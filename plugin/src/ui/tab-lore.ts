@@ -27,6 +27,7 @@ let viewMount: HTMLElement | null = null;
 let noticeMount: HTMLElement | null = null;
 let openId = '';
 let entries: LoreEntry[] = [];
+let seenEpoch = -1;
 
 export function renderLoreTab(mount: HTMLElement): void {
   if (!state.activeCharKey) {
@@ -49,6 +50,12 @@ export function renderLoreTab(mount: HTMLElement): void {
     pane.centre.appendChild(viewMount);
     mount.appendChild(pane.root);
     built = true;
+    seenEpoch = state.epoch;
+    void refresh();
+  } else if (seenEpoch !== state.epoch) {
+    // A restore, a reset, a commit or an approved proposal changed the rows
+    // underneath this list; what it shows is stale until it reloads.
+    seenEpoch = state.epoch;
     void refresh();
   }
 
@@ -223,7 +230,7 @@ function open(e: LoreEntry): void {
         comment: comment.value,
         content: content.value,
       });
-      notice('저장했습니다. RisuAI 반영은 챗 에딧 탭의 “반영”에서 함께 이루어집니다.', 'ok');
+      notice('저장했습니다. 위 “반영”을 누르면 턴·장기기억과 함께 RisuAI에 쓰입니다.', 'ok');
       await refresh();
       // Re-open from the refreshed list so the row's edited badge and the pane
       // agree about what is stored.

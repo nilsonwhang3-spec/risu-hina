@@ -34,6 +34,7 @@ let toolbar: HTMLElement | null = null;
 let countEl: HTMLElement | null = null;
 let openId = '';
 let items: MemoryItem[] = [];
+let seenEpoch = -1;
 
 export function renderMemoryTab(mount: HTMLElement): void {
   if (!state.activeChatKey) {
@@ -58,6 +59,12 @@ export function renderMemoryTab(mount: HTMLElement): void {
     mount.appendChild(pane.root);
     buildToolbar();
     built = true;
+    seenEpoch = state.epoch;
+    void refresh();
+  } else if (seenEpoch !== state.epoch) {
+    // A restore, a reset, a commit or an approved proposal changed the rows
+    // underneath this list; what it shows is stale until it reloads.
+    seenEpoch = state.epoch;
     void refresh();
   }
 
@@ -67,27 +74,14 @@ export function renderMemoryTab(mount: HTMLElement): void {
   if (inner) mountAgent(inner as HTMLElement);
 }
 
+/**
+ * Only a reload here. Writing the memory back is the chat bar's 반영, the same
+ * verb that writes the turns and the lorebook - this tab used to carry a 반영
+ * of its own with a narrower meaning, and two buttons with one label is how a
+ * user writes the memory while believing the turns went too.
+ */
 function buildToolbar(): void {
   countEl = el('span', { class: 'dim' });
-
-  const write = el('button', { class: 'tool', title: '고친 장기기억을 RisuAI 챗에 씁니다' }, [
-    el('span', { class: 'glyph', text: '💾' }),
-    el('span', { class: 'tool-label', text: '반영' }),
-  ]);
-  write.addEventListener('click', async () => {
-    write.disabled = true;
-    try {
-      const r = await state.writeBackMemory();
-      notice(r.changed
-        ? `${r.changed}개 항목을 RisuAI에 반영했습니다 (${r.kinds.join(', ')}).`
-        : '바뀐 항목이 없어 그대로 두었습니다.', 'ok');
-      await refresh();
-    } catch (e) {
-      notice('반영하지 못했습니다: ' + msg(e), 'err');
-    } finally {
-      write.disabled = false;
-    }
-  });
 
   const reloadBtn = el('button', { class: 'tool', title: '백엔드에서 다시 읽어 옵니다' }, [
     el('span', { class: 'glyph', text: '↻' }),
@@ -96,7 +90,7 @@ function buildToolbar(): void {
   reloadBtn.addEventListener('click', () => void refresh());
 
   toolbar = el('div', { class: 'toolrow' }, [
-    write, reloadBtn, el('span', { class: 'spacer' }), countEl,
+    reloadBtn, el('span', { class: 'spacer' }), countEl,
   ]);
 }
 
@@ -187,7 +181,7 @@ function open(item: MemoryItem): void {
     save.disabled = true;
     try {
       await state.saveMemory(item.id, body.value);
-      notice('저장했습니다. RisuAI에 쓰려면 위 “반영”을 눌러 주세요.', 'ok');
+      notice('저장했습니다. 위 “반영”을 누르면 턴·로어북과 함께 RisuAI에 쓰입니다.', 'ok');
       await refresh();
       // Re-open from the refreshed list. Without this the pane still shows the
       // pre-save item, so the diff against the original - the thing that says

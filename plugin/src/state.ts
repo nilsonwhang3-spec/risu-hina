@@ -45,6 +45,36 @@ export interface Patch {
   reordered: boolean;
   messages?: RisuMessage[];
   warnings: string[];
+  /** This chat's lorebook, whole, plus how much of it differs from RisuAI. */
+  lore?: { localLore: unknown[]; changed: number; added: number; edited: number; deleted: number };
+  /** The long-term memory fields, plus how many entries differ. */
+  memory?: { data: Record<string, unknown>; changed: number };
+}
+
+/**
+ * What is pending on the active chat, as counts.
+ *
+ * One object for turns, lorebook and memory, because the user sees them as one
+ * thing - "what will 반영 write" - and a bar that counted only turns would say
+ * 변경 없음 over a chat whose lorebook was rewritten.
+ */
+export interface Changes {
+  chatKey: string;
+  turns: { edited: number; added: number; removed: number; reordered: boolean; structural: boolean; total: number };
+  lore: { added: number; edited: number; deleted: number; total: number };
+  memory: { changed: number; total: number; entries: number };
+  total: number;
+  staged: number;
+  actions: number;
+  warnings: string[];
+}
+
+export interface WriteBackResult {
+  mode: 'noop' | 'edits' | 'replace';
+  applied: number;
+  lore: number;
+  memory: number;
+  warnings: string[];
 }
 
 export interface StagedEdit {
@@ -197,6 +227,15 @@ class AppState {
   turns: Turn[] = [];
   totalTurns = 0;
   warnings: string[] = [];
+  changes: Changes | null = null;
+  /**
+   * Bumped whenever the working state changed underneath the tabs - a
+   * restore, a reset, a commit, an approved proposal. Tabs that cache what
+   * they show (lorebook, memory) compare it to the value they last rendered
+   * and reload when it moved, instead of each tab having to know every path
+   * that can change its data.
+   */
+  epoch = 0;
 
   listeners = new Set<() => void>();
 
@@ -298,6 +337,31 @@ class AppState {
     this.turns = res.turns;
     this.totalTurns = res.total;
     this.emit();
+    void this.refreshChanges();
+  }
+
+  /**
+   * Refresh the pending-change summary for the active chat.
+   *
+   * Cheap on the server (counts only) and called after anything that can
+   * change it, so the shared bar never shows a count that is one save behind.
+   * A failure here is not worth surfacing - the next call fixes it.
+   */
+  async refreshChanges(): Promise<Changes | null> {
+    if (!this.activeChatKey) { this.changes = null; this.emit(); return null; }
+    try {
+      this.changes = await transport.get<Changes>('/changes', { chatKey: this.activeChatKey });
+    } catch {
+      this.changes = null;
+    }
+    this.emit();
+    return this.changes;
+  }
+
+  /** The working state changed underneath the tabs; tell them to reload. */
+  bump(): void {
+    this.epoch += 1;
+    this.emit();
   }
 
   /**
@@ -319,6 +383,7 @@ class AppState {
       t.body = after;
       t.changed = !t.isNew && t.original !== after;
       this.emit();
+      void this.refreshChanges();
     } else {
       await this.loadTurns();
     }
@@ -343,13 +408,17 @@ class AppState {
    * Called only on success, so a failed write-back leaves the diff intact and
    * the retry meaningful.
    */
-  async commit(label: string): Promise<{ previousBaseline: number; newBaseline: number }> {
-    return await transport.post('/commit', { chatKey: this.activeChatKey, label });
+  async commit(label: string): Promise<{ previousBaseline: number; newBaseline: number; lore: number; memory: number }> {
+    const r = await transport.post<{ previousBaseline: number; newBaseline: number; lore: number; memory: number }>(
+      '/commit', { chatKey: this.activeChatKey, label });
+    this.bump();
+    return r;
   }
 
   async reset(): Promise<void> {
     await transport.post('/reset', { chatKey: this.activeChatKey });
     await this.loadTurns();
+    this.bump();
   }
 
   async checkpoint(label: string): Promise<void> {
@@ -361,44 +430,65 @@ class AppState {
     return res.checkpoints ?? [];
   }
 
-  async restore(id: string): Promise<void> {
-    await transport.post('/checkpoint/restore', { chatKey: this.activeChatKey, id });
+  async restore(id: string): Promise<{ lore: number | null; memory: number | null }> {
+    const r = await transport.post<{ lore: number | null; memory: number | null }>(
+      '/checkpoint/restore', { chatKey: this.activeChatKey, id });
     await this.loadTurns();
+    this.bump();
+    return r;
   }
 
   // --- write back ---------------------------------------------------------
 
   /**
-   * Push the working state into RisuAI.
+   * Push the working state into RisuAI - turns, this chat's lorebook and its
+   * memory - in one host write.
    *
-   * Which path is taken is decided by the backend's `structural` flag, not by
-   * inspecting the lists: once turns were inserted, deleted or reordered, a
-   * per-turn patch cannot express the result and the whole array has to go.
+   * Which path the turns take is decided by the backend's `structural` flag,
+   * not by inspecting the lists: once turns were inserted, deleted or
+   * reordered, a per-turn patch cannot express the result and the whole array
+   * has to go. Lorebook and memory are sent whole whenever anything in them
+   * differs from the baseline; the host write replaces the field either way.
    */
-  async writeBack(): Promise<{ mode: string; applied: number; warnings: string[] }> {
+  async writeBack(): Promise<WriteBackResult> {
     if (!this.slot) throw new Error('호스트 상태를 먼저 읽어야 합니다');
     const patch = await this.patch();
-    const seenId = this.liveChat?.id;
+    const update = this.updateFrom(patch, false);
+    if (!update) return { mode: 'noop', applied: 0, lore: 0, memory: 0, warnings: patch.warnings };
+    const r = await host.writeChat(this.slot, this.liveChat?.id, update);
+    return {
+      mode: r.mode, applied: r.applied,
+      lore: patch.lore?.changed ?? 0, memory: patch.memory?.changed ?? 0,
+      warnings: patch.warnings,
+    };
+  }
 
+  /**
+   * The host update a patch calls for, or null when nothing differs.
+   *
+   * `whole` asks for every part regardless of whether it changed - a copy has
+   * to carry the working state in full, not only the parts that moved.
+   */
+  private updateFrom(patch: Patch, whole: boolean): host.ChatUpdate | null {
+    const update: host.ChatUpdate = {};
     if (patch.structural) {
       if (!patch.messages) throw new Error('구조 변경인데 백엔드가 메시지 배열을 주지 않았습니다');
-      const r = await host.replaceMessages(this.slot, seenId, patch.messages);
-      return { mode: r.mode, applied: r.applied, warnings: patch.warnings };
+      update.messages = patch.messages;
+    } else if (patch.edits.length) {
+      update.edits = patch.edits;
     }
-    if (!patch.edits.length) {
-      return { mode: 'noop', applied: 0, warnings: patch.warnings };
-    }
-    const r = await host.applyEdits(this.slot, seenId, patch.edits);
-    return { mode: r.mode, applied: r.applied, warnings: patch.warnings };
+    if (patch.lore && (whole || patch.lore.changed)) update.localLore = patch.lore.localLore;
+    if (patch.memory && (whole || patch.memory.changed)) update.memory = patch.memory.data;
+    return Object.keys(update).length ? update : null;
   }
 
   async saveCopy(name: string): Promise<void> {
     if (!this.slot) throw new Error('호스트 상태를 먼저 읽어야 합니다');
     const patch = await this.patch();
-    const messages = patch.structural
-      ? patch.messages ?? null
-      : await this.messagesFromExport();
-    await host.saveAsCopy(this.slot, messages, name);
+    const update = this.updateFrom(patch, true) ?? {};
+    if (!update.messages) update.messages = (await this.messagesFromExport()) ?? undefined;
+    delete update.edits;
+    await host.saveAsCopy(this.slot, update, name);
   }
 
   private async messagesFromExport(): Promise<RisuMessage[] | null> {
@@ -464,7 +554,10 @@ class AppState {
   }
 
   async approveStaged(approve: boolean): Promise<{ decided: number; applied: number }> {
-    return await transport.post('/approve', { chatKey: this.activeChatKey, all: true, approve });
+    const r = await transport.post<{ decided: number; applied: number }>(
+      '/approve', { chatKey: this.activeChatKey, all: true, approve });
+    void this.refreshChanges();
+    return r;
   }
 
   // --- settings -----------------------------------------------------------
@@ -651,7 +744,13 @@ class AppState {
     }) as { approved: boolean; result?: string; host?: { kind: string; args: Record<string, any> } };
 
     if (!r.approved) return '거절했습니다.';
-    if (!r.host) return String(r.result ?? '실행했습니다.');
+    if (!r.host) {
+      // A lorebook or memory proposal just landed in the working copy; the
+      // tabs caching those lists and the shared bar both have to hear it.
+      this.bump();
+      void this.refreshChanges();
+      return String(r.result ?? '실행했습니다.');
+    }
 
     try {
       let detail = '';
@@ -687,6 +786,7 @@ class AppState {
 
   async saveLore(id: string, entry: Record<string, unknown>): Promise<void> {
     await transport.post('/lore/update', { charKey: this.activeCharKey, id, entry });
+    void this.refreshChanges();
   }
 
   async addLore(entry: Record<string, unknown>, scope: 'global' | 'local'): Promise<string> {
@@ -694,11 +794,13 @@ class AppState {
       charKey: this.activeCharKey, entry, scope,
       chatKey: scope === 'local' ? this.activeChatKey : undefined,
     }) as { id: string };
+    void this.refreshChanges();
     return r.id;
   }
 
   async deleteLore(id: string): Promise<void> {
     await transport.post('/lore/delete', { charKey: this.activeCharKey, id });
+    void this.refreshChanges();
   }
 
   // --- long-term memory -----------------------------------------------------
@@ -711,6 +813,7 @@ class AppState {
     const r = await transport.post('/memory/update', {
       chatKey: this.activeChatKey, id, body, title,
     }) as { item: MemoryItem };
+    void this.refreshChanges();
     return r.item;
   }
 
@@ -718,32 +821,15 @@ class AppState {
     const r = await transport.post('/memory/add', {
       chatKey: this.activeChatKey, kind, body, title,
     }) as { item: MemoryItem };
+    void this.refreshChanges();
     return r.item;
   }
 
   async deleteMemory(id: string): Promise<void> {
     await transport.post('/memory/delete', { chatKey: this.activeChatKey, id });
+    void this.refreshChanges();
   }
 
-  /**
-   * Write the edited memory back into the RisuAI chat.
-   *
-   * The baseline only moves after RisuAI has accepted the write. Committing
-   * first would leave the panel claiming everything was saved while the host
-   * still held the old summaries - the same failure the transcript commit was
-   * added to fix.
-   */
-  async writeBackMemory(): Promise<{ kinds: string[]; changed: number }> {
-    if (!this.slot) throw new Error('RisuAI에서 봇을 먼저 선택해 주세요.');
-    const chat = this.activeChat;
-    if (!chat) throw new Error('먼저 챗을 골라 주세요.');
-    const patch = await transport.get(
-      '/memory/patch?chatKey=' + encodeURIComponent(this.activeChatKey)) as
-      { memory: Record<string, unknown>; changed: number };
-    const kinds = await host.writeMemory(this.slot, chat.chatId, patch.memory);
-    await transport.post('/memory/commit', { chatKey: this.activeChatKey });
-    return { kinds, changed: patch.changed };
-  }
 }
 
 export const state = new AppState();

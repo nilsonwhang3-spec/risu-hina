@@ -1,10 +1,12 @@
 /**
  * Tab 2 - the work surface.
  *
- * Layout follows what the tools actually are. Acting on the chat (snapshot,
- * versions, apply, export) belongs above the chat, because that is what it acts
- * on. Adjusting how a tool behaves belongs to the right panel, because it is a
- * second-order decision. So:
+ * Layout follows what the tools actually are. Acting on the transcript (view,
+ * find, cut, export) belongs above the chat, because that is what it acts on.
+ * Adjusting how a tool behaves belongs to the right panel, because it is a
+ * second-order decision. Acting on the chat as a whole (snapshot, versions,
+ * write-back) is not this tab's at all - the shell's chat bar does that, on
+ * every tab, because a lorebook edit is written back by the same verb. So:
  *
  *   left, above the turns   one icon per tool. Clicking activates it.
  *   right, 상세옵션          the active tool's controls, and nothing else.
@@ -15,7 +17,7 @@
  * the panel a wall of controls to scroll past. Options belonging to an inactive
  * tool are now not on screen at all.
  */
-import { el, clear, armed, popover, TOOL, fmtTime } from './dom';
+import { el, clear, armed, TOOL } from './dom';
 import { state, type Turn, type BulkPreview, type StagedEdit } from '../state';
 import { Explorer } from './explorer';
 import { threePane } from './panes';
@@ -26,7 +28,7 @@ import * as host from '../host';
 import { setToolbar } from './shell';
 import { clientLog } from '../transport';
 
-type ToolId = 'view' | 'find' | 'cut' | 'apply' | 'export' | 'versions' | null;
+type ToolId = 'view' | 'find' | 'cut' | 'export' | null;
 
 let list: TurnList | null = null;
 let rightMount: HTMLElement | null = null;
@@ -130,7 +132,7 @@ function toolButton(id: Exclude<ToolId, null>, glyph: string, label: string, tit
     el('span', { class: 'glyph', text: glyph }),
     el('span', { class: 'tool-label', text: label }),
   ]);
-  b.addEventListener('click', () => selectTool(id, b));
+  b.addEventListener('click', () => selectTool(id));
   return b;
 }
 
@@ -138,10 +140,6 @@ function buildToolbar(): HTMLElement {
   countEl = el('span', { class: 'dim' });
 
   toolbarEl = el('div', { class: 'toolrow' }, [
-    toolButton('apply', TOOL.apply, '반영', 'RisuAI에 반영 · 복사본 저장 · 되돌리기'),
-    toolButton('versions', TOOL.versions, '버전', '스냅샷 목록에서 되돌리기'),
-    buildSnapshotButton(),
-    el('span', { class: 'sep' }),
     toolButton('view', TOOL.view, '보기', '원문 / 정리해서 보기 / 렌더링'),
     toolButton('find', TOOL.find, '찾기', '찾기·바꾸기'),
     toolButton('cut', TOOL.cut, '삭제', '턴 범위 일괄 삭제'),
@@ -152,35 +150,7 @@ function buildToolbar(): HTMLElement {
   return toolbarEl;
 }
 
-/**
- * Snapshot is a verb, not a panel: it takes one and says so. Everything else in
- * the row opens options; this one only acts, so it never becomes the active
- * tool and never steals the options panel.
- */
-function buildSnapshotButton(): HTMLElement {
-  const b = el('button', { class: 'tool', title: '지금 상태를 스냅샷으로 저장합니다' }, [
-    el('span', { class: 'glyph', text: TOOL.snapshot }),
-    el('span', { class: 'tool-label', text: '스냅샷' }),
-  ]);
-  b.addEventListener('click', async () => {
-    b.disabled = true;
-    try {
-      await state.checkpoint('수동');
-      notice('스냅샷을 저장했습니다. 🕘 버전에서 되돌릴 수 있습니다.', 'ok');
-    } catch (e) {
-      notice('스냅샷 저장에 실패했습니다: ' + msg(e), 'err');
-    } finally {
-      b.disabled = false;
-    }
-  });
-  return b;
-}
-
-function selectTool(id: Exclude<ToolId, null>, anchor: HTMLElement): void {
-  if (id === 'versions') {
-    void openVersions(anchor);
-    return;
-  }
+function selectTool(id: Exclude<ToolId, null>): void {
   // Clicking the active tool closes it, so the options panel can be empty on
   // purpose rather than always showing whatever was touched last.
   activeTool = activeTool === id ? null : id;
@@ -324,7 +294,6 @@ function renderOptions(): void {
     case 'view': optionMount.appendChild(buildViewOptions()); break;
     case 'find': optionMount.appendChild(buildFind()); break;
     case 'cut': optionMount.appendChild(buildCut()); break;
-    case 'apply': optionMount.appendChild(buildApply()); break;
     case 'export': optionMount.appendChild(buildExport()); break;
     default:
       optionMount.appendChild(el('div', {
@@ -643,80 +612,6 @@ function buildCut(): HTMLElement {
   ]);
 }
 
-// --- 반영 · 저장 --------------------------------------------------------------
-
-function buildApply(): HTMLElement {
-  const out = el('div', { class: 'hint' });
-
-  const apply = el('button', { class: 'primary', text: 'RisuAI에 반영' });
-  apply.addEventListener('click', async () => {
-    apply.disabled = true;
-    try {
-      const r = await state.writeBack();
-      if (r.mode === 'noop') {
-        out.textContent = '반영할 변경이 없습니다.';
-      } else {
-        // The write landed, so this state is the baseline now. Without this the
-        // panel keeps every edited turn struck through, which reads as "still
-        // pending" when it already shipped.
-        const c = await state.commit('반영 직전');
-        await state.loadTurns();
-        out.textContent = `${r.mode === 'replace' ? '전체 교체' : '본문 수정'} · ${r.applied}건 · 기준선 ${c.newBaseline}턴`;
-        notice('RisuAI에 반영했습니다. 이 상태가 새 기준선이 됩니다.', 'ok');
-      }
-      for (const w of r.warnings) notice(w);
-    } catch (e) {
-      const m = msg(e);
-      out.textContent = m;
-      void clientLog('error', 'writeBack failed', { error: m });
-      notice(
-        e instanceof host.HostError && e.code === 'changed'
-          ? m + ' — "다시 불러오기"를 누른 뒤 다시 시도해 주세요'
-          : '반영에 실패했습니다: ' + m,
-        'err',
-      );
-    } finally {
-      apply.disabled = false;
-    }
-  });
-
-  const copy = el('button', { text: '복사본으로 저장' });
-  copy.addEventListener('click', async () => {
-    const name = (state.activeChat?.name || 'chat') + ' (Risu Elf)';
-    copy.disabled = true;
-    try {
-      await state.saveCopy(name);
-      const c = await state.commit('복사본 저장 직전');
-      await state.loadTurns();
-      notice(`복사본 "${name}" 을 만들었습니다 · 기준선 ${c.newBaseline}턴. 하이파 기억도 함께 복제됩니다.`, 'ok');
-    } catch (e) {
-      void clientLog('error', 'saveCopy failed', { error: msg(e) });
-      notice('복사본 저장에 실패했습니다: ' + msg(e), 'err');
-    } finally {
-      copy.disabled = false;
-    }
-  });
-
-  const reset = el('button', { class: 'ghost' });
-  armed(reset, '기준선으로 되돌리기', '정말 되돌릴까요?', async () => {
-    try {
-      await state.reset();
-      notice('작업본을 기준선으로 되돌렸습니다.', 'ok');
-    } catch (e) {
-      notice('되돌리기에 실패했습니다: ' + msg(e), 'err');
-    }
-  });
-
-  return el('div', { class: 'card' }, [
-    el('h2', { text: '반영 · 저장' }),
-    el('div', { class: 'row' }, [apply]),
-    el('div', { class: 'row' }, [copy]),
-    el('div', { class: 'row' }, [reset]),
-    out,
-    el('div', { class: 'hint', text: '반영에 성공하면 그 상태가 새 기준선이 되면서 수정 표시가 사라집니다.' }),
-  ]);
-}
-
 // --- 내보내기 -----------------------------------------------------------------
 
 function buildExport(): HTMLElement {
@@ -752,42 +647,4 @@ function buildExport(): HTMLElement {
     el('div', { class: 'row' }, [cb]),
     el('div', { class: 'hint', text: 'risuChat JSON은 RisuAI 기본 임포터가 그대로 받아 줍니다.' }),
   ]);
-}
-
-// --- 버전 (팝오버) -------------------------------------------------------------
-
-async function openVersions(anchor: HTMLElement): Promise<void> {
-  const body = el('div', { class: 'verlist' }, [el('div', { class: 'hint', text: '불러오는 중입니다…' })]);
-  const close = popover(anchor, body);
-  try {
-    const cps = await state.checkpoints();
-    clear(body);
-    if (!cps.length) {
-      body.appendChild(el('div', { class: 'hint', text: '아직 스냅샷이 없습니다. 🔖 스냅샷 버튼으로 저장해 주세요.' }));
-      return;
-    }
-    for (const c of cps.slice(0, 12)) {
-      const b = el('button', { class: 'ghost tiny', text: '되돌리기' });
-      b.addEventListener('click', async () => {
-        b.disabled = true;
-        try {
-          await state.restore(c.id);
-          close();
-          notice('되돌렸습니다. 되돌리기 직전 상태도 스냅샷으로 남겨 두었습니다.', 'ok');
-        } catch (e) {
-          notice('복원에 실패했습니다: ' + msg(e), 'err');
-        }
-      });
-      body.appendChild(el('div', { class: 'verrow' }, [
-        el('div', { class: 'grow' }, [
-          el('div', { text: c.label || '(무제)' }),
-          el('div', { class: 'hint', text: `${c.message_count}턴 · ${fmtTime(c.created_at * 1000)}` }),
-        ]),
-        b,
-      ]));
-    }
-  } catch (e) {
-    clear(body);
-    body.appendChild(el('div', { class: 'hint', text: msg(e) }));
-  }
 }

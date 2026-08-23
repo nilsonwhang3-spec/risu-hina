@@ -75,8 +75,24 @@ header h1 { margin: 0; font-size: 14px; font-weight: 700; display: flex; align-i
 .status.warn .healthdot { background: #f59e0b; }
 
 /* The active tab's tool row, full width under the tabs. */
-.toolslot { flex-shrink: 0; display: none; }
-.toolslot .toolrow { border-bottom: 1px solid var(--borderc, #2b323f); }
+.toolslot {
+  flex-shrink: 0; display: flex; align-items: center; flex-wrap: wrap;
+  border-bottom: 1px solid var(--borderc, #2b323f);
+}
+.toolslot .toolrow { border-bottom: none; }
+.toolslot .chatbar { flex: 0 0 auto; padding-right: 4px; }
+.toolslot .chatbar + .tabslot:not([style*="none"])::before {
+  content: ''; display: inline-block; width: 1px; height: 18px;
+  background: var(--borderc, #2b323f); margin: 0 4px; vertical-align: middle;
+}
+.toolslot .tabslot { flex: 1 1 auto; display: flex; align-items: center; min-width: 0; }
+.toolslot .tabslot > .toolrow { flex: 1 1 auto; }
+.chatbar .changesum { font-size: 11px; margin-left: 4px; white-space: nowrap; }
+.chatbar .applybadge { margin-left: 2px; }
+.shellnotice:empty { display: none; }
+.shellnotice .notice { margin: 6px 10px 0; }
+.applypop .row { margin-top: 6px; }
+.applypop .row button { width: 100%; }
 
 .tabs { display: flex; gap: 2px; padding: 0 10px; border-bottom: 1px solid var(--borderc, #2b323f); flex-shrink: 0; }
 .tab {

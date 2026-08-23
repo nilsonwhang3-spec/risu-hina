@@ -14,6 +14,7 @@ import { renderFilesTab } from './tab-files';
 import { renderLoreTab } from './tab-lore';
 import { renderMemoryTab } from './tab-memory';
 import { renderSettingsTab } from './tab-settings';
+import { buildChatBar, refreshChatBar } from './chatbar';
 
 /**
  * Content views in the tab bar; settings is not one of them.
@@ -40,18 +41,32 @@ let mounted = false;
 const mounts: Record<TabId, HTMLElement> = {} as Record<TabId, HTMLElement>;
 let healthEl: HTMLElement | null = null;
 let toolbarSlot: HTMLElement | null = null;
+let chatBarEl: HTMLElement | null = null;
+let tabSlot: HTMLElement | null = null;
 
 /**
- * Hand the shell this tab's tool row, or null to leave the slot empty.
+ * Hand the shell this tab's tool row, or null to leave the tab's part of the
+ * slot empty.
  *
  * The slot is shared, so whoever renders last owns it - which is exactly right,
- * because only one tab is visible at a time.
+ * because only one tab is visible at a time. The chat bar (반영 · 스냅샷 ·
+ * 버전) sits ahead of it and is the shell's own: it acts on the chat, not on
+ * a tab, so no tab gets to remove it.
  */
 export function setToolbar(node: HTMLElement | null): void {
-  if (!toolbarSlot) return;
-  clear(toolbarSlot);
-  toolbarSlot.style.display = node ? 'block' : 'none';
-  if (node) toolbarSlot.appendChild(node);
+  if (!tabSlot) return;
+  clear(tabSlot);
+  if (node) tabSlot.appendChild(node);
+  syncToolslot();
+}
+
+function syncToolslot(): void {
+  if (!toolbarSlot || !chatBarEl || !tabSlot) return;
+  const showChat = !!state.activeChatKey && active !== 'settings';
+  chatBarEl.style.display = showChat ? '' : 'none';
+  const showTab = tabSlot.childElementCount > 0;
+  tabSlot.style.display = showTab ? '' : 'none';
+  toolbarSlot.style.display = showChat || showTab ? '' : 'none';
 }
 
 export function setTab(tab: TabId): void {
@@ -63,6 +78,7 @@ export function setTab(tab: TabId): void {
   // The gear is a toggle, so it has to look pressed while settings is open.
   document.getElementById('open-settings')?.classList.toggle('on', tab === 'settings');
   renderActive();
+  syncToolslot();
 }
 
 export function currentTab(): TabId {
@@ -163,11 +179,14 @@ export function buildShell(): void {
     mounts[id] = el('div', { class: 'panel' + (id === 'chats' ? ' active' : '') });
   }
 
-  // A slot below the tabs that the active tab fills with its own tool row.
-  // The row used to live inside the editor's middle column, which boxed it into
-  // a third of the width and made it read as a property of the transcript
-  // rather than as the actions available on this tab.
-  toolbarSlot = el('div', { class: 'toolslot' });
+  // A slot below the tabs: the chat bar first, then whatever tool row the
+  // active tab adds. The row used to live inside the editor's middle column,
+  // which boxed it into a third of the width and made it read as a property of
+  // the transcript rather than as the actions available on this tab.
+  const shellNotice = el('div', { class: 'shellnotice' });
+  chatBarEl = buildChatBar(shellNotice);
+  tabSlot = el('div', { class: 'tabslot' });
+  toolbarSlot = el('div', { class: 'toolslot' }, [chatBarEl, tabSlot]);
 
   document.body.appendChild(el('div', { class: 'wrap' }, [
     el('header', {}, [
@@ -181,18 +200,22 @@ export function buildShell(): void {
     ]),
     el('div', { class: 'tabs' }, CONTENT_TABS.map(([id, label]) => tabButton(id, label))),
     toolbarSlot,
+    shellNotice,
     el('main', {}, ALL_TABS.map((id) => mounts[id])),
   ]));
 
   document.getElementById('tab-chats')?.classList.add('active');
   mounted = true;
   refreshStatus();
+  syncToolslot();
 }
 
 state.onChange(() => {
   if (!mounted) return;
   refreshStatus();
+  refreshChatBar();
   renderActive();
+  syncToolslot();
 });
 
 /**

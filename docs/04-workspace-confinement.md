@@ -429,3 +429,71 @@ RisuAI 는 플러그인 저장소를 **플러그인 이름으로** 키잉한다.
 폴더 이름 하나의 값어치보다 크다. 문서의 경로 표기도 실제와 맞춰 그대로 두었다 —
 **문서가 존재하지 않는 경로를 가리키는 것**이 이름이 안 맞는 것보다 나쁘다.
 배포 쪽은 `D:\code\risu-elf` 로 옮겼다.
+
+---
+
+# 부록 D — 인터프리터 동봉 (2026-08-23 5차)
+
+## D.1 무엇이 틀려 있었나
+
+> "배포시 python을 사용자가 깔아야 하는거면 안된다." — 착수 시 결정
+
+첫 릴리스가 이걸 어겼다. `setup.sh`와 `manage.ps1`이 시스템 파이썬을 **찾아서** venv를
+만들었고, 없으면 실패했다. 설치 가이드에는 심지어 "Ubuntu 20.04는 3.8이라 그대로는
+안 된다, pyenv로 깔아라"까지 적혀 있었다. 결정을 기록해 두고도 그 반대를 배포한 것이다.
+
+## D.2 지금 구조
+
+아카이브마다 CPython 3.11이 의존성까지 깔린 채로 들어간다. 런처가 **그것을 먼저** 쓰고,
+venv는 소스 체크아웃에서만 의미가 있는 폴백이 됐다.
+
+| OS | 인터프리터 | 근거 |
+|---|---|---|
+| Windows | python.org embeddable 3.11.9 | 11 MB, 공식, `._pth`가 sys.path를 통째로 장악 |
+| Linux | python-build-standalone 3.11.13 | python.org는 리눅스용 relocatable 빌드를 내지 않는다. uv가 쓰는 그것 |
+
+"자기 완결"이 뜻하는 것: **번들된 인터프리터가 이 기계의 다른 파이썬을 우연히 집어 오지
+못한다.** Windows는 `._pth`가 PYTHONPATH·레지스트리·user site-packages를 전부 무시하게
+만든다. Linux의 python-build-standalone은 `._pth`를 보지 않으므로 런처가 `PYTHONPATH`와
+`PYTHONHOME`을 지운다. 단 **`PYTHONHOME`은 Windows에서도 `._pth`를 뚫고 들어온다** —
+`start.bat`과 `manage.ps1`이 그것도 지운다.
+
+의존성은 빌드 머신의 pip이 `--platform/--abi/--python-version`으로 받는다. 대상
+인터프리터를 **실행하지 않으므로** Windows 한 대에서 두 아카이브를 다 만든다. lock은
+플랫폼별이다 — `pydantic-core`·`tiktoken`·`regex`가 컴파일 휠이라 해시가 플랫폼마다 다르다.
+
+## D.3 검증
+
+시스템 파이썬을 일부러 못 쓰게 하고 설치했다: PATH에서 파이썬을 전부 빼고
+`PYTHONHOME`/`PYTHONPATH`를 없는 경로로. Ubuntu 20.04는 시스템 파이썬이 3.8뿐이라
+이 앱을 돌릴 수 없는 기계다 — 동봉된 3.11로 떴고, 서버 프로세스가
+`pyserver/python/bin/python3.11`인 것을 `ps`로 확인했다.
+
+## D.4 리허설이 잡은 것 — 순서대로
+
+1. **의존성이 `pyserver/` 밖에 깔렸다.** `--target`이 `stage / site`였고 `pyserver/`가
+   빠져 있었다. zip에는 5,311개 파일이 들어 있었지만 인터프리터가 보는 자리가 아니었다.
+2. **`.pyc`가 빌드 머신의 3.12용으로 컴파일됐다.** 3.11 번들 안의 8 MB 쓰레기. `--no-compile`.
+3. **실행 권한 비트가 버려졌다.** `external_attr`에 0o755를 넣어도 `create_system`이
+   기본값 0(MS-DOS)이면 unzip이 무시한다. 3(Unix)이어야 한다.
+4. **52 MB 정적 바이너리가 심볼릭 링크 자리마다 복사됐다.** `python3 → python3.11`,
+   `python → python3`를 "10 KB 복사"로 생각했는데 정적 링크라 각각 52 MB였고 번들이
+   89 MB가 됐다. 두 줄짜리 `exec` 심으로 바꾸고, 임베딩 호스트만 쓰는 53 MB
+   `libpython.so`와 tk도 뺐다 → 34 MB.
+5. **셸 심이 CRLF로 써졌다.** Windows의 `write_text`가 `\n`을 `\r\n`으로 바꿔서 커널이
+   `/bin/sh\r`을 찾았다. `newline=""`. **이 프로젝트가 세 번째로 밟은 줄바꿈 함정이다**
+   (`.sh` CRLF, `datadir.txt` BOM, 그리고 이것).
+6. **`setup.sh`가 `PYTHONHOME`을 지우기 전에 인터프리터를 불렀다.** `start.sh`만 지우고
+   있었다. `No module named 'encodings'`는 인터프리터가 자기 stdlib을 못 찾을 때의
+   증상이고, 그 기계에 stray `PYTHONHOME`이 있는 사용자가 겪었을 일이다. 오류 메시지도
+   "glibc가 너무 오래됐다"고 **추측**하고 있었다 — 이제 실제 오류를 보여 준다.
+
+## D.5 업데이터
+
+OS당 아카이브가 하나씩이므로 업데이터가 **자기 플랫폼 것만** 고른다. 다른 쪽을 깔면
+멀쩡한 서버를 이 기계에서 못 도는 파이썬으로 바꾸는 셈이다. `python/`도 `app/`과 함께
+교체하고 — 새 버전이 새 파이썬을 요구할 수 있다 — 옛것을 옛 app 옆에 남겨 롤백이
+rename 두 번으로 끝나게 했다.
+
+`release.py`는 `bundle.py`로 위임만 한다. **인터프리터 없는 아카이브를 만들 수 있는 코드
+경로를 남기지 않았다** — 그게 규칙을 어긴 아카이브였으니까.
