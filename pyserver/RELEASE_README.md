@@ -2,7 +2,7 @@
 
 RisuAI 챗을 **끝난 뒤에** 고치는 도구. 대화를 통째로 펼쳐 놓고 직접 고치거나 AI에게 시킨다.
 
-이 폴더가 백엔드다. 플러그인(`risu-elf.js`)은 `plugin/` 안에 같이 들어 있고,
+이 폴더가 백엔드다. 플러그인(`Risu.Elf.Plugin.js`)은 `plugin/` 안에 같이 들어 있고,
 RisuAI 쪽에 따로 설치한다.
 
 ---
@@ -47,7 +47,7 @@ chmod +x *.sh
 
 ### 플러그인
 
-`plugin/risu-elf.js` 를 RisuAI 설정 → 플러그인 → Add Plugin 에 넣는다.
+`plugin/Risu.Elf.Plugin.js` 를 RisuAI 설정 → 플러그인 → Add Plugin 에 넣는다.
 챗 화면에 **Risu Elf** 버튼이 생긴다.
 
 열고 나서 오른쪽 위 ⚙ 에서:

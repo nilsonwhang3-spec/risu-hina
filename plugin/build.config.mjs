@@ -42,7 +42,7 @@ const OUTFILE = resolve(__dirname, `dist/risu-elf-${pkg.version}.js`);
 // than the honest absence of one.
 const REPO = process.env.RISUELF_REPO || pkg.risuelfRepo || "";
 const UPDATE_URL = process.env.RISUELF_UPDATE_URL
-  || (REPO ? `https://github.com/${REPO}/releases/latest/download/risu-elf.js` : "");
+  || (REPO ? `https://github.com/${REPO}/releases/latest/download/Risu.Elf.Plugin.js` : "");
 
 let banner = readFileSync(HEADER, "utf8").replace(/\$\{VERSION\}/g, pkg.version);
 if (UPDATE_URL) {

@@ -45,13 +45,13 @@ RisuAI / PocketRisu (브라우저)
 
 ## 설치
 
-[릴리스](../../releases/latest)에서 **`risu-elf-install-<버전>.zip` 하나만** 받으면 된다.
+[릴리스](../../releases/latest)에서 **`Risu.Elf.<버전>.Auto.Install.Package.zip` 하나만** 받으면 된다.
 플러그인도 그 안에 들어 있다.
 
 ```
 risu-elf/
   pyserver/       백엔드 코드
-  plugin/         RisuAI 에 설치할 risu-elf.js
+  plugin/         RisuAI 에 설치할 플러그인
   data/           DB · 설정 · 토큰 · 워크스페이스
   setup.bat  uninstall.bat      (Windows)
   setup.sh   uninstall.sh       (Linux)
@@ -70,11 +70,11 @@ chmod +x *.sh && ./setup.sh   # Linux
 ./setup.sh --service          # pm2
 ```
 
-그다음 `plugin/risu-elf.js` 를 RisuAI 플러그인 화면에 넣고, 챗 화면의 **Risu Elf** 버튼을
+그다음 `plugin/Risu.Elf.Plugin.js` 를 RisuAI 플러그인 화면에 넣고, 챗 화면의 **Risu Elf** 버튼을
 열어 오른쪽 위 ⚙ → **연결**에 백엔드 URL(같은 기계면 `http://127.0.0.1:6020`),
 **에이전트 → 수정**에 모델 자격증명을 넣는다.
 
-**푸는 것보다 먼저 `SHA256SUMS.txt` 로 해시를 확인한다.** 받은 내용이 곧 돌아갈 서버가 된다.
+**푸는 것보다 먼저 `SHA256SUMS-<버전>.txt` 로 해시를 확인한다.** 받은 내용이 곧 돌아갈 서버가 된다.
 
 설치 위치·데이터 위치·포트·인터프리터를 바꾸는 법은 압축 안의 `README.md` 와
 [docs/05-install.md](docs/05-install.md)에 있다.

@@ -52,7 +52,9 @@ from . import config, log
 RESTART_CODE = 75
 
 API = "https://api.github.com/repos/{repo}/releases/latest"
-ASSET_SUMS = "SHA256SUMS.txt"
+# Matched by prefix: the digests file carries the version in its name, so the
+# exact string changes with every release.
+SUMS_PREFIX = "SHA256SUMS"
 
 # Anything larger is not our backend.
 MAX_ASSET = 200 * 1024 * 1024
@@ -125,11 +127,12 @@ def check() -> dict:
 
     tag = str(rel.get("tag_name") or "").lstrip("vV")
     assets = {a.get("name"): a.get("browser_download_url") for a in rel.get("assets") or []}
-    # Named, then any zip. The fallback matters for older releases, whose asset
-    # was called risu-elf-backend-<ver>.zip; the name changed once the archive
-    # stopped being only the backend.
-    archive = next((n for n in assets if n.startswith("risu-elf-install") and n.endswith(".zip")), None)
+    # By name, then by shape. The fallback matters for releases made before the
+    # naming settled - risu-elf-backend-<ver>.zip, then risu-elf-install-<ver>.zip.
+    archive = next((n for n in assets
+                    if "Install.Package" in n and n.endswith(".zip")), None)
     archive = archive or next((n for n in assets if n.endswith(".zip")), None)
+    sums = next((n for n in assets if n.startswith(SUMS_PREFIX)), None)
 
     newer = _ver_tuple(tag) > _ver_tuple(config.VERSION)
     return {
@@ -141,11 +144,12 @@ def check() -> dict:
         "notes": str(rel.get("body") or "")[:4000],
         "publishedAt": rel.get("published_at"),
         "asset": archive,
-        "verifiable": ASSET_SUMS in assets,
-        "installable": bool(archive) and ASSET_SUMS in assets,
-        "reason": None if (archive and ASSET_SUMS in assets) else (
-            "릴리스에 백엔드 zip이 없습니다" if not archive
-            else f"릴리스에 {ASSET_SUMS} 가 없어 검증할 수 없습니다"),
+        "sums": sums,
+        "verifiable": bool(sums),
+        "installable": bool(archive and sums),
+        "reason": None if (archive and sums) else (
+            "릴리스에 설치 zip이 없습니다" if not archive
+            else f"릴리스에 {SUMS_PREFIX}… 파일이 없어 검증할 수 없습니다"),
     }
 
 
@@ -167,7 +171,7 @@ def _verify(blob: bytes, filename: str, sums_text: str) -> None:
             want = parts[0].lower()
             break
     if not want:
-        raise UpdateError(f"{ASSET_SUMS} 에 {filename} 항목이 없습니다")
+        raise UpdateError(f"해시 파일에 {filename} 항목이 없습니다")
     got = hashlib.sha256(blob).hexdigest()
     if got != want:
         raise UpdateError(f"해시가 맞지 않습니다 (기대 {want[:12]}…, 실제 {got[:12]}…)")
@@ -205,7 +209,8 @@ def apply() -> dict:
 
     log.info("update: downloading %s from %s", archive_name, name)
     blob = _http_bytes(assets[archive_name])
-    sums = _http_bytes(assets[ASSET_SUMS], timeout=30).decode("utf-8", "replace")
+    sums_name = info.get("sums")
+    sums = _http_bytes(assets[sums_name], timeout=30).decode("utf-8", "replace")
     _verify(blob, archive_name, sums)
     log.info("update: %s verified (%s bytes)", archive_name, len(blob))
 

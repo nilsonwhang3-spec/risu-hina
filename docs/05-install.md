@@ -28,17 +28,17 @@ test-server에서 실제로 처음부터 돌려 보고 쓴 절차다. 명령과 
 릴리스에서 세 파일을 받는다.
 
 ```
-risu-elf-install-<버전>.zip
+Risu.Elf.<버전>.Auto.Install.Package.zip
 SHA256SUMS.txt
-risu-elf.js               ← 플러그인. 3단계에서 쓴다
+Risu.Elf.Plugin.js        ← RisuAI 가 자동 업데이트에 쓰는 것. 3단계에서 쓴다
 ```
 
 **해시를 먼저 확인한다.** 이 zip의 내용이 곧 돌아갈 서버가 되므로, 검증하지 않은
 다운로드를 푸는 것은 남이 준 코드를 그냥 실행하는 것과 같다.
 
 ```powershell
-$want = (Get-Content SHA256SUMS.txt | Where-Object { $_ -like '*backend*' }).Split(' ')[0]
-$got  = (Get-FileHash risu-elf-install-0.1.0.zip -Algorithm SHA256).Hash.ToLower()
+$want = (Get-Content SHA256SUMS-<버전>.txt | Where-Object { $_ -like '*backend*' }).Split(' ')[0]
+$got  = (Get-FileHash Risu.Elf.0.1.0.Auto.Install.Package.zip -Algorithm SHA256).Hash.ToLower()
 if ($want -ne $got) { throw 'hash mismatch' } else { 'hash ok' }
 ```
 
@@ -48,13 +48,13 @@ if ($want -ne $got) { throw 'hash mismatch' } else { 'hash ok' }
 만들 필요도 이름을 맞출 필요도 없다.
 
 ```powershell
-Expand-Archive risu-elf-install-0.1.0.zip -DestinationPath D:\code -Force
+Expand-Archive Risu.Elf.0.1.0.Auto.Install.Package.zip -DestinationPath D:\code -Force
 ```
 
 ```
 D:\code\risu-elf\
   pyserver\              코드 + 런처. 업데이트가 통째로 갈아끼운다
-  plugin\risu-elf.js     백엔드가 직접 서빙하는 플러그인 사본
+  plugin\                RisuAI 에 설치할 플러그인
   data\                  당신 것. 업데이트가 건드리지 않는다
   start.bat  start.sh
   setup.bat  uninstall.bat        (Windows)
@@ -137,7 +137,7 @@ web RisuAI나 다른 기계에서 직접 붙을 때만 필요하다 — 그 경�
 폴더 이름이 `risu-elf` 일 필요도 없다.
 
 ```powershell
-Expand-Archive risu-elf-install-0.1.0.zip -DestinationPath E:\apps -Force
+Expand-Archive Risu.Elf.0.1.0.Auto.Install.Package.zip -DestinationPath E:\apps -Force
 Rename-Item E:\apps\risu-elf myelf          # 이름도 마음대로
 powershell -ExecutionPolicy Bypass -File E:\apps\myelf\setup.bat
 ```
@@ -181,7 +181,7 @@ setup: data dir E:\backup\risu-elf-data
 ### 리눅스에서는
 
 ```bash
-unzip risu-elf-install-0.1.0.zip -d /opt
+unzip Risu.Elf.0.1.0.Auto.Install.Package.zip -d /opt
 cd /opt/risu-elf && chmod +x *.sh
 ./setup.sh                      # venv + 의존성 + 기동. 3.10+ 를 알아서 찾는다
 ./setup.sh --service            # 또는 PM2 로 상주시키기
@@ -233,7 +233,7 @@ sudo 명령을 사람이 직접 실행해야 한다 — 스크립트가 읽지�
 
 ## 3. 플러그인
 
-1. RisuAI → 설정 → 플러그인 → **Add Plugin** 에서 `risu-elf.js` 를 넣는다.
+1. RisuAI → 설정 → 플러그인 → **Add Plugin** 에서 `Risu.Elf.Plugin.js` 를 넣는다.
 2. 챗 화면에 **Risu Elf** 버튼이 생긴다. 눌러서 연다.
 3. 오른쪽 위 **⚙ → 연결** 에서 백엔드 URL을 넣는다. 같은 기계면
    `http://127.0.0.1:6020`. 다른 기계면 그 주소와 §1-5의 토큰.

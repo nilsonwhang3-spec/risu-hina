@@ -331,7 +331,7 @@ charx 스크립트는 `rpack_map.bin`을 base64로 **내장**했다. 스킬 스�
 최신이어야 가능해진다. 지금은 GitHub 릴리스를 가리킨다:
 
 ```
-https://github.com/<owner>/<repo>/releases/latest/download/risu-elf.js
+https://github.com/<owner>/<repo>/releases/latest/download/Risu.Elf.Plugin.js
 ```
 
 `plugin/package.json`의 `risuelfRepo` 하나만 채우면 된다. **비어 있으면

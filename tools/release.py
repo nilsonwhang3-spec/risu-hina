@@ -2,17 +2,25 @@
 
 Three files, and the third is what makes the other two installable:
 
-    risu-elf.js         the plugin, under the exact name //@update-url expects
-    risu-elf-install-<ver>.zip   the whole install, laid out ready to run
-    SHA256SUMS.txt      digests of both
+    Risu.Elf.<ver>.Auto.Install.Package.zip   the whole install, ready to run
+    Risu.Elf.Plugin.js                        what //@update-url fetches
+    SHA256SUMS-<ver>.txt                      digests of both
 
 `updater.py` refuses a release without `SHA256SUMS.txt`. That is not ceremony:
 the downloaded archive becomes the running server, so an unverified download is
 a remote-code-execution endpoint with extra steps.
 
-The plugin asset is named `risu-elf.js` with no version in it, because
-`releases/latest/download/<name>` needs a name that does not change. The
-version lives inside the file, in the `//@version` header RisuAI reads.
+## Why the names look like that
+
+Dots and Title Case, so each name reads as a sentence about what the file is
+for. GitHub auto-generates a source archive called `<repo>-<tag>.zip` for every
+release and attaches it to the same page; an asset named `risu-elf-0.1.0.zip`
+sat right next to `risu-elf-0.1.0.zip` and people downloaded the wrong one.
+Nothing here shares that shape.
+
+The plugin asset carries no version, because `releases/latest/download/<name>`
+needs a name that does not change - RisuAI fetches that exact URL. Its version
+lives inside the file, in the `//@version` header RisuAI reads.
 
 ## The archive unpacks ready to run
 
@@ -54,13 +62,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "release"
-PLUGIN_ASSET = "risu-elf.js"
+PLUGIN_ASSET = "Risu.Elf.Plugin.js"
 
-# Not "risu-elf-<ver>.zip": GitHub attaches its own source archive to every
-# release under exactly that name, and two identically named files on one page
-# is the confusion this is trying to avoid. Not "backend" either - the archive
-# carries the plugin too, so that name undersold it.
-INSTALL_ASSET = "risu-elf-install-%s.zip"
+INSTALL_ASSET = "Risu.Elf.%s.Auto.Install.Package.zip"
+SUMS_ASSET = "SHA256SUMS-%s.txt"
 
 # The tree's top-level folder, so the zip unpacks into one directory rather
 # than scattering itself across wherever it was opened.
@@ -167,14 +172,14 @@ def sha256(path: Path) -> str:
 
 
 def write_sums(paths: list[Path]) -> Path:
-    dest = OUT / "SHA256SUMS.txt"
+    dest = OUT / (SUMS_ASSET % version())
     lines = [f"{sha256(p)}  {p.name}" for p in paths]
     dest.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
     return dest
 
 
 def check() -> int:
-    sums = OUT / "SHA256SUMS.txt"
+    sums = next(iter(sorted(OUT.glob("SHA256SUMS*.txt"))), OUT / "SHA256SUMS.txt")
     if not sums.is_file():
         print("no SHA256SUMS.txt - updater.py would refuse this release")
         return 1

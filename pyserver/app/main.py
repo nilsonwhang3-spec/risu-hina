@@ -290,10 +290,13 @@ def _plugin_file() -> "pathlib.Path | None":
     found: list[pathlib.Path] = []
     for root in roots:
         try:
-            # `risu-elf*.js`, not `risu-elf-*.js`: the release asset has no
-            # version in its name, because releases/latest/download needs a
-            # name that does not change. A dev build still has one.
-            found.extend(f for f in root.glob("risu-elf*.js") if f.is_file())
+            # Case-insensitively, and both naming shapes. A release ships
+            # `Risu.Elf.Plugin.js` - no version, because
+            # releases/latest/download needs a name that does not change - and
+            # a dev build is `risu-elf-<ver>.js`. Matching one of them meant
+            # /plugin.js served nothing on exactly the installs that had it.
+            found.extend(f for f in root.glob("*.js")
+                         if f.is_file() and f.name.lower().replace(".", "-").startswith("risu-elf"))
         except OSError:
             continue
     if not found:
