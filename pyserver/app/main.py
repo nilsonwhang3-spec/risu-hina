@@ -171,18 +171,47 @@ def h_config_test(arg: dict) -> dict:
 
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {key}"}
     url = base + "/chat/completions"
+
+    def body_of(r) -> dict:
+        """The JSON body, or a ValueError that names what actually came back.
+
+        A bare JSONDecodeError hides the two common misconfigurations: a host
+        that only redirects (api.ollama.com -> ollama.com, which httpx does not
+        follow, so a 301 with an empty body reached `r.json()`), and a baseUrl
+        that lands on an HTML page. Both used to surface as "Expecting value:
+        line 1 column 1", which points at nothing the user can change.
+        """
+        if 300 <= r.status_code < 400:
+            where = r.headers.get("location") or "(Location 헤더 없음)"
+            if where.endswith("/chat/completions"):
+                where = where[: -len("/chat/completions")]
+            raise ValueError(
+                f"HTTP {r.status_code} 리다이렉트 → {where} — baseUrl 을 이 주소로 바꿔 주세요")
+        if r.status_code >= 400:
+            # Sanitised: an upstream error body can echo the key back.
+            raise ValueError(f"HTTP {r.status_code}: {_scrub(r.text[:200], key)}")
+        try:
+            data = r.json()
+        except ValueError:
+            ctype = r.headers.get("content-type") or "?"
+            raise ValueError(
+                f"응답이 JSON 이 아닙니다 (HTTP {r.status_code}, {ctype}): "
+                f"{_scrub(r.text[:120].strip(), key) or '(빈 본문)'} — baseUrl 이 OpenAI 호환 "
+                f"엔드포인트(…/v1)인지 확인해 주세요")
+        if not isinstance(data, dict):
+            raise ValueError(f"응답이 객체가 아닙니다: {_scrub(str(data)[:120], key)}")
+        return data
+
     try:
         r = httpx.post(url, headers=headers, timeout=45, json={
             "model": model,
             "messages": [{"role": "user", "content": "Reply with exactly: PONG"}],
             "max_tokens": 32, "temperature": 0,
         })
-        if r.status_code >= 400:
-            # Sanitised: an upstream error body can echo the key back.
-            return {"ok": False, "stage": "completion",
-                    "error": f"HTTP {r.status_code}: {_scrub(r.text[:200], key)}"}
-        data = r.json()
+        data = body_of(r)
         usage = data.get("usage") or {}
+    except ValueError as e:
+        return {"ok": False, "stage": "completion", "error": str(e)}
     except Exception as e:
         return {"ok": False, "stage": "completion", "error": _scrub(f"{type(e).__name__}: {e}", key)}
 
@@ -197,7 +226,9 @@ def h_config_test(arg: dict) -> dict:
                                "required": ["start", "end"]}}}],
             "tool_choice": "auto", "max_tokens": 256, "temperature": 0,
         })
-        calls = ((r.json().get("choices") or [{}])[0].get("message") or {}).get("tool_calls") or []
+        calls = ((body_of(r).get("choices") or [{}])[0].get("message") or {}).get("tool_calls") or []
+    except ValueError as e:
+        return {"ok": False, "stage": "tools", "error": str(e)}
     except Exception as e:
         return {"ok": False, "stage": "tools", "error": _scrub(f"{type(e).__name__}: {e}", key)}
 
@@ -776,20 +807,72 @@ def h_search(arg: dict) -> dict:
     return {"query": q, "hits": store.search(ck, q, keys, limit=_int(arg, "limit", 40))}
 
 
+def _char_of_chat(tk: str) -> str:
+    return str((store.chat_row(tk) or {}).get("char_key") or "")
+
+
 def h_patch(arg: dict) -> dict:
-    return store.patch(_chat(arg))
+    """Everything one write-back sends, in one response.
+
+    Turns, this chat's lorebook and its memory all follow the same shape -
+    working copy against a baseline - and RisuAI holds all three on the same
+    chat object, so the plugin writes them in one `setChatToIndex`. Fetching
+    them separately invited the state the lorebook tab was in: a write path
+    for two of the three and a message claiming the third came along.
+    """
+    tk = _chat(arg)
+    ck = _char_of_chat(tk)
+    out = store.patch(tk)
+    lore = store.lore_changes(ck, tk)
+    out["lore"] = {
+        "localLore": [e["entry"] for e in store.lore(ck, "local") if e["chatKey"] == tk],
+        "changed": lore["total"],
+        **{k: lore[k] for k in ("added", "edited", "deleted")},
+    }
+    m = mem.patch(tk)
+    out["memory"] = {"data": m["memory"], "changed": m["changed"]}
+    return out
+
+
+def h_changes(arg: dict) -> dict:
+    """What is pending on this chat, as counts - the shared bar's one line."""
+    tk = _chat(arg)
+    ck = _char_of_chat(tk)
+    p = store.patch(tk)
+    turns = {
+        "edited": len(p["edits"]), "added": len(p["added"]), "removed": len(p["removed"]),
+        "reordered": bool(p["reordered"]), "structural": bool(p["structural"]),
+    }
+    turns["total"] = turns["edited"] + turns["added"] + turns["removed"] + (1 if p["reordered"] else 0)
+    lore = store.lore_changes(ck, tk)
+    memory = mem.changes(tk)
+    return {
+        "chatKey": tk,
+        "turns": turns,
+        "lore": lore,
+        "memory": memory,
+        "total": turns["total"] + lore["total"] + memory["total"],
+        "staged": len(staging.pending(tk)),
+        "actions": len(actions.pending(tk)),
+        "warnings": p["warnings"],
+    }
 
 
 def h_commit(arg: dict) -> dict:
-    """Mark the working state as shipped; the baseline moves to match.
+    """Mark the working state as shipped; every baseline moves to match.
 
     The client calls this only after RisuAI confirmed the write, so a failed
-    write-back leaves the diff intact and retryable.
+    write-back leaves the diff intact and retryable. Turns, lorebook and memory
+    move together because they were written together.
     """
     tk = _chat(arg)
+    ck = _char_of_chat(tk)
     _checkpoint(tk, str(arg.get("label") or "반영 직전"))
     out = store.rebase_original(tk)
-    log.info("commit chat=%s baseline %s -> %s", tk, out["previousBaseline"], out["newBaseline"])
+    out["lore"] = store.rebase_lore(ck, tk)
+    out["memory"] = mem.rebase(tk)
+    log.info("commit chat=%s baseline %s -> %s lore=%s memory=%s",
+             tk, out["previousBaseline"], out["newBaseline"], out["lore"], out["memory"])
     return out
 
 
@@ -1038,6 +1121,7 @@ ROUTES: dict[str, Handler] = {
 
     "GET /search": h_search,
     "GET /patch": h_patch,
+    "GET /changes": h_changes,
     "POST /commit": h_commit,
 
     "POST /chat": h_chat,

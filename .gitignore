@@ -25,3 +25,7 @@ release/
 
 # Written by the installer when the data lives outside the install.
 pyserver/datadir.txt
+
+# bundle.py: downloaded interpreters and the staging tree
+.cache/
+.build/

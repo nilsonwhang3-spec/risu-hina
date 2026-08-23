@@ -40,6 +40,7 @@ import json
 import os
 import re
 import shutil
+import sys
 import tempfile
 import time
 import zipfile
@@ -127,11 +128,18 @@ def check() -> dict:
 
     tag = str(rel.get("tag_name") or "").lstrip("vV")
     assets = {a.get("name"): a.get("browser_download_url") for a in rel.get("assets") or []}
-    # By name, then by shape. The fallback matters for releases made before the
-    # naming settled - risu-elf-backend-<ver>.zip, then risu-elf-install-<ver>.zip.
+    # This platform's archive. There is one per OS now that the interpreter
+    # ships inside; installing the other one would replace a working server
+    # with a python that cannot run here. The fallbacks are for releases made
+    # before the naming settled.
+    want = "Windows" if sys.platform.startswith("win") else "Linux"
     archive = next((n for n in assets
-                    if "Install.Package" in n and n.endswith(".zip")), None)
-    archive = archive or next((n for n in assets if n.endswith(".zip")), None)
+                    if "Install.Package" in n and want in n and n.endswith(".zip")), None)
+    archive = archive or next((n for n in assets
+                               if "Install.Package" in n and n.endswith(".zip")
+                               and "Windows" not in n and "Linux" not in n), None)
+    archive = archive or next((n for n in assets if n.endswith(".zip")
+                               and "Windows" not in n and "Linux" not in n), None)
     sums = next((n for n in assets if n.startswith(SUMS_PREFIX)), None)
 
     newer = _ver_tuple(tag) > _ver_tuple(config.VERSION)
@@ -310,6 +318,14 @@ def _install(payload: Path, version: str) -> Path:
         shutil.copytree(pkg / "app", backup)
         shutil.rmtree(pkg / "app", ignore_errors=True)
     shutil.copytree(payload / "app", pkg / "app")
+    # The interpreter comes with the release too. Swap it the same way as
+    # app/: a new version may need a new python, and a half-updated pair is
+    # exactly the state nothing can start from. The old one is kept alongside
+    # the old app, so a rollback is two renames rather than a reinstall.
+    if (payload / "python").is_dir():
+        if (pkg / "python").is_dir():
+            shutil.move(str(pkg / "python"), str(backup.with_name(backup.name + "-python")))
+        shutil.copytree(payload / "python", pkg / "python")
     for extra in ("run.py", "requirements.in", "requirements.lock"):
         src = payload / extra
         if src.is_file():

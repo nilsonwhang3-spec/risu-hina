@@ -50,7 +50,12 @@ if (-not (Test-Path (Join-Path $Server 'app'))) {
     throw "cannot find app\ next to this script ($Server)"
 }
 $Venv = Join-Path $Server '.venv'
-$VenvPy = Join-Path $Venv 'Scripts\python.exe'
+# The interpreter the release ships, with its dependencies already installed.
+# When it is there, nothing on this machine is consulted - that is the point of
+# bundling it. The venv path below is for a source checkout, which has no
+# python\ and builds one from whatever python it can find.
+$BundledPy = Join-Path $Server 'python\python.exe'
+$VenvPy = if (Test-Path $BundledPy) { $BundledPy } else { Join-Path $Venv 'Scripts\python.exe' }
 $Entry = Join-Path $Server 'run.py'
 $Log = Join-Path $Server 'server.log'
 $Bat = Join-Path $Server 'start.bat'
@@ -130,16 +135,28 @@ function Test-Admin {
 }
 
 function Invoke-Setup {
-    $SysPy = Find-Python
-    Write-Output ("setup: using {0}" -f $SysPy)
-    if (-not (Test-Path $VenvPy)) {
-        Write-Output 'setup: creating venv'
-        & $SysPy -m venv $Venv
+    # Same reason start.bat clears it: a stray PYTHONHOME points the bundled
+    # interpreter at someone else's stdlib and it dies before printing a
+    # useful word. (The ._pth already neutralises PYTHONPATH.)
+    $env:PYTHONHOME = $null
+    if (Test-Path $BundledPy) {
+        # Nothing to install: the interpreter and every dependency came in
+        # the archive, hash-pinned. Just prove they load.
+        $v = & $BundledPy -c "import sys; print('%d.%d.%d' % sys.version_info[:3])"
+        Write-Output ("setup: bundled Python {0}" -f $v)
+    } else {
+        $SysPy = Find-Python
+        Write-Output ("setup: no bundled python - building a venv with {0}" -f $SysPy)
+        if (-not (Test-Path $VenvPy)) {
+            Write-Output 'setup: creating venv'
+            & $SysPy -m venv $Venv
+        }
+        Write-Output 'setup: installing dependencies'
+        & $VenvPy -m pip install --quiet --upgrade pip
+        & $VenvPy -m pip install --quiet -r (Join-Path $Server 'requirements.in')
     }
-    Write-Output 'setup: installing dependencies'
-    & $VenvPy -m pip install --quiet --upgrade pip
-    & $VenvPy -m pip install --quiet -r (Join-Path $Server 'requirements.in')
-    & $VenvPy -c "import fastapi, uvicorn, httpx; print('setup: fastapi', fastapi.__version__, 'uvicorn', uvicorn.__version__)"
+    & $VenvPy -c "import fastapi, uvicorn, httpx, pydantic_ai; print('setup: fastapi', fastapi.__version__, 'uvicorn', uvicorn.__version__)"
+    if ($LASTEXITCODE -ne 0) { throw 'the interpreter cannot import the dependencies' }
 
     $target = if ($DataDir) { $DataDir } else { Join-Path $Root 'data' }
     try { New-Item -ItemType Directory -Force $target | Out-Null }
@@ -161,7 +178,7 @@ function Invoke-Setup {
 }
 
 function Start-Server {
-    if (-not (Test-Path $VenvPy)) { throw 'venv missing - run setup first' }
+    if (-not (Test-Path $VenvPy)) { throw 'no interpreter - run setup first' }
     if (-not (Test-Path $Bat)) { throw "missing $Bat" }
     # Win32_Process.Create runs under the WMI service, outside the ssh session's
     # job object. Start-Process does not: OpenSSH kills the whole job when the
@@ -275,7 +292,7 @@ function Invoke-Uninstall {
         Write-Output 'purging:'
         Write-Output ("  {0}" -f $Venv)
         Write-Output ("  {0}" -f $data)
-        Remove-Item -Recurse -Force $Venv -ErrorAction SilentlyContinue
+        if (Test-Path $Venv) { Remove-Item -Recurse -Force $Venv -ErrorAction SilentlyContinue }
         Remove-Item -Recurse -Force $data -ErrorAction SilentlyContinue
         Remove-Item $Pin -ErrorAction SilentlyContinue
         Write-Output 'purged. The code is still here; delete this folder to finish.'
@@ -291,12 +308,12 @@ function Get-Status {
     Write-Output ("install    {0}" -f $Root)
     Write-Output ("data       {0}" -f (Get-DataDir))
     $procs = @(Get-ServerProcesses)
-    # Two processes is normal on Windows and not a duplicate server. A venv's
-    # Scripts\python.exe is venvlauncher.exe, which starts the real interpreter
-    # as a child and stays alive as its parent, so both match this install's
-    # run.py.
-    $note = if ($procs.Count -eq 2) { ' (venv launcher + server, normal)' }
-            elseif ($procs.Count -gt 2) { ' - more than expected' }
+    # One process with the bundled interpreter. Two with a venv, and that is
+    # not a duplicate server: a venv's Scripts\python.exe is venvlauncher.exe,
+    # which starts the real interpreter as a child and stays as its parent.
+    $expected = if (Test-Path $BundledPy) { 1 } else { 2 }
+    $note = if ($procs.Count -eq 2 -and $expected -eq 2) { ' (venv launcher + server, normal)' }
+            elseif ($procs.Count -gt $expected) { ' - more than expected' }
             else { '' }
     Write-Output ("processes  {0}{1}" -f $procs.Count, $note)
     foreach ($p in $procs) { Write-Output ("           pid {0}" -f $p.ProcessId) }

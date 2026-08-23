@@ -15,14 +15,14 @@ RisuAI 쪽에 따로 설치한다.
 setup.bat
 ```
 
-파이썬 3.10+ 를 찾아 전용 venv 를 만들고, 의존성을 깔고, 서버를 띄운다.
-시스템 파이썬은 건드리지 않는다.
+파이썬이 **동봉돼 있다.** 이 기계에 파이썬이 있든 없든, 무슨 버전이든 상관없이
+`pyserver/python/` 안의 것으로만 돈다. `setup.bat` 은 그것이 제대로 뜨는지 확인하고
+서버를 띄운다.
 
 ```
 setup.bat -Port 6030            다른 포트
 setup.bat -Service              재부팅해도 살아 있게 (NSSM 필요, 관리자 권한)
 setup.bat -DataDir E:\elfdata   데이터를 다른 곳에
-setup.bat -Python C:\Python311\python.exe
 setup.bat -NoStart              설치만
 ```
 
@@ -37,13 +37,12 @@ chmod +x *.sh
 ./setup.sh --port 6030
 ./setup.sh --service            재부팅해도 살아 있게 (pm2 필요)
 ./setup.sh --data-dir /srv/elfdata
-./setup.sh --python /usr/bin/python3.11
 ./setup.sh --no-start
 ```
 
-> **Ubuntu 20.04 는 시스템 파이썬이 3.8 이라 그대로는 안 된다.**
-> `pyenv` 나 deadsnakes 로 3.10+ 를 깔면 `setup.sh` 가 알아서 찾는다.
-> venv 생성이 실패하면 `sudo apt install python3-venv` 가 대개 답이다.
+> 파이썬을 설치할 필요가 없다. Ubuntu 20.04 처럼 시스템 파이썬이 3.8 인 기계에서도
+> 그대로 돈다 — 동봉된 3.11 을 쓴다. 필요한 것은 glibc 2.28+ 뿐이다
+> (Ubuntu 20.04 / Debian 10 이상이면 된다).
 
 ### 플러그인
 
@@ -110,7 +109,7 @@ powershell -ExecutionPolicy Bypass -File pyserver\manage.ps1 -Action restart
 
 | 증상 | 원인 |
 |---|---|
-| `no Python 3.10 or newer found` | 없거나 못 찾음 → `-Python` / `--python` |
+| `GLIBC_2.28 not found` | 너무 오래된 리눅스. Ubuntu 20.04 / Debian 10 이상이 필요하다 |
 | `listening NO`, 로그에 `WinError 10048` | 그 포트를 다른 것이 쓰고 있음 → 포트 변경 |
 | 플러그인이 "백엔드 연결 안 됨" | URL 오타, 백엔드 미기동, web RisuAI 에서 토큰 미입력 |
 | web RisuAI 에서만 실패 | RisuAI 설정의 **Use Plain Fetch** 를 켤 것. 꺼져 있으면 요청이 `sv.risuai.xyz` 로 릴레이되어 사설 주소에 닿지 않는다 |

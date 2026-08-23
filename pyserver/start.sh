@@ -28,8 +28,12 @@ export RISUELF_PORT="$PORT"
 export RISUELF_HOST="${RISUELF_HOST:-127.0.0.1}"
 export PYTHONIOENCODING=utf-8
 
-PY="$ROOT/.venv/bin/python"
-[ -x "$PY" ] || PY="$ROOT/.venv/Scripts/python.exe"
+# The bundled interpreter first. python-build-standalone is relocatable but
+# does not honour a ._pth, so the two variables that could point it at another
+# installation's stdlib or site-packages are cleared here instead.
+unset PYTHONPATH PYTHONHOME
+PY="$ROOT/python/bin/python3"
+[ -x "$PY" ] || PY="$ROOT/.venv/bin/python"
 [ -x "$PY" ] || PY="$(command -v python3 || command -v python)"
 
 while true; do

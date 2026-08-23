@@ -11,13 +11,13 @@ test-server에서 실제로 처음부터 돌려 보고 쓴 절차다. 명령과 
 
 | 필요한 것 | 확인 |
 |---|---|
-| Python **3.10 이상** (3.11 권장) | `py -3.11 --version` |
+| 파이썬 | **필요 없다.** 동봉돼 있다 |
 | 백엔드를 둘 디렉터리 | 어디든 된다. §2 참조 |
 | PocketRisu 또는 web RisuAI | 이미 쓰고 있는 것 |
 
-파이썬은 설치 스크립트가 알아서 찾는다. `py -3.11` → `C:\Program Files\Python31x` →
-`%LOCALAPPDATA%\Programs\Python` → PATH 순이고, 어느 것을 골랐는지 출력한다.
-원하는 것이 따로 있으면 `-Python <경로>` 로 지정한다.
+인터프리터는 압축 안에 있다(`pyserver/python/`). 이 기계에 무엇이 깔려 있든 그것만 쓴다 —
+사용자가 파이썬을 설치해야 하는 배포는 처음부터 하지 않기로 한 것이고, 첫 릴리스가 그
+규칙을 어겼던 것을 바로잡았다. 소스 체크아웃에서 돌릴 때만 `-Python <경로>` 가 의미 있다.
 
 ---
 
@@ -183,15 +183,14 @@ setup: data dir E:\backup\risu-elf-data
 ```bash
 unzip Risu.Elf.0.1.0.Auto.Install.Package.zip -d /opt
 cd /opt/risu-elf && chmod +x *.sh
-./setup.sh                      # venv + 의존성 + 기동. 3.10+ 를 알아서 찾는다
+./setup.sh                      # 동봉된 파이썬을 확인하고 띄운다
 ./setup.sh --service            # 또는 PM2 로 상주시키기
 ./uninstall.sh                  # 멈추고 등록 해제
 ```
 
-`setup.sh` 는 `--python <경로>` 와 `--data-dir <절대경로>` 를 받는다(윈도우의 `-Python`,
-`-DataDir` 과 같다). **Ubuntu 20.04 는 시스템 파이썬이 3.8 이라 그대로는 안 된다** —
-`pyenv` 나 deadsnakes 로 3.10+ 를 깔면 `setup.sh` 가 찾아낸다.
-venv 생성이 실패하면 `sudo apt install python3-venv` 가 대개 답이다.
+`setup.sh` 는 `--data-dir <절대경로>` 와 `--port` 를 받는다(윈도우의 `-DataDir`, `-Port`).
+**시스템 파이썬은 보지 않는다.** Ubuntu 20.04 처럼 3.8 만 있는 기계에서도 동봉된 3.11 로
+그대로 돈다 — 실제로 그 환경에서 PATH 를 비우고 확인했다. 필요한 것은 glibc 2.28+ 뿐이다.
 
 ### 서비스로 상주시키려면
 

@@ -77,92 +77,104 @@ export function cardOf(char: RisuCharacter): Record<string, unknown> {
 
 export interface Edit { msgId: string; before: string; after: string }
 
+/**
+ * One write-back's worth of change. Every field is optional and only the
+ * fields present are touched on the live chat.
+ *
+ *  - `edits`     per-turn body changes, addressed by chatId and verified
+ *                against `before` on the live chat (non-structural case)
+ *  - `messages`  the whole ordered array, once turns were inserted, deleted
+ *                or reordered and a per-turn patch cannot express the result
+ *  - `localLore` this chat's lorebook, whole list
+ *  - `memory`    the long-term memory fields (hypaV3Data and friends)
+ */
+export interface ChatUpdate {
+  edits?: Edit[];
+  messages?: RisuMessage[];
+  localLore?: unknown[];
+  memory?: Record<string, unknown>;
+}
+
 export interface WriteResult {
   applied: number;
-  mode: 'edits' | 'replace';
+  mode: 'noop' | 'edits' | 'replace';
+  /** Which parts of the chat object were written. */
+  parts: string[];
 }
 
 /**
- * Apply body edits to the live chat, addressing turns by chatId.
+ * Write a chat update to the live chat, in one `setChatToIndex`.
+ *
+ * Turns, lorebook and memory all live on the same chat object, and RisuAI's
+ * write replaces that object whole, so writing them one part at a time would
+ * be three re-reads and three chances for the last write to carry a stale
+ * copy of the other two. One read, one compose, one write.
  *
  * Mirrors the only prior art for writing chats back (cocoAgent): re-read
  * without the cache, confirm we are still looking at the same chat, confirm
- * each target still holds the text the user was shown, then write once. Any
- * mismatch aborts the whole write rather than applying part of it.
+ * each edited turn still holds the text the user was shown, then write once.
+ * Any mismatch aborts the whole write rather than applying part of it.
  */
-export async function applyEdits(slot: Slot, seenChatId: string | undefined, edits: Edit[]): Promise<WriteResult> {
-  if (!edits.length) return { applied: 0, mode: 'edits' };
+export async function writeChat(slot: Slot, seenChatId: string | undefined, update: ChatUpdate): Promise<WriteResult> {
   const fresh = await readChat(slot);
   if (seenChatId && fresh.id && fresh.id !== seenChatId) {
     throw new HostError('changed', '챗이 바뀌었습니다 (복사·브랜치 직후일 수 있습니다). 다시 불러와 주세요');
   }
 
-  const byId = new Map<string, number>();
-  fresh.message.forEach((m, i) => { if (m.chatId) byId.set(m.chatId, i); });
+  const next: RisuChat = { ...fresh };
+  const parts: string[] = [];
+  let applied = 0;
+  let mode: WriteResult['mode'] = 'noop';
 
-  for (const e of edits) {
-    const idx = byId.get(e.msgId);
-    if (idx === undefined) {
-      throw new HostError('missing', `턴이 라이브 챗에 없습니다: ${e.msgId}`);
+  if (update.messages) {
+    next.message = update.messages;
+    applied = update.messages.length;
+    mode = 'replace';
+    parts.push('message');
+  } else if (update.edits?.length) {
+    const byId = new Map<string, number>();
+    fresh.message.forEach((m, i) => { if (m.chatId) byId.set(m.chatId, i); });
+    for (const e of update.edits) {
+      const idx = byId.get(e.msgId);
+      if (idx === undefined) {
+        throw new HostError('missing', `턴이 라이브 챗에 없습니다: ${e.msgId}`);
+      }
+      if (String(fresh.message[idx].data ?? '') !== e.before) {
+        throw new HostError('changed', `RisuAI 쪽에서 턴이 바뀌었습니다 (${e.msgId}). 다시 불러와 주세요`);
+      }
     }
-    if (String(fresh.message[idx].data ?? '') !== e.before) {
-      throw new HostError('changed', `RisuAI 쪽에서 턴이 바뀌었습니다 (${e.msgId}). 다시 불러와 주세요`);
-    }
-  }
-
-  const next: RisuChat = {
-    ...fresh,
-    message: fresh.message.map((m, i) => {
+    const edits = update.edits;
+    next.message = fresh.message.map((m, i) => {
       const hit = edits.find((e) => byId.get(e.msgId) === i);
       // Spread the original message so chatId, generationInfo and every field
       // we do not know about ride along untouched.
       return hit ? { ...m, data: hit.after } : m;
-    }),
-  };
+    });
+    applied = edits.length;
+    mode = 'edits';
+    parts.push('message');
+  }
+
+  if (update.localLore) {
+    next.localLore = update.localLore;
+    parts.push('localLore');
+  }
+  if (update.memory) {
+    // Only the memory keys are replaced - `message` and everything else on
+    // the chat object rides along untouched, because a memory edit must never
+    // be able to disturb the transcript.
+    Object.assign(next, update.memory);
+    parts.push(...Object.keys(update.memory));
+  }
+
+  if (!parts.length) return { applied: 0, mode: 'noop', parts };
   await Risuai.setChatToIndex(slot.characterIndex, slot.chatIndex, next);
-  return { applied: edits.length, mode: 'edits' };
+  return { applied, mode, parts };
 }
 
 /**
- * Replace the whole message array. Needed once turns were inserted, deleted or
- * reordered, because a per-turn patch cannot express that.
- */
-export async function replaceMessages(
-  slot: Slot,
-  seenChatId: string | undefined,
-  messages: RisuMessage[],
-): Promise<WriteResult> {
-  const fresh = await readChat(slot);
-  if (seenChatId && fresh.id && fresh.id !== seenChatId) {
-    throw new HostError('changed', '챗이 바뀌었습니다. 다시 불러와 주세요');
-  }
-  await Risuai.setChatToIndex(slot.characterIndex, slot.chatIndex, { ...fresh, message: messages });
-  return { applied: messages.length, mode: 'replace' };
-}
-
-/**
- * Write the long-term memory fields back into the live chat.
- *
- * Same guard as every other write here: re-read, confirm it is still the same
- * chat, then write once. Only the memory keys are replaced - `message` and
- * everything else on the chat object rides along untouched, because a memory
- * edit must never be able to disturb the transcript.
- */
-export async function writeMemory(
-  slot: Slot,
-  seenChatId: string | undefined,
-  memory: Record<string, unknown>,
-): Promise<string[]> {
-  const fresh = await readChat(slot);
-  if (seenChatId && fresh.id && fresh.id !== seenChatId) {
-    throw new HostError('changed', '챗이 바뀌었습니다. 다시 불러와 주세요');
-  }
-  await Risuai.setChatToIndex(slot.characterIndex, slot.chatIndex, { ...fresh, ...memory });
-  return Object.keys(memory);
-}
-
-/**
- * Save a copy as a new chat.
+ * Save a copy as a new chat, carrying the working state - turns, lorebook
+ * and memory - so the copy is what the panel shows, not what RisuAI held.
  *
  * `setChatToIndex` cannot append, so the character object has to grow and be
  * written back whole. The copy gets a fresh `chat.id` because two live chats
@@ -170,7 +182,7 @@ export async function writeMemory(
  */
 export async function saveAsCopy(
   slot: Slot,
-  messages: RisuMessage[] | null,
+  update: ChatUpdate,
   name: string,
 ): Promise<number> {
   const fresh = await readChat(slot);
@@ -179,9 +191,11 @@ export async function saveAsCopy(
 
   const copy: RisuChat = {
     ...fresh,
+    ...(update.memory ?? {}),
     id: cryptoRandomId(),
     name,
-    ...(messages ? { message: messages } : {}),
+    ...(update.messages ? { message: update.messages } : {}),
+    ...(update.localLore ? { localLore: update.localLore } : {}),
   };
   chats.unshift(copy);
   await Risuai.setCharacterToIndex(slot.characterIndex, { ...char, chats });

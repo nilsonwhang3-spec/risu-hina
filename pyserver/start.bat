@@ -33,9 +33,17 @@ set RISUELF_PORT=%PORT%
 set RISUELF_HOST=127.0.0.1
 set PYTHONIOENCODING=utf-8
 
+REM The bundled interpreter first. Its ._pth file owns sys.path outright, so
+REM PYTHONPATH and the registry cannot steer it - but PYTHONHOME is honoured
+REM even then, and a user who set one for some other program would have it
+REM pointed at the wrong stdlib. Clear it.
+set PYTHONHOME=
+set PY=%SERVER%python\python.exe
+if not exist "%PY%" set PY=%SERVER%.venv\Scripts\python.exe
+
 :loop
 echo === start %DATE% %TIME% port=%PORT% >> "%LOG%"
-"%SERVER%.venv\Scripts\python.exe" "%SERVER%run.py" >> "%LOG%" 2>&1
+"%PY%" "%SERVER%run.py" >> "%LOG%" 2>&1
 if errorlevel 75 if not errorlevel 76 (
     echo === update applied, restarting >> "%LOG%"
     goto loop

@@ -52,7 +52,7 @@ if [ "$PURGE" = "1" ]; then
   [ -f "$PIN" ] && DATA="$(tr -d '\r\n' < "$PIN")"
   echo
   echo "purging:"
-  echo "  $SERVER/.venv"
+  [ -d "$SERVER/.venv" ] && echo "  $SERVER/.venv"
   echo "  $DATA"
   rm -rf "$SERVER/.venv"
   rm -rf "$DATA"

@@ -64,10 +64,30 @@ EOF
   exit 2
 }
 
-PY="$(find_python)"
-echo "setup: using $PY ($("$PY" --version 2>&1))"
-
 VENV="$SERVER/.venv"
+BUNDLED="$SERVER/python/bin/python3"
+
+# These two can point any Python at another installation's stdlib, and a user
+# who set them for some other program would see "No module named encodings"
+# from ours with no hint why. start.sh clears them for the server; this does
+# the same for the checks below.
+unset PYTHONHOME PYTHONPATH
+
+if [ -x "$BUNDLED" ]; then
+  # Nothing to install: the interpreter and every dependency came in the
+  # archive, hash-pinned. Just prove they load.
+  echo "setup: bundled Python $("$BUNDLED" -c 'import sys; print("%d.%d.%d" % sys.version_info[:3])')"
+  "$BUNDLED" -c "import fastapi, uvicorn, httpx, pydantic_ai; print('setup: fastapi', fastapi.__version__, 'uvicorn', uvicorn.__version__)" || {
+    echo >&2
+    echo 'the bundled interpreter failed - the message above says why.' >&2
+    echo 'If it mentions GLIBC: this build needs glibc 2.28+ (Debian 10 / Ubuntu 20.04 or newer).' >&2
+    exit 2
+  }
+  RUNPY="$BUNDLED"
+else
+PY="$(find_python)"
+echo "setup: no bundled python - building a venv with $PY ($("$PY" --version 2>&1))"
+
 if [ ! -x "$VENV/bin/python" ]; then
   echo 'setup: creating venv'
   # python3-venv is a separate package on Debian/Ubuntu and its absence is the
@@ -85,6 +105,8 @@ echo 'setup: installing dependencies'
 "$VENV/bin/python" -m pip install --quiet --upgrade pip
 "$VENV/bin/python" -m pip install --quiet -r "$SERVER/requirements.in"
 "$VENV/bin/python" -c "import fastapi, uvicorn, httpx; print('setup: fastapi', fastapi.__version__, 'uvicorn', uvicorn.__version__)"
+RUNPY="$VENV/bin/python"
+fi
 
 # --- data directory ---------------------------------------------------------
 PIN="$SERVER/datadir.txt"
@@ -101,6 +123,9 @@ else
 fi
 echo "setup: data dir $DATA_DIR"
 chmod +x "$ROOT"/*.sh "$SERVER"/start.sh 2>/dev/null || true
+# A zip extracted by a tool that drops permission bits leaves the interpreter
+# non-executable; putting it back is cheaper than explaining the error.
+[ -d "$SERVER/python/bin" ] && chmod +x "$SERVER"/python/bin/* 2>/dev/null || true
 
 # --- run it -----------------------------------------------------------------
 if [ "$SERVICE" = "1" ]; then
