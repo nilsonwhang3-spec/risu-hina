@@ -385,7 +385,7 @@ Tailscale로 접속 중인 PC에 있을 수 있고, 로그는 그 PC의 파일�
 
 # 부록 C — `Real-ooc` → `risu-elf` 개명 (2026-08-23 4차)
 
-레포는 `nilsonwhang-spec/risu-elf`. 네 가지 표기를 길이 순으로 치환했다(짧은 것이 긴 것을
+레포는 `nilsonwhang3-spec/risu-elf`. 네 가지 표기를 길이 순으로 치환했다(짧은 것이 긴 것을
 먹지 않도록):
 
 | 이전 | 이후 | 쓰이는 곳 |

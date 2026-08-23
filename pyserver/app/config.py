@@ -196,7 +196,7 @@ DEFAULTS: dict[str, Any] = {
     },
     "update": {
         # owner/repo on GitHub.
-        "repo": "nilsonwhang-spec/risu-elf",
+        "repo": "nilsonwhang3-spec/risu-elf",
         # Only for a private repo or to lift the anonymous rate limit.
         "githubToken": "",
     },
