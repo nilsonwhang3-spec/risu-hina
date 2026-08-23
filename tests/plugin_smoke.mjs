@@ -339,8 +339,9 @@ await settle(700);
 const turnNodes = document.querySelectorAll('.turn');
 check('turns rendered', turnNodes.length > 0, String(turnNodes.length));
 check('virtualised', turnNodes.length <= 10, String(turnNodes.length));
+// A pencil, not the word - it sits on every row of a 394-row list.
 check('every turn has a visible edit button',
-      [...turnNodes].every((t) => [...t.querySelectorAll('button')].some((b) => b.textContent === '수정')));
+      [...turnNodes].every((t) => !!t.querySelector('button[title="이 턴 편집"]')));
 check('tools sit above the chat', document.querySelectorAll('.toolrow .tool').length >= 6,
       String(document.querySelectorAll('.toolrow .tool').length));
 // Files are their own view now; a second entry point in the editor was the
@@ -368,6 +369,62 @@ check('a resize gutter exists', !!document.querySelector('.gutter'));
   ?.dispatchEvent(new window.Event('click', { bubbles: true }));
 await settle(200);
 check('options panel starts empty', /위 도구를 선택하시면/.test(document.body.innerHTML));
+
+console.log('\ntest_turn_edit_modal');
+{
+  const row = document.querySelector('.turn');
+  const seq = row.querySelector('.turn-no')?.textContent;
+  row.querySelector('button[title="이 턴 편집"]')
+    ?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(600);
+  const box = document.querySelector('.modalbox');
+  check('the pencil opens a modal', !!box);
+  check('it names the turn', new RegExp('턴 ' + seq).test(
+        box?.querySelector('.modalhead')?.textContent || ''),
+        box?.querySelector('.modalhead')?.textContent);
+  const area = box?.querySelector('textarea.turnedit');
+  // The whole reason it left the row: a few lines was not enough for a turn
+  // that is routinely a screen of prose. The height is in the stylesheet, so
+  // that is where it has to be checked - linkedom computes no styles.
+  check('the box carries the tall class', area?.classList.contains('turnedit'),
+        area?.className);
+  check('and that class is sized in viewport heights',
+        /textarea[.]turnedit[^}]*min-height:[^;]*vh/.test(
+          document.querySelector('style')?.textContent || ''),
+        (document.querySelector('style')?.textContent || '')
+          .slice((document.querySelector('style')?.textContent || '')
+            .indexOf('textarea.turnedit'), 200));
+  check('it holds the turn text', (area?.value || '').length > 5, (area?.value || '').slice(0, 60));
+  check('the length is counted', /자/.test(box?.textContent || ''));
+
+  area.value = '모달에서 고친 본문입니다.';
+  [...box.querySelectorAll('button')].find((b) => b.textContent === '저장')
+    ?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(1100);
+  check('saving closes the modal', !document.querySelector('.modalbox'));
+  check('the edit is in the list',
+        /모달에서 고친 본문입니다/.test(document.querySelector('.turn')?.textContent || ''),
+        (document.querySelector('.turn')?.textContent || '').slice(0, 120));
+  check('and the turn is marked changed',
+        !!document.querySelector('.turn.changed'));
+
+  // Reopening a changed turn offers the frozen original to compare against.
+  document.querySelector('.turn button[title="이 턴 편집"]')
+    ?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(600);
+  check('the original is shown for comparison',
+        !!findButton(document.querySelector('.modalbox'), '원본으로 되돌리기'));
+  clickButton(document.querySelector('.modalbox'), '원본으로 되돌리기');
+  await settle(200);
+  check('reverting refills the box, without saving',
+        !/모달에서 고친/.test(document.querySelector('.modalbox textarea')?.value || ''),
+        (document.querySelector('.modalbox textarea')?.value || '').slice(0, 60));
+  [...document.querySelectorAll('.modalbox button')].find((b) => b.textContent === '취소')
+    ?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(300);
+  check('cancelling leaves the edit in place',
+        !!document.querySelector('.turn.changed'));
+}
 
 console.log('\ntest_view_modes');
 {

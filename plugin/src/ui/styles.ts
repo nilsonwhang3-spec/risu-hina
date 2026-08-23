@@ -250,6 +250,15 @@ button.iconbtn:hover:not(:disabled) { background: rgba(128,128,128,.14); }
 .diff-ins { background: rgba(16, 185, 129, .22); }
 .before-label { color: var(--textcolor2, #79839a); font-size: 11px; margin-top: 4px; }
 button.tiny { padding: 1px 7px; font-size: 11px; border-radius: 4px; }
+button.iconbtn.tiny { padding: 2px 4px; display: inline-flex; align-items: center; }
+
+/* The turn editor. Tall on purpose - a turn is often a screen of prose, and
+   the whole reason this left the row is that a few lines were not enough. */
+.turneditwrap { display: flex; flex-direction: column; }
+textarea.turnedit {
+  min-height: 46vh; max-height: 62vh; line-height: 1.7; font-size: 13px;
+  resize: vertical;
+}
 
 .filterbar {
   display: flex; align-items: center; gap: 8px; flex-shrink: 0;

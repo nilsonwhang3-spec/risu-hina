@@ -10,7 +10,7 @@
  * one line to several screens. Measured heights are cached per msgId and the
  * cache survives re-renders, so scrolling back up does not jump.
  */
-import { el, clear, diffFragments, fmtTime } from './dom';
+import { el, clear, diffFragments, fmtTime, modal, ICON } from './dom';
 import { renderBody, type ViewMode, type RenderOptions } from './render';
 import type { Turn } from '../state';
 
@@ -40,7 +40,6 @@ export class TurnList {
 
   private turns: Turn[] = [];
   private heights = new Map<string, number>();
-  private editing = new Set<string>();
   private raf = 0;
 
   constructor(private opts: TurnListOptions) {
@@ -140,22 +139,107 @@ export class TurnList {
     });
   }
 
+  /**
+   * Edit one turn, in a window big enough to read it in.
+   *
+   * This was an inline textarea inside the row. A turn here is routinely a
+   * screen or two of prose, and editing it through a box a few lines tall
+   * meant scrolling inside a scroll - the transcript moving underneath while
+   * you worked. The modal takes the height it needs and the list holds still.
+   *
+   * Ctrl+Enter saves, Escape closes. Escape is the modal's own, so an
+   * accidental one loses the edit - which is why the button is right there and
+   * the box is large enough that nobody reaches for the keyboard to escape a
+   * cramped one.
+   */
+  private openEditor(t: Turn): void {
+    const box = el('textarea', { class: 'turnedit', value: t.body });
+    const count = el('span', { class: 'hint' });
+    const out = el('div');
+    const sync = () => {
+      const n = box.value.length;
+      count.textContent = n === t.body.length
+        ? `${n.toLocaleString()}자`
+        : `${n.toLocaleString()}자 (${n > t.body.length ? '+' : ''}${n - t.body.length})`;
+    };
+    box.addEventListener('input', sync);
+    sync();
+
+    const save = el('button', { class: 'primary', text: '저장' });
+    const cancel = el('button', { class: 'ghost', text: '취소' });
+
+    const body = el('div', { class: 'turneditwrap' }, [
+      el('div', { class: 'row', style: { marginBottom: '6px' } }, [
+        el('span', { class: `turn-role ${t.role === 'user' ? 'user' : 'char'}`, text: t.role }),
+        t.time ? el('span', { class: 'hint', text: fmtTime(t.time) }) : null,
+        el('span', { class: 'spacer' }),
+        count,
+      ]),
+      box,
+      out,
+      el('div', { class: 'row', style: { marginTop: '8px' } }, [save, cancel]),
+    ]);
+
+    // The frozen original, for a turn that has already been changed. Comparing
+    // against it is the reason to open this at all, half the time.
+    if (t.changed && t.original != null) {
+      const revert = el('button', { class: 'ghost tiny', text: '원본으로 되돌리기' });
+      revert.addEventListener('click', () => {
+        box.value = t.original as string;
+        sync();
+      });
+      body.appendChild(el('div', { class: 'card', style: { marginTop: '10px' } }, [
+        el('h2', {}, [el('span', { text: '원본' }), el('span', { class: 'spacer' }), revert]),
+        el('pre', { class: 'mono filepreview', text: t.original as string }),
+      ]));
+    }
+
+    const close = modal(`턴 ${t.seq} 편집`, body, { wide: true });
+    cancel.addEventListener('click', close);
+
+    const commit = async () => {
+      if (box.value === t.body) {
+        close();
+        return;
+      }
+      save.disabled = true;
+      try {
+        await this.opts.onEdit(t, box.value);
+        close();
+      } catch (e) {
+        clear(out);
+        out.appendChild(el('div', {
+          class: 'notice err',
+          text: e instanceof Error ? e.message : String(e),
+        }));
+      } finally {
+        save.disabled = false;
+      }
+    };
+    save.addEventListener('click', () => void commit());
+    box.addEventListener('keydown', (e) => {
+      const ev = e as KeyboardEvent;
+      if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) {
+        ev.preventDefault();
+        void commit();
+      }
+    });
+  }
+
   private renderTurn(t: Turn): HTMLElement {
     const doomed = this.opts.deleting()?.has(t.msgId) ?? false;
     const cls = ['turn', t.changed ? 'changed' : '', t.isNew ? 'isnew' : '',
                  doomed ? 'doomed' : ''].filter(Boolean).join(' ');
     const node = el('div', { class: cls, dataset: { msgid: t.msgId } });
 
-    const startEdit = () => {
-      this.editing.add(t.msgId);
-      this.heights.delete(t.msgId);
-      this.render();
-    };
+    const startEdit = () => this.openEditor(t);
 
-    // An always-visible button, not only double-click. Double-click was the
-    // sole way in and nobody found it - "there is no manual text editing" was
-    // the first thing reported about this panel.
-    const editBtn = el('button', { class: 'ghost tiny', text: '수정', title: '이 턴 편집' });
+    // A pencil rather than the word 수정: it sits on every row of a 394-row
+    // list, and a word there is 394 words of chrome. Still always visible -
+    // double-click alone was the original way in and nobody found it.
+    const editBtn = el('button', {
+      class: 'iconbtn tiny', html: ICON.pencil, title: '이 턴 편집',
+    });
     editBtn.addEventListener('click', startEdit);
 
     node.appendChild(el('div', { class: 'turn-head' }, [
@@ -174,30 +258,6 @@ export class TurnList {
     ]));
 
     node.addEventListener('dblclick', startEdit);
-
-    if (this.editing.has(t.msgId)) {
-      const ta = el('textarea', { value: t.body });
-      const save = el('button', { class: 'primary', text: '저장' });
-      const cancel = el('button', { class: 'ghost', text: '취소' });
-      save.addEventListener('click', async () => {
-        save.disabled = true;
-        try {
-          await this.opts.onEdit(t, ta.value);
-          this.editing.delete(t.msgId);
-        } finally {
-          save.disabled = false;
-        }
-      });
-      cancel.addEventListener('click', () => {
-        this.editing.delete(t.msgId);
-        this.heights.delete(t.msgId);
-        this.render();
-      });
-      node.appendChild(ta);
-      node.appendChild(el('div', { class: 'row', style: { marginTop: '6px' } }, [save, cancel]));
-      requestAnimationFrame(() => ta.focus());
-      return node;
-    }
 
     // A pending bulk preview is shown in place, on the left, rather than as a
     // sample list in the right-hand card: the whole point of a preview is to
