@@ -44,29 +44,38 @@ if ($want -ne $got) { throw 'hash mismatch' } else { 'hash ok' }
 
 ### 1-2. 푼다
 
-zip 안에는 `app/`, `run.py`, `start.bat`, `start.sh`, `risuelf_ctl.ps1`, `requirements.in`이
-들어 있다. 이것들이 **`pyserver/`** 라는 이름의 폴더에 들어가야 한다.
+**한 번 풀면 끝이다.** 압축 안에 `risu-elf/` 트리가 통째로 들어 있어서, 폴더를 미리
+만들 필요도 이름을 맞출 필요도 없다.
 
 ```powershell
-$install = 'D:\code\risu-elf'          # 원하는 곳으로 바꿔도 된다 (§2)
-New-Item -ItemType Directory -Force "$install\pyserver" | Out-Null
-Expand-Archive risu-elf-backend-0.1.0.zip -DestinationPath "$install\pyserver" -Force
+Expand-Archive risu-elf-backend-0.1.0.zip -DestinationPath D:\code -Force
 ```
-
-결과:
 
 ```
 D:\code\risu-elf\
-  pyserver\
-    app\  run.py  start.bat  start.sh  risuelf_ctl.ps1  requirements.in
+  pyserver\              코드. 업데이트가 통째로 갈아끼운다
+  plugin\risu-elf.js     백엔드가 직접 서빙하는 플러그인 사본
+  data\                  당신 것. 업데이트가 건드리지 않는다
+  start.bat  start.sh
+  risuelf_ctl.ps1        setup / start / stop / status / token   (Windows)
+  setup.sh               venv + 의존성                            (Linux)
+  service-install.ps1    NSSM 등록                                (Windows)
+  service-uninstall.ps1  NSSM 해제
+  service-install.sh     PM2 등록                                 (Linux)
+  service-uninstall.sh   PM2 해제
 ```
 
-`data\` 는 아직 없다. 다음 단계가 만든다.
+런처가 `pyserver\` **밖에** 있는 것은 정돈이 아니라 안전 문제다. cmd.exe 는 실행 중인
+배치 파일을 바이트 오프셋으로 다시 읽는다 — 재시작 루프가 `start.bat` 안에 앉아 있는
+바로 그 순간 업데이트가 그 파일을 덮어쓰면 cmd 가 엉뚱한 줄을 실행할 수 있다.
+업데이트가 손대는 디렉터리 밖에 두면 그 가능성 자체가 없어진다.
+(그래도 런처가 바뀌면 업데이트가 `start.bat.new` 로 옆에 놓고 로그로 알린다.)
+
 
 ### 1-3. 설치
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File D:\code\risu-elf\pyserver\risuelf_ctl.ps1 -Action setup
+powershell -ExecutionPolicy Bypass -File D:\code\risu-elf\risuelf_ctl.ps1 -Action setup
 ```
 
 ```
@@ -82,7 +91,7 @@ setup: data dir D:\code\risu-elf\data
 ### 1-4. 기동
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File D:\code\risu-elf\pyserver\risuelf_ctl.ps1 -Action start
+powershell -ExecutionPolicy Bypass -File D:\code\risu-elf\risuelf_ctl.ps1 -Action start
 ```
 
 ```
@@ -105,15 +114,12 @@ health     {"service": "risu-elf", "version": "0.1.0", "ok": true, "agentReady":
 감싸면 된다. NSSM·PM2·systemd 무엇이든, **런처를 직접 실행해야 한다** — 자체 업데이트가
 exit 75로 재진입을 요청하는데 그 루프가 런처 안에 있기 때문이다.
 
-```
-nssm install RisuElf "D:\code\risu-elf\pyserver\start.bat"
-pm2 start D:\code\risu-elf\pyserver\start.bat --name risu-elf
-```
+상주시키는 것은 §2의 **서비스로 상주시키려면**에 스크립트로 준비돼 있다.
 
 ### 1-5. 토큰
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File D:\code\risu-elf\pyserver\risuelf_ctl.ps1 -Action token
+powershell -ExecutionPolicy Bypass -File D:\code\risu-elf\risuelf_ctl.ps1 -Action token
 ```
 
 ```
@@ -134,13 +140,13 @@ web RisuAI나 다른 기계에서 직접 붙을 때만 필요하다 — 그 경�
 `run.py` 경로로** 찾는다. 폴더 이름이 `risu-elf` 일 필요도 없다.
 
 ```powershell
-$install = 'E:\apps\myelf'
-Expand-Archive risu-elf-backend-0.1.0.zip -DestinationPath "$install\pyserver" -Force
-powershell -ExecutionPolicy Bypass -File "$install\pyserver\risuelf_ctl.ps1" -Action setup
+Expand-Archive risu-elf-backend-0.1.0.zip -DestinationPath E:\apps -Force
+Rename-Item E:\apps\risu-elf myelf          # 이름도 마음대로
+powershell -ExecutionPolicy Bypass -File E:\apps\myelf\risuelf_ctl.ps1 -Action setup
 ```
 
-지켜야 할 규칙은 **하나**뿐이다: 압축 내용이 **`pyserver\`** 라는 이름의 폴더에 들어가야 한다.
-`data\` 는 그 **옆**에(위 폴더 밑에) 생긴다.
+압축이 `risu-elf/` 트리를 통째로 담고 있으므로 그냥 원하는 부모 폴더에 풀면 된다.
+폴더 이름이 `risu-elf` 일 필요도 없다 — 풀고 나서 이름을 바꿔도 그대로 동작한다.
 
 ```
 <install>\
@@ -156,7 +162,7 @@ powershell -ExecutionPolicy Bypass -File "$install\pyserver\risuelf_ctl.ps1" -Ac
 다른 드라이브나 백업되는 디스크에 두고 싶을 때.
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File "$install\pyserver\risuelf_ctl.ps1" `
+powershell -ExecutionPolicy Bypass -File "$install\risuelf_ctl.ps1" `
   -Action setup -DataDir 'E:\backup\risu-elf-data'
 ```
 
@@ -176,6 +182,38 @@ setup: data dir E:\backup\risu-elf-data
 **옮기고 싶으면 서버를 멈추고 `data\` 폴더를 통째로 옮긴 뒤** 다시 `setup -DataDir` 한다.
 스크립트는 데이터를 옮겨 주지 않는다 — 옮기다 만 상태가 조용히 생기는 것보다 낫다.
 
+### 리눅스에서는
+
+```bash
+unzip risu-elf-backend-0.1.0.zip -d /opt
+cd /opt/risu-elf && chmod +x *.sh
+./setup.sh                      # venv + 의존성. 3.10+ 를 알아서 찾는다
+./start.sh 6020                 # 손으로 띄우기
+./service-install.sh 6020       # 또는 PM2 로 상주시키기
+```
+
+`setup.sh` 는 `--python <경로>` 와 `--data-dir <절대경로>` 를 받는다(윈도우의 `-Python`,
+`-DataDir` 과 같다). **Ubuntu 20.04 는 시스템 파이썬이 3.8 이라 그대로는 안 된다** —
+`pyenv` 나 deadsnakes 로 3.10+ 를 깔면 `setup.sh` 가 찾아낸다.
+venv 생성이 실패하면 `sudo apt install python3-venv` 가 대개 답이다.
+
+### 서비스로 상주시키려면
+
+| | 등록 | 해제 |
+|---|---|---|
+| Windows (NSSM) | `service-install.ps1 [-Name RisuElf] [-Port 6020]` | `service-uninstall.ps1 [-Name RisuElf]` |
+| Linux (PM2) | `./service-install.sh [port] [name]` | `./service-uninstall.sh [name]` |
+
+둘 다 **`start.bat`/`start.sh` 를 실행하지 `run.py` 를 직접 실행하지 않는다.** exit 75 가
+"업데이트를 설치했으니 다시 올라와라"라는 뜻이고 그걸 아는 루프가 런처 안에 있기 때문이다.
+수퍼바이저를 `run.py` 에 바로 물리면 플러그인에서 업데이트하는 날까지는 잘 돌다가 그날 멈춘다.
+
+NSSM 등록은 **관리자 권한**이 필요하다. PM2 의 부팅 상주는 `pm2 startup` 이 출력하는
+sudo 명령을 사람이 직접 실행해야 한다 — 스크립트가 읽지도 않은 sudo 명령을 몰래 실행하지는 않는다.
+
+**해제 스크립트는 등록만 지운다.** 코드도 데이터도 그대로 남고, 런처는 손으로 계속 쓸 수 있다.
+
+
 ### 포트를 바꾸려면
 
 ```powershell
@@ -189,7 +227,7 @@ setup: data dir E:\backup\risu-elf-data
 
 | 바꾸고 싶은 것 | 방법 |
 |---|---|
-| 코드 위치 | 그냥 다른 데 풀면 된다. `pyserver\` 이름만 지킬 것 |
+| 코드 위치 | 그냥 원하는 부모 폴더에 풀면 된다 |
 | 데이터 위치 | `setup -DataDir <절대경로>` (`datadir.txt` 에 박힌다) |
 | 포트 | `-Port` 또는 `RISUELF_PORT` |
 | 인터프리터 | `setup -Python <python.exe 경로>` |
@@ -214,7 +252,7 @@ setup: data dir E:\backup\risu-elf-data
 ## 4. 확인과 문제 해결
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File <install>\pyserver\risuelf_ctl.ps1 -Action status
+powershell -ExecutionPolicy Bypass -File <install>\risuelf_ctl.ps1 -Action status
 ```
 
 > **다른 기계에서 `curl http://127.0.0.1:6020/health` 는 아무 의미가 없다.**
@@ -244,7 +282,7 @@ powershell -ExecutionPolicy Bypass -File <install>\pyserver\risuelf_ctl.ps1 -Act
 ## 5. 지우려면
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File <install>\pyserver\risuelf_ctl.ps1 -Action stop
+powershell -ExecutionPolicy Bypass -File <install>\risuelf_ctl.ps1 -Action stop
 Remove-Item -Recurse -Force <install>
 ```
 

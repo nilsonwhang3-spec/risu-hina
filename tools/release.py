@@ -14,6 +14,30 @@ The plugin asset is named `risu-elf.js` with no version in it, because
 `releases/latest/download/<name>` needs a name that does not change. The
 version lives inside the file, in the `//@version` header RisuAI reads.
 
+## The archive unpacks ready to run
+
+    risu-elf/
+      pyserver/          code. an update replaces this wholesale
+      plugin/            risu-elf.js, so the backend can serve it locally
+      data/              yours. an update never touches it
+      start.bat          run it
+      start.sh
+      risuelf_ctl.ps1    setup / start / stop / status / token  (Windows)
+      setup.sh           venv + dependencies                     (Linux)
+      service-install.ps1    register with NSSM      (Windows)
+      service-uninstall.ps1  unregister
+      service-install.sh     register with PM2       (Linux)
+      service-uninstall.sh   unregister
+
+Extract it anywhere and it is an install - no "now make a folder called
+pyserver and put these in it".
+
+The launchers sit at the root rather than beside the code, and that is not
+tidiness. cmd.exe re-reads a running batch file by byte offset, so an update
+that overwrote start.bat while the restart loop was sitting in it could make
+cmd execute nonsense. Keeping them outside the directory an update replaces
+removes the possibility.
+
     python tools/release.py            # build into release/
     python tools/release.py --check    # verify an existing release/
 """
@@ -31,10 +55,20 @@ ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "release"
 PLUGIN_ASSET = "risu-elf.js"
 
-# What the backend archive carries. `updater.py` looks for `app/` inside it and
-# copies the rest alongside; anything not listed here is not part of a release.
-BACKEND_FILES = ["run.py", "requirements.in", "start.bat", "start.sh", "risuelf_ctl.ps1"]
-BACKEND_DIRS = ["app"]
+# The tree's top-level folder, so the zip unpacks into one directory rather
+# than scattering itself across wherever it was opened.
+TREE = "risu-elf"
+
+# Inside pyserver/ - the part an update replaces.
+SERVER_FILES = ["run.py", "requirements.in"]
+SERVER_DIRS = ["app"]
+
+# At the install root - the operator's entry points, left alone by updates.
+ROOT_FILES = [
+    "start.bat", "start.sh", "risuelf_ctl.ps1", "setup.sh",
+    "service-install.ps1", "service-uninstall.ps1",
+    "service-install.sh", "service-uninstall.sh",
+]
 
 # Never ship these, whatever happens to be on disk.
 EXCLUDE_DIRS = {"__pycache__", ".venv", "data", "dist"}
@@ -67,15 +101,25 @@ def build_plugin() -> Path:
     return dest
 
 
-def build_backend() -> Path:
+DATA_README = """이 폴더는 당신 것입니다.
+
+데이터베이스, 설정, 토큰, 워크스페이스가 여기 들어갑니다.
+업데이트는 pyserver/ 만 갈아끼우고 이 폴더는 건드리지 않습니다.
+
+다른 위치에 두고 싶으면:
+    risuelf_ctl.ps1 -Action setup -DataDir <절대경로>
+"""
+
+
+def build_backend(plugin: Path) -> Path:
     dest = OUT / f"risu-elf-backend-{version()}.zip"
     src = ROOT / "pyserver"
     with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as zf:
-        for name in BACKEND_FILES:
+        for name in SERVER_FILES:
             f = src / name
             if f.is_file() and name not in EXCLUDE_NAMES:
-                zf.write(f, name)
-        for name in BACKEND_DIRS:
+                zf.write(f, f"{TREE}/pyserver/{name}")
+        for name in SERVER_DIRS:
             for f in sorted((src / name).rglob("*")):
                 if not f.is_file():
                     continue
@@ -83,7 +127,21 @@ def build_backend() -> Path:
                     continue
                 if f.suffix in EXCLUDE_SUFFIXES or f.name in EXCLUDE_NAMES:
                     continue
-                zf.write(f, str(f.relative_to(src)).replace("\\", "/"))
+                rel = str(f.relative_to(src)).replace("\\", "/")
+                zf.write(f, f"{TREE}/pyserver/{rel}")
+
+        for name in ROOT_FILES:
+            f = src / name
+            if f.is_file():
+                zf.write(f, f"{TREE}/{name}")
+
+        # The same plugin build as the standalone asset, so a local install can
+        # serve it without the operator copying a file around.
+        zf.write(plugin, f"{TREE}/plugin/{PLUGIN_ASSET}")
+
+        # An empty directory in a zip is easy to lose; a file in it is not, and
+        # this one says what the directory is for.
+        zf.writestr(f"{TREE}/data/README.txt", DATA_README)
     return dest
 
 
@@ -129,7 +187,7 @@ def main() -> int:
     OUT.mkdir(parents=True)
 
     plugin = build_plugin()
-    backend = build_backend()
+    backend = build_backend(plugin)
     sums = write_sums([plugin, backend])
 
     print(f"\nrelease v{version()}")

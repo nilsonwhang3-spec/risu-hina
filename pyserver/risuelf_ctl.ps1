@@ -40,10 +40,22 @@ $DataDir = Unquote $DataDir
 $Python = Unquote $Python
 
 # Everything is derived from where this file sits, so the install can be
-# anywhere. It used to hardcode D:\code\risu-elf, which meant a second
-# install - or anyone else's - silently controlled the first one's paths.
-$Server = $PSScriptRoot
-$Root = Split-Path $Server -Parent
+# anywhere. It used to hardcode D:\risu-elf, which meant a second install -
+# or anyone else's - silently controlled the first one's paths.
+#
+# Two placements are supported. A release unpacks this at the install root next
+# to pyserver\; older installs have it inside pyserver\. The root placement is
+# the better one - it keeps the operator's entry points out of the directory an
+# update replaces - but breaking existing installs to get there is not worth it.
+if (Test-Path (Join-Path $PSScriptRoot 'app')) {
+    $Server = $PSScriptRoot
+    $Root = Split-Path $Server -Parent
+} elseif (Test-Path (Join-Path $PSScriptRoot 'pyserver\app')) {
+    $Root = $PSScriptRoot
+    $Server = Join-Path $Root 'pyserver'
+} else {
+    throw "cannot find app - looked in $PSScriptRoot and $PSScriptRoot\pyserver"
+}
 $Venv = Join-Path $Server '.venv'
 $VenvPy = Join-Path $Venv 'Scripts\python.exe'
 $Entry = Join-Path $Server 'run.py'
@@ -152,8 +164,13 @@ function Start-Server {
     # job object. Start-Process does not: OpenSSH kills the whole job when the
     # session ends, which looks like a successful start that leaves nothing
     # listening. The .bat owns all quoting so this command line needs none.
-    $bat = Join-Path $Server 'start.bat'
-    if (-not (Test-Path $bat)) { throw "missing $bat" }
+    # The launcher lives at the install root in a release tree and inside
+    # pyserver\ in older installs. Both are checked rather than assumed.
+    $bat = Join-Path $Root 'start.bat'
+    if (-not (Test-Path $bat)) { $bat = Join-Path $Server 'start.bat' }
+    if (-not (Test-Path $bat)) {
+        throw ("cannot find start.bat - looked in {0} and {1}" -f $Root, $Server)
+    }
     $r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
         CommandLine = 'cmd.exe /c ' + $bat + ' ' + $Port
     }

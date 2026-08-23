@@ -21,7 +21,7 @@ from typing import Any, Iterable
 
 from . import config
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 LOCK = threading.RLock()
 _conn: sqlite3.Connection | None = None
@@ -355,38 +355,6 @@ DDL = [
     """,
     "CREATE INDEX IF NOT EXISTS actions_chat ON pending_actions(chat_key, status, created_at)",
 
-    # --- search -----------------------------------------------------------
-    #
-    # External-content FTS over turn bodies, so cross-chat questions are one
-    # query. Unlike active-recall's insert-only blob index, turns are updated
-    # and deleted, so all three triggers are required - an external-content
-    # index whose base table changes without them silently serves stale rowids.
-    #
-    # trigram (not the default tokenizer) because Korean has no spaces to
-    # tokenise on. Its known limit: queries under 3 characters cannot match at
-    # all, and Korean narrative vocabulary is full of 2-syllable words
-    # (몰수/포상/약속). store.search() falls back to LIKE per short term.
-    """
-    CREATE VIRTUAL TABLE IF NOT EXISTS turns_fts USING fts5(
-        body, content='turns', content_rowid='id', tokenize='trigram'
-    )
-    """,
-    """
-    CREATE TRIGGER IF NOT EXISTS turns_ai AFTER INSERT ON turns BEGIN
-        INSERT INTO turns_fts(rowid, body) VALUES (new.id, new.body);
-    END
-    """,
-    """
-    CREATE TRIGGER IF NOT EXISTS turns_ad AFTER DELETE ON turns BEGIN
-        INSERT INTO turns_fts(turns_fts, rowid, body) VALUES ('delete', old.id, old.body);
-    END
-    """,
-    """
-    CREATE TRIGGER IF NOT EXISTS turns_au AFTER UPDATE ON turns BEGIN
-        INSERT INTO turns_fts(turns_fts, rowid, body) VALUES ('delete', old.id, old.body);
-        INSERT INTO turns_fts(rowid, body) VALUES (new.id, new.body);
-    END
-    """,
 ]
 
 
@@ -399,9 +367,32 @@ ADD_COLUMNS = [
 ]
 
 
+# Dropped in schema 7. There used to be an FTS5 index over turn bodies with the
+# trigram tokenizer.
+#
+# It was removed because it was measured and found to buy nothing here. Three
+# LIKE queries over 60,000 turns (24 MB) take 2 ms; a real chat is a few hundred
+# turns. Against that, the index cost a virtual table, three triggers on every
+# turn insert/update/delete, a two-path search that routed short terms
+# differently, and - the thing that forced the issue - a hard floor of SQLite
+# 3.34, since that is when trigram arrived. Ubuntu 20.04 ships 3.31 and links
+# Python against it, so the backend could not start there at all.
+#
+# The triggers are dropped before the table: they reference it, and a leftover
+# trigger on an install that once had the index would fail every write to turns.
+DROP_FTS = [
+    "DROP TRIGGER IF EXISTS turns_ai",
+    "DROP TRIGGER IF EXISTS turns_ad",
+    "DROP TRIGGER IF EXISTS turns_au",
+    "DROP TABLE IF EXISTS turns_fts",
+]
+
+
 def _migrate(conn: sqlite3.Connection) -> None:
     with LOCK:
         for stmt in DDL:
+            conn.execute(stmt)
+        for stmt in DROP_FTS:
             conn.execute(stmt)
         for table, column, decl in ADD_COLUMNS:
             cols = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}

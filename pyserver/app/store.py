@@ -569,10 +569,13 @@ def search(char_key_: str, query: str, chat_keys: list[str] | None = None,
            limit: int = 40) -> list[dict]:
     """Cross-chat body search.
 
-    trigram FTS cannot match a term shorter than 3 characters at all, and
-    Korean narrative vocabulary is full of 2-syllable words. Each term is
-    therefore routed individually: long ones to FTS, short ones to LIKE. Same
-    resolution active-recall reached, for the same reason.
+    A plain LIKE scan, scoped to one character. There was an FTS5 trigram index
+    here; it was measured at 2 ms for three queries over 60,000 turns versus
+    the same 2 ms for LIKE, and removed. See db.py for the rest of that.
+
+    Every term is matched independently and results are ranked by how many
+    terms hit, so a two-syllable Korean word - which trigram could not match at
+    all - works the same as any other.
     """
     terms = [t for t in _TERM.findall(query or "") if t]
     if not terms:
@@ -587,17 +590,10 @@ def search(char_key_: str, query: str, chat_keys: list[str] | None = None,
 
     hits: dict[int, dict] = {}
     for term in terms:
-        if len(term) >= 3:
-            rows = db.query(
-                f"SELECT t.* FROM turns_fts f JOIN turns t ON t.id = f.rowid "
-                f"WHERE turns_fts MATCH ? AND {scope_sql} LIMIT ?",
-                ['"' + term.replace('"', '""') + '"', *params, limit * 4],
-            )
-        else:
-            rows = db.query(
-                f"SELECT t.* FROM turns t WHERE {scope_sql} AND t.body LIKE ? LIMIT ?",
-                [*params, f"%{term}%", limit * 4],
-            )
+        rows = db.query(
+            f"SELECT t.* FROM turns t WHERE {scope_sql} AND t.body LIKE ? LIMIT ?",
+            [*params, f"%{term}%", limit * 4],
+        )
         for r in rows:
             h = hits.setdefault(int(r["id"]), {"row": r, "matched": 0})
             h["matched"] += 1

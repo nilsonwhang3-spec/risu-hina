@@ -223,13 +223,59 @@ def apply() -> dict:
 
 
 def _find_payload(staging: Path) -> Path:
-    """The directory in the archive that actually holds `app/`."""
+    """The directory in the archive that holds `app/`.
+
+    Three shapes, because the archive layout changed and old releases still
+    have to be installable: `app/` at the top, one level down, or under a
+    `pyserver/` inside a named tree - which is what a release unpacks as now.
+    """
     if (staging / "app").is_dir():
         return staging
     for child in sorted(staging.iterdir()):
-        if child.is_dir() and (child / "app").is_dir():
+        if not child.is_dir():
+            continue
+        if (child / "app").is_dir():
             return child
+        if (child / "pyserver" / "app").is_dir():
+            return child / "pyserver"
     raise UpdateError("압축 파일 안에서 app/ 을 찾지 못했습니다")
+
+
+def _refresh_plugin(payload: Path, root: Path) -> None:
+    """Put the shipped plugin where /plugin.js will find it."""
+    src = payload.parent / "plugin"
+    if not src.is_dir():
+        return
+    dest = root / "plugin"
+    dest.mkdir(parents=True, exist_ok=True)
+    for f in src.glob("risu-elf*.js"):
+        shutil.copy2(f, dest / f.name)
+
+
+def _offer_launchers(payload: Path, root: Path) -> list[str]:
+    """Write updated launchers alongside, never over, the running ones.
+
+    cmd.exe re-reads a running batch file by byte offset. The restart loop is
+    sitting inside start.bat at exactly the moment an update finishes, so
+    overwriting it can make cmd execute nonsense on the way back round.
+    Launchers change rarely; a `.new` file and a log line beat a corrupted one.
+    """
+    offered: list[str] = []
+    for name in ("start.bat", "start.sh", "risuelf_ctl.ps1", "setup.sh",
+                 "service-install.ps1", "service-uninstall.ps1",
+                 "service-install.sh", "service-uninstall.sh"):
+        src = payload.parent / name
+        if not src.is_file():
+            continue
+        current = root / name
+        if current.is_file() and current.read_bytes() == src.read_bytes():
+            continue
+        shutil.copy2(src, root / (name + ".new"))
+        offered.append(name)
+    if offered:
+        log.info("update: launcher changes staged as *.new (%s) - swap them by hand",
+                 ", ".join(offered))
+    return offered
 
 
 def _install(payload: Path, version: str) -> Path:
@@ -251,13 +297,17 @@ def _install(payload: Path, version: str) -> Path:
         shutil.copytree(pkg / "app", backup)
         shutil.rmtree(pkg / "app", ignore_errors=True)
     shutil.copytree(payload / "app", pkg / "app")
-    for extra in ("run.py", "requirements.in", "requirements.lock",
-                  "start.bat", "start.sh", "risuelf_ctl.ps1"):
+    for extra in ("run.py", "requirements.in", "requirements.lock"):
         src = payload / extra
         if src.is_file():
             shutil.copy2(src, pkg / extra)
     # Stale bytecode from the version being replaced would shadow the new code.
     shutil.rmtree(pkg / "app" / "__pycache__", ignore_errors=True)
+
+    # data/ is never in this loop, and never will be: it is the one directory
+    # an update must not be able to reach.
+    _refresh_plugin(payload, lay["root"])
+    _offer_launchers(payload, lay["root"])
     log.info("update: previous version kept at %s", backup)
     return pkg
 

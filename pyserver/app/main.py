@@ -281,12 +281,19 @@ def _plugin_file() -> "pathlib.Path | None":
     `plugin/dist/`, and during development that is the one that is current.
     Newest wins, so a developer never serves yesterday's build by accident.
     """
-    roots = [config.DATA_DIR / "plugin",
-             pathlib.Path(__file__).resolve().parent.parent.parent / "plugin" / "dist"]
+    install = pathlib.Path(__file__).resolve().parent.parent.parent
+    roots = [
+        install / "plugin",          # where a release unpacks it
+        config.DATA_DIR / "plugin",  # where an operator may have dropped it
+        install / "plugin" / "dist", # a checkout
+    ]
     found: list[pathlib.Path] = []
     for root in roots:
         try:
-            found.extend(f for f in root.glob("risu-elf-*.js") if f.is_file())
+            # `risu-elf*.js`, not `risu-elf-*.js`: the release asset has no
+            # version in its name, because releases/latest/download needs a
+            # name that does not change. A dev build still has one.
+            found.extend(f for f in root.glob("risu-elf*.js") if f.is_file())
         except OSError:
             continue
     if not found:

@@ -9,7 +9,18 @@
 # Any other exit code leaves for real, so a crash stops rather than spinning.
 set -u
 
-ROOT="$(cd "$(dirname "$0")" && pwd)"
+# Works from either place: at the install root next to pyserver/, which is
+# where a release unpacks it, or inside pyserver/ as older installs have it.
+HERE="$(cd "$(dirname "$0")" && pwd)"
+if [ -d "$HERE/app" ]; then
+  ROOT="$HERE"
+elif [ -d "$HERE/pyserver/app" ]; then
+  ROOT="$HERE/pyserver"
+else
+  echo "cannot find app/ - looked in $HERE and $HERE/pyserver" >&2
+  exit 2
+fi
+
 PORT="${1:-${RISUELF_PORT:-6020}}"
 LOG="${RISUELF_LOG:-$ROOT/server.log}"
 
