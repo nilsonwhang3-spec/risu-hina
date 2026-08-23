@@ -101,7 +101,8 @@ function describe(c: Changes | null): string[] {
     if (l.deleted) bits.push(`−${l.deleted}`);
     out.push('로어북 ' + bits.join(' '));
   }
-  if (c.memory.total) out.push(`장기기억 ${c.memory.total}`);
+  if (c.memory.changed) out.push(`장기기억 ${c.memory.changed}`);
+  if (c.memory.vars) out.push(`챗 변수 ${c.memory.vars}`);
   const pending = (c.staged || 0) + (c.actions || 0);
   if (pending) out.push(`제안 ${pending} 대기`);
   return out;

@@ -23,6 +23,8 @@ button {
   padding: 6px 12px; border-radius: 6px; cursor: pointer;
   border: 1px solid var(--borderc, #2b323f);
   background: var(--darkbutton, #1b202a);
+  /* A label never breaks mid-word ("진단 정/보"): the row wraps instead. */
+  white-space: nowrap; flex-shrink: 0;
 }
 button:hover:not(:disabled) { filter: brightness(1.25); }
 button:disabled { opacity: .45; cursor: default; }
@@ -90,6 +92,34 @@ header h1 { margin: 0; font-size: 14px; font-weight: 700; display: flex; align-i
 .chatbar .changesum { font-size: 11px; margin-left: 4px; white-space: nowrap; }
 .chatbar .applybadge { margin-left: 2px; }
 .shellnotice:empty { display: none; }
+.tab .tabbadge { margin-left: 5px; font-size: 10px; padding: 0 5px; }
+.tchip.skill { background: rgba(37,99,235,.16); border-color: rgba(37,99,235,.35); }
+.skillfiles .pickrow { padding: 3px 6px; font-size: 12px; }
+.hint.dim { opacity: .7; }
+.tabsep { width: 1px; align-self: stretch; margin: 6px 6px; background: var(--borderc, #2b323f); }
+.vartable { display: flex; flex-direction: column; gap: 4px; }
+.varrow {
+  display: grid; grid-template-columns: minmax(90px, 1.2fr) 60px minmax(120px, 2fr) auto;
+  gap: 8px; align-items: center; padding: 4px 6px; border-radius: 5px;
+}
+.varrow.changed { background: rgba(245,158,11,.08); }
+.varrow:hover { background: rgba(128,128,128,.08); }
+.varkey { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.vartype { font-size: 11px; }
+.varvalue input { width: 100%; }
+.varops { display: flex; gap: 4px; align-items: center; }
+.varadd input { flex: 1; min-width: 90px; }
+@media (max-width: 720px) {
+  .varrow { grid-template-columns: 1fr 1fr; }
+  .varrow .varvalue { grid-column: 1 / -1; }
+  .varrow .varops { grid-column: 1 / -1; justify-content: flex-end; }
+}
+button.outline {
+  display: flex; align-items: center; gap: 6px; width: 100%; text-align: left;
+  margin: 4px 0; padding: 6px 8px; font-size: 12px;
+  background: rgba(37,99,235,.10); border-color: rgba(37,99,235,.25);
+}
+button.outline:hover { background: rgba(37,99,235,.18); }
 .shellnotice .notice { margin: 6px 10px 0; }
 .applypop .row { margin-top: 6px; }
 .applypop .row button { width: 100%; }
@@ -117,7 +147,9 @@ main { flex: 1; min-height: 0; display: flex; }
   margin: 0 0 9px; font-size: 11px; font-weight: 700; letter-spacing: .04em;
   text-transform: uppercase; color: var(--textcolor2, #79839a);
 }
-.row { display: flex; gap: 8px; align-items: center; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+/* A result box under a button row: spaced from the row only when it has something. */
+.outbox:not(:empty) { margin-top: 10px; }
 .row + .row { margin-top: 8px; }
 .grow { flex: 1; min-width: 0; }
 label.field { display: block; margin-bottom: 10px; }

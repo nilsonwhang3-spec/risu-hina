@@ -602,63 +602,95 @@ def h_skills(arg: dict) -> dict:
     return skills.listing()
 
 
+def h_skill_get(arg: dict) -> dict:
+    sk = skills.get(str(arg.get("id") or arg.get("slug") or ""))
+    if sk is None:
+        raise ApiError(404, "없는 스킬입니다")
+    return {"skill": sk}
+
+
 def h_skill_save(arg: dict) -> dict:
+    """Create or rewrite a skill's SKILL.md: name, description (the trigger), body."""
     try:
         return {"skill": skills.save(
             str(arg.get("name") or ""),
+            str(arg.get("description") or ""),
             str(arg.get("body") or ""),
-            skill_id=str(arg.get("id") or "") or None,
-            enabled=arg.get("enabled") is not False,
+            slug=str(arg.get("id") or arg.get("slug") or "") or None,
+            always=bool(arg.get("always")),
+            enabled=(None if arg.get("enabled") is None else bool(arg.get("enabled"))),
             sort_order=arg.get("sortOrder") if isinstance(arg.get("sortOrder"), int) else None,
-            kind=str(arg.get("kind") or "md"),
-            filename=str(arg.get("filename") or ""),
         )}
     except skills.SkillError as e:
         raise ApiError(400, str(e))
 
 
+def _upload_bytes(arg: dict) -> bytes:
+    body = arg.get("body")
+    if arg.get("base64"):
+        import base64
+        try:
+            return base64.b64decode(str(body or ""), validate=True)
+        except (ValueError, TypeError):
+            raise ApiError(400, "base64 본문이 아닙니다")
+    return str(body or "").encode("utf-8")
+
+
 def h_skill_upload(arg: dict) -> dict:
-    """Create a skill from an uploaded file.
+    """Import a skill from a file.
 
-    The extension decides script-or-not: a .py is code the agent runs, anything
-    else is prose it reads. Guessing from the content would be cleverer and
-    wrong more often - a markdown file full of code fences looks like Python to
-    a heuristic.
-
-    Size then decides prose-or-reference. A 9,000-character syntax table is not
-    an instruction to follow on every request; it is something to look up. The
-    editor can override either way.
+    A .zip is a whole skill folder (SKILL.md plus its files). Anything else
+    is one file that becomes a skill of its own: a .py as the script of a new
+    skill, a long .md as its reference, a short .md as its body - the shapes
+    skills started out in, still accepted so nothing the user has stops
+    working.
     """
     name = str(arg.get("filename") or "").strip()
-    body = str(arg.get("body") or "")
     if not name:
-        raise ApiError(400, "filename 이 필요합니다")
-    if name.lower().endswith((".py", ".pyw")):
-        kind = "script"
-    elif len(body) > skills.MAX_BODY:
-        # Too big to sit in every request. A long document is reference
-        # material by nature; the user can switch it to 지침 in the editor if
-        # they really did mean it as an instruction.
-        kind = "reference"
-    else:
-        kind = "md"
-    label = str(arg.get("name") or "").strip() or name.rsplit(".", 1)[0]
+        raise ApiError(400, "filename is required")
     try:
-        return {"skill": skills.save(label, body, kind=kind, filename=name)}
+        if name.lower().endswith(".zip"):
+            return {"skill": skills.import_zip(name, _upload_bytes(arg))}
+        data = _upload_bytes(arg)
+        return {"skill": skills.import_file(name, data.decode("utf-8", errors="replace"))}
     except skills.SkillError as e:
         raise ApiError(400, str(e))
 
 
+def h_skill_file_put(arg: dict) -> dict:
+    """Add or replace one file inside an existing skill folder."""
+    try:
+        return skills.put_file(str(arg.get("id") or arg.get("slug") or ""),
+                               str(arg.get("path") or arg.get("filename") or ""),
+                               _upload_bytes(arg))
+    except skills.SkillError as e:
+        raise ApiError(400, str(e))
+
+
+def h_skill_file_get(arg: dict) -> dict:
+    try:
+        return skills.read_file(str(arg.get("id") or arg.get("slug") or ""), str(arg.get("path") or ""))
+    except skills.SkillError as e:
+        raise ApiError(404, str(e))
+
+
+def h_skill_file_delete(arg: dict) -> dict:
+    try:
+        return skills.delete_file(str(arg.get("id") or arg.get("slug") or ""), str(arg.get("path") or ""))
+    except skills.SkillError as e:
+        raise ApiError(404, str(e))
+
+
 def h_skill_toggle(arg: dict) -> dict:
     try:
-        return {"skill": skills.set_enabled(str(arg.get("id") or ""), bool(arg.get("enabled")))}
+        return {"skill": skills.set_enabled(str(arg.get("id") or arg.get("slug") or ""), bool(arg.get("enabled")))}
     except skills.SkillError as e:
         raise ApiError(404, str(e))
 
 
 def h_skill_delete(arg: dict) -> dict:
     try:
-        return skills.delete(str(arg.get("id") or ""))
+        return skills.delete(str(arg.get("id") or arg.get("slug") or ""))
     except skills.SkillError as e:
         raise ApiError(404, str(e))
 
@@ -667,8 +699,13 @@ def h_skill_preview(arg: dict) -> dict:
     """Exactly what gets appended to the instructions, so it is inspectable.
 
     "Why did it not follow my skill" is otherwise unanswerable without server
-    log access - the block could be empty, truncated, or the skill disabled.
+    log access - the catalog could be empty, truncated, or the skill disabled.
+    What a load_skill call would return is previewable too, by name.
     """
+    want = str(arg.get("name") or arg.get("id") or "")
+    if want:
+        text = skills.load(want)
+        return {"prompt": text, "chars": len(text), "loaded": want}
     block = skills.prompt()
     return {"prompt": block, "chars": len(block)}
 
@@ -1094,11 +1131,15 @@ ROUTES: dict[str, Handler] = {
     "POST /presets/delete": h_preset_delete,
 
     "GET /skills": h_skills,
+    "GET /skills/get": h_skill_get,
     "GET /skills/preview": h_skill_preview,
     "POST /skills/save": h_skill_save,
     "POST /skills/upload": h_skill_upload,
     "POST /skills/toggle": h_skill_toggle,
     "POST /skills/delete": h_skill_delete,
+    "POST /skills/file": h_skill_file_put,
+    "GET /skills/file": h_skill_file_get,
+    "POST /skills/file/delete": h_skill_file_delete,
 
     "GET /files": h_files,
     "GET /files/read": h_file_read,
@@ -1294,8 +1335,17 @@ async def _startup() -> None:
     config.ensure_token()
     await run_in_threadpool(db.connect)
     await run_in_threadpool(config.migrate_once, db.has_migration, db.mark_migration)
+    # Rows first, then seeds: an old install's rows become folders, and the
+    # seed step (already marked there) leaves them alone.
+    await run_in_threadpool(skills.migrate_rows_once)
     await run_in_threadpool(skills.seed_once)
     # There is always a selected preset; on an existing install it is seeded
     # from whatever config.json already holds, so nothing appears to be lost.
     await run_in_threadpool(presets.ensure_default)
     log.info("ready port=%s agent=%s", config.PORT, "on" if agent_ready() else "off")
+
+
+@app.on_event("shutdown")
+async def _shutdown() -> None:
+    # A clean stop folds the WAL away, so data/ at rest is one file.
+    await run_in_threadpool(db.close)

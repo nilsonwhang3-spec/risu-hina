@@ -114,9 +114,11 @@ def materialize(payload: dict, *, force: bool = False) -> dict:
         # in RisuAI since, and a stale original makes every diff wrong.
         _write(base / "original" / f"{tk}.md", chatfmt.decode(chat)["markdown"])
 
+        # Chat variables (`scriptstate`) travel with the memory: same chat
+        # object, same per-entry rows, same write-back.
         memory = {
             k: chat.get(k) for k in
-            ("hypaV3Data", "hypaV2Data", "supaMemory", "supaMemoryData", "lastMemory")
+            ("hypaV3Data", "hypaV2Data", "supaMemory", "supaMemoryData", "lastMemory", "scriptstate")
             if chat.get(k) not in (None, "", [], {})
         }
         _write(base / "original" / f"{tk}.hypa.json",
@@ -200,7 +202,12 @@ def chat_owner(chat_key: str) -> str | None:
 
 
 def write_out(char_key: str, filename: str, text: str) -> str:
-    safe = SAFE.sub("_", filename) or "export"
+    # The agent is told "save it in out/" and often says so in the name; that
+    # prefix is the folder, not part of the file name.
+    name = filename.strip().replace("\\", "/")
+    while name.startswith("out/"):
+        name = name[4:]
+    safe = SAFE.sub("_", name) or "export"
     path = root(char_key) / "out" / safe
     _write(path, text)
     return str(path)

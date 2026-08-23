@@ -189,6 +189,8 @@ export const TOOL_GLYPH: Record<string, [string, string]> = {
   read_card: ['🪪', '카드'],
   read_lore: ['📚', '로어'],
   read_memory: ['🧠', '요약'],
+  list_skills: ['🧩', '스킬 목록'],
+  load_skill: ['🧩', '스킬'],
   stage_edit: ['✏️', '수정 제안'],
   stage_bulk: ['✏️', '일괄 제안'],
   stage_delete: ['✂️', '삭제 제안'],

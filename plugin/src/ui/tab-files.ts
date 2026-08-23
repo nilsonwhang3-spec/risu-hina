@@ -11,6 +11,12 @@
  * snapshot and the agent's scratch - all of it real, none of it interesting
  * unless something has gone wrong. Those are hidden behind a toggle rather than
  * removed, because "정리" needs to be able to say what it is about to delete.
+ *
+ * One exception, by kind rather than by place: a document the agent wrote
+ * into scratch/ or scripts/ (a .md, an .html, a .csv) is a deliverable that
+ * landed in the wrong folder, not an internal file, and a person should not
+ * have to unfold the internals to find it. Those are listed up top under their
+ * own heading; the .py files, logs and queues around them stay folded.
  */
 import { el, clear, armed } from './dom';
 import { state, type FileArea, type FileListing, type WorkspaceFile } from '../state';
@@ -30,7 +36,20 @@ const AREA_LABEL: Record<string, [string, string]> = {
 /** The two areas a person actually put things in or takes things out of. */
 const USER_AREAS = new Set(['uploads', 'out']);
 
+/** Internal areas whose document-like files are surfaced anyway. */
+const SURFACE_FROM = new Set(['scratch', 'scripts']);
+const DOCUMENT_EXT = new Set([
+  'md', 'markdown', 'txt', 'html', 'htm', 'csv', 'tsv', 'json', 'yaml', 'yml', 'xml', 'rtf', 'pdf', 'docx',
+]);
+
+/** A file that reads as a deliverable rather than as a script or a log. */
+function isDocument(f: WorkspaceFile): boolean {
+  const ext = (f.name.split('.').pop() || '').toLowerCase();
+  return ext !== f.name.toLowerCase() && DOCUMENT_EXT.has(ext);
+}
+
 let built = false;
+let seenFilesRev = -1;
 let treeMount: HTMLElement | null = null;
 let viewMount: HTMLElement | null = null;
 let noticeMount: HTMLElement | null = null;
@@ -61,8 +80,15 @@ export function renderFilesTab(mount: HTMLElement): void {
     mount.appendChild(pane.root);
     mountAgent(pane.right.querySelector('.right-inner') as HTMLElement);
     built = true;
+    seenFilesRev = state.filesRev;
+    void refresh();
+  } else if (seenFilesRev !== state.filesRev) {
+    // The agent made a file, or one was uploaded or deleted elsewhere, since
+    // this tree was drawn.
+    seenFilesRev = state.filesRev;
     void refresh();
   }
+  state.markOutputsSeen();
 
   bindAgent({ notice });
   const inner = mount.querySelector('.right-inner');
@@ -83,6 +109,16 @@ async function refresh(): Promise<void> {
   try {
     const data = await state.files();
     drawTree(data);
+    // A log line in the agent panel asked for this file; honour it once the
+    // tree is drawn, so the row can be highlighted too.
+    const want = state.openFileRequest;
+    if (want) {
+      state.openFileRequest = null;
+      for (const area of data.areas) {
+        const f = area.files.find((x) => x.path === want);
+        if (f) { void open(f, area); break; }
+      }
+    }
   } catch (e) {
     clear(treeMount);
     treeMount.appendChild(el('div', { class: 'notice err', text: msg(e) }));
@@ -104,6 +140,8 @@ function drawTree(data: FileListing): void {
     try {
       await upload(file);
       notice(`${file.name} 을(를) 올렸습니다. AI가 uploads/ 에서 읽을 수 있습니다.`, 'ok');
+      seenFilesRev = state.filesRev + 1;
+      state.touchFiles();
       await refresh();
     } catch (e) {
       notice('업로드에 실패했습니다: ' + msg(e), 'err');
@@ -124,6 +162,17 @@ function drawTree(data: FileListing): void {
     if (!area.count) continue;
     anyFiles = true;
     treeMount.appendChild(areaBranch(area));
+  }
+  // Deliverables that landed in an internal folder, listed without unfolding
+  // the internals. Only while those are folded - unfolded, they are in place.
+  if (!showInternal) {
+    for (const area of data.areas) {
+      if (!SURFACE_FROM.has(area.area)) continue;
+      const docs = area.files.filter(isDocument);
+      if (!docs.length) continue;
+      anyFiles = true;
+      treeMount.appendChild(areaBranch({ ...area, files: docs, count: docs.length }, true));
+    }
   }
   if (!anyFiles) {
     treeMount.appendChild(el('div', {
@@ -162,11 +211,15 @@ function drawTree(data: FileListing): void {
   ]));
 }
 
-function areaBranch(area: FileArea): HTMLElement {
-  const [label, why] = AREA_LABEL[area.area] ?? [area.area, ''];
+function areaBranch(area: FileArea, surfaced = false): HTMLElement {
+  const [base, why] = AREA_LABEL[area.area] ?? [area.area, ''];
+  const label = surfaced ? `${base} 문서` : base;
   const rows = area.files.map((f) => fileRow(area, f));
 
-  const head = el('button', { class: 'treebranch', title: why }, [
+  const head = el('button', {
+    class: 'treebranch',
+    title: surfaced ? `${area.area}/ 에 있는 문서입니다. ${why}` : why,
+  }, [
     el('span', { class: 'grow', text: label }),
     el('span', { class: 'hint', text: String(area.count) }),
   ]);
@@ -175,7 +228,8 @@ function areaBranch(area: FileArea): HTMLElement {
     body.style.display = body.style.display === 'none' ? 'block' : 'none';
   });
   // Internal areas start collapsed: they are shown for reference, not for use.
-  if (!USER_AREAS.has(area.area)) body.style.display = 'none';
+  // A surfaced document group is open - being seen is the point of it.
+  if (!USER_AREAS.has(area.area) && !surfaced) body.style.display = 'none';
 
   return el('div', {}, [head, body]);
 }

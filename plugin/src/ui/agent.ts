@@ -42,15 +42,14 @@ export class AgentPanel {
   private attached: string[] = [];
   private attachBar = el('div', { class: 'attachbar', style: { display: 'none' } });
   private actionBox: HTMLElement;
-  private outBox: HTMLElement;
   /** out/ paths already offered, so the card does not churn every refresh. */
   private outSeen = '';
+  private outPrimed = false;
 
   constructor(private hooks: AgentPanelHooks) {
     this.log = el('div', { class: 'agentlog' });
     this.stagedBox = el('div', { class: 'stagedbox' });
     this.actionBox = el('div', { class: 'stagedbox' });
-    this.outBox = el('div', { class: 'stagedbox' });
     this.status = el('div', { class: 'hint grow' });
 
     const fresh = el('button', {
@@ -127,7 +126,6 @@ export class AgentPanel {
       this.log,
       this.stagedBox,
       this.actionBox,
-      this.outBox,
       this.attachBar,
       el('div', { class: 'agentcompose' }, [clip, this.input, this.send, this.picker]),
     ]);
@@ -270,65 +268,46 @@ export class AgentPanel {
   }
 
   /**
-   * Anything the agent left in out/, offered as a download.
+   * Files the agent left in out/ since the last look.
    *
-   * "AI가 파일을 뱉어줄 수 있는지" is really two questions. It can write files -
-   * write_file and run_python both do - but a file in a folder on the server is
-   * not something the user has. The iframe is sandboxed with allow-downloads,
-   * so a Blob plus an <a download> is the one way to actually hand it over, and
-   * that is what this does.
+   * Each new file gets one line in the log, where the conversation is, and
+   * that line opens the file in the files tab. There used to be a pinned card
+   * listing every output with a download button; it sat between the log and
+   * the input and grew with every file, so after a long session it took more
+   * of the panel than the conversation did. The files tab is the place that
+   * lists files; the log only has to say that one appeared.
    */
   private async refreshOutputs(): Promise<void> {
     try {
       const listing = await state.files();
       const out = listing.areas.find((a) => a.area === 'out');
       const files = out?.files ?? [];
-      // Compare before rebuilding: this runs after every turn, and replacing
-      // the card each time would drop a click that was mid-flight.
       const stamp = files.map((f) => `${f.path}:${f.size}:${f.modified}`).join('|');
-      if (stamp === this.outSeen) return;
-      this.outSeen = stamp;
-
-      clear(this.outBox);
-      if (!files.length) return;
-      this.outBox.appendChild(el('div', { class: 'card staged' }, [
-        el('h2', { text: `만들어진 파일 ${files.length}개` }),
-        el('div', { class: 'hint', text: '워크스페이스의 out/ 에 저장돼 있습니다.' }),
-        ...files.map((f) => {
-          const get = el('button', { class: 'ghost tiny', text: '내려받기' });
-          get.addEventListener('click', () => void this.download(f.path, f.name, get));
-          return el('div', { class: 'stagedrow' }, [
-            el('span', { class: 'grow hint', text: `${f.name} · ${fmtSize(f.size)}` }),
-            get,
-          ]);
-        }),
-      ]));
-      this.scroll();
-    } catch { /* the panel already reports connection failure */ }
-  }
-
-  private async download(path: string, name: string, button: HTMLButtonElement): Promise<void> {
-    button.disabled = true;
-    try {
-      const r = await state.readFile(path);
-      if (!r.textual) {
-        this.hooks.notice('텍스트 파일만 내려받을 수 있습니다. 파일 탭에서 확인해 주세요.', 'err');
+      // The first look is the baseline - files from earlier sessions are
+      // already in the files tab and do not need announcing again. A flag,
+      // not "was the stamp empty": an empty out/ has an empty stamp, and the
+      // first file would otherwise be taken for the baseline.
+      if (!this.outPrimed) {
+        this.outPrimed = true;
+        this.outSeen = stamp;
         return;
       }
-      // A Blob URL rather than a data: URI - a multi-megabyte export as a data
-      // URI is a multi-megabyte string in the href attribute.
-      const url = URL.createObjectURL(new Blob([r.content], { type: 'text/plain;charset=utf-8' }));
-      const a = el('a', { href: url, download: name });
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 10_000);
-      this.hooks.notice(`${name} 을(를) 내려받았습니다.`, 'ok');
-    } catch (e) {
-      this.hooks.notice('내려받지 못했습니다: ' + msg(e), 'err');
-    } finally {
-      button.disabled = false;
-    }
+      if (stamp === this.outSeen) return;
+      const before = new Set(this.outSeen.split('|').map((s) => s.split(':')[0]));
+      this.outSeen = stamp;
+      const fresh = files.filter((f) => !before.has(f.path));
+      if (!fresh.length) return;
+      state.touchFiles(fresh.map((f) => f.path));
+      for (const f of fresh) {
+        const line = el('button', { class: 'outline', title: '파일 탭에서 엽니다' }, [
+          el('span', { class: 'glyph', text: '📄' }),
+          el('span', { class: 'grow', text: `${f.name} · ${fmtSize(f.size)} — out/ 에 저장했습니다. 파일 탭에서 열기 →` }),
+        ]);
+        line.addEventListener('click', () => state.requestOpenFile(f.path));
+        this.log.appendChild(line);
+      }
+      this.scroll();
+    } catch { /* the panel already reports connection failure */ }
   }
 
   /** Proposals that are not transcript edits - lorebook, memory, snapshots. */
@@ -542,8 +521,11 @@ export class AgentPanel {
             // Naming the tool answers "is it stuck?" during the long quiet
             // stretch while it reads: a spinner alone does not.
             const name = String(e.name ?? '?');
-            tracker.push(name);
-            setThinking(true, (TOOL_GLYPH[name]?.[1] ?? name) + ' 중입니다…');
+            // A skill load is the one call whose argument is the whole story:
+            // "스킬" says nothing, "스킬: 말투 통일" says what the agent decided.
+            const detail = name === 'load_skill' ? skillArg(e.args) : '';
+            tracker.push(name, detail);
+            setThinking(true, (TOOL_GLYPH[name]?.[1] ?? name) + (detail ? `: ${detail}` : '') + ' 중입니다…');
             this.scroll();
             break;
           }
@@ -657,8 +639,8 @@ class TraceTracker {
 
   constructor(private mount: HTMLElement) {}
 
-  push(name: string): void {
-    if (name === this.lastName && this.chip) {
+  push(name: string, detail = ''): void {
+    if (name === this.lastName && this.chip && !detail) {
       this.count += 1;
       const x = this.chip.querySelector('.tx');
       if (x) x.textContent = `×${this.count}`;
@@ -666,13 +648,26 @@ class TraceTracker {
       return;
     }
     const [glyph, label] = TOOL_GLYPH[name] ?? ['🔧', name];
-    this.chip = el('span', { class: 'tchip', title: name }, [
+    this.chip = el('span', { class: 'tchip' + (detail ? ' skill' : ''), title: name + (detail ? ` ${detail}` : '') }, [
       el('span', { text: glyph }),
-      el('span', { text: label }),
+      el('span', { text: detail ? `${label}: ${detail}` : label }),
     ]);
     this.mount.appendChild(this.chip);
     this.lastName = name;
     this.count = 1;
+  }
+}
+
+/** The `name` argument of a load_skill call, from the streamed args. */
+function skillArg(args: unknown): string {
+  if (!args) return '';
+  try {
+    const v = typeof args === 'string' ? JSON.parse(args) : args;
+    const name = (v as Record<string, unknown>)?.name;
+    return typeof name === 'string' ? name.slice(0, 40) : '';
+  } catch {
+    const m = /"name"\s*:\s*"([^"]{1,40})/.exec(String(args));
+    return m ? m[1] : '';
   }
 }
 

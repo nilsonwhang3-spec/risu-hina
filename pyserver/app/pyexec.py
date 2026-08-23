@@ -24,36 +24,36 @@ SCOPE_TABLES = ("characters", "chats", "turns", "turns_original", "lore_entries"
 
 
 def install_skills(ws: Path) -> list[str]:
-    """Copy the enabled file skills into <workspace>/skills/.
+    """Copy the enabled skill folders into <workspace>/skills/<slug>/.
 
-    Skills are global and workspaces are per bot, so the scripts have to come
+    Skills are global and workspaces are per bot, so the folders have to come
     to the sandbox rather than the sandbox reaching out to them - the audit
     hook in sandbox.py refuses anything outside the workspace, and that refusal
     is the point.
 
     The directory is rebuilt on every run: a skill the user disabled or renamed
-    must not linger as a file the agent can still find and run.
+    must not linger as a folder the agent can still find and run.
     """
+    import shutil
+
     out = ws / "skills"
     try:
-        if out.is_dir():
-            for old in list(out.glob("*.py")) + list(out.glob("*.md")):
-                old.unlink()
+        if out.exists():
+            shutil.rmtree(out, ignore_errors=True)
         out.mkdir(parents=True, exist_ok=True)
     except OSError as e:
         log.warn("could not prepare the skills directory: %s", e)
         return []
 
     written: list[str] = []
-    for sk in skills.enabled_files():
-        name = sk.get("filename") or "skill.py"
+    for slug, src in skills.enabled_dirs():
         try:
-            (out / name).write_text(sk.get("body") or "", encoding="utf-8")
-            written.append(name)
+            shutil.copytree(src, out / slug, dirs_exist_ok=True)
+            written.append(slug)
         except OSError as e:  # noqa: PERF203
-            log.warn("could not write skill %s: %s", name, e)
+            log.warn("could not install skill %s: %s", slug, e)
     if written:
-        log.debug("installed %s skill script(s)", len(written))
+        log.debug("installed %s skill folder(s)", len(written))
     return written
 
 

@@ -207,6 +207,9 @@ def make_chat(chat_id: str, name: str, turns: int, *, subject: str = "페데리�
             {"text": "요약 A", "chatMemos": [f"{chat_id}-m1"]},
             {"text": "요약 B", "chatMemos": [f"{chat_id}-m3", f"{chat_id}-m5"]},
         ]},
+        # Chat variables as RisuAI stores them: {{setvar}} keys carry a $,
+        # triggers write bare keys, and the values are not all strings.
+        "scriptstate": {"$affection": 3, "$met": True, "route": "A", "tags": ["x", "y"]},
         "message": msgs,
     }
 
@@ -757,6 +760,71 @@ def test_unified_writeback(s: Server, ws: dict) -> None:
           str([(e["origin"], e["entry"].get("content")) for e in mine]))
 
 
+def test_chat_variables(s: Server, ws: dict) -> None:
+    """Chat variables are rows like the summaries - same table, same write-back.
+
+    What has to hold: every key becomes a row addressed by its key, the value's
+    type survives the round trip (3 comes back as 3, not "3"), an edit is a
+    change the bar can count, and the patch rebuilds scriptstate whole so a
+    deleted row is a deleted variable.
+    """
+    print("test_chat_variables")
+    chat = make_chat("chatV", "변수 챗", 4)
+    st, body = s.post("/workspace", payload([chat]))
+    tk = next(c["chatKey"] for c in body["workspace"]["chats"] if c["chatId"] == "chatV")
+
+    st, body = s.get(q("/memory", chatKey=tk))
+    vars_ = [i for i in body["items"] if i["kind"] == "scriptstate"]
+    check("each variable is a row", len(vars_) == 4, str([v["title"] for v in vars_]))
+    by = {v["title"]: v for v in vars_}
+    check("the key is the title", "$affection" in by and "route" in by, str(list(by)))
+    check("a number is typed", by["$affection"]["valueType"] == "number" and by["$affection"]["body"] == "3", str(by["$affection"]))
+    check("a bool is typed", by["$met"]["valueType"] == "bool", str(by["$met"]))
+    check("a list is kept as json", by["tags"]["valueType"] == "json", str(by["tags"]))
+
+    st, patch = s.get(q("/memory/patch", chatKey=tk))
+    state = (patch.get("memory") or {}).get("scriptstate")
+    check("the patch rebuilds scriptstate", isinstance(state, dict), str(patch)[:200])
+    check("with original types", state.get("$affection") == 3 and state.get("$met") is True
+          and state.get("tags") == ["x", "y"] and state.get("route") == "A", str(state))
+    check("and the summaries still rebuild beside it", "hypaV3Data" in (patch.get("memory") or {}))
+
+    s.post("/memory/update", {"chatKey": tk, "id": by["$affection"]["id"], "body": "7", "title": "renamed"})
+    st, body = s.get(q("/memory", chatKey=tk))
+    row = next(i for i in body["items"] if i["id"] == by["$affection"]["id"])
+    check("a variable keeps its key when edited", row["title"] == "$affection", row["title"])
+    check("and is marked changed", row["changed"], str(row))
+    st, ch = s.get(q("/changes", chatKey=tk))
+    check("the change summary counts variables apart", ch["memory"]["vars"] == 1 and ch["memory"]["changed"] == 0, str(ch["memory"]))
+
+    st, body = s.post("/memory/add", {"chatKey": tk, "kind": "scriptstate", "title": "$new", "body": "hello"})
+    check("a variable can be added", st == 200 and body["item"]["title"] == "$new", f"{st} {str(body)[:120]}")
+    st, body = s.post("/memory/add", {"chatKey": tk, "kind": "scriptstate", "title": "$new", "body": "again"})
+    check("a duplicate key is refused", st == 400, str(st))
+    st, _ = s.post("/memory/delete", {"chatKey": tk, "id": by["route"]["id"]})
+    st, patch = s.get(q("/memory/patch", chatKey=tk))
+    state = patch["memory"]["scriptstate"]
+    check("the patch has the edit, the addition, and not the deletion",
+          state.get("$affection") == 7 and state.get("$new") == "hello" and "route" not in state, str(state))
+
+    # Re-opening the panel matches variables by key, so the edit survives and
+    # a key RisuAI added appears.
+    chat["scriptstate"]["$late"] = "z"
+    s.post("/workspace", payload([chat]))
+    st, body = s.get(q("/memory", chatKey=tk))
+    vars_ = {i["title"]: i for i in body["items"] if i["kind"] == "scriptstate"}
+    check("the edit survived a re-open", vars_["$affection"]["body"] == "7", str(vars_.get("$affection")))
+    check("a key added in RisuAI appeared", "$late" in vars_, str(list(vars_)))
+
+    # A chat without variables must not gain an empty scriptstate.
+    plain = make_chat("chatP", "변수 없음", 2)
+    plain.pop("scriptstate")
+    st, body = s.post("/workspace", payload([plain]))
+    tk2 = next(c["chatKey"] for c in body["workspace"]["chats"] if c["chatId"] == "chatP")
+    st, patch = s.get(q("/memory/patch", chatKey=tk2))
+    check("no scriptstate is invented", "scriptstate" not in (patch.get("memory") or {}), str(patch.get("memory"))[:120])
+
+
 def test_action_queue(s: Server, ws: dict) -> None:
     """The queue's HTTP surface.
 
@@ -785,38 +853,57 @@ def test_action_queue(s: Server, ws: dict) -> None:
 
 
 def test_reference_skills(s: Server) -> None:
-    """Reference material lives on disk and costs one line of prompt."""
+    """Reference material lives in the skill folder and costs one catalog line."""
     print("test_reference_skills")
     st, body = s.get("/skills")
-    refs = [x for x in body.get("skills") or [] if x.get("kind") == "reference"]
-    check("reference skills are seeded", len(refs) >= 2, str(len(refs)))
-    check("they are big", any(len(x["body"]) > 5000 for x in refs),
-          str([len(x["body"]) for x in refs]))
-    check("and they carry a filename", all(x.get("filename") for x in refs),
-          str([x.get("filename") for x in refs]))
-
-    used = int(body.get("usedChars") or 0)
-    check("they do not spend the prompt budget", used < 3000, str(used))
+    refs = [x for x in body.get("skills") or []
+            if any(f["path"].startswith("references/") for f in x.get("files") or [])]
+    check("reference skills are seeded as folders", len(refs) >= 2, str(len(refs)))
+    check("they carry a big file", any(f["size"] > 5000 for x in refs for f in x["files"]),
+          str([[f["size"] for f in x["files"]] for x in refs]))
 
     st, body = s.get("/skills/preview")
     prompt = body.get("prompt") or ""
-    check("the prompt names the file", "risuai-cbs.md" in prompt, prompt[:400])
-    # The whole point: tens of thousands of characters of reference for a few
-    # hundred of prompt.
-    check("but not its contents", "{{getvar" not in prompt, prompt[:400])
-    check("it says when to open it", "읽어라" in prompt, prompt[:400])
+    check("the catalog names the skill", "RisuAI CBS 문법" in prompt, prompt[:400])
+    check("and says when to load it", "CBS" in prompt and "load_skill" in prompt, prompt[:400])
+    check("but not its contents", "{{getvar::" not in prompt and "insertorder" not in prompt, prompt[:400])
     check("the whole block stays small", len(prompt) < 4000, str(len(prompt)))
 
-    # A long upload becomes reference rather than an 8,000-char prompt block.
+    st, body = s.get(q("/skills/preview", name="RisuAI CBS 문법"))
+    loaded = body.get("prompt") or ""
+    check("loading it names the file to read", "references/risuai-cbs.md" in loaded, loaded[:300])
+    check("and tells how", "read_file" in loaded, loaded[:300])
+
+    # A long .md upload becomes a reference file rather than a prompt block.
     st, body = s.post("/skills/upload", {"filename": "긴자료.md", "body": "가" * 9000})
-    check("a long upload becomes reference", body["skill"]["kind"] == "reference", str(body)[:160])
-    check("and gets an .md filename", body["skill"]["filename"].endswith(".md"),
-          str(body["skill"].get("filename")))
-    s.post("/skills/delete", {"id": body["skill"]["id"]})
+    sk = body.get("skill") or {}
+    check("a long upload becomes a reference file", any(f["path"] == "references/긴자료.md" for f in sk.get("files") or []),
+          str(sk.get("files")))
+    check("its body says to read it", "read_file" in sk.get("body", ""), sk.get("body", "")[:120])
+    s.post("/skills/delete", {"id": sk.get("id")})
 
     st, body = s.post("/skills/upload", {"filename": "짧은.md", "body": "1. 먼저 읽는다."})
-    check("a short one is still an instruction", body["skill"]["kind"] == "md", str(body)[:160])
-    s.post("/skills/delete", {"id": body["skill"]["id"]})
+    sk = body.get("skill") or {}
+    check("a short one is the body itself", sk.get("body") == "1. 먼저 읽는다." and not sk.get("files"), str(sk)[:160])
+    s.post("/skills/delete", {"id": sk.get("id")})
+
+    # A zipped skill folder imports whole.
+    import base64, io as _io, zipfile
+    buf = _io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("my-skill/SKILL.md", "---\nname: 집 스킬\ndescription: 집 정리를 할 때\n---\n\n1. 방부터.\n")
+        zf.writestr("my-skill/references/guide.md", "# 안내\n자세한 절차.")
+        zf.writestr("my-skill/scripts/go.py", "print('go')\n")
+    st, body = s.post("/skills/upload", {"filename": "my-skill.zip",
+                                          "body": base64.b64encode(buf.getvalue()).decode(), "base64": True})
+    sk = body.get("skill") or {}
+    check("a zip imports as a skill", st == 200 and sk.get("name") == "집 스킬", f"{st} {str(body)[:160]}")
+    check("with its description as the trigger", sk.get("description") == "집 정리를 할 때", str(sk.get("description")))
+    check("and its files", sorted(f["path"] for f in sk.get("files") or []) == ["references/guide.md", "scripts/go.py"],
+          str(sk.get("files")))
+    st, body = s.get("/skills/file?id=" + urllib.parse.quote(sk["id"]) + "&path=scripts/go.py")
+    check("a skill file can be read back", body.get("content") == "print('go')\n", str(body)[:120])
+    s.post("/skills/delete", {"id": sk.get("id")})
 
 
 def test_plugin_self_update(s: Server) -> None:
@@ -1032,73 +1119,107 @@ def test_preset_selection(s: Server) -> None:
 
 
 def test_script_skills(s: Server) -> None:
-    """A skill can be a script, and then its source stays out of the prompt."""
+    """A skill can carry a script, and then its source stays out of the prompt."""
     print("test_script_skills")
     st, body = s.post("/skills/upload", {
         "filename": "tidy_names.py",
         "body": '"""이름 표기를 훑어 후보를 뽑는다."""\nimport risuelf\nprint(len(risuelf.turns()))\n',
     })
-    check("a .py upload becomes a script skill",
-          st == 200 and body["skill"]["kind"] == "script", str(body)[:200])
-    sid = body["skill"]["id"]
-    check("it gets a safe filename", body["skill"]["filename"] == "tidy_names.py",
-          str(body["skill"].get("filename")))
-
-    st, body = s.post("/skills/upload", {"filename": "절차.md", "body": "1. 먼저 읽는다."})
-    check("a .md upload becomes a prose skill", body["skill"]["kind"] == "md", str(body)[:160])
-    mid = body["skill"]["id"]
+    sk = body.get("skill") or {}
+    check("a .py upload becomes a skill with a script",
+          st == 200 and any(f["path"] == "scripts/tidy_names.py" for f in sk.get("files") or []), str(body)[:200])
+    sid = sk.get("id")
+    check("its docstring is the trigger", "이름 표기를" in sk.get("description", ""), sk.get("description"))
+    check("its body names the path with the real slug", f"skills/{sid}/scripts/tidy_names.py" in sk.get("body", ""),
+          sk.get("body", "")[:200])
 
     st, body = s.get("/skills/preview")
     prompt = body.get("prompt") or ""
-    check("the script is named in the prompt", "tidy_names.py" in prompt, prompt[:200])
+    check("the skill is in the catalog", "이름 표기를" in prompt, prompt[:300])
     check("its source is NOT in the prompt", "import risuelf" not in prompt, prompt[:300])
-    check("its purpose line is", "이름 표기를" in prompt, prompt[:300])
-    check("prose skills are included whole", "먼저 읽는다" in prompt, prompt[:300])
+    check("nor is its body", "scripts/tidy_names.py" not in prompt, prompt[:300])
 
-    st, body = s.get("/skills")
-    total = body.get("usedChars") or 0
-    check("only prose spends the prompt budget", total < 3000, str(total))
+    st, body = s.get(q("/skills/preview", name=sk["name"]))
+    check("loading lists the script", "scripts/tidy_names.py" in (body.get("prompt") or ""), (body.get("prompt") or "")[:300])
 
-    # A traversal in the filename must not choose where the file lands.
+    # Files can be added to and removed from a skill folder.
+    st, body = s.post("/skills/file", {"id": sid, "path": "scripts/helper.py", "body": "x = 1\n"})
+    check("a file can be added to a skill", st == 200 and body.get("path") == "scripts/helper.py", f"{st} {body}")
+    st, body = s.get(q("/skills/get", id=sid))
+    check("it is listed", any(f["path"] == "scripts/helper.py" for f in body["skill"]["files"]), str(body["skill"]["files"]))
+    st, body = s.post("/skills/file", {"id": sid, "path": "../../evil.py", "body": "print(1)"})
+    check("a traversing path is refused", st == 400, str(st))
+    st, body = s.post("/skills/file", {"id": sid, "path": "SKILL.md", "body": "nope"})
+    check("SKILL.md is not writable through the file route", st == 400, str(st))
+    st, body = s.post("/skills/file/delete", {"id": sid, "path": "scripts/helper.py"})
+    check("a file can be removed", st == 200, str(st))
+    st, body = s.get(q("/skills/get", id=sid))
+    check("and is gone", all(f["path"] != "scripts/helper.py" for f in body["skill"]["files"]))
+
+    # A traversal in an upload filename must not choose where the file lands.
     st, body = s.post("/skills/upload", {"filename": "../../evil.py", "body": "print(1)"})
+    sk2 = body.get("skill") or {}
     check("a traversing filename is reduced to a basename",
-          body["skill"]["filename"] == "evil.py", str(body["skill"].get("filename")))
-    s.post("/skills/delete", {"id": body["skill"]["id"]})
-
+          any(f["path"] == "scripts/evil.py" for f in sk2.get("files") or []), str(sk2.get("files")))
+    s.post("/skills/delete", {"id": sk2.get("id")})
     s.post("/skills/delete", {"id": sid})
-    s.post("/skills/delete", {"id": mid})
 
 
 def test_skills(s: Server) -> None:
-    """Skills are editable instructions, and what gets sent must be inspectable."""
+    """Skills are folders; the prompt holds the catalog, the body comes on load."""
     print("test_skills")
     st, body = s.get("/skills")
     check("skills endpoint answers", st == 200, str(st))
     seeded = body.get("skills") or []
     check("starter skills are seeded", len(seeded) >= 2, str(len(seeded)))
-    check("a budget is reported", int(body.get("limitChars") or 0) > 0, str(body.get("limitChars")))
+    check("each has a slug, a name and a trigger description",
+          all(x.get("id") and x.get("name") and x.get("description") for x in seeded), str(seeded)[:200])
+    check("a catalog size is reported", int(body.get("catalogChars") or 0) > 0, str(body.get("catalogChars")))
 
-    st, body = s.post("/skills/save", {"name": "테스트 스킬", "body": "1. 먼저 확인한다.\n2. 그 다음 제안한다."})
+    st, body = s.post("/skills/save", {"name": "테스트 스킬", "description": "테스트를 돌릴 때",
+                                        "body": "1. 먼저 확인한다.\n2. 그 다음 제안한다."})
     check("skill saved", st == 200, str(body)[:200])
-    sid = (body.get("skill") or {}).get("id")
+    sk = body.get("skill") or {}
+    sid = sk.get("id")
+    check("it got a folder slug", sid == "테스트-스킬", str(sid))
 
     st, body = s.get("/skills/preview")
-    check("the prompt block is inspectable", st == 200 and "테스트 스킬" in (body.get("prompt") or ""),
-          (body.get("prompt") or "")[:120])
+    prompt = body.get("prompt") or ""
+    check("the catalog names it with its trigger", "테스트 스킬" in prompt and "테스트를 돌릴 때" in prompt, prompt[:300])
+    check("the body is NOT in the prompt", "먼저 확인한다" not in prompt, prompt[:300])
+    check("the prompt tells the model to load_skill", "load_skill" in prompt, prompt[:200])
+
+    st, body = s.get(q("/skills/preview", name="테스트 스킬"))
+    check("loading by name returns the body", "먼저 확인한다" in (body.get("prompt") or ""), (body.get("prompt") or "")[:200])
+    st, body = s.get(q("/skills/preview", name="없는 스킬"))
+    check("loading a missing one says so and lists what exists",
+          "그런 스킬이 없습니다" in (body.get("prompt") or "") and "테스트 스킬" in (body.get("prompt") or ""),
+          (body.get("prompt") or "")[:200])
 
     st, _ = s.post("/skills/toggle", {"id": sid, "enabled": False})
     check("skill can be disabled", st == 200, str(st))
     st, body = s.get("/skills/preview")
-    check("a disabled skill leaves the prompt", "테스트 스킬" not in (body.get("prompt") or ""),
-          (body.get("prompt") or "")[:200])
+    check("a disabled skill leaves the catalog", "테스트 스킬" not in (body.get("prompt") or ""), (body.get("prompt") or "")[:200])
+    st, body = s.get(q("/skills/preview", name="테스트 스킬"))
+    check("and cannot be loaded", "꺼져" in (body.get("prompt") or ""), (body.get("prompt") or "")[:200])
     st, body = s.get("/skills")
     kept = [x for x in body.get("skills") or [] if x.get("id") == sid]
     check("but it is still stored", len(kept) == 1 and kept[0].get("enabled") is False, str(kept)[:200])
+    s.post("/skills/toggle", {"id": sid, "enabled": True})
 
-    st, _ = s.post("/skills/save", {"name": "너무 긴", "body": "가" * 9000})
-    check("an oversized skill is refused", st == 400, str(st))
-    st, _ = s.post("/skills/save", {"name": "빈 내용", "body": "   "})
-    check("an empty skill is refused", st == 400, str(st))
+    # always: true puts the body in the prompt - the explicit exception.
+    st, body = s.post("/skills/save", {"id": sid, "name": "테스트 스킬", "description": "테스트를 돌릴 때",
+                                        "body": "항상 존댓말.", "always": True})
+    check("always can be set", st == 200 and body["skill"]["always"] is True, str(body)[:160])
+    st, body = s.get("/skills/preview")
+    check("an always-on body is in the prompt", "항상 존댓말." in (body.get("prompt") or ""), (body.get("prompt") or "")[-200:])
+
+    st, _ = s.post("/skills/save", {"name": "설명 없음", "body": "본문"})
+    check("a skill without a trigger description is refused", st == 400, str(st))
+    st, _ = s.post("/skills/save", {"name": "빈 내용", "description": "언제", "body": "   "})
+    check("an empty body is refused", st == 400, str(st))
+    st, _ = s.post("/skills/save", {"name": "너무 긴", "description": "언제", "body": "가" * 50000})
+    check("an oversized body is refused", st == 400, str(st))
     st, _ = s.post("/skills/delete", {"id": "nope"})
     check("deleting a missing skill is 404", st == 404, str(st))
 
@@ -1153,6 +1274,7 @@ def main() -> int:
             test_memory_as_rows(s, ws)
             test_lore_editing(s, ws)
             test_unified_writeback(s, ws)
+            test_chat_variables(s, ws)
             test_action_queue(s, ws)
         test_agent_presets(s)
         test_preset_selection(s)

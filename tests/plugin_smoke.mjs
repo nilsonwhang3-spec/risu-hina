@@ -13,7 +13,7 @@
  *
  *   node tests/plugin_smoke.mjs
  */
-import { readFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { readFileSync, existsSync, mkdtempSync, rmSync, mkdirSync, writeFileSync, readdirSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -86,6 +86,7 @@ function makeChat(id, name, n) {
     arKey: 'someone-elses-stamp',
     modelBinding: { provider: 'p' },
     hypaV3Data: { summaries: [{ text: 's', chatMemos: [`${id}-m1`] }] },
+    scriptstate: { '$affection': 3, '$met': true, route: 'A', tags: ['x', 'y'] },
     message: Array.from({ length: n }, (_, i) => ({
       role: i % 2 ? 'char' : 'user',
       data: i % 2
@@ -286,8 +287,12 @@ await settle(1500);
 check('showContainer called before painting', host.calls.includes('showContainer'));
 check('shell rendered', !!document.querySelector('.wrap'));
 // Content views in the tab bar; settings is a header verb, not a view.
-check('five content tabs present', document.querySelectorAll('.tab').length === 5,
+check('six content tabs present', document.querySelectorAll('.tab').length === 6,
       [...document.querySelectorAll('.tab')].map((t) => t.textContent).join(','));
+check('the workspace files tab is set apart', !!document.querySelector('.tabs .tabsep')
+      && document.querySelector('.tabs .tabsep')?.nextElementSibling?.id === 'tab-files');
+check('and named for what it is', /워크스페이스 파일/.test(document.getElementById('tab-files')?.textContent || ''));
+check('no chat bar on the chat picker', document.querySelector('.toolslot .chatbar')?.style.display === 'none');
 check('settings is not one of them',
       ![...document.querySelectorAll('.tab')].some((t) => t.textContent === '설정'));
 check('settings is reachable from the header',
@@ -344,6 +349,17 @@ check('every turn has a visible edit button',
       [...turnNodes].every((t) => !!t.querySelector('button[title="이 턴 편집"]')));
 check('tools sit above the chat', document.querySelectorAll('.toolrow .tool').length >= 6,
       String(document.querySelectorAll('.toolrow .tool').length));
+// The chat-level verbs are the shell's, rendered ahead of the tab's own tools.
+check('the chat bar is present', !!document.querySelector('.toolslot .chatbar'));
+check('it carries 반영 · 스냅샷 · 버전',
+      ['apply', 'snapshot', 'versions'].every((t) => !!document.querySelector('.chatbar .tool[data-tool="' + t + '"]')));
+check('the editor tool row no longer has its own 반영',
+      !document.querySelector('.tabslot .tool[data-tool="apply"]'));
+check('the chat bar comes first',
+      document.querySelector('.toolslot')?.firstElementChild?.classList.contains('chatbar'));
+check('the change line says nothing is pending yet',
+      /변경 없음/.test(document.querySelector('.chatbar .changesum')?.textContent || ''),
+      document.querySelector('.chatbar .changesum')?.textContent);
 // Files are their own view now; a second entry point in the editor was the
 // same browser rendered into a third of a column.
 check('the editor no longer duplicates the file browser',
@@ -558,14 +574,25 @@ console.log('\ntest_find_replace');
   check('preview cleared after apply', document.querySelectorAll('.turn.preview').length === 0);
   check('turns show as changed', document.querySelectorAll('.turn.changed').length > 0,
         String(document.querySelectorAll('.turn.changed').length));
+  await settle(400);
+  check('the chat bar counts the edited turns',
+        /턴 수정 \d+/.test(document.querySelector('.chatbar .changesum')?.textContent || ''),
+        document.querySelector('.chatbar .changesum')?.textContent);
+  check('and badges the 반영 button',
+        (document.querySelector('.chatbar .applybadge')?.textContent || '') !== '0'
+        && document.querySelector('.chatbar .applybadge')?.style.display !== 'none');
 }
 
 console.log('\ntest_write_back_to_host');
 {
   const before = JSON.stringify(host.liveChar.chats[0].message);
-  check('apply tool activates', clickTool(document, 'apply'));
+  check('반영 opens from the chat bar', clickTool(document, 'apply'));
   await settle(300);
-  clickButton(document, 'RisuAI에 반영');
+  check('it opens a popover with the verbs', !!document.querySelector('.popover .applypop'));
+  check('the popover names what will be written',
+        /턴 수정/.test(document.querySelector('.popover')?.textContent || ''),
+        document.querySelector('.popover')?.textContent?.slice(0, 120));
+  clickButton(document.querySelector('.popover'), 'RisuAI에 반영');
   await settle(900);
   check('setChatToIndex was called', host.calls.includes('setChatToIndex'));
   const after = host.liveChar.chats[0].message;
@@ -589,6 +616,9 @@ console.log('\ntest_commit_rebases_the_baseline');
         stillChanged === 0, String(stillChanged));
   const struck = document.querySelectorAll('.diff-del').length;
   check('nothing is still rendered struck through', struck === 0, String(struck));
+  check('the chat bar is back to 변경 없음',
+        /변경 없음/.test(document.querySelector('.chatbar .changesum')?.textContent || ''),
+        document.querySelector('.chatbar .changesum')?.textContent);
 }
 
 console.log('\ntest_truncate_with_preview');
@@ -617,7 +647,7 @@ console.log('\ntest_truncate_with_preview');
 
   clickTool(document, 'apply');
   await settle(300);
-  clickButton(document, 'RisuAI에 반영');
+  clickButton(document.querySelector('.popover'), 'RisuAI에 반영');
   await settle(1200);
   check('structural write shortened the host chat',
         host.liveChar.chats[0].message.length === 7,
@@ -626,6 +656,23 @@ console.log('\ntest_truncate_with_preview');
 
 console.log('\ntest_workspace_files');
 {
+  // Seed the kind of thing the agent leaves behind: a document in scratch/
+  // (a deliverable in the wrong folder) next to a script (internal). Written
+  // straight into the workspace, because there is no HTTP route for it - the
+  // agent's write tool is the only writer.
+  const wsRoot = join(backend.data, 'workspace');
+  const charDir = join(wsRoot, readdirSync(wsRoot)[0]);
+  mkdirSync(join(charDir, 'scratch'), { recursive: true });
+  mkdirSync(join(charDir, 'scripts'), { recursive: true });
+  writeFileSync(join(charDir, 'scratch', 'draft-summary.md'), '# 초안' + String.fromCharCode(10) + '본문');
+  writeFileSync(join(charDir, 'scratch', 'numbers.txt'), '1 2 3');
+  writeFileSync(join(charDir, 'scripts', 'helper.py'), 'print(1)');
+
+  // No pinned download card in the agent panel any more - a file shows up as
+  // one line in the log, and the files tab is where files are listed.
+  check('the agent panel has no pinned output card',
+        !/만들어진 파일/.test(document.querySelector('.agentpanel')?.textContent || ''));
+
   clickById(document, 'tab-files');
   await settle(1100);
   check('the file view has its own three panes', !!document.querySelector('.panel.active .split'));
@@ -643,6 +690,17 @@ console.log('\ntest_workspace_files');
   check('and the toggle says how many are hidden',
         /내부 파일 보기 [(]\d+[)]/.test(tree?.textContent || ''),
         (tree?.textContent || '').slice(-120));
+  // A document in scratch/ is a deliverable and is listed without unfolding;
+  // the script beside it stays behind the toggle.
+  check('a document in scratch/ is surfaced', /draft-summary\.md/.test(tree?.textContent || ''),
+        (tree?.textContent || '').slice(0, 300));
+  check('under a heading that says where it lives', /임시 문서/.test(tree?.textContent || ''));
+  check('a plain text note counts as a document', /numbers\.txt/.test(tree?.textContent || ''));
+  check('the script stays folded', !/helper\.py/.test(tree?.textContent || ''));
+  const surfaced = [...tree.querySelectorAll('.treebranch')].find((b) => /임시 문서/.test(b.textContent || ''));
+  check('the surfaced group is open, not collapsed',
+        surfaced?.nextElementSibling?.style.display !== 'none');
+  check('the files tab button carries a badge slot', !!document.querySelector('#tab-files .tabbadge'));
 
   clickButton(tree, '내부 파일 보기');
   await settle(900);
@@ -715,6 +773,33 @@ console.log('\ntest_lore_view');
         String(document.querySelectorAll('.panel.active .tree button.treefile').length));
   check('and marked as edited',
         /수정|추가/.test(document.querySelector('.panel.active .tree')?.textContent || ''));
+  check('it does not claim another tab does the writing',
+        !/챗 에딧 탭/.test(document.querySelector('.panel.active')?.textContent || ''));
+
+  // The chat bar is on this tab as well, and it counts the lorebook.
+  await settle(400);
+  check('the chat bar is on the lorebook tab', !!document.querySelector('.toolslot .chatbar')
+        && document.querySelector('.toolslot .chatbar')?.style.display !== 'none');
+  check('it counts the new entry',
+        /로어북 \+1/.test(document.querySelector('.chatbar .changesum')?.textContent || ''),
+        document.querySelector('.chatbar .changesum')?.textContent);
+
+  // And 반영 from here writes the lorebook into the live chat - the path that
+  // did not exist before: entries were saved to a table nothing wrote back.
+  const msgsBefore = JSON.stringify(host.liveChar.chats[0].message);
+  clickTool(document, 'apply');
+  await settle(300);
+  clickButton(document.querySelector('.popover'), 'RisuAI에 반영');
+  await settle(1200);
+  const lore = host.liveChar.chats[0].localLore || [];
+  check('the lorebook entry reached the host', lore.some((e) => e.comment === '스모크 항목'),
+        JSON.stringify(lore).slice(0, 200));
+  check('the transcript was not disturbed by it',
+        JSON.stringify(host.liveChar.chats[0].message) === msgsBefore);
+  await settle(600);
+  check('the entry is original after the write',
+        !/수정|추가/.test(document.querySelector('.panel.active .tree')?.textContent || ''),
+        (document.querySelector('.panel.active .tree')?.textContent || '').slice(0, 200));
 }
 
 console.log('\ntest_memory_view');
@@ -722,8 +807,9 @@ console.log('\ntest_memory_view');
   clickById(document, 'tab-memory');
   await settle(1100);
   check('the memory view has three panes', !!document.querySelector('.panel.active .split'));
-  check('it has its own tool row', !!document.querySelector('.toolslot .toolrow'));
-  check('반영 is offered', !!findButton(document.querySelector('.toolslot'), '반영'));
+  check('it has its own tool row', !!document.querySelector('.tabslot .toolrow'));
+  check('it has no 반영 of its own', !findButton(document.querySelector('.tabslot'), '반영'));
+  check('the chat bar offers 반영 here too', !!document.querySelector('.chatbar .tool[data-tool="apply"]'));
 
   // The fixture chat carries a hypaV3 summary, so it must have been taken
   // apart into rows rather than left as a JSON blob.
@@ -750,15 +836,60 @@ console.log('\ntest_memory_view');
   check('and the original is kept for comparison',
         /원본/.test(document.querySelector('.panel.active .left')?.textContent || ''));
 
+  await settle(400);
+  check('the chat bar counts the memory edit',
+        /장기기억 1/.test(document.querySelector('.chatbar .changesum')?.textContent || ''),
+        document.querySelector('.chatbar .changesum')?.textContent);
+
   // Writing back must touch only the memory fields, never the transcript.
   const before = host.liveChar.chats[0].message.length;
-  clickButton(document.querySelector('.toolslot'), '반영');
+  clickTool(document, 'apply');
+  await settle(300);
+  clickButton(document.querySelector('.popover'), 'RisuAI에 반영');
   await settle(1400);
   check('the transcript is untouched by a memory write',
         host.liveChar.chats[0].message.length === before, String(before));
   check('the summary reached the host',
         JSON.stringify(host.liveChar.chats[0].hypaV3Data || {}).includes('고친 요약'),
         JSON.stringify(host.liveChar.chats[0].hypaV3Data || {}).slice(0, 200));
+}
+
+console.log('\ntest_chat_variables_view');
+{
+  clickById(document, 'tab-vars');
+  await settle(1100);
+  check('the variables view exists', !!document.querySelector('.panel.active .vartable'),
+        (document.querySelector('.panel.active')?.textContent || '').slice(0, 200));
+  check('the chat bar is on it', document.querySelector('.toolslot .chatbar')?.style.display !== 'none');
+  const rows = [...document.querySelectorAll('.panel.active .varrow')];
+  check('each fixture variable is a row', rows.length === 4, String(rows.length));
+  const aff = rows.find((r) => /\$affection/.test(r.textContent || ''));
+  check('a $ key is listed with its type', !!aff && /숫자/.test(aff.textContent || ''), aff?.textContent);
+  const input = aff?.querySelector('input');
+  input.value = '9';
+  input.dispatchEvent(new window.Event('input', { bubbles: true }));
+  clickButton(aff, '저장');
+  await settle(1100);
+  const aff2 = [...document.querySelectorAll('.panel.active .varrow')].find((r) => /\$affection/.test(r.textContent || ''));
+  check('the edit is marked', /수정/.test(aff2?.textContent || ''), aff2?.textContent);
+  await settle(400);
+  check('the chat bar counts it as a variable, not a memory',
+        /챗 변수 1/.test(document.querySelector('.chatbar .changesum')?.textContent || '')
+        && !/장기기억/.test(document.querySelector('.chatbar .changesum')?.textContent || ''),
+        document.querySelector('.chatbar .changesum')?.textContent);
+
+  clickTool(document, 'apply');
+  await settle(300);
+  clickButton(document.querySelector('.popover'), 'RisuAI에 반영');
+  await settle(1400);
+  const st = host.liveChar.chats[0].scriptstate || {};
+  check('the variable reached the host as a number', st['$affection'] === 9, JSON.stringify(st));
+  check('the other variables kept their types', st['$met'] === true && Array.isArray(st.tags), JSON.stringify(st));
+
+  clickById(document, 'tab-memory');
+  await settle(900);
+  check('the memory tab does not list variables',
+        !/\$affection/.test(document.querySelector('.panel.active .tree')?.textContent || ''));
 }
 
 console.log('\ntest_settings_tab');
@@ -879,70 +1010,61 @@ console.log('\ntest_skills_ui');
   check('skills card present', /스킬/.test(document.body.innerHTML));
   check('the budget names what it counts',
         /프롬프트에 실리는 분량/.test(document.body.innerHTML));
+  check('it says bodies are loaded on demand', /load_skill/.test(document.body.innerHTML));
   const skillRows = () => [...document.querySelectorAll('.card')]
     .find((c) => /^스킬$/.test(c.querySelector('h2')?.textContent || ''))
     ?.querySelectorAll('.pickrow') || [];
   check('seeded skills are listed', skillRows().length >= 2, String(skillRows().length));
   check('each row has an enable toggle',
         [...skillRows()].every((r) => !!r.querySelector('input[type="checkbox"]')));
+  check('each row shows its trigger description and folder',
+        [...skillRows()].every((r) => /skills\//.test(r.textContent || '')),
+        [...skillRows()].map((r) => r.textContent).join(' | ').slice(0, 200));
 
   clickButton(document, '스킬 추가');
   await settle(700);
   const box = document.querySelector('.modalbox');
   check('the editor is a modal', !!box);
-  check('the kind is choosable', !!box?.querySelector('select'));
-  check('a prose skill hides the filename field',
-        box.querySelectorAll('label.field')[2]?.style.display === 'none',
-        box.querySelectorAll('label.field')[2]?.style.display);
+  check('the description is its own field', /트리거/.test(box?.textContent || ''));
+  check('always-on is an explicit opt-in', !!box?.querySelector('.checkrow input[type="checkbox"]'));
 
   box.querySelector('input').value = '스모크 스킬';
-  const bodyBox = box.querySelector('textarea');
-  bodyBox.value = '1. 확인한다.\\n2. 제안한다.';
+  const [descBox, bodyBox] = box.querySelectorAll('textarea');
+  descBox.value = '스모크 테스트를 돌릴 때';
+  bodyBox.value = '1. 확인한다.\n2. 제안한다.';
   bodyBox.dispatchEvent(new window.Event('input', { bubbles: true }));
   check('the length is counted against the cap',
-        /\/\s*\d+자/.test(box.textContent || ''), box.textContent?.slice(0, 200));
+        /\/\s*[\d,]+자/.test(box.textContent || ''), box.textContent?.slice(0, 200));
   [...box.querySelectorAll('button')].find((b) => b.textContent === '저장')
     ?.dispatchEvent(new window.Event('click', { bubbles: true }));
   await settle(1000);
   check('the skill is saved', /스모크 스킬/.test(document.body.innerHTML));
-
-  // A script skill keeps its source out of the prompt - the whole reason the
-  // two kinds exist.
-  clickButton(document, '스킬 추가');
-  await settle(600);
-  const box2 = document.querySelector('.modalbox');
-  const TRIPLE_DOC = '"""도구 설명."""\nimport risuelf';
-  box2.querySelector('input').value = '스모크 스크립트';
-  const kind = box2.querySelector('select');
-  // Selection is expressed on the option: linkedom's select.value is read-only.
-  [...kind.querySelectorAll('option')].forEach((o) => {
-    if (o.value === 'script') o.setAttribute('selected', '');
-    else o.removeAttribute('selected');
-  });
-  kind.dispatchEvent(new window.Event('change', { bubbles: true }));
-  check('choosing script reveals the filename field',
-        box2.querySelectorAll('label.field')[2]?.style.display !== 'none');
-  check('it says the code is not sent',
-        /프롬프트에 실리지 않습니다/.test(box2.textContent || ''));
-  [...box2.querySelectorAll('input')][1].value = 'smoke_tool.py';
-  box2.querySelector('textarea').value = TRIPLE_DOC;
-  [...box2.querySelectorAll('button')].find((b) => b.textContent === '저장')
-    ?.dispatchEvent(new window.Event('click', { bubbles: true }));
-  await settle(1000);
-  check('the script skill is listed as a script',
-        [...skillRows()].some((r) => /smoke_tool.py/.test(r.textContent || '')),
-        [...skillRows()].map((r) => r.textContent).join(' | ').slice(0, 200));
+  check('and listed with its trigger',
+        [...skillRows()].some((r) => /스모크 테스트를 돌릴 때/.test(r.textContent || '')));
 
   clickButton(document, '보내는 내용 보기');
   await settle(800);
   const preview = document.querySelector('.modalbox .filepreview')?.textContent || '';
-  check('what actually gets sent is inspectable', /스모크 스킬/.test(preview), preview.slice(0, 120));
-  check('the script is referenced, not inlined',
-        /smoke_tool.py/.test(preview) && !/import risuelf/.test(preview), preview.slice(0, 300));
+  check('the catalog is inspectable', /스모크 스킬/.test(preview), preview.slice(0, 120));
+  check('it carries the trigger, not the body',
+        /스모크 테스트를 돌릴 때/.test(preview) && !/확인한다/.test(preview), preview.slice(0, 300));
+  check('and tells the model to load_skill', /load_skill/.test(preview));
   pressEscape(document);
   await settle(200);
 
-  // Disabling keeps the skill but takes it out of the prompt.
+  // Editing an existing skill shows its folder files.
+  const row0 = [...skillRows()].find((r) => /스모크 스킬/.test(r.textContent || ''));
+  clickButton(row0, '수정');
+  await settle(900);
+  const box2 = document.querySelector('.modalbox');
+  check('the editor names the folder', /skills\//.test(box2?.querySelector('.modalhead')?.textContent || ''),
+        box2?.querySelector('.modalhead')?.textContent);
+  check('it has a files section', /폴더의 파일/.test(box2?.textContent || ''));
+  check('it is pre-filled with the body', /확인한다/.test(box2?.querySelectorAll('textarea')[1]?.value || ''));
+  pressEscape(document);
+  await settle(200);
+
+  // Disabling keeps the skill but takes it out of the catalog.
   const row = [...skillRows()].find((r) => /스모크 스킬/.test(r.textContent || ''));
   const boxToggle = row?.querySelector('input[type="checkbox"]');
   boxToggle.checked = false;
@@ -950,7 +1072,7 @@ console.log('\ntest_skills_ui');
   await settle(900);
   clickButton(document, '보내는 내용 보기');
   await settle(800);
-  check('a disabled skill leaves the prompt',
+  check('a disabled skill leaves the catalog',
         !/스모크 스킬/.test(document.querySelector('.modalbox .filepreview')?.textContent || ''));
   check('but stays in the list',
         [...skillRows()].some((r) => /스모크 스킬/.test(r.textContent || '')));

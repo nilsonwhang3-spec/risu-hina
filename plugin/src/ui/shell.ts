@@ -13,6 +13,7 @@ import { renderEditorTab } from './tab-editor';
 import { renderFilesTab } from './tab-files';
 import { renderLoreTab } from './tab-lore';
 import { renderMemoryTab } from './tab-memory';
+import { renderVarsTab } from './tab-vars';
 import { renderSettingsTab } from './tab-settings';
 import { buildChatBar, refreshChatBar } from './chatbar';
 
@@ -24,15 +25,24 @@ import { buildChatBar, refreshChatBar } from './chatbar';
  * things the user is actually working on. It lives in the header now, next to
  * the other verbs.
  */
-export type TabId = 'chats' | 'editor' | 'lore' | 'memory' | 'files' | 'settings';
+export type TabId = 'chats' | 'editor' | 'lore' | 'memory' | 'vars' | 'files' | 'settings';
 
+/**
+ * The tab bar reads left to right as "pick a chat, then its parts, then the
+ * workspace". Files are the bot's workspace, not the chat's, so the files tab
+ * is set apart with a divider and named for what it is.
+ */
 const CONTENT_TABS: [TabId, string][] = [
   ['chats', '챗 선택'],
   ['editor', '챗 에딧'],
   ['lore', '챗 로어북'],
   ['memory', '장기기억'],
-  ['files', '파일'],
+  ['vars', '챗 변수'],
+  ['files', '워크스페이스 파일'],
 ];
+
+/** Tabs that show one chat's material - the only place the chat bar belongs. */
+const CHAT_TABS = new Set<TabId>(['editor', 'lore', 'memory', 'vars']);
 
 const ALL_TABS: TabId[] = [...CONTENT_TABS.map(([id]) => id), 'settings'];
 
@@ -62,7 +72,9 @@ export function setToolbar(node: HTMLElement | null): void {
 
 function syncToolslot(): void {
   if (!toolbarSlot || !chatBarEl || !tabSlot) return;
-  const showChat = !!state.activeChatKey && active !== 'settings';
+  // Not on 챗 선택 (nothing is being edited there) and not on the workspace
+  // files (they are the bot's, not the chat's).
+  const showChat = !!state.activeChatKey && CHAT_TABS.has(active);
   chatBarEl.style.display = showChat ? '' : 'none';
   const showTab = tabSlot.childElementCount > 0;
   tabSlot.style.display = showTab ? '' : 'none';
@@ -79,6 +91,7 @@ export function setTab(tab: TabId): void {
   document.getElementById('open-settings')?.classList.toggle('on', tab === 'settings');
   renderActive();
   syncToolslot();
+  refreshTabBadges();
 }
 
 export function currentTab(): TabId {
@@ -93,6 +106,7 @@ function renderActive(): void {
   else if (active === 'editor') renderEditorTab(node);
   else if (active === 'lore') renderLoreTab(node);
   else if (active === 'memory') renderMemoryTab(node);
+  else if (active === 'vars') renderVarsTab(node);
   else if (active === 'files') renderFilesTab(node);
   else renderSettingsTab(node);
 }
@@ -145,7 +159,12 @@ export function buildShell(): void {
   healthEl = el('div', { class: 'status' });
 
   const tabButton = (id: TabId, label: string) => {
-    const b = el('button', { class: 'tab', id: 'tab-' + id, text: label });
+    const b = el('button', { class: 'tab', id: 'tab-' + id }, [
+      el('span', { text: label }),
+      // Only the files tab ever fills this: the count of agent outputs the
+      // user has not looked at. Cleared by opening the tab.
+      el('span', { class: 'badge warn tabbadge', style: { display: 'none' } }),
+    ]);
     b.addEventListener('click', () => setTab(id));
     return b;
   };
@@ -198,7 +217,11 @@ export function buildShell(): void {
       settingsBtn,
       close,
     ]),
-    el('div', { class: 'tabs' }, CONTENT_TABS.map(([id, label]) => tabButton(id, label))),
+    el('div', { class: 'tabs' }, CONTENT_TABS.flatMap(([id, label]) => (
+      id === 'files'
+        ? [el('span', { class: 'tabsep', title: '여기부터는 챗이 아니라 봇의 워크스페이스입니다' }), tabButton(id, label)]
+        : [tabButton(id, label)]
+    ))),
     toolbarSlot,
     shellNotice,
     el('main', {}, ALL_TABS.map((id) => mounts[id])),
@@ -210,10 +233,24 @@ export function buildShell(): void {
   syncToolslot();
 }
 
+function refreshTabBadges(): void {
+  const badge = document.querySelector('#tab-files .tabbadge') as HTMLElement | null;
+  if (!badge) return;
+  const n = state.unseenOutputs.length;
+  badge.textContent = String(n);
+  badge.style.display = n && active !== 'files' ? '' : 'none';
+}
+
 state.onChange(() => {
   if (!mounted) return;
+  // A log line in the agent panel asked for a file: go where files are.
+  if (state.openFileRequest && active !== 'files') {
+    setTab('files');
+    return;
+  }
   refreshStatus();
   refreshChatBar();
+  refreshTabBadges();
   renderActive();
   syncToolslot();
 });

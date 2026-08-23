@@ -46,6 +46,15 @@ pyserver/start.sh [port]       런처를 직접
 뜻이고 루프가 재진입한다. NSSM·PM2·systemd 중 무엇으로 감싸도 자체 업데이트가 동일하게 동작하는
 이유가 이것이다 — 루프가 수퍼바이저가 아니라 런처에 있다.
 
+## data/ 를 옮길 때
+
+**서버를 먼저 멈추고** 옮긴다. 기동·종료 때마다 WAL 을 본 파일에 접어 넣으므로(`wal_checkpoint(TRUNCATE)`)
+멈춘 상태의 `data/` 는 `risuelf.db` 하나가 전부다. 살아 있는 서버의 `risuelf.db-wal`·`-shm` 까지 복사해
+다른 설치본에서 열면, 낡은 wal-index 가 새 서버를 속여 **그 서버의 커밋이 WAL 의 닿지 않는 자리에 쓰인다.**
+읽을 때는 보이고 다음 재시작에 전부 사라진다(2026-08-23 실제 사고 — 두 시간치 편집이 조용히 없어졌다).
+기동 시 WAL 에 낯선 salt 의 커밋 프레임이 있으면 로그에 `WARNING: the WAL holds … under a foreign salt` 를
+남기고 `data/orphaned-wal-<시각>.db-wal` 로 사본을 보존한다. 그 경고가 보이면 복구는 수작업이다.
+
 ## 확인
 
 ```

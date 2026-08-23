@@ -107,8 +107,10 @@ async function refresh(): Promise<void> {
   treeMount.appendChild(el('div', { class: 'hint', style: { padding: '8px' }, text: '읽는 중입니다…' }));
   try {
     const r = await state.memory();
-    items = r.items;
-    drawTree(r.changed);
+    // Variables are the same rows but their own tab (챗 변수); here only the
+    // summaries, and the count only counts them.
+    items = r.items.filter((i) => i.kind !== 'scriptstate');
+    drawTree(items.filter((i) => i.changed || i.isNew).length);
   } catch (e) {
     clear(treeMount);
     treeMount.appendChild(el('div', { class: 'notice err', text: msg(e) }));

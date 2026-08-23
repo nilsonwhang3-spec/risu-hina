@@ -36,6 +36,43 @@ SCHEMES: dict[str, tuple[str, str]] = {
 # Schemes that are one lump of prose rather than a list.
 FLAT = ("supaMemoryData", "supaMemory", "lastMemory")
 
+# Chat variables. RisuAI keeps them on `chat.scriptstate` as one object -
+# `{{setvar::x::1}}` writes `scriptstate["$x"]`, triggers and Lua write their
+# own keys. One row per key, the key as the title, the value as the body.
+# Values are not all strings, so the type rides along in extra_json and the
+# write-back converts back; a number that came out as "3" would otherwise go
+# back in as the string "3", which `{{calc}}` treats differently.
+VARS = "scriptstate"
+
+
+def _var_encode(value: Any) -> tuple[str, str]:
+    """A scriptstate value as (body text, type tag)."""
+    if isinstance(value, bool):
+        return ("true" if value else "false"), "bool"
+    if isinstance(value, (int, float)):
+        return json.dumps(value), "number"
+    if value is None:
+        return "", "null"
+    if isinstance(value, str):
+        return value, "string"
+    return json.dumps(value, ensure_ascii=False), "json"
+
+
+def _var_decode(body: str, kind: str) -> Any:
+    try:
+        if kind == "bool":
+            return body.strip().lower() in ("true", "1", "yes")
+        if kind == "number":
+            n = json.loads(body)
+            return n if isinstance(n, (int, float)) else body
+        if kind == "null":
+            return None if body == "" else body
+        if kind == "json":
+            return json.loads(body)
+    except (ValueError, TypeError):
+        pass
+    return body
+
 SHELL_KEY = "hypa_shell:"
 
 
@@ -89,6 +126,14 @@ def ingest(char_key: str, chat_key: str, memory: dict, *, reset: bool = True) ->
                          _title(raw, 0), raw, raw, db.js({}), now, now))
             counts[scheme] = 1
 
+    state = memory.get(VARS)
+    if isinstance(state, dict):
+        for i, (key, value) in enumerate(state.items()):
+            body, vtype = _var_encode(value)
+            rows.append((uuid.uuid4().hex, chat_key, char_key, VARS, i,
+                         str(key), body, body, db.js({"key": str(key), "type": vtype}), now, now))
+        counts[VARS] = len(state)
+
     if reset:
         if rows:
             db.executemany(
@@ -108,9 +153,16 @@ def ingest(char_key: str, chat_key: str, memory: dict, *, reset: bool = True) ->
     rebased = 0
     for r in rows:
         _, _, _, kind, seq, title, body, _original, extra, _c, _u = r
-        found = db.one(
-            "SELECT id, original FROM memories WHERE chat_key = ? AND kind = ? AND seq = ?",
-            (chat_key, kind, seq))
+        if kind == VARS:
+            # A variable's address is its key, not its position: keys come and
+            # go in RisuAI and the order of a dict is not a promise.
+            found = db.one(
+                "SELECT id, original FROM memories WHERE chat_key = ? AND kind = ? AND title = ?",
+                (chat_key, kind, title))
+        else:
+            found = db.one(
+                "SELECT id, original FROM memories WHERE chat_key = ? AND kind = ? AND seq = ?",
+                (chat_key, kind, seq))
         if found is None:
             db.execute(
                 "INSERT INTO memories(id, chat_key, char_key, kind, seq, title, body, "
@@ -134,7 +186,7 @@ def _shell(memory: dict) -> dict:
         if key in SCHEMES and isinstance(value, dict):
             list_key = SCHEMES[key][0]
             shell[key] = {k: v for k, v in value.items() if k != list_key}
-        elif key in FLAT:
+        elif key in FLAT or key == VARS:
             continue
         else:
             shell[key] = value
@@ -150,6 +202,7 @@ def _row(r) -> dict:
     d = db.row_to_dict(r) or {}
     body = d.get("body") or ""
     original = d.get("original")
+    extra = db.unjs(d.get("extra_json"), {}) or {}
     return {
         "id": d.get("id"),
         "chatKey": d.get("chat_key"),
@@ -161,6 +214,7 @@ def _row(r) -> dict:
         "changed": original is not None and original != body,
         "isNew": original is None,
         "updatedAt": d.get("updated_at"),
+        "valueType": extra.get("type") if d.get("kind") == VARS else None,
     }
 
 
@@ -184,16 +238,31 @@ def update(memory_id: str, body: str, title: str | None = None) -> dict:
     cur = get(memory_id)
     if cur is None:
         raise LookupError("없는 항목입니다")
+    if cur["kind"] == VARS:
+        # The title is the key and the key is the address; it does not move.
+        new_title = cur["title"]
+    else:
+        new_title = title if title is not None else _title(body, cur["seq"])
     db.execute(
         "UPDATE memories SET body = ?, title = ?, updated_at = ? WHERE id = ?",
-        (body, (title if title is not None else _title(body, cur["seq"])), db.now(), memory_id),
+        (body, new_title, db.now(), memory_id),
     )
     return get(memory_id) or {}
 
 
 def add(char_key: str, chat_key: str, kind: str, body: str, title: str = "") -> dict:
-    if kind not in SCHEMES and kind not in FLAT:
+    if kind not in SCHEMES and kind not in FLAT and kind != VARS:
         raise ValueError(f"모르는 기억 종류입니다: {kind}")
+    extra: dict[str, Any] = {}
+    if kind == VARS:
+        key = (title or "").strip()
+        if not key:
+            raise ValueError("변수 이름이 필요합니다")
+        if db.one("SELECT id FROM memories WHERE chat_key = ? AND kind = ? AND title = ?",
+                  (chat_key, kind, key)) is not None:
+            raise ValueError(f"이미 있는 변수입니다: {key}")
+        title = key
+        extra = {"key": key, "type": "string"}
     r = db.one(
         "SELECT COALESCE(MAX(seq), -1) AS m FROM memories WHERE chat_key = ? AND kind = ?",
         (chat_key, kind))
@@ -206,7 +275,7 @@ def add(char_key: str, chat_key: str, kind: str, body: str, title: str = "") -> 
         # original stays NULL: this entry has no frozen counterpart, which is
         # exactly what marks it as added rather than edited.
         (mid, chat_key, char_key, kind, seq, title or _title(body, seq), body,
-         None, db.js({}), now, now),
+         None, db.js(extra), now, now),
     )
     return get(mid) or {}
 
@@ -232,6 +301,17 @@ def patch(chat_key: str) -> dict:
         body = d.get("body") or ""
         if (d.get("original") or "") != body:
             changed += 1
+        if kind == VARS:
+            # The whole object, so a deleted row is a deleted variable. Only
+            # emitted when there are rows: a chat without variables must not
+            # gain an empty scriptstate from us.
+            extra = db.unjs(d.get("extra_json"), {}) or {}
+            state = out.setdefault(VARS, {})
+            if not isinstance(state, dict):
+                state = {}
+                out[VARS] = state
+            state[str(extra.get("key") or d.get("title") or "")] = _var_decode(body, str(extra.get("type") or "string"))
+            continue
         if kind in SCHEMES:
             list_key, text_key = SCHEMES[kind]
             block = out.setdefault(kind, {})
@@ -252,10 +332,24 @@ def patch(chat_key: str) -> dict:
 
 
 def changes(chat_key: str) -> dict:
-    """What a write-back of this chat's memory would change, as counts."""
-    rows = db.query("SELECT body, original FROM memories WHERE chat_key = ?", (chat_key,))
-    changed = sum(1 for r in rows if (r["original"] or "") != (r["body"] or ""))
-    return {"changed": changed, "total": changed, "entries": len(rows)}
+    """What a write-back of this chat's memory would change, as counts.
+
+    Variables are counted apart from summaries: they are written together
+    (same chat object, same call) but the bar names them apart, because a
+    person thinks of "the summary I fixed" and "the flag I flipped" as two
+    different things.
+    """
+    rows = db.query("SELECT kind, body, original FROM memories WHERE chat_key = ?", (chat_key,))
+    changed = vars_changed = 0
+    for r in rows:
+        if (r["original"] or "") == (r["body"] or ""):
+            continue
+        if r["kind"] == VARS:
+            vars_changed += 1
+        else:
+            changed += 1
+    return {"changed": changed, "vars": vars_changed, "total": changed + vars_changed,
+            "entries": len(rows)}
 
 
 def rows_for_checkpoint(chat_key: str) -> dict:

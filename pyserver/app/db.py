@@ -34,6 +34,7 @@ def connect() -> sqlite3.Connection:
             return _conn
         config.DATA_DIR.mkdir(parents=True, exist_ok=True)
         _adopt_legacy_db()
+        _wal_report()
         conn = sqlite3.connect(str(config.DB_PATH), check_same_thread=False)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode = WAL")
@@ -41,7 +42,97 @@ def connect() -> sqlite3.Connection:
         conn.execute("PRAGMA foreign_keys = ON")
         _conn = conn
         _migrate(conn)
+        # Fold the WAL into the main file on every boot. Between runs the
+        # database is then one file, so copying data/ to another install moves
+        # the data and not a WAL and a wal-index that belong to a process that
+        # no longer exists. See `_wal_report` for what a carried-over
+        # wal-index did once.
+        try:
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        except sqlite3.Error as e:
+            print(f"[{config.APP_NAME}] wal checkpoint at boot failed: {e}", flush=True)
         return conn
+
+
+def close() -> None:
+    """Checkpoint and close, so a clean stop leaves a single file behind."""
+    global _conn
+    with LOCK:
+        if _conn is None:
+            return
+        try:
+            _conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        except sqlite3.Error:
+            pass
+        try:
+            _conn.close()
+        finally:
+            _conn = None
+
+
+def _wal_report() -> None:
+    """Say what a leftover WAL holds before SQLite opens it.
+
+    2026-08-23: a data/ folder copied from another install - WAL and wal-index
+    included - was opened by a new server. The stale wal-index made it append
+    its commits under a salt the WAL header had never seen. Everything it
+    wrote was readable through that index and invisible to the next process,
+    which rebuilt the index from the file and found only the header's chain:
+    two hours of edits gone on restart, with nothing in the log.
+
+    SQLite is right to drop frames it cannot verify. What this adds is the
+    sentence that was missing: if the WAL holds committed frames under a salt
+    that is neither the header's nor one of the header's predecessors, say so
+    loudly and keep a copy of the WAL, so the data is at least recoverable by
+    hand instead of silently overwritten by the next checkpoint.
+    """
+    import shutil
+    import struct
+    import time
+
+    wal = config.DB_PATH.with_name(config.DB_PATH.name + "-wal")
+    try:
+        if not wal.exists() or wal.stat().st_size < 32:
+            return
+        data = wal.read_bytes()
+    except OSError:
+        return
+    try:
+        magic, _ver, psz, _ck, s1, s2, _c1, _c2 = struct.unpack(">IIIIIIII", data[:32])
+    except struct.error:
+        return
+    if magic not in (0x377F0682, 0x377F0683) or psz < 512:
+        return
+    frame = 24 + psz
+    groups: dict[tuple[int, int], list[int]] = {}
+    off, n = 32, 0
+    while off + frame <= len(data):
+        pg, commit, fs1, fs2 = struct.unpack(">IIII", data[off:off + 16])
+        g = groups.setdefault((fs1, fs2), [0, 0])
+        g[0] += 1
+        g[1] += 1 if commit else 0
+        off += frame
+        n += 1
+    # A WAL restart bumps salt-1 by one and draws a fresh salt-2, so frames
+    # from earlier generations sit just below the header's salt-1. Anything
+    # else was written under a header this file no longer has.
+    strangers = {k: v for k, v in groups.items()
+                 if k != (s1, s2) and not (0 < (s1 - k[0]) & 0xFFFFFFFF <= 64) and v[1] > 0}
+    print(f"[{config.APP_NAME}] wal: {len(data)} bytes, {n} frames, "
+          f"{groups.get((s1, s2), [0, 0])[0]} under the header salt", flush=True)
+    if not strangers:
+        return
+    keep = config.DATA_DIR / f"orphaned-wal-{time.strftime('%Y%m%d-%H%M%S')}.db-wal"
+    try:
+        shutil.copy2(wal, keep)
+    except OSError as e:
+        keep = None  # type: ignore[assignment]
+        print(f"[{config.APP_NAME}] could not keep a copy of the WAL: {e}", flush=True)
+    for k, v in strangers.items():
+        print(f"[{config.APP_NAME}] WARNING: the WAL holds {v[0]} frames / {v[1]} commits under a "
+              f"foreign salt ({k[0]:#x},{k[1]:#x}) - written through a stale wal-index, unreachable "
+              f"now. Copy kept at {keep}. Usually data/ was copied from another install with its "
+              f"-wal/-shm; stop the server before copying.", flush=True)
 
 
 def _adopt_legacy_db() -> None:
@@ -214,6 +305,17 @@ DDL = [
     """,
     "CREATE INDEX IF NOT EXISTS staged_pending ON staged_edits(chat_key, status, created_at)",
     "CREATE INDEX IF NOT EXISTS staged_batch ON staged_edits(batch_id)",
+
+    # Skills live as folders under data/skills/; only what the folder cannot
+    # hold - whether it is on, and its order - is a row.
+    """
+    CREATE TABLE IF NOT EXISTS skill_state (
+        slug        TEXT PRIMARY KEY,
+        enabled     INTEGER NOT NULL DEFAULT 1,
+        sort_order  INTEGER NOT NULL DEFAULT 0,
+        updated_at  REAL NOT NULL
+    )
+    """,
 
     # A checkpoint is the full working document plus its sidecar, so restoring
     # never depends on replaying edits in order.

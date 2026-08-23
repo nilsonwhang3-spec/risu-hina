@@ -62,7 +62,7 @@ export interface Changes {
   chatKey: string;
   turns: { edited: number; added: number; removed: number; reordered: boolean; structural: boolean; total: number };
   lore: { added: number; edited: number; deleted: number; total: number };
-  memory: { changed: number; total: number; entries: number };
+  memory: { changed: number; vars: number; total: number; entries: number };
   total: number;
   staged: number;
   actions: number;
@@ -151,23 +151,34 @@ export interface AgentPreset {
   updatedAt: number;
 }
 
+/**
+ * A skill folder: `data/skills/<id>/SKILL.md` plus its files. The id is the
+ * folder name. Only name and description reach the prompt; the body comes
+ * when the agent calls load_skill.
+ */
 export interface Skill {
   id: string;
   name: string;
-  body: string;
+  /** The trigger: when the agent should load this. */
+  description: string;
+  /** Body goes into the prompt on every request, not only on load. */
+  always: boolean;
   enabled: boolean;
   sortOrder: number;
-  /** 'md' goes into the prompt; 'script' is written into the workspace. */
-  kind: 'md' | 'script' | 'reference';
-  filename: string;
+  /** Empty in listings; filled by state.skill(id). */
+  body: string;
+  bodyChars: number;
+  files: { path: string; size: number; textual: boolean }[];
   updatedAt: number;
 }
 
 export interface SkillListing {
   skills: Skill[];
-  usedChars: number;
-  limitChars: number;
+  catalogChars: number;
+  catalogLimit: number;
   maxBodyChars: number;
+  maxDescriptionChars: number;
+  dir: string;
 }
 
 export interface LoreEntry {
@@ -193,6 +204,8 @@ export interface MemoryItem {
   changed: boolean;
   isNew: boolean;
   updatedAt: number;
+  /** For kind `scriptstate`: how the value goes back (string · number · bool · json · null). */
+  valueType?: string | null;
 }
 
 export interface PendingAction {
@@ -228,6 +241,15 @@ class AppState {
   totalTurns = 0;
   warnings: string[] = [];
   changes: Changes | null = null;
+  /**
+   * out/ files the agent made that the files tab has not shown yet. The tab
+   * button wears the count as a badge; opening the tab clears it.
+   */
+  unseenOutputs: string[] = [];
+  /** A file the user asked to see (from an agent log line); the files tab opens it. */
+  openFileRequest: string | null = null;
+  /** Bumped when the workspace listing changed; the files tab reloads when it moved. */
+  filesRev = 0;
   /**
    * Bumped whenever the working state changed underneath the tabs - a
    * restore, a reset, a commit, an approved proposal. Tabs that cache what
@@ -361,6 +383,25 @@ class AppState {
   /** The working state changed underneath the tabs; tell them to reload. */
   bump(): void {
     this.epoch += 1;
+    this.emit();
+  }
+
+  /** The workspace listing changed (a file was made, uploaded or deleted). */
+  touchFiles(newOutputs: string[] = []): void {
+    for (const p of newOutputs) if (!this.unseenOutputs.includes(p)) this.unseenOutputs.push(p);
+    this.filesRev += 1;
+    this.emit();
+  }
+
+  requestOpenFile(path: string): void {
+    this.openFileRequest = path;
+    this.emit();
+  }
+
+  /** The files tab is showing; whatever was unseen has now been seen. */
+  markOutputsSeen(): void {
+    if (!this.unseenOutputs.length) return;
+    this.unseenOutputs = [];
     this.emit();
   }
 
@@ -696,17 +737,36 @@ class AppState {
     return await transport.get('/skills');
   }
 
+  async skill(id: string): Promise<Skill> {
+    const r = await transport.get('/skills/get', { id }) as { skill: Skill };
+    return r.skill;
+  }
+
   async saveSkill(v: {
-    id?: string; name: string; body: string; enabled?: boolean;
-    kind?: 'md' | 'script' | 'reference'; filename?: string;
+    id?: string; name: string; description: string; body: string; always?: boolean; enabled?: boolean;
   }): Promise<Skill> {
     const r = await transport.post('/skills/save', v) as { skill: Skill };
     return r.skill;
   }
 
+  /** A file inside a skill folder. Binary-safe: everything goes as base64. */
+  async putSkillFile(id: string, path: string, file: File): Promise<{ path: string; size: number }> {
+    const body = await fileBase64(file);
+    return await transport.post('/skills/file', { id, path, body, base64: true });
+  }
+
+  async deleteSkillFile(id: string, path: string): Promise<void> {
+    await transport.post('/skills/file/delete', { id, path });
+  }
+
   /** Register a file as a skill. The extension decides whether it is a script. */
-  async uploadSkill(filename: string, body: string): Promise<Skill> {
-    const r = await transport.post('/skills/upload', { filename, body }) as { skill: Skill };
+  /** Import a skill from a file: .md/.py become a skill of their own, .zip is a whole folder. */
+  async uploadSkill(file: File): Promise<Skill> {
+    const zip = /\.zip$/i.test(file.name);
+    const payload = zip
+      ? { filename: file.name, body: await fileBase64(file), base64: true }
+      : { filename: file.name, body: await file.text() };
+    const r = await transport.post('/skills/upload', payload) as { skill: Skill };
     return r.skill;
   }
 
@@ -830,6 +890,16 @@ class AppState {
     void this.refreshChanges();
   }
 
+}
+
+/** A File as base64, without the data: prefix. */
+async function fileBase64(file: File): Promise<string> {
+  const buf = new Uint8Array(await file.arrayBuffer());
+  let bin = '';
+  for (let i = 0; i < buf.length; i += 0x8000) {
+    bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
+  }
+  return btoa(bin);
 }
 
 export const state = new AppState();

@@ -121,7 +121,7 @@ function buildConnectionCard(): HTMLElement {
 }
 
 function buildDiagnosticCard(): HTMLElement {
-  const out = el('div');
+  const out = el('div', { class: 'outbox' });
 
   const run = el('button', { text: '연결 진단' });
   run.addEventListener('click', async () => {

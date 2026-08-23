@@ -29,7 +29,7 @@ import * as host from '../host';
  * one button does both.
  */
 export function buildUpdateCard(): HTMLElement {
-  const out = el('div');
+  const out = el('div', { class: 'outbox' });
   const say = (text: string, kind: 'ok' | 'err' | '' = '') => {
     clear(out);
     out.appendChild(el('div', { class: 'notice ' + kind, text }));
@@ -114,7 +114,7 @@ export function buildUpdateCard(): HTMLElement {
 }
 
 export function buildDebugCard(): HTMLElement {
-  const out = el('div');
+  const out = el('div', { class: 'outbox' });
   const levelSel = el('select');
   for (const [value, label] of [
     ['', '전체'], ['info', 'info 이상'], ['warn', 'warn 이상'], ['error', 'error만'],

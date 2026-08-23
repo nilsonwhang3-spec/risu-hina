@@ -159,15 +159,37 @@ def build() -> Agent[Deps]:
         return json.dumps(entries, ensure_ascii=False, indent=2)[:20000]
 
     @agent.tool
+    def list_skills(ctx: RunContext[Deps]) -> str:
+        """등록된 스킬 목록(이름과 언제 쓰는지). 본문은 load_skill 로 불러온다."""
+        lines = skills.catalog_lines()
+        return "\n".join(lines) if lines else "등록된 스킬이 없습니다"
+
+    @agent.tool
+    def load_skill(ctx: RunContext[Deps], name: str) -> str:
+        """스킬 본문을 불러온다. 해당하는 작업을 시작하기 전에 부른다.
+
+        돌아온 절차를 그대로 따른다. 스킬 폴더의 파일은 `skills/<id>/…` 에 있어
+        read_file 로 읽고 run_python 으로 실행할 수 있다.
+        """
+        return skills.load(name)
+
+    @agent.tool
     def read_memory(ctx: RunContext[Deps]) -> str:
-        """장기기억(하이파/수파 요약) 목록과 본문."""
+        """장기기억(하이파/수파 요약)과 챗 변수(scriptstate) 목록과 본문.
+
+        챗 변수는 `[scriptstate] key=값` 으로 나온다. 값 수정은 propose_memory_edit 로
+        제안한다(id 로 조준). `$` 로 시작하는 키가 {{getvar}} 가 읽는 변수다.
+        """
         data = mem.listing(ctx.deps.chat_key)
         if not data["items"]:
             return "장기기억이 없습니다"
         out = [f"총 {len(data['items'])}개, 수정됨 {data['changed']}개"]
         for i in data["items"]:
             mark = " *수정됨*" if i["changed"] else (" *추가됨*" if i["isNew"] else "")
-            out.append(f"--- [{i['kind']} #{i['seq']}] id={i['id']}{mark}\n{i['body']}")
+            if i["kind"] == mem.VARS:
+                out.append(f"--- [scriptstate] id={i['id']}{mark} {i['title']} = {i['body']!r} ({i.get('valueType') or 'string'})")
+            else:
+                out.append(f"--- [{i['kind']} #{i['seq']}] id={i['id']}{mark}\n{i['body']}")
         return "\n\n".join(out)[:30000]
 
     def _propose(ctx: RunContext[Deps], kind: str, summary: str, args: dict) -> str:
