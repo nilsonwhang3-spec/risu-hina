@@ -251,6 +251,42 @@ def patch(chat_key: str) -> dict:
     return {"chatKey": chat_key, "memory": out, "changed": changed, "entries": len(rows)}
 
 
+def changes(chat_key: str) -> dict:
+    """What a write-back of this chat's memory would change, as counts."""
+    rows = db.query("SELECT body, original FROM memories WHERE chat_key = ?", (chat_key,))
+    changed = sum(1 for r in rows if (r["original"] or "") != (r["body"] or ""))
+    return {"changed": changed, "total": changed, "entries": len(rows)}
+
+
+def rows_for_checkpoint(chat_key: str) -> dict:
+    """The memory as whole rows plus its shell, so a checkpoint can put back
+    exactly this - ids included, because proposals name entries by id."""
+    shell_row = db.one("SELECT value FROM meta WHERE key = ?", (_shell_key(chat_key),))
+    return {
+        "shell": db.unjs(shell_row["value"] if shell_row else None, {}) or {},
+        "rows": [dict(db.row_to_dict(r) or {}) for r in db.query(
+            "SELECT * FROM memories WHERE chat_key = ? ORDER BY kind, seq", (chat_key,))],
+    }
+
+
+def restore_rows(char_key: str, chat_key: str, snap: dict) -> int:
+    rows = list(snap.get("rows") or [])
+    db.execute("DELETE FROM memories WHERE chat_key = ?", (chat_key,))
+    if rows:
+        cols = ("id", "chat_key", "char_key", "kind", "seq", "title", "body",
+                "original", "extra_json", "created_at", "updated_at")
+        db.executemany(
+            f"INSERT INTO memories({', '.join(cols)}) VALUES({', '.join('?' * len(cols))})",
+            [tuple(r.get(c) if c not in ("chat_key", "char_key") else (chat_key if c == "chat_key" else char_key)
+                   for c in cols) for r in rows],
+        )
+    db.execute(
+        "INSERT INTO meta(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (_shell_key(chat_key), db.js(snap.get("shell") or {})),
+    )
+    return len(rows)
+
+
 def rebase(chat_key: str) -> int:
     """Make the current text the new baseline, after a successful write-back."""
     n = db.execute(

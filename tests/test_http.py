@@ -641,6 +641,122 @@ def test_lore_editing(s: Server, ws: dict) -> None:
     check("editing a missing entry is 404", st == 404, str(st))
 
 
+def test_unified_writeback(s: Server, ws: dict) -> None:
+    """Turns, this chat's lorebook and its memory follow one shape.
+
+    Working copy against a baseline, one /patch that carries all three, one
+    /commit that moves all three baselines, one checkpoint that holds all
+    three. The lorebook used to have none of this: an edit was saved to a
+    table nothing wrote back, and a re-upload put a second copy next to it.
+    """
+    print("test_unified_writeback")
+    ck = ws["charKey"]
+    # A chat of its own, with local lore, so the other tests' leftovers on
+    # chatA do not bleed into the counts.
+    chat = make_chat("chatL", "로어 챗", 6)
+    chat["localLore"] = [
+        {"key": ["성소"], "comment": "성소", "content": "원래 성소 설명"},
+        {"key": ["의식"], "comment": "의식", "content": "원래 의식 설명"},
+    ]
+    st, body = s.post("/workspace", payload([chat]))
+    check("chat with local lore ingested", st == 200, str(st))
+    tk = next(c["chatKey"] for c in body["workspace"]["chats"] if c["chatId"] == "chatL")
+
+    st, body = s.get(q("/changes", chatKey=tk))
+    check("changes endpoint answers", st == 200, str(st))
+    check("a fresh chat has nothing pending", body.get("total") == 0, str(body)[:200])
+
+    st, body = s.get(q("/lore", charKey=ck, scope="local"))
+    mine = [e for e in (body.get("lore") or []) if e["chatKey"] == tk]
+    check("both local entries are listed for this chat", len(mine) == 2, str(len(mine)))
+    first, second = mine
+
+    # Edit one, delete one, add one - and change a turn and a memory too.
+    entry = dict(first["entry"]); entry["content"] = "고친 성소 설명"
+    s.post("/lore/update", {"charKey": ck, "id": first["id"], "entry": entry})
+    s.post("/lore/delete", {"charKey": ck, "id": second["id"]})
+    st, body = s.post("/lore", {"charKey": ck, "scope": "local", "chatKey": tk,
+                               "entry": {"key": ["새"], "comment": "새 항목", "content": "새로 넣음"}})
+    added_id = body.get("id")
+    s.post("/turn", {"chatKey": tk, "msgId": "chatL-m1", "after": "고친 턴"})
+    st, body = s.get(q("/memory", chatKey=tk))
+    m0 = (body.get("items") or [])[0]
+    s.post("/memory/update", {"chatKey": tk, "id": m0["id"], "body": "고친 기억"})
+
+    st, body = s.get(q("/lore", charKey=ck, scope="local"))
+    mine = [e for e in (body.get("lore") or []) if e["chatKey"] == tk]
+    check("the deleted entry is no longer listed", all(e["id"] != second["id"] for e in mine), str(len(mine)))
+    check("the added one is", any(e["id"] == added_id for e in mine))
+    st, body = s.get(q("/lore/get", charKey=ck, id=second["id"]))
+    check("and cannot be fetched", st == 404, str(st))
+
+    st, ch = s.get(q("/changes", chatKey=tk))
+    check("turn change counted", ch["turns"]["edited"] == 1, str(ch["turns"]))
+    check("lore changes counted by kind",
+          (ch["lore"]["added"], ch["lore"]["edited"], ch["lore"]["deleted"]) == (1, 1, 1), str(ch["lore"]))
+    check("memory change counted", ch["memory"]["changed"] == 1, str(ch["memory"]))
+    check("the total adds up", ch["total"] == 5, str(ch["total"]))
+
+    st, patch = s.get(q("/patch", chatKey=tk))
+    check("patch carries the lorebook", isinstance(patch.get("lore"), dict), str(patch.keys()))
+    local = patch["lore"]["localLore"]
+    check("the write list has edit and add, not the deletion",
+          len(local) == 2 and any(e.get("content") == "고친 성소 설명" for e in local)
+          and not any(e.get("content") == "원래 의식 설명" for e in local), str(local)[:200])
+    check("patch carries the memory", "hypaV3Data" in (patch.get("memory") or {}).get("data", {}),
+          str(patch.get("memory"))[:200])
+    check("with its count", patch["memory"]["changed"] == 1, str(patch["memory"].get("changed")))
+
+    # Editing back to the baseline is not a change.
+    back = dict(first["entry"])
+    s.post("/lore/update", {"charKey": ck, "id": first["id"], "entry": back})
+    st, body = s.get(q("/lore/get", charKey=ck, id=first["id"]))
+    check("an entry edited back to its original is original again", body["origin"] == "original", body["origin"])
+    s.post("/lore/update", {"charKey": ck, "id": first["id"], "entry": entry})
+
+    # A checkpoint holds all three; restoring brings all three back.
+    st, body = s.post("/checkpoint", {"chatKey": tk, "label": "full"})
+    cid = body["id"]
+    s.post("/lore/delete", {"charKey": ck, "id": first["id"]})
+    s.post("/memory/update", {"chatKey": tk, "id": m0["id"], "body": "또 고친 기억"})
+    s.post("/turn", {"chatKey": tk, "msgId": "chatL-m1", "after": "또 고친 턴"})
+    st, body = s.post("/checkpoint/restore", {"chatKey": tk, "id": cid})
+    check("restore reports lore and memory", body.get("lore") is not None and body.get("memory") is not None, str(body))
+    st, body = s.get(q("/lore/get", charKey=ck, id=first["id"]))
+    check("the lore entry deleted after the checkpoint is back", st == 200 and body["entry"]["content"] == "고친 성소 설명", f"{st} {str(body)[:120]}")
+    st, body = s.get(q("/memory", chatKey=tk))
+    m0b = next(i for i in body["items"] if i["id"] == m0["id"])
+    check("memory went back to the checkpoint, id kept", m0b["body"] == "고친 기억", m0b["body"])
+    st, body = s.get(q("/turns", chatKey=tk))
+    t1 = next(t for t in body["turns"] if t["msgId"] == "chatL-m1")
+    check("turn went back too", t1["body"] == "고친 턴", t1["body"])
+
+    # Re-opening the panel keeps the working lorebook - no second copy.
+    st, body = s.post("/workspace", payload([chat]))
+    st, body = s.get(q("/lore", charKey=ck, scope="local"))
+    mine = [e for e in (body.get("lore") or []) if e["chatKey"] == tk]
+    check("re-upload does not duplicate edited lore", len(mine) == 2, str([e["entry"].get("comment") for e in mine]))
+    check("the edit is still there", any(e["entry"].get("content") == "고친 성소 설명" for e in mine))
+
+    # One commit moves every baseline.
+    st, body = s.post("/commit", {"chatKey": tk, "label": "after write"})
+    check("commit reports lore and memory", body.get("lore") == 3 and body.get("memory") == 1, str(body))
+    st, ch = s.get(q("/changes", chatKey=tk))
+    check("nothing pending after commit", ch["total"] == 0, str(ch)[:200])
+    st, body = s.get(q("/lore", charKey=ck, scope="local"))
+    mine = [e for e in (body.get("lore") or []) if e["chatKey"] == tk]
+    check("committed entries are original", all(e["origin"] == "original" for e in mine), str([e["origin"] for e in mine]))
+    check("the committed deletion is gone for good", len(mine) == 2, str(len(mine)))
+
+    # A forced reload resets the lorebook like everything else.
+    s.post("/lore/delete", {"charKey": ck, "id": mine[0]["id"]})
+    st, body = s.post("/workspace", {**payload([chat]), "force": True})
+    st, body = s.get(q("/lore", charKey=ck, scope="local"))
+    mine = [e for e in (body.get("lore") or []) if e["chatKey"] == tk]
+    check("force reload restores RisuAI's lorebook", len(mine) == 2 and all(e["origin"] == "original" for e in mine),
+          str([(e["origin"], e["entry"].get("content")) for e in mine]))
+
+
 def test_action_queue(s: Server, ws: dict) -> None:
     """The queue's HTTP surface.
 
@@ -1036,6 +1152,7 @@ def main() -> int:
             test_agent_output_budget(s, ws)
             test_memory_as_rows(s, ws)
             test_lore_editing(s, ws)
+            test_unified_writeback(s, ws)
             test_action_queue(s, ws)
         test_agent_presets(s)
         test_preset_selection(s)

@@ -481,18 +481,38 @@ def reset_working(tk: str) -> None:
 
 # --- lorebook ---------------------------------------------------------------
 
-def ingest_lore(ck: str, global_lore: list, chat_key_for_local: str | None, local_lore: list) -> None:
-    db.execute("DELETE FROM lore_entries WHERE char_key = ? AND origin = 'original'", (ck,))
+def ingest_lore(ck: str, global_lore: list, local_by_chat: dict[str, tuple[list, bool]],
+                *, global_reset: bool) -> None:
+    """Load lorebook entries the same way turns and memory are loaded.
+
+    Same reset rule as the turns, decided by the same call: a chat whose
+    working turns were kept also keeps its working lore. The previous version
+    deleted only the `original` rows and re-inserted them, which left every
+    edited row beside a fresh copy of what it was edited from - the entry
+    showed twice, and one of the two was a stale original.
+
+    `local_by_chat` maps chat_key -> (entries, reset). A chat seen for the first
+    time has no rows and is loaded regardless of the flag.
+    """
     now = db.now()
     rows = []
-    for i, e in enumerate(global_lore or []):
-        rows.append((uuid.uuid4().hex, ck, "global", None, i, db.js(e), "original", now))
-    for i, e in enumerate(local_lore or []):
-        rows.append((uuid.uuid4().hex, ck, "local", chat_key_for_local, i, db.js(e), "original", now))
+    have_global = db.one("SELECT 1 AS x FROM lore_entries WHERE char_key = ? AND scope = 'global' LIMIT 1", (ck,))
+    if global_reset or have_global is None:
+        db.execute("DELETE FROM lore_entries WHERE char_key = ? AND scope = 'global'", (ck,))
+        for i, e in enumerate(global_lore or []):
+            rows.append((uuid.uuid4().hex, ck, "global", None, i, db.js(e), db.js(e), "original", now))
+    for tk, (entries, reset) in local_by_chat.items():
+        have = db.one("SELECT 1 AS x FROM lore_entries WHERE char_key = ? AND scope = 'local' "
+                      "AND chat_key = ? LIMIT 1", (ck, tk))
+        if not (reset or have is None):
+            continue
+        db.execute("DELETE FROM lore_entries WHERE char_key = ? AND scope = 'local' AND chat_key = ?", (ck, tk))
+        for i, e in enumerate(entries or []):
+            rows.append((uuid.uuid4().hex, ck, "local", tk, i, db.js(e), db.js(e), "original", now))
     if rows:
         db.executemany(
-            "INSERT INTO lore_entries(id, char_key, scope, chat_key, seq, entry_json, origin, created_at) "
-            "VALUES(?,?,?,?,?,?,?,?)",
+            "INSERT INTO lore_entries(id, char_key, scope, chat_key, seq, entry_json, original_json, "
+            "origin, created_at) VALUES(?,?,?,?,?,?,?,?,?)",
             rows,
         )
 
@@ -513,7 +533,9 @@ def add_lore(ck: str, entry: dict, scope: str = "global", tk: str | None = None)
 
 
 def lore(ck: str, scope: str | None = None) -> list[dict]:
-    sql = "SELECT * FROM lore_entries WHERE char_key = ?"
+    """Live entries only: a deleted original stays as a row until the deletion
+    is committed (see `delete_lore`), but it is not something to list."""
+    sql = "SELECT * FROM lore_entries WHERE char_key = ? AND origin <> 'deleted'"
     params: list[Any] = [ck]
     if scope:
         sql += " AND scope = ?"
@@ -534,19 +556,25 @@ def update_lore(lore_id: str, entry: dict) -> dict:
     field-wise merge would have to know all of them to avoid dropping one. The
     caller reads, changes, and writes the object back whole.
     """
-    row = db.one("SELECT * FROM lore_entries WHERE id = ?", (lore_id,))
+    row = db.one("SELECT * FROM lore_entries WHERE id = ? AND origin <> 'deleted'", (lore_id,))
     if row is None:
         raise LookupError("없는 로어북 항목입니다")
-    db.execute(
-        "UPDATE lore_entries SET entry_json = ?, origin = CASE origin "
-        "WHEN 'original' THEN 'edited' ELSE origin END WHERE id = ?",
-        (db.js(entry), lore_id),
-    )
+    text = db.js(entry)
+    # Against the baseline, not against the last save: editing an entry back
+    # to what RisuAI holds is not a change, and must not be written as one.
+    if row["origin"] == "added":
+        origin = "added"
+    elif row["original_json"] is not None and row["original_json"] == text:
+        origin = "original"
+    else:
+        origin = "edited"
+    db.execute("UPDATE lore_entries SET entry_json = ?, origin = ? WHERE id = ?",
+               (text, origin, lore_id))
     return {"id": lore_id, "entry": entry}
 
 
 def lore_entry(lore_id: str) -> dict | None:
-    row = db.one("SELECT * FROM lore_entries WHERE id = ?", (lore_id,))
+    row = db.one("SELECT * FROM lore_entries WHERE id = ? AND origin <> 'deleted'", (lore_id,))
     if row is None:
         return None
     d = db.row_to_dict(row) or {}
@@ -557,7 +585,74 @@ def lore_entry(lore_id: str) -> dict | None:
 
 
 def delete_lore(lore_id: str) -> int:
-    return db.execute("DELETE FROM lore_entries WHERE id = ?", (lore_id,)).rowcount or 0
+    """Delete from the working copy.
+
+    An entry we added is simply gone. One that came from RisuAI is kept as a
+    `deleted` row instead: the write-back sends the whole list, so the deletion
+    reaches RisuAI either way, but keeping the row is what lets the change
+    summary say "1 deleted", a snapshot bring it back, and a commit know the
+    baseline it is moving from.
+    """
+    row = db.one("SELECT origin FROM lore_entries WHERE id = ?", (lore_id,))
+    if row is None or row["origin"] == "deleted":
+        return 0
+    if row["origin"] == "added":
+        return db.execute("DELETE FROM lore_entries WHERE id = ?", (lore_id,)).rowcount or 0
+    return db.execute("UPDATE lore_entries SET origin = 'deleted' WHERE id = ?", (lore_id,)).rowcount or 0
+
+
+def lore_changes(ck: str, tk: str) -> dict:
+    """What a write-back of this chat's lorebook would change, as counts."""
+    rows = db.query(
+        "SELECT origin FROM lore_entries WHERE char_key = ? AND scope = 'local' AND chat_key = ?",
+        (ck, tk))
+    out = {"added": 0, "edited": 0, "deleted": 0}
+    for r in rows:
+        if r["origin"] in out:
+            out[r["origin"]] += 1
+    out["total"] = out["added"] + out["edited"] + out["deleted"]
+    return out
+
+
+def rebase_lore(ck: str, tk: str) -> int:
+    """Make the working lorebook the baseline, after RisuAI accepted it.
+
+    Same meaning as `rebase_original` for turns and `memory.rebase`: deleted
+    rows go for good, everything else becomes `original` as it stands now.
+    """
+    n = db.execute(
+        "DELETE FROM lore_entries WHERE char_key = ? AND scope = 'local' AND chat_key = ? "
+        "AND origin = 'deleted'", (ck, tk)).rowcount or 0
+    n += db.execute(
+        "UPDATE lore_entries SET origin = 'original', original_json = entry_json "
+        "WHERE char_key = ? AND scope = 'local' AND chat_key = ? AND origin <> 'original'",
+        (ck, tk)).rowcount or 0
+    return n
+
+
+def lore_rows(ck: str, tk: str) -> list[dict]:
+    """This chat's local entries, whole rows, for a checkpoint."""
+    return [
+        dict(db.row_to_dict(r) or {})
+        for r in db.query(
+            "SELECT * FROM lore_entries WHERE char_key = ? AND scope = 'local' AND chat_key = ? "
+            "ORDER BY seq", (ck, tk))
+    ]
+
+
+def restore_lore_rows(ck: str, tk: str, rows: list[dict]) -> int:
+    """Put back exactly the rows a checkpoint captured, ids included, so an
+    agent proposal that names an entry still names the same one afterwards."""
+    db.execute("DELETE FROM lore_entries WHERE char_key = ? AND scope = 'local' AND chat_key = ?", (ck, tk))
+    if rows:
+        db.executemany(
+            "INSERT INTO lore_entries(id, char_key, scope, chat_key, seq, entry_json, original_json, "
+            "origin, created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+            [(r["id"], ck, "local", tk, int(r.get("seq") or 0), r.get("entry_json") or "{}",
+              r.get("original_json"), r.get("origin") or "original",
+              float(r.get("created_at") or db.now())) for r in rows],
+        )
+    return len(rows)
 
 
 # --- search -----------------------------------------------------------------

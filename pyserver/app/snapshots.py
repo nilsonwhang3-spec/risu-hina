@@ -10,17 +10,26 @@ from __future__ import annotations
 import uuid
 
 from . import chatfmt, config, db, log, store
+from . import memory as mem
 
 
 def create(chat_key: str, label: str) -> str:
+    """Snapshot the whole chat: turns, this chat's lorebook, its memory.
+
+    One unit, because that is what the user restores. A snapshot that put the
+    turns back but left the lorebook holding summaries of turns that had just
+    reappeared would be worse than no snapshot.
+    """
     md = store.export_markdown(chat_key)
     row = store.chat_row(chat_key) or {}
+    ck = row.get("char_key") or ""
     cid = uuid.uuid4().hex
     db.execute(
-        "INSERT INTO checkpoints(id, chat_key, label, markdown, meta_json, message_count, created_at) "
-        "VALUES(?,?,?,?,?,?,?)",
+        "INSERT INTO checkpoints(id, chat_key, label, markdown, meta_json, message_count, created_at, "
+        "lore_json, memory_json) VALUES(?,?,?,?,?,?,?,?,?)",
         (cid, chat_key, label, md, row.get("meta_json") or "{}",
-         chatfmt.message_count(md), db.now()),
+         chatfmt.message_count(md), db.now(),
+         db.js(store.lore_rows(ck, chat_key)), db.js(mem.rows_for_checkpoint(chat_key))),
     )
     keep = int((config.section("limits") or {}).get("checkpointKeep") or 50)
     db.execute(
@@ -55,6 +64,14 @@ def restore(chat_key: str, checkpoint_id: str) -> dict:
         chat_row.get("chat_index"),
         force=True,
     )
-    log.info("restored chat=%s checkpoint=%s messages=%s",
-             chat_key, checkpoint_id, row["message_count"])
-    return {"ok": True, "restored": checkpoint_id, "messageCount": row["message_count"]}
+    # Older checkpoints carry turns only; they restore what they have and say so.
+    ck = chat_row.get("char_key") or ""
+    lore_n = mem_n = None
+    if row["lore_json"] is not None:
+        lore_n = store.restore_lore_rows(ck, chat_key, db.unjs(row["lore_json"], []) or [])
+    if row["memory_json"] is not None:
+        mem_n = mem.restore_rows(ck, chat_key, db.unjs(row["memory_json"], {}) or {})
+    log.info("restored chat=%s checkpoint=%s messages=%s lore=%s memory=%s",
+             chat_key, checkpoint_id, row["message_count"], lore_n, mem_n)
+    return {"ok": True, "restored": checkpoint_id, "messageCount": row["message_count"],
+            "lore": lore_n, "memory": mem_n}

@@ -103,7 +103,8 @@ def materialize(payload: dict, *, force: bool = False) -> dict:
     _write(base / "card.md", card_markdown(card))
 
     ingested = []
-    local_lore_seen: tuple[str, list] | None = None
+    local_lore: dict[str, tuple[list, bool]] = {}
+    any_reset = False
     for it in items:
         chat = it["chat"]
         summary = store.ingest_chat(cha_id, chat, it["chatIndex"], force=force)
@@ -125,16 +126,19 @@ def materialize(payload: dict, *, force: bool = False) -> dict:
         # Same reset rule as the turns, decided by the same call - otherwise
         # re-opening the panel would discard memory edits while keeping turn
         # edits, which is the kind of inconsistency nobody would guess at.
-        mem.ingest(ck, tk, memory, reset=bool(summary.get("workingReset")))
+        reset = bool(summary.get("workingReset"))
+        mem.ingest(ck, tk, memory, reset=reset)
         summary["memoryKinds"] = sorted(memory.keys())
         ingested.append(summary)
-        if local_lore_seen is None and chat.get("localLore"):
-            local_lore_seen = (tk, list(chat.get("localLore") or []))
+        # Every chat's own lorebook, under the same reset rule as its turns and
+        # memory. The earlier version kept only the first chat that had any.
+        local_lore[tk] = (list(chat.get("localLore") or []), reset)
+        any_reset = any_reset or reset
 
-    lore_tk, local_lore = local_lore_seen or (None, [])
-    store.ingest_lore(ck, list(card.get("globalLore") or []), lore_tk, local_lore)
+    store.ingest_lore(ck, list(card.get("globalLore") or []), local_lore, global_reset=any_reset)
     _write(base / "lore.json", json.dumps(
-        {"globalLore": card.get("globalLore") or [], "localLore": local_lore},
+        {"globalLore": card.get("globalLore") or [],
+         "localLore": {tk: entries for tk, (entries, _) in local_lore.items()}},
         ensure_ascii=False, indent=2))
 
     (base / "scripts").mkdir(parents=True, exist_ok=True)

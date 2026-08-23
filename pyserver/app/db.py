@@ -364,6 +364,14 @@ ADD_COLUMNS = [
     ("agent_presets", "instructions", "TEXT NOT NULL DEFAULT ''"),
     ("skills", "kind", "TEXT NOT NULL DEFAULT 'md'"),
     ("skills", "filename", "TEXT NOT NULL DEFAULT ''"),
+    # A checkpoint covers the whole chat - turns, this chat's lorebook entries
+    # and its long-term memory - because that is the unit the user restores.
+    # Older rows have NULL here and restore turns only.
+    ("checkpoints", "lore_json", "TEXT"),
+    ("checkpoints", "memory_json", "TEXT"),
+    # The entry as it came from RisuAI, so an edit can be told from a no-op and
+    # a commit knows what the new baseline is. NULL for rows that predate it.
+    ("lore_entries", "original_json", "TEXT"),
 ]
 
 
