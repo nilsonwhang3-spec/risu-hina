@@ -22,3 +22,6 @@ docs/00-environment.md
 
 # Release staging, rebuilt by tools/release.py
 release/
+
+# Written by the installer when the data lives outside the install.
+pyserver/datadir.txt

@@ -66,15 +66,57 @@ def _env_int(name: str, default: int) -> int:
 
 # --- paths ------------------------------------------------------------------
 
+# A one-line file next to run.py holding an absolute path. Written by the
+# installer when the operator wants the data somewhere other than beside the
+# code - on a different drive, or on a disk that gets backed up.
+DATADIR_FILE = "datadir.txt"
+
+
 def _default_data_dir() -> Path:
-    # The data root deliberately sits outside the versioned package directory
-    # (plan section 8) so a backend self-update can swap versions/<v>/ wholesale
-    # without ever touching the database, config, token or workspaces.
+    """Where the database, config, token and workspaces live.
+
+    Three sources, in order:
+
+        RISUELF_DATA_DIR      one launch, for testing
+        pyserver/datadir.txt  this install, for good
+        <install>/data        the default
+
+    The file matters more than it looks. `Win32_Process.Create` - which is how
+    the control script detaches the server from an ssh session - runs under the
+    WMI service and does not inherit the caller's environment, so a data
+    directory passed as an env var would silently not arrive. A file is also
+    the honest semantic: where the data lives is a property of the install, and
+    every supervisor (NSSM, PM2, a double-click) has to agree about it.
+
+    The default sits outside the versioned package directory (plan section 8)
+    so a self-update can swap versions/<v>/ wholesale without ever touching the
+    database, config, token or workspaces.
+    """
     explicit = _ENV("RISUELF_DATA_DIR")
     if explicit:
         return Path(explicit).expanduser().resolve()
+
     here = Path(__file__).resolve().parent          # .../app
     pkg_root = here.parent                          # .../pyserver  or  versions/<v>
+
+    pinned = pkg_root / DATADIR_FILE
+    try:
+        # utf-8-sig, because whatever wrote this may have added a BOM -
+        # PowerShell 5.1's `Set-Content -Encoding utf8` does, and so does
+        # Notepad. A BOM left in place becomes part of the path.
+        text = pinned.read_text(encoding="utf-8-sig").strip().strip("\"'")
+    except OSError:
+        text = ""
+    if text:
+        candidate = Path(text).expanduser()
+        if candidate.is_absolute():
+            return candidate.resolve()
+        # A relative path here would resolve against the service's working
+        # directory, which on Windows is somewhere in System32. Refusing is
+        # the only outcome that says what is wrong.
+        print(f"[{APP_NAME}] {DATADIR_FILE} must hold an absolute path, "
+              f"got {text!r} - ignoring it", file=sys.stderr)
+
     install_root = pkg_root.parent
     if install_root.name.lower() == "versions":
         install_root = install_root.parent

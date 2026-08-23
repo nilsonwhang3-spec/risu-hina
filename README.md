@@ -49,8 +49,8 @@ RisuAI / PocketRisu (브라우저)
 
 ## 설치
 
-1. **백엔드** — `pyserver/` 를 서버에 두고 `start.bat`(또는 `start.sh`)를 실행한다.
-   자세한 것은 [docs/00-deployment.md](docs/00-deployment.md).
+1. **백엔드** — 릴리스의 zip을 서버에 `pyserver/` 로 풀고 `risuelf_ctl.ps1 -Action setup` → `-Action start`.
+   설치 위치·데이터 위치·포트를 바꾸는 법까지 [docs/05-install.md](docs/05-install.md)에 있다.
 2. **플러그인** — 릴리스의 `risu-elf.js` 를 RisuAI 플러그인 화면에서 설치한다.
    이후 업데이트는 RisuAI가 `//@update-url` 로 확인한다.
 3. 플러그인 우측 상단 ⚙ → **연결**에서 백엔드 URL을, **에이전트**에서 모델 자격증명을 넣는다.

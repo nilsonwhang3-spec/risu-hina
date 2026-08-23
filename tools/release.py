@@ -39,6 +39,9 @@ BACKEND_DIRS = ["app"]
 # Never ship these, whatever happens to be on disk.
 EXCLUDE_DIRS = {"__pycache__", ".venv", "data", "dist"}
 EXCLUDE_SUFFIXES = {".pyc", ".pyo", ".log", ".db"}
+# datadir.txt belongs to one install; shipping one would point a fresh
+# install at somebody else's data directory.
+EXCLUDE_NAMES = {"datadir.txt", "server.log"}
 
 
 def version() -> str:
@@ -70,7 +73,7 @@ def build_backend() -> Path:
     with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as zf:
         for name in BACKEND_FILES:
             f = src / name
-            if f.is_file():
+            if f.is_file() and name not in EXCLUDE_NAMES:
                 zf.write(f, name)
         for name in BACKEND_DIRS:
             for f in sorted((src / name).rglob("*")):
@@ -78,7 +81,7 @@ def build_backend() -> Path:
                     continue
                 if any(part in EXCLUDE_DIRS for part in f.relative_to(src).parts):
                     continue
-                if f.suffix in EXCLUDE_SUFFIXES:
+                if f.suffix in EXCLUDE_SUFFIXES or f.name in EXCLUDE_NAMES:
                     continue
                 zf.write(f, str(f.relative_to(src)).replace("\\", "/"))
     return dest

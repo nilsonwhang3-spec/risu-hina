@@ -1,0 +1,252 @@
+# 05. 최초 설치
+
+test-server에서 실제로 처음부터 돌려 보고 쓴 절차다. 명령과 출력은 실행한 것이다.
+
+**두 조각을 따로 설치한다.** 백엔드는 서버(PocketRisu가 도는 그 기계)에,
+플러그인은 RisuAI에. 순서는 백엔드가 먼저다 — 플러그인이 처음 열릴 때 백엔드에 붙는다.
+
+---
+
+## 준비
+
+| 필요한 것 | 확인 |
+|---|---|
+| Python **3.10 이상** (3.11 권장) | `py -3.11 --version` |
+| 백엔드를 둘 디렉터리 | 어디든 된다. §2 참조 |
+| PocketRisu 또는 web RisuAI | 이미 쓰고 있는 것 |
+
+파이썬은 설치 스크립트가 알아서 찾는다. `py -3.11` → `C:\Program Files\Python31x` →
+`%LOCALAPPDATA%\Programs\Python` → PATH 순이고, 어느 것을 골랐는지 출력한다.
+원하는 것이 따로 있으면 `-Python <경로>` 로 지정한다.
+
+---
+
+## 1. 백엔드
+
+### 1-1. 내려받아 검증한다
+
+릴리스에서 세 파일을 받는다.
+
+```
+risu-elf-backend-<버전>.zip
+SHA256SUMS.txt
+risu-elf.js               ← 플러그인. 3단계에서 쓴다
+```
+
+**해시를 먼저 확인한다.** 이 zip의 내용이 곧 돌아갈 서버가 되므로, 검증하지 않은
+다운로드를 푸는 것은 남이 준 코드를 그냥 실행하는 것과 같다.
+
+```powershell
+$want = (Get-Content SHA256SUMS.txt | Where-Object { $_ -like '*backend*' }).Split(' ')[0]
+$got  = (Get-FileHash risu-elf-backend-0.1.0.zip -Algorithm SHA256).Hash.ToLower()
+if ($want -ne $got) { throw 'hash mismatch' } else { 'hash ok' }
+```
+
+### 1-2. 푼다
+
+zip 안에는 `app/`, `run.py`, `start.bat`, `start.sh`, `risuelf_ctl.ps1`, `requirements.in`이
+들어 있다. 이것들이 **`pyserver/`** 라는 이름의 폴더에 들어가야 한다.
+
+```powershell
+$install = 'D:\code\risu-elf'          # 원하는 곳으로 바꿔도 된다 (§2)
+New-Item -ItemType Directory -Force "$install\pyserver" | Out-Null
+Expand-Archive risu-elf-backend-0.1.0.zip -DestinationPath "$install\pyserver" -Force
+```
+
+결과:
+
+```
+D:\code\risu-elf\
+  pyserver\
+    app\  run.py  start.bat  start.sh  risuelf_ctl.ps1  requirements.in
+```
+
+`data\` 는 아직 없다. 다음 단계가 만든다.
+
+### 1-3. 설치
+
+```powershell
+powershell -ExecutionPolicy Bypass -File D:\code\risu-elf\pyserver\risuelf_ctl.ps1 -Action setup
+```
+
+```
+setup: using C:\Program Files\Python311\python.exe
+setup: creating venv
+setup: installing dependencies
+setup: fastapi 0.115.6 uvicorn 0.34.0
+setup: data dir D:\code\risu-elf\data
+```
+
+전용 venv를 만들고 `requirements.in`(버전 고정)을 설치한다. 시스템 파이썬은 건드리지 않는다.
+
+### 1-4. 기동
+
+```powershell
+powershell -ExecutionPolicy Bypass -File D:\code\risu-elf\pyserver\risuelf_ctl.ps1 -Action start
+```
+
+```
+install    D:\code\risu-elf
+data       D:\code\risu-elf\data
+processes  2 (venv launcher + server, normal)
+           pid 21404
+           pid 20596
+listening  yes on 6020
+health     {"service": "risu-elf", "version": "0.1.0", "ok": true, "agentReady": false, ...}
+```
+
+> **`processes 2` 는 정상이다.** 윈도우 venv의 `Scripts\python.exe` 는
+> `venvlauncher.exe` 라서 진짜 인터프리터를 자식으로 띄우고 자기는 부모로 남는다.
+> 서버는 하나다 — `listening` 과 `health` 가 그것을 말한다.
+
+`agentReady: false` 도 정상이다. 아직 모델 자격증명을 넣지 않았다.
+
+**다른 수퍼바이저를 쓸 거라면** `risuelf_ctl.ps1` 대신 `start.bat`(또는 `start.sh`)을
+감싸면 된다. NSSM·PM2·systemd 무엇이든, **런처를 직접 실행해야 한다** — 자체 업데이트가
+exit 75로 재진입을 요청하는데 그 루프가 런처 안에 있기 때문이다.
+
+```
+nssm install RisuElf "D:\code\risu-elf\pyserver\start.bat"
+pm2 start D:\code\risu-elf\pyserver\start.bat --name risu-elf
+```
+
+### 1-5. 토큰
+
+```powershell
+powershell -ExecutionPolicy Bypass -File D:\code\risu-elf\pyserver\risuelf_ctl.ps1 -Action token
+```
+
+```
+token: 17sFfQSPMjg6kPH6gi_D8jLg_020Z5zJV1IEmhchbd0
+```
+
+**PocketRisu를 같은 기계에서 쓰면 토큰이 필요 없다.** PocketRisu의 노드 서버가 대신
+요청하므로 백엔드가 보는 클라이언트 IP는 언제나 127.0.0.1이고, 루프백은 면제다.
+web RisuAI나 다른 기계에서 직접 붙을 때만 필요하다 — 그 경우 토큰은 **강제**이며
+설정으로 끌 수 없다.
+
+---
+
+## 2. 설치 위치를 바꾸려면
+
+**코드 위치는 그냥 바꾸면 된다.** 하드코딩된 경로가 없다 — `risuelf_ctl.ps1` 은
+자기가 놓인 자리(`$PSScriptRoot`)에서 모든 경로를 계산하고, 프로세스도 **자기 설치의
+`run.py` 경로로** 찾는다. 폴더 이름이 `risu-elf` 일 필요도 없다.
+
+```powershell
+$install = 'E:\apps\myelf'
+Expand-Archive risu-elf-backend-0.1.0.zip -DestinationPath "$install\pyserver" -Force
+powershell -ExecutionPolicy Bypass -File "$install\pyserver\risuelf_ctl.ps1" -Action setup
+```
+
+지켜야 할 규칙은 **하나**뿐이다: 압축 내용이 **`pyserver\`** 라는 이름의 폴더에 들어가야 한다.
+`data\` 는 그 **옆**에(위 폴더 밑에) 생긴다.
+
+```
+<install>\
+  pyserver\   ← 코드. 업데이트가 통째로 갈아끼운다
+  data\       ← DB·설정·토큰·워크스페이스. 업데이트가 절대 건드리지 않는다
+```
+
+이 구조가 자체 업데이트의 전제다. 데이터가 코드 **안에** 있으면 버전 교체가 매번
+사용자의 챗을 밟고 지나가야 한다.
+
+### 데이터만 다른 곳에 두려면
+
+다른 드라이브나 백업되는 디스크에 두고 싶을 때.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "$install\pyserver\risuelf_ctl.ps1" `
+  -Action setup -DataDir 'E:\backup\risu-elf-data'
+```
+
+```
+setup: pinned data dir in E:\apps\myelf\pyserver\datadir.txt
+setup: data dir E:\backup\risu-elf-data
+```
+
+`pyserver\datadir.txt` 한 줄에 절대경로가 적힌다. **launch 때 넘기는 값이 아니라
+설치에 박히는 값이다** — 그래야 NSSM이든 PM2든 손으로 띄우든 전부 같은 곳을 본다.
+(제어 스크립트는 서버를 ssh 세션에서 떼어내려고 `Win32_Process.Create` 로 띄우는데,
+그건 WMI 서비스 밑에서 돌아서 환경변수를 하나도 물려받지 않는다. 파일이어야 하는 이유다.)
+
+이후 `-DataDir` 없이 불러도 `status`·`token` 이 실제 위치를 보고한다.
+
+되돌리려면 `-DataDir` 없이 `setup` 을 다시 돌리거나 `datadir.txt` 를 지운다.
+**옮기고 싶으면 서버를 멈추고 `data\` 폴더를 통째로 옮긴 뒤** 다시 `setup -DataDir` 한다.
+스크립트는 데이터를 옮겨 주지 않는다 — 옮기다 만 상태가 조용히 생기는 것보다 낫다.
+
+### 포트를 바꾸려면
+
+```powershell
+... -Action start -Port 6030
+```
+
+`stop`·`status`·`token` 에도 같은 `-Port` 를 준다(상태 확인이 그 포트를 본다).
+`start.bat 6030` / `start.sh 6030` 도 같다. 환경변수 `RISUELF_PORT` 도 읽는다.
+
+### 요약
+
+| 바꾸고 싶은 것 | 방법 |
+|---|---|
+| 코드 위치 | 그냥 다른 데 풀면 된다. `pyserver\` 이름만 지킬 것 |
+| 데이터 위치 | `setup -DataDir <절대경로>` (`datadir.txt` 에 박힌다) |
+| 포트 | `-Port` 또는 `RISUELF_PORT` |
+| 인터프리터 | `setup -Python <python.exe 경로>` |
+| 바인딩 주소 | `RISUELF_HOST` — **바꾸기 전에 §4를 읽을 것** |
+
+---
+
+## 3. 플러그인
+
+1. RisuAI → 설정 → 플러그인 → **Add Plugin** 에서 `risu-elf.js` 를 넣는다.
+2. 챗 화면에 **Risu Elf** 버튼이 생긴다. 눌러서 연다.
+3. 오른쪽 위 **⚙ → 연결** 에서 백엔드 URL을 넣는다. 같은 기계면
+   `http://127.0.0.1:6020`. 다른 기계면 그 주소와 §1-5의 토큰.
+4. **⚙ → 에이전트 → 수정** 에서 Base URL · Model · API Key 를 넣고 **연결 테스트**.
+   테스트는 일반 응답과 **툴 호출을 따로** 확인한다 — 툴 호출이 안 되면 에이전트가
+   동작할 수 없으므로, 여기서 걸러야 한다.
+
+이후 플러그인 업데이트는 RisuAI가 `//@update-url` 로 알아서 확인한다.
+
+---
+
+## 4. 확인과 문제 해결
+
+```powershell
+powershell -ExecutionPolicy Bypass -File <install>\pyserver\risuelf_ctl.ps1 -Action status
+```
+
+> **다른 기계에서 `curl http://127.0.0.1:6020/health` 는 아무 의미가 없다.**
+> 자기 자신을 가리킨다. 서버는 루프백에만 바인딩하므로 확인은 그 서버 안에서 해야 한다.
+
+`health unreachable` 이면 `status` 가 `server.log` 꼬리 25줄을 같이 뱉는다.
+로그는 플러그인 안에서도 볼 수 있다 — **⚙ → 정보 · 로그 → 서버 로그**.
+문제를 신고할 때는 같은 화면의 **진단 정보** 를 함께 복사해 주면 된다.
+둘 다 API 키와 토큰을 담지 않는다.
+
+| 증상 | 원인 |
+|---|---|
+| `no Python found` | 3.10+ 가 없거나 못 찾음 → `-Python <경로>` |
+| `venv missing - run -Action setup first` | 1-3을 건너뜀 |
+| `listening NO` + 로그에 `WinError 10048` | 그 포트를 다른 것이 쓰고 있음 → `-Port` |
+| 플러그인이 "백엔드 연결 안 됨" | URL 오타, 백엔드 미기동, 또는 web RisuAI에서 토큰 미입력 |
+| web RisuAI에서만 실패 | RisuAI 설정의 **Use Plain Fetch** 를 켤 것. 꺼져 있으면 요청이 `sv.risuai.xyz` 로 릴레이되어 사설 주소에 닿지 않는다 |
+
+### 바인딩을 넓히기 전에
+
+`RISUELF_HOST=0.0.0.0` 은 **토큰을 아는 사람에게 그 기계의 임의 코드 실행 권한을 주는 것과
+같다** — 에이전트의 `run_python` 이 그 기계에서 돈다. 서버가 기동할 때 그 경고를 찍는다.
+넓혀야 한다면 Tailscale 같은 사설망 안으로만 하고, 공개 인터넷에는 바인딩하지 않는다.
+
+---
+
+## 5. 지우려면
+
+```powershell
+powershell -ExecutionPolicy Bypass -File <install>\pyserver\risuelf_ctl.ps1 -Action stop
+Remove-Item -Recurse -Force <install>
+```
+
+`data\`(또는 `datadir.txt` 가 가리키는 곳)에 챗 사본과 워크스페이스가 들어 있다.
+**RisuAI 쪽 원본 챗은 그대로다** — 이 도구는 승인된 수정만 되돌려 썼다.
