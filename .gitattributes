@@ -1,0 +1,18 @@
+# Normalise to LF in the repository.
+* text=auto eol=lf
+
+# These must be LF wherever they are checked out: a shell script with CRLF
+# fails on Linux with "bad interpreter: \r", and the launcher is the first
+# thing a new install runs.
+*.sh text eol=lf
+*.py text eol=lf
+
+# Windows-only, and cmd.exe is happier with CRLF.
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+# Never touched.
+*.js text eol=lf
+*.ts text eol=lf
+*.json text eol=lf
+*.md text eol=lf
