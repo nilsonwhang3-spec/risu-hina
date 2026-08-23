@@ -1,0 +1,609 @@
+/**
+ * One stylesheet, injected once.
+ *
+ * RisuAI's CSS custom properties cascade into the plugin iframe, so borrowing
+ * them makes the panel follow the user's theme for free. Each has a fallback
+ * because a fork or an older build may not define all of them.
+ *
+ * No images in the chrome: mainline RisuAI's plugin CSP has no `img-src`, so
+ * anything loaded through <img> is blocked there even though PocketRisu allows
+ * it. Inline SVG is markup, not a fetch, so it works on both; the one place an
+ * <img> appears - the bot portrait - degrades to initials.
+ */
+export const CSS = `
+:host, * { box-sizing: border-box; }
+body {
+  margin: 0;
+  font: 13px/1.6 -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Malgun Gothic', sans-serif;
+  background: var(--bgcolor, #12141a);
+  color: var(--textcolor, #d8dce4);
+}
+button, input, textarea, select { font: inherit; color: inherit; }
+button {
+  padding: 6px 12px; border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--borderc, #2b323f);
+  background: var(--darkbutton, #1b202a);
+}
+button:hover:not(:disabled) { filter: brightness(1.25); }
+button:disabled { opacity: .45; cursor: default; }
+button.primary { background: #2563eb; border-color: #2563eb; color: #fff; }
+button.danger { background: #b91c1c; border-color: #b91c1c; color: #fff; }
+button.ghost { background: transparent; }
+input, textarea, select {
+  background: var(--darkbg, #171b23);
+  border: 1px solid var(--borderc, #2b323f);
+  border-radius: 5px; padding: 6px 9px; width: 100%;
+}
+textarea { resize: vertical; line-height: 1.6; }
+a { color: #7dd3fc; }
+code { font-family: Consolas, monospace; font-size: 12px; }
+
+/* Scrollbars: a light translucent thumb with no rail drawn across the panel.
+   Firefox takes the standard property, Chromium the webkit one. */
+* { scrollbar-width: thin; scrollbar-color: rgba(190, 200, 215, .28) transparent; }
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: rgba(190, 200, 215, .22); border-radius: 6px;
+  border: 2px solid transparent; background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover { background: rgba(190, 200, 215, .42); background-clip: content-box; }
+::-webkit-scrollbar-corner { background: transparent; }
+
+.wrap { display: flex; flex-direction: column; height: 100vh; }
+header {
+  display: flex; align-items: center; gap: 8px; padding: 8px 14px;
+  border-bottom: 1px solid var(--borderc, #2b323f); flex-shrink: 0;
+}
+header h1 { margin: 0; font-size: 14px; font-weight: 700; display: flex; align-items: center; gap: 7px; }
+.spacer { flex: 1; }
+.dim { color: var(--textcolor2, #79839a); font-size: 12px; font-weight: 400; }
+
+/* Backend health, inline in the title row. It is one dot and a version - it
+   never justified a full row of its own above a panel whose job is showing a
+   long transcript. */
+.status {
+  display: flex; align-items: center; gap: 6px; min-width: 0;
+  font-size: 12px; padding: 2px 8px; border-radius: 20px;
+  background: rgba(16, 185, 129, .10);
+}
+.status.bad { background: rgba(239, 68, 68, .14); }
+.status.warn { background: rgba(245, 158, 11, .13); }
+.status .chatname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.healthdot { width: 7px; height: 7px; border-radius: 50%; background: #10b981; flex-shrink: 0; }
+.status.bad .healthdot { background: #ef4444; }
+.status.warn .healthdot { background: #f59e0b; }
+
+/* The active tab's tool row, full width under the tabs. */
+.toolslot { flex-shrink: 0; display: none; }
+.toolslot .toolrow { border-bottom: 1px solid var(--borderc, #2b323f); }
+
+.tabs { display: flex; gap: 2px; padding: 0 10px; border-bottom: 1px solid var(--borderc, #2b323f); flex-shrink: 0; }
+.tab {
+  padding: 8px 16px; border: none; background: none; border-radius: 0;
+  color: var(--textcolor2, #79839a); border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.tab.active { color: var(--textcolor, #d8dce4); border-bottom-color: #2563eb; font-weight: 700; }
+
+main { flex: 1; min-height: 0; display: flex; }
+.panel { display: none; flex: 1; min-height: 0; }
+.panel.active { display: flex; }
+.pad { padding: 14px; overflow-y: auto; flex: 1; }
+
+/* Flat sections rather than accented rounded cards. A coloured left rail on
+   every block turns the panel into stripes and communicates nothing, because
+   everything has one; emphasis is kept for blocks that need it. */
+.card {
+  border: 1px solid var(--borderc, #2b323f); border-radius: 6px;
+  padding: 11px; margin-bottom: 10px; background: transparent;
+}
+.card h2 {
+  margin: 0 0 9px; font-size: 11px; font-weight: 700; letter-spacing: .04em;
+  text-transform: uppercase; color: var(--textcolor2, #79839a);
+}
+.row { display: flex; gap: 8px; align-items: center; }
+.row + .row { margin-top: 8px; }
+.grow { flex: 1; min-width: 0; }
+label.field { display: block; margin-bottom: 10px; }
+label.field > span { display: block; margin-bottom: 4px; color: var(--textcolor2, #79839a); font-size: 12px; }
+
+.notice {
+  padding: 8px 10px; border-radius: 5px; margin-bottom: 10px; font-size: 12px;
+  background: rgba(245, 158, 11, .10);
+}
+.notice.err { background: rgba(239, 68, 68, .12); }
+.notice.ok { background: rgba(16, 185, 129, .12); }
+
+.badge {
+  display: inline-block; padding: 1px 7px; border-radius: 4px; font-size: 11px;
+  border: 1px solid var(--borderc, #2b323f);
+}
+.badge.ok { color: #10b981; border-color: rgba(16,185,129,.5); }
+.badge.warn { color: #f59e0b; border-color: rgba(245,158,11,.5); }
+.badge.err { color: #ef4444; border-color: rgba(239,68,68,.5); }
+
+.empty { padding: 36px 20px; text-align: center; color: var(--textcolor2, #79839a); }
+pre.mono {
+  font-family: Consolas, monospace; font-size: 11px; white-space: pre-wrap;
+  word-break: break-all; max-height: 200px; overflow: auto;
+  background: rgba(128,128,128,.08); border-radius: 5px; padding: 8px; margin: 6px 0 0;
+}
+.hint { color: var(--textcolor2, #79839a); font-size: 12px; }
+.sectionline { height: 1px; background: var(--borderc, #2b323f); margin: 16px 0 12px; }
+.sectiontitle {
+  font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--textcolor2, #79839a); margin-bottom: 8px;
+}
+
+/* --- chat selection ------------------------------------------------------ */
+
+.botcard { display: flex; gap: 12px; align-items: flex-start; }
+.botportrait, .botinitials {
+  width: 72px; height: 72px; border-radius: 8px; flex-shrink: 0;
+  background: rgba(128,128,128,.12);
+}
+.botportrait { object-fit: cover; }
+.botinitials {
+  display: flex; align-items: center; justify-content: center;
+  font-size: 24px; font-weight: 700; color: var(--textcolor2, #79839a);
+}
+.botname { font-size: 15px; font-weight: 700; }
+
+.folder { margin-bottom: 4px; }
+.folderhead {
+  display: flex; align-items: center; gap: 7px; width: 100%; text-align: left;
+  padding: 6px 8px; border: none; background: transparent; border-radius: 5px;
+  color: var(--textcolor2, #79839a); font-size: 12px;
+}
+.folderhead:hover { background: rgba(128,128,128,.10); }
+.folderdot { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; background: #79839a; }
+.folderbody { display: none; padding-left: 10px; }
+.folderbody.open { display: block; }
+.chatlist { display: flex; flex-direction: column; }
+.chatitem {
+  display: flex; align-items: center; gap: 9px; padding: 7px 9px; cursor: pointer;
+  border-radius: 5px; border: 1px solid transparent;
+}
+.chatitem:hover { background: rgba(128,128,128,.10); }
+.chatitem.presetnow { border-color: rgba(37,99,235,.55); background: rgba(37,99,235,.10); }
+.chatitem .n { color: var(--textcolor2, #79839a); font-size: 11px; min-width: 40px; text-align: right; }
+
+/* --- editor: explorer | turns | tools ------------------------------------ */
+
+.split { display: flex; flex: 1; min-height: 0; width: 100%; }
+.explorer {
+  width: 118px; flex-shrink: 0; overflow-y: auto; padding: 6px 4px;
+  border-right: 1px solid var(--borderc, #2b323f);
+}
+.expgroup {
+  display: block; width: 100%; text-align: left; padding: 5px 8px; margin-bottom: 2px;
+  border: none; background: transparent; border-radius: 5px; font-size: 12px;
+  color: var(--textcolor2, #79839a); font-variant-numeric: tabular-nums;
+}
+.expgroup:hover { background: rgba(128,128,128,.12); }
+.expgroup.on { background: rgba(37,99,235,.18); color: var(--textcolor, #d8dce4); }
+.expmark { font-size: 10px; margin-left: 5px; }
+
+.left {
+  flex: 1; min-width: 260px; display: flex; flex-direction: column; position: relative;
+  /* Lifted off the surrounding panels: the transcript is the subject, the
+     explorer and tools are chrome around it. */
+  background: rgba(255, 255, 255, .035);
+}
+.right { flex: 0 0 380px; min-width: 250px; display: flex; flex-direction: column; }
+.gutter { flex: 0 0 5px; cursor: col-resize; background: var(--borderc, #2b323f); opacity: .45; }
+.gutter:hover, .gutter.dragging { opacity: 1; background: #2563eb; }
+
+.toolrow {
+  display: flex; align-items: center; gap: 3px; padding: 6px 8px; flex-wrap: wrap;
+  border-bottom: 1px solid var(--borderc, #2b323f); flex-shrink: 0;
+}
+.toolrow .sep { width: 1px; height: 18px; background: var(--borderc, #2b323f); margin: 0 4px; }
+button.tool {
+  display: flex; align-items: center; gap: 5px; padding: 4px 8px;
+  background: transparent; border-color: transparent;
+}
+button.tool:hover:not(:disabled) { background: rgba(128,128,128,.12); }
+button.tool.on { background: rgba(37,99,235,.18); }
+button.tool .glyph { font-size: 14px; line-height: 1; }
+button.tool .tool-label { font-size: 12px; }
+button.iconbtn { padding: 4px 8px; background: transparent; border-color: transparent; font-size: 14px; }
+button.iconbtn:hover:not(:disabled) { background: rgba(128,128,128,.14); }
+
+.scroller { flex: 1; overflow-y: auto; position: relative; }
+.spacerTop, .spacerBottom { width: 100%; }
+
+.turn { padding: 8px 12px; border-bottom: 1px solid rgba(128,128,128,.10); }
+.turn.changed { background: rgba(37, 99, 235, .06); }
+.turn.isnew { background: rgba(16, 185, 129, .06); }
+.turn.preview { background: rgba(245, 158, 11, .07); }
+.turn.doomed { background: rgba(239, 68, 68, .09); opacity: .7; }
+.turn.doomed .turn-body { text-decoration: line-through; }
+.turn-head {
+  display: flex; gap: 8px; align-items: center; color: var(--textcolor2, #79839a);
+  font-size: 11px; margin-bottom: 3px;
+}
+.turn-head .spacer { flex: 1; }
+.turn-no {
+  /* Tabular figures and a fixed min-width so the numbers form a column: a
+     ragged left edge makes a 394-turn list much harder to scan. */
+  min-width: 30px; padding: 1px 5px; border-radius: 4px; text-align: right;
+  font-family: Consolas, monospace; font-variant-numeric: tabular-nums;
+  font-size: 11px; font-weight: 700;
+  background: rgba(128,128,128,.16); color: var(--textcolor, #d7dce6);
+}
+.turn.changed .turn-no { background: rgba(37, 99, 235, .32); }
+.turn.isnew .turn-no { background: rgba(16, 185, 129, .30); }
+.turn.doomed .turn-no { background: rgba(239, 68, 68, .30); }
+.turn-role { font-weight: 700; }
+.turn-role.user { color: #7dd3fc; }
+.turn-role.char { color: #fbbf24; }
+.turn-body { white-space: pre-wrap; word-break: break-word; }
+/* Speech and inner thought, the two the logs actually mark. The card's own
+   regexes do this on the chat screen; the stored text is flat without it. */
+.speech { color: #f0a04b; }
+.thought { color: #7dd3fc; }
+.turn-body.raw { font-family: Consolas, monospace; font-size: 12px; color: var(--textcolor2, #9aa4b8); }
+.turn-body img.turn-img { max-width: 100%; max-height: 320px; border-radius: 5px; margin: 4px 0; }
+.turn textarea { min-height: 90px; }
+.diff-del { background: rgba(239, 68, 68, .22); text-decoration: line-through; }
+.diff-ins { background: rgba(16, 185, 129, .22); }
+.before-label { color: var(--textcolor2, #79839a); font-size: 11px; margin-top: 4px; }
+button.tiny { padding: 1px 7px; font-size: 11px; border-radius: 4px; }
+
+.filterbar {
+  display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+  padding: 5px 12px; font-size: 11.5px;
+  background: rgba(245, 158, 11, .12);
+  border-bottom: 1px solid rgba(245, 158, 11, .3);
+  color: var(--textcolor, #d7dce6);
+}
+.filterbar .spacer { flex: 1; }
+.rangerow { display: flex; align-items: center; gap: 6px; margin-bottom: 7px; }
+.rangerow input { width: 74px; text-align: center; }
+
+/* --- files · presets · skills --------------------------------------------- */
+.filerow {
+  display: flex; align-items: center; gap: 8px; padding: 3px 0;
+  border-bottom: 1px solid rgba(128,128,128,.08);
+}
+.filerow:last-child { border-bottom: none; }
+button.linkish {
+  flex: 1; min-width: 0; padding: 2px 0; border: none; background: none;
+  text-align: left; color: var(--textcolor, #d7dce6); font-size: 12px;
+  font-family: Consolas, monospace; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; border-radius: 0;
+}
+button.linkish:hover { color: #7dd3fc; text-decoration: underline; }
+.filepreview {
+  max-height: 320px; overflow: auto; white-space: pre-wrap; word-break: break-word;
+  font-size: 11.5px; line-height: 1.5;
+}
+.presetrow, .skillrow {
+  padding: 7px 0; border-bottom: 1px solid rgba(128,128,128,.10);
+  display: flex; align-items: center; gap: 6px;
+}
+.skillrow { display: block; }
+.presetrow:last-child, .skillrow:last-child { border-bottom: none; }
+.presetrow .grow { flex: 1; min-width: 0; }
+.skillbody {
+  margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* --- settings sub-tabs ---------------------------------------------------- */
+.settingswrap { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.subtabs {
+  display: flex; gap: 2px; padding: 0 12px; flex-shrink: 0; flex-wrap: wrap;
+  border-bottom: 1px solid var(--borderc, #2b323f);
+}
+.subtab {
+  padding: 7px 13px; border: none; background: none; border-radius: 0; font-size: 12px;
+  color: var(--textcolor2, #79839a); border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.subtab.active { color: var(--textcolor, #d8dce4); border-bottom-color: #2563eb; font-weight: 700; }
+.subpane { display: none; }
+.subpane.active { display: block; }
+
+/* --- tree (files · lorebook · memory) ------------------------------------- */
+.tree { display: flex; flex-direction: column; gap: 1px; padding: 4px; min-width: 0; }
+.treehead, .treefoot {
+  display: flex; align-items: center; gap: 5px; flex-wrap: wrap;
+  padding: 5px 4px; border-bottom: 1px solid var(--borderc, #2b323f);
+}
+.treefoot { border-bottom: none; border-top: 1px solid var(--borderc, #2b323f); margin-top: 6px; }
+.treescope {
+  padding: 7px 5px 3px; font-size: 10.5px; font-weight: 700; letter-spacing: .04em;
+  text-transform: uppercase; color: var(--textcolor2, #79839a);
+}
+.treebranch {
+  display: flex; align-items: center; gap: 5px; width: 100%;
+  padding: 4px 6px; border: none; background: transparent; border-radius: 5px;
+  font-size: 12px; color: var(--textcolor, #d8dce4); text-align: left;
+}
+.treebranch:hover { background: rgba(128,128,128,.12); }
+.treekids { padding-left: 9px; }
+.treerow { display: flex; align-items: center; gap: 3px; }
+button.treefile {
+  flex: 1; min-width: 0; padding: 3px 6px; border: none; background: transparent;
+  border-radius: 5px; text-align: left; font-size: 12px;
+  color: var(--textcolor2, #9aa4b8);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+button.treefile:hover { background: rgba(128,128,128,.12); color: var(--textcolor, #d8dce4); }
+button.treefile.on { background: rgba(37, 99, 235, .22); color: var(--textcolor, #d8dce4); }
+
+/* The tree column is wider than the turn explorer: file and entry names are
+   words, not two-digit ranges. */
+.explorer:has(.tree) { width: 210px; }
+
+/* --- modal ---------------------------------------------------------------- */
+.modalback {
+  position: fixed; inset: 0; z-index: 90; display: flex;
+  align-items: center; justify-content: center; padding: 24px;
+  background: rgba(0, 0, 0, .55);
+}
+.modalbox {
+  display: flex; flex-direction: column; width: 100%; max-width: 460px;
+  max-height: 100%; border-radius: 9px;
+  background: var(--bgcolor, #12141a);
+  border: 1px solid var(--borderc, #2b323f);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, .5);
+}
+.modalbox.wide { max-width: 620px; }
+.modalhead {
+  display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+  padding: 11px 14px; border-bottom: 1px solid var(--borderc, #2b323f);
+}
+.modalhead h2 {
+  margin: 0; font-size: 12px; font-weight: 700; letter-spacing: .04em;
+  text-transform: uppercase; color: var(--textcolor2, #79839a);
+}
+.modalbody { padding: 14px; overflow-y: auto; }
+.modalbody .card { border: none; padding: 0; margin-bottom: 0; }
+
+/* One row per preset or skill inside a picker. */
+.pickrow {
+  display: flex; align-items: center; gap: 8px; padding: 8px 4px;
+  border-bottom: 1px solid rgba(128,128,128,.10);
+}
+.pickrow:last-child { border-bottom: none; }
+.pickrow.on { background: rgba(37, 99, 235, .12); border-radius: 5px; }
+/* A disabled skill is still stored - dimmed, not hidden. */
+.pickrow.off .pickname { opacity: .55; }
+.pickrow input[type=checkbox] { width: auto; flex-shrink: 0; }
+.pickrow .grow { flex: 1; min-width: 0; cursor: pointer; }
+.pickname { display: flex; align-items: center; gap: 6px; }
+
+/* The one preset the agent is actually using. */
+.presetnow {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 11px; border-radius: 6px; margin-bottom: 9px;
+  background: rgba(37, 99, 235, .10);
+  border: 1px solid rgba(37, 99, 235, .30);
+}
+.presetnow .grow { min-width: 0; }
+.presetnow-name { font-weight: 700; }
+
+.field select {
+  width: 100%; padding: 6px 8px; border-radius: 5px; font-size: 12px;
+  background: var(--bgcolor, #1a1f27); color: var(--textcolor, #d7dce6);
+  border: 1px solid var(--borderc, #2b323f);
+}
+
+/* --- right panel --------------------------------------------------------- */
+
+.right-inner { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.rtabs { display: flex; gap: 2px; padding: 0 8px; border-bottom: 1px solid var(--borderc, #2b323f); flex-shrink: 0; }
+.rtab {
+  padding: 7px 13px; border: none; background: none; border-radius: 0; font-size: 12px;
+  color: var(--textcolor2, #79839a); border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.rtab.active { color: var(--textcolor, #d8dce4); border-bottom-color: #2563eb; font-weight: 700; }
+.rpanel { display: none; min-height: 0; }
+.rpanel.active { display: block; overflow-y: auto; }
+.rpanel.agentwrap.active { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+
+button.modebtn {
+  display: block; width: 100%; text-align: left; margin-bottom: 5px;
+  background: transparent; border-color: var(--borderc, #2b323f);
+}
+button.modebtn.on { border-color: #2563eb; background: rgba(37, 99, 235, .12); }
+button.modebtn.todo { opacity: .55; }
+label.checkrow { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; font-size: 12px; }
+label.checkrow input { width: auto; }
+
+.popover {
+  position: fixed; z-index: 200; min-width: 280px; max-width: 380px;
+  max-height: 340px; overflow-y: auto; padding: 8px;
+  background: var(--darkbg, #171b23); border: 1px solid var(--borderc, #2b323f);
+  border-radius: 7px; box-shadow: 0 12px 32px rgba(0,0,0,.5);
+}
+.verrow, .sessrow { display: flex; align-items: center; gap: 8px; padding: 6px 4px; }
+.verrow + .verrow, .sessrow + .sessrow { border-top: 1px solid rgba(128,128,128,.12); }
+.sessrow { cursor: pointer; }
+.sessrow:hover { background: rgba(128,128,128,.10); }
+
+/* --- agent ---------------------------------------------------------------
+ *
+ * The agent column sits on a slightly lifted ground of its own. The three
+ * panels were all the same dark, so the boundary between "the transcript" and
+ * "the conversation about the transcript" had to be inferred from the content.
+ * --darkbg is PocketRisu's own second surface, so this follows the host theme
+ * rather than inventing a colour that only suits one of them.
+ */
+.agentwrap { flex: 1; min-height: 0; }
+.agentpanel {
+  display: flex; flex-direction: column; height: 100%; padding: 8px 10px; gap: 7px;
+  background: var(--darkbg, rgba(255, 255, 255, .022));
+}
+.right { background: var(--darkbg, rgba(255, 255, 255, .022)); }
+.agenthead { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.agentlog { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 9px; }
+.bubble { border-radius: 6px; padding: 7px 10px; }
+.bubble.user { background: rgba(37, 99, 235, .12); }
+.bubble.assistant { background: rgba(255, 255, 255, .05); }
+.bubble-body { white-space: pre-wrap; word-break: break-word; }
+.costline { margin-top: 5px; font-size: 11px; color: var(--textcolor2, #79839a); }
+.trace { margin-bottom: 5px; display: flex; flex-wrap: wrap; gap: 4px; }
+.tchip {
+  display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px;
+  border-radius: 4px; font-size: 11px; background: rgba(128,128,128,.14);
+  color: var(--textcolor2, #79839a);
+}
+.tchip .tx { color: #7dd3fc; font-weight: 700; }
+.agentcompose { display: flex; gap: 6px; align-items: flex-end; flex-shrink: 0; }
+/* One line taller than it was: two lines of Korean plus room to see a third
+   coming, which is about the length of a real instruction here. */
+.agentinput { min-height: 82px; max-height: 220px; background: var(--bgcolor, #12141a); }
+.agentinput.dropping { border-color: #7dd3fc; background: rgba(125, 211, 252, .08); }
+button.sendbtn { padding: 9px 12px; display: flex; align-items: center; }
+button.attachbtn { padding: 8px 9px; display: flex; align-items: center; flex-shrink: 0; }
+
+.attachbar { display: flex; flex-wrap: wrap; gap: 5px; flex-shrink: 0; }
+.attachchip {
+  display: inline-flex; align-items: center; gap: 5px; max-width: 100%;
+  padding: 2px 4px 2px 8px; border-radius: 5px; font-size: 11.5px;
+  background: rgba(125, 211, 252, .14); border: 1px solid rgba(125, 211, 252, .3);
+}
+.attachchip > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attachchip.bad { background: rgba(239, 68, 68, .14); border-color: rgba(239, 68, 68, .35); }
+.stagedbox { flex-shrink: 0; max-height: 42%; overflow-y: auto; }
+.card.staged { border-color: rgba(245,158,11,.45); background: rgba(245,158,11,.06); }
+.stagedrow { display: flex; gap: 8px; align-items: center; padding: 3px 0; flex-wrap: wrap; }
+.stagedrow .grow { flex: 1; min-width: 120px; }
+
+/* An empty conversation, saying what to ask for. */
+.welcome { display: flex; flex-direction: column; gap: 6px; padding: 4px 2px; }
+.welcome-title { font-weight: 700; font-size: 13px; }
+.welcome-foot { margin-top: 4px; }
+button.exbtn {
+  display: flex; align-items: flex-start; gap: 7px; width: 100%; text-align: left;
+  padding: 8px 10px; font-size: 12px; line-height: 1.5;
+  background: rgba(255, 255, 255, .045);
+  border: 1px solid var(--borderc, #2b323f);
+}
+button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; background: rgba(37, 99, 235, .12); }
+.exmark { color: #7dd3fc; flex-shrink: 0; }
+
+/* --- markdown in agent replies ------------------------------------------- */
+.md-p { margin: 0 0 6px; }
+.md-p:last-child { margin-bottom: 0; }
+.md-h { font-weight: 700; margin: 8px 0 4px; }
+.md-h1 { font-size: 15px; }
+.md-h2 { font-size: 14px; }
+.md-h3, .md-h4 { font-size: 13px; color: var(--textcolor2, #9aa4b8); }
+.md-list { margin: 4px 0 6px; padding-left: 20px; }
+.md-list li { margin-bottom: 2px; }
+.md-quote {
+  margin: 4px 0 6px; padding: 2px 0 2px 10px;
+  border-left: 2px solid rgba(128,128,128,.4); color: var(--textcolor2, #9aa4b8);
+}
+.md-code {
+  margin: 5px 0; padding: 8px; border-radius: 5px; overflow-x: auto;
+  background: rgba(0,0,0,.28); font-family: Consolas, monospace; font-size: 11.5px;
+}
+.md-code code { white-space: pre; }
+.md-inline-code {
+  padding: 1px 4px; border-radius: 3px; background: rgba(128,128,128,.2);
+  font-family: Consolas, monospace; font-size: 12px;
+}
+.md-hr { border: none; border-top: 1px solid var(--borderc, #2b323f); margin: 8px 0; }
+
+/* --- thinking indicator --------------------------------------------------- */
+.thinking { display: flex; align-items: center; gap: 7px; margin-bottom: 5px; }
+.elapsed {
+  font-family: Consolas, monospace; font-variant-numeric: tabular-nums;
+  font-size: 11px; color: var(--textcolor2, #79839a);
+  padding: 0 5px; border-radius: 4px; background: rgba(128,128,128,.14);
+}
+.elapsed.done { background: transparent; padding: 0; }
+.dots.stopped i { animation: none; opacity: .2; }
+.thinkingtext { font-size: 11px; color: var(--textcolor2, #79839a); }
+.dots { display: inline-flex; gap: 3px; }
+.dots i {
+  width: 5px; height: 5px; border-radius: 50%; background: #7dd3fc;
+  animation: blink 1.1s infinite ease-in-out;
+}
+.dots i:nth-child(2) { animation-delay: .18s; }
+.dots i:nth-child(3) { animation-delay: .36s; }
+@keyframes blink { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
+
+/* --- narrow screens -------------------------------------------------------
+ *
+ * Pocket RisuAI on a phone gets the same panel, and two things broke there:
+ * the agent column sat off the right edge because the split is horizontal, and
+ * wide fields in the settings pushed the page sideways.
+ *
+ * The split stacks instead of shrinking. That ordering is deliberate - on a
+ * phone the agent is the thing being used and the transcript is the thing being
+ * checked, so the transcript takes what is left rather than the other way
+ * round. The same gutter still resizes, just vertically (see splitter.ts).
+ */
+@media (max-width: 760px) {
+  .split { flex-direction: column; }
+
+  /* The explorer becomes a scrolling strip of jump targets across the top
+     rather than a column eating a third of a 390px screen. */
+  .explorer {
+    /* The base rule is a block column; a strip has to say it is a flex row. */
+    display: flex; flex-direction: row; align-items: center;
+    width: auto; max-width: none; flex-shrink: 0;
+    overflow-x: auto; overflow-y: hidden;
+    border-right: none; border-bottom: 1px solid var(--borderc, #2b323f);
+    padding: 5px 8px; gap: 5px;
+  }
+  .tree { padding: 2px; }
+  .explorer:has(.tree) { width: auto; max-height: 190px; }
+  .explorer .expgroup {
+    flex-shrink: 0; width: auto; min-width: 72px; margin-bottom: 0;
+    white-space: nowrap;
+  }
+
+  .left { min-width: 0; min-height: 120px; }
+  /* flex-basis is set inline by the drag, so height must not be pinned here -
+     these only decide who yields when there is not enough room. */
+  .right { min-width: 0; flex-basis: 55%; min-height: 180px; }
+
+  .gutter {
+    width: auto; height: 7px; cursor: row-resize;
+    background-image: linear-gradient(to right, transparent 42%,
+      rgba(190,200,215,.35) 42%, rgba(190,200,215,.35) 58%, transparent 58%);
+  }
+
+  /* The tool row wraps instead of scrolling off the edge. */
+  .toolrow { flex-wrap: wrap; row-gap: 4px; }
+  .toolrow .spacer { flex-basis: 100%; height: 0; }
+  .tool-label { display: none; }
+
+  header { padding: 7px 10px; gap: 6px; }
+  header h1 span { display: none; }
+  .status .chatname { display: none; }
+  .tab { padding: 8px 11px; }
+  .pad { padding: 10px; }
+
+  /* Nothing may push the page sideways. Rows become columns and every control
+     is allowed to shrink below its content width - a fixed-width input in a
+     flex row is what put the settings fields past the right edge. */
+  .row { flex-wrap: wrap; }
+  .row > * { min-width: 0; }
+  .rangerow input { width: 64px; }
+  .field select, .field input, .field textarea { max-width: 100%; }
+  .modalback { padding: 0; }
+  .modalbox, .modalbox.wide { max-width: none; height: 100%; border-radius: 0; }
+  .filepreview { font-size: 11px; }
+  .pickrow { flex-wrap: wrap; row-gap: 4px; }
+  .pickrow .grow { flex-basis: 100%; }
+}
+
+/* Belt and braces: whatever the width, the panel itself never scrolls
+   sideways. A single over-wide child used to take the whole page with it. */
+.wrap { overflow-x: hidden; }
+.pad { overflow-x: hidden; }
+`;
+
+export function injectStyles(): void {
+  if (document.getElementById('risu-elf-style')) return;
+  const style = document.createElement('style');
+  style.id = 'risu-elf-style';
+  style.textContent = CSS;
+  (document.head || document.documentElement).appendChild(style);
+}

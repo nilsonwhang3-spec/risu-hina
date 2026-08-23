@@ -1,0 +1,1061 @@
+"""Black-box HTTP tests. The server is a child process; we only speak HTTP.
+
+The suite must never import the server's internals. active-recall's docs/06 is
+emphatic about why: the moment tests reach inside, they stop being an oracle for
+"does the wire behaviour still hold" and start asserting the implementation
+against itself. That property is what made its Node -> Python port verifiable at
+all, and it is worth keeping here from the start.
+
+Coverage is organised around the three job shapes this tool exists for, not
+around the modules that implement them:
+
+    small      edit one turn, write it back
+    medium     one edit spanning many turns of a chat (the common case)
+    large      summarise early turns into lorebook entries, then cut them
+
+    RISUELF_TEST_PY      python to run the server with
+    RISUELF_TEST_ENTRY   entry script (default pyserver/run.py)
+
+    python tests/test_http.py
+"""
+from __future__ import annotations
+
+from collections import deque
+
+import json
+import os
+import shutil
+import socket
+import subprocess
+import threading
+import sys
+import tempfile
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+PYSERVER = ROOT / "pyserver"
+
+FAILURES: list[str] = []
+
+
+def check(name: str, cond: bool, detail: str = "") -> None:
+    if cond:
+        print(f"  ok   {name}")
+    else:
+        print(f"  FAIL {name}{(' - ' + detail) if detail else ''}")
+        FAILURES.append(name)
+
+
+def q(path: str, **params: object) -> str:
+    """Build a query string with proper percent-encoding.
+
+    Korean query terms are the normal case here, and urllib refuses to put raw
+    non-ASCII in a request line. The plugin does the same thing with
+    encodeURIComponent.
+    """
+    parts = [
+        f"{urllib.parse.quote(str(k))}={urllib.parse.quote(str(v))}"
+        for k, v in params.items() if v is not None
+    ]
+    return path + ("?" + "&".join(parts) if parts else "")
+
+
+def free_port() -> int:
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+class Server:
+    def __init__(self, require_token: bool = True) -> None:
+        self.port = free_port()
+        self.token = "test-token-" + str(self.port)
+        self.data = Path(tempfile.mkdtemp(prefix="risuelf-test-"))
+        py = os.environ.get("RISUELF_TEST_PY") or str(PYSERVER / ".venv" / "Scripts" / "python.exe")
+        if not Path(py).exists():
+            py = sys.executable
+        entry = os.environ.get("RISUELF_TEST_ENTRY") or str(PYSERVER / "run.py")
+        env = {
+            **os.environ,
+            "RISUELF_PORT": str(self.port),
+            "RISUELF_HOST": "127.0.0.1",
+            "RISUELF_DATA_DIR": str(self.data),
+            "RISUELF_TOKEN": self.token,
+            # The suite talks to 127.0.0.1, where a token is optional by design.
+            # Forcing it on is what makes the 401 assertions mean anything; the
+            # exemption itself is covered by test_loopback_exemption.
+            "RISUELF_REQUIRE_TOKEN": "1" if require_token else "0",
+            "PYTHONIOENCODING": "utf-8",
+        }
+        self.proc = subprocess.Popen(
+            [py, entry], cwd=str(PYSERVER), env=env,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+            encoding="utf-8", errors="replace",
+        )
+        # A reader thread, not a read at the end.
+        #
+        # The server logs a line per request. Nobody was reading the pipe until
+        # the suite finished, so once the suite's logging passed the OS pipe
+        # buffer (64KB here) the server blocked inside write() and simply
+        # stopped answering - which surfaced as a request timing out on a route
+        # that works fine in isolation. Adding tests made it appear, so it would
+        # have appeared again for whoever added the next ones.
+        self._log_lines: deque[str] = deque(maxlen=4000)
+        self._reader = threading.Thread(target=self._pump, daemon=True)
+        self._reader.start()
+
+    def _pump(self) -> None:
+        stream = self.proc.stdout
+        if stream is None:
+            return
+        try:
+            for line in stream:
+                self._log_lines.append(line)
+        except Exception:
+            pass
+
+    def wait_ready(self, timeout: float = 25.0) -> bool:
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if self.proc.poll() is not None:
+                return False
+            try:
+                st, body = self.get("/health")
+                if st == 200 and body.get("service") == "risu-elf":
+                    return True
+            except Exception:
+                time.sleep(0.2)
+        return False
+
+    def _req(self, method: str, path: str, payload=None, token: str | None = "__default__"):
+        url = f"http://127.0.0.1:{self.port}{path}"
+        data = None
+        headers = {}
+        if payload is not None:
+            data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            headers["Content-Type"] = "application/json"
+        tok = self.token if token == "__default__" else token
+        if tok:
+            headers["Authorization"] = f"Bearer {tok}"
+        req = urllib.request.Request(url, data=data, headers=headers, method=method)
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                raw = r.read().decode("utf-8", "replace")
+                try:
+                    return r.status, json.loads(raw)
+                except ValueError:
+                    # Not every route answers JSON - /plugin.js serves the
+                    # bundle itself. The error path already did this; the
+                    # success path assumed otherwise and threw on the first
+                    # non-JSON route added.
+                    return r.status, {"_raw": raw}
+        except urllib.error.HTTPError as e:
+            raw = e.read().decode("utf-8", "replace")
+            try:
+                return e.code, json.loads(raw)
+            except ValueError:
+                return e.code, {"_raw": raw}
+
+    def get(self, path, token="__default__"):
+        return self._req("GET", path, None, token)
+
+    def post(self, path, payload=None, token="__default__"):
+        return self._req("POST", path, payload if payload is not None else {}, token)
+
+    def stop(self) -> None:
+        try:
+            self.proc.terminate()
+            self.proc.wait(timeout=10)
+        except Exception:
+            self.proc.kill()
+        shutil.rmtree(self.data, ignore_errors=True)
+
+    def drain(self) -> str:
+        """Everything the server has logged so far. Safe to call while running."""
+        return "".join(self._log_lines)
+
+
+# --- fixtures ---------------------------------------------------------------
+
+def make_chat(chat_id: str, name: str, turns: int, *, subject: str = "페데리코",
+              place: str = "신전") -> dict:
+    msgs = []
+    for i in range(turns):
+        if i % 2 == 0:
+            body = f"턴 {i}: {subject}는 어디 있지?"
+        else:
+            body = f"턴 {i}: {subject}는 {place}에 있다."
+        msgs.append({
+            "role": "user" if i % 2 == 0 else "char",
+            "data": body,
+            "time": 1778892822492 + i * 1000,
+            "chatId": f"{chat_id}-m{i}",
+        })
+    return {
+        "id": chat_id,
+        "name": name,
+        "note": "",
+        "localLore": [],
+        "fmIndex": 0,
+        "arKey": "someone-elses-stamp",
+        "modelBinding": {"provider": "p"},
+        "hypaV3Data": {"summaries": [
+            {"text": "요약 A", "chatMemos": [f"{chat_id}-m1"]},
+            {"text": "요약 B", "chatMemos": [f"{chat_id}-m3", f"{chat_id}-m5"]},
+        ]},
+        "message": msgs,
+    }
+
+
+def payload(chats: list[dict]) -> dict:
+    return {
+        "charId": "cha-test",
+        "characterIndex": 3,
+        "card": {
+            "name": "테스트 봇",
+            "chaId": "cha-test",
+            "desc": "설명",
+            "firstMessage": "첫 인사",
+            "globalLore": [{"key": ["기존"], "content": "기존 로어"}],
+        },
+        "chats": [{"chat": c, "chatIndex": i} for i, c in enumerate(chats)],
+    }
+
+
+# --- tests ------------------------------------------------------------------
+
+def test_dispatcher(s: Server) -> None:
+    print("test_dispatcher")
+    st, body = s.get("/health", token=None)
+    check("/health needs no token", st == 200 and body.get("service") == "risu-elf", str(body)[:120])
+    st, body = s.get("/nope", token=None)
+    check("unknown route is 404 even without a token", st == 404, f"{st} {body}")
+    st, body = s.get("/turns", token=None)
+    check("known route without a token is 401", st == 401, f"{st} {body}")
+    check("401 does not leak the token", "token" not in json.dumps(body).lower(), str(body))
+    st, _ = s.get("/turns", token="wrong")
+    check("wrong token is 401", st == 401, str(st))
+    st, body = s.post("/workspace", {"charId": "x", "chat": {"message": "nope"}})
+    check("bad payload is 400 not 500", st == 400, f"{st} {body}")
+
+
+def test_multi_chat_workspace(s: Server) -> dict:
+    print("test_multi_chat_workspace")
+    st, body = s.post("/workspace", payload([
+        make_chat("chatA", "플레이스루 A", 8),
+        make_chat("chatB", "플레이스루 B", 6, place="폐허"),
+    ]))
+    check("materialise returns 200", st == 200, f"{st} {str(body)[:200]}")
+    ws = body.get("workspace") or {}
+    check("workspace is character-scoped", bool(ws.get("charKey")), str(ws)[:160])
+    check("both chats ingested", len(ws.get("chats") or []) == 2, str(ws.get("chats"))[:200])
+    check("turn totals add up", ws.get("totalTurns") == 14, str(ws.get("totalTurns")))
+    check("existing lore counted", (ws.get("loreCounts") or {}).get("global") == 1, str(ws.get("loreCounts")))
+    return ws
+
+
+def test_small_job_edit_and_patch(s: Server, ws: dict) -> None:
+    print("test_small_job_edit_and_patch")
+    a = ws["chats"][0]["chatKey"]
+    st, body = s.get(f"/turns?chatKey={a}")
+    check("turns listed", st == 200 and body.get("total") == 8, f"{st} {str(body)[:160]}")
+    check("addressed by msgId", body["turns"][0]["msgId"] == "chatA-m0", str(body["turns"][0])[:120])
+
+    st, _ = s.post("/turn", {"chatKey": a, "msgId": "chatA-m1",
+                             "before": "턴 1: 페데리코는 신전에 있다.", "after": "턴 1: 페데리코는 폐허에 있다."})
+    check("edit accepted", st == 200, str(st))
+
+    st, body = s.get(f"/turns?chatKey={a}")
+    t1 = next(t for t in body["turns"] if t["msgId"] == "chatA-m1")
+    check("edited body stored", t1["body"] == "턴 1: 페데리코는 폐허에 있다.", t1["body"])
+    check("flagged changed", t1["changed"] is True)
+    check("original retained for diffing", "신전" in (t1["original"] or ""), str(t1["original"]))
+    check("no other turn flagged", sum(1 for t in body["turns"] if t["changed"]) == 1)
+
+    st, body = s.post("/turn", {"chatKey": a, "msgId": "chatA-m1",
+                                "before": "턴 1: 페데리코는 신전에 있다.", "after": "x"})
+    check("stale before is 409", st == 409, f"{st} {body}")
+
+    st, body = s.get(f"/patch?chatKey={a}")
+    check("patch has exactly one edit", len(body.get("edits") or []) == 1, str(body)[:200])
+    check("patch is not structural", body.get("structural") is False)
+    check("patch carries before", body["edits"][0]["before"].endswith("신전에 있다."), str(body["edits"][0]))
+
+
+def test_medium_job_bulk_across_turns(s: Server, ws: dict) -> None:
+    """The real medium-sized job: one edit spanning many turns of one chat."""
+    print("test_medium_job_bulk_across_turns")
+    a = ws["chats"][0]["chatKey"]
+
+    st, body = s.post("/turn/bulk", {"chatKey": a, "pattern": "페데리코", "replacement": "페데리꼬"})
+    check("dry run is the default", st == 200 and body.get("dryRun") is True, f"{st} {str(body)[:160]}")
+    check("preview finds every turn", body.get("matchedTurns") == 8, str(body.get("matchedTurns")))
+    check("preview carries before and after",
+          all("before" in c and "after" in c for c in body.get("changes") or []))
+
+    st, body = s.get(q("/turns", chatKey=a))
+    check("dry run changed nothing", not any("페데리꼬" in t["body"] for t in body["turns"]))
+
+    st, body = s.post("/turn/bulk", {"chatKey": a, "pattern": "페데리코",
+                                     "replacement": "페데리꼬", "fromSeq": 2, "toSeq": 5})
+    check("range scoping narrows the match", body.get("matchedTurns") == 4, str(body.get("matchedTurns")))
+
+    st, body = s.post("/turn/bulk", {"chatKey": a, "pattern": "페데리코",
+                                     "replacement": "페데리꼬", "role": "user"})
+    check("role scoping narrows the match", body.get("matchedTurns") == 4, str(body.get("matchedTurns")))
+
+    st, body = s.post("/turn/bulk", {"chatKey": a, "pattern": r"턴 (\d+):",
+                                     "replacement": r"TURN \1:", "regex": True, "apply": True})
+    check("regex apply writes", st == 200 and body.get("applied") == 8, f"{st} {str(body)[:160]}")
+
+    st, body = s.get(q("/turns", chatKey=a))
+    check("all turns rewritten", all(t["body"].startswith("TURN ") for t in body["turns"]),
+          str([t["body"][:12] for t in body["turns"][:3]]))
+    check("every turn is flagged changed", all(t["changed"] for t in body["turns"]))
+
+    st, body = s.post("/turn/bulk", {"chatKey": a, "pattern": "([", "regex": True, "replacement": "x"})
+    check("bad regex is 400 not 500", st == 400, f"{st} {body}")
+
+    # A staged batch lands through bulk-set, and a stale one must not half-apply.
+    st, body = s.post("/turn/bulk-set", {"chatKey": a, "edits": [
+        {"msgId": "chatA-m0", "before": "틀린 원본", "after": "무시되어야 함"},
+        {"msgId": "chatA-m1", "after": "이것도 무시되어야 함"},
+    ]})
+    check("stale batch is rejected whole", st == 409, f"{st} {str(body)[:160]}")
+    st, body = s.get(q("/turns", chatKey=a))
+    check("nothing from the rejected batch landed",
+          not any("무시되어야" in t["body"] for t in body["turns"]))
+
+    s.post("/reset", {"chatKey": a})
+
+
+def test_medium_job_cross_chat_search(s: Server, ws: dict) -> None:
+    print("test_medium_job_cross_chat_search")
+    ck = ws["charKey"]
+    st, body = s.get(q("/search", charKey=ck, **{"q": "페데리코"}))
+    check("search returns 200", st == 200, f"{st} {str(body)[:160]}")
+    hits = body.get("hits") or []
+    keys = {h["chatKey"] for h in hits}
+    check("hits span both chats", len(keys) == 2, str(keys))
+    check("hits carry msgId for targeting", all(h.get("msgId") for h in hits), str(hits[:2]))
+    check("hits carry an excerpt", all(h.get("excerpt") for h in hits), str(hits[:1]))
+
+    # Two syllables: below the trigram floor, so this only works if the LIKE
+    # fallback is wired. This is the Korean case that matters.
+    st, body = s.get(q("/search", charKey=ck, **{"q": "폐허"}))
+    check("2-syllable Korean term still matches (LIKE fallback)",
+          len(body.get("hits") or []) > 0, str(body)[:200])
+
+    a = ws["chats"][0]["chatKey"]
+    st, body = s.get(q("/search", charKey=ck, chatKeys=a, **{"q": "페데리코"}))
+    check("scoping to one chat works",
+          {h["chatKey"] for h in body.get("hits") or []} == {a}, str(body)[:160])
+
+
+def test_large_job_lore_then_truncate(s: Server, ws: dict) -> None:
+    """The 'summary chat migration' job, end to end."""
+    print("test_large_job_lore_then_truncate")
+    ck, b = ws["charKey"], ws["chats"][1]["chatKey"]
+
+    st, body = s.post("/lore", {"charKey": ck, "scope": "global",
+                                "entry": {"key": ["페데리코"], "content": "요약: 페데리코는 폐허에 갇혀 있었다."}})
+    check("lore entry added", st == 200 and body.get("id"), f"{st} {body}")
+
+    st, body = s.get(f"/lore?charKey={ck}")
+    check("lore lists original plus added", len(body.get("lore") or []) == 2, str(body)[:200])
+
+    st, body = s.get(f"/lore/patch?charKey={ck}")
+    check("lore patch returns globalLore array", len(body.get("globalLore") or []) == 2, str(body)[:200])
+    check("lore patch counts what we added", body.get("added") == 1, str(body.get("added")))
+
+    st, body = s.post("/turn/delete", {"chatKey": b, "fromSeq": 0, "toSeq": 3})
+    check("range delete removes 4 turns", st == 200 and body.get("deleted") == 4, f"{st} {body}")
+
+    st, body = s.get(f"/turns?chatKey={b}")
+    check("chat is shorter", body.get("total") == 2, str(body.get("total")))
+    check("seq was renumbered densely", [t["seq"] for t in body["turns"]] == [0, 1],
+          str([t["seq"] for t in body["turns"]]))
+
+    st, body = s.get(f"/patch?chatKey={b}")
+    check("patch reports structural", body.get("structural") is True, str(body)[:160])
+    check("structural patch carries the full message array",
+          isinstance(body.get("messages"), list) and len(body["messages"]) == 2,
+          str(body.get("messages"))[:160])
+    check("removed turns are listed", len(body.get("removed") or []) == 4, str(len(body.get("removed") or [])))
+    # Cutting turns orphans hypa summaries that cite them. Silent is not an option.
+    check("hypa orphan warning is raised",
+          any("hypa" in w.lower() for w in body.get("warnings") or []), str(body.get("warnings")))
+
+
+def test_structural_ops(s: Server, ws: dict) -> None:
+    print("test_structural_ops")
+    a = ws["chats"][0]["chatKey"]
+
+    st, body = s.post("/turn/insert", {"chatKey": a, "afterMsgId": "chatA-m0",
+                                       "role": "char", "body": "삽입된 턴"})
+    new_id = body.get("msgId")
+    check("insert returns a new msgId", st == 200 and bool(new_id), f"{st} {body}")
+
+    st, body = s.get(f"/turns?chatKey={a}")
+    ids = [t["msgId"] for t in body["turns"]]
+    check("inserted right after the anchor", ids[1] == new_id, str(ids[:3]))
+    check("total grew by one", body["total"] == 9, str(body["total"]))
+    check("inserted turn is marked new", next(t for t in body["turns"] if t["msgId"] == new_id)["isNew"])
+
+    st, body = s.post("/turn/split", {"chatKey": a, "msgId": "chatA-m2", "at": 4})
+    check("split returns the new msgId", st == 200 and body.get("newMsgId"), f"{st} {body}")
+
+    st, body = s.post("/turn/merge", {"chatKey": a, "msgIds": ["chatA-m2", body["newMsgId"]]})
+    check("merge keeps the first turn's identity", body.get("msgId") == "chatA-m2", str(body))
+
+    st, body = s.get(f"/turns?chatKey={a}")
+    t2 = next(t for t in body["turns"] if t["msgId"] == "chatA-m2")
+    check("split+merge restores the body", t2["body"].replace("\n\n", "") == "턴 2: 페데리코는 어디 있지?",
+          repr(t2["body"]))
+
+    st, _ = s.post("/turn/delete", {"chatKey": a, "msgIds": [new_id]})
+    check("delete by msgId works", st == 200)
+
+
+def test_export_preserves_foreign_fields(s: Server, ws: dict) -> None:
+    print("test_export_preserves_foreign_fields")
+    a = ws["chats"][0]["chatKey"]
+    # Make our own edit rather than relying on one an earlier test left behind:
+    # the bulk test resets this chat, and a test that silently depends on
+    # another's leftovers fails for reasons that have nothing to do with export.
+    s.post("/turn", {"chatKey": a, "msgId": "chatA-m1", "after": "턴 1: 페데리코는 폐허에 있다."})
+
+    st, body = s.get(f"/export/risuchat?chatKey={a}")
+    check("export returns 200", st == 200, f"{st} {str(body)[:120]}")
+    env = body.get("envelope") or {}
+    check("stock importer shape", env.get("type") == "risuChat" and env.get("ver") == 2, str(env)[:120])
+    data = env.get("data") or {}
+    check("another plugin's arKey survived", data.get("arKey") == "someone-elses-stamp")
+    check("PocketRisu modelBinding survived", data.get("modelBinding") == {"provider": "p"})
+    check("edit is present in the export",
+          any("폐허" in str(m.get("data")) for m in data.get("message") or []))
+    st, body = s.get(f"/export/md?chatKey={a}")
+    check("markdown export returns 200", st == 200 and "markdown" in body, str(st))
+
+
+def test_checkpoint_restore(s: Server, ws: dict) -> None:
+    print("test_checkpoint_restore")
+    a = ws["chats"][0]["chatKey"]
+    st, body = s.post("/checkpoint", {"chatKey": a, "label": "before"})
+    cid = body.get("id")
+    check("checkpoint created", st == 200 and bool(cid), f"{st} {body}")
+
+    s.post("/turn", {"chatKey": a, "msgId": "chatA-m4", "after": "또 고침"})
+    st, body = s.post("/checkpoint/restore", {"chatKey": a, "id": cid})
+    check("restore returns 200", st == 200, f"{st} {body}")
+
+    st, body = s.get(f"/turns?chatKey={a}")
+    t4 = next(t for t in body["turns"] if t["msgId"] == "chatA-m4")
+    check("restored turn reverted", "또 고침" not in t4["body"], t4["body"])
+    st, body = s.get(f"/checkpoints?chatKey={a}")
+    check("restore is itself undoable", len(body.get("checkpoints") or []) >= 2, str(len(body.get("checkpoints") or [])))
+
+
+def test_reopen_keeps_pending_edits(s: Server, ws: dict) -> None:
+    print("test_reopen_keeps_pending_edits")
+    a = ws["chats"][0]["chatKey"]
+    s.post("/turn", {"chatKey": a, "msgId": "chatA-m6", "after": "작업 중"})
+    st, body = s.post("/workspace", payload([make_chat("chatA", "플레이스루 A", 8),
+                                             make_chat("chatB", "플레이스루 B", 6, place="폐허")]))
+    check("re-materialise returns 200", st == 200, str(st))
+    check("working turns were not reset",
+          all(c["workingReset"] is False for c in (body.get("workspace") or {}).get("chats") or []),
+          str((body.get("workspace") or {}).get("chats")))
+    st, body = s.get(f"/turns?chatKey={a}")
+    t6 = next(t for t in body["turns"] if t["msgId"] == "chatA-m6")
+    check("pending edit survived re-open", t6["body"] == "작업 중", t6["body"])
+
+    st, body = s.post("/workspace", {**payload([make_chat("chatA", "플레이스루 A", 8)]), "force": True})
+    check("force resets", all(c["workingReset"] is True for c in (body.get("workspace") or {}).get("chats") or []))
+    st, body = s.get(f"/turns?chatKey={a}")
+    check("forced reset cleared edits", not any(t["changed"] for t in body["turns"]))
+
+
+def test_agent_readiness_is_consistent(s: Server, ws: dict) -> None:
+    """/session and /health must agree about whether the agent is configured.
+
+    They did not: /session returned early when no session existed yet and that
+    branch omitted `agentReady` entirely, so the panel read undefined as false
+    and announced "credentials not configured" on every first open - while the
+    settings tab's test passed, because it asked a different endpoint.
+    """
+    print("test_agent_readiness_is_consistent")
+    a = ws["chats"][0]["chatKey"]
+
+    st, health = s.get("/health")
+    check("health reports readiness", st == 200 and "agentReady" in health, str(health)[:160])
+
+    # No session has been created for this chat yet - the exact case that broke.
+    st, sess = s.get(q("/session", chatKey=a))
+    check("session returns 200 with no session yet", st == 200, f"{st} {str(sess)[:160]}")
+    check("session reports readiness even with no session",
+          "agentReady" in sess, str(sess)[:200])
+    check("the two endpoints agree",
+          sess.get("agentReady") == health.get("agentReady"),
+          f"session={sess.get('agentReady')} health={health.get('agentReady')}")
+    check("shape is complete without a session",
+          sess.get("session") is None and sess.get("messages") == [] and "staged" in sess,
+          str(sess)[:200])
+    check("websearch flag present", "webSearch" in sess, str(sess)[:160])
+
+    st, body = s.post("/session", {"chatKey": a, "title": "t"})
+    check("session can be created", st == 200 and body.get("sessionId"), f"{st} {body}")
+
+    st, sess2 = s.get(q("/session", chatKey=a))
+    check("readiness unchanged once a session exists",
+          sess2.get("agentReady") == health.get("agentReady"),
+          f"{sess2.get('agentReady')} vs {health.get('agentReady')}")
+    check("staged list is present", isinstance(sess2.get("staged"), list))
+
+
+def test_agent_output_budget(s: Server, ws: dict) -> None:
+    """The output budget must be big enough for a reasoning model to answer.
+
+    8000 was the first-run template's value and it made the agent fail with
+    "token limit exceeded before any response was generated" - the thinking
+    tokens came out of the same budget. The default has to clear that, and a
+    stored copy of the old default must be migrated rather than left to fail.
+    """
+    print("test_agent_output_budget")
+    st, body = s.get("/config")
+    agent = (body.get("config") or {}).get("agent") or {}
+
+    # `maxTokens` is not a secret. A substring rule on "token" once redacted it
+    # to {set, length}, which made it unreadable and unsettable from the UI.
+    check("maxTokens is not redacted", not isinstance(agent.get("maxTokens"), dict),
+          str(agent.get("maxTokens")))
+    check("apiKey still is redacted", isinstance(agent.get("apiKey"), dict),
+          str(agent.get("apiKey")))
+    check("temperature is visible", not isinstance(agent.get("temperature"), dict))
+
+    mt = int(agent.get("maxTokens") or 0)
+    check("output budget clears a reasoning model's needs", mt >= 32000, str(mt))
+
+    # It stays editable: an operator with a cheaper model may want it lower.
+    st, _ = s.post("/config", {"config": {"agent": {"maxTokens": 12345}}})
+    check("maxTokens is settable", st == 200, str(st))
+    st, body = s.get("/config")
+    check("the setting round-trips",
+          int(((body.get("config") or {}).get("agent") or {}).get("maxTokens") or 0) == 12345,
+          str(body.get("config", {}).get("agent")))
+    s.post("/config", {"config": {"agent": {"maxTokens": mt}}})
+
+
+def test_memory_as_rows(s: Server, ws: dict) -> None:
+    """The hypa summaries are rows, and re-opening must not discard edits.
+
+    The panel re-uploads the whole workspace every time it opens. Turns already
+    survive that; memory has to survive it the same way, or an edit made and not
+    yet written back would vanish on the next open with no error anywhere.
+    """
+    print("test_memory_as_rows")
+    a = ws["chats"][0]["chatKey"]
+
+    st, body = s.get(q("/memory", chatKey=a))
+    check("memory endpoint answers", st == 200, str(st))
+    items = body.get("items") or []
+    check("the summary was taken apart into rows", len(items) >= 1, str(len(items)))
+    first = items[0] if items else {}
+    check("an entry carries its scheme", first.get("kind") == "hypaV3Data", str(first.get("kind")))
+    check("and starts unedited", first.get("changed") is False, str(first))
+
+    st, body = s.post("/memory/update", {"chatKey": a, "id": first["id"], "body": "고친 요약입니다."})
+    check("an entry can be edited", st == 200, str(body)[:160])
+    st, body = s.get(q("/memory", chatKey=a))
+    edited = [i for i in body["items"] if i["id"] == first["id"]][0]
+    check("the edit is marked", edited["changed"] is True, str(edited)[:200])
+    check("the original is kept", edited["original"] != edited["body"], str(edited)[:200])
+
+    # Re-upload, exactly as re-opening the panel does.
+    s.post("/workspace", payload([
+        make_chat("chatA", "플레이스루 A", 8),
+        make_chat("chatB", "플레이스루 B", 6, place="폐허"),
+    ]))
+    st, body = s.get(q("/memory", chatKey=a))
+    kept = [i for i in body["items"] if i["id"] == first["id"]]
+    check("the edit survives a re-upload", len(kept) == 1 and kept[0]["body"] == "고친 요약입니다.",
+          str(kept)[:200])
+
+    # The patch has to put the structure back, extras included.
+    st, patch = s.get(q("/memory/patch", chatKey=a))
+    check("the patch rebuilds the scheme", "hypaV3Data" in (patch.get("memory") or {}),
+          str(patch.get("memory"))[:200])
+    summaries = ((patch.get("memory") or {}).get("hypaV3Data") or {}).get("summaries") or []
+    check("the edited text is in it", any("고친 요약" in str(x.get("text")) for x in summaries),
+          str(summaries)[:200])
+    # chatMemos is the link from a summary to the turns it summarises. Losing it
+    # is invisible until the next generation reads the wrong thing.
+    check("chatMemos rode along", any(x.get("chatMemos") for x in summaries),
+          str(summaries)[:250])
+
+    st, _ = s.post("/memory/commit", {"chatKey": a})
+    st, body = s.get(q("/memory", chatKey=a))
+    after = [i for i in body["items"] if i["id"] == first["id"]][0]
+    check("committing moves the baseline", after["changed"] is False, str(after)[:200])
+
+    st, body = s.post("/memory/add", {"chatKey": a, "kind": "hypaV3Data", "body": "새로 넣은 기억"})
+    made = body.get("item") or {}
+    check("an entry can be added", st == 200 and made.get("isNew") is True, str(body)[:200])
+    st, _ = s.post("/memory/delete", {"chatKey": a, "id": made["id"]})
+    check("and deleted", st == 200, str(st))
+    st, _ = s.post("/memory/update", {"chatKey": a, "id": "nope", "body": "x"})
+    check("editing a missing entry is 404", st == 404, str(st))
+
+
+def test_lore_editing(s: Server, ws: dict) -> None:
+    """Lorebook entries are editable, and an entry is replaced whole."""
+    print("test_lore_editing")
+    ck = ws["charKey"]
+    st, body = s.get(q("/lore", charKey=ck))
+    entries = body.get("lore") or []
+    check("lore is listed", len(entries) >= 1, str(len(entries)))
+    target = entries[0]
+    check("it starts as original", target["origin"] == "original", str(target)[:160])
+
+    entry = dict(target["entry"])
+    entry["content"] = "고친 로어 내용"
+    st, _ = s.post("/lore/update", {"charKey": ck, "id": target["id"], "entry": entry})
+    check("an entry can be edited", st == 200, str(st))
+
+    st, body = s.get(q("/lore/get", charKey=ck, id=target["id"]))
+    check("the edit round-trips", body["entry"]["content"] == "고친 로어 내용", str(body)[:200])
+    check("and it is marked as edited", body["origin"] == "edited", str(body)[:160])
+    # Fields we do not model must survive - a merge that knew only our fields
+    # would drop them.
+    for k, v in (target["entry"] or {}).items():
+        if k == "content":
+            continue
+        check(f"unmodelled field {k} survived", body["entry"].get(k) == v, str(body["entry"])[:200])
+        break
+
+    st, _ = s.post("/lore/update", {"charKey": ck, "id": "nope", "entry": {}})
+    check("editing a missing entry is 404", st == 404, str(st))
+
+
+def test_action_queue(s: Server, ws: dict) -> None:
+    """The queue's HTTP surface.
+
+    Proposing is deliberately not an HTTP route - only an agent tool creates a
+    row - so what this file can check is the shape around it: the queue starts
+    empty, a decision on something that is not there is refused, and clearing
+    works. The propose -> approve -> execute round trip needs the module layer
+    and lives in test_sandbox.py.
+    """
+    print("test_action_queue")
+    a = ws["chats"][0]["chatKey"]
+
+    st, body = s.get(q("/actions", chatKey=a))
+    check("the queue is readable", st == 200, str(st))
+    check("and starts empty", not body.get("actions"), str(body)[:160])
+
+    st, body = s.post("/actions/decide", {"chatKey": a, "id": "nope", "approve": True})
+    check("deciding a missing action is refused", st == 400, str(st))
+    check("and says so in Korean", "없는" in str(body.get("error") or ""), str(body)[:160])
+
+    st, body = s.post("/actions/complete", {"chatKey": a, "id": "nope", "ok": True})
+    check("completing a missing action is 404", st == 404, str(st))
+
+    st, body = s.post("/actions/clear", {"chatKey": a})
+    check("the queue can be cleared", st == 200, str(body)[:120])
+
+
+def test_reference_skills(s: Server) -> None:
+    """Reference material lives on disk and costs one line of prompt."""
+    print("test_reference_skills")
+    st, body = s.get("/skills")
+    refs = [x for x in body.get("skills") or [] if x.get("kind") == "reference"]
+    check("reference skills are seeded", len(refs) >= 2, str(len(refs)))
+    check("they are big", any(len(x["body"]) > 5000 for x in refs),
+          str([len(x["body"]) for x in refs]))
+    check("and they carry a filename", all(x.get("filename") for x in refs),
+          str([x.get("filename") for x in refs]))
+
+    used = int(body.get("usedChars") or 0)
+    check("they do not spend the prompt budget", used < 3000, str(used))
+
+    st, body = s.get("/skills/preview")
+    prompt = body.get("prompt") or ""
+    check("the prompt names the file", "risuai-cbs.md" in prompt, prompt[:400])
+    # The whole point: tens of thousands of characters of reference for a few
+    # hundred of prompt.
+    check("but not its contents", "{{getvar" not in prompt, prompt[:400])
+    check("it says when to open it", "읽어라" in prompt, prompt[:400])
+    check("the whole block stays small", len(prompt) < 4000, str(len(prompt)))
+
+    # A long upload becomes reference rather than an 8,000-char prompt block.
+    st, body = s.post("/skills/upload", {"filename": "긴자료.md", "body": "가" * 9000})
+    check("a long upload becomes reference", body["skill"]["kind"] == "reference", str(body)[:160])
+    check("and gets an .md filename", body["skill"]["filename"].endswith(".md"),
+          str(body["skill"].get("filename")))
+    s.post("/skills/delete", {"id": body["skill"]["id"]})
+
+    st, body = s.post("/skills/upload", {"filename": "짧은.md", "body": "1. 먼저 읽는다."})
+    check("a short one is still an instruction", body["skill"]["kind"] == "md", str(body)[:160])
+    s.post("/skills/delete", {"id": body["skill"]["id"]})
+
+
+def test_plugin_self_update(s: Server) -> None:
+    """RisuAI's own updater has to be able to fetch the plugin, without a token.
+
+    The update check is made by RisuAI, which knows nothing about our bearer -
+    so this one route is auth-exempt, and the header it serves has to carry
+    //@version inside the first 512 bytes because that is all RisuAI reads.
+    """
+    print("test_plugin_self_update")
+    st, body = s.get("/plugin")
+    check("the backend knows about the plugin file", st == 200, str(st))
+    if not body.get("available"):
+        check("plugin build present", False, str(body)[:200])
+        return
+    check("it reports a version", bool(body.get("version")), str(body)[:200])
+
+    st, raw = s.get("/plugin.js", token=None)
+    text = raw.get("_raw") if isinstance(raw, dict) else str(raw)
+    check("it serves without a token", st == 200, str(st))
+    head = (text or "")[:512]
+    check("the header survived the bundle", "//@name risu-elf" in head, head[:120])
+    check("//@version is inside the first 512 bytes", "//@version" in head, head[:200])
+    # //@update-url is emitted only when a release repo is configured. Its
+    # absence is deliberate rather than a bug: a URL that 404s makes RisuAI
+    # report a failed update check forever, which is worse than having none.
+    if "//@update-url" in head:
+        check("the update url is a release, not this backend",
+              "/releases/" in head or "github" in head, head[:300])
+    else:
+        check("no update url is emitted until a repo is set", True)
+    # A leaked token here would be handed to anyone who can reach the port.
+    check("the file carries no token", "test-token-" not in (text or ""))
+
+
+def test_logs_and_diagnostics(s: Server) -> None:
+    """A user hitting a bug must be able to hand over what happened."""
+    print("test_logs_and_diagnostics")
+    st, body = s.get("/logs?limit=50")
+    check("logs are readable", st == 200, str(st))
+    lines = body.get("lines") or []
+    check("and there is something in them", len(lines) > 0, str(len(lines)))
+    check("each line is stamped", all(ln.startswith("[") for ln in lines[:5]),
+          str(lines[:2]))
+    joined = "\n".join(lines)
+    # The log has never written a credential, and this is the assertion that
+    # keeps it that way once someone starts pasting logs into bug reports.
+    check("logs carry no token", "test-token-" not in joined)
+
+    st, body = s.get("/logs?limit=20&level=error")
+    check("logs can be filtered by level", st == 200, str(st))
+
+    st, body = s.get("/diag")
+    check("the diagnostic answers", st == 200, str(st))
+    check("it reports the version", body.get("version"), str(body)[:200])
+    check("and what is configured", "agent" in body, str(body)[:200])
+    check("it says whether a key is set, not what it is",
+          isinstance((body.get("agent") or {}).get("hasKey"), bool), str(body.get("agent")))
+    check("no key appears anywhere in it", "sk-" not in json.dumps(body),
+          json.dumps(body)[:200])
+    check("it counts what is stored", isinstance(body.get("counts"), dict), str(body)[:200])
+
+
+def test_agent_presets(s: Server) -> None:
+    """A preset is a saved copy of the agent settings, never a second live one.
+
+    The distinction is the whole design: if a preset could be "active" while
+    config.json said something else, "what will the agent use" would have two
+    answers, and the settings panel and the agent would eventually disagree.
+    """
+    print("test_agent_presets")
+    st, body = s.get("/presets")
+    check("presets endpoint answers", st == 200, str(st))
+    check("reasoning levels are advertised", "high" in (body.get("reasoningLevels") or []),
+          str(body.get("reasoningLevels")))
+    start = len(body.get("presets") or [])
+
+    st, body = s.post("/presets/save", {"name": "테스트 프리셋", "values": {
+        "baseUrl": "https://gw.example/v1", "apiKey": "sk-secret-value",
+        "model": "test/model-a", "maxTokens": 41000, "reasoning": "high",
+        "cache": True, "flex": True,
+    }})
+    check("preset saved", st == 200, str(body)[:200])
+    pid = (body.get("preset") or {}).get("id")
+    check("preset has an id", bool(pid))
+
+    st, body = s.get("/presets")
+    got = [p for p in body.get("presets") or [] if p.get("id") == pid]
+    check("it is listed", len(got) == 1, str(len(body.get("presets") or [])))
+    p0 = got[0] if got else {}
+    check("the api key never comes back", isinstance(p0.get("apiKey"), dict), str(p0.get("apiKey")))
+    check("but its presence does", (p0.get("apiKey") or {}).get("set") is True)
+    check("options round-trip", p0.get("reasoning") == "high" and p0.get("cache") is True
+          and p0.get("flex") is True, str(p0))
+    raw = json.dumps(body)
+    check("the secret is nowhere in the response", "sk-secret-value" not in raw)
+
+    # Editing without resending the key must not wipe it.
+    st, _ = s.post("/presets/save", {"id": pid, "name": "테스트 프리셋", "values": {
+        "model": "test/model-b", "apiKey": "__keep__"}})
+    check("edit accepted", st == 200, str(st))
+    st, body = s.get("/presets")
+    p0 = [p for p in body["presets"] if p["id"] == pid][0]
+    check("the model changed", p0.get("model") == "test/model-b", str(p0.get("model")))
+    check("the key survived the edit", (p0.get("apiKey") or {}).get("set") is True, str(p0))
+
+    # Applying writes into the live settings - that is the only thing that
+    # decides what the agent runs with.
+    before = ((s.get("/config")[1].get("config") or {}).get("agent") or {})
+    st, body = s.post("/presets/apply", {"id": pid})
+    check("preset applied", st == 200 and body.get("applied") == "테스트 프리셋", str(body)[:200])
+    agent = ((s.get("/config")[1].get("config") or {}).get("agent") or {})
+    check("live settings took the model", agent.get("model") == "test/model-b", str(agent.get("model")))
+    check("live settings took the reasoning level", agent.get("reasoning") == "high",
+          str(agent.get("reasoning")))
+    check("live api key is still redacted", isinstance(agent.get("apiKey"), dict))
+
+    # Capture is the reverse direction.
+    st, body = s.post("/presets/capture", {"name": "지금 설정"})
+    check("current settings can be captured", st == 200, str(body)[:200])
+    cap = (body.get("preset") or {}).get("id")
+
+    st, body = s.post("/presets/save", {"name": "잘못된", "values": {"reasoning": "very-high"}})
+    check("an unknown reasoning level is refused", st == 400, str(st))
+    st, _ = s.post("/presets/save", {"name": "", "values": {}})
+    check("an unnamed preset is refused", st == 400, str(st))
+    st, _ = s.post("/presets/apply", {"id": "nope"})
+    check("applying a missing preset is 404", st == 404, str(st))
+
+    for x in (pid, cap):
+        s.post("/presets/delete", {"id": x})
+    st, body = s.get("/presets")
+    check("deleting cleans up", len(body.get("presets") or []) == start,
+          f"{len(body.get('presets') or [])} vs {start}")
+
+    # Put the live settings back so later tests see what they expect.
+    s.post("/config", {"config": {"agent": {
+        "model": before.get("model") or "", "baseUrl": before.get("baseUrl") or "",
+        "reasoning": before.get("reasoning") or "", "cache": bool(before.get("cache")),
+        "flex": bool(before.get("flex")),
+        "maxTokens": before.get("maxTokens") or 32000}}})
+
+
+def test_preset_selection(s: Server) -> None:
+    """There is always exactly one selected preset and it is what the agent runs.
+
+    The panel shows one preset, not a list, so "selected" has to be a real
+    property of the data rather than something the UI remembers. And because
+    config.json is still the only thing agent.py reads, selecting has to write
+    through to it - otherwise the panel would show one model and the agent
+    would use another.
+    """
+    print("test_preset_selection")
+    st, body = s.get("/presets")
+    check("a preset is always selected", bool((body.get("selected") or {}).get("id")),
+          str(body.get("selected"))[:160])
+    check("exactly one row is marked selected",
+          sum(1 for x in body["presets"] if x.get("selected")) == 1,
+          str([x.get("selected") for x in body["presets"]]))
+    original = body["selected"]["id"]
+
+    st, body = s.post("/presets/save", {"name": "선택 테스트", "values": {
+        "baseUrl": "https://gw.example/v1", "apiKey": "sk-pick-me",
+        "model": "test/pick", "instructions": "항상 존댓말로 답한다."}})
+    check("a new preset saves", st == 200, str(body)[:200])
+    pid = body["preset"]["id"]
+
+    st, body = s.post("/presets/select", {"id": pid})
+    check("it can be selected", st == 200 and body.get("id") == pid, str(body)[:200])
+    agent = ((s.get("/config")[1].get("config") or {}).get("agent") or {})
+    check("selecting writes through to the live config",
+          agent.get("model") == "test/pick", str(agent.get("model")))
+    check("base instructions come along",
+          agent.get("instructions") == "항상 존댓말로 답한다.", str(agent.get("instructions")))
+
+    # Editing the selected preset must reach the agent without a second step.
+    st, _ = s.post("/presets/save", {"id": pid, "name": "선택 테스트", "values": {
+        "model": "test/edited", "apiKey": "__keep__"}})
+    agent = ((s.get("/config")[1].get("config") or {}).get("agent") or {})
+    check("editing the selected preset applies immediately",
+          agent.get("model") == "test/edited", str(agent.get("model")))
+
+    # Editing a preset that is NOT selected must not touch the live config.
+    st, body = s.post("/presets/save", {"name": "다른 것", "values": {"model": "test/other"}})
+    other = body["preset"]["id"]
+    agent = ((s.get("/config")[1].get("config") or {}).get("agent") or {})
+    check("editing an unselected preset changes nothing live",
+          agent.get("model") == "test/edited", str(agent.get("model")))
+
+    st, _ = s.post("/presets/save", {"name": "너무 긴 지침",
+                                     "values": {"instructions": "가" * 13000}})
+    check("oversized base instructions are refused", st == 400, str(st))
+
+    # Deleting the selected one has to leave something selected.
+    st, body = s.post("/presets/delete", {"id": pid})
+    check("the selected preset can be deleted", st == 200, str(body)[:160])
+    st, body = s.get("/presets")
+    check("something else became selected", bool((body.get("selected") or {}).get("id")),
+          str(body.get("selected"))[:160])
+    check("and it is not the deleted one", body["selected"]["id"] != pid)
+
+    s.post("/presets/delete", {"id": other})
+    s.post("/presets/select", {"id": original})
+    st, body = s.get("/presets")
+    left = body["presets"]
+    for x in left:
+        if x["id"] != original:
+            s.post("/presets/delete", {"id": x["id"]})
+    st, body = s.get("/presets")
+    check("the last preset cannot be deleted",
+          s.post("/presets/delete", {"id": body["selected"]["id"]})[0] == 400,
+          str(len(body["presets"])))
+
+
+def test_script_skills(s: Server) -> None:
+    """A skill can be a script, and then its source stays out of the prompt."""
+    print("test_script_skills")
+    st, body = s.post("/skills/upload", {
+        "filename": "tidy_names.py",
+        "body": '"""이름 표기를 훑어 후보를 뽑는다."""\nimport risuelf\nprint(len(risuelf.turns()))\n',
+    })
+    check("a .py upload becomes a script skill",
+          st == 200 and body["skill"]["kind"] == "script", str(body)[:200])
+    sid = body["skill"]["id"]
+    check("it gets a safe filename", body["skill"]["filename"] == "tidy_names.py",
+          str(body["skill"].get("filename")))
+
+    st, body = s.post("/skills/upload", {"filename": "절차.md", "body": "1. 먼저 읽는다."})
+    check("a .md upload becomes a prose skill", body["skill"]["kind"] == "md", str(body)[:160])
+    mid = body["skill"]["id"]
+
+    st, body = s.get("/skills/preview")
+    prompt = body.get("prompt") or ""
+    check("the script is named in the prompt", "tidy_names.py" in prompt, prompt[:200])
+    check("its source is NOT in the prompt", "import risuelf" not in prompt, prompt[:300])
+    check("its purpose line is", "이름 표기를" in prompt, prompt[:300])
+    check("prose skills are included whole", "먼저 읽는다" in prompt, prompt[:300])
+
+    st, body = s.get("/skills")
+    total = body.get("usedChars") or 0
+    check("only prose spends the prompt budget", total < 3000, str(total))
+
+    # A traversal in the filename must not choose where the file lands.
+    st, body = s.post("/skills/upload", {"filename": "../../evil.py", "body": "print(1)"})
+    check("a traversing filename is reduced to a basename",
+          body["skill"]["filename"] == "evil.py", str(body["skill"].get("filename")))
+    s.post("/skills/delete", {"id": body["skill"]["id"]})
+
+    s.post("/skills/delete", {"id": sid})
+    s.post("/skills/delete", {"id": mid})
+
+
+def test_skills(s: Server) -> None:
+    """Skills are editable instructions, and what gets sent must be inspectable."""
+    print("test_skills")
+    st, body = s.get("/skills")
+    check("skills endpoint answers", st == 200, str(st))
+    seeded = body.get("skills") or []
+    check("starter skills are seeded", len(seeded) >= 2, str(len(seeded)))
+    check("a budget is reported", int(body.get("limitChars") or 0) > 0, str(body.get("limitChars")))
+
+    st, body = s.post("/skills/save", {"name": "테스트 스킬", "body": "1. 먼저 확인한다.\n2. 그 다음 제안한다."})
+    check("skill saved", st == 200, str(body)[:200])
+    sid = (body.get("skill") or {}).get("id")
+
+    st, body = s.get("/skills/preview")
+    check("the prompt block is inspectable", st == 200 and "테스트 스킬" in (body.get("prompt") or ""),
+          (body.get("prompt") or "")[:120])
+
+    st, _ = s.post("/skills/toggle", {"id": sid, "enabled": False})
+    check("skill can be disabled", st == 200, str(st))
+    st, body = s.get("/skills/preview")
+    check("a disabled skill leaves the prompt", "테스트 스킬" not in (body.get("prompt") or ""),
+          (body.get("prompt") or "")[:200])
+    st, body = s.get("/skills")
+    kept = [x for x in body.get("skills") or [] if x.get("id") == sid]
+    check("but it is still stored", len(kept) == 1 and kept[0].get("enabled") is False, str(kept)[:200])
+
+    st, _ = s.post("/skills/save", {"name": "너무 긴", "body": "가" * 9000})
+    check("an oversized skill is refused", st == 400, str(st))
+    st, _ = s.post("/skills/save", {"name": "빈 내용", "body": "   "})
+    check("an empty skill is refused", st == 400, str(st))
+    st, _ = s.post("/skills/delete", {"id": "nope"})
+    check("deleting a missing skill is 404", st == 404, str(st))
+
+    st, _ = s.post("/skills/delete", {"id": sid})
+    check("skill deleted", st == 200, str(st))
+    st, body = s.get("/skills")
+    check("it is gone", all(x.get("id") != sid for x in body.get("skills") or []))
+
+
+def test_loopback_exemption() -> None:
+    """With RISUELF_REQUIRE_TOKEN off, a loopback caller needs no token.
+
+    The other half of the access policy, and the half users will actually run.
+    """
+    print("test_loopback_exemption")
+    s = Server(require_token=False)
+    try:
+        if not s.wait_ready():
+            check("second server started", False, s.drain()[:600])
+            return
+        st, body = s.get("/health", token=None)
+        check("health reports the exemption", st == 200 and body.get("tokenRequired") is False, str(body)[:160])
+        check("health reports loopback", body.get("loopback") is True, str(body)[:160])
+        st, _ = s.post("/workspace", payload([make_chat("solo", "혼자", 3)]), token=None)
+        check("loopback works without a token", st == 200, str(st))
+        st, _ = s.get("/turns?chatKey=nope", token=None)
+        check("still 404, not 401", st == 404, str(st))
+    finally:
+        s.stop()
+
+
+def main() -> int:
+    s = Server()
+    try:
+        if not s.wait_ready():
+            print("server failed to start:")
+            print(s.drain()[:4000])
+            return 1
+        test_dispatcher(s)
+        ws = test_multi_chat_workspace(s)
+        if ws.get("chats"):
+            test_small_job_edit_and_patch(s, ws)
+            test_medium_job_bulk_across_turns(s, ws)
+            test_medium_job_cross_chat_search(s, ws)
+            test_large_job_lore_then_truncate(s, ws)
+            test_structural_ops(s, ws)
+            test_export_preserves_foreign_fields(s, ws)
+            test_checkpoint_restore(s, ws)
+            test_reopen_keeps_pending_edits(s, ws)
+            test_agent_readiness_is_consistent(s, ws)
+            test_agent_output_budget(s, ws)
+            test_memory_as_rows(s, ws)
+            test_lore_editing(s, ws)
+            test_action_queue(s, ws)
+        test_agent_presets(s)
+        test_preset_selection(s)
+        test_skills(s)
+        test_script_skills(s)
+        test_reference_skills(s)
+        test_plugin_self_update(s)
+        test_logs_and_diagnostics(s)
+    finally:
+        s.stop()
+
+    test_loopback_exemption()
+
+    print()
+    if FAILURES:
+        print(f"FAIL - {len(FAILURES)} check(s): {', '.join(FAILURES)}")
+        return 1
+    print("PASS - all checks")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

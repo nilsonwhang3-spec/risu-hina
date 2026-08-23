@@ -1,0 +1,702 @@
+/**
+ * The agent panel.
+ *
+ * Two things it must never blur:
+ *
+ *  - A proposal is not an edit. Staged items render as a review list with
+ *    explicit 승인 / 거부, and the turn list shows them as previews. The agent
+ *    is instructed to say "제안했습니다" rather than "고쳤습니다"; the UI has to
+ *    hold up the same distinction visually.
+ *  - Cost is per turn, small, and honest. An unpriced model shows "가격 미설정",
+ *    never $0.00 - a cost line that silently reads zero is worse than one that
+ *    admits it does not know.
+ *
+ * The tool trace is glyphs, not function names: a run that lists, reads twice
+ * and then proposes should read as a sentence, and repeats collapse to ×N so a
+ * long run does not become a wall of identical chips.
+ */
+import { el, clear, popover, TOOL_GLYPH, PAPER_PLANE, ICON } from './dom';
+import { state, type StagedEdit, type AgentSessionInfo, type PendingAction } from '../state';
+import { renderMarkdown } from './markdown';
+import { clientLog } from '../transport';
+
+export interface AgentPanelHooks {
+  /** Show staged proposals as previews in the turn list. */
+  onStagedChanged: (staged: StagedEdit[]) => void;
+  onApplied: () => void | Promise<void>;
+  notice: (text: string, kind?: 'ok' | 'err' | '') => void;
+}
+
+export class AgentPanel {
+  readonly root: HTMLElement;
+  private log: HTMLElement;
+  private stagedBox: HTMLElement;
+  private input: HTMLTextAreaElement;
+  private send: HTMLButtonElement;
+  private status: HTMLElement;
+  private historyBtn: HTMLButtonElement;
+  private busy = false;
+  private loaded = false;
+  private picker: HTMLInputElement;
+  /** Workspace paths uploaded for the message being composed. */
+  private attached: string[] = [];
+  private attachBar = el('div', { class: 'attachbar', style: { display: 'none' } });
+  private actionBox: HTMLElement;
+  private outBox: HTMLElement;
+  /** out/ paths already offered, so the card does not churn every refresh. */
+  private outSeen = '';
+
+  constructor(private hooks: AgentPanelHooks) {
+    this.log = el('div', { class: 'agentlog' });
+    this.stagedBox = el('div', { class: 'stagedbox' });
+    this.actionBox = el('div', { class: 'stagedbox' });
+    this.outBox = el('div', { class: 'stagedbox' });
+    this.status = el('div', { class: 'hint grow' });
+
+    const fresh = el('button', {
+      class: 'ghost tiny', title: '지금 대화를 접고 새 대화를 시작합니다', text: '새 대화',
+    });
+    fresh.addEventListener('click', () => void this.newConversation());
+
+    this.historyBtn = el('button', {
+      class: 'ghost tiny', title: '이전 대화 목록', text: '이전 대화',
+    });
+    this.historyBtn.addEventListener('click', () => void this.openHistory());
+
+    this.input = el('textarea', {
+      class: 'agentinput',
+      placeholder: '챗에서 수정이나 조정이 필요한 부분을 말씀하세요. 궁금한 점이 있다면 무엇이든 물어보세요.',
+    });
+    this.input.addEventListener('keydown', (e) => {
+      const ev = e as KeyboardEvent;
+      // Enter sends, Shift+Enter newlines - the chat convention. Multi-line
+      // instructions are common enough that the escape hatch has to exist.
+      if (ev.key === 'Enter' && !ev.shiftKey) {
+        ev.preventDefault();
+        void this.submit();
+      }
+    });
+
+    this.send = el('button', { class: 'primary sendbtn', title: '보내기 (Enter)', html: PAPER_PLANE });
+    this.send.addEventListener('click', () => void this.submit());
+
+    // --- attachments ---------------------------------------------------------
+    //
+    // A file dropped here goes to the workspace's uploads/, and the message
+    // names it. That is the honest shape: the agent reads files with a tool, so
+    // handing it a path costs a line where pasting the contents would cost the
+    // whole file on every turn of the tool loop - and would still be unreadable
+    // for anything that is not text.
+    this.picker = el('input', { type: 'file', multiple: true, style: { display: 'none' } });
+    this.picker.addEventListener('change', () => {
+      void this.attachAll(Array.from(this.picker.files ?? []));
+      this.picker.value = '';
+    });
+    const clip = el('button', {
+      class: 'ghost attachbtn', title: '파일 첨부 — 워크스페이스에 올라갑니다',
+      html: ICON.clip,
+    });
+    clip.addEventListener('click', () => this.picker.click());
+
+    // Paste and drop are the two ways people actually attach things; a button
+    // alone gets used once and then forgotten.
+    this.input.addEventListener('paste', (e) => {
+      const files = Array.from((e as ClipboardEvent).clipboardData?.files ?? []);
+      if (!files.length) return;
+      e.preventDefault();
+      void this.attachAll(files);
+    });
+    for (const kind of ['dragover', 'dragenter']) {
+      this.input.addEventListener(kind, (e) => {
+        e.preventDefault();
+        this.input.classList.add('dropping');
+      });
+    }
+    for (const kind of ['dragleave', 'drop']) {
+      this.input.addEventListener(kind, () => this.input.classList.remove('dropping'));
+    }
+    this.input.addEventListener('drop', (e) => {
+      const files = Array.from((e as DragEvent).dataTransfer?.files ?? []);
+      if (!files.length) return;
+      e.preventDefault();
+      void this.attachAll(files);
+    });
+
+    this.root = el('div', { class: 'agentpanel' }, [
+      el('div', { class: 'agenthead' }, [this.status, fresh, this.historyBtn]),
+      this.log,
+      this.stagedBox,
+      this.actionBox,
+      this.outBox,
+      this.attachBar,
+      el('div', { class: 'agentcompose' }, [clip, this.input, this.send, this.picker]),
+    ]);
+  }
+
+  /**
+   * Upload files and remember them until the next message goes out.
+   *
+   * Uploaded immediately rather than on send: the user should be able to see
+   * that it worked, and a failure should surface while they are still looking
+   * at the file rather than after they have written a paragraph about it.
+   */
+  private async attachAll(files: File[]): Promise<void> {
+    for (const file of files) {
+      const chip = el('span', { class: 'attachchip' }, [
+        el('span', { text: file.name }),
+        el('span', { class: 'hint', text: '올리는 중…' }),
+      ]);
+      this.attachBar.appendChild(chip);
+      this.attachBar.style.display = 'flex';
+      try {
+        const isText = /[.](md|txt|json|jsonl|csv|py|html?|css|js|ya?ml|xml|log|sql)$/i.test(file.name);
+        let saved;
+        if (isText) {
+          saved = await state.uploadFile(file.name, await file.text());
+        } else {
+          const buf = new Uint8Array(await file.arrayBuffer());
+          let bin = '';
+          for (let i = 0; i < buf.length; i++) bin += String.fromCharCode(buf[i]);
+          saved = await state.uploadFile(file.name, btoa(bin), true);
+        }
+        this.attached.push(saved.path);
+        clear(chip);
+        const drop = el('button', { class: 'ghost tiny', text: '×', title: '이 메시지에서 빼기' });
+        drop.addEventListener('click', () => {
+          this.attached = this.attached.filter((p) => p !== saved.path);
+          chip.remove();
+          if (!this.attachBar.children.length) this.attachBar.style.display = 'none';
+        });
+        chip.appendChild(el('span', { text: saved.path }));
+        chip.appendChild(drop);
+      } catch (e) {
+        clear(chip);
+        chip.classList.add('bad');
+        chip.appendChild(el('span', { text: `${file.name} — ${msg(e)}` }));
+      }
+    }
+  }
+
+  private clearAttachments(): void {
+    this.attached = [];
+    clear(this.attachBar);
+    this.attachBar.style.display = 'none';
+  }
+
+  /** Load once per chat; re-entering the tab must not re-fetch the transcript. */
+  async load(force = false): Promise<void> {
+    if (this.loaded && !force) return;
+    this.loaded = true;
+    await this.render();
+  }
+
+  invalidate(): void {
+    this.loaded = false;
+  }
+
+  private async render(sessionId?: string): Promise<void> {
+    clear(this.log);
+    try {
+      const s = await state.agentSession(sessionId);
+      if (!s.agentReady) {
+        this.status.textContent = '';
+        this.log.appendChild(el('div', { class: 'notice' }, [
+          el('div', { text: '에이전트 자격증명이 아직 설정되지 않았습니다.' }),
+          el('div', {
+            class: 'hint',
+            text: '오른쪽 위 ⚙ → 에이전트에서 Base URL · Model · API Key를 넣고 연결 테스트를 해 주세요.',
+          }),
+        ]));
+        this.send.disabled = true;
+        return;
+      }
+      this.send.disabled = false;
+      this.status.textContent = s.session ? '' : '새 대화';
+
+      for (const m of s.messages) {
+        if (m.role === 'user') this.addBubble('user', String(m.content ?? ''));
+        else if (m.role === 'assistant') {
+          this.addBubble('assistant', String(m.content ?? ''), m.usage ?? undefined, m.cost);
+        }
+      }
+      if (!s.messages.length) this.log.appendChild(this.welcome());
+      this.setStaged(s.staged ?? []);
+      void this.refreshActions();
+      void this.refreshOutputs();
+      this.scroll();
+    } catch (e) {
+      this.status.textContent = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  /**
+   * What an empty conversation says.
+   *
+   * A blank panel with a cursor asks "what can this do?" and answers nothing.
+   * The three examples are the three sizes of job this tool was built for -
+   * one turn, many turns, and restructuring the whole chat - so they double as
+   * a description of the tool. Clicking one fills the box rather than sending
+   * it: they are starting points to edit, not commands.
+   */
+  private welcome(): HTMLElement {
+    const examples = [
+      '대화에서 페르소나를 조금 더 착한 사람으로 조정해줘',
+      '{{char}}에게 고백한 일을 없던 걸로 해줘',
+      '챗 이사가고 싶어. 전체 항목을 체계적으로 요약해서 챗 로어북에 넣고, 10턴만 남겨줘',
+    ];
+    const box = el('div', { class: 'welcome' }, [
+      el('div', { class: 'welcome-title', text: '조정해야 할 항목을 상담하세요' }),
+      el('div', {
+        class: 'hint',
+        text: '고칠 곳을 말씀하시면 훑어보고 제안을 만들어 옵니다. 반영은 승인하신 뒤에 이루어집니다.',
+      }),
+    ]);
+    for (const text of examples) {
+      const b = el('button', { class: 'exbtn' }, [
+        el('span', { class: 'exmark', text: '→' }),
+        el('span', { text }),
+      ]);
+      b.addEventListener('click', () => {
+        this.input.value = text;
+        this.input.focus();
+      });
+      box.appendChild(b);
+    }
+    box.appendChild(el('div', {
+      class: 'hint welcome-foot',
+      text: '파일은 아래 클립 버튼이나 붙여넣기·끌어놓기로 올리실 수 있습니다.',
+    }));
+    return box;
+  }
+
+  /**
+   * Anything the agent left in out/, offered as a download.
+   *
+   * "AI가 파일을 뱉어줄 수 있는지" is really two questions. It can write files -
+   * write_file and run_python both do - but a file in a folder on the server is
+   * not something the user has. The iframe is sandboxed with allow-downloads,
+   * so a Blob plus an <a download> is the one way to actually hand it over, and
+   * that is what this does.
+   */
+  private async refreshOutputs(): Promise<void> {
+    try {
+      const listing = await state.files();
+      const out = listing.areas.find((a) => a.area === 'out');
+      const files = out?.files ?? [];
+      // Compare before rebuilding: this runs after every turn, and replacing
+      // the card each time would drop a click that was mid-flight.
+      const stamp = files.map((f) => `${f.path}:${f.size}:${f.modified}`).join('|');
+      if (stamp === this.outSeen) return;
+      this.outSeen = stamp;
+
+      clear(this.outBox);
+      if (!files.length) return;
+      this.outBox.appendChild(el('div', { class: 'card staged' }, [
+        el('h2', { text: `만들어진 파일 ${files.length}개` }),
+        el('div', { class: 'hint', text: '워크스페이스의 out/ 에 저장돼 있습니다.' }),
+        ...files.map((f) => {
+          const get = el('button', { class: 'ghost tiny', text: '내려받기' });
+          get.addEventListener('click', () => void this.download(f.path, f.name, get));
+          return el('div', { class: 'stagedrow' }, [
+            el('span', { class: 'grow hint', text: `${f.name} · ${fmtSize(f.size)}` }),
+            get,
+          ]);
+        }),
+      ]));
+      this.scroll();
+    } catch { /* the panel already reports connection failure */ }
+  }
+
+  private async download(path: string, name: string, button: HTMLButtonElement): Promise<void> {
+    button.disabled = true;
+    try {
+      const r = await state.readFile(path);
+      if (!r.textual) {
+        this.hooks.notice('텍스트 파일만 내려받을 수 있습니다. 파일 탭에서 확인해 주세요.', 'err');
+        return;
+      }
+      // A Blob URL rather than a data: URI - a multi-megabyte export as a data
+      // URI is a multi-megabyte string in the href attribute.
+      const url = URL.createObjectURL(new Blob([r.content], { type: 'text/plain;charset=utf-8' }));
+      const a = el('a', { href: url, download: name });
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+      this.hooks.notice(`${name} 을(를) 내려받았습니다.`, 'ok');
+    } catch (e) {
+      this.hooks.notice('내려받지 못했습니다: ' + msg(e), 'err');
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  /** Proposals that are not transcript edits - lorebook, memory, snapshots. */
+  private async refreshActions(): Promise<void> {
+    try {
+      this.setActions(await state.actions());
+    } catch { /* the panel already reports connection failure */ }
+  }
+
+  private setActions(items: PendingAction[]): void {
+    clear(this.actionBox);
+    if (!items.length) return;
+
+    const rows = items.map((a) => {
+      const yes = el('button', { class: 'primary tiny', text: a.byHost ? '승인·실행' : '승인' });
+      const no = el('button', { class: 'ghost tiny', text: '거절' });
+      const decide = async (approve: boolean) => {
+        yes.disabled = true;
+        no.disabled = true;
+        try {
+          const said = await state.decideAction(a.id, approve);
+          this.hooks.notice(said, approve ? 'ok' : '');
+          await this.refreshActions();
+          if (approve) await this.hooks.onApplied();
+        } catch (e) {
+          this.hooks.notice('실행하지 못했습니다: ' + msg(e), 'err');
+          yes.disabled = false;
+          no.disabled = false;
+        }
+      };
+      yes.addEventListener('click', () => void decide(true));
+      no.addEventListener('click', () => void decide(false));
+
+      return el('div', { class: 'stagedrow' }, [
+        // Host actions touch the live RisuAI chat rather than our working copy,
+        // which is a different kind of consequence and says so.
+        a.byHost ? el('span', { class: 'badge err', text: 'RisuAI' }) : null,
+        el('span', { class: 'grow', text: a.summary }),
+        yes, no,
+      ]);
+    });
+
+    this.actionBox.appendChild(el('div', { class: 'card staged' }, [
+      el('h2', { text: `승인 요청 ${items.length}건` }),
+      el('div', { class: 'hint', text: '승인해야 실행됩니다. 전사 수정이 아닌 변경입니다.' }),
+      ...rows,
+    ]));
+  }
+
+  private async newConversation(): Promise<void> {
+    if (this.busy) return;
+    try {
+      await state.newAgentSession();
+      await this.render();
+      this.hooks.notice('새 대화를 시작했습니다.', 'ok');
+    } catch (e) {
+      this.hooks.notice('새 대화를 시작하지 못했습니다: ' + msg(e), 'err');
+    }
+  }
+
+  private async openHistory(): Promise<void> {
+    const body = el('div', {}, [el('div', { class: 'hint', text: '불러오는 중입니다…' })]);
+    const close = popover(this.historyBtn, body);
+    try {
+      const sessions = await state.agentSessions();
+      clear(body);
+      if (!sessions.length) {
+        body.appendChild(el('div', { class: 'hint', text: '이전 대화가 없습니다.' }));
+        return;
+      }
+      for (const s of sessions) {
+        const row = el('div', { class: 'sessrow' }, [
+          el('div', { class: 'grow' }, [
+            el('div', { text: s.title }),
+            el('div', {
+              class: 'hint',
+              text: `${s.turns}턴` + (s.cost != null ? ` · $${Number(s.cost).toFixed(4)}` : ''),
+            }),
+          ]),
+        ]);
+        row.addEventListener('click', async () => {
+          close();
+          await this.render(s.sessionId);
+        });
+        body.appendChild(row);
+      }
+    } catch (e) {
+      clear(body);
+      body.appendChild(el('div', { class: 'hint', text: msg(e) }));
+    }
+  }
+
+  /** Interval id for the elapsed clock, so a teardown can stop it. */
+  private timer: number | null = null;
+
+  private clearTimer(): void {
+    if (this.timer !== null) {
+      clearInterval(this.timer);
+      this.timer = null;
+    }
+  }
+
+  private addBubble(role: 'user' | 'assistant', text: string,
+                    usage?: Record<string, unknown>, cost?: number | null): HTMLElement {
+    const body = el('div', { class: 'bubble-body' });
+    // The user's own text is shown verbatim - they typed it, and rendering it
+    // would mangle a pasted snippet. Only the model's prose gets markdown.
+    if (role === 'assistant') setMarkdown(body, text);
+    else body.textContent = text;
+    const node = el('div', { class: `bubble ${role}` }, [body]);
+    if (role === 'assistant') node.appendChild(this.costLine(usage, cost));
+    this.log.appendChild(node);
+    return body;
+  }
+
+  private costLine(usage?: Record<string, unknown>, cost?: number | null): HTMLElement {
+    const bits: string[] = [];
+    if (cost !== null && cost !== undefined) {
+      bits.push('$' + Number(cost).toFixed(4));
+    } else if (usage) {
+      // Never render an unknown price as zero.
+      bits.push('가격 미설정');
+    }
+    if (usage) {
+      const i = usage.input, o = usage.output, t = usage.toolCalls;
+      if (i != null || o != null) bits.push(`${fmtTok(i)}↑ / ${fmtTok(o)}↓`);
+      if (t) bits.push(`툴 ${t}회`);
+    }
+    return el('div', { class: 'costline', text: bits.join(' · ') });
+  }
+
+  private async submit(): Promise<void> {
+    const typed = this.input.value.trim();
+    // An attachment on its own is a complete message: "here, look at this".
+    if ((!typed && !this.attached.length) || this.busy) return;
+
+    // The paths go in the message rather than the file contents. The agent has
+    // read_file, so it fetches what it needs and only what it needs - and a
+    // pasted file would otherwise be re-sent on every turn of the tool loop.
+    const files = this.attached.slice();
+    const prompt = files.length
+      ? (typed ? typed + '\n\n' : '')
+        + '첨부한 파일: ' + files.join(', ')
+        + '\n(워크스페이스에 올려 뒀습니다. read_file 로 읽어 주세요.)'
+      : typed;
+
+    this.busy = true;
+    this.input.value = '';
+    this.clearAttachments();
+    this.send.disabled = true;
+    const empty = this.log.querySelector('.empty');
+    if (empty) empty.remove();
+    this.addBubble('user', prompt);
+
+    const body = this.addBubble('assistant', '');
+    const trace = el('div', { class: 'trace' });
+    body.parentElement?.insertBefore(trace, body);
+    // A running clock, not just a spinner.
+    //
+    // An agent turn here is minutes, not seconds - it reads dozens of turns and
+    // runs scripts between tokens. Three bouncing dots answer "is it alive"
+    // but not "has this been going for 20 seconds or four minutes", which is
+    // the question that decides whether to wait or interrupt.
+    const elapsed = el('span', { class: 'elapsed', text: '0m 0s' });
+    const thinkingText = el('span', { class: 'thinkingtext', text: '생각하는 중입니다…' });
+    const thinking = el('div', { class: 'thinking' }, [
+      el('span', { class: 'dots' }, [el('i'), el('i'), el('i')]),
+      thinkingText,
+      elapsed,
+    ]);
+    body.parentElement?.insertBefore(thinking, body);
+
+    const startedAt = Date.now();
+    const tick = () => {
+      const s = Math.floor((Date.now() - startedAt) / 1000);
+      elapsed.textContent = `${Math.floor(s / 60)}m ${s % 60}s`;
+    };
+    // Kept in `this` so a panel teardown mid-run cannot leave it running.
+    this.clearTimer();
+    this.timer = setInterval(tick, 1000) as unknown as number;
+
+    const setThinking = (on: boolean, label?: string) => {
+      thinking.style.display = on ? 'flex' : 'none';
+      if (label) thinkingText.textContent = label;
+      if (!on) {
+        // The clock stops but stays on screen: how long the whole turn took is
+        // worth keeping next to what it produced.
+        this.clearTimer();
+        tick();
+        elapsed.classList.add('done');
+        thinking.style.display = 'flex';
+        thinkingText.textContent = label ?? '완료';
+        thinking.querySelector('.dots')?.classList.add('stopped');
+      }
+    };
+    const tracker = new TraceTracker(trace);
+    let acc = '';
+    this.scroll();
+
+    try {
+      for await (const ev of state.agentChat(prompt)) {
+        const e = ev as Record<string, unknown>;
+        switch (e.type) {
+          case 'text':
+            acc += String(e.text ?? '');
+            setThinking(false);
+            setMarkdown(body, acc);
+            this.scroll();
+            break;
+          case 'tool': {
+            // Naming the tool answers "is it stuck?" during the long quiet
+            // stretch while it reads: a spinner alone does not.
+            const name = String(e.name ?? '?');
+            tracker.push(name);
+            setThinking(true, (TOOL_GLYPH[name]?.[1] ?? name) + ' 중입니다…');
+            this.scroll();
+            break;
+          }
+          case 'done': {
+            setThinking(false, '완료');
+            body.parentElement?.appendChild(this.costLine(
+              e.usage as Record<string, unknown> | undefined,
+              (e.cost as number | null | undefined) ?? null));
+            if (typeof e.total === 'number') {
+              this.status.textContent = `이 대화 누적 $${e.total.toFixed(4)}`;
+            }
+            await this.refreshStaged();
+            break;
+          }
+          case 'error':
+            setThinking(false, '중단됨');
+            body.parentElement?.appendChild(
+              el('div', { class: 'notice err', text: String(e.error ?? '알 수 없는 오류가 발생했습니다') }));
+            void clientLog('error', 'agent stream error', { error: e.error });
+            break;
+        }
+      }
+    } catch (e) {
+      setThinking(false, '중단됨');
+      body.parentElement?.appendChild(
+        el('div', { class: 'notice err', text: msg(e) }));
+      void clientLog('error', 'agent chat failed', { error: String(e) });
+    } finally {
+      this.busy = false;
+      this.send.disabled = false;
+      this.scroll();
+    }
+  }
+
+  private async refreshStaged(): Promise<void> {
+    try {
+      this.setStaged(await state.stagedEdits());
+      await this.refreshActions();
+      await this.refreshOutputs();
+    } catch { /* the turn already reported its own failure */ }
+  }
+
+  private setStaged(items: StagedEdit[]): void {
+    clear(this.stagedBox);
+    this.hooks.onStagedChanged(items);
+    if (!items.length) return;
+
+    const label = (op: string) => op === 'edit' ? '수정' : op === 'delete' ? '삭제' : '삽입';
+    const byOp = items.reduce<Record<string, number>>((a, i) => {
+      a[i.op] = (a[i.op] ?? 0) + 1;
+      return a;
+    }, {});
+    const summary = Object.entries(byOp).map(([op, n]) => `${label(op)} ${n}`).join(' · ');
+
+    const approve = el('button', { class: 'primary', text: '전체 승인하고 적용' });
+    approve.addEventListener('click', async () => {
+      approve.disabled = true;
+      try {
+        const r = await state.approveStaged(true);
+        this.hooks.notice(`제안 ${r.decided}건을 승인해 ${r.applied}건을 적용했습니다.`, 'ok');
+        await this.refreshStaged();
+        await this.hooks.onApplied();
+      } catch (e) {
+        this.hooks.notice('적용에 실패했습니다: ' + msg(e), 'err');
+      } finally {
+        approve.disabled = false;
+      }
+    });
+
+    const reject = el('button', { class: 'ghost', text: '전체 거부' });
+    reject.addEventListener('click', async () => {
+      reject.disabled = true;
+      try {
+        await state.approveStaged(false);
+        this.hooks.notice('제안을 거부했습니다.', 'ok');
+        await this.refreshStaged();
+      } catch (e) {
+        this.hooks.notice('거부에 실패했습니다: ' + msg(e), 'err');
+      } finally {
+        reject.disabled = false;
+      }
+    });
+
+    this.stagedBox.appendChild(el('div', { class: 'card staged' }, [
+      el('h2', { text: `승인 대기 ${items.length}건` }),
+      el('div', { class: 'hint', text: summary + ' — 왼쪽 패널에 미리보기로 표시했습니다.' }),
+      ...items.slice(0, 8).map((i) => el('div', { class: 'stagedrow' }, [
+        el('span', { class: 'badge warn', text: label(i.op) }),
+        el('span', { class: 'grow hint', text: `#${i.seq ?? '?'} ${i.reason || ''}` }),
+      ])),
+      items.length > 8 ? el('div', { class: 'hint', text: `그 외 ${items.length - 8}건` }) : null,
+      el('div', { class: 'row', style: { marginTop: '8px' } }, [approve, reject]),
+    ]));
+  }
+
+  private scroll(): void {
+    this.log.scrollTop = this.log.scrollHeight;
+  }
+}
+
+/**
+ * Renders the tool trace, collapsing consecutive repeats into ×N.
+ *
+ * An agent that reads eight ranges in a row produces eight identical chips
+ * otherwise, which buries the one call that mattered.
+ */
+class TraceTracker {
+  private lastName = '';
+  private count = 0;
+  private chip: HTMLElement | null = null;
+
+  constructor(private mount: HTMLElement) {}
+
+  push(name: string): void {
+    if (name === this.lastName && this.chip) {
+      this.count += 1;
+      const x = this.chip.querySelector('.tx');
+      if (x) x.textContent = `×${this.count}`;
+      else this.chip.appendChild(el('span', { class: 'tx', text: `×${this.count}` }));
+      return;
+    }
+    const [glyph, label] = TOOL_GLYPH[name] ?? ['🔧', name];
+    this.chip = el('span', { class: 'tchip', title: name }, [
+      el('span', { text: glyph }),
+      el('span', { text: label }),
+    ]);
+    this.mount.appendChild(this.chip);
+    this.lastName = name;
+    this.count = 1;
+  }
+}
+
+/** Replace a node's contents with rendered markdown. */
+function setMarkdown(node: HTMLElement, text: string): void {
+  clear(node);
+  node.appendChild(renderMarkdown(text));
+}
+
+function fmtSize(n: number): string {
+  if (!n) return '0B';
+  if (n < 1024) return `${n}B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)}KB`;
+  return `${(n / 1024 / 1024).toFixed(1)}MB`;
+}
+
+function msg(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
+
+function fmtTok(v: unknown): string {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return '?';
+  return n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n);
+}
+
+export type { AgentSessionInfo };

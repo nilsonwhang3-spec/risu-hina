@@ -1,0 +1,24 @@
+# Runtime data. Holds the auth token, API credentials, the SQLite DB and every
+# materialised chat transcript - none of which may ever reach a repository.
+data/
+pyserver/data/
+pyserver/dist/
+pyserver/.venv/
+.venv/
+
+__pycache__/
+*.pyc
+
+node_modules/
+plugin/dist/
+
+# Probe leftovers
+probe/out.log
+probe/*.log
+
+# The author's own deployment notes: real hostname, ssh user, key filename and
+# an open-port inventory of a home machine. Useful locally, not publishable.
+docs/00-environment.md
+
+# Release staging, rebuilt by tools/release.py
+release/
