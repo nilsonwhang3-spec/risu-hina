@@ -261,16 +261,21 @@ def _offer_launchers(payload: Path, root: Path) -> list[str]:
     Launchers change rarely; a `.new` file and a log line beat a corrupted one.
     """
     offered: list[str] = []
-    for name in ("start.bat", "start.sh", "risuelf_ctl.ps1", "setup.sh",
-                 "service-install.ps1", "service-uninstall.ps1",
-                 "service-install.sh", "service-uninstall.sh"):
-        src = payload.parent / name
+    # Two places, because the entry points are at the install root and the
+    # plumbing they call is inside pyserver/.
+    for name, where in (
+        ("start.bat", payload), ("start.sh", payload), ("manage.ps1", payload),
+        ("setup.bat", root), ("uninstall.bat", root),
+        ("setup.sh", root), ("uninstall.sh", root), ("README.md", root),
+    ):
+        src = (payload.parent / name) if where is root else (payload / name)
         if not src.is_file():
             continue
-        current = root / name
+        current = (root if where is root else payload) / name
         if current.is_file() and current.read_bytes() == src.read_bytes():
             continue
-        shutil.copy2(src, root / (name + ".new"))
+        dest = (root if where is root else payload) / (name + ".new")
+        shutil.copy2(src, dest)
         offered.append(name)
     if offered:
         log.info("update: launcher changes staged as *.new (%s) - swap them by hand",

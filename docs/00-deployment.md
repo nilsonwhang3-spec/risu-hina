@@ -34,11 +34,12 @@ web RisuAI(risuai.xyz)로 붙을 때만 토큰·CORS·혼합콘텐츠 문제가 
 
 ```
 # Windows
-pyserver\start.bat [port]
-powershell -ExecutionPolicy Bypass -File pyserver\risuelf_ctl.ps1 -Action start|stop|status
+setup.bat                      최초 설치 + 기동
+powershell -ExecutionPolicy Bypass -File pyserver\manage.ps1 -Action start|stop|status
 
 # 그 외
-pyserver/start.sh [port]
+./setup.sh
+pyserver/start.sh [port]       런처를 직접
 ```
 
 두 런처 모두 **재시작 루프**다. 백엔드가 exit 75 로 끝나면 "새 버전을 설치했으니 다시 들어와라"라는

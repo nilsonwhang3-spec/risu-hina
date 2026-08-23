@@ -17,26 +17,27 @@ version lives inside the file, in the `//@version` header RisuAI reads.
 ## The archive unpacks ready to run
 
     risu-elf/
-      pyserver/          code. an update replaces this wholesale
-      plugin/            risu-elf.js, so the backend can serve it locally
-      data/              yours. an update never touches it
-      start.bat          run it
-      start.sh
-      risuelf_ctl.ps1    setup / start / stop / status / token  (Windows)
-      setup.sh           venv + dependencies                     (Linux)
-      service-install.ps1    register with NSSM      (Windows)
-      service-uninstall.ps1  unregister
-      service-install.sh     register with PM2       (Linux)
-      service-uninstall.sh   unregister
+      pyserver/       code. an update replaces this wholesale
+      plugin/         risu-elf.js, to install into RisuAI
+      data/           yours. an update never touches it
+      setup.bat       install and start          (Windows)
+      uninstall.bat   stop and undo
+      setup.sh        install and start          (Linux)
+      uninstall.sh    stop and undo
+      README.md       how to use all of the above
 
 Extract it anywhere and it is an install - no "now make a folder called
 pyserver and put these in it".
 
-The launchers sit at the root rather than beside the code, and that is not
-tidiness. cmd.exe re-reads a running batch file by byte offset, so an update
-that overwrote start.bat while the restart loop was sitting in it could make
-cmd execute nonsense. Keeping them outside the directory an update replaces
-removes the possibility.
+**Five files at the root, and they are the five a person touches.** Everything
+else - the restart loop, the PowerShell that finds an interpreter and talks to
+the service manager - lives in pyserver/ where it belongs. An install directory
+that greets you with eleven scripts is one where you have to read all eleven to
+find out which two matter.
+
+Nothing from development ships: no docs/, tests/, tools/. GitHub attaches its
+own "Source code" archives to every release and those do contain them, which is
+worth knowing when someone downloads the wrong one.
 
     python tools/release.py            # build into release/
     python tools/release.py --check    # verify an existing release/
@@ -59,16 +60,18 @@ PLUGIN_ASSET = "risu-elf.js"
 # than scattering itself across wherever it was opened.
 TREE = "risu-elf"
 
-# Inside pyserver/ - the part an update replaces.
-SERVER_FILES = ["run.py", "requirements.in"]
+# Inside pyserver/. `run.py` and `app/` are replaced by an update; the
+# launchers and manage.ps1 are not copied by the updater, so a start.bat that
+# cmd is currently executing is never overwritten under it.
+SERVER_FILES = ["run.py", "requirements.in", "start.bat", "start.sh", "manage.ps1"]
 SERVER_DIRS = ["app"]
 
-# At the install root - the operator's entry points, left alone by updates.
-ROOT_FILES = [
-    "start.bat", "start.sh", "risuelf_ctl.ps1", "setup.sh",
-    "service-install.ps1", "service-uninstall.ps1",
-    "service-install.sh", "service-uninstall.sh",
-]
+# At the install root - the four entry points and the readme, nothing else.
+ROOT_FILES = ["setup.bat", "uninstall.bat", "setup.sh", "uninstall.sh"]
+
+# Shipped as README.md at the root. The repository README is about the project;
+# this one is about the copy someone just extracted.
+RELEASE_README = "RELEASE_README.md"
 
 # Never ship these, whatever happens to be on disk.
 EXCLUDE_DIRS = {"__pycache__", ".venv", "data", "dist"}
@@ -134,6 +137,10 @@ def build_backend(plugin: Path) -> Path:
             f = src / name
             if f.is_file():
                 zf.write(f, f"{TREE}/{name}")
+
+        readme = src / RELEASE_README
+        if readme.is_file():
+            zf.write(readme, f"{TREE}/README.md")
 
         # The same plugin build as the standalone asset, so a local install can
         # serve it without the operator copying a file around.

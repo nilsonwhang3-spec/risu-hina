@@ -53,16 +53,13 @@ Expand-Archive risu-elf-backend-0.1.0.zip -DestinationPath D:\code -Force
 
 ```
 D:\code\risu-elf\
-  pyserver\              코드. 업데이트가 통째로 갈아끼운다
+  pyserver\              코드 + 런처. 업데이트가 통째로 갈아끼운다
   plugin\risu-elf.js     백엔드가 직접 서빙하는 플러그인 사본
   data\                  당신 것. 업데이트가 건드리지 않는다
   start.bat  start.sh
-  risuelf_ctl.ps1        setup / start / stop / status / token   (Windows)
-  setup.sh               venv + 의존성                            (Linux)
-  service-install.ps1    NSSM 등록                                (Windows)
-  service-uninstall.ps1  NSSM 해제
-  service-install.sh     PM2 등록                                 (Linux)
-  service-uninstall.sh   PM2 해제
+  setup.bat  uninstall.bat        (Windows)
+  setup.sh   uninstall.sh         (Linux)
+  README.md
 ```
 
 런처가 `pyserver\` **밖에** 있는 것은 정돈이 아니라 안전 문제다. cmd.exe 는 실행 중인
@@ -75,7 +72,7 @@ D:\code\risu-elf\
 ### 1-3. 설치
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File D:\code\risu-elf\risuelf_ctl.ps1 -Action setup
+D:\code\risu-elf\setup.bat
 ```
 
 ```
@@ -91,7 +88,7 @@ setup: data dir D:\code\risu-elf\data
 ### 1-4. 기동
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File D:\code\risu-elf\risuelf_ctl.ps1 -Action start
+D:\code\risu-elf\setup.bat        REM setup 이 곧바로 띄운다
 ```
 
 ```
@@ -110,7 +107,7 @@ health     {"service": "risu-elf", "version": "0.1.0", "ok": true, "agentReady":
 
 `agentReady: false` 도 정상이다. 아직 모델 자격증명을 넣지 않았다.
 
-**다른 수퍼바이저를 쓸 거라면** `risuelf_ctl.ps1` 대신 `start.bat`(또는 `start.sh`)을
+**다른 수퍼바이저를 쓸 거라면** `pyserver\start.bat`(또는 `pyserver/start.sh`)을
 감싸면 된다. NSSM·PM2·systemd 무엇이든, **런처를 직접 실행해야 한다** — 자체 업데이트가
 exit 75로 재진입을 요청하는데 그 루프가 런처 안에 있기 때문이다.
 
@@ -119,7 +116,7 @@ exit 75로 재진입을 요청하는데 그 루프가 런처 안에 있기 때�
 ### 1-5. 토큰
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File D:\code\risu-elf\risuelf_ctl.ps1 -Action token
+powershell -ExecutionPolicy Bypass -File D:\code\risu-elf\pyserver\manage.ps1 -Action token
 ```
 
 ```
@@ -135,14 +132,14 @@ web RisuAI나 다른 기계에서 직접 붙을 때만 필요하다 — 그 경�
 
 ## 2. 설치 위치를 바꾸려면
 
-**코드 위치는 그냥 바꾸면 된다.** 하드코딩된 경로가 없다 — `risuelf_ctl.ps1` 은
-자기가 놓인 자리(`$PSScriptRoot`)에서 모든 경로를 계산하고, 프로세스도 **자기 설치의
-`run.py` 경로로** 찾는다. 폴더 이름이 `risu-elf` 일 필요도 없다.
+**코드 위치는 그냥 바꾸면 된다.** 하드코딩된 경로가 없다 — 스크립트가 자기가 놓인
+자리에서 모든 경로를 계산하고, 프로세스도 **자기 설치의 `run.py` 경로로** 찾는다.
+폴더 이름이 `risu-elf` 일 필요도 없다.
 
 ```powershell
 Expand-Archive risu-elf-backend-0.1.0.zip -DestinationPath E:\apps -Force
 Rename-Item E:\apps\risu-elf myelf          # 이름도 마음대로
-powershell -ExecutionPolicy Bypass -File E:\apps\myelf\risuelf_ctl.ps1 -Action setup
+powershell -ExecutionPolicy Bypass -File E:\apps\myelf\setup.bat
 ```
 
 압축이 `risu-elf/` 트리를 통째로 담고 있으므로 그냥 원하는 부모 폴더에 풀면 된다.
@@ -162,8 +159,7 @@ powershell -ExecutionPolicy Bypass -File E:\apps\myelf\risuelf_ctl.ps1 -Action s
 다른 드라이브나 백업되는 디스크에 두고 싶을 때.
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File "$install\risuelf_ctl.ps1" `
-  -Action setup -DataDir 'E:\backup\risu-elf-data'
+powershell -ExecutionPolicy Bypass -File "$install\setup.bat" -DataDir E:\backup\risu-elf-data
 ```
 
 ```
@@ -187,9 +183,9 @@ setup: data dir E:\backup\risu-elf-data
 ```bash
 unzip risu-elf-backend-0.1.0.zip -d /opt
 cd /opt/risu-elf && chmod +x *.sh
-./setup.sh                      # venv + 의존성. 3.10+ 를 알아서 찾는다
-./start.sh 6020                 # 손으로 띄우기
-./service-install.sh 6020       # 또는 PM2 로 상주시키기
+./setup.sh                      # venv + 의존성 + 기동. 3.10+ 를 알아서 찾는다
+./setup.sh --service            # 또는 PM2 로 상주시키기
+./uninstall.sh                  # 멈추고 등록 해제
 ```
 
 `setup.sh` 는 `--python <경로>` 와 `--data-dir <절대경로>` 를 받는다(윈도우의 `-Python`,
@@ -201,8 +197,8 @@ venv 생성이 실패하면 `sudo apt install python3-venv` 가 대개 답이다
 
 | | 등록 | 해제 |
 |---|---|---|
-| Windows (NSSM) | `service-install.ps1 [-Name RisuElf] [-Port 6020]` | `service-uninstall.ps1 [-Name RisuElf]` |
-| Linux (PM2) | `./service-install.sh [port] [name]` | `./service-uninstall.sh [name]` |
+| Windows (NSSM) | `setup.bat -Service [-Name RisuElf] [-Port 6020]` | `uninstall.bat [-Name RisuElf]` |
+| Linux (PM2) | `./setup.sh --service [--port 6020]` | `./uninstall.sh` |
 
 둘 다 **`start.bat`/`start.sh` 를 실행하지 `run.py` 를 직접 실행하지 않는다.** exit 75 가
 "업데이트를 설치했으니 다시 올라와라"라는 뜻이고 그걸 아는 루프가 런처 안에 있기 때문이다.
@@ -220,7 +216,7 @@ sudo 명령을 사람이 직접 실행해야 한다 — 스크립트가 읽지�
 ... -Action start -Port 6030
 ```
 
-`stop`·`status`·`token` 에도 같은 `-Port` 를 준다(상태 확인이 그 포트를 본다).
+`manage.ps1` 의 `stop`·`status`·`token` 에도 같은 `-Port` 를 준다(상태 확인이 그 포트를 본다).
 `start.bat 6030` / `start.sh 6030` 도 같다. 환경변수 `RISUELF_PORT` 도 읽는다.
 
 ### 요약
@@ -228,9 +224,9 @@ sudo 명령을 사람이 직접 실행해야 한다 — 스크립트가 읽지�
 | 바꾸고 싶은 것 | 방법 |
 |---|---|
 | 코드 위치 | 그냥 원하는 부모 폴더에 풀면 된다 |
-| 데이터 위치 | `setup -DataDir <절대경로>` (`datadir.txt` 에 박힌다) |
+| 데이터 위치 | `setup.bat -DataDir <절대경로>` / `./setup.sh --data-dir <절대경로>` |
 | 포트 | `-Port` 또는 `RISUELF_PORT` |
-| 인터프리터 | `setup -Python <python.exe 경로>` |
+| 인터프리터 | `setup.bat -Python <경로>` / `./setup.sh --python <경로>` |
 | 바인딩 주소 | `RISUELF_HOST` — **바꾸기 전에 §4를 읽을 것** |
 
 ---
@@ -252,7 +248,7 @@ sudo 명령을 사람이 직접 실행해야 한다 — 스크립트가 읽지�
 ## 4. 확인과 문제 해결
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File <install>\risuelf_ctl.ps1 -Action status
+powershell -ExecutionPolicy Bypass -File <install>\pyserver\manage.ps1 -Action status
 ```
 
 > **다른 기계에서 `curl http://127.0.0.1:6020/health` 는 아무 의미가 없다.**
@@ -282,7 +278,7 @@ powershell -ExecutionPolicy Bypass -File <install>\risuelf_ctl.ps1 -Action statu
 ## 5. 지우려면
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File <install>\risuelf_ctl.ps1 -Action stop
+<install>\uninstall.bat -Purge
 Remove-Item -Recurse -Force <install>
 ```
 

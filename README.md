@@ -45,57 +45,47 @@ RisuAI / PocketRisu (브라우저)
 
 ## 설치
 
-[릴리스](../../releases/latest)에서 `risu-elf-backend-<버전>.zip`, `SHA256SUMS.txt`,
-`risu-elf.js` 세 개를 받는다.
-
-### 1. 백엔드
-
-zip을 **원하는 폴더에 풀면 된다.** 안에 `risu-elf/` 트리가 통째로 들어 있어서, 폴더를
-미리 만들 필요도 이름을 맞출 필요도 없다.
+[릴리스](../../releases/latest)에서 **`risu-elf-backend-<버전>.zip` 하나만** 받으면 된다.
+플러그인도 그 안에 들어 있다.
 
 ```
 risu-elf/
-  pyserver/            코드. 업데이트가 통째로 갈아끼운다
-  plugin/risu-elf.js   백엔드가 서빙하는 플러그인 사본
-  data/                당신 것. 업데이트가 건드리지 않는다
-  risuelf_ctl.ps1  start.bat      (Windows)
-  setup.sh         start.sh       (Linux)
-  service-install.ps1 / .sh       상주시킬 때
+  pyserver/       백엔드 코드
+  plugin/         RisuAI 에 설치할 risu-elf.js
+  data/           DB · 설정 · 토큰 · 워크스페이스
+  setup.bat  uninstall.bat      (Windows)
+  setup.sh   uninstall.sh       (Linux)
+  README.md
 ```
 
+원하는 폴더에 풀고 — 폴더 이름이 `risu-elf` 일 필요도 없다 —
+
 ```powershell
-# Windows
-powershell -ExecutionPolicy Bypass -File risu-elf\risuelf_ctl.ps1 -Action setup
-powershell -ExecutionPolicy Bypass -File risu-elf\risuelf_ctl.ps1 -Action start
+setup.bat                    # Windows. 파이썬을 찾아 venv 를 만들고 띄운다
+setup.bat -Service           # 재부팅해도 살아 있게 (NSSM, 관리자 권한)
 ```
 
 ```bash
-# Linux
-cd risu-elf && chmod +x *.sh && ./setup.sh && ./start.sh
+chmod +x *.sh && ./setup.sh   # Linux
+./setup.sh --service          # pm2
 ```
 
+그다음 `plugin/risu-elf.js` 를 RisuAI 플러그인 화면에 넣고, 챗 화면의 **Risu Elf** 버튼을
+열어 오른쪽 위 ⚙ → **연결**에 백엔드 URL(같은 기계면 `http://127.0.0.1:6020`),
+**에이전트 → 수정**에 모델 자격증명을 넣는다.
+
 **푸는 것보다 먼저 `SHA256SUMS.txt` 로 해시를 확인한다.** 받은 내용이 곧 돌아갈 서버가 된다.
-설치 위치·데이터 위치·포트·인터프리터를 바꾸는 법, 서비스로 상주시키는 법은
+
+설치 위치·데이터 위치·포트·인터프리터를 바꾸는 법은 압축 안의 `README.md` 와
 [docs/05-install.md](docs/05-install.md)에 있다.
-
-### 2. 플러그인
-
-`risu-elf.js` 를 RisuAI 플러그인 화면에서 설치한다. 이후 업데이트는 RisuAI가
-`//@update-url` 로 알아서 확인한다.
-
-### 3. 연결
-
-플러그인 우측 상단 ⚙ → **연결**에 백엔드 URL을 넣는다. 같은 기계면 `http://127.0.0.1:6020`.
-그다음 **에이전트 → 수정**에서 Base URL · Model · API Key 를 넣고 **연결 테스트**를 누른다.
-테스트는 일반 응답과 툴 호출을 따로 확인한다 — 툴 호출이 안 되면 에이전트가 동작할 수 없다.
 
 ### 업데이트 순서
 
 **① RisuAI 플러그인 화면에서 플러그인 → ② 플러그인 ⚙ → 정보 · 로그에서 백엔드.**
 
-이 순서여서 `//@update-url` 이 로컬 백엔드가 아니라 GitHub 릴리스를 가리킨다. 백엔드를
-가리키면 순환이 된다 — 플러그인 업데이트가 먼저인데 그게 백엔드가 살아 있고 최신이어야
-가능해진다.
+이 순서여서 `//@update-url` 이 로컬 백엔드가 아니라 GitHub 릴리스를 가리킨다.
+백엔드를 가리키면 순환이 된다 — 플러그인 업데이트가 먼저인데 그게 백엔드가 살아 있고
+최신이어야 가능해진다.
 
 ## 개발
 

@@ -42,10 +42,6 @@ else
   echo
 fi
 
-if [ -f probe/risu-elf-probe.js ]; then
-  run "probe plugin syntax" node --check probe/risu-elf-probe.js
-fi
-
 if [ "$fail" -eq 0 ]; then
   echo "ALL GREEN"
   exit 0
