@@ -28,7 +28,7 @@ test-server에서 실제로 처음부터 돌려 보고 쓴 절차다. 명령과 
 릴리스에서 세 파일을 받는다.
 
 ```
-risu-elf-backend-<버전>.zip
+risu-elf-install-<버전>.zip
 SHA256SUMS.txt
 risu-elf.js               ← 플러그인. 3단계에서 쓴다
 ```
@@ -38,7 +38,7 @@ risu-elf.js               ← 플러그인. 3단계에서 쓴다
 
 ```powershell
 $want = (Get-Content SHA256SUMS.txt | Where-Object { $_ -like '*backend*' }).Split(' ')[0]
-$got  = (Get-FileHash risu-elf-backend-0.1.0.zip -Algorithm SHA256).Hash.ToLower()
+$got  = (Get-FileHash risu-elf-install-0.1.0.zip -Algorithm SHA256).Hash.ToLower()
 if ($want -ne $got) { throw 'hash mismatch' } else { 'hash ok' }
 ```
 
@@ -48,7 +48,7 @@ if ($want -ne $got) { throw 'hash mismatch' } else { 'hash ok' }
 만들 필요도 이름을 맞출 필요도 없다.
 
 ```powershell
-Expand-Archive risu-elf-backend-0.1.0.zip -DestinationPath D:\code -Force
+Expand-Archive risu-elf-install-0.1.0.zip -DestinationPath D:\code -Force
 ```
 
 ```
@@ -137,7 +137,7 @@ web RisuAI나 다른 기계에서 직접 붙을 때만 필요하다 — 그 경�
 폴더 이름이 `risu-elf` 일 필요도 없다.
 
 ```powershell
-Expand-Archive risu-elf-backend-0.1.0.zip -DestinationPath E:\apps -Force
+Expand-Archive risu-elf-install-0.1.0.zip -DestinationPath E:\apps -Force
 Rename-Item E:\apps\risu-elf myelf          # 이름도 마음대로
 powershell -ExecutionPolicy Bypass -File E:\apps\myelf\setup.bat
 ```
@@ -181,7 +181,7 @@ setup: data dir E:\backup\risu-elf-data
 ### 리눅스에서는
 
 ```bash
-unzip risu-elf-backend-0.1.0.zip -d /opt
+unzip risu-elf-install-0.1.0.zip -d /opt
 cd /opt/risu-elf && chmod +x *.sh
 ./setup.sh                      # venv + 의존성 + 기동. 3.10+ 를 알아서 찾는다
 ./setup.sh --service            # 또는 PM2 로 상주시키기

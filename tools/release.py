@@ -3,7 +3,7 @@
 Three files, and the third is what makes the other two installable:
 
     risu-elf.js         the plugin, under the exact name //@update-url expects
-    risu-elf-backend-<ver>.zip   the backend, laid out the way updater.py unpacks
+    risu-elf-install-<ver>.zip   the whole install, laid out ready to run
     SHA256SUMS.txt      digests of both
 
 `updater.py` refuses a release without `SHA256SUMS.txt`. That is not ceremony:
@@ -55,6 +55,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "release"
 PLUGIN_ASSET = "risu-elf.js"
+
+# Not "risu-elf-<ver>.zip": GitHub attaches its own source archive to every
+# release under exactly that name, and two identically named files on one page
+# is the confusion this is trying to avoid. Not "backend" either - the archive
+# carries the plugin too, so that name undersold it.
+INSTALL_ASSET = "risu-elf-install-%s.zip"
 
 # The tree's top-level folder, so the zip unpacks into one directory rather
 # than scattering itself across wherever it was opened.
@@ -115,7 +121,7 @@ DATA_README = """이 폴더는 당신 것입니다.
 
 
 def build_backend(plugin: Path) -> Path:
-    dest = OUT / f"risu-elf-backend-{version()}.zip"
+    dest = OUT / (INSTALL_ASSET % version())
     src = ROOT / "pyserver"
     with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as zf:
         for name in SERVER_FILES:

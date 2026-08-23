@@ -45,7 +45,7 @@ RisuAI / PocketRisu (브라우저)
 
 ## 설치
 
-[릴리스](../../releases/latest)에서 **`risu-elf-backend-<버전>.zip` 하나만** 받으면 된다.
+[릴리스](../../releases/latest)에서 **`risu-elf-install-<버전>.zip` 하나만** 받으면 된다.
 플러그인도 그 안에 들어 있다.
 
 ```

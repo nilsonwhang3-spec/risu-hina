@@ -125,7 +125,10 @@ def check() -> dict:
 
     tag = str(rel.get("tag_name") or "").lstrip("vV")
     assets = {a.get("name"): a.get("browser_download_url") for a in rel.get("assets") or []}
-    archive = next((n for n in assets if n.endswith(".zip") and "backend" in n.lower()), None)
+    # Named, then any zip. The fallback matters for older releases, whose asset
+    # was called risu-elf-backend-<ver>.zip; the name changed once the archive
+    # stopped being only the backend.
+    archive = next((n for n in assets if n.startswith("risu-elf-install") and n.endswith(".zip")), None)
     archive = archive or next((n for n in assets if n.endswith(".zip")), None)
 
     newer = _ver_tuple(tag) > _ver_tuple(config.VERSION)
