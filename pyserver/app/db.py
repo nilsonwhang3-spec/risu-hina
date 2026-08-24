@@ -21,7 +21,7 @@ from typing import Any, Iterable
 
 from . import config
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 LOCK = threading.RLock()
 _conn: sqlite3.Connection | None = None
@@ -457,6 +457,70 @@ DDL = [
     """,
     "CREATE INDEX IF NOT EXISTS actions_chat ON pending_actions(chat_key, status, created_at)",
 
+    # --- the card itself (schema 8, bot editing) ----------------------------
+    #
+    # Card prose fields as rows, for the same reason memories are rows: they
+    # are text a person edits one at a time, and the diff against a frozen
+    # original is a string comparison. Scalars sit at seq 0 under their field
+    # name; alternateGreetings is one row per greeting. `original IS NULL`
+    # means "added here"; a deleted greeting is marked in extra_json rather
+    # than removed, so the diff can say so.
+    #
+    # There is deliberately NO card shell: write-back re-reads the live
+    # character and overlays only modelled fields, so unmodelled keys
+    # (emotionImages, ccAssets, ...) ride along untouched. characters.card_json
+    # (overwritten with the full card on every upload) is the frozen reference.
+    """
+    CREATE TABLE IF NOT EXISTS card_fields (
+        id          TEXT PRIMARY KEY,
+        char_key    TEXT NOT NULL REFERENCES characters(char_key) ON DELETE CASCADE,
+        field       TEXT NOT NULL,
+        seq         INTEGER NOT NULL DEFAULT 0,
+        body        TEXT NOT NULL DEFAULT '',
+        original    TEXT,
+        extra_json  TEXT,
+        created_at  REAL NOT NULL,
+        updated_at  REAL NOT NULL
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS card_fields_char ON card_fields(char_key, field, seq)",
+
+    # Regex (customscript) and trigger (triggerscript) items, in lore_entries'
+    # grammar: whole-entry JSON with a frozen original_json and an origin
+    # lifecycle (original|edited|added|deleted). Item-whole replacement is what
+    # preserves fields this schema never modelled.
+    """
+    CREATE TABLE IF NOT EXISTS card_scripts (
+        id          TEXT PRIMARY KEY,
+        char_key    TEXT NOT NULL REFERENCES characters(char_key) ON DELETE CASCADE,
+        kind        TEXT NOT NULL,
+        seq         INTEGER NOT NULL DEFAULT 0,
+        entry_json  TEXT NOT NULL,
+        original_json TEXT,
+        origin      TEXT NOT NULL DEFAULT 'original',
+        created_at  REAL NOT NULL
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS card_scripts_char ON card_scripts(char_key, kind, seq)",
+
+    # Bot-level snapshots. A separate table rather than nullable-ing
+    # checkpoints' chat_key: that table's consumers all assume a chat, and a
+    # bot snapshot has no markdown and no message count. Content is the full
+    # row sets (ids included - agent proposals point at ids) so restore is a
+    # replace, never a replay.
+    """
+    CREATE TABLE IF NOT EXISTS card_checkpoints (
+        id          TEXT PRIMARY KEY,
+        char_key    TEXT NOT NULL,
+        label       TEXT NOT NULL DEFAULT '',
+        fields_json TEXT NOT NULL,
+        scripts_json TEXT NOT NULL,
+        lore_json   TEXT NOT NULL,
+        created_at  REAL NOT NULL
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS card_checkpoints_char ON card_checkpoints(char_key, created_at DESC)",
+
 ]
 
 
@@ -572,10 +636,6 @@ def has_migration(key: str) -> bool:
 def mark_migration(key: str) -> None:
     execute("INSERT OR REPLACE INTO meta(key, value) VALUES(?, ?)", (f"mig_{key}", "1"))
 
-
-def close() -> None:
-    global _conn
-    with LOCK:
-        if _conn is not None:
-            _conn.close()
-            _conn = None
+# NOTE: close() is defined once, near connect(). A second bare definition used
+# to sit here and, being later, silently replaced the one that checkpoints the
+# WAL - so "clean stop leaves one file" was not actually true. Do not add one.

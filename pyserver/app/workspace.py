@@ -27,6 +27,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from . import card as cardmod
 from . import chatfmt, config, db, store
 from . import memory as mem
 
@@ -137,7 +138,16 @@ def materialize(payload: dict, *, force: bool = False) -> dict:
         local_lore[tk] = (list(chat.get("localLore") or []), reset)
         any_reset = any_reset or reset
 
-    store.ingest_lore(ck, list(card.get("globalLore") or []), local_lore, global_reset=any_reset)
+    # The card (and with it the global lorebook) resets on its own rule, not on
+    # the chats' OR. `any_reset` used to govern global lore too, which meant
+    # opening a brand-new chat of an existing bot (first-seen -> reset) threw
+    # away global-lore edits in progress. A card that has never been ingested
+    # loads regardless of the flag, same as a first-seen chat.
+    card_reset = force or bool(payload.get("cardReset")) or not cardmod.exists(ck)
+    card_summary = cardmod.ingest(ck, card, reset=card_reset)
+    cardmod.set_full(ck, bool(payload.get("cardFull")))
+
+    store.ingest_lore(ck, list(card.get("globalLore") or []), local_lore, global_reset=card_reset)
     _write(base / "lore.json", json.dumps(
         {"globalLore": card.get("globalLore") or [],
          "localLore": {tk: entries for tk, (entries, _) in local_lore.items()}},
@@ -153,6 +163,9 @@ def materialize(payload: dict, *, force: bool = False) -> dict:
         "characterIndex": payload.get("characterIndex"),
         "chats": ingested,
         "totalTurns": sum(c["turns"] for c in ingested),
+        "cardReset": card_reset,
+        "cardFull": bool(payload.get("cardFull")),
+        "cardCounts": card_summary.get("counts"),
         "loreCounts": {
             "global": len(card.get("globalLore") or []),
             "local": len(local_lore),

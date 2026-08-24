@@ -9,13 +9,15 @@
  * Chat counts of 30-50 across folders are normal, so folders collapse and the
  * list is plain rows rather than cards - at that count, cards are a wall.
  */
-import { el, clear } from './dom';
+import { el, clear, searchBox, refocusSearch } from './dom';
 import { state } from '../state';
-import { setTab } from './shell';
+import { setEditMode } from './shell';
+import { shellNotice } from './chatbar';
 import type { RisuChat } from '../risuai';
 
 /** Blob URLs for portraits, revoked when the tab is rebuilt. */
 let portraitUrl = '';
+let filterText = '';
 
 export function renderChatsTab(mount: HTMLElement): void {
   clear(mount);
@@ -48,12 +50,40 @@ export function renderChatsTab(mount: HTMLElement): void {
   const folders = Array.isArray(char.chatFolders) ? char.chatFolders as FolderDef[] : [];
 
   // --- bot section ---------------------------------------------------------
+  // The bot's own edit entry lives here: clicking 봇 편집 swaps the tab bar's
+  // middle to the bot tabs, the same way clicking a chat swaps it to the chat
+  // tabs. One picker, two modes.
+  const editBot = el('button', { class: 'primary tiny', text: '봇 편집' });
+  editBot.addEventListener('click', () => {
+    if (!state.activeCharKey) {
+      flash(pad, '백엔드에 봇이 아직 올라가지 않았습니다. 연결을 확인해 주세요.');
+      return;
+    }
+    setEditMode('bot', 'meta');
+  });
+
+  const rescan = el('button', { class: 'ghost tiny', text: '카드만 다시 읽기' }) as HTMLButtonElement;
+  rescan.title = '카드·봇 로어북·Regex·트리거 작업본을 버리고 RisuAI의 현재 카드로 다시 읽습니다. 챗 작업본은 그대로 둡니다.';
+  rescan.addEventListener('click', async () => {
+    rescan.disabled = true;
+    try {
+      await state.upload({ cardReset: true });
+      state.bump();
+      shellNotice('RisuAI의 현재 카드로 다시 읽었습니다. 카드 작업본이 초기화되었습니다.', 'ok');
+    } catch (e) {
+      flash(pad, '다시 읽지 못했습니다: ' + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      rescan.disabled = false;
+    }
+  });
+
   const portrait = el('div', { class: 'botinitials', text: initials(String(char.name || '?')) });
   pad.appendChild(el('div', { class: 'botcard' }, [
     portrait,
     el('div', { class: 'grow' }, [
       el('div', { class: 'botname', text: String(char.name || '(이름 없음)') }),
       el('div', { class: 'hint', text: `챗 ${liveChats.length}개` + (folders.length ? ` · 폴더 ${folders.length}개` : '') }),
+      el('div', { class: 'row', style: { marginTop: '8px' } }, [editBot, rescan]),
       el('div', { class: 'hint', style: { marginTop: '6px' } }, [
         '다른 봇을 편집하시려면 RisuAI에서 그 봇을 열고 🔄 를 눌러 주세요.',
       ]),
@@ -69,7 +99,16 @@ export function renderChatsTab(mount: HTMLElement): void {
   const ws = state.workspace;
   const loadedFor = (c: RisuChat) => ws?.chats.find((w) => w.chatId === (c.id ?? ''));
 
-  const rows = liveChats.map((c, i) => ({ chat: c, index: i }));
+  if (liveChats.length > 6) {
+    pad.appendChild(searchBox(filterText, (v) => {
+      filterText = v;
+      renderChatsTab(mount);
+      refocusSearch(mount);
+    }, '챗 찾기'));
+  }
+  const needle = filterText.trim().toLowerCase();
+  const rows = liveChats.map((c, i) => ({ chat: c, index: i }))
+    .filter((r) => !needle || String(r.chat.name ?? '').toLowerCase().includes(needle));
   const grouped = new Map<string, { chat: RisuChat; index: number }[]>();
   for (const r of rows) {
     const key = String((r.chat as Record<string, unknown>).folderId ?? '');
@@ -80,6 +119,7 @@ export function renderChatsTab(mount: HTMLElement): void {
   const makeItem = (r: { chat: RisuChat; index: number }) => {
     const loaded = loadedFor(r.chat);
     const isCurrent = r.index === state.slot?.chatIndex;
+    const edit = el('button', { class: 'ghost tiny', text: '챗 편집' });
     const item = el('div', {
       class: 'chatitem' + (loaded && loaded.chatKey === state.activeChatKey ? ' current' : ''),
     }, [
@@ -87,11 +127,12 @@ export function renderChatsTab(mount: HTMLElement): void {
       isCurrent ? el('span', { class: 'badge', text: '열림' }) : null,
       loaded ? el('span', { class: 'badge ok', text: '불러옴' }) : null,
       el('span', { class: 'n', text: `${(r.chat.message ?? []).length}턴` }),
+      edit,
     ]);
-    item.addEventListener('click', async () => {
+    const enter = async () => {
       if (loaded) {
         await state.loadTurns(loaded.chatKey);
-        setTab('editor');
+        setEditMode('chat', 'editor');
         return;
       }
       if (!isCurrent) {
@@ -102,8 +143,10 @@ export function renderChatsTab(mount: HTMLElement): void {
       }
       await state.upload({});
       await state.loadTurns();
-      setTab('editor');
-    });
+      setEditMode('chat', 'editor');
+    };
+    item.addEventListener('click', () => void enter());
+    edit.addEventListener('click', (ev) => { ev.stopPropagation(); void enter(); });
     return item;
   };
 

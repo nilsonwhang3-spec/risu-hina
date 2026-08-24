@@ -15,7 +15,12 @@ import { renderLoreTab } from './tab-lore';
 import { renderMemoryTab } from './tab-memory';
 import { renderVarsTab } from './tab-vars';
 import { renderSettingsTab } from './tab-settings';
+import { renderMetaTab } from './tab-meta';
+import { renderBotLoreTab } from './tab-botlore';
+import { renderRegexTab } from './tab-regex';
+import { renderTriggerTab } from './tab-trigger';
 import { buildChatBar, refreshChatBar } from './chatbar';
+import { buildBotBar, refreshBotBar } from './botbar';
 
 /**
  * Content views in the tab bar; settings is not one of them.
@@ -25,24 +30,61 @@ import { buildChatBar, refreshChatBar } from './chatbar';
  * things the user is actually working on. It lives in the header now, next to
  * the other verbs.
  */
-export type TabId = 'chats' | 'editor' | 'lore' | 'memory' | 'vars' | 'files' | 'settings';
+export type TabId = 'chats' | 'editor' | 'lore' | 'memory' | 'vars'
+  | 'meta' | 'botlore' | 'regex' | 'trigger' | 'files' | 'settings';
 
 /**
- * The tab bar reads left to right as "pick a chat, then its parts, then the
- * workspace". Files are the bot's workspace, not the chat's, so the files tab
- * is set apart with a divider and named for what it is.
+ * What the middle of the tab bar edits: one chat, or the bot's card.
+ *
+ * One picker screen serves both (the bot with its chats IS the first screen),
+ * so instead of eleven tabs competing for width, the bar swaps its middle:
+ * 선택 | 챗 에딧 · 챗 로어북 · 장기기억 · 챗 변수 ┃ 워크스페이스 파일   (chat)
+ * 선택 | 메타 · 봇 로어북 · Regex · 트리거 ┃ 워크스페이스 파일          (bot)
+ * Clicking a chat on the picker enters chat mode; "봇 편집" enters bot mode.
  */
+export type EditMode = 'chat' | 'bot';
+let mode: EditMode = 'chat';
+
 const CONTENT_TABS: [TabId, string][] = [
-  ['chats', '챗 선택'],
+  ['chats', '선택'],
   ['editor', '챗 에딧'],
   ['lore', '챗 로어북'],
   ['memory', '장기기억'],
   ['vars', '챗 변수'],
+  ['meta', '메타'],
+  ['botlore', '봇 로어북'],
+  ['regex', 'Regex'],
+  ['trigger', '트리거'],
   ['files', '워크스페이스 파일'],
 ];
 
 /** Tabs that show one chat's material - the only place the chat bar belongs. */
 const CHAT_TABS = new Set<TabId>(['editor', 'lore', 'memory', 'vars']);
+
+/** Tabs that show the bot's card - where the bot bar belongs. */
+const BOT_TABS = new Set<TabId>(['meta', 'botlore', 'regex', 'trigger']);
+
+export function setEditMode(m: EditMode, tab?: TabId): void {
+  mode = m;
+  syncModeTabs();
+  if (tab) setTab(tab);
+  else if ((m === 'chat' ? BOT_TABS : CHAT_TABS).has(active)) setTab('chats');
+}
+
+export function currentMode(): EditMode {
+  return mode;
+}
+
+function syncModeTabs(): void {
+  for (const id of CHAT_TABS) {
+    const b = document.getElementById('tab-' + id);
+    if (b) b.style.display = mode === 'chat' ? '' : 'none';
+  }
+  for (const id of BOT_TABS) {
+    const b = document.getElementById('tab-' + id);
+    if (b) b.style.display = mode === 'bot' ? '' : 'none';
+  }
+}
 
 const ALL_TABS: TabId[] = [...CONTENT_TABS.map(([id]) => id), 'settings'];
 
@@ -52,6 +94,7 @@ const mounts: Record<TabId, HTMLElement> = {} as Record<TabId, HTMLElement>;
 let healthEl: HTMLElement | null = null;
 let toolbarSlot: HTMLElement | null = null;
 let chatBarEl: HTMLElement | null = null;
+let botBarEl: HTMLElement | null = null;
 let tabSlot: HTMLElement | null = null;
 
 /**
@@ -71,14 +114,17 @@ export function setToolbar(node: HTMLElement | null): void {
 }
 
 function syncToolslot(): void {
-  if (!toolbarSlot || !chatBarEl || !tabSlot) return;
-  // Not on 챗 선택 (nothing is being edited there) and not on the workspace
-  // files (they are the bot's, not the chat's).
+  if (!toolbarSlot || !chatBarEl || !botBarEl || !tabSlot) return;
+  // The two bars are mutually exclusive by construction: CHAT_TABS and
+  // BOT_TABS do not overlap. Selection tabs (챗 선택 · 봇 선택) and files show
+  // neither - nothing is being edited there.
   const showChat = !!state.activeChatKey && CHAT_TABS.has(active);
+  const showBot = !!state.botKey && BOT_TABS.has(active);
   chatBarEl.style.display = showChat ? '' : 'none';
+  botBarEl.style.display = showBot ? '' : 'none';
   const showTab = tabSlot.childElementCount > 0;
   tabSlot.style.display = showTab ? '' : 'none';
-  toolbarSlot.style.display = showChat || showTab ? '' : 'none';
+  toolbarSlot.style.display = showChat || showBot || showTab ? '' : 'none';
 }
 
 export function setTab(tab: TabId): void {
@@ -107,6 +153,10 @@ function renderActive(): void {
   else if (active === 'lore') renderLoreTab(node);
   else if (active === 'memory') renderMemoryTab(node);
   else if (active === 'vars') renderVarsTab(node);
+  else if (active === 'meta') renderMetaTab(node);
+  else if (active === 'botlore') renderBotLoreTab(node);
+  else if (active === 'regex') renderRegexTab(node);
+  else if (active === 'trigger') renderTriggerTab(node);
   else if (active === 'files') renderFilesTab(node);
   else renderSettingsTab(node);
 }
@@ -204,8 +254,9 @@ export function buildShell(): void {
   // the transcript rather than as the actions available on this tab.
   const shellNotice = el('div', { class: 'shellnotice' });
   chatBarEl = buildChatBar(shellNotice);
+  botBarEl = buildBotBar();
   tabSlot = el('div', { class: 'tabslot' });
-  toolbarSlot = el('div', { class: 'toolslot' }, [chatBarEl, tabSlot]);
+  toolbarSlot = el('div', { class: 'toolslot' }, [chatBarEl, botBarEl, tabSlot]);
 
   document.body.appendChild(el('div', { class: 'wrap' }, [
     el('header', {}, [
@@ -219,7 +270,7 @@ export function buildShell(): void {
     ]),
     el('div', { class: 'tabs' }, CONTENT_TABS.flatMap(([id, label]) => (
       id === 'files'
-        ? [el('span', { class: 'tabsep', title: '여기부터는 챗이 아니라 봇의 워크스페이스입니다' }), tabButton(id, label)]
+        ? [el('span', { class: 'tabsep', title: '여기부터는 편집 대상이 아니라 봇의 워크스페이스입니다' }), tabButton(id, label)]
         : [tabButton(id, label)]
     ))),
     toolbarSlot,
@@ -229,6 +280,7 @@ export function buildShell(): void {
 
   document.getElementById('tab-chats')?.classList.add('active');
   mounted = true;
+  syncModeTabs();
   refreshStatus();
   syncToolslot();
 }
@@ -243,6 +295,16 @@ function refreshTabBadges(): void {
 
 state.onChange(() => {
   if (!mounted) return;
+  // An approved agent proposal asked for a tab: go there, switching the
+  // bar's middle to whichever mode owns it.
+  if (state.openTabRequest) {
+    const tab = state.openTabRequest as TabId;
+    state.openTabRequest = null;
+    if (CHAT_TABS.has(tab)) setEditMode('chat', tab);
+    else if (BOT_TABS.has(tab)) setEditMode('bot', tab);
+    else if (tab === 'files' || tab === 'chats') setTab(tab);
+    return;
+  }
   // A log line in the agent panel asked for a file: go where files are.
   if (state.openFileRequest && active !== 'files') {
     setTab('files');
@@ -250,6 +312,7 @@ state.onChange(() => {
   }
   refreshStatus();
   refreshChatBar();
+  refreshBotBar();
   refreshTabBadges();
   renderActive();
   syncToolslot();

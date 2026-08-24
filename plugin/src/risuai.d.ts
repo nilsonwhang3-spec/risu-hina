@@ -105,6 +105,16 @@ export interface RisuaiApi {
   /** Writes only to an index that already exists; cannot append a chat. */
   setChatToIndex(characterIndex: number, chatIndex: number, chat: RisuChat): Promise<void>;
 
+  /**
+   * Allowed DB keys only. Prompts the user for the 'db' permission on first
+   * use (re-confirmed every 3 days) and resolves to null when refused.
+   */
+  getDatabase(includeOnly?: string[] | 'all'): Promise<Record<string, unknown> | null>;
+  /** Writes allowed keys onto the live DB; no permission gate of its own. */
+  setDatabase(patch: Record<string, unknown>): Promise<void>;
+  /** Registers new chaIds in characterOrder so the sidebar shows them. */
+  checkCharOrder?(): Promise<void>;
+
   showContainer(type?: 'fullscreen'): Promise<void>;
   hideContainer(): Promise<void>;
   registerSetting(name: string, cb: () => void, icon?: string, iconType?: 'html' | 'img' | 'none'): Promise<UIPart>;

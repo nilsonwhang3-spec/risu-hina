@@ -105,6 +105,13 @@ function makeHost(backendUrl, token) {
     desc: '설명', firstMessage: '첫 인사',
     image: 'assets/portrait.png',
     globalLore: [{ key: ['k'], content: 'c' }],
+    alternateGreetings: ['대체 인사 하나'],
+    // forkExtra is a field the schema does not model - it must survive edits.
+    customscript: [{ comment: '치환', in: 'foo', out: 'bar', type: 'editdisplay', forkExtra: 7 }],
+    triggerscript: [{
+      comment: '스모크 트리거', type: 'start', conditions: [], lowLevelAccess: true,
+      effect: [{ type: 'triggerlua', code: 'local n = 1\nprint(n)' }],
+    }],
     chatFolders: [{ id: 'f1', name: '보관함', color: '#8b5cf6' }],
     // One loose chat plus a folder, so both list paths render.
     chats: [
@@ -115,11 +122,13 @@ function makeHost(backendUrl, token) {
   };
   const calls = [];
   const storage = new Map();
+  const dbWrites = [];
   let selectedChar = 0;
 
   return {
     liveChar,
     calls,
+    dbWrites,
     api: {
       async getArgument(k) {
         calls.push('getArgument');
@@ -154,7 +163,20 @@ function makeHost(backendUrl, token) {
         return liveChar.chatPage;
       },
       async getCharacterFromIndex() { calls.push('getCharacterFromIndex'); return structuredClone(liveChar); },
-      async setCharacterToIndex(i, char) { calls.push('setCharacterToIndex'); liveChar.chats = structuredClone(char.chats); },
+      async setCharacterToIndex(i, char) {
+        calls.push('setCharacterToIndex');
+        // The real host replaces the object whole; mirroring that is what lets
+        // the card write-back tests see their fields land (or fail to).
+        const next = structuredClone(char);
+        for (const k of Object.keys(liveChar)) delete liveChar[k];
+        Object.assign(liveChar, next);
+      },
+      async getDatabase(keys) {
+        calls.push('getDatabase');
+        return { characters: [structuredClone(liveChar)] };
+      },
+      async setDatabase(patch) { calls.push('setDatabase'); dbWrites.push(structuredClone(patch)); },
+      async checkCharOrder() { calls.push('checkCharOrder'); },
       async getChatFromIndex(ci, chi) { calls.push('getChatFromIndex'); return structuredClone(liveChar.chats[chi] ?? null); },
       async setChatToIndex(ci, chi, chat) {
         calls.push('setChatToIndex');
@@ -286,12 +308,17 @@ await settle(1500);
 
 check('showContainer called before painting', host.calls.includes('showContainer'));
 check('shell rendered', !!document.querySelector('.wrap'));
-// Content views in the tab bar; settings is a header verb, not a view.
-check('six content tabs present', document.querySelectorAll('.tab').length === 6,
+// Content views in the tab bar; settings is a header verb, not a view. The
+// middle of the bar is modal: chat tabs and bot tabs share the slot and only
+// one set is visible at a time.
+check('ten content tabs present', document.querySelectorAll('.tab').length === 10,
       [...document.querySelectorAll('.tab')].map((t) => t.textContent).join(','));
 check('the workspace files tab is set apart', !!document.querySelector('.tabs .tabsep')
       && document.querySelector('.tabs .tabsep')?.nextElementSibling?.id === 'tab-files');
 check('and named for what it is', /워크스페이스 파일/.test(document.getElementById('tab-files')?.textContent || ''));
+check('bot tabs start hidden (chat mode)',
+      document.getElementById('tab-meta')?.style.display === 'none'
+      && document.getElementById('tab-editor')?.style.display !== 'none');
 check('no chat bar on the chat picker', document.querySelector('.toolslot .chatbar')?.style.display === 'none');
 check('settings is not one of them',
       ![...document.querySelectorAll('.tab')].some((t) => t.textContent === '설정'));
@@ -747,7 +774,7 @@ console.log('\ntest_lore_view');
         [...document.querySelectorAll('.panel.active .treescope')]
           .map((h) => h.textContent).join(','));
   check('and it says where bot-level editing went',
-        /봇 단위 편집은 따로/.test(loreTree()), loreTree().slice(0, 200));
+        /봇 로어북/.test(loreTree()), loreTree().slice(0, 200));
 
   clickButton(document.querySelector('.panel.active .tree'), '새 항목');
   await settle(1100);
@@ -759,9 +786,9 @@ console.log('\ntest_lore_view');
   const inputs = [...centre.querySelectorAll('input')];
   inputs[0].value = '스모크 항목';
   centre.querySelector('textarea').value = '# 제목' + String.fromCharCode(10) + '본문입니다.';
-  centre.querySelector('textarea').dispatchEvent(new window.Event('input', { bubbles: true }));
-  check('the content is previewed as markdown',
-        !!centre.querySelector('.md-h'), centre.querySelector('.md-h')?.textContent);
+  // The editor carries a folder select for 폴더 간 이동 (no preview pane -
+  // removed by user decision 2026-08-24).
+  check('a folder select is offered', !!centre.querySelector('select'));
   clickButton(centre, '저장');
   await settle(1100);
   check('the entry is listed by name',
@@ -890,6 +917,131 @@ console.log('\ntest_chat_variables_view');
   await settle(900);
   check('the memory tab does not list variables',
         !/\$affection/.test(document.querySelector('.panel.active .tree')?.textContent || ''));
+}
+
+console.log('\ntest_bot_tabs');
+{
+  // One picker, two modes: 봇 편집 on the picker swaps the bar's middle to
+  // the bot tabs and lands on 메타.
+  clickById(document, 'tab-chats');
+  await settle(600);
+  clickButton(document.querySelector('.panel.active'), '봇 편집');
+  await settle(900);
+  check('봇 편집 swaps to bot mode', document.getElementById('tab-meta')?.style.display !== 'none'
+        && document.getElementById('tab-editor')?.style.display === 'none');
+  check('and lands on 메타', document.getElementById('tab-meta')?.classList.contains('active'));
+  check('the bot bar shows on bot tabs',
+        document.querySelector('.toolslot .botbar')?.style.display !== 'none');
+  check('and the chat bar does not',
+        document.querySelector('.toolslot .chatbar')?.style.display === 'none');
+  const tree = () => document.querySelector('.panel.active .tree');
+  check('card fields listed as rows', /설명 \(desc\)/.test(tree()?.textContent || '')
+        && /대체 인사말 #1/.test(tree()?.textContent || ''), tree()?.textContent?.slice(0, 200));
+  check('retired fields are gone', !/시나리오|성격|시스템 프롬프트/.test(tree()?.textContent || ''));
+  check('greetings sit under the first message', (() => {
+    const labels = [...tree()?.querySelectorAll('.treefile') ?? []].map((b) => b.textContent || '');
+    const fm = labels.findIndex((t) => /첫 인사/.test(t));
+    return fm >= 0 && /대체 인사말 #1/.test(labels[fm + 1] || '');
+  })(), [...tree()?.querySelectorAll('.treefile') ?? []].map((b) => b.textContent).join(','));
+
+  clickButton(tree(), '설명 (desc)');
+  await settle(400);
+  const centre = document.querySelector('.panel.active .left');
+  const box = centre?.querySelector('textarea');
+  check('the field opens for editing', !!box && box.value === '설명', box?.value);
+  box.value = '스모크가 고친 설명';
+  clickButton(centre, '저장');
+  await settle(1100);
+  check('the row wears a 수정 badge',
+        /수정/.test([...tree().querySelectorAll('.treerow')]
+          .find((r) => /설명 \(desc\)/.test(r.textContent || ''))?.textContent || ''));
+  check('the bot bar counts the change',
+        /메타 1/.test(document.querySelector('.botbar .changesum')?.textContent || ''),
+        document.querySelector('.botbar .changesum')?.textContent);
+
+  // Regex: the whole-entry write must keep fields the schema never modelled.
+  clickById(document, 'tab-regex');
+  await settle(900);
+  clickButton(document.querySelector('.panel.active .tree'), '1. 치환');
+  await settle(400);
+  const rc = document.querySelector('.panel.active .left');
+  const outBox = [...(rc?.querySelectorAll('textarea') ?? [])][1];
+  check('the regex opens with its out text', outBox?.value === 'bar', outBox?.value);
+  outBox.value = 'baz';
+  clickButton(rc, '저장');
+  await settle(1100);
+  check('the bot bar counts regex too',
+        /Regex ~1/.test(document.querySelector('.botbar .changesum')?.textContent || ''),
+        document.querySelector('.botbar .changesum')?.textContent);
+  check('the background pair is listed here',
+        /백그라운드 HTML/.test(document.querySelector('.panel.active .tree')?.textContent || ''));
+  check('reorder lives in the list, not the editor',
+        !!document.querySelector('.panel.active .tree .movebtn') && !findButton(rc, '↑ 위로'));
+
+  // Trigger: the editor is the CODE, real newlines and all - never JSON.
+  clickById(document, 'tab-trigger');
+  await settle(900);
+  clickButton(document.querySelector('.panel.active .tree'), '스모크 트리거');
+  await settle(400);
+  const tc = document.querySelector('.panel.active .left');
+  const codeBox = tc?.querySelector('textarea');
+  check('the trigger opens as code, not JSON', codeBox?.value === 'local n = 1\nprint(n)',
+        JSON.stringify(codeBox?.value));
+  codeBox.value = 'local n = 2\nprint(n)';
+  clickButton(tc, '저장');
+  await settle(1100);
+  check('the bot bar counts the trigger',
+        /트리거 ~1/.test(document.querySelector('.botbar .changesum')?.textContent || ''),
+        document.querySelector('.botbar .changesum')?.textContent);
+}
+
+console.log('\ntest_card_write_back');
+{
+  const chatsBefore = JSON.stringify(host.liveChar.chats);
+  check('반영 opens from the bot bar', clickTool(document, 'card-apply'));
+  await settle(300);
+  check('the popover names what will be written',
+        /메타 1/.test(document.querySelector('.popover')?.textContent || ''),
+        document.querySelector('.popover')?.textContent?.slice(0, 160));
+  clickButton(document.querySelector('.popover'), 'RisuAI에 반영');
+  await settle(1500);
+  check('setCharacterToIndex was called', host.calls.includes('setCharacterToIndex'));
+  check('the field landed in the host', host.liveChar.desc === '스모크가 고친 설명',
+        host.liveChar.desc);
+  check('the regex landed whole', host.liveChar.customscript?.[0]?.out === 'baz',
+        JSON.stringify(host.liveChar.customscript ?? []));
+  check('with its unmodelled field intact', host.liveChar.customscript?.[0]?.forkExtra === 7);
+  check('the trigger code landed', host.liveChar.triggerscript?.[0]?.effect?.[0]?.code === 'local n = 2\nprint(n)',
+        JSON.stringify(host.liveChar.triggerscript?.[0]?.effect ?? []));
+  check('with lowLevelAccess intact', host.liveChar.triggerscript?.[0]?.lowLevelAccess === true);
+  check('a card write never touches the chats',
+        JSON.stringify(host.liveChar.chats) === chatsBefore);
+  await settle(600);
+  check('the bot bar is back to 변경 없음',
+        /변경 없음/.test(document.querySelector('.botbar .changesum')?.textContent || ''),
+        document.querySelector('.botbar .changesum')?.textContent);
+}
+
+console.log('\ntest_clone_bot');
+{
+  clickTool(document, 'card-apply');
+  await settle(300);
+  const pop = document.querySelector('.popover');
+  const nameBox = pop?.querySelector('input');
+  nameBox.value = '스모크 복제';
+  clickButton(pop, '복제 봇 생성');
+  await settle(1500);
+  check('the clone went through setDatabase', host.dbWrites.length === 1, String(host.dbWrites.length));
+  const chars = host.dbWrites[0]?.characters ?? [];
+  const clone = chars[chars.length - 1];
+  check('as a new character', chars.length === 2 && clone?.name === '스모크 복제',
+        JSON.stringify({ n: chars.length, name: clone?.name }));
+  check('with a fresh chaId', !!clone?.chaId && clone.chaId !== 'cha-smoke', clone?.chaId);
+  check('and a fresh chat list', clone?.chats?.length === 1 && clone.chats[0].message.length === 0,
+        JSON.stringify(clone?.chats?.map((c) => c.message.length)));
+  check('carrying the edited card', clone?.desc === '스모크가 고친 설명', clone?.desc);
+  check('assets shared by reference, not copied', clone?.image === 'assets/portrait.png');
+  check('the sidebar was told about it', host.calls.includes('checkCharOrder'));
 }
 
 console.log('\ntest_settings_tab');

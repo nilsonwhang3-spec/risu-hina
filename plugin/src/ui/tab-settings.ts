@@ -13,7 +13,8 @@ import { buildPresetsCard } from './presets';
 import { buildSkillsCard } from './skills';
 import { agentPanel } from './agentpane';
 import { buildDebugCard, buildUpdateCard } from './debugpanel';
-import { transport } from '../transport';
+import { transport, clientLog } from '../transport';
+import { measureAssetDump, type DumpController } from '../assets';
 
 let aboutMount: HTMLElement | null = null;
 
@@ -41,7 +42,7 @@ export function renderSettingsTab(mount: HTMLElement): void {
   refreshAbout();
 
   const sections: [string, HTMLElement[]][] = [
-    ['연결', [buildConnectionCard(), buildDiagnosticCard()]],
+    ['연결', [buildConnectionCard(), buildDiagnosticCard(), buildAssetProbeCard()]],
     ['에이전트', [buildPresetsCard({
       onChanged: async () => {
         await state.connect();
@@ -170,6 +171,100 @@ function buildDiagnosticCard(): HTMLElement {
   return el('div', { class: 'card' }, [
     el('h2', { text: '연결 진단' }),
     el('div', { class: 'row' }, [run]),
+    out,
+  ]);
+}
+
+/**
+ * M0 of the bot-edit plan: measure the asset transfer path on this exact
+ * host and backend before the real importer is built. Reads every asset the
+ * current bot references, pushes the bytes through /diag/asset-echo in the
+ * same batches the importer will use, and reports both sides' numbers - plus
+ * whether the backend can pull from the RisuAI hub on its own.
+ */
+function buildAssetProbeCard(): HTMLElement {
+  const out = el('div', { class: 'outbox' });
+  const progress = el('div', { class: 'hint' });
+  let running: DumpController | null = null;
+
+  const run = el('button', { text: '에셋 덤프 실측' });
+  const cancel = el('button', { text: '중단' });
+  cancel.style.display = 'none';
+
+  cancel.addEventListener('click', () => { running?.cancel(); });
+  run.addEventListener('click', async () => {
+    const char = state.character;
+    if (!char) {
+      clear(out);
+      out.appendChild(el('div', { class: 'notice err', text: '호스트 상태를 먼저 읽어야 합니다. 패널을 다시 열어 주세요.' }));
+      return;
+    }
+    run.disabled = true;
+    cancel.style.display = '';
+    clear(out);
+    try {
+      running = measureAssetDump(char, (t) => { progress.textContent = t; });
+      const r = await running.done;
+      progress.textContent = '';
+
+      const mb = r.bytes / 1048576;
+      const mbps = (ms: number): string => (ms > 0 ? (mb / (ms / 1000)).toFixed(2) + ' MB/s' : '-');
+      // What a 150MB / 3000-asset bot would cost at the throughput just seen.
+      const proj = r.wallMs > 0 && r.bytes > 0
+        ? Math.round((150 * 1048576) / (r.bytes / (r.wallMs / 1000)))
+        : 0;
+      const rows: [string, string][] = [
+        ['에셋 참조', `${r.refs}개 (읽기 성공 ${r.readOk}, 실패 ${r.readFail.length})`],
+        ['총 크기', mb.toFixed(1) + 'MB'],
+        ['읽기 시간', `${(r.readMs / 1000).toFixed(1)}s · ${mbps(r.readMs)}` +
+          (r.readOk ? ` · 장당 ${Math.round(r.readMs / r.readOk)}ms` : '')],
+        ['전송 시간', `${(r.uploadMs / 1000).toFixed(1)}s · ${mbps(r.uploadMs)} · ${r.batches}배치`],
+        ['총 소요', `${(r.wallMs / 1000).toFixed(1)}s` + (r.cancelled ? ' (중단됨)' : '')],
+        ['150MB 환산', proj ? `약 ${proj}초` : '-'],
+        ['백엔드가 본 주소', r.echoAddr || '-'],
+      ];
+      if (r.rsProbe) {
+        const p = r.rsProbe;
+        rows.push(['/rs/ 직접 풀', p.error
+          ? `실패: ${String(p.error)}`
+          : `HTTP ${String(p.status)} · ${Math.round(Number(p.bytes || 0) / 1024)}KB · ${String(p.ms)}ms`]);
+      }
+      out.appendChild(el('div', { class: 'notice ok', text: '실측이 끝났습니다.' }));
+      out.appendChild(el('pre', {
+        class: 'mono',
+        text: rows.map(([k, v]) => `${k.padEnd(14)} ${v}`).join('\n'),
+      }));
+      if (r.readFail.length) {
+        out.appendChild(el('div', {
+          class: 'hint',
+          text: '읽기 실패: ' + r.readFail.slice(0, 5).join(', ') + (r.readFail.length > 5 ? ` 외 ${r.readFail.length - 5}건` : ''),
+        }));
+      }
+      void clientLog('info', 'asset-dump-probe', {
+        platform: transport.hostPlatform,
+        refs: r.refs, ok: r.readOk, fail: r.readFail.length, bytes: r.bytes,
+        readMs: r.readMs, uploadMs: r.uploadMs, wallMs: r.wallMs,
+        batches: r.batches, addr: r.echoAddr, rs: r.rsProbe, cancelled: r.cancelled,
+      });
+    } catch (e) {
+      progress.textContent = '';
+      out.appendChild(el('div', { class: 'notice err', text: '실측 실패: ' + (e instanceof Error ? e.message : String(e)) }));
+      void clientLog('warn', 'asset-dump-probe-failed', { error: String(e) });
+    } finally {
+      running = null;
+      run.disabled = false;
+      cancel.style.display = 'none';
+    }
+  });
+
+  return el('div', { class: 'card' }, [
+    el('h2', { text: '에셋 덤프 실측' }),
+    el('div', {
+      class: 'hint',
+      text: '현재 봇이 참조하는 에셋 전부를 순차로 읽어 백엔드로 전송해 보고 속도를 잽니다. 데이터는 백엔드에 저장되지 않습니다.',
+    }),
+    el('div', { class: 'row' }, [run, cancel]),
+    progress,
     out,
   ]);
 }

@@ -39,6 +39,27 @@ export function el<K extends keyof HTMLElementTagNameMap>(
 }
 
 /**
+ * A list filter box, the same one on every list tab.
+ *
+ * `onInput` typically redraws the list; the caller re-focuses the box after
+ * the redraw (`.searchbox input`) because the redraw replaced this node.
+ */
+export function searchBox(value: string, onInput: (v: string) => void,
+                          placeholder = '찾기'): HTMLElement {
+  const input = el('input', { class: 'searchinput', placeholder, value });
+  input.addEventListener('input', () => onInput(input.value));
+  return el('div', { class: 'searchbox' }, [input]);
+}
+
+/** Re-focus the filter box after a redraw, caret at the end. */
+export function refocusSearch(root: HTMLElement | null): void {
+  const input = root?.querySelector('.searchbox input') as HTMLInputElement | null;
+  if (!input) return;
+  input.focus();
+  try { input.setSelectionRange(input.value.length, input.value.length); } catch { /* number inputs */ }
+}
+
+/**
  * Set and read a <select> through its options.
  *
  * `select.value = x` is the obvious way and it is not portable: linkedom, which

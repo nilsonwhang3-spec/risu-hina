@@ -20,6 +20,7 @@ import hmac
 import inspect
 import json
 import pathlib
+import re
 import sys
 import time
 import uuid
@@ -33,6 +34,7 @@ from starlette.concurrency import run_in_threadpool
 from . import (chatfmt, config, db, files, log, presets, session, skills, staging,
                store, websearch, workspace)
 from . import actions, snapshots, updater
+from . import card as cardmod
 from . import memory as mem
 
 Handler = Callable[..., Any]
@@ -302,6 +304,73 @@ def h_diag(arg: dict) -> dict:
         "counts": counts,
         "routes": len(ROUTES),
     }
+
+
+# --- M0: asset-transfer measurement (bot-edit plan, milestone 0) -------------
+
+def h_diag_asset_echo(arg: dict) -> dict:
+    """Receive an asset batch, count it, discard it.
+
+    Measures the plugin->backend transfer path (readImage -> base64 -> POST)
+    before the real asset store exists. Nothing touches disk. The address the
+    backend saw goes back in the response: the user's own IP means a direct
+    fetch, a hub address means the request was relayed - the two paths have
+    very different bandwidth and privacy stories, and this is how they are
+    told apart.
+    """
+    import base64
+    items = arg.get("items")
+    if not isinstance(items, list):
+        raise ApiError(400, "items must be a list")
+    t0 = time.time()
+    total = 0
+    bad: list[str] = []
+    for it in items:
+        row = it if isinstance(it, dict) else {}
+        try:
+            total += len(base64.b64decode(str(row.get("data") or ""), validate=True))
+        except (ValueError, TypeError):
+            bad.append(str(row.get("key") or "?"))
+    return {
+        "items": len(items),
+        "bytes": total,
+        "decodeMs": int((time.time() - t0) * 1000),
+        "badItems": bad,
+        "addr": str(arg.get("_addr") or ""),
+    }
+
+
+_RS_HUB = "https://sv.risuai.xyz/rs/"
+# Only the exact content-addressed shape may leave this server as a probe.
+_RS_KEY = re.compile(r"assets/[0-9a-f]{16,64}\.[A-Za-z0-9]{1,8}")
+
+
+def h_diag_rs_probe(arg: dict) -> dict:
+    """Can this backend pull an asset straight from the RisuAI hub?
+
+    Web-mainline client code fetches `<hub>/rs/assets/<hash>.<ext>` without
+    credentials, but whether the server actually gates it is unknowable from
+    client source alone. If this returns 200 for an account-synced bot, the
+    plugin only ever needs to send key lists and the backend downloads the
+    content itself - no browser bandwidth at all.
+    """
+    import httpx
+    key = str(arg.get("key") or "").strip()
+    if not _RS_KEY.fullmatch(key):
+        raise ApiError(400, "key must look like assets/<hash>.<ext>")
+    t0 = time.time()
+    try:
+        r = httpx.get(_RS_HUB + key, timeout=30, follow_redirects=True)
+        return {
+            "key": key,
+            "status": r.status_code,
+            "bytes": len(r.content),
+            "contentType": r.headers.get("content-type", ""),
+            "ms": int((time.time() - t0) * 1000),
+        }
+    except Exception as e:  # noqa: BLE001 - the failure itself is the finding
+        return {"key": key, "error": f"{type(e).__name__}: {e}",
+                "ms": int((time.time() - t0) * 1000)}
 
 
 def _plugin_file() -> "pathlib.Path | None":
@@ -935,7 +1004,9 @@ def h_lore_add(arg: dict) -> dict:
     tk = str(arg.get("chatKey") or "") or None
     if scope == "local" and not tk:
         raise ApiError(400, "scope=local needs chatKey")
-    return {"ok": True, "id": store.add_lore(ck, entry, scope, tk)}
+    # Global rows live under chat_key IS NULL; a chatKey that rode along in the
+    # payload must not leak into them, or char-level queries never see the row.
+    return {"ok": True, "id": store.add_lore(ck, entry, scope, tk if scope == "local" else None)}
 
 
 def h_lore_update(arg: dict) -> dict:
@@ -948,6 +1019,14 @@ def h_lore_update(arg: dict) -> dict:
         raise ApiError(400, "entry must be an object")
     try:
         return {"ok": True, **store.update_lore(lid, entry)}
+    except LookupError as e:
+        raise ApiError(404, str(e))
+
+
+def h_lore_move(arg: dict) -> dict:
+    _char(arg)
+    try:
+        return {"ok": True, **store.move_lore(str(arg.get("id") or ""), _int(arg, "toSeq", 0))}
     except LookupError as e:
         raise ApiError(404, str(e))
 
@@ -1054,6 +1133,141 @@ def h_export_md(arg: dict) -> dict:
     return {"filename": f"{row.get('name') or tk}.md", "markdown": md}
 
 
+# --- the card (bot editing) -------------------------------------------------
+#
+# The char-key twins of the chat pipeline: rows, patch, changes, commit,
+# reset, checkpoints. Same contracts - commit only after the host confirmed
+# the write, reset snapshots first, checkpoint restore is itself undoable.
+
+# Pending-action kinds that belong to the bot bar rather than the chat bar.
+_CARD_KINDS = ("card_", "script_", "host_card_", "host_clone_")
+
+
+def _card_actions_pending(ck: str) -> int:
+    rows = db.query(
+        "SELECT kind FROM pending_actions WHERE char_key = ? AND status = 'pending'", (ck,))
+    return sum(1 for r in rows if str(r["kind"]).startswith(_CARD_KINDS))
+
+
+def h_card(arg: dict) -> dict:
+    return cardmod.listing(_char(arg))
+
+
+def h_card_scripts(arg: dict) -> dict:
+    ck = _char(arg)
+    kind = str(arg.get("kind") or "customscript")
+    try:
+        return {"charKey": ck, "kind": kind, "items": cardmod.scripts(ck, kind)}
+    except ValueError as e:
+        raise ApiError(400, str(e))
+
+
+def h_card_field(arg: dict) -> dict:
+    _char(arg)
+    fid = str(arg.get("id") or "")
+    if not fid:
+        raise ApiError(400, "id is required")
+    try:
+        return {"ok": True, "item": cardmod.update_field(fid, str(arg.get("body") or ""))}
+    except LookupError as e:
+        raise ApiError(404, str(e))
+
+
+def h_card_greeting_add(arg: dict) -> dict:
+    return {"ok": True, "item": cardmod.add_greeting(_char(arg), str(arg.get("body") or ""))}
+
+
+def h_card_greeting_delete(arg: dict) -> dict:
+    _char(arg)
+    try:
+        return {"ok": True, **cardmod.delete_greeting(str(arg.get("id") or ""))}
+    except LookupError as e:
+        raise ApiError(404, str(e))
+
+
+def h_card_script_update(arg: dict) -> dict:
+    _char(arg)
+    sid = str(arg.get("id") or "")
+    entry = arg.get("entry")
+    if not sid:
+        raise ApiError(400, "id is required")
+    if not isinstance(entry, dict):
+        raise ApiError(400, "entry must be an object")
+    try:
+        return {"ok": True, **cardmod.update_script(sid, entry)}
+    except LookupError as e:
+        raise ApiError(404, str(e))
+
+
+def h_card_script_add(arg: dict) -> dict:
+    ck = _char(arg)
+    entry = arg.get("entry")
+    if not isinstance(entry, dict):
+        raise ApiError(400, "entry must be an object")
+    try:
+        return {"ok": True, "id": cardmod.add_script(ck, str(arg.get("kind") or ""), entry)}
+    except ValueError as e:
+        raise ApiError(400, str(e))
+
+
+def h_card_script_delete(arg: dict) -> dict:
+    _char(arg)
+    return {"ok": True, "deleted": cardmod.delete_script(str(arg.get("id") or ""))}
+
+
+def h_card_script_move(arg: dict) -> dict:
+    _char(arg)
+    try:
+        return {"ok": True, **cardmod.move_script(str(arg.get("id") or ""), _int(arg, "toSeq", 0))}
+    except LookupError as e:
+        raise ApiError(404, str(e))
+
+
+def h_card_patch(arg: dict) -> dict:
+    return cardmod.patch(_char(arg))
+
+
+def h_card_changes(arg: dict) -> dict:
+    ck = _char(arg)
+    out = cardmod.changes(ck)
+    out["charKey"] = ck
+    out["full"] = cardmod.is_full(ck)
+    out["actions"] = _card_actions_pending(ck)
+    return out
+
+
+def h_card_commit(arg: dict) -> dict:
+    ck = _char(arg)
+    snapshots.create_card(ck, str(arg.get("label") or "반영 직전"))
+    out = cardmod.rebase(ck)
+    out["lore"] = store.rebase_lore_global(ck)
+    log.info("card commit char=%s %s", ck, out)
+    return {"charKey": ck, **out}
+
+
+def h_card_reset(arg: dict) -> dict:
+    ck = _char(arg)
+    snapshots.create_card(ck, "reset 직전")
+    out = cardmod.reset_working(ck)
+    out["lore"] = store.reset_lore_global(ck)
+    return {"ok": True, "charKey": ck, **out}
+
+
+def h_card_checkpoint_create(arg: dict) -> dict:
+    return {"id": snapshots.create_card(_char(arg), str(arg.get("label") or ""))}
+
+
+def h_card_checkpoint_list(arg: dict) -> dict:
+    return {"checkpoints": snapshots.listing_card(_char(arg))}
+
+
+def h_card_checkpoint_restore(arg: dict) -> dict:
+    try:
+        return snapshots.restore_card(_char(arg), str(arg.get("id") or ""))
+    except LookupError as e:
+        raise ApiError(404, str(e))
+
+
 # --- checkpoints ------------------------------------------------------------
 
 def _checkpoint(tk: str, label: str) -> str:
@@ -1118,6 +1332,8 @@ ROUTES: dict[str, Handler] = {
     "POST /update/apply": h_update_apply,
     "GET /plugin.js": h_plugin_js,
     "GET /diag": h_diag,
+    "POST /diag/asset-echo": h_diag_asset_echo,
+    "GET /diag/rs-probe": h_diag_rs_probe,
 
     "GET /config": h_config_get,
     "POST /config": h_config_set,
@@ -1180,6 +1396,7 @@ ROUTES: dict[str, Handler] = {
     "GET /lore/get": h_lore_get,
     "POST /lore/update": h_lore_update,
     "POST /lore/delete": h_lore_delete,
+    "POST /lore/move": h_lore_move,
 
     "GET /memory": h_memory_list,
     "POST /memory/update": h_memory_update,
@@ -1188,6 +1405,23 @@ ROUTES: dict[str, Handler] = {
     "GET /memory/patch": h_memory_patch,
     "POST /memory/commit": h_memory_commit,
     "GET /lore/patch": h_lore_patch,
+
+    "GET /card": h_card,
+    "GET /card/scripts": h_card_scripts,
+    "POST /card/field": h_card_field,
+    "POST /card/greeting": h_card_greeting_add,
+    "POST /card/greeting/delete": h_card_greeting_delete,
+    "POST /card/script": h_card_script_update,
+    "POST /card/script/add": h_card_script_add,
+    "POST /card/script/delete": h_card_script_delete,
+    "POST /card/script/move": h_card_script_move,
+    "GET /card/patch": h_card_patch,
+    "GET /card/changes": h_card_changes,
+    "POST /card/commit": h_card_commit,
+    "POST /card/reset": h_card_reset,
+    "POST /card/checkpoint": h_card_checkpoint_create,
+    "GET /card/checkpoints": h_card_checkpoint_list,
+    "POST /card/checkpoint/restore": h_card_checkpoint_restore,
 
     "GET /export/risuchat": h_export_risuchat,
     "GET /export/md": h_export_md,

@@ -124,7 +124,24 @@ button.outline:hover { background: rgba(37,99,235,.18); }
 .applypop .row { margin-top: 6px; }
 .applypop .row button { width: 100%; }
 
-.tabs { display: flex; gap: 2px; padding: 0 10px; border-bottom: 1px solid var(--borderc, #2b323f); flex-shrink: 0; }
+/* Eleven tabs now; on a narrow panel the bar scrolls rather than wrapping. */
+.tabs { display: flex; gap: 2px; padding: 0 10px; border-bottom: 1px solid var(--borderc, #2b323f); flex-shrink: 0; overflow-x: auto; overflow-y: hidden; }
+.tabs .tab { white-space: nowrap; }
+
+/* Regex patterns, HTML payloads, trigger JSON - text where columns matter. */
+.codearea { font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace; font-size: 12px; }
+
+/* The apply verb when a gate (bot not selected, assets importing) blocks it. */
+.tool.dimmed { opacity: 0.45; }
+
+/* The shared list filter, and the list rows that carry reorder buttons. */
+.searchbox { padding: 4px 8px; }
+.searchbox input { width: 100%; }
+.treerow.lorecard {
+  border: 1px solid var(--borderc, #2b323f); border-radius: 6px;
+  padding: 3px 6px 3px 3px; margin: 3px 6px;
+}
+.movebtn { padding: 1px 6px; min-width: 0; }
 .tab {
   padding: 8px 16px; border: none; background: none; border-radius: 0;
   color: var(--textcolor2, #79839a); border-bottom: 2px solid transparent; margin-bottom: -1px;
@@ -207,13 +224,21 @@ pre.mono {
 .folderdot { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; background: #79839a; }
 .folderbody { display: none; padding-left: 10px; }
 .folderbody.open { display: block; }
-.chatlist { display: flex; flex-direction: column; }
-.chatitem {
-  display: flex; align-items: center; gap: 9px; padding: 7px 9px; cursor: pointer;
-  border-radius: 5px; border: 1px solid transparent;
+/* On a desktop-width panel a borderless full-width row reads as prose, not a
+   list: cap the width and rule every row so the chats read as chats. */
+.chatlist, .folder {
+  display: flex; flex-direction: column; max-width: 640px;
+  border: 1px solid var(--borderc, #2b323f); border-radius: 6px; overflow: hidden;
 }
+.folder { display: block; margin-bottom: 6px; }
+.chatlist { margin-bottom: 6px; }
+.chatitem {
+  display: flex; align-items: center; gap: 9px; padding: 8px 10px; cursor: pointer;
+  border-bottom: 1px solid var(--borderc, #2b323f);
+}
+.chatlist .chatitem:last-child, .folderbody .chatitem:last-child { border-bottom: none; }
 .chatitem:hover { background: rgba(128,128,128,.10); }
-.chatitem.presetnow { border-color: rgba(37,99,235,.55); background: rgba(37,99,235,.10); }
+.chatitem.presetnow, .chatitem.current { background: rgba(37,99,235,.10); }
 .chatitem .n { color: var(--textcolor2, #79839a); font-size: 11px; min-width: 40px; text-align: right; }
 
 /* --- editor: explorer | turns | tools ------------------------------------ */

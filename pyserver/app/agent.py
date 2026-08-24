@@ -25,6 +25,7 @@ from pydantic_ai.providers.openai import OpenAIProvider
 
 from . import (actions, config, files, log, presets, pyexec, skills, snapshots,
                staging, store, websearch, workspace)
+from . import card as cardmod
 from . import memory as mem
 
 INSTRUCTIONS = """\
@@ -54,6 +55,11 @@ INSTRUCTIONS = """\
   `import risuelf` 헬퍼가 준비돼 있다.
 - 원문을 인용할 때는 read_turns 로 실제로 읽은 것만 인용해라. 기억으로 지어내지 마라.
 - 무엇을 왜 바꾸려는지 짧게 설명하고, 애매하면 먼저 물어라.
+- **봇(카드) 편집도 같은 문법이다.** read_card 로 행을 보고 propose_card_edit /
+  propose_greeting_* / propose_regex_* / propose_trigger_* 로 제안한다. 카드는 이 봇의
+  **모든 챗**에 영향을 준다 — 챗 하나의 문제를 카드에서 고치려 하지 마라.
+  반영(propose_card_writeback)과 복제 봇 생성(propose_clone_bot)은 RisuAI 원본을
+  건드리므로 반드시 먼저 동의를 받아라.
 
 작업 폴더 규칙 (반드시 지켜라 — 패널이 이 규칙대로 정리한다):
 - `scratch/` 임시 파일. 중간 산출물, 계산 결과, 버려도 되는 것 전부 여기.
@@ -143,12 +149,58 @@ def build() -> Agent[Deps]:
 
     @agent.tool
     def read_card(ctx: RunContext[Deps]) -> str:
-        """봇 카드 원본(설정·첫인사 등). 참고용이며 편집 대상이 아니다."""
-        path = workspace.root(ctx.deps.char_key) / "card.md"
+        """봇 카드를 행 단위로 훑는다. 편집 대상이다 — propose_card_edit 로 조준한다.
+
+        본문 대신 첫 줄만 준다. 긴 필드 전체는 read_card_field(id) 로 읽어라.
+        """
+        data = cardmod.listing(ctx.deps.char_key)
+        out = [f"카드 필드 {len(data['fields'])}개, 수정됨 {data['changed']}개"
+               + ("" if data["full"] else " (구버전 업로드 — 반영 불가)")]
+        for f in data["fields"]:
+            mark = " *수정됨*" if f["changed"] else (" *추가됨*" if f["isNew"] else "")
+            mark += " *삭제 예정*" if f["deleted"] else ""
+            head = (f["body"] or "").split("\n", 1)[0][:100]
+            tag = f["field"] + (f"[{f['seq']}]" if f["field"] == "alternateGreetings" else "")
+            out.append(f"--- [{tag}] id={f['id']}{mark} ({len(f['body'])}자) {head}")
+        return "\n".join(out)[:20000]
+
+    @agent.tool
+    def read_card_field(ctx: RunContext[Deps], field_id: str) -> str:
+        """카드 필드 하나의 본문 전체."""
+        cur = cardmod.get_field(field_id)
+        if cur is None:
+            return "없는 카드 필드입니다"
+        return f"[{cur['field']}#{cur['seq']}]\n{cur['body']}"[:30000]
+
+    @agent.tool
+    def list_scripts(ctx: RunContext[Deps], kind: str = "customscript") -> str:
+        """Regex(customscript) 또는 트리거(triggerscript) 목록. 요약만 준다.
+
+        본문(치환식·HTML·트리거 정의)은 read_script(id) 로 읽어라 — background HTML
+        항목은 수만 자일 수 있어 목록에 싣지 않는다.
+        """
         try:
-            return path.read_text(encoding="utf-8")[:20000]
-        except OSError:
-            return "카드 정보를 읽지 못했습니다"
+            items = cardmod.scripts(ctx.deps.char_key, kind)
+        except ValueError as e:
+            return str(e)
+        if not items:
+            return f"{kind} 항목이 없습니다"
+        out = []
+        for i in items:
+            e = i["entry"] or {}
+            size = len(json.dumps(e, ensure_ascii=False))
+            mark = "" if i["origin"] == "original" else f" *{i['origin']}*"
+            out.append(f"#{i['seq']} id={i['id']}{mark} “{e.get('comment') or '(설명 없음)'}”"
+                       f" type={e.get('type') or ''} ({size}자)")
+        return "\n".join(out)
+
+    @agent.tool
+    def read_script(ctx: RunContext[Deps], script_id: str) -> str:
+        """스크립트 항목 하나의 전체 JSON."""
+        row = cardmod.script_entry(script_id)
+        if row is None:
+            return "없는 스크립트 항목입니다"
+        return json.dumps(row, ensure_ascii=False, indent=2)[:30000]
 
     @agent.tool
     def read_lore(ctx: RunContext[Deps]) -> str:
@@ -224,17 +276,48 @@ def build() -> Agent[Deps]:
 
     @agent.tool
     def list_lore(ctx: RunContext[Deps], scope: str = "") -> str:
-        """로어북 항목 목록. scope 는 global 또는 local."""
+        """로어북 항목 목록. scope 는 global 또는 local.
+
+        구조가 함께 나온다: `#순번`은 배열 순서(propose_lore_move 로 조정),
+        `folder=`는 소속 폴더, `[폴더]` 행은 폴더 자체(항목이 아니라 컨테이너 -
+        RisuAI 는 폴더도 mode='folder' 인 로어북 항목으로 저장하고, 소속은
+        멤버의 folder 값 == 폴더 항목의 key 값으로 판정한다). 폴더 정리는
+        propose_lore_edit 로 멤버의 folder 값을 바꾸면 된다.
+        """
         entries = store.lore(ctx.deps.char_key, scope or None)
         if not entries:
             return "로어북 항목이 없습니다"
+        # Folder key -> display name, RisuAI's own membership rule.
+        names = {}
+        for e in entries:
+            entry = e["entry"] or {}
+            if str(entry.get("mode") or "") == "folder" and entry.get("key"):
+                names[str(entry["key"])] = str(entry.get("comment") or "") or "(이름 없는 폴더)"
         out = []
         for e in entries:
             entry = e["entry"] or {}
+            if str(entry.get("mode") or "") == "folder":
+                out.append(f"--- #{e['seq']} [{e['scope']}] [폴더] id={e['id']} "
+                           f"key={entry.get('key')} 이름={entry.get('comment') or '(없음)'}")
+                continue
             keys = entry.get("key") or entry.get("keys") or ""
-            out.append(f"--- [{e['scope']}] id={e['id']} key={keys}\n"
+            folder = str(entry.get("folder") or "")
+            where = f" folder={names.get(folder, folder)}" if folder else ""
+            out.append(f"--- #{e['seq']} [{e['scope']}] id={e['id']} key={keys}{where}\n"
                        f"{str(entry.get('content') or '')[:1500]}")
         return "\n\n".join(out)[:25000]
+
+    @agent.tool
+    def propose_lore_move(ctx: RunContext[Deps], lore_id: str, to_seq: int,
+                          reason: str) -> str:
+        """로어북 항목의 순서 이동을 제안한다. to_seq 는 같은 scope 안 목표 순번."""
+        cur = store.lore_entry(lore_id)
+        if cur is None:
+            return "없는 로어북 항목입니다"
+        label = (cur["entry"] or {}).get("comment") or lore_id
+        return _propose(ctx, "lore_move",
+                        f"로어북 “{label}” 을 #{to_seq} 로 이동 — {reason}",
+                        {"id": lore_id, "toSeq": int(to_seq)})
 
     @agent.tool
     def propose_lore_edit(ctx: RunContext[Deps], lore_id: str, content: str,
@@ -255,16 +338,19 @@ def build() -> Agent[Deps]:
 
     @agent.tool
     def propose_lore_add(ctx: RunContext[Deps], comment: str, keys: str,
-                         content: str, reason: str) -> str:
-        """이 챗의 로어북에 항목 추가를 제안한다.
+                         content: str, reason: str, scope: str = "local") -> str:
+        """로어북에 항목 추가를 제안한다.
 
-        봇 전체 로어북(globalLore)은 건드리지 않는다. 이 챗에서 한 요약을 봇 전체에
-        얹으면 그 봇의 다른 챗까지 바뀌기 때문이다.
+        기본은 이 챗의 로어북(local)이다. scope="global" 은 봇 전체 로어북이라
+        이 봇의 **모든 챗**에 영향을 준다 — 사용자가 봇 로어북이라고 명시했을 때만 써라.
         """
+        if scope not in ("local", "global"):
+            return "scope 는 local 또는 global 입니다"
+        where = "봇 로어북(global)" if scope == "global" else "이 챗 로어북"
         entry = {"key": keys, "comment": comment, "content": content,
                  "alwaysActive": False, "insertorder": 100}
-        return _propose(ctx, "lore_add", f"로어북 “{comment}” 추가 — {reason}",
-                        {"entry": entry, "scope": "local"})
+        return _propose(ctx, "lore_add", f"{where}에 “{comment}” 추가 — {reason}",
+                        {"entry": entry, "scope": scope})
 
     @agent.tool
     def propose_lore_delete(ctx: RunContext[Deps], lore_id: str, reason: str) -> str:
@@ -275,6 +361,182 @@ def build() -> Agent[Deps]:
         label = (cur["entry"] or {}).get("comment") or lore_id
         return _propose(ctx, "lore_delete", f"로어북 “{label}” 삭제 — {reason}",
                         {"id": lore_id})
+
+    # --- card (bot) editing --------------------------------------------------
+
+    @agent.tool
+    def propose_card_edit(ctx: RunContext[Deps], field_id: str, new_body: str,
+                          reason: str) -> str:
+        """카드 필드 하나(설명·성격·첫인사·인사말 등)의 수정을 제안한다.
+
+        카드는 이 봇의 모든 챗에 영향을 준다. id 는 read_card 에서 얻는다.
+        """
+        cur = cardmod.get_field(field_id)
+        if cur is None:
+            return "없는 카드 필드입니다"
+        return _propose(ctx, "card_edit",
+                        f"카드 {cur['field']} 수정 — {reason}",
+                        {"id": field_id, "body": new_body})
+
+    @agent.tool
+    def propose_greeting_add(ctx: RunContext[Deps], body: str, reason: str) -> str:
+        """대체 인사말(alternateGreetings) 추가를 제안한다."""
+        return _propose(ctx, "card_greeting_add", f"대체 인사말 추가 — {reason}",
+                        {"body": body})
+
+    @agent.tool
+    def propose_greeting_delete(ctx: RunContext[Deps], field_id: str, reason: str) -> str:
+        """대체 인사말 삭제를 제안한다. id 는 read_card 에서 얻는다."""
+        cur = cardmod.get_field(field_id)
+        if cur is None or cur["field"] != "alternateGreetings":
+            return "없는 인사말입니다"
+        return _propose(ctx, "card_greeting_delete",
+                        f"대체 인사말 #{cur['seq'] + 1} 삭제 — {reason}", {"id": field_id})
+
+    @agent.tool
+    def propose_regex_edit(ctx: RunContext[Deps], script_id: str, reason: str,
+                           in_pattern: str = "", out_text: str = "",
+                           comment: str = "", flag: str = "",
+                           script_type: str = "") -> str:
+        """Regex(customscript) 항목 수정을 제안한다. 빈 인자는 그대로 둔다.
+
+        여기 없는 필드는 항목에 있던 그대로 보존된다. background HTML 도
+        out_text 로 통째 교체하면 된다 — 먼저 read_script 로 현재 값을 읽어라.
+        """
+        cur = cardmod.script_entry(script_id)
+        if cur is None or cur["kind"] != "customscript":
+            return "없는 Regex 항목입니다"
+        entry = dict(cur["entry"] or {})
+        if in_pattern:
+            entry["in"] = in_pattern
+        if out_text:
+            entry["out"] = out_text
+        if comment:
+            entry["comment"] = comment
+        if flag:
+            entry["flag"] = flag
+        if script_type:
+            entry["type"] = script_type
+        label = entry.get("comment") or script_id
+        return _propose(ctx, "script_edit", f"Regex “{label}” 수정 — {reason}",
+                        {"id": script_id, "entry": entry})
+
+    @agent.tool
+    def propose_regex_add(ctx: RunContext[Deps], comment: str, in_pattern: str,
+                          out_text: str, script_type: str, reason: str,
+                          flag: str = "") -> str:
+        """Regex(customscript) 항목 추가를 제안한다.
+
+        script_type: editinput | editoutput | editdisplay | editprocess 등.
+        """
+        entry: dict[str, Any] = {"comment": comment, "in": in_pattern,
+                                 "out": out_text, "type": script_type}
+        if flag:
+            entry["flag"] = flag
+        return _propose(ctx, "script_add", f"Regex “{comment}” 추가 — {reason}",
+                        {"kind": "customscript", "entry": entry})
+
+    @agent.tool
+    def propose_trigger_edit(ctx: RunContext[Deps], script_id: str,
+                             entry_json: str, reason: str) -> str:
+        """트리거(triggerscript) 항목 수정을 제안한다.
+
+        트리거는 구조가 다양해서(V1 조건/효과, Lua triggerCode, V2 블록)
+        read_script 로 읽은 JSON 전체를 고쳐 entry_json 으로 넘긴다.
+        """
+        cur = cardmod.script_entry(script_id)
+        if cur is None or cur["kind"] != "triggerscript":
+            return "없는 트리거 항목입니다"
+        try:
+            entry = json.loads(entry_json)
+        except ValueError as e:
+            return f"entry_json 이 JSON 이 아닙니다: {e}"
+        if not isinstance(entry, dict):
+            return "entry_json 은 객체여야 합니다"
+        label = entry.get("comment") or script_id
+        return _propose(ctx, "script_edit", f"트리거 “{label}” 수정 — {reason}",
+                        {"id": script_id, "entry": entry})
+
+    @agent.tool
+    def propose_trigger_add(ctx: RunContext[Deps], entry_json: str, reason: str) -> str:
+        """트리거(triggerscript) 항목 추가를 제안한다. entry_json 은 항목 전체 JSON."""
+        try:
+            entry = json.loads(entry_json)
+        except ValueError as e:
+            return f"entry_json 이 JSON 이 아닙니다: {e}"
+        if not isinstance(entry, dict):
+            return "entry_json 은 객체여야 합니다"
+        label = entry.get("comment") or "(설명 없음)"
+        return _propose(ctx, "script_add", f"트리거 “{label}” 추가 — {reason}",
+                        {"kind": "triggerscript", "entry": entry})
+
+    @agent.tool
+    def propose_script_delete(ctx: RunContext[Deps], script_id: str, reason: str) -> str:
+        """Regex 또는 트리거 항목 삭제를 제안한다."""
+        cur = cardmod.script_entry(script_id)
+        if cur is None:
+            return "없는 스크립트 항목입니다"
+        label = (cur["entry"] or {}).get("comment") or script_id
+        kind = "Regex" if cur["kind"] == "customscript" else "트리거"
+        return _propose(ctx, "script_delete", f"{kind} “{label}” 삭제 — {reason}",
+                        {"id": script_id})
+
+    @agent.tool
+    def propose_open_tab(ctx: RunContext[Deps], tab: str, reason: str) -> str:
+        """패널을 다른 탭으로 옮기자고 제안한다. 승인하면 그 탭이 열린다.
+
+        지금 보는 탭이 아니라 다른 탭의 재료를 고쳐야 할 때 쓴다 - 예:
+        로어북 탭에서 대화 중 메타(설명) 수정이 필요해졌을 때
+        propose_open_tab("meta", "이 항목은 메타 수정이 필요합니다").
+        tab: editor(챗 에딧) lore(챗 로어북) memory(장기기억) vars(챗 변수)
+             meta(메타) botlore(봇 로어북) regex(Regex) trigger(트리거)
+             files(워크스페이스 파일)
+        """
+        labels = {"editor": "챗 에딧", "lore": "챗 로어북", "memory": "장기기억",
+                  "vars": "챗 변수", "meta": "메타", "botlore": "봇 로어북",
+                  "regex": "Regex", "trigger": "트리거", "files": "워크스페이스 파일"}
+        if tab not in labels:
+            return "모르는 탭입니다: " + tab + " (가능: " + ", ".join(labels) + ")"
+        return _propose(ctx, "host_open_tab",
+                        f"{labels[tab]} 탭으로 이동 — {reason}", {"tab": tab})
+
+    @agent.tool
+    def list_bot_snapshots(ctx: RunContext[Deps]) -> str:
+        """봇(카드) 스냅샷 목록. 챗 스냅샷과 별개다."""
+        rows = snapshots.listing_card(ctx.deps.char_key)
+        if not rows:
+            return "봇 스냅샷이 없습니다"
+        return "\n".join(f"id={r['id']} {r['label'] or '(이름 없음)'}" for r in rows)
+
+    @agent.tool
+    def propose_bot_snapshot(ctx: RunContext[Deps], label: str) -> str:
+        """봇(카드·스크립트·봇 로어북) 스냅샷 저장을 제안한다."""
+        return _propose(ctx, "card_checkpoint_create", f"봇 스냅샷 저장 — {label}",
+                        {"label": label})
+
+    @agent.tool
+    def propose_bot_restore(ctx: RunContext[Deps], snapshot_id: str, reason: str) -> str:
+        """봇 스냅샷으로 되돌리자고 제안한다. 카드 작업본을 통째로 덮어쓴다."""
+        return _propose(ctx, "card_checkpoint_restore",
+                        f"봇 스냅샷 {snapshot_id} 로 되돌리기 — {reason} (카드 작업본을 덮어씁니다)",
+                        {"id": snapshot_id})
+
+    @agent.tool
+    def propose_card_writeback(ctx: RunContext[Deps], reason: str) -> str:
+        """카드 수정(메타·인사말·봇 로어북·Regex·트리거)을 RisuAI에 실제로 쓰자고 제안한다.
+
+        반영은 RisuAI에서 이 봇이 선택되어 있어야 한다. 승인하면 플러그인이 수행한다.
+        """
+        return _propose(ctx, "host_card_writeback", f"카드를 RisuAI에 반영 — {reason}", {})
+
+    @agent.tool
+    def propose_clone_bot(ctx: RunContext[Deps], name: str, reason: str) -> str:
+        """지금 편집본을 얹은 복제 봇을 RisuAI에 만들자고 제안한다.
+
+        원본 봇은 건드리지 않는다. 에셋은 참조를 공유하므로 복제는 즉시 끝난다.
+        """
+        return _propose(ctx, "host_clone_bot", f"복제 봇 “{name}” 생성 — {reason}",
+                        {"name": name})
 
     # --- the jobs the panel can do, so the agent can too ---------------------
 

@@ -852,6 +852,257 @@ def test_action_queue(s: Server, ws: dict) -> None:
     check("the queue can be cleared", st == 200, str(body)[:120])
 
 
+def card_payload(chats: list[dict], **extra: object) -> dict:
+    """A bot with every modelled material plus fields we deliberately do not
+    model (emotionImages) - those must survive in card_json untouched."""
+    return {
+        "charId": "cha-card",
+        "characterIndex": 5,
+        "cardFull": True,
+        "card": {
+            "name": "카드 봇",
+            "chaId": "cha-card",
+            "desc": "본래 설명",
+            "personality": "본래 성격",
+            "firstMessage": "본래 첫 인사",
+            "alternateGreetings": ["대체 인사 1", "대체 인사 2"],
+            "customscript": [
+                {"comment": "치환", "in": "foo", "out": "bar", "type": "editdisplay"},
+                {"comment": "배경 HTML", "in": "^", "out": "<div class=bg></div>",
+                 "type": "editdisplay", "flag": "g", "forkExtra": 7},
+            ],
+            "triggerscript": [
+                {"comment": "시작 트리거", "type": "start", "conditions": [],
+                 "effect": [{"type": "setvar", "var": "x"}]},
+            ],
+            "emotionImages": [["기쁨", "assets/aa.png"]],
+            "globalLore": [{"key": ["세계"], "content": "세계 설정"}],
+        },
+        "chats": [{"chat": c, "chatIndex": i} for i, c in enumerate(chats)],
+        **extra,
+    }
+
+
+def test_card_rows(s: Server) -> dict:
+    """Full-card upload becomes rows; re-upload keeps the working copy."""
+    print("test_card_rows")
+    st, body = s.post("/workspace", card_payload([make_chat("cardA", "카드 챗", 4)]))
+    check("card workspace created", st == 200, str(body)[:200])
+    ws = body.get("workspace") or {}
+    ck = ws.get("charKey") or ""
+    check("first ingest resets the card", ws.get("cardReset") is True, str(ws)[:200])
+    check("full flag recorded", ws.get("cardFull") is True)
+
+    st, body = s.get(q("/card", charKey=ck))
+    check("card rows listed", st == 200, str(st))
+    check("full flag on the listing", body.get("full") is True)
+    fields = {(f["field"], f["seq"]): f for f in body.get("fields") or []}
+    check("scalars are rows", ("desc", 0) in fields and ("name", 0) in fields,
+          str(sorted(k for k, _ in fields))[:200])
+    check("greetings are rows", ("alternateGreetings", 0) in fields and ("alternateGreetings", 1) in fields)
+    check("nothing changed yet", body.get("changed") == 0, str(body.get("changed")))
+    fseq = [f["field"] for f in body["fields"]]
+    check("greetings sit under firstMessage",
+          fseq.index("alternateGreetings") == fseq.index("firstMessage") + 1, str(fseq))
+    check("retired fields are not rows",
+          not any(f in fseq for f in ("personality", "scenario", "exampleMessage",
+                                      "systemPrompt", "postHistoryInstructions")), str(fseq))
+    check("background fields are rows",
+          "backgroundHTML" in fseq and "backgroundCSS" in fseq, str(fseq))
+
+    st, body = s.get(q("/card/scripts", charKey=ck, kind="customscript"))
+    check("regex items listed", st == 200 and len(body.get("items") or []) == 2, str(body)[:200])
+    check("unmodelled script fields survive", body["items"][1]["entry"].get("forkExtra") == 7,
+          str(body["items"][1])[:160])
+    st, body = s.get(q("/card/scripts", charKey=ck, kind="triggerscript"))
+    check("trigger items listed", len(body.get("items") or []) == 1, str(body)[:160])
+
+    # Edit, then re-upload the panel-open way (no force): the edit must survive
+    # while the baseline follows what RisuAI now holds.
+    st, body = s.get(q("/card", charKey=ck))
+    desc_id = next(f["id"] for f in body["fields"] if f["field"] == "desc")
+    st, _ = s.post("/card/field", {"charKey": ck, "id": desc_id, "body": "고친 설명"})
+    check("field edit accepted", st == 200, str(st))
+
+    p2 = card_payload([make_chat("cardA", "카드 챗", 4)])
+    p2["card"]["desc"] = "RisuAI에서 바뀐 설명"  # type: ignore[index]
+    st, body = s.post("/workspace", p2)
+    check("re-upload keeps the working card", (body.get("workspace") or {}).get("cardReset") is False,
+          str(body.get("workspace"))[:200])
+    st, body = s.get(q("/card", charKey=ck))
+    d = next(f for f in body["fields"] if f["field"] == "desc")
+    check("working text preserved", d["body"] == "고친 설명", d["body"])
+    check("baseline refreshed", d["original"] == "RisuAI에서 바뀐 설명", str(d["original"]))
+    return {"charKey": ck, "descId": desc_id}
+
+
+def test_card_edit_patch_commit(s: Server, cw: dict) -> None:
+    print("test_card_edit_patch_commit")
+    ck = cw["charKey"]
+
+    st, body = s.post("/card/greeting", {"charKey": ck, "body": "새 인사"})
+    check("greeting added", st == 200 and (body.get("item") or {}).get("isNew") is True, str(body)[:160])
+    st, body = s.get(q("/card", charKey=ck))
+    g0 = next(f for f in body["fields"] if f["field"] == "alternateGreetings" and f["seq"] == 0)
+    st, body = s.post("/card/greeting/delete", {"charKey": ck, "id": g0["id"]})
+    check("original greeting is kept as deleted", body.get("kept") is True, str(body)[:120])
+
+    st, body = s.get(q("/card/changes", charKey=ck))
+    check("changes counts the field", body.get("fields") == 1, str(body)[:200])
+    g = body.get("greetings") or {}
+    check("and the greetings", g.get("added") == 1 and g.get("deleted") == 1, str(g))
+    check("bar total adds up", body.get("total") == 3, str(body.get("total")))
+    check("action count present", body.get("actions") == 0, str(body.get("actions")))
+
+    st, body = s.get(q("/card/patch", charKey=ck))
+    check("patch names the bot", body.get("chaId") == "cha-card", str(body.get("chaId")))
+    check("patch is full-card", body.get("full") is True)
+    f0 = (body.get("fields") or [{}])[0]
+    check("scalar carries before/after", f0.get("field") == "desc"
+          and f0.get("before") == "RisuAI에서 바뀐 설명" and f0.get("after") == "고친 설명", str(f0)[:200])
+    ag = body.get("alternateGreetings") or {}
+    check("greetings list omits the deleted, keeps order",
+          ag.get("list") == ["대체 인사 2", "새 인사"], str(ag)[:200])
+
+    st, body = s.post("/card/commit", {"charKey": ck, "label": "테스트 반영"})
+    check("commit answers", st == 200, str(body)[:160])
+    st, body = s.get(q("/card/changes", charKey=ck))
+    check("after commit nothing is pending", body.get("total") == 0, str(body)[:200])
+    st, body = s.get(q("/card", charKey=ck))
+    d = next(f for f in body["fields"] if f["field"] == "desc")
+    check("baseline moved to the working text", d["original"] == "고친 설명" and not d["changed"], str(d)[:160])
+    check("deleted greeting is gone for good",
+          not any(f["seq"] == 0 and f["deleted"] for f in body["fields"] if f["field"] == "alternateGreetings"))
+
+    # Reset: edit again, then return to the (new) baseline.
+    st, _ = s.post("/card/field", {"charKey": ck, "id": cw["descId"], "body": "또 고침"})
+    st, body = s.post("/card/reset", {"charKey": ck})
+    check("reset answers", st == 200, str(body)[:120])
+    st, body = s.get(q("/card", charKey=ck))
+    d = next(f for f in body["fields"] if f["field"] == "desc")
+    check("reset returns to the baseline", d["body"] == "고친 설명", d["body"])
+
+    # Checkpoints: the commit and reset above each left one; restore is undoable.
+    st, body = s.get(q("/card/checkpoints", charKey=ck))
+    labels = [c["label"] for c in body.get("checkpoints") or []]
+    check("commit and reset snapshot first", "테스트 반영" in labels and "reset 직전" in labels, str(labels))
+    st, body = s.post("/card/checkpoint", {"charKey": ck, "label": "수동"})
+    cid = body.get("id")
+    st, _ = s.post("/card/field", {"charKey": ck, "id": cw["descId"], "body": "복원 확인용"})
+    st, body = s.post("/card/checkpoint/restore", {"charKey": ck, "id": cid})
+    check("restore answers", st == 200, str(body)[:160])
+    st, body = s.get(q("/card", charKey=ck))
+    d = next(f for f in body["fields"] if f["field"] == "desc")
+    check("restore puts the field back", d["body"] == "고친 설명", d["body"])
+    st, body = s.get(q("/card/checkpoints", charKey=ck))
+    check("restoring snapshots first, so it is undoable",
+          "restore 직전" in [c["label"] for c in body.get("checkpoints") or []])
+
+
+def test_card_scripts_lifecycle(s: Server, cw: dict) -> None:
+    print("test_card_scripts_lifecycle")
+    ck = cw["charKey"]
+    st, body = s.get(q("/card/scripts", charKey=ck, kind="customscript"))
+    items = body.get("items") or []
+    bg = next(i for i in items if i["entry"].get("comment") == "배경 HTML")
+
+    entry = dict(bg["entry"])
+    entry["out"] = "<div class=bg2></div>"
+    st, body = s.post("/card/script", {"charKey": ck, "id": bg["id"], "entry": entry})
+    check("script edited whole", st == 200 and body.get("origin") == "edited", str(body)[:160])
+    st, body = s.get(q("/card/scripts", charKey=ck, kind="customscript"))
+    bg2 = next(i for i in body["items"] if i["id"] == bg["id"])
+    check("its unmodelled field survived the edit", bg2["entry"].get("forkExtra") == 7, str(bg2)[:160])
+
+    st, body = s.post("/card/script/add",
+                      {"charKey": ck, "kind": "customscript",
+                       "entry": {"comment": "추가", "in": "x", "out": "y", "type": "editinput"}})
+    sid = body.get("id")
+    check("script added", st == 200 and bool(sid), str(body)[:120])
+    st, body = s.post("/card/script/move", {"charKey": ck, "id": sid, "toSeq": 0})
+    check("added script moved first", st == 200 and body.get("seq") == 0, str(body)[:120])
+
+    st, body = s.get(q("/card/scripts", charKey=ck, kind="customscript"))
+    first = (body.get("items") or [{}])[0]
+    check("order is the working order", first.get("id") == sid, str([i["entry"].get("comment") for i in body["items"]]))
+    other = next(i for i in body["items"] if i["entry"].get("comment") == "치환")
+    st, _ = s.post("/card/script/delete", {"charKey": ck, "id": other["id"]})
+
+    st, body = s.get(q("/card/patch", charKey=ck))
+    cs = body.get("customscript") or {}
+    check("patch list excludes the deleted", [e.get("comment") for e in cs.get("list") or []]
+          == ["추가", "배경 HTML"], str(cs.get("list"))[:200])
+    check("script changes counted", cs.get("changed") == 3, str(cs.get("changed")))
+
+    st, _ = s.post("/card/commit", {"charKey": ck, "label": "스크립트 반영"})
+    st, body = s.get(q("/card/changes", charKey=ck))
+    check("script baselines moved", (body.get("customscript") or {}).get("total") == 0, str(body)[:200])
+
+
+def test_global_lore_decoupled_reset(s: Server, cw: dict) -> None:
+    """Opening a new chat must not reset the bot's card or global lorebook -
+    the regression the old any_reset coupling would cause."""
+    print("test_global_lore_decoupled_reset")
+    ck = cw["charKey"]
+
+    st, body = s.get(q("/lore", charKey=ck, scope="global"))
+    row = (body.get("lore") or [{}])[0]
+    check("global lore row exists without a chat", row.get("chatKey") is None, str(row)[:160])
+    entry = dict(row.get("entry") or {})
+    entry["content"] = "고친 세계"
+    st, _ = s.post("/lore/update", {"charKey": ck, "id": row["id"], "entry": entry})
+
+    st, body = s.post("/lore", {"charKey": ck, "scope": "global",
+                                "chatKey": "cardA-should-be-ignored",
+                                "entry": {"key": ["추가"], "content": "추가 로어"}})
+    check("global add accepted", st == 200, str(body)[:120])
+
+    st, _ = s.post("/card/field", {"charKey": ck, "id": cw["descId"], "body": "새 챗 전에 고침"})
+
+    # A brand-new chat, uploaded the panel-open way: its own turns reset
+    # (first seen), but the card and global lore must keep their edits.
+    st, body = s.post("/workspace", card_payload([
+        make_chat("cardA", "카드 챗", 4),
+        make_chat("cardB", "새 챗", 4),
+    ]))
+    ws = body.get("workspace") or {}
+    check("new chat did not reset the card", ws.get("cardReset") is False, str(ws)[:160])
+    st, body = s.get(q("/lore", charKey=ck, scope="global"))
+    contents = sorted(str((e.get("entry") or {}).get("content")) for e in body.get("lore") or [])
+    check("global lore edits survived the new chat", contents == ["고친 세계", "추가 로어"], str(contents))
+    check("the added row is chat-less", all(e.get("chatKey") is None for e in body.get("lore") or []))
+    st, body = s.get(q("/card", charKey=ck))
+    d = next(f for f in body["fields"] if f["field"] == "desc")
+    check("card edit survived the new chat", d["body"] == "새 챗 전에 고침", d["body"])
+
+    st, body = s.get(q("/card/patch", charKey=ck))
+    gl = body.get("globalLore") or {}
+    check("patch carries the working global lore",
+          sorted(str(e.get("content")) for e in gl.get("list") or []) == ["고친 세계", "추가 로어"],
+          str(gl)[:200])
+
+    # Order is part of the material: move the added row first and the patch
+    # list must follow.
+    st, body = s.get(q("/lore", charKey=ck, scope="global"))
+    added = next(e for e in body.get("lore") or [] if (e.get("entry") or {}).get("content") == "추가 로어")
+    st, body = s.post("/lore/move", {"charKey": ck, "id": added["id"], "toSeq": 0})
+    check("global lore can be reordered", st == 200 and body.get("seq") == 0, str(body)[:120])
+    st, body = s.get(q("/card/patch", charKey=ck))
+    first = ((body.get("globalLore") or {}).get("list") or [{}])[0]
+    check("the patch list follows the new order", first.get("content") == "추가 로어", str(first)[:120])
+
+    # 카드만 다시 읽기: cardReset resets card and global lore, chats untouched.
+    st, body = s.post("/workspace", card_payload([make_chat("cardA", "카드 챗", 4)], cardReset=True))
+    check("cardReset forces the card", (body.get("workspace") or {}).get("cardReset") is True,
+          str(body.get("workspace"))[:160])
+    st, body = s.get(q("/lore", charKey=ck, scope="global"))
+    contents = [str((e.get("entry") or {}).get("content")) for e in body.get("lore") or []]
+    check("global lore returned to RisuAI's copy", contents == ["세계 설정"], str(contents))
+    st, body = s.get(q("/card", charKey=ck))
+    d = next(f for f in body["fields"] if f["field"] == "desc")
+    check("card returned to the uploaded copy", d["body"] == "본래 설명", d["body"])
+
+
 def test_reference_skills(s: Server) -> None:
     """Reference material lives in the skill folder and costs one catalog line."""
     print("test_reference_skills")
@@ -965,6 +1216,38 @@ def test_logs_and_diagnostics(s: Server) -> None:
     check("no key appears anywhere in it", "sk-" not in json.dumps(body),
           json.dumps(body)[:200])
     check("it counts what is stored", isinstance(body.get("counts"), dict), str(body)[:200])
+
+
+def test_asset_probe(s: Server) -> None:
+    """M0 measurement surface: the echo counts what actually arrived.
+
+    The echo endpoint is the prototype of the M2 asset upload, so its contract
+    - per-item base64, byte counting, bad items reported not fatal - is locked
+    here before the plugin starts depending on it.
+    """
+    print("test_asset_probe")
+    import base64
+    payload = {"items": [
+        {"key": "assets/aa.png", "data": base64.b64encode(b"x" * 1000).decode()},
+        {"key": "assets/bb.png", "data": "***not-base64***"},
+    ]}
+    st, body = s.post("/diag/asset-echo", payload)
+    check("echo answers", st == 200, str(body)[:200])
+    check("bytes are counted after decode", body.get("bytes") == 1000, str(body.get("bytes")))
+    check("all items are acknowledged", body.get("items") == 2, str(body.get("items")))
+    check("a bad item is reported, not fatal", body.get("badItems") == ["assets/bb.png"],
+          str(body.get("badItems")))
+    check("the address the backend saw is echoed", bool(body.get("addr")), str(body)[:200])
+
+    st, body = s.post("/diag/asset-echo", {"items": "nope"})
+    check("a non-list body is a 400", st == 400, str(st))
+
+    # Key validation only - the actual hub fetch needs the network and belongs
+    # to the manual measurement, not the gate.
+    st, body = s.get("/diag/rs-probe?key=../etc/passwd")
+    check("rs-probe rejects a non-asset key", st == 400, str(st))
+    st, body = s.get("/diag/rs-probe?key=assets/" + "0" * 64 + ".png.exe")
+    check("and a dressed-up one", st == 400, str(st))
 
 
 def test_agent_presets(s: Server) -> None:
@@ -1276,6 +1559,10 @@ def main() -> int:
             test_unified_writeback(s, ws)
             test_chat_variables(s, ws)
             test_action_queue(s, ws)
+        cw = test_card_rows(s)
+        test_card_edit_patch_commit(s, cw)
+        test_card_scripts_lifecycle(s, cw)
+        test_global_lore_decoupled_reset(s, cw)
         test_agent_presets(s)
         test_preset_selection(s)
         test_skills(s)
@@ -1283,6 +1570,7 @@ def main() -> int:
         test_reference_skills(s)
         test_plugin_self_update(s)
         test_logs_and_diagnostics(s)
+        test_asset_probe(s)
     finally:
         s.stop()
 

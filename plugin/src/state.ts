@@ -218,6 +218,53 @@ export interface PendingAction {
   createdAt: number;
 }
 
+export interface CardField {
+  id: string;
+  field: string;
+  seq: number;
+  body: string;
+  original: string | null;
+  changed: boolean;
+  isNew: boolean;
+  /** An original greeting marked for deletion (purged on commit). */
+  deleted: boolean;
+  updatedAt: number;
+}
+
+export interface CardScript {
+  id: string;
+  kind: 'customscript' | 'triggerscript';
+  seq: number;
+  origin: string;
+  entry: Record<string, unknown>;
+}
+
+interface ScriptCounts { added: number; edited: number; deleted: number; total: number }
+
+export interface CardChanges {
+  charKey: string;
+  full: boolean;
+  fields: number;
+  greetings: ScriptCounts;
+  customscript: ScriptCounts;
+  triggerscript: ScriptCounts;
+  lore: ScriptCounts;
+  total: number;
+  actions: number;
+}
+
+export interface CardPatch {
+  charKey: string;
+  chaId: string;
+  full: boolean;
+  fields: { field: string; before: string; after: string }[];
+  alternateGreetings: { changed: boolean; list: string[] };
+  globalLore: { changed: number; list: unknown[] };
+  customscript: { changed: number; list: unknown[] };
+  triggerscript: { changed: number; list: unknown[] };
+  total: number;
+}
+
 export interface BulkPreview {
   dryRun: boolean;
   matchedTurns: number;
@@ -237,6 +284,7 @@ class AppState {
 
   workspace: WorkspaceInfo | null = null;
   activeChatKey = '';
+  botChanges: CardChanges | null = null;
   turns: Turn[] = [];
   totalTurns = 0;
   warnings: string[] = [];
@@ -248,6 +296,8 @@ class AppState {
   unseenOutputs: string[] = [];
   /** A file the user asked to see (from an agent log line); the files tab opens it. */
   openFileRequest: string | null = null;
+  /** A tab an approved agent proposal asked for; the shell moves there. */
+  openTabRequest: string | null = null;
   /** Bumped when the workspace listing changed; the files tab reloads when it moved. */
   filesRev = 0;
   /**
@@ -279,6 +329,21 @@ class AppState {
   /** The workspace is per bot, so file and upload calls address the character. */
   get activeCharKey(): string {
     return this.workspace?.charKey ?? '';
+  }
+
+  /**
+   * What the bot tabs address. Always the live workspace: the panel's
+   * standing premise is "select the bot in RisuAI, then open the plugin" -
+   * other bots are not writable anyway (mainline silently drops writes to a
+   * non-selected character), so there is no browsing of other workspaces.
+   */
+  get botKey(): string {
+    return this.activeCharKey;
+  }
+
+  /** Whether a live, writable bot is behind the bot tabs right now. */
+  get isLiveBot(): boolean {
+    return !!this.activeCharKey && !!this.character;
   }
 
   // --- connection ---------------------------------------------------------
@@ -325,14 +390,18 @@ class AppState {
    * megabytes, and sending every chat of a character on every panel open would
    * make the common case pay for the rare one.
    */
-  async upload(opts: { allChats?: boolean; force?: boolean } = {}): Promise<WorkspaceInfo> {
+  async upload(opts: { allChats?: boolean; force?: boolean; cardReset?: boolean } = {}): Promise<WorkspaceInfo> {
     if (!this.slot || !this.character) throw new Error('호스트 상태를 먼저 읽어야 합니다');
     const chats = Array.isArray(this.character.chats) ? this.character.chats : [];
     const payload: Record<string, unknown> = {
       charId: this.character.chaId ?? '',
       characterIndex: this.slot.characterIndex,
       card: host.cardOf(this.character),
+      // The card is the full character now (minus chats); the backend records
+      // this and refuses card write-backs built on whitelist-era uploads.
+      cardFull: true,
       force: Boolean(opts.force),
+      cardReset: Boolean(opts.cardReset),
     };
     if (opts.allChats) {
       payload.chats = chats.map((c, i) => ({ chat: c, chatIndex: i }));
@@ -345,6 +414,7 @@ class AppState {
       this.activeChatKey = this.workspace.chats[0]?.chatKey ?? '';
     }
     this.emit();
+    void this.refreshBotChanges();
     return res.workspace;
   }
 
@@ -821,6 +891,20 @@ class AppState {
         const name = String(r.host.args?.name || '') || '사본';
         await this.saveCopy(name);
         detail = `“${name}” 으로 복사본을 저장했습니다.`;
+      } else if (r.host.kind === 'host_card_writeback') {
+        const out = await this.cardWriteBack();
+        detail = out.mode === 'noop'
+          ? '카드에 반영할 변경이 없었습니다.'
+          : `카드 변경 ${out.applied}건을 RisuAI에 반영했습니다.`;
+      } else if (r.host.kind === 'host_clone_bot') {
+        const name = String(r.host.args?.name || '') || '복제 봇';
+        await this.cloneBot(name);
+        detail = `복제 봇 “${name}” 을 만들었습니다. RisuAI 목록에서 확인해 주세요.`;
+      } else if (r.host.kind === 'host_open_tab') {
+        const tab = String(r.host.args?.tab || '');
+        this.openTabRequest = tab;
+        this.emit();
+        detail = '탭을 이동했습니다.';
       } else {
         throw new Error('플러그인이 모르는 작업입니다: ' + r.host.kind);
       }
@@ -863,6 +947,12 @@ class AppState {
     void this.refreshChanges();
   }
 
+  async moveLore(id: string, toSeq: number): Promise<void> {
+    await transport.post('/lore/move', { charKey: this.activeCharKey, id, toSeq });
+    void this.refreshChanges();
+    void this.refreshBotChanges();
+  }
+
   // --- long-term memory -----------------------------------------------------
 
   async memory(): Promise<{ items: MemoryItem[]; changed: number }> {
@@ -888,6 +978,150 @@ class AppState {
   async deleteMemory(id: string): Promise<void> {
     await transport.post('/memory/delete', { chatKey: this.activeChatKey, id });
     void this.refreshChanges();
+  }
+
+  // --- the card (bot editing) -----------------------------------------------
+  //
+  // The char-key twins of the chat calls above, addressed by `botKey`. Editing
+  // works on any workspace the backend knows; only 반영/복제 touch RisuAI and
+  // carry the isLiveBot gate.
+
+  /** Same contract as refreshChanges, for the bot bar. */
+  async refreshBotChanges(): Promise<CardChanges | null> {
+    if (!this.botKey) { this.botChanges = null; this.emit(); return null; }
+    try {
+      this.botChanges = await transport.get<CardChanges>('/card/changes', { charKey: this.botKey });
+    } catch {
+      this.botChanges = null;
+    }
+    this.emit();
+    return this.botChanges;
+  }
+
+  async cardFields(): Promise<{ full: boolean; fields: CardField[]; changed: number }> {
+    return await transport.get('/card', { charKey: this.botKey });
+  }
+
+  async cardScripts(kind: CardScript['kind']): Promise<CardScript[]> {
+    const r = await transport.get<{ items: CardScript[] }>('/card/scripts', { charKey: this.botKey, kind });
+    return r.items ?? [];
+  }
+
+  async saveCardField(id: string, body: string): Promise<CardField> {
+    const r = await transport.post<{ item: CardField }>('/card/field', { charKey: this.botKey, id, body });
+    void this.refreshBotChanges();
+    return r.item;
+  }
+
+  async addGreeting(body: string): Promise<CardField> {
+    const r = await transport.post<{ item: CardField }>('/card/greeting', { charKey: this.botKey, body });
+    void this.refreshBotChanges();
+    return r.item;
+  }
+
+  async deleteGreeting(id: string): Promise<void> {
+    await transport.post('/card/greeting/delete', { charKey: this.botKey, id });
+    void this.refreshBotChanges();
+  }
+
+  async saveScript(id: string, entry: Record<string, unknown>): Promise<void> {
+    await transport.post('/card/script', { charKey: this.botKey, id, entry });
+    void this.refreshBotChanges();
+  }
+
+  async addScript(kind: CardScript['kind'], entry: Record<string, unknown>): Promise<string> {
+    const r = await transport.post<{ id: string }>('/card/script/add', { charKey: this.botKey, kind, entry });
+    void this.refreshBotChanges();
+    return r.id;
+  }
+
+  async deleteScript(id: string): Promise<void> {
+    await transport.post('/card/script/delete', { charKey: this.botKey, id });
+    void this.refreshBotChanges();
+  }
+
+  async moveScript(id: string, toSeq: number): Promise<void> {
+    await transport.post('/card/script/move', { charKey: this.botKey, id, toSeq });
+  }
+
+  async cardPatch(): Promise<CardPatch> {
+    return await transport.get<CardPatch>('/card/patch', { charKey: this.botKey });
+  }
+
+  async cardCommit(label: string): Promise<void> {
+    await transport.post('/card/commit', { charKey: this.botKey, label });
+    this.bump();
+    void this.refreshBotChanges();
+  }
+
+  async cardReset(): Promise<void> {
+    await transport.post('/card/reset', { charKey: this.botKey });
+    this.bump();
+    void this.refreshBotChanges();
+  }
+
+  async cardCheckpoint(label: string): Promise<void> {
+    await transport.post('/card/checkpoint', { charKey: this.botKey, label });
+  }
+
+  async cardCheckpoints(): Promise<{ id: string; label: string; created_at: number }[]> {
+    const r = await transport.get<{ checkpoints: any[] }>('/card/checkpoints', { charKey: this.botKey });
+    return r.checkpoints ?? [];
+  }
+
+  async cardRestore(id: string): Promise<void> {
+    await transport.post('/card/checkpoint/restore', { charKey: this.botKey, id });
+    this.bump();
+    void this.refreshBotChanges();
+  }
+
+  /** The host update a card patch calls for, or null when nothing differs. */
+  private cardUpdateFrom(patch: CardPatch, whole: boolean): host.CardUpdate | null {
+    const update: host.CardUpdate = {};
+    if (patch.fields.length) update.fields = patch.fields;
+    if (whole || patch.alternateGreetings.changed) update.alternateGreetings = patch.alternateGreetings.list;
+    if (whole || patch.globalLore.changed) update.globalLore = patch.globalLore.list;
+    if (whole || patch.customscript.changed) update.customscript = patch.customscript.list;
+    if (whole || patch.triggerscript.changed) update.triggerscript = patch.triggerscript.list;
+    return Object.keys(update).length ? update : null;
+  }
+
+  /**
+   * Push the working card into RisuAI and, on success, move the baseline.
+   *
+   * Unlike the chat flow (where the bar orchestrates write → commit), the
+   * whole sequence lives here because two callers need it - the bot bar and
+   * an approved host_card_writeback - and they must not drift apart.
+   */
+  async cardWriteBack(): Promise<{ applied: number; mode: string }> {
+    if (!this.isLiveBot) {
+      throw new Error('반영은 RisuAI에서 이 봇이 선택되어 있어야 합니다. '
+        + 'RisuAI에서 봇을 선택한 뒤 패널을 다시 열어 주세요');
+    }
+    const slot = await host.currentSlot();
+    const patch = await this.cardPatch();
+    if (!patch.full) {
+      throw new Error('구버전 업로드 상태의 카드라 반영할 수 없습니다. 패널을 닫았다 다시 열어 주세요');
+    }
+    const update = this.cardUpdateFrom(patch, false);
+    if (!update) return { applied: 0, mode: 'noop' };
+    const r = await host.writeCharacter(slot.characterIndex, patch.chaId, update);
+    await this.cardCommit('반영 직전');
+    await this.readHost();
+    return { applied: r.applied, mode: r.mode };
+  }
+
+  /** Create a clone bot in RisuAI carrying the working card. */
+  async cloneBot(name: string): Promise<string> {
+    if (!this.slot) throw new Error('호스트 상태를 먼저 읽어야 합니다');
+    const patch = await this.cardPatch();
+    if (!patch.full) {
+      throw new Error('구버전 업로드 상태의 카드라 복제할 수 없습니다. 패널을 닫았다 다시 열어 주세요');
+    }
+    const update = this.cardUpdateFrom(patch, true) ?? {};
+    const chaId = await host.cloneBot(this.slot.characterIndex, patch.chaId, name, update);
+    await this.cardCommit('복제 직전');
+    return chaId;
   }
 
 }

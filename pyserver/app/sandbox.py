@@ -197,9 +197,15 @@ def chats():
 
 
 def lore():
+    """Live lorebook rows, ids included - the ids are what propose_lore_*
+    tools take, so a script can compute and the tools can aim."""
     with conn() as c:
-        rows = c.execute("SELECT scope, entry_json FROM lore_entries ORDER BY scope, seq").fetchall()
-    return [{"scope": r["scope"], "entry": json.loads(r["entry_json"])} for r in rows]
+        rows = c.execute(
+            "SELECT id, scope, chat_key, seq, origin, entry_json FROM lore_entries "
+            "WHERE origin <> 'deleted' ORDER BY scope, seq").fetchall()
+    return [{"id": r["id"], "scope": r["scope"], "chatKey": r["chat_key"],
+             "seq": r["seq"], "origin": r["origin"],
+             "entry": json.loads(r["entry_json"])} for r in rows]
 
 
 def card():

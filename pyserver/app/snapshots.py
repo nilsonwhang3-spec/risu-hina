@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import uuid
 
+from . import card as cardmod
 from . import chatfmt, config, db, log, store
 from . import memory as mem
 
@@ -75,3 +76,54 @@ def restore(chat_key: str, checkpoint_id: str) -> dict:
              chat_key, checkpoint_id, row["message_count"], lore_n, mem_n)
     return {"ok": True, "restored": checkpoint_id, "messageCount": row["message_count"],
             "lore": lore_n, "memory": mem_n}
+
+
+# --- bot-level checkpoints ---------------------------------------------------
+#
+# Same three verbs over card_checkpoints. A separate table and separate
+# functions rather than nullable-ing chat_key: every consumer above assumes a
+# chat (markdown, message_count), and a bot snapshot has neither.
+
+def create_card(char_key: str, label: str) -> str:
+    """Snapshot the bot as one unit: card fields, scripts, global lorebook."""
+    rows = cardmod.rows_for_checkpoint(char_key)
+    cid = uuid.uuid4().hex
+    db.execute(
+        "INSERT INTO card_checkpoints(id, char_key, label, fields_json, scripts_json, "
+        "lore_json, created_at) VALUES(?,?,?,?,?,?,?)",
+        (cid, char_key, label, db.js(rows["fields"]), db.js(rows["scripts"]),
+         db.js(store.lore_rows_global(char_key)), db.now()),
+    )
+    keep = int((config.section("limits") or {}).get("checkpointKeep") or 50)
+    db.execute(
+        "DELETE FROM card_checkpoints WHERE char_key = ? AND id NOT IN "
+        "(SELECT id FROM card_checkpoints WHERE char_key = ? ORDER BY created_at DESC LIMIT ?)",
+        (char_key, char_key, keep),
+    )
+    return cid
+
+
+def listing_card(char_key: str) -> list[dict]:
+    rows = db.query(
+        "SELECT id, label, created_at FROM card_checkpoints "
+        "WHERE char_key = ? ORDER BY created_at DESC",
+        (char_key,),
+    )
+    return [dict(r) for r in rows]
+
+
+def restore_card(char_key: str, checkpoint_id: str) -> dict:
+    row = db.one("SELECT * FROM card_checkpoints WHERE id = ? AND char_key = ?",
+                 (checkpoint_id, char_key))
+    if row is None:
+        raise LookupError(f"unknown checkpoint: {checkpoint_id}")
+    # Same as chat restore: snapshot first, so restoring is itself undoable.
+    create_card(char_key, "restore 직전")
+    counts = cardmod.restore_rows(char_key, {
+        "fields": db.unjs(row["fields_json"], []) or [],
+        "scripts": db.unjs(row["scripts_json"], []) or [],
+    })
+    lore_n = store.restore_lore_rows_global(char_key, db.unjs(row["lore_json"], []) or [])
+    log.info("restored card char=%s checkpoint=%s fields=%s scripts=%s lore=%s",
+             char_key, checkpoint_id, counts["fields"], counts["scripts"], lore_n)
+    return {"ok": True, "restored": checkpoint_id, **counts, "lore": lore_n}

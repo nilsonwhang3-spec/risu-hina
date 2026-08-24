@@ -20,7 +20,8 @@ from pathlib import Path
 
 from . import config, db, log, sandbox, staging, skills
 
-SCOPE_TABLES = ("characters", "chats", "turns", "turns_original", "lore_entries")
+SCOPE_TABLES = ("characters", "chats", "turns", "turns_original", "lore_entries",
+                "card_fields", "card_scripts")
 
 
 def install_skills(ws: Path) -> list[str]:
@@ -90,11 +91,14 @@ def build_scope_db(workspace_dir: Path, char_key: str) -> Path:
         "SELECT c.updated_at AS c_at, "
         "  (SELECT MAX(k.updated_at) FROM chats k WHERE k.char_key = c.char_key) AS t_at, "
         "  (SELECT MAX(t.updated_at) FROM turns t JOIN chats k2 ON k2.chat_key = t.chat_key "
-        "     WHERE k2.char_key = c.char_key) AS u_at "
+        "     WHERE k2.char_key = c.char_key) AS u_at, "
+        "  (SELECT MAX(f.updated_at) FROM card_fields f WHERE f.char_key = c.char_key) AS f_at, "
+        "  (SELECT COUNT(*) FROM card_scripts s WHERE s.char_key = c.char_key) AS s_n "
         "FROM characters c WHERE c.char_key = ?",
         (char_key,),
     )
-    stamp = json.dumps([row["c_at"], row["t_at"], row["u_at"]] if row else [])
+    stamp = json.dumps(
+        [row["c_at"], row["t_at"], row["u_at"], row["f_at"], row["s_n"]] if row else [])
     if path.exists() and stamp_path.exists():
         try:
             if stamp_path.read_text(encoding="utf-8") == stamp:
@@ -115,7 +119,7 @@ def build_scope_db(workspace_dir: Path, char_key: str) -> Path:
                 if table == "characters":
                     sql = f"SELECT {coldef} FROM characters WHERE char_key = ?"
                     args: tuple = (char_key,)
-                elif table in ("chats", "lore_entries"):
+                elif table in ("chats", "lore_entries", "card_fields", "card_scripts"):
                     sql = f"SELECT {coldef} FROM {table} WHERE char_key = ?"
                     args = (char_key,)
                 else:
@@ -277,6 +281,20 @@ def describe_helper() -> str:
           risuelf.uploads() / risuelf.read_upload(name)
           risuelf.scratch(name) / risuelf.out(name)   paths to write to
           risuelf.conn()       read-only scoped snapshot, for other queries
+
+        The snapshot behind risuelf.conn() holds this bot's whole structure, so
+        anything the tools do not cover can be computed with plain SQL:
+          characters(card_json: 카드 전체 JSON, 에셋 참조 포함)
+          chats / turns / turns_original(작업본 vs 기준선)
+          lore_entries(id, scope global|local, chat_key, seq, entry_json,
+                       origin, original_json)  - 폴더는 mode='folder' 항목,
+                       소속은 멤버.folder == 폴더.key
+          card_fields(field, seq, body, original)  카드 프로즈 행
+          card_scripts(kind customscript|triggerscript, seq, entry_json,
+                       original_json, origin)  - Lua 코드는
+                       entry_json.effect[0].code
+        Writes still go through the tools (stage_* / propose_*): compute with
+        the script, then aim the tool with the ids the script found.
 
         Where to write - the panel cleans up on these, so please use them:
           risuelf.scratch("x.json")  throwaway working files

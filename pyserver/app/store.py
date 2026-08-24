@@ -601,6 +601,27 @@ def delete_lore(lore_id: str) -> int:
     return db.execute("UPDATE lore_entries SET origin = 'deleted' WHERE id = ?", (lore_id,)).rowcount or 0
 
 
+def move_lore(lore_id: str, to_seq: int) -> dict:
+    """Reorder one entry within its scope. Dense renumber over the live rows,
+    the same policy card.move_script uses - order is part of the material."""
+    row = db.one("SELECT * FROM lore_entries WHERE id = ? AND origin <> 'deleted'", (lore_id,))
+    if row is None:
+        raise LookupError("없는 로어북 항목입니다")
+    if row["scope"] == "local":
+        where, params = "scope = 'local' AND chat_key = ?", (row["char_key"], row["chat_key"])
+    else:
+        where, params = "scope = 'global' AND chat_key IS NULL", (row["char_key"],)
+    ids = [r["id"] for r in db.query(
+        f"SELECT id FROM lore_entries WHERE char_key = ? AND {where} "
+        "AND origin <> 'deleted' ORDER BY seq", params)]
+    ids.remove(lore_id)
+    pos = max(0, min(int(to_seq), len(ids)))
+    ids.insert(pos, lore_id)
+    for i, lid in enumerate(ids):
+        db.execute("UPDATE lore_entries SET seq = ? WHERE id = ?", (i, lid))
+    return {"id": lore_id, "seq": pos}
+
+
 def lore_changes(ck: str, tk: str) -> dict:
     """What a write-back of this chat's lorebook would change, as counts."""
     rows = db.query(
@@ -653,6 +674,72 @@ def restore_lore_rows(ck: str, tk: str, rows: list[dict]) -> int:
               float(r.get("created_at") or db.now())) for r in rows],
         )
     return len(rows)
+
+
+# The character-level (scope='global', chat_key IS NULL) twins of the four
+# local functions above. Twins rather than a scope parameter on the originals:
+# the local ones are called from the chat pipeline with a chat_key that the
+# global scope must never see, and a shared function with an optional tk is
+# exactly the kind of call site where a None slips in and matches every row.
+
+def lore_changes_global(ck: str) -> dict:
+    rows = db.query(
+        "SELECT origin FROM lore_entries WHERE char_key = ? AND scope = 'global' AND chat_key IS NULL",
+        (ck,))
+    out = {"added": 0, "edited": 0, "deleted": 0}
+    for r in rows:
+        if r["origin"] in out:
+            out[r["origin"]] += 1
+    out["total"] = out["added"] + out["edited"] + out["deleted"]
+    return out
+
+
+def rebase_lore_global(ck: str) -> int:
+    n = db.execute(
+        "DELETE FROM lore_entries WHERE char_key = ? AND scope = 'global' AND chat_key IS NULL "
+        "AND origin = 'deleted'", (ck,)).rowcount or 0
+    n += db.execute(
+        "UPDATE lore_entries SET origin = 'original', original_json = entry_json "
+        "WHERE char_key = ? AND scope = 'global' AND chat_key IS NULL AND origin <> 'original'",
+        (ck,)).rowcount or 0
+    return n
+
+
+def lore_rows_global(ck: str) -> list[dict]:
+    return [
+        dict(db.row_to_dict(r) or {})
+        for r in db.query(
+            "SELECT * FROM lore_entries WHERE char_key = ? AND scope = 'global' AND chat_key IS NULL "
+            "ORDER BY seq", (ck,))
+    ]
+
+
+def restore_lore_rows_global(ck: str, rows: list[dict]) -> int:
+    db.execute("DELETE FROM lore_entries WHERE char_key = ? AND scope = 'global' AND chat_key IS NULL", (ck,))
+    if rows:
+        db.executemany(
+            "INSERT INTO lore_entries(id, char_key, scope, chat_key, seq, entry_json, original_json, "
+            "origin, created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+            [(r["id"], ck, "global", None, int(r.get("seq") or 0), r.get("entry_json") or "{}",
+              r.get("original_json"), r.get("origin") or "original",
+              float(r.get("created_at") or db.now())) for r in rows],
+        )
+    return len(rows)
+
+
+def reset_lore_global(ck: str) -> int:
+    """Working copy back to the baseline: added rows go, everything else
+    becomes its original again. Rows that predate original_json are left as
+    they stand - there is nothing recorded to return them to."""
+    n = db.execute(
+        "DELETE FROM lore_entries WHERE char_key = ? AND scope = 'global' AND chat_key IS NULL "
+        "AND origin = 'added'", (ck,)).rowcount or 0
+    n += db.execute(
+        "UPDATE lore_entries SET entry_json = original_json, origin = 'original' "
+        "WHERE char_key = ? AND scope = 'global' AND chat_key IS NULL "
+        "AND origin <> 'original' AND original_json IS NOT NULL",
+        (ck,)).rowcount or 0
+    return n
 
 
 # --- search -----------------------------------------------------------------

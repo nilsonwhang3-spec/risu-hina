@@ -63,15 +63,21 @@ export async function readChat(slot: Slot): Promise<RisuChat> {
   return chat;
 }
 
-/** The card fields the backend keeps as reference material. */
+/**
+ * The card as uploaded to the backend: the whole character minus its chats.
+ *
+ * Used to be a 13-field whitelist, which silently dropped customscript,
+ * triggerscript and every asset reference at upload time - the bot editor
+ * needs all of them, and M2's charx builder needs the rest. Chats are
+ * excluded because they are megabytes and travel on their own endpoint;
+ * chatPage goes with them (it is chat UI state, not card content).
+ */
 export function cardOf(char: RisuCharacter): Record<string, unknown> {
-  const keys = [
-    'name', 'chaId', 'type', 'desc', 'personality', 'scenario', 'firstMessage',
-    'alternateGreetings', 'exampleMessage', 'systemPrompt', 'postHistoryInstructions',
-    'creatorNotes', 'globalLore',
-  ];
   const out: Record<string, unknown> = {};
-  for (const k of keys) if (char[k] !== undefined) out[k] = char[k];
+  for (const k of Object.keys(char)) {
+    if (k === 'chats' || k === 'chatPage') continue;
+    out[k] = char[k];
+  }
   return out;
 }
 
@@ -200,6 +206,143 @@ export async function saveAsCopy(
   chats.unshift(copy);
   await Risuai.setCharacterToIndex(slot.characterIndex, { ...char, chats });
   return 0;
+}
+
+/** One scalar card-field change, verified against `before` on the live card. */
+export interface CardFieldEdit { field: string; before: string; after: string }
+
+/**
+ * One card write-back's worth of change. Only fields present are touched;
+ * the three list materials are whole-list replacements, the same acceptance
+ * the chat path gives localLore.
+ */
+export interface CardUpdate {
+  fields?: CardFieldEdit[];
+  alternateGreetings?: string[];
+  globalLore?: unknown[];
+  customscript?: unknown[];
+  triggerscript?: unknown[];
+}
+
+/**
+ * Write a card update to the live character, in one `setCharacterToIndex`.
+ *
+ * Same contract as writeChat: re-read without the cache, confirm identity
+ * (chaId), confirm every edited scalar still holds the text the diff was
+ * drawn against, then write once - any mismatch aborts the whole write.
+ *
+ * `chats` is force-carried from the fresh read and a CardUpdate that tries to
+ * smuggle one in is refused outright: this is the one write path that could
+ * destroy every conversation of a bot in a single call, so the invariant is
+ * enforced here rather than trusted to callers.
+ */
+export async function writeCharacter(
+  characterIndex: number,
+  seenChaId: string | undefined,
+  update: CardUpdate,
+): Promise<WriteResult> {
+  if ('chats' in update || 'chatPage' in update) {
+    throw new HostError('failed', '카드 반영이 chats 를 건드리려 했습니다 - 버그입니다');
+  }
+  const fresh = await readCharacter(characterIndex);
+  if (seenChaId && fresh.chaId && fresh.chaId !== seenChaId) {
+    throw new HostError('changed', '선택된 봇이 바뀌었습니다. 봇 선택 탭에서 다시 불러와 주세요');
+  }
+
+  const next: RisuCharacter = { ...fresh };
+  const parts: string[] = [];
+  let applied = 0;
+
+  for (const e of update.fields ?? []) {
+    if (String(fresh[e.field] ?? '') !== e.before) {
+      throw new HostError('changed', `RisuAI 쪽에서 카드가 바뀌었습니다 (${e.field}). 다시 불러와 주세요`);
+    }
+  }
+  for (const e of update.fields ?? []) {
+    next[e.field] = e.after;
+    applied += 1;
+    parts.push(e.field);
+  }
+  if (update.alternateGreetings) {
+    next.alternateGreetings = update.alternateGreetings;
+    parts.push('alternateGreetings');
+  }
+  if (update.globalLore) {
+    next.globalLore = update.globalLore;
+    parts.push('globalLore');
+  }
+  if (update.customscript) {
+    next['customscript'] = update.customscript;
+    parts.push('customscript');
+  }
+  if (update.triggerscript) {
+    next['triggerscript'] = update.triggerscript;
+    parts.push('triggerscript');
+  }
+
+  if (!parts.length) return { applied: 0, mode: 'noop', parts };
+  next.chats = fresh.chats;
+  next.chatPage = fresh.chatPage;
+  await Risuai.setCharacterToIndex(characterIndex, next);
+  return { applied, mode: 'edits', parts };
+}
+
+/**
+ * Create a clone bot carrying the working card, as a NEW character.
+ *
+ * A new chaId is the one write that is safe on every host: mainline's save
+ * encoder skips re-encoding an existing non-selected character (edits there
+ * silently do not persist), but a chaId it has never seen is always encoded.
+ * Assets are shared by reference - keys are content hashes and RisuAI's GC
+ * scans every character, so nothing needs copying and the clone is instant.
+ *
+ * Needs the 'db' permission (getDatabase prompts on first use and returns
+ * null when refused) because appending a character is a database write.
+ */
+export async function cloneBot(
+  sourceIndex: number,
+  seenChaId: string | undefined,
+  name: string,
+  update: CardUpdate,
+): Promise<string> {
+  const src = await readCharacter(sourceIndex);
+  if (seenChaId && src.chaId && src.chaId !== seenChaId) {
+    throw new HostError('changed', '봇이 바뀌었습니다. 봇 선택 탭에서 다시 불러와 주세요');
+  }
+
+  const copy: RisuCharacter = structuredClone(src);
+  for (const e of update.fields ?? []) copy[e.field] = e.after;
+  if (update.alternateGreetings) copy.alternateGreetings = update.alternateGreetings;
+  if (update.globalLore) copy.globalLore = update.globalLore;
+  if (update.customscript) copy['customscript'] = update.customscript;
+  if (update.triggerscript) copy['triggerscript'] = update.triggerscript;
+
+  copy.chaId = cryptoRandomId();
+  copy.name = name;
+  // A fresh chat rather than the source's: PocketRisu hands back stubs for
+  // inactive chats anyway, and a clone is a card operation, not a chat copy.
+  copy.chats = [{ message: [], note: '', name: 'Chat 1', localLore: [] }];
+  copy.chatPage = 0;
+  delete copy['realmId'];
+
+  let dbSlice: Record<string, unknown> | null = null;
+  try {
+    dbSlice = await Risuai.getDatabase(['characters']);
+  } catch (e) {
+    throw new HostError('failed', '캐릭터 목록을 읽지 못했습니다: ' + String(e));
+  }
+  const characters = dbSlice && Array.isArray(dbSlice['characters'])
+    ? (dbSlice['characters'] as RisuCharacter[]).slice()
+    : null;
+  if (!characters) {
+    throw new HostError('failed',
+      "복제에는 'db' 권한이 필요합니다. RisuAI가 띄운 권한 요청을 허용하고 다시 시도해 주세요");
+  }
+  characters.push(copy);
+  await Risuai.setDatabase({ characters });
+  // Without this the clone exists but the sidebar never shows it.
+  try { await Risuai.checkCharOrder?.(); } catch { /* cosmetic on hosts without it */ }
+  return copy.chaId ?? '';
 }
 
 function cryptoRandomId(): string {

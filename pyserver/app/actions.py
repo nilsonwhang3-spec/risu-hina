@@ -36,7 +36,10 @@ DONE = "done"
 FAILED = "failed"
 
 # Actions the plugin has to carry out, because the capability lives there.
-HOST_KINDS = ("host_writeback", "host_save_copy")
+# host_open_tab is a UI move, not a write - it rides the same queue because
+# the queue is exactly the "~하시겠습니까? [승인]" interaction the ask needs.
+HOST_KINDS = ("host_writeback", "host_save_copy",
+              "host_card_writeback", "host_clone_bot", "host_open_tab")
 
 
 class ActionError(ValueError):
@@ -166,8 +169,11 @@ def _lore_edit(a: dict) -> str:
 def _lore_add(a: dict) -> str:
     from . import store
     args = a["args"]
-    lid = store.add_lore(a["charKey"], args["entry"],
-                         args.get("scope") or "local", a["chatKey"])
+    scope = args.get("scope") or "local"
+    # Global rows live under chat_key IS NULL - handing them this chat's key
+    # would make them invisible to every char-level query.
+    lid = store.add_lore(a["charKey"], args["entry"], scope,
+                         a["chatKey"] if scope == "local" else None)
     return f"로어북 항목을 추가했습니다 (id={lid})"
 
 
@@ -175,6 +181,12 @@ def _lore_delete(a: dict) -> str:
     from . import store
     store.delete_lore(a["args"]["id"])
     return "로어북 항목을 지웠습니다"
+
+
+def _lore_move(a: dict) -> str:
+    from . import store
+    out = store.move_lore(a["args"]["id"], int(a["args"].get("toSeq") or 0))
+    return f"로어북 항목을 #{out['seq']} 로 옮겼습니다"
 
 
 def _checkpoint_restore(a: dict) -> str:
@@ -189,12 +201,69 @@ def _checkpoint_create(a: dict) -> str:
     return f"스냅샷을 저장했습니다 (id={cid})"
 
 
+def _card_edit(a: dict) -> str:
+    from . import card
+    got = card.update_field(a["args"]["id"], a["args"]["body"])
+    return f"카드 필드 {got['field']} 을(를) 고쳤습니다"
+
+
+def _card_greeting_add(a: dict) -> str:
+    from . import card
+    got = card.add_greeting(a["charKey"], a["args"]["body"])
+    return f"인사말을 추가했습니다 (#{got['seq'] + 1})"
+
+
+def _card_greeting_delete(a: dict) -> str:
+    from . import card
+    card.delete_greeting(a["args"]["id"])
+    return "인사말을 지웠습니다"
+
+
+def _script_edit(a: dict) -> str:
+    from . import card
+    card.update_script(a["args"]["id"], a["args"]["entry"])
+    return "스크립트 항목을 고쳤습니다"
+
+
+def _script_add(a: dict) -> str:
+    from . import card
+    sid = card.add_script(a["charKey"], a["args"]["kind"], a["args"]["entry"])
+    return f"스크립트 항목을 추가했습니다 (id={sid})"
+
+
+def _script_delete(a: dict) -> str:
+    from . import card
+    card.delete_script(a["args"]["id"])
+    return "스크립트 항목을 지웠습니다"
+
+
+def _card_checkpoint_create(a: dict) -> str:
+    from . import snapshots
+    cid = snapshots.create_card(a["charKey"], a["args"].get("label") or "에이전트")
+    return f"봇 스냅샷을 저장했습니다 (id={cid})"
+
+
+def _card_checkpoint_restore(a: dict) -> str:
+    from . import snapshots
+    out = snapshots.restore_card(a["charKey"], a["args"]["id"])
+    return f"봇 스냅샷으로 되돌렸습니다 (필드 {out['fields']}, 스크립트 {out['scripts']})"
+
+
 EXECUTORS: dict[str, Callable[[dict], str]] = {
     "memory_edit": _memory_edit,
     "memory_delete": _memory_delete,
     "lore_edit": _lore_edit,
     "lore_add": _lore_add,
     "lore_delete": _lore_delete,
+    "lore_move": _lore_move,
     "checkpoint_restore": _checkpoint_restore,
     "checkpoint_create": _checkpoint_create,
+    "card_edit": _card_edit,
+    "card_greeting_add": _card_greeting_add,
+    "card_greeting_delete": _card_greeting_delete,
+    "script_edit": _script_edit,
+    "script_add": _script_add,
+    "script_delete": _script_delete,
+    "card_checkpoint_create": _card_checkpoint_create,
+    "card_checkpoint_restore": _card_checkpoint_restore,
 }
