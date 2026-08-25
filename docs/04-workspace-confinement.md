@@ -622,8 +622,26 @@ RisuAI 와 다른 점 하나: 아이콘 항목(`ccdefault:` → `assets/icon/ima
 - 연결 진단의 "토큰을 보내지 않았습니다"는 **연결이 실패했을 때만** 나온다. 성공 줄 밑에 그 말이
   남아 있던 것이 버그였다.
 
-## F.5 남긴 것
+## F.5 OpenAI 구독(Codex)으로 에이전트 돌리기 (v0.4.1, 사용자 결정으로 진행)
 
-- OpenAI Codex 구독(ChatGPT OAuth)으로 에이전트 돌리기 — Codex CLI 가 어느 PC 에도 없어 OAuth
-  기기 흐름을 직접 구현해야 한다. 사용자 결정 대기.
+Codex CLI 가 어느 PC 에도 없어 그 로그인을 빌릴 수 없었다. 그래서 `codexauth.py` 가 Codex CLI 와
+같은 것을 한다: `auth.openai.com/oauth/authorize` PKCE(client_id `app_EMoamEEZ73f0CkXaXp7hrann`,
+scope `openid profile email offline_access`, redirect `http://localhost:1455/auth/callback`) →
+`/oauth/token` 교환 → `id_token` 의 `https://api.openai.com/auth.chatgpt_account_id` → 요청은
+`https://chatgpt.com/backend-api/codex/responses` 에 `Authorization: Bearer` + `chatgpt-account-id`
++ `OpenAI-Beta: responses=experimental` + `originator: codex_cli_rs`. 이 백엔드는 **스트리밍만 받고
+store 를 거부**하므로 `codexauth.client()` 가 `responses.create` 를 감싸 `stream=True, store=False` 를
+강제하고, 스트림을 원치 않은 호출(연결 테스트)에는 `response.completed` 이벤트의 응답을 접어 돌려준다.
+우리 세션은 원래 `run_stream_events` 라 그대로 통과한다. 토큰은 `data/codex-auth.json`(0600),
+만료 5분 전 refresh_token 으로 갱신, 매 호출 전 bearer 를 다시 읽는다.
+
+콜백: 백엔드 PC 의 브라우저면 127.0.0.1:1455 일회용 리스너가 받는다. 다른 기기(폰·다른 PC)면
+리다이렉트가 "연결할 수 없음" 페이지로 끝나는데 **그 주소를 플러그인에 붙여넣으면** 완료된다
+(`POST /codex/login/complete`, state 검증). 프리셋의 `provider='codex'` 가 스위치이고
+`agent._model_for()` 가 `OpenAIResponsesModel` 로 분기한다. 문서화되지 않은 API 라 OpenAI 가 바꾸면
+깨지고, 그때는 오류를 그대로 보여 준다 — 사용자가 알고 택했다.
+
+## F.6 남긴 것
+
 - 모바일 스플리터: `touch-action: none` 으로 고쳤으나 실기기 확인 전.
+- 코덱스 실호출 검증(로그인·툴 호출·추론 모델) — 실사용에서.

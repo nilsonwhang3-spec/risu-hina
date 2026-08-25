@@ -1,7 +1,7 @@
 //@name risu-elf
-//@display-name Risu Elf v0.4.0
+//@display-name Risu Elf v0.4.1
 //@api 3.0
-//@version 0.4.0
+//@version 0.4.1
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-elf/master/plugin/Risu.Elf.Plugin.js
 //@arg backend_url string 백엔드 URL (기본: http://127.0.0.1:6020)
 //@arg backend_token string 백엔드 토큰 (data/token.txt)
@@ -2326,6 +2326,22 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     /** models.dev, through the backend's daily cache. */
     async modelCatalog(q, provider = "", refresh8 = false) {
       return await transport.get("/models/catalog", { q, provider, refresh: refresh8 ? "1" : "" });
+    }
+    // --- OpenAI subscription (codex) login -----------------------------------------
+    async codexStatus() {
+      return await transport.get("/codex/status");
+    }
+    async codexLoginStart() {
+      return await transport.post("/codex/login/start", {});
+    }
+    async codexLoginStatus(state2) {
+      return await transport.get("/codex/login/status", { state: state2 });
+    }
+    async codexLoginComplete(redirect, state2 = "") {
+      return await transport.post("/codex/login/complete", { redirect, state: state2 });
+    }
+    async codexLogout() {
+      await transport.post("/codex/logout", {});
     }
     // --- skills ---------------------------------------------------------------
     async skills() {
@@ -5913,7 +5929,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         el("div", { class: "grow" }, [
           el("div", { class: "presetnow-name" }, [
             el("span", { text: p.name }),
-            !p.apiKey?.set && !p.keyRef ? el("span", { class: "badge warn", style: { marginLeft: "6px" }, text: "\uD0A4 \uC5C6\uC74C" }) : null
+            !p.apiKey?.set && !p.keyRef && p.provider !== "codex" ? el("span", { class: "badge warn", style: { marginLeft: "6px" }, text: "\uD0A4 \uC5C6\uC74C" }) : null
           ]),
           el("div", { class: "hint", text: summarise(p) })
         ]),
@@ -5985,7 +6001,8 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
   }
   function summarise(p) {
     const bits = [p.model || "\uBAA8\uB378 \uBBF8\uC124\uC815"];
-    if (p.keyRef) bits.push("API \uD0A4 \uD0ED\uC758 \uD0A4");
+    if (p.provider === "codex") bits.push("OpenAI \uAD6C\uB3C5");
+    else if (p.keyRef) bits.push("API \uD0A4 \uD0ED\uC758 \uD0A4");
     if (p.reasoning) bits.push("reasoning " + p.reasoning);
     if (p.cache) bits.push("\uCE90\uC2DC");
     if (p.flex) bits.push("Flex");
@@ -6026,7 +6043,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         el("div", { class: "pickname" }, [
           el("span", { text: p.name }),
           p.selected ? el("span", { class: "badge ok", text: "\uC0AC\uC6A9 \uC911" }) : null,
-          !p.apiKey?.set && !p.keyRef ? el("span", { class: "badge warn", text: "\uD0A4 \uC5C6\uC74C" }) : null
+          !p.apiKey?.set && !p.keyRef && p.provider !== "codex" ? el("span", { class: "badge warn", text: "\uD0A4 \uC5C6\uC74C" }) : null
         ]),
         el("div", { class: "hint", text: summarise(p) })
       ]);
@@ -6084,15 +6101,33 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     const out = el("div");
     let keepSentinel = "__keep__";
     let keys = [];
+    const providerSel = el("select", {}, [
+      el("option", { value: "", text: "API \uD0A4 (OpenAI \uD638\uD658 \uC5D4\uB4DC\uD3EC\uC778\uD2B8)" }),
+      el("option", { value: "codex", text: "OpenAI \uAD6C\uB3C5 (ChatGPT Plus/Pro \xB7 Codex)" })
+    ]);
+    const keyRow = el("label", { class: "field" }, [el("span", { text: "API \uD0A4" }), keySel]);
+    const keyHint = el("div", { class: "hint", style: { marginTop: "-4px", marginBottom: "10px" } }, [
+      "API \uD0A4 \uD0ED\uC5D0 \uC800\uC7A5\uD55C \uD0A4\uB97C \uACE0\uB974\uAC70\uB098, \uC9C1\uC811 \uC785\uB825\uD569\uB2C8\uB2E4. \uD0A4 \uD0ED\uC758 \uD0A4\uB97C \uACE0\uB974\uBA74 Base URL \uC774 \uBE44\uC5B4 \uC788\uC744 \uB54C \uADF8 \uD0A4\uC758 URL \uC744 \uC501\uB2C8\uB2E4."
+    ]);
+    const urlRow = el("label", { class: "field" }, [el("span", { text: "Base URL" }), baseUrl]);
+    const codexBox = buildCodexBox(model);
+    const isCodex = () => selectedValue(providerSel) === "codex";
     const syncCount = () => {
       instCount.textContent = `${instructions.value.length}\uC790`;
     };
     instructions.addEventListener("input", syncCount);
     syncCount();
     const syncKeyRow = () => {
-      ownKeyRow.style.display = selectedValue(keySel) ? "none" : "";
+      const codex = isCodex();
+      keyRow.style.display = codex ? "none" : "";
+      keyHint.style.display = codex ? "none" : "";
+      urlRow.style.display = codex ? "none" : "";
+      ownKeyRow.style.display = codex || selectedValue(keySel) ? "none" : "";
+      codexBox.root.style.display = codex ? "" : "none";
+      if (codex) void codexBox.refresh();
     };
     keySel.addEventListener("change", syncKeyRow);
+    providerSel.addEventListener("change", syncKeyRow);
     const catalogBtn = el("button", { class: "ghost tiny", text: "\uCE74\uD0C8\uB85C\uADF8\uC5D0\uC11C \uCC3E\uAE30", title: "models.dev \uC5D0\uC11C \uD504\uB85C\uBC14\uC774\uB354\xB7\uBAA8\uB378\uC744 \uCC3E\uC544 \uCC44\uC6C1\uB2C8\uB2E4" });
     catalogBtn.addEventListener("click", () => openCatalogPicker(catalogBtn, (m, api) => {
       model.value = m.id;
@@ -6119,6 +6154,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         temperature.value = String(p.temperature);
         setSelected(reasoning, p.reasoning || "");
         setSelected(keySel, p.keyRef || "");
+        setSelected(providerSel, p.provider || "");
         cache.checked = p.cache;
         flex.checked = p.flex;
         instructions.value = p.instructions || "";
@@ -6133,12 +6169,12 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     const cancel = el("button", { class: "ghost", text: "\uCDE8\uC18C" });
     const body = el("div", {}, [
       el("label", { class: "field" }, [el("span", { text: "\uC774\uB984" }), name]),
-      el("label", { class: "field" }, [el("span", { text: "API \uD0A4" }), keySel]),
-      el("div", { class: "hint", style: { marginTop: "-4px", marginBottom: "10px" } }, [
-        "API \uD0A4 \uD0ED\uC5D0 \uC800\uC7A5\uD55C \uD0A4\uB97C \uACE0\uB974\uAC70\uB098, \uC9C1\uC811 \uC785\uB825\uD569\uB2C8\uB2E4. \uD0A4 \uD0ED\uC758 \uD0A4\uB97C \uACE0\uB974\uBA74 Base URL \uC774 \uBE44\uC5B4 \uC788\uC744 \uB54C \uADF8 \uD0A4\uC758 URL \uC744 \uC501\uB2C8\uB2E4."
-      ]),
+      el("label", { class: "field" }, [el("span", { text: "\uC778\uC99D \uBC29\uC2DD" }), providerSel]),
+      codexBox.root,
+      keyRow,
+      keyHint,
       ownKeyRow,
-      el("label", { class: "field" }, [el("span", { text: "Base URL" }), baseUrl]),
+      urlRow,
       el("label", { class: "field" }, [
         el("span", {}, [el("span", { text: "Model " }), catalogBtn]),
         model
@@ -6185,7 +6221,8 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       try {
         const saved = await state.savePreset(name.value, {
           kind,
-          keyRef: selectedValue(keySel),
+          provider: selectedValue(providerSel),
+          keyRef: isCodex() ? "" : selectedValue(keySel),
           baseUrl: baseUrl.value,
           model: model.value,
           // Leave the stored key alone unless a new one was typed.
@@ -6212,6 +6249,118 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       }
     });
     void load();
+  }
+  function buildCodexBox(modelInput) {
+    const line = el("div", { class: "hint" });
+    const out = el("div", { class: "outbox" });
+    const login = el("button", { class: "primary tiny", text: "OpenAI \uB85C\uADF8\uC778" });
+    const logout = el("button", { class: "ghost tiny", text: "\uB85C\uADF8\uC544\uC6C3" });
+    const paste = el("input", { placeholder: "\uB85C\uADF8\uC778 \uB4A4 \uC774\uB3D9\uD55C \uC8FC\uC18C\uB97C \uC5EC\uAE30\uC5D0 \uBD99\uC5EC\uB123\uAE30 (http://localhost:1455/auth/callback?code=\u2026)" });
+    const finish = el("button", { class: "ghost tiny", text: "\uBD99\uC5EC\uB123\uC740 \uC8FC\uC18C\uB85C \uC644\uB8CC" });
+    const pasteRow = el("div", { class: "row" }, [paste, finish]);
+    pasteRow.style.display = "none";
+    const models = el("div", { class: "row" });
+    let pendingState = "";
+    let poll = null;
+    const stopPoll = () => {
+      if (poll) {
+        clearInterval(poll);
+        poll = null;
+      }
+    };
+    const refresh8 = async () => {
+      try {
+        const s = await state.codexStatus();
+        line.textContent = s.loggedIn ? `\uB85C\uADF8\uC778\uB428 \xB7 ${s.email || s.accountId.slice(0, 8)}${s.plan ? " \xB7 " + s.plan : ""}` : "\uB85C\uADF8\uC778\uB418\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4. ChatGPT Plus/Pro \uACC4\uC815\uC73C\uB85C \uB85C\uADF8\uC778\uD558\uBA74 \uAD6C\uB3C5\uC73C\uB85C \uC5D0\uC774\uC804\uD2B8\uB97C \uB3CC\uB9BD\uB2C8\uB2E4.";
+        login.style.display = s.loggedIn ? "none" : "";
+        logout.style.display = s.loggedIn ? "" : "none";
+        if (s.loggedIn) {
+          pasteRow.style.display = "none";
+          stopPoll();
+        }
+        clear(models);
+        for (const m of s.models) {
+          const b = el("button", { class: "ghost tiny", text: m });
+          b.addEventListener("click", () => {
+            modelInput.value = m;
+          });
+          models.appendChild(b);
+        }
+      } catch (e) {
+        line.textContent = msg8(e);
+      }
+    };
+    login.addEventListener("click", async () => {
+      login.disabled = true;
+      clear(out);
+      try {
+        const r = await state.codexLoginStart();
+        pendingState = r.state;
+        const a = el("a", { href: r.url, target: "_blank", rel: "noopener", text: "\uBE0C\uB77C\uC6B0\uC800\uC5D0\uC11C OpenAI \uB85C\uADF8\uC778 \uC5F4\uAE30" });
+        out.appendChild(el("div", { class: "notice" }, [
+          a,
+          el("div", { class: "hint", style: { marginTop: "6px" }, text: r.listening ? "\uC774 \uBE0C\uB77C\uC6B0\uC800\uAC00 \uBC31\uC5D4\uB4DC\uC640 \uAC19\uC740 PC \uB77C\uBA74 \uB85C\uADF8\uC778 \uB4A4 \uC790\uB3D9\uC73C\uB85C \uC644\uB8CC\uB429\uB2C8\uB2E4. \uB2E4\uB978 \uAE30\uAE30\uB77C\uBA74 \uB85C\uADF8\uC778 \uB4A4 \uC774\uB3D9\uD55C \uC8FC\uC18C(\uC5F0\uACB0 \uC548 \uB428 \uD398\uC774\uC9C0\uC758 \uC8FC\uC18C)\uB97C \uC544\uB798\uC5D0 \uBD99\uC5EC\uB123\uC5B4 \uC8FC\uC138\uC694." : "\uCF5C\uBC31 \uD3EC\uD2B8(1455)\uAC00 \uC0AC\uC6A9 \uC911\uC774\uB77C \uC790\uB3D9 \uC644\uB8CC\uB294 \uC548 \uB429\uB2C8\uB2E4. \uB85C\uADF8\uC778 \uB4A4 \uC774\uB3D9\uD55C \uC8FC\uC18C\uB97C \uC544\uB798\uC5D0 \uBD99\uC5EC\uB123\uC5B4 \uC8FC\uC138\uC694." })
+        ]));
+        pasteRow.style.display = "";
+        try {
+          window.open(r.url, "_blank", "noopener");
+        } catch {
+        }
+        stopPoll();
+        poll = setInterval(async () => {
+          try {
+            const st = await state.codexLoginStatus(pendingState);
+            if (st.done || st.loggedIn) {
+              stopPoll();
+              clear(out);
+              await refresh8();
+            } else if (st.error) {
+              stopPoll();
+              out.appendChild(el("div", { class: "notice err", text: st.error }));
+            }
+          } catch {
+          }
+        }, 2e3);
+      } catch (e) {
+        out.appendChild(el("div", { class: "notice err", text: msg8(e) }));
+      } finally {
+        login.disabled = false;
+      }
+    });
+    finish.addEventListener("click", async () => {
+      finish.disabled = true;
+      try {
+        await state.codexLoginComplete(paste.value.trim(), pendingState);
+        clear(out);
+        paste.value = "";
+        await refresh8();
+      } catch (e) {
+        clear(out);
+        out.appendChild(el("div", { class: "notice err", text: msg8(e) }));
+      } finally {
+        finish.disabled = false;
+      }
+    });
+    logout.addEventListener("click", async () => {
+      try {
+        await state.codexLogout();
+        await refresh8();
+      } catch (e) {
+        out.appendChild(el("div", { class: "notice err", text: msg8(e) }));
+      }
+    });
+    const root = el("div", { class: "card codexbox" }, [
+      el("h2", { text: "OpenAI \uAD6C\uB3C5 (Codex)" }),
+      el("div", { class: "hint", style: { marginBottom: "6px" }, text: "Codex CLI \uC640 \uAC19\uC740 \uBC29\uC2DD\uC73C\uB85C ChatGPT \uACC4\uC815\uC5D0 \uB85C\uADF8\uC778\uD574 chatgpt.com \uC758 codex \uBC31\uC5D4\uB4DC\uB97C \uC501\uB2C8\uB2E4. \uACF5\uC2DD API \uAC00 \uC544\uB2C8\uB77C OpenAI \uCABD \uBCC0\uACBD\uC5D0 \uAE68\uC9C8 \uC218 \uC788\uACE0, \uADF8\uB54C\uB294 \uC624\uB958\uB97C \uADF8\uB300\uB85C \uBCF4\uC5EC \uC90D\uB2C8\uB2E4. Base URL\xB7API \uD0A4\uB294 \uC4F0\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4." }),
+      line,
+      el("div", { class: "row", style: { marginTop: "6px" } }, [login, logout]),
+      pasteRow,
+      out,
+      el("div", { class: "hint", style: { marginTop: "8px" }, text: "\uC774 \uBC31\uC5D4\uB4DC\uAC00 \uBC1B\uB294 \uBAA8\uB378 (\uB204\uB974\uBA74 \uCC44\uC6CC\uC9D1\uB2C8\uB2E4):" }),
+      models
+    ]);
+    root.style.display = "none";
+    return { root, refresh: refresh8 };
   }
   function openCatalogPicker(anchor, onPick) {
     const input = el("input", { placeholder: "\uD504\uB85C\uBC14\uC774\uB354\uB098 \uBAA8\uB378 \uC774\uB984 (\uC608: gemini, anthropic, gpt-5)" });
@@ -6639,7 +6788,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.4.0",
+            version: "0.4.1",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -7158,7 +7307,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.4.0"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.4.1"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -8623,7 +8772,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Elf</span>" }),
-        el("span", { class: "dim", text: "v0.4.0" }),
+        el("span", { class: "dim", text: "v0.4.1" }),
         healthEl,
         el("span", { class: "spacer" }),
         reload,
@@ -8758,6 +8907,6 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       });
     } catch {
     }
-    console.log(`[risu-elf] v${"0.4.0"} loaded`);
+    console.log(`[risu-elf] v${"0.4.1"} loaded`);
   })();
 })();

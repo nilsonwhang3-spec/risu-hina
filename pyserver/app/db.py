@@ -593,6 +593,8 @@ ADD_COLUMNS = [
     # them (key_ref = api_keys.id, '' = the preset's own base_url/api_key).
     ("agent_presets", "kind", "TEXT NOT NULL DEFAULT 'general'"),
     ("agent_presets", "key_ref", "TEXT NOT NULL DEFAULT ''"),
+    # '' = OpenAI-compatible endpoint, 'codex' = OpenAI subscription (codexauth).
+    ("agent_presets", "provider", "TEXT NOT NULL DEFAULT ''"),
     ("skills", "kind", "TEXT NOT NULL DEFAULT 'md'"),
     ("skills", "filename", "TEXT NOT NULL DEFAULT ''"),
     # A checkpoint covers the whole chat - turns, this chat's lorebook entries

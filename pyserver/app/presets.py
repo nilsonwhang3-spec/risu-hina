@@ -59,14 +59,18 @@ FIELDS: dict[str, Any] = {
     # An api_keys row to take the key (and, when baseUrl is empty, the base
     # URL) from. '' = this preset carries its own.
     "keyRef": "",
+    # '' = an OpenAI-compatible endpoint (baseUrl + key). 'codex' = the
+    # OpenAI subscription through codexauth (no URL, no key; needs login).
+    "provider": "",
 }
 
 KINDS = ("general", "search")
+PROVIDERS = ("", "codex")
 # Which config section each kind drives (agent._model reads them).
 SECTION = {"general": "agent", "search": "agent_search"}
 # What the agent actually needs, resolved through keys.resolve.
 RUN_FIELDS = ("baseUrl", "apiKey", "model", "temperature", "maxTokens", "reasoning",
-              "cache", "flex", "instructions")
+              "cache", "flex", "instructions", "provider")
 
 REASONING_LEVELS = ("", "none", "minimal", "low", "medium", "high", "xhigh", "max")
 
@@ -97,6 +101,7 @@ def _row_to_preset(row) -> dict:
         "instructions": d.get("instructions") or "",
         "kind": d.get("kind") if d.get("kind") in KINDS else "general",
         "keyRef": d.get("key_ref") or "",
+        "provider": d.get("provider") if d.get("provider") in PROVIDERS else "",
         "updatedAt": d.get("updated_at"),
     }
 
@@ -270,6 +275,11 @@ def _clean(values: dict, previous: dict | None) -> dict:
             if k not in KINDS:
                 raise PresetError("kind 는 general 또는 search 여야 합니다")
             out[field] = k
+        elif field == "provider":
+            pv = str(raw).strip().lower()
+            if pv not in PROVIDERS:
+                raise PresetError("provider 는 비우거나 codex 여야 합니다")
+            out[field] = pv
         elif field == "keyRef":
             ref = str(raw).strip()
             if ref:
@@ -330,16 +340,16 @@ def save(name: str, values: dict, preset_id: str | None = None) -> dict:
 def _insert(pid: str, label: str, v: dict, now: float) -> None:
     db.execute(
         "INSERT INTO agent_presets(id, name, base_url, api_key, model, temperature, "
-        "max_tokens, reasoning, cache, flex, instructions, kind, key_ref, created_at, updated_at) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+        "max_tokens, reasoning, cache, flex, instructions, kind, key_ref, provider, created_at, updated_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
         "ON CONFLICT(id) DO UPDATE SET name=excluded.name, base_url=excluded.base_url, "
         "api_key=excluded.api_key, model=excluded.model, temperature=excluded.temperature, "
         "max_tokens=excluded.max_tokens, reasoning=excluded.reasoning, cache=excluded.cache, "
         "flex=excluded.flex, instructions=excluded.instructions, kind=excluded.kind, "
-        "key_ref=excluded.key_ref, updated_at=excluded.updated_at",
+        "key_ref=excluded.key_ref, provider=excluded.provider, updated_at=excluded.updated_at",
         (pid, label, v["baseUrl"], v["apiKey"], v["model"], v["temperature"],
          v["maxTokens"], v["reasoning"], int(v["cache"]), int(v["flex"]),
-         v["instructions"], v["kind"], v["keyRef"], now, now),
+         v["instructions"], v["kind"], v["keyRef"], v["provider"], now, now),
     )
 
 
@@ -395,6 +405,12 @@ def model_settings() -> dict[str, Any]:
     level = str(cfg.get("reasoning") or "").strip().lower()
     if level and level in REASONING_LEVELS and level != "":
         out["openai_reasoning_effort"] = level
+    codex = (cfg.get("provider") or "") == "codex"
+    if codex:
+        # The subscription backend has no tiers and no caches to pick, and it
+        # refuses stored responses; codexauth.client strips these anyway.
+        out["openai_store"] = False
+        return out
     if cfg.get("flex"):
         # Cheaper, slower, and only on tiers that offer it. Requests can queue
         # for minutes, so the agent timeout matters more when this is on.
@@ -412,7 +428,7 @@ def fingerprint() -> str:
     """Everything a rebuilt agent would pick up, as one comparable string."""
     cfg = config.section("agent")
     return "|".join(str(x) for x in (
-        cfg.get("baseUrl"), cfg.get("model"), len(cfg.get("apiKey") or ""),
+        cfg.get("provider"), cfg.get("baseUrl"), cfg.get("model"), len(cfg.get("apiKey") or ""),
         cfg.get("temperature"), cfg.get("maxTokens"),
         cfg.get("reasoning"), cfg.get("cache"), cfg.get("flex"),
         len(cfg.get("instructions") or ""), (cfg.get("instructions") or "")[:60],

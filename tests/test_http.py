@@ -1850,6 +1850,45 @@ def test_keys_and_agent_kinds(s: Server) -> None:
     check("the model catalog route answers", st == 200 and "models" in body and "providers" in body, str(body)[:160])
 
 
+def test_codex_subscription_preset(s: Server) -> None:
+    """The OpenAI-subscription provider: the login flow's shape (no network),
+    and a codex preset as the agent's config - which leaves /health honest
+    (not ready) until someone actually logs in."""
+    print("test_codex_subscription_preset")
+    st, body = s.get("/codex/status")
+    check("logged out at first", st == 200 and body.get("loggedIn") is False and body.get("models"), str(body)[:160])
+
+    st, body = s.post("/codex/login/start", {})
+    url = body.get("url") or ""
+    check("login start hands out an authorization URL", st == 200 and url.startswith("https://auth.openai.com/oauth/authorize?"), url[:80])
+    qs = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+    check("with PKCE, the codex client id and the codex redirect",
+          qs.get("code_challenge_method") == ["S256"] and qs.get("client_id") == ["app_EMoamEEZ73f0CkXaXp7hrann"]
+          and qs.get("redirect_uri") == ["http://localhost:1455/auth/callback"] and bool(qs.get("state")), str(qs)[:200])
+    state = qs["state"][0]
+    check("the pending attempt is known", s.get(q("/codex/login/status", state=state))[1].get("known") is True)
+    st, body = s.post("/codex/login/complete", {"redirect": "http://localhost:1455/auth/callback?code=abc&state=WRONG"})
+    check("a redirect with the wrong state is refused", st == 400 and "state" in body.get("error", ""), str(body)[:120])
+    st, body = s.post("/codex/login/complete", {"redirect": "garbage"})
+    check("garbage is refused", st == 400, str(st))
+    st, body = s.post("/codex/logout", {})
+    check("logout answers", st == 200 and body.get("loggedIn") is False)
+
+    # A codex preset needs no URL or key; selected, it is what config.agent says.
+    st, body = s.post("/presets/save", {"name": "구독", "values": {"provider": "codex", "model": "gpt-5.1-codex", "apiKey": ""}})
+    check("a codex preset saves without URL or key", st == 200 and body["preset"]["provider"] == "codex", str(body)[:200])
+    pid = body["preset"]["id"]
+    st, body = s.post("/presets/save", {"name": "구독", "values": {"provider": "nope"}, "id": pid})
+    check("an unknown provider is refused", st == 400, str(st))
+    st, body = s.post("/presets/select", {"id": pid})
+    st, cfg = s.get("/config")
+    a = (cfg.get("config") or {}).get("agent") or {}
+    check("config.agent carries the provider", a.get("provider") == "codex" and a.get("model") == "gpt-5.1-codex", str(a)[:160])
+    st, h = s.get("/health")
+    check("not agentReady until logged in", h.get("agentReady") is False, str(h)[:120])
+    st, body = s.post("/presets/delete", {"id": pid})
+
+
 def test_loopback_exemption() -> None:
     """With RISUELF_REQUIRE_TOKEN off, a loopback caller needs no token.
 
@@ -1904,6 +1943,7 @@ def main() -> int:
         test_agent_presets(s)
         test_preset_selection(s)
         test_keys_and_agent_kinds(s)
+        test_codex_subscription_preset(s)
         test_skills(s)
         test_script_skills(s)
         test_reference_skills(s)

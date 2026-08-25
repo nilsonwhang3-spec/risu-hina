@@ -175,6 +175,8 @@ export interface AgentPreset {
   kind: 'general' | 'search';
   /** An API key entry to borrow credentials from; '' = this preset's own. */
   keyRef: string;
+  /** '' = OpenAI-compatible endpoint; 'codex' = the OpenAI subscription (login, no key). */
+  provider: '' | 'codex';
   /** One preset per kind carries this. */
   selected?: boolean;
   updatedAt: number;
@@ -195,6 +197,11 @@ export interface CatalogModel {
   context: number | null; output: number | null; costIn: number | null; costOut: number | null; releaseDate: string;
 }
 export interface CatalogProvider { id: string; name: string; api: string; doc: string; env: string[]; models: number }
+export interface CodexStatus {
+  loggedIn: boolean; email: string; accountId: string; plan: string; expiresAt: number;
+  pending: boolean; listening: boolean; models: string[]; base: string; redirectUri: string;
+}
+
 export interface CatalogResult {
   providers: CatalogProvider[]; models: CatalogModel[]; truncated: boolean;
   totalProviders: number; cachedAt: number; stale: boolean; source: string;
@@ -964,6 +971,28 @@ class AppState {
   /** models.dev, through the backend's daily cache. */
   async modelCatalog(q: string, provider = '', refresh = false): Promise<CatalogResult> {
     return await transport.get('/models/catalog', { q, provider, refresh: refresh ? '1' : '' });
+  }
+
+  // --- OpenAI subscription (codex) login -----------------------------------------
+
+  async codexStatus(): Promise<CodexStatus> {
+    return await transport.get('/codex/status');
+  }
+
+  async codexLoginStart(): Promise<{ url: string; state: string; listening: boolean; redirectUri: string }> {
+    return await transport.post('/codex/login/start', {});
+  }
+
+  async codexLoginStatus(state: string): Promise<{ known: boolean; done: boolean; error: string; loggedIn?: boolean }> {
+    return await transport.get('/codex/login/status', { state });
+  }
+
+  async codexLoginComplete(redirect: string, state = ''): Promise<CodexStatus> {
+    return await transport.post('/codex/login/complete', { redirect, state });
+  }
+
+  async codexLogout(): Promise<void> {
+    await transport.post('/codex/logout', {});
   }
 
   // --- skills ---------------------------------------------------------------

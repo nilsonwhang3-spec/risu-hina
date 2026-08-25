@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any
 
 APP_NAME = "risu-elf"
-VERSION = "0.4.0"
+VERSION = "0.4.1"
 
 # Renamed from REALOOC_* to RISUELF_*. The old names are still honoured, and
 # not as politeness: the launcher, the control script and any service wrapper
@@ -175,6 +175,9 @@ DEFAULTS: dict[str, Any] = {
         # change how the agent works without being able to revoke "never write
         # to the transcript".
         "instructions": "",
+        # '' = baseUrl + apiKey above. 'codex' = the OpenAI subscription via
+        # codexauth (login instead of a key; baseUrl/apiKey ignored).
+        "provider": "",
     },
     # The search agent: a second, smaller model the general agent hands a
     # research question to (agent.web_research). Same keys as `agent`;
@@ -191,6 +194,7 @@ DEFAULTS: dict[str, Any] = {
         "cache": False,
         "flex": False,
         "instructions": "",
+        "provider": "",
     },
     "websearch": {
         "provider": "",          # brave | tavily | serper | searxng | google-cse

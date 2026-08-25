@@ -20,10 +20,10 @@ from pathlib import Path
 from typing import Any
 
 from pydantic_ai import Agent, RunContext
-from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.models.openai import OpenAIChatModel, OpenAIResponsesModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
-from . import (actions, assets, config, files, log, presets, pyexec, skills, snapshots,
+from . import (actions, assets, codexauth, config, files, log, presets, pyexec, skills, snapshots,
                staging, store, websearch, workspace)
 from . import card as cardmod
 from . import memory as mem
@@ -89,17 +89,29 @@ class Deps:
     workspace_dir: Path
 
 
-def _model() -> OpenAIChatModel:
-    cfg = config.section("agent")
+def _model_for(section: str) -> "OpenAIChatModel | OpenAIResponsesModel":
+    """The model a config section describes: an OpenAI-compatible endpoint,
+    or the OpenAI subscription through codexauth (Responses API, streaming)."""
+    cfg = config.section(section)
+    name = cfg.get("model") or ""
+    if (cfg.get("provider") or "") == "codex":
+        if not name:
+            raise RuntimeError("코덱스 프리셋에 모델 이름이 없습니다 (예: gpt-5.1-codex)")
+        if not codexauth.logged_in():
+            raise RuntimeError("OpenAI 구독 로그인이 필요합니다 (설정 → 에이전트 → 프리셋 수정 → 로그인)")
+        return OpenAIResponsesModel(name, provider=OpenAIProvider(openai_client=codexauth.client()))
     base = (cfg.get("baseUrl") or "").rstrip("/")
     key = cfg.get("apiKey") or ""
-    name = cfg.get("model") or ""
     if not (base and key and name):
         raise RuntimeError("에이전트 자격증명이 설정되지 않았습니다 (설정 탭에서 baseUrl/apiKey/model)")
     # Everything is addressed as an OpenAI-compatible endpoint; a gateway is
     # what normalises the providers behind it. Same reasoning as active-recall's
     # llm.py - portability lives at the gateway, not in our code.
     return OpenAIChatModel(name, provider=OpenAIProvider(base_url=base, api_key=key))
+
+
+def _model() -> "OpenAIChatModel | OpenAIResponsesModel":
+    return _model_for("agent")
 
 
 def build() -> Agent[Deps]:
@@ -800,6 +812,8 @@ def build() -> Agent[Deps]:
 
 def search_agent_ready() -> bool:
     cfg = config.section("agent_search")
+    if (cfg.get("provider") or "") == "codex":
+        return bool(cfg.get("model")) and codexauth.logged_in()
     return bool(cfg.get("baseUrl") and cfg.get("apiKey") and cfg.get("model"))
 
 
@@ -810,10 +824,8 @@ SEARCH_INSTRUCTIONS = """\
 """
 
 
-def _search_model() -> OpenAIChatModel:
-    cfg = config.section("agent_search")
-    base = (cfg.get("baseUrl") or "").rstrip("/")
-    return OpenAIChatModel(cfg.get("model") or "", provider=OpenAIProvider(base_url=base, api_key=cfg.get("apiKey") or ""))
+def _search_model() -> "OpenAIChatModel | OpenAIResponsesModel":
+    return _model_for("agent_search")
 
 
 async def research(question: str) -> str:

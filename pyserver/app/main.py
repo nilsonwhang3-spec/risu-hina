@@ -34,7 +34,7 @@ from starlette.concurrency import run_in_threadpool
 
 from . import (chatfmt, config, db, files, log, presets, session, skills, staging,
                store, websearch, workspace)
-from . import actions, assets, catalog, charx, keys, snapshots, updater
+from . import actions, assets, catalog, charx, codexauth, keys, snapshots, updater
 from . import card as cardmod
 from . import memory as mem
 
@@ -122,6 +122,8 @@ def agent_ready() -> bool:
     did once, and the panel believed the wrong one.
     """
     a = config.section("agent")
+    if (a.get("provider") or "") == "codex":
+        return bool((a.get("model") or "").strip()) and codexauth.logged_in()
     return bool((a.get("baseUrl") or "").strip()
                 and (a.get("apiKey") or "").strip()
                 and (a.get("model") or "").strip())
@@ -785,6 +787,32 @@ def h_key_delete(arg: dict) -> dict:
 def h_models_catalog(arg: dict) -> dict:
     return catalog.search(str(arg.get("q") or ""), provider=str(arg.get("provider") or ""),
                           refresh=str(arg.get("refresh") or "") in ("1", "true"))
+
+
+# --- OpenAI subscription (codex) login ----------------------------------------------
+
+def h_codex_status(arg: dict) -> dict:
+    return codexauth.status()
+
+
+def h_codex_login_start(arg: dict) -> dict:
+    return codexauth.start_login()
+
+
+def h_codex_login_status(arg: dict) -> dict:
+    return codexauth.login_status(str(arg.get("state") or ""))
+
+
+def h_codex_login_complete(arg: dict) -> dict:
+    try:
+        return codexauth.complete_login(str(arg.get("redirect") or arg.get("code") or ""),
+                                        str(arg.get("state") or ""))
+    except codexauth.CodexError as e:
+        raise ApiError(400, str(e))
+
+
+def h_codex_logout(arg: dict) -> dict:
+    return codexauth.logout()
 
 
 def h_skills(arg: dict) -> dict:
@@ -1493,6 +1521,11 @@ ROUTES: dict[str, Handler] = {
     "POST /keys/save": h_key_save,
     "POST /keys/delete": h_key_delete,
     "GET /models/catalog": h_models_catalog,
+    "GET /codex/status": h_codex_status,
+    "POST /codex/login/start": h_codex_login_start,
+    "GET /codex/login/status": h_codex_login_status,
+    "POST /codex/login/complete": h_codex_login_complete,
+    "POST /codex/logout": h_codex_logout,
     "POST /presets/select": h_preset_select,
     "POST /presets/delete": h_preset_delete,
 
