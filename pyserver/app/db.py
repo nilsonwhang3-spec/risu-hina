@@ -21,7 +21,7 @@ from typing import Any, Iterable
 
 from . import config
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 LOCK = threading.RLock()
 _conn: sqlite3.Connection | None = None
@@ -563,6 +563,24 @@ DDL = [
     """,
     "CREATE INDEX IF NOT EXISTS char_assets_key ON char_assets(risu_key)",
 
+    # --- v10: API keys, kept apart from presets -------------------------------
+    # One row per credential (a provider's key, a gateway's key). Presets
+    # point at a row (key_ref) or carry their own; the settings page shows the
+    # key's shape, never the key.
+    """
+    CREATE TABLE IF NOT EXISTS api_keys (
+        id          TEXT PRIMARY KEY,
+        name        TEXT NOT NULL,
+        provider    TEXT NOT NULL DEFAULT '',
+        base_url    TEXT NOT NULL DEFAULT '',
+        api_key     TEXT NOT NULL DEFAULT '',
+        note        TEXT NOT NULL DEFAULT '',
+        created_at  REAL NOT NULL,
+        updated_at  REAL NOT NULL
+    )
+    """,
+    "CREATE UNIQUE INDEX IF NOT EXISTS api_keys_name ON api_keys(name COLLATE NOCASE)",
+
 ]
 
 
@@ -570,6 +588,11 @@ DDL = [
 # alter an existing table, so a deployed database needs these explicitly.
 ADD_COLUMNS = [
     ("agent_presets", "instructions", "TEXT NOT NULL DEFAULT ''"),
+    # v10: a preset is either the general agent's or the search agent's, and
+    # may borrow its credentials from the API key table instead of carrying
+    # them (key_ref = api_keys.id, '' = the preset's own base_url/api_key).
+    ("agent_presets", "kind", "TEXT NOT NULL DEFAULT 'general'"),
+    ("agent_presets", "key_ref", "TEXT NOT NULL DEFAULT ''"),
     ("skills", "kind", "TEXT NOT NULL DEFAULT 'md'"),
     ("skills", "filename", "TEXT NOT NULL DEFAULT ''"),
     # A checkpoint covers the whole chat - turns, this chat's lorebook entries

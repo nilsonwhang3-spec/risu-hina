@@ -52,7 +52,21 @@ FIELDS: dict[str, Any] = {
     # Free-form extra instructions. Additive to the built-in rules, never a
     # replacement for them - see agent.py.
     "instructions": "",
+    # 'general' runs the editing agent (tools, scripts, proposals); 'search'
+    # runs the search agent the general one hands research questions to.
+    # One of each is selected, independently.
+    "kind": "general",
+    # An api_keys row to take the key (and, when baseUrl is empty, the base
+    # URL) from. '' = this preset carries its own.
+    "keyRef": "",
 }
+
+KINDS = ("general", "search")
+# Which config section each kind drives (agent._model reads them).
+SECTION = {"general": "agent", "search": "agent_search"}
+# What the agent actually needs, resolved through keys.resolve.
+RUN_FIELDS = ("baseUrl", "apiKey", "model", "temperature", "maxTokens", "reasoning",
+              "cache", "flex", "instructions")
 
 REASONING_LEVELS = ("", "none", "minimal", "low", "medium", "high", "xhigh", "max")
 
@@ -81,6 +95,8 @@ def _row_to_preset(row) -> dict:
         "cache": bool(d.get("cache")),
         "flex": bool(d.get("flex")),
         "instructions": d.get("instructions") or "",
+        "kind": d.get("kind") if d.get("kind") in KINDS else "general",
+        "keyRef": d.get("key_ref") or "",
         "updatedAt": d.get("updated_at"),
     }
 
@@ -93,40 +109,75 @@ def _public(preset: dict) -> dict:
     return out
 
 
-def list_all() -> list[dict]:
+def list_all(kind: str | None = None) -> list[dict]:
     ensure_default()
-    rows = db.query("SELECT * FROM agent_presets ORDER BY name COLLATE NOCASE")
-    sel = selected_id()
+    rows = db.query("SELECT * FROM agent_presets ORDER BY kind, name COLLATE NOCASE")
+    sel = {k: selected_id(k) for k in KINDS}
     out = []
     for r in rows:
         item = _public(_row_to_preset(r))
-        item["selected"] = item["id"] == sel
+        if kind and item["kind"] != kind:
+            continue
+        item["selected"] = item["id"] == sel.get(item["kind"], "")
         out.append(item)
     return out
 
 
-def selected_id() -> str:
-    row = db.one("SELECT value FROM meta WHERE key = ?", (SELECTED_KEY,))
+def _sel_key(kind: str) -> str:
+    # The general agent keeps the historical key so an existing install's
+    # selection survives the split.
+    return SELECTED_KEY if kind == "general" else f"{SELECTED_KEY}_{kind}"
+
+
+def selected_id(kind: str = "general") -> str:
+    row = db.one("SELECT value FROM meta WHERE key = ?", (_sel_key(kind),))
     return (row["value"] if row else "") or ""
 
 
-def _set_selected(preset_id: str) -> None:
+def _set_selected(preset_id: str, kind: str = "general") -> None:
     db.execute(
         "INSERT INTO meta(key, value) VALUES(?, ?) "
         "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-        (SELECTED_KEY, preset_id),
+        (_sel_key(kind), preset_id),
     )
 
 
-def selected() -> dict | None:
-    """The preset the agent is running, key redacted. Never None after seeding."""
+def _clear_selected(kind: str) -> None:
+    db.execute("DELETE FROM meta WHERE key = ?", (_sel_key(kind),))
+
+
+def _apply_to_config(p: dict) -> None:
+    """Push a preset's resolved run values into the section its kind drives."""
+    from . import keys
+    base, key = keys.resolve(p.get("baseUrl") or "", p.get("apiKey") or "", p.get("keyRef") or "")
+    values = {f: p.get(f, FIELDS[f]) for f in RUN_FIELDS}
+    values["baseUrl"] = base
+    values["apiKey"] = key
+    config.update({SECTION[p.get("kind") or "general"]: values})
+
+
+def reresolve_selected() -> None:
+    """A key changed: whichever selected presets point at keys get re-applied."""
+    for kind in KINDS:
+        p = get(selected_id(kind))
+        if p is not None:
+            _apply_to_config(p)
+
+
+def selected(kind: str = "general") -> dict | None:
+    """The preset the agent of this kind is running, key redacted. The general
+    agent always has one after seeding; the search agent may have none."""
     ensure_default()
-    p = get(selected_id())
+    p = get(selected_id(kind))
+    if p is not None and p["kind"] != kind:
+        p = None
     if p is None:
-        row = db.one("SELECT id FROM agent_presets ORDER BY name COLLATE NOCASE LIMIT 1")
+        if kind != "general":
+            return None
+        row = db.one("SELECT id FROM agent_presets WHERE kind = 'general' ORDER BY name COLLATE NOCASE LIMIT 1")
         if row is None:
             return None
-        _set_selected(row["id"])
+        _set_selected(row["id"], kind)
         p = get(row["id"])
     out = _public(p or {})
     out["selected"] = True
@@ -140,9 +191,9 @@ def ensure_default() -> None:
     even though the agent is configured and working - the settings would look
     lost rather than merely unnamed.
     """
-    if db.one("SELECT id FROM agent_presets LIMIT 1") is not None:
+    if db.one("SELECT id FROM agent_presets WHERE kind = 'general' LIMIT 1") is not None:
         if not selected_id():
-            row = db.one("SELECT id FROM agent_presets ORDER BY name COLLATE NOCASE LIMIT 1")
+            row = db.one("SELECT id FROM agent_presets WHERE kind = 'general' ORDER BY name COLLATE NOCASE LIMIT 1")
             if row is not None:
                 _set_selected(row["id"])
         return
@@ -160,10 +211,20 @@ def select(preset_id: str) -> dict:
     p = get(preset_id)
     if p is None:
         raise PresetError("없는 프리셋입니다")
-    _set_selected(preset_id)
-    config.update({"agent": {f: p[f] for f in FIELDS}})
-    log.info("preset selected id=%s name=%s model=%s", preset_id, p["name"], p["model"])
-    return {"selected": p["name"], "id": preset_id, "config": config.redacted()}
+    _set_selected(preset_id, p["kind"])
+    _apply_to_config(p)
+    log.info("preset selected kind=%s id=%s name=%s model=%s", p["kind"], preset_id, p["name"], p["model"])
+    return {"selected": p["name"], "id": preset_id, "kind": p["kind"], "config": config.redacted()}
+
+
+def deselect(kind: str) -> dict:
+    """Only the search agent can run with no preset: then the general agent
+    searches on its own again."""
+    if kind == "general":
+        raise PresetError("일반 에이전트는 항상 프리셋 하나를 씁니다")
+    _clear_selected(kind)
+    config.update({SECTION[kind]: {f: FIELDS[f] for f in RUN_FIELDS}})
+    return {"kind": kind, "selected": None}
 
 
 def get(preset_id: str) -> dict | None:
@@ -204,6 +265,18 @@ def _clean(values: dict, previous: dict | None) -> dict:
                 raise PresetError(
                     f"기본지침은 {MAX_INSTRUCTIONS}자까지입니다 (지금 {len(text)}자)")
             out[field] = text
+        elif field == "kind":
+            k = str(raw).strip().lower() or "general"
+            if k not in KINDS:
+                raise PresetError("kind 는 general 또는 search 여야 합니다")
+            out[field] = k
+        elif field == "keyRef":
+            ref = str(raw).strip()
+            if ref:
+                from . import keys
+                if keys.get(ref) is None:
+                    raise PresetError("없는 API 키를 가리킵니다")
+            out[field] = ref
         elif field == "reasoning":
             level = str(raw).strip().lower()
             if level not in REASONING_LEVELS:
@@ -244,34 +317,39 @@ def save(name: str, values: dict, preset_id: str | None = None) -> dict:
     # Editing the selected preset has to reach the agent immediately. Saving
     # and then having to press 선택 again would be a trap: the panel would show
     # the new value while the agent kept using the old one.
-    if not selected_id():
-        _set_selected(pid)
-    if selected_id() == pid:
-        config.update({"agent": {f: v[f] for f in FIELDS}})
+    kind = v["kind"]
+    if kind == "general" and not selected_id("general"):
+        _set_selected(pid, "general")
+    if selected_id(kind) == pid:
+        _apply_to_config(get(pid) or {**v, "kind": kind})
     out = _public(get(pid) or {})
-    out["selected"] = selected_id() == pid
+    out["selected"] = selected_id(kind) == pid
     return out
 
 
 def _insert(pid: str, label: str, v: dict, now: float) -> None:
     db.execute(
         "INSERT INTO agent_presets(id, name, base_url, api_key, model, temperature, "
-        "max_tokens, reasoning, cache, flex, instructions, created_at, updated_at) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) "
+        "max_tokens, reasoning, cache, flex, instructions, kind, key_ref, created_at, updated_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
         "ON CONFLICT(id) DO UPDATE SET name=excluded.name, base_url=excluded.base_url, "
         "api_key=excluded.api_key, model=excluded.model, temperature=excluded.temperature, "
         "max_tokens=excluded.max_tokens, reasoning=excluded.reasoning, cache=excluded.cache, "
-        "flex=excluded.flex, instructions=excluded.instructions, updated_at=excluded.updated_at",
+        "flex=excluded.flex, instructions=excluded.instructions, kind=excluded.kind, "
+        "key_ref=excluded.key_ref, updated_at=excluded.updated_at",
         (pid, label, v["baseUrl"], v["apiKey"], v["model"], v["temperature"],
          v["maxTokens"], v["reasoning"], int(v["cache"]), int(v["flex"]),
-         v["instructions"], now, now),
+         v["instructions"], v["kind"], v["keyRef"], now, now),
     )
 
 
-def capture(name: str) -> dict:
+def capture(name: str, kind: str = "general") -> dict:
     """Save the settings the agent is using right now as a preset."""
-    cur = config.section("agent")
-    return save(name, {f: cur.get(f, d) for f, d in FIELDS.items()})
+    cur = config.section(SECTION.get(kind, "agent"))
+    values = {f: cur.get(f, d) for f, d in FIELDS.items()}
+    values["kind"] = kind if kind in KINDS else "general"
+    values["keyRef"] = ""
+    return save(name, values)
 
 
 def apply(preset_id: str) -> dict:
@@ -281,20 +359,24 @@ def apply(preset_id: str) -> dict:
 
 
 def delete(preset_id: str) -> dict:
-    if get(preset_id) is None:
+    p = get(preset_id)
+    if p is None:
         raise PresetError("없는 프리셋입니다")
-    if len(db.query("SELECT id FROM agent_presets")) <= 1:
-        # There is always one selected preset, so the last one cannot go. The
-        # alternative is a panel with nothing to show and an agent configured
-        # from a row that no longer exists.
-        raise PresetError("마지막 프리셋은 지울 수 없습니다. 새로 하나 만든 뒤에 지워 주세요")
-    was_selected = selected_id() == preset_id
+    kind = p["kind"]
+    if kind == "general" and len(db.query("SELECT id FROM agent_presets WHERE kind = 'general'")) <= 1:
+        # There is always one selected general preset, so the last one cannot
+        # go. The alternative is a panel with nothing to show and an agent
+        # configured from a row that no longer exists.
+        raise PresetError("마지막 일반 프리셋은 지울 수 없습니다. 새로 하나 만든 뒤에 지워 주세요")
+    was_selected = selected_id(kind) == preset_id
     db.execute("DELETE FROM agent_presets WHERE id = ?", (preset_id,))
     if was_selected:
-        row = db.one("SELECT id FROM agent_presets ORDER BY name COLLATE NOCASE LIMIT 1")
+        row = db.one("SELECT id FROM agent_presets WHERE kind = ? ORDER BY name COLLATE NOCASE LIMIT 1", (kind,))
         if row is not None:
             select(row["id"])
-    return {"deleted": preset_id, "selectedId": selected_id()}
+        elif kind != "general":
+            deselect(kind)
+    return {"deleted": preset_id, "kind": kind, "selectedId": selected_id(kind)}
 
 
 def model_settings() -> dict[str, Any]:

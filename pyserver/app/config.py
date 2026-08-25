@@ -176,6 +176,22 @@ DEFAULTS: dict[str, Any] = {
         # to the transcript".
         "instructions": "",
     },
+    # The search agent: a second, smaller model the general agent hands a
+    # research question to (agent.web_research). Same keys as `agent`;
+    # presets of kind 'search' fill it. Empty = the general agent searches
+    # on its own with the web_search tool, as before.
+    "agent_search": {
+        "baseUrl": "",
+        "apiKey": "",
+        "model": "",
+        "temperature": 0.2,
+        "maxTokens": 16000,
+        "timeoutSeconds": 180,
+        "reasoning": "",
+        "cache": False,
+        "flex": False,
+        "instructions": "",
+    },
     "websearch": {
         "provider": "",          # brave | tavily | serper | searxng | google-cse
         "apiKey": "",

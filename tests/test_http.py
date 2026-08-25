@@ -1782,6 +1782,74 @@ def test_card_assets(s: Server, cw: dict) -> None:
     check("reset brings it back", len(body.get("items") or []) == 1)
 
 
+def test_keys_and_agent_kinds(s: Server) -> None:
+    """API keys apart from presets; two agent kinds, one selected each; the
+    search kind may run with none. The agent reads config sections the
+    presets fill, so what lands in config is what is asserted."""
+    print("test_keys_and_agent_kinds")
+    st, body = s.post("/keys/save", {"values": {"name": "게이트웨이", "provider": "vercel",
+                                                "baseUrl": "https://gw.example/v1/", "apiKey": "sk-gw-123456"}})
+    check("a key is saved with its shape, not its value", st == 200
+          and body["key"]["apiKey"] == {"set": True, "length": 12} and body["key"]["baseUrl"] == "https://gw.example/v1",
+          str(body)[:200])
+    kid = body["key"]["id"]
+    st, body = s.get("/keys")
+    check("keys are listed", any(k["id"] == kid for k in body.get("keys") or []))
+
+    # A general preset borrowing the key: config.agent gets the resolved pair.
+    st, body = s.post("/presets/save", {"name": "키참조", "values": {
+        "model": "gpt-x", "keyRef": kid, "kind": "general", "apiKey": ""}})
+    check("a preset may point at a key", st == 200 and body["preset"]["keyRef"] == kid, str(body)[:200])
+    pid = body["preset"]["id"]
+    st, body = s.post("/presets/select", {"id": pid})
+    st, cfg = s.get("/config")
+    a = (cfg.get("config") or {}).get("agent") or {}
+    check("selecting it resolves base URL and key into config.agent",
+          a.get("baseUrl") == "https://gw.example/v1" and a.get("apiKey", {}).get("length") == 12
+          and a.get("model") == "gpt-x", str(a)[:200])
+
+    # Rotating the key reaches the running agent without touching the preset.
+    st, body = s.post("/keys/save", {"id": kid, "values": {"name": "게이트웨이", "apiKey": "sk-gw-abcdefghij"}})
+    st, cfg = s.get("/config")
+    check("a rotated key is re-resolved", ((cfg.get("config") or {}).get("agent") or {}).get("apiKey", {}).get("length") == 16,
+          str(cfg)[:200])
+    st, body = s.post("/keys/delete", {"id": kid})
+    check("a key in use cannot be deleted", st == 400 and "프리셋" in body.get("error", ""), str(body)[:120])
+    st, body = s.post("/presets/save", {"name": "키참조", "values": {"keyRef": "nope"}, "id": pid})
+    check("an unknown key ref is refused", st == 400, str(st))
+
+    # The search kind: its own selection, its own config section, may be none.
+    st, body = s.get("/presets")
+    check("no search preset selected at first", body.get("selectedSearch") is None and body.get("kinds") == ["general", "search"],
+          str(body.get("selectedSearch"))[:80])
+    st, body = s.post("/presets/save", {"name": "검색용", "values": {
+        "kind": "search", "baseUrl": "https://s.example/v1", "apiKey": "sk-s-1", "model": "gemini-x"}})
+    check("a search preset saves under its kind", st == 200 and body["preset"]["kind"] == "search" and not body["preset"]["selected"],
+          str(body)[:200])
+    sid = body["preset"]["id"]
+    st, body = s.post("/presets/select", {"id": sid})
+    check("selecting it does not disturb the general selection", body.get("kind") == "search")
+    st, body = s.get("/presets")
+    check("both kinds show their own selection",
+          (body.get("selected") or {}).get("id") == pid and (body.get("selectedSearch") or {}).get("id") == sid,
+          str(body.get("selected", {}).get("name")) + " / " + str((body.get("selectedSearch") or {}).get("name")))
+    st, cfg = s.get("/config")
+    check("config.agent_search is filled", ((cfg.get("config") or {}).get("agent_search") or {}).get("model") == "gemini-x",
+          str((cfg.get("config") or {}).get("agent_search"))[:160])
+    st, body = s.post("/presets/deselect", {"kind": "search"})
+    st, cfg = s.get("/config")
+    check("deselecting the search agent empties its section",
+          ((cfg.get("config") or {}).get("agent_search") or {}).get("model") == "", str(cfg)[:160])
+    st, body = s.post("/presets/deselect", {"kind": "general"})
+    check("the general agent cannot be deselected", st == 400, str(st))
+    st, body = s.post("/presets/delete", {"id": sid})
+    check("a search preset can be deleted even when it is the last of its kind", st == 200, str(body)[:120])
+
+    # The catalog answers even offline: an empty result, never a 500.
+    st, body = s.get(q("/models/catalog", q="gemini"))
+    check("the model catalog route answers", st == 200 and "models" in body and "providers" in body, str(body)[:160])
+
+
 def test_loopback_exemption() -> None:
     """With RISUELF_REQUIRE_TOKEN off, a loopback caller needs no token.
 
@@ -1835,6 +1903,7 @@ def main() -> int:
         test_global_lore_decoupled_reset(s, cw)
         test_agent_presets(s)
         test_preset_selection(s)
+        test_keys_and_agent_kinds(s)
         test_skills(s)
         test_script_skills(s)
         test_reference_skills(s)

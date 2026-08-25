@@ -1,22 +1,26 @@
 /**
- * The agent's configuration, as one selected preset.
+ * The agents' configuration, as two selected presets.
  *
- * The settings tab shows exactly one preset - the one the agent is running -
- * and nothing else. Everything that used to sit on that page (base URL, model,
- * key, budgets) is now inside that preset, reachable through 수정.
+ * Two sections, one per kind. 일반 is the editing agent - tools, scripts,
+ * proposals - and always has exactly one preset selected. 검색 is the
+ * research agent the general one hands questions to (web_research); it may
+ * have none, in which case the general agent searches on its own with the
+ * raw web_search tool as before. Splitting them lets a cheap, grounded model
+ * do the searching while the capable one does the editing.
  *
- * That is a real simplification, not a rearrangement: the page previously
- * showed a form *and* a list of saved copies of that form, which meant two
- * things on screen that both looked like the current settings. Now there is one
- * current thing, and the list is behind a button.
+ * A preset carries its own base URL and key, or points at an entry on the
+ * API 키 page (keyRef) - the one place a rotated key has to be typed.
  *
- * The list and the editor are modals rather than inline sections because both
- * are whole tasks. An editor with ten fields unfolding inside a settings page
- * pushes everything else off screen and leaves the user unsure whether their
- * half-typed key is saved.
+ * The list and the editor are modals rather than inline sections because
+ * both are whole tasks. An editor with a dozen fields unfolding inside a
+ * settings page pushes everything else off screen.
  */
-import { el, clear, armed, modal, setSelected, selectedValue } from './dom';
-import { state, type AgentPreset } from '../state';
+import { el, clear, armed, modal, setSelected, selectedValue, popover } from './dom';
+import { state, type AgentPreset, type ApiKeyEntry, type CatalogModel } from '../state';
+
+type Kind = 'general' | 'search';
+
+const KIND_LABEL: Record<Kind, string> = { general: '일반 에이전트', search: '검색 에이전트' };
 
 const REASONING_LABEL: Record<string, string> = {
   '': '보내지 않음',
@@ -30,48 +34,60 @@ const REASONING_LABEL: Record<string, string> = {
 };
 
 export interface PresetsCardOptions {
-  /** Called whenever the selected preset changes, so dependent UI can refresh. */
+  /** Called whenever a selected preset changes, so dependent UI can refresh. */
   onChanged: () => void | Promise<void>;
 }
 
 export function buildPresetsCard(opts: PresetsCardOptions): HTMLElement {
-  const currentMount = el('div');
+  const generalMount = el('div');
+  const searchMount = el('div');
   const out = el('div');
-
   const say = (text: string, kind: 'ok' | 'err' | '' = '') => {
     clear(out);
     out.appendChild(el('div', { class: 'notice ' + kind, text }));
   };
 
   const refresh = async (): Promise<void> => {
-    clear(currentMount);
-    currentMount.appendChild(el('div', { class: 'hint', text: '읽는 중입니다…' }));
+    clear(generalMount);
+    clear(searchMount);
+    generalMount.appendChild(el('div', { class: 'hint', text: '읽는 중입니다…' }));
     try {
       const r = await state.presets();
-      clear(currentMount);
-      currentMount.appendChild(currentRow(r.selected, r.presets.length));
+      clear(generalMount);
+      clear(searchMount);
+      const general = r.presets.filter((p) => p.kind === 'general');
+      const search = r.presets.filter((p) => p.kind === 'search');
+      generalMount.appendChild(currentRow('general', r.selected, general.length));
+      searchMount.appendChild(currentRow('search', r.selectedSearch, search.length));
     } catch (e) {
-      clear(currentMount);
-      currentMount.appendChild(el('div', { class: 'notice err', text: msg(e) }));
+      clear(generalMount);
+      generalMount.appendChild(el('div', { class: 'notice err', text: msg(e) }));
     }
     await opts.onChanged();
   };
 
-  const currentRow = (p: AgentPreset | null, total: number): HTMLElement => {
-    if (!p) {
-      return el('div', { class: 'hint', text: '프리셋이 없습니다. 새로 하나 만들어 주세요.' });
-    }
+  const currentRow = (kind: Kind, p: AgentPreset | null, total: number): HTMLElement => {
     const pick = el('button', { class: 'ghost', text: `선택 (${total})`, title: '저장된 프리셋 목록' });
-    pick.addEventListener('click', () => openPicker(refresh, say));
-
+    pick.addEventListener('click', () => openPicker(kind, refresh, say));
+    if (!p) {
+      const add = el('button', { class: 'primary', text: '새 프리셋' });
+      add.addEventListener('click', () => openEditor(kind, null, refresh, say));
+      return el('div', { class: 'presetnow' }, [
+        el('div', { class: 'grow' }, [
+          el('div', { class: 'hint', text: kind === 'search'
+            ? '검색 에이전트가 없습니다 — 일반 에이전트가 직접 web_search 로 검색합니다.'
+            : '프리셋이 없습니다. 새로 하나 만들어 주세요.' }),
+        ]),
+        total ? pick : null, add,
+      ]);
+    }
     const edit = el('button', { class: 'primary', text: '수정' });
-    edit.addEventListener('click', () => openEditor(p.id, refresh, say));
-
-    return el('div', { class: 'presetnow' }, [
+    edit.addEventListener('click', () => openEditor(kind, p.id, refresh, say));
+    const row = el('div', { class: 'presetnow' }, [
       el('div', { class: 'grow' }, [
         el('div', { class: 'presetnow-name' }, [
           el('span', { text: p.name }),
-          !p.apiKey?.set
+          !p.apiKey?.set && !p.keyRef
             ? el('span', { class: 'badge warn', style: { marginLeft: '6px' }, text: '키 없음' })
             : null,
         ]),
@@ -79,10 +95,15 @@ export function buildPresetsCard(opts: PresetsCardOptions): HTMLElement {
       ]),
       pick, edit,
     ]);
+    if (kind === 'search') {
+      const off = el('button', { class: 'ghost tiny', text: '해제', title: '검색 에이전트를 끄고 일반 에이전트가 직접 검색하게 합니다' });
+      off.addEventListener('click', async () => {
+        try { await state.deselectPreset('search'); await refresh(); say('검색 에이전트를 껐습니다.', 'ok'); } catch (e) { say(msg(e), 'err'); }
+      });
+      row.appendChild(off);
+    }
+    return row;
   };
-
-  const addBtn = el('button', { class: 'ghost', text: '새 프리셋' });
-  addBtn.addEventListener('click', () => openEditor(null, refresh, say));
 
   const testBtn = el('button', { class: 'ghost', text: '연결 테스트' });
   testBtn.addEventListener('click', async () => {
@@ -112,20 +133,31 @@ export function buildPresetsCard(opts: PresetsCardOptions): HTMLElement {
   });
 
   void refresh();
-
-  return el('div', { class: 'card' }, [
-    el('h2', { text: 'AI 에이전트 프리셋' }),
-    currentMount,
-    el('div', { class: 'row' }, [addBtn, testBtn]),
-    out,
-    el('div', { class: 'hint', style: { marginTop: '8px' } }, [
-      '테스트는 일반 응답과 툴 호출을 따로 확인합니다. 툴 호출이 안 되면 에이전트가 동작할 수 없습니다.',
+  return el('div', {}, [
+    el('div', { class: 'card' }, [
+      el('h2', { text: '일반 에이전트' }),
+      el('div', { class: 'hint', style: { marginBottom: '8px' }, text: '챗·카드를 읽고 고치는 에이전트입니다. 툴과 파이썬 스크립트를 씁니다. 항상 하나가 선택되어 있습니다.' }),
+      generalMount,
+      el('div', { class: 'row', style: { marginTop: '8px' } }, [testBtn]),
+      out,
+      el('div', { class: 'hint', style: { marginTop: '8px' } }, [
+        '테스트는 일반 응답과 툴 호출을 따로 확인합니다. 툴 호출이 안 되면 에이전트가 동작할 수 없습니다.',
+      ]),
+    ]),
+    el('div', { class: 'card' }, [
+      el('h2', { text: '검색 에이전트' }),
+      el('div', { class: 'hint', style: { marginBottom: '8px' } }, [
+        '일반 에이전트가 조사가 필요할 때 web_research 로 부르는 별도 에이전트입니다. 웹 검색 툴만 갖고, 스크립트는 쓰지 않습니다. ',
+        '검색에 강한 저렴한 모델 — Google Gemini(검색 그라운딩) 를 권합니다. 없으면 일반 에이전트가 직접 검색합니다.',
+      ]),
+      searchMount,
     ]),
   ]);
 }
 
 function summarise(p: AgentPreset): string {
   const bits = [p.model || '모델 미설정'];
+  if (p.keyRef) bits.push('API 키 탭의 키');
   if (p.reasoning) bits.push('reasoning ' + p.reasoning);
   if (p.cache) bits.push('캐시');
   if (p.flex) bits.push('Flex');
@@ -136,7 +168,7 @@ function summarise(p: AgentPreset): string {
 
 // --- the picker ---------------------------------------------------------------
 
-function openPicker(refresh: () => Promise<void>, say: (t: string, k?: 'ok' | 'err' | '') => void): void {
+function openPicker(kind: Kind, refresh: () => Promise<void>, say: (t: string, k?: 'ok' | 'err' | '') => void): void {
   const listMount = el('div');
   const body = el('div', {}, [
     el('div', { class: 'hint', style: { marginBottom: '8px' } }, [
@@ -144,19 +176,20 @@ function openPicker(refresh: () => Promise<void>, say: (t: string, k?: 'ok' | 'e
     ]),
     listMount,
   ]);
-  const close = modal('프리셋 선택', body);
+  const close = modal(`${KIND_LABEL[kind]} 프리셋 선택`, body);
 
   const draw = async () => {
     clear(listMount);
     listMount.appendChild(el('div', { class: 'hint', text: '읽는 중입니다…' }));
     try {
       const r = await state.presets();
+      const mine = r.presets.filter((p) => p.kind === kind);
       clear(listMount);
-      for (const p of r.presets) listMount.appendChild(row(p, r.presets.length));
+      for (const p of mine) listMount.appendChild(row(p, mine.length));
       const add = el('button', { class: 'primary', text: '새 프리셋 추가', style: { marginTop: '10px' } });
       add.addEventListener('click', () => {
         close();
-        openEditor(null, refresh, say);
+        openEditor(kind, null, refresh, say);
       });
       listMount.appendChild(add);
     } catch (e) {
@@ -170,7 +203,7 @@ function openPicker(refresh: () => Promise<void>, say: (t: string, k?: 'ok' | 'e
       el('div', { class: 'pickname' }, [
         el('span', { text: p.name }),
         p.selected ? el('span', { class: 'badge ok', text: '사용 중' }) : null,
-        !p.apiKey?.set ? el('span', { class: 'badge warn', text: '키 없음' }) : null,
+        !p.apiKey?.set && !p.keyRef ? el('span', { class: 'badge warn', text: '키 없음' }) : null,
       ]),
       el('div', { class: 'hint', text: summarise(p) }),
     ]);
@@ -185,13 +218,11 @@ function openPicker(refresh: () => Promise<void>, say: (t: string, k?: 'ok' | 'e
         say(msg(e), 'err');
       }
     });
-
     const edit = el('button', { class: 'ghost tiny', text: '수정' });
     edit.addEventListener('click', () => {
       close();
-      openEditor(p.id, refresh, say);
+      openEditor(kind, p.id, refresh, say);
     });
-
     const del = el('button', { class: 'ghost tiny' });
     armed(del, '삭제', '한 번 더', async () => {
       try {
@@ -199,16 +230,14 @@ function openPicker(refresh: () => Promise<void>, say: (t: string, k?: 'ok' | 'e
         await draw();
         await refresh();
       } catch (e) {
-        // The backend refuses to delete the last one; that is a rule worth
-        // stating in place rather than as a silent no-op.
+        // The backend refuses to delete the last general one; that is a rule
+        // worth stating in place rather than as a silent no-op.
         clear(listMount);
         listMount.appendChild(el('div', { class: 'notice err', text: msg(e) }));
         setTimeout(() => void draw(), 2500);
       }
     });
-    // The delete button is hidden on the only preset rather than shown failing.
-    if (total <= 1) del.style.display = 'none';
-
+    if (kind === 'general' && total <= 1) del.style.display = 'none';
     return el('div', { class: 'pickrow' + (p.selected ? ' on' : '') }, [pickArea, edit, del]);
   };
 
@@ -218,48 +247,63 @@ function openPicker(refresh: () => Promise<void>, say: (t: string, k?: 'ok' | 'e
 // --- the editor ---------------------------------------------------------------
 
 /**
- * One form for both 추가 and 수정.
- *
- * `id === null` means a new preset. Everything else about the form is identical,
- * because the difference between creating and editing is one field's worth of
- * behaviour and duplicating the form would guarantee the two drift.
+ * One form for both 추가 and 수정, and for both kinds - the kind is fixed by
+ * the section the form was opened from. The API key is either typed here or
+ * taken from the API 키 page.
  */
 function openEditor(
+  kind: Kind,
   id: string | null,
   refresh: () => Promise<void>,
   say: (t: string, k?: 'ok' | 'err' | '') => void,
 ): void {
-  const name = el('input', { placeholder: '프리셋 이름 (예: 정밀 · 저렴이)' });
-  const baseUrl = el('input', { placeholder: 'https://ai-gateway.vercel.sh/v1' });
-  const model = el('input', { placeholder: 'google/gemini-3.7-flash' });
+  const name = el('input', { placeholder: kind === 'search' ? '프리셋 이름 (예: Gemini 검색)' : '프리셋 이름 (예: 정밀 · 저렴이)' });
+  const baseUrl = el('input', { placeholder: kind === 'search' ? 'https://generativelanguage.googleapis.com/v1beta/openai' : 'https://ai-gateway.vercel.sh/v1' });
+  const model = el('input', { placeholder: kind === 'search' ? 'gemini-2.5-flash' : 'google/gemini-3.7-flash' });
+  const keySel = el('select') as HTMLSelectElement;
   const apiKey = el('input', { type: 'password', placeholder: '(변경할 때만 입력)' });
   const keyNote = el('span', { class: 'hint' });
-  const maxTokens = el('input', { placeholder: '32000' });
+  const ownKeyRow = el('label', { class: 'field' }, [el('span', { text: 'API Key (직접 입력)' }), apiKey, keyNote]);
+  const maxTokens = el('input', { placeholder: kind === 'search' ? '16000' : '32000' });
   const temperature = el('input', { placeholder: '0.2' });
   const reasoning = reasoningSelect();
   const cache = el('input', { type: 'checkbox' });
   const flex = el('input', { type: 'checkbox' });
   const instructions = el('textarea', {
-    placeholder: '에이전트가 항상 지킬 지침을 적어 주세요. 비워 두셔도 됩니다.',
+    placeholder: kind === 'search'
+      ? '검색 에이전트가 지킬 지침 (예: 한국어 자료 우선, 출처 3개 이상). 비워 두셔도 됩니다.'
+      : '에이전트가 항상 지킬 지침을 적어 주세요. 비워 두셔도 됩니다.',
     style: { minHeight: '110px' },
   });
   const instCount = el('div', { class: 'hint' });
   const out = el('div');
   let keepSentinel = '__keep__';
+  let keys: ApiKeyEntry[] = [];
 
-  const syncCount = () => {
-    instCount.textContent = `${instructions.value.length}자`;
-  };
+  const syncCount = () => { instCount.textContent = `${instructions.value.length}자`; };
   instructions.addEventListener('input', syncCount);
   syncCount();
+  const syncKeyRow = () => { ownKeyRow.style.display = selectedValue(keySel) ? 'none' : ''; };
+  keySel.addEventListener('change', syncKeyRow);
+
+  const catalogBtn = el('button', { class: 'ghost tiny', text: '카탈로그에서 찾기', title: 'models.dev 에서 프로바이더·모델을 찾아 채웁니다' });
+  catalogBtn.addEventListener('click', () => openCatalogPicker(catalogBtn, (m, api) => {
+    model.value = m.id;
+    if (api && !baseUrl.value) baseUrl.value = api;
+  }));
 
   const load = async () => {
     try {
       const r = await state.presets();
       keepSentinel = r.keepSentinel || keepSentinel;
+      keys = r.keys ?? [];
+      clear(keySel);
+      keySel.appendChild(el('option', { value: '', text: '직접 입력' }));
+      for (const k of keys) keySel.appendChild(el('option', { value: k.id, text: `${k.name}${k.provider ? ' · ' + k.provider : ''}` }));
       const p = id ? r.presets.find((x) => x.id === id) : null;
       if (!p) {
         keyNote.textContent = '설정되지 않음';
+        syncKeyRow();
         return;
       }
       name.value = p.name;
@@ -268,10 +312,12 @@ function openEditor(
       maxTokens.value = String(p.maxTokens);
       temperature.value = String(p.temperature);
       setSelected(reasoning, p.reasoning || '');
+      setSelected(keySel, p.keyRef || '');
       cache.checked = p.cache;
       flex.checked = p.flex;
       instructions.value = p.instructions || '';
       syncCount();
+      syncKeyRow();
       keyNote.textContent = p.apiKey?.set
         ? `설정됨 (${p.apiKey.length}자) — 바꾸려면 새로 입력`
         : '설정되지 않음';
@@ -282,12 +328,21 @@ function openEditor(
 
   const save = el('button', { class: 'primary', text: '저장' });
   const cancel = el('button', { class: 'ghost', text: '취소' });
-
   const body = el('div', {}, [
     el('label', { class: 'field' }, [el('span', { text: '이름' }), name]),
+    el('label', { class: 'field' }, [el('span', { text: 'API 키' }), keySel]),
+    el('div', { class: 'hint', style: { marginTop: '-4px', marginBottom: '10px' } }, [
+      'API 키 탭에 저장한 키를 고르거나, 직접 입력합니다. 키 탭의 키를 고르면 Base URL 이 비어 있을 때 그 키의 URL 을 씁니다.',
+    ]),
+    ownKeyRow,
     el('label', { class: 'field' }, [el('span', { text: 'Base URL' }), baseUrl]),
-    el('label', { class: 'field' }, [el('span', { text: 'Model' }), model]),
-    el('label', { class: 'field' }, [el('span', { text: 'API Key' }), apiKey, keyNote]),
+    el('label', { class: 'field' }, [
+      el('span', {}, [el('span', { text: 'Model ' }), catalogBtn]), model,
+    ]),
+    kind === 'search'
+      ? el('div', { class: 'notice', style: { marginBottom: '10px' }, text:
+        '검색 에이전트에는 검색에 강하고 저렴한 모델을 권합니다 — Google Gemini(예: gemini-2.5-flash, OpenAI 호환 엔드포인트 …/v1beta/openai). 웹 검색 프로바이더는 연결 탭에서 설정합니다.' })
+      : null,
     el('div', { class: 'row' }, [
       el('label', { class: 'field grow' }, [el('span', { text: '최대 출력 토큰' }), maxTokens]),
       el('label', { class: 'field grow' }, [el('span', { text: 'temperature' }), temperature]),
@@ -314,14 +369,15 @@ function openEditor(
     out,
     el('div', { class: 'row' }, [save, cancel]),
   ]);
-
-  const close = modal(id ? '프리셋 수정' : '새 프리셋', body, { wide: true });
+  const close = modal(`${KIND_LABEL[kind]} — ${id ? '프리셋 수정' : '새 프리셋'}`, body, { wide: true });
   cancel.addEventListener('click', close);
 
   save.addEventListener('click', async () => {
     save.disabled = true;
     try {
       const saved = await state.savePreset(name.value, {
+        kind,
+        keyRef: selectedValue(keySel),
         baseUrl: baseUrl.value,
         model: model.value,
         // Leave the stored key alone unless a new one was typed.
@@ -333,9 +389,6 @@ function openEditor(
         flex: flex.checked,
         instructions: instructions.value,
       }, id ?? undefined);
-      // A brand-new preset is not selected by itself; making it current is
-      // almost always why it was created, so offer it as the next click rather
-      // than leaving the user to reopen the picker.
       close();
       await refresh();
       if (!id && !saved.selected) {
@@ -352,6 +405,44 @@ function openEditor(
   });
 
   void load();
+}
+
+/**
+ * models.dev, searched through the backend's cache: pick a model and the
+ * form takes its id (and the provider's API base when the URL is empty).
+ */
+export function openCatalogPicker(anchor: HTMLElement, onPick: (m: CatalogModel, api: string) => void): void {
+  const input = el('input', { placeholder: '프로바이더나 모델 이름 (예: gemini, anthropic, gpt-5)' }) as HTMLInputElement;
+  const list = el('div', { class: 'cataloglist' });
+  const body = el('div', { class: 'applypop catalogpop' }, [el('div', { class: 'row' }, [input]), list]);
+  const close = popover(anchor, body);
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const run = async () => {
+    const q = input.value.trim();
+    clear(list);
+    if (q.length < 2) { list.appendChild(el('div', { class: 'hint', text: '두 글자 이상 입력하세요.' })); return; }
+    list.appendChild(el('div', { class: 'hint', text: '찾는 중…' }));
+    try {
+      const r = await state.modelCatalog(q);
+      clear(list);
+      const apiOf = new Map(r.providers.map((p) => [p.id, p.api]));
+      if (!r.models.length) list.appendChild(el('div', { class: 'hint', text: '없습니다.' }));
+      for (const m of r.models.slice(0, 40)) {
+        const b = el('button', { class: 'catrow' }, [
+          el('span', { class: 'grow', text: `${m.id}` }),
+          el('span', { class: 'hint', text: `${m.provider}${m.context ? ' · ' + Math.round(m.context / 1000) + 'k' : ''}${m.costIn != null ? ' · $' + m.costIn + '/' + m.costOut : ''}` }),
+        ]);
+        b.addEventListener('click', () => { onPick(m, apiOf.get(m.provider) || ''); close(); });
+        list.appendChild(b);
+      }
+      if (r.truncated) list.appendChild(el('div', { class: 'hint', text: '더 있습니다 — 검색어를 좁혀 주세요.' }));
+    } catch (e) {
+      clear(list);
+      list.appendChild(el('div', { class: 'notice err', text: msg(e) }));
+    }
+  };
+  input.addEventListener('input', () => { if (timer) clearTimeout(timer); timer = setTimeout(() => void run(), 300); });
+  setTimeout(() => input.focus(), 0);
 }
 
 /** The reasoning selector. */

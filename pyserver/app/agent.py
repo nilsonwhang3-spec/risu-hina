@@ -780,7 +780,68 @@ def build() -> Agent[Deps]:
     if websearch.configured():
         @agent.tool
         def web_search(ctx: RunContext[Deps], query: str) -> str:
-            """웹 검색. 원작 설정 확인 등 외부 사실이 필요할 때만."""
+            """웹 검색(원시 결과). 원작 설정 확인 등 외부 사실이 필요할 때만."""
             return websearch.search(query)
 
+    if search_agent_ready():
+        @agent.tool
+        async def web_research(ctx: RunContext[Deps], question: str) -> str:
+            """검색 에이전트에게 조사를 맡긴다 — 검색하고 읽고 정리한 답을 돌려준다.
+
+            원작 설정·시대 고증·용어처럼 외부 사실이 여럿 얽힌 질문에 쓴다. 한 번의
+            web_search 로 끝날 단순 확인은 web_search 가 싸다.
+            """
+            return await research(question)
+
     return agent
+
+
+# --- the search agent ---------------------------------------------------------
+
+def search_agent_ready() -> bool:
+    cfg = config.section("agent_search")
+    return bool(cfg.get("baseUrl") and cfg.get("apiKey") and cfg.get("model"))
+
+
+SEARCH_INSTRUCTIONS = """\
+당신은 조사 담당이다. 질문을 받으면 web_search 로 찾고, 여러 출처를 대조해 사실 위주로
+답한다. 모르면 모른다고 하고, 출처 URL 을 답 끝에 붙인다. 카드나 챗을 고치는 일은
+당신의 몫이 아니다 — 물어본 것에만 답한다. 한국어로 답한다.
+"""
+
+
+def _search_model() -> OpenAIChatModel:
+    cfg = config.section("agent_search")
+    base = (cfg.get("baseUrl") or "").rstrip("/")
+    return OpenAIChatModel(cfg.get("model") or "", provider=OpenAIProvider(base_url=base, api_key=cfg.get("apiKey") or ""))
+
+
+async def research(question: str) -> str:
+    """Run the search agent once, with the web as its only tool."""
+    if not search_agent_ready():
+        return "검색 에이전트가 설정되지 않았습니다 (설정 → 에이전트 → 검색 에이전트)"
+    if not websearch.configured():
+        return "웹 검색 프로바이더가 설정되지 않았습니다 (설정 → 연결)"
+    cfg = config.section("agent_search")
+    settings: dict[str, Any] = {
+        "temperature": float(cfg.get("temperature") or 0.2),
+        "max_tokens": int(cfg.get("maxTokens") or 16000),
+    }
+    extra = str(cfg.get("instructions") or "").strip()
+    sub = Agent(
+        _search_model(),
+        instructions=SEARCH_INSTRUCTIONS + ("\n" + extra if extra else ""),
+        model_settings=settings,  # type: ignore[arg-type]
+    )
+
+    @sub.tool_plain
+    def web_search(query: str) -> str:
+        """웹 검색."""
+        return websearch.search(query)
+
+    try:
+        r = await sub.run(question)
+        return str(r.output)[:20000]
+    except Exception as e:  # noqa: BLE001 - a failed research degrades the turn, never fails it
+        log.warn("search agent failed: %s", e)
+        return f"검색 에이전트가 실패했습니다: {type(e).__name__}: {e}"

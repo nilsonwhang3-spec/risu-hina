@@ -252,6 +252,17 @@ pre.mono {
   display: inline-block; padding: 14px 18px; border-radius: 6px; font-size: 12px;
   color: var(--textcolor2, #79839a); background: rgba(128,128,128,.10);
 }
+/* API key form rows and the model catalog picker. */
+.keyform { border: 1px dashed var(--borderc, #2b323f); border-radius: 6px; padding: 8px; margin: 6px 0; }
+.keyform .row input { flex: 1; min-width: 120px; }
+.catalogpop { min-width: 380px; max-width: 520px; }
+.catalogpop input { width: 100%; }
+.cataloglist { max-height: 320px; overflow-y: auto; margin-top: 6px; }
+.catrow {
+  display: flex; gap: 8px; width: 100%; text-align: left; padding: 5px 6px; border: none;
+  background: transparent; border-radius: 4px; font-size: 12px;
+}
+.catrow:hover { background: rgba(128,128,128,.12); }
 .assetline { gap: 8px; }
 .assetline.err .hint { color: #ef4444; }
 .assetline.warn .hint { color: #f59e0b; }

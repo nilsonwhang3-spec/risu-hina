@@ -1144,7 +1144,7 @@ document.getElementById('open-settings')
   ?.dispatchEvent(new window.Event('click', { bubbles: true }));
 await settle(900);
 check('the gear shows as pressed', document.getElementById('open-settings')?.classList.contains('on'));
-check('settings is split into sub-tabs', document.querySelectorAll('.subtab').length === 4,
+check('settings is split into sub-tabs', document.querySelectorAll('.subtab').length === 5,
       [...document.querySelectorAll('.subtab')].map((t) => t.textContent).join(','));
 check('connection card present', !!findButton(document, '저장하고 연결'));
 check('diagnostic present', !!findButton(document, '연결 진단'));
@@ -1187,8 +1187,12 @@ console.log('\ntest_agent_presets_ui');
   check('수정 opens a modal', !!box);
   check('it has a backdrop', !!document.querySelector('.modalback'));
   check('base instructions are editable', !!box?.querySelector('textarea'));
-  check('reasoning level is settable', !!box?.querySelector('select'));
-  const opts = [...(box?.querySelector('select')?.querySelectorAll('option') || [])]
+  // Two selects now: the API key reference first, then reasoning.
+  const selects = [...(box?.querySelectorAll('select') || [])];
+  check('the API key can be borrowed from the key page', !!selects[0] && /직접 입력/.test(selects[0].textContent || ''));
+  const reasoningSel = selects.find((s) => /high/.test(s.textContent || ''));
+  check('reasoning level is settable', !!reasoningSel);
+  const opts = [...(reasoningSel?.querySelectorAll('option') || [])]
     .map((o) => o.getAttribute('value'));
   check('off means sending nothing', opts.includes('') && opts.includes('high'), opts.join(','));
   check('prompt cache is offered', /프롬프트 캐시/.test(box?.textContent || ''));

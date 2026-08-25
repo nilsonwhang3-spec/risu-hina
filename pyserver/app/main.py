@@ -34,7 +34,7 @@ from starlette.concurrency import run_in_threadpool
 
 from . import (chatfmt, config, db, files, log, presets, session, skills, staging,
                store, websearch, workspace)
-from . import actions, assets, charx, snapshots, updater
+from . import actions, assets, catalog, charx, keys, snapshots, updater
 from . import card as cardmod
 from . import memory as mem
 
@@ -698,7 +698,11 @@ def h_presets(arg: dict) -> dict:
     """
     return {
         "presets": presets.list_all(),
-        "selected": presets.selected(),
+        "selected": presets.selected("general"),
+        # The search agent's, or null: it is allowed to have none.
+        "selectedSearch": presets.selected("search"),
+        "kinds": list(presets.KINDS),
+        "keys": keys.list_all(),
         "keepSentinel": config.KEEP,
         "reasoningLevels": list(presets.REASONING_LEVELS),
         "maxInstructions": presets.MAX_INSTRUCTIONS,
@@ -728,7 +732,7 @@ def h_preset_save(arg: dict) -> dict:
 def h_preset_capture(arg: dict) -> dict:
     """Save whatever the agent is configured with right now under a name."""
     try:
-        return {"preset": presets.capture(str(arg.get("name") or ""))}
+        return {"preset": presets.capture(str(arg.get("name") or ""), str(arg.get("kind") or "general"))}
     except presets.PresetError as e:
         raise ApiError(400, str(e))
 
@@ -746,6 +750,41 @@ def h_preset_delete(arg: dict) -> dict:
     except presets.PresetError as e:
         # "the last preset cannot go" is a rule, not a missing row.
         raise ApiError(404 if "없는" in str(e) else 400, str(e))
+
+
+def h_preset_deselect(arg: dict) -> dict:
+    try:
+        return presets.deselect(str(arg.get("kind") or "search"))
+    except presets.PresetError as e:
+        raise ApiError(400, str(e))
+
+
+# --- API keys ---------------------------------------------------------------------
+
+def h_keys(arg: dict) -> dict:
+    return {"keys": keys.list_all(), "keepSentinel": config.KEEP}
+
+
+def h_key_save(arg: dict) -> dict:
+    values = arg.get("values")
+    try:
+        return {"key": keys.save(values if isinstance(values, dict) else {}, str(arg.get("id") or "") or None)}
+    except keys.KeyError_ as e:
+        raise ApiError(400, str(e))
+
+
+def h_key_delete(arg: dict) -> dict:
+    try:
+        return keys.delete(str(arg.get("id") or ""))
+    except keys.KeyError_ as e:
+        raise ApiError(404 if "없는" in str(e) else 400, str(e))
+
+
+# --- model catalog (models.dev) -------------------------------------------------------
+
+def h_models_catalog(arg: dict) -> dict:
+    return catalog.search(str(arg.get("q") or ""), provider=str(arg.get("provider") or ""),
+                          refresh=str(arg.get("refresh") or "") in ("1", "true"))
 
 
 def h_skills(arg: dict) -> dict:
@@ -1449,6 +1488,11 @@ ROUTES: dict[str, Handler] = {
     "POST /presets/save": h_preset_save,
     "POST /presets/capture": h_preset_capture,
     "POST /presets/apply": h_preset_apply,
+    "POST /presets/deselect": h_preset_deselect,
+    "GET /keys": h_keys,
+    "POST /keys/save": h_key_save,
+    "POST /keys/delete": h_key_delete,
+    "GET /models/catalog": h_models_catalog,
     "POST /presets/select": h_preset_select,
     "POST /presets/delete": h_preset_delete,
 

@@ -171,9 +171,33 @@ export interface AgentPreset {
   instructions: string;
   /** Never the key itself - only whether one is stored and how long it is. */
   apiKey: { set: boolean; length: number };
-  /** Exactly one preset carries this, and it is what the agent runs. */
+  /** general = the editing agent; search = the research agent it delegates to. */
+  kind: 'general' | 'search';
+  /** An API key entry to borrow credentials from; '' = this preset's own. */
+  keyRef: string;
+  /** One preset per kind carries this. */
   selected?: boolean;
   updatedAt: number;
+}
+
+export interface ApiKeyEntry {
+  id: string;
+  name: string;
+  provider: string;
+  baseUrl: string;
+  note: string;
+  apiKey: { set: boolean; length: number };
+  updatedAt: number;
+}
+
+export interface CatalogModel {
+  provider: string; id: string; name: string; reasoning: boolean; toolCall: boolean;
+  context: number | null; output: number | null; costIn: number | null; costOut: number | null; releaseDate: string;
+}
+export interface CatalogProvider { id: string; name: string; api: string; doc: string; env: string[]; models: number }
+export interface CatalogResult {
+  providers: CatalogProvider[]; models: CatalogModel[]; truncated: boolean;
+  totalProviders: number; cachedAt: number; stale: boolean; source: string;
 }
 
 /**
@@ -882,6 +906,9 @@ class AppState {
   async presets(): Promise<{
     presets: AgentPreset[];
     selected: AgentPreset | null;
+    selectedSearch: AgentPreset | null;
+    kinds: string[];
+    keys: ApiKeyEntry[];
     reasoningLevels: string[];
     keepSentinel: string;
     maxInstructions: number;
@@ -912,6 +939,31 @@ class AppState {
 
   async deletePreset(id: string): Promise<void> {
     await transport.post('/presets/delete', { id });
+  }
+
+  /** Only the search agent may run without a preset. */
+  async deselectPreset(kind: 'search'): Promise<void> {
+    await transport.post('/presets/deselect', { kind });
+  }
+
+  // --- API keys ---------------------------------------------------------------
+
+  async apiKeys(): Promise<{ keys: ApiKeyEntry[]; keepSentinel: string }> {
+    return await transport.get('/keys');
+  }
+
+  async saveApiKey(values: Record<string, unknown>, id?: string): Promise<ApiKeyEntry> {
+    const r = await transport.post<{ key: ApiKeyEntry }>('/keys/save', { values, id });
+    return r.key;
+  }
+
+  async deleteApiKey(id: string): Promise<void> {
+    await transport.post('/keys/delete', { id });
+  }
+
+  /** models.dev, through the backend's daily cache. */
+  async modelCatalog(q: string, provider = '', refresh = false): Promise<CatalogResult> {
+    return await transport.get('/models/catalog', { q, provider, refresh: refresh ? '1' : '' });
   }
 
   // --- skills ---------------------------------------------------------------

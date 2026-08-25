@@ -7,8 +7,8 @@
  * request being relayed through sv.risuai.xyz instead of reaching the backend
  * at all. Reporting what was actually observed beats guessing.
  */
-import { el, clear } from './dom';
-import { state } from '../state';
+import { el, clear, armed } from './dom';
+import { state, type ApiKeyEntry } from '../state';
 import { buildPresetsCard } from './presets';
 import { buildSkillsCard } from './skills';
 import { agentPanel } from './agentpane';
@@ -43,6 +43,7 @@ export function renderSettingsTab(mount: HTMLElement): void {
 
   const sections: [string, HTMLElement[]][] = [
     ['연결', [buildConnectionCard(), buildAssetsCard(), buildDiagnosticCard(), buildAssetProbeCard()]],
+    ['API 키', [buildKeysCard()]],
     ['에이전트', [buildPresetsCard({
       onChanged: async () => {
         await state.connect();
@@ -52,7 +53,7 @@ export function renderSettingsTab(mount: HTMLElement): void {
       },
     })]],
     ['스킬', [buildSkillsCard()]],
-    ['정보 · 로그', [buildUpdateCard(), buildDebugCard(), aboutMount]],
+    ['정보 · 로그', [buildCatalogCard(), buildUpdateCard(), buildDebugCard(), aboutMount]],
   ];
 
   const bar = el('div', { class: 'subtabs' });
@@ -154,7 +155,10 @@ function buildDiagnosticCard(): HTMLElement {
         text: rows.map(([k, v]) => `${k.padEnd(22)} ${v}`).join('\n'),
       }));
 
-      if (transport.hostPlatform === 'web' && !transport.tokenAttached) {
+      // Only when the probe actually failed: a successful connect has just
+      // proven the route direct and attached the token, and saying otherwise
+      // underneath a green line is exactly the message that would not go away.
+      if (!ok && transport.hostPlatform === 'web' && !transport.tokenAttached) {
         out.appendChild(el('div', { class: 'notice' }, [
           el('div', { text: 'web RisuAI에서 직접 연결이 확인되지 않아 토큰을 보내지 않았습니다.' }),
           el('div', {
@@ -335,6 +339,156 @@ function buildAssetsCard(): HTMLElement {
       '비워 두면 플러그인이 에셋을 읽어 올립니다(웹 계정 사용자는 백엔드가 허브에서 직접 받습니다). ',
       '경로를 주면 백엔드가 risuai.db 를 읽기 전용으로 열어 빠진 에셋을 곧바로 채웁니다.',
     ]),
+  ]);
+}
+
+/**
+ * API 키 - credentials kept apart from presets. A preset points at one of
+ * these (or carries its own); rotating a key happens here, once.
+ */
+function buildKeysCard(): HTMLElement {
+  const listMount = el('div');
+  const out = el('div', { class: 'outbox' });
+  const say = (text: string, kind: 'ok' | 'err' | '' = '') => {
+    clear(out);
+    out.appendChild(el('div', { class: 'notice ' + kind, text }));
+  };
+  let keepSentinel = '__keep__';
+
+  const form = (existing: ApiKeyEntry | null): HTMLElement => {
+    const name = el('input', { value: existing?.name ?? '', placeholder: '이름 (예: Vercel 게이트웨이, Gemini)' }) as HTMLInputElement;
+    const provider = el('input', { value: existing?.provider ?? '', placeholder: '프로바이더 (예: openai, google, vercel) — 표시용' }) as HTMLInputElement;
+    const baseUrl = el('input', { value: existing?.baseUrl ?? '', placeholder: 'Base URL (선택 · 프리셋의 URL 이 비어 있을 때 씀)' }) as HTMLInputElement;
+    const apiKey = el('input', { type: 'password', placeholder: existing?.apiKey?.set ? `설정됨 (${existing.apiKey.length}자) — 바꿀 때만 입력` : 'API 키' }) as HTMLInputElement;
+    const note = el('input', { value: existing?.note ?? '', placeholder: '메모 (선택)' }) as HTMLInputElement;
+    const save = el('button', { class: 'primary tiny', text: existing ? '저장' : '추가' }) as HTMLButtonElement;
+    const cancel = el('button', { class: 'ghost tiny', text: '취소' });
+    const box = el('div', { class: 'keyform' }, [
+      el('div', { class: 'row' }, [name, provider]),
+      el('div', { class: 'row' }, [baseUrl]),
+      el('div', { class: 'row' }, [apiKey, note]),
+      el('div', { class: 'row' }, [save, cancel]),
+    ]);
+    cancel.addEventListener('click', () => { box.remove(); });
+    save.addEventListener('click', async () => {
+      save.disabled = true;
+      try {
+        await state.saveApiKey({
+          name: name.value, provider: provider.value, baseUrl: baseUrl.value, note: note.value,
+          apiKey: apiKey.value ? apiKey.value : (existing ? keepSentinel : ''),
+        }, existing?.id);
+        say(existing ? '키를 저장했습니다. 이 키를 쓰는 프리셋에 바로 적용됩니다.' : '키를 추가했습니다. 에이전트 탭의 프리셋에서 고를 수 있습니다.', 'ok');
+        await draw();
+      } catch (e) {
+        say(e instanceof Error ? e.message : String(e), 'err');
+      } finally {
+        save.disabled = false;
+      }
+    });
+    return box;
+  };
+
+  const draw = async (): Promise<void> => {
+    clear(listMount);
+    listMount.appendChild(el('div', { class: 'hint', text: '읽는 중입니다…' }));
+    try {
+      const r = await state.apiKeys();
+      keepSentinel = r.keepSentinel || keepSentinel;
+      clear(listMount);
+      if (!r.keys.length) listMount.appendChild(el('div', { class: 'hint', text: '저장된 키가 없습니다.' }));
+      for (const k of r.keys) {
+        const edit = el('button', { class: 'ghost tiny', text: '수정' });
+        const del = el('button', { class: 'ghost tiny' });
+        const row = el('div', { class: 'verrow keyrow' }, [
+          el('div', { class: 'grow' }, [
+            el('div', {}, [
+              el('span', { text: k.name }),
+              k.provider ? el('span', { class: 'badge', style: { marginLeft: '6px' }, text: k.provider }) : null,
+              !k.apiKey.set ? el('span', { class: 'badge warn', style: { marginLeft: '6px' }, text: '키 없음' }) : null,
+            ]),
+            el('div', { class: 'hint', text: [k.baseUrl || '(URL 없음)', k.apiKey.set ? `키 ${k.apiKey.length}자` : '', k.note].filter(Boolean).join(' · ') }),
+          ]),
+          edit, del,
+        ]);
+        edit.addEventListener('click', () => { row.after(form(k)); });
+        armed(del, '삭제', '정말?', async () => {
+          try { await state.deleteApiKey(k.id); await draw(); } catch (e) { say(e instanceof Error ? e.message : String(e), 'err'); }
+        });
+        listMount.appendChild(row);
+      }
+    } catch (e) {
+      clear(listMount);
+      listMount.appendChild(el('div', { class: 'notice err', text: e instanceof Error ? e.message : String(e) }));
+    }
+  };
+  const add = el('button', { class: 'primary', text: '키 추가' });
+  add.addEventListener('click', () => { listMount.appendChild(form(null)); });
+  void draw();
+
+  return el('div', { class: 'card' }, [
+    el('h2', { text: 'API 키' }),
+    el('div', { class: 'hint', style: { marginBottom: '8px' }, text:
+      '프로바이더·게이트웨이의 키를 한 곳에 둡니다. 에이전트 프리셋은 여기 키를 고르거나 직접 입력할 수 있고, 키를 바꾸면 그 키를 쓰는 프리셋 전부에 바로 적용됩니다. 키는 백엔드 data/ 에만 저장되며 화면에는 길이만 보입니다.' }),
+    listMount,
+    el('div', { class: 'row', style: { marginTop: '8px' } }, [add]),
+    out,
+  ]);
+}
+
+/**
+ * 모델 카탈로그 - models.dev through the backend's daily cache. Which base
+ * URL a provider uses and what its models are called, searchable, so a
+ * preset does not start from a guess.
+ */
+function buildCatalogCard(): HTMLElement {
+  const input = el('input', { placeholder: '프로바이더나 모델 이름 (예: gemini, anthropic, deepseek)' }) as HTMLInputElement;
+  const out = el('div', { class: 'outbox' });
+  const meta = el('div', { class: 'hint' });
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const run = async (refresh = false) => {
+    const q = input.value.trim();
+    clear(out);
+    if (q.length < 2 && !refresh) { meta.textContent = ''; return; }
+    out.appendChild(el('div', { class: 'hint', text: '찾는 중…' }));
+    try {
+      const r = await state.modelCatalog(q, '', refresh);
+      clear(out);
+      meta.textContent = `models.dev · 프로바이더 ${r.totalProviders}개` + (r.cachedAt ? ` · 갱신 ${new Date(r.cachedAt * 1000).toLocaleString()}` : '') + (r.stale ? ' · 오래됨' : '');
+      if (r.providers.length) {
+        out.appendChild(el('div', { class: 'sectiontitle', text: `프로바이더 ${r.providers.length}` }));
+        for (const p of r.providers.slice(0, 20)) {
+          out.appendChild(el('div', { class: 'verrow' }, [
+            el('div', { class: 'grow' }, [
+              el('div', { text: `${p.name} (${p.id}) · 모델 ${p.models}개` }),
+              el('div', { class: 'hint mono', text: p.api || '(OpenAI 호환 URL 미기재)' }),
+              p.doc ? el('div', { class: 'hint', text: p.doc }) : null,
+            ]),
+          ]));
+        }
+      }
+      if (r.models.length) {
+        out.appendChild(el('div', { class: 'sectiontitle', style: { marginTop: '8px' }, text: `모델 ${r.models.length}${r.truncated ? '+' : ''}` }));
+        const rows = r.models.map((m) =>
+          `${m.provider.padEnd(14)} ${m.id.padEnd(40)} ${m.context ? Math.round(m.context / 1000) + 'k' : '-'}`.padEnd(62)
+          + ` ${m.costIn != null ? '$' + m.costIn + '/' + m.costOut : '-'}${m.reasoning ? ' · reasoning' : ''}${m.toolCall ? ' · tools' : ''}`);
+        out.appendChild(el('pre', { class: 'mono', style: { maxHeight: '360px' }, text: rows.join('\n') }));
+      }
+      if (!r.providers.length && !r.models.length) out.appendChild(el('div', { class: 'hint', text: '없습니다.' }));
+    } catch (e) {
+      clear(out);
+      out.appendChild(el('div', { class: 'notice err', text: e instanceof Error ? e.message : String(e) }));
+    }
+  };
+  input.addEventListener('input', () => { if (timer) clearTimeout(timer); timer = setTimeout(() => void run(), 300); });
+  const refreshBtn = el('button', { class: 'ghost tiny', text: '지금 갱신' });
+  refreshBtn.addEventListener('click', () => void run(true));
+  return el('div', { class: 'card' }, [
+    el('h2', { text: '모델 카탈로그' }),
+    el('div', { class: 'hint', style: { marginBottom: '8px' }, text:
+      '주요 프로바이더의 API 주소와 모델 이름·컨텍스트·가격을 models.dev 에서 찾습니다(백엔드가 하루 한 번 받아 둠). 프리셋 편집기의 “카탈로그에서 찾기”도 같은 자료입니다.' }),
+    el('div', { class: 'row' }, [input, refreshBtn]),
+    meta,
+    out,
   ]);
 }
 
