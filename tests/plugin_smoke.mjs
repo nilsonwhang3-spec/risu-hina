@@ -1449,8 +1449,11 @@ console.log('\ntest_agent_welcome');
   check('an empty conversation suggests what to ask',
         document.querySelectorAll('.agentpanel .exbtn').length === 3,
         String(document.querySelectorAll('.agentpanel .exbtn').length));
-  check('it names the job', /조정해야 할 항목을 상담하세요/.test(
+  // The title follows the tab bar's mode (chat or bot); either is the job.
+  check('it names the job', /조정(해야 )?할 항목을 상담하세요/.test(
         document.querySelector('.agentpanel')?.textContent || ''));
+  check('and says the agent sees the whole bot and chat, not just the tab',
+        /선택된 봇 및 챗의 전반적인 정보를 모두 알고 있습니다/.test(document.querySelector('.agentpanel')?.textContent || ''));
 
   const ex = document.querySelector('.agentpanel .exbtn');
   ex?.dispatchEvent(new window.Event('click', { bubbles: true }));

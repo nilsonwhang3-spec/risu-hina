@@ -315,7 +315,10 @@ pre.mono {
   background: rgba(255, 255, 255, .035);
 }
 .right { flex: 0 0 380px; min-width: 250px; display: flex; flex-direction: column; }
-.gutter { flex: 0 0 5px; cursor: col-resize; background: var(--borderc, #2b323f); opacity: .45; }
+/* touch-action: none is what makes the drag work on a phone - without it the
+   browser claims the touch for scrolling and fires pointercancel at once. */
+.gutter { flex: 0 0 5px; cursor: col-resize; background: var(--borderc, #2b323f); opacity: .45; touch-action: none; }
+.gutter.leftside { flex-basis: 4px; }
 .gutter:hover, .gutter.dragging { opacity: 1; background: #2563eb; }
 
 .toolrow {

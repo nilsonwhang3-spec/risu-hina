@@ -24,10 +24,17 @@ export interface SplitterOptions {
   container: HTMLElement;
   min?: number;
   storageKey?: string;
+  /**
+   * Which side of the gutter the target sits on. 'right' (default) is the
+   * agent panel, measured from the container's far edge; 'left' is the tree
+   * column, measured from the near edge - so a lorebook title that does not
+   * fit can be given room without touching the agent.
+   */
+  side?: 'left' | 'right';
 }
 
 export function splitter(opts: SplitterOptions): HTMLElement {
-  const gutter = el('div', { class: 'gutter', title: '드래그해서 패널 크기를 조절합니다' });
+  const gutter = el('div', { class: 'gutter' + (opts.side === 'left' ? ' leftside' : ''), title: '드래그해서 패널 크기를 조절합니다' });
 
   /** True while the container is stacking, i.e. on a narrow screen. */
   const vertical = () => {
@@ -69,7 +76,10 @@ export function splitter(opts: SplitterOptions): HTMLElement {
     // Measured from the container's far edge, so the number is the panel's own
     // size regardless of where the gutter happens to sit.
     const rect = opts.container.getBoundingClientRect();
-    apply(vertical() ? rect.bottom - ev.clientY : rect.right - ev.clientX);
+    const left = opts.side === 'left';
+    apply(vertical()
+      ? (left ? ev.clientY - rect.top : rect.bottom - ev.clientY)
+      : (left ? ev.clientX - rect.left : rect.right - ev.clientX));
   });
 
   const end = (e: Event) => {
@@ -88,7 +98,7 @@ export function splitter(opts: SplitterOptions): HTMLElement {
   // Double-click restores the default rather than leaving the user to nudge it
   // back by hand after dragging it somewhere unusable.
   gutter.addEventListener('dblclick', () => {
-    const back = apply(vertical() ? 360 : 380);
+    const back = apply(opts.side === 'left' ? 210 : (vertical() ? 360 : 380));
     if (opts.storageKey) void Risuai.pluginStorage.setItem(opts.storageKey, back).catch(() => undefined);
   });
 

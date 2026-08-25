@@ -19,6 +19,7 @@ import { el, clear, popover, TOOL_GLYPH, PAPER_PLANE, ICON } from './dom';
 import { state, type StagedEdit, type AgentSessionInfo, type PendingAction } from '../state';
 import { renderMarkdown } from './markdown';
 import { clientLog } from '../transport';
+import { currentMode } from './shell';
 
 export interface AgentPanelHooks {
   /** Show staged proposals as previews in the turn list. */
@@ -237,16 +238,29 @@ export class AgentPanel {
    * it: they are starting points to edit, not commands.
    */
   private welcome(): HTMLElement {
-    const examples = [
-      '대화에서 페르소나를 조금 더 착한 사람으로 조정해줘',
-      '{{char}}에게 고백한 일을 없던 걸로 해줘',
-      '챗 이사가고 싶어. 전체 항목을 체계적으로 요약해서 챗 로어북에 넣고, 10턴만 남겨줘',
-    ];
+    // The examples follow the tab bar's mode: a chat's three sizes of job, or
+    // the card's - the agent is the same, the material in front of it differs.
+    const bot = currentMode() === 'bot';
+    const examples = bot
+      ? [
+        '봇 로어북을 훑어서 겹치거나 빈 항목을 정리하고 폴더로 묶어줘',
+        '퍼스트 메시지와 대체 인사말의 말투를 설명(desc)과 맞춰줘',
+        '에셋 이름 끝의 확장자를 떼고, 감정 이미지 이름을 감정 단어로 통일해줘',
+      ]
+      : [
+        '대화에서 페르소나를 조금 더 착한 사람으로 조정해줘',
+        '{{char}}에게 고백한 일을 없던 걸로 해줘',
+        '챗 이사가고 싶어. 전체 항목을 체계적으로 요약해서 챗 로어북에 넣고, 10턴만 남겨줘',
+      ];
     const box = el('div', { class: 'welcome' }, [
-      el('div', { class: 'welcome-title', text: '조정해야 할 항목을 상담하세요' }),
+      el('div', { class: 'welcome-title', text: bot ? '봇(카드)에서 조정할 항목을 상담하세요' : '조정해야 할 항목을 상담하세요' }),
       el('div', {
         class: 'hint',
         text: '고칠 곳을 말씀하시면 훑어보고 제안을 만들어 옵니다. 반영은 승인하신 뒤에 이루어집니다.',
+      }),
+      el('div', {
+        class: 'hint',
+        text: 'AI 에이전트는 현재 탭뿐만 아니라 선택된 봇 및 챗의 전반적인 정보를 모두 알고 있습니다.',
       }),
     ]);
     for (const text of examples) {

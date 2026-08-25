@@ -33,7 +33,11 @@ export function threePane(leftNode?: HTMLElement): ThreePaneParts {
   const centre = el('div', { class: 'left' });
   const right = el('div', { class: 'right' }, [el('div', { class: 'right-inner' })]);
 
-  const root = el('div', { class: 'split' }, [left, centre]);
+  const root = el('div', { class: 'split' }, [left]);
+  // The tree column is resizable too: lorebook titles are sentences, and a
+  // fixed 210px cut most of them off.
+  root.appendChild(splitter({ target: left, container: root, storageKey: 'treeWidth', side: 'left', min: 120 }));
+  root.appendChild(centre);
   root.appendChild(splitter({ target: right, container: root, storageKey: 'panelWidth' }));
   root.appendChild(right);
 
