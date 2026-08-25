@@ -36,7 +36,12 @@ const REASONING_LABEL: Record<string, string> = {
 export interface PresetsCardOptions {
   /** Called whenever a selected preset changes, so dependent UI can refresh. */
   onChanged: () => void | Promise<void>;
+  /** Hands the card's reload to the settings page, which calls it when the connection comes up. */
+  onMount?: (refresh: () => Promise<void>) => void;
 }
+
+/** The key-select value that means "the OpenAI subscription" (provider codex). */
+const CODEX_KEY = '__codex__';
 
 export function buildPresetsCard(opts: PresetsCardOptions): HTMLElement {
   const generalMount = el('div');
@@ -132,6 +137,7 @@ export function buildPresetsCard(opts: PresetsCardOptions): HTMLElement {
     }
   });
 
+  opts.onMount?.(refresh);
   void refresh();
   return el('div', {}, [
     el('div', { class: 'card' }, [
@@ -281,34 +287,28 @@ function openEditor(
   let keepSentinel = '__keep__';
   let keys: ApiKeyEntry[] = [];
 
-  // How the model is reached: an OpenAI-compatible endpoint (URL + key), or
-  // the OpenAI subscription through the codex backend (login, no key).
-  const providerSel = el('select', {}, [
-    el('option', { value: '', text: 'API 키 (OpenAI 호환 엔드포인트)' }),
-    el('option', { value: 'codex', text: 'OpenAI 구독 (ChatGPT Plus/Pro · Codex)' }),
-  ]) as HTMLSelectElement;
+  // Where the credential comes from: a key from the API 키 page, this
+  // preset's own, or the OpenAI subscription (also set up on the API 키
+  // page) - one select, because to the user they are the same question.
   const keyRow = el('label', { class: 'field' }, [el('span', { text: 'API 키' }), keySel]);
   const keyHint = el('div', { class: 'hint', style: { marginTop: '-4px', marginBottom: '10px' } }, [
-    'API 키 탭에 저장한 키를 고르거나, 직접 입력합니다. 키 탭의 키를 고르면 Base URL 이 비어 있을 때 그 키의 URL 을 씁니다.',
+    'API 키 탭에 저장한 키를 고르거나, 직접 입력합니다. 키 탭의 키를 고르면 Base URL 이 비어 있을 때 그 키의 URL 을 씁니다. OpenAI 구독 로그인도 API 키 탭에서 합니다.',
   ]);
   const urlRow = el('label', { class: 'field' }, [el('span', { text: 'Base URL' }), baseUrl]);
-  const codexBox = buildCodexBox(model);
-  const isCodex = () => selectedValue(providerSel) === 'codex';
+  const codexBox = buildCodexBox(model, false);
+  const isCodex = () => selectedValue(keySel) === CODEX_KEY;
 
   const syncCount = () => { instCount.textContent = `${instructions.value.length}자`; };
   instructions.addEventListener('input', syncCount);
   syncCount();
   const syncKeyRow = () => {
     const codex = isCodex();
-    keyRow.style.display = codex ? 'none' : '';
-    keyHint.style.display = codex ? 'none' : '';
     urlRow.style.display = codex ? 'none' : '';
     ownKeyRow.style.display = codex || selectedValue(keySel) ? 'none' : '';
     codexBox.root.style.display = codex ? '' : 'none';
     if (codex) void codexBox.refresh();
   };
   keySel.addEventListener('change', syncKeyRow);
-  providerSel.addEventListener('change', syncKeyRow);
 
   const catalogBtn = el('button', { class: 'ghost tiny', text: '카탈로그에서 찾기', title: 'models.dev 에서 프로바이더·모델을 찾아 채웁니다' });
   catalogBtn.addEventListener('click', () => openCatalogPicker(catalogBtn, (m, api) => {
@@ -324,6 +324,7 @@ function openEditor(
       clear(keySel);
       keySel.appendChild(el('option', { value: '', text: '직접 입력' }));
       for (const k of keys) keySel.appendChild(el('option', { value: k.id, text: `${k.name}${k.provider ? ' · ' + k.provider : ''}` }));
+      keySel.appendChild(el('option', { value: CODEX_KEY, text: 'OpenAI 구독 (ChatGPT Plus/Pro · Codex)' }));
       const p = id ? r.presets.find((x) => x.id === id) : null;
       if (!p) {
         keyNote.textContent = '설정되지 않음';
@@ -336,8 +337,7 @@ function openEditor(
       maxTokens.value = String(p.maxTokens);
       temperature.value = String(p.temperature);
       setSelected(reasoning, p.reasoning || '');
-      setSelected(keySel, p.keyRef || '');
-      setSelected(providerSel, p.provider || '');
+      setSelected(keySel, p.provider === 'codex' ? CODEX_KEY : (p.keyRef || ''));
       cache.checked = p.cache;
       flex.checked = p.flex;
       instructions.value = p.instructions || '';
@@ -355,10 +355,9 @@ function openEditor(
   const cancel = el('button', { class: 'ghost', text: '취소' });
   const body = el('div', {}, [
     el('label', { class: 'field' }, [el('span', { text: '이름' }), name]),
-    el('label', { class: 'field' }, [el('span', { text: '인증 방식' }), providerSel]),
-    codexBox.root,
     keyRow,
     keyHint,
+    codexBox.root,
     ownKeyRow,
     urlRow,
     el('label', { class: 'field' }, [
@@ -402,7 +401,7 @@ function openEditor(
     try {
       const saved = await state.savePreset(name.value, {
         kind,
-        provider: selectedValue(providerSel),
+        provider: isCodex() ? 'codex' : '',
         keyRef: isCodex() ? '' : selectedValue(keySel),
         baseUrl: baseUrl.value,
         model: model.value,
@@ -440,7 +439,7 @@ function openEditor(
  * unreachable page - its address is what gets pasted), and the model list
  * the codex backend is known to serve.
  */
-function buildCodexBox(modelInput: HTMLInputElement): { root: HTMLElement; refresh: () => Promise<void> } {
+export function buildCodexBox(modelInput: HTMLInputElement | null, withLogin: boolean): { root: HTMLElement; refresh: () => Promise<void> } {
   const line = el('div', { class: 'hint' });
   const out = el('div', { class: 'outbox' });
   const login = el('button', { class: 'primary tiny', text: 'OpenAI 로그인' }) as HTMLButtonElement;
@@ -464,10 +463,12 @@ function buildCodexBox(modelInput: HTMLInputElement): { root: HTMLElement; refre
       logout.style.display = s.loggedIn ? '' : 'none';
       if (s.loggedIn) { pasteRow.style.display = 'none'; stopPoll(); }
       clear(models);
-      for (const m of s.models) {
-        const b = el('button', { class: 'ghost tiny', text: m });
-        b.addEventListener('click', () => { modelInput.value = m; });
-        models.appendChild(b);
+      if (modelInput) {
+        for (const m of s.models) {
+          const b = el('button', { class: 'ghost tiny', text: m });
+          b.addEventListener('click', () => { modelInput.value = m; });
+          models.appendChild(b);
+        }
       }
     } catch (e) {
       line.textContent = msg(e);
@@ -521,17 +522,26 @@ function buildCodexBox(modelInput: HTMLInputElement): { root: HTMLElement; refre
     try { await state.codexLogout(); await refresh(); } catch (e) { out.appendChild(el('div', { class: 'notice err', text: msg(e) })); }
   });
 
-  const root = el('div', { class: 'card codexbox' }, [
-    el('h2', { text: 'OpenAI 구독 (Codex)' }),
-    el('div', { class: 'hint', style: { marginBottom: '6px' }, text:
-      'Codex CLI 와 같은 방식으로 ChatGPT 계정에 로그인해 chatgpt.com 의 codex 백엔드를 씁니다. 공식 API 가 아니라 OpenAI 쪽 변경에 깨질 수 있고, 그때는 오류를 그대로 보여 줍니다. Base URL·API 키는 쓰지 않습니다.' }),
-    line,
-    el('div', { class: 'row', style: { marginTop: '6px' } }, [login, logout]),
-    pasteRow,
-    out,
-    el('div', { class: 'hint', style: { marginTop: '8px' }, text: '이 백엔드가 받는 모델 (누르면 채워집니다):' }),
-    models,
-  ]);
+  // On the API 키 page: the full card with login. In the preset editor:
+  // the state line and the model buttons, with a pointer to that page.
+  const root = withLogin
+    ? el('div', { class: 'card codexbox' }, [
+      el('h2', { text: 'OpenAI 구독 (Codex)' }),
+      el('div', { class: 'hint', style: { marginBottom: '6px' }, text:
+        'Codex CLI 와 같은 방식으로 ChatGPT Plus/Pro 계정에 로그인해 chatgpt.com 의 codex 백엔드를 씁니다. 로그인해 두면 에이전트 프리셋의 API 키 선택에서 "OpenAI 구독" 을 고를 수 있습니다. 공식 API 가 아니라 OpenAI 쪽 변경에 깨질 수 있고, 그때는 오류를 그대로 보여 줍니다.' }),
+      line,
+      el('div', { class: 'row', style: { marginTop: '6px' } }, [login, logout]),
+      pasteRow,
+      out,
+    ])
+    : el('div', { class: 'codexbox', style: { marginBottom: '10px' } }, [
+      el('div', { class: 'notice' }, [
+        line,
+        el('div', { class: 'hint', style: { marginTop: '4px' }, text: 'Base URL·API 키는 쓰지 않습니다. 로그인·로그아웃은 API 키 탭에서 합니다.' }),
+      ]),
+      el('div', { class: 'hint', text: '이 백엔드가 받는 모델 (누르면 채워집니다):' }),
+      models,
+    ]);
   root.style.display = 'none';
   return { root, refresh };
 }

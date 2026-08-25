@@ -1187,10 +1187,12 @@ console.log('\ntest_agent_presets_ui');
   check('수정 opens a modal', !!box);
   check('it has a backdrop', !!document.querySelector('.modalback'));
   check('base instructions are editable', !!box?.querySelector('textarea'));
-  // Three selects now: auth method, the API key reference, reasoning.
+  // Two selects: the credential (own / a key from the key page / the OpenAI
+  // subscription), then reasoning.
   const selects = [...(box?.querySelectorAll('select') || [])];
-  check('the auth method offers the OpenAI subscription', selects.some((s) => /OpenAI 구독/.test(s.textContent || '')));
-  check('the API key can be borrowed from the key page', selects.some((s) => /직접 입력/.test(s.textContent || '')));
+  const credSel = selects.find((s) => /직접 입력/.test(s.textContent || ''));
+  check('the API key can be borrowed from the key page', !!credSel);
+  check('and the OpenAI subscription is one of the credentials', /OpenAI 구독/.test(credSel?.textContent || ''));
   const reasoningSel = selects.find((s) => /high/.test(s.textContent || ''));
   check('reasoning level is settable', !!reasoningSel);
   const opts = [...(reasoningSel?.querySelectorAll('option') || [])]

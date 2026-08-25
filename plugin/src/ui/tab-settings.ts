@@ -9,7 +9,7 @@
  */
 import { el, clear, armed } from './dom';
 import { state, type ApiKeyEntry } from '../state';
-import { buildPresetsCard } from './presets';
+import { buildPresetsCard, buildCodexBox } from './presets';
 import { buildSkillsCard } from './skills';
 import { agentPanel } from './agentpane';
 import { buildDebugCard, buildUpdateCard } from './debugpanel';
@@ -27,12 +27,35 @@ let aboutMount: HTMLElement | null = null;
  * read it. The agent test result had the same fate. Anything long-lived here -
  * a half-typed API key included - has to survive an unrelated state change.
  */
+/**
+ * Cards that load from the backend register here, so a connection that
+ * comes up AFTER the settings page was built (the page opened before the
+ * probe finished, or 저장하고 연결 fixed the URL) re-reads them. Without
+ * this a card kept the "token not sent" refusal it got before the route
+ * was proven direct, under a header that already said connected.
+ */
+const refreshers: (() => void | Promise<void>)[] = [];
+let watchedHealth: boolean | null = null;
+
+export function refreshSettingsCards(): void {
+  for (const fn of refreshers) { try { void fn(); } catch { /* one card must not stop the rest */ } }
+}
+
+state.onChange(() => {
+  const ok = !!state.health;
+  if (watchedHealth === null) { watchedHealth = ok; return; }
+  if (ok && !watchedHealth) refreshSettingsCards();
+  watchedHealth = ok;
+});
+
 export function renderSettingsTab(mount: HTMLElement): void {
   if (mount.querySelector('.pad')) {
     refreshAbout();
     return;
   }
   clear(mount);
+  refreshers.length = 0;
+  watchedHealth = !!state.health;
 
   // Sub-tabs, because these are four unrelated jobs and stacking them made a
   // page you scroll past three things to reach the fourth. Each section is
@@ -45,6 +68,7 @@ export function renderSettingsTab(mount: HTMLElement): void {
     ['연결', [buildConnectionCard(), buildAssetsCard(), buildDiagnosticCard(), buildAssetProbeCard()]],
     ['API 키', [buildKeysCard()]],
     ['에이전트', [buildPresetsCard({
+      onMount: (refresh) => { refreshers.push(refresh); },
       onChanged: async () => {
         await state.connect();
         // The agent panel renders once and keeps it. Without this, changing
@@ -103,6 +127,8 @@ function buildConnectionCard(): HTMLElement {
       out.textContent = ok
         ? `연결되었습니다 · 백엔드 v${state.health?.version}`
         : '실패했습니다: ' + state.connectError;
+      // Every other card loaded against the old (or no) connection.
+      if (ok) refreshSettingsCards();
     } finally {
       save.disabled = false;
     }
@@ -423,15 +449,26 @@ function buildKeysCard(): HTMLElement {
   };
   const add = el('button', { class: 'primary', text: '키 추가' });
   add.addEventListener('click', () => { listMount.appendChild(form(null)); });
+  refreshers.push(draw);
   void draw();
 
-  return el('div', { class: 'card' }, [
-    el('h2', { text: 'API 키' }),
-    el('div', { class: 'hint', style: { marginBottom: '8px' }, text:
-      '프로바이더·게이트웨이의 키를 한 곳에 둡니다. 에이전트 프리셋은 여기 키를 고르거나 직접 입력할 수 있고, 키를 바꾸면 그 키를 쓰는 프리셋 전부에 바로 적용됩니다. 키는 백엔드 data/ 에만 저장되며 화면에는 길이만 보입니다.' }),
-    listMount,
-    el('div', { class: 'row', style: { marginTop: '8px' } }, [add]),
-    out,
+  // The OpenAI subscription is a credential too, so its login lives here;
+  // a preset then picks it the way it picks a key.
+  const codex = buildCodexBox(null, true);
+  codex.root.style.display = '';
+  refreshers.push(codex.refresh);
+  void codex.refresh();
+
+  return el('div', {}, [
+    el('div', { class: 'card' }, [
+      el('h2', { text: 'API 키' }),
+      el('div', { class: 'hint', style: { marginBottom: '8px' }, text:
+        '프로바이더·게이트웨이의 키를 한 곳에 둡니다. 에이전트 프리셋은 여기 키를 고르거나 직접 입력할 수 있고, 키를 바꾸면 그 키를 쓰는 프리셋 전부에 바로 적용됩니다. 키는 백엔드 data/ 에만 저장되며 화면에는 길이만 보입니다.' }),
+      listMount,
+      el('div', { class: 'row', style: { marginTop: '8px' } }, [add]),
+      out,
+    ]),
+    codex.root,
   ]);
 }
 

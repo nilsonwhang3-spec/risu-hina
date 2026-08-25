@@ -39,6 +39,7 @@
 | 에이전트 지식 | 랜덤 풀(같은 이름 = 무작위 1개)·charx `_N` 파일명 규칙·assetref 행 편집법을 지시문과 describe_helper 에 |
 
 테스트: test_http `test_card_assets`·`test_keys_and_agent_kinds`, 스모크의 에셋 격자·트리거 모드·툴바 검색·syncbadge·설정 5탭·키 선택. 게이트 **ALL GREEN**.
+**0.4.2**: 설정 카드가 연결이 올라온 뒤 다시 읽는다(`tab-settings.refreshers` — 연결 전 로드된 "토큰을 보내지 않았습니다" 오류가 카드에 남던 것). OpenAI 구독 로그인은 **API 키 탭**으로, 프리셋은 "API 키" 선택에서 "OpenAI 구독" 을 고른다(인증 방식 셀렉트 제거).
 **0.4.1**: OpenAI 구독(Codex) 프리셋 — 사용자 결정으로 구현(docs/04 F.5). `codexauth.py`(PKCE 로그인·1455 콜백·붙여넣기 폴백·토큰 갱신·Responses 스트리밍 강제 클라이언트), 프리셋 `provider` 필드, `/codex/*` 5 라우트, 편집기 "인증 방식" 선택 + 로그인 박스. **실호출 검증은 사용자가 로그인한 뒤** 연결 테스트로.
 
 ## 1b. 2026-08-25 에 들어간 것 — 릴리스·M2 전부
