@@ -1,6 +1,6 @@
 {
   "name": "risu-elf-plugin",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "private": true,
   "//risuelfRepo": "owner/repo on GitHub. Empty means no //@update-url is emitted.",
   "risuelfRepo": "nilsonwhang3-spec/risu-elf",

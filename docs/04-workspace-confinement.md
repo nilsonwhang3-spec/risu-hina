@@ -579,3 +579,51 @@ RisuAI 와 다른 점 하나: 아이콘 항목(`ccdefault:` → `assets/icon/ima
   성립해 우선순위를 내렸다.
 - PocketRisu `bulk-write`(비-PNG 추가·교체, `__jwt_secret` 자체 서명) — `serverWrite` 플래그만 있다.
 - 모듈 에셋(v2), 트리거 V2 블록 GUI.
+
+# 부록 F — 봇 편집·설정 2라운드 (2026-08-25 밤, v0.4.0)
+
+사용자 피드백 20여 건. 원칙은 앞과 같다 — **RisuAI 의 UI 가 제공하는 것만, RisuAI 가 저장하는 모양대로.**
+
+## F.1 에셋 참조는 카드 재료다
+
+이름 변경·삭제·일괄 도구는 이미지가 아니라 카드의 세 목록(`emotionImages` / `additionalAssets` /
+`ccAssets`)을 고치는 일이다. 그래서 `card_scripts` 에 `kind='assetref'`(entry={field,name,key,ext})
+로 들어가 Regex·트리거와 같은 수명(original|edited|added|deleted)을 살고, `card.patch` 가
+`assets{emotionImages,additionalAssets,ccAssets}` 로 되돌려 반영 때 한 번에 쓴다. 통째로 쓰지만
+바뀌었을 때만 보낸다(로어북·스크립트와 같은 규칙). 파일 바이트는 스토어의 일이고, 삭제는 참조만
+지운다(파일은 RisuAI GC 몫). 봇 버전(`additionalData.character_version`, RisuAI UI 가 편집하는
+자리)은 `characterVersion` 행으로 모델링하고 쓸 때 두 자리(nested + top-level) 모두 쓴다.
+`backgroundCSS` 는 RisuAI UI 에 없으므로 퇴역.
+
+## F.2 트리거 = RisuAI 의 세 모드
+
+`TriggerList.svelte` 가 `triggerscript[0].effect[0].type` 으로 모드를 정한다: `triggerlua` 면 Lua
+텍스트 박스 하나(이벤트 선택 없음 — 스크립트가 스스로 등록), `v2Header` 면 블록 프로그램, 그 외 V1.
+탭은 그대로 따라간다: 모드 버튼 V2/Lua(+V1 은 현재가 V1 일 때만), Lua 는 박스 하나, V2/V1 은
+읽기 전용 요약. 모드 전환은 RisuAI 가 쓰는 초기 객체로 목록을 통째로 바꾼다.
+
+## F.3 동기화는 에셋 편집과 charx 만 기다린다
+
+반영 게이트를 뗐다. 텍스트 재료는 텍스트로 쓰이니 이미지가 도착하기를 기다릴 이유가 없고, 스토어의
+바이트가 필요한 것은 charx 조립과 에셋 편집뿐이다. 동기화 진행률은 탭 줄 끝(`syncbadge`)에 늘
+보이고, 에셋 탭은 동기화 중 읽기 전용, charx(봇바) 버튼은 흐려진다.
+
+## F.4 설정 — 에이전트 둘, 키는 한 곳
+
+- **일반/검색 에이전트**: 프리셋에 `kind` 가 생겼고 종류별로 하나씩 선택된다(`agent` / `agent_search`
+  섹션). 일반 에이전트는 `web_research(question)` 로 검색 에이전트(웹 검색 툴만, 스크립트 없음)를
+  부른다. 검색 프리셋이 없으면 예전처럼 직접 `web_search`. UI 는 Gemini(검색 그라운딩)를 권한다.
+- **API 키**(`api_keys`, DB v10): 프리셋은 `keyRef` 로 키를 빌리거나 자기 키를 든다. 키를 바꾸면
+  그 키를 쓰는 선택된 프리셋이 즉시 재해석된다(`presets.reresolve_selected`). 에이전트는 여전히
+  config 섹션만 읽는다 — `agent._model()` 은 몰라도 된다.
+- **모델 카탈로그**: models.dev `api.json`(~200 프로바이더, API 주소·모델·컨텍스트·가격)을 백엔드가
+  하루 한 번 받아 두고 `GET /models/catalog?q=` 로 검색한다. 정보·로그 탭의 카드와 프리셋 편집기의
+  "카탈로그에서 찾기"가 같은 자료를 쓴다. 오프라인이면 캐시, 캐시도 없으면 빈 결과(500 아님).
+- 연결 진단의 "토큰을 보내지 않았습니다"는 **연결이 실패했을 때만** 나온다. 성공 줄 밑에 그 말이
+  남아 있던 것이 버그였다.
+
+## F.5 남긴 것
+
+- OpenAI Codex 구독(ChatGPT OAuth)으로 에이전트 돌리기 — Codex CLI 가 어느 PC 에도 없어 OAuth
+  기기 흐름을 직접 구현해야 한다. 사용자 결정 대기.
+- 모바일 스플리터: `touch-action: none` 으로 고쳤으나 실기기 확인 전.

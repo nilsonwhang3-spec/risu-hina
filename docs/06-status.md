@@ -1,4 +1,4 @@
-# 06. 구현 상태 — 2026-08-25 기준 (v0.3.0)
+# 06. 구현 상태 — 2026-08-25 밤 기준 (v0.4.0)
 
 다음 세션에 이어서 할 사람(=나)을 위한 한 장. 무엇이 있고, 무엇이 바뀌었고, 어디까지 배포됐고,
 무엇이 남았는지. 설계의 *이유*는 `docs/04`(에셋·charx 는 부록 E), 저장 구조는 `docs/02`, 배포 환경은 `docs/00`.
@@ -6,16 +6,15 @@
 
 ## 0. 다음 세션 시작점 (먼저 읽을 것)
 
-**코드 상태**: master `08dc16f` "Release 0.3.0: assets, charx, agent image work" = M2 전부, **origin 푸시됨**, 태그 `v0.3.0` 푸시됨.
-게이트 ALL GREEN 으로 커밋. 이 문서(06)와 `docs/04` 부록 E 갱신분이 그 다음 커밋.
+**코드 상태**: master = **v0.4.0**(라운드 2, §1) 태그·푸시됨. 게이트 ALL GREEN.
 
 **배포 상태 (2026-08-25 21:01 `deploy.ps1`, 새 SSH 세션에서 확인)**:
 
 | 어디 | 무엇 | 비고 |
 |---|---|---|
-| test-server **실행 중** `pyserver/app` + `plugin/risu-elf.js` | **0.3.0 = `08dc16f`** (`/health` 0.3.0, DB v9, `data/assets/` 생성, 플러그인 해시 `ADB1E73B` 일치) | 직전 백업 `app.bak-20260825-210145` |
+| test-server **실행 중** `pyserver/app` + `plugin/risu-elf.js` | **0.4.0**(DB v10) — `deploy.ps1` 로 배포, 새 세션 `/health` 확인 | 백업 `app.bak-<시각>` |
 | test-server config | `pocketrisu.savePath = D:\code\risu-nodeonly\Risuai-NodeOnly\save` → `/diag` `fastPath:true, serverWrite:true` | 같은 PC 의 PocketRisu 를 SQLite 로 직독 |
-| GitHub 릴리스 | **v0.3.2 Latest**(21:43, 자산 4개) · v0.3.1 · v0.3.0 · v0.1.0 | `gh release create` 는 auto 모드 분류기가 막는다 — 수동 권한 모드에서는 내가 직접 실행(0.3.1·0.3.2). test-server 는 0.3.2 배포·검증됨, raw 주소도 0.3.2 |
+| GitHub 릴리스 | **v0.4.0 Latest** · v0.3.2 · v0.3.1 · v0.3.0 · v0.1.0 | `gh release create` 는 auto 모드 분류기가 막는다 — 수동 권한 모드에서는 내가 직접 실행(0.3.1·0.3.2). test-server 는 0.3.2 배포·검증됨, raw 주소도 0.3.2 |
 | RisuAI 설치 플러그인 | **0.3.1 을 한 번 수동 재설치해야 함** — 설치본의 `//@update-url` 이 CORS 없는 릴리스 주소라 `+` 가 영영 안 뜬다(docs/04 B.4) | 그 뒤부터는 raw 주소라 `+` 가 뜬다 |
 
 **0.3.2 (2026-08-25 밤)** — 실사용 첫 회: PC 브라우저(risu.xyz) 봇 312장 0.6초, 아이폰(risu.xyz) `office counseling` 2980장 5.3초, 전부 `fast=N`(같은 PC 의 PocketRisu `risuai.db` 캐시 히트, 브라우저 전송 0). 사용자가 "포켓리스에서 연결한 것처럼 읽어갔다"고 의심 → 키가 SHA-256 이라 같은 바이트임을 확인하고, `assets.store_bytes` 가 **키 해시 = 바이트 해시** 를 검증하도록(출처 불문 거부), 동기화 줄이 출처(PocketRisu DB / 허브 / 이 브라우저)를 밝히도록 고침(docs/04 E.2). 고속 경로는 읽기 전용이며 쓰기는 항상 접속한 클라이언트에만 간다.
@@ -25,7 +24,24 @@
 
 → **첫 할 일**: 사용자가 RisuAI 에 `plugin/Risu.Elf.Plugin.js` **수동 재설치 1회**(설치본 0.1.0 의 update-url 은 CORS 로 못 읽음) → 다음 릴리스부터 `+` 가 뜨는지 확인 → M2 실사용 검증(§5-2).
 
-## 1. 2026-08-25 에 들어간 것 — 릴리스·M2 전부
+## 1. 2026-08-25 밤 — 라운드 2 (v0.4.0): 봇 탭·설정 피드백 20여 건 (docs/04 부록 F)
+
+| 영역 | 무엇 |
+|---|---|
+| 메타 | 봇 버전(`characterVersion` ↔ `additionalData.character_version`) 행 추가 · 첫 인사 → 퍼스트 메시지 · `backgroundCSS` 퇴역(RisuAI UI 에 없음) |
+| 목록/검색 | 좌측 트리 열 리사이즈(`splitter side:'left'`, `treeWidth`) · 모든 찾기 박스가 툴바 줄로(`shell.setToolbarSearch`) |
+| 트리거 | RisuAI 와 같은 모드 버튼 V2/Lua(+V1) · Lua 는 텍스트 박스 하나(이벤트 선택 없음) · V2/V1 읽기 전용 요약 · 모드 전환은 RisuAI 초기 객체로 |
+| 에셋 | 격자(썸네일+이름) · 이름 클릭 편집 · ✕ 참조 삭제 · 도구: 확장자 일괄 제거·정규식 일괄 변경(`POST /card/assets/rename`) · **에셋 참조 = `card_scripts kind='assetref'`**, patch 가 세 목록으로 되돌려 반영 |
+| 게이트 | 반영은 더 이상 동기화를 기다리지 않음 · 에셋 편집·charx 만 기다림 · 탭 줄 끝 `syncbadge`(%) · charx 버튼은 봇바로 이동 |
+| 에이전트 패널 | 환영 예시가 모드별(봇/챗) · "현재 탭뿐 아니라 선택된 봇·챗 전반을 안다" 안내 |
+| 모바일 | `.gutter { touch-action: none }` (터치가 스크롤로 잡혀 pointercancel 나던 것) |
+| 설정 | 섹션 연결 / API 키 / 에이전트 / 스킬 / 정보·로그 · **일반/검색 에이전트** 각 1개 선택(`kind`, `agent_search` 섹션, `web_research` 툴) · **API 키 탭**(`api_keys`, DB v10, `keyRef`) · **모델 카탈로그**(models.dev, `GET /models/catalog`) · 진단 카드의 토큰 경고는 실패 때만 |
+| 에이전트 지식 | 랜덤 풀(같은 이름 = 무작위 1개)·charx `_N` 파일명 규칙·assetref 행 편집법을 지시문과 describe_helper 에 |
+
+테스트: test_http `test_card_assets`·`test_keys_and_agent_kinds`, 스모크의 에셋 격자·트리거 모드·툴바 검색·syncbadge·설정 5탭·키 선택. 게이트 **ALL GREEN**.
+**미결(사용자 결정)**: OpenAI Codex 구독 인증 — Codex CLI 가 어느 PC 에도 없어 OAuth 기기 흐름 직접 구현 필요.
+
+## 1b. 2026-08-25 에 들어간 것 — 릴리스·M2 전부
 
 **운영**: M1.1 배포(19:51) → v0.2.0 태그·푸시 → 0.2.0 배포(20:03) → M2 ①~⑦ → v0.3.0 태그·푸시 → 0.3.0 배포(21:01).
 원격 실행(`ssh test-server "powershell -File …deploy.ps1"`)은 **내가 직접 할 수 있다**(이전 "분류기가 막는다"는 틀림). 막히는 것은
@@ -65,7 +81,7 @@ RisuAI(PocketRisu | 웹 risu.xyz) ── 플러그인 iframe(risu-elf.js) ──
 ```
 
 **플러그인 탭**: `선택 ┃ [챗: 챗 에딧·챗 로어북·장기기억·챗 변수 | 봇: 메타·봇 로어북·Regex·트리거·에셋] ┃ 워크스페이스 파일` (+ ⚙).
-봇바 반영은 **에셋 동기화 complete 이후**에만 열린다. 에셋 추가/교체(승인)는 즉시 RisuAI 에 쓰이는 유일한 카드 변경.
+에셋 동기화는 **에셋 편집과 charx 만** 기다린다(반영은 안 기다림). 에셋 추가/교체(승인)는 즉시 RisuAI 에 쓰이는 유일한 카드 변경; 이름·삭제는 카드 재료(assetref)라 반영 때.
 
 ## 3. 배포 절차 (검증됨, 내가 직접 실행)
 

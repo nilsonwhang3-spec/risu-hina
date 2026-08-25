@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any
 
 APP_NAME = "risu-elf"
-VERSION = "0.3.2"
+VERSION = "0.4.0"
 
 # Renamed from REALOOC_* to RISUELF_*. The old names are still honoured, and
 # not as politeness: the launcher, the control script and any service wrapper
