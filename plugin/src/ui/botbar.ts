@@ -7,9 +7,11 @@
  * write requires the bot to be the one RisuAI has selected, because mainline
  * silently drops writes to any other character.
  *
- * The asset gate: once M2's background importer exists, 반영 stays disabled
- * until the bot's assets finished importing. M1 ships with the gate open -
- * setAssetGate() is the hook the importer will use.
+ * The asset gate: 반영 stays disabled until the background importer
+ * (assets.ts, started by state.upload) reports the bot's assets in the
+ * store - `state.assetGateReason` is the importer's word on that. A card
+ * written back before its images arrived would be a card the charx builder
+ * cannot complete.
  */
 import { el, clear, armed, popover, TOOL, fmtTime } from './dom';
 import { state, type CardChanges } from '../state';
@@ -21,14 +23,6 @@ let applyBtn: HTMLButtonElement | null = null;
 let applyBadge: HTMLElement | null = null;
 let summaryEl: HTMLElement | null = null;
 
-/** Why 반영 is blocked on assets, or null when the gate is open (M1: always). */
-let assetGateReason: string | null = null;
-
-export function setAssetGate(reason: string | null): void {
-  assetGateReason = reason;
-  refreshBotBar();
-}
-
 function applyBlockReason(): string | null {
   if (!state.isLiveBot) {
     return 'RisuAI에서 이 봇을 선택해야 반영할 수 있습니다';
@@ -36,7 +30,7 @@ function applyBlockReason(): string | null {
   if (state.botChanges && !state.botChanges.full) {
     return '구버전 업로드 상태입니다. 패널을 닫았다 다시 열어 주세요';
   }
-  return assetGateReason;
+  return state.assetGateReason;
 }
 
 export function buildBotBar(): HTMLElement {

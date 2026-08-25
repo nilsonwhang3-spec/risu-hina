@@ -213,6 +213,20 @@ pre.mono {
   font-size: 24px; font-weight: 700; color: var(--textcolor2, #79839a);
 }
 .botname { font-size: 15px; font-weight: 700; }
+/* The background asset importer, under the bot's name on the picker. */
+.assetsync { margin-top: 4px; }
+.assetline { gap: 8px; }
+.assetline.err .hint { color: #ef4444; }
+.assetline.warn .hint { color: #f59e0b; }
+.assetbar {
+  height: 3px; margin-top: 4px; border-radius: 2px; overflow: hidden;
+  background: rgba(128,128,128,.18); max-width: 360px;
+}
+.assetfill { height: 100%; width: 0; background: #2563eb; transition: width .3s; }
+.assetbar.indeterminate .assetfill {
+  width: 30%; animation: assetslide 1.2s ease-in-out infinite alternate;
+}
+@keyframes assetslide { from { margin-left: 0; } to { margin-left: 70%; } }
 
 .folder { margin-bottom: 4px; }
 .folderhead {

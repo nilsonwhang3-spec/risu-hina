@@ -1,6 +1,7 @@
 /** App state and every backend call the UI makes. */
-import { transport, BackendError, type HealthInfo } from './transport';
+import { transport, BackendError, clientLog, type HealthInfo } from './transport';
 import * as host from './host';
+import { syncAssets, syncBusy, describeSync, type SyncProgress, type SyncController } from './assets';
 import type { RisuChat, RisuCharacter, RisuMessage } from './risuai';
 
 export interface ChatInfo {
@@ -285,6 +286,14 @@ class AppState {
   workspace: WorkspaceInfo | null = null;
   activeChatKey = '';
   botChanges: CardChanges | null = null;
+  /**
+   * The background asset importer's progress for the live bot, or null before
+   * it has started. The bot bar's 반영 gate and the picker's bot card both
+   * read it; `syncAssets` drives it.
+   */
+  assetSync: SyncProgress | null = null;
+  private assetSyncCtl: SyncController | null = null;
+  private assetSyncEmitAt = 0;
   turns: Turn[] = [];
   totalTurns = 0;
   warnings: string[] = [];
@@ -415,7 +424,60 @@ class AppState {
     }
     this.emit();
     void this.refreshBotChanges();
+    // The text is in; the images follow in the background. Editing starts
+    // now, 반영 waits for the store to catch up (bot bar gate).
+    void this.syncAssets();
     return res.workspace;
+  }
+
+  // --- assets (background importer) ----------------------------------------
+
+  /**
+   * Start (or restart) the asset sync for the live bot. A run already going
+   * for the same bot is left alone unless `force`; a run for another bot is
+   * cancelled first. Progress lands in `assetSync` and is emitted at most a
+   * few times a second - the picker re-renders on every emit.
+   */
+  syncAssets(force = false): void {
+    const ck = this.activeCharKey;
+    const char = this.character;
+    if (!ck || !char) return;
+    if (this.assetSync && this.assetSync.charKey === ck && syncBusy(this.assetSync) && !force) return;
+    this.cancelAssetSync();
+    const web = transport.hostPlatform === 'web';
+    this.assetSyncCtl = syncAssets(char, ck, {
+      hubPull: web,
+      concurrency: web ? 4 : 6,
+    }, (p) => {
+      this.assetSync = p;
+      const now = Date.now();
+      const settled = !syncBusy(p);
+      if (settled || now - this.assetSyncEmitAt > 400) {
+        this.assetSyncEmitAt = now;
+        this.emit();
+      }
+    });
+    this.assetSync = null;
+    void this.assetSyncCtl.done.then((p) => {
+      if (p.phase === 'error') void clientLog('warn', 'asset sync failed', { error: p.error, charKey: ck });
+    });
+  }
+
+  cancelAssetSync(): void {
+    if (this.assetSyncCtl) {
+      this.assetSyncCtl.cancel();
+      this.assetSyncCtl = null;
+    }
+  }
+
+  /** Why 반영 has to wait for the assets, or null when it need not. */
+  get assetGateReason(): string | null {
+    const p = this.assetSync;
+    if (!p || p.charKey !== this.activeCharKey) return null;
+    if (syncBusy(p)) return describeSync(p) + ' — 끝나면 반영할 수 있습니다';
+    if (p.phase === 'error') return describeSync(p) + ' — 봇 카드에서 다시 동기화해 주세요';
+    if (p.phase === 'cancelled') return '에셋 임포트가 중단되었습니다 — 봇 카드에서 다시 동기화해 주세요';
+    return null;
   }
 
   // --- turns --------------------------------------------------------------

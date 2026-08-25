@@ -1,14 +1,30 @@
 /**
- * Asset references and transfer measurement.
+ * Asset references and the background importer.
  *
- * M0 of the bot-edit plan: before the real asset store exists, measure what
- * the wire can actually do - how fast `readImage` hands assets out of this
- * host, and how fast batched base64 POSTs reach the backend. The extractor
- * and the read->batch->upload loop here are the prototypes the M2 background
- * importer promotes, which is why they live outside the UI files.
+ * The bot's images reach the backend store here, after the text did. The
+ * shape follows what M0 measured (2026-08-24, 2980 assets / 142.6MB from a
+ * risu.xyz account): reading out of the host is the slow side - 862ms per
+ * asset, 42.8 minutes in all - and uploading is the fast side (2.6 minutes).
+ * So the importer's whole job is to read from the host as little as it can:
+ *
+ *   1. manifest      tell the backend every key the card references. It
+ *                    answers with what it already has, fills what it can from
+ *                    a PocketRisu database next door (fast path), and - for
+ *                    web users - starts pulling the rest from the RisuAI hub
+ *                    itself, with no browser bandwidth involved.
+ *   2. wait          while the backend pulls, poll its status.
+ *   3. push          whatever is still missing: readImage with a few in
+ *                    flight (never one at a time), batched by BYTES into
+ *                    uploads, then report the keys the host could not read.
+ *
+ * Content addressing makes all of this restartable: opening the panel again
+ * sends nothing the store already has, and a sync cut off half way resumes
+ * where it stopped. The gate on the bot bar's 반영 opens when the backend
+ * says `complete` - nothing missing and no pull running. Failed keys are
+ * shown, not waited for.
  */
 import type { RisuCharacter } from './risuai';
-import { transport } from './transport';
+import { transport, BackendError } from './transport';
 
 export interface AssetRef {
   /** Which character field referenced it. */
@@ -74,9 +90,273 @@ export function b64encode(bytes: Uint8Array): string {
   return btoa(bin);
 }
 
-/** Batch bounds shared with the M2 plan: raw bytes before base64, and count. */
+/**
+ * Batch bounds. Bytes first: at the measured 48KB average, a 50-item cap
+ * would fill 2.4MB of an 8MB batch, so the count is only a backstop for
+ * bots with many tiny files. 8MB raw is ~11MB base64 - well inside the
+ * backend's 64MB body limit and Cloudflare's 100MB.
+ */
 export const BATCH_BYTES = 8 * 1024 * 1024;
 export const BATCH_ITEMS = 50;
+
+// --- the importer -----------------------------------------------------------
+
+export type SyncPhase = 'manifest' | 'pulling' | 'pushing' | 'done' | 'cancelled' | 'error' | 'unsupported';
+
+export interface SyncProgress {
+  charKey: string;
+  phase: SyncPhase;
+  /** Keys the card references (deduplicated). */
+  total: number;
+  present: number;
+  missing: number;
+  failed: number;
+  /** Bytes the store holds for this bot. */
+  bytes: number;
+  /** This run's own work. */
+  read: number;
+  readFailed: number;
+  sent: number;
+  sentBytes: number;
+  toPush: number;
+  fastFilled: number;
+  pull: { total: number; done: number; ok: number; notFound: number; failed: number } | null;
+  /** What the backend said at the end: nothing missing, no pull running. */
+  complete: boolean;
+  error: string;
+  startedAt: number;
+  finishedAt: number;
+}
+
+export interface SyncController {
+  cancel(): void;
+  done: Promise<SyncProgress>;
+}
+
+interface ManifestReply {
+  total: number; present: number; missing: string[] | number; failed: number; bytes: number;
+  pulling: boolean; pull: SyncProgress['pull']; complete: boolean; fastFilled?: number;
+}
+
+interface StatusReply {
+  total: number; present: number; missing: number; failed: number; bytes: number;
+  pulling: boolean; pull: SyncProgress['pull']; complete: boolean;
+}
+
+export interface SyncOptions {
+  /** Ask the backend to pull from the RisuAI hub (web / account users). */
+  hubPull: boolean;
+  /** readImage calls in flight at once. */
+  concurrency: number;
+  /** Status poll interval while the backend pulls. */
+  pollMs?: number;
+}
+
+/**
+ * Sync one bot's assets into the backend store. Progress is reported through
+ * the callback (the same object, mutated); the promise resolves with it.
+ * Never rejects - an error is a phase.
+ */
+export function syncAssets(
+  char: RisuCharacter,
+  charKey: string,
+  opts: SyncOptions,
+  onProgress: (p: SyncProgress) => void,
+): SyncController {
+  let cancelled = false;
+  const p: SyncProgress = {
+    charKey, phase: 'manifest', total: 0, present: 0, missing: 0, failed: 0, bytes: 0,
+    read: 0, readFailed: 0, sent: 0, sentBytes: 0, toPush: 0, fastFilled: 0, pull: null,
+    complete: false, error: '', startedAt: Date.now(), finishedAt: 0,
+  };
+  const report = (): void => { try { onProgress(p); } catch { /* a listener must not stop the sync */ } };
+  const absorb = (r: StatusReply | ManifestReply): void => {
+    p.total = r.total;
+    p.present = r.present;
+    p.missing = Array.isArray(r.missing) ? r.missing.length : r.missing;
+    p.failed = r.failed;
+    p.bytes = r.bytes;
+    p.pull = r.pull ?? null;
+    p.complete = !!r.complete;
+  };
+  const sleep = (ms: number) => new Promise<void>((res) => setTimeout(res, ms));
+
+  const done = (async (): Promise<SyncProgress> => {
+    try {
+      const refs = extractAssetRefs(char);
+      p.total = refs.length;
+      report();
+
+      let m = await transport.upload<ManifestReply>('/assets/manifest', {
+        charKey, refs, hubPull: opts.hubPull,
+      });
+      absorb(m);
+      p.fastFilled = m.fastFilled ?? 0;
+      report();
+
+      // The backend is pulling from the hub: wait it out, then ask again for
+      // what is left - that is the list we have to read ourselves.
+      if (m.pulling) {
+        p.phase = 'pulling';
+        report();
+        while (!cancelled) {
+          await sleep(opts.pollMs ?? 1500);
+          const s = await transport.get<StatusReply>('/assets/status', { charKey });
+          absorb(s);
+          report();
+          if (!s.pulling) break;
+        }
+        if (cancelled) return finish('cancelled');
+        m = await transport.upload<ManifestReply>('/assets/manifest', { charKey, refs, hubPull: false });
+        absorb(m);
+        report();
+      }
+
+      const missing = Array.isArray(m.missing) ? m.missing : [];
+      p.toPush = missing.length;
+      if (missing.length) {
+        p.phase = 'pushing';
+        report();
+        await push(missing);
+        if (cancelled) return finish('cancelled');
+      }
+
+      const s = await transport.get<StatusReply>('/assets/status', { charKey });
+      absorb(s);
+      return finish('done');
+    } catch (e) {
+      if (e instanceof BackendError && e.status === 404) {
+        // An older backend without the store: nothing to sync against, and
+        // nothing to gate on.
+        return finish('unsupported', '백엔드에 에셋 스토어가 없습니다 (백엔드를 업데이트해 주세요)');
+      }
+      return finish('error', e instanceof Error ? e.message : String(e));
+    }
+  })();
+
+  function finish(phase: SyncPhase, error = ''): SyncProgress {
+    p.phase = phase;
+    p.error = error;
+    p.finishedAt = Date.now();
+    if (phase === 'unsupported') p.complete = true;
+    report();
+    return p;
+  }
+
+  /**
+   * Read the missing keys out of the host with a few in flight and ship them
+   * in byte-bounded batches. One batch is being filled while another is in
+   * transit; nothing is retained after its upload.
+   */
+  async function push(keys: string[]): Promise<void> {
+    const failed: string[] = [];
+    let batch: { key: string; data: string }[] = [];
+    let batchBytes = 0;
+    let uploading: Promise<void> = Promise.resolve();
+    let inTransit = 0;
+
+    const flush = (): void => {
+      if (!batch.length) return;
+      const items = batch;
+      const bytes = batchBytes;
+      batch = [];
+      batchBytes = 0;
+      inTransit += 1;
+      uploading = uploading.then(async () => {
+        try {
+          const r = await transport.upload<{ stored: number; bad: { key: string; error: string }[] }>(
+            '/assets/upload', { charKey, items },
+          );
+          p.sent += r.stored;
+          p.sentBytes += bytes;
+          for (const b of r.bad ?? []) failed.push(b.key);
+        } finally {
+          inTransit -= 1;
+        }
+        report();
+      });
+    };
+
+    let next = 0;
+    const worker = async (): Promise<void> => {
+      while (!cancelled) {
+        const i = next++;
+        if (i >= keys.length) return;
+        const key = keys[i];
+        let bytes: Uint8Array | null = null;
+        try {
+          const raw = await Risuai.readImage(key);
+          if (raw && (raw as Uint8Array).byteLength) {
+            bytes = raw instanceof Uint8Array ? raw : new Uint8Array(raw as ArrayBufferLike);
+          }
+        } catch { /* counted below */ }
+        if (!bytes) {
+          failed.push(key);
+          p.readFailed += 1;
+          report();
+          continue;
+        }
+        p.read += 1;
+        batch.push({ key, data: b64encode(bytes) });
+        batchBytes += bytes.byteLength;
+        if (batchBytes >= BATCH_BYTES || batch.length >= BATCH_ITEMS) flush();
+        report();
+        // Reading overlaps uploading, but not without bound: with two batches
+        // already on the wire, wait rather than fill a third in memory.
+        if (inTransit >= 2) await uploading;
+      }
+    };
+    const n = Math.max(1, Math.min(8, opts.concurrency));
+    await Promise.all(Array.from({ length: n }, () => worker()));
+    if (!cancelled) flush();
+    await uploading;
+
+    if (failed.length && !cancelled) {
+      try {
+        await transport.post('/assets/fail', {
+          charKey, keys: failed, reason: 'readImage returned nothing',
+        });
+      } catch { /* reported by the next status anyway */ }
+    }
+  }
+
+  return { cancel: () => { cancelled = true; }, done };
+}
+
+export function describeSync(p: SyncProgress | null): string {
+  if (!p) return '';
+  const mb = (n: number) => (n / 1048576).toFixed(1) + 'MB';
+  switch (p.phase) {
+    case 'manifest':
+      return `에셋 목록 대조 중 · ${p.total}개`;
+    case 'pulling': {
+      const d = p.pull;
+      return d
+        ? `백엔드가 허브에서 받는 중 ${d.done}/${d.total}` + (d.notFound ? ` · 없음 ${d.notFound}` : '')
+        : '백엔드가 허브에서 받는 중';
+    }
+    case 'pushing':
+      return `에셋 임포트 중 ${p.read + p.readFailed}/${p.toPush} · 전송 ${mb(p.sentBytes)}`;
+    case 'done':
+      return p.total
+        ? `에셋 ${p.present}/${p.total}개 · ${mb(p.bytes)}` + (p.failed ? ` · 읽기 실패 ${p.failed}` : '')
+        : '참조하는 에셋 없음';
+    case 'cancelled':
+      return `에셋 임포트 중단됨 (${p.present}/${p.total})`;
+    case 'unsupported':
+      return p.error;
+    case 'error':
+      return '에셋 임포트 실패: ' + p.error;
+  }
+  return '';
+}
+
+/** Whether a sync is still working - what the bot bar's gate reads. */
+export function syncBusy(p: SyncProgress | null): boolean {
+  return !!p && (p.phase === 'manifest' || p.phase === 'pulling' || p.phase === 'pushing');
+}
+
+// --- M0 measurement (kept: the settings tab's probe) ------------------------
 
 export interface DumpReport {
   refs: number;
@@ -100,11 +380,9 @@ export interface DumpController {
 
 /**
  * Sequentially read every referenced asset and push it through the echo
- * endpoint in batches, timing both sides separately.
- *
- * Sequential on purpose: this is the shape the background importer will use
- * (bounded memory - one batch in flight, nothing retained after upload), so
- * the numbers measured here are the numbers that flow matters for.
+ * endpoint in batches, timing both sides separately. Sequential on purpose:
+ * it measures the per-asset cost of the host, which is the number the
+ * importer's design rests on.
  */
 export function measureAssetDump(
   char: RisuCharacter,
@@ -164,7 +442,7 @@ export function measureAssetDump(
     if (!cancelled) await flush();
 
     // Whether the backend can pull from the RisuAI hub itself - the path that
-    // would spare the browser entirely for account-synced bots.
+    // spares the browser entirely for account-synced bots.
     if (refs.length) {
       try {
         rep.rsProbe = await transport.get<Record<string, unknown>>(

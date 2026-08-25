@@ -14,6 +14,50 @@ import { state } from '../state';
 import { setEditMode } from './shell';
 import { shellNotice } from './chatbar';
 import type { RisuChat } from '../risuai';
+import { describeSync, syncBusy } from '../assets';
+
+/**
+ * One line under the bot's name: what the background asset importer is up
+ * to. Progress while it runs (a thin bar, re-rendered on each emit), the
+ * totals once it is done, and a retry when it stopped short - the bot bar's
+ * 반영 waits on exactly this.
+ */
+function assetSyncLine(): HTMLElement {
+  const p = state.assetSync;
+  const wrap = el('div', { class: 'assetsync' });
+  if (!p) {
+    wrap.appendChild(el('div', { class: 'hint', text: state.activeCharKey ? '에셋 동기화 대기 중' : '' }));
+    return wrap;
+  }
+  const busy = syncBusy(p);
+  const text = el('span', { class: 'hint', text: describeSync(p) });
+  const tone = p.phase === 'error' ? ' err' : (p.phase === 'done' && p.failed ? ' warn' : '');
+  const line = el('div', { class: 'row assetline' + tone }, [text]);
+  if (busy) {
+    const cancel = el('button', { class: 'ghost tiny', text: '중단' });
+    cancel.addEventListener('click', () => { state.cancelAssetSync(); });
+    line.appendChild(cancel);
+    // Pulling: the backend's own count. Pushing: ours. Manifest: indeterminate.
+    let ratio = -1;
+    if (p.phase === 'pulling' && p.pull && p.pull.total) ratio = p.pull.done / p.pull.total;
+    else if (p.phase === 'pushing' && p.toPush) ratio = (p.read + p.readFailed) / p.toPush;
+    const bar = el('div', { class: 'assetbar' + (ratio < 0 ? ' indeterminate' : '') });
+    const fill = el('div', { class: 'assetfill' });
+    if (ratio >= 0) fill.style.width = Math.round(Math.min(1, ratio) * 100) + '%';
+    bar.appendChild(fill);
+    wrap.appendChild(line);
+    wrap.appendChild(bar);
+  } else {
+    if (p.phase !== 'unsupported') {
+      const again = el('button', { class: 'ghost tiny', text: '다시 동기화' });
+      again.title = '에셋 목록을 다시 대조하고, 빠진 것만 가져옵니다';
+      again.addEventListener('click', () => { state.syncAssets(true); });
+      line.appendChild(again);
+    }
+    wrap.appendChild(line);
+  }
+  return wrap;
+}
 
 /** Blob URLs for portraits, revoked when the tab is rebuilt. */
 let portraitUrl = '';
@@ -83,6 +127,7 @@ export function renderChatsTab(mount: HTMLElement): void {
     el('div', { class: 'grow' }, [
       el('div', { class: 'botname', text: String(char.name || '(이름 없음)') }),
       el('div', { class: 'hint', text: `챗 ${liveChats.length}개` + (folders.length ? ` · 폴더 ${folders.length}개` : '') }),
+      assetSyncLine(),
       el('div', { class: 'row', style: { marginTop: '8px' } }, [editBot, rescan]),
       el('div', { class: 'hint', style: { marginTop: '6px' } }, [
         '다른 봇을 편집하시려면 RisuAI에서 그 봇을 열고 🔄 를 눌러 주세요.',

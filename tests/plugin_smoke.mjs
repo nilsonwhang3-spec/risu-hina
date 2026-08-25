@@ -350,6 +350,42 @@ console.log('\ntest_chat_selection_layout');
         /다른 봇을 편집하시려면/.test(document.querySelector('.botcard').textContent || ''));
 }
 
+console.log('\ntest_asset_sync');
+{
+  // The background importer starts right after the text upload: the card's
+  // one asset (the portrait) is read out of the host and lands in the store,
+  // after which the backend reports the bot complete and the picker says so.
+  const auth = { Authorization: 'Bearer plugin-smoke-token' };
+  const wsList = await (await fetch(backend.url + '/workspace', { headers: auth })).json();
+  const ck = wsList.workspaces?.[0]?.charKey || '';
+  check('workspace known to the backend', !!ck, JSON.stringify(wsList).slice(0, 120));
+  let status = null;
+  for (let i = 0; i < 20 && !(status && status.complete); i++) {
+    await settle(250);
+    status = await (await fetch(backend.url + '/assets/status?charKey=' + encodeURIComponent(ck), { headers: auth })).json();
+  }
+  check('the store holds the portrait', status?.present === 1 && status?.total === 1, JSON.stringify(status).slice(0, 200));
+  check('and reports the bot complete', status?.complete === true);
+  check('readImage was used for the missing key', host.calls.filter((c) => c === 'readImage').length >= 1);
+  clickById(document, 'tab-chats');
+  await settle(600);
+  const line = document.querySelector('.botcard .assetsync');
+  check('the bot card shows the sync result', /에셋 1\/1개/.test(line?.textContent || ''), line?.textContent);
+  check('with a way to run it again', !!findButton(line, '다시 동기화'));
+  check('and no progress bar once done', !line?.querySelector('.assetbar'));
+  // A second sync sends nothing: the store already has the key. Counted on
+  // the wire (the picker's portrait thumbnail also calls readImage, so host
+  // calls would not tell the two apart).
+  const uploads = () => (backend.log().match(/POST \/assets\/upload/g) || []).length;
+  const uploadsBefore = uploads();
+  check('the first sync uploaded once', uploadsBefore === 1, String(uploadsBefore));
+  clickButton(line, '다시 동기화');
+  await settle(1200);
+  check('a second sync uploads nothing', uploads() === uploadsBefore, `${uploadsBefore} -> ${uploads()}`);
+  const again = await (await fetch(backend.url + '/assets/status?charKey=' + encodeURIComponent(ck), { headers: auth })).json();
+  check('and is still complete', again?.complete === true && again?.present === 1);
+}
+
 console.log('\ntest_health_status');
 {
   // Health lives inside the title row now: one dot and a version rather than a
@@ -933,6 +969,11 @@ console.log('\ntest_bot_tabs');
   check('and lands on 메타', document.getElementById('tab-meta')?.classList.contains('active'));
   check('the bot bar shows on bot tabs',
         document.querySelector('.toolslot .botbar')?.style.display !== 'none');
+  // The asset importer finished earlier (test_asset_sync), so the gate on
+  // 반영 is open: the apply verb is not dimmed and its title is the plain one.
+  const applyTool = document.querySelector('.botbar .tool[data-tool="card-apply"]');
+  check('the asset gate is open after the sync', !!applyTool && !applyTool.classList.contains('dimmed'),
+        applyTool?.title);
   check('and the chat bar does not',
         document.querySelector('.toolslot .chatbar')?.style.display === 'none');
   const tree = () => document.querySelector('.panel.active .tree');
