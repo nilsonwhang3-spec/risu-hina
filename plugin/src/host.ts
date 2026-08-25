@@ -360,7 +360,18 @@ function cryptoRandomId(): string {
 
 /** Trigger a browser download. Verified working in the sandbox (allow-downloads). */
 export function download(filename: string, text: string, mime = 'text/plain;charset=utf-8'): void {
-  const blob = new Blob([text], { type: mime });
+  downloadBlob(filename, new Blob([text], { type: mime }));
+}
+
+/** Bytes variant: a charx or an image the backend built. */
+export function downloadBytes(filename: string, bytes: Uint8Array, mime = 'application/octet-stream'): void {
+  // Copy into a plain ArrayBuffer: a SharedArrayBuffer-backed view is refused by Blob.
+  const buf = new Uint8Array(bytes.byteLength);
+  buf.set(bytes);
+  downloadBlob(filename, new Blob([buf], { type: mime }));
+}
+
+function downloadBlob(filename: string, blob: Blob): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;

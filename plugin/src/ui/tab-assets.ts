@@ -130,6 +130,61 @@ function renderHeader(): void {
       '왼쪽에서 항목을 고르면 상세를 봅니다.',
     ]),
   ]));
+  viewMount.appendChild(charxCard(present, total));
+}
+
+/**
+ * charx from the working card: the backend assembles it into out/ (files
+ * tab → 내 PC에 저장). Missing assets are the one thing that can stop it -
+ * the importer throws on an embedded path that is not in the zip - so the
+ * choice is shown up front: wait for the sync, or build without them.
+ */
+function charxCard(present: number, total: number): HTMLElement {
+  const out = el('div', { class: 'outbox' });
+  const nameInput = el('input', {
+    value: (state.workspace?.characterName || 'character'), placeholder: '파일 이름 (.charx)',
+  }) as HTMLInputElement;
+  const build = el('button', { class: 'primary', text: 'charx 만들기' }) as HTMLButtonElement;
+  const buildAnyway = el('button', { class: 'ghost', text: '빠진 에셋 빼고 만들기' }) as HTMLButtonElement;
+  buildAnyway.style.display = 'none';
+  const run = async (allowMissing: boolean): Promise<void> => {
+    build.disabled = buildAnyway.disabled = true;
+    clear(out);
+    out.appendChild(el('div', { class: 'hint', text: '만드는 중입니다… 에셋이 많으면 몇 분 걸립니다.' }));
+    try {
+      const r = await state.charxBuild({ allowMissing, name: nameInput.value.trim() });
+      clear(out);
+      out.appendChild(el('div', { class: 'notice ok', text:
+        `${r.file} · ${(r.size / 1048576).toFixed(1)}MB · 에셋 ${r.assets}개` + (r.dropped ? ` (${r.dropped}개 제외)` : '')
+        + ` · ${r.seconds}s — 워크스페이스 파일 탭의 out/ 에서 내 PC에 저장할 수 있습니다.` }));
+      buildAnyway.style.display = 'none';
+    } catch (e) {
+      clear(out);
+      const body = (e as { body?: { missing?: { name: string; type: string }[] } }).body;
+      const missing = body?.missing;
+      if (Array.isArray(missing) && missing.length) {
+        out.appendChild(el('div', { class: 'notice err', text:
+          `에셋 ${missing.length}개가 스토어에 없어 만들지 않았습니다: `
+          + missing.slice(0, 6).map((m) => m.name || m.type).join(', ') + (missing.length > 6 ? ' …' : '') }));
+        out.appendChild(el('div', { class: 'hint', text: '동기화를 다시 돌려 채우거나, 빠진 항목을 빼고 만들 수 있습니다(그 이미지는 카드에서 사라집니다).' }));
+        buildAnyway.style.display = '';
+      } else {
+        out.appendChild(el('div', { class: 'notice err', text: 'charx 를 만들지 못했습니다: ' + (e instanceof Error ? e.message : String(e)) }));
+      }
+    } finally {
+      build.disabled = buildAnyway.disabled = false;
+    }
+  };
+  build.addEventListener('click', () => { void run(false); });
+  buildAnyway.addEventListener('click', () => { void run(true); });
+  return el('div', { class: 'card' }, [
+    el('h2', { text: 'charx 내보내기' }),
+    el('div', { class: 'hint', text:
+      `작업본 카드(메타·인사말·봇 로어북·Regex·트리거)와 스토어의 에셋 ${present}/${total}개로 charx 를 만듭니다. `
+      + '반영하지 않은 편집도 들어갑니다. module.risum 없이 card.json 에 인라인으로 담기며 RisuAI·PocketRisu 가 그대로 가져옵니다.' }),
+    el('div', { class: 'row', style: { marginTop: '8px' } }, [nameInput, build, buildAnyway]),
+    out,
+  ]);
 }
 
 function mb(n: number): string {

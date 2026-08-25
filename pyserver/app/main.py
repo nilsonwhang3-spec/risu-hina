@@ -23,6 +23,7 @@ import pathlib
 import re
 import sys
 import time
+import urllib.parse
 import uuid
 from collections import defaultdict, deque
 from typing import Any, Callable
@@ -33,7 +34,7 @@ from starlette.concurrency import run_in_threadpool
 
 from . import (chatfmt, config, db, files, log, presets, session, skills, staging,
                store, websearch, workspace)
-from . import actions, assets, snapshots, updater
+from . import actions, assets, charx, snapshots, updater
 from . import card as cardmod
 from . import memory as mem
 
@@ -414,6 +415,33 @@ def h_assets_gc(arg: dict) -> dict:
 
 def h_assets_blob(arg: dict) -> Any:
     raise ApiError(500, "assets/blob must be dispatched directly")
+
+
+# --- M2: charx ------------------------------------------------------------------
+
+def h_charx_preview(arg: dict) -> dict:
+    try:
+        return charx.preview(_char(arg))
+    except charx.CharxError as e:
+        raise ApiError(409, str(e))
+
+
+def h_charx_build(arg: dict) -> dict:
+    """Assemble out/<name>.charx from the working card and the store. A
+    refusal over missing assets is a 409 with the list, not an exception."""
+    ck = _char(arg)
+    try:
+        r = charx.build(ck, allow_missing=bool(arg.get("allowMissing")),
+                        filename=str(arg.get("name") or "") or None)
+    except charx.CharxError as e:
+        raise ApiError(409, str(e))
+    if not r.get("ok"):
+        raise ApiError(409, "에셋이 빠져 있어 charx 를 만들지 않았습니다", **r)
+    return r
+
+
+def h_file_download(arg: dict) -> Any:
+    raise ApiError(500, "files/download must be dispatched directly")
 
 
 def _plugin_file() -> "pathlib.Path | None":
@@ -1385,6 +1413,9 @@ ROUTES: dict[str, Handler] = {
     "GET /assets/list": h_assets_list,
     "POST /assets/gc": h_assets_gc,
     "GET /assets/blob": h_assets_blob,
+    "GET /charx/preview": h_charx_preview,
+    "POST /charx/build": h_charx_build,
+    "GET /files/download": h_file_download,
 
     "GET /config": h_config_get,
     "POST /config": h_config_set,
@@ -1559,6 +1590,44 @@ async def dispatch(path: str, request: Request) -> Response:
             content=f.read_bytes(),
             media_type="application/javascript; charset=utf-8",
             headers={**config.cors_headers(origin), "Cache-Control": "no-cache"},
+        )
+
+    if key == "GET /files/download":
+        # A workspace file as bytes, for things the JSON preview cannot carry
+        # - a charx, an image the agent made. Streamed: a 150MB charx must not
+        # be read into memory to be served.
+        try:
+            ck = _char(arg)
+            target = files._resolve(ck, str(arg.get("path") or ""))
+        except ApiError as e:
+            _log(request.method, pathname, e.status, started, str(e))
+            return _json(e.status, e.payload, origin)
+        except files.FileError as e:
+            _log(request.method, pathname, 400, started, str(e))
+            return _json(400, {"error": str(e)}, origin)
+        if not target.is_file():
+            _log(request.method, pathname, 404, started, str(arg.get("path") or ""))
+            return _json(404, {"error": "no such file", "path": arg.get("path")}, origin)
+        size = target.stat().st_size
+        _log(request.method, pathname, 200, started, f"{target.name} {size // 1024}KB")
+        quoted = urllib.parse.quote(target.name)
+
+        def _iter(p: pathlib.Path, chunk: int = 1 << 20):
+            with p.open("rb") as fh:
+                while True:
+                    block = fh.read(chunk)
+                    if not block:
+                        break
+                    yield block
+        return StreamingResponse(
+            _iter(target),
+            media_type=_MIME.get(target.suffix.lower().lstrip("."), "application/octet-stream"),
+            headers={
+                **config.cors_headers(origin),
+                "Content-Length": str(size),
+                "Content-Disposition": f"attachment; filename*=UTF-8''{quoted}",
+                "Cache-Control": "no-store",
+            },
         )
 
     if key == "GET /assets/blob":

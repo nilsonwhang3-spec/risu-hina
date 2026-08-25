@@ -295,6 +295,20 @@ def store_stats() -> dict:
             "dir": str(ASSET_DIR)}
 
 
+def locate(key: str) -> Path | None:
+    """The file behind a present key, or None. For streaming readers (charx)."""
+    if not key_ok(key):
+        return None
+    r = db.one(
+        "SELECT k.content_hash, b.ext FROM asset_keys k JOIN asset_blobs b "
+        "ON b.content_hash = k.content_hash WHERE k.risu_key = ? AND k.state = 'present'",
+        (key,))
+    if r is None:
+        return None
+    p = blob_path(r["content_hash"], r["ext"])
+    return p if p.is_file() else None
+
+
 def read_bytes(key: str) -> tuple[bytes, str] | None:
     """(bytes, ext) for a present key, or None."""
     r = db.one(

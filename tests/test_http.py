@@ -1610,6 +1610,96 @@ def test_assets_store(s: Server, cw: dict) -> None:
     check("an unknown workspace is a 404", st == 404, str(st))
 
 
+def test_charx_build(s: Server, cw: dict) -> None:
+    """M2: charx from the working card and the store.
+
+    The contract RisuAI's importer imposes (characterCards.ts at c0ed1026):
+    chara_card_v3, every `embeded://` path present in the zip, triggers and
+    Regex inline under extensions.risuai, the lorebook in character_book.
+    And ours: the WORKING card goes in, missing assets refuse by default and
+    drop on request, the file lands in out/ and streams back as bytes.
+    """
+    print("test_charx_build")
+    import base64
+    import io
+    import zipfile
+    ck = cw["charKey"]
+    png = b"\x89PNG\r\n\x1a\n" + b"y" * 300
+
+    # The card references one emotion image; the store was emptied by the
+    # asset test, so a build must refuse and name it.
+    st, body = s.post("/assets/manifest", {"charKey": ck, "refs": [
+        {"field": "emotion", "name": "기쁨", "key": "assets/aa.png"}]})
+    st, body = s.get(q("/charx/preview", charKey=ck))
+    check("preview counts the card", st == 200 and body.get("assets") == 1 and body.get("lore") >= 1, str(body)[:200])
+    check("and names the missing asset", [m["key"] for m in body.get("missing") or []] == ["assets/aa.png"], str(body.get("missing")))
+    st, body = s.post("/charx/build", {"charKey": ck})
+    check("a build with a missing asset is refused", st == 409, str(st) + " " + str(body)[:120])
+    check("and says which", [m["key"] for m in body.get("missing") or []] == ["assets/aa.png"], str(body)[:200])
+
+    # Drop it on request: the entry disappears, the zip imports cleanly.
+    st, body = s.post("/charx/build", {"charKey": ck, "allowMissing": True, "name": "dropped"})
+    check("allowMissing builds", st == 200 and body.get("ok") is True, str(body)[:200])
+    check("with the entry dropped", body.get("dropped") == 1 and body.get("assets") == 0, str(body)[:200])
+
+    # Fill the store and build for real.
+    s.post("/assets/upload", {"items": [{"key": "assets/aa.png", "data": base64.b64encode(png).decode()}]})
+    st, body = s.post("/charx/build", {"charKey": ck, "name": "카드 봇 테스트"})
+    check("build succeeds once the asset is there", st == 200 and body.get("ok") is True, str(body)[:200])
+    check("one asset in, nothing dropped", body.get("assets") == 1 and body.get("dropped") == 0, str(body)[:200])
+    check("the file lands in out/", body.get("path") == "out/카드 봇 테스트.charx", str(body.get("path")))
+
+    # q()'s own first parameter is called `path`, so this query is spelled out.
+    dl = lambda p: "/files/download?charKey=" + urllib.parse.quote(ck) + "&path=" + urllib.parse.quote(p)
+    st, raw = s.get(dl(body.get("path")))
+    check("download streams bytes", st == 200 and "_raw" in raw, str(st))
+    st, resp = s.get(dl("../../etc/passwd"))
+    check("download refuses an escape", st == 400, str(st))
+    st, resp = s.get(dl("out/nope.charx"))
+    check("and a missing file is a 404", st == 404, str(st))
+
+    # Read the zip straight off disk (the helper decodes bodies as text).
+    st, files = s.get(q("/files", charKey=ck))
+    root = files.get("root") or ""
+    with zipfile.ZipFile(Path(root) / "out" / "카드 봇 테스트.charx") as z:
+        names = z.namelist()
+        check("card.json is the last entry, no module.risum",
+              names[-1] == "card.json" and "module.risum" not in names, str(names))
+        check("x_meta precedes its asset",
+              names[0].startswith("x_meta/") and names[1].startswith("assets/emotion/image/"), str(names))
+        card = json.loads(z.read("card.json"))
+        d = card.get("data") or {}
+        check("spec is v3", card.get("spec") == "chara_card_v3" and card.get("spec_version") == "3.0")
+        a = (d.get("assets") or [{}])[0]
+        check("the asset entry points into the zip", a.get("uri") == "embeded://" + names[1]
+              and a.get("type") == "emotion" and a.get("name") == "기쁨", str(a))
+        check("and the bytes are the store's", z.read(names[1]) == png)
+        risu = (d.get("extensions") or {}).get("risuai") or {}
+        check("Regex and triggers are inline", isinstance(risu.get("customScripts"), list)
+              and isinstance(risu.get("triggerscript"), list) and len(risu["customScripts"]) >= 1,
+              str(list(risu.keys()))[:200])
+        check("vits is an empty object, as createBaseV3 writes it", risu.get("vits") == {})
+        book = d.get("character_book") or {}
+        entries = book.get("entries") or []
+        check("the lorebook is in character_book", len(entries) >= 1 and "keys" in entries[0]
+              and "risu_fullWordMatching" in (book.get("extensions") or {}), str(book)[:200])
+        # The working copy, not the baseline: the card test edited desc and
+        # committed, and the greeting list is whatever /card lists now.
+        st, cardrows = s.get(q("/card", charKey=ck))
+        want = [f["body"] for f in sorted(
+            (f for f in cardrows.get("fields") or [] if f["field"] == "alternateGreetings" and not f.get("deleted")),
+            key=lambda f: f["seq"])]
+        check("greetings come from the working copy", d.get("alternate_greetings") == want,
+              str(d.get("alternate_greetings"))[:120] + " vs " + str(want)[:120])
+        desc = next((f["body"] for f in cardrows.get("fields") or [] if f["field"] == "desc"), None)
+        check("so does the description", d.get("description") == desc, str(d.get("description"))[:80])
+        check("the portrait entry is absent when the card has no image",
+              not any(x.get("type") == "icon" for x in d.get("assets") or []))
+
+    st, body = s.post("/charx/build", {"charKey": "cnope"})
+    check("unknown workspace is a 404", st == 404, str(st))
+
+
 def test_loopback_exemption() -> None:
     """With RISUELF_REQUIRE_TOKEN off, a loopback caller needs no token.
 
@@ -1670,6 +1760,7 @@ def main() -> int:
         test_logs_and_diagnostics(s)
         test_asset_probe(s)
         test_assets_store(s, cw)
+        test_charx_build(s, cw)
     finally:
         s.stop()
 

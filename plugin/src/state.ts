@@ -120,6 +120,17 @@ export interface AssetItem {
   hash: string | null;
 }
 
+export interface CharxPreview {
+  charKey: string; name: string; assets: number; present: number;
+  missing: { name: string; type: string; key: string }[];
+  lore: number; regex: number; triggers: number; greetings: number;
+}
+
+export interface CharxBuilt {
+  ok: boolean; file: string; path: string; size: number; assets: number; dropped: number;
+  missing: { name: string; type: string; key: string }[]; assetBytes: number; seconds: number;
+}
+
 export interface WorkspaceFile {
   path: string;
   name: string;
@@ -814,6 +825,29 @@ class AppState {
   //
   // Scoped to the character, not the chat: the workspace is per bot, and its
   // uploads and outputs are shared across that bot's chats.
+
+  /** Save a workspace file to the user's disk through the browser. */
+  async downloadFile(path: string): Promise<number> {
+    const bytes = await transport.getBinary('/files/download', { charKey: this.activeCharKey, path });
+    const name = path.split('/').pop() || 'file';
+    host.downloadBytes(name, bytes, name.endsWith('.charx') ? 'application/zip' : 'application/octet-stream');
+    return bytes.byteLength;
+  }
+
+  // --- charx ------------------------------------------------------------------
+
+  async charxPreview(): Promise<CharxPreview> {
+    return await transport.get('/charx/preview', { charKey: this.botKey });
+  }
+
+  /** Build out/<name>.charx on the backend from the working card + store. */
+  async charxBuild(opts: { allowMissing?: boolean; name?: string } = {}): Promise<CharxBuilt> {
+    const r = await transport.post<CharxBuilt>('/charx/build', {
+      charKey: this.botKey, allowMissing: !!opts.allowMissing, name: opts.name || '',
+    }, 600_000);
+    this.touchFiles([r.path]);
+    return r;
+  }
 
   async files(): Promise<FileListing> {
     return await transport.get('/files?charKey=' + encodeURIComponent(this.activeCharKey));

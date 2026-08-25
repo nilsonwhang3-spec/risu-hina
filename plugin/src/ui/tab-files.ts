@@ -271,9 +271,28 @@ async function open(f: WorkspaceFile, area: FileArea): Promise<void> {
 
   clear(viewMount);
   if (!f.textual) {
+    const save = el('button', { class: 'primary tiny', text: '내 PC에 저장' }) as HTMLButtonElement;
+    const out = el('div', { class: 'hint' });
+    save.addEventListener('click', async () => {
+      save.disabled = true;
+      out.textContent = '받는 중입니다…';
+      try {
+        const n = await state.downloadFile(f.path);
+        out.textContent = `${fmtSize(n)} 를 브라우저 다운로드로 넘겼습니다.`;
+      } catch (e) {
+        out.textContent = '받지 못했습니다: ' + (e instanceof Error ? e.message : String(e));
+      } finally {
+        save.disabled = false;
+      }
+    });
     viewMount.appendChild(el('div', { class: 'card' }, [
       el('h2', { text: f.path }),
       el('div', { class: 'hint', text: `${fmtSize(f.size)} · 텍스트 파일이 아니라 미리보기를 건너뜁니다.` }),
+      el('div', { class: 'row', style: { marginTop: '8px' } }, [save]),
+      out,
+      f.path.endsWith('.charx')
+        ? el('div', { class: 'hint', style: { marginTop: '6px' }, text: '받은 charx 는 RisuAI 의 캐릭터 가져오기로 넣습니다. 300MB 가 넘으면 백엔드 PC 의 out/ 폴더에서 직접 복사하는 편이 빠릅니다.' })
+        : null,
     ]));
     return;
   }

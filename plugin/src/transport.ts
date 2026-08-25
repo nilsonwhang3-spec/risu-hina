@@ -138,6 +138,19 @@ export class Transport {
     return this.json<T>('POST', path, payload, UPLOAD_TIMEOUT_MS);
   }
 
+  /** GET that answers bytes, not JSON - a charx, an image out of the store. */
+  async getBinary(path: string, query?: Record<string, string | number | undefined>): Promise<Uint8Array> {
+    const qs = query
+      ? '?' + Object.entries(query)
+          .filter(([, v]) => v !== undefined && v !== '')
+          .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
+          .join('&')
+      : '';
+    const res = await this.raw('GET', path + qs, undefined, { timeoutMs: UPLOAD_TIMEOUT_MS });
+    if (!res.ok) throw await toError(res);
+    return new Uint8Array(await res.arrayBuffer());
+  }
+
   /**
    * NDJSON stream. Yields one parsed object per line as it arrives.
    *
