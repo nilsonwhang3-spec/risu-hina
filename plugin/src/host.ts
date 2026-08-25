@@ -257,12 +257,28 @@ export async function writeCharacter(
   const parts: string[] = [];
   let applied = 0;
 
+  // characterVersion is nested on a RisuAI character (additionalData.
+  // character_version is what its UI edits; the importer also sets the
+  // top-level twin). Read the nested one, write both.
+  const liveValue = (field: string): string => {
+    if (field === 'characterVersion') {
+      const add = fresh['additionalData'] as Record<string, unknown> | undefined;
+      const v = add && typeof add === 'object' ? add['character_version'] : undefined;
+      return String(v ?? fresh['characterVersion'] ?? '');
+    }
+    return String(fresh[field] ?? '');
+  };
   for (const e of update.fields ?? []) {
-    if (String(fresh[e.field] ?? '') !== e.before) {
+    if (liveValue(e.field) !== e.before) {
       throw new HostError('changed', `RisuAI 쪽에서 카드가 바뀌었습니다 (${e.field}). 다시 불러와 주세요`);
     }
   }
   for (const e of update.fields ?? []) {
+    if (e.field === 'characterVersion') {
+      const add = { ...((fresh['additionalData'] as Record<string, unknown> | undefined) ?? {}) };
+      add['character_version'] = e.after;
+      next['additionalData'] = add;
+    }
     next[e.field] = e.after;
     applied += 1;
     parts.push(e.field);

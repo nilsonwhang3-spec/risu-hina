@@ -989,7 +989,7 @@ console.log('\ntest_bot_tabs');
   check('retired fields are gone', !/시나리오|성격|시스템 프롬프트/.test(tree()?.textContent || ''));
   check('greetings sit under the first message', (() => {
     const labels = [...tree()?.querySelectorAll('.treefile') ?? []].map((b) => b.textContent || '');
-    const fm = labels.findIndex((t) => /첫 인사/.test(t));
+    const fm = labels.findIndex((t) => /퍼스트 메시지/.test(t));
     return fm >= 0 && /대체 인사말 #1/.test(labels[fm + 1] || '');
   })(), [...tree()?.querySelectorAll('.treefile') ?? []].map((b) => b.textContent).join(','));
 
@@ -1013,26 +1013,32 @@ console.log('\ntest_bot_tabs');
   await settle(900);
   check('the assets tab is a bot tab', document.getElementById('tab-assets')?.style.display !== 'none'
         && document.getElementById('tab-assets')?.classList.contains('active'));
-  const atree = () => document.querySelector('.panel.active .tree');
-  check('the portrait is listed under its field', /프로필 · 1개/.test(atree()?.textContent || '')
-        && /저장됨/.test(atree()?.textContent || ''), atree()?.textContent?.slice(0, 160));
-  check('the header states the totals', /에셋 1\/1개/.test(document.querySelector('.panel.active .left')?.textContent || ''),
-        document.querySelector('.panel.active .left')?.textContent?.slice(0, 160));
-  clickButton(atree(), '프로필');
-  await settle(500);
-  const aview = document.querySelector('.panel.active .left');
-  check('an item opens with its key and hash', /assets\/portrait\.png/.test(aview?.textContent || '')
-        && /해시/.test(aview?.textContent || ''), aview?.textContent?.slice(0, 200));
-  check('and a preview was attempted on this host', !!aview?.querySelector('.assetpreview img, .assetpreview .assettype'));
-  // charx: built on the backend from the working card and the store, into out/.
-  clickButton(aview, '← 목록');
-  await settle(400);
-  const left = () => document.querySelector('.panel.active .left');
-  check('the charx card is offered', !!findButton(left(), 'charx 만들기'));
-  clickButton(left(), 'charx 만들기');
-  await settle(2500);
-  check('charx built with the portrait in it', /에셋 1개/.test(left()?.textContent || '')
-        && /out\//.test(left()?.textContent || ''), left()?.querySelector('.outbox')?.textContent);
+  // A grid of thumbnails with the name under each; the portrait is a cell too.
+  const grid = () => document.querySelector('.panel.active .assetgrid');
+  check('assets are a grid', !!grid() && grid().querySelectorAll('.assetcell').length === 1,
+        String(grid()?.querySelectorAll('.assetcell').length));
+  check('the portrait cell carries its name and a thumbnail attempt',
+        /프로필/.test(grid()?.querySelector('.assetname')?.textContent || '')
+        && !!grid()?.querySelector('.assetpic img, .assetpic .assettype'));
+  check('the side column totals the assets', /에셋 1개/.test(document.querySelector('.panel.active .tree')?.textContent || ''),
+        document.querySelector('.panel.active .tree')?.textContent?.slice(0, 120));
+  check('the find box sits on the menu line', !!document.querySelector('.tabslot .searchbox input'));
+  check('the sync badge sits at the end of the tab row', /에셋 1\/1/.test(document.querySelector('.tabs .syncbadge')?.textContent || ''),
+        document.querySelector('.tabs .syncbadge')?.textContent);
+  check('bulk tools are offered once the sync is done', !!findButton(document.querySelector('.panel.active .tree'), '확장자 일괄 제거'));
+  // charx lives on the bot bar, next to 반영, and is open because the sync finished.
+  const charxTool = document.querySelector('.botbar .tool[data-tool="card-charx"]');
+  check('charx is a bot bar verb', !!charxTool && !charxTool.classList.contains('dimmed'), charxTool?.title);
+  check('it opens a popover', clickTool(document, 'card-charx'));
+  await settle(300);
+  clickButton(document.querySelector('.popover'), 'charx 만들기');
+  // The build zips on the backend; wait for the shell notice rather than a fixed pause.
+  for (let i = 0; i < 40 && !/out\//.test(document.querySelector('.shellnotice')?.textContent || ''); i++) await settle(250);
+  check('charx built with the portrait in it', /에셋 1개/.test(document.querySelector('.shellnotice')?.textContent || '')
+        && /out\//.test(document.querySelector('.shellnotice')?.textContent || ''),
+        'notice=' + JSON.stringify(document.querySelector('.shellnotice')?.textContent) + ' popover=' + JSON.stringify(document.querySelector('.popover')?.textContent?.slice(0, 200)));
+  pressEscape(document);
+  await settle(200);
   clickById(document, 'tab-files');
   await settle(900);
   const filesTree = document.querySelector('.panel.active .tree');
@@ -1063,15 +1069,18 @@ console.log('\ntest_bot_tabs');
   check('reorder lives in the list, not the editor',
         !!document.querySelector('.panel.active .tree .movebtn') && !findButton(rc, '↑ 위로'));
 
-  // Trigger: the editor is the CODE, real newlines and all - never JSON.
+  // Trigger: RisuAI's three modes. The card is in Lua mode, so the editor is
+  // ONE text box with the code - no list, no event type, never JSON.
   clickById(document, 'tab-trigger');
   await settle(900);
-  clickButton(document.querySelector('.panel.active .tree'), '스모크 트리거');
-  await settle(400);
   const tc = document.querySelector('.panel.active .left');
+  const modes = document.querySelector('.panel.active .tree');
+  check('mode switch shows V2 and Lua like RisuAI', !!findButton(modes, 'V2') && !!findButton(modes, 'Lua')
+        && modes?.querySelector('.modebtn.on')?.textContent === 'Lua', modes?.textContent?.slice(0, 120));
   const codeBox = tc?.querySelector('textarea');
-  check('the trigger opens as code, not JSON', codeBox?.value === 'local n = 1\nprint(n)',
+  check('the Lua script opens as one code box', codeBox?.value === 'local n = 1\nprint(n)',
         JSON.stringify(codeBox?.value));
+  check('with no per-trigger event selector', !tc?.querySelector('select') && !/실행 시점/.test(tc?.textContent || ''));
   codeBox.value = 'local n = 2\nprint(n)';
   clickButton(tc, '저장');
   await settle(1100);

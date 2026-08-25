@@ -142,11 +142,21 @@ button.outline:hover { background: rgba(37,99,235,.18); }
   padding: 3px 6px 3px 3px; margin: 3px 6px;
 }
 .movebtn { padding: 1px 6px; min-width: 0; }
+/* Trigger mode switch, drawn like RisuAI's own V2 / Lua buttons. */
+.modebtn { padding: 3px 10px; font-size: 12px; border: 1px solid transparent; }
+.modebtn.on { border-color: #2563eb; color: var(--textcolor, #d8dce4); font-weight: 700; }
 .tab {
   padding: 8px 16px; border: none; background: none; border-radius: 0;
   color: var(--textcolor2, #79839a); border-bottom: 2px solid transparent; margin-bottom: -1px;
 }
 .tab.active { color: var(--textcolor, #d8dce4); border-bottom-color: #2563eb; font-weight: 700; }
+/* The asset importer's progress at the end of the tab row. */
+.syncbadge {
+  margin-left: auto; align-self: center; padding: 2px 8px; border-radius: 4px; font-size: 11px;
+  color: var(--textcolor2, #79839a); border: 1px solid var(--borderc, #2b323f); white-space: nowrap;
+}
+.syncbadge.busy { color: #f59e0b; border-color: rgba(245,158,11,.5); }
+.syncbadge.err { color: #ef4444; border-color: rgba(239,68,68,.5); }
 
 main { flex: 1; min-height: 0; display: flex; }
 .panel { display: none; flex: 1; min-height: 0; }
@@ -215,9 +225,29 @@ pre.mono {
 .botname { font-size: 15px; font-weight: 700; }
 /* The background asset importer, under the bot's name on the picker. */
 .assetsync { margin-top: 4px; }
-/* The assets tab: a preview above the item's facts. */
-.assetpreview { margin: 6px 0 10px; }
-.assetimg { max-width: 100%; max-height: 320px; border-radius: 6px; display: block; }
+/* The assets tab: a grid of thumbnails with the name under each, like RisuAI's. */
+.assetgrid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 10px; margin-bottom: 14px;
+}
+.assetcell {
+  border: 1px solid var(--borderc, #2b323f); border-radius: 6px; padding: 6px; min-width: 0;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.assetcell.changed { border-color: rgba(245,158,11,.6); }
+.assetcell.failed { border-color: rgba(239,68,68,.5); }
+.assetpic {
+  aspect-ratio: 1 / 1; border-radius: 4px; overflow: hidden; display: flex; align-items: center;
+  justify-content: center; background: rgba(128,128,128,.08);
+}
+.assetpic img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.assetname {
+  font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.assetname.editable { cursor: text; }
+.assetname.editable:hover { text-decoration: underline dotted; }
+.assetrename { width: 100%; font-size: 12px; padding: 2px 4px; }
+.assetmeta { display: flex; align-items: center; gap: 4px; font-size: 10px; color: var(--textcolor2, #79839a); }
+.assetmeta .tiny { margin-left: auto; padding: 0 5px; }
 .assettype {
   display: inline-block; padding: 14px 18px; border-radius: 6px; font-size: 12px;
   color: var(--textcolor2, #79839a); background: rgba(128,128,128,.10);

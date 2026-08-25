@@ -8,7 +8,8 @@
  * of characters of HTML, so the editor is a monospace area sized for it and
  * the list shows only comments.
  */
-import { el, clear, armed, searchBox, refocusSearch } from './dom';
+import { el, clear, armed, refocusSearch } from './dom';
+import { setToolbarSearch } from './shell';
 import { state, type CardScript, type CardField } from '../state';
 import { threePane } from './panes';
 import { bindAgent, mountAgent } from './agentpane';
@@ -21,9 +22,10 @@ const TYPE_LABEL: Record<string, string> = {
   editdisplay: 'editdisplay — 표시만 수정',
 };
 
+// backgroundCSS is not here (nor anywhere): RisuAI's own UI has no field for
+// it, so the panel does not invent one.
 const BG_LABEL: Record<string, string> = {
   backgroundHTML: '백그라운드 HTML',
-  backgroundCSS: '백그라운드 CSS',
 };
 
 let built = false;
@@ -143,11 +145,11 @@ function drawTree(): void {
     return;
   }
 
-  treeMount.appendChild(searchBox(filterText, (v) => {
+  setToolbarSearch(filterText, (v) => {
     filterText = v;
     drawTree();
-    refocusSearch(treeMount);
-  }, '찾기 (이름·패턴·본문)'));
+    refocusSearch(null);
+  }, '찾기 (이름·패턴·본문)');
   const needle = filterText.trim().toLowerCase();
   const shown = items.map((s, i) => ({ s, i })).filter(({ s }) => {
     if (!needle) return true;

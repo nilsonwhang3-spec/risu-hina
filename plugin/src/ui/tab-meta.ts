@@ -5,7 +5,8 @@
  * middle, the agent on the right. Every save goes to the working copy; the
  * bot bar's 반영 is what reaches RisuAI.
  */
-import { el, clear, armed, searchBox, refocusSearch } from './dom';
+import { el, clear, armed, refocusSearch } from './dom';
+import { setToolbarSearch } from './shell';
 import { state, type CardField } from '../state';
 import { threePane } from './panes';
 import { bindAgent, mountAgent } from './agentpane';
@@ -15,14 +16,15 @@ import { bindAgent, mountAgent } from './agentpane';
 const LABELS: Record<string, string> = {
   name: '이름',
   desc: '설명 (desc)',
-  firstMessage: '첫 인사',
+  firstMessage: '퍼스트 메시지',
   creatorNotes: '제작자 노트',
+  characterVersion: '봇 버전',
   alternateGreetings: '대체 인사말',
 };
 
 // Card fields, but not meta: the Regex tab owns them (they live next to the
 // display scripts that usually come with them).
-const NOT_HERE = new Set(['backgroundHTML', 'backgroundCSS']);
+const NOT_HERE = new Set(['backgroundHTML']);
 
 let built = false;
 let treeMount: HTMLElement | null = null;
@@ -125,11 +127,11 @@ function drawTree(): void {
     }));
   }
 
-  treeMount.appendChild(searchBox(filterText, (v) => {
+  setToolbarSearch(filterText, (v) => {
     filterText = v;
     drawTree();
-    refocusSearch(treeMount);
-  }, '찾기 (이름·본문)'));
+    refocusSearch(null);
+  }, '찾기 (이름·본문)');
   const needle = filterText.trim().toLowerCase();
   const shown = fields.filter((f) => !needle
     || labelOf(f).toLowerCase().includes(needle)

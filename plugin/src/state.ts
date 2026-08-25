@@ -258,7 +258,7 @@ export interface CardField {
 
 export interface CardScript {
   id: string;
-  kind: 'customscript' | 'triggerscript';
+  kind: 'customscript' | 'triggerscript' | 'assetref';
   seq: number;
   origin: string;
   entry: Record<string, unknown>;
@@ -273,6 +273,7 @@ export interface CardChanges {
   greetings: ScriptCounts;
   customscript: ScriptCounts;
   triggerscript: ScriptCounts;
+  assetref: ScriptCounts;
   lore: ScriptCounts;
   total: number;
   actions: number;
@@ -287,6 +288,9 @@ export interface CardPatch {
   globalLore: { changed: number; list: unknown[] };
   customscript: { changed: number; list: unknown[] };
   triggerscript: { changed: number; list: unknown[] };
+  assetref: { changed: number; list: unknown[] };
+  /** The asset references as RisuAI's three lists, rebuilt from the working rows. */
+  assets: { changed: number; emotionImages: unknown[]; additionalAssets: unknown[]; ccAssets: unknown[] };
   total: number;
 }
 
@@ -1199,6 +1203,13 @@ class AppState {
     if (whole || patch.globalLore.changed) update.globalLore = patch.globalLore.list;
     if (whole || patch.customscript.changed) update.customscript = patch.customscript.list;
     if (whole || patch.triggerscript.changed) update.triggerscript = patch.triggerscript.list;
+    if (patch.assets && (whole || patch.assets.changed)) {
+      // Whole lists, like lore and scripts: RisuAI keeps them as lists and a
+      // rename or a removal is a change to the list. Only sent when changed.
+      update.emotionImages = patch.assets.emotionImages;
+      update.additionalAssets = patch.assets.additionalAssets;
+      update.ccAssets = patch.assets.ccAssets;
+    }
     return Object.keys(update).length ? update : null;
   }
 

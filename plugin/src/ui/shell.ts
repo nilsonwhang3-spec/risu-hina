@@ -4,7 +4,8 @@
  * Sections stay in the DOM and are toggled with CSS rather than being rebuilt,
  * so switching tabs does not lose scroll position or an in-progress edit.
  */
-import { el, clear, ICON } from './dom';
+import { el, clear, ICON, searchBox } from './dom';
+import { describeSync, syncBusy } from '../assets';
 import { injectStyles } from './styles';
 import { state } from '../state';
 import { transport } from '../transport';
@@ -98,6 +99,29 @@ let toolbarSlot: HTMLElement | null = null;
 let chatBarEl: HTMLElement | null = null;
 let botBarEl: HTMLElement | null = null;
 let tabSlot: HTMLElement | null = null;
+/** End of the tab row: the asset importer's progress, visible from any tab. */
+const syncBadge = el('span', { class: 'syncbadge', style: { display: 'none' } });
+
+function refreshSyncBadge(): void {
+  const p = state.assetSync;
+  if (!p || !state.botKey) { syncBadge.style.display = 'none'; return; }
+  const busy = syncBusy(p);
+  let text = '';
+  if (busy) {
+    let ratio = -1;
+    if (p.phase === 'pulling' && p.pull && p.pull.total) ratio = p.pull.done / p.pull.total;
+    else if (p.phase === 'pushing' && p.toPush) ratio = (p.read + p.readFailed) / p.toPush;
+    text = '에셋 ' + (ratio >= 0 ? Math.round(ratio * 100) + '%' : '대조 중');
+  } else if (p.phase === 'error' || p.phase === 'cancelled') {
+    text = '에셋 동기화 중단';
+  } else if (p.total) {
+    text = `에셋 ${p.present}/${p.total}` + (p.failed ? ` (실패 ${p.failed})` : '');
+  }
+  syncBadge.textContent = text;
+  syncBadge.title = describeSync(p);
+  syncBadge.className = 'syncbadge' + (busy ? ' busy' : (p.phase === 'error' ? ' err' : ''));
+  syncBadge.style.display = text ? '' : 'none';
+}
 
 /**
  * Hand the shell this tab's tool row, or null to leave the tab's part of the
@@ -113,6 +137,15 @@ export function setToolbar(node: HTMLElement | null): void {
   clear(tabSlot);
   if (node) tabSlot.appendChild(node);
   syncToolslot();
+}
+
+/**
+ * A tab's filter box, on the menu line next to the bars rather than inside
+ * the tab's own column - the chat editor's 찾기 lives there, and every list
+ * tab's search should be found in the same place.
+ */
+export function setToolbarSearch(value: string, onInput: (v: string) => void, placeholder = '찾기'): void {
+  setToolbar(searchBox(value, onInput, placeholder));
 }
 
 function syncToolslot(): void {
@@ -274,7 +307,7 @@ export function buildShell(): void {
     el('div', { class: 'tabs' }, CONTENT_TABS.flatMap(([id, label]) => (
       id === 'files'
         ? [el('span', { class: 'tabsep', title: '여기부터는 편집 대상이 아니라 봇의 워크스페이스입니다' }), tabButton(id, label)]
-        : [tabButton(id, label)]
+        : [tabButton(id, label), syncBadge]
     ))),
     toolbarSlot,
     shellNotice,
@@ -317,6 +350,7 @@ state.onChange(() => {
   refreshChatBar();
   refreshBotBar();
   refreshTabBadges();
+  refreshSyncBadge();
   renderActive();
   syncToolslot();
 });

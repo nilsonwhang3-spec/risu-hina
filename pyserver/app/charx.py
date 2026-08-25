@@ -95,12 +95,23 @@ def working_character(ck: str) -> dict:
         if f["field"] == cardmod.LIST_FIELD:
             if not f["deleted"]:
                 greetings.append((f["seq"], f["body"]))
+        elif f["field"] in cardmod.NESTED:
+            top, inner = cardmod.NESTED[f["field"]]
+            holder = char.get(top) if isinstance(char.get(top), dict) else {}
+            holder[inner] = f["body"]
+            char[top] = holder
+            char[f["field"]] = f["body"]
         else:
             char[f["field"]] = f["body"]
     char[cardmod.LIST_FIELD] = [b for _s, b in sorted(greetings)]
     char["globalLore"] = [x["entry"] for x in store.lore(ck, "global")]
     for kind in cardmod.SCRIPT_KINDS:
-        char[kind] = [x["entry"] for x in cardmod.scripts(ck, kind)]
+        entries = [x["entry"] for x in cardmod.scripts(ck, kind)]
+        if kind == cardmod.ASSET_KIND:
+            # The working asset references, back in the shape createBaseV3 reads.
+            char.update(cardmod.asset_lists(entries))
+        else:
+            char[kind] = entries
     return char
 
 

@@ -1243,6 +1243,19 @@ def h_card_scripts(arg: dict) -> dict:
         raise ApiError(400, str(e))
 
 
+def h_card_assets_rename(arg: dict) -> dict:
+    """Bulk-rename asset references in the working card (assets tab tools)."""
+    ck = _char(arg)
+    fields = arg.get("fields")
+    try:
+        return cardmod.rename_assets(
+            ck, str(arg.get("mode") or "strip-ext"), str(arg.get("pattern") or ""),
+            str(arg.get("repl") or ""),
+            tuple(str(f) for f in fields) if isinstance(fields, list) and fields else None)
+    except ValueError as e:
+        raise ApiError(400, str(e))
+
+
 def h_card_field(arg: dict) -> dict:
     _char(arg)
     fid = str(arg.get("id") or "")
@@ -1508,6 +1521,7 @@ ROUTES: dict[str, Handler] = {
     "POST /card/script/add": h_card_script_add,
     "POST /card/script/delete": h_card_script_delete,
     "POST /card/script/move": h_card_script_move,
+    "POST /card/assets/rename": h_card_assets_rename,
     "GET /card/patch": h_card_patch,
     "GET /card/changes": h_card_changes,
     "POST /card/commit": h_card_commit,

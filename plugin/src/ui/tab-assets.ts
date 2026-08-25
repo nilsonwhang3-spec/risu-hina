@@ -1,20 +1,27 @@
 /**
- * 에셋 - what the card's images are, and whether the backend store has them.
+ * 에셋 - the card's images as a grid, the way RisuAI shows them.
  *
- * Read-mostly on purpose. The card decides an asset's name and field, so a
- * rename or a removal is a card edit (M1's pipeline) and lands in RisuAI
- * through the same 반영 as any other card change; this tab only shows the
- * result and the store's side of it. Grouped by field, in card order, with
- * the sync state per item and a thumbnail where the host can give us one
- * (PocketRisu; the web build's CSP blocks blob: images inside the iframe,
- * so there a type icon stands in).
+ * Two sources drawn as one: the CARD's references (assetref rows in the
+ * working copy - name, field, key; renamed and removed here and written on
+ * 반영 like any other card material) and the STORE's state for each key
+ * (present / missing / failed, size) from the background importer.
+ *
+ * Editing waits for the importer only here: while it runs, every other tab
+ * and 반영 work as usual, but a rename or removal of a reference whose bytes
+ * are still arriving is the kind of half-state nobody would guess at, so
+ * the grid is read-only until the backend reports the bot complete.
+ *
+ * Thumbnails come from the host where it can give them (PocketRisu /
+ * desktop). The web build's iframe CSP blocks blob: images, so there a type
+ * badge stands in.
  */
-import { el, clear, searchBox, refocusSearch } from './dom';
-import { state, type AssetItem } from '../state';
+import { el, clear, armed, refocusSearch, popover } from './dom';
+import { state, type AssetItem, type CardScript } from '../state';
 import { threePane } from './panes';
 import { bindAgent, mountAgent } from './agentpane';
 import { transport } from '../transport';
 import { describeSync, syncBusy } from '../assets';
+import { setToolbarSearch } from './shell';
 
 const FIELD_LABEL: Record<string, string> = {
   image: '프로필',
@@ -25,18 +32,23 @@ const FIELD_LABEL: Record<string, string> = {
 };
 const FIELD_ORDER = ['image', 'emotion', 'additional', 'cc', 'vits'];
 
-const STATE_LABEL: Record<string, [string, string]> = {
-  present: ['저장됨', 'ok'],
-  missing: ['없음', 'warn'],
-  failed: ['읽기 실패', 'err'],
-};
+interface Cell {
+  /** The card row when the card references it (renamable); null for the portrait. */
+  row: CardScript | null;
+  field: string;
+  name: string;
+  key: string;
+  ext: string;
+  state: 'present' | 'missing' | 'failed' | 'unknown';
+  size: number | null;
+  origin: string;
+}
 
 let built = false;
-let treeMount: HTMLElement | null = null;
-let viewMount: HTMLElement | null = null;
+let gridMount: HTMLElement | null = null;
 let noticeMount: HTMLElement | null = null;
-let items: AssetItem[] = [];
-let openKey = '';
+let sideMount: HTMLElement | null = null;
+let cells: Cell[] = [];
 let seenEpoch = -1;
 let seenKey = '';
 let seenSyncAt = 0;
@@ -54,34 +66,35 @@ export function renderAssetsTab(mount: HTMLElement): void {
     return;
   }
   const syncAt = state.assetSync?.finishedAt ?? 0;
+  const busy = syncBusy(state.assetSync);
   if (!built || !mount.querySelector('.split')) {
     clear(mount);
     const pane = threePane();
-    treeMount = el('div', { class: 'tree' });
-    pane.left.appendChild(treeMount);
+    sideMount = el('div', { class: 'tree' });
+    pane.left.appendChild(sideMount);
     noticeMount = el('div');
-    viewMount = el('div', { class: 'pad' });
+    gridMount = el('div', { class: 'pad' });
     pane.centre.appendChild(noticeMount);
-    pane.centre.appendChild(viewMount);
+    pane.centre.appendChild(gridMount);
     mount.appendChild(pane.root);
     built = true;
     seenEpoch = state.epoch;
     seenKey = state.botKey;
     seenSyncAt = syncAt;
+    seenBusy = busy;
     void refresh();
-  } else if (seenEpoch !== state.epoch || seenKey !== state.botKey || seenSyncAt !== syncAt) {
+  } else if (seenEpoch !== state.epoch || seenKey !== state.botKey || seenSyncAt !== syncAt || seenBusy !== busy) {
     seenEpoch = state.epoch;
     seenKey = state.botKey;
     seenSyncAt = syncAt;
-    seenBusy = syncBusy(state.assetSync);
+    seenBusy = busy;
     void refresh();
-  } else if (seenBusy !== syncBusy(state.assetSync)) {
-    // Only a change in the importer's state redraws the header: every other
-    // emit (a file listing bump after a charx build, say) must leave the
-    // result the user is reading where it is.
-    seenBusy = syncBusy(state.assetSync);
-    renderHeader();
   }
+  setToolbarSearch(filterText, (v) => {
+    filterText = v;
+    drawGrid();
+    refocusSearch(null);
+  }, '에셋 찾기');
   bindAgent({ notice });
   const inner = mount.querySelector('.right-inner');
   if (inner) mountAgent(inner as HTMLElement);
@@ -94,230 +107,249 @@ function notice(text: string, kind: 'ok' | 'err' | '' = ''): void {
   setTimeout(() => { if (noticeMount) clear(noticeMount); }, 9000);
 }
 
+/** The card's rows joined with the store's state, portrait first. */
 async function refresh(): Promise<void> {
+  let rows: CardScript[] = [];
+  let store: AssetItem[] = [];
   try {
-    const r = await state.assetList();
-    items = r.items;
+    [rows, store] = await Promise.all([
+      state.cardScripts('assetref'),
+      state.assetList().then((r) => r.items).catch(() => [] as AssetItem[]),
+    ]);
   } catch (e) {
-    items = [];
     notice('에셋 목록을 읽지 못했습니다: ' + (e instanceof Error ? e.message : String(e)), 'err');
   }
-  renderTree();
-  renderHeader();
-  if (openKey && !items.some((i) => i.key === openKey)) openKey = '';
-  if (openKey) renderItem(openKey);
+  const byKey = new Map(store.map((i) => [i.key, i]));
+  const out: Cell[] = [];
+  const portrait = store.find((i) => i.field === 'image') ?? null;
+  const image = String(state.character?.image ?? '');
+  if (image) {
+    out.push({
+      row: null, field: 'image', name: '프로필', key: image, ext: image.split('.').pop() || 'png',
+      state: portrait?.state ?? 'unknown', size: portrait?.size ?? null, origin: 'original',
+    });
+  }
+  for (const r of rows) {
+    const e = r.entry as Record<string, unknown>;
+    const key = String(e.key ?? '');
+    const st = byKey.get(key);
+    out.push({
+      row: r, field: String(e.field ?? 'additional'), name: String(e.name ?? ''), key,
+      ext: String(e.ext ?? (st?.ext ?? 'png')), state: st?.state ?? 'unknown', size: st?.size ?? null,
+      origin: r.origin,
+    });
+  }
+  cells = out;
+  drawSide();
+  drawGrid();
 }
 
-// --- header (sync state, totals) ---------------------------------------------
+// --- side: totals, sync state, tools ----------------------------------------------
 
-function renderHeader(): void {
-  if (!viewMount || openKey) return;
-  clear(viewMount);
+function editable(): boolean {
+  return !syncBusy(state.assetSync);
+}
+
+function drawSide(): void {
+  if (!sideMount) return;
+  clear(sideMount);
   const p = state.assetSync;
-  const total = items.length;
-  const present = items.filter((i) => i.state === 'present').length;
-  const failed = items.filter((i) => i.state === 'failed').length;
-  const bytes = items.reduce((n, i) => n + (i.size || 0), 0);
+  const present = cells.filter((c) => c.state === 'present').length;
+  const bytes = cells.reduce((n, c) => n + (c.size || 0), 0);
+  const counts = new Map<string, number>();
+  for (const c of cells) counts.set(c.field, (counts.get(c.field) ?? 0) + 1);
+
+  sideMount.appendChild(el('div', { class: 'treehead', text: `에셋 ${cells.length}개 · ${mb(bytes)}` }));
+  for (const f of FIELD_ORDER) {
+    const n = counts.get(f);
+    if (n) sideMount.appendChild(el('div', { class: 'hint', style: { padding: '2px 8px' }, text: `${FIELD_LABEL[f] ?? f} ${n}` }));
+  }
+  sideMount.appendChild(el('div', { class: 'sectionline', style: { margin: '10px 6px' } }));
 
   const again = el('button', { class: 'ghost tiny', text: syncBusy(p) ? '동기화 중…' : '다시 동기화' }) as HTMLButtonElement;
   again.disabled = syncBusy(p);
   again.addEventListener('click', () => { state.syncAssets(true); });
+  sideMount.appendChild(el('div', { class: 'hint', style: { padding: '0 8px 6px' }, text: p ? describeSync(p) : `스토어 ${present}/${cells.length}` }));
+  sideMount.appendChild(el('div', { style: { padding: '0 6px' } }, [again]));
 
-  viewMount.appendChild(el('div', { class: 'card' }, [
-    el('h2', { text: '에셋 동기화' }),
-    el('div', { class: 'row' }, [
-      el('span', { class: 'grow', text: p ? describeSync(p) : `에셋 ${present}/${total}개 · ${mb(bytes)}` }),
-      again,
-    ]),
-    failed ? el('div', { class: 'hint', style: { marginTop: '6px' }, text:
-      `읽기 실패 ${failed}개 - RisuAI 쪽에 파일이 없는 참조입니다. 카드에서 그 항목을 지우거나, 다시 동기화로 한 번 더 시도할 수 있습니다.` }) : null,
-    el('div', { class: 'hint', style: { marginTop: '8px' } }, [
-      '백엔드 스토어는 charx 생성·에이전트 이미지 작업의 재료입니다. 이름 변경·삭제는 메타 탭의 카드 편집으로 하고 반영합니다. ',
-      '왼쪽에서 항목을 고르면 상세를 봅니다.',
-    ]),
-  ]));
-  viewMount.appendChild(charxCard(present, total));
+  if (!editable()) return;
+  sideMount.appendChild(el('div', { class: 'sectionline', style: { margin: '10px 6px' } }));
+  sideMount.appendChild(el('div', { class: 'sectiontitle', style: { padding: '0 8px' }, text: '도구' }));
+  const strip = el('button', { class: 'ghost tiny', text: '이름의 확장자 일괄 제거' }) as HTMLButtonElement;
+  strip.title = '"face.png" 처럼 이름 끝에 붙은 .png/.webp 를 뗍니다. CBS 는 확장자 없는 이름으로 호출합니다.';
+  strip.addEventListener('click', async () => {
+    strip.disabled = true;
+    try {
+      const r = await transport.post<{ changed: number }>('/card/assets/rename', { charKey: state.botKey, mode: 'strip-ext' });
+      notice(r.changed ? `${r.changed}개 이름에서 확장자를 뗐습니다. 봇 바의 “반영”을 누르면 RisuAI에 쓰입니다.` : '확장자가 붙은 이름이 없습니다.', r.changed ? 'ok' : '');
+      void state.refreshBotChanges();
+      await refresh();
+    } catch (e) {
+      notice('실패했습니다: ' + (e instanceof Error ? e.message : String(e)), 'err');
+    } finally {
+      strip.disabled = false;
+    }
+  });
+  const rx = el('button', { class: 'ghost tiny', text: '정규식으로 일괄 이름 변경' });
+  rx.addEventListener('click', () => openRegexRename(rx));
+  sideMount.appendChild(el('div', { style: { padding: '0 6px' } }, [strip]));
+  sideMount.appendChild(el('div', { style: { padding: '4px 6px' } }, [rx]));
 }
 
-/**
- * charx from the working card: the backend assembles it into out/ (files
- * tab → 내 PC에 저장). Missing assets are the one thing that can stop it -
- * the importer throws on an embedded path that is not in the zip - so the
- * choice is shown up front: wait for the sync, or build without them.
- */
-function charxCard(present: number, total: number): HTMLElement {
-  const out = el('div', { class: 'outbox' });
-  const nameInput = el('input', {
-    value: (state.workspace?.characterName || 'character'), placeholder: '파일 이름 (.charx)',
-  }) as HTMLInputElement;
-  const build = el('button', { class: 'primary', text: 'charx 만들기' }) as HTMLButtonElement;
-  const buildAnyway = el('button', { class: 'ghost', text: '빠진 에셋 빼고 만들기' }) as HTMLButtonElement;
-  buildAnyway.style.display = 'none';
-  const run = async (allowMissing: boolean): Promise<void> => {
-    build.disabled = buildAnyway.disabled = true;
-    clear(out);
-    out.appendChild(el('div', { class: 'hint', text: '만드는 중입니다… 에셋이 많으면 몇 분 걸립니다.' }));
+function openRegexRename(anchor: HTMLElement): void {
+  const pattern = el('input', { placeholder: '패턴 (정규식), 예: ^Beatrice-' }) as HTMLInputElement;
+  const repl = el('input', { placeholder: '바꿀 문자열, 예: 비어 있으면 삭제' }) as HTMLInputElement;
+  const out = el('div', { class: 'hint' });
+  const body = el('div', { class: 'applypop' });
+  const close = popover(anchor, body);
+  const run = el('button', { class: 'primary', text: '적용' }) as HTMLButtonElement;
+  run.addEventListener('click', async () => {
+    run.disabled = true;
     try {
-      const r = await state.charxBuild({ allowMissing, name: nameInput.value.trim() });
-      clear(out);
-      out.appendChild(el('div', { class: 'notice ok', text:
-        `${r.file} · ${(r.size / 1048576).toFixed(1)}MB · 에셋 ${r.assets}개` + (r.dropped ? ` (${r.dropped}개 제외)` : '')
-        + ` · ${r.seconds}s — 워크스페이스 파일 탭의 out/ 에서 내 PC에 저장할 수 있습니다.` }));
-      buildAnyway.style.display = 'none';
+      const r = await transport.post<{ changed: number }>('/card/assets/rename', {
+        charKey: state.botKey, mode: 'regex', pattern: pattern.value, repl: repl.value,
+      });
+      notice(`${r.changed}개 이름을 바꿨습니다. 봇 바의 “반영”을 누르면 RisuAI에 쓰입니다.`, r.changed ? 'ok' : '');
+      void state.refreshBotChanges();
+      await refresh();
+      close();
     } catch (e) {
-      clear(out);
-      const body = (e as { body?: { missing?: { name: string; type: string }[] } }).body;
-      const missing = body?.missing;
-      if (Array.isArray(missing) && missing.length) {
-        out.appendChild(el('div', { class: 'notice err', text:
-          `에셋 ${missing.length}개가 스토어에 없어 만들지 않았습니다: `
-          + missing.slice(0, 6).map((m) => m.name || m.type).join(', ') + (missing.length > 6 ? ' …' : '') }));
-        out.appendChild(el('div', { class: 'hint', text: '동기화를 다시 돌려 채우거나, 빠진 항목을 빼고 만들 수 있습니다(그 이미지는 카드에서 사라집니다).' }));
-        buildAnyway.style.display = '';
-      } else {
-        out.appendChild(el('div', { class: 'notice err', text: 'charx 를 만들지 못했습니다: ' + (e instanceof Error ? e.message : String(e)) }));
-      }
+      out.textContent = e instanceof Error ? e.message : String(e);
     } finally {
-      build.disabled = buildAnyway.disabled = false;
+      run.disabled = false;
     }
-  };
-  build.addEventListener('click', () => { void run(false); });
-  buildAnyway.addEventListener('click', () => { void run(true); });
-  return el('div', { class: 'card' }, [
-    el('h2', { text: 'charx 내보내기' }),
-    el('div', { class: 'hint', text:
-      `작업본 카드(메타·인사말·봇 로어북·Regex·트리거)와 스토어의 에셋 ${present}/${total}개로 charx 를 만듭니다. `
-      + '반영하지 않은 편집도 들어갑니다. module.risum 없이 card.json 에 인라인으로 담기며 RisuAI·PocketRisu 가 그대로 가져옵니다.' }),
-    el('div', { class: 'row', style: { marginTop: '8px' } }, [nameInput, build, buildAnyway]),
-    out,
-  ]);
+  });
+  body.appendChild(el('div', { class: 'hint', text: '모든 에셋 이름에 re.sub(패턴, 바꿀 문자열) 을 적용합니다.' }));
+  body.appendChild(el('div', { class: 'row' }, [pattern]));
+  body.appendChild(el('div', { class: 'row' }, [repl]));
+  body.appendChild(el('div', { class: 'row' }, [run]));
+  body.appendChild(out);
 }
 
 function mb(n: number): string {
   return n >= 1048576 ? (n / 1048576).toFixed(1) + 'MB' : Math.max(1, Math.round(n / 1024)) + 'KB';
 }
 
-// --- tree ---------------------------------------------------------------------
+// --- the grid --------------------------------------------------------------------------
 
-function renderTree(): void {
-  if (!treeMount) return;
-  clear(treeMount);
-  if (items.length > 6) {
-    treeMount.appendChild(searchBox(filterText, (v) => {
-      filterText = v;
-      renderTree();
-      refocusSearch(treeMount);
-    }, '에셋 찾기'));
+function drawGrid(): void {
+  if (!gridMount) return;
+  clear(gridMount);
+  if (!editable()) {
+    gridMount.appendChild(el('div', { class: 'notice', text:
+      '에셋 동기화 중입니다… 동기화가 끝나기 전까지 에셋 편집이 불가합니다. 다른 탭과 반영은 그대로 쓸 수 있습니다.' }));
   }
   const needle = filterText.trim().toLowerCase();
-  const shown = items.filter((i) => !needle || i.name.toLowerCase().includes(needle) || i.key.toLowerCase().includes(needle));
+  const shown = cells.filter((c) => !needle || c.name.toLowerCase().includes(needle) || c.key.toLowerCase().includes(needle));
   if (!shown.length) {
-    treeMount.appendChild(el('div', { class: 'hint', style: { padding: '10px' }, text: items.length ? '검색 결과가 없습니다.' : '이 봇은 에셋을 참조하지 않습니다.' }));
+    gridMount.appendChild(el('div', { class: 'empty', text: cells.length ? '검색 결과가 없습니다.' : '이 봇은 에셋을 참조하지 않습니다.' }));
     return;
   }
-  const groups = new Map<string, AssetItem[]>();
-  for (const it of shown) {
-    if (!groups.has(it.field)) groups.set(it.field, []);
-    groups.get(it.field)!.push(it);
+  for (const f of FIELD_ORDER) {
+    const list = shown.filter((c) => c.field === f);
+    if (!list.length) continue;
+    gridMount.appendChild(el('div', { class: 'sectiontitle', text: `${FIELD_LABEL[f] ?? f} · ${list.length}` }));
+    const grid = el('div', { class: 'assetgrid' });
+    for (const c of list) grid.appendChild(cell(c));
+    gridMount.appendChild(grid);
   }
-  for (const field of FIELD_ORDER) {
-    const list = groups.get(field);
-    if (!list) continue;
-    const size = list.reduce((n, i) => n + (i.size || 0), 0);
-    treeMount.appendChild(el('div', { class: 'treehead', text: `${FIELD_LABEL[field] ?? field} · ${list.length}개` + (size ? ` · ${mb(size)}` : '') }));
-    for (const it of list) treeMount.appendChild(row(it));
-  }
+  gridMount.appendChild(el('div', { class: 'hint', style: { marginTop: '10px' }, text:
+    '같은 이름이 여럿이면 RisuAI 가 호출 때 무작위로 하나를 고르는 랜덤 풀입니다. 이름을 누르면 바꿀 수 있고, 삭제는 카드의 참조만 지웁니다(파일은 RisuAI 가 정리). 둘 다 반영 때 쓰입니다.' }));
 }
 
-function row(it: AssetItem): HTMLElement {
-  const [label, tone] = STATE_LABEL[it.state] ?? [it.state, ''];
-  const btn = el('button', { class: 'treefile' + (it.key === openKey ? ' active' : '') }, [
-    el('span', { class: 'grow', text: it.name || '(이름 없음)' }),
-    el('span', { class: 'dim', text: it.ext.toUpperCase() }),
-    el('span', { class: 'badge ' + tone, text: label }),
+function cell(c: Cell): HTMLElement {
+  const box = el('div', { class: 'assetcell' + (c.origin !== 'original' ? ' changed' : '') + (c.state === 'failed' ? ' failed' : '') });
+  const pic = el('div', { class: 'assetpic' });
+  box.appendChild(pic);
+  void loadThumb(c, pic);
+
+  const nameEl = el('div', { class: 'assetname', text: c.name || '(이름 없음)', title: `${c.key}${c.size ? ' · ' + mb(c.size) : ''}` });
+  if (c.row && editable()) {
+    nameEl.classList.add('editable');
+    nameEl.addEventListener('click', () => beginRename(c, nameEl));
+  }
+  box.appendChild(nameEl);
+
+  const meta = el('div', { class: 'assetmeta' }, [
+    el('span', { text: c.ext.toUpperCase() }),
+    c.state === 'missing' ? el('span', { class: 'badge warn', text: '없음' }) : null,
+    c.state === 'failed' ? el('span', { class: 'badge err', text: '실패' }) : null,
+    c.origin === 'edited' ? el('span', { class: 'badge warn', text: '수정' }) : null,
+    c.origin === 'added' ? el('span', { class: 'badge ok', text: '추가' }) : null,
   ]);
-  btn.addEventListener('click', () => {
-    openKey = it.key;
-    renderTree();
-    renderItem(it.key);
+  if (c.row && editable()) {
+    const del = el('button', { class: 'ghost tiny', text: '✕', title: '카드에서 이 참조를 지웁니다' }) as HTMLButtonElement;
+    const row = c.row;
+    armed(del, '✕', '정말?', async () => {
+      try {
+        await state.deleteScript(row.id);
+        void state.refreshBotChanges();
+        await refresh();
+      } catch (e) {
+        notice('지우지 못했습니다: ' + (e instanceof Error ? e.message : String(e)), 'err');
+      }
+    });
+    meta.appendChild(del);
+  }
+  box.appendChild(meta);
+  return box;
+}
+
+function beginRename(c: Cell, nameEl: HTMLElement): void {
+  if (!c.row) return;
+  const row = c.row;
+  const input = el('input', { value: c.name, class: 'assetrename' }) as HTMLInputElement;
+  const done = async (commit: boolean): Promise<void> => {
+    const v = input.value.trim();
+    if (!commit || !v || v === c.name) { input.replaceWith(nameEl); return; }
+    try {
+      await state.saveScript(row.id, { ...(row.entry as Record<string, unknown>), name: v });
+      void state.refreshBotChanges();
+      await refresh();
+    } catch (e) {
+      notice('이름을 바꾸지 못했습니다: ' + (e instanceof Error ? e.message : String(e)), 'err');
+      input.replaceWith(nameEl);
+    }
+  };
+  input.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') void done(true);
+    else if (ev.key === 'Escape') void done(false);
   });
-  return el('div', { class: 'treerow' }, [btn]);
+  input.addEventListener('blur', () => void done(true));
+  nameEl.replaceWith(input);
+  input.focus();
+  try { input.select(); } catch { /* linkedom */ }
 }
 
-// --- item -----------------------------------------------------------------------
-
-function renderItem(key: string): void {
-  if (!viewMount) return;
-  const it = items.find((i) => i.key === key);
-  clear(viewMount);
-  if (!it) { renderHeader(); return; }
-  const [label, tone] = STATE_LABEL[it.state] ?? [it.state, ''];
-
-  const back = el('button', { class: 'ghost tiny', text: '← 목록' });
-  back.addEventListener('click', () => { openKey = ''; renderTree(); renderHeader(); });
-
-  const preview = el('div', { class: 'assetpreview' });
-  const rows: [string, string][] = [
-    ['필드', FIELD_LABEL[it.field] ?? it.field],
-    ['이름', it.name || '(이름 없음)'],
-    ['키', it.key],
-    ['형식', it.ext.toUpperCase()],
-    ['크기', it.size ? mb(it.size) + ` (${it.size.toLocaleString()} B)` : '-'],
-    ['스토어', label + (it.error ? ` · ${it.error}` : '')],
-    ['해시', it.hash || '-'],
-  ];
-  viewMount.appendChild(el('div', { class: 'card' }, [
-    el('div', { class: 'row' }, [
-      el('h2', { class: 'grow', text: it.name || it.key }),
-      el('span', { class: 'badge ' + tone, text: label }),
-      back,
-    ]),
-    preview,
-    el('pre', { class: 'mono', text: rows.map(([k, v]) => `${k.padEnd(4)} ${v}`).join('\n') }),
-    el('div', { class: 'hint', text: it.field === 'emotion'
-      ? '이 이름은 감정 이미지 이름이며, CBS·Lua 에서 {{asset::이름}} 또는 감정 감지로 쓰입니다. 이름을 바꾸려면 메타 탭에서 카드를 고치고 반영합니다.'
-      : '이름을 바꾸거나 지우려면 메타 탭에서 카드를 고치고 반영합니다. 스토어의 파일은 참조가 사라진 뒤 GC 로 정리됩니다.' }),
-  ]));
-  void loadPreview(it, preview);
-}
-
-/**
- * A thumbnail from the host where that works (PocketRisu / desktop), the
- * store's copy as a fallback, and a type icon on the web build where the
- * iframe's CSP forbids blob: images.
- */
-async function loadPreview(it: AssetItem, mount: HTMLElement): Promise<void> {
-  const isImage = /^(png|jpe?g|gif|webp|avif|bmp)$/i.test(it.ext);
-  if (!isImage) {
-    mount.appendChild(el('div', { class: 'assettype', text: it.ext.toUpperCase() }));
+/** Thumbnail from the host where it works; a type badge on the web build (CSP). */
+async function loadThumb(c: Cell, mount: HTMLElement): Promise<void> {
+  const isImage = /^(png|jpe?g|gif|webp|avif|bmp)$/i.test(c.ext);
+  if (!isImage || transport.hostPlatform === 'web') {
+    mount.appendChild(el('div', { class: 'assettype', text: c.ext.toUpperCase() }));
     return;
   }
-  if (transport.hostPlatform === 'web') {
-    mount.appendChild(el('div', { class: 'assettype', text: '이미지 · 웹에서는 미리보기 없음' }));
-    return;
-  }
-  let url = thumbs.get(it.key) || '';
+  let url = thumbs.get(c.key) || '';
   if (!url) {
     try {
-      const bytes = await Risuai.readImage(it.key);
+      const bytes = await Risuai.readImage(c.key);
       if (bytes && (bytes as Uint8Array).byteLength) {
         const view = bytes as Uint8Array;
         const buf = new Uint8Array(view.byteLength);
         buf.set(view);
         url = URL.createObjectURL(new Blob([buf]));
-        if (thumbs.size > 40) {
+        if (thumbs.size > 200) {
           for (const [k, u] of thumbs) { URL.revokeObjectURL(u); thumbs.delete(k); break; }
         }
-        thumbs.set(it.key, url);
+        thumbs.set(c.key, url);
       }
     } catch { /* fall through */ }
   }
   if (!url) {
-    mount.appendChild(el('div', { class: 'assettype', text: '미리보기를 읽지 못했습니다' }));
+    mount.appendChild(el('div', { class: 'assettype', text: c.state === 'missing' ? '없음' : c.ext.toUpperCase() }));
     return;
   }
-  if (openKey !== it.key) return;
-  const img = el('img', { class: 'assetimg', src: url, alt: it.name });
-  img.addEventListener('error', () => img.replaceWith(el('div', { class: 'assettype', text: '표시할 수 없는 이미지' })));
+  if (!mount.isConnected) return;
+  const img = el('img', { src: url, alt: c.name, loading: 'lazy' });
+  img.addEventListener('error', () => img.replaceWith(el('div', { class: 'assettype', text: c.ext.toUpperCase() })));
   mount.appendChild(img);
 }

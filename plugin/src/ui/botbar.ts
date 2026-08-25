@@ -30,7 +30,10 @@ function applyBlockReason(): string | null {
   if (state.botChanges && !state.botChanges.full) {
     return '구버전 업로드 상태입니다. 패널을 닫았다 다시 열어 주세요';
   }
-  return state.assetGateReason;
+  // The asset importer does not hold 반영 any more: text material is
+  // written as text, and the store's images are only needed by charx and by
+  // asset editing - those two wait (state.assetGateReason), this does not.
+  return null;
 }
 
 export function buildBotBar(): HTMLElement {
@@ -73,11 +76,80 @@ export function buildBotBar(): HTMLElement {
   ]);
   versions.addEventListener('click', () => void openVersions(versions));
 
+  charxBtn = el('button', {
+    class: 'tool', dataset: { tool: 'card-charx' },
+    title: '작업본 카드와 스토어의 에셋으로 charx 파일을 만듭니다',
+  }, [
+    el('span', { class: 'glyph', text: TOOL.export }),
+    el('span', { class: 'tool-label', text: 'charx' }),
+  ]) as HTMLButtonElement;
+  charxBtn.addEventListener('click', () => { if (charxBtn) openCharx(charxBtn); });
+
   summaryEl = el('span', { class: 'dim changesum', title: '이 봇의 카드에서 아직 RisuAI에 쓰지 않은 변경' });
 
-  bar = el('div', { class: 'toolrow botbar' }, [applyBtn, snap, versions, summaryEl]);
+  bar = el('div', { class: 'toolrow botbar' }, [applyBtn, snap, versions, charxBtn, summaryEl]);
   refreshBotBar();
   return bar;
+}
+
+let charxBtn: HTMLButtonElement | null = null;
+
+/** charx waits for the importer: a zip missing its images is not the card. */
+function charxBlockReason(): string | null {
+  return state.assetGateReason;
+}
+
+// --- charx (popover) -----------------------------------------------------------
+
+function openCharx(anchor: HTMLElement): void {
+  const out = el('div', { class: 'outbox' });
+  const body = el('div', { class: 'applypop' });
+  const close = popover(anchor, body);
+  const blocked = charxBlockReason();
+  if (blocked) body.appendChild(el('div', { class: 'notice', text: blocked }));
+
+  const nameInput = el('input', {
+    value: (state.workspace?.characterName || 'character'), placeholder: '파일 이름 (.charx)',
+  }) as HTMLInputElement;
+  const build = el('button', { class: 'primary', text: 'charx 만들기' }) as HTMLButtonElement;
+  const buildAnyway = el('button', { class: 'ghost', text: '빠진 에셋 빼고 만들기' }) as HTMLButtonElement;
+  build.disabled = !!blocked;
+  buildAnyway.style.display = 'none';
+  const run = async (allowMissing: boolean): Promise<void> => {
+    build.disabled = buildAnyway.disabled = true;
+    clear(out);
+    out.appendChild(el('div', { class: 'hint', text: '만드는 중입니다… 에셋이 많으면 몇 분 걸립니다.' }));
+    try {
+      const r = await state.charxBuild({ allowMissing, name: nameInput.value.trim() });
+      clear(out);
+      shellNotice(`${r.file} · ${(r.size / 1048576).toFixed(1)}MB · 에셋 ${r.assets}개`
+        + (r.dropped ? ` (${r.dropped}개 제외)` : '') + ` — 워크스페이스 파일 탭의 out/ 에서 내 PC에 저장할 수 있습니다.`, 'ok');
+      close();
+    } catch (e) {
+      clear(out);
+      const missing = (e as { body?: { missing?: { name: string; type: string }[] } }).body?.missing;
+      if (Array.isArray(missing) && missing.length) {
+        out.appendChild(el('div', { class: 'notice err', text:
+          `에셋 ${missing.length}개가 스토어에 없어 만들지 않았습니다: `
+          + missing.slice(0, 6).map((m) => m.name || m.type).join(', ') + (missing.length > 6 ? ' …' : '') }));
+        buildAnyway.style.display = '';
+      } else {
+        out.appendChild(el('div', { class: 'notice err', text: 'charx 를 만들지 못했습니다: ' + msg(e) }));
+      }
+    } finally {
+      build.disabled = !!charxBlockReason();
+      buildAnyway.disabled = false;
+    }
+  };
+  build.addEventListener('click', () => { void run(false); });
+  buildAnyway.addEventListener('click', () => { void run(true); });
+
+  body.appendChild(el('div', { class: 'hint', text:
+    '작업본 카드(메타·인사말·봇 로어북·Regex·트리거·에셋 이름)와 스토어의 이미지로 charx 를 만듭니다. 반영하지 않은 편집도 들어갑니다. '
+    + 'module.risum 없이 card.json 에 인라인으로 담기며 RisuAI·PocketRisu 가 그대로 가져옵니다.' }));
+  body.appendChild(el('div', { class: 'row' }, [nameInput]));
+  body.appendChild(el('div', { class: 'row' }, [build, buildAnyway]));
+  body.appendChild(out);
 }
 
 /** Redraw the counts; the shell calls this on every state change. */
@@ -91,6 +163,11 @@ export function refreshBotBar(): void {
   applyBadge.style.display = total ? '' : 'none';
   const blocked = applyBlockReason();
   applyBtn.classList.toggle('dimmed', !!blocked);
+  if (charxBtn) {
+    const cb = charxBlockReason();
+    charxBtn.classList.toggle('dimmed', !!cb);
+    charxBtn.title = cb ? cb : '작업본 카드와 스토어의 에셋으로 charx 파일을 만듭니다';
+  }
   applyBtn.title = blocked
     ? blocked + ' (복제·되돌리기는 눌러서 쓸 수 있습니다)'
     : '카드를 RisuAI에 반영 · 복제 봇 생성 · 기준선으로 되돌리기';
@@ -106,6 +183,7 @@ function describe(c: CardChanges | null): string[] {
   if (l.total) out.push('로어북 ' + counts(l));
   if (c.customscript.total) out.push('Regex ' + counts(c.customscript));
   if (c.triggerscript.total) out.push('트리거 ' + counts(c.triggerscript));
+  if (c.assetref && c.assetref.total) out.push('에셋 ' + counts(c.assetref));
   if (c.actions) out.push(`제안 ${c.actions} 대기`);
   return out;
 }

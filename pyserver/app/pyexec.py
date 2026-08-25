@@ -294,7 +294,10 @@ def describe_helper() -> str:
                        original_json, origin)  - Lua 코드는
                        entry_json.effect[0].code
           char_assets(seq, field image|emotion|additional|cc|vits, name, ext,
-                      risu_key)  카드가 참조하는 에셋 목록(카드 순서)
+                      risu_key)  카드가 참조하는 에셋 목록(카드 순서, 스토어 쪽 매니페스트)
+          card_scripts kind='assetref' (entry_json={field,name,key,ext})  카드의 에셋
+                      참조 작업본 - 이름 변경·삭제는 이 행을 고친다. 같은 name 여러 개 =
+                      랜덤 풀(호출 시 무작위 1개). 이름 끝 확장자는 보통 실수.
         Writes still go through the tools (stage_* / propose_*): compute with
         the script, then aim the tool with the ids the script found.
 

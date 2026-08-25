@@ -32,14 +32,74 @@ from . import db, log, store
 # backgroundHTML/backgroundCSS are card fields too (database.svelte.ts:1712,
 # 1714) but the panel edits them on the Regex tab, next to the scripts that
 # usually accompany them - the meta tab filters them out.
-SCALARS = ("name", "desc", "firstMessage", "creatorNotes",
-           "backgroundHTML", "backgroundCSS")
+SCALARS = ("name", "desc", "firstMessage", "creatorNotes", "characterVersion",
+           "backgroundHTML")
+# backgroundCSS: RisuAI's UI has no field for it, so neither has this panel.
 _RETIRED = ("personality", "scenario", "exampleMessage",
-            "systemPrompt", "postHistoryInstructions")
+            "systemPrompt", "postHistoryInstructions", "backgroundCSS")
+# characterVersion lives in two places on a RisuAI character: the UI edits
+# `additionalData.character_version` (CharConfig.svelte), the importer also
+# writes top-level `characterVersion`. Rows read the nested one; the write
+# path sets both.
+NESTED = {"characterVersion": ("additionalData", "character_version")}
 # One row per greeting, seq = its index. Displayed right under firstMessage.
 LIST_FIELD = "alternateGreetings"
 
-SCRIPT_KINDS = ("customscript", "triggerscript")
+# Asset references are card material too: emotionImages / additionalAssets /
+# ccAssets are lists of (name, key[, ext]) the card carries, and the assets
+# tab renames and removes entries in them. They ride in card_scripts under a
+# kind of their own with the same lifecycle (original|edited|added|deleted)
+# and go out in the same patch. Bytes are the asset store's business; this is
+# only what the card says about them.
+ASSET_KIND = "assetref"
+SCRIPT_KINDS = ("customscript", "triggerscript", ASSET_KIND)
+
+
+def scalar_of(card: dict, field: str) -> str:
+    """A scalar's value on a character, nested ones included."""
+    if field in NESTED:
+        top, inner = NESTED[field]
+        holder = card.get(top)
+        v = holder.get(inner) if isinstance(holder, dict) else None
+        if v in (None, ""):
+            v = card.get(field)
+        return "" if v is None else str(v)
+    return str(card.get(field) or "")
+
+
+def asset_entries(card: dict) -> list[dict]:
+    """The card's asset references as assetref entries, in the order the
+    assets tab shows them: emotion, additional, cc."""
+    out: list[dict] = []
+    for e in card.get("emotionImages") or []:
+        if isinstance(e, list) and len(e) >= 2:
+            out.append({"field": "emotion", "name": str(e[0] or ""), "key": str(e[1] or ""), "ext": "png"})
+    for a in card.get("additionalAssets") or []:
+        if isinstance(a, list) and len(a) >= 2:
+            out.append({"field": "additional", "name": str(a[0] or ""), "key": str(a[1] or ""),
+                        "ext": str(a[2]) if len(a) > 2 and a[2] else "png"})
+    for c in card.get("ccAssets") or []:
+        if isinstance(c, dict):
+            out.append({"field": "cc", "name": str(c.get("name") or ""), "key": str(c.get("uri") or ""),
+                        "ext": str(c.get("ext") or "png"), "type": str(c.get("type") or "asset")})
+    return out
+
+
+def asset_lists(entries: list[dict]) -> dict:
+    """assetref entries back into the three character lists."""
+    emotion: list = []
+    additional: list = []
+    cc: list = []
+    for e in entries:
+        f = e.get("field")
+        if f == "emotion":
+            emotion.append([e.get("name") or "", e.get("key") or ""])
+        elif f == "cc":
+            cc.append({"type": e.get("type") or "asset", "uri": e.get("key") or "",
+                       "name": e.get("name") or "", "ext": e.get("ext") or "png"})
+        else:
+            additional.append([e.get("name") or "", e.get("key") or "", e.get("ext") or "png"])
+    return {"emotionImages": emotion, "additionalAssets": additional, "ccAssets": cc}
 
 # Whether the last upload carried the full character (vs the 13-field
 # whitelist an older plugin sends). A patch built on whitelist-era rows may
@@ -88,7 +148,7 @@ def ingest(ck: str, card: dict, *, reset: bool) -> dict:
 
     field_rows: list[tuple[str, int, str]] = []
     for f in SCALARS:
-        field_rows.append((f, 0, str(card.get(f) or "")))
+        field_rows.append((f, 0, scalar_of(card, f)))
         counts["fields"] += 1
     greetings = card.get(LIST_FIELD)
     for i, g in enumerate(greetings if isinstance(greetings, list) else []):
@@ -97,11 +157,11 @@ def ingest(ck: str, card: dict, *, reset: bool) -> dict:
 
     script_rows: list[tuple[str, int, dict]] = []
     for kind in SCRIPT_KINDS:
-        items = card.get(kind)
+        items = asset_entries(card) if kind == ASSET_KIND else card.get(kind)
         for i, e in enumerate(items if isinstance(items, list) else []):
             if isinstance(e, dict):
                 script_rows.append((kind, i, e))
-                counts[kind] += 1
+                counts[kind] = counts.get(kind, 0) + 1
 
     if reset:
         db.execute("DELETE FROM card_fields WHERE char_key = ?", (ck,))
@@ -333,6 +393,42 @@ def move_script(script_id: str, to_seq: int) -> dict:
     return {"id": script_id, "seq": pos}
 
 
+def rename_assets(ck: str, mode: str, pattern: str = "", repl: str = "",
+                  fields: tuple[str, ...] | None = None) -> dict:
+    """Bulk-rename asset references in the working copy.
+
+    mode 'strip-ext'  'face.png' -> 'face' (a trailing .<ext> of 1-8 chars)
+    mode 'regex'      re.sub(pattern, repl, name)
+    Names are what CBS and emotion detection look up, so this is a card
+    edit like any other: rows move to 'edited' and go out on 반영.
+    """
+    import re as _re
+    if mode not in ("strip-ext", "regex"):
+        raise ValueError("mode 는 strip-ext 또는 regex 여야 합니다")
+    rx = None
+    if mode == "regex":
+        try:
+            rx = _re.compile(pattern)
+        except _re.error as e:
+            raise ValueError(f"정규식 오류: {e}")
+    changed = 0
+    for row in scripts(ck, ASSET_KIND):
+        e = dict(row["entry"])
+        if fields and e.get("field") not in fields:
+            continue
+        name = str(e.get("name") or "")
+        if mode == "strip-ext":
+            new = _re.sub(r"\.[A-Za-z0-9]{1,8}$", "", name)
+        else:
+            new = rx.sub(repl, name) if rx else name
+        if new == name or not new:
+            continue
+        e["name"] = new
+        update_script(row["id"], e)
+        changed += 1
+    return {"changed": changed}
+
+
 # --- diff / write-back / baseline -------------------------------------------
 
 def changes(ck: str) -> dict:
@@ -364,7 +460,7 @@ def changes(ck: str) -> dict:
         out[kind] = counts
     out["lore"] = store.lore_changes_global(ck)
     out["total"] = (fields + out["greetings"]["total"] + out["customscript"]["total"]
-                    + out["triggerscript"]["total"] + out["lore"]["total"])
+                    + out["triggerscript"]["total"] + out[ASSET_KIND]["total"] + out["lore"]["total"])
     return out
 
 
@@ -415,6 +511,10 @@ def patch(ck: str) -> dict:
         n = counts["added"] + counts["edited"] + counts["deleted"]
         out[kind] = {"changed": n, "list": [x["entry"] for x in scripts(ck, kind)]}
         total += n
+    # The asset references go out as the three character lists RisuAI keeps,
+    # rebuilt from the working entries - the plugin writes lists, never rows.
+    out["assets"] = {"changed": out[ASSET_KIND]["changed"],
+                     **asset_lists([x["entry"] for x in scripts(ck, ASSET_KIND)])}
     out["total"] = total
     return out
 

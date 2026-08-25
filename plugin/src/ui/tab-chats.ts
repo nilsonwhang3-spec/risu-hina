@@ -9,9 +9,9 @@
  * Chat counts of 30-50 across folders are normal, so folders collapse and the
  * list is plain rows rather than cards - at that count, cards are a wall.
  */
-import { el, clear, searchBox, refocusSearch } from './dom';
+import { el, clear, refocusSearch } from './dom';
 import { state } from '../state';
-import { setEditMode } from './shell';
+import { setEditMode, setToolbarSearch } from './shell';
 import { shellNotice } from './chatbar';
 import type { RisuChat } from '../risuai';
 import { describeSync, syncBusy } from '../assets';
@@ -145,11 +145,11 @@ export function renderChatsTab(mount: HTMLElement): void {
   const loadedFor = (c: RisuChat) => ws?.chats.find((w) => w.chatId === (c.id ?? ''));
 
   if (liveChats.length > 6) {
-    pad.appendChild(searchBox(filterText, (v) => {
+    setToolbarSearch(filterText, (v) => {
       filterText = v;
       renderChatsTab(mount);
-      refocusSearch(mount);
-    }, '챗 찾기'));
+      refocusSearch(null);
+    }, '챗 찾기');
   }
   const needle = filterText.trim().toLowerCase();
   const rows = liveChats.map((c, i) => ({ chat: c, index: i }))

@@ -71,6 +71,11 @@ INSTRUCTIONS = """\
   run_python(PIL) 으로 가공한 뒤, 결과 PNG 를 propose_asset_add / propose_asset_replace 로
   제안한다. 승인되면 플러그인이 RisuAI 에 저장하고 카드에 붙인다 — 이것은 반영을 기다리지
   않고 즉시 RisuAI 에 쓰이는 유일한 카드 변경이다(바이너리라 작업본이 없다). PNG 만 된다.
+  에셋의 **이름·삭제**는 카드 재료다: list_scripts("assetref") 로 행을 보고 propose_regex_edit 와
+  같은 문법(propose_script_delete / entry 교체)으로 고치면 반영 때 한 번에 쓰인다.
+  RisuAI 규칙: **같은 이름을 가진 에셋 여러 개 = 랜덤 풀**({{asset::이름}} 호출 때 무작위 1개).
+  charx 파일명의 `_1`, `_2` 는 파일명 고유화용일 뿐 이름이 아니다. 이름 끝 `.png` 같은 확장자는
+  보통 실수이며(호출은 확장자 없는 이름), 일괄 제거는 카드 도구가 한다.
 - 워크스페이스 밖에는 읽기도 쓰기도 할 수 없다. 다른 봇의 데이터도 볼 수 없다.
 - 파일을 만들기 전에 list_files 로 이미 있는지 확인해라. 같은 이름을 덮어쓰지 마라.
 """

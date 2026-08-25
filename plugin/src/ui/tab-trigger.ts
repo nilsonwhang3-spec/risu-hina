@@ -1,49 +1,34 @@
 /**
- * Trigger scripts (triggerscript) - code-first editing.
+ * 트리거 - the same three modes RisuAI's own editor offers, and no more.
  *
- * The triggers people actually write are code: `effect[0] = {type:
- * 'triggerlua'|'triggercode', code}` (triggers.ts:66-69, and the dispatcher
- * checks exactly effect[0], :1213). So the editor shows the code as code -
- * real newlines, monospace - and writes it back into effect[0].code with
- * everything else on the item preserved. Never JSON at the user.
+ * RisuAI (SideBars/Scripts/TriggerList.svelte) decides the mode from
+ * `triggerscript[0].effect[0].type`:
  *
- * V1 condition/effect lists and V2 block programs have no code to show; they
- * are summarised read-only and edited in RisuAI's own block editor.
+ *   'triggerlua'   Lua: ONE text box bound to triggerscript[0].effect[0].code.
+ *                  No event type, no list - the script registers its own
+ *                  handlers. This is what nearly every modern card uses.
+ *   'v2Header'     V2: a block program. RisuAI edits it with a block editor;
+ *                  here it is summarised read-only.
+ *   anything else  V1 (deprecated): condition/effect lists, read-only here.
+ *
+ * Switching modes replaces the whole list with RisuAI's own starting
+ * objects, after the same confirmation RisuAI asks for. There is no per-
+ * trigger "실행 시점": Lua has none, and V2 events are not edited here.
  */
-import { el, clear, armed, searchBox, refocusSearch } from './dom';
+import { el, clear, armed } from './dom';
 import { state, type CardScript } from '../state';
 import { threePane } from './panes';
 import { bindAgent, mountAgent } from './agentpane';
 
-const EVENTS = ['start', 'manual', 'output', 'input', 'display', 'request'];
-const EVENT_LABEL: Record<string, string> = {
-  start: 'start — 채팅 시작 시',
-  manual: 'manual — 수동 실행',
-  output: 'output — 모델 출력 후',
-  input: 'input — 입력 전송 시',
-  display: 'display — 표시 시',
-  request: 'request — 요청 직전',
-};
-
-/** The code slot, when this trigger is a code trigger. */
-function codeOf(s: CardScript): { kind: string; code: string } | null {
-  const e = s.entry as Record<string, any>;
-  const first = Array.isArray(e.effect) ? e.effect[0] : null;
-  if (first && (first.type === 'triggerlua' || first.type === 'triggercode')) {
-    return { kind: first.type, code: String(first.code ?? '') };
-  }
-  return null;
-}
+type Mode = 'lua' | 'v2' | 'v1' | 'none';
 
 let built = false;
-let treeMount: HTMLElement | null = null;
+let sideMount: HTMLElement | null = null;
 let viewMount: HTMLElement | null = null;
 let noticeMount: HTMLElement | null = null;
-let openId = '';
 let items: CardScript[] = [];
 let seenEpoch = -1;
 let seenKey = '';
-let filterText = '';
 
 export function renderTriggerTab(mount: HTMLElement): void {
   if (!state.botKey) {
@@ -57,8 +42,8 @@ export function renderTriggerTab(mount: HTMLElement): void {
   if (!built || !mount.querySelector('.split')) {
     clear(mount);
     const pane = threePane();
-    treeMount = el('div', { class: 'tree' });
-    pane.left.appendChild(treeMount);
+    sideMount = el('div', { class: 'tree' });
+    pane.left.appendChild(sideMount);
     noticeMount = el('div');
     viewMount = el('div', { class: 'pad' });
     pane.centre.appendChild(noticeMount);
@@ -71,8 +56,6 @@ export function renderTriggerTab(mount: HTMLElement): void {
   } else if (seenEpoch !== state.epoch || seenKey !== state.botKey) {
     seenEpoch = state.epoch;
     seenKey = state.botKey;
-    openId = '';
-    if (viewMount) clear(viewMount);
     void refresh();
   }
   bindAgent({ notice });
@@ -88,173 +71,156 @@ function notice(text: string, kind: 'ok' | 'err' | '' = ''): void {
 }
 
 async function refresh(): Promise<void> {
-  if (!treeMount) return;
-  clear(treeMount);
-  treeMount.appendChild(el('div', { class: 'hint', style: { padding: '8px' }, text: '읽는 중입니다…' }));
   try {
     items = await state.cardScripts('triggerscript');
-    drawTree();
   } catch (e) {
-    clear(treeMount);
-    treeMount.appendChild(el('div', { class: 'notice err', text: msg(e) }));
+    items = [];
+    notice('트리거를 읽지 못했습니다: ' + msg(e), 'err');
+  }
+  drawSide();
+  drawView();
+}
+
+function firstEffectType(): string {
+  const e = items[0]?.entry as Record<string, any> | undefined;
+  const first = e && Array.isArray(e.effect) ? e.effect[0] : null;
+  return first && typeof first.type === 'string' ? first.type : '';
+}
+
+function modeOf(): Mode {
+  if (!items.length) return 'none';
+  const t = firstEffectType();
+  if (t === 'triggerlua') return 'lua';
+  if (t === 'v2Header') return 'v2';
+  return 'v1';
+}
+
+// --- the side column: mode switch, as RisuAI draws it --------------------------
+
+function drawSide(): void {
+  if (!sideMount) return;
+  clear(sideMount);
+  const mode = modeOf();
+  // Switching away from existing triggers asks twice, the way every other
+  // destructive button here does (armed) - RisuAI asks with a dialog.
+  const btn = (label: string, on: boolean, run: () => void) => {
+    const b = el('button', { class: 'modebtn' + (on ? ' on' : ''), text: label }) as HTMLButtonElement;
+    if (on) return b;
+    if (items.length) armed(b, label, '정말 바꿀까요? (지금 트리거가 지워집니다)', run);
+    else b.addEventListener('click', run);
+    return b;
+  };
+  const row = el('div', { class: 'row', style: { padding: '6px' } });
+  if (mode === 'v1') row.appendChild(btn('V1', true, () => { /* legacy: stays until switched */ }));
+  row.appendChild(btn('V2', mode === 'v2', () => void switchMode('v2')));
+  row.appendChild(btn('Lua', mode === 'lua', () => void switchMode('lua')));
+  sideMount.appendChild(row);
+  sideMount.appendChild(el('div', { class: 'hint', style: { padding: '0 8px' }, text:
+    mode === 'lua' ? 'Lua 스크립트 한 개가 이 봇의 트리거입니다.'
+      : mode === 'v2' ? `V2 블록 프로그램 · 이벤트 ${Math.max(0, items.length - 1)}개`
+        : mode === 'v1' ? 'V1 (구형) 트리거입니다.'
+          : '트리거가 없습니다. 모드를 골라 시작합니다.' }));
+}
+
+/**
+ * Replace the whole list with RisuAI's starting objects for the mode - the
+ * exact shapes TriggerList.svelte writes, so RisuAI reads them as its own.
+ */
+async function switchMode(to: 'lua' | 'v2'): Promise<void> {
+  const mode = modeOf();
+  if (mode === to) return;
+  try {
+    for (const it of items) await state.deleteScript(it.id);
+    if (to === 'lua') {
+      await state.addScript('triggerscript', {
+        comment: '', type: 'start', conditions: [],
+        effect: [{ type: 'triggerlua', code: '' }],
+      });
+    } else {
+      await state.addScript('triggerscript', {
+        comment: '', type: 'manual', conditions: [],
+        effect: [{ type: 'v2Header', code: '', indent: 0 }],
+      });
+      await state.addScript('triggerscript', {
+        comment: 'New Event', type: 'manual', conditions: [], effect: [],
+      });
+    }
+    await refresh();
+    notice('모드를 바꿨습니다. 봇 바의 “반영”을 누르면 RisuAI에 쓰입니다.', 'ok');
+  } catch (e) {
+    notice('모드를 바꾸지 못했습니다: ' + msg(e), 'err');
   }
 }
 
-function titleOf(s: CardScript): string {
-  const e = s.entry as Record<string, any>;
-  return String(e.comment || '').trim().slice(0, 60) || '(이름 없음)';
-}
+// --- the centre: one text box (Lua) or a read-only summary ----------------------
 
-function shapeOf(s: CardScript): string {
-  const code = codeOf(s);
-  if (code) return code.kind === 'triggerlua' ? 'Lua' : 'triggercode';
-  const effects = (s.entry as Record<string, any>).effect;
-  return Array.isArray(effects) && effects.length ? '블록형' : '빈 트리거';
-}
+function drawView(): void {
+  if (!viewMount) return;
+  clear(viewMount);
+  const mode = modeOf();
 
-function drawTree(): void {
-  if (!treeMount) return;
-  clear(treeMount);
-
-  const add = el('button', { class: 'primary tiny', text: '새 Lua 트리거' });
-  add.addEventListener('click', async () => {
-    try {
-      const id = await state.addScript('triggerscript', {
-        comment: '새 트리거', type: 'manual', conditions: [],
-        effect: [{ type: 'triggerlua', code: '' }],
-      });
-      await refresh();
-      const made = items.find((s) => s.id === id);
-      if (made) open(made);
-    } catch (e) {
-      notice('만들지 못했습니다: ' + msg(e), 'err');
-    }
-  });
-  const reloadBtn = el('button', { class: 'ghost tiny', text: '새로고침' });
-  reloadBtn.addEventListener('click', () => void refresh());
-  treeMount.appendChild(el('div', { class: 'treehead' }, [add, reloadBtn]));
-
-  if (!items.length) {
-    treeMount.appendChild(el('div', {
-      class: 'hint', style: { padding: '8px' },
-      text: '이 봇의 트리거 스크립트가 없습니다.',
-    }));
+  if (mode === 'none') {
+    viewMount.appendChild(el('div', { class: 'empty', text: '트리거가 없습니다. 왼쪽에서 V2 또는 Lua 를 고르면 RisuAI 와 같은 초기 상태로 시작합니다.' }));
     return;
   }
 
-  treeMount.appendChild(searchBox(filterText, (v) => {
-    filterText = v;
-    drawTree();
-    refocusSearch(treeMount);
-  }, '찾기 (이름·코드)'));
-  const needle = filterText.trim().toLowerCase();
-  const shown = items.filter((s) => {
-    if (!needle) return true;
+  if (mode === 'lua') {
+    const s = items[0];
     const e = s.entry as Record<string, any>;
-    return [e.comment, codeOf(s)?.code].some((v) => String(v ?? '').toLowerCase().includes(needle));
-  });
-  treeMount.appendChild(el('div', {
-    class: 'treescope',
-    text: `이 봇 · ${needle ? `${shown.length}/${items.length}` : items.length}`,
-  }));
-
-  for (const s of shown) {
-    const e = s.entry as Record<string, any>;
-    const name = el('button', {
-      class: 'treefile' + (s.id === openId ? ' on' : ''),
-      text: titleOf(s),
-      title: s.id,
+    const first = (Array.isArray(e.effect) ? e.effect[0] : {}) as Record<string, unknown>;
+    const body = el('textarea', {
+      class: 'codearea', value: String(first.code ?? ''),
+      style: { minHeight: '520px' }, spellcheck: 'false',
+    }) as HTMLTextAreaElement;
+    const save = el('button', { class: 'primary', text: '저장' }) as HTMLButtonElement;
+    save.addEventListener('click', async () => {
+      save.disabled = true;
+      try {
+        // Only the code slot moves; everything else on the item rides along.
+        const effect = Array.isArray(e.effect) ? e.effect.slice() : [{}];
+        effect[0] = { ...(effect[0] as Record<string, unknown>), type: 'triggerlua', code: body.value };
+        await state.saveScript(s.id, { ...e, effect });
+        notice('저장했습니다. 봇 바의 “반영”을 누르면 RisuAI에 쓰입니다.', 'ok');
+        await refresh();
+      } catch (err) {
+        notice('저장하지 못했습니다: ' + msg(err), 'err');
+      } finally {
+        save.disabled = false;
+      }
     });
-    name.addEventListener('click', () => open(s));
-    const row = el('div', { class: 'treerow' }, [name]);
-    row.appendChild(el('span', { class: 'hint', text: `${String(e.type || '')} · ${shapeOf(s)}` }));
-    if (s.origin !== 'original') {
-      row.appendChild(el('span', { class: 'badge warn', text: s.origin === 'added' ? '추가' : '수정' }));
-    }
-    treeMount.appendChild(row);
-  }
-}
-
-function open(s: CardScript): void {
-  if (!viewMount) return;
-  openId = s.id;
-  for (const b of Array.from(document.querySelectorAll('.tree .treefile'))) {
-    b.classList.toggle('on', (b as HTMLElement).title === s.id);
-  }
-
-  const e = s.entry as Record<string, any>;
-  const code = codeOf(s);
-
-  const del = el('button', { class: 'ghost' });
-  armed(del, '삭제', '정말 지울까요?', async () => {
-    try {
-      await state.deleteScript(s.id);
-      openId = '';
-      if (viewMount) clear(viewMount);
-      await refresh();
-    } catch (err) {
-      notice('삭제하지 못했습니다: ' + msg(err), 'err');
-    }
-  });
-
-  clear(viewMount);
-
-  if (!code) {
-    // Block programs have no code to show; anything else would be JSON at the
-    // user, which is exactly what this editor exists to avoid.
     viewMount.appendChild(el('div', { class: 'card' }, [
-      el('h2', { text: `트리거 — ${titleOf(s)} (${shapeOf(s)})` }),
-      el('div', {
-        class: 'notice',
-        text: '블록형 트리거입니다. 블록 편집은 RisuAI의 트리거 편집기에서 해 주세요. '
-          + '여기서는 삭제만 할 수 있습니다.',
-      }),
-      el('div', { class: 'row' }, [del]),
+      el('h2', { text: 'Lua' + (s.origin !== 'original' ? ' · 수정됨' : '') }),
+      body,
+      el('div', { class: 'row', style: { marginTop: '8px' } }, [save]),
+      el('div', { class: 'hint', style: { marginTop: '6px' }, text:
+        'RisuAI 의 트리거 편집기와 같은 Lua 스크립트 한 개입니다. 이벤트 등록은 스크립트 안에서 합니다 (listenEdit, onStart 등).' }),
     ]));
     return;
   }
 
-  const comment = el('input', { value: String(e.comment ?? '') }) as HTMLInputElement;
-  const curEvent = String(e.type ?? 'manual');
-  const eventNames = EVENTS.includes(curEvent) ? EVENTS : [...EVENTS, curEvent];
-  const eventSel = el('select', {}, eventNames.map((t) => {
-    const o = el('option', { value: t, text: EVENT_LABEL[t] || t });
-    if (t === curEvent) o.setAttribute('selected', '');
-    return o;
-  })) as HTMLSelectElement;
-  const body = el('textarea', {
-    class: 'codearea',
-    value: code.code,
-    style: { minHeight: '420px' },
-    spellcheck: 'false',
-  }) as HTMLTextAreaElement;
-
-  const save = el('button', { class: 'primary', text: '저장' }) as HTMLButtonElement;
-  save.addEventListener('click', async () => {
-    save.disabled = true;
-    try {
-      // Only comment, event type and the code slot move; conditions,
-      // lowLevelAccess and any field we never modelled ride along untouched.
-      const effect = Array.isArray(e.effect) ? e.effect.slice() : [{}];
-      effect[0] = { ...(effect[0] as Record<string, unknown>), type: code.kind, code: body.value };
-      await state.saveScript(s.id, { ...e, comment: comment.value, type: eventSel.value, effect });
-      notice('저장했습니다. 봇 바의 “반영”을 누르면 RisuAI에 쓰입니다.', 'ok');
-      await refresh();
-      const fresh = items.find((x) => x.id === s.id);
-      if (fresh) open(fresh);
-    } catch (err) {
-      notice('저장하지 못했습니다: ' + msg(err), 'err');
-    } finally {
-      save.disabled = false;
-    }
+  // V2 / V1: summarise, do not invent a JSON editor.
+  const rows = items.filter((s, i) => !(mode === 'v2' && i === 0)).map((s) => {
+    const e = s.entry as Record<string, any>;
+    const n = Array.isArray(e.effect) ? e.effect.length : 0;
+    const c = Array.isArray(e.conditions) ? e.conditions.length : 0;
+    const del = el('button', { class: 'ghost tiny' });
+    armed(del, '삭제', '정말?', async () => {
+      try { await state.deleteScript(s.id); await refresh(); } catch (err) { notice(msg(err), 'err'); }
+    });
+    return el('div', { class: 'verrow' }, [
+      el('div', { class: 'grow' }, [
+        el('div', { text: String(e.comment || '(이름 없음)') }),
+        el('div', { class: 'hint', text: `${String(e.type || 'manual')} · 조건 ${c} · 효과 ${n}` + (s.origin !== 'original' ? ` · ${s.origin}` : '') }),
+      ]),
+      del,
+    ]);
   });
-
   viewMount.appendChild(el('div', { class: 'card' }, [
-    el('h2', { text: `트리거 — ${titleOf(s)} (${code.kind === 'triggerlua' ? 'Lua' : 'triggercode'})` }),
-    el('label', { class: 'field' }, [el('span', { text: '이름 (comment)' }), comment]),
-    el('label', { class: 'field' }, [el('span', { text: '실행 시점 (type)' }), eventSel]),
-    el('label', { class: 'field' }, [el('span', { text: '코드' }), body]),
-    el('div', { class: 'row' }, [save, del]),
+    el('h2', { text: mode === 'v2' ? '트리거 V2 (블록)' : '트리거 V1 (구형)' }),
+    el('div', { class: 'notice', text: mode === 'v2'
+      ? '블록 프로그램은 RisuAI 의 트리거 편집기에서 편집합니다. 여기서는 이벤트 목록을 보고 지울 수만 있습니다. 에이전트는 run_python 으로 card_scripts 의 entry_json 을 읽어 분석할 수 있습니다.'
+      : 'V1 트리거는 RisuAI 에서도 더 이상 권장하지 않습니다. V2 나 Lua 로 바꾸는 것을 권합니다.' }),
+    ...(rows.length ? rows : [el('div', { class: 'hint', text: '이벤트가 없습니다.' })]),
   ]));
 }
 

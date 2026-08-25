@@ -53,7 +53,10 @@ export function searchBox(value: string, onInput: (v: string) => void,
 
 /** Re-focus the filter box after a redraw, caret at the end. */
 export function refocusSearch(root: HTMLElement | null): void {
-  const input = root?.querySelector('.searchbox input') as HTMLInputElement | null;
+  // Filter boxes live on the menu line (shell.setToolbarSearch) now; a tab
+  // passing its own column still finds one there.
+  const input = (root?.querySelector('.searchbox input')
+    ?? document.querySelector('.tabslot .searchbox input')) as HTMLInputElement | null;
   if (!input) return;
   input.focus();
   try { input.setSelectionRange(input.value.length, input.value.length); } catch { /* number inputs */ }

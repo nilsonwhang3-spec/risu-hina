@@ -11,7 +11,8 @@
  * than each becoming its own - a folder per entry is a list with extra
  * indentation.
  */
-import { el, clear, armed, searchBox, refocusSearch } from './dom';
+import { el, clear, armed, refocusSearch } from './dom';
+import { setToolbarSearch } from './shell';
 import { state, type LoreEntry } from '../state';
 import { threePane } from './panes';
 import { bindAgent, mountAgent } from './agentpane';
@@ -124,11 +125,11 @@ export function makeLoreTab(opts: LoreViewOptions): (mount: HTMLElement) => void
 
     // Finding one entry among dozens is the common case; the filter searches
     // names and content, and a filtered view auto-opens its folders.
-    treeMount.appendChild(searchBox(filterText, (v) => {
+    setToolbarSearch(filterText, (v) => {
       filterText = v;
       drawTree();
-      refocusSearch(treeMount);
-    }, '찾기 (이름·내용)'));
+      refocusSearch(null);
+    }, '찾기 (이름·내용)');
 
     const needle = filterText.trim().toLowerCase();
     const hit = (e: LoreEntry): boolean => {

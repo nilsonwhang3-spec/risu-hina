@@ -908,7 +908,7 @@ def test_card_rows(s: Server) -> dict:
           not any(f in fseq for f in ("personality", "scenario", "exampleMessage",
                                       "systemPrompt", "postHistoryInstructions")), str(fseq))
     check("background fields are rows",
-          "backgroundHTML" in fseq and "backgroundCSS" in fseq, str(fseq))
+          "backgroundHTML" in fseq and "backgroundCSS" not in fseq and "characterVersion" in fseq, str(fseq))
 
     st, body = s.get(q("/card/scripts", charKey=ck, kind="customscript"))
     check("regex items listed", st == 200 and len(body.get("items") or []) == 2, str(body)[:200])
@@ -1733,6 +1733,55 @@ def test_charx_build(s: Server, cw: dict) -> None:
     check("and an escaping path", st == 400, str(st))
 
 
+def test_card_assets(s: Server, cw: dict) -> None:
+    """Asset references are card material: rows under kind 'assetref' with the
+    script lifecycle, renamed singly or in bulk, and written back as RisuAI's
+    three lists in the same patch as everything else."""
+    print("test_card_assets")
+    ck = cw["charKey"]
+    # Bring the card back to its baseline shape for this test: one emotion.
+    s.post("/card/reset", {"charKey": ck})
+    st, body = s.get(q("/card/scripts", charKey=ck, kind="assetref"))
+    items = body.get("items") or []
+    check("the emotion image is an assetref row", st == 200 and len(items) == 1
+          and items[0]["entry"] == {"field": "emotion", "name": "기쁨", "key": "assets/aa.png", "ext": "png"},
+          str(items)[:200])
+    check("the version field is a card row",
+          any(f["field"] == "characterVersion" for f in (s.get(q("/card", charKey=ck))[1].get("fields") or [])))
+
+    # Single rename: entry replaced whole, origin edited.
+    rid = items[0]["id"]
+    st, body = s.post("/card/script", {"charKey": ck, "id": rid, "entry": {**items[0]["entry"], "name": "기쁨.png"}})
+    check("rename marks the row edited", st == 200 and body.get("origin") == "edited", str(body)[:160])
+
+    # Bulk: strip the extension people leave on names by mistake.
+    st, body = s.post("/card/assets/rename", {"charKey": ck, "mode": "strip-ext"})
+    check("strip-ext renames one", st == 200 and body.get("changed") == 1, str(body))
+    st, body = s.get(q("/card/scripts", charKey=ck, kind="assetref"))
+    check("and the name lost its .png", (body.get("items") or [{}])[0].get("entry", {}).get("name") == "기쁨", str(body)[:160])
+    st, body = s.post("/card/assets/rename", {"charKey": ck, "mode": "regex", "pattern": "기쁨", "repl": "행복"})
+    check("regex rename works", body.get("changed") == 1, str(body))
+    st, body = s.post("/card/assets/rename", {"charKey": ck, "mode": "regex", "pattern": "(", "repl": ""})
+    check("a bad regex is a 400", st == 400, str(st))
+
+    st, body = s.get(q("/card/changes", charKey=ck))
+    check("the bot bar counts it under assetref", (body.get("assetref") or {}).get("edited") == 1
+          and body.get("total", 0) >= 1, str(body)[:200])
+    st, body = s.get(q("/card/patch", charKey=ck))
+    a = body.get("assets") or {}
+    check("the patch carries RisuAI's lists, rebuilt from the working rows",
+          a.get("changed") == 1 and a.get("emotionImages") == [["행복", "assets/aa.png"]]
+          and a.get("additionalAssets") == [] and a.get("ccAssets") == [], str(a)[:200])
+
+    # Delete: the reference goes on 반영; the store is not touched.
+    st, body = s.post("/card/script/delete", {"charKey": ck, "id": rid})
+    st, body = s.get(q("/card/patch", charKey=ck))
+    check("a deleted reference leaves the list", (body.get("assets") or {}).get("emotionImages") == [], str(body.get("assets"))[:120])
+    s.post("/card/reset", {"charKey": ck})
+    st, body = s.get(q("/card/scripts", charKey=ck, kind="assetref"))
+    check("reset brings it back", len(body.get("items") or []) == 1)
+
+
 def test_loopback_exemption() -> None:
     """With RISUELF_REQUIRE_TOKEN off, a loopback caller needs no token.
 
@@ -1794,6 +1843,7 @@ def main() -> int:
         test_asset_probe(s)
         test_assets_store(s, cw)
         test_charx_build(s, cw)
+        test_card_assets(s, cw)
     finally:
         s.stop()
 
