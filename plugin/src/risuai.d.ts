@@ -135,6 +135,12 @@ export interface RisuaiApi {
    * the host throws otherwise.
    */
   readImage(path: string): Promise<Uint8Array | null>;
+  /**
+   * Store bytes as an asset; resolves to the key (`assets/<hash>.png`). The
+   * extension is always .png whatever the bytes are (globalApi.saveAsset with
+   * no fileName), so only PNG goes through here.
+   */
+  saveAsset(data: Uint8Array): Promise<string>;
 
   onUnload(cb: () => void | Promise<void>): Promise<void>;
   alert(msg: string): Promise<void>;

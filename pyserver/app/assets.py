@@ -295,6 +295,81 @@ def store_stats() -> dict:
             "dir": str(ASSET_DIR)}
 
 
+def fetch_to_scratch(ck: str, wanted: list[str]) -> dict:
+    """Copy present assets into <workspace>/scratch/assets/ for the agent's
+    PIL work. Names or keys; a name shared by several entries (a random
+    pool) yields name, name_1, name_2..."""
+    from . import workspace as ws
+    rows = _rows_for(ck)
+    dest = ws.root(ck) / "scratch" / "assets"
+    dest.mkdir(parents=True, exist_ok=True)
+    paths: list[str] = []
+    missing: list[str] = []
+    for want in wanted:
+        hits = [r for r in rows if r["risu_key"] == want or (r["name"] or "") == want]
+        if not hits:
+            missing.append(want)
+            continue
+        used: set[str] = set()
+        for r in hits:
+            p = locate(r["risu_key"])
+            if p is None:
+                missing.append(f"{want} ({r['state']})")
+                continue
+            ext = r["ext"] or ext_of(r["risu_key"])
+            stem = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", r["name"] or "asset").strip(". ") or "asset"
+            name, n = stem, 0
+            while name in used or (dest / f"{name}.{ext}").exists() and name in used:
+                n += 1
+                name = f"{stem}_{n}"
+            used.add(name)
+            target = dest / f"{name}.{ext}"
+            target.write_bytes(p.read_bytes())
+            paths.append(f"scratch/assets/{name}.{ext}")
+    return {"paths": paths, "missing": missing}
+
+
+def stage_file(ck: str, rel: str) -> dict:
+    """Validate a workspace file the agent wants to turn into an asset: it
+    must exist inside the workspace and be a PNG (saveAsset names every key
+    `.png`, so anything else would be mislabelled)."""
+    from . import files
+    p = files._resolve(ck, rel)
+    if not p.is_file():
+        raise AssetError(f"파일이 없습니다: {rel}")
+    head = p.read_bytes()[:8] if p.stat().st_size >= 8 else b""
+    if not head.startswith(b"\x89PNG"):
+        raise AssetError("PNG 만 에셋으로 넣을 수 있습니다 (saveAsset 이 .png 키를 만듭니다): " + rel)
+    limit = int(settings().get("maxItemBytes") or 0)
+    if limit and p.stat().st_size > limit:
+        raise AssetError(f"{limit} 바이트를 넘습니다: {rel}")
+    return {"path": p.relative_to(files._root(ck)).as_posix(), "size": p.stat().st_size}
+
+
+def adopt(ck: str, key: str, rel: str, *, name: str = "", field: str = "additional") -> dict:
+    """The host saved a workspace file as an asset and told us the key: put
+    the same bytes in the store under it and append it to the manifest, so
+    the next charx or fetch sees it before the next full sync does."""
+    from . import files
+    if not key_ok(key):
+        raise AssetError(f"bad asset key: {key!r}")
+    p = files._resolve(ck, rel)
+    if not p.is_file():
+        raise AssetError(f"파일이 없습니다: {rel}")
+    r = store_bytes(key, p.read_bytes())
+    if field not in FIELDS:
+        field = "additional"
+    with db.LOCK:
+        exists = db.one("SELECT seq FROM char_assets WHERE char_key = ? AND risu_key = ?", (ck, key))
+        if exists is None:
+            row = db.one("SELECT COALESCE(MAX(seq), -1) AS m FROM char_assets WHERE char_key = ?", (ck,))
+            seq = int(row["m"]) + 1 if row else 0
+            db.execute(
+                "INSERT INTO char_assets(char_key, seq, field, name, ext, risu_key) VALUES(?,?,?,?,?,?)",
+                (ck, seq, field, name[:200], ext_of(key), key))
+    return {"key": key, "hash": r["hash"], "size": r["size"], "created": r["created"]}
+
+
 def locate(key: str) -> Path | None:
     """The file behind a present key, or None. For streaming readers (charx)."""
     if not key_ok(key):

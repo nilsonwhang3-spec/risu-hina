@@ -40,6 +40,7 @@ let openKey = '';
 let seenEpoch = -1;
 let seenKey = '';
 let seenSyncAt = 0;
+let seenBusy = false;
 let filterText = '';
 const thumbs = new Map<string, string>();
 
@@ -72,8 +73,13 @@ export function renderAssetsTab(mount: HTMLElement): void {
     seenEpoch = state.epoch;
     seenKey = state.botKey;
     seenSyncAt = syncAt;
+    seenBusy = syncBusy(state.assetSync);
     void refresh();
-  } else {
+  } else if (seenBusy !== syncBusy(state.assetSync)) {
+    // Only a change in the importer's state redraws the header: every other
+    // emit (a file listing bump after a charx build, say) must leave the
+    // result the user is reading where it is.
+    seenBusy = syncBusy(state.assetSync);
     renderHeader();
   }
   bindAgent({ notice });

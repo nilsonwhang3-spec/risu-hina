@@ -1014,6 +1014,8 @@ class AppState {
         this.openTabRequest = tab;
         this.emit();
         detail = '탭을 이동했습니다.';
+      } else if (r.host.kind === 'host_asset_add' || r.host.kind === 'host_asset_replace') {
+        detail = await this.applyAssetAction(r.host.kind, r.host.args ?? {});
       } else {
         throw new Error('플러그인이 모르는 작업입니다: ' + r.host.kind);
       }
@@ -1223,6 +1225,81 @@ class AppState {
     await this.cardCommit('반영 직전');
     await this.readHost();
     return { applied: r.applied, mode: r.mode };
+  }
+
+  /**
+   * An approved asset proposal: bytes from the workspace -> RisuAI's asset
+   * store (saveAsset, which names the key) -> the live card's reference
+   * list -> the backend store under that key. Written to RisuAI at once,
+   * unlike text: binary material has no working copy to stage in, and the
+   * card re-upload afterwards makes the new reference the baseline.
+   */
+  private async applyAssetAction(kind: string, args: Record<string, unknown>): Promise<string> {
+    if (!this.isLiveBot || !this.slot) {
+      throw new Error('에셋을 넣으려면 RisuAI에서 이 봇이 선택되어 있어야 합니다');
+    }
+    const name = String(args.name || '').trim();
+    const path = String(args.path || '');
+    const field = String(args.field || 'additional');
+    if (!name || !path) throw new Error('에셋 이름과 파일 경로가 필요합니다');
+    const bytes = await transport.getBinary('/files/download', { charKey: this.activeCharKey, path });
+    if (!(bytes[0] === 0x89 && bytes[1] === 0x50)) throw new Error('PNG 파일만 에셋으로 넣을 수 있습니다');
+    const key = await Risuai.saveAsset(bytes);
+    if (!key || typeof key !== 'string') throw new Error('RisuAI 가 에셋 키를 돌려주지 않았습니다');
+
+    const slot = await host.currentSlot();
+    const fresh = await host.readCharacter(slot.characterIndex);
+    const update: host.CardUpdate = {};
+    let placed = '';
+    if (kind === 'host_asset_add') {
+      if (field === 'emotion') {
+        const list = Array.isArray(fresh['emotionImages']) ? [...(fresh['emotionImages'] as unknown[])] : [];
+        list.push([name, key]);
+        update.emotionImages = list;
+        placed = '감정 이미지';
+      } else {
+        const list = Array.isArray(fresh['additionalAssets']) ? [...(fresh['additionalAssets'] as unknown[])] : [];
+        list.push([name, key, 'png']);
+        update.additionalAssets = list;
+        placed = '추가 에셋';
+      }
+    } else {
+      // Replace: same name, new key, wherever the name lives. CBS references
+      // the name, so nothing else in the card has to change.
+      let hits = 0;
+      const swap = (arr: unknown, at: number): unknown[] | null => {
+        if (!Array.isArray(arr)) return null;
+        const next = arr.map((e) => {
+          if (Array.isArray(e) && String(e[0]) === name) { hits += 1; const c = [...e]; c[at] = key; return c; }
+          return e;
+        });
+        return next;
+      };
+      const emo = swap(fresh['emotionImages'], 1);
+      const add = swap(fresh['additionalAssets'], 1);
+      const cc = Array.isArray(fresh['ccAssets'])
+        ? (fresh['ccAssets'] as { name?: unknown; uri?: unknown }[]).map((c) => {
+          if (c && typeof c === 'object' && String(c.name) === name) { hits += 1; return { ...c, uri: key }; }
+          return c;
+        })
+        : null;
+      if (!hits) throw new Error(`이름이 “${name}” 인 에셋이 카드에 없습니다`);
+      if (emo) update.emotionImages = emo;
+      if (add) update.additionalAssets = add;
+      if (cc) update.ccAssets = cc;
+      placed = `${hits}곳 교체`;
+    }
+    await host.writeCharacter(slot.characterIndex, fresh.chaId, update);
+    try {
+      await transport.post('/assets/adopt', { charKey: this.activeCharKey, key, path, name, field });
+    } catch (e) {
+      void clientLog('warn', 'assets/adopt failed', { error: String(e) });
+    }
+    // The card changed in RisuAI: re-read so the baseline (and the manifest)
+    // carry the new reference, without disturbing the text working copy.
+    await this.readHost();
+    await this.upload();
+    return `에셋 “${name}” 을 RisuAI 에 저장하고 카드에 붙였습니다 (${placed}, ${key}).`;
   }
 
   /** Create a clone bot in RisuAI carrying the working card. */

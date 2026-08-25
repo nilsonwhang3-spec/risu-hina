@@ -39,7 +39,10 @@ FAILED = "failed"
 # host_open_tab is a UI move, not a write - it rides the same queue because
 # the queue is exactly the "~하시겠습니까? [승인]" interaction the ask needs.
 HOST_KINDS = ("host_writeback", "host_save_copy",
-              "host_card_writeback", "host_clone_bot", "host_open_tab")
+              "host_card_writeback", "host_clone_bot", "host_open_tab",
+              # Binary card material: the plugin saves the bytes into RisuAI
+              # (saveAsset) and attaches the key to the live card at once.
+              "host_asset_add", "host_asset_replace")
 
 
 class ActionError(ValueError):

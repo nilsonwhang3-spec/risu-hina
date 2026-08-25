@@ -444,6 +444,16 @@ def h_file_download(arg: dict) -> Any:
     raise ApiError(500, "files/download must be dispatched directly")
 
 
+def h_assets_adopt(arg: dict) -> dict:
+    """The plugin saved a workspace file into RisuAI; record the key here."""
+    ck = _char(arg)
+    try:
+        return assets.adopt(ck, str(arg.get("key") or ""), str(arg.get("path") or ""),
+                            name=str(arg.get("name") or ""), field=str(arg.get("field") or "additional"))
+    except (assets.AssetError, files.FileError) as e:
+        raise ApiError(400, str(e))
+
+
 def _plugin_file() -> "pathlib.Path | None":
     """The newest built plugin, wherever this install keeps it.
 
@@ -1416,6 +1426,7 @@ ROUTES: dict[str, Handler] = {
     "GET /charx/preview": h_charx_preview,
     "POST /charx/build": h_charx_build,
     "GET /files/download": h_file_download,
+    "POST /assets/adopt": h_assets_adopt,
 
     "GET /config": h_config_get,
     "POST /config": h_config_set,

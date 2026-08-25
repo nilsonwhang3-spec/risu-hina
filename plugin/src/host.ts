@@ -222,6 +222,10 @@ export interface CardUpdate {
   globalLore?: unknown[];
   customscript?: unknown[];
   triggerscript?: unknown[];
+  /** Binary card material (asset references). Written by approved asset actions only. */
+  additionalAssets?: unknown[];
+  emotionImages?: unknown[];
+  ccAssets?: unknown[];
 }
 
 /**
@@ -278,6 +282,12 @@ export async function writeCharacter(
   if (update.triggerscript) {
     next['triggerscript'] = update.triggerscript;
     parts.push('triggerscript');
+  }
+  for (const k of ['additionalAssets', 'emotionImages', 'ccAssets'] as const) {
+    if (update[k]) {
+      next[k] = update[k];
+      parts.push(k);
+    }
   }
 
   if (!parts.length) return { applied: 0, mode: 'noop', parts };

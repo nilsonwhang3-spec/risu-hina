@@ -194,6 +194,13 @@ function makeHost(backendUrl, token) {
         return new Uint8Array([71,73,70,56,57,97,1,0,1,0,128,0,0,0,0,0,255,255,255,33,
                                249,4,1,0,0,0,0,44,0,0,0,0,1,0,1,0,0,2,2,68,1,0,59]);
       },
+      async saveAsset(data) {
+        calls.push('saveAsset');
+        // The real host names the key by content hash and always .png.
+        let h = 0;
+        for (const b of data) h = (h * 31 + b) >>> 0;
+        return 'assets/smoke' + h.toString(16) + '.png';
+      },
       pluginStorage: {
         async getItem(k) { return storage.get(k); },
         async setItem(k, v) { storage.set(k, v); },
@@ -1017,6 +1024,23 @@ console.log('\ntest_bot_tabs');
   check('an item opens with its key and hash', /assets\/portrait\.png/.test(aview?.textContent || '')
         && /해시/.test(aview?.textContent || ''), aview?.textContent?.slice(0, 200));
   check('and a preview was attempted on this host', !!aview?.querySelector('.assetpreview img, .assetpreview .assettype'));
+  // charx: built on the backend from the working card and the store, into out/.
+  clickButton(aview, '← 목록');
+  await settle(400);
+  const left = () => document.querySelector('.panel.active .left');
+  check('the charx card is offered', !!findButton(left(), 'charx 만들기'));
+  clickButton(left(), 'charx 만들기');
+  await settle(2500);
+  check('charx built with the portrait in it', /에셋 1개/.test(left()?.textContent || '')
+        && /out\//.test(left()?.textContent || ''), left()?.querySelector('.outbox')?.textContent);
+  clickById(document, 'tab-files');
+  await settle(900);
+  const filesTree = document.querySelector('.panel.active .tree');
+  check('the charx shows up under out/', /\.charx/.test(filesTree?.textContent || ''), filesTree?.textContent?.slice(0, 200));
+  const charxBtn = [...(filesTree?.querySelectorAll('.treefile') ?? [])].find((b) => /\.charx/.test(b.textContent || ''));
+  charxBtn?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(500);
+  check('a binary file offers 내 PC에 저장', !!findButton(document.querySelector('.panel.active'), '내 PC에 저장'));
   clickById(document, 'tab-meta');
   await settle(400);
 

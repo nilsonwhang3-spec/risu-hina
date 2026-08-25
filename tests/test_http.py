@@ -1699,6 +1699,22 @@ def test_charx_build(s: Server, cw: dict) -> None:
     st, body = s.post("/charx/build", {"charKey": "cnope"})
     check("unknown workspace is a 404", st == 404, str(st))
 
+    # adopt: the plugin saved a workspace PNG into RisuAI and reports the key
+    # the host chose; the store takes the same bytes under it and the
+    # manifest grows by one, so a charx right after already carries it.
+    s.post("/files/upload", {"charKey": ck, "name": "made.png", "base64": base64.b64encode(png).decode()})
+    st, body = s.post("/assets/adopt", {"charKey": ck, "key": "assets/hostchose.png",
+                                        "path": "uploads/made.png", "name": "새 그림", "field": "additional"})
+    check("adopt records the host's key", st == 200 and body.get("key") == "assets/hostchose.png", str(body)[:160])
+    check("same bytes as aa.png - one blob", body.get("created") is False, str(body)[:160])
+    st, body = s.get(q("/assets/list", charKey=ck))
+    names = [(i["name"], i["state"]) for i in body.get("items") or []]
+    check("the manifest carries the new asset as present", ("새 그림", "present") in names, str(names))
+    st, body = s.post("/assets/adopt", {"charKey": ck, "key": "../x.png", "path": "uploads/made.png"})
+    check("adopt refuses a bad key", st == 400, str(st))
+    st, body = s.post("/assets/adopt", {"charKey": ck, "key": "assets/ok.png", "path": "../../etc/hosts"})
+    check("and an escaping path", st == 400, str(st))
+
 
 def test_loopback_exemption() -> None:
     """With RISUELF_REQUIRE_TOKEN off, a loopback caller needs no token.

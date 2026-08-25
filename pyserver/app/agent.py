@@ -23,7 +23,7 @@ from pydantic_ai import Agent, RunContext
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
-from . import (actions, config, files, log, presets, pyexec, skills, snapshots,
+from . import (actions, assets, config, files, log, presets, pyexec, skills, snapshots,
                staging, store, websearch, workspace)
 from . import card as cardmod
 from . import memory as mem
@@ -67,6 +67,10 @@ INSTRUCTIONS = """\
   여기 넣으면 대화창에 내려받기 버튼이 뜬다. 결과물을 만들었으면 반드시 여기 저장하고,
   "out/ 에 저장했습니다, 대화창에서 내려받으실 수 있습니다"라고 알려라.
 - `uploads/` 사용자가 올린 참고 파일. **읽기 전용이다. 쓰지 마라.**
+- **에셋(이미지)도 다룬다.** list_assets 로 목록을 보고 fetch_assets 로 scratch/ 에 꺼내
+  run_python(PIL) 으로 가공한 뒤, 결과 PNG 를 propose_asset_add / propose_asset_replace 로
+  제안한다. 승인되면 플러그인이 RisuAI 에 저장하고 카드에 붙인다 — 이것은 반영을 기다리지
+  않고 즉시 RisuAI 에 쓰이는 유일한 카드 변경이다(바이너리라 작업본이 없다). PNG 만 된다.
 - 워크스페이스 밖에는 읽기도 쓰기도 할 수 없다. 다른 봇의 데이터도 볼 수 없다.
 - 파일을 만들기 전에 list_files 로 이미 있는지 확인해라. 같은 이름을 덮어쓰지 마라.
 """
@@ -489,12 +493,13 @@ def build() -> Agent[Deps]:
         로어북 탭에서 대화 중 메타(설명) 수정이 필요해졌을 때
         propose_open_tab("meta", "이 항목은 메타 수정이 필요합니다").
         tab: editor(챗 에딧) lore(챗 로어북) memory(장기기억) vars(챗 변수)
-             meta(메타) botlore(봇 로어북) regex(Regex) trigger(트리거)
+             meta(메타) botlore(봇 로어북) regex(Regex) trigger(트리거) assets(에셋)
              files(워크스페이스 파일)
         """
         labels = {"editor": "챗 에딧", "lore": "챗 로어북", "memory": "장기기억",
                   "vars": "챗 변수", "meta": "메타", "botlore": "봇 로어북",
-                  "regex": "Regex", "trigger": "트리거", "files": "워크스페이스 파일"}
+                  "regex": "Regex", "trigger": "트리거", "assets": "에셋",
+                  "files": "워크스페이스 파일"}
         if tab not in labels:
             return "모르는 탭입니다: " + tab + " (가능: " + ", ".join(labels) + ")"
         return _propose(ctx, "host_open_tab",
@@ -528,6 +533,68 @@ def build() -> Agent[Deps]:
         반영은 RisuAI에서 이 봇이 선택되어 있어야 한다. 승인하면 플러그인이 수행한다.
         """
         return _propose(ctx, "host_card_writeback", f"카드를 RisuAI에 반영 — {reason}", {})
+
+    # --- assets ---------------------------------------------------------------
+
+    @agent.tool
+    def list_assets(ctx: RunContext[Deps]) -> str:
+        """이 봇이 참조하는 에셋(이미지 등) 목록: 필드·이름·형식·크기·스토어 상태.
+
+        상태 present 인 것만 fetch_assets 로 꺼낼 수 있다. missing 은 아직 동기화 전이다.
+        """
+        data = assets.listing(ctx.deps.char_key)
+        items = data["items"]
+        out = [f"에셋 {len(items)}개 · 스토어에 {data['present']}개"
+               + (f" · 없음 {data['missing']}" if data["missing"] else "")
+               + (f" · 읽기 실패 {data['failed']}" if data["failed"] else "")]
+        for it in items:
+            size = f"{it['size'] // 1024}KB" if it.get("size") else "-"
+            out.append(f"--- [{it['field']}] {it['name']!r} .{it['ext']} {size} {it['state']}")
+        return "\n".join(out)[:20000]
+
+    @agent.tool
+    def fetch_assets(ctx: RunContext[Deps], names: str) -> str:
+        """에셋을 워크스페이스 scratch/assets/ 로 꺼낸다. 쉼표로 여러 개.
+
+        돌려주는 경로를 run_python 에서 PIL 로 연다. 같은 이름이 여럿(랜덤 풀)이면
+        _1, _2 가 붙는다. 이름 대신 'assets/…' 키도 받는다.
+        """
+        wanted = [n.strip() for n in names.split(",") if n.strip()]
+        r = assets.fetch_to_scratch(ctx.deps.char_key, wanted)
+        lines = [f"{p}" for p in r["paths"]]
+        if r["missing"]:
+            lines.append("없음: " + ", ".join(r["missing"]))
+        return "\n".join(lines) or "꺼낸 것이 없습니다"
+
+    @agent.tool
+    def propose_asset_add(ctx: RunContext[Deps], name: str, path: str, reason: str,
+                          field: str = "additional") -> str:
+        """워크스페이스의 PNG 파일을 이 봇의 에셋으로 추가하자고 제안한다.
+
+        path: 워크스페이스 상대 경로(out/… 또는 scratch/…), PNG 만.
+        field: additional(추가 에셋, 기본) | emotion(감정 이미지).
+        승인되면 플러그인이 RisuAI 에 저장하고 카드에 붙인다 — 반영과 무관하게 즉시 쓰인다.
+        """
+        if field not in ("additional", "emotion"):
+            return "field 는 additional 또는 emotion 이어야 합니다"
+        try:
+            info = assets.stage_file(ctx.deps.char_key, path)
+        except (assets.AssetError, files.FileError) as e:
+            return str(e)
+        return _propose(ctx, "host_asset_add",
+                        f"에셋 추가 “{name}” ({field}, {info['size'] // 1024}KB) — {reason}",
+                        {"name": name, "path": info["path"], "field": field, "ext": "png"})
+
+    @agent.tool
+    def propose_asset_replace(ctx: RunContext[Deps], name: str, path: str, reason: str) -> str:
+        """이름은 그대로 두고 그 에셋의 그림만 바꾸자고 제안한다 (PNG). CBS 참조는 영향 없다."""
+        try:
+            info = assets.stage_file(ctx.deps.char_key, path)
+        except (assets.AssetError, files.FileError) as e:
+            return str(e)
+        return _propose(ctx, "host_asset_replace",
+                        f"에셋 교체 “{name}” ({info['size'] // 1024}KB) — {reason}",
+                        {"name": name, "path": info["path"], "ext": "png"})
 
     @agent.tool
     def propose_clone_bot(ctx: RunContext[Deps], name: str, reason: str) -> str:
