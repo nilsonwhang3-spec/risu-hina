@@ -21,7 +21,7 @@ from typing import Any, Iterable
 
 from . import config
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 LOCK = threading.RLock()
 _conn: sqlite3.Connection | None = None
@@ -520,6 +520,48 @@ DDL = [
     )
     """,
     "CREATE INDEX IF NOT EXISTS card_checkpoints_char ON card_checkpoints(char_key, created_at DESC)",
+
+    # --- v9: the asset store (assets.py) ------------------------------------
+    # What is on disk: data/assets/<content_hash>.<ext>, one row per file,
+    # global across bots - RisuAI keys by content too, so two bots sharing an
+    # image share a blob here as well.
+    """
+    CREATE TABLE IF NOT EXISTS asset_blobs (
+        content_hash TEXT PRIMARY KEY,
+        ext          TEXT NOT NULL,
+        size         INTEGER NOT NULL,
+        created_at   REAL NOT NULL
+    )
+    """,
+    # A RisuAI key (`assets/<hash>.<ext>`) and what the store knows about it:
+    # present (points at a blob), missing (never fetched), failed (the host
+    # could not read it - retried on the next sync, never holds the gate).
+    """
+    CREATE TABLE IF NOT EXISTS asset_keys (
+        risu_key     TEXT PRIMARY KEY,
+        content_hash TEXT REFERENCES asset_blobs(content_hash),
+        state        TEXT NOT NULL DEFAULT 'missing',
+        error        TEXT NOT NULL DEFAULT '',
+        updated_at   REAL NOT NULL
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS asset_keys_state ON asset_keys(state)",
+    # The manifest: which keys a bot references, in card order, with the
+    # field and display name the card gave them. Replaced whole on every
+    # /assets/manifest; the assets tab and the charx builder read this rather
+    # than re-deriving it from card_json.
+    """
+    CREATE TABLE IF NOT EXISTS char_assets (
+        char_key TEXT NOT NULL REFERENCES characters(char_key) ON DELETE CASCADE,
+        seq      INTEGER NOT NULL,
+        field    TEXT NOT NULL,
+        name     TEXT NOT NULL DEFAULT '',
+        ext      TEXT NOT NULL DEFAULT '',
+        risu_key TEXT NOT NULL,
+        PRIMARY KEY (char_key, seq)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS char_assets_key ON char_assets(risu_key)",
 
 ]
 

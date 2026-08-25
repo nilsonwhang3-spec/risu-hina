@@ -1512,6 +1512,104 @@ def test_skills(s: Server) -> None:
     check("it is gone", all(x.get("id") != sid for x in body.get("skills") or []))
 
 
+def test_assets_store(s: Server, cw: dict) -> None:
+    """M2: the content-addressed store behind the background importer.
+
+    The contract the plugin importer depends on: a manifest says what is
+    missing, uploads are per-item fallible, the same bytes under two keys is
+    one blob, failed keys never hold the gate but are retried by the next
+    manifest, and GC only ever drops what no manifest reaches.
+    """
+    print("test_assets_store")
+    import base64
+    ck = cw["charKey"]
+    png = b"\x89PNG\r\n\x1a\n" + b"x" * 500
+    refs = [
+        {"field": "image", "name": "프로필", "key": "assets/aaaa1111.png"},
+        {"field": "emotion", "name": "기쁨", "key": "assets/bbbb2222.png"},
+        {"field": "emotion", "name": "중복", "key": "assets/bbbb2222.png"},
+        {"field": "additional", "name": "나쁜키", "key": "../etc/passwd"},
+    ]
+    st, body = s.post("/assets/manifest", {"charKey": ck, "refs": refs})
+    check("manifest answers", st == 200, str(body)[:200])
+    check("bad and duplicate refs are dropped", body.get("total") == 2, str(body.get("total")))
+    check("everything is missing at first", sorted(body.get("missing") or []) ==
+          ["assets/aaaa1111.png", "assets/bbbb2222.png"], str(body.get("missing")))
+    check("the gate is closed", body.get("complete") is False)
+    check("no fast path without a save dir", body.get("fastPath") is False)
+
+    st, body = s.post("/assets/upload", {"items": [
+        {"key": "assets/aaaa1111.png", "data": base64.b64encode(png).decode()},
+        {"key": "assets/zzzz.png", "data": "***not-base64***"},
+        {"key": "../../evil.png", "data": base64.b64encode(png).decode()},
+    ]})
+    check("upload answers", st == 200, str(body)[:200])
+    check("one stored", body.get("stored") == 1, str(body.get("stored")))
+    check("bad items reported, not fatal", sorted(b["key"] for b in body.get("bad") or []) ==
+          ["../../evil.png", "assets/zzzz.png"], str(body.get("bad")))
+
+    st, body = s.get(q("/assets/status", charKey=ck))
+    check("status counts present and missing", body.get("present") == 1 and body.get("missing") == 1,
+          str(body)[:200])
+    check("still closed", body.get("complete") is False)
+
+    # Same bytes, second key: one blob, two keys.
+    st, body = s.post("/assets/upload", {"items": [
+        {"key": "assets/bbbb2222.png", "data": base64.b64encode(png).decode()},
+    ]})
+    check("second key stored", body.get("stored") == 1, str(body)[:200])
+    check("but no new bytes - deduplicated", body.get("newBytes") == 0, str(body.get("newBytes")))
+    st, body = s.get(q("/assets/status", charKey=ck))
+    check("gate opens once nothing is missing", body.get("complete") is True, str(body)[:200])
+    check("one blob in the store", (body.get("store") or {}).get("blobs") == 1, str(body.get("store")))
+
+    st, body = s.get(q("/assets/list", charKey=ck))
+    items = body.get("items") or []
+    check("listing follows card order with state and size",
+          [i["key"] for i in items] == ["assets/aaaa1111.png", "assets/bbbb2222.png"]
+          and all(i["state"] == "present" and i["size"] == len(png) for i in items), str(items)[:200])
+
+    # Raw bytes come back as bytes, not JSON.
+    st, body = s.get(q("/assets/blob", key="assets/aaaa1111.png"))
+    # The helper decodes the body as text; the PNG signature's high byte
+    # becomes U+FFFD, the ASCII part survives - enough to tell raw from JSON.
+    raw = body.get("_raw", "")
+    check("blob is served raw", st == 200 and "PNG" in raw[:8] and not raw.startswith("{"),
+          str(st) + " " + repr(raw[:8]).encode("ascii", "replace").decode())
+    st, body = s.get(q("/assets/blob", key="assets/nope.png"))
+    check("unknown blob is a 404", st == 404, str(st))
+
+    # A key the host could not read: marked failed, gate stays open, and the
+    # next manifest tries it again.
+    st, body = s.post("/assets/manifest", {"charKey": ck, "refs": refs + [
+        {"field": "additional", "name": "깨진", "key": "assets/cccc3333.webp"}]})
+    check("new ref is missing", body.get("missing") == ["assets/cccc3333.webp"], str(body.get("missing")))
+    st, body = s.post("/assets/fail", {"charKey": ck, "keys": ["assets/cccc3333.webp", "assets/aaaa1111.png"],
+                                        "reason": "readImage returned null"})
+    check("only the missing key is marked", body.get("marked") == 1, str(body))
+    st, body = s.get(q("/assets/status", charKey=ck))
+    check("failed does not hold the gate", body.get("complete") is True and body.get("failed") == 1, str(body)[:200])
+    st, body = s.post("/assets/manifest", {"charKey": ck, "refs": refs + [
+        {"field": "additional", "name": "깨진", "key": "assets/cccc3333.webp"}]})
+    check("the next sync retries a failed key", body.get("missing") == ["assets/cccc3333.webp"],
+          str(body.get("missing")))
+
+    # GC: reachable blobs stay whatever their age; unreachable ones go once old.
+    st, body = s.post("/assets/gc", {"days": 0})
+    check("gc keeps what a manifest reaches", body.get("removed") == 0, str(body))
+    st, body = s.post("/assets/manifest", {"charKey": ck, "refs": []})
+    check("empty manifest is complete", body.get("complete") is True and body.get("total") == 0, str(body)[:120])
+    st, body = s.post("/assets/gc", {"days": 0})
+    check("gc drops the unreachable blob", body.get("removed") == 1 and body.get("orphanKeys") == 3, str(body))
+    st, body = s.get(q("/assets/blob", key="assets/aaaa1111.png"))
+    check("and it is gone", st == 404, str(st))
+
+    st, body = s.post("/assets/manifest", {"charKey": ck, "refs": "nope"})
+    check("a non-list manifest is a 400", st == 400, str(st))
+    st, body = s.post("/assets/manifest", {"charKey": "cnope", "refs": []})
+    check("an unknown workspace is a 404", st == 404, str(st))
+
+
 def test_loopback_exemption() -> None:
     """With RISUELF_REQUIRE_TOKEN off, a loopback caller needs no token.
 
@@ -1571,6 +1669,7 @@ def main() -> int:
         test_plugin_self_update(s)
         test_logs_and_diagnostics(s)
         test_asset_probe(s)
+        test_assets_store(s, cw)
     finally:
         s.stop()
 

@@ -33,7 +33,7 @@ from starlette.concurrency import run_in_threadpool
 
 from . import (chatfmt, config, db, files, log, presets, session, skills, staging,
                store, websearch, workspace)
-from . import actions, snapshots, updater
+from . import actions, assets, snapshots, updater
 from . import card as cardmod
 from . import memory as mem
 
@@ -277,7 +277,7 @@ def h_diag(arg: dict) -> dict:
     agent_cfg = config.section("agent")
     counts = {}
     for table in ("characters", "chats", "turns", "memories", "skills",
-                  "agent_presets", "sessions", "pending_actions"):
+                  "agent_presets", "sessions", "pending_actions", "asset_blobs", "char_assets"):
         try:
             r = db.one(f"SELECT COUNT(*) AS n FROM {table}")
             counts[table] = int(r["n"]) if r else 0
@@ -301,6 +301,7 @@ def h_diag(arg: dict) -> dict:
             "flex": bool(agent_cfg.get("flex")),
         },
         "webSearch": websearch.configured(),
+        "assets": assets.summary_for_diag(),
         "counts": counts,
         "routes": len(ROUTES),
     }
@@ -371,6 +372,48 @@ def h_diag_rs_probe(arg: dict) -> dict:
     except Exception as e:  # noqa: BLE001 - the failure itself is the finding
         return {"key": key, "error": f"{type(e).__name__}: {e}",
                 "ms": int((time.time() - t0) * 1000)}
+
+
+# --- M2: the asset store ------------------------------------------------------
+
+def h_assets_manifest(arg: dict) -> dict:
+    """The plugin says what the bot references; the store says what it lacks."""
+    ck = _char(arg)
+    try:
+        return assets.manifest(ck, arg.get("refs") or [], hub_pull=bool(arg.get("hubPull")))
+    except assets.AssetError as e:
+        raise ApiError(400, str(e))
+
+
+def h_assets_upload(arg: dict) -> dict:
+    try:
+        return assets.upload(arg.get("items"))
+    except assets.AssetError as e:
+        raise ApiError(400, str(e))
+
+
+def h_assets_fail(arg: dict) -> dict:
+    keys = arg.get("keys")
+    if not isinstance(keys, list):
+        raise ApiError(400, "keys must be a list")
+    return {"marked": assets.mark_failed([str(k) for k in keys], str(arg.get("reason") or "host read failed"))}
+
+
+def h_assets_status(arg: dict) -> dict:
+    return assets.status(_char(arg))
+
+
+def h_assets_list(arg: dict) -> dict:
+    return assets.listing(_char(arg))
+
+
+def h_assets_gc(arg: dict) -> dict:
+    days = arg.get("days")
+    return assets.gc(None if days in (None, "") else float(days))
+
+
+def h_assets_blob(arg: dict) -> Any:
+    raise ApiError(500, "assets/blob must be dispatched directly")
 
 
 def _plugin_file() -> "pathlib.Path | None":
@@ -1335,6 +1378,14 @@ ROUTES: dict[str, Handler] = {
     "POST /diag/asset-echo": h_diag_asset_echo,
     "GET /diag/rs-probe": h_diag_rs_probe,
 
+    "POST /assets/manifest": h_assets_manifest,
+    "POST /assets/upload": h_assets_upload,
+    "POST /assets/fail": h_assets_fail,
+    "GET /assets/status": h_assets_status,
+    "GET /assets/list": h_assets_list,
+    "POST /assets/gc": h_assets_gc,
+    "GET /assets/blob": h_assets_blob,
+
     "GET /config": h_config_get,
     "POST /config": h_config_set,
     "POST /config/test": h_config_test,
@@ -1439,6 +1490,13 @@ ROUTES: dict[str, Handler] = {
 # /plugin.js is fetched by RisuAI's updater, which cannot know our token.
 AUTH_EXEMPT = {"GET /health", "GET /plugin.js"}
 
+_MIME = {
+    "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "gif": "image/gif",
+    "webp": "image/webp", "avif": "image/avif", "svg": "image/svg+xml", "bmp": "image/bmp",
+    "mp3": "audio/mpeg", "wav": "audio/wav", "ogg": "audio/ogg", "m4a": "audio/mp4",
+    "mp4": "video/mp4", "webm": "video/webm", "json": "application/json",
+}
+
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 
@@ -1501,6 +1559,22 @@ async def dispatch(path: str, request: Request) -> Response:
             content=f.read_bytes(),
             media_type="application/javascript; charset=utf-8",
             headers={**config.cors_headers(origin), "Cache-Control": "no-cache"},
+        )
+
+    if key == "GET /assets/blob":
+        # Raw bytes, same special case as /plugin.js: the JSON envelope would
+        # base64 a 5MB image into 7MB of text for nothing.
+        akey = str(arg.get("key") or "")
+        found = assets.read_bytes(akey) if assets.key_ok(akey) else None
+        if found is None:
+            _log(request.method, pathname, 404, started, akey)
+            return _json(404, {"error": "asset not in store", "key": akey}, origin)
+        data, ext = found
+        _log(request.method, pathname, 200, started, f"{len(data) // 1024}KB")
+        return Response(
+            content=data,
+            media_type=_MIME.get(ext, "application/octet-stream"),
+            headers={**config.cors_headers(origin), "Cache-Control": "private, max-age=86400"},
         )
 
     if key == "POST /chat":

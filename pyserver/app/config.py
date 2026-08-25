@@ -204,6 +204,25 @@ DEFAULTS: dict[str, Any] = {
         "maxTurnsPerWorkspace": 20000,
         "checkpointKeep": 50,
     },
+    "assets": {
+        # data/assets/<sha256>.<ext>, global across bots (assets.py).
+        # One asset larger than this is refused; 0 disables the check.
+        "maxItemBytes": 64 * 1024 * 1024,
+        # `POST /assets/gc` only drops unreachable blobs older than this.
+        "gcDays": 7,
+        # Account-synced web bots: let the backend fetch from the RisuAI hub
+        # itself instead of the browser reading each asset (M0: 862ms each).
+        "hubPull": True,
+        "hubWorkers": 6,
+        "hubTimeoutSeconds": 30,
+    },
+    "pocketrisu": {
+        # PocketRisu's save directory on THIS machine (the one holding
+        # risuai.db). Set it and the importer reads assets straight out of
+        # that database instead of through the plugin. Empty = off.
+        "savePath": "",
+        "serverUrl": "http://127.0.0.1:6001",
+    },
 }
 
 _lock = threading.RLock()

@@ -21,7 +21,7 @@ from pathlib import Path
 from . import config, db, log, sandbox, staging, skills
 
 SCOPE_TABLES = ("characters", "chats", "turns", "turns_original", "lore_entries",
-                "card_fields", "card_scripts")
+                "card_fields", "card_scripts", "char_assets")
 
 
 def install_skills(ws: Path) -> list[str]:
@@ -119,7 +119,7 @@ def build_scope_db(workspace_dir: Path, char_key: str) -> Path:
                 if table == "characters":
                     sql = f"SELECT {coldef} FROM characters WHERE char_key = ?"
                     args: tuple = (char_key,)
-                elif table in ("chats", "lore_entries", "card_fields", "card_scripts"):
+                elif table in ("chats", "lore_entries", "card_fields", "card_scripts", "char_assets"):
                     sql = f"SELECT {coldef} FROM {table} WHERE char_key = ?"
                     args = (char_key,)
                 else:
@@ -293,6 +293,8 @@ def describe_helper() -> str:
           card_scripts(kind customscript|triggerscript, seq, entry_json,
                        original_json, origin)  - Lua 코드는
                        entry_json.effect[0].code
+          char_assets(seq, field image|emotion|additional|cc|vits, name, ext,
+                      risu_key)  카드가 참조하는 에셋 목록(카드 순서)
         Writes still go through the tools (stage_* / propose_*): compute with
         the script, then aim the tool with the ids the script found.
 
