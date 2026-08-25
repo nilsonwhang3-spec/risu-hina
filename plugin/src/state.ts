@@ -107,6 +107,19 @@ export interface AgentSession {
   webSearch?: boolean;
 }
 
+/** One row of the backend's asset manifest for a bot (`GET /assets/list`). */
+export interface AssetItem {
+  seq: number;
+  field: 'image' | 'emotion' | 'additional' | 'cc' | 'vits';
+  name: string;
+  key: string;
+  ext: string;
+  state: 'present' | 'missing' | 'failed';
+  error: string;
+  size: number | null;
+  hash: string | null;
+}
+
 export interface WorkspaceFile {
   path: string;
   name: string;
@@ -1058,6 +1071,11 @@ class AppState {
     }
     this.emit();
     return this.botChanges;
+  }
+
+  /** The store's view of the bot's assets: the manifest with state and size. */
+  async assetList(): Promise<{ items: AssetItem[]; total: number; present: number; missing: number; failed: number; bytes: number; complete: boolean }> {
+    return await transport.get('/assets/list', { charKey: this.botKey });
   }
 
   async cardFields(): Promise<{ full: boolean; fields: CardField[]; changed: number }> {

@@ -312,7 +312,7 @@ check('shell rendered', !!document.querySelector('.wrap'));
 // Content views in the tab bar; settings is a header verb, not a view. The
 // middle of the bar is modal: chat tabs and bot tabs share the slot and only
 // one set is visible at a time.
-check('ten content tabs present', document.querySelectorAll('.tab').length === 10,
+check('eleven content tabs present', document.querySelectorAll('.tab').length === 11,
       [...document.querySelectorAll('.tab')].map((t) => t.textContent).join(','));
 check('the workspace files tab is set apart', !!document.querySelector('.tabs .tabsep')
       && document.querySelector('.tabs .tabsep')?.nextElementSibling?.id === 'tab-files');
@@ -1000,6 +1000,25 @@ console.log('\ntest_bot_tabs');
   check('the bot bar counts the change',
         /메타 1/.test(document.querySelector('.botbar .changesum')?.textContent || ''),
         document.querySelector('.botbar .changesum')?.textContent);
+
+  // 에셋: the store's manifest, grouped by field, with the sync state per row.
+  clickById(document, 'tab-assets');
+  await settle(900);
+  check('the assets tab is a bot tab', document.getElementById('tab-assets')?.style.display !== 'none'
+        && document.getElementById('tab-assets')?.classList.contains('active'));
+  const atree = () => document.querySelector('.panel.active .tree');
+  check('the portrait is listed under its field', /프로필 · 1개/.test(atree()?.textContent || '')
+        && /저장됨/.test(atree()?.textContent || ''), atree()?.textContent?.slice(0, 160));
+  check('the header states the totals', /에셋 1\/1개/.test(document.querySelector('.panel.active .left')?.textContent || ''),
+        document.querySelector('.panel.active .left')?.textContent?.slice(0, 160));
+  clickButton(atree(), '프로필');
+  await settle(500);
+  const aview = document.querySelector('.panel.active .left');
+  check('an item opens with its key and hash', /assets\/portrait\.png/.test(aview?.textContent || '')
+        && /해시/.test(aview?.textContent || ''), aview?.textContent?.slice(0, 200));
+  check('and a preview was attempted on this host', !!aview?.querySelector('.assetpreview img, .assetpreview .assettype'));
+  clickById(document, 'tab-meta');
+  await settle(400);
 
   // Regex: the whole-entry write must keep fields the schema never modelled.
   clickById(document, 'tab-regex');

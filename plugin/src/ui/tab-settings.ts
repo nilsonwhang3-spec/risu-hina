@@ -42,7 +42,7 @@ export function renderSettingsTab(mount: HTMLElement): void {
   refreshAbout();
 
   const sections: [string, HTMLElement[]][] = [
-    ['연결', [buildConnectionCard(), buildDiagnosticCard(), buildAssetProbeCard()]],
+    ['연결', [buildConnectionCard(), buildAssetsCard(), buildDiagnosticCard(), buildAssetProbeCard()]],
     ['에이전트', [buildPresetsCard({
       onChanged: async () => {
         await state.connect();
@@ -266,6 +266,75 @@ function buildAssetProbeCard(): HTMLElement {
     el('div', { class: 'row' }, [run, cancel]),
     progress,
     out,
+  ]);
+}
+
+/**
+ * The asset store's knobs: PocketRisu's save directory for the fast path
+ * (the backend reads risuai.db directly instead of the plugin pushing every
+ * image), the store's size, and the manual GC.
+ */
+function buildAssetsCard(): HTMLElement {
+  const savePath = el('input', { placeholder: 'D:\\path\\to\\Risuai-NodeOnly\\save  (PocketRisu 의 save 폴더, 백엔드와 같은 PC일 때)' }) as HTMLInputElement;
+  const stats = el('div', { class: 'hint' });
+  const out = el('div', { class: 'outbox' });
+
+  const load = async (): Promise<void> => {
+    try {
+      const { config } = await state.getConfig();
+      const pr = (config.pocketrisu || {}) as { savePath?: string };
+      savePath.value = pr.savePath || '';
+    } catch { /* offline: leave blank */ }
+    try {
+      const d = await state.diagnostics() as { assets?: { blobs?: number; bytes?: number; fastPath?: boolean; serverWrite?: boolean; dir?: string } };
+      const a = d.assets || {};
+      stats.textContent = `스토어 ${a.blobs ?? '?'}개 · ${((a.bytes ?? 0) / 1048576).toFixed(1)}MB · ${a.dir ?? ''}`
+        + (a.fastPath ? ' · SQLite 고속 경로 사용 중' : '') + (a.serverWrite ? ' · 서버 쓰기 가능' : '');
+    } catch { stats.textContent = ''; }
+  };
+  void load();
+
+  const save = el('button', { class: 'primary', text: '저장' });
+  save.addEventListener('click', async () => {
+    save.disabled = true;
+    clear(out);
+    try {
+      await state.setConfig({ pocketrisu: { savePath: savePath.value.trim() } });
+      await load();
+      out.appendChild(el('div', { class: 'notice ok', text: '저장했습니다. 다음 에셋 동기화부터 적용됩니다.' }));
+    } catch (e) {
+      out.appendChild(el('div', { class: 'notice err', text: '저장 실패: ' + (e instanceof Error ? e.message : String(e)) }));
+    } finally {
+      save.disabled = false;
+    }
+  });
+
+  const gc = el('button', { text: '스토어 정리 (GC)' });
+  gc.title = '어느 봇의 목록에도 없는 파일 중 7일이 지난 것을 지웁니다';
+  gc.addEventListener('click', async () => {
+    gc.disabled = true;
+    clear(out);
+    try {
+      const r = await transport.post<{ removed: number; freed: number; orphanKeys: number }>('/assets/gc', {});
+      await load();
+      out.appendChild(el('div', { class: 'notice ok', text: `정리했습니다: 파일 ${r.removed}개 · ${(r.freed / 1048576).toFixed(1)}MB 확보 · 고아 키 ${r.orphanKeys}개` }));
+    } catch (e) {
+      out.appendChild(el('div', { class: 'notice err', text: 'GC 실패: ' + (e instanceof Error ? e.message : String(e)) }));
+    } finally {
+      gc.disabled = false;
+    }
+  });
+
+  return el('div', { class: 'card' }, [
+    el('h2', { text: '에셋 스토어' }),
+    el('label', { class: 'field' }, [el('span', { text: 'PocketRisu save 폴더 (선택 · 백엔드와 같은 PC일 때만)' }), savePath]),
+    el('div', { class: 'row' }, [save, gc]),
+    stats,
+    out,
+    el('div', { class: 'hint', style: { marginTop: '8px' } }, [
+      '비워 두면 플러그인이 에셋을 읽어 올립니다(웹 계정 사용자는 백엔드가 허브에서 직접 받습니다). ',
+      '경로를 주면 백엔드가 risuai.db 를 읽기 전용으로 열어 빠진 에셋을 곧바로 채웁니다.',
+    ]),
   ]);
 }
 

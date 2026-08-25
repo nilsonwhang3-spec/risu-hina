@@ -215,6 +215,13 @@ pre.mono {
 .botname { font-size: 15px; font-weight: 700; }
 /* The background asset importer, under the bot's name on the picker. */
 .assetsync { margin-top: 4px; }
+/* The assets tab: a preview above the item's facts. */
+.assetpreview { margin: 6px 0 10px; }
+.assetimg { max-width: 100%; max-height: 320px; border-radius: 6px; display: block; }
+.assettype {
+  display: inline-block; padding: 14px 18px; border-radius: 6px; font-size: 12px;
+  color: var(--textcolor2, #79839a); background: rgba(128,128,128,.10);
+}
 .assetline { gap: 8px; }
 .assetline.err .hint { color: #ef4444; }
 .assetline.warn .hint { color: #f59e0b; }

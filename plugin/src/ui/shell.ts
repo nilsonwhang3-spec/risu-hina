@@ -21,6 +21,7 @@ import { renderRegexTab } from './tab-regex';
 import { renderTriggerTab } from './tab-trigger';
 import { buildChatBar, refreshChatBar } from './chatbar';
 import { buildBotBar, refreshBotBar } from './botbar';
+import { renderAssetsTab } from './tab-assets';
 
 /**
  * Content views in the tab bar; settings is not one of them.
@@ -31,7 +32,7 @@ import { buildBotBar, refreshBotBar } from './botbar';
  * the other verbs.
  */
 export type TabId = 'chats' | 'editor' | 'lore' | 'memory' | 'vars'
-  | 'meta' | 'botlore' | 'regex' | 'trigger' | 'files' | 'settings';
+  | 'meta' | 'botlore' | 'regex' | 'trigger' | 'assets' | 'files' | 'settings';
 
 /**
  * What the middle of the tab bar edits: one chat, or the bot's card.
@@ -55,6 +56,7 @@ const CONTENT_TABS: [TabId, string][] = [
   ['botlore', '봇 로어북'],
   ['regex', 'Regex'],
   ['trigger', '트리거'],
+  ['assets', '에셋'],
   ['files', '워크스페이스 파일'],
 ];
 
@@ -62,7 +64,7 @@ const CONTENT_TABS: [TabId, string][] = [
 const CHAT_TABS = new Set<TabId>(['editor', 'lore', 'memory', 'vars']);
 
 /** Tabs that show the bot's card - where the bot bar belongs. */
-const BOT_TABS = new Set<TabId>(['meta', 'botlore', 'regex', 'trigger']);
+const BOT_TABS = new Set<TabId>(['meta', 'botlore', 'regex', 'trigger', 'assets']);
 
 export function setEditMode(m: EditMode, tab?: TabId): void {
   mode = m;
@@ -157,6 +159,7 @@ function renderActive(): void {
   else if (active === 'botlore') renderBotLoreTab(node);
   else if (active === 'regex') renderRegexTab(node);
   else if (active === 'trigger') renderTriggerTab(node);
+  else if (active === 'assets') renderAssetsTab(node);
   else if (active === 'files') renderFilesTab(node);
   else renderSettingsTab(node);
 }
