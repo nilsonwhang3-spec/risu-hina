@@ -18,6 +18,8 @@
 | GitHub 릴리스 | **v0.3.1 Latest**(21:20, 자산 4개) · v0.3.0 · v0.1.0 | `gh release create` 는 auto 모드 분류기가 막는다 — 수동 권한 모드에서는 내가 직접 실행 가능(0.3.1 이 그렇게 됨) |
 | RisuAI 설치 플러그인 | **0.3.1 을 한 번 수동 재설치해야 함** — 설치본의 `//@update-url` 이 CORS 없는 릴리스 주소라 `+` 가 영영 안 뜬다(docs/04 B.4) | 그 뒤부터는 raw 주소라 `+` 가 뜬다 |
 
+**0.3.2 (2026-08-25 밤)** — 실사용 첫 회: PC 브라우저(risu.xyz) 봇 312장 0.6초, 아이폰(risu.xyz) `office counseling` 2980장 5.3초, 전부 `fast=N`(같은 PC 의 PocketRisu `risuai.db` 캐시 히트, 브라우저 전송 0). 사용자가 "포켓리스에서 연결한 것처럼 읽어갔다"고 의심 → 키가 SHA-256 이라 같은 바이트임을 확인하고, `assets.store_bytes` 가 **키 해시 = 바이트 해시** 를 검증하도록(출처 불문 거부), 동기화 줄이 출처(PocketRisu DB / 허브 / 이 브라우저)를 밝히도록 고침(docs/04 E.2). 고속 경로는 읽기 전용이며 쓰기는 항상 접속한 클라이언트에만 간다.
+
 **0.3.1 (2026-08-25 밤)** — `+` 가 안 뜬 진짜 원인은 "같은 버전"이 아니라 **CORS**: RisuAI 는 브라우저 `fetch` 로 `//@update-url` 을 읽는데 릴리스 주소의 리다이렉트 응답에 CORS 헤더가 없다. `//@update-url` 을
 `https://raw.githubusercontent.com/nilsonwhang3-spec/risu-elf/master/plugin/Risu.Elf.Plugin.js` 로 바꾸고, `tools/bundle.py` 가 그 파일을 저장소에 쓰도록 했다(릴리스 커밋에 포함). 백엔드 코드는 VERSION 만 바뀜.
 

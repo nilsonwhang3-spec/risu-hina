@@ -337,10 +337,19 @@ export function describeSync(p: SyncProgress | null): string {
     }
     case 'pushing':
       return `에셋 임포트 중 ${p.read + p.readFailed}/${p.toPush} · 전송 ${mb(p.sentBytes)}`;
-    case 'done':
-      return p.total
-        ? `에셋 ${p.present}/${p.total}개 · ${mb(p.bytes)}` + (p.failed ? ` · 읽기 실패 ${p.failed}` : '')
-        : '참조하는 에셋 없음';
+    case 'done': {
+      if (!p.total) return '참조하는 에셋 없음';
+      // Where this run's bytes came from, so a 0.6s sync of 312 images does
+      // not look like magic (or like the wrong store). Every source is
+      // verified against the key's SHA-256 by the backend.
+      const src: string[] = [];
+      if (p.fastFilled) src.push(`같은 PC 의 PocketRisu DB ${p.fastFilled}`);
+      if (p.pull && p.pull.ok) src.push(`허브 ${p.pull.ok}`);
+      if (p.sent) src.push(`이 브라우저 ${p.sent}`);
+      return `에셋 ${p.present}/${p.total}개 · ${mb(p.bytes)}`
+        + (src.length ? ` · 이번에 ${src.join(', ')}` : ' · 이미 있었음')
+        + (p.failed ? ` · 읽기 실패 ${p.failed}` : '');
+    }
     case 'cancelled':
       return `에셋 임포트 중단됨 (${p.present}/${p.total})`;
     case 'unsupported':

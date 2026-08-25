@@ -1553,6 +1553,20 @@ def test_assets_store(s: Server, cw: dict) -> None:
           str(body)[:200])
     check("still closed", body.get("complete") is False)
 
+    # RisuAI keys are SHA-256 of the bytes. A key that looks like one but does
+    # not match its content is refused whatever the source - that is what
+    # makes a PocketRisu database or the hub a safe place to take bytes from.
+    import hashlib
+    real = hashlib.sha256(png).hexdigest()
+    st, body = s.post("/assets/upload", {"items": [
+        {"key": "assets/" + "0" * 64 + ".png", "data": base64.b64encode(png).decode()},
+        {"key": f"assets/{real}.png", "data": base64.b64encode(png).decode()},
+    ]})
+    bad_keys = [b["key"] for b in body.get("bad") or []]
+    check("a hash-shaped key must match its bytes", bad_keys == ["assets/" + "0" * 64 + ".png"]
+          and "hash mismatch" in (body.get("bad") or [{}])[0].get("error", ""), str(body)[:200])
+    check("and the true key is accepted", body.get("stored") == 1, str(body)[:120])
+
     # Same bytes, second key: one blob, two keys.
     st, body = s.post("/assets/upload", {"items": [
         {"key": "assets/bbbb2222.png", "data": base64.b64encode(png).decode()},
@@ -1600,6 +1614,9 @@ def test_assets_store(s: Server, cw: dict) -> None:
     st, body = s.post("/assets/manifest", {"charKey": ck, "refs": []})
     check("empty manifest is complete", body.get("complete") is True and body.get("total") == 0, str(body)[:120])
     st, body = s.post("/assets/gc", {"days": 0})
+    # Three keys were still in the manifest until now (aaaa, bbbb, cccc); the
+    # true-hash key was never in one and the earlier gc already dropped it -
+    # orphan keys go regardless of age, only blobs wait out gcDays.
     check("gc drops the unreachable blob", body.get("removed") == 1 and body.get("orphanKeys") == 3, str(body))
     st, body = s.get(q("/assets/blob", key="assets/aaaa1111.png"))
     check("and it is gone", st == 404, str(st))

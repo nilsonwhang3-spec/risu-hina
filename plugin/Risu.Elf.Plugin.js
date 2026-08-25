@@ -1,7 +1,7 @@
 //@name risu-elf
-//@display-name Risu Elf v0.3.1
+//@display-name Risu Elf v0.3.2
 //@api 3.0
-//@version 0.3.1
+//@version 0.3.2
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-elf/master/plugin/Risu.Elf.Plugin.js
 //@arg backend_url string 백엔드 URL (기본: http://127.0.0.1:6020)
 //@arg backend_token string 백엔드 토큰 (data/token.txt)
@@ -1612,8 +1612,14 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       }
       case "pushing":
         return `\uC5D0\uC14B \uC784\uD3EC\uD2B8 \uC911 ${p.read + p.readFailed}/${p.toPush} \xB7 \uC804\uC1A1 ${mb2(p.sentBytes)}`;
-      case "done":
-        return p.total ? `\uC5D0\uC14B ${p.present}/${p.total}\uAC1C \xB7 ${mb2(p.bytes)}` + (p.failed ? ` \xB7 \uC77D\uAE30 \uC2E4\uD328 ${p.failed}` : "") : "\uCC38\uC870\uD558\uB294 \uC5D0\uC14B \uC5C6\uC74C";
+      case "done": {
+        if (!p.total) return "\uCC38\uC870\uD558\uB294 \uC5D0\uC14B \uC5C6\uC74C";
+        const src = [];
+        if (p.fastFilled) src.push(`\uAC19\uC740 PC \uC758 PocketRisu DB ${p.fastFilled}`);
+        if (p.pull && p.pull.ok) src.push(`\uD5C8\uBE0C ${p.pull.ok}`);
+        if (p.sent) src.push(`\uC774 \uBE0C\uB77C\uC6B0\uC800 ${p.sent}`);
+        return `\uC5D0\uC14B ${p.present}/${p.total}\uAC1C \xB7 ${mb2(p.bytes)}` + (src.length ? ` \xB7 \uC774\uBC88\uC5D0 ${src.join(", ")}` : " \xB7 \uC774\uBBF8 \uC788\uC5C8\uC74C") + (p.failed ? ` \xB7 \uC77D\uAE30 \uC2E4\uD328 ${p.failed}` : "");
+      }
       case "cancelled":
         return `\uC5D0\uC14B \uC784\uD3EC\uD2B8 \uC911\uB2E8\uB428 (${p.present}/${p.total})`;
       case "unsupported":
@@ -6429,7 +6435,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.3.1",
+            version: "0.3.2",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -6794,7 +6800,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.3.1"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.3.2"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -8152,7 +8158,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Elf</span>" }),
-        el("span", { class: "dim", text: "v0.3.1" }),
+        el("span", { class: "dim", text: "v0.3.2" }),
         healthEl,
         el("span", { class: "spacer" }),
         reload,
@@ -8286,6 +8292,6 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       });
     } catch {
     }
-    console.log(`[risu-elf] v${"0.3.1"} loaded`);
+    console.log(`[risu-elf] v${"0.3.2"} loaded`);
   })();
 })();

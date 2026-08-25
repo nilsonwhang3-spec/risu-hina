@@ -54,6 +54,7 @@ ASSET_DIR = config.DATA_DIR / "assets"
 # depends on that; the file on disk is named by OUR hash. What matters is
 # that the key cannot carry a path.
 KEY_RE = re.compile(r"assets/[A-Za-z0-9_-]{1,80}\.[A-Za-z0-9]{1,8}")
+_SHA256_STEM = re.compile(r"[0-9a-fA-F]{64}")
 FIELDS = ("image", "emotion", "additional", "cc", "vits")
 STATES = ("present", "missing", "failed")
 
@@ -96,6 +97,16 @@ def store_bytes(key: str, data: bytes) -> dict:
         raise AssetError(f"asset larger than {limit} bytes: {key}")
     h = hashlib.sha256(data).hexdigest()
     ext = ext_of(key)
+    # RisuAI names every asset by SHA-256 of its bytes (parser.svelte.ts
+    # `hasher`), so a key and its content vouch for each other - which is what
+    # lets bytes come from anywhere (this plugin, the hub, a PocketRisu
+    # database on this machine) and still be THE asset the card references.
+    # Enforce it rather than trust it: bytes whose hash is not the key's are
+    # refused, whatever the source. Keys with a non-hash stem (nothing RisuAI
+    # makes; the test suite does) are stored as-is.
+    stem = key[len("assets/"):].rsplit(".", 1)[0]
+    if _SHA256_STEM.fullmatch(stem) and stem.lower() != h:
+        raise AssetError(f"hash mismatch: content {h[:12]}… is not {stem[:12]}… ({key})")
     path = blob_path(h, ext)
     created = False
     if not path.is_file():
