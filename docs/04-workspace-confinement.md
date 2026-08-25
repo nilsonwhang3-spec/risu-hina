@@ -507,3 +507,56 @@ rename 두 번으로 끝나게 했다.
 
 `release.py`는 `bundle.py`로 위임만 한다. **인터프리터 없는 아카이브를 만들 수 있는 코드
 경로를 남기지 않았다** — 그게 규칙을 어긴 아카이브였으니까.
+
+# 부록 E — 에셋 서브시스템과 charx (2026-08-25 6차, v0.3.0)
+
+## E.1 왜 스토어가 따로 있나
+
+M1 까지는 바이트가 필요 없었다 — 카드·스크립트·로어북은 텍스트라 `/workspace` 업로드에
+실려 온다. 그 다음 전부가 바이트를 요구한다: charx 는 카드+이미지의 zip 이고, PIL 작업은
+픽셀이 필요하고, 에셋 탭은 2980장이 무엇인지 말해야 한다. RisuAI 자신이 에셋을 콘텐츠
+해시로 키잉하므로(`assets/<sha256>.<ext>`) 스토어도 그대로 따른다:
+`data/assets/<sha256>.<ext>`, 봇 간 전역, 구조상 dedup. 해시는 백엔드가 다시 계산한다 —
+파일 이름이면서 업로드 무결성 검사다. (`pyserver/app/assets.py` 머리말이 정본.)
+
+## E.2 동기화가 그 모양인 이유 — M0 실측
+
+2026-08-24, risu.xyz 계정 사용자 2980장/142.6MB: 호스트에서 **읽는** 데 42.8분(장당 862ms,
+계정 스토리지가 장마다 허브 GET), 올리는 데 2.6분. 그래서 임포터는 "호스트에서 되도록 읽지
+않기"를 중심으로 짰다:
+
+    허브 풀     계정 사용자: 백엔드가 `sv.risuai.xyz/rs/<key>` 를 직접 병렬 GET (프로브 200)
+    고속 경로   PocketRisu 가 같은 PC: `save/risuai.db` 의 `kv(key TEXT, value BLOB)` 를 읽기 전용으로
+    플러그인 푸시  그러고도 빠진 것: readImage 4~6 동시, 바이트 기준 8MB 배치
+
+콘텐츠 어드레싱 덕에 재개·증분이 공짜다. 호스트가 못 읽은 키는 `failed` 로 표시해 게이트를
+붙들지 않게 했고, 다음 동기화가 다시 시도한다. 반영 게이트는 백엔드의 `complete`(빠진 것 없음 +
+풀 진행 중 아님)로 연다 — 이미지가 도착하기 전에 쓴 카드는 charx 빌더가 완성할 수 없는 카드다.
+
+## E.3 charx — module.risum 을 만들지 않는다
+
+RisuAI 의 charx 내보내기(characterCards.ts `createBaseV3` + `exportCharacterCard`, c0ed1026)는
+트리거·Regex·로어북을 모듈로 **복제한 뒤 card.json 에서 지운다**. 임포터(`importCharacterProcess`
+→ `importCharacterCardSpec`)는 모듈이 없으면 인라인 `extensions.risuai.triggerscript` /
+`customScripts` 와 `character_book` 을 그대로 소화한다. 그래서 인라인으로 두면 rpack 인코더가
+필요 없고 같은 결과로 들어온다(모듈 namespace 는 charx 왕복에서 어차피 소실 — `charx-cards.md`).
+
+RisuAI 와 다른 점 하나: 아이콘 항목(`ccdefault:` → `assets/icon/image/main.png`)을 감정
+이미지가 있을 때만이 아니라 **항상** 넣는다. 임포터는 `icon`+`main` 을 캐릭터 이미지로 매핑하고,
+없으면 초상이 없는 봇이 된다. 임포터는 zip 에 없는 `embeded://` 경로에서 **throw** 하므로 빠진
+에셋은 기본 거절(목록 반환), `allowMissing` 이면 그 항목을 제거한다. 조립 명세 전체는
+`pyserver/app/charx.py` 머리말.
+
+## E.4 에셋 추가·교체는 즉시 쓰인다
+
+텍스트 재료와 달리 바이너리는 작업본이 없다. 승인된 `host_asset_add` / `host_asset_replace` 는
+플러그인이 `saveAsset`(키는 호스트가 정하고 항상 `.png`) → 라이브 카드의 참조 목록에 붙이고
+→ `/assets/adopt` 로 백엔드 스토어에 같은 키로 넣는다. 반영을 기다리지 않는 유일한 카드
+변경이며, 그래서 PNG 로 제한했다(비-PNG 는 PocketRisu bulk-write 로만 가능 — 미구현, E.5).
+
+## E.5 남긴 것
+
+- 플러그인 fflate 조립 폴백(백엔드 동기화가 불가능한 환경) — 허브 풀+푸시로 웹도 백엔드 경로가
+  성립해 우선순위를 내렸다.
+- PocketRisu `bulk-write`(비-PNG 추가·교체, `__jwt_secret` 자체 서명) — `serverWrite` 플래그만 있다.
+- 모듈 에셋(v2), 트리거 V2 블록 GUI.

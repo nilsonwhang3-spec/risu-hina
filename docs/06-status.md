@@ -1,123 +1,102 @@
-# 06. 구현 상태 — 2026-08-25 기준
+# 06. 구현 상태 — 2026-08-25 기준 (v0.3.0)
 
 다음 세션에 이어서 할 사람(=나)을 위한 한 장. 무엇이 있고, 무엇이 바뀌었고, 어디까지 배포됐고,
-무엇이 남았는지. 설계의 *이유*는 `docs/04`, 저장 구조는 `docs/02`, 배포 환경은 `docs/00`.
-봇 편집 모드의 전체 계획(M0 실측 결과·M2 명세 포함)은 `~/.claude/plans/risu-elf-whimsical-lovelace.md`.
+무엇이 남았는지. 설계의 *이유*는 `docs/04`(에셋·charx 는 부록 E), 저장 구조는 `docs/02`, 배포 환경은 `docs/00`.
+봇 편집 모드의 원계획(M0 실측·M2 명세)은 `~/.claude/plans/risu-elf-whimsical-lovelace.md`.
 
 ## 0. 다음 세션 시작점 (먼저 읽을 것)
 
-**코드 상태**: master `9a77c62` "Bot editing: the card gets the chat pipeline, and a measured asset plan"
-(29 파일, +4087/−361) = M0 + M1 + M1.1 전부. **origin 에 미푸시.** 게이트 ALL GREEN 상태로 커밋.
-이 문서(06)의 갱신분만 워킹 트리에 미커밋.
+**코드 상태**: master `08dc16f` "Release 0.3.0: assets, charx, agent image work" = M2 전부, **origin 푸시됨**, 태그 `v0.3.0` 푸시됨.
+게이트 ALL GREEN 으로 커밋. 이 문서(06)와 `docs/04` 부록 E 갱신분이 그 다음 커밋.
 
-**배포 상태 (2026-08-25 19:51 `deploy-m1.ps1` 실행, 새 SSH 세션 해시 대조로 확인)**:
+**배포 상태 (2026-08-25 21:01 `deploy.ps1`, 새 SSH 세션에서 확인)**:
 
 | 어디 | 무엇 | 비고 |
 |---|---|---|
-| test-server **실행 중** `pyserver/app` + `plugin/risu-elf.js` | **`9a77c62` = M1.1** (app/*.py 23개 해시 일치, 플러그인 `F19948B3`) | 직전 백업 `app.bak-20260825-195105` |
-| RisuAI 설치 플러그인 | 사용자가 dist 에서 수동 설치한 버전(M1 또는 M1.1 — 미확인) | v0.2.0 릴리스 후 `+` 로 갱신되는지 확인 (§5-3) |
+| test-server **실행 중** `pyserver/app` + `plugin/risu-elf.js` | **0.3.0 = `08dc16f`** (`/health` 0.3.0, DB v9, `data/assets/` 생성, 플러그인 해시 `ADB1E73B` 일치) | 직전 백업 `app.bak-20260825-210145` |
+| test-server config | `pocketrisu.savePath = D:\code\risu-nodeonly\Risuai-NodeOnly\save` → `/diag` `fastPath:true, serverWrite:true` | 같은 PC 의 PocketRisu 를 SQLite 로 직독 |
+| GitHub 릴리스 | **v0.3.0 미생성** (v0.2.0 도 미생성 — `gh release create` 가 권한 분류기에 막힘) | 자산은 로컬 `release/` 에 빌드됨(0.3.0), 노트는 아래 §5-1 |
+| RisuAI 설치 플러그인 | 사용자가 재설치해야 함 (`plugin/dist/risu-elf-0.3.0.js` 또는 릴리스의 `Risu.Elf.Plugin.js`) | |
 
-원격 실행은 `ssh test-server "powershell -ExecutionPolicy Bypass -File ..."` 로 **내가 직접 할 수 있다**
-(2026-08-25 확인 — 이전 세션의 "권한 분류기가 막는다"는 더 이상 사실이 아님). 확인은 반드시 **새 SSH 세션**에서.
+→ **첫 할 일**: 사용자가 `gh release create v0.3.0 …`(§5-1) 실행 → RisuAI 에서 플러그인 `+` 업데이트가 뜨는지 확인(0.2.0/0.3.0 둘 다 설치본보다 새 버전이므로 이 가설이 검증된다).
 
-## 1. 2026-08-24 에 들어간 것 — 봇(카드) 편집 M0·M1·M1.1
+## 1. 2026-08-25 에 들어간 것 — 릴리스·M2 전부
 
-**M0 (에셋 덤프 실측, 웹리스 실증)** — 웹리스(risu.xyz)가 공개 백엔드(cloudflared
-`elf.example.com`)로 연결·에이전트 동작 확인. 2980장/142.6MB 실측: 읽기 42.8분(장당 862ms,
-계정 스토리지가 장마다 hub GET) vs 업로드 2.6분 — **병목은 readImage**. 백엔드의
-`sv.risuai.xyz/rs/<key>` 직접 GET = **200 OK** → M2 는 계정 사용자용 "백엔드 직접 풀" 채택.
-측정 장치: `plugin/src/assets.ts`(M2 임포터 원형), `POST /diag/asset-echo`, `GET /diag/rs-probe`,
-설정→연결 탭 "에셋 덤프 실측".
+**운영**: M1.1 배포(19:51) → v0.2.0 태그·푸시 → 0.2.0 배포(20:03) → M2 ①~⑦ → v0.3.0 태그·푸시 → 0.3.0 배포(21:01).
+원격 실행(`ssh test-server "powershell -File …deploy.ps1"`)은 **내가 직접 할 수 있다**(이전 "분류기가 막는다"는 틀림). 막히는 것은
+`gh release create`(외부 공개)와 `del` 이 섞인 복합 원격 명령. 스크립트는 `_stage\deploy.ps1`(범용: `*.py` + 최신 `risu-elf-*.js`).
 
-**M1 (봇 텍스트 편집)** — 챗 편집과 같은 문법으로 카드를 편집한다.
+**M2 ① 백엔드 에셋 스토어** (`assets.py`, 커밋 `ba015b0`) — `data/assets/<sha256>.<ext>` 전역, DB **v9** `asset_blobs`/`asset_keys(state present|missing|failed)`/`char_assets`(매니페스트, 카드 순서).
+`POST /assets/manifest{refs,hubPull}` → 스토어 대조 → SQLite 고속 경로로 즉시 채움 → 허브 풀 백그라운드 스레드(httpx, 6 워커) → `missing` 반환.
+`POST /assets/upload{items[{key,data}]}`(항목별 실패 보고), `POST /assets/fail`, `GET /assets/status`(`complete` = missing 0 ∧ 풀 없음), `GET /assets/list`, `POST /assets/gc`(도달 불가+7일), `GET /assets/blob?key`(raw).
+config `assets{maxItemBytes,gcDays,hubPull,hubWorkers,hubTimeoutSeconds}`, `pocketrisu{savePath,serverUrl}`. `/diag` 에 `assets` 요약. `run_python` scope.db 에 `char_assets`.
 
-| 층 | 무엇 |
-|---|---|
-| DB v8 | `card_fields`(memories 문법: body/original), `card_scripts`(lore 문법: entry/original_json/origin), `card_checkpoints`. 카드 셸 없음 — 반영이 fresh 재읽기+오버레이라 미모델링 필드는 원래 안 건드린다 |
-| 업로드 | `cardOf` 화이트리스트 폐지 → full-character(chats 제외) + `cardFull` 플래그. **card_reset 분리**: 새 챗 first-seen 이 카드·globalLore 작업본을 더는 리셋하지 않음(기존 잠재 버그 수정) + `cardReset` 페이로드("카드만 다시 읽기") |
-| HTTP | `/card` `/card/scripts` `/card/field` `/card/greeting[/delete]` `/card/script[/add|delete|move]` `/card/patch` `/card/changes` `/card/commit` `/card/reset` `/card/checkpoint[s|/restore]` `/lore/move` — 전부 `_char` 스코프 |
-| global 로어 | `store.*_global` 5종(`scope='global' AND chat_key IS NULL`) + `move_lore`. `h_lore_add`/`_lore_add` 의 global 행 chat_key 오염 수정 |
-| 플러그인 | `host.writeCharacter`(writeChat 규약: chaId·before 검증, **chats 강제 불변**, update 에 chats 있으면 throw), `host.cloneBot`(새 chaId + 참조 공유 에셋 + `getDatabase(['characters'])`→push→`setDatabase`→`checkCharOrder`). `botbar.ts`(챗바의 형제: 반영 팝오버=RisuAI 반영/복제 봇 생성/기준선 되돌리기 + 스냅샷·버전, `isLiveBot` 게이트, M2 에셋 게이트 훅 `setAssetGate(reason)`) |
-| 에이전트 | `read_card`(행·id) `read_card_field` `list_scripts`/`read_script`(대형 HTML 은 온디맨드), propose_card_edit/greeting_*/regex_*/trigger_*/script_delete/bot_snapshot/bot_restore/card_writeback/clone_bot/lore_move/open_tab, `propose_lore_add(scope=)`. actions: `HOST_KINDS` += host_card_writeback·host_clone_bot·host_open_tab, EXECUTORS += 9종 |
-| 함정 반영 | 메인라인 비선택 캐릭터 쓰기 미저장 → 반영은 `isLiveBot` 만, 복제는 setDatabase(신규 chaId)라 안전. `db.py close()` 중복 정의로 종료 체크포인트가 무효였던 버그 수정 |
+**M2 ② 플러그인 백그라운드 임포터** (`assets.ts syncAssets`, `a383b5b`) — `state.upload()` 직후 자동. manifest → (pulling 이면 status 폴링 → manifest 재요청) → 빠진 키만 readImage **동시 4(web)/6** → 8MB·50개 배치 업로드(전송 중 배치 2개까지 겹침) → `/assets/fail`. 404 route 면 `unsupported`(게이트 열림).
+`state.assetSync`/`assetGateReason` → 봇바 `applyBlockReason` 이 읽음(`setAssetGate` 삭제). 봇 카드에 진행 줄+바+중단/다시 동기화.
 
-**M1.1 (UI 피드백 라운드, 사용자 지시 10건 전부 반영)**
+**M2 ③ SQLite 고속 경로** — `assets._fast_fill`: `file:…?mode=ro` + `query_only` + `busy_timeout`, key/value 테이블 자동 탐지(PocketRisu 는 `kv(key TEXT, value BLOB)`, 원본 바이트 그대로 — test-server 에서 실측). `__jwt_secret` 있으면 `serverWrite:true`(플래그만).
 
-| # | 무엇 | 어디 |
-|---|---|---|
-| 1 | 챗/봇 선택 **한 화면**. 탭 바 중앙이 모드로 교체 — `봇 편집` → `메타·봇 로어북·Regex·트리거`, 챗 행의 `챗 편집` → `챗 에딧·챗 로어북·장기기억·챗 변수`. 탭 10개(선택 ┃모드 4┃ 워크스페이스 파일 ⚙). **단일 봇 대전제**(RisuAI 에서 봇 선택 후 진입) — `tab-bots.ts` 삭제, `botKey`=`activeCharKey` | `shell.ts setEditMode/syncModeTabs`, `tab-chats.ts` |
-| 2 | 사장 필드 5종(personality/scenario/exampleMessage/systemPrompt/PHI) 행 제거, `ingest` 가 기존 행 청소 | `card.py _RETIRED` |
-| 3 | `backgroundHTML`/`backgroundCSS` 를 SCALARS 에 추가 — **Regex 탭 상단 섹션에서 편집**(메타 탭엔 `NOT_HERE`) | `tab-regex.ts BG_LABEL` |
-| 4 | 로어북 폴더 규칙을 RisuAI 실제 규칙으로: **소속 = `member.folder === folderEntry.key`, 표시명 = 폴더 항목의 `comment`**(LoreBookData.svelte:142,154 — id 가 아니다). 접기 기본 + 열림 기억(`openFolders`), 편집기에 폴더 `<select>` 로 폴더 간 이동 | `lore-view.ts`(챗/봇 공용, `makeLoreTab`) |
-| 5 | 미리보기 전부 제거 | 메타/로어/Regex |
-| 6 | 순서 이동은 왼쪽 목록 카드(`.lorecard`+`.movebtn` ↑↓) — 로어북은 `/lore/move`, 스크립트는 `moveScript` | `lore-view.ts`, `tab-regex.ts` |
-| 7 | 트리거는 **JSON 금지** — `effect[0]={type:'triggerlua'|'triggercode',code}` 의 `code` 만 코드 영역으로(comment + 이벤트 select + textarea). 블록형(V2) 은 읽기 전용 안내. "새 Lua 트리거" 추가 | `tab-trigger.ts codeOf` |
-| 8 | 찾기 박스 공용화 — 로어북/메타/Regex/트리거/챗 목록(6개 초과 시) | `dom.ts searchBox/refocusSearch` |
-| 9 | 첫 화면 챗 목록: max-width 640·행 구분선·현재 챗 강조 | `styles.ts` |
-| 10 | 에이전트 탭 이동 툴 `propose_open_tab(tab, reason)` → `host_open_tab` 승인 시 `state.openTabRequest` → shell 이 모드까지 맞춰 전환 | `agent.py`, `state.ts decideAction`, `shell.ts` |
-| 11 | 에이전트가 로어북 생성/삭제/폴더 정리/CBS·Lua 추론을 툴+스크립트로: `list_lore` 가 `#seq`·`folder=`·`[폴더]` 행 노출, `run_python` 의 scope.db 에 `card_fields`/`card_scripts` 포함 + `describe_helper` 가 전 테이블 구조·폴더 규칙·`effect[0].code` 를 문서화, 샌드박스 `lore()` 가 id 포함 | `pyexec.py SCOPE_TABLES`, `sandbox.py` |
+**M2 ④ 에셋 탭** (`tab-assets.ts`, `b8642be`) — 봇 탭 5번째(`BOT_TABS` += assets, 탭 11개). 필드별 그룹·찾기·상태 배지·항목 상세(키·해시·크기)·데스크톱 썸네일(readImage→blob, 40개 캐시)·웹은 형식 아이콘. 설정 → 연결 → **에셋 스토어** 카드(savePath 저장, 스토어 크기, GC).
+**헤더는 동기화 상태가 바뀔 때만 다시 그린다** — emit 마다 그리면 charx 결과가 지워졌다(스모크가 잡음).
 
-테스트: test_http 에 card 4종(test_card_rows/edit_patch_commit/scripts_lifecycle/**global_lore_decoupled_reset**(+/lore/move)),
-`test_asset_probe`; 스모크에 test_bot_tabs(모드 전환·사장 필드 부재·인사말 위치·bg 섹션·movebtn·트리거 코드 편집)/
-card_write_back(chats 불변·forkExtra·lowLevelAccess 보존 단언)/clone_bot. 게이트 **ALL GREEN**.
+**M2 ⑤ charx** (`charx.py`, `d6f5919`) — `createBaseV3` 파이썬 포트 + 작업본 오버레이(`working_character`: card_fields/greetings/global lore/scripts) → `out/<이름>.charx`. x_meta→asset 교차, 에셋 STORED, card.json 마지막, **module.risum 없음**(인라인 — 임포터 소스로 확인), 아이콘 항목 항상. `POST /charx/build{allowMissing,name}`(빠지면 409+목록), `GET /charx/preview`. `GET /files/download?charKey&path` = 원시 스트림(Content-Disposition). 플러그인: 에셋 탭 "charx 만들기"(빠진 에셋 빼고 만들기 폴백), 파일 탭 "내 PC에 저장"(`transport.getBinary` + `host.downloadBytes`).
+
+**M2 ⑦ 에이전트 에셋** (`14f14f0`) — `list_assets` / `fetch_assets(names)`→`scratch/assets/` / `propose_asset_add(name,path,field)` / `propose_asset_replace(name,path)`(PNG 검증 `assets.stage_file`). HOST_KINDS += `host_asset_add`·`host_asset_replace` → 플러그인 `applyAssetAction`: `/files/download` → `Risuai.saveAsset` → `host.writeCharacter{additionalAssets|emotionImages|ccAssets}`(CardUpdate 확장) → `POST /assets/adopt` → readHost+upload. `propose_open_tab` 에 assets.
+
+**⑥ fflate 플러그인 조립 폴백은 보류**(부록 E.5). RisuAI/PocketRisu 소스는 `C:\code\vepo-bot\{RisuAI,PocketRisu}`(오늘 `c0ed1026` / v1.10.0 `98e96833` 로 갱신, 둘의 charx 임포트 코드 동일). charx 스킬 원본 `C:\code\vepo-bot\.claude\skills\charx\`.
+
+테스트: test_http `test_assets_store`(manifest/upload/dedup/게이트/failed 재시도/blob/GC/400·404) · `test_charx_build`(거절→allowMissing→정상 빌드→zip 구조·작업본 반영·다운로드·adopt); 스모크 `test_asset_sync`(초상 1장 임포트→complete→2회째 업로드 0)·`test_bot_tabs` 에 게이트 열림·에셋 탭·charx 빌드·파일 탭 저장 버튼. 게이트 **ALL GREEN**.
 
 ## 2. 지금 있는 것 (한눈에)
 
 ```
 RisuAI(PocketRisu | 웹 risu.xyz) ── 플러그인 iframe(risu-elf.js) ──nativeFetch──▶ 백엔드 (FastAPI)
-   127.0.0.1:6020 또는 공개 주소(cloudflared http://elf.example.com)   ├─ data/risuelf.db   턴·로어북(local/global)·기억·변수·카드 필드/스크립트·세션·승인 큐·스냅샷(챗/봇)
-                                                                       ├─ data/workspace/<char>/  card.md · original/ · out/ · scratch/ · skills/(실행 시 복사)
-                                                                       ├─ data/skills/<id>/SKILL.md  폴더형 스킬
+   127.0.0.1:6020 또는 공개 주소(cloudflared http://elf.example.com)   ├─ data/risuelf.db   턴·로어북·기억·변수·카드 필드/스크립트·에셋 키/매니페스트·세션·승인 큐·스냅샷
+                                                                       ├─ data/assets/<sha256>.<ext>   콘텐츠 어드레스드 스토어(봇 간 공유)
+                                                                       ├─ data/workspace/<char>/  card.md · original/ · out/(charx) · scratch/assets/ · skills/
+                                                                       ├─ data/skills/<id>/SKILL.md
                                                                        └─ Pydantic AI 에이전트 (OpenAI 호환 게이트웨이)
+   에셋 유입: 허브 풀(웹 계정) | risuai.db 직독(PocketRisu 동일 PC) | 플러그인 푸시(나머지)
 ```
 
-**플러그인 탭**: `선택 ┃ [챗 편집: 챗 에딧·챗 로어북·장기기억·챗 변수 | 봇 편집: 메타·봇 로어북·Regex·트리거] ┃ 워크스페이스 파일` (+ ⚙ 설정).
-챗 탭 위엔 **챗바**(반영·스냅샷·버전·변경 요약), 봇 탭 위엔 **봇바**(반영▾ RisuAI 반영/복제 봇/되돌리기 · 스냅샷 · 버전).
+**플러그인 탭**: `선택 ┃ [챗: 챗 에딧·챗 로어북·장기기억·챗 변수 | 봇: 메타·봇 로어북·Regex·트리거·에셋] ┃ 워크스페이스 파일` (+ ⚙).
+봇바 반영은 **에셋 동기화 complete 이후**에만 열린다. 에셋 추가/교체(승인)는 즉시 RisuAI 에 쓰이는 유일한 카드 변경.
 
-**한 구조** — 턴·챗 로어북·기억·변수(챗) / 카드 필드·인사말·global 로어·Regex·트리거(봇) 모두
-*작업본 vs 기준선 → `GET /patch`|`/card/patch` → `host.writeChat`|`writeCharacter` **한 번** → `POST /commit`|`/card/commit` 이 기준선 이동*.
-스냅샷은 챗(`checkpoints`)·봇(`card_checkpoints`) 각각 한 단위. **에이전트의 쓰기는 전부 승인 큐**.
+## 3. 배포 절차 (검증됨, 내가 직접 실행)
 
-## 3. 배포 절차 (검증됨)
-
-- test-server `D:\code\risu-elf`. 기동 `powershell -File D:\code\risu-elf\pyserver\manage.ps1 -Action start|stop|status`.
-- `_stage\` 에 `app/*.py`·`app/seeds`·`risu-elf-0.1.0.js`·`deploy-m1.ps1` 을 scp(내가 함) → **사용자가** `.ps1` 실행
-  (stop → `app.bak-<시각>` → 교체 → `__pycache__` 삭제 → start) → **새 SSH 세션**에서 `/health`.
-  스크립트 원본은 세션 scratchpad `deploy-m1.ps1`(ASCII, 위 §0 명령).
-- 플러그인 본체는 사용자가 RisuAI 에 재설치(`plugin/dist/risu-elf-0.1.0.js`). GitHub 릴리스는 아직 v0.1.0.
-- 원격 스킬 8개 켜 둠. Ollama 프리셋 `ollama.com/v1`, flex/cache 끔, reasoning ''.
+```
+scp -q pyserver/app/*.py plugin/dist/risu-elf-<ver>.js test-server:D:/code/risu-elf/_stage/
+ssh test-server "powershell -ExecutionPolicy Bypass -File D:\code\risu-elf\_stage\deploy.ps1"   # stop → app.bak-<시각> → 교체 → __pycache__ 삭제 → start
+ssh test-server "curl.exe -s http://127.0.0.1:6020/health"   # 반드시 새 SSH 세션
+```
+`deploy.ps1` 원본은 세션 scratchpad; 원격 `_stage` 에 남아 있다. seeds 가 바뀌면 `_stage\seeds\` 도 올린다(스크립트가 있으면 복사).
+플러그인은 사용자가 RisuAI 에 재설치. **`data/` 는 서버를 멈추고 옮긴다**(§4).
 
 ## 4. 2026-08-23 의 사고 — DB 가 17:47 로 돌아감
 
-dev 설치본의 `data/` 를 `-wal`·`-shm` 째 새 설치본에 복사한 뒤 기동한 서버가, 낡은 wal-index 를 믿고
-커밋을 WAL 헤더 체인 밖(낯선 salt)에 썼다. 그 프로세스는 읽을 수 있었고, 다음 재시작이 그 60커밋을 버렸다.
-사라진 것: 21:13~22 프리셋 수정(복구함), 21:25 테스트 세션, 승인된 로어북 6건(본문은 `out/out_summary_lorebook_draft.md`).
-증거 `data/forensic-20260823/`, `data/orphaned-wal-20260823-221737.db-wal`. 규칙: **`data/` 는 서버를 멈추고 옮긴다.** (`docs/00`)
+dev 설치본의 `data/` 를 `-wal`·`-shm` 째 복사한 뒤 기동한 서버가 낡은 wal-index 를 믿고 커밋을 체인 밖에 썼고, 다음 재시작이 60커밋을 버렸다.
+증거 `data/forensic-20260823/`. 규칙: **`data/` 는 서버를 멈추고 옮긴다.** (`docs/00`)
 
 ## 5. 이어서 할 것 (순서대로)
 
-1. ~~**M1.1 배포**~~ — 2026-08-25 완료(§0). `git push origin master` 도 완료.
-2. **실사용 확인(M1.1 새 UI)** — 봇 편집 진입→메타 수정→봇바 반영(RisuAI 카드가 바뀌고 chats 그대로인지)→복제 봇 생성('db' 권한 프롬프트 1회)→
-   로어북 폴더명·접기·폴더 이동→Regex 탭 bg HTML 편집→트리거 코드 편집→에이전트에게 "로어북 정리해줘"로 `propose_open_tab`/`propose_lore_move` 확인.
-3. **릴리스 v0.2.0** — `python tools/release.py`. 플러그인 `+` 업데이트 버튼이 안 뜬 유력 원인: 설치본과 최신 릴리스가 둘 다 `0.1.0` 이라
-   RisuAI 가 새 버전으로 안 봄(`//@update-url` 은 dist 에 정상 — `releases/latest/download/Risu.Elf.Plugin.js`). v0.2.0 이 나오면 확인되는 가설.
-   릴리스 노트엔 06 §1 을 압축.
-4. **M2 착수** (계획서 "마일스톤 2" 그대로) — 순서: ① `assets.py` 스토어(`data/assets/<sha256>.<ext>` 전역, DB v9 `asset_blobs/asset_keys/char_assets`)
-   + `/assets/manifest|upload|status|gc` (M0 의 `/diag/asset-echo`·`assets.ts` 배치 업로더 승격) → ② 플러그인 백그라운드 임포터 + `botbar.setAssetGate` 로 반영 게이트
-   (경로 3갈래: 웹리스 계정=백엔드 `/rs/` 병렬 풀, 로컬 저장=readImage 4~8 동시 푸시, PocketRisu 동일 머신=SQLite 직읽기 — **순차 readImage 금지**, 실측 근거)
-   → ③ SQLite 고속 경로(config `pocketrisu.savePath`) → ④ 에셋 탭 → ⑤ `charx.py`(module.risum 생략·인라인 확장, 누락 에셋은 assets 엔트리 제거) + PocketRisu 실 import 검증
-   → ⑥ 플러그인 fflate 조립 폴백 → ⑦ 이름변경/삭제/추가/교체 + PIL 액션 → ⑧ 릴리스 v0.3.0.
-5. **공개 백엔드 보안 점검** — `elf.example.com` 노출 상태. 토큰 길이·실패 rate limit·`/health` 정보(`tokenRequired:false` 가 보인다)·`/diag/*` 가 auth 뒤에 있는지.
-6. 이월: 스킬 description 다듬기("요약 이사"·"말투 통일"), 사라진 로어북 6건 복구(`out/` 초안 → `propose_lore_add`), 모듈 에셋(v2), 트리거 V2 블록 GUI.
+1. **GitHub 릴리스 v0.3.0** — 사용자가 실행(분류기가 막음). 노트 초안은 세션 scratchpad `notes-0.3.0.md`(없으면 §1 을 압축):
+   ```
+   cd C:\code\risu-elf\release
+   gh release create v0.3.0 -R nilsonwhang3-spec/risu-elf --title "Risu Elf 0.3.0" --notes-file <notes> Risu.Elf.0.3.0.Windows.x64.Auto.Install.Package.zip Risu.Elf.0.3.0.Linux.x64.Auto.Install.Package.zip Risu.Elf.Plugin.js SHA256SUMS-0.3.0.txt
+   ```
+   v0.2.0 릴리스는 건너뛰어도 된다(태그만 있음). 그다음 RisuAI 플러그인 `+` 업데이트가 뜨는지 확인 → 뜨면 "설치본=최신 버전이라 안 떴다" 가설 확정.
+2. **실사용 확인(M2)** — PocketRisu(test-server, fastPath 켜짐): 패널 열기→봇 카드 진행 줄→수 초 내 complete(SQLite 직독)→에셋 탭 썸네일→charx 만들기→파일 탭 저장→**PocketRisu 로 import**(에셋·로어·트리거·Regex·CBS 표시가 원본과 같은지, 이것이 charx 의 핵심 검증). 웹리스(elf.example.com): 허브 풀 진행률·2회째 0건·게이트.
+   에이전트: "프로필을 흑백으로 바꿔 추가 에셋으로 넣어 줘" → fetch_assets→PIL→propose_asset_add→승인→RisuAI 카드 확인.
+3. **공개 백엔드 보안 점검** — `elf.example.com`: 토큰 길이·실패 rate limit(있음: 60초 20회)·`/health` 의 `tokenRequired:false` 노출·`/diag/*`·`/assets/*`·`/files/download` 가 auth 뒤인지(AUTH_EXEMPT 는 health·plugin.js 뿐 — 확인됨).
+4. 보류분: 플러그인 fflate 조립 폴백(⑥), PocketRisu bulk-write(비-PNG), 모듈 에셋(v2), 트리거 V2 블록 GUI, 스킬 description 다듬기, 사라진 로어북 6건 복구(`out/` 초안).
 
 ## 6. 빠른 명령
 
 ```
-bash tests/gate.sh                               # 게이트. ALL GREEN 아니면 배포 금지 (시스템 python 은 3.6 — venv 를 쓴다)
-node plugin/build.config.mjs                     # 플러그인 빌드 → plugin/dist/risu-elf-0.1.0.js
-node tests/plugin_smoke.mjs                      # linkedom 스모크 (select.value 는 getter 전용 → option selected 속성)
-ssh test-server "curl.exe -s http://127.0.0.1:6020/health"     # 원격 확인(로컬 curl 은 내 PC다)
-ssh test-server "powershell -ExecutionPolicy Bypass -File D:\code\risu-elf\_stage\deploy-m1.ps1"   # 배포(사용자가 ! 로 실행)
-ssh test-server "curl.exe -s \"http://127.0.0.1:6020/card/changes?charKey=<ck>\""
-ssh test-server "curl.exe -s http://127.0.0.1:6020/skills/preview"  # 에이전트가 보는 스킬 카탈로그
+bash tests/gate.sh                               # 게이트 (시스템 python 3.6 → venv 자동)
+pyserver/.venv/Scripts/python.exe tools/release.py   # 릴리스 자산 (시스템 python 으로는 SyntaxError)
+node plugin/build.config.mjs && node tests/plugin_smoke.mjs
+ssh test-server "curl.exe -s http://127.0.0.1:6020/diag"          # assets{blobs,bytes,fastPath,serverWrite}
+ssh test-server "curl.exe -s \"http://127.0.0.1:6020/assets/status?charKey=<ck>\""
+ssh test-server "curl.exe -s \"http://127.0.0.1:6020/charx/preview?charKey=<ck>\""
 ```
