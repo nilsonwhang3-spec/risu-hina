@@ -137,6 +137,12 @@ def build_plugin() -> Path:
             raise SystemExit(f"{needed} missing from the first 512 bytes")
     dest = OUT / PLUGIN_ASSET
     shutil.copy2(built, dest)
+    # The copy RisuAI's update check actually reads: `//@update-url` points at
+    # raw.githubusercontent.com/<repo>/master/plugin/Risu.Elf.Plugin.js, because
+    # the release-asset URL has no CORS and a browser fetch from risu.xyz fails
+    # on it (see plugin/build.config.mjs). This file is committed with the
+    # release; the release commit is what makes the new version visible.
+    shutil.copy2(built, ROOT / "plugin" / PLUGIN_ASSET)
     return dest
 
 

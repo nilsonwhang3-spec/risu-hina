@@ -338,11 +338,22 @@ charx 스크립트는 `rpack_map.bin`을 base64로 **내장**했다. 스킬 스�
 
 맞다. 처음엔 백엔드가 `/plugin.js`를 서빙하고 `//@update-url`이 거기를 가리키게
 했는데, **그러면 순환이다** — 플러그인 업데이트가 먼저인데 그게 백엔드가 살아 있고
-최신이어야 가능해진다. 지금은 GitHub 릴리스를 가리킨다:
+최신이어야 가능해진다. 지금은 GitHub 의 **raw 파일**을 가리킨다:
 
 ```
-https://github.com/<owner>/<repo>/releases/latest/download/Risu.Elf.Plugin.js
+https://raw.githubusercontent.com/<owner>/<repo>/master/plugin/Risu.Elf.Plugin.js
 ```
+
+처음엔 `releases/latest/download/Risu.Elf.Plugin.js` 였다 — 안정된 주소이고 curl 로는 잘
+받아진다. 그런데 **v0.1.0 → 0.3.0 이 나와도 risu.xyz 에 `+` 가 안 떴다.** RisuAI 의 확인 코드
+(`plugins.svelte.ts checkPluginUpdate`)는 브라우저 `fetch(updateURL, {Range: bytes=0-512})` 이고,
+릴리스 주소는 `github.com → releases/download → release-assets.githubusercontent.com` 으로 두 번
+리다이렉트되며 세 응답 어느 것도 `Access-Control-Allow-Origin` 을 안 준다. CORS 예외 → catch →
+버튼 없음. raw 는 `access-control-allow-origin: *` 와 `Accept-Ranges` 를 주고, RisuAI 문서의
+예시 URL 도 raw 다. 그래서 `tools/bundle.py` 가 릴리스마다 번들을 `plugin/Risu.Elf.Plugin.js`
+로도 복사하고, **그 파일을 릴리스 커밋에 포함**한다 — 커밋이 곧 "새 버전 공개"다. 릴리스 자산의
+`Risu.Elf.Plugin.js` 는 같은 파일의 사본(설치 zip 안에도 들어 있음)이다.
+설치본이 옛 주소를 들고 있으면 그 한 번은 수동 재설치가 필요하다(0.3.1 이 그 경우).
 
 `plugin/package.json`의 `risuelfRepo` 하나만 채우면 된다. **비어 있으면
 `//@update-url`을 아예 넣지 않는다** — 404 나는 URL은 RisuAI가 영영 "업데이트 확인

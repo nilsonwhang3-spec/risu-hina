@@ -38,7 +38,7 @@ Risu.Elf.Plugin.js        ← RisuAI 가 자동 업데이트에 쓰는 것. 3단
 
 ```powershell
 $want = (Get-Content SHA256SUMS-<버전>.txt | Where-Object { $_ -like '*backend*' }).Split(' ')[0]
-$got  = (Get-FileHash Risu.Elf.0.3.0.Auto.Install.Package.zip -Algorithm SHA256).Hash.ToLower()
+$got  = (Get-FileHash Risu.Elf.0.3.1.Auto.Install.Package.zip -Algorithm SHA256).Hash.ToLower()
 if ($want -ne $got) { throw 'hash mismatch' } else { 'hash ok' }
 ```
 
@@ -48,7 +48,7 @@ if ($want -ne $got) { throw 'hash mismatch' } else { 'hash ok' }
 만들 필요도 이름을 맞출 필요도 없다.
 
 ```powershell
-Expand-Archive Risu.Elf.0.3.0.Auto.Install.Package.zip -DestinationPath D:\code -Force
+Expand-Archive Risu.Elf.0.3.1.Auto.Install.Package.zip -DestinationPath D:\code -Force
 ```
 
 ```
@@ -98,7 +98,7 @@ processes  2 (venv launcher + server, normal)
            pid 21404
            pid 20596
 listening  yes on 6020
-health     {"service": "risu-elf", "version": "0.3.0", "ok": true, "agentReady": false, ...}
+health     {"service": "risu-elf", "version": "0.3.1", "ok": true, "agentReady": false, ...}
 ```
 
 > **`processes 2` 는 정상이다.** 윈도우 venv의 `Scripts\python.exe` 는
@@ -137,7 +137,7 @@ web RisuAI나 다른 기계에서 직접 붙을 때만 필요하다 — 그 경�
 폴더 이름이 `risu-elf` 일 필요도 없다.
 
 ```powershell
-Expand-Archive Risu.Elf.0.3.0.Auto.Install.Package.zip -DestinationPath E:\apps -Force
+Expand-Archive Risu.Elf.0.3.1.Auto.Install.Package.zip -DestinationPath E:\apps -Force
 Rename-Item E:\apps\risu-elf myelf          # 이름도 마음대로
 powershell -ExecutionPolicy Bypass -File E:\apps\myelf\setup.bat
 ```
@@ -181,7 +181,7 @@ setup: data dir E:\backup\risu-elf-data
 ### 리눅스에서는
 
 ```bash
-unzip Risu.Elf.0.3.0.Auto.Install.Package.zip -d /opt
+unzip Risu.Elf.0.3.1.Auto.Install.Package.zip -d /opt
 cd /opt/risu-elf && chmod +x *.sh
 ./setup.sh                      # 동봉된 파이썬을 확인하고 띄운다
 ./setup.sh --service            # 또는 PM2 로 상주시키기

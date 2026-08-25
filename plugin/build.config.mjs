@@ -31,18 +31,27 @@ const OUTFILE = resolve(__dirname, `dist/risu-elf-${pkg.version}.js`);
 
 // Where RisuAI will look for a newer build.
 //
-// A GitHub release, not the local backend. The order the user works in is
-// "update the plugin from RisuAI, then update the backend from the plugin", so
-// the plugin's update source has to work while the backend is down, out of
-// date, or on a port this file cannot know. `releases/latest/download/...` is
-// a stable URL that always resolves to the newest release.
+// GitHub, not the local backend. The order the user works in is "update the
+// plugin from RisuAI, then update the backend from the plugin", so the
+// plugin's update source has to work while the backend is down, out of date,
+// or on a port this file cannot know.
+//
+// raw.githubusercontent.com, not `releases/latest/download/...`. RisuAI's
+// check (plugins.svelte.ts checkPluginUpdate) is a plain browser `fetch` with
+// a Range header from the RisuAI origin, so every hop needs CORS. The release
+// URL redirects twice and none of the three responses carries
+// Access-Control-Allow-Origin - the check throws and the `+` never shows
+// (0.1.0 -> 0.3.0 was never offered on risu.xyz). raw.githubusercontent.com
+// answers with `access-control-allow-origin: *` and Accept-Ranges, which is
+// why RisuAI's own docs use it. So the release build also commits the bundle
+// as plugin/Risu.Elf.Plugin.js (tools/bundle.py) for this URL to serve.
 //
 // Empty repo means no //@update-url at all rather than a placeholder: a URL
 // that 404s makes RisuAI report a failed update check forever, which is worse
 // than the honest absence of one.
 const REPO = process.env.RISUELF_REPO || pkg.risuelfRepo || "";
 const UPDATE_URL = process.env.RISUELF_UPDATE_URL
-  || (REPO ? `https://github.com/${REPO}/releases/latest/download/Risu.Elf.Plugin.js` : "");
+  || (REPO ? `https://raw.githubusercontent.com/${REPO}/master/plugin/Risu.Elf.Plugin.js` : "");
 
 let banner = readFileSync(HEADER, "utf8").replace(/\$\{VERSION\}/g, pkg.version);
 if (UPDATE_URL) {
