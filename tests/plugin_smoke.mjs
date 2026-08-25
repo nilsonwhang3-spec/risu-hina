@@ -29,7 +29,8 @@ const ROOT = resolve(__dirname, '..');
 // it is resolved from there rather than duplicated into a second node_modules.
 const pluginRequire = createRequire(pathToFileURL(resolve(ROOT, 'plugin/package.json')));
 const { parseHTML } = pluginRequire('linkedom');
-const BUNDLE = resolve(ROOT, 'plugin/dist/risu-elf-0.1.0.js');
+const pkgVersion = JSON.parse(readFileSync(resolve(ROOT, 'plugin/package.json'), 'utf8')).version;
+const BUNDLE = resolve(ROOT, `plugin/dist/risu-elf-${pkgVersion}.js`);
 
 const failures = [];
 const check = (name, cond, detail = '') => {
