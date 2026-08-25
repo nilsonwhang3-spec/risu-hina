@@ -15,13 +15,13 @@
 |---|---|---|
 | test-server **실행 중** `pyserver/app` + `plugin/risu-elf.js` | **0.3.0 = `08dc16f`** (`/health` 0.3.0, DB v9, `data/assets/` 생성, 플러그인 해시 `ADB1E73B` 일치) | 직전 백업 `app.bak-20260825-210145` |
 | test-server config | `pocketrisu.savePath = D:\code\risu-nodeonly\Risuai-NodeOnly\save` → `/diag` `fastPath:true, serverWrite:true` | 같은 PC 의 PocketRisu 를 SQLite 로 직독 |
-| GitHub 릴리스 | v0.3.0 생성됨(사용자 실행, 21:08). **v0.3.1 은 §5-1** | `gh release create` 는 권한 분류기가 막아 사용자가 실행 |
+| GitHub 릴리스 | **v0.3.1 Latest**(21:20, 자산 4개) · v0.3.0 · v0.1.0 | `gh release create` 는 auto 모드 분류기가 막는다 — 수동 권한 모드에서는 내가 직접 실행 가능(0.3.1 이 그렇게 됨) |
 | RisuAI 설치 플러그인 | **0.3.1 을 한 번 수동 재설치해야 함** — 설치본의 `//@update-url` 이 CORS 없는 릴리스 주소라 `+` 가 영영 안 뜬다(docs/04 B.4) | 그 뒤부터는 raw 주소라 `+` 가 뜬다 |
 
 **0.3.1 (2026-08-25 밤)** — `+` 가 안 뜬 진짜 원인은 "같은 버전"이 아니라 **CORS**: RisuAI 는 브라우저 `fetch` 로 `//@update-url` 을 읽는데 릴리스 주소의 리다이렉트 응답에 CORS 헤더가 없다. `//@update-url` 을
 `https://raw.githubusercontent.com/nilsonwhang3-spec/risu-elf/master/plugin/Risu.Elf.Plugin.js` 로 바꾸고, `tools/bundle.py` 가 그 파일을 저장소에 쓰도록 했다(릴리스 커밋에 포함). 백엔드 코드는 VERSION 만 바뀜.
 
-→ **첫 할 일**: 사용자가 `gh release create v0.3.1 …`(§5-1) → RisuAI 에 `plugin/Risu.Elf.Plugin.js` **수동 재설치 1회** → 이후 릴리스부터 `+` 확인.
+→ **첫 할 일**: 사용자가 RisuAI 에 `plugin/Risu.Elf.Plugin.js` **수동 재설치 1회**(설치본 0.1.0 의 update-url 은 CORS 로 못 읽음) → 다음 릴리스부터 `+` 가 뜨는지 확인 → M2 실사용 검증(§5-2).
 
 ## 1. 2026-08-25 에 들어간 것 — 릴리스·M2 전부
 
@@ -82,11 +82,9 @@ dev 설치본의 `data/` 를 `-wal`·`-shm` 째 복사한 뒤 기동한 서버�
 
 ## 5. 이어서 할 것 (순서대로)
 
-1. **GitHub 릴리스 v0.3.1** — 사용자가 실행(분류기가 막음; PowerShell 이라 `&&` 대신 `;`). 노트는 `release/notes-0.3.1.md`:
-   ```
-   cd C:\code\risu-elf\release; gh release create v0.3.1 -R nilsonwhang3-spec/risu-elf --title "Risu Elf 0.3.1" --notes-file notes-0.3.1.md Risu.Elf.0.3.1.Windows.x64.Auto.Install.Package.zip Risu.Elf.0.3.1.Linux.x64.Auto.Install.Package.zip Risu.Elf.Plugin.js SHA256SUMS-0.3.1.txt
-   ```
-   그다음 RisuAI 에 `plugin/Risu.Elf.Plugin.js` 를 수동 재설치(설치본의 옛 update-url 은 CORS 로 못 읽는다). 이후 릴리스부터 `+` 가 떠야 정상.
+1. ~~**GitHub 릴리스 v0.3.1**~~ — 완료(21:20). 다음 릴리스 절차: 버전 5곳 bump → `pyserver/.venv/Scripts/python.exe tools/release.py`(저장소의 `plugin/Risu.Elf.Plugin.js` 도 갱신됨) → 게이트 → 커밋(번들 포함)·태그·푸시 → 배포 →
+   `cd release && gh release create v<ver> -R nilsonwhang3-spec/risu-elf --title "Risu Elf <ver>" --notes-file notes-<ver>.md <zip 2개> Risu.Elf.Plugin.js SHA256SUMS-<ver>.txt`
+   (auto 모드에선 분류기가 막으므로 수동 권한 모드에서 실행). 사용자는 RisuAI 에 `plugin/Risu.Elf.Plugin.js` 를 한 번 수동 재설치해야 이후 `+` 가 뜬다.
 2. **실사용 확인(M2)** — PocketRisu(test-server, fastPath 켜짐): 패널 열기→봇 카드 진행 줄→수 초 내 complete(SQLite 직독)→에셋 탭 썸네일→charx 만들기→파일 탭 저장→**PocketRisu 로 import**(에셋·로어·트리거·Regex·CBS 표시가 원본과 같은지, 이것이 charx 의 핵심 검증). 웹리스(elf.example.com): 허브 풀 진행률·2회째 0건·게이트.
    에이전트: "프로필을 흑백으로 바꿔 추가 에셋으로 넣어 줘" → fetch_assets→PIL→propose_asset_add→승인→RisuAI 카드 확인.
 3. **공개 백엔드 보안 점검** — `elf.example.com`: 토큰 길이·실패 rate limit(있음: 60초 20회)·`/health` 의 `tokenRequired:false` 노출·`/diag/*`·`/assets/*`·`/files/download` 가 auth 뒤인지(AUTH_EXEMPT 는 health·plugin.js 뿐 — 확인됨).
