@@ -696,3 +696,18 @@ history 4개). 이제 `BaseException` 경로에서 프롬프트 + 도착한 텍�
 실행은 샌드박스 밖(백엔드 프로세스)에서 워크스페이스를 cwd 로, 동봉 인터프리터를 PATH 앞에 두고 한다 —
 사용자가 허용한 것이므로 감사 훅의 "프로세스 생성 금지"와 모순되지 않는다. 임베디드 파이썬엔 pip 이
 없어 `tools/bundle.py` 가 pip 휠을 내려받아 `python311._pth` 에 올린다(휠은 zip-import 된다).
+
+## G.7 업데이터는 자기 인터프리터를 옮길 수 없다 (v0.5.2)
+
+첫 실사용 업데이트(0.5.0→0.5.1)에서 `_install` 이 `python/` 을 `shutil.move` 했다. 그 안의 `.pyd` 는 **지금
+돌고 있는 프로세스가 로드한 것**이라 Windows 가 잠근다 → `PermissionError`, 그리고 `move` 의 폴백
+(copytree 후 rmtree)이 절반만 지운 트리를 남겨 다음 시도는 `FileNotFoundError`. 규칙: **실행 중인 프로세스는
+자기 인터프리터 디렉터리를 건드리지 않는다.** 새 인터프리터는 `python.new` 로 두고, 파이썬 밖에서 도는 런처
+(`start.bat`/`start.sh`)가 다음 기동 직전에 `python`→`python.old`, `python.new`→`python` 으로 바꾼다.
+`python/bundle.txt`(파이썬 버전 + `requirements.lock` 해시)가 같으면 스테이징도 하지 않는다. 런처 자체는
+업데이터가 `*.new` 로 놓아 두는 것이라(자기 파일을 덮어쓰면 cmd 가 바이트 오프셋으로 읽다 깨진다), 옛 런처를
+쓰는 설치본은 한 번 손으로 바꿔야 스왑이 작동한다 — 0.5.2 를 수동 설치하라는 이유.
+
+버전 게이트: 플러그인은 `/health` 의 버전과 자기 버전의 major.minor 를 비교해 다르면 업데이트 경로
+(`/health` `/update/*` `/plugin` `/logs` `/diag` `/config`) 외의 호출을 거부하고 어느 쪽을 올릴지 말한다.
+그 전엔 어긋난 API 가 404 나 이상한 모양으로 깊은 곳에서 터졌다.

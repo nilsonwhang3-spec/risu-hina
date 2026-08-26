@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.5.1
+//@display-name Risu Hina v0.5.2
 //@api 3.0
-//@version 0.5.1
+//@version 0.5.2
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@arg backend_url string 백엔드 URL (기본: http://127.0.0.1:6020)
 //@arg backend_token string 백엔드 토큰 (data/token.txt)
@@ -84,8 +84,14 @@
       this.route = "direct";
       this.tokenSafe = true;
       this.lastHealth = body;
+      this.gate = versionGate("0.5.2", String(body.version || ""));
       return body;
     }
+    /** Why ordinary calls are refused right now (version mismatch), or ''. */
+    get versionGate() {
+      return this.gate;
+    }
+    gate = "";
     async get(path, query) {
       const qs = query ? "?" + Object.entries(query).filter(([, v]) => v !== void 0 && v !== "").map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`).join("&") : "";
       return this.json("GET", path + qs, void 0);
@@ -147,6 +153,9 @@
     }
     async raw(method, path, payload, opts = {}) {
       if (!this.cfg.url) throw new BackendError(0, "\uBC31\uC5D4\uB4DC URL\uC774 \uC124\uC815\uB418\uC5B4 \uC788\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4");
+      if (this.gate && !GATE_EXEMPT.has(path.split("?")[0])) {
+        throw new BackendError(0, this.gate);
+      }
       const headers = {};
       const wantToken = opts.withToken !== false;
       if (wantToken && this.cfg.token) {
@@ -208,6 +217,16 @@
     } catch {
       return { _raw: text.slice(0, 500) };
     }
+  }
+  var GATE_EXEMPT = /* @__PURE__ */ new Set(["/health", "/update/check", "/update/apply", "/plugin", "/logs", "/diag", "/config"]);
+  function versionGate(plugin, backend) {
+    const mm = (v) => v.split(".").slice(0, 2).map((x) => parseInt(x, 10) || 0);
+    if (!backend) return "";
+    const [pa, pb] = mm(plugin);
+    const [ba, bb] = mm(backend);
+    if (pa === ba && pb === bb) return "";
+    const pluginNewer = pa > ba || pa === ba && pb > bb;
+    return pluginNewer ? `\uD50C\uB7EC\uADF8\uC778 v${plugin} \uACFC \uBC31\uC5D4\uB4DC v${backend} \uC758 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \u2699 \u2192 \uC5F0\uACB0\uC5D0\uC11C \uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8\uD574 \uC8FC\uC138\uC694.` : `\uBC31\uC5D4\uB4DC v${backend} \uAC00 \uD50C\uB7EC\uADF8\uC778 v${plugin} \uBCF4\uB2E4 \uC0C8 \uBC84\uC804\uC785\uB2C8\uB2E4. RisuAI \uD50C\uB7EC\uADF8\uC778 \uD654\uBA74\uC5D0\uC11C Risu Hina \uB97C \uC5C5\uB370\uC774\uD2B8(+)\uD574 \uC8FC\uC138\uC694.`;
   }
   async function toError(res) {
     const body = await readJson(res);
@@ -283,8 +302,10 @@
   }
   function selectedValue(sel) {
     const options = Array.from(sel.querySelectorAll("option"));
-    const chosen = sel.querySelector("option[selected]") ?? options.find((o) => o.selected);
-    return chosen?.value ?? sel.value ?? options[0]?.value ?? "";
+    const live = options.find((o) => o.selected === true && o.hasAttribute("selected") === false) ?? (typeof sel.value === "string" && sel.value !== "" && options.find((o) => o.value === sel.value)) ?? options.find((o) => o.selected === true);
+    if (live) return live.value;
+    const stamped = sel.querySelector("option[selected]");
+    return stamped?.value ?? sel.value ?? options[0]?.value ?? "";
   }
   function clear(node) {
     while (node.firstChild) node.removeChild(node.firstChild);
@@ -7070,7 +7091,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.5.1",
+            version: "0.5.2",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -7176,7 +7197,10 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     aboutMount = el("div");
     refreshAbout();
     const sections = [
-      ["\uC5F0\uACB0", [buildConnectionCard(), buildAssetsCard(), buildDiagnosticCard(), buildAssetProbeCard()]],
+      // The backend update sits with the connection, right under it: it is the
+      // first thing to press when the two sides disagree, and it was buried on
+      // the last page before.
+      ["\uC5F0\uACB0", [buildConnectionCard(), buildUpdateCard(), buildDiagnosticCard(), buildAssetsCard(), buildAssetProbeCard()]],
       ["API \uD0A4/\uC778\uC99D", [buildKeysCard()]],
       ["\uC5D0\uC774\uC804\uD2B8", [buildPresetsCard({
         onMount: (refresh8) => {
@@ -7188,7 +7212,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         }
       })]],
       ["\uC2A4\uD0AC", [buildSkillsCard()]],
-      ["\uC815\uBCF4 \xB7 \uB85C\uADF8", [buildCatalogCard(), buildUpdateCard(), buildDebugCard(), aboutMount]]
+      ["\uC815\uBCF4 \xB7 \uB85C\uADF8", [buildCatalogCard(), buildDebugCard(), aboutMount]]
     ];
     const bar3 = el("div", { class: "subtabs" });
     const body = el("div", { class: "pad" });
@@ -7649,7 +7673,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.5.1"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.5.2"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -9067,6 +9091,13 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       const go = el("button", { class: "ghost tiny", text: "\uC124\uC815\uC73C\uB85C" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
+    } else if (transport.versionGate) {
+      healthEl.className = "status bad";
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.5.2"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
+      go.addEventListener("click", () => setTab("settings"));
+      healthEl.appendChild(go);
+      healthEl.title = transport.versionGate;
     } else {
       healthEl.appendChild(el("span", { class: "hint", text: `\uBC31\uC5D4\uB4DC v${h.version}` }));
       if (!h.agentReady) {
@@ -9137,7 +9168,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.5.1" }),
+        el("span", { class: "dim", text: "v0.5.2" }),
         healthEl,
         el("span", { class: "spacer" }),
         reload,
@@ -9190,18 +9221,55 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     await transport.detectPlatform();
     const connected = await state.connect();
     await state.readHost();
-    if (connected && state.slot && !state.slotError) {
-      try {
-        await state.upload({ force });
-        if (state.activeChatKey) await state.loadTurns();
-      } catch (e) {
-        console.log("[risu-hina] upload failed", e);
-        state.emit();
-      }
+    if (connected) {
+      await uploadAfterConnect(force);
+    } else {
+      startReconnect(force);
     }
     refreshStatus();
     renderActive();
   }
+  async function uploadAfterConnect(force = false) {
+    if (!state.slot || state.slotError) return;
+    try {
+      await state.upload({ force });
+      if (state.activeChatKey) await state.loadTurns();
+    } catch (e) {
+      console.log("[risu-hina] upload failed", e);
+      state.emit();
+    }
+  }
+  var reconnectTimer = null;
+  var RECONNECT_DELAYS = [3e3, 5e3, 8e3, 12e3, 2e4, 3e4, 3e4, 3e4, 3e4, 3e4];
+  function startReconnect(force) {
+    if (reconnectTimer) return;
+    let i = 0;
+    const tick = async () => {
+      reconnectTimer = null;
+      if (state.health) return;
+      const ok = await state.connect();
+      if (ok) {
+        if (!state.slot) await state.readHost();
+        if (!state.workspace) await uploadAfterConnect(force);
+        refreshStatus();
+        renderActive();
+        return;
+      }
+      if (i < RECONNECT_DELAYS.length) reconnectTimer = setTimeout(tick, RECONNECT_DELAYS[i++]);
+    };
+    reconnectTimer = setTimeout(tick, RECONNECT_DELAYS[i++]);
+  }
+  var sawConnected = false;
+  state.onChange(() => {
+    const ok = !!state.health;
+    if (ok && !sawConnected && mounted && !state.workspace && state.slot && !state.slotError) {
+      void uploadAfterConnect().then(() => {
+        refreshStatus();
+        renderActive();
+      });
+    }
+    sawConnected = ok;
+  });
 
   // src/index.ts
   var DEFAULT_URL = "http://127.0.0.1:6020";
@@ -9272,6 +9340,6 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.5.1"} loaded`);
+    console.log(`[risu-hina] v${"0.5.2"} loaded`);
   })();
 })();

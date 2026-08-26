@@ -36,6 +36,14 @@
 
 **배포**: 사용자 요청으로 test-server 에 직접 배포하지 않음 — 플러그인 `+` → 백엔드 업데이트 경로를 사용자가 직접 검증. 옛 업데이터는 `Install.Package`+OS 로 자산을 고르므로 `Risu.Hina.*` zip 도 받고, zip 안 `*/pyserver/app` 을 찾으므로 최상위 폴더 이름 변경도 무관.
 
+## 1-0. 2026-08-26 밤 — v0.5.2: 업데이터가 자기 인터프리터를 옮기다 죽던 것, 버전 게이트
+
+- **실사용 첫 백엔드 업데이트(0.5.0→0.5.1)가 실패**: `_install` 이 실행 중인 `python/` 을 `shutil.move` → Windows 가 로드된 `.pyd`(jiter) 를 잠가 `PermissionError`, 두 번째 시도는 반쯤 지워진 트리에서 `FileNotFoundError`. 앞선 `Unauthorized` 는 재설치한 플러그인(새 이름)에 토큰이 비어 있던 것.
+- 고침: 인터프리터는 **`python.new` 로 스테이징**, `start.bat`/`start.sh` 가 다음 기동 때 스왑(`python`→`python.old`). 같은 번들(`python/bundle.txt` 스탬프 = 파이썬 버전+락 해시)이면 건너뜀. **옛 런처를 쓰는 설치본은 런처를 한 번 손으로 바꿔야** 스왑이 된다(업데이터가 `start.bat.new` 로 놓아 둠).
+- 플러그인 `selectedValue()` 가 사용자의 선택보다 `selected` 속성을 먼저 읽던 버그(키 선택 안 먹음·keyRef 누락) 수정. 연결이 늦게 올라오면 재시도·업로드(`startReconnect`, health 상승 감시).
+- **버전 게이트**: major.minor 가 다르면 `/health`·`/update/*`·`/plugin`·`/logs`·`/diag`·`/config` 외 호출을 플러그인이 거부하고 헤더에 "버전이 다릅니다 → 백엔드 업데이트로 / 플러그인 업데이트" 안내. 백엔드 업데이트 카드는 **연결 탭 상단**으로.
+- test-server 복구: 서버 정지 → `pyserver\python` 을 0.5.2 zip 의 것으로 교체(또는 zip 을 폴더 위에 풀기, `data/` 유지) → 새 `start.bat` → 시작.
+
 ## 1-1. 2026-08-26 — 라운드 4 (v0.5.1)
 
 | 영역 | 무엇 |

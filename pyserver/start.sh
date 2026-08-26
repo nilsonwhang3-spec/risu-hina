@@ -37,6 +37,14 @@ PY="$ROOT/python/bin/python3"
 [ -x "$PY" ] || PY="$(command -v python3 || command -v python)"
 
 while true; do
+  # An update staged a new interpreter as python.new (updater.py never
+  # replaces the one it runs on); swap it in while nothing runs from it.
+  if [ -d "$ROOT/python.new" ]; then
+    rm -rf "$ROOT/python.old"
+    [ -d "$ROOT/python" ] && mv "$ROOT/python" "$ROOT/python.old"
+    mv "$ROOT/python.new" "$ROOT/python"
+    echo "=== interpreter swapped in at $(date)" >> "$LOG"
+  fi
   echo "=== start $(date -Is) port=$PORT" >> "$LOG"
   "$PY" "$ROOT/run.py" >> "$LOG" 2>&1
   code=$?

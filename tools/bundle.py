@@ -319,6 +319,11 @@ def main() -> int:
             shutil.rmtree(stage)
         stage.mkdir(parents=True)
         stage_interpreter(target, stage)
+        # What identifies this interpreter bundle; updater.py skips replacing
+        # python/ when an update carries the same one.
+        (stage / "pyserver" / "python" / "bundle.txt").write_text(
+            f"{TARGETS[target]['python']} deps={sha256((SERVER / TARGETS[target]['lock']).read_bytes())[:16]} pip\n",
+            encoding="ascii")
         stage_app(stage, plugin)
         archive = pack(target, stage)
         assets.append(archive)

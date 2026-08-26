@@ -42,6 +42,15 @@ set PY=%SERVER%python\python.exe
 if not exist "%PY%" set PY=%SERVER%.venv\Scripts\python.exe
 
 :loop
+REM An update staged a new interpreter (updater.py cannot replace the one it
+REM runs on - Windows locks the .pyd files). Nothing runs from python\ here,
+REM so this is the moment to swap: old aside, new in place.
+if exist "%SERVER%python.new\" (
+    if exist "%SERVER%python.old\" rmdir /s /q "%SERVER%python.old"
+    if exist "%SERVER%python\" move "%SERVER%python" "%SERVER%python.old" >nul
+    move "%SERVER%python.new" "%SERVER%python" >nul
+    echo === interpreter swapped in at %DATE% %TIME% >> "%LOG%"
+)
 echo === start %DATE% %TIME% port=%PORT% >> "%LOG%"
 "%PY%" "%SERVER%run.py" >> "%LOG%" 2>&1
 if errorlevel 75 if not errorlevel 76 (

@@ -90,10 +90,20 @@ export function setSelected(sel: HTMLSelectElement, value: string): void {
 
 export function selectedValue(sel: HTMLSelectElement): string {
   const options = Array.from(sel.querySelectorAll('option'));
-  const chosen = sel.querySelector<HTMLOptionElement>('option[selected]')
-    ?? options.find((o) => o.selected);
+  // The live choice first. In a browser, what the user picked is the option's
+  // `.selected` property (and `sel.value`); the `selected` ATTRIBUTE is only
+  // what setSelected stamped when the form was filled, and it stays on that
+  // old option after the user changes the select - reading it first made
+  // "직접 입력" look chosen after a key had been picked, and the preset saved
+  // without the key. The attribute remains the fallback for the test DOM,
+  // which tracks neither the property nor `.value`.
+  const live = options.find((o) => o.selected === true && o.hasAttribute('selected') === false)
+    ?? (typeof sel.value === 'string' && sel.value !== '' && options.find((o) => o.value === sel.value))
+    ?? options.find((o) => o.selected === true);
+  if (live) return live.value;
+  const stamped = sel.querySelector<HTMLOptionElement>('option[selected]');
   // Last resort is the first option, which is what an untouched <select> shows.
-  return chosen?.value ?? sel.value ?? options[0]?.value ?? '';
+  return stamped?.value ?? sel.value ?? options[0]?.value ?? '';
 }
 
 export function clear(node: Element): void {

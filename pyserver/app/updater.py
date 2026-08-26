@@ -299,6 +299,15 @@ def _offer_launchers(payload: Path, root: Path) -> list[str]:
     return offered
 
 
+def _bundle_stamp(pydir: Path) -> str:
+    """What identifies a bundled interpreter: the stamp tools/bundle.py wrote
+    (python version + dependency lock hash), or '' for a bundle without one."""
+    try:
+        return (pydir / "bundle.txt").read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
 def _install(payload: Path, version: str) -> Path:
     lay = _layout()
     if lay["mode"] == "versioned":
@@ -318,14 +327,25 @@ def _install(payload: Path, version: str) -> Path:
         shutil.copytree(pkg / "app", backup)
         shutil.rmtree(pkg / "app", ignore_errors=True)
     shutil.copytree(payload / "app", pkg / "app")
-    # The interpreter comes with the release too. Swap it the same way as
-    # app/: a new version may need a new python, and a half-updated pair is
-    # exactly the state nothing can start from. The old one is kept alongside
-    # the old app, so a rollback is two renames rather than a reinstall.
+    # The interpreter comes with the release too - but it is the interpreter
+    # THIS process runs on, and Windows will not let a running exe's .pyd
+    # files be moved or deleted (2026-08-26: `shutil.move(python)` died on a
+    # locked jiter .pyd half way, leaving a torn python/ that the next start
+    # could not use). So the new one is staged as python.new/ and the
+    # launcher (start.bat / start.sh) swaps it in before the next start, when
+    # nothing is running from it. Identical bundles (same python, same
+    # dependency lock) are not staged at all.
     if (payload / "python").is_dir():
-        if (pkg / "python").is_dir():
-            shutil.move(str(pkg / "python"), str(backup.with_name(backup.name + "-python")))
-        shutil.copytree(payload / "python", pkg / "python")
+        new_stamp = _bundle_stamp(payload / "python")
+        old_stamp = _bundle_stamp(pkg / "python")
+        if new_stamp and new_stamp == old_stamp:
+            log.info("update: interpreter unchanged (%s), keeping python/", new_stamp[:16])
+        else:
+            staged = pkg / "python.new"
+            if staged.exists():
+                shutil.rmtree(staged, ignore_errors=True)
+            shutil.copytree(payload / "python", staged)
+            log.info("update: interpreter staged as python.new - the launcher swaps it in on restart")
     for extra in ("run.py", "requirements.in", "requirements.lock"):
         src = payload / extra
         if src.is_file():

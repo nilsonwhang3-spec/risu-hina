@@ -250,6 +250,15 @@ export function refreshStatus(): void {
     const go = el('button', { class: 'ghost tiny', text: '설정으로' });
     go.addEventListener('click', () => setTab('settings'));
     healthEl.appendChild(go);
+  } else if (transport.versionGate) {
+    // Different major.minor on the two sides: ordinary calls are refused
+    // (transport) and the strip says which side to update.
+    healthEl.className = 'status bad';
+    healthEl.appendChild(el('span', { text: `백엔드 v${h.version} · 플러그인 v${__PLUGIN_VERSION__} — 버전이 다릅니다` }));
+    const go = el('button', { class: 'primary tiny', text: transport.versionGate.includes('백엔드를 업데이트') ? '백엔드 업데이트로' : '안내 보기' });
+    go.addEventListener('click', () => setTab('settings'));
+    healthEl.appendChild(go);
+    healthEl.title = transport.versionGate;
   } else {
     healthEl.appendChild(el('span', { class: 'hint', text: `백엔드 v${h.version}` }));
     if (!h.agentReady) {
@@ -403,15 +412,58 @@ export async function bootstrap(force = false): Promise<void> {
   const connected = await state.connect();
   await state.readHost();
 
-  if (connected && state.slot && !state.slotError) {
-    try {
-      await state.upload({ force });
-      if (state.activeChatKey) await state.loadTurns();
-    } catch (e) {
-      console.log('[risu-hina] upload failed', e);
-      state.emit();
-    }
+  if (connected) {
+    await uploadAfterConnect(force);
+  } else {
+    // The backend was not reachable at open (a tunnel warming up, plain
+    // fetch not yet in effect, a laptop waking). Keep trying for a while;
+    // the first success uploads the bot exactly as a good open would have.
+    startReconnect(force);
   }
   refreshStatus();
   renderActive();
 }
+
+async function uploadAfterConnect(force = false): Promise<void> {
+  if (!state.slot || state.slotError) return;
+  try {
+    await state.upload({ force });
+    if (state.activeChatKey) await state.loadTurns();
+  } catch (e) {
+    console.log('[risu-hina] upload failed', e);
+    state.emit();
+  }
+}
+
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+const RECONNECT_DELAYS = [3000, 5000, 8000, 12000, 20000, 30000, 30000, 30000, 30000, 30000];
+
+function startReconnect(force: boolean): void {
+  if (reconnectTimer) return;
+  let i = 0;
+  const tick = async () => {
+    reconnectTimer = null;
+    if (state.health) return;
+    const ok = await state.connect();
+    if (ok) {
+      if (!state.slot) await state.readHost();
+      if (!state.workspace) await uploadAfterConnect(force);
+      refreshStatus();
+      renderActive();
+      return;
+    }
+    if (i < RECONNECT_DELAYS.length) reconnectTimer = setTimeout(tick, RECONNECT_DELAYS[i++]);
+  };
+  reconnectTimer = setTimeout(tick, RECONNECT_DELAYS[i++]);
+}
+
+// A connection that comes up some other way (저장하고 연결 in settings, the
+// diagnostic probe) also has to finish the open: upload the bot it never got.
+let sawConnected = false;
+state.onChange(() => {
+  const ok = !!state.health;
+  if (ok && !sawConnected && mounted && !state.workspace && state.slot && !state.slotError) {
+    void uploadAfterConnect().then(() => { refreshStatus(); renderActive(); });
+  }
+  sawConnected = ok;
+});

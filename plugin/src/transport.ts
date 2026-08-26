@@ -116,8 +116,16 @@ export class Transport {
     this.route = 'direct';
     this.tokenSafe = true;
     this.lastHealth = body;
+    // A plugin and a backend of different minor versions do not speak the
+    // same API. Rather than fail somewhere deep with a 404 or a wrong shape,
+    // refuse everything but the update paths and say which side to update.
+    this.gate = versionGate(__PLUGIN_VERSION__, String(body.version || ''));
     return body;
   }
+
+  /** Why ordinary calls are refused right now (version mismatch), or ''. */
+  get versionGate(): string { return this.gate; }
+  private gate = '';
 
   async get<T = unknown>(path: string, query?: Record<string, string | number | undefined>): Promise<T> {
     const qs = query
@@ -203,6 +211,9 @@ export class Transport {
   ): Promise<Response> {
     if (!this.cfg.url) throw new BackendError(0, '백엔드 URL이 설정되어 있지 않습니다');
 
+    if (this.gate && !GATE_EXEMPT.has(path.split('?')[0])) {
+      throw new BackendError(0, this.gate);
+    }
     const headers: Record<string, string> = {};
     const wantToken = opts.withToken !== false;
     if (wantToken && this.cfg.token) {
@@ -268,6 +279,26 @@ async function readJson(res: Response): Promise<unknown> {
   let text: string;
   try { text = await res.text(); } catch { return null; }
   try { return JSON.parse(text); } catch { return { _raw: text.slice(0, 500) }; }
+}
+
+/** Paths that work across versions: the ones an update needs. */
+const GATE_EXEMPT = new Set(['/health', '/update/check', '/update/apply', '/plugin', '/logs', '/diag', '/config']);
+
+/**
+ * The refusal text when plugin and backend differ in major.minor, or ''.
+ * Newer plugin -> update the backend (from 설정 → 연결); newer backend ->
+ * update the plugin (RisuAI's +). Patch versions are compatible by contract.
+ */
+export function versionGate(plugin: string, backend: string): string {
+  const mm = (v: string) => v.split('.').slice(0, 2).map((x) => parseInt(x, 10) || 0);
+  if (!backend) return '';
+  const [pa, pb] = mm(plugin);
+  const [ba, bb] = mm(backend);
+  if (pa === ba && pb === bb) return '';
+  const pluginNewer = pa > ba || (pa === ba && pb > bb);
+  return pluginNewer
+    ? `플러그인 v${plugin} 과 백엔드 v${backend} 의 버전이 다릅니다. ⚙ → 연결에서 백엔드를 업데이트해 주세요.`
+    : `백엔드 v${backend} 가 플러그인 v${plugin} 보다 새 버전입니다. RisuAI 플러그인 화면에서 Risu Hina 를 업데이트(+)해 주세요.`;
 }
 
 async function toError(res: Response): Promise<BackendError> {

@@ -65,7 +65,10 @@ export function renderSettingsTab(mount: HTMLElement): void {
   refreshAbout();
 
   const sections: [string, HTMLElement[]][] = [
-    ['연결', [buildConnectionCard(), buildAssetsCard(), buildDiagnosticCard(), buildAssetProbeCard()]],
+    // The backend update sits with the connection, right under it: it is the
+    // first thing to press when the two sides disagree, and it was buried on
+    // the last page before.
+    ['연결', [buildConnectionCard(), buildUpdateCard(), buildDiagnosticCard(), buildAssetsCard(), buildAssetProbeCard()]],
     ['API 키/인증', [buildKeysCard()]],
     ['에이전트', [buildPresetsCard({
       onMount: (refresh) => { refreshers.push(refresh); },
@@ -77,7 +80,7 @@ export function renderSettingsTab(mount: HTMLElement): void {
       },
     })]],
     ['스킬', [buildSkillsCard()]],
-    ['정보 · 로그', [buildCatalogCard(), buildUpdateCard(), buildDebugCard(), aboutMount]],
+    ['정보 · 로그', [buildCatalogCard(), buildDebugCard(), aboutMount]],
   ];
 
   const bar = el('div', { class: 'subtabs' });
