@@ -24,6 +24,7 @@ from pydantic_ai.messages import (
     PartStartEvent,
     TextPart,
     TextPartDelta,
+    ThinkingPart,
     UserPromptPart,
 )
 
@@ -220,6 +221,42 @@ def _model_refs(model: str) -> list[str]:
     return refs
 
 
+def neutralise_thinking(history: list, model: Any) -> list:
+    """Strip provider-specific reasoning ids the current model cannot replay.
+
+    A preset can change between turns. A ThinkingPart a chat-completions
+    gateway produced carries id='reasoning' (pydantic-ai names it after the
+    field); sent back to the Responses API it becomes a reasoning item whose
+    id must start with 'rs_' -> 400 "Invalid 'input[N].id': 'reasoning'".
+    The reverse is harmless (chat/completions never replays ids), so the
+    rule is one-sided: to a Responses model, keep only its own 'rs_' items;
+    everything else loses its id (and signature), which is exactly the
+    condition under which pydantic-ai does not send the part at all. The
+    text of the thought stays in the history for the transcript.
+    """
+    from dataclasses import replace
+    responses = type(model).__name__ == "OpenAIResponsesModel"
+    if not responses:
+        return history
+    system = getattr(model, "system", "openai")
+    out = []
+    for m in history:
+        if not isinstance(m, ModelResponse):
+            out.append(m)
+            continue
+        parts = []
+        changed = False
+        for p in m.parts:
+            if isinstance(p, ThinkingPart) and (p.id or p.signature):
+                own = str(p.id or "").startswith("rs_") and (p.provider_name in (None, system))
+                if not own:
+                    p = replace(p, id=None, signature=None)
+                    changed = True
+            parts.append(p)
+        out.append(replace(m, parts=parts) if changed else m)
+    return out
+
+
 async def run(session_id: str, prompt: str, mode: str = "") -> AsyncGenerator[str, None]:
     """Drive one agent turn, yielding NDJSON lines. `mode` is the half of the
     panel the user is looking at ('chat' | 'bot'), see agent.Deps.mode."""
@@ -257,6 +294,7 @@ async def run(session_id: str, prompt: str, mode: str = "") -> AsyncGenerator[st
         ag = get_agent()
         # Older turns are summarised once the history is past its budget.
         history = await agent_mod.compact_history(session_id, _history(session_id))
+        history = neutralise_thinking(history, ag.model)
         async with ag.run_stream_events(
             prompt, deps=deps, message_history=history
         ) as events:

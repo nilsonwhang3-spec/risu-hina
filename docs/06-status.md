@@ -24,6 +24,11 @@
 
 → **첫 할 일**: 사용자가 RisuAI 에 `plugin/Risu.Hina.Plugin.js` **수동 재설치 1회**(설치본 0.1.0 의 update-url 은 CORS 로 못 읽음) → 다음 릴리스부터 `+` 가 뜨는지 확인 → M2 실사용 검증(§5-2).
 
+## 1-4. 2026-08-27 아침 — v0.6.2: 서버 로그의 오류 2건
+
+- **코덱스 무응답** = `400 Invalid 'input[29].id': 'reasoning'. Expected an ID that begins with 'rs'`. pydantic-ai 의 chat/completions 경로는 응답의 `reasoning` 필드를 `ThinkingPart(id='reasoning')` 로 남기고, Responses 경로는 이력의 ThinkingPart 를 `id` 그대로 reasoning 아이템으로 재전송한다 → 프리셋을 게이트웨이에서 코덱스로 바꾸면 터짐. 고침: `session.neutralise_thinking(history, model)` — 대상이 `OpenAIResponsesModel` 일 때 `rs_` 로 시작하고 같은 system 인 것만 id 유지, 나머지는 `id=None, signature=None`(pydantic-ai 가 보내지 않는 조건). `tests/test_history.py` 게이트 추가.
+- **로어북 18개** = `list_lore` 가 본문 1500자씩 붙여 25000자에서 조용히 잘림(스크립트로 우회 불가 — 로어북은 DB, 샌드박스는 워크스페이스만). 고침: 목록은 본문 없이 전부(이름·key·상시·글자수·80자 미리보기, 60000자 초과 시 "이하 N개 생략" 명시), 본문은 새 툴 `read_lore_entry(id)`, `read_lore` 는 목록과 동일.
+
 ## 1-3. 2026-08-26 밤 — v0.6.1: 0.6.0 실사용 피드백 10건
 
 - **썸네일 웹에서도**: RisuAI 메인라인 `factory.ts` CSP 가 `img-src * data: blob:` 으로 바뀜(8/25 소스, 예전 메모 "메인라인은 img-src 없음" 은 옛 사실) → `tab-assets.loadThumb` 의 `hostPlatform==='web'` 게이트 제거. 썸네일은 `readImage` → blob (백엔드 무관, 해시 키 동일).

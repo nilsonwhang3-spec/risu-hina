@@ -383,11 +383,20 @@ def build() -> Agent[Deps]:
 
     @agent.tool
     def read_lore(ctx: RunContext[Deps]) -> str:
-        """로어북 항목들."""
-        entries = store.lore(ctx.deps.char_key)
-        if not entries:
-            return "로어북 항목이 없습니다"
-        return json.dumps(entries, ensure_ascii=False, indent=2)[:20000]
+        """로어북 전체 목록 (list_lore 와 같다). 본문은 read_lore_entry 로 읽는다."""
+        return list_lore(ctx)
+
+    @agent.tool
+    def read_lore_entry(ctx: RunContext[Deps], lore_id: str) -> str:
+        """로어북 항목 하나의 본문 전체와 설정(key·alwaysActive·folder·insertorder 등)."""
+        cur = store.lore_entry(lore_id)
+        if cur is None:
+            return "없는 로어북 항목입니다"
+        entry = dict(cur.get("entry") or {})
+        content = str(entry.pop("content", "") or "")
+        head = json.dumps({"id": cur.get("id"), "scope": cur.get("scope"), "seq": cur.get("seq"), **entry},
+                          ensure_ascii=False)
+        return f"{head}\n--- content ({len(content)}자) ---\n{content[:60000]}"
 
     @agent.tool
     def list_skills(ctx: RunContext[Deps]) -> str:
@@ -477,11 +486,14 @@ def build() -> Agent[Deps]:
             entry = e["entry"] or {}
             if str(entry.get("mode") or "") == "folder" and entry.get("key"):
                 names[str(entry["key"])] = str(entry.get("comment") or "") or "(이름 없는 폴더)"
-        out = []
+        # An index, one line per entry, no bodies: with bodies attached a big
+        # lorebook (hundreds of entries) was cut at 25000 chars and the agent
+        # reported "only 18 entries". Bodies come from read_lore_entry.
+        out = [f"로어북 {len(entries)}개 (본문은 read_lore_entry(id) 로 읽는다)"]
         for e in entries:
             entry = e["entry"] or {}
             if str(entry.get("mode") or "") == "folder":
-                out.append(f"--- #{e['seq']} [{e['scope']}] [폴더] id={e['id']} "
+                out.append(f"#{e['seq']} [{e['scope']}] [폴더] id={e['id']} "
                            f"key={entry.get('key')} 이름={entry.get('comment') or '(없음)'}")
                 continue
             keys = entry.get("key") or entry.get("keys") or ""
@@ -490,9 +502,15 @@ def build() -> Agent[Deps]:
             # 상시 활성화: no keys, always inserted. Said explicitly, or an
             # empty key reads as a broken entry.
             always = " [상시활성]" if entry.get("alwaysActive") else ""
-            out.append(f"--- #{e['seq']} [{e['scope']}] id={e['id']}{always} key={keys}{where}\n"
-                       f"{str(entry.get('content') or '')[:1500]}")
-        return "\n\n".join(out)[:25000]
+            body = str(entry.get("content") or "")
+            preview = body[:80].replace("\n", " ")
+            out.append(f"#{e['seq']} [{e['scope']}] id={e['id']}{always} 이름={entry.get('comment') or '(없음)'} "
+                       f"key={keys}{where} ({len(body)}자) {preview}{'…' if len(body) > 80 else ''}")
+        text = "\n".join(out)
+        if len(text) > 60000:
+            kept = text[:60000].count("\n")
+            text = text[:60000] + f"\n… (이하 {len(entries) - kept}개 생략 — scope 를 좁혀 다시 부른다)"
+        return text
 
     @agent.tool
     def propose_lore_move(ctx: RunContext[Deps], lore_id: str, to_seq: int,
