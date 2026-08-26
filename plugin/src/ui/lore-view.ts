@@ -214,6 +214,11 @@ export function makeLoreTab(opts: LoreViewOptions): (mount: HTMLElement) => void
     down.addEventListener('click', () => void moveTo(siblings[at + 1]));
 
     const row = el('div', { class: 'treerow lorecard' }, [name]);
+    // Always-active entries have no trigger keys; without the badge they
+    // look like entries whose keys someone forgot.
+    if ((e.entry as Record<string, unknown>).alwaysActive) {
+      row.appendChild(el('span', { class: 'badge', title: '상시 활성화 — 키워드 없이 항상 삽입됩니다', text: '상시' }));
+    }
     if (e.origin !== 'original') {
       row.appendChild(el('span', { class: 'badge warn', text: e.origin === 'added' ? '추가' : '수정' }));
     }
@@ -230,8 +235,22 @@ export function makeLoreTab(opts: LoreViewOptions): (mount: HTMLElement) => void
     }
 
     const entry = e.entry as Record<string, any>;
-    const keys = el('input', { value: String(entry.key ?? entry.keys ?? '') });
+    const keys = el('input', { value: String(entry.key ?? entry.keys ?? '') }) as HTMLInputElement;
     const comment = el('input', { value: String(entry.comment ?? entry.name ?? '') });
+    // RisuAI's 상시 활성화: the entry is always inserted and carries no
+    // keys. The checkbox and the key box are one setting seen two ways.
+    const always = el('input', { type: 'checkbox' }) as HTMLInputElement;
+    always.checked = !!entry.alwaysActive;
+    const keyHint = el('span', { class: 'hint', text: '쉼표로 구분합니다. 대화에 이 말이 나오면 항목이 삽입됩니다.' });
+    const syncAlways = () => {
+      keys.disabled = always.checked;
+      if (always.checked) keys.value = '';
+      keyHint.textContent = always.checked
+        ? '상시 활성화 항목은 키워드 없이 항상 삽입됩니다 (키워드는 비웁니다).'
+        : '쉼표로 구분합니다. 대화에 이 말이 나오면 항목이 삽입됩니다.';
+    };
+    always.addEventListener('change', syncAlways);
+    syncAlways();
     const content = el('textarea', {
       value: String(entry.content ?? ''),
       style: { minHeight: '300px' },
@@ -264,7 +283,8 @@ export function makeLoreTab(opts: LoreViewOptions): (mount: HTMLElement) => void
         // not model, and a field-wise merge would have to know all of them.
         const next: Record<string, unknown> = {
           ...entry,
-          key: keys.value,
+          key: always.checked ? '' : keys.value,
+          alwaysActive: always.checked,
           comment: comment.value,
           content: content.value,
         };
@@ -300,9 +320,11 @@ export function makeLoreTab(opts: LoreViewOptions): (mount: HTMLElement) => void
     viewMount.appendChild(el('div', { class: 'card' }, [
       el('h2', { text: opts.heading }),
       el('label', { class: 'field' }, [el('span', { text: '이름 (comment)' }), comment]),
+      el('label', { class: 'checkrow', style: { marginBottom: '8px' } }, [
+        always, el('span', { text: '상시 활성화 (alwaysActive) — 키워드 없이 항상 삽입' }),
+      ]),
       el('label', { class: 'field' }, [
-        el('span', { text: '키워드 (key)' }), keys,
-        el('span', { class: 'hint', text: '쉼표로 구분합니다. 대화에 이 말이 나오면 항목이 삽입됩니다.' }),
+        el('span', { text: '키워드 (key)' }), keys, keyHint,
       ]),
       el('label', { class: 'field' }, [el('span', { text: '폴더' }), folderSel]),
       el('label', { class: 'field' }, [el('span', { text: '내용' }), content]),

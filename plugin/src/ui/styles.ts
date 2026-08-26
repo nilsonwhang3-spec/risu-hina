@@ -610,6 +610,9 @@ label.checkrow input { width: auto; }
 .bubble { border-radius: 6px; padding: 7px 10px; }
 .bubble.user { background: rgba(37, 99, 235, .12); }
 .bubble.assistant { background: rgba(255, 255, 255, .05); }
+.bubble.note { background: transparent; border: 1px dashed rgba(255, 255, 255, .18); font-size: 12px; opacity: .85; }
+.bubble.note.ok { border-color: rgba(34, 197, 94, .5); }
+.bubble.note.err { border-color: rgba(239, 68, 68, .5); }
 .bubble-body { white-space: pre-wrap; word-break: break-word; }
 .costline { margin-top: 5px; font-size: 11px; color: var(--textcolor2, #79839a); }
 .trace { margin-bottom: 5px; display: flex; flex-wrap: wrap; gap: 4px; }

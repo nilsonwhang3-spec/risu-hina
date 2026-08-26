@@ -711,3 +711,42 @@ history 4개). 이제 `BaseException` 경로에서 프롬프트 + 도착한 텍�
 버전 게이트: 플러그인은 `/health` 의 버전과 자기 버전의 major.minor 를 비교해 다르면 업데이트 경로
 (`/health` `/update/*` `/plugin` `/logs` `/diag` `/config`) 외의 호출을 거부하고 어느 쪽을 올릴지 말한다.
 그 전엔 어긋난 API 가 404 나 이상한 모양으로 깊은 곳에서 터졌다.
+
+## H. 요청 파라미터는 데이터다 (v0.6.0)
+
+"OpenAI 호환" 엔드포인트는 이름만 같다. 문서 기준(2026-08-26)으로 확인한 것: OpenAI 공식의 GPT-5·o 계열은
+`temperature`·`top_p` 등 샘플링 파라미터를 **거부**하고(기본값만 허용), gpt-5.6 계열은 **Chat Completions 에서
+툴 호출 자체를 거부**한다(Responses API 를 쓰거나 `reasoning_effort: none`); 구독 백엔드는 `max_output_tokens`
+를 거부; Anthropic·Gemini(AI Studio)·Vertex 의 호환 계층은 모르는 필드를 **무시**; Ollama 는 `max_tokens`
+만 알고 `max_completion_tokens` 는 목록에 없음; OpenCode 는 GPT·Grok 이 `/responses`, DeepSeek·GLM·Kimi 가
+`/chat/completions`, Claude·Qwen 은 Anthropic 형식(우리 도구로 불가), Go 는 `opencode.ai/zen/go/v1`;
+Vertex 는 OAuth 액세스 토큰만 받고 express-mode API 키는 이 엔드포인트에 없다. 한편 pydantic-ai 2.33 은
+모델 이름만 보고 프로파일을 정하므로 gpt-5 에도 `temperature` 를 그대로 보내고, 툴 정의에 `strict:true`,
+상한은 `max_completion_tokens`, 스트리밍엔 `stream_options` 를 늘 붙인다.
+
+파라미터 집합을 코드에 박으면 어딘가에서 반드시 깨진다. 그래서 `providers.py` 로 옮겼다:
+
+- **프로파일**(`PROFILES`): Base URL 의 호스트(경로 포함 — `opencode.ai/zen/go` 가 `opencode.ai` 보다 앞)로
+  찾는다. 출력 상한 필드, `strict` 허용, 거부 필드, 기본 API(chat|responses), 모델 계열 규칙(`modelRules`:
+  접두어·예외·거부 필드·엔드포인트), 예시 JSON, 안내문, 문서 URL.
+- **프리셋의 `params` JSON**: 키는 실제 요청 필드 이름. 값은 그 필드를, `null` 은 "보내지 않음". `max_tokens`
+  / `max_completion_tokens` 에 숫자를 주면 값과 철자를 함께 정하고, 둘 다 `null` 이면 상한 없음. `strict`
+  와 `api` 는 의사 키. 모르는 키는 `extra_body` 로 그대로 나간다. `model`·`messages`·`stream`·`tools` 는
+  거부.
+- **계획**(`plan_for`): 섹션 숫자칸 → 프로파일 거부 목록 → JSON 의 순서로 `settings`(pydantic-ai 모델 설정),
+  `drop`(요청 직전에 뺄 필드), `cap_field`, `strict_tools`, `api` 를 만든다. `temperature` 기본은 **None
+  = 보내지 않음** — 프로바이더마다 기본값이 있고 OpenAI 사고 모델은 기본값만 받으므로.
+- **적용**: `agent._client` 가 `AsyncOpenAI.chat.completions.create` 와 `responses.create` 를 감싸 `drop`
+  (+Responses 철자 별칭)을 pop 한다 — 설정으로는 끌 수 없는 `stream_options`·`parallel_tool_calls` 까지 여기서
+  빠진다. `agent._profile` 은 `openai_model_profile(모델)` 위에 `openai_chat_supports_max_completion_tokens`
+  와 `openai_supports_strict_tool_definition` 을 얹는다(`merge_profile`; 프로파일은 TypedDict 라
+  `dataclasses.replace` 가 아니다). 연결 테스트(`h_config_test`)도 같은 계획으로 `/responses` 또는
+  `/chat/completions` 에 같은 필드를 보낸다.
+- **안내**(`hint`): 400 본문의 "Unsupported parameter: 'X'" · "Unsupported value: 'X' does not support …" ·
+  "Unknown name \"X\"" · "X: Extra inputs are not permitted" · "Function tools with reasoning_effort are not
+  supported" 등에서 필드를 뽑아, 프리셋 JSON 에 넣을 정확한 스니펫을 붙인다(`{"temperature": null}`,
+  `{"max_completion_tokens": 32000}`, `{"api": "responses"}`). 모르는 단어는 필드 목록(`KNOWN_FIELDS`)에
+  없으면 무시한다. `session._explain`·연결 테스트·검색 에이전트 실패 문구에 붙는다.
+
+사용자 실측: gpt-5.6-sol 을 구독(Responses) 경로로 쓰면 툴 호출까지 문제없다 — 조사 결과와 같은 방향이라
+OpenAI 공식 프로파일의 기본도 Responses 로 두었다.

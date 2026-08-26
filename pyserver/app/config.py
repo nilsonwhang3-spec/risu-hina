@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any
 
 APP_NAME = "risu-hina"
-VERSION = "0.5.2"
+VERSION = "0.6.0"
 
 # Renamed from REALOOC_* to RISUHINA_*. The old names are still honoured, and
 # not as politeness: the launcher, the control script and any service wrapper
@@ -156,7 +156,11 @@ DEFAULTS: dict[str, Any] = {
         "baseUrl": "",
         "apiKey": "",
         "model": "",
-        "temperature": 0.2,
+        # None = not sent (presets.FIELDS has the reasoning); '' from the UI
+        # means the same. "params" is request-parameter JSON, real field
+        # names, null = do not send (providers.plan_for).
+        "temperature": None,
+        "params": "",
         # Output budget, and on reasoning models the thinking tokens come out of
         # it too - 8000 was exhausted by reasoning before a single visible token
         # appeared ("token limit exceeded before any response was generated").
@@ -193,7 +197,8 @@ DEFAULTS: dict[str, Any] = {
         "baseUrl": "",
         "apiKey": "",
         "model": "",
-        "temperature": 0.2,
+        "temperature": None,
+        "params": "",
         "maxTokens": 16000,
         "timeoutSeconds": 180,
         "reasoning": "",

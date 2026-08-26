@@ -1212,7 +1212,7 @@ console.log('\ntest_agent_presets_ui');
   const fields = [...box.querySelectorAll('input')];
   const nameBox = fields.find((i) => (i.getAttribute('placeholder') || '').includes('프리셋 이름'));
   nameBox.value = '스모크 프리셋';
-  box.querySelector('textarea').value = '항상 존댓말로 답한다.';
+  [...box.querySelectorAll('textarea')].find((t) => (t.getAttribute('placeholder') || '').includes('지침')).value = '항상 존댓말로 답한다.';
   [...box.querySelectorAll('button')].find((b) => b.textContent === '저장')
     ?.dispatchEvent(new window.Event('click', { bubbles: true }));
   await settle(1000);

@@ -42,16 +42,13 @@ export function buildChatBar(notice: HTMLElement): HTMLElement {
     el('span', { class: 'glyph', text: TOOL.snapshot }),
     el('span', { class: 'tool-label', text: '스냅샷' }),
   ]);
-  snap.addEventListener('click', async () => {
-    (snap as HTMLButtonElement).disabled = true;
-    try {
-      await state.checkpoint('수동');
-      shellNotice('스냅샷을 저장했습니다. 🕘 버전에서 되돌릴 수 있습니다.', 'ok');
-    } catch (e) {
-      shellNotice('스냅샷 저장에 실패했습니다: ' + msg(e), 'err');
-    } finally {
-      (snap as HTMLButtonElement).disabled = false;
-    }
+  snap.addEventListener('click', () => {
+    // A manual snapshot gets a name up front - "수동 #7" tells nobody what
+    // was special about it. The name can still be changed in 버전.
+    openSnapshotName(snap, '수동', async (label) => {
+      await state.checkpoint(label);
+      shellNotice('스냅샷을 저장했습니다. 🕘 버전에서 이름을 바꾸거나 되돌릴 수 있습니다.', 'ok');
+    });
   });
 
   const versions = el('button', {
@@ -244,16 +241,60 @@ async function openVersions(anchor: HTMLElement): Promise<void> {
           shellNotice('복원에 실패했습니다: ' + msg(e), 'err');
         }
       });
+      const title = el('div', { text: c.label || '(무제)' });
+      const ren = el('button', { class: 'ghost tiny', text: '✎', title: '이름 바꾸기' });
+      ren.addEventListener('click', () => {
+        openSnapshotName(ren, c.label || '', async (label) => {
+          await state.renameCheckpoint(c.id, label);
+          title.textContent = label;
+        });
+      });
       body.appendChild(el('div', { class: 'verrow' }, [
         el('div', { class: 'grow' }, [
-          el('div', { text: c.label || '(무제)' }),
+          title,
           el('div', { class: 'hint', text: `${c.message_count}턴 · ${fmtTime(c.created_at * 1000)}` }),
         ]),
-        b,
+        ren, b,
       ]));
     }
   } catch (e) {
     clear(body);
     body.appendChild(el('div', { class: 'hint', text: msg(e) }));
   }
+}
+
+/**
+ * A small popover asking for a snapshot's name. Shared by 스냅샷 (name it
+ * before saving) and 버전 (rename an existing one); `save` does whichever.
+ */
+export function openSnapshotName(anchor: HTMLElement, initial: string,
+                                 save: (label: string) => Promise<void>): void {
+  const input = el('input', { value: initial, placeholder: '스냅샷 이름 (예: 3장 시작 전)' }) as HTMLInputElement;
+  const ok = el('button', { class: 'primary tiny', text: '저장' }) as HTMLButtonElement;
+  const cancel = el('button', { class: 'ghost tiny', text: '취소' });
+  const out = el('div', { class: 'hint' });
+  const body = el('div', { class: 'verlist' }, [
+    el('label', { class: 'field' }, [el('span', { text: '스냅샷 이름' }), input]),
+    el('div', { class: 'row' }, [ok, cancel]),
+    out,
+  ]);
+  const close = popover(anchor, body);
+  cancel.addEventListener('click', close);
+  const submit = async () => {
+    const label = input.value.trim();
+    if (!label) { out.textContent = '이름을 입력해 주세요.'; return; }
+    ok.disabled = true;
+    try {
+      await save(label);
+      close();
+    } catch (e) {
+      out.textContent = msg(e);
+      ok.disabled = false;
+    }
+  };
+  ok.addEventListener('click', () => void submit());
+  input.addEventListener('keydown', (e) => {
+    if ((e as KeyboardEvent).key === 'Enter') { e.preventDefault(); void submit(); }
+  });
+  setTimeout(() => { input.focus(); input.select(); }, 0);
 }

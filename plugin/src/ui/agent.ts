@@ -338,16 +338,26 @@ export class AgentPanel {
     const rows = items.map((a) => {
       const yes = el('button', { class: 'primary tiny', text: a.byHost ? '승인·실행' : '승인' });
       const no = el('button', { class: 'ghost tiny', text: '거절' });
+      const busy = el('span', { class: 'hint', text: '' });
       const decide = async (approve: boolean) => {
         yes.disabled = true;
         no.disabled = true;
+        // The row says what is happening while it happens; a host action can
+        // take seconds, and a silent button reads as a dead one.
+        busy.textContent = approve ? '실행 중…' : '거절 중…';
         try {
           const said = await state.decideAction(a.id, approve);
           this.hooks.notice(said, approve ? 'ok' : '');
+          // The outcome also goes into the conversation, where it stays -
+          // a notice fades, and the question "did it run?" comes later.
+          this.note((approve ? '✔ 승인·실행: ' : '✖ 거절: ') + a.summary + (said ? ' — ' + said : ''),
+                    approve ? 'ok' : '');
           await this.refreshActions();
           if (approve) await this.hooks.onApplied();
         } catch (e) {
           this.hooks.notice('실행하지 못했습니다: ' + msg(e), 'err');
+          this.note('✖ 실행 실패: ' + a.summary + ' — ' + msg(e), 'err');
+          busy.textContent = '';
           yes.disabled = false;
           no.disabled = false;
         }
@@ -360,7 +370,7 @@ export class AgentPanel {
         // which is a different kind of consequence and says so.
         a.byHost ? el('span', { class: 'badge err', text: 'RisuAI' }) : null,
         el('span', { class: 'grow', text: a.summary }),
-        yes, no,
+        busy, yes, no,
       ]);
     });
 
@@ -435,6 +445,12 @@ export class AgentPanel {
     if (role === 'assistant') node.appendChild(this.costLine(usage, cost));
     this.log.appendChild(node);
     return body;
+  }
+
+  /** A one-line event in the conversation (an approval ran, a run was stopped). */
+  private note(text: string, kind: 'ok' | 'err' | '' = ''): void {
+    this.log.appendChild(el('div', { class: 'bubble note' + (kind ? ' ' + kind : ''), text }));
+    this.scroll();
   }
 
   private costLine(usage?: Record<string, unknown>, cost?: number | null): HTMLElement {
@@ -654,15 +670,21 @@ export class AgentPanel {
     const approve = el('button', { class: 'primary', text: '전체 승인하고 적용' });
     approve.addEventListener('click', async () => {
       approve.disabled = true;
+      const was = approve.textContent;
+      approve.textContent = '적용 중…';
       try {
         const r = await state.approveStaged(true);
-        this.hooks.notice(`제안 ${r.decided}건을 승인해 ${r.applied}건을 적용했습니다.`, 'ok');
+        const said = `제안 ${r.decided}건을 승인해 ${r.applied}건을 적용했습니다.`;
+        this.hooks.notice(said, 'ok');
+        this.note('✔ ' + said, 'ok');
         await this.refreshStaged();
         await this.hooks.onApplied();
       } catch (e) {
         this.hooks.notice('적용에 실패했습니다: ' + msg(e), 'err');
+        this.note('✖ 적용 실패: ' + msg(e), 'err');
       } finally {
         approve.disabled = false;
+        approve.textContent = was;
       }
     });
 

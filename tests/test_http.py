@@ -462,6 +462,17 @@ def test_checkpoint_restore(s: Server, ws: dict) -> None:
     st, body = s.get(f"/checkpoints?chatKey={a}")
     check("restore is itself undoable", len(body.get("checkpoints") or []) >= 2, str(len(body.get("checkpoints") or [])))
 
+    # A snapshot's label is the one thing about it the user may change.
+    st, _ = s.post("/checkpoint/rename", {"chatKey": a, "id": cid, "label": "3장 시작 전"})
+    check("checkpoint renamed", st == 200, str(st))
+    st, body = s.get(f"/checkpoints?chatKey={a}")
+    check("the new label is listed",
+          any(c.get("id") == cid and c.get("label") == "3장 시작 전" for c in body.get("checkpoints") or []))
+    st, _ = s.post("/checkpoint/rename", {"chatKey": a, "id": cid, "label": "   "})
+    check("a blank label is refused", st == 400, str(st))
+    st, _ = s.post("/checkpoint/rename", {"chatKey": a, "id": "nope", "label": "x"})
+    check("an unknown snapshot is 404", st == 404, str(st))
+
 
 def test_reopen_keeps_pending_edits(s: Server, ws: dict) -> None:
     print("test_reopen_keeps_pending_edits")
@@ -1283,6 +1294,32 @@ def test_agent_presets(s: Server) -> None:
           and p0.get("flex") is True, str(p0))
     raw = json.dumps(body)
     check("the secret is nowhere in the response", "sk-secret-value" not in raw)
+    provs = body.get("providers") or []
+    check("provider profiles are advertised", any(p.get("id") == "openai" for p in provs), str(len(provs)))
+    check("a profile names its API and auth", all(p.get("auth") for p in provs))
+    check("temperature defaults to not-sent", p0.get("temperature") is None, str(p0.get("temperature")))
+
+    # Request parameters travel as JSON, real field names, null = do not send.
+    st, body = s.post("/presets/save", {"id": pid, "name": "테스트 프리셋", "values": {
+        "apiKey": "__keep__", "temperature": 0.7,
+        "params": '{"reasoning_effort": "low", "temperature": null, "api": "responses"}'}})
+    check("parameter JSON accepted", st == 200, str(body)[:200])
+    st, body = s.get("/presets")
+    p0 = [p for p in body["presets"] if p["id"] == pid][0]
+    check("parameter JSON round-trips", "reasoning_effort" in (p0.get("params") or ""), str(p0.get("params")))
+    check("temperature is a number when set", p0.get("temperature") == 0.7, str(p0.get("temperature")))
+    st, body = s.post("/presets/save", {"id": pid, "name": "테스트 프리셋", "values": {
+        "apiKey": "__keep__", "params": "{not json"}})
+    check("broken parameter JSON is refused", st == 400, str(st))
+    st, body = s.post("/presets/save", {"id": pid, "name": "테스트 프리셋", "values": {
+        "apiKey": "__keep__", "params": '{"model": "x"}'}})
+    check("the model cannot be overridden by JSON", st == 400, str(st))
+    st, body = s.post("/presets/save", {"id": pid, "name": "테스트 프리셋", "values": {
+        "apiKey": "__keep__", "temperature": ""}})
+    check("a blank temperature means not sent", st == 200
+          and [p for p in s.get("/presets")[1]["presets"] if p["id"] == pid][0].get("temperature") is None)
+    st, body = s.get("/catalog/providers")
+    check("providers endpoint answers alone", st == 200 and len(body.get("providers") or []) >= 9, str(st))
 
     # Editing without resending the key must not wipe it.
     st, _ = s.post("/presets/save", {"id": pid, "name": "테스트 프리셋", "values": {

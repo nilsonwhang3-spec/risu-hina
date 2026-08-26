@@ -34,7 +34,7 @@ from starlette.concurrency import run_in_threadpool
 
 from . import (chatfmt, config, db, files, log, presets, session, skills, staging,
                store, websearch, workspace)
-from . import actions, assets, catalog, charx, codexauth, keys, permits, snapshots, updater
+from . import actions, assets, catalog, charx, codexauth, keys, permits, providers, snapshots, updater
 from . import card as cardmod
 from . import memory as mem
 
@@ -175,7 +175,24 @@ def h_config_test(arg: dict) -> dict:
         return {"ok": False, "stage": "config", "error": "baseUrl · apiKey · model 이 모두 필요합니다"}
 
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {key}"}
-    url = base + "/chat/completions"
+    # The same request the agent will make: the plan decides the API
+    # (chat/completions or responses), the cap field, and what not to send.
+    plan = presets.plan("agent")
+    responses = plan.api == "responses"
+    url = base + ("/responses" if responses else "/chat/completions")
+    extra = plan.raw
+    if responses:
+        extra.pop("reasoning", None)   # the test wants a short answer, not a thought
+        extra["max_output_tokens"] = min(int(extra.get("max_output_tokens") or 4096), 4096)
+    else:
+        for cap in ("max_tokens", "max_completion_tokens"):
+            if cap in extra:
+                extra[cap] = min(int(extra[cap]), 4096)
+    note = " · ".join(plan.notes)
+
+    def with_hint(err: str) -> str:
+        fix = providers.hint(err)
+        return f"{err}\n→ {fix}" if fix else err
 
     def body_of(r) -> dict:
         """The JSON body, or a ValueError that names what actually came back.
@@ -193,6 +210,7 @@ def h_config_test(arg: dict) -> dict:
             raise ValueError(
                 f"HTTP {r.status_code} 리다이렉트 → {where} — baseUrl 을 이 주소로 바꿔 주세요")
         if r.status_code >= 400:
+            # The provider's own words first - they name the field - then ours.
             # Sanitised: an upstream error body can echo the key back.
             raise ValueError(f"HTTP {r.status_code}: {_scrub(r.text[:200], key)}")
         try:
@@ -207,42 +225,53 @@ def h_config_test(arg: dict) -> dict:
             raise ValueError(f"응답이 객체가 아닙니다: {_scrub(str(data)[:120], key)}")
         return data
 
+    ask = "Reply with exactly: PONG"
     try:
-        r = httpx.post(url, headers=headers, timeout=45, json={
-            "model": model,
-            "messages": [{"role": "user", "content": "Reply with exactly: PONG"}],
-            "max_tokens": 32, "temperature": 0,
-        })
+        if responses:
+            r = httpx.post(url, headers=headers, timeout=60, json={
+                "model": model, "input": [{"role": "user", "content": ask}], **extra})
+        else:
+            r = httpx.post(url, headers=headers, timeout=60, json={
+                "model": model, "messages": [{"role": "user", "content": ask}], **extra})
         data = body_of(r)
         usage = data.get("usage") or {}
     except ValueError as e:
-        return {"ok": False, "stage": "completion", "error": str(e)}
+        return {"ok": False, "stage": "completion", "error": with_hint(str(e)), "api": plan.api, "note": note}
     except Exception as e:
-        return {"ok": False, "stage": "completion", "error": _scrub(f"{type(e).__name__}: {e}", key)}
+        return {"ok": False, "stage": "completion", "error": _scrub(f"{type(e).__name__}: {e}", key),
+                "api": plan.api, "note": note}
 
+    fn = {"name": "read_turns", "description": "Read chat turns by index range.",
+          "parameters": {"type": "object",
+                         "properties": {"start": {"type": "integer"}, "end": {"type": "integer"}},
+                         "required": ["start", "end"]}}
+    ask = "Read turns 3 through 5."
     try:
-        r = httpx.post(url, headers=headers, timeout=45, json={
-            "model": model,
-            "messages": [{"role": "user", "content": "Read turns 3 through 5."}],
-            "tools": [{"type": "function", "function": {
-                "name": "read_turns", "description": "Read chat turns by index range.",
-                "parameters": {"type": "object",
-                               "properties": {"start": {"type": "integer"}, "end": {"type": "integer"}},
-                               "required": ["start", "end"]}}}],
-            "tool_choice": "auto", "max_tokens": 256, "temperature": 0,
-        })
-        calls = ((body_of(r).get("choices") or [{}])[0].get("message") or {}).get("tool_calls") or []
+        if responses:
+            r = httpx.post(url, headers=headers, timeout=60, json={
+                "model": model, "input": [{"role": "user", "content": ask}],
+                "tools": [{"type": "function", **fn}], "tool_choice": "auto", **extra})
+            calls = [o for o in (body_of(r).get("output") or []) if isinstance(o, dict) and o.get("type") == "function_call"]
+        else:
+            r = httpx.post(url, headers=headers, timeout=60, json={
+                "model": model, "messages": [{"role": "user", "content": ask}],
+                "tools": [{"type": "function", "function": fn}], "tool_choice": "auto", **extra})
+            calls = ((body_of(r).get("choices") or [{}])[0].get("message") or {}).get("tool_calls") or []
     except ValueError as e:
-        return {"ok": False, "stage": "tools", "error": str(e)}
+        return {"ok": False, "stage": "tools", "error": with_hint(str(e)), "api": plan.api, "note": note}
     except Exception as e:
-        return {"ok": False, "stage": "tools", "error": _scrub(f"{type(e).__name__}: {e}", key)}
+        return {"ok": False, "stage": "tools", "error": _scrub(f"{type(e).__name__}: {e}", key),
+                "api": plan.api, "note": note}
 
     return {
         "ok": bool(calls),
         "stage": "done",
         "model": model,
+        "api": plan.api,
+        "note": note,
         "toolCalls": len(calls),
-        "usage": {"in": usage.get("prompt_tokens"), "out": usage.get("completion_tokens")},
+        "usage": ({"in": usage.get("input_tokens"), "out": usage.get("output_tokens")} if responses
+                  else {"in": usage.get("prompt_tokens"), "out": usage.get("completion_tokens")}),
         "error": None if calls else "모델이 tool_calls 를 돌려주지 않습니다 — 에이전트가 동작할 수 없습니다",
     }
 
@@ -727,7 +756,15 @@ def h_presets(arg: dict) -> dict:
         "defaultAgentName": presets.FIELDS["agentName"],
         "reasoningLevels": list(presets.REASONING_LEVELS),
         "maxInstructions": presets.MAX_INSTRUCTIONS,
+        # Provider profiles: base URL, auth shape, example JSON, guidance.
+        "providers": providers.public(),
+        "maxParams": providers.MAX_PARAMS_CHARS,
     }
+
+
+def h_providers(arg: dict) -> dict:
+    """The provider profiles alone (the key page needs them without presets)."""
+    return {"providers": providers.public()}
 
 
 def h_preset_select(arg: dict) -> dict:
@@ -1457,6 +1494,16 @@ def h_card_checkpoint_list(arg: dict) -> dict:
     return {"checkpoints": snapshots.listing_card(_char(arg))}
 
 
+def h_card_checkpoint_rename(arg: dict) -> dict:
+    try:
+        snapshots.rename_card(_char(arg), str(arg.get("id") or ""), str(arg.get("label") or ""))
+    except LookupError as e:
+        raise ApiError(404, str(e))
+    except ValueError as e:
+        raise ApiError(400, str(e))
+    return {"ok": True}
+
+
 def h_card_checkpoint_restore(arg: dict) -> dict:
     try:
         return snapshots.restore_card(_char(arg), str(arg.get("id") or ""))
@@ -1478,6 +1525,16 @@ def h_checkpoint_create(arg: dict) -> dict:
 
 def h_checkpoint_list(arg: dict) -> dict:
     return {"checkpoints": snapshots.listing(_chat(arg))}
+
+
+def h_checkpoint_rename(arg: dict) -> dict:
+    try:
+        snapshots.rename(_chat(arg), str(arg.get("id") or ""), str(arg.get("label") or ""))
+    except LookupError as e:
+        raise ApiError(404, str(e))
+    except ValueError as e:
+        raise ApiError(400, str(e))
+    return {"ok": True}
 
 
 def h_checkpoint_restore(arg: dict) -> dict:
@@ -1556,6 +1613,7 @@ ROUTES: dict[str, Handler] = {
     "POST /keys/save": h_key_save,
     "POST /keys/delete": h_key_delete,
     "GET /models/catalog": h_models_catalog,
+    "GET /catalog/providers": h_providers,
     "GET /codex/status": h_codex_status,
     "POST /codex/login/start": h_codex_login_start,
     "GET /codex/login/status": h_codex_login_status,
@@ -1644,6 +1702,7 @@ ROUTES: dict[str, Handler] = {
     "POST /card/reset": h_card_reset,
     "POST /card/checkpoint": h_card_checkpoint_create,
     "GET /card/checkpoints": h_card_checkpoint_list,
+    "POST /card/checkpoint/rename": h_card_checkpoint_rename,
     "POST /card/checkpoint/restore": h_card_checkpoint_restore,
 
     "GET /export/risuchat": h_export_risuchat,
@@ -1651,6 +1710,7 @@ ROUTES: dict[str, Handler] = {
 
     "POST /checkpoint": h_checkpoint_create,
     "GET /checkpoints": h_checkpoint_list,
+    "POST /checkpoint/rename": h_checkpoint_rename,
     "POST /checkpoint/restore": h_checkpoint_restore,
 
     "GET /actions": h_actions,

@@ -31,7 +31,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from . import config, db, log
+from . import config, db, log, providers
 
 # The fields a preset carries. Anything outside this list belongs to the
 # machine, not to a named configuration - `timeoutSeconds` is about this
@@ -40,8 +40,15 @@ FIELDS: dict[str, Any] = {
     "baseUrl": "",
     "apiKey": "",
     "model": "",
-    "temperature": 0.2,
+    # None = not sent. OpenAI's reasoning models reject any value but the
+    # default, and every other provider has its own default, so the field is
+    # opt-in. (Stored as -1 in the NOT NULL column; see _row_to_preset.)
+    "temperature": None,
     "maxTokens": 32000,
+    # Request parameters as JSON, keyed by the real field names; null = do
+    # not send. Last word over the numeric fields and the provider profile
+    # (providers.plan_for).
+    "params": "",
     # '' means "do not send the parameter at all". A gateway that has never
     # heard of reasoning effort will reject the field rather than ignore it, so
     # the default has to be silence rather than a value.
@@ -71,12 +78,17 @@ FIELDS: dict[str, Any] = {
 # stay above both.
 DEFAULT_INSTRUCTIONS = {
     "general": (
-        "당신은 risuAI 사용자의 챗과 봇 제작, 수정, 비평을 돕는 유능한 비서, '{name}'입니다.\n"
-        "당신은 친절하고 여성스러우며, 사용자의 고독과 외로움을 이해하며, 사용자의 의도를 파악하고 배려하는 "
-        "센스있는 여성입니다. 사용자가 원하는 것을 달성하기 위해 최선을 다하며, 정직하고 올바릅니다. "
-        "롤플레이, 챗, 봇 제작자 관점에서 당신은 전문적이며 자유와 즐거움을 위해 상상과 허용이 필요하다는 "
-        "것을 이해합니다. 사용자와의 대화는 현실에 영향을 끼치지 않는 상상속의 것이며, 늘 농담과 위트가 "
-        "함께 해야 한다는 것을 기억하고 사용자를 도와주세요."
+        "You are '{name}', a capable assistant who helps a RisuAI user create, edit and critique "
+        "their chats and bots.\n"
+        "You are warm and feminine, understand the user's solitude and loneliness, and read their "
+        "intent with tact and care. You do your best to achieve what the user wants, and you are "
+        "honest and upright. As a roleplay, chat and bot author you are a professional, and you "
+        "understand that freedom and enjoyment need imagination and permissiveness. Conversations "
+        "with the user are fiction that does not touch reality; keep humour and wit in them and "
+        "help the user.\n"
+        "Language: answer in the language the user writes in. When writing Korean, use the soft "
+        "polite register by default - sentences end in \"~해요\" and questions in \"~할까요?\" - "
+        "never the stiff \"~합니다\" or the blunt \"~해\" unless the user asks for it."
     ),
     "search": (
         "당신은 메인 에이전트를 도와 웹검색을 지원하는 유능한 어시스턴트입니다. 웹검색을 요청 받을 경우, "
@@ -89,13 +101,44 @@ DEFAULT_INSTRUCTIONS = {
 def default_instructions(kind: str, name: str = "") -> str:
     return DEFAULT_INSTRUCTIONS.get(kind, "").replace("{name}", name or FIELDS["agentName"])
 
+
+# Earlier wordings of the general default. A preset still carrying one of
+# these verbatim was never edited by the user, so it follows the default when
+# the default changes; any edited text is left alone.
+_OLD_GENERAL_DEFAULTS = (
+    "당신은 risuAI 사용자의 챗과 봇 제작, 수정, 비평을 돕는 유능한 비서, '{name}'입니다.\n"
+    "당신은 친절하고 여성스러우며, 사용자의 고독과 외로움을 이해하며, 사용자의 의도를 파악하고 배려하는 "
+    "센스있는 여성입니다. 사용자가 원하는 것을 달성하기 위해 최선을 다하며, 정직하고 올바릅니다. "
+    "롤플레이, 챗, 봇 제작자 관점에서 당신은 전문적이며 자유와 즐거움을 위해 상상과 허용이 필요하다는 "
+    "것을 이해합니다. 사용자와의 대화는 현실에 영향을 끼치지 않는 상상속의 것이며, 늘 농담과 위트가 "
+    "함께 해야 한다는 것을 기억하고 사용자를 도와주세요.",
+)
+
+
+def _migrate_default_text() -> None:
+    rows = db.query("SELECT id, instructions, agent_name FROM agent_presets WHERE kind = 'general'")
+    for r in rows:
+        d = db.row_to_dict(r) or {}
+        text = str(d.get("instructions") or "").strip()
+        name = str(d.get("agent_name") or "") or FIELDS["agentName"]
+        if any(text == old.replace("{name}", name).strip() for old in _OLD_GENERAL_DEFAULTS):
+            db.execute("UPDATE agent_presets SET instructions = ? WHERE id = ?",
+                       (default_instructions("general", name), d["id"]))
+            if selected_id() == d["id"]:
+                p = get(d["id"])
+                if p is not None:
+                    _apply_to_config(p)
+
 KINDS = ("general", "search")
 PROVIDERS = ("", "codex")
 # Which config section each kind drives (agent._model reads them).
 SECTION = {"general": "agent", "search": "agent_search"}
 # What the agent actually needs, resolved through keys.resolve.
 RUN_FIELDS = ("baseUrl", "apiKey", "model", "temperature", "maxTokens", "reasoning",
-              "cache", "flex", "instructions", "provider", "agentName")
+              "cache", "flex", "instructions", "provider", "agentName", "params")
+
+# The NOT NULL temperature column's spelling of "not set".
+TEMP_UNSET = -1.0
 
 REASONING_LEVELS = ("", "none", "minimal", "low", "medium", "high", "xhigh", "max")
 
@@ -110,6 +153,20 @@ class PresetError(ValueError):
     pass
 
 
+def _temp_out(stored: Any) -> float | None:
+    """Column value -> preset value: the sentinel (or NULL) is None."""
+    try:
+        t = float(stored)
+    except (TypeError, ValueError):
+        return None
+    return None if t < 0 else t
+
+
+def _temp_in(value: Any) -> float:
+    """Preset value -> column value."""
+    return TEMP_UNSET if value is None or value == "" else float(value)
+
+
 def _row_to_preset(row) -> dict:
     d = db.row_to_dict(row) or {}
     return {
@@ -118,8 +175,9 @@ def _row_to_preset(row) -> dict:
         "baseUrl": d.get("base_url") or "",
         "apiKey": d.get("api_key") or "",
         "model": d.get("model") or "",
-        "temperature": float(d.get("temperature") or 0.2),
+        "temperature": _temp_out(d.get("temperature")),
         "maxTokens": int(d.get("max_tokens") or FIELDS["maxTokens"]),
+        "params": d.get("params") or "",
         "reasoning": d.get("reasoning") or "",
         "cache": bool(d.get("cache")),
         "flex": bool(d.get("flex")),
@@ -227,6 +285,7 @@ def ensure_default() -> None:
             row = db.one("SELECT id FROM agent_presets WHERE kind = 'general' ORDER BY name COLLATE NOCASE LIMIT 1")
             if row is not None:
                 _set_selected(row["id"])
+        _migrate_default_text()
         return
     cur = config.section("agent")
     seed = {f: cur.get(f, d) for f, d in FIELDS.items()}
@@ -286,10 +345,21 @@ def _clean(values: dict, previous: dict | None) -> dict:
         elif field in ("cache", "flex"):
             out[field] = bool(raw)
         elif field == "temperature":
+            if raw == "" or raw == "null":
+                # The editor sends '' for a cleared box: "do not send".
+                out[field] = None
+                continue
             try:
                 out[field] = max(0.0, min(2.0, float(raw)))
             except (TypeError, ValueError):
-                raise PresetError("temperature 는 숫자여야 합니다")
+                raise PresetError("temperature 는 숫자여야 합니다 (비우면 보내지 않습니다)")
+        elif field == "params":
+            text = str(raw).strip()
+            try:
+                providers.parse_params(text)
+            except providers.ParamsError as e:
+                raise PresetError(str(e))
+            out[field] = text
         elif field == "maxTokens":
             try:
                 out[field] = max(256, min(2_000_000, int(raw)))
@@ -374,17 +444,19 @@ def save(name: str, values: dict, preset_id: str | None = None) -> dict:
 def _insert(pid: str, label: str, v: dict, now: float) -> None:
     db.execute(
         "INSERT INTO agent_presets(id, name, base_url, api_key, model, temperature, "
-        "max_tokens, reasoning, cache, flex, instructions, kind, key_ref, provider, agent_name, created_at, updated_at) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+        "max_tokens, reasoning, cache, flex, instructions, kind, key_ref, provider, agent_name, params, "
+        "created_at, updated_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
         "ON CONFLICT(id) DO UPDATE SET name=excluded.name, base_url=excluded.base_url, "
         "api_key=excluded.api_key, model=excluded.model, temperature=excluded.temperature, "
         "max_tokens=excluded.max_tokens, reasoning=excluded.reasoning, cache=excluded.cache, "
         "flex=excluded.flex, instructions=excluded.instructions, kind=excluded.kind, "
         "key_ref=excluded.key_ref, provider=excluded.provider, agent_name=excluded.agent_name, "
-        "updated_at=excluded.updated_at",
-        (pid, label, v["baseUrl"], v["apiKey"], v["model"], v["temperature"],
+        "params=excluded.params, updated_at=excluded.updated_at",
+        (pid, label, v["baseUrl"], v["apiKey"], v["model"], _temp_in(v["temperature"]),
          v["maxTokens"], v["reasoning"], int(v["cache"]), int(v["flex"]),
-         v["instructions"], v["kind"], v["keyRef"], v["provider"], v["agentName"], now, now),
+         v["instructions"], v["kind"], v["keyRef"], v["provider"], v["agentName"],
+         v.get("params") or "", now, now),
     )
 
 
@@ -432,31 +504,14 @@ def model_settings() -> dict[str, Any]:
     field it does not know instead of ignoring it. Off therefore has to mean
     absent.
     """
-    cfg = config.section("agent")
-    out: dict[str, Any] = {
-        "temperature": float(cfg.get("temperature") or 0.2),
-        "max_tokens": int(cfg.get("maxTokens") or FIELDS["maxTokens"]),
-    }
-    level = str(cfg.get("reasoning") or "").strip().lower()
-    if level and level in REASONING_LEVELS and level != "":
-        out["openai_reasoning_effort"] = level
-    codex = (cfg.get("provider") or "") == "codex"
-    if codex:
-        # The subscription backend has no tiers and no caches to pick, and it
-        # refuses stored responses; codexauth.client strips these anyway.
-        out["openai_store"] = False
-        return out
-    if cfg.get("flex"):
-        # Cheaper, slower, and only on tiers that offer it. Requests can queue
-        # for minutes, so the agent timeout matters more when this is on.
-        out["openai_service_tier"] = "flex"
-    if cfg.get("cache"):
-        # A stable routing key. The cacheable prefix is the instructions plus
-        # the tool schemas, which are identical across chats, so one key for the
-        # whole app maximises hits rather than fragmenting them per chat.
-        out["openai_prompt_cache_key"] = "risu-hina"
-        out["openai_prompt_cache_retention"] = "24h"
-    return out
+    return plan("agent").settings
+
+
+def plan(section: str = "agent") -> providers.Plan:
+    """The request plan for a config section - settings, fields to drop, cap
+    field, strict flag - from its numbers, its provider, and its parameter
+    JSON (providers.plan_for has the precedence)."""
+    return providers.plan_for(config.section(section))
 
 
 def fingerprint() -> str:
@@ -465,7 +520,7 @@ def fingerprint() -> str:
     return "|".join(str(x) for x in (
         cfg.get("provider"), cfg.get("baseUrl"), cfg.get("model"), len(cfg.get("apiKey") or ""),
         cfg.get("temperature"), cfg.get("maxTokens"),
-        cfg.get("reasoning"), cfg.get("cache"), cfg.get("flex"),
+        cfg.get("reasoning"), cfg.get("cache"), cfg.get("flex"), cfg.get("params"),
         len(cfg.get("instructions") or ""), (cfg.get("instructions") or "")[:60],
     ))
 

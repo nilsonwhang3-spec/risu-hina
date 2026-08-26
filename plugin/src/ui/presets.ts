@@ -16,7 +16,7 @@
  * settings page pushes everything else off screen.
  */
 import { el, clear, armed, modal, setSelected, selectedValue, popover } from './dom';
-import { state, type AgentPreset, type ApiKeyEntry, type CatalogModel } from '../state';
+import { state, type AgentPreset, type ApiKeyEntry, type CatalogModel, type ProviderProfile } from '../state';
 
 type Kind = 'general' | 'search';
 
@@ -175,6 +175,7 @@ function summarise(p: AgentPreset): string {
   if (p.cache) bits.push('캐시');
   if (p.flex) bits.push('Flex');
   bits.push(`${p.maxTokens.toLocaleString()} 토큰`);
+  if (p.params) bits.push('파라미터 JSON');
   if (p.instructions) bits.push('기본지침 있음');
   return bits.join(' · ');
 }
@@ -284,8 +285,19 @@ function openEditor(
   const keyNote = el('span', { class: 'hint' });
   const ownKeyRow = el('label', { class: 'field' }, [el('span', { text: 'API Key (직접 입력)' }), apiKey, keyNote]);
   const maxTokens = el('input', { placeholder: kind === 'search' ? '16000' : '32000' });
-  const temperature = el('input', { placeholder: '0.2' });
+  // Blank = not sent. OpenAI's reasoning models refuse any value but their
+  // default, and every provider has a sensible one of its own.
+  const temperature = el('input', { placeholder: '(비움 = 보내지 않음)' });
   const reasoning = reasoningSelect();
+  // Request parameters as JSON, real field names, null = do not send. The
+  // last word over the boxes above and over the provider profile.
+  const params = el('textarea', {
+    placeholder: '{"reasoning_effort": "medium", "temperature": null}',
+    style: { minHeight: '64px', fontFamily: 'ui-monospace, Menlo, Consolas, monospace', fontSize: '12px' },
+  }) as HTMLTextAreaElement;
+  const paramsNote = el('div', { class: 'hint', style: { marginTop: '-4px', marginBottom: '10px' } });
+  const provBox = el('div', { class: 'notice', style: { marginBottom: '10px', display: 'none' } });
+  let providers: ProviderProfile[] = [];
   const cache = el('input', { type: 'checkbox' });
   const flex = el('input', { type: 'checkbox' });
   const instructions = el('textarea', {
@@ -324,6 +336,48 @@ function openEditor(
   };
   keySel.addEventListener('change', syncKeyRow);
 
+  // Which provider this preset will talk to, from the chosen key's provider
+  // or URL, or the URL typed here - and what that provider wants to hear.
+  const profileFor = (): ProviderProfile | null => {
+    if (isCodex()) return null;
+    const k = keys.find((x) => x.id === selectedValue(keySel));
+    const url = (baseUrl.value || k?.baseUrl || '').toLowerCase().replace(/^https?:\/\//, '');
+    const byUrl = url ? providers.find((p) => p.hosts.some((h) => url.includes(h))) : null;
+    if (byUrl) return byUrl;
+    const pv = (k?.provider || '').trim().toLowerCase();
+    return pv ? providers.find((p) => p.id === pv || p.name.toLowerCase() === pv) ?? null : null;
+  };
+  const syncProvider = () => {
+    const p = profileFor();
+    clear(provBox);
+    provBox.style.display = p ? '' : 'none';
+    if (!p) return;
+    const fill = el('button', { class: 'ghost tiny', text: '예시 JSON 채우기' });
+    fill.addEventListener('click', () => {
+      // Merge over what is there rather than replace: a null the user added
+      // to silence a field must not come back.
+      let cur: Record<string, unknown> = {};
+      try { cur = params.value.trim() ? JSON.parse(params.value) : {}; } catch { cur = {}; }
+      params.value = JSON.stringify({ ...p.template, ...cur }, null, 1).replace(/\n\s*/g, ' ');
+    });
+    provBox.appendChild(el('div', {}, [
+      el('b', { text: p.name }),
+      el('span', { class: 'dim', text: ` · ${p.endpoint === 'responses' ? 'Responses API' : 'Chat Completions'} · 출력 상한 ${p.capField}` }),
+    ]));
+    if (p.note) provBox.appendChild(el('div', { class: 'hint', text: p.note }));
+    for (const n of p.modelNotes) provBox.appendChild(el('div', { class: 'hint', text: '· ' + n }));
+    if (p.unsupported.length) provBox.appendChild(el('div', { class: 'hint', text: '보내지 않는 필드: ' + p.unsupported.join(', ') }));
+    if (p.modelExample) provBox.appendChild(el('div', { class: 'hint', text: '모델 이름 예: ' + p.modelExample }));
+    const row = el('div', { class: 'row', style: { marginTop: '4px' } }, [
+      Object.keys(p.template).length ? fill : null,
+      p.docs ? el('a', { href: p.docs, target: '_blank', rel: 'noopener', class: 'hint', text: '문서 ↗' }) : null,
+    ]);
+    provBox.appendChild(row);
+  };
+  keySel.addEventListener('change', syncProvider);
+  baseUrl.addEventListener('input', syncProvider);
+  model.addEventListener('input', syncProvider);
+
   const catalogBtn = el('button', { class: 'ghost tiny', text: '카탈로그에서 찾기', title: 'models.dev 에서 프로바이더·모델을 찾아 채웁니다' });
   catalogBtn.addEventListener('click', () => openCatalogPicker(catalogBtn, (m, api) => {
     model.value = m.id;
@@ -335,6 +389,8 @@ function openEditor(
       const r = await state.presets();
       keepSentinel = r.keepSentinel || keepSentinel;
       keys = r.keys ?? [];
+      providers = r.providers ?? [];
+      paramsNote.textContent = `실제 요청 필드 이름으로 적습니다. null 은 "보내지 않음". 위 칸들과 프로바이더 기본값보다 우선합니다 (${r.maxParams ?? 4000}자까지). 예: {"temperature": null, "api": "responses", "max_tokens": 16000, "extra_body": {"thinking": {"type": "enabled"}}}`;
       clear(keySel);
       keySel.appendChild(el('option', { value: '', text: '직접 입력' }));
       for (const k of keys) keySel.appendChild(el('option', { value: k.id, text: `${k.name}${k.provider ? ' · ' + k.provider : ''}` }));
@@ -348,6 +404,7 @@ function openEditor(
         syncCount();
         keyNote.textContent = '설정되지 않음';
         syncKeyRow();
+        syncProvider();
         return;
       }
       agentName.value = p.agentName || r.defaultAgentName || '히나';
@@ -355,7 +412,8 @@ function openEditor(
       baseUrl.value = p.baseUrl;
       model.value = p.model;
       maxTokens.value = String(p.maxTokens);
-      temperature.value = String(p.temperature);
+      temperature.value = p.temperature === null || p.temperature === undefined ? '' : String(p.temperature);
+      params.value = p.params || '';
       setSelected(reasoning, p.reasoning || '');
       setSelected(keySel, p.provider === 'codex' ? CODEX_KEY : (p.keyRef || ''));
       cache.checked = p.cache;
@@ -363,6 +421,7 @@ function openEditor(
       instructions.value = p.instructions || '';
       syncCount();
       syncKeyRow();
+      syncProvider();
       keyNote.textContent = p.apiKey?.set
         ? `설정됨 (${p.apiKey.length}자) — 바꾸려면 새로 입력`
         : '설정되지 않음';
@@ -405,6 +464,9 @@ function openEditor(
     el('div', { class: 'hint', style: { marginBottom: '12px' } }, [
       '세 항목 모두 게이트웨이·모델에 따라 지원 여부가 다릅니다. 끄면 요청에서 빠지므로, 오류가 나면 먼저 꺼 보세요.',
     ]),
+    provBox,
+    el('label', { class: 'field' }, [el('span', { text: '파라미터 JSON (선택)' }), params]),
+    paramsNote,
     el('label', { class: 'field' }, [
       el('span', { text: '기본지침' }), instructions, instCount,
     ]),
@@ -429,7 +491,9 @@ function openEditor(
         // Leave the stored key alone unless a new one was typed.
         apiKey: apiKey.value ? apiKey.value : keepSentinel,
         maxTokens: maxTokens.value === '' ? undefined : Number(maxTokens.value),
-        temperature: temperature.value === '' ? undefined : Number(temperature.value),
+        // '' is a value here: "do not send". undefined would keep the old one.
+        temperature: temperature.value.trim() === '' ? '' : Number(temperature.value),
+        params: params.value.trim(),
         reasoning: selectedValue(reasoning),
         cache: cache.checked,
         flex: flex.checked,

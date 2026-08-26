@@ -23,7 +23,7 @@ from pydantic_ai import Agent, RunContext
 from pydantic_ai.models.openai import OpenAIChatModel, OpenAIResponsesModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
-from . import (actions, assets, codexauth, config, files, log, permits, presets, pyexec, skills, snapshots,
+from . import (actions, assets, codexauth, config, files, log, permits, presets, providers, pyexec, skills, snapshots,
                staging, store, websearch, workspace)
 from . import card as cardmod
 from . import memory as mem
@@ -136,10 +136,50 @@ def _model_for(section: str) -> "OpenAIChatModel | OpenAIResponsesModel":
     key = cfg.get("apiKey") or ""
     if not (base and key and name):
         raise RuntimeError("에이전트 자격증명이 설정되지 않았습니다 (설정 탭에서 baseUrl/apiKey/model)")
-    # Everything is addressed as an OpenAI-compatible endpoint; a gateway is
-    # what normalises the providers behind it. Same reasoning as active-recall's
-    # llm.py - portability lives at the gateway, not in our code.
-    return OpenAIChatModel(name, provider=OpenAIProvider(base_url=base, api_key=key))
+    # Everything is addressed as an OpenAI-compatible endpoint, but which
+    # fields it accepts, which API it speaks and whether tools may be strict
+    # come from the plan (provider profile + the preset's parameter JSON) -
+    # see providers.py. The client pops the fields the plan says not to send,
+    # including the ones pydantic-ai adds on its own.
+    plan = providers.plan_for(cfg)
+    timeout = float(cfg.get("timeoutSeconds") or 300)
+    provider = OpenAIProvider(openai_client=_client(base, key, plan.drop_all, timeout))
+    profile = _profile(plan, name)
+    if plan.api == "responses":
+        return OpenAIResponsesModel(name, provider=provider, profile=profile)
+    return OpenAIChatModel(name, provider=provider, profile=profile)
+
+
+def _client(base: str, key: str, drop: set[str], timeout: float) -> Any:
+    """An AsyncOpenAI for an OpenAI-compatible endpoint that drops the request
+    fields the plan forbids. Wrapping `create` is the only place where
+    stream_options / parallel_tool_calls / tool_choice can be removed - no
+    model setting switches those off."""
+    import openai
+    c = openai.AsyncOpenAI(base_url=base, api_key=key, timeout=timeout)
+    if drop:
+        for res in (c.chat.completions, c.responses):
+            orig = res.create
+
+            async def create(*a: Any, _orig: Any = orig, **kw: Any) -> Any:
+                for k in drop:
+                    kw.pop(k, None)
+                return await _orig(*a, **kw)
+
+            res.create = create  # type: ignore[method-assign]
+    return c
+
+
+def _profile(plan: "providers.Plan", name: str) -> Any:
+    """pydantic-ai's profile for the model name (family rules: reasoning
+    support, schema transformer), with the plan's choices on top."""
+    from pydantic_ai.profiles import merge_profile
+    from pydantic_ai.profiles.openai import OpenAIModelProfile, openai_model_profile
+    base = openai_model_profile(providers._bare_model(name))
+    return merge_profile(base, OpenAIModelProfile(
+        openai_chat_supports_max_completion_tokens=(plan.cap_field != "max_tokens"),
+        openai_supports_strict_tool_definition=plan.strict_tools,
+    ))
 
 
 def _model() -> "OpenAIChatModel | OpenAIResponsesModel":
@@ -447,7 +487,10 @@ def build() -> Agent[Deps]:
             keys = entry.get("key") or entry.get("keys") or ""
             folder = str(entry.get("folder") or "")
             where = f" folder={names.get(folder, folder)}" if folder else ""
-            out.append(f"--- #{e['seq']} [{e['scope']}] id={e['id']} key={keys}{where}\n"
+            # 상시 활성화: no keys, always inserted. Said explicitly, or an
+            # empty key reads as a broken entry.
+            always = " [상시활성]" if entry.get("alwaysActive") else ""
+            out.append(f"--- #{e['seq']} [{e['scope']}] id={e['id']}{always} key={keys}{where}\n"
                        f"{str(entry.get('content') or '')[:1500]}")
         return "\n\n".join(out)[:25000]
 
@@ -482,17 +525,19 @@ def build() -> Agent[Deps]:
 
     @agent.tool
     def propose_lore_add(ctx: RunContext[Deps], comment: str, keys: str,
-                         content: str, reason: str, scope: str = "local") -> str:
+                         content: str, reason: str, scope: str = "local",
+                         always_active: bool = False) -> str:
         """로어북에 항목 추가를 제안한다.
 
         기본은 이 챗의 로어북(local)이다. scope="global" 은 봇 전체 로어북이라
         이 봇의 **모든 챗**에 영향을 준다 — 사용자가 봇 로어북이라고 명시했을 때만 써라.
+        always_active=True 는 상시 활성화(키워드 없이 항상 삽입)다 — 그때 keys 는 비운다.
         """
         if scope not in ("local", "global"):
             return "scope 는 local 또는 global 입니다"
         where = "봇 로어북(global)" if scope == "global" else "이 챗 로어북"
-        entry = {"key": keys, "comment": comment, "content": content,
-                 "alwaysActive": False, "insertorder": 100}
+        entry = {"key": "" if always_active else keys, "comment": comment, "content": content,
+                 "alwaysActive": bool(always_active), "insertorder": 100}
         return _propose(ctx, "lore_add", f"{where}에 “{comment}” 추가 — {reason}",
                         {"entry": entry, "scope": scope})
 
@@ -1014,10 +1059,7 @@ async def research(question: str) -> str:
     if not websearch.configured():
         return "웹 검색 프로바이더가 설정되지 않았습니다 (설정 → 연결)"
     cfg = config.section("agent_search")
-    settings: dict[str, Any] = {
-        "temperature": float(cfg.get("temperature") or 0.2),
-        "max_tokens": int(cfg.get("maxTokens") or 16000),
-    }
+    settings = providers.plan_for(cfg).settings
     extra = str(cfg.get("instructions") or "").strip()
     sub = Agent(
         _search_model(),
@@ -1035,4 +1077,5 @@ async def research(question: str) -> str:
         return str(r.output)[:20000]
     except Exception as e:  # noqa: BLE001 - a failed research degrades the turn, never fails it
         log.warn("search agent failed: %s", e)
-        return f"검색 에이전트가 실패했습니다: {type(e).__name__}: {e}"
+        fix = providers.hint(str(e), "에이전트 (검색)")
+        return f"검색 에이전트가 실패했습니다: {type(e).__name__}: {e}" + (f"\n→ {fix}" if fix else "")

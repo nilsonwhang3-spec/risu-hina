@@ -8,7 +8,7 @@
  * at all. Reporting what was actually observed beats guessing.
  */
 import { el, clear, armed, modal } from './dom';
-import { state, type ApiKeyEntry } from '../state';
+import { state, type ApiKeyEntry, type ProviderProfile } from '../state';
 import { buildPresetsCard, buildCodexBox } from './presets';
 import { buildSkillsCard } from './skills';
 import { agentPanel } from './agentpane';
@@ -413,6 +413,33 @@ function buildKeysCard(): HTMLElement {
     const provider = el('input', { value: existing?.provider ?? '', placeholder: '프로바이더 (예: google, openai, openrouter, vercel)', list: 'hina-providers' }) as HTMLInputElement;
     const providerList = el('datalist', { id: 'hina-providers' }, ['google', 'openai', 'anthropic', 'openrouter', 'vercel', 'groq', 'deepseek', 'xai', 'mistral', 'ollama']
       .map((p) => el('option', { value: p })));
+    // What the chosen provider expects - its URL, how the key travels, its
+    // quirks - from the backend's profile table, so the form says it before
+    // the first failed request does.
+    const provNote = el('div', { class: 'notice', style: { marginTop: '-4px', marginBottom: '10px', display: 'none' } });
+    let profiles: ProviderProfile[] = [];
+    const syncProv = () => {
+      const want = provider.value.trim().toLowerCase();
+      const p = want ? profiles.find((x) => x.id === want || x.name.toLowerCase() === want
+        || x.hosts.some((h) => want.includes(h))) : null;
+      clear(provNote);
+      provNote.style.display = p ? '' : 'none';
+      if (!p) return;
+      provNote.appendChild(el('div', {}, [el('b', { text: p.name })]));
+      provNote.appendChild(el('div', { class: 'hint', text: p.api ? 'API 주소: ' + p.api : 'API 주소: 프로젝트마다 다릅니다 — 아래 Base URL 직접 지정' }));
+      provNote.appendChild(el('div', { class: 'hint', text: '인증: ' + p.auth }));
+      if (p.modelExample) provNote.appendChild(el('div', { class: 'hint', text: '모델 이름 예: ' + p.modelExample }));
+      if (p.note) provNote.appendChild(el('div', { class: 'hint', text: p.note }));
+      if (p.docs) provNote.appendChild(el('a', { href: p.docs, target: '_blank', rel: 'noopener', class: 'hint', text: '문서 ↗' }));
+      if (!p.api) urlRow.style.display = '';
+    };
+    provider.addEventListener('input', syncProv);
+    void state.providers().then((list) => {
+      profiles = list;
+      clear(providerList);
+      for (const p of list) providerList.appendChild(el('option', { value: p.id, text: p.name }));
+      syncProv();
+    }).catch(() => { /* the static list above stays */ });
     const apiKey = el('input', { type: 'password', placeholder: existing?.apiKey?.set ? `설정됨 (${existing.apiKey.length}자) — 바꿀 때만 입력` : 'API 키' }) as HTMLInputElement;
     const note = el('input', { value: existing?.note ?? '', placeholder: '메모 (선택)' }) as HTMLInputElement;
     const baseUrl = el('input', { value: existing?.baseUrl ?? '', placeholder: 'Base URL (프로바이더 이름으로 못 찾을 때만 · 예: https://generativelanguage.googleapis.com/v1beta/openai)' }) as HTMLInputElement;
@@ -425,6 +452,7 @@ function buildKeysCard(): HTMLElement {
       el('label', { class: 'field' }, [el('span', { text: '이름' }), name]),
       el('label', { class: 'field' }, [el('span', { text: '프로바이더' }), provider, providerList]),
       el('div', { class: 'hint', style: { marginTop: '-4px', marginBottom: '10px' }, text: '프로바이더 이름으로 API 주소를 찾습니다(models.dev). 게이트웨이처럼 주소가 따로 있으면 아래에서 직접 지정합니다.' }),
+      provNote,
       el('label', { class: 'field' }, [el('span', { text: 'API 키' }), apiKey]),
       el('label', { class: 'field' }, [el('span', { text: '메모' }), note]),
       urlRow,

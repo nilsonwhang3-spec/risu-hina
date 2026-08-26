@@ -44,12 +44,25 @@ export function bindAgent(next: Partial<AgentPanelHooks>): void {
 /**
  * Move the panel into this container.
  *
- * `appendChild` moves rather than copies, so the panel keeps its DOM - and with
- * it the scroll position, the half-typed message, and any run in flight.
+ * `appendChild` moves rather than copies, so the panel keeps its DOM - the
+ * half-typed message and any run in flight survive. The scroll position does
+ * not: a detached element loses its scroll offset, so a tab switch used to
+ * land the conversation at the top. It is saved and put back after layout.
  */
 export function mountAgent(into: HTMLElement): void {
   const p = agentPanel();
-  if (p.root.parentElement !== into) into.appendChild(p.root);
+  if (p.root.parentElement !== into) {
+    const log = p.root.querySelector('.agentlog') as HTMLElement | null;
+    const top = log?.scrollTop ?? 0;
+    // Pinned to the bottom stays pinned even if the log grew meanwhile.
+    const atBottom = !!log && log.scrollHeight - log.scrollTop - log.clientHeight < 4;
+    into.appendChild(p.root);
+    if (log) {
+      const restore = () => { log.scrollTop = atBottom ? log.scrollHeight : top; };
+      restore();
+      requestAnimationFrame(restore);
+    }
+  }
   void p.load();
 }
 

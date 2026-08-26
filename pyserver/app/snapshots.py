@@ -50,6 +50,17 @@ def listing(chat_key: str) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def rename(chat_key: str, checkpoint_id: str, label: str) -> None:
+    """Relabel a snapshot. The label is the only thing about a snapshot the
+    user can change - the content is what it was."""
+    text = (label or "").strip()[:80]
+    if not text:
+        raise ValueError("스냅샷 이름을 입력해 주세요")
+    if db.one("SELECT id FROM checkpoints WHERE id = ? AND chat_key = ?", (checkpoint_id, chat_key)) is None:
+        raise LookupError(f"unknown checkpoint: {checkpoint_id}")
+    db.execute("UPDATE checkpoints SET label = ? WHERE id = ? AND chat_key = ?", (text, checkpoint_id, chat_key))
+
+
 def restore(chat_key: str, checkpoint_id: str) -> dict:
     row = db.one("SELECT * FROM checkpoints WHERE id = ? AND chat_key = ?",
                  (checkpoint_id, chat_key))
@@ -110,6 +121,16 @@ def listing_card(char_key: str) -> list[dict]:
         (char_key,),
     )
     return [dict(r) for r in rows]
+
+
+def rename_card(char_key: str, checkpoint_id: str, label: str) -> None:
+    text = (label or "").strip()[:80]
+    if not text:
+        raise ValueError("스냅샷 이름을 입력해 주세요")
+    if db.one("SELECT id FROM card_checkpoints WHERE id = ? AND char_key = ?", (checkpoint_id, char_key)) is None:
+        raise LookupError(f"unknown checkpoint: {checkpoint_id}")
+    db.execute("UPDATE card_checkpoints SET label = ? WHERE id = ? AND char_key = ?",
+               (text, checkpoint_id, char_key))
 
 
 def restore_card(char_key: str, checkpoint_id: str) -> dict:

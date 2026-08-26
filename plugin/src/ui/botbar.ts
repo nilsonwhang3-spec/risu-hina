@@ -15,7 +15,7 @@
  */
 import { el, clear, armed, popover, TOOL, fmtTime } from './dom';
 import { state, type CardChanges } from '../state';
-import { shellNotice } from './chatbar';
+import { shellNotice, openSnapshotName } from './chatbar';
 import { clientLog } from '../transport';
 
 let bar: HTMLElement | null = null;
@@ -55,16 +55,11 @@ export function buildBotBar(): HTMLElement {
     el('span', { class: 'glyph', text: TOOL.snapshot }),
     el('span', { class: 'tool-label', text: '스냅샷' }),
   ]);
-  snap.addEventListener('click', async () => {
-    (snap as HTMLButtonElement).disabled = true;
-    try {
-      await state.cardCheckpoint('수동');
-      shellNotice('봇 스냅샷을 저장했습니다. 🕘 버전에서 되돌릴 수 있습니다.', 'ok');
-    } catch (e) {
-      shellNotice('봇 스냅샷 저장에 실패했습니다: ' + msg(e), 'err');
-    } finally {
-      (snap as HTMLButtonElement).disabled = false;
-    }
+  snap.addEventListener('click', () => {
+    openSnapshotName(snap, '수동', async (label) => {
+      await state.cardCheckpoint(label);
+      shellNotice('봇 스냅샷을 저장했습니다. 🕘 버전에서 이름을 바꾸거나 되돌릴 수 있습니다.', 'ok');
+    });
   });
 
   const versions = el('button', {
@@ -241,17 +236,27 @@ function openApply(anchor: HTMLElement): void {
   const clone = el('button', { text: '복제 봇 생성' }) as HTMLButtonElement;
   clone.addEventListener('click', async () => {
     clone.disabled = true;
+    const was = clone.textContent;
+    // The popover itself reports: the shell notice sits above the tabs and
+    // is easy to miss, and cloning can wait on RisuAI's permission prompt.
+    clone.textContent = '복제 중…';
+    out.textContent = '복제하는 중입니다. RisuAI 가 db 권한을 물으면 허용해 주세요.';
     try {
       const name = nameInput.value.trim() || '복제 봇';
       await state.cloneBot(name);
-      shellNotice(`복제 봇 “${name}” 을 만들었습니다. 편집본이 담겼고, 에셋은 원본과 공유합니다. `
-        + 'RisuAI 목록에서 확인해 주세요.', 'ok');
-      close();
+      const said = `복제 봇 “${name}” 을 만들었습니다. 편집본과 챗 전부가 담겼고, 에셋은 원본과 공유합니다. RisuAI 봇 목록에서 확인해 주세요.`;
+      shellNotice(said, 'ok');
+      clear(body);
+      const ok = el('button', { class: 'primary tiny', text: '닫기' });
+      ok.addEventListener('click', close);
+      body.appendChild(el('div', { class: 'notice ok', text: '✔ ' + said }));
+      body.appendChild(el('div', { class: 'row', style: { marginTop: '8px' } }, [ok]));
     } catch (e) {
       void clientLog('error', 'cloneBot failed', { error: msg(e) });
       shellNotice('복제에 실패했습니다: ' + msg(e), 'err');
-    } finally {
+      out.textContent = '복제에 실패했습니다: ' + msg(e);
       clone.disabled = false;
+      clone.textContent = was;
     }
   });
 
@@ -273,7 +278,7 @@ function openApply(anchor: HTMLElement): void {
   body.appendChild(el('div', {
     class: 'hint',
     text: '메타·인사말·봇 로어북·Regex·트리거가 한 번에 쓰입니다. 챗은 절대 건드리지 않습니다. '
-      + '복제 봇은 새 캐릭터로 만들어지며 처음 한 번 db 권한 허용이 필요합니다.',
+      + '복제 봇은 새 캐릭터로 만들어지고 챗도 모두 복사됩니다. 처음 한 번 db 권한 허용이 필요합니다.',
   }));
 }
 
@@ -301,12 +306,20 @@ async function openVersions(anchor: HTMLElement): Promise<void> {
           shellNotice('복원에 실패했습니다: ' + msg(e), 'err');
         }
       });
+      const title = el('div', { text: c.label || '(무제)' });
+      const ren = el('button', { class: 'ghost tiny', text: '✎', title: '이름 바꾸기' });
+      ren.addEventListener('click', () => {
+        openSnapshotName(ren, c.label || '', async (label) => {
+          await state.renameCardCheckpoint(c.id, label);
+          title.textContent = label;
+        });
+      });
       body.appendChild(el('div', { class: 'verrow' }, [
         el('div', { class: 'grow' }, [
-          el('div', { text: c.label || '(무제)' }),
+          title,
           el('div', { class: 'hint', text: fmtTime(c.created_at * 1000) }),
         ]),
-        b,
+        ren, b,
       ]));
     }
   } catch (e) {

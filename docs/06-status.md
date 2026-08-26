@@ -24,6 +24,14 @@
 
 → **첫 할 일**: 사용자가 RisuAI 에 `plugin/Risu.Hina.Plugin.js` **수동 재설치 1회**(설치본 0.1.0 의 update-url 은 CORS 로 못 읽음) → 다음 릴리스부터 `+` 가 뜨는지 확인 → M2 실사용 검증(§5-2).
 
+## 1-2. 2026-08-26 밤 — v0.6.0: 파라미터는 코드가 아니라 데이터 (docs/04 부록 H)
+
+- **왜**: pydantic-ai 는 gpt-5 계열에도 `temperature` 를 보내고(400 "Only the default (1) value is supported"), 툴 정의에 `strict:true`, 상한은 `max_completion_tokens` 로 보낸다. 조사(문서 기준, 2026-08-26): OpenAI 공식은 gpt-5.6 계열에서 **Chat Completions + 툴 호출 자체를 거부**(Responses 필요); Anthropic·Gemini·Vertex 호환 계층은 모르는 필드를 **무시**; Ollama 는 `max_tokens` 만; OpenCode 는 모델별로 `/responses` 와 `/chat/completions` 가 갈리고 Go 는 `opencode.ai/zen/go/v1`; 뉴럴와트 = `api.neuralwatt.com/v1`; Vertex 는 OAuth 토큰만(API 키 불가).
+- **구조** (`pyserver/app/providers.py`): `PROFILES`(id·api·hosts·auth·modelExample·endpoint chat|responses·capField·strictTools·unsupported·modelRules·template·note·docs) → `plan_for(cfg)` 가 섹션 숫자칸 → 프로파일 거부 목록 → 프리셋 **`params` JSON**(실제 필드명, `null`=보내지 않음, `api`/`strict` 는 의사 키) 순으로 `Plan{settings, drop, cap_field, strict_tools, api}` 를 만든다. `agent._model_for` 는 `_client`(create 래핑으로 `drop` 필드 pop — `stream_options` 같은 라이브러리 필드도) + `_profile`(`merge_profile(openai_model_profile, {max_completion_tokens 지원, strict 허용})`) 로 `OpenAIChatModel`/`OpenAIResponsesModel` 을 고른다. `hint(text)` 가 400 본문에서 필드를 뽑아 넣을 JSON 을 말한다 — `session._explain`, 연결 테스트, 검색 에이전트에 적용. 연결 테스트도 같은 계획(API·필드)으로 보낸다.
+- 프리셋: `temperature` 기본 **None(보내지 않음)** — DB NOT NULL 컬럼엔 `-1`(`TEMP_UNSET`); `params` 컬럼(스키마 v11). `/presets` 에 `providers`·`maxParams`, `GET /catalog/providers`. 플러그인: 편집기에 *파라미터 JSON* 칸 + 프로바이더 안내 상자(예시 JSON 채우기), 키 폼에 인증·주소 안내.
+- 그 밖에(사용자 피드백): 히나 기본 지침 영어화 + 한국어 어투 "~해요/~할까요?"(옛 기본문 그대로인 프리셋은 `_migrate_default_text` 로 자동 갱신) · 탭 전환 시 에이전트 스크롤 유지(`mountAgent` 가 detach 전 scrollTop 저장·복원) · 승인/전체 승인/복제 봇의 진행·결과 표시(대화에 `bubble note` 로 남김) · 스냅샷 이름 지정·변경(`/checkpoint/rename`, `/card/checkpoint/rename`, `openSnapshotName`) · 로어북 `alwaysActive` 배지·체크박스(켜면 key 비움)·에이전트 `always_active` · 봇 탭별 변경 수 배지(`refreshTabBadges`) · `start.bat` 이 `RISUHINA_HOST` 존중 · **번들 README 전면 개정**(유형 1/2, NSSM·pm2, Tailscale·Cloudflare·LAN, 업데이트).
+- 검증: `tests/test_providers.py`(게이트 추가), test_http 에 params·providers·rename 검사, 스모크는 지침 textarea 를 placeholder 로 찾도록 수정. 릴리스 v0.6.0. **test-server 는 사용자가 플러그인 `+` → 백엔드 업데이트로 올림(0.5.2 업데이터 첫 실사용 검증 겸)** — 실패하면 ssh 로 zip 덮어쓰기(`nssm stop` 먼저).
+
 ## 1. 2026-08-26 — 라운드 3 + 개명 (v0.5.0) (docs/04 부록 G)
 
 | 영역 | 무엇 |

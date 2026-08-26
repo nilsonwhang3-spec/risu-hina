@@ -354,10 +354,6 @@ export async function cloneBot(
 
   copy.chaId = cryptoRandomId();
   copy.name = name;
-  // A fresh chat rather than the source's: PocketRisu hands back stubs for
-  // inactive chats anyway, and a clone is a card operation, not a chat copy.
-  copy.chats = [{ message: [], note: '', name: 'Chat 1', localLore: [] }];
-  copy.chatPage = 0;
   delete copy['realmId'];
 
   let dbSlice: Record<string, unknown> | null = null;
@@ -372,6 +368,22 @@ export async function cloneBot(
   if (!characters) {
     throw new HostError('failed',
       "복제에는 'db' 권한이 필요합니다. RisuAI가 띄운 권한 요청을 허용하고 다시 시도해 주세요");
+  }
+
+  // The chats come along. readCharacter can hand back stubs for inactive
+  // chats (PocketRisu loads them lazily), so they are taken from the database
+  // slice, which holds the character whole; a chat that still has no message
+  // list is a stub and is skipped. No real chat: one fresh chat, as before.
+  const srcDb = characters.find((c) => c.chaId && c.chaId === src.chaId) ?? characters[sourceIndex];
+  const srcChats = Array.isArray(srcDb?.chats) ? (srcDb.chats as Record<string, unknown>[]) : [];
+  const real = srcChats.filter((c) => c && Array.isArray(c['message']));
+  if (real.length) {
+    copy.chats = structuredClone(real).map((c) => (c['id'] ? { ...c, id: cryptoRandomId() } : c)) as RisuCharacter['chats'];
+    const page = Number(srcDb?.chatPage ?? src.chatPage ?? 0);
+    copy.chatPage = Number.isFinite(page) ? Math.max(0, Math.min(page, real.length - 1)) : 0;
+  } else {
+    copy.chats = [{ message: [], note: '', name: 'Chat 1', localLore: [] }];
+    copy.chatPage = 0;
   }
   characters.push(copy);
   await Risuai.setDatabase({ characters });

@@ -166,8 +166,11 @@ export interface AgentPreset {
   name: string;
   baseUrl: string;
   model: string;
-  temperature: number;
+  /** null = not sent (OpenAI's reasoning models reject any value but the default). */
+  temperature: number | null;
   maxTokens: number;
+  /** Request-parameter JSON: real field names, null = do not send. */
+  params: string;
   reasoning: string;
   cache: boolean;
   flex: boolean;
@@ -196,6 +199,26 @@ export interface ApiKeyEntry {
   note: string;
   apiKey: { set: boolean; length: number };
   updatedAt: number;
+}
+
+/** A known provider's OpenAI-compatible surface and its quirks (backend providers.py). */
+export interface ProviderProfile {
+  id: string;
+  name: string;
+  /** Base URL, or '' when it varies (Vertex). */
+  api: string;
+  hosts: string[];
+  auth: string;
+  modelExample: string;
+  /** Which API the agent uses by default: 'chat' | 'responses'. */
+  endpoint: string;
+  capField: string;
+  strictTools: boolean;
+  unsupported: string[];
+  template: Record<string, unknown>;
+  note: string;
+  modelNotes: string[];
+  docs: string;
 }
 
 export interface CatalogModel {
@@ -675,6 +698,10 @@ class AppState {
     return res.checkpoints ?? [];
   }
 
+  async renameCheckpoint(id: string, label: string): Promise<void> {
+    await transport.post('/checkpoint/rename', { chatKey: this.activeChatKey, id, label });
+  }
+
   async restore(id: string): Promise<{ lore: number | null; memory: number | null }> {
     const r = await transport.post<{ lore: number | null; memory: number | null }>(
       '/checkpoint/restore', { chatKey: this.activeChatKey, id });
@@ -943,8 +970,20 @@ class AppState {
     reasoningLevels: string[];
     keepSentinel: string;
     maxInstructions: number;
+    providers?: ProviderProfile[];
+    maxParams?: number;
   }> {
     return await transport.get('/presets');
+  }
+
+  private providerCache: ProviderProfile[] | null = null;
+
+  /** Provider profiles (cached for the panel's lifetime - they are code, not data). */
+  async providers(): Promise<ProviderProfile[]> {
+    if (this.providerCache) return this.providerCache;
+    const r = await transport.get<{ providers: ProviderProfile[] }>('/catalog/providers');
+    this.providerCache = r.providers ?? [];
+    return this.providerCache;
   }
 
   /** Make a preset the one the agent runs. Writes through to the live config. */
@@ -1304,6 +1343,10 @@ class AppState {
   async cardCheckpoints(): Promise<{ id: string; label: string; created_at: number }[]> {
     const r = await transport.get<{ checkpoints: any[] }>('/card/checkpoints', { charKey: this.botKey });
     return r.checkpoints ?? [];
+  }
+
+  async renameCardCheckpoint(id: string, label: string): Promise<void> {
+    await transport.post('/card/checkpoint/rename', { charKey: this.botKey, id, label });
   }
 
   async cardRestore(id: string): Promise<void> {

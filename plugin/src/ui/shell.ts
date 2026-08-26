@@ -364,10 +364,29 @@ export function buildShell(): void {
 
 function refreshTabBadges(): void {
   const badge = document.querySelector('#tab-files .tabbadge') as HTMLElement | null;
-  if (!badge) return;
-  const n = state.unseenOutputs.length;
-  badge.textContent = String(n);
-  badge.style.display = n && active !== 'files' ? '' : 'none';
+  if (badge) {
+    const n = state.unseenOutputs.length;
+    badge.textContent = String(n);
+    badge.style.display = n && active !== 'files' ? '' : 'none';
+  }
+  // Bot tabs: how many things on that tab differ from the baseline. The bot
+  // bar's total says "1"; these say where. Shown on the active tab too - it
+  // is a state, not an unread count.
+  const c = state.botChanges;
+  const per: Record<string, number> = {
+    meta: c ? c.fields + (c.greetings?.total ?? 0) : 0,
+    botlore: c?.lore?.total ?? 0,
+    regex: c?.customscript?.total ?? 0,
+    trigger: c?.triggerscript?.total ?? 0,
+    assets: c?.assetref?.total ?? 0,
+  };
+  for (const [id, n] of Object.entries(per)) {
+    const b = document.querySelector(`#tab-${id} .tabbadge`) as HTMLElement | null;
+    if (!b) continue;
+    b.textContent = String(n);
+    b.title = n ? `기준선과 다른 항목 ${n}개 — 각 항목에 추가/수정 표시가 있습니다` : '';
+    b.style.display = n ? '' : 'none';
+  }
 }
 
 state.onChange(() => {

@@ -28,6 +28,7 @@ from pydantic_ai.messages import (
 )
 
 from . import agent as agent_mod
+from . import providers
 from . import config, db, log, permits, presets, pyexec, skills, staging, store, workspace
 
 _agent_cache: dict[str, Any] = {}
@@ -334,6 +335,13 @@ def _explain(e: Exception) -> str:
     raw = f"{type(e).__name__}: {e}"
     text = str(e)
     limit = config.section("agent").get("maxTokens")
+
+    # A provider refusing a request field: say which, and the JSON that
+    # stops it being sent, before anything else - the raw message names a
+    # library parameter the user never typed.
+    fix = providers.hint(text)
+    if fix:
+        return f"{raw[:400]}\n→ {fix}"
 
     if "token limit" in text.lower() or "max_tokens" in text.lower():
         return (

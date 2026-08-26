@@ -21,7 +21,7 @@ from typing import Any, Iterable
 
 from . import config
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 LOCK = threading.RLock()
 _conn: sqlite3.Connection | None = None
@@ -601,6 +601,9 @@ ADD_COLUMNS = [
     ("characters", "family_key", "TEXT NOT NULL DEFAULT ''"),
     # What the agent calls itself (presets.agentName).
     ("agent_presets", "agent_name", "TEXT NOT NULL DEFAULT ''"),
+    # v11: request-parameter JSON (providers.plan_for). temperature keeps its
+    # NOT NULL column; -1 there means "not sent" (presets.TEMP_UNSET).
+    ("agent_presets", "params", "TEXT NOT NULL DEFAULT ''"),
     ("skills", "kind", "TEXT NOT NULL DEFAULT 'md'"),
     ("skills", "filename", "TEXT NOT NULL DEFAULT ''"),
     # A checkpoint covers the whole chat - turns, this chat's lorebook entries

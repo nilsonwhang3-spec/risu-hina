@@ -30,7 +30,9 @@ set PORT=%~1
 if "%PORT%"=="" set PORT=6020
 set LOG=%SERVER%server.log
 set RISUHINA_PORT=%PORT%
-set RISUHINA_HOST=127.0.0.1
+REM Loopback unless the environment says otherwise (a service can set
+REM RISUHINA_HOST=0.0.0.0 for a LAN PocketRisu; README "유형 2").
+if "%RISUHINA_HOST%"=="" set RISUHINA_HOST=127.0.0.1
 set PYTHONIOENCODING=utf-8
 
 REM The bundled interpreter first. Its ._pth file owns sys.path outright, so
