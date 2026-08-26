@@ -1494,6 +1494,22 @@ def h_card_checkpoint_list(arg: dict) -> dict:
     return {"checkpoints": snapshots.listing_card(_char(arg))}
 
 
+def h_card_checkpoint_delete(arg: dict) -> dict:
+    try:
+        snapshots.delete_card(_char(arg), str(arg.get("id") or ""))
+    except LookupError as e:
+        raise ApiError(404, str(e))
+    return {"ok": True}
+
+
+def h_card_checkpoint_clear(arg: dict) -> dict:
+    try:
+        keep = int(arg.get("keep") or 0)
+    except (TypeError, ValueError):
+        raise ApiError(400, "keep 은 정수여야 합니다")
+    return {"deleted": snapshots.clear_card(_char(arg), keep)}
+
+
 def h_card_checkpoint_rename(arg: dict) -> dict:
     try:
         snapshots.rename_card(_char(arg), str(arg.get("id") or ""), str(arg.get("label") or ""))
@@ -1525,6 +1541,23 @@ def h_checkpoint_create(arg: dict) -> dict:
 
 def h_checkpoint_list(arg: dict) -> dict:
     return {"checkpoints": snapshots.listing(_chat(arg))}
+
+
+def h_checkpoint_delete(arg: dict) -> dict:
+    try:
+        snapshots.delete(_chat(arg), str(arg.get("id") or ""))
+    except LookupError as e:
+        raise ApiError(404, str(e))
+    return {"ok": True}
+
+
+def h_checkpoint_clear(arg: dict) -> dict:
+    """Delete this chat's snapshots, keeping the `keep` newest (0 = all)."""
+    try:
+        keep = int(arg.get("keep") or 0)
+    except (TypeError, ValueError):
+        raise ApiError(400, "keep 은 정수여야 합니다")
+    return {"deleted": snapshots.clear(_chat(arg), keep)}
 
 
 def h_checkpoint_rename(arg: dict) -> dict:
@@ -1703,6 +1736,8 @@ ROUTES: dict[str, Handler] = {
     "POST /card/checkpoint": h_card_checkpoint_create,
     "GET /card/checkpoints": h_card_checkpoint_list,
     "POST /card/checkpoint/rename": h_card_checkpoint_rename,
+    "POST /card/checkpoint/delete": h_card_checkpoint_delete,
+    "POST /card/checkpoint/clear": h_card_checkpoint_clear,
     "POST /card/checkpoint/restore": h_card_checkpoint_restore,
 
     "GET /export/risuchat": h_export_risuchat,
@@ -1711,6 +1746,8 @@ ROUTES: dict[str, Handler] = {
     "POST /checkpoint": h_checkpoint_create,
     "GET /checkpoints": h_checkpoint_list,
     "POST /checkpoint/rename": h_checkpoint_rename,
+    "POST /checkpoint/delete": h_checkpoint_delete,
+    "POST /checkpoint/clear": h_checkpoint_clear,
     "POST /checkpoint/restore": h_checkpoint_restore,
 
     "GET /actions": h_actions,

@@ -311,6 +311,10 @@ export function popover(anchor: HTMLElement, content: HTMLElement): () => void {
   const rect = anchor.getBoundingClientRect();
   const vw = window.innerWidth || 1024;
   const vh = window.innerHeight || 768;
+  // Never wider than the viewport: a content min-width (the catalog picker's
+  // search box) would otherwise push the panel into a horizontal scroll on a
+  // phone.
+  pop.style.maxWidth = Math.max(200, vw - 16) + 'px';
   // Measure after insertion, then keep it on screen: anchored near the right
   // edge it would otherwise open off-panel, and near the bottom it would open
   // below the fold.

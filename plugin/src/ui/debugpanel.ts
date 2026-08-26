@@ -16,6 +16,7 @@
  */
 import { el, clear } from './dom';
 import { state } from '../state';
+import { renderMarkdown } from './markdown';
 import { transport } from '../transport';
 import * as host from '../host';
 
@@ -71,7 +72,10 @@ export function buildUpdateCard(): HTMLElement {
           : el('div', { class: 'hint', text: r.reason || '이 릴리스는 자동 설치할 수 없습니다' }),
       ]));
       if (r.notes) {
-        out.appendChild(el('pre', { class: 'mono filepreview', text: r.notes }));
+        // Release notes are markdown; a <pre> showed the asterisks.
+        const notes = el('div', { class: 'md notes', style: { maxHeight: '320px', overflowY: 'auto', marginTop: '8px' } });
+        notes.appendChild(renderMarkdown(r.notes));
+        out.appendChild(notes);
       }
     } catch (e) {
       say(msg(e), 'err');

@@ -24,6 +24,15 @@
 
 → **첫 할 일**: 사용자가 RisuAI 에 `plugin/Risu.Hina.Plugin.js` **수동 재설치 1회**(설치본 0.1.0 의 update-url 은 CORS 로 못 읽음) → 다음 릴리스부터 `+` 가 뜨는지 확인 → M2 실사용 검증(§5-2).
 
+## 1-3. 2026-08-26 밤 — v0.6.1: 0.6.0 실사용 피드백 10건
+
+- **썸네일 웹에서도**: RisuAI 메인라인 `factory.ts` CSP 가 `img-src * data: blob:` 으로 바뀜(8/25 소스, 예전 메모 "메인라인은 img-src 없음" 은 옛 사실) → `tab-assets.loadThumb` 의 `hostPlatform==='web'` 게이트 제거. 썸네일은 `readImage` → blob (백엔드 무관, 해시 키 동일).
+- 마크다운 **표**(`markdown.ts` GFM 테이블, 정렬 콜론), 업데이트 노트 `renderMarkdown`.
+- 스냅샷 **삭제/정리**: `snapshots.delete/clear(keep)`·`delete_card/clear_card`, 라우트 `/checkpoint/{delete,clear}`·`/card/checkpoint/{delete,clear}`, UI `snapshotCleanup`(행 ✕·최근 5개·전부). 버전 목록 맨 위 "현재" 행 + "최신 스냅샷" 배지(챗·봇·봇 선택 화면).
+- 봇 선택 화면 스냅샷 목록을 카드 밖 전폭 `chatlist snaplist` 로(챗 목록과 같은 모양). **기본 모드 bot**(`shell.mode`, `state.editMode`). 프리셋 저장 후 `openPicker` 재오픈. 팝오버 `maxWidth = vw-16` + `.catalogpop` 폭 `min(520px, 100vw-32px)`. 설명문 축약.
+- test_http: checkpoint delete/clear 검사.
+- **모바일 단일 화면**(`panes.ts` `mobileToggle`/`showMobileAgent`, `.split.m-agent|.m-centre`, `localStorage hina.mobileView`, 기본 agent): ≤760px 에서 거터 숨김, 우하단 `.mtoggle` 버튼으로 편집 화면 ↔ AI 챗. 드래그가 inline flex-basis 를 두므로 `!important`.
+
 ## 1-2. 2026-08-26 밤 — v0.6.0: 파라미터는 코드가 아니라 데이터 (docs/04 부록 H)
 
 - **왜**: pydantic-ai 는 gpt-5 계열에도 `temperature` 를 보내고(400 "Only the default (1) value is supported"), 툴 정의에 `strict:true`, 상한은 `max_completion_tokens` 로 보낸다. 조사(문서 기준, 2026-08-26): OpenAI 공식은 gpt-5.6 계열에서 **Chat Completions + 툴 호출 자체를 거부**(Responses 필요); Anthropic·Gemini·Vertex 호환 계층은 모르는 필드를 **무시**; Ollama 는 `max_tokens` 만; OpenCode 는 모델별로 `/responses` 와 `/chat/completions` 가 갈리고 Go 는 `opencode.ai/zen/go/v1`; 뉴럴와트 = `api.neuralwatt.com/v1`; Vertex 는 OAuth 토큰만(API 키 불가).

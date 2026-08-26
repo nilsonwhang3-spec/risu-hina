@@ -46,7 +46,9 @@ export type TabId = 'chats' | 'editor' | 'lore' | 'memory' | 'vars'
  * Clicking a chat on the picker enters chat mode; "봇 편집" enters bot mode.
  */
 export type EditMode = 'chat' | 'bot';
-let mode: EditMode = 'chat';
+// The bot half opens first: a session usually starts by looking at the card,
+// and the chat tabs are one click away on the picker either way.
+let mode: EditMode = 'bot';
 
 const CONTENT_TABS: [TabId, string][] = [
   ['chats', '선택'],

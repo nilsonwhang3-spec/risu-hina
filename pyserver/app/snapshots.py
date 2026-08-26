@@ -61,6 +61,26 @@ def rename(chat_key: str, checkpoint_id: str, label: str) -> None:
     db.execute("UPDATE checkpoints SET label = ? WHERE id = ? AND chat_key = ?", (text, checkpoint_id, chat_key))
 
 
+def delete(chat_key: str, checkpoint_id: str) -> None:
+    if db.one("SELECT id FROM checkpoints WHERE id = ? AND chat_key = ?", (checkpoint_id, chat_key)) is None:
+        raise LookupError(f"unknown checkpoint: {checkpoint_id}")
+    db.execute("DELETE FROM checkpoints WHERE id = ? AND chat_key = ?", (checkpoint_id, chat_key))
+
+
+def clear(chat_key: str, keep: int = 0) -> int:
+    """Delete this chat's snapshots, keeping the `keep` newest. Returns how
+    many went."""
+    keep = max(0, int(keep))
+    before = db.one("SELECT COUNT(*) AS n FROM checkpoints WHERE chat_key = ?", (chat_key,))
+    db.execute(
+        "DELETE FROM checkpoints WHERE chat_key = ? AND id NOT IN "
+        "(SELECT id FROM checkpoints WHERE chat_key = ? ORDER BY created_at DESC LIMIT ?)",
+        (chat_key, chat_key, keep),
+    )
+    after = db.one("SELECT COUNT(*) AS n FROM checkpoints WHERE chat_key = ?", (chat_key,))
+    return int((before["n"] if before else 0) - (after["n"] if after else 0))
+
+
 def restore(chat_key: str, checkpoint_id: str) -> dict:
     row = db.one("SELECT * FROM checkpoints WHERE id = ? AND chat_key = ?",
                  (checkpoint_id, chat_key))
@@ -131,6 +151,24 @@ def rename_card(char_key: str, checkpoint_id: str, label: str) -> None:
         raise LookupError(f"unknown checkpoint: {checkpoint_id}")
     db.execute("UPDATE card_checkpoints SET label = ? WHERE id = ? AND char_key = ?",
                (text, checkpoint_id, char_key))
+
+
+def delete_card(char_key: str, checkpoint_id: str) -> None:
+    if db.one("SELECT id FROM card_checkpoints WHERE id = ? AND char_key = ?", (checkpoint_id, char_key)) is None:
+        raise LookupError(f"unknown checkpoint: {checkpoint_id}")
+    db.execute("DELETE FROM card_checkpoints WHERE id = ? AND char_key = ?", (checkpoint_id, char_key))
+
+
+def clear_card(char_key: str, keep: int = 0) -> int:
+    keep = max(0, int(keep))
+    before = db.one("SELECT COUNT(*) AS n FROM card_checkpoints WHERE char_key = ?", (char_key,))
+    db.execute(
+        "DELETE FROM card_checkpoints WHERE char_key = ? AND id NOT IN "
+        "(SELECT id FROM card_checkpoints WHERE char_key = ? ORDER BY created_at DESC LIMIT ?)",
+        (char_key, char_key, keep),
+    )
+    after = db.one("SELECT COUNT(*) AS n FROM card_checkpoints WHERE char_key = ?", (char_key,))
+    return int((before["n"] if before else 0) - (after["n"] if after else 0))
 
 
 def restore_card(char_key: str, checkpoint_id: str) -> dict:

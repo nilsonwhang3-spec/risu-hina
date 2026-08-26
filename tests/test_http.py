@@ -473,6 +473,24 @@ def test_checkpoint_restore(s: Server, ws: dict) -> None:
     st, _ = s.post("/checkpoint/rename", {"chatKey": a, "id": "nope", "label": "x"})
     check("an unknown snapshot is 404", st == 404, str(st))
 
+    # Delete one, then clear down to the newest N, then all.
+    for n in range(3):
+        s.post("/checkpoint", {"chatKey": a, "label": f"extra {n}"})
+    st, body = s.get(f"/checkpoints?chatKey={a}")
+    total = len(body.get("checkpoints") or [])
+    check("several snapshots exist", total >= 5, str(total))
+    st, _ = s.post("/checkpoint/delete", {"chatKey": a, "id": cid})
+    check("one snapshot deleted", st == 200, str(st))
+    st, body = s.get(f"/checkpoints?chatKey={a}")
+    check("it is gone", all(c.get("id") != cid for c in body.get("checkpoints") or []))
+    st, body = s.post("/checkpoint/clear", {"chatKey": a, "keep": 2})
+    check("clear keeps the newest two", st == 200 and body.get("deleted") == total - 1 - 2, str(body))
+    st, body = s.get(f"/checkpoints?chatKey={a}")
+    left = body.get("checkpoints") or []
+    check("two remain, newest first", len(left) == 2 and left[0]["created_at"] >= left[1]["created_at"], str(len(left)))
+    st, body = s.post("/checkpoint/clear", {"chatKey": a, "keep": 0})
+    check("clear all", st == 200 and body.get("deleted") == 2 and not (s.get(f"/checkpoints?chatKey={a}")[1].get("checkpoints")), str(body))
+
 
 def test_reopen_keeps_pending_edits(s: Server, ws: dict) -> None:
     print("test_reopen_keeps_pending_edits")

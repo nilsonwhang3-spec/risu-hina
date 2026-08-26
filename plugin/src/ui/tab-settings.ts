@@ -451,7 +451,7 @@ function buildKeysCard(): HTMLElement {
     const box = el('div', { class: 'keyform' }, [
       el('label', { class: 'field' }, [el('span', { text: '이름' }), name]),
       el('label', { class: 'field' }, [el('span', { text: '프로바이더' }), provider, providerList]),
-      el('div', { class: 'hint', style: { marginTop: '-4px', marginBottom: '10px' }, text: '프로바이더 이름으로 API 주소를 찾습니다(models.dev). 게이트웨이처럼 주소가 따로 있으면 아래에서 직접 지정합니다.' }),
+      el('div', { class: 'hint', style: { marginTop: '-4px', marginBottom: '10px' }, text: '이름을 고르면 주소를 압니다. 주소가 따로 있으면 아래 직접 지정.' }),
       provNote,
       el('label', { class: 'field' }, [el('span', { text: 'API 키' }), apiKey]),
       el('label', { class: 'field' }, [el('span', { text: '메모' }), note]),

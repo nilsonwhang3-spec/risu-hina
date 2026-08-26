@@ -40,6 +40,57 @@ export function threePane(leftNode?: HTMLElement): ThreePaneParts {
   root.appendChild(centre);
   root.appendChild(splitter({ target: right, container: root, storageKey: 'panelWidth' }));
   root.appendChild(right);
+  root.appendChild(mobileToggle(root));
 
   return { root, left, centre, right };
+}
+
+// --- phones: one view at a time ---------------------------------------------
+//
+// Stacking three panes on a 390px screen left the conversation a third of
+// the height and the editor in the way of it. Under the mobile breakpoint the
+// split shows either the agent (default) or the editor side, and a floating
+// button swaps them. The choice is remembered and shared by every tab, so
+// switching tabs does not flip the view back.
+
+type MobileView = 'agent' | 'centre';
+const VIEW_KEY = 'hina.mobileView';
+let mobileView: MobileView = 'agent';
+try {
+  const v = localStorage.getItem(VIEW_KEY);
+  if (v === 'centre' || v === 'agent') mobileView = v;
+} catch { /* storage may be unavailable in the iframe */ }
+// Every live split's sync, keyed by its root so re-rendered tabs drop out.
+const toggles = new Map<HTMLElement, () => void>();
+
+function syncAll(): void {
+  for (const [root, t] of [...toggles]) {
+    if (!root.isConnected && toggles.size > 1) { toggles.delete(root); continue; }
+    t();
+  }
+}
+
+function mobileToggle(root: HTMLElement): HTMLElement {
+  const btn = el('button', { class: 'mtoggle', title: 'AI 챗과 편집 화면을 바꿉니다 (모바일)' });
+  const sync = () => {
+    root.classList.toggle('m-agent', mobileView === 'agent');
+    root.classList.toggle('m-centre', mobileView === 'centre');
+    btn.textContent = mobileView === 'agent' ? '📄 편집 화면' : '💬 AI 챗';
+  };
+  btn.addEventListener('click', () => {
+    mobileView = mobileView === 'agent' ? 'centre' : 'agent';
+    try { localStorage.setItem(VIEW_KEY, mobileView); } catch { /* fine */ }
+    syncAll();
+  });
+  toggles.set(root, sync);
+  sync();
+  return btn;
+}
+
+/** Show the agent side on a phone (a proposal arrived, a run finished). */
+export function showMobileAgent(): void {
+  if (mobileView === 'agent') return;
+  mobileView = 'agent';
+  try { localStorage.setItem(VIEW_KEY, mobileView); } catch { /* fine */ }
+  syncAll();
 }

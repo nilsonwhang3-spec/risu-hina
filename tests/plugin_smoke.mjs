@@ -324,9 +324,10 @@ check('eleven content tabs present', document.querySelectorAll('.tab').length ==
 check('the workspace files tab is set apart', !!document.querySelector('.tabs .tabsep')
       && document.querySelector('.tabs .tabsep')?.nextElementSibling?.id === 'tab-files');
 check('and named for what it is', /워크스페이스 파일/.test(document.getElementById('tab-files')?.textContent || ''));
-check('bot tabs start hidden (chat mode)',
-      document.getElementById('tab-meta')?.style.display === 'none'
-      && document.getElementById('tab-editor')?.style.display !== 'none');
+// The bot half opens first (0.6.1): bot tabs visible, chat tabs hidden.
+check('chat tabs start hidden (bot mode)',
+      document.getElementById('tab-editor')?.style.display === 'none'
+      && document.getElementById('tab-meta')?.style.display !== 'none');
 check('no chat bar on the chat picker', document.querySelector('.toolslot .chatbar')?.style.display === 'none');
 check('settings is not one of them',
       ![...document.querySelectorAll('.tab')].some((t) => t.textContent === '설정'));
@@ -1131,7 +1132,10 @@ console.log('\ntest_clone_bot');
   check('as a new character', chars.length === 2 && clone?.name === '스모크 복제',
         JSON.stringify({ n: chars.length, name: clone?.name }));
   check('with a fresh chaId', !!clone?.chaId && clone.chaId !== 'cha-smoke', clone?.chaId);
-  check('and a fresh chat list', clone?.chats?.length === 1 && clone.chats[0].message.length === 0,
+  // 0.6.1: the chats come along, copied whole from the database slice.
+  const srcChats = chars[0]?.chats ?? [];
+  check('and the chats come along', clone?.chats?.length === srcChats.length
+        && clone.chats.every((c, i) => c.message.length === srcChats[i].message.length),
         JSON.stringify(clone?.chats?.map((c) => c.message.length)));
   check('carrying the edited card', clone?.desc === '스모크가 고친 설명', clone?.desc);
   check('assets shared by reference, not copied', clone?.image === 'assets/portrait.png');
@@ -1216,7 +1220,13 @@ console.log('\ntest_agent_presets_ui');
   [...box.querySelectorAll('button')].find((b) => b.textContent === '저장')
     ?.dispatchEvent(new window.Event('click', { bubbles: true }));
   await settle(1000);
-  check('saving closes the modal', !document.querySelector('.modalbox'));
+  // Saving hands over to the picker (0.6.1): the next question is "which
+  // one runs", so the list opens with the saved preset in it.
+  check('saving opens the picker', /프리셋 선택/.test(document.querySelector('.modalbox')?.textContent || '')
+        && /스모크 프리셋/.test(document.querySelector('.modalbox')?.textContent || ''));
+  pressEscape(document);
+  await settle(300);
+  check('and escape closes it', !document.querySelector('.modalbox'));
   check('the rename shows in the current row',
         /스모크 프리셋/.test(document.querySelector('.presetnow')?.textContent || ''),
         document.querySelector('.presetnow')?.textContent);
@@ -1247,9 +1257,8 @@ console.log('\ntest_agent_presets_ui');
         /스모크 프리셋/.test(document.querySelector('.presetnow')?.textContent || ''),
         document.querySelector('.presetnow')?.textContent);
 
-  // Escape closes a modal - the only other way out besides the backdrop.
-  document.querySelector('.presetnow .chev')?.dispatchEvent(new window.Event('click', { bubbles: true }));
-  await settle(600);
+  // Saving reopened the picker; escape closes a modal - the only other way
+  // out besides the backdrop.
   check('the list now has two', document.querySelectorAll('.modalbox .pickrow').length === 2,
         String(document.querySelectorAll('.modalbox .pickrow').length));
   pressEscape(document);

@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.6.0
+//@display-name Risu Hina v0.6.1
 //@api 3.0
-//@version 0.6.0
+//@version 0.6.1
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@arg backend_url string 백엔드 URL (기본: http://127.0.0.1:6020)
 //@arg backend_token string 백엔드 토큰 (data/token.txt)
@@ -84,7 +84,7 @@
       this.route = "direct";
       this.tokenSafe = true;
       this.lastHealth = body;
-      this.gate = versionGate("0.6.0", String(body.version || ""));
+      this.gate = versionGate("0.6.1", String(body.version || ""));
       return body;
     }
     /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -443,6 +443,7 @@
     const rect = anchor.getBoundingClientRect();
     const vw = window.innerWidth || 1024;
     const vh = window.innerHeight || 768;
+    pop.style.maxWidth = Math.max(200, vw - 16) + "px";
     const pw = pop.offsetWidth || 300;
     const ph = pop.offsetHeight || 200;
     const left = Math.max(8, Math.min(rect.left, vw - pw - 8));
@@ -1061,8 +1062,9 @@ pre.mono {
 /* API key form rows and the model catalog picker. */
 .keyform { border: 1px dashed var(--borderc, #2b323f); border-radius: 6px; padding: 8px; margin: 6px 0; }
 .keyform .row input { flex: 1; min-width: 120px; }
-.catalogpop { min-width: 380px; max-width: 520px; }
-.catalogpop input { width: 100%; }
+.catalogpop { width: min(520px, calc(100vw - 32px)); max-width: none; box-sizing: border-box; }
+.catalogpop input { width: 100%; min-width: 0; box-sizing: border-box; }
+.catalogpop .row { min-width: 0; }
 .cataloglist { max-height: 320px; overflow-y: auto; margin-top: 6px; }
 .catrow {
   display: flex; gap: 8px; width: 100%; text-align: left; padding: 5px 6px; border: none;
@@ -1443,6 +1445,14 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
 /* --- markdown in agent replies ------------------------------------------- */
 .md-p { margin: 0 0 6px; }
 .md-p:last-child { margin-bottom: 0; }
+.md-tablewrap { overflow-x: auto; margin: 4px 0 8px; }
+.md-table { border-collapse: collapse; font-size: 12px; min-width: 50%; }
+.md-table th, .md-table td { border: 1px solid rgba(128,128,128,.3); padding: 3px 7px; text-align: left; vertical-align: top; }
+.md-table th { background: rgba(255,255,255,.06); font-weight: 600; }
+.md-table td.num, .md-table th.num { text-align: right; }
+.md-table td.mid, .md-table th.mid { text-align: center; }
+.snaplist { margin: 6px 0 4px; }
+.verrow .badge.now { background: rgba(37, 99, 235, .25); }
 .md-h { font-weight: 700; margin: 8px 0 4px; }
 .md-h1 { font-size: 15px; }
 .md-h2 { font-size: 14px; }
@@ -1494,8 +1504,24 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
  * checked, so the transcript takes what is left rather than the other way
  * round. The same gutter still resizes, just vertically (see splitter.ts).
  */
+.mtoggle { display: none; }
 @media (max-width: 760px) {
-  .split { flex-direction: column; }
+  .split { flex-direction: column; position: relative; }
+
+  /* One view at a time (panes.ts): the agent, or the explorer + editor.
+     Drags set flex-basis inline, so the shown side must win with !important. */
+  .split .gutter { display: none; }
+  .split.m-agent > .explorer, .split.m-agent > .left { display: none; }
+  .split.m-centre > .right { display: none; }
+  .split.m-agent > .right { flex: 1 1 auto !important; min-height: 0; }
+  .split.m-centre > .left { flex: 1 1 auto !important; }
+  .mtoggle {
+    display: inline-flex; align-items: center; position: absolute; right: 12px; bottom: 64px; z-index: 60;
+    padding: 6px 12px; border-radius: 999px; font-size: 12px; font-weight: 700;
+    background: rgba(37, 99, 235, .92); color: #fff; border: 1px solid rgba(255,255,255,.25);
+    box-shadow: 0 6px 18px rgba(0,0,0,.45);
+  }
+  .split.m-centre .mtoggle { bottom: 14px; }
 
   /* The explorer becomes a scrolling strip of jump targets across the top
      rather than a column eating a third of a 390px screen. */
@@ -1846,7 +1872,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     liveChat = null;
     workspace = null;
     /** Which half of the panel is open ('chat' | 'bot'); the shell keeps it current, the agent is told. */
-    editMode = "chat";
+    editMode = "bot";
     activeChatKey = "";
     botChanges = null;
     /**
@@ -2143,6 +2169,14 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     }
     async renameCheckpoint(id, label) {
       await transport.post("/checkpoint/rename", { chatKey: this.activeChatKey, id, label });
+    }
+    async deleteCheckpoint(id) {
+      await transport.post("/checkpoint/delete", { chatKey: this.activeChatKey, id });
+    }
+    /** Delete this chat's snapshots, keeping the `keep` newest. */
+    async clearCheckpoints(keep = 0) {
+      const r = await transport.post("/checkpoint/clear", { chatKey: this.activeChatKey, keep });
+      return r.deleted;
     }
     async restore(id) {
       const r = await transport.post(
@@ -2680,6 +2714,13 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     async renameCardCheckpoint(id, label) {
       await transport.post("/card/checkpoint/rename", { charKey: this.botKey, id, label });
     }
+    async deleteCardCheckpoint(id) {
+      await transport.post("/card/checkpoint/delete", { charKey: this.botKey, id });
+    }
+    async clearCardCheckpoints(keep = 0) {
+      const r = await transport.post("/card/checkpoint/clear", { charKey: this.botKey, keep });
+      return r.deleted;
+    }
     async cardRestore(id) {
       await transport.post("/card/checkpoint/restore", { charKey: this.botKey, id });
       this.bump();
@@ -3003,8 +3044,14 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         body.appendChild(el("div", { class: "hint", text: "\uC544\uC9C1 \uC2A4\uB0C5\uC0F7\uC774 \uC5C6\uC2B5\uB2C8\uB2E4. \u{1F516} \uC2A4\uB0C5\uC0F7 \uBC84\uD2BC\uC73C\uB85C \uC800\uC7A5\uD574 \uC8FC\uC138\uC694." }));
         return;
       }
-      for (const c of cps.slice(0, 12)) {
-        const b = el("button", { class: "ghost tiny", text: "\uB418\uB3CC\uB9AC\uAE30" });
+      body.appendChild(el("div", { class: "verrow" }, [
+        el("div", { class: "grow" }, [
+          el("div", {}, [el("span", { text: "\uC9C0\uAE08 \uD3B8\uC9D1 \uC911\uC778 \uC0C1\uD0DC " }), el("span", { class: "badge now", text: "\uD604\uC7AC" })]),
+          el("div", { class: "hint", text: "\uC2A4\uB0C5\uC0F7\uC774 \uC544\uB2D9\uB2C8\uB2E4. \uC544\uB798\uB294 \uC624\uB798\uB41C \uC21C\uC774 \uC544\uB2C8\uB77C \uCD5C\uADFC \uC21C\uC785\uB2C8\uB2E4." })
+        ])
+      ]));
+      for (const [idx, c] of cps.slice(0, 12).entries()) {
+        const b = el("button", { class: "ghost tiny", text: "\uB418\uB3CC\uB9AC\uAE30", title: "\uC791\uC5C5\uBCF8\uC744 \uC774 \uC2DC\uC810\uC73C\uB85C \uB418\uB3CC\uB9BD\uB2C8\uB2E4 (\uC9C1\uC804 \uC0C1\uD0DC\uB3C4 \uC2A4\uB0C5\uC0F7\uC73C\uB85C \uB0A8\uC2B5\uB2C8\uB2E4)" });
         b.addEventListener("click", async () => {
           b.disabled = true;
           try {
@@ -3018,27 +3065,72 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
             shellNotice("\uBCF5\uC6D0\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg(e), "err");
           }
         });
-        const title = el("div", { text: c.label || "(\uBB34\uC81C)" });
+        const title = el("div", {}, [
+          el("span", { text: c.label || "(\uBB34\uC81C)" }),
+          idx === 0 ? el("span", { class: "badge", style: { marginLeft: "6px" }, text: "\uCD5C\uC2E0 \uC2A4\uB0C5\uC0F7" }) : null
+        ]);
         const ren = el("button", { class: "ghost tiny", text: "\u270E", title: "\uC774\uB984 \uBC14\uAFB8\uAE30" });
         ren.addEventListener("click", () => {
           openSnapshotName(ren, c.label || "", async (label) => {
             await state.renameCheckpoint(c.id, label);
-            title.textContent = label;
+            title.firstChild.textContent = label;
           });
         });
-        body.appendChild(el("div", { class: "verrow" }, [
+        const row = el("div", { class: "verrow" });
+        const del = el("button", { class: "ghost tiny", title: "\uC774 \uC2A4\uB0C5\uC0F7 \uC0AD\uC81C" });
+        armed(del, "\u2715", "\uC0AD\uC81C?", async () => {
+          try {
+            await state.deleteCheckpoint(c.id);
+            row.remove();
+          } catch (e) {
+            shellNotice("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg(e), "err");
+          }
+        });
+        row.append(
           el("div", { class: "grow" }, [
             title,
             el("div", { class: "hint", text: `${c.message_count}\uD134 \xB7 ${fmtTime(c.created_at * 1e3)}` })
           ]),
           ren,
-          b
-        ]));
+          b,
+          del
+        );
+        body.appendChild(row);
       }
+      if (cps.length > 12) body.appendChild(el("div", { class: "hint", text: `\uADF8 \uC678 ${cps.length - 12}\uAC1C` }));
+      body.appendChild(snapshotCleanup(cps.length, async (keep) => {
+        const n = await state.clearCheckpoints(keep);
+        close();
+        shellNotice(`\uC2A4\uB0C5\uC0F7 ${n}\uAC1C\uB97C \uC9C0\uC6E0\uC2B5\uB2C8\uB2E4.`, "ok");
+      }));
     } catch (e) {
       clear(body);
       body.appendChild(el("div", { class: "hint", text: msg(e) }));
     }
+  }
+  function snapshotCleanup(total, run) {
+    const keep5 = el("button", { class: "ghost tiny", title: "\uCD5C\uADFC 5\uAC1C\uB9CC \uB0A8\uAE30\uACE0 \uC9C0\uC6C1\uB2C8\uB2E4" });
+    const all = el("button", { class: "ghost tiny", title: "\uC2A4\uB0C5\uC0F7\uC744 \uC804\uBD80 \uC9C0\uC6C1\uB2C8\uB2E4" });
+    const wrap = el("div", { class: "row", style: { marginTop: "8px", justifyContent: "flex-end" } }, [
+      el("span", { class: "hint grow", text: `\uC2A4\uB0C5\uC0F7 ${total}\uAC1C` }),
+      total > 5 ? keep5 : null,
+      all
+    ]);
+    armed(keep5, "\uCD5C\uADFC 5\uAC1C\uB9CC \uB0A8\uAE30\uAE30", "\uC815\uB9D0?", async () => {
+      try {
+        await run(5);
+      } catch (e) {
+        shellNotice("\uC815\uB9AC\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg(e), "err");
+      }
+    });
+    armed(all, "\uC804\uBD80 \uC0AD\uC81C", "\uC815\uB9D0 \uC804\uBD80?", async () => {
+      try {
+        await run(0);
+      } catch (e) {
+        shellNotice("\uC815\uB9AC\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg(e), "err");
+      }
+    });
+    return wrap;
   }
   function openSnapshotName(anchor, initial, save) {
     const input = el("input", { value: initial, placeholder: "\uC2A4\uB0C5\uC0F7 \uC774\uB984 (\uC608: 3\uC7A5 \uC2DC\uC791 \uC804)" });
@@ -3081,10 +3173,8 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
   }
 
   // src/ui/tab-chats.ts
-  function botSnapshots(editBot, rescan) {
-    const wrap = el("div", { style: { marginTop: "8px" } });
-    const row = el("div", { class: "row" }, [editBot, rescan]);
-    wrap.appendChild(row);
+  function botSnapshots(editBot) {
+    const wrap = el("div");
     if (!state.activeCharKey) return wrap;
     void (async () => {
       let cps = [];
@@ -3095,10 +3185,19 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       }
       if (!cps.length) return;
       editBot.textContent = "\uD604\uC7AC \uC0C1\uD0DC\uB85C \uD3B8\uC9D1";
-      const list2 = el("div", { class: "snaplist" });
-      for (const c of cps.slice(0, 8)) {
+      wrap.appendChild(el("div", { class: "sectionline" }));
+      wrap.appendChild(el("div", { class: "sectiontitle", text: `\uBD07 \uC2A4\uB0C5\uC0F7 ${cps.length}\uAC1C` }));
+      const list2 = el("div", { class: "chatlist snaplist" });
+      const nowEdit = el("button", { class: "ghost tiny", text: "\uBD07 \uD3B8\uC9D1" });
+      nowEdit.addEventListener("click", () => setEditMode("bot", "meta"));
+      list2.appendChild(el("div", { class: "chatitem current" }, [
+        el("span", { class: "grow", text: "\uC9C0\uAE08 \uD3B8\uC9D1 \uC911\uC778 \uC791\uC5C5\uBCF8" }),
+        el("span", { class: "badge now", text: "\uD604\uC7AC" }),
+        nowEdit
+      ]));
+      for (const [idx, c] of cps.slice(0, 8).entries()) {
         const edit = el("button", { class: "ghost tiny", text: "\uC774 \uC2A4\uB0C5\uC0F7\uC73C\uB85C \uD3B8\uC9D1" });
-        edit.title = "\uC774 \uC2A4\uB0C5\uC0F7\uC73C\uB85C \uB418\uB3CC\uB9B0 \uB4A4 \uBD07 \uD3B8\uC9D1\uC73C\uB85C \uB4E4\uC5B4\uAC11\uB2C8\uB2E4 (\uB418\uB3CC\uB9AC\uAE30 \uC9C1\uC804 \uC0C1\uD0DC\uB3C4 \uC2A4\uB0C5\uC0F7\uC73C\uB85C \uB0A8\uC2B5\uB2C8\uB2E4)";
+        edit.title = "\uC791\uC5C5\uBCF8\uC744 \uC774 \uC2DC\uC810\uC73C\uB85C \uB418\uB3CC\uB9B0 \uB4A4 \uBD07 \uD3B8\uC9D1\uC73C\uB85C \uB4E4\uC5B4\uAC11\uB2C8\uB2E4 (\uC9C1\uC804 \uC0C1\uD0DC\uB3C4 \uC2A4\uB0C5\uC0F7\uC73C\uB85C \uB0A8\uC2B5\uB2C8\uB2E4)";
         edit.addEventListener("click", async () => {
           edit.disabled = true;
           try {
@@ -3109,16 +3208,15 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
             edit.disabled = false;
           }
         });
-        list2.appendChild(el("div", { class: "verrow" }, [
-          el("div", { class: "grow" }, [
-            el("div", { text: c.label || "(\uBB34\uC81C)" }),
-            el("div", { class: "hint", text: fmtTime(c.created_at * 1e3) })
-          ]),
+        list2.appendChild(el("div", { class: "chatitem" }, [
+          el("span", { class: "grow", text: c.label || "(\uBB34\uC81C)" }),
+          idx === 0 ? el("span", { class: "badge", text: "\uCD5C\uC2E0 \uC2A4\uB0C5\uC0F7" }) : null,
+          el("span", { class: "n", text: fmtTime(c.created_at * 1e3) }),
           edit
         ]));
       }
-      wrap.insertBefore(el("div", { class: "hint", style: { marginTop: "8px" }, text: `\uBD07 \uC2A4\uB0C5\uC0F7 ${cps.length}\uAC1C` }), row);
-      wrap.insertBefore(list2, row);
+      if (cps.length > 8) list2.appendChild(el("div", { class: "hint", style: { padding: "4px 0" }, text: `\uADF8 \uC678 ${cps.length - 8}\uAC1C \u2014 \uBD07 \uD3B8\uC9D1 \u2192 \u{1F558} \uBC84\uC804\uC5D0\uC11C \uC804\uBD80 \uBD05\uB2C8\uB2E4` }));
+      wrap.appendChild(list2);
     })();
     return wrap;
   }
@@ -3222,13 +3320,14 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         el("div", { class: "botname", text: String(char.name || "(\uC774\uB984 \uC5C6\uC74C)") }),
         el("div", { class: "hint", text: `\uCC57 ${liveChats.length}\uAC1C` + (folders.length ? ` \xB7 \uD3F4\uB354 ${folders.length}\uAC1C` : "") }),
         assetSyncLine(),
-        botSnapshots(editBot, rescan),
+        el("div", { class: "row", style: { marginTop: "8px" } }, [editBot, rescan]),
         el("div", { class: "hint", style: { marginTop: "6px" } }, [
           "\uB2E4\uB978 \uBD07\uC744 \uD3B8\uC9D1\uD558\uC2DC\uB824\uBA74 RisuAI\uC5D0\uC11C \uADF8 \uBD07\uC744 \uC5F4\uACE0 \u{1F504} \uB97C \uB20C\uB7EC \uC8FC\uC138\uC694."
         ])
       ])
     ]));
     void loadPortrait(char.image, portrait);
+    pad.appendChild(botSnapshots(editBot));
     pad.appendChild(el("div", { class: "sectionline" }));
     pad.appendChild(el("div", { class: "sectiontitle", text: "\uCC57 \uC120\uD0DD" }));
     const ws = state.workspace;
@@ -3490,7 +3589,44 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     root.appendChild(centre);
     root.appendChild(splitter({ target: right, container: root, storageKey: "panelWidth" }));
     root.appendChild(right);
+    root.appendChild(mobileToggle(root));
     return { root, left, centre, right };
+  }
+  var VIEW_KEY = "hina.mobileView";
+  var mobileView = "agent";
+  try {
+    const v = localStorage.getItem(VIEW_KEY);
+    if (v === "centre" || v === "agent") mobileView = v;
+  } catch {
+  }
+  var toggles = /* @__PURE__ */ new Map();
+  function syncAll() {
+    for (const [root, t] of [...toggles]) {
+      if (!root.isConnected && toggles.size > 1) {
+        toggles.delete(root);
+        continue;
+      }
+      t();
+    }
+  }
+  function mobileToggle(root) {
+    const btn = el("button", { class: "mtoggle", title: "AI \uCC57\uACFC \uD3B8\uC9D1 \uD654\uBA74\uC744 \uBC14\uAFC9\uB2C8\uB2E4 (\uBAA8\uBC14\uC77C)" });
+    const sync = () => {
+      root.classList.toggle("m-agent", mobileView === "agent");
+      root.classList.toggle("m-centre", mobileView === "centre");
+      btn.textContent = mobileView === "agent" ? "\u{1F4C4} \uD3B8\uC9D1 \uD654\uBA74" : "\u{1F4AC} AI \uCC57";
+    };
+    btn.addEventListener("click", () => {
+      mobileView = mobileView === "agent" ? "centre" : "agent";
+      try {
+        localStorage.setItem(VIEW_KEY, mobileView);
+      } catch {
+      }
+      syncAll();
+    });
+    toggles.set(root, sync);
+    sync();
+    return btn;
   }
 
   // src/ui/markdown.ts
@@ -3537,6 +3673,32 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         frag.appendChild(q);
         continue;
       }
+      if (line.includes("|") && i + 1 < lines.length && isTableSeparator(lines[i + 1])) {
+        const header = splitRow(line);
+        const aligns = splitRow(lines[i + 1]).map((c) => {
+          const t = c.trim();
+          return t.startsWith(":") && t.endsWith(":") ? "mid" : t.endsWith(":") ? "num" : "";
+        });
+        i += 2;
+        const rows = [];
+        while (i < lines.length && lines[i].includes("|") && lines[i].trim()) {
+          rows.push(splitRow(lines[i]));
+          i++;
+        }
+        const cellClass = (j) => aligns[j] || "";
+        const thead = el("thead", {}, [el("tr", {}, header.map((h, j) => {
+          const th = el("th", { class: cellClass(j) });
+          th.appendChild(inline(h.trim()));
+          return th;
+        }))]);
+        const tbody = el("tbody", {}, rows.map((r) => el("tr", {}, header.map((_, j) => {
+          const td = el("td", { class: cellClass(j) });
+          td.appendChild(inline((r[j] ?? "").trim()));
+          return td;
+        }))));
+        frag.appendChild(el("div", { class: "md-tablewrap" }, [el("table", { class: "md-table" }, [thead, tbody])]));
+        continue;
+      }
       const bullet = line.match(/^\s*([-*+]|\d+\.)\s+/);
       if (bullet) {
         const ordered = /\d/.test(bullet[1]);
@@ -3557,7 +3719,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         continue;
       }
       const para = [];
-      while (i < lines.length && lines[i].trim() && !isBlockStart(lines[i])) {
+      while (i < lines.length && lines[i].trim() && !isBlockStart(lines[i]) && !(lines[i].includes("|") && isTableSeparator(lines[i + 1] ?? ""))) {
         para.push(lines[i]);
         i++;
       }
@@ -3566,6 +3728,16 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       frag.appendChild(p);
     }
     return frag;
+  }
+  function isTableSeparator(line) {
+    const cells2 = splitRow(line);
+    return cells2.length > 0 && cells2.every((c) => /^\s*:?-{1,}:?\s*$/.test(c)) && /-{2,}/.test(line);
+  }
+  function splitRow(line) {
+    let s = line.trim();
+    if (s.startsWith("|")) s = s.slice(1);
+    if (s.endsWith("|") && !s.endsWith("\\|")) s = s.slice(0, -1);
+    return s.split(/(?<!\\)\|/).map((c) => c.replace(/\\\|/g, "|"));
   }
   function isBlockStart(line) {
     return /^\s*```/.test(line) || /^#{1,4}\s/.test(line) || /^\s*>/.test(line) || /^\s*(?:[-*+]|\d+\.)\s/.test(line) || /^\s*([-*_])\1{2,}\s*$/.test(line);
@@ -6383,8 +6555,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       el("div", { class: "card" }, [
         el("h2", { text: "\uAC80\uC0C9 \uC5D0\uC774\uC804\uD2B8" }),
         el("div", { class: "hint", style: { marginBottom: "8px" } }, [
-          "\uC77C\uBC18 \uC5D0\uC774\uC804\uD2B8\uAC00 \uC870\uC0AC\uAC00 \uD544\uC694\uD560 \uB54C web_research \uB85C \uBD80\uB974\uB294 \uBCC4\uB3C4 \uC5D0\uC774\uC804\uD2B8\uC785\uB2C8\uB2E4. \uC6F9 \uAC80\uC0C9 \uD234\uB9CC \uAC16\uACE0, \uC2A4\uD06C\uB9BD\uD2B8\uB294 \uC4F0\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4. ",
-          "\uAC80\uC0C9\uC5D0 \uAC15\uD55C \uC800\uB834\uD55C \uBAA8\uB378 \u2014 Google Gemini(\uAC80\uC0C9 \uADF8\uB77C\uC6B4\uB529) \uB97C \uAD8C\uD569\uB2C8\uB2E4. \uC5C6\uC73C\uBA74 \uC77C\uBC18 \uC5D0\uC774\uC804\uD2B8\uAC00 \uC9C1\uC811 \uAC80\uC0C9\uD569\uB2C8\uB2E4."
+          "\uC77C\uBC18 \uC5D0\uC774\uC804\uD2B8\uAC00 \uC870\uC0AC\uB97C \uB9E1\uAE30\uB294 \uBCF4\uC870 \uC5D0\uC774\uC804\uD2B8(\uC6F9 \uAC80\uC0C9\uB9CC). \uC800\uB834\uD55C \uAC80\uC0C9\uD615 \uBAA8\uB378(\uC608: Gemini Flash)\uC744 \uAD8C\uD569\uB2C8\uB2E4. \uC5C6\uC73C\uBA74 \uC77C\uBC18 \uC5D0\uC774\uC804\uD2B8\uAC00 \uC9C1\uC811 \uAC80\uC0C9\uD569\uB2C8\uB2E4."
         ]),
         searchMount
       ])
@@ -6406,7 +6577,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     const listMount2 = el("div");
     const body = el("div", {}, [
       el("div", { class: "hint", style: { marginBottom: "8px" } }, [
-        "\uACE0\uB974\uBA74 \uBC14\uB85C \uC801\uC6A9\uB429\uB2C8\uB2E4. \uC218\uC815\uD55C \uB0B4\uC6A9\uB3C4 \uADF8 \uC989\uC2DC \uC5D0\uC774\uC804\uD2B8\uC5D0 \uBC18\uC601\uB429\uB2C8\uB2E4."
+        "\uC120\uD0DD\uD558\uBA74 \uBC14\uB85C \uC801\uC6A9\uB429\uB2C8\uB2E4."
       ]),
       listMount2
     ]);
@@ -6504,7 +6675,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     let keys = [];
     const keyRow = el("label", { class: "field" }, [el("span", { text: "API \uD0A4" }), keySel]);
     const keyHint = el("div", { class: "hint", style: { marginTop: "-4px", marginBottom: "10px" } }, [
-      "API \uD0A4 \uD0ED\uC5D0 \uC800\uC7A5\uD55C \uD0A4\uB97C \uACE0\uB974\uAC70\uB098, \uC9C1\uC811 \uC785\uB825\uD569\uB2C8\uB2E4. \uD0A4 \uD0ED\uC758 \uD0A4\uB97C \uACE0\uB974\uBA74 Base URL \uC774 \uBE44\uC5B4 \uC788\uC744 \uB54C \uADF8 \uD0A4\uC758 URL \uC744 \uC501\uB2C8\uB2E4. OpenAI \uAD6C\uB3C5 \uB85C\uADF8\uC778\uB3C4 API \uD0A4 \uD0ED\uC5D0\uC11C \uD569\uB2C8\uB2E4."
+      "API \uD0A4/\uC778\uC99D \uD0ED\uC758 \uD0A4\uB97C \uACE0\uB974\uAC70\uB098 \uC9C1\uC811 \uC785\uB825\uD569\uB2C8\uB2E4. \uD0A4\uB97C \uACE0\uB974\uBA74 \uC8FC\uC18C\uB3C4 \uB530\uB77C\uC635\uB2C8\uB2E4."
     ]);
     const urlRow = el("label", { class: "field" }, [el("span", { text: "Base URL" }), baseUrl]);
     const codexBox = buildCodexBox(model, false);
@@ -6575,7 +6746,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         keepSentinel = r.keepSentinel || keepSentinel;
         keys = r.keys ?? [];
         providers = r.providers ?? [];
-        paramsNote.textContent = `\uC2E4\uC81C \uC694\uCCAD \uD544\uB4DC \uC774\uB984\uC73C\uB85C \uC801\uC2B5\uB2C8\uB2E4. null \uC740 "\uBCF4\uB0B4\uC9C0 \uC54A\uC74C". \uC704 \uCE78\uB4E4\uACFC \uD504\uB85C\uBC14\uC774\uB354 \uAE30\uBCF8\uAC12\uBCF4\uB2E4 \uC6B0\uC120\uD569\uB2C8\uB2E4 (${r.maxParams ?? 4e3}\uC790\uAE4C\uC9C0). \uC608: {"temperature": null, "api": "responses", "max_tokens": 16000, "extra_body": {"thinking": {"type": "enabled"}}}`;
+        paramsNote.textContent = `\uC694\uCCAD \uD544\uB4DC \uC774\uB984 \uADF8\uB300\uB85C, null \uC740 "\uBCF4\uB0B4\uC9C0 \uC54A\uC74C". \uC704 \uCE78\uB4E4\uBCF4\uB2E4 \uC6B0\uC120\uD569\uB2C8\uB2E4. \uC624\uB958 \uBA54\uC2DC\uC9C0\uAC00 \uC54C\uB824\uC8FC\uB294 JSON \uC744 \uC5EC\uAE30\uC5D0 \uBD99\uC785\uB2C8\uB2E4. (${r.maxParams ?? 4e3}\uC790\uAE4C\uC9C0)`;
         clear(keySel);
         keySel.appendChild(el("option", { value: "", text: "\uC9C1\uC811 \uC785\uB825" }));
         for (const k of keys) keySel.appendChild(el("option", { value: k.id, text: `${k.name}${k.provider ? " \xB7 " + k.provider : ""}` }));
@@ -6630,7 +6801,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         el("label", { class: "field grow" }, [el("span", { text: "temperature" }), temperature])
       ]),
       el("div", { class: "hint", style: { marginTop: "-4px", marginBottom: "10px" } }, [
-        "\uC0AC\uACE0(reasoning) \uBAA8\uB378\uC740 \uC0DD\uAC01\uD55C \uD1A0\uD070\uB3C4 \uCD9C\uB825\uC73C\uB85C \uC149\uB2C8\uB2E4. \uB108\uBB34 \uB0AE\uC73C\uBA74 \uB2F5\uC744 \uB0B4\uAE30 \uC804\uC5D0 \uC608\uC0B0\uC774 \uBC14\uB2E5\uB098\uBBC0\uB85C 32000 \uC774\uC0C1\uC744 \uAD8C\uD569\uB2C8\uB2E4."
+        "\uC0AC\uACE0 \uBAA8\uB378\uC740 \uC0DD\uAC01\uD55C \uD1A0\uD070\uB3C4 \uCD9C\uB825\uC5D0 \uD3EC\uD568\uB429\uB2C8\uB2E4 \u2014 32000 \uC774\uC0C1 \uAD8C\uC7A5. temperature \uB294 \uBE44\uC6B0\uBA74 \uBCF4\uB0B4\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4."
       ]),
       el("label", { class: "field" }, [el("span", { text: "Reasoning" }), reasoning]),
       el("div", { class: "row", style: { marginBottom: "8px" } }, [
@@ -6646,7 +6817,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         )
       ]),
       el("div", { class: "hint", style: { marginBottom: "12px" } }, [
-        "\uC138 \uD56D\uBAA9 \uBAA8\uB450 \uAC8C\uC774\uD2B8\uC6E8\uC774\xB7\uBAA8\uB378\uC5D0 \uB530\uB77C \uC9C0\uC6D0 \uC5EC\uBD80\uAC00 \uB2E4\uB985\uB2C8\uB2E4. \uB044\uBA74 \uC694\uCCAD\uC5D0\uC11C \uBE60\uC9C0\uBBC0\uB85C, \uC624\uB958\uAC00 \uB098\uBA74 \uBA3C\uC800 \uAEBC \uBCF4\uC138\uC694."
+        "\uD504\uB85C\uBC14\uC774\uB354\uC5D0 \uB530\uB77C \uC9C0\uC6D0\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uC624\uB958\uAC00 \uB098\uBA74 \uBA3C\uC800 \uAEBC \uBCF4\uC138\uC694."
       ]),
       provBox,
       el("label", { class: "field" }, [el("span", { text: "\uD30C\uB77C\uBBF8\uD130 JSON (\uC120\uD0DD)" }), params]),
@@ -6687,11 +6858,8 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         }, id ?? void 0);
         close();
         await refresh8();
-        if (!id && !saved.selected) {
-          say(`\u201C${saved.name}\u201D \uC744(\uB97C) \uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4. \uC120\uD0DD\uC5D0\uC11C \uACE0\uB974\uBA74 \uBC14\uB85C \uC4F8 \uC218 \uC788\uC2B5\uB2C8\uB2E4.`, "ok");
-        } else {
-          say("\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4.", "ok");
-        }
+        say(saved.selected ? "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4." : `\u201C${saved.name}\u201D \uC744(\uB97C) \uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4. \uC4F0\uB824\uBA74 \uC544\uB798\uC5D0\uC11C \uC120\uD0DD\uD558\uC138\uC694.`, "ok");
+        openPicker(kind, refresh8, say);
       } catch (e) {
         clear(out);
         out.appendChild(el("div", { class: "notice err", text: msg8(e) }));
@@ -6771,10 +6939,9 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
           el("div", {}, [a]),
           el("div", { class: "row", style: { marginTop: "6px" } }, [urlBox, copy]),
           el("ol", { class: "hint steps" }, [
-            el("li", { text: "\uC704 \uC8FC\uC18C\uB97C \uB85C\uADF8\uC778\uD560 \uBE0C\uB77C\uC6B0\uC800\uC5D0\uC11C \uC5FD\uB2C8\uB2E4 (\uB2E4\uB978 \uAE30\uAE30\uC5EC\uB3C4 \uB429\uB2C8\uB2E4)." }),
-            el("li", { text: "ChatGPT \uACC4\uC815\uC73C\uB85C \uB85C\uADF8\uC778\uD569\uB2C8\uB2E4." }),
-            el("li", { text: r.listening ? "\uBC31\uC5D4\uB4DC\uC640 \uAC19\uC740 PC \uC758 \uBE0C\uB77C\uC6B0\uC800\uB77C\uBA74 \uC5EC\uAE30\uC11C \uC790\uB3D9\uC73C\uB85C \uC644\uB8CC\uB429\uB2C8\uB2E4." : "(\uCF5C\uBC31 \uD3EC\uD2B8 1455 \uAC00 \uC0AC\uC6A9 \uC911\uC774\uB77C \uC790\uB3D9 \uC644\uB8CC\uB294 \uC548 \uB429\uB2C8\uB2E4.)" }),
-            el("li", { text: '\uB2E4\uB978 \uAE30\uAE30\uB77C\uBA74 \uB85C\uADF8\uC778 \uB4A4 http://localhost:1455/auth/callback?code=\u2026 \uB85C \uC774\uB3D9\uD558\uB2E4 "\uC5F0\uACB0\uD560 \uC218 \uC5C6\uC74C" \uD398\uC774\uC9C0\uAC00 \uB739\uB2C8\uB2E4 \u2014 \uC815\uC0C1\uC785\uB2C8\uB2E4. \uADF8 \uD398\uC774\uC9C0\uC758 \uC8FC\uC18C \uC804\uCCB4\uB97C \uBCF5\uC0AC\uD574 \uC544\uB798\uC5D0 \uBD99\uC5EC\uB123\uACE0 \uC644\uB8CC\uB97C \uB204\uB985\uB2C8\uB2E4.' })
+            el("li", { text: "\uC704 \uC8FC\uC18C\uB97C \uC5F4\uC5B4 ChatGPT \uACC4\uC815\uC73C\uB85C \uB85C\uADF8\uC778\uD569\uB2C8\uB2E4 (\uB2E4\uB978 \uAE30\uAE30\uC5EC\uB3C4 \uB429\uB2C8\uB2E4)." }),
+            el("li", { text: r.listening ? "\uBC31\uC5D4\uB4DC\uC640 \uAC19\uC740 PC \uC758 \uBE0C\uB77C\uC6B0\uC800\uBA74 \uC790\uB3D9\uC73C\uB85C \uC644\uB8CC\uB429\uB2C8\uB2E4." : "(\uD3EC\uD2B8 1455 \uAC00 \uC0AC\uC6A9 \uC911\uC774\uB77C \uC790\uB3D9 \uC644\uB8CC\uB294 \uC548 \uB429\uB2C8\uB2E4.)" }),
+            el("li", { text: '\uB2E4\uB978 \uAE30\uAE30\uBA74 \uB9C8\uC9C0\uB9C9\uC5D0 "\uC5F0\uACB0\uD560 \uC218 \uC5C6\uC74C" \uD398\uC774\uC9C0(localhost:1455/\u2026)\uAC00 \uB739\uB2C8\uB2E4 \u2014 \uC815\uC0C1. \uADF8 \uC8FC\uC18C \uC804\uCCB4\uB97C \uC544\uB798\uC5D0 \uBD99\uC5EC\uB123\uACE0 \uC644\uB8CC.' })
           ])
         ]));
         pasteRow.style.display = "";
@@ -7191,7 +7358,9 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
           r.installable ? null : el("div", { class: "hint", text: r.reason || "\uC774 \uB9B4\uB9AC\uC2A4\uB294 \uC790\uB3D9 \uC124\uCE58\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4" })
         ]));
         if (r.notes) {
-          out.appendChild(el("pre", { class: "mono filepreview", text: r.notes }));
+          const notes = el("div", { class: "md notes", style: { maxHeight: "320px", overflowY: "auto", marginTop: "8px" } });
+          notes.appendChild(renderMarkdown(r.notes));
+          out.appendChild(notes);
         }
       } catch (e) {
         say(msg10(e), "err");
@@ -7269,7 +7438,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.6.0",
+            version: "0.6.1",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -7722,7 +7891,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       const box = el("div", { class: "keyform" }, [
         el("label", { class: "field" }, [el("span", { text: "\uC774\uB984" }), name]),
         el("label", { class: "field" }, [el("span", { text: "\uD504\uB85C\uBC14\uC774\uB354" }), provider, providerList]),
-        el("div", { class: "hint", style: { marginTop: "-4px", marginBottom: "10px" }, text: "\uD504\uB85C\uBC14\uC774\uB354 \uC774\uB984\uC73C\uB85C API \uC8FC\uC18C\uB97C \uCC3E\uC2B5\uB2C8\uB2E4(models.dev). \uAC8C\uC774\uD2B8\uC6E8\uC774\uCC98\uB7FC \uC8FC\uC18C\uAC00 \uB530\uB85C \uC788\uC73C\uBA74 \uC544\uB798\uC5D0\uC11C \uC9C1\uC811 \uC9C0\uC815\uD569\uB2C8\uB2E4." }),
+        el("div", { class: "hint", style: { marginTop: "-4px", marginBottom: "10px" }, text: "\uC774\uB984\uC744 \uACE0\uB974\uBA74 \uC8FC\uC18C\uB97C \uC555\uB2C8\uB2E4. \uC8FC\uC18C\uAC00 \uB530\uB85C \uC788\uC73C\uBA74 \uC544\uB798 \uC9C1\uC811 \uC9C0\uC815." }),
         provNote,
         el("label", { class: "field" }, [el("span", { text: "API \uD0A4" }), apiKey]),
         el("label", { class: "field" }, [el("span", { text: "\uBA54\uBAA8" }), note]),
@@ -7876,7 +8045,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.6.0"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.6.1"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -8800,8 +8969,14 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         body.appendChild(el("div", { class: "hint", text: "\uC544\uC9C1 \uBD07 \uC2A4\uB0C5\uC0F7\uC774 \uC5C6\uC2B5\uB2C8\uB2E4. \u{1F516} \uC2A4\uB0C5\uC0F7 \uBC84\uD2BC\uC73C\uB85C \uC800\uC7A5\uD574 \uC8FC\uC138\uC694." }));
         return;
       }
-      for (const c of cps.slice(0, 12)) {
-        const b = el("button", { class: "ghost tiny", text: "\uB418\uB3CC\uB9AC\uAE30" });
+      body.appendChild(el("div", { class: "verrow" }, [
+        el("div", { class: "grow" }, [
+          el("div", {}, [el("span", { text: "\uC9C0\uAE08 \uD3B8\uC9D1 \uC911\uC778 \uC791\uC5C5\uBCF8 " }), el("span", { class: "badge now", text: "\uD604\uC7AC" })]),
+          el("div", { class: "hint", text: "\uC2A4\uB0C5\uC0F7\uC774 \uC544\uB2D9\uB2C8\uB2E4. \uC544\uB798\uB294 \uCD5C\uADFC \uC21C\uC785\uB2C8\uB2E4." })
+        ])
+      ]));
+      for (const [idx, c] of cps.slice(0, 12).entries()) {
+        const b = el("button", { class: "ghost tiny", text: "\uB418\uB3CC\uB9AC\uAE30", title: "\uC791\uC5C5\uBCF8\uC744 \uC774 \uC2DC\uC810\uC73C\uB85C \uB418\uB3CC\uB9BD\uB2C8\uB2E4 (\uC9C1\uC804 \uC0C1\uD0DC\uB3C4 \uC2A4\uB0C5\uC0F7\uC73C\uB85C \uB0A8\uC2B5\uB2C8\uB2E4)" });
         b.addEventListener("click", async () => {
           b.disabled = true;
           try {
@@ -8812,23 +8987,44 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
             shellNotice("\uBCF5\uC6D0\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg14(e), "err");
           }
         });
-        const title = el("div", { text: c.label || "(\uBB34\uC81C)" });
+        const title = el("div", {}, [
+          el("span", { text: c.label || "(\uBB34\uC81C)" }),
+          idx === 0 ? el("span", { class: "badge", style: { marginLeft: "6px" }, text: "\uCD5C\uC2E0 \uC2A4\uB0C5\uC0F7" }) : null
+        ]);
         const ren = el("button", { class: "ghost tiny", text: "\u270E", title: "\uC774\uB984 \uBC14\uAFB8\uAE30" });
         ren.addEventListener("click", () => {
           openSnapshotName(ren, c.label || "", async (label) => {
             await state.renameCardCheckpoint(c.id, label);
-            title.textContent = label;
+            title.firstChild.textContent = label;
           });
         });
-        body.appendChild(el("div", { class: "verrow" }, [
+        const row = el("div", { class: "verrow" });
+        const del = el("button", { class: "ghost tiny", title: "\uC774 \uC2A4\uB0C5\uC0F7 \uC0AD\uC81C" });
+        armed(del, "\u2715", "\uC0AD\uC81C?", async () => {
+          try {
+            await state.deleteCardCheckpoint(c.id);
+            row.remove();
+          } catch (e) {
+            shellNotice("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg14(e), "err");
+          }
+        });
+        row.append(
           el("div", { class: "grow" }, [
             title,
             el("div", { class: "hint", text: fmtTime(c.created_at * 1e3) })
           ]),
           ren,
-          b
-        ]));
+          b,
+          del
+        );
+        body.appendChild(row);
       }
+      if (cps.length > 12) body.appendChild(el("div", { class: "hint", text: `\uADF8 \uC678 ${cps.length - 12}\uAC1C` }));
+      body.appendChild(snapshotCleanup(cps.length, async (keep) => {
+        const n = await state.clearCardCheckpoints(keep);
+        close();
+        shellNotice(`\uBD07 \uC2A4\uB0C5\uC0F7 ${n}\uAC1C\uB97C \uC9C0\uC6E0\uC2B5\uB2C8\uB2E4.`, "ok");
+      }));
     } catch (e) {
       clear(body);
       body.appendChild(el("div", { class: "hint", text: msg14(e) }));
@@ -9124,7 +9320,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
   }
   async function loadThumb(c, mount) {
     const isImage = /^(png|jpe?g|gif|webp|avif|bmp)$/i.test(c.ext);
-    if (!isImage || transport.hostPlatform === "web") {
+    if (!isImage) {
       mount.appendChild(el("div", { class: "assettype", text: c.ext.toUpperCase() }));
       return;
     }
@@ -9160,7 +9356,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
   }
 
   // src/ui/shell.ts
-  var mode = "chat";
+  var mode = "bot";
   var CONTENT_TABS = [
     ["chats", "\uC120\uD0DD"],
     ["editor", "\uCC57 \uC5D0\uB527"],
@@ -9309,7 +9505,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       healthEl.appendChild(go);
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.6.0"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.6.1"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
@@ -9384,7 +9580,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.6.0" }),
+        el("span", { class: "dim", text: "v0.6.1" }),
         healthEl,
         el("span", { class: "spacer" }),
         reload,
@@ -9572,6 +9768,6 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.6.0"} loaded`);
+    console.log(`[risu-hina] v${"0.6.1"} loaded`);
   })();
 })();

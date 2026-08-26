@@ -159,8 +159,7 @@ export function buildPresetsCard(opts: PresetsCardOptions): HTMLElement {
     el('div', { class: 'card' }, [
       el('h2', { text: '검색 에이전트' }),
       el('div', { class: 'hint', style: { marginBottom: '8px' } }, [
-        '일반 에이전트가 조사가 필요할 때 web_research 로 부르는 별도 에이전트입니다. 웹 검색 툴만 갖고, 스크립트는 쓰지 않습니다. ',
-        '검색에 강한 저렴한 모델 — Google Gemini(검색 그라운딩) 를 권합니다. 없으면 일반 에이전트가 직접 검색합니다.',
+        '일반 에이전트가 조사를 맡기는 보조 에이전트(웹 검색만). 저렴한 검색형 모델(예: Gemini Flash)을 권합니다. 없으면 일반 에이전트가 직접 검색합니다.',
       ]),
       searchMount,
     ]),
@@ -186,7 +185,7 @@ function openPicker(kind: Kind, refresh: () => Promise<void>, say: (t: string, k
   const listMount = el('div');
   const body = el('div', {}, [
     el('div', { class: 'hint', style: { marginBottom: '8px' } }, [
-      '고르면 바로 적용됩니다. 수정한 내용도 그 즉시 에이전트에 반영됩니다.',
+      '선택하면 바로 적용됩니다.',
     ]),
     listMount,
   ]);
@@ -316,7 +315,7 @@ function openEditor(
   // page) - one select, because to the user they are the same question.
   const keyRow = el('label', { class: 'field' }, [el('span', { text: 'API 키' }), keySel]);
   const keyHint = el('div', { class: 'hint', style: { marginTop: '-4px', marginBottom: '10px' } }, [
-    'API 키 탭에 저장한 키를 고르거나, 직접 입력합니다. 키 탭의 키를 고르면 Base URL 이 비어 있을 때 그 키의 URL 을 씁니다. OpenAI 구독 로그인도 API 키 탭에서 합니다.',
+    'API 키/인증 탭의 키를 고르거나 직접 입력합니다. 키를 고르면 주소도 따라옵니다.',
   ]);
   const urlRow = el('label', { class: 'field' }, [el('span', { text: 'Base URL' }), baseUrl]);
   const codexBox = buildCodexBox(model, false);
@@ -390,7 +389,7 @@ function openEditor(
       keepSentinel = r.keepSentinel || keepSentinel;
       keys = r.keys ?? [];
       providers = r.providers ?? [];
-      paramsNote.textContent = `실제 요청 필드 이름으로 적습니다. null 은 "보내지 않음". 위 칸들과 프로바이더 기본값보다 우선합니다 (${r.maxParams ?? 4000}자까지). 예: {"temperature": null, "api": "responses", "max_tokens": 16000, "extra_body": {"thinking": {"type": "enabled"}}}`;
+      paramsNote.textContent = `요청 필드 이름 그대로, null 은 "보내지 않음". 위 칸들보다 우선합니다. 오류 메시지가 알려주는 JSON 을 여기에 붙입니다. (${r.maxParams ?? 4000}자까지)`;
       clear(keySel);
       keySel.appendChild(el('option', { value: '', text: '직접 입력' }));
       for (const k of keys) keySel.appendChild(el('option', { value: k.id, text: `${k.name}${k.provider ? ' · ' + k.provider : ''}` }));
@@ -452,7 +451,7 @@ function openEditor(
       el('label', { class: 'field grow' }, [el('span', { text: 'temperature' }), temperature]),
     ]),
     el('div', { class: 'hint', style: { marginTop: '-4px', marginBottom: '10px' } }, [
-      '사고(reasoning) 모델은 생각한 토큰도 출력으로 셉니다. 너무 낮으면 답을 내기 전에 예산이 바닥나므로 32000 이상을 권합니다.',
+      '사고 모델은 생각한 토큰도 출력에 포함됩니다 — 32000 이상 권장. temperature 는 비우면 보내지 않습니다.',
     ]),
     el('label', { class: 'field' }, [el('span', { text: 'Reasoning' }), reasoning]),
     el('div', { class: 'row', style: { marginBottom: '8px' } }, [
@@ -462,7 +461,7 @@ function openEditor(
          [flex, el('span', { text: 'Flex 티어' })]),
     ]),
     el('div', { class: 'hint', style: { marginBottom: '12px' } }, [
-      '세 항목 모두 게이트웨이·모델에 따라 지원 여부가 다릅니다. 끄면 요청에서 빠지므로, 오류가 나면 먼저 꺼 보세요.',
+      '프로바이더에 따라 지원이 다릅니다. 오류가 나면 먼저 꺼 보세요.',
     ]),
     provBox,
     el('label', { class: 'field' }, [el('span', { text: '파라미터 JSON (선택)' }), params]),
@@ -502,11 +501,10 @@ function openEditor(
       }, id ?? undefined);
       close();
       await refresh();
-      if (!id && !saved.selected) {
-        say(`“${saved.name}” 을(를) 저장했습니다. 선택에서 고르면 바로 쓸 수 있습니다.`, 'ok');
-      } else {
-        say('저장했습니다.', 'ok');
-      }
+      say(saved.selected ? '저장했습니다.' : `“${saved.name}” 을(를) 저장했습니다. 쓰려면 아래에서 선택하세요.`, 'ok');
+      // Back to the list, not to nothing: the next question after saving is
+      // "which one runs now", and that is answered there.
+      openPicker(kind, refresh, say);
     } catch (e) {
       clear(out);
       out.appendChild(el('div', { class: 'notice err', text: msg(e) }));
@@ -580,12 +578,11 @@ export function buildCodexBox(modelInput: HTMLInputElement | null, withLogin: bo
         el('div', {}, [a]),
         el('div', { class: 'row', style: { marginTop: '6px' } }, [urlBox, copy]),
         el('ol', { class: 'hint steps' }, [
-          el('li', { text: '위 주소를 로그인할 브라우저에서 엽니다 (다른 기기여도 됩니다).' }),
-          el('li', { text: 'ChatGPT 계정으로 로그인합니다.' }),
+          el('li', { text: '위 주소를 열어 ChatGPT 계정으로 로그인합니다 (다른 기기여도 됩니다).' }),
           el('li', { text: r.listening
-            ? '백엔드와 같은 PC 의 브라우저라면 여기서 자동으로 완료됩니다.'
-            : '(콜백 포트 1455 가 사용 중이라 자동 완료는 안 됩니다.)' }),
-          el('li', { text: '다른 기기라면 로그인 뒤 http://localhost:1455/auth/callback?code=… 로 이동하다 "연결할 수 없음" 페이지가 뜹니다 — 정상입니다. 그 페이지의 주소 전체를 복사해 아래에 붙여넣고 완료를 누릅니다.' }),
+            ? '백엔드와 같은 PC 의 브라우저면 자동으로 완료됩니다.'
+            : '(포트 1455 가 사용 중이라 자동 완료는 안 됩니다.)' }),
+          el('li', { text: '다른 기기면 마지막에 "연결할 수 없음" 페이지(localhost:1455/…)가 뜹니다 — 정상. 그 주소 전체를 아래에 붙여넣고 완료.' }),
         ]),
       ]));
       pasteRow.style.display = '';

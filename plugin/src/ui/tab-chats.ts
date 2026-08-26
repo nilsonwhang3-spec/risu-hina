@@ -29,20 +29,31 @@ import { describeSync, syncBusy } from '../assets';
  * a chat is always edited as it is now, its snapshots live behind 버전 on
  * the chat bar where they cannot be mistaken for other chats.
  */
-function botSnapshots(editBot: HTMLElement, rescan: HTMLElement): HTMLElement {
-  const wrap = el('div', { style: { marginTop: '8px' } });
-  const row = el('div', { class: 'row' }, [editBot, rescan]);
-  wrap.appendChild(row);
+function botSnapshots(editBot: HTMLElement): HTMLElement {
+  // Full width under the bot card, in the same list shape as 챗 선택 below -
+  // a narrower column beside the portrait made the two lists look unrelated.
+  const wrap = el('div');
   if (!state.activeCharKey) return wrap;
   void (async () => {
     let cps: { id: string; label: string; created_at: number }[] = [];
     try { cps = await state.cardCheckpoints(); } catch { return; }
     if (!cps.length) return;
     editBot.textContent = '현재 상태로 편집';
-    const list = el('div', { class: 'snaplist' });
-    for (const c of cps.slice(0, 8)) {
+    wrap.appendChild(el('div', { class: 'sectionline' }));
+    wrap.appendChild(el('div', { class: 'sectiontitle', text: `봇 스냅샷 ${cps.length}개` }));
+    const list = el('div', { class: 'chatlist snaplist' });
+    // The working copy is the top row: it is what 봇 편집 opens, and it is
+    // newer than every snapshot below it.
+    const nowEdit = el('button', { class: 'ghost tiny', text: '봇 편집' });
+    nowEdit.addEventListener('click', () => setEditMode('bot', 'meta'));
+    list.appendChild(el('div', { class: 'chatitem current' }, [
+      el('span', { class: 'grow', text: '지금 편집 중인 작업본' }),
+      el('span', { class: 'badge now', text: '현재' }),
+      nowEdit,
+    ]));
+    for (const [idx, c] of cps.slice(0, 8).entries()) {
       const edit = el('button', { class: 'ghost tiny', text: '이 스냅샷으로 편집' }) as HTMLButtonElement;
-      edit.title = '이 스냅샷으로 되돌린 뒤 봇 편집으로 들어갑니다 (되돌리기 직전 상태도 스냅샷으로 남습니다)';
+      edit.title = '작업본을 이 시점으로 되돌린 뒤 봇 편집으로 들어갑니다 (직전 상태도 스냅샷으로 남습니다)';
       edit.addEventListener('click', async () => {
         edit.disabled = true;
         try {
@@ -53,16 +64,15 @@ function botSnapshots(editBot: HTMLElement, rescan: HTMLElement): HTMLElement {
           edit.disabled = false;
         }
       });
-      list.appendChild(el('div', { class: 'verrow' }, [
-        el('div', { class: 'grow' }, [
-          el('div', { text: c.label || '(무제)' }),
-          el('div', { class: 'hint', text: fmtTime(c.created_at * 1000) }),
-        ]),
+      list.appendChild(el('div', { class: 'chatitem' }, [
+        el('span', { class: 'grow', text: c.label || '(무제)' }),
+        idx === 0 ? el('span', { class: 'badge', text: '최신 스냅샷' }) : null,
+        el('span', { class: 'n', text: fmtTime(c.created_at * 1000) }),
         edit,
       ]));
     }
-    wrap.insertBefore(el('div', { class: 'hint', style: { marginTop: '8px' }, text: `봇 스냅샷 ${cps.length}개` }), row);
-    wrap.insertBefore(list, row);
+    if (cps.length > 8) list.appendChild(el('div', { class: 'hint', style: { padding: '4px 0' }, text: `그 외 ${cps.length - 8}개 — 봇 편집 → 🕘 버전에서 전부 봅니다` }));
+    wrap.appendChild(list);
   })();
   return wrap;
 }
@@ -177,13 +187,14 @@ export function renderChatsTab(mount: HTMLElement): void {
       el('div', { class: 'botname', text: String(char.name || '(이름 없음)') }),
       el('div', { class: 'hint', text: `챗 ${liveChats.length}개` + (folders.length ? ` · 폴더 ${folders.length}개` : '') }),
       assetSyncLine(),
-      botSnapshots(editBot, rescan),
+      el('div', { class: 'row', style: { marginTop: '8px' } }, [editBot, rescan]),
       el('div', { class: 'hint', style: { marginTop: '6px' } }, [
         '다른 봇을 편집하시려면 RisuAI에서 그 봇을 열고 🔄 를 눌러 주세요.',
       ]),
     ]),
   ]));
   void loadPortrait(char.image as string | undefined, portrait);
+  pad.appendChild(botSnapshots(editBot));
 
   pad.appendChild(el('div', { class: 'sectionline' }));
 

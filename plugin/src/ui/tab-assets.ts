@@ -11,9 +11,9 @@
  * are still arriving is the kind of half-state nobody would guess at, so
  * the grid is read-only until the backend reports the bot complete.
  *
- * Thumbnails come from the host where it can give them (PocketRisu /
- * desktop). The web build's iframe CSP blocks blob: images, so there a type
- * badge stands in.
+ * Thumbnails come from the host (readImage): the bytes are RisuAI's own,
+ * keyed by content hash, so no round trip to the backend. A host whose CSP
+ * refuses blob: images gets a type badge instead.
  */
 import { el, clear, armed, refocusSearch, popover } from './dom';
 import { state, type AssetItem, type CardScript } from '../state';
@@ -321,10 +321,15 @@ function beginRename(c: Cell, nameEl: HTMLElement): void {
   try { input.select(); } catch { /* linkedom */ }
 }
 
-/** Thumbnail from the host where it works; a type badge on the web build (CSP). */
+/**
+ * Thumbnail read from the host (readImage -> blob: URL). The web build's
+ * iframe CSP used to block blob: images; since RisuAI's 2026-08 mainline it
+ * allows `img-src * data: blob:`, so every host gets a try. A host that
+ * still refuses fires the img error handler, and the type badge stands in.
+ */
 async function loadThumb(c: Cell, mount: HTMLElement): Promise<void> {
   const isImage = /^(png|jpe?g|gif|webp|avif|bmp)$/i.test(c.ext);
-  if (!isImage || transport.hostPlatform === 'web') {
+  if (!isImage) {
     mount.appendChild(el('div', { class: 'assettype', text: c.ext.toUpperCase() }));
     return;
   }

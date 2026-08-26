@@ -378,7 +378,7 @@ class AppState {
 
   workspace: WorkspaceInfo | null = null;
   /** Which half of the panel is open ('chat' | 'bot'); the shell keeps it current, the agent is told. */
-  editMode: 'chat' | 'bot' = 'chat';
+  editMode: 'chat' | 'bot' = 'bot';
   activeChatKey = '';
   botChanges: CardChanges | null = null;
   /**
@@ -700,6 +700,16 @@ class AppState {
 
   async renameCheckpoint(id: string, label: string): Promise<void> {
     await transport.post('/checkpoint/rename', { chatKey: this.activeChatKey, id, label });
+  }
+
+  async deleteCheckpoint(id: string): Promise<void> {
+    await transport.post('/checkpoint/delete', { chatKey: this.activeChatKey, id });
+  }
+
+  /** Delete this chat's snapshots, keeping the `keep` newest. */
+  async clearCheckpoints(keep = 0): Promise<number> {
+    const r = await transport.post('/checkpoint/clear', { chatKey: this.activeChatKey, keep }) as { deleted: number };
+    return r.deleted;
   }
 
   async restore(id: string): Promise<{ lore: number | null; memory: number | null }> {
@@ -1347,6 +1357,15 @@ class AppState {
 
   async renameCardCheckpoint(id: string, label: string): Promise<void> {
     await transport.post('/card/checkpoint/rename', { charKey: this.botKey, id, label });
+  }
+
+  async deleteCardCheckpoint(id: string): Promise<void> {
+    await transport.post('/card/checkpoint/delete', { charKey: this.botKey, id });
+  }
+
+  async clearCardCheckpoints(keep = 0): Promise<number> {
+    const r = await transport.post('/card/checkpoint/clear', { charKey: this.botKey, keep }) as { deleted: number };
+    return r.deleted;
   }
 
   async cardRestore(id: string): Promise<void> {

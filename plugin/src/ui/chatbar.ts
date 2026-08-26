@@ -224,8 +224,16 @@ async function openVersions(anchor: HTMLElement): Promise<void> {
       body.appendChild(el('div', { class: 'hint', text: '아직 스냅샷이 없습니다. 🔖 스냅샷 버튼으로 저장해 주세요.' }));
       return;
     }
-    for (const c of cps.slice(0, 12)) {
-      const b = el('button', { class: 'ghost tiny', text: '되돌리기' });
+    // The working copy first, so "which one is newest" has an answer: the
+    // top row is now, the rows below are the past, newest first.
+    body.appendChild(el('div', { class: 'verrow' }, [
+      el('div', { class: 'grow' }, [
+        el('div', {}, [el('span', { text: '지금 편집 중인 상태 ' }), el('span', { class: 'badge now', text: '현재' })]),
+        el('div', { class: 'hint', text: '스냅샷이 아닙니다. 아래는 오래된 순이 아니라 최근 순입니다.' }),
+      ]),
+    ]));
+    for (const [idx, c] of cps.slice(0, 12).entries()) {
+      const b = el('button', { class: 'ghost tiny', text: '되돌리기', title: '작업본을 이 시점으로 되돌립니다 (직전 상태도 스냅샷으로 남습니다)' });
       b.addEventListener('click', async () => {
         (b as HTMLButtonElement).disabled = true;
         try {
@@ -241,26 +249,64 @@ async function openVersions(anchor: HTMLElement): Promise<void> {
           shellNotice('복원에 실패했습니다: ' + msg(e), 'err');
         }
       });
-      const title = el('div', { text: c.label || '(무제)' });
+      const title = el('div', {}, [
+        el('span', { text: c.label || '(무제)' }),
+        idx === 0 ? el('span', { class: 'badge', style: { marginLeft: '6px' }, text: '최신 스냅샷' }) : null,
+      ]);
       const ren = el('button', { class: 'ghost tiny', text: '✎', title: '이름 바꾸기' });
       ren.addEventListener('click', () => {
         openSnapshotName(ren, c.label || '', async (label) => {
           await state.renameCheckpoint(c.id, label);
-          title.textContent = label;
+          (title.firstChild as HTMLElement).textContent = label;
         });
       });
-      body.appendChild(el('div', { class: 'verrow' }, [
+      const row = el('div', { class: 'verrow' });
+      const del = el('button', { class: 'ghost tiny', title: '이 스냅샷 삭제' });
+      armed(del, '✕', '삭제?', async () => {
+        try {
+          await state.deleteCheckpoint(c.id);
+          row.remove();
+        } catch (e) {
+          shellNotice('삭제하지 못했습니다: ' + msg(e), 'err');
+        }
+      });
+      row.append(
         el('div', { class: 'grow' }, [
           title,
           el('div', { class: 'hint', text: `${c.message_count}턴 · ${fmtTime(c.created_at * 1000)}` }),
         ]),
-        ren, b,
-      ]));
+        ren, b, del,
+      );
+      body.appendChild(row);
     }
+    if (cps.length > 12) body.appendChild(el('div', { class: 'hint', text: `그 외 ${cps.length - 12}개` }));
+    body.appendChild(snapshotCleanup(cps.length, async (keep) => {
+      const n = await state.clearCheckpoints(keep);
+      close();
+      shellNotice(`스냅샷 ${n}개를 지웠습니다.`, 'ok');
+    }));
   } catch (e) {
     clear(body);
     body.appendChild(el('div', { class: 'hint', text: msg(e) }));
   }
+}
+
+/** The bulk row under a snapshot list: keep the newest few, or drop them all. */
+export function snapshotCleanup(total: number, run: (keep: number) => Promise<void>): HTMLElement {
+  const keep5 = el('button', { class: 'ghost tiny', title: '최근 5개만 남기고 지웁니다' });
+  const all = el('button', { class: 'ghost tiny', title: '스냅샷을 전부 지웁니다' });
+  const wrap = el('div', { class: 'row', style: { marginTop: '8px', justifyContent: 'flex-end' } }, [
+    el('span', { class: 'hint grow', text: `스냅샷 ${total}개` }),
+    total > 5 ? keep5 : null,
+    all,
+  ]);
+  armed(keep5, '최근 5개만 남기기', '정말?', async () => {
+    try { await run(5); } catch (e) { shellNotice('정리하지 못했습니다: ' + msg(e), 'err'); }
+  });
+  armed(all, '전부 삭제', '정말 전부?', async () => {
+    try { await run(0); } catch (e) { shellNotice('정리하지 못했습니다: ' + msg(e), 'err'); }
+  });
+  return wrap;
 }
 
 /**

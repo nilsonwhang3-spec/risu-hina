@@ -15,7 +15,7 @@
  */
 import { el, clear, armed, popover, TOOL, fmtTime } from './dom';
 import { state, type CardChanges } from '../state';
-import { shellNotice, openSnapshotName } from './chatbar';
+import { shellNotice, openSnapshotName, snapshotCleanup } from './chatbar';
 import { clientLog } from '../transport';
 
 let bar: HTMLElement | null = null;
@@ -294,8 +294,14 @@ async function openVersions(anchor: HTMLElement): Promise<void> {
       body.appendChild(el('div', { class: 'hint', text: '아직 봇 스냅샷이 없습니다. 🔖 스냅샷 버튼으로 저장해 주세요.' }));
       return;
     }
-    for (const c of cps.slice(0, 12)) {
-      const b = el('button', { class: 'ghost tiny', text: '되돌리기' });
+    body.appendChild(el('div', { class: 'verrow' }, [
+      el('div', { class: 'grow' }, [
+        el('div', {}, [el('span', { text: '지금 편집 중인 작업본 ' }), el('span', { class: 'badge now', text: '현재' })]),
+        el('div', { class: 'hint', text: '스냅샷이 아닙니다. 아래는 최근 순입니다.' }),
+      ]),
+    ]));
+    for (const [idx, c] of cps.slice(0, 12).entries()) {
+      const b = el('button', { class: 'ghost tiny', text: '되돌리기', title: '작업본을 이 시점으로 되돌립니다 (직전 상태도 스냅샷으로 남습니다)' });
       b.addEventListener('click', async () => {
         (b as HTMLButtonElement).disabled = true;
         try {
@@ -306,22 +312,42 @@ async function openVersions(anchor: HTMLElement): Promise<void> {
           shellNotice('복원에 실패했습니다: ' + msg(e), 'err');
         }
       });
-      const title = el('div', { text: c.label || '(무제)' });
+      const title = el('div', {}, [
+        el('span', { text: c.label || '(무제)' }),
+        idx === 0 ? el('span', { class: 'badge', style: { marginLeft: '6px' }, text: '최신 스냅샷' }) : null,
+      ]);
       const ren = el('button', { class: 'ghost tiny', text: '✎', title: '이름 바꾸기' });
       ren.addEventListener('click', () => {
         openSnapshotName(ren, c.label || '', async (label) => {
           await state.renameCardCheckpoint(c.id, label);
-          title.textContent = label;
+          (title.firstChild as HTMLElement).textContent = label;
         });
       });
-      body.appendChild(el('div', { class: 'verrow' }, [
+      const row = el('div', { class: 'verrow' });
+      const del = el('button', { class: 'ghost tiny', title: '이 스냅샷 삭제' });
+      armed(del, '✕', '삭제?', async () => {
+        try {
+          await state.deleteCardCheckpoint(c.id);
+          row.remove();
+        } catch (e) {
+          shellNotice('삭제하지 못했습니다: ' + msg(e), 'err');
+        }
+      });
+      row.append(
         el('div', { class: 'grow' }, [
           title,
           el('div', { class: 'hint', text: fmtTime(c.created_at * 1000) }),
         ]),
-        ren, b,
-      ]));
+        ren, b, del,
+      );
+      body.appendChild(row);
     }
+    if (cps.length > 12) body.appendChild(el('div', { class: 'hint', text: `그 외 ${cps.length - 12}개` }));
+    body.appendChild(snapshotCleanup(cps.length, async (keep) => {
+      const n = await state.clearCardCheckpoints(keep);
+      close();
+      shellNotice(`봇 스냅샷 ${n}개를 지웠습니다.`, 'ok');
+    }));
   } catch (e) {
     clear(body);
     body.appendChild(el('div', { class: 'hint', text: msg(e) }));

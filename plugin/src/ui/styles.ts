@@ -277,8 +277,9 @@ pre.mono {
 /* API key form rows and the model catalog picker. */
 .keyform { border: 1px dashed var(--borderc, #2b323f); border-radius: 6px; padding: 8px; margin: 6px 0; }
 .keyform .row input { flex: 1; min-width: 120px; }
-.catalogpop { min-width: 380px; max-width: 520px; }
-.catalogpop input { width: 100%; }
+.catalogpop { width: min(520px, calc(100vw - 32px)); max-width: none; box-sizing: border-box; }
+.catalogpop input { width: 100%; min-width: 0; box-sizing: border-box; }
+.catalogpop .row { min-width: 0; }
 .cataloglist { max-height: 320px; overflow-y: auto; margin-top: 6px; }
 .catrow {
   display: flex; gap: 8px; width: 100%; text-align: left; padding: 5px 6px; border: none;
@@ -659,6 +660,14 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
 /* --- markdown in agent replies ------------------------------------------- */
 .md-p { margin: 0 0 6px; }
 .md-p:last-child { margin-bottom: 0; }
+.md-tablewrap { overflow-x: auto; margin: 4px 0 8px; }
+.md-table { border-collapse: collapse; font-size: 12px; min-width: 50%; }
+.md-table th, .md-table td { border: 1px solid rgba(128,128,128,.3); padding: 3px 7px; text-align: left; vertical-align: top; }
+.md-table th { background: rgba(255,255,255,.06); font-weight: 600; }
+.md-table td.num, .md-table th.num { text-align: right; }
+.md-table td.mid, .md-table th.mid { text-align: center; }
+.snaplist { margin: 6px 0 4px; }
+.verrow .badge.now { background: rgba(37, 99, 235, .25); }
 .md-h { font-weight: 700; margin: 8px 0 4px; }
 .md-h1 { font-size: 15px; }
 .md-h2 { font-size: 14px; }
@@ -710,8 +719,24 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
  * checked, so the transcript takes what is left rather than the other way
  * round. The same gutter still resizes, just vertically (see splitter.ts).
  */
+.mtoggle { display: none; }
 @media (max-width: 760px) {
-  .split { flex-direction: column; }
+  .split { flex-direction: column; position: relative; }
+
+  /* One view at a time (panes.ts): the agent, or the explorer + editor.
+     Drags set flex-basis inline, so the shown side must win with !important. */
+  .split .gutter { display: none; }
+  .split.m-agent > .explorer, .split.m-agent > .left { display: none; }
+  .split.m-centre > .right { display: none; }
+  .split.m-agent > .right { flex: 1 1 auto !important; min-height: 0; }
+  .split.m-centre > .left { flex: 1 1 auto !important; }
+  .mtoggle {
+    display: inline-flex; align-items: center; position: absolute; right: 12px; bottom: 64px; z-index: 60;
+    padding: 6px 12px; border-radius: 999px; font-size: 12px; font-weight: 700;
+    background: rgba(37, 99, 235, .92); color: #fff; border: 1px solid rgba(255,255,255,.25);
+    box-shadow: 0 6px 18px rgba(0,0,0,.45);
+  }
+  .split.m-centre .mtoggle { bottom: 14px; }
 
   /* The explorer becomes a scrolling strip of jump targets across the top
      rather than a column eating a third of a 390px screen. */

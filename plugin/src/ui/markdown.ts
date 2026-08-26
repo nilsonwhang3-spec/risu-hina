@@ -64,6 +64,35 @@ export function renderMarkdown(text: string): DocumentFragment {
       continue;
     }
 
+    // GFM table: a header row, a separator row of dashes (with optional
+    // alignment colons), then body rows - each row a pipe-separated line.
+    if (line.includes('|') && i + 1 < lines.length && isTableSeparator(lines[i + 1])) {
+      const header = splitRow(line);
+      const aligns = splitRow(lines[i + 1]).map((c) => {
+        const t = c.trim();
+        return t.startsWith(':') && t.endsWith(':') ? 'mid' : t.endsWith(':') ? 'num' : '';
+      });
+      i += 2;
+      const rows: string[][] = [];
+      while (i < lines.length && lines[i].includes('|') && lines[i].trim()) {
+        rows.push(splitRow(lines[i]));
+        i++;
+      }
+      const cellClass = (j: number) => aligns[j] || '';
+      const thead = el('thead', {}, [el('tr', {}, header.map((h, j) => {
+        const th = el('th', { class: cellClass(j) });
+        th.appendChild(inline(h.trim()));
+        return th;
+      }))]);
+      const tbody = el('tbody', {}, rows.map((r) => el('tr', {}, header.map((_, j) => {
+        const td = el('td', { class: cellClass(j) });
+        td.appendChild(inline((r[j] ?? '').trim()));
+        return td;
+      }))));
+      frag.appendChild(el('div', { class: 'md-tablewrap' }, [el('table', { class: 'md-table' }, [thead, tbody])]));
+      continue;
+    }
+
     const bullet = line.match(/^\s*([-*+]|\d+\.)\s+/);
     if (bullet) {
       const ordered = /\d/.test(bullet[1]);
@@ -88,7 +117,8 @@ export function renderMarkdown(text: string): DocumentFragment {
     // A paragraph runs until a blank line or the start of another block, so a
     // wrapped sentence stays one paragraph instead of becoming several.
     const para: string[] = [];
-    while (i < lines.length && lines[i].trim() && !isBlockStart(lines[i])) {
+    while (i < lines.length && lines[i].trim() && !isBlockStart(lines[i])
+           && !(lines[i].includes('|') && isTableSeparator(lines[i + 1] ?? ''))) {
       para.push(lines[i]);
       i++;
     }
@@ -97,6 +127,20 @@ export function renderMarkdown(text: string): DocumentFragment {
     frag.appendChild(p);
   }
   return frag;
+}
+
+function isTableSeparator(line: string): boolean {
+  // |---|:--:|--:| or ---|--- : every cell is dashes with optional colons.
+  const cells = splitRow(line);
+  return cells.length > 0 && cells.every((c) => /^\s*:?-{1,}:?\s*$/.test(c)) && /-{2,}/.test(line);
+}
+
+/** Cells of a table row, outer pipes stripped, escaped pipes kept. */
+function splitRow(line: string): string[] {
+  let s = line.trim();
+  if (s.startsWith('|')) s = s.slice(1);
+  if (s.endsWith('|') && !s.endsWith('\\|')) s = s.slice(0, -1);
+  return s.split(/(?<!\\)\|/).map((c) => c.replace(/\\\|/g, '|'));
 }
 
 function isBlockStart(line: string): boolean {
