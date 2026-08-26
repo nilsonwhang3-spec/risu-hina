@@ -1,4 +1,4 @@
-# 06. 구현 상태 — 2026-08-26 기준 (v0.5.0, Risu Hina)
+# 06. 구현 상태 — 2026-08-26 기준 (v0.6.0, Risu Hina)
 
 다음 세션에 이어서 할 사람(=나)을 위한 한 장. 무엇이 있고, 무엇이 바뀌었고, 어디까지 배포됐고,
 무엇이 남았는지. 설계의 *이유*는 `docs/04`(에셋·charx 는 부록 E), 저장 구조는 `docs/02`, 배포 환경은 `docs/00`.
@@ -14,7 +14,7 @@
 |---|---|---|
 | test-server **실행 중** | **0.5.2** — 클린 설치 `D:\code\risu-hina`, **NSSM 서비스 `RisuHina`**(`cmd.exe /c start.bat 6020`, Automatic, ActiveRecall·risuai 와 같은 방식). 2026-08-26 밤 ssh 로 훼손된 `pyserver\python` 제거 → 0.5.2 zip 을 폴더 위에 풀기(`data/` 유지) → `nssm stop/start` → `/health` 0.5.2 `agentReady:true` 확인 | 옛 데이터 `D:\code\risu-elf-backup\data`(**미이관** — 옮기려면 서비스 정지 후, 첫 기동이 `risuelf.db→risuhina.db` 입양) |
 | test-server config | `pocketrisu.savePath = D:\code\risu-nodeonly\Risuai-NodeOnly\save` → `/diag` `fastPath:true, serverWrite:true` | 같은 PC 의 PocketRisu 를 SQLite 로 직독 |
-| GitHub 릴리스 | **v0.5.0 Latest (Risu Hina)** · v0.4.2 · … · v0.1.0 | `gh release create` 는 auto 모드 분류기가 막는다 — 수동 권한 모드에서는 내가 직접 실행(0.3.1·0.3.2). test-server 는 0.3.2 배포·검증됨, raw 주소도 0.3.2 |
+| GitHub 릴리스 | **v0.6.0 Latest** (2026-08-26 22:18, 자산 4개, raw 플러그인 주소도 0.6.0) · v0.5.2 · … · v0.1.0 | `gh release create` 는 auto 모드 분류기가 막는다 — 수동 권한 모드에서는 내가 직접 실행(0.3.1·0.3.2). test-server 는 0.3.2 배포·검증됨, raw 주소도 0.3.2 |
 | RisuAI 설치 플러그인 | **0.3.1 을 한 번 수동 재설치해야 함** — 설치본의 `//@update-url` 이 CORS 없는 릴리스 주소라 `+` 가 영영 안 뜬다(docs/04 B.4) | 그 뒤부터는 raw 주소라 `+` 가 뜬다 |
 
 **0.3.2 (2026-08-25 밤)** — 실사용 첫 회: PC 브라우저(risu.xyz) 봇 312장 0.6초, 아이폰(risu.xyz) `office counseling` 2980장 5.3초, 전부 `fast=N`(같은 PC 의 PocketRisu `risuai.db` 캐시 히트, 브라우저 전송 0). 사용자가 "포켓리스에서 연결한 것처럼 읽어갔다"고 의심 → 키가 SHA-256 이라 같은 바이트임을 확인하고, `assets.store_bytes` 가 **키 해시 = 바이트 해시** 를 검증하도록(출처 불문 거부), 동기화 줄이 출처(PocketRisu DB / 허브 / 이 브라우저)를 밝히도록 고침(docs/04 E.2). 고속 경로는 읽기 전용이며 쓰기는 항상 접속한 클라이언트에만 간다.
