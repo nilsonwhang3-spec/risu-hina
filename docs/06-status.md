@@ -1,4 +1,4 @@
-# 06. 구현 상태 — 2026-08-26 기준 (v0.6.1, Risu Hina)
+# 06. 구현 상태 — 2026-08-27 기준 (v0.6.2, Risu Hina)
 
 다음 세션에 이어서 할 사람(=나)을 위한 한 장. 무엇이 있고, 무엇이 바뀌었고, 어디까지 배포됐고,
 무엇이 남았는지. 설계의 *이유*는 `docs/04`(에셋·charx 는 부록 E), 저장 구조는 `docs/02`, 배포 환경은 `docs/00`.
@@ -6,7 +6,7 @@
 
 ## 0. 다음 세션 시작점 (먼저 읽을 것)
 
-**코드 상태**: master = **v0.6.1**(§1-3) 태그·푸시·릴리스됨. 게이트 ALL GREEN(신규 test_providers 포함).
+**코드 상태**: master = **v0.6.2**(§1-4; 다음 세션은 docs/07 플래닝부터) 태그·푸시·릴리스됨. 게이트 ALL GREEN(신규 test_providers 포함).
 
 **배포 상태 (2026-08-25 21:01 `deploy.ps1`, 새 SSH 세션에서 확인)**:
 
@@ -14,7 +14,7 @@
 |---|---|---|
 | test-server **실행 중** | **0.5.2** — 클린 설치 `D:\code\risu-hina`, **NSSM 서비스 `RisuHina`**(`cmd.exe /c start.bat 6020`, Automatic, ActiveRecall·risuai 와 같은 방식). 2026-08-26 밤 ssh 로 훼손된 `pyserver\python` 제거 → 0.5.2 zip 을 폴더 위에 풀기(`data/` 유지) → `nssm stop/start` → `/health` 0.5.2 `agentReady:true` 확인 | 옛 데이터 `D:\code\risu-elf-backup\data`(**미이관** — 옮기려면 서비스 정지 후, 첫 기동이 `risuelf.db→risuhina.db` 입양) |
 | test-server config | `pocketrisu.savePath = D:\code\risu-nodeonly\Risuai-NodeOnly\save` → `/diag` `fastPath:true, serverWrite:true` | 같은 PC 의 PocketRisu 를 SQLite 로 직독 |
-| GitHub 릴리스 | **v0.6.1 Latest** (2026-08-26 23:02, 자산 4개, raw 플러그인 주소도 0.6.1) · v0.6.0 · v0.5.2 · … · v0.1.0 | `gh release create` 는 auto 모드 분류기가 막는다 — 수동 권한 모드에서는 내가 직접 실행(0.3.1·0.3.2). test-server 는 0.3.2 배포·검증됨, raw 주소도 0.3.2 |
+| GitHub 릴리스 | **v0.6.2 Latest** (2026-08-27 07:22, 자산 4개) · v0.6.1 · v0.6.0 · v0.5.2 · … · v0.1.0 | `gh release create` 는 auto 모드 분류기가 막는다 — 수동 권한 모드에서는 내가 직접 실행(0.3.1·0.3.2). test-server 는 0.3.2 배포·검증됨, raw 주소도 0.3.2 |
 | RisuAI 설치 플러그인 | **0.3.1 을 한 번 수동 재설치해야 함** — 설치본의 `//@update-url` 이 CORS 없는 릴리스 주소라 `+` 가 영영 안 뜬다(docs/04 B.4) | 그 뒤부터는 raw 주소라 `+` 가 뜬다 |
 
 **0.3.2 (2026-08-25 밤)** — 실사용 첫 회: PC 브라우저(risu.xyz) 봇 312장 0.6초, 아이폰(risu.xyz) `office counseling` 2980장 5.3초, 전부 `fast=N`(같은 PC 의 PocketRisu `risuai.db` 캐시 히트, 브라우저 전송 0). 사용자가 "포켓리스에서 연결한 것처럼 읽어갔다"고 의심 → 키가 SHA-256 이라 같은 바이트임을 확인하고, `assets.store_bytes` 가 **키 해시 = 바이트 해시** 를 검증하도록(출처 불문 거부), 동기화 줄이 출처(PocketRisu DB / 허브 / 이 브라우저)를 밝히도록 고침(docs/04 E.2). 고속 경로는 읽기 전용이며 쓰기는 항상 접속한 클라이언트에만 간다.
@@ -27,7 +27,8 @@
 ## 1-4. 2026-08-27 아침 — v0.6.2: 서버 로그의 오류 2건
 
 - **코덱스 무응답** = `400 Invalid 'input[29].id': 'reasoning'. Expected an ID that begins with 'rs'`. pydantic-ai 의 chat/completions 경로는 응답의 `reasoning` 필드를 `ThinkingPart(id='reasoning')` 로 남기고, Responses 경로는 이력의 ThinkingPart 를 `id` 그대로 reasoning 아이템으로 재전송한다 → 프리셋을 게이트웨이에서 코덱스로 바꾸면 터짐. 고침: `session.neutralise_thinking(history, model)` — 대상이 `OpenAIResponsesModel` 일 때 `rs_` 로 시작하고 같은 system 인 것만 id 유지, 나머지는 `id=None, signature=None`(pydantic-ai 가 보내지 않는 조건). `tests/test_history.py` 게이트 추가.
-- **로어북 18개** = `list_lore` 가 본문 1500자씩 붙여 25000자에서 조용히 잘림(스크립트로 우회 불가 — 로어북은 DB, 샌드박스는 워크스페이스만). 고침: 목록은 본문 없이 전부(이름·key·상시·글자수·80자 미리보기, 60000자 초과 시 "이하 N개 생략" 명시), 본문은 새 툴 `read_lore_entry(id)`, `read_lore` 는 목록과 동일.
+- **로어북 18개** = `list_lore` 가 본문 1500자씩 붙여 25000자에서 조용히 잘림. 고침: 목록은 본문 없이 전부(이름·key·상시·글자수·80자 미리보기, 60000자 초과 시 "이하 N개 생략" 명시), 본문은 새 툴 `read_lore_entry(id)`, `read_lore` 는 목록과 동일. **정정**: 스크립트로 우회는 가능했다 — 샌드박스에 이 봇 행만 복사한 `.scratch/scope.db` 와 `risuhina.lore()/conn()` 이 이미 있다(지침에도 있음). 에이전트가 안 쓴 것 + 툴이 절단을 안 알린 것.
+- **다음 세션 플래닝 (사용자 지시: 단순 해결 금지)** → `docs/07-agent-data-access-plan.md`: 스냅샷(`scope.db`) 버저닝 이슈(스탬프가 lore/스크립트 내용/에셋/메모리 변경을 못 봄), 권한 모델 두 갈래(툴 vs 스크립트), 선택지 A(스탬프 보강) / **B(원본 DB 를 authorizer 로 봇 스코프·읽기 전용 라이브 연결, 세팅·API 키 테이블 원천 차단, 쓰기는 전부 승인 큐)**, 절단 규칙 전수 점검.
 
 ## 1-3. 2026-08-26 밤 — v0.6.1: 0.6.0 실사용 피드백 10건
 
