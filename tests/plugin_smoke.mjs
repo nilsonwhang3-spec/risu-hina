@@ -1180,7 +1180,11 @@ console.log('\ntest_agent_presets_ui');
           .some((i) => (i.getAttribute('placeholder') || '').includes('ai-gateway')));
 
   // --- the editor is a focused modal ---------------------------------------
-  [...(current?.querySelectorAll('button') || [])].find((b) => b.textContent === '수정')
+  // The current row carries one chevron; 수정 lives in the list behind it.
+  current?.querySelector('.chev')?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(700);
+  check('› opens the preset list', !!document.querySelector('.modalbox .pickrow'));
+  [...document.querySelectorAll('.modalbox .pickrow.on button')].find((b) => b.textContent === '수정')
     ?.dispatchEvent(new window.Event('click', { bubbles: true }));
   await settle(700);
   const box = document.querySelector('.modalbox');
@@ -1220,8 +1224,7 @@ console.log('\ntest_agent_presets_ui');
         /기본지침 있음/.test(document.querySelector('.presetnow')?.textContent || ''));
 
   // --- the picker ----------------------------------------------------------
-  [...document.querySelectorAll('.presetnow button')].find((b) => /선택/.test(b.textContent || ''))
-    ?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  document.querySelector('.presetnow .chev')?.dispatchEvent(new window.Event('click', { bubbles: true }));
   await settle(800);
   check('선택 opens the list', !!document.querySelector('.modalbox'));
   check('the list marks which one is in use',
@@ -1245,8 +1248,7 @@ console.log('\ntest_agent_presets_ui');
         document.querySelector('.presetnow')?.textContent);
 
   // Escape closes a modal - the only other way out besides the backdrop.
-  [...document.querySelectorAll('.presetnow button')].find((b) => /선택/.test(b.textContent || ''))
-    ?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  document.querySelector('.presetnow .chev')?.dispatchEvent(new window.Event('click', { bubbles: true }));
   await settle(600);
   check('the list now has two', document.querySelectorAll('.modalbox .pickrow').length === 2,
         String(document.querySelectorAll('.modalbox .pickrow').length));
@@ -1427,7 +1429,9 @@ console.log('\ntest_agent_welcome');
   [...document.querySelectorAll('.subtab')].find((t) => t.textContent === '에이전트')
     ?.dispatchEvent(new window.Event('click', { bubbles: true }));
   await settle(500);
-  [...document.querySelectorAll('.presetnow button')].find((b) => b.textContent === '수정')
+  document.querySelector('.presetnow .chev')?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(600);
+  [...document.querySelectorAll('.modalbox .pickrow.on button')].find((b) => b.textContent === '수정')
     ?.dispatchEvent(new window.Event('click', { bubbles: true }));
   await settle(700);
   const box = document.querySelector('.modalbox');

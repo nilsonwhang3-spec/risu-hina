@@ -23,6 +23,7 @@ import { renderTriggerTab } from './tab-trigger';
 import { buildChatBar, refreshChatBar } from './chatbar';
 import { buildBotBar, refreshBotBar } from './botbar';
 import { renderAssetsTab } from './tab-assets';
+import { getSettingsBar } from './tab-settings';
 
 /**
  * Content views in the tab bar; settings is not one of them.
@@ -69,6 +70,8 @@ const BOT_TABS = new Set<TabId>(['meta', 'botlore', 'regex', 'trigger', 'assets'
 
 export function setEditMode(m: EditMode, tab?: TabId): void {
   mode = m;
+  // The agent is told which half is open with every prompt (Deps.mode).
+  state.editMode = m;
   syncModeTabs();
   if (tab) setTab(tab);
   else if ((m === 'chat' ? BOT_TABS : CHAT_TABS).has(active)) setTab('chats');
@@ -171,8 +174,30 @@ export function setTab(tab: TabId): void {
   // The gear is a toggle, so it has to look pressed while settings is open.
   document.getElementById('open-settings')?.classList.toggle('on', tab === 'settings');
   renderActive();
+  syncSettingsBar();
   syncToolslot();
   refreshTabBadges();
+}
+
+/**
+ * While settings is open the tab row shows the settings sections (연결 ·
+ * API 키/인증 · 에이전트 · 스킬 · 정보·로그) in place of the content tabs -
+ * the row always names what the panel is showing.
+ */
+function syncSettingsBar(): void {
+  const row = document.querySelector('.tabs') as HTMLElement | null;
+  if (!row) return;
+  const inSettings = active === 'settings';
+  for (const b of Array.from(row.querySelectorAll('.tab, .tabsep'))) {
+    (b as HTMLElement).style.display = inSettings ? 'none' : '';
+  }
+  if (!inSettings) syncModeTabs();
+  syncBadge.style.visibility = inSettings ? 'hidden' : '';
+  const bar = getSettingsBar();
+  if (bar) {
+    if (bar.parentElement !== row) row.appendChild(bar);
+    bar.style.display = inSettings ? '' : 'none';
+  }
 }
 
 export function currentTab(): TabId {
@@ -220,8 +245,11 @@ export function refreshStatus(): void {
     healthEl.appendChild(el('span', { text: '백엔드 연결 안 됨' }));
     healthEl.appendChild(el('span', {
       class: 'hint',
-      text: state.connectError || '설정 탭에서 URL과 토큰을 확인해 주세요',
+      text: state.connectError || '설정에서 URL과 토큰을 확인해 주세요',
     }));
+    const go = el('button', { class: 'ghost tiny', text: '설정으로' });
+    go.addEventListener('click', () => setTab('settings'));
+    healthEl.appendChild(go);
   } else {
     healthEl.appendChild(el('span', { class: 'hint', text: `백엔드 v${h.version}` }));
     if (!h.agentReady) {
@@ -229,6 +257,10 @@ export function refreshStatus(): void {
     }
   }
 
+  // The bot first, then the chat: the bot is what the panel was opened on
+  // and the bot tabs have no chat to name.
+  const botName = state.character?.name ? String(state.character.name) : '';
+  if (botName) healthEl.appendChild(el('span', { class: 'hint botname', text: `· ${botName}` }));
   const chat = state.activeChat;
   if (chat) {
     healthEl.appendChild(el('span', {

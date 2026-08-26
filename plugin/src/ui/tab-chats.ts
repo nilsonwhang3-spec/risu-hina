@@ -9,9 +9,9 @@
  * Chat counts of 30-50 across folders are normal, so folders collapse and the
  * list is plain rows rather than cards - at that count, cards are a wall.
  */
-import { el, clear, refocusSearch } from './dom';
+import { el, clear, refocusSearch, fmtTime } from './dom';
 import { state } from '../state';
-import { setEditMode, setToolbarSearch } from './shell';
+import { setEditMode, setToolbarSearch, setTab } from './shell';
 import { shellNotice } from './chatbar';
 import type { RisuChat } from '../risuai';
 import { describeSync, syncBusy } from '../assets';
@@ -22,6 +22,51 @@ import { describeSync, syncBusy } from '../assets';
  * totals once it is done, and a retry when it stopped short - the bot bar's
  * 반영 waits on exactly this.
  */
+/**
+ * The bot's snapshots, right on the picker. No snapshots: one 봇 편집
+ * button. Snapshots: each row offers to restore it and edit from there, and
+ * 현재 상태로 편집 keeps the working copy as it is. Chats do not get this -
+ * a chat is always edited as it is now, its snapshots live behind 버전 on
+ * the chat bar where they cannot be mistaken for other chats.
+ */
+function botSnapshots(editBot: HTMLElement, rescan: HTMLElement): HTMLElement {
+  const wrap = el('div', { style: { marginTop: '8px' } });
+  const row = el('div', { class: 'row' }, [editBot, rescan]);
+  wrap.appendChild(row);
+  if (!state.activeCharKey) return wrap;
+  void (async () => {
+    let cps: { id: string; label: string; created_at: number }[] = [];
+    try { cps = await state.cardCheckpoints(); } catch { return; }
+    if (!cps.length) return;
+    editBot.textContent = '현재 상태로 편집';
+    const list = el('div', { class: 'snaplist' });
+    for (const c of cps.slice(0, 8)) {
+      const edit = el('button', { class: 'ghost tiny', text: '이 스냅샷으로 편집' }) as HTMLButtonElement;
+      edit.title = '이 스냅샷으로 되돌린 뒤 봇 편집으로 들어갑니다 (되돌리기 직전 상태도 스냅샷으로 남습니다)';
+      edit.addEventListener('click', async () => {
+        edit.disabled = true;
+        try {
+          await state.cardRestore(c.id);
+          setEditMode('bot', 'meta');
+        } catch (e) {
+          flash(wrap, '복원하지 못했습니다: ' + (e instanceof Error ? e.message : String(e)));
+          edit.disabled = false;
+        }
+      });
+      list.appendChild(el('div', { class: 'verrow' }, [
+        el('div', { class: 'grow' }, [
+          el('div', { text: c.label || '(무제)' }),
+          el('div', { class: 'hint', text: fmtTime(c.created_at * 1000) }),
+        ]),
+        edit,
+      ]));
+    }
+    wrap.insertBefore(el('div', { class: 'hint', style: { marginTop: '8px' }, text: `봇 스냅샷 ${cps.length}개` }), row);
+    wrap.insertBefore(list, row);
+  })();
+  return wrap;
+}
+
 function assetSyncLine(): HTMLElement {
   const p = state.assetSync;
   const wrap = el('div', { class: 'assetsync' });
@@ -69,10 +114,14 @@ export function renderChatsTab(mount: HTMLElement): void {
   mount.appendChild(pad);
 
   if (state.connectError) {
+    const go = el('button', { class: 'primary tiny', text: '설정으로 이동' });
+    go.addEventListener('click', () => setTab('settings'));
     pad.appendChild(el('div', { class: 'notice err' }, [
       el('div', { text: '백엔드에 연결하지 못했습니다.' }),
       el('div', { class: 'hint', text: state.connectError }),
-      el('div', { class: 'hint', text: '설정 탭에서 URL과 토큰을 확인해 주세요.' }),
+      el('div', { class: 'row', style: { marginTop: '6px' } }, [
+        el('span', { class: 'hint', text: '설정 → 연결에서 URL과 토큰을 확인해 주세요.' }), go,
+      ]),
     ]));
   }
 
@@ -128,7 +177,7 @@ export function renderChatsTab(mount: HTMLElement): void {
       el('div', { class: 'botname', text: String(char.name || '(이름 없음)') }),
       el('div', { class: 'hint', text: `챗 ${liveChats.length}개` + (folders.length ? ` · 폴더 ${folders.length}개` : '') }),
       assetSyncLine(),
-      el('div', { class: 'row', style: { marginTop: '8px' } }, [editBot, rescan]),
+      botSnapshots(editBot, rescan),
       el('div', { class: 'hint', style: { marginTop: '6px' } }, [
         '다른 봇을 편집하시려면 RisuAI에서 그 봇을 열고 🔄 를 눌러 주세요.',
       ]),

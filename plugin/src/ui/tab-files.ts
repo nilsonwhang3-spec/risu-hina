@@ -18,7 +18,7 @@
  * have to unfold the internals to find it. Those are listed up top under their
  * own heading; the .py files, logs and queues around them stay folded.
  */
-import { el, clear, armed } from './dom';
+import { el, clear, armed, popover, setSelected, selectedValue } from './dom';
 import { state, type FileArea, type FileListing, type WorkspaceFile } from '../state';
 import { threePane } from './panes';
 import { bindAgent, mountAgent } from './agentpane';
@@ -55,6 +55,10 @@ let viewMount: HTMLElement | null = null;
 let noticeMount: HTMLElement | null = null;
 let showInternal = false;
 let openPath = '';
+/** The last listing, for folder pickers. */
+let lastListing: FileListing | null = null;
+/** Where the next upload lands (a folder inside uploads/). */
+let uploadDir = 'uploads';
 
 export function renderFilesTab(mount: HTMLElement): void {
   if (!state.activeCharKey) {
@@ -108,6 +112,7 @@ async function refresh(): Promise<void> {
   treeMount.appendChild(el('div', { class: 'hint', style: { padding: '8px' }, text: '읽는 중입니다…' }));
   try {
     const data = await state.files();
+    lastListing = data;
     drawTree(data);
     // A log line in the agent panel asked for this file; honour it once the
     // tree is drawn, so the row can be highlighted too.
@@ -155,7 +160,32 @@ function drawTree(data: FileListing): void {
   const reloadBtn = el('button', { class: 'ghost tiny', text: '새로고침' });
   reloadBtn.addEventListener('click', () => void refresh());
 
-  treeMount.appendChild(el('div', { class: 'treehead' }, [uploadBtn, reloadBtn, picker]));
+  const dirSel = el('select', { class: 'tiny', title: '올린 파일이 들어갈 폴더' }) as HTMLSelectElement;
+  for (const d of uploadTargets()) dirSel.appendChild(el('option', { value: d, text: d === 'uploads' ? 'uploads/' : d.slice(8) + '/' }));
+  setSelected(dirSel, uploadTargets().includes(uploadDir) ? uploadDir : 'uploads');
+  dirSel.addEventListener('change', () => { uploadDir = selectedValue(dirSel) || 'uploads'; });
+  const newDir = el('button', { class: 'ghost tiny', text: '새 폴더', title: 'uploads/ 나 out/ 안에 폴더를 만듭니다' });
+  newDir.addEventListener('click', () => {
+    const body = el('div', { class: 'applypop' });
+    const close = popover(newDir, body);
+    const where = el('select', {}, ['uploads', 'out'].map((a) => el('option', { value: a, text: a + '/' }))) as HTMLSelectElement;
+    const name = el('input', { placeholder: '폴더 이름' }) as HTMLInputElement;
+    const ok = el('button', { class: 'primary tiny', text: '만들기' });
+    ok.addEventListener('click', async () => {
+      const n = name.value.trim().replace(/[\/]+/g, '-');
+      if (!n) return;
+      try {
+        await state.mkdirFile(selectedValue(where) + '/' + n);
+        close();
+        await refresh();
+      } catch (e) {
+        notice('만들지 못했습니다: ' + msg(e), 'err');
+      }
+    });
+    body.appendChild(el('div', { class: 'row' }, [where, name, ok]));
+    setTimeout(() => name.focus(), 0);
+  });
+  treeMount.appendChild(el('div', { class: 'treehead' }, [uploadBtn, dirSel, newDir, reloadBtn, picker]));
 
   let anyFiles = false;
   for (const area of shown) {
@@ -214,7 +244,36 @@ function drawTree(data: FileListing): void {
 function areaBranch(area: FileArea, surfaced = false): HTMLElement {
   const [base, why] = AREA_LABEL[area.area] ?? [area.area, ''];
   const label = surfaced ? `${base} 문서` : base;
-  const rows = area.files.map((f) => fileRow(area, f));
+  // Files at the area's root first, then each folder (empty ones too) with
+  // its files indented under it. One level of grouping by the path's folder
+  // part is what "put things in folders" needs; deeper trees still show.
+  const dirs = new Set<string>(surfaced ? [] : (area.dirs ?? []));
+  const byDir = new Map<string, WorkspaceFile[]>();
+  for (const f of area.files) {
+    const dir = f.path.includes('/') ? f.path.slice(0, f.path.lastIndexOf('/')) : area.area;
+    const key = dir === area.area ? '' : dir;
+    if (key) dirs.add(key);
+    if (!byDir.has(key)) byDir.set(key, []);
+    byDir.get(key)!.push(f);
+  }
+  const rows: HTMLElement[] = (byDir.get('') ?? []).map((f) => fileRow(area, f));
+  for (const dir of [...dirs].sort()) {
+    const files = byDir.get(dir) ?? [];
+    const shortName = dir.slice(area.area.length + 1);
+    const head = el('div', { class: 'treerow folderrow' }, [
+      el('span', { class: 'treefile folderlabel', text: '📁 ' + shortName, title: dir }),
+      el('span', { class: 'hint', text: String(files.length) }),
+    ]);
+    if (area.deletable && !surfaced) {
+      const del = el('button', { class: 'ghost tiny', title: '폴더를 안의 파일과 함께 지웁니다' });
+      armed(del, '×', '폴더째?', async () => {
+        try { await state.deleteFile(dir); await refresh(); } catch (e) { notice('지우지 못했습니다: ' + msg(e), 'err'); }
+      });
+      head.appendChild(del);
+    }
+    rows.push(head);
+    rows.push(el('div', { class: 'treekids folderkids' }, files.map((f) => fileRow(area, f))));
+  }
 
   const head = el('button', {
     class: 'treebranch',
@@ -234,6 +293,23 @@ function areaBranch(area: FileArea, surfaced = false): HTMLElement {
   return el('div', {}, [head, body]);
 }
 
+/** Folders a file may be moved into: the deletable areas and their folders. */
+function moveTargets(): string[] {
+  const out: string[] = [];
+  for (const a of lastListing?.areas ?? []) {
+    if (!a.deletable) continue;
+    out.push(a.area);
+    for (const d of a.dirs ?? []) out.push(d);
+  }
+  return out;
+}
+
+/** uploads/ and its folders - where an upload may land. */
+function uploadTargets(): string[] {
+  const up = (lastListing?.areas ?? []).find((a) => a.area === 'uploads');
+  return ['uploads', ...(up?.dirs ?? [])];
+}
+
 function fileRow(area: FileArea, f: WorkspaceFile): HTMLElement {
   const name = el('button', {
     class: 'treefile' + (f.path === openPath ? ' on' : ''),
@@ -244,6 +320,31 @@ function fileRow(area: FileArea, f: WorkspaceFile): HTMLElement {
 
   const row = el('div', { class: 'treerow' }, [name]);
   if (area.deletable) {
+    // 이동: any folder in the deletable areas, the area roots included.
+    const mv = el('button', { class: 'ghost tiny', text: '이동', title: '다른 폴더로 옮깁니다' });
+    mv.addEventListener('click', () => {
+      const body = el('div', { class: 'applypop' });
+      const close = popover(mv, body);
+      body.appendChild(el('div', { class: 'hint', text: `${f.name} 을(를) 옮길 곳:` }));
+      const here = f.path.includes('/') ? f.path.slice(0, f.path.lastIndexOf('/')) : '';
+      for (const target of moveTargets()) {
+        if (target === here) continue;
+        const b = el('button', { class: 'catrow', text: '📁 ' + target });
+        b.addEventListener('click', async () => {
+          try {
+            await state.moveFile(f.path, target);
+            close();
+            if (openPath === f.path) { openPath = ''; if (viewMount) clear(viewMount); }
+            state.touchFiles();
+            await refresh();
+          } catch (e) {
+            notice('옮기지 못했습니다: ' + msg(e), 'err');
+          }
+        });
+        body.appendChild(b);
+      }
+    });
+    row.appendChild(mv);
     const del = el('button', { class: 'ghost tiny' });
     armed(del, '×', '한 번 더', async () => {
       try {
@@ -338,13 +439,13 @@ async function open(f: WorkspaceFile, area: FileArea): Promise<void> {
 async function upload(file: File): Promise<void> {
   const isText = /\.(md|txt|json|jsonl|csv|py|html?|css|js|ya?ml|xml|log|sql)$/i.test(file.name);
   if (isText) {
-    await state.uploadFile(file.name, await file.text());
+    await state.uploadFile(file.name, await file.text(), false, uploadDir);
     return;
   }
   const buf = new Uint8Array(await file.arrayBuffer());
   let bin = '';
   for (let i = 0; i < buf.length; i++) bin += String.fromCharCode(buf[i]);
-  await state.uploadFile(file.name, btoa(bin), true);
+  await state.uploadFile(file.name, btoa(bin), true, uploadDir);
 }
 
 function fmtSize(n: number): string {

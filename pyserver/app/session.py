@@ -18,10 +18,13 @@ from typing import Any, AsyncGenerator
 
 from pydantic_ai.messages import (
     ModelMessagesTypeAdapter,
+    ModelRequest,
+    ModelResponse,
     PartDeltaEvent,
     PartStartEvent,
     TextPart,
     TextPartDelta,
+    UserPromptPart,
 )
 
 from . import agent as agent_mod
@@ -216,8 +219,9 @@ def _model_refs(model: str) -> list[str]:
     return refs
 
 
-async def run(session_id: str, prompt: str) -> AsyncGenerator[str, None]:
-    """Drive one agent turn, yielding NDJSON lines."""
+async def run(session_id: str, prompt: str, mode: str = "") -> AsyncGenerator[str, None]:
+    """Drive one agent turn, yielding NDJSON lines. `mode` is the half of the
+    panel the user is looking at ('chat' | 'bot'), see agent.Deps.mode."""
     srow = db.one("SELECT * FROM sessions WHERE id = ?", (session_id,))
     if srow is None:
         yield _line({"type": "error", "error": f"unknown session: {session_id}"})
@@ -239,6 +243,7 @@ async def run(session_id: str, prompt: str) -> AsyncGenerator[str, None]:
         char_key=crow["char_key"],
         session_id=session_id,
         workspace_dir=ws_dir,
+        mode=mode if mode in ("chat", "bot") else "",
     )
 
     _save_message(session_id, "user", prompt)
@@ -265,8 +270,13 @@ async def run(session_id: str, prompt: str) -> AsyncGenerator[str, None]:
                       usage={**counts, "model": model_name}, cost=cost)
         # Store the wire-form history separately so the next turn can resume the
         # conversation exactly, including tool calls and their results.
+        # If the history processor compacted the conversation this turn, the
+        # compacted form is what gets stored - otherwise every later turn would
+        # pay to summarise the same old messages again.
+        compacted = agent_mod.COMPACTED.pop(session_id, None)
+        stored = (compacted + list(result.new_messages())) if compacted is not None else result.all_messages()
         _save_message(session_id, "history",
-                      json.loads(ModelMessagesTypeAdapter.dump_json(result.all_messages())))
+                      json.loads(ModelMessagesTypeAdapter.dump_json(stored)))
         db.execute(
             "INSERT INTO cost_ledger(session_id, chat_key, model, in_tokens, out_tokens, "
             "cost_usd, priced, ts) VALUES(?,?,?,?,?,?,?,?)",
@@ -285,9 +295,28 @@ async def run(session_id: str, prompt: str) -> AsyncGenerator[str, None]:
         })
         log.info("agent turn session=%s in=%s out=%s cost=%s staged=%s",
                  session_id, counts.get("input"), counts.get("output"), cost, len(pending))
-    except Exception as e:  # noqa: BLE001 - the stream is the only channel back
+    except BaseException as e:  # noqa: BLE001 - the stream is the only channel back
+        # A turn that fails or is cut off must still leave its prompt (and
+        # whatever text arrived) in the history: the next turn used to start
+        # from the last SUCCESSFUL one, so after one error the agent had never
+        # heard the prompts in between and lost the thread.
+        _save_partial_history(session_id, prompt, "".join(text_acc), _explain(e) if isinstance(e, Exception) else "중단됨")
+        if not isinstance(e, Exception):
+            raise
         log.exception(f"agent run failed session={session_id}")
         yield _line({"type": "error", "error": _explain(e)})
+
+
+def _save_partial_history(session_id: str, prompt: str, partial: str, why: str) -> None:
+    try:
+        history = list(_history(session_id))
+        history.append(ModelRequest(parts=[UserPromptPart(content=prompt)]))
+        note = (partial + "\n\n" if partial else "") + f"(이 턴은 완료되지 못했습니다: {why})"
+        history.append(ModelResponse(parts=[TextPart(content=note)]))
+        _save_message(session_id, "history",
+                      json.loads(ModelMessagesTypeAdapter.dump_json(history)))
+    except Exception as e2:  # noqa: BLE001 - best effort, never masks the real error
+        log.warn("partial history save failed session=%s: %s", session_id, e2)
 
 
 def _explain(e: Exception) -> str:

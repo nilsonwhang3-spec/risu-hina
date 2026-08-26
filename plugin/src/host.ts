@@ -330,6 +330,7 @@ export async function cloneBot(
   seenChaId: string | undefined,
   name: string,
   update: CardUpdate,
+  familyKey = '',
 ): Promise<string> {
   const src = await readCharacter(sourceIndex);
   if (seenChaId && src.chaId && src.chaId !== seenChaId) {
@@ -337,6 +338,14 @@ export async function cloneBot(
   }
 
   const copy: RisuCharacter = structuredClone(src);
+  // The copy shares the source's workspace: the backend reads this stamp on
+  // upload (workspace.family_from_card). RisuAI keeps unknown extension keys
+  // through save, export and charx import, so it survives round trips.
+  if (familyKey) {
+    const ext = { ...((copy['extentions'] as Record<string, unknown> | undefined) ?? {}) };
+    ext['risu_hina'] = { ...((ext['risu_hina'] as Record<string, unknown> | undefined) ?? {}), family: familyKey };
+    copy['extentions'] = ext;
+  }
   for (const e of update.fields ?? []) copy[e.field] = e.after;
   if (update.alternateGreetings) copy.alternateGreetings = update.alternateGreetings;
   if (update.globalLore) copy.globalLore = update.globalLore;

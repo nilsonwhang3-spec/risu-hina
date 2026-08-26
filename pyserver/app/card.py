@@ -32,8 +32,9 @@ from . import db, log, store
 # backgroundHTML/backgroundCSS are card fields too (database.svelte.ts:1712,
 # 1714) but the panel edits them on the Regex tab, next to the scripts that
 # usually accompany them - the meta tab filters them out.
+# replaceGlobalNote = RisuAI's "글로벌 노트 덮어쓰기" (post_history_instructions in a card).
 SCALARS = ("name", "desc", "firstMessage", "creatorNotes", "characterVersion",
-           "backgroundHTML")
+           "replaceGlobalNote", "backgroundHTML")
 # backgroundCSS: RisuAI's UI has no field for it, so neither has this panel.
 _RETIRED = ("personality", "scenario", "exampleMessage",
             "systemPrompt", "postHistoryInstructions", "backgroundCSS")

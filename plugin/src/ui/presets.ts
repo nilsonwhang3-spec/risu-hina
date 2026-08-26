@@ -86,8 +86,11 @@ export function buildPresetsCard(opts: PresetsCardOptions): HTMLElement {
         total ? pick : null, add,
       ]);
     }
-    const edit = el('button', { class: 'primary', text: '수정' });
-    edit.addEventListener('click', () => openEditor(kind, p.id, refresh, say));
+    // One chevron: the list behind it is where 수정 and 삭제 live, next to
+    // 추가. The current row only says what is running.
+    const open = el('button', { class: 'ghost chev', text: '›', title: `저장된 프리셋 ${total}개 — 선택 · 수정 · 삭제 · 추가` });
+    open.addEventListener('click', () => openPicker(kind, refresh, say));
+    void pick;
     const row = el('div', { class: 'presetnow' }, [
       el('div', { class: 'grow' }, [
         el('div', { class: 'presetnow-name' }, [
@@ -98,7 +101,7 @@ export function buildPresetsCard(opts: PresetsCardOptions): HTMLElement {
         ]),
         el('div', { class: 'hint', text: summarise(p) }),
       ]),
-      pick, edit,
+      open,
     ]);
     if (kind === 'search') {
       const off = el('button', { class: 'ghost tiny', text: '해제', title: '검색 에이전트를 끄고 일반 에이전트가 직접 검색하게 합니다' });
@@ -482,11 +485,25 @@ export function buildCodexBox(modelInput: HTMLInputElement | null, withLogin: bo
       const r = await state.codexLoginStart();
       pendingState = r.state;
       const a = el('a', { href: r.url, target: '_blank', rel: 'noopener', text: '브라우저에서 OpenAI 로그인 열기' });
+      // The raw address too: this page usually runs on a phone or a browser
+      // that is not the backend's, so the link gets copied, not clicked.
+      const urlBox = el('input', { value: r.url, readonly: 'readonly', class: 'mono' }) as HTMLInputElement;
+      urlBox.addEventListener('focus', () => { try { urlBox.select(); } catch { /* linkedom */ } });
+      const copy = el('button', { class: 'ghost tiny', text: '복사' });
+      copy.addEventListener('click', () => {
+        try { urlBox.select(); document.execCommand('copy'); copy.textContent = '복사됨'; } catch { copy.textContent = '길게 눌러 복사'; }
+      });
       out.appendChild(el('div', { class: 'notice' }, [
-        a,
-        el('div', { class: 'hint', style: { marginTop: '6px' }, text: r.listening
-          ? '이 브라우저가 백엔드와 같은 PC 라면 로그인 뒤 자동으로 완료됩니다. 다른 기기라면 로그인 뒤 이동한 주소(연결 안 됨 페이지의 주소)를 아래에 붙여넣어 주세요.'
-          : '콜백 포트(1455)가 사용 중이라 자동 완료는 안 됩니다. 로그인 뒤 이동한 주소를 아래에 붙여넣어 주세요.' }),
+        el('div', {}, [a]),
+        el('div', { class: 'row', style: { marginTop: '6px' } }, [urlBox, copy]),
+        el('ol', { class: 'hint steps' }, [
+          el('li', { text: '위 주소를 로그인할 브라우저에서 엽니다 (다른 기기여도 됩니다).' }),
+          el('li', { text: 'ChatGPT 계정으로 로그인합니다.' }),
+          el('li', { text: r.listening
+            ? '백엔드와 같은 PC 의 브라우저라면 여기서 자동으로 완료됩니다.'
+            : '(콜백 포트 1455 가 사용 중이라 자동 완료는 안 됩니다.)' }),
+          el('li', { text: '다른 기기라면 로그인 뒤 http://localhost:1455/auth/callback?code=… 로 이동하다 "연결할 수 없음" 페이지가 뜹니다 — 정상입니다. 그 페이지의 주소 전체를 복사해 아래에 붙여넣고 완료를 누릅니다.' }),
+        ]),
       ]));
       pasteRow.style.display = '';
       try { window.open(r.url, '_blank', 'noopener'); } catch { /* popup blocked: the link is there */ }

@@ -98,6 +98,10 @@ def listing(char_key: str) -> dict:
                     "textual": f.suffix.lower() in TEXTUAL,
                 })
         total += size
+        dirs = sorted(
+            d.relative_to(root).as_posix() for d in (d.rglob("*") if d.is_dir() else [])
+            if d.is_dir() and not d.name.startswith(".")
+        ) if d.is_dir() else []
         areas.append({
             "area": name,
             "deletable": deletable,
@@ -105,6 +109,9 @@ def listing(char_key: str) -> dict:
             "count": len(files),
             "size": size,
             "files": files,
+            # Folders, empty ones included - the files tab draws them and
+            # offers them as move targets.
+            "dirs": dirs,
         })
     return {"charKey": char_key, "root": str(root), "totalSize": total, "areas": areas}
 
@@ -128,7 +135,7 @@ def read(char_key: str, rel: str) -> dict:
 
 
 def upload(char_key: str, name: str, *, text: str | None = None,
-           base64_data: str | None = None) -> dict:
+           base64_data: str | None = None, into: str = "") -> dict:
     """Store a user-provided file under uploads/.
 
     The name is reduced to its basename: an upload is never allowed to choose
@@ -136,8 +143,10 @@ def upload(char_key: str, name: str, *, text: str | None = None,
     """
     safe = Path(name or "upload").name.strip() or "upload"
     root = _root(char_key)
-    dest = root / "uploads" / safe
+    # `into` is a folder the files tab chose; it has to stay inside uploads/.
+    dest = _folder(char_key, into or "uploads", "uploads") / safe
     dest.parent.mkdir(parents=True, exist_ok=True)
+    rel = dest.relative_to(root).as_posix()
 
     if base64_data is not None:
         try:
@@ -156,8 +165,70 @@ def upload(char_key: str, name: str, *, text: str | None = None,
     else:
         raise FileError("text 또는 base64 중 하나가 필요합니다")
 
-    log.info("upload char=%s name=%s size=%s", char_key, safe, size)
-    return {"path": f"uploads/{safe}", "name": safe, "size": size}
+    log.info("upload char=%s path=%s size=%s", char_key, rel, size)
+    return {"path": rel, "name": safe, "size": size}
+
+
+def _folder(char_key: str, rel: str, area: str) -> Path:
+    """A folder path inside one area (uploads/, out/ ...), created on demand."""
+    path = _resolve(char_key, rel)
+    root = _root(char_key)
+    parts = path.relative_to(root).parts if path != root else ()
+    if not parts or parts[0] != area:
+        raise FileError(f"{area}/ 안의 폴더여야 합니다: {rel}")
+    if path.exists() and not path.is_dir():
+        raise FileError(f"폴더가 아닙니다: {rel}")
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _area_of(char_key: str, path: Path) -> str:
+    root = _root(char_key)
+    try:
+        return path.relative_to(root).parts[0]
+    except (ValueError, IndexError) as e:
+        raise FileError("워크스페이스 밖의 경로입니다") from e
+
+
+def mkdir(char_key: str, rel: str) -> dict:
+    """A new folder inside a deletable area. Folders are how the user keeps
+    fifty uploads and a season of outputs apart; the agent sees them as paths."""
+    path = _resolve(char_key, rel)
+    area = _area_of(char_key, path)
+    if not AREAS.get(area, (False, False))[0]:
+        raise FileError(f"{area}/ 안에는 폴더를 만들 수 없습니다")
+    if path.exists():
+        raise FileError(f"이미 있습니다: {rel}")
+    path.mkdir(parents=True)
+    log.info("mkdir char=%s path=%s", char_key, rel)
+    return {"path": path.relative_to(_root(char_key)).as_posix()}
+
+
+def move(char_key: str, src_rel: str, dst_rel: str) -> dict:
+    """Move a file or folder within the deletable areas (uploads <-> out is
+    fine; nothing enters original/ or leaves the workspace). `dst_rel` may be
+    a folder (the name is kept) or a full new path."""
+    src = _resolve(char_key, src_rel)
+    if not src.exists():
+        raise FileError(f"없습니다: {src_rel}")
+    if src == _root(char_key):
+        raise FileError("워크스페이스 자체는 옮길 수 없습니다")
+    dst = _resolve(char_key, dst_rel)
+    if dst.is_dir():
+        dst = dst / src.name
+    for p in (src, dst):
+        area = _area_of(char_key, p)
+        if not AREAS.get(area, (False, False))[0]:
+            raise FileError(f"{area}/ 는 옮길 수 없는 영역입니다")
+    if dst.exists():
+        raise FileError(f"같은 이름이 이미 있습니다: {dst.relative_to(_root(char_key)).as_posix()}")
+    if src.is_dir() and (dst == src or src in dst.parents):
+        raise FileError("폴더를 자기 안으로 옮길 수 없습니다")
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(src), str(dst))
+    out = dst.relative_to(_root(char_key)).as_posix()
+    log.info("move char=%s %s -> %s", char_key, src_rel, out)
+    return {"from": src_rel, "to": out}
 
 
 def delete(char_key: str, rel: str) -> dict:

@@ -14,6 +14,8 @@ export interface ChatInfo {
 }
 
 export interface WorkspaceInfo {
+  /** The workspace shared with this bot's other versions ('' = its own). */
+  familyKey?: string;
   charKey: string;
   charId: string;
   characterName: string;
@@ -148,6 +150,8 @@ export interface FileArea {
   count: number;
   size: number;
   files: WorkspaceFile[];
+  /** Folders inside the area, empty ones included. */
+  dirs?: string[];
 }
 
 export interface FileListing {
@@ -343,6 +347,8 @@ class AppState {
   liveChat: RisuChat | null = null;
 
   workspace: WorkspaceInfo | null = null;
+  /** Which half of the panel is open ('chat' | 'bot'); the shell keeps it current, the agent is told. */
+  editMode: 'chat' | 'bot' = 'chat';
   activeChatKey = '';
   botChanges: CardChanges | null = null;
   /**
@@ -772,12 +778,12 @@ class AppState {
    * A session is created lazily so opening the tab costs nothing; only actually
    * talking to the agent creates one.
    */
-  async *agentChat(prompt: string): AsyncGenerator<unknown> {
+  async *agentChat(prompt: string, signal?: AbortSignal): AsyncGenerator<unknown> {
     if (!this.sessionId) {
       const r = await transport.post<{ sessionId: string }>('/session', { chatKey: this.activeChatKey });
       this.sessionId = r.sessionId;
     }
-    yield* transport.stream('/chat', { sessionId: this.sessionId, prompt });
+    yield* transport.stream('/chat', { sessionId: this.sessionId, prompt, mode: this.editMode }, signal);
   }
 
   async stagedEdits(): Promise<StagedEdit[]> {
@@ -894,10 +900,18 @@ class AppState {
       + '&path=' + encodeURIComponent(path));
   }
 
-  async uploadFile(name: string, content: string, base64 = false): Promise<{ path: string; size: number }> {
+  async uploadFile(name: string, content: string, base64 = false, dir = ''): Promise<{ path: string; size: number }> {
     return await transport.post('/files/upload', base64
-      ? { charKey: this.activeCharKey, name, base64: content }
-      : { charKey: this.activeCharKey, name, text: content });
+      ? { charKey: this.activeCharKey, name, base64: content, dir }
+      : { charKey: this.activeCharKey, name, text: content, dir });
+  }
+
+  async mkdirFile(path: string): Promise<void> {
+    await transport.post('/files/mkdir', { charKey: this.activeCharKey, path });
+  }
+
+  async moveFile(from: string, to: string): Promise<{ to: string }> {
+    return await transport.post('/files/move', { charKey: this.activeCharKey, from, to });
   }
 
   async deleteFile(path: string): Promise<void> {
@@ -1402,7 +1416,9 @@ class AppState {
       throw new Error('구버전 업로드 상태의 카드라 복제할 수 없습니다. 패널을 닫았다 다시 열어 주세요');
     }
     const update = this.cardUpdateFrom(patch, true) ?? {};
-    const chaId = await host.cloneBot(this.slot.characterIndex, patch.chaId, name, update);
+    // The clone shares this bot's workspace: it carries the family key.
+    const family = this.workspace?.familyKey || this.activeCharKey;
+    const chaId = await host.cloneBot(this.slot.characterIndex, patch.chaId, name, update, family);
     await this.cardCommit('복제 직전');
     return chaId;
   }

@@ -673,7 +673,22 @@ def h_file_upload(arg: dict) -> dict:
             _char(arg), str(arg.get("name") or ""),
             text=arg.get("text") if isinstance(arg.get("text"), str) else None,
             base64_data=arg.get("base64") if isinstance(arg.get("base64"), str) else None,
+            into=str(arg.get("dir") or ""),
         )
+    except files.FileError as e:
+        raise ApiError(400, str(e))
+
+
+def h_file_mkdir(arg: dict) -> dict:
+    try:
+        return files.mkdir(_char(arg), str(arg.get("path") or ""))
+    except files.FileError as e:
+        raise ApiError(400, str(e))
+
+
+def h_file_move(arg: dict) -> dict:
+    try:
+        return files.move(_char(arg), str(arg.get("from") or ""), str(arg.get("to") or ""))
     except files.FileError as e:
         raise ApiError(400, str(e))
 
@@ -1544,6 +1559,8 @@ ROUTES: dict[str, Handler] = {
     "GET /files/read": h_file_read,
     "POST /files/upload": h_file_upload,
     "POST /files/delete": h_file_delete,
+    "POST /files/mkdir": h_file_mkdir,
+    "POST /files/move": h_file_move,
     "POST /files/clean": h_file_clean,
 
     "GET /workspace": h_workspace_list,
@@ -1758,9 +1775,10 @@ async def dispatch(path: str, request: Request) -> Response:
         prompt = str(body.get("prompt") or "")
         if not sid or not prompt:
             return _json(400, {"error": "sessionId 와 prompt 가 필요합니다"}, origin)
-        log.info("POST /chat session=%s prompt=%sB", sid, len(prompt))
+        mode = str(body.get("mode") or "")
+        log.info("POST /chat session=%s prompt=%sB mode=%s", sid, len(prompt), mode or "-")
         return StreamingResponse(
-            session.run(sid, prompt),
+            session.run(sid, prompt, mode),
             media_type="application/x-ndjson; charset=utf-8",
             headers={
                 **config.cors_headers(origin),

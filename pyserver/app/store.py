@@ -43,16 +43,17 @@ def new_msg_id() -> str:
 
 # --- ingest -----------------------------------------------------------------
 
-def upsert_character(cha_id: str, name: str, card: dict, char_index: int | None) -> str:
+def upsert_character(cha_id: str, name: str, card: dict, char_index: int | None,
+                     family_key: str = "") -> str:
     ck = char_key(cha_id)
     now = db.now()
     db.execute(
-        "INSERT INTO characters(char_key, cha_id, name, char_index, card_json, created_at, updated_at) "
-        "VALUES(?,?,?,?,?,?,?) "
+        "INSERT INTO characters(char_key, cha_id, name, char_index, card_json, family_key, created_at, updated_at) "
+        "VALUES(?,?,?,?,?,?,?,?) "
         "ON CONFLICT(char_key) DO UPDATE SET "
         "  cha_id=excluded.cha_id, name=excluded.name, char_index=excluded.char_index, "
-        "  card_json=excluded.card_json, updated_at=excluded.updated_at",
-        (ck, cha_id, name, char_index, db.js(card), now, now),
+        "  card_json=excluded.card_json, family_key=excluded.family_key, updated_at=excluded.updated_at",
+        (ck, cha_id, name, char_index, db.js(card), family_key or "", now, now),
     )
     return ck
 

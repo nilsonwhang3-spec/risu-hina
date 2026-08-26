@@ -39,9 +39,42 @@ class WorkspaceError(ValueError):
 
 
 def root(char_key: str) -> Path:
+    """The workspace directory - the bot's own, or its family's.
+
+    Copies and new versions of one bot (a clone made here, a charx exported
+    here and imported again) carry the original's key in
+    `extentions.risu_hina.family`, and every one of them lands in that
+    directory: uploads, outputs, scratch and skills are shared across the
+    versions automatically. Rows (turns, card, lore) stay per bot - they are
+    keyed in the database, not by directory.
+    """
     if not char_key or SAFE.sub("", char_key) != char_key:
         raise WorkspaceError(f"unsafe workspace key: {char_key!r}")
-    return config.WORKSPACE_DIR / char_key
+    fam = family_of(char_key)
+    return config.WORKSPACE_DIR / (fam or char_key)
+
+
+def family_of(char_key: str) -> str:
+    """The family key a bot belongs to ('' when it is its own)."""
+    try:
+        row = db.one("SELECT family_key FROM characters WHERE char_key = ?", (char_key,))
+    except Exception:  # noqa: BLE001 - before the table exists (first boot)
+        return ""
+    fam = (row["family_key"] if row else "") or ""
+    if not fam or fam == char_key or SAFE.sub("", fam) != fam:
+        return ""
+    return fam
+
+
+def family_from_card(card: dict) -> str:
+    """The family stamp a card carries, if any (see root)."""
+    ext = card.get("extentions")
+    if not isinstance(ext, dict):
+        return ""
+    ours = ext.get("risu_hina")
+    fam = ours.get("family") if isinstance(ours, dict) else ""
+    fam = str(fam or "")
+    return fam if fam and SAFE.sub("", fam) == fam else ""
 
 
 def _write(path: Path, text: str) -> None:
@@ -96,8 +129,12 @@ def materialize(payload: dict, *, force: bool = False) -> dict:
         raise WorkspaceError("charId is required")
 
     items = _normalise_chats(payload)
+    # A copy or new version of a bot made here carries the original's key
+    # (host.cloneBot / charx round-trip stamp it); it shares that workspace.
+    family = family_from_card(card)
     ck = store.upsert_character(
-        cha_id, str(card.get("name") or ""), card, payload.get("characterIndex")
+        cha_id, str(card.get("name") or ""), card, payload.get("characterIndex"),
+        family_key=family if family != store.char_key(cha_id) else "",
     )
     base = root(ck)
 
@@ -165,6 +202,8 @@ def materialize(payload: dict, *, force: bool = False) -> dict:
         "totalTurns": sum(c["turns"] for c in ingested),
         "cardReset": card_reset,
         "cardFull": bool(payload.get("cardFull")),
+        # The workspace this bot shares with its other versions ('' = its own).
+        "familyKey": family_of(ck),
         "cardCounts": card_summary.get("counts"),
         "loreCounts": {
             "global": len(card.get("globalLore") or []),

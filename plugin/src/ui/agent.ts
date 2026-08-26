@@ -487,10 +487,16 @@ export class AgentPanel {
     // the question that decides whether to wait or interrupt.
     const elapsed = el('span', { class: 'elapsed', text: '0m 0s' });
     const thinkingText = el('span', { class: 'thinkingtext', text: '생각하는 중입니다…' });
+    // 중단: aborts the stream; the backend saves the prompt and what arrived
+    // so far into the history, so the next turn still knows what was asked.
+    const abort = new AbortController();
+    const stopBtn = el('button', { class: 'ghost tiny stopbtn', text: '중단', title: '이 턴을 중단합니다' });
+    stopBtn.addEventListener('click', () => { abort.abort(); stopBtn.disabled = true; });
     const thinking = el('div', { class: 'thinking' }, [
       el('span', { class: 'dots' }, [el('i'), el('i'), el('i')]),
       thinkingText,
       elapsed,
+      stopBtn,
     ]);
     body.parentElement?.insertBefore(thinking, body);
 
@@ -507,6 +513,7 @@ export class AgentPanel {
       thinking.style.display = on ? 'flex' : 'none';
       if (label) thinkingText.textContent = label;
       if (!on) {
+        stopBtn.style.display = 'none';
         // The clock stops but stays on screen: how long the whole turn took is
         // worth keeping next to what it produced.
         this.clearTimer();
@@ -522,7 +529,7 @@ export class AgentPanel {
     this.scroll();
 
     try {
-      for await (const ev of state.agentChat(prompt)) {
+      for await (const ev of state.agentChat(prompt, abort.signal)) {
         const e = ev as Record<string, unknown>;
         switch (e.type) {
           case 'text':
@@ -548,6 +555,15 @@ export class AgentPanel {
             body.parentElement?.appendChild(this.costLine(
               e.usage as Record<string, unknown> | undefined,
               (e.cost as number | null | undefined) ?? null));
+            // A turn ends when the model stops, not when the job is done. One
+            // click asks it to pick up where it left off, history and all.
+            const more = el('button', { class: 'ghost tiny continuebtn', text: '계속 이어서', title: '방금 턴에서 끝내지 못한 작업을 이어갑니다' });
+            more.addEventListener('click', () => {
+              more.remove();
+              this.input.value = '이어서 진행해 주세요. 방금 턴에서 끝내지 못한 작업이 있으면 마저 해 주세요.';
+              void this.submit();
+            });
+            body.parentElement?.appendChild(el('div', { class: 'row', style: { marginTop: '4px' } }, [more]));
             if (typeof e.total === 'number') {
               this.status.textContent = `이 대화 누적 $${e.total.toFixed(4)}`;
             }

@@ -19,6 +19,7 @@ const LABELS: Record<string, string> = {
   firstMessage: '퍼스트 메시지',
   creatorNotes: '제작자 노트',
   characterVersion: '봇 버전',
+  replaceGlobalNote: '글로벌 노트 덮어쓰기',
   alternateGreetings: '대체 인사말',
 };
 

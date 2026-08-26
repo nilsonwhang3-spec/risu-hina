@@ -1889,6 +1889,55 @@ def test_codex_subscription_preset(s: Server) -> None:
     st, body = s.post("/presets/delete", {"id": pid})
 
 
+def test_workspace_folders_and_family(s: Server, cw: dict) -> None:
+    """Folders inside the deletable areas, moves between them, and one
+    workspace shared by every version of a bot (the family stamp a clone or
+    a charx round-trip carries)."""
+    print("test_workspace_folders_and_family")
+    ck = cw["charKey"]
+    st, body = s.post("/files/mkdir", {"charKey": ck, "path": "uploads/참고"})
+    check("a folder is made inside uploads", st == 200 and body.get("path") == "uploads/참고", str(body)[:120])
+    st, body = s.post("/files/mkdir", {"charKey": ck, "path": "original/x"})
+    check("but not inside original", st == 400, str(st))
+    st, body = s.post("/files/upload", {"charKey": ck, "name": "memo.txt", "text": "hi", "dir": "uploads/참고"})
+    check("an upload can target a folder", st == 200 and body.get("path") == "uploads/참고/memo.txt", str(body)[:120])
+    st, body = s.post("/files/upload", {"charKey": ck, "name": "x.txt", "text": "hi", "dir": "out"})
+    check("an upload cannot target another area", st == 400, str(st))
+    st, files = s.get(q("/files", charKey=ck))
+    up = next(a for a in files["areas"] if a["area"] == "uploads")
+    check("the listing names the folder", "uploads/참고" in (up.get("dirs") or []), str(up.get("dirs")))
+    st, body = s.post("/files/move", {"charKey": ck, "from": "uploads/참고/memo.txt", "to": "out"})
+    check("a file moves between areas, name kept", st == 200 and body.get("to") == "out/memo.txt", str(body)[:120])
+    st, body = s.post("/files/move", {"charKey": ck, "from": "out/memo.txt", "to": "original/memo.txt"})
+    check("but never into original", st == 400, str(st))
+    st, body = s.post("/files/move", {"charKey": ck, "from": "uploads/참고", "to": "uploads/참고/안"})
+    check("nor a folder into itself", st == 400, str(st))
+    st, body = s.post("/files/delete", {"charKey": ck, "path": "out/memo.txt"})
+
+    # Family: a second bot stamped with this one's key lands in this workspace.
+    st, body = s.post("/workspace", {
+        "charId": "cha-card-v2", "characterIndex": 6, "cardFull": True,
+        "card": {"name": "카드 봇 v2", "chaId": "cha-card-v2", "desc": "v2",
+                 "extentions": {"risu_hina": {"family": ck}}},
+        "chats": [{"chat": make_chat("v2chat", "v2 챗", 2), "chatIndex": 0}],
+    })
+    ws2 = body.get("workspace") or {}
+    check("the copy is its own bot", st == 200 and ws2.get("charKey") and ws2.get("charKey") != ck, str(ws2)[:120])
+    check("in the original's workspace", ws2.get("familyKey") == ck and ws2["paths"]["root"] == files["root"],
+          str(ws2.get("familyKey")) + " " + str(ws2.get("paths", {}).get("root")))
+    st, f2 = s.get(q("/files", charKey=ws2["charKey"]))
+    check("so its file listing is the shared one", f2.get("root") == files.get("root")
+          and any(a["area"] == "uploads" and "uploads/참고" in (a.get("dirs") or []) for a in f2["areas"]), str(f2)[:120])
+    st, body = s.post("/workspace", {
+        "charId": "cha-card-v2", "characterIndex": 6, "cardFull": True,
+        "card": {"name": "카드 봇 v2", "chaId": "cha-card-v2", "desc": "v2",
+                 "extentions": {"risu_hina": {"family": ws2["charKey"]}}},
+        "chats": [{"chat": make_chat("v2chat", "v2 챗", 2), "chatIndex": 0}],
+    })
+    check("a stamp pointing at itself is ignored", (body.get("workspace") or {}).get("familyKey") == "",
+          str(body.get("workspace", {}).get("familyKey")))
+
+
 def test_loopback_exemption() -> None:
     """With RISUELF_REQUIRE_TOKEN off, a loopback caller needs no token.
 
@@ -1953,6 +2002,7 @@ def main() -> int:
         test_assets_store(s, cw)
         test_charx_build(s, cw)
         test_card_assets(s, cw)
+        test_workspace_folders_and_family(s, cw)
     finally:
         s.stop()
 

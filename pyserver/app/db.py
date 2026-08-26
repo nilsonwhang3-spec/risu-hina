@@ -595,6 +595,8 @@ ADD_COLUMNS = [
     ("agent_presets", "key_ref", "TEXT NOT NULL DEFAULT ''"),
     # '' = OpenAI-compatible endpoint, 'codex' = OpenAI subscription (codexauth).
     ("agent_presets", "provider", "TEXT NOT NULL DEFAULT ''"),
+    # The workspace a copy / new version of a bot shares (workspace.root).
+    ("characters", "family_key", "TEXT NOT NULL DEFAULT ''"),
     ("skills", "kind", "TEXT NOT NULL DEFAULT 'md'"),
     ("skills", "filename", "TEXT NOT NULL DEFAULT ''"),
     # A checkpoint covers the whole chat - turns, this chat's lorebook entries

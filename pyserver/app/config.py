@@ -178,6 +178,10 @@ DEFAULTS: dict[str, Any] = {
         # '' = baseUrl + apiKey above. 'codex' = the OpenAI subscription via
         # codexauth (login instead of a key; baseUrl/apiKey ignored).
         "provider": "",
+        # When the stored conversation grows past this many characters
+        # (~1/3 as many tokens), the older part is summarised by the model
+        # once and replaced (agent._compact_history). 0 turns it off.
+        "historyBudgetChars": 240000,
     },
     # The search agent: a second, smaller model the general agent hands a
     # research question to (agent.web_research). Same keys as `agent`;

@@ -60,6 +60,12 @@ INSTRUCTIONS = """\
   **모든 챗**에 영향을 준다 — 챗 하나의 문제를 카드에서 고치려 하지 마라.
   반영(propose_card_writeback)과 복제 봇 생성(propose_clone_bot)은 RisuAI 원본을
   건드리므로 반드시 먼저 동의를 받아라.
+- **너는 패널의 두 화면(챗 편집 / 봇 편집) 중 어디가 열려 있는지 안다.** 챗 편집 화면에서는
+  챗 재료(턴·장기기억·챗 로어북·챗 스냅샷·챗 반영)만, 봇 편집 화면에서는 카드 재료(메타·인사말·
+  봇 로어북·Regex·트리거·에셋·봇 스냅샷·카드 반영)만 고칠 수 있다. 다른 화면의 재료를 고쳐야
+  하면 **먼저 "○○ 화면으로 이동하겠습니다"라고 알리고 propose_open_tab 으로 이동을 제안해
+  승인을 받은 뒤** 그 다음 턴에 진행해라. 읽기·검색은 어느 화면에서든 된다 — 너는 현재 탭뿐
+  아니라 선택된 봇과 챗 전체를 안다.
 
 작업 폴더 규칙 (반드시 지켜라 — 패널이 이 규칙대로 정리한다):
 - `scratch/` 임시 파일. 중간 산출물, 계산 결과, 버려도 되는 것 전부 여기.
@@ -87,6 +93,32 @@ class Deps:
     char_key: str
     session_id: str | None
     workspace_dir: Path
+    # Which half of the panel the user is looking at: 'chat' or 'bot' ('' =
+    # unknown, older plugin). Chat material is edited from the chat tabs and
+    # card material from the bot tabs; a tool for the other half refuses and
+    # points at propose_open_tab, so the user is never surprised by a change
+    # landing in the half they are not looking at.
+    mode: str = ""
+
+
+# Proposal kinds by the half of the panel they belong to (see Deps.mode).
+CHAT_KINDS = frozenset({"memory_edit", "memory_delete", "checkpoint_restore", "checkpoint_create",
+                        "host_writeback", "host_save_copy"})
+BOT_KINDS = frozenset({"card_edit", "card_greeting_add", "card_greeting_delete", "script_edit",
+                       "script_add", "script_delete", "card_checkpoint_create", "card_checkpoint_restore",
+                       "host_card_writeback", "host_clone_bot", "host_asset_add", "host_asset_replace"})
+_MODE_TAB = {"chat": ("챗 편집", "editor"), "bot": ("봇 편집", "meta")}
+
+
+def _wrong_half(ctx: "RunContext[Deps]", need: str) -> str | None:
+    """A refusal when the tool's material belongs to the other half."""
+    mode = ctx.deps.mode
+    if not mode or mode == need:
+        return None
+    label, tab = _MODE_TAB[need]
+    return (f"지금 화면은 {'봇 편집' if mode == 'bot' else '챗 편집'}입니다. 이 작업은 {label} 화면의 재료를 고칩니다. "
+            f"먼저 사용자에게 {label} 화면으로 이동하겠다고 알리고, propose_open_tab(\"{tab}\", 이유) 로 이동을 "
+            f"제안해 승인을 받은 뒤 다시 요청해 주세요. (그 전에는 이 툴이 실행되지 않습니다)")
 
 
 def _model_for(section: str) -> "OpenAIChatModel | OpenAIResponsesModel":
@@ -114,6 +146,91 @@ def _model() -> "OpenAIChatModel | OpenAIResponsesModel":
     return _model_for("agent")
 
 
+# --- history compaction --------------------------------------------------------
+
+# session_id -> the compacted history used this turn, for session.run to store
+# in place of the original (see _compact_history).
+COMPACTED: dict[str, list] = {}
+KEEP_TAIL = 6
+
+
+def _msg_chars(m: Any) -> int:
+    n = 0
+    for p in getattr(m, "parts", []) or []:
+        c = getattr(p, "content", None)
+        if isinstance(c, str):
+            n += len(c)
+        elif c is not None:
+            n += len(str(c))
+        a = getattr(p, "args", None)
+        if a is not None:
+            n += len(str(a))
+    return n
+
+
+def _msg_text(m: Any) -> str:
+    """A message flattened for the summariser: who said what, tool calls by name."""
+    who = "사용자" if m.kind == "request" else "에이전트"
+    bits = []
+    for p in getattr(m, "parts", []) or []:
+        kind = getattr(p, "part_kind", "")
+        c = getattr(p, "content", None)
+        if kind == "user-prompt" and isinstance(c, str):
+            bits.append(f"[사용자] {c}")
+        elif kind == "text" and isinstance(c, str):
+            bits.append(f"[에이전트] {c}")
+        elif kind == "tool-call":
+            bits.append(f"[툴 호출] {getattr(p, 'tool_name', '')}({str(getattr(p, 'args', ''))[:200]})")
+        elif kind == "tool-return":
+            bits.append(f"[툴 결과 {getattr(p, 'tool_name', '')}] {str(c)[:300]}")
+    return "\n".join(bits) if bits else f"[{who}]"
+
+
+async def _compact_history(ctx: RunContext[Deps], messages: list) -> list:
+    """Keep the conversation inside the model's budget.
+
+    When the stored history grows past `agent.historyBudgetChars`, everything
+    but the last KEEP_TAIL messages is summarised by the model into one
+    Korean note and replaced by a (summary request, acknowledgement) pair.
+    The result is remembered in COMPACTED so session.run stores it - the
+    summary is paid for once, not on every later turn.
+    """
+    budget = int(config.section("agent").get("historyBudgetChars") or 0)
+    if budget <= 0 or len(messages) <= KEEP_TAIL + 2:
+        return messages
+    total = sum(_msg_chars(m) for m in messages)
+    if total <= budget:
+        return messages
+    head, tail = messages[:-KEEP_TAIL], messages[-KEEP_TAIL:]
+    # Never cut between a tool call and its return: extend the tail back to a
+    # user prompt boundary.
+    while head and not any(getattr(p, "part_kind", "") == "user-prompt" for p in getattr(tail[0], "parts", [])):
+        tail.insert(0, head.pop())
+        if not head:
+            return messages
+    transcript = "\n\n".join(_msg_text(m) for m in head)[-120000:]
+    try:
+        summariser = Agent(_model(), instructions=(
+            "다음은 편집 도구 안에서 사용자와 에이전트가 나눈 대화 기록이다. 이어서 작업할 수 있도록 "
+            "**한국어로 1500자 이내** 요약해라: 사용자가 원한 것, 확정된 결정, 이미 제안·승인된 변경(id 포함), "
+            "아직 안 끝난 일, 사용자가 싫어한 것. 인용은 최소한으로."))
+        r = await summariser.run(transcript, model_settings={"temperature": 0.1, "max_tokens": 4000})  # type: ignore[arg-type]
+        summary = str(r.output).strip()
+    except Exception as e:  # noqa: BLE001 - a failed summary must not fail the turn
+        log.warn("history compaction failed: %s", e)
+        return messages
+    from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
+    compacted = [
+        ModelRequest(parts=[UserPromptPart(content="[이전 대화 요약 — 앞선 대화는 이 요약으로 대체되었습니다]\n" + summary)]),
+        ModelResponse(parts=[TextPart(content="요약을 확인했습니다. 이어서 진행합니다.")]),
+    ] + tail
+    if ctx.deps.session_id:
+        COMPACTED[ctx.deps.session_id] = compacted
+    log.info("history compacted session=%s %s msgs/%s chars -> %s msgs", ctx.deps.session_id,
+             len(messages), total, len(compacted))
+    return compacted
+
+
 def build() -> Agent[Deps]:
     # The user's own procedures are appended rather than mixed in, so the rules
     # above them stay the rules: a skill describes how to do a job, it does not
@@ -126,6 +243,7 @@ def build() -> Agent[Deps]:
         # gets to sit above "the agent never writes to the transcript".
         instructions=INSTRUCTIONS + presets.instructions() + skills.prompt(),
         model_settings=presets.model_settings(),
+        history_processors=[_compact_history],
     )
 
     # --- reading ------------------------------------------------------------
@@ -266,6 +384,11 @@ def build() -> Agent[Deps]:
         return "\n\n".join(out)[:30000]
 
     def _propose(ctx: RunContext[Deps], kind: str, summary: str, args: dict) -> str:
+        need = "chat" if kind in CHAT_KINDS else ("bot" if kind in BOT_KINDS else "")
+        if need:
+            wrong = _wrong_half(ctx, need)
+            if wrong:
+                return wrong
         try:
             out = actions.propose(
                 kind, chat_key=ctx.deps.chat_key, char_key=ctx.deps.char_key,
@@ -680,6 +803,9 @@ def build() -> Agent[Deps]:
     @agent.tool
     def stage_edit(ctx: RunContext[Deps], msg_id: str, new_body: str, reason: str) -> str:
         """턴 하나의 수정을 제안한다. 승인 전까지 반영되지 않는다."""
+        wrong = _wrong_half(ctx, "chat")
+        if wrong:
+            return wrong
         cur = store.turn_by_msg(ctx.deps.chat_key, msg_id)
         if cur is None:
             return f"그런 턴이 없습니다: {msg_id}"
@@ -699,6 +825,9 @@ def build() -> Agent[Deps]:
         edits: [{"msg_id": "...", "new_body": "..."}, ...]
         한 묶음은 통째로 승인되고 통째로 적용된다.
         """
+        wrong = _wrong_half(ctx, "chat")
+        if wrong:
+            return wrong
         items = []
         skipped = 0
         for e in edits:
@@ -720,6 +849,9 @@ def build() -> Agent[Deps]:
     @agent.tool
     def stage_delete(ctx: RunContext[Deps], msg_ids: list[str], reason: str) -> str:
         """턴 삭제를 제안한다. 승인 전까지 지워지지 않는다."""
+        wrong = _wrong_half(ctx, "chat")
+        if wrong:
+            return wrong
         items = []
         for mid in msg_ids:
             cur = store.turn_by_msg(ctx.deps.chat_key, str(mid))

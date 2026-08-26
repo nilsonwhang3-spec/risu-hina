@@ -7,7 +7,7 @@
  * request being relayed through sv.risuai.xyz instead of reaching the backend
  * at all. Reporting what was actually observed beats guessing.
  */
-import { el, clear, armed } from './dom';
+import { el, clear, armed, modal } from './dom';
 import { state, type ApiKeyEntry } from '../state';
 import { buildPresetsCard, buildCodexBox } from './presets';
 import { buildSkillsCard } from './skills';
@@ -66,7 +66,7 @@ export function renderSettingsTab(mount: HTMLElement): void {
 
   const sections: [string, HTMLElement[]][] = [
     ['연결', [buildConnectionCard(), buildAssetsCard(), buildDiagnosticCard(), buildAssetProbeCard()]],
-    ['API 키', [buildKeysCard()]],
+    ['API 키/인증', [buildKeysCard()]],
     ['에이전트', [buildPresetsCard({
       onMount: (refresh) => { refreshers.push(refresh); },
       onChanged: async () => {
@@ -97,7 +97,17 @@ export function renderSettingsTab(mount: HTMLElement): void {
   });
   void panes;
 
-  mount.appendChild(el('div', { class: 'settingswrap' }, [bar, body]));
+  // The sub-tab bar goes up to the shell's tab row while settings is open
+  // (연결 · API 키/인증 · 에이전트 …); the page keeps only its panes.
+  settingsBar = bar;
+  mount.appendChild(el('div', { class: 'settingswrap' }, [body]));
+}
+
+let settingsBar: HTMLElement | null = null;
+
+/** The sub-tab bar, for the shell to place in the tab row (null until first render). */
+export function getSettingsBar(): HTMLElement | null {
+  return settingsBar;
 }
 
 function refreshAbout(): void {
@@ -381,7 +391,13 @@ function buildKeysCard(): HTMLElement {
   };
   let keepSentinel = '__keep__';
 
-  const form = (existing: ApiKeyEntry | null): HTMLElement => {
+  // Add and edit open a focused modal; the card itself stays a list.
+  const openForm = (existing: ApiKeyEntry | null): void => {
+    let close = (): void => { /* set below */ };
+    const box = form(existing, () => close());
+    close = modal(existing ? 'API 키 수정' : 'API 키 추가', box);
+  };
+  const form = (existing: ApiKeyEntry | null, onClose: () => void): HTMLElement => {
     const name = el('input', { value: existing?.name ?? '', placeholder: '이름 (예: Vercel 게이트웨이, Gemini)' }) as HTMLInputElement;
     const provider = el('input', { value: existing?.provider ?? '', placeholder: '프로바이더 (예: openai, google, vercel) — 표시용' }) as HTMLInputElement;
     const baseUrl = el('input', { value: existing?.baseUrl ?? '', placeholder: 'Base URL (선택 · 프리셋의 URL 이 비어 있을 때 씀)' }) as HTMLInputElement;
@@ -395,7 +411,7 @@ function buildKeysCard(): HTMLElement {
       el('div', { class: 'row' }, [apiKey, note]),
       el('div', { class: 'row' }, [save, cancel]),
     ]);
-    cancel.addEventListener('click', () => { box.remove(); });
+    cancel.addEventListener('click', () => { onClose(); });
     save.addEventListener('click', async () => {
       save.disabled = true;
       try {
@@ -404,6 +420,7 @@ function buildKeysCard(): HTMLElement {
           apiKey: apiKey.value ? apiKey.value : (existing ? keepSentinel : ''),
         }, existing?.id);
         say(existing ? '키를 저장했습니다. 이 키를 쓰는 프리셋에 바로 적용됩니다.' : '키를 추가했습니다. 에이전트 탭의 프리셋에서 고를 수 있습니다.', 'ok');
+        onClose();
         await draw();
       } catch (e) {
         say(e instanceof Error ? e.message : String(e), 'err');
@@ -436,7 +453,7 @@ function buildKeysCard(): HTMLElement {
           ]),
           edit, del,
         ]);
-        edit.addEventListener('click', () => { row.after(form(k)); });
+        edit.addEventListener('click', () => { openForm(k); });
         armed(del, '삭제', '정말?', async () => {
           try { await state.deleteApiKey(k.id); await draw(); } catch (e) { say(e instanceof Error ? e.message : String(e), 'err'); }
         });
@@ -448,7 +465,7 @@ function buildKeysCard(): HTMLElement {
     }
   };
   const add = el('button', { class: 'primary', text: '키 추가' });
-  add.addEventListener('click', () => { listMount.appendChild(form(null)); });
+  add.addEventListener('click', () => { openForm(null); });
   refreshers.push(draw);
   void draw();
 
