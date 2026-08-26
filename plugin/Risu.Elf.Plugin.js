@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.5.0
+//@display-name Risu Hina v0.5.1
 //@api 3.0
-//@version 0.5.0
+//@version 0.5.1
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@arg backend_url string 백엔드 URL (기본: http://127.0.0.1:6020)
 //@arg backend_token string 백엔드 토큰 (data/token.txt)
@@ -211,7 +211,12 @@
   }
   async function toError(res) {
     const body = await readJson(res);
-    const msg15 = body && typeof body === "object" && "error" in body ? String(body.error) : `HTTP ${res.status}`;
+    let msg15 = body && typeof body === "object" && "error" in body ? String(body.error) : `HTTP ${res.status}`;
+    if (res.status === 401) {
+      msg15 = '\uD1A0\uD070\uC774 \uB9DE\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4. \uBC31\uC5D4\uB4DC PC \uC758 data/token.txt \uB0B4\uC6A9\uC744 \u2699 \u2192 \uC5F0\uACB0 \u2192 \uD1A0\uD070\uC5D0 \uB123\uACE0 "\uC800\uC7A5\uD558\uACE0 \uC5F0\uACB0"\uC744 \uB20C\uB7EC \uC8FC\uC138\uC694 (127.0.0.1 \uB85C \uC811\uC18D\uD560 \uB54C\uB294 \uBE44\uC6CC\uB3C4 \uB429\uB2C8\uB2E4).';
+    } else if (res.status === 429) {
+      msg15 = "\uD2C0\uB9B0 \uD1A0\uD070\uC774 \uC5EC\uB7EC \uBC88 \uAC70\uBD80\uB418\uC5B4 \uC7A0\uC2DC \uB9C9\uD614\uC2B5\uB2C8\uB2E4. 1\uBD84 \uB4A4 \uB2E4\uC2DC \uC2DC\uB3C4\uD574 \uC8FC\uC138\uC694.";
+    }
     return new BackendError(res.status, msg15, body);
   }
   var transport = new Transport();
@@ -405,7 +410,7 @@
     };
     closeBtn.addEventListener("click", close);
     back.addEventListener("click", (e) => {
-      if (e.target === back) close();
+      if (e.target === back && !opts.sticky) close();
     });
     document.addEventListener("keydown", esc, true);
     setTimeout(() => box.querySelector("input, textarea, select, button")?.focus(), 0);
@@ -935,6 +940,7 @@ main { flex: 1; min-height: 0; display: flex; }
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 /* A result box under a button row: spaced from the row only when it has something. */
 .outbox:not(:empty) { margin-top: 10px; }
+.card > .notice, .card > div > .notice { margin-top: 8px; }
 .row + .row { margin-top: 8px; }
 .grow { flex: 1; min-width: 0; }
 label.field { display: block; margin-bottom: 10px; }
@@ -1017,6 +1023,16 @@ pre.mono {
 .steps { margin: 6px 0 0 18px; padding: 0; }
 .steps li { margin: 2px 0; }
 .thinking .stopbtn { margin-left: 8px; }
+/* A shell / pip request waiting on the user, inside the assistant bubble. */
+.permit {
+  border: 1px solid rgba(245,158,11,.6); border-radius: 6px; padding: 8px 10px; margin: 6px 0;
+  background: rgba(245,158,11,.07);
+}
+.permit.allowed { border-color: rgba(16,185,129,.5); background: rgba(16,185,129,.06); }
+.permit.denied { border-color: rgba(239,68,68,.5); background: rgba(239,68,68,.06); }
+.permit-title { font-weight: 700; font-size: 12px; margin-bottom: 4px; }
+.permit pre.mono { max-height: 140px; }
+.settingsclose { margin-left: auto; }
 .snaplist .verrow { padding: 4px 0; }
 /* Folders in the files tree: a label row, files indented under it. */
 .folderrow .folderlabel { cursor: default; color: var(--textcolor2, #79839a); }
@@ -2366,6 +2382,15 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     }
     async codexLogout() {
       await transport.post("/codex/logout", {});
+    }
+    // --- permission prompts (shell / pip while a turn runs) --------------------------
+    async permits() {
+      if (!this.sessionId) return [];
+      const r = await transport.get("/permits", { sessionId: this.sessionId });
+      return r.pending ?? [];
+    }
+    async decidePermit(id, allow, always = false) {
+      await transport.post("/permits/decide", { id, allow, always });
     }
     // --- skills ---------------------------------------------------------------
     async skills() {
@@ -3923,6 +3948,43 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       const tracker = new TraceTracker(trace);
       let acc = "";
       this.scroll();
+      const permitBox = el("div", { class: "permits" });
+      body.parentElement?.insertBefore(permitBox, body);
+      const shown = /* @__PURE__ */ new Set();
+      const askPermit = (p) => {
+        const card = el("div", { class: "permit" });
+        const decide = async (allow2, always2) => {
+          for (const b of Array.from(card.querySelectorAll("button"))) b.disabled = true;
+          try {
+            await state.decidePermit(p.id, allow2, always2);
+            card.classList.add(allow2 ? "allowed" : "denied");
+            card.appendChild(el("div", { class: "hint", text: allow2 ? always2 ? "\uD5C8\uC6A9 (\uC774\uBC88 \uD134 \uB3D9\uC548 \uACC4\uC18D \uD5C8\uC6A9)" : "\uD5C8\uC6A9" : "\uAC70\uBD80" }));
+          } catch (e) {
+            card.appendChild(el("div", { class: "notice err", text: msg2(e) }));
+          }
+        };
+        const allow = el("button", { class: "primary tiny", text: "\uD5C8\uC6A9" });
+        const deny = el("button", { class: "ghost tiny", text: "\uAC70\uBD80" });
+        const always = el("button", { class: "ghost tiny", text: "\uC774\uBC88 \uD134 \uD56D\uC0C1 \uD5C8\uC6A9", title: "\uC774 \uD134\uC774 \uB05D\uB0A0 \uB54C\uAE4C\uC9C0 \uAC19\uC740 \uC885\uB958\uC758 \uC694\uCCAD\uC744 \uBB3B\uC9C0 \uC54A\uACE0 \uD5C8\uC6A9\uD569\uB2C8\uB2E4" });
+        allow.addEventListener("click", () => void decide(true, false));
+        deny.addEventListener("click", () => void decide(false, false));
+        always.addEventListener("click", () => void decide(true, true));
+        card.appendChild(el("div", { class: "permit-title", text: (p.kind === "pip" ? "\uD328\uD0A4\uC9C0 \uC124\uCE58 \uD5C8\uC6A9?" : "\uC178 \uBA85\uB839 \uC2E4\uD589 \uD5C8\uC6A9?") + " " + p.summary }));
+        card.appendChild(el("pre", { class: "mono", text: p.detail }));
+        card.appendChild(el("div", { class: "row" }, [allow, deny, always]));
+        permitBox.appendChild(card);
+        this.scroll();
+      };
+      const permitPoll = setInterval(async () => {
+        try {
+          for (const p of await state.permits()) {
+            if (shown.has(p.id)) continue;
+            shown.add(p.id);
+            askPermit(p);
+          }
+        } catch {
+        }
+      }, 1500);
       try {
         for await (const ev of state.agentChat(prompt, abort.signal)) {
           const e = ev;
@@ -3976,6 +4038,8 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         );
         void clientLog("error", "agent chat failed", { error: String(e) });
       } finally {
+        clearInterval(permitPoll);
+        if (!permitBox.childElementCount) permitBox.remove();
         this.busy = false;
         this.send.disabled = false;
         this.scroll();
@@ -6101,14 +6165,13 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       const pick = el("button", { class: "ghost", text: `\uC120\uD0DD (${total})`, title: "\uC800\uC7A5\uB41C \uD504\uB9AC\uC14B \uBAA9\uB85D" });
       pick.addEventListener("click", () => openPicker(kind, refresh8, say));
       if (!p) {
-        const add = el("button", { class: "primary", text: "\uC0C8 \uD504\uB9AC\uC14B" });
-        add.addEventListener("click", () => openEditor(kind, null, refresh8, say));
+        const open6 = el("button", { class: "ghost chev", text: "\u203A", title: total ? `\uC800\uC7A5\uB41C \uD504\uB9AC\uC14B ${total}\uAC1C \u2014 \uC120\uD0DD \xB7 \uCD94\uAC00` : "\uD504\uB9AC\uC14B \uCD94\uAC00" });
+        open6.addEventListener("click", () => openPicker(kind, refresh8, say));
         return el("div", { class: "presetnow" }, [
           el("div", { class: "grow" }, [
-            el("div", { class: "hint", text: kind === "search" ? "\uAC80\uC0C9 \uC5D0\uC774\uC804\uD2B8\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4 \u2014 \uC77C\uBC18 \uC5D0\uC774\uC804\uD2B8\uAC00 \uC9C1\uC811 web_search \uB85C \uAC80\uC0C9\uD569\uB2C8\uB2E4." : "\uD504\uB9AC\uC14B\uC774 \uC5C6\uC2B5\uB2C8\uB2E4. \uC0C8\uB85C \uD558\uB098 \uB9CC\uB4E4\uC5B4 \uC8FC\uC138\uC694." })
+            el("div", { class: "hint", text: kind === "search" ? "\uAC80\uC0C9 \uC5D0\uC774\uC804\uD2B8\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4 \u2014 \uC77C\uBC18 \uC5D0\uC774\uC804\uD2B8\uAC00 \uC9C1\uC811 web_search \uB85C \uAC80\uC0C9\uD569\uB2C8\uB2E4. \u203A \uC5D0\uC11C \uACE0\uB974\uAC70\uB098 \uCD94\uAC00\uD569\uB2C8\uB2E4." : "\uD504\uB9AC\uC14B\uC774 \uC5C6\uC2B5\uB2C8\uB2E4. \u203A \uC5D0\uC11C \uD558\uB098 \uB9CC\uB4E4\uC5B4 \uC8FC\uC138\uC694." })
           ]),
-          total ? pick : null,
-          add
+          open6
         ]);
       }
       const open5 = el("button", { class: "ghost chev", text: "\u203A", title: `\uC800\uC7A5\uB41C \uD504\uB9AC\uC14B ${total}\uAC1C \u2014 \uC120\uD0DD \xB7 \uC218\uC815 \xB7 \uC0AD\uC81C \xB7 \uCD94\uAC00` });
@@ -6235,8 +6298,9 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         ]),
         el("div", { class: "hint", text: summarise(p) })
       ]);
-      pickArea.addEventListener("click", async () => {
-        if (p.selected) return;
+      const select = el("button", { class: "primary tiny", text: p.selected ? "\uC0AC\uC6A9 \uC911" : "\uC120\uD0DD" });
+      select.disabled = !!p.selected;
+      select.addEventListener("click", async () => {
         try {
           await state.selectPreset(p.id);
           await refresh8();
@@ -6264,12 +6328,13 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         }
       });
       if (kind === "general" && total <= 1) del.style.display = "none";
-      return el("div", { class: "pickrow" + (p.selected ? " on" : "") }, [pickArea, edit, del]);
+      return el("div", { class: "pickrow" + (p.selected ? " on" : "") }, [pickArea, select, edit, del]);
     };
     void draw2();
   }
   function openEditor(kind, id, refresh8, say) {
     const name = el("input", { placeholder: kind === "search" ? "\uD504\uB9AC\uC14B \uC774\uB984 (\uC608: Gemini \uAC80\uC0C9)" : "\uD504\uB9AC\uC14B \uC774\uB984 (\uC608: \uC815\uBC00 \xB7 \uC800\uB834\uC774)" });
+    const agentName = el("input", { placeholder: "\uD788\uB098" });
     const baseUrl = el("input", { placeholder: kind === "search" ? "https://generativelanguage.googleapis.com/v1beta/openai" : "https://ai-gateway.vercel.sh/v1" });
     const model = el("input", { placeholder: kind === "search" ? "gemini-2.5-flash" : "google/gemini-3.7-flash" });
     const keySel = el("select");
@@ -6303,8 +6368,9 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     syncCount();
     const syncKeyRow = () => {
       const codex = isCodex();
-      urlRow.style.display = codex ? "none" : "";
-      ownKeyRow.style.display = codex || selectedValue(keySel) ? "none" : "";
+      const fromKeyPage = !codex && !!selectedValue(keySel);
+      urlRow.style.display = codex || fromKeyPage ? "none" : "";
+      ownKeyRow.style.display = codex || fromKeyPage ? "none" : "";
       codexBox.root.style.display = codex ? "" : "none";
       if (codex) void codexBox.refresh();
     };
@@ -6325,10 +6391,14 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         keySel.appendChild(el("option", { value: CODEX_KEY, text: "OpenAI \uAD6C\uB3C5 (ChatGPT Plus/Pro \xB7 Codex)" }));
         const p = id ? r.presets.find((x) => x.id === id) : null;
         if (!p) {
+          agentName.value = r.defaultAgentName || "\uD788\uB098";
+          instructions.value = r.defaultInstructions?.[kind] || "";
+          syncCount();
           keyNote.textContent = "\uC124\uC815\uB418\uC9C0 \uC54A\uC74C";
           syncKeyRow();
           return;
         }
+        agentName.value = p.agentName || r.defaultAgentName || "\uD788\uB098";
         name.value = p.name;
         baseUrl.value = p.baseUrl;
         model.value = p.model;
@@ -6349,7 +6419,8 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     const save = el("button", { class: "primary", text: "\uC800\uC7A5" });
     const cancel = el("button", { class: "ghost", text: "\uCDE8\uC18C" });
     const body = el("div", {}, [
-      el("label", { class: "field" }, [el("span", { text: "\uC774\uB984" }), name]),
+      el("label", { class: "field" }, [el("span", { text: "\uD504\uB9AC\uC14B \uC774\uB984" }), name]),
+      kind === "general" ? el("label", { class: "field" }, [el("span", { text: "\uC5D0\uC774\uC804\uD2B8 \uC774\uB984 (\uB300\uD654\uC5D0\uC11C \uBD80\uB974\uB294 \uC774\uB984)" }), agentName]) : null,
       keyRow,
       keyHint,
       codexBox.root,
@@ -6394,7 +6465,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       out,
       el("div", { class: "row" }, [save, cancel])
     ]);
-    const close = modal(`${KIND_LABEL2[kind]} \u2014 ${id ? "\uD504\uB9AC\uC14B \uC218\uC815" : "\uC0C8 \uD504\uB9AC\uC14B"}`, body, { wide: true });
+    const close = modal(`${KIND_LABEL2[kind]} \u2014 ${id ? "\uD504\uB9AC\uC14B \uC218\uC815" : "\uC0C8 \uD504\uB9AC\uC14B"}`, body, { wide: true, sticky: true });
     cancel.addEventListener("click", close);
     save.addEventListener("click", async () => {
       save.disabled = true;
@@ -6412,7 +6483,8 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
           reasoning: selectedValue(reasoning),
           cache: cache.checked,
           flex: flex.checked,
-          instructions: instructions.value
+          instructions: instructions.value,
+          agentName: agentName.value.trim() || void 0
         }, id ?? void 0);
         close();
         await refresh8();
@@ -6998,7 +7070,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.5.0",
+            version: "0.5.1",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -7133,6 +7205,12 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       body.appendChild(pane);
       return { pane, btn };
     });
+    const closeBtn = el("button", { class: "ghost tiny settingsclose", text: "\u2715 \uB2EB\uAE30", title: "\uC124\uC815\uC744 \uB2EB\uACE0 \uBCF4\uB358 \uD0ED\uC73C\uB85C \uB3CC\uC544\uAC11\uB2C8\uB2E4" });
+    closeBtn.addEventListener("click", () => {
+      document.getElementById("open-settings")?.dispatchEvent(new Event("click", { bubbles: true }));
+    });
+    bar3.appendChild(el("span", { class: "spacer" }));
+    bar3.appendChild(closeBtn);
     settingsBar = bar3;
     mount.appendChild(el("div", { class: "settingswrap" }, [body]));
   }
@@ -7399,21 +7477,30 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       let close = () => {
       };
       const box = form(existing, () => close());
-      close = modal(existing ? "API \uD0A4 \uC218\uC815" : "API \uD0A4 \uCD94\uAC00", box);
+      close = modal(existing ? "API \uD0A4 \uC218\uC815" : "API \uD0A4 \uCD94\uAC00", box, { sticky: true });
     };
     const form = (existing, onClose) => {
-      const name = el("input", { value: existing?.name ?? "", placeholder: "\uC774\uB984 (\uC608: Vercel \uAC8C\uC774\uD2B8\uC6E8\uC774, Gemini)" });
-      const provider = el("input", { value: existing?.provider ?? "", placeholder: "\uD504\uB85C\uBC14\uC774\uB354 (\uC608: openai, google, vercel) \u2014 \uD45C\uC2DC\uC6A9" });
-      const baseUrl = el("input", { value: existing?.baseUrl ?? "", placeholder: "Base URL (\uC120\uD0DD \xB7 \uD504\uB9AC\uC14B\uC758 URL \uC774 \uBE44\uC5B4 \uC788\uC744 \uB54C \uC500)" });
+      const name = el("input", { value: existing?.name ?? "", placeholder: "\uC774\uB984 (\uD655\uC778\uC6A9, \uC608: \uB0B4 Gemini \uD0A4)" });
+      const provider = el("input", { value: existing?.provider ?? "", placeholder: "\uD504\uB85C\uBC14\uC774\uB354 (\uC608: google, openai, openrouter, vercel)", list: "hina-providers" });
+      const providerList = el("datalist", { id: "hina-providers" }, ["google", "openai", "anthropic", "openrouter", "vercel", "groq", "deepseek", "xai", "mistral", "ollama"].map((p) => el("option", { value: p })));
       const apiKey = el("input", { type: "password", placeholder: existing?.apiKey?.set ? `\uC124\uC815\uB428 (${existing.apiKey.length}\uC790) \u2014 \uBC14\uAFC0 \uB54C\uB9CC \uC785\uB825` : "API \uD0A4" });
       const note = el("input", { value: existing?.note ?? "", placeholder: "\uBA54\uBAA8 (\uC120\uD0DD)" });
+      const baseUrl = el("input", { value: existing?.baseUrl ?? "", placeholder: "Base URL (\uD504\uB85C\uBC14\uC774\uB354 \uC774\uB984\uC73C\uB85C \uBABB \uCC3E\uC744 \uB54C\uB9CC \xB7 \uC608: https://generativelanguage.googleapis.com/v1beta/openai)" });
+      const urlRow = el("label", { class: "field", style: { display: existing?.baseUrl ? "" : "none" } }, [el("span", { text: "Base URL \uC9C1\uC811 \uC9C0\uC815" }), baseUrl]);
+      const urlToggle = el("button", { class: "ghost tiny", text: "Base URL \uC9C1\uC811 \uC9C0\uC815" });
+      urlToggle.addEventListener("click", () => {
+        urlRow.style.display = urlRow.style.display === "none" ? "" : "none";
+      });
       const save = el("button", { class: "primary tiny", text: existing ? "\uC800\uC7A5" : "\uCD94\uAC00" });
       const cancel = el("button", { class: "ghost tiny", text: "\uCDE8\uC18C" });
       const box = el("div", { class: "keyform" }, [
-        el("div", { class: "row" }, [name, provider]),
-        el("div", { class: "row" }, [baseUrl]),
-        el("div", { class: "row" }, [apiKey, note]),
-        el("div", { class: "row" }, [save, cancel])
+        el("label", { class: "field" }, [el("span", { text: "\uC774\uB984" }), name]),
+        el("label", { class: "field" }, [el("span", { text: "\uD504\uB85C\uBC14\uC774\uB354" }), provider, providerList]),
+        el("div", { class: "hint", style: { marginTop: "-4px", marginBottom: "10px" }, text: "\uD504\uB85C\uBC14\uC774\uB354 \uC774\uB984\uC73C\uB85C API \uC8FC\uC18C\uB97C \uCC3E\uC2B5\uB2C8\uB2E4(models.dev). \uAC8C\uC774\uD2B8\uC6E8\uC774\uCC98\uB7FC \uC8FC\uC18C\uAC00 \uB530\uB85C \uC788\uC73C\uBA74 \uC544\uB798\uC5D0\uC11C \uC9C1\uC811 \uC9C0\uC815\uD569\uB2C8\uB2E4." }),
+        el("label", { class: "field" }, [el("span", { text: "API \uD0A4" }), apiKey]),
+        el("label", { class: "field" }, [el("span", { text: "\uBA54\uBAA8" }), note]),
+        urlRow,
+        el("div", { class: "row" }, [save, cancel, urlToggle])
       ]);
       cancel.addEventListener("click", () => {
         onClose();
@@ -7562,7 +7649,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.5.0"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.5.1"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -9050,7 +9137,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.5.0" }),
+        el("span", { class: "dim", text: "v0.5.1" }),
         healthEl,
         el("span", { class: "spacer" }),
         reload,
@@ -9185,6 +9272,6 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.5.0"} loaded`);
+    console.log(`[risu-hina] v${"0.5.1"} loaded`);
   })();
 })();

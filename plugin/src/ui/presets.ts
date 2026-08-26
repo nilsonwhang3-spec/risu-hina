@@ -75,15 +75,18 @@ export function buildPresetsCard(opts: PresetsCardOptions): HTMLElement {
     const pick = el('button', { class: 'ghost', text: `선택 (${total})`, title: '저장된 프리셋 목록' });
     pick.addEventListener('click', () => openPicker(kind, refresh, say));
     if (!p) {
-      const add = el('button', { class: 'primary', text: '새 프리셋' });
-      add.addEventListener('click', () => openEditor(kind, null, refresh, say));
+      // Same shape as the filled row: the chevron opens the list (which has
+      // 추가 at the bottom), so both agents are picked the same way.
+      const open = el('button', { class: 'ghost chev', text: '›', title: total ? `저장된 프리셋 ${total}개 — 선택 · 추가` : '프리셋 추가' });
+      open.addEventListener('click', () => openPicker(kind, refresh, say));
+      void pick;
       return el('div', { class: 'presetnow' }, [
         el('div', { class: 'grow' }, [
           el('div', { class: 'hint', text: kind === 'search'
-            ? '검색 에이전트가 없습니다 — 일반 에이전트가 직접 web_search 로 검색합니다.'
-            : '프리셋이 없습니다. 새로 하나 만들어 주세요.' }),
+            ? '검색 에이전트가 없습니다 — 일반 에이전트가 직접 web_search 로 검색합니다. › 에서 고르거나 추가합니다.'
+            : '프리셋이 없습니다. › 에서 하나 만들어 주세요.' }),
         ]),
-        total ? pick : null, add,
+        open,
       ]);
     }
     // One chevron: the list behind it is where 수정 and 삭제 live, next to
@@ -217,8 +220,12 @@ function openPicker(kind: Kind, refresh: () => Promise<void>, say: (t: string, k
       ]),
       el('div', { class: 'hint', text: summarise(p) }),
     ]);
-    pickArea.addEventListener('click', async () => {
-      if (p.selected) return;
+    // An explicit 선택, not a click on the row: the row also carries 수정
+    // and 삭제, and a choice that changes what the agent runs should be a
+    // button that says so.
+    const select = el('button', { class: 'primary tiny', text: p.selected ? '사용 중' : '선택' }) as HTMLButtonElement;
+    select.disabled = !!p.selected;
+    select.addEventListener('click', async () => {
       try {
         await state.selectPreset(p.id);
         await refresh();
@@ -248,7 +255,7 @@ function openPicker(kind: Kind, refresh: () => Promise<void>, say: (t: string, k
       }
     });
     if (kind === 'general' && total <= 1) del.style.display = 'none';
-    return el('div', { class: 'pickrow' + (p.selected ? ' on' : '') }, [pickArea, edit, del]);
+    return el('div', { class: 'pickrow' + (p.selected ? ' on' : '') }, [pickArea, select, edit, del]);
   };
 
   void draw();
@@ -268,6 +275,8 @@ function openEditor(
   say: (t: string, k?: 'ok' | 'err' | '') => void,
 ): void {
   const name = el('input', { placeholder: kind === 'search' ? '프리셋 이름 (예: Gemini 검색)' : '프리셋 이름 (예: 정밀 · 저렴이)' });
+  // What the agent calls itself - in its instructions and the panel.
+  const agentName = el('input', { placeholder: '히나' }) as HTMLInputElement;
   const baseUrl = el('input', { placeholder: kind === 'search' ? 'https://generativelanguage.googleapis.com/v1beta/openai' : 'https://ai-gateway.vercel.sh/v1' });
   const model = el('input', { placeholder: kind === 'search' ? 'gemini-2.5-flash' : 'google/gemini-3.7-flash' });
   const keySel = el('select') as HTMLSelectElement;
@@ -306,8 +315,10 @@ function openEditor(
   syncCount();
   const syncKeyRow = () => {
     const codex = isCodex();
-    urlRow.style.display = codex ? 'none' : '';
-    ownKeyRow.style.display = codex || selectedValue(keySel) ? 'none' : '';
+    const fromKeyPage = !codex && !!selectedValue(keySel);
+    // A key from the key page carries its endpoint; only 직접 입력 shows URL and key.
+    urlRow.style.display = codex || fromKeyPage ? 'none' : '';
+    ownKeyRow.style.display = codex || fromKeyPage ? 'none' : '';
     codexBox.root.style.display = codex ? '' : 'none';
     if (codex) void codexBox.refresh();
   };
@@ -330,10 +341,16 @@ function openEditor(
       keySel.appendChild(el('option', { value: CODEX_KEY, text: 'OpenAI 구독 (ChatGPT Plus/Pro · Codex)' }));
       const p = id ? r.presets.find((x) => x.id === id) : null;
       if (!p) {
+        // A new preset starts as the kind's default persona; the text is
+        // editable and replaces the default, never appends to it.
+        agentName.value = r.defaultAgentName || '히나';
+        instructions.value = r.defaultInstructions?.[kind] || '';
+        syncCount();
         keyNote.textContent = '설정되지 않음';
         syncKeyRow();
         return;
       }
+      agentName.value = p.agentName || r.defaultAgentName || '히나';
       name.value = p.name;
       baseUrl.value = p.baseUrl;
       model.value = p.model;
@@ -357,7 +374,8 @@ function openEditor(
   const save = el('button', { class: 'primary', text: '저장' });
   const cancel = el('button', { class: 'ghost', text: '취소' });
   const body = el('div', {}, [
-    el('label', { class: 'field' }, [el('span', { text: '이름' }), name]),
+    el('label', { class: 'field' }, [el('span', { text: '프리셋 이름' }), name]),
+    kind === 'general' ? el('label', { class: 'field' }, [el('span', { text: '에이전트 이름 (대화에서 부르는 이름)' }), agentName]) : null,
     keyRow,
     keyHint,
     codexBox.root,
@@ -396,7 +414,7 @@ function openEditor(
     out,
     el('div', { class: 'row' }, [save, cancel]),
   ]);
-  const close = modal(`${KIND_LABEL[kind]} — ${id ? '프리셋 수정' : '새 프리셋'}`, body, { wide: true });
+  const close = modal(`${KIND_LABEL[kind]} — ${id ? '프리셋 수정' : '새 프리셋'}`, body, { wide: true, sticky: true });
   cancel.addEventListener('click', close);
 
   save.addEventListener('click', async () => {
@@ -416,6 +434,7 @@ function openEditor(
         cache: cache.checked,
         flex: flex.checked,
         instructions: instructions.value,
+        agentName: agentName.value.trim() || undefined,
       }, id ?? undefined);
       close();
       await refresh();

@@ -1938,6 +1938,34 @@ def test_workspace_folders_and_family(s: Server, cw: dict) -> None:
           str(body.get("workspace", {}).get("familyKey")))
 
 
+def test_permits_and_key_providers(s: Server) -> None:
+    """Permission prompts have a wire shape the panel polls; a key names a
+    provider and gets its base URL from the catalog (pinned list offline)."""
+    print("test_permits_and_key_providers")
+    st, body = s.get(q("/permits", sessionId="sess-x"))
+    check("an idle session has no prompts", st == 200 and body.get("pending") == [], str(body)[:120])
+    st, body = s.get("/permits")
+    check("sessionId is required", st == 400, str(st))
+    st, body = s.post("/permits/decide", {"id": "nope", "allow": True})
+    check("deciding an unknown prompt is a 404", st == 404, str(st))
+
+    st, body = s.post("/keys/save", {"values": {"name": "제미니", "provider": "google", "apiKey": "AIza-test-key-000"}})
+    check("a key without a URL gets the provider's endpoint",
+          st == 200 and body["key"]["baseUrl"] == "https://generativelanguage.googleapis.com/v1beta/openai", str(body)[:200])
+    kid = body["key"]["id"]
+    st, body = s.post("/keys/save", {"id": kid, "values": {"name": "제미니", "provider": "google", "baseUrl": "https://gw.example/v1"}})
+    check("an explicit URL wins over the provider's", body["key"]["baseUrl"] == "https://gw.example/v1", str(body)[:160])
+    st, body = s.post("/keys/save", {"values": {"name": "미지", "provider": "nobody-knows-this", "apiKey": "k"}})
+    check("an unknown provider leaves the URL empty rather than guessing", st == 200 and body["key"]["baseUrl"] == "", str(body)[:160])
+    for k in (kid, body["key"]["id"]):
+        s.post("/keys/delete", {"id": k})
+
+    st, body = s.get("/presets")
+    sel = body.get("selected") or {}
+    check("the general preset carries an agent name", sel.get("agentName") == "히나", str(sel.get("agentName")))
+    check("and the defaults are offered to the editor", "general" in (body.get("defaultInstructions") or {}), str(list((body.get("defaultInstructions") or {}).keys())))
+
+
 def test_loopback_exemption() -> None:
     """With RISUHINA_REQUIRE_TOKEN off, a loopback caller needs no token.
 
@@ -1993,6 +2021,7 @@ def main() -> int:
         test_preset_selection(s)
         test_keys_and_agent_kinds(s)
         test_codex_subscription_preset(s)
+        test_permits_and_key_providers(s)
         test_skills(s)
         test_script_skills(s)
         test_reference_skills(s)

@@ -75,6 +75,13 @@ def save(values: dict, key_id: str | None = None) -> dict:
         api_key = (previous or {}).get("apiKey", "")
     else:
         api_key = str(raw).strip()
+    provider = str(values.get("provider") or "").strip()
+    base_url = str(values.get("baseUrl") or "").strip().rstrip("/")
+    if not base_url and provider:
+        # The provider names the endpoint: models.dev knows the OpenAI-
+        # compatible base for most, so the page asks for a provider, not a URL.
+        from . import catalog
+        base_url = catalog.provider_api(provider)
     kid = key_id or uuid.uuid4().hex
     now = db.now()
     db.execute(
@@ -82,8 +89,7 @@ def save(values: dict, key_id: str | None = None) -> dict:
         "VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, "
         "provider=excluded.provider, base_url=excluded.base_url, api_key=excluded.api_key, "
         "note=excluded.note, updated_at=excluded.updated_at",
-        (kid, name, str(values.get("provider") or "").strip(), str(values.get("baseUrl") or "").strip().rstrip("/"),
-         api_key, str(values.get("note") or "")[:500], now, now))
+        (kid, name, provider, base_url, api_key, str(values.get("note") or "")[:500], now, now))
     log.info("api key saved id=%s name=%s provider=%s", kid, name, values.get("provider"))
     # Presets pointing at this key see the new value on their next use.
     from . import presets

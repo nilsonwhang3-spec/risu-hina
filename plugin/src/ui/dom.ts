@@ -254,6 +254,8 @@ export const PAPER_PLANE =
  */
 export function modal(title: string, body: HTMLElement, opts: {
   wide?: boolean;
+  /** A form the user is typing into: the backdrop does not close it, only ✕ / Escape / 취소. */
+  sticky?: boolean;
   onClose?: () => void;
 } = {}): () => void {
   const closeBtn = el('button', { class: 'iconbtn', html: ICON.close, title: '닫기' });
@@ -282,8 +284,8 @@ export function modal(title: string, body: HTMLElement, opts: {
   closeBtn.addEventListener('click', close);
   back.addEventListener('click', (e) => {
     // Only the backdrop itself, never a click that happened to bubble from a
-    // field inside the box.
-    if (e.target === back) close();
+    // field inside the box - and not at all for a sticky form.
+    if (e.target === back && !opts.sticky) close();
   });
   document.addEventListener('keydown', esc, true);
 

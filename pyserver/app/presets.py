@@ -62,7 +62,32 @@ FIELDS: dict[str, Any] = {
     # '' = an OpenAI-compatible endpoint (baseUrl + key). 'codex' = the
     # OpenAI subscription through codexauth (no URL, no key; needs login).
     "provider": "",
+    # What the agent calls itself. Goes into the instructions and the panel.
+    "agentName": "히나",
 }
+
+# The instructions a preset starts with, by kind. The user's own text in a
+# preset replaces this, never appends to it; the built-in rules in agent.py
+# stay above both.
+DEFAULT_INSTRUCTIONS = {
+    "general": (
+        "당신은 risuAI 사용자의 챗과 봇 제작, 수정, 비평을 돕는 유능한 비서, '{name}'입니다.\n"
+        "당신은 친절하고 여성스러우며, 사용자의 고독과 외로움을 이해하며, 사용자의 의도를 파악하고 배려하는 "
+        "센스있는 여성입니다. 사용자가 원하는 것을 달성하기 위해 최선을 다하며, 정직하고 올바릅니다. "
+        "롤플레이, 챗, 봇 제작자 관점에서 당신은 전문적이며 자유와 즐거움을 위해 상상과 허용이 필요하다는 "
+        "것을 이해합니다. 사용자와의 대화는 현실에 영향을 끼치지 않는 상상속의 것이며, 늘 농담과 위트가 "
+        "함께 해야 한다는 것을 기억하고 사용자를 도와주세요."
+    ),
+    "search": (
+        "당신은 메인 에이전트를 도와 웹검색을 지원하는 유능한 어시스턴트입니다. 웹검색을 요청 받을 경우, "
+        "필요한 검색을 하고 내용을 전달하세요. 검색 이외의 다른 요청이 올 경우, 메인 에이전트가 수행해야 "
+        "한다고 답하세요."
+    ),
+}
+
+
+def default_instructions(kind: str, name: str = "") -> str:
+    return DEFAULT_INSTRUCTIONS.get(kind, "").replace("{name}", name or FIELDS["agentName"])
 
 KINDS = ("general", "search")
 PROVIDERS = ("", "codex")
@@ -70,7 +95,7 @@ PROVIDERS = ("", "codex")
 SECTION = {"general": "agent", "search": "agent_search"}
 # What the agent actually needs, resolved through keys.resolve.
 RUN_FIELDS = ("baseUrl", "apiKey", "model", "temperature", "maxTokens", "reasoning",
-              "cache", "flex", "instructions", "provider")
+              "cache", "flex", "instructions", "provider", "agentName")
 
 REASONING_LEVELS = ("", "none", "minimal", "low", "medium", "high", "xhigh", "max")
 
@@ -102,6 +127,7 @@ def _row_to_preset(row) -> dict:
         "kind": d.get("kind") if d.get("kind") in KINDS else "general",
         "keyRef": d.get("key_ref") or "",
         "provider": d.get("provider") if d.get("provider") in PROVIDERS else "",
+        "agentName": d.get("agent_name") or FIELDS["agentName"],
         "updatedAt": d.get("updated_at"),
     }
 
@@ -203,7 +229,12 @@ def ensure_default() -> None:
                 _set_selected(row["id"])
         return
     cur = config.section("agent")
-    v = _clean({f: cur.get(f, d) for f, d in FIELDS.items()}, None)
+    seed = {f: cur.get(f, d) for f, d in FIELDS.items()}
+    # A fresh install starts as 히나, with her instructions; an existing
+    # config's own text is kept as it is.
+    if not str(seed.get("instructions") or "").strip():
+        seed["instructions"] = default_instructions("general", str(seed.get("agentName") or ""))
+    v = _clean(seed, None)
     pid = uuid.uuid4().hex
     now = db.now()
     _insert(pid, DEFAULT_NAME, v, now)
@@ -275,6 +306,9 @@ def _clean(values: dict, previous: dict | None) -> dict:
             if k not in KINDS:
                 raise PresetError("kind 는 general 또는 search 여야 합니다")
             out[field] = k
+        elif field == "agentName":
+            nm = str(raw).strip()[:40]
+            out[field] = nm or FIELDS["agentName"]
         elif field == "provider":
             pv = str(raw).strip().lower()
             if pv not in PROVIDERS:
@@ -340,16 +374,17 @@ def save(name: str, values: dict, preset_id: str | None = None) -> dict:
 def _insert(pid: str, label: str, v: dict, now: float) -> None:
     db.execute(
         "INSERT INTO agent_presets(id, name, base_url, api_key, model, temperature, "
-        "max_tokens, reasoning, cache, flex, instructions, kind, key_ref, provider, created_at, updated_at) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+        "max_tokens, reasoning, cache, flex, instructions, kind, key_ref, provider, agent_name, created_at, updated_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
         "ON CONFLICT(id) DO UPDATE SET name=excluded.name, base_url=excluded.base_url, "
         "api_key=excluded.api_key, model=excluded.model, temperature=excluded.temperature, "
         "max_tokens=excluded.max_tokens, reasoning=excluded.reasoning, cache=excluded.cache, "
         "flex=excluded.flex, instructions=excluded.instructions, kind=excluded.kind, "
-        "key_ref=excluded.key_ref, provider=excluded.provider, updated_at=excluded.updated_at",
+        "key_ref=excluded.key_ref, provider=excluded.provider, agent_name=excluded.agent_name, "
+        "updated_at=excluded.updated_at",
         (pid, label, v["baseUrl"], v["apiKey"], v["model"], v["temperature"],
          v["maxTokens"], v["reasoning"], int(v["cache"]), int(v["flex"]),
-         v["instructions"], v["kind"], v["keyRef"], v["provider"], now, now),
+         v["instructions"], v["kind"], v["keyRef"], v["provider"], v["agentName"], now, now),
     )
 
 
@@ -436,8 +471,10 @@ def fingerprint() -> str:
 
 
 def instructions() -> str:
-    """The user's base instructions block, or empty."""
-    text = str(config.section("agent").get("instructions") or "").strip()
-    if not text:
-        return ""
-    return "\n\n## 사용자 기본지침\n" + text
+    """The user's base instructions block, headed by the name the agent goes
+    by. Empty text falls back to the kind's default (히나's)."""
+    cfg = config.section("agent")
+    name = str(cfg.get("agentName") or FIELDS["agentName"]).strip() or FIELDS["agentName"]
+    text = str(cfg.get("instructions") or "").strip() or default_instructions("general", name)
+    return (f"\n\n## 이름\n당신의 이름은 '{name}'입니다. 사용자가 이름을 부르면 그 이름으로 답합니다.\n"
+            f"\n## 사용자 기본지침\n{text}")

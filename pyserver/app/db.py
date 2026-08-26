@@ -599,6 +599,8 @@ ADD_COLUMNS = [
     ("agent_presets", "provider", "TEXT NOT NULL DEFAULT ''"),
     # The workspace a copy / new version of a bot shares (workspace.root).
     ("characters", "family_key", "TEXT NOT NULL DEFAULT ''"),
+    # What the agent calls itself (presets.agentName).
+    ("agent_presets", "agent_name", "TEXT NOT NULL DEFAULT ''"),
     ("skills", "kind", "TEXT NOT NULL DEFAULT 'md'"),
     ("skills", "filename", "TEXT NOT NULL DEFAULT ''"),
     # A checkpoint covers the whole chat - turns, this chat's lorebook entries

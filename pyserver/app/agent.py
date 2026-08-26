@@ -23,7 +23,7 @@ from pydantic_ai import Agent, RunContext
 from pydantic_ai.models.openai import OpenAIChatModel, OpenAIResponsesModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
-from . import (actions, assets, codexauth, config, files, log, presets, pyexec, skills, snapshots,
+from . import (actions, assets, codexauth, config, files, log, permits, presets, pyexec, skills, snapshots,
                staging, store, websearch, workspace)
 from . import card as cardmod
 from . import memory as mem
@@ -920,6 +920,53 @@ def build() -> Agent[Deps]:
             return str(e)
 
     # --- outside world ------------------------------------------------------
+
+    # --- things that must be allowed first -------------------------------------
+    # A shell command or a package install is asked in the panel while the tool
+    # waits (permits.py). The user may allow once, refuse, or allow this kind
+    # for the rest of the turn.
+
+    async def _permitted(ctx: RunContext[Deps], kind: str, summary: str, detail: str) -> bool:
+        if not ctx.deps.session_id:
+            return False
+        req = permits.request(ctx.deps.session_id, kind, summary, detail)
+        if req["auto"]:
+            return True
+        return await permits.decision(req["id"])
+
+    def _fmt(r: dict) -> str:
+        out = f"(exit {r['code']}, {r['seconds']}s)\n"
+        if r.get("stdout"):
+            out += r["stdout"]
+        if r.get("stderr"):
+            out += ("\n--- stderr ---\n" if r.get("stdout") else "") + r["stderr"]
+        return out[:20000]
+
+    @agent.tool
+    async def run_shell(ctx: RunContext[Deps], command: str, reason: str) -> str:
+        """워크스페이스에서 셸 명령(cmd / bash)을 실행한다. **사용자 허용이 필요하다** —
+        패널에 프롬프트가 뜨고, 허용하면 실행되고 거부하면 거부됐다고 돌아온다.
+
+        run_python 으로 안 되는 것(외부 도구 호출, 파일 변환 프로그램 등)에만 쓴다.
+        reason 은 사용자에게 보이는 이유다. 워크스페이스 밖을 건드리는 명령은 제안하지 마라.
+        """
+        ws = workspace.root(ctx.deps.char_key)
+        ok = await _permitted(ctx, "shell", permits.safe_summary(command), f"이유: {reason}\n\n{command}\n\n작업 폴더: {ws}")
+        if not ok:
+            return "사용자가 이 명령을 허용하지 않았습니다. 다른 방법을 찾거나 사용자에게 물어보세요."
+        return _fmt(permits.run_shell(command, ws))
+
+    @agent.tool
+    async def pip_install(ctx: RunContext[Deps], packages: str, reason: str) -> str:
+        """파이썬 패키지를 설치한다 (쉼표로 여러 개). **사용자 허용이 필요하다.**
+
+        run_python 에서 import 가 실패했을 때 쓴다. 설치는 이 백엔드의 인터프리터에 된다.
+        """
+        pkgs = [p.strip() for p in packages.split(",") if p.strip()]
+        ok = await _permitted(ctx, "pip", "pip install " + " ".join(pkgs)[:120], f"이유: {reason}\n\n패키지: {', '.join(pkgs)}")
+        if not ok:
+            return "사용자가 설치를 허용하지 않았습니다."
+        return _fmt(permits.pip_install(pkgs))
 
     if websearch.configured():
         @agent.tool

@@ -93,6 +93,38 @@ def _model(pid: str, mid: str, m: dict) -> dict:
     }
 
 
+def provider_api(provider: str) -> str:
+    """The OpenAI-compatible base URL models.dev lists for a provider, matched
+    by id or display name (case-insensitive); '' when unknown. A few common
+    ones are pinned so the key page works before the catalog has been fetched."""
+    want = (provider or "").strip().lower()
+    if not want:
+        return ""
+    pinned = {
+        "openai": "https://api.openai.com/v1",
+        "google": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "gemini": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "anthropic": "https://api.anthropic.com/v1",
+        "openrouter": "https://openrouter.ai/api/v1",
+        "vercel": "https://ai-gateway.vercel.sh/v1",
+        "groq": "https://api.groq.com/openai/v1",
+        "deepseek": "https://api.deepseek.com/v1",
+        "xai": "https://api.x.ai/v1",
+        "mistral": "https://api.mistral.ai/v1",
+        "ollama": "https://ollama.com/v1",
+    }
+    data = _load()
+    for pid, p in data.items():
+        if not isinstance(p, dict):
+            continue
+        if pid.lower() == want or str(p.get("name") or "").lower() == want:
+            api = str(p.get("api") or "").rstrip("/")
+            if api:
+                return api
+            break
+    return pinned.get(want, "")
+
+
 def search(q: str, *, provider: str = "", refresh: bool = False) -> dict:
     """Providers and models matching `q` (substring on ids and names).
     `provider` narrows to one provider's models; empty `q` with a provider

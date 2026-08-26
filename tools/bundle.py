@@ -149,6 +149,22 @@ def build_plugin() -> Path:
     return dest
 
 
+def _pip_wheel(pydir: Path) -> str:
+    """Download the pip wheel next to the embedded interpreter; returns its
+    file name ('' when the download fails - pip_install then says so)."""
+    r = subprocess.run([sys.executable, "-m", "pip", "download", "pip", "--no-deps",
+                        "--only-binary=:all:", "--disable-pip-version-check", "-q", "-d", str(pydir)],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        print(f"  warn    pip wheel not bundled: {r.stderr.strip()[:200]}")
+        return ""
+    found = sorted(pydir.glob("pip-*.whl"))
+    if not found:
+        return ""
+    print(f"  pip     {found[-1].name}")
+    return found[-1].name
+
+
 def stage_interpreter(target: str, stage: Path) -> None:
     spec = TARGETS[target]
     print(f"[1/3] interpreter: CPython {spec['python']} ({spec['label']})")
@@ -158,7 +174,12 @@ def stage_interpreter(target: str, stage: Path) -> None:
     if target == "win":
         with zipfile.ZipFile(archive) as z:
             z.extractall(pydir)
-        (pydir / "python311._pth").write_text(PTH, encoding="ascii")
+        # The embeddable zip has no pip. The agent's pip_install runs
+        # `python -m pip` on this interpreter, so a pip wheel goes on its
+        # path - wheels are zip-importable, and `._pth` takes a file name.
+        wheel = _pip_wheel(pydir)
+        (pydir / "python311._pth").write_text(PTH.replace("python311.zip\n", f"python311.zip\n{wheel}\n", 1) if wheel else PTH,
+                                               encoding="ascii")
     else:
         # The tarball has a single `python/` top level; strip it.
         with tarfile.open(archive, "r:gz") as t:

@@ -28,7 +28,7 @@ from pydantic_ai.messages import (
 )
 
 from . import agent as agent_mod
-from . import config, db, log, presets, pyexec, skills, staging, store, workspace
+from . import config, db, log, permits, presets, pyexec, skills, staging, store, workspace
 
 _agent_cache: dict[str, Any] = {}
 
@@ -307,6 +307,9 @@ async def run(session_id: str, prompt: str, mode: str = "") -> AsyncGenerator[st
             raise
         log.exception(f"agent run failed session={session_id}")
         yield _line({"type": "error", "error": _explain(e)})
+    finally:
+        # "이번 턴 항상 허용" and any unanswered prompt end with the turn.
+        permits.end_turn(session_id)
 
 
 def _save_partial_history(session_id: str, prompt: str, partial: str, why: str) -> None:

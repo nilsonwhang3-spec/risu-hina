@@ -528,6 +528,45 @@ export class AgentPanel {
     let acc = '';
     this.scroll();
 
+    // Permission prompts: while the turn runs, the backend may be waiting on
+    // a shell / pip request. Poll and draw each once, with three answers.
+    const permitBox = el('div', { class: 'permits' });
+    body.parentElement?.insertBefore(permitBox, body);
+    const shown = new Set<string>();
+    const askPermit = (p: { id: string; kind: string; summary: string; detail: string }) => {
+      const card = el('div', { class: 'permit' });
+      const decide = async (allow: boolean, always: boolean) => {
+        for (const b of Array.from(card.querySelectorAll('button'))) (b as HTMLButtonElement).disabled = true;
+        try {
+          await state.decidePermit(p.id, allow, always);
+          card.classList.add(allow ? 'allowed' : 'denied');
+          card.appendChild(el('div', { class: 'hint', text: allow ? (always ? '허용 (이번 턴 동안 계속 허용)' : '허용') : '거부' }));
+        } catch (e) {
+          card.appendChild(el('div', { class: 'notice err', text: msg(e) }));
+        }
+      };
+      const allow = el('button', { class: 'primary tiny', text: '허용' });
+      const deny = el('button', { class: 'ghost tiny', text: '거부' });
+      const always = el('button', { class: 'ghost tiny', text: '이번 턴 항상 허용', title: '이 턴이 끝날 때까지 같은 종류의 요청을 묻지 않고 허용합니다' });
+      allow.addEventListener('click', () => void decide(true, false));
+      deny.addEventListener('click', () => void decide(false, false));
+      always.addEventListener('click', () => void decide(true, true));
+      card.appendChild(el('div', { class: 'permit-title', text: (p.kind === 'pip' ? '패키지 설치 허용?' : '셸 명령 실행 허용?') + ' ' + p.summary }));
+      card.appendChild(el('pre', { class: 'mono', text: p.detail }));
+      card.appendChild(el('div', { class: 'row' }, [allow, deny, always]));
+      permitBox.appendChild(card);
+      this.scroll();
+    };
+    const permitPoll = setInterval(async () => {
+      try {
+        for (const p of await state.permits()) {
+          if (shown.has(p.id)) continue;
+          shown.add(p.id);
+          askPermit(p);
+        }
+      } catch { /* the stream reports real failures */ }
+    }, 1500);
+
     try {
       for await (const ev of state.agentChat(prompt, abort.signal)) {
         const e = ev as Record<string, unknown>;
@@ -584,6 +623,8 @@ export class AgentPanel {
         el('div', { class: 'notice err', text: msg(e) }));
       void clientLog('error', 'agent chat failed', { error: String(e) });
     } finally {
+      clearInterval(permitPoll);
+      if (!permitBox.childElementCount) permitBox.remove();
       this.busy = false;
       this.send.disabled = false;
       this.scroll();

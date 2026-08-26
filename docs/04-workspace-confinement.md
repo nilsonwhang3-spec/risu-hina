@@ -686,3 +686,13 @@ history 4개). 이제 `BaseException` 경로에서 프롬프트 + 도착한 텍�
 
 - 웹(risu.xyz) 에셋 썸네일: iframe CSP 에 `img-src` 가 없어 불가(`default-src 'none'`). PocketRisu 만.
 - 실기기 확인: 모바일 거터, 코덱스 실호출, `web_research`, 요약 압축 실동작.
+
+## G.6 허용 프롬프트 (v0.5.1)
+
+셸 명령과 pip 설치는 승인 큐(턴이 끝난 뒤 결정)로는 안 된다 — 에이전트가 *지금* 필요해서다. 그래서
+`permits.py` 는 툴 호출을 **블록**한다: 요청을 등록하고 `permits.decision()` 이 답을 기다리며(최대 10분,
+시간 초과 = 거부), 패널은 턴이 도는 동안 `GET /permits?sessionId=` 를 1.5초마다 폴링해 프롬프트를 그린다
+(허용 / 거부 / 이번 턴 항상 허용). "항상"은 세션·턴 단위라 `session.run` 의 finally 가 지운다.
+실행은 샌드박스 밖(백엔드 프로세스)에서 워크스페이스를 cwd 로, 동봉 인터프리터를 PATH 앞에 두고 한다 —
+사용자가 허용한 것이므로 감사 훅의 "프로세스 생성 금지"와 모순되지 않는다. 임베디드 파이썬엔 pip 이
+없어 `tools/bundle.py` 가 pip 휠을 내려받아 `python311._pth` 에 올린다(휠은 zip-import 된다).

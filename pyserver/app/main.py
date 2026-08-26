@@ -34,7 +34,7 @@ from starlette.concurrency import run_in_threadpool
 
 from . import (chatfmt, config, db, files, log, presets, session, skills, staging,
                store, websearch, workspace)
-from . import actions, assets, catalog, charx, codexauth, keys, snapshots, updater
+from . import actions, assets, catalog, charx, codexauth, keys, permits, snapshots, updater
 from . import card as cardmod
 from . import memory as mem
 
@@ -721,6 +721,10 @@ def h_presets(arg: dict) -> dict:
         "kinds": list(presets.KINDS),
         "keys": keys.list_all(),
         "keepSentinel": config.KEEP,
+        # What a new preset's instructions start as, per kind (the editor
+        # prefills them; the user's text replaces, never appends).
+        "defaultInstructions": {k: presets.default_instructions(k) for k in presets.KINDS},
+        "defaultAgentName": presets.FIELDS["agentName"],
         "reasoningLevels": list(presets.REASONING_LEVELS),
         "maxInstructions": presets.MAX_INSTRUCTIONS,
     }
@@ -828,6 +832,22 @@ def h_codex_login_complete(arg: dict) -> dict:
 
 def h_codex_logout(arg: dict) -> dict:
     return codexauth.logout()
+
+
+# --- permission prompts (shell / pip while a turn runs) --------------------------------
+
+def h_permits(arg: dict) -> dict:
+    sid = str(arg.get("sessionId") or "")
+    if not sid:
+        raise ApiError(400, "sessionId is required")
+    return {"sessionId": sid, "pending": permits.pending(sid)}
+
+
+def h_permit_decide(arg: dict) -> dict:
+    try:
+        return permits.decide(str(arg.get("id") or ""), bool(arg.get("allow")), bool(arg.get("always")))
+    except LookupError as e:
+        raise ApiError(404, str(e))
 
 
 def h_skills(arg: dict) -> dict:
@@ -1541,6 +1561,8 @@ ROUTES: dict[str, Handler] = {
     "GET /codex/login/status": h_codex_login_status,
     "POST /codex/login/complete": h_codex_login_complete,
     "POST /codex/logout": h_codex_logout,
+    "GET /permits": h_permits,
+    "POST /permits/decide": h_permit_decide,
     "POST /presets/select": h_preset_select,
     "POST /presets/delete": h_preset_delete,
 

@@ -272,9 +272,15 @@ async function readJson(res: Response): Promise<unknown> {
 
 async function toError(res: Response): Promise<BackendError> {
   const body = await readJson(res);
-  const msg = (body && typeof body === 'object' && 'error' in body)
+  let msg = (body && typeof body === 'object' && 'error' in body)
     ? String((body as { error: unknown }).error)
     : `HTTP ${res.status}`;
+  // "unauthorized" names the rule, not the fix. Say where the token is.
+  if (res.status === 401) {
+    msg = '토큰이 맞지 않습니다. 백엔드 PC 의 data/token.txt 내용을 ⚙ → 연결 → 토큰에 넣고 "저장하고 연결"을 눌러 주세요 (127.0.0.1 로 접속할 때는 비워도 됩니다).';
+  } else if (res.status === 429) {
+    msg = '틀린 토큰이 여러 번 거부되어 잠시 막혔습니다. 1분 뒤 다시 시도해 주세요.';
+  }
   return new BackendError(res.status, msg, body);
 }
 

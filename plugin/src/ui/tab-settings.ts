@@ -99,6 +99,11 @@ export function renderSettingsTab(mount: HTMLElement): void {
 
   // The sub-tab bar goes up to the shell's tab row while settings is open
   // (연결 · API 키/인증 · 에이전트 …); the page keeps only its panes.
+  // A visible way out, at the end of the section row (the gear toggles too).
+  const closeBtn = el('button', { class: 'ghost tiny settingsclose', text: '✕ 닫기', title: '설정을 닫고 보던 탭으로 돌아갑니다' });
+  closeBtn.addEventListener('click', () => { document.getElementById('open-settings')?.dispatchEvent(new Event('click', { bubbles: true })); });
+  bar.appendChild(el('span', { class: 'spacer' }));
+  bar.appendChild(closeBtn);
   settingsBar = bar;
   mount.appendChild(el('div', { class: 'settingswrap' }, [body]));
 }
@@ -395,21 +400,32 @@ function buildKeysCard(): HTMLElement {
   const openForm = (existing: ApiKeyEntry | null): void => {
     let close = (): void => { /* set below */ };
     const box = form(existing, () => close());
-    close = modal(existing ? 'API 키 수정' : 'API 키 추가', box);
+    close = modal(existing ? 'API 키 수정' : 'API 키 추가', box, { sticky: true });
   };
   const form = (existing: ApiKeyEntry | null, onClose: () => void): HTMLElement => {
-    const name = el('input', { value: existing?.name ?? '', placeholder: '이름 (예: Vercel 게이트웨이, Gemini)' }) as HTMLInputElement;
-    const provider = el('input', { value: existing?.provider ?? '', placeholder: '프로바이더 (예: openai, google, vercel) — 표시용' }) as HTMLInputElement;
-    const baseUrl = el('input', { value: existing?.baseUrl ?? '', placeholder: 'Base URL (선택 · 프리셋의 URL 이 비어 있을 때 씀)' }) as HTMLInputElement;
+    // Four fields: name, provider, key, note. The endpoint comes from the
+    // provider (models.dev, or a pinned list) - a custom gateway is the one
+    // case that needs the URL, behind 직접 지정.
+    const name = el('input', { value: existing?.name ?? '', placeholder: '이름 (확인용, 예: 내 Gemini 키)' }) as HTMLInputElement;
+    const provider = el('input', { value: existing?.provider ?? '', placeholder: '프로바이더 (예: google, openai, openrouter, vercel)', list: 'hina-providers' }) as HTMLInputElement;
+    const providerList = el('datalist', { id: 'hina-providers' }, ['google', 'openai', 'anthropic', 'openrouter', 'vercel', 'groq', 'deepseek', 'xai', 'mistral', 'ollama']
+      .map((p) => el('option', { value: p })));
     const apiKey = el('input', { type: 'password', placeholder: existing?.apiKey?.set ? `설정됨 (${existing.apiKey.length}자) — 바꿀 때만 입력` : 'API 키' }) as HTMLInputElement;
     const note = el('input', { value: existing?.note ?? '', placeholder: '메모 (선택)' }) as HTMLInputElement;
+    const baseUrl = el('input', { value: existing?.baseUrl ?? '', placeholder: 'Base URL (프로바이더 이름으로 못 찾을 때만 · 예: https://generativelanguage.googleapis.com/v1beta/openai)' }) as HTMLInputElement;
+    const urlRow = el('label', { class: 'field', style: { display: existing?.baseUrl ? '' : 'none' } }, [el('span', { text: 'Base URL 직접 지정' }), baseUrl]);
+    const urlToggle = el('button', { class: 'ghost tiny', text: 'Base URL 직접 지정' });
+    urlToggle.addEventListener('click', () => { urlRow.style.display = urlRow.style.display === 'none' ? '' : 'none'; });
     const save = el('button', { class: 'primary tiny', text: existing ? '저장' : '추가' }) as HTMLButtonElement;
     const cancel = el('button', { class: 'ghost tiny', text: '취소' });
     const box = el('div', { class: 'keyform' }, [
-      el('div', { class: 'row' }, [name, provider]),
-      el('div', { class: 'row' }, [baseUrl]),
-      el('div', { class: 'row' }, [apiKey, note]),
-      el('div', { class: 'row' }, [save, cancel]),
+      el('label', { class: 'field' }, [el('span', { text: '이름' }), name]),
+      el('label', { class: 'field' }, [el('span', { text: '프로바이더' }), provider, providerList]),
+      el('div', { class: 'hint', style: { marginTop: '-4px', marginBottom: '10px' }, text: '프로바이더 이름으로 API 주소를 찾습니다(models.dev). 게이트웨이처럼 주소가 따로 있으면 아래에서 직접 지정합니다.' }),
+      el('label', { class: 'field' }, [el('span', { text: 'API 키' }), apiKey]),
+      el('label', { class: 'field' }, [el('span', { text: '메모' }), note]),
+      urlRow,
+      el('div', { class: 'row' }, [save, cancel, urlToggle]),
     ]);
     cancel.addEventListener('click', () => { onClose(); });
     save.addEventListener('click', async () => {

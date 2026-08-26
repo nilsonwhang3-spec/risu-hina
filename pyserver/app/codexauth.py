@@ -416,8 +416,11 @@ def client() -> Any:
         wanted_stream = bool(kw.get("stream"))
         kw["stream"] = True
         kw["store"] = False
-        # Not accepted by this backend; the subscription has no tiers/caches to pick.
-        for k in ("service_tier", "prompt_cache_key", "prompt_cache_retention", "prompt_cache_options", "user"):
+        # Not accepted by this backend: no tiers or caches to pick, and (seen in
+        # the wild, 400 "Unsupported parameter: max_output_tokens") no output
+        # cap either - the subscription decides.
+        for k in ("service_tier", "prompt_cache_key", "prompt_cache_retention", "prompt_cache_options", "user",
+                  "max_output_tokens", "top_p"):
             kw.pop(k, None)
         stream = await orig(**kw)
         if wanted_stream:

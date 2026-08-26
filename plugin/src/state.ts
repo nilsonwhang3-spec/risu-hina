@@ -181,6 +181,8 @@ export interface AgentPreset {
   keyRef: string;
   /** '' = OpenAI-compatible endpoint; 'codex' = the OpenAI subscription (login, no key). */
   provider: '' | 'codex';
+  /** What the agent calls itself. */
+  agentName: string;
   /** One preset per kind carries this. */
   selected?: boolean;
   updatedAt: number;
@@ -201,6 +203,11 @@ export interface CatalogModel {
   context: number | null; output: number | null; costIn: number | null; costOut: number | null; releaseDate: string;
 }
 export interface CatalogProvider { id: string; name: string; api: string; doc: string; env: string[]; models: number }
+/** A shell / pip request the agent is waiting on (GET /permits). */
+export interface PermitRequest {
+  id: string; sessionId: string; kind: 'shell' | 'pip'; summary: string; detail: string; createdAt: number;
+}
+
 export interface CodexStatus {
   loggedIn: boolean; email: string; accountId: string; plan: string; expiresAt: number;
   pending: boolean; listening: boolean; models: string[]; base: string; redirectUri: string;
@@ -930,6 +937,9 @@ class AppState {
     selectedSearch: AgentPreset | null;
     kinds: string[];
     keys: ApiKeyEntry[];
+    /** What a new preset's instructions start as, per kind. */
+    defaultInstructions?: Record<string, string>;
+    defaultAgentName?: string;
     reasoningLevels: string[];
     keepSentinel: string;
     maxInstructions: number;
@@ -1007,6 +1017,18 @@ class AppState {
 
   async codexLogout(): Promise<void> {
     await transport.post('/codex/logout', {});
+  }
+
+  // --- permission prompts (shell / pip while a turn runs) --------------------------
+
+  async permits(): Promise<PermitRequest[]> {
+    if (!this.sessionId) return [];
+    const r = await transport.get<{ pending: PermitRequest[] }>('/permits', { sessionId: this.sessionId });
+    return r.pending ?? [];
+  }
+
+  async decidePermit(id: string, allow: boolean, always = false): Promise<void> {
+    await transport.post('/permits/decide', { id, allow, always });
   }
 
   // --- skills ---------------------------------------------------------------

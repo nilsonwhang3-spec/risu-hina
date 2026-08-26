@@ -177,6 +177,7 @@ main { flex: 1; min-height: 0; display: flex; }
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 /* A result box under a button row: spaced from the row only when it has something. */
 .outbox:not(:empty) { margin-top: 10px; }
+.card > .notice, .card > div > .notice { margin-top: 8px; }
 .row + .row { margin-top: 8px; }
 .grow { flex: 1; min-width: 0; }
 label.field { display: block; margin-bottom: 10px; }
@@ -259,6 +260,16 @@ pre.mono {
 .steps { margin: 6px 0 0 18px; padding: 0; }
 .steps li { margin: 2px 0; }
 .thinking .stopbtn { margin-left: 8px; }
+/* A shell / pip request waiting on the user, inside the assistant bubble. */
+.permit {
+  border: 1px solid rgba(245,158,11,.6); border-radius: 6px; padding: 8px 10px; margin: 6px 0;
+  background: rgba(245,158,11,.07);
+}
+.permit.allowed { border-color: rgba(16,185,129,.5); background: rgba(16,185,129,.06); }
+.permit.denied { border-color: rgba(239,68,68,.5); background: rgba(239,68,68,.06); }
+.permit-title { font-weight: 700; font-size: 12px; margin-bottom: 4px; }
+.permit pre.mono { max-height: 140px; }
+.settingsclose { margin-left: auto; }
 .snaplist .verrow { padding: 4px 0; }
 /* Folders in the files tree: a label row, files indented under it. */
 .folderrow .folderlabel { cursor: default; color: var(--textcolor2, #79839a); }
