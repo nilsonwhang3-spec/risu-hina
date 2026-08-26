@@ -239,7 +239,7 @@ function copyText(text: string): boolean {
 function saveText(title: string, text: string): void {
   const url = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }));
   const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '');
-  const a = el('a', { href: url, download: `risu-elf-${title}-${stamp}.txt` });
+  const a = el('a', { href: url, download: `risu-hina-${title}-${stamp}.txt` });
   document.body.appendChild(a);
   a.click();
   a.remove();

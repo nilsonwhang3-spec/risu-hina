@@ -63,7 +63,7 @@ class Server:
     def __init__(self) -> None:
         self.port = free_port()
         self.token = "agent-test-" + str(self.port)
-        self.data = Path(tempfile.mkdtemp(prefix="risuelf-agent-"))
+        self.data = Path(tempfile.mkdtemp(prefix="risuhina-agent-"))
         # Copy the operator's credentials into the throwaway data dir so the
         # test uses real ones without touching the real database.
         try:
@@ -79,9 +79,9 @@ class Server:
             [str(py) if py.exists() else sys.executable, str(PYSERVER / "run.py")],
             cwd=str(PYSERVER),
             env={**os.environ,
-                 "RISUELF_PORT": str(self.port), "RISUELF_HOST": "127.0.0.1",
-                 "RISUELF_DATA_DIR": str(self.data), "RISUELF_TOKEN": self.token,
-                 "RISUELF_REQUIRE_TOKEN": "0", "PYTHONIOENCODING": "utf-8"},
+                 "RISUHINA_PORT": str(self.port), "RISUHINA_HOST": "127.0.0.1",
+                 "RISUHINA_DATA_DIR": str(self.data), "RISUHINA_TOKEN": self.token,
+                 "RISUHINA_REQUIRE_TOKEN": "0", "PYTHONIOENCODING": "utf-8"},
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
             encoding="utf-8", errors="replace")
 
@@ -92,7 +92,7 @@ class Server:
                 return False
             try:
                 st, b = self.get("/health")
-                if st == 200 and b.get("service") == "risu-elf":
+                if st == 200 and b.get("service") == "risu-hina":
                     return True
             except Exception:
                 time.sleep(0.2)

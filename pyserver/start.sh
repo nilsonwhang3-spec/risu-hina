@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Risu Elf backend launcher.
+# Risu Hina backend launcher.
 #
 # The restart loop is the supervisor-agnostic update mechanism (plan section 8):
 # exit code 75 means "a new version was installed, re-enter it". PM2, systemd,
@@ -21,11 +21,11 @@ else
   exit 2
 fi
 
-PORT="${1:-${RISUELF_PORT:-6020}}"
-LOG="${RISUELF_LOG:-$ROOT/server.log}"
+PORT="${1:-${RISUHINA_PORT:-6020}}"
+LOG="${RISUHINA_LOG:-$ROOT/server.log}"
 
-export RISUELF_PORT="$PORT"
-export RISUELF_HOST="${RISUELF_HOST:-127.0.0.1}"
+export RISUHINA_PORT="$PORT"
+export RISUHINA_HOST="${RISUHINA_HOST:-127.0.0.1}"
 export PYTHONIOENCODING=utf-8
 
 # The bundled interpreter first. python-build-standalone is relocatable but

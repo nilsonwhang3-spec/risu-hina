@@ -30,7 +30,7 @@ const ROOT = resolve(__dirname, '..');
 const pluginRequire = createRequire(pathToFileURL(resolve(ROOT, 'plugin/package.json')));
 const { parseHTML } = pluginRequire('linkedom');
 const pkgVersion = JSON.parse(readFileSync(resolve(ROOT, 'plugin/package.json'), 'utf8')).version;
-const BUNDLE = resolve(ROOT, `plugin/dist/risu-elf-${pkgVersion}.js`);
+const BUNDLE = resolve(ROOT, `plugin/dist/risu-hina-${pkgVersion}.js`);
 
 const failures = [];
 const check = (name, cond, detail = '') => {
@@ -47,18 +47,18 @@ const freePort = () => new Promise((res) => {
 
 async function startBackend() {
   const port = await freePort();
-  const data = mkdtempSync(join(tmpdir(), 'risuelf-plugin-'));
+  const data = mkdtempSync(join(tmpdir(), 'risuhina-plugin-'));
   let py = resolve(ROOT, 'pyserver/.venv/Scripts/python.exe');
   if (!existsSync(py)) py = 'python';
   const proc = spawn(py, [resolve(ROOT, 'pyserver/run.py')], {
     cwd: resolve(ROOT, 'pyserver'),
     env: {
       ...process.env,
-      RISUELF_PORT: String(port),
-      RISUELF_HOST: '127.0.0.1',
-      RISUELF_DATA_DIR: data,
-      RISUELF_TOKEN: 'plugin-smoke-token',
-      RISUELF_REQUIRE_TOKEN: '1',
+      RISUHINA_PORT: String(port),
+      RISUHINA_HOST: '127.0.0.1',
+      RISUHINA_DATA_DIR: data,
+      RISUHINA_TOKEN: 'plugin-smoke-token',
+      RISUHINA_REQUIRE_TOKEN: '1',
       PYTHONIOENCODING: 'utf-8',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -73,7 +73,7 @@ async function startBackend() {
     try {
       const r = await fetch(url + '/health');
       const j = await r.json();
-      if (j.service === 'risu-elf') return { url, port, data, proc, token: 'plugin-smoke-token', log: () => log };
+      if (j.service === 'risu-hina') return { url, port, data, proc, token: 'plugin-smoke-token', log: () => log };
     } catch { await new Promise((r) => setTimeout(r, 200)); }
   }
   throw new Error('backend did not start:\n' + log);

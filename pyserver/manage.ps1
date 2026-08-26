@@ -21,7 +21,7 @@ param(
     [string]$Python = '',
     # Keep it running across reboots, via NSSM.
     [switch]$Service,
-    [string]$Name = 'RisuElf',
+    [string]$Name = 'RisuHina',
     # setup: install only, do not start. uninstall: also delete venv and data.
     [switch]$NoStart,
     [switch]$Purge
@@ -109,7 +109,7 @@ function Find-Python {
 
 function Get-ServerProcesses {
     # Matched on this install's own run.py, not on a name in the path: an
-    # install in a directory not called risu-elf used to report nothing running
+    # install in a directory not called risu-hina used to report nothing running
     # while the server was up, and stop silently did nothing.
     $needle = $Entry.ToLower()
     Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
@@ -243,7 +243,7 @@ supervisor.
     & $exe install $Name 'cmd.exe' | Out-Null
     & $exe set $Name AppDirectory $Server | Out-Null
     & $exe set $Name AppParameters ("/c start.bat {0}" -f $Port) | Out-Null
-    & $exe set $Name DisplayName ("Risu Elf backend ({0})" -f $Port) | Out-Null
+    & $exe set $Name DisplayName ("Risu Hina backend ({0})" -f $Port) | Out-Null
     & $exe set $Name Description 'RisuAI chat post-editing backend' | Out-Null
     & $exe set $Name Start SERVICE_AUTO_START | Out-Null
     # A crash loop should be a slow one rather than a hot spin. The launcher

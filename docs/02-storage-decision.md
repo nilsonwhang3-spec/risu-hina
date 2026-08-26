@@ -55,7 +55,7 @@
 ## 결과 구조
 
 ```
-data/risuelf.db
+data/risuhina.db
   characters(char_key, cha_id, name, char_index, card_json)
   chats(chat_key, char_key, chat_id, chat_index, meta_json, orig_count)
   turns(chat_key, seq, msg_id, role, body, time, name, extras_json, origin)   ← 정본

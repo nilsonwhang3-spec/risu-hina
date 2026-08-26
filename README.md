@@ -1,4 +1,4 @@
-# Risu Elf
+# Risu Hina
 
 RisuAI 챗을 **끝난 뒤에** 고치는 도구. 플러그인 화면 안에서 대화를 통째로 펼쳐 놓고,
 직접 고치거나 AI 에이전트에게 시킨다.
@@ -17,13 +17,13 @@ RisuAI 챗을 **끝난 뒤에** 고치는 도구. 플러그인 화면 안에서 
 
 ```
 RisuAI / PocketRisu (브라우저)
- └─ 플러그인 iframe  ── risu-elf.js
+ └─ 플러그인 iframe  ── risu-hina.js
       │  Risuai.getChatFromIndex / setChatToIndex / ...
       └─ Risuai.nativeFetch          ← CSP connect-src 'none' 이라 유일한 통로
              ▼
       pyserver  127.0.0.1:6020   FastAPI + Pydantic AI + SQLite
              ├─ data/workspace/<char>/   원문·업로드·스크립트·산출물
-             └─ data/risuelf.db          턴·로어북·장기기억·세션·승인 큐
+             └─ data/risuhina.db          턴·로어북·장기기억·세션·승인 큐
 ```
 
 **턴의 정본은 DB다.** 마크다운은 파생물이다. 목표 작업이 질의형("이 네 챗에서 인물이 신전에
@@ -45,11 +45,11 @@ RisuAI / PocketRisu (브라우저)
 
 ## 설치
 
-[릴리스](../../releases/latest)에서 **`Risu.Elf.<버전>.Auto.Install.Package.zip` 하나만** 받으면 된다.
+[릴리스](../../releases/latest)에서 **`Risu.Hina.<버전>.Auto.Install.Package.zip` 하나만** 받으면 된다.
 플러그인도 그 안에 들어 있다.
 
 ```
-risu-elf/
+risu-hina/
   pyserver/       백엔드 코드
   plugin/         RisuAI 에 설치할 플러그인
   data/           DB · 설정 · 토큰 · 워크스페이스
@@ -58,7 +58,7 @@ risu-elf/
   README.md
 ```
 
-원하는 폴더에 풀고 — 폴더 이름이 `risu-elf` 일 필요도 없다 —
+원하는 폴더에 풀고 — 폴더 이름이 `risu-hina` 일 필요도 없다 —
 
 ```powershell
 setup.bat                    # Windows. 파이썬을 찾아 venv 를 만들고 띄운다
@@ -70,7 +70,7 @@ chmod +x *.sh && ./setup.sh   # Linux
 ./setup.sh --service          # pm2
 ```
 
-그다음 `plugin/Risu.Elf.Plugin.js` 를 RisuAI 플러그인 화면에 넣고, 챗 화면의 **Risu Elf** 버튼을
+그다음 `plugin/Risu.Hina.Plugin.js` 를 RisuAI 플러그인 화면에 넣고, 챗 화면의 **Risu Hina** 버튼을
 열어 오른쪽 위 ⚙ → **연결**에 백엔드 URL(같은 기계면 `http://127.0.0.1:6020`),
 **에이전트 → 수정**에 모델 자격증명을 넣는다.
 

@@ -36,7 +36,7 @@ python 권한이 매우 높아야 한다."* 그 결정은 유지된다. 바뀐 �
 
 **실측으로 잡은 함정:** 감사 이벤트의 인자가 항상 경로 문자열인 것은 아니다. importlib이
 `.pyc`를 원자적으로 쓸 때 이미 열린 **fd를 int로** 넘긴다. 첫 구현은 거기에
-`os.path.realpath()`를 걸어 `TypeError`로 죽었고, 그 결과 `import risuelf` 자체가
+`os.path.realpath()`를 걸어 `TypeError`로 죽었고, 그 결과 `import risuhina` 자체가
 실패했다. 지금은 경로가 아닌 값은 통과시킨다 — fd는 이미 검사를 통과한 `open`으로
 얻은 것이라 그 자체로는 탈출 수단이 되지 않는다. 덧붙여 `PYTHONDONTWRITEBYTECODE=1`로
 `.pyc`를 아예 만들지 않는다(정리 대상 폴더의 쓰레기이기도 하다).
@@ -44,7 +44,7 @@ python 권한이 매우 높아야 한다."* 그 결정은 유지된다. 바뀐 �
 ### 2.2 스코프 DB (`pyexec.build_scope_db`)
 
 자식 프로세스는 **진짜 DB를 보지 못한다.** 부모가 해당 캐릭터의 행만 `.scratch/scope.db`로
-내보내고, `risuelf` 헬퍼는 그것만 읽는다.
+내보내고, `risuhina` 헬퍼는 그것만 읽는다.
 
 이것이 헬퍼 함수마다 `WHERE char_key = ?`를 붙이는 것보다 나은 이유: **"이 봇의 데이터만"이
 구현의 성실함이 아니라 구조로 참이 된다.** 다른 봇의 행은 걸러지는 게 아니라 파일에 없다.
@@ -95,7 +95,7 @@ out/        내려받을 산출물. 정리 대상이지만 아직 안 받았을 
 | UI | 모델 설정 |
 |---|---|
 | Reasoning | `openai_reasoning_effort` (`none`…`max`) |
-| 프롬프트 캐시 | `openai_prompt_cache_key='risu-elf'` + `retention='24h'` |
+| 프롬프트 캐시 | `openai_prompt_cache_key='risu-hina'` + `retention='24h'` |
 | Flex 티어 | `openai_service_tier='flex'` |
 
 캐시 키를 챗별이 아니라 앱 전체에 하나로 두는 이유: 캐시되는 접두부는 지시문 + 툴 스키마이고
@@ -149,7 +149,7 @@ scripts/*.py      run_python 으로 실행하는 스크립트
 헤더로 올라갔다(제목·상태·새로고침·⚙·닫기 한 줄).
 
 ```
-[Risu Elf v0.1.0] [● 백엔드 v0.1.0 · 챗이름 · 394턴]        [↻] [⚙] [×]
+[Risu Hina v0.1.0] [● 백엔드 v0.1.0 · 챗이름 · 394턴]        [↻] [⚙] [×]
 챗 선택 | 챗 에딧 | 챗 로어북 | 장기기억 | 파일
 [ 툴 라인 — 현재 탭의 동작. 전체 폭 ]
 ┌──────────┬────────────────────────┬──────────────┐
@@ -341,21 +341,21 @@ charx 스크립트는 `rpack_map.bin`을 base64로 **내장**했다. 스킬 스�
 최신이어야 가능해진다. 지금은 GitHub 의 **raw 파일**을 가리킨다:
 
 ```
-https://raw.githubusercontent.com/<owner>/<repo>/master/plugin/Risu.Elf.Plugin.js
+https://raw.githubusercontent.com/<owner>/<repo>/master/plugin/Risu.Hina.Plugin.js
 ```
 
-처음엔 `releases/latest/download/Risu.Elf.Plugin.js` 였다 — 안정된 주소이고 curl 로는 잘
+처음엔 `releases/latest/download/Risu.Hina.Plugin.js` 였다 — 안정된 주소이고 curl 로는 잘
 받아진다. 그런데 **v0.1.0 → 0.3.0 이 나와도 risu.xyz 에 `+` 가 안 떴다.** RisuAI 의 확인 코드
 (`plugins.svelte.ts checkPluginUpdate`)는 브라우저 `fetch(updateURL, {Range: bytes=0-512})` 이고,
 릴리스 주소는 `github.com → releases/download → release-assets.githubusercontent.com` 으로 두 번
 리다이렉트되며 세 응답 어느 것도 `Access-Control-Allow-Origin` 을 안 준다. CORS 예외 → catch →
 버튼 없음. raw 는 `access-control-allow-origin: *` 와 `Accept-Ranges` 를 주고, RisuAI 문서의
-예시 URL 도 raw 다. 그래서 `tools/bundle.py` 가 릴리스마다 번들을 `plugin/Risu.Elf.Plugin.js`
+예시 URL 도 raw 다. 그래서 `tools/bundle.py` 가 릴리스마다 번들을 `plugin/Risu.Hina.Plugin.js`
 로도 복사하고, **그 파일을 릴리스 커밋에 포함**한다 — 커밋이 곧 "새 버전 공개"다. 릴리스 자산의
-`Risu.Elf.Plugin.js` 는 같은 파일의 사본(설치 zip 안에도 들어 있음)이다.
+`Risu.Hina.Plugin.js` 는 같은 파일의 사본(설치 zip 안에도 들어 있음)이다.
 설치본이 옛 주소를 들고 있으면 그 한 번은 수동 재설치가 필요하다(0.3.1 이 그 경우).
 
-`plugin/package.json`의 `risuelfRepo` 하나만 채우면 된다. **비어 있으면
+`plugin/package.json`의 `risuhinaRepo` 하나만 채우면 된다. **비어 있으면
 `//@update-url`을 아예 넣지 않는다** — 404 나는 URL은 RisuAI가 영영 "업데이트 확인
 실패"를 띄우게 만들고, 그건 없느니만 못하다.
 
@@ -404,43 +404,43 @@ Tailscale로 접속 중인 PC에 있을 수 있고, 로그는 그 PC의 파일�
 
 ---
 
-# 부록 C — `Real-ooc` → `risu-elf` 개명 (2026-08-23 4차)
+# 부록 C — `Real-ooc` → `risu-hina` 개명 (2026-08-23 4차)
 
-레포는 `nilsonwhang3-spec/risu-elf`. 네 가지 표기를 길이 순으로 치환했다(짧은 것이 긴 것을
+레포는 `nilsonwhang3-spec/risu-hina`. 네 가지 표기를 길이 순으로 치환했다(짧은 것이 긴 것을
 먹지 않도록):
 
 | 이전 | 이후 | 쓰이는 곳 |
 |---|---|---|
-| `REALOOC_` | `RISUELF_` | 환경변수 |
-| `Real-ooc` | `Risu Elf` | 표시·산문 |
-| `real-ooc` | `risu-elf` | 패키지·파일·서비스 이름 |
-| `realooc` | `risuelf` | 파이썬 식별자, DB 파일, 임시 접두어 |
+| `REALOOC_` | `RISUHINA_` | 환경변수 |
+| `Real-ooc` | `Risu Hina` | 표시·산문 |
+| `real-ooc` | `risu-hina` | 패키지·파일·서비스 이름 |
+| `realooc` | `risuhina` | 파이썬 식별자, DB 파일, 임시 접두어 |
 
 ## C.1 살아 있는 설치 위에서 이름을 바꾼다
 
 개명은 문자열 치환이 아니다. 이미 돌고 있는 설치가 있고, 그 안에 사용자의 챗이 있다.
 남긴 호환 장치 네 가지는 전부 **조용한 실패**를 막기 위한 것이다.
 
-**환경변수.** `_ENV()` 가 `RISUELF_*` 를 못 찾으면 `REALOOC_*` 를 읽는다. 예의가 아니라
+**환경변수.** `_ENV()` 가 `RISUHINA_*` 를 못 찾으면 `REALOOC_*` 를 읽는다. 예의가 아니라
 필요다 — 기계에 이미 올라가 있는 런처·제어 스크립트·서비스 래퍼가 옛 접두어로 쓰여 있고,
 `REALOOC_PORT` 를 말없이 무시하면 **이유 없이 엉뚱한 포트에 바인딩한 것처럼** 보인다.
 
-**데이터베이스.** `realooc.db` 를 `risuelf.db` 로 옮긴다. **연결을 열기 전에** 한다 —
+**데이터베이스.** `realooc.db` 를 `risuhina.db` 로 옮긴다. **연결을 열기 전에** 한다 —
 WAL·shm 사이드카가 같이 움직여야 하고, 열려 있는 연결 밑에서 파일 이름을 바꾸는 것이
 WAL 이 자기 본체와 헤어지는 경로다. 실측: 454턴이 그대로 넘어왔다.
 
-**샌드박스 헬퍼.** 워크스페이스에 `risuelf.py` 와 함께 `realooc.py` 심을 쓴다.
+**샌드박스 헬퍼.** 워크스페이스에 `risuhina.py` 와 함께 `realooc.py` 심을 쓴다.
 개명 전에 사용자가 쓴 스크립트 스킬은 여전히 `import realooc` 라고 적혀 있고,
 **그 스크립트가 정작 필요해진 순간에 깨지는 것**과 세 줄의 재export 를 맞바꾸지 않는다.
 
-**핸드셰이크.** 플러그인이 `/health` 의 `service` 로 `risu-elf` 와 `real-ooc` 를 둘 다 받는다.
+**핸드셰이크.** 플러그인이 `/health` 의 `service` 로 `risu-hina` 와 `real-ooc` 를 둘 다 받는다.
 업데이트 순서상 **플러그인이 먼저** 갱신되므로 한 세션은 새 플러그인이 옛 백엔드를 만난다.
 거기서 악수를 거부하면 "백엔드가 옛 버전"이 아니라 "백엔드가 죽었다"로 보인다.
 
 ## C.2 사용자가 겪는 것
 
 RisuAI 는 플러그인 저장소를 **플러그인 이름으로** 키잉한다. `//@name` 이 바뀌었으므로
-저장해 둔 백엔드 URL·토큰이 따라오지 않는다. 파일 이름도 `risu-elf-0.1.0.js` 라
+저장해 둔 백엔드 URL·토큰이 따라오지 않는다. 파일 이름도 `risu-hina-0.1.0.js` 라
 업데이트가 아니라 **새 설치**다. 개명의 정상적인 비용이고, 루프백에서는 토큰이 면제라
 실제로 다시 넣을 것은 거의 없다.
 
@@ -645,3 +645,44 @@ store 를 거부**하므로 `codexauth.client()` 가 `responses.create` 를 감�
 
 - 모바일 스플리터: `touch-action: none` 으로 고쳤으나 실기기 확인 전.
 - 코덱스 실호출 검증(로그인·툴 호출·추론 모델) — 실사용에서.
+
+# 부록 G — 3라운드와 개명 (2026-08-26, v0.5.0)
+
+## G.1 Risu Elf → Risu Hina
+
+실배포된 적이 없으므로 이력을 남기지 않고 이름을 바꿨다(`rename_hina.py` 한 번). 남긴 것은 셋:
+GitHub 저장소 경로(`nilsonwhang3-spec/risu-hina`, URL 이라 유지), 체크아웃·설치 디렉터리 이름, 그리고
+**호환 훅** — `RISUELF_*`/`REALOOC_*` 환경변수는 계속 읽고(`config._OLD_PREFIXES`), `/health` 서명은
+`risu-hina` 이되 플러그인은 `risu-elf`/`real-ooc` 도 받으며, DB 는 `risuelf.db`→`risuhina.db` 로 첫 기동 때
+채택한다. 플러그인 이름(`//@name risu-hina`)이 바뀌므로 RisuAI 에는 새 플러그인이다: 옛 항목의 `+` 로
+받으면 Hina 가 설치되고(`plugin/Risu.Elf.Plugin.js` 를 한 번 더 같은 번들로 써 둔다), 백엔드 URL·토큰은
+플러그인 저장소가 이름별이라 한 번 다시 입력한다. 릴리스 자산은 `Risu.Hina.*`; 실행 중인 옛 업데이터는
+이름이 아니라 `Install.Package`+OS 로 고르므로 옛 백엔드도 새 zip 을 받는다.
+
+## G.2 에이전트가 화면을 안다
+
+플러그인이 매 프롬프트에 `mode`(chat|bot)를 보내고 `Deps.mode` 가 된다. 제안 종류를 두 집합
+(`CHAT_KINDS` / `BOT_KINDS`)으로 나눠 `_propose` 와 `stage_*` 가 다른 화면의 재료면 거부하고
+`propose_open_tab` 으로 이동을 제안하라고 답한다. 읽기는 어디서든 된다.
+
+## G.3 이력이 끊기던 이유와 고침
+
+`session.run` 은 성공한 턴만 `history` 행을 저장했다. 오류·중단으로 끝난 턴은 저장되지 않아 다음 턴이
+마지막 *성공* 턴의 이력에서 시작했고, 그 사이 프롬프트를 에이전트는 들은 적이 없었다(실측: 사용자 턴 8개,
+history 4개). 이제 `BaseException` 경로에서 프롬프트 + 도착한 텍스트 + 실패 메모를 이력에 붙인다.
+컨텍스트 예산: pydantic-ai 2.x 엔 history processor 훅이 없어 `session.run` 이 실행 직전
+`agent.compact_history()` 를 부른다 — `agent.historyBudgetChars`(기본 240k) 를 넘으면 마지막 6개를 남기고
+앞부분을 모델이 한 번 요약해 (요약 요청, 확인) 한 쌍으로 대체하고, `COMPACTED` 에 기억해 두었다가 그 턴의
+저장 이력으로 쓴다(요약 비용은 한 번). 중단은 클라이언트 AbortController → 서버 취소 → 같은 부분 이력 저장.
+
+## G.4 봇 버전 간 워크스페이스
+
+`workspace.root(ck)` 가 `characters.family_key` 를 보고 가족의 디렉터리를 돌려준다. 가족 표식은 카드의
+`extentions.risu_hina.family`(원본의 char_key) — `host.cloneBot` 이 찍고, charx 는 `extentions` 를 그대로
+실어 왕복 뒤에도 남으며, RisuAI 는 모르는 확장 키를 저장·내보내기·가져오기 모두에서 보존한다. 행(턴·카드·
+로어)은 봇별 DB 키라 섞이지 않고, 파일(업로드·결과물·스크래치·스킬)만 공유된다.
+
+## G.5 남긴 것
+
+- 웹(risu.xyz) 에셋 썸네일: iframe CSP 에 `img-src` 가 없어 불가(`default-src 'none'`). PocketRisu 만.
+- 실기기 확인: 모바일 거터, 코덱스 실호출, `web_research`, 요약 압축 실동작.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install Risu Elf: virtualenv, dependencies, and optionally keep it running.
+# Install Risu Hina: virtualenv, dependencies, and optionally keep it running.
 #
 #   ./setup.sh                          set up and start
 #   ./setup.sh --port 6030              a different port
@@ -17,7 +17,7 @@ if [ -d "$HERE/app" ]; then SERVER="$HERE"; else SERVER="$HERE/pyserver"; fi
 [ -d "$SERVER/app" ] || { echo "cannot find app/ - looked in $HERE and $HERE/pyserver" >&2; exit 2; }
 ROOT="$(dirname "$SERVER")"
 
-PYTHON=""; DATA_DIR=""; PORT=6020; SERVICE=0; START=1; NAME="risu-elf"
+PYTHON=""; DATA_DIR=""; PORT=6020; SERVICE=0; START=1; NAME="risu-hina"
 while [ $# -gt 0 ]; do
   case "$1" in
     --python)   PYTHON="${2:-}"; shift 2 ;;

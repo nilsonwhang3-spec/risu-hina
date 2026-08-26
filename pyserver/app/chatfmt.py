@@ -83,7 +83,7 @@ def _stamp(time_ms: Any) -> str:
 # A body that happens to contain `<!--[MSG:` would be parsed as a delimiter and
 # split one message into several phantom ones. That is not hypothetical here:
 # the agent reads and writes this document with unrestricted tools, and a chat
-# about Risu Elf (or one where someone pasted a decoded chatlog) contains
+# about Risu Hina (or one where someone pasted a decoded chatlog) contains
 # exactly this text. So `<!--[` inside a body gets one backslash added on
 # decode and one removed on encode, which is reversible for any number of
 # pre-existing backslashes.

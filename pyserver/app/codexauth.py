@@ -335,7 +335,7 @@ class _Handler(BaseHTTPRequestHandler):
                 if p:
                     p["error"] = err
         body = ("<html><body style='font-family:sans-serif;padding:40px'>"
-                + ("<h2>Risu Elf: OpenAI 로그인 완료</h2><p>이 창을 닫고 플러그인으로 돌아가셔도 됩니다.</p>" if ok
+                + ("<h2>Risu Hina: OpenAI 로그인 완료</h2><p>이 창을 닫고 플러그인으로 돌아가셔도 됩니다.</p>" if ok
                    else f"<h2>로그인 실패</h2><p>{err}</p>")
                 + "</body></html>").encode("utf-8")
         self.send_response(200)

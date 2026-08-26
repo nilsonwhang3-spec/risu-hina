@@ -18,8 +18,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "pyserver"))
 
-DATA = Path(tempfile.mkdtemp(prefix="risuelf-sandbox-"))
-os.environ["RISUELF_DATA_DIR"] = str(DATA)
+DATA = Path(tempfile.mkdtemp(prefix="risuhina-sandbox-"))
+os.environ["RISUHINA_DATA_DIR"] = str(DATA)
 
 from app import actions, db, files, pyexec, staging, store, workspace  # noqa: E402
 
@@ -73,10 +73,10 @@ def main() -> int:
 
     print("test_normal_work_still_works")
     r = run(
-        "import risuelf\n"
-        "ts = risuelf.turns()\n"
+        "import risuhina\n"
+        "ts = risuhina.turns()\n"
         "print('turns', len(ts))\n"
-        "p = risuelf.scratch('note.txt')\n"
+        "p = risuhina.scratch('note.txt')\n"
         "open(p, 'w', encoding='utf-8').write('작업 중')\n"
         "print('wrote', open(p, encoding='utf-8').read())\n",
         ck, tk, ws)
@@ -92,11 +92,11 @@ def main() -> int:
     check("the refusal says why", "워크스페이스 밖" in (r["stderr"] or ""), r["stderr"][:200])
     check("nothing was written", not (ws.parent / "escaped.txt").exists())
 
-    r = run("print(open(__import__('os').environ['RISUELF_DATA_DIR'] + '/config.json').read())",
+    r = run("print(open(__import__('os').environ['RISUHINA_DATA_DIR'] + '/config.json').read())",
             ck, tk, ws)
     check("reading the data dir fails", not r["ok"], r["stdout"][:120])
 
-    r = run("import os; print(os.listdir(os.path.dirname(os.environ['RISUELF_WORKSPACE'])))",
+    r = run("import os; print(os.listdir(os.path.dirname(os.environ['RISUHINA_WORKSPACE'])))",
             ck, tk, ws)
     # listdir is not an audited open, so it may succeed - what must fail is
     # actually reading anything it names.
@@ -114,10 +114,10 @@ def main() -> int:
 
     print("\ntest_other_bots_are_not_visible")
     r = run(
-        "import risuelf\n"
-        "print('chats', [c['name'] for c in risuelf.chats()])\n"
-        "print('beta hits', len(risuelf.search('베타비밀')))\n"
-        "print('card', risuelf.card().get('name'))\n",
+        "import risuhina\n"
+        "print('chats', [c['name'] for c in risuhina.chats()])\n"
+        "print('beta hits', len(risuhina.search('베타비밀')))\n"
+        "print('card', risuhina.card().get('name'))\n",
         ck, tk, ws)
     check("scoped read works", r["ok"], r.get("stderr", "")[:300])
     check("only this bot's chats are listed", "알파 챗" in r["stdout"] and "베타 챗" not in r["stdout"],
@@ -126,8 +126,8 @@ def main() -> int:
     check("the card is this bot's", "card 알파" in r["stdout"], r["stdout"][:200])
 
     r = run(
-        "import risuelf, sqlite3\n"
-        "c = risuelf.conn()\n"
+        "import risuhina, sqlite3\n"
+        "c = risuhina.conn()\n"
         "print('rows', c.execute('SELECT COUNT(*) FROM characters').fetchone()[0])\n"
         "try:\n"
         "    c.execute(\"UPDATE turns SET body='x'\")\n"
@@ -140,9 +140,9 @@ def main() -> int:
 
     print("\ntest_staging_from_a_script")
     r = run(
-        "import risuelf\n"
-        "t = risuelf.turns()[1]\n"
-        "risuelf.stage(t['msg_id'], t['body'] + ' (제안)', '스크립트 테스트')\n"
+        "import risuhina\n"
+        "t = risuhina.turns()[1]\n"
+        "risuhina.stage(t['msg_id'], t['body'] + ' (제안)', '스크립트 테스트')\n"
         "print('staged one')\n",
         ck, tk, ws)
     check("script ran", r["ok"], r.get("stderr", "")[:200])
@@ -169,7 +169,7 @@ def main() -> int:
     check("original is protected from deletion", areas["original"]["deletable"] is False)
     check("scratch is cleanable", areas["scratch"]["cleanable"] is True)
 
-    r = run("import risuelf\nprint(risuelf.uploads())\nprint(risuelf.read_upload('참고.md'))",
+    r = run("import risuhina\nprint(risuhina.uploads())\nprint(risuhina.read_upload('참고.md'))",
             ck, tk, ws)
     check("the agent can read an upload", "참고 자료" in r["stdout"], r["stdout"][:200])
 

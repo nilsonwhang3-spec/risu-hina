@@ -90,8 +90,8 @@ PTH = "python311.zip\n.\nLib\\site-packages\n..\n\nimport site\n"
 # the archive, and a zip cannot carry a symlink portably.
 SHIM = '#!/bin/sh\nexec "$(dirname "$0")/python3.11" "$@"\n'
 
-TREE = "risu-elf"
-PLUGIN_ASSET = "Risu.Elf.Plugin.js"
+TREE = "risu-hina"
+PLUGIN_ASSET = "Risu.Hina.Plugin.js"
 ROOT_FILES = ["setup.bat", "uninstall.bat", "setup.sh", "uninstall.sh"]
 SERVER_FILES = ["run.py", "requirements.in", "start.bat", "start.sh", "manage.ps1"]
 EXCLUDE_DIRS = {"__pycache__", ".venv", "data", "dist", "locks", "tools", "python"}
@@ -130,7 +130,7 @@ def fetch(url: str, digest: str) -> Path:
 def build_plugin() -> Path:
     subprocess.run([shutil.which("node") or "node", "build.config.mjs"],
                    cwd=ROOT / "plugin", check=True, capture_output=True)
-    built = ROOT / "plugin" / "dist" / f"risu-elf-{version()}.js"
+    built = ROOT / "plugin" / "dist" / f"risu-hina-{version()}.js"
     head = built.read_text(encoding="utf-8")[:512]
     for needed in ("//@version", "//@update-url"):
         if needed not in head:
@@ -138,11 +138,14 @@ def build_plugin() -> Path:
     dest = OUT / PLUGIN_ASSET
     shutil.copy2(built, dest)
     # The copy RisuAI's update check actually reads: `//@update-url` points at
-    # raw.githubusercontent.com/<repo>/master/plugin/Risu.Elf.Plugin.js, because
+    # raw.githubusercontent.com/<repo>/master/plugin/Risu.Hina.Plugin.js, because
     # the release-asset URL has no CORS and a browser fetch from risu.xyz fails
     # on it (see plugin/build.config.mjs). This file is committed with the
     # release; the release commit is what makes the new version visible.
     shutil.copy2(built, ROOT / "plugin" / PLUGIN_ASSET)
+    # Installs from before the rename check the old file name; they get the
+    # renamed bundle from it once, and follow the new name from then on.
+    shutil.copy2(built, ROOT / "plugin" / "Risu.Elf.Plugin.js")
     return dest
 
 
@@ -233,7 +236,7 @@ def stage_app(stage: Path, plugin: Path) -> None:
 
 def pack(target: str, stage: Path) -> Path:
     spec = TARGETS[target]
-    name = f"Risu.Elf.{version()}.{spec['label']}.Auto.Install.Package.zip"
+    name = f"Risu.Hina.{version()}.{spec['label']}.Auto.Install.Package.zip"
     dest = OUT / name
     with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as zf:
         for f in sorted(stage.rglob("*")):

@@ -178,7 +178,7 @@ function openApply(anchor: HTMLElement): void {
 
   const copy = el('button', { text: '복사본으로 저장' });
   copy.addEventListener('click', async () => {
-    const name = (state.activeChat?.name || 'chat') + ' (Risu Elf)';
+    const name = (state.activeChat?.name || 'chat') + ' (Risu Hina)';
     (copy as HTMLButtonElement).disabled = true;
     try {
       await state.saveCopy(name);

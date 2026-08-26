@@ -32,7 +32,7 @@ BOOTSTRAP = '''"""Installed before agent code runs. Confines it to one workspace
 import os
 import sys
 
-_ROOT = os.path.realpath(os.environ["RISUELF_WORKSPACE"])
+_ROOT = os.path.realpath(os.environ["RISUHINA_WORKSPACE"])
 # Reads outside the workspace are allowed only where imports must reach.
 _READ_OK = tuple(os.path.realpath(p) for p in {
     sys.prefix, sys.base_prefix, os.path.dirname(os.__file__),
@@ -100,24 +100,24 @@ os.chdir(_ROOT)
 
 # Hand-off: run the agent's file with __name__ == "__main__" so ordinary
 # `if __name__ == "__main__":` blocks behave as written.
-_target = os.environ["RISUELF_SCRIPT"]
+_target = os.environ["RISUHINA_SCRIPT"]
 with open(_target, "r", encoding="utf-8") as _f:
     _code = _f.read()
 sys.argv = [_target]
 exec(compile(_code, _target, "exec"), {"__name__": "__main__", "__file__": _target})
 '''
 
-LEGACY_HELPER = '''"""Old name for the risuelf helper. Kept so existing scripts run.
+LEGACY_HELPER = '''"""Old name for the risuhina helper. Kept so existing scripts run.
 
 The module was called `realooc` before the project was renamed. Re-exporting
 costs three lines and saves every script skill written before the rename.
 """
-from risuelf import *  # noqa: F401,F403
-from risuelf import conn, turns, turn, search, chats, lore, card, stage  # noqa: F401
-from risuelf import stage_many, scratch, out, uploads, read_upload  # noqa: F401
+from risuhina import *  # noqa: F401,F403
+from risuhina import conn, turns, turn, search, chats, lore, card, stage  # noqa: F401
+from risuhina import stage_many, scratch, out, uploads, read_upload  # noqa: F401
 '''
 
-HELPER = '''"""Helpers for Risu Elf agent scripts. Import as `import risuelf`.
+HELPER = '''"""Helpers for Risu Hina agent scripts. Import as `import risuhina`.
 
 Reads come from a scoped snapshot containing only this bot's data - other
 characters are not merely filtered out, they are not in the file.
@@ -137,9 +137,9 @@ import os
 import sqlite3
 import uuid
 
-WORKSPACE = os.environ["RISUELF_WORKSPACE"]
-CHAT_KEY = os.environ["RISUELF_CHAT_KEY"]
-SESSION_ID = os.environ.get("RISUELF_SESSION_ID") or None
+WORKSPACE = os.environ["RISUHINA_WORKSPACE"]
+CHAT_KEY = os.environ["RISUHINA_CHAT_KEY"]
+SESSION_ID = os.environ.get("RISUHINA_SESSION_ID") or None
 
 SCRATCH = os.path.join(WORKSPACE, "scratch")
 OUT = os.path.join(WORKSPACE, "out")

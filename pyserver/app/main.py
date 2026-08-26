@@ -133,7 +133,7 @@ def h_health(arg: dict) -> dict:
     return {
         # The signature the plugin checks before it is willing to attach a
         # bearer token (plan 7.1). Must stay stable.
-        "service": "risu-elf",
+        "service": "risu-hina",
         "version": config.VERSION,
         "ok": True,
         "agentReady": agent_ready(),
@@ -474,12 +474,12 @@ def _plugin_file() -> "pathlib.Path | None":
     for root in roots:
         try:
             # Case-insensitively, and both naming shapes. A release ships
-            # `Risu.Elf.Plugin.js` - no version, because
+            # `Risu.Hina.Plugin.js` - no version, because
             # releases/latest/download needs a name that does not change - and
-            # a dev build is `risu-elf-<ver>.js`. Matching one of them meant
+            # a dev build is `risu-hina-<ver>.js`. Matching one of them meant
             # /plugin.js served nothing on exactly the installs that had it.
             found.extend(f for f in root.glob("*.js")
-                         if f.is_file() and f.name.lower().replace(".", "-").startswith("risu-elf"))
+                         if f.is_file() and f.name.lower().replace(".", "-").startswith("risu-hina"))
         except OSError:
             continue
     if not found:

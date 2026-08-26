@@ -337,7 +337,7 @@ function buildUploadAll(): HTMLElement {
       await state.upload({ allChats: true });
       if (state.activeChatKey) await state.loadTurns();
     } catch (e) {
-      console.log('[risu-elf] upload all failed', e);
+      console.log('[risu-hina] upload all failed', e);
     } finally {
       b.disabled = false;
       b.textContent = '이 봇의 모든 챗 불러오기';

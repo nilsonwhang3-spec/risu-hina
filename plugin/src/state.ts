@@ -392,7 +392,7 @@ class AppState {
 
   emit(): void {
     for (const fn of [...this.listeners]) {
-      try { fn(); } catch (e) { console.log('[risu-elf] listener failed', e); }
+      try { fn(); } catch (e) { console.log('[risu-hina] listener failed', e); }
     }
   }
 

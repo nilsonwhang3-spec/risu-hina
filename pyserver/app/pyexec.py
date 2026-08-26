@@ -67,7 +67,7 @@ def layout(workspace_dir: Path) -> None:
     """
     for name in ("scratch", "out", "uploads", "scripts", ".scratch"):
         (workspace_dir / name).mkdir(parents=True, exist_ok=True)
-    (workspace_dir / "scripts" / "risuelf.py").write_text(sandbox.HELPER, encoding="utf-8")
+    (workspace_dir / "scripts" / "risuhina.py").write_text(sandbox.HELPER, encoding="utf-8")
     # The helper used to be called `realooc`. Any script skill the user already
     # wrote still says `import realooc`, and a rename that breaks those scripts
     # at the moment they are finally needed is not worth the tidiness.
@@ -215,9 +215,9 @@ def run(
     src.write_text(code, encoding="utf-8")
 
     env = {
-        "RISUELF_WORKSPACE": str(workspace_dir.resolve()),
-        "RISUELF_CHAT_KEY": chat_key,
-        "RISUELF_SCRIPT": str(src.resolve()),
+        "RISUHINA_WORKSPACE": str(workspace_dir.resolve()),
+        "RISUHINA_CHAT_KEY": chat_key,
+        "RISUHINA_SCRIPT": str(src.resolve()),
         "PYTHONIOENCODING": "utf-8",
         # -u so partial output survives a timeout kill: a script that hangs
         # after printing something useful should still show what it printed.
@@ -225,13 +225,13 @@ def run(
         # No .pyc files: they are clutter in a directory the panel offers
         # to clean, and these imports are far too small to be worth caching.
         "PYTHONDONTWRITEBYTECODE": "1",
-        # scripts/ first so `import risuelf` finds the helper.
+        # scripts/ first so `import risuhina` finds the helper.
         "PYTHONPATH": str((workspace_dir / "scripts").resolve()),
         "PATH": os.environ.get("PATH", ""),
         "SYSTEMROOT": os.environ.get("SYSTEMROOT", ""),
     }
     if session_id:
-        env["RISUELF_SESSION_ID"] = session_id
+        env["RISUHINA_SESSION_ID"] = session_id
 
     boot = workspace_dir / ".scratch" / "_bootstrap.py"
     log.debug("run_python chat=%s bytes=%s timeout=%s", chat_key, len(code), timeout)
@@ -271,18 +271,18 @@ def run(
 def describe_helper() -> str:
     """The helper API and the file conventions, for the tool description."""
     return textwrap.dedent("""
-        `import risuelf` is available (workspace-scoped, this bot only):
-          risuelf.turns(start, end, role, chat_key)  ordered turns
-          risuelf.turn(msg_id) / risuelf.search(needle, limit)
-          risuelf.chats()      every chat of this bot
-          risuelf.lore() / risuelf.card()
-          risuelf.stage(msg_id, after, reason)   propose one change
-          risuelf.stage_many(items, reason)      propose a group
-          risuelf.uploads() / risuelf.read_upload(name)
-          risuelf.scratch(name) / risuelf.out(name)   paths to write to
-          risuelf.conn()       read-only scoped snapshot, for other queries
+        `import risuhina` is available (workspace-scoped, this bot only):
+          risuhina.turns(start, end, role, chat_key)  ordered turns
+          risuhina.turn(msg_id) / risuhina.search(needle, limit)
+          risuhina.chats()      every chat of this bot
+          risuhina.lore() / risuhina.card()
+          risuhina.stage(msg_id, after, reason)   propose one change
+          risuhina.stage_many(items, reason)      propose a group
+          risuhina.uploads() / risuhina.read_upload(name)
+          risuhina.scratch(name) / risuhina.out(name)   paths to write to
+          risuhina.conn()       read-only scoped snapshot, for other queries
 
-        The snapshot behind risuelf.conn() holds this bot's whole structure, so
+        The snapshot behind risuhina.conn() holds this bot's whole structure, so
         anything the tools do not cover can be computed with plain SQL:
           characters(card_json: 카드 전체 JSON, 에셋 참조 포함)
           chats / turns / turns_original(작업본 vs 기준선)
@@ -302,8 +302,8 @@ def describe_helper() -> str:
         the script, then aim the tool with the ids the script found.
 
         Where to write - the panel cleans up on these, so please use them:
-          risuelf.scratch("x.json")  throwaway working files
-          risuelf.out("report.md")   deliverables the user downloads
+          risuhina.scratch("x.json")  throwaway working files
+          risuhina.out("report.md")   deliverables the user downloads
           uploads/ is read-only.
 
         The script cannot read or write outside this workspace, cannot see other

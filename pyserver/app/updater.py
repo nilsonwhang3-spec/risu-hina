@@ -222,7 +222,7 @@ def apply() -> dict:
     _verify(blob, archive_name, sums)
     log.info("update: %s verified (%s bytes)", archive_name, len(blob))
 
-    staging = Path(tempfile.mkdtemp(prefix="risuelf-update-"))
+    staging = Path(tempfile.mkdtemp(prefix="risuhina-update-"))
     try:
         with zipfile.ZipFile(io.BytesIO(blob)) as zf:
             _safe_extract(zf, staging)
@@ -264,7 +264,7 @@ def _refresh_plugin(payload: Path, root: Path) -> None:
         return
     dest = root / "plugin"
     dest.mkdir(parents=True, exist_ok=True)
-    for f in src.glob("risu-elf*.js"):
+    for f in src.glob("risu-hina*.js"):
         shutil.copy2(f, dest / f.name)
 
 

@@ -143,8 +143,10 @@ def _adopt_legacy_db() -> None:
     a database out from under an open connection is how a WAL gets separated
     from the file it belongs to.
     """
-    old = getattr(config, "LEGACY_DB_PATH", None)
-    if old is None or config.DB_PATH.exists() or not old.exists():
+    if config.DB_PATH.exists():
+        return
+    old = next((p for p in getattr(config, "LEGACY_DB_PATHS", ()) if p.exists()), None)
+    if old is None:
         return
     for suffix in ("", "-wal", "-shm"):
         src = old.with_name(old.name + suffix)

@@ -13,8 +13,8 @@ around the modules that implement them:
     medium     one edit spanning many turns of a chat (the common case)
     large      summarise early turns into lorebook entries, then cut them
 
-    RISUELF_TEST_PY      python to run the server with
-    RISUELF_TEST_ENTRY   entry script (default pyserver/run.py)
+    RISUHINA_TEST_PY      python to run the server with
+    RISUHINA_TEST_ENTRY   entry script (default pyserver/run.py)
 
     python tests/test_http.py
 """
@@ -74,21 +74,21 @@ class Server:
     def __init__(self, require_token: bool = True) -> None:
         self.port = free_port()
         self.token = "test-token-" + str(self.port)
-        self.data = Path(tempfile.mkdtemp(prefix="risuelf-test-"))
-        py = os.environ.get("RISUELF_TEST_PY") or str(PYSERVER / ".venv" / "Scripts" / "python.exe")
+        self.data = Path(tempfile.mkdtemp(prefix="risuhina-test-"))
+        py = os.environ.get("RISUHINA_TEST_PY") or str(PYSERVER / ".venv" / "Scripts" / "python.exe")
         if not Path(py).exists():
             py = sys.executable
-        entry = os.environ.get("RISUELF_TEST_ENTRY") or str(PYSERVER / "run.py")
+        entry = os.environ.get("RISUHINA_TEST_ENTRY") or str(PYSERVER / "run.py")
         env = {
             **os.environ,
-            "RISUELF_PORT": str(self.port),
-            "RISUELF_HOST": "127.0.0.1",
-            "RISUELF_DATA_DIR": str(self.data),
-            "RISUELF_TOKEN": self.token,
+            "RISUHINA_PORT": str(self.port),
+            "RISUHINA_HOST": "127.0.0.1",
+            "RISUHINA_DATA_DIR": str(self.data),
+            "RISUHINA_TOKEN": self.token,
             # The suite talks to 127.0.0.1, where a token is optional by design.
             # Forcing it on is what makes the 401 assertions mean anything; the
             # exemption itself is covered by test_loopback_exemption.
-            "RISUELF_REQUIRE_TOKEN": "1" if require_token else "0",
+            "RISUHINA_REQUIRE_TOKEN": "1" if require_token else "0",
             "PYTHONIOENCODING": "utf-8",
         }
         self.proc = subprocess.Popen(
@@ -125,7 +125,7 @@ class Server:
                 return False
             try:
                 st, body = self.get("/health")
-                if st == 200 and body.get("service") == "risu-elf":
+                if st == 200 and body.get("service") == "risu-hina":
                     return True
             except Exception:
                 time.sleep(0.2)
@@ -234,7 +234,7 @@ def payload(chats: list[dict]) -> dict:
 def test_dispatcher(s: Server) -> None:
     print("test_dispatcher")
     st, body = s.get("/health", token=None)
-    check("/health needs no token", st == 200 and body.get("service") == "risu-elf", str(body)[:120])
+    check("/health needs no token", st == 200 and body.get("service") == "risu-hina", str(body)[:120])
     st, body = s.get("/nope", token=None)
     check("unknown route is 404 even without a token", st == 404, f"{st} {body}")
     st, body = s.get("/turns", token=None)
@@ -1176,7 +1176,7 @@ def test_plugin_self_update(s: Server) -> None:
     text = raw.get("_raw") if isinstance(raw, dict) else str(raw)
     check("it serves without a token", st == 200, str(st))
     head = (text or "")[:512]
-    check("the header survived the bundle", "//@name risu-elf" in head, head[:120])
+    check("the header survived the bundle", "//@name risu-hina" in head, head[:120])
     check("//@version is inside the first 512 bytes", "//@version" in head, head[:200])
     # //@update-url is emitted only when a release repo is configured. Its
     # absence is deliberate rather than a bug: a URL that 404s makes RisuAI
@@ -1406,7 +1406,7 @@ def test_script_skills(s: Server) -> None:
     print("test_script_skills")
     st, body = s.post("/skills/upload", {
         "filename": "tidy_names.py",
-        "body": '"""이름 표기를 훑어 후보를 뽑는다."""\nimport risuelf\nprint(len(risuelf.turns()))\n',
+        "body": '"""이름 표기를 훑어 후보를 뽑는다."""\nimport risuhina\nprint(len(risuhina.turns()))\n',
     })
     sk = body.get("skill") or {}
     check("a .py upload becomes a skill with a script",
@@ -1419,7 +1419,7 @@ def test_script_skills(s: Server) -> None:
     st, body = s.get("/skills/preview")
     prompt = body.get("prompt") or ""
     check("the skill is in the catalog", "이름 표기를" in prompt, prompt[:300])
-    check("its source is NOT in the prompt", "import risuelf" not in prompt, prompt[:300])
+    check("its source is NOT in the prompt", "import risuhina" not in prompt, prompt[:300])
     check("nor is its body", "scripts/tidy_names.py" not in prompt, prompt[:300])
 
     st, body = s.get(q("/skills/preview", name=sk["name"]))
@@ -1939,7 +1939,7 @@ def test_workspace_folders_and_family(s: Server, cw: dict) -> None:
 
 
 def test_loopback_exemption() -> None:
-    """With RISUELF_REQUIRE_TOKEN off, a loopback caller needs no token.
+    """With RISUHINA_REQUIRE_TOKEN off, a loopback caller needs no token.
 
     The other half of the access policy, and the half users will actually run.
     """

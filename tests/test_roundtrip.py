@@ -248,7 +248,7 @@ def test_never_invents_fields() -> None:
 
     Preserving unknown fields is only half of it. Round-tripping a web-RisuAI
     chat must not *add* PocketRisu-only fields either - a chat that gained
-    `modelBinding` or `useModelPreset` on its way through Risu Elf would
+    `modelBinding` or `useModelPreset` on its way through Risu Hina would
     silently change behaviour the next time it is opened in PocketRisu.
     """
     print("test_never_invents_fields")

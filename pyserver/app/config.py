@@ -9,7 +9,7 @@ that refuses to start.
 Access policy (plan section 7.1), stated once here so the dispatcher does not
 have to re-derive it:
 
-  loopback client  -> token optional (RISUELF_REQUIRE_TOKEN=1 forces it)
+  loopback client  -> token optional (RISUHINA_REQUIRE_TOKEN=1 forces it)
   any other client -> token REQUIRED, and this cannot be switched off
 
 The second rule is not configurable on purpose. `run_python` has no permission
@@ -27,16 +27,16 @@ import threading
 from pathlib import Path
 from typing import Any
 
-APP_NAME = "risu-elf"
-VERSION = "0.4.2"
+APP_NAME = "risu-hina"
+VERSION = "0.5.0"
 
-# Renamed from REALOOC_* to RISUELF_*. The old names are still honoured, and
+# Renamed from REALOOC_* to RISUHINA_*. The old names are still honoured, and
 # not as politeness: the launcher, the control script and any service wrapper
 # already on a machine were written with the old prefix, and a rename that
 # silently ignores REALOOC_PORT looks like the server binding the wrong port
 # for no reason.
-_OLD_PREFIX = "REALOOC_"
-_NEW_PREFIX = "RISUELF_"
+_OLD_PREFIXES = ("RISUELF_", "REALOOC_")
+_NEW_PREFIX = "RISUHINA_"
 
 
 def _ENV(name: str, default: Any = None) -> Any:
@@ -44,9 +44,10 @@ def _ENV(name: str, default: Any = None) -> Any:
     if value is not None:
         return value
     if name.startswith(_NEW_PREFIX):
-        legacy = os.environ.get(_OLD_PREFIX + name[len(_NEW_PREFIX):])
-        if legacy is not None:
-            return legacy
+        for old in _OLD_PREFIXES:
+            legacy = os.environ.get(old + name[len(_NEW_PREFIX):])
+            if legacy is not None:
+                return legacy
     return default
 
 
@@ -77,7 +78,7 @@ def _default_data_dir() -> Path:
 
     Three sources, in order:
 
-        RISUELF_DATA_DIR      one launch, for testing
+        RISUHINA_DATA_DIR      one launch, for testing
         pyserver/datadir.txt  this install, for good
         <install>/data        the default
 
@@ -92,7 +93,7 @@ def _default_data_dir() -> Path:
     so a self-update can swap versions/<v>/ wholesale without ever touching the
     database, config, token or workspaces.
     """
-    explicit = _ENV("RISUELF_DATA_DIR")
+    explicit = _ENV("RISUHINA_DATA_DIR")
     if explicit:
         return Path(explicit).expanduser().resolve()
 
@@ -125,23 +126,24 @@ def _default_data_dir() -> Path:
 
 DATA_DIR = _default_data_dir()
 WORKSPACE_DIR = DATA_DIR / "workspace"
-DB_PATH = DATA_DIR / "risuelf.db"
-# What the database was called before the rename.
-LEGACY_DB_PATH = DATA_DIR / "realooc.db"
+DB_PATH = DATA_DIR / "risuhina.db"
+# What the database was called before the renames (newest first).
+LEGACY_DB_PATHS = (DATA_DIR / "risuelf.db", DATA_DIR / "realooc.db")
+LEGACY_DB_PATH = LEGACY_DB_PATHS[0]
 CONFIG_PATH = DATA_DIR / "config.json"
 TOKEN_PATH = DATA_DIR / "token.txt"
 
-HOST = _ENV("RISUELF_HOST", "127.0.0.1")
-PORT = _env_int("RISUELF_PORT", 6020)
-REQUIRE_TOKEN = _env_flag("RISUELF_REQUIRE_TOKEN", False)
-ALLOWED_ORIGINS = (_ENV("RISUELF_ALLOWED_ORIGINS") or "*").strip()
+HOST = _ENV("RISUHINA_HOST", "127.0.0.1")
+PORT = _env_int("RISUHINA_PORT", 6020)
+REQUIRE_TOKEN = _env_flag("RISUHINA_REQUIRE_TOKEN", False)
+ALLOWED_ORIGINS = (_ENV("RISUHINA_ALLOWED_ORIGINS") or "*").strip()
 
 LOOPBACK_ADDRS = frozenset({"127.0.0.1", "::1", "::ffff:127.0.0.1", "localhost", "testclient"})
 
 # Requests larger than this are refused before parsing. A 394-turn chat is
 # around 4MB of text, so the cap has to clear that with room to spare while
 # still refusing something obviously wrong.
-MAX_BODY_BYTES = _env_int("RISUELF_MAX_BODY_BYTES", 64 * 1024 * 1024)
+MAX_BODY_BYTES = _env_int("RISUHINA_MAX_BODY_BYTES", 64 * 1024 * 1024)
 
 
 # --- defaults ---------------------------------------------------------------
@@ -220,7 +222,7 @@ DEFAULTS: dict[str, Any] = {
     },
     "update": {
         # owner/repo on GitHub.
-        "repo": "nilsonwhang3-spec/risu-elf",
+        "repo": "nilsonwhang3-spec/risu-hina",
         # Only for a private repo or to lift the anonymous rate limit.
         "githubToken": "",
     },
@@ -396,7 +398,7 @@ def ensure_token() -> str:
     with _lock:
         if TOKEN:
             return TOKEN
-        env = (_ENV("RISUELF_TOKEN") or "").strip()
+        env = (_ENV("RISUHINA_TOKEN") or "").strip()
         if env:
             TOKEN = env
             return TOKEN

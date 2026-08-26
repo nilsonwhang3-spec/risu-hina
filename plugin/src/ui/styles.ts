@@ -759,9 +759,9 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
 `;
 
 export function injectStyles(): void {
-  if (document.getElementById('risu-elf-style')) return;
+  if (document.getElementById('risu-hina-style')) return;
   const style = document.createElement('style');
-  style.id = 'risu-elf-style';
+  style.id = 'risu-hina-style';
   style.textContent = CSS;
   (document.head || document.documentElement).appendChild(style);
 }

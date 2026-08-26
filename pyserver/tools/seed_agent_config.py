@@ -1,7 +1,7 @@
-"""Seed Risu Elf's agent credentials from active-recall's config, in place.
+"""Seed Risu Hina's agent credentials from active-recall's config, in place.
 
 Run on the machine that holds both. Reads active-recall's `sweep` block (an
-OpenAI-compatible baseUrl/apiKey/model) and writes it into Risu Elf's
+OpenAI-compatible baseUrl/apiKey/model) and writes it into Risu Hina's
 `agent` block, leaving every other setting alone.
 
 Deliberately reads the source locally rather than having the key handed in as

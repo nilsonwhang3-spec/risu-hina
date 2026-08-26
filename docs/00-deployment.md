@@ -11,7 +11,7 @@
       nativeFetch({networkRoute:'local_network'})
       → PocketRisu 서버의 /proxy2 가 대신 요청 ─┘
                                               ▼
-                              [서버] Risu Elf 127.0.0.1:6020
+                              [서버] Risu Hina 127.0.0.1:6020
 ```
 
 **중요한 귀결:** 백엔드가 보는 클라이언트 IP는 언제나 **127.0.0.1** 이다 — PocketRisu 의
@@ -27,7 +27,7 @@ web RisuAI(risuai.xyz)로 붙을 때만 토큰·CORS·혼합콘텐츠 문제가 
 | 항목 | 값 |
 |---|---|
 | Python | 동봉 (3.11). 설치 불필요 |
-| 포트 | 기본 `127.0.0.1:6020` (`RISUELF_PORT` 로 변경) |
+| 포트 | 기본 `127.0.0.1:6020` (`RISUHINA_PORT` 로 변경) |
 | 데이터 | `<install>/data/` — DB·설정·토큰·워크스페이스. 버전 디렉터리 **바깥**에 둔다 |
 
 ## 기동
@@ -49,7 +49,7 @@ pyserver/start.sh [port]       런처를 직접
 ## data/ 를 옮길 때
 
 **서버를 먼저 멈추고** 옮긴다. 기동·종료 때마다 WAL 을 본 파일에 접어 넣으므로(`wal_checkpoint(TRUNCATE)`)
-멈춘 상태의 `data/` 는 `risuelf.db` 하나가 전부다. 살아 있는 서버의 `risuelf.db-wal`·`-shm` 까지 복사해
+멈춘 상태의 `data/` 는 `risuhina.db` 하나가 전부다. 살아 있는 서버의 `risuhina.db-wal`·`-shm` 까지 복사해
 다른 설치본에서 열면, 낡은 wal-index 가 새 서버를 속여 **그 서버의 커밋이 WAL 의 닿지 않는 자리에 쓰인다.**
 읽을 때는 보이고 다음 재시작에 전부 사라진다(2026-08-23 실제 사고 — 두 시간치 편집이 조용히 없어졌다).
 기동 시 WAL 에 낯선 salt 의 커밋 프레임이 있으면 로그에 `WARNING: the WAL holds … under a foreign salt` 를

@@ -1,5 +1,5 @@
 /**
- * Risu Elf - RisuAI chat post-editing.
+ * Risu Hina - RisuAI chat post-editing.
  *
  * Entry point: register the UI, resolve config, and get out of the way. The
  * panel is not built until the user opens it, because a plugin that does work
@@ -46,7 +46,7 @@ async function resolveConfig(): Promise<{ url: string; token: string }> {
   try {
     transport.configure(await resolveConfig());
   } catch (e) {
-    console.log('[risu-elf] config resolve failed', e);
+    console.log('[risu-hina] config resolve failed', e);
   }
 
   const open = async () => {
@@ -56,22 +56,22 @@ async function resolveConfig(): Promise<{ url: string; token: string }> {
       await Risuai.showContainer('fullscreen');
       await bootstrap();
     } catch (e) {
-      console.log('[risu-elf] open failed', e);
+      console.log('[risu-hina] open failed', e);
     }
   };
 
   try {
-    parts.push(await Risuai.registerSetting('Risu Elf', open, ICON.app, 'html'));
+    parts.push(await Risuai.registerSetting('Risu Hina', open, ICON.app, 'html'));
   } catch (e) {
-    console.log('[risu-elf] registerSetting failed', e);
+    console.log('[risu-hina] registerSetting failed', e);
   }
   try {
     parts.push(await Risuai.registerButton(
-      { name: 'Risu Elf', icon: ICON.app, iconType: 'html', location: 'hamburger' },
+      { name: 'Risu Hina', icon: ICON.app, iconType: 'html', location: 'hamburger' },
       open,
     ));
   } catch (e) {
-    console.log('[risu-elf] registerButton failed', e);
+    console.log('[risu-hina] registerButton failed', e);
   }
 
   try {
@@ -84,5 +84,5 @@ async function resolveConfig(): Promise<{ url: string; token: string }> {
     });
   } catch { /* optional */ }
 
-  console.log(`[risu-elf] v${__PLUGIN_VERSION__} loaded`);
+  console.log(`[risu-hina] v${__PLUGIN_VERSION__} loaded`);
 })();

@@ -8,7 +8,7 @@ reconstruct what happened without asking the user to reproduce it.
 
 Two levels:
     info   requests, mutations, lifecycle - always on
-    debug  payload shapes, decisions, timings - RISUELF_DEBUG=1
+    debug  payload shapes, decisions, timings - RISUHINA_DEBUG=1
 
 Never logs the agent API key or the auth token. Bodies are summarised by shape
 and size rather than dumped, because a single request here can carry a
@@ -28,7 +28,7 @@ import time
 from collections import deque
 from typing import Any
 
-DEBUG = (os.environ.get("RISUELF_DEBUG") or "").strip().lower() in ("1", "true", "yes", "on")
+DEBUG = (os.environ.get("RISUHINA_DEBUG") or "").strip().lower() in ("1", "true", "yes", "on")
 
 _lock = threading.Lock()
 

@@ -1,5 +1,5 @@
 @echo off
-REM Risu Elf backend launcher.
+REM Risu Hina backend launcher.
 REM
 REM ASCII-only and self-redirecting on purpose: the caller only ever needs
 REM `cmd.exe /c <this-file> [port]` with no quotes, which is what survives both
@@ -29,8 +29,8 @@ if not exist "%SERVER%run.py" (
 set PORT=%~1
 if "%PORT%"=="" set PORT=6020
 set LOG=%SERVER%server.log
-set RISUELF_PORT=%PORT%
-set RISUELF_HOST=127.0.0.1
+set RISUHINA_PORT=%PORT%
+set RISUHINA_HOST=127.0.0.1
 set PYTHONIOENCODING=utf-8
 
 REM The bundled interpreter first. Its ._pth file owns sys.path outright, so

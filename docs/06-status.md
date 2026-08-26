@@ -1,8 +1,8 @@
-# 06. 구현 상태 — 2026-08-25 밤 기준 (v0.4.0)
+# 06. 구현 상태 — 2026-08-26 기준 (v0.5.0, Risu Hina)
 
 다음 세션에 이어서 할 사람(=나)을 위한 한 장. 무엇이 있고, 무엇이 바뀌었고, 어디까지 배포됐고,
 무엇이 남았는지. 설계의 *이유*는 `docs/04`(에셋·charx 는 부록 E), 저장 구조는 `docs/02`, 배포 환경은 `docs/00`.
-봇 편집 모드의 원계획(M0 실측·M2 명세)은 `~/.claude/plans/risu-elf-whimsical-lovelace.md`.
+봇 편집 모드의 원계획(M0 실측·M2 명세)은 `~/.claude/plans/risu-hina-whimsical-lovelace.md`.
 
 ## 0. 다음 세션 시작점 (먼저 읽을 것)
 
@@ -12,19 +12,31 @@
 
 | 어디 | 무엇 | 비고 |
 |---|---|---|
-| test-server **실행 중** `pyserver/app` + `plugin/risu-elf.js` | **0.4.0**(DB v10) — `deploy.ps1` 로 배포, 새 세션 `/health` 확인 | 백업 `app.bak-<시각>` |
+| test-server **실행 중** `pyserver/app` + `plugin/risu-hina.js` | **0.4.0**(DB v10) — `deploy.ps1` 로 배포, 새 세션 `/health` 확인 | 백업 `app.bak-<시각>` |
 | test-server config | `pocketrisu.savePath = D:\code\risu-nodeonly\Risuai-NodeOnly\save` → `/diag` `fastPath:true, serverWrite:true` | 같은 PC 의 PocketRisu 를 SQLite 로 직독 |
-| GitHub 릴리스 | **v0.4.0 Latest** · v0.3.2 · v0.3.1 · v0.3.0 · v0.1.0 | `gh release create` 는 auto 모드 분류기가 막는다 — 수동 권한 모드에서는 내가 직접 실행(0.3.1·0.3.2). test-server 는 0.3.2 배포·검증됨, raw 주소도 0.3.2 |
+| GitHub 릴리스 | **v0.5.0 Latest (Risu Hina)** · v0.4.2 · … · v0.1.0 | `gh release create` 는 auto 모드 분류기가 막는다 — 수동 권한 모드에서는 내가 직접 실행(0.3.1·0.3.2). test-server 는 0.3.2 배포·검증됨, raw 주소도 0.3.2 |
 | RisuAI 설치 플러그인 | **0.3.1 을 한 번 수동 재설치해야 함** — 설치본의 `//@update-url` 이 CORS 없는 릴리스 주소라 `+` 가 영영 안 뜬다(docs/04 B.4) | 그 뒤부터는 raw 주소라 `+` 가 뜬다 |
 
 **0.3.2 (2026-08-25 밤)** — 실사용 첫 회: PC 브라우저(risu.xyz) 봇 312장 0.6초, 아이폰(risu.xyz) `office counseling` 2980장 5.3초, 전부 `fast=N`(같은 PC 의 PocketRisu `risuai.db` 캐시 히트, 브라우저 전송 0). 사용자가 "포켓리스에서 연결한 것처럼 읽어갔다"고 의심 → 키가 SHA-256 이라 같은 바이트임을 확인하고, `assets.store_bytes` 가 **키 해시 = 바이트 해시** 를 검증하도록(출처 불문 거부), 동기화 줄이 출처(PocketRisu DB / 허브 / 이 브라우저)를 밝히도록 고침(docs/04 E.2). 고속 경로는 읽기 전용이며 쓰기는 항상 접속한 클라이언트에만 간다.
 
 **0.3.1 (2026-08-25 밤)** — `+` 가 안 뜬 진짜 원인은 "같은 버전"이 아니라 **CORS**: RisuAI 는 브라우저 `fetch` 로 `//@update-url` 을 읽는데 릴리스 주소의 리다이렉트 응답에 CORS 헤더가 없다. `//@update-url` 을
-`https://raw.githubusercontent.com/nilsonwhang3-spec/risu-elf/master/plugin/Risu.Elf.Plugin.js` 로 바꾸고, `tools/bundle.py` 가 그 파일을 저장소에 쓰도록 했다(릴리스 커밋에 포함). 백엔드 코드는 VERSION 만 바뀜.
+`https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js` 로 바꾸고, `tools/bundle.py` 가 그 파일을 저장소에 쓰도록 했다(릴리스 커밋에 포함). 백엔드 코드는 VERSION 만 바뀜.
 
-→ **첫 할 일**: 사용자가 RisuAI 에 `plugin/Risu.Elf.Plugin.js` **수동 재설치 1회**(설치본 0.1.0 의 update-url 은 CORS 로 못 읽음) → 다음 릴리스부터 `+` 가 뜨는지 확인 → M2 실사용 검증(§5-2).
+→ **첫 할 일**: 사용자가 RisuAI 에 `plugin/Risu.Hina.Plugin.js` **수동 재설치 1회**(설치본 0.1.0 의 update-url 은 CORS 로 못 읽음) → 다음 릴리스부터 `+` 가 뜨는지 확인 → M2 실사용 검증(§5-2).
 
-## 1. 2026-08-25 밤 — 라운드 2 (v0.4.0): 봇 탭·설정 피드백 20여 건 (docs/04 부록 F)
+## 1. 2026-08-26 — 라운드 3 + 개명 (v0.5.0) (docs/04 부록 G)
+
+| 영역 | 무엇 |
+|---|---|
+| 개명 | Risu Elf → **Risu Hina** 전면(플러그인 `risu-hina`, 서명, 자산 `Risu.Hina.*`, DB `risuhina.db`, 환경변수 `RISUHINA_*`). 호환: 옛 접두사·서명·DB 채택, `plugin/Risu.Elf.Plugin.js` 도 같은 번들로 유지. 저장소·디렉터리 이름은 그대로 |
+| 에이전트 | `mode` 전달·교차 화면 수정 거부(`_wrong_half`) · 실패/중단 턴도 이력 저장 · 예산 초과 시 자동 요약(`compact_history`, 실행 직전 호출) · 중단(AbortController)·계속 이어서 버튼 · 환영 문구 |
+| 봇/파일 | 메타 `replaceGlobalNote` · 첫 화면 봇 스냅샷 목록 · 워크스페이스 폴더(`/files/mkdir`·`/files/move`·업로드 폴더) · 봇 버전 간 공유(`family_key`, `risu_hina.family` 스탬프) · 헤더 봇 이름 · 연결 경고에 설정 바로가기 |
+| 설정 | 설정 열면 탭 줄이 섹션으로 교체(`getSettingsBar`) · 카드는 연결 후 재로드(`refreshers`) · API 키/인증 탭(모달 추가/수정, 코덱스 로그인 카드) · 프리셋 `›` · 코덱스 URL 텍스트·복사·단계 안내 |
+| 검증 | test_http `test_workspace_folders_and_family` 등, 스모크 갱신. 게이트 ALL GREEN |
+
+**배포**: 사용자 요청으로 test-server 에 직접 배포하지 않음 — 플러그인 `+` → 백엔드 업데이트 경로를 사용자가 직접 검증. 옛 업데이터는 `Install.Package`+OS 로 자산을 고르므로 `Risu.Hina.*` zip 도 받고, zip 안 `*/pyserver/app` 을 찾으므로 최상위 폴더 이름 변경도 무관.
+
+## 1a. 2026-08-25 밤 — 라운드 2 (v0.4.0): 봇 탭·설정 피드백 20여 건 (docs/04 부록 F)
 
 | 영역 | 무엇 |
 |---|---|
@@ -46,7 +58,7 @@
 
 **운영**: M1.1 배포(19:51) → v0.2.0 태그·푸시 → 0.2.0 배포(20:03) → M2 ①~⑦ → v0.3.0 태그·푸시 → 0.3.0 배포(21:01).
 원격 실행(`ssh test-server "powershell -File …deploy.ps1"`)은 **내가 직접 할 수 있다**(이전 "분류기가 막는다"는 틀림). 막히는 것은
-`gh release create`(외부 공개)와 `del` 이 섞인 복합 원격 명령. 스크립트는 `_stage\deploy.ps1`(범용: `*.py` + 최신 `risu-elf-*.js`).
+`gh release create`(외부 공개)와 `del` 이 섞인 복합 원격 명령. 스크립트는 `_stage\deploy.ps1`(범용: `*.py` + 최신 `risu-hina-*.js`).
 
 **M2 ① 백엔드 에셋 스토어** (`assets.py`, 커밋 `ba015b0`) — `data/assets/<sha256>.<ext>` 전역, DB **v9** `asset_blobs`/`asset_keys(state present|missing|failed)`/`char_assets`(매니페스트, 카드 순서).
 `POST /assets/manifest{refs,hubPull}` → 스토어 대조 → SQLite 고속 경로로 즉시 채움 → 허브 풀 백그라운드 스레드(httpx, 6 워커) → `missing` 반환.
@@ -72,8 +84,8 @@ config `assets{maxItemBytes,gcDays,hubPull,hubWorkers,hubTimeoutSeconds}`, `pock
 ## 2. 지금 있는 것 (한눈에)
 
 ```
-RisuAI(PocketRisu | 웹 risu.xyz) ── 플러그인 iframe(risu-elf.js) ──nativeFetch──▶ 백엔드 (FastAPI)
-   127.0.0.1:6020 또는 공개 주소(cloudflared http://elf.example.com)   ├─ data/risuelf.db   턴·로어북·기억·변수·카드 필드/스크립트·에셋 키/매니페스트·세션·승인 큐·스냅샷
+RisuAI(PocketRisu | 웹 risu.xyz) ── 플러그인 iframe(risu-hina.js) ──nativeFetch──▶ 백엔드 (FastAPI)
+   127.0.0.1:6020 또는 공개 주소(cloudflared http://elf.example.com)   ├─ data/risuhina.db   턴·로어북·기억·변수·카드 필드/스크립트·에셋 키/매니페스트·세션·승인 큐·스냅샷
                                                                        ├─ data/assets/<sha256>.<ext>   콘텐츠 어드레스드 스토어(봇 간 공유)
                                                                        ├─ data/workspace/<char>/  card.md · original/ · out/(charx) · scratch/assets/ · skills/
                                                                        ├─ data/skills/<id>/SKILL.md
@@ -87,7 +99,7 @@ RisuAI(PocketRisu | 웹 risu.xyz) ── 플러그인 iframe(risu-elf.js) ──
 ## 3. 배포 절차 (검증됨, 내가 직접 실행)
 
 ```
-scp -q pyserver/app/*.py plugin/dist/risu-elf-<ver>.js test-server:D:/code/risu-elf/_stage/
+scp -q pyserver/app/*.py plugin/dist/risu-hina-<ver>.js test-server:D:/code/risu-elf/_stage/
 ssh test-server "powershell -ExecutionPolicy Bypass -File D:\code\risu-elf\_stage\deploy.ps1"   # stop → app.bak-<시각> → 교체 → __pycache__ 삭제 → start
 ssh test-server "curl.exe -s http://127.0.0.1:6020/health"   # 반드시 새 SSH 세션
 ```
@@ -101,9 +113,9 @@ dev 설치본의 `data/` 를 `-wal`·`-shm` 째 복사한 뒤 기동한 서버�
 
 ## 5. 이어서 할 것 (순서대로)
 
-1. ~~**GitHub 릴리스 v0.3.1**~~ — 완료(21:20). 다음 릴리스 절차: 버전 5곳 bump → `pyserver/.venv/Scripts/python.exe tools/release.py`(저장소의 `plugin/Risu.Elf.Plugin.js` 도 갱신됨) → 게이트 → 커밋(번들 포함)·태그·푸시 → 배포 →
-   `cd release && gh release create v<ver> -R nilsonwhang3-spec/risu-elf --title "Risu Elf <ver>" --notes-file notes-<ver>.md <zip 2개> Risu.Elf.Plugin.js SHA256SUMS-<ver>.txt`
-   (auto 모드에선 분류기가 막으므로 수동 권한 모드에서 실행). 사용자는 RisuAI 에 `plugin/Risu.Elf.Plugin.js` 를 한 번 수동 재설치해야 이후 `+` 가 뜬다.
+1. ~~**GitHub 릴리스 v0.3.1**~~ — 완료(21:20). 다음 릴리스 절차: 버전 5곳 bump → `pyserver/.venv/Scripts/python.exe tools/release.py`(저장소의 `plugin/Risu.Hina.Plugin.js` 도 갱신됨) → 게이트 → 커밋(번들 포함)·태그·푸시 → 배포 →
+   `cd release && gh release create v<ver> -R nilsonwhang3-spec/risu-hina --title "Risu Hina <ver>" --notes-file notes-<ver>.md <zip 2개> Risu.Hina.Plugin.js SHA256SUMS-<ver>.txt`
+   (auto 모드에선 분류기가 막으므로 수동 권한 모드에서 실행). 사용자는 RisuAI 에 `plugin/Risu.Hina.Plugin.js` 를 한 번 수동 재설치해야 이후 `+` 가 뜬다.
 2. **실사용 확인(M2)** — PocketRisu(test-server, fastPath 켜짐): 패널 열기→봇 카드 진행 줄→수 초 내 complete(SQLite 직독)→에셋 탭 썸네일→charx 만들기→파일 탭 저장→**PocketRisu 로 import**(에셋·로어·트리거·Regex·CBS 표시가 원본과 같은지, 이것이 charx 의 핵심 검증). 웹리스(elf.example.com): 허브 풀 진행률·2회째 0건·게이트.
    에이전트: "프로필을 흑백으로 바꿔 추가 에셋으로 넣어 줘" → fetch_assets→PIL→propose_asset_add→승인→RisuAI 카드 확인.
 3. **공개 백엔드 보안 점검** — `elf.example.com`: 토큰 길이·실패 rate limit(있음: 60초 20회)·`/health` 의 `tokenRequired:false` 노출·`/diag/*`·`/assets/*`·`/files/download` 가 auth 뒤인지(AUTH_EXEMPT 는 health·plugin.js 뿐 — 확인됨).

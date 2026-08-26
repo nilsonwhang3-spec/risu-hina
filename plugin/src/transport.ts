@@ -45,12 +45,12 @@ export class BackendError extends Error {
   }
 }
 
-const SIGNATURE = 'risu-elf';
+const SIGNATURE = 'risu-hina';
 // What the backend called itself before the rename. Accepted on the client
 // because the plugin updates first: for one session a new plugin talks to an
 // old backend, and refusing the handshake there would look like the backend
 // being down rather than merely older.
-const LEGACY_SIGNATURE = 'real-ooc';
+const LEGACY_SIGNATURES = new Set(['risu-elf', 'real-ooc']);
 const DEFAULT_TIMEOUT_MS = 20_000;
 /** Uploading a whole transcript is slow; a 394-turn chat is several MB. */
 const UPLOAD_TIMEOUT_MS = 180_000;
@@ -101,7 +101,7 @@ export class Transport {
 
     const res = await this.raw('GET', '/health', undefined, { withToken: false });
     const body = (await readJson(res)) as HealthInfo | null;
-    if (!body || (body.service !== SIGNATURE && body.service !== LEGACY_SIGNATURE)) {
+    if (!body || (body.service !== SIGNATURE && !LEGACY_SIGNATURES.has(String(body.service)))) {
       this.route = 'blocked';
       this.tokenSafe = false;
       throw new BackendError(
@@ -109,7 +109,7 @@ export class Transport {
         this.platform === 'web'
           ? '백엔드에 직접 닿지 않습니다. RisuAI 설정에서 Use Plain Fetch를 켜 주세요 ' +
             '(끄면 요청이 sv.risuai.xyz로 릴레이되어 토큰이 새고, 사설 주소에는 닿지도 않습니다)'
-          : '백엔드 응답이 Risu Elf의 것이 아닙니다',
+          : '백엔드 응답이 Risu Hina의 것이 아닙니다',
         body,
       );
     }

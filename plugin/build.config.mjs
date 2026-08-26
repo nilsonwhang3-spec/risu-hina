@@ -27,7 +27,7 @@ const isMin = args.has("--minify");
 
 const HEADER = resolve(__dirname, "src/plugin-header.txt");
 const ENTRY = resolve(__dirname, "src/index.ts");
-const OUTFILE = resolve(__dirname, `dist/risu-elf-${pkg.version}.js`);
+const OUTFILE = resolve(__dirname, `dist/risu-hina-${pkg.version}.js`);
 
 // Where RisuAI will look for a newer build.
 //
@@ -44,14 +44,14 @@ const OUTFILE = resolve(__dirname, `dist/risu-elf-${pkg.version}.js`);
 // (0.1.0 -> 0.3.0 was never offered on risu.xyz). raw.githubusercontent.com
 // answers with `access-control-allow-origin: *` and Accept-Ranges, which is
 // why RisuAI's own docs use it. So the release build also commits the bundle
-// as plugin/Risu.Elf.Plugin.js (tools/bundle.py) for this URL to serve.
+// as plugin/Risu.Hina.Plugin.js (tools/bundle.py) for this URL to serve.
 //
 // Empty repo means no //@update-url at all rather than a placeholder: a URL
 // that 404s makes RisuAI report a failed update check forever, which is worse
 // than the honest absence of one.
-const REPO = process.env.RISUELF_REPO || pkg.risuelfRepo || "";
-const UPDATE_URL = process.env.RISUELF_UPDATE_URL
-  || (REPO ? `https://raw.githubusercontent.com/${REPO}/master/plugin/Risu.Elf.Plugin.js` : "");
+const REPO = process.env.RISUHINA_REPO || pkg.risuhinaRepo || "";
+const UPDATE_URL = process.env.RISUHINA_UPDATE_URL
+  || (REPO ? `https://raw.githubusercontent.com/${REPO}/master/plugin/Risu.Hina.Plugin.js` : "");
 
 let banner = readFileSync(HEADER, "utf8").replace(/\$\{VERSION\}/g, pkg.version);
 if (UPDATE_URL) {
@@ -59,8 +59,8 @@ if (UPDATE_URL) {
 } else {
   banner = banner.replace(/^\/\/@update-url.*\r?\n/m, "");
   console.warn(
-    "[build] no //@update-url emitted - set risuelfRepo in package.json " +
-    "(or RISUELF_REPO) to enable RisuAI's in-app plugin update."
+    "[build] no //@update-url emitted - set risuhinaRepo in package.json " +
+    "(or RISUHINA_REPO) to enable RisuAI's in-app plugin update."
   );
 }
 

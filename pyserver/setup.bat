@@ -1,5 +1,5 @@
 @echo off
-REM Install Risu Elf: virtualenv, dependencies, and start it.
+REM Install Risu Hina: virtualenv, dependencies, and start it.
 REM
 REM   setup.bat                     set up and start on 6020
 REM   setup.bat -Port 6030          a different port

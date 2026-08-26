@@ -1,5 +1,5 @@
 @echo off
-REM Stop Risu Elf and undo what setup.bat did.
+REM Stop Risu Hina and undo what setup.bat did.
 REM
 REM   uninstall.bat            stop it, unregister the service. Deletes nothing.
 REM   uninstall.bat -Purge     also delete the venv and the data

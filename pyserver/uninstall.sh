@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Stop Risu Elf and undo what setup.sh did.
+# Stop Risu Hina and undo what setup.sh did.
 #
 #   ./uninstall.sh              stop it, unregister from pm2. Keeps everything.
 #   ./uninstall.sh --purge      also delete the venv and the data
@@ -13,7 +13,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 if [ -d "$HERE/app" ]; then SERVER="$HERE"; else SERVER="$HERE/pyserver"; fi
 ROOT="$(dirname "$SERVER")"
 
-NAME="risu-elf"; PURGE=0
+NAME="risu-hina"; PURGE=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --name)    NAME="${2:-}"; shift 2 ;;

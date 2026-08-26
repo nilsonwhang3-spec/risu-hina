@@ -52,7 +52,7 @@ INSTRUCTIONS = """\
   "패널에서 승인·거절하신 뒤 이어서 말씀해 주세요"라고 끝내라. 다음 턴에 list_proposals ·
   list_staged · list_lore 로 무엇이 반영됐는지 확인하고 이어가라.
 - 규칙적인 치환은 run_python 으로 직접 훑는 편이 정확할 때가 많다.
-  `import risuelf` 헬퍼가 준비돼 있다.
+  `import risuhina` 헬퍼가 준비돼 있다.
 - 원문을 인용할 때는 read_turns 로 실제로 읽은 것만 인용해라. 기억으로 지어내지 마라.
 - 무엇을 왜 바꾸려는지 짧게 설명하고, 애매하면 먼저 물어라.
 - **봇(카드) 편집도 같은 문법이다.** read_card 로 행을 보고 propose_card_edit /
@@ -186,14 +186,15 @@ def _msg_text(m: Any) -> str:
     return "\n".join(bits) if bits else f"[{who}]"
 
 
-async def _compact_history(ctx: RunContext[Deps], messages: list) -> list:
+async def compact_history(session_id: str, messages: list) -> list:
     """Keep the conversation inside the model's budget.
 
     When the stored history grows past `agent.historyBudgetChars`, everything
     but the last KEEP_TAIL messages is summarised by the model into one
     Korean note and replaced by a (summary request, acknowledgement) pair.
-    The result is remembered in COMPACTED so session.run stores it - the
-    summary is paid for once, not on every later turn.
+    Called by session.run before each turn (pydantic-ai 2.x has no history
+    processor hook). The result is remembered in COMPACTED so session.run
+    stores it - the summary is paid for once, not on every later turn.
     """
     budget = int(config.section("agent").get("historyBudgetChars") or 0)
     if budget <= 0 or len(messages) <= KEEP_TAIL + 2:
@@ -224,9 +225,9 @@ async def _compact_history(ctx: RunContext[Deps], messages: list) -> list:
         ModelRequest(parts=[UserPromptPart(content="[이전 대화 요약 — 앞선 대화는 이 요약으로 대체되었습니다]\n" + summary)]),
         ModelResponse(parts=[TextPart(content="요약을 확인했습니다. 이어서 진행합니다.")]),
     ] + tail
-    if ctx.deps.session_id:
-        COMPACTED[ctx.deps.session_id] = compacted
-    log.info("history compacted session=%s %s msgs/%s chars -> %s msgs", ctx.deps.session_id,
+    if session_id:
+        COMPACTED[session_id] = compacted
+    log.info("history compacted session=%s %s msgs/%s chars -> %s msgs", session_id,
              len(messages), total, len(compacted))
     return compacted
 
@@ -243,7 +244,6 @@ def build() -> Agent[Deps]:
         # gets to sit above "the agent never writes to the transcript".
         instructions=INSTRUCTIONS + presets.instructions() + skills.prompt(),
         model_settings=presets.model_settings(),
-        history_processors=[_compact_history],
     )
 
     # --- reading ------------------------------------------------------------

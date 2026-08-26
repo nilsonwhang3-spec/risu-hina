@@ -419,7 +419,7 @@ def model_settings() -> dict[str, Any]:
         # A stable routing key. The cacheable prefix is the instructions plus
         # the tool schemas, which are identical across chats, so one key for the
         # whole app maximises hits rather than fragmenting them per chat.
-        out["openai_prompt_cache_key"] = "risu-elf"
+        out["openai_prompt_cache_key"] = "risu-hina"
         out["openai_prompt_cache_retention"] = "24h"
     return out
 

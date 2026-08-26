@@ -2,11 +2,11 @@
 
 run_python 안에서 이렇게 부른다 (별도 프로세스를 띄울 수 없으므로 exec 한다):
 
-    import risuelf, os
+    import risuhina, os
     ns = {}
     exec(open("skills/charx_unpack.py", encoding="utf-8").read(), ns)
-    out = risuelf.scratch("card")
-    ns["decode"](os.path.join(risuelf.UPLOADS, "카드.charx"), out)
+    out = risuhina.scratch("card")
+    ns["decode"](os.path.join(risuhina.UPLOADS, "카드.charx"), out)
     print(open(os.path.join(out, "card.md"), encoding="utf-8").read()[:2000])
 
 푼 결과는 scratch/ 에 두고 필요한 부분만 읽어라. 카드 하나가 수십 MB일 수 있다.

@@ -7,7 +7,7 @@ set -u
 
 cd "$(dirname "$0")/.." || exit 1
 
-PY="${RISUELF_TEST_PY:-pyserver/.venv/Scripts/python.exe}"
+PY="${RISUHINA_TEST_PY:-pyserver/.venv/Scripts/python.exe}"
 [ -x "$PY" ] || PY="$(command -v python3 || command -v python)"
 
 fail=0

@@ -1,8 +1,8 @@
-# Risu Elf
+# Risu Hina
 
 RisuAI 챗을 **끝난 뒤에** 고치는 도구. 대화를 통째로 펼쳐 놓고 직접 고치거나 AI에게 시킨다.
 
-이 폴더가 백엔드다. 플러그인(`Risu.Elf.Plugin.js`)은 `plugin/` 안에 같이 들어 있고,
+이 폴더가 백엔드다. 플러그인(`Risu.Hina.Plugin.js`)은 `plugin/` 안에 같이 들어 있고,
 RisuAI 쪽에 따로 설치한다.
 
 ---
@@ -46,8 +46,8 @@ chmod +x *.sh
 
 ### 플러그인
 
-`plugin/Risu.Elf.Plugin.js` 를 RisuAI 설정 → 플러그인 → Add Plugin 에 넣는다.
-챗 화면에 **Risu Elf** 버튼이 생긴다.
+`plugin/Risu.Hina.Plugin.js` 를 RisuAI 설정 → 플러그인 → Add Plugin 에 넣는다.
+챗 화면에 **Risu Hina** 버튼이 생긴다.
 
 열고 나서 오른쪽 위 ⚙ 에서:
 
@@ -70,7 +70,7 @@ data/       DB · 설정 · 토큰 · 워크스페이스. 업데이트가 건드
 이 분리가 자체 업데이트의 전제다. 데이터가 코드 안에 있으면 버전 교체가 매번
 당신의 챗을 밟고 지나가야 한다.
 
-**설치 폴더는 어디든 된다.** 이름이 `risu-elf` 일 필요도 없다 — 모든 경로를
+**설치 폴더는 어디든 된다.** 이름이 `risu-hina` 일 필요도 없다 — 모든 경로를
 스크립트가 자기 위치에서 계산한다.
 
 ---
@@ -84,7 +84,7 @@ data/       DB · 설정 · 토큰 · 워크스페이스. 업데이트가 건드
 web RisuAI 나 다른 기계에서 직접 붙을 때만 필요하고, 그 경우 토큰은 **강제**이며
 설정으로 끌 수 없다.
 
-`RISUELF_HOST=0.0.0.0` 으로 넓히는 것은 **토큰을 아는 사람에게 이 기계의 임의 코드
+`RISUHINA_HOST=0.0.0.0` 으로 넓히는 것은 **토큰을 아는 사람에게 이 기계의 임의 코드
 실행 권한을 주는 것과 같다** — 에이전트의 `run_python` 이 여기서 돈다. 넓혀야 한다면
 Tailscale 같은 사설망 안으로만 하고, 공개 인터넷에는 바인딩하지 않는다.
 
@@ -97,7 +97,7 @@ powershell -ExecutionPolicy Bypass -File pyserver\manage.ps1 -Action status
 powershell -ExecutionPolicy Bypass -File pyserver\manage.ps1 -Action restart
 ```
 
-리눅스에서는 `pyserver/server.log` 를 보거나, pm2 를 쓴다면 `pm2 logs risu-elf`.
+리눅스에서는 `pyserver/server.log` 를 보거나, pm2 를 쓴다면 `pm2 logs risu-hina`.
 
 > 윈도우에서 `processes 2` 는 정상이다. venv 의 `Scripts\python.exe` 는
 > `venvlauncher.exe` 라서 진짜 인터프리터를 자식으로 띄우고 자기는 부모로 남는다.
@@ -143,4 +143,4 @@ uninstall.bat -Purge     venv 와 데이터까지 삭제
 
 ---
 
-소스와 설계 기록: https://github.com/nilsonwhang3-spec/risu-elf
+소스와 설계 기록: https://github.com/nilsonwhang3-spec/risu-hina

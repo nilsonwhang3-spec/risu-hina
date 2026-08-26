@@ -28,9 +28,9 @@ test-server에서 실제로 처음부터 돌려 보고 쓴 절차다. 명령과 
 릴리스에서 세 파일을 받는다.
 
 ```
-Risu.Elf.<버전>.Auto.Install.Package.zip
+Risu.Hina.<버전>.Auto.Install.Package.zip
 SHA256SUMS.txt
-Risu.Elf.Plugin.js        ← RisuAI 가 자동 업데이트에 쓰는 것. 3단계에서 쓴다
+Risu.Hina.Plugin.js        ← RisuAI 가 자동 업데이트에 쓰는 것. 3단계에서 쓴다
 ```
 
 **해시를 먼저 확인한다.** 이 zip의 내용이 곧 돌아갈 서버가 되므로, 검증하지 않은
@@ -38,17 +38,17 @@ Risu.Elf.Plugin.js        ← RisuAI 가 자동 업데이트에 쓰는 것. 3단
 
 ```powershell
 $want = (Get-Content SHA256SUMS-<버전>.txt | Where-Object { $_ -like '*backend*' }).Split(' ')[0]
-$got  = (Get-FileHash Risu.Elf.0.4.2.Auto.Install.Package.zip -Algorithm SHA256).Hash.ToLower()
+$got  = (Get-FileHash Risu.Hina.0.5.0.Auto.Install.Package.zip -Algorithm SHA256).Hash.ToLower()
 if ($want -ne $got) { throw 'hash mismatch' } else { 'hash ok' }
 ```
 
 ### 1-2. 푼다
 
-**한 번 풀면 끝이다.** 압축 안에 `risu-elf/` 트리가 통째로 들어 있어서, 폴더를 미리
+**한 번 풀면 끝이다.** 압축 안에 `risu-hina/` 트리가 통째로 들어 있어서, 폴더를 미리
 만들 필요도 이름을 맞출 필요도 없다.
 
 ```powershell
-Expand-Archive Risu.Elf.0.4.2.Auto.Install.Package.zip -DestinationPath D:\code -Force
+Expand-Archive Risu.Hina.0.5.0.Auto.Install.Package.zip -DestinationPath D:\code -Force
 ```
 
 ```
@@ -98,7 +98,7 @@ processes  2 (venv launcher + server, normal)
            pid 21404
            pid 20596
 listening  yes on 6020
-health     {"service": "risu-elf", "version": "0.4.2", "ok": true, "agentReady": false, ...}
+health     {"service": "risu-hina", "version": "0.5.0", "ok": true, "agentReady": false, ...}
 ```
 
 > **`processes 2` 는 정상이다.** 윈도우 venv의 `Scripts\python.exe` 는
@@ -134,16 +134,16 @@ web RisuAI나 다른 기계에서 직접 붙을 때만 필요하다 — 그 경�
 
 **코드 위치는 그냥 바꾸면 된다.** 하드코딩된 경로가 없다 — 스크립트가 자기가 놓인
 자리에서 모든 경로를 계산하고, 프로세스도 **자기 설치의 `run.py` 경로로** 찾는다.
-폴더 이름이 `risu-elf` 일 필요도 없다.
+폴더 이름이 `risu-hina` 일 필요도 없다.
 
 ```powershell
-Expand-Archive Risu.Elf.0.4.2.Auto.Install.Package.zip -DestinationPath E:\apps -Force
-Rename-Item E:\apps\risu-elf myelf          # 이름도 마음대로
+Expand-Archive Risu.Hina.0.5.0.Auto.Install.Package.zip -DestinationPath E:\apps -Force
+Rename-Item E:\apps\risu-hina myelf          # 이름도 마음대로
 powershell -ExecutionPolicy Bypass -File E:\apps\myelf\setup.bat
 ```
 
-압축이 `risu-elf/` 트리를 통째로 담고 있으므로 그냥 원하는 부모 폴더에 풀면 된다.
-폴더 이름이 `risu-elf` 일 필요도 없다 — 풀고 나서 이름을 바꿔도 그대로 동작한다.
+압축이 `risu-hina/` 트리를 통째로 담고 있으므로 그냥 원하는 부모 폴더에 풀면 된다.
+폴더 이름이 `risu-hina` 일 필요도 없다 — 풀고 나서 이름을 바꿔도 그대로 동작한다.
 
 ```
 <install>\
@@ -159,12 +159,12 @@ powershell -ExecutionPolicy Bypass -File E:\apps\myelf\setup.bat
 다른 드라이브나 백업되는 디스크에 두고 싶을 때.
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File "$install\setup.bat" -DataDir E:\backup\risu-elf-data
+powershell -ExecutionPolicy Bypass -File "$install\setup.bat" -DataDir E:\backup\risu-hina-data
 ```
 
 ```
 setup: pinned data dir in E:\apps\myelf\pyserver\datadir.txt
-setup: data dir E:\backup\risu-elf-data
+setup: data dir E:\backup\risu-hina-data
 ```
 
 `pyserver\datadir.txt` 한 줄에 절대경로가 적힌다. **launch 때 넘기는 값이 아니라
@@ -181,8 +181,8 @@ setup: data dir E:\backup\risu-elf-data
 ### 리눅스에서는
 
 ```bash
-unzip Risu.Elf.0.4.2.Auto.Install.Package.zip -d /opt
-cd /opt/risu-elf && chmod +x *.sh
+unzip Risu.Hina.0.5.0.Auto.Install.Package.zip -d /opt
+cd /opt/risu-hina && chmod +x *.sh
 ./setup.sh                      # 동봉된 파이썬을 확인하고 띄운다
 ./setup.sh --service            # 또는 PM2 로 상주시키기
 ./uninstall.sh                  # 멈추고 등록 해제
@@ -196,7 +196,7 @@ cd /opt/risu-elf && chmod +x *.sh
 
 | | 등록 | 해제 |
 |---|---|---|
-| Windows (NSSM) | `setup.bat -Service [-Name RisuElf] [-Port 6020]` | `uninstall.bat [-Name RisuElf]` |
+| Windows (NSSM) | `setup.bat -Service [-Name RisuHina] [-Port 6020]` | `uninstall.bat [-Name RisuHina]` |
 | Linux (PM2) | `./setup.sh --service [--port 6020]` | `./uninstall.sh` |
 
 둘 다 **`start.bat`/`start.sh` 를 실행하지 `run.py` 를 직접 실행하지 않는다.** exit 75 가
@@ -216,7 +216,7 @@ sudo 명령을 사람이 직접 실행해야 한다 — 스크립트가 읽지�
 ```
 
 `manage.ps1` 의 `stop`·`status`·`token` 에도 같은 `-Port` 를 준다(상태 확인이 그 포트를 본다).
-`start.bat 6030` / `start.sh 6030` 도 같다. 환경변수 `RISUELF_PORT` 도 읽는다.
+`start.bat 6030` / `start.sh 6030` 도 같다. 환경변수 `RISUHINA_PORT` 도 읽는다.
 
 ### 요약
 
@@ -224,16 +224,16 @@ sudo 명령을 사람이 직접 실행해야 한다 — 스크립트가 읽지�
 |---|---|
 | 코드 위치 | 그냥 원하는 부모 폴더에 풀면 된다 |
 | 데이터 위치 | `setup.bat -DataDir <절대경로>` / `./setup.sh --data-dir <절대경로>` |
-| 포트 | `-Port` 또는 `RISUELF_PORT` |
+| 포트 | `-Port` 또는 `RISUHINA_PORT` |
 | 인터프리터 | `setup.bat -Python <경로>` / `./setup.sh --python <경로>` |
-| 바인딩 주소 | `RISUELF_HOST` — **바꾸기 전에 §4를 읽을 것** |
+| 바인딩 주소 | `RISUHINA_HOST` — **바꾸기 전에 §4를 읽을 것** |
 
 ---
 
 ## 3. 플러그인
 
-1. RisuAI → 설정 → 플러그인 → **Add Plugin** 에서 `Risu.Elf.Plugin.js` 를 넣는다.
-2. 챗 화면에 **Risu Elf** 버튼이 생긴다. 눌러서 연다.
+1. RisuAI → 설정 → 플러그인 → **Add Plugin** 에서 `Risu.Hina.Plugin.js` 를 넣는다.
+2. 챗 화면에 **Risu Hina** 버튼이 생긴다. 눌러서 연다.
 3. 오른쪽 위 **⚙ → 연결** 에서 백엔드 URL을 넣는다. 같은 기계면
    `http://127.0.0.1:6020`. 다른 기계면 그 주소와 §1-5의 토큰.
 4. **⚙ → 에이전트 → 수정** 에서 Base URL · Model · API Key 를 넣고 **연결 테스트**.
@@ -268,7 +268,7 @@ powershell -ExecutionPolicy Bypass -File <install>\pyserver\manage.ps1 -Action s
 
 ### 바인딩을 넓히기 전에
 
-`RISUELF_HOST=0.0.0.0` 은 **토큰을 아는 사람에게 그 기계의 임의 코드 실행 권한을 주는 것과
+`RISUHINA_HOST=0.0.0.0` 은 **토큰을 아는 사람에게 그 기계의 임의 코드 실행 권한을 주는 것과
 같다** — 에이전트의 `run_python` 이 그 기계에서 돈다. 서버가 기동할 때 그 경고를 찍는다.
 넓혀야 한다면 Tailscale 같은 사설망 안으로만 하고, 공개 인터넷에는 바인딩하지 않는다.
 

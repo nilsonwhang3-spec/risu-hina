@@ -328,7 +328,7 @@ export function buildShell(): void {
 
   document.body.appendChild(el('div', { class: 'wrap' }, [
     el('header', {}, [
-      el('h1', { html: ICON.app + '<span>Risu Elf</span>' }),
+      el('h1', { html: ICON.app + '<span>Risu Hina</span>' }),
       el('span', { class: 'dim', text: 'v' + __PLUGIN_VERSION__ }),
       healthEl,
       el('span', { class: 'spacer' }),
@@ -408,7 +408,7 @@ export async function bootstrap(force = false): Promise<void> {
       await state.upload({ force });
       if (state.activeChatKey) await state.loadTurns();
     } catch (e) {
-      console.log('[risu-elf] upload failed', e);
+      console.log('[risu-hina] upload failed', e);
       state.emit();
     }
   }

@@ -254,8 +254,10 @@ async def run(session_id: str, prompt: str, mode: str = "") -> AsyncGenerator[st
 
     try:
         ag = get_agent()
+        # Older turns are summarised once the history is past its budget.
+        history = await agent_mod.compact_history(session_id, _history(session_id))
         async with ag.run_stream_events(
-            prompt, deps=deps, message_history=_history(session_id)
+            prompt, deps=deps, message_history=history
         ) as events:
             async for ev in events:
                 for line in _translate(ev, text_acc):
