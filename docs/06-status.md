@@ -12,7 +12,7 @@
 
 | 어디 | 무엇 | 비고 |
 |---|---|---|
-| test-server **실행 중** `pyserver/app` + `plugin/risu-hina.js` | **0.4.0**(DB v10) — `deploy.ps1` 로 배포, 새 세션 `/health` 확인 | 백업 `app.bak-<시각>` |
+| test-server **실행 중** | **0.5.2** — 클린 설치 `D:\code\risu-hina`, **NSSM 서비스 `RisuHina`**(`cmd.exe /c start.bat 6020`, Automatic, ActiveRecall·risuai 와 같은 방식). 2026-08-26 밤 ssh 로 훼손된 `pyserver\python` 제거 → 0.5.2 zip 을 폴더 위에 풀기(`data/` 유지) → `nssm stop/start` → `/health` 0.5.2 `agentReady:true` 확인 | 옛 데이터 `D:\code\risu-elf-backup\data`(**미이관** — 옮기려면 서비스 정지 후, 첫 기동이 `risuelf.db→risuhina.db` 입양) |
 | test-server config | `pocketrisu.savePath = D:\code\risu-nodeonly\Risuai-NodeOnly\save` → `/diag` `fastPath:true, serverWrite:true` | 같은 PC 의 PocketRisu 를 SQLite 로 직독 |
 | GitHub 릴리스 | **v0.5.0 Latest (Risu Hina)** · v0.4.2 · … · v0.1.0 | `gh release create` 는 auto 모드 분류기가 막는다 — 수동 권한 모드에서는 내가 직접 실행(0.3.1·0.3.2). test-server 는 0.3.2 배포·검증됨, raw 주소도 0.3.2 |
 | RisuAI 설치 플러그인 | **0.3.1 을 한 번 수동 재설치해야 함** — 설치본의 `//@update-url` 이 CORS 없는 릴리스 주소라 `+` 가 영영 안 뜬다(docs/04 B.4) | 그 뒤부터는 raw 주소라 `+` 가 뜬다 |
@@ -42,7 +42,8 @@
 - 고침: 인터프리터는 **`python.new` 로 스테이징**, `start.bat`/`start.sh` 가 다음 기동 때 스왑(`python`→`python.old`). 같은 번들(`python/bundle.txt` 스탬프 = 파이썬 버전+락 해시)이면 건너뜀. **옛 런처를 쓰는 설치본은 런처를 한 번 손으로 바꿔야** 스왑이 된다(업데이터가 `start.bat.new` 로 놓아 둠).
 - 플러그인 `selectedValue()` 가 사용자의 선택보다 `selected` 속성을 먼저 읽던 버그(키 선택 안 먹음·keyRef 누락) 수정. 연결이 늦게 올라오면 재시도·업로드(`startReconnect`, health 상승 감시).
 - **버전 게이트**: major.minor 가 다르면 `/health`·`/update/*`·`/plugin`·`/logs`·`/diag`·`/config` 외 호출을 플러그인이 거부하고 헤더에 "버전이 다릅니다 → 백엔드 업데이트로 / 플러그인 업데이트" 안내. 백엔드 업데이트 카드는 **연결 탭 상단**으로.
-- test-server 복구: 서버 정지 → `pyserver\python` 을 0.5.2 zip 의 것으로 교체(또는 zip 을 폴더 위에 풀기, `data/` 유지) → 새 `start.bat` → 시작.
+- test-server 복구(완료, ssh 직접): `manage.ps1 stop` → 훼손된 `pyserver\python`·`python.new` 삭제 → 0.5.2 zip 을 `D:\code` 위에 `Expand-Archive -Force`(`data/` 유지) → `bundle.txt`=`3.11.9 deps=4fe2e353af438144 pip` 확인 → NSSM 서비스 재시작 → `/health` 0.5.2.
+- **NSSM 운영 규칙**: `RisuHina` 서비스는 `AppExit Restart` 이므로 `manage.ps1 -Action stop`(프로세스 kill)만 하면 NSSM 이 곧 다시 띄우고 그 사이 상태가 **Paused** 로 보인다. 파일 교체·`data/` 이동은 반드시 `nssm stop RisuHina`(또는 `Stop-Service RisuHina`) → 작업 → `nssm start RisuHina`. nssm 경로: `C:\Users\<user>\AppData\Local\Microsoft\WinGet\Packages\NSSM.NSSM_…\win64\nssm.exe`. ssh 세션은 관리자 토큰이라 `setup.bat -Service` 가 그대로 된다(이미 등록돼 있으면 "already exists" 로 멈춤 — `uninstall.bat` 후 재등록).
 
 ## 1-1. 2026-08-26 — 라운드 4 (v0.5.1)
 
@@ -116,6 +117,9 @@ RisuAI(PocketRisu | 웹 risu.xyz) ── 플러그인 iframe(risu-hina.js) ─�
 ## 3. 배포 절차 (검증됨, 내가 직접 실행)
 
 ```
+# (0.5.2 이후, NSSM 서비스) — 핫픽스는 zip 을 D:\code 위에 풀거나 app/*.py 만 교체:
+#   ssh test-server "<nssm> stop RisuHina" → scp/Expand-Archive → ssh test-server "<nssm> start RisuHina" → 새 세션 /health
+# (0.4.x 시절, D:\code\risu-elf 경로 — 지금은 없음)
 scp -q pyserver/app/*.py plugin/dist/risu-hina-<ver>.js test-server:D:/code/risu-elf/_stage/
 ssh test-server "powershell -ExecutionPolicy Bypass -File D:\code\risu-elf\_stage\deploy.ps1"   # stop → app.bak-<시각> → 교체 → __pycache__ 삭제 → start
 ssh test-server "curl.exe -s http://127.0.0.1:6020/health"   # 반드시 새 SSH 세션
