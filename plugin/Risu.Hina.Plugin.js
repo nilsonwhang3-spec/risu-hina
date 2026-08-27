@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.7.0
+//@display-name Risu Hina v0.7.1
 //@api 3.0
-//@version 0.7.0
+//@version 0.7.1
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@arg backend_url string 백엔드 URL (기본: http://127.0.0.1:6020)
 //@arg backend_token string 백엔드 토큰 (data/token.txt)
@@ -97,7 +97,7 @@
       this.route = "direct";
       this.tokenSafe = true;
       this.lastHealth = body;
-      this.gate = versionGate("0.7.0", String(body.version || ""));
+      this.gate = versionGate("0.7.1", String(body.version || ""));
       return body;
     }
     /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -7939,7 +7939,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
   }
 
   // src/ui/skills.ts
-  function buildSkillsCard() {
+  function buildSkillsCard(opts = {}) {
     const listMount2 = el("div");
     const out = el("div", { class: "outbox" });
     const budget = el("div", { class: "hint" });
@@ -8045,6 +8045,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       }
     });
     void refresh8();
+    opts.onMount?.(refresh8);
     return el("div", { class: "card" }, [
       el("h2", { text: "\uC2A4\uD0AC" }),
       el("div", { class: "hint", style: { marginBottom: "8px" } }, [
@@ -8313,7 +8314,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.7.0",
+            version: "0.7.1",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -8433,7 +8434,9 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
           agentPanel().invalidate();
         }
       })]],
-      ["\uC2A4\uD0AC", [buildSkillsCard()]],
+      ["\uC2A4\uD0AC", [buildSkillsCard({ onMount: (refresh8) => {
+        refreshers.push(refresh8);
+      } })]],
       ["\uC815\uBCF4 \xB7 \uB85C\uADF8", [buildCatalogCard(), buildDebugCard(), aboutMount]]
     ];
     const bar3 = el("div", { class: "subtabs" });
@@ -8920,7 +8923,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.7.0"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.7.1"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -10442,16 +10445,11 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     healthEl.appendChild(el("span", { class: "healthdot" }));
     if (!h) {
       healthEl.appendChild(el("span", { text: "\uBC31\uC5D4\uB4DC \uC5F0\uACB0 \uC548 \uB428" }));
-      healthEl.appendChild(el("span", {
-        class: "hint",
-        text: (state.connectError || "\uC124\uC815\uC5D0\uC11C URL\uACFC \uD1A0\uD070\uC744 \uD655\uC778\uD574 \uC8FC\uC138\uC694") + (reconnectTimer ? ` (\uC790\uB3D9 \uC7AC\uC2DC\uB3C4 ${reconnectAttempts + 1}\uD68C\uC9F8)` : "")
-      }));
-      const go = el("button", { class: "ghost tiny", text: "\uC124\uC815\uC73C\uB85C" });
-      go.addEventListener("click", () => setTab("settings"));
-      healthEl.appendChild(go);
+      healthEl.title = (state.connectError || "\uC124\uC815\uC5D0\uC11C URL\uACFC \uD1A0\uD070\uC744 \uD655\uC778\uD574 \uC8FC\uC138\uC694") + (reconnectTimer ? ` (\uC790\uB3D9 \uC7AC\uC2DC\uB3C4 ${reconnectAttempts + 1}\uD68C\uC9F8)` : "");
+      if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.7.0"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.7.1"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
@@ -10526,7 +10524,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.7.0" }),
+        el("span", { class: "dim", text: "v0.7.1" }),
         healthEl,
         el("span", { class: "spacer" }),
         reload,
@@ -10733,6 +10731,6 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.7.0"} loaded`);
+    console.log(`[risu-hina] v${"0.7.1"} loaded`);
   })();
 })();

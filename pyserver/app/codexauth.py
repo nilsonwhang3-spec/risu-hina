@@ -426,10 +426,24 @@ def client() -> Any:
         if wanted_stream:
             return stream
         final = None
+        # This backend's `response.completed` carries an EMPTY `output`; the
+        # items only ever arrive as `response.output_item.done` events. A
+        # folded (non-stream) call that trusted the final object came back
+        # with no text and no tool calls - the connection test read that as
+        # "the model does not return tool_calls" while the agent, which
+        # streams, worked. Collect the items and put them where the SDK's
+        # `output_text` and every caller look for them.
+        items: list[Any] = []
         async for ev in stream:
             t = getattr(ev, "type", "")
-            if t == "response.completed":
+            if t == "response.output_item.done":
+                item = getattr(ev, "item", None)
+                if item is not None:
+                    items.append(item)
+            elif t == "response.completed":
                 final = ev.response
+                if final is not None and not getattr(final, "output", None) and items:
+                    final.output = items
             elif t in ("response.failed", "response.incomplete"):
                 final = getattr(ev, "response", None)
                 err = getattr(final, "error", None)

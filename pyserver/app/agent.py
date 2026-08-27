@@ -23,7 +23,7 @@ from pydantic_ai import Agent, RunContext
 from pydantic_ai.models.openai import OpenAIChatModel, OpenAIResponsesModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
-from . import (actions, assets, codexauth, config, files, log, permits, presets, providers, pyexec, skills, snapshots,
+from . import (actions, assets, codexauth, config, files, log, permits, presets, providers, pyexec, skills, snapshots, textedit,
                staging, store, websearch, workspace)
 from . import card as cardmod
 from . import memory as mem
@@ -51,8 +51,18 @@ INSTRUCTIONS = """\
   않는다. 함께 가는 제안(예: 로어북 추가와 그 턴들의 삭제)은 **한 턴에 모두 제안**하고,
   "패널에서 승인·거절하신 뒤 이어서 말씀해 주세요"라고 끝내라. 다음 턴에 list_proposals ·
   list_staged · list_lore 로 무엇이 반영됐는지 확인하고 이어가라.
+- **한 문장·한 줄만 고칠 때는 부분 교체 툴을 써라**: propose_lore_replace / propose_memory_replace /
+  propose_card_replace (find → replace). 본문 전체를 다시 써 넣는 propose_*_edit 는 항목을
+  통째로 다시 쓸 때만 — 긴 본문을 다시 치면 문장이 빠지거나 달라진다. find 는 read_* 로 읽은
+  원문을 공백·따옴표까지 그대로 옮긴다.
 - 규칙적인 치환은 run_python 으로 직접 훑는 편이 정확할 때가 많다.
   `import risuhina` 헬퍼가 준비돼 있다.
+- **RisuAI 처리 순서를 알고 말해라.** 한 턴은 editinput(regex·저장됨) → start 트리거 → editprocess
+  (regex, 턴마다 요청용·저장 안 됨) → 프롬프트 조립 → Lua editRequest(요청 배열 전체) → 모델 →
+  editoutput(regex·저장됨) → output 트리거 → 화면마다 editdisplay(regex·저장 안 됨) 순이다.
+  저장되는 건 editinput·editoutput 뿐이고, 모델이 보는 건 editprocess→editRequest 결과다. Lua
+  listenEdit 훅은 같은 단계의 정규식보다 먼저 돈다. 정규식·트리거·배경 HTML 을 만들거나 고치기
+  전에는 스킬 "RisuAI 처리 순서" 를 load_skill 로 불러 세부(플래그·@@명령·오진단 표)를 확인해라.
 - 원문을 인용할 때는 read_turns 로 실제로 읽은 것만 인용해라. 기억으로 지어내지 마라.
 - 무엇을 왜 바꾸려는지 짧게 설명하고, 애매하면 먼저 물어라.
 - **봇(카드) 편집도 같은 문법이다.** read_card 로 행을 보고 propose_card_edit /
@@ -458,6 +468,25 @@ def build() -> Agent[Deps]:
                         {"id": memory_id, "body": new_body})
 
     @agent.tool
+    def propose_memory_replace(ctx: RunContext[Deps], memory_id: str, find: str, replace: str,
+                               reason: str, replace_all: bool = False) -> str:
+        """장기기억 항목의 **일부만** 고치자고 제안한다 (한 문장·한 줄을 바꿀 때).
+
+        find 는 본문에 정확히 한 번 있는 문자열(공백·따옴표까지 그대로), replace 는 그 자리에
+        들어갈 문자열. 두 곳 이상이면 문맥을 더 넣거나 replace_all=True. 본문 전체를 다시 쓰지 마라.
+        """
+        cur = mem.get(memory_id)
+        if cur is None:
+            return "없는 항목입니다"
+        try:
+            body, n = textedit.replace_once(str(cur.get("body") or ""), find, replace, replace_all=replace_all)
+        except textedit.ReplaceError as e:
+            return str(e)
+        return _propose(ctx, "memory_edit",
+                        f"장기기억 [{cur['kind']} #{cur['seq']}] 부분 수정({n}곳) — {reason}",
+                        {"id": memory_id, "body": body})
+
+    @agent.tool
     def propose_memory_delete(ctx: RunContext[Deps], memory_id: str, reason: str) -> str:
         """장기기억 항목 삭제를 제안한다."""
         cur = mem.get(memory_id)
@@ -525,9 +554,35 @@ def build() -> Agent[Deps]:
                         {"id": lore_id, "toSeq": int(to_seq)})
 
     @agent.tool
+    def propose_lore_replace(ctx: RunContext[Deps], lore_id: str, find: str, replace: str,
+                             reason: str, replace_all: bool = False) -> str:
+        """로어북 항목 본문의 **일부만** 고치자고 제안한다 (한 문장·한 줄을 바꿀 때 이걸 써라).
+
+        find 는 본문(content)에 정확히 한 번 있는 문자열(공백·따옴표·줄바꿈까지 그대로), replace 는
+        그 자리에 들어갈 문자열(지우려면 ""). 두 곳 이상이면 앞뒤 문맥을 더 넣거나 replace_all=True.
+        본문 전체를 다시 써 넣는 propose_lore_edit 는 항목을 통째로 다시 쓸 때만 쓴다.
+        """
+        cur = store.lore_entry(lore_id)
+        if cur is None:
+            return "없는 로어북 항목입니다"
+        entry = dict(cur["entry"] or {})
+        try:
+            content, n = textedit.replace_once(str(entry.get("content") or ""), find, replace, replace_all=replace_all)
+        except textedit.ReplaceError as e:
+            return str(e)
+        entry["content"] = content
+        label = entry.get("comment") or entry.get("key") or lore_id
+        return _propose(ctx, "lore_edit", f"로어북 “{label}” 부분 수정({n}곳) — {reason}",
+                        {"id": lore_id, "entry": entry})
+
+    @agent.tool
     def propose_lore_edit(ctx: RunContext[Deps], lore_id: str, content: str,
                           reason: str, keys: str = "", comment: str = "") -> str:
-        """로어북 항목 수정을 제안한다. keys·comment 는 비우면 그대로 둔다."""
+        """로어북 항목을 **통째로** 다시 쓰자고 제안한다 (content 가 새 본문 전체).
+
+        한 부분만 고칠 때는 propose_lore_replace 를 써라 — 전체를 다시 써 넣으면 나머지 문장이
+        빠지거나 달라질 위험이 있다. keys·comment 는 비우면 그대로 둔다.
+        """
         cur = store.lore_entry(lore_id)
         if cur is None:
             return "없는 로어북 항목입니다"
@@ -572,10 +627,30 @@ def build() -> Agent[Deps]:
     # --- card (bot) editing --------------------------------------------------
 
     @agent.tool
+    def propose_card_replace(ctx: RunContext[Deps], field_id: str, find: str, replace: str,
+                             reason: str, replace_all: bool = False) -> str:
+        """카드 필드(설명·첫인사·인사말·제작자 노트 등)의 **일부만** 고치자고 제안한다.
+
+        find 는 본문에 정확히 한 번 있는 문자열, replace 는 그 자리에 들어갈 문자열. 긴 desc 의
+        한 문장을 바꿀 때 전체를 다시 쓰지 말고 이걸 써라. id 는 read_card 에서 얻는다.
+        """
+        cur = cardmod.get_field(field_id)
+        if cur is None:
+            return "없는 카드 필드입니다"
+        try:
+            body, n = textedit.replace_once(str(cur.get("body") or ""), find, replace, replace_all=replace_all)
+        except textedit.ReplaceError as e:
+            return str(e)
+        return _propose(ctx, "card_edit",
+                        f"카드 {cur['field']} 부분 수정({n}곳) — {reason}",
+                        {"id": field_id, "body": body})
+
+    @agent.tool
     def propose_card_edit(ctx: RunContext[Deps], field_id: str, new_body: str,
                           reason: str) -> str:
-        """카드 필드 하나(설명·성격·첫인사·인사말 등)의 수정을 제안한다.
+        """카드 필드 하나(설명·성격·첫인사·인사말 등)를 **통째로** 다시 쓰자고 제안한다.
 
+        new_body 가 새 본문 전체다. 한 부분만 고칠 때는 propose_card_replace 를 써라.
         카드는 이 봇의 모든 챗에 영향을 준다. id 는 read_card 에서 얻는다.
         """
         cur = cardmod.get_field(field_id)

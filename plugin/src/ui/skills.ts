@@ -16,7 +16,7 @@
 import { el, clear, armed, modal } from './dom';
 import { state, type Skill } from '../state';
 
-export function buildSkillsCard(): HTMLElement {
+export function buildSkillsCard(opts: { onMount?: (refresh: () => Promise<void>) => void } = {}): HTMLElement {
   const listMount = el('div');
   const out = el('div', { class: 'outbox' });
   const budget = el('div', { class: 'hint' });
@@ -131,6 +131,10 @@ export function buildSkillsCard(): HTMLElement {
   });
 
   void refresh();
+  // Re-read once the connection is proven direct: opened before the probe
+  // finished, the list held the transport's "token not sent" refusal under a
+  // header that already said connected.
+  opts.onMount?.(refresh);
 
   return el('div', { class: 'card' }, [
     el('h2', { text: '스킬' }),

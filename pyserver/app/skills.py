@@ -50,7 +50,7 @@ CATALOG_LIMIT = 6_000      # the whole catalog block
 ALWAYS_LIMIT = 16_000      # bodies of always-on skills, combined
 TEXT_EXT = {".md", ".txt", ".py", ".json", ".yaml", ".yml", ".csv", ".html", ".js", ".lua", ".xml"}
 
-SEED_KEY = "skills_seeded_v2"
+SEED_KEY = "skills_seeded_v3"
 FOLDER_KEY = "skills_folders_v1"
 SEED_DIR = Path(__file__).resolve().parent / "seeds"
 
@@ -646,6 +646,8 @@ SEED_FILES: dict[str, tuple[str, str, bool]] = {
                       "봇 카드·로어북·정규식·프롬프트의 `{{tag}}` (CBS) 문법을 읽거나 써야 할 때. {{getvar}}·{{random}} 같은 태그의 뜻이 필요할 때.", True),
     "risuai-lorebook.md": ("RisuAI 로어북 구조",
                            "챗 로어북 항목을 만들거나 고칠 때, 특히 발동 조건(key·데코레이터·삽입 위치)을 정할 때.", True),
+    "risuai-hooks.md": ("RisuAI 처리 순서 (정규식·Lua 훅)",
+                        "Regex(editinput/editoutput/editprocess/editdisplay)·Lua listenEdit(editRequest 등)·트리거가 한 턴에서 언제 어떤 순서로 돌고 무엇이 저장되는지. 정규식·트리거·배경 HTML 을 만들거나 고칠 때, 태그가 요청/화면/저장본 어디에 남는지 설명할 때.", True),
     "risuai-lua.md": ("RisuAI Lua 트리거",
                       "봇 카드의 Lua 트리거 스크립트를 읽거나 이해해야 할 때.", False),
     "charx-cards.md": ("charx 카드 구조",

@@ -79,7 +79,7 @@ export function renderSettingsTab(mount: HTMLElement): void {
         agentPanel().invalidate();
       },
     })]],
-    ['스킬', [buildSkillsCard()]],
+    ['스킬', [buildSkillsCard({ onMount: (refresh) => { refreshers.push(refresh); } })]],
     ['정보 · 로그', [buildCatalogCard(), buildDebugCard(), aboutMount]],
   ];
 

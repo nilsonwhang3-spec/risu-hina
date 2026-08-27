@@ -244,15 +244,13 @@ export function refreshStatus(): void {
   healthEl.appendChild(el('span', { class: 'healthdot' }));
 
   if (!h) {
+    // One dot and four words. The error text and the way to settings are on
+    // the picker (the notice there) and in ⚙ → 연결 → 연결 진단; in the
+    // title row they made a strip of chrome out of a status light.
     healthEl.appendChild(el('span', { text: '백엔드 연결 안 됨' }));
-    healthEl.appendChild(el('span', {
-      class: 'hint',
-      text: (state.connectError || '설정에서 URL과 토큰을 확인해 주세요')
-        + (reconnectTimer ? ` (자동 재시도 ${reconnectAttempts + 1}회째)` : ''),
-    }));
-    const go = el('button', { class: 'ghost tiny', text: '설정으로' });
-    go.addEventListener('click', () => setTab('settings'));
-    healthEl.appendChild(go);
+    healthEl.title = (state.connectError || '설정에서 URL과 토큰을 확인해 주세요')
+      + (reconnectTimer ? ` (자동 재시도 ${reconnectAttempts + 1}회째)` : '');
+    if (reconnectTimer) healthEl.appendChild(el('span', { class: 'hint', text: '재시도 중' }));
   } else if (transport.versionGate) {
     // Different major.minor on the two sides: ordinary calls are refused
     // (transport) and the strip says which side to update.

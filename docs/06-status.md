@@ -1,4 +1,4 @@
-# 06. 구현 상태 — 2026-08-27 기준 (v0.7.0, Risu Hina)
+# 06. 구현 상태 — 2026-08-27 기준 (v0.7.1, Risu Hina)
 
 다음 세션에 이어서 할 사람(=나)을 위한 한 장. 무엇이 있고, 무엇이 바뀌었고, 어디까지 배포됐고,
 무엇이 남았는지. 설계의 *이유*는 `docs/04`(에셋·charx 는 부록 E), 저장 구조는 `docs/02`, 배포 환경은 `docs/00`.
@@ -6,7 +6,7 @@
 
 ## 0. 다음 세션 시작점 (먼저 읽을 것)
 
-**코드 상태**: master = **v0.7.0**(§1-5 라운드 7 피드백 15건; docs/07 플래닝은 여전히 대기) — 게이트 ALL GREEN. 0.7.0 은 minor 가 바뀌어 **버전 게이트가 걸린다**: 백엔드를 올리면 RisuAI 쪽 플러그인도 `+` 로 올려야 한다(헤더가 안내).
+**코드 상태**: master = **v0.7.1**(§1-6 라운드 8 · §1-5 라운드 7; docs/07 플래닝은 여전히 대기) — 게이트 ALL GREEN. 0.7.0 은 minor 가 바뀌어 **버전 게이트가 걸린다**: 백엔드를 올리면 RisuAI 쪽 플러그인도 `+` 로 올려야 한다(헤더가 안내).
 
 **배포 상태 (2026-08-25 21:01 `deploy.ps1`, 새 SSH 세션에서 확인)**:
 
@@ -23,6 +23,14 @@
 `https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js` 로 바꾸고, `tools/bundle.py` 가 그 파일을 저장소에 쓰도록 했다(릴리스 커밋에 포함). 백엔드 코드는 VERSION 만 바뀜.
 
 → **첫 할 일**: 사용자가 RisuAI 에 `plugin/Risu.Hina.Plugin.js` **수동 재설치 1회**(설치본 0.1.0 의 update-url 은 CORS 로 못 읽음) → 다음 릴리스부터 `+` 가 뜨는지 확인 → M2 실사용 검증(§5-2).
+
+## 1-6. 2026-08-27 밤 — v0.7.1: 라운드 8 피드백 5건 (코덱스 빈 응답의 진짜 원인 · 부분 교체 툴 · 훅 레퍼런스)
+
+- **"솔(gpt-5.6-sol, 코덱스) 연결 테스트가 tool_calls 를 안 돌려준다"** — 원격에서 `diag_codex.py`(scp → `python\python.exe`) 로 5가지 tool_choice 변형을 돌려 보니 **전부 `output=[]`, 텍스트도 없음**. 원인은 `codexauth.client()` 의 스트림 접기(fold): chatgpt 코덱스 백엔드는 `response.completed` 의 `output` 을 **비워서** 보내고 아이템은 `response.output_item.done` 으로만 온다 → 비스트리밍 호출(연결 테스트, `agent.run` 계열)은 모두 빈 응답이었고, 스트리밍인 채팅만 멀쩡했다. 고침: `output_item.done` 을 모아 최종 `output` 에 채움. 재검증: 5변형 모두 `function_call` 반환. 연결 테스트는 프롬프트를 명령형으로, `tool_choice="required"` 우선(거부하면 auto), 실패 시 모델이 대신 말한 텍스트를 인용(`_no_calls`).
+- 헤더 연결 상태는 점 + "백엔드 연결 안 됨" + (재시도 중) 만 — 오류문·설정 버튼은 선택 화면 알림과 ⚙ 연결 진단으로(툴팁에는 남김).
+- 스킬 카드가 연결 전 오류("토큰을 보내지 않았습니다")를 붙든 채 남던 것 → `buildSkillsCard({onMount})` 로 `refreshers` 등록(프리셋·키 카드와 같은 경로).
+- **부분 교체 툴** `propose_lore_replace / propose_memory_replace / propose_card_replace(find, replace, replace_all)` — `textedit.replace_once`(정확히 1곳, 없으면 비슷한 줄 힌트, 2곳 이상이면 문맥 요구). 전체 교체 툴 docstring 은 "통째로 다시 쓸 때만". 지침에 규칙 추가. `tests/test_textedit.py` 게이트.
+- **RisuAI 처리 순서 레퍼런스** `seeds/risuai-hooks.md`(소스 `index.svelte.ts`·`scripts.ts`·`scriptings.ts` 로 검증: editinput(저장) → start → editprocess(요청용) → 조립 → Lua editRequest → 모델 → editoutput(저장) → output → editdisplay(표시); Lua 훅이 같은 단계 정규식보다 먼저; `@@emo/inject/move_top/repeat_back`, `<order N>`·`<cbs>` 플래그, 오진단 표). 기본 켜짐 스킬로 시드(`SEED_KEY` v3 — 기존 설치도 다음 기동 때 받는다), 지침에 요약 6줄.
 
 ## 1-5. 2026-08-27 밤 — v0.7.0: 라운드 7 피드백 15건 (연결 오진단 · 파일 탭 재작성 · diff)
 

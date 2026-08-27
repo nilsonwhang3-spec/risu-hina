@@ -250,18 +250,37 @@ def h_config_test(arg: dict) -> dict:
           "parameters": {"type": "object",
                          "properties": {"start": {"type": "integer"}, "end": {"type": "integer"}},
                          "required": ["start", "end"]}}
-    ask = "Read turns 3 through 5."
-    try:
+    ask = TOOL_ASK
+    answer = ""
+
+    def tool_round(choice: Any) -> list:
+        nonlocal answer
         if responses:
             r = httpx.post(url, headers=headers, timeout=60, json={
                 "model": model, "input": [{"role": "user", "content": ask}],
-                "tools": [{"type": "function", **fn}], "tool_choice": "auto", **extra})
-            calls = [o for o in (body_of(r).get("output") or []) if isinstance(o, dict) and o.get("type") == "function_call"]
-        else:
-            r = httpx.post(url, headers=headers, timeout=60, json={
-                "model": model, "messages": [{"role": "user", "content": ask}],
-                "tools": [{"type": "function", "function": fn}], "tool_choice": "auto", **extra})
-            calls = ((body_of(r).get("choices") or [{}])[0].get("message") or {}).get("tool_calls") or []
+                "tools": [{"type": "function", **fn}], "tool_choice": choice, **extra})
+            out = body_of(r).get("output") or []
+            answer = " ".join(
+                str(c.get("text") or "") for o in out if isinstance(o, dict) and o.get("type") == "message"
+                for c in (o.get("content") or []) if isinstance(c, dict))
+            return [o for o in out if isinstance(o, dict) and o.get("type") == "function_call"]
+        r = httpx.post(url, headers=headers, timeout=60, json={
+            "model": model, "messages": [{"role": "user", "content": ask}],
+            "tools": [{"type": "function", "function": fn}], "tool_choice": choice, **extra})
+        m = ((body_of(r).get("choices") or [{}])[0].get("message") or {})
+        answer = str(m.get("content") or "")
+        return m.get("tool_calls") or []
+
+    try:
+        # "required" is the honest probe - the question is whether tools reach
+        # the model at all, not whether it feels like using one. A gateway
+        # that only knows "auto" answers 400; then auto it is.
+        try:
+            calls = tool_round("required")
+        except ValueError as e:
+            if "tool_choice" not in str(e).lower() and "required" not in str(e).lower():
+                raise
+            calls = tool_round("auto")
     except ValueError as e:
         return {"ok": False, "stage": "tools", "error": with_hint(str(e)), "api": plan.api, "note": note}
     except Exception as e:
@@ -277,8 +296,20 @@ def h_config_test(arg: dict) -> dict:
         "toolCalls": len(calls),
         "usage": ({"in": usage.get("input_tokens"), "out": usage.get("output_tokens")} if responses
                   else {"in": usage.get("prompt_tokens"), "out": usage.get("completion_tokens")}),
-        "error": None if calls else "모델이 tool_calls 를 돌려주지 않습니다 — 에이전트가 동작할 수 없습니다",
+        "error": None if calls else _no_calls(answer),
     }
+
+
+TOOL_ASK = "Use the read_turns tool to read turns 3 through 5. Call the tool rather than answering in prose."
+
+
+def _no_calls(answer: str) -> str:
+    """Why a tool round came back empty, with what the model said instead -
+    a text answer means the gateway dropped `tools`; nothing at all usually
+    means the response shape is not what the plan expected."""
+    said = _scrub(answer.strip().replace("\n", " ")[:160], "")
+    return ("모델이 tool_calls 를 돌려주지 않습니다 — 에이전트가 동작할 수 없습니다"
+            + (f". 대신 텍스트로 답했습니다: “{said}”" if said else ". 텍스트도 없는 빈 응답입니다 (응답 형식이 계획과 다를 수 있습니다)"))
 
 
 def _config_test_codex(agent: dict) -> dict:
@@ -314,11 +345,21 @@ def _config_test_codex(agent: dict) -> dict:
                 input=[{"role": "user", "content": "Reply with exactly: PONG"}])
             usage = getattr(r, "usage", None)
             stage = "tools"
-            r2 = await c.responses.create(
-                model=model, instructions=instructions,
-                input=[{"role": "user", "content": "Read turns 3 through 5."}],
-                tools=[fn], tool_choice="auto")
-            calls = [o for o in (getattr(r2, "output", None) or []) if getattr(o, "type", "") == "function_call"]
+
+            async def tool_round(choice: Any):
+                r2 = await c.responses.create(
+                    model=model, instructions=instructions,
+                    input=[{"role": "user", "content": TOOL_ASK}],
+                    tools=[fn], tool_choice=choice)
+                return [o for o in (getattr(r2, "output", None) or []) if getattr(o, "type", "") == "function_call"], \
+                    str(getattr(r2, "output_text", "") or "")
+
+            try:
+                calls, answer = await tool_round("required")
+            except Exception as e:  # noqa: BLE001 - a backend that only knows auto
+                if "tool_choice" not in str(e).lower():
+                    raise
+                calls, answer = await tool_round("auto")
         except Exception as e:  # noqa: BLE001 - reported, not raised
             return {"ok": False, "stage": stage, "error": f"{type(e).__name__}: {e}"[:400],
                     "api": "responses", "note": "OpenAI 구독 (codex)"}
@@ -330,7 +371,7 @@ def _config_test_codex(agent: dict) -> dict:
             "note": "OpenAI 구독 (codex)",
             "toolCalls": len(calls),
             "usage": {"in": getattr(usage, "input_tokens", None), "out": getattr(usage, "output_tokens", None)},
-            "error": None if calls else "모델이 tool_calls 를 돌려주지 않습니다 — 에이전트가 동작할 수 없습니다",
+            "error": None if calls else _no_calls(answer),
         }
 
     return asyncio.run(run())
