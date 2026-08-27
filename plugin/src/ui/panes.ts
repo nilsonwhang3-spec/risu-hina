@@ -38,7 +38,7 @@ export function threePane(leftNode?: HTMLElement): ThreePaneParts {
   // fixed 210px cut most of them off.
   root.appendChild(splitter({ target: left, container: root, storageKey: 'treeWidth', side: 'left', min: 120 }));
   root.appendChild(centre);
-  root.appendChild(splitter({ target: right, container: root, storageKey: 'panelWidth' }));
+  root.appendChild(splitter({ target: right, container: root, storageKey: 'panelWidth2' }));
   root.appendChild(right);
   root.appendChild(mobileToggle(root));
 

@@ -817,6 +817,10 @@ def h_file_zip(arg: dict) -> Any:
     raise ApiError(500, "files/zip must be dispatched directly")
 
 
+def h_file_upload_many(arg: dict) -> Any:
+    raise ApiError(500, "files/upload-many must be dispatched directly")
+
+
 def h_file_mkdir(arg: dict) -> dict:
     try:
         return files.mkdir(_char(arg), str(arg.get("path") or ""))
@@ -1743,6 +1747,7 @@ ROUTES: dict[str, Handler] = {
     "POST /charx/build": h_charx_build,
     "GET /files/download": h_file_download,
     "POST /files/zip": h_file_zip,
+    "POST /files/upload-many": h_file_upload_many,
     "POST /assets/adopt": h_assets_adopt,
 
     "GET /config": h_config_get,
@@ -1988,6 +1993,36 @@ async def dispatch(path: str, request: Request) -> Response:
                 "Cache-Control": "no-store",
             },
         )
+
+    if key == "POST /files/upload-many":
+        # Binary body: 4-byte big-endian header length, a JSON header
+        # ({charKey, dir, extract, files:[{name, rel, size}]}), then the
+        # files' bytes back to back. No base64, one round trip per batch.
+        raw = await request.body()
+        if len(raw) > config.MAX_BODY_BYTES:
+            return _json(413, {"error": "body too large", "limit": config.MAX_BODY_BYTES}, origin)
+        if len(raw) < 4:
+            return _json(400, {"error": "empty body"}, origin)
+        hlen = int.from_bytes(raw[:4], "big")
+        try:
+            header = json.loads(raw[4:4 + hlen])
+        except ValueError:
+            return _json(400, {"error": "header is not valid JSON"}, origin)
+        if not isinstance(header, dict) or not isinstance(header.get("files"), list):
+            return _json(400, {"error": "header needs files[]"}, origin)
+        try:
+            ck = _char(header)
+            out = await run_in_threadpool(
+                files.upload_many, ck, str(header.get("dir") or ""), header["files"],
+                raw[4 + hlen:], extract=bool(header.get("extract")))
+        except ApiError as e:
+            _log(request.method, pathname, e.status, started, str(e))
+            return _json(e.status, e.payload, origin)
+        except files.FileError as e:
+            _log(request.method, pathname, 400, started, str(e))
+            return _json(400, {"error": str(e)}, origin)
+        _log(request.method, pathname, 200, started, f"{out['count']} files {out['size'] // 1024}KB")
+        return _json(200, out, origin)
 
     if key == "POST /files/zip":
         # Several files, or a folder, as one archive - the files tab's

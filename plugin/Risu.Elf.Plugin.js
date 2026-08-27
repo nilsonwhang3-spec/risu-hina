@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.7.2
+//@display-name Risu Hina v0.8.0
 //@api 3.0
-//@version 0.7.2
+//@version 0.8.0
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -95,7 +95,7 @@
       this.route = "direct";
       this.tokenSafe = true;
       this.lastHealth = body;
-      this.gate = versionGate("0.7.2", String(body.version || ""));
+      this.gate = versionGate("0.8.0", String(body.version || ""));
       return body;
     }
     /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -120,6 +120,14 @@
       const res = await this.raw("GET", path + qs, void 0, { timeoutMs: UPLOAD_TIMEOUT_MS });
       if (!res.ok) throw await toError(res);
       return new Uint8Array(await res.arrayBuffer());
+    }
+    /** POST of raw bytes (application/octet-stream) - the batch upload. */
+    async postBytes(path, bytes) {
+      const res = await this.raw("POST", path, void 0, { timeoutMs: UPLOAD_TIMEOUT_MS, bytes });
+      if (!res.ok) throw await toError(res);
+      const body = await readJson(res);
+      if (isRaw(body)) throw new BackendError(res.status, "\uBC31\uC5D4\uB4DC \uB300\uC2E0 \uB2E4\uB978 \uC751\uB2F5\uC774 \uC654\uC2B5\uB2C8\uB2E4 (JSON \uC774 \uC544\uB2D8)");
+      return body;
     }
     /** POST that answers bytes - a zip of workspace files. */
     async postBinary(path, payload) {
@@ -193,7 +201,10 @@
         headers,
         networkRoute: "local_network"
       };
-      if (method === "POST") {
+      if (opts.bytes) {
+        headers["Content-Type"] = "application/octet-stream";
+        init.body = opts.bytes;
+      } else if (method === "POST") {
         headers["Content-Type"] = "application/json";
         init.body = JSON.stringify(payload ?? {});
       }
@@ -1215,7 +1226,9 @@ pre.mono {
      explorer and tools are chrome around it. */
   background: rgba(255, 255, 255, .035);
 }
-.right { flex: 0 0 380px; min-width: 250px; display: flex; flex-direction: column; }
+/* The agent takes half the width by default: the conversation is where the
+   work happens and 380px wrapped every sentence of it. */
+.right { flex: 0 0 50%; min-width: 250px; display: flex; flex-direction: column; }
 /* touch-action: none is what makes the drag work on a phone - without it the
    browser claims the touch for scrolling and fires pointercancel at once. */
 .gutter { flex: 0 0 5px; cursor: col-resize; background: var(--borderc, #2b323f); opacity: .45; touch-action: none; }
@@ -1556,7 +1569,18 @@ textarea.focusarea.codearea { font-size: 12.5px; line-height: 1.55; }
   width: 16px; flex-shrink: 0; padding: 0; border: none; background: transparent;
   color: var(--textcolor2, #79839a); font-size: 10px; text-align: center;
 }
-.filetree .treebranch .n { font-size: 11px; color: var(--textcolor2, #79839a); margin-left: auto; }
+.filetree .treebranch { overflow: hidden; }
+.filetree .treebranch .n {
+  flex-shrink: 0; margin-left: auto; padding: 0 6px; border-radius: 9px;
+  font-size: 11px; font-variant-numeric: tabular-nums; line-height: 16px;
+  color: var(--textcolor, #d8dce4); background: rgba(128,128,128,.22);
+}
+.filetree .treebranch.on .n { background: rgba(37, 99, 235, .45); }
+.frow .ftag {
+  display: inline-block; min-width: 34px; margin-right: 7px; padding: 0 4px; border-radius: 3px;
+  font-family: Consolas, monospace; font-size: 10px; text-align: center; line-height: 15px;
+  color: var(--textcolor2, #79839a); background: rgba(128,128,128,.16);
+}
 .filebar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
 .filecrumb { font-weight: 700; font-family: Consolas, monospace; font-size: 12.5px; }
 .filehint { font-size: 11px; color: var(--textcolor2, #79839a); margin-bottom: 6px; }
@@ -2581,6 +2605,29 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     async uploadFile(name, content, base64 = false, dir = "", extract = false) {
       return await transport.upload("/files/upload", base64 ? { charKey: this.activeCharKey, name, base64: content, dir, extract } : { charKey: this.activeCharKey, name, text: content, dir });
     }
+    /**
+     * A batch of files as one binary body: [u32 header length][JSON header][bytes…].
+     * `entries[i].bytes` go in order; the header carries name, rel (subfolder
+     * under `dir`) and size for each.
+     */
+    async uploadBatch(dir, entries, extract = false) {
+      const header = new TextEncoder().encode(JSON.stringify({
+        charKey: this.activeCharKey,
+        dir,
+        extract,
+        files: entries.map((e) => ({ name: e.name, rel: e.rel, size: e.bytes.byteLength }))
+      }));
+      const total = 4 + header.byteLength + entries.reduce((n, e) => n + e.bytes.byteLength, 0);
+      const body = new Uint8Array(total);
+      new DataView(body.buffer).setUint32(0, header.byteLength);
+      body.set(header, 4);
+      let at = 4 + header.byteLength;
+      for (const e of entries) {
+        body.set(e.bytes, at);
+        at += e.bytes.byteLength;
+      }
+      return await transport.postBytes("/files/upload-many", body);
+    }
     /** Several files or a folder as one zip, handed to the browser to save. */
     async downloadZip(paths, name) {
       const bytes = await transport.postBinary("/files/zip", { charKey: this.activeCharKey, paths, name });
@@ -3528,6 +3575,10 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       pad.appendChild(el("div", { class: "notice err" }, [
         el("div", { text: "\uBC31\uC5D4\uB4DC\uC5D0 \uC5F0\uACB0\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4." }),
         el("div", { class: "hint", text: state.connectError }),
+        // Measured on web RisuAI (risuai.xyz): the first connection after
+        // opening can take a couple of minutes while the host falls back from
+        // its proxy route to a direct one. The panel keeps retrying meanwhile.
+        transport.hostPlatform === "web" ? el("div", { class: "hint", style: { marginTop: "4px" }, text: "\uC6F9 RisuAI(risuai.xyz)\uC5D0\uC11C\uB294 \uCD5C\uCD08 \uC5F0\uACB0\uAE4C\uC9C0 3\uBD84 \uC815\uB3C4 \uAC78\uB9B4 \uC218 \uC788\uC2B5\uB2C8\uB2E4 (\uD504\uB85D\uC2DC \u2192 \uC9C1\uC811 \uC5F0\uACB0 \uD3F4\uBC31\uC5D0 \uAC78\uB9AC\uB294 \uC2DC\uAC04). \uD328\uB110\uC774 30\uCD08\uB9C8\uB2E4 \uC790\uB3D9\uC73C\uB85C \uB2E4\uC2DC \uC2DC\uB3C4\uD558\uB2C8 \uADF8\uB300\uB85C \uB450\uC154\uB3C4 \uB429\uB2C8\uB2E4." }) : null,
         el("div", { class: "row", style: { marginTop: "6px" } }, [
           el("span", { class: "hint", text: "\uC124\uC815 \u2192 \uC5F0\uACB0\uC5D0\uC11C URL\uACFC \uD1A0\uD070\uC744 \uD655\uC778\uD574 \uC8FC\uC138\uC694." }),
           go
@@ -3830,7 +3881,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     gutter.addEventListener("pointerup", end);
     gutter.addEventListener("pointercancel", end);
     gutter.addEventListener("dblclick", () => {
-      const back = apply(opts.side === "left" ? 210 : vertical() ? 360 : 380);
+      const back = apply(opts.side === "left" ? 210 : vertical() ? 360 : Math.round(opts.container.clientWidth / 2));
       if (opts.storageKey) void Risuai.pluginStorage.setItem(opts.storageKey, back).catch(() => void 0);
     });
     return gutter;
@@ -3844,7 +3895,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     const root = el("div", { class: "split" }, [left]);
     root.appendChild(splitter({ target: left, container: root, storageKey: "treeWidth", side: "left", min: 120 }));
     root.appendChild(centre);
-    root.appendChild(splitter({ target: right, container: root, storageKey: "panelWidth" }));
+    root.appendChild(splitter({ target: right, container: root, storageKey: "panelWidth2" }));
     root.appendChild(right);
     root.appendChild(mobileToggle(root));
     return { root, left, centre, right };
@@ -6150,8 +6201,11 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     box.checked = selection.has(e.path);
     const row = el("div", { class: "frow" + (selection.has(e.path) ? " sel" : ""), title: e.path }, [
       box,
+      // A folder glyph for folders; files carry their extension as a small tag
+      // instead of a pictogram - the picture glyphs rendered as stray letters
+      // on a machine without a colour emoji font.
       el("span", { class: "fname" }, [
-        el("span", { class: "ficon", text: e.node ? "\u{1F4C1}" : icon(e.name) }),
+        e.node ? el("span", { class: "ficon", text: "\u{1F4C1}" }) : el("span", { class: "ftag", text: extOf(e.name) }),
         el("span", { text: e.name })
       ]),
       el("span", { class: "fsize", text: e.file ? fmtSize2(e.file.size) : `${countFiles(e.node)}\uAC1C` }),
@@ -6493,18 +6547,58 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     let done = 0;
     let failed = 0;
     let extracted = 0;
-    for (const { file, rel } of todo) {
-      prog.textContent = `\uC62C\uB9AC\uB294 \uC911 ${done + failed + 1}/${todo.length} \u2014 ${file.name}`;
-      const dir = rel ? into + "/" + rel : into;
-      try {
-        const r = await uploadOne(file, dir, !!extractZips && /\.zip$/i.test(file.name));
-        done += 1;
-        if (r.extracted) extracted += r.extracted;
-      } catch (e) {
+    const t0 = Date.now();
+    const BATCH = 16 * 1024 * 1024;
+    const SOLO = 60 * 1024 * 1024;
+    const batches = [];
+    let cur = [];
+    let curSize = 0;
+    for (const item of todo) {
+      if (item.file.size > SOLO) {
         failed += 1;
-        notice2(`${file.name}: ` + msg4(e), "err");
+        notice2(`${item.file.name}: 60MB \uB97C \uB118\uB294 \uD30C\uC77C\uC740 \uC62C\uB9B4 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4.`, "err");
+        continue;
       }
+      if (cur.length && curSize + item.file.size > BATCH) {
+        batches.push(cur);
+        cur = [];
+        curSize = 0;
+      }
+      cur.push(item);
+      curSize += item.file.size;
     }
+    if (cur.length) batches.push(cur);
+    const sendBatch = async (batch) => {
+      try {
+        const entries = await Promise.all(batch.map(async ({ file, rel }) => ({
+          name: file.name,
+          rel,
+          bytes: new Uint8Array(await file.arrayBuffer())
+        })));
+        const r = await state.uploadBatch(into, entries, !!extractZips);
+        done += r.count;
+        extracted += r.extracted;
+      } catch (e) {
+        for (const { file, rel } of batch) {
+          try {
+            const r = await uploadOne(file, rel ? into + "/" + rel : into, !!extractZips && /\.zip$/i.test(file.name));
+            done += 1;
+            if (r.extracted) extracted += r.extracted;
+          } catch (e2) {
+            failed += 1;
+            notice2(`${file.name}: ` + msg4(e2), "err");
+          }
+        }
+      }
+      const secs = Math.max(1, Math.round((Date.now() - t0) / 1e3));
+      prog.textContent = `\uC62C\uB9AC\uB294 \uC911 ${done + failed}/${todo.length} (${secs}\uCD08)`;
+    };
+    prog.textContent = `\uC62C\uB9AC\uB294 \uC911 0/${todo.length}`;
+    let next = 0;
+    const worker = async () => {
+      while (next < batches.length) await sendBatch(batches[next++]);
+    };
+    await Promise.all([worker(), worker()]);
     prog.remove();
     notice2(`${done}\uAC1C\uB97C ${into}/ \uC5D0 \uC62C\uB838\uC2B5\uB2C8\uB2E4.` + (extracted ? ` (zip \uC5D0\uC11C ${extracted}\uAC1C \uD480\uB9BC)` : "") + (failed ? ` \uC2E4\uD328 ${failed}\uAC1C.` : ""), failed ? "err" : "ok");
     if (nodes.has(into)) {
@@ -6527,15 +6621,10 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     });
     return await state.uploadFile(file.name, b64, true, dir, extract);
   }
-  function icon(name) {
-    if (IMAGE_RE.test(name)) return "\u{1F5BC}";
-    const ext = (name.split(".").pop() || "").toLowerCase();
-    if (ext === "charx" || ext === "zip") return "\u{1F5DC}";
-    if (["md", "txt", "rtf", "docx", "pdf"].includes(ext)) return "\u{1F4C4}";
-    if (["py", "js", "ts", "lua", "html", "css", "json", "yaml", "yml", "xml"].includes(ext)) return "\u{1F4DC}";
-    if (["mp3", "wav", "ogg", "m4a"].includes(ext)) return "\u{1F3B5}";
-    if (["mp4", "webm"].includes(ext)) return "\u{1F3AC}";
-    return "\u{1F4CE}";
+  function extOf(name) {
+    const i = name.lastIndexOf(".");
+    if (i <= 0 || i === name.length - 1) return "\u2014";
+    return name.slice(i + 1).toLowerCase().slice(0, 5);
   }
   function fmtSize2(n) {
     if (!n) return "0B";
@@ -8288,7 +8377,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.7.2",
+            version: "0.8.0",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -8801,7 +8890,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.7.2"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.8.0"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -9717,7 +9806,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       value: (state.workspace?.characterName || "\uBD07") + " (\uBC31\uC5C5)",
       placeholder: "\uBC31\uC5C5 \uBD07 \uC774\uB984"
     });
-    const saveNew = el("button", { text: "\uC0C8 \uBD07\uC73C\uB85C \uC800\uC7A5", title: "\uC9C0\uAE08 RisuAI \uC5D0 \uC788\uB294 \uC0C1\uD0DC\uB97C \uBC31\uC5C5 \uBD07\uC73C\uB85C \uBCF5\uC81C\uD55C \uB4A4, \uD3B8\uC9D1 \uC911\uC778 \uB0B4\uC6A9\uC744 \uC774 \uBD07\uC5D0 \uBC18\uC601\uD558\uACE0 \uACC4\uC18D \uD3B8\uC9D1\uD569\uB2C8\uB2E4" });
+    const saveNew = el("button", { text: "\uC0C8 \uBD07\uC73C\uB85C \uC800\uC7A5", title: "\uAE30\uC900\uC120(\uD3B8\uC9D1 \uC804, RisuAI \uAC00 \uC9C0\uAE08 \uB4E4\uACE0 \uC788\uB294 \uCE74\uB4DC)\uC744 \uBC31\uC5C5 \uBD07\uC73C\uB85C \uBCF5\uC81C\uD55C \uB4A4, \uD3B8\uC9D1 \uC911\uC778 \uB0B4\uC6A9\uC744 \uC774 \uBD07\uC5D0 \uBC18\uC601\uD558\uACE0 \uACC4\uC18D \uD3B8\uC9D1\uD569\uB2C8\uB2E4" });
     saveNew.disabled = !!blocked;
     saveNew.addEventListener("click", async () => {
       saveNew.disabled = true;
@@ -9760,7 +9849,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     body.appendChild(out);
     body.appendChild(el("div", {
       class: "hint",
-      text: "\uBC18\uC601: \uBA54\uD0C0\xB7\uC778\uC0AC\uB9D0\xB7\uBD07 \uB85C\uC5B4\uBD81\xB7Regex\xB7\uD2B8\uB9AC\uAC70\uAC00 \uD55C \uBC88\uC5D0 \uC4F0\uC785\uB2C8\uB2E4. \uCC57\uC740 \uC808\uB300 \uAC74\uB4DC\uB9AC\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4. \uC0C8 \uBD07\uC73C\uB85C \uC800\uC7A5: \uC9C0\uAE08 RisuAI \uC0C1\uD0DC\uB97C \uBC31\uC5C5 \uBD07(\uCC57 \uD3EC\uD568, \uC0C8 \uCE90\uB9AD\uD130)\uC73C\uB85C \uB0A8\uAE30\uACE0 \uD3B8\uC9D1\uBCF8\uC744 \uC774 \uBD07\uC5D0 \uBC18\uC601\uD569\uB2C8\uB2E4. \uCC98\uC74C \uD55C \uBC88 db \uAD8C\uD55C \uD5C8\uC6A9\uC774 \uD544\uC694\uD569\uB2C8\uB2E4."
+      text: "\uBC18\uC601: \uBA54\uD0C0\xB7\uC778\uC0AC\uB9D0\xB7\uBD07 \uB85C\uC5B4\uBD81\xB7Regex\xB7\uD2B8\uB9AC\uAC70\uAC00 \uD55C \uBC88\uC5D0 \uC4F0\uC785\uB2C8\uB2E4. \uCC57\uC740 \uC808\uB300 \uAC74\uB4DC\uB9AC\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4. \uC0C8 \uBD07\uC73C\uB85C \uC800\uC7A5: \uAE30\uC900\uC120(\uD3B8\uC9D1 \uC804 \uC0C1\uD0DC)\uC744 \uBC31\uC5C5 \uBD07(\uCC57 \uD3EC\uD568, \uC0C8 \uCE90\uB9AD\uD130)\uC73C\uB85C \uB0A8\uAE30\uACE0 \uD3B8\uC9D1\uBCF8\uC744 \uC774 \uBD07\uC5D0 \uBC18\uC601\uD574 \uC0C8 \uAE30\uC900\uC120\uC73C\uB85C \uC0BC\uC2B5\uB2C8\uB2E4. \uCC98\uC74C \uD55C \uBC88 db \uAD8C\uD55C \uD5C8\uC6A9\uC774 \uD544\uC694\uD569\uB2C8\uB2E4."
     }));
   }
   async function openVersions2(anchor) {
@@ -10345,7 +10434,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.7.2"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.8.0"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
@@ -10420,7 +10509,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.7.2" }),
+        el("span", { class: "dim", text: "v0.8.0" }),
         healthEl,
         el("span", { class: "spacer" }),
         reload,
@@ -10615,6 +10704,6 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.7.2"} loaded`);
+    console.log(`[risu-hina] v${"0.8.0"} loaded`);
   })();
 })();

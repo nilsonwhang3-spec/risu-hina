@@ -98,7 +98,8 @@ export function splitter(opts: SplitterOptions): HTMLElement {
   // Double-click restores the default rather than leaving the user to nudge it
   // back by hand after dragging it somewhere unusable.
   gutter.addEventListener('dblclick', () => {
-    const back = apply(opts.side === 'left' ? 210 : (vertical() ? 360 : 380));
+    // The agent's default is half the split (see .right in styles.ts).
+    const back = apply(opts.side === 'left' ? 210 : (vertical() ? 360 : Math.round(opts.container.clientWidth / 2)));
     if (opts.storageKey) void Risuai.pluginStorage.setItem(opts.storageKey, back).catch(() => undefined);
   });
 

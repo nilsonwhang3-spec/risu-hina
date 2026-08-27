@@ -542,8 +542,11 @@ function listRow(e: { path: string; name: string; file?: WorkspaceFile; node?: F
   box.checked = selection.has(e.path);
   const row = el('div', { class: 'frow' + (selection.has(e.path) ? ' sel' : ''), title: e.path }, [
     box,
+    // A folder glyph for folders; files carry their extension as a small tag
+    // instead of a pictogram - the picture glyphs rendered as stray letters
+    // on a machine without a colour emoji font.
     el('span', { class: 'fname' }, [
-      el('span', { class: 'ficon', text: e.node ? '📁' : icon(e.name) }),
+      e.node ? el('span', { class: 'ficon', text: '📁' }) : el('span', { class: 'ftag', text: extOf(e.name) }),
       el('span', { text: e.name }),
     ]),
     el('span', { class: 'fsize', text: e.file ? fmtSize(e.file.size) : `${countFiles(e.node!)}개` }),
@@ -871,18 +874,58 @@ async function uploadMany(files: Incoming[], into: string): Promise<void> {
   let done = 0;
   let failed = 0;
   let extracted = 0;
-  for (const { file, rel } of todo) {
-    prog.textContent = `올리는 중 ${done + failed + 1}/${todo.length} — ${file.name}`;
-    const dir = rel ? into + '/' + rel : into;
-    try {
-      const r = await uploadOne(file, dir, !!extractZips && /\.zip$/i.test(file.name));
-      done += 1;
-      if (r.extracted) extracted += r.extracted;
-    } catch (e) {
+  const t0 = Date.now();
+
+  // Batches of raw bytes, ~16MB each, two in flight: a thousand small files
+  // is ~60 requests instead of a thousand, with no base64 in between. A
+  // file too big for a batch goes alone (up to the backend's body limit).
+  const BATCH = 16 * 1024 * 1024;
+  const SOLO = 60 * 1024 * 1024;
+  const batches: Incoming[][] = [];
+  let cur: Incoming[] = [];
+  let curSize = 0;
+  for (const item of todo) {
+    if (item.file.size > SOLO) {
       failed += 1;
-      notice(`${file.name}: ` + msg(e), 'err');
+      notice(`${item.file.name}: 60MB 를 넘는 파일은 올릴 수 없습니다.`, 'err');
+      continue;
     }
+    if (cur.length && curSize + item.file.size > BATCH) { batches.push(cur); cur = []; curSize = 0; }
+    cur.push(item);
+    curSize += item.file.size;
   }
+  if (cur.length) batches.push(cur);
+
+  const sendBatch = async (batch: Incoming[]): Promise<void> => {
+    try {
+      const entries = await Promise.all(batch.map(async ({ file, rel }) => ({
+        name: file.name, rel, bytes: new Uint8Array(await file.arrayBuffer()),
+      })));
+      const r = await state.uploadBatch(into, entries, !!extractZips);
+      done += r.count;
+      extracted += r.extracted;
+    } catch (e) {
+      // A batch that failed whole: retry its files one at a time so a single
+      // bad file does not take its neighbours with it.
+      for (const { file, rel } of batch) {
+        try {
+          const r = await uploadOne(file, rel ? into + '/' + rel : into, !!extractZips && /\.zip$/i.test(file.name));
+          done += 1;
+          if (r.extracted) extracted += r.extracted;
+        } catch (e2) {
+          failed += 1;
+          notice(`${file.name}: ` + msg(e2), 'err');
+        }
+      }
+      void e;
+    }
+    const secs = Math.max(1, Math.round((Date.now() - t0) / 1000));
+    prog.textContent = `올리는 중 ${done + failed}/${todo.length} (${secs}초)`;
+  };
+  prog.textContent = `올리는 중 0/${todo.length}`;
+  let next = 0;
+  const worker = async () => { while (next < batches.length) await sendBatch(batches[next++]); };
+  await Promise.all([worker(), worker()]);
   prog.remove();
   notice(`${done}개를 ${into}/ 에 올렸습니다.` + (extracted ? ` (zip 에서 ${extracted}개 풀림)` : '') + (failed ? ` 실패 ${failed}개.` : ''), failed ? 'err' : 'ok');
   if (nodes.has(into)) { selectedDir = into; expandTo(into); }
@@ -914,15 +957,11 @@ async function uploadOne(file: File, dir: string, extract: boolean): Promise<{ p
 
 // --- small helpers ---------------------------------------------------------------
 
-function icon(name: string): string {
-  if (IMAGE_RE.test(name)) return '🖼';
-  const ext = (name.split('.').pop() || '').toLowerCase();
-  if (ext === 'charx' || ext === 'zip') return '🗜';
-  if (['md', 'txt', 'rtf', 'docx', 'pdf'].includes(ext)) return '📄';
-  if (['py', 'js', 'ts', 'lua', 'html', 'css', 'json', 'yaml', 'yml', 'xml'].includes(ext)) return '📜';
-  if (['mp3', 'wav', 'ogg', 'm4a'].includes(ext)) return '🎵';
-  if (['mp4', 'webm'].includes(ext)) return '🎬';
-  return '📎';
+/** The extension as a short tag: "png", "md", "charx"; "—" when there is none. */
+function extOf(name: string): string {
+  const i = name.lastIndexOf('.');
+  if (i <= 0 || i === name.length - 1) return '—';
+  return name.slice(i + 1).toLowerCase().slice(0, 5);
 }
 
 function fmtSize(n: number): string {

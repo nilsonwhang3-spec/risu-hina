@@ -179,6 +179,15 @@ export class Transport {
     return new Uint8Array(await res.arrayBuffer());
   }
 
+  /** POST of raw bytes (application/octet-stream) - the batch upload. */
+  async postBytes<T = unknown>(path: string, bytes: Uint8Array): Promise<T> {
+    const res = await this.raw('POST', path, undefined, { timeoutMs: UPLOAD_TIMEOUT_MS, bytes });
+    if (!res.ok) throw await toError(res);
+    const body = await readJson(res);
+    if (isRaw(body)) throw new BackendError(res.status, '백엔드 대신 다른 응답이 왔습니다 (JSON 이 아님)');
+    return body as T;
+  }
+
   /** POST that answers bytes - a zip of workspace files. */
   async postBinary(path: string, payload: unknown): Promise<Uint8Array> {
     const res = await this.raw('POST', path, payload, { timeoutMs: UPLOAD_TIMEOUT_MS });
@@ -244,7 +253,7 @@ export class Transport {
     method: 'GET' | 'POST',
     path: string,
     payload?: unknown,
-    opts: { withToken?: boolean; timeoutMs?: number; signal?: AbortSignal } = {},
+    opts: { withToken?: boolean; timeoutMs?: number; signal?: AbortSignal; bytes?: Uint8Array } = {},
   ): Promise<Response> {
     if (!this.cfg.url) throw new BackendError(0, '백엔드 URL이 설정되어 있지 않습니다');
 
@@ -266,7 +275,10 @@ export class Transport {
       headers,
       networkRoute: 'local_network',
     };
-    if (method === 'POST') {
+    if (opts.bytes) {
+      headers['Content-Type'] = 'application/octet-stream';
+      init.body = opts.bytes;
+    } else if (method === 'POST') {
       headers['Content-Type'] = 'application/json';
       // nativeFetch throws when a POST has no body at all.
       init.body = JSON.stringify(payload ?? {});

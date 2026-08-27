@@ -183,6 +183,50 @@ def upload(char_key: str, name: str, *, text: str | None = None,
     return {"path": rel, "name": safe, "size": size}
 
 
+def upload_many(char_key: str, into: str, entries: list[dict], data: bytes, *, extract: bool = False) -> dict:
+    """Many files from one binary body - the folder drop.
+
+    `entries` is the header's list ({name, rel, size}) and `data` the files'
+    bytes back to back in that order. One request per file was the reason a
+    thousand-asset folder took minutes: each file cost a base64 encode, a
+    JSON parse, and a round trip through the tunnel. This costs one round
+    trip per ~16MB and no encoding at all.
+    """
+    root = _root(char_key)
+    target = (into or "uploads").replace("\\", "/").strip("/")
+    area = target.split("/")[0]
+    if area not in ("uploads", "out"):
+        raise FileError(f"uploads/ 또는 out/ 안의 폴더여야 합니다: {into}")
+    out: list[dict] = []
+    offset = 0
+    total = 0
+    extracted = 0
+    for e in entries:
+        size = int(e.get("size") or 0)
+        if size < 0 or offset + size > len(data):
+            raise FileError("본문 길이가 헤더와 맞지 않습니다")
+        chunk = data[offset:offset + size]
+        offset += size
+        safe = Path(str(e.get("name") or "upload")).name.strip() or "upload"
+        rel = str(e.get("rel") or "").replace("\\", "/").strip("/")
+        if ".." in rel.split("/"):
+            raise FileError(f"잘못된 하위 경로입니다: {rel}")
+        folder = _folder(char_key, target + ("/" + rel if rel else ""), area)
+        if size > MAX_UPLOAD:
+            raise FileError(f"{safe}: 파일이 너무 큽니다 ({size} 바이트, 최대 {MAX_UPLOAD})")
+        if extract and safe.lower().endswith(".zip"):
+            r = _extract_zip(char_key, folder, safe, bytes(chunk))
+            extracted += int(r.get("extracted") or 0)
+            out.append(r)
+            continue
+        dest = folder / safe
+        dest.write_bytes(chunk)
+        total += size
+        out.append({"path": dest.relative_to(root).as_posix(), "name": safe, "size": size})
+    log.info("upload-many char=%s into=%s files=%s size=%s extracted=%s", char_key, target, len(out), total, extracted)
+    return {"files": out, "count": len(out), "size": total, "extracted": extracted}
+
+
 # An extracted archive may not exceed this, however small the zip was: a
 # zip bomb is the one upload that could fill the disk from a JSON body.
 MAX_EXTRACT = 512 * 1024 * 1024

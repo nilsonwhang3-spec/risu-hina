@@ -955,6 +955,26 @@ class AppState {
       : { charKey: this.activeCharKey, name, text: content, dir });
   }
 
+  /**
+   * A batch of files as one binary body: [u32 header length][JSON header][bytes…].
+   * `entries[i].bytes` go in order; the header carries name, rel (subfolder
+   * under `dir`) and size for each.
+   */
+  async uploadBatch(dir: string, entries: { name: string; rel: string; bytes: Uint8Array }[], extract = false)
+    : Promise<{ files: { path: string; name: string; size: number; extracted?: number }[]; count: number; size: number; extracted: number }> {
+    const header = new TextEncoder().encode(JSON.stringify({
+      charKey: this.activeCharKey, dir, extract,
+      files: entries.map((e) => ({ name: e.name, rel: e.rel, size: e.bytes.byteLength })),
+    }));
+    const total = 4 + header.byteLength + entries.reduce((n, e) => n + e.bytes.byteLength, 0);
+    const body = new Uint8Array(total);
+    new DataView(body.buffer).setUint32(0, header.byteLength);
+    body.set(header, 4);
+    let at = 4 + header.byteLength;
+    for (const e of entries) { body.set(e.bytes, at); at += e.bytes.byteLength; }
+    return await transport.postBytes('/files/upload-many', body);
+  }
+
   /** Several files or a folder as one zip, handed to the browser to save. */
   async downloadZip(paths: string[], name: string): Promise<number> {
     const bytes = await transport.postBinary('/files/zip', { charKey: this.activeCharKey, paths, name });

@@ -166,6 +166,21 @@ class Server:
     def post(self, path, payload=None, token="__default__"):
         return self._req("POST", path, payload if payload is not None else {}, token)
 
+    def post_raw(self, path, body: bytes) -> tuple[int, dict]:
+        """A POST whose body is bytes (application/octet-stream), JSON back."""
+        url = f"http://127.0.0.1:{self.port}{path}"
+        headers = {"Content-Type": "application/octet-stream", "Authorization": f"Bearer {self.token}"}
+        req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                return r.status, json.loads(r.read().decode("utf-8", "replace"))
+        except urllib.error.HTTPError as e:
+            raw = e.read().decode("utf-8", "replace")
+            try:
+                return e.code, json.loads(raw)
+            except ValueError:
+                return e.code, {"_raw": raw}
+
     def post_bytes(self, path, payload=None) -> tuple[int, bytes, dict]:
         """A POST whose answer is bytes, not JSON (the zip download)."""
         url = f"http://127.0.0.1:{self.port}{path}"
@@ -2019,6 +2034,27 @@ def test_workspace_folders_and_family(s: Server, cw: dict) -> None:
     st, raw, hdr = s.post_bytes("/files/zip", {"charKey": ck, "paths": ["../etc"]})
     check("a path outside the workspace is refused", st == 400, str(st))
     s.post("/files/delete", {"charKey": ck, "path": "uploads/참고/묶음"})
+
+    # The folder drop: many files in one binary body, subfolders kept.
+    def packed(entries: list[tuple[str, str, bytes]], **hdr_extra: object) -> bytes:
+        header = json.dumps({"charKey": ck, "dir": "uploads/참고", "files": [
+            {"name": n, "rel": r, "size": len(b)} for n, r, b in entries], **hdr_extra}, ensure_ascii=False).encode()
+        return len(header).to_bytes(4, "big") + header + b"".join(b for _, _, b in entries)
+    st, body = s.post_raw("/files/upload-many", packed([
+        ("a.png", "", b"\x89PNG" + bytes(20)), ("b.txt", "deep/er", "hello".encode()), ("c.bin", "deep", bytes(3))]))
+    check("a batch upload lands every file", st == 200 and body.get("count") == 3, str(body)[:160])
+    st, files = s.get(q("/files", charKey=ck))
+    up = next(a for a in files["areas"] if a["area"] == "uploads")
+    names = {f["path"]: f["size"] for f in up["files"]}
+    check("with subfolders from `rel` and exact bytes",
+          names.get("uploads/참고/a.png") == 24 and names.get("uploads/참고/deep/er/b.txt") == 5
+          and names.get("uploads/참고/deep/c.bin") == 3, str(sorted(names))[:200])
+    st, body = s.post_raw("/files/upload-many", packed([("x.txt", "../../escape", b"x")]))
+    check("a climbing `rel` is refused", st == 400, str(st))
+    bad = packed([("y.txt", "", b"12345")])[:-2]
+    st, body = s.post_raw("/files/upload-many", bad)
+    check("a body shorter than its header is refused", st == 400, str(body)[:80])
+    s.post("/files/delete", {"charKey": ck, "path": "uploads/참고/deep"})
     st, files = s.get(q("/files", charKey=ck))
     up = next(a for a in files["areas"] if a["area"] == "uploads")
     check("the listing names the folder", "uploads/참고" in (up.get("dirs") or []), str(up.get("dirs")))

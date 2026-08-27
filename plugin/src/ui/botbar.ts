@@ -238,7 +238,7 @@ function openApply(anchor: HTMLElement): void {
     value: (state.workspace?.characterName || '봇') + ' (백업)',
     placeholder: '백업 봇 이름',
   }) as HTMLInputElement;
-  const saveNew = el('button', { text: '새 봇으로 저장', title: '지금 RisuAI 에 있는 상태를 백업 봇으로 복제한 뒤, 편집 중인 내용을 이 봇에 반영하고 계속 편집합니다' }) as HTMLButtonElement;
+  const saveNew = el('button', { text: '새 봇으로 저장', title: '기준선(편집 전, RisuAI 가 지금 들고 있는 카드)을 백업 봇으로 복제한 뒤, 편집 중인 내용을 이 봇에 반영하고 계속 편집합니다' }) as HTMLButtonElement;
   saveNew.disabled = !!blocked;
   saveNew.addEventListener('click', async () => {
     saveNew.disabled = true;
@@ -288,7 +288,7 @@ function openApply(anchor: HTMLElement): void {
   body.appendChild(el('div', {
     class: 'hint',
     text: '반영: 메타·인사말·봇 로어북·Regex·트리거가 한 번에 쓰입니다. 챗은 절대 건드리지 않습니다. '
-      + '새 봇으로 저장: 지금 RisuAI 상태를 백업 봇(챗 포함, 새 캐릭터)으로 남기고 편집본을 이 봇에 반영합니다. 처음 한 번 db 권한 허용이 필요합니다.',
+      + '새 봇으로 저장: 기준선(편집 전 상태)을 백업 봇(챗 포함, 새 캐릭터)으로 남기고 편집본을 이 봇에 반영해 새 기준선으로 삼습니다. 처음 한 번 db 권한 허용이 필요합니다.',
   }));
 }
 

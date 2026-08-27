@@ -15,6 +15,7 @@ import { setEditMode, setToolbarSearch, setTab } from './shell';
 import { shellNotice, snapshotCleanup } from './chatbar';
 import type { RisuChat } from '../risuai';
 import { describeSync, syncBusy } from '../assets';
+import { transport } from '../transport';
 
 /**
  * One line under the bot's name: what the background asset importer is up
@@ -153,6 +154,13 @@ export function renderChatsTab(mount: HTMLElement): void {
     pad.appendChild(el('div', { class: 'notice err' }, [
       el('div', { text: '백엔드에 연결하지 못했습니다.' }),
       el('div', { class: 'hint', text: state.connectError }),
+      // Measured on web RisuAI (risuai.xyz): the first connection after
+      // opening can take a couple of minutes while the host falls back from
+      // its proxy route to a direct one. The panel keeps retrying meanwhile.
+      transport.hostPlatform === 'web'
+        ? el('div', { class: 'hint', style: { marginTop: '4px' }, text:
+            '웹 RisuAI(risuai.xyz)에서는 최초 연결까지 3분 정도 걸릴 수 있습니다 (프록시 → 직접 연결 폴백에 걸리는 시간). 패널이 30초마다 자동으로 다시 시도하니 그대로 두셔도 됩니다.' })
+        : null,
       el('div', { class: 'row', style: { marginTop: '6px' } }, [
         el('span', { class: 'hint', text: '설정 → 연결에서 URL과 토큰을 확인해 주세요.' }), go,
       ]),

@@ -1,5 +1,7 @@
 # Risu Hina
 
+> **BETA (v0.8.0, 2026-08-27)** — 기능은 갖춰졌고 실사용 피드백 10라운드를 거쳤습니다. 데이터는 언제나 RisuAI 가 원본이며, 이 도구는 승인 없이는 쓰지 않습니다. 문제는 [Issues](https://github.com/nilsonwhang3-spec/risu-hina/issues) 로.
+
 RisuAI 챗을 **끝난 뒤에** 고치는 도구. 플러그인 화면 안에서 대화를 통째로 펼쳐 놓고,
 직접 고치거나 AI 에이전트에게 시킨다.
 

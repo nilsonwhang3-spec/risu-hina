@@ -348,7 +348,9 @@ pre.mono {
      explorer and tools are chrome around it. */
   background: rgba(255, 255, 255, .035);
 }
-.right { flex: 0 0 380px; min-width: 250px; display: flex; flex-direction: column; }
+/* The agent takes half the width by default: the conversation is where the
+   work happens and 380px wrapped every sentence of it. */
+.right { flex: 0 0 50%; min-width: 250px; display: flex; flex-direction: column; }
 /* touch-action: none is what makes the drag work on a phone - without it the
    browser claims the touch for scrolling and fires pointercancel at once. */
 .gutter { flex: 0 0 5px; cursor: col-resize; background: var(--borderc, #2b323f); opacity: .45; touch-action: none; }
@@ -689,7 +691,18 @@ textarea.focusarea.codearea { font-size: 12.5px; line-height: 1.55; }
   width: 16px; flex-shrink: 0; padding: 0; border: none; background: transparent;
   color: var(--textcolor2, #79839a); font-size: 10px; text-align: center;
 }
-.filetree .treebranch .n { font-size: 11px; color: var(--textcolor2, #79839a); margin-left: auto; }
+.filetree .treebranch { overflow: hidden; }
+.filetree .treebranch .n {
+  flex-shrink: 0; margin-left: auto; padding: 0 6px; border-radius: 9px;
+  font-size: 11px; font-variant-numeric: tabular-nums; line-height: 16px;
+  color: var(--textcolor, #d8dce4); background: rgba(128,128,128,.22);
+}
+.filetree .treebranch.on .n { background: rgba(37, 99, 235, .45); }
+.frow .ftag {
+  display: inline-block; min-width: 34px; margin-right: 7px; padding: 0 4px; border-radius: 3px;
+  font-family: Consolas, monospace; font-size: 10px; text-align: center; line-height: 15px;
+  color: var(--textcolor2, #79839a); background: rgba(128,128,128,.16);
+}
 .filebar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
 .filecrumb { font-weight: 700; font-family: Consolas, monospace; font-size: 12.5px; }
 .filehint { font-size: 11px; color: var(--textcolor2, #79839a); margin-bottom: 6px; }
