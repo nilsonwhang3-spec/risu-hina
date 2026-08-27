@@ -15,7 +15,7 @@
  * objects, after the same confirmation RisuAI asks for. There is no per-
  * trigger "실행 시점": Lua has none, and V2 events are not edited here.
  */
-import { el, clear, armed } from './dom';
+import { el, clear, armed, focusButton, diffCard } from './dom';
 import { state, type CardScript } from '../state';
 import { threePane } from './panes';
 import { bindAgent, mountAgent } from './agentpane';
@@ -188,9 +188,18 @@ function drawView(): void {
         save.disabled = false;
       }
     });
+    const origFirst = s.origin === 'edited' && s.original && Array.isArray((s.original as Record<string, any>).effect)
+      ? ((s.original as Record<string, any>).effect[0] as Record<string, unknown> | undefined)
+      : undefined;
+    const diff = origFirst ? diffCard(String(origFirst.code ?? ''), String(first.code ?? ''), { code: true }) : null;
     viewMount.appendChild(el('div', { class: 'card' }, [
-      el('h2', { text: 'Lua' + (s.origin !== 'original' ? ' · 수정됨' : '') }),
+      el('h2', {}, [
+        el('span', { text: 'Lua' + (s.origin !== 'original' ? ' · 수정됨' : '') }),
+        el('span', { class: 'spacer' }),
+        focusButton(body, 'Lua 트리거', { code: true }),
+      ]),
       body,
+      diff,
       el('div', { class: 'row', style: { marginTop: '8px' } }, [save]),
       el('div', { class: 'hint', style: { marginTop: '6px' }, text:
         'RisuAI 의 트리거 편집기와 같은 Lua 스크립트 한 개입니다. 이벤트 등록은 스크립트 안에서 합니다 (listenEdit, onStart 등).' }),

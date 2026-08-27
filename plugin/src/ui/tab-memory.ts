@@ -12,7 +12,7 @@
  * sibling: list on the left, the entry in the middle, agent on the right, and a
  * diff against the frozen original.
  */
-import { el, clear, armed } from './dom';
+import { el, clear, armed, focusButton, diffCard } from './dom';
 import { state, type MemoryItem } from '../state';
 import { threePane } from './panes';
 import { bindAgent, mountAgent } from './agentpane';
@@ -220,6 +220,8 @@ function open(item: MemoryItem): void {
   viewMount.appendChild(el('div', { class: 'card' }, [
     el('h2', {}, [
       el('span', { text: `${KIND_LABEL[item.kind] ?? item.kind} · ${item.seq}번 항목` }),
+      el('span', { class: 'spacer' }),
+      focusButton(body, `${KIND_LABEL[item.kind] ?? item.kind} · ${item.seq}번 항목`),
     ]),
     el('div', { class: 'hint', style: { marginBottom: '8px' } }, [
       '이 요약이 모델이 실제로 읽는 “옛날 일”입니다. 여기 틀린 사실이 있으면 이후 답변이 계속 그 위에 쌓입니다.',
@@ -229,9 +231,11 @@ function open(item: MemoryItem): void {
   ]));
 
   if (item.changed && item.original !== null) {
+    // The lines that differ, open - a memory edit is usually a sentence in a
+    // paragraph, and the whole original beside it hid which sentence.
     viewMount.appendChild(el('div', { class: 'card' }, [
-      el('h2', { text: '원본' }),
-      el('pre', { class: 'mono filepreview', text: item.original }),
+      el('h2', { text: '원본과의 차이' }),
+      diffCard(item.original, item.body, { open: true }),
     ]));
   }
 }

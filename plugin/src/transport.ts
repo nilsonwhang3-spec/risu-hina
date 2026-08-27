@@ -99,17 +99,37 @@ export class Transport {
     if (!this.cfg.url) throw new BackendError(0, '백엔드 URL이 설정되어 있지 않습니다');
     if (this.platform === 'unknown') await this.detectPlatform();
 
-    const res = await this.raw('GET', '/health', undefined, { withToken: false });
+    let res: Response;
+    try {
+      res = await this.raw('GET', '/health', undefined, { withToken: false });
+    } catch (e) {
+      if (e instanceof BackendError) throw e;
+      // The host's fetch threw before any response: the address is wrong, or
+      // the tunnel / VPN in front of the backend is not up yet. Say that,
+      // and say the panel keeps trying - the shell does (startReconnect).
+      this.route = 'blocked';
+      this.tokenSafe = false;
+      throw new BackendError(0,
+        `백엔드에 닿지 못했습니다 (${e instanceof Error ? e.message : String(e)}). ` +
+        'URL 이 맞는지, 터널·VPN 이 열려 있는지 확인해 주세요. 잠시 뒤 자동으로 다시 시도합니다.');
+    }
     const body = (await readJson(res)) as HealthInfo | null;
     if (!body || (body.service !== SIGNATURE && !LEGACY_SIGNATURES.has(String(body.service)))) {
       this.route = 'blocked';
       this.tokenSafe = false;
+      // What actually came back is the diagnostic: a relay's error page, a
+      // reverse proxy's 502 while the tunnel warms up, someone else's server.
+      // It is quoted rather than guessed at - the old text blamed a RisuAI
+      // setting, and the one real report turned out to be a tunnel that
+      // came up a minute later with nothing changed.
+      const what = res.status ? `HTTP ${res.status}` : '빈 응답';
+      const raw = body && typeof body === 'object' && '_raw' in body
+        ? String((body as { _raw: unknown })._raw).replace(/\s+/g, ' ').trim().slice(0, 80)
+        : (body ? JSON.stringify(body).slice(0, 80) : '');
       throw new BackendError(
         res.status,
-        this.platform === 'web'
-          ? '백엔드에 직접 닿지 않습니다. RisuAI 설정에서 Use Plain Fetch를 켜 주세요 ' +
-            '(끄면 요청이 sv.risuai.xyz로 릴레이되어 토큰이 새고, 사설 주소에는 닿지도 않습니다)'
-          : '백엔드 응답이 Risu Hina의 것이 아닙니다',
+        `백엔드에서 Risu Hina 응답을 받지 못했습니다 (${what}${raw ? ' · ' + raw : ''}). ` +
+        '주소가 다른 서버를 가리키거나 터널이 아직 안 열렸을 수 있습니다. 잠시 뒤 자동으로 다시 시도합니다.',
         body,
       );
     }
@@ -155,6 +175,13 @@ export class Transport {
           .join('&')
       : '';
     const res = await this.raw('GET', path + qs, undefined, { timeoutMs: UPLOAD_TIMEOUT_MS });
+    if (!res.ok) throw await toError(res);
+    return new Uint8Array(await res.arrayBuffer());
+  }
+
+  /** POST that answers bytes - a zip of workspace files. */
+  async postBinary(path: string, payload: unknown): Promise<Uint8Array> {
+    const res = await this.raw('POST', path, payload, { timeoutMs: UPLOAD_TIMEOUT_MS });
     if (!res.ok) throw await toError(res);
     return new Uint8Array(await res.arrayBuffer());
   }

@@ -280,6 +280,8 @@ export interface LoreEntry {
   origin: string;
   /** The RisuAI lorebook entry, kept whole - it has fields we do not model. */
   entry: Record<string, unknown>;
+  /** The frozen baseline entry, for edited rows only (the diff view). */
+  original?: Record<string, unknown> | null;
 }
 
 export interface MemoryItem {
@@ -327,6 +329,8 @@ export interface CardScript {
   seq: number;
   origin: string;
   entry: Record<string, unknown>;
+  /** The frozen baseline item, for edited rows only (the diff view). */
+  original?: Record<string, unknown> | null;
 }
 
 interface ScriptCounts { added: number; edited: number; deleted: number; total: number }
@@ -944,10 +948,23 @@ class AppState {
       + '&path=' + encodeURIComponent(path));
   }
 
-  async uploadFile(name: string, content: string, base64 = false, dir = ''): Promise<{ path: string; size: number }> {
-    return await transport.post('/files/upload', base64
-      ? { charKey: this.activeCharKey, name, base64: content, dir }
+  async uploadFile(name: string, content: string, base64 = false, dir = '', extract = false)
+    : Promise<{ path: string; size: number; extracted?: number }> {
+    return await transport.upload('/files/upload', base64
+      ? { charKey: this.activeCharKey, name, base64: content, dir, extract }
       : { charKey: this.activeCharKey, name, text: content, dir });
+  }
+
+  /** Several files or a folder as one zip, handed to the browser to save. */
+  async downloadZip(paths: string[], name: string): Promise<number> {
+    const bytes = await transport.postBinary('/files/zip', { charKey: this.activeCharKey, paths, name });
+    host.downloadBytes(name.endsWith('.zip') ? name : name + '.zip', bytes, 'application/zip');
+    return bytes.byteLength;
+  }
+
+  /** Raw bytes of a workspace file (an image preview, a thumbnail). */
+  async fileBytes(path: string): Promise<Uint8Array> {
+    return await transport.getBinary('/files/download', { charKey: this.activeCharKey, path });
   }
 
   async mkdirFile(path: string): Promise<void> {

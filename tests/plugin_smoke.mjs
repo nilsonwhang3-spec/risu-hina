@@ -748,11 +748,12 @@ console.log('\ntest_workspace_files');
   clickById(document, 'tab-files');
   await settle(1100);
   check('the file view has its own three panes', !!document.querySelector('.panel.active .split'));
-  check('the left pane is a tree', !!document.querySelector('.panel.active .tree'));
+  check('the left pane is a folder tree', !!document.querySelector('.panel.active .tree.filetree'));
   check('the agent came along', !!document.querySelector('.panel.active .agentpanel'));
 
   const tree = document.querySelector('.panel.active .tree');
   check('upload is offered', !!findButton(tree, '올리기'));
+  check('a whole folder can be uploaded', !!findButton(tree, '폴더 올리기'));
   check('cleaning is offered', !!findButton(tree, '임시 정리'));
 
   // Only what a person put in or would take out. The frozen originals, the
@@ -762,16 +763,21 @@ console.log('\ntest_workspace_files');
   check('and the toggle says how many are hidden',
         /내부 파일 보기 [(]\d+[)]/.test(tree?.textContent || ''),
         (tree?.textContent || '').slice(-120));
-  // A document in scratch/ is a deliverable and is listed without unfolding;
-  // the script beside it stays behind the toggle.
-  check('a document in scratch/ is surfaced', /draft-summary\.md/.test(tree?.textContent || ''),
+  // A document in scratch/ is a deliverable: it gets a folder of its own in
+  // the tree, and its files are listed in the centre without unfolding the
+  // internals; the script beside it stays behind the toggle.
+  check('documents in scratch/ get a folder of their own', /임시 문서/.test(tree?.textContent || ''),
         (tree?.textContent || '').slice(0, 300));
-  check('under a heading that says where it lives', /임시 문서/.test(tree?.textContent || ''));
-  check('a plain text note counts as a document', /numbers\.txt/.test(tree?.textContent || ''));
-  check('the script stays folded', !/helper\.py/.test(tree?.textContent || ''));
-  const surfaced = [...tree.querySelectorAll('.treebranch')].find((b) => /임시 문서/.test(b.textContent || ''));
-  check('the surfaced group is open, not collapsed',
-        surfaced?.nextElementSibling?.style.display !== 'none');
+  const docsBranch = [...tree.querySelectorAll('.treebranch')].find((b) => /임시 문서/.test(b.textContent || ''));
+  docsBranch?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(300);
+  const centre = () => document.querySelector('.panel.active .left');
+  check('the centre lists the surfaced documents',
+        /draft-summary\.md/.test(centre()?.textContent || '') && /numbers\.txt/.test(centre()?.textContent || ''),
+        (centre()?.textContent || '').slice(0, 300));
+  check('the script stays out of it', !/helper\.py/.test(centre()?.textContent || ''));
+  check('rows carry a checkbox for multi-select',
+        document.querySelectorAll('.panel.active .filelist .frow input[type=checkbox]').length >= 2);
   check('the files tab button carries a badge slot', !!document.querySelector('#tab-files .tabbadge'));
 
   clickButton(tree, '내부 파일 보기');
@@ -780,24 +786,30 @@ console.log('\ntest_workspace_files');
   check('revealing shows the frozen original', /원본/.test(tree2?.textContent || ''),
         (tree2?.textContent || '').slice(0, 200));
 
-  // original/ is the diff baseline, so it is never offered for deletion.
-  const branches = [...document.querySelectorAll('.panel.active .treebranch')];
-  const originalBranch = branches.find((b) => /원본/.test(b.textContent || ''));
+  // original/ is the diff baseline: its files list, open and download, but
+  // the delete verb stays disabled however many are selected.
+  const originalBranch = [...tree2.querySelectorAll('.treebranch')].find((b) => /원본/.test(b.textContent || ''));
   check('the original branch is listed', !!originalBranch);
   originalBranch?.dispatchEvent(new window.Event('click', { bubbles: true }));
   await settle(300);
-  const originalKids = originalBranch?.nextElementSibling;
-  check('original files offer no delete button',
-        [...(originalKids?.querySelectorAll('button') || [])]
-          .every((b) => b.textContent !== '×'),
-        [...(originalKids?.querySelectorAll('button') || [])].map((b) => b.textContent).join(','));
-
-  const firstFile = originalKids?.querySelector('button.treefile');
-  check('a file can be opened', !!firstFile);
-  firstFile?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  const rows = [...document.querySelectorAll('.panel.active .filelist .frow:not(.head)')];
+  check('the original folder lists its files', rows.length > 0, String(rows.length));
+  rows[0]?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(200);
+  check('a row can be selected', !!document.querySelector('.panel.active .filelist .frow.sel'));
+  const bar = document.querySelector('.panel.active .filebar');
+  const delBtn = findButton(bar, '삭제');
+  check('original files cannot be deleted', !!delBtn && delBtn.disabled, delBtn ? String(delBtn.disabled) : 'no button');
+  const dlBtn = findButton(bar, '내려받기');
+  check('but can be downloaded', !!dlBtn && !dlBtn.disabled);
+  const row0 = document.querySelector('.panel.active .filelist .frow:not(.head)');
+  row0?.dispatchEvent(new window.Event('dblclick', { bubbles: true }));
   await settle(900);
-  check('its contents are shown in the middle pane',
+  check('double-click opens the file in the middle pane',
         !!document.querySelector('.panel.active .left .filepreview'));
+  clickButton(document.querySelector('.panel.active .left'), '목록으로');
+  await settle(200);
+  check('and the list comes back', !!document.querySelector('.panel.active .filelist'));
 
   clickButton(document.querySelector('.panel.active .tree'), '내부 파일 숨기기');
   await settle(600);
@@ -1008,6 +1020,26 @@ console.log('\ntest_bot_tabs');
   check('the bot bar counts the change',
         /메타 1/.test(document.querySelector('.botbar .changesum')?.textContent || ''),
         document.querySelector('.botbar .changesum')?.textContent);
+  // The reopened field says what changed, not just that it did: a folded
+  // diff card, and the box can be taken full-screen.
+  {
+    const c2 = document.querySelector('.panel.active .left');
+    check('the editor offers 집중 편집', !!findButton(c2, '집중 편집'));
+    const diffBtn = findButton(c2, '변경 내용 보기');
+    check('an edited field offers its diff', !!diffBtn, c2?.textContent?.slice(0, 200));
+    diffBtn?.dispatchEvent(new window.Event('click', { bubbles: true }));
+    await settle(100);
+    check('the diff marks the removed and the added line',
+          !!c2?.querySelector('.diffview .diffline.del') && !!c2?.querySelector('.diffview .diffline.ins'),
+          c2?.querySelector('.diffview')?.textContent?.slice(0, 120));
+    clickButton(c2, '집중 편집');
+    await settle(100);
+    const big = document.querySelector('.modalbox.focusmodal textarea');
+    check('집중 편집 opens the box full-screen with the same text', !!big && big.value === '스모크가 고친 설명', big?.value);
+    pressEscape(document);
+    await settle(100);
+    check('and closes without a trace', !document.querySelector('.modalbox.focusmodal'));
+  }
 
   // 에셋: the store's manifest, grouped by field, with the sync state per row.
   clickById(document, 'tab-assets');
@@ -1042,10 +1074,14 @@ console.log('\ntest_bot_tabs');
   await settle(200);
   clickById(document, 'tab-files');
   await settle(900);
-  const filesTree = document.querySelector('.panel.active .tree');
-  check('the charx shows up under out/', /\.charx/.test(filesTree?.textContent || ''), filesTree?.textContent?.slice(0, 200));
-  const charxBtn = [...(filesTree?.querySelectorAll('.treefile') ?? [])].find((b) => /\.charx/.test(b.textContent || ''));
-  charxBtn?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  // The tree holds folders; the file is in the centre once 결과물 is picked.
+  const outBranch = [...document.querySelectorAll('.panel.active .tree .treebranch')].find((b) => /결과물/.test(b.textContent || ''));
+  check('out/ is a folder in the tree', !!outBranch, document.querySelector('.panel.active .tree')?.textContent?.slice(0, 200));
+  outBranch?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(300);
+  const charxRow = [...document.querySelectorAll('.panel.active .filelist .frow:not(.head)')].find((r) => /\.charx/.test(r.textContent || ''));
+  check('the charx shows up under out/', !!charxRow, document.querySelector('.panel.active .left')?.textContent?.slice(0, 200));
+  charxRow?.dispatchEvent(new window.Event('dblclick', { bubbles: true }));
   await settle(500);
   check('a binary file offers 내 PC에 저장', !!findButton(document.querySelector('.panel.active'), '내 PC에 저장'));
   clickById(document, 'tab-meta');

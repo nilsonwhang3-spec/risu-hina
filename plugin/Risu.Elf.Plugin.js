@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.6.2
+//@display-name Risu Hina v0.7.0
 //@api 3.0
-//@version 0.6.2
+//@version 0.7.0
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@arg backend_url string 백엔드 URL (기본: http://127.0.0.1:6020)
 //@arg backend_token string 백엔드 토큰 (data/token.txt)
@@ -70,21 +70,34 @@
     async connect() {
       if (!this.cfg.url) throw new BackendError(0, "\uBC31\uC5D4\uB4DC URL\uC774 \uC124\uC815\uB418\uC5B4 \uC788\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4");
       if (this.platform === "unknown") await this.detectPlatform();
-      const res = await this.raw("GET", "/health", void 0, { withToken: false });
+      let res;
+      try {
+        res = await this.raw("GET", "/health", void 0, { withToken: false });
+      } catch (e) {
+        if (e instanceof BackendError) throw e;
+        this.route = "blocked";
+        this.tokenSafe = false;
+        throw new BackendError(
+          0,
+          `\uBC31\uC5D4\uB4DC\uC5D0 \uB2FF\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4 (${e instanceof Error ? e.message : String(e)}). URL \uC774 \uB9DE\uB294\uC9C0, \uD130\uB110\xB7VPN \uC774 \uC5F4\uB824 \uC788\uB294\uC9C0 \uD655\uC778\uD574 \uC8FC\uC138\uC694. \uC7A0\uC2DC \uB4A4 \uC790\uB3D9\uC73C\uB85C \uB2E4\uC2DC \uC2DC\uB3C4\uD569\uB2C8\uB2E4.`
+        );
+      }
       const body = await readJson(res);
       if (!body || body.service !== SIGNATURE && !LEGACY_SIGNATURES.has(String(body.service))) {
         this.route = "blocked";
         this.tokenSafe = false;
+        const what = res.status ? `HTTP ${res.status}` : "\uBE48 \uC751\uB2F5";
+        const raw = body && typeof body === "object" && "_raw" in body ? String(body._raw).replace(/\s+/g, " ").trim().slice(0, 80) : body ? JSON.stringify(body).slice(0, 80) : "";
         throw new BackendError(
           res.status,
-          this.platform === "web" ? "\uBC31\uC5D4\uB4DC\uC5D0 \uC9C1\uC811 \uB2FF\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4. RisuAI \uC124\uC815\uC5D0\uC11C Use Plain Fetch\uB97C \uCF1C \uC8FC\uC138\uC694 (\uB044\uBA74 \uC694\uCCAD\uC774 sv.risuai.xyz\uB85C \uB9B4\uB808\uC774\uB418\uC5B4 \uD1A0\uD070\uC774 \uC0C8\uACE0, \uC0AC\uC124 \uC8FC\uC18C\uC5D0\uB294 \uB2FF\uC9C0\uB3C4 \uC54A\uC2B5\uB2C8\uB2E4)" : "\uBC31\uC5D4\uB4DC \uC751\uB2F5\uC774 Risu Hina\uC758 \uAC83\uC774 \uC544\uB2D9\uB2C8\uB2E4",
+          `\uBC31\uC5D4\uB4DC\uC5D0\uC11C Risu Hina \uC751\uB2F5\uC744 \uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4 (${what}${raw ? " \xB7 " + raw : ""}). \uC8FC\uC18C\uAC00 \uB2E4\uB978 \uC11C\uBC84\uB97C \uAC00\uB9AC\uD0A4\uAC70\uB098 \uD130\uB110\uC774 \uC544\uC9C1 \uC548 \uC5F4\uB838\uC744 \uC218 \uC788\uC2B5\uB2C8\uB2E4. \uC7A0\uC2DC \uB4A4 \uC790\uB3D9\uC73C\uB85C \uB2E4\uC2DC \uC2DC\uB3C4\uD569\uB2C8\uB2E4.`,
           body
         );
       }
       this.route = "direct";
       this.tokenSafe = true;
       this.lastHealth = body;
-      this.gate = versionGate("0.6.2", String(body.version || ""));
+      this.gate = versionGate("0.7.0", String(body.version || ""));
       return body;
     }
     /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -107,6 +120,12 @@
     async getBinary(path, query) {
       const qs = query ? "?" + Object.entries(query).filter(([, v]) => v !== void 0 && v !== "").map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`).join("&") : "";
       const res = await this.raw("GET", path + qs, void 0, { timeoutMs: UPLOAD_TIMEOUT_MS });
+      if (!res.ok) throw await toError(res);
+      return new Uint8Array(await res.arrayBuffer());
+    }
+    /** POST that answers bytes - a zip of workspace files. */
+    async postBinary(path, payload) {
+      const res = await this.raw("POST", path, payload, { timeoutMs: UPLOAD_TIMEOUT_MS });
       if (!res.ok) throw await toError(res);
       return new Uint8Array(await res.arrayBuffer());
     }
@@ -408,7 +427,7 @@
   var PAPER_PLANE = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4z"/></svg>';
   function modal(title, body, opts = {}) {
     const closeBtn = el("button", { class: "iconbtn", html: ICON.close, title: "\uB2EB\uAE30" });
-    const box = el("div", { class: "modalbox" + (opts.wide ? " wide" : "") }, [
+    const box = el("div", { class: "modalbox" + (opts.wide ? " wide" : "") + (opts.cls ? " " + opts.cls : "") }, [
       el("div", { class: "modalhead" }, [
         el("h2", { text: title }),
         el("span", { class: "spacer" }),
@@ -436,6 +455,142 @@
     document.addEventListener("keydown", esc, true);
     setTimeout(() => box.querySelector("input, textarea, select, button")?.focus(), 0);
     return close;
+  }
+  function focusEdit(source, title, opts = {}) {
+    const big = el("textarea", {
+      class: "focusarea" + (opts.code ? " codearea" : ""),
+      spellcheck: opts.code ? "false" : "true"
+    });
+    big.value = source.value;
+    const count = el("span", { class: "hint", text: `${big.value.length}\uC790` });
+    const sync = () => {
+      source.value = big.value;
+      count.textContent = `${big.value.length}\uC790`;
+      source.dispatchEvent(new Event("input", { bubbles: true }));
+    };
+    big.addEventListener("input", sync);
+    const done = el("button", { class: "primary", text: "\uC644\uB8CC" });
+    const body = el("div", { class: "focusbody" }, [
+      big,
+      el("div", { class: "row focusfoot" }, [
+        count,
+        el("span", { class: "hint grow", text: "\uC785\uB825\uC740 \uBC14\uB85C \uC6D0\uB798 \uC0C1\uC790\uC5D0 \uBC18\uC601\uB429\uB2C8\uB2E4. \uC800\uC7A5\uC740 \uC6D0\uB798 \uD654\uBA74\uC758 \uC800\uC7A5 \uBC84\uD2BC\uC73C\uB85C \uD569\uB2C8\uB2E4." }),
+        done
+      ])
+    ]);
+    const close = modal(title, body, { cls: "focusmodal", sticky: true });
+    done.addEventListener("click", close);
+    setTimeout(() => {
+      big.focus();
+      try {
+        big.setSelectionRange(source.selectionStart, source.selectionEnd);
+      } catch {
+      }
+    }, 0);
+  }
+  function focusButton(source, title, opts = {}) {
+    const b = el("button", { class: "ghost tiny focusbtn", text: "\u2922 \uC9D1\uC911 \uD3B8\uC9D1", title: "\uD654\uBA74 \uC804\uCCB4\uB85C \uD06C\uAC8C \uD3B8\uC9D1\uD569\uB2C8\uB2E4" });
+    b.addEventListener("click", () => focusEdit(source, title, opts));
+    return b;
+  }
+  function lineDiff(before, after) {
+    const a = before.split("\n");
+    const b = after.split("\n");
+    let head = 0;
+    while (head < a.length && head < b.length && a[head] === b[head]) head++;
+    let tail = 0;
+    while (tail < a.length - head && tail < b.length - head && a[a.length - 1 - tail] === b[b.length - 1 - tail]) tail++;
+    const out = [];
+    for (let i = 0; i < head; i++) out.push({ kind: "same", text: a[i] });
+    const am = a.slice(head, a.length - tail);
+    const bm = b.slice(head, b.length - tail);
+    if (am.length && bm.length && am.length * bm.length <= 4e6) {
+      const n = am.length, m = bm.length;
+      const dp = [];
+      for (let i2 = 0; i2 <= n; i2++) dp.push(new Uint32Array(m + 1));
+      for (let i2 = n - 1; i2 >= 0; i2--) {
+        for (let j2 = m - 1; j2 >= 0; j2--) {
+          dp[i2][j2] = am[i2] === bm[j2] ? dp[i2 + 1][j2 + 1] + 1 : Math.max(dp[i2 + 1][j2], dp[i2][j2 + 1]);
+        }
+      }
+      let i = 0, j = 0;
+      while (i < n && j < m) {
+        if (am[i] === bm[j]) {
+          out.push({ kind: "same", text: am[i] });
+          i++;
+          j++;
+        } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+          out.push({ kind: "del", text: am[i] });
+          i++;
+        } else {
+          out.push({ kind: "ins", text: bm[j] });
+          j++;
+        }
+      }
+      while (i < n) out.push({ kind: "del", text: am[i++] });
+      while (j < m) out.push({ kind: "ins", text: bm[j++] });
+    } else {
+      for (const t of am) out.push({ kind: "del", text: t });
+      for (const t of bm) out.push({ kind: "ins", text: t });
+    }
+    for (let i = a.length - tail; i < a.length; i++) out.push({ kind: "same", text: a[i] });
+    return out;
+  }
+  function diffView(before, after, opts = {}) {
+    const lines = lineDiff(before, after);
+    const ctx = opts.context ?? 2;
+    const dels = lines.filter((l) => l.kind === "del").length;
+    const ins = lines.filter((l) => l.kind === "ins").length;
+    const root = el("div", { class: "diffview" + (opts.code ? " code" : "") });
+    root.appendChild(el("div", { class: "diffsum" }, [
+      el("span", { class: "diff-ins-n", text: `+${ins}` }),
+      el("span", { class: "diff-del-n", text: `\u2212${dels}` }),
+      el("span", { class: "hint", text: dels || ins ? " \uC904 (\uAE30\uC900\uC120 \u2192 \uC9C0\uAE08)" : " \uC904 \u2014 \uB0B4\uC6A9\uC774 \uAC19\uC2B5\uB2C8\uB2E4" })
+    ]));
+    const show = new Array(lines.length).fill(false);
+    lines.forEach((l, i) => {
+      if (l.kind === "same") return;
+      for (let k = Math.max(0, i - ctx); k <= Math.min(lines.length - 1, i + ctx); k++) show[k] = true;
+    });
+    let hidden = 0;
+    const flush = () => {
+      if (hidden) root.appendChild(el("div", { class: "diffskip", text: `\u2026 ${hidden}\uC904 \uAC19\uC74C \u2026` }));
+      hidden = 0;
+    };
+    lines.forEach((l, i) => {
+      if (!show[i]) {
+        hidden++;
+        return;
+      }
+      flush();
+      root.appendChild(el("div", { class: "diffline " + l.kind }, [
+        el("span", { class: "diffmark", text: l.kind === "del" ? "\u2212" : l.kind === "ins" ? "+" : " " }),
+        el("span", { class: "difftext", text: l.text || " " })
+      ]));
+    });
+    flush();
+    return root;
+  }
+  function diffCard(before, after, opts = {}) {
+    if (before === null || before === after) return null;
+    const lines = lineDiff(before, after);
+    const n = lines.filter((l) => l.kind !== "same").length;
+    const body = el("div", { class: "diffbody", style: { display: opts.open ? "" : "none" } });
+    const toggle = el("button", { class: "ghost tiny", text: opts.open ? "\uBCC0\uACBD \uB0B4\uC6A9 \uC811\uAE30" : `\uBCC0\uACBD \uB0B4\uC6A9 \uBCF4\uAE30 (${n}\uC904)` });
+    toggle.addEventListener("click", () => {
+      const open4 = body.style.display === "none";
+      if (open4 && !body.childElementCount) body.appendChild(diffView(before, after, { code: opts.code }));
+      body.style.display = open4 ? "" : "none";
+      toggle.textContent = open4 ? "\uBCC0\uACBD \uB0B4\uC6A9 \uC811\uAE30" : `\uBCC0\uACBD \uB0B4\uC6A9 \uBCF4\uAE30 (${n}\uC904)`;
+    });
+    if (opts.open) body.appendChild(diffView(before, after, { code: opts.code }));
+    return el("div", { class: "diffcard" }, [
+      el("div", { class: "row" }, [
+        el("span", { class: "hint grow", text: `\uAE30\uC900\uC120\uACFC \uB2E4\uB985\uB2C8\uB2E4 (${before.length}\uC790 \u2192 ${after.length}\uC790).` }),
+        toggle
+      ]),
+      body
+    ]);
   }
   function popover(anchor, content) {
     const pop = el("div", { class: "popover" }, [content]);
@@ -1410,10 +1565,115 @@ label.checkrow input { width: auto; }
 .tchip .tx { color: #7dd3fc; font-weight: 700; }
 .agentcompose { display: flex; gap: 6px; align-items: flex-end; flex-shrink: 0; }
 /* One line taller than it was: two lines of Korean plus room to see a third
-   coming, which is about the length of a real instruction here. */
-.agentinput { min-height: 82px; max-height: 220px; background: var(--bgcolor, #12141a); }
+   coming, which is about the length of a real instruction here. The box is
+   the flexible part and may shrink below its content: with width:100% and no
+   min-width it kept its size when the panel was dragged narrow and pushed
+   the send button out of the visible column. */
+.agentinput { flex: 1 1 auto; min-width: 0; width: auto; min-height: 82px; max-height: 220px; background: var(--bgcolor, #12141a); }
 .agentinput.dropping { border-color: #7dd3fc; background: rgba(125, 211, 252, .08); }
-button.sendbtn { padding: 9px 12px; display: flex; align-items: center; }
+button.sendbtn { padding: 9px 12px; display: flex; align-items: center; flex-shrink: 0; }
+/* A snapshot row whose delete is on its way to the backend. */
+.verrow.deleting, .chatitem.deleting { opacity: .4; }
+
+/* --- \uC9D1\uC911 \uD3B8\uC9D1: one text box, the whole screen ------------------------------ */
+.modalbox.focusmodal { max-width: none; width: calc(100vw - 48px); height: calc(100vh - 48px); }
+.modalbox.focusmodal .modalbody { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.focusbody { display: flex; flex-direction: column; flex: 1; min-height: 0; gap: 8px; }
+textarea.focusarea { flex: 1; min-height: 0; resize: none; font-size: 14px; line-height: 1.7; }
+textarea.focusarea.codearea { font-size: 12.5px; line-height: 1.55; }
+.focusfoot { flex-shrink: 0; }
+.card h2 .focusbtn { text-transform: none; letter-spacing: 0; font-weight: 400; }
+.card h2 { display: flex; align-items: center; gap: 8px; }
+
+/* --- line diff: an IDE's margin, on the material the panel edits ------------- */
+.diffcard { margin: 2px 0 10px; }
+.diffbody { margin-top: 6px; }
+.diffview {
+  border: 1px solid var(--borderc, #2b323f); border-radius: 5px; overflow: auto;
+  max-height: 440px; font-size: 12px;
+}
+.diffview.code { font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace; font-size: 11.5px; }
+.diffsum {
+  display: flex; gap: 6px; align-items: center; padding: 4px 8px; font-size: 11px;
+  border-bottom: 1px solid var(--borderc, #2b323f); position: sticky; top: 0;
+  background: var(--bgcolor, #12141a);
+}
+.diff-ins-n { color: #10b981; font-weight: 700; }
+.diff-del-n { color: #ef4444; font-weight: 700; }
+.diffline { display: flex; line-height: 1.55; border-left: 3px solid transparent; }
+.diffline.ins { background: rgba(16, 185, 129, .13); border-left-color: #10b981; }
+.diffline.del { background: rgba(239, 68, 68, .13); border-left-color: #ef4444; }
+.diffmark {
+  width: 20px; flex-shrink: 0; text-align: center; user-select: none;
+  color: var(--textcolor2, #79839a); font-family: Consolas, monospace;
+}
+.diffline.ins .diffmark { color: #10b981; }
+.diffline.del .diffmark { color: #ef4444; }
+.difftext { white-space: pre-wrap; word-break: break-word; flex: 1; padding-right: 8px; }
+.diffskip {
+  padding: 2px 8px; font-size: 11px; text-align: center;
+  color: var(--textcolor2, #79839a); background: rgba(128,128,128,.08);
+}
+.diffmeta { margin: -4px 0 8px; }
+
+/* --- workspace files: tree | list \xB7 grid ------------------------------------ */
+.filetree .treerow { gap: 0; }
+.filetree .treebranch { padding: 3px 6px; gap: 4px; }
+.filetree .treebranch.on { background: rgba(37, 99, 235, .22); color: var(--textcolor, #d8dce4); }
+.filetree .treebranch.dropping { outline: 2px dashed #7dd3fc; outline-offset: -2px; }
+.filetree .treekids { padding-left: 12px; }
+.filetree .caret {
+  width: 16px; flex-shrink: 0; padding: 0; border: none; background: transparent;
+  color: var(--textcolor2, #79839a); font-size: 10px; text-align: center;
+}
+.filetree .treebranch .n { font-size: 11px; color: var(--textcolor2, #79839a); margin-left: auto; }
+.filebar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.filecrumb { font-weight: 700; font-family: Consolas, monospace; font-size: 12.5px; }
+.filehint { font-size: 11px; color: var(--textcolor2, #79839a); margin-bottom: 6px; }
+.filelist { outline: none; border: 1px solid var(--borderc, #2b323f); border-radius: 6px; min-height: 220px; }
+.filelist:focus-within { border-color: rgba(37, 99, 235, .55); }
+.filelist.dropping, .pad.dropping .filelist { outline: 2px dashed #7dd3fc; outline-offset: -2px; background: rgba(125, 211, 252, .06); }
+.frow {
+  display: grid; grid-template-columns: 22px 1fr 76px 118px; gap: 8px; align-items: center;
+  padding: 5px 8px; border-bottom: 1px solid rgba(128,128,128,.08); font-size: 12px; user-select: none;
+}
+.frow:last-child { border-bottom: none; }
+.frow:hover { background: rgba(128,128,128,.08); }
+.frow.sel { background: rgba(37, 99, 235, .18); }
+.frow.head {
+  font-size: 10.5px; color: var(--textcolor2, #79839a); font-weight: 700;
+  text-transform: uppercase; letter-spacing: .04em; background: rgba(128,128,128,.05);
+}
+.frow .fname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.frow .fname .ficon { margin-right: 5px; }
+.frow .fsize { text-align: right; font-variant-numeric: tabular-nums; color: var(--textcolor2, #79839a); }
+.frow .ftime { color: var(--textcolor2, #79839a); font-variant-numeric: tabular-nums; font-size: 11px; }
+.frow input[type=checkbox] { width: auto; margin: 0; }
+.fgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 10px; padding: 10px; }
+.fcell {
+  border: 1px solid var(--borderc, #2b323f); border-radius: 6px; padding: 6px;
+  display: flex; flex-direction: column; gap: 4px; user-select: none; min-width: 0;
+}
+.fcell:hover { background: rgba(128,128,128,.06); }
+.fcell.sel { border-color: #2563eb; background: rgba(37, 99, 235, .12); }
+.fcell .fname { font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fcell .fsize { font-size: 10px; color: var(--textcolor2, #79839a); }
+.confirmbar {
+  display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 6px 10px;
+  border-radius: 5px; background: rgba(239, 68, 68, .12); margin-bottom: 8px; font-size: 12px;
+}
+.uploadprog { font-size: 12px; margin-bottom: 8px; color: var(--textcolor2, #79839a); }
+.zipask {
+  display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 6px 10px;
+  border-radius: 5px; background: rgba(125, 211, 252, .1); margin-bottom: 8px; font-size: 12px;
+}
+.fpreview img { max-width: 100%; max-height: 70vh; border-radius: 5px; display: block; }
+.fempty { padding: 28px 16px; text-align: center; color: var(--textcolor2, #79839a); font-size: 12px; }
+@media (max-width: 760px) {
+  .frow { grid-template-columns: 22px 1fr 70px; }
+  .frow .ftime { display: none; }
+  .modalbox.focusmodal { width: 100%; height: 100%; }
+}
 button.attachbtn { padding: 8px 9px; display: flex; align-items: center; flex-shrink: 0; }
 
 .attachbar { display: flex; flex-wrap: wrap; gap: 5px; flex-shrink: 0; }
@@ -2379,8 +2639,18 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     async readFile(path) {
       return await transport.get("/files/read?charKey=" + encodeURIComponent(this.activeCharKey) + "&path=" + encodeURIComponent(path));
     }
-    async uploadFile(name, content, base64 = false, dir = "") {
-      return await transport.post("/files/upload", base64 ? { charKey: this.activeCharKey, name, base64: content, dir } : { charKey: this.activeCharKey, name, text: content, dir });
+    async uploadFile(name, content, base64 = false, dir = "", extract = false) {
+      return await transport.upload("/files/upload", base64 ? { charKey: this.activeCharKey, name, base64: content, dir, extract } : { charKey: this.activeCharKey, name, text: content, dir });
+    }
+    /** Several files or a folder as one zip, handed to the browser to save. */
+    async downloadZip(paths, name) {
+      const bytes = await transport.postBinary("/files/zip", { charKey: this.activeCharKey, paths, name });
+      downloadBytes(name.endsWith(".zip") ? name : name + ".zip", bytes, "application/zip");
+      return bytes.byteLength;
+    }
+    /** Raw bytes of a workspace file (an image preview, a thumbnail). */
+    async fileBytes(path) {
+      return await transport.getBinary("/files/download", { charKey: this.activeCharKey, path });
     }
     async mkdirFile(path) {
       await transport.post("/files/mkdir", { charKey: this.activeCharKey, path });
@@ -3078,11 +3348,15 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         });
         const row = el("div", { class: "verrow" });
         const del = el("button", { class: "ghost tiny", title: "\uC774 \uC2A4\uB0C5\uC0F7 \uC0AD\uC81C" });
-        armed(del, "\u2715", "\uC0AD\uC81C?", async () => {
+        armed(del, "\u2715", "\uC0AD\uC81C \uD655\uC778", async () => {
+          row.classList.add("deleting");
+          del.disabled = true;
           try {
             await state.deleteCheckpoint(c.id);
             row.remove();
           } catch (e) {
+            row.classList.remove("deleting");
+            del.disabled = false;
             shellNotice("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg(e), "err");
           }
         });
@@ -3195,6 +3469,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         el("span", { class: "badge now", text: "\uD604\uC7AC" }),
         nowEdit
       ]));
+      const redraw = () => wrap.replaceWith(botSnapshots(editBot));
       for (const [idx, c] of cps.slice(0, 8).entries()) {
         const edit = el("button", { class: "ghost tiny", text: "\uC774 \uC2A4\uB0C5\uC0F7\uC73C\uB85C \uD3B8\uC9D1" });
         edit.title = "\uC791\uC5C5\uBCF8\uC744 \uC774 \uC2DC\uC810\uC73C\uB85C \uB418\uB3CC\uB9B0 \uB4A4 \uBD07 \uD3B8\uC9D1\uC73C\uB85C \uB4E4\uC5B4\uAC11\uB2C8\uB2E4 (\uC9C1\uC804 \uC0C1\uD0DC\uB3C4 \uC2A4\uB0C5\uC0F7\uC73C\uB85C \uB0A8\uC2B5\uB2C8\uB2E4)";
@@ -3208,15 +3483,37 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
             edit.disabled = false;
           }
         });
-        list2.appendChild(el("div", { class: "chatitem" }, [
+        const row = el("div", { class: "chatitem" });
+        const del = el("button", { class: "ghost tiny", title: "\uC774 \uC2A4\uB0C5\uC0F7 \uC0AD\uC81C" });
+        armed(del, "\u2715", "\uC0AD\uC81C \uD655\uC778", async () => {
+          row.classList.add("deleting");
+          del.disabled = true;
+          edit.disabled = true;
+          try {
+            await state.deleteCardCheckpoint(c.id);
+            redraw();
+          } catch (e) {
+            row.classList.remove("deleting");
+            del.disabled = false;
+            edit.disabled = false;
+            flash(wrap, "\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + (e instanceof Error ? e.message : String(e)));
+          }
+        });
+        row.append(
           el("span", { class: "grow", text: c.label || "(\uBB34\uC81C)" }),
-          idx === 0 ? el("span", { class: "badge", text: "\uCD5C\uC2E0 \uC2A4\uB0C5\uC0F7" }) : null,
+          idx === 0 ? el("span", { class: "badge", text: "\uCD5C\uC2E0 \uC2A4\uB0C5\uC0F7" }) : "",
           el("span", { class: "n", text: fmtTime(c.created_at * 1e3) }),
-          edit
-        ]));
+          edit,
+          del
+        );
+        list2.appendChild(row);
       }
       if (cps.length > 8) list2.appendChild(el("div", { class: "hint", style: { padding: "4px 0" }, text: `\uADF8 \uC678 ${cps.length - 8}\uAC1C \u2014 \uBD07 \uD3B8\uC9D1 \u2192 \u{1F558} \uBC84\uC804\uC5D0\uC11C \uC804\uBD80 \uBD05\uB2C8\uB2E4` }));
       wrap.appendChild(list2);
+      wrap.appendChild(snapshotCleanup(cps.length, async (keep) => {
+        await state.clearCardCheckpoints(keep);
+        redraw();
+      }));
     })();
     return wrap;
   }
@@ -3400,8 +3697,8 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         el("span", { text: `${items5.length}` })
       ]);
       head.addEventListener("click", () => {
-        const open5 = body.classList.toggle("open");
-        caret.textContent = open5 ? "\u25BE" : "\u25B8";
+        const open4 = body.classList.toggle("open");
+        caret.textContent = open4 ? "\u25BE" : "\u25B8";
       });
       pad.appendChild(el("div", { class: "folder" }, [head, body]));
     }
@@ -3429,9 +3726,9 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       const bytes = await Risuai.readImage(path);
       if (!bytes || !bytes.byteLength) return;
       if (portraitUrl) URL.revokeObjectURL(portraitUrl);
-      const view = bytes;
-      const buf = new Uint8Array(view.byteLength);
-      buf.set(view);
+      const view2 = bytes;
+      const buf = new Uint8Array(view2.byteLength);
+      buf.set(view2);
       portraitUrl = URL.createObjectURL(new Blob([buf]));
       const img = el("img", { class: "botportrait", src: portraitUrl, alt: "" });
       img.addEventListener("error", () => img.replaceWith(mount));
@@ -4051,6 +4348,21 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     setActions(items5) {
       clear(this.actionBox);
       if (!items5.length) return;
+      const decideOne = async (a, approve, quiet = false) => {
+        try {
+          const said = await state.decideAction(a.id, approve);
+          if (!quiet) this.hooks.notice(said, approve ? "ok" : "");
+          this.note(
+            (approve ? "\u2714 \uC2B9\uC778\xB7\uC2E4\uD589: " : "\u2716 \uAC70\uC808: ") + a.summary + (said ? " \u2014 " + said : ""),
+            approve ? "ok" : ""
+          );
+          return true;
+        } catch (e) {
+          if (!quiet) this.hooks.notice("\uC2E4\uD589\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg2(e), "err");
+          this.note("\u2716 \uC2E4\uD589 \uC2E4\uD328: " + a.summary + " \u2014 " + msg2(e), "err");
+          return false;
+        }
+      };
       const rows = items5.map((a) => {
         const yes = el("button", { class: "primary tiny", text: a.byHost ? "\uC2B9\uC778\xB7\uC2E4\uD589" : "\uC2B9\uC778" });
         const no = el("button", { class: "ghost tiny", text: "\uAC70\uC808" });
@@ -4059,18 +4371,11 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
           yes.disabled = true;
           no.disabled = true;
           busy.textContent = approve ? "\uC2E4\uD589 \uC911\u2026" : "\uAC70\uC808 \uC911\u2026";
-          try {
-            const said = await state.decideAction(a.id, approve);
-            this.hooks.notice(said, approve ? "ok" : "");
-            this.note(
-              (approve ? "\u2714 \uC2B9\uC778\xB7\uC2E4\uD589: " : "\u2716 \uAC70\uC808: ") + a.summary + (said ? " \u2014 " + said : ""),
-              approve ? "ok" : ""
-            );
+          const ok = await decideOne(a, approve);
+          if (ok) {
             await this.refreshActions();
             if (approve) await this.hooks.onApplied();
-          } catch (e) {
-            this.hooks.notice("\uC2E4\uD589\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg2(e), "err");
-            this.note("\u2716 \uC2E4\uD589 \uC2E4\uD328: " + a.summary + " \u2014 " + msg2(e), "err");
+          } else {
             busy.textContent = "";
             yes.disabled = false;
             no.disabled = false;
@@ -4088,10 +4393,47 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
           no
         ]);
       });
+      const progress = el("span", { class: "hint", text: "" });
+      const allYes = el("button", { class: "primary tiny", text: `\uC804\uCCB4 \uC2B9\uC778\xB7\uC2E4\uD589 (${items5.length})` });
+      const allNo = el("button", { class: "ghost tiny", text: "\uC804\uCCB4 \uAC70\uC808" });
+      const decideAll = async (approve) => {
+        allYes.disabled = allNo.disabled = true;
+        for (const b of Array.from(this.actionBox.querySelectorAll(".stagedrow button"))) b.disabled = true;
+        let done = 0;
+        let failed = false;
+        for (const a of items5) {
+          progress.textContent = `${approve ? "\uC2E4\uD589" : "\uAC70\uC808"} \uC911 ${done + 1}/${items5.length}\u2026`;
+          const ok = await decideOne(a, approve, true);
+          if (!ok) {
+            failed = true;
+            break;
+          }
+          done += 1;
+        }
+        const said = approve ? `\uC2B9\uC778 \uC694\uCCAD ${done}\uAC74\uC744 \uC2E4\uD589\uD588\uC2B5\uB2C8\uB2E4.` + (failed ? " \uC2E4\uD328\uD55C \uD56D\uBAA9\uC5D0\uC11C \uBA48\uCDC4\uC2B5\uB2C8\uB2E4." : "") : `\uC2B9\uC778 \uC694\uCCAD ${done}\uAC74\uC744 \uAC70\uC808\uD588\uC2B5\uB2C8\uB2E4.`;
+        this.hooks.notice(said, failed ? "err" : "ok");
+        await this.refreshActions();
+        if (approve && done) await this.hooks.onApplied();
+      };
+      allYes.addEventListener("click", () => void decideAll(true));
+      allNo.addEventListener("click", () => void decideAll(false));
+      const FOLD = 6;
+      const shown = rows.slice(0, FOLD);
+      const rest = rows.slice(FOLD);
+      const restBox = el("div", { style: { display: "none" } }, rest);
+      const unfold = rest.length ? el("button", { class: "ghost tiny", text: `\uADF8 \uC678 ${rest.length}\uAC74 \uBCF4\uAE30` }) : null;
+      unfold?.addEventListener("click", () => {
+        const open4 = restBox.style.display === "none";
+        restBox.style.display = open4 ? "" : "none";
+        unfold.textContent = open4 ? "\uC811\uAE30" : `\uADF8 \uC678 ${rest.length}\uAC74 \uBCF4\uAE30`;
+      });
       this.actionBox.appendChild(el("div", { class: "card staged" }, [
         el("h2", { text: `\uC2B9\uC778 \uC694\uCCAD ${items5.length}\uAC74` }),
         el("div", { class: "hint", text: "\uC2B9\uC778\uD574\uC57C \uC2E4\uD589\uB429\uB2C8\uB2E4. \uC804\uC0AC \uC218\uC815\uC774 \uC544\uB2CC \uBCC0\uACBD\uC785\uB2C8\uB2E4." }),
-        ...rows
+        items5.length > 1 ? el("div", { class: "row", style: { margin: "6px 0" } }, [allYes, allNo, progress]) : null,
+        ...shown,
+        restBox,
+        unfold
       ]));
     }
     async newConversation() {
@@ -4183,9 +4525,8 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       const empty = this.log.querySelector(".empty");
       if (empty) empty.remove();
       this.addBubble("user", prompt);
-      const body = this.addBubble("assistant", "");
-      const trace = el("div", { class: "trace" });
-      body.parentElement?.insertBefore(trace, body);
+      const bubble = el("div", { class: "bubble assistant" });
+      this.log.appendChild(bubble);
       const elapsed = el("span", { class: "elapsed", text: "0m 0s" });
       const thinkingText = el("span", { class: "thinkingtext", text: "\uC0DD\uAC01\uD558\uB294 \uC911\uC785\uB2C8\uB2E4\u2026" });
       const abort = new AbortController();
@@ -4200,7 +4541,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         elapsed,
         stopBtn
       ]);
-      body.parentElement?.insertBefore(thinking, body);
+      bubble.appendChild(thinking);
       const startedAt = Date.now();
       const tick = () => {
         const s = Math.floor((Date.now() - startedAt) / 1e3);
@@ -4211,21 +4552,38 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       const setThinking = (on, label) => {
         thinking.style.display = on ? "flex" : "none";
         if (label) thinkingText.textContent = label;
-        if (!on) {
-          stopBtn.style.display = "none";
-          this.clearTimer();
-          tick();
-          elapsed.classList.add("done");
-          thinking.style.display = "flex";
-          thinkingText.textContent = label ?? "\uC644\uB8CC";
-          thinking.querySelector(".dots")?.classList.add("stopped");
-        }
       };
-      const tracker = new TraceTracker(trace);
-      let acc = "";
+      const finish = (label) => {
+        stopBtn.style.display = "none";
+        this.clearTimer();
+        tick();
+        elapsed.classList.add("done");
+        thinking.style.display = "flex";
+        thinkingText.textContent = label;
+        thinking.querySelector(".dots")?.classList.add("stopped");
+      };
+      let textNode = null;
+      let textAcc = "";
+      let tracker = null;
+      const proseSegment = () => {
+        if (!textNode) {
+          textNode = el("div", { class: "bubble-body" });
+          bubble.insertBefore(textNode, thinking);
+          textAcc = "";
+          tracker = null;
+        }
+        return textNode;
+      };
+      const traceSegment = () => {
+        if (!tracker) {
+          const strip = el("div", { class: "trace" });
+          bubble.insertBefore(strip, thinking);
+          tracker = new TraceTracker(strip);
+          textNode = null;
+        }
+        return tracker;
+      };
       this.scroll();
-      const permitBox = el("div", { class: "permits" });
-      body.parentElement?.insertBefore(permitBox, body);
       const shown = /* @__PURE__ */ new Set();
       const askPermit = (p) => {
         const card = el("div", { class: "permit" });
@@ -4248,7 +4606,9 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         card.appendChild(el("div", { class: "permit-title", text: (p.kind === "pip" ? "\uD328\uD0A4\uC9C0 \uC124\uCE58 \uD5C8\uC6A9?" : "\uC178 \uBA85\uB839 \uC2E4\uD589 \uD5C8\uC6A9?") + " " + p.summary }));
         card.appendChild(el("pre", { class: "mono", text: p.detail }));
         card.appendChild(el("div", { class: "row" }, [allow, deny, always]));
-        permitBox.appendChild(card);
+        bubble.insertBefore(card, thinking);
+        textNode = null;
+        tracker = null;
         this.scroll();
       };
       const permitPoll = setInterval(async () => {
@@ -4265,23 +4625,25 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         for await (const ev of state.agentChat(prompt, abort.signal)) {
           const e = ev;
           switch (e.type) {
-            case "text":
-              acc += String(e.text ?? "");
+            case "text": {
+              const node = proseSegment();
+              textAcc += String(e.text ?? "");
               setThinking(false);
-              setMarkdown(body, acc);
+              setMarkdown(node, textAcc);
               this.scroll();
               break;
+            }
             case "tool": {
               const name = String(e.name ?? "?");
               const detail = name === "load_skill" ? skillArg(e.args) : "";
-              tracker.push(name, detail);
+              traceSegment().push(name, detail);
               setThinking(true, (TOOL_GLYPH[name]?.[1] ?? name) + (detail ? `: ${detail}` : "") + " \uC911\uC785\uB2C8\uB2E4\u2026");
               this.scroll();
               break;
             }
             case "done": {
-              setThinking(false, "\uC644\uB8CC");
-              body.parentElement?.appendChild(this.costLine(
+              finish("\uC644\uB8CC");
+              bubble.appendChild(this.costLine(
                 e.usage,
                 e.cost ?? null
               ));
@@ -4291,7 +4653,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
                 this.input.value = "\uC774\uC5B4\uC11C \uC9C4\uD589\uD574 \uC8FC\uC138\uC694. \uBC29\uAE08 \uD134\uC5D0\uC11C \uB05D\uB0B4\uC9C0 \uBABB\uD55C \uC791\uC5C5\uC774 \uC788\uC73C\uBA74 \uB9C8\uC800 \uD574 \uC8FC\uC138\uC694.";
                 void this.submit();
               });
-              body.parentElement?.appendChild(el("div", { class: "row", style: { marginTop: "4px" } }, [more]));
+              bubble.appendChild(el("div", { class: "row", style: { marginTop: "4px" } }, [more]));
               if (typeof e.total === "number") {
                 this.status.textContent = `\uC774 \uB300\uD654 \uB204\uC801 $${e.total.toFixed(4)}`;
               }
@@ -4299,8 +4661,8 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
               break;
             }
             case "error":
-              setThinking(false, "\uC911\uB2E8\uB428");
-              body.parentElement?.appendChild(
+              finish("\uC911\uB2E8\uB428");
+              bubble.appendChild(
                 el("div", { class: "notice err", text: String(e.error ?? "\uC54C \uC218 \uC5C6\uB294 \uC624\uB958\uAC00 \uBC1C\uC0DD\uD588\uC2B5\uB2C8\uB2E4") })
               );
               void clientLog("error", "agent stream error", { error: e.error });
@@ -4308,14 +4670,12 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
           }
         }
       } catch (e) {
-        setThinking(false, "\uC911\uB2E8\uB428");
-        body.parentElement?.appendChild(
-          el("div", { class: "notice err", text: msg2(e) })
-        );
+        finish("\uC911\uB2E8\uB428");
+        bubble.appendChild(el("div", { class: "notice err", text: msg2(e) }));
         void clientLog("error", "agent chat failed", { error: String(e) });
       } finally {
         clearInterval(permitPoll);
-        if (!permitBox.childElementCount) permitBox.remove();
+        if (this.timer !== null) finish("\uC885\uB8CC");
         this.busy = false;
         this.send.disabled = false;
         this.scroll();
@@ -5357,6 +5717,9 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     "pdf",
     "docx"
   ]);
+  var IMAGE_RE = /\.(png|jpe?g|gif|webp|avif|bmp)$/i;
+  var TEXT_UPLOAD_RE = /\.(md|txt|json|jsonl|csv|py|html?|css|js|ya?ml|xml|log|sql)$/i;
+  var DOCS_NODE = "@docs";
   function isDocument(f) {
     const ext = (f.name.split(".").pop() || "").toLowerCase();
     return ext !== f.name.toLowerCase() && DOCUMENT_EXT.has(ext);
@@ -5367,9 +5730,20 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
   var viewMount = null;
   var noticeMount3 = null;
   var showInternal = false;
-  var openPath = "";
   var lastListing = null;
-  var uploadDir = "uploads";
+  var nodes = /* @__PURE__ */ new Map();
+  var selectedDir = "uploads";
+  var selection = /* @__PURE__ */ new Set();
+  var anchorPath = "";
+  var previewPath = "";
+  var confirmDelete = false;
+  var view = "list";
+  try {
+    if (localStorage.getItem("hina.filesView") === "grid") view = "grid";
+  } catch {
+  }
+  var expanded = /* @__PURE__ */ new Set(["uploads", "out"]);
+  var thumbs = /* @__PURE__ */ new Map();
   function renderFilesTab(mount) {
     if (!state.activeCharKey) {
       clear(mount);
@@ -5382,12 +5756,13 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     if (!built || !mount.querySelector(".split")) {
       clear(mount);
       const pane = threePane();
-      treeMount = el("div", { class: "tree" });
+      treeMount = el("div", { class: "tree filetree" });
       pane.left.appendChild(treeMount);
       noticeMount3 = el("div");
-      viewMount = el("div", { class: "pad" });
+      viewMount = el("div", { class: "pad filepad" });
       pane.centre.appendChild(noticeMount3);
       pane.centre.appendChild(viewMount);
+      installDrop(viewMount, () => uploadTarget());
       mount.appendChild(pane.root);
       mountAgent(pane.right.querySelector(".right-inner"));
       built = true;
@@ -5412,103 +5787,179 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
   }
   async function refresh() {
     if (!treeMount) return;
-    clear(treeMount);
-    treeMount.appendChild(el("div", { class: "hint", style: { padding: "8px" }, text: "\uC77D\uB294 \uC911\uC785\uB2C8\uB2E4\u2026" }));
     try {
       const data = await state.files();
       lastListing = data;
-      drawTree(data);
+      buildNodes(data);
+      if (!nodes.has(selectedDir)) selectedDir = nodes.has("uploads") ? "uploads" : nodes.keys().next().value ?? "";
+      const alive = new Set(allPaths());
+      selection = new Set([...selection].filter((p) => alive.has(p)));
       const want = state.openFileRequest;
       if (want) {
         state.openFileRequest = null;
-        for (const area of data.areas) {
-          const f = area.files.find((x) => x.path === want);
-          if (f) {
-            void open(f, area);
-            break;
-          }
+        const dir = want.includes("/") ? want.slice(0, want.lastIndexOf("/")) : want;
+        if (nodes.has(dir)) {
+          selectedDir = dir;
+          expandTo(dir);
         }
+        previewPath = want;
+        selection = /* @__PURE__ */ new Set([want]);
       }
+      drawTree();
+      drawCentre();
     } catch (e) {
       clear(treeMount);
       treeMount.appendChild(el("div", { class: "notice err", text: msg4(e) }));
     }
   }
-  function drawTree(data) {
-    if (!treeMount) return;
-    clear(treeMount);
+  function buildNodes(data) {
+    nodes = /* @__PURE__ */ new Map();
     const shown = data.areas.filter((a) => showInternal || USER_AREAS.has(a.area));
-    const hidden = data.areas.filter((a) => !USER_AREAS.has(a.area) && a.count > 0);
-    const picker = el("input", { type: "file", style: { display: "none" } });
-    picker.addEventListener("change", async () => {
-      const file = picker.files?.[0];
-      if (!file) return;
-      try {
-        await upload(file);
-        notice2(`${file.name} \uC744(\uB97C) \uC62C\uB838\uC2B5\uB2C8\uB2E4. AI\uAC00 uploads/ \uC5D0\uC11C \uC77D\uC744 \uC218 \uC788\uC2B5\uB2C8\uB2E4.`, "ok");
-        seenFilesRev = state.filesRev + 1;
-        state.touchFiles();
-        await refresh();
-      } catch (e) {
-        notice2("\uC5C5\uB85C\uB4DC\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg4(e), "err");
-      } finally {
-        picker.value = "";
+    for (const area of shown) {
+      const root = { path: area.area, name: AREA_LABEL[area.area]?.[0] ?? area.area, area, kids: [], files: [] };
+      nodes.set(root.path, root);
+      const ensure = (path) => {
+        const have = nodes.get(path);
+        if (have) return have;
+        const parentPath = path.slice(0, path.lastIndexOf("/"));
+        const parent = ensure(parentPath);
+        const node = { path, name: path.slice(path.lastIndexOf("/") + 1), area, kids: [], files: [] };
+        parent.kids.push(node);
+        nodes.set(path, node);
+        return node;
+      };
+      for (const d of area.dirs ?? []) ensure(d);
+      for (const f of area.files) {
+        const dir = f.path.includes("/") ? f.path.slice(0, f.path.lastIndexOf("/")) : area.area;
+        ensure(dir).files.push(f);
       }
+      for (const n of nodes.values()) {
+        n.kids.sort((a, b) => a.name.localeCompare(b.name));
+        n.files.sort((a, b) => a.name.localeCompare(b.name));
+      }
+    }
+    if (!showInternal) {
+      const docs = [];
+      let anyArea = null;
+      for (const area of data.areas) {
+        if (!SURFACE_FROM.has(area.area)) continue;
+        const mine = area.files.filter(isDocument);
+        if (mine.length) {
+          docs.push(...mine);
+          anyArea = anyArea ?? area;
+        }
+      }
+      if (docs.length && anyArea) {
+        nodes.set(DOCS_NODE, {
+          path: DOCS_NODE,
+          name: "\uC784\uC2DC \uBB38\uC11C",
+          area: { ...anyArea, deletable: true },
+          kids: [],
+          files: docs,
+          virtual: true
+        });
+      }
+    }
+  }
+  function allPaths() {
+    const out = [];
+    for (const n of nodes.values()) {
+      out.push(n.path);
+      for (const f of n.files) out.push(f.path);
+    }
+    return out;
+  }
+  function expandTo(path) {
+    const parts = path.split("/");
+    for (let i = 1; i <= parts.length; i++) expanded.add(parts.slice(0, i).join("/"));
+  }
+  function uploadTarget() {
+    const n = nodes.get(selectedDir);
+    if (n && !n.virtual && USER_AREAS.has(n.area.area)) return n.path;
+    return "uploads";
+  }
+  function moveTargets() {
+    const out = [];
+    for (const a of lastListing?.areas ?? []) {
+      if (!a.deletable) continue;
+      out.push(a.area);
+      for (const d of a.dirs ?? []) out.push(d);
+    }
+    return out;
+  }
+  function drawTree() {
+    if (!treeMount || !lastListing) return;
+    clear(treeMount);
+    const data = lastListing;
+    const filePicker = el("input", { type: "file", multiple: true, style: { display: "none" } });
+    filePicker.addEventListener("change", () => {
+      const files = Array.from(filePicker.files ?? []).map((file) => ({ file, rel: "" }));
+      filePicker.value = "";
+      void uploadMany(files, uploadTarget());
     });
-    const uploadBtn = el("button", { class: "primary tiny", text: "\uC62C\uB9AC\uAE30" });
-    uploadBtn.addEventListener("click", () => picker.click());
-    const reloadBtn = el("button", { class: "ghost tiny", text: "\uC0C8\uB85C\uACE0\uCE68" });
-    reloadBtn.addEventListener("click", () => void refresh());
-    const dirSel = el("select", { class: "tiny", title: "\uC62C\uB9B0 \uD30C\uC77C\uC774 \uB4E4\uC5B4\uAC08 \uD3F4\uB354" });
-    for (const d of uploadTargets()) dirSel.appendChild(el("option", { value: d, text: d === "uploads" ? "uploads/" : d.slice(8) + "/" }));
-    setSelected(dirSel, uploadTargets().includes(uploadDir) ? uploadDir : "uploads");
-    dirSel.addEventListener("change", () => {
-      uploadDir = selectedValue(dirSel) || "uploads";
+    const dirPicker = el("input", { type: "file", multiple: true, style: { display: "none" } });
+    dirPicker.setAttribute("webkitdirectory", "");
+    dirPicker.addEventListener("change", () => {
+      const files = Array.from(dirPicker.files ?? []).map((file) => {
+        const rel = String(file.webkitRelativePath || file.name);
+        return { file, rel: rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/")) : "" };
+      });
+      dirPicker.value = "";
+      void uploadMany(files, uploadTarget());
     });
-    const newDir = el("button", { class: "ghost tiny", text: "\uC0C8 \uD3F4\uB354", title: "uploads/ \uB098 out/ \uC548\uC5D0 \uD3F4\uB354\uB97C \uB9CC\uB4ED\uB2C8\uB2E4" });
+    const uploadBtn = el("button", { class: "primary tiny", text: "\uC62C\uB9AC\uAE30", title: "\uD30C\uC77C\uC744 \uACE8\uB77C \uC9C0\uAE08 \uD3F4\uB354\uC5D0 \uC62C\uB9BD\uB2C8\uB2E4" });
+    uploadBtn.addEventListener("click", () => filePicker.click());
+    const uploadDirBtn = el("button", { class: "ghost tiny", text: "\uD3F4\uB354 \uC62C\uB9AC\uAE30", title: "\uD3F4\uB354\uC9F8 \uC62C\uB9BD\uB2C8\uB2E4 (\uC548\uC758 \uD3F4\uB354 \uAD6C\uC870 \uC720\uC9C0)" });
+    uploadDirBtn.addEventListener("click", () => dirPicker.click());
+    const newDir = el("button", { class: "ghost tiny", text: "\uC0C8 \uD3F4\uB354", title: "\uC9C0\uAE08 \uD3F4\uB354 \uC548\uC5D0 \uD3F4\uB354\uB97C \uB9CC\uB4ED\uB2C8\uB2E4" });
     newDir.addEventListener("click", () => {
       const body = el("div", { class: "applypop" });
       const close = popover(newDir, body);
-      const where = el("select", {}, ["uploads", "out"].map((a) => el("option", { value: a, text: a + "/" })));
+      const where = uploadTarget();
       const name = el("input", { placeholder: "\uD3F4\uB354 \uC774\uB984" });
       const ok = el("button", { class: "primary tiny", text: "\uB9CC\uB4E4\uAE30" });
       ok.addEventListener("click", async () => {
-        const n = name.value.trim().replace(/[\/]+/g, "-");
+        const n = name.value.trim().replace(/[\\/]+/g, "-");
         if (!n) return;
         try {
-          await state.mkdirFile(selectedValue(where) + "/" + n);
+          await state.mkdirFile(where + "/" + n);
           close();
+          expandTo(where + "/" + n);
           await refresh();
         } catch (e) {
           notice2("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg4(e), "err");
         }
       });
-      body.appendChild(el("div", { class: "row" }, [where, name, ok]));
+      name.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") ok.click();
+      });
+      body.appendChild(el("div", { class: "hint", text: `${where}/ \uC548\uC5D0` }));
+      body.appendChild(el("div", { class: "row" }, [name, ok]));
       setTimeout(() => name.focus(), 0);
     });
-    treeMount.appendChild(el("div", { class: "treehead" }, [uploadBtn, dirSel, newDir, reloadBtn, picker]));
-    let anyFiles = false;
-    for (const area of shown) {
-      if (!area.count) continue;
-      anyFiles = true;
-      treeMount.appendChild(areaBranch(area));
+    const reloadBtn = el("button", { class: "ghost tiny", text: "\uC0C8\uB85C\uACE0\uCE68" });
+    reloadBtn.addEventListener("click", () => void refresh());
+    treeMount.appendChild(el("div", { class: "treehead" }, [uploadBtn, uploadDirBtn, newDir, reloadBtn, filePicker, dirPicker]));
+    let any = false;
+    const roots = [...nodes.values()].filter((n) => !n.path.includes("/") && n.path !== DOCS_NODE);
+    for (const root of roots) {
+      if (!root.area.count && !root.kids.length) continue;
+      any = true;
+      treeMount.appendChild(nodeRow(root, 0));
     }
-    if (!showInternal) {
-      for (const area of data.areas) {
-        if (!SURFACE_FROM.has(area.area)) continue;
-        const docs = area.files.filter(isDocument);
-        if (!docs.length) continue;
-        anyFiles = true;
-        treeMount.appendChild(areaBranch({ ...area, files: docs, count: docs.length }, true));
-      }
+    const docs = nodes.get(DOCS_NODE);
+    if (docs) {
+      any = true;
+      treeMount.appendChild(nodeRow(docs, 0));
     }
-    if (!anyFiles) {
+    if (!any) {
       treeMount.appendChild(el("div", {
         class: "hint",
         style: { padding: "8px" },
-        text: showInternal ? "\uD30C\uC77C\uC774 \uC5C6\uC2B5\uB2C8\uB2E4." : "\uC62C\uB9B0 \uD30C\uC77C\uB3C4 \uACB0\uACFC\uBB3C\uB3C4 \uC544\uC9C1 \uC5C6\uC2B5\uB2C8\uB2E4."
+        text: showInternal ? "\uD30C\uC77C\uC774 \uC5C6\uC2B5\uB2C8\uB2E4." : "\uC62C\uB9B0 \uD30C\uC77C\uB3C4 \uACB0\uACFC\uBB3C\uB3C4 \uC544\uC9C1 \uC5C6\uC2B5\uB2C8\uB2E4. \uD30C\uC77C\uC744 \uB04C\uC5B4\uB2E4 \uB193\uC73C\uBA74 \uC62C\uB77C\uAC11\uB2C8\uB2E4."
       }));
     }
+    const hidden = data.areas.filter((a) => !USER_AREAS.has(a.area) && a.count > 0);
     const toggle = el("button", {
       class: "ghost tiny",
       text: showInternal ? "\uB0B4\uBD80 \uD30C\uC77C \uC228\uAE30\uAE30" : `\uB0B4\uBD80 \uD30C\uC77C \uBCF4\uAE30 (${hidden.reduce((n, a) => n + a.count, 0)})`
@@ -5533,196 +5984,608 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       el("div", { class: "hint", text: `\uC804\uCCB4 ${fmtSize2(data.totalSize)}` })
     ]));
   }
-  function areaBranch(area, surfaced = false) {
-    const [base, why] = AREA_LABEL[area.area] ?? [area.area, ""];
-    const label = surfaced ? `${base} \uBB38\uC11C` : base;
-    const dirs = new Set(surfaced ? [] : area.dirs ?? []);
-    const byDir = /* @__PURE__ */ new Map();
-    for (const f of area.files) {
-      const dir = f.path.includes("/") ? f.path.slice(0, f.path.lastIndexOf("/")) : area.area;
-      const key = dir === area.area ? "" : dir;
-      if (key) dirs.add(key);
-      if (!byDir.has(key)) byDir.set(key, []);
-      byDir.get(key).push(f);
-    }
-    const rows = (byDir.get("") ?? []).map((f) => fileRow(area, f));
-    for (const dir of [...dirs].sort()) {
-      const files = byDir.get(dir) ?? [];
-      const shortName = dir.slice(area.area.length + 1);
-      const head2 = el("div", { class: "treerow folderrow" }, [
-        el("span", { class: "treefile folderlabel", text: "\u{1F4C1} " + shortName, title: dir }),
-        el("span", { class: "hint", text: String(files.length) })
-      ]);
-      if (area.deletable && !surfaced) {
-        const del = el("button", { class: "ghost tiny", title: "\uD3F4\uB354\uB97C \uC548\uC758 \uD30C\uC77C\uACFC \uD568\uAED8 \uC9C0\uC6C1\uB2C8\uB2E4" });
-        armed(del, "\xD7", "\uD3F4\uB354\uC9F8?", async () => {
-          try {
-            await state.deleteFile(dir);
-            await refresh();
-          } catch (e) {
-            notice2("\uC9C0\uC6B0\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg4(e), "err");
-          }
-        });
-        head2.appendChild(del);
-      }
-      rows.push(head2);
-      rows.push(el("div", { class: "treekids folderkids" }, files.map((f) => fileRow(area, f))));
-    }
-    const head = el("button", {
-      class: "treebranch",
-      title: surfaced ? `${area.area}/ \uC5D0 \uC788\uB294 \uBB38\uC11C\uC785\uB2C8\uB2E4. ${why}` : why
+  function nodeRow(n, depth) {
+    const isOpen = expanded.has(n.path);
+    const caret = el("button", { class: "caret", text: n.kids.length ? isOpen ? "\u25BE" : "\u25B8" : "" });
+    const count = n.files.length + n.kids.reduce((s, k) => s + countFiles(k), 0);
+    const [, why] = AREA_LABEL[n.area.area] ?? ["", ""];
+    const branch = el("button", {
+      class: "treebranch" + (n.path === selectedDir ? " on" : ""),
+      title: n.virtual ? `${SURFACE_FROM.size ? "scratch/\xB7scripts/" : ""} \uC5D0 \uC788\uB294 \uBB38\uC11C\uC785\uB2C8\uB2E4. \uC5EC\uAE30\uC11C \uBC14\uB85C \uBCFC \uC218 \uC788\uC2B5\uB2C8\uB2E4.` : depth ? n.path : why
     }, [
-      el("span", { class: "grow", text: label }),
-      el("span", { class: "hint", text: String(area.count) })
+      el("span", { text: n.virtual ? "\u{1F4C4}" : isOpen && n.kids.length ? "\u{1F4C2}" : "\u{1F4C1}" }),
+      el("span", { class: "grow", text: n.name, style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }),
+      el("span", { class: "n", text: String(count) })
     ]);
-    const body = el("div", { class: "treekids" }, rows);
-    head.addEventListener("click", () => {
-      body.style.display = body.style.display === "none" ? "block" : "none";
+    branch.addEventListener("click", () => {
+      selectedDir = n.path;
+      previewPath = "";
+      selection.clear();
+      confirmDelete = false;
+      if (n.kids.length) expanded.add(n.path);
+      drawTree();
+      drawCentre();
     });
-    if (!USER_AREAS.has(area.area) && !surfaced) body.style.display = "none";
-    return el("div", {}, [head, body]);
-  }
-  function moveTargets() {
-    const out = [];
-    for (const a of lastListing?.areas ?? []) {
-      if (!a.deletable) continue;
-      out.push(a.area);
-      for (const d of a.dirs ?? []) out.push(d);
-    }
-    return out;
-  }
-  function uploadTargets() {
-    const up = (lastListing?.areas ?? []).find((a) => a.area === "uploads");
-    return ["uploads", ...up?.dirs ?? []];
-  }
-  function fileRow(area, f) {
-    const name = el("button", {
-      class: "treefile" + (f.path === openPath ? " on" : ""),
-      text: f.name,
-      title: `${f.path} \xB7 ${fmtSize2(f.size)}`
+    caret.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (expanded.has(n.path)) expanded.delete(n.path);
+      else expanded.add(n.path);
+      drawTree();
     });
-    name.addEventListener("click", () => void open(f, area));
-    const row = el("div", { class: "treerow" }, [name]);
-    if (area.deletable) {
-      const mv = el("button", { class: "ghost tiny", text: "\uC774\uB3D9", title: "\uB2E4\uB978 \uD3F4\uB354\uB85C \uC62E\uAE41\uB2C8\uB2E4" });
-      mv.addEventListener("click", () => {
-        const body = el("div", { class: "applypop" });
-        const close = popover(mv, body);
-        body.appendChild(el("div", { class: "hint", text: `${f.name} \uC744(\uB97C) \uC62E\uAE38 \uACF3:` }));
-        const here = f.path.includes("/") ? f.path.slice(0, f.path.lastIndexOf("/")) : "";
-        for (const target of moveTargets()) {
-          if (target === here) continue;
-          const b = el("button", { class: "catrow", text: "\u{1F4C1} " + target });
-          b.addEventListener("click", async () => {
-            try {
-              await state.moveFile(f.path, target);
-              close();
-              if (openPath === f.path) {
-                openPath = "";
-                if (viewMount) clear(viewMount);
-              }
-              state.touchFiles();
-              await refresh();
-            } catch (e) {
-              notice2("\uC62E\uAE30\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg4(e), "err");
-            }
-          });
-          body.appendChild(b);
-        }
-      });
-      row.appendChild(mv);
-      const del = el("button", { class: "ghost tiny" });
-      armed(del, "\xD7", "\uD55C \uBC88 \uB354", async () => {
-        try {
-          await state.deleteFile(f.path);
-          if (openPath === f.path) {
-            openPath = "";
-            if (viewMount) clear(viewMount);
-          }
-          await refresh();
-        } catch (e) {
-          notice2("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg4(e), "err");
-        }
-      });
-      row.appendChild(del);
+    if (!n.virtual && USER_AREAS.has(n.area.area)) installDrop(branch, () => n.path);
+    const kids = el(
+      "div",
+      { class: "treekids", style: { display: isOpen ? "" : "none" } },
+      n.kids.map((k) => nodeRow(k, depth + 1))
+    );
+    return el("div", {}, [el("div", { class: "treerow" }, [caret, branch]), kids]);
+  }
+  function countFiles(n) {
+    return n.files.length + n.kids.reduce((s, k) => s + countFiles(k), 0);
+  }
+  function drawCentre() {
+    if (!viewMount) return;
+    clear(viewMount);
+    const n = nodes.get(selectedDir);
+    if (!n) {
+      viewMount.appendChild(el("div", { class: "empty", text: "\uC67C\uCABD\uC5D0\uC11C \uD3F4\uB354\uB97C \uACE0\uB974\uC138\uC694." }));
+      return;
     }
+    if (previewPath) {
+      const f = n.files.find((x) => x.path === previewPath) ?? findFile(previewPath);
+      if (f) {
+        void drawPreview(f, n);
+        return;
+      }
+      previewPath = "";
+    }
+    const writable = !n.virtual && USER_AREAS.has(n.area.area);
+    const deletable = n.area.deletable;
+    const hasImages = n.files.some((f) => IMAGE_RE.test(f.name));
+    const [, why] = AREA_LABEL[n.area.area] ?? ["", ""];
+    const selCount = selection.size;
+    const dl = el("button", { class: "ghost tiny", text: selCount > 1 ? `\uB0B4\uB824\uBC1B\uAE30 (${selCount}, zip)` : "\uB0B4\uB824\uBC1B\uAE30", title: "\uB0B4 PC\uC5D0 \uC800\uC7A5\uD569\uB2C8\uB2E4. \uC5EC\uB7EC \uAC1C\uB098 \uD3F4\uB354\uB294 zip \uD558\uB098\uB85C \uBC1B\uC2B5\uB2C8\uB2E4." });
+    dl.disabled = !selCount;
+    dl.addEventListener("click", () => void downloadSelected(n));
+    const mv = el("button", { class: "ghost tiny", text: "\uC774\uB3D9", title: "\uACE0\uB978 \uD56D\uBAA9\uC744 \uB2E4\uB978 \uD3F4\uB354\uB85C \uC62E\uAE41\uB2C8\uB2E4" });
+    mv.disabled = !selCount || !deletable;
+    mv.addEventListener("click", () => openMove(mv));
+    const del = el("button", { class: "ghost tiny", text: selCount ? `\uC0AD\uC81C (${selCount})` : "\uC0AD\uC81C", title: "Delete \uD0A4\uB85C\uB3C4 \uB429\uB2C8\uB2E4" });
+    del.disabled = !selCount || !deletable;
+    del.addEventListener("click", () => requestDelete());
+    const all = el("button", { class: "ghost tiny", text: "\uC804\uCCB4 \uC120\uD0DD", title: "Ctrl+A" });
+    all.addEventListener("click", () => {
+      selectAll(n);
+      drawCentre();
+    });
+    const viewBtn = el("button", { class: "ghost tiny", text: view === "grid" ? "\uBAA9\uB85D \uBCF4\uAE30" : "\uBBF8\uB9AC\uBCF4\uAE30", title: "\uADF8\uB9BC\uC774 \uC788\uB294 \uD3F4\uB354\uB294 \uC378\uB124\uC77C\uB85C \uBCFC \uC218 \uC788\uC2B5\uB2C8\uB2E4" });
+    viewBtn.addEventListener("click", () => {
+      view = view === "grid" ? "list" : "grid";
+      try {
+        localStorage.setItem("hina.filesView", view);
+      } catch {
+      }
+      drawCentre();
+    });
+    const zipAll = el("button", { class: "ghost tiny", text: "\uD3F4\uB354 zip", title: "\uC774 \uD3F4\uB354 \uC804\uCCB4\uB97C zip \uD558\uB098\uB85C \uBC1B\uC2B5\uB2C8\uB2E4" });
+    zipAll.disabled = n.virtual === true || !n.files.length && !n.kids.length;
+    zipAll.addEventListener("click", async () => {
+      zipAll.disabled = true;
+      try {
+        const bytes = await state.downloadZip([n.path], n.name);
+        notice2(`${fmtSize2(bytes)} zip \uC744 \uBE0C\uB77C\uC6B0\uC800 \uB2E4\uC6B4\uB85C\uB4DC\uB85C \uB118\uACBC\uC2B5\uB2C8\uB2E4.`, "ok");
+      } catch (e) {
+        notice2("\uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg4(e), "err");
+      } finally {
+        zipAll.disabled = false;
+      }
+    });
+    viewMount.appendChild(el("div", { class: "filebar" }, [
+      el("span", { class: "filecrumb", text: n.virtual ? "\uC784\uC2DC \uBB38\uC11C" : n.path + "/" }),
+      el("span", { class: "hint", text: `${n.files.length}\uAC1C` + (n.kids.length ? ` \xB7 \uD3F4\uB354 ${n.kids.length}` : "") }),
+      el("span", { class: "spacer" }),
+      hasImages ? viewBtn : null,
+      all,
+      dl,
+      zipAll,
+      mv,
+      del
+    ]));
+    viewMount.appendChild(el("div", { class: "filehint", text: (n.virtual ? "scratch/\xB7scripts/ \uC5D0 AI\uAC00 \uB0A8\uAE34 \uBB38\uC11C\uC785\uB2C8\uB2E4. " : why + " ") + (writable ? "\uD30C\uC77C\uC774\uB098 \uD3F4\uB354\uB97C \uC5EC\uAE30\uC5D0 \uB04C\uC5B4\uB2E4 \uB193\uC73C\uBA74 \uC774 \uD3F4\uB354\uC5D0 \uC62C\uB77C\uAC11\uB2C8\uB2E4 (zip \uC740 \uD480\uC5B4\uC11C \uC62C\uB9B4 \uC218 \uC788\uC2B5\uB2C8\uB2E4). " : "") + "\uD074\uB9AD\uC73C\uB85C \uC120\uD0DD, Ctrl\xB7Shift \uB85C \uC5EC\uB7EC \uAC1C, \uB354\uBE14\uD074\uB9AD\xB7Enter \uB85C \uC5F4\uAE30" + (deletable ? ", Delete \uB85C \uC0AD\uC81C." : ".") }));
+    const barSlot = el("div", { class: "fileslot" });
+    viewMount.appendChild(barSlot);
+    if (confirmDelete && selCount && deletable) barSlot.appendChild(confirmBar(n));
+    const list2 = el("div", { class: "filelist", tabindex: "0" });
+    const entries = [
+      ...n.kids.map((k) => ({ path: k.path, name: k.name, node: k })),
+      ...n.files.map((f) => ({ path: f.path, name: f.name, file: f }))
+    ];
+    if (!entries.length) {
+      list2.appendChild(el("div", { class: "fempty", text: writable ? "\uBE44\uC5B4 \uC788\uC2B5\uB2C8\uB2E4. \uD30C\uC77C\uC744 \uB04C\uC5B4\uB2E4 \uB193\uAC70\uB098 \uC67C\uCABD \u201C\uC62C\uB9AC\uAE30\u201D\uB97C \uB204\uB974\uC138\uC694." : "\uBE44\uC5B4 \uC788\uC2B5\uB2C8\uB2E4." }));
+    } else if (view === "grid" && hasImages) {
+      const grid = el("div", { class: "fgrid" });
+      for (const e of entries) grid.appendChild(gridCell(e, entries, n));
+      list2.appendChild(grid);
+    } else {
+      list2.appendChild(el("div", { class: "frow head" }, [
+        el("span"),
+        el("span", { text: "\uC774\uB984" }),
+        el("span", { class: "fsize", text: "\uD06C\uAE30" }),
+        el("span", { class: "ftime", text: "\uC218\uC815" })
+      ]));
+      for (const e of entries) list2.appendChild(listRow(e, entries, n));
+    }
+    list2.addEventListener("keydown", (ev) => {
+      const e = ev;
+      if (e.key === "Delete" || e.key === "Backspace") {
+        e.preventDefault();
+        if (confirmDelete) void runDelete(n);
+        else requestDelete();
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        const first = [...selection][0];
+        if (first) openEntry(first, n);
+      } else if (e.key === "Escape") {
+        selection.clear();
+        confirmDelete = false;
+        drawCentre();
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
+        e.preventDefault();
+        selectAll(n);
+        drawCentre();
+      }
+    });
+    viewMount.appendChild(list2);
+  }
+  function findFile(path) {
+    for (const n of nodes.values()) {
+      const f = n.files.find((x) => x.path === path);
+      if (f) return f;
+    }
+    return void 0;
+  }
+  function selectAll(n) {
+    selection = /* @__PURE__ */ new Set([...n.kids.map((k) => k.path), ...n.files.map((f) => f.path)]);
+  }
+  function pick(path, e, order) {
+    if (e.shiftKey && anchorPath) {
+      const a = order.findIndex((x) => x.path === anchorPath);
+      const b = order.findIndex((x) => x.path === path);
+      if (a >= 0 && b >= 0) {
+        const [lo, hi] = a < b ? [a, b] : [b, a];
+        for (let i = lo; i <= hi; i++) selection.add(order[i].path);
+      } else selection.add(path);
+    } else if (e.ctrlKey || e.metaKey) {
+      if (selection.has(path)) selection.delete(path);
+      else selection.add(path);
+      anchorPath = path;
+    } else {
+      selection = /* @__PURE__ */ new Set([path]);
+      anchorPath = path;
+    }
+    confirmDelete = false;
+  }
+  function openEntry(path, n) {
+    const kid = n.kids.find((k) => k.path === path);
+    if (kid) {
+      selectedDir = kid.path;
+      expandTo(kid.path);
+      selection.clear();
+      drawTree();
+      drawCentre();
+      return;
+    }
+    previewPath = path;
+    drawCentre();
+  }
+  function listRow(e, order, n) {
+    const box = el("input", { type: "checkbox" });
+    box.checked = selection.has(e.path);
+    const row = el("div", { class: "frow" + (selection.has(e.path) ? " sel" : ""), title: e.path }, [
+      box,
+      el("span", { class: "fname" }, [
+        el("span", { class: "ficon", text: e.node ? "\u{1F4C1}" : icon(e.name) }),
+        el("span", { text: e.name })
+      ]),
+      el("span", { class: "fsize", text: e.file ? fmtSize2(e.file.size) : `${countFiles(e.node)}\uAC1C` }),
+      el("span", { class: "ftime", text: e.file ? fmtWhen(e.file.modified) : "" })
+    ]);
+    box.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      if (box.checked) selection.add(e.path);
+      else selection.delete(e.path);
+      anchorPath = e.path;
+      confirmDelete = false;
+      drawCentre();
+      focusList();
+    });
+    row.addEventListener("click", (ev) => {
+      pick(e.path, ev, order);
+      drawCentre();
+      focusList();
+    });
+    row.addEventListener("dblclick", () => openEntry(e.path, n));
     return row;
   }
-  async function open(f, area) {
-    if (!viewMount) return;
-    openPath = f.path;
-    for (const b of Array.from(document.querySelectorAll(".treefile"))) {
-      b.classList.toggle("on", b.title.startsWith(f.path + " "));
-    }
-    clear(viewMount);
-    if (!f.textual) {
-      const save = el("button", { class: "primary tiny", text: "\uB0B4 PC\uC5D0 \uC800\uC7A5" });
-      const out = el("div", { class: "hint" });
-      save.addEventListener("click", async () => {
-        save.disabled = true;
-        out.textContent = "\uBC1B\uB294 \uC911\uC785\uB2C8\uB2E4\u2026";
-        try {
-          const n = await state.downloadFile(f.path);
-          out.textContent = `${fmtSize2(n)} \uB97C \uBE0C\uB77C\uC6B0\uC800 \uB2E4\uC6B4\uB85C\uB4DC\uB85C \uB118\uACBC\uC2B5\uB2C8\uB2E4.`;
-        } catch (e) {
-          out.textContent = "\uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + (e instanceof Error ? e.message : String(e));
-        } finally {
-          save.disabled = false;
-        }
+  function gridCell(e, order, n) {
+    const pic = el("div", { class: "assetpic" });
+    const cell2 = el("div", { class: "fcell" + (selection.has(e.path) ? " sel" : ""), title: e.path }, [
+      pic,
+      el("div", { class: "fname", text: e.name }),
+      el("div", { class: "fsize", text: e.file ? fmtSize2(e.file.size) : `\uD3F4\uB354 \xB7 ${countFiles(e.node)}\uAC1C` })
+    ]);
+    if (e.node) pic.appendChild(el("div", { class: "assettype", text: "\u{1F4C1}" }));
+    else if (e.file && IMAGE_RE.test(e.name)) void loadThumb(e.file, pic);
+    else pic.appendChild(el("div", { class: "assettype", text: (e.name.split(".").pop() || "?").toUpperCase().slice(0, 5) }));
+    cell2.addEventListener("click", (ev) => {
+      pick(e.path, ev, order);
+      drawCentre();
+      focusList();
+    });
+    cell2.addEventListener("dblclick", () => openEntry(e.path, n));
+    return cell2;
+  }
+  function focusList() {
+    viewMount?.querySelector(".filelist")?.focus();
+  }
+  var THUMB_PARALLEL = 6;
+  var thumbActive = 0;
+  var thumbQueue = [];
+  async function loadThumb(f, mount) {
+    let url = thumbs.get(f.path + ":" + f.modified) || "";
+    if (!url) {
+      await new Promise((resolve) => {
+        const go = () => {
+          thumbActive += 1;
+          resolve();
+        };
+        if (thumbActive < THUMB_PARALLEL) go();
+        else thumbQueue.push(go);
       });
-      viewMount.appendChild(el("div", { class: "card" }, [
-        el("h2", { text: f.path }),
-        el("div", { class: "hint", text: `${fmtSize2(f.size)} \xB7 \uD14D\uC2A4\uD2B8 \uD30C\uC77C\uC774 \uC544\uB2C8\uB77C \uBBF8\uB9AC\uBCF4\uAE30\uB97C \uAC74\uB108\uB701\uB2C8\uB2E4.` }),
-        el("div", { class: "row", style: { marginTop: "8px" } }, [save]),
-        out,
-        f.path.endsWith(".charx") ? el("div", { class: "hint", style: { marginTop: "6px" }, text: "\uBC1B\uC740 charx \uB294 RisuAI \uC758 \uCE90\uB9AD\uD130 \uAC00\uC838\uC624\uAE30\uB85C \uB123\uC2B5\uB2C8\uB2E4. 300MB \uAC00 \uB118\uC73C\uBA74 \uBC31\uC5D4\uB4DC PC \uC758 out/ \uD3F4\uB354\uC5D0\uC11C \uC9C1\uC811 \uBCF5\uC0AC\uD558\uB294 \uD3B8\uC774 \uBE60\uB985\uB2C8\uB2E4." }) : null
-      ]));
+      try {
+        if (!mount.isConnected) return;
+        const bytes = await state.fileBytes(f.path);
+        const buf = new Uint8Array(bytes.byteLength);
+        buf.set(bytes);
+        url = URL.createObjectURL(new Blob([buf]));
+        if (thumbs.size > 400) {
+          for (const [k, u] of thumbs) {
+            URL.revokeObjectURL(u);
+            thumbs.delete(k);
+            break;
+          }
+        }
+        thumbs.set(f.path + ":" + f.modified, url);
+      } catch {
+        mount.appendChild(el("div", { class: "assettype", text: "?" }));
+        return;
+      } finally {
+        thumbActive -= 1;
+        thumbQueue.shift()?.();
+      }
+    }
+    if (!mount.isConnected) return;
+    const img = el("img", { src: url, alt: f.name, loading: "lazy" });
+    img.addEventListener("error", () => img.replaceWith(el("div", { class: "assettype", text: "IMG" })));
+    mount.appendChild(img);
+  }
+  async function drawPreview(f, n) {
+    if (!viewMount) return;
+    clear(viewMount);
+    const back = el("button", { class: "ghost tiny", text: "\u2039 \uBAA9\uB85D\uC73C\uB85C" });
+    back.addEventListener("click", () => {
+      previewPath = "";
+      drawCentre();
+      focusList();
+    });
+    const save = el("button", { class: "primary tiny", text: "\uB0B4 PC\uC5D0 \uC800\uC7A5" });
+    const out = el("span", { class: "hint" });
+    save.addEventListener("click", async () => {
+      save.disabled = true;
+      out.textContent = "\uBC1B\uB294 \uC911\uC785\uB2C8\uB2E4\u2026";
+      try {
+        const bytes = await state.downloadFile(f.path);
+        out.textContent = `${fmtSize2(bytes)} \uB97C \uBE0C\uB77C\uC6B0\uC800 \uB2E4\uC6B4\uB85C\uB4DC\uB85C \uB118\uACBC\uC2B5\uB2C8\uB2E4.`;
+      } catch (e) {
+        out.textContent = "\uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg4(e);
+      } finally {
+        save.disabled = false;
+      }
+    });
+    const head = el("div", { class: "filebar" }, [
+      back,
+      el("span", { class: "filecrumb", text: f.path }),
+      el("span", { class: "hint", text: `${fmtSize2(f.size)} \xB7 ${fmtWhen(f.modified)} \xB7 ${AREA_LABEL[n.area.area]?.[0] ?? n.area.area}` }),
+      el("span", { class: "spacer" }),
+      save,
+      out
+    ]);
+    viewMount.appendChild(head);
+    const body = el("div", { class: "card fpreview" });
+    viewMount.appendChild(body);
+    if (IMAGE_RE.test(f.name)) {
+      body.appendChild(el("div", { class: "hint", text: "\uBD88\uB7EC\uC624\uB294 \uC911\uC785\uB2C8\uB2E4\u2026" }));
+      try {
+        const bytes = await state.fileBytes(f.path);
+        const buf = new Uint8Array(bytes.byteLength);
+        buf.set(bytes);
+        const url = URL.createObjectURL(new Blob([buf]));
+        clear(body);
+        const img = el("img", { src: url, alt: f.name });
+        img.addEventListener("error", () => {
+          clear(body);
+          body.appendChild(el("div", { class: "hint", text: "\uC774 \uD638\uC2A4\uD2B8\uC5D0\uC11C\uB294 \uADF8\uB9BC\uC744 \uD45C\uC2DC\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4. \uB0B4 PC\uC5D0 \uC800\uC7A5\uD574\uC11C \uBCF4\uC138\uC694." }));
+        });
+        body.appendChild(img);
+      } catch (e) {
+        clear(body);
+        body.appendChild(el("div", { class: "notice err", text: msg4(e) }));
+      }
       return;
     }
-    viewMount.appendChild(el("div", { class: "hint", text: "\uC5EC\uB294 \uC911\uC785\uB2C8\uB2E4\u2026" }));
+    if (!f.textual) {
+      body.appendChild(el("div", { class: "hint", text: "\uD14D\uC2A4\uD2B8 \uD30C\uC77C\uC774 \uC544\uB2C8\uB77C \uBBF8\uB9AC\uBCF4\uAE30\uB97C \uAC74\uB108\uB701\uB2C8\uB2E4. \uC704 \u201C\uB0B4 PC\uC5D0 \uC800\uC7A5\u201D\uC73C\uB85C \uBC1B\uC73C\uC138\uC694." }));
+      if (f.path.endsWith(".charx")) {
+        body.appendChild(el("div", { class: "hint", style: { marginTop: "6px" }, text: "\uBC1B\uC740 charx \uB294 RisuAI \uC758 \uCE90\uB9AD\uD130 \uAC00\uC838\uC624\uAE30\uB85C \uB123\uC2B5\uB2C8\uB2E4. 300MB \uAC00 \uB118\uC73C\uBA74 \uBC31\uC5D4\uB4DC PC \uC758 out/ \uD3F4\uB354\uC5D0\uC11C \uC9C1\uC811 \uBCF5\uC0AC\uD558\uB294 \uD3B8\uC774 \uBE60\uB985\uB2C8\uB2E4." }));
+      }
+      return;
+    }
+    body.appendChild(el("div", { class: "hint", text: "\uC5EC\uB294 \uC911\uC785\uB2C8\uB2E4\u2026" }));
     try {
       const r = await state.readFile(f.path);
-      clear(viewMount);
-      const ask = el("button", { class: "ghost tiny", text: "AI\uC5D0\uAC8C \uC774 \uD30C\uC77C \uBCF4\uC5EC\uC8FC\uAE30" });
-      ask.addEventListener("click", () => {
-        notice2(`AI \uD328\uB110\uC5D0 \u201C${f.path} \uC77D\uC5B4 \uC918\u201D \uB77C\uACE0 \uBB3C\uC5B4\uBCF4\uC2DC\uBA74 \uB429\uB2C8\uB2E4.`);
-      });
-      viewMount.appendChild(el("div", { class: "card" }, [
-        el("h2", {}, [
-          el("span", { text: f.path }),
-          el("span", { class: "spacer" })
-        ]),
-        el("div", { class: "row", style: { marginBottom: "8px" } }, [
-          el("span", {
-            class: "hint",
-            text: `${fmtSize2(r.size)}${r.truncated ? " \xB7 \uC55E\uBD80\uBD84\uB9CC \uD45C\uC2DC\uD569\uB2C8\uB2E4" : ""} \xB7 ${AREA_LABEL[area.area]?.[0] ?? area.area}`
-          }),
-          el("span", { class: "spacer" }),
-          ask
-        ]),
-        el("pre", { class: "mono filepreview", text: r.content || r.note || "(\uBE44\uC5B4 \uC788\uC2B5\uB2C8\uB2E4)" })
-      ]));
+      clear(body);
+      if (r.truncated) body.appendChild(el("div", { class: "hint", text: "\uC55E\uBD80\uBD84\uB9CC \uD45C\uC2DC\uD569\uB2C8\uB2E4." }));
+      body.appendChild(el("pre", { class: "mono filepreview", text: r.content || r.note || "(\uBE44\uC5B4 \uC788\uC2B5\uB2C8\uB2E4)" }));
     } catch (e) {
-      clear(viewMount);
-      viewMount.appendChild(el("div", { class: "notice err", text: msg4(e) }));
+      clear(body);
+      body.appendChild(el("div", { class: "notice err", text: msg4(e) }));
     }
   }
-  async function upload(file) {
-    const isText = /\.(md|txt|json|jsonl|csv|py|html?|css|js|ya?ml|xml|log|sql)$/i.test(file.name);
-    if (isText) {
-      await state.uploadFile(file.name, await file.text(), false, uploadDir);
+  function requestDelete() {
+    const n = nodes.get(selectedDir);
+    if (!n || !selection.size) return;
+    if (!n.area.deletable) {
+      notice2(`${n.name} \uC548\uC758 \uD30C\uC77C\uC740 \uC9C0\uC6B8 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4.`);
       return;
     }
-    const buf = new Uint8Array(await file.arrayBuffer());
-    let bin = "";
-    for (let i = 0; i < buf.length; i++) bin += String.fromCharCode(buf[i]);
-    await state.uploadFile(file.name, btoa(bin), true, uploadDir);
+    confirmDelete = true;
+    drawCentre();
+    focusList();
+  }
+  function confirmBar(n) {
+    const yes = el("button", { class: "danger tiny", text: "\uC0AD\uC81C" });
+    const no = el("button", { class: "ghost tiny", text: "\uCDE8\uC18C" });
+    yes.addEventListener("click", () => void runDelete(n));
+    no.addEventListener("click", () => {
+      confirmDelete = false;
+      drawCentre();
+      focusList();
+    });
+    const names = [...selection].map((p) => p.slice(p.lastIndexOf("/") + 1));
+    return el("div", { class: "confirmbar" }, [
+      el("span", { text: `${selection.size}\uAC1C\uB97C \uC9C0\uC6B8\uAE4C\uC694? ` + names.slice(0, 3).join(", ") + (names.length > 3 ? " \u2026" : "") }),
+      el("span", { class: "hint", text: "(Delete \uB97C \uD55C \uBC88 \uB354 \uB204\uB974\uBA74 \uC9C0\uC6C1\uB2C8\uB2E4)" }),
+      el("span", { class: "spacer" }),
+      yes,
+      no
+    ]);
+  }
+  async function runDelete(n) {
+    const paths = [...selection];
+    confirmDelete = false;
+    if (!paths.length) return;
+    let done = 0;
+    try {
+      for (const p of paths) {
+        await state.deleteFile(p);
+        done += 1;
+        if (previewPath === p) previewPath = "";
+      }
+      notice2(`${done}\uAC1C\uB97C \uC9C0\uC6E0\uC2B5\uB2C8\uB2E4.`, "ok");
+    } catch (e) {
+      notice2(`${done}\uAC1C\uB97C \uC9C0\uC6B4 \uB4A4 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: ` + msg4(e), "err");
+    }
+    selection.clear();
+    state.touchFiles();
+    seenFilesRev = state.filesRev;
+    await refresh();
+    focusList();
+  }
+  function openMove(anchor) {
+    const paths = [...selection];
+    if (!paths.length) return;
+    const body = el("div", { class: "applypop" });
+    const close = popover(anchor, body);
+    body.appendChild(el("div", { class: "hint", text: `${paths.length}\uAC1C\uB97C \uC62E\uAE38 \uACF3:` }));
+    for (const target of moveTargets()) {
+      if (target === selectedDir) continue;
+      const b = el("button", { class: "catrow", text: "\u{1F4C1} " + target });
+      b.addEventListener("click", async () => {
+        close();
+        let done = 0;
+        try {
+          for (const p of paths) {
+            await state.moveFile(p, target);
+            done += 1;
+          }
+          notice2(`${done}\uAC1C\uB97C ${target}/ \uB85C \uC62E\uACBC\uC2B5\uB2C8\uB2E4.`, "ok");
+        } catch (e) {
+          notice2(`${done}\uAC1C\uB97C \uC62E\uAE34 \uB4A4 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: ` + msg4(e), "err");
+        }
+        selection.clear();
+        previewPath = "";
+        state.touchFiles();
+        seenFilesRev = state.filesRev;
+        await refresh();
+      });
+      body.appendChild(b);
+    }
+  }
+  async function downloadSelected(n) {
+    const paths = [...selection];
+    if (!paths.length) return;
+    const single = paths.length === 1 ? n.files.find((f) => f.path === paths[0]) : void 0;
+    try {
+      if (single) {
+        const bytes2 = await state.downloadFile(single.path);
+        notice2(`${single.name} \xB7 ${fmtSize2(bytes2)} \uB97C \uBE0C\uB77C\uC6B0\uC800 \uB2E4\uC6B4\uB85C\uB4DC\uB85C \uB118\uACBC\uC2B5\uB2C8\uB2E4.`, "ok");
+        return;
+      }
+      const name = paths.length === 1 ? paths[0].slice(paths[0].lastIndexOf("/") + 1) : `${state.workspace?.characterName || "files"}-${n.name}`;
+      notice2("zip \uC744 \uB9CC\uB4DC\uB294 \uC911\uC785\uB2C8\uB2E4\u2026");
+      const bytes = await state.downloadZip(paths, name);
+      notice2(`${paths.length}\uAC1C \xB7 ${fmtSize2(bytes)} zip \uC744 \uBE0C\uB77C\uC6B0\uC800 \uB2E4\uC6B4\uB85C\uB4DC\uB85C \uB118\uACBC\uC2B5\uB2C8\uB2E4.`, "ok");
+    } catch (e) {
+      notice2("\uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg4(e), "err");
+    }
+  }
+  function installDrop(target, into) {
+    for (const kind of ["dragover", "dragenter"]) {
+      target.addEventListener(kind, (e) => {
+        const dt = e.dataTransfer;
+        if (!dt || !Array.from(dt.types).includes("Files")) return;
+        e.preventDefault();
+        e.stopPropagation();
+        target.classList.add("dropping");
+      });
+    }
+    target.addEventListener("dragleave", (e) => {
+      if (!target.contains(e.relatedTarget)) target.classList.remove("dropping");
+    });
+    target.addEventListener("drop", async (e) => {
+      const dt = e.dataTransfer;
+      target.classList.remove("dropping");
+      if (!dt) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const files = await collectDrop(dt);
+      if (files.length) void uploadMany(files, into());
+    });
+  }
+  async function collectDrop(dt) {
+    const out = [];
+    const items5 = Array.from(dt.items ?? []);
+    const entries = items5.map((it) => it.webkitGetAsEntry?.() ?? null).filter((x) => !!x);
+    if (!entries.length) {
+      for (const file of Array.from(dt.files)) out.push({ file, rel: "" });
+      return out;
+    }
+    const walk = async (entry, rel) => {
+      if (entry.isFile) {
+        const file = await new Promise((res, rej) => entry.file(res, rej));
+        out.push({ file, rel });
+      } else if (entry.isDirectory) {
+        const reader = entry.createReader();
+        const sub = rel ? rel + "/" + entry.name : entry.name;
+        for (; ; ) {
+          const batch = await new Promise((res, rej) => reader.readEntries(res, rej));
+          if (!batch.length) break;
+          for (const child of batch) await walk(child, sub);
+        }
+      }
+    };
+    for (const entry of entries) await walk(entry, "");
+    return out;
+  }
+  async function uploadMany(files, into) {
+    if (!viewMount) return;
+    const zips = files.filter((f) => /\.zip$/i.test(f.file.name));
+    const plain = files.filter((f) => !/\.zip$/i.test(f.file.name));
+    let extractZips = zips.length ? null : false;
+    if (zips.length) {
+      extractZips = await new Promise((resolve) => {
+        const ask = el("div", { class: "zipask" });
+        const unpack = el("button", { class: "primary tiny", text: "\uD480\uC5B4\uC11C \uC62C\uB9AC\uAE30" });
+        const keep = el("button", { class: "ghost tiny", text: "zip \uADF8\uB300\uB85C \uC62C\uB9AC\uAE30" });
+        const cancel = el("button", { class: "ghost tiny", text: "\uCDE8\uC18C" });
+        unpack.addEventListener("click", () => {
+          ask.remove();
+          resolve(true);
+        });
+        keep.addEventListener("click", () => {
+          ask.remove();
+          resolve(false);
+        });
+        cancel.addEventListener("click", () => {
+          ask.remove();
+          resolve(null);
+        });
+        ask.append(
+          el("span", { text: `zip ${zips.length}\uAC1C (${zips.map((z) => z.file.name).slice(0, 3).join(", ")}${zips.length > 3 ? " \u2026" : ""}) \u2014` }),
+          unpack,
+          keep,
+          cancel
+        );
+        (viewMount?.querySelector(".fileslot") ?? viewMount)?.prepend(ask);
+      });
+      if (extractZips === null && !plain.length) return;
+    }
+    const todo = extractZips === null ? plain : [...plain, ...zips];
+    const prog = el("div", { class: "uploadprog" });
+    (viewMount.querySelector(".fileslot") ?? viewMount).prepend(prog);
+    let done = 0;
+    let failed = 0;
+    let extracted = 0;
+    for (const { file, rel } of todo) {
+      prog.textContent = `\uC62C\uB9AC\uB294 \uC911 ${done + failed + 1}/${todo.length} \u2014 ${file.name}`;
+      const dir = rel ? into + "/" + rel : into;
+      try {
+        const r = await uploadOne(file, dir, !!extractZips && /\.zip$/i.test(file.name));
+        done += 1;
+        if (r.extracted) extracted += r.extracted;
+      } catch (e) {
+        failed += 1;
+        notice2(`${file.name}: ` + msg4(e), "err");
+      }
+    }
+    prog.remove();
+    notice2(`${done}\uAC1C\uB97C ${into}/ \uC5D0 \uC62C\uB838\uC2B5\uB2C8\uB2E4.` + (extracted ? ` (zip \uC5D0\uC11C ${extracted}\uAC1C \uD480\uB9BC)` : "") + (failed ? ` \uC2E4\uD328 ${failed}\uAC1C.` : ""), failed ? "err" : "ok");
+    if (nodes.has(into)) {
+      selectedDir = into;
+      expandTo(into);
+    }
+    state.touchFiles();
+    seenFilesRev = state.filesRev;
+    await refresh();
+  }
+  async function uploadOne(file, dir, extract) {
+    if (TEXT_UPLOAD_RE.test(file.name)) {
+      return await state.uploadFile(file.name, await file.text(), false, dir);
+    }
+    const b64 = await new Promise((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onload = () => resolve(String(fr.result).split(",")[1] ?? "");
+      fr.onerror = () => reject(fr.error ?? new Error("read failed"));
+      fr.readAsDataURL(file);
+    });
+    return await state.uploadFile(file.name, b64, true, dir, extract);
+  }
+  function icon(name) {
+    if (IMAGE_RE.test(name)) return "\u{1F5BC}";
+    const ext = (name.split(".").pop() || "").toLowerCase();
+    if (ext === "charx" || ext === "zip") return "\u{1F5DC}";
+    if (["md", "txt", "rtf", "docx", "pdf"].includes(ext)) return "\u{1F4C4}";
+    if (["py", "js", "ts", "lua", "html", "css", "json", "yaml", "yml", "xml"].includes(ext)) return "\u{1F4DC}";
+    if (["mp3", "wav", "ogg", "m4a"].includes(ext)) return "\u{1F3B5}";
+    if (["mp4", "webm"].includes(ext)) return "\u{1F3AC}";
+    return "\u{1F4CE}";
   }
   function fmtSize2(n) {
     if (!n) return "0B";
     if (n < 1024) return `${n}B`;
     if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)}KB`;
     return `${(n / 1024 / 1024).toFixed(1)}MB`;
+  }
+  function fmtWhen(sec) {
+    const n = Number(sec) * 1e3;
+    if (!Number.isFinite(n) || n <= 0) return "";
+    try {
+      const d = new Date(n);
+      const p = (x) => String(x).padStart(2, "0");
+      return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+    } catch {
+      return "";
+    }
   }
   function msg4(e) {
     return e instanceof Error ? e.message : String(e);
@@ -5868,7 +6731,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         text: titleOf(e),
         title: e.id
       });
-      name.addEventListener("click", () => open5(e));
+      name.addEventListener("click", () => open4(e));
       const siblings = all.filter((x) => folderOf(x) === folderOf(e));
       const at = siblings.findIndex((x) => x.id === e.id);
       const moveTo = async (neighbor) => {
@@ -5896,7 +6759,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       row.appendChild(down);
       return row;
     }
-    function open5(e) {
+    function open4(e) {
       if (!viewMount6) return;
       openId4 = e.id;
       for (const b of Array.from(document.querySelectorAll(".tree .treefile"))) {
@@ -5953,7 +6816,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
           notice9(opts.savedNotice, "ok");
           await refresh8();
           const fresh = entries.find((x) => x.id === e.id);
-          if (fresh) open5(fresh);
+          if (fresh) open4(fresh);
         } catch (err) {
           notice9("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg5(err), "err");
         } finally {
@@ -5972,9 +6835,17 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
           notice9("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg5(err), "err");
         }
       });
+      const orig = e.origin === "edited" && e.original ? e.original : null;
+      const diff = orig ? diffCard(String(orig.content ?? ""), String(entry.content ?? "")) : null;
+      const metaChanged = [];
+      if (orig) {
+        if (String(orig.comment ?? "") !== String(entry.comment ?? "")) metaChanged.push(`\uC774\uB984: \u201C${String(orig.comment ?? "")}\u201D \u2192 \u201C${String(entry.comment ?? "")}\u201D`);
+        if (String(orig.key ?? "") !== String(entry.key ?? "")) metaChanged.push(`\uD0A4\uC6CC\uB4DC: \u201C${String(orig.key ?? "")}\u201D \u2192 \u201C${String(entry.key ?? "")}\u201D`);
+        if (!!orig.alwaysActive !== !!entry.alwaysActive) metaChanged.push(`\uC0C1\uC2DC \uD65C\uC131\uD654: ${orig.alwaysActive ? "\uCF2C" : "\uB054"} \u2192 ${entry.alwaysActive ? "\uCF2C" : "\uB054"}`);
+      }
       clear(viewMount6);
       viewMount6.appendChild(el("div", { class: "card" }, [
-        el("h2", { text: opts.heading }),
+        el("h2", {}, [el("span", { text: opts.heading }), el("span", { class: "spacer" }), focusButton(content, titleOf(e))]),
         el("label", { class: "field" }, [el("span", { text: "\uC774\uB984 (comment)" }), comment]),
         el("label", { class: "checkrow", style: { marginBottom: "8px" } }, [
           always,
@@ -5987,6 +6858,8 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         ]),
         el("label", { class: "field" }, [el("span", { text: "\uD3F4\uB354" }), folderSel]),
         el("label", { class: "field" }, [el("span", { text: "\uB0B4\uC6A9" }), content]),
+        metaChanged.length ? el("div", { class: "hint diffmeta", text: "\uAE30\uC900\uC120\uACFC \uB2E4\uB978 \uD56D\uBAA9 \u2014 " + metaChanged.join(" \xB7 ") }) : null,
+        diff,
         el("div", { class: "row" }, [save, del])
       ]));
     }
@@ -5999,7 +6872,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         if (opts.scope === "global") void state.refreshBotChanges();
         await refresh8();
         const made = entries.find((e) => e.id === id);
-        if (made) open5(made);
+        if (made) open4(made);
       } catch (e) {
         notice9("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg5(e), "err");
       }
@@ -6166,13 +7039,13 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       text: `${item.seq}. ${item.title}`,
       title: item.id
     });
-    name.addEventListener("click", () => open2(item));
+    name.addEventListener("click", () => open(item));
     const row = el("div", { class: "treerow" }, [name]);
     if (item.isNew) row.appendChild(el("span", { class: "badge ok", text: "\uCD94\uAC00" }));
     else if (item.changed) row.appendChild(el("span", { class: "badge warn", text: "\uC218\uC815" }));
     return row;
   }
-  function open2(item) {
+  function open(item) {
     if (!viewMount2) return;
     openId = item.id;
     for (const b of Array.from(document.querySelectorAll(".tree .treefile"))) {
@@ -6193,7 +7066,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         notice3("\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4. \uC704 \u201C\uBC18\uC601\u201D\uC744 \uB204\uB974\uBA74 \uD134\xB7\uB85C\uC5B4\uBD81\uACFC \uD568\uAED8 RisuAI\uC5D0 \uC4F0\uC785\uB2C8\uB2E4.", "ok");
         await refresh2();
         const fresh = items.find((i) => i.id === item.id);
-        if (fresh) open2(fresh);
+        if (fresh) open(fresh);
       } catch (e) {
         notice3("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg6(e), "err");
       } finally {
@@ -6220,7 +7093,9 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     clear(viewMount2);
     viewMount2.appendChild(el("div", { class: "card" }, [
       el("h2", {}, [
-        el("span", { text: `${KIND_LABEL[item.kind] ?? item.kind} \xB7 ${item.seq}\uBC88 \uD56D\uBAA9` })
+        el("span", { text: `${KIND_LABEL[item.kind] ?? item.kind} \xB7 ${item.seq}\uBC88 \uD56D\uBAA9` }),
+        el("span", { class: "spacer" }),
+        focusButton(body, `${KIND_LABEL[item.kind] ?? item.kind} \xB7 ${item.seq}\uBC88 \uD56D\uBAA9`)
       ]),
       el("div", { class: "hint", style: { marginBottom: "8px" } }, [
         "\uC774 \uC694\uC57D\uC774 \uBAA8\uB378\uC774 \uC2E4\uC81C\uB85C \uC77D\uB294 \u201C\uC61B\uB0A0 \uC77C\u201D\uC785\uB2C8\uB2E4. \uC5EC\uAE30 \uD2C0\uB9B0 \uC0AC\uC2E4\uC774 \uC788\uC73C\uBA74 \uC774\uD6C4 \uB2F5\uBCC0\uC774 \uACC4\uC18D \uADF8 \uC704\uC5D0 \uC313\uC785\uB2C8\uB2E4."
@@ -6231,8 +7106,8 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     ]));
     if (item.changed && item.original !== null) {
       viewMount2.appendChild(el("div", { class: "card" }, [
-        el("h2", { text: "\uC6D0\uBCF8" }),
-        el("pre", { class: "mono filepreview", text: item.original })
+        el("h2", { text: "\uC6D0\uBCF8\uACFC\uC758 \uCC28\uC774" }),
+        diffCard(item.original, item.body, { open: true })
       ]));
     }
   }
@@ -6241,7 +7116,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     try {
       const made = await state.addMemory(kind, "");
       await refresh2();
-      open2(made);
+      open(made);
     } catch (e) {
       notice3("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg6(e), "err");
     }
@@ -6474,20 +7349,20 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       await opts.onChanged();
     };
     const currentRow = (kind, p, total) => {
-      const pick = el("button", { class: "ghost", text: `\uC120\uD0DD (${total})`, title: "\uC800\uC7A5\uB41C \uD504\uB9AC\uC14B \uBAA9\uB85D" });
-      pick.addEventListener("click", () => openPicker(kind, refresh8, say));
+      const pick2 = el("button", { class: "ghost", text: `\uC120\uD0DD (${total})`, title: "\uC800\uC7A5\uB41C \uD504\uB9AC\uC14B \uBAA9\uB85D" });
+      pick2.addEventListener("click", () => openPicker(kind, refresh8, say));
       if (!p) {
-        const open6 = el("button", { class: "ghost chev", text: "\u203A", title: total ? `\uC800\uC7A5\uB41C \uD504\uB9AC\uC14B ${total}\uAC1C \u2014 \uC120\uD0DD \xB7 \uCD94\uAC00` : "\uD504\uB9AC\uC14B \uCD94\uAC00" });
-        open6.addEventListener("click", () => openPicker(kind, refresh8, say));
+        const open5 = el("button", { class: "ghost chev", text: "\u203A", title: total ? `\uC800\uC7A5\uB41C \uD504\uB9AC\uC14B ${total}\uAC1C \u2014 \uC120\uD0DD \xB7 \uCD94\uAC00` : "\uD504\uB9AC\uC14B \uCD94\uAC00" });
+        open5.addEventListener("click", () => openPicker(kind, refresh8, say));
         return el("div", { class: "presetnow" }, [
           el("div", { class: "grow" }, [
             el("div", { class: "hint", text: kind === "search" ? "\uAC80\uC0C9 \uC5D0\uC774\uC804\uD2B8\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4 \u2014 \uC77C\uBC18 \uC5D0\uC774\uC804\uD2B8\uAC00 \uC9C1\uC811 web_search \uB85C \uAC80\uC0C9\uD569\uB2C8\uB2E4. \u203A \uC5D0\uC11C \uACE0\uB974\uAC70\uB098 \uCD94\uAC00\uD569\uB2C8\uB2E4." : "\uD504\uB9AC\uC14B\uC774 \uC5C6\uC2B5\uB2C8\uB2E4. \u203A \uC5D0\uC11C \uD558\uB098 \uB9CC\uB4E4\uC5B4 \uC8FC\uC138\uC694." })
           ]),
-          open6
+          open5
         ]);
       }
-      const open5 = el("button", { class: "ghost chev", text: "\u203A", title: `\uC800\uC7A5\uB41C \uD504\uB9AC\uC14B ${total}\uAC1C \u2014 \uC120\uD0DD \xB7 \uC218\uC815 \xB7 \uC0AD\uC81C \xB7 \uCD94\uAC00` });
-      open5.addEventListener("click", () => openPicker(kind, refresh8, say));
+      const open4 = el("button", { class: "ghost chev", text: "\u203A", title: `\uC800\uC7A5\uB41C \uD504\uB9AC\uC14B ${total}\uAC1C \u2014 \uC120\uD0DD \xB7 \uC218\uC815 \xB7 \uC0AD\uC81C \xB7 \uCD94\uAC00` });
+      open4.addEventListener("click", () => openPicker(kind, refresh8, say));
       const row = el("div", { class: "presetnow" }, [
         el("div", { class: "grow" }, [
           el("div", { class: "presetnow-name" }, [
@@ -6496,7 +7371,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
           ]),
           el("div", { class: "hint", text: summarise(p) })
         ]),
-        open5
+        open4
       ]);
       if (kind === "search") {
         const off = el("button", { class: "ghost tiny", text: "\uD574\uC81C", title: "\uAC80\uC0C9 \uC5D0\uC774\uC804\uD2B8\uB97C \uB044\uACE0 \uC77C\uBC18 \uC5D0\uC774\uC804\uD2B8\uAC00 \uC9C1\uC811 \uAC80\uC0C9\uD558\uAC8C \uD569\uB2C8\uB2E4" });
@@ -7438,7 +8313,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.6.2",
+            version: "0.7.0",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -7673,7 +8548,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
             el("div", { text: "web RisuAI\uC5D0\uC11C \uC9C1\uC811 \uC5F0\uACB0\uC774 \uD655\uC778\uB418\uC9C0 \uC54A\uC544 \uD1A0\uD070\uC744 \uBCF4\uB0B4\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4." }),
             el("div", {
               class: "hint",
-              text: "RisuAI \uC124\uC815\uC5D0\uC11C Use Plain Fetch\uB97C \uCF1C \uC8FC\uC138\uC694. \uAEBC\uC838 \uC788\uC73C\uBA74 \uC694\uCCAD\uC774 sv.risuai.xyz\uB85C \uB9B4\uB808\uC774\uB418\uC5B4 \uD1A0\uD070\uC774 \uC0C8\uACE0, \uC0AC\uC124 \uC8FC\uC18C\uC5D0\uB294 \uB2FF\uC9C0\uB3C4 \uC54A\uC2B5\uB2C8\uB2E4."
+              text: "\uB300\uAC1C\uB294 \uBC31\uC5D4\uB4DC \uC55E\uC758 \uD130\uB110\xB7VPN \uC774 \uC544\uC9C1 \uC548 \uC5F4\uB9B0 \uAC83\uC774\uACE0, \uD328\uB110\uC774 30\uCD08\uB9C8\uB2E4 \uB2E4\uC2DC \uC2DC\uB3C4\uD569\uB2C8\uB2E4. \uACC4\uC18D \uC2E4\uD328\uD558\uBA74 \uC704\uC5D0 \uC778\uC6A9\uB41C \uC751\uB2F5\uC744 \uBCF4\uC138\uC694 \u2014 HTML \uC774\uB098 \uB2E4\uB978 \uC11C\uBC84\uC758 \uB2F5\uC774\uBA74 URL \uC774 \uC798\uBABB\uB41C \uAC83\uC774\uACE0, sv.risuai.xyz \uC758 \uC624\uB958\uBA74 RisuAI \uC124\uC815\uC758 Use Plain Fetch \uAC00 \uAEBC\uC838 \uC694\uCCAD\uC774 \uB9B4\uB808\uC774\uB41C \uAC83\uC785\uB2C8\uB2E4."
             })
           ]));
         }
@@ -8045,7 +8920,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.6.2"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.7.0"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -8143,7 +9018,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         const made = await state.addGreeting("");
         await refresh4();
         const fresh = fields.find((f) => f.id === made.id);
-        if (fresh) open3(fresh);
+        if (fresh) open2(fresh);
       } catch (e) {
         notice5("\uCD94\uAC00\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg11(e), "err");
       }
@@ -8171,7 +9046,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         text: labelOf(f) + (f.body ? "" : " (\uBE44\uC5B4 \uC788\uC74C)"),
         title: f.id
       });
-      name.addEventListener("click", () => open3(f));
+      name.addEventListener("click", () => open2(f));
       const row = el("div", { class: "treerow" }, [name]);
       if (f.deleted) row.appendChild(el("span", { class: "badge", text: "\uC0AD\uC81C \uC608\uC815" }));
       else if (f.isNew) row.appendChild(el("span", { class: "badge warn", text: "\uCD94\uAC00" }));
@@ -8179,7 +9054,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       treeMount3.appendChild(row);
     }
   }
-  function open3(f) {
+  function open2(f) {
     if (!viewMount3) return;
     openId2 = f.id;
     for (const b of Array.from(document.querySelectorAll(".tree .treefile"))) {
@@ -8197,7 +9072,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         notice5(f.deleted ? "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4. \uC0AD\uC81C \uD45C\uC2DC\uB294 \uD574\uC81C\uB418\uC5C8\uC2B5\uB2C8\uB2E4." : "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4. \uBD07 \uBC14\uC758 \u201C\uBC18\uC601\u201D\uC744 \uB204\uB974\uBA74 RisuAI\uC5D0 \uC4F0\uC785\uB2C8\uB2E4.", "ok");
         await refresh4();
         const fresh = fields.find((x) => x.id === f.id);
-        if (fresh) open3(fresh);
+        if (fresh) open2(fresh);
       } catch (e) {
         notice5("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg11(e), "err");
       } finally {
@@ -8219,13 +9094,17 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       });
       buttons.push(del);
     }
-    const diffNote = f.changed && f.original !== null ? el("div", { class: "hint", text: `\uAE30\uC900\uC120\uACFC \uB2E4\uB985\uB2C8\uB2E4 (\uAE30\uC900\uC120 ${f.original.length}\uC790 \u2192 \uC9C0\uAE08 ${f.body.length}\uC790).` }) : null;
+    const diff = f.changed ? diffCard(f.original, f.body) : null;
     clear(viewMount3);
     viewMount3.appendChild(el("div", { class: "card" }, [
-      el("h2", { text: labelOf(f) }),
+      el("h2", {}, [
+        el("span", { text: labelOf(f) }),
+        el("span", { class: "spacer" }),
+        f.field === "name" ? null : focusButton(body, labelOf(f))
+      ]),
       ...f.deleted ? [el("div", { class: "notice", text: "\uC0AD\uC81C \uC608\uC815\uC785\uB2C8\uB2E4. \uC800\uC7A5\uD558\uBA74 \uC0AD\uC81C\uAC00 \uCDE8\uC18C\uB429\uB2C8\uB2E4." })] : [],
       el("label", { class: "field" }, [body]),
-      ...diffNote ? [diffNote] : [],
+      ...diff ? [diff] : [],
       el("div", { class: "row" }, buttons)
     ]));
   }
@@ -8338,7 +9217,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         );
         await refresh5();
         const made = items3.find((s) => s.id === id);
-        if (made) open4(made);
+        if (made) open3(made);
       } catch (e) {
         notice6("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg12(e), "err");
       }
@@ -8390,7 +9269,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         text: `${i + 1}. ${titleOf2(s)}`,
         title: s.id
       });
-      name.addEventListener("click", () => open4(s));
+      name.addEventListener("click", () => open3(s));
       const move = async (to) => {
         try {
           await state.moveScript(s.id, to);
@@ -8444,13 +9323,18 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     });
     clear(viewMount4);
     viewMount4.appendChild(el("div", { class: "card" }, [
-      el("h2", { text: BG_LABEL[f.field] }),
+      el("h2", {}, [
+        el("span", { text: BG_LABEL[f.field] }),
+        el("span", { class: "spacer" }),
+        focusButton(body, BG_LABEL[f.field], { code: true })
+      ]),
       el("div", { class: "hint", text: "CSS\uB294 \uBCF4\uD1B5 \uC5EC\uAE30(\uBC31\uADF8\uB77C\uC6B4\uB4DC HTML)\uC758 <style> \uC548\uC5D0 \uB4E4\uC5B4\uAC11\uB2C8\uB2E4." }),
       el("label", { class: "field" }, [body]),
+      f.changed ? diffCard(f.original, f.body, { code: true }) : null,
       el("div", { class: "row" }, [save])
     ]));
   }
-  function open4(s) {
+  function open3(s) {
     if (!viewMount4) return;
     openId3 = s.id;
     for (const b of Array.from(document.querySelectorAll(".tree .treefile"))) {
@@ -8491,7 +9375,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         notice6("\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4. \uBD07 \uBC14\uC758 \u201C\uBC18\uC601\u201D\uC744 \uB204\uB974\uBA74 RisuAI\uC5D0 \uC4F0\uC785\uB2C8\uB2E4.", "ok");
         await refresh5();
         const fresh = items3.find((x) => x.id === s.id);
-        if (fresh) open4(fresh);
+        if (fresh) open3(fresh);
       } catch (err) {
         notice6("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg12(err), "err");
       } finally {
@@ -8509,9 +9393,21 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         notice6("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg12(err), "err");
       }
     });
+    const orig = s.origin === "edited" && s.original ? s.original : null;
+    const diff = orig ? diffCard(String(orig.out ?? ""), String(e.out ?? ""), { code: true }) : null;
+    const small = [];
+    if (orig) {
+      if (String(orig.in ?? "") !== String(e.in ?? "")) small.push(`\uCC3E\uAE30: ${String(orig.in ?? "")} \u2192 ${String(e.in ?? "")}`);
+      if (String(orig.type ?? "") !== String(e.type ?? "")) small.push(`\uC885\uB958: ${String(orig.type ?? "")} \u2192 ${String(e.type ?? "")}`);
+      if (String(orig.comment ?? "") !== String(e.comment ?? "")) small.push(`\uC774\uB984: ${String(orig.comment ?? "")} \u2192 ${String(e.comment ?? "")}`);
+    }
     clear(viewMount4);
     viewMount4.appendChild(el("div", { class: "card" }, [
-      el("h2", { text: "Regex \uC2A4\uD06C\uB9BD\uD2B8" }),
+      el("h2", {}, [
+        el("span", { text: "Regex \uC2A4\uD06C\uB9BD\uD2B8" }),
+        el("span", { class: "spacer" }),
+        focusButton(outText, String(e.comment || "Regex \uC2A4\uD06C\uB9BD\uD2B8") + " \u2014 \uBC14\uAFB8\uAE30 (out)", { code: true })
+      ]),
       el("label", { class: "field" }, [el("span", { text: "\uC774\uB984 (comment)" }), comment]),
       el("label", { class: "field" }, [el("span", { text: "\uC885\uB958 (type)" }), type]),
       el("label", { class: "field" }, [
@@ -8523,6 +9419,8 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         outText
       ]),
       el("label", { class: "field" }, [el("span", { text: "\uD50C\uB798\uADF8 (flag)" }), flag]),
+      small.length ? el("div", { class: "hint diffmeta", text: "\uAE30\uC900\uC120\uACFC \uB2E4\uB978 \uD56D\uBAA9 \u2014 " + small.join(" \xB7 ") }) : null,
+      diff,
       el("div", { class: "row" }, [save, del])
     ]));
   }
@@ -8684,9 +9582,16 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
           save.disabled = false;
         }
       });
+      const origFirst = s.origin === "edited" && s.original && Array.isArray(s.original.effect) ? s.original.effect[0] : void 0;
+      const diff = origFirst ? diffCard(String(origFirst.code ?? ""), String(first.code ?? ""), { code: true }) : null;
       viewMount5.appendChild(el("div", { class: "card" }, [
-        el("h2", { text: "Lua" + (s.origin !== "original" ? " \xB7 \uC218\uC815\uB428" : "") }),
+        el("h2", {}, [
+          el("span", { text: "Lua" + (s.origin !== "original" ? " \xB7 \uC218\uC815\uB428" : "") }),
+          el("span", { class: "spacer" }),
+          focusButton(body, "Lua \uD2B8\uB9AC\uAC70", { code: true })
+        ]),
         body,
+        diff,
         el("div", { class: "row", style: { marginTop: "8px" } }, [save]),
         el("div", { class: "hint", style: { marginTop: "6px" }, text: "RisuAI \uC758 \uD2B8\uB9AC\uAC70 \uD3B8\uC9D1\uAE30\uC640 \uAC19\uC740 Lua \uC2A4\uD06C\uB9BD\uD2B8 \uD55C \uAC1C\uC785\uB2C8\uB2E4. \uC774\uBCA4\uD2B8 \uB4F1\uB85D\uC740 \uC2A4\uD06C\uB9BD\uD2B8 \uC548\uC5D0\uC11C \uD569\uB2C8\uB2E4 (listenEdit, onStart \uB4F1)." })
       ]));
@@ -9000,11 +9905,15 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         });
         const row = el("div", { class: "verrow" });
         const del = el("button", { class: "ghost tiny", title: "\uC774 \uC2A4\uB0C5\uC0F7 \uC0AD\uC81C" });
-        armed(del, "\u2715", "\uC0AD\uC81C?", async () => {
+        armed(del, "\u2715", "\uC0AD\uC81C \uD655\uC778", async () => {
+          row.classList.add("deleting");
+          del.disabled = true;
           try {
             await state.deleteCardCheckpoint(c.id);
             row.remove();
           } catch (e) {
+            row.classList.remove("deleting");
+            del.disabled = false;
             shellNotice("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg14(e), "err");
           }
         });
@@ -9050,7 +9959,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
   var seenSyncAt = 0;
   var seenBusy = false;
   var filterText4 = "";
-  var thumbs = /* @__PURE__ */ new Map();
+  var thumbs2 = /* @__PURE__ */ new Map();
   function renderAssetsTab(mount) {
     if (!state.botKey) {
       clear(mount);
@@ -9256,7 +10165,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     const box = el("div", { class: "assetcell" + (c.origin !== "original" ? " changed" : "") + (c.state === "failed" ? " failed" : "") });
     const pic = el("div", { class: "assetpic" });
     box.appendChild(pic);
-    void loadThumb(c, pic);
+    void loadThumb2(c, pic);
     const nameEl = el("div", { class: "assetname", text: c.name || "(\uC774\uB984 \uC5C6\uC74C)", title: `${c.key}${c.size ? " \xB7 " + mb(c.size) : ""}` });
     if (c.row && editable()) {
       nameEl.classList.add("editable");
@@ -9318,31 +10227,68 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     } catch {
     }
   }
-  async function loadThumb(c, mount) {
+  var THUMB_PARALLEL2 = 6;
+  var thumbActive2 = 0;
+  var thumbQueue2 = [];
+  function thumbSlot() {
+    return new Promise((resolve) => {
+      const grant = () => {
+        thumbActive2 += 1;
+        let released = false;
+        resolve(() => {
+          if (released) return;
+          released = true;
+          thumbActive2 -= 1;
+          const next = thumbQueue2.shift();
+          if (next) next();
+        });
+      };
+      if (thumbActive2 < THUMB_PARALLEL2) grant();
+      else thumbQueue2.push(grant);
+    });
+  }
+  async function thumbBytes(c) {
+    if (c.state === "present") {
+      try {
+        const bytes = await transport.getBinary("/assets/blob", { key: c.key });
+        if (bytes.byteLength) return bytes;
+      } catch {
+      }
+    }
+    try {
+      const bytes = await Risuai.readImage(c.key);
+      if (bytes && bytes.byteLength) return bytes;
+    } catch {
+    }
+    return null;
+  }
+  async function loadThumb2(c, mount) {
     const isImage = /^(png|jpe?g|gif|webp|avif|bmp)$/i.test(c.ext);
     if (!isImage) {
       mount.appendChild(el("div", { class: "assettype", text: c.ext.toUpperCase() }));
       return;
     }
-    let url = thumbs.get(c.key) || "";
+    let url = thumbs2.get(c.key) || "";
     if (!url) {
+      const release = await thumbSlot();
       try {
-        const bytes = await Risuai.readImage(c.key);
-        if (bytes && bytes.byteLength) {
-          const view = bytes;
-          const buf = new Uint8Array(view.byteLength);
-          buf.set(view);
+        if (!mount.isConnected) return;
+        const view2 = await thumbBytes(c);
+        if (view2) {
+          const buf = new Uint8Array(view2.byteLength);
+          buf.set(view2);
           url = URL.createObjectURL(new Blob([buf]));
-          if (thumbs.size > 200) {
-            for (const [k, u] of thumbs) {
+          if (thumbs2.size > 400) {
+            for (const [k, u] of thumbs2) {
               URL.revokeObjectURL(u);
-              thumbs.delete(k);
+              thumbs2.delete(k);
               break;
             }
           }
-          thumbs.set(c.key, url);
+          thumbs2.set(c.key, url);
         }
-      } catch {
+      } finally {
+        release();
       }
     }
     if (!url) {
@@ -9498,14 +10444,14 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       healthEl.appendChild(el("span", { text: "\uBC31\uC5D4\uB4DC \uC5F0\uACB0 \uC548 \uB428" }));
       healthEl.appendChild(el("span", {
         class: "hint",
-        text: state.connectError || "\uC124\uC815\uC5D0\uC11C URL\uACFC \uD1A0\uD070\uC744 \uD655\uC778\uD574 \uC8FC\uC138\uC694"
+        text: (state.connectError || "\uC124\uC815\uC5D0\uC11C URL\uACFC \uD1A0\uD070\uC744 \uD655\uC778\uD574 \uC8FC\uC138\uC694") + (reconnectTimer ? ` (\uC790\uB3D9 \uC7AC\uC2DC\uB3C4 ${reconnectAttempts + 1}\uD68C\uC9F8)` : "")
       }));
       const go = el("button", { class: "ghost tiny", text: "\uC124\uC815\uC73C\uB85C" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.6.2"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.7.0"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
@@ -9580,14 +10526,21 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.6.2" }),
+        el("span", { class: "dim", text: "v0.7.0" }),
         healthEl,
         el("span", { class: "spacer" }),
         reload,
         settingsBtn,
         close
       ]),
-      el("div", { class: "tabs" }, CONTENT_TABS.flatMap(([id, label]) => id === "files" ? [el("span", { class: "tabsep", title: "\uC5EC\uAE30\uBD80\uD130\uB294 \uD3B8\uC9D1 \uB300\uC0C1\uC774 \uC544\uB2C8\uB77C \uBD07\uC758 \uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4\uC785\uB2C8\uB2E4" }), tabButton(id, label)] : [tabButton(id, label), syncBadge])),
+      // The files tab sits right after 에셋, and the importer's badge goes at
+      // the far end of the row on its own: it used to sit between the two with
+      // margin-left:auto, which pushed 워크스페이스 파일 to the opposite edge
+      // of the bar from the tab it belongs beside.
+      el("div", { class: "tabs" }, [
+        ...CONTENT_TABS.flatMap(([id, label]) => id === "files" ? [el("span", { class: "tabsep", title: "\uC5EC\uAE30\uBD80\uD130\uB294 \uD3B8\uC9D1 \uB300\uC0C1\uC774 \uC544\uB2C8\uB77C \uBD07\uC758 \uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4\uC785\uB2C8\uB2E4" }), tabButton(id, label)] : [tabButton(id, label)]),
+        syncBadge
+      ]),
       toolbarSlot,
       shellNotice2,
       el("main", {}, ALL_TABS.map((id) => mounts[id]))
@@ -9668,24 +10621,36 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     }
   }
   var reconnectTimer = null;
-  var RECONNECT_DELAYS = [3e3, 5e3, 8e3, 12e3, 2e4, 3e4, 3e4, 3e4, 3e4, 3e4];
+  var reconnectAttempts = 0;
+  var RECONNECT_DELAYS = [3e3, 5e3, 8e3, 12e3, 2e4, 3e4];
   function startReconnect(force) {
     if (reconnectTimer) return;
     let i = 0;
+    const startedAt = Date.now();
     const tick = async () => {
       reconnectTimer = null;
       if (state.health) return;
+      reconnectAttempts += 1;
+      const lastError = state.connectError;
       const ok = await state.connect();
       if (ok) {
+        void clientLog("warn", "connect recovered", {
+          attempts: reconnectAttempts,
+          seconds: Math.round((Date.now() - startedAt) / 1e3),
+          lastError: lastError.slice(0, 300),
+          platform: transport.hostPlatform
+        });
+        reconnectAttempts = 0;
         if (!state.slot) await state.readHost();
         if (!state.workspace) await uploadAfterConnect(force);
         refreshStatus();
         renderActive();
         return;
       }
-      if (i < RECONNECT_DELAYS.length) reconnectTimer = setTimeout(tick, RECONNECT_DELAYS[i++]);
+      refreshStatus();
+      reconnectTimer = setTimeout(tick, RECONNECT_DELAYS[Math.min(i++, RECONNECT_DELAYS.length - 1)]);
     };
-    reconnectTimer = setTimeout(tick, RECONNECT_DELAYS[i++]);
+    reconnectTimer = setTimeout(tick, RECONNECT_DELAYS[Math.min(i++, RECONNECT_DELAYS.length - 1)]);
   }
   var sawConnected = false;
   state.onChange(() => {
@@ -9734,7 +10699,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     } catch (e) {
       console.log("[risu-hina] config resolve failed", e);
     }
-    const open5 = async () => {
+    const open4 = async () => {
       try {
         await Risuai.showContainer("fullscreen");
         await bootstrap();
@@ -9743,14 +10708,14 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       }
     };
     try {
-      parts.push(await Risuai.registerSetting("Risu Hina", open5, ICON.app, "html"));
+      parts.push(await Risuai.registerSetting("Risu Hina", open4, ICON.app, "html"));
     } catch (e) {
       console.log("[risu-hina] registerSetting failed", e);
     }
     try {
       parts.push(await Risuai.registerButton(
         { name: "Risu Hina", icon: ICON.app, iconType: "html", location: "hamburger" },
-        open5
+        open4
       ));
     } catch (e) {
       console.log("[risu-hina] registerButton failed", e);
@@ -9768,6 +10733,6 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.6.2"} loaded`);
+    console.log(`[risu-hina] v${"0.7.0"} loaded`);
   })();
 })();

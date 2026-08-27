@@ -5,7 +5,7 @@
  * middle, the agent on the right. Every save goes to the working copy; the
  * bot bar's 반영 is what reaches RisuAI.
  */
-import { el, clear, armed, refocusSearch } from './dom';
+import { el, clear, armed, refocusSearch, focusButton, diffCard } from './dom';
 import { setToolbarSearch } from './shell';
 import { state, type CardField } from '../state';
 import { threePane } from './panes';
@@ -199,16 +199,17 @@ function open(f: CardField): void {
     buttons.push(del);
   }
 
-  const diffNote = f.changed && f.original !== null
-    ? el('div', { class: 'hint', text: `기준선과 다릅니다 (기준선 ${f.original.length}자 → 지금 ${f.body.length}자).` })
-    : null;
+  // What changed, not just that it did: the badge on the row says 수정, and
+  // this says which lines.
+  const diff = f.changed ? diffCard(f.original, f.body) : null;
 
   clear(viewMount);
   viewMount.appendChild(el('div', { class: 'card' }, [
-    el('h2', { text: labelOf(f) }),
+    el('h2', {}, [el('span', { text: labelOf(f) }), el('span', { class: 'spacer' }),
+                  f.field === 'name' ? null : focusButton(body, labelOf(f))]),
     ...(f.deleted ? [el('div', { class: 'notice', text: '삭제 예정입니다. 저장하면 삭제가 취소됩니다.' })] : []),
     el('label', { class: 'field' }, [body]),
-    ...(diffNote ? [diffNote] : []),
+    ...(diff ? [diff] : []),
     el('div', { class: 'row' }, buttons),
   ]));
 }

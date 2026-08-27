@@ -1,4 +1,4 @@
-# 06. 구현 상태 — 2026-08-27 기준 (v0.6.2, Risu Hina)
+# 06. 구현 상태 — 2026-08-27 기준 (v0.7.0, Risu Hina)
 
 다음 세션에 이어서 할 사람(=나)을 위한 한 장. 무엇이 있고, 무엇이 바뀌었고, 어디까지 배포됐고,
 무엇이 남았는지. 설계의 *이유*는 `docs/04`(에셋·charx 는 부록 E), 저장 구조는 `docs/02`, 배포 환경은 `docs/00`.
@@ -6,7 +6,7 @@
 
 ## 0. 다음 세션 시작점 (먼저 읽을 것)
 
-**코드 상태**: master = **v0.6.2**(§1-4; 다음 세션은 docs/07 플래닝부터) 태그·푸시·릴리스됨. 게이트 ALL GREEN(신규 test_providers 포함).
+**코드 상태**: master = **v0.7.0**(§1-5 라운드 7 피드백 15건; docs/07 플래닝은 여전히 대기) — 게이트 ALL GREEN. 0.7.0 은 minor 가 바뀌어 **버전 게이트가 걸린다**: 백엔드를 올리면 RisuAI 쪽 플러그인도 `+` 로 올려야 한다(헤더가 안내).
 
 **배포 상태 (2026-08-25 21:01 `deploy.ps1`, 새 SSH 세션에서 확인)**:
 
@@ -23,6 +23,20 @@
 `https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js` 로 바꾸고, `tools/bundle.py` 가 그 파일을 저장소에 쓰도록 했다(릴리스 커밋에 포함). 백엔드 코드는 VERSION 만 바뀜.
 
 → **첫 할 일**: 사용자가 RisuAI 에 `plugin/Risu.Hina.Plugin.js` **수동 재설치 1회**(설치본 0.1.0 의 update-url 은 CORS 로 못 읽음) → 다음 릴리스부터 `+` 가 뜨는지 확인 → M2 실사용 검증(§5-2).
+
+## 1-5. 2026-08-27 밤 — v0.7.0: 라운드 7 피드백 15건 (연결 오진단 · 파일 탭 재작성 · diff)
+
+- **"Use Plain Fetch 를 켜 주세요" 는 오진단이었다.** 서버 로그(`/logs`): 19:30:04 `/health` 200 → 19:32:04 까지 요청이 **백엔드에 아예 도착하지 않음** → 19:32:04 부터 정상, 설정 변경 없음. 즉 터널/VPN 워밍업. 메인라인 소스 확인(`globalApi.svelte.ts` `fetchNative`): 웹은 `throughProxy = !db.usePlainFetch`, `networkRoute:'local_network'` 은 사설 IP 에만 걸리고 그때는 웹에서 throw. 고침: `transport.connect` 가 (a) fetch 예외 → "백엔드에 닿지 못했습니다 (원인) … 자동 재시도", (b) 서명 불일치 → **받은 응답을 인용**("HTTP n · 본문 80자") — Plain Fetch 언급은 진단 카드의 세 번째 가능성으로만. `startReconnect` 는 30초 간격으로 **무한 재시도**(옛 10회 후 포기 → 사용자가 새로고침), 헤더에 "자동 재시도 n회째", 붙는 순간 `clientLog('connect recovered', {attempts, seconds, lastError})` 로 **다음엔 실제 오류가 서버 로그에 남는다**.
+- **코덱스 연결 테스트 "(config) baseUrl·apiKey·model 모두 필요"**: `h_config_test` 가 provider=codex 를 몰랐다(채팅은 `_model_for` 가 codexauth 로 감). `_config_test_codex` — 같은 `codexauth.client()` 로 PONG + 툴 호출 2단계, `instructions` 필수, 스레드풀이라 `asyncio.run`.
+- **에이전트 패널**: (1) 타이머가 첫 텍스트에서 멈춰 툴 단계 "…중입니다" 옆 시계가 얼어 있던 것 → 턴 끝(`finish`)까지 돈다. (2) 툴 칩이 본문 **위** 한 줄에 고정 → 버블을 **순차 세그먼트**(칩 줄 → 본문 → 칩 줄 → 본문…, 허용 카드도 그 자리)로. (3) 승인 요청 카드에 **전체 승인·실행 / 전체 거절**(순차 실행, 실패 시 중단) + 6건 넘으면 접기. (4) 패널을 좁히면 보내기 버튼이 사라짐 → `.agentinput { flex:1; min-width:0 }` + `.sendbtn { flex-shrink:0 }`.
+- **워크스페이스 파일 탭 재작성**(`tab-files.ts`): 왼쪽 = **폴더 트리만**(영역·하위 폴더, 캐럿, 폴더에 드롭 가능), 중앙 = **선택 폴더의 파일 목록**(이름·크기·수정, 체크박스, 클릭/Ctrl/Shift 다중 선택, Delete 키 삭제 — 확인 줄 + Delete 한 번 더, Enter/더블클릭 열기, Ctrl+A) 또는 **썸네일 격자**(그림 폴더, 백엔드 `/files/download` 로 6개 동시), 미리보기(텍스트·이미지·기타는 저장), **내려받기 = 여러 개·폴더면 zip 하나**(`POST /files/zip`, 공통 부모 기준 이름), **드래그 업로드**(파일·폴더 트리 `webkitGetAsEntry`, `webkitdirectory` 폴더 올리기, 진행 표시), **zip 은 풀어서/그대로** 선택(`/files/upload extract`, `..`·절대경로·`__MACOSX` 제외, 512MB/5000개 상한), out/ 도 업로드 대상, 중첩 폴더 자동 생성. "임시 문서" 는 가상 폴더. FileReader 로 base64(옛 바이트 루프는 20MB 에 수 초).
+- **탭 위치**: 에셋 동기화 배지(`margin-left:auto`)가 에셋과 워크스페이스 파일 사이에 있어 파일 탭이 반대쪽 끝으로 밀렸음 → 배지를 줄 끝으로.
+- **선택 화면 봇 스냅샷 삭제**(행 ✕ + 최근 5개/전부 정리), **스냅샷 삭제 즉시 피드백**(행 흐려짐 — 서버는 5ms, 느린 건 왕복; 확인 라벨 "삭제 확인").
+- **집중 편집**(`dom.focusEdit/focusButton`): 메타·로어북(챗/봇)·Regex(out·배경 HTML)·Lua·장기기억 텍스트 상자에 ⤢ — 화면 전체 모달, 입력이 원래 상자에 실시간 반영(저장은 원래 버튼).
+- **변경 내용 diff**(`dom.lineDiff/diffView/diffCard`): LCS 라인 diff(공통 머리·꼬리 제거, 4M 셀 상한), IDE 식 좌측 마크(−/+ 색 거터), 같은 줄 접기 "… N줄 같음". 메타·Regex·배경 HTML·Lua·장기기억(열림) + 로어북(내용 diff + 이름/키/상시 변경 요약). 백엔드가 `original` 을 함께 내려준다: `store.lore()`·`card._script_row()` (edited 행만).
+- **에셋 썸네일**: 호스트 `readImage` 를 300장 동시에 부르니 웹에서 절반이 깨짐 → **백엔드 스토어 `/assets/blob` 우선**(present 인 것), 6개 동시, 호스트는 폴백.
+- 생략: 모바일 찾기창 줄바꿈(사용자가 생략 지시).
+- 검증: test_http +zip/extract/original 검사(482 ok), 스모크 파일 탭 재작성 + diff/집중 편집 검사(320 ok). docs/05 문제 해결 표의 Plain Fetch 행 교체.
 
 ## 1-4. 2026-08-27 아침 — v0.6.2: 서버 로그의 오류 2건
 

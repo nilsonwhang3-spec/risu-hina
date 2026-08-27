@@ -324,12 +324,20 @@ async function openVersions(anchor: HTMLElement): Promise<void> {
         });
       });
       const row = el('div', { class: 'verrow' });
-      const del = el('button', { class: 'ghost tiny', title: '이 스냅샷 삭제' });
-      armed(del, '✕', '삭제?', async () => {
+      const del = el('button', { class: 'ghost tiny', title: '이 스냅샷 삭제' }) as HTMLButtonElement;
+      // The row dims the moment the delete is confirmed: the request itself is
+      // milliseconds on the backend, but the round trip from a browser over a
+      // tunnel is not, and a row that sits unchanged for a second and then
+      // vanishes reads as "nothing happened, then something did".
+      armed(del, '✕', '삭제 확인', async () => {
+        row.classList.add('deleting');
+        del.disabled = true;
         try {
           await state.deleteCardCheckpoint(c.id);
           row.remove();
         } catch (e) {
+          row.classList.remove('deleting');
+          del.disabled = false;
           shellNotice('삭제하지 못했습니다: ' + msg(e), 'err');
         }
       });

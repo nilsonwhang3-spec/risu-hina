@@ -542,9 +542,13 @@ def lore(ck: str, scope: str | None = None) -> list[dict]:
         sql += " AND scope = ?"
         params.append(scope)
     sql += " ORDER BY scope, seq"
+    # `original` rides along only for edited entries: it is what the panel
+    # diffs against, and an unchanged or added entry has nothing to show.
     return [
         {"id": r["id"], "scope": r["scope"], "chatKey": r["chat_key"], "seq": r["seq"],
-         "origin": r["origin"], "entry": db.unjs(r["entry_json"], {})}
+         "origin": r["origin"], "entry": db.unjs(r["entry_json"], {}),
+         "original": (db.unjs(r["original_json"], None)
+                      if r["origin"] == "edited" and r["original_json"] else None)}
         for r in db.query(sql, params)
     ]
 

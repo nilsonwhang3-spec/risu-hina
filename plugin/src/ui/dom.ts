@@ -266,10 +266,12 @@ export function modal(title: string, body: HTMLElement, opts: {
   wide?: boolean;
   /** A form the user is typing into: the backdrop does not close it, only ✕ / Escape / 취소. */
   sticky?: boolean;
+  /** Extra class on the box (the focus editor takes the whole screen). */
+  cls?: string;
   onClose?: () => void;
 } = {}): () => void {
   const closeBtn = el('button', { class: 'iconbtn', html: ICON.close, title: '닫기' });
-  const box = el('div', { class: 'modalbox' + (opts.wide ? ' wide' : '') }, [
+  const box = el('div', { class: 'modalbox' + (opts.wide ? ' wide' : '') + (opts.cls ? ' ' + opts.cls : '') }, [
     el('div', { class: 'modalhead' }, [
       el('h2', { text: title }),
       el('span', { class: 'spacer' }),
@@ -302,6 +304,169 @@ export function modal(title: string, body: HTMLElement, opts: {
   // Focus the first field so a keyboard user is not left on the backdrop.
   setTimeout(() => box.querySelector<HTMLElement>('input, textarea, select, button')?.focus(), 0);
   return close;
+}
+
+/**
+ * Edit a text box in a screen-sized modal - "집중 편집".
+ *
+ * A Lua script or a lorebook entry is often hundreds of lines, and the
+ * centre column shows a dozen of them at a time. The modal mirrors the
+ * source box live (every keystroke lands in it), so there is no "apply"
+ * step to forget and Escape loses nothing; 완료 just closes. The source's
+ * own `input` listeners fire too, so a character count keeps counting.
+ */
+export function focusEdit(source: HTMLTextAreaElement, title: string, opts: { code?: boolean } = {}): void {
+  const big = el('textarea', {
+    class: 'focusarea' + (opts.code ? ' codearea' : ''),
+    spellcheck: opts.code ? 'false' : 'true',
+  }) as HTMLTextAreaElement;
+  big.value = source.value;
+  const count = el('span', { class: 'hint', text: `${big.value.length}자` });
+  const sync = () => {
+    source.value = big.value;
+    count.textContent = `${big.value.length}자`;
+    source.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+  big.addEventListener('input', sync);
+  const done = el('button', { class: 'primary', text: '완료' });
+  const body = el('div', { class: 'focusbody' }, [
+    big,
+    el('div', { class: 'row focusfoot' }, [
+      count,
+      el('span', { class: 'hint grow', text: '입력은 바로 원래 상자에 반영됩니다. 저장은 원래 화면의 저장 버튼으로 합니다.' }),
+      done,
+    ]),
+  ]);
+  const close = modal(title, body, { cls: 'focusmodal', sticky: true });
+  done.addEventListener('click', close);
+  setTimeout(() => {
+    big.focus();
+    try { big.setSelectionRange(source.selectionStart, source.selectionEnd); } catch { /* fine */ }
+  }, 0);
+}
+
+/** A ⤢ button that opens `focusEdit` on the box - the same one on every tab. */
+export function focusButton(source: HTMLTextAreaElement, title: string, opts: { code?: boolean } = {}): HTMLElement {
+  const b = el('button', { class: 'ghost tiny focusbtn', text: '⤢ 집중 편집', title: '화면 전체로 크게 편집합니다' });
+  b.addEventListener('click', () => focusEdit(source, title, opts));
+  return b;
+}
+
+// --- line diff -----------------------------------------------------------------
+
+export interface DiffLine { kind: 'same' | 'del' | 'ins'; text: string }
+
+/**
+ * Line-level diff of two texts.
+ *
+ * Common head and tail are stripped first, so the quadratic part only sees
+ * the lines that actually differ; past a size that would take real time in
+ * the browser, the middle is reported as one replaced block rather than
+ * computed - a rough answer now beats an exact one after a freeze.
+ */
+export function lineDiff(before: string, after: string): DiffLine[] {
+  const a = before.split('\n');
+  const b = after.split('\n');
+  let head = 0;
+  while (head < a.length && head < b.length && a[head] === b[head]) head++;
+  let tail = 0;
+  while (tail < a.length - head && tail < b.length - head
+         && a[a.length - 1 - tail] === b[b.length - 1 - tail]) tail++;
+  const out: DiffLine[] = [];
+  for (let i = 0; i < head; i++) out.push({ kind: 'same', text: a[i] });
+  const am = a.slice(head, a.length - tail);
+  const bm = b.slice(head, b.length - tail);
+  if (am.length && bm.length && am.length * bm.length <= 4_000_000) {
+    // Longest common subsequence over the middle, walked back into ops.
+    const n = am.length, m = bm.length;
+    const dp: Uint32Array[] = [];
+    for (let i = 0; i <= n; i++) dp.push(new Uint32Array(m + 1));
+    for (let i = n - 1; i >= 0; i--) {
+      for (let j = m - 1; j >= 0; j--) {
+        dp[i][j] = am[i] === bm[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+      }
+    }
+    let i = 0, j = 0;
+    while (i < n && j < m) {
+      if (am[i] === bm[j]) { out.push({ kind: 'same', text: am[i] }); i++; j++; }
+      else if (dp[i + 1][j] >= dp[i][j + 1]) { out.push({ kind: 'del', text: am[i] }); i++; }
+      else { out.push({ kind: 'ins', text: bm[j] }); j++; }
+    }
+    while (i < n) out.push({ kind: 'del', text: am[i++] });
+    while (j < m) out.push({ kind: 'ins', text: bm[j++] });
+  } else {
+    for (const t of am) out.push({ kind: 'del', text: t });
+    for (const t of bm) out.push({ kind: 'ins', text: t });
+  }
+  for (let i = a.length - tail; i < a.length; i++) out.push({ kind: 'same', text: a[i] });
+  return out;
+}
+
+/**
+ * The diff as a block: a gutter mark per line (− / +) with the line beside
+ * it, the way an IDE colours its margin, and long unchanged stretches
+ * folded to a "… N줄 같음" line so a one-word edit in a 400-line entry
+ * shows as one screen rather than four hundred.
+ */
+export function diffView(before: string, after: string, opts: { context?: number; code?: boolean } = {}): HTMLElement {
+  const lines = lineDiff(before, after);
+  const ctx = opts.context ?? 2;
+  const dels = lines.filter((l) => l.kind === 'del').length;
+  const ins = lines.filter((l) => l.kind === 'ins').length;
+  const root = el('div', { class: 'diffview' + (opts.code ? ' code' : '') });
+  root.appendChild(el('div', { class: 'diffsum' }, [
+    el('span', { class: 'diff-ins-n', text: `+${ins}` }),
+    el('span', { class: 'diff-del-n', text: `−${dels}` }),
+    el('span', { class: 'hint', text: dels || ins ? ' 줄 (기준선 → 지금)' : ' 줄 — 내용이 같습니다' }),
+  ]));
+  // Which lines to show: every changed line plus `ctx` around it.
+  const show = new Array<boolean>(lines.length).fill(false);
+  lines.forEach((l, i) => {
+    if (l.kind === 'same') return;
+    for (let k = Math.max(0, i - ctx); k <= Math.min(lines.length - 1, i + ctx); k++) show[k] = true;
+  });
+  let hidden = 0;
+  const flush = () => {
+    if (hidden) root.appendChild(el('div', { class: 'diffskip', text: `… ${hidden}줄 같음 …` }));
+    hidden = 0;
+  };
+  lines.forEach((l, i) => {
+    if (!show[i]) { hidden++; return; }
+    flush();
+    root.appendChild(el('div', { class: 'diffline ' + l.kind }, [
+      el('span', { class: 'diffmark', text: l.kind === 'del' ? '−' : l.kind === 'ins' ? '+' : ' ' }),
+      el('span', { class: 'difftext', text: l.text || ' ' }),
+    ]));
+  });
+  flush();
+  return root;
+}
+
+/**
+ * A folded "변경 내용" card for an edited item: closed by default (the
+ * badge already says "수정"), one click shows what changed. `before` null
+ * means nothing to compare against, and no card at all.
+ */
+export function diffCard(before: string | null, after: string, opts: { code?: boolean; open?: boolean } = {}): HTMLElement | null {
+  if (before === null || before === after) return null;
+  const lines = lineDiff(before, after);
+  const n = lines.filter((l) => l.kind !== 'same').length;
+  const body = el('div', { class: 'diffbody', style: { display: opts.open ? '' : 'none' } });
+  const toggle = el('button', { class: 'ghost tiny', text: opts.open ? '변경 내용 접기' : `변경 내용 보기 (${n}줄)` });
+  toggle.addEventListener('click', () => {
+    const open = body.style.display === 'none';
+    if (open && !body.childElementCount) body.appendChild(diffView(before, after, { code: opts.code }));
+    body.style.display = open ? '' : 'none';
+    toggle.textContent = open ? '변경 내용 접기' : `변경 내용 보기 (${n}줄)`;
+  });
+  if (opts.open) body.appendChild(diffView(before, after, { code: opts.code }));
+  return el('div', { class: 'diffcard' }, [
+    el('div', { class: 'row' }, [
+      el('span', { class: 'hint grow', text: `기준선과 다릅니다 (${before.length}자 → ${after.length}자).` }),
+      toggle,
+    ]),
+    body,
+  ]);
 }
 
 export function popover(anchor: HTMLElement, content: HTMLElement): () => void {

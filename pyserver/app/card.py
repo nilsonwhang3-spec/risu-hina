@@ -313,6 +313,9 @@ def _script_row(r) -> dict:
         "seq": int(d.get("seq") or 0),
         "origin": d.get("origin") or "original",
         "entry": db.unjs(d.get("entry_json"), {}),
+        # The frozen counterpart, for the panel's diff view - edited rows only.
+        "original": (db.unjs(d.get("original_json"), None)
+                     if (d.get("origin") == "edited" and d.get("original_json")) else None),
     }
 
 

@@ -22,6 +22,7 @@ Directories carry meaning, and the cleanup rules follow it:
 from __future__ import annotations
 
 import base64
+import os
 import shutil
 import time
 from pathlib import Path
@@ -135,16 +136,27 @@ def read(char_key: str, rel: str) -> dict:
 
 
 def upload(char_key: str, name: str, *, text: str | None = None,
-           base64_data: str | None = None, into: str = "") -> dict:
-    """Store a user-provided file under uploads/.
+           base64_data: str | None = None, into: str = "", extract: bool = False) -> dict:
+    """Store a user-provided file under uploads/ (or out/).
 
     The name is reduced to its basename: an upload is never allowed to choose
-    where in the tree it lands.
+    where in the tree it lands. `into` picks the folder, which may be nested
+    (`uploads/참고/2장`) and is created on demand - a dropped folder tree
+    arrives as one upload per file, each naming its own subfolder.
+
+    `extract` unpacks a .zip into a folder named after it instead of storing
+    the archive: the way to bring fifty files over in one drop.
     """
     safe = Path(name or "upload").name.strip() or "upload"
     root = _root(char_key)
-    # `into` is a folder the files tab chose; it has to stay inside uploads/.
-    dest = _folder(char_key, into or "uploads", "uploads") / safe
+    # `into` is a folder the files tab chose; it has to stay inside a
+    # writable area (uploads/ is the default; out/ is allowed so a person can
+    # put a deliverable back where the agent left it).
+    target = into or "uploads"
+    area = target.replace("\\", "/").lstrip("/").split("/")[0]
+    if area not in ("uploads", "out"):
+        raise FileError(f"uploads/ 또는 out/ 안의 폴더여야 합니다: {into}")
+    dest = _folder(char_key, target, area) / safe
     dest.parent.mkdir(parents=True, exist_ok=True)
     rel = dest.relative_to(root).as_posix()
 
@@ -155,6 +167,8 @@ def upload(char_key: str, name: str, *, text: str | None = None,
             raise FileError(f"base64 를 해석하지 못했습니다: {e}") from e
         if len(raw) > MAX_UPLOAD:
             raise FileError(f"파일이 너무 큽니다 ({len(raw)} 바이트, 최대 {MAX_UPLOAD})")
+        if extract and safe.lower().endswith(".zip"):
+            return _extract_zip(char_key, dest.parent, safe, raw)
         dest.write_bytes(raw)
         size = len(raw)
     elif text is not None:
@@ -167,6 +181,92 @@ def upload(char_key: str, name: str, *, text: str | None = None,
 
     log.info("upload char=%s path=%s size=%s", char_key, rel, size)
     return {"path": rel, "name": safe, "size": size}
+
+
+# An extracted archive may not exceed this, however small the zip was: a
+# zip bomb is the one upload that could fill the disk from a JSON body.
+MAX_EXTRACT = 512 * 1024 * 1024
+MAX_EXTRACT_FILES = 5000
+
+
+def _extract_zip(char_key: str, parent: Path, zip_name: str, raw: bytes) -> dict:
+    """Unpack `raw` into parent/<zip stem>/, refusing anything that would
+    land outside it. Directory entries and OS junk (__MACOSX, .DS_Store) are
+    skipped; nested folders are kept."""
+    import io
+    import zipfile
+
+    root = _root(char_key)
+    stem = Path(zip_name).stem.strip() or "zip"
+    folder = parent / stem
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(raw))
+    except zipfile.BadZipFile as e:
+        raise FileError(f"zip 파일을 읽지 못했습니다: {e}") from e
+    total = 0
+    count = 0
+    with zf:
+        members = [m for m in zf.infolist() if not m.is_dir()]
+        if len(members) > MAX_EXTRACT_FILES:
+            raise FileError(f"zip 안의 파일이 너무 많습니다 ({len(members)}개, 최대 {MAX_EXTRACT_FILES})")
+        if sum(m.file_size for m in members) > MAX_EXTRACT:
+            raise FileError("zip 을 풀면 너무 큽니다 (최대 512MB)")
+        folder.mkdir(parents=True, exist_ok=True)
+        for m in members:
+            name = m.filename.replace("\\", "/")
+            raw_parts = [p for p in name.split("/") if p and p != "."]
+            # A member that climbs is dropped whole, not flattened into the
+            # folder: an archive that tries to escape is not one to trust.
+            if not raw_parts or ".." in raw_parts or name.startswith("/") or ":" in raw_parts[0]:
+                continue
+            parts = raw_parts
+            if parts[0] == "__MACOSX" or parts[-1] == ".DS_Store":
+                continue
+            out = (folder / Path(*parts)).resolve()
+            if folder.resolve() != out and folder.resolve() not in out.parents:
+                continue
+            out.parent.mkdir(parents=True, exist_ok=True)
+            with zf.open(m) as src, out.open("wb") as dst:
+                shutil.copyfileobj(src, dst)
+            total += m.file_size
+            count += 1
+    rel = folder.relative_to(root).as_posix()
+    log.info("upload char=%s zip=%s -> %s files=%s size=%s", char_key, zip_name, rel, count, total)
+    return {"path": rel, "name": stem, "size": total, "extracted": count}
+
+
+def zip_paths(char_key: str, rels: list[str]) -> tuple[Path, int]:
+    """A zip of the given workspace paths (files or folders), written to a
+    temp file the caller streams and deletes. Names inside the archive are
+    relative to the paths' common parent, so one folder unpacks as itself
+    rather than as `uploads/<folder>`."""
+    import tempfile
+    import zipfile
+
+    targets: list[Path] = []
+    for rel in rels:
+        p = _resolve(char_key, rel)
+        if p == _root(char_key):
+            raise FileError("워크스페이스 전체는 받을 수 없습니다")
+        if not p.exists():
+            raise FileError(f"없습니다: {rel}")
+        targets.append(p)
+    if not targets:
+        raise FileError("받을 파일을 고르지 않았습니다")
+    base = targets[0].parent if len(targets) == 1 else Path(os.path.commonpath([str(t.parent) for t in targets]))
+
+    fd, tmp = tempfile.mkstemp(prefix="risuhina-", suffix=".zip")
+    os.close(fd)
+    out = Path(tmp)
+    count = 0
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, allowZip64=True) as zf:
+        for t in targets:
+            files_in = [t] if t.is_file() else sorted(f for f in t.rglob("*") if f.is_file())
+            for f in files_in:
+                zf.write(f, f.relative_to(base).as_posix())
+                count += 1
+    log.info("zip char=%s paths=%s files=%s size=%s", char_key, len(rels), count, out.stat().st_size)
+    return out, count
 
 
 def _folder(char_key: str, rel: str, area: str) -> Path:

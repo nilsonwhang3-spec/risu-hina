@@ -8,7 +8,7 @@ import { el, clear, ICON, searchBox } from './dom';
 import { describeSync, syncBusy } from '../assets';
 import { injectStyles } from './styles';
 import { state } from '../state';
-import { transport } from '../transport';
+import { transport, clientLog } from '../transport';
 import { renderChatsTab } from './tab-chats';
 import { renderEditorTab } from './tab-editor';
 import { renderFilesTab } from './tab-files';
@@ -247,7 +247,8 @@ export function refreshStatus(): void {
     healthEl.appendChild(el('span', { text: '백엔드 연결 안 됨' }));
     healthEl.appendChild(el('span', {
       class: 'hint',
-      text: state.connectError || '설정에서 URL과 토큰을 확인해 주세요',
+      text: (state.connectError || '설정에서 URL과 토큰을 확인해 주세요')
+        + (reconnectTimer ? ` (자동 재시도 ${reconnectAttempts + 1}회째)` : ''),
     }));
     const go = el('button', { class: 'ghost tiny', text: '설정으로' });
     go.addEventListener('click', () => setTab('settings'));
@@ -347,11 +348,18 @@ export function buildShell(): void {
       settingsBtn,
       close,
     ]),
-    el('div', { class: 'tabs' }, CONTENT_TABS.flatMap(([id, label]) => (
-      id === 'files'
-        ? [el('span', { class: 'tabsep', title: '여기부터는 편집 대상이 아니라 봇의 워크스페이스입니다' }), tabButton(id, label)]
-        : [tabButton(id, label), syncBadge]
-    ))),
+    // The files tab sits right after 에셋, and the importer's badge goes at
+    // the far end of the row on its own: it used to sit between the two with
+    // margin-left:auto, which pushed 워크스페이스 파일 to the opposite edge
+    // of the bar from the tab it belongs beside.
+    el('div', { class: 'tabs' }, [
+      ...CONTENT_TABS.flatMap(([id, label]) => (
+        id === 'files'
+          ? [el('span', { class: 'tabsep', title: '여기부터는 편집 대상이 아니라 봇의 워크스페이스입니다' }), tabButton(id, label)]
+          : [tabButton(id, label)]
+      )),
+      syncBadge,
+    ]),
     toolbarSlot,
     shellNotice,
     el('main', {}, ALL_TABS.map((id) => mounts[id])),
@@ -457,25 +465,46 @@ async function uploadAfterConnect(force = false): Promise<void> {
 }
 
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-const RECONNECT_DELAYS = [3000, 5000, 8000, 12000, 20000, 30000, 30000, 30000, 30000, 30000];
+/** How many probes have failed since the panel opened; 0 once connected. */
+let reconnectAttempts = 0;
+// Backs off to 30s and then stays there: a /health probe is cheap, and the
+// one real failure report was a tunnel that opened a minute or two after
+// the panel did - giving up after ten tries meant the user refreshed instead.
+const RECONNECT_DELAYS = [3000, 5000, 8000, 12000, 20000, 30000];
+
+export function reconnecting(): boolean { return reconnectTimer !== null; }
 
 function startReconnect(force: boolean): void {
   if (reconnectTimer) return;
   let i = 0;
+  const startedAt = Date.now();
   const tick = async () => {
     reconnectTimer = null;
     if (state.health) return;
+    reconnectAttempts += 1;
+    const lastError = state.connectError;
     const ok = await state.connect();
     if (ok) {
+      // The backend can only hear about a connection failure after it ends.
+      // Recording how it looked from here is what turns the next "it did not
+      // connect for a while" into a log line with the actual error in it.
+      void clientLog('warn', 'connect recovered', {
+        attempts: reconnectAttempts,
+        seconds: Math.round((Date.now() - startedAt) / 1000),
+        lastError: lastError.slice(0, 300),
+        platform: transport.hostPlatform,
+      });
+      reconnectAttempts = 0;
       if (!state.slot) await state.readHost();
       if (!state.workspace) await uploadAfterConnect(force);
       refreshStatus();
       renderActive();
       return;
     }
-    if (i < RECONNECT_DELAYS.length) reconnectTimer = setTimeout(tick, RECONNECT_DELAYS[i++]);
+    refreshStatus();
+    reconnectTimer = setTimeout(tick, RECONNECT_DELAYS[Math.min(i++, RECONNECT_DELAYS.length - 1)]);
   };
-  reconnectTimer = setTimeout(tick, RECONNECT_DELAYS[i++]);
+  reconnectTimer = setTimeout(tick, RECONNECT_DELAYS[Math.min(i++, RECONNECT_DELAYS.length - 1)]);
 }
 
 // A connection that comes up some other way (저장하고 연결 in settings, the

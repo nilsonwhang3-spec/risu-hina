@@ -207,7 +207,9 @@ function buildDiagnosticCard(): HTMLElement {
           el('div', { text: 'web RisuAI에서 직접 연결이 확인되지 않아 토큰을 보내지 않았습니다.' }),
           el('div', {
             class: 'hint',
-            text: 'RisuAI 설정에서 Use Plain Fetch를 켜 주세요. 꺼져 있으면 요청이 sv.risuai.xyz로 릴레이되어 토큰이 새고, 사설 주소에는 닿지도 않습니다.',
+            text: '대개는 백엔드 앞의 터널·VPN 이 아직 안 열린 것이고, 패널이 30초마다 다시 시도합니다. '
+              + '계속 실패하면 위에 인용된 응답을 보세요 — HTML 이나 다른 서버의 답이면 URL 이 잘못된 것이고, '
+              + 'sv.risuai.xyz 의 오류면 RisuAI 설정의 Use Plain Fetch 가 꺼져 요청이 릴레이된 것입니다.',
           }),
         ]));
       }

@@ -11,7 +11,7 @@
  * than each becoming its own - a folder per entry is a list with extra
  * indentation.
  */
-import { el, clear, armed, refocusSearch } from './dom';
+import { el, clear, armed, refocusSearch, focusButton, diffCard } from './dom';
 import { setToolbarSearch } from './shell';
 import { state, type LoreEntry } from '../state';
 import { threePane } from './panes';
@@ -316,9 +316,21 @@ export function makeLoreTab(opts: LoreViewOptions): (mount: HTMLElement) => void
       }
     });
 
+    // An edited entry shows its lines against the baseline - the row badge
+    // says 수정, this says where. Keys and name changes are one line each
+    // and read fine from the diff of the content plus a note.
+    const orig = e.origin === 'edited' && e.original ? (e.original as Record<string, any>) : null;
+    const diff = orig ? diffCard(String(orig.content ?? ''), String(entry.content ?? '')) : null;
+    const metaChanged: string[] = [];
+    if (orig) {
+      if (String(orig.comment ?? '') !== String(entry.comment ?? '')) metaChanged.push(`이름: “${String(orig.comment ?? '')}” → “${String(entry.comment ?? '')}”`);
+      if (String(orig.key ?? '') !== String(entry.key ?? '')) metaChanged.push(`키워드: “${String(orig.key ?? '')}” → “${String(entry.key ?? '')}”`);
+      if (!!orig.alwaysActive !== !!entry.alwaysActive) metaChanged.push(`상시 활성화: ${orig.alwaysActive ? '켬' : '끔'} → ${entry.alwaysActive ? '켬' : '끔'}`);
+    }
+
     clear(viewMount);
     viewMount.appendChild(el('div', { class: 'card' }, [
-      el('h2', { text: opts.heading }),
+      el('h2', {}, [el('span', { text: opts.heading }), el('span', { class: 'spacer' }), focusButton(content, titleOf(e))]),
       el('label', { class: 'field' }, [el('span', { text: '이름 (comment)' }), comment]),
       el('label', { class: 'checkrow', style: { marginBottom: '8px' } }, [
         always, el('span', { text: '상시 활성화 (alwaysActive) — 키워드 없이 항상 삽입' }),
@@ -328,6 +340,8 @@ export function makeLoreTab(opts: LoreViewOptions): (mount: HTMLElement) => void
       ]),
       el('label', { class: 'field' }, [el('span', { text: '폴더' }), folderSel]),
       el('label', { class: 'field' }, [el('span', { text: '내용' }), content]),
+      metaChanged.length ? el('div', { class: 'hint diffmeta', text: '기준선과 다른 항목 — ' + metaChanged.join(' · ') }) : null,
+      diff,
       el('div', { class: 'row' }, [save, del]),
     ]));
   }

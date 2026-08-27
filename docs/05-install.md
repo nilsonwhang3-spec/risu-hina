@@ -264,7 +264,7 @@ powershell -ExecutionPolicy Bypass -File <install>\pyserver\manage.ps1 -Action s
 | `venv missing - run -Action setup first` | 1-3을 건너뜀 |
 | `listening NO` + 로그에 `WinError 10048` | 그 포트를 다른 것이 쓰고 있음 → `-Port` |
 | 플러그인이 "백엔드 연결 안 됨" | URL 오타, 백엔드 미기동, 또는 web RisuAI에서 토큰 미입력 |
-| web RisuAI에서만 실패 | RisuAI 설정의 **Use Plain Fetch** 를 켤 것. 꺼져 있으면 요청이 `sv.risuai.xyz` 로 릴레이되어 사설 주소에 닿지 않는다 |
+| web RisuAI에서 열자마자 "Risu Hina 응답을 받지 못했습니다" | 대개 백엔드 앞의 터널·VPN 이 아직 안 열린 것 — 패널이 30초 간격으로 계속 재시도하고, 붙는 순간 서버 로그에 `[plugin] connect recovered` 가 남는다(실측: 2026-08-27 19:30~19:32, 요청이 백엔드에 아예 도착하지 않았고 설정 변경 없이 2분 뒤 붙음). 메시지에 인용된 응답이 HTML 이나 다른 서버의 답이면 URL 오타. `sv.risuai.xyz` 의 오류면 RisuAI 설정의 **Use Plain Fetch** 가 꺼져 요청이 릴레이된 것 |
 
 ### 바인딩을 넓히기 전에
 

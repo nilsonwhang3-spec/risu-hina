@@ -168,6 +168,11 @@ def h_config_test(arg: dict) -> dict:
     import httpx
 
     agent = config.section("agent")
+    # The subscription preset has neither a baseUrl nor a key - the agent goes
+    # through codexauth - so the generic check below would refuse a setup that
+    # chats perfectly well. It gets its own probe over the same client.
+    if (agent.get("provider") or "") == "codex":
+        return _config_test_codex(agent)
     base = (agent.get("baseUrl") or "").rstrip("/")
     key = agent.get("apiKey") or ""
     model = agent.get("model") or ""
@@ -274,6 +279,61 @@ def h_config_test(arg: dict) -> dict:
                   else {"in": usage.get("prompt_tokens"), "out": usage.get("completion_tokens")}),
         "error": None if calls else "모델이 tool_calls 를 돌려주지 않습니다 — 에이전트가 동작할 수 없습니다",
     }
+
+
+def _config_test_codex(agent: dict) -> dict:
+    """The connection test for the OpenAI subscription preset.
+
+    Same two probes as the endpoint test (a plain answer, then a tool call),
+    but through `codexauth.client()` - the exact client the agent runs on, so
+    what passes here is what chats. Runs its own event loop: the handler is
+    sync and lives on the threadpool, where no loop is running.
+    """
+    import asyncio
+
+    model = agent.get("model") or ""
+    if not model:
+        return {"ok": False, "stage": "config", "error": "코덱스 프리셋에 모델 이름이 필요합니다 (예: gpt-5.1-codex)"}
+    if not codexauth.logged_in():
+        return {"ok": False, "stage": "config",
+                "error": "OpenAI 구독 로그인이 필요합니다 (⚙ → API 키 → OpenAI 구독 로그인)"}
+
+    fn = {"type": "function", "name": "read_turns", "description": "Read chat turns by index range.",
+          "parameters": {"type": "object",
+                         "properties": {"start": {"type": "integer"}, "end": {"type": "integer"}},
+                         "required": ["start", "end"]}}
+    # The codex backend insists on `instructions`; Codex CLI always sends one.
+    instructions = "You are a helpful assistant. Follow the user's instruction exactly."
+
+    async def run() -> dict:
+        c = codexauth.client()
+        stage = "completion"
+        try:
+            r = await c.responses.create(
+                model=model, instructions=instructions,
+                input=[{"role": "user", "content": "Reply with exactly: PONG"}])
+            usage = getattr(r, "usage", None)
+            stage = "tools"
+            r2 = await c.responses.create(
+                model=model, instructions=instructions,
+                input=[{"role": "user", "content": "Read turns 3 through 5."}],
+                tools=[fn], tool_choice="auto")
+            calls = [o for o in (getattr(r2, "output", None) or []) if getattr(o, "type", "") == "function_call"]
+        except Exception as e:  # noqa: BLE001 - reported, not raised
+            return {"ok": False, "stage": stage, "error": f"{type(e).__name__}: {e}"[:400],
+                    "api": "responses", "note": "OpenAI 구독 (codex)"}
+        return {
+            "ok": bool(calls),
+            "stage": "done",
+            "model": model,
+            "api": "responses",
+            "note": "OpenAI 구독 (codex)",
+            "toolCalls": len(calls),
+            "usage": {"in": getattr(usage, "input_tokens", None), "out": getattr(usage, "output_tokens", None)},
+            "error": None if calls else "모델이 tool_calls 를 돌려주지 않습니다 — 에이전트가 동작할 수 없습니다",
+        }
+
+    return asyncio.run(run())
 
 
 def _scrub(text: str, secret: str) -> str:
@@ -703,9 +763,14 @@ def h_file_upload(arg: dict) -> dict:
             text=arg.get("text") if isinstance(arg.get("text"), str) else None,
             base64_data=arg.get("base64") if isinstance(arg.get("base64"), str) else None,
             into=str(arg.get("dir") or ""),
+            extract=bool(arg.get("extract")),
         )
     except files.FileError as e:
         raise ApiError(400, str(e))
+
+
+def h_file_zip(arg: dict) -> Any:
+    raise ApiError(500, "files/zip must be dispatched directly")
 
 
 def h_file_mkdir(arg: dict) -> dict:
@@ -1631,6 +1696,7 @@ ROUTES: dict[str, Handler] = {
     "GET /charx/preview": h_charx_preview,
     "POST /charx/build": h_charx_build,
     "GET /files/download": h_file_download,
+    "POST /files/zip": h_file_zip,
     "POST /assets/adopt": h_assets_adopt,
 
     "GET /config": h_config_get,
@@ -1864,6 +1930,57 @@ async def dispatch(path: str, request: Request) -> Response:
                 **config.cors_headers(origin),
                 "Content-Length": str(size),
                 "Content-Disposition": f"attachment; filename*=UTF-8''{quoted}",
+                "Cache-Control": "no-store",
+            },
+        )
+
+    if key == "POST /files/zip":
+        # Several files, or a folder, as one archive - the files tab's
+        # multi-select download. Built in a temp file on the threadpool and
+        # streamed, then removed once the response has gone out.
+        raw = await request.body()
+        try:
+            body = json.loads(raw) if raw else {}
+        except ValueError:
+            return _json(400, {"error": "body is not valid JSON"}, origin)
+        paths = body.get("paths")
+        if not isinstance(paths, list) or not all(isinstance(p, str) for p in paths):
+            return _json(400, {"error": "paths[] 가 필요합니다"}, origin)
+        try:
+            ck = _char(body)
+            tmp, count = await run_in_threadpool(files.zip_paths, ck, paths)
+        except ApiError as e:
+            _log(request.method, pathname, e.status, started, str(e))
+            return _json(e.status, e.payload, origin)
+        except files.FileError as e:
+            _log(request.method, pathname, 400, started, str(e))
+            return _json(400, {"error": str(e)}, origin)
+        size = tmp.stat().st_size
+        name = str(body.get("name") or "").strip() or "files"
+        if not name.lower().endswith(".zip"):
+            name += ".zip"
+        _log(request.method, pathname, 200, started, f"{count} files {size // 1024}KB")
+
+        def _iter_tmp(p: pathlib.Path, chunk: int = 1 << 20):
+            try:
+                with p.open("rb") as fh:
+                    while True:
+                        block = fh.read(chunk)
+                        if not block:
+                            break
+                        yield block
+            finally:
+                try:
+                    p.unlink()
+                except OSError:
+                    pass
+        return StreamingResponse(
+            _iter_tmp(tmp),
+            media_type="application/zip",
+            headers={
+                **config.cors_headers(origin),
+                "Content-Length": str(size),
+                "Content-Disposition": f"attachment; filename*=UTF-8''{urllib.parse.quote(name)}",
                 "Cache-Control": "no-store",
             },
         )

@@ -335,6 +335,23 @@ export class AgentPanel {
     clear(this.actionBox);
     if (!items.length) return;
 
+    /** One decision, shared by the row buttons and the bulk buttons. */
+    const decideOne = async (a: PendingAction, approve: boolean, quiet = false): Promise<boolean> => {
+      try {
+        const said = await state.decideAction(a.id, approve);
+        if (!quiet) this.hooks.notice(said, approve ? 'ok' : '');
+        // The outcome also goes into the conversation, where it stays -
+        // a notice fades, and the question "did it run?" comes later.
+        this.note((approve ? '✔ 승인·실행: ' : '✖ 거절: ') + a.summary + (said ? ' — ' + said : ''),
+                  approve ? 'ok' : '');
+        return true;
+      } catch (e) {
+        if (!quiet) this.hooks.notice('실행하지 못했습니다: ' + msg(e), 'err');
+        this.note('✖ 실행 실패: ' + a.summary + ' — ' + msg(e), 'err');
+        return false;
+      }
+    };
+
     const rows = items.map((a) => {
       const yes = el('button', { class: 'primary tiny', text: a.byHost ? '승인·실행' : '승인' });
       const no = el('button', { class: 'ghost tiny', text: '거절' });
@@ -345,18 +362,11 @@ export class AgentPanel {
         // The row says what is happening while it happens; a host action can
         // take seconds, and a silent button reads as a dead one.
         busy.textContent = approve ? '실행 중…' : '거절 중…';
-        try {
-          const said = await state.decideAction(a.id, approve);
-          this.hooks.notice(said, approve ? 'ok' : '');
-          // The outcome also goes into the conversation, where it stays -
-          // a notice fades, and the question "did it run?" comes later.
-          this.note((approve ? '✔ 승인·실행: ' : '✖ 거절: ') + a.summary + (said ? ' — ' + said : ''),
-                    approve ? 'ok' : '');
+        const ok = await decideOne(a, approve);
+        if (ok) {
           await this.refreshActions();
           if (approve) await this.hooks.onApplied();
-        } catch (e) {
-          this.hooks.notice('실행하지 못했습니다: ' + msg(e), 'err');
-          this.note('✖ 실행 실패: ' + a.summary + ' — ' + msg(e), 'err');
+        } else {
           busy.textContent = '';
           yes.disabled = false;
           no.disabled = false;
@@ -374,10 +384,56 @@ export class AgentPanel {
       ]);
     });
 
+    // Twelve asset additions in one turn are twelve rows; deciding them one
+    // click each was the complaint. The bulk buttons run through the queue
+    // in order (host actions have to happen one at a time anyway) and report
+    // as they go; a failure stops the run so the rest can be looked at.
+    const progress = el('span', { class: 'hint', text: '' });
+    const allYes = el('button', { class: 'primary tiny', text: `전체 승인·실행 (${items.length})` }) as HTMLButtonElement;
+    const allNo = el('button', { class: 'ghost tiny', text: '전체 거절' }) as HTMLButtonElement;
+    const decideAll = async (approve: boolean) => {
+      allYes.disabled = allNo.disabled = true;
+      for (const b of Array.from(this.actionBox.querySelectorAll('.stagedrow button'))) (b as HTMLButtonElement).disabled = true;
+      let done = 0;
+      let failed = false;
+      for (const a of items) {
+        progress.textContent = `${approve ? '실행' : '거절'} 중 ${done + 1}/${items.length}…`;
+        const ok = await decideOne(a, approve, true);
+        if (!ok) { failed = true; break; }
+        done += 1;
+      }
+      const said = approve
+        ? `승인 요청 ${done}건을 실행했습니다.` + (failed ? ' 실패한 항목에서 멈췄습니다.' : '')
+        : `승인 요청 ${done}건을 거절했습니다.`;
+      this.hooks.notice(said, failed ? 'err' : 'ok');
+      await this.refreshActions();
+      if (approve && done) await this.hooks.onApplied();
+    };
+    allYes.addEventListener('click', () => void decideAll(true));
+    allNo.addEventListener('click', () => void decideAll(false));
+
+    // A long queue folds: the first few rows, then a count that unfolds the
+    // rest, so the card between the log and the input stays a card.
+    const FOLD = 6;
+    const shown = rows.slice(0, FOLD);
+    const rest = rows.slice(FOLD);
+    const restBox = el('div', { style: { display: 'none' } }, rest);
+    const unfold = rest.length
+      ? el('button', { class: 'ghost tiny', text: `그 외 ${rest.length}건 보기` })
+      : null;
+    unfold?.addEventListener('click', () => {
+      const open = restBox.style.display === 'none';
+      restBox.style.display = open ? '' : 'none';
+      unfold.textContent = open ? '접기' : `그 외 ${rest.length}건 보기`;
+    });
+
     this.actionBox.appendChild(el('div', { class: 'card staged' }, [
       el('h2', { text: `승인 요청 ${items.length}건` }),
       el('div', { class: 'hint', text: '승인해야 실행됩니다. 전사 수정이 아닌 변경입니다.' }),
-      ...rows,
+      items.length > 1 ? el('div', { class: 'row', style: { margin: '6px 0' } }, [allYes, allNo, progress]) : null,
+      ...shown,
+      restBox,
+      unfold,
     ]));
   }
 
@@ -492,9 +548,13 @@ export class AgentPanel {
     if (empty) empty.remove();
     this.addBubble('user', prompt);
 
-    const body = this.addBubble('assistant', '');
-    const trace = el('div', { class: 'trace' });
-    body.parentElement?.insertBefore(trace, body);
+    // The live bubble is a sequence, in the order things happened: a run of
+    // tool chips, then the prose the model wrote after them, then the next
+    // run of chips, and so on. One chip strip pinned above one prose block
+    // put every later tool call above text it came after, which read as the
+    // model having done its reading before it spoke when it had not.
+    const bubble = el('div', { class: 'bubble assistant' });
+    this.log.appendChild(bubble);
     // A running clock, not just a spinner.
     //
     // An agent turn here is minutes, not seconds - it reads dozens of turns and
@@ -514,40 +574,64 @@ export class AgentPanel {
       elapsed,
       stopBtn,
     ]);
-    body.parentElement?.insertBefore(thinking, body);
+    // Always the last thing in the bubble: segments are inserted before it.
+    bubble.appendChild(thinking);
 
     const startedAt = Date.now();
     const tick = () => {
       const s = Math.floor((Date.now() - startedAt) / 1000);
       elapsed.textContent = `${Math.floor(s / 60)}m ${s % 60}s`;
     };
-    // Kept in `this` so a panel teardown mid-run cannot leave it running.
+    // Kept in `this` so a panel teardown mid-run cannot leave it running. It
+    // runs until the turn ends - not until the first text arrives - so the
+    // clock next to "스크립트 중입니다…" keeps moving and says the turn is
+    // alive; a frozen clock there used to look like a hang.
     this.clearTimer();
     this.timer = setInterval(tick, 1000) as unknown as number;
 
     const setThinking = (on: boolean, label?: string) => {
       thinking.style.display = on ? 'flex' : 'none';
       if (label) thinkingText.textContent = label;
-      if (!on) {
-        stopBtn.style.display = 'none';
-        // The clock stops but stays on screen: how long the whole turn took is
-        // worth keeping next to what it produced.
-        this.clearTimer();
-        tick();
-        elapsed.classList.add('done');
-        thinking.style.display = 'flex';
-        thinkingText.textContent = label ?? '완료';
-        thinking.querySelector('.dots')?.classList.add('stopped');
-      }
     };
-    const tracker = new TraceTracker(trace);
-    let acc = '';
+    /** The turn is over: stop the clock, keep the row as the turn's footer. */
+    const finish = (label: string) => {
+      stopBtn.style.display = 'none';
+      this.clearTimer();
+      tick();
+      elapsed.classList.add('done');
+      thinking.style.display = 'flex';
+      thinkingText.textContent = label;
+      thinking.querySelector('.dots')?.classList.add('stopped');
+    };
+
+    // Segments: the current prose block and the current chip strip. Opening
+    // one closes the other, so alternation lands in document order.
+    let textNode: HTMLElement | null = null;
+    let textAcc = '';
+    let tracker: TraceTracker | null = null;
+    const proseSegment = (): HTMLElement => {
+      if (!textNode) {
+        textNode = el('div', { class: 'bubble-body' });
+        bubble.insertBefore(textNode, thinking);
+        textAcc = '';
+        tracker = null;
+      }
+      return textNode;
+    };
+    const traceSegment = (): TraceTracker => {
+      if (!tracker) {
+        const strip = el('div', { class: 'trace' });
+        bubble.insertBefore(strip, thinking);
+        tracker = new TraceTracker(strip);
+        textNode = null;
+      }
+      return tracker;
+    };
     this.scroll();
 
     // Permission prompts: while the turn runs, the backend may be waiting on
-    // a shell / pip request. Poll and draw each once, with three answers.
-    const permitBox = el('div', { class: 'permits' });
-    body.parentElement?.insertBefore(permitBox, body);
+    // a shell / pip request. Poll and draw each once, with three answers -
+    // each card goes in at the point of the sequence it was asked at.
     const shown = new Set<string>();
     const askPermit = (p: { id: string; kind: string; summary: string; detail: string }) => {
       const card = el('div', { class: 'permit' });
@@ -570,7 +654,10 @@ export class AgentPanel {
       card.appendChild(el('div', { class: 'permit-title', text: (p.kind === 'pip' ? '패키지 설치 허용?' : '셸 명령 실행 허용?') + ' ' + p.summary }));
       card.appendChild(el('pre', { class: 'mono', text: p.detail }));
       card.appendChild(el('div', { class: 'row' }, [allow, deny, always]));
-      permitBox.appendChild(card);
+      bubble.insertBefore(card, thinking);
+      // A new prose block after the card, not the one before it.
+      textNode = null;
+      tracker = null;
       this.scroll();
     };
     const permitPoll = setInterval(async () => {
@@ -587,12 +674,16 @@ export class AgentPanel {
       for await (const ev of state.agentChat(prompt, abort.signal)) {
         const e = ev as Record<string, unknown>;
         switch (e.type) {
-          case 'text':
-            acc += String(e.text ?? '');
+          case 'text': {
+            const node = proseSegment();
+            textAcc += String(e.text ?? '');
+            // Text is arriving, so the indicator would only repeat "alive";
+            // it comes back the moment the model turns to a tool again.
             setThinking(false);
-            setMarkdown(body, acc);
+            setMarkdown(node, textAcc);
             this.scroll();
             break;
+          }
           case 'tool': {
             // Naming the tool answers "is it stuck?" during the long quiet
             // stretch while it reads: a spinner alone does not.
@@ -600,14 +691,14 @@ export class AgentPanel {
             // A skill load is the one call whose argument is the whole story:
             // "스킬" says nothing, "스킬: 말투 통일" says what the agent decided.
             const detail = name === 'load_skill' ? skillArg(e.args) : '';
-            tracker.push(name, detail);
+            traceSegment().push(name, detail);
             setThinking(true, (TOOL_GLYPH[name]?.[1] ?? name) + (detail ? `: ${detail}` : '') + ' 중입니다…');
             this.scroll();
             break;
           }
           case 'done': {
-            setThinking(false, '완료');
-            body.parentElement?.appendChild(this.costLine(
+            finish('완료');
+            bubble.appendChild(this.costLine(
               e.usage as Record<string, unknown> | undefined,
               (e.cost as number | null | undefined) ?? null));
             // A turn ends when the model stops, not when the job is done. One
@@ -618,7 +709,7 @@ export class AgentPanel {
               this.input.value = '이어서 진행해 주세요. 방금 턴에서 끝내지 못한 작업이 있으면 마저 해 주세요.';
               void this.submit();
             });
-            body.parentElement?.appendChild(el('div', { class: 'row', style: { marginTop: '4px' } }, [more]));
+            bubble.appendChild(el('div', { class: 'row', style: { marginTop: '4px' } }, [more]));
             if (typeof e.total === 'number') {
               this.status.textContent = `이 대화 누적 $${e.total.toFixed(4)}`;
             }
@@ -626,21 +717,22 @@ export class AgentPanel {
             break;
           }
           case 'error':
-            setThinking(false, '중단됨');
-            body.parentElement?.appendChild(
+            finish('중단됨');
+            bubble.appendChild(
               el('div', { class: 'notice err', text: String(e.error ?? '알 수 없는 오류가 발생했습니다') }));
             void clientLog('error', 'agent stream error', { error: e.error });
             break;
         }
       }
     } catch (e) {
-      setThinking(false, '중단됨');
-      body.parentElement?.appendChild(
-        el('div', { class: 'notice err', text: msg(e) }));
+      finish('중단됨');
+      bubble.appendChild(el('div', { class: 'notice err', text: msg(e) }));
       void clientLog('error', 'agent chat failed', { error: String(e) });
     } finally {
       clearInterval(permitPoll);
-      if (!permitBox.childElementCount) permitBox.remove();
+      // A turn that ended without the clock being stopped (an early return,
+      // a stream that closed without 'done') still gets its footer.
+      if (this.timer !== null) finish('종료');
       this.busy = false;
       this.send.disabled = false;
       this.scroll();

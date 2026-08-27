@@ -327,6 +327,54 @@ function beginRename(c: Cell, nameEl: HTMLElement): void {
  * allows `img-src * data: blob:`, so every host gets a try. A host that
  * still refuses fires the img error handler, and the type badge stands in.
  */
+/**
+ * At most this many thumbnail fetches in flight. Three hundred cells firing
+ * at once is what made the grid load half its pictures and drop the rest:
+ * the host's readImage on web goes to the hub one request at a time, and a
+ * burst of them times out. The backend store answers from disk, and a small
+ * window keeps it - and the tunnel in front of it - steady.
+ */
+const THUMB_PARALLEL = 6;
+let thumbActive = 0;
+const thumbQueue: (() => void)[] = [];
+
+function thumbSlot(): Promise<() => void> {
+  return new Promise((resolve) => {
+    const grant = () => {
+      thumbActive += 1;
+      let released = false;
+      resolve(() => {
+        if (released) return;
+        released = true;
+        thumbActive -= 1;
+        const next = thumbQueue.shift();
+        if (next) next();
+      });
+    };
+    if (thumbActive < THUMB_PARALLEL) grant();
+    else thumbQueue.push(grant);
+  });
+}
+
+/** The bytes of one asset: the backend store first, the host as fallback. */
+async function thumbBytes(c: Cell): Promise<Uint8Array | null> {
+  // The store is content-addressed and already holds everything the importer
+  // finished with, so it is the same bytes without the host's per-image
+  // round trip to the hub. A cell the store does not have yet (or that
+  // failed) still gets the host's copy.
+  if (c.state === 'present') {
+    try {
+      const bytes = await transport.getBinary('/assets/blob', { key: c.key });
+      if (bytes.byteLength) return bytes;
+    } catch { /* fall back to the host */ }
+  }
+  try {
+    const bytes = await Risuai.readImage(c.key);
+    if (bytes && (bytes as Uint8Array).byteLength) return bytes as Uint8Array;
+  } catch { /* nothing to show */ }
+  return null;
+}
+
 async function loadThumb(c: Cell, mount: HTMLElement): Promise<void> {
   const isImage = /^(png|jpe?g|gif|webp|avif|bmp)$/i.test(c.ext);
   if (!isImage) {
@@ -335,19 +383,23 @@ async function loadThumb(c: Cell, mount: HTMLElement): Promise<void> {
   }
   let url = thumbs.get(c.key) || '';
   if (!url) {
+    const release = await thumbSlot();
     try {
-      const bytes = await Risuai.readImage(c.key);
-      if (bytes && (bytes as Uint8Array).byteLength) {
-        const view = bytes as Uint8Array;
+      // The grid may have been redrawn while this waited in the queue.
+      if (!mount.isConnected) return;
+      const view = await thumbBytes(c);
+      if (view) {
         const buf = new Uint8Array(view.byteLength);
         buf.set(view);
         url = URL.createObjectURL(new Blob([buf]));
-        if (thumbs.size > 200) {
+        if (thumbs.size > 400) {
           for (const [k, u] of thumbs) { URL.revokeObjectURL(u); thumbs.delete(k); break; }
         }
         thumbs.set(c.key, url);
       }
-    } catch { /* fall through */ }
+    } finally {
+      release();
+    }
   }
   if (!url) {
     mount.appendChild(el('div', { class: 'assettype', text: c.state === 'missing' ? '없음' : c.ext.toUpperCase() }));

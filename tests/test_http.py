@@ -166,6 +166,18 @@ class Server:
     def post(self, path, payload=None, token="__default__"):
         return self._req("POST", path, payload if payload is not None else {}, token)
 
+    def post_bytes(self, path, payload=None) -> tuple[int, bytes, dict]:
+        """A POST whose answer is bytes, not JSON (the zip download)."""
+        url = f"http://127.0.0.1:{self.port}{path}"
+        data = json.dumps(payload or {}, ensure_ascii=False).encode("utf-8")
+        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {self.token}"}
+        req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                return r.status, r.read(), dict(r.headers)
+        except urllib.error.HTTPError as e:
+            return e.code, e.read(), dict(e.headers)
+
     def stop(self) -> None:
         try:
             self.proc.terminate()
@@ -1042,6 +1054,8 @@ def test_card_scripts_lifecycle(s: Server, cw: dict) -> None:
     st, body = s.get(q("/card/scripts", charKey=ck, kind="customscript"))
     bg2 = next(i for i in body["items"] if i["id"] == bg["id"])
     check("its unmodelled field survived the edit", bg2["entry"].get("forkExtra") == 7, str(bg2)[:160])
+    check("an edited script carries its original for the diff view",
+          isinstance(bg2.get("original"), dict) and bg2["original"] != bg2["entry"], str(bg2.get("original"))[:120])
 
     st, body = s.post("/card/script/add",
                       {"charKey": ck, "kind": "customscript",
@@ -1100,6 +1114,14 @@ def test_global_lore_decoupled_reset(s: Server, cw: dict) -> None:
     contents = sorted(str((e.get("entry") or {}).get("content")) for e in body.get("lore") or [])
     check("global lore edits survived the new chat", contents == ["고친 세계", "추가 로어"], str(contents))
     check("the added row is chat-less", all(e.get("chatKey") is None for e in body.get("lore") or []))
+    # The frozen counterpart travels with edited rows only - the panel's diff
+    # view needs it, and an added row has nothing to diff against.
+    edited = next(e for e in body["lore"] if (e.get("entry") or {}).get("content") == "고친 세계")
+    added = next(e for e in body["lore"] if (e.get("entry") or {}).get("content") == "추가 로어")
+    check("an edited lore row carries its original",
+          isinstance(edited.get("original"), dict) and edited["original"].get("content") != "고친 세계",
+          str(edited.get("original"))[:120])
+    check("an added lore row carries none", added.get("original") is None)
     st, body = s.get(q("/card", charKey=ck))
     d = next(f for f in body["fields"] if f["field"] == "desc")
     check("card edit survived the new chat", d["body"] == "새 챗 전에 고침", d["body"])
@@ -1956,8 +1978,47 @@ def test_workspace_folders_and_family(s: Server, cw: dict) -> None:
     check("but not inside original", st == 400, str(st))
     st, body = s.post("/files/upload", {"charKey": ck, "name": "memo.txt", "text": "hi", "dir": "uploads/참고"})
     check("an upload can target a folder", st == 200 and body.get("path") == "uploads/참고/memo.txt", str(body)[:120])
-    st, body = s.post("/files/upload", {"charKey": ck, "name": "x.txt", "text": "hi", "dir": "out"})
-    check("an upload cannot target another area", st == 400, str(st))
+    st, body = s.post("/files/upload", {"charKey": ck, "name": "x.txt", "text": "hi", "dir": "original"})
+    check("an upload cannot target a frozen area", st == 400, str(st))
+    st, body = s.post("/files/upload", {"charKey": ck, "name": "x.txt", "text": "hi", "dir": "out/보관"})
+    check("but out/ and a nested folder are fine", st == 200 and body.get("path") == "out/보관/x.txt", str(body)[:120])
+    s.post("/files/delete", {"charKey": ck, "path": "out/보관"})
+
+    # A dropped zip unpacks into a folder named after it; junk and escapes are
+    # skipped; and a selection comes back as one zip.
+    import base64 as _b64
+    import io as _io
+    import zipfile as _zipfile
+    buf = _io.BytesIO()
+    with _zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("a.txt", "A")
+        zf.writestr("sub/b.txt", "B")
+        zf.writestr("__MACOSX/._a.txt", "junk")
+        zf.writestr("../escape.txt", "X")
+    st, body = s.post("/files/upload", {"charKey": ck, "name": "묶음.zip", "dir": "uploads/참고",
+                                        "base64": _b64.b64encode(buf.getvalue()).decode(), "extract": True})
+    check("a zip can be unpacked on upload", st == 200 and body.get("path") == "uploads/참고/묶음"
+          and body.get("extracted") == 2, str(body)[:160])
+    st, files = s.get(q("/files", charKey=ck))
+    up = next(a for a in files["areas"] if a["area"] == "uploads")
+    names = {f["path"] for f in up["files"]}
+    check("its files land under the folder, nested kept",
+          "uploads/참고/묶음/a.txt" in names and "uploads/참고/묶음/sub/b.txt" in names, str(sorted(names))[:200])
+    check("junk and escaping members are dropped",
+          not any("escape" in n or "MACOSX" in n for n in names))
+    st, raw, hdr = s.post_bytes("/files/zip", {"charKey": ck, "paths": ["uploads/참고/묶음"], "name": "받기"})
+    ctype = next((v for k, v in hdr.items() if k.lower() == "content-type"), "")
+    check("a folder downloads as one zip", st == 200 and raw[:2] == b"PK" and "zip" in ctype, f"{st} {ctype}")
+    with _zipfile.ZipFile(_io.BytesIO(raw)) as zf:
+        got = sorted(zf.namelist())
+    check("named relative to the folder's parent", got == ["묶음/a.txt", "묶음/sub/b.txt"], str(got))
+    st, raw, hdr = s.post_bytes("/files/zip", {"charKey": ck, "paths": ["uploads/참고/묶음/a.txt", "uploads/참고/묶음/sub/b.txt"]})
+    with _zipfile.ZipFile(_io.BytesIO(raw)) as zf:
+        got = sorted(zf.namelist())
+    check("several files zip relative to their common parent", got == ["a.txt", "sub/b.txt"], str(got))
+    st, raw, hdr = s.post_bytes("/files/zip", {"charKey": ck, "paths": ["../etc"]})
+    check("a path outside the workspace is refused", st == 400, str(st))
+    s.post("/files/delete", {"charKey": ck, "path": "uploads/참고/묶음"})
     st, files = s.get(q("/files", charKey=ck))
     up = next(a for a in files["areas"] if a["area"] == "uploads")
     check("the listing names the folder", "uploads/참고" in (up.get("dirs") or []), str(up.get("dirs")))

@@ -8,7 +8,7 @@
  * of characters of HTML, so the editor is a monospace area sized for it and
  * the list shows only comments.
  */
-import { el, clear, armed, refocusSearch } from './dom';
+import { el, clear, armed, refocusSearch, focusButton, diffCard } from './dom';
 import { setToolbarSearch } from './shell';
 import { state, type CardScript, type CardField } from '../state';
 import { threePane } from './panes';
@@ -224,9 +224,11 @@ function openField(f: CardField): void {
   });
   clear(viewMount);
   viewMount.appendChild(el('div', { class: 'card' }, [
-    el('h2', { text: BG_LABEL[f.field] }),
+    el('h2', {}, [el('span', { text: BG_LABEL[f.field] }), el('span', { class: 'spacer' }),
+                  focusButton(body, BG_LABEL[f.field], { code: true })]),
     el('div', { class: 'hint', text: 'CSS는 보통 여기(백그라운드 HTML)의 <style> 안에 들어갑니다.' }),
     el('label', { class: 'field' }, [body]),
+    f.changed ? diffCard(f.original, f.body, { code: true }) : null,
     el('div', { class: 'row' }, [save]),
   ]));
 }
@@ -290,9 +292,22 @@ function open(s: CardScript): void {
     }
   });
 
+  // The lines that changed, for an edited script: `out` is where the bulk
+  // of a regex script lives (a background HTML is thousands of lines), and
+  // a one-line `in` change is shown as a note.
+  const orig = s.origin === 'edited' && s.original ? (s.original as Record<string, any>) : null;
+  const diff = orig ? diffCard(String(orig.out ?? ''), String(e.out ?? ''), { code: true }) : null;
+  const small: string[] = [];
+  if (orig) {
+    if (String(orig.in ?? '') !== String(e.in ?? '')) small.push(`찾기: ${String(orig.in ?? '')} → ${String(e.in ?? '')}`);
+    if (String(orig.type ?? '') !== String(e.type ?? '')) small.push(`종류: ${String(orig.type ?? '')} → ${String(e.type ?? '')}`);
+    if (String(orig.comment ?? '') !== String(e.comment ?? '')) small.push(`이름: ${String(orig.comment ?? '')} → ${String(e.comment ?? '')}`);
+  }
+
   clear(viewMount);
   viewMount.appendChild(el('div', { class: 'card' }, [
-    el('h2', { text: 'Regex 스크립트' }),
+    el('h2', {}, [el('span', { text: 'Regex 스크립트' }), el('span', { class: 'spacer' }),
+                  focusButton(outText, String(e.comment || 'Regex 스크립트') + ' — 바꾸기 (out)', { code: true })]),
     el('label', { class: 'field' }, [el('span', { text: '이름 (comment)' }), comment]),
     el('label', { class: 'field' }, [el('span', { text: '종류 (type)' }), type]),
     el('label', { class: 'field' }, [
@@ -302,6 +317,8 @@ function open(s: CardScript): void {
       el('span', { text: '바꾸기 (out) — background HTML도 여기에 들어갑니다' }), outText,
     ]),
     el('label', { class: 'field' }, [el('span', { text: '플래그 (flag)' }), flag]),
+    small.length ? el('div', { class: 'hint diffmeta', text: '기준선과 다른 항목 — ' + small.join(' · ') }) : null,
+    diff,
     el('div', { class: 'row' }, [save, del]),
   ]));
 }

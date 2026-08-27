@@ -9,10 +9,10 @@
  * Chat counts of 30-50 across folders are normal, so folders collapse and the
  * list is plain rows rather than cards - at that count, cards are a wall.
  */
-import { el, clear, refocusSearch, fmtTime } from './dom';
+import { el, clear, refocusSearch, fmtTime, armed } from './dom';
 import { state } from '../state';
 import { setEditMode, setToolbarSearch, setTab } from './shell';
-import { shellNotice } from './chatbar';
+import { shellNotice, snapshotCleanup } from './chatbar';
 import type { RisuChat } from '../risuai';
 import { describeSync, syncBusy } from '../assets';
 
@@ -51,6 +51,7 @@ function botSnapshots(editBot: HTMLElement): HTMLElement {
       el('span', { class: 'badge now', text: '현재' }),
       nowEdit,
     ]));
+    const redraw = () => wrap.replaceWith(botSnapshots(editBot));
     for (const [idx, c] of cps.slice(0, 8).entries()) {
       const edit = el('button', { class: 'ghost tiny', text: '이 스냅샷으로 편집' }) as HTMLButtonElement;
       edit.title = '작업본을 이 시점으로 되돌린 뒤 봇 편집으로 들어갑니다 (직전 상태도 스냅샷으로 남습니다)';
@@ -64,15 +65,38 @@ function botSnapshots(editBot: HTMLElement): HTMLElement {
           edit.disabled = false;
         }
       });
-      list.appendChild(el('div', { class: 'chatitem' }, [
+      // Deleting from here too - the picker is where the snapshots are seen
+      // first, and going into 봇 편집 → 버전 just to drop one was a detour.
+      const row = el('div', { class: 'chatitem' });
+      const del = el('button', { class: 'ghost tiny', title: '이 스냅샷 삭제' }) as HTMLButtonElement;
+      armed(del, '✕', '삭제 확인', async () => {
+        row.classList.add('deleting');
+        del.disabled = true;
+        edit.disabled = true;
+        try {
+          await state.deleteCardCheckpoint(c.id);
+          redraw();
+        } catch (e) {
+          row.classList.remove('deleting');
+          del.disabled = false;
+          edit.disabled = false;
+          flash(wrap, '삭제하지 못했습니다: ' + (e instanceof Error ? e.message : String(e)));
+        }
+      });
+      row.append(
         el('span', { class: 'grow', text: c.label || '(무제)' }),
-        idx === 0 ? el('span', { class: 'badge', text: '최신 스냅샷' }) : null,
+        idx === 0 ? el('span', { class: 'badge', text: '최신 스냅샷' }) : '',
         el('span', { class: 'n', text: fmtTime(c.created_at * 1000) }),
-        edit,
-      ]));
+        edit, del,
+      );
+      list.appendChild(row);
     }
     if (cps.length > 8) list.appendChild(el('div', { class: 'hint', style: { padding: '4px 0' }, text: `그 외 ${cps.length - 8}개 — 봇 편집 → 🕘 버전에서 전부 봅니다` }));
     wrap.appendChild(list);
+    wrap.appendChild(snapshotCleanup(cps.length, async (keep) => {
+      await state.clearCardCheckpoints(keep);
+      redraw();
+    }));
   })();
   return wrap;
 }

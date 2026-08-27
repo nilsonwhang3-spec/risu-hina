@@ -261,12 +261,17 @@ async function openVersions(anchor: HTMLElement): Promise<void> {
         });
       });
       const row = el('div', { class: 'verrow' });
-      const del = el('button', { class: 'ghost tiny', title: '이 스냅샷 삭제' });
-      armed(del, '✕', '삭제?', async () => {
+      const del = el('button', { class: 'ghost tiny', title: '이 스냅샷 삭제' }) as HTMLButtonElement;
+      armed(del, '✕', '삭제 확인', async () => {
+        // Dim at once (see botbar.ts): the wait is the round trip, not the delete.
+        row.classList.add('deleting');
+        del.disabled = true;
         try {
           await state.deleteCheckpoint(c.id);
           row.remove();
         } catch (e) {
+          row.classList.remove('deleting');
+          del.disabled = false;
           shellNotice('삭제하지 못했습니다: ' + msg(e), 'err');
         }
       });
