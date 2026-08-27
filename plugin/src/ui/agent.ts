@@ -700,6 +700,13 @@ export class AgentPanel {
             break;
           }
           case 'done': {
+            // The model is done, the panel is not: the staged edits, the
+            // approval queue and the out/ files are fetched next, and with
+            // the clock stopped and the dots frozen that fetch looked like a
+            // hang right before the cards appeared. Keep it visibly alive
+            // until the cards are in, then mark the turn finished.
+            setThinking(true, '제안·변경 카드를 정리하는 중입니다…');
+            await this.refreshStaged();
             finish('완료');
             bubble.appendChild(this.costLine(
               e.usage as Record<string, unknown> | undefined,
@@ -716,7 +723,6 @@ export class AgentPanel {
             if (typeof e.total === 'number') {
               this.status.textContent = `이 대화 누적 $${e.total.toFixed(4)}`;
             }
-            await this.refreshStaged();
             break;
           }
           case 'error':

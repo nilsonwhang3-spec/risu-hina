@@ -50,7 +50,7 @@ CATALOG_LIMIT = 6_000      # the whole catalog block
 ALWAYS_LIMIT = 16_000      # bodies of always-on skills, combined
 TEXT_EXT = {".md", ".txt", ".py", ".json", ".yaml", ".yml", ".csv", ".html", ".js", ".lua", ".xml"}
 
-SEED_KEY = "skills_seeded_v3"
+SEED_KEY = "skills_seeded_v4"
 FOLDER_KEY = "skills_folders_v1"
 SEED_DIR = Path(__file__).resolve().parent / "seeds"
 
@@ -640,6 +640,8 @@ RETIRED_SEEDS = ("말투 통일",)
 SEED_FILES: dict[str, tuple[str, str, bool]] = {
     "risuai-cbs.md": ("RisuAI CBS 문법",
                       "봇 카드·로어북·정규식·프롬프트의 `{{tag}}` (CBS) 문법을 읽거나 써야 할 때. {{getvar}}·{{random}} 같은 태그의 뜻이 필요할 때.", True),
+    "risuai-lorebook-style.md": ("RisuAI 로어북 작성 규칙",
+                                 "로어북 항목을 새로 쓰거나 고칠 때 반드시. ### 제목·#### 소제목·불릿 형식, 우선순위 숫자 표(300~2000), 영/한/일 키워드, 폴더, 상시 항목 규칙. 실리태번식 @@ 헤더 금지.", True),
     "risuai-lorebook.md": ("RisuAI 로어북 구조",
                            "챗 로어북 항목을 만들거나 고칠 때, 특히 발동 조건(key·데코레이터·삽입 위치)을 정할 때.", True),
     "risuai-hooks.md": ("RisuAI 처리 순서 (정규식·Lua 훅)",

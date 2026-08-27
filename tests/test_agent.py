@@ -14,6 +14,8 @@ offline.
 from __future__ import annotations
 
 import json
+import threading
+from collections import deque
 import os
 import shutil
 import socket
@@ -84,6 +86,20 @@ class Server:
                  "RISUHINA_REQUIRE_TOKEN": "0", "PYTHONIOENCODING": "utf-8"},
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
             encoding="utf-8", errors="replace")
+        # Drain the child's output continuously. It was read only at the end,
+        # and a Windows pipe holds about 4KB: once the seed-skill lines plus
+        # two turns of request logging crossed that, the server blocked on a
+        # print() mid-turn and the stream "timed out" - a hang that appeared
+        # the day one more seed skill was added.
+        self._log_lines: deque[str] = deque(maxlen=400)
+
+        def pump() -> None:
+            try:
+                for line in self.proc.stdout or []:
+                    self._log_lines.append(line.rstrip("\n"))
+            except Exception:  # noqa: BLE001 - the pipe closed under us
+                pass
+        threading.Thread(target=pump, daemon=True).start()
 
     def wait_ready(self, timeout: float = 25.0) -> bool:
         deadline = time.time() + timeout
@@ -149,10 +165,7 @@ class Server:
         shutil.rmtree(self.data, ignore_errors=True)
 
     def drain(self):
-        try:
-            return self.proc.stdout.read() if self.proc.stdout else ""
-        except Exception:
-            return ""
+        return "\n".join(self._log_lines)
 
 
 def make_payload() -> dict:

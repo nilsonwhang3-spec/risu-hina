@@ -148,6 +148,21 @@ def h_config_get(arg: dict) -> dict:
     return {"config": config.redacted(), "keepSentinel": config.KEEP}
 
 
+def h_websearch(arg: dict) -> dict:
+    return {**websearch.status(), "keepSentinel": config.KEEP}
+
+
+def h_websearch_test(arg: dict) -> dict:
+    """One real search with the configured provider, for the settings card."""
+    q = str(arg.get("query") or "RisuAI").strip()[:200]
+    if not websearch.configured():
+        return {"ok": False, "provider": websearch.provider_id(), "error": websearch.why_not()}
+    text = websearch.search(q)
+    ok = not (text.startswith("검색에 실패") or text.endswith("결과가 없습니다") or text.startswith("지원하지"))
+    return {"ok": ok, "provider": websearch.provider_id(), "query": q, "text": text[:4000],
+            "error": None if ok else text[:300]}
+
+
 def h_config_set(arg: dict) -> dict:
     patch = arg.get("config")
     if not isinstance(patch, dict):
@@ -196,6 +211,11 @@ def h_config_test(arg: dict) -> dict:
         for cap in ("max_tokens", "max_completion_tokens"):
             if cap in extra:
                 extra[cap] = min(int(extra[cap]), 4096)
+    # The test asks two one-line questions; a reasoning setting meant for real
+    # work ("high") turned the tool round into a minute-plus think and a
+    # ReadTimeout. The probe is about reachability and tool plumbing, not depth.
+    if "reasoning_effort" in extra:
+        extra["reasoning_effort"] = "low"
     note = " · ".join(plan.notes)
 
     def with_hint(err: str) -> str:
@@ -236,10 +256,10 @@ def h_config_test(arg: dict) -> dict:
     ask = "Reply with exactly: PONG"
     try:
         if responses:
-            r = httpx.post(url, headers=headers, timeout=60, json={
+            r = httpx.post(url, headers=headers, timeout=110, json={
                 "model": model, "input": [{"role": "user", "content": ask}], **extra})
         else:
-            r = httpx.post(url, headers=headers, timeout=60, json={
+            r = httpx.post(url, headers=headers, timeout=110, json={
                 "model": model, "messages": [{"role": "user", "content": ask}], **extra})
         data = body_of(r)
         usage = data.get("usage") or {}
@@ -259,7 +279,7 @@ def h_config_test(arg: dict) -> dict:
     def tool_round(choice: Any) -> list:
         nonlocal answer
         if responses:
-            r = httpx.post(url, headers=headers, timeout=60, json={
+            r = httpx.post(url, headers=headers, timeout=110, json={
                 "model": model, "input": [{"role": "user", "content": ask}],
                 "tools": [{"type": "function", **fn}], "tool_choice": choice, **extra})
             out = body_of(r).get("output") or []
@@ -267,7 +287,7 @@ def h_config_test(arg: dict) -> dict:
                 str(c.get("text") or "") for o in out if isinstance(o, dict) and o.get("type") == "message"
                 for c in (o.get("content") or []) if isinstance(c, dict))
             return [o for o in out if isinstance(o, dict) and o.get("type") == "function_call"]
-        r = httpx.post(url, headers=headers, timeout=60, json={
+        r = httpx.post(url, headers=headers, timeout=110, json={
             "model": model, "messages": [{"role": "user", "content": ask}],
             "tools": [{"type": "function", "function": fn}], "tool_choice": choice, **extra})
         m = ((body_of(r).get("choices") or [{}])[0].get("message") or {})
@@ -1753,6 +1773,8 @@ ROUTES: dict[str, Handler] = {
     "GET /config": h_config_get,
     "POST /config": h_config_set,
     "POST /config/test": h_config_test,
+    "GET /websearch": h_websearch,
+    "POST /websearch/test": h_websearch_test,
 
     "GET /presets": h_presets,
     "POST /presets/save": h_preset_save,

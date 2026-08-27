@@ -122,6 +122,21 @@ export interface AssetItem {
   hash: string | null;
 }
 
+export interface WebsearchProvider {
+  id: string; name: string; needsKey: boolean; needsUrl: boolean; note: string;
+}
+
+export interface WebsearchStatus {
+  providers: WebsearchProvider[];
+  provider: string;
+  apiKeySet: boolean;
+  baseUrl: string;
+  maxResults: number;
+  configured: boolean;
+  whyNot: string;
+  keepSentinel: string;
+}
+
 export interface CharxPreview {
   charKey: string; name: string; assets: number; present: number;
   missing: { name: string; type: string; key: string }[];
@@ -857,7 +872,22 @@ class AppState {
   }
 
   async testAgent(kind: 'general' | 'search' = 'general'): Promise<Record<string, unknown>> {
-    return await transport.post('/config/test', { section: kind === 'search' ? 'agent_search' : 'agent' }, 120_000);
+    // Two model rounds at up to 110s each on the backend; the panel waits for both.
+    return await transport.post('/config/test', { section: kind === 'search' ? 'agent_search' : 'agent' }, 240_000);
+  }
+
+  // --- web search provider (what the search agent searches with) ------------
+
+  async websearch(): Promise<WebsearchStatus> {
+    return await transport.get('/websearch');
+  }
+
+  async saveWebsearch(patch: { provider: string; apiKey: string; baseUrl: string; maxResults: number }): Promise<void> {
+    await transport.post('/config', { config: { websearch: patch } });
+  }
+
+  async testWebsearch(query: string): Promise<{ ok: boolean; provider: string; query?: string; text?: string; error?: string | null }> {
+    return await transport.post('/websearch/test', { query }, 60_000);
   }
 
   // --- diagnostics ----------------------------------------------------------

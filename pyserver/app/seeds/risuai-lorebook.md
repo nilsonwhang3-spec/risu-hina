@@ -159,19 +159,18 @@ content 필드 안에 `@@데코레이터` 를 줄 단위로 작성한다. 본문
 
 ---
 
-## 5. 토큰 예산 및 우선도 알고리즘
+## 5. 토큰 예산 및 우선도 알고리즘 (lorebook.svelte.ts 실측)
 
 ```
-1. 활성화된 항목을 priority 내림차순 정렬
-2. 토큰 예산 내에서 탐욕적(greedy) 충전:
-   - 높은 priority 항목부터 포함
-   - 토큰 초과 시 낮은 priority 항목 제거
-3. 최종 정렬: insertorder 순서로 프롬프트에 배치
+priority = insertorder, order = insertorder   ← 둘 다 같은 필드에서 시작
+1. 활성화된 항목을 priority 내림차순 정렬 (b.priority - a.priority)
+2. 토큰 예산 내에서 탐욕적(greedy) 충전: 높은 priority 부터, 초과분은 버림
+3. 살아남은 것을 order 내림차순으로 배치 (b.order - a.order) → insertorder 가 큰 항목이 프롬프트에서 먼저
 ```
 
-- `@@priority N` 명시 시 해당 값 사용
-- 미지정 시 insertorder 값이 priority로 사용
+- **우선순위는 `insertorder` 필드다.** 새 항목을 만들 때 반드시 숫자를 정해라(작성 규칙 스킬의 표). `@@priority N` 은 예산 경쟁에서만 쓰는 오버라이드이고 배치 순서는 바꾸지 않는다 — 실제 봇은 쓰지 않는다.
 - `@@ignore_on_max_context` → priority = -1000 (가장 먼저 제거)
+- 데코레이터는 **본문 맨 위**, 한 줄에 하나, 본문 텍스트보다 앞에 있어야 파싱된다. `@@position` 의 인자는 `after_desc | before_desc | personality | scenario | pt_이름` 만 유효하고 그 외는 무시된다.
 
 ---
 

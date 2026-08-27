@@ -214,6 +214,10 @@ export function makeLoreTab(opts: LoreViewOptions): (mount: HTMLElement) => void
     down.addEventListener('click', () => void moveTo(siblings[at + 1]));
 
     const row = el('div', { class: 'treerow lorecard' }, [name]);
+    // The priority number beside every entry: a lorebook is read by tiers,
+    // and a 100 among 700s and 1000s is the entry someone forgot to place.
+    const io = Number((e.entry as Record<string, unknown>).insertorder ?? 100);
+    row.appendChild(el('span', { class: 'hint ordertag', title: '우선순위 (insertorder)', text: String(io) }));
     // Always-active entries have no trigger keys; without the badge they
     // look like entries whose keys someone forgot.
     if ((e.entry as Record<string, unknown>).alwaysActive) {
@@ -255,6 +259,13 @@ export function makeLoreTab(opts: LoreViewOptions): (mount: HTMLElement) => void
       value: String(entry.content ?? ''),
       style: { minHeight: '300px' },
     });
+    // insertorder: RisuAI's one number for both "survives the token budget"
+    // and "goes first in the prompt" (bigger wins both). It had no field
+    // here, so every entry the panel made sat at the default 100.
+    const order = el('input', {
+      type: 'number', step: '10', value: String(Number(entry.insertorder ?? 100)),
+      title: '클수록 예산에서 먼저 살아남고 프롬프트에 먼저 놓입니다. 주연 1000 · 조연 800~900 · 세계관 700 · 장소 600 · 몬스터 500 · 엑스트라 300 · 상시 정본 2000',
+    }) as HTMLInputElement;
 
     // 폴더 간 이동: membership is `entry.folder === folderEntry.key`, so the
     // select's values are folder keys and its labels the folders' comments.
@@ -287,6 +298,7 @@ export function makeLoreTab(opts: LoreViewOptions): (mount: HTMLElement) => void
           alwaysActive: always.checked,
           comment: comment.value,
           content: content.value,
+          insertorder: Number.isFinite(Number(order.value)) ? Math.trunc(Number(order.value)) : 100,
         };
         if (folderSel.value) next.folder = folderSel.value;
         else delete next.folder;
@@ -338,7 +350,10 @@ export function makeLoreTab(opts: LoreViewOptions): (mount: HTMLElement) => void
       el('label', { class: 'field' }, [
         el('span', { text: '키워드 (key)' }), keys, keyHint,
       ]),
-      el('label', { class: 'field' }, [el('span', { text: '폴더' }), folderSel]),
+      el('div', { class: 'row', style: { marginBottom: '10px' } }, [
+        el('label', { class: 'field grow', style: { marginBottom: '0' } }, [el('span', { text: '폴더' }), folderSel]),
+        el('label', { class: 'field', style: { marginBottom: '0', width: '150px' } }, [el('span', { text: '우선순위 (insertorder)' }), order]),
+      ]),
       el('label', { class: 'field' }, [el('span', { text: '내용' }), content]),
       metaChanged.length ? el('div', { class: 'hint diffmeta', text: '기준선과 다른 항목 — ' + metaChanged.join(' · ') }) : null,
       diff,

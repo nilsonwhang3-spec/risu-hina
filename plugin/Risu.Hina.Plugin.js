@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.8.0
+//@display-name Risu Hina v0.8.1
 //@api 3.0
-//@version 0.8.0
+//@version 0.8.1
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -95,7 +95,7 @@
       this.route = "direct";
       this.tokenSafe = true;
       this.lastHealth = body;
-      this.gate = versionGate("0.8.0", String(body.version || ""));
+      this.gate = versionGate("0.8.1", String(body.version || ""));
       return body;
     }
     /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -1068,6 +1068,12 @@ label.field > span { display: block; margin-bottom: 4px; color: var(--textcolor2
 .notice.err { background: rgba(239, 68, 68, .12); }
 .notice.ok { background: rgba(16, 185, 129, .12); }
 
+/* The lorebook entry's insertorder, beside its name. */
+.ordertag {
+  flex-shrink: 0; padding: 0 5px; border-radius: 3px; font-size: 10.5px;
+  font-family: Consolas, monospace; font-variant-numeric: tabular-nums;
+  background: rgba(128,128,128,.14);
+}
 .badge {
   display: inline-block; padding: 1px 7px; border-radius: 4px; font-size: 11px;
   border: 1px solid var(--borderc, #2b323f);
@@ -2529,7 +2535,17 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       await transport.post("/config", { config: patch });
     }
     async testAgent(kind = "general") {
-      return await transport.post("/config/test", { section: kind === "search" ? "agent_search" : "agent" }, 12e4);
+      return await transport.post("/config/test", { section: kind === "search" ? "agent_search" : "agent" }, 24e4);
+    }
+    // --- web search provider (what the search agent searches with) ------------
+    async websearch() {
+      return await transport.get("/websearch");
+    }
+    async saveWebsearch(patch) {
+      await transport.post("/config", { config: { websearch: patch } });
+    }
+    async testWebsearch(query) {
+      return await transport.post("/websearch/test", { query }, 6e4);
     }
     // --- diagnostics ----------------------------------------------------------
     async logs(limit = 300, level = "") {
@@ -4656,6 +4672,8 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
               break;
             }
             case "done": {
+              setThinking(true, "\uC81C\uC548\xB7\uBCC0\uACBD \uCE74\uB4DC\uB97C \uC815\uB9AC\uD558\uB294 \uC911\uC785\uB2C8\uB2E4\u2026");
+              await this.refreshStaged();
               finish("\uC644\uB8CC");
               bubble.appendChild(this.costLine(
                 e.usage,
@@ -4671,7 +4689,6 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
               if (typeof e.total === "number") {
                 this.status.textContent = `\uC774 \uB300\uD654 \uB204\uC801 $${e.total.toFixed(4)}`;
               }
-              await this.refreshStaged();
               break;
             }
             case "error":
@@ -6805,6 +6822,8 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       up.addEventListener("click", () => void moveTo(siblings[at - 1]));
       down.addEventListener("click", () => void moveTo(siblings[at + 1]));
       const row = el("div", { class: "treerow lorecard" }, [name]);
+      const io = Number(e.entry.insertorder ?? 100);
+      row.appendChild(el("span", { class: "hint ordertag", title: "\uC6B0\uC120\uC21C\uC704 (insertorder)", text: String(io) }));
       if (e.entry.alwaysActive) {
         row.appendChild(el("span", { class: "badge", title: "\uC0C1\uC2DC \uD65C\uC131\uD654 \u2014 \uD0A4\uC6CC\uB4DC \uC5C6\uC774 \uD56D\uC0C1 \uC0BD\uC785\uB429\uB2C8\uB2E4", text: "\uC0C1\uC2DC" }));
       }
@@ -6838,6 +6857,12 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         value: String(entry.content ?? ""),
         style: { minHeight: "300px" }
       });
+      const order = el("input", {
+        type: "number",
+        step: "10",
+        value: String(Number(entry.insertorder ?? 100)),
+        title: "\uD074\uC218\uB85D \uC608\uC0B0\uC5D0\uC11C \uBA3C\uC800 \uC0B4\uC544\uB0A8\uACE0 \uD504\uB86C\uD504\uD2B8\uC5D0 \uBA3C\uC800 \uB193\uC785\uB2C8\uB2E4. \uC8FC\uC5F0 1000 \xB7 \uC870\uC5F0 800~900 \xB7 \uC138\uACC4\uAD00 700 \xB7 \uC7A5\uC18C 600 \xB7 \uBAAC\uC2A4\uD130 500 \xB7 \uC5D1\uC2A4\uD2B8\uB77C 300 \xB7 \uC0C1\uC2DC \uC815\uBCF8 2000"
+      });
       const names = folderNames(entries);
       const curFolder = folderOf(e);
       const folderKeys = [...names.keys()];
@@ -6863,7 +6888,8 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
             key: always.checked ? "" : keys.value,
             alwaysActive: always.checked,
             comment: comment.value,
-            content: content.value
+            content: content.value,
+            insertorder: Number.isFinite(Number(order.value)) ? Math.trunc(Number(order.value)) : 100
           };
           if (folderSel.value) next.folder = folderSel.value;
           else delete next.folder;
@@ -6912,7 +6938,10 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
           keys,
           keyHint
         ]),
-        el("label", { class: "field" }, [el("span", { text: "\uD3F4\uB354" }), folderSel]),
+        el("div", { class: "row", style: { marginBottom: "10px" } }, [
+          el("label", { class: "field grow", style: { marginBottom: "0" } }, [el("span", { text: "\uD3F4\uB354" }), folderSel]),
+          el("label", { class: "field", style: { marginBottom: "0", width: "150px" } }, [el("span", { text: "\uC6B0\uC120\uC21C\uC704 (insertorder)" }), order])
+        ]),
         el("label", { class: "field" }, [el("span", { text: "\uB0B4\uC6A9" }), content]),
         metaChanged.length ? el("div", { class: "hint diffmeta", text: "\uAE30\uC900\uC120\uACFC \uB2E4\uB978 \uD56D\uBAA9 \u2014 " + metaChanged.join(" \xB7 ") }) : null,
         diff,
@@ -7412,7 +7441,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         open5.addEventListener("click", () => openPicker(kind, refresh8, say));
         return el("div", { class: "presetnow" }, [
           el("div", { class: "grow" }, [
-            el("div", { class: "hint", text: kind === "search" ? "\uAC80\uC0C9 \uC5D0\uC774\uC804\uD2B8\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4 \u2014 \uC77C\uBC18 \uC5D0\uC774\uC804\uD2B8\uAC00 \uC9C1\uC811 web_search \uB85C \uAC80\uC0C9\uD569\uB2C8\uB2E4. \u203A \uC5D0\uC11C \uACE0\uB974\uAC70\uB098 \uCD94\uAC00\uD569\uB2C8\uB2E4." : "\uD504\uB9AC\uC14B\uC774 \uC5C6\uC2B5\uB2C8\uB2E4. \u203A \uC5D0\uC11C \uD558\uB098 \uB9CC\uB4E4\uC5B4 \uC8FC\uC138\uC694." })
+            el("div", { class: "hint", text: kind === "search" ? "\uAC80\uC0C9 \uC5D0\uC774\uC804\uD2B8\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4 \u2014 \uADF8\uB3D9\uC548 \uC5D0\uC774\uC804\uD2B8\uB294 \uC6F9\uC744 \uAC80\uC0C9\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4. \u203A \uC5D0\uC11C \uACE0\uB974\uAC70\uB098 \uCD94\uAC00\uD569\uB2C8\uB2E4." : "\uD504\uB9AC\uC14B\uC774 \uC5C6\uC2B5\uB2C8\uB2E4. \u203A \uC5D0\uC11C \uD558\uB098 \uB9CC\uB4E4\uC5B4 \uC8FC\uC138\uC694." })
           ]),
           open5
         ]);
@@ -7430,7 +7459,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         open4
       ]);
       if (kind === "search") {
-        const off = el("button", { class: "ghost tiny", text: "\uD574\uC81C", title: "\uAC80\uC0C9 \uC5D0\uC774\uC804\uD2B8\uB97C \uB044\uACE0 \uC77C\uBC18 \uC5D0\uC774\uC804\uD2B8\uAC00 \uC9C1\uC811 \uAC80\uC0C9\uD558\uAC8C \uD569\uB2C8\uB2E4" });
+        const off = el("button", { class: "ghost tiny", text: "\uD574\uC81C", title: "\uAC80\uC0C9 \uC5D0\uC774\uC804\uD2B8\uB97C \uB055\uB2C8\uB2E4 (\uC6F9 \uAC80\uC0C9\uC744 \uD560 \uC218 \uC5C6\uAC8C \uB429\uB2C8\uB2E4)" });
         off.addEventListener("click", async () => {
           try {
             await state.deselectPreset("search");
@@ -7449,7 +7478,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       testBtn.addEventListener("click", async () => {
         testBtn.disabled = true;
         clear(box);
-        box.appendChild(el("div", { class: "hint", text: "\uD14C\uC2A4\uD2B8 \uC911\uC785\uB2C8\uB2E4\u2026 (\uCD5C\uB300 2\uBD84)" }));
+        box.appendChild(el("div", { class: "hint", text: "\uD14C\uC2A4\uD2B8 \uC911\uC785\uB2C8\uB2E4\u2026 (\uCD5C\uB300 4\uBD84)" }));
         try {
           const r = await state.testAgent(kind);
           clear(box);
@@ -7491,12 +7520,111 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       el("div", { class: "card" }, [
         el("h2", { text: "\uAC80\uC0C9 \uC5D0\uC774\uC804\uD2B8" }),
         el("div", { class: "hint", style: { marginBottom: "8px" } }, [
-          "\uC77C\uBC18 \uC5D0\uC774\uC804\uD2B8\uAC00 \uC870\uC0AC\uB97C \uB9E1\uAE30\uB294 \uBCF4\uC870 \uC5D0\uC774\uC804\uD2B8(\uC6F9 \uAC80\uC0C9\uB9CC). \uC800\uB834\uD55C \uAC80\uC0C9\uD615 \uBAA8\uB378(\uC608: Gemini Flash)\uC744 \uAD8C\uD569\uB2C8\uB2E4. \uC5C6\uC73C\uBA74 \uC77C\uBC18 \uC5D0\uC774\uC804\uD2B8\uAC00 \uC9C1\uC811 \uAC80\uC0C9\uD569\uB2C8\uB2E4."
+          "\uC77C\uBC18 \uC5D0\uC774\uC804\uD2B8\uB294 \uC6F9\uC744 \uC9C1\uC811 \uAC80\uC0C9\uD558\uC9C0 \uC54A\uACE0, \uC678\uBD80 \uC0AC\uC2E4\uC774 \uD544\uC694\uD558\uBA74 \uC774 \uC5D0\uC774\uC804\uD2B8\uC5D0\uAC8C \uB9E1\uAE41\uB2C8\uB2E4. \uAC80\uC0C9 \uC5D0\uC774\uC804\uD2B8 = \uC544\uB798 \uD504\uB9AC\uC14B\uC758 \uBAA8\uB378 + \uADF8 \uC544\uB798 \uAC80\uC0C9 \uC81C\uACF5\uC790. \uC800\uB834\uD55C \uBAA8\uB378(\uC608: Gemini Flash)\uC744 \uAD8C\uD569\uB2C8\uB2E4."
         ]),
         searchMount,
         el("div", { class: "row", style: { marginTop: "8px" } }, [testButton("search", searchOut)]),
-        searchOut
-      ])
+        searchOut,
+        el("div", { class: "hint", style: { marginTop: "8px" } }, [
+          "\uC5F0\uACB0 \uD14C\uC2A4\uD2B8\uB294 \uBAA8\uB378\uB9CC \uBD05\uB2C8\uB2E4(\uC751\uB2F5 + \uD234 \uD638\uCD9C, \uCD5C\uB300 4\uBD84). \uC2E4\uC81C \uAC80\uC0C9\uC740 \uC544\uB798 \uC81C\uACF5\uC790\uB85C \uD569\uB2C8\uB2E4."
+        ])
+      ]),
+      buildWebsearchCard()
+    ]);
+  }
+  function buildWebsearchCard() {
+    const sel = el("select");
+    const key = el("input", { type: "password", placeholder: "API \uD0A4" });
+    const url = el("input", { placeholder: "https://searx.example.com" });
+    const max = el("input", { type: "number", min: "1", max: "8", value: "5" });
+    const keyRow = el("label", { class: "field" }, [el("span", { text: "API \uD0A4" }), key]);
+    const urlRow = el("label", { class: "field" }, [el("span", { text: "\uC8FC\uC18C (baseUrl)" }), url]);
+    const note = el("div", { class: "hint" });
+    const status = el("div", { class: "hint", style: { marginBottom: "6px" } });
+    const out = el("div", { class: "outbox" });
+    let providers = [];
+    let keySet = false;
+    let keep = "__keep__";
+    const syncFields = () => {
+      const p = providers.find((x) => x.id === selectedValue(sel));
+      keyRow.style.display = p?.needsKey ? "" : "none";
+      urlRow.style.display = p?.needsUrl ? "" : "none";
+      key.placeholder = keySet ? "(\uC800\uC7A5\uB41C \uD0A4 \uC720\uC9C0 \u2014 \uBC14\uAFB8\uB824\uBA74 \uC785\uB825)" : "API \uD0A4";
+      note.textContent = p?.note ?? "";
+    };
+    sel.addEventListener("change", syncFields);
+    const load = async () => {
+      try {
+        const r = await state.websearch();
+        providers = r.providers;
+        keySet = r.apiKeySet;
+        keep = r.keepSentinel || keep;
+        clear(sel);
+        for (const p of providers) sel.appendChild(el("option", { value: p.id, text: p.name }));
+        setSelected(sel, r.provider);
+        url.value = r.baseUrl || "";
+        max.value = String(r.maxResults || 5);
+        status.textContent = r.configured ? `\uC9C0\uAE08 \uC81C\uACF5\uC790: ${providers.find((p) => p.id === r.provider)?.name ?? r.provider} \u2014 \uAC80\uC0C9 \uAC00\uB2A5` : `\uAC80\uC0C9 \uBD88\uAC00: ${r.whyNot}`;
+        status.className = "hint " + (r.configured ? "" : "diff-del-n");
+        syncFields();
+      } catch (e) {
+        status.textContent = msg8(e);
+      }
+    };
+    const save = el("button", { class: "primary", text: "\uC800\uC7A5" });
+    save.addEventListener("click", async () => {
+      save.disabled = true;
+      try {
+        await state.saveWebsearch({
+          provider: selectedValue(sel),
+          apiKey: key.value ? key.value : keySet ? keep : "",
+          baseUrl: url.value.trim(),
+          maxResults: Math.max(1, Math.min(8, Number(max.value) || 5))
+        });
+        key.value = "";
+        await load();
+        clear(out);
+        out.appendChild(el("div", { class: "notice ok", text: "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4." }));
+      } catch (e) {
+        clear(out);
+        out.appendChild(el("div", { class: "notice err", text: msg8(e) }));
+      } finally {
+        save.disabled = false;
+      }
+    });
+    const q = el("input", { placeholder: "\uAC80\uC0C9 \uD14C\uC2A4\uD2B8 \uC9C8\uBB38 (\uC608: RisuAI)", value: "RisuAI" });
+    const test = el("button", { class: "ghost", text: "\uAC80\uC0C9 \uD14C\uC2A4\uD2B8" });
+    test.addEventListener("click", async () => {
+      test.disabled = true;
+      clear(out);
+      out.appendChild(el("div", { class: "hint", text: "\uAC80\uC0C9\uD558\uB294 \uC911\uC785\uB2C8\uB2E4\u2026" }));
+      try {
+        const r = await state.testWebsearch(q.value.trim() || "RisuAI");
+        clear(out);
+        out.appendChild(el("div", { class: "notice " + (r.ok ? "ok" : "err") }, [
+          el("div", { text: r.ok ? `\uAC80\uC0C9\uB429\uB2C8\uB2E4 \xB7 ${r.provider}` : `\uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4 \xB7 ${r.provider}` }),
+          el("pre", { class: "mono", style: { maxHeight: "220px" }, text: r.text || r.error || "" })
+        ]));
+      } catch (e) {
+        clear(out);
+        out.appendChild(el("div", { class: "notice err", text: msg8(e) }));
+      } finally {
+        test.disabled = false;
+      }
+    });
+    void load();
+    return el("div", { class: "card" }, [
+      el("h2", { text: "\uAC80\uC0C9 \uC81C\uACF5\uC790" }),
+      el("div", { class: "hint", style: { marginBottom: "8px" }, text: "\uAC80\uC0C9 \uC5D0\uC774\uC804\uD2B8\uAC00 \uC2E4\uC81C\uB85C \uC6F9\uC744 \uCC3E\uC744 \uB54C \uC4F0\uB294 \uAC80\uC0C9 API \uC785\uB2C8\uB2E4. \uAE30\uBCF8 DuckDuckGo \uB294 \uC124\uC815\uC774 \uD544\uC694 \uC5C6\uC2B5\uB2C8\uB2E4." }),
+      status,
+      el("label", { class: "field" }, [el("span", { text: "\uC81C\uACF5\uC790" }), sel]),
+      note,
+      keyRow,
+      urlRow,
+      el("label", { class: "field" }, [el("span", { text: "\uACB0\uACFC \uC218 (1\u20138)" }), max]),
+      el("div", { class: "row" }, [save]),
+      el("div", { class: "row", style: { marginTop: "8px" } }, [q, test]),
+      out
     ]);
   }
   function summarise(p) {
@@ -7733,7 +7861,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         el("span", {}, [el("span", { text: "Model " }), catalogBtn]),
         model
       ]),
-      kind === "search" ? el("div", { class: "notice", style: { marginBottom: "10px" }, text: "\uAC80\uC0C9 \uC5D0\uC774\uC804\uD2B8\uC5D0\uB294 \uAC80\uC0C9\uC5D0 \uAC15\uD558\uACE0 \uC800\uB834\uD55C \uBAA8\uB378\uC744 \uAD8C\uD569\uB2C8\uB2E4 \u2014 Google Gemini(\uC608: gemini-2.5-flash, OpenAI \uD638\uD658 \uC5D4\uB4DC\uD3EC\uC778\uD2B8 \u2026/v1beta/openai). \uC6F9 \uAC80\uC0C9 \uD504\uB85C\uBC14\uC774\uB354\uB294 \uC5F0\uACB0 \uD0ED\uC5D0\uC11C \uC124\uC815\uD569\uB2C8\uB2E4." }) : null,
+      kind === "search" ? el("div", { class: "notice", style: { marginBottom: "10px" }, text: "\uAC80\uC0C9 \uC5D0\uC774\uC804\uD2B8\uC5D0\uB294 \uAC80\uC0C9\uC5D0 \uAC15\uD558\uACE0 \uC800\uB834\uD55C \uBAA8\uB378\uC744 \uAD8C\uD569\uB2C8\uB2E4 \u2014 Google Gemini(\uC608: gemini-2.5-flash, OpenAI \uD638\uD658 \uC5D4\uB4DC\uD3EC\uC778\uD2B8 \u2026/v1beta/openai). \uC2E4\uC81C \uAC80\uC0C9\uC740 \uC5D0\uC774\uC804\uD2B8 \uD0ED \uC544\uB798 \u201C\uAC80\uC0C9 \uC81C\uACF5\uC790\u201D \uCE74\uB4DC\uB85C \uD569\uB2C8\uB2E4." }) : null,
       el("div", { class: "row" }, [
         el("label", { class: "field grow" }, [el("span", { text: "\uCD5C\uB300 \uCD9C\uB825 \uD1A0\uD070" }), maxTokens]),
         el("label", { class: "field grow" }, [el("span", { text: "temperature" }), temperature])
@@ -8377,7 +8505,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.8.0",
+            version: "0.8.1",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -8890,7 +9018,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.8.0"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.8.1"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -10434,7 +10562,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.8.0"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.8.1"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
@@ -10509,7 +10637,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.8.0" }),
+        el("span", { class: "dim", text: "v0.8.1" }),
         healthEl,
         el("span", { class: "spacer" }),
         reload,
@@ -10704,6 +10832,6 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.8.0"} loaded`);
+    console.log(`[risu-hina] v${"0.8.1"} loaded`);
   })();
 })();

@@ -190,6 +190,12 @@ label.field > span { display: block; margin-bottom: 4px; color: var(--textcolor2
 .notice.err { background: rgba(239, 68, 68, .12); }
 .notice.ok { background: rgba(16, 185, 129, .12); }
 
+/* The lorebook entry's insertorder, beside its name. */
+.ordertag {
+  flex-shrink: 0; padding: 0 5px; border-radius: 3px; font-size: 10.5px;
+  font-family: Consolas, monospace; font-variant-numeric: tabular-nums;
+  background: rgba(128,128,128,.14);
+}
 .badge {
   display: inline-block; padding: 1px 7px; border-radius: 4px; font-size: 11px;
   border: 1px solid var(--borderc, #2b323f);

@@ -1,4 +1,4 @@
-# 06. 구현 상태 — 2026-08-27 기준 (v0.8.0 BETA, Risu Hina)
+# 06. 구현 상태 — 2026-08-27 기준 (v0.8.1 BETA, Risu Hina)
 
 다음 세션에 이어서 할 사람(=나)을 위한 한 장. 무엇이 있고, 무엇이 바뀌었고, 어디까지 배포됐고,
 무엇이 남았는지. 설계의 *이유*는 `docs/04`(에셋·charx 는 부록 E), 저장 구조는 `docs/02`, 배포 환경은 `docs/00`.
@@ -6,7 +6,7 @@
 
 ## 0. 다음 세션 시작점 (먼저 읽을 것)
 
-**코드 상태**: master = **v0.8.0 BETA**(§1-8 라운드 10 · §1-7 · §1-6 · §1-5; docs/07 플래닝은 여전히 대기) — 게이트 ALL GREEN. 0.7.0 은 minor 가 바뀌어 **버전 게이트가 걸린다**: 백엔드를 올리면 RisuAI 쪽 플러그인도 `+` 로 올려야 한다(헤더가 안내).
+**코드 상태**: master = **v0.8.1 BETA**(§1-9 검색 · §1-8 라운드 10 · §1-7 · §1-6 · §1-5; docs/07 플래닝은 여전히 대기) — 게이트 ALL GREEN. 0.7.0 은 minor 가 바뀌어 **버전 게이트가 걸린다**: 백엔드를 올리면 RisuAI 쪽 플러그인도 `+` 로 올려야 한다(헤더가 안내).
 
 **배포 상태 (2026-08-25 21:01 `deploy.ps1`, 새 SSH 세션에서 확인)**:
 
@@ -23,6 +23,14 @@
 `https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js` 로 바꾸고, `tools/bundle.py` 가 그 파일을 저장소에 쓰도록 했다(릴리스 커밋에 포함). 백엔드 코드는 VERSION 만 바뀜.
 
 → **첫 할 일**: 사용자가 RisuAI 에 `plugin/Risu.Hina.Plugin.js` **수동 재설치 1회**(설치본 0.1.0 의 update-url 은 CORS 로 못 읽음) → 다음 릴리스부터 `+` 가 뜨는지 확인 → M2 실사용 검증(§5-2).
+
+## 1-9. 2026-08-27 밤 — v0.8.1: 웹 검색 에이전트가 애초에 검색할 수 없었다
+
+- 구조: 검색 에이전트 = `agent_search` 프리셋의 모델 + `websearch` 섹션의 **검색 제공자 API**(brave·tavily·serper·searxng). 그런데 제공자를 설정하는 **카드가 플러그인에 없었다**(설정 섹션만 존재, 안내문은 "연결 탭에서" 라고 가리킴) → `research()` 가 항상 "웹 검색 프로바이더가 설정되지 않았습니다". 
+- 고침: `websearch.PROVIDERS` + **DuckDuckGo 키 없는 기본 제공자**(`html.duckduckgo.com/html` 파싱, 비공식, 실측 OK), `provider_id()` 빈 값 → duckduckgo, `configured()/why_not()`, `GET /websearch`, `POST /websearch/test`. 플러그인: 에이전트 탭 검색 에이전트 카드 아래 **"검색 제공자" 카드**(선택·키·주소·결과 수·저장·검색 테스트). test_http `test_websearch_card`.
+- **메인 에이전트는 웹을 직접 검색하지 않는다**: `web_search` 툴 제거, `web_research` 는 항상 등록(검색 에이전트 없으면 안내 문구 반환), 지침에 규칙. 원격 실측: 검색 에이전트(gemini-3.7-flash@vercel) 테스트 26초 성공 — 사용자 화면의 `ReadTimeout` 은 툴 라운드가 요청당 60초를 넘긴 것(`reasoning: high`) → 테스트는 요청당 110초·`reasoning_effort=low`, 플러그인 대기 240초.
+- **로어북 작성 규칙 스킬** `seeds/risuai-lorebook-style.md`(기본 켜짐, SEED_KEY v4): Parma Knights(81항목) 실측 — 본문은 `### 제목` → `#### 소제목` → 불릿, 인물 시트 7~13k자 17소제목, 키워드 영/한/일 별칭, insertorder 층(10000 출력형식 · 2000 상시 정본 · 1000 주연/시스템 · 980 아크 단계 · 900 왕족 · 800 조연 · 700 세계관 · 600 장소 · 500 몬스터 · 300 엑스트라), 폴더 7개, 데코레이터는 시스템 항목의 `@@position pt_PI` 만, 진행형 설정은 CBS `{{#when}}`. **사실 정정**: `@@position`·`@@role`·`@@scan_depth`·`@@priority` 는 RisuAI 소스(`lorebook.svelte.ts` `CCardLib.decorator.parse` 콜백)에 전부 있어 동작한다(맨 위 한 줄씩) — 다만 집 스타일은 안 쓰고, 우선순위는 `insertorder` 필드(priority 이자 order: 큰 값이 예산에서 살아남고 먼저 놓임). 사양 스킬 §5 정정. 에이전트 `propose_lore_add/edit` 에 `insert_order`·`folder` 인자, `list_lore` 에 `order=`, 지침 규칙. 플러그인 로어북 편집기에 **우선순위 칸** + 목록에 숫자 태그(전엔 칸이 없어 전부 100).
+- 에이전트 패널: 스트림 `done` 뒤 카드(제안·승인·out/) 를 불러오는 동안 "제안·변경 카드를 정리하는 중입니다…" 로 계속 깜빡이고, 다 들어온 뒤 "완료"(전엔 시계가 멈춘 채 카드가 뒤늦게 떠 멈춘 것처럼 보임).
 
 ## 1-8. 2026-08-27 밤 — v0.8.0 **BETA**: 라운드 10 피드백 5건 (배치 업로드)
 

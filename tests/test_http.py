@@ -40,6 +40,10 @@ ROOT = Path(__file__).resolve().parent.parent
 PYSERVER = ROOT / "pyserver"
 
 FAILURES: list[str] = []
+try:
+    sys.stdout.reconfigure(encoding="utf-8")  # a FAIL detail with "—" or "⚙" must not crash the suite on cp949
+except Exception:  # noqa: BLE001
+    pass
 
 
 def check(name: str, cond: bool, detail: str = "") -> None:
@@ -2090,6 +2094,26 @@ def test_workspace_folders_and_family(s: Server, cw: dict) -> None:
           str(body.get("workspace", {}).get("familyKey")))
 
 
+def test_websearch_card(s: Server) -> None:
+    """The search provider: listed, defaulting to the keyless one, and a keyed
+    choice without its key reported as not ready (no network here)."""
+    print("test_websearch_card")
+    st, body = s.get("/websearch")
+    check("providers are listed with the keyless default first",
+          st == 200 and body["providers"][0]["id"] == "duckduckgo" and body["provider"] == "duckduckgo"
+          and body["configured"] is True, str(body)[:200])
+    st, _ = s.post("/config", {"config": {"websearch": {"provider": "brave", "apiKey": "", "baseUrl": "", "maxResults": 5}}})
+    st, body = s.get("/websearch")
+    check("a keyed provider without a key is not ready and says why",
+          body["configured"] is False and "키" in body["whyNot"], str(body)[:200])
+    st, body = s.post("/websearch/test", {"query": "x"})
+    check("and the test reports that instead of searching", st == 200 and body["ok"] is False and "키" in body["error"], str(body)[:160])
+    st, _ = s.post("/config", {"config": {"websearch": {"provider": "brave", "apiKey": "k", "baseUrl": "", "maxResults": 5}}})
+    st, body = s.get("/websearch")
+    check("with a key it is ready, and the key is not echoed", body["configured"] is True and body["apiKeySet"] is True and "k" not in json.dumps(body.get("apiKey", "")), str(body)[:160])
+    st, _ = s.post("/config", {"config": {"websearch": {"provider": "", "apiKey": "", "baseUrl": "", "maxResults": 5}}})
+
+
 def test_permits_and_key_providers(s: Server) -> None:
     """Permission prompts have a wire shape the panel polls; a key names a
     provider and gets its base URL from the catalog (pinned list offline)."""
@@ -2173,6 +2197,7 @@ def main() -> int:
         test_preset_selection(s)
         test_keys_and_agent_kinds(s)
         test_codex_subscription_preset(s)
+        test_websearch_card(s)
         test_permits_and_key_providers(s)
         test_skills(s)
         test_script_skills(s)

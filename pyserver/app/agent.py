@@ -57,6 +57,12 @@ INSTRUCTIONS = """\
   원문을 공백·따옴표까지 그대로 옮긴다.
 - 규칙적인 치환은 run_python 으로 직접 훑는 편이 정확할 때가 많다.
   `import risuhina` 헬퍼가 준비돼 있다.
+- **로어북을 쓰기 전에 스킬 "RisuAI 로어북 작성 규칙" 을 load_skill 로 읽어라.** 본문은 `### 제목` 으로
+  시작하는 마크다운(#### 소제목 + 불릿), 우선순위는 insertorder 숫자(이웃과 같은 층), 키워드는
+  영/한/일 별칭. 실리태번식 `@@position`·`@@role`·`@@priority` 헤더를 본문에 쓰지 마라.
+- **웹은 네가 직접 검색하지 않는다.** 원작 설정·고증·용어·최신 정보 등 외부 사실이 필요하면
+  web_research(질문) 로 검색 에이전트에게 맡기고, 돌아온 답의 출처를 사용자에게 함께 전해라.
+  검색 에이전트가 없다고 돌아오면 그 안내를 그대로 전하고, 기억으로 사실을 지어내지 마라.
 - **RisuAI 처리 순서를 알고 말해라.** 한 턴은 editinput(regex·저장됨) → start 트리거 → editprocess
   (regex, 턴마다 요청용·저장 안 됨) → 프롬프트 조립 → Lua editRequest(요청 배열 전체) → 모델 →
   editoutput(regex·저장됨) → output 트리거 → 화면마다 editdisplay(regex·저장 안 됨) 순이다.
@@ -534,7 +540,8 @@ def build() -> Agent[Deps]:
             body = str(entry.get("content") or "")
             preview = body[:80].replace("\n", " ")
             out.append(f"#{e['seq']} [{e['scope']}] id={e['id']}{always} 이름={entry.get('comment') or '(없음)'} "
-                       f"key={keys}{where} ({len(body)}자) {preview}{'…' if len(body) > 80 else ''}")
+                       f"order={entry.get('insertorder', 100)} key={keys}{where} ({len(body)}자) "
+                       f"{preview}{'…' if len(body) > 80 else ''}")
         text = "\n".join(out)
         if len(text) > 60000:
             kept = text[:60000].count("\n")
@@ -577,11 +584,13 @@ def build() -> Agent[Deps]:
 
     @agent.tool
     def propose_lore_edit(ctx: RunContext[Deps], lore_id: str, content: str,
-                          reason: str, keys: str = "", comment: str = "") -> str:
+                          reason: str, keys: str = "", comment: str = "",
+                          insert_order: int = -1, folder: str = "") -> str:
         """로어북 항목을 **통째로** 다시 쓰자고 제안한다 (content 가 새 본문 전체).
 
         한 부분만 고칠 때는 propose_lore_replace 를 써라 — 전체를 다시 써 넣으면 나머지 문장이
-        빠지거나 달라질 위험이 있다. keys·comment 는 비우면 그대로 둔다.
+        빠지거나 달라질 위험이 있다. keys·comment·folder 는 비우면, insert_order 는 -1 이면 그대로 둔다.
+        본문만 그대로 두고 우선순위·키워드만 바꿀 때는 content 에 read_lore_entry 로 읽은 원문을 넣는다.
         """
         cur = store.lore_entry(lore_id)
         if cur is None:
@@ -592,6 +601,10 @@ def build() -> Agent[Deps]:
             entry["key"] = keys
         if comment:
             entry["comment"] = comment
+        if int(insert_order) >= 0:
+            entry["insertorder"] = int(insert_order)
+        if folder:
+            entry["folder"] = folder
         label = entry.get("comment") or entry.get("key") or lore_id
         return _propose(ctx, "lore_edit", f"로어북 “{label}” 수정 — {reason}",
                         {"id": lore_id, "entry": entry})
@@ -599,9 +612,14 @@ def build() -> Agent[Deps]:
     @agent.tool
     def propose_lore_add(ctx: RunContext[Deps], comment: str, keys: str,
                          content: str, reason: str, scope: str = "local",
-                         always_active: bool = False) -> str:
-        """로어북에 항목 추가를 제안한다.
+                         always_active: bool = False, insert_order: int = 100,
+                         folder: str = "") -> str:
+        """로어북에 항목 추가를 제안한다. 먼저 스킬 "RisuAI 로어북 작성 규칙" 을 읽어라.
 
+        content 는 `### 제목` 으로 시작하는 마크다운(#### 소제목 + 불릿). insert_order 는
+        우선순위 숫자(큰 값이 예산에서 살아남고 프롬프트에 먼저 놓임) — 이웃 항목과 같은 층으로
+        반드시 정한다(주연 1000 · 조연 800~900 · 세계관 700 · 장소 600 · 몬스터 500 · 엑스트라 300,
+        상시 정본 목록 2000). folder 는 소속 폴더 항목의 key.
         기본은 이 챗의 로어북(local)이다. scope="global" 은 봇 전체 로어북이라
         이 봇의 **모든 챗**에 영향을 준다 — 사용자가 봇 로어북이라고 명시했을 때만 써라.
         always_active=True 는 상시 활성화(키워드 없이 항상 삽입)다 — 그때 keys 는 비운다.
@@ -610,8 +628,10 @@ def build() -> Agent[Deps]:
             return "scope 는 local 또는 global 입니다"
         where = "봇 로어북(global)" if scope == "global" else "이 챗 로어북"
         entry = {"key": "" if always_active else keys, "comment": comment, "content": content,
-                 "alwaysActive": bool(always_active), "insertorder": 100}
-        return _propose(ctx, "lore_add", f"{where}에 “{comment}” 추가 — {reason}",
+                 "alwaysActive": bool(always_active), "insertorder": int(insert_order)}
+        if folder:
+            entry["folder"] = folder
+        return _propose(ctx, "lore_add", f"{where}에 “{comment}” 추가 (우선순위 {int(insert_order)}) — {reason}",
                         {"entry": entry, "scope": scope})
 
     @agent.tool
@@ -1106,21 +1126,19 @@ def build() -> Agent[Deps]:
             return "사용자가 설치를 허용하지 않았습니다."
         return _fmt(permits.pip_install(pkgs))
 
-    if websearch.configured():
-        @agent.tool
-        def web_search(ctx: RunContext[Deps], query: str) -> str:
-            """웹 검색(원시 결과). 원작 설정 확인 등 외부 사실이 필요할 때만."""
-            return websearch.search(query)
+    # The editing agent does not search the web itself. Anything that needs
+    # outside facts goes to the search agent, which has the search tool and
+    # the cheaper model; the main agent gets back an answer with sources.
+    # Always registered: when the search agent is not set up the tool says
+    # so, which is a better answer than a tool that silently is not there.
+    @agent.tool
+    async def web_research(ctx: RunContext[Deps], question: str) -> str:
+        """검색 에이전트에게 조사를 맡긴다 — 검색하고 읽고 정리한 답(출처 포함)을 돌려준다.
 
-    if search_agent_ready():
-        @agent.tool
-        async def web_research(ctx: RunContext[Deps], question: str) -> str:
-            """검색 에이전트에게 조사를 맡긴다 — 검색하고 읽고 정리한 답을 돌려준다.
-
-            원작 설정·시대 고증·용어처럼 외부 사실이 여럿 얽힌 질문에 쓴다. 한 번의
-            web_search 로 끝날 단순 확인은 web_search 가 싸다.
-            """
-            return await research(question)
+        원작 설정·시대 고증·용어·최신 정보처럼 **외부 사실이 필요한 모든 경우** 이 툴을
+        쓴다. 너는 직접 웹을 검색하지 않는다. 질문은 한 번에 하나, 구체적으로.
+        """
+        return await research(question)
 
     return agent
 
@@ -1148,9 +1166,10 @@ def _search_model() -> "OpenAIChatModel | OpenAIResponsesModel":
 async def research(question: str) -> str:
     """Run the search agent once, with the web as its only tool."""
     if not search_agent_ready():
-        return "검색 에이전트가 설정되지 않았습니다 (설정 → 에이전트 → 검색 에이전트)"
+        return ("검색 에이전트가 설정되지 않았습니다 — 사용자에게 ⚙ → 에이전트 → 검색 에이전트에서 "
+                "프리셋을 고르고 연결 테스트를 하라고 안내해라. 너는 직접 검색할 수 없다.")
     if not websearch.configured():
-        return "웹 검색 프로바이더가 설정되지 않았습니다 (설정 → 연결)"
+        return f"검색 제공자가 준비되지 않았습니다 — {websearch.why_not()}. 사용자에게 안내해라."
     cfg = config.section("agent_search")
     settings = providers.plan_for(cfg).settings
     extra = str(cfg.get("instructions") or "").strip()
