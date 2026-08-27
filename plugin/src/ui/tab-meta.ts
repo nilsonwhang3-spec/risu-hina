@@ -27,6 +27,17 @@ const LABELS: Record<string, string> = {
 // display scripts that usually come with them).
 const NOT_HERE = new Set(['backgroundHTML']);
 
+/** Row order on the left; 100+ sits below the rule. */
+const FIELD_RANK: Record<string, number> = {
+  name: 0,
+  desc: 10,
+  firstMessage: 20,
+  alternateGreetings: 21,
+  replaceGlobalNote: 30,
+  characterVersion: 100,
+  creatorNotes: 110,
+};
+
 let built = false;
 let treeMount: HTMLElement | null = null;
 let viewMount: HTMLElement | null = null;
@@ -138,7 +149,16 @@ function drawTree(): void {
     || labelOf(f).toLowerCase().includes(needle)
     || f.body.toLowerCase().includes(needle));
 
+  // The order a person reads a card in, not the order the schema lists it:
+  // what the bot is, what it says, the note that overrides the global one -
+  // then, below a rule, the housekeeping fields (version, creator's notes).
+  shown.sort((a, b) => (FIELD_RANK[a.field] ?? 50) - (FIELD_RANK[b.field] ?? 50) || a.seq - b.seq);
+  let ruled = false;
   for (const f of shown) {
+    if (!ruled && (FIELD_RANK[f.field] ?? 50) >= 100) {
+      ruled = true;
+      treeMount.appendChild(el('div', { class: 'sectionline', style: { margin: '8px 6px' } }));
+    }
     const name = el('button', {
       class: 'treefile' + (f.id === openId ? ' on' : ''),
       text: labelOf(f) + (f.body ? '' : ' (비어 있음)'),

@@ -31,6 +31,7 @@ import { el, clear, armed, popover } from './dom';
 import { state, type FileArea, type FileListing, type WorkspaceFile } from '../state';
 import { threePane } from './panes';
 import { bindAgent, mountAgent } from './agentpane';
+import { clientLog } from '../transport';
 
 const AREA_LABEL: Record<string, [string, string]> = {
   uploads: ['업로드', '직접 올리신 참고 파일입니다. 정리해도 남습니다.'],
@@ -160,6 +161,11 @@ async function refresh(): Promise<void> {
   } catch (e) {
     clear(treeMount);
     treeMount.appendChild(el('div', { class: 'notice err', text: msg(e) }));
+    // With the stack: the one report of this was a bare "reading 'filter'",
+    // which named the symptom (a non-JSON body) and not the cause.
+    void clientLog('error', 'files tab refresh failed', {
+      error: msg(e), stack: e instanceof Error ? String(e.stack).slice(0, 1500) : '',
+    });
   }
 }
 

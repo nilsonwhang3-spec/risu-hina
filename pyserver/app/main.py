@@ -167,7 +167,10 @@ def h_config_test(arg: dict) -> dict:
     """
     import httpx
 
-    agent = config.section("agent")
+    # `section` picks which preset is probed: the editing agent (default) or
+    # the search agent - the same test, the same result shape, for both.
+    section = "agent_search" if str(arg.get("section") or "") in ("agent_search", "search") else "agent"
+    agent = config.section(section)
     # The subscription preset has neither a baseUrl nor a key - the agent goes
     # through codexauth - so the generic check below would refuse a setup that
     # chats perfectly well. It gets its own probe over the same client.
@@ -182,7 +185,7 @@ def h_config_test(arg: dict) -> dict:
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {key}"}
     # The same request the agent will make: the plan decides the API
     # (chat/completions or responses), the cap field, and what not to send.
-    plan = presets.plan("agent")
+    plan = presets.plan(section)
     responses = plan.api == "responses"
     url = base + ("/responses" if responses else "/chat/completions")
     extra = plan.raw
@@ -1734,6 +1737,8 @@ ROUTES: dict[str, Handler] = {
     "GET /assets/list": h_assets_list,
     "POST /assets/gc": h_assets_gc,
     "GET /assets/blob": h_assets_blob,
+    "POST /assets/blob": h_assets_blob,
+    "POST /files/download": h_file_download,
     "GET /charx/preview": h_charx_preview,
     "POST /charx/build": h_charx_build,
     "GET /files/download": h_file_download,
@@ -1937,10 +1942,19 @@ async def dispatch(path: str, request: Request) -> Response:
             headers={**config.cors_headers(origin), "Cache-Control": "no-cache"},
         )
 
-    if key == "GET /files/download":
+    if key in ("GET /files/download", "POST /files/download"):
         # A workspace file as bytes, for things the JSON preview cannot carry
         # - a charx, an image the agent made. Streamed: a 150MB charx must not
-        # be read into memory to be served.
+        # be read into memory to be served. POST as well as GET, and no-store:
+        # a cache in front of the backend (a tunnel's edge) was seen serving
+        # one GET's bytes for every query string, which turned a grid of
+        # thumbnails into a grid of the same picture.
+        if request.method == "POST":
+            raw = await request.body()
+            try:
+                arg.update(json.loads(raw) if raw else {})
+            except ValueError:
+                return _json(400, {"error": "body is not valid JSON"}, origin)
         try:
             ck = _char(arg)
             target = files._resolve(ck, str(arg.get("path") or ""))
@@ -2026,20 +2040,27 @@ async def dispatch(path: str, request: Request) -> Response:
             },
         )
 
-    if key == "GET /assets/blob":
+    if key in ("GET /assets/blob", "POST /assets/blob"):
         # Raw bytes, same special case as /plugin.js: the JSON envelope would
-        # base64 a 5MB image into 7MB of text for nothing.
+        # base64 a 5MB image into 7MB of text for nothing. The panel POSTs the
+        # key (see /files/download above for why); GET stays for tools.
+        if request.method == "POST":
+            raw = await request.body()
+            try:
+                arg.update(json.loads(raw) if raw else {})
+            except ValueError:
+                return _json(400, {"error": "body is not valid JSON"}, origin)
         akey = str(arg.get("key") or "")
         found = assets.read_bytes(akey) if assets.key_ok(akey) else None
         if found is None:
             _log(request.method, pathname, 404, started, akey)
             return _json(404, {"error": "asset not in store", "key": akey}, origin)
         data, ext = found
-        _log(request.method, pathname, 200, started, f"{len(data) // 1024}KB")
+        _log(request.method, pathname, 200, started, f"{len(data) // 1024}KB {akey[-20:]}")
         return Response(
             content=data,
             media_type=_MIME.get(ext, "application/octet-stream"),
-            headers={**config.cors_headers(origin), "Cache-Control": "private, max-age=86400"},
+            headers={**config.cors_headers(origin), "Cache-Control": "no-store"},
         )
 
     if key == "POST /chat":
@@ -2113,6 +2134,7 @@ async def _startup() -> None:
     # seed step (already marked there) leaves them alone.
     await run_in_threadpool(skills.migrate_rows_once)
     await run_in_threadpool(skills.seed_once)
+    await run_in_threadpool(skills.defaults_once)
     # There is always a selected preset; on an existing install it is seeded
     # from whatever config.json already holds, so nothing appears to be lost.
     await run_in_threadpool(presets.ensure_default)

@@ -36,8 +36,8 @@ export function buildSkillsCard(opts: { onMount?: (refresh: () => Promise<void>)
       maxBody = r.maxBodyChars || maxBody;
       maxDesc = r.maxDescriptionChars || maxDesc;
       budget.textContent =
-        `프롬프트에 실리는 분량 ${r.catalogChars.toLocaleString()}자 / 한도 ${r.catalogLimit.toLocaleString()}자`
-        + ' — 목록(이름·설명)과 “항상 적용” 스킬의 본문만 실립니다. 나머지 본문은 필요할 때 불러옵니다.';
+        `매 요청에 실리는 것은 이 목록(이름·설명)뿐입니다: ${r.catalogChars.toLocaleString()}자 / 한도 ${r.catalogLimit.toLocaleString()}자. `
+        + '본문은 에이전트가 맞는 작업을 만나면 load_skill 로 그때 불러옵니다.';
       clear(listMount);
       if (!r.skills.length) {
         listMount.appendChild(el('div', { class: 'hint', text: '등록된 스킬이 없습니다.' }));

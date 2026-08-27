@@ -128,7 +128,10 @@ export class AgentPanel {
       this.stagedBox,
       this.actionBox,
       this.attachBar,
-      el('div', { class: 'agentcompose' }, [clip, this.input, this.send, this.picker]),
+      // The two buttons stack beside the box, attach above send: the box is
+      // two lines tall anyway, and a clip on the far left read as a third
+      // control competing with the text rather than an option on sending.
+      el('div', { class: 'agentcompose' }, [this.input, el('div', { class: 'agentbtns' }, [clip, this.send]), this.picker]),
     ]);
   }
 

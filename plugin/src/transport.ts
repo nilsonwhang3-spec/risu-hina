@@ -227,7 +227,17 @@ export class Transport {
   private async json<T>(method: 'GET' | 'POST', path: string, payload?: unknown, timeoutMs?: number): Promise<T> {
     const res = await this.raw(method, path, payload, { timeoutMs });
     if (!res.ok) throw await toError(res);
-    return (await readJson(res)) as T;
+    const body = await readJson(res);
+    // A 200 that is not JSON is not ours: a tunnel's interstitial, a login
+    // page, a proxy's error in HTML. Letting `{_raw}` through as if it were
+    // the answer made callers fail one property deeper with a message
+    // ("reading 'filter'") that named nothing a person could act on.
+    if (isRaw(body)) {
+      throw new BackendError(res.status,
+        `백엔드 대신 다른 응답이 왔습니다 (JSON 이 아님): “${body._raw.replace(/\s+/g, ' ').trim().slice(0, 100)}” — `
+        + '터널·프록시가 대신 답했을 수 있습니다. 잠시 뒤 다시 시도해 주세요.');
+    }
+    return body as T;
   }
 
   private async raw(
@@ -306,6 +316,10 @@ async function readJson(res: Response): Promise<unknown> {
   let text: string;
   try { text = await res.text(); } catch { return null; }
   try { return JSON.parse(text); } catch { return { _raw: text.slice(0, 500) }; }
+}
+
+function isRaw(v: unknown): v is { _raw: string } {
+  return !!v && typeof v === 'object' && '_raw' in v && Object.keys(v as object).length === 1;
 }
 
 /** Paths that work across versions: the ones an update needs. */

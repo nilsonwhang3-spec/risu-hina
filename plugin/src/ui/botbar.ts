@@ -229,36 +229,46 @@ function openApply(anchor: HTMLElement): void {
     }
   });
 
+  // 새 봇으로 저장: the bot as RisuAI has it now is kept as "(백업)", the
+  // edits go into this bot and become its baseline, editing carries on here.
+  // It replaced "복제 봇 생성" (a clone of the edited card next to an
+  // untouched original), which left the user in a new bot with an empty
+  // workspace and the old one still showing every change as pending.
   const nameInput = el('input', {
-    value: (state.workspace?.characterName || '봇') + ' (복제)',
-    placeholder: '복제 봇 이름',
+    value: (state.workspace?.characterName || '봇') + ' (백업)',
+    placeholder: '백업 봇 이름',
   }) as HTMLInputElement;
-  const clone = el('button', { text: '복제 봇 생성' }) as HTMLButtonElement;
-  clone.addEventListener('click', async () => {
-    clone.disabled = true;
-    const was = clone.textContent;
+  const saveNew = el('button', { text: '새 봇으로 저장', title: '지금 RisuAI 에 있는 상태를 백업 봇으로 복제한 뒤, 편집 중인 내용을 이 봇에 반영하고 계속 편집합니다' }) as HTMLButtonElement;
+  saveNew.disabled = !!blocked;
+  saveNew.addEventListener('click', async () => {
+    saveNew.disabled = true;
+    const was = saveNew.textContent;
     // The popover itself reports: the shell notice sits above the tabs and
-    // is easy to miss, and cloning can wait on RisuAI's permission prompt.
-    clone.textContent = '복제 중…';
-    out.textContent = '복제하는 중입니다. RisuAI 가 db 권한을 물으면 허용해 주세요.';
+    // is easy to miss, and the backup can wait on RisuAI's permission prompt
+    // (the panel steps aside for it and comes back).
+    saveNew.textContent = '저장 중…';
+    out.textContent = '백업 봇을 만드는 중입니다. RisuAI 가 db 권한을 물으면 허용해 주세요.';
     try {
-      const name = nameInput.value.trim() || '복제 봇';
-      await state.cloneBot(name);
-      const said = `복제 봇 “${name}” 을 만들었습니다. 편집본과 챗 전부가 담겼고, 에셋은 원본과 공유합니다. RisuAI 봇 목록에서 확인해 주세요.`;
+      const backup = nameInput.value.trim() || '백업';
+      const r = await state.saveAsNewBot(backup);
+      const said = `현재 편집 중인 봇을 새 봇으로 저장하였습니다. 기존 봇은 “${backup}” 이름으로 복제되었습니다.`
+        + (r.mode === 'noop' ? ' (반영할 변경은 없었습니다.)' : ` 변경 ${r.applied}건이 이 봇에 반영되어 새 기준선이 되었습니다.`);
       shellNotice(said, 'ok');
       clear(body);
       const ok = el('button', { class: 'primary tiny', text: '닫기' });
       ok.addEventListener('click', close);
       body.appendChild(el('div', { class: 'notice ok', text: '✔ ' + said }));
+      body.appendChild(el('div', { class: 'hint', text: '백업 봇은 RisuAI 봇 목록에 새 캐릭터로 있습니다. 챗도 함께 복사되었고 에셋은 공유합니다.' }));
       body.appendChild(el('div', { class: 'row', style: { marginTop: '8px' } }, [ok]));
     } catch (e) {
-      void clientLog('error', 'cloneBot failed', { error: msg(e) });
-      shellNotice('복제에 실패했습니다: ' + msg(e), 'err');
-      out.textContent = '복제에 실패했습니다: ' + msg(e);
-      clone.disabled = false;
-      clone.textContent = was;
+      void clientLog('error', 'saveAsNewBot failed', { error: msg(e) });
+      shellNotice('새 봇으로 저장하지 못했습니다: ' + msg(e), 'err');
+      out.textContent = '저장하지 못했습니다: ' + msg(e);
+      saveNew.disabled = !!applyBlockReason();
+      saveNew.textContent = was;
     }
   });
+  const clone = saveNew;
 
   const reset = el('button', { class: 'ghost' });
   armed(reset, '기준선으로 되돌리기', '정말 되돌릴까요?', async () => {
@@ -277,8 +287,8 @@ function openApply(anchor: HTMLElement): void {
   body.appendChild(out);
   body.appendChild(el('div', {
     class: 'hint',
-    text: '메타·인사말·봇 로어북·Regex·트리거가 한 번에 쓰입니다. 챗은 절대 건드리지 않습니다. '
-      + '복제 봇은 새 캐릭터로 만들어지고 챗도 모두 복사됩니다. 처음 한 번 db 권한 허용이 필요합니다.',
+    text: '반영: 메타·인사말·봇 로어북·Regex·트리거가 한 번에 쓰입니다. 챗은 절대 건드리지 않습니다. '
+      + '새 봇으로 저장: 지금 RisuAI 상태를 백업 봇(챗 포함, 새 캐릭터)으로 남기고 편집본을 이 봇에 반영합니다. 처음 한 번 db 권한 허용이 필요합니다.',
   }));
 }
 

@@ -856,8 +856,8 @@ class AppState {
     await transport.post('/config', { config: patch });
   }
 
-  async testAgent(): Promise<Record<string, unknown>> {
-    return await transport.post('/config/test', {}, 120_000);
+  async testAgent(kind: 'general' | 'search' = 'general'): Promise<Record<string, unknown>> {
+    return await transport.post('/config/test', { section: kind === 'search' ? 'agent_search' : 'agent' }, 120_000);
   }
 
   // --- diagnostics ----------------------------------------------------------
@@ -917,7 +917,7 @@ class AppState {
 
   /** Save a workspace file to the user's disk through the browser. */
   async downloadFile(path: string): Promise<number> {
-    const bytes = await transport.getBinary('/files/download', { charKey: this.activeCharKey, path });
+    const bytes = await transport.postBinary('/files/download', { charKey: this.activeCharKey, path });
     const name = path.split('/').pop() || 'file';
     host.downloadBytes(name, bytes, name.endsWith('.charx') ? 'application/zip' : 'application/octet-stream');
     return bytes.byteLength;
@@ -962,9 +962,9 @@ class AppState {
     return bytes.byteLength;
   }
 
-  /** Raw bytes of a workspace file (an image preview, a thumbnail). */
+  /** Raw bytes of a workspace file (an image preview, a thumbnail). POST: see tab-assets. */
   async fileBytes(path: string): Promise<Uint8Array> {
-    return await transport.getBinary('/files/download', { charKey: this.activeCharKey, path });
+    return await transport.postBinary('/files/download', { charKey: this.activeCharKey, path });
   }
 
   async mkdirFile(path: string): Promise<void> {
@@ -1507,6 +1507,29 @@ class AppState {
     await this.readHost();
     await this.upload();
     return `에셋 “${name}” 을 RisuAI 에 저장하고 카드에 붙였습니다 (${placed}, ${key}).`;
+  }
+
+  /**
+   * 새 봇으로 저장: keep editing this bot, and keep what it was.
+   *
+   * The bot as RisuAI holds it now - the baseline, untouched by the working
+   * copy - is cloned first as "<name> (백업)", chats included. Then the
+   * working copy is written into the live bot and becomes its baseline, so
+   * the workspace, snapshots and conversation carry on where they are. The
+   * opposite (clone the edited card, leave the original) put the user in a
+   * new bot with an empty workspace and the old one still pending.
+   */
+  async saveAsNewBot(backupName: string): Promise<{ backupChaId: string; applied: number; mode: string }> {
+    if (!this.slot) throw new Error('호스트 상태를 먼저 읽어야 합니다');
+    const patch = await this.cardPatch();
+    if (!patch.full) {
+      throw new Error('구버전 업로드 상태의 카드라 저장할 수 없습니다. 패널을 닫았다 다시 열어 주세요');
+    }
+    // No card update: the backup is the live card as it is.
+    const family = this.workspace?.familyKey || this.activeCharKey;
+    const backupChaId = await host.cloneBot(this.slot.characterIndex, patch.chaId, backupName, {}, family);
+    const r = await this.cardWriteBack();
+    return { backupChaId, applied: r.applied, mode: r.mode };
   }
 
   /** Create a clone bot in RisuAI carrying the working card. */

@@ -3,6 +3,4 @@
 //@api 3.0
 //@version ${VERSION}
 //@update-url ${UPDATE_URL}
-//@arg backend_url string 백엔드 URL (기본: http://127.0.0.1:6020)
-//@arg backend_token string 백엔드 토큰 (data/token.txt)
 //@author Risu Hina

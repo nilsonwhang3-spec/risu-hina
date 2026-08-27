@@ -123,6 +123,9 @@ function makeHost(backendUrl, token) {
   };
   const calls = [];
   const storage = new Map();
+  // 0.7.2: the //@arg fields are gone; the backend address lives only in
+  // pluginStorage, which is what a real install has after ⚙ → 연결.
+  storage.set('backend', { url: backendUrl, token });
   const dbWrites = [];
   let selectedChar = 0;
 
@@ -1153,29 +1156,54 @@ console.log('\ntest_card_write_back');
         document.querySelector('.botbar .changesum')?.textContent);
 }
 
-console.log('\ntest_clone_bot');
+console.log('\ntest_save_as_new_bot');
 {
+  // An edit pending, so the save has something to write into this bot while
+  // the backup keeps what RisuAI held.
+  clickById(document, 'tab-meta');
+  await settle(600);
+  clickButton(document.querySelector('.panel.active .tree'), '설명 (desc)');
+  await settle(400);
+  const c = document.querySelector('.panel.active .left');
+  c.querySelector('textarea').value = '새 봇으로 저장 전에 고친 설명';
+  clickButton(c, '저장');
+  await settle(1000);
+
   clickTool(document, 'card-apply');
   await settle(300);
   const pop = document.querySelector('.popover');
+  check('the verb is 새 봇으로 저장, not a clone', !!findButton(pop, '새 봇으로 저장') && !findButton(pop, '복제 봇 생성'));
   const nameBox = pop?.querySelector('input');
-  nameBox.value = '스모크 복제';
-  clickButton(pop, '복제 봇 생성');
-  await settle(1500);
-  check('the clone went through setDatabase', host.dbWrites.length === 1, String(host.dbWrites.length));
+  check('the backup name is prefilled with (백업)', /\(백업\)$/.test(nameBox?.value || ''), nameBox?.value);
+  nameBox.value = '스모크 (백업)';
+  const hides = host.calls.filter((x) => x === 'hideContainer').length;
+  clickButton(pop, '새 봇으로 저장');
+  await settle(2000);
+  check('the backup went through setDatabase', host.dbWrites.length === 1, String(host.dbWrites.length));
   const chars = host.dbWrites[0]?.characters ?? [];
-  const clone = chars[chars.length - 1];
-  check('as a new character', chars.length === 2 && clone?.name === '스모크 복제',
-        JSON.stringify({ n: chars.length, name: clone?.name }));
-  check('with a fresh chaId', !!clone?.chaId && clone.chaId !== 'cha-smoke', clone?.chaId);
-  // 0.6.1: the chats come along, copied whole from the database slice.
+  const backup = chars[chars.length - 1];
+  check('as a new character named for the backup', chars.length === 2 && backup?.name === '스모크 (백업)',
+        JSON.stringify({ n: chars.length, name: backup?.name }));
+  check('with a fresh chaId', !!backup?.chaId && backup.chaId !== 'cha-smoke', backup?.chaId);
   const srcChats = chars[0]?.chats ?? [];
-  check('and the chats come along', clone?.chats?.length === srcChats.length
-        && clone.chats.every((c, i) => c.message.length === srcChats[i].message.length),
-        JSON.stringify(clone?.chats?.map((c) => c.message.length)));
-  check('carrying the edited card', clone?.desc === '스모크가 고친 설명', clone?.desc);
-  check('assets shared by reference, not copied', clone?.image === 'assets/portrait.png');
+  check('and the chats come along', backup?.chats?.length === srcChats.length
+        && backup.chats.every((c2, i) => c2.message.length === srcChats[i].message.length),
+        JSON.stringify(backup?.chats?.map((c2) => c2.message.length)));
+  check('the backup holds the card as RisuAI had it', backup?.desc === '스모크가 고친 설명', backup?.desc);
+  check('the live bot got the pending edit', host.liveChar.desc === '새 봇으로 저장 전에 고친 설명', host.liveChar.desc);
+  check('assets shared by reference, not copied', backup?.image === 'assets/portrait.png');
   check('the sidebar was told about it', host.calls.includes('checkCharOrder'));
+  check('the panel stepped aside for the permission prompt and came back',
+        host.calls.filter((x) => x === 'hideContainer').length > hides && host.calls.includes('showContainer'));
+  check('the popover says what happened',
+        /새 봇으로 저장하였습니다/.test(document.querySelector('.popover')?.textContent || '')
+        && /백업/.test(document.querySelector('.popover')?.textContent || ''),
+        document.querySelector('.popover')?.textContent?.slice(0, 200));
+  pressEscape(document);
+  await settle(600);
+  check('the bot bar is back to 변경 없음 (the edit became the baseline)',
+        /변경 없음/.test(document.querySelector('.botbar .changesum')?.textContent || ''),
+        document.querySelector('.botbar .changesum')?.textContent);
 }
 
 console.log('\ntest_settings_tab');
@@ -1309,7 +1337,7 @@ console.log('\ntest_skills_ui');
   await settle(600);
   check('skills card present', /스킬/.test(document.body.innerHTML));
   check('the budget names what it counts',
-        /프롬프트에 실리는 분량/.test(document.body.innerHTML));
+        /매 요청에 실리는 것은 이 목록/.test(document.body.innerHTML));
   check('it says bodies are loaded on demand', /load_skill/.test(document.body.innerHTML));
   const skillRows = () => [...document.querySelectorAll('.card')]
     .find((c) => /^스킬$/.test(c.querySelector('h2')?.textContent || ''))

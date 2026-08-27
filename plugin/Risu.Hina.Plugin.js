@@ -1,10 +1,8 @@
 //@name risu-hina
-//@display-name Risu Hina v0.7.1
+//@display-name Risu Hina v0.7.2
 //@api 3.0
-//@version 0.7.1
+//@version 0.7.2
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
-//@arg backend_url string 백엔드 URL (기본: http://127.0.0.1:6020)
-//@arg backend_token string 백엔드 토큰 (data/token.txt)
 //@author Risu Hina
 
 "use strict";
@@ -97,7 +95,7 @@
       this.route = "direct";
       this.tokenSafe = true;
       this.lastHealth = body;
-      this.gate = versionGate("0.7.1", String(body.version || ""));
+      this.gate = versionGate("0.7.2", String(body.version || ""));
       return body;
     }
     /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -168,7 +166,14 @@
     async json(method, path, payload, timeoutMs) {
       const res = await this.raw(method, path, payload, { timeoutMs });
       if (!res.ok) throw await toError(res);
-      return await readJson(res);
+      const body = await readJson(res);
+      if (isRaw(body)) {
+        throw new BackendError(
+          res.status,
+          `\uBC31\uC5D4\uB4DC \uB300\uC2E0 \uB2E4\uB978 \uC751\uB2F5\uC774 \uC654\uC2B5\uB2C8\uB2E4 (JSON \uC774 \uC544\uB2D8): \u201C${body._raw.replace(/\s+/g, " ").trim().slice(0, 100)}\u201D \u2014 \uD130\uB110\xB7\uD504\uB85D\uC2DC\uAC00 \uB300\uC2E0 \uB2F5\uD588\uC744 \uC218 \uC788\uC2B5\uB2C8\uB2E4. \uC7A0\uC2DC \uB4A4 \uB2E4\uC2DC \uC2DC\uB3C4\uD574 \uC8FC\uC138\uC694.`
+        );
+      }
+      return body;
     }
     async raw(method, path, payload, opts = {}) {
       if (!this.cfg.url) throw new BackendError(0, "\uBC31\uC5D4\uB4DC URL\uC774 \uC124\uC815\uB418\uC5B4 \uC788\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4");
@@ -236,6 +241,9 @@
     } catch {
       return { _raw: text.slice(0, 500) };
     }
+  }
+  function isRaw(v) {
+    return !!v && typeof v === "object" && "_raw" in v && Object.keys(v).length === 1;
   }
   var GATE_EXEMPT = /* @__PURE__ */ new Set(["/health", "/update/check", "/update/apply", "/plugin", "/logs", "/diag", "/config"]);
   function versionGate(plugin, backend) {
@@ -867,87 +875,6 @@
   function syncBusy(p) {
     return !!p && (p.phase === "manifest" || p.phase === "pulling" || p.phase === "pushing");
   }
-  function measureAssetDump(char, onProgress) {
-    let cancelled = false;
-    const done = (async () => {
-      const refs = extractAssetRefs(char);
-      const rep = {
-        refs: refs.length,
-        readOk: 0,
-        readFail: [],
-        bytes: 0,
-        readMs: 0,
-        uploadMs: 0,
-        wallMs: 0,
-        batches: 0,
-        echoAddr: "",
-        rsProbe: null,
-        cancelled: false
-      };
-      const t0 = Date.now();
-      let batch = [];
-      let batchBytes = 0;
-      const flush = async () => {
-        if (!batch.length) return;
-        const items5 = batch;
-        batch = [];
-        batchBytes = 0;
-        const u0 = Date.now();
-        const res = await transport.upload(
-          "/diag/asset-echo",
-          { items: items5 }
-        );
-        rep.uploadMs += Date.now() - u0;
-        rep.batches += 1;
-        if (res && typeof res.addr === "string") rep.echoAddr = res.addr;
-      };
-      for (const [i, ref] of refs.entries()) {
-        if (cancelled) {
-          rep.cancelled = true;
-          break;
-        }
-        onProgress(`\uC77D\uB294 \uC911 ${i + 1}/${refs.length} \xB7 ${(rep.bytes / 1048576).toFixed(1)}MB`);
-        const r0 = Date.now();
-        let bytes = null;
-        try {
-          const raw = await Risuai.readImage(ref.key);
-          if (raw && raw.byteLength) {
-            bytes = raw instanceof Uint8Array ? raw : new Uint8Array(raw);
-          }
-        } catch {
-        }
-        rep.readMs += Date.now() - r0;
-        if (!bytes) {
-          rep.readFail.push(ref.key);
-          continue;
-        }
-        rep.readOk += 1;
-        rep.bytes += bytes.byteLength;
-        batch.push({ key: ref.key, data: b64encode(bytes) });
-        batchBytes += bytes.byteLength;
-        if (batchBytes >= BATCH_BYTES || batch.length >= BATCH_ITEMS) {
-          onProgress(`\uC804\uC1A1 \uC911 ${i + 1}/${refs.length} \xB7 ${(rep.bytes / 1048576).toFixed(1)}MB`);
-          await flush();
-        }
-      }
-      if (!cancelled) await flush();
-      if (refs.length) {
-        try {
-          rep.rsProbe = await transport.get(
-            "/diag/rs-probe",
-            { key: refs[0].key }
-          );
-        } catch (e) {
-          rep.rsProbe = { error: String(e instanceof Error ? e.message : e) };
-        }
-      }
-      rep.wallMs = Date.now() - t0;
-      return rep;
-    })();
-    return { cancel: () => {
-      cancelled = true;
-    }, done };
-  }
 
   // src/ui/styles.ts
   var CSS = `
@@ -1571,7 +1498,10 @@ label.checkrow input { width: auto; }
    the send button out of the visible column. */
 .agentinput { flex: 1 1 auto; min-width: 0; width: auto; min-height: 82px; max-height: 220px; background: var(--bgcolor, #12141a); }
 .agentinput.dropping { border-color: #7dd3fc; background: rgba(125, 211, 252, .08); }
-button.sendbtn { padding: 9px 12px; display: flex; align-items: center; flex-shrink: 0; }
+button.sendbtn { padding: 9px 12px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+/* Attach above send, in a column beside the box. */
+.agentbtns { display: flex; flex-direction: column; gap: 4px; flex-shrink: 0; justify-content: flex-end; }
+.agentbtns button { width: 42px; justify-content: center; }
 /* A snapshot row whose delete is on its way to the backend. */
 .verrow.deleting, .chatitem.deleting { opacity: .4; }
 
@@ -2045,9 +1975,18 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     delete copy["realmId"];
     let dbSlice = null;
     try {
+      await Risuai.hideContainer();
+    } catch {
+    }
+    try {
       dbSlice = await Risuai.getDatabase(["characters"]);
     } catch (e) {
       throw new HostError("failed", "\uCE90\uB9AD\uD130 \uBAA9\uB85D\uC744 \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + String(e));
+    } finally {
+      try {
+        await Risuai.showContainer("fullscreen");
+      } catch {
+      }
     }
     const characters = dbSlice && Array.isArray(dbSlice["characters"]) ? dbSlice["characters"].slice() : null;
     if (!characters) {
@@ -2565,8 +2504,8 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     async setConfig(patch) {
       await transport.post("/config", { config: patch });
     }
-    async testAgent() {
-      return await transport.post("/config/test", {}, 12e4);
+    async testAgent(kind = "general") {
+      return await transport.post("/config/test", { section: kind === "search" ? "agent_search" : "agent" }, 12e4);
     }
     // --- diagnostics ----------------------------------------------------------
     async logs(limit = 300, level = "") {
@@ -2614,7 +2553,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     // uploads and outputs are shared across that bot's chats.
     /** Save a workspace file to the user's disk through the browser. */
     async downloadFile(path) {
-      const bytes = await transport.getBinary("/files/download", { charKey: this.activeCharKey, path });
+      const bytes = await transport.postBinary("/files/download", { charKey: this.activeCharKey, path });
       const name = path.split("/").pop() || "file";
       downloadBytes(name, bytes, name.endsWith(".charx") ? "application/zip" : "application/octet-stream");
       return bytes.byteLength;
@@ -2648,9 +2587,9 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       downloadBytes(name.endsWith(".zip") ? name : name + ".zip", bytes, "application/zip");
       return bytes.byteLength;
     }
-    /** Raw bytes of a workspace file (an image preview, a thumbnail). */
+    /** Raw bytes of a workspace file (an image preview, a thumbnail). POST: see tab-assets. */
     async fileBytes(path) {
-      return await transport.getBinary("/files/download", { charKey: this.activeCharKey, path });
+      return await transport.postBinary("/files/download", { charKey: this.activeCharKey, path });
     }
     async mkdirFile(path) {
       await transport.post("/files/mkdir", { charKey: this.activeCharKey, path });
@@ -3108,6 +3047,27 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       await this.readHost();
       await this.upload();
       return `\uC5D0\uC14B \u201C${name}\u201D \uC744 RisuAI \uC5D0 \uC800\uC7A5\uD558\uACE0 \uCE74\uB4DC\uC5D0 \uBD99\uC600\uC2B5\uB2C8\uB2E4 (${placed}, ${key}).`;
+    }
+    /**
+     * 새 봇으로 저장: keep editing this bot, and keep what it was.
+     *
+     * The bot as RisuAI holds it now - the baseline, untouched by the working
+     * copy - is cloned first as "<name> (백업)", chats included. Then the
+     * working copy is written into the live bot and becomes its baseline, so
+     * the workspace, snapshots and conversation carry on where they are. The
+     * opposite (clone the edited card, leave the original) put the user in a
+     * new bot with an empty workspace and the old one still pending.
+     */
+    async saveAsNewBot(backupName) {
+      if (!this.slot) throw new Error("\uD638\uC2A4\uD2B8 \uC0C1\uD0DC\uB97C \uBA3C\uC800 \uC77D\uC5B4\uC57C \uD569\uB2C8\uB2E4");
+      const patch = await this.cardPatch();
+      if (!patch.full) {
+        throw new Error("\uAD6C\uBC84\uC804 \uC5C5\uB85C\uB4DC \uC0C1\uD0DC\uC758 \uCE74\uB4DC\uB77C \uC800\uC7A5\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4. \uD328\uB110\uC744 \uB2EB\uC558\uB2E4 \uB2E4\uC2DC \uC5F4\uC5B4 \uC8FC\uC138\uC694");
+      }
+      const family = this.workspace?.familyKey || this.activeCharKey;
+      const backupChaId = await cloneBot(this.slot.characterIndex, patch.chaId, backupName, {}, family);
+      const r = await this.cardWriteBack();
+      return { backupChaId, applied: r.applied, mode: r.mode };
     }
     /** Create a clone bot in RisuAI carrying the working card. */
     async cloneBot(name) {
@@ -4141,7 +4101,10 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         this.stagedBox,
         this.actionBox,
         this.attachBar,
-        el("div", { class: "agentcompose" }, [clip, this.input, this.send, this.picker])
+        // The two buttons stack beside the box, attach above send: the box is
+        // two lines tall anyway, and a clip on the far left read as a third
+        // control competing with the text rather than an option on sending.
+        el("div", { class: "agentcompose" }, [this.input, el("div", { class: "agentbtns" }, [clip, this.send]), this.picker])
       ]);
     }
     root;
@@ -5810,6 +5773,10 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     } catch (e) {
       clear(treeMount);
       treeMount.appendChild(el("div", { class: "notice err", text: msg4(e) }));
+      void clientLog("error", "files tab refresh failed", {
+        error: msg4(e),
+        stack: e instanceof Error ? String(e.stack).slice(0, 1500) : ""
+      });
     }
   }
   function buildNodes(data) {
@@ -7388,32 +7355,37 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       }
       return row;
     };
-    const testBtn = el("button", { class: "ghost", text: "\uC5F0\uACB0 \uD14C\uC2A4\uD2B8" });
-    testBtn.addEventListener("click", async () => {
-      testBtn.disabled = true;
-      clear(out);
-      out.appendChild(el("div", { class: "hint", text: "\uD14C\uC2A4\uD2B8 \uC911\uC785\uB2C8\uB2E4\u2026 (\uCD5C\uB300 2\uBD84)" }));
-      try {
-        const r = await state.testAgent();
-        clear(out);
-        if (r.ok) {
-          const u = r.usage ?? {};
-          out.appendChild(el("div", { class: "notice ok" }, [
-            el("div", { text: `\uC815\uC0C1 \uB3D9\uC791\uD569\uB2C8\uB2E4 \xB7 ${r.model}` }),
-            el("div", { class: "hint", text: `\uD234 \uD638\uCD9C ${r.toolCalls}\uAC74 \xB7 \uD1A0\uD070 in ${u.in} / out ${u.out}` })
-          ]));
-        } else {
-          out.appendChild(el("div", { class: "notice err" }, [
-            el("div", { text: `\uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4 (${r.stage})` }),
-            el("div", { class: "hint", text: String(r.error ?? "") })
-          ]));
+    const testButton = (kind, box) => {
+      const testBtn = el("button", { class: "ghost", text: "\uC5F0\uACB0 \uD14C\uC2A4\uD2B8" });
+      testBtn.addEventListener("click", async () => {
+        testBtn.disabled = true;
+        clear(box);
+        box.appendChild(el("div", { class: "hint", text: "\uD14C\uC2A4\uD2B8 \uC911\uC785\uB2C8\uB2E4\u2026 (\uCD5C\uB300 2\uBD84)" }));
+        try {
+          const r = await state.testAgent(kind);
+          clear(box);
+          if (r.ok) {
+            const u = r.usage ?? {};
+            box.appendChild(el("div", { class: "notice ok" }, [
+              el("div", { text: `\uC815\uC0C1 \uB3D9\uC791\uD569\uB2C8\uB2E4 \xB7 ${r.model}` }),
+              el("div", { class: "hint", text: `\uD234 \uD638\uCD9C ${r.toolCalls}\uAC74 \xB7 \uD1A0\uD070 in ${u.in} / out ${u.out}` })
+            ]));
+          } else {
+            box.appendChild(el("div", { class: "notice err" }, [
+              el("div", { text: `\uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4 (${r.stage})` }),
+              el("div", { class: "hint", text: String(r.error ?? "") })
+            ]));
+          }
+        } catch (e) {
+          clear(box);
+          box.appendChild(el("div", { class: "notice err", text: msg8(e) }));
+        } finally {
+          testBtn.disabled = false;
         }
-      } catch (e) {
-        say(msg8(e), "err");
-      } finally {
-        testBtn.disabled = false;
-      }
-    });
+      });
+      return testBtn;
+    };
+    const searchOut = el("div", { class: "outbox" });
     opts.onMount?.(refresh8);
     void refresh8();
     return el("div", {}, [
@@ -7421,7 +7393,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         el("h2", { text: "\uC77C\uBC18 \uC5D0\uC774\uC804\uD2B8" }),
         el("div", { class: "hint", style: { marginBottom: "8px" }, text: "\uCC57\xB7\uCE74\uB4DC\uB97C \uC77D\uACE0 \uACE0\uCE58\uB294 \uC5D0\uC774\uC804\uD2B8\uC785\uB2C8\uB2E4. \uD234\uACFC \uD30C\uC774\uC36C \uC2A4\uD06C\uB9BD\uD2B8\uB97C \uC501\uB2C8\uB2E4. \uD56D\uC0C1 \uD558\uB098\uAC00 \uC120\uD0DD\uB418\uC5B4 \uC788\uC2B5\uB2C8\uB2E4." }),
         generalMount,
-        el("div", { class: "row", style: { marginTop: "8px" } }, [testBtn]),
+        el("div", { class: "row", style: { marginTop: "8px" } }, [testButton("general", out)]),
         out,
         el("div", { class: "hint", style: { marginTop: "8px" } }, [
           "\uD14C\uC2A4\uD2B8\uB294 \uC77C\uBC18 \uC751\uB2F5\uACFC \uD234 \uD638\uCD9C\uC744 \uB530\uB85C \uD655\uC778\uD569\uB2C8\uB2E4. \uD234 \uD638\uCD9C\uC774 \uC548 \uB418\uBA74 \uC5D0\uC774\uC804\uD2B8\uAC00 \uB3D9\uC791\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4."
@@ -7432,7 +7404,9 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         el("div", { class: "hint", style: { marginBottom: "8px" } }, [
           "\uC77C\uBC18 \uC5D0\uC774\uC804\uD2B8\uAC00 \uC870\uC0AC\uB97C \uB9E1\uAE30\uB294 \uBCF4\uC870 \uC5D0\uC774\uC804\uD2B8(\uC6F9 \uAC80\uC0C9\uB9CC). \uC800\uB834\uD55C \uAC80\uC0C9\uD615 \uBAA8\uB378(\uC608: Gemini Flash)\uC744 \uAD8C\uD569\uB2C8\uB2E4. \uC5C6\uC73C\uBA74 \uC77C\uBC18 \uC5D0\uC774\uC804\uD2B8\uAC00 \uC9C1\uC811 \uAC80\uC0C9\uD569\uB2C8\uB2E4."
         ]),
-        searchMount
+        searchMount,
+        el("div", { class: "row", style: { marginTop: "8px" } }, [testButton("search", searchOut)]),
+        searchOut
       ])
     ]);
   }
@@ -7956,7 +7930,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         const r = await state.skills();
         maxBody = r.maxBodyChars || maxBody;
         maxDesc = r.maxDescriptionChars || maxDesc;
-        budget.textContent = `\uD504\uB86C\uD504\uD2B8\uC5D0 \uC2E4\uB9AC\uB294 \uBD84\uB7C9 ${r.catalogChars.toLocaleString()}\uC790 / \uD55C\uB3C4 ${r.catalogLimit.toLocaleString()}\uC790 \u2014 \uBAA9\uB85D(\uC774\uB984\xB7\uC124\uBA85)\uACFC \u201C\uD56D\uC0C1 \uC801\uC6A9\u201D \uC2A4\uD0AC\uC758 \uBCF8\uBB38\uB9CC \uC2E4\uB9BD\uB2C8\uB2E4. \uB098\uBA38\uC9C0 \uBCF8\uBB38\uC740 \uD544\uC694\uD560 \uB54C \uBD88\uB7EC\uC635\uB2C8\uB2E4.`;
+        budget.textContent = `\uB9E4 \uC694\uCCAD\uC5D0 \uC2E4\uB9AC\uB294 \uAC83\uC740 \uC774 \uBAA9\uB85D(\uC774\uB984\xB7\uC124\uBA85)\uBFD0\uC785\uB2C8\uB2E4: ${r.catalogChars.toLocaleString()}\uC790 / \uD55C\uB3C4 ${r.catalogLimit.toLocaleString()}\uC790. \uBCF8\uBB38\uC740 \uC5D0\uC774\uC804\uD2B8\uAC00 \uB9DE\uB294 \uC791\uC5C5\uC744 \uB9CC\uB098\uBA74 load_skill \uB85C \uADF8\uB54C \uBD88\uB7EC\uC635\uB2C8\uB2E4.`;
         clear(listMount2);
         if (!r.skills.length) {
           listMount2.appendChild(el("div", { class: "hint", text: "\uB4F1\uB85D\uB41C \uC2A4\uD0AC\uC774 \uC5C6\uC2B5\uB2C8\uB2E4." }));
@@ -8314,7 +8288,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.7.1",
+            version: "0.7.2",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -8423,7 +8397,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       // The backend update sits with the connection, right under it: it is the
       // first thing to press when the two sides disagree, and it was buried on
       // the last page before.
-      ["\uC5F0\uACB0", [buildConnectionCard(), buildUpdateCard(), buildDiagnosticCard(), buildAssetsCard(), buildAssetProbeCard()]],
+      ["\uC5F0\uACB0", [buildConnectionCard(), buildUpdateCard(), buildDiagnosticCard(), buildAssetsCard()]],
       ["API \uD0A4/\uC778\uC99D", [buildKeysCard()]],
       ["\uC5D0\uC774\uC804\uD2B8", [buildPresetsCard({
         onMount: (refresh8) => {
@@ -8483,14 +8457,6 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       out.textContent = "\uC5F0\uACB0\uD558\uB294 \uC911\uC785\uB2C8\uB2E4\u2026";
       try {
         await Risuai.pluginStorage.setItem("backend", { url: url.value, token: token2.value });
-        try {
-          await Risuai.setArgument("backend_url", url.value);
-        } catch {
-        }
-        try {
-          await Risuai.setArgument("backend_token", token2.value);
-        } catch {
-        }
         transport.configure({ url: url.value, token: token2.value });
         const ok = await state.connect();
         out.textContent = ok ? `\uC5F0\uACB0\uB418\uC5C8\uC2B5\uB2C8\uB2E4 \xB7 \uBC31\uC5D4\uB4DC v${state.health?.version}` : "\uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + state.connectError;
@@ -8565,94 +8531,6 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       out
     ]);
   }
-  function buildAssetProbeCard() {
-    const out = el("div", { class: "outbox" });
-    const progress = el("div", { class: "hint" });
-    let running = null;
-    const run = el("button", { text: "\uC5D0\uC14B \uB364\uD504 \uC2E4\uCE21" });
-    const cancel = el("button", { text: "\uC911\uB2E8" });
-    cancel.style.display = "none";
-    cancel.addEventListener("click", () => {
-      running?.cancel();
-    });
-    run.addEventListener("click", async () => {
-      const char = state.character;
-      if (!char) {
-        clear(out);
-        out.appendChild(el("div", { class: "notice err", text: "\uD638\uC2A4\uD2B8 \uC0C1\uD0DC\uB97C \uBA3C\uC800 \uC77D\uC5B4\uC57C \uD569\uB2C8\uB2E4. \uD328\uB110\uC744 \uB2E4\uC2DC \uC5F4\uC5B4 \uC8FC\uC138\uC694." }));
-        return;
-      }
-      run.disabled = true;
-      cancel.style.display = "";
-      clear(out);
-      try {
-        running = measureAssetDump(char, (t) => {
-          progress.textContent = t;
-        });
-        const r = await running.done;
-        progress.textContent = "";
-        const mb2 = r.bytes / 1048576;
-        const mbps = (ms) => ms > 0 ? (mb2 / (ms / 1e3)).toFixed(2) + " MB/s" : "-";
-        const proj = r.wallMs > 0 && r.bytes > 0 ? Math.round(150 * 1048576 / (r.bytes / (r.wallMs / 1e3))) : 0;
-        const rows = [
-          ["\uC5D0\uC14B \uCC38\uC870", `${r.refs}\uAC1C (\uC77D\uAE30 \uC131\uACF5 ${r.readOk}, \uC2E4\uD328 ${r.readFail.length})`],
-          ["\uCD1D \uD06C\uAE30", mb2.toFixed(1) + "MB"],
-          ["\uC77D\uAE30 \uC2DC\uAC04", `${(r.readMs / 1e3).toFixed(1)}s \xB7 ${mbps(r.readMs)}` + (r.readOk ? ` \xB7 \uC7A5\uB2F9 ${Math.round(r.readMs / r.readOk)}ms` : "")],
-          ["\uC804\uC1A1 \uC2DC\uAC04", `${(r.uploadMs / 1e3).toFixed(1)}s \xB7 ${mbps(r.uploadMs)} \xB7 ${r.batches}\uBC30\uCE58`],
-          ["\uCD1D \uC18C\uC694", `${(r.wallMs / 1e3).toFixed(1)}s` + (r.cancelled ? " (\uC911\uB2E8\uB428)" : "")],
-          ["150MB \uD658\uC0B0", proj ? `\uC57D ${proj}\uCD08` : "-"],
-          ["\uBC31\uC5D4\uB4DC\uAC00 \uBCF8 \uC8FC\uC18C", r.echoAddr || "-"]
-        ];
-        if (r.rsProbe) {
-          const p = r.rsProbe;
-          rows.push(["/rs/ \uC9C1\uC811 \uD480", p.error ? `\uC2E4\uD328: ${String(p.error)}` : `HTTP ${String(p.status)} \xB7 ${Math.round(Number(p.bytes || 0) / 1024)}KB \xB7 ${String(p.ms)}ms`]);
-        }
-        out.appendChild(el("div", { class: "notice ok", text: "\uC2E4\uCE21\uC774 \uB05D\uB0AC\uC2B5\uB2C8\uB2E4." }));
-        out.appendChild(el("pre", {
-          class: "mono",
-          text: rows.map(([k, v]) => `${k.padEnd(14)} ${v}`).join("\n")
-        }));
-        if (r.readFail.length) {
-          out.appendChild(el("div", {
-            class: "hint",
-            text: "\uC77D\uAE30 \uC2E4\uD328: " + r.readFail.slice(0, 5).join(", ") + (r.readFail.length > 5 ? ` \uC678 ${r.readFail.length - 5}\uAC74` : "")
-          }));
-        }
-        void clientLog("info", "asset-dump-probe", {
-          platform: transport.hostPlatform,
-          refs: r.refs,
-          ok: r.readOk,
-          fail: r.readFail.length,
-          bytes: r.bytes,
-          readMs: r.readMs,
-          uploadMs: r.uploadMs,
-          wallMs: r.wallMs,
-          batches: r.batches,
-          addr: r.echoAddr,
-          rs: r.rsProbe,
-          cancelled: r.cancelled
-        });
-      } catch (e) {
-        progress.textContent = "";
-        out.appendChild(el("div", { class: "notice err", text: "\uC2E4\uCE21 \uC2E4\uD328: " + (e instanceof Error ? e.message : String(e)) }));
-        void clientLog("warn", "asset-dump-probe-failed", { error: String(e) });
-      } finally {
-        running = null;
-        run.disabled = false;
-        cancel.style.display = "none";
-      }
-    });
-    return el("div", { class: "card" }, [
-      el("h2", { text: "\uC5D0\uC14B \uB364\uD504 \uC2E4\uCE21" }),
-      el("div", {
-        class: "hint",
-        text: "\uD604\uC7AC \uBD07\uC774 \uCC38\uC870\uD558\uB294 \uC5D0\uC14B \uC804\uBD80\uB97C \uC21C\uCC28\uB85C \uC77D\uC5B4 \uBC31\uC5D4\uB4DC\uB85C \uC804\uC1A1\uD574 \uBCF4\uACE0 \uC18D\uB3C4\uB97C \uC7BD\uB2C8\uB2E4. \uB370\uC774\uD130\uB294 \uBC31\uC5D4\uB4DC\uC5D0 \uC800\uC7A5\uB418\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4."
-      }),
-      el("div", { class: "row" }, [run, cancel]),
-      progress,
-      out
-    ]);
-  }
   function buildAssetsCard() {
     const savePath = el("input", { placeholder: "D:\\path\\to\\Risuai-NodeOnly\\save  (PocketRisu \uC758 save \uD3F4\uB354, \uBC31\uC5D4\uB4DC\uC640 \uAC19\uC740 PC\uC77C \uB54C)" });
     const stats = el("div", { class: "hint" });
@@ -8703,7 +8581,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       }
     });
     return el("div", { class: "card" }, [
-      el("h2", { text: "\uC5D0\uC14B \uC2A4\uD1A0\uC5B4" }),
+      el("h2", { text: "\uD3EC\uCF13\uB9AC\uC2A4 \uC9C1\uB82C\uC5F0\uACB0 (\uD3EC\uCF13\uB9AC\uC2A4 \uC0AC\uC6A9\uC2DC\uB9CC)" }),
       el("label", { class: "field" }, [el("span", { text: "PocketRisu save \uD3F4\uB354 (\uC120\uD0DD \xB7 \uBC31\uC5D4\uB4DC\uC640 \uAC19\uC740 PC\uC77C \uB54C\uB9CC)" }), savePath]),
       el("div", { class: "row" }, [save, gc]),
       stats,
@@ -8923,7 +8801,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.7.1"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.7.2"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -8942,6 +8820,15 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     alternateGreetings: "\uB300\uCCB4 \uC778\uC0AC\uB9D0"
   };
   var NOT_HERE = /* @__PURE__ */ new Set(["backgroundHTML"]);
+  var FIELD_RANK = {
+    name: 0,
+    desc: 10,
+    firstMessage: 20,
+    alternateGreetings: 21,
+    replaceGlobalNote: 30,
+    characterVersion: 100,
+    creatorNotes: 110
+  };
   var built4 = false;
   var treeMount3 = null;
   var viewMount3 = null;
@@ -9043,7 +8930,13 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     }, "\uCC3E\uAE30 (\uC774\uB984\xB7\uBCF8\uBB38)");
     const needle = filterText2.trim().toLowerCase();
     const shown = fields.filter((f) => !needle || labelOf(f).toLowerCase().includes(needle) || f.body.toLowerCase().includes(needle));
+    shown.sort((a, b) => (FIELD_RANK[a.field] ?? 50) - (FIELD_RANK[b.field] ?? 50) || a.seq - b.seq);
+    let ruled = false;
     for (const f of shown) {
+      if (!ruled && (FIELD_RANK[f.field] ?? 50) >= 100) {
+        ruled = true;
+        treeMount3.appendChild(el("div", { class: "sectionline", style: { margin: "8px 6px" } }));
+      }
       const name = el("button", {
         class: "treefile" + (f.id === openId2 ? " on" : ""),
         text: labelOf(f) + (f.body ? "" : " (\uBE44\uC5B4 \uC788\uC74C)"),
@@ -9821,33 +9714,36 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       }
     });
     const nameInput = el("input", {
-      value: (state.workspace?.characterName || "\uBD07") + " (\uBCF5\uC81C)",
-      placeholder: "\uBCF5\uC81C \uBD07 \uC774\uB984"
+      value: (state.workspace?.characterName || "\uBD07") + " (\uBC31\uC5C5)",
+      placeholder: "\uBC31\uC5C5 \uBD07 \uC774\uB984"
     });
-    const clone = el("button", { text: "\uBCF5\uC81C \uBD07 \uC0DD\uC131" });
-    clone.addEventListener("click", async () => {
-      clone.disabled = true;
-      const was = clone.textContent;
-      clone.textContent = "\uBCF5\uC81C \uC911\u2026";
-      out.textContent = "\uBCF5\uC81C\uD558\uB294 \uC911\uC785\uB2C8\uB2E4. RisuAI \uAC00 db \uAD8C\uD55C\uC744 \uBB3C\uC73C\uBA74 \uD5C8\uC6A9\uD574 \uC8FC\uC138\uC694.";
+    const saveNew = el("button", { text: "\uC0C8 \uBD07\uC73C\uB85C \uC800\uC7A5", title: "\uC9C0\uAE08 RisuAI \uC5D0 \uC788\uB294 \uC0C1\uD0DC\uB97C \uBC31\uC5C5 \uBD07\uC73C\uB85C \uBCF5\uC81C\uD55C \uB4A4, \uD3B8\uC9D1 \uC911\uC778 \uB0B4\uC6A9\uC744 \uC774 \uBD07\uC5D0 \uBC18\uC601\uD558\uACE0 \uACC4\uC18D \uD3B8\uC9D1\uD569\uB2C8\uB2E4" });
+    saveNew.disabled = !!blocked;
+    saveNew.addEventListener("click", async () => {
+      saveNew.disabled = true;
+      const was = saveNew.textContent;
+      saveNew.textContent = "\uC800\uC7A5 \uC911\u2026";
+      out.textContent = "\uBC31\uC5C5 \uBD07\uC744 \uB9CC\uB4DC\uB294 \uC911\uC785\uB2C8\uB2E4. RisuAI \uAC00 db \uAD8C\uD55C\uC744 \uBB3C\uC73C\uBA74 \uD5C8\uC6A9\uD574 \uC8FC\uC138\uC694.";
       try {
-        const name = nameInput.value.trim() || "\uBCF5\uC81C \uBD07";
-        await state.cloneBot(name);
-        const said = `\uBCF5\uC81C \uBD07 \u201C${name}\u201D \uC744 \uB9CC\uB4E4\uC5C8\uC2B5\uB2C8\uB2E4. \uD3B8\uC9D1\uBCF8\uACFC \uCC57 \uC804\uBD80\uAC00 \uB2F4\uACBC\uACE0, \uC5D0\uC14B\uC740 \uC6D0\uBCF8\uACFC \uACF5\uC720\uD569\uB2C8\uB2E4. RisuAI \uBD07 \uBAA9\uB85D\uC5D0\uC11C \uD655\uC778\uD574 \uC8FC\uC138\uC694.`;
+        const backup = nameInput.value.trim() || "\uBC31\uC5C5";
+        const r = await state.saveAsNewBot(backup);
+        const said = `\uD604\uC7AC \uD3B8\uC9D1 \uC911\uC778 \uBD07\uC744 \uC0C8 \uBD07\uC73C\uB85C \uC800\uC7A5\uD558\uC600\uC2B5\uB2C8\uB2E4. \uAE30\uC874 \uBD07\uC740 \u201C${backup}\u201D \uC774\uB984\uC73C\uB85C \uBCF5\uC81C\uB418\uC5C8\uC2B5\uB2C8\uB2E4.` + (r.mode === "noop" ? " (\uBC18\uC601\uD560 \uBCC0\uACBD\uC740 \uC5C6\uC5C8\uC2B5\uB2C8\uB2E4.)" : ` \uBCC0\uACBD ${r.applied}\uAC74\uC774 \uC774 \uBD07\uC5D0 \uBC18\uC601\uB418\uC5B4 \uC0C8 \uAE30\uC900\uC120\uC774 \uB418\uC5C8\uC2B5\uB2C8\uB2E4.`);
         shellNotice(said, "ok");
         clear(body);
         const ok = el("button", { class: "primary tiny", text: "\uB2EB\uAE30" });
         ok.addEventListener("click", close);
         body.appendChild(el("div", { class: "notice ok", text: "\u2714 " + said }));
+        body.appendChild(el("div", { class: "hint", text: "\uBC31\uC5C5 \uBD07\uC740 RisuAI \uBD07 \uBAA9\uB85D\uC5D0 \uC0C8 \uCE90\uB9AD\uD130\uB85C \uC788\uC2B5\uB2C8\uB2E4. \uCC57\uB3C4 \uD568\uAED8 \uBCF5\uC0AC\uB418\uC5C8\uACE0 \uC5D0\uC14B\uC740 \uACF5\uC720\uD569\uB2C8\uB2E4." }));
         body.appendChild(el("div", { class: "row", style: { marginTop: "8px" } }, [ok]));
       } catch (e) {
-        void clientLog("error", "cloneBot failed", { error: msg14(e) });
-        shellNotice("\uBCF5\uC81C\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg14(e), "err");
-        out.textContent = "\uBCF5\uC81C\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg14(e);
-        clone.disabled = false;
-        clone.textContent = was;
+        void clientLog("error", "saveAsNewBot failed", { error: msg14(e) });
+        shellNotice("\uC0C8 \uBD07\uC73C\uB85C \uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg14(e), "err");
+        out.textContent = "\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg14(e);
+        saveNew.disabled = !!applyBlockReason();
+        saveNew.textContent = was;
       }
     });
+    const clone = saveNew;
     const reset = el("button", { class: "ghost" });
     armed(reset, "\uAE30\uC900\uC120\uC73C\uB85C \uB418\uB3CC\uB9AC\uAE30", "\uC815\uB9D0 \uB418\uB3CC\uB9B4\uAE4C\uC694?", async () => {
       try {
@@ -9864,7 +9760,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     body.appendChild(out);
     body.appendChild(el("div", {
       class: "hint",
-      text: "\uBA54\uD0C0\xB7\uC778\uC0AC\uB9D0\xB7\uBD07 \uB85C\uC5B4\uBD81\xB7Regex\xB7\uD2B8\uB9AC\uAC70\uAC00 \uD55C \uBC88\uC5D0 \uC4F0\uC785\uB2C8\uB2E4. \uCC57\uC740 \uC808\uB300 \uAC74\uB4DC\uB9AC\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4. \uBCF5\uC81C \uBD07\uC740 \uC0C8 \uCE90\uB9AD\uD130\uB85C \uB9CC\uB4E4\uC5B4\uC9C0\uACE0 \uCC57\uB3C4 \uBAA8\uB450 \uBCF5\uC0AC\uB429\uB2C8\uB2E4. \uCC98\uC74C \uD55C \uBC88 db \uAD8C\uD55C \uD5C8\uC6A9\uC774 \uD544\uC694\uD569\uB2C8\uB2E4."
+      text: "\uBC18\uC601: \uBA54\uD0C0\xB7\uC778\uC0AC\uB9D0\xB7\uBD07 \uB85C\uC5B4\uBD81\xB7Regex\xB7\uD2B8\uB9AC\uAC70\uAC00 \uD55C \uBC88\uC5D0 \uC4F0\uC785\uB2C8\uB2E4. \uCC57\uC740 \uC808\uB300 \uAC74\uB4DC\uB9AC\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4. \uC0C8 \uBD07\uC73C\uB85C \uC800\uC7A5: \uC9C0\uAE08 RisuAI \uC0C1\uD0DC\uB97C \uBC31\uC5C5 \uBD07(\uCC57 \uD3EC\uD568, \uC0C8 \uCE90\uB9AD\uD130)\uC73C\uB85C \uB0A8\uAE30\uACE0 \uD3B8\uC9D1\uBCF8\uC744 \uC774 \uBD07\uC5D0 \uBC18\uC601\uD569\uB2C8\uB2E4. \uCC98\uC74C \uD55C \uBC88 db \uAD8C\uD55C \uD5C8\uC6A9\uC774 \uD544\uC694\uD569\uB2C8\uB2E4."
     }));
   }
   async function openVersions2(anchor) {
@@ -10253,7 +10149,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
   async function thumbBytes(c) {
     if (c.state === "present") {
       try {
-        const bytes = await transport.getBinary("/assets/blob", { key: c.key });
+        const bytes = await transport.postBinary("/assets/blob", { key: c.key });
         if (bytes.byteLength) return bytes;
       } catch {
       }
@@ -10449,7 +10345,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.7.1"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.7.2"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
@@ -10524,7 +10420,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.7.1" }),
+        el("span", { class: "dim", text: "v0.7.2" }),
         healthEl,
         el("span", { class: "spacer" }),
         reload,
@@ -10675,18 +10571,6 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       }
     } catch {
     }
-    if (!url) {
-      try {
-        url = String(await Risuai.getArgument("backend_url") ?? "").trim();
-      } catch {
-      }
-    }
-    if (!token2) {
-      try {
-        token2 = String(await Risuai.getArgument("backend_token") ?? "").trim();
-      } catch {
-      }
-    }
     return { url: url || DEFAULT_URL, token: token2 };
   }
   (async () => {
@@ -10731,6 +10615,6 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.7.1"} loaded`);
+    console.log(`[risu-hina] v${"0.7.2"} loaded`);
   })();
 })();

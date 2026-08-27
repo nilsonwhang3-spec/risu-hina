@@ -356,11 +356,18 @@ export async function cloneBot(
   copy.name = name;
   delete copy['realmId'];
 
+  // RisuAI asks for the 'db' permission with a dialog drawn UNDER the
+  // fullscreen plugin container, so the first clone ever sat at "복제 중…"
+  // until the user closed the panel and found the prompt waiting. The panel
+  // steps aside for the read and comes back right after.
   let dbSlice: Record<string, unknown> | null = null;
+  try { await Risuai.hideContainer(); } catch { /* not shown */ }
   try {
     dbSlice = await Risuai.getDatabase(['characters']);
   } catch (e) {
     throw new HostError('failed', '캐릭터 목록을 읽지 못했습니다: ' + String(e));
+  } finally {
+    try { await Risuai.showContainer('fullscreen'); } catch { /* fine */ }
   }
   const characters = dbSlice && Array.isArray(dbSlice['characters'])
     ? (dbSlice['characters'] as RisuCharacter[]).slice()

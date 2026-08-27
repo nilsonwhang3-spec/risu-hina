@@ -116,32 +116,38 @@ export function buildPresetsCard(opts: PresetsCardOptions): HTMLElement {
     return row;
   };
 
-  const testBtn = el('button', { class: 'ghost', text: '연결 테스트' });
-  testBtn.addEventListener('click', async () => {
-    testBtn.disabled = true;
-    clear(out);
-    out.appendChild(el('div', { class: 'hint', text: '테스트 중입니다… (최대 2분)' }));
-    try {
-      const r = await state.testAgent() as Record<string, any>;
-      clear(out);
-      if (r.ok) {
-        const u = r.usage ?? {};
-        out.appendChild(el('div', { class: 'notice ok' }, [
-          el('div', { text: `정상 동작합니다 · ${r.model}` }),
-          el('div', { class: 'hint', text: `툴 호출 ${r.toolCalls}건 · 토큰 in ${u.in} / out ${u.out}` }),
-        ]));
-      } else {
-        out.appendChild(el('div', { class: 'notice err' }, [
-          el('div', { text: `실패했습니다 (${r.stage})` }),
-          el('div', { class: 'hint', text: String(r.error ?? '') }),
-        ]));
+  // The same probe for both agents: plain answer, then a forced tool call.
+  const testButton = (kind: Kind, box: HTMLElement): HTMLElement => {
+    const testBtn = el('button', { class: 'ghost', text: '연결 테스트' });
+    testBtn.addEventListener('click', async () => {
+      testBtn.disabled = true;
+      clear(box);
+      box.appendChild(el('div', { class: 'hint', text: '테스트 중입니다… (최대 2분)' }));
+      try {
+        const r = await state.testAgent(kind) as Record<string, any>;
+        clear(box);
+        if (r.ok) {
+          const u = r.usage ?? {};
+          box.appendChild(el('div', { class: 'notice ok' }, [
+            el('div', { text: `정상 동작합니다 · ${r.model}` }),
+            el('div', { class: 'hint', text: `툴 호출 ${r.toolCalls}건 · 토큰 in ${u.in} / out ${u.out}` }),
+          ]));
+        } else {
+          box.appendChild(el('div', { class: 'notice err' }, [
+            el('div', { text: `실패했습니다 (${r.stage})` }),
+            el('div', { class: 'hint', text: String(r.error ?? '') }),
+          ]));
+        }
+      } catch (e) {
+        clear(box);
+        box.appendChild(el('div', { class: 'notice err', text: msg(e) }));
+      } finally {
+        testBtn.disabled = false;
       }
-    } catch (e) {
-      say(msg(e), 'err');
-    } finally {
-      testBtn.disabled = false;
-    }
-  });
+    });
+    return testBtn;
+  };
+  const searchOut = el('div', { class: 'outbox' });
 
   opts.onMount?.(refresh);
   void refresh();
@@ -150,7 +156,7 @@ export function buildPresetsCard(opts: PresetsCardOptions): HTMLElement {
       el('h2', { text: '일반 에이전트' }),
       el('div', { class: 'hint', style: { marginBottom: '8px' }, text: '챗·카드를 읽고 고치는 에이전트입니다. 툴과 파이썬 스크립트를 씁니다. 항상 하나가 선택되어 있습니다.' }),
       generalMount,
-      el('div', { class: 'row', style: { marginTop: '8px' } }, [testBtn]),
+      el('div', { class: 'row', style: { marginTop: '8px' } }, [testButton('general', out)]),
       out,
       el('div', { class: 'hint', style: { marginTop: '8px' } }, [
         '테스트는 일반 응답과 툴 호출을 따로 확인합니다. 툴 호출이 안 되면 에이전트가 동작할 수 없습니다.',
@@ -162,6 +168,8 @@ export function buildPresetsCard(opts: PresetsCardOptions): HTMLElement {
         '일반 에이전트가 조사를 맡기는 보조 에이전트(웹 검색만). 저렴한 검색형 모델(예: Gemini Flash)을 권합니다. 없으면 일반 에이전트가 직접 검색합니다.',
       ]),
       searchMount,
+      el('div', { class: 'row', style: { marginTop: '8px' } }, [testButton('search', searchOut)]),
+      searchOut,
     ]),
   ]);
 }

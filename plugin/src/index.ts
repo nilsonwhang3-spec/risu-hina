@@ -12,11 +12,13 @@ import { ICON } from './ui/dom';
 const DEFAULT_URL = 'http://127.0.0.1:6020';
 
 /**
- * Config lives in two places and pluginStorage wins.
+ * Config lives in pluginStorage and nowhere else.
  *
- * `//@arg` values are wiped when the plugin is reinstalled, which during
- * development is every few minutes; `db.pluginCustomStorage` survives. Args are
- * still read so a first-time user can fill them in the normal RisuAI way.
+ * There used to be `//@arg backend_url` / `backend_token` fields on RisuAI's
+ * plugin screen as well. RisuAI wipes them on every plugin update, so after
+ * each `+` the user saw two empty boxes that looked like something they had
+ * to fill in again - while the real values sat untouched in
+ * `db.pluginCustomStorage`. The fields are gone; ⚙ → 연결 is the one place.
  */
 async function resolveConfig(): Promise<{ url: string; token: string }> {
   let url = '';
@@ -28,13 +30,6 @@ async function resolveConfig(): Promise<{ url: string; token: string }> {
       token = String((stored as Record<string, unknown>).token ?? '');
     }
   } catch { /* first run */ }
-
-  if (!url) {
-    try { url = String((await Risuai.getArgument('backend_url')) ?? '').trim(); } catch { /* ignore */ }
-  }
-  if (!token) {
-    try { token = String((await Risuai.getArgument('backend_token')) ?? '').trim(); } catch { /* ignore */ }
-  }
   return { url: url || DEFAULT_URL, token };
 }
 

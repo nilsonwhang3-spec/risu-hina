@@ -1,4 +1,4 @@
-# 06. 구현 상태 — 2026-08-27 기준 (v0.7.1, Risu Hina)
+# 06. 구현 상태 — 2026-08-27 기준 (v0.7.2, Risu Hina)
 
 다음 세션에 이어서 할 사람(=나)을 위한 한 장. 무엇이 있고, 무엇이 바뀌었고, 어디까지 배포됐고,
 무엇이 남았는지. 설계의 *이유*는 `docs/04`(에셋·charx 는 부록 E), 저장 구조는 `docs/02`, 배포 환경은 `docs/00`.
@@ -6,7 +6,7 @@
 
 ## 0. 다음 세션 시작점 (먼저 읽을 것)
 
-**코드 상태**: master = **v0.7.1**(§1-6 라운드 8 · §1-5 라운드 7; docs/07 플래닝은 여전히 대기) — 게이트 ALL GREEN. 0.7.0 은 minor 가 바뀌어 **버전 게이트가 걸린다**: 백엔드를 올리면 RisuAI 쪽 플러그인도 `+` 로 올려야 한다(헤더가 안내).
+**코드 상태**: master = **v0.7.2**(§1-7 라운드 9 · §1-6 · §1-5; docs/07 플래닝은 여전히 대기) — 게이트 ALL GREEN. 0.7.0 은 minor 가 바뀌어 **버전 게이트가 걸린다**: 백엔드를 올리면 RisuAI 쪽 플러그인도 `+` 로 올려야 한다(헤더가 안내).
 
 **배포 상태 (2026-08-25 21:01 `deploy.ps1`, 새 SSH 세션에서 확인)**:
 
@@ -23,6 +23,20 @@
 `https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js` 로 바꾸고, `tools/bundle.py` 가 그 파일을 저장소에 쓰도록 했다(릴리스 커밋에 포함). 백엔드 코드는 VERSION 만 바뀜.
 
 → **첫 할 일**: 사용자가 RisuAI 에 `plugin/Risu.Hina.Plugin.js` **수동 재설치 1회**(설치본 0.1.0 의 update-url 은 CORS 로 못 읽음) → 다음 릴리스부터 `+` 가 뜨는지 확인 → M2 실사용 검증(§5-2).
+
+## 1-7. 2026-08-27 밤 — v0.7.2: 라운드 9 피드백 13건 (중간 캐시가 썸네일을 한 장으로 · 새 봇으로 저장)
+
+- **에셋 미리보기가 전부 프로필** — 서버 로그에 격자 한 번당 `GET /assets/blob` 이 **한 건만** 도착(178KB). 키는 전부 맞고 present. 즉 브라우저와 백엔드 사이(터널 엣지)의 캐시가 쿼리스트링을 무시하고 첫 응답을 전 키에 돌려준 것(RisuAI sw.js 는 `/sw/*`·`/tf/*` 만 잡으므로 아님). 고침: 바이너리 읽기는 **POST**(`POST /assets/blob {key}`, `POST /files/download {charKey,path}`) + `Cache-Control: no-store`; GET 은 도구용으로 유지.
+- **워크스페이스 "Cannot read properties of undefined (reading 'filter')"** — 같은 중간자가 200 으로 HTML 을 돌려주면 `readJson` 의 `{_raw}` 폴백이 정상 응답처럼 흘러 `data.areas.filter` 에서 터졌다. `transport.json()` 이 `{_raw}` 를 감지해 "백엔드 대신 다른 응답이 왔습니다 (JSON 이 아님): …" 로 던지고, 파일 탭은 실패를 `clientLog` 에 스택과 함께 남긴다.
+- **플러그인 업데이트 때 URL·토큰 칸이 비어 보이던 것** — `//@arg backend_url/backend_token` 은 RisuAI 가 업데이트마다 지우는데 실제 값은 `pluginCustomStorage` 에 있었다. 헤더에서 `@arg` 두 줄 제거, `getArgument/setArgument` 경로 삭제 — ⚙ → 연결 이 유일한 입력처.
+- 설정 연결 탭: "에셋 덤프 실측" 카드 삭제(`measureAssetDump` 는 코드만 남음), "에셋 스토어" → **"포켓리스 직렬연결 (포켓리스 사용시만)"**.
+- **검색 에이전트 연결 테스트** — `POST /config/test {section:"agent_search"}`, 프리셋 카드 두 곳에 같은 버튼.
+- 스킬: 시드 전부 기본 켜짐, "말투 통일" 시드 삭제(`RETIRED_SEEDS`), 기존 설치는 `skills.defaults_once()`(마이그레이션 `skills_defaults_v1`: 전부 켜고 은퇴 시드 삭제). 스킬 카드 설명을 "매 요청에 실리는 것은 이 목록뿐 … 본문은 load_skill 로 그때" 로.
+- 메타 탭 순서: 이름 → 설명 → 퍼스트 메시지(+대체 인사말) → 글로벌 노트 덮어쓰기 → 구분선 → 봇 버전 → 제작자 노트(`FIELD_RANK`).
+- AI 챗: 첨부 버튼을 보내기 버튼 **위**에 세로로(`.agentbtns`).
+- **복제가 "복제 중…" 에서 멈추던 것** — RisuAI 의 db 권한 대화상자가 전체화면 플러그인 컨테이너 **뒤**에 뜬다. `host.cloneBot` 이 `getDatabase` 전에 `hideContainer`, 끝나면 `showContainer('fullscreen')`.
+- **복제 봇 생성 → 새 봇으로 저장**(`state.saveAsNewBot`): 지금 RisuAI 상태(기준선)를 "<이름> (백업)" 으로 복제(챗 포함) → 편집본을 이 봇에 반영·커밋 → 계속 편집. 팝업: "현재 편집 중인 봇을 새 봇으로 저장하였습니다. 기존 봇은 “…(백업)” 이름으로 복제되었습니다." 에이전트의 `propose_clone_bot` 은 그대로.
+- 스모크: `test_save_as_new_bot`(백업 이름·챗 동반·라이브 봇에 편집 반영·컨테이너 hide/show·변경 없음 복귀).
 
 ## 1-6. 2026-08-27 밤 — v0.7.1: 라운드 8 피드백 5건 (코덱스 빈 응답의 진짜 원인 · 부분 교체 툴 · 훅 레퍼런스)
 

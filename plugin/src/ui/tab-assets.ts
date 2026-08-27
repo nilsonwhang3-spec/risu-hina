@@ -364,7 +364,10 @@ async function thumbBytes(c: Cell): Promise<Uint8Array | null> {
   // failed) still gets the host's copy.
   if (c.state === 'present') {
     try {
-      const bytes = await transport.getBinary('/assets/blob', { key: c.key });
+      // POST, not GET-with-query: a cache between the browser and the
+      // backend served one key's bytes for every key (one request reached
+      // the server per grid, every cell showed the portrait).
+      const bytes = await transport.postBinary('/assets/blob', { key: c.key });
       if (bytes.byteLength) return bytes;
     } catch { /* fall back to the host */ }
   }

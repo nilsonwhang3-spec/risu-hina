@@ -631,7 +631,10 @@ label.checkrow input { width: auto; }
    the send button out of the visible column. */
 .agentinput { flex: 1 1 auto; min-width: 0; width: auto; min-height: 82px; max-height: 220px; background: var(--bgcolor, #12141a); }
 .agentinput.dropping { border-color: #7dd3fc; background: rgba(125, 211, 252, .08); }
-button.sendbtn { padding: 9px 12px; display: flex; align-items: center; flex-shrink: 0; }
+button.sendbtn { padding: 9px 12px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+/* Attach above send, in a column beside the box. */
+.agentbtns { display: flex; flex-direction: column; gap: 4px; flex-shrink: 0; justify-content: flex-end; }
+.agentbtns button { width: 42px; justify-content: center; }
 /* A snapshot row whose delete is on its way to the backend. */
 .verrow.deleting, .chatitem.deleting { opacity: .4; }
 

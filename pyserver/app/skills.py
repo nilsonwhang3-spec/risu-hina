@@ -627,20 +627,16 @@ SEEDS: list[tuple[str, str, str]] = [
 5. 동의를 받으면 로어북 추가(propose_lore_add)와 원본 턴 삭제(stage_delete)를 **한 턴에** 제안한다.
 6. 삭제 범위에 하이파 요약이 참조하는 턴이 있으면 반드시 먼저 알린다.""",
     ),
-    (
-        "말투 통일",
-        "한 인물의 말투·호칭·어미를 챗 전체에서 고르게 맞출 때. \"말투 통일\", \"반말로 바꿔\", \"존댓말 일관되게\" 같은 요청.",
-        """한 인물의 말투를 챗 전체에서 고르게 맞추는 작업이다.
-
-1. search_turns 로 해당 인물의 대사가 있는 턴을 모은다.
-2. 실제 사례를 10개쯤 read_turns 로 읽고, 어떤 편차가 있는지 먼저 사용자에게 정리해 보고한다.
-3. 규칙이 정해지면 run_python 으로 후보를 뽑아 개수를 확인한다. 눈대중으로 세지 않는다.
-4. 기계적으로 치환 가능한 것은 stage_bulk, 문맥을 봐야 하는 것은 stage_edit 으로 나눠 제안한다.
-5. 원문의 오탈자나 의도된 말버릇까지 고치지 않는다. 애매하면 남기고 물어본다.""",
-    ),
 ]
 
-# filename -> (display name, description, starts enabled)
+# Seeds that were shipped once and are retired: removed from installs that
+# still carry them untouched (the user asked; the agent does the job as well
+# without a procedure card).
+RETIRED_SEEDS = ("말투 통일",)
+
+# filename -> (display name, description, starts enabled). All on by default
+# since 0.7.2: a reference the agent may need is worth its catalog line, and
+# a disabled reference is one the user has to know exists to switch on.
 SEED_FILES: dict[str, tuple[str, str, bool]] = {
     "risuai-cbs.md": ("RisuAI CBS 문법",
                       "봇 카드·로어북·정규식·프롬프트의 `{{tag}}` (CBS) 문법을 읽거나 써야 할 때. {{getvar}}·{{random}} 같은 태그의 뜻이 필요할 때.", True),
@@ -649,13 +645,13 @@ SEED_FILES: dict[str, tuple[str, str, bool]] = {
     "risuai-hooks.md": ("RisuAI 처리 순서 (정규식·Lua 훅)",
                         "Regex(editinput/editoutput/editprocess/editdisplay)·Lua listenEdit(editRequest 등)·트리거가 한 턴에서 언제 어떤 순서로 돌고 무엇이 저장되는지. 정규식·트리거·배경 HTML 을 만들거나 고칠 때, 태그가 요청/화면/저장본 어디에 남는지 설명할 때.", True),
     "risuai-lua.md": ("RisuAI Lua 트리거",
-                      "봇 카드의 Lua 트리거 스크립트를 읽거나 이해해야 할 때.", False),
+                      "봇 카드의 Lua 트리거 스크립트를 읽거나 이해해야 할 때.", True),
     "charx-cards.md": ("charx 카드 구조",
-                       "사용자가 .charx 카드 파일을 올렸고 그 내부 구조(설정·에셋·로어북)를 알아야 할 때.", False),
+                       "사용자가 .charx 카드 파일을 올렸고 그 내부 구조(설정·에셋·로어북)를 알아야 할 때.", True),
     "charx_unpack.py": ("charx 풀기",
-                        "사용자가 올린 .charx 카드를 읽기 좋은 폴더로 풀어 조사해야 할 때.", False),
+                        "사용자가 올린 .charx 카드를 읽기 좋은 폴더로 풀어 조사해야 할 때.", True),
     "arca-html.md": ("아카라이브 HTML 작성",
-                     "아카라이브(arca.live)에 붙여넣을 HTML(챗로그·소개글·요약)을 만들 때의 제약.", False),
+                     "아카라이브(arca.live)에 붙여넣을 HTML(챗로그·소개글·요약)을 만들 때의 제약.", True),
 }
 
 
@@ -689,6 +685,32 @@ def seed_once() -> None:
             log.warn("could not seed %s: %s", filename, e)
     db.mark_migration(SEED_KEY)
     log.info("seeded %s starter skills", made)
+
+
+DEFAULTS_KEY = "skills_defaults_v1"
+
+
+def defaults_once() -> None:
+    """One-time alignment of an existing install with the 0.7.2 defaults:
+    every skill switched on, and retired seeds removed. Runs after seeding
+    so a fresh install gets the same end state by construction."""
+    if db.has_migration(DEFAULTS_KEY):
+        return
+    on = 0
+    gone = 0
+    for s in list_all():
+        if s["name"].strip() in RETIRED_SEEDS:
+            try:
+                delete(s["slug"])
+                gone += 1
+            except SkillError:
+                pass
+            continue
+        if not s["enabled"]:
+            _set_state(s["slug"], enabled=True)
+            on += 1
+    db.mark_migration(DEFAULTS_KEY)
+    log.info("skill defaults: enabled %s, retired %s", on, gone)
 
 
 def _seed_file_skill(label: str, desc: str, filename: str, data: bytes, enabled: bool, order: int) -> dict:
