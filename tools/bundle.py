@@ -245,7 +245,13 @@ def stage_app(stage: Path, plugin: Path) -> None:
                     ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.log"))
     for name in ROOT_FILES:
         shutil.copy2(SERVER / name, stage / name)
-    shutil.copy2(SERVER / "RELEASE_README.md", stage / "README.md")
+    # The zip's README is the repository's own, so what a person reads on
+    # GitHub and what they find after unzipping are the same document. The
+    # step-by-step install guide (connection types, tokens, persistence,
+    # troubleshooting) is far too long to be that front page, so it ships
+    # beside it as INSTALL.md - and the README points at it.
+    shutil.copy2(ROOT / "README.md", stage / "README.md")
+    shutil.copy2(SERVER / "RELEASE_README.md", stage / "INSTALL.md")
     (stage / "plugin").mkdir()
     shutil.copy2(plugin, stage / "plugin" / PLUGIN_ASSET)
     (stage / "data").mkdir()

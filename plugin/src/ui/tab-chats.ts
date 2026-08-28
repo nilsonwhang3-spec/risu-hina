@@ -12,7 +12,6 @@
 import { el, clear, refocusSearch, fmtTime, armed } from './dom';
 import { state } from '../state';
 import { setEditMode, setToolbarSearch, setTab } from './shell';
-import { shellNotice, snapshotCleanup } from './chatbar';
 import type { RisuChat } from '../risuai';
 import { describeSync, syncBusy } from '../assets';
 import { transport } from '../transport';
@@ -24,11 +23,13 @@ import { transport } from '../transport';
  * 반영 waits on exactly this.
  */
 /**
- * The bot's snapshots, right on the picker. No snapshots: one 봇 편집
- * button. Snapshots: each row offers to restore it and edit from there, and
- * 현재 상태로 편집 keeps the working copy as it is. Chats do not get this -
- * a chat is always edited as it is now, its snapshots live behind 버전 on
- * the chat bar where they cannot be mistaken for other chats.
+ * The bot's snapshots, right on the picker.
+ *
+ * Two buttons per row and nothing else: 편집 (restore this point and open it)
+ * and ✕. The list used to carry a "지금 편집 중인 작업본 · 현재 · 봇 편집" row
+ * on top and a cleanup control at the bottom, which put four different ways to
+ * start editing on one screen - 봇 편집 above already is that, so the rows here
+ * only answer "and from an older point?".
  */
 function botSnapshots(editBot: HTMLElement): HTMLElement {
   // Full width under the bot card, in the same list shape as 챗 선택 below -
@@ -39,22 +40,12 @@ function botSnapshots(editBot: HTMLElement): HTMLElement {
     let cps: { id: string; label: string; created_at: number }[] = [];
     try { cps = await state.cardCheckpoints(); } catch { return; }
     if (!cps.length) return;
-    editBot.textContent = '현재 상태로 편집';
     wrap.appendChild(el('div', { class: 'sectionline' }));
     wrap.appendChild(el('div', { class: 'sectiontitle', text: `봇 스냅샷 ${cps.length}개` }));
     const list = el('div', { class: 'chatlist snaplist' });
-    // The working copy is the top row: it is what 봇 편집 opens, and it is
-    // newer than every snapshot below it.
-    const nowEdit = el('button', { class: 'ghost tiny', text: '봇 편집' });
-    nowEdit.addEventListener('click', () => setEditMode('bot', 'meta'));
-    list.appendChild(el('div', { class: 'chatitem current' }, [
-      el('span', { class: 'grow', text: '지금 편집 중인 작업본' }),
-      el('span', { class: 'badge now', text: '현재' }),
-      nowEdit,
-    ]));
     const redraw = () => wrap.replaceWith(botSnapshots(editBot));
-    for (const [idx, c] of cps.slice(0, 8).entries()) {
-      const edit = el('button', { class: 'ghost tiny', text: '이 스냅샷으로 편집' }) as HTMLButtonElement;
+    for (const c of cps.slice(0, 8)) {
+      const edit = el('button', { class: 'ghost tiny', text: '편집' }) as HTMLButtonElement;
       edit.title = '작업본을 이 시점으로 되돌린 뒤 봇 편집으로 들어갑니다 (직전 상태도 스냅샷으로 남습니다)';
       edit.addEventListener('click', async () => {
         edit.disabled = true;
@@ -86,7 +77,6 @@ function botSnapshots(editBot: HTMLElement): HTMLElement {
       });
       row.append(
         el('span', { class: 'grow', text: c.label || '(무제)' }),
-        idx === 0 ? el('span', { class: 'badge', text: '최신 스냅샷' }) : '',
         el('span', { class: 'n', text: fmtTime(c.created_at * 1000) }),
         edit, del,
       );
@@ -94,10 +84,6 @@ function botSnapshots(editBot: HTMLElement): HTMLElement {
     }
     if (cps.length > 8) list.appendChild(el('div', { class: 'hint', style: { padding: '4px 0' }, text: `그 외 ${cps.length - 8}개 — 봇 편집 → 🕘 버전에서 전부 봅니다` }));
     wrap.appendChild(list);
-    wrap.appendChild(snapshotCleanup(cps.length, async (keep) => {
-      await state.clearCardCheckpoints(keep);
-      redraw();
-    }));
   })();
   return wrap;
 }
@@ -128,7 +114,10 @@ function assetSyncLine(): HTMLElement {
     wrap.appendChild(line);
     wrap.appendChild(bar);
   } else {
-    if (p.phase !== 'unsupported') {
+    // Only when there is something to retry. A finished sync offering "다시
+    // 동기화" is one more button on a screen whose job is "pick what to edit",
+    // and the header's 🔄 restarts it anyway.
+    if (p.phase === 'error' || p.phase === 'cancelled' || p.failed) {
       const again = el('button', { class: 'ghost tiny', text: '다시 동기화' });
       again.title = '에셋 목록을 다시 대조하고, 빠진 것만 가져옵니다';
       again.addEventListener('click', () => { state.syncAssets(true); });
@@ -197,21 +186,9 @@ export function renderChatsTab(mount: HTMLElement): void {
     setEditMode('bot', 'meta');
   });
 
-  const rescan = el('button', { class: 'ghost tiny', text: '카드만 다시 읽기' }) as HTMLButtonElement;
-  rescan.title = '카드·봇 로어북·Regex·트리거 작업본을 버리고 RisuAI의 현재 카드로 다시 읽습니다. 챗 작업본은 그대로 둡니다.';
-  rescan.addEventListener('click', async () => {
-    rescan.disabled = true;
-    try {
-      await state.upload({ cardReset: true });
-      state.bump();
-      shellNotice('RisuAI의 현재 카드로 다시 읽었습니다. 카드 작업본이 초기화되었습니다.', 'ok');
-    } catch (e) {
-      flash(pad, '다시 읽지 못했습니다: ' + (e instanceof Error ? e.message : String(e)));
-    } finally {
-      rescan.disabled = false;
-    }
-  });
-
+  // Only 봇 편집 here. "카드만 다시 읽기" was a second, differently-scoped
+  // reload standing next to it: since 0.9 a re-open merges RisuAI's changes in
+  // by itself, and the header's 🔄 is the one "throw my copy away" button.
   const portrait = el('div', { class: 'botinitials', text: initials(String(char.name || '?')) });
   pad.appendChild(el('div', { class: 'botcard' }, [
     portrait,
@@ -219,7 +196,7 @@ export function renderChatsTab(mount: HTMLElement): void {
       el('div', { class: 'botname', text: String(char.name || '(이름 없음)') }),
       el('div', { class: 'hint', text: `챗 ${liveChats.length}개` + (folders.length ? ` · 폴더 ${folders.length}개` : '') }),
       assetSyncLine(),
-      el('div', { class: 'row', style: { marginTop: '8px' } }, [editBot, rescan]),
+      el('div', { class: 'row', style: { marginTop: '8px' } }, [editBot]),
       el('div', { class: 'hint', style: { marginTop: '6px' } }, [
         '다른 봇을 편집하시려면 RisuAI에서 그 봇을 열고 🔄 를 눌러 주세요.',
       ]),
@@ -261,8 +238,6 @@ export function renderChatsTab(mount: HTMLElement): void {
       class: 'chatitem' + (loaded && loaded.chatKey === state.activeChatKey ? ' current' : ''),
     }, [
       el('span', { class: 'grow', text: String(r.chat.name || `(챗 ${r.index})`) }),
-      isCurrent ? el('span', { class: 'badge', text: '열림' }) : null,
-      loaded ? el('span', { class: 'badge ok', text: '불러옴' }) : null,
       el('span', { class: 'n', text: `${(r.chat.message ?? []).length}턴` }),
       edit,
     ]);

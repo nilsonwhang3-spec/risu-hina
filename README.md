@@ -89,6 +89,7 @@ uninstall.bat            # 서비스 제거
 
 ---
 
-설치 옵션 상세(포트·데이터 위치·인터프리터 변경 등)는 [docs/05-install.md](docs/05-install.md),
+설치 옵션 상세(연결 유형·토큰·포트·데이터 위치·인터프리터 변경, 문제 해결)는
+압축 안 `INSTALL.md` 와 [docs/05-install.md](docs/05-install.md),
 설계 결정은 [docs/](docs/),
 문제 리포트는 [Issues](https://github.com/nilsonwhang3-spec/risu-hina/issues).

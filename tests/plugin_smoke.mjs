@@ -395,7 +395,11 @@ console.log('\ntest_asset_sync');
   await settle(600);
   const line = document.querySelector('.botcard .assetsync');
   check('the bot card shows the sync result', /에셋 1\/1개/.test(line?.textContent || ''), line?.textContent);
-  check('with a way to run it again', !!findButton(line, '다시 동기화'));
+  // A finished, complete sync offers no button: the picker's job is "pick
+  // what to edit", and 다시 동기화 only appears when there is something to
+  // retry (an error, a cancel, or failed items). 🔄 restarts it either way.
+  check('a clean finished sync offers no retry button', !findButton(line, '다시 동기화'),
+        line?.textContent);
   check('and no progress bar once done', !line?.querySelector('.assetbar'));
   // A second sync sends nothing: the store already has the key. Counted on
   // the wire (the picker's portrait thumbnail also calls readImage, so host
