@@ -1,51 +1,51 @@
-# 05. 최초 설치
+# 05. First-time install
 
-test-server에서 실제로 처음부터 돌려 보고 쓴 절차다. 명령과 출력은 실행한 것이다.
+This is the procedure written after actually running it from scratch on test-server. The commands and output are what was run.
 
-**두 조각을 따로 설치한다.** 백엔드는 서버(PocketRisu가 도는 그 기계)에,
-플러그인은 RisuAI에. 순서는 백엔드가 먼저다 — 플러그인이 처음 열릴 때 백엔드에 붙는다.
+**Two pieces, installed separately.** The backend goes on the server (the machine PocketRisu runs on),
+the plugin goes into RisuAI. The backend comes first — the plugin connects to the backend the first time it opens.
 
 ---
 
-## 준비
+## Prerequisites
 
-| 필요한 것 | 확인 |
+| What you need | Check |
 |---|---|
-| 파이썬 | **필요 없다.** 동봉돼 있다 |
-| 백엔드를 둘 디렉터리 | 어디든 된다. §2 참조 |
-| PocketRisu 또는 web RisuAI | 이미 쓰고 있는 것 |
+| Python | **Not needed.** It ships bundled |
+| A directory for the backend | Anywhere works. See §2 |
+| PocketRisu or web RisuAI | Whichever you already use |
 
-인터프리터는 압축 안에 있다(`pyserver/python/`). 이 기계에 무엇이 깔려 있든 그것만 쓴다 —
-사용자가 파이썬을 설치해야 하는 배포는 처음부터 하지 않기로 한 것이고, 첫 릴리스가 그
-규칙을 어겼던 것을 바로잡았다. 소스 체크아웃에서 돌릴 때만 `-Python <경로>` 가 의미 있다.
+The interpreter is inside the archive (`pyserver/python/`). Whatever is installed on this machine, only that one is used —
+a distribution that makes the user install Python was ruled out from the start, and the first release breaking that
+rule has been fixed. `-Python <path>` only means something when running from a source checkout.
 
 ---
 
-## 1. 백엔드
+## 1. The backend
 
-### 1-1. 내려받아 검증한다
+### 1-1. Download and verify
 
-릴리스에서 세 파일을 받는다.
+Get three files from the release.
 
 ```
-Risu.Hina.<버전>.Auto.Install.Package.zip
+Risu.Hina.<version>.Auto.Install.Package.zip
 SHA256SUMS.txt
-Risu.Hina.Plugin.js        ← RisuAI 가 자동 업데이트에 쓰는 것. 3단계에서 쓴다
+Risu.Hina.Plugin.js        ← what RisuAI uses for auto-update. Used in step 3
 ```
 
-**해시를 먼저 확인한다.** 이 zip의 내용이 곧 돌아갈 서버가 되므로, 검증하지 않은
-다운로드를 푸는 것은 남이 준 코드를 그냥 실행하는 것과 같다.
+**Check the hash first.** The contents of this zip become the server that runs, so unpacking an
+unverified download is the same as just running code someone handed you.
 
 ```powershell
-$want = (Get-Content SHA256SUMS-<버전>.txt | Where-Object { $_ -like '*backend*' }).Split(' ')[0]
+$want = (Get-Content SHA256SUMS-<version>.txt | Where-Object { $_ -like '*backend*' }).Split(' ')[0]
 $got  = (Get-FileHash Risu.Hina.0.6.0.Auto.Install.Package.zip -Algorithm SHA256).Hash.ToLower()
 if ($want -ne $got) { throw 'hash mismatch' } else { 'hash ok' }
 ```
 
-### 1-2. 푼다
+### 1-2. Unpack
 
-**한 번 풀면 끝이다.** 압축 안에 `risu-hina/` 트리가 통째로 들어 있어서, 폴더를 미리
-만들 필요도 이름을 맞출 필요도 없다.
+**One unpack and you are done.** The archive contains the whole `risu-hina/` tree, so there is no folder to
+create beforehand and no name to match.
 
 ```powershell
 Expand-Archive Risu.Hina.0.6.0.Auto.Install.Package.zip -DestinationPath D:\code -Force
@@ -53,23 +53,23 @@ Expand-Archive Risu.Hina.0.6.0.Auto.Install.Package.zip -DestinationPath D:\code
 
 ```
 D:\code\risu-elf\
-  pyserver\              코드 + 런처. 업데이트가 통째로 갈아끼운다
-  plugin\                RisuAI 에 설치할 플러그인
-  data\                  당신 것. 업데이트가 건드리지 않는다
+  pyserver\              code + launcher. An update swaps this wholesale
+  plugin\                the plugin to install into RisuAI
+  data\                  yours. An update does not touch it
   start.bat  start.sh
   setup.bat  uninstall.bat        (Windows)
   setup.sh   uninstall.sh         (Linux)
   README.md
 ```
 
-런처가 `pyserver\` **밖에** 있는 것은 정돈이 아니라 안전 문제다. cmd.exe 는 실행 중인
-배치 파일을 바이트 오프셋으로 다시 읽는다 — 재시작 루프가 `start.bat` 안에 앉아 있는
-바로 그 순간 업데이트가 그 파일을 덮어쓰면 cmd 가 엉뚱한 줄을 실행할 수 있다.
-업데이트가 손대는 디렉터리 밖에 두면 그 가능성 자체가 없어진다.
-(그래도 런처가 바뀌면 업데이트가 `start.bat.new` 로 옆에 놓고 로그로 알린다.)
+The launcher sitting **outside** `pyserver\` is a safety matter, not tidiness. cmd.exe re-reads a running
+batch file by byte offset — if an update overwrites that file at the exact moment the restart loop is sitting
+inside `start.bat`, cmd can execute the wrong line.
+Keeping it outside the directory an update touches removes that possibility entirely.
+(Even so, if the launcher changes, the update drops it alongside as `start.bat.new` and says so in the log.)
 
 
-### 1-3. 설치
+### 1-3. Install
 
 ```powershell
 D:\code\risu-elf\setup.bat
@@ -83,12 +83,12 @@ setup: fastapi 0.115.6 uvicorn 0.34.0
 setup: data dir D:\code\risu-elf\data
 ```
 
-전용 venv를 만들고 `requirements.in`(버전 고정)을 설치한다. 시스템 파이썬은 건드리지 않는다.
+It creates a dedicated venv and installs `requirements.in` (pinned versions). The system Python is left alone.
 
-### 1-4. 기동
+### 1-4. Start
 
 ```powershell
-D:\code\risu-elf\setup.bat        REM setup 이 곧바로 띄운다
+D:\code\risu-elf\setup.bat        REM setup starts it right away
 ```
 
 ```
@@ -101,19 +101,19 @@ listening  yes on 6020
 health     {"service": "risu-hina", "version": "0.6.0", "ok": true, "agentReady": false, ...}
 ```
 
-> **`processes 2` 는 정상이다.** 윈도우 venv의 `Scripts\python.exe` 는
-> `venvlauncher.exe` 라서 진짜 인터프리터를 자식으로 띄우고 자기는 부모로 남는다.
-> 서버는 하나다 — `listening` 과 `health` 가 그것을 말한다.
+> **`processes 2` is normal.** A Windows venv's `Scripts\python.exe` is
+> `venvlauncher.exe`, so it spawns the real interpreter as a child and stays around as the parent.
+> There is one server — `listening` and `health` say so.
 
-`agentReady: false` 도 정상이다. 아직 모델 자격증명을 넣지 않았다.
+`agentReady: false` is normal too. You have not entered model credentials yet.
 
-**다른 수퍼바이저를 쓸 거라면** `pyserver\start.bat`(또는 `pyserver/start.sh`)을
-감싸면 된다. NSSM·PM2·systemd 무엇이든, **런처를 직접 실행해야 한다** — 자체 업데이트가
-exit 75로 재진입을 요청하는데 그 루프가 런처 안에 있기 때문이다.
+**If you use a different supervisor**, wrap `pyserver\start.bat` (or `pyserver/start.sh`).
+NSSM, PM2, systemd, whatever it is, **it has to run the launcher itself** — the self-update asks for
+re-entry with exit 75, and that loop lives inside the launcher.
 
-상주시키는 것은 §2의 **서비스로 상주시키려면**에 스크립트로 준비돼 있다.
+Keeping it resident is scripted in §2, under **Running it as a service**.
 
-### 1-5. 토큰
+### 1-5. Token
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File D:\code\risu-elf\pyserver\manage.ps1 -Action token
@@ -123,40 +123,40 @@ powershell -ExecutionPolicy Bypass -File D:\code\risu-elf\pyserver\manage.ps1 -A
 token: 17sFfQSPMjg6kPH6gi_D8jLg_020Z5zJV1IEmhchbd0
 ```
 
-**PocketRisu를 같은 기계에서 쓰면 토큰이 필요 없다.** PocketRisu의 노드 서버가 대신
-요청하므로 백엔드가 보는 클라이언트 IP는 언제나 127.0.0.1이고, 루프백은 면제다.
-web RisuAI나 다른 기계에서 직접 붙을 때만 필요하다 — 그 경우 토큰은 **강제**이며
-설정으로 끌 수 없다.
+**No token is needed if you use PocketRisu on the same machine.** PocketRisu's node server makes the
+request on your behalf, so the client IP the backend sees is always 127.0.0.1, and loopback is exempt.
+It is only needed when connecting directly from web RisuAI or another machine — and there the token is
+**mandatory** and cannot be turned off in settings.
 
 ---
 
-## 2. 설치 위치를 바꾸려면
+## 2. Changing the install location
 
-**코드 위치는 그냥 바꾸면 된다.** 하드코딩된 경로가 없다 — 스크립트가 자기가 놓인
-자리에서 모든 경로를 계산하고, 프로세스도 **자기 설치의 `run.py` 경로로** 찾는다.
-폴더 이름이 `risu-hina` 일 필요도 없다.
+**Just move the code wherever you want.** There are no hardcoded paths — the scripts compute every path
+from where they sit, and processes are found **by the `run.py` path of their own install**.
+The folder does not have to be named `risu-hina`.
 
 ```powershell
 Expand-Archive Risu.Hina.0.6.0.Auto.Install.Package.zip -DestinationPath E:\apps -Force
-Rename-Item E:\apps\risu-hina myelf          # 이름도 마음대로
+Rename-Item E:\apps\risu-hina myelf          # name it whatever you like
 powershell -ExecutionPolicy Bypass -File E:\apps\myelf\setup.bat
 ```
 
-압축이 `risu-hina/` 트리를 통째로 담고 있으므로 그냥 원하는 부모 폴더에 풀면 된다.
-폴더 이름이 `risu-hina` 일 필요도 없다 — 풀고 나서 이름을 바꿔도 그대로 동작한다.
+The archive holds the whole `risu-hina/` tree, so just unpack it into whatever parent folder you want.
+The folder does not have to be named `risu-hina` — rename it after unpacking and it still works.
 
 ```
 <install>\
-  pyserver\   ← 코드. 업데이트가 통째로 갈아끼운다
-  data\       ← DB·설정·토큰·워크스페이스. 업데이트가 절대 건드리지 않는다
+  pyserver\   ← code. An update swaps this wholesale
+  data\       ← DB, settings, token, workspace. An update never touches it
 ```
 
-이 구조가 자체 업데이트의 전제다. 데이터가 코드 **안에** 있으면 버전 교체가 매번
-사용자의 챗을 밟고 지나가야 한다.
+This layout is the premise of the self-update. If the data lived **inside** the code, every version swap
+would have to trample the user's chats.
 
-### 데이터만 다른 곳에 두려면
+### Putting just the data somewhere else
 
-다른 드라이브나 백업되는 디스크에 두고 싶을 때.
+For when you want it on another drive, or on a disk that gets backed up.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File "$install\setup.bat" -DataDir E:\backup\risu-hina-data
@@ -167,119 +167,119 @@ setup: pinned data dir in E:\apps\myelf\pyserver\datadir.txt
 setup: data dir E:\backup\risu-hina-data
 ```
 
-`pyserver\datadir.txt` 한 줄에 절대경로가 적힌다. **launch 때 넘기는 값이 아니라
-설치에 박히는 값이다** — 그래야 NSSM이든 PM2든 손으로 띄우든 전부 같은 곳을 본다.
-(제어 스크립트는 서버를 ssh 세션에서 떼어내려고 `Win32_Process.Create` 로 띄우는데,
-그건 WMI 서비스 밑에서 돌아서 환경변수를 하나도 물려받지 않는다. 파일이어야 하는 이유다.)
+One line with an absolute path is written into `pyserver\datadir.txt`. **It is not a value passed at launch,
+it is baked into the install** — that way NSSM, PM2 and a hand-started process all look at the same place.
+(The control script launches the server with `Win32_Process.Create` to detach it from the ssh session,
+and that runs under the WMI service and inherits no environment variables at all. That is why it has to be a file.)
 
-이후 `-DataDir` 없이 불러도 `status`·`token` 이 실제 위치를 보고한다.
+From then on, `status` and `token` report the real location even when called without `-DataDir`.
 
-되돌리려면 `-DataDir` 없이 `setup` 을 다시 돌리거나 `datadir.txt` 를 지운다.
-**옮기고 싶으면 서버를 멈추고 `data\` 폴더를 통째로 옮긴 뒤** 다시 `setup -DataDir` 한다.
-스크립트는 데이터를 옮겨 주지 않는다 — 옮기다 만 상태가 조용히 생기는 것보다 낫다.
+To undo it, run `setup` again without `-DataDir`, or delete `datadir.txt`.
+**To move it, stop the server, move the whole `data\` folder**, then run `setup -DataDir` again.
+The script does not move the data for you — better that than a half-moved state appearing silently.
 
-### 리눅스에서는
+### On Linux
 
 ```bash
 unzip Risu.Hina.0.6.0.Auto.Install.Package.zip -d /opt
 cd /opt/risu-hina && chmod +x *.sh
-./setup.sh                      # 동봉된 파이썬을 확인하고 띄운다
-./setup.sh --service            # 또는 PM2 로 상주시키기
-./uninstall.sh                  # 멈추고 등록 해제
+./setup.sh                      # checks the bundled Python and starts it
+./setup.sh --service            # or keep it resident with PM2
+./uninstall.sh                  # stop and deregister
 ```
 
-`setup.sh` 는 `--data-dir <절대경로>` 와 `--port` 를 받는다(윈도우의 `-DataDir`, `-Port`).
-**시스템 파이썬은 보지 않는다.** Ubuntu 20.04 처럼 3.8 만 있는 기계에서도 동봉된 3.11 로
-그대로 돈다 — 실제로 그 환경에서 PATH 를 비우고 확인했다. 필요한 것은 glibc 2.28+ 뿐이다.
+`setup.sh` takes `--data-dir <absolute path>` and `--port` (Windows' `-DataDir`, `-Port`).
+**It does not look at the system Python.** On a machine that only has 3.8, like Ubuntu 20.04, it runs on the
+bundled 3.11 as-is — actually verified in that environment with PATH emptied. All it needs is glibc 2.28+.
 
-### 서비스로 상주시키려면
+### Running it as a service
 
-| | 등록 | 해제 |
+| | Register | Deregister |
 |---|---|---|
 | Windows (NSSM) | `setup.bat -Service [-Name RisuHina] [-Port 6020]` | `uninstall.bat [-Name RisuHina]` |
 | Linux (PM2) | `./setup.sh --service [--port 6020]` | `./uninstall.sh` |
 
-둘 다 **`start.bat`/`start.sh` 를 실행하지 `run.py` 를 직접 실행하지 않는다.** exit 75 가
-"업데이트를 설치했으니 다시 올라와라"라는 뜻이고 그걸 아는 루프가 런처 안에 있기 때문이다.
-수퍼바이저를 `run.py` 에 바로 물리면 플러그인에서 업데이트하는 날까지는 잘 돌다가 그날 멈춘다.
+Both run **`start.bat`/`start.sh`, not `run.py` directly.** exit 75 means "an update was installed, come
+back up", and the loop that knows this lives inside the launcher.
+Point the supervisor straight at `run.py` and it runs fine right up to the day you update from the plugin, and stops that day.
 
-NSSM 등록은 **관리자 권한**이 필요하다. PM2 의 부팅 상주는 `pm2 startup` 이 출력하는
-sudo 명령을 사람이 직접 실행해야 한다 — 스크립트가 읽지도 않은 sudo 명령을 몰래 실행하지는 않는다.
+Registering with NSSM needs **administrator privileges**. Making PM2 survive a boot requires a person to run
+the sudo command `pm2 startup` prints — the script does not quietly run a sudo command you have not read.
 
-**해제 스크립트는 등록만 지운다.** 코드도 데이터도 그대로 남고, 런처는 손으로 계속 쓸 수 있다.
+**The deregister script only removes the registration.** Code and data both stay, and you can go on using the launcher by hand.
 
 
-### 포트를 바꾸려면
+### Changing the port
 
 ```powershell
 ... -Action start -Port 6030
 ```
 
-`manage.ps1` 의 `stop`·`status`·`token` 에도 같은 `-Port` 를 준다(상태 확인이 그 포트를 본다).
-`start.bat 6030` / `start.sh 6030` 도 같다. 환경변수 `RISUHINA_PORT` 도 읽는다.
+Give the same `-Port` to `manage.ps1`'s `stop`, `status` and `token` (the status check looks at that port).
+`start.bat 6030` / `start.sh 6030` are the same. The environment variable `RISUHINA_PORT` is read too.
 
-### 요약
+### Summary
 
-| 바꾸고 싶은 것 | 방법 |
+| What you want to change | How |
 |---|---|
-| 코드 위치 | 그냥 원하는 부모 폴더에 풀면 된다 |
-| 데이터 위치 | `setup.bat -DataDir <절대경로>` / `./setup.sh --data-dir <절대경로>` |
-| 포트 | `-Port` 또는 `RISUHINA_PORT` |
-| 인터프리터 | `setup.bat -Python <경로>` / `./setup.sh --python <경로>` |
-| 바인딩 주소 | `RISUHINA_HOST` — **바꾸기 전에 §4를 읽을 것** |
+| Code location | Just unpack into whatever parent folder you want |
+| Data location | `setup.bat -DataDir <absolute path>` / `./setup.sh --data-dir <absolute path>` |
+| Port | `-Port` or `RISUHINA_PORT` |
+| Interpreter | `setup.bat -Python <path>` / `./setup.sh --python <path>` |
+| Bind address | `RISUHINA_HOST` — **read §4 before changing it** |
 
 ---
 
-## 3. 플러그인
+## 3. The plugin
 
-1. RisuAI → 설정 → 플러그인 → **Add Plugin** 에서 `Risu.Hina.Plugin.js` 를 넣는다.
-2. 챗 화면에 **Risu Hina** 버튼이 생긴다. 눌러서 연다.
-3. 오른쪽 위 **⚙ → 연결** 에서 백엔드 URL을 넣는다. 같은 기계면
-   `http://127.0.0.1:6020`. 다른 기계면 그 주소와 §1-5의 토큰.
-4. **⚙ → 에이전트 → 수정** 에서 Base URL · Model · API Key 를 넣고 **연결 테스트**.
-   테스트는 일반 응답과 **툴 호출을 따로** 확인한다 — 툴 호출이 안 되면 에이전트가
-   동작할 수 없으므로, 여기서 걸러야 한다.
+1. RisuAI → Settings → Plugins → **Add Plugin**, and put in `Risu.Hina.Plugin.js`.
+2. A **Risu Hina** button appears on the chat screen. Press it to open the panel.
+3. Enter the backend URL under **⚙ → 연결** (Connection) at the top right. Same machine:
+   `http://127.0.0.1:6020`. Another machine: that address plus the token from §1-5.
+4. Under **⚙ → 에이전트 → 수정** (Agent → Edit), enter Base URL, Model and API Key, then **연결 테스트**
+   (test connection). The test checks an ordinary response and **a tool call separately** — an agent
+   cannot work if tool calls fail, so it has to be caught here.
 
-이후 플러그인 업데이트는 RisuAI가 `//@update-url` 로 알아서 확인한다.
+From then on RisuAI checks for plugin updates itself via `//@update-url`.
 
 ---
 
-## 4. 확인과 문제 해결
+## 4. Checking and troubleshooting
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File <install>\pyserver\manage.ps1 -Action status
 ```
 
-> **다른 기계에서 `curl http://127.0.0.1:6020/health` 는 아무 의미가 없다.**
-> 자기 자신을 가리킨다. 서버는 루프백에만 바인딩하므로 확인은 그 서버 안에서 해야 한다.
+> **`curl http://127.0.0.1:6020/health` from another machine means nothing.**
+> It points at itself. The server binds to loopback only, so the check has to be done on that server.
 
-`health unreachable` 이면 `status` 가 `server.log` 꼬리 25줄을 같이 뱉는다.
-로그는 플러그인 안에서도 볼 수 있다 — **⚙ → 정보 · 로그 → 서버 로그**.
-문제를 신고할 때는 같은 화면의 **진단 정보** 를 함께 복사해 주면 된다.
-둘 다 API 키와 토큰을 담지 않는다.
+On `health unreachable`, `status` also dumps the last 25 lines of `server.log`.
+The log can be seen inside the plugin too — **⚙ → 정보 · 로그 → 서버 로그** (Info · Logs → Server log).
+When reporting a problem, copy the **진단 정보** (diagnostics) from the same screen along with it.
+Neither one contains API keys or tokens.
 
-| 증상 | 원인 |
+| Symptom | Cause |
 |---|---|
-| `no Python found` | 3.10+ 가 없거나 못 찾음 → `-Python <경로>` |
-| `venv missing - run -Action setup first` | 1-3을 건너뜀 |
-| `listening NO` + 로그에 `WinError 10048` | 그 포트를 다른 것이 쓰고 있음 → `-Port` |
-| 플러그인이 "백엔드 연결 안 됨" | URL 오타, 백엔드 미기동, 또는 web RisuAI에서 토큰 미입력 |
-| web RisuAI에서 열자마자 "Risu Hina 응답을 받지 못했습니다" | 대개 백엔드 앞의 터널·VPN 이 아직 안 열린 것 — 패널이 30초 간격으로 계속 재시도하고, 붙는 순간 서버 로그에 `[plugin] connect recovered` 가 남는다(실측: 2026-08-27 19:30~19:32, 요청이 백엔드에 아예 도착하지 않았고 설정 변경 없이 2분 뒤 붙음). 메시지에 인용된 응답이 HTML 이나 다른 서버의 답이면 URL 오타. `sv.risuai.xyz` 의 오류면 RisuAI 설정의 **Use Plain Fetch** 가 꺼져 요청이 릴레이된 것 |
+| `no Python found` | 3.10+ missing or not found → `-Python <path>` |
+| `venv missing - run -Action setup first` | Skipped 1-3 |
+| `listening NO` + `WinError 10048` in the log | Something else is using that port → `-Port` |
+| The plugin says "백엔드 연결 안 됨" (backend not connected) | Typo in the URL, backend not started, or no token entered in web RisuAI |
+| "Risu Hina 응답을 받지 못했습니다" (no response received from Risu Hina) right after opening in web RisuAI | Usually the tunnel or VPN in front of the backend has not come up yet — the panel keeps retrying every 30 seconds, and the moment it connects `[plugin] connect recovered` is left in the server log (measured: 2026-08-27 19:30~19:32, the requests never reached the backend at all and it connected two minutes later with no config change). If the response quoted in the message is HTML or an answer from a different server, the URL has a typo. If it is an error from `sv.risuai.xyz`, **Use Plain Fetch** is off in RisuAI settings and the request was relayed |
 
-### 바인딩을 넓히기 전에
+### Before widening the binding
 
-`RISUHINA_HOST=0.0.0.0` 은 **토큰을 아는 사람에게 그 기계의 임의 코드 실행 권한을 주는 것과
-같다** — 에이전트의 `run_python` 이 그 기계에서 돈다. 서버가 기동할 때 그 경고를 찍는다.
-넓혀야 한다면 Tailscale 같은 사설망 안으로만 하고, 공개 인터넷에는 바인딩하지 않는다.
+`RISUHINA_HOST=0.0.0.0` is **the same as handing arbitrary code execution on that machine to anyone who
+knows the token** — the agent's `run_python` runs on that machine. The server prints that warning at startup.
+If you must widen it, do it only inside a private network such as Tailscale, and never bind to the public internet.
 
 ---
 
-## 5. 지우려면
+## 5. Removing it
 
 ```powershell
 <install>\uninstall.bat -Purge
 Remove-Item -Recurse -Force <install>
 ```
 
-`data\`(또는 `datadir.txt` 가 가리키는 곳)에 챗 사본과 워크스페이스가 들어 있다.
-**RisuAI 쪽 원본 챗은 그대로다** — 이 도구는 승인된 수정만 되돌려 썼다.
+`data\` (or wherever `datadir.txt` points) holds the chat copies and the workspace.
+**The original chats on the RisuAI side are untouched** — this tool only ever wrote back approved edits.

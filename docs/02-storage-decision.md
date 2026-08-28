@@ -1,84 +1,84 @@
-# 02. 저장소 결정 — DB 정본, 캐릭터 단위 워크스페이스
+# 02. Storage decision — DB as the source of truth, workspace per character
 
-2026-08-23. 계획서 §4(파일 기반 워크스페이스)를 뒤집는다. Phase 2 UI를 얹기 전에 결정했다.
+2026-08-23. This overturns plan §4 (file-based workspace). Decided before putting the Phase 2 UI on top.
 
-## 계기
+## What prompted it
 
-목표 잡이 단일 챗 소편집만이 아니라는 것이 확인됐다.
+It was confirmed that the target jobs are not just small edits to a single chat.
 
-- **소** — 턴 하나 고쳐 되돌려쓰기
-- **중** — **여러 턴에 걸친 수정**(한 챗 안에서 100~300턴 일괄 치환 등). 이것이 중규모의 본체다.
-  한 봇의 여러 챗 사이 일관성은 실제로는 드문 시나리오다(사용자 정정, 2026-08-23)
-- **대** — 앞 턴들을 **요약해 로어북화**하고 그 턴들을 **잘라내기**("요약 챗 이사")
+- **Small** — fix one turn and write it back
+- **Medium** — **edits spanning many turns** (bulk replacement across 100~300 turns within one chat, etc.). This is the core of the medium case.
+  Consistency across several chats of one bot is in practice a rare scenario (user correction, 2026-08-23)
+- **Large** — **summarise earlier turns into a lorebook** and **cut those turns out** ("summary chat relocation")
 
-이 셋 중 **하나만** 기존 구조에서 돌았다.
+**Only one** of these three worked under the existing structure.
 
-## 감사 결과 — 구멍 3개
+## Audit results — 3 holes
 
-| # | 문제 | 원인 |
+| # | Problem | Cause |
 |---|---|---|
-| 1 | 교차 챗 작업이 안 된다 | 워크스페이스가 `chat_key` 단위라 챗 하나가 섬. **호스트의 저장 단위는 캐릭터**인데 구조가 어긋나 있었다 |
-| 2 | 로어북 쓰기 경로가 없다 | `lore.json`이 참고용으로만 존재 |
-| 3 | 구조 편집이 되돌아가지 않는다 | `patch()`가 `removed[]`를 계산만 하고, 쓰기 경로는 본문 편집만 적용 |
+| 1 | Cross-chat work is impossible | The workspace is per `chat_key`, so each chat is an island. **The host's unit of storage is the character**, and the structure was misaligned with it |
+| 2 | There is no lorebook write path | `lore.json` exists for reference only |
+| 3 | Structural edits do not make it back | `patch()` only computes `removed[]`, and the write path applies body edits only |
 
-## 호스트 제약 재확인 (`globalApi.svelte.ts:360-366`)
+## Host constraint, re-confirmed (`globalApi.svelte.ts:360-366`)
 
-자동저장 `$effect`가 선택된 캐릭터의 **`chats` 배열 전체**와 **`chats` 외 모든 키**를 스냅샷한다. 따라서
+The autosave `$effect` snapshots the selected character's **entire `chats` array** and **every key other than `chats`**. Therefore
 
-- 한 캐릭터 안 **여러 챗** 동시 편집 → 저장됨 ✓
-- `globalLore` 쓰기 → 저장됨 ✓ (로어북화 성립)
-- 캐릭터를 넘나드는 편집 → 여전히 안 됨 ✗
+- editing **multiple chats** within one character at once → saved ✓
+- writing `globalLore` → saved ✓ (turning things into a lorebook works)
+- editing across characters → still not possible ✗
 
-**그래서 워크스페이스 단위는 캐릭터여야 한다.** 잡의 모양과 호스트의 저장 단위가 그때 일치한다.
+**So the workspace unit has to be the character.** That is when the shape of the job matches the host's unit of storage.
 
-## 결정 — DB가 턴의 정본
+## Decision — the DB is the source of truth for turns
 
-**turns 테이블(seq 순서)이 정본. 마크다운은 파생 산출물.**
+**The turns table (ordered by seq) is the source of truth. Markdown is a derived artefact.**
 
-근거 셋:
+Three reasons:
 
-1. **목표 잡이 질의 모양이다.** "이 봇의 4개 챗에서 X를 언급한 턴 전부"는 SQL 한 줄, 4MB짜리 md 여러 개 grep은 고통. FTS5가 stdlib에 있다.
-2. **구조 편집은 행 연산이다.** 턴 1~200 삭제·병합·분할·재정렬은 `seq` 컬럼이면 자명하고, 4MB 문자열 수술로 하면 **조용한 손상**이 사는 자리가 된다. 하물며 그 문자열은 LLM도 같이 쓴다.
-3. **에이전트의 Python이 DB를 쓰는 게 오히려 쉽다.** `sqlite3`는 stdlib이고 `run_python`은 무제한. 흔한 조작은 헬퍼로 감싸고 질의는 SQL을 직접 쓰게 둔다.
+1. **The target jobs are query-shaped.** "Every turn mentioning X across this bot's 4 chats" is one line of SQL; grepping several 4 MB md files is painful. FTS5 is in the stdlib.
+2. **Structural edits are row operations.** Deleting, merging, splitting and reordering turns 1~200 is self-evident with a `seq` column, and doing it by surgery on a 4 MB string is where **silent corruption** lives. All the more so because an LLM uses that string too.
+3. **It is actually easier for the agent's Python to use the DB.** `sqlite3` is stdlib and `run_python` is unrestricted. Common manipulations get wrapped in helpers and queries are left to raw SQL.
 
-### 양쪽을 정본으로 두지 않는다
+### We do not keep two sources of truth
 
-동기화 모호성("지금 어느 쪽이 맞나")이 최악이다. **단방향으로 못 박았다:**
+Sync ambiguity ("which side is right now?") is the worst outcome. **It is nailed down one-directionally:**
 
-- `working/messages.md` — **없앴다.** DB가 턴을 소유한다.
-- `original/<chat_key>.md` — 동결 스냅샷. 재생성하지 않는다(그게 원본이니까).
-- `out/*.md` — 필요할 때 DB에서 생성.
+- `working/messages.md` — **removed.** The DB owns turns.
+- `original/<chat_key>.md` — a frozen snapshot. Not regenerated (that is the original, after all).
+- `out/*.md` — generated from the DB when needed.
 
-`chatfmt.py`는 죽지 않고 **경계 코덱**이 됐다 — 챗 JSON → DB 넣을 때, DB → md/risuChat 뺄 때.
+`chatfmt.py` did not die; it became a **boundary codec** — chat JSON → into the DB, DB → out to md/risuChat.
 
-### 정본은 둘이 아니지만, 원본은 둘이다 (0.9)
+### There is not a second source of truth, but there are two originals (0.9)
 
-DB가 정본이라는 것은 *우리 쪽* 이야기다. RisuAI도 같은 재료를 들고 있고 사용자가
-그쪽에서도 고친다 — 챗을 더 진행하거나 로어북을 손으로 손보거나. 그래서 재오픈은
-"다시 읽기"가 아니라 **병합**이다: `turns_original`(지난 기준선) · 이번 업로드
-(RisuAI의 현재) · `turns`(작업본) 세 값을 놓고 판정한다. 규칙과 그 이유는
-`docs/04` A.5 보강과 `pyserver/app/merge.py` 머리말에 있다.
+The DB being the source of truth is a statement about *our side*. RisuAI holds the same material and the user
+edits over there too — continuing the chat further, or touching up the lorebook by hand. So reopening is
+not "read it again" but a **merge**: the decision is made across three values — `turns_original` (the previous baseline),
+this upload (RisuAI's current state), and `turns` (the working copy). The rules and their reasons are in
+the `docs/04` A.5 supplement and the header of `pyserver/app/merge.py`.
 
-두 가지가 여기서 따라 나온다:
+Two things follow from this:
 
-- **기준선을 덮기 전에 읽어야 한다.** 옛 기준선은 공통 조상이고, 그것을 기록하는
-  곳은 그 테이블뿐이다. 그래서 병합은 `db.transaction()` 한 덩어리 안에서 돈다 —
-  중간에 끊기면 조상을 잃는다.
-- **행 식별자가 필요하다.** 턴은 이미 `msg_id`로 조준한다(위 규칙). 로어북·인사말·
-  스크립트·요약에는 그런 것이 없어서, 내용 일치 → 자연키(제목·정규식·`chatMemos`
-  같은 것) → 위치 순으로 짝짓고, **위치로만 짝지은 것은 절대 자동 수용하지 않는다.**
-기존 40여 검사가 그대로 유효하다.
+- **The baseline must be read before it is overwritten.** The old baseline is the common ancestor, and the only
+  place recording it is that table. That is why the merge runs inside a single `db.transaction()` block —
+  if it is interrupted midway, the ancestor is lost.
+- **Row identifiers are needed.** Turns are already targeted by `msg_id` (rule above). Lorebook entries, greetings,
+  scripts and summaries have nothing like it, so they are matched in the order content match → natural key (title, regex,
+  things like `chatMemos`) → position, and **anything matched by position alone is never auto-accepted.**
+The existing 40-odd checks remain valid as they are.
 
-## 결과 구조
+## Resulting structure
 
 ```
 data/risuhina.db
   characters(char_key, cha_id, name, char_index, card_json)
   chats(chat_key, char_key, chat_id, chat_index, meta_json, orig_count)
-  turns(chat_key, seq, msg_id, role, body, time, name, extras_json, origin)   ← 정본
-  turns_original(chat_key, seq, msg_id, ...)                                  ← 동결
+  turns(chat_key, seq, msg_id, role, body, time, name, extras_json, origin)   ← source of truth
+  turns_original(chat_key, seq, msg_id, ...)                                  ← frozen
   lore_entries(char_key, scope, chat_key, seq, entry_json, origin)
-  turns_fts (external content, trigram, INSERT/UPDATE/DELETE 트리거 3종)
+  turns_fts (external content, trigram, 3 INSERT/UPDATE/DELETE triggers)
   + sessions / agent_messages / staged_edits / checkpoints / cost_ledger / jobs
 
 data/workspace/<char_key>/
@@ -87,34 +87,34 @@ data/workspace/<char_key>/
   scripts/  out/
 ```
 
-### 설계 규칙 4가지
+### 4 design rules
 
-1. **턴은 `msg_id`(=`Message.chatId`)로 조준한다. 위치로 조준하지 않는다.**
-   `seq`는 삽입·삭제마다 재번호되고, 사용자가 RisuAI에서 편집하면 호스트 쪽 배열도 밀린다.
-   `msg_id`는 둘 다 견디고, 하이파 `chatMemos`가 조인하는 키이기도 하다.
-2. **`seq`는 조밀한 정수 + 재번호.** 분수 인덱스는 충분히 쪼개면 정밀도가 흔들린다. 수백 행 재번호는 공짜다.
-   (유니크 인덱스 때문에 음수 구간을 거쳐 두 번 도는 것에 주의 — 한 번에 밀면 중간에 충돌한다.)
-3. **병합은 첫 턴의 정체성을 유지한다.** 새 id를 발급하면 그 턴을 인용하던 하이파 요약과 우리 패치 조준이
-   전부 고아가 된다 — 사용자가 요청한 것보다 훨씬 큰 편집이 된다.
-4. **구조가 바뀌면 패치가 전체 배열을 싣는다.** 턴별 패치로는 삭제·삽입·재정렬을 표현할 수 없다.
-   클라이언트는 `structural` 플래그를 보고 분기하지, 리스트가 비었는지로 추측하지 않는다.
+1. **Turns are targeted by `msg_id` (= `Message.chatId`). Not by position.**
+   `seq` is renumbered on every insert and delete, and if the user edits in RisuAI the host-side array shifts too.
+   `msg_id` survives both, and it is also the key the hypa `chatMemos` joins on.
+2. **`seq` is a dense integer + renumbering.** Fractional indices lose precision if you subdivide far enough. Renumbering a few hundred rows is free.
+   (Watch out for having to go around twice, through a negative range, because of the unique index — pushing everything at once collides midway.)
+3. **A merge preserves the identity of the first turn.** Issuing a new id orphans every hypa summary that cited that turn along with our patch targeting —
+   it becomes a far larger edit than the user asked for.
+4. **When the structure changes, the patch carries the whole array.** Per-turn patches cannot express deletion, insertion or reordering.
+   The client branches on the `structural` flag; it does not guess from whether the list is empty.
 
-## 부수 효과 — 하이파 고아 경고
+## Side effect — hypa orphan warning
 
-턴을 자르면 그 턴을 인용하던 `hypaV3Data.summaries[].chatMemos`가 고아가 된다.
-**이 기능이 존재하는 이유가 바로 그 잡이므로** 조용히 넘어갈 수 없다.
-`store.patch()`가 구조 변경 시 고아 수를 세어 경고로 올린다.
+Cutting turns orphans the `hypaV3Data.summaries[].chatMemos` that cited them.
+**Since that job is the very reason this feature exists**, it cannot be passed over silently.
+`store.patch()` counts the orphans on a structural change and raises it as a warning.
 
-## FTS 함정 (active-recall에서 이미 푼 것)
+## FTS trap (already solved in active-recall)
 
-trigram은 **3자 미만 질의를 원리적으로 못 잡는다.** 그런데 한국어 서사 어휘는 2음절이 많다
-(몰수·포상·약속·폐허). `store.search()`가 **항 단위로** 분기한다 — 3자 이상은 FTS, 미만은 LIKE.
-테스트에 `폐허` 케이스가 박혀 있다.
+trigram **cannot, in principle, catch queries shorter than 3 characters.** But Korean narrative vocabulary is often 2 syllables
+(몰수, 포상, 약속, 폐허 — confiscation, reward, promise, ruins). `store.search()` branches **per term** — 3 characters or more goes to FTS, shorter goes to LIKE.
+The `폐허` case is pinned in the tests.
 
-또 turns는 UPDATE/DELETE가 있으므로 external-content 인덱스에 **트리거 3종이 전부 필요**하다.
-active-recall은 blobs가 insert-only라 AFTER INSERT 하나로 끝났지만 여기는 아니다.
+Also, turns has UPDATE/DELETE, so the external-content index needs **all three triggers**.
+In active-recall, blobs were insert-only so a single AFTER INSERT was enough; not here.
 
-## 비용
+## Cost
 
-`workspace.py` 재작성, `main.py` 라우트 확장(12 → 21개), 테스트 갱신. 게이트 ALL GREEN.
-UI를 얹기 전이라 가장 싼 시점이었다.
+Rewrite of `workspace.py`, route expansion in `main.py` (12 → 21), test updates. Gate ALL GREEN.
+Being before the UI went on top, this was the cheapest possible moment.

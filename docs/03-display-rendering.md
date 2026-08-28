@@ -1,77 +1,77 @@
-# 03. 봇 카드의 REGEX/LUA/CBS 렌더링을 왼쪽 패널에 반영할 수 있는가
+# 03. Can the bot card's REGEX/LUA/CBS rendering be reflected in the left panel?
 
-2026-08-23 검토. 결론부터: **완전 복제는 안 한다. 정규식+CSS 단계까지는 한다.**
+Reviewed 2026-08-23. Conclusion first: **we do not do a full replica. We go as far as the regex + CSS stage.**
 
-## 사용자가 실제로 보는 것까지의 경로
+## The path to what the user actually sees
 
 `processScriptFull(char, data, 'editdisplay', chatID, cbsConditions)` — `PocketRisu/src/ts/process/scripts.ts:99`.
-순서대로:
+In order:
 
-1. `runLuaEditTrigger(char, mode, data, {index})` — **Lua VM**(`wasmoon ^1.16.0`)
-2. `runTrigger(currentChar, 'display', {...})` — 트리거 스크립트(역시 Lua/CBS)
-3. 플러그인 `editdisplay` 훅
-4. `risuChatParser(data, {chatID, cbsConditions})` — **CBS 엔진 전체**
-5. 정규식: `db.presetRegex` + `char.customscript` + `getModuleRegexScripts()`
-   - `$n`→개행, 플래그 정규화, `@@emo` / `@@inject` / `@@move_top` / `@@move_bottom` 지시자,
-     `pscript.actions`(`cbs`·`inject`·`move_top`·`no_end_nl`), 스크립트 캐시
+1. `runLuaEditTrigger(char, mode, data, {index})` — **Lua VM** (`wasmoon ^1.16.0`)
+2. `runTrigger(currentChar, 'display', {...})` — trigger scripts (Lua/CBS again)
+3. the plugin `editdisplay` hook
+4. `risuChatParser(data, {chatID, cbsConditions})` — **the entire CBS engine**
+5. regexes: `db.presetRegex` + `char.customscript` + `getModuleRegexScripts()`
+   - `$n`→newline, flag normalisation, the `@@emo` / `@@inject` / `@@move_top` / `@@move_bottom` directives,
+     `pscript.actions` (`cbs`, `inject`, `move_top`, `no_end_nl`), script cache
 6. `ParseMarkdown(...)`
 
-그리고 **화면의 CSS는 메시지가 아니라 배경 레이어에서 온다**:
-`character.backgroundHTML` + 모듈 `backgroundEmbedding` 을 이어붙여 `risuChatParser` → `ParseMarkdown(..., 'back')`
-→ `BackgroundDom.svelte`. 여기 실린 `<style>`이 장식 정규식이 뱉은 마크업에 스타일을 입힌다.
-**정규식만 복제하고 이 CSS를 빼면 스타일 없는 마크업만 남는다.**
+And **the CSS on screen comes from the background layer, not from the message**:
+`character.backgroundHTML` + the module `backgroundEmbedding` are concatenated, then `risuChatParser` → `ParseMarkdown(..., 'back')`
+→ `BackgroundDom.svelte`. The `<style>` carried in there is what styles the markup the decorative regexes emit.
+**Replicate only the regexes and leave this CSS out and you are left with unstyled markup.**
 
-## 호스트에 맡길 수 있는가 — 없다
+## Can the host do it for us — no
 
-v3 API 전수 확인: 디스플레이 파이프라인을 실행해 주는 API가 **없다.**
-`addRisuScriptHandler(mode, fn)`은 핸들러를 *등록*할 뿐 파이프라인을 *호출*하지 않는다.
-`risuai.d.ts` 어디에도 `processScript`/`risuChatParser`류 노출이 없다.
+Full sweep of the v3 API: there is **no** API that runs the display pipeline for you.
+`addRisuScriptHandler(mode, fn)` only *registers* a handler; it does not *invoke* the pipeline.
+Nowhere in `risuai.d.ts` is anything of the `processScript`/`risuChatParser` kind exposed.
 
-읽기는 된다: `getCharacterFromIndex`가 트리밍 없는 `$state.snapshot`을 주므로
-`char.customscript`, `char.backgroundHTML`, `char.triggerscript`를 전부 볼 수 있다.
-**실행을 우리가 해야 한다는 뜻이다.**
+Reading works: `getCharacterFromIndex` gives an untrimmed `$state.snapshot`, so
+`char.customscript`, `char.backgroundHTML` and `char.triggerscript` are all visible.
+**Which means we have to do the execution ourselves.**
 
-(이미 렌더된 DOM을 `getRootDocument()`로 긁는 방법도 있으나, 채팅 화면에 그려진 몇 개만 존재하고
-SafeElement 왕복이 느려 394턴에는 성립하지 않는다.)
+(There is also the approach of scraping the already-rendered DOM via `getRootDocument()`, but only the few drawn on the chat screen exist
+and the SafeElement round-trip is slow, so it does not hold up for 394 turns.)
 
-## 위험 3가지 — 이게 판단을 갈랐다
+## Three risks — these are what decided it
 
-1. **`@@inject`는 챗에 쓴다.** `scripts.ts:206` — `selchar.chats[selchar.chatPage].message[chatID].data = data`.
-   읽기 전용 뷰어가 표시를 하려다 **원문을 고치는** 경로다. 충실히 포팅할수록 위험해진다.
-   어떤 구현이든 `@@` 지시자 스크립트는 실행하지 않는다.
-2. **카드 정규식은 남이 쓴 정규식이고, 대상은 수 MB다.** JS 정규식에는 타임아웃이 없다.
-   플러그인 iframe에서 파국적 백트래킹이 걸리면 **패널이 통째로 얼어붙는다.**
-3. **Lua는 VM을 들고 와야 한다.** CSP가 `'wasm-unsafe-eval'`을 허용하므로 wasmoon이 *원리적으로는*
-   돈다(이건 의외의 발견이다). 하지만 번들 +400KB에 호스트 함수 표면
-   (`LUA_LLM_REFERENCE.md`)을 전부 재구현해야 하고, 그 위에 CBS 수백 태그가 또 있다.
+1. **`@@inject` writes into the chat.** `scripts.ts:206` — `selchar.chats[selchar.chatPage].message[chatID].data = data`.
+   That is a path where a read-only viewer **modifies the original** while trying to display it. The more faithfully you port it, the more dangerous it gets.
+   Whatever the implementation, we do not execute `@@` directive scripts.
+2. **Card regexes are regexes somebody else wrote, and the target is several MB.** JS regexes have no timeout.
+   If catastrophic backtracking hits inside the plugin iframe, **the whole panel freezes.**
+3. **Lua means bringing in a VM.** The CSP allows `'wasm-unsafe-eval'`, so wasmoon *in principle* runs
+   (that was a surprising finding). But it is +400KB of bundle plus reimplementing the entire host function surface
+   (`LUA_LLM_REFERENCE.md`), and on top of that there are several hundred CBS tags.
 
-## 결정 — 3단계, A만 지금
+## Decision — 3 stages, only A for now
 
-### A. 정규식 + 배경 CSS (구현 예정, 비용 작음)
+### A. Regexes + background CSS (to be implemented, low cost)
 
-- `char.customscript` + 모듈 정규식에서 `type === 'editdisplay'`만 적용
-- **`out`이 `@@`로 시작하거나 `actions`에 `inject`/`move_*`가 있으면 건너뛴다** (위험 1)
-- **정규식 실행은 백엔드에서** 한다. 이게 위험 2의 진짜 해법이다 — 파이썬 쪽은 서브프로세스와
-  시간 예산을 걸 수 있고, 얼어도 UI가 아니라 요청 하나가 죽는다.
-  경계 계약(“정책은 백엔드”)과도 맞는다.
-- `backgroundHTML` + 모듈 `backgroundEmbedding`에서 **`<style>` 블록만** 추출해 턴 리스트에 스코프해 주입.
-  스크립트는 CSP nonce가 없어 어차피 실행되지 않으므로, 스타일만 남기는 건 필터가 아니라 확인이다.
-- 이 단계로 “장식 정규식 31개”류는 대부분 살아난다. CBS가 든 `out`은 리터럴로 남는다.
+- From `char.customscript` + module regexes, apply only those with `type === 'editdisplay'`
+- **Skip if `out` starts with `@@` or `actions` contains `inject`/`move_*`** (risk 1)
+- **Run the regexes on the backend.** This is the real answer to risk 2 — the Python side can use a subprocess and
+  a time budget, and when it hangs it is one request that dies, not the UI.
+  It also matches the boundary contract ("policy lives in the backend").
+- From `backgroundHTML` + the module `backgroundEmbedding`, extract **only the `<style>` blocks** and inject them scoped to the turn list.
+  Scripts would not run anyway because they lack the CSP nonce, so keeping only the styles is a confirmation, not a filter.
+- This stage revives most of the "31 decorative regexes" class. An `out` containing CBS remains as a literal.
 
-### B. CBS 부분 집합 (추후)
+### B. A subset of CBS (later)
 
-`out`/`in`에 실제로 나타나는 태그만 골라 구현. 전체 CBS 포팅은 하지 않는다.
-A를 배포한 뒤 **실제 카드에서 어떤 태그가 남는지 세어 보고** 범위를 정한다 — 추측으로 정하지 않는다.
+Implement only the tags that actually appear in `out`/`in`. We do not port all of CBS.
+After shipping A, **count which tags remain in real cards** and set the scope from that — not from guesswork.
 
-### C. Lua 트리거 + 전체 CBS (하지 않는다)
+### C. Lua triggers + full CBS (not doing it)
 
-VM과 호스트 API를 재구현하는 일이고, 그 결과도 RisuAI 버전이 바뀔 때마다 어긋난다.
-이게 필요한 카드는 **raw 보기**와 RisuAI 본체에서 보는 것으로 남긴다.
+That means reimplementing the VM and the host API, and the result would drift every time RisuAI's version changes.
+Cards that need this are left to the **raw 보기** (raw view) and to viewing them in RisuAI itself.
 
-## 지금 있는 것 (v0.1.0)
+## What exists today (v0.1.0)
 
-계약을 정직하게 적자면, 현재 “렌더링 보기”는 **RisuAI 재현이 아니라 노이즈 제거**다:
-사고사슬 블록 제거, `img` 외 태그 제거, 코드블록 제거(선택), `**강조**` 렌더.
-카드 정규식은 아직 반영하지 않는다. raw 보기가 저장된 원문 그대로다.
+Stating the contract honestly, the current "렌더링 보기" (rendered view) is **noise removal, not a reproduction of RisuAI**:
+chain-of-thought blocks removed, tags other than `img` removed, code blocks removed (optional), `**emphasis**` rendered.
+Card regexes are not reflected yet. The raw view is the stored original exactly as it is.
 
-UI 문구도 이에 맞춰야 한다 — “렌더링”이 RisuAI와 같은 화면을 뜻한다고 오해되면 안 된다.
+The UI wording has to match this — "렌더링" (rendering) must not be misread as meaning the same screen RisuAI shows.
