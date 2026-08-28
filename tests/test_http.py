@@ -266,6 +266,17 @@ def test_dispatcher(s: Server) -> None:
     print("test_dispatcher")
     st, body = s.get("/health", token=None)
     check("/health needs no token", st == 200 and body.get("service") == "risu-hina", str(body)[:120])
+    # The connect probe is a POST, because a CDN in front of the backend will
+    # answer a GET from its cache and never pass it on: a cached error page on
+    # GET /health left one deployment unable to connect for 49 and 79 seconds
+    # with nothing reaching this process. Same answer, same exemption.
+    st, body = s.post("/health", {}, token=None)
+    check("/health answers POST too, without a token",
+          st == 200 and body.get("service") == "risu-hina", f"{st} {str(body)[:120]}")
+    st, raw, headers = s.post_bytes("/health", {})
+    lower = {k.lower(): v for k, v in headers.items()}
+    check("and no reply may be cached by an intermediary",
+          "no-store" in lower.get("cache-control", ""), str(lower.get("cache-control")))
     st, body = s.get("/nope", token=None)
     check("unknown route is 404 even without a token", st == 404, f"{st} {body}")
     st, body = s.get("/turns", token=None)

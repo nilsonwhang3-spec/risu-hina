@@ -147,6 +147,10 @@ function makeHost(backendUrl, token) {
       },
       async nativeFetch(url, opts = {}) {
         calls.push('nativeFetch');
+        // Record how the health probe was made: it must be a POST, which no
+        // CDN answers from its cache (a cached GET /health error page cost a
+        // real deployment a minute of "not connected" on every open).
+        if (url.endsWith('/health')) calls.push('health:' + (opts.method || 'GET'));
         // The real bridge rejects a POST with no body; mirror that so the
         // client's own guard is exercised.
         if ((opts.method === 'POST' || opts.method === 'PUT') && opts.body === undefined) {
@@ -337,6 +341,9 @@ check('settings is not one of them',
 check('settings is reachable from the header',
       document.getElementById('open-settings')?.closest('header') === document.querySelector('header'));
 check('backend reached', host.calls.filter((c) => c === 'nativeFetch').length > 0);
+check('the health probe is a POST, uncacheable by any relay',
+      host.calls.includes('health:POST') && !host.calls.includes('health:GET'),
+      host.calls.filter((c) => c.startsWith('health:')).join(','));
 check('chat list rendered', !!document.querySelector('.chatitem'));
 
 console.log('\ntest_chat_selection_layout');

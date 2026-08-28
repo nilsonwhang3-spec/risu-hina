@@ -101,7 +101,7 @@ export class Transport {
 
     let res: Response;
     try {
-      res = await this.raw('GET', '/health', undefined, { withToken: false });
+      res = await this.probe();
     } catch (e) {
       if (e instanceof BackendError) throw e;
       // The host's fetch threw before any response: the address is wrong, or
@@ -126,6 +126,18 @@ export class Transport {
       const raw = body && typeof body === 'object' && '_raw' in body
         ? String((body as { _raw: unknown })._raw).replace(/\s+/g, ' ').trim().slice(0, 80)
         : (body ? JSON.stringify(body).slice(0, 80) : '');
+      // Who answered, for the log. Only CORS-safelisted response headers are
+      // readable here, which is enough: our own replies are no-store JSON, so
+      // an HTML content-type or a cacheable Cache-Control names an
+      // intermediary rather than the backend.
+      this.probeInfo = [
+        `HTTP ${res.status}`,
+        `type=${res.headers.get('content-type') || '?'}`,
+        `cache=${res.headers.get('cache-control') || '-'}`,
+        res.headers.get('age') ? `age=${res.headers.get('age')}` : '',
+        res.headers.get('expires') ? `expires=${res.headers.get('expires')}` : '',
+        `body=${raw}`,
+      ].filter(Boolean).join(' · ');
       throw new BackendError(
         res.status,
         `백엔드에서 Risu Hina 응답을 받지 못했습니다 (${what}${raw ? ' · ' + raw : ''}). ` +
@@ -136,6 +148,7 @@ export class Transport {
     this.route = 'direct';
     this.tokenSafe = true;
     this.lastHealth = body;
+    this.probeInfo = '';
     // A plugin and a backend of different minor versions do not speak the
     // same API. Rather than fail somewhere deep with a 404 or a wrong shape,
     // refuse everything but the update paths and say which side to update.
@@ -146,6 +159,28 @@ export class Transport {
   /** Why ordinary calls are refused right now (version mismatch), or ''. */
   get versionGate(): string { return this.gate; }
   private gate = '';
+
+  /** What answered the last failed probe (status, type, cache headers), or ''. */
+  probeInfo = '';
+
+  /**
+   * The connect probe: POST first, GET as the fallback.
+   *
+   * There is a caching CDN in front of at least one real deployment. When its
+   * cache holds an error page for `GET /health`, the panel cannot connect
+   * until that entry expires - measured at 49s and 79s in the server log,
+   * with **no request reaching the backend** in either window, and the first
+   * one that did arrive succeeding immediately. Cache-busting the URL does not
+   * work: that edge ignores query strings (0.7.2 caught it serving one asset
+   * blob for every key). A POST is never served from a cache, so the probe is
+   * a POST; GET remains for backends older than 0.8.4, which have no route
+   * for it.
+   */
+  private async probe(): Promise<Response> {
+    const post = await this.raw('POST', '/health', {}, { withToken: false });
+    if (post.status !== 404 && post.status !== 405) return post;
+    return await this.raw('GET', '/health', undefined, { withToken: false });
+  }
 
   async get<T = unknown>(path: string, query?: Record<string, string | number | undefined>): Promise<T> {
     const qs = query

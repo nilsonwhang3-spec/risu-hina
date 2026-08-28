@@ -1,4 +1,4 @@
-# 06. 구현 상태 — 2026-08-28 기준 (v0.8.3 BETA, Risu Hina)
+# 06. 구현 상태 — 2026-08-28 기준 (v0.8.4 BETA, Risu Hina)
 
 다음 세션에 이어서 할 사람(=나)을 위한 한 장. 무엇이 있고, 무엇이 바뀌었고, 어디까지 배포됐고,
 무엇이 남았는지. 설계의 *이유*는 `docs/04`(에셋·charx 는 부록 E), 저장 구조는 `docs/02`, 배포 환경은 `docs/00`.
@@ -6,7 +6,7 @@
 
 ## 0. 다음 세션 시작점 (먼저 읽을 것)
 
-**코드 상태**: master = **v0.8.3 BETA**(§1-11 웹 검색 툴 카드 3택1 · §1-10 내장 검색 실측·모바일·플러그인 재로드 진단 · §1-9 검색 · §1-8 라운드 10 · §1-7 · §1-6 · §1-5; docs/07 플래닝은 여전히 대기) — 게이트 ALL GREEN. 0.7.0 은 minor 가 바뀌어 **버전 게이트가 걸린다**: 백엔드를 올리면 RisuAI 쪽 플러그인도 `+` 로 올려야 한다(헤더가 안내).
+**코드 상태**: master = **v0.8.4 BETA**(§1-12 중간 캐시가 연결을 막던 것(POST 프로브·no-store) · §1-11 웹 검색 툴 카드 3택1 · §1-10 내장 검색 실측·모바일·플러그인 재로드 진단 · §1-9 검색 · §1-8 라운드 10 · §1-7 · §1-6 · §1-5; docs/07 플래닝은 여전히 대기) — 게이트 ALL GREEN. 0.7.0 은 minor 가 바뀌어 **버전 게이트가 걸린다**: 백엔드를 올리면 RisuAI 쪽 플러그인도 `+` 로 올려야 한다(헤더가 안내).
 
 **배포 상태 (2026-08-25 21:01 `deploy.ps1`, 새 SSH 세션에서 확인)**:
 
@@ -23,6 +23,20 @@
 `https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js` 로 바꾸고, `tools/bundle.py` 가 그 파일을 저장소에 쓰도록 했다(릴리스 커밋에 포함). 백엔드 코드는 VERSION 만 바뀜.
 
 → **첫 할 일**: 사용자가 RisuAI 에 `plugin/Risu.Hina.Plugin.js` **수동 재설치 1회**(설치본 0.1.0 의 update-url 은 CORS 로 못 읽음) → 다음 릴리스부터 `+` 가 뜨는지 확인 → M2 실사용 검증(§5-2).
+
+## 1-12. 2026-08-28 밤 — v0.8.4: "백엔드가 한참 있다 붙는다" 의 범인 = 중간 캐시 (로그로 확정)
+
+- 증상: 웹 RisuAI 에서 패널을 열면 백엔드 연결이 매번 한참 뒤에 된다.
+- **증거 1 — 로그**: `server.log` 의 `[plugin] connect recovered` 두 건, `attempts=5 seconds=49` / `attempts=6 seconds=79`(재시도 간격 3·5·8·12·20 = 48초와 정확히 일치).
+- **증거 2 — 오류 문구 길이**: 당시 `lastError=str(181)`. 두 후보 문구의 길이를 계산하면 181 = "백엔드에서 Risu Hina 응답을 받지 못했습니다 (…)" 문구(90자) + `HTTP nnn · ` (11자) + **본문 80자(슬라이스 상한에 정확히 걸림)**. 즉 네트워크 실패가 아니라 **HTTP 응답이 왔고 본문이 80자 이상인 비-JSON(HTML)** 이었다.
+- **증거 3 — 결정적**: 두 실패 구간(21:04:30~21:06:29, 21:51:30~21:53:37) 동안 **백엔드에 도착한 요청이 0건**이고, 처음 도착한 요청(`GET /health -> 200 7ms`)이 곧바로 성공하며 그 직후 recovered 로그가 찍힌다. → 요청이 오리진까지 오지 않았는데 응답은 왔다 = **중간이 대신 답했다**.
+- 앞단 확인: test-server 는 **Cloudflare Tunnel**(`cloudflared` 서비스 2개, 원격 관리형 토큰 터널이라 ingress 는 대시보드에 있음), 백엔드는 `127.0.0.1:6020` **IPv4 루프백만** 리슨. 이벤트 로그에는 부팅 시 서비스 시작 외 재연결 기록 없음. 0.7.2 에서 이미 **같은 엣지가 쿼리스트링을 무시하고 캐시**하는 것을 확인했다(에셋 썸네일 전부 한 장) → "Cache Everything + Ignore Query String" 성격의 캐시가 앞에 있고, 그 캐시가 한 번 물고 있던 오류 페이지를 TTL(≈1분) 동안 `GET /health` 에 계속 돌려준 것으로 본다.
+- 고침(우리 쪽, 근본):
+  - **`POST /health` 라우트 추가**(같은 핸들러·같은 AUTH_EXEMPT). 플러그인 연결 프로브 `transport.probe()` 는 **POST 먼저**, 404/405 면 GET 폴백(0.8.3 이하 백엔드 대비). CDN 은 POST 를 캐시에서 돌려주지 못한다 — 쿼리 캐시버스터는 이 엣지에선 무의미(쿼리 무시)하므로 POST 가 유일하게 확실한 방법.
+  - **모든 JSON 응답에 `Cache-Control: no-store`**(`_json`). 이 API 는 전부 요청별 상태라 중간이 재생하면 안 된다.
+  - 실패 시 `transport.probeInfo` 에 **누가 답했는지**(status·content-type·cache-control·age·expires·본문 80자)를 담아 `connect recovered` 로그에 `lastProbe` 로 함께 남긴다. CORS 안전목록 헤더만 읽히지만 content-type/cache-control 이면 중간인지 백엔드인지 판별에 충분하다.
+- 덤으로 로그에서 잡은 것: 재연결 복구마다 `POST /workspace`·`assets manifest`·`/turns`·`/changes` 가 **전부 두 번씩** 찍혔다 → `state.connect()` 가 `emit()` 하면서 "다른 경로로 연결됨" 감시자가 업로드를 시작하고, 곧이어 재연결 루프가 또 한 번 시작. `uploadAfterConnect` 에 in-flight 프로미스 가드(두 번째 호출은 첫 번째에 합류).
+- 사용자 쪽 권장(대시보드): ① 터널 호스트네임에 **Cache Rule = Bypass cache**(또는 Caching Level 을 Standard 로) — 이 API 는 캐시되면 안 된다. ② 터널 ingress 를 `http://localhost:6020` 대신 **`http://127.0.0.1:6020`** 로(백엔드는 IPv4 루프백만 리슨하므로 `localhost` 는 `::1` 을 먼저 시도해 502 를 만들 수 있고, 그 502 가 캐시되면 위 증상이 된다).
 
 ## 1-11. 2026-08-28 — v0.8.3: 웹 검색 툴 카드 하나, 검색 옵션 3택1 (사용자 설계)
 

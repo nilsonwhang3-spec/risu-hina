@@ -483,14 +483,33 @@ function setBootPhase(text: string): void {
   refreshStatus();
 }
 
+/**
+ * Send the bot up, once.
+ *
+ * Two things call this on a recovered connection - the reconnect loop and the
+ * "connected some other way" watcher below - and `state.connect()` emits
+ * before the loop resumes, so both fired for the same recovery: the server log
+ * showed every reconnect uploading the workspace and rebuilding the asset
+ * manifest twice. The in-flight promise makes the second caller join the first
+ * instead of starting another multi-megabyte upload.
+ */
+let uploadInFlight: Promise<void> | null = null;
 async function uploadAfterConnect(force = false): Promise<void> {
+  if (uploadInFlight) return uploadInFlight;
   if (!state.slot || state.slotError) return;
+  uploadInFlight = (async () => {
+    try {
+      await state.upload({ force });
+      if (state.activeChatKey) await state.loadTurns();
+    } catch (e) {
+      console.log('[risu-hina] upload failed', e);
+      state.emit();
+    }
+  })();
   try {
-    await state.upload({ force });
-    if (state.activeChatKey) await state.loadTurns();
-  } catch (e) {
-    console.log('[risu-hina] upload failed', e);
-    state.emit();
+    await uploadInFlight;
+  } finally {
+    uploadInFlight = null;
   }
 }
 
@@ -513,6 +532,7 @@ function startReconnect(force: boolean): void {
     if (state.health) return;
     reconnectAttempts += 1;
     const lastError = state.connectError;
+    const lastProbe = transport.probeInfo;
     const ok = await state.connect();
     if (ok) {
       // The backend can only hear about a connection failure after it ends.
@@ -522,6 +542,10 @@ function startReconnect(force: boolean): void {
         attempts: reconnectAttempts,
         seconds: Math.round((Date.now() - startedAt) / 1000),
         lastError: lastError.slice(0, 300),
+        // Who was answering while it failed. An HTML content-type or a
+        // cacheable Cache-Control here means an intermediary replied and the
+        // backend never saw the request.
+        lastProbe: lastProbe.slice(0, 300),
         platform: transport.hostPlatform,
       });
       reconnectAttempts = 0;

@@ -44,11 +44,17 @@ Handler = Callable[..., Any]
 def _json(status: int, payload: Any, origin: str | None = None) -> Response:
     # Explicit charset: Starlette emits a bare application/json and some clients
     # then decode UTF-8 Korean as latin-1.
+    #
+    # no-store on every JSON reply: there is a caching CDN in front of at least
+    # one real deployment (a Cloudflare tunnel with "ignore query string"
+    # caching - 0.7.2 caught it serving one asset for every key). This is a
+    # private API where every answer is per-request state, so nothing here may
+    # ever be replayed from an intermediary.
     return Response(
         content=json.dumps(payload, ensure_ascii=False),
         status_code=status,
         media_type="application/json; charset=utf-8",
-        headers=config.cors_headers(origin),
+        headers={**config.cors_headers(origin), "Cache-Control": "no-store"},
     )
 
 
@@ -1763,6 +1769,11 @@ def h_actions_clear(arg: dict) -> dict:
 
 ROUTES: dict[str, Handler] = {
     "GET /health": h_health,
+    # The same health check as a POST, because a POST is the one thing a CDN
+    # will not answer from its cache. The panel's connect probe uses this: a
+    # cached error page on GET /health left it unable to connect for 49 and 79
+    # seconds in the log, with no request reaching this process at all.
+    "POST /health": h_health,
 
     "POST /clientlog": h_clientlog,
     "GET /logs": h_logs,
@@ -1916,7 +1927,7 @@ ROUTES: dict[str, Handler] = {
 }
 
 # /plugin.js is fetched by RisuAI's updater, which cannot know our token.
-AUTH_EXEMPT = {"GET /health", "GET /plugin.js"}
+AUTH_EXEMPT = {"GET /health", "POST /health", "GET /plugin.js"}
 
 _MIME = {
     "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "gif": "image/gif",

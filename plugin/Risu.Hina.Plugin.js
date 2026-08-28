@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.8.3
+//@display-name Risu Hina v0.8.4
 //@api 3.0
-//@version 0.8.3
+//@version 0.8.4
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -70,7 +70,7 @@
       if (this.platform === "unknown") await this.detectPlatform();
       let res;
       try {
-        res = await this.raw("GET", "/health", void 0, { withToken: false });
+        res = await this.probe();
       } catch (e) {
         if (e instanceof BackendError) throw e;
         this.route = "blocked";
@@ -86,6 +86,14 @@
         this.tokenSafe = false;
         const what = res.status ? `HTTP ${res.status}` : "\uBE48 \uC751\uB2F5";
         const raw = body && typeof body === "object" && "_raw" in body ? String(body._raw).replace(/\s+/g, " ").trim().slice(0, 80) : body ? JSON.stringify(body).slice(0, 80) : "";
+        this.probeInfo = [
+          `HTTP ${res.status}`,
+          `type=${res.headers.get("content-type") || "?"}`,
+          `cache=${res.headers.get("cache-control") || "-"}`,
+          res.headers.get("age") ? `age=${res.headers.get("age")}` : "",
+          res.headers.get("expires") ? `expires=${res.headers.get("expires")}` : "",
+          `body=${raw}`
+        ].filter(Boolean).join(" \xB7 ");
         throw new BackendError(
           res.status,
           `\uBC31\uC5D4\uB4DC\uC5D0\uC11C Risu Hina \uC751\uB2F5\uC744 \uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4 (${what}${raw ? " \xB7 " + raw : ""}). \uC8FC\uC18C\uAC00 \uB2E4\uB978 \uC11C\uBC84\uB97C \uAC00\uB9AC\uD0A4\uAC70\uB098 \uD130\uB110\uC774 \uC544\uC9C1 \uC548 \uC5F4\uB838\uC744 \uC218 \uC788\uC2B5\uB2C8\uB2E4. \uC7A0\uC2DC \uB4A4 \uC790\uB3D9\uC73C\uB85C \uB2E4\uC2DC \uC2DC\uB3C4\uD569\uB2C8\uB2E4.`,
@@ -95,7 +103,8 @@
       this.route = "direct";
       this.tokenSafe = true;
       this.lastHealth = body;
-      this.gate = versionGate("0.8.3", String(body.version || ""));
+      this.probeInfo = "";
+      this.gate = versionGate("0.8.4", String(body.version || ""));
       return body;
     }
     /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -103,6 +112,26 @@
       return this.gate;
     }
     gate = "";
+    /** What answered the last failed probe (status, type, cache headers), or ''. */
+    probeInfo = "";
+    /**
+     * The connect probe: POST first, GET as the fallback.
+     *
+     * There is a caching CDN in front of at least one real deployment. When its
+     * cache holds an error page for `GET /health`, the panel cannot connect
+     * until that entry expires - measured at 49s and 79s in the server log,
+     * with **no request reaching the backend** in either window, and the first
+     * one that did arrive succeeding immediately. Cache-busting the URL does not
+     * work: that edge ignores query strings (0.7.2 caught it serving one asset
+     * blob for every key). A POST is never served from a cache, so the probe is
+     * a POST; GET remains for backends older than 0.8.4, which have no route
+     * for it.
+     */
+    async probe() {
+      const post = await this.raw("POST", "/health", {}, { withToken: false });
+      if (post.status !== 404 && post.status !== 405) return post;
+      return await this.raw("GET", "/health", void 0, { withToken: false });
+    }
     async get(path, query) {
       const qs = query ? "?" + Object.entries(query).filter(([, v]) => v !== void 0 && v !== "").map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`).join("&") : "";
       return this.json("GET", path + qs, void 0);
@@ -8606,7 +8635,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.8.3",
+            version: "0.8.4",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -9119,7 +9148,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.8.3"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.8.4"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -10663,7 +10692,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.8.3"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.8.4"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
@@ -10739,7 +10768,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.8.3" }),
+        el("span", { class: "dim", text: "v0.8.4" }),
         healthEl,
         el("span", { class: "spacer" }),
         reload,
@@ -10846,14 +10875,23 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     bootPhase = text;
     refreshStatus();
   }
+  var uploadInFlight = null;
   async function uploadAfterConnect(force = false) {
+    if (uploadInFlight) return uploadInFlight;
     if (!state.slot || state.slotError) return;
+    uploadInFlight = (async () => {
+      try {
+        await state.upload({ force });
+        if (state.activeChatKey) await state.loadTurns();
+      } catch (e) {
+        console.log("[risu-hina] upload failed", e);
+        state.emit();
+      }
+    })();
     try {
-      await state.upload({ force });
-      if (state.activeChatKey) await state.loadTurns();
-    } catch (e) {
-      console.log("[risu-hina] upload failed", e);
-      state.emit();
+      await uploadInFlight;
+    } finally {
+      uploadInFlight = null;
     }
   }
   var reconnectTimer = null;
@@ -10868,12 +10906,17 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       if (state.health) return;
       reconnectAttempts += 1;
       const lastError = state.connectError;
+      const lastProbe = transport.probeInfo;
       const ok = await state.connect();
       if (ok) {
         void clientLog("warn", "connect recovered", {
           attempts: reconnectAttempts,
           seconds: Math.round((Date.now() - startedAt) / 1e3),
           lastError: lastError.slice(0, 300),
+          // Who was answering while it failed. An HTML content-type or a
+          // cacheable Cache-Control here means an intermediary replied and the
+          // backend never saw the request.
+          lastProbe: lastProbe.slice(0, 300),
           platform: transport.hostPlatform
         });
         reconnectAttempts = 0;
@@ -10961,6 +11004,6 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.8.3"} loaded`);
+    console.log(`[risu-hina] v${"0.8.4"} loaded`);
   })();
 })();
