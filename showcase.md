@@ -70,8 +70,8 @@
 
 <div style="padding:16px 32px 20px;border-top:1px solid rgba(196,168,120,0.06);">
 <div style="font-size:11px;color:#9a9690;line-height:2;">
-▸ 멀티턴 에이전틱 워크플로우. Ollama GLM 5.2 / Gemini 3.7 Flash 등 저비용 모델 사용 가능(책임못짐).<br>
-▸ 백엔드로 쓸 PC가 필요합니다. PC에 깔고 폰으로 접속하세요(포켓리스 추천, 웹 가능).
+▸ 멀티턴 에이전틱 워크플로우. <strong style="color:#c4a878;font-weight:700;">Ollama GLM 5.3</strong> / <strong style="color:#c4a878;font-weight:700;">Gemini 3.7 Flash</strong> 등 저비용 LLM API를 추천합니다.<br>
+▸ <strong style="color:#c4a878;font-weight:700;">백엔드로 쓸 PC</strong>가 반드시 필요합니다. PC에 깔고 폰이나 브라우저로 접속하세요(포켓리스 추천).
 </div>
 </div>
 
