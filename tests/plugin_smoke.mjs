@@ -1223,16 +1223,35 @@ check('diagnostic present', !!findButton(document, '연결 진단'));
 await settle(500);
 check('agent credential card present', !!findButton(document, '연결 테스트'));
 {
-  // The search engine is a fold inside the search agent's card, not a card
-  // of its own: one thing to set up, with a knob under it.
-  const fold = [...document.querySelectorAll('details.fold')]
-    .find((d) => /검색 엔진/.test(d.querySelector('summary')?.textContent || ''));
-  check('the search engine folds under the search agent', !!fold && !!fold.closest('.card')
-        && /검색 에이전트/.test(fold.closest('.card')?.querySelector('h2')?.textContent || ''));
-  check('the engine test lives in the fold', !!fold && !![...fold.querySelectorAll('button')].find((b) => /검색 테스트/.test(b.textContent || '')));
+  // The web search tool is one card right under the general agent, with a
+  // three-way choice at the top that swaps the fields under it. The old
+  // "search agent" preset card is gone.
   await settle(600);
-  const opts = [...(fold?.querySelectorAll('select option') || [])].map((o) => o.getAttribute('value'));
-  check('the model-native engine is offered', opts.includes('native'), opts.join(','));
+  const card = document.getElementById('websearch-card');
+  check('the web search tool card follows the general agent card',
+        !!card && /일반 에이전트/.test(card.previousElementSibling?.querySelector('h2')?.textContent || ''));
+  check('no search agent card remains', ![...document.querySelectorAll('h2')].some((h) => /검색 에이전트/.test(h.textContent || '')));
+  const modeSel = card?.querySelector('select');
+  const modes = [...(modeSel?.options || [])].map((o) => o.value);
+  check('three search options, in order', modes.join(',') === 'native,gemini,provider', modes.join(','));
+  // linkedom's <select> has no settable .value: the stamped `selected`
+  // attribute is what setSelected wrote and what selectedValue falls back to.
+  const chosen = () => modeSel?.querySelector('option[selected]')?.value;
+  const choose = (v) => {
+    for (const o of modeSel.options) o.removeAttribute('selected');
+    [...modeSel.options].find((o) => o.value === v)?.setAttribute('selected', '');
+    modeSel.dispatchEvent(new window.Event('change', { bubbles: true }));
+  };
+  check('provider mode is the default and its pane is the visible one',
+        chosen() === 'provider' && [...card.querySelectorAll('.wsmode')].filter((p) => p.style.display !== 'none').length === 1,
+        String(chosen()));
+  // Picking a mode swaps the pane.
+  choose('gemini');
+  const shown = [...card.querySelectorAll('.wsmode')].filter((p) => p.style.display !== 'none');
+  check('choosing the Gemini helper shows its fields (model, key, instructions)',
+        shown.length === 1 && /Google AI Studio/.test(shown[0].textContent) && !!shown[0].querySelector('textarea'));
+  choose('provider');
+  check('a test button is on the card', !![...card.querySelectorAll('button')].find((b) => b.textContent.trim() === '테스트'));
 }
 {
   // The phone view switch: two segments at the top of every split, the lit

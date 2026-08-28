@@ -1,4 +1,4 @@
-# 06. 구현 상태 — 2026-08-28 기준 (v0.8.2 BETA, Risu Hina)
+# 06. 구현 상태 — 2026-08-28 기준 (v0.8.3 BETA, Risu Hina)
 
 다음 세션에 이어서 할 사람(=나)을 위한 한 장. 무엇이 있고, 무엇이 바뀌었고, 어디까지 배포됐고,
 무엇이 남았는지. 설계의 *이유*는 `docs/04`(에셋·charx 는 부록 E), 저장 구조는 `docs/02`, 배포 환경은 `docs/00`.
@@ -6,7 +6,7 @@
 
 ## 0. 다음 세션 시작점 (먼저 읽을 것)
 
-**코드 상태**: master = **v0.8.2 BETA**(§1-10 검색 엔진 접기·내장 검색 실측·모바일·플러그인 재로드 진단 · §1-9 검색 · §1-8 라운드 10 · §1-7 · §1-6 · §1-5; docs/07 플래닝은 여전히 대기) — 게이트 ALL GREEN. 0.7.0 은 minor 가 바뀌어 **버전 게이트가 걸린다**: 백엔드를 올리면 RisuAI 쪽 플러그인도 `+` 로 올려야 한다(헤더가 안내).
+**코드 상태**: master = **v0.8.3 BETA**(§1-11 웹 검색 툴 카드 3택1 · §1-10 내장 검색 실측·모바일·플러그인 재로드 진단 · §1-9 검색 · §1-8 라운드 10 · §1-7 · §1-6 · §1-5; docs/07 플래닝은 여전히 대기) — 게이트 ALL GREEN. 0.7.0 은 minor 가 바뀌어 **버전 게이트가 걸린다**: 백엔드를 올리면 RisuAI 쪽 플러그인도 `+` 로 올려야 한다(헤더가 안내).
 
 **배포 상태 (2026-08-25 21:01 `deploy.ps1`, 새 SSH 세션에서 확인)**:
 
@@ -23,6 +23,17 @@
 `https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js` 로 바꾸고, `tools/bundle.py` 가 그 파일을 저장소에 쓰도록 했다(릴리스 커밋에 포함). 백엔드 코드는 VERSION 만 바뀜.
 
 → **첫 할 일**: 사용자가 RisuAI 에 `plugin/Risu.Hina.Plugin.js` **수동 재설치 1회**(설치본 0.1.0 의 update-url 은 CORS 로 못 읽음) → 다음 릴리스부터 `+` 가 뜨는지 확인 → M2 실사용 검증(§5-2).
+
+## 1-11. 2026-08-28 — v0.8.3: 웹 검색 툴 카드 하나, 검색 옵션 3택1 (사용자 설계)
+
+- 사용자 지시: "검색은 일반 에이전트 아래 웹검색툴 설정 카드로 체계적으로 교체. 검색 옵션은 셋 중 하나, 위 옵션을 고르면 아래 레이아웃이 바뀜, 테스트 버튼. ① 메인 에이전트 내장 검색툴(특정 주소 막지 말고 테스트로) ② Gemini 보조 에이전트(지침, Google AI Studio 고정, 기본 gemini-3.7-flash, 키는 프리셋에서 또는 직접) ③ 외부 검색 제공자(duckduckgo 기본, firecrawl 등)."
+- **"검색 에이전트" 프리셋 종류는 화면에서 사라짐**(DB 행·`agent_search` 섹션·`/config/test section=agent_search` 는 남김). 에이전트 툴은 **`web_search(query)` 하나**(전 `web_research`): 모드별 docstring 을 등록 시점에 `websearch.tool_doc()` 으로 넣고(`@agent.tool` 은 등록 때 설명을 읽으므로 뒤에 `__doc__` 을 바꿔도 소용없다), `presets.fingerprint()` 에 `websearch.mode/provider` 를 넣어 모드 바꾸면 에이전트가 재빌드된다. 지침도 "외부 사실은 web_search 로".
+- `websearch.py` 재작성 — `mode()` native | gemini | provider(기본; 옛 `provider=native` 는 native 로 매핑), `ready()/why_not()/tool_doc()/run()/test()`:
+  - **native**: 일반 에이전트(`config.agent`)의 엔드포인트로 **후보 방식을 차례로 시도**하고 처음 답한 것을 `websearch.nativeShape` 에 기억(테스트는 `force` 로 다시 찾음). 호스트별 확실한 것 먼저 — codex(Responses `web_search`) · `ollama.com`(**Ollama 클라우드 `POST /api/web_search`**, 같은 키; 결과 목록) · `anthropic.com`(`web_search_20250305`) · `generativelanguage.googleapis.com`(grounding) — 그다음 어느 호스트든 OpenAI 호환 추정 4종: Responses `web_search` → chat `vercel:exa_search` → chat `web_search_options` → OpenRouter `plugins:[{id:web}]`. 빈 응답은 실패로 간주(Vercel 의 Responses 가 200 에 빈 output 을 준다). 주소 화이트리스트 없음.
+  - **gemini**: Google AI Studio **네이티브 REST**(`v1beta/models/<m>:generateContent`, `tools:[{google_search:{}}]`, `x-goog-api-key`) — OpenAI 호환 레이어에는 grounding 이 없다. 답 + `groundingMetadata.groundingChunks` 의 URL 을 출처로. 키는 `geminiKeyRef`(API 키 탭 항목 id) 또는 `geminiApiKey`(secret: KEEP·redact), 모델 기본 `gemini-3.7-flash`, 지침 기본값 제공. **미실측**(원격에 Google 키 없음) — 요청 형식은 가짜 응답으로 파싱 검증.
+  - **provider**: 기존 5종 + **Firecrawl**(`v2/search`, `scrapeOptions.formats=[markdown]` 로 본문 일부를 요약 칸에; v1 `data[]` 형태도 읽음). 메인 에이전트가 결과를 직접 읽는다(전엔 검색 프리셋 모델이 읽었음).
+  - `POST /websearch/test` → `websearch.test()`: `{ok, mode, detail(방식·모델/제공자), text, error, ms}`; native 는 최대 몇 분(후보당 60초). 플러그인 대기 330초.
+- 플러그인 `buildWebsearchCard()`(presets.ts, `#websearch-card`): 일반 에이전트 카드 바로 아래, "검색 옵션" 셀렉트 → 모드별 패널(`.wsmode`) 전환, 저장 · 테스트 질문 · 테스트(저장 후 실검색, 결과·소요 시간). Gemini 패널: 모델, 키 목록 셀렉트(`/keys`) 또는 직접 입력, 지침 textarea + "기본 지침으로". 검색 에이전트 카드·`testButton('search')`·해제 버튼 제거. 스모크: 카드 위치·옵션 3개 순서·기본 provider·패널 전환·테스트 버튼(linkedom 의 select 는 `.value` 세터가 없어 `selected` 속성으로 고른다). test_http: 모드 3·기본·native 미준비 사유·gemini 키 없음/있음/KEEP/redact·firecrawl.
 
 ## 1-10. 2026-08-28 아침 — v0.8.2: 검색 엔진은 에이전트 안으로 · 내장 검색 실측 · 모바일 3건 · "다른 플러그인 업데이트 뒤 연결 안 됨"
 

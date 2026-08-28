@@ -126,15 +126,30 @@ export interface WebsearchProvider {
   id: string; name: string; needsKey: boolean; needsUrl: boolean; note: string;
 }
 
+export type WebsearchMode = 'native' | 'gemini' | 'provider';
+
 export interface WebsearchStatus {
+  modes: { id: WebsearchMode; name: string; note: string }[];
+  mode: WebsearchMode;
+  nativeShape: string;
+  nativeShapeLabel: string;
+  agent: { model: string; host: string };
+  gemini: {
+    model: string; defaultModel: string; keyRef: string; apiKeySet: boolean;
+    instructions: string; defaultInstructions: string;
+  };
   providers: WebsearchProvider[];
   provider: string;
   apiKeySet: boolean;
   baseUrl: string;
   maxResults: number;
-  configured: boolean;
+  ready: boolean;
   whyNot: string;
   keepSentinel: string;
+}
+
+export interface WebsearchTest {
+  ok: boolean; mode: WebsearchMode; detail: string; query?: string; text?: string; error?: string; ms: number;
 }
 
 export interface CharxPreview {
@@ -882,12 +897,14 @@ class AppState {
     return await transport.get('/websearch');
   }
 
-  async saveWebsearch(patch: { provider: string; apiKey: string; baseUrl: string; maxResults: number }): Promise<void> {
+  async saveWebsearch(patch: Record<string, unknown>): Promise<void> {
     await transport.post('/config', { config: { websearch: patch } });
   }
 
-  async testWebsearch(query: string): Promise<{ ok: boolean; provider: string; query?: string; text?: string; error?: string | null }> {
-    return await transport.post('/websearch/test', { query }, 60_000);
+  /** One real search in the configured mode. Native mode probes several
+   *  shapes at up to a minute each, so the wait is generous. */
+  async testWebsearch(query: string): Promise<WebsearchTest> {
+    return await transport.post('/websearch/test', { query }, 330_000);
   }
 
   // --- diagnostics ----------------------------------------------------------

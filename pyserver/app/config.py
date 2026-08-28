@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any
 
 APP_NAME = "risu-hina"
-VERSION = "0.8.2"
+VERSION = "0.8.3"
 
 # Renamed from REALOOC_* to RISUHINA_*. The old names are still honoured, and
 # not as politeness: the launcher, the control script and any service wrapper
@@ -208,7 +208,13 @@ DEFAULTS: dict[str, Any] = {
         "provider": "",
     },
     "websearch": {
-        "provider": "",          # brave | tavily | serper | searxng | google-cse
+        "mode": "",              # native | gemini | provider ('' = provider; see websearch.mode())
+        "nativeShape": "",       # remembered by the native probe (codex | vercel | responses | ...)
+        "geminiModel": "",       # '' = gemini-3.7-flash
+        "geminiKeyRef": "",      # an api_keys row id, or
+        "geminiApiKey": "",      # a key typed in (secret: KEEP-able, redacted)
+        "geminiInstructions": "",
+        "provider": "",          # duckduckgo | brave | tavily | serper | firecrawl | searxng
         "apiKey": "",
         "baseUrl": "",
         "maxResults": 5,

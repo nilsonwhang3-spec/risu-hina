@@ -1,12 +1,8 @@
 /**
- * The agents' configuration, as two selected presets.
- *
- * Two sections, one per kind. 일반 is the editing agent - tools, scripts,
- * proposals - and always has exactly one preset selected. 검색 is the
- * research agent the general one hands questions to (web_research); without
- * one the general agent cannot reach the web at all (0.8.1: it never searches
- * directly). Splitting them lets a cheap, grounded model
- * do the searching while the capable one does the editing.
+ * The agent's configuration: the selected general preset, and under it the
+ * web search tool card (buildWebsearchCard - who searches: the model itself,
+ * a Gemini helper, or a search API). The "search agent" preset kind that
+ * used to sit between them is gone from the page; its rows stay in the DB.
  *
  * A preset carries its own base URL and key, or points at an entry on the
  * API 키 page (keyRef) - the one place a rotated key has to be typed.
@@ -16,7 +12,7 @@
  * settings page pushes everything else off screen.
  */
 import { el, clear, armed, modal, setSelected, selectedValue, popover } from './dom';
-import { state, type AgentPreset, type ApiKeyEntry, type CatalogModel, type ProviderProfile, type WebsearchProvider } from '../state';
+import { state, type AgentPreset, type ApiKeyEntry, type CatalogModel, type ProviderProfile, type WebsearchMode, type WebsearchStatus } from '../state';
 
 type Kind = 'general' | 'search';
 
@@ -45,7 +41,6 @@ const CODEX_KEY = '__codex__';
 
 export function buildPresetsCard(opts: PresetsCardOptions): HTMLElement {
   const generalMount = el('div');
-  const searchMount = el('div');
   const out = el('div');
   const say = (text: string, kind: 'ok' | 'err' | '' = '') => {
     clear(out);
@@ -54,16 +49,12 @@ export function buildPresetsCard(opts: PresetsCardOptions): HTMLElement {
 
   const refresh = async (): Promise<void> => {
     clear(generalMount);
-    clear(searchMount);
     generalMount.appendChild(el('div', { class: 'hint', text: '읽는 중입니다…' }));
     try {
       const r = await state.presets();
       clear(generalMount);
-      clear(searchMount);
       const general = r.presets.filter((p) => p.kind === 'general');
-      const search = r.presets.filter((p) => p.kind === 'search');
       generalMount.appendChild(currentRow('general', r.selected, general.length));
-      searchMount.appendChild(currentRow('search', r.selectedSearch, search.length));
     } catch (e) {
       clear(generalMount);
       generalMount.appendChild(el('div', { class: 'notice err', text: msg(e) }));
@@ -82,9 +73,7 @@ export function buildPresetsCard(opts: PresetsCardOptions): HTMLElement {
       void pick;
       return el('div', { class: 'presetnow' }, [
         el('div', { class: 'grow' }, [
-          el('div', { class: 'hint', text: kind === 'search'
-            ? '검색 에이전트가 없습니다 — 그동안 에이전트는 웹을 검색할 수 없습니다. › 에서 고르거나 추가합니다.'
-            : '프리셋이 없습니다. › 에서 하나 만들어 주세요.' }),
+          el('div', { class: 'hint', text: '프리셋이 없습니다. › 에서 하나 만들어 주세요.' }),
         ]),
         open,
       ]);
@@ -106,13 +95,6 @@ export function buildPresetsCard(opts: PresetsCardOptions): HTMLElement {
       ]),
       open,
     ]);
-    if (kind === 'search') {
-      const off = el('button', { class: 'ghost tiny', text: '해제', title: '검색 에이전트를 끕니다 (웹 검색을 할 수 없게 됩니다)' });
-      off.addEventListener('click', async () => {
-        try { await state.deselectPreset('search'); await refresh(); say('검색 에이전트를 껐습니다.', 'ok'); } catch (e) { say(msg(e), 'err'); }
-      });
-      row.appendChild(off);
-    }
     return row;
   };
 
@@ -147,7 +129,6 @@ export function buildPresetsCard(opts: PresetsCardOptions): HTMLElement {
     });
     return testBtn;
   };
-  const searchOut = el('div', { class: 'outbox' });
 
   opts.onMount?.(refresh);
   void refresh();
@@ -162,90 +143,152 @@ export function buildPresetsCard(opts: PresetsCardOptions): HTMLElement {
         '테스트는 일반 응답과 툴 호출을 따로 확인합니다. 툴 호출이 안 되면 에이전트가 동작할 수 없습니다.',
       ]),
     ]),
-    el('div', { class: 'card' }, [
-      el('h2', { text: '검색 에이전트' }),
-      el('div', { class: 'hint', style: { marginBottom: '8px' } }, [
-        '일반 에이전트는 웹을 직접 검색하지 않고, 외부 사실이 필요하면 이 에이전트에게 맡깁니다. '
-        + '모델(프리셋)이 검색어를 만들고 결과를 읽어 정리하며, 실제로 웹을 찾는 것은 검색 엔진입니다. '
-        + '검색 엔진은 기본 DuckDuckGo 라 따로 설정할 것이 없고, 저렴한 모델(예: Gemini Flash)을 권합니다.',
-      ]),
-      searchMount,
-      el('div', { class: 'row', style: { marginTop: '8px' } }, [testButton('search', searchOut)]),
-      searchOut,
-      el('div', { class: 'hint', style: { marginTop: '8px' } }, [
-        '연결 테스트는 모델만 봅니다(응답 + 툴 호출, 최대 4분). 검색 자체는 아래 검색 엔진의 “검색 테스트”로 확인합니다.',
-      ]),
-      // Folded: the engine is a knob most people never turn. It was a card
-      // of its own beside the agent card, and read as a second thing to set
-      // up - "why are there two?" - when it is part of this one.
-      el('details', { class: 'fold', style: { marginTop: '10px' } }, [
-        el('summary', { text: '검색 엔진 — 기본 DuckDuckGo · 결과가 부실하면 여기서 바꿉니다' }),
-        buildWebsearchCard(),
-      ]),
-    ]),
+    buildWebsearchCard(),
   ]);
 }
 
 /**
- * The search provider: what the search agent actually queries. It had no
- * card at all - the config section existed, the agent's text pointed at "설정
- * → 연결", and nothing there could set it - so the search agent could never
- * search. DuckDuckGo needs nothing and is the default; the keyed providers
- * are one field away when it is not enough.
+ * The web search tool: one card under the general agent, one choice.
+ *
+ *   1. the main agent's own search      (its endpoint has one - found by trying)
+ *   2. a Gemini helper                   (Google AI Studio, Google Search grounding)
+ *   3. an external search provider       (DuckDuckGo by default, keyed ones optional)
+ *
+ * The choice at the top swaps the fields under it; 저장 writes the section;
+ * 테스트 runs one real search the way the agent's web_search tool would and
+ * shows what came back. There used to be a "search agent" preset next to a
+ * "search provider" card - a model and an engine that could not be tested
+ * as one thing, and whose split nobody could explain in one sentence.
  */
 function buildWebsearchCard(): HTMLElement {
-  const sel = el('select') as HTMLSelectElement;
-  const key = el('input', { type: 'password', placeholder: 'API 키' }) as HTMLInputElement;
-  const url = el('input', { placeholder: 'https://searx.example.com' }) as HTMLInputElement;
-  const max = el('input', { type: 'number', min: '1', max: '8', value: '5' }) as HTMLInputElement;
-  const keyRow = el('label', { class: 'field' }, [el('span', { text: 'API 키' }), key]);
-  const urlRow = el('label', { class: 'field' }, [el('span', { text: '주소 (baseUrl)' }), url]);
-  const note = el('div', { class: 'hint' });
-  const status = el('div', { class: 'hint', style: { marginBottom: '6px' } });
+  const modeSel = el('select') as HTMLSelectElement;
+  const modeNote = el('div', { class: 'hint', style: { margin: '4px 0 10px' } });
+  const status = el('div', { class: 'hint', style: { marginBottom: '8px' } });
   const out = el('div', { class: 'outbox' });
-  let providers: WebsearchProvider[] = [];
-  let keySet = false;
+  let st: WebsearchStatus | null = null;
   let keep = '__keep__';
+  let keyList: ApiKeyEntry[] = [];
 
-  const syncFields = () => {
-    const p = providers.find((x) => x.id === selectedValue(sel));
-    keyRow.style.display = p?.needsKey ? '' : 'none';
-    urlRow.style.display = p?.needsUrl ? '' : 'none';
-    key.placeholder = keySet ? '(저장된 키 유지 — 바꾸려면 입력)' : 'API 키';
-    note.textContent = p?.note ?? '';
+  // --- 1. native ---
+  const nativeInfo = el('div', { class: 'hint' });
+  const nativePane = el('div', { class: 'wsmode' }, [nativeInfo]);
+
+  // --- 2. gemini ---
+  const gModel = el('input', { placeholder: 'gemini-3.7-flash' }) as HTMLInputElement;
+  const gKeySel = el('select') as HTMLSelectElement;
+  const gKey = el('input', { type: 'password', placeholder: 'Google AI Studio API 키' }) as HTMLInputElement;
+  const gKeyRow = el('label', { class: 'field' }, [el('span', { text: 'API 키 직접 입력' }), gKey]);
+  const gInstr = el('textarea', { rows: '4' }) as HTMLTextAreaElement;
+  const gReset = el('button', { class: 'ghost tiny', text: '기본 지침으로' });
+  gReset.addEventListener('click', () => { gInstr.value = st?.gemini.defaultInstructions ?? ''; });
+  const syncGeminiKey = () => { gKeyRow.style.display = selectedValue(gKeySel) ? 'none' : ''; };
+  gKeySel.addEventListener('change', syncGeminiKey);
+  const geminiPane = el('div', { class: 'wsmode' }, [
+    el('div', { class: 'hint', style: { marginBottom: '8px' }, text: 'Google AI Studio 로 고정됩니다 (generativelanguage.googleapis.com). Gemini 가 Google 검색으로 찾고 읽어 출처가 붙은 답을 돌려줍니다.' }),
+    el('label', { class: 'field' }, [el('span', { text: '모델' }), gModel]),
+    el('label', { class: 'field' }, [el('span', { text: 'API 키 (키 목록에서)' }), gKeySel]),
+    gKeyRow,
+    el('label', { class: 'field' }, [el('span', { text: '에이전트 지침' }), gInstr]),
+    el('div', { class: 'row' }, [gReset]),
+  ]);
+
+  // --- 3. provider ---
+  const pSel = el('select') as HTMLSelectElement;
+  const pKey = el('input', { type: 'password', placeholder: 'API 키' }) as HTMLInputElement;
+  const pUrl = el('input', { placeholder: 'https://searx.example.com' }) as HTMLInputElement;
+  const pMax = el('input', { type: 'number', min: '1', max: '8', value: '5' }) as HTMLInputElement;
+  const pKeyRow = el('label', { class: 'field' }, [el('span', { text: 'API 키' }), pKey]);
+  const pUrlRow = el('label', { class: 'field' }, [el('span', { text: '주소 (baseUrl)' }), pUrl]);
+  const pNote = el('div', { class: 'hint' });
+  const syncProvider = () => {
+    const p = st?.providers.find((x) => x.id === selectedValue(pSel));
+    pKeyRow.style.display = p?.needsKey ? '' : 'none';
+    pUrlRow.style.display = p?.needsUrl ? '' : 'none';
+    pKey.placeholder = st?.apiKeySet ? '(저장된 키 유지 — 바꾸려면 입력)' : 'API 키';
+    pNote.textContent = p?.note ?? '';
   };
-  sel.addEventListener('change', syncFields);
+  pSel.addEventListener('change', syncProvider);
+  const providerPane = el('div', { class: 'wsmode' }, [
+    el('label', { class: 'field' }, [el('span', { text: '제공자' }), pSel]),
+    pNote,
+    pKeyRow,
+    pUrlRow,
+    el('label', { class: 'field' }, [el('span', { text: '결과 수 (1–8)' }), pMax]),
+  ]);
+
+  const panes: Record<WebsearchMode, HTMLElement> = { native: nativePane, gemini: geminiPane, provider: providerPane };
+  const syncMode = () => {
+    const m = selectedValue(modeSel) as WebsearchMode;
+    for (const [id, pane] of Object.entries(panes)) pane.style.display = id === m ? '' : 'none';
+    modeNote.textContent = st?.modes.find((x) => x.id === m)?.note ?? '';
+  };
+  modeSel.addEventListener('change', syncMode);
 
   const load = async () => {
     try {
-      const r = await state.websearch();
-      providers = r.providers;
-      keySet = r.apiKeySet;
+      const [r, k] = await Promise.all([state.websearch(), state.apiKeys().catch(() => ({ keys: [] as ApiKeyEntry[] }))]);
+      st = r;
       keep = r.keepSentinel || keep;
-      clear(sel);
-      for (const p of providers) sel.appendChild(el('option', { value: p.id, text: p.name }));
-      setSelected(sel, r.provider);
-      url.value = r.baseUrl || '';
-      max.value = String(r.maxResults || 5);
-      status.textContent = r.configured ? `지금 제공자: ${providers.find((p) => p.id === r.provider)?.name ?? r.provider} — 검색 가능` : `검색 불가: ${r.whyNot}`;
-      status.className = 'hint ' + (r.configured ? '' : 'diff-del-n');
-      syncFields();
+      keyList = k.keys ?? [];
+      clear(modeSel);
+      for (const m of r.modes) modeSel.appendChild(el('option', { value: m.id, text: `${r.modes.indexOf(m) + 1}. ${m.name}` }));
+      setSelected(modeSel, r.mode);
+      // native
+      clear(nativeInfo);
+      nativeInfo.appendChild(el('div', { text: `일반 에이전트: ${r.agent.model || '(모델 없음)'} @ ${r.agent.host || '(주소 없음)'}` }));
+      nativeInfo.appendChild(el('div', { text: r.nativeShape
+        ? `기억한 방식: ${r.nativeShapeLabel || r.nativeShape} — 테스트로 다시 찾을 수 있습니다.`
+        : '아직 테스트하지 않았습니다. 테스트가 여러 방식을 차례로 시도해 되는 것을 기억합니다 (최대 몇 분).' }));
+      // gemini
+      gModel.value = r.gemini.model === r.gemini.defaultModel ? '' : r.gemini.model;
+      gModel.placeholder = r.gemini.defaultModel;
+      clear(gKeySel);
+      gKeySel.appendChild(el('option', { value: '', text: r.gemini.apiKeySet ? '(직접 입력한 키 사용)' : '(직접 입력)' }));
+      for (const key of keyList) gKeySel.appendChild(el('option', { value: key.id, text: `${key.name}${key.provider ? ' · ' + key.provider : ''}` }));
+      setSelected(gKeySel, r.gemini.keyRef);
+      gKey.placeholder = r.gemini.apiKeySet ? '(저장된 키 유지 — 바꾸려면 입력)' : 'Google AI Studio API 키';
+      gInstr.value = r.gemini.instructions;
+      gInstr.placeholder = r.gemini.defaultInstructions;
+      syncGeminiKey();
+      // provider
+      clear(pSel);
+      for (const p of r.providers) pSel.appendChild(el('option', { value: p.id, text: p.name }));
+      setSelected(pSel, r.provider);
+      pUrl.value = r.baseUrl || '';
+      pMax.value = String(r.maxResults || 5);
+      syncProvider();
+      syncMode();
+      status.textContent = r.ready ? `지금: ${r.modes.find((m) => m.id === r.mode)?.name ?? r.mode} — 검색 가능` : `검색 불가: ${r.whyNot}`;
+      status.className = 'hint ' + (r.ready ? '' : 'diff-del-n');
     } catch (e) {
       status.textContent = msg(e);
     }
+  };
+
+  const patch = (): Record<string, unknown> => {
+    const m = selectedValue(modeSel) as WebsearchMode;
+    const p: Record<string, unknown> = { mode: m };
+    if (m === 'gemini') {
+      p.geminiModel = gModel.value.trim();
+      p.geminiKeyRef = selectedValue(gKeySel);
+      p.geminiApiKey = gKey.value ? gKey.value : (st?.gemini.apiKeySet ? keep : '');
+      p.geminiInstructions = gInstr.value.trim();
+    } else if (m === 'provider') {
+      p.provider = selectedValue(pSel);
+      p.apiKey = pKey.value ? pKey.value : (st?.apiKeySet ? keep : '');
+      p.baseUrl = pUrl.value.trim();
+      p.maxResults = Math.max(1, Math.min(8, Number(pMax.value) || 5));
+    }
+    return p;
   };
 
   const save = el('button', { class: 'primary', text: '저장' }) as HTMLButtonElement;
   save.addEventListener('click', async () => {
     save.disabled = true;
     try {
-      await state.saveWebsearch({
-        provider: selectedValue(sel),
-        apiKey: key.value ? key.value : (keySet ? keep : ''),
-        baseUrl: url.value.trim(),
-        maxResults: Math.max(1, Math.min(8, Number(max.value) || 5)),
-      });
-      key.value = '';
+      await state.saveWebsearch(patch());
+      gKey.value = '';
+      pKey.value = '';
       await load();
       clear(out);
       out.appendChild(el('div', { class: 'notice ok', text: '저장했습니다.' }));
@@ -256,18 +299,23 @@ function buildWebsearchCard(): HTMLElement {
       save.disabled = false;
     }
   });
-  const q = el('input', { placeholder: '검색 테스트 질문 (예: RisuAI)', value: 'RisuAI' }) as HTMLInputElement;
-  const test = el('button', { class: 'ghost', text: '검색 테스트' }) as HTMLButtonElement;
+
+  const q = el('input', { placeholder: '테스트 질문', value: 'RisuAI 최신 릴리스 버전' }) as HTMLInputElement;
+  const test = el('button', { class: 'ghost', text: '테스트' }) as HTMLButtonElement;
   test.addEventListener('click', async () => {
     test.disabled = true;
     clear(out);
-    out.appendChild(el('div', { class: 'hint', text: '검색하는 중입니다…' }));
+    out.appendChild(el('div', { class: 'hint', text: '저장하고 검색하는 중입니다… (내장 검색은 여러 방식을 시도하므로 몇 분 걸릴 수 있습니다)' }));
     try {
-      const r = await state.testWebsearch(q.value.trim() || 'RisuAI');
+      await state.saveWebsearch(patch());
+      gKey.value = '';
+      pKey.value = '';
+      const r = await state.testWebsearch(q.value.trim() || 'RisuAI 최신 릴리스 버전');
+      await load();
       clear(out);
       out.appendChild(el('div', { class: 'notice ' + (r.ok ? 'ok' : 'err') }, [
-        el('div', { text: r.ok ? `검색됩니다 · ${r.provider}` : `실패했습니다 · ${r.provider}` }),
-        el('pre', { class: 'mono', style: { maxHeight: '220px' }, text: r.text || r.error || '' }),
+        el('div', { text: r.ok ? `검색됩니다 · ${r.detail} · ${(r.ms / 1000).toFixed(1)}초` : `실패했습니다${r.detail ? ' · ' + r.detail : ''}` }),
+        el('pre', { class: 'mono', style: { maxHeight: '260px' }, text: r.text || r.error || '' }),
       ]));
     } catch (e) {
       clear(out);
@@ -278,16 +326,16 @@ function buildWebsearchCard(): HTMLElement {
   });
 
   void load();
-  return el('div', { class: 'foldbody' }, [
-    el('div', { class: 'hint', style: { marginBottom: '8px' }, text: '검색 에이전트가 실제로 웹을 찾을 때 쓰는 검색 API 입니다. DuckDuckGo 는 키가 없어도 되지만 결과가 적고, Brave·Tavily 등은 키가 필요합니다. “모델 내장 검색”은 검색 에이전트가 codex(ChatGPT 구독)이거나 Vercel AI Gateway 일 때 그쪽 검색을 그대로 씁니다.' }),
+  return el('div', { class: 'card', id: 'websearch-card' }, [
+    el('h2', { text: '웹 검색 툴' }),
+    el('div', { class: 'hint', style: { marginBottom: '8px' }, text: '일반 에이전트가 외부 사실이 필요할 때 쓰는 web_search 툴입니다. 누가 검색할지 하나를 고릅니다.' }),
     status,
-    el('label', { class: 'field' }, [el('span', { text: '제공자' }), sel]),
-    note,
-    keyRow,
-    urlRow,
-    el('label', { class: 'field' }, [el('span', { text: '결과 수 (1–8)' }), max]),
-    el('div', { class: 'row' }, [save]),
-    el('div', { class: 'row', style: { marginTop: '8px' } }, [q, test]),
+    el('label', { class: 'field' }, [el('span', { text: '검색 옵션' }), modeSel]),
+    modeNote,
+    nativePane,
+    geminiPane,
+    providerPane,
+    el('div', { class: 'row', style: { marginTop: '8px' } }, [save, q, test]),
     out,
   ]);
 }

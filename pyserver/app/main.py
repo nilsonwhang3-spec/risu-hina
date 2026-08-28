@@ -153,23 +153,10 @@ def h_websearch(arg: dict) -> dict:
 
 
 async def h_websearch_test(arg: dict) -> dict:
-    """One real search with the configured provider, for the settings card."""
-    q = str(arg.get("query") or "RisuAI").strip()[:200]
-    if not websearch.configured():
-        return {"ok": False, "provider": websearch.provider_id(), "error": websearch.why_not()}
-    if websearch.provider_id() == "native":
-        # The model searches inside its own turn, so the test is one real
-        # research call - the same thing the agent's web_research tool does.
-        from . import agent as agentmod  # lazy: agent pulls in pydantic-ai
-        cfg = config.section("agent_search")
-        text = await agentmod.native_research(f"{q} — 웹에서 검색해서 짧게 답하고 출처 URL 을 붙여.", cfg)
-        ok = not text.startswith("검색 에이전트가 실패") and not text.startswith("검색 제공자가 준비되지")
-        return {"ok": ok, "provider": f"native:{websearch.native_kind()}", "query": q, "text": text[:4000],
-                "error": None if ok else text[:300]}
-    text = await run_in_threadpool(websearch.search, q)
-    ok = not (text.startswith("검색에 실패") or text.endswith("결과가 없습니다") or text.startswith("지원하지"))
-    return {"ok": ok, "provider": websearch.provider_id(), "query": q, "text": text[:4000],
-            "error": None if ok else text[:300]}
+    """One real search in the configured mode, for the settings card. In
+    native mode this is the probe that finds (and remembers) the shape."""
+    q = str(arg.get("query") or "RisuAI 최신 릴리스 버전").strip()[:200]
+    return await websearch.test(q)
 
 
 def h_config_set(arg: dict) -> dict:

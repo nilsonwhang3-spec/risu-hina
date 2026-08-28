@@ -2099,29 +2099,42 @@ def test_websearch_card(s: Server) -> None:
     choice without its key reported as not ready (no network here)."""
     print("test_websearch_card")
     st, body = s.get("/websearch")
-    check("providers are listed with the keyless default first",
-          st == 200 and body["providers"][0]["id"] == "duckduckgo" and body["provider"] == "duckduckgo"
-          and body["configured"] is True, str(body)[:200])
+    check("three modes, provider mode by default, DuckDuckGo ready with nothing set",
+          st == 200 and [m["id"] for m in body["modes"]] == ["native", "gemini", "provider"]
+          and body["mode"] == "provider" and body["providers"][0]["id"] == "duckduckgo"
+          and body["provider"] == "duckduckgo" and body["ready"] is True, str(body)[:300])
     st, _ = s.post("/config", {"config": {"websearch": {"provider": "brave", "apiKey": "", "baseUrl": "", "maxResults": 5}}})
     st, body = s.get("/websearch")
     check("a keyed provider without a key is not ready and says why",
-          body["configured"] is False and "키" in body["whyNot"], str(body)[:200])
+          body["ready"] is False and "키" in body["whyNot"], str(body)[:200])
     st, body = s.post("/websearch/test", {"query": "x"})
     check("and the test reports that instead of searching", st == 200 and body["ok"] is False and "키" in body["error"], str(body)[:160])
     st, _ = s.post("/config", {"config": {"websearch": {"provider": "brave", "apiKey": "k", "baseUrl": "", "maxResults": 5}}})
     st, body = s.get("/websearch")
-    check("with a key it is ready, and the key is not echoed", body["configured"] is True and body["apiKeySet"] is True and "k" not in json.dumps(body.get("apiKey", "")), str(body)[:160])
-    # The model's own search: only when the search agent's endpoint has one.
-    # Here it has none (no search preset), so the card must say so rather
-    # than let the agent discover it mid-turn.
-    st, _ = s.post("/config", {"config": {"websearch": {"provider": "native", "apiKey": "", "baseUrl": "", "maxResults": 5}}})
+    check("with a key it is ready, and the key is not echoed", body["ready"] is True and body["apiKeySet"] is True and "k" not in json.dumps(body.get("apiKey", "")), str(body)[:160])
+    check("firecrawl is offered", any(p["id"] == "firecrawl" for p in body["providers"]))
+    # The main agent's own search needs a main agent; there is none here.
+    st, _ = s.post("/config", {"config": {"websearch": {"mode": "native"}}})
     st, body = s.get("/websearch")
-    check("native search is listed", any(p["id"] == "native" for p in body["providers"]), str([p["id"] for p in body["providers"]]))
-    check("and not ready without a codex or gateway search agent",
-          body["configured"] is False and "내장 검색" in body["whyNot"], str(body)[:200])
+    check("native mode without agent credentials is not ready and points at the agent card",
+          body["mode"] == "native" and body["ready"] is False and "일반 에이전트" in body["whyNot"], str(body)[:200])
     st, body = s.post("/websearch/test", {"query": "x"})
-    check("its test says the same without calling anything", st == 200 and body["ok"] is False and "내장 검색" in body["error"], str(body)[:160])
-    st, _ = s.post("/config", {"config": {"websearch": {"provider": "", "apiKey": "", "baseUrl": "", "maxResults": 5}}})
+    check("its test says the same without calling anything", st == 200 and body["ok"] is False and "일반 에이전트" in body["error"], str(body)[:160])
+    # The Gemini helper needs a key - typed or referenced - and the typed one
+    # is a secret: reported as set, never echoed, kept by the sentinel.
+    st, _ = s.post("/config", {"config": {"websearch": {"mode": "gemini", "geminiApiKey": ""}}})
+    st, body = s.get("/websearch")
+    check("gemini mode without a key is not ready", body["mode"] == "gemini" and body["ready"] is False and "키" in body["whyNot"], str(body)[:200])
+    check("its defaults are visible", body["gemini"]["model"] == "gemini-3.7-flash" and body["gemini"]["defaultInstructions"], str(body["gemini"])[:200])
+    st, _ = s.post("/config", {"config": {"websearch": {"geminiApiKey": "AIza-secret"}}})
+    st, body = s.get("/websearch")
+    check("with a key it is ready and the key is not echoed", body["ready"] is True and body["gemini"]["apiKeySet"] is True and "AIza" not in json.dumps(body), str(body)[:200])
+    st, _ = s.post("/config", {"config": {"websearch": {"geminiApiKey": body["keepSentinel"], "geminiModel": "gemini-3.7-pro"}}})
+    st, body = s.get("/websearch")
+    check("the sentinel keeps the key while other fields change", body["gemini"]["apiKeySet"] is True and body["gemini"]["model"] == "gemini-3.7-pro", str(body["gemini"])[:200])
+    st, body = s.get("/config")
+    check("the gemini key is redacted in /config", "AIza" not in json.dumps(body), str(body.get("config", {}).get("websearch"))[:200])
+    st, _ = s.post("/config", {"config": {"websearch": {"mode": "", "provider": "", "apiKey": "", "baseUrl": "", "maxResults": 5, "geminiApiKey": "", "geminiModel": ""}}})
 
 
 def test_permits_and_key_providers(s: Server) -> None:

@@ -517,11 +517,15 @@ def plan(section: str = "agent") -> providers.Plan:
 def fingerprint() -> str:
     """Everything a rebuilt agent would pick up, as one comparable string."""
     cfg = config.section("agent")
+    # The search mode too: the web_search tool's description is written at
+    # build time from it, so switching modes has to rebuild.
+    ws = config.section("websearch")
     return "|".join(str(x) for x in (
         cfg.get("provider"), cfg.get("baseUrl"), cfg.get("model"), len(cfg.get("apiKey") or ""),
         cfg.get("temperature"), cfg.get("maxTokens"),
         cfg.get("reasoning"), cfg.get("cache"), cfg.get("flex"), cfg.get("params"),
         len(cfg.get("instructions") or ""), (cfg.get("instructions") or "")[:60],
+        ws.get("mode"), ws.get("provider"),
     ))
 
 

@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.8.2
+//@display-name Risu Hina v0.8.3
 //@api 3.0
-//@version 0.8.2
+//@version 0.8.3
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -95,7 +95,7 @@
       this.route = "direct";
       this.tokenSafe = true;
       this.lastHealth = body;
-      this.gate = versionGate("0.8.2", String(body.version || ""));
+      this.gate = versionGate("0.8.3", String(body.version || ""));
       return body;
     }
     /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -2587,8 +2587,10 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     async saveWebsearch(patch) {
       await transport.post("/config", { config: { websearch: patch } });
     }
+    /** One real search in the configured mode. Native mode probes several
+     *  shapes at up to a minute each, so the wait is generous. */
     async testWebsearch(query) {
-      return await transport.post("/websearch/test", { query }, 6e4);
+      return await transport.post("/websearch/test", { query }, 33e4);
     }
     // --- diagnostics ----------------------------------------------------------
     async logs(limit = 300, level = "") {
@@ -7468,7 +7470,6 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
   var CODEX_KEY = "__codex__";
   function buildPresetsCard(opts) {
     const generalMount = el("div");
-    const searchMount = el("div");
     const out = el("div");
     const say = (text, kind = "") => {
       clear(out);
@@ -7476,16 +7477,12 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     };
     const refresh8 = async () => {
       clear(generalMount);
-      clear(searchMount);
       generalMount.appendChild(el("div", { class: "hint", text: "\uC77D\uB294 \uC911\uC785\uB2C8\uB2E4\u2026" }));
       try {
         const r = await state.presets();
         clear(generalMount);
-        clear(searchMount);
         const general = r.presets.filter((p) => p.kind === "general");
-        const search = r.presets.filter((p) => p.kind === "search");
         generalMount.appendChild(currentRow("general", r.selected, general.length));
-        searchMount.appendChild(currentRow("search", r.selectedSearch, search.length));
       } catch (e) {
         clear(generalMount);
         generalMount.appendChild(el("div", { class: "notice err", text: msg8(e) }));
@@ -7500,7 +7497,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         open5.addEventListener("click", () => openPicker(kind, refresh8, say));
         return el("div", { class: "presetnow" }, [
           el("div", { class: "grow" }, [
-            el("div", { class: "hint", text: kind === "search" ? "\uAC80\uC0C9 \uC5D0\uC774\uC804\uD2B8\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4 \u2014 \uADF8\uB3D9\uC548 \uC5D0\uC774\uC804\uD2B8\uB294 \uC6F9\uC744 \uAC80\uC0C9\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4. \u203A \uC5D0\uC11C \uACE0\uB974\uAC70\uB098 \uCD94\uAC00\uD569\uB2C8\uB2E4." : "\uD504\uB9AC\uC14B\uC774 \uC5C6\uC2B5\uB2C8\uB2E4. \u203A \uC5D0\uC11C \uD558\uB098 \uB9CC\uB4E4\uC5B4 \uC8FC\uC138\uC694." })
+            el("div", { class: "hint", text: "\uD504\uB9AC\uC14B\uC774 \uC5C6\uC2B5\uB2C8\uB2E4. \u203A \uC5D0\uC11C \uD558\uB098 \uB9CC\uB4E4\uC5B4 \uC8FC\uC138\uC694." })
           ]),
           open5
         ]);
@@ -7517,19 +7514,6 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         ]),
         open4
       ]);
-      if (kind === "search") {
-        const off = el("button", { class: "ghost tiny", text: "\uD574\uC81C", title: "\uAC80\uC0C9 \uC5D0\uC774\uC804\uD2B8\uB97C \uB055\uB2C8\uB2E4 (\uC6F9 \uAC80\uC0C9\uC744 \uD560 \uC218 \uC5C6\uAC8C \uB429\uB2C8\uB2E4)" });
-        off.addEventListener("click", async () => {
-          try {
-            await state.deselectPreset("search");
-            await refresh8();
-            say("\uAC80\uC0C9 \uC5D0\uC774\uC804\uD2B8\uB97C \uAED0\uC2B5\uB2C8\uB2E4.", "ok");
-          } catch (e) {
-            say(msg8(e), "err");
-          }
-        });
-        row.appendChild(off);
-      }
       return row;
     };
     const testButton = (kind, box) => {
@@ -7562,7 +7546,6 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       });
       return testBtn;
     };
-    const searchOut = el("div", { class: "outbox" });
     opts.onMount?.(refresh8);
     void refresh8();
     return el("div", {}, [
@@ -7576,77 +7559,127 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
           "\uD14C\uC2A4\uD2B8\uB294 \uC77C\uBC18 \uC751\uB2F5\uACFC \uD234 \uD638\uCD9C\uC744 \uB530\uB85C \uD655\uC778\uD569\uB2C8\uB2E4. \uD234 \uD638\uCD9C\uC774 \uC548 \uB418\uBA74 \uC5D0\uC774\uC804\uD2B8\uAC00 \uB3D9\uC791\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4."
         ])
       ]),
-      el("div", { class: "card" }, [
-        el("h2", { text: "\uAC80\uC0C9 \uC5D0\uC774\uC804\uD2B8" }),
-        el("div", { class: "hint", style: { marginBottom: "8px" } }, [
-          "\uC77C\uBC18 \uC5D0\uC774\uC804\uD2B8\uB294 \uC6F9\uC744 \uC9C1\uC811 \uAC80\uC0C9\uD558\uC9C0 \uC54A\uACE0, \uC678\uBD80 \uC0AC\uC2E4\uC774 \uD544\uC694\uD558\uBA74 \uC774 \uC5D0\uC774\uC804\uD2B8\uC5D0\uAC8C \uB9E1\uAE41\uB2C8\uB2E4. \uBAA8\uB378(\uD504\uB9AC\uC14B)\uC774 \uAC80\uC0C9\uC5B4\uB97C \uB9CC\uB4E4\uACE0 \uACB0\uACFC\uB97C \uC77D\uC5B4 \uC815\uB9AC\uD558\uBA70, \uC2E4\uC81C\uB85C \uC6F9\uC744 \uCC3E\uB294 \uAC83\uC740 \uAC80\uC0C9 \uC5D4\uC9C4\uC785\uB2C8\uB2E4. \uAC80\uC0C9 \uC5D4\uC9C4\uC740 \uAE30\uBCF8 DuckDuckGo \uB77C \uB530\uB85C \uC124\uC815\uD560 \uAC83\uC774 \uC5C6\uACE0, \uC800\uB834\uD55C \uBAA8\uB378(\uC608: Gemini Flash)\uC744 \uAD8C\uD569\uB2C8\uB2E4."
-        ]),
-        searchMount,
-        el("div", { class: "row", style: { marginTop: "8px" } }, [testButton("search", searchOut)]),
-        searchOut,
-        el("div", { class: "hint", style: { marginTop: "8px" } }, [
-          "\uC5F0\uACB0 \uD14C\uC2A4\uD2B8\uB294 \uBAA8\uB378\uB9CC \uBD05\uB2C8\uB2E4(\uC751\uB2F5 + \uD234 \uD638\uCD9C, \uCD5C\uB300 4\uBD84). \uAC80\uC0C9 \uC790\uCCB4\uB294 \uC544\uB798 \uAC80\uC0C9 \uC5D4\uC9C4\uC758 \u201C\uAC80\uC0C9 \uD14C\uC2A4\uD2B8\u201D\uB85C \uD655\uC778\uD569\uB2C8\uB2E4."
-        ]),
-        // Folded: the engine is a knob most people never turn. It was a card
-        // of its own beside the agent card, and read as a second thing to set
-        // up - "why are there two?" - when it is part of this one.
-        el("details", { class: "fold", style: { marginTop: "10px" } }, [
-          el("summary", { text: "\uAC80\uC0C9 \uC5D4\uC9C4 \u2014 \uAE30\uBCF8 DuckDuckGo \xB7 \uACB0\uACFC\uAC00 \uBD80\uC2E4\uD558\uBA74 \uC5EC\uAE30\uC11C \uBC14\uAFC9\uB2C8\uB2E4" }),
-          buildWebsearchCard()
-        ])
-      ])
+      buildWebsearchCard()
     ]);
   }
   function buildWebsearchCard() {
-    const sel = el("select");
-    const key = el("input", { type: "password", placeholder: "API \uD0A4" });
-    const url = el("input", { placeholder: "https://searx.example.com" });
-    const max = el("input", { type: "number", min: "1", max: "8", value: "5" });
-    const keyRow = el("label", { class: "field" }, [el("span", { text: "API \uD0A4" }), key]);
-    const urlRow = el("label", { class: "field" }, [el("span", { text: "\uC8FC\uC18C (baseUrl)" }), url]);
-    const note = el("div", { class: "hint" });
-    const status = el("div", { class: "hint", style: { marginBottom: "6px" } });
+    const modeSel = el("select");
+    const modeNote = el("div", { class: "hint", style: { margin: "4px 0 10px" } });
+    const status = el("div", { class: "hint", style: { marginBottom: "8px" } });
     const out = el("div", { class: "outbox" });
-    let providers = [];
-    let keySet = false;
+    let st = null;
     let keep = "__keep__";
-    const syncFields = () => {
-      const p = providers.find((x) => x.id === selectedValue(sel));
-      keyRow.style.display = p?.needsKey ? "" : "none";
-      urlRow.style.display = p?.needsUrl ? "" : "none";
-      key.placeholder = keySet ? "(\uC800\uC7A5\uB41C \uD0A4 \uC720\uC9C0 \u2014 \uBC14\uAFB8\uB824\uBA74 \uC785\uB825)" : "API \uD0A4";
-      note.textContent = p?.note ?? "";
+    let keyList = [];
+    const nativeInfo = el("div", { class: "hint" });
+    const nativePane = el("div", { class: "wsmode" }, [nativeInfo]);
+    const gModel = el("input", { placeholder: "gemini-3.7-flash" });
+    const gKeySel = el("select");
+    const gKey = el("input", { type: "password", placeholder: "Google AI Studio API \uD0A4" });
+    const gKeyRow = el("label", { class: "field" }, [el("span", { text: "API \uD0A4 \uC9C1\uC811 \uC785\uB825" }), gKey]);
+    const gInstr = el("textarea", { rows: "4" });
+    const gReset = el("button", { class: "ghost tiny", text: "\uAE30\uBCF8 \uC9C0\uCE68\uC73C\uB85C" });
+    gReset.addEventListener("click", () => {
+      gInstr.value = st?.gemini.defaultInstructions ?? "";
+    });
+    const syncGeminiKey = () => {
+      gKeyRow.style.display = selectedValue(gKeySel) ? "none" : "";
     };
-    sel.addEventListener("change", syncFields);
+    gKeySel.addEventListener("change", syncGeminiKey);
+    const geminiPane = el("div", { class: "wsmode" }, [
+      el("div", { class: "hint", style: { marginBottom: "8px" }, text: "Google AI Studio \uB85C \uACE0\uC815\uB429\uB2C8\uB2E4 (generativelanguage.googleapis.com). Gemini \uAC00 Google \uAC80\uC0C9\uC73C\uB85C \uCC3E\uACE0 \uC77D\uC5B4 \uCD9C\uCC98\uAC00 \uBD99\uC740 \uB2F5\uC744 \uB3CC\uB824\uC90D\uB2C8\uB2E4." }),
+      el("label", { class: "field" }, [el("span", { text: "\uBAA8\uB378" }), gModel]),
+      el("label", { class: "field" }, [el("span", { text: "API \uD0A4 (\uD0A4 \uBAA9\uB85D\uC5D0\uC11C)" }), gKeySel]),
+      gKeyRow,
+      el("label", { class: "field" }, [el("span", { text: "\uC5D0\uC774\uC804\uD2B8 \uC9C0\uCE68" }), gInstr]),
+      el("div", { class: "row" }, [gReset])
+    ]);
+    const pSel = el("select");
+    const pKey = el("input", { type: "password", placeholder: "API \uD0A4" });
+    const pUrl = el("input", { placeholder: "https://searx.example.com" });
+    const pMax = el("input", { type: "number", min: "1", max: "8", value: "5" });
+    const pKeyRow = el("label", { class: "field" }, [el("span", { text: "API \uD0A4" }), pKey]);
+    const pUrlRow = el("label", { class: "field" }, [el("span", { text: "\uC8FC\uC18C (baseUrl)" }), pUrl]);
+    const pNote = el("div", { class: "hint" });
+    const syncProvider = () => {
+      const p = st?.providers.find((x) => x.id === selectedValue(pSel));
+      pKeyRow.style.display = p?.needsKey ? "" : "none";
+      pUrlRow.style.display = p?.needsUrl ? "" : "none";
+      pKey.placeholder = st?.apiKeySet ? "(\uC800\uC7A5\uB41C \uD0A4 \uC720\uC9C0 \u2014 \uBC14\uAFB8\uB824\uBA74 \uC785\uB825)" : "API \uD0A4";
+      pNote.textContent = p?.note ?? "";
+    };
+    pSel.addEventListener("change", syncProvider);
+    const providerPane = el("div", { class: "wsmode" }, [
+      el("label", { class: "field" }, [el("span", { text: "\uC81C\uACF5\uC790" }), pSel]),
+      pNote,
+      pKeyRow,
+      pUrlRow,
+      el("label", { class: "field" }, [el("span", { text: "\uACB0\uACFC \uC218 (1\u20138)" }), pMax])
+    ]);
+    const panes = { native: nativePane, gemini: geminiPane, provider: providerPane };
+    const syncMode = () => {
+      const m = selectedValue(modeSel);
+      for (const [id, pane] of Object.entries(panes)) pane.style.display = id === m ? "" : "none";
+      modeNote.textContent = st?.modes.find((x) => x.id === m)?.note ?? "";
+    };
+    modeSel.addEventListener("change", syncMode);
     const load = async () => {
       try {
-        const r = await state.websearch();
-        providers = r.providers;
-        keySet = r.apiKeySet;
+        const [r, k] = await Promise.all([state.websearch(), state.apiKeys().catch(() => ({ keys: [] }))]);
+        st = r;
         keep = r.keepSentinel || keep;
-        clear(sel);
-        for (const p of providers) sel.appendChild(el("option", { value: p.id, text: p.name }));
-        setSelected(sel, r.provider);
-        url.value = r.baseUrl || "";
-        max.value = String(r.maxResults || 5);
-        status.textContent = r.configured ? `\uC9C0\uAE08 \uC81C\uACF5\uC790: ${providers.find((p) => p.id === r.provider)?.name ?? r.provider} \u2014 \uAC80\uC0C9 \uAC00\uB2A5` : `\uAC80\uC0C9 \uBD88\uAC00: ${r.whyNot}`;
-        status.className = "hint " + (r.configured ? "" : "diff-del-n");
-        syncFields();
+        keyList = k.keys ?? [];
+        clear(modeSel);
+        for (const m of r.modes) modeSel.appendChild(el("option", { value: m.id, text: `${r.modes.indexOf(m) + 1}. ${m.name}` }));
+        setSelected(modeSel, r.mode);
+        clear(nativeInfo);
+        nativeInfo.appendChild(el("div", { text: `\uC77C\uBC18 \uC5D0\uC774\uC804\uD2B8: ${r.agent.model || "(\uBAA8\uB378 \uC5C6\uC74C)"} @ ${r.agent.host || "(\uC8FC\uC18C \uC5C6\uC74C)"}` }));
+        nativeInfo.appendChild(el("div", { text: r.nativeShape ? `\uAE30\uC5B5\uD55C \uBC29\uC2DD: ${r.nativeShapeLabel || r.nativeShape} \u2014 \uD14C\uC2A4\uD2B8\uB85C \uB2E4\uC2DC \uCC3E\uC744 \uC218 \uC788\uC2B5\uB2C8\uB2E4.` : "\uC544\uC9C1 \uD14C\uC2A4\uD2B8\uD558\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4. \uD14C\uC2A4\uD2B8\uAC00 \uC5EC\uB7EC \uBC29\uC2DD\uC744 \uCC28\uB840\uB85C \uC2DC\uB3C4\uD574 \uB418\uB294 \uAC83\uC744 \uAE30\uC5B5\uD569\uB2C8\uB2E4 (\uCD5C\uB300 \uBA87 \uBD84)." }));
+        gModel.value = r.gemini.model === r.gemini.defaultModel ? "" : r.gemini.model;
+        gModel.placeholder = r.gemini.defaultModel;
+        clear(gKeySel);
+        gKeySel.appendChild(el("option", { value: "", text: r.gemini.apiKeySet ? "(\uC9C1\uC811 \uC785\uB825\uD55C \uD0A4 \uC0AC\uC6A9)" : "(\uC9C1\uC811 \uC785\uB825)" }));
+        for (const key of keyList) gKeySel.appendChild(el("option", { value: key.id, text: `${key.name}${key.provider ? " \xB7 " + key.provider : ""}` }));
+        setSelected(gKeySel, r.gemini.keyRef);
+        gKey.placeholder = r.gemini.apiKeySet ? "(\uC800\uC7A5\uB41C \uD0A4 \uC720\uC9C0 \u2014 \uBC14\uAFB8\uB824\uBA74 \uC785\uB825)" : "Google AI Studio API \uD0A4";
+        gInstr.value = r.gemini.instructions;
+        gInstr.placeholder = r.gemini.defaultInstructions;
+        syncGeminiKey();
+        clear(pSel);
+        for (const p of r.providers) pSel.appendChild(el("option", { value: p.id, text: p.name }));
+        setSelected(pSel, r.provider);
+        pUrl.value = r.baseUrl || "";
+        pMax.value = String(r.maxResults || 5);
+        syncProvider();
+        syncMode();
+        status.textContent = r.ready ? `\uC9C0\uAE08: ${r.modes.find((m) => m.id === r.mode)?.name ?? r.mode} \u2014 \uAC80\uC0C9 \uAC00\uB2A5` : `\uAC80\uC0C9 \uBD88\uAC00: ${r.whyNot}`;
+        status.className = "hint " + (r.ready ? "" : "diff-del-n");
       } catch (e) {
         status.textContent = msg8(e);
       }
+    };
+    const patch = () => {
+      const m = selectedValue(modeSel);
+      const p = { mode: m };
+      if (m === "gemini") {
+        p.geminiModel = gModel.value.trim();
+        p.geminiKeyRef = selectedValue(gKeySel);
+        p.geminiApiKey = gKey.value ? gKey.value : st?.gemini.apiKeySet ? keep : "";
+        p.geminiInstructions = gInstr.value.trim();
+      } else if (m === "provider") {
+        p.provider = selectedValue(pSel);
+        p.apiKey = pKey.value ? pKey.value : st?.apiKeySet ? keep : "";
+        p.baseUrl = pUrl.value.trim();
+        p.maxResults = Math.max(1, Math.min(8, Number(pMax.value) || 5));
+      }
+      return p;
     };
     const save = el("button", { class: "primary", text: "\uC800\uC7A5" });
     save.addEventListener("click", async () => {
       save.disabled = true;
       try {
-        await state.saveWebsearch({
-          provider: selectedValue(sel),
-          apiKey: key.value ? key.value : keySet ? keep : "",
-          baseUrl: url.value.trim(),
-          maxResults: Math.max(1, Math.min(8, Number(max.value) || 5))
-        });
-        key.value = "";
+        await state.saveWebsearch(patch());
+        gKey.value = "";
+        pKey.value = "";
         await load();
         clear(out);
         out.appendChild(el("div", { class: "notice ok", text: "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4." }));
@@ -7657,18 +7690,22 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         save.disabled = false;
       }
     });
-    const q = el("input", { placeholder: "\uAC80\uC0C9 \uD14C\uC2A4\uD2B8 \uC9C8\uBB38 (\uC608: RisuAI)", value: "RisuAI" });
-    const test = el("button", { class: "ghost", text: "\uAC80\uC0C9 \uD14C\uC2A4\uD2B8" });
+    const q = el("input", { placeholder: "\uD14C\uC2A4\uD2B8 \uC9C8\uBB38", value: "RisuAI \uCD5C\uC2E0 \uB9B4\uB9AC\uC2A4 \uBC84\uC804" });
+    const test = el("button", { class: "ghost", text: "\uD14C\uC2A4\uD2B8" });
     test.addEventListener("click", async () => {
       test.disabled = true;
       clear(out);
-      out.appendChild(el("div", { class: "hint", text: "\uAC80\uC0C9\uD558\uB294 \uC911\uC785\uB2C8\uB2E4\u2026" }));
+      out.appendChild(el("div", { class: "hint", text: "\uC800\uC7A5\uD558\uACE0 \uAC80\uC0C9\uD558\uB294 \uC911\uC785\uB2C8\uB2E4\u2026 (\uB0B4\uC7A5 \uAC80\uC0C9\uC740 \uC5EC\uB7EC \uBC29\uC2DD\uC744 \uC2DC\uB3C4\uD558\uBBC0\uB85C \uBA87 \uBD84 \uAC78\uB9B4 \uC218 \uC788\uC2B5\uB2C8\uB2E4)" }));
       try {
-        const r = await state.testWebsearch(q.value.trim() || "RisuAI");
+        await state.saveWebsearch(patch());
+        gKey.value = "";
+        pKey.value = "";
+        const r = await state.testWebsearch(q.value.trim() || "RisuAI \uCD5C\uC2E0 \uB9B4\uB9AC\uC2A4 \uBC84\uC804");
+        await load();
         clear(out);
         out.appendChild(el("div", { class: "notice " + (r.ok ? "ok" : "err") }, [
-          el("div", { text: r.ok ? `\uAC80\uC0C9\uB429\uB2C8\uB2E4 \xB7 ${r.provider}` : `\uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4 \xB7 ${r.provider}` }),
-          el("pre", { class: "mono", style: { maxHeight: "220px" }, text: r.text || r.error || "" })
+          el("div", { text: r.ok ? `\uAC80\uC0C9\uB429\uB2C8\uB2E4 \xB7 ${r.detail} \xB7 ${(r.ms / 1e3).toFixed(1)}\uCD08` : `\uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4${r.detail ? " \xB7 " + r.detail : ""}` }),
+          el("pre", { class: "mono", style: { maxHeight: "260px" }, text: r.text || r.error || "" })
         ]));
       } catch (e) {
         clear(out);
@@ -7678,16 +7715,16 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       }
     });
     void load();
-    return el("div", { class: "foldbody" }, [
-      el("div", { class: "hint", style: { marginBottom: "8px" }, text: "\uAC80\uC0C9 \uC5D0\uC774\uC804\uD2B8\uAC00 \uC2E4\uC81C\uB85C \uC6F9\uC744 \uCC3E\uC744 \uB54C \uC4F0\uB294 \uAC80\uC0C9 API \uC785\uB2C8\uB2E4. DuckDuckGo \uB294 \uD0A4\uAC00 \uC5C6\uC5B4\uB3C4 \uB418\uC9C0\uB9CC \uACB0\uACFC\uAC00 \uC801\uACE0, Brave\xB7Tavily \uB4F1\uC740 \uD0A4\uAC00 \uD544\uC694\uD569\uB2C8\uB2E4. \u201C\uBAA8\uB378 \uB0B4\uC7A5 \uAC80\uC0C9\u201D\uC740 \uAC80\uC0C9 \uC5D0\uC774\uC804\uD2B8\uAC00 codex(ChatGPT \uAD6C\uB3C5)\uC774\uAC70\uB098 Vercel AI Gateway \uC77C \uB54C \uADF8\uCABD \uAC80\uC0C9\uC744 \uADF8\uB300\uB85C \uC501\uB2C8\uB2E4." }),
+    return el("div", { class: "card", id: "websearch-card" }, [
+      el("h2", { text: "\uC6F9 \uAC80\uC0C9 \uD234" }),
+      el("div", { class: "hint", style: { marginBottom: "8px" }, text: "\uC77C\uBC18 \uC5D0\uC774\uC804\uD2B8\uAC00 \uC678\uBD80 \uC0AC\uC2E4\uC774 \uD544\uC694\uD560 \uB54C \uC4F0\uB294 web_search \uD234\uC785\uB2C8\uB2E4. \uB204\uAC00 \uAC80\uC0C9\uD560\uC9C0 \uD558\uB098\uB97C \uACE0\uB985\uB2C8\uB2E4." }),
       status,
-      el("label", { class: "field" }, [el("span", { text: "\uC81C\uACF5\uC790" }), sel]),
-      note,
-      keyRow,
-      urlRow,
-      el("label", { class: "field" }, [el("span", { text: "\uACB0\uACFC \uC218 (1\u20138)" }), max]),
-      el("div", { class: "row" }, [save]),
-      el("div", { class: "row", style: { marginTop: "8px" } }, [q, test]),
+      el("label", { class: "field" }, [el("span", { text: "\uAC80\uC0C9 \uC635\uC158" }), modeSel]),
+      modeNote,
+      nativePane,
+      geminiPane,
+      providerPane,
+      el("div", { class: "row", style: { marginTop: "8px" } }, [save, q, test]),
       out
     ]);
   }
@@ -8569,7 +8606,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.8.2",
+            version: "0.8.3",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -9082,7 +9119,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.8.2"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.8.3"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -10626,7 +10663,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.8.2"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.8.3"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
@@ -10702,7 +10739,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.8.2" }),
+        el("span", { class: "dim", text: "v0.8.3" }),
         healthEl,
         el("span", { class: "spacer" }),
         reload,
@@ -10924,6 +10961,6 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.8.2"} loaded`);
+    console.log(`[risu-hina] v${"0.8.3"} loaded`);
   })();
 })();
