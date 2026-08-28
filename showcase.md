@@ -4,7 +4,7 @@
 
 <div style="display:table;width:100%;">
 <div style="display:table-cell;width:200px;vertical-align:middle;padding:32px 8px 32px 32px;">
-<img src="https://raw.githubusercontent.com/nilsonwhang3-spec/vepo-bot-assets/master/Assets/Main Characters/Natsume_Hina/Natsume_Hina.webp" alt="히나" style="width:175px;border-radius:6px;box-shadow:0 8px 32px rgba(0,0,0,0.5),0 0 60px rgba(196,168,120,0.06);">
+<img src="https://raw.githubusercontent.com/nilsonwhang3-spec/vepo-bot-assets/master/Assets/Main Characters/Natsume_Hina_90s/Natsume_Hina_90s.webp" alt="히나" style="width:175px;height:230px;border-radius:6px;object-fit:cover;object-position:top;box-shadow:0 8px 32px rgba(0,0,0,0.5),0 0 60px rgba(196,168,120,0.06);">
 </div>
 <div style="display:table-cell;vertical-align:middle;padding:32px 32px 32px 12px;">
 <div style="font-size:30px;font-weight:700;color:#ece4d8;letter-spacing:3px;">리스히나</div>

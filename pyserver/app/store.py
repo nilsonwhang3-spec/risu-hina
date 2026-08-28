@@ -88,7 +88,15 @@ def ingest_chat(cha_id: str, chat: dict, chat_index: int | None, *, force: bool 
         ))
 
     with db.transaction():
-        exists = db.one("SELECT chat_key FROM chats WHERE chat_key = ?", (tk,)) is not None
+        # "Have we ever loaded this chat's turns?", not "is there a chats row".
+        # Two cases hang on the difference: a schema upgrade drops the working
+        # tables while the chats row survives (that must load fresh, not report
+        # every turn as newly arrived), and an agent that deleted every working
+        # turn must NOT be reset - the baseline is still there and the merge
+        # honours the deletion.
+        exists = db.one(
+            "SELECT 1 AS x FROM turns WHERE chat_key = ? LIMIT 1", (tk,)) is not None or db.one(
+            "SELECT 1 AS x FROM turns_original WHERE chat_key = ? LIMIT 1", (tk,)) is not None
         db.execute(
             "INSERT INTO chats(chat_key, char_key, chat_id, chat_index, name, meta_json, orig_count, created_at, updated_at) "
             "VALUES(?,?,?,?,?,?,?,?,?) "

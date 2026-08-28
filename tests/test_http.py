@@ -659,6 +659,18 @@ def test_reopen_merges_risu_changes(s: Server) -> None:
     st, ch = s.get(q("/changes", chatKey=tk))
     check("nothing pending after the conflict was decided", ch["total"] == 0 and ch["conflicts"] == 0, str(ch)[:200])
 
+    # An agent that deleted every working turn must not be reset by the next
+    # open: the baseline is still there, so the merge honours the deletion.
+    # (The schema-12 upgrade empties both tables, and that DOES load fresh -
+    # otherwise the first open after an upgrade reports every turn as new.)
+    st, body = s.get(q("/turns", chatKey=tk))
+    s.post("/turn/delete", {"chatKey": tk, "msgIds": [t["msgId"] for t in body["turns"]]})
+    ws = up(chat(["RisuAI가 고침", "RisuAI도 고침", "턴 2", "턴 3", "턴 4"]))
+    check("deleting every turn here is not undone by the next open",
+          ws["chats"][0]["turns"] == 0 and ws["chats"][0]["workingReset"] is False,
+          str(ws["chats"][0])[:200])
+    up(chat(["RisuAI가 고침", "RisuAI도 고침", "턴 2", "턴 3", "턴 4"]), force=True)
+
     # A turn deleted in RisuAI, untouched here, must not come back.
     ws = up(chat(["RisuAI가 고침", "RisuAI도 고침", "턴 3", "턴 4"]))
     st, body = s.get(q("/turns", chatKey=tk))
