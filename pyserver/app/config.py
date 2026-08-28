@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any
 
 APP_NAME = "risu-hina"
-VERSION = "0.9.4"
+VERSION = "0.9.5"
 
 # Renamed from REALOOC_* to RISUHINA_*. The old names are still honoured, and
 # not as politeness: the launcher, the control script and any service wrapper
@@ -149,6 +149,10 @@ MAX_BODY_BYTES = _env_int("RISUHINA_MAX_BODY_BYTES", 64 * 1024 * 1024)
 # --- defaults ---------------------------------------------------------------
 
 DEFAULTS: dict[str, Any] = {
+    # Off by default, and only an operator editing config.json by hand can
+    # turn it on - the settings API ignores non-section keys, so nothing the
+    # panel sends can reach it. See CODEX_FLAG below.
+    "OPENAI_CODEX": 0,
     "agent": {
         # OpenAI-compatible surface; a gateway normalises the providers behind
         # it. Same reasoning as active-recall's llm.py - the portability lives
@@ -314,10 +318,10 @@ def section(name: str) -> dict:
     return dict(load().get(name) or {})
 
 
-# The OpenAI subscription path. Off unless the operator sets
-# `"OPENAI_CODEX": 1` in config.json by hand - deliberately absent from
-# DEFAULTS, so it is never written into a fresh install's template and never
-# shown in the panel. With it off the routes are not there, a preset cannot
+# The OpenAI subscription path. Ships as 0 in the config template and stays
+# off unless the operator sets `"OPENAI_CODEX": 1` in config.json by hand -
+# `update()` skips top-level non-section keys, so no settings patch from the
+# panel can reach it. With it off the routes are not there, a preset cannot
 # select it, and the settings page does not offer it.
 CODEX_FLAG = "OPENAI_CODEX"
 

@@ -2210,8 +2210,9 @@ def test_codex_is_off_unless_enabled() -> None:
     """The shipped default: the subscription path is not offered at all.
 
     Its own server, because the rest of the suite seeds the flag to exercise
-    the feature. Nothing but a hand-edited config.json can turn it on - a
-    settings patch cannot, since `config.update` only walks sections.
+    the feature. The key ships in the config template at 0, and nothing but a
+    hand-edited config.json can turn it on - a settings patch cannot, since
+    `config.update` only walks sections.
     """
     print("test_codex_is_off_unless_enabled")
     s = Server(codex=False)
@@ -2221,6 +2222,8 @@ def test_codex_is_off_unless_enabled() -> None:
             return
         st, h = s.get("/health", token=None)
         check("health says it is not offered", h.get("codexEnabled") is False, str(h)[:200])
+        tmpl = json.loads((s.data / "config.json").read_text(encoding="utf-8"))
+        check("the config template ships the flag at 0", tmpl.get("OPENAI_CODEX") == 0, str(tmpl.get("OPENAI_CODEX")))
         st, _ = s.get("/codex/status")
         check("its routes are not there at all", st == 404, str(st))
         st, body = s.post("/presets/save", {"name": "구독", "values": {"provider": "codex", "model": "m"}})
