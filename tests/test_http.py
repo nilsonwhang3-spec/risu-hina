@@ -2305,6 +2305,34 @@ def test_workspace_folders_and_family(s: Server, cw: dict) -> None:
     check("with subfolders from `rel` and exact bytes",
           names.get("uploads/참고/a.png") == 24 and names.get("uploads/참고/deep/er/b.txt") == 5
           and names.get("uploads/참고/deep/c.bin") == 3, str(sorted(names))[:200])
+    # A file bigger than one body arrives in pieces. A character's .charx is
+    # 140-180MB, which the batch path could never take (the body limit is
+    # 64MB), so it used to be refused outright.
+    def chunk(name: str, offset: int, total: int, blob: bytes, last: bool, **extra: object) -> bytes:
+        header = json.dumps({"charKey": ck, "dir": "uploads/참고", "name": name, "rel": "",
+                             "offset": offset, "total": total, "last": last, **extra},
+                            ensure_ascii=False).encode()
+        return len(header).to_bytes(4, "big") + header + blob
+    big = bytes(range(256)) * 40  # 10240 bytes, in three pieces
+    st, body = s.post_raw("/files/upload-chunk", chunk("큰.bin", 0, len(big), big[:4096], False))
+    check("a first chunk is accepted and not finished", st == 200 and body.get("done") is False
+          and body.get("received") == 4096, str(body)[:140])
+    st, files = s.get(q("/files", charKey=ck))
+    up = next(a for a in files["areas"] if a["area"] == "uploads")
+    check("a half-arrived file is not listed", not any(f["name"].startswith("큰.bin") for f in up["files"]),
+          str([f["name"] for f in up["files"]])[:160])
+    st, body = s.post_raw("/files/upload-chunk", chunk("큰.bin", 9999, len(big), big[4096:8192], False))
+    check("a chunk at the wrong offset is refused", st == 400 and "조각" in str(body), str(body)[:120])
+    st, body = s.post_raw("/files/upload-chunk", chunk("큰.bin", 4096, len(big), big[4096:8192], False))
+    st, body = s.post_raw("/files/upload-chunk", chunk("큰.bin", 8192, len(big), big[8192:], True))
+    check("the last chunk completes the file", st == 200 and body.get("done") is True
+          and body.get("size") == len(big), str(body)[:140])
+    st, raw, _hdr = s.post_bytes("/files/download", {"charKey": ck, "path": "uploads/참고/큰.bin"})
+    check("and the bytes are exactly what was sent", raw == big, f"{len(raw)} vs {len(big)}")
+    st, body = s.post_raw("/files/upload-chunk", chunk("짧.bin", 0, 99, b"12345", True))
+    check("a size that does not match is refused", st == 400 and "크기" in str(body), str(body)[:120])
+    s.post("/files/delete", {"charKey": ck, "path": "uploads/참고/큰.bin"})
+
     st, body = s.post_raw("/files/upload-many", packed([("x.txt", "../../escape", b"x")]))
     check("a climbing `rel` is refused", st == 400, str(st))
     bad = packed([("y.txt", "", b"12345")])[:-2]

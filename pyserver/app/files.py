@@ -84,8 +84,8 @@ def listing(char_key: str) -> dict:
         size = 0
         if d.is_dir():
             for f in sorted(d.rglob("*")):
-                if not f.is_file():
-                    continue
+                if not f.is_file() or f.name.endswith(PART_SUFFIX):
+                    continue  # an upload still arriving in chunks
                 try:
                     st = f.stat()
                 except OSError:
@@ -225,6 +225,67 @@ def upload_many(char_key: str, into: str, entries: list[dict], data: bytes, *, e
         out.append({"path": dest.relative_to(root).as_posix(), "name": safe, "size": size})
     log.info("upload-many char=%s into=%s files=%s size=%s extracted=%s", char_key, target, len(out), total, extracted)
     return {"files": out, "count": len(out), "size": total, "extracted": extracted}
+
+
+# A file that arrives in pieces is written to <name>.part and renamed when the
+# last piece lands, so a listing never shows a half-written file and an
+# interrupted upload leaves something obviously unfinished rather than a
+# plausible-looking truncated one.
+PART_SUFFIX = ".part"
+# The whole-file cap for the chunked path. A .charx of a big character is
+# 140-180MB in practice, which the single-shot path could never take: the body
+# limit is 64MB and the plugin had to read the file into one array.
+MAX_CHUNKED = 2 * 1024 * 1024 * 1024
+
+
+def upload_chunk(char_key: str, into: str, name: str, rel: str, offset: int, total: int,
+                 data: bytes, *, last: bool = False, extract: bool = False) -> dict:
+    """One piece of a large file, appended at `offset`.
+
+    The offset is checked against what is already on disk rather than trusted:
+    two workers racing on the same name, or a retried chunk, would otherwise
+    interleave into a corrupt file that looks complete.
+    """
+    root = _root(char_key)
+    target = (into or "uploads").replace("\\", "/").strip("/")
+    area = target.split("/")[0]
+    if area not in ("uploads", "out"):
+        raise FileError(f"uploads/ 또는 out/ 안의 폴더여야 합니다: {into}")
+    if total < 0 or total > MAX_CHUNKED:
+        raise FileError(f"파일이 너무 큽니다 ({total} 바이트, 최대 {MAX_CHUNKED})")
+    safe = Path(str(name or "upload")).name.strip() or "upload"
+    rel = str(rel or "").replace("\\", "/").strip("/")
+    if ".." in rel.split("/"):
+        raise FileError(f"잘못된 하위 경로입니다: {rel}")
+    folder = _folder(char_key, target + ("/" + rel if rel else ""), area)
+    part = folder / (safe + PART_SUFFIX)
+
+    have = part.stat().st_size if part.exists() else 0
+    if offset == 0:
+        part.write_bytes(b"")
+        have = 0
+    if offset != have:
+        raise FileError(f"{safe}: 조각 순서가 어긋났습니다 (기대 {have}, 받은 {offset})")
+    with open(part, "ab") as f:
+        f.write(data)
+    have += len(data)
+
+    if not last:
+        return {"name": safe, "received": have, "total": total, "done": False}
+    if total and have != total:
+        part.unlink(missing_ok=True)
+        raise FileError(f"{safe}: 크기가 맞지 않습니다 ({have} / {total})")
+    if extract and safe.lower().endswith(".zip"):
+        blob = part.read_bytes()
+        part.unlink(missing_ok=True)
+        r = _extract_zip(char_key, folder, safe, blob)
+        log.info("upload-chunk char=%s %s extracted=%s", char_key, safe, r.get("extracted"))
+        return {**r, "done": True}
+    dest = folder / safe
+    part.replace(dest)
+    log.info("upload-chunk char=%s %s size=%s", char_key, safe, have)
+    return {"path": dest.relative_to(root).as_posix(), "name": safe, "size": have,
+            "received": have, "total": total, "done": True}
 
 
 # An extracted archive may not exceed this, however small the zip was: a

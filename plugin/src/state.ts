@@ -1114,6 +1114,27 @@ class AppState {
     return await transport.postBytes('/files/upload-many', body);
   }
 
+  /**
+   * One piece of a file too large to send in a single body.
+   *
+   * A character's .charx runs to 140-180MB, and every single-shot path caps
+   * far below that: the backend's body limit, and a relay in front of it.
+   * Pieces are appended server-side at the offset they claim, and the file
+   * only appears in the workspace once the last one lands.
+   */
+  async uploadChunk(dir: string, part: {
+    name: string; rel: string; offset: number; total: number; last: boolean; extract?: boolean;
+  }, bytes: Uint8Array): Promise<{ done: boolean; received: number; total: number; extracted?: number }> {
+    const header = new TextEncoder().encode(JSON.stringify({
+      charKey: this.activeCharKey, dir, ...part,
+    }));
+    const body = new Uint8Array(4 + header.byteLength + bytes.byteLength);
+    new DataView(body.buffer).setUint32(0, header.byteLength);
+    body.set(header, 4);
+    body.set(bytes, 4 + header.byteLength);
+    return await transport.postBytes('/files/upload-chunk', body);
+  }
+
   /** Several files or a folder as one zip, handed to the browser to save. */
   async downloadZip(paths: string[], name: string): Promise<number> {
     const bytes = await transport.postBinary('/files/zip', { charKey: this.activeCharKey, paths, name });

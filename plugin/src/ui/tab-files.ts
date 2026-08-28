@@ -877,24 +877,45 @@ async function uploadMany(files: Incoming[], into: string): Promise<void> {
   const t0 = Date.now();
 
   // Batches of raw bytes, ~16MB each, two in flight: a thousand small files
-  // is ~60 requests instead of a thousand, with no base64 in between. A
-  // file too big for a batch goes alone (up to the backend's body limit).
+  // is ~60 requests instead of a thousand, with no base64 in between.
+  //
+  // Anything larger than one batch goes through the chunked path instead of
+  // being refused: a character's .charx is 140-180MB, which no single body
+  // could carry (the backend's limit is 64MB, and a relay in front of it is
+  // stricter still). It is also read a slice at a time, so a 180MB file never
+  // sits in memory as one array.
   const BATCH = 16 * 1024 * 1024;
-  const SOLO = 60 * 1024 * 1024;
   const batches: Incoming[][] = [];
+  const big: Incoming[] = [];
   let cur: Incoming[] = [];
   let curSize = 0;
   for (const item of todo) {
-    if (item.file.size > SOLO) {
-      failed += 1;
-      notice(`${item.file.name}: 60MB 를 넘는 파일은 올릴 수 없습니다.`, 'err');
-      continue;
-    }
+    if (item.file.size > BATCH) { big.push(item); continue; }
     if (cur.length && curSize + item.file.size > BATCH) { batches.push(cur); cur = []; curSize = 0; }
     cur.push(item);
     curSize += item.file.size;
   }
   if (cur.length) batches.push(cur);
+
+  const sendBig = async ({ file, rel }: Incoming): Promise<void> => {
+    const name = file.name;
+    const extract = !!extractZips && /\.zip$/i.test(name);
+    try {
+      for (let offset = 0; offset < file.size; offset += BATCH) {
+        const end = Math.min(file.size, offset + BATCH);
+        const bytes = new Uint8Array(await file.slice(offset, end).arrayBuffer());
+        await state.uploadChunk(into, {
+          name, rel, offset, total: file.size, last: end >= file.size, extract,
+        }, bytes);
+        const pct = Math.round((end / file.size) * 100);
+        prog.textContent = `${name} 올리는 중 ${pct}% (${Math.round(end / 1048576)}/${Math.round(file.size / 1048576)}MB)`;
+      }
+      done += 1;
+    } catch (e) {
+      failed += 1;
+      notice(`${name}: ` + msg(e), 'err');
+    }
+  };
 
   const sendBatch = async (batch: Incoming[]): Promise<void> => {
     try {
@@ -926,6 +947,9 @@ async function uploadMany(files: Incoming[], into: string): Promise<void> {
   let next = 0;
   const worker = async () => { while (next < batches.length) await sendBatch(batches[next++]); };
   await Promise.all([worker(), worker()]);
+  // The large ones after the batches, one at a time: their pieces are ordered
+  // and the progress line is per file.
+  for (const item of big) await sendBig(item);
   prog.remove();
   notice(`${done}개를 ${into}/ 에 올렸습니다.` + (extracted ? ` (zip 에서 ${extracted}개 풀림)` : '') + (failed ? ` 실패 ${failed}개.` : ''), failed ? 'err' : 'ok');
   if (nodes.has(into)) { selectedDir = into; expandTo(into); }

@@ -867,6 +867,10 @@ def h_file_upload_many(arg: dict) -> Any:
     raise ApiError(500, "files/upload-many must be dispatched directly")
 
 
+def h_file_upload_chunk(arg: dict) -> Any:
+    raise ApiError(500, "files/upload-chunk must be dispatched directly")
+
+
 def h_file_mkdir(arg: dict) -> dict:
     try:
         return files.mkdir(_char(arg), str(arg.get("path") or ""))
@@ -1829,6 +1833,7 @@ ROUTES: dict[str, Handler] = {
     "GET /files/download": h_file_download,
     "POST /files/zip": h_file_zip,
     "POST /files/upload-many": h_file_upload_many,
+    "POST /files/upload-chunk": h_file_upload_chunk,
     "POST /assets/adopt": h_assets_adopt,
 
     "GET /config": h_config_get,
@@ -2107,6 +2112,41 @@ async def dispatch(path: str, request: Request) -> Response:
             _log(request.method, pathname, 400, started, str(e))
             return _json(400, {"error": str(e)}, origin)
         _log(request.method, pathname, 200, started, f"{out['count']} files {out['size'] // 1024}KB")
+        return _json(200, out, origin)
+
+    if key == "POST /files/upload-chunk":
+        # One piece of a file too big for a single body: same binary framing as
+        # upload-many ([u32 header len][JSON header][bytes]), header
+        # {charKey, dir, name, rel, offset, total, last, extract}. A 140MB
+        # .charx cannot go any other way - the body limit is 64MB, and a relay
+        # in front of the backend would not take it even if it could.
+        raw = await request.body()
+        if len(raw) > config.MAX_BODY_BYTES:
+            return _json(413, {"error": "body too large", "limit": config.MAX_BODY_BYTES}, origin)
+        if len(raw) < 4:
+            return _json(400, {"error": "empty body"}, origin)
+        hlen = int.from_bytes(raw[:4], "big")
+        try:
+            header = json.loads(raw[4:4 + hlen])
+        except ValueError:
+            return _json(400, {"error": "header is not valid JSON"}, origin)
+        if not isinstance(header, dict):
+            return _json(400, {"error": "header must be an object"}, origin)
+        try:
+            ck = _char(header)
+            out = await run_in_threadpool(
+                files.upload_chunk, ck, str(header.get("dir") or ""),
+                str(header.get("name") or ""), str(header.get("rel") or ""),
+                _int(header, "offset", 0), _int(header, "total", 0), raw[4 + hlen:],
+                last=bool(header.get("last")), extract=bool(header.get("extract")))
+        except ApiError as e:
+            _log(request.method, pathname, e.status, started, str(e))
+            return _json(e.status, e.payload, origin)
+        except files.FileError as e:
+            _log(request.method, pathname, 400, started, str(e))
+            return _json(400, {"error": str(e)}, origin)
+        _log(request.method, pathname, 200, started,
+             f"{out.get('received', 0) // 1024}KB/{out.get('total', 0) // 1024}KB")
         return _json(200, out, origin)
 
     if key == "POST /files/zip":
