@@ -77,6 +77,12 @@ def family_from_card(card: dict) -> str:
     return fam if fam and SAFE.sub("", fam) == fam else ""
 
 
+def _tally(into: dict[str, int], counts: dict | None) -> None:
+    for k, v in (counts or {}).items():
+        if v:
+            into[k] = into.get(k, 0) + int(v)
+
+
 def _write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     # newline='' keeps exactly the bytes we composed. Letting Python translate
@@ -143,10 +149,17 @@ def materialize(payload: dict, *, force: bool = False) -> dict:
     ingested = []
     local_lore: dict[str, tuple[list, bool]] = {}
     any_reset = False
+    # What the merge did across every material, for the panel's one-line
+    # notice. Empty on a first load and on a repeat open where nothing moved.
+    merged: dict[str, int] = {}
+    # A write-back re-reads only what it wrote: `chatReset` after a chat was
+    # written, `cardReset` after the card. `force` (the 🔄 button) is both.
+    chat_reset = force or bool(payload.get("chatReset"))
     for it in items:
         chat = it["chat"]
-        summary = store.ingest_chat(cha_id, chat, it["chatIndex"], force=force)
+        summary = store.ingest_chat(cha_id, chat, it["chatIndex"], force=chat_reset)
         tk = summary["chatKey"]
+        _tally(merged, summary.get("merge"))
 
         # Frozen original: written every time, because the user may have edited
         # in RisuAI since, and a stale original makes every diff wrong.
@@ -167,7 +180,7 @@ def materialize(payload: dict, *, force: bool = False) -> dict:
         # re-opening the panel would discard memory edits while keeping turn
         # edits, which is the kind of inconsistency nobody would guess at.
         reset = bool(summary.get("workingReset"))
-        mem.ingest(ck, tk, memory, reset=reset)
+        _tally(merged, (mem.ingest(ck, tk, memory, reset=reset) or {}).get("merge"))
         summary["memoryKinds"] = sorted(memory.keys())
         ingested.append(summary)
         # Every chat's own lorebook, under the same reset rule as its turns and
@@ -182,9 +195,11 @@ def materialize(payload: dict, *, force: bool = False) -> dict:
     # loads regardless of the flag, same as a first-seen chat.
     card_reset = force or bool(payload.get("cardReset")) or not cardmod.exists(ck)
     card_summary = cardmod.ingest(ck, card, reset=card_reset)
+    _tally(merged, card_summary.get("merge"))
     cardmod.set_full(ck, bool(payload.get("cardFull")))
 
-    store.ingest_lore(ck, list(card.get("globalLore") or []), local_lore, global_reset=card_reset)
+    _tally(merged, store.ingest_lore(ck, list(card.get("globalLore") or []), local_lore,
+                                     global_reset=card_reset))
     _write(base / "lore.json", json.dumps(
         {"globalLore": card.get("globalLore") or [],
          "localLore": {tk: entries for tk, (entries, _) in local_lore.items()}},
@@ -205,6 +220,8 @@ def materialize(payload: dict, *, force: bool = False) -> dict:
         # The workspace this bot shares with its other versions ('' = its own).
         "familyKey": family_of(ck),
         "cardCounts": card_summary.get("counts"),
+        # adopt / conflict / insert / delete, summed over every material.
+        "merge": merged,
         "loreCounts": {
             "global": len(card.get("globalLore") or []),
             "local": len(local_lore),

@@ -34,7 +34,7 @@ from starlette.concurrency import run_in_threadpool
 
 from . import (chatfmt, config, db, files, log, presets, session, skills, staging,
                store, websearch, workspace)
-from . import actions, assets, catalog, charx, codexauth, keys, permits, providers, snapshots, updater
+from . import actions, assets, catalog, charx, codexauth, conflicts, keys, permits, providers, snapshots, updater
 from . import card as cardmod
 from . import memory as mem
 
@@ -1311,6 +1311,8 @@ def h_patch(arg: dict) -> dict:
     lore = store.lore_changes(ck, tk)
     out["lore"] = {
         "localLore": [e["entry"] for e in store.lore(ck, "local") if e["chatKey"] == tk],
+        # The list as RisuAI last showed it, for the host's guard.
+        "before": store.lore_baseline(ck, "local", tk),
         "changed": lore["total"],
         **{k: lore[k] for k in ("added", "edited", "deleted")},
     }
@@ -1339,26 +1341,37 @@ def h_changes(arg: dict) -> dict:
         "total": turns["total"] + lore["total"] + memory["total"],
         "staged": len(staging.pending(tk)),
         "actions": len(actions.pending(tk)),
+        # Rows where our copy and RisuAI's both moved. 반영 is blocked until
+        # they are decided - writing one side of a conflict without saying so
+        # is exactly the silent revert this release removes.
+        "conflicts": conflicts.count_for_chat(tk),
         "warnings": p["warnings"],
     }
 
 
 def h_commit(arg: dict) -> dict:
-    """Mark the working state as shipped; every baseline moves to match.
+    """The write landed in RisuAI. Take a snapshot and stop holding a copy.
 
-    The client calls this only after RisuAI confirmed the write, so a failed
-    write-back leaves the diff intact and retryable. Turns, lorebook and memory
-    move together because they were written together.
+    This used to move every baseline onto the working copy ("rebase"), which
+    made the diff go to zero while our own copy stayed behind - and from that
+    moment it began drifting from RisuAI again, which is the drift this whole
+    release is about. Now the client re-reads the chat it just wrote and
+    re-uploads it with `chatReset`, so the working copy and the baseline are
+    both simply RisuAI's current state.
+
+    Nothing is deleted here. If that re-upload never arrives (a dropped
+    connection), the rows stay exactly as they are and the next open merges
+    them: RisuAI and the working copy now hold the same text, which
+    `merge.decide` reads as agreement rather than as a conflict.
+
+    NOT called after 복사본 저장: that writes a *new* chat and leaves this one
+    untouched in RisuAI, so this chat's edits are still pending against it.
     """
     tk = _chat(arg)
-    ck = _char_of_chat(tk)
+    pending = h_changes({"chatKey": tk})
     _checkpoint(tk, str(arg.get("label") or "반영 직전"))
-    out = store.rebase_original(tk)
-    out["lore"] = store.rebase_lore(ck, tk)
-    out["memory"] = mem.rebase(tk)
-    log.info("commit chat=%s baseline %s -> %s lore=%s memory=%s",
-             tk, out["previousBaseline"], out["newBaseline"], out["lore"], out["memory"])
-    return out
+    log.info("commit chat=%s shipped %s", tk, pending.get("total"))
+    return {"chatKey": tk, "shipped": pending.get("total"), "changes": pending}
 
 
 def h_reset(arg: dict) -> dict:
@@ -1625,16 +1638,33 @@ def h_card_changes(arg: dict) -> dict:
     out["charKey"] = ck
     out["full"] = cardmod.is_full(ck)
     out["actions"] = _card_actions_pending(ck)
+    out["conflicts"] = conflicts.count_for_card(ck)
     return out
 
 
 def h_card_commit(arg: dict) -> dict:
+    """The card write landed. Snapshot, and let the client re-read (see h_commit)."""
     ck = _char(arg)
+    pending = cardmod.changes(ck)
     snapshots.create_card(ck, str(arg.get("label") or "반영 직전"))
-    out = cardmod.rebase(ck)
-    out["lore"] = store.rebase_lore_global(ck)
-    log.info("card commit char=%s %s", ck, out)
-    return {"charKey": ck, **out}
+    log.info("card commit char=%s shipped %s", ck, pending.get("total"))
+    return {"charKey": ck, "shipped": pending.get("total"), "changes": pending}
+
+
+def h_conflicts(arg: dict) -> dict:
+    return conflicts.listing(str(arg.get("charKey") or ""), str(arg.get("chatKey") or ""))
+
+
+def h_conflict_resolve(arg: dict) -> dict:
+    try:
+        if arg.get("all"):
+            return conflicts.resolve_all(
+                str(arg.get("kind") or ""), str(arg.get("choice") or "mine"),
+                char_key=str(arg.get("charKey") or ""), chat_key=str(arg.get("chatKey") or ""))
+        return conflicts.resolve(str(arg.get("kind") or ""), str(arg.get("id") or ""),
+                                 str(arg.get("choice") or ""))
+    except conflicts.ConflictError as e:
+        raise ApiError(400, str(e))
 
 
 def h_card_reset(arg: dict) -> dict:
@@ -1901,6 +1931,8 @@ ROUTES: dict[str, Handler] = {
     "POST /card/assets/rename": h_card_assets_rename,
     "GET /card/patch": h_card_patch,
     "GET /card/changes": h_card_changes,
+    "GET /conflicts": h_conflicts,
+    "POST /conflict/resolve": h_conflict_resolve,
     "POST /card/commit": h_card_commit,
     "POST /card/reset": h_card_reset,
     "POST /card/checkpoint": h_card_checkpoint_create,

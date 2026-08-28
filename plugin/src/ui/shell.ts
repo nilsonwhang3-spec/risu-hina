@@ -20,7 +20,7 @@ import { renderMetaTab } from './tab-meta';
 import { renderBotLoreTab } from './tab-botlore';
 import { renderRegexTab } from './tab-regex';
 import { renderTriggerTab } from './tab-trigger';
-import { buildChatBar, refreshChatBar } from './chatbar';
+import { buildChatBar, refreshChatBar, shellNotice } from './chatbar';
 import { buildBotBar, refreshBotBar } from './botbar';
 import { renderAssetsTab } from './tab-assets';
 import { getSettingsBar } from './tab-settings';
@@ -400,6 +400,13 @@ function refreshTabBadges(): void {
     b.title = n ? `기준선과 다른 항목 ${n}개 — 각 항목에 추가/수정 표시가 있습니다` : '';
     b.style.display = n ? '' : 'none';
   }
+  // One red badge on the tab bar when something needs deciding, so a conflict
+  // is visible from whichever tab the user happens to be on.
+  const stuck = (state.botChanges?.conflicts ?? 0) + (state.changes?.conflicts ?? 0);
+  for (const id of ['meta', 'botlore', 'regex', 'trigger', 'editor', 'lore', 'memory'] as TabId[]) {
+    const b = document.querySelector(`#tab-${id} .tabbadge`) as HTMLElement | null;
+    if (b) b.classList.toggle('conflict', stuck > 0 && b.style.display !== 'none');
+  }
 }
 
 state.onChange(() => {
@@ -494,12 +501,36 @@ function setBootPhase(text: string): void {
  * instead of starting another multi-megabyte upload.
  */
 let uploadInFlight: Promise<void> | null = null;
+/**
+ * Say what the re-open merge did, once, in one line.
+ *
+ * Silence would be wrong here: rows moved on their own. The user needs to
+ * know that the panel is showing RisuAI's newer text rather than the copy
+ * they left behind - and, when something could not be decided, that 반영 is
+ * waiting on them.
+ */
+function announceMerge(): void {
+  const m = state.lastMerge;
+  state.lastMerge = null;
+  if (!m) return;
+  const bits: string[] = [];
+  if (m.adopt) bits.push(`수정 ${m.adopt}건`);
+  if (m.insert) bits.push(`추가 ${m.insert}건`);
+  if (m.delete) bits.push(`삭제 ${m.delete}건`);
+  const conflicts = m.conflict ?? 0;
+  if (!bits.length && !conflicts) return;
+  const head = bits.length ? `RisuAI 쪽 변경을 받았습니다 (${bits.join(' · ')}).` : '';
+  const tail = conflicts ? ` 편집 중이던 ${conflicts}건은 충돌로 표시했습니다 — 반영 전에 골라 주세요.` : '';
+  shellNotice((head + tail).trim(), conflicts ? 'err' : 'ok');
+}
+
 async function uploadAfterConnect(force = false): Promise<void> {
   if (uploadInFlight) return uploadInFlight;
   if (!state.slot || state.slotError) return;
   uploadInFlight = (async () => {
     try {
       await state.upload({ force });
+      announceMerge();
       if (state.activeChatKey) await state.loadTurns();
     } catch (e) {
       console.log('[risu-hina] upload failed', e);

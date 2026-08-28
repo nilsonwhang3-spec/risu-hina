@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RisuHina Showcase</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;700&family=Noto+Serif+JP:wght@400;700&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0c0a08;color:#d4d0c8;font-family:'Noto Sans KR',sans-serif;line-height:1.6;min-height:100vh}
+
+.wrap{max-width:720px;margin:0 auto}
+
+.top-label{text-align:center;padding:20px 20px 16px;font-size:10px;letter-spacing:8px;color:rgba(196,168,120,0.35);border-bottom:1px solid rgba(196,168,120,0.06)}
+
+.hero{display:flex;align-items:center;padding:36px 32px;gap:24px}
+.hero-img{flex-shrink:0;width:175px;border-radius:6px;box-shadow:0 8px 32px rgba(0,0,0,0.5),0 0 60px rgba(196,168,120,0.06)}
+.hero-text{flex:1}
+.hero-title{font-size:30px;font-weight:700;color:#ece4d8;letter-spacing:3px}
+.hero-sub{font-size:11px;color:rgba(196,168,120,0.5);letter-spacing:2px;margin-top:2px}
+.badge{display:inline-block;margin-top:10px;background:rgba(196,168,120,0.1);border:1px solid rgba(196,168,120,0.2);border-radius:3px;padding:2px 12px;font-size:10px;letter-spacing:3px;color:#c4a878}
+.hero-tagline{margin-top:18px;font-size:15px;color:#c8c4bc;line-height:1.9}
+.hero-tagline strong{color:#c4a878;font-weight:700}
+.hero-desc{font-size:12px;color:#8a8680;line-height:1.8;margin-top:4px}
+.dl-btn{display:inline-block;margin-top:16px;background:linear-gradient(135deg,#c4a878,#a08050);padding:10px 32px;border-radius:4px;box-shadow:0 4px 16px rgba(0,0,0,0.3);color:#0c0a08;font-size:13px;font-weight:700;letter-spacing:1px;text-decoration:none;transition:box-shadow .2s}
+.dl-btn:hover{box-shadow:0 4px 24px rgba(196,168,120,0.4)}
+
+.divider{text-align:center;padding:4px 0;font-size:9px;letter-spacing:16px;color:rgba(196,168,120,0.15)}
+
+.features{padding:8px 32px 20px}
+.feat{display:flex;gap:12px;padding:16px 0;border-bottom:1px solid rgba(196,168,120,0.06)}
+.feat:last-child{border-bottom:none}
+.feat-num{flex-shrink:0;width:32px;font-size:18px;font-weight:700;color:rgba(196,168,120,0.2);font-family:'Noto Serif JP',serif;padding-top:3px}
+.feat-body{flex:1}
+.feat-title{font-size:14px;font-weight:700;color:#c4a878}
+.feat-title span{font-size:11px;font-weight:400;color:#8a8680}
+.feat-desc{font-size:12px;color:#7a7670;line-height:1.9;margin-top:6px}
+
+.footer{padding:16px 32px 24px;border-top:1px solid rgba(196,168,120,0.06);font-size:11px;color:#9a9690;line-height:2}
+
+@media(max-width:520px){
+  .hero{flex-direction:column;text-align:center;padding:28px 20px}
+  .hero-img{width:140px}
+  .features{padding:8px 20px 20px}
+  .footer{padding:16px 20px 24px}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="top-label">RISUAI PLUGIN</div>
+
+<div class="hero">
+  <img class="hero-img" src="https://raw.githubusercontent.com/nilsonwhang3-spec/vepo-bot-assets/master/Assets/Main Characters/Natsume_Hina/Natsume_Hina.webp" alt="히나">
+  <div class="hero-text">
+    <div class="hero-title">리스히나</div>
+    <div class="hero-sub">RisuHina</div>
+    <div class="badge">BETA</div>
+    <div class="hero-tagline">당신의 봇과 챗을 개변하는 <strong>진짜</strong> OOC 플러그인</div>
+    <div class="hero-desc">멀티턴 에이전트를 통해 당신의 봇과 챗을 마음대로 주무르세요</div>
+    <a class="dl-btn" href="https://github.com/nilsonwhang3-spec/risu-hina/releases/latest" target="_blank" rel="noopener noreferrer">DOWNLOAD</a>
+  </div>
+</div>
+
+<div class="divider">──────</div>
+
+<div class="features">
+
+  <div class="feat">
+    <div class="feat-num">01</div>
+    <div class="feat-body">
+      <div class="feat-title">스토리 기획과 제작/수정 <span>— 아이디어를 봇으로</span></div>
+      <div class="feat-desc">봇의 전체 구조를 이해하고 당신을 도와줍니다.<br>단순 수정부터 새 캐릭터 기획, 봇의 약점 분석까지.</div>
+    </div>
+  </div>
+
+  <div class="feat">
+    <div class="feat-num">02</div>
+    <div class="feat-body">
+      <div class="feat-title">상태창, Regex, LUA, 에셋 <span>— 다재다능한 비서</span></div>
+      <div class="feat-desc">이야기만 쓰는 게 아닙니다. 리스의 구조를 알고 있습니다.<br>상태창 꾸미기, 정규식, LUA 프로그래밍, 에셋 관리까지 한번에.</div>
+    </div>
+  </div>
+
+  <div class="feat">
+    <div class="feat-num">03</div>
+    <div class="feat-body">
+      <div class="feat-title">챗 역사개변 <span>— 너의 흑역사가 추억이 된다</span></div>
+      <div class="feat-desc">상태창, 변수를 이야기 흐름에 맞춰 일관되게 찐빠를 잡아냅니다.<br>처음부터 진행한 것처럼 감쪽같이 바꿔줍니다.</div>
+    </div>
+  </div>
+
+  <div class="feat">
+    <div class="feat-num">04</div>
+    <div class="feat-body">
+      <div class="feat-title">그 외</div>
+      <div class="feat-desc">챗요약, 이사 등등 — 봇과 챗에 관한 거라면 상상하는 대부분의 것들을 할 수 있어요.</div>
+    </div>
+  </div>
+
+</div>
+
+<div class="footer">
+  ▸ 멀티턴 에이전틱 워크플로우. Ollama GLM 5.2 / Gemini 3.7 Flash 등 저비용 모델 사용 가능(책임못짐).<br>
+  ▸ 백엔드로 쓸 PC가 필요합니다. PC에 깔고 폰으로 접속하세요(포켓리스 추천, 웹 가능).
+</div>
+
+</div>
+</body>
+</html>

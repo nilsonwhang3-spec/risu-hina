@@ -16,6 +16,12 @@ export interface ChatInfo {
 export interface WorkspaceInfo {
   /** The workspace shared with this bot's other versions ('' = its own). */
   familyKey?: string;
+  /**
+   * What the re-open merge did: how many rows followed RisuAI (`adopt`),
+   * arrived (`insert`), went away (`delete`) and need a decision (`conflict`).
+   * Absent on a first load and on a repeat open where nothing moved.
+   */
+  merge?: { adopt?: number; keep?: number; conflict?: number; insert?: number; delete?: number };
   charKey: string;
   charId: string;
   characterName: string;
@@ -37,6 +43,8 @@ export interface Turn {
   changed: boolean;
   isNew: boolean;
   origin: string;
+  /** Set when RisuAI changed this turn too; 반영 waits for a decision. */
+  conflict?: { kind: string; theirs?: unknown; base?: unknown } | null;
 }
 
 export interface Patch {
@@ -47,9 +55,11 @@ export interface Patch {
   structural: boolean;
   reordered: boolean;
   messages?: RisuMessage[];
+  /** The ordered turn ids + body hashes a whole-array replace is based on. */
+  beforeTurns?: { id: string; h: number }[];
   warnings: string[];
   /** This chat's lorebook, whole, plus how much of it differs from RisuAI. */
-  lore?: { localLore: unknown[]; changed: number; added: number; edited: number; deleted: number };
+  lore?: { localLore: unknown[]; before?: unknown[]; changed: number; added: number; edited: number; deleted: number };
   /** The long-term memory fields, plus how many entries differ. */
   memory?: { data: Record<string, unknown>; changed: number };
 }
@@ -69,6 +79,8 @@ export interface Changes {
   total: number;
   staged: number;
   actions: number;
+  /** Rows where our copy and RisuAI's both moved. 반영 waits for these. */
+  conflicts: number;
   warnings: string[];
 }
 
@@ -78,6 +90,23 @@ export interface WriteBackResult {
   lore: number;
   memory: number;
   warnings: string[];
+}
+
+/** One row the merge could not decide on its own. */
+export interface ConflictItem {
+  kind: 'turn' | 'lore' | 'card_field' | 'card_script' | 'memory';
+  id: string;
+  label: string;
+  charKey: string | null;
+  chatKey: string | null;
+  /** both-moved | deleted-upstream | weak-match */
+  reason: string;
+  tier: string;
+  mine: unknown;
+  /** null when RisuAI no longer has the item at all. */
+  theirs: unknown;
+  base: unknown;
+  canTakeTheirs: boolean;
 }
 
 export interface StagedEdit {
@@ -312,6 +341,8 @@ export interface LoreEntry {
   entry: Record<string, unknown>;
   /** The frozen baseline entry, for edited rows only (the diff view). */
   original?: Record<string, unknown> | null;
+  /** Set when RisuAI changed this entry too; 반영 waits for a decision. */
+  conflict?: { kind: string; theirs?: unknown; base?: unknown } | null;
 }
 
 export interface MemoryItem {
@@ -350,6 +381,8 @@ export interface CardField {
   isNew: boolean;
   /** An original greeting marked for deletion (purged on commit). */
   deleted: boolean;
+  /** Set when RisuAI changed this field too; 반영 waits for a decision. */
+  conflict?: { kind: string; theirs?: unknown; base?: unknown } | null;
   updatedAt: number;
 }
 
@@ -376,6 +409,8 @@ export interface CardChanges {
   lore: ScriptCounts;
   total: number;
   actions: number;
+  /** Rows where our copy and RisuAI's both moved. 반영 waits for these. */
+  conflicts: number;
 }
 
 export interface CardPatch {
@@ -383,13 +418,17 @@ export interface CardPatch {
   chaId: string;
   full: boolean;
   fields: { field: string; before: string; after: string }[];
-  alternateGreetings: { changed: boolean; list: string[] };
-  globalLore: { changed: number; list: unknown[] };
-  customscript: { changed: number; list: unknown[] };
-  triggerscript: { changed: number; list: unknown[] };
-  assetref: { changed: number; list: unknown[] };
+  // `before` on each list is what RisuAI last showed us, in its order: the
+  // host compares it with live and refuses rather than overwriting a change
+  // made in RisuAI while the panel was open.
+  alternateGreetings: { changed: boolean; list: string[]; before: string[] };
+  globalLore: { changed: number; list: unknown[]; before: unknown[] };
+  customscript: { changed: number; list: unknown[]; before: unknown[] };
+  triggerscript: { changed: number; list: unknown[]; before: unknown[] };
+  assetref: { changed: number; list: unknown[]; before: unknown[] };
   /** The asset references as RisuAI's three lists, rebuilt from the working rows. */
-  assets: { changed: number; emotionImages: unknown[]; additionalAssets: unknown[]; ccAssets: unknown[] };
+  assets: { changed: number; emotionImages: unknown[]; additionalAssets: unknown[]; ccAssets: unknown[];
+            before?: { emotionImages: unknown[]; additionalAssets: unknown[]; ccAssets: unknown[] } };
   total: number;
 }
 
@@ -411,6 +450,8 @@ class AppState {
   liveChat: RisuChat | null = null;
 
   workspace: WorkspaceInfo | null = null;
+  /** What the last upload's merge did, until the shell has announced it. */
+  lastMerge: WorkspaceInfo['merge'] | null = null;
   /** Which half of the panel is open ('chat' | 'bot'); the shell keeps it current, the agent is told. */
   editMode: 'chat' | 'bot' = 'bot';
   activeChatKey = '';
@@ -528,7 +569,8 @@ class AppState {
    * megabytes, and sending every chat of a character on every panel open would
    * make the common case pay for the rare one.
    */
-  async upload(opts: { allChats?: boolean; force?: boolean; cardReset?: boolean } = {}): Promise<WorkspaceInfo> {
+  async upload(opts: { allChats?: boolean; force?: boolean; cardReset?: boolean;
+                       chatReset?: boolean } = {}): Promise<WorkspaceInfo> {
     if (!this.slot || !this.character) throw new Error('호스트 상태를 먼저 읽어야 합니다');
     const chats = Array.isArray(this.character.chats) ? this.character.chats : [];
     const payload: Record<string, unknown> = {
@@ -539,7 +581,10 @@ class AppState {
       // this and refuses card write-backs built on whitelist-era uploads.
       cardFull: true,
       force: Boolean(opts.force),
+      // Scoped re-reads after a write-back: the card half or the chat half,
+      // never both, so writing one does not discard edits pending in the other.
       cardReset: Boolean(opts.cardReset),
+      chatReset: Boolean(opts.chatReset),
     };
     if (opts.allChats) {
       payload.chats = chats.map((c, i) => ({ chat: c, chatIndex: i }));
@@ -548,6 +593,8 @@ class AppState {
     }
     const res = await transport.upload<{ workspace: WorkspaceInfo }>('/workspace', payload);
     this.workspace = res.workspace;
+    // Read once by the shell, which turns it into the one-line notice.
+    this.lastMerge = res.workspace.merge ?? null;
     if (!this.activeChatKey || !this.workspace.chats.some((c) => c.chatKey === this.activeChatKey)) {
       this.activeChatKey = this.workspace.chats[0]?.chatKey ?? '';
     }
@@ -710,9 +757,14 @@ class AppState {
    * Called only on success, so a failed write-back leaves the diff intact and
    * the retry meaningful.
    */
-  async commit(label: string): Promise<{ previousBaseline: number; newBaseline: number; lore: number; memory: number }> {
-    const r = await transport.post<{ previousBaseline: number; newBaseline: number; lore: number; memory: number }>(
+  /**
+   * The chat landed in RisuAI: snapshot it, then re-read what RisuAI now
+   * holds. See `rereadCard` for why the working copy is not kept.
+   */
+  async commit(label: string): Promise<{ shipped: number }> {
+    const r = await transport.post<{ shipped: number }>(
       '/commit', { chatKey: this.activeChatKey, label });
+    await this.rereadChat();
     this.bump();
     return r;
   }
@@ -795,6 +847,12 @@ class AppState {
     }
     if (patch.lore && (whole || patch.lore.changed)) update.localLore = patch.lore.localLore;
     if (patch.memory && (whole || patch.memory.changed)) update.memory = patch.memory.data;
+    // Saving a copy writes a brand-new chat and cannot clobber anything, so it
+    // sends no guards; a write-back into the live chat sends both.
+    if (!whole) {
+      if (update.messages) update.beforeTurns = patch.beforeTurns;
+      if (update.localLore) update.loreBefore = patch.lore?.before;
+    }
     return Object.keys(update).length ? update : null;
   }
 
@@ -862,6 +920,40 @@ class AppState {
       this.sessionId = r.sessionId;
     }
     yield* transport.stream('/chat', { sessionId: this.sessionId, prompt, mode: this.editMode }, signal);
+  }
+
+  // --- merge conflicts ------------------------------------------------------
+
+  /** Rows where our copy and RisuAI's both moved since the last open. */
+  async conflicts(scope: 'chat' | 'card' | 'both' = 'both'): Promise<ConflictItem[]> {
+    const q: Record<string, string> = {};
+    if (scope !== 'card' && this.activeChatKey) q.chatKey = this.activeChatKey;
+    if (scope !== 'chat' && this.activeCharKey) q.charKey = this.activeCharKey;
+    if (!Object.keys(q).length) return [];
+    const r = await transport.get<{ conflicts: ConflictItem[] }>('/conflicts', q);
+    return r.conflicts ?? [];
+  }
+
+  async resolveConflict(kind: string, id: string, choice: 'mine' | 'theirs'): Promise<void> {
+    await transport.post('/conflict/resolve', { kind, id, choice });
+    await this.afterResolve();
+  }
+
+  async resolveAllConflicts(choice: 'mine' | 'theirs', scope: 'chat' | 'card'): Promise<number> {
+    const r = await transport.post<{ resolved: number }>('/conflict/resolve', {
+      all: true, choice,
+      ...(scope === 'chat' ? { chatKey: this.activeChatKey } : { charKey: this.activeCharKey }),
+    });
+    await this.afterResolve();
+    return r.resolved ?? 0;
+  }
+
+  private async afterResolve(): Promise<void> {
+    if (this.activeChatKey) await this.loadTurns();
+    await this.refreshChanges();
+    await this.refreshBotChanges();
+    this.epoch += 1;
+    this.emit();
   }
 
   async stagedEdits(): Promise<StagedEdit[]> {
@@ -1473,6 +1565,20 @@ class AppState {
       update.additionalAssets = patch.assets.additionalAssets;
       update.ccAssets = patch.assets.ccAssets;
     }
+    // What RisuAI held when we based these lists on it, so the host can refuse
+    // rather than overwrite a change made there meanwhile. A clone (`whole`)
+    // writes into a brand-new bot and has nothing to clobber, so it sends none.
+    if (!whole) {
+      update.before = {
+        alternateGreetings: patch.alternateGreetings.before,
+        globalLore: patch.globalLore.before,
+        customscript: patch.customscript.before,
+        triggerscript: patch.triggerscript.before,
+        emotionImages: patch.assets?.before?.emotionImages,
+        additionalAssets: patch.assets?.before?.additionalAssets,
+        ccAssets: patch.assets?.before?.ccAssets,
+      };
+    }
     return Object.keys(update).length ? update : null;
   }
 
@@ -1497,8 +1603,36 @@ class AppState {
     if (!update) return { applied: 0, mode: 'noop' };
     const r = await host.writeCharacter(slot.characterIndex, patch.chaId, update);
     await this.cardCommit('반영 직전');
-    await this.readHost();
+    await this.rereadCard();
     return { applied: r.applied, mode: r.mode };
+  }
+
+  /**
+   * The card landed in RisuAI, so stop holding a copy of it.
+   *
+   * The old flow moved the baseline onto the working copy and kept both. The
+   * diff went to zero and our copy stayed behind, and from that moment it
+   * drifted from RisuAI again - which is what made a later re-open show
+   * untouched rows as edits. Re-reading is the whole fix: after this the
+   * working copy IS RisuAI's current card, with no history to go stale.
+   *
+   * Scoped to the card: a chat's pending edits are none of this write's
+   * business and must not be discarded with it.
+   */
+  private async rereadCard(): Promise<void> {
+    await this.readHost();
+    if (this.slot && this.character) await this.upload({ cardReset: true });
+    this.epoch += 1;
+    this.emit();
+  }
+
+  /** The chat twin of rereadCard. */
+  private async rereadChat(): Promise<void> {
+    await this.readHost();
+    if (this.slot && this.character) await this.upload({ chatReset: true });
+    if (this.activeChatKey) await this.loadTurns();
+    this.epoch += 1;
+    this.emit();
   }
 
   /**

@@ -25,7 +25,7 @@ import json
 import uuid
 from typing import Any
 
-from . import db, log
+from . import db, log, merge
 
 # Which key holds a list of summaries, and what each one calls its text.
 SCHEMES: dict[str, tuple[str, str]] = {
@@ -145,38 +145,85 @@ def ingest(char_key: str, chat_key: str, memory: dict, *, reset: bool = True) ->
         log.info("memory ingest chat=%s %s", chat_key, counts or "none")
         return {"chatKey": chat_key, "counts": counts, "total": len(rows), "reset": True}
 
-    # Refresh in place, matched on (kind, seq) - the address a summary keeps
-    # across regenerations. New summaries are added; rows RisuAI no longer has
-    # are left, because deleting one would throw away an edit rather than an
-    # absence the user asked for.
-    added = 0
-    rebased = 0
-    for r in rows:
-        _, _, _, kind, seq, title, body, _original, extra, _c, _u = r
-        if kind == VARS:
-            # A variable's address is its key, not its position: keys come and
-            # go in RisuAI and the order of a dict is not a promise.
-            found = db.one(
-                "SELECT id, original FROM memories WHERE chat_key = ? AND kind = ? AND title = ?",
-                (chat_key, kind, title))
-        else:
-            found = db.one(
-                "SELECT id, original FROM memories WHERE chat_key = ? AND kind = ? AND seq = ?",
-                (chat_key, kind, seq))
-        if found is None:
-            db.execute(
-                "INSERT INTO memories(id, chat_key, char_key, kind, seq, title, body, "
-                "original, extra_json, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-                r)
-            added += 1
-        elif (found["original"] or "") != body:
-            db.execute(
-                "UPDATE memories SET original = ?, extra_json = ?, updated_at = ? WHERE id = ?",
-                (body, extra, now, found["id"]))
-            rebased += 1
-    log.info("memory refresh chat=%s added=%s rebased=%s", chat_key, added, rebased)
+    # Three-way merge, per kind (app/merge.py). Variables keep their name as
+    # the address; summaries are matched on the turns they cover, because
+    # `(kind, seq)` - the old address - shifts under every regeneration, and
+    # one insertion at the head rebased every summary onto its neighbour.
+    merged = _merge_memory(chat_key, rows, now)
+    log.info("memory refresh chat=%s %s", chat_key, merged or "no change")
     return {"chatKey": chat_key, "counts": counts, "total": len(rows),
-            "reset": False, "added": added, "rebased": rebased}
+            "reset": False, "merge": merged}
+
+
+def _merge_memory(chat_key: str, incoming: list[tuple], now: float) -> dict[str, int]:
+    out: dict[str, int] = {}
+    by_kind: dict[str, list[tuple]] = {}
+    for r in incoming:
+        by_kind.setdefault(r[3], []).append(r)
+    kinds = set(by_kind) | {
+        str(r["kind"]) for r in db.query(
+            "SELECT DISTINCT kind FROM memories WHERE chat_key = ?", (chat_key,))}
+
+    for kind in sorted(kinds):
+        items = by_kind.get(kind, [])
+        spec = merge.VAR if kind == VARS else merge.MEMO
+        rows = [db.row_to_dict(r) for r in db.query(
+            "SELECT * FROM memories WHERE chat_key = ? AND kind = ? ORDER BY seq", (chat_key, kind))]
+        # A summary's identity lives in its extras (`chatMemos`), a variable's
+        # in its title, so both travel with the value being matched.
+        def shape(title: str, body: str, extra: Any) -> Any:
+            # The identity travels with the value: a variable is keyed by its
+            # name and a summary by the turns it covers (`chatMemos`), while
+            # what the three-way compares is the text either way.
+            if kind == VARS:
+                return {"key": title, "text": body}
+            return {"text": body, **(db.unjs(extra, {}) if isinstance(extra, str) else (extra or {}))}
+
+        based, added_here = [], []
+        for r in rows:
+            ours = shape(r["title"], r["body"] or "", r["extra_json"])
+            if r["original"] is None:
+                added_here.append(merge.Row(id=r["id"], ours=ours, base=None, dirty=True))
+            else:
+                based.append(merge.Row(id=r["id"], ours=ours,
+                                       base=shape(r["title"], r["original"] or "", r["extra_json"]),
+                                       dirty=False, order=int(r["seq"] or 0)))
+        theirs = [shape(t[5], t[6], t[8]) for t in items]
+        ops = merge.plan(based, theirs, spec)
+        same = merge.adopted_additions(added_here, [o for o in ops if o.action == merge.INSERT], spec)
+        folded = {id(o) for o in same.values()}
+        for op in ops:
+            out[op.action] = out.get(op.action, 0) + 1
+            row = items[op.seq] if op.seq is not None and op.seq < len(items) else None
+            if op.action == merge.INSERT:
+                if id(op) in folded:
+                    continue
+                db.execute(
+                    "INSERT INTO memories(id, chat_key, char_key, kind, seq, title, body, "
+                    "original, conflict_json, extra_json, created_at, updated_at) "
+                    "VALUES(?,?,?,?,?,?,?,?,NULL,?,?,?)",
+                    (row[0], row[1], row[2], row[3], row[4], row[5], row[6], row[7], row[8], now, now))
+                continue
+            body = row[6] if row is not None else None
+            extra = row[8] if row is not None else None
+            if op.action == merge.DELETE:
+                db.execute("DELETE FROM memories WHERE id = ?", (op.row.id,))
+            elif op.action == merge.ADOPT:
+                db.execute("UPDATE memories SET body = ?, original = ?, title = ?, extra_json = ?, "
+                           "conflict_json = NULL, updated_at = ? WHERE id = ?",
+                           (body, body, row[5], extra, now, op.row.id))
+            elif op.action == merge.CONFLICT:
+                db.execute("UPDATE memories SET original = COALESCE(?, original), conflict_json = ?, "
+                           "updated_at = ? WHERE id = ?",
+                           (body, db.js(op.conflict), now, op.row.id))
+            elif body is not None:
+                db.execute("UPDATE memories SET original = ?, updated_at = ? WHERE id = ?",
+                           (body, now, op.row.id))
+        for row_id, op in same.items():
+            row = items[op.seq]
+            db.execute("UPDATE memories SET original = ?, updated_at = ? WHERE id = ?",
+                       (row[6], now, row_id))
+    return {k: v for k, v in out.items() if v}
 
 
 def _shell(memory: dict) -> dict:
@@ -213,6 +260,7 @@ def _row(r) -> dict:
         "original": original,
         "changed": original is not None and original != body,
         "isNew": original is None,
+        "conflict": db.unjs(d.get("conflict_json"), None),
         "updatedAt": d.get("updated_at"),
         "valueType": extra.get("type") if d.get("kind") == VARS else None,
     }

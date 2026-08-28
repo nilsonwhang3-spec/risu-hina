@@ -98,7 +98,78 @@ export interface ChatUpdate {
   edits?: Edit[];
   messages?: RisuMessage[];
   localLore?: unknown[];
+  /** The lorebook as RisuAI last showed us, checked before replacing it. */
+  loreBefore?: unknown[];
+  /** The ordered turn ids + body hashes a whole-array replace is based on. */
+  beforeTurns?: { id: string; h: number }[];
   memory?: Record<string, unknown>;
+}
+
+// --- comparing a list against what RisuAI holds now --------------------------
+//
+// A list material (lorebook, greetings, scripts, asset references) is written
+// whole, so before 0.9 an entry the user added in RisuAI while the panel was
+// open simply vanished - no error, no warning. The backend now sends the
+// baseline list alongside the new one and these compare it with live.
+//
+// Never `JSON.stringify(a) === JSON.stringify(b)`: `structuredClone` and
+// RisuAI's own save/load reorder object keys freely, so key order can never be
+// part of the comparison. The rules here mirror `app/merge.py`'s `canon`, and
+// the boolean set matters as much as the sorting - a card that has been
+// through RisuAI's importer carries `selective: false` on every lorebook entry
+// it read, and without treating a default as absent no write-back would ever
+// pass again.
+
+const DEFAULT_FALSE = new Set([
+  'alwaysActive', 'selective', 'useRegex', 'enabled', 'case_sensitive',
+  'scanDepth', 'loreCache', 'folder', 'activationPercent',
+]);
+
+function strip(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(strip);
+  if (value && typeof value === 'object') {
+    const src = value as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const k of Object.keys(src).sort()) {
+      const v = strip(src[k]);
+      if (v === null || v === undefined || v === '') continue;
+      if (Array.isArray(v) && !v.length) continue;
+      if (v && typeof v === 'object' && !Array.isArray(v) && !Object.keys(v).length) continue;
+      if (DEFAULT_FALSE.has(k) && (v === false || v === 0 || v === '0')) continue;
+      out[k] = v;
+    }
+    return out;
+  }
+  return value;
+}
+
+export function canon(value: unknown): string {
+  return typeof value === 'string' ? value : JSON.stringify(strip(value));
+}
+
+export function fnv32(text: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i += 1) {
+    // Hash the UTF-8 bytes, so the backend's Python and this agree.
+    const c = text.codePointAt(i) as number;
+    for (const b of utf8(c)) h = Math.imul(h ^ b, 0x01000193) >>> 0;
+    if (c > 0xffff) i += 1;
+  }
+  return h >>> 0;
+}
+
+function utf8(cp: number): number[] {
+  if (cp < 0x80) return [cp];
+  if (cp < 0x800) return [0xc0 | (cp >> 6), 0x80 | (cp & 63)];
+  if (cp < 0x10000) return [0xe0 | (cp >> 12), 0x80 | ((cp >> 6) & 63), 0x80 | (cp & 63)];
+  return [0xf0 | (cp >> 18), 0x80 | ((cp >> 12) & 63), 0x80 | ((cp >> 6) & 63), 0x80 | (cp & 63)];
+}
+
+/** Refuse the write when RisuAI's copy of a list is not what we based ours on. */
+function checkList(what: string, live: unknown, before: unknown): void {
+  if (canon(live ?? []) === canon(before ?? [])) return;
+  throw new HostError('changed',
+    `RisuAI 쪽에서 ${what}이(가) 바뀌었습니다. 패널을 다시 열어 병합한 뒤 반영해 주세요`);
 }
 
 export interface WriteResult {
@@ -125,6 +196,19 @@ export async function writeChat(slot: Slot, seenChatId: string | undefined, upda
   const fresh = await readChat(slot);
   if (seenChatId && fresh.id && fresh.id !== seenChatId) {
     throw new HostError('changed', '챗이 바뀌었습니다 (복사·브랜치 직후일 수 있습니다). 다시 불러와 주세요');
+  }
+
+  // Every check first, then every write: a mismatch on the lorebook must not
+  // leave the transcript already replaced.
+  if (update.messages && update.beforeTurns) {
+    const live = fresh.message.map((m) => ({ id: String(m.chatId ?? ''), h: fnv32(String(m.data ?? '')) }));
+    if (canon(live) !== canon(update.beforeTurns)) {
+      throw new HostError('changed',
+        'RisuAI 쪽에서 챗이 바뀌었습니다 (턴이 늘었거나 수정되었습니다). 패널을 다시 열어 병합한 뒤 반영해 주세요');
+    }
+  }
+  if (update.localLore && update.loreBefore) {
+    checkList('로어북', fresh.localLore, update.loreBefore);
   }
 
   const next: RisuChat = { ...fresh };
@@ -226,6 +310,21 @@ export interface CardUpdate {
   additionalAssets?: unknown[];
   emotionImages?: unknown[];
   ccAssets?: unknown[];
+  /**
+   * What each list looked like in RisuAI when we based our copy on it. A list
+   * is replaced whole, so without this a change made in RisuAI while the panel
+   * was open was overwritten with no error at all. Absent = no check (an
+   * approved asset action, or a clone, which cannot clobber anything).
+   */
+  before?: {
+    alternateGreetings?: unknown[];
+    globalLore?: unknown[];
+    customscript?: unknown[];
+    triggerscript?: unknown[];
+    additionalAssets?: unknown[];
+    emotionImages?: unknown[];
+    ccAssets?: unknown[];
+  };
 }
 
 /**
@@ -272,6 +371,17 @@ export async function writeCharacter(
     if (liveValue(e.field) !== e.before) {
       throw new HostError('changed', `RisuAI 쪽에서 카드가 바뀌었습니다 (${e.field}). 다시 불러와 주세요`);
     }
+  }
+  // The lists, checked before anything is written (see checkList).
+  const LIST_LABEL: Record<string, string> = {
+    alternateGreetings: '대체 인사말', globalLore: '봇 로어북',
+    customscript: 'Regex', triggerscript: '트리거',
+    additionalAssets: '에셋', emotionImages: '감정 이미지', ccAssets: '에셋',
+  };
+  for (const [key, label] of Object.entries(LIST_LABEL)) {
+    const wanted = (update as Record<string, unknown>)[key];
+    const before = update.before?.[key as keyof NonNullable<CardUpdate['before']>];
+    if (wanted && before !== undefined) checkList(label, fresh[key], before);
   }
   for (const e of update.fields ?? []) {
     if (e.field === 'characterVersion') {

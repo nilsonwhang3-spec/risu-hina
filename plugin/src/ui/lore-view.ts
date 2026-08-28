@@ -16,6 +16,7 @@ import { setToolbarSearch } from './shell';
 import { state, type LoreEntry } from '../state';
 import { threePane } from './panes';
 import { bindAgent, mountAgent } from './agentpane';
+import { conflictBadge, conflictBox } from './conflicts';
 
 export interface LoreViewOptions {
   scope: 'local' | 'global';
@@ -223,7 +224,9 @@ export function makeLoreTab(opts: LoreViewOptions): (mount: HTMLElement) => void
     if ((e.entry as Record<string, unknown>).alwaysActive) {
       row.appendChild(el('span', { class: 'badge', title: '상시 활성화 — 키워드 없이 항상 삽입됩니다', text: '상시' }));
     }
-    if (e.origin !== 'original') {
+    if (e.conflict) {
+      row.appendChild(conflictBadge());
+    } else if (e.origin !== 'original') {
       row.appendChild(el('span', { class: 'badge warn', text: e.origin === 'added' ? '추가' : '수정' }));
     }
     row.appendChild(up);
@@ -340,9 +343,22 @@ export function makeLoreTab(opts: LoreViewOptions): (mount: HTMLElement) => void
       if (!!orig.alwaysActive !== !!entry.alwaysActive) metaChanged.push(`상시 활성화: ${orig.alwaysActive ? '켬' : '끔'} → ${entry.alwaysActive ? '켬' : '끔'}`);
     }
 
+    // A conflict sits above the editor: RisuAI changed this entry too, and
+    // until one side is chosen the panel is holding two answers for it.
+    const conflict = e.conflict
+      ? conflictBox({
+          kind: 'lore', id: e.id, label: titleOf(e), charKey: null, chatKey: e.chatKey ?? null,
+          reason: String((e.conflict as Record<string, unknown>).kind ?? ''), tier: '',
+          mine: e.entry, theirs: (e.conflict as Record<string, unknown>).theirs ?? null,
+          base: (e.conflict as Record<string, unknown>).base ?? null,
+          canTakeTheirs: true,
+        }, () => { void refresh(); })
+      : null;
+
     clear(viewMount);
     viewMount.appendChild(el('div', { class: 'card' }, [
       el('h2', {}, [el('span', { text: opts.heading }), el('span', { class: 'spacer' }), focusButton(content, titleOf(e))]),
+      conflict,
       el('label', { class: 'field' }, [el('span', { text: '이름 (comment)' }), comment]),
       el('label', { class: 'checkrow', style: { marginBottom: '8px' } }, [
         always, el('span', { text: '상시 활성화 (alwaysActive) — 키워드 없이 항상 삽입' }),

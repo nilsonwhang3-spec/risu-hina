@@ -13,6 +13,7 @@
 import { el, clear, diffFragments, fmtTime, modal, ICON } from './dom';
 import { renderBody, type ViewMode, type RenderOptions } from './render';
 import type { Turn } from '../state';
+import { conflictBadge } from './conflicts';
 
 const ESTIMATED_ROW = 92;
 const OVERSCAN = 6;
@@ -250,7 +251,8 @@ export class TurnList {
       el('span', { class: 'turn-no', text: String(t.seq), title: `턴 ${t.seq}` }),
       el('span', { class: `turn-role ${t.role === 'user' ? 'user' : 'char'}`, text: t.role }),
       t.time ? el('span', { text: fmtTime(t.time) }) : null,
-      t.changed ? el('span', { class: 'badge warn', text: '수정됨' }) : null,
+      t.conflict ? conflictBadge() : null,
+      t.changed && !t.conflict ? el('span', { class: 'badge warn', text: '수정됨' }) : null,
       t.isNew ? el('span', { class: 'badge ok', text: '추가됨' }) : null,
       doomed ? el('span', { class: 'badge err', text: '삭제 예정' }) : null,
       el('span', { class: 'spacer' }),

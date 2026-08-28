@@ -341,6 +341,12 @@ check('settings is not one of them',
 check('settings is reachable from the header',
       document.getElementById('open-settings')?.closest('header') === document.querySelector('header'));
 check('backend reached', host.calls.filter((c) => c === 'nativeFetch').length > 0);
+{
+  // The merge summary the shell announces after a re-open, and the conflict
+  // gate on 반영. Both are new in 0.9 and neither has any other coverage.
+  const notice = document.querySelector('.shellnotice')?.textContent || '';
+  check('a first open announces no merge', !/RisuAI 쪽 변경/.test(notice), notice.slice(0, 80));
+}
 check('the health probe is a POST, uncacheable by any relay',
       host.calls.includes('health:POST') && !host.calls.includes('health:GET'),
       host.calls.filter((c) => c.startsWith('health:')).join(','));

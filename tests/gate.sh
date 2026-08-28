@@ -27,6 +27,7 @@ run "chatfmt round-trip"      "$PY" tests/test_roundtrip.py
 run "provider plan & hints"   "$PY" tests/test_providers.py
 run "history thinking ids"    "$PY" tests/test_history.py
 run "partial replace"         "$PY" tests/test_textedit.py
+run "three-way merge"         "$PY" tests/test_merge.py
 run "backend HTTP (black-box)" "$PY" tests/test_http.py
 # Runs real Python through the real runner: the confinement claims in
 # sandbox.py are only worth stating if something checks them each time.

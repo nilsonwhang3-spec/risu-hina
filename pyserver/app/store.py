@@ -17,7 +17,7 @@ import re
 import uuid
 from typing import Any, Iterable
 
-from . import chatfmt, db
+from . import chatfmt, db, merge
 
 INLINE = ("role", "data", "time", "chatId", "name")
 
@@ -61,27 +61,22 @@ def upsert_character(cha_id: str, name: str, card: dict, char_index: int | None,
 def ingest_chat(cha_id: str, chat: dict, chat_index: int | None, *, force: bool = False) -> dict:
     """Load a Chat object into the store. Returns a summary.
 
-    Re-ingesting an existing chat leaves the working turns alone unless `force`
-    is set: re-opening the panel must not silently discard edits in progress.
-    The original snapshot is always refreshed, because the user may have edited
-    in RisuAI since, and a stale original would make every diff wrong.
+    Re-ingesting an existing chat never discards edits in progress (only
+    `force` does), and the baseline always moves to what RisuAI holds now.
+    What is new since 0.9 is the third part: a turn the panel did **not**
+    edit follows the baseline instead of being left behind. Leaving it behind
+    is what made an untouched turn read as "edited here" with its diff
+    inverted, and what made every message generated since the last open show
+    up as `removed` - which the write-back then applied, destroying them.
+
+    See app/merge.py for the rule. Turns are matched by `msg_id`, per the
+    addressing rule at the top of this module.
     """
     ck = char_key(cha_id)
     tk = chat_key(cha_id, str(chat.get("id") or ""))
     doc = chatfmt.decode(chat)
     messages = chat.get("message") or []
     now = db.now()
-
-    exists = db.one("SELECT chat_key FROM chats WHERE chat_key = ?", (tk,)) is not None
-    db.execute(
-        "INSERT INTO chats(chat_key, char_key, chat_id, chat_index, name, meta_json, orig_count, created_at, updated_at) "
-        "VALUES(?,?,?,?,?,?,?,?,?) "
-        "ON CONFLICT(chat_key) DO UPDATE SET "
-        "  chat_index=excluded.chat_index, name=excluded.name, meta_json=excluded.meta_json, "
-        "  orig_count=excluded.orig_count, updated_at=excluded.updated_at",
-        (tk, ck, str(chat.get("id") or ""), chat_index, str(chat.get("name") or ""),
-         db.js(doc["meta"]), len(messages), now, now),
-    )
 
     rows = []
     for i, m in enumerate(messages):
@@ -92,32 +87,176 @@ def ingest_chat(cha_id: str, chat: dict, chat_index: int | None, *, force: bool 
             m.get("name"), db.js(extras) if extras else None,
         ))
 
-    db.execute("DELETE FROM turns_original WHERE chat_key = ?", (tk,))
-    db.executemany(
-        "INSERT INTO turns_original(chat_key, seq, msg_id, role, body, time, name, extras_json) "
-        "VALUES(?,?,?,?,?,?,?,?)",
-        rows,
-    )
-
-    reset = force or not exists
-    if reset:
-        db.execute("DELETE FROM turns WHERE chat_key = ?", (tk,))
-        db.executemany(
-            "INSERT INTO turns(chat_key, seq, msg_id, role, body, time, name, extras_json, origin, updated_at) "
-            "VALUES(?,?,?,?,?,?,?,?,'original',?)",
-            [r + (now,) for r in rows],
+    with db.transaction():
+        exists = db.one("SELECT chat_key FROM chats WHERE chat_key = ?", (tk,)) is not None
+        db.execute(
+            "INSERT INTO chats(chat_key, char_key, chat_id, chat_index, name, meta_json, orig_count, created_at, updated_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?) "
+            "ON CONFLICT(chat_key) DO UPDATE SET "
+            "  chat_index=excluded.chat_index, name=excluded.name, meta_json=excluded.meta_json, "
+            "  orig_count=excluded.orig_count, updated_at=excluded.updated_at",
+            (tk, ck, str(chat.get("id") or ""), chat_index, str(chat.get("name") or ""),
+             db.js(doc["meta"]), len(messages), now, now),
         )
 
-    return {
-        "chatKey": tk,
-        "charKey": ck,
-        "chatId": chat.get("id"),
-        "chatIndex": chat_index,
-        "name": chat.get("name") or "",
-        "turns": count_turns(tk),
-        "originalTurns": len(messages),
-        "workingReset": reset,
-    }
+        reset = force or not exists
+        # The baseline as it was: read before it is replaced, because it is the
+        # common ancestor and nothing else records it.
+        base = {} if reset else {
+            r["msg_id"]: db.row_to_dict(r)
+            for r in db.query("SELECT * FROM turns_original WHERE chat_key = ?", (tk,))
+            if r["msg_id"]
+        }
+        merged = {} if reset else _merge_turns(tk, base, rows, now)
+
+        db.execute("DELETE FROM turns_original WHERE chat_key = ?", (tk,))
+        db.executemany(
+            "INSERT INTO turns_original(chat_key, seq, msg_id, role, body, time, name, extras_json) "
+            "VALUES(?,?,?,?,?,?,?,?)",
+            rows,
+        )
+        if reset:
+            db.execute("DELETE FROM turns WHERE chat_key = ?", (tk,))
+            db.executemany(
+                "INSERT INTO turns(chat_key, seq, msg_id, role, body, time, name, extras_json, origin, conflict_json, updated_at) "
+                "VALUES(?,?,?,?,?,?,?,?,'original',NULL,?)",
+                [r + (now,) for r in rows],
+            )
+        else:
+            _write_turns(tk, merged["rows"], now)
+
+        out = {
+            "chatKey": tk,
+            "charKey": ck,
+            "chatId": chat.get("id"),
+            "chatIndex": chat_index,
+            "name": chat.get("name") or "",
+            "turns": count_turns(tk),
+            "originalTurns": len(messages),
+            "workingReset": reset,
+        }
+    if not reset and merged.get("counts"):
+        out["merge"] = merged["counts"]
+    return out
+
+
+def _merge_turns(tk: str, base: dict[str, dict], incoming: list[tuple], now: float) -> dict:
+    """Three-way merge of one chat's turns, by `msg_id`.
+
+    Returns the working rows in their new order. Rows we inserted ourselves
+    have no counterpart on either side, so they are re-anchored behind the turn
+    they currently follow; if that anchor is gone from RisuAI they float to the
+    end rather than disappearing.
+    """
+    ours_rows = [db.row_to_dict(r) for r in db.query(
+        "SELECT * FROM turns WHERE chat_key = ? ORDER BY seq", (tk,))]
+    ours = {r["msg_id"]: r for r in ours_rows if r["msg_id"]}
+    incoming_by = {r[2]: r for r in incoming if r[2]}
+
+    # Where each locally-inserted row sits: behind the msg_id before it.
+    anchored: dict[str, list[dict]] = {}
+    head: list[dict] = []
+    prev = ""
+    for r in ours_rows:
+        known = bool(r["msg_id"]) and (r["msg_id"] in base or r["msg_id"] in incoming_by)
+        if known:
+            prev = r["msg_id"]
+            continue
+        (anchored.setdefault(prev, []) if prev else head).append(r)
+
+    counts = {merge.ADOPT: 0, merge.KEEP: 0, merge.CONFLICT: 0, merge.INSERT: 0, merge.DELETE: 0}
+    out: list[dict] = list(head)
+
+    def carry(row: dict, action: str, conflict: dict | None = None) -> None:
+        counts[action] = counts.get(action, 0) + 1
+        row = dict(row)
+        row["conflict_json"] = db.js(conflict) if conflict else None
+        out.append(row)
+
+    for t in incoming:
+        _, _, msg_id, role, body, time_, name, extras = t
+        was = base.get(msg_id)
+        mine = ours.get(msg_id)
+        if mine is None:
+            if was is None:
+                # New in RisuAI since the last open - the turns that used to be
+                # reported as `removed` and then written away.
+                counts[merge.INSERT] += 1
+                out.append({"msg_id": msg_id, "role": role, "body": body, "time": time_,
+                            "name": name, "extras_json": extras, "origin": "original",
+                            "conflict_json": None})
+            elif (was.get("body") or "") != body:
+                # Deleted here, edited there. Bring it back with the conflict
+                # attached rather than silently dropping RisuAI's edit; the
+                # user can delete it again in one click.
+                counts[merge.CONFLICT] += 1
+                out.append({"msg_id": msg_id, "role": role, "body": body, "time": time_,
+                            "name": name, "extras_json": extras, "origin": "original",
+                            "conflict_json": db.js({"kind": merge.DELETED_UPSTREAM,
+                                                    "theirs": body, "base": was.get("body"),
+                                                    "tier": "", "side": "deleted-here"})})
+            else:
+                counts[merge.DELETE] += 1  # our deletion stands
+        else:
+            row = merge.Row(id=str(mine["id"]), ours=mine.get("body") or "",
+                            base=None if was is None else (was.get("body") or ""),
+                            dirty=False)
+            if was is None:
+                carry(mine, merge.KEEP)
+            else:
+                op = merge.decide(row, body, merge.TIER_KEYED)
+                if op.action == merge.ADOPT:
+                    carry({**mine, "body": body, "role": role, "time": time_,
+                           "name": name, "extras_json": extras, "origin": "original"}, merge.ADOPT)
+                elif op.action == merge.CONFLICT:
+                    carry(mine, merge.CONFLICT, op.conflict)
+                else:
+                    carry(mine, merge.KEEP)
+        for extra in anchored.get(msg_id, []):
+            out.append(extra)
+
+    # Ours that RisuAI no longer has at all.
+    for msg_id, mine in ours.items():
+        if msg_id in incoming_by or msg_id not in base:
+            continue
+        if (mine.get("body") or "") == (base[msg_id].get("body") or ""):
+            counts[merge.DELETE] += 1          # deleted in RisuAI, untouched here
+        else:
+            counts[merge.CONFLICT] += 1
+            out.append({**mine, "conflict_json": db.js(
+                {"kind": merge.DELETED_UPSTREAM, "theirs": None,
+                 "base": base[msg_id].get("body"), "tier": ""})})
+
+    # Anchors that vanished from RisuAI: their rows would otherwise be dropped.
+    placed = {id(r) for r in out}
+    for rowlist in anchored.values():
+        for r in rowlist:
+            if id(r) not in placed:
+                out.append(r)
+    return {"rows": out, "counts": {k: v for k, v in counts.items() if v}}
+
+
+def _write_turns(tk: str, rows: list[dict], now: float) -> None:
+    """Replace the working turns with `rows`, renumbering seq densely."""
+    db.execute("DELETE FROM turns WHERE chat_key = ?", (tk,))
+    db.executemany(
+        "INSERT INTO turns(chat_key, seq, msg_id, role, body, time, name, extras_json, origin, conflict_json, updated_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+        [(tk, i, r.get("msg_id") or "", r.get("role") or "char", r.get("body") or "",
+          r.get("time"), r.get("name"), r.get("extras_json"), r.get("origin") or "original",
+          r.get("conflict_json"), now)
+         for i, r in enumerate(rows)],
+    )
+
+
+def _fnv32(text: str) -> int:
+    """FNV-1a over the body. Small enough to send for every turn (a 394-turn
+    chat costs about 8KB) and enough to catch a body edited in RisuAI while a
+    structural change was pending here."""
+    h = 0x811C9DC5
+    for ch in text.encode("utf-8"):
+        h = ((h ^ ch) * 0x01000193) & 0xFFFFFFFF
+    return h
 
 
 def _int_or_none(v: Any) -> int | None:
@@ -179,6 +318,7 @@ def turns(tk: str, start: int = 0, limit: int = 100) -> dict:
             "changed": changed,
             "isNew": was is None,
             "origin": r["origin"],
+            "conflict": db.unjs(r["conflict_json"], None),
         }
         # `original` is only carried for turns that actually differ. Sending it
         # for every turn doubled the payload: a real 394-turn chat is 1.7MB of
@@ -483,7 +623,7 @@ def reset_working(tk: str) -> None:
 # --- lorebook ---------------------------------------------------------------
 
 def ingest_lore(ck: str, global_lore: list, local_by_chat: dict[str, tuple[list, bool]],
-                *, global_reset: bool) -> None:
+                *, global_reset: bool) -> dict[str, int]:
     """Load lorebook entries the same way turns and memory are loaded.
 
     Same reset rule as the turns, decided by the same call: a chat whose
@@ -496,26 +636,116 @@ def ingest_lore(ck: str, global_lore: list, local_by_chat: dict[str, tuple[list,
     time has no rows and is loaded regardless of the flag.
     """
     now = db.now()
-    rows = []
-    have_global = db.one("SELECT 1 AS x FROM lore_entries WHERE char_key = ? AND scope = 'global' LIMIT 1", (ck,))
-    if global_reset or have_global is None:
-        db.execute("DELETE FROM lore_entries WHERE char_key = ? AND scope = 'global'", (ck,))
-        for i, e in enumerate(global_lore or []):
-            rows.append((uuid.uuid4().hex, ck, "global", None, i, db.js(e), db.js(e), "original", now))
-    for tk, (entries, reset) in local_by_chat.items():
-        have = db.one("SELECT 1 AS x FROM lore_entries WHERE char_key = ? AND scope = 'local' "
-                      "AND chat_key = ? LIMIT 1", (ck, tk))
-        if not (reset or have is None):
+    counts: dict[str, int] = {}
+    with db.transaction():
+        have_global = db.one("SELECT 1 AS x FROM lore_entries WHERE char_key = ? AND scope = 'global' LIMIT 1", (ck,))
+        if global_reset or have_global is None:
+            _load_lore(ck, "global", None, global_lore or [], now)
+        else:
+            _add(counts, _merge_lore(ck, "global", None, global_lore or [], now))
+        for tk, (entries, reset) in local_by_chat.items():
+            have = db.one("SELECT 1 AS x FROM lore_entries WHERE char_key = ? AND scope = 'local' "
+                          "AND chat_key = ? LIMIT 1", (ck, tk))
+            if reset or have is None:
+                _load_lore(ck, "local", tk, entries or [], now)
+            else:
+                _add(counts, _merge_lore(ck, "local", tk, entries or [], now))
+    return counts
+
+
+def _add(into: dict[str, int], counts: dict[str, int]) -> None:
+    for k, v in counts.items():
+        if v:
+            into[k] = into.get(k, 0) + v
+
+
+def _load_lore(ck: str, scope: str, tk: str | None, entries: list, now: float) -> None:
+    """First sight, or a forced reload: RisuAI's list becomes both copies."""
+    db.execute("DELETE FROM lore_entries WHERE char_key = ? AND scope = ? "
+               "AND (chat_key IS ? OR chat_key = ?)", (ck, scope, tk, tk or ""))
+    db.executemany(
+        "INSERT INTO lore_entries(id, char_key, scope, chat_key, seq, base_seq, entry_json, "
+        "original_json, origin, conflict_json, created_at) VALUES(?,?,?,?,?,?,?,?,'original',NULL,?)",
+        [(uuid.uuid4().hex, ck, scope, tk, i, i, db.js(e), db.js(e), now)
+         for i, e in enumerate(entries)],
+    )
+
+
+def _merge_lore(ck: str, scope: str, tk: str | None, entries: list, now: float) -> dict[str, int]:
+    """Re-open: three-way merge against what RisuAI holds now.
+
+    This is where a manual lorebook edit in RisuAI used to be invisible. The
+    old code skipped the whole scope, so neither copy moved, the panel showed
+    the pre-edit list with no diff at all, and the first write-back replaced
+    RisuAI's entry with the stale one.
+    """
+    rows = [db.row_to_dict(r) for r in db.query(
+        "SELECT * FROM lore_entries WHERE char_key = ? AND scope = ? "
+        "AND (chat_key IS ? OR chat_key = ?) ORDER BY COALESCE(base_seq, seq)",
+        (ck, scope, tk, tk or ""))]
+    based, added = [], []
+    for r in rows:
+        if r["origin"] == "deleted":
+            # A deletion waiting to be written back. It is still in RisuAI, so
+            # it takes part in the matching, but it can never be adopted.
+            based.append(_lore_row(r, dirty=True))
+        elif r["original_json"] is None:
+            added.append(_lore_row(r, dirty=True))
+        else:
+            based.append(_lore_row(r, dirty=r["origin"] != "original"))
+    by_id = {r["id"]: r for r in rows}
+
+    ops = merge.plan(based, entries, merge.LORE)
+    same = merge.adopted_additions(added, [o for o in ops if o.action == merge.INSERT], merge.LORE)
+    folded = {id(o) for o in same.values()}
+
+    for op in ops:
+        if op.action == merge.INSERT:
+            if id(op) in folded:
+                continue
+            db.execute(
+                "INSERT INTO lore_entries(id, char_key, scope, chat_key, seq, base_seq, entry_json, "
+                "original_json, origin, conflict_json, created_at) VALUES(?,?,?,?,?,?,?,?,'original',NULL,?)",
+                (uuid.uuid4().hex, ck, scope, tk, _next_seq(ck, scope, tk), op.seq,
+                 db.js(op.theirs), db.js(op.theirs), now))
             continue
-        db.execute("DELETE FROM lore_entries WHERE char_key = ? AND scope = 'local' AND chat_key = ?", (ck, tk))
-        for i, e in enumerate(entries or []):
-            rows.append((uuid.uuid4().hex, ck, "local", tk, i, db.js(e), db.js(e), "original", now))
-    if rows:
-        db.executemany(
-            "INSERT INTO lore_entries(id, char_key, scope, chat_key, seq, entry_json, original_json, "
-            "origin, created_at) VALUES(?,?,?,?,?,?,?,?,?)",
-            rows,
-        )
+        row = by_id[op.row.id]
+        if op.action == merge.DELETE:
+            db.execute("DELETE FROM lore_entries WHERE id = ?", (row["id"],))
+            continue
+        # Every paired row's baseline moves to RisuAI's current value, even a
+        # conflicted one: otherwise the next diff lies again and the write-back
+        # guard could never pass.
+        base_json = row["original_json"] if op.theirs is None else db.js(op.theirs)
+        if op.action == merge.ADOPT:
+            db.execute("UPDATE lore_entries SET entry_json = ?, original_json = ?, base_seq = ?, "
+                       "origin = 'original', conflict_json = NULL WHERE id = ?",
+                       (base_json, base_json, op.seq, row["id"]))
+        elif op.action == merge.CONFLICT:
+            db.execute("UPDATE lore_entries SET original_json = ?, base_seq = ?, conflict_json = ? WHERE id = ?",
+                       (base_json, op.seq, db.js(op.conflict), row["id"]))
+        else:  # keep
+            db.execute("UPDATE lore_entries SET original_json = ?, base_seq = ? WHERE id = ?",
+                       (base_json, op.seq, row["id"]))
+    for row_id, op in same.items():
+        # Added on both sides: keep our row but give it a baseline, so it stops
+        # being an addition and the write-back cannot ship it twice.
+        db.execute("UPDATE lore_entries SET original_json = ?, base_seq = ?, origin = 'original' WHERE id = ?",
+                   (db.js(op.theirs), op.seq, row_id))
+    return merge.counts(ops)
+
+
+def _lore_row(r: dict, *, dirty: bool) -> merge.Row:
+    return merge.Row(id=r["id"], ours=db.unjs(r["entry_json"], {}),
+                     base=db.unjs(r["original_json"], None), dirty=dirty,
+                     order=r["base_seq"] if r["base_seq"] is not None else r["seq"])
+
+
+def _next_seq(ck: str, scope: str, tk: str | None) -> int:
+    row = db.one("SELECT COALESCE(MAX(seq), -1) AS m FROM lore_entries "
+                 "WHERE char_key = ? AND scope = ? AND (chat_key IS ? OR chat_key = ?)",
+                 (ck, scope, tk, tk or ""))
+    return int(row["m"]) + 1 if row else 0
 
 
 def add_lore(ck: str, entry: dict, scope: str = "global", tk: str | None = None) -> str:
@@ -547,10 +777,32 @@ def lore(ck: str, scope: str | None = None) -> list[dict]:
     return [
         {"id": r["id"], "scope": r["scope"], "chatKey": r["chat_key"], "seq": r["seq"],
          "origin": r["origin"], "entry": db.unjs(r["entry_json"], {}),
+         "conflict": db.unjs(r["conflict_json"], None),
+         # The frozen counterpart, for the panel's diff - carried when the two
+         # sides differ, which a conflict guarantees even when origin says
+         # 'original' (the row was adopted-then-conflicted, not edited here).
          "original": (db.unjs(r["original_json"], None)
-                      if r["origin"] == "edited" and r["original_json"] else None)}
+                      if (r["conflict_json"] or r["origin"] == "edited") and r["original_json"] else None)}
         for r in db.query(sql, params)
     ]
+
+
+def lore_baseline(ck: str, scope: str, tk: str | None = None) -> list[dict]:
+    """The lorebook as RisuAI last showed it, for the write-back guard.
+
+    Ordered by `base_seq`, not `seq`: `seq` is the working order and the
+    panel's move buttons renumber it, so a list built from `seq` would stop
+    matching live the first time anything was reordered here.
+    """
+    sql = ("SELECT * FROM lore_entries WHERE char_key = ? AND scope = ? "
+           "AND original_json IS NOT NULL AND origin <> 'added'")
+    params: list[Any] = [ck, scope]
+    if scope == "local":
+        sql += " AND chat_key = ?"
+        params.append(tk)
+    rows = [db.row_to_dict(r) for r in db.query(sql, params)]
+    rows.sort(key=lambda r: r["base_seq"] if r["base_seq"] is not None else r["seq"])
+    return [db.unjs(r["original_json"], {}) for r in rows]
 
 
 def update_lore(lore_id: str, entry: dict) -> dict:
@@ -862,6 +1114,10 @@ def patch(tk: str) -> dict:
     }
     if structural:
         out["messages"] = [_to_message(r) for r in cur]
+        # What the whole-array replace is based on. The host compares this
+        # with the live message list and refuses if it moved: replacing the
+        # array blind is how turns generated since the last open were lost.
+        out["beforeTurns"] = [{"id": r["msg_id"], "h": _fnv32(r["body"] or "")} for r in orig]
         out["warnings"].extend(_hypa_warnings(tk, set(cur_ids)))
     return out
 

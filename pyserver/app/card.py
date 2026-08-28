@@ -20,7 +20,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from . import db, log, store
+from . import db, log, merge, store
 
 # Scalar prose fields, one row each at seq 0. Order here is display order.
 #
@@ -167,56 +167,179 @@ def ingest(ck: str, card: dict, *, reset: bool) -> dict:
     if reset:
         db.execute("DELETE FROM card_fields WHERE char_key = ?", (ck,))
         db.executemany(
-            "INSERT INTO card_fields(id, char_key, field, seq, body, original, "
-            "extra_json, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
-            [(uuid.uuid4().hex, ck, f, seq, body, body, None, now, now)
+            "INSERT INTO card_fields(id, char_key, field, seq, base_seq, body, original, "
+            "conflict_json, extra_json, created_at, updated_at) VALUES(?,?,?,?,?,?,?,NULL,?,?,?)",
+            [(uuid.uuid4().hex, ck, f, seq, seq, body, body, None, now, now)
              for f, seq, body in field_rows],
         )
         db.execute("DELETE FROM card_scripts WHERE char_key = ?", (ck,))
         db.executemany(
-            "INSERT INTO card_scripts(id, char_key, kind, seq, entry_json, "
-            "original_json, origin, created_at) VALUES(?,?,?,?,?,?, 'original', ?)",
-            [(uuid.uuid4().hex, ck, kind, seq, db.js(e), db.js(e), now)
+            "INSERT INTO card_scripts(id, char_key, kind, seq, base_seq, entry_json, "
+            "original_json, origin, conflict_json, created_at) VALUES(?,?,?,?,?,?,?,'original',NULL,?)",
+            [(uuid.uuid4().hex, ck, kind, seq, seq, db.js(e), db.js(e), now)
              for kind, seq, e in script_rows],
         )
         log.info("card ingest char=%s %s reset", ck, counts)
         return {"charKey": ck, "counts": counts, "reset": True}
 
+    merged = _merge_card(ck, card, field_rows, script_rows, now)
+    log.info("card refresh char=%s %s", ck, merged or "no change")
+    return {"charKey": ck, "counts": counts, "reset": False, "merge": merged}
+
+
+def _merge_card(ck: str, card: dict, field_rows: list, script_rows: list, now: float) -> dict[str, int]:
+    """Three-way merge of the card on re-open (app/merge.py).
+
+    The old code moved only the baseline and left the working copy behind, so
+    a field the user changed in RisuAI came back as "edited here" with the
+    diff inverted - and `patch` then shipped the stale text as an edit whose
+    `before` matched live, which is how a write-back silently reverted the
+    user's own RisuAI edit.
+
+    Scalars are addressed by name. Greetings and scripts are lists, and index
+    addressing is what made one insertion in RisuAI rebase every later row
+    onto its neighbour, so they go through the matcher instead.
+    """
+    out: dict[str, int] = {}
+    scalars = [(f, seq, body) for f, seq, body in field_rows if f != LIST_FIELD]
     added = rebased = 0
-    for f, seq, body in field_rows:
+    for f, seq, body in scalars:
         found = db.one(
-            "SELECT id, original FROM card_fields WHERE char_key = ? AND field = ? AND seq = ?",
+            "SELECT id, body, original, conflict_json FROM card_fields WHERE char_key = ? AND field = ? AND seq = ?",
             (ck, f, seq))
         if found is None:
             db.execute(
-                "INSERT INTO card_fields(id, char_key, field, seq, body, original, "
-                "extra_json, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
-                (uuid.uuid4().hex, ck, f, seq, body, body, None, now, now))
+                "INSERT INTO card_fields(id, char_key, field, seq, base_seq, body, original, "
+                "conflict_json, extra_json, created_at, updated_at) VALUES(?,?,?,?,?,?,?,NULL,?,?,?)",
+                (uuid.uuid4().hex, ck, f, seq, seq, body, body, None, now, now))
             added += 1
-        elif (found["original"] or "") != body:
+            continue
+        row = merge.Row(id=found["id"], ours=found["body"] or "",
+                        base=found["original"], dirty=False)
+        if row.base is None:
+            # Cannot happen for a scalar (ingest always writes both), but a
+            # half-finished older ingest could leave one. Take RisuAI's.
+            db.execute("UPDATE card_fields SET original = ?, updated_at = ? WHERE id = ?",
+                       (body, now, found["id"]))
+            continue
+        op = merge.decide(row, body, merge.TIER_KEYED)
+        if op.action == merge.ADOPT:
+            db.execute("UPDATE card_fields SET body = ?, original = ?, base_seq = ?, "
+                       "conflict_json = NULL, updated_at = ? WHERE id = ?",
+                       (body, body, seq, now, found["id"]))
+            out[merge.ADOPT] = out.get(merge.ADOPT, 0) + 1
+        elif op.action == merge.CONFLICT:
+            db.execute("UPDATE card_fields SET original = ?, base_seq = ?, conflict_json = ?, "
+                       "updated_at = ? WHERE id = ?",
+                       (body, seq, db.js(op.conflict), now, found["id"]))
+            out[merge.CONFLICT] = out.get(merge.CONFLICT, 0) + 1
+        else:
+            if (found["original"] or "") != body:
+                db.execute("UPDATE card_fields SET original = ?, base_seq = ?, updated_at = ? WHERE id = ?",
+                           (body, seq, now, found["id"]))
+                rebased += 1
+            out[merge.KEEP] = out.get(merge.KEEP, 0) + 1
+
+    _merge_greetings(ck, [body for f, _, body in field_rows if f == LIST_FIELD], now, out)
+    for kind in SCRIPT_KINDS:
+        _merge_scripts(ck, kind, [e for k, _, e in script_rows if k == kind], now, out)
+    if added:
+        out["added"] = added
+    return {k: v for k, v in out.items() if v}
+
+
+def _merge_greetings(ck: str, greetings: list[str], now: float, out: dict) -> None:
+    rows = [db.row_to_dict(r) for r in db.query(
+        "SELECT * FROM card_fields WHERE char_key = ? AND field = ? ORDER BY COALESCE(base_seq, seq)",
+        (ck, LIST_FIELD))]
+    based, extra = [], []
+    for r in rows:
+        deleted = db.unjs(r["extra_json"], {}) == {"deleted": True}
+        if r["original"] is None:
+            extra.append(merge.Row(id=r["id"], ours=r["body"] or "", base=None, dirty=True))
+        else:
+            based.append(merge.Row(id=r["id"], ours=r["body"] or "", base=r["original"],
+                                   dirty=deleted, order=r["base_seq"] if r["base_seq"] is not None else r["seq"]))
+    ops = merge.plan(based, greetings, merge.GREETING)
+    same = merge.adopted_additions(extra, [o for o in ops if o.action == merge.INSERT], merge.GREETING)
+    folded = {id(o) for o in same.values()}
+    seq = max([int(r["seq"]) for r in rows], default=-1)
+    for op in ops:
+        out[op.action] = out.get(op.action, 0) + 1
+        if op.action == merge.INSERT:
+            if id(op) in folded:
+                continue
+            seq += 1
             db.execute(
-                "UPDATE card_fields SET original = ?, updated_at = ? WHERE id = ?",
-                (body, now, found["id"]))
-            rebased += 1
-    for kind, seq, e in script_rows:
-        text = db.js(e)
-        found = db.one(
-            "SELECT id, original_json FROM card_scripts WHERE char_key = ? AND kind = ? AND seq = ?",
-            (ck, kind, seq))
-        if found is None:
+                "INSERT INTO card_fields(id, char_key, field, seq, base_seq, body, original, "
+                "conflict_json, extra_json, created_at, updated_at) VALUES(?,?,?,?,?,?,?,NULL,NULL,?,?)",
+                (uuid.uuid4().hex, ck, LIST_FIELD, seq, op.seq, op.theirs, op.theirs, now, now))
+        elif op.action == merge.DELETE:
+            db.execute("DELETE FROM card_fields WHERE id = ?", (op.row.id,))
+        elif op.action == merge.ADOPT:
+            db.execute("UPDATE card_fields SET body = ?, original = ?, base_seq = ?, "
+                       "conflict_json = NULL, updated_at = ? WHERE id = ?",
+                       (op.theirs, op.theirs, op.seq, now, op.row.id))
+        elif op.action == merge.CONFLICT:
+            db.execute("UPDATE card_fields SET original = COALESCE(?, original), base_seq = ?, "
+                       "conflict_json = ?, updated_at = ? WHERE id = ?",
+                       (op.theirs, op.seq, db.js(op.conflict), now, op.row.id))
+        else:
+            db.execute("UPDATE card_fields SET original = COALESCE(?, original), base_seq = ?, "
+                       "updated_at = ? WHERE id = ?", (op.theirs, op.seq, now, op.row.id))
+    for row_id, op in same.items():
+        db.execute("UPDATE card_fields SET original = ?, base_seq = ?, updated_at = ? WHERE id = ?",
+                   (op.theirs, op.seq, now, row_id))
+
+
+_SPECS = {"customscript": merge.REGEX, "triggerscript": merge.TRIGGER}
+
+
+def _merge_scripts(ck: str, kind: str, entries: list[dict], now: float, out: dict) -> None:
+    spec = _SPECS.get(kind, merge.ASSET)
+    rows = [db.row_to_dict(r) for r in db.query(
+        "SELECT * FROM card_scripts WHERE char_key = ? AND kind = ? ORDER BY COALESCE(base_seq, seq)",
+        (ck, kind))]
+    based, extra = [], []
+    for r in rows:
+        if r["original_json"] is None:
+            extra.append(merge.Row(id=r["id"], ours=db.unjs(r["entry_json"], {}), base=None, dirty=True))
+        else:
+            based.append(merge.Row(id=r["id"], ours=db.unjs(r["entry_json"], {}),
+                                   base=db.unjs(r["original_json"], None),
+                                   dirty=r["origin"] != "original",
+                                   order=r["base_seq"] if r["base_seq"] is not None else r["seq"]))
+    ops = merge.plan(based, entries, spec)
+    same = merge.adopted_additions(extra, [o for o in ops if o.action == merge.INSERT], spec)
+    folded = {id(o) for o in same.values()}
+    seq = max([int(r["seq"]) for r in rows], default=-1)
+    for op in ops:
+        out[op.action] = out.get(op.action, 0) + 1
+        text = db.js(op.theirs) if op.theirs is not None else None
+        if op.action == merge.INSERT:
+            if id(op) in folded:
+                continue
+            seq += 1
             db.execute(
-                "INSERT INTO card_scripts(id, char_key, kind, seq, entry_json, "
-                "original_json, origin, created_at) VALUES(?,?,?,?,?,?, 'original', ?)",
-                (uuid.uuid4().hex, ck, kind, seq, text, text, now))
-            added += 1
-        elif found["original_json"] != text:
-            db.execute(
-                "UPDATE card_scripts SET original_json = ? WHERE id = ?",
-                (text, found["id"]))
-            rebased += 1
-    log.info("card refresh char=%s added=%s rebased=%s", ck, added, rebased)
-    return {"charKey": ck, "counts": counts, "reset": False,
-            "added": added, "rebased": rebased}
+                "INSERT INTO card_scripts(id, char_key, kind, seq, base_seq, entry_json, "
+                "original_json, origin, conflict_json, created_at) VALUES(?,?,?,?,?,?,?,'original',NULL,?)",
+                (uuid.uuid4().hex, ck, kind, seq, op.seq, text, text, now))
+        elif op.action == merge.DELETE:
+            db.execute("DELETE FROM card_scripts WHERE id = ?", (op.row.id,))
+        elif op.action == merge.ADOPT:
+            db.execute("UPDATE card_scripts SET entry_json = ?, original_json = ?, base_seq = ?, "
+                       "origin = 'original', conflict_json = NULL WHERE id = ?",
+                       (text, text, op.seq, op.row.id))
+        elif op.action == merge.CONFLICT:
+            db.execute("UPDATE card_scripts SET original_json = COALESCE(?, original_json), "
+                       "base_seq = ?, conflict_json = ? WHERE id = ?",
+                       (text, op.seq, db.js(op.conflict), op.row.id))
+        else:
+            db.execute("UPDATE card_scripts SET original_json = COALESCE(?, original_json), "
+                       "base_seq = ? WHERE id = ?", (text, op.seq, op.row.id))
+    for row_id, op in same.items():
+        db.execute("UPDATE card_scripts SET original_json = ?, base_seq = ?, origin = 'original' WHERE id = ?",
+                   (db.js(op.theirs), op.seq, row_id))
 
 
 # --- fields -----------------------------------------------------------------
@@ -235,6 +358,7 @@ def _field_row(r) -> dict:
         "changed": original is not None and original != body,
         "isNew": original is None,
         "deleted": bool(extra.get("deleted")),
+        "conflict": db.unjs(d.get("conflict_json"), None),
         "updatedAt": d.get("updated_at"),
     }
 
@@ -313,9 +437,11 @@ def _script_row(r) -> dict:
         "seq": int(d.get("seq") or 0),
         "origin": d.get("origin") or "original",
         "entry": db.unjs(d.get("entry_json"), {}),
-        # The frozen counterpart, for the panel's diff view - edited rows only.
+        "conflict": db.unjs(d.get("conflict_json"), None),
+        # The frozen counterpart, for the panel's diff view - edited or
+        # conflicted rows, which are the two cases where the sides differ.
         "original": (db.unjs(d.get("original_json"), None)
-                     if (d.get("origin") == "edited" and d.get("original_json")) else None),
+                     if ((d.get("origin") == "edited" or d.get("conflict_json")) and d.get("original_json")) else None),
     }
 
 
@@ -472,18 +598,29 @@ def patch(ck: str) -> dict:
     """Everything one card write-back sends, in one response.
 
     Changed scalars come as before/after pairs so the host can verify each
-    live value against `before` and refuse a stale snapshot. The three list
-    materials (greetings, global lore, scripts) are whole lists - the same
-    acceptance the chat path already gives localLore.
+    live value against `before` and refuse a stale snapshot. The list
+    materials go out whole, and since 0.9 they carry a `before` too: the
+    baseline list, in the order RisuAI last showed it. Without it a list was
+    replaced with no comparison at all, so an entry the user added in RisuAI
+    while the panel was open disappeared with no error and no warning.
+
+    `before` is ordered by `base_seq`, never by `seq`: `seq` is the working
+    order and the panel's move buttons renumber it.
     """
     char = db.one("SELECT cha_id FROM characters WHERE char_key = ?", (ck,))
     fields = []
     greet_rows: list[tuple[int, str]] = []
     greet_changed = False
     rows = db.query("SELECT * FROM card_fields WHERE char_key = ? ORDER BY field, seq", (ck,))
+    greet_before: list[tuple[int, str]] = []
     for r in rows:
         row = _field_row(r)
+        d = db.row_to_dict(r) or {}
         if row["field"] == LIST_FIELD:
+            # The baseline list includes a greeting queued for deletion (RisuAI
+            # still has it) and excludes one added here (RisuAI does not).
+            if row["original"] is not None:
+                greet_before.append((_order(d), row["original"]))
             if row["deleted"]:
                 greet_changed = True
                 continue
@@ -501,9 +638,11 @@ def patch(ck: str) -> dict:
         "chaId": (char["cha_id"] if char else "") or "",
         "full": is_full(ck),
         "fields": fields,
-        "alternateGreetings": {"changed": greet_changed, "list": greetings_list},
+        "alternateGreetings": {"changed": greet_changed, "list": greetings_list,
+                               "before": [b for _s, b in sorted(greet_before)]},
         "globalLore": {"changed": lore_counts["total"],
-                       "list": [x["entry"] for x in store.lore(ck, "global")]},
+                       "list": [x["entry"] for x in store.lore(ck, "global")],
+                       "before": store.lore_baseline(ck, "global")},
     }
     total = len(fields) + (1 if greet_changed else 0) + lore_counts["total"]
     for kind in SCRIPT_KINDS:
@@ -513,14 +652,33 @@ def patch(ck: str) -> dict:
             if r["origin"] in counts:
                 counts[r["origin"]] += 1
         n = counts["added"] + counts["edited"] + counts["deleted"]
-        out[kind] = {"changed": n, "list": [x["entry"] for x in scripts(ck, kind)]}
+        out[kind] = {"changed": n, "list": [x["entry"] for x in scripts(ck, kind)],
+                     "before": _script_baseline(ck, kind)}
         total += n
     # The asset references go out as the three character lists RisuAI keeps,
     # rebuilt from the working entries - the plugin writes lists, never rows.
     out["assets"] = {"changed": out[ASSET_KIND]["changed"],
-                     **asset_lists([x["entry"] for x in scripts(ck, ASSET_KIND)])}
+                     **asset_lists([x["entry"] for x in scripts(ck, ASSET_KIND)]),
+                     # Built through the same function, so the two sides of the
+                     # comparison cannot differ by how they were assembled.
+                     "before": asset_lists(_script_baseline(ck, ASSET_KIND))}
     out["total"] = total
     return out
+
+
+def _order(d: dict) -> int:
+    """A row's position in the baseline list."""
+    v = d.get("base_seq")
+    return int(v) if v is not None else int(d.get("seq") or 0)
+
+
+def _script_baseline(ck: str, kind: str) -> list[dict]:
+    """The list as RisuAI last showed it: baselined rows in base_seq order."""
+    rows = [db.row_to_dict(r) for r in db.query(
+        "SELECT * FROM card_scripts WHERE char_key = ? AND kind = ? AND original_json IS NOT NULL "
+        "AND origin <> 'added'", (ck, kind))]
+    rows.sort(key=_order)
+    return [db.unjs(r["original_json"], {}) for r in rows]
 
 
 def rebase(ck: str) -> dict:

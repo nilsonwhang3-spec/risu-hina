@@ -260,6 +260,65 @@ def payload(chats: list[dict]) -> dict:
     }
 
 
+def write_back(s: "Server", tk: str, chat: dict) -> dict:
+    """What RisuAI would hold after the panel's 반영, as a chat object.
+
+    Since 0.9 a commit does not move the baseline onto the working copy - the
+    plugin re-reads the bot it just wrote and re-uploads that. A test that
+    committed and then re-uploaded the *old* fixture would be modelling a
+    write-back that never happened, so it applies the patch the same way the
+    host does: edits by msgId, structural changes as the whole array, and the
+    lorebook and memory as wholes.
+    """
+    st, p = s.get(q("/patch", chatKey=tk))
+    assert st == 200, p
+    out = json.loads(json.dumps(chat))
+    if p.get("structural") and p.get("messages") is not None:
+        out["message"] = p["messages"]
+    else:
+        by = {e["msgId"]: e["after"] for e in p.get("edits") or []}
+        for m in out.get("message") or []:
+            if m.get("chatId") in by:
+                m["data"] = by[m["chatId"]]
+    lore = p.get("lore") or {}
+    if lore.get("changed"):
+        out["localLore"] = lore.get("localLore") or []
+    mem_patch = p.get("memory") or {}
+    if mem_patch.get("changed"):
+        for k, v in (mem_patch.get("data") or {}).items():
+            out[k] = v
+    return out
+
+
+def desc_id(s: "Server", ck: str) -> str:
+    """The desc row's id, looked up fresh.
+
+    A re-read after 반영 rebuilds the card rows, so their ids change - exactly
+    as they do for the panel, which re-fetches after every upload. A test that
+    cached an id would be asserting against a row that no longer exists.
+    """
+    st, body = s.get(q("/card", charKey=ck))
+    return next(f["id"] for f in body["fields"] if f["field"] == "desc")
+
+
+def write_back_card(s: "Server", ck: str, card: dict) -> dict:
+    """The same, for the card half."""
+    st, p = s.get(q("/card/patch", charKey=ck))
+    assert st == 200, p
+    out = json.loads(json.dumps(card))
+    for f in p.get("fields") or []:
+        out[f["field"]] = f["after"]
+    for key in ("alternateGreetings", "globalLore", "customscript", "triggerscript"):
+        block = p.get(key) or {}
+        if block.get("changed"):
+            out[key] = block.get("list") or []
+    assets = p.get("assets") or {}
+    if assets.get("changed"):
+        for key in ("emotionImages", "additionalAssets", "ccAssets"):
+            out[key] = assets.get(key) or []
+    return out
+
+
 # --- tests ------------------------------------------------------------------
 
 def test_dispatcher(s: Server) -> None:
@@ -532,6 +591,152 @@ def test_checkpoint_restore(s: Server, ws: dict) -> None:
     check("two remain, newest first", len(left) == 2 and left[0]["created_at"] >= left[1]["created_at"], str(len(left)))
     st, body = s.post("/checkpoint/clear", {"chatKey": a, "keep": 0})
     check("clear all", st == 200 and body.get("deleted") == 2 and not (s.get(f"/checkpoints?chatKey={a}")[1].get("checkpoints")), str(body))
+
+
+def test_reopen_merges_risu_changes(s: Server) -> None:
+    """The reported bug, encoded: RisuAI moves while the panel is closed.
+
+    Before the three-way merge the baseline was refreshed and the working copy
+    was not, so a turn nobody had touched came back as "edited here" with its
+    diff inverted, and every message generated since the last open was
+    classified `removed` - which the write-back then applied. Each check below
+    fails on the old behaviour.
+    """
+    print("test_reopen_merges_risu_changes")
+
+    def chat(bodies: list[str]) -> dict:
+        return {"id": "mrg", "name": "병합", "note": "", "localLore": [], "fmIndex": 0,
+                "message": [{"role": "user" if i % 2 == 0 else "char", "data": b,
+                             "time": 1778892822492 + i, "chatId": f"mrg-m{i}"}
+                            for i, b in enumerate(bodies)]}
+
+    def up(c: dict, **extra) -> dict:
+        st, body = s.post("/workspace", {**payload([c]), "charId": "cha-merge",
+                                         "card": {"name": "병합 봇", "chaId": "cha-merge",
+                                                  "desc": "설명", "globalLore": []}, **extra})
+        assert st == 200, body
+        return (body.get("workspace") or {})
+
+    ws = up(chat(["턴 0", "턴 1", "턴 2"]))
+    tk = ws["chats"][0]["chatKey"]
+    s.post("/turn", {"chatKey": tk, "msgId": "mrg-m1", "after": "내가 고침"})
+
+    # RisuAI: turn 0 edited, two turns generated, turn 1 untouched.
+    ws = up(chat(["RisuAI가 고침", "턴 1", "턴 2", "턴 3", "턴 4"]))
+    st, body = s.get(q("/turns", chatKey=tk))
+    by = {t["msgId"]: t for t in body["turns"]}
+    check("an untouched turn follows RisuAI instead of reading as our edit",
+          by["mrg-m0"]["body"] == "RisuAI가 고침" and not by["mrg-m0"]["changed"], str(by["mrg-m0"])[:160])
+    check("our own edit is kept and still marked",
+          by["mrg-m1"]["body"] == "내가 고침" and by["mrg-m1"]["changed"], str(by["mrg-m1"])[:160])
+    check("turns generated since the last open are absorbed",
+          body["total"] == 5 and "mrg-m4" in by, str(sorted(by))[:160])
+    st, p = s.get(q("/patch", chatKey=tk))
+    check("and are not reported as removals",
+          not p["removed"] and not p["structural"] and len(p["edits"]) == 1, str(p)[:200])
+
+    # Both sides move the same turn: a conflict, ours kept, theirs recorded.
+    ws = up(chat(["RisuAI가 고침", "RisuAI도 고침", "턴 2", "턴 3", "턴 4"]))
+    st, body = s.get(q("/turns", chatKey=tk))
+    t1 = next(t for t in body["turns"] if t["msgId"] == "mrg-m1")
+    check("a turn both sides changed is a conflict, not a silent revert",
+          t1["body"] == "내가 고침" and (t1.get("conflict") or {}).get("kind") == "both-moved",
+          str(t1)[:200])
+    st, ch = s.get(q("/changes", chatKey=tk))
+    check("the chat reports its conflicts", ch.get("conflicts") == 1, str(ch)[:200])
+    st, body = s.get(q("/conflicts", chatKey=tk))
+    c = (body.get("conflicts") or [{}])[0]
+    check("and the list shows both sides",
+          body.get("total") == 1 and c.get("mine") == "내가 고침" and c.get("theirs") == "RisuAI도 고침",
+          str(body)[:250])
+
+    st, body = s.post("/conflict/resolve", {"kind": "turn", "id": c["id"], "choice": "theirs"})
+    check("taking RisuAI's copy resolves it", st == 200 and body.get("ok"), str(body)[:160])
+    st, body = s.get(q("/turns", chatKey=tk))
+    t1 = next(t for t in body["turns"] if t["msgId"] == "mrg-m1")
+    check("the turn now holds RisuAI's text with no diff left",
+          t1["body"] == "RisuAI도 고침" and not t1["changed"] and not t1.get("conflict"), str(t1)[:160])
+    st, ch = s.get(q("/changes", chatKey=tk))
+    check("nothing pending after the conflict was decided", ch["total"] == 0 and ch["conflicts"] == 0, str(ch)[:200])
+
+    # A turn deleted in RisuAI, untouched here, must not come back.
+    ws = up(chat(["RisuAI가 고침", "RisuAI도 고침", "턴 3", "턴 4"]))
+    st, body = s.get(q("/turns", chatKey=tk))
+    check("a turn deleted in RisuAI does not reappear",
+          body["total"] == 4 and not any(t["body"] == "턴 2" for t in body["turns"]),
+          str([t["body"] for t in body["turns"]])[:160])
+
+
+def test_reopen_merges_card_and_lore(s: Server) -> None:
+    """The same rule for the bot half, where the lorebook used not to be
+    re-read at all - a manual RisuAI edit was invisible and the first
+    write-back replaced it with the stale copy."""
+    print("test_reopen_merges_card_and_lore")
+
+    def lore(comment: str, content: str) -> dict:
+        return {"key": [comment], "comment": comment, "content": content}
+
+    def card(desc: str, entries: list[dict], greetings: list[str]) -> dict:
+        return {"name": "병합 봇2", "chaId": "cha-merge2", "desc": desc,
+                "firstMessage": "첫 인사", "alternateGreetings": greetings,
+                "globalLore": entries}
+
+    G = [lore("왕국", "본문 A"), lore("기사단", "본문 B")]
+
+    def up(c: dict, **extra) -> dict:
+        st, body = s.post("/workspace", {**payload([make_chat("mc", "챗", 2)]),
+                                         "charId": "cha-merge2", "cardFull": True,
+                                         "card": c, **extra})
+        assert st == 200, body
+        return (body.get("workspace") or {})
+
+    ws = up(card("설명", G, ["인사 1", "인사 2"]))
+    ck = ws["charKey"]
+    st, body = s.get(q("/lore", charKey=ck, scope="global"))
+    mine = next(e for e in body["lore"] if e["entry"]["comment"] == "기사단")
+    s.post("/lore/update", {"charKey": ck, "id": mine["id"], "entry": {**mine["entry"], "content": "내가 고침"}})
+
+    # RisuAI: 왕국 rewritten, a new entry inserted at the head, desc changed,
+    # a greeting inserted at the front (which used to shift every row).
+    G2 = [lore("새 항목", "본문 Z"), lore("왕국", "RisuAI가 고침"), G[1]]
+    up(card("RisuAI 설명", G2, ["새 인사", "인사 1", "인사 2"]))
+
+    st, body = s.get(q("/lore", charKey=ck, scope="global"))
+    by = {e["entry"]["comment"]: e for e in body["lore"]}
+    check("a lorebook entry edited in RisuAI is picked up",
+          by["왕국"]["entry"]["content"] == "RisuAI가 고침", str(by.get("왕국"))[:160])
+    check("my lorebook edit survives", by["기사단"]["entry"]["content"] == "내가 고침")
+    check("an entry added in RisuAI arrives", "새 항목" in by, str(sorted(by)))
+
+    st, body = s.get(q("/card", charKey=ck))
+    fields = {f["field"]: f for f in body["fields"] if f["field"] == "desc"}
+    check("a card field edited in RisuAI is adopted, not shown as our edit",
+          fields["desc"]["body"] == "RisuAI 설명" and not fields["desc"]["changed"], str(fields["desc"])[:160])
+    greets = [f["body"] for f in body["fields"] if f["field"] == "alternateGreetings"]
+    check("an inserted greeting does not shift the others",
+          greets == ["인사 1", "인사 2", "새 인사"] or greets == ["새 인사", "인사 1", "인사 2"], str(greets))
+
+    st, body = s.get(q("/card/changes", charKey=ck))
+    check("RisuAI's own changes do not become pending ones",
+          body.get("fields") == 0 and (body.get("greetings") or {}).get("total") == 0
+          # The one pending item is the lorebook entry this test edited here.
+          and (body.get("lore") or {}).get("total") == 1 and body.get("total") == 1,
+          str(body)[:250])
+
+    # Both sides edit the same entry.
+    G3 = [G2[0], G2[1], lore("기사단", "RisuAI도 고침")]
+    up(card("RisuAI 설명", G3, ["새 인사", "인사 1", "인사 2"]))
+    st, body = s.get(q("/conflicts", charKey=ck))
+    c = (body.get("conflicts") or [{}])[0]
+    check("the lorebook conflict is listed with both sides",
+          body.get("total") == 1 and c.get("kind") == "lore"
+          and (c.get("mine") or {}).get("content") == "내가 고침"
+          and (c.get("theirs") or {}).get("content") == "RisuAI도 고침", str(body)[:250])
+    st, body = s.post("/conflict/resolve", {"kind": "lore", "id": c["id"], "choice": "mine"})
+    check("keeping mine clears the conflict", st == 200, str(body)[:160])
+    st, body = s.get(q("/card/changes", charKey=ck))
+    check("and leaves it as an ordinary pending edit",
+          body.get("conflicts") == 0 and (body.get("lore") or {}).get("total") == 1, str(body)[:200])
 
 
 def test_reopen_keeps_pending_edits(s: Server, ws: dict) -> None:
@@ -812,15 +1017,24 @@ def test_unified_writeback(s: Server, ws: dict) -> None:
     check("re-upload does not duplicate edited lore", len(mine) == 2, str([e["entry"].get("comment") for e in mine]))
     check("the edit is still there", any(e["entry"].get("content") == "고친 성소 설명" for e in mine))
 
-    # One commit moves every baseline.
+    # 반영: the host write, then the commit, then the re-read that replaces
+    # the working copy with what RisuAI now holds. Keeping a working copy past
+    # a successful write is what let it drift again on the next open.
+    written = write_back(s, tk, chat)
     st, body = s.post("/commit", {"chatKey": tk, "label": "after write"})
-    check("commit reports lore and memory", body.get("lore") == 3 and body.get("memory") == 1, str(body))
+    check("commit reports what shipped", body.get("shipped", 0) >= 1, str(body)[:200])
+    st, body = s.post("/workspace", {**payload([written]), "chatReset": True})
     st, ch = s.get(q("/changes", chatKey=tk))
-    check("nothing pending after commit", ch["total"] == 0, str(ch)[:200])
+    check("nothing pending after the write-back and re-read", ch["total"] == 0, str(ch)[:200])
+    check("and no conflicts either", ch.get("conflicts") == 0, str(ch)[:200])
     st, body = s.get(q("/lore", charKey=ck, scope="local"))
     mine = [e for e in (body.get("lore") or []) if e["chatKey"] == tk]
-    check("committed entries are original", all(e["origin"] == "original" for e in mine), str([e["origin"] for e in mine]))
+    check("re-read entries are original", all(e["origin"] == "original" for e in mine), str([e["origin"] for e in mine]))
     check("the committed deletion is gone for good", len(mine) == 2, str(len(mine)))
+    check("and the edit survived the round trip",
+          any(e["entry"].get("content") == "고친 성소 설명" for e in mine),
+          str([e["entry"].get("content") for e in mine])[:200])
+    chat = written
 
     # A forced reload resets the lorebook like everything else.
     s.post("/lore/delete", {"charKey": ck, "id": mine[0]["id"]})
@@ -1035,18 +1249,26 @@ def test_card_edit_patch_commit(s: Server, cw: dict) -> None:
     check("greetings list omits the deleted, keeps order",
           ag.get("list") == ["대체 인사 2", "새 인사"], str(ag)[:200])
 
+    # 반영: write, commit, then re-read the card RisuAI now holds. The working
+    # copy is not kept past a successful write (0.9) - it is where the drift
+    # this release fixes used to start.
+    base_card = card_payload([make_chat("cardA", "카드 챗", 4)])["card"]
+    written_card = write_back_card(s, ck, {**base_card, "desc": "RisuAI에서 바뀐 설명"})
     st, body = s.post("/card/commit", {"charKey": ck, "label": "테스트 반영"})
-    check("commit answers", st == 200, str(body)[:160])
+    check("commit answers with what shipped", st == 200 and body.get("shipped", 0) >= 1, str(body)[:160])
+    st, body = s.post("/workspace", {**card_payload([make_chat("cardA", "카드 챗", 4)]),
+                                     "card": written_card, "cardReset": True})
     st, body = s.get(q("/card/changes", charKey=ck))
-    check("after commit nothing is pending", body.get("total") == 0, str(body)[:200])
+    check("after the write-back and re-read nothing is pending", body.get("total") == 0, str(body)[:200])
+    check("and no conflicts", body.get("conflicts") == 0, str(body)[:200])
     st, body = s.get(q("/card", charKey=ck))
     d = next(f for f in body["fields"] if f["field"] == "desc")
-    check("baseline moved to the working text", d["original"] == "고친 설명" and not d["changed"], str(d)[:160])
+    check("the card now reads what was written", d["body"] == "고친 설명" and not d["changed"], str(d)[:160])
     check("deleted greeting is gone for good",
           not any(f["seq"] == 0 and f["deleted"] for f in body["fields"] if f["field"] == "alternateGreetings"))
 
     # Reset: edit again, then return to the (new) baseline.
-    st, _ = s.post("/card/field", {"charKey": ck, "id": cw["descId"], "body": "또 고침"})
+    st, _ = s.post("/card/field", {"charKey": ck, "id": desc_id(s, ck), "body": "또 고침"})
     st, body = s.post("/card/reset", {"charKey": ck})
     check("reset answers", st == 200, str(body)[:120])
     st, body = s.get(q("/card", charKey=ck))
@@ -1059,7 +1281,7 @@ def test_card_edit_patch_commit(s: Server, cw: dict) -> None:
     check("commit and reset snapshot first", "테스트 반영" in labels and "reset 직전" in labels, str(labels))
     st, body = s.post("/card/checkpoint", {"charKey": ck, "label": "수동"})
     cid = body.get("id")
-    st, _ = s.post("/card/field", {"charKey": ck, "id": cw["descId"], "body": "복원 확인용"})
+    st, _ = s.post("/card/field", {"charKey": ck, "id": desc_id(s, ck), "body": "복원 확인용"})
     st, body = s.post("/card/checkpoint/restore", {"charKey": ck, "id": cid})
     check("restore answers", st == 200, str(body)[:160])
     st, body = s.get(q("/card", charKey=ck))
@@ -1107,9 +1329,16 @@ def test_card_scripts_lifecycle(s: Server, cw: dict) -> None:
           == ["추가", "배경 HTML"], str(cs.get("list"))[:200])
     check("script changes counted", cs.get("changed") == 3, str(cs.get("changed")))
 
+    # Same 반영 shape as the field test: write, commit, re-read.
+    written = write_back_card(s, ck, card_payload([make_chat("cardA", "카드 챗", 4)])["card"])
     st, _ = s.post("/card/commit", {"charKey": ck, "label": "스크립트 반영"})
+    st, _ = s.post("/workspace", {**card_payload([make_chat("cardA", "카드 챗", 4)]),
+                                  "card": written, "cardReset": True})
     st, body = s.get(q("/card/changes", charKey=ck))
-    check("script baselines moved", (body.get("customscript") or {}).get("total") == 0, str(body)[:200])
+    check("after the re-read the scripts are clean", (body.get("customscript") or {}).get("total") == 0, str(body)[:200])
+    st, body = s.get(q("/card/scripts", charKey=ck, kind="customscript"))
+    check("and hold what was written", [i["entry"].get("comment") for i in body["items"]] == ["추가", "배경 HTML"],
+          str([i["entry"].get("comment") for i in body["items"]]))
 
 
 def test_global_lore_decoupled_reset(s: Server, cw: dict) -> None:
@@ -1130,7 +1359,7 @@ def test_global_lore_decoupled_reset(s: Server, cw: dict) -> None:
                                 "entry": {"key": ["추가"], "content": "추가 로어"}})
     check("global add accepted", st == 200, str(body)[:120])
 
-    st, _ = s.post("/card/field", {"charKey": ck, "id": cw["descId"], "body": "새 챗 전에 고침"})
+    st, _ = s.post("/card/field", {"charKey": ck, "id": desc_id(s, ck), "body": "새 챗 전에 고침"})
 
     # A brand-new chat, uploaded the panel-open way: its own turns reset
     # (first seen), but the card and global lore must keep their edits.
@@ -2216,6 +2445,8 @@ def main() -> int:
             test_export_preserves_foreign_fields(s, ws)
             test_checkpoint_restore(s, ws)
             test_reopen_keeps_pending_edits(s, ws)
+            test_reopen_merges_risu_changes(s)
+            test_reopen_merges_card_and_lore(s)
             test_agent_readiness_is_consistent(s, ws)
             test_agent_output_budget(s, ws)
             test_memory_as_rows(s, ws)

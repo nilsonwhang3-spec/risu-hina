@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.8.4
+//@display-name Risu Hina v0.9.0
 //@api 3.0
-//@version 0.8.4
+//@version 0.9.0
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -104,7 +104,7 @@
       this.tokenSafe = true;
       this.lastHealth = body;
       this.probeInfo = "";
-      this.gate = versionGate("0.8.4", String(body.version || ""));
+      this.gate = versionGate("0.9.0", String(body.version || ""));
       return body;
     }
     /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -175,8 +175,8 @@
       if (!res.ok) throw await toError(res);
       const body = res.body;
       if (!body || typeof body.getReader !== "function") {
-        const text = await res.text();
-        for (const line of text.split("\n")) {
+        const text2 = await res.text();
+        for (const line of text2.split("\n")) {
           const v = parseLine(line);
           if (v !== void 0) yield v;
         }
@@ -270,16 +270,16 @@
     }
   }
   async function readJson(res) {
-    let text;
+    let text2;
     try {
-      text = await res.text();
+      text2 = await res.text();
     } catch {
       return null;
     }
     try {
-      return JSON.parse(text);
+      return JSON.parse(text2);
     } catch {
-      return { _raw: text.slice(0, 500) };
+      return { _raw: text2.slice(0, 500) };
     }
   }
   function isRaw(v) {
@@ -421,12 +421,12 @@
     while (head < max && before[head] === after[head]) head++;
     let tail = 0;
     while (tail < max - head && before[before.length - 1 - tail] === after[after.length - 1 - tail]) tail++;
-    const mk = (text, cls) => {
+    const mk = (text2, cls) => {
       const frag = document.createDocumentFragment();
-      frag.appendChild(document.createTextNode(text.slice(0, head)));
-      const mid = text.slice(head, text.length - tail);
+      frag.appendChild(document.createTextNode(text2.slice(0, head)));
+      const mid = text2.slice(head, text2.length - tail);
       if (mid) frag.appendChild(el("span", { class: cls, text: mid }));
-      frag.appendChild(document.createTextNode(text.slice(text.length - tail)));
+      frag.appendChild(document.createTextNode(text2.slice(text2.length - tail)));
       return frag;
     };
     return { before: mk(before, "diff-del"), after: mk(after, "diff-ins") };
@@ -1571,6 +1571,19 @@ button.sendbtn { padding: 9px 12px; display: flex; align-items: center; justify-
 /* Attach above send, in a column beside the box. */
 .agentbtns { display: flex; flex-direction: column; gap: 4px; flex-shrink: 0; justify-content: flex-end; }
 .agentbtns button { width: 42px; justify-content: center; }
+/* --- merge conflicts -------------------------------------------------------
+   Red rather than the ordinary amber "\uC218\uC815": an edit badge says "this will be
+   written", a conflict badge says "this cannot be written until you choose". */
+.badge.conflict { background: rgba(239, 68, 68, .18); border-color: rgba(239, 68, 68, .55); color: #fca5a5; }
+.tabbadge.conflict { background: rgba(239, 68, 68, .22); border-color: rgba(239, 68, 68, .6); }
+.conflictbox {
+  border: 1px solid rgba(239, 68, 68, .45); border-radius: 7px; padding: 8px 10px; margin: 8px 0;
+  background: rgba(239, 68, 68, .06);
+}
+.conflicthead { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; flex-wrap: wrap; }
+.conflictrow { border-top: 1px solid var(--borderc, #2b323f); padding-top: 8px; margin-top: 8px; }
+.conflictname { font-size: 12.5px; color: var(--textcolor2, #79839a); margin-bottom: 4px; }
+
 /* A snapshot row whose delete is on its way to the backend. */
 .verrow.deleting, .chatitem.deleting { opacity: .4; }
 
@@ -1929,10 +1942,75 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     }
     return out;
   }
+  var DEFAULT_FALSE = /* @__PURE__ */ new Set([
+    "alwaysActive",
+    "selective",
+    "useRegex",
+    "enabled",
+    "case_sensitive",
+    "scanDepth",
+    "loreCache",
+    "folder",
+    "activationPercent"
+  ]);
+  function strip(value) {
+    if (Array.isArray(value)) return value.map(strip);
+    if (value && typeof value === "object") {
+      const src = value;
+      const out = {};
+      for (const k of Object.keys(src).sort()) {
+        const v = strip(src[k]);
+        if (v === null || v === void 0 || v === "") continue;
+        if (Array.isArray(v) && !v.length) continue;
+        if (v && typeof v === "object" && !Array.isArray(v) && !Object.keys(v).length) continue;
+        if (DEFAULT_FALSE.has(k) && (v === false || v === 0 || v === "0")) continue;
+        out[k] = v;
+      }
+      return out;
+    }
+    return value;
+  }
+  function canon(value) {
+    return typeof value === "string" ? value : JSON.stringify(strip(value));
+  }
+  function fnv32(text2) {
+    let h = 2166136261;
+    for (let i = 0; i < text2.length; i += 1) {
+      const c = text2.codePointAt(i);
+      for (const b of utf8(c)) h = Math.imul(h ^ b, 16777619) >>> 0;
+      if (c > 65535) i += 1;
+    }
+    return h >>> 0;
+  }
+  function utf8(cp) {
+    if (cp < 128) return [cp];
+    if (cp < 2048) return [192 | cp >> 6, 128 | cp & 63];
+    if (cp < 65536) return [224 | cp >> 12, 128 | cp >> 6 & 63, 128 | cp & 63];
+    return [240 | cp >> 18, 128 | cp >> 12 & 63, 128 | cp >> 6 & 63, 128 | cp & 63];
+  }
+  function checkList(what, live, before) {
+    if (canon(live ?? []) === canon(before ?? [])) return;
+    throw new HostError(
+      "changed",
+      `RisuAI \uCABD\uC5D0\uC11C ${what}\uC774(\uAC00) \uBC14\uB00C\uC5C8\uC2B5\uB2C8\uB2E4. \uD328\uB110\uC744 \uB2E4\uC2DC \uC5F4\uC5B4 \uBCD1\uD569\uD55C \uB4A4 \uBC18\uC601\uD574 \uC8FC\uC138\uC694`
+    );
+  }
   async function writeChat(slot, seenChatId, update) {
     const fresh = await readChat(slot);
     if (seenChatId && fresh.id && fresh.id !== seenChatId) {
       throw new HostError("changed", "\uCC57\uC774 \uBC14\uB00C\uC5C8\uC2B5\uB2C8\uB2E4 (\uBCF5\uC0AC\xB7\uBE0C\uB79C\uCE58 \uC9C1\uD6C4\uC77C \uC218 \uC788\uC2B5\uB2C8\uB2E4). \uB2E4\uC2DC \uBD88\uB7EC\uC640 \uC8FC\uC138\uC694");
+    }
+    if (update.messages && update.beforeTurns) {
+      const live = fresh.message.map((m) => ({ id: String(m.chatId ?? ""), h: fnv32(String(m.data ?? "")) }));
+      if (canon(live) !== canon(update.beforeTurns)) {
+        throw new HostError(
+          "changed",
+          "RisuAI \uCABD\uC5D0\uC11C \uCC57\uC774 \uBC14\uB00C\uC5C8\uC2B5\uB2C8\uB2E4 (\uD134\uC774 \uB298\uC5C8\uAC70\uB098 \uC218\uC815\uB418\uC5C8\uC2B5\uB2C8\uB2E4). \uD328\uB110\uC744 \uB2E4\uC2DC \uC5F4\uC5B4 \uBCD1\uD569\uD55C \uB4A4 \uBC18\uC601\uD574 \uC8FC\uC138\uC694"
+        );
+      }
+    }
+    if (update.localLore && update.loreBefore) {
+      checkList("\uB85C\uC5B4\uBD81", fresh.localLore, update.loreBefore);
     }
     const next = { ...fresh };
     const parts = [];
@@ -2017,6 +2095,20 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       if (liveValue(e.field) !== e.before) {
         throw new HostError("changed", `RisuAI \uCABD\uC5D0\uC11C \uCE74\uB4DC\uAC00 \uBC14\uB00C\uC5C8\uC2B5\uB2C8\uB2E4 (${e.field}). \uB2E4\uC2DC \uBD88\uB7EC\uC640 \uC8FC\uC138\uC694`);
       }
+    }
+    const LIST_LABEL = {
+      alternateGreetings: "\uB300\uCCB4 \uC778\uC0AC\uB9D0",
+      globalLore: "\uBD07 \uB85C\uC5B4\uBD81",
+      customscript: "Regex",
+      triggerscript: "\uD2B8\uB9AC\uAC70",
+      additionalAssets: "\uC5D0\uC14B",
+      emotionImages: "\uAC10\uC815 \uC774\uBBF8\uC9C0",
+      ccAssets: "\uC5D0\uC14B"
+    };
+    for (const [key, label] of Object.entries(LIST_LABEL)) {
+      const wanted = update[key];
+      const before = update.before?.[key];
+      if (wanted && before !== void 0) checkList(label, fresh[key], before);
     }
     for (const e of update.fields ?? []) {
       if (e.field === "characterVersion") {
@@ -2126,8 +2218,8 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       });
     }
   }
-  function download(filename, text, mime = "text/plain;charset=utf-8") {
-    downloadBlob(filename, new Blob([text], { type: mime }));
+  function download(filename, text2, mime = "text/plain;charset=utf-8") {
+    downloadBlob(filename, new Blob([text2], { type: mime }));
   }
   function downloadBytes(filename, bytes, mime = "application/octet-stream") {
     const buf = new Uint8Array(bytes.byteLength);
@@ -2146,9 +2238,9 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       a.remove();
     }, 4e3);
   }
-  function copyToClipboard(text) {
+  function copyToClipboard(text2) {
     const ta = document.createElement("textarea");
-    ta.value = text;
+    ta.value = text2;
     ta.style.position = "fixed";
     ta.style.left = "-9999px";
     document.body.appendChild(ta);
@@ -2172,6 +2264,8 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     character = null;
     liveChat = null;
     workspace = null;
+    /** What the last upload's merge did, until the shell has announced it. */
+    lastMerge = null;
     /** Which half of the panel is open ('chat' | 'bot'); the shell keeps it current, the agent is told. */
     editMode = "bot";
     activeChatKey = "";
@@ -2292,7 +2386,10 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         // this and refuses card write-backs built on whitelist-era uploads.
         cardFull: true,
         force: Boolean(opts.force),
-        cardReset: Boolean(opts.cardReset)
+        // Scoped re-reads after a write-back: the card half or the chat half,
+        // never both, so writing one does not discard edits pending in the other.
+        cardReset: Boolean(opts.cardReset),
+        chatReset: Boolean(opts.chatReset)
       };
       if (opts.allChats) {
         payload.chats = chats.map((c, i) => ({ chat: c, chatIndex: i }));
@@ -2301,6 +2398,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       }
       const res = await transport.upload("/workspace", payload);
       this.workspace = res.workspace;
+      this.lastMerge = res.workspace.merge ?? null;
       if (!this.activeChatKey || !this.workspace.chats.some((c) => c.chatKey === this.activeChatKey)) {
         this.activeChatKey = this.workspace.chats[0]?.chatKey ?? "";
       }
@@ -2448,11 +2546,16 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
      * Called only on success, so a failed write-back leaves the diff intact and
      * the retry meaningful.
      */
+    /**
+     * The chat landed in RisuAI: snapshot it, then re-read what RisuAI now
+     * holds. See `rereadCard` for why the working copy is not kept.
+     */
     async commit(label) {
       const r = await transport.post(
         "/commit",
         { chatKey: this.activeChatKey, label }
       );
+      await this.rereadChat();
       this.bump();
       return r;
     }
@@ -2529,6 +2632,10 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       }
       if (patch.lore && (whole || patch.lore.changed)) update.localLore = patch.lore.localLore;
       if (patch.memory && (whole || patch.memory.changed)) update.memory = patch.memory.data;
+      if (!whole) {
+        if (update.messages) update.beforeTurns = patch.beforeTurns;
+        if (update.localLore) update.loreBefore = patch.lore?.before;
+      }
       return Object.keys(update).length ? update : null;
     }
     async saveCopy(name) {
@@ -2586,6 +2693,36 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         this.sessionId = r.sessionId;
       }
       yield* transport.stream("/chat", { sessionId: this.sessionId, prompt, mode: this.editMode }, signal);
+    }
+    // --- merge conflicts ------------------------------------------------------
+    /** Rows where our copy and RisuAI's both moved since the last open. */
+    async conflicts(scope = "both") {
+      const q = {};
+      if (scope !== "card" && this.activeChatKey) q.chatKey = this.activeChatKey;
+      if (scope !== "chat" && this.activeCharKey) q.charKey = this.activeCharKey;
+      if (!Object.keys(q).length) return [];
+      const r = await transport.get("/conflicts", q);
+      return r.conflicts ?? [];
+    }
+    async resolveConflict(kind, id, choice) {
+      await transport.post("/conflict/resolve", { kind, id, choice });
+      await this.afterResolve();
+    }
+    async resolveAllConflicts(choice, scope) {
+      const r = await transport.post("/conflict/resolve", {
+        all: true,
+        choice,
+        ...scope === "chat" ? { chatKey: this.activeChatKey } : { charKey: this.activeCharKey }
+      });
+      await this.afterResolve();
+      return r.resolved ?? 0;
+    }
+    async afterResolve() {
+      if (this.activeChatKey) await this.loadTurns();
+      await this.refreshChanges();
+      await this.refreshBotChanges();
+      this.epoch += 1;
+      this.emit();
     }
     async stagedEdits() {
       const r = await transport.get("/staged", { chatKey: this.activeChatKey });
@@ -3085,6 +3222,17 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         update.additionalAssets = patch.assets.additionalAssets;
         update.ccAssets = patch.assets.ccAssets;
       }
+      if (!whole) {
+        update.before = {
+          alternateGreetings: patch.alternateGreetings.before,
+          globalLore: patch.globalLore.before,
+          customscript: patch.customscript.before,
+          triggerscript: patch.triggerscript.before,
+          emotionImages: patch.assets?.before?.emotionImages,
+          additionalAssets: patch.assets?.before?.additionalAssets,
+          ccAssets: patch.assets?.before?.ccAssets
+        };
+      }
       return Object.keys(update).length ? update : null;
     }
     /**
@@ -3107,8 +3255,34 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       if (!update) return { applied: 0, mode: "noop" };
       const r = await writeCharacter(slot.characterIndex, patch.chaId, update);
       await this.cardCommit("\uBC18\uC601 \uC9C1\uC804");
-      await this.readHost();
+      await this.rereadCard();
       return { applied: r.applied, mode: r.mode };
+    }
+    /**
+     * The card landed in RisuAI, so stop holding a copy of it.
+     *
+     * The old flow moved the baseline onto the working copy and kept both. The
+     * diff went to zero and our copy stayed behind, and from that moment it
+     * drifted from RisuAI again - which is what made a later re-open show
+     * untouched rows as edits. Re-reading is the whole fix: after this the
+     * working copy IS RisuAI's current card, with no history to go stale.
+     *
+     * Scoped to the card: a chat's pending edits are none of this write's
+     * business and must not be discarded with it.
+     */
+    async rereadCard() {
+      await this.readHost();
+      if (this.slot && this.character) await this.upload({ cardReset: true });
+      this.epoch += 1;
+      this.emit();
+    }
+    /** The chat twin of rereadCard. */
+    async rereadChat() {
+      await this.readHost();
+      if (this.slot && this.character) await this.upload({ chatReset: true });
+      if (this.activeChatKey) await this.loadTurns();
+      this.epoch += 1;
+      this.emit();
     }
     /**
      * An approved asset proposal: bytes from the workspace -> RisuAI's asset
@@ -3230,6 +3404,125 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
   }
   var state = new AppState();
 
+  // src/ui/conflicts.ts
+  var REASON = {
+    "both-moved": "\uC591\uCABD\uC5D0\uC11C \uC218\uC815\uB428",
+    "deleted-upstream": "RisuAI\uC5D0\uC11C \uC0AD\uC81C\uB428",
+    "weak-match": "\uC9DD\uC744 \uD655\uC2E0\uD560 \uC218 \uC5C6\uC74C"
+  };
+  var KIND = {
+    turn: "\uD134",
+    lore: "\uB85C\uC5B4\uBD81",
+    card_field: "\uCE74\uB4DC",
+    card_script: "\uC2A4\uD06C\uB9BD\uD2B8",
+    memory: "\uC7A5\uAE30\uAE30\uC5B5"
+  };
+  function text(v) {
+    if (v === null || v === void 0) return "";
+    if (typeof v === "string") return v;
+    return JSON.stringify(v, null, 2);
+  }
+  function conflictBadge() {
+    return el("span", {
+      class: "badge conflict",
+      text: "\u26A0 \uCDA9\uB3CC",
+      title: "RisuAI \uCABD\uC5D0\uC11C\uB3C4 \uC774 \uD56D\uBAA9\uC774 \uBC14\uB00C\uC5C8\uC2B5\uB2C8\uB2E4. \uC5B4\uB290 \uCABD\uC744 \uB0A8\uAE38\uC9C0 \uACE8\uB77C \uC8FC\uC138\uC694"
+    });
+  }
+  function conflictBox(item, onDone) {
+    const out = el("div", { class: "outbox" });
+    const mine = text(item.mine);
+    const theirs = text(item.theirs);
+    const decide = async (choice) => {
+      clear(out);
+      out.appendChild(el("div", { class: "hint", text: "\uC815\uB9AC\uD558\uB294 \uC911\uC785\uB2C8\uB2E4\u2026" }));
+      try {
+        await state.resolveConflict(item.kind, item.id, choice);
+        onDone();
+      } catch (e) {
+        clear(out);
+        out.appendChild(el("div", { class: "notice err", text: e instanceof Error ? e.message : String(e) }));
+      }
+    };
+    const keep = el("button", { class: "primary tiny", text: "\uB0B4 \uAC83 \uC720\uC9C0" });
+    keep.addEventListener("click", () => void decide("mine"));
+    const take = el("button", { class: "ghost tiny", text: item.theirs === null ? "RisuAI\uB300\uB85C \uC0AD\uC81C" : "RisuAI \uAC83\uC73C\uB85C" });
+    take.addEventListener("click", () => void decide("theirs"));
+    return el("div", { class: "conflictbox" }, [
+      el("div", { class: "conflicthead" }, [
+        el("span", { class: "badge conflict", text: "\u26A0 \uCDA9\uB3CC" }),
+        el("span", { class: "hint", text: `${KIND[item.kind] ?? item.kind} \xB7 ${REASON[item.reason] ?? item.reason}` }),
+        el("span", { class: "spacer" }),
+        keep,
+        take
+      ]),
+      item.theirs === null ? el("div", { class: "hint", text: "RisuAI \uCABD\uC5D0\uC11C\uB294 \uC774 \uD56D\uBAA9\uC774 \uC0AC\uB77C\uC84C\uC2B5\uB2C8\uB2E4. \uC5EC\uAE30\uC11C \uD3B8\uC9D1 \uC911\uC774\uB77C \uB0A8\uACA8 \uB450\uC5C8\uC2B5\uB2C8\uB2E4." }) : diffView(mine, theirs, { context: 3 }),
+      out
+    ]);
+  }
+  function openConflicts(scope, onDone) {
+    const body = el("div");
+    const out = el("div", { class: "outbox" });
+    const render = async () => {
+      clear(body);
+      body.appendChild(el("div", { class: "hint", text: "\uC77D\uB294 \uC911\uC785\uB2C8\uB2E4\u2026" }));
+      let items5 = [];
+      try {
+        items5 = await state.conflicts(scope);
+      } catch (e) {
+        clear(body);
+        body.appendChild(el("div", { class: "notice err", text: e instanceof Error ? e.message : String(e) }));
+        return;
+      }
+      clear(body);
+      if (!items5.length) {
+        body.appendChild(el("div", { class: "empty", text: "\uB0A8\uC740 \uCDA9\uB3CC\uC774 \uC5C6\uC2B5\uB2C8\uB2E4." }));
+        onDone();
+        return;
+      }
+      const all = (choice) => async () => {
+        clear(out);
+        out.appendChild(el("div", { class: "hint", text: "\uC815\uB9AC\uD558\uB294 \uC911\uC785\uB2C8\uB2E4\u2026" }));
+        try {
+          const n = await state.resolveAllConflicts(choice, scope);
+          clear(out);
+          out.appendChild(el("div", { class: "notice ok", text: `${n}\uAC74\uC744 \uC815\uB9AC\uD588\uC2B5\uB2C8\uB2E4.` }));
+          await render();
+        } catch (e) {
+          clear(out);
+          out.appendChild(el("div", { class: "notice err", text: e instanceof Error ? e.message : String(e) }));
+        }
+      };
+      const mineAll = el("button", { class: "ghost tiny", text: "\uC804\uBD80 \uB0B4 \uAC83 \uC720\uC9C0" });
+      mineAll.addEventListener("click", all("mine"));
+      const theirsAll = el("button", { class: "ghost tiny", text: "\uC804\uBD80 RisuAI \uAC83\uC73C\uB85C" });
+      theirsAll.addEventListener("click", all("theirs"));
+      body.appendChild(el("div", { class: "row", style: { marginBottom: "8px" } }, [
+        el("span", { class: "hint", text: `${items5.length}\uAC74` }),
+        el("span", { class: "spacer" }),
+        mineAll,
+        theirsAll
+      ]));
+      for (const it of items5) {
+        body.appendChild(el("div", { class: "conflictrow" }, [
+          el("div", { class: "conflictname", text: `${KIND[it.kind] ?? it.kind} \xB7 ${it.label}` }),
+          conflictBox(it, () => void render())
+        ]));
+      }
+      onDone();
+    };
+    void render();
+    modal("\uCDA9\uB3CC \uC815\uB9AC", el("div", {}, [
+      el("div", {
+        class: "hint",
+        style: { marginBottom: "8px" },
+        text: "\uD328\uB110\uC5D0\uC11C \uD3B8\uC9D1\uD55C \uD56D\uBAA9\uC744 RisuAI \uCABD\uC5D0\uC11C\uB3C4 \uBC14\uAFE8\uC2B5\uB2C8\uB2E4. \uC5B4\uB290 \uCABD\uC744 \uB0A8\uAE38\uC9C0 \uACE0\uB974\uBA74 \uBC18\uC601\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4."
+      }),
+      body,
+      out
+    ]), { wide: true });
+  }
+
   // src/ui/chatbar.ts
   var bar = null;
   var applyBtn = null;
@@ -3283,10 +3576,13 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     if (!bar || !summaryEl || !applyBadge) return;
     const c = state.changes;
     const parts = describe(c);
+    const conflicts = c?.conflicts ?? 0;
+    if (conflicts) parts.unshift(`\u26A0 \uCDA9\uB3CC ${conflicts}`);
     summaryEl.textContent = parts.length ? parts.join(" \xB7 ") : state.activeChatKey ? "\uBCC0\uACBD \uC5C6\uC74C" : "";
     const total = c?.total ?? 0;
     applyBadge.textContent = String(total);
     applyBadge.style.display = total ? "" : "none";
+    applyBadge.classList.toggle("conflict", !!conflicts);
   }
   function describe(c) {
     if (!c) return [];
@@ -3314,10 +3610,10 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     if (pending) out.push(`\uC81C\uC548 ${pending} \uB300\uAE30`);
     return out;
   }
-  function shellNotice(text, kind = "") {
+  function shellNotice(text2, kind = "") {
     if (!noticeMount) return;
     clear(noticeMount);
-    noticeMount.appendChild(el("div", { class: "notice " + kind, text }));
+    noticeMount.appendChild(el("div", { class: "notice " + kind, text: text2 }));
     setTimeout(() => {
       if (noticeMount) clear(noticeMount);
     }, 9e3);
@@ -3334,7 +3630,22 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     if (state.changes?.warnings?.length) {
       for (const w of state.changes.warnings) body.appendChild(el("div", { class: "notice", text: w }));
     }
+    const conflicts = state.changes?.conflicts ?? 0;
+    if (conflicts) {
+      const open4 = el("button", { class: "ghost tiny", text: `\uCDA9\uB3CC ${conflicts}\uAC74 \uC815\uB9AC` });
+      open4.addEventListener("click", () => {
+        close();
+        openConflicts("chat", () => {
+          void state.refreshChanges();
+        });
+      });
+      body.appendChild(el("div", { class: "notice" }, [
+        el("div", { text: `RisuAI \uCABD\uC5D0\uC11C\uB3C4 \uBC14\uB010 \uD56D\uBAA9\uC774 ${conflicts}\uAC74 \uC788\uC2B5\uB2C8\uB2E4. \uBA3C\uC800 \uC815\uB9AC\uD574 \uC8FC\uC138\uC694.` }),
+        el("div", { class: "row", style: { marginTop: "6px" } }, [open4])
+      ]));
+    }
     const apply = el("button", { class: "primary", text: "RisuAI\uC5D0 \uBC18\uC601" });
+    apply.disabled = conflicts > 0;
     apply.addEventListener("click", async () => {
       apply.disabled = true;
       try {
@@ -3342,14 +3653,13 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         if (r.mode === "noop" && !r.lore && !r.memory) {
           out.textContent = "\uBC18\uC601\uD560 \uBCC0\uACBD\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.";
         } else {
-          const c = await state.commit("\uBC18\uC601 \uC9C1\uC804");
-          await state.loadTurns();
+          await state.commit("\uBC18\uC601 \uC9C1\uC804");
           const bits = [];
           if (r.mode !== "noop") bits.push(`${r.mode === "replace" ? "\uC804\uCCB4 \uAD50\uCCB4" : "\uBCF8\uBB38 \uC218\uC815"} ${r.applied}\uAC74`);
           if (r.lore) bits.push(`\uB85C\uC5B4\uBD81 ${r.lore}\uAC74`);
           if (r.memory) bits.push(`\uC7A5\uAE30\uAE30\uC5B5 ${r.memory}\uAC74`);
-          out.textContent = `${bits.join(" \xB7 ")} \xB7 \uAE30\uC900\uC120 ${c.newBaseline}\uD134`;
-          shellNotice(`RisuAI\uC5D0 \uBC18\uC601\uD588\uC2B5\uB2C8\uB2E4 (${bits.join(" \xB7 ")}). \uC774 \uC0C1\uD0DC\uAC00 \uC0C8 \uAE30\uC900\uC120\uC774 \uB429\uB2C8\uB2E4.`, "ok");
+          out.textContent = bits.join(" \xB7 ");
+          shellNotice(`RisuAI\uC5D0 \uBC18\uC601\uD558\uACE0 \uB2E4\uC2DC \uC77D\uC5C8\uC2B5\uB2C8\uB2E4 (${bits.join(" \xB7 ")}).`, "ok");
           close();
         }
         for (const w of r.warnings) shellNotice(w);
@@ -3362,7 +3672,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
           "err"
         );
       } finally {
-        apply.disabled = false;
+        apply.disabled = (state.changes?.conflicts ?? 0) > 0;
       }
     });
     const copy = el("button", { text: "\uBCF5\uC0AC\uBCF8\uC73C\uB85C \uC800\uC7A5" });
@@ -3371,9 +3681,9 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       copy.disabled = true;
       try {
         await state.saveCopy(name);
-        const c = await state.commit("\uBCF5\uC0AC\uBCF8 \uC800\uC7A5 \uC9C1\uC804");
+        await state.checkpoint("\uBCF5\uC0AC\uBCF8 \uC800\uC7A5 \uC9C1\uD6C4");
         await state.loadTurns();
-        shellNotice(`\uBCF5\uC0AC\uBCF8 "${name}" \uC744 \uB9CC\uB4E4\uC5C8\uC2B5\uB2C8\uB2E4 \xB7 \uAE30\uC900\uC120 ${c.newBaseline}\uD134. \uB85C\uC5B4\uBD81\uACFC \uC7A5\uAE30\uAE30\uC5B5\uB3C4 \uD568\uAED8 \uB2F4\uACBC\uC2B5\uB2C8\uB2E4.`, "ok");
+        shellNotice(`\uBCF5\uC0AC\uBCF8 "${name}" \uC744 \uB9CC\uB4E4\uC5C8\uC2B5\uB2C8\uB2E4. \uB85C\uC5B4\uBD81\uACFC \uC7A5\uAE30\uAE30\uC5B5\uB3C4 \uD568\uAED8 \uB2F4\uACBC\uC2B5\uB2C8\uB2E4. \uC774 \uCC57\uC758 \uC218\uC815\uC740 \uC544\uC9C1 \uBC18\uC601 \uC804 \uC0C1\uD0DC\uB85C \uB0A8\uC544 \uC788\uC2B5\uB2C8\uB2E4.`, "ok");
         close();
       } catch (e) {
         void clientLog("error", "saveCopy failed", { error: msg(e) });
@@ -3622,9 +3932,9 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       return wrap;
     }
     const busy = syncBusy(p);
-    const text = el("span", { class: "hint", text: describeSync(p) });
+    const text2 = el("span", { class: "hint", text: describeSync(p) });
     const tone = p.phase === "error" ? " err" : p.phase === "done" && p.failed ? " warn" : "";
-    const line = el("div", { class: "row assetline" + tone }, [text]);
+    const line = el("div", { class: "row assetline" + tone }, [text2]);
     if (busy) {
       const cancel = el("button", { class: "ghost tiny", text: "\uC911\uB2E8" });
       cancel.addEventListener("click", () => {
@@ -3854,8 +4164,8 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     });
     return b;
   }
-  function flash(pad, text) {
-    const n = el("div", { class: "notice", text });
+  function flash(pad, text2) {
+    const n = el("div", { class: "notice", text: text2 });
     pad.insertBefore(n, pad.firstChild);
     setTimeout(() => n.remove(), 5e3);
   }
@@ -4044,9 +4354,9 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
   }
 
   // src/ui/markdown.ts
-  function renderMarkdown(text) {
+  function renderMarkdown(text2) {
     const frag = document.createDocumentFragment();
-    const lines = text.split("\n");
+    const lines = text2.split("\n");
     let i = 0;
     while (i < lines.length) {
       const line = lines[i];
@@ -4157,17 +4467,17 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     return /^\s*```/.test(line) || /^#{1,4}\s/.test(line) || /^\s*>/.test(line) || /^\s*(?:[-*+]|\d+\.)\s/.test(line) || /^\s*([-*_])\1{2,}\s*$/.test(line);
   }
   var INLINE_RE = /(\*\*[^*\n]+\*\*|__[^_\n]+__|\*[^*\n]+\*|_[^_\n]+_|`[^`\n]+`|\[[^\]\n]+\]\([^)\s]+\))/g;
-  function inline(text) {
+  function inline(text2) {
     const frag = document.createDocumentFragment();
     let last = 0;
     let m;
     INLINE_RE.lastIndex = 0;
-    while ((m = INLINE_RE.exec(text)) !== null) {
-      if (m.index > last) frag.appendChild(document.createTextNode(text.slice(last, m.index)));
+    while ((m = INLINE_RE.exec(text2)) !== null) {
+      if (m.index > last) frag.appendChild(document.createTextNode(text2.slice(last, m.index)));
       frag.appendChild(token(m[0]));
       last = INLINE_RE.lastIndex;
     }
-    if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
+    if (last < text2.length) frag.appendChild(document.createTextNode(text2.slice(last)));
     return frag;
   }
   function token(tok) {
@@ -4402,13 +4712,13 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
           text: "AI \uC5D0\uC774\uC804\uD2B8\uB294 \uD604\uC7AC \uD0ED\uBFD0\uB9CC \uC544\uB2C8\uB77C \uC120\uD0DD\uB41C \uBD07 \uBC0F \uCC57\uC758 \uC804\uBC18\uC801\uC778 \uC815\uBCF4\uB97C \uBAA8\uB450 \uC54C\uACE0 \uC788\uC2B5\uB2C8\uB2E4."
         })
       ]);
-      for (const text of examples) {
+      for (const text2 of examples) {
         const b = el("button", { class: "exbtn" }, [
           el("span", { class: "exmark", text: "\u2192" }),
-          el("span", { text })
+          el("span", { text: text2 })
         ]);
         b.addEventListener("click", () => {
-          this.input.value = text;
+          this.input.value = text2;
           this.input.focus();
         });
         box.appendChild(b);
@@ -4605,18 +4915,18 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         this.timer = null;
       }
     }
-    addBubble(role, text, usage, cost) {
+    addBubble(role, text2, usage, cost) {
       const body = el("div", { class: "bubble-body" });
-      if (role === "assistant") setMarkdown(body, text);
-      else body.textContent = text;
+      if (role === "assistant") setMarkdown(body, text2);
+      else body.textContent = text2;
       const node = el("div", { class: `bubble ${role}` }, [body]);
       if (role === "assistant") node.appendChild(this.costLine(usage, cost));
       this.log.appendChild(node);
       return body;
     }
     /** A one-line event in the conversation (an approval ran, a run was stopped). */
-    note(text, kind = "") {
-      this.log.appendChild(el("div", { class: "bubble note" + (kind ? " " + kind : ""), text }));
+    note(text2, kind = "") {
+      this.log.appendChild(el("div", { class: "bubble note" + (kind ? " " + kind : ""), text: text2 }));
       this.scroll();
     }
     costLine(usage, cost) {
@@ -4696,9 +5006,9 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       };
       const traceSegment = () => {
         if (!tracker) {
-          const strip = el("div", { class: "trace" });
-          bubble.insertBefore(strip, thinking);
-          tracker = new TraceTracker(strip);
+          const strip2 = el("div", { class: "trace" });
+          bubble.insertBefore(strip2, thinking);
+          tracker = new TraceTracker(strip2);
           textNode = null;
         }
         return tracker;
@@ -4904,9 +5214,9 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       return m ? m[1] : "";
     }
   }
-  function setMarkdown(node, text) {
+  function setMarkdown(node, text2) {
     clear(node);
-    node.appendChild(renderMarkdown(text));
+    node.appendChild(renderMarkdown(text2));
   }
   function fmtSize(n) {
     if (!n) return "0B";
@@ -4994,13 +5304,13 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     if (mode2 !== "clean") {
       return el("div", { class: "turn-body raw", text: raw });
     }
-    const text = toDisplayText(raw, opts);
+    const text2 = toDisplayText(raw, opts);
     const box = el("div", { class: "turn-body" });
-    if (!text) {
+    if (!text2) {
       box.appendChild(el("span", { class: "hint", text: "(\uC815\uB9AC\uD558\uACE0 \uB098\uB2C8 \uB0B4\uC6A9\uC774 \uBE44\uC5C8\uC2B5\uB2C8\uB2E4 \u2014 \uC6D0\uBB38 \uBCF4\uAE30\uB85C \uD655\uC778\uD574 \uC8FC\uC138\uC694)" }));
       return box;
     }
-    for (const piece of splitImages(text)) {
+    for (const piece of splitImages(text2)) {
       if (piece.kind === "img") {
         const img = el("img", { class: "turn-img", src: piece.src, alt: piece.alt || "image" });
         img.addEventListener("error", () => {
@@ -5013,13 +5323,13 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     }
     return box;
   }
-  function splitImages(text) {
+  function splitImages(text2) {
     const out = [];
     const re = /<img\b([^>]*)>/gi;
     let last = 0;
     let m;
-    while ((m = re.exec(text)) !== null) {
-      if (m.index > last) out.push({ kind: "text", text: text.slice(last, m.index) });
+    while ((m = re.exec(text2)) !== null) {
+      if (m.index > last) out.push({ kind: "text", text: text2.slice(last, m.index) });
       const attrs = m[1] || "";
       out.push({
         kind: "img",
@@ -5028,26 +5338,26 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       });
       last = re.lastIndex;
     }
-    if (last < text.length) out.push({ kind: "text", text: text.slice(last) });
+    if (last < text2.length) out.push({ kind: "text", text: text2.slice(last) });
     return out;
   }
-  function appendMarkdown(box, text, opts) {
+  function appendMarkdown(box, text2, opts) {
     const parts = [];
     if (opts.markdown) parts.push("\\*\\*[^*\n]+\\*\\*", "\\*[^*\n]+\\*", "`[^`\n]+`");
     if (opts.quotes) parts.push(SPEECH_RE.source, THOUGHT_RE.source);
     if (!parts.length) {
-      box.appendChild(document.createTextNode(text));
+      box.appendChild(document.createTextNode(text2));
       return;
     }
     const re = new RegExp("(" + parts.join("|") + ")", "g");
     let last = 0;
     let m;
-    while ((m = re.exec(text)) !== null) {
-      if (m.index > last) box.appendChild(document.createTextNode(text.slice(last, m.index)));
+    while ((m = re.exec(text2)) !== null) {
+      if (m.index > last) box.appendChild(document.createTextNode(text2.slice(last, m.index)));
       box.appendChild(inlineToken(m[0], opts));
       last = re.lastIndex;
     }
-    if (last < text.length) box.appendChild(document.createTextNode(text.slice(last)));
+    if (last < text2.length) box.appendChild(document.createTextNode(text2.slice(last)));
   }
   function inlineToken(tok, opts) {
     if (opts.markdown) {
@@ -5259,7 +5569,8 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         el("span", { class: "turn-no", text: String(t.seq), title: `\uD134 ${t.seq}` }),
         el("span", { class: `turn-role ${t.role === "user" ? "user" : "char"}`, text: t.role }),
         t.time ? el("span", { text: fmtTime(t.time) }) : null,
-        t.changed ? el("span", { class: "badge warn", text: "\uC218\uC815\uB428" }) : null,
+        t.conflict ? conflictBadge() : null,
+        t.changed && !t.conflict ? el("span", { class: "badge warn", text: "\uC218\uC815\uB428" }) : null,
         t.isNew ? el("span", { class: "badge ok", text: "\uCD94\uAC00\uB428" }) : null,
         doomed ? el("span", { class: "badge err", text: "\uC0AD\uC81C \uC608\uC815" }) : null,
         el("span", { class: "spacer" }),
@@ -5408,10 +5719,10 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     if (deleting) bits.push(`\uC0AD\uC81C \uC608\uC815 ${deleting.size}`);
     countEl.textContent = bits.join(" \xB7 ");
   }
-  function notice(text, kind = "") {
+  function notice(text2, kind = "") {
     if (!noticeMount2) return;
     clear(noticeMount2);
-    noticeMount2.appendChild(el("div", { class: "notice " + kind, text }));
+    noticeMount2.appendChild(el("div", { class: "notice " + kind, text: text2 }));
     setTimeout(() => {
       if (noticeMount2) clear(noticeMount2);
     }, 9e3);
@@ -5898,10 +6209,10 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     const inner = mount.querySelector(".right-inner");
     if (inner) mountAgent(inner);
   }
-  function notice2(text, kind = "") {
+  function notice2(text2, kind = "") {
     if (!noticeMount3) return;
     clear(noticeMount3);
-    noticeMount3.appendChild(el("div", { class: "notice " + kind, style: { margin: "10px 14px 0" }, text }));
+    noticeMount3.appendChild(el("div", { class: "notice " + kind, style: { margin: "10px 14px 0" }, text: text2 }));
     setTimeout(() => {
       if (noticeMount3) clear(noticeMount3);
     }, 9e3);
@@ -6801,10 +7112,10 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       const inner = mount.querySelector(".right-inner");
       if (inner) mountAgent(inner);
     }
-    function notice9(text, kind = "") {
+    function notice9(text2, kind = "") {
       if (!noticeMount10) return;
       clear(noticeMount10);
-      noticeMount10.appendChild(el("div", { class: "notice " + kind, style: { margin: "10px 14px 0" }, text }));
+      noticeMount10.appendChild(el("div", { class: "notice " + kind, style: { margin: "10px 14px 0" }, text: text2 }));
       setTimeout(() => {
         if (noticeMount10) clear(noticeMount10);
       }, 9e3);
@@ -6917,7 +7228,9 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       if (e.entry.alwaysActive) {
         row.appendChild(el("span", { class: "badge", title: "\uC0C1\uC2DC \uD65C\uC131\uD654 \u2014 \uD0A4\uC6CC\uB4DC \uC5C6\uC774 \uD56D\uC0C1 \uC0BD\uC785\uB429\uB2C8\uB2E4", text: "\uC0C1\uC2DC" }));
       }
-      if (e.origin !== "original") {
+      if (e.conflict) {
+        row.appendChild(conflictBadge());
+      } else if (e.origin !== "original") {
         row.appendChild(el("span", { class: "badge warn", text: e.origin === "added" ? "\uCD94\uAC00" : "\uC218\uC815" }));
       }
       row.appendChild(up);
@@ -7015,9 +7328,25 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         if (String(orig.key ?? "") !== String(entry.key ?? "")) metaChanged.push(`\uD0A4\uC6CC\uB4DC: \u201C${String(orig.key ?? "")}\u201D \u2192 \u201C${String(entry.key ?? "")}\u201D`);
         if (!!orig.alwaysActive !== !!entry.alwaysActive) metaChanged.push(`\uC0C1\uC2DC \uD65C\uC131\uD654: ${orig.alwaysActive ? "\uCF2C" : "\uB054"} \u2192 ${entry.alwaysActive ? "\uCF2C" : "\uB054"}`);
       }
+      const conflict = e.conflict ? conflictBox({
+        kind: "lore",
+        id: e.id,
+        label: titleOf(e),
+        charKey: null,
+        chatKey: e.chatKey ?? null,
+        reason: String(e.conflict.kind ?? ""),
+        tier: "",
+        mine: e.entry,
+        theirs: e.conflict.theirs ?? null,
+        base: e.conflict.base ?? null,
+        canTakeTheirs: true
+      }, () => {
+        void refresh8();
+      }) : null;
       clear(viewMount6);
       viewMount6.appendChild(el("div", { class: "card" }, [
         el("h2", {}, [el("span", { text: opts.heading }), el("span", { class: "spacer" }), focusButton(content, titleOf(e))]),
+        conflict,
         el("label", { class: "field" }, [el("span", { text: "\uC774\uB984 (comment)" }), comment]),
         el("label", { class: "checkrow", style: { marginBottom: "8px" } }, [
           always,
@@ -7158,10 +7487,10 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       countEl2
     ]);
   }
-  function notice3(text, kind = "") {
+  function notice3(text2, kind = "") {
     if (!noticeMount4) return;
     clear(noticeMount4);
-    noticeMount4.appendChild(el("div", { class: "notice " + kind, style: { margin: "10px 14px 0" }, text }));
+    noticeMount4.appendChild(el("div", { class: "notice " + kind, style: { margin: "10px 14px 0" }, text: text2 }));
     setTimeout(() => {
       if (noticeMount4) clear(noticeMount4);
     }, 9e3);
@@ -7301,7 +7630,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
   }
 
   // src/ui/tab-vars.ts
-  var KIND = "scriptstate";
+  var KIND2 = "scriptstate";
   var built3 = false;
   var listMount = null;
   var noticeMount5 = null;
@@ -7336,10 +7665,10 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     const inner = mount.querySelector(".right-inner");
     if (inner) mountAgent(inner);
   }
-  function notice4(text, kind = "") {
+  function notice4(text2, kind = "") {
     if (!noticeMount5) return;
     clear(noticeMount5);
-    noticeMount5.appendChild(el("div", { class: "notice " + kind, style: { margin: "10px 14px 0" }, text }));
+    noticeMount5.appendChild(el("div", { class: "notice " + kind, style: { margin: "10px 14px 0" }, text: text2 }));
     setTimeout(() => {
       if (noticeMount5) clear(noticeMount5);
     }, 9e3);
@@ -7350,7 +7679,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     listMount.appendChild(el("div", { class: "hint", text: "\uC77D\uB294 \uC911\uC785\uB2C8\uB2E4\u2026" }));
     try {
       const r = await state.memory();
-      items2 = r.items.filter((i) => i.kind === KIND);
+      items2 = r.items.filter((i) => i.kind === KIND2);
       draw();
     } catch (e) {
       clear(listMount);
@@ -7467,7 +7796,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       }
       add.disabled = true;
       try {
-        await state.addMemory(KIND, value.value, k);
+        await state.addMemory(KIND2, value.value, k);
         key.value = "";
         value.value = "";
         notice4(`${k} \uC744(\uB97C) \uCD94\uAC00\uD588\uC2B5\uB2C8\uB2E4.`, "ok");
@@ -7500,9 +7829,9 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
   function buildPresetsCard(opts) {
     const generalMount = el("div");
     const out = el("div");
-    const say = (text, kind = "") => {
+    const say = (text2, kind = "") => {
       clear(out);
-      out.appendChild(el("div", { class: "notice " + kind, text }));
+      out.appendChild(el("div", { class: "notice " + kind, text: text2 }));
     };
     const refresh8 = async () => {
       clear(generalMount);
@@ -8266,9 +8595,9 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     const budget = el("div", { class: "hint" });
     let maxBody = 4e4;
     let maxDesc = 400;
-    const say = (text, kind = "") => {
+    const say = (text2, kind = "") => {
       clear(out);
-      out.appendChild(el("div", { class: "notice " + kind, text }));
+      out.appendChild(el("div", { class: "notice " + kind, text: text2 }));
     };
     const refresh8 = async () => {
       clear(listMount2);
@@ -8518,9 +8847,9 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
   // src/ui/debugpanel.ts
   function buildUpdateCard() {
     const out = el("div", { class: "outbox" });
-    const say = (text, kind = "") => {
+    const say = (text2, kind = "") => {
       clear(out);
-      out.appendChild(el("div", { class: "notice " + kind, text }));
+      out.appendChild(el("div", { class: "notice " + kind, text: text2 }));
     };
     const applyBtn3 = el("button", { class: "primary", text: "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8" });
     applyBtn3.disabled = true;
@@ -8604,28 +8933,28 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     ]) {
       levelSel.appendChild(el("option", { value, text: label }));
     }
-    const say = (text, kind = "") => {
+    const say = (text2, kind = "") => {
       clear(out);
-      out.appendChild(el("div", { class: "notice " + kind, text }));
+      out.appendChild(el("div", { class: "notice " + kind, text: text2 }));
     };
-    const show = (title, text) => {
+    const show = (title, text2) => {
       clear(out);
       const copy = el("button", { class: "ghost tiny", text: "\uBCF5\uC0AC" });
       copy.addEventListener("click", () => {
-        const ok = copyText(text);
+        const ok = copyText(text2);
         copy.textContent = ok ? "\uBCF5\uC0AC\uD588\uC2B5\uB2C8\uB2E4" : "\uBCF5\uC0AC \uC2E4\uD328 \u2014 \uC9C1\uC811 \uC120\uD0DD\uD574 \uC8FC\uC138\uC694";
         setTimeout(() => {
           copy.textContent = "\uBCF5\uC0AC";
         }, 3e3);
       });
       const dl = el("button", { class: "ghost tiny", text: "\uD30C\uC77C\uB85C \uC800\uC7A5" });
-      dl.addEventListener("click", () => saveText(title, text));
+      dl.addEventListener("click", () => saveText(title, text2));
       out.appendChild(el("div", { class: "card" }, [
         el("h2", {}, [
-          el("span", { text: `${title} \xB7 ${text.length.toLocaleString()}\uC790` })
+          el("span", { text: `${title} \xB7 ${text2.length.toLocaleString()}\uC790` })
         ]),
         el("div", { class: "row", style: { marginBottom: "8px" } }, [copy, dl]),
-        el("pre", { class: "mono filepreview", text })
+        el("pre", { class: "mono filepreview", text: text2 })
       ]));
     };
     const diagBtn = el("button", { class: "primary", text: "\uC9C4\uB2E8 \uC815\uBCF4" });
@@ -8635,7 +8964,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.8.4",
+            version: "0.9.0",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -8693,11 +9022,11 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       return url ? "(\uD615\uC2DD \uC624\uB958)" : "(\uBBF8\uC124\uC815)";
     }
   }
-  function copyText(text) {
-    return copyToClipboard(text);
+  function copyText(text2) {
+    return copyToClipboard(text2);
   }
-  function saveText(title, text) {
-    const url = URL.createObjectURL(new Blob([text], { type: "text/plain;charset=utf-8" }));
+  function saveText(title, text2) {
+    const url = URL.createObjectURL(new Blob([text2], { type: "text/plain;charset=utf-8" }));
     const stamp = (/* @__PURE__ */ new Date()).toISOString().slice(0, 19).replace(/[:T]/g, "");
     const a = el("a", { href: url, download: `risu-hina-${title}-${stamp}.txt` });
     document.body.appendChild(a);
@@ -8942,9 +9271,9 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
   function buildKeysCard() {
     const listMount2 = el("div");
     const out = el("div", { class: "outbox" });
-    const say = (text, kind = "") => {
+    const say = (text2, kind = "") => {
       clear(out);
-      out.appendChild(el("div", { class: "notice " + kind, text }));
+      out.appendChild(el("div", { class: "notice " + kind, text: text2 }));
     };
     let keepSentinel = "__keep__";
     const openForm = (existing) => {
@@ -9148,7 +9477,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.8.4"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.9.0"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -9220,10 +9549,10 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     const inner = mount.querySelector(".right-inner");
     if (inner) mountAgent(inner);
   }
-  function notice5(text, kind = "") {
+  function notice5(text2, kind = "") {
     if (!noticeMount6) return;
     clear(noticeMount6);
-    noticeMount6.appendChild(el("div", { class: "notice " + kind, style: { margin: "10px 14px 0" }, text }));
+    noticeMount6.appendChild(el("div", { class: "notice " + kind, style: { margin: "10px 14px 0" }, text: text2 }));
     setTimeout(() => {
       if (noticeMount6) clear(noticeMount6);
     }, 9e3);
@@ -9337,9 +9666,25 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       });
       buttons.push(del);
     }
-    const diff = f.changed ? diffCard(f.original, f.body) : null;
+    const diff = f.changed && !f.conflict ? diffCard(f.original, f.body) : null;
+    const conflict = f.conflict ? conflictBox({
+      kind: "card_field",
+      id: f.id,
+      label: labelOf(f),
+      charKey: state.botKey,
+      chatKey: null,
+      reason: String(f.conflict.kind ?? ""),
+      tier: "",
+      mine: f.body,
+      theirs: f.conflict.theirs ?? null,
+      base: f.conflict.base ?? null,
+      canTakeTheirs: true
+    }, () => {
+      void refresh4();
+    }) : null;
     clear(viewMount3);
     viewMount3.appendChild(el("div", { class: "card" }, [
+      conflict,
       el("h2", {}, [
         el("span", { text: labelOf(f) }),
         el("span", { class: "spacer" }),
@@ -9422,10 +9767,10 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     const inner = mount.querySelector(".right-inner");
     if (inner) mountAgent(inner);
   }
-  function notice6(text, kind = "") {
+  function notice6(text2, kind = "") {
     if (!noticeMount7) return;
     clear(noticeMount7);
-    noticeMount7.appendChild(el("div", { class: "notice " + kind, style: { margin: "10px 14px 0" }, text }));
+    noticeMount7.appendChild(el("div", { class: "notice " + kind, style: { margin: "10px 14px 0" }, text: text2 }));
     setTimeout(() => {
       if (noticeMount7) clear(noticeMount7);
     }, 9e3);
@@ -9711,10 +10056,10 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     const inner = mount.querySelector(".right-inner");
     if (inner) mountAgent(inner);
   }
-  function notice7(text, kind = "") {
+  function notice7(text2, kind = "") {
     if (!noticeMount8) return;
     clear(noticeMount8);
-    noticeMount8.appendChild(el("div", { class: "notice " + kind, style: { margin: "10px 14px 0" }, text }));
+    noticeMount8.appendChild(el("div", { class: "notice " + kind, style: { margin: "10px 14px 0" }, text: text2 }));
     setTimeout(() => {
       if (noticeMount8) clear(noticeMount8);
     }, 9e3);
@@ -10039,8 +10384,22 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     body.appendChild(el("div", { class: "hint", text: lines.length ? lines.join(" \xB7 ") : "\uBC18\uC601\uD560 \uBCC0\uACBD\uC774 \uC5C6\uC2B5\uB2C8\uB2E4." }));
     const blocked = applyBlockReason();
     if (blocked) body.appendChild(el("div", { class: "notice", text: blocked }));
+    const conflicts = state.botChanges?.conflicts ?? 0;
+    if (conflicts) {
+      const open4 = el("button", { class: "ghost tiny", text: `\uCDA9\uB3CC ${conflicts}\uAC74 \uC815\uB9AC` });
+      open4.addEventListener("click", () => {
+        close();
+        openConflicts("card", () => {
+          void state.refreshBotChanges();
+        });
+      });
+      body.appendChild(el("div", { class: "notice" }, [
+        el("div", { text: `RisuAI \uCABD\uC5D0\uC11C\uB3C4 \uBC14\uB010 \uD56D\uBAA9\uC774 ${conflicts}\uAC74 \uC788\uC2B5\uB2C8\uB2E4. \uBA3C\uC800 \uC815\uB9AC\uD574 \uC8FC\uC138\uC694.` }),
+        el("div", { class: "row", style: { marginTop: "6px" } }, [open4])
+      ]));
+    }
     const apply = el("button", { class: "primary", text: "RisuAI\uC5D0 \uBC18\uC601" });
-    apply.disabled = !!blocked;
+    apply.disabled = !!blocked || conflicts > 0;
     apply.addEventListener("click", async () => {
       apply.disabled = true;
       try {
@@ -10048,7 +10407,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         if (r.mode === "noop") {
           out.textContent = "\uBC18\uC601\uD560 \uBCC0\uACBD\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.";
         } else {
-          shellNotice("\uCE74\uB4DC\uB97C RisuAI\uC5D0 \uBC18\uC601\uD588\uC2B5\uB2C8\uB2E4. \uC774 \uC0C1\uD0DC\uAC00 \uC0C8 \uAE30\uC900\uC120\uC774 \uB429\uB2C8\uB2E4.", "ok");
+          shellNotice("\uCE74\uB4DC\uB97C RisuAI\uC5D0 \uBC18\uC601\uD558\uACE0 \uB2E4\uC2DC \uC77D\uC5C8\uC2B5\uB2C8\uB2E4.", "ok");
           close();
         }
       } catch (e) {
@@ -10057,7 +10416,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         void clientLog("error", "cardWriteBack failed", { error: m });
         shellNotice("\uCE74\uB4DC \uBC18\uC601\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + m, "err");
       } finally {
-        apply.disabled = !!applyBlockReason();
+        apply.disabled = !!applyBlockReason() || (state.botChanges?.conflicts ?? 0) > 0;
       }
     });
     const nameInput = el("input", {
@@ -10249,10 +10608,10 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     const inner = mount.querySelector(".right-inner");
     if (inner) mountAgent(inner);
   }
-  function notice8(text, kind = "") {
+  function notice8(text2, kind = "") {
     if (!noticeMount9) return;
     clear(noticeMount9);
-    noticeMount9.appendChild(el("div", { class: "notice " + kind, style: { margin: "10px 14px 0" }, text }));
+    noticeMount9.appendChild(el("div", { class: "notice " + kind, style: { margin: "10px 14px 0" }, text: text2 }));
     setTimeout(() => {
       if (noticeMount9) clear(noticeMount9);
     }, 9e3);
@@ -10330,10 +10689,10 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     if (!editable()) return;
     sideMount2.appendChild(el("div", { class: "sectionline", style: { margin: "10px 6px" } }));
     sideMount2.appendChild(el("div", { class: "sectiontitle", style: { padding: "0 8px" }, text: "\uB3C4\uAD6C" }));
-    const strip = el("button", { class: "ghost tiny", text: "\uC774\uB984\uC758 \uD655\uC7A5\uC790 \uC77C\uAD04 \uC81C\uAC70" });
-    strip.title = '"face.png" \uCC98\uB7FC \uC774\uB984 \uB05D\uC5D0 \uBD99\uC740 .png/.webp \uB97C \uB5CD\uB2C8\uB2E4. CBS \uB294 \uD655\uC7A5\uC790 \uC5C6\uB294 \uC774\uB984\uC73C\uB85C \uD638\uCD9C\uD569\uB2C8\uB2E4.';
-    strip.addEventListener("click", async () => {
-      strip.disabled = true;
+    const strip2 = el("button", { class: "ghost tiny", text: "\uC774\uB984\uC758 \uD655\uC7A5\uC790 \uC77C\uAD04 \uC81C\uAC70" });
+    strip2.title = '"face.png" \uCC98\uB7FC \uC774\uB984 \uB05D\uC5D0 \uBD99\uC740 .png/.webp \uB97C \uB5CD\uB2C8\uB2E4. CBS \uB294 \uD655\uC7A5\uC790 \uC5C6\uB294 \uC774\uB984\uC73C\uB85C \uD638\uCD9C\uD569\uB2C8\uB2E4.';
+    strip2.addEventListener("click", async () => {
+      strip2.disabled = true;
       try {
         const r = await transport.post("/card/assets/rename", { charKey: state.botKey, mode: "strip-ext" });
         notice8(r.changed ? `${r.changed}\uAC1C \uC774\uB984\uC5D0\uC11C \uD655\uC7A5\uC790\uB97C \uB5D0\uC2B5\uB2C8\uB2E4. \uBD07 \uBC14\uC758 \u201C\uBC18\uC601\u201D\uC744 \uB204\uB974\uBA74 RisuAI\uC5D0 \uC4F0\uC785\uB2C8\uB2E4.` : "\uD655\uC7A5\uC790\uAC00 \uBD99\uC740 \uC774\uB984\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.", r.changed ? "ok" : "");
@@ -10342,12 +10701,12 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       } catch (e) {
         notice8("\uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + (e instanceof Error ? e.message : String(e)), "err");
       } finally {
-        strip.disabled = false;
+        strip2.disabled = false;
       }
     });
     const rx = el("button", { class: "ghost tiny", text: "\uC815\uADDC\uC2DD\uC73C\uB85C \uC77C\uAD04 \uC774\uB984 \uBCC0\uACBD" });
     rx.addEventListener("click", () => openRegexRename(rx));
-    sideMount2.appendChild(el("div", { style: { padding: "0 6px" } }, [strip]));
+    sideMount2.appendChild(el("div", { style: { padding: "0 6px" } }, [strip2]));
     sideMount2.appendChild(el("div", { style: { padding: "4px 6px" } }, [rx]));
   }
   function openRegexRename(anchor) {
@@ -10601,21 +10960,21 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       return;
     }
     const busy = syncBusy(p);
-    let text = "";
+    let text2 = "";
     if (busy) {
       let ratio = -1;
       if (p.phase === "pulling" && p.pull && p.pull.total) ratio = p.pull.done / p.pull.total;
       else if (p.phase === "pushing" && p.toPush) ratio = (p.read + p.readFailed) / p.toPush;
-      text = "\uC5D0\uC14B " + (ratio >= 0 ? Math.round(ratio * 100) + "%" : "\uB300\uC870 \uC911");
+      text2 = "\uC5D0\uC14B " + (ratio >= 0 ? Math.round(ratio * 100) + "%" : "\uB300\uC870 \uC911");
     } else if (p.phase === "error" || p.phase === "cancelled") {
-      text = "\uC5D0\uC14B \uB3D9\uAE30\uD654 \uC911\uB2E8";
+      text2 = "\uC5D0\uC14B \uB3D9\uAE30\uD654 \uC911\uB2E8";
     } else if (p.total) {
-      text = `\uC5D0\uC14B ${p.present}/${p.total}` + (p.failed ? ` (\uC2E4\uD328 ${p.failed})` : "");
+      text2 = `\uC5D0\uC14B ${p.present}/${p.total}` + (p.failed ? ` (\uC2E4\uD328 ${p.failed})` : "");
     }
-    syncBadge.textContent = text;
+    syncBadge.textContent = text2;
     syncBadge.title = describeSync(p);
     syncBadge.className = "syncbadge" + (busy ? " busy" : p.phase === "error" ? " err" : "");
-    syncBadge.style.display = text ? "" : "none";
+    syncBadge.style.display = text2 ? "" : "none";
   }
   function setToolbar(node) {
     if (!tabSlot) return;
@@ -10692,7 +11051,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.8.4"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.9.0"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
@@ -10768,7 +11127,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.8.4" }),
+        el("span", { class: "dim", text: "v0.9.0" }),
         healthEl,
         el("span", { class: "spacer" }),
         reload,
@@ -10814,6 +11173,11 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       b.textContent = String(n);
       b.title = n ? `\uAE30\uC900\uC120\uACFC \uB2E4\uB978 \uD56D\uBAA9 ${n}\uAC1C \u2014 \uAC01 \uD56D\uBAA9\uC5D0 \uCD94\uAC00/\uC218\uC815 \uD45C\uC2DC\uAC00 \uC788\uC2B5\uB2C8\uB2E4` : "";
       b.style.display = n ? "" : "none";
+    }
+    const stuck = (state.botChanges?.conflicts ?? 0) + (state.changes?.conflicts ?? 0);
+    for (const id of ["meta", "botlore", "regex", "trigger", "editor", "lore", "memory"]) {
+      const b = document.querySelector(`#tab-${id} .tabbadge`);
+      if (b) b.classList.toggle("conflict", stuck > 0 && b.style.display !== "none");
     }
   }
   state.onChange(() => {
@@ -10871,17 +11235,32 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     }
   }
   var bootPhase = "";
-  function setBootPhase(text) {
-    bootPhase = text;
+  function setBootPhase(text2) {
+    bootPhase = text2;
     refreshStatus();
   }
   var uploadInFlight = null;
+  function announceMerge() {
+    const m = state.lastMerge;
+    state.lastMerge = null;
+    if (!m) return;
+    const bits = [];
+    if (m.adopt) bits.push(`\uC218\uC815 ${m.adopt}\uAC74`);
+    if (m.insert) bits.push(`\uCD94\uAC00 ${m.insert}\uAC74`);
+    if (m.delete) bits.push(`\uC0AD\uC81C ${m.delete}\uAC74`);
+    const conflicts = m.conflict ?? 0;
+    if (!bits.length && !conflicts) return;
+    const head = bits.length ? `RisuAI \uCABD \uBCC0\uACBD\uC744 \uBC1B\uC558\uC2B5\uB2C8\uB2E4 (${bits.join(" \xB7 ")}).` : "";
+    const tail = conflicts ? ` \uD3B8\uC9D1 \uC911\uC774\uB358 ${conflicts}\uAC74\uC740 \uCDA9\uB3CC\uB85C \uD45C\uC2DC\uD588\uC2B5\uB2C8\uB2E4 \u2014 \uBC18\uC601 \uC804\uC5D0 \uACE8\uB77C \uC8FC\uC138\uC694.` : "";
+    shellNotice((head + tail).trim(), conflicts ? "err" : "ok");
+  }
   async function uploadAfterConnect(force = false) {
     if (uploadInFlight) return uploadInFlight;
     if (!state.slot || state.slotError) return;
     uploadInFlight = (async () => {
       try {
         await state.upload({ force });
+        announceMerge();
         if (state.activeChatKey) await state.loadTurns();
       } catch (e) {
         console.log("[risu-hina] upload failed", e);
@@ -11004,6 +11383,6 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.8.4"} loaded`);
+    console.log(`[risu-hina] v${"0.9.0"} loaded`);
   })();
 })();

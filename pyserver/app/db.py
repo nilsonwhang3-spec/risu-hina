@@ -13,15 +13,16 @@ because the user should be able to open them in an editor.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import sqlite3
 import threading
 import time
-from typing import Any, Iterable
+from typing import Any, Iterable, Iterator
 
 from . import config
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 LOCK = threading.RLock()
 _conn: sqlite3.Connection | None = None
@@ -214,6 +215,9 @@ DDL = [
         name        TEXT,
         extras_json TEXT,
         origin      TEXT NOT NULL DEFAULT 'original',
+        -- Set when this row and RisuAI's copy both moved away from the same
+        -- baseline (app/merge.py). NULL is the normal state.
+        conflict_json TEXT,
         updated_at  REAL NOT NULL
     )
     """,
@@ -249,8 +253,14 @@ DDL = [
         scope       TEXT NOT NULL DEFAULT 'global',
         chat_key    TEXT,
         seq         INTEGER NOT NULL DEFAULT 0,
+        -- `seq` is the WORKING order and move_lore renumbers it. `base_seq` is
+        -- the position RisuAI last showed this entry in, which is what the
+        -- write-back guard's `before` list has to be built from.
+        base_seq    INTEGER,
         entry_json  TEXT NOT NULL,
+        original_json TEXT,
         origin      TEXT NOT NULL DEFAULT 'original',
+        conflict_json TEXT,
         created_at  REAL NOT NULL
     )
     """,
@@ -429,6 +439,7 @@ DDL = [
         -- NULL means "added here", which is what distinguishes a new entry
         -- from an edited one when the diff is drawn.
         original    TEXT,
+        conflict_json TEXT,
         extra_json  TEXT,
         created_at  REAL NOT NULL,
         updated_at  REAL NOT NULL
@@ -478,8 +489,10 @@ DDL = [
         char_key    TEXT NOT NULL REFERENCES characters(char_key) ON DELETE CASCADE,
         field       TEXT NOT NULL,
         seq         INTEGER NOT NULL DEFAULT 0,
+        base_seq    INTEGER,
         body        TEXT NOT NULL DEFAULT '',
         original    TEXT,
+        conflict_json TEXT,
         extra_json  TEXT,
         created_at  REAL NOT NULL,
         updated_at  REAL NOT NULL
@@ -497,9 +510,11 @@ DDL = [
         char_key    TEXT NOT NULL REFERENCES characters(char_key) ON DELETE CASCADE,
         kind        TEXT NOT NULL,
         seq         INTEGER NOT NULL DEFAULT 0,
+        base_seq    INTEGER,
         entry_json  TEXT NOT NULL,
         original_json TEXT,
         origin      TEXT NOT NULL DEFAULT 'original',
+        conflict_json TEXT,
         created_at  REAL NOT NULL
     )
     """,
@@ -611,9 +626,6 @@ ADD_COLUMNS = [
     # Older rows have NULL here and restore turns only.
     ("checkpoints", "lore_json", "TEXT"),
     ("checkpoints", "memory_json", "TEXT"),
-    # The entry as it came from RisuAI, so an edit can be told from a no-op and
-    # a commit knows what the new baseline is. NULL for rows that predate it.
-    ("lore_entries", "original_json", "TEXT"),
 ]
 
 
@@ -638,8 +650,37 @@ DROP_FTS = [
 ]
 
 
+# Tables whose rows are a working copy of something RisuAI owns. Schema 12
+# changed how they are merged on re-open (app/merge.py), and rows written by
+# the old rule carry no `base_seq` and were addressed by position, which the
+# new matcher would read as a wave of conflicts. They are dropped instead:
+# every one of them is rebuilt from RisuAI on the first open, and the
+# snapshots (checkpoints, card_checkpoints) are deliberately kept.
+WORKING_TABLES = ("turns", "turns_original", "lore_entries",
+                  "card_fields", "card_scripts", "memories")
+
+
+def _drop_working_copies(conn: sqlite3.Connection) -> None:
+    row = conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()
+    try:
+        was = int(row["value"]) if row else 0
+    except (TypeError, ValueError):
+        was = 0
+    if not was or was >= 12:
+        return
+    for table in WORKING_TABLES:
+        conn.execute(f"DROP TABLE IF EXISTS {table}")
+    print(f"[risu-hina] schema {was} -> {SCHEMA_VERSION}: working copies rebuilt from RisuAI "
+          f"on next open (snapshots kept)", flush=True)
+
+
 def _migrate(conn: sqlite3.Connection) -> None:
     with LOCK:
+        # Before the DDL, so the tables come back with the new columns.
+        try:
+            _drop_working_copies(conn)
+        except sqlite3.Error as e:  # noqa: BLE001 - a fresh DB has no meta table yet
+            print(f"[risu-hina] schema check skipped: {e}", flush=True)
         for stmt in DDL:
             conn.execute(stmt)
         for stmt in DROP_FTS:
@@ -672,11 +713,44 @@ def one(sql: str, params: Iterable[Any] = ()) -> sqlite3.Row | None:
         return connect().execute(sql, tuple(params)).fetchone()
 
 
+# How deep we are inside `transaction()`. Every statement below commits on its
+# own, which is right for a one-shot mutation and wrong for a merge: that reads
+# the old baseline, decides, then overwrites it, so a crash halfway leaves half
+# the baselines moved and the previous state gone - the baseline is the only
+# record of it. Rather than thread a connection through four ingest modules,
+# the helpers simply hold their commit while a transaction is open. Safe
+# because LOCK is an RLock and every path here shares one connection.
+_tx_depth = 0
+
+
+@contextlib.contextmanager
+def transaction() -> Iterator[sqlite3.Connection]:
+    """Run a block as one unit. Nestable; the outermost one commits."""
+    global _tx_depth
+    with LOCK:
+        conn = connect()
+        outer = _tx_depth == 0
+        if outer and not conn.in_transaction:
+            conn.execute("BEGIN IMMEDIATE")
+        _tx_depth += 1
+        try:
+            yield conn
+        except BaseException:
+            _tx_depth -= 1
+            if _tx_depth == 0:
+                conn.rollback()
+            raise
+        _tx_depth -= 1
+        if _tx_depth == 0:
+            conn.commit()
+
+
 def execute(sql: str, params: Iterable[Any] = ()) -> sqlite3.Cursor:
     with LOCK:
         conn = connect()
         cur = conn.execute(sql, tuple(params))
-        conn.commit()
+        if _tx_depth == 0:
+            conn.commit()
         return cur
 
 
@@ -684,7 +758,8 @@ def executemany(sql: str, rows: Iterable[Iterable[Any]]) -> None:
     with LOCK:
         conn = connect()
         conn.executemany(sql, [tuple(r) for r in rows])
-        conn.commit()
+        if _tx_depth == 0:
+            conn.commit()
 
 
 def js(value: Any) -> str:

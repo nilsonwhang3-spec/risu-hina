@@ -9,6 +9,7 @@ import { el, clear, armed, refocusSearch, focusButton, diffCard } from './dom';
 import { setToolbarSearch } from './shell';
 import { state, type CardField } from '../state';
 import { threePane } from './panes';
+import { conflictBox } from './conflicts';
 import { bindAgent, mountAgent } from './agentpane';
 
 // personality/scenario/exampleMessage/systemPrompt/PHI are retired fields
@@ -221,10 +222,19 @@ function open(f: CardField): void {
 
   // What changed, not just that it did: the badge on the row says 수정, and
   // this says which lines.
-  const diff = f.changed ? diffCard(f.original, f.body) : null;
+  const diff = f.changed && !f.conflict ? diffCard(f.original, f.body) : null;
+  const conflict = f.conflict
+    ? conflictBox({
+        kind: 'card_field', id: f.id, label: labelOf(f), charKey: state.botKey, chatKey: null,
+        reason: String((f.conflict as Record<string, unknown>).kind ?? ''), tier: '',
+        mine: f.body, theirs: (f.conflict as Record<string, unknown>).theirs ?? null,
+        base: (f.conflict as Record<string, unknown>).base ?? null, canTakeTheirs: true,
+      }, () => { void refresh(); })
+    : null;
 
   clear(viewMount);
   viewMount.appendChild(el('div', { class: 'card' }, [
+    conflict,
     el('h2', {}, [el('span', { text: labelOf(f) }), el('span', { class: 'spacer' }),
                   f.field === 'name' ? null : focusButton(body, labelOf(f))]),
     ...(f.deleted ? [el('div', { class: 'notice', text: '삭제 예정입니다. 저장하면 삭제가 취소됩니다.' })] : []),

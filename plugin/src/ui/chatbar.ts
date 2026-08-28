@@ -15,6 +15,7 @@ import { el, clear, armed, popover, TOOL, fmtTime } from './dom';
 import { state, type Changes } from '../state';
 import * as host from '../host';
 import { clientLog } from '../transport';
+import { openConflicts } from './conflicts';
 
 let bar: HTMLElement | null = null;
 let applyBtn: HTMLElement | null = null;
@@ -72,10 +73,13 @@ export function refreshChatBar(): void {
   if (!bar || !summaryEl || !applyBadge) return;
   const c = state.changes;
   const parts = describe(c);
+  const conflicts = c?.conflicts ?? 0;
+  if (conflicts) parts.unshift(`⚠ 충돌 ${conflicts}`);
   summaryEl.textContent = parts.length ? parts.join(' · ') : (state.activeChatKey ? '변경 없음' : '');
   const total = c?.total ?? 0;
   applyBadge.textContent = String(total);
   applyBadge.style.display = total ? '' : 'none';
+  applyBadge.classList.toggle('conflict', !!conflicts);
 }
 
 function describe(c: Changes | null): string[] {
@@ -136,25 +140,41 @@ function openApply(anchor: HTMLElement): void {
     for (const w of state.changes.warnings) body.appendChild(el('div', { class: 'notice', text: w }));
   }
 
-  const apply = el('button', { class: 'primary', text: 'RisuAI에 반영' });
+  // A conflict means we are holding two answers for the same row. Writing one
+  // of them without saying which is the silent revert this release removes,
+  // so 반영 waits until they are decided.
+  const conflicts = state.changes?.conflicts ?? 0;
+  if (conflicts) {
+    const open = el('button', { class: 'ghost tiny', text: `충돌 ${conflicts}건 정리` });
+    open.addEventListener('click', () => {
+      close();
+      openConflicts('chat', () => { void state.refreshChanges(); });
+    });
+    body.appendChild(el('div', { class: 'notice' }, [
+      el('div', { text: `RisuAI 쪽에서도 바뀐 항목이 ${conflicts}건 있습니다. 먼저 정리해 주세요.` }),
+      el('div', { class: 'row', style: { marginTop: '6px' } }, [open]),
+    ]));
+  }
+
+  const apply = el('button', { class: 'primary', text: 'RisuAI에 반영' }) as HTMLButtonElement;
+  apply.disabled = conflicts > 0;
   apply.addEventListener('click', async () => {
-    (apply as HTMLButtonElement).disabled = true;
+    apply.disabled = true;
     try {
       const r = await state.writeBack();
       if (r.mode === 'noop' && !r.lore && !r.memory) {
         out.textContent = '반영할 변경이 없습니다.';
       } else {
-        // The write landed, so this state is the baseline now. Without this
-        // the panel keeps every edited turn struck through, which reads as
-        // "still pending" when it already shipped.
-        const c = await state.commit('반영 직전');
-        await state.loadTurns();
+        // The write landed. `commit` snapshots and then re-reads the chat
+        // from RisuAI, so the panel stops holding a copy of what it just
+        // shipped - keeping one is where the drift used to start.
+        await state.commit('반영 직전');
         const bits: string[] = [];
         if (r.mode !== 'noop') bits.push(`${r.mode === 'replace' ? '전체 교체' : '본문 수정'} ${r.applied}건`);
         if (r.lore) bits.push(`로어북 ${r.lore}건`);
         if (r.memory) bits.push(`장기기억 ${r.memory}건`);
-        out.textContent = `${bits.join(' · ')} · 기준선 ${c.newBaseline}턴`;
-        shellNotice(`RisuAI에 반영했습니다 (${bits.join(' · ')}). 이 상태가 새 기준선이 됩니다.`, 'ok');
+        out.textContent = bits.join(' · ');
+        shellNotice(`RisuAI에 반영하고 다시 읽었습니다 (${bits.join(' · ')}).`, 'ok');
         close();
       }
       for (const w of r.warnings) shellNotice(w);
@@ -169,7 +189,7 @@ function openApply(anchor: HTMLElement): void {
         'err',
       );
     } finally {
-      (apply as HTMLButtonElement).disabled = false;
+      apply.disabled = (state.changes?.conflicts ?? 0) > 0;
     }
   });
 
@@ -179,9 +199,14 @@ function openApply(anchor: HTMLElement): void {
     (copy as HTMLButtonElement).disabled = true;
     try {
       await state.saveCopy(name);
-      const c = await state.commit('복사본 저장 직전');
+      // Deliberately no commit: the copy went into a *new* chat and this one
+      // still holds RisuAI's old content, so the edits are still pending
+      // against it. Re-reading here would fetch that old content back and
+      // throw the edits away.
+      await state.checkpoint('복사본 저장 직후');
       await state.loadTurns();
-      shellNotice(`복사본 "${name}" 을 만들었습니다 · 기준선 ${c.newBaseline}턴. 로어북과 장기기억도 함께 담겼습니다.`, 'ok');
+      shellNotice(`복사본 "${name}" 을 만들었습니다. 로어북과 장기기억도 함께 담겼습니다. `
+        + '이 챗의 수정은 아직 반영 전 상태로 남아 있습니다.', 'ok');
       close();
     } catch (e) {
       void clientLog('error', 'saveCopy failed', { error: msg(e) });

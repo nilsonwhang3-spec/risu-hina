@@ -17,6 +17,7 @@ import { el, clear, armed, popover, TOOL, fmtTime } from './dom';
 import { state, type CardChanges } from '../state';
 import { shellNotice, openSnapshotName, snapshotCleanup } from './chatbar';
 import { clientLog } from '../transport';
+import { openConflicts } from './conflicts';
 
 let bar: HTMLElement | null = null;
 let applyBtn: HTMLButtonElement | null = null;
@@ -207,8 +208,23 @@ function openApply(anchor: HTMLElement): void {
   const blocked = applyBlockReason();
   if (blocked) body.appendChild(el('div', { class: 'notice', text: blocked }));
 
+  // Same gate as the chat bar: a row both sides changed has to be decided
+  // before either answer can be written.
+  const conflicts = state.botChanges?.conflicts ?? 0;
+  if (conflicts) {
+    const open = el('button', { class: 'ghost tiny', text: `충돌 ${conflicts}건 정리` });
+    open.addEventListener('click', () => {
+      close();
+      openConflicts('card', () => { void state.refreshBotChanges(); });
+    });
+    body.appendChild(el('div', { class: 'notice' }, [
+      el('div', { text: `RisuAI 쪽에서도 바뀐 항목이 ${conflicts}건 있습니다. 먼저 정리해 주세요.` }),
+      el('div', { class: 'row', style: { marginTop: '6px' } }, [open]),
+    ]));
+  }
+
   const apply = el('button', { class: 'primary', text: 'RisuAI에 반영' }) as HTMLButtonElement;
-  apply.disabled = !!blocked;
+  apply.disabled = !!blocked || conflicts > 0;
   apply.addEventListener('click', async () => {
     apply.disabled = true;
     try {
@@ -216,7 +232,7 @@ function openApply(anchor: HTMLElement): void {
       if (r.mode === 'noop') {
         out.textContent = '반영할 변경이 없습니다.';
       } else {
-        shellNotice('카드를 RisuAI에 반영했습니다. 이 상태가 새 기준선이 됩니다.', 'ok');
+        shellNotice('카드를 RisuAI에 반영하고 다시 읽었습니다.', 'ok');
         close();
       }
     } catch (e) {
@@ -225,7 +241,8 @@ function openApply(anchor: HTMLElement): void {
       void clientLog('error', 'cardWriteBack failed', { error: m });
       shellNotice('카드 반영에 실패했습니다: ' + m, 'err');
     } finally {
-      apply.disabled = !!applyBlockReason();
+      apply.disabled = !!applyBlockReason()
+        || (state.botChanges?.conflicts ?? 0) > 0;
     }
   });
 

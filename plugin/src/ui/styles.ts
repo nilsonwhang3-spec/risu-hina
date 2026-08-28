@@ -664,6 +664,19 @@ button.sendbtn { padding: 9px 12px; display: flex; align-items: center; justify-
 /* Attach above send, in a column beside the box. */
 .agentbtns { display: flex; flex-direction: column; gap: 4px; flex-shrink: 0; justify-content: flex-end; }
 .agentbtns button { width: 42px; justify-content: center; }
+/* --- merge conflicts -------------------------------------------------------
+   Red rather than the ordinary amber "수정": an edit badge says "this will be
+   written", a conflict badge says "this cannot be written until you choose". */
+.badge.conflict { background: rgba(239, 68, 68, .18); border-color: rgba(239, 68, 68, .55); color: #fca5a5; }
+.tabbadge.conflict { background: rgba(239, 68, 68, .22); border-color: rgba(239, 68, 68, .6); }
+.conflictbox {
+  border: 1px solid rgba(239, 68, 68, .45); border-radius: 7px; padding: 8px 10px; margin: 8px 0;
+  background: rgba(239, 68, 68, .06);
+}
+.conflicthead { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; flex-wrap: wrap; }
+.conflictrow { border-top: 1px solid var(--borderc, #2b323f); padding-top: 8px; margin-top: 8px; }
+.conflictname { font-size: 12.5px; color: var(--textcolor2, #79839a); margin-bottom: 4px; }
+
 /* A snapshot row whose delete is on its way to the backend. */
 .verrow.deleting, .chatitem.deleting { opacity: .4; }
 
