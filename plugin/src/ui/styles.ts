@@ -335,6 +335,21 @@ pre.mono {
 /* --- editor: explorer | turns | tools ------------------------------------ */
 
 .split { display: flex; flex: 1; min-height: 0; width: 100%; }
+/* Phone-only view switch (panes.ts); the mobile block below shows it. */
+.mbar { display: none; }
+
+/* A folded section inside a card: a summary line, the rest on demand. */
+details.fold > summary {
+  cursor: pointer; font-size: 12.5px; color: var(--textcolor2, #79839a); padding: 6px 8px;
+  border: 1px dashed var(--borderc, #2b323f); border-radius: 6px; list-style: none;
+}
+details.fold > summary::before { content: '▸ '; }
+details.fold[open] > summary::before { content: '▾ '; }
+details.fold[open] > summary { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+details.fold > .foldbody {
+  padding: 10px 10px 6px; border: 1px dashed var(--borderc, #2b323f); border-top: none;
+  border-radius: 0 0 6px 6px;
+}
 .explorer {
   width: 118px; flex-shrink: 0; overflow-y: auto; padding: 6px 4px;
   border-right: 1px solid var(--borderc, #2b323f);
@@ -637,7 +652,13 @@ label.checkrow input { width: auto; }
    the flexible part and may shrink below its content: with width:100% and no
    min-width it kept its size when the panel was dragged narrow and pushed
    the send button out of the visible column. */
-.agentinput { flex: 1 1 auto; min-width: 0; width: auto; min-height: 82px; max-height: 220px; background: var(--bgcolor, #12141a); }
+.agentinput {
+  flex: 1 1 auto; min-width: 0; width: auto; max-width: 100%; min-height: 82px; max-height: min(220px, 40vh);
+  background: var(--bgcolor, #12141a);
+  /* Height only. The default handle also drags the width, and a box pulled
+     wider than its column pushed the attach and send buttons off the panel. */
+  resize: vertical;
+}
 .agentinput.dropping { border-color: #7dd3fc; background: rgba(125, 211, 252, .08); }
 button.sendbtn { padding: 9px 12px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 /* Attach above send, in a column beside the box. */
@@ -857,13 +878,23 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
   .split.m-centre > .right { display: none; }
   .split.m-agent > .right { flex: 1 1 auto !important; min-height: 0; }
   .split.m-centre > .left { flex: 1 1 auto !important; }
-  .mtoggle {
-    display: inline-flex; align-items: center; position: absolute; right: 12px; bottom: 64px; z-index: 60;
-    padding: 6px 12px; border-radius: 999px; font-size: 12px; font-weight: 700;
-    background: rgba(37, 99, 235, .92); color: #fff; border: 1px solid rgba(255,255,255,.25);
-    box-shadow: 0 6px 18px rgba(0,0,0,.45);
+
+  /* The view switch is a bar across the top of the split, not a floating
+     pill: the pill sat on the attach and send buttons in the agent view and
+     its label named the *other* view, which read as the current one. Two
+     segments, the lit one is where you are. */
+  .mbar {
+    display: flex; align-items: center; gap: 6px; padding: 5px 8px; flex-shrink: 0;
+    border-bottom: 1px solid var(--borderc, #2b323f); background: rgba(255, 255, 255, .03);
   }
-  .split.m-centre .mtoggle { bottom: 14px; }
+  .mbar .mseg { display: flex; border: 1px solid var(--borderc, #2b323f); border-radius: 6px; overflow: hidden; }
+  .mbar .mseg button {
+    border: none; border-radius: 0; padding: 5px 13px; font-size: 12px; background: transparent;
+    color: var(--textcolor2, #79839a);
+  }
+  .mbar .mseg button.on { background: rgba(37, 99, 235, .28); color: var(--textcolor, #d8dce4); font-weight: 700; }
+  .mbar .mlist { margin-left: auto; font-size: 12px; padding: 4px 10px; }
+  .split.m-agent .mbar .mlist { display: none; }
 
   /* The explorer becomes a scrolling strip of jump targets across the top
      rather than a column eating a third of a 390px screen. */
@@ -876,7 +907,19 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     padding: 5px 8px; gap: 5px;
   }
   .tree { padding: 2px; }
-  .explorer:has(.tree) { width: auto; max-height: 190px; }
+  /* A tree (lorebook, meta fields, regex...) is a list, not a strip: it
+     scrolls vertically, starts short so the entry below it gets the screen,
+     and the bar's 목록 button opens it to most of the height. It was pinned
+     at 190px with overflow hidden - the fifth item on was unreachable. */
+  .explorer:has(.tree) { display: block; width: auto; max-height: 150px; overflow-y: auto; overflow-x: hidden; }
+  .split.m-list > .explorer:has(.tree) { max-height: 62%; }
+  .explorer:has(.tree) .tree { width: 100%; }
+
+  /* One line of status. The pill wrapped to three lines on a phone and took
+     80px of a screen that has none to spare. */
+  header .status { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; }
+  header .status > * { white-space: nowrap; }
+  .status .botname { display: none; }
   .explorer .expgroup {
     flex-shrink: 0; width: auto; min-width: 72px; margin-bottom: 0;
     white-space: nowrap;

@@ -267,6 +267,11 @@ export function refreshStatus(): void {
     }
   }
 
+  // While the open is in progress, say which step: reading the bot out of
+  // RisuAI can take a while on web RisuAI, and that wait looked like a
+  // backend that would not connect.
+  if (bootPhase) healthEl.appendChild(el('span', { class: 'hint bootphase', text: '· ' + bootPhase }));
+
   // The bot first, then the chat: the bot is what the panel was opened on
   // and the bot tabs have no chat to name.
   const botName = state.character?.name ? String(state.character.name) : '';
@@ -435,11 +440,22 @@ export async function bootstrap(force = false): Promise<void> {
   if (!mounted) buildShell();
   setTab(active);
 
+  // Each step is timed and the whole open is reported once, because the one
+  // slow open in the log (web RisuAI, 2 minutes between /health and the
+  // upload) sat inside readHost - the host bridge, not the backend - and the
+  // panel had no way to say so; the status light said "connected" and the
+  // user read the empty panel as "not connected".
+  const t0 = Date.now();
+  setBootPhase('백엔드에 연결하는 중…');
   await transport.detectPlatform();
   const connected = await state.connect();
+  const t1 = Date.now();
+  setBootPhase('RisuAI에서 봇을 읽는 중…');
   await state.readHost();
+  const t2 = Date.now();
 
   if (connected) {
+    setBootPhase('백엔드에 올리는 중…');
     await uploadAfterConnect(force);
   } else {
     // The backend was not reachable at open (a tunnel warming up, plain
@@ -447,8 +463,24 @@ export async function bootstrap(force = false): Promise<void> {
     // the first success uploads the bot exactly as a good open would have.
     startReconnect(force);
   }
+  const t3 = Date.now();
+  setBootPhase('');
   refreshStatus();
   renderActive();
+  const hostMs = t2 - t1;
+  if (connected) {
+    void clientLog(hostMs > 5000 ? 'warn' : 'info', 'boot', {
+      connectMs: t1 - t0, hostMs, uploadMs: t3 - t2, platform: transport.hostPlatform,
+      hostError: state.slotError.slice(0, 200),
+    });
+  }
+}
+
+/** What the open is doing right now; '' once it is done. Shown in the title row. */
+let bootPhase = '';
+function setBootPhase(text: string): void {
+  bootPhase = text;
+  refreshStatus();
 }
 
 async function uploadAfterConnect(force = false): Promise<void> {

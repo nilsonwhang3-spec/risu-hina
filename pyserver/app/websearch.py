@@ -35,8 +35,38 @@ PROVIDERS: list[dict] = [
      "note": "구글 결과. serper.dev 키."},
     {"id": "searxng", "name": "SearXNG (자체 호스팅)", "needsKey": False, "needsUrl": True,
      "note": "내 SearXNG 인스턴스 주소(JSON 출력 허용 필요)."},
+    # Measured 2026-08-28 on the operator's box: codex web_search answered a
+    # "latest release" question exactly in 8.8s (search + open_page, no extra
+    # cost on the subscription); Vercel's gateway search with Gemini took
+    # 10-17s at $0.03-0.07 a question and one of its two engines was five
+    # months stale. Offered because it needs no key of its own, not as the
+    # default: a fresh install may have neither.
+    {"id": "native", "name": "모델 내장 검색 (codex · Vercel AI Gateway)", "needsKey": False, "needsUrl": False,
+     "note": "검색 에이전트 모델 쪽의 검색을 그대로 씁니다 — codex(ChatGPT 구독)는 OpenAI web_search, "
+             "Vercel AI Gateway 주소면 게이트웨이의 exa 검색. 그 밖의 엔드포인트에서는 안 됩니다."},
 ]
 DEFAULT_PROVIDER = "duckduckgo"
+VERCEL_HOST = "ai-gateway.vercel.sh"
+
+
+def native_kind() -> str:
+    """Which built-in search the *search agent's* endpoint can do: 'codex',
+    'vercel', or '' when that endpoint has none we know how to call."""
+    cfg = config.section("agent_search")
+    if (cfg.get("provider") or "") == "codex":
+        return "codex"
+    host = urllib.parse.urlparse(str(cfg.get("baseUrl") or "")).hostname or ""
+    if host.endswith(VERCEL_HOST) and cfg.get("apiKey") and cfg.get("model"):
+        return "vercel"
+    return ""
+
+
+def native_why_not() -> str:
+    cfg = config.section("agent_search")
+    host = urllib.parse.urlparse(str(cfg.get("baseUrl") or "")).hostname or "(주소 없음)"
+    where = "codex" if (cfg.get("provider") or "") == "codex" else host
+    return (f"내장 검색은 검색 에이전트가 codex(ChatGPT 구독) 프리셋이거나 Vercel AI Gateway 주소일 때만 됩니다 "
+            f"— 지금 검색 에이전트: {cfg.get('model') or '(모델 없음)'} @ {where}")
 
 
 def _cfg() -> dict:
@@ -56,6 +86,8 @@ def configured() -> bool:
     meta = next((p for p in PROVIDERS if p["id"] == provider), None)
     if meta is None:
         return False
+    if provider == "native":
+        return bool(native_kind())
     if meta["needsKey"] and not (c.get("apiKey") or "").strip():
         return False
     if meta["needsUrl"] and not (c.get("baseUrl") or "").strip():
@@ -69,6 +101,8 @@ def why_not() -> str:
     meta = next((p for p in PROVIDERS if p["id"] == provider), None)
     if meta is None:
         return f"모르는 검색 제공자입니다: {provider}"
+    if provider == "native":
+        return native_why_not()
     if meta["needsKey"]:
         return f"{meta['name']} 에는 API 키가 필요합니다 (⚙ → 에이전트 → 검색 제공자)"
     return f"{meta['name']} 에는 주소가 필요합니다 (⚙ → 에이전트 → 검색 제공자)"
@@ -82,6 +116,10 @@ def search(query: str) -> str:
     limit = max(1, min(MAX_RESULTS, int(c.get("maxResults") or 5)))
     if not configured():
         return why_not()
+    if provider == "native":
+        # Not a query→results function: the model does the searching inside
+        # its own turn. agent.research() takes that path before calling here.
+        return "내장 검색은 검색 에이전트 안에서 실행됩니다 (web_research 툴)"
 
     try:
         if provider == "duckduckgo":

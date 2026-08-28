@@ -152,12 +152,21 @@ def h_websearch(arg: dict) -> dict:
     return {**websearch.status(), "keepSentinel": config.KEEP}
 
 
-def h_websearch_test(arg: dict) -> dict:
+async def h_websearch_test(arg: dict) -> dict:
     """One real search with the configured provider, for the settings card."""
     q = str(arg.get("query") or "RisuAI").strip()[:200]
     if not websearch.configured():
         return {"ok": False, "provider": websearch.provider_id(), "error": websearch.why_not()}
-    text = websearch.search(q)
+    if websearch.provider_id() == "native":
+        # The model searches inside its own turn, so the test is one real
+        # research call - the same thing the agent's web_research tool does.
+        from . import agent as agentmod  # lazy: agent pulls in pydantic-ai
+        cfg = config.section("agent_search")
+        text = await agentmod.native_research(f"{q} — 웹에서 검색해서 짧게 답하고 출처 URL 을 붙여.", cfg)
+        ok = not text.startswith("검색 에이전트가 실패") and not text.startswith("검색 제공자가 준비되지")
+        return {"ok": ok, "provider": f"native:{websearch.native_kind()}", "query": q, "text": text[:4000],
+                "error": None if ok else text[:300]}
+    text = await run_in_threadpool(websearch.search, q)
     ok = not (text.startswith("검색에 실패") or text.endswith("결과가 없습니다") or text.startswith("지원하지"))
     return {"ok": ok, "provider": websearch.provider_id(), "query": q, "text": text[:4000],
             "error": None if ok else text[:300]}
@@ -696,6 +705,30 @@ def _schedule_restart() -> None:
     threading.Timer(1.5, updater.restart_now).start()
 
 
+def _client_detail(detail: Any) -> str:
+    """A client event's detail, with its strings kept.
+
+    `log.shape` hides string contents on purpose - a request body can be a
+    transcript. A plugin event's detail is the opposite case: the error text
+    IS the evidence, and `agent stream error {error=str(71)}` was a log line
+    that answered nothing. Strings are shown (trimmed), everything else keeps
+    the shape treatment, secrets stay redacted.
+    """
+    if isinstance(detail, str):
+        return repr(detail[:400])
+    if isinstance(detail, dict):
+        parts = []
+        for k, v in list(detail.items())[:12]:
+            if any(h in str(k).lower() for h in log.SECRET_HINTS):
+                parts.append(f"{k}=<redacted>")
+            elif isinstance(v, str):
+                parts.append(f"{k}={v[:400]!r}")
+            else:
+                parts.append(f"{k}={log.shape(v)}")
+        return "{" + ", ".join(parts) + "}"
+    return log.shape(detail)
+
+
 def h_clientlog(arg: dict) -> dict:
     """Plugin-side events, funnelled into the server log.
 
@@ -707,7 +740,7 @@ def h_clientlog(arg: dict) -> dict:
     level = str(arg.get("level") or "info").lower()
     event = str(arg.get("event") or "")[:200]
     detail = arg.get("detail")
-    line = f"[plugin] {event}" + (f" {log.shape(detail)}" if detail is not None else "")
+    line = f"[plugin] {event}" + (f" {_client_detail(detail)}" if detail is not None else "")
     if level == "error":
         log.error(line)
         if isinstance(detail, dict) and detail.get("stack"):

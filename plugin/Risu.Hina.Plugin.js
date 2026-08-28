@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.8.1
+//@display-name Risu Hina v0.8.2
 //@api 3.0
-//@version 0.8.1
+//@version 0.8.2
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -95,7 +95,7 @@
       this.route = "direct";
       this.tokenSafe = true;
       this.lastHealth = body;
-      this.gate = versionGate("0.8.1", String(body.version || ""));
+      this.gate = versionGate("0.8.2", String(body.version || ""));
       return body;
     }
     /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -1213,6 +1213,21 @@ pre.mono {
 /* --- editor: explorer | turns | tools ------------------------------------ */
 
 .split { display: flex; flex: 1; min-height: 0; width: 100%; }
+/* Phone-only view switch (panes.ts); the mobile block below shows it. */
+.mbar { display: none; }
+
+/* A folded section inside a card: a summary line, the rest on demand. */
+details.fold > summary {
+  cursor: pointer; font-size: 12.5px; color: var(--textcolor2, #79839a); padding: 6px 8px;
+  border: 1px dashed var(--borderc, #2b323f); border-radius: 6px; list-style: none;
+}
+details.fold > summary::before { content: '\u25B8 '; }
+details.fold[open] > summary::before { content: '\u25BE '; }
+details.fold[open] > summary { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+details.fold > .foldbody {
+  padding: 10px 10px 6px; border: 1px dashed var(--borderc, #2b323f); border-top: none;
+  border-radius: 0 0 6px 6px;
+}
 .explorer {
   width: 118px; flex-shrink: 0; overflow-y: auto; padding: 6px 4px;
   border-right: 1px solid var(--borderc, #2b323f);
@@ -1515,7 +1530,13 @@ label.checkrow input { width: auto; }
    the flexible part and may shrink below its content: with width:100% and no
    min-width it kept its size when the panel was dragged narrow and pushed
    the send button out of the visible column. */
-.agentinput { flex: 1 1 auto; min-width: 0; width: auto; min-height: 82px; max-height: 220px; background: var(--bgcolor, #12141a); }
+.agentinput {
+  flex: 1 1 auto; min-width: 0; width: auto; max-width: 100%; min-height: 82px; max-height: min(220px, 40vh);
+  background: var(--bgcolor, #12141a);
+  /* Height only. The default handle also drags the width, and a box pulled
+     wider than its column pushed the attach and send buttons off the panel. */
+  resize: vertical;
+}
 .agentinput.dropping { border-color: #7dd3fc; background: rgba(125, 211, 252, .08); }
 button.sendbtn { padding: 9px 12px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 /* Attach above send, in a column beside the box. */
@@ -1735,13 +1756,23 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
   .split.m-centre > .right { display: none; }
   .split.m-agent > .right { flex: 1 1 auto !important; min-height: 0; }
   .split.m-centre > .left { flex: 1 1 auto !important; }
-  .mtoggle {
-    display: inline-flex; align-items: center; position: absolute; right: 12px; bottom: 64px; z-index: 60;
-    padding: 6px 12px; border-radius: 999px; font-size: 12px; font-weight: 700;
-    background: rgba(37, 99, 235, .92); color: #fff; border: 1px solid rgba(255,255,255,.25);
-    box-shadow: 0 6px 18px rgba(0,0,0,.45);
+
+  /* The view switch is a bar across the top of the split, not a floating
+     pill: the pill sat on the attach and send buttons in the agent view and
+     its label named the *other* view, which read as the current one. Two
+     segments, the lit one is where you are. */
+  .mbar {
+    display: flex; align-items: center; gap: 6px; padding: 5px 8px; flex-shrink: 0;
+    border-bottom: 1px solid var(--borderc, #2b323f); background: rgba(255, 255, 255, .03);
   }
-  .split.m-centre .mtoggle { bottom: 14px; }
+  .mbar .mseg { display: flex; border: 1px solid var(--borderc, #2b323f); border-radius: 6px; overflow: hidden; }
+  .mbar .mseg button {
+    border: none; border-radius: 0; padding: 5px 13px; font-size: 12px; background: transparent;
+    color: var(--textcolor2, #79839a);
+  }
+  .mbar .mseg button.on { background: rgba(37, 99, 235, .28); color: var(--textcolor, #d8dce4); font-weight: 700; }
+  .mbar .mlist { margin-left: auto; font-size: 12px; padding: 4px 10px; }
+  .split.m-agent .mbar .mlist { display: none; }
 
   /* The explorer becomes a scrolling strip of jump targets across the top
      rather than a column eating a third of a 390px screen. */
@@ -1754,7 +1785,19 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     padding: 5px 8px; gap: 5px;
   }
   .tree { padding: 2px; }
-  .explorer:has(.tree) { width: auto; max-height: 190px; }
+  /* A tree (lorebook, meta fields, regex...) is a list, not a strip: it
+     scrolls vertically, starts short so the entry below it gets the screen,
+     and the bar's \uBAA9\uB85D button opens it to most of the height. It was pinned
+     at 190px with overflow hidden - the fifth item on was unreachable. */
+  .explorer:has(.tree) { display: block; width: auto; max-height: 150px; overflow-y: auto; overflow-x: hidden; }
+  .split.m-list > .explorer:has(.tree) { max-height: 62%; }
+  .explorer:has(.tree) .tree { width: 100%; }
+
+  /* One line of status. The pill wrapped to three lines on a phone and took
+     80px of a screen that has none to spare. */
+  header .status { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; }
+  header .status > * { white-space: nowrap; }
+  .status .botname { display: none; }
   .explorer .expgroup {
     flex-shrink: 0; width: auto; min-width: 72px; margin-bottom: 0;
     white-space: nowrap;
@@ -3913,7 +3956,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     root.appendChild(centre);
     root.appendChild(splitter({ target: right, container: root, storageKey: "panelWidth2" }));
     root.appendChild(right);
-    root.appendChild(mobileToggle(root));
+    root.insertBefore(mobileBar(root), root.firstChild);
     return { root, left, centre, right };
   }
   var VIEW_KEY = "hina.mobileView";
@@ -3933,24 +3976,40 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       t();
     }
   }
-  function mobileToggle(root) {
-    const btn = el("button", { class: "mtoggle", title: "AI \uCC57\uACFC \uD3B8\uC9D1 \uD654\uBA74\uC744 \uBC14\uAFC9\uB2C8\uB2E4 (\uBAA8\uBC14\uC77C)" });
+  var mobileList = false;
+  function mobileBar(root) {
+    const editBtn = el("button", { text: "\u{1F4C4} \uD3B8\uC9D1", title: "\uD3B8\uC9D1 \uD654\uBA74 (\uBAA8\uBC14\uC77C)" });
+    const agentBtn = el("button", { text: "\u{1F4AC} AI \uCC57", title: "AI \uCC57 (\uBAA8\uBC14\uC77C)" });
+    const listBtn = el("button", { class: "ghost tiny mlist", title: "\uC67C\uCABD \uBAA9\uB85D\uC744 \uD3BC\uCE58\uAC70\uB098 \uC811\uC2B5\uB2C8\uB2E4" });
+    const bar3 = el("div", { class: "mbar" }, [el("div", { class: "mseg" }, [editBtn, agentBtn]), listBtn]);
     const sync = () => {
       root.classList.toggle("m-agent", mobileView === "agent");
       root.classList.toggle("m-centre", mobileView === "centre");
-      btn.textContent = mobileView === "agent" ? "\u{1F4C4} \uD3B8\uC9D1 \uD654\uBA74" : "\u{1F4AC} AI \uCC57";
+      root.classList.toggle("m-list", mobileList);
+      editBtn.classList.toggle("on", mobileView === "centre");
+      agentBtn.classList.toggle("on", mobileView === "agent");
+      listBtn.textContent = mobileList ? "\u2630 \uBAA9\uB85D \uC811\uAE30" : "\u2630 \uBAA9\uB85D \uD3BC\uCE58\uAE30";
+      listBtn.style.display = root.querySelector(".explorer .tree") ? "" : "none";
     };
-    btn.addEventListener("click", () => {
-      mobileView = mobileView === "agent" ? "centre" : "agent";
+    const pick2 = (v) => {
+      if (mobileView === v) return;
+      mobileView = v;
       try {
         localStorage.setItem(VIEW_KEY, mobileView);
       } catch {
       }
       syncAll();
+    };
+    editBtn.addEventListener("click", () => pick2("centre"));
+    agentBtn.addEventListener("click", () => pick2("agent"));
+    listBtn.addEventListener("click", () => {
+      mobileList = !mobileList;
+      syncAll();
     });
     toggles.set(root, sync);
     sync();
-    return btn;
+    setTimeout(sync, 0);
+    return bar3;
   }
 
   // src/ui/markdown.ts
@@ -7520,16 +7579,22 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       el("div", { class: "card" }, [
         el("h2", { text: "\uAC80\uC0C9 \uC5D0\uC774\uC804\uD2B8" }),
         el("div", { class: "hint", style: { marginBottom: "8px" } }, [
-          "\uC77C\uBC18 \uC5D0\uC774\uC804\uD2B8\uB294 \uC6F9\uC744 \uC9C1\uC811 \uAC80\uC0C9\uD558\uC9C0 \uC54A\uACE0, \uC678\uBD80 \uC0AC\uC2E4\uC774 \uD544\uC694\uD558\uBA74 \uC774 \uC5D0\uC774\uC804\uD2B8\uC5D0\uAC8C \uB9E1\uAE41\uB2C8\uB2E4. \uAC80\uC0C9 \uC5D0\uC774\uC804\uD2B8 = \uC544\uB798 \uD504\uB9AC\uC14B\uC758 \uBAA8\uB378 + \uADF8 \uC544\uB798 \uAC80\uC0C9 \uC81C\uACF5\uC790. \uC800\uB834\uD55C \uBAA8\uB378(\uC608: Gemini Flash)\uC744 \uAD8C\uD569\uB2C8\uB2E4."
+          "\uC77C\uBC18 \uC5D0\uC774\uC804\uD2B8\uB294 \uC6F9\uC744 \uC9C1\uC811 \uAC80\uC0C9\uD558\uC9C0 \uC54A\uACE0, \uC678\uBD80 \uC0AC\uC2E4\uC774 \uD544\uC694\uD558\uBA74 \uC774 \uC5D0\uC774\uC804\uD2B8\uC5D0\uAC8C \uB9E1\uAE41\uB2C8\uB2E4. \uBAA8\uB378(\uD504\uB9AC\uC14B)\uC774 \uAC80\uC0C9\uC5B4\uB97C \uB9CC\uB4E4\uACE0 \uACB0\uACFC\uB97C \uC77D\uC5B4 \uC815\uB9AC\uD558\uBA70, \uC2E4\uC81C\uB85C \uC6F9\uC744 \uCC3E\uB294 \uAC83\uC740 \uAC80\uC0C9 \uC5D4\uC9C4\uC785\uB2C8\uB2E4. \uAC80\uC0C9 \uC5D4\uC9C4\uC740 \uAE30\uBCF8 DuckDuckGo \uB77C \uB530\uB85C \uC124\uC815\uD560 \uAC83\uC774 \uC5C6\uACE0, \uC800\uB834\uD55C \uBAA8\uB378(\uC608: Gemini Flash)\uC744 \uAD8C\uD569\uB2C8\uB2E4."
         ]),
         searchMount,
         el("div", { class: "row", style: { marginTop: "8px" } }, [testButton("search", searchOut)]),
         searchOut,
         el("div", { class: "hint", style: { marginTop: "8px" } }, [
-          "\uC5F0\uACB0 \uD14C\uC2A4\uD2B8\uB294 \uBAA8\uB378\uB9CC \uBD05\uB2C8\uB2E4(\uC751\uB2F5 + \uD234 \uD638\uCD9C, \uCD5C\uB300 4\uBD84). \uC2E4\uC81C \uAC80\uC0C9\uC740 \uC544\uB798 \uC81C\uACF5\uC790\uB85C \uD569\uB2C8\uB2E4."
+          "\uC5F0\uACB0 \uD14C\uC2A4\uD2B8\uB294 \uBAA8\uB378\uB9CC \uBD05\uB2C8\uB2E4(\uC751\uB2F5 + \uD234 \uD638\uCD9C, \uCD5C\uB300 4\uBD84). \uAC80\uC0C9 \uC790\uCCB4\uB294 \uC544\uB798 \uAC80\uC0C9 \uC5D4\uC9C4\uC758 \u201C\uAC80\uC0C9 \uD14C\uC2A4\uD2B8\u201D\uB85C \uD655\uC778\uD569\uB2C8\uB2E4."
+        ]),
+        // Folded: the engine is a knob most people never turn. It was a card
+        // of its own beside the agent card, and read as a second thing to set
+        // up - "why are there two?" - when it is part of this one.
+        el("details", { class: "fold", style: { marginTop: "10px" } }, [
+          el("summary", { text: "\uAC80\uC0C9 \uC5D4\uC9C4 \u2014 \uAE30\uBCF8 DuckDuckGo \xB7 \uACB0\uACFC\uAC00 \uBD80\uC2E4\uD558\uBA74 \uC5EC\uAE30\uC11C \uBC14\uAFC9\uB2C8\uB2E4" }),
+          buildWebsearchCard()
         ])
-      ]),
-      buildWebsearchCard()
+      ])
     ]);
   }
   function buildWebsearchCard() {
@@ -7613,9 +7678,8 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       }
     });
     void load();
-    return el("div", { class: "card" }, [
-      el("h2", { text: "\uAC80\uC0C9 \uC81C\uACF5\uC790" }),
-      el("div", { class: "hint", style: { marginBottom: "8px" }, text: "\uAC80\uC0C9 \uC5D0\uC774\uC804\uD2B8\uAC00 \uC2E4\uC81C\uB85C \uC6F9\uC744 \uCC3E\uC744 \uB54C \uC4F0\uB294 \uAC80\uC0C9 API \uC785\uB2C8\uB2E4. \uAE30\uBCF8 DuckDuckGo \uB294 \uC124\uC815\uC774 \uD544\uC694 \uC5C6\uC2B5\uB2C8\uB2E4." }),
+    return el("div", { class: "foldbody" }, [
+      el("div", { class: "hint", style: { marginBottom: "8px" }, text: "\uAC80\uC0C9 \uC5D0\uC774\uC804\uD2B8\uAC00 \uC2E4\uC81C\uB85C \uC6F9\uC744 \uCC3E\uC744 \uB54C \uC4F0\uB294 \uAC80\uC0C9 API \uC785\uB2C8\uB2E4. DuckDuckGo \uB294 \uD0A4\uAC00 \uC5C6\uC5B4\uB3C4 \uB418\uC9C0\uB9CC \uACB0\uACFC\uAC00 \uC801\uACE0, Brave\xB7Tavily \uB4F1\uC740 \uD0A4\uAC00 \uD544\uC694\uD569\uB2C8\uB2E4. \u201C\uBAA8\uB378 \uB0B4\uC7A5 \uAC80\uC0C9\u201D\uC740 \uAC80\uC0C9 \uC5D0\uC774\uC804\uD2B8\uAC00 codex(ChatGPT \uAD6C\uB3C5)\uC774\uAC70\uB098 Vercel AI Gateway \uC77C \uB54C \uADF8\uCABD \uAC80\uC0C9\uC744 \uADF8\uB300\uB85C \uC501\uB2C8\uB2E4." }),
       status,
       el("label", { class: "field" }, [el("span", { text: "\uC81C\uACF5\uC790" }), sel]),
       note,
@@ -8505,7 +8569,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.8.1",
+            version: "0.8.2",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -9018,7 +9082,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.8.1"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.8.2"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -10562,7 +10626,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.8.1"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.8.2"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
@@ -10573,6 +10637,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         healthEl.appendChild(el("span", { class: "hint", text: "\xB7 AI \uBBF8\uC124\uC815" }));
       }
     }
+    if (bootPhase) healthEl.appendChild(el("span", { class: "hint bootphase", text: "\xB7 " + bootPhase }));
     const botName = state.character?.name ? String(state.character.name) : "";
     if (botName) healthEl.appendChild(el("span", { class: "hint botname", text: `\xB7 ${botName}` }));
     const chat = state.activeChat;
@@ -10637,7 +10702,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.8.1" }),
+        el("span", { class: "dim", text: "v0.8.2" }),
         healthEl,
         el("span", { class: "spacer" }),
         reload,
@@ -10710,16 +10775,39 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
   async function bootstrap(force = false) {
     if (!mounted) buildShell();
     setTab(active);
+    const t0 = Date.now();
+    setBootPhase("\uBC31\uC5D4\uB4DC\uC5D0 \uC5F0\uACB0\uD558\uB294 \uC911\u2026");
     await transport.detectPlatform();
     const connected = await state.connect();
+    const t1 = Date.now();
+    setBootPhase("RisuAI\uC5D0\uC11C \uBD07\uC744 \uC77D\uB294 \uC911\u2026");
     await state.readHost();
+    const t2 = Date.now();
     if (connected) {
+      setBootPhase("\uBC31\uC5D4\uB4DC\uC5D0 \uC62C\uB9AC\uB294 \uC911\u2026");
       await uploadAfterConnect(force);
     } else {
       startReconnect(force);
     }
+    const t3 = Date.now();
+    setBootPhase("");
     refreshStatus();
     renderActive();
+    const hostMs = t2 - t1;
+    if (connected) {
+      void clientLog(hostMs > 5e3 ? "warn" : "info", "boot", {
+        connectMs: t1 - t0,
+        hostMs,
+        uploadMs: t3 - t2,
+        platform: transport.hostPlatform,
+        hostError: state.slotError.slice(0, 200)
+      });
+    }
+  }
+  var bootPhase = "";
+  function setBootPhase(text) {
+    bootPhase = text;
+    refreshStatus();
   }
   async function uploadAfterConnect(force = false) {
     if (!state.slot || state.slotError) return;
@@ -10821,6 +10909,10 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     }
     try {
       await Risuai.onUnload(async () => {
+        void clientLog("info", "unloaded by host (plugin reload or disable)", {
+          platform: transport.hostPlatform,
+          connected: !!transport.health
+        });
         for (const p of parts) {
           if (p?.id) {
             try {
@@ -10832,6 +10924,6 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.8.1"} loaded`);
+    console.log(`[risu-hina] v${"0.8.2"} loaded`);
   })();
 })();

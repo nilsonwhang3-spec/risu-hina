@@ -1,4 +1,4 @@
-# 06. 구현 상태 — 2026-08-27 기준 (v0.8.1 BETA, Risu Hina)
+# 06. 구현 상태 — 2026-08-28 기준 (v0.8.2 BETA, Risu Hina)
 
 다음 세션에 이어서 할 사람(=나)을 위한 한 장. 무엇이 있고, 무엇이 바뀌었고, 어디까지 배포됐고,
 무엇이 남았는지. 설계의 *이유*는 `docs/04`(에셋·charx 는 부록 E), 저장 구조는 `docs/02`, 배포 환경은 `docs/00`.
@@ -6,7 +6,7 @@
 
 ## 0. 다음 세션 시작점 (먼저 읽을 것)
 
-**코드 상태**: master = **v0.8.1 BETA**(§1-9 검색 · §1-8 라운드 10 · §1-7 · §1-6 · §1-5; docs/07 플래닝은 여전히 대기) — 게이트 ALL GREEN. 0.7.0 은 minor 가 바뀌어 **버전 게이트가 걸린다**: 백엔드를 올리면 RisuAI 쪽 플러그인도 `+` 로 올려야 한다(헤더가 안내).
+**코드 상태**: master = **v0.8.2 BETA**(§1-10 검색 엔진 접기·내장 검색 실측·모바일·플러그인 재로드 진단 · §1-9 검색 · §1-8 라운드 10 · §1-7 · §1-6 · §1-5; docs/07 플래닝은 여전히 대기) — 게이트 ALL GREEN. 0.7.0 은 minor 가 바뀌어 **버전 게이트가 걸린다**: 백엔드를 올리면 RisuAI 쪽 플러그인도 `+` 로 올려야 한다(헤더가 안내).
 
 **배포 상태 (2026-08-25 21:01 `deploy.ps1`, 새 SSH 세션에서 확인)**:
 
@@ -23,6 +23,15 @@
 `https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js` 로 바꾸고, `tools/bundle.py` 가 그 파일을 저장소에 쓰도록 했다(릴리스 커밋에 포함). 백엔드 코드는 VERSION 만 바뀜.
 
 → **첫 할 일**: 사용자가 RisuAI 에 `plugin/Risu.Hina.Plugin.js` **수동 재설치 1회**(설치본 0.1.0 의 update-url 은 CORS 로 못 읽음) → 다음 릴리스부터 `+` 가 뜨는지 확인 → M2 실사용 검증(§5-2).
+
+## 1-10. 2026-08-28 아침 — v0.8.2: 검색 엔진은 에이전트 안으로 · 내장 검색 실측 · 모바일 3건 · "다른 플러그인 업데이트 뒤 연결 안 됨"
+
+- **"에이전트와 제공자가 왜 따로?"** — 역할: 프리셋 모델은 검색어를 만들고 결과를 읽어 정리, 제공자는 실제로 웹에 질의. OpenAI 호환 chat completions 경로(Vercel 등 중계)로는 벤더 내장 검색이 안 넘어오므로 우리가 검색 엔진을 붙여야 한다. UI: "검색 제공자" 카드를 검색 에이전트 카드 **안** `details.fold` "검색 엔진 — 기본 DuckDuckGo · 결과가 부실하면 여기서 바꿉니다" 로 접어 넣음(사용자에겐 "프리셋 하나 고르면 됨"). 스모크 검사.
+- **내장 검색 실측**(test-server, 프로브 스크립트는 실행 후 삭제; 자격증명은 그 PC 밖으로 안 나감): codex `responses.create(tools=[{"type":"web_search"}], input=[...])` **8.8초**, `web_search_call`(search → open_page) 2회, 정답(v2026.8.250 · 8/25), 구독이라 추가 비용 0 — `input` 은 리스트여야 함(문자열이면 400 "Input must be a list"). Vercel AI Gateway(gemini-3.7-flash): `google_search`·`web_search` 타입은 400(허용: function·custom·`vercel:exa_search`·`parallel_search`·`perplexity_search`·`tako_search`), `extra_body google.tools` 는 조용히 무시. `vercel:exa_search` 17.3초 · $0.066 · 8/24 릴리스(근사), `vercel:parallel_search` 10.2초 · $0.032 · **3월 릴리스(5개월 묵은 오답)**; 프롬프트 토큰 38k~72k(게이트웨이가 결과를 프롬프트에 채움). → 제공자 **`native` "모델 내장 검색 (codex · Vercel AI Gateway)"**: `websearch.native_kind()` = codex | vercel(호스트 `ai-gateway.vercel.sh`) | ''; `agent.native_research()` 는 pydantic-ai 없이 직접 호출(codex Responses `web_search` + 열어 본 URL 을 출처로 보강, vercel 은 `exa_search`), `research()` 가 먼저 분기; `POST /websearch/test` 는 async 로 실제 조사 1회. **기본값은 그대로 duckduckgo**(새 설치엔 둘 다 없을 수 있음). test_http 3건(목록·미준비 사유·테스트가 호출 없이 같은 사유).
+- **risu.xyz "타 플러그인(cupcake) 업데이트 알림 뒤 일정 시간 백엔드 연결 안 됨"** — RisuAI 소스 확인(`plugins.svelte.ts`, `apiV3/v3.svelte.ts`, `factory.ts`): `updatePlugin → importPlugin → loadPlugins()` → `loadV3Plugins` 가 **실행 중인 V3 플러그인을 전부 언로드**(onUnload 콜백 1초 대기 → `host.terminate()` = message 리스너 제거 + **iframe 제거**)하고 다시 실행한다. 즉 어떤 플러그인이든 업데이트/설치되면 우리 패널은 사라지고 다음 열기는 콜드 스타트. 서버 링 로그(06:52:56 `GET /health` → **2분 공백** → 06:54:57 `/health` + 정상 로드 3초, `connect recovered` 없음)는 첫 열기가 `readHost`(호스트 브리지 `getCharacterFromIndex` = `$state.snapshot(캐릭터 전체)`)에서 2분 머문 것 — 백엔드는 즉시 응답했는데 패널이 비어 있어 "연결 안 됨"으로 읽혔다(라운드 10 "웹 최초 연결 3분" 과 같은 증상). 고침: (1) 헤더 상태줄에 **부팅 단계**("백엔드에 연결하는 중… / RisuAI에서 봇을 읽는 중… / 백엔드에 올리는 중…"), (2) 열기마다 `clientLog('boot', {connectMs, hostMs, uploadMs, platform, hostError})` — hostMs > 5초면 warn, (3) `onUnload` 에 `clientLog('unloaded by host (plugin reload or disable)')`, (4) `h_clientlog` 가 detail 의 문자열을 그대로 기록(`_client_detail`; 전엔 `agent stream error {error=str(71)}` 로 내용이 사라짐). 다음 보고는 로그로 확정 가능.
+- **모바일 3건** — `tools/harness.mjs`(플러그인 번들 + 브라우저용 스텁 호스트 + 임시 백엔드, 헤드리스 Chrome 캡처) 로 실측. 헤드리스 Chrome 은 **창 폭 500px 미만을 거부**(뷰포트 500 에 캡처만 390 으로 잘려 "버튼이 밖으로 나감" 이 착시로 보였음) → 플러그인 페이지를 요청한 크기의 iframe(`/?w=390&h=760`) 에 넣고 미디어쿼리가 iframe 폭을 보게 함; `&probe=1` 이면 레이아웃 수치를 `postMessage` 로 부모 `#probe` 에 써서 `--dump-dom` 으로 읽는다. 확인된 실제 문제: ① 전환 버튼(플로팅 필)이 AI 챗 뷰에서 첨부·전송 버튼 **위에** 얹히고 라벨이 "다른 쪽" 이름이라 헷갈림 → 스플릿 상단 세그먼트 바 `.mbar`(📄 편집 | 💬 AI 챗, 현재 뷰 점등) + 트리 탭에 "☰ 목록 펼치기/접기"(`.m-list`: 150px ↔ 62%); ② 트리 스트립이 `max-height:190px` + `overflow-y:hidden`(스트립용 규칙 상속) 이라 5번째 항목부터 도달 불가 → `.explorer:has(.tree)` 는 block · 150px · `overflow-y:auto`; ③ 헤더 상태 필이 3줄로 접혀 80px → 한 줄 nowrap + 봇 이름 숨김.
+- **입력창을 늘리면 버튼이 화면 밖으로** — textarea 의 기본 `resize: both` 가 폭까지 끌어 열 밖으로 밀어냈다 → `resize: vertical`, `max-width:100%`, `max-height:min(220px, 40vh)`.
+- 하네스 사용: `node tools/harness.mjs --port 8765` → `http://127.0.0.1:8765/?w=390&h=760&tab=botlore&view=centre` (`tab=settings&sub=에이전트`, `mode=chat&tab=editor`). 캡처: `chrome --headless=new --window-size=520,820 --virtual-time-budget=9000 --screenshot=<abs> <url>` — **프로필 디렉터리를 캡처마다 따로**(같은 `--user-data-dir` 이면 살아 있는 인스턴스에 넘기고 종료해 파일이 안 생김), 출력 경로는 절대 Windows 경로.
 
 ## 1-9. 2026-08-27 밤 — v0.8.1: 웹 검색 에이전트가 애초에 검색할 수 없었다
 

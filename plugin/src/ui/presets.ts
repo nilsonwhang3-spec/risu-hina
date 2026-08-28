@@ -166,16 +166,23 @@ export function buildPresetsCard(opts: PresetsCardOptions): HTMLElement {
       el('h2', { text: '검색 에이전트' }),
       el('div', { class: 'hint', style: { marginBottom: '8px' } }, [
         '일반 에이전트는 웹을 직접 검색하지 않고, 외부 사실이 필요하면 이 에이전트에게 맡깁니다. '
-        + '검색 에이전트 = 아래 프리셋의 모델 + 그 아래 검색 제공자. 저렴한 모델(예: Gemini Flash)을 권합니다.',
+        + '모델(프리셋)이 검색어를 만들고 결과를 읽어 정리하며, 실제로 웹을 찾는 것은 검색 엔진입니다. '
+        + '검색 엔진은 기본 DuckDuckGo 라 따로 설정할 것이 없고, 저렴한 모델(예: Gemini Flash)을 권합니다.',
       ]),
       searchMount,
       el('div', { class: 'row', style: { marginTop: '8px' } }, [testButton('search', searchOut)]),
       searchOut,
       el('div', { class: 'hint', style: { marginTop: '8px' } }, [
-        '연결 테스트는 모델만 봅니다(응답 + 툴 호출, 최대 4분). 실제 검색은 아래 제공자로 합니다.',
+        '연결 테스트는 모델만 봅니다(응답 + 툴 호출, 최대 4분). 검색 자체는 아래 검색 엔진의 “검색 테스트”로 확인합니다.',
+      ]),
+      // Folded: the engine is a knob most people never turn. It was a card
+      // of its own beside the agent card, and read as a second thing to set
+      // up - "why are there two?" - when it is part of this one.
+      el('details', { class: 'fold', style: { marginTop: '10px' } }, [
+        el('summary', { text: '검색 엔진 — 기본 DuckDuckGo · 결과가 부실하면 여기서 바꿉니다' }),
+        buildWebsearchCard(),
       ]),
     ]),
-    buildWebsearchCard(),
   ]);
 }
 
@@ -271,9 +278,8 @@ function buildWebsearchCard(): HTMLElement {
   });
 
   void load();
-  return el('div', { class: 'card' }, [
-    el('h2', { text: '검색 제공자' }),
-    el('div', { class: 'hint', style: { marginBottom: '8px' }, text: '검색 에이전트가 실제로 웹을 찾을 때 쓰는 검색 API 입니다. 기본 DuckDuckGo 는 설정이 필요 없습니다.' }),
+  return el('div', { class: 'foldbody' }, [
+    el('div', { class: 'hint', style: { marginBottom: '8px' }, text: '검색 에이전트가 실제로 웹을 찾을 때 쓰는 검색 API 입니다. DuckDuckGo 는 키가 없어도 되지만 결과가 적고, Brave·Tavily 등은 키가 필요합니다. “모델 내장 검색”은 검색 에이전트가 codex(ChatGPT 구독)이거나 Vercel AI Gateway 일 때 그쪽 검색을 그대로 씁니다.' }),
     status,
     el('label', { class: 'field' }, [el('span', { text: '제공자' }), sel]),
     note,

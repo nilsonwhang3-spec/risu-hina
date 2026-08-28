@@ -40,7 +40,9 @@ export function threePane(leftNode?: HTMLElement): ThreePaneParts {
   root.appendChild(centre);
   root.appendChild(splitter({ target: right, container: root, storageKey: 'panelWidth2' }));
   root.appendChild(right);
-  root.appendChild(mobileToggle(root));
+  // First child: under the mobile breakpoint the split is a column and the
+  // bar sits across its top. Desktop CSS hides it.
+  root.insertBefore(mobileBar(root), root.firstChild);
 
   return { root, left, centre, right };
 }
@@ -70,21 +72,39 @@ function syncAll(): void {
   }
 }
 
-function mobileToggle(root: HTMLElement): HTMLElement {
-  const btn = el('button', { class: 'mtoggle', title: 'AI 챗과 편집 화면을 바꿉니다 (모바일)' });
+// Whether the tree explorer (lorebook, meta fields...) is opened out on a
+// phone. Off by default: the list is short and the entry gets the screen.
+let mobileList = false;
+
+function mobileBar(root: HTMLElement): HTMLElement {
+  const editBtn = el('button', { text: '📄 편집', title: '편집 화면 (모바일)' });
+  const agentBtn = el('button', { text: '💬 AI 챗', title: 'AI 챗 (모바일)' });
+  const listBtn = el('button', { class: 'ghost tiny mlist', title: '왼쪽 목록을 펼치거나 접습니다' });
+  const bar = el('div', { class: 'mbar' }, [el('div', { class: 'mseg' }, [editBtn, agentBtn]), listBtn]);
   const sync = () => {
     root.classList.toggle('m-agent', mobileView === 'agent');
     root.classList.toggle('m-centre', mobileView === 'centre');
-    btn.textContent = mobileView === 'agent' ? '📄 편집 화면' : '💬 AI 챗';
+    root.classList.toggle('m-list', mobileList);
+    editBtn.classList.toggle('on', mobileView === 'centre');
+    agentBtn.classList.toggle('on', mobileView === 'agent');
+    listBtn.textContent = mobileList ? '☰ 목록 접기' : '☰ 목록 펼치기';
+    // Only trees fold; a strip of jump targets has nothing to open.
+    listBtn.style.display = root.querySelector('.explorer .tree') ? '' : 'none';
   };
-  btn.addEventListener('click', () => {
-    mobileView = mobileView === 'agent' ? 'centre' : 'agent';
+  const pick = (v: MobileView) => {
+    if (mobileView === v) return;
+    mobileView = v;
     try { localStorage.setItem(VIEW_KEY, mobileView); } catch { /* fine */ }
     syncAll();
-  });
+  };
+  editBtn.addEventListener('click', () => pick('centre'));
+  agentBtn.addEventListener('click', () => pick('agent'));
+  listBtn.addEventListener('click', () => { mobileList = !mobileList; syncAll(); });
   toggles.set(root, sync);
   sync();
-  return btn;
+  // The tree mounts after the split is built; re-check once it is there.
+  setTimeout(sync, 0);
+  return bar;
 }
 
 /** Show the agent side on a phone (a proposal arrived, a run finished). */

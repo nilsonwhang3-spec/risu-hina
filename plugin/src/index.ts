@@ -5,7 +5,7 @@
  * panel is not built until the user opens it, because a plugin that does work
  * on load slows down every RisuAI start whether or not it is used.
  */
-import { transport } from './transport';
+import { transport, clientLog } from './transport';
 import { bootstrap } from './ui/shell';
 import { ICON } from './ui/dom';
 
@@ -71,6 +71,15 @@ async function resolveConfig(): Promise<{ url: string; token: string }> {
 
   try {
     await Risuai.onUnload(async () => {
+      // RisuAI reloads every plugin when any one of them is updated or
+      // installed (loadPlugins -> loadV3Plugins unloads all instances and
+      // starts them again). This is the only trace of that from our side: an
+      // open panel simply vanishes, and the next open is a cold start. The
+      // line makes "it disconnected after the other plugin's update notice"
+      // readable in the server log as a reload, not a network failure.
+      void clientLog('info', 'unloaded by host (plugin reload or disable)', {
+        platform: transport.hostPlatform, connected: !!transport.health,
+      });
       for (const p of parts) {
         if (p?.id) {
           try { await Risuai.unregisterUIPart(p.id); } catch { /* already gone */ }

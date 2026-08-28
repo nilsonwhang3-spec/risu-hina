@@ -2111,6 +2111,16 @@ def test_websearch_card(s: Server) -> None:
     st, _ = s.post("/config", {"config": {"websearch": {"provider": "brave", "apiKey": "k", "baseUrl": "", "maxResults": 5}}})
     st, body = s.get("/websearch")
     check("with a key it is ready, and the key is not echoed", body["configured"] is True and body["apiKeySet"] is True and "k" not in json.dumps(body.get("apiKey", "")), str(body)[:160])
+    # The model's own search: only when the search agent's endpoint has one.
+    # Here it has none (no search preset), so the card must say so rather
+    # than let the agent discover it mid-turn.
+    st, _ = s.post("/config", {"config": {"websearch": {"provider": "native", "apiKey": "", "baseUrl": "", "maxResults": 5}}})
+    st, body = s.get("/websearch")
+    check("native search is listed", any(p["id"] == "native" for p in body["providers"]), str([p["id"] for p in body["providers"]]))
+    check("and not ready without a codex or gateway search agent",
+          body["configured"] is False and "내장 검색" in body["whyNot"], str(body)[:200])
+    st, body = s.post("/websearch/test", {"query": "x"})
+    check("its test says the same without calling anything", st == 200 and body["ok"] is False and "내장 검색" in body["error"], str(body)[:160])
     st, _ = s.post("/config", {"config": {"websearch": {"provider": "", "apiKey": "", "baseUrl": "", "maxResults": 5}}})
 
 

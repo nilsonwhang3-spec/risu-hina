@@ -1223,6 +1223,25 @@ check('diagnostic present', !!findButton(document, '연결 진단'));
 await settle(500);
 check('agent credential card present', !!findButton(document, '연결 테스트'));
 {
+  // The search engine is a fold inside the search agent's card, not a card
+  // of its own: one thing to set up, with a knob under it.
+  const fold = [...document.querySelectorAll('details.fold')]
+    .find((d) => /검색 엔진/.test(d.querySelector('summary')?.textContent || ''));
+  check('the search engine folds under the search agent', !!fold && !!fold.closest('.card')
+        && /검색 에이전트/.test(fold.closest('.card')?.querySelector('h2')?.textContent || ''));
+  check('the engine test lives in the fold', !!fold && !![...fold.querySelectorAll('button')].find((b) => /검색 테스트/.test(b.textContent || '')));
+  await settle(600);
+  const opts = [...(fold?.querySelectorAll('select option') || [])].map((o) => o.getAttribute('value'));
+  check('the model-native engine is offered', opts.includes('native'), opts.join(','));
+}
+{
+  // The phone view switch: two segments at the top of every split, the lit
+  // one being the current view. (A floating pill used to sit on the send button.)
+  const bars = [...document.querySelectorAll('.split > .mbar')];
+  check('every split starts with the mobile view bar', bars.length >= 1 && bars.every((b) => b.parentElement?.firstElementChild === b), String(bars.length));
+  check('with an 편집 and an AI 챗 segment', bars.every((b) => /편집/.test(b.textContent) && /AI 챗/.test(b.textContent)));
+}
+{
   const pw = [...document.querySelectorAll('input')].filter((i) => i.getAttribute('type') === 'password');
   check('api key field is a password input', pw.length >= 1, String(pw.length));
   const body = document.body.innerHTML;

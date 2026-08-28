@@ -1173,6 +1173,8 @@ async def research(question: str) -> str:
     cfg = config.section("agent_search")
     settings = providers.plan_for(cfg).settings
     extra = str(cfg.get("instructions") or "").strip()
+    if websearch.provider_id() == "native":
+        return await native_research(question, cfg, extra)
     sub = Agent(
         _search_model(),
         instructions=SEARCH_INSTRUCTIONS + ("\n" + extra if extra else ""),
@@ -1191,3 +1193,61 @@ async def research(question: str) -> str:
         log.warn("search agent failed: %s", e)
         fix = providers.hint(str(e), "에이전트 (검색)")
         return f"검색 에이전트가 실패했습니다: {type(e).__name__}: {e}" + (f"\n→ {fix}" if fix else "")
+
+
+# How long one native research call may take. The codex path was measured at
+# 8.8s; the gateway path at 10-17s. Well under the tool's 110s round.
+NATIVE_TIMEOUT = 100
+
+
+async def native_research(question: str, cfg: dict, extra: str = "") -> str:
+    """The search agent's own endpoint does the searching.
+
+    Two shapes, both measured on 2026-08-28:
+      codex   Responses API `tools=[{"type":"web_search"}]` - the model
+              searches and opens pages inside one turn (8.8s, exact answer).
+      vercel  chat completions with the gateway's `vercel:exa_search` tool
+              (17s; the fresher of its two engines - parallel_search was five
+              months behind on the same question).
+    No pydantic-ai here: there is no tool loop to run, the vendor runs it.
+    """
+    kind = websearch.native_kind()
+    if not kind:
+        return f"검색 제공자가 준비되지 않았습니다 — {websearch.native_why_not()}. 사용자에게 안내해라."
+    instructions = SEARCH_INSTRUCTIONS.replace("web_search 로 찾고", "내장 웹 검색으로 찾고") + ("\n" + extra if extra else "")
+    try:
+        if kind == "codex":
+            c = codexauth.client()
+            r = await c.responses.create(
+                model=cfg.get("model") or "",
+                instructions=instructions,
+                input=[{"role": "user", "content": question}],
+                tools=[{"type": "web_search"}],
+                reasoning={"effort": str(cfg.get("reasoning") or "low")},
+                timeout=NATIVE_TIMEOUT,
+            )
+            text = str(getattr(r, "output_text", "") or "")
+            # The answer normally cites; when it does not, the pages the model
+            # opened are the sources it had.
+            urls: list[str] = []
+            for it in getattr(r, "output", None) or []:
+                action = getattr(it, "action", None)
+                url = getattr(action, "url", None)
+                if url and url not in urls:
+                    urls.append(str(url))
+            if urls and "http" not in text:
+                text += "\n\n출처:\n" + "\n".join(urls[:8])
+            return text[:20000] or "(검색 에이전트가 빈 답을 돌려줬습니다)"
+        import openai
+        c = openai.AsyncOpenAI(base_url=str(cfg.get("baseUrl")), api_key=str(cfg.get("apiKey")), timeout=NATIVE_TIMEOUT)
+        r = await c.chat.completions.create(
+            model=str(cfg.get("model") or ""),
+            messages=[{"role": "system", "content": instructions}, {"role": "user", "content": question}],
+            tools=[{"type": "vercel:exa_search"}],  # type: ignore[list-item]
+        )
+        text = str(r.choices[0].message.content or "") if r.choices else ""
+        return text[:20000] or "(검색 에이전트가 빈 답을 돌려줬습니다)"
+    except Exception as e:  # noqa: BLE001 - a failed research degrades the turn, never fails it
+        log.warn("native search (%s) failed: %s", kind, e)
+        fix = providers.hint(str(e), "에이전트 (검색)")
+        return f"검색 에이전트가 실패했습니다 ({kind} 내장 검색): {type(e).__name__}: {e}" + (f"\n→ {fix}" if fix else "")
