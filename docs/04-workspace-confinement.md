@@ -649,29 +649,9 @@ visible at the end of the tab row (`syncbadge`), the asset tab is read-only whil
 - "토큰을 보내지 않았습니다" (no token was sent) in the connection diagnostics appears **only when the connection
   failed**. That line lingering under a success line was the bug.
 
-## F.5 Running the agent on an OpenAI subscription (Codex) (v0.4.1, done at the user's decision)
-
-The Codex CLI is on none of the PCs, so its login could not be borrowed. So `codexauth.py` does the same thing
-the Codex CLI does: `auth.openai.com/oauth/authorize` PKCE (client_id `app_EMoamEEZ73f0CkXaXp7hrann`,
-scope `openid profile email offline_access`, redirect `http://localhost:1455/auth/callback`) →
-exchange at `/oauth/token` → `https://api.openai.com/auth.chatgpt_account_id` out of the `id_token` → requests go
-to `https://chatgpt.com/backend-api/codex/responses` with `Authorization: Bearer` + `chatgpt-account-id`
-+ `OpenAI-Beta: responses=experimental` + `originator: codex_cli_rs`. This backend **only accepts streaming and
-rejects store**, so `codexauth.client()` wraps `responses.create` to force `stream=True, store=False`, and for
-calls that did not want a stream (the connection test) it folds the `response.completed` event's response back.
-Our session uses `run_stream_events` anyway, so it passes straight through. The token lives in
-`data/codex-auth.json` (0600), is refreshed with the refresh_token five minutes before expiry, and the bearer is re-read before every call.
-
-The callback: in a browser on the backend PC, a one-shot listener on 127.0.0.1:1455 receives it. On another
-device (a phone, another PC) the redirect ends on a "cannot connect" page, but **pasting that address into the
-plugin** completes it (`POST /codex/login/complete`, with state verification). `provider='codex'` on the preset
-is the switch, and `agent._model_for()` branches to `OpenAIResponsesModel`. It is an undocumented API, so it
-breaks if OpenAI changes it, and at that point the error is shown as is — the user chose this knowing that.
-
-## F.6 Left undone
+## F.5 Left undone
 
 - The mobile splitter: fixed with `touch-action: none`, but not yet confirmed on a real device.
-- Verifying real Codex calls (login, tool calls, reasoning models) — in real use.
 
 # Appendix G — Round 3 and the rename (2026-08-26, v0.5.0)
 
@@ -716,7 +696,7 @@ save, export and import. Rows (turns · card · lore) are keyed per bot in the D
 ## G.5 Left undone
 
 - Web (risu.xyz) asset thumbnails: impossible because the iframe CSP has no `img-src` (`default-src 'none'`). PocketRisu only.
-- Real-device checks: the mobile gutter, real Codex calls, `web_research`, summary compaction actually working.
+- Real-device checks: the mobile gutter, `web_research`, summary compaction actually working.
 
 ## G.6 Permission prompts (v0.5.1)
 
@@ -750,7 +730,7 @@ upgrade. Before that, a mismatched API blew up deep inside as a 404 or in some s
 "OpenAI-compatible" endpoints share only the name. Confirmed against the documentation (2026-08-26): OpenAI's own
 GPT-5 and o series **reject** sampling parameters such as `temperature` and `top_p` (only the defaults are
 allowed), and the gpt-5.6 series **rejects tool calls outright on Chat Completions** (use the Responses API, or
-`reasoning_effort: none`); the subscription backend rejects `max_output_tokens`; the compatibility layers of
+`reasoning_effort: none`); the compatibility layers of
 Anthropic, Gemini (AI Studio) and Vertex **ignore** fields they do not know; Ollama knows only `max_tokens` and
 does not list `max_completion_tokens`; on OpenCode, GPT and Grok are `/responses`, DeepSeek, GLM and Kimi are
 `/chat/completions`, Claude and Qwen use the Anthropic format (not possible with our tooling), and Go is
@@ -785,5 +765,5 @@ Hardcode a parameter set and it will break somewhere, guaranteed. So it was move
   Words it does not recognize are ignored when they are not in the field list (`KNOWN_FIELDS`).
   It is attached to `session._explain`, the connection test and the search agent's failure message.
 
-Measured by the user: using gpt-5.6-sol through the subscription (Responses) path works, tool calls included — the
+Measured by the user: gpt-5.6-sol works through the Responses path, tool calls included — the
 same direction as the research, so the default of the official OpenAI profile was set to Responses as well.
