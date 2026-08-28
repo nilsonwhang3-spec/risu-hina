@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.9.3
+//@display-name Risu Hina v0.9.4
 //@api 3.0
-//@version 0.9.3
+//@version 0.9.4
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -104,7 +104,7 @@
       this.tokenSafe = true;
       this.lastHealth = body;
       this.probeInfo = "";
-      this.gate = versionGate("0.9.3", String(body.version || ""));
+      this.gate = versionGate("0.9.4", String(body.version || ""));
       return body;
     }
     /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -7511,6 +7511,9 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     max: "max"
   };
   var CODEX_KEY = "__codex__";
+  function codexOffered() {
+    return transport.health?.codexEnabled === true;
+  }
   function buildPresetsCard(opts) {
     const generalMount = el("div");
     const out = el("div");
@@ -7960,7 +7963,9 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         clear(keySel);
         keySel.appendChild(el("option", { value: "", text: "\uC9C1\uC811 \uC785\uB825" }));
         for (const k of keys) keySel.appendChild(el("option", { value: k.id, text: `${k.name}${k.provider ? " \xB7 " + k.provider : ""}` }));
-        keySel.appendChild(el("option", { value: CODEX_KEY, text: "OpenAI \uAD6C\uB3C5 (ChatGPT Plus/Pro \xB7 Codex)" }));
+        if (codexOffered()) {
+          keySel.appendChild(el("option", { value: CODEX_KEY, text: "OpenAI \uAD6C\uB3C5 (ChatGPT Plus/Pro \xB7 Codex)" }));
+        }
         const p = id ? r.presets.find((x) => x.id === id) : null;
         if (!p) {
           agentName.value = r.defaultAgentName || "\uD788\uB098";
@@ -7998,7 +8003,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       kind === "general" ? el("label", { class: "field" }, [el("span", { text: "\uC5D0\uC774\uC804\uD2B8 \uC774\uB984 (\uB300\uD654\uC5D0\uC11C \uBD80\uB974\uB294 \uC774\uB984)" }), agentName]) : null,
       keyRow,
       keyHint,
-      codexBox.root,
+      codexOffered() ? codexBox.root : null,
       ownKeyRow,
       urlRow,
       el("label", { class: "field" }, [
@@ -8649,7 +8654,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.9.3",
+            version: "0.9.4",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -9086,10 +9091,13 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     });
     refreshers.push(draw2);
     void draw2();
+    const offered = transport.health?.codexEnabled === true;
     const codex = buildCodexBox(null, true);
     codex.root.style.display = "";
-    refreshers.push(codex.refresh);
-    void codex.refresh();
+    if (offered) {
+      refreshers.push(codex.refresh);
+      void codex.refresh();
+    }
     return el("div", {}, [
       el("div", { class: "card" }, [
         el("h2", { text: "API \uD0A4" }),
@@ -9098,7 +9106,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         el("div", { class: "row", style: { marginTop: "8px" } }, [add]),
         out
       ]),
-      codex.root
+      offered ? codex.root : null
     ]);
   }
   function buildCatalogCard() {
@@ -9162,7 +9170,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.9.3"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.9.4"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -11066,7 +11074,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.9.3"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.9.4"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
@@ -11142,7 +11150,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.9.3" }),
+        el("span", { class: "dim", text: "v0.9.4" }),
         healthEl,
         el("span", { class: "spacer" }),
         reload,
@@ -11398,6 +11406,6 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.9.3"} loaded`);
+    console.log(`[risu-hina] v${"0.9.4"} loaded`);
   })();
 })();

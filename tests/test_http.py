@@ -75,10 +75,18 @@ def free_port() -> int:
 
 
 class Server:
-    def __init__(self, require_token: bool = True) -> None:
+    def __init__(self, require_token: bool = True, codex: bool = True) -> None:
         self.port = free_port()
         self.token = "test-token-" + str(self.port)
         self.data = Path(tempfile.mkdtemp(prefix="risuhina-test-"))
+        # The subscription path is only present when the operator put the flag
+        # in config.json by hand; the suite exercises the feature, so it seeds
+        # one. `codex=False` is the shipped default and is asserted on its own
+        # server (test_codex_is_off_unless_enabled).
+        if codex:
+            self.data.mkdir(parents=True, exist_ok=True)
+            (self.data / "config.json").write_text(
+                json.dumps({"OPENAI_CODEX": 1}, ensure_ascii=False), encoding="utf-8")
         py = os.environ.get("RISUHINA_TEST_PY") or str(PYSERVER / ".venv" / "Scripts" / "python.exe")
         if not Path(py).exists():
             py = sys.executable
@@ -2198,6 +2206,32 @@ def test_keys_and_agent_kinds(s: Server) -> None:
     check("the model catalog route answers", st == 200 and "models" in body and "providers" in body, str(body)[:160])
 
 
+def test_codex_is_off_unless_enabled() -> None:
+    """The shipped default: the subscription path is not offered at all.
+
+    Its own server, because the rest of the suite seeds the flag to exercise
+    the feature. Nothing but a hand-edited config.json can turn it on - a
+    settings patch cannot, since `config.update` only walks sections.
+    """
+    print("test_codex_is_off_unless_enabled")
+    s = Server(codex=False)
+    try:
+        if not s.wait_ready():
+            check("server started", False, s.drain()[-400:])
+            return
+        st, h = s.get("/health", token=None)
+        check("health says it is not offered", h.get("codexEnabled") is False, str(h)[:200])
+        st, _ = s.get("/codex/status")
+        check("its routes are not there at all", st == 404, str(st))
+        st, body = s.post("/presets/save", {"name": "구독", "values": {"provider": "codex", "model": "m"}})
+        check("and a preset cannot select it", st == 400, f"{st} {str(body)[:100]}")
+        st, body = s.post("/config", {"config": {"OPENAI_CODEX": 1}})
+        st, h = s.get("/health", token=None)
+        check("and a settings patch cannot turn it on", h.get("codexEnabled") is False, str(h)[:200])
+    finally:
+        s.stop()
+
+
 def test_codex_subscription_preset(s: Server) -> None:
     """The OpenAI-subscription provider: the login flow's shape (no network),
     and a codex preset as the agent's config - which leaves /health honest
@@ -2502,6 +2536,7 @@ def main() -> int:
         test_preset_selection(s)
         test_keys_and_agent_kinds(s)
         test_codex_subscription_preset(s)
+        test_codex_is_off_unless_enabled()
         test_websearch_card(s)
         test_permits_and_key_providers(s)
         test_skills(s)

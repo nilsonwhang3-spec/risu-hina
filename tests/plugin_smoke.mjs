@@ -1278,6 +1278,10 @@ check('agent credential card present', !!findButton(document, '연결 테스트'
   check('with an 편집 and an AI 챗 segment', bars.every((b) => /편집/.test(b.textContent) && /AI 챗/.test(b.textContent)));
 }
 {
+  // The subscription path is off unless this backend's operator enabled it,
+  // so the key page must not offer it (the smoke backend uses the default).
+  check('the key page offers no subscription login',
+        !/OPENAI 구독|OpenAI 로그인/i.test(document.body.textContent || ''));
   const pw = [...document.querySelectorAll('input')].filter((i) => i.getAttribute('type') === 'password');
   check('api key field is a password input', pw.length >= 1, String(pw.length));
   const body = document.body.innerHTML;
@@ -1319,7 +1323,10 @@ console.log('\ntest_agent_presets_ui');
   const selects = [...(box?.querySelectorAll('select') || [])];
   const credSel = selects.find((s) => /직접 입력/.test(s.textContent || ''));
   check('the API key can be borrowed from the key page', !!credSel);
-  check('and the OpenAI subscription is one of the credentials', /OpenAI 구독/.test(credSel?.textContent || ''));
+  // Not among them here: the subscription path is offered only when this
+  // backend's operator turned it on, and the smoke backend is the default.
+  check('and the subscription is not offered when the backend does not enable it',
+        !/OpenAI 구독/.test(credSel?.textContent || ''), credSel?.textContent?.slice(0, 80));
   const reasoningSel = selects.find((s) => /high/.test(s.textContent || ''));
   check('reasoning level is settable', !!reasoningSel);
   const opts = [...(reasoningSel?.querySelectorAll('option') || [])]

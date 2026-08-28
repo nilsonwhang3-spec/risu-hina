@@ -422,11 +422,15 @@ function buildKeysCard(): HTMLElement {
   void draw();
 
   // The OpenAI subscription is a credential too, so its login lives here;
-  // a preset then picks it the way it picks a key.
+  // a preset then picks it the way it picks a key. Present only when the
+  // backend offers that path at all (its operator turns it on).
+  const offered = transport.health?.codexEnabled === true;
   const codex = buildCodexBox(null, true);
   codex.root.style.display = '';
-  refreshers.push(codex.refresh);
-  void codex.refresh();
+  if (offered) {
+    refreshers.push(codex.refresh);
+    void codex.refresh();
+  }
 
   return el('div', {}, [
     el('div', { class: 'card' }, [
@@ -437,7 +441,7 @@ function buildKeysCard(): HTMLElement {
       el('div', { class: 'row', style: { marginTop: '8px' } }, [add]),
       out,
     ]),
-    codex.root,
+    offered ? codex.root : null,
   ]);
 }
 

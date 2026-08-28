@@ -33,6 +33,8 @@ export interface HealthInfo {
   clientIp?: string;
   loopback?: boolean;
   tokenRequired?: boolean;
+  /** Whether this backend offers the OpenAI subscription path at all. */
+  codexEnabled?: boolean;
   workspaces?: number;
 }
 

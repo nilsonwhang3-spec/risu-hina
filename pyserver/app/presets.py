@@ -383,6 +383,11 @@ def _clean(values: dict, previous: dict | None) -> dict:
             pv = str(raw).strip().lower()
             if pv not in PROVIDERS:
                 raise PresetError("provider 는 비우거나 codex 여야 합니다")
+            # Only when the operator turned it on (config.codex_enabled); a
+            # client that still offers it gets the same answer as one asking
+            # for a provider that does not exist.
+            if pv == "codex" and not config.codex_enabled():
+                raise PresetError("provider 는 비워 주세요")
             out[field] = pv
         elif field == "keyRef":
             ref = str(raw).strip()

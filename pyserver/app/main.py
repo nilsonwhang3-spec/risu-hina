@@ -146,6 +146,7 @@ def h_health(arg: dict) -> dict:
         "clientIp": arg.get("_addr"),
         "loopback": config.is_loopback(arg.get("_addr") or ""),
         "tokenRequired": config.token_required_for(arg.get("_addr") or ""),
+        "codexEnabled": config.codex_enabled(),
         "workspaces": len(workspace.list_all()),
     }
 
@@ -2004,6 +2005,11 @@ async def dispatch(path: str, request: Request) -> Response:
     pathname = "/" + path
     key = f"{request.method} {pathname}"
     handler = ROUTES.get(key)
+
+    # The subscription routes exist only when the operator turned them on
+    # (config.codex_enabled). 404, the same as any route that is not there.
+    if handler is not None and pathname.startswith("/codex/") and not config.codex_enabled():
+        handler = None
 
     # 404 before auth: otherwise an unauthenticated caller could map the API by
     # watching 401 vs 404.

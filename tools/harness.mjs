@@ -40,7 +40,11 @@ const freePort = () => new Promise((res) => {
 
 async function startBackend() {
   const port = await freePort();
-  const data = mkdtempSync(join(tmpdir(), 'risuhina-harness-'));
+  // A throwaway dir per run, unless one is named: some checks need a config
+  // the backend reads at boot (a hand-set flag), and a fresh dir every time
+  // cannot hold one.
+  const data = process.env.RISUHINA_HARNESS_DATA
+    || mkdtempSync(join(tmpdir(), 'risuhina-harness-'));
   let py = resolve(ROOT, 'pyserver/.venv/Scripts/python.exe');
   if (!existsSync(py)) py = 'python';
   const proc = spawn(py, [resolve(ROOT, 'pyserver/run.py')], {
@@ -273,7 +277,10 @@ server.listen(port, '127.0.0.1', () => {
 
 const bye = () => {
   try { backend.proc.kill(); } catch { /* gone */ }
-  try { rmSync(backend.data, { recursive: true, force: true }); } catch { /* fine */ }
+  // Only clean up what we created.
+  if (!process.env.RISUHINA_HARNESS_DATA) {
+    try { rmSync(backend.data, { recursive: true, force: true }); } catch { /* fine */ }
+  }
   process.exit(0);
 };
 process.on('SIGINT', bye);

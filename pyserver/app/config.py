@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any
 
 APP_NAME = "risu-hina"
-VERSION = "0.9.3"
+VERSION = "0.9.4"
 
 # Renamed from REALOOC_* to RISUHINA_*. The old names are still honoured, and
 # not as politeness: the launcher, the control script and any service wrapper
@@ -312,6 +312,18 @@ def load(refresh: bool = False) -> dict:
 
 def section(name: str) -> dict:
     return dict(load().get(name) or {})
+
+
+# The OpenAI subscription path. Off unless the operator sets
+# `"OPENAI_CODEX": 1` in config.json by hand - deliberately absent from
+# DEFAULTS, so it is never written into a fresh install's template and never
+# shown in the panel. With it off the routes are not there, a preset cannot
+# select it, and the settings page does not offer it.
+CODEX_FLAG = "OPENAI_CODEX"
+
+
+def codex_enabled() -> bool:
+    return str(load().get(CODEX_FLAG, 0)).strip().lower() in ("1", "true", "yes", "on")
 
 
 OLD_MAX_TOKENS_DEFAULT = 8000

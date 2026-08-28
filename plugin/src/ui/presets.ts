@@ -13,6 +13,7 @@
  */
 import { el, clear, armed, modal, setSelected, selectedValue, popover } from './dom';
 import { state, type AgentPreset, type ApiKeyEntry, type CatalogModel, type ProviderProfile, type WebsearchMode, type WebsearchStatus } from '../state';
+import { transport } from '../transport';
 
 type Kind = 'general' | 'search';
 
@@ -38,6 +39,11 @@ export interface PresetsCardOptions {
 
 /** The key-select value that means "the OpenAI subscription" (provider codex). */
 const CODEX_KEY = '__codex__';
+
+/** Whether this backend offers that path; off unless its operator enabled it. */
+function codexOffered(): boolean {
+  return transport.health?.codexEnabled === true;
+}
 
 export function buildPresetsCard(opts: PresetsCardOptions): HTMLElement {
   const generalMount = el('div');
@@ -567,7 +573,9 @@ function openEditor(
       clear(keySel);
       keySel.appendChild(el('option', { value: '', text: '직접 입력' }));
       for (const k of keys) keySel.appendChild(el('option', { value: k.id, text: `${k.name}${k.provider ? ' · ' + k.provider : ''}` }));
-      keySel.appendChild(el('option', { value: CODEX_KEY, text: 'OpenAI 구독 (ChatGPT Plus/Pro · Codex)' }));
+      if (codexOffered()) {
+        keySel.appendChild(el('option', { value: CODEX_KEY, text: 'OpenAI 구독 (ChatGPT Plus/Pro · Codex)' }));
+      }
       const p = id ? r.presets.find((x) => x.id === id) : null;
       if (!p) {
         // A new preset starts as the kind's default persona; the text is
@@ -610,7 +618,7 @@ function openEditor(
     kind === 'general' ? el('label', { class: 'field' }, [el('span', { text: '에이전트 이름 (대화에서 부르는 이름)' }), agentName]) : null,
     keyRow,
     keyHint,
-    codexBox.root,
+    codexOffered() ? codexBox.root : null,
     ownKeyRow,
     urlRow,
     el('label', { class: 'field' }, [
