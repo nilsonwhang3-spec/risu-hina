@@ -352,13 +352,13 @@ def main() -> int:
                     # The full set. A shorter one 500s: v4_negative_prompt and
                     # negative_prompt are not optional for the v4.5 models,
                     # which cost a probe run to find out.
-                    neg = "lowres"
+                    neg = "blurry"
                     params = {
                         "params_version": 3, "width": 832, "height": 1216, "scale": 5,
                         "sampler": "k_euler_ancestral", "steps": 23, "n_samples": 1,
                         "seed": 999, "noise_schedule": "karras", "cfg_rescale": 0,
                         "ucPreset": 0, "qualityToggle": True, "negative_prompt": neg,
-                        "v4_prompt": {"caption": {"base_caption": "1girl", "char_captions": []},
+                        "v4_prompt": {"caption": {"base_caption": "a cat", "char_captions": []},
                                       "use_coords": False, "use_order": True},
                         "v4_negative_prompt": {"caption": {"base_caption": neg, "char_captions": []},
                                                "legacy_uc": False},
@@ -367,7 +367,7 @@ def main() -> int:
                         "reference_strength_multiple": [0.6],
                     }
                     probe(c, "POST", "https://image.novelai.net/ai/generate-image",
-                          {"input": "1girl", "model": model, "action": "generate",
+                          {"input": "a cat", "model": model, "action": "generate",
                            "parameters": params}, raw_dir)
                     print(f"       -> {label}")
                 a2 = anlas()
@@ -400,7 +400,7 @@ def main() -> int:
         # picture. A rejection here is a result, not a failure - the error body
         # is what names the fields this service actually wants.
         body = {
-            "input": "1girl, simple background",
+            "input": "a cat",
             "model": args.model,
             "action": "generate",
             "parameters": {"width": 512, "height": 512, "n_samples": 1, "steps": 1},

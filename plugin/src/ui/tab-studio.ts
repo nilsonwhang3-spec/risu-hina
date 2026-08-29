@@ -472,8 +472,8 @@ function openCharacter(path: string): void {
   const close = modal(path ? '캐릭터 편집' : '새 캐릭터', body, { sticky: true });
 
   const name = el('input', { placeholder: '히나' }) as HTMLInputElement;
-  const caption = el('textarea', { rows: '3', placeholder: '1girl, silver hair, blue eyes' }) as HTMLTextAreaElement;
-  const negative = el('textarea', { rows: '2', placeholder: 'multiple girls' }) as HTMLTextAreaElement;
+  const caption = el('textarea', { rows: '3', placeholder: '이 캐릭터를 그리는 프롬프트 (쉼표로 구분)' }) as HTMLTextAreaElement;
+  const negative = el('textarea', { rows: '2', placeholder: '이 캐릭터에만 붙는 네거티브' }) as HTMLTextAreaElement;
   const folder = el('input', { value: 'characters', placeholder: 'characters/폴더' }) as HTMLInputElement;
   const refInfo = el('div', { class: 'hint' });
   let refBytes: string = '';

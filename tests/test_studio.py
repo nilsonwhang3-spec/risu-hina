@@ -129,34 +129,34 @@ from app import studio  # noqa: E402
 
 files.upload(files.STUDIO, "수채화.md", text=(
     "---\nname: 수채화\ndescription: 부드러운 수채\n---\n"
-    "## positive\nmasterpiece, watercolor\n\n## negative\nlowres, bad anatomy\n"), into="styles")
+    "## positive\n스타일A, 스타일B\n\n## negative\n제외A, 제외B\n"), into="styles")
 files.upload(files.STUDIO, "히나.json", text=json.dumps(
-    {"name": "히나", "caption": "1girl, silver hair", "negative": "multiple girls"},
+    {"name": "히나", "caption": "캐릭터A", "negative": "제외C"},
     ensure_ascii=False), into="characters")
 files.upload(files.STUDIO, "기본.json", text=json.dumps(
     {"version": 1, "scenes": [
-        {"name": "happy", "prompt": "<조각.eyes>, smile", "negativePrompt": "", "width": 832, "height": 1216},
-        {"name": "sad", "prompt": "teary eyes", "negativePrompt": "blurry", "width": 512, "height": 512},
-        {"name": "angry", "prompt": "{{angry}}, frown", "negativePrompt": "", "width": 0, "height": 0}]},
+        {"name": "happy", "prompt": "<조각프롬.a>, 씬A", "negativePrompt": "", "width": 832, "height": 1216},
+        {"name": "sad", "prompt": "씬B", "negativePrompt": "제외D", "width": 512, "height": 512},
+        {"name": "angry", "prompt": "{{강조}}, 씬C", "negativePrompt": "", "width": 0, "height": 0}]},
     ensure_ascii=False), into="scenes")
-files.upload(files.STUDIO, "조각.json", text=json.dumps(
-    {"eyes": "blue eyes"}, ensure_ascii=False), into="fragments")
+files.upload(files.STUDIO, "조각프롬.json", text=json.dumps(
+    {"a": "조각A"}, ensure_ascii=False), into="fragments")
 
 s = studio.read_style("styles/수채화.md")
 check("front matter is read", s["name"] == "수채화", s["name"])
 check("positive and negative are split",
-      s["positive"] == "masterpiece, watercolor" and s["negative"] == "lowres, bad anatomy",
+      s["positive"] == "스타일A, 스타일B" and s["negative"] == "제외A, 제외B",
       f"{s['positive']!r} / {s['negative']!r}")
 # A file someone pasted a prompt into, with no headings at all, must still work.
-files.upload(files.STUDIO, "민무늬.md", text="just a prompt, nothing else", into="styles")
+files.upload(files.STUDIO, "민무늬.md", text="본문만 있는 파일", into="styles")
 check("a heading-less style is all positive",
-      studio.read_style("styles/민무늬.md")["positive"] == "just a prompt, nothing else")
+      studio.read_style("styles/민무늬.md")["positive"] == "본문만 있는 파일")
 
 pos, neg, caps = studio.compose({
-    "style": "styles/수채화.md", "characters": ["characters/히나.json"], "emotion": "smile"})
+    "style": "styles/수채화.md", "characters": ["characters/히나.json"], "emotion": "씬A"})
 check("style, character and emotion are composed in order",
-      pos == "masterpiece, watercolor, 1girl, silver hair, smile", pos)
-check("negatives are collected too", "lowres" in neg and "multiple girls" in neg, neg)
+      pos == "스타일A, 스타일B, 캐릭터A, 씬A", pos)
+check("negatives are collected too", "제외A" in neg and "제외C" in neg, neg)
 check("one character needs no char_captions", caps == [], str(caps))
 
 print("\ntest_naming_and_parsing")
@@ -183,21 +183,21 @@ check("a zero size means 'use the run\'s'", sc["scenes"][2]["width"] is None)
 
 # `<collection.key>` is spliced in; `{{…}}` is NovelAI's own emphasis and has to
 # reach NovelAI exactly as written - this file never parses or rewrites it.
-text, missing = studio.resolve_refs("<조각.eyes>, {{angry}}")
-check("a fragment reference is resolved", text == "blue eyes, {{angry}}", text)
-check("NovelAI emphasis is untouched", "{{angry}}" in text)
+text, missing = studio.resolve_refs("<조각프롬.a>, {{강조}}")
+check("a fragment reference is resolved", text == "조각A, {{강조}}", text)
+check("NovelAI emphasis is untouched", "{{강조}}" in text)
 check("nothing was missing", missing == [], str(missing))
 # A whole file by name, and a folder-qualified one. File wins over a key.
-files.upload(files.STUDIO, "눈.md", text="wide eyes", into="fragments")
-files.upload(files.STUDIO, "눈.md", text="narrow eyes", into="fragments/밤")
-whole, _ = studio.resolve_refs("<눈>, smile")
-check("a whole .md fragment is called by name", whole == "wide eyes, smile", whole)
-nested, _ = studio.resolve_refs("<밤/눈>, smile")
-check("and a folder-qualified one", nested == "narrow eyes, smile", nested)
-allof, _ = studio.resolve_refs("<조각>")
-check("a whole .json collection joins its values", allof == "blue eyes", allof)
+files.upload(files.STUDIO, "조각파일.md", text="조각B", into="fragments")
+files.upload(files.STUDIO, "조각파일.md", text="조각C", into="fragments/폴더")
+whole, _ = studio.resolve_refs("<조각파일>, 씬A")
+check("a whole .md fragment is called by name", whole == "조각B, 씬A", whole)
+nested, _ = studio.resolve_refs("<폴더/조각파일>, 씬A")
+check("and a folder-qualified one", nested == "조각C, 씬A", nested)
+allof, _ = studio.resolve_refs("<조각프롬>")
+check("a whole .json collection joins its values", allof == "조각A", allof)
 
-text, missing = studio.resolve_refs("<없는것.x>, smile")
+text, missing = studio.resolve_refs("<없는것.x>, 씬A")
 check("an unknown reference is reported", missing == ["<없는것.x>"], str(missing))
 check("and left in the prompt rather than dropped", "<없는것.x>" in text, text)
 
@@ -209,12 +209,12 @@ check("one entry per scene x count", len(items) == 6, str(len(items)))
 check("every scene is present", {i["scene"] for i in items} == {"happy", "sad", "angry"},
       str({i["scene"] for i in items}))
 check("the scene's prompt lands in the composed prompt",
-      any("teary eyes" in i["prompt"] for i in items), items[0]["prompt"])
+      any("씬B" in i["prompt"] for i in items), items[0]["prompt"])
 check("its fragment reference was resolved",
-      any("blue eyes" in i["prompt"] for i in items),
+      any("조각A" in i["prompt"] for i in items),
       next(i["prompt"] for i in items if i["scene"] == "happy"))
 check("the scene's own negative is carried",
-      any("blurry" in i["negative"] for i in items),
+      any("제외D" in i["negative"] for i in items),
       next(i["negative"] for i in items if i["scene"] == "sad"))
 check("a scene's size overrides the run's",
       next(i for i in items if i["scene"] == "sad")["size"] == {"width": 512, "height": 512})
@@ -343,9 +343,9 @@ check("nothing was deleted", len(list(dup.iterdir())) == 4, str(len(list(dup.ite
 # Both directions matter and they look nothing alike: a slot with no asset is
 # work to do, an asset nothing names is dead weight.
 files.upload(files.STUDIO, "12종.json", text=json.dumps(
-    {"version": 1, "scenes": [{"name": "happy", "prompt": "smile"},
-                              {"name": "sad", "prompt": "tears"},
-                              {"name": "angry", "prompt": "frown"}]},
+    {"version": 1, "scenes": [{"name": "happy", "prompt": "씬A"},
+                              {"name": "sad", "prompt": "씬B"},
+                              {"name": "angry", "prompt": "씬C"}]},
     ensure_ascii=False), into="scenes")
 db.execute("INSERT INTO char_assets(char_key, seq, field, name, ext, risu_key) "
            "VALUES(?,?,?,?,?,?)", (CK, 0, "emotion", "happy", "png", "assets/x.png"))

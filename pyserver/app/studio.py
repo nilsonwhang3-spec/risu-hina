@@ -157,7 +157,7 @@ def listing(area: str) -> list[dict]:
 # A scene file is NAIS3's, read verbatim rather than converted:
 #
 #     {"version": 1, "scenes": [
-#        {"name": "angry", "prompt": "<눈 조각.eyes>, {{angry}}, frown",
+#        {"name": "angry", "prompt": "<조각프롬>, angry, frown",
 #         "negativePrompt": "", "width": 832, "height": 1216}]}
 #
 # (An invented example. Scene files are the user's own material and none of
