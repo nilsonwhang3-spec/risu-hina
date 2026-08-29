@@ -828,7 +828,8 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
 .md-table td.num, .md-table th.num { text-align: right; }
 .md-table td.mid, .md-table th.mid { text-align: center; }
 .snaplist { margin: 6px 0 4px; }
-.verrow .badge.now { background: rgba(37, 99, 235, .25); }
+.verrow .badge.modechip { background: var(--accent, #7c5cff); color: #fff; opacity: .85; }
+.badge.now { background: rgba(37, 99, 235, .25); }
 .md-h { font-weight: 700; margin: 8px 0 4px; }
 .md-h1 { font-size: 15px; }
 .md-h2 { font-size: 14px; }

@@ -302,6 +302,16 @@ def build() -> Agent[Deps]:
         model_settings=presets.model_settings(),
     )
 
+    @agent.instructions
+    def _current_screen(ctx: RunContext[Deps]) -> str:
+        # Stated up front rather than discovered through a tool refusal, in
+        # the same words the panel header shows (user request, 2026-08-30).
+        if ctx.deps.mode == "bot":
+            return "지금 열려 있는 화면: 봇 편집 (카드 재료 - 메타·인사말·봇 로어북·Regex·트리거·에셋)."
+        if ctx.deps.mode == "chat":
+            return "지금 열려 있는 화면: 챗 편집 (이 챗의 재료 - 턴·챗 로어북·장기기억·챗 변수)."
+        return ""
+
     # --- reading ------------------------------------------------------------
 
     @agent.tool

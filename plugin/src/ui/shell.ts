@@ -180,6 +180,8 @@ export function setTab(tab: TabId): void {
   syncSettingsBar();
   syncToolslot();
   refreshTabBadges();
+  // The header's mode chip follows the active tab (edit tabs only).
+  refreshStatus();
 }
 
 /**
@@ -272,6 +274,19 @@ export function refreshStatus(): void {
   // RisuAI can take a while on web RisuAI, and that wait looked like a
   // backend that would not connect.
   if (bootPhase) healthEl.appendChild(el('span', { class: 'hint bootphase', text: '· ' + bootPhase }));
+
+  // Which half is being edited, in the same words Hina is told. Shown only
+  // while an edit tab is open - on the picker the question is not answered
+  // yet, and in settings or files it is not being asked.
+  if (CHAT_TABS.has(active) || BOT_TABS.has(active)) {
+    healthEl.appendChild(el('span', {
+      class: 'badge modechip',
+      text: mode === 'chat' ? '챗 편집' : '봇 편집',
+      title: mode === 'chat'
+        ? '이 챗의 재료(턴·챗 로어북·장기기억·챗 변수)를 고치는 화면입니다'
+        : '봇 카드의 재료(메타·인사말·봇 로어북·Regex·트리거·에셋)를 고치는 화면입니다',
+    }));
+  }
 
   // The bot first, then the chat: the bot is what the panel was opened on
   // and the bot tabs have no chat to name.
