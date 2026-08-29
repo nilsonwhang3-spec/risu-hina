@@ -537,6 +537,21 @@ button.treefile.on { background: rgba(37, 99, 235, .22); color: var(--textcolor,
 .genpanel .row { gap: 6px; align-items: flex-end; }
 .genstatus { margin-top: 8px; display: flex; flex-direction: column; gap: 2px; }
 
+/* --- the comparison selector ---------------------------------------------- */
+/* Column count is set inline (2..6) because it is the user's control, not a
+   breakpoint: how many candidates fit side by side is a judgement about the
+   pictures, not about the window. */
+.selgrid { display: grid; gap: 8px; }
+.selcell { border: 2px solid transparent; border-radius: 6px; padding: 4px; }
+/* The three states have to be readable at a glance across a wall of thumbnails,
+   so they are borders and not badges. */
+.selcell.picked   { border-color: var(--ok, #34d399); }
+.selcell.fixing   { border-color: var(--warn, #fbbf24); }
+.selcell.dropping { border-color: var(--err, #f87171); opacity: .45; }
+.selflags { gap: 4px; justify-content: center; margin-top: 4px; }
+.selflags button.on { background: var(--accent, #6366f1); color: #fff; }
+.selcell .assetpic { cursor: pointer; }
+
 /* --- modal ---------------------------------------------------------------- */
 .modalback {
   position: fixed; inset: 0; z-index: 90; display: flex;

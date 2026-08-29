@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import time
 from pathlib import Path
 from typing import Any
@@ -358,6 +359,206 @@ def plan(spec: dict) -> list[dict]:
                 "seed": (int(seed) + i) if seed not in (None, "") else None,
             })
     return out
+
+
+# --- choosing between candidates ----------------------------------------------
+#
+# The model is `C:\code\image-selector`, which the user built and uses: three
+# independent flags per file rather than one "representative" radio, kept per
+# folder. `use` is what goes to the bot, `inpaint` is what needs fixing first,
+# `delete` is what to throw away - a file can legitimately be none of them,
+# which is why one radio would not do.
+
+SELECTION_DIR = ".studio/selection"
+GROUP_DIR = ".studio/groups"
+NAMING_DIR = ".studio/naming"
+
+
+def _slug(folder: str) -> str:
+    return re.sub(r"[^A-Za-z0-9]+", "_", folder.strip("/")) or "root"
+
+
+def _side(kind: str, folder: str) -> Path:
+    return root() / kind / f"{_slug(folder)}.json"
+
+
+def read_selection(folder: str) -> dict:
+    p = _side(SELECTION_DIR, folder)
+    if not p.is_file():
+        return {}
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except ValueError:
+        return {}
+
+
+def write_selection(folder: str, selections: dict) -> dict:
+    p = _side(SELECTION_DIR, folder)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    clean = {str(k): {"use": bool(v.get("use")), "inpaint": bool(v.get("inpaint")),
+                      "delete": bool(v.get("delete"))}
+             for k, v in (selections or {}).items() if isinstance(v, dict)}
+    p.write_text(json.dumps(clean, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"folder": folder, "count": len(clean)}
+
+
+def naming_profile(char_key: str) -> dict:
+    """The regex this bot's names are read with, if one has been decided."""
+    p = _side(NAMING_DIR, char_key)
+    if not p.is_file():
+        return {}
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except ValueError:
+        return {}
+
+
+def save_naming_profile(char_key: str, profile: dict) -> dict:
+    p = _side(NAMING_DIR, char_key)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(profile, ensure_ascii=False, indent=2), encoding="utf-8")
+    return profile
+
+
+def group(folder: str, pattern: str = "", group_by: str = "emotion") -> dict:
+    """The folder's images, gathered into groups to choose between.
+
+    Groups come from parsing the filenames, and **what failed to parse is
+    returned too**. That list is the honest part: names are not deterministic,
+    so a selector that silently showed only the files it understood would hide
+    exactly the ones needing attention.
+    """
+    base = files._resolve(SCOPE, folder)
+    if not base.is_dir():
+        raise StudioError(f"폴더가 없습니다: {folder}")
+    names = sorted(p.name for p in base.iterdir()
+                   if p.is_file() and p.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp"))
+    parsed = parse_names(names, pattern)
+    sel = read_selection(folder)
+
+    groups: dict[str, list[dict]] = {}
+    for m in parsed["matched"]:
+        key = m.get(group_by) or "(없음)"
+        groups.setdefault(key, []).append({
+            "filename": m["filename"],
+            "path": f"{folder.strip('/')}/{m['filename']}",
+            "fields": {k: v for k, v in m.items() if k != "filename"},
+            "selection": sel.get(m["filename"], {"use": False, "inpaint": False, "delete": False}),
+        })
+    return {
+        "folder": folder,
+        "pattern": parsed["pattern"],
+        "groupBy": group_by,
+        "fields": parsed["fields"],
+        "groups": [{"key": k, "items": v} for k, v in sorted(groups.items())],
+        # Shown as its own group so it cannot be missed.
+        "unmatched": [{"filename": n, "path": f"{folder.strip('/')}/{n}",
+                       "selection": sel.get(n, {"use": False, "inpaint": False, "delete": False})}
+                      for n in parsed["unmatched"]],
+        "total": len(names),
+    }
+
+
+def rename_plan(folder: str, pairs: list[dict]) -> dict:
+    """Check a bulk rename before anything moves.
+
+    Bulk renaming is not a convenience here - it is what makes the regex above
+    work at all, because the names it has to read were not made by us. So the
+    plan is computed first and every problem is reported by name: a collision,
+    a missing source, a name that escapes the folder.
+    """
+    base = files._resolve(SCOPE, folder)
+    ok, problems = [], []
+    taken = {p.name for p in base.iterdir() if p.is_file()} if base.is_dir() else set()
+    for pair in pairs:
+        src = str(pair.get("from") or "").strip()
+        dst = str(pair.get("to") or "").strip()
+        if not src or not dst:
+            problems.append({"from": src, "to": dst, "why": "이름이 비었습니다"})
+            continue
+        if "/" in dst or "\\" in dst or dst != Path(dst).name:
+            problems.append({"from": src, "to": dst, "why": "폴더를 옮길 수는 없습니다"})
+            continue
+        if not (base / src).is_file():
+            problems.append({"from": src, "to": dst, "why": "원본이 없습니다"})
+            continue
+        if dst in taken and dst != src:
+            problems.append({"from": src, "to": dst, "why": "같은 이름이 이미 있습니다"})
+            continue
+        taken.discard(src)
+        taken.add(dst)
+        ok.append({"from": src, "to": dst})
+    return {"folder": folder, "rename": ok, "problems": problems}
+
+
+def rename_apply(folder: str, pairs: list[dict]) -> dict:
+    """Apply a checked rename. The sidecar follows its image."""
+    plan = rename_plan(folder, pairs)
+    if plan["problems"]:
+        raise StudioError(f"{len(plan['problems'])}건에 문제가 있어 아무것도 바꾸지 않았습니다")
+    base = files._resolve(SCOPE, folder)
+    done = 0
+    for pair in plan["rename"]:
+        src, dst = base / pair["from"], base / pair["to"]
+        if src == dst:
+            continue
+        src.rename(dst)
+        side = src.with_suffix(".json")
+        if side.is_file():
+            side.rename(dst.with_suffix(".json"))
+        done += 1
+    log.info("studio rename %s: %d files", folder, done)
+    return {"folder": folder, "renamed": done}
+
+
+def export_selected(folder: str, *, pattern: str = "", group_by: str = "emotion",
+                    character: str = "", delimiter: str = "-") -> dict:
+    """Write the chosen images into `selected/` under canonical names.
+
+    Mirrors `image-selector`'s export, which the user already works with:
+
+      selected/<character><delim><group><ext>    the chosen one
+      selected/<...>.2<ext>                      a second choice for the same group
+      selected/inpaint/<...>                     flagged as needing a fix first
+      selected/<character><delim><group>.txt     **nothing chosen for this group**
+
+    The empty `.txt` is the useful part: it makes a slot with no answer visible,
+    which is what sends you back to generate just that one.
+    """
+    g = group(folder, pattern, group_by)
+    base = files._resolve(SCOPE, folder)
+    out = base / "selected"
+    if out.exists():
+        shutil.rmtree(out)
+    out.mkdir(parents=True, exist_ok=True)
+
+    def name_for(key: str, index: int, ext: str) -> str:
+        stem = f"{character}{delimiter}{key}" if character else key
+        return f"{stem}{ext}" if index == 0 else f"{stem}.{index + 1}{ext}"
+
+    used = inpainted = placeholders = 0
+    for grp in g["groups"]:
+        chosen = [i for i in grp["items"] if i["selection"].get("use")]
+        fixing = [i for i in grp["items"] if i["selection"].get("inpaint")]
+        for i, item in enumerate(sorted(chosen, key=lambda x: x["filename"])):
+            ext = Path(item["filename"]).suffix
+            shutil.copy2(base / item["filename"], out / name_for(grp["key"], i, ext))
+            used += 1
+        if fixing:
+            (out / "inpaint").mkdir(exist_ok=True)
+            for i, item in enumerate(sorted(fixing, key=lambda x: x["filename"])):
+                ext = Path(item["filename"]).suffix
+                shutil.copy2(base / item["filename"], out / "inpaint" / name_for(grp["key"], i, ext))
+                inpainted += 1
+        if not chosen and not fixing:
+            stem = f"{character}{delimiter}{grp['key']}" if character else grp["key"]
+            (out / f"{stem}.txt").write_text("", encoding="utf-8")
+            placeholders += 1
+
+    rel = out.relative_to(root()).as_posix()
+    log.info("studio export %s: %d used, %d inpaint, %d empty", rel, used, inpainted, placeholders)
+    return {"folder": rel, "used": used, "inpaint": inpainted, "empty": placeholders,
+            "groups": len(g["groups"]), "unmatched": len(g["unmatched"])}
 
 
 def estimate(spec: dict, images: int) -> dict:

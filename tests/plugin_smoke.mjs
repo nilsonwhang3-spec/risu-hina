@@ -1912,6 +1912,68 @@ console.log('\ntest_studio_tab');
         (gen?.textContent || '').slice(0, 200));
 }
 
+console.log('\ntest_studio_selector');
+{
+  // Put candidates in the library through the backend, then drive the
+  // selector the way a person does: look at a group, pick one, check the
+  // unreadable names are shown rather than hidden.
+  const auth = { Authorization: 'Bearer plugin-smoke-token', 'Content-Type': 'application/json' };
+  // A real PNG signature plus padding: the length has to be a multiple of 4 or
+  // the backend's base64 decode refuses it.
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
+    .concat(Array(40).fill(0))).toString('base64');
+  for (const name of ['하나-교복-happy-20260829-1200-1.png',
+                      '하나-교복-happy-20260829-1200-2.png',
+                      '하나-교복-sad-20260829-1200-1.png',
+                      '규칙에 안 맞는 이름.png']) {
+    await fetch(backend.url + '/files/upload', {
+      method: 'POST', headers: auth,
+      body: JSON.stringify({ studio: true, name, base64: png, dir: 'images/고르기' }),
+    });
+  }
+
+  // The tab was opened earlier in this run, so its listing is stale: go away
+  // and come back, which is what a person does too.
+  clickById(document, 'tab-files');
+  await settle(200);
+  clickById(document, 'tab-studio');
+  await settle(400);
+  await settle(900);
+  // Open images/ and walk into the new folder.
+  const openFolder = (label) => [...document.querySelectorAll('.panel.active .treerow')]
+    .find((r) => (r.textContent || '').includes(label));
+  // images/ opens by default, so only unfold it if the new folder is not
+  // already on screen - clicking an open row would close it.
+  if (!openFolder('고르기')) {
+    openFolder('생성물')?.dispatchEvent(new window.Event('click', { bubbles: true }));
+    await settle(500);
+  }
+  openFolder('고르기')?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(1500);
+
+  const text = () => document.querySelector('.panel.active')?.textContent || '';
+  check('the selector replaces the plain grid under images/',
+        !!document.querySelector('.selgrid'), text().slice(0, 160));
+  check('candidates are grouped by the parsed emotion',
+        /happy/.test(text()) && /sad/.test(text()), text().slice(0, 200));
+  // The whole reason this screen exists.
+  check('a name the regex cannot read is shown, not dropped',
+        /안 맞는 파일|규칙에 안 맞는 이름/.test(text()), text().slice(0, 300));
+  check('and it says how to fix it', /일괄로 바꿔/.test(text()));
+
+  const cells = document.querySelectorAll('.selcell');
+  check('every candidate is a cell', cells.length >= 4, String(cells.length));
+  check('each offers three independent flags',
+        (cells[0]?.querySelectorAll('.selflags button') || []).length === 3);
+  const useBtn = [...(cells[0]?.querySelectorAll('.selflags button') || [])]
+    .find((b) => b.textContent === '채택');
+  useBtn?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(400);
+  check('choosing one marks it', !!document.querySelector('.selcell.picked'));
+  check('and the group stops reading 미선택',
+        (document.querySelector('.panel.active')?.textContent || '').includes('선택 1'));
+}
+
 console.log('\ntest_no_character_selected');
 host.selectNone();
 clickById(document, 'tab-chats');

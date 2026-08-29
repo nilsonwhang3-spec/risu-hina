@@ -198,6 +198,72 @@ check("it lands in the bot's workspace", staged["path"].startswith("out/studio/"
 check("and the library keeps its own", (studio.root() / "images" / "hop.png").is_file())
 raises("a non-PNG is refused", studio.stage_to_bot, CK, "styles/수채화.md")
 
+print("\ntest_grouping_and_selection")
+shots = studio.root() / "images" / "고르기"
+shots.mkdir(parents=True, exist_ok=True)
+PNG = bytes.fromhex("89504e470d0a1a0a") + b"\x00" * 40
+for n in ("히나-교복-happy-20260829-1200-1.png", "히나-교복-happy-20260829-1200-2.png",
+          "히나-교복-sad-20260829-1200-1.png", "제멋대로 지은 이름.png"):
+    (shots / n).write_bytes(PNG)
+
+g = studio.group("images/고르기")
+check("groups come from the filename", [x["key"] for x in g["groups"]] == ["happy", "sad"],
+      str([x["key"] for x in g["groups"]]))
+check("candidates land in their group",
+      len(g["groups"][0]["items"]) == 2 and len(g["groups"][1]["items"]) == 1)
+# The point of the whole design: a name the regex cannot read is SHOWN, not
+# dropped, because that is the file that needs attention.
+check("what did not parse is carried, not dropped",
+      [u["filename"] for u in g["unmatched"]] == ["제멋대로 지은 이름.png"],
+      str(g["unmatched"]))
+
+studio.write_selection("images/고르기", {
+    "히나-교복-happy-20260829-1200-1.png": {"use": True, "inpaint": False, "delete": False},
+    "히나-교복-happy-20260829-1200-2.png": {"use": False, "inpaint": True, "delete": False},
+})
+back = studio.group("images/고르기")
+picked = [i for grp in back["groups"] for i in grp["items"] if i["selection"]["use"]]
+check("a selection survives a round trip", len(picked) == 1, str(len(picked)))
+check("the three flags are independent",
+      back["groups"][0]["items"][1]["selection"] == {"use": False, "inpaint": True, "delete": False},
+      str(back["groups"][0]["items"][1]["selection"]))
+
+print("\ntest_export")
+r = studio.export_selected("images/고르기", character="히나")
+sel_dir = shots / "selected"
+names = sorted(p.name for p in sel_dir.iterdir())
+check("the chosen one gets the canonical name", "히나-happy.png" in names, str(names))
+check("the one to fix goes to inpaint/", (sel_dir / "inpaint").is_dir() and
+      any((sel_dir / "inpaint").iterdir()))
+# The empty .txt is what sends you back to generate just that slot.
+check("a group with nothing chosen leaves a placeholder",
+      "히나-sad.txt" in names, str(names))
+check("the counts are reported", r["used"] == 1 and r["inpaint"] == 1 and r["empty"] == 1,
+      json.dumps(r, ensure_ascii=False))
+# `<character>-<emotion>` is exactly RisuAI's emotionImages naming, which is
+# why the export is directly adoptable.
+check("export names match the emotionImages convention",
+      all(("-" in n) for n in names if n.endswith(".png")), str(names))
+
+print("\ntest_bulk_rename")
+plan = studio.rename_plan("images/고르기", [
+    {"from": "제멋대로 지은 이름.png", "to": "히나-교복-angry-20260829-1200-1.png"}])
+check("a clean rename plans", plan["rename"] and not plan["problems"], json.dumps(plan, ensure_ascii=False))
+bad = studio.rename_plan("images/고르기", [
+    {"from": "없는파일.png", "to": "x.png"},
+    {"from": "히나-교복-sad-20260829-1200-1.png", "to": "히나-교복-happy-20260829-1200-1.png"},
+    {"from": "히나-교복-sad-20260829-1200-1.png", "to": "../탈출.png"}])
+check("every problem is named", len(bad["problems"]) == 3, json.dumps(bad, ensure_ascii=False))
+check("a rename cannot leave the folder",
+      any("폴더" in p["why"] for p in bad["problems"]), str(bad["problems"]))
+# All or nothing: a half-applied rename is worse than none.
+raises("a plan with problems applies nothing", studio.rename_apply, "images/고르기",
+       [{"from": "없는파일.png", "to": "x.png"}])
+studio.rename_apply("images/고르기", plan["rename"])
+check("the rename landed", (shots / "히나-교복-angry-20260829-1200-1.png").is_file())
+check("and it now parses into a group",
+      "angry" in [x["key"] for x in studio.group("images/고르기")["groups"]])
+
 print()
 if FAILURES:
     print(f"FAIL - {len(FAILURES)} check(s): " + ", ".join(FAILURES))

@@ -472,6 +472,34 @@ export interface StudioStatus {
   };
 }
 
+/**
+ * Three independent flags per file, not one "representative" radio.
+ *
+ * The shape comes from `image-selector`, which the user built and uses: `use`
+ * is what goes to the bot, `inpaint` is what needs fixing first, `delete` is
+ * what to throw away — and a candidate can legitimately be none of them.
+ */
+export interface SelectionState { use: boolean; inpaint: boolean; delete: boolean }
+export type SelectionMap = Record<string, SelectionState>;
+
+export interface GroupItem {
+  filename: string;
+  path: string;
+  fields?: Record<string, string>;
+  selection: SelectionState;
+}
+
+export interface StudioGroups {
+  folder: string;
+  pattern: string;
+  groupBy: string;
+  fields: string[];
+  groups: { key: string; items: GroupItem[] }[];
+  /** Files the regex could not read. Shown, never dropped. */
+  unmatched: GroupItem[];
+  total: number;
+}
+
 export interface StudioItem {
   path: string; name: string; folder: string;
   description?: string; count?: number;
@@ -582,6 +610,29 @@ class StudioFiles {
     matched: Record<string, string>[]; unmatched: string[]; pattern: string; fields: string[];
   }> {
     return await transport.post('/studio/parse', { names, pattern });
+  }
+
+  /** One folder's images, gathered into groups to choose between. */
+  async group(folder: string, pattern = '', groupBy = 'emotion'): Promise<StudioGroups> {
+    return await transport.post<StudioGroups>('/studio/group', { folder, pattern, groupBy });
+  }
+
+  async saveSelection(folder: string, selections: SelectionMap): Promise<void> {
+    await transport.post('/studio/selection', { folder, selections });
+  }
+
+  async renamePlan(folder: string, rename: { from: string; to: string }[]): Promise<{
+    rename: { from: string; to: string }[];
+    problems: { from: string; to: string; why: string }[];
+  }> {
+    return await transport.post('/studio/rename', { folder, rename });
+  }
+
+  async exportSelected(folder: string, character: string, pattern = ''): Promise<{
+    folder: string; used: number; inpaint: number; empty: number;
+    groups: number; unmatched: number;
+  }> {
+    return await transport.post('/studio/export', { folder, character, pattern });
   }
 
   /** Copy library images into a bot's workspace so they can be adopted. */

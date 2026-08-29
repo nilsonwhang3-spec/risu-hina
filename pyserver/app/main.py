@@ -1027,6 +1027,59 @@ def h_studio_naming(arg: dict) -> dict:
     return studio.naming_from_bot(_char(arg))
 
 
+def h_studio_group(arg: dict) -> dict:
+    """The folder's images gathered into groups to choose between.
+
+    Carries `unmatched` as its own list: names are not deterministic, so the
+    files the regex could not read are shown rather than dropped.
+    """
+    try:
+        return studio.group(str(arg.get("folder") or ""), str(arg.get("pattern") or ""),
+                            str(arg.get("groupBy") or "emotion"))
+    except (studio.StudioError, files.FileError) as e:
+        raise ApiError(400, str(e))
+
+
+def h_studio_selection(arg: dict) -> dict:
+    folder = str(arg.get("folder") or "")
+    if not folder:
+        raise ApiError(400, "folder is required")
+    if isinstance(arg.get("selections"), dict):
+        return studio.write_selection(folder, arg["selections"])
+    return {"folder": folder, "selections": studio.read_selection(folder)}
+
+
+def h_studio_rename(arg: dict) -> dict:
+    """Bulk rename. `apply: true` does it; without it this only reports.
+
+    Renaming in bulk is what makes the selector's regex work at all - the names
+    it has to read were not written by us - so a plan is always computable and
+    every problem is named before anything moves.
+    """
+    folder = str(arg.get("folder") or "")
+    pairs = arg.get("rename")
+    if not folder or not isinstance(pairs, list):
+        raise ApiError(400, "folder and rename[] are required")
+    try:
+        if arg.get("apply"):
+            return studio.rename_apply(folder, pairs)
+        return studio.rename_plan(folder, pairs)
+    except (studio.StudioError, files.FileError) as e:
+        raise ApiError(400, str(e))
+
+
+def h_studio_export(arg: dict) -> dict:
+    try:
+        return studio.export_selected(
+            str(arg.get("folder") or ""),
+            pattern=str(arg.get("pattern") or ""),
+            group_by=str(arg.get("groupBy") or "emotion"),
+            character=str(arg.get("character") or ""),
+            delimiter=str(arg.get("delimiter") or "-"))
+    except (studio.StudioError, files.FileError) as e:
+        raise ApiError(400, str(e))
+
+
 def h_studio_stage(arg: dict) -> dict:
     """Copy a library image into a bot's workspace so it can be adopted."""
     paths = arg.get("paths")
@@ -1998,6 +2051,11 @@ ROUTES: dict[str, Handler] = {
     "POST /studio/recipe": h_studio_recipe,
     "POST /studio/parse": h_studio_parse,
     "GET /studio/naming": h_studio_naming,
+    "POST /studio/group": h_studio_group,
+    "GET /studio/selection": h_studio_selection,
+    "POST /studio/selection": h_studio_selection,
+    "POST /studio/rename": h_studio_rename,
+    "POST /studio/export": h_studio_export,
     "POST /studio/stage": h_studio_stage,
 
     "POST /assets/manifest": h_assets_manifest,

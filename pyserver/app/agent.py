@@ -1042,6 +1042,101 @@ def build() -> Agent[Deps]:
         return "\n".join(out)
 
     @agent.tool
+    def studio_rename(ctx: RunContext[Deps], folder: str, rename_json: str,
+                      apply: bool = False) -> str:
+        """생성물 파일 이름을 **일괄로** 바꾼다. rename_json = [{"from":"a.png","to":"b.png"}, …]
+
+        **먼저 apply=false 로 확인하고 사용자에게 보여 준 다음** apply=true 로 적용한다.
+        이름이 규칙에 안 맞으면 비교 선택기가 그룹을 못 나눈다 — 이 툴이 그걸 고치는
+        경로이고, studio_parse 의 "안 맞는 파일" 목록이 그 입력이다.
+        충돌·원본 없음 같은 문제가 하나라도 있으면 **아무것도 바꾸지 않는다**.
+        """
+        try:
+            pairs = json.loads(rename_json)
+            if not isinstance(pairs, list):
+                return "rename_json 은 [{\"from\":…,\"to\":…}] 배열이어야 합니다"
+            if apply:
+                r = studio.rename_apply(folder, pairs)
+                return f"{r['renamed']}개의 이름을 바꿨습니다 (사이드카도 따라갔습니다)"
+            plan = studio.rename_plan(folder, pairs)
+        except Exception as e:  # noqa: BLE001
+            return str(e)
+        out = [f"바꿀 것 {len(plan['rename'])}건, 문제 {len(plan['problems'])}건"]
+        for p in plan["rename"][:20]:
+            out.append(f"  {p['from']} → {p['to']}")
+        for p in plan["problems"][:20]:
+            out.append(f"  ✕ {p['from']} → {p['to']}: {p['why']}")
+        if plan["problems"]:
+            out.append("문제가 있어서 apply=true 로 불러도 아무것도 바뀌지 않습니다. 먼저 고치세요.")
+        return "\n".join(out)
+
+    @agent.tool
+    def studio_group(ctx: RunContext[Deps], folder: str, pattern: str = "",
+                     group_by: str = "emotion") -> str:
+        """생성물을 그룹으로 묶어 본다 (비교 선택기가 보는 것과 같다).
+
+        안 맞는 파일이 있으면 그것부터 보고한다 — studio_rename 으로 고칠 대상이다.
+        """
+        try:
+            g = studio.group(folder, pattern, group_by)
+        except Exception as e:  # noqa: BLE001
+            return str(e)
+        out = [f"{g['total']}개 · 그룹 {len(g['groups'])} · 안 맞는 파일 {len(g['unmatched'])} · 필드 {g['fields']}"]
+        for grp in g["groups"][:25]:
+            chosen = sum(1 for i in grp["items"] if i["selection"].get("use"))
+            out.append(f"  {grp['key']}: {len(grp['items'])}장" + (f" (선택 {chosen})" if chosen else ""))
+        for u in g["unmatched"][:20]:
+            out.append(f"  ✕ {u['filename']}")
+        return "\n".join(out)
+
+    @agent.tool
+    def studio_export(ctx: RunContext[Deps], folder: str, character: str = "",
+                      pattern: str = "") -> str:
+        """선택한 것들을 `selected/` 로 내보낸다. 아무것도 안 고른 그룹은 빈 .txt 로 남는다.
+
+        그 .txt 가 "여긴 아직 없다" 는 표시이고, 그것만 다시 생성하면 된다.
+        """
+        try:
+            r = studio.export_selected(folder, pattern=pattern, character=character)
+        except Exception as e:  # noqa: BLE001
+            return str(e)
+        return (f"{r['folder']} 로 내보냈습니다 — 채택 {r['used']}, 인페인트 {r['inpaint']}, "
+                f"빈 슬롯 {r['empty']} (그룹 {r['groups']}, 안 맞는 파일 {r['unmatched']})")
+
+    @agent.tool
+    def studio_adopt(ctx: RunContext[Deps], paths: str, names: str,
+                     field: str = "emotion", reason: str = "") -> str:
+        """스튜디오 이미지를 지금 선택된 봇의 에셋으로 넣자고 제안한다.
+
+        paths/names 는 쉼표로 구분하고 개수가 같아야 한다 (paths[i] 가 names[i] 로 들어간다).
+        field: emotion(감정 이미지) | additional(추가 에셋).
+        라이브러리에서 봇 워크스페이스로 **복사**한 뒤 기존 에셋 추가 경로를 탄다 —
+        승인해야 RisuAI 에 쓰인다. 봇이 선택돼 있어야 한다.
+        """
+        ck = ctx.deps.char_key
+        if not ck:
+            return "봇이 선택돼 있지 않습니다. RisuAI 에서 봇을 열어 주세요."
+        plist = [p.strip() for p in paths.split(",") if p.strip()]
+        nlist = [n.strip() for n in names.split(",") if n.strip()]
+        if len(plist) != len(nlist):
+            return f"경로 {len(plist)}개와 이름 {len(nlist)}개의 수가 다릅니다"
+        if field not in ("emotion", "additional"):
+            return "field 는 emotion 또는 additional 이어야 합니다"
+        made = []
+        for path, name in zip(plist, nlist):
+            try:
+                staged = studio.stage_to_bot(ck, path)
+                info = assets.stage_file(ck, staged["path"])
+            except Exception as e:  # noqa: BLE001
+                made.append(f"✕ {path}: {e}")
+                continue
+            made.append(_propose(ctx, "host_asset_add",
+                                 f"에셋 추가 “{name}” ({field}, {info['size'] // 1024}KB) — "
+                                 + (reason or "스튜디오에서 채택"),
+                                 {"name": name, "path": info["path"], "field": field, "ext": "png"}))
+        return "\n".join(made)
+
+    @agent.tool
     def studio_naming(ctx: RunContext[Deps]) -> str:
         """지금 선택된 봇이 실제로 쓰는 감정 에셋 이름들. 이름 규칙은 봇마다 다르므로 여기서 읽는다."""
         if not ctx.deps.char_key:
