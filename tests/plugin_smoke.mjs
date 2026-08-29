@@ -1030,6 +1030,39 @@ console.log('\ntest_workspace_files');
   check('a row can be selected', !!document.querySelector('.panel.active .filelist .frow.sel'));
   const dlBtn = findButton(document.querySelector('.panel.active .filebar'), '내려받기');
   check('and can be downloaded', !!dlBtn && !dlBtn.disabled);
+
+  // 삭제 is the shared two-step confirm now: first click arms, the second
+  // fires. Arm and let it lapse rather than deleting the fixture.
+  const delBar = [...document.querySelectorAll('.panel.active .filebar button')]
+    .find((b) => /^삭제/.test(b.textContent || ''));
+  check('the delete button is armed on the bar', !!delBar && !delBar.disabled);
+  delBar?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(100);
+  check('the first click arms it, not deletes', /정말 지울까요/.test(delBar?.textContent || ''),
+        delBar?.textContent);
+  // Escape clears the selection (and the redraw disarms the button).
+  const esc = new window.Event('keydown', { bubbles: true });
+  esc.key = 'Escape';
+  document.querySelector('.panel.active .filelist')?.dispatchEvent(esc);
+  await settle(150);
+
+  // The kit's folder filter narrows the visible rows.
+  const fileSearch = document.querySelector('.tabslot .searchbox input');
+  check('the files tab has a filter box on the menu line', !!fileSearch);
+  if (fileSearch) {
+    fileSearch.value = 'draft';
+    fileSearch.dispatchEvent(new window.Event('input', { bubbles: true }));
+    await settle(200);
+    check('filtering narrows the folder listing',
+          document.querySelectorAll('.panel.active .filelist .frow:not(.head)').length === 1,
+          String(document.querySelectorAll('.panel.active .filelist .frow:not(.head)').length));
+    fileSearch.value = '';
+    fileSearch.dispatchEvent(new window.Event('input', { bubbles: true }));
+    await settle(200);
+  }
+  const rows2 = [...document.querySelectorAll('.panel.active .filelist .frow:not(.head)')];
+  rows2[0]?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(150);
   rows[0]?.dispatchEvent(new window.Event('dblclick', { bubbles: true }));
   await settle(900);
   check('double-click opens the file in the middle pane',

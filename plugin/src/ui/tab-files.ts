@@ -25,10 +25,9 @@
  * backend (POST /files/zip); a dropped folder goes up file by file into the
  * matching subfolders; a dropped .zip is offered to be unpacked on arrival.
  */
-import { el, clear, armed, popover } from './dom';
+import { el, clear, armed, popover, refocusSearch, type ArmedControl } from './dom';
 import { state, type FileArea, type FileListing, type WorkspaceFile } from '../state';
-import { threePane } from './panes';
-import { bindAgent, mountAgent } from './agentpane';
+import { makeTab, type NoticeKind, type TabUi } from './kit';
 import { clientLog } from '../transport';
 
 const AREA_LABEL: Record<string, [string, string]> = {
@@ -66,11 +65,8 @@ interface Folder {
   virtual?: boolean;
 }
 
-let built = false;
-let seenFilesRev = -1;
 let treeMount: HTMLElement | null = null;
 let viewMount: HTMLElement | null = null;
-let noticeMount: HTMLElement | null = null;
 let showInternal = false;
 let lastListing: FileListing | null = null;
 let nodes = new Map<string, Folder>();
@@ -79,47 +75,44 @@ let selection = new Set<string>();
 /** The row clicked last, for Shift ranges. */
 let anchorPath = '';
 let previewPath = '';
-let confirmDelete = false;
+/** The 삭제 button's two-step confirm; the Delete key drives the same one. */
+let delCtrl: ArmedControl | null = null;
+let filterText = '';
 let view: 'list' | 'grid' = 'list';
 try { if (localStorage.getItem('hina.filesView') === 'grid') view = 'grid'; } catch { /* iframe */ }
 const expanded = new Set<string>(['projects', 'studio']);
 /** Thumbnail blob URLs by path. */
 const thumbs = new Map<string, string>();
+let ui: TabUi | null = null;
 
-export function renderFilesTab(mount: HTMLElement): void {
-  if (!built || !mount.querySelector('.split')) {
-    clear(mount);
-    const pane = threePane();
-    treeMount = el('div', { class: 'tree filetree' });
-    pane.left.appendChild(treeMount);
-    noticeMount = el('div');
-    viewMount = el('div', { class: 'pad filepad' });
-    pane.centre.appendChild(noticeMount);
-    pane.centre.appendChild(viewMount);
-    installDrop(viewMount, () => uploadTarget());
-    mount.appendChild(pane.root);
-    mountAgent(pane.right.querySelector('.right-inner') as HTMLElement);
-    built = true;
-    seenFilesRev = state.filesRev;
-    void refresh();
-  } else if (seenFilesRev !== state.filesRev) {
-    // The agent made a file, or one was uploaded or deleted elsewhere, since
-    // this view was drawn.
-    seenFilesRev = state.filesRev;
-    void refresh();
-  }
-  state.markOutputsSeen();
-
-  bindAgent({ notice });
-  const inner = mount.querySelector('.right-inner');
-  if (inner) mountAgent(inner as HTMLElement);
+function notice(text: string, kind: NoticeKind = ''): void {
+  ui?.notice(text, kind);
 }
 
-function notice(text: string, kind: 'ok' | 'err' | '' = ''): void {
-  if (!noticeMount) return;
-  clear(noticeMount);
-  noticeMount.appendChild(el('div', { class: 'notice ' + kind, style: { margin: '10px 14px 0' }, text }));
-  setTimeout(() => { if (noticeMount) clear(noticeMount); }, 9000);
+const kitRender = makeTab({
+  // A pending open-request is a staleness key: consuming it is refresh's job.
+  keys: () => [state.filesRev, state.openFileRequest],
+  search: {
+    placeholder: '이 폴더에서 찾기',
+    get: () => filterText,
+    set: (v) => { filterText = v; drawCentre(); refocusSearch(null); },
+  },
+  build(pane, u) {
+    ui = u;
+    treeMount = el('div', { class: 'tree filetree' });
+    pane.left.appendChild(treeMount);
+    viewMount = el('div', { class: 'pad filepad' });
+    pane.centre.appendChild(viewMount);
+    installDrop(viewMount, () => uploadTarget());
+  },
+  async refresh() {
+    await refresh();
+  },
+});
+
+export function renderFilesTab(mount: HTMLElement): void {
+  kitRender(mount);
+  state.markOutputsSeen();
 }
 
 async function refresh(): Promise<void> {
@@ -349,7 +342,6 @@ function nodeRow(n: Folder, depth: number): HTMLElement {
     selectedDir = n.path;
     previewPath = '';
     selection.clear();
-    confirmDelete = false;
     if (n.kids.length) expanded.add(n.path);
     drawTree();
     drawCentre();
@@ -400,9 +392,10 @@ function drawCentre(): void {
   const mv = el('button', { class: 'ghost tiny', text: '이동', title: '고른 항목을 다른 폴더로 옮깁니다' }) as HTMLButtonElement;
   mv.disabled = !selCount || !deletable;
   mv.addEventListener('click', () => openMove(mv));
-  const del = el('button', { class: 'ghost tiny', text: selCount ? `삭제 (${selCount})` : '삭제', title: 'Delete 키로도 됩니다' }) as HTMLButtonElement;
+  const del = el('button', { class: 'ghost tiny', title: 'Delete 키로도 됩니다' }) as HTMLButtonElement;
   del.disabled = !selCount || !deletable;
-  del.addEventListener('click', () => requestDelete());
+  delCtrl = armed(del, selCount ? `삭제 (${selCount})` : '삭제',
+                  `정말 지울까요? (${selCount})`, () => void runDelete(n));
   const all = el('button', { class: 'ghost tiny', text: '전체 선택', title: 'Ctrl+A' });
   all.addEventListener('click', () => { selectAll(n); drawCentre(); });
   const viewBtn = el('button', { class: 'ghost tiny', text: view === 'grid' ? '목록 보기' : '미리보기', title: '그림이 있는 폴더는 썸네일로 볼 수 있습니다' });
@@ -433,18 +426,17 @@ function drawCentre(): void {
     + (writable ? '파일이나 폴더를 여기에 끌어다 놓으면 이 폴더에 올라갑니다 (zip 은 풀어서 올릴 수 있습니다). ' : '')
     + '클릭으로 선택, Ctrl·Shift 로 여러 개, 더블클릭·Enter 로 열기' + (deletable ? ', Delete 로 삭제.' : '.') }));
 
-  const barSlot = el('div', { class: 'fileslot' });
-  viewMount.appendChild(barSlot);
-  if (confirmDelete && selCount && deletable) barSlot.appendChild(confirmBar(n));
-
   // --- rows ----------------------------------------------------------------------
   const list = el('div', { class: 'filelist', tabindex: '0' });
+  const q = filterText.trim().toLowerCase();
   const entries: { path: string; name: string; file?: WorkspaceFile; node?: Folder }[] = [
     ...n.kids.map((k) => ({ path: k.path, name: k.name, node: k })),
     ...n.files.map((f) => ({ path: f.path, name: f.name, file: f })),
-  ];
+  ].filter((e) => !q || e.name.toLowerCase().includes(q));
   if (!entries.length) {
-    list.appendChild(el('div', { class: 'fempty', text: writable ? '비어 있습니다. 파일을 끌어다 놓거나 왼쪽 “올리기”를 누르세요.' : '비어 있습니다.' }));
+    list.appendChild(el('div', { class: 'fempty', text: q
+      ? `“${filterText}” 에 맞는 항목이 없습니다.`
+      : (writable ? '비어 있습니다. 파일을 끌어다 놓거나 왼쪽 “올리기”를 누르세요.' : '비어 있습니다.') }));
   } else if (view === 'grid' && hasImages) {
     const grid = el('div', { class: 'fgrid' });
     for (const e of entries) grid.appendChild(gridCell(e, entries, n));
@@ -461,14 +453,14 @@ function drawCentre(): void {
     const e = ev as KeyboardEvent;
     if (e.key === 'Delete' || e.key === 'Backspace') {
       e.preventDefault();
-      if (confirmDelete) void runDelete(n); else requestDelete();
+      // The key drives the same two-step confirm as the 삭제 button.
+      if (delCtrl && !del.disabled) { if (delCtrl.armed) delCtrl.fire(); else delCtrl.arm(); }
     } else if (e.key === 'Enter') {
       e.preventDefault();
       const first = [...selection][0];
       if (first) openEntry(first, n);
     } else if (e.key === 'Escape') {
       selection.clear();
-      confirmDelete = false;
       drawCentre();
     } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
       e.preventDefault();
@@ -507,7 +499,6 @@ function pick(path: string, e: MouseEvent, order: { path: string }[]): void {
     selection = new Set([path]);
     anchorPath = path;
   }
-  confirmDelete = false;
 }
 
 function openEntry(path: string, n: Folder): void {
@@ -543,7 +534,6 @@ function listRow(e: { path: string; name: string; file?: WorkspaceFile; node?: F
     ev.stopPropagation();
     if (box.checked) selection.add(e.path); else selection.delete(e.path);
     anchorPath = e.path;
-    confirmDelete = false;
     drawCentre();
     focusList();
   });
@@ -676,32 +666,8 @@ async function drawPreview(f: WorkspaceFile, n: Folder): Promise<void> {
 
 // --- delete · move · download ----------------------------------------------------
 
-function requestDelete(): void {
-  const n = nodes.get(selectedDir);
-  if (!n || !selection.size) return;
-  if (!n.area.deletable) { notice(`${n.name} 안의 파일은 지울 수 없습니다.`); return; }
-  confirmDelete = true;
-  drawCentre();
-  focusList();
-}
-
-function confirmBar(n: Folder): HTMLElement {
-  const yes = el('button', { class: 'danger tiny', text: '삭제' });
-  const no = el('button', { class: 'ghost tiny', text: '취소' });
-  yes.addEventListener('click', () => void runDelete(n));
-  no.addEventListener('click', () => { confirmDelete = false; drawCentre(); focusList(); });
-  const names = [...selection].map((p) => p.slice(p.lastIndexOf('/') + 1));
-  return el('div', { class: 'confirmbar' }, [
-    el('span', { text: `${selection.size}개를 지울까요? ` + names.slice(0, 3).join(', ') + (names.length > 3 ? ' …' : '') }),
-    el('span', { class: 'hint', text: '(Delete 를 한 번 더 누르면 지웁니다)' }),
-    el('span', { class: 'spacer' }),
-    yes, no,
-  ]);
-}
-
 async function runDelete(n: Folder): Promise<void> {
   const paths = [...selection];
-  confirmDelete = false;
   if (!paths.length) return;
   let done = 0;
   try {
@@ -716,7 +682,6 @@ async function runDelete(n: Folder): Promise<void> {
   }
   selection.clear();
   state.touchFiles();
-  seenFilesRev = state.filesRev;
   await refresh();
   focusList();
 }
@@ -742,7 +707,6 @@ function openMove(anchor: HTMLElement): void {
       selection.clear();
       previewPath = '';
       state.touchFiles();
-      seenFilesRev = state.filesRev;
       await refresh();
     });
     body.appendChild(b);
@@ -941,7 +905,6 @@ async function uploadMany(files: Incoming[], into: string): Promise<void> {
   notice(`${done}개를 ${into}/ 에 올렸습니다.` + (extracted ? ` (zip 에서 ${extracted}개 풀림)` : '') + (failed ? ` 실패 ${failed}개.` : ''), failed ? 'err' : 'ok');
   if (nodes.has(into)) { selectedDir = into; expandTo(into); }
   state.touchFiles();
-  seenFilesRev = state.filesRev;
   await refresh();
 }
 
