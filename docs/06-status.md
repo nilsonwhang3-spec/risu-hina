@@ -8,7 +8,7 @@ The original plan for bot edit mode (M0 measurements, M2 spec) is `~/.claude/pla
 
 **Releases are manual now (2026-08-29, the user's instruction).** The plugin has users other than us, so **do not release or deploy after every fix**. Land the change, run the gate, leave it on master, and say what is waiting; `tools/release.py`, `gh release create` and the test-server deploy happen **only when the user asks for them**. One mechanical consequence to keep in mind: `tools/bundle.py` writes `plugin/Risu.Hina.Plugin.js` (and the old-name twin) into the repository, and *that committed file is what RisuAI's `+` update check reads* — so a release is not the tag, it is that commit. An ordinary fix commit must leave those two files alone, which `node plugin/build.config.mjs` does by itself (it only writes `plugin/dist/`).
 
-**Code state**: master = **v0.9.6 BETA** (§1-15 any chat opens from the picker · §1-14 the repo goes English · §1-13 3-way merge on reopen · §1-12 an intermediate cache blocking the connection (POST probe, no-store) · §1-11 one web-search tool card with three options · §1-10 built-in search measured, mobile, plugin-reload diagnosis · §1-9 search · §1-8 round 10 · §1-7 · §1-6 · §1-5; the docs/07 planning is still pending) — gate ALL GREEN. 0.7.0 changes the minor, so **the version gate trips**: raise the backend and the plugin on the RisuAI side has to be raised with `+` as well (the header says so).
+**Code state**: master = **v0.9.6 BETA + the unreleased §1-16 lifecycle rework** (§1-16 the edit-session lifecycle: leave guard, 변경 취소, write verification, snapshot kinds - **schema 13**, not yet released; when it ships, bump the minor - `/workspace/dirty`, the reset payloads and the `kind` column mean the backend and the plugin go together) (§1-15 any chat opens from the picker · §1-14 the repo goes English · §1-13 3-way merge on reopen · §1-12 an intermediate cache blocking the connection (POST probe, no-store) · §1-11 one web-search tool card with three options · §1-10 built-in search measured, mobile, plugin-reload diagnosis · §1-9 search · §1-8 round 10 · §1-7 · §1-6 · §1-5; the docs/07 planning is still pending) — gate ALL GREEN. 0.7.0 changes the minor, so **the version gate trips**: raise the backend and the plugin on the RisuAI side has to be raised with `+` as well (the header says so).
 
 **Deployment state (2026-08-25 21:01 `deploy.ps1`, verified in a new SSH session)**:
 
@@ -25,6 +25,59 @@ The original plan for bot edit mode (M0 measurements, M2 spec) is `~/.claude/pla
 `https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js`, and made `tools/bundle.py` write that file into the repository (included in the release commit). In the backend code only VERSION changed.
 
 → **First thing to do**: the user reinstalls `plugin/Risu.Hina.Plugin.js` into RisuAI **by hand, once** (the installed 0.1.0's update-url cannot be read because of CORS) → check that `+` appears from the next release on → verify M2 in real use (§5-2).
+
+## 1-16. 2026-08-30 - the edit-session lifecycle: nothing stays silently pending (unreleased, schema 13)
+
+The user rolled the three post-release commits back (`discarded/snapshot-fixes-2026-08-29` keeps them;
+their commit messages are the bug-repro record) and redesigned the lifecycle in one pass. The stated
+problems: a backend "임시저장" (= the working copy) that survives every exit unresolved, no visible
+cancel, bot/chat edits interleaving ("saving the bot quietly re-saved the chat"), too many automatic
+snapshots, and a version list the user cannot trust because nothing in it was consciously saved.
+Six commits, each gate-green:
+
+- **Rollback base**: `origin/master` (= eb1b725, v0.9.6 + release docs). The discarded branch's
+  writeBackAll ("반영 writes both halves") was explicitly NOT re-adopted - the design goes the other
+  way (one dirty thing at a time).
+- **lifecycle 1/3 (backend)**: the three data-loss fixes re-landed clean - a restore writes the
+  working copy only (`store.restore_turns`; via `ingest_chat(force=True)` it rewrote the baseline,
+  so 반영 found 0건 and the next reopen adopted it away); an empty upload over held turns is a
+  PocketRisu stub and is refused (`skipped`, force/🔄 still passes); `POST /reset` discards all
+  three materials (turns + local lore + memory, new `store.reset_lore_local` / `memory.reset_working`)
+  and every reset clears conflict marks (a surviving mark kept 반영 blocked over rows that no longer
+  differed). Dead `rebase_*` family deleted. `tests/test_lifecycle.py` joins the gate.
+- **lifecycle 2/3 (backend)**: schema **13** - a `kind` column ('user' | 'auto') on both checkpoint
+  tables, backfilled once from the labels the code always used (a column, not a label convention:
+  the user can rename a label). Auto snapshots self-prune inside create() to `limits.autoBackupKeep`
+  (default 5, never zero - RisuAI has no undo for a plugin write); the restore dedup folds only the
+  auto 'restore 직전'. '복사본 저장 직후' is no longer snapshotted (the copy in RisuAI is the backup).
+- **lifecycle 3/3 (backend)**: `GET /workspace/dirty` (the whole bot: card + every loaded chat, each
+  with pending total and conflict count) and `workspace.cross_scope_blocker` - the one-dirty-thing
+  rule as a refusal. Guarded at the only two doors that write a working copy without the bars:
+  `actions.decide` (via `scope_of`; a lore row answers for itself, global = card material) and
+  `h_approve`. A refused approval stays pending. A card write is blocked by every dirty chat
+  including the acting one - that pairing IS the reported bug.
+- **plugin: write verification**: both host writes read back and compare (`WriteResult.verified`);
+  unverified = no commit, no re-read, working copy kept, the reason shown (RisuAI open elsewhere is
+  the usual one). This was the worst v0.9.6 hole: a failed write followed by the re-read replaced
+  the working copy with the text the write had just failed to change - gone from both sides.
+  `rereadCard` now carries the edited chat (chatIndex), ending the quiet activeChatKey swap after a
+  card 반영.
+- **plugin: 변경 취소** on both bars (two-click, visible only while dirty, names what went); the
+  "기준선으로 되돌리기" rows left the 반영 popovers - one verb, one place.
+- **plugin: the leave guard** (`ui/leaveguard.ts`): X, the 선택 tab, 봇 편집, chat rows, the header
+  🔄 and the agent's cross-scope open-tab all funnel through `ensureResolved` → per dirty scope:
+  [반영하고 계속] [버리고 계속] [계속 편집]. Exempt where the action is at home (a chat in itself,
+  봇 편집 / snapshot restore in the card). A dead backend never locks the user in. The browser
+  closing remains the one unguarded exit - the reopen 3-way merge (§1-13) is unchanged and covers it.
+  Picker rows carry a "미반영 N" badge; opening a stub chat surfaces the refusal.
+- **plugin: 버전 lists 'user' snapshots only**, autos behind "자동 백업 N개 보기" (restorable, not
+  renamable, flagged as possibly behind RisuAI); `/checkpoint/clear` sweeps saved rows only.
+
+Verification: gate ALL GREEN throughout; the smoke walks the unverified write, the discard button,
+X→stay / picker→discard / mode-switch→apply, and the version-list fold end to end. Manual checks
+still owed before a release (real RisuAI): the 3-choice modal on 챗→봇 switch, a PocketRisu stub
+chat from the picker, an unverified 반영 with RisuAI open in two windows, reopen-merge after closing
+the browser dirty, and a schema-12 DB start (kind backfill line in the log).
 
 ## 1-15. 2026-08-29 — v0.9.6: clicking a chat loads it, and 반영 follows the chat that was clicked
 
