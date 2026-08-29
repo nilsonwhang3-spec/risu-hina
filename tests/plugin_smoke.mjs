@@ -1896,7 +1896,11 @@ console.log('\ntest_studio_tab');
   const text = () => document.querySelector('.panel.active')?.textContent || '';
   check('the studio tab renders its own tree', !!document.querySelector('.panel.active .filetree'));
   check('it lists the library areas, not the workspace',
-        /생성물/.test(text()) && !/업로드/.test(text()), text().slice(0, 200));
+        /스타일 프롬프트/.test(text()) && !/업로드/.test(text()), text().slice(0, 200));
+  // Two halves: what you write above the rule, what came back below it.
+  check('materials and output are separated by a rule',
+        !!document.querySelector('.panel.active .treesep'));
+  check('the output half is named for what it is', /output/.test(text()));
   check('and Hina is beside it', !!document.querySelector('.panel.active .right-inner'));
 
   // The generation card sits under the tree because nothing on it changes
@@ -1945,7 +1949,7 @@ console.log('\ntest_studio_selector');
   // images/ opens by default, so only unfold it if the new folder is not
   // already on screen - clicking an open row would close it.
   if (!openFolder('고르기')) {
-    openFolder('생성물')?.dispatchEvent(new window.Event('click', { bubbles: true }));
+    openFolder('output')?.dispatchEvent(new window.Event('click', { bubbles: true }));
     await settle(500);
   }
   openFolder('고르기')?.dispatchEvent(new window.Event('click', { bubbles: true }));

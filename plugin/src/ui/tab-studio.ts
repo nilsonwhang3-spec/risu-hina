@@ -7,9 +7,12 @@
  * shell already survives that state (readHost only sets slotError), and it is
  * the per-tab render functions that bail. This one does not.
  *
- *   left    the library's folders, as a tree
- *   centre  what the selected folder holds - a grid for pictures, a list
- *           otherwise
+ *   left    the library, as a tree in two halves - the prompts and presets you
+ *           write above the rule, the output below it - plus the generation
+ *           card. See MATERIALS/OUTPUT for why the halves behave differently.
+ *   centre  the picked prompt, or the picked output folder: for images that is
+ *           the comparison selector, otherwise a list, as the workspace files
+ *           tab does it.
  *   right   Hina, as on every tab
  *
  * The files come from the same endpoints the workspace uses, addressed with
@@ -25,15 +28,38 @@ import { state, type FileListing, type GroupItem, type SelectionMap, type Select
 import { threePane } from './panes';
 import { bindAgent, mountAgent } from './agentpane';
 
-/** Areas in the order a person works through them; label for each. */
-const AREA_LABEL: Record<string, string> = {
-  images: '생성물',
-  characters: '캐릭터',
-  styles: '스타일',
-  emotions: '감정 프리셋',
-  fragments: '조각',
-  presets: '생성 프리셋',
-};
+/**
+ * The tree, in two halves with a rule between them.
+ *
+ * **Materials** are what you write: a handful of prompt files you pick one of,
+ * so the tree shows the files themselves as leaves - clicking a style IS
+ * choosing it, and making you open a folder to see two files is a step for
+ * nothing.
+ *
+ * **Output** is what comes back: hundreds of images per folder, so the tree
+ * shows folders only and the pictures live in the middle pane, exactly as the
+ * workspace files tab does.
+ *
+ * The old flat list (생성물 · 캐릭터 · 스타일 · 감정 프리셋 · 조각 · 생성 프리셋)
+ * put six unrelated things at one level and said nothing about which were
+ * inputs and which were results.
+ */
+const MATERIALS: [string, string][] = [
+  ['styles', '스타일 프롬프트'],
+  ['characters', '캐릭터 프롬프트'],
+  // Both kinds of preset under one heading: they are the same sort of thing
+  // (saved settings you pick from) and two top-level "프리셋" entries read as
+  // a mistake.
+  ['presets', '프리셋 · 생성'],
+  ['emotions', '프리셋 · 감정'],
+  ['fragments', '조각 프롬프트'],
+];
+const OUTPUT: [string, string][] = [['images', 'output']];
+const AREA_LABEL: Record<string, string> =
+  Object.fromEntries([...MATERIALS, ...OUTPUT]);
+
+/** Areas whose individual files belong in the tree rather than the grid. */
+const LEAF_AREAS = new Set(MATERIALS.map(([a]) => a));
 
 const IMAGE_RE = /\.(png|jpe?g|gif|webp|avif|bmp)$/i;
 
@@ -52,6 +78,8 @@ let noticeMount: HTMLElement | null = null;
 let listing: FileListing | null = null;
 let roots: Folder[] = [];
 let selected = 'images';
+/** A prompt file picked in the tree; the centre shows it instead of a listing. */
+let selectedFile = '';
 const open = new Set<string>(['images']);
 const thumbs = new Map<string, string>();
 
@@ -159,7 +187,8 @@ function build(): void {
     }
     roots.push(root);
   }
-  // Keep the order of AREA_LABEL - it is the order a person works through.
+  // Materials first, then output - the order of the two lists above, which is
+  // the order the work goes in.
   const rank = Object.keys(AREA_LABEL);
   roots.sort((a, b) => rank.indexOf(a.path) - rank.indexOf(b.path));
 }
@@ -184,13 +213,30 @@ function drawTree(): void {
     treeMount.appendChild(el('div', { class: 'hint', style: { padding: '10px' }, text: '라이브러리가 비어 있습니다.' }));
     return;
   }
-  for (const r of roots) treeMount.appendChild(row(r, 0));
+  const material = roots.filter((r) => LEAF_AREAS.has(r.path));
+  const output = roots.filter((r) => !LEAF_AREAS.has(r.path));
+  for (const r of material) treeMount.appendChild(row(r, 0));
+  if (material.length && output.length) {
+    treeMount.appendChild(el('div', {
+      class: 'sectionline treesep',
+      title: '위는 쓰는 것(프롬프트·프리셋), 아래는 나온 것(생성물)입니다',
+    }));
+  }
+  for (const r of output) treeMount.appendChild(row(r, 0));
+}
+
+/** Which area a path belongs to. */
+function areaOf(path: string): string {
+  return path.split('/')[0];
 }
 
 function row(n: Folder, depth: number): HTMLElement {
   const wrap = el('div');
   const isOpen = open.has(n.path);
-  const kids = n.children.length > 0;
+  // In the material half a folder's files are leaves in the tree, so a folder
+  // holding only files still unfolds.
+  const leaves = LEAF_AREAS.has(areaOf(n.path)) ? n.files : [];
+  const kids = n.children.length > 0 || leaves.length > 0;
   const caret = el('span', { class: 'caret', text: kids ? (isOpen ? '▾' : '▸') : '' });
   const line = el('button', {
     class: 'treerow' + (selected === n.path ? ' on' : ''),
@@ -204,12 +250,38 @@ function row(n: Folder, depth: number): HTMLElement {
   line.addEventListener('click', () => {
     if (kids) { if (isOpen) open.delete(n.path); else open.add(n.path); }
     selected = n.path;
+    selectedFile = '';
     drawTree();
     drawCentre();
   });
   wrap.appendChild(line);
-  if (isOpen) for (const c of n.children) wrap.appendChild(row(c, depth + 1));
+  if (isOpen) {
+    for (const c of n.children) wrap.appendChild(row(c, depth + 1));
+    for (const f of leaves) wrap.appendChild(leafRow(f, depth + 1));
+  }
   return wrap;
+}
+
+/**
+ * One prompt file, in the tree. Clicking it IS choosing it — a style or a
+ * character is a thing you pick, not a folder you browse into.
+ */
+function leafRow(f: WorkspaceFile, depth: number): HTMLElement {
+  const line = el('button', {
+    class: 'treerow leafrow' + (selectedFile === f.path ? ' on' : ''),
+    style: { paddingLeft: 6 + depth * 12 + 'px' },
+    title: f.path,
+  }, [
+    el('span', { class: 'caret' }),
+    el('span', { class: 'grow', text: f.name.replace(/\.(md|json)$/i, '') }),
+  ]);
+  line.addEventListener('click', () => {
+    selectedFile = f.path;
+    selected = f.path.slice(0, f.path.lastIndexOf('/'));
+    drawTree();
+    drawCentre();
+  });
+  return line;
 }
 
 /**
@@ -571,6 +643,13 @@ async function pollJob(): Promise<void> {
 function drawCentre(): void {
   if (!viewMount) return;
   clear(viewMount);
+
+  // A prompt picked in the tree: show it, not the folder it lives in.
+  if (selectedFile) {
+    drawPromptFile(selectedFile);
+    return;
+  }
+
   const node = find(selected);
   if (!node) {
     viewMount.appendChild(el('div', { class: 'empty', text: '폴더를 골라 주세요.' }));
@@ -818,6 +897,61 @@ function adoptButton(): HTMLElement {
     } finally { b.disabled = !state.activeCharKey; }
   });
   return b;
+}
+
+/**
+ * One prompt file, editable in place.
+ *
+ * These are short and are the thing you came to change, so there is no "open
+ * an editor" step: the text is here, with a save button. A character opens its
+ * own editor instead, because it is not only text (reference image, position).
+ */
+function drawPromptFile(path: string): void {
+  if (!viewMount) return;
+  const area = areaOf(path);
+  const box = el('textarea', { rows: '22', class: 'promptedit' }) as HTMLTextAreaElement;
+  const out = el('div', { class: 'hint' });
+  const save = el('button', { class: 'primary tiny', text: '저장' }) as HTMLButtonElement;
+  const back = el('button', { class: 'ghost tiny', text: '← 목록' });
+  back.addEventListener('click', () => { selectedFile = ''; drawTree(); drawCentre(); });
+
+  const head = el('div', { class: 'row', style: { marginBottom: '8px' } }, [
+    back, el('span', { class: 'sectiontitle grow', text: path }),
+  ]);
+  if (area === 'characters' && path.endsWith('.json')) {
+    const edit = el('button', { class: 'ghost tiny', text: '캐릭터 편집기' });
+    edit.addEventListener('click', () => openCharacter(path));
+    head.appendChild(edit);
+  }
+  const del = el('button', { class: 'ghost tiny', title: '삭제' }) as HTMLButtonElement;
+  armed(del, '✕', '삭제 확인', async () => {
+    try {
+      await state.studio.remove(path);
+      selectedFile = '';
+      await refresh();
+    } catch (e) { out.textContent = msg(e); }
+  });
+  head.appendChild(del);
+  head.appendChild(save);
+  viewMount.append(head, box, out);
+
+  save.addEventListener('click', async () => {
+    save.disabled = true;
+    try {
+      const dir = path.slice(0, path.lastIndexOf('/'));
+      const name = path.slice(path.lastIndexOf('/') + 1);
+      await state.studio.write(dir, name, box.value);
+      out.textContent = '저장했습니다.';
+      drawGen();  // a renamed style should show up in the picker at once
+    } catch (e) {
+      out.textContent = msg(e);
+    } finally { save.disabled = false; }
+  });
+
+  void state.studio.read(path).then((r) => {
+    box.value = r.content;
+    if (!r.textual) out.textContent = r.note || '텍스트 파일이 아닙니다.';
+  }).catch((e) => { out.textContent = msg(e); });
 }
 
 function emptyHint(area: string): string {

@@ -536,6 +536,13 @@ button.treefile.on { background: rgba(37, 99, 235, .22); color: var(--textcolor,
 .genpanel input, .genpanel select { width: 100%; box-sizing: border-box; }
 .genpanel .row { gap: 6px; align-items: flex-end; }
 .genstatus { margin-top: 8px; display: flex; flex-direction: column; gap: 2px; }
+/* The rule between what you write and what came back. */
+.treesep { margin: 6px 4px; }
+/* A prompt file sitting in the tree: lighter than a folder, because it is a
+   thing you pick rather than a place you go. */
+.treerow.leafrow { opacity: .85; font-size: 12px; }
+.treerow.leafrow.on { opacity: 1; }
+textarea.promptedit { width: 100%; box-sizing: border-box; min-height: 42vh; font-family: var(--mono, monospace); }
 
 /* --- the comparison selector ---------------------------------------------- */
 /* Column count is set inline (2..6) because it is the user's control, not a

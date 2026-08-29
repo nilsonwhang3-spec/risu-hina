@@ -292,6 +292,104 @@ function buildAssetsCard(): HTMLElement {
 }
 
 /**
+ * NovelAI - its own card, under the general keys.
+ *
+ * A NovelAI token is not a provider credential an agent preset picks from a
+ * list: nothing chooses between NovelAI tokens, exactly one is in play, and
+ * what a person wants to see next to it is the balance rather than the key
+ * length. So it gets a card of its own, the way the web-search provider does
+ * in the next tab, instead of being one anonymous row among the gateway keys.
+ *
+ * It is still stored as an `api_keys` row (provider `novelai`) - one place for
+ * secrets - so nothing downstream had to learn about a second store.
+ */
+function msg(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
+
+function buildNaiCard(): { root: HTMLElement; refresh: () => Promise<void> } {
+  const meters = el('div', { class: 'row', style: { gap: '8px', marginBottom: '8px' } });
+  const input = el('input', { type: 'password', placeholder: 'NovelAI 퍼시스턴트 토큰' }) as HTMLInputElement;
+  const out = el('div', { class: 'outbox' });
+  const save = el('button', { class: 'primary tiny', text: '저장' }) as HTMLButtonElement;
+  const test = el('button', { class: 'ghost tiny', text: '연결 확인' }) as HTMLButtonElement;
+  let existingId = '';
+
+  const refresh = async (): Promise<void> => {
+    clear(meters);
+    let st;
+    try {
+      st = await state.studio.status();
+    } catch (e) {
+      meters.appendChild(el('span', { class: 'hint err', text: msg(e) }));
+      return;
+    }
+    if (!st.configured) {
+      meters.appendChild(el('span', { class: 'hint', text: st.note || '토큰이 아직 없습니다.' }));
+    } else if (st.account) {
+      const a = st.account;
+      meters.append(
+        el('span', { class: 'badge', title: '레퍼런스 인코딩과 디렉터 툴이 쓰는 잔량', text: `Anlas ${a.anlas}` }),
+        // Two currencies, neither derived from the other (docs/09 §2).
+        el('span', { class: 'badge', title: 'v5 사용량 — Anlas 와 별개의 한도', text: `v5 ${a.usagePercent ?? '?'}%` }),
+        el('span', { class: 'hint', text: `tier ${a.tier ?? '?'}${a.active ? '' : ' · 만료'}` }),
+      );
+    } else if (st.error) {
+      meters.appendChild(el('span', { class: 'hint err', text: st.error }));
+    }
+    try {
+      const { keys } = await state.apiKeys();
+      const hit = keys.find((k) => (k.provider || '').toLowerCase() === 'novelai');
+      existingId = hit?.id ?? '';
+      input.placeholder = hit?.apiKey?.set
+        ? `설정됨 (${hit.apiKey.length}자) — 바꿀 때만 입력`
+        : 'NovelAI 퍼시스턴트 토큰';
+    } catch { /* the card still works without the list */ }
+  };
+
+  save.addEventListener('click', async () => {
+    const v = input.value.trim();
+    if (!v) { out.textContent = '토큰을 입력해 주세요.'; return; }
+    save.disabled = true;
+    out.textContent = '';
+    try {
+      await state.saveApiKey({ name: 'NovelAI', provider: 'novelai', apiKey: v, baseUrl: '', note: '' },
+                             existingId || undefined);
+      input.value = '';
+      await refresh();
+      out.textContent = '저장했습니다.';
+    } catch (e) {
+      out.textContent = msg(e);
+    } finally { save.disabled = false; }
+  });
+
+  test.addEventListener('click', async () => {
+    test.disabled = true;
+    out.textContent = '확인 중…';
+    try {
+      const st = await state.studio.status();
+      out.textContent = st.configured && st.account
+        ? `연결됨 — Anlas ${st.account.anlas}, tier ${st.account.tier}`
+        : (st.error || st.note || '토큰이 없습니다.');
+    } catch (e) {
+      out.textContent = msg(e);
+    } finally { test.disabled = false; }
+  });
+
+  const root = el('div', { class: 'card' }, [
+    el('h2', { text: 'NovelAI' }),
+    el('div', { class: 'hint', style: { marginBottom: '8px' }, text:
+      '에셋 스튜디오가 이미지를 생성할 때 씁니다. NovelAI 계정 설정의 퍼시스턴트 토큰을 넣으세요. '
+      + '토큰 없이도 스튜디오에서 이미지를 넣고, 고르고, 봇에 반영하는 것은 됩니다.' }),
+    meters,
+    el('label', { class: 'field' }, [el('span', { text: '퍼시스턴트 토큰' }), input]),
+    el('div', { class: 'row' }, [save, test]),
+    out,
+  ]);
+  return { root, refresh };
+}
+
+/**
  * API 키 - credentials kept apart from presets. A preset points at one of
  * these (or carries its own); rotating a key happens here, once.
  */
@@ -425,6 +523,10 @@ function buildKeysCard(): HTMLElement {
   // a preset then picks it the way it picks a key. Present only when the
   // backend offers that path at all (its operator turns it on).
   const offered = transport.health?.codexEnabled === true;
+  const nai = buildNaiCard();
+  refreshers.push(nai.refresh);
+  void nai.refresh();
+
   const codex = buildCodexBox(null, true);
   codex.root.style.display = '';
   if (offered) {
@@ -441,6 +543,9 @@ function buildKeysCard(): HTMLElement {
       el('div', { class: 'row', style: { marginTop: '8px' } }, [add]),
       out,
     ]),
+    // NovelAI below the general keys: exactly one is ever in play, and what
+    // belongs beside it is the balance, not a key length in a list.
+    nai.root,
     offered ? codex.root : null,
   ]);
 }
