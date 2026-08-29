@@ -264,6 +264,13 @@ DEFAULTS: dict[str, Any] = {
         "savePath": "",
         "serverUrl": "http://127.0.0.1:6001",
     },
+    "studio": {
+        # The asset studio library: prompts, presets and generated images.
+        # Global, not per bot. Configurable because a few thousand generated
+        # PNGs is a drive decision, not a data-folder decision; empty means
+        # `<data>/studio`.
+        "libraryPath": "",
+    },
 }
 
 _lock = threading.RLock()

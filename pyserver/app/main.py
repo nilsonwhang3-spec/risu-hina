@@ -100,6 +100,22 @@ def _char(arg: dict) -> str:
     return key
 
 
+def _scope(arg: dict) -> str:
+    """Which file scope a request addresses.
+
+    The file routes serve two roots (see `files.py`): a bot's workspace, which
+    is the default and what every existing caller sends, and the asset studio
+    library, which is global. `studio: true` picks the second. It is a boolean
+    rather than a `scope` string because `/lore` already spends that word on
+    something else (global vs this chat's lorebook), and one wire name meaning
+    two things is how a reader ends up guessing.
+    """
+    if arg.get("studio"):
+        workspace.ensure_studio()
+        return files.STUDIO
+    return _char(arg)
+
+
 def _chat(arg: dict) -> str:
     key = str(arg.get("chatKey") or "").strip()
     if not key:
@@ -843,12 +859,12 @@ def h_cost(arg: dict) -> dict:
 # --- workspace files --------------------------------------------------------
 
 def h_files(arg: dict) -> dict:
-    return files.listing(_char(arg))
+    return files.listing(_scope(arg))
 
 
 def h_file_read(arg: dict) -> dict:
     try:
-        return files.read(_char(arg), str(arg.get("path") or ""))
+        return files.read(_scope(arg), str(arg.get("path") or ""))
     except files.FileError as e:
         raise ApiError(400, str(e))
 
@@ -856,7 +872,7 @@ def h_file_read(arg: dict) -> dict:
 def h_file_upload(arg: dict) -> dict:
     try:
         return files.upload(
-            _char(arg), str(arg.get("name") or ""),
+            _scope(arg), str(arg.get("name") or ""),
             text=arg.get("text") if isinstance(arg.get("text"), str) else None,
             base64_data=arg.get("base64") if isinstance(arg.get("base64"), str) else None,
             into=str(arg.get("dir") or ""),
@@ -880,21 +896,21 @@ def h_file_upload_chunk(arg: dict) -> Any:
 
 def h_file_mkdir(arg: dict) -> dict:
     try:
-        return files.mkdir(_char(arg), str(arg.get("path") or ""))
+        return files.mkdir(_scope(arg), str(arg.get("path") or ""))
     except files.FileError as e:
         raise ApiError(400, str(e))
 
 
 def h_file_move(arg: dict) -> dict:
     try:
-        return files.move(_char(arg), str(arg.get("from") or ""), str(arg.get("to") or ""))
+        return files.move(_scope(arg), str(arg.get("from") or ""), str(arg.get("to") or ""))
     except files.FileError as e:
         raise ApiError(400, str(e))
 
 
 def h_file_delete(arg: dict) -> dict:
     try:
-        return files.delete(_char(arg), str(arg.get("path") or ""))
+        return files.delete(_scope(arg), str(arg.get("path") or ""))
     except files.FileError as e:
         raise ApiError(400, str(e))
 
@@ -902,7 +918,7 @@ def h_file_delete(arg: dict) -> dict:
 def h_file_clean(arg: dict) -> dict:
     raw = arg.get("areas")
     areas = [str(a) for a in raw] if isinstance(raw, list) else None
-    return files.clean(_char(arg), areas)
+    return files.clean(_scope(arg), areas)
 
 
 def h_presets(arg: dict) -> dict:
@@ -2089,7 +2105,7 @@ async def dispatch(path: str, request: Request) -> Response:
             except ValueError:
                 return _json(400, {"error": "body is not valid JSON"}, origin)
         try:
-            ck = _char(arg)
+            ck = _scope(arg)
             target = files._resolve(ck, str(arg.get("path") or ""))
         except ApiError as e:
             _log(request.method, pathname, e.status, started, str(e))
@@ -2139,7 +2155,7 @@ async def dispatch(path: str, request: Request) -> Response:
         if not isinstance(header, dict) or not isinstance(header.get("files"), list):
             return _json(400, {"error": "header needs files[]"}, origin)
         try:
-            ck = _char(header)
+            ck = _scope(header)
             out = await run_in_threadpool(
                 files.upload_many, ck, str(header.get("dir") or ""), header["files"],
                 raw[4 + hlen:], extract=bool(header.get("extract")))
@@ -2171,7 +2187,7 @@ async def dispatch(path: str, request: Request) -> Response:
         if not isinstance(header, dict):
             return _json(400, {"error": "header must be an object"}, origin)
         try:
-            ck = _char(header)
+            ck = _scope(header)
             out = await run_in_threadpool(
                 files.upload_chunk, ck, str(header.get("dir") or ""),
                 str(header.get("name") or ""), str(header.get("rel") or ""),
@@ -2200,7 +2216,7 @@ async def dispatch(path: str, request: Request) -> Response:
         if not isinstance(paths, list) or not all(isinstance(p, str) for p in paths):
             return _json(400, {"error": "paths[] 가 필요합니다"}, origin)
         try:
-            ck = _char(body)
+            ck = _scope(body)
             tmp, count = await run_in_threadpool(files.zip_paths, ck, paths)
         except ApiError as e:
             _log(request.method, pathname, e.status, started, str(e))

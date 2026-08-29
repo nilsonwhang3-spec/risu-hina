@@ -38,8 +38,37 @@ class WorkspaceError(ValueError):
     pass
 
 
+STUDIO = "studio"
+
+
+def studio_root() -> Path:
+    """The asset studio library: `studio.libraryPath`, or `<data>/studio`.
+
+    Configurable and therefore allowed to sit outside the data directory - a
+    few thousand generated images is a drive decision. `files._resolve`
+    compares *resolved* paths against whatever this returns, so containment
+    holds wherever it points.
+    """
+    raw = str((config.section("studio") or {}).get("libraryPath") or "").strip()
+    return (Path(raw).expanduser() if raw else config.DATA_DIR / "studio")
+
+
+def ensure_studio() -> Path:
+    """Create the library's areas. Called on the first studio request rather
+    than at boot: an install that never opens the studio grows no folders."""
+    from . import files
+    base = studio_root()
+    for area in files.STUDIO_AREAS:
+        (base / area).mkdir(parents=True, exist_ok=True)
+    return base
+
+
 def root(char_key: str) -> Path:
     """The workspace directory - the bot's own, or its family's.
+
+    `STUDIO` is the one key that is not a bot: it answers with the studio
+    library instead. It cannot collide with a real key, because `store.char_key`
+    always produces "c<hash>".
 
     Copies and new versions of one bot (a clone made here, a charx exported
     here and imported again) carry the original's key in
@@ -48,6 +77,8 @@ def root(char_key: str) -> Path:
     versions automatically. Rows (turns, card, lore) stay per bot - they are
     keyed in the database, not by directory.
     """
+    if char_key == STUDIO:
+        return studio_root()
     if not char_key or SAFE.sub("", char_key) != char_key:
         raise WorkspaceError(f"unsafe workspace key: {char_key!r}")
     fam = family_of(char_key)

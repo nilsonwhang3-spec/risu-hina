@@ -116,11 +116,10 @@ plugin the whole selected character, chats included, and `getChatFromIndex` read
 - Covered by `tests/plugin_smoke.mjs` → `test_open_a_chat_risuai_does_not_have_open`: click the chat in the folder
   (RisuAI's `chatPage` stays 0 throughout), edit a turn, 반영, and assert the edit landed in `chats[1]` with its
   `chatId`s and turn count intact **and `chats[0]` byte-identical**. Gate ALL GREEN.
-- **Not measured on a real host yet**: writing to a chat index other than the open one. Phase 0's T-13 says a write
-  to a *nonexistent* index is ignored and an existing index round-trips (T-12), and the character-level write path
-  (`writeCharacter`) has been writing non-open material all along, so there is no reason to expect trouble — but the
-  first real-use check should be exactly this: edit a chat that is not on screen in RisuAI, 반영, and confirm in
-  RisuAI that it landed there and that the open chat is untouched.
+- **Confirmed on a real host (2026-08-29, the user)**: a chat RisuAI does not have open is written back and saved. That is the `docs/02` host constraint seen from the other side — the autosave `$effect` snapshots the **selected character's** whole `chats` array, so every chat of that bot is in scope and the only boundary is the character. Phase 0's T-12/T-13 (an existing
+  index round-trips, a nonexistent one is ignored) were the grounds for expecting it; this is the measurement.
+  **The character boundary does not fall with it**: a write to a character other than the selected one is still
+  dropped by the host (`docs/02`), which is why 새 봇으로 저장 clones a new bot instead of editing another one in place.
 
 ## 1-14. 2026-08-29 — v0.9.5: the repo goes English
 
@@ -375,7 +374,11 @@ Evidence in `data/forensic-20260823/`. Rule: **move `data/` with the server stop
 2. **Real-use check (M2)** — PocketRisu (test-server, fastPath on): open the panel → the progress line on the bot card → complete within seconds (reading SQLite directly) → thumbnails on the assets tab → build charx → save from the files tab → **import into PocketRisu** (whether the assets, lore, triggers, Regex and CBS render the same as the original — this is the core verification for charx). Web Risu (elf.example.com): hub pull progress, 0 items the second time, the gate.
    Agent: "turn the profile black and white and add it as an extra asset" → fetch_assets → PIL → propose_asset_add → approve → check the card in RisuAI.
 3. **Security review of the public backend** — `elf.example.com`: token length, the rate limit on failures (present: 20 per 60 seconds), the `tokenRequired:false` exposure on `/health`, and whether `/diag/*`, `/assets/*` and `/files/download` sit behind auth (AUTH_EXEMPT is health and plugin.js only — confirmed).
-4. On hold: the in-plugin fflate assembly fallback (⑥), PocketRisu bulk-write (non-PNG), module assets (v2), a block GUI for trigger V2, polishing the skill descriptions, recovering the 6 lost lorebook entries (drafts in `out/`).
+4. **On hold, written up but not started**: an MCP surface on the backend so Claude Code and other clients can work
+   the workspace with RisuAI closed — `docs/08`. The relay idea that came with it (the plugin as a headless job
+   runner) was dropped there: a RisuAI tab has to be open either way, and then the panel is the better UI.
+   `docs/08` §4 says why it should be planned together with `docs/07`.
+5. On hold: the in-plugin fflate assembly fallback (⑥), PocketRisu bulk-write (non-PNG), module assets (v2), a block GUI for trigger V2, polishing the skill descriptions, recovering the 6 lost lorebook entries (drafts in `out/`).
 
 ## 6. Quick commands
 

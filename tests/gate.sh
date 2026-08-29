@@ -33,6 +33,9 @@ run "backend HTTP (black-box)" "$PY" tests/test_http.py
 # Runs real Python through the real runner: the confinement claims in
 # sandbox.py are only worth stating if something checks them each time.
 run "workspace confinement" "$PY" tests/test_sandbox.py
+# The studio is a second file scope on the same code path; the wall between it
+# and a bot workspace is the thing worth re-checking on every change.
+run "studio scope isolation" "$PY" tests/test_studio.py
 # Real model, real tool loop. Skips itself when no credentials are configured,
 # so the gate stays runnable offline.
 run "agent end-to-end (real model)" "$PY" tests/test_agent.py

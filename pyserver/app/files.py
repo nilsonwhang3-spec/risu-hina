@@ -1,8 +1,22 @@
-"""Workspace file management: list, read, upload, delete, clean.
+"""File management for a scope: list, read, upload, delete, clean.
 
-Every path here is resolved and checked against the workspace root before it is
+A **scope** is one of two roots, and every function here takes one:
+
+    a bot's workspace key   `data/workspaces/<key>/` - per bot, the original home
+    STUDIO                  the asset studio library - global, bot-independent
+
+The studio was added because generating and sorting images is not work that
+belongs to one bot: you make them, sort them, and only then decide which bot
+gets them. Rather than a second file API, the scope became a parameter - the
+listing, upload, chunked upload, zip extraction, move and delete below are
+identical for both and were not touched when the studio arrived. Only the root
+and the area table differ, and both hang off the scope.
+
+Every path here is resolved and checked against that scope's root before it is
 touched. The check uses the *resolved* path, so `../` and symlinks are caught -
-a relative path that looks contained can still point anywhere.
+a relative path that looks contained can still point anywhere. That check is
+what keeps the two scopes apart as well: a studio path can never resolve into a
+bot's workspace, or the other way round.
 
 Directories carry meaning, and the cleanup rules follow it:
 
@@ -43,6 +57,46 @@ AREAS: dict[str, tuple[bool, bool]] = {
     ".scratch": (False, True),
 }
 
+# The studio scope. Not a workspace key: `store.char_key` always produces
+# "c<hash>", so this can never collide with a bot.
+STUDIO = "studio"
+
+# The studio's areas. Everything is deletable and **nothing is cleanable**:
+# this is the user's own library, not a scratch space, and "정리" offering to
+# sweep away a folder of generated images would be the worst button in the app.
+STUDIO_AREAS: dict[str, tuple[bool, bool]] = {
+    "styles": (True, False),
+    "characters": (True, False),
+    "fragments": (True, False),
+    # Emotion presets: a named set of prompt fragments, one per emotion. An
+    # expression set is made by generating once per entry with the character
+    # and seed held fixed - not with the `emotion` director tool, which costs
+    # about ten times as much and infers the emotion instead of stating it.
+    "emotions": (True, False),
+    "presets": (True, False),
+    "images": (True, False),
+    # Ours: naming profiles, per-folder selection maps, group overrides.
+    # Hidden from the panel by the same rule that hides .scratch.
+    ".studio": (False, False),
+}
+
+
+def areas_for(scope: str) -> dict[str, tuple[bool, bool]]:
+    return STUDIO_AREAS if scope == STUDIO else AREAS
+
+
+def upload_targets(scope: str) -> tuple[tuple[str, ...], str]:
+    """Where an upload may land, and where it goes when the caller says nothing.
+
+    Narrower than "deletable" on purpose: `scripts/` and `scratch/` are the
+    agent's, and a person dropping a file into them would be a surprise rather
+    than a feature. In the studio every area but our own `.studio` is somewhere
+    a person legitimately puts files, and images are what arrive most.
+    """
+    if scope == STUDIO:
+        return tuple(a for a in STUDIO_AREAS if not a.startswith(".")), "images"
+    return ("uploads", "out"), "uploads"
+
 # Preview and upload ceilings. A transcript export can legitimately be large,
 # but nothing here needs to be read into a JSON response whole.
 MAX_PREVIEW = 256 * 1024
@@ -56,13 +110,13 @@ class FileError(ValueError):
     pass
 
 
-def _root(char_key: str) -> Path:
-    return workspace.root(char_key).resolve()
+def _root(scope: str) -> Path:
+    return workspace.root(scope).resolve()
 
 
-def _resolve(char_key: str, rel: str) -> Path:
+def _resolve(scope: str, rel: str) -> Path:
     """Resolve a workspace-relative path, refusing anything that escapes."""
-    root = _root(char_key)
+    root = _root(scope)
     if not rel or rel in (".", "/"):
         return root
     candidate = (root / rel.replace("\\", "/").lstrip("/")).resolve()
@@ -73,12 +127,12 @@ def _resolve(char_key: str, rel: str) -> Path:
     return candidate
 
 
-def listing(char_key: str) -> dict:
+def listing(scope: str) -> dict:
     """Every file in the workspace, grouped by area, with sizes."""
-    root = _root(char_key)
+    root = _root(scope)
     areas = []
     total = 0
-    for name, (deletable, cleanable) in AREAS.items():
+    for name, (deletable, cleanable) in areas_for(scope).items():
         d = root / name
         files = []
         size = 0
@@ -114,11 +168,11 @@ def listing(char_key: str) -> dict:
             # offers them as move targets.
             "dirs": dirs,
         })
-    return {"charKey": char_key, "root": str(root), "totalSize": total, "areas": areas}
+    return {"charKey": scope, "root": str(root), "totalSize": total, "areas": areas}
 
 
-def read(char_key: str, rel: str) -> dict:
-    path = _resolve(char_key, rel)
+def read(scope: str, rel: str) -> dict:
+    path = _resolve(scope, rel)
     if not path.is_file():
         raise FileError(f"파일이 없습니다: {rel}")
     size = path.stat().st_size
@@ -135,7 +189,7 @@ def read(char_key: str, rel: str) -> dict:
     }
 
 
-def upload(char_key: str, name: str, *, text: str | None = None,
+def upload(scope: str, name: str, *, text: str | None = None,
            base64_data: str | None = None, into: str = "", extract: bool = False) -> dict:
     """Store a user-provided file under uploads/ (or out/).
 
@@ -148,15 +202,16 @@ def upload(char_key: str, name: str, *, text: str | None = None,
     the archive: the way to bring fifty files over in one drop.
     """
     safe = Path(name or "upload").name.strip() or "upload"
-    root = _root(char_key)
+    root = _root(scope)
     # `into` is a folder the files tab chose; it has to stay inside a
     # writable area (uploads/ is the default; out/ is allowed so a person can
     # put a deliverable back where the agent left it).
-    target = into or "uploads"
+    allowed, default = upload_targets(scope)
+    target = into or default
     area = target.replace("\\", "/").lstrip("/").split("/")[0]
-    if area not in ("uploads", "out"):
-        raise FileError(f"uploads/ 또는 out/ 안의 폴더여야 합니다: {into}")
-    dest = _folder(char_key, target, area) / safe
+    if area not in allowed:
+        raise FileError(f"{' / '.join(allowed)} 안의 폴더여야 합니다: {into}")
+    dest = _folder(scope, target, area) / safe
     dest.parent.mkdir(parents=True, exist_ok=True)
     rel = dest.relative_to(root).as_posix()
 
@@ -168,7 +223,7 @@ def upload(char_key: str, name: str, *, text: str | None = None,
         if len(raw) > MAX_UPLOAD:
             raise FileError(f"파일이 너무 큽니다 ({len(raw)} 바이트, 최대 {MAX_UPLOAD})")
         if extract and safe.lower().endswith(".zip"):
-            return _extract_zip(char_key, dest.parent, safe, raw)
+            return _extract_zip(scope, dest.parent, safe, raw)
         dest.write_bytes(raw)
         size = len(raw)
     elif text is not None:
@@ -179,11 +234,11 @@ def upload(char_key: str, name: str, *, text: str | None = None,
     else:
         raise FileError("text 또는 base64 중 하나가 필요합니다")
 
-    log.info("upload char=%s path=%s size=%s", char_key, rel, size)
+    log.info("upload scope=%s path=%s size=%s", scope, rel, size)
     return {"path": rel, "name": safe, "size": size}
 
 
-def upload_many(char_key: str, into: str, entries: list[dict], data: bytes, *, extract: bool = False) -> dict:
+def upload_many(scope: str, into: str, entries: list[dict], data: bytes, *, extract: bool = False) -> dict:
     """Many files from one binary body - the folder drop.
 
     `entries` is the header's list ({name, rel, size}) and `data` the files'
@@ -192,11 +247,12 @@ def upload_many(char_key: str, into: str, entries: list[dict], data: bytes, *, e
     JSON parse, and a round trip through the tunnel. This costs one round
     trip per ~16MB and no encoding at all.
     """
-    root = _root(char_key)
-    target = (into or "uploads").replace("\\", "/").strip("/")
+    root = _root(scope)
+    allowed, default = upload_targets(scope)
+    target = (into or default).replace("\\", "/").strip("/")
     area = target.split("/")[0]
-    if area not in ("uploads", "out"):
-        raise FileError(f"uploads/ 또는 out/ 안의 폴더여야 합니다: {into}")
+    if area not in allowed:
+        raise FileError(f"{' / '.join(allowed)} 안의 폴더여야 합니다: {into}")
     out: list[dict] = []
     offset = 0
     total = 0
@@ -211,11 +267,11 @@ def upload_many(char_key: str, into: str, entries: list[dict], data: bytes, *, e
         rel = str(e.get("rel") or "").replace("\\", "/").strip("/")
         if ".." in rel.split("/"):
             raise FileError(f"잘못된 하위 경로입니다: {rel}")
-        folder = _folder(char_key, target + ("/" + rel if rel else ""), area)
+        folder = _folder(scope, target + ("/" + rel if rel else ""), area)
         if size > MAX_UPLOAD:
             raise FileError(f"{safe}: 파일이 너무 큽니다 ({size} 바이트, 최대 {MAX_UPLOAD})")
         if extract and safe.lower().endswith(".zip"):
-            r = _extract_zip(char_key, folder, safe, bytes(chunk))
+            r = _extract_zip(scope, folder, safe, bytes(chunk))
             extracted += int(r.get("extracted") or 0)
             out.append(r)
             continue
@@ -223,7 +279,7 @@ def upload_many(char_key: str, into: str, entries: list[dict], data: bytes, *, e
         dest.write_bytes(chunk)
         total += size
         out.append({"path": dest.relative_to(root).as_posix(), "name": safe, "size": size})
-    log.info("upload-many char=%s into=%s files=%s size=%s extracted=%s", char_key, target, len(out), total, extracted)
+    log.info("upload-many scope=%s into=%s files=%s size=%s extracted=%s", scope, target, len(out), total, extracted)
     return {"files": out, "count": len(out), "size": total, "extracted": extracted}
 
 
@@ -238,7 +294,7 @@ PART_SUFFIX = ".part"
 MAX_CHUNKED = 2 * 1024 * 1024 * 1024
 
 
-def upload_chunk(char_key: str, into: str, name: str, rel: str, offset: int, total: int,
+def upload_chunk(scope: str, into: str, name: str, rel: str, offset: int, total: int,
                  data: bytes, *, last: bool = False, extract: bool = False) -> dict:
     """One piece of a large file, appended at `offset`.
 
@@ -246,18 +302,19 @@ def upload_chunk(char_key: str, into: str, name: str, rel: str, offset: int, tot
     two workers racing on the same name, or a retried chunk, would otherwise
     interleave into a corrupt file that looks complete.
     """
-    root = _root(char_key)
-    target = (into or "uploads").replace("\\", "/").strip("/")
+    root = _root(scope)
+    allowed, default = upload_targets(scope)
+    target = (into or default).replace("\\", "/").strip("/")
     area = target.split("/")[0]
-    if area not in ("uploads", "out"):
-        raise FileError(f"uploads/ 또는 out/ 안의 폴더여야 합니다: {into}")
+    if area not in allowed:
+        raise FileError(f"{' / '.join(allowed)} 안의 폴더여야 합니다: {into}")
     if total < 0 or total > MAX_CHUNKED:
         raise FileError(f"파일이 너무 큽니다 ({total} 바이트, 최대 {MAX_CHUNKED})")
     safe = Path(str(name or "upload")).name.strip() or "upload"
     rel = str(rel or "").replace("\\", "/").strip("/")
     if ".." in rel.split("/"):
         raise FileError(f"잘못된 하위 경로입니다: {rel}")
-    folder = _folder(char_key, target + ("/" + rel if rel else ""), area)
+    folder = _folder(scope, target + ("/" + rel if rel else ""), area)
     part = folder / (safe + PART_SUFFIX)
 
     have = part.stat().st_size if part.exists() else 0
@@ -278,12 +335,12 @@ def upload_chunk(char_key: str, into: str, name: str, rel: str, offset: int, tot
     if extract and safe.lower().endswith(".zip"):
         blob = part.read_bytes()
         part.unlink(missing_ok=True)
-        r = _extract_zip(char_key, folder, safe, blob)
-        log.info("upload-chunk char=%s %s extracted=%s", char_key, safe, r.get("extracted"))
+        r = _extract_zip(scope, folder, safe, blob)
+        log.info("upload-chunk scope=%s %s extracted=%s", scope, safe, r.get("extracted"))
         return {**r, "done": True}
     dest = folder / safe
     part.replace(dest)
-    log.info("upload-chunk char=%s %s size=%s", char_key, safe, have)
+    log.info("upload-chunk scope=%s %s size=%s", scope, safe, have)
     return {"path": dest.relative_to(root).as_posix(), "name": safe, "size": have,
             "received": have, "total": total, "done": True}
 
@@ -294,14 +351,14 @@ MAX_EXTRACT = 512 * 1024 * 1024
 MAX_EXTRACT_FILES = 5000
 
 
-def _extract_zip(char_key: str, parent: Path, zip_name: str, raw: bytes) -> dict:
+def _extract_zip(scope: str, parent: Path, zip_name: str, raw: bytes) -> dict:
     """Unpack `raw` into parent/<zip stem>/, refusing anything that would
     land outside it. Directory entries and OS junk (__MACOSX, .DS_Store) are
     skipped; nested folders are kept."""
     import io
     import zipfile
 
-    root = _root(char_key)
+    root = _root(scope)
     stem = Path(zip_name).stem.strip() or "zip"
     folder = parent / stem
     try:
@@ -336,11 +393,11 @@ def _extract_zip(char_key: str, parent: Path, zip_name: str, raw: bytes) -> dict
             total += m.file_size
             count += 1
     rel = folder.relative_to(root).as_posix()
-    log.info("upload char=%s zip=%s -> %s files=%s size=%s", char_key, zip_name, rel, count, total)
+    log.info("upload scope=%s zip=%s -> %s files=%s size=%s", scope, zip_name, rel, count, total)
     return {"path": rel, "name": stem, "size": total, "extracted": count}
 
 
-def zip_paths(char_key: str, rels: list[str]) -> tuple[Path, int]:
+def zip_paths(scope: str, rels: list[str]) -> tuple[Path, int]:
     """A zip of the given workspace paths (files or folders), written to a
     temp file the caller streams and deletes. Names inside the archive are
     relative to the paths' common parent, so one folder unpacks as itself
@@ -350,8 +407,8 @@ def zip_paths(char_key: str, rels: list[str]) -> tuple[Path, int]:
 
     targets: list[Path] = []
     for rel in rels:
-        p = _resolve(char_key, rel)
-        if p == _root(char_key):
+        p = _resolve(scope, rel)
+        if p == _root(scope):
             raise FileError("워크스페이스 전체는 받을 수 없습니다")
         if not p.exists():
             raise FileError(f"없습니다: {rel}")
@@ -370,14 +427,14 @@ def zip_paths(char_key: str, rels: list[str]) -> tuple[Path, int]:
             for f in files_in:
                 zf.write(f, f.relative_to(base).as_posix())
                 count += 1
-    log.info("zip char=%s paths=%s files=%s size=%s", char_key, len(rels), count, out.stat().st_size)
+    log.info("zip scope=%s paths=%s files=%s size=%s", scope, len(rels), count, out.stat().st_size)
     return out, count
 
 
-def _folder(char_key: str, rel: str, area: str) -> Path:
+def _folder(scope: str, rel: str, area: str) -> Path:
     """A folder path inside one area (uploads/, out/ ...), created on demand."""
-    path = _resolve(char_key, rel)
-    root = _root(char_key)
+    path = _resolve(scope, rel)
+    root = _root(scope)
     parts = path.relative_to(root).parts if path != root else ()
     if not parts or parts[0] != area:
         raise FileError(f"{area}/ 안의 폴더여야 합니다: {rel}")
@@ -387,65 +444,65 @@ def _folder(char_key: str, rel: str, area: str) -> Path:
     return path
 
 
-def _area_of(char_key: str, path: Path) -> str:
-    root = _root(char_key)
+def _area_of(scope: str, path: Path) -> str:
+    root = _root(scope)
     try:
         return path.relative_to(root).parts[0]
     except (ValueError, IndexError) as e:
         raise FileError("워크스페이스 밖의 경로입니다") from e
 
 
-def mkdir(char_key: str, rel: str) -> dict:
+def mkdir(scope: str, rel: str) -> dict:
     """A new folder inside a deletable area. Folders are how the user keeps
     fifty uploads and a season of outputs apart; the agent sees them as paths."""
-    path = _resolve(char_key, rel)
-    area = _area_of(char_key, path)
-    if not AREAS.get(area, (False, False))[0]:
+    path = _resolve(scope, rel)
+    area = _area_of(scope, path)
+    if not areas_for(scope).get(area, (False, False))[0]:
         raise FileError(f"{area}/ 안에는 폴더를 만들 수 없습니다")
     if path.exists():
         raise FileError(f"이미 있습니다: {rel}")
     path.mkdir(parents=True)
-    log.info("mkdir char=%s path=%s", char_key, rel)
-    return {"path": path.relative_to(_root(char_key)).as_posix()}
+    log.info("mkdir scope=%s path=%s", scope, rel)
+    return {"path": path.relative_to(_root(scope)).as_posix()}
 
 
-def move(char_key: str, src_rel: str, dst_rel: str) -> dict:
+def move(scope: str, src_rel: str, dst_rel: str) -> dict:
     """Move a file or folder within the deletable areas (uploads <-> out is
     fine; nothing enters original/ or leaves the workspace). `dst_rel` may be
     a folder (the name is kept) or a full new path."""
-    src = _resolve(char_key, src_rel)
+    src = _resolve(scope, src_rel)
     if not src.exists():
         raise FileError(f"없습니다: {src_rel}")
-    if src == _root(char_key):
+    if src == _root(scope):
         raise FileError("워크스페이스 자체는 옮길 수 없습니다")
-    dst = _resolve(char_key, dst_rel)
+    dst = _resolve(scope, dst_rel)
     if dst.is_dir():
         dst = dst / src.name
     for p in (src, dst):
-        area = _area_of(char_key, p)
-        if not AREAS.get(area, (False, False))[0]:
+        area = _area_of(scope, p)
+        if not areas_for(scope).get(area, (False, False))[0]:
             raise FileError(f"{area}/ 는 옮길 수 없는 영역입니다")
     if dst.exists():
-        raise FileError(f"같은 이름이 이미 있습니다: {dst.relative_to(_root(char_key)).as_posix()}")
+        raise FileError(f"같은 이름이 이미 있습니다: {dst.relative_to(_root(scope)).as_posix()}")
     if src.is_dir() and (dst == src or src in dst.parents):
         raise FileError("폴더를 자기 안으로 옮길 수 없습니다")
     dst.parent.mkdir(parents=True, exist_ok=True)
     shutil.move(str(src), str(dst))
-    out = dst.relative_to(_root(char_key)).as_posix()
-    log.info("move char=%s %s -> %s", char_key, src_rel, out)
+    out = dst.relative_to(_root(scope)).as_posix()
+    log.info("move scope=%s %s -> %s", scope, src_rel, out)
     return {"from": src_rel, "to": out}
 
 
-def delete(char_key: str, rel: str) -> dict:
-    path = _resolve(char_key, rel)
-    root = _root(char_key)
+def delete(scope: str, rel: str) -> dict:
+    path = _resolve(scope, rel)
+    root = _root(scope)
     if path == root:
         raise FileError("워크스페이스 자체는 지울 수 없습니다")
     try:
         area = path.relative_to(root).parts[0]
     except ValueError as e:
         raise FileError("워크스페이스 밖의 경로입니다") from e
-    if not AREAS.get(area, (False, False))[0]:
+    if not areas_for(scope).get(area, (False, False))[0]:
         raise FileError(f"{area}/ 안의 파일은 지울 수 없습니다")
     if not path.exists():
         raise FileError(f"파일이 없습니다: {rel}")
@@ -453,15 +510,16 @@ def delete(char_key: str, rel: str) -> dict:
         shutil.rmtree(path, ignore_errors=True)
     else:
         path.unlink()
-    log.info("delete char=%s path=%s", char_key, rel)
+    log.info("delete scope=%s path=%s", scope, rel)
     return {"deleted": rel}
 
 
-def clean(char_key: str, areas: list[str] | None = None) -> dict:
+def clean(scope: str, areas: list[str] | None = None) -> dict:
     """Empty the cleanable areas. Never touches original/ or uploads/."""
-    root = _root(char_key)
-    targets = [a for a in (areas or [a for a, (_, c) in AREAS.items() if c])
-               if AREAS.get(a, (False, False))[1]]
+    root = _root(scope)
+    table = areas_for(scope)
+    targets = [a for a in (areas or [a for a, (_, c) in table.items() if c])
+               if table.get(a, (False, False))[1]]
     removed, freed = 0, 0
     for area in targets:
         d = root / area
@@ -477,16 +535,16 @@ def clean(char_key: str, areas: list[str] | None = None) -> dict:
                     f.rmdir()
             except OSError:
                 continue
-    log.info("clean char=%s areas=%s removed=%s freed=%s", char_key, targets, removed, freed)
+    log.info("clean scope=%s areas=%s removed=%s freed=%s", scope, targets, removed, freed)
     return {"areas": targets, "removed": removed, "freed": freed}
 
 
-def agent_list(char_key: str, rel: str = "") -> str:
+def agent_list(scope: str, rel: str = "") -> str:
     """Directory listing for the agent, as text."""
-    path = _resolve(char_key, rel)
+    path = _resolve(scope, rel)
     if not path.is_dir():
         raise FileError(f"디렉터리가 아닙니다: {rel or '.'}")
-    root = _root(char_key)
+    root = _root(scope)
     rows = []
     for f in sorted(path.iterdir()):
         try:
@@ -498,8 +556,8 @@ def agent_list(char_key: str, rel: str = "") -> str:
     return "\n".join(rows) or "(비어 있습니다)"
 
 
-def agent_read(char_key: str, rel: str, limit: int = 40000) -> str:
-    path = _resolve(char_key, rel)
+def agent_read(scope: str, rel: str, limit: int = 40000) -> str:
+    path = _resolve(scope, rel)
     if not path.is_file():
         raise FileError(f"파일이 없습니다: {rel}")
     if path.suffix.lower() not in TEXTUAL:
@@ -510,8 +568,8 @@ def agent_read(char_key: str, rel: str, limit: int = 40000) -> str:
     return text
 
 
-def stats(char_key: str) -> dict[str, Any]:
-    data = listing(char_key)
+def stats(scope: str) -> dict[str, Any]:
+    data = listing(scope)
     return {
         "totalSize": data["totalSize"],
         "byArea": {a["area"]: {"count": a["count"], "size": a["size"]} for a in data["areas"]},
