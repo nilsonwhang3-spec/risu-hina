@@ -271,6 +271,13 @@ DEFAULTS: dict[str, Any] = {
         # `<data>/studio`.
         "libraryPath": "",
     },
+    "workspace": {
+        # The ONE global file space every bot shares (projects/, studio/,
+        # hina/). Configurable for the same drive reason as the studio;
+        # empty means `<data>/space`. Files are never moved automatically
+        # when this changes.
+        "globalPath": "",
+    },
 }
 
 _lock = threading.RLock()

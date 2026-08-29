@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import re
 import shutil
+import time
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +40,88 @@ class WorkspaceError(ValueError):
 
 
 STUDIO = "studio"
+
+# Windows-forbidden filename characters plus control bytes. Korean stays: the
+# bot's own name is the folder name, that is the point of the hina/ area.
+_FOLDER_BAD = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
+
+
+def space_root() -> Path:
+    """The ONE global file space (`workspace.globalPath`, or `<data>/space`).
+
+    Every bot's agent sees the same root: projects/ the user manages, studio/
+    the image library, hina/<봇이름>/ the agent's own work area. Configurable
+    for the same drive reason as the studio library; `files._resolve` compares
+    resolved paths against whatever this returns, so containment holds
+    wherever it points.
+    """
+    raw = str((config.section("workspace") or {}).get("globalPath") or "").strip()
+    return (Path(raw).expanduser() if raw else config.DATA_DIR / "space")
+
+
+def ensure_space() -> Path:
+    """Create the space's top-level areas, on the first request that needs it."""
+    from . import files
+    base = space_root()
+    for area in files.SPACE_AREAS:
+        (base / area).mkdir(parents=True, exist_ok=True)
+    return base
+
+
+def _bots_map_path() -> Path:
+    return space_root() / ".hina" / "bots.json"
+
+
+def _bots_map() -> dict:
+    try:
+        return json.loads(_bots_map_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_bots_map(mapping: dict) -> None:
+    p = _bots_map_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(mapping, ensure_ascii=False, indent=1), encoding="utf-8")
+
+
+def bot_folder(char_key: str) -> str:
+    """The bot-named folder under projects/ and hina/, pinned in bots.json.
+
+    Pinned so a rename does not orphan the folder; family bots share one
+    folder by the family key, the same sharing rule root() applies. A name
+    collision takes `이름~2` rather than merging two bots' work.
+    """
+    key = family_of(char_key) or char_key
+    if not key or SAFE.sub("", key) != key:
+        raise WorkspaceError(f"unsafe workspace key: {char_key!r}")
+    mapping = _bots_map()
+    hit = mapping.get(key)
+    if isinstance(hit, dict) and str(hit.get("folder") or ""):
+        return str(hit["folder"])
+    name = ""
+    try:
+        row = db.one("SELECT name FROM characters WHERE char_key = ?", (key,))
+        name = str(row["name"] if row else "") or ""
+    except Exception:  # noqa: BLE001 - before the table exists (first boot)
+        name = ""
+    folder = _FOLDER_BAD.sub("", name).strip().strip(".") or key
+    taken = {str(v.get("folder") or "") for v in mapping.values() if isinstance(v, dict)}
+    base, n = folder, 2
+    while folder in taken:
+        folder = f"{base}~{n}"
+        n += 1
+    mapping[key] = {"folder": folder, "createdAt": time.time()}
+    _save_bots_map(mapping)
+    return folder
+
+
+def hina_dir(char_key: str) -> Path:
+    """The agent's own work area for one bot: hina/<봇폴더>/{scripts,scratch,out}."""
+    base = space_root() / "hina" / bot_folder(char_key)
+    for sub in ("scripts", "scratch", "out"):
+        (base / sub).mkdir(parents=True, exist_ok=True)
+    return base
 
 
 def studio_root() -> Path:

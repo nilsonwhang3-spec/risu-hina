@@ -61,6 +61,25 @@ AREAS: dict[str, tuple[bool, bool]] = {
 # "c<hash>", so this can never collide with a bot.
 STUDIO = "studio"
 
+# The ONE global space every bot shares. Same non-collision argument as STUDIO.
+SPACE = "space"
+
+# The space's areas. Nothing here is cleanable globally: projects/ and studio/
+# are the user's own material, and hina/ holds every bot's work at once -
+# cleanup is a per-bot verb (`clean_bot`), never a broom over the whole space.
+SPACE_AREAS: dict[str, tuple[bool, bool]] = {
+    # The user's own project folders, one per bot by convention (they manage
+    # the structure; the default upload landing).
+    "projects": (True, False),
+    # The asset studio library (styles/characters/fragments/scenes/images).
+    "studio": (True, False),
+    # The agent's work areas, one folder per bot name: scripts/scratch/out.
+    "hina": (True, False),
+    # Ours: skills copies, the bots.json map, migration manifests. Hidden
+    # from the panel by the same rule that hides .scratch.
+    ".hina": (False, True),
+}
+
 # The studio's areas. Everything is deletable and **nothing is cleanable**:
 # this is the user's own library, not a scratch space, and "정리" offering to
 # sweep away a folder of generated images would be the worst button in the app.
@@ -84,6 +103,8 @@ STUDIO_AREAS: dict[str, tuple[bool, bool]] = {
 
 
 def areas_for(scope: str) -> dict[str, tuple[bool, bool]]:
+    if scope == SPACE:
+        return SPACE_AREAS
     return STUDIO_AREAS if scope == STUDIO else AREAS
 
 
@@ -95,6 +116,8 @@ def upload_targets(scope: str) -> tuple[tuple[str, ...], str]:
     than a feature. In the studio every area but our own `.studio` is somewhere
     a person legitimately puts files, and images are what arrive most.
     """
+    if scope == SPACE:
+        return tuple(a for a in SPACE_AREAS if not a.startswith(".")), "projects"
     if scope == STUDIO:
         return tuple(a for a in STUDIO_AREAS if not a.startswith(".")), "images"
     return ("uploads", "out"), "uploads"
@@ -113,6 +136,8 @@ class FileError(ValueError):
 
 
 def _root(scope: str) -> Path:
+    if scope == SPACE:
+        return workspace.space_root().resolve()
     return workspace.root(scope).resolve()
 
 
@@ -539,6 +564,138 @@ def clean(scope: str, areas: list[str] | None = None) -> dict:
                 continue
     log.info("clean scope=%s areas=%s removed=%s freed=%s", scope, targets, removed, freed)
     return {"areas": targets, "removed": removed, "freed": freed}
+
+
+def _sweep(d: Path) -> tuple[int, int]:
+    """Empty one directory tree, keeping the directory itself. (removed, freed)."""
+    removed = freed = 0
+    if not d.is_dir():
+        return 0, 0
+    for f in sorted(d.rglob("*"), reverse=True):
+        try:
+            if f.is_file():
+                freed += f.stat().st_size
+                f.unlink()
+                removed += 1
+            elif f.is_dir():
+                f.rmdir()
+        except OSError:
+            continue
+    return removed, freed
+
+
+def clean_bot(char_key: str, areas: list[str] | None = None) -> dict:
+    """정리, per bot, in the global space: this bot's hina/ scratch and
+    scripts by default, out/ only on request (the user may not have taken the
+    deliverables yet), plus its SYSTEM .scratch/ (regenerated next run).
+
+    There is deliberately no global clean: hina/ holds every bot's work at
+    once, and projects/ and studio/ are the user's own material.
+    """
+    allowed = ("scratch", "scripts", "out")
+    targets = [a for a in (areas or ["scratch", "scripts"]) if a in allowed]
+    base = workspace.space_root() / "hina" / workspace.bot_folder(char_key)
+    removed = freed = 0
+    for area in targets:
+        r, f = _sweep(base / area)
+        removed += r
+        freed += f
+    r, f = _sweep(workspace.root(char_key) / ".scratch")
+    removed += r
+    freed += f
+    log.info("clean-bot key=%s areas=%s removed=%s freed=%s", char_key, targets, removed, freed)
+    return {"areas": targets, "removed": removed, "freed": freed}
+
+
+def _hidden(rel: str) -> bool:
+    """True when any directory component is a dot-name (.hina, .studio, …)."""
+    return any(p.startswith(".") for p in rel.split("/")[:-1])
+
+
+def search_names(scope: str, pattern: str, base: str = "", limit: int = 200) -> dict:
+    """Filename glob over one scope's tree, dot-areas excluded.
+
+    Returns every match count but at most `limit` rows - the caller must state
+    the truncation (docs/07 §3-3: a clipped listing that does not say so is a
+    wrong answer, not a short one).
+    """
+    import fnmatch
+
+    root = _root(scope)
+    start = _resolve(scope, base)
+    if not start.is_dir():
+        raise FileError(f"디렉터리가 아닙니다: {base or '.'}")
+    pat = (pattern or "*").strip() or "*"
+    # A pattern with a slash matches the whole relative path; a bare name
+    # pattern matches the filename, wherever it lives.
+    on_path = "/" in pat
+    rows: list[dict] = []
+    total = 0
+    for f in sorted(start.rglob("*")):
+        if not f.is_file() or f.name.endswith(PART_SUFFIX):
+            continue
+        rel = f.relative_to(root).as_posix()
+        if _hidden(rel):
+            continue
+        if not fnmatch.fnmatch((rel if on_path else f.name).lower(), pat.lower()):
+            continue
+        total += 1
+        if len(rows) < max(1, limit):
+            try:
+                st = f.stat()
+            except OSError:
+                continue
+            rows.append({"path": rel, "size": st.st_size, "modified": st.st_mtime})
+    return {"total": total, "files": rows}
+
+
+# Content search skips anything bigger than this rather than choking on it -
+# the skip is counted and reported, never silent.
+MAX_SEARCH_FILE = 4 * 1024 * 1024
+
+
+def search_content(scope: str, needle: str, glob: str = "", limit: int = 50) -> dict:
+    """Substring search over the scope's textual files, dot-areas excluded.
+
+    At most 5 hits per file and `limit` rows overall; every hit is still
+    counted, and skipped files (too big, unreadable) are counted too, so the
+    caller can state exactly what was and was not looked at.
+    """
+    import fnmatch
+
+    if not (needle or "").strip():
+        raise FileError("검색어가 필요합니다")
+    root = _root(scope)
+    low = needle.lower()
+    rows: list[dict] = []
+    total_hits = scanned = skipped = 0
+    for f in sorted(root.rglob("*")):
+        if not f.is_file() or f.name.endswith(PART_SUFFIX):
+            continue
+        rel = f.relative_to(root).as_posix()
+        if _hidden(rel):
+            continue
+        if glob and not fnmatch.fnmatch(rel.lower(), glob.lower()):
+            continue
+        if f.suffix.lower() not in TEXTUAL:
+            continue
+        try:
+            if f.stat().st_size > MAX_SEARCH_FILE:
+                skipped += 1
+                continue
+            text = f.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            skipped += 1
+            continue
+        scanned += 1
+        per = 0
+        for ln, line in enumerate(text.splitlines(), 1):
+            if low in line.lower():
+                total_hits += 1
+                if per < 5 and len(rows) < max(1, limit):
+                    rows.append({"path": rel, "line": ln, "text": line.strip()[:160]})
+                    per += 1
+    return {"hits": rows, "totalHits": total_hits, "scanned": scanned, "skipped": skipped}
 
 
 def agent_list(scope: str, rel: str = "") -> str:

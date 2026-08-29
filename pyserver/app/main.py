@@ -111,6 +111,9 @@ def _scope(arg: dict) -> str:
     something else (global vs this chat's lorebook), and one wire name meaning
     two things is how a reader ends up guessing.
     """
+    if arg.get("space"):
+        workspace.ensure_space()
+        return files.SPACE
     if arg.get("studio"):
         workspace.ensure_studio()
         return files.STUDIO
