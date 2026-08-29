@@ -567,10 +567,11 @@ class AppState {
    *
    * Only the currently open chat is sent by default. A 394-turn chat is several
    * megabytes, and sending every chat of a character on every panel open would
-   * make the common case pay for the rare one.
+   * make the common case pay for the rare one. `chatIndex` sends one other
+   * chat of the same bot instead - what clicking a row in the picker does.
    */
   async upload(opts: { allChats?: boolean; force?: boolean; cardReset?: boolean;
-                       chatReset?: boolean } = {}): Promise<WorkspaceInfo> {
+                       chatReset?: boolean; chatIndex?: number } = {}): Promise<WorkspaceInfo> {
     if (!this.slot || !this.character) throw new Error('호스트 상태를 먼저 읽어야 합니다');
     const chats = Array.isArray(this.character.chats) ? this.character.chats : [];
     const payload: Record<string, unknown> = {
@@ -588,6 +589,8 @@ class AppState {
     };
     if (opts.allChats) {
       payload.chats = chats.map((c, i) => ({ chat: c, chatIndex: i }));
+    } else if (opts.chatIndex !== undefined && opts.chatIndex !== this.slot.chatIndex) {
+      payload.chats = [{ chat: await this.chatAt(opts.chatIndex), chatIndex: opts.chatIndex }];
     } else {
       payload.chats = [{ chat: this.liveChat, chatIndex: this.slot.chatIndex }];
     }
@@ -604,6 +607,72 @@ class AppState {
     // now, 반영 waits for the store to catch up (bot bar gate).
     void this.syncAssets();
     return res.workspace;
+  }
+
+  /**
+   * One of the bot's chats, read fresh from RisuAI.
+   *
+   * `getChatFromIndex` is asked first and the character object we already hold
+   * is only the fallback: PocketRisu hands `readCharacter` **stubs** for chats
+   * it has not loaded yet (see host.cloneBot), and a stub has no `message`
+   * list at all - uploading one would look like a chat that lost every turn.
+   * A stub from both sources throws, and the picker says what to do about it.
+   */
+  private async chatAt(chatIndex: number): Promise<RisuChat> {
+    const characterIndex = this.slot!.characterIndex;
+    try {
+      return await host.readChat({ characterIndex, chatIndex });
+    } catch (e) {
+      const fallback = (this.character?.chats ?? [])[chatIndex];
+      if (fallback && Array.isArray(fallback.message)) return fallback;
+      throw e;
+    }
+  }
+
+  /**
+   * Open one of the bot's chats for editing, loading it if it is not in the
+   * workspace yet.
+   *
+   * The panel used to refuse any chat but the one RisuAI had open ("open that
+   * chat in RisuAI and press 🔄"), while 이 봇의 모든 챗 불러오기 right below
+   * loaded all of them and let you edit exactly those chats - so the refusal
+   * was a detour, not a constraint. RisuAI hands us every chat of the selected
+   * character, and the write-back addresses the chat by its own id and index
+   * (see `chatSlot`), so a chat that is not on screen in RisuAI is as editable
+   * as the one that is.
+   */
+  async openChat(chatIndex: number): Promise<void> {
+    const ws = await this.upload({ chatIndex });
+    // A single-chat upload answers with just that chat, so it is the one to
+    // select - `upload` only re-picks when the previous key went missing.
+    const key = ws.chats[0]?.chatKey ?? '';
+    if (key) this.activeChatKey = key;
+    await this.loadTurns();
+  }
+
+  /**
+   * Which chat of the live bot a write-back addresses.
+   *
+   * Not necessarily the one RisuAI has open: the picker loads any chat of the
+   * bot. The index recorded at upload time is only a hint - chats get
+   * reordered, deleted and copied in RisuAI while the panel is open - so the
+   * chat **id** is what is trusted and the index is re-derived from a fresh
+   * read. `writeChat` then re-reads at that index and refuses the write if the
+   * id moved again between here and there.
+   */
+  private async chatSlot(): Promise<host.Slot> {
+    if (!this.slot) throw new Error('호스트 상태를 먼저 읽어야 합니다');
+    const wanted = this.activeChat?.chatId ?? '';
+    if (!wanted || wanted === (this.liveChat?.id ?? '')) return this.slot;
+    const characterIndex = this.slot.characterIndex;
+    const char = await host.readCharacter(characterIndex);
+    const chats = Array.isArray(char.chats) ? char.chats : [];
+    const chatIndex = chats.findIndex((c) => String(c?.id ?? '') === wanted);
+    if (chatIndex < 0) {
+      throw new host.HostError('missing',
+        'RisuAI에서 이 챗을 찾지 못했습니다 (지워졌을 수 있습니다). 🔄 로 다시 읽어 주세요');
+    }
+    return { characterIndex, chatIndex };
   }
 
   // --- assets (background importer) ----------------------------------------
@@ -823,7 +892,9 @@ class AppState {
     const patch = await this.patch();
     const update = this.updateFrom(patch, false);
     if (!update) return { mode: 'noop', applied: 0, lore: 0, memory: 0, warnings: patch.warnings };
-    const r = await host.writeChat(this.slot, this.liveChat?.id, update);
+    // The chat being edited, which is not always the one RisuAI has open.
+    const slot = await this.chatSlot();
+    const r = await host.writeChat(slot, this.activeChat?.chatId || this.liveChat?.id, update);
     return {
       mode: r.mode, applied: r.applied,
       lore: patch.lore?.changed ?? 0, memory: patch.memory?.changed ?? 0,
@@ -862,7 +933,7 @@ class AppState {
     const update = this.updateFrom(patch, true) ?? {};
     if (!update.messages) update.messages = (await this.messagesFromExport()) ?? undefined;
     delete update.edits;
-    await host.saveAsCopy(this.slot, update, name);
+    await host.saveAsCopy(await this.chatSlot(), update, name);
   }
 
   private async messagesFromExport(): Promise<RisuMessage[] | null> {
@@ -1647,10 +1718,23 @@ class AppState {
     this.emit();
   }
 
-  /** The chat twin of rereadCard. */
+  /**
+   * The chat twin of rereadCard.
+   *
+   * It has to re-read the chat that was written, not whichever one RisuAI has
+   * open: taking the live chat here would ingest a chat nobody edited and
+   * leave the edited one holding a baseline one write behind.
+   */
   private async rereadChat(): Promise<void> {
+    const wanted = this.activeChat?.chatId ?? '';
+    const key = this.activeChatKey;
     await this.readHost();
-    if (this.slot && this.character) await this.upload({ chatReset: true });
+    if (this.slot && this.character) {
+      const chats = Array.isArray(this.character.chats) ? this.character.chats : [];
+      const at = wanted ? chats.findIndex((c) => String(c?.id ?? '') === wanted) : -1;
+      await this.upload(at < 0 ? { chatReset: true } : { chatReset: true, chatIndex: at });
+      if (key && this.workspace?.chats.some((c) => c.chatKey === key)) this.activeChatKey = key;
+    }
     if (this.activeChatKey) await this.loadTurns();
     this.epoch += 1;
     this.emit();

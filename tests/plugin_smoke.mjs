@@ -1613,6 +1613,61 @@ console.log('\ntest_agent_welcome');
   document.querySelector('.agentinput').value = '';
 }
 
+console.log('\ntest_open_a_chat_risuai_does_not_have_open');
+{
+  // Reported: clicking a chat that was not loaded sent the user out to RisuAI
+  // ("open that chat there and press 🔄"), while 이 봇의 모든 챗 불러오기 right
+  // below loaded and edited exactly those chats. So the refusal was a detour.
+  // Clicking loads the chat now - and the write-back has to land on THAT chat,
+  // not on the one RisuAI has open (chatPage = 0, i.e. chatA, throughout).
+  clickById(document, 'tab-chats');
+  await settle(700);
+  document.querySelector('.folderhead')?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(250);
+  const row = document.querySelector('.folderbody.open .chatitem');
+  check('the folder lists the chat RisuAI does not have open', !!row);
+  const liveBefore = JSON.stringify(host.liveChar.chats[0].message);
+  check('clicking it starts the load', clickButton(row, '챗 편집'));
+  await settle(2000);
+  check('it does not send the user back to RisuAI',
+        !/RisuAI에서 그 챗을/.test(document.body.innerHTML));
+  check('the editor opened',
+        document.getElementById('tab-editor')?.style.display !== 'none');
+  // chatB is 4 turns, chatA is 10: the count is what tells them apart.
+  check('and it is showing the clicked chat, not the open one',
+        document.querySelectorAll('.turn').length === 4,
+        String(document.querySelectorAll('.turn').length));
+
+  document.querySelector('.turn button[title="이 턴 편집"]')
+    ?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(600);
+  const area = document.querySelector('.modalbox textarea.turnedit');
+  check('a turn of it can be edited', !!area);
+  area.value = '옆 챗에서 고친 본문입니다.';
+  // Scoped to the turn modal: the settings modal from the preset test is still
+  // in the tree, and it has a 저장 of its own.
+  [...area.closest('.modalbox').querySelectorAll('button')].find((b) => b.textContent === '저장')
+    ?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(1200);
+  check('the edit is pending on it', !!document.querySelector('.turn.changed'));
+
+  clickTool(document, 'apply');
+  await settle(400);
+  clickButton(document.querySelector('.popover'), 'RisuAI에 반영');
+  await settle(1600);
+  const written = host.liveChar.chats[1].message;
+  check('the write-back landed on the clicked chat',
+        written.some((m) => m.data.includes('옆 챗에서 고친 본문입니다')),
+        written[0]?.data?.slice(0, 60));
+  check('and left the chat RisuAI has open alone',
+        JSON.stringify(host.liveChar.chats[0].message) === liveBefore);
+  check('its chatIds survived', written.every((m, i) => m.chatId === `chatB-m${i}`));
+  check('its turn count is unchanged', written.length === 4, String(written.length));
+  check('the chat bar is back to 변경 없음',
+        /변경 없음/.test(document.querySelector('.chatbar .changesum')?.textContent || ''),
+        document.querySelector('.chatbar .changesum')?.textContent);
+}
+
 console.log('\ntest_no_character_selected');
 host.selectNone();
 clickById(document, 'tab-chats');

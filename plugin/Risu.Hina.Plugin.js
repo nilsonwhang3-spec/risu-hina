@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.9.5
+//@display-name Risu Hina v0.9.6
 //@api 3.0
-//@version 0.9.5
+//@version 0.9.6
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -104,7 +104,7 @@
       this.tokenSafe = true;
       this.lastHealth = body;
       this.probeInfo = "";
-      this.gate = versionGate("0.9.5", String(body.version || ""));
+      this.gate = versionGate("0.9.6", String(body.version || ""));
       return body;
     }
     /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -2373,7 +2373,8 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
      *
      * Only the currently open chat is sent by default. A 394-turn chat is several
      * megabytes, and sending every chat of a character on every panel open would
-     * make the common case pay for the rare one.
+     * make the common case pay for the rare one. `chatIndex` sends one other
+     * chat of the same bot instead - what clicking a row in the picker does.
      */
     async upload(opts = {}) {
       if (!this.slot || !this.character) throw new Error("\uD638\uC2A4\uD2B8 \uC0C1\uD0DC\uB97C \uBA3C\uC800 \uC77D\uC5B4\uC57C \uD569\uB2C8\uB2E4");
@@ -2393,6 +2394,8 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       };
       if (opts.allChats) {
         payload.chats = chats.map((c, i) => ({ chat: c, chatIndex: i }));
+      } else if (opts.chatIndex !== void 0 && opts.chatIndex !== this.slot.chatIndex) {
+        payload.chats = [{ chat: await this.chatAt(opts.chatIndex), chatIndex: opts.chatIndex }];
       } else {
         payload.chats = [{ chat: this.liveChat, chatIndex: this.slot.chatIndex }];
       }
@@ -2406,6 +2409,69 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       void this.refreshBotChanges();
       void this.syncAssets();
       return res.workspace;
+    }
+    /**
+     * One of the bot's chats, read fresh from RisuAI.
+     *
+     * `getChatFromIndex` is asked first and the character object we already hold
+     * is only the fallback: PocketRisu hands `readCharacter` **stubs** for chats
+     * it has not loaded yet (see host.cloneBot), and a stub has no `message`
+     * list at all - uploading one would look like a chat that lost every turn.
+     * A stub from both sources throws, and the picker says what to do about it.
+     */
+    async chatAt(chatIndex) {
+      const characterIndex = this.slot.characterIndex;
+      try {
+        return await readChat({ characterIndex, chatIndex });
+      } catch (e) {
+        const fallback = (this.character?.chats ?? [])[chatIndex];
+        if (fallback && Array.isArray(fallback.message)) return fallback;
+        throw e;
+      }
+    }
+    /**
+     * Open one of the bot's chats for editing, loading it if it is not in the
+     * workspace yet.
+     *
+     * The panel used to refuse any chat but the one RisuAI had open ("open that
+     * chat in RisuAI and press 🔄"), while 이 봇의 모든 챗 불러오기 right below
+     * loaded all of them and let you edit exactly those chats - so the refusal
+     * was a detour, not a constraint. RisuAI hands us every chat of the selected
+     * character, and the write-back addresses the chat by its own id and index
+     * (see `chatSlot`), so a chat that is not on screen in RisuAI is as editable
+     * as the one that is.
+     */
+    async openChat(chatIndex) {
+      const ws = await this.upload({ chatIndex });
+      const key = ws.chats[0]?.chatKey ?? "";
+      if (key) this.activeChatKey = key;
+      await this.loadTurns();
+    }
+    /**
+     * Which chat of the live bot a write-back addresses.
+     *
+     * Not necessarily the one RisuAI has open: the picker loads any chat of the
+     * bot. The index recorded at upload time is only a hint - chats get
+     * reordered, deleted and copied in RisuAI while the panel is open - so the
+     * chat **id** is what is trusted and the index is re-derived from a fresh
+     * read. `writeChat` then re-reads at that index and refuses the write if the
+     * id moved again between here and there.
+     */
+    async chatSlot() {
+      if (!this.slot) throw new Error("\uD638\uC2A4\uD2B8 \uC0C1\uD0DC\uB97C \uBA3C\uC800 \uC77D\uC5B4\uC57C \uD569\uB2C8\uB2E4");
+      const wanted = this.activeChat?.chatId ?? "";
+      if (!wanted || wanted === (this.liveChat?.id ?? "")) return this.slot;
+      const characterIndex = this.slot.characterIndex;
+      const char = await readCharacter(characterIndex);
+      const chats = Array.isArray(char.chats) ? char.chats : [];
+      const chatIndex = chats.findIndex((c) => String(c?.id ?? "") === wanted);
+      if (chatIndex < 0) {
+        throw new HostError(
+          "missing",
+          "RisuAI\uC5D0\uC11C \uC774 \uCC57\uC744 \uCC3E\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4 (\uC9C0\uC6CC\uC84C\uC744 \uC218 \uC788\uC2B5\uB2C8\uB2E4). \u{1F504} \uB85C \uB2E4\uC2DC \uC77D\uC5B4 \uC8FC\uC138\uC694"
+        );
+      }
+      return { characterIndex, chatIndex };
     }
     // --- assets (background importer) ----------------------------------------
     /**
@@ -2607,7 +2673,8 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       const patch = await this.patch();
       const update = this.updateFrom(patch, false);
       if (!update) return { mode: "noop", applied: 0, lore: 0, memory: 0, warnings: patch.warnings };
-      const r = await writeChat(this.slot, this.liveChat?.id, update);
+      const slot = await this.chatSlot();
+      const r = await writeChat(slot, this.activeChat?.chatId || this.liveChat?.id, update);
       return {
         mode: r.mode,
         applied: r.applied,
@@ -2644,7 +2711,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       const update = this.updateFrom(patch, true) ?? {};
       if (!update.messages) update.messages = await this.messagesFromExport() ?? void 0;
       delete update.edits;
-      await saveAsCopy(this.slot, update, name);
+      await saveAsCopy(await this.chatSlot(), update, name);
     }
     async messagesFromExport() {
       const res = await transport.get(
@@ -3296,10 +3363,23 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       this.epoch += 1;
       this.emit();
     }
-    /** The chat twin of rereadCard. */
+    /**
+     * The chat twin of rereadCard.
+     *
+     * It has to re-read the chat that was written, not whichever one RisuAI has
+     * open: taking the live chat here would ingest a chat nobody edited and
+     * leave the edited one holding a baseline one write behind.
+     */
     async rereadChat() {
+      const wanted = this.activeChat?.chatId ?? "";
+      const key = this.activeChatKey;
       await this.readHost();
-      if (this.slot && this.character) await this.upload({ chatReset: true });
+      if (this.slot && this.character) {
+        const chats = Array.isArray(this.character.chats) ? this.character.chats : [];
+        const at = wanted ? chats.findIndex((c) => String(c?.id ?? "") === wanted) : -1;
+        await this.upload(at < 0 ? { chatReset: true } : { chatReset: true, chatIndex: at });
+        if (key && this.workspace?.chats.some((c) => c.chatKey === key)) this.activeChatKey = key;
+      }
       if (this.activeChatKey) await this.loadTurns();
       this.epoch += 1;
       this.emit();
@@ -3601,7 +3681,6 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     }
     const makeItem = (r) => {
       const loaded = loadedFor(r.chat);
-      const isCurrent = r.index === state.slot?.chatIndex;
       const edit = el("button", { class: "ghost tiny", text: "\uCC57 \uD3B8\uC9D1" });
       const item = el("div", {
         class: "chatitem" + (loaded && loaded.chatKey === state.activeChatKey ? " current" : "")
@@ -3610,19 +3689,27 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         el("span", { class: "n", text: `${(r.chat.message ?? []).length}\uD134` }),
         edit
       ]);
+      let busy = false;
       const enter = async () => {
+        if (busy) return;
         if (loaded) {
           await state.loadTurns(loaded.chatKey);
           setEditMode("chat", "editor");
           return;
         }
-        if (!isCurrent) {
-          flash(pad, "RisuAI\uC5D0\uC11C \uADF8 \uCC57\uC744 \uBA3C\uC800 \uC5F0 \uB2E4\uC74C \u{1F504} \uB97C \uB20C\uB7EC \uC8FC\uC138\uC694.");
-          return;
+        busy = true;
+        edit.disabled = true;
+        edit.textContent = "\uBD88\uB7EC\uC624\uB294 \uC911\u2026";
+        try {
+          await state.openChat(r.index);
+          setEditMode("chat", "editor");
+        } catch (e) {
+          flash(pad, e instanceof HostError && e.code === "missing" ? "RisuAI\uAC00 \uC774 \uCC57\uC744 \uC544\uC9C1 \uC77D\uC5B4 \uB450\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4. RisuAI\uC5D0\uC11C \uADF8 \uCC57\uC744 \uD55C \uBC88 \uC5F0 \uB2E4\uC74C \u{1F504} \uB97C \uB20C\uB7EC \uC8FC\uC138\uC694." : "\uCC57\uC744 \uBD88\uB7EC\uC624\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + (e instanceof Error ? e.message : String(e)));
+        } finally {
+          busy = false;
+          edit.disabled = false;
+          edit.textContent = "\uCC57 \uD3B8\uC9D1";
         }
-        await state.upload({});
-        await state.loadTurns();
-        setEditMode("chat", "editor");
       };
       item.addEventListener("click", () => void enter());
       edit.addEventListener("click", (ev) => {
@@ -3665,7 +3752,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     }
     pad.appendChild(el("div", { class: "row", style: { marginTop: "12px" } }, [
       buildUploadAll(),
-      el("span", { class: "hint", text: "\uAE30\uBCF8\uC801\uC73C\uB85C \uD604\uC7AC \uC5F4\uB824 \uC788\uB294 \uCC57\uB9CC \uC62C\uB9BD\uB2C8\uB2E4." })
+      el("span", { class: "hint", text: "\uCC57\uC744 \uB204\uB974\uBA74 \uADF8 \uCC57\uB9CC \uBD88\uB7EC\uC635\uB2C8\uB2E4. \uC5EC\uB7EC \uCC57\uC744 \uC624\uAC00\uBA70 \uBCFC \uB54C\uB9CC \uC774 \uBC84\uD2BC\uC744 \uC4F0\uC138\uC694." })
     ]));
   }
   function initials(name) {
@@ -8654,7 +8741,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.9.5",
+            version: "0.9.6",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -9170,7 +9257,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.9.5"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.9.6"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -11074,7 +11161,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.9.5"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.9.6"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
@@ -11150,7 +11237,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.9.5" }),
+        el("span", { class: "dim", text: "v0.9.6" }),
         healthEl,
         el("span", { class: "spacer" }),
         reload,
@@ -11406,6 +11493,6 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.9.5"} loaded`);
+    console.log(`[risu-hina] v${"0.9.6"} loaded`);
   })();
 })();

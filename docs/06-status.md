@@ -1,4 +1,4 @@
-# 06. Implementation status — as of 2026-08-29 (v0.9.5 BETA, Risu Hina)
+# 06. Implementation status — as of 2026-08-29 (v0.9.6 BETA, Risu Hina)
 
 One page for whoever picks this up next session (= me). What exists, what changed, how far it is deployed,
 and what is left. The *why* of the design is `docs/04` (assets and charx are in Appendix E), the storage layout is `docs/02`, the deployment environment is `docs/00`.
@@ -6,7 +6,9 @@ The original plan for bot edit mode (M0 measurements, M2 spec) is `~/.claude/pla
 
 ## 0. Starting point for the next session (read this first)
 
-**Code state**: master = **v0.9.5 BETA** (§1-14 the repo goes English · §1-13 3-way merge on reopen · §1-12 an intermediate cache blocking the connection (POST probe, no-store) · §1-11 one web-search tool card with three options · §1-10 built-in search measured, mobile, plugin-reload diagnosis · §1-9 search · §1-8 round 10 · §1-7 · §1-6 · §1-5; the docs/07 planning is still pending) — gate ALL GREEN. 0.7.0 changes the minor, so **the version gate trips**: raise the backend and the plugin on the RisuAI side has to be raised with `+` as well (the header says so).
+**Releases are manual now (2026-08-29, the user's instruction).** The plugin has users other than us, so **do not release or deploy after every fix**. Land the change, run the gate, leave it on master, and say what is waiting; `tools/release.py`, `gh release create` and the test-server deploy happen **only when the user asks for them**. One mechanical consequence to keep in mind: `tools/bundle.py` writes `plugin/Risu.Hina.Plugin.js` (and the old-name twin) into the repository, and *that committed file is what RisuAI's `+` update check reads* — so a release is not the tag, it is that commit. An ordinary fix commit must leave those two files alone, which `node plugin/build.config.mjs` does by itself (it only writes `plugin/dist/`).
+
+**Code state**: master = **v0.9.6 BETA** (§1-15 any chat opens from the picker · §1-14 the repo goes English · §1-13 3-way merge on reopen · §1-12 an intermediate cache blocking the connection (POST probe, no-store) · §1-11 one web-search tool card with three options · §1-10 built-in search measured, mobile, plugin-reload diagnosis · §1-9 search · §1-8 round 10 · §1-7 · §1-6 · §1-5; the docs/07 planning is still pending) — gate ALL GREEN. 0.7.0 changes the minor, so **the version gate trips**: raise the backend and the plugin on the RisuAI side has to be raised with `+` as well (the header says so).
 
 **Deployment state (2026-08-25 21:01 `deploy.ps1`, verified in a new SSH session)**:
 
@@ -23,6 +25,39 @@ The original plan for bot edit mode (M0 measurements, M2 spec) is `~/.claude/pla
 `https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js`, and made `tools/bundle.py` write that file into the repository (included in the release commit). In the backend code only VERSION changed.
 
 → **First thing to do**: the user reinstalls `plugin/Risu.Hina.Plugin.js` into RisuAI **by hand, once** (the installed 0.1.0's update-url cannot be read because of CORS) → check that `+` appears from the next release on → verify M2 in real use (§5-2).
+
+## 1-15. 2026-08-29 — v0.9.6: clicking a chat loads it, and 반영 follows the chat that was clicked
+
+Reported: selecting a chat that was not loaded flashed "open that chat in RisuAI first and press 🔄", yet
+**이 봇의 모든 챗 불러오기 immediately below loaded every chat of the bot and let you edit exactly those chats.**
+So the refusal was never a constraint — it was a detour around one that had already been lifted. RisuAI hands the
+plugin the whole selected character, chats included, and `getChatFromIndex` reads any index of it.
+
+- **`state.openChat(index)`** — the picker row now uploads that one chat (`upload({ chatIndex })`) and opens the
+  editor on it. The row's button says 불러오는 중… while it runs: a few hundred turns is megabytes, and it is the
+  one click on that screen that is not instant.
+- **The write-back had to move with it, and this is the part that was a latent bug.** `writeBack` and `saveCopy`
+  addressed `state.slot` — *whichever chat RisuAI has open* — so the pre-existing 모든 챗 불러오기 path could send
+  chat B's material into chat A. The turn paths would have failed loudly (`beforeTurns` mismatch, or an unknown
+  `msgId`), but a **lorebook or memory-only** write-back on two chats whose lorebooks were both empty passed every
+  guard and landed on the wrong chat. Both paths now go through **`state.chatSlot()`**: the chat **id** is the
+  identity, and the index is re-derived from a fresh `readCharacter` — an index recorded at upload time is stale as
+  soon as chats are reordered, copied or deleted in RisuAI. `host.writeChat` then re-reads at that index and still
+  refuses the write if the id moved again in between, so the two checks are belt and braces.
+- **`rereadChat`** (the re-read that follows a successful 반영) took the live chat too, which would have left the
+  edited chat holding a baseline one write behind. It now re-reads the chat that was actually written.
+- The one real refusal that survives: PocketRisu loads chats lazily and hands `readCharacter` **stubs** with no
+  `message` list for chats it has not opened yet (already known — `host.cloneBot` skips them). `state.chatAt`
+  therefore asks `getChatFromIndex` first and falls back to the card's copy, and only when both are stubs does the
+  picker say "RisuAI가 이 챗을 아직 읽어 두지 않았습니다" — the old message, now an exception rather than the rule.
+- Covered by `tests/plugin_smoke.mjs` → `test_open_a_chat_risuai_does_not_have_open`: click the chat in the folder
+  (RisuAI's `chatPage` stays 0 throughout), edit a turn, 반영, and assert the edit landed in `chats[1]` with its
+  `chatId`s and turn count intact **and `chats[0]` byte-identical**. Gate ALL GREEN.
+- **Not measured on a real host yet**: writing to a chat index other than the open one. Phase 0's T-13 says a write
+  to a *nonexistent* index is ignored and an existing index round-trips (T-12), and the character-level write path
+  (`writeCharacter`) has been writing non-open material all along, so there is no reason to expect trouble — but the
+  first real-use check should be exactly this: edit a chat that is not on screen in RisuAI, 반영, and confirm in
+  RisuAI that it landed there and that the open chat is untouched.
 
 ## 1-14. 2026-08-29 — v0.9.5: the repo goes English
 
@@ -271,7 +306,7 @@ Evidence in `data/forensic-20260823/`. Rule: **move `data/` with the server stop
 
 ## 5. What to do next (in order)
 
-1. ~~**GitHub release v0.3.1**~~ — done (21:20). Procedure for the next release: bump the version in 5 places → `pyserver/.venv/Scripts/python.exe tools/release.py` (this refreshes `plugin/Risu.Hina.Plugin.js` in the repository too) → gate → commit (bundle included), tag, push → deploy →
+1. ~~**GitHub release v0.3.1**~~ — done (21:20). Procedure for the next release — **run it only when the user asks for a release (§0)**: bump the version in 5 places → `pyserver/.venv/Scripts/python.exe tools/release.py` (this refreshes `plugin/Risu.Hina.Plugin.js` in the repository too) → gate → commit (bundle included), tag, push → deploy →
    `cd release && gh release create v<ver> -R nilsonwhang3-spec/risu-hina --title "Risu Hina <ver>" --notes-file notes-<ver>.md <the 2 zips> Risu.Hina.Plugin.js SHA256SUMS-<ver>.txt`
    (run it in manual permission mode, since the classifier blocks it in auto mode). The user has to reinstall `plugin/Risu.Hina.Plugin.js` into RisuAI by hand once before `+` starts appearing.
 2. **Real-use check (M2)** — PocketRisu (test-server, fastPath on): open the panel → the progress line on the bot card → complete within seconds (reading SQLite directly) → thumbnails on the assets tab → build charx → save from the files tab → **import into PocketRisu** (whether the assets, lore, triggers, Regex and CBS render the same as the original — this is the core verification for charx). Web Risu (elf.example.com): hub pull progress, 0 items the second time, the gate.

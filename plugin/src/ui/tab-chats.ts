@@ -13,6 +13,7 @@ import { el, clear, refocusSearch, fmtTime, armed } from './dom';
 import { state } from '../state';
 import { setEditMode, setToolbarSearch, setTab } from './shell';
 import type { RisuChat } from '../risuai';
+import { HostError } from '../host';
 import { describeSync, syncBusy } from '../assets';
 import { transport } from '../transport';
 
@@ -232,8 +233,7 @@ export function renderChatsTab(mount: HTMLElement): void {
 
   const makeItem = (r: { chat: RisuChat; index: number }) => {
     const loaded = loadedFor(r.chat);
-    const isCurrent = r.index === state.slot?.chatIndex;
-    const edit = el('button', { class: 'ghost tiny', text: '챗 편집' });
+    const edit = el('button', { class: 'ghost tiny', text: '챗 편집' }) as HTMLButtonElement;
     const item = el('div', {
       class: 'chatitem' + (loaded && loaded.chatKey === state.activeChatKey ? ' current' : ''),
     }, [
@@ -241,21 +241,37 @@ export function renderChatsTab(mount: HTMLElement): void {
       el('span', { class: 'n', text: `${(r.chat.message ?? []).length}턴` }),
       edit,
     ]);
+    let busy = false;
     const enter = async () => {
+      if (busy) return;
       if (loaded) {
         await state.loadTurns(loaded.chatKey);
         setEditMode('chat', 'editor');
         return;
       }
-      if (!isCurrent) {
-        // Only the chat the host currently has open can be read, and only the
-        // selected character's chats persist when written back.
-        flash(pad, 'RisuAI에서 그 챗을 먼저 연 다음 🔄 를 눌러 주세요.');
-        return;
+      // Any chat of this bot, not only the one RisuAI has open: clicking one
+      // loads it. A chat of a few hundred turns is megabytes, so the row says
+      // it is working - this is the one click here that is not instant.
+      busy = true;
+      edit.disabled = true;
+      edit.textContent = '불러오는 중…';
+      try {
+        await state.openChat(r.index);
+        setEditMode('chat', 'editor');
+      } catch (e) {
+        // One case is still a real refusal, and only one: RisuAI has not read
+        // this chat itself yet, so all it can hand over is a stub with no
+        // turns (PocketRisu loads chats lazily). Opening it there fills it in.
+        // Anything else is a failure and has to say so rather than send the
+        // user off to fix something that is not broken.
+        flash(pad, e instanceof HostError && e.code === 'missing'
+          ? 'RisuAI가 이 챗을 아직 읽어 두지 않았습니다. RisuAI에서 그 챗을 한 번 연 다음 🔄 를 눌러 주세요.'
+          : '챗을 불러오지 못했습니다: ' + (e instanceof Error ? e.message : String(e)));
+      } finally {
+        busy = false;
+        edit.disabled = false;
+        edit.textContent = '챗 편집';
       }
-      await state.upload({});
-      await state.loadTurns();
-      setEditMode('chat', 'editor');
     };
     item.addEventListener('click', () => void enter());
     edit.addEventListener('click', (ev) => { ev.stopPropagation(); void enter(); });
@@ -304,7 +320,7 @@ export function renderChatsTab(mount: HTMLElement): void {
 
   pad.appendChild(el('div', { class: 'row', style: { marginTop: '12px' } }, [
     buildUploadAll(),
-    el('span', { class: 'hint', text: '기본적으로 현재 열려 있는 챗만 올립니다.' }),
+    el('span', { class: 'hint', text: '챗을 누르면 그 챗만 불러옵니다. 여러 챗을 오가며 볼 때만 이 버튼을 쓰세요.' }),
   ]));
 }
 
