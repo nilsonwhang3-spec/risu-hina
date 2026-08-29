@@ -713,6 +713,57 @@ console.log('\ntest_commit_rebases_the_baseline');
         document.querySelector('.chatbar .changesum')?.textContent);
 }
 
+console.log('\ntest_unverified_write_keeps_the_working_copy');
+{
+  // A resolved setChatToIndex is not a kept write: mainline's save encoder
+  // can skip it, another RisuAI window can save its stale copy over ours.
+  // The host here swallows the write; the panel must keep the edits, say so,
+  // and neither commit nor re-read (the re-read is what used to replace the
+  // working copy with the text the write had just failed to change).
+  check('find tool activates', clickTool(document, 'find'));
+  await settle(300);
+  // The tool button toggles; if find was already the active tool the first
+  // click closed it - click again until the inputs are actually there.
+  if (!optionInput(document, '찾을 문자열')) { clickTool(document, 'find'); await settle(300); }
+  optionInput(document, '찾을 문자열').value = '페데리꼬';
+  optionInput(document, '바꿀 문자열').value = '페데리코';
+  clickButton(document, '미리보기');
+  await settle(900);
+  const applyBtn = () => [...document.querySelectorAll('.rpanel.active button')]
+    .find((b) => b.textContent === '적용');
+  applyBtn().dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(1200);
+
+  const before = JSON.stringify(host.liveChar.chats[0].message);
+  const real = host.api.setChatToIndex;
+  host.api.setChatToIndex = async () => { host.calls.push('setChatToIndex:dropped'); };
+  clickTool(document, 'apply');
+  await settle(300);
+  clickButton(document.querySelector('.popover'), 'RisuAI에 반영');
+  await settle(900);
+  check('the write was attempted and dropped', host.calls.includes('setChatToIndex:dropped'));
+  check('the popover says the write was not kept',
+        /받지 않았습니다/.test(document.querySelector('.popover')?.textContent || ''),
+        document.querySelector('.popover')?.textContent?.slice(0, 160));
+  check('the host chat is untouched',
+        JSON.stringify(host.liveChar.chats[0].message) === before);
+  await settle(400);
+  check('the edits are still pending',
+        /턴 수정 \d+/.test(document.querySelector('.chatbar .changesum')?.textContent || ''),
+        document.querySelector('.chatbar .changesum')?.textContent);
+
+  // The host comes back; the same press now lands, verifies, and commits.
+  host.api.setChatToIndex = real;
+  clickButton(document.querySelector('.popover'), 'RisuAI에 반영');
+  await settle(1500);
+  check('the retry landed',
+        host.liveChar.chats[0].message.some((m) => m.data.includes('페데리코')));
+  await settle(600);
+  check('and the chat bar is clean again',
+        /변경 없음/.test(document.querySelector('.chatbar .changesum')?.textContent || ''),
+        document.querySelector('.chatbar .changesum')?.textContent);
+}
+
 console.log('\ntest_truncate_with_preview');
 {
   check('cut tool activates', clickTool(document, 'cut'));

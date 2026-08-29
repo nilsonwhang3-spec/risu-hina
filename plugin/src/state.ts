@@ -90,6 +90,11 @@ export interface WriteBackResult {
   lore: number;
   memory: number;
   warnings: string[];
+  /** Read back and confirmed kept (host.WriteResult.verified). A `false`
+   * means the caller must not commit or re-read - the working copy is the
+   * only surviving copy of the edit. */
+  verified: boolean;
+  drift?: string;
 }
 
 /** One row the merge could not decide on its own. */
@@ -891,7 +896,9 @@ class AppState {
     if (!this.slot) throw new Error('호스트 상태를 먼저 읽어야 합니다');
     const patch = await this.patch();
     const update = this.updateFrom(patch, false);
-    if (!update) return { mode: 'noop', applied: 0, lore: 0, memory: 0, warnings: patch.warnings };
+    if (!update) {
+      return { mode: 'noop', applied: 0, lore: 0, memory: 0, warnings: patch.warnings, verified: true };
+    }
     // The chat being edited, which is not always the one RisuAI has open.
     const slot = await this.chatSlot();
     const r = await host.writeChat(slot, this.activeChat?.chatId || this.liveChat?.id, update);
@@ -899,6 +906,7 @@ class AppState {
       mode: r.mode, applied: r.applied,
       lore: patch.lore?.changed ?? 0, memory: patch.memory?.changed ?? 0,
       warnings: patch.warnings,
+      verified: r.verified, ...(r.drift ? { drift: r.drift } : {}),
     };
   }
 
@@ -1681,7 +1689,7 @@ class AppState {
    * whole sequence lives here because two callers need it - the bot bar and
    * an approved host_card_writeback - and they must not drift apart.
    */
-  async cardWriteBack(): Promise<{ applied: number; mode: string }> {
+  async cardWriteBack(): Promise<{ applied: number; mode: string; verified: boolean; drift?: string }> {
     if (!this.isLiveBot) {
       throw new Error('반영은 RisuAI에서 이 봇이 선택되어 있어야 합니다. '
         + 'RisuAI에서 봇을 선택한 뒤 패널을 다시 열어 주세요');
@@ -1692,11 +1700,16 @@ class AppState {
       throw new Error('구버전 업로드 상태의 카드라 반영할 수 없습니다. 패널을 닫았다 다시 열어 주세요');
     }
     const update = this.cardUpdateFrom(patch, false);
-    if (!update) return { applied: 0, mode: 'noop' };
+    if (!update) return { applied: 0, mode: 'noop', verified: true };
     const r = await host.writeCharacter(slot.characterIndex, patch.chaId, update);
+    if (!r.verified) {
+      // No commit and no re-read: the re-read is what used to replace the
+      // working copy with the text the write had just failed to change.
+      return { applied: r.applied, mode: r.mode, verified: false, ...(r.drift ? { drift: r.drift } : {}) };
+    }
     await this.cardCommit('반영 직전');
     await this.rereadCard();
-    return { applied: r.applied, mode: r.mode };
+    return { applied: r.applied, mode: r.mode, verified: true };
   }
 
   /**
@@ -1712,8 +1725,20 @@ class AppState {
    * business and must not be discarded with it.
    */
   private async rereadCard(): Promise<void> {
+    // Carry the chat being edited, exactly as rereadChat does. Without a
+    // chatIndex the upload sends only RisuAI's open chat, the response lists
+    // only that chat, and upload()'s re-pick quietly moves activeChatKey
+    // onto it - the edited chat's work survived in the backend, but the UI
+    // was suddenly pointing at a different chat.
+    const wanted = this.activeChat?.chatId ?? '';
+    const key = this.activeChatKey;
     await this.readHost();
-    if (this.slot && this.character) await this.upload({ cardReset: true });
+    if (this.slot && this.character) {
+      const chats = Array.isArray(this.character.chats) ? this.character.chats : [];
+      const at = wanted ? chats.findIndex((c) => String(c?.id ?? '') === wanted) : -1;
+      await this.upload(at < 0 ? { cardReset: true } : { cardReset: true, chatIndex: at });
+      if (key && this.workspace?.chats.some((c) => c.chatKey === key)) this.activeChatKey = key;
+    }
     this.epoch += 1;
     this.emit();
   }
@@ -1835,6 +1860,11 @@ class AppState {
     const family = this.workspace?.familyKey || this.activeCharKey;
     const backupChaId = await host.cloneBot(this.slot.characterIndex, patch.chaId, backupName, {}, family);
     const r = await this.cardWriteBack();
+    if (!r.verified) {
+      throw new Error('RisuAI 가 카드 쓰기를 받지 않았습니다'
+        + (r.drift ? ` (${r.drift})` : '')
+        + '. 백업 봇은 만들어졌지만 이 봇에는 반영되지 않았습니다 - 편집 내용은 그대로 있습니다.');
+    }
     return { backupChaId, applied: r.applied, mode: r.mode };
   }
 

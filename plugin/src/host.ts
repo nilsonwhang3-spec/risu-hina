@@ -177,6 +177,23 @@ export interface WriteResult {
   mode: 'noop' | 'edits' | 'replace';
   /** Which parts of the chat object were written. */
   parts: string[];
+  /**
+   * Did RisuAI actually keep it?
+   *
+   * `setChatToIndex` resolving is not proof. A save encoder that skips the
+   * write, another RisuAI instance saving its own stale copy over ours, a
+   * chat the host holds only as a stub - all of them return without an error
+   * and leave the old text in place. That was reported from real use: 반영
+   * said it succeeded, and the panel then re-read RisuAI and replaced the
+   * working copy with the text it had just failed to change. The edit was
+   * gone from both sides.
+   *
+   * So the write is read back and compared. `false` means: do not commit, do
+   * not re-read, keep the working copy, and say so.
+   */
+  verified: boolean;
+  /** What came back instead, when it did not verify. */
+  drift?: string;
 }
 
 /**
@@ -257,9 +274,39 @@ export async function writeChat(slot: Slot, seenChatId: string | undefined, upda
     parts.push(...Object.keys(update.memory));
   }
 
-  if (!parts.length) return { applied: 0, mode: 'noop', parts };
+  if (!parts.length) return { applied: 0, mode: 'noop', parts, verified: true };
   await Risuai.setChatToIndex(slot.characterIndex, slot.chatIndex, next);
-  return { applied, mode, parts };
+
+  // Read it back. See WriteResult.verified for why resolving is not enough.
+  let verified = true;
+  let drift = '';
+  try {
+    const after = await readChat(slot);
+    if (update.messages || update.edits?.length) {
+      const want = next.message;
+      const got = after.message ?? [];
+      if (got.length !== want.length) {
+        verified = false;
+        drift = `턴 수가 다릅니다 (보낸 ${want.length}, 남은 ${got.length})`;
+      } else {
+        const bad = want.findIndex((m, i) => String(m.data ?? '') !== String(got[i]?.data ?? ''));
+        if (bad >= 0) {
+          verified = false;
+          drift = `${bad + 1}번째 턴이 쓰기 전 내용 그대로입니다`;
+        }
+      }
+    }
+    if (verified && update.localLore && canon(after.localLore ?? []) !== canon(update.localLore)) {
+      verified = false;
+      drift = '로어북이 쓰기 전 내용 그대로입니다';
+    }
+  } catch (e) {
+    // Could not check. Report it as unverified rather than assuming either
+    // way - the caller's job is to not throw the working copy away.
+    verified = false;
+    drift = '쓴 뒤 다시 읽지 못했습니다: ' + (e instanceof Error ? e.message : String(e));
+  }
+  return { applied, mode, parts, verified, ...(drift ? { drift } : {}) };
 }
 
 /**
@@ -327,6 +374,12 @@ export interface CardUpdate {
   };
 }
 
+const LIST_LABEL: Record<string, string> = {
+  alternateGreetings: '대체 인사말', globalLore: '봇 로어북',
+  customscript: 'Regex', triggerscript: '트리거',
+  additionalAssets: '에셋', emotionImages: '감정 이미지', ccAssets: '에셋',
+};
+
 /**
  * Write a card update to the live character, in one `setCharacterToIndex`.
  *
@@ -373,11 +426,6 @@ export async function writeCharacter(
     }
   }
   // The lists, checked before anything is written (see checkList).
-  const LIST_LABEL: Record<string, string> = {
-    alternateGreetings: '대체 인사말', globalLore: '봇 로어북',
-    customscript: 'Regex', triggerscript: '트리거',
-    additionalAssets: '에셋', emotionImages: '감정 이미지', ccAssets: '에셋',
-  };
   for (const [key, label] of Object.entries(LIST_LABEL)) {
     const wanted = (update as Record<string, unknown>)[key];
     const before = update.before?.[key as keyof NonNullable<CardUpdate['before']>];
@@ -416,11 +464,35 @@ export async function writeCharacter(
     }
   }
 
-  if (!parts.length) return { applied: 0, mode: 'noop', parts };
+  if (!parts.length) return { applied: 0, mode: 'noop', parts, verified: true };
   next.chats = fresh.chats;
   next.chatPage = fresh.chatPage;
   await Risuai.setCharacterToIndex(characterIndex, next);
-  return { applied, mode: 'edits', parts };
+
+  // Same reason as writeChat: mainline's save encoder is documented (in
+  // cloneBot) to skip a character it decides has not changed, so a resolved
+  // write is not a kept write.
+  let verified = true;
+  let drift = '';
+  try {
+    const after = await readCharacter(characterIndex);
+    const missed = (update.fields ?? []).find((e) => String(after[e.field] ?? '') !== e.after);
+    if (missed) {
+      verified = false;
+      drift = `${missed.field} 이(가) 쓰기 전 값 그대로입니다`;
+    }
+    const LISTS = ['globalLore', 'alternateGreetings', 'customscript', 'triggerscript'] as const;
+    for (const k of LISTS) {
+      if (verified && update[k] && canon(after[k] ?? []) !== canon(update[k])) {
+        verified = false;
+        drift = `${LIST_LABEL[k] ?? k} 이(가) 쓰기 전 내용 그대로입니다`;
+      }
+    }
+  } catch (e) {
+    verified = false;
+    drift = '쓴 뒤 다시 읽지 못했습니다: ' + (e instanceof Error ? e.message : String(e));
+  }
+  return { applied, mode: 'edits', parts, verified, ...(drift ? { drift } : {}) };
 }
 
 /**

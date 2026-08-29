@@ -164,6 +164,15 @@ function openApply(anchor: HTMLElement): void {
       const r = await state.writeBack();
       if (r.mode === 'noop' && !r.lore && !r.memory) {
         out.textContent = '반영할 변경이 없습니다.';
+      } else if (!r.verified) {
+        // The write did not stick (see host.WriteResult.verified). Nothing
+        // was committed, nothing re-read: the edits are still here.
+        const m = 'RisuAI 가 이 쓰기를 받지 않았습니다'
+          + (r.drift ? ` (${r.drift})` : '')
+          + '. 편집 내용은 그대로 두었습니다. RisuAI 가 다른 창이나 기기에 열려 있지 않은지 확인해 주세요.';
+        out.textContent = m;
+        void clientLog('error', 'writeBack unverified', { drift: r.drift ?? '' });
+        shellNotice(m, 'err');
       } else {
         // The write landed. `commit` snapshots and then re-reads the chat
         // from RisuAI, so the panel stops holding a copy of what it just
