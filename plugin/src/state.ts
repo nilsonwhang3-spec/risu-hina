@@ -506,8 +506,12 @@ export interface StudioItem {
 }
 
 export interface PlannedImage {
-  name: string; emotion: string; prompt: string; negative: string;
+  name: string; scene: string; prompt: string; negative: string;
   seed: number | null; charCaptions: unknown[];
+  /** Per-scene size from the preset file; it wins over the panel's. */
+  size?: { width: number; height: number };
+  /** `<collection.key>` references no fragment provides. Reported, not dropped. */
+  unresolved?: string[];
 }
 
 export interface BatchEstimate {

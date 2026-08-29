@@ -67,13 +67,15 @@ STUDIO = "studio"
 STUDIO_AREAS: dict[str, tuple[bool, bool]] = {
     "styles": (True, False),
     "characters": (True, False),
+    # Named prompt pieces a scene or a style splices in by `<collection.key>`.
     "fragments": (True, False),
-    # Emotion presets: a named set of prompt fragments, one per emotion. An
-    # expression set is made by generating once per entry with the character
-    # and seed held fixed - not with the `emotion` director tool, which costs
-    # about ten times as much and infers the emotion instead of stating it.
-    "emotions": (True, False),
-    "presets": (True, False),
+    # Scene presets: the NAIS3 file format, verbatim -
+    # {"version":1,"scenes":[{name, prompt, negativePrompt, width, height}]}.
+    # One scene is one image in a batch, and a set of them is an expression
+    # sheet - which is how expression sets are made here, rather than with the
+    # `emotion` director tool (ten times the price, and it infers the emotion
+    # from a finished image instead of stating it).
+    "scenes": (True, False),
     "images": (True, False),
     # Ours: naming profiles, per-folder selection maps, group overrides.
     # Hidden from the panel by the same rule that hides .scratch.

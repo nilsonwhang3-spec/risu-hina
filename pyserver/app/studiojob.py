@@ -81,7 +81,11 @@ def start(spec: dict) -> dict:
                      name=f"studio-{job_id}").start()
     return {"jobId": job_id, "total": len(items),
             "estimate": studio.estimate(spec, len(items)),
-            "items": [{"name": i["name"], "emotion": i["emotion"]} for i in items]}
+            "items": [{"name": i["name"], "scene": i.get("scene", "")} for i in items],
+            # References a scene names but no fragment collection provides.
+            # Surfaced at the top so a batch is not started with a hole in
+            # every prompt.
+            "unresolved": sorted({r for i in items for r in i.get("unresolved", [])})}
 
 
 def _run(job_id: str) -> None:
@@ -125,16 +129,21 @@ def _run(job_id: str) -> None:
         p = dict(params)
         if item.get("seed") is not None:
             p["seed"] = item["seed"]
+        # A scene carries its own size in the preset file, and it wins: a
+        # portrait and a wide shot are different scenes, not different runs.
+        if item.get("size"):
+            p["width"] = item["size"]["width"]
+            p["height"] = item["size"]["height"]
         if item.get("charCaptions"):
             p["char_captions"] = item["charCaptions"]
             p["use_coords"] = True
         try:
             png = nai.generate(model, item["prompt"], item["negative"], p, vibes or None)
             saved = studio.save_image(folder, item["name"], png, {
-                "emotion": item["emotion"], "prompt": item["prompt"],
+                "scene": item.get("scene"), "prompt": item["prompt"],
                 "negative": item["negative"], "model": model, "seed": item.get("seed"),
                 "style": spec.get("style"), "characters": spec.get("characters"),
-                "emotionPreset": spec.get("emotionPreset"),
+                "scenePreset": spec.get("scenePreset"),
             })
             payload["saved"].append(saved["path"])
         except Exception as e:  # noqa: BLE001

@@ -134,8 +134,13 @@ files.upload(files.STUDIO, "히나.json", text=json.dumps(
     {"name": "히나", "caption": "1girl, silver hair", "negative": "multiple girls"},
     ensure_ascii=False), into="characters")
 files.upload(files.STUDIO, "기본.json", text=json.dumps(
-    {"name": "3종", "emotions": {"happy": "smile", "sad": "teary eyes", "angry": "frown"}},
-    ensure_ascii=False), into="emotions")
+    {"version": 1, "scenes": [
+        {"name": "happy", "prompt": "<조각.eyes>, smile", "negativePrompt": "", "width": 832, "height": 1216},
+        {"name": "sad", "prompt": "teary eyes", "negativePrompt": "blurry", "width": 512, "height": 512},
+        {"name": "angry", "prompt": "{{angry}}, frown", "negativePrompt": "", "width": 0, "height": 0}]},
+    ensure_ascii=False), into="scenes")
+files.upload(files.STUDIO, "조각.json", text=json.dumps(
+    {"eyes": "blue eyes"}, ensure_ascii=False), into="fragments")
 
 s = studio.read_style("styles/수채화.md")
 check("front matter is read", s["name"] == "수채화", s["name"])
@@ -169,20 +174,57 @@ check("a well-formed name parses", r["matched"] and r["matched"][0]["emotion"] =
 # NOT parse has to be reported rather than dropped.
 check("what did not parse is reported", r["unmatched"] == ["엉망진창.png"], str(r["unmatched"]))
 
+print("\ntest_scene_presets")
+sc = studio.read_scenes("scenes/기본.json")
+check("the NAIS3 file is read verbatim", len(sc["scenes"]) == 3, str(len(sc["scenes"])))
+check("each scene carries its own size",
+      sc["scenes"][1]["width"] == 512 and sc["scenes"][0]["width"] == 832)
+check("a zero size means 'use the run\'s'", sc["scenes"][2]["width"] is None)
+
+# `<collection.key>` is spliced in; `{{…}}` is NovelAI's own emphasis and has to
+# reach NovelAI exactly as written - this file never parses or rewrites it.
+text, missing = studio.resolve_refs("<조각.eyes>, {{angry}}")
+check("a fragment reference is resolved", text == "blue eyes, {{angry}}", text)
+check("NovelAI emphasis is untouched", "{{angry}}" in text)
+check("nothing was missing", missing == [], str(missing))
+# A whole file by name, and a folder-qualified one. File wins over a key.
+files.upload(files.STUDIO, "눈.md", text="wide eyes", into="fragments")
+files.upload(files.STUDIO, "눈.md", text="narrow eyes", into="fragments/밤")
+whole, _ = studio.resolve_refs("<눈>, smile")
+check("a whole .md fragment is called by name", whole == "wide eyes, smile", whole)
+nested, _ = studio.resolve_refs("<밤/눈>, smile")
+check("and a folder-qualified one", nested == "narrow eyes, smile", nested)
+allof, _ = studio.resolve_refs("<조각>")
+check("a whole .json collection joins its values", allof == "blue eyes", allof)
+
+text, missing = studio.resolve_refs("<없는것.x>, smile")
+check("an unknown reference is reported", missing == ["<없는것.x>"], str(missing))
+check("and left in the prompt rather than dropped", "<없는것.x>" in text, text)
+
 print("\ntest_batch_plan")
 items = studio.plan({"style": "styles/수채화.md", "characters": ["characters/히나.json"],
-                     "emotionPreset": "emotions/기본.json", "characterName": "히나",
+                     "scenePreset": "scenes/기본.json", "characterName": "히나",
                      "outfit": "교복", "count": 2, "seed": 7})
-check("one entry per emotion x count", len(items) == 6, str(len(items)))
-check("every emotion is present",
-      {i["emotion"] for i in items} == {"happy", "sad", "angry"},
-      str({i["emotion"] for i in items}))
-check("the emotion fragment lands in the prompt",
-      any(i["prompt"].endswith("teary eyes") for i in items),
-      items[0]["prompt"])
+check("one entry per scene x count", len(items) == 6, str(len(items)))
+check("every scene is present", {i["scene"] for i in items} == {"happy", "sad", "angry"},
+      str({i["scene"] for i in items}))
+check("the scene's prompt lands in the composed prompt",
+      any("teary eyes" in i["prompt"] for i in items), items[0]["prompt"])
+check("its fragment reference was resolved",
+      any("blue eyes" in i["prompt"] for i in items),
+      next(i["prompt"] for i in items if i["scene"] == "happy"))
+check("the scene's own negative is carried",
+      any("blurry" in i["negative"] for i in items),
+      next(i["negative"] for i in items if i["scene"] == "sad"))
+check("a scene's size overrides the run's",
+      next(i for i in items if i["scene"] == "sad")["size"] == {"width": 512, "height": 512})
+check("a scene with no size leaves it to the run",
+      "size" not in next(i for i in items if i["scene"] == "angry"))
 check("seeds advance within a group, not across it",
       sorted({i["seed"] for i in items}) == [7, 8], str(sorted({i["seed"] for i in items})))
 check("names are unique", len({i["name"] for i in items}) == 6)
+check("only= picks a subset",
+      len(studio.plan({"scenePreset": "scenes/기본.json", "only": ["sad"]})) == 1)
 est = studio.estimate({"vibes": []}, len(items))
 check("an estimate never claims generation is free",
       est["anlasCertain"] == 0 and "등급" in est["note"], json.dumps(est, ensure_ascii=False))
@@ -301,13 +343,15 @@ check("nothing was deleted", len(list(dup.iterdir())) == 4, str(len(list(dup.ite
 # Both directions matter and they look nothing alike: a slot with no asset is
 # work to do, an asset nothing names is dead weight.
 files.upload(files.STUDIO, "12종.json", text=json.dumps(
-    {"name": "12종", "emotions": {"happy": "smile", "sad": "tears", "angry": "frown"}},
-    ensure_ascii=False), into="emotions")
+    {"version": 1, "scenes": [{"name": "happy", "prompt": "smile"},
+                              {"name": "sad", "prompt": "tears"},
+                              {"name": "angry", "prompt": "frown"}]},
+    ensure_ascii=False), into="scenes")
 db.execute("INSERT INTO char_assets(char_key, seq, field, name, ext, risu_key) "
            "VALUES(?,?,?,?,?,?)", (CK, 0, "emotion", "happy", "png", "assets/x.png"))
 db.execute("INSERT INTO char_assets(char_key, seq, field, name, ext, risu_key) "
            "VALUES(?,?,?,?,?,?)", (CK, 1, "emotion", "떠돌이", "png", "assets/y.png"))
-e = studio.emotion_check(CK, "emotions/12종.json")
+e = studio.emotion_check(CK, "scenes/12종.json")
 check("what the card has is listed", set(e["have"]) == {"happy", "떠돌이"}, str(e["have"]))
 check("slots with no asset are named", set(e["missing"]) == {"sad", "angry"}, str(e["missing"]))
 check("and the note counts them", "2개가 카드에 없습니다" in e["note"], e["note"])

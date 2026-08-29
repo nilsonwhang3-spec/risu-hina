@@ -903,7 +903,7 @@ def build() -> Agent[Deps]:
 
     @agent.tool
     def studio_list(ctx: RunContext[Deps], area: str) -> str:
-        """에셋 스튜디오 라이브러리 목록. area: images | characters | styles | emotions | fragments | presets.
+        """에셋 스튜디오 라이브러리 목록. area: images | styles | characters | scenes | fragments.
 
         스튜디오는 봇과 무관한 전역 라이브러리다. 봇이 선택돼 있지 않아도 쓸 수 있다.
         """
@@ -923,7 +923,7 @@ def build() -> Agent[Deps]:
 
     @agent.tool
     def studio_read(ctx: RunContext[Deps], path: str) -> str:
-        """스튜디오의 .md / .json 파일 본문을 읽는다 (styles/…, characters/…, emotions/… )."""
+        """스튜디오의 .md / .json 파일 본문을 읽는다 (styles/…, characters/…, scenes/…, fragments/…)."""
         try:
             return studio._read_text(path)[:30000]
         except Exception as e:  # noqa: BLE001
@@ -935,9 +935,14 @@ def build() -> Agent[Deps]:
 
         경로는 `styles/폴더/이름.md` 처럼 영역으로 시작해야 한다. 덮어쓴다.
         스타일 .md 는 front matter + `## positive` / `## negative` 형식이다.
-        감정 프리셋은 `{"name": …, "emotions": {"happy": "smile, happy", …}}` 형식이고,
-        **표정 세트는 이 조각을 일반 생성에 얹어 감정마다 한 장씩 뽑는 방식으로 만든다** —
-        디렉터 emotion 툴이 아니다(10배 비싸고 통제가 안 된다).
+        SD스튜디오 프리셋(scenes/)은 NAIS3 형식이다:
+        `{"version":1,"scenes":[{"name","prompt","negativePrompt","width","height"}]}`.
+        씬 하나가 배치의 한 장이고, 프롬프트·네거티브·크기를 각자 들고 있다.
+        **표정 세트는 이렇게 씬마다 한 장씩 일반 생성으로 뽑는다** — 디렉터 emotion
+        툴이 아니다(10배 비싸고 통제가 안 된다).
+
+        프롬프트 안의 `{{…}}` 는 NovelAI 강조 문법이라 **절대 건드리지 않는다.**
+        `<조각>` · `<폴더/조각>` · `<컬렉션.키>` 는 fragments/ 참조이고 생성 직전에 치환된다.
         """
         rel = path.replace("\\", "/").strip("/")
         area = rel.split("/")[0]
@@ -957,7 +962,7 @@ def build() -> Agent[Deps]:
 
         spec 예시:
         {"model":"nai-diffusion-4-5-full","style":"styles/수채화.md",
-         "characters":["characters/히나.json"],"emotionPreset":"emotions/기본.json",
+         "characters":["characters/히나.json"],"scenePreset":"scenes/기본.json",
          "characterName":"히나","outfit":"교복","count":1,"seed":4242,
          "folder":"images/히나","params":{"steps":23,"width":832,"height":1216}}
 
@@ -1195,7 +1200,7 @@ def build() -> Agent[Deps]:
     def studio_emotion_check(ctx: RunContext[Deps], preset: str = "") -> str:
         """이 봇의 감정 에셋이 있어야 할 것과 맞는지 대조한다.
 
-        preset 에 감정 프리셋 경로(emotions/…json)를 주면 **빠진 슬롯**을 알려준다 —
+        preset 에 SD스튜디오 프리셋 경로(scenes/…json)를 주면 **빠진 슬롯**을 알려준다 —
         그것만 다시 생성하면 된다. 카드 스크립트/본문에서 이름이 한 번도 안 나오는
         에셋은 **참조 안 됨**으로 따로 보고한다.
         """

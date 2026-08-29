@@ -47,11 +47,10 @@ import { bindAgent, mountAgent } from './agentpane';
 const MATERIALS: [string, string][] = [
   ['styles', '스타일 프롬프트'],
   ['characters', '캐릭터 프롬프트'],
-  // Both kinds of preset under one heading: they are the same sort of thing
-  // (saved settings you pick from) and two top-level "프리셋" entries read as
-  // a mistake.
-  ['presets', '프리셋 · 생성'],
-  ['emotions', '프리셋 · 감정'],
+  // One kind of preset only: a scene list. Model, steps and CFG are the run,
+  // not the scene, so they stay on the panel rather than becoming a second
+  // sort of preset file.
+  ['scenes', 'SD스튜디오 프리셋'],
   ['fragments', '조각 프롬프트'],
 ];
 const OUTPUT: [string, string][] = [['images', 'output']];
@@ -86,7 +85,7 @@ const thumbs = new Map<string, string>();
 /** What the generation card is set to. Held across renders, saved per panel. */
 const gen = {
   model: 'nai-diffusion-4-5-full',
-  style: '', character: '', emotionPreset: '',
+  style: '', character: '', scenePreset: '',
   characterName: '', outfit: '',
   steps: 23, scale: 5, width: 832, height: 1216, count: 1, seed: '',
   folder: 'images',
@@ -356,7 +355,7 @@ function drawGen(): void {
     pickerField('스타일', 'styles', 'style'),
     pickerField('캐릭터', 'characters', 'character'),
     characterButtons(),
-    pickerField('감정 프리셋', 'emotions', 'emotionPreset'),
+    pickerField('SD스튜디오 프리셋', 'scenes', 'scenePreset'),
     referenceToggle(),
   );
 
@@ -430,7 +429,7 @@ function spec(): Record<string, unknown> {
   };
   if (gen.style) out.style = gen.style;
   if (gen.character) out.characters = [gen.character];
-  if (gen.emotionPreset) out.emotionPreset = gen.emotionPreset;
+  if (gen.scenePreset) out.scenePreset = gen.scenePreset;
   if (gen.seed.trim()) out.seed = Number(gen.seed.trim());
   // A reference is a list entry with its own strength: NovelAI takes several
   // (reference_*_multiple), and the backend encodes each once per batch.
@@ -556,7 +555,7 @@ function openCharacter(path: string): void {
 }
 
 /** A <select> of one library area, filled when the card is drawn. */
-function pickerField(label: string, area: string, key: 'style' | 'character' | 'emotionPreset'): HTMLElement {
+function pickerField(label: string, area: string, key: 'style' | 'character' | 'scenePreset'): HTMLElement {
   const sel = el('select') as HTMLSelectElement;
   sel.appendChild(el('option', { value: '', text: '(없음)' }));
   sel.addEventListener('change', () => { gen[key] = sel.value; });
@@ -578,6 +577,16 @@ async function showPlan(): Promise<void> {
   try {
     const r = await state.studio.plan(spec());
     out.appendChild(el('div', { class: 'hint', text: `${r.items.length}장 · ${r.estimate.note}` }));
+    // A `<collection.key>` no fragment provides is left in the prompt and
+    // said out loud: it would otherwise generate happily and wrongly.
+    const unresolved = [...new Set(r.items.flatMap((i) => i.unresolved ?? []))];
+    if (unresolved.length) {
+      out.appendChild(el('div', { class: 'notice err' }, [
+        el('div', { text: `조각을 찾지 못한 참조 ${unresolved.length}개` }),
+        el('div', { class: 'hint', text: unresolved.join(', ') }),
+        el('div', { class: 'hint', text: '조각 프롬프트에 그 이름의 컬렉션을 만들어 주세요. 지금 생성하면 프롬프트에 그대로 들어갑니다.' }),
+      ]));
+    }
     for (const i of r.items.slice(0, 12)) {
       out.appendChild(el('div', { class: 'hint', text: `${i.name}  seed=${i.seed ?? '랜덤'}` }));
     }
@@ -957,7 +966,7 @@ function drawPromptFile(path: string): void {
 function emptyHint(area: string): string {
   const root = area.split('/')[0];
   if (root === 'images') return '아직 생성물이 없습니다. 이미지를 여기에 넣거나 히나에게 생성을 부탁하세요.';
-  if (root === 'emotions') return '감정 프리셋이 없습니다 — 감정 이름 → 프롬프트 조각을 담은 JSON 입니다.';
+  if (root === 'scenes') return 'SD스튜디오 프리셋이 없습니다 — NAIS3 형식의 scenes[] JSON 을 넣으세요.';
   if (root === 'characters') return '캐릭터가 없습니다 — 프롬프트와 레퍼런스 이미지를 함께 둡니다.';
   return '비어 있습니다.';
 }

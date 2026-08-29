@@ -6,13 +6,15 @@ is mostly about **names**:
 
     styles/      a style, as front matter + ## positive / ## negative
     characters/  a character: prompt, negative, reference image, position
-    fragments/   snippets spliced into either
-    emotions/    emotion name -> prompt fragment. **This is how expression sets
-                 are made** - one ordinary generation per entry with the
-                 character and seed held fixed - not with the `emotion`
-                 director tool, which costs ten times as much and infers the
-                 emotion from a finished image rather than stating it.
-    presets/     NovelAI model and parameters, as data
+    fragments/   named pieces, spliced in by `<조각>`, `<폴더/조각>` or `<컬렉션.키>`
+    scenes/      NAIS3 scene presets, read verbatim. One scene is one image in
+                 a batch and carries its own prompt, negative and size. **This
+                 is how expression sheets are made** - an ordinary generation
+                 per scene with the character and seed held fixed - not with
+                 the `emotion` director tool, which costs ten times as much and
+                 infers the emotion from a finished image rather than stating
+                 it. Generation parameters (model, steps, CFG) are not in here:
+                 they are the run, not the scene, and live on the panel.
     images/      the output, plus a `.json` sidecar per file
 
 A generated file's name is what the comparison selector later parses back into
@@ -142,12 +144,144 @@ def listing(area: str) -> list[dict]:
             try:
                 d = read_json(rel)
                 item["name"] = str(d.get("name") or p.stem)
-                if area == "emotions":
-                    item["count"] = len(d.get("emotions") or {})
+                if area == "scenes":
+                    item["count"] = len(d.get("scenes") or [])
             except StudioError:
                 pass
         out.append(item)
     return out
+
+
+# --- fragments and scenes ------------------------------------------------------
+#
+# A scene file is NAIS3's, read verbatim rather than converted:
+#
+#     {"version": 1, "scenes": [
+#        {"name": "angry", "prompt": "<눈 조각.eyes>, {{angry}}, frown",
+#         "negativePrompt": "", "width": 832, "height": 1216}]}
+#
+# (An invented example. Scene files are the user's own material and none of
+#  anyone's ships with this code.)
+#
+# Two things in those prompts are not ours and must survive untouched:
+#
+#   {{…}}   NovelAI's own emphasis. It goes to NovelAI exactly as written; this
+#           file never parses or rewrites it.
+#   <…>     a fragment reference. Resolved here - see FragmentTable.
+
+REF = re.compile(r"<([^<>]+)>")
+
+
+class FragmentTable:
+    """What `<…>` can name.
+
+    Two forms, and a whole file wins over a key inside one:
+
+        <조각>            fragments/조각.md   (or .json) - the whole file
+        <폴더/조각>       fragments/폴더/조각.md
+        <컬렉션.키>       one entry of fragments/컬렉션.json
+
+    File-first is what makes the ordering predictable: `<a.b>` is a file called
+    `a.b` if there is one, and only otherwise the `b` entry of collection `a`.
+    Without that rule a new file could silently shadow a key, or the reverse,
+    depending on which lookup happened to run first.
+    """
+
+    def __init__(self) -> None:
+        self.files: dict[str, str] = {}          # "폴더/조각" -> text
+        self.collections: dict[str, dict[str, str]] = {}
+
+    def get(self, name: str) -> str | None:
+        name = name.strip().strip("/")
+        hit = self.files.get(name)
+        if hit is not None:
+            return hit
+        if "." in name:
+            coll, _, key = name.rpartition(".")
+            entry = (self.collections.get(coll.strip()) or {}).get(key.strip())
+            if entry is not None:
+                return entry
+        return None
+
+
+def fragments() -> FragmentTable:
+    """Everything under `fragments/`, as both whole files and collections.
+
+    A `.md` is a whole fragment. A `.json` is both: the file as a whole (its
+    values joined, so `<컬렉션>` means "all of it") and each key on its own.
+    """
+    table = FragmentTable()
+    base = root() / "fragments"
+    if not base.is_dir():
+        return table
+    for p in sorted(base.rglob("*")):
+        if not p.is_file() or p.name.startswith("."):
+            continue
+        rel = p.relative_to(root()).as_posix()
+        # The name a reference uses: path under fragments/, without extension.
+        key = p.relative_to(base).as_posix()
+        key = key[: -len(p.suffix)] if p.suffix else key
+        try:
+            if p.suffix.lower() == ".json":
+                d = read_json(rel)
+                flat = {str(k): str(v) for k, v in d.items() if not isinstance(v, (dict, list))}
+                table.collections[key] = flat
+                # Also addressable by its bare name (the stem) when it is in a
+                # folder, so `<조각>` works wherever the file happens to live.
+                table.collections.setdefault(p.stem, flat)
+                table.files[key] = ", ".join(v for v in flat.values() if v)
+            elif p.suffix.lower() == ".md":
+                _, body = _front_matter(_read_text(rel))
+                table.files[key] = body.strip()
+                table.files.setdefault(p.stem, body.strip())
+        except StudioError:
+            continue
+    return table
+
+
+def resolve_refs(text: str, table: FragmentTable | None = None) -> tuple[str, list[str]]:
+    """Splice fragment references in. Returns (text, unresolved references).
+
+    An unknown reference is **left in the text and reported**, never dropped:
+    a prompt silently missing its eye description would generate happily and
+    wrongly, and the caller could not tell. Same rule as the selector's
+    unreadable filenames.
+
+    `{{…}}` is NovelAI's emphasis and is not a reference - the pattern only
+    matches `<…>`, so emphasis passes through untouched.
+    """
+    table = fragments() if table is None else table
+    missing: list[str] = []
+
+    def sub(m: re.Match[str]) -> str:
+        hit = table.get(m.group(1))
+        if hit is None:
+            missing.append(m.group(0))
+            return m.group(0)
+        return hit
+
+    return REF.sub(sub, text), missing
+
+
+def read_scenes(rel: str) -> dict:
+    """A scene preset file, in NAIS3's shape."""
+    d = read_json(rel)
+    raw = d.get("scenes")
+    if not isinstance(raw, list):
+        raise StudioError(f"{rel}: scenes[] 가 없습니다 (NAIS3 씬 프리셋 형식이어야 합니다)")
+    scenes = []
+    for s in raw:
+        if not isinstance(s, dict) or not str(s.get("name") or "").strip():
+            continue
+        scenes.append({
+            "name": str(s["name"]).strip(),
+            "prompt": str(s.get("prompt") or ""),
+            "negativePrompt": str(s.get("negativePrompt") or ""),
+            "width": int(s.get("width") or 0) or None,
+            "height": int(s.get("height") or 0) or None,
+        })
+    return {"path": rel, "version": d.get("version"), "name": d.get("name") or Path(rel).stem,
+            "scenes": scenes}
 
 
 # --- assembling one request ---------------------------------------------------
@@ -326,14 +460,18 @@ def plan(spec: dict) -> list[dict]:
     caller can be told how many images and what they will be called before it
     spends anything.
     """
-    emotions: dict[str, str] = {}
-    if spec.get("emotionPreset"):
-        d = read_json(str(spec["emotionPreset"]))
-        emotions = {str(k): str(v) for k, v in (d.get("emotions") or {}).items()}
-    if spec.get("emotions"):
-        emotions = {str(k): str(v) for k, v in dict(spec["emotions"]).items()}
-    if not emotions:
-        emotions = {"": ""}
+    scenes: list[dict] = []
+    if spec.get("scenes"):
+        picked = spec["scenes"]
+        scenes = picked if isinstance(picked, list) and picked and isinstance(picked[0], dict) else []
+    if not scenes and spec.get("scenePreset"):
+        scenes = read_scenes(str(spec["scenePreset"]))["scenes"]
+        only = spec.get("only")
+        if isinstance(only, list) and only:
+            keep = {str(n) for n in only}
+            scenes = [s for s in scenes if s["name"] in keep]
+    if not scenes:
+        scenes = [{"name": "", "prompt": "", "negativePrompt": "", "width": None, "height": None}]
 
     count = max(1, int(spec.get("count") or 1))
     template = str(spec.get("template") or DEFAULT_TEMPLATE)
@@ -341,24 +479,37 @@ def plan(spec: dict) -> list[dict]:
     outfit = str(spec.get("outfit") or "")
     stamp = time.strftime("%Y%m%d-%H%M%S")
     seed = spec.get("seed")
+    table = fragments()
 
     out = []
-    for emotion, fragment in emotions.items():
+    for scene in scenes:
         for i in range(count):
-            one = {**spec, "emotion": fragment}
+            one = {**spec, "emotion": scene.get("prompt") or "",
+                   "negativeExtra": scene.get("negativePrompt") or ""}
             pos, neg, captions = compose(one)
-            out.append({
+            # References are spliced after composing, so a fragment may be
+            # named from a style or a character as well as from a scene.
+            pos, missing = resolve_refs(pos, table)
+            neg, missing2 = resolve_refs(neg, table)
+            entry = {
                 "name": build_name(template, character=character, outfit=outfit,
-                                   emotion=emotion, index=i, stamp=stamp),
-                "emotion": emotion,
+                                   emotion=scene["name"], index=i, stamp=stamp),
+                "scene": scene["name"],
                 "prompt": pos,
                 "negative": neg,
                 "charCaptions": captions,
-                # A fixed seed across a batch is what makes an expression set
+                # A fixed seed across a batch is what makes an expression sheet
                 # look like one character; varying it is what makes candidates
                 # to choose between. Both are legitimate, so both are explicit.
                 "seed": (int(seed) + i) if seed not in (None, "") else None,
-            })
+            }
+            # Size travels with the scene, because it does in the file: a
+            # portrait and a wide shot are different scenes, not different runs.
+            if scene.get("width") and scene.get("height"):
+                entry["size"] = {"width": scene["width"], "height": scene["height"]}
+            if missing or missing2:
+                entry["unresolved"] = sorted(set(missing + missing2))
+            out.append(entry)
     return out
 
 
@@ -692,7 +843,7 @@ def emotion_check(char_key: str, preset: str = "") -> dict:
 
     wanted: list[str] = []
     if preset:
-        wanted = list((read_json(preset).get("emotions") or {}).keys())
+        wanted = [s["name"] for s in read_scenes(preset)["scenes"]]
 
     # Where an emotion name can actually be reached from: the scripts (Regex
     # and triggers, whose bodies live in entry_json) and the card's own text.
@@ -712,7 +863,7 @@ def emotion_check(char_key: str, preset: str = "") -> dict:
         "unreferenced": [n for n in have if n not in referenced] if blob.strip() else [],
         "note": ("감정 프리셋을 주면 빠진 슬롯도 알려줍니다."
                  if not preset else
-                 f"프리셋 {len(wanted)}개 중 {len([n for n in wanted if n not in have])}개가 카드에 없습니다."),
+                 f"프리셋의 씬 {len(wanted)}개 중 {len([n for n in wanted if n not in have])}개가 카드에 없습니다."),
     }
 
 
