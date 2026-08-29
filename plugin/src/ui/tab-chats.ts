@@ -39,8 +39,10 @@ function botSnapshots(editBot: HTMLElement): HTMLElement {
   const wrap = el('div');
   if (!state.activeCharKey) return wrap;
   void (async () => {
-    let cps: { id: string; label: string; created_at: number }[] = [];
-    try { cps = await state.cardCheckpoints(); } catch { return; }
+    let cps: { id: string; label: string; created_at: number; kind?: string }[] = [];
+    // Saved ones only: the picker is a place to recognise a version by the
+    // name you gave it, and the automatic backups live behind 버전's toggle.
+    try { cps = (await state.cardCheckpoints()).filter((c) => c.kind !== 'auto'); } catch { return; }
     if (!cps.length) return;
     wrap.appendChild(el('div', { class: 'sectionline' }));
     wrap.appendChild(el('div', { class: 'sectiontitle', text: `봇 스냅샷 ${cps.length}개` }));

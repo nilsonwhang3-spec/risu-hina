@@ -101,16 +101,21 @@ def delete(chat_key: str, checkpoint_id: str) -> None:
 
 
 def clear(chat_key: str, keep: int = 0) -> int:
-    """Delete this chat's snapshots, keeping the `keep` newest. Returns how
-    many went."""
+    """Delete this chat's saved snapshots, keeping the `keep` newest. Returns
+    how many went. 'user' rows only: the automatic backups are the backend's
+    to prune (prune_auto), and "전부 삭제" must not quietly take the safety
+    net taken before the last 반영 with it."""
     keep = max(0, int(keep))
-    before = db.one("SELECT COUNT(*) AS n FROM checkpoints WHERE chat_key = ?", (chat_key,))
+    before = db.one(
+        "SELECT COUNT(*) AS n FROM checkpoints WHERE chat_key = ? AND kind = 'user'", (chat_key,))
     db.execute(
-        "DELETE FROM checkpoints WHERE chat_key = ? AND id NOT IN "
-        "(SELECT id FROM checkpoints WHERE chat_key = ? ORDER BY created_at DESC LIMIT ?)",
+        "DELETE FROM checkpoints WHERE chat_key = ? AND kind = 'user' AND id NOT IN "
+        "(SELECT id FROM checkpoints WHERE chat_key = ? AND kind = 'user' "
+        "ORDER BY created_at DESC LIMIT ?)",
         (chat_key, chat_key, keep),
     )
-    after = db.one("SELECT COUNT(*) AS n FROM checkpoints WHERE chat_key = ?", (chat_key,))
+    after = db.one(
+        "SELECT COUNT(*) AS n FROM checkpoints WHERE chat_key = ? AND kind = 'user'", (chat_key,))
     return int((before["n"] if before else 0) - (after["n"] if after else 0))
 
 
@@ -216,14 +221,18 @@ def delete_card(char_key: str, checkpoint_id: str) -> None:
 
 
 def clear_card(char_key: str, keep: int = 0) -> int:
+    """clear()'s bot twin: 'user' rows only, for the same reason."""
     keep = max(0, int(keep))
-    before = db.one("SELECT COUNT(*) AS n FROM card_checkpoints WHERE char_key = ?", (char_key,))
+    before = db.one(
+        "SELECT COUNT(*) AS n FROM card_checkpoints WHERE char_key = ? AND kind = 'user'", (char_key,))
     db.execute(
-        "DELETE FROM card_checkpoints WHERE char_key = ? AND id NOT IN "
-        "(SELECT id FROM card_checkpoints WHERE char_key = ? ORDER BY created_at DESC LIMIT ?)",
+        "DELETE FROM card_checkpoints WHERE char_key = ? AND kind = 'user' AND id NOT IN "
+        "(SELECT id FROM card_checkpoints WHERE char_key = ? AND kind = 'user' "
+        "ORDER BY created_at DESC LIMIT ?)",
         (char_key, char_key, keep),
     )
-    after = db.one("SELECT COUNT(*) AS n FROM card_checkpoints WHERE char_key = ?", (char_key,))
+    after = db.one(
+        "SELECT COUNT(*) AS n FROM card_checkpoints WHERE char_key = ? AND kind = 'user'", (char_key,))
     return int((before["n"] if before else 0) - (after["n"] if after else 0))
 
 

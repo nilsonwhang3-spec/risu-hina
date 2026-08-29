@@ -893,7 +893,7 @@ class AppState {
     }
   }
 
-  async checkpoints(): Promise<{ id: string; label: string; message_count: number; created_at: number }[]> {
+  async checkpoints(): Promise<{ id: string; label: string; message_count: number; created_at: number; kind?: string }[]> {
     const res = await transport.get<{ checkpoints: any[] }>('/checkpoints', { chatKey: this.activeChatKey });
     return res.checkpoints ?? [];
   }
@@ -1669,7 +1669,7 @@ class AppState {
     await transport.post('/card/checkpoint', { charKey: this.botKey, label });
   }
 
-  async cardCheckpoints(): Promise<{ id: string; label: string; created_at: number }[]> {
+  async cardCheckpoints(): Promise<{ id: string; label: string; created_at: number; kind?: string }[]> {
     const r = await transport.get<{ checkpoints: any[] }>('/card/checkpoints', { charKey: this.botKey });
     return r.checkpoints ?? [];
   }

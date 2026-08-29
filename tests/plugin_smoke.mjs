@@ -890,6 +890,45 @@ console.log('\ntest_leave_guard_resolves_on_every_exit');
         document.getElementById('tab-editor')?.classList.contains('active'));
 }
 
+console.log('\ntest_version_list_shows_saves_and_folds_backups');
+{
+  // The version list is what the user saved by name; what the code saved for
+  // itself (반영 직전, reset 직전...) folds behind "자동 백업 N개 보기".
+  // By this point the suite has pressed 반영 and 버리기 several times, so
+  // automatic backups exist.
+  // linkedom has no input.select(); the popover calls it on focus.
+  if (window.HTMLInputElement && !window.HTMLInputElement.prototype.select) {
+    window.HTMLInputElement.prototype.select = function () {};
+  }
+  clickTool(document, 'snapshot');
+  await settle(300);
+  const nameInput = document.querySelector('.popover input');
+  check('the snapshot popover asks for a name', !!nameInput);
+  nameInput.value = '연습 저장';
+  clickButton(document.querySelector('.popover'), '저장');
+  await settle(900);
+
+  clickTool(document, 'versions');
+  await settle(600);
+  const pop = () => document.querySelector('.popover');
+  check('the saved snapshot is listed by its name', /연습 저장/.test(pop()?.textContent || ''));
+  check('no automatic label is in the default list',
+        !/반영 직전|reset 직전/.test(pop()?.textContent || ''),
+        pop()?.textContent?.slice(0, 200));
+  const toggle = [...pop().querySelectorAll('button')]
+    .find((b) => /자동 백업 \d+개 보기/.test(b.textContent || ''));
+  check('the backups fold behind one line', !!toggle);
+  toggle.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(200);
+  check('unfolding shows the automatic labels', /반영 직전|reset 직전/.test(pop()?.textContent || ''));
+  check('and warns that a backup can be behind RisuAI',
+        /과거일 수 있습니다/.test(pop()?.textContent || ''));
+  check('the cleanup row counts the saved ones only',
+        /저장한 스냅샷 \d+개/.test(pop()?.textContent || ''));
+  clickTool(document, 'versions');  // close the popover
+  await settle(200);
+}
+
 console.log('\ntest_truncate_with_preview');
 {
   check('cut tool activates', clickTool(document, 'cut'));

@@ -333,7 +333,11 @@ async function openVersions(anchor: HTMLElement): Promise<void> {
   try {
     const cps = await state.cardCheckpoints();
     clear(body);
-    if (!cps.length) {
+    // Same split as the chat bar: named saves are the list, automatic
+    // backups fold behind one line.
+    const users = cps.filter((c) => c.kind !== 'auto');
+    const autos = cps.filter((c) => c.kind === 'auto');
+    if (!users.length && !autos.length) {
       body.appendChild(el('div', { class: 'hint', text: '아직 봇 스냅샷이 없습니다. 🔖 스냅샷 버튼으로 저장해 주세요.' }));
       return;
     }
@@ -343,7 +347,10 @@ async function openVersions(anchor: HTMLElement): Promise<void> {
         el('div', { class: 'hint', text: '스냅샷이 아닙니다. 아래는 최근 순입니다.' }),
       ]),
     ]));
-    for (const [idx, c] of cps.slice(0, 12).entries()) {
+    if (!users.length) {
+      body.appendChild(el('div', { class: 'hint', text: '아직 저장한 봇 스냅샷이 없습니다. 🔖 스냅샷 버튼으로 저장해 주세요.' }));
+    }
+    const verRow = (c: (typeof cps)[number], opts: { newest?: boolean; auto?: boolean }) => {
       const b = el('button', { class: 'ghost tiny', text: '되돌리기', title: '작업본을 이 시점으로 되돌립니다 (직전 상태도 스냅샷으로 남습니다)' });
       b.addEventListener('click', async () => {
         (b as HTMLButtonElement).disabled = true;
@@ -357,10 +364,10 @@ async function openVersions(anchor: HTMLElement): Promise<void> {
       });
       const title = el('div', {}, [
         el('span', { text: c.label || '(무제)' }),
-        idx === 0 ? el('span', { class: 'badge', style: { marginLeft: '6px' }, text: '최신 스냅샷' }) : null,
+        opts.newest ? el('span', { class: 'badge', style: { marginLeft: '6px' }, text: '최신 스냅샷' }) : null,
       ]);
-      const ren = el('button', { class: 'ghost tiny', text: '✎', title: '이름 바꾸기' });
-      ren.addEventListener('click', () => {
+      const ren = opts.auto ? null : el('button', { class: 'ghost tiny', text: '✎', title: '이름 바꾸기' });
+      ren?.addEventListener('click', () => {
         openSnapshotName(ren, c.label || '', async (label) => {
           await state.renameCardCheckpoint(c.id, label);
           (title.firstChild as HTMLElement).textContent = label;
@@ -389,15 +396,37 @@ async function openVersions(anchor: HTMLElement): Promise<void> {
           title,
           el('div', { class: 'hint', text: fmtTime(c.created_at * 1000) }),
         ]),
-        ren, b, del,
+        ...(ren ? [ren] : []), b, del,
       );
-      body.appendChild(row);
+      return row;
+    };
+    for (const [idx, c] of users.slice(0, 12).entries()) {
+      body.appendChild(verRow(c, { newest: idx === 0 }));
     }
-    if (cps.length > 12) body.appendChild(el('div', { class: 'hint', text: `그 외 ${cps.length - 12}개` }));
-    body.appendChild(snapshotCleanup(cps.length, async (keep) => {
+    if (users.length > 12) body.appendChild(el('div', { class: 'hint', text: `그 외 ${users.length - 12}개` }));
+    if (autos.length) {
+      const fold = el('div', { class: 'autofold' });
+      const toggle = el('button', { class: 'ghost tiny', text: `자동 백업 ${autos.length}개 보기` }) as HTMLButtonElement;
+      toggle.addEventListener('click', () => {
+        if (fold.childElementCount) {
+          clear(fold);
+          toggle.textContent = `자동 백업 ${autos.length}개 보기`;
+          return;
+        }
+        toggle.textContent = '자동 백업 접기';
+        fold.appendChild(el('div', {
+          class: 'hint',
+          text: '자동 백업은 반영·되돌리기 직전에 남긴 내부용 사본입니다. RisuAI의 현재 내용보다 과거일 수 있습니다.',
+        }));
+        for (const c of autos) fold.appendChild(verRow(c, { auto: true }));
+      });
+      body.appendChild(el('div', { class: 'row', style: { marginTop: '8px' } }, [toggle]));
+      body.appendChild(fold);
+    }
+    body.appendChild(snapshotCleanup(users.length, async (keep) => {
       const n = await state.clearCardCheckpoints(keep);
       close();
-      shellNotice(`봇 스냅샷 ${n}개를 지웠습니다.`, 'ok');
+      shellNotice(`저장한 봇 스냅샷 ${n}개를 지웠습니다.`, 'ok');
     }));
   } catch (e) {
     clear(body);

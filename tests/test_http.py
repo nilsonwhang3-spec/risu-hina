@@ -586,19 +586,24 @@ def test_checkpoint_restore(s: Server, ws: dict) -> None:
     for n in range(3):
         s.post("/checkpoint", {"chatKey": a, "label": f"extra {n}"})
     st, body = s.get(f"/checkpoints?chatKey={a}")
-    total = len(body.get("checkpoints") or [])
-    check("several snapshots exist", total >= 5, str(total))
+    # clear() works on what the user saved; the restore's own 'restore 직전'
+    # row is an automatic backup and stays out of both the count and the sweep.
+    total = len([c for c in body.get("checkpoints") or [] if c.get("kind") != "auto"])
+    check("several snapshots exist", total >= 4, str(total))
     st, _ = s.post("/checkpoint/delete", {"chatKey": a, "id": cid})
     check("one snapshot deleted", st == 200, str(st))
     st, body = s.get(f"/checkpoints?chatKey={a}")
     check("it is gone", all(c.get("id") != cid for c in body.get("checkpoints") or []))
     st, body = s.post("/checkpoint/clear", {"chatKey": a, "keep": 2})
-    check("clear keeps the newest two", st == 200 and body.get("deleted") == total - 1 - 2, str(body))
+    check("clear keeps the newest two saved ones", st == 200 and body.get("deleted") == total - 1 - 2, str(body))
     st, body = s.get(f"/checkpoints?chatKey={a}")
-    left = body.get("checkpoints") or []
+    left = [c for c in body.get("checkpoints") or [] if c.get("kind") != "auto"]
     check("two remain, newest first", len(left) == 2 and left[0]["created_at"] >= left[1]["created_at"], str(len(left)))
     st, body = s.post("/checkpoint/clear", {"chatKey": a, "keep": 0})
-    check("clear all", st == 200 and body.get("deleted") == 2 and not (s.get(f"/checkpoints?chatKey={a}")[1].get("checkpoints")), str(body))
+    remaining = [c for c in s.get(f"/checkpoints?chatKey={a}")[1].get("checkpoints") or []
+                 if c.get("kind") != "auto"]
+    check("clear all clears the saved ones (auto backups stay, they self-prune)",
+          st == 200 and body.get("deleted") == 2 and not remaining, str(body))
 
 
 def test_reopen_merges_risu_changes(s: Server) -> None:
