@@ -264,6 +264,26 @@ check("the rename landed", (shots / "히나-교복-angry-20260829-1200-1.png").i
 check("and it now parses into a group",
       "angry" in [x["key"] for x in studio.group("images/고르기")["groups"]])
 
+print("\ntest_inpaint_mask")
+from app import nai  # noqa: E402
+
+mask = studio.make_mask(64, 48, [{"x": 0.25, "y": 0.5, "w": 0.5, "h": 0.25}])
+check("it is a PNG", mask[:8] == b"\x89PNG\r\n\x1a\n")
+check("of the size asked for", nai.png_size(mask) == (64, 48), str(nai.png_size(mask)))
+# Written with zlib alone on purpose: Pillow is not in the release bundle, and
+# the one image operation on the core path must not need it.
+check("it needs no image library",
+      "PIL" not in sys.modules and "Pillow" not in sys.modules)
+# White is what gets repainted (docs/09 §7c), so an empty box list would
+# repaint nothing and is refused rather than silently doing a no-op.
+raises("no region is refused",
+       lambda: studio.inpaint("images/고르기/히나-교복-sad-20260829-1200-1.png", [], "x",
+                              model="nai-diffusion-4-5-full"))
+check("the inpainting model is derived, not guessed",
+      nai.inpaint_model("nai-diffusion-4-5-full") == "nai-diffusion-4-5-full-inpainting")
+check("and an inpainting id is left alone",
+      nai.inpaint_model("nai-diffusion-3-inpainting") == "nai-diffusion-3-inpainting")
+
 print()
 if FAILURES:
     print(f"FAIL - {len(FAILURES)} check(s): " + ", ".join(FAILURES))

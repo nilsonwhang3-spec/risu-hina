@@ -264,6 +264,33 @@ batch of them and reports the actual difference afterwards.
 Also present: `POST image.novelai.net/ai/upscale` (400 validation, shape unmeasured). Only on the legacy host:
 `POST api.novelai.net/ai/annotate-image` — absent from `image.novelai.net`.
 
+## 7c. Inpainting — `action: "infill"`, and it needs the inpainting model
+
+Same endpoint as generation, different action, and **a different model**:
+
+```
+POST /ai/generate-image
+{ "input": "<prompt>", "model": "<...>-inpainting", "action": "infill",
+  "parameters": { …the usual…, "image": "<base64 png>", "mask": "<base64 png>",
+                  "add_original_image": true } }
+```
+
+The base model refuses it by name, which is worth quoting to the user verbatim:
+
+> `400 Model nai-diffusion-4-5-full doesn't support action infill`
+
+Inpainting model ids exist for every generation (checked free with the §5 oracle):
+`nai-diffusion-4-5-full-inpainting` · `nai-diffusion-4-5-curated-inpainting` ·
+`nai-diffusion-5-full-inpainting` · `nai-diffusion-4-full-inpainting` · `nai-diffusion-3-inpainting`.
+(`nai-diffusion-inpainting` is not an id.)
+
+**The mask is a full-resolution RGB PNG and white is what gets repainted.** Measured by diffing the result
+against the source: mean channel difference **22.1 inside the white rectangle and 0.0 outside it** — so with
+`add_original_image: true` everything outside the mask comes back *byte-identical*. That is what makes inpaint
+safe to offer on a chosen asset: it cannot quietly alter the rest of the picture.
+
+**Cost: 0 Anlas** at tier 3 (9257 → 9257), same as generation — and subject to the same §4 caveat.
+
 ## 8. What `app/nai.py` takes from this
 
 - Base `https://image.novelai.net`, bearer token from the `api_keys` row with provider `novelai`.

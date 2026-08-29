@@ -1137,6 +1137,31 @@ def build() -> Agent[Deps]:
         return "\n".join(made)
 
     @agent.tool
+    def studio_inpaint(ctx: RunContext[Deps], path: str, boxes_json: str, prompt: str,
+                       model: str = "nai-diffusion-4-5-full", negative: str = "") -> str:
+        """이미지의 일부만 다시 그린다. 원본은 두고 `-fix` 가 붙은 새 파일로 저장한다.
+
+        boxes_json = [{"x":0.25,"y":0.15,"w":0.5,"h":0.35}] — **0~1 비율**이다.
+        (x,y 는 왼쪽 위 모서리, w,h 는 너비/높이. 여러 개 줄 수 있다.)
+        지정한 사각형 안만 바뀌고 **바깥은 원본 그대로** 유지된다.
+
+        비용은 계정 등급에 따라 다르다. 실행 전후 Anlas 를 대조해 실제로 얼마나
+        나갔는지 보고하므로, 여러 장을 돌리기 전에 한 장으로 확인시켜 드릴 것.
+        """
+        try:
+            boxes = json.loads(boxes_json)
+            if not isinstance(boxes, list) or not boxes:
+                return 'boxes_json 은 [{"x":…,"y":…,"w":…,"h":…}] 배열이어야 합니다 (0~1 비율)'
+            before = nai.anlas()
+            r = studio.inpaint(path, boxes, prompt, model=model, negative=negative)
+            after = nai.anlas()
+        except Exception as e:  # noqa: BLE001
+            return str(e)
+        spent = before - after if before >= 0 and after >= 0 else None
+        return (f"{r['path']} 로 저장했습니다 ({r['size'] // 1024}KB)."
+                + (f" Anlas {before} → {after} ({spent} 소모)." if spent is not None else ""))
+
+    @agent.tool
     def studio_naming(ctx: RunContext[Deps]) -> str:
         """지금 선택된 봇이 실제로 쓰는 감정 에셋 이름들. 이름 규칙은 봇마다 다르므로 여기서 읽는다."""
         if not ctx.deps.char_key:

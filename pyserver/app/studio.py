@@ -361,6 +361,78 @@ def plan(spec: dict) -> list[dict]:
     return out
 
 
+# --- inpainting ---------------------------------------------------------------
+
+def make_mask(width: int, height: int, boxes: list[dict]) -> bytes:
+    """A mask PNG: white where it should be repainted, black elsewhere.
+
+    Written with `zlib` and nothing else **on purpose**. Pillow is not in the
+    release bundle - it is installed through the pip permission prompt when a
+    workflow actually needs it - so the one image operation that is part of the
+    core path must not depend on it. Rectangles are enough for the job this
+    serves (a hand, a background corner, a badly drawn eye); anything cleverer
+    is a `run_python` script's business, where Pillow is available.
+
+    Boxes are fractions of the image (0..1) so a caller can say "the top third"
+    without knowing the resolution.
+    """
+    import struct
+    import zlib
+
+    px = bytearray(width * height)
+    for b in boxes:
+        x0 = max(0, min(width, int(float(b.get("x", 0)) * width)))
+        y0 = max(0, min(height, int(float(b.get("y", 0)) * height)))
+        x1 = max(x0, min(width, int((float(b.get("x", 0)) + float(b.get("w", 0))) * width)))
+        y1 = max(y0, min(height, int((float(b.get("y", 0)) + float(b.get("h", 0))) * height)))
+        for y in range(y0, y1):
+            base = y * width
+            for x in range(x0, x1):
+                px[base + x] = 255
+
+    rows = bytearray()
+    for y in range(height):
+        rows.append(0)  # filter: none
+        line = px[y * width:(y + 1) * width]
+        for v in line:
+            rows += bytes((v, v, v))
+
+    def chunk(tag: bytes, data: bytes) -> bytes:
+        body = tag + data
+        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+
+    return (b"\x89PNG\r\n\x1a\n"
+            + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(bytes(rows), 6))
+            + chunk(b"IEND", b""))
+
+
+def inpaint(rel: str, boxes: list[dict], prompt: str, *, model: str,
+            negative: str = "", params: dict | None = None, suffix: str = "-fix") -> dict:
+    """Repaint part of a library image and save the result beside it.
+
+    A new file, never in place: the original is a candidate someone may still
+    prefer, and an inpaint that overwrote it would remove the comparison the
+    selector exists to make.
+    """
+    png = read_bytes(rel)
+    w, h = nai.png_size(png)
+    if not w or not h:
+        raise StudioError(f"PNG 이 아닙니다: {rel}")
+    if not boxes:
+        raise StudioError("다시 그릴 영역이 필요합니다 (x, y, w, h — 0~1 비율)")
+    mask = make_mask(w, h, boxes)
+    out = nai.infill(model, png, mask, prompt, negative, params)
+    src = Path(rel)
+    name = f"{src.stem}{suffix}.png"
+    folder = str(src.parent).replace("\\", "/")
+    saved = save_image(folder, name, out, {
+        "inpaintOf": rel, "boxes": boxes, "prompt": prompt, "negative": negative,
+        "model": nai.inpaint_model(model),
+    })
+    return saved
+
+
 # --- choosing between candidates ----------------------------------------------
 #
 # The model is `C:\code\image-selector`, which the user built and uses: three

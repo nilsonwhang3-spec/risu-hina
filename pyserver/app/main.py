@@ -1027,6 +1027,26 @@ def h_studio_naming(arg: dict) -> dict:
     return studio.naming_from_bot(_char(arg))
 
 
+def h_studio_inpaint(arg: dict) -> dict:
+    """Repaint part of one image. Reports the Anlas actually spent."""
+    boxes = arg.get("boxes")
+    if not isinstance(boxes, list) or not boxes:
+        raise ApiError(400, "boxes[] is required (x, y, w, h as 0..1 fractions)")
+    before = nai.anlas()
+    try:
+        r = studio.inpaint(str(arg.get("path") or ""), boxes,
+                           str(arg.get("prompt") or ""),
+                           model=str(arg.get("model") or "nai-diffusion-4-5-full"),
+                           negative=str(arg.get("negative") or ""))
+    except (studio.StudioError, files.FileError) as e:
+        raise ApiError(400, str(e))
+    except nai.NaiError as e:
+        raise ApiError(502, str(e))
+    after = nai.anlas()
+    return {**r, "anlasBefore": before, "anlasAfter": after,
+            "anlasSpent": (before - after) if before >= 0 and after >= 0 else None}
+
+
 def h_studio_group(arg: dict) -> dict:
     """The folder's images gathered into groups to choose between.
 
@@ -2051,6 +2071,7 @@ ROUTES: dict[str, Handler] = {
     "POST /studio/recipe": h_studio_recipe,
     "POST /studio/parse": h_studio_parse,
     "GET /studio/naming": h_studio_naming,
+    "POST /studio/inpaint": h_studio_inpaint,
     "POST /studio/group": h_studio_group,
     "GET /studio/selection": h_studio_selection,
     "POST /studio/selection": h_studio_selection,

@@ -240,6 +240,37 @@ def generate(model: str, prompt: str, negative: str = "",
     return _unzip(r.content, "생성")
 
 
+def inpaint_model(model: str) -> str:
+    """The inpainting twin of a model id.
+
+    `infill` is refused by the ordinary models by name, and every generation
+    has a `-inpainting` id (docs/09 §7c), so the caller names the model it is
+    working with and this points at the right one.
+    """
+    return model if model.endswith("-inpainting") else model + "-inpainting"
+
+
+def infill(model: str, png: bytes, mask: bytes, prompt: str, negative: str = "",
+           params: dict | None = None) -> bytes:
+    """Repaint the white part of `mask` and leave the rest alone.
+
+    Measured: with `add_original_image` everything outside the mask comes back
+    byte-identical (docs/09 §7c), which is what makes this safe to offer on an
+    asset someone has already chosen - it cannot quietly change the rest.
+    """
+    w, h = png_size(png)
+    p = build_parameters(prompt, negative, {**(params or {}), "width": w, "height": h})
+    p["image"] = base64.b64encode(png).decode()
+    p["mask"] = base64.b64encode(mask).decode()
+    p["add_original_image"] = True
+    body = {"input": prompt, "model": inpaint_model(model), "action": "infill", "parameters": p}
+    with _client() as c:
+        r = c.post("/ai/generate-image", json=body)
+    if r.status_code >= 300:
+        raise _fail(r, "인페인트에 실패했습니다")
+    return _unzip(r.content, "인페인트")
+
+
 def augment(action: str, model: str, png: bytes, prompt: str = "",
             width: int = 0, height: int = 0) -> bytes:
     """A director tool. About 10 Anlas a call - the expensive path."""
