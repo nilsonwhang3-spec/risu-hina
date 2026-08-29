@@ -764,6 +764,54 @@ console.log('\ntest_unverified_write_keeps_the_working_copy');
         document.querySelector('.chatbar .changesum')?.textContent);
 }
 
+console.log('\ntest_discard_button_resolves_the_session');
+{
+  // 변경 취소 lives on the bar itself now, visible only while something is
+  // pending, and discards the whole chat scope in two clicks.
+  const discardBtn = () => document.querySelector('.chatbar [data-tool="discard"]');
+  check('discard is hidden while clean', discardBtn()?.style.display === 'none',
+        discardBtn()?.style.display);
+
+  check('find tool activates', clickTool(document, 'find'));
+  await settle(300);
+  if (!optionInput(document, '찾을 문자열')) { clickTool(document, 'find'); await settle(300); }
+  optionInput(document, '찾을 문자열').value = '페데리코';
+  optionInput(document, '바꿀 문자열').value = '페데리꼬';
+  clickButton(document, '미리보기');
+  await settle(900);
+  const applyBtn = () => [...document.querySelectorAll('.rpanel.active button')]
+    .find((b) => b.textContent === '적용');
+  applyBtn().dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(1200);
+
+  check('discard appears once something is pending', discardBtn()?.style.display !== 'none');
+  // The 반영 popover no longer carries a reset row - one verb, one place.
+  clickTool(document, 'apply');
+  await settle(300);
+  check('the popover no longer hides a reset row',
+        !/기준선으로 되돌리기/.test(document.querySelector('.popover')?.textContent || ''));
+  clickTool(document, 'apply');
+  await settle(200);
+
+  const before = JSON.stringify(host.liveChar.chats[0].message);
+  discardBtn().dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(200);
+  check('first click only arms', /정말 버릴까요/.test(discardBtn()?.textContent || ''),
+        discardBtn()?.textContent);
+  discardBtn().dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(1200);
+  check('the discard names what went',
+        /버렸습니다.*턴 \d+건/.test(document.querySelector('.notice.ok')?.textContent || ''),
+        document.querySelector('.notice.ok')?.textContent);
+  check('the chat bar is clean after the discard',
+        /변경 없음/.test(document.querySelector('.chatbar .changesum')?.textContent || ''),
+        document.querySelector('.chatbar .changesum')?.textContent);
+  check('and the host was never written', JSON.stringify(host.liveChar.chats[0].message) === before);
+  await settle(300);
+  check('discard hides again once clean', discardBtn()?.style.display === 'none',
+        discardBtn()?.style.display);
+}
+
 console.log('\ntest_truncate_with_preview');
 {
   check('cut tool activates', clickTool(document, 'cut'));

@@ -843,14 +843,21 @@ class AppState {
     return r;
   }
 
-  async reset(): Promise<void> {
-    await transport.post('/reset', { chatKey: this.activeChatKey });
+  /** Discard the chat's working copy - turns, local lorebook and memory as
+   * one unit. Returns what went, for the confirmation line. */
+  async reset(): Promise<{ turns: number; lore: number; memory: number; total: number }> {
+    const r = await transport.post<{ discarded?: { turns: number; lore: number; memory: number; total: number } }>(
+      '/reset', { chatKey: this.activeChatKey });
     await this.loadTurns();
     this.bump();
+    void this.refreshChanges();
+    return r.discarded ?? { turns: 0, lore: 0, memory: 0, total: 0 };
   }
 
-  async checkpoint(label: string): Promise<void> {
-    await transport.post('/checkpoint', { chatKey: this.activeChatKey, label });
+  /** `auto` marks the plugin's own protective snapshots (before a bulk
+   * replace or a range delete): internal backups, not the version list. */
+  async checkpoint(label: string, auto = false): Promise<void> {
+    await transport.post('/checkpoint', { chatKey: this.activeChatKey, label, ...(auto ? { auto } : {}) });
   }
 
   async checkpoints(): Promise<{ id: string; label: string; message_count: number; created_at: number }[]> {
@@ -1616,10 +1623,13 @@ class AppState {
     void this.refreshBotChanges();
   }
 
-  async cardReset(): Promise<void> {
-    await transport.post('/card/reset', { charKey: this.botKey });
+  /** Discard the card's working copy, global lorebook included. Returns how
+   * many pending changes went, for the confirmation line. */
+  async cardReset(): Promise<number> {
+    const r = await transport.post<{ discarded?: number }>('/card/reset', { charKey: this.botKey });
     this.bump();
     void this.refreshBotChanges();
+    return r.discarded ?? 0;
   }
 
   async cardCheckpoint(label: string): Promise<void> {

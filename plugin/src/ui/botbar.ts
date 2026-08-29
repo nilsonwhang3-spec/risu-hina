@@ -21,6 +21,7 @@ import { openConflicts } from './conflicts';
 
 let bar: HTMLElement | null = null;
 let applyBtn: HTMLButtonElement | null = null;
+let discardBtn: HTMLButtonElement | null = null;
 let applyBadge: HTMLElement | null = null;
 let summaryEl: HTMLElement | null = null;
 
@@ -41,7 +42,7 @@ export function buildBotBar(): HTMLElement {
   applyBadge = el('span', { class: 'badge warn applybadge', style: { display: 'none' } });
   applyBtn = el('button', {
     class: 'tool', dataset: { tool: 'card-apply' },
-    title: '카드를 RisuAI에 반영 · 복제 봇 생성 · 기준선으로 되돌리기',
+    title: '카드를 RisuAI에 반영 · 새 봇으로 저장',
   }, [
     el('span', { class: 'glyph', text: TOOL.apply }),
     el('span', { class: 'tool-label', text: '반영' }),
@@ -81,9 +82,26 @@ export function buildBotBar(): HTMLElement {
   ]) as HTMLButtonElement;
   charxBtn.addEventListener('click', () => { if (charxBtn) openCharx(charxBtn); });
 
+  // The chat bar's 변경 취소, for the card. See there for why it is a bar
+  // verb and not a popover row.
+  discardBtn = el('button', {
+    class: 'tool', dataset: { tool: 'card-discard' },
+    title: '카드의 미반영 변경(메타·인사말·봇 로어북·스크립트)을 모두 버리고 RisuAI 상태로 되돌립니다',
+    style: { display: 'none' },
+  }) as HTMLButtonElement;
+  armed(discardBtn, TOOL.discard + ' 변경 취소', '정말 버릴까요?', async () => {
+    try {
+      const n = await state.cardReset();
+      shellNotice('카드의 미반영 변경을 버렸습니다' + (n ? ` (${n}건)` : '')
+        + '. 작업본이 기준선(RisuAI 상태)으로 돌아갔습니다.', 'ok');
+    } catch (e) {
+      shellNotice('변경 취소에 실패했습니다: ' + msg(e), 'err');
+    }
+  });
+
   summaryEl = el('span', { class: 'dim changesum', title: '이 봇의 카드에서 아직 RisuAI에 쓰지 않은 변경' });
 
-  bar = el('div', { class: 'toolrow botbar' }, [applyBtn, snap, versions, charxBtn, summaryEl]);
+  bar = el('div', { class: 'toolrow botbar' }, [applyBtn, snap, versions, discardBtn, charxBtn, summaryEl]);
   refreshBotBar();
   return bar;
 }
@@ -157,6 +175,7 @@ export function refreshBotBar(): void {
   const total = c?.total ?? 0;
   applyBadge.textContent = String(total);
   applyBadge.style.display = total ? '' : 'none';
+  if (discardBtn) discardBtn.style.display = total || (c?.conflicts ?? 0) ? '' : 'none';
   const blocked = applyBlockReason();
   applyBtn.classList.toggle('dimmed', !!blocked);
   if (charxBtn) {
@@ -165,8 +184,8 @@ export function refreshBotBar(): void {
     charxBtn.title = cb ? cb : '작업본 카드와 스토어의 에셋으로 charx 파일을 만듭니다';
   }
   applyBtn.title = blocked
-    ? blocked + ' (복제·되돌리기는 눌러서 쓸 수 있습니다)'
-    : '카드를 RisuAI에 반영 · 복제 봇 생성 · 기준선으로 되돌리기';
+    ? blocked + ' (새 봇으로 저장은 눌러서 쓸 수 있습니다)'
+    : '카드를 RisuAI에 반영 · 새 봇으로 저장';
 }
 
 function describe(c: CardChanges | null): string[] {
@@ -296,20 +315,8 @@ function openApply(anchor: HTMLElement): void {
   });
   const clone = saveNew;
 
-  const reset = el('button', { class: 'ghost' });
-  armed(reset, '기준선으로 되돌리기', '정말 되돌릴까요?', async () => {
-    try {
-      await state.cardReset();
-      shellNotice('카드 작업본을 기준선으로 되돌렸습니다.', 'ok');
-      close();
-    } catch (e) {
-      shellNotice('되돌리기에 실패했습니다: ' + msg(e), 'err');
-    }
-  });
-
   body.appendChild(el('div', { class: 'row' }, [apply]));
   body.appendChild(el('div', { class: 'row' }, [nameInput, clone]));
-  body.appendChild(el('div', { class: 'row' }, [reset]));
   body.appendChild(out);
   body.appendChild(el('div', {
     class: 'hint',

@@ -523,7 +523,7 @@ function buildFind(): HTMLElement {
   applyBtn.addEventListener('click', async () => {
     applyBtn.disabled = true;
     try {
-      await state.checkpoint('찾기·바꾸기 직전');
+      await state.checkpoint('찾기·바꾸기 직전', true);
       const r = await state.bulk(params(true));
       setPreview(null);
       await state.loadTurns();
@@ -591,7 +591,7 @@ function buildCut(): HTMLElement {
     const r = range();
     if (!r) return;
     try {
-      await state.checkpoint('턴 삭제 직전');
+      await state.checkpoint('턴 삭제 직전', true);
       await state.deleteRange(r[0], r[1]);
       setPreview(null);
       notice(`턴 ${r[0]}~${r[1]} 을 지웠습니다. 하이파 요약이 지워진 턴을 인용하고 있으면 반영할 때 알려 드립니다.`, 'ok');

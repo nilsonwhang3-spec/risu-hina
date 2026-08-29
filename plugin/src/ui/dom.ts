@@ -197,6 +197,7 @@ export function fmtTime(ms: unknown): string {
  */
 export const TOOL = {
   snapshot: '🔖',
+  discard: '↩',
   versions: '🕘',
   apply: '💾',
   export: '⬇',

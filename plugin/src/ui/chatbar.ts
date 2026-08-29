@@ -19,6 +19,7 @@ import { openConflicts } from './conflicts';
 
 let bar: HTMLElement | null = null;
 let applyBtn: HTMLElement | null = null;
+let discardBtn: HTMLButtonElement | null = null;
 let applyBadge: HTMLElement | null = null;
 let summaryEl: HTMLElement | null = null;
 let noticeMount: HTMLElement | null = null;
@@ -28,7 +29,7 @@ export function buildChatBar(notice: HTMLElement): HTMLElement {
   applyBadge = el('span', { class: 'badge warn applybadge', style: { display: 'none' } });
   applyBtn = el('button', {
     class: 'tool', dataset: { tool: 'apply' },
-    title: 'RisuAI에 반영 · 복사본 저장 · 기준선으로 되돌리기',
+    title: 'RisuAI에 반영 · 복사본 저장',
   }, [
     el('span', { class: 'glyph', text: TOOL.apply }),
     el('span', { class: 'tool-label', text: '반영' }),
@@ -61,9 +62,32 @@ export function buildChatBar(notice: HTMLElement): HTMLElement {
   ]);
   versions.addEventListener('click', () => void openVersions(versions));
 
+  // 변경 취소: the other half of resolving an edit session. It used to hide
+  // inside the 반영 popover as "기준선으로 되돌리기", which meant the way to
+  // NOT write something lived behind the button whose job is to write.
+  // Visible only while something is pending - exactly when it has meaning.
+  discardBtn = el('button', {
+    class: 'tool', dataset: { tool: 'discard' },
+    title: '이 챗의 미반영 변경(턴·로어북·장기기억)을 모두 버리고 RisuAI 상태로 되돌립니다',
+    style: { display: 'none' },
+  }) as HTMLButtonElement;
+  armed(discardBtn, TOOL.discard + ' 변경 취소', '정말 버릴까요?', async () => {
+    try {
+      const d = await state.reset();
+      const bits: string[] = [];
+      if (d.turns) bits.push(`턴 ${d.turns}건`);
+      if (d.lore) bits.push(`로어북 ${d.lore}건`);
+      if (d.memory) bits.push(`장기기억 ${d.memory}건`);
+      shellNotice('미반영 변경을 버렸습니다' + (bits.length ? ` (${bits.join(' · ')})` : '')
+        + '. 작업본이 기준선(RisuAI 상태)으로 돌아갔습니다.', 'ok');
+    } catch (e) {
+      shellNotice('변경 취소에 실패했습니다: ' + msg(e), 'err');
+    }
+  });
+
   summaryEl = el('span', { class: 'dim changesum', title: '이 챗에서 아직 RisuAI에 쓰지 않은 변경' });
 
-  bar = el('div', { class: 'toolrow chatbar' }, [applyBtn, snap, versions, summaryEl]);
+  bar = el('div', { class: 'toolrow chatbar' }, [applyBtn, snap, versions, discardBtn, summaryEl]);
   refreshChatBar();
   return bar;
 }
@@ -80,6 +104,7 @@ export function refreshChatBar(): void {
   applyBadge.textContent = String(total);
   applyBadge.style.display = total ? '' : 'none';
   applyBadge.classList.toggle('conflict', !!conflicts);
+  if (discardBtn) discardBtn.style.display = total || conflicts ? '' : 'none';
 }
 
 function describe(c: Changes | null): string[] {
@@ -212,7 +237,6 @@ function openApply(anchor: HTMLElement): void {
       // still holds RisuAI's old content, so the edits are still pending
       // against it. Re-reading here would fetch that old content back and
       // throw the edits away.
-      await state.checkpoint('복사본 저장 직후');
       await state.loadTurns();
       shellNotice(`복사본 "${name}" 을 만들었습니다. 로어북과 장기기억도 함께 담겼습니다. `
         + '이 챗의 수정은 아직 반영 전 상태로 남아 있습니다.', 'ok');
@@ -225,20 +249,8 @@ function openApply(anchor: HTMLElement): void {
     }
   });
 
-  const reset = el('button', { class: 'ghost' });
-  armed(reset, '기준선으로 되돌리기', '정말 되돌릴까요?', async () => {
-    try {
-      await state.reset();
-      shellNotice('작업본을 기준선으로 되돌렸습니다.', 'ok');
-      close();
-    } catch (e) {
-      shellNotice('되돌리기에 실패했습니다: ' + msg(e), 'err');
-    }
-  });
-
   body.appendChild(el('div', { class: 'row' }, [apply]));
   body.appendChild(el('div', { class: 'row' }, [copy]));
-  body.appendChild(el('div', { class: 'row' }, [reset]));
   body.appendChild(out);
   body.appendChild(el('div', {
     class: 'hint',
