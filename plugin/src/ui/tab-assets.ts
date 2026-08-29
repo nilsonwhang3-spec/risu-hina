@@ -17,11 +17,9 @@
  */
 import { el, clear, armed, refocusSearch, popover } from './dom';
 import { state, type AssetItem, type CardScript } from '../state';
-import { threePane } from './panes';
-import { bindAgent, mountAgent } from './agentpane';
 import { transport } from '../transport';
 import { describeSync, syncBusy } from '../assets';
-import { setToolbarSearch } from './shell';
+import { makeTab, type NoticeKind, type TabUi } from './kit';
 
 const FIELD_LABEL: Record<string, string> = {
   image: '프로필',
@@ -44,71 +42,39 @@ interface Cell {
   origin: string;
 }
 
-let built = false;
 let gridMount: HTMLElement | null = null;
-let noticeMount: HTMLElement | null = null;
 let sideMount: HTMLElement | null = null;
 let cells: Cell[] = [];
-let seenEpoch = -1;
-let seenKey = '';
-let seenSyncAt = 0;
-let seenBusy = false;
 let filterText = '';
 const thumbs = new Map<string, string>();
+let ui: TabUi | null = null;
 
-export function renderAssetsTab(mount: HTMLElement): void {
-  if (!state.botKey) {
-    clear(mount);
-    built = false;
-    mount.appendChild(el('div', { class: 'pad' }, [
-      el('div', { class: 'empty', text: '먼저 패널을 연 봇이 있어야 합니다.' }),
-    ]));
-    return;
-  }
-  const syncAt = state.assetSync?.finishedAt ?? 0;
-  const busy = syncBusy(state.assetSync);
-  if (!built || !mount.querySelector('.split')) {
-    clear(mount);
-    const pane = threePane();
+function notice(text: string, kind: NoticeKind = ''): void {
+  ui?.notice(text, kind);
+}
+
+export const renderAssetsTab = makeTab({
+  gate: 'bot',
+  keys: () => [state.epoch, state.botKey, state.assetSync?.finishedAt ?? 0, syncBusy(state.assetSync)],
+  search: {
+    placeholder: '에셋 찾기',
+    get: () => filterText,
+    set: (v) => { filterText = v; drawGrid(); refocusSearch(null); },
+  },
+  build(pane, u) {
+    ui = u;
     sideMount = el('div', { class: 'tree' });
     pane.left.appendChild(sideMount);
-    noticeMount = el('div');
     gridMount = el('div', { class: 'pad' });
-    pane.centre.appendChild(noticeMount);
     pane.centre.appendChild(gridMount);
-    mount.appendChild(pane.root);
-    built = true;
-    seenEpoch = state.epoch;
-    seenKey = state.botKey;
-    seenSyncAt = syncAt;
-    seenBusy = busy;
-    void refresh();
-  } else if (seenEpoch !== state.epoch || seenKey !== state.botKey || seenSyncAt !== syncAt || seenBusy !== busy) {
-    seenEpoch = state.epoch;
-    seenKey = state.botKey;
-    seenSyncAt = syncAt;
-    seenBusy = busy;
-    void refresh();
-  }
-  setToolbarSearch(filterText, (v) => {
-    filterText = v;
-    drawGrid();
-    refocusSearch(null);
-  }, '에셋 찾기');
-  bindAgent({ notice });
-  const inner = mount.querySelector('.right-inner');
-  if (inner) mountAgent(inner as HTMLElement);
-}
-
-function notice(text: string, kind: 'ok' | 'err' | '' = ''): void {
-  if (!noticeMount) return;
-  clear(noticeMount);
-  noticeMount.appendChild(el('div', { class: 'notice ' + kind, style: { margin: '10px 14px 0' }, text }));
-  setTimeout(() => { if (noticeMount) clear(noticeMount); }, 9000);
-}
+  },
+  async refresh() {
+    await refreshNow();
+  },
+});
 
 /** The card's rows joined with the store's state, portrait first. */
-async function refresh(): Promise<void> {
+async function refreshNow(): Promise<void> {
   let rows: CardScript[] = [];
   let store: AssetItem[] = [];
   try {
@@ -183,7 +149,7 @@ function drawSide(): void {
       const r = await transport.post<{ changed: number }>('/card/assets/rename', { charKey: state.botKey, mode: 'strip-ext' });
       notice(r.changed ? `${r.changed}개 이름에서 확장자를 뗐습니다. 봇 바의 “반영”을 누르면 RisuAI에 쓰입니다.` : '확장자가 붙은 이름이 없습니다.', r.changed ? 'ok' : '');
       void state.refreshBotChanges();
-      await refresh();
+      await refreshNow();
     } catch (e) {
       notice('실패했습니다: ' + (e instanceof Error ? e.message : String(e)), 'err');
     } finally {
@@ -211,7 +177,7 @@ function openRegexRename(anchor: HTMLElement): void {
       });
       notice(`${r.changed}개 이름을 바꿨습니다. 봇 바의 “반영”을 누르면 RisuAI에 쓰입니다.`, r.changed ? 'ok' : '');
       void state.refreshBotChanges();
-      await refresh();
+      await refreshNow();
       close();
     } catch (e) {
       out.textContent = e instanceof Error ? e.message : String(e);
@@ -284,7 +250,7 @@ function cell(c: Cell): HTMLElement {
       try {
         await state.deleteScript(row.id);
         void state.refreshBotChanges();
-        await refresh();
+        await refreshNow();
       } catch (e) {
         notice('지우지 못했습니다: ' + (e instanceof Error ? e.message : String(e)), 'err');
       }
@@ -305,7 +271,7 @@ function beginRename(c: Cell, nameEl: HTMLElement): void {
     try {
       await state.saveScript(row.id, { ...(row.entry as Record<string, unknown>), name: v });
       void state.refreshBotChanges();
-      await refresh();
+      await refreshNow();
     } catch (e) {
       notice('이름을 바꾸지 못했습니다: ' + (e instanceof Error ? e.message : String(e)), 'err');
       input.replaceWith(nameEl);

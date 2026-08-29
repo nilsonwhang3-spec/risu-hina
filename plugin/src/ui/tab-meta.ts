@@ -6,11 +6,9 @@
  * bot bar's 반영 is what reaches RisuAI.
  */
 import { el, clear, armed, refocusSearch, focusButton, diffCard } from './dom';
-import { setToolbarSearch } from './shell';
 import { state, type CardField } from '../state';
-import { threePane } from './panes';
 import { conflictBox } from './conflicts';
-import { bindAgent, mountAgent } from './agentpane';
+import { makeTab, savedText, type NoticeKind, type TabUi } from './kit';
 
 // personality/scenario/exampleMessage/systemPrompt/PHI are retired fields
 // (import compatibility only) and the backend no longer sends rows for them.
@@ -39,62 +37,39 @@ const FIELD_RANK: Record<string, number> = {
   creatorNotes: 110,
 };
 
-let built = false;
 let treeMount: HTMLElement | null = null;
 let viewMount: HTMLElement | null = null;
-let noticeMount: HTMLElement | null = null;
 let openId = '';
 let fields: CardField[] = [];
 let full = true;
-let seenEpoch = -1;
-let seenKey = '';
 let filterText = '';
+let ui: TabUi | null = null;
 
-export function renderMetaTab(mount: HTMLElement): void {
-  if (!state.botKey) {
-    clear(mount);
-    built = false;
-    mount.appendChild(el('div', { class: 'pad' }, [
-      el('div', { class: 'empty', text: '먼저 패널을 연 봇이 있어야 합니다. RisuAI에서 봇을 열고 다시 여세요.' }),
-    ]));
-    return;
-  }
+function notice(text: string, kind: NoticeKind = ''): void {
+  ui?.notice(text, kind);
+}
 
-  if (!built || !mount.querySelector('.split')) {
-    clear(mount);
-    const pane = threePane();
+export const renderMetaTab = makeTab({
+  gate: 'bot',
+  keys: () => [state.epoch, state.botKey],
+  search: {
+    placeholder: '찾기 (이름·본문)',
+    get: () => filterText,
+    set: (v) => { filterText = v; drawTree(); refocusSearch(null); },
+  },
+  build(pane, u) {
+    ui = u;
     treeMount = el('div', { class: 'tree' });
     pane.left.appendChild(treeMount);
-    noticeMount = el('div');
     viewMount = el('div', { class: 'pad' });
-    pane.centre.appendChild(noticeMount);
     pane.centre.appendChild(viewMount);
-    mount.appendChild(pane.root);
-    built = true;
-    seenEpoch = state.epoch;
-    seenKey = state.botKey;
-    void refresh();
-  } else if (seenEpoch !== state.epoch || seenKey !== state.botKey) {
-    seenEpoch = state.epoch;
-    seenKey = state.botKey;
-    openId = '';
-    if (viewMount) clear(viewMount);
-    void refresh();
-  }
+  },
+  async refresh() {
+    await refreshNow();
+  },
+});
 
-  bindAgent({ notice });
-  const inner = mount.querySelector('.right-inner');
-  if (inner) mountAgent(inner as HTMLElement);
-}
-
-function notice(text: string, kind: 'ok' | 'err' | '' = ''): void {
-  if (!noticeMount) return;
-  clear(noticeMount);
-  noticeMount.appendChild(el('div', { class: 'notice ' + kind, style: { margin: '10px 14px 0' }, text }));
-  setTimeout(() => { if (noticeMount) clear(noticeMount); }, 9000);
-}
-
-async function refresh(): Promise<void> {
+async function refreshNow(): Promise<void> {
   if (!treeMount) return;
   clear(treeMount);
   treeMount.appendChild(el('div', { class: 'hint', style: { padding: '8px' }, text: '읽는 중입니다…' }));
@@ -102,11 +77,15 @@ async function refresh(): Promise<void> {
     const r = await state.cardFields();
     fields = r.fields.filter((f) => !NOT_HERE.has(f.field));
     full = r.full;
-    drawTree();
   } catch (e) {
     clear(treeMount);
     treeMount.appendChild(el('div', { class: 'notice err', text: msg(e) }));
+    return;
   }
+  drawTree();
+  const fresh = fields.find((x) => x.id === openId);
+  if (fresh) open(fresh);
+  else if (openId && viewMount) { openId = ''; clear(viewMount); }
 }
 
 function labelOf(f: CardField): string {
@@ -122,7 +101,7 @@ function drawTree(): void {
   addGreet.addEventListener('click', async () => {
     try {
       const made = await state.addGreeting('');
-      await refresh();
+      await refreshNow();
       const fresh = fields.find((f) => f.id === made.id);
       if (fresh) open(fresh);
     } catch (e) {
@@ -130,7 +109,7 @@ function drawTree(): void {
     }
   });
   const reloadBtn = el('button', { class: 'ghost tiny', text: '새로고침' });
-  reloadBtn.addEventListener('click', () => void refresh());
+  reloadBtn.addEventListener('click', () => void refreshNow());
   treeMount.appendChild(el('div', { class: 'treehead' }, [addGreet, reloadBtn]));
 
   if (!full) {
@@ -140,11 +119,6 @@ function drawTree(): void {
     }));
   }
 
-  setToolbarSearch(filterText, (v) => {
-    filterText = v;
-    drawTree();
-    refocusSearch(null);
-  }, '찾기 (이름·본문)');
   const needle = filterText.trim().toLowerCase();
   const shown = fields.filter((f) => !needle
     || labelOf(f).toLowerCase().includes(needle)
@@ -176,10 +150,9 @@ function drawTree(): void {
 
 function open(f: CardField): void {
   if (!viewMount) return;
+  const was = openId;
   openId = f.id;
-  for (const b of Array.from(document.querySelectorAll('.tree .treefile'))) {
-    b.classList.toggle('on', (b as HTMLElement).title === f.id);
-  }
+  if (was !== f.id) drawTree();
 
   const body = el('textarea', {
     value: f.body,
@@ -193,10 +166,8 @@ function open(f: CardField): void {
       await state.saveCardField(f.id, body.value);
       notice(f.deleted
         ? '저장했습니다. 삭제 표시는 해제되었습니다.'
-        : '저장했습니다. 봇 바의 “반영”을 누르면 RisuAI에 쓰입니다.', 'ok');
-      await refresh();
-      const fresh = fields.find((x) => x.id === f.id);
-      if (fresh) open(fresh);
+        : savedText('카드 필드를'), 'ok');
+      await refreshNow();
     } catch (e) {
       notice('저장하지 못했습니다: ' + msg(e), 'err');
     } finally {
@@ -212,7 +183,7 @@ function open(f: CardField): void {
         await state.deleteGreeting(f.id);
         openId = '';
         if (viewMount) clear(viewMount);
-        await refresh();
+        await refreshNow();
       } catch (e) {
         notice('삭제하지 못했습니다: ' + msg(e), 'err');
       }
@@ -229,7 +200,7 @@ function open(f: CardField): void {
         reason: String((f.conflict as Record<string, unknown>).kind ?? ''), tier: '',
         mine: f.body, theirs: (f.conflict as Record<string, unknown>).theirs ?? null,
         base: (f.conflict as Record<string, unknown>).base ?? null, canTakeTheirs: true,
-      }, () => { void refresh(); })
+      }, () => { void refreshNow(); })
     : null;
 
   clear(viewMount);
