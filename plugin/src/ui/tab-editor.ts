@@ -25,6 +25,7 @@ import { agentPanel, bindAgent, mountAgent } from './agentpane';
 import { TurnList } from './turnlist';
 import { DEFAULT_RENDER, type RenderOptions, type ViewMode } from './render';
 import * as host from '../host';
+import { GATE_COPY } from './kit';
 import { setToolbar } from './shell';
 import { clientLog } from '../transport';
 
@@ -67,7 +68,7 @@ export function renderEditorTab(mount: HTMLElement): void {
     clear(mount);
     setToolbar(null);
     mount.appendChild(el('div', { class: 'pad' }, [
-      el('div', { class: 'empty', text: '먼저 “챗 선택” 탭에서 챗을 골라 주세요.' }),
+      el('div', { class: 'empty', text: GATE_COPY.chat }),
     ]));
     return;
   }

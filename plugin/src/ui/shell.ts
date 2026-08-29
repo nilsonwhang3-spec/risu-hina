@@ -216,7 +216,9 @@ export function currentTab(): TabId {
 function renderActive(): void {
   const node = mounts[active];
   if (!node) return;
-  if (active !== 'editor') setToolbar(null);
+  // Tabs without a menu-line tool of their own; every kit tab and the editor
+  // install (or clear) theirs on each render.
+  if (active === 'chats' || active === 'settings' || active === 'studio') setToolbar(null);
   if (active === 'chats') renderChatsTab(node);
   else if (active === 'editor') renderEditorTab(node);
   else if (active === 'lore') renderLoreTab(node);
