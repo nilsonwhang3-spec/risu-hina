@@ -25,6 +25,7 @@ from pydantic_ai.providers.openai import OpenAIProvider
 
 from . import (actions, assets, codexauth, config, files, log, permits, presets, providers, pyexec, skills, snapshots, textedit,
                staging, store, websearch, workspace)
+from . import nai, studio, studiojob
 from . import card as cardmod
 from . import memory as mem
 
@@ -892,6 +893,184 @@ def build() -> Agent[Deps]:
         return _propose(ctx, "host_asset_add",
                         f"에셋 추가 “{name}” ({field}, {info['size'] // 1024}KB) — {reason}",
                         {"name": name, "path": info["path"], "field": field, "ext": "png"})
+
+    # --- 에셋 스튜디오 --------------------------------------------------------
+    #
+    # The studio is bot-independent: these read and write a global library, not
+    # this bot's workspace, and they work with no bot selected. The one that
+    # crosses back into a bot is `studio_adopt`, which stages a file and then
+    # hands it to the existing propose_asset_add path.
+
+    @agent.tool
+    def studio_list(ctx: RunContext[Deps], area: str) -> str:
+        """에셋 스튜디오 라이브러리 목록. area: images | characters | styles | emotions | fragments | presets.
+
+        스튜디오는 봇과 무관한 전역 라이브러리다. 봇이 선택돼 있지 않아도 쓸 수 있다.
+        """
+        try:
+            items = studio.listing(area)
+        except Exception as e:  # noqa: BLE001
+            return f"목록을 읽지 못했습니다: {e}"
+        if not items:
+            return f"{area}/ 가 비어 있습니다"
+        lines = [f"{i['path']}  {i.get('name','')}"
+                 + (f"  감정 {i['count']}개" if i.get("count") else "")
+                 + (f"  — {i['description']}" if i.get("description") else "")
+                 for i in items[:200]]
+        if len(items) > 200:
+            lines.append(f"… 이하 {len(items) - 200}개 생략")
+        return "\n".join(lines)
+
+    @agent.tool
+    def studio_read(ctx: RunContext[Deps], path: str) -> str:
+        """스튜디오의 .md / .json 파일 본문을 읽는다 (styles/…, characters/…, emotions/… )."""
+        try:
+            return studio._read_text(path)[:30000]
+        except Exception as e:  # noqa: BLE001
+            return str(e)
+
+    @agent.tool
+    def studio_write(ctx: RunContext[Deps], path: str, content: str) -> str:
+        """스튜디오에 파일을 쓴다 (스타일 .md, 캐릭터/감정/프리셋 .json).
+
+        경로는 `styles/폴더/이름.md` 처럼 영역으로 시작해야 한다. 덮어쓴다.
+        스타일 .md 는 front matter + `## positive` / `## negative` 형식이다.
+        감정 프리셋은 `{"name": …, "emotions": {"happy": "smile, happy", …}}` 형식이고,
+        **표정 세트는 이 조각을 일반 생성에 얹어 감정마다 한 장씩 뽑는 방식으로 만든다** —
+        디렉터 emotion 툴이 아니다(10배 비싸고 통제가 안 된다).
+        """
+        rel = path.replace("\\", "/").strip("/")
+        area = rel.split("/")[0]
+        if area not in files.STUDIO_AREAS or area.startswith("."):
+            return f"경로는 {sorted(a for a in files.STUDIO_AREAS if not a.startswith('.'))} 중 하나로 시작해야 합니다"
+        name = rel.split("/")[-1]
+        into = "/".join(rel.split("/")[:-1]) or area
+        try:
+            r = files.upload(files.STUDIO, name, text=content, into=into)
+        except files.FileError as e:
+            return str(e)
+        return f"썼습니다: {r['path']} ({r['size']} 바이트)"
+
+    @agent.tool
+    def studio_plan(ctx: RunContext[Deps], spec_json: str) -> str:
+        """배치 생성 계획을 세워 본다 (아무것도 만들지 않는다). 먼저 이걸로 확인하고 studio_generate 한다.
+
+        spec 예시:
+        {"model":"nai-diffusion-4-5-full","style":"styles/수채화.md",
+         "characters":["characters/히나.json"],"emotionPreset":"emotions/기본.json",
+         "characterName":"히나","outfit":"교복","count":1,"seed":4242,
+         "folder":"images/히나","params":{"steps":23,"width":832,"height":1216}}
+
+        이름은 `{character}-{outfit}-{emotion}-{stamp}-{n}` 규칙을 따른다. 이 규칙을
+        지키는 것이 나중에 비교 선택기가 그룹을 나누는 조건이다.
+        """
+        try:
+            spec = json.loads(spec_json)
+            items = studio.plan(spec)
+        except Exception as e:  # noqa: BLE001
+            return f"계획을 세우지 못했습니다: {e}"
+        est = studio.estimate(spec, len(items))
+        lines = [f"{len(items)}장 · {est['note']}"]
+        for i in items[:40]:
+            lines.append(f"  {i['name']}  seed={i['seed']}  {i['prompt'][:70]}")
+        if len(items) > 40:
+            lines.append(f"  … 이하 {len(items) - 40}개 생략")
+        return "\n".join(lines)
+
+    @agent.tool
+    def studio_generate(ctx: RunContext[Deps], spec_json: str) -> str:
+        """배치 생성을 시작한다 (studio_plan 과 같은 spec). 비동기로 돌고 job id 를 돌려준다.
+
+        진행 상황은 studio_job 으로 본다. 레퍼런스(vibes)를 쓰면 인코딩마다 2 Anlas 가
+        확정으로 나가므로, 쓰기 전에 사용자에게 알린다.
+        """
+        try:
+            spec = json.loads(spec_json)
+            r = studiojob.start(spec)
+        except Exception as e:  # noqa: BLE001
+            return f"시작하지 못했습니다: {e}"
+        return (f"배치를 시작했습니다 (id={r['jobId']}, {r['total']}장). "
+                f"{r['estimate']['note']} studio_job 으로 진행을 확인하세요.")
+
+    @agent.tool
+    def studio_job(ctx: RunContext[Deps], job_id: str = "") -> str:
+        """배치 진행 상황. job_id 없이 부르면 최근 배치 목록."""
+        if not job_id:
+            jobs = studiojob.recent()
+            return "\n".join(f"{j['id']}  {j['state']}  "
+                             f"{(j.get('payload') or {}).get('done')}/{(j.get('payload') or {}).get('total')}"
+                             for j in jobs) or "배치가 없습니다"
+        j = studiojob.get(job_id)
+        if not j:
+            return f"그런 배치가 없습니다: {job_id}"
+        p = j.get("payload") or {}
+        out = [f"{j['state']}  {p.get('done')}/{p.get('total')}"]
+        if j.get("error"):
+            out.append("오류: " + str(j["error"]))
+        for f in (p.get("failed") or [])[:10]:
+            out.append(f"  실패 {f['name']}: {f['error']}")
+        if p.get("anlasAfter") is not None and p.get("anlasBefore") is not None:
+            out.append(f"Anlas {p['anlasBefore']} → {p['anlasAfter']}")
+        for s in (p.get("saved") or [])[-20:]:
+            out.append("  " + s)
+        return "\n".join(out)
+
+    @agent.tool
+    def studio_parse(ctx: RunContext[Deps], folder: str, pattern: str = "") -> str:
+        """생성물 폴더의 파일명을 정규식으로 갈라 본다. **안 맞는 파일을 반드시 보고한다.**
+
+        이름은 결정론적이지 않다 — 그래서 이 툴이 있다. 안 맞는 것이 있으면
+        studio_write 로 규칙을 고치거나, 사용자에게 일괄 이름 변경을 제안한다.
+        """
+        try:
+            base = files._resolve(files.STUDIO, folder)
+            names = sorted(p.name for p in base.glob("*.png"))
+        except Exception as e:  # noqa: BLE001
+            return str(e)
+        if not names:
+            return f"{folder} 에 png 가 없습니다"
+        r = studio.parse_names(names, pattern)
+        out = [f"매치 {len(r['matched'])} / 미매치 {len(r['unmatched'])} · 필드 {r['fields']}",
+               f"정규식: {r['pattern']}"]
+        for m in r["matched"][:15]:
+            out.append("  " + ", ".join(f"{k}={v}" for k, v in m.items() if k != "filename"))
+        if r["unmatched"]:
+            out.append("안 맞는 파일:")
+            out += ["  " + n for n in r["unmatched"][:30]]
+            if len(r["unmatched"]) > 30:
+                out.append(f"  … 이하 {len(r['unmatched']) - 30}개 생략")
+        return "\n".join(out)
+
+    @agent.tool
+    def studio_naming(ctx: RunContext[Deps]) -> str:
+        """지금 선택된 봇이 실제로 쓰는 감정 에셋 이름들. 이름 규칙은 봇마다 다르므로 여기서 읽는다."""
+        if not ctx.deps.char_key:
+            return "봇이 선택돼 있지 않습니다"
+        r = studio.naming_from_bot(ctx.deps.char_key)
+        if not r["hasConvention"]:
+            return r["note"] + f" 기본 이름 규칙: {r['template']}"
+        return r["note"] + "\n" + ", ".join(r["emotionNames"])
+
+    @agent.tool
+    def studio_recipe(ctx: RunContext[Deps], path: str) -> str:
+        """NAI 가 PNG 안에 남긴 생성 파라미터를 읽는다. 밖에서 만든 이미지도 읽힌다.
+
+        "이거랑 같은 설정으로 더" 를 할 때 쓴다.
+        """
+        try:
+            r = nai.recipe(studio.read_bytes(path))
+        except Exception as e:  # noqa: BLE001
+            return str(e)
+        if not r:
+            return "NAI 가 만든 PNG 가 아닙니다 (메타데이터 없음)"
+        p = r.get("parameters") or {}
+        keep = ("prompt", "uc", "seed", "steps", "scale", "sampler", "width", "height",
+                "noise_schedule", "cfg_rescale")
+        lines = [f"source: {r.get('source', '?')}"]
+        lines += [f"{k}: {p[k]}" for k in keep if k in p]
+        if p.get("reference_strength_multiple"):
+            lines.append(f"vibe strengths: {p['reference_strength_multiple']}")
+        return "\n".join(lines)
 
     @agent.tool
     def propose_asset_replace(ctx: RunContext[Deps], name: str, path: str, reason: str) -> str:

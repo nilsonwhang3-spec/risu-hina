@@ -32,9 +32,10 @@ from fastapi import FastAPI, Request, Response
 from fastapi.responses import StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
-from . import (chatfmt, config, db, files, log, presets, session, skills, staging,
+from . import (chatfmt, config, db, files, log, nai, presets, session, skills, staging,
                store, websearch, workspace)
 from . import actions, assets, catalog, charx, codexauth, conflicts, keys, permits, providers, snapshots, updater
+from . import studio, studiojob
 from . import card as cardmod
 from . import memory as mem
 
@@ -919,6 +920,126 @@ def h_file_clean(arg: dict) -> dict:
     raw = arg.get("areas")
     areas = [str(a) for a in raw] if isinstance(raw, list) else None
     return files.clean(_scope(arg), areas)
+
+
+# --- asset studio -------------------------------------------------------------
+#
+# The library's files ride the same /files/* routes with `studio: true`; these
+# are the parts that are not files: what NovelAI says about the account, what a
+# batch would be, and running one.
+
+def h_studio_status(arg: dict) -> dict:
+    """Two meters and the library path — what the studio tab's header shows.
+
+    Anlas and the v5 usage quota are separate currencies (docs/09 §2), so both
+    are reported and neither is derived from the other. A missing token is not
+    an error here: the tab is usable for sorting and adopting without one.
+    """
+    out: dict[str, Any] = {
+        "configured": nai.configured(),
+        "library": str(workspace.studio_root()),
+    }
+    if not out["configured"]:
+        out["note"] = "NovelAI 토큰이 없습니다 — 설정 → API 키에 provider 'novelai' 로 추가하면 생성이 켜집니다"
+        return out
+    try:
+        out["account"] = nai.subscription()
+    except nai.NaiError as e:
+        out["error"] = str(e)
+    return out
+
+
+def h_studio_model_check(arg: dict) -> dict:
+    """Does this model id exist? Free — see docs/09 §5 for why it is asked."""
+    model = str(arg.get("model") or "").strip()
+    if not model:
+        raise ApiError(400, "model is required")
+    try:
+        return {"model": model, "exists": nai.exists(model),
+                "supportsVibe": nai.supports_vibe(model)}
+    except nai.NaiError as e:
+        raise ApiError(502, str(e))
+
+
+def h_studio_list(arg: dict) -> dict:
+    area = str(arg.get("area") or "").strip()
+    if area not in files.STUDIO_AREAS or area.startswith("."):
+        raise ApiError(400, f"area must be one of {sorted(a for a in files.STUDIO_AREAS if not a.startswith('.'))}")
+    return {"area": area, "items": studio.listing(area)}
+
+
+def h_studio_plan(arg: dict) -> dict:
+    """What a batch would produce, before anything is spent."""
+    try:
+        items = studio.plan(arg)
+    except studio.StudioError as e:
+        raise ApiError(400, str(e))
+    return {"items": items, "estimate": studio.estimate(arg, len(items))}
+
+
+def h_studio_generate(arg: dict) -> dict:
+    if not nai.configured():
+        raise ApiError(400, "NovelAI 토큰이 없습니다 — 설정 → API 키에 추가해 주세요")
+    if not str(arg.get("model") or ""):
+        raise ApiError(400, "model is required")
+    try:
+        return studiojob.start(arg)
+    except studio.StudioError as e:
+        raise ApiError(400, str(e))
+
+
+def h_studio_job(arg: dict) -> dict:
+    job_id = str(arg.get("id") or "")
+    if not job_id:
+        return {"jobs": studiojob.recent()}
+    job = studiojob.get(job_id)
+    if job is None:
+        raise ApiError(404, f"unknown job: {job_id}")
+    return job
+
+
+def h_studio_job_cancel(arg: dict) -> dict:
+    return {"ok": studiojob.cancel(str(arg.get("id") or ""))}
+
+
+def h_studio_recipe(arg: dict) -> dict:
+    """The parameters NovelAI embedded in one of its own PNGs (docs/09 §5b)."""
+    try:
+        return {"path": arg.get("path"), "recipe": nai.recipe(studio.read_bytes(str(arg.get("path") or "")))}
+    except studio.StudioError as e:
+        raise ApiError(404, str(e))
+
+
+def h_studio_parse(arg: dict) -> dict:
+    """Split filenames into fields, and say which ones did not match.
+
+    The unmatched list is the point: names are not deterministic, so the caller
+    has to see what could not be read rather than have it quietly dropped.
+    """
+    names = arg.get("names")
+    if not isinstance(names, list):
+        raise ApiError(400, "names[] is required")
+    return studio.parse_names([str(n) for n in names], str(arg.get("pattern") or ""))
+
+
+def h_studio_naming(arg: dict) -> dict:
+    """What this bot calls its emotion assets — the convention is per bot."""
+    return studio.naming_from_bot(_char(arg))
+
+
+def h_studio_stage(arg: dict) -> dict:
+    """Copy a library image into a bot's workspace so it can be adopted."""
+    paths = arg.get("paths")
+    if not isinstance(paths, list) or not paths:
+        raise ApiError(400, "paths[] is required")
+    ck = _char(arg)
+    out, failed = [], []
+    for p in paths:
+        try:
+            out.append(studio.stage_to_bot(ck, str(p)))
+        except (studio.StudioError, files.FileError) as e:
+            failed.append({"path": p, "error": str(e)})
+    return {"charKey": ck, "staged": out, "failed": failed}
 
 
 def h_presets(arg: dict) -> dict:
@@ -1866,6 +1987,18 @@ ROUTES: dict[str, Handler] = {
     "GET /diag": h_diag,
     "POST /diag/asset-echo": h_diag_asset_echo,
     "GET /diag/rs-probe": h_diag_rs_probe,
+
+    "GET /studio/status": h_studio_status,
+    "POST /studio/model-check": h_studio_model_check,
+    "GET /studio/list": h_studio_list,
+    "POST /studio/plan": h_studio_plan,
+    "POST /studio/generate": h_studio_generate,
+    "GET /studio/job": h_studio_job,
+    "POST /studio/job/cancel": h_studio_job_cancel,
+    "POST /studio/recipe": h_studio_recipe,
+    "POST /studio/parse": h_studio_parse,
+    "GET /studio/naming": h_studio_naming,
+    "POST /studio/stage": h_studio_stage,
 
     "POST /assets/manifest": h_assets_manifest,
     "POST /assets/upload": h_assets_upload,
