@@ -481,7 +481,10 @@ export async function writeCharacter(
       verified = false;
       drift = `${missed.field} 이(가) 쓰기 전 값 그대로입니다`;
     }
-    const LISTS = ['globalLore', 'alternateGreetings', 'customscript', 'triggerscript'] as const;
+    // The asset lists verify too: adoption from the studio lands here, and a
+    // write the save encoder skipped must not report itself as kept.
+    const LISTS = ['globalLore', 'alternateGreetings', 'customscript', 'triggerscript',
+                   'additionalAssets', 'emotionImages', 'ccAssets'] as const;
     for (const k of LISTS) {
       if (verified && update[k] && canon(after[k] ?? []) !== canon(update[k])) {
         verified = false;

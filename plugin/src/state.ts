@@ -2074,7 +2074,12 @@ class AppState {
       if (cc) update.ccAssets = cc;
       placed = `${hits}곳 교체`;
     }
-    await host.writeCharacter(slot.characterIndex, fresh.chaId, update);
+    const w = await host.writeCharacter(slot.characterIndex, fresh.chaId, update);
+    // A resolved write is not a kept write (the save encoder may skip it).
+    // Unverified = the action fails, and nothing downstream pretends otherwise.
+    if (!w.verified) {
+      throw new Error('카드에 에셋이 반영되지 않았습니다: ' + (w.drift || '재확인 실패'));
+    }
     try {
       await transport.post('/assets/adopt', { charKey: this.activeCharKey, key, path, name, field });
     } catch (e) {

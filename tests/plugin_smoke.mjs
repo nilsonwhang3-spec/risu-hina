@@ -1952,6 +1952,68 @@ console.log('\ntest_studio_screen_mode');
         JSON.stringify(chatBody));
 }
 
+console.log('\ntest_asset_write_verified');
+{
+  // An adopted asset is a card write like any other: when the save encoder
+  // quietly drops it, the action must complete as failed, not as success.
+  // The whole flow is faked at the fetch seam; only the plugin code runs.
+  const origFetch = globalThis.fetch;
+  const origSet = host.api.setCharacterToIndex;
+  host.api.setCharacterToIndex = async (i, char) => {
+    const kept = structuredClone(char);
+    kept.emotionImages = structuredClone(host.liveChar.emotionImages ?? []);
+    return origSet(i, kept);
+  };
+  let completed = null;
+  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+  const json = (obj) => new Response(JSON.stringify(obj), {
+    status: 200, headers: { 'Content-Type': 'application/json' },
+  });
+  globalThis.fetch = async (url, opts) => {
+    const u = String(url);
+    if (u.endsWith('/session') && opts?.body) return json({ sessionId: 'smoke-verify' });
+    if (u.endsWith('/chat') && opts?.body) {
+      return new Response('{"type":"done"}\n', {
+        status: 200, headers: { 'Content-Type': 'application/x-ndjson' },
+      });
+    }
+    if (u.includes('/actions?')) {
+      return json({ actions: [{ id: 'smoke-asset-1', kind: 'host_asset_add',
+                                summary: '스모크 감정 에셋', args: {}, byHost: true, createdAt: Date.now() }] });
+    }
+    if (u.endsWith('/actions/decide')) {
+      return json({ approved: true, host: { kind: 'host_asset_add',
+                    args: { name: '스모크감정', path: 'images/스모크.png', field: 'emotion' } } });
+    }
+    if (u.endsWith('/actions/complete')) {
+      completed = JSON.parse(opts.body);
+      return json({ ok: true });
+    }
+    if (u.includes('/files/download')) {
+      return new Response(png, { status: 200, headers: { 'Content-Type': 'application/octet-stream' } });
+    }
+    return origFetch(url, opts);
+  };
+  try {
+    const input = document.querySelector('.panel.active .agentinput');
+    input.value = '검증 트리거';
+    document.querySelector('.panel.active .sendbtn')
+      ?.dispatchEvent(new window.Event('click', { bubbles: true }));
+    await settle(600);
+    const row = document.querySelector('.panel.active .stagedrow');
+    check('the faked pending action rendered', !!row);
+    row?.querySelector('button.primary')?.dispatchEvent(new window.Event('click', { bubbles: true }));
+    await settle(900);
+  } finally {
+    globalThis.fetch = origFetch;
+    host.api.setCharacterToIndex = origSet;
+  }
+  check('a dropped asset write completes the action as failed', completed?.ok === false,
+        JSON.stringify(completed));
+  check('and the reason names the unkept write', /반영되지 않았습니다/.test(completed?.detail || ''),
+        completed?.detail);
+}
+
 console.log('\ntest_studio_selector');
 {
   // Put candidates in the library through the backend, then drive the
