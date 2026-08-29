@@ -8,7 +8,9 @@ The original plan for bot edit mode (M0 measurements, M2 spec) is `~/.claude/pla
 
 **Releases are manual now (2026-08-29, the user's instruction).** The plugin has users other than us, so **do not release or deploy after every fix**. Land the change, run the gate, leave it on master, and say what is waiting; `tools/release.py`, `gh release create` and the test-server deploy happen **only when the user asks for them**. One mechanical consequence to keep in mind: `tools/bundle.py` writes `plugin/Risu.Hina.Plugin.js` (and the old-name twin) into the repository, and *that committed file is what RisuAI's `+` update check reads* — so a release is not the tag, it is that commit. An ordinary fix commit must leave those two files alone, which `node plugin/build.config.mjs` does by itself (it only writes `plugin/dist/`).
 
-**Code state**: master = **v0.10.0 BETA** (§1-16 the edit-session lifecycle: leave guard, 변경 취소, write verification, snapshot kinds - **schema 13**; the minor went up because `/workspace/dirty`, the reset payloads and the `kind` column mean the backend and the plugin go together, so **the version gate trips**: update the backend, then press `+` on the plugin in RisuAI) (§1-15 any chat opens from the picker · §1-14 the repo goes English · §1-13 3-way merge on reopen · §1-12 an intermediate cache blocking the connection (POST probe, no-store) · §1-11 one web-search tool card with three options · §1-10 built-in search measured, mobile, plugin-reload diagnosis · §1-9 search · §1-8 round 10 · §1-7 · §1-6 · §1-5; the docs/07 planning is still pending) — gate ALL GREEN. 0.7.0 changes the minor, so **the version gate trips**: raise the backend and the plugin on the RisuAI side has to be raised with `+` as well (the header says so).
+**Code state**: master = **0.11.0 (unreleased)** - §1-17 the ONE global file space (the studio-asset
+branch rebased in: the asset studio + the space unification, C1-C4 of plan risu-elf-1-distributed-magpie;
+gate ALL GREEN; the minor went up so the version gate trips when it ships). Released = **v0.10.0 BETA** (§1-16 the edit-session lifecycle: leave guard, 변경 취소, write verification, snapshot kinds - **schema 13**; the minor went up because `/workspace/dirty`, the reset payloads and the `kind` column mean the backend and the plugin go together, so **the version gate trips**: update the backend, then press `+` on the plugin in RisuAI) (§1-15 any chat opens from the picker · §1-14 the repo goes English · §1-13 3-way merge on reopen · §1-12 an intermediate cache blocking the connection (POST probe, no-store) · §1-11 one web-search tool card with three options · §1-10 built-in search measured, mobile, plugin-reload diagnosis · §1-9 search · §1-8 round 10 · §1-7 · §1-6 · §1-5; the docs/07 planning is still pending) — gate ALL GREEN. 0.7.0 changes the minor, so **the version gate trips**: raise the backend and the plugin on the RisuAI side has to be raised with `+` as well (the header says so).
 
 **Deployment state (2026-08-25 21:01 `deploy.ps1`, verified in a new SSH session)**:
 
@@ -25,6 +27,41 @@ The original plan for bot edit mode (M0 measurements, M2 spec) is `~/.claude/pla
 `https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js`, and made `tools/bundle.py` write that file into the repository (included in the release commit). In the backend code only VERSION changed.
 
 → **First thing to do**: the user reinstalls `plugin/Risu.Hina.Plugin.js` into RisuAI **by hand, once** (the installed 0.1.0's update-url cannot be read because of CORS) → check that `+` appears from the next release on → verify M2 in real use (§5-2).
+
+## 1-17. 2026-08-30 - 0.11.0 (unreleased): the ONE global file space, and the studio rebased into it
+
+The `studio-asset` branch (12 commits, forked at v0.9.6) was rebased onto master - the only
+conflict was this file's deploy row - then fast-forwarded in. Two semantic follow-ups landed
+with it: the studio is a **third screen** (`mode:'studio'` on /chat, `agent.screen_gate` as a
+pure function; adopt passes there, everything else refuses naming the actual screen - and
+`session.SCREEN_MODES` now includes it, because the wire filter silently dropped it at first),
+and **asset adds read back like every other write** (writeCharacter verifies the three asset
+lists; an unverified adopt fails the action instead of reporting success).
+
+Then the space (plan `risu-elf-1-distributed-magpie.md`, Phase 1, C1-C4):
+
+- **One root, `data/space/`** (`workspace.globalPath`): `projects/<봇이름>/` the user manages,
+  `studio/` the library (wire paths are space-rooted; `studio._rel` keeps bare paths working),
+  `hina/<봇이름>/{scripts,scratch,out}` the agent's per-bot work, `.hina/` machinery. Bot folder
+  names are the bot's own name, pinned in `.hina/bots.json`; collisions take `~2`.
+- **SYSTEM stays outside the space** at `data/workspace/<key>/` (card.md, original/, .scratch/
+  with scope.db): everything inside the space is readable by every sandbox, and another bot's
+  scope.db must not be. The wire reaches it read-only with `system:1`. The DATA axis (scope.db
+  contents, docs/07) is untouched.
+- **Sandbox**: root = the space, plus this bot's SYSTEM (read; only its .scratch writable - so
+  original/ is now write-protected from scripts, tighter than before). cwd = the bot's hina
+  home; helper scratch/out follow; uploads() reads projects/<봇>/. Skills copy to home/skills
+  per run as before.
+- **Agent tools**: list/read/write_file over the space (`system/` and `skills/` prefixes),
+  new `find_files`/`search_files` with counted-truncation lines (docs/07 §3-3);
+  studio_list/read/write absorbed into the general tools; `studio_adopt` proposes the image's
+  own global path - `stage_to_bot` and the copy hop are gone. 정리 is per-bot (`clean_bot`).
+- **Boot migration `space_v1`**: uploads→projects/<봇>/, out·scratch·scripts→hina/<봇>/,
+  data/studio→space/studio. Move + manifest only (`.hina/migration-space_v1.json`), no deletes;
+  `pyserver/tools/rollback_space.py` replays it in reverse. A studio on a configured
+  libraryPath is not moved and the status line says so.
+- **0.11.0** on both sides - the wire changed shape, the version gate must trip. New
+  tests/test_files.py joins the gate; test_sandbox asserts both directions of the wall.
 
 ## 1-16. 2026-08-30 - v0.10.0: the edit-session lifecycle - nothing stays silently pending (schema 13)
 
