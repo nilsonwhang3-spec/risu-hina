@@ -110,11 +110,12 @@ class Deps:
     char_key: str
     session_id: str | None
     workspace_dir: Path
-    # Which half of the panel the user is looking at: 'chat' or 'bot' ('' =
+    # Which screen the user is looking at: 'chat', 'bot' or 'studio' ('' =
     # unknown, older plugin). Chat material is edited from the chat tabs and
-    # card material from the bot tabs; a tool for the other half refuses and
+    # card material from the bot tabs; a tool for another screen refuses and
     # points at propose_open_tab, so the user is never surprised by a change
-    # landing in the half they are not looking at.
+    # landing in a screen they are not looking at. The studio is a third
+    # screen, not a half - adopting an image into the card is its own verb.
     mode: str = ""
 
 
@@ -125,17 +126,40 @@ BOT_KINDS = frozenset({"card_edit", "card_greeting_add", "card_greeting_delete",
                        "script_add", "script_delete", "card_checkpoint_create", "card_checkpoint_restore",
                        "host_card_writeback", "host_clone_bot", "host_asset_add", "host_asset_replace"})
 _MODE_TAB = {"chat": ("챗 편집", "editor"), "bot": ("봇 편집", "meta")}
+_SCREEN_LABEL = {"chat": "챗 편집", "bot": "봇 편집", "studio": "에셋 스튜디오"}
+
+# The studio's own verbs: adopting an image into the card is what the studio
+# is for, so these pass the screen gate there (the approval queue still runs).
+_STUDIO_KINDS = frozenset({"host_asset_add", "host_asset_replace"})
+
+
+def _screen_refusal(mode: str, need: str) -> str | None:
+    """A refusal when the tool's material belongs to a screen the user is not on."""
+    if not need or not mode or mode == need:
+        return None
+    label, tab = _MODE_TAB[need]
+    here = _SCREEN_LABEL.get(mode, mode)
+    return (f"지금 화면은 {here}입니다. 이 작업은 {label} 화면의 재료를 고칩니다. "
+            f"먼저 사용자에게 {label} 화면으로 이동하겠다고 알리고, propose_open_tab(\"{tab}\", 이유) 로 이동을 "
+            f"제안해 승인을 받은 뒤 다시 요청해 주세요. (그 전에는 이 툴이 실행되지 않습니다)")
+
+
+def screen_gate(mode: str, kind: str) -> str | None:
+    """The screen rule for one proposal kind, as a pure function.
+
+    Which screen a kind belongs to and which screens may fire it is a rule,
+    not a property of the request - keeping it here means the tests state the
+    rule instead of replaying a conversation.
+    """
+    if mode == "studio" and kind in _STUDIO_KINDS:
+        return None
+    need = "chat" if kind in CHAT_KINDS else ("bot" if kind in BOT_KINDS else "")
+    return _screen_refusal(mode, need)
 
 
 def _wrong_half(ctx: "RunContext[Deps]", need: str) -> str | None:
     """A refusal when the tool's material belongs to the other half."""
-    mode = ctx.deps.mode
-    if not mode or mode == need:
-        return None
-    label, tab = _MODE_TAB[need]
-    return (f"지금 화면은 {'봇 편집' if mode == 'bot' else '챗 편집'}입니다. 이 작업은 {label} 화면의 재료를 고칩니다. "
-            f"먼저 사용자에게 {label} 화면으로 이동하겠다고 알리고, propose_open_tab(\"{tab}\", 이유) 로 이동을 "
-            f"제안해 승인을 받은 뒤 다시 요청해 주세요. (그 전에는 이 툴이 실행되지 않습니다)")
+    return _screen_refusal(ctx.deps.mode, need)
 
 
 def _model_for(section: str) -> "OpenAIChatModel | OpenAIResponsesModel":
@@ -311,6 +335,9 @@ def build() -> Agent[Deps]:
             return "지금 열려 있는 화면: 봇 편집 (카드 재료 - 메타·인사말·봇 로어북·Regex·트리거·에셋)."
         if ctx.deps.mode == "chat":
             return "지금 열려 있는 화면: 챗 편집 (이 챗의 재료 - 턴·챗 로어북·장기기억·챗 변수)."
+        if ctx.deps.mode == "studio":
+            return ("지금 열려 있는 화면: 에셋 스튜디오 (봇과 무관한 전역 이미지 라이브러리 - "
+                    "프롬프트 카드·생성·선별. 카드로의 에셋 반영 제안은 여기서도 됩니다).")
         return ""
 
     # --- reading ------------------------------------------------------------
@@ -460,11 +487,9 @@ def build() -> Agent[Deps]:
         return "\n\n".join(out)[:30000]
 
     def _propose(ctx: RunContext[Deps], kind: str, summary: str, args: dict) -> str:
-        need = "chat" if kind in CHAT_KINDS else ("bot" if kind in BOT_KINDS else "")
-        if need:
-            wrong = _wrong_half(ctx, need)
-            if wrong:
-                return wrong
+        wrong = screen_gate(ctx.deps.mode, kind)
+        if wrong:
+            return wrong
         try:
             out = actions.propose(
                 kind, chat_key=ctx.deps.chat_key, char_key=ctx.deps.char_key,

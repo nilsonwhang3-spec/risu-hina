@@ -356,6 +356,20 @@ check("what the card has is listed", set(e["have"]) == {"happy", "떠돌이"}, s
 check("slots with no asset are named", set(e["missing"]) == {"sad", "angry"}, str(e["missing"]))
 check("and the note counts them", "2개가 카드에 없습니다" in e["note"], e["note"])
 
+# The studio is a third screen, not a half. Adopting an image into the card is
+# the studio's own verb, so it passes the gate there; everything else still
+# belongs to its edit screen, and the refusal names where the user actually is.
+print("\ntest_screen_gate")
+from app.agent import screen_gate  # noqa: E402
+
+check("adopt passes on the studio screen", screen_gate("studio", "host_asset_add") is None)
+_r = screen_gate("studio", "card_edit")
+check("a card edit from the studio is refused by name",
+      _r is not None and "에셋 스튜디오" in _r, str(_r))
+_r = screen_gate("chat", "host_asset_add")
+check("adopt from the chat screen still needs the bot screen",
+      _r is not None and "봇 편집" in _r, str(_r))
+
 print()
 if FAILURES:
     print(f"FAIL - {len(FAILURES)} check(s): " + ", ".join(FAILURES))

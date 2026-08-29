@@ -661,6 +661,9 @@ class AppState {
   lastMerge: WorkspaceInfo['merge'] | null = null;
   /** Which half of the panel is open ('chat' | 'bot'); the shell keeps it current, the agent is told. */
   editMode: 'chat' | 'bot' = 'bot';
+  /** The active tab id, verbatim from the shell. The studio is a third screen
+   * (neither half), and the agent has to be told the truth about it. */
+  activeTab = '';
   activeChatKey = '';
   botChanges: CardChanges | null = null;
   /**
@@ -1233,7 +1236,10 @@ class AppState {
       const r = await transport.post<{ sessionId: string }>('/session', { chatKey: this.activeChatKey });
       this.sessionId = r.sessionId;
     }
-    yield* transport.stream('/chat', { sessionId: this.sessionId, prompt, mode: this.editMode }, signal);
+    yield* transport.stream('/chat', {
+      sessionId: this.sessionId, prompt,
+      mode: this.activeTab === 'studio' ? 'studio' : this.editMode,
+    }, signal);
   }
 
   // --- merge conflicts ------------------------------------------------------

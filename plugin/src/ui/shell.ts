@@ -173,6 +173,7 @@ function syncToolslot(): void {
 
 export function setTab(tab: TabId): void {
   active = tab;
+  state.activeTab = tab;
   for (const id of ALL_TABS) {
     mounts[id]?.classList.toggle('active', id === tab);
     document.getElementById('tab-' + id)?.classList.toggle('active', id === tab);

@@ -1916,6 +1916,42 @@ console.log('\ntest_studio_tab');
         (gen?.textContent || '').slice(0, 200));
 }
 
+console.log('\ntest_studio_screen_mode');
+{
+  // The agent is told the truth about the third screen: while the studio tab
+  // is open, /chat carries mode:'studio' instead of the stale edit half.
+  clickById(document, 'tab-studio');
+  await settle(300);
+  const orig = globalThis.fetch;
+  let chatBody = null;
+  globalThis.fetch = async (url, opts) => {
+    const u = String(url);
+    if (u.endsWith('/session') && opts?.body) {
+      return new Response(JSON.stringify({ sessionId: 'smoke-mode' }), {
+        status: 200, headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    if (u.endsWith('/chat') && opts?.body) {
+      chatBody = JSON.parse(opts.body);
+      return new Response('{"type":"done"}\n', {
+        status: 200, headers: { 'Content-Type': 'application/x-ndjson' },
+      });
+    }
+    return orig(url, opts);
+  };
+  try {
+    const input = document.querySelector('.panel.active .agentinput');
+    input.value = '화면 확인';
+    document.querySelector('.panel.active .sendbtn')
+      ?.dispatchEvent(new window.Event('click', { bubbles: true }));
+    await settle(800);
+  } finally {
+    globalThis.fetch = orig;
+  }
+  check('the studio tab reports mode studio to /chat', chatBody?.mode === 'studio',
+        JSON.stringify(chatBody));
+}
+
 console.log('\ntest_studio_selector');
 {
   // Put candidates in the library through the backend, then drive the
