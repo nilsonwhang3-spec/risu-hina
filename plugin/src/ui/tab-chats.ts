@@ -12,6 +12,7 @@
 import { el, clear, refocusSearch, fmtTime, armed } from './dom';
 import { state } from '../state';
 import { setEditMode, setToolbarSearch, setTab } from './shell';
+import { ensureResolved } from './leaveguard';
 import type { RisuChat } from '../risuai';
 import { HostError } from '../host';
 import { describeSync, syncBusy } from '../assets';
@@ -51,6 +52,13 @@ function botSnapshots(editBot: HTMLElement): HTMLElement {
       edit.addEventListener('click', async () => {
         edit.disabled = true;
         try {
+          // The restore writes the card's working copy, so it is a card edit:
+          // a dirty chat has to be resolved first, a dirty card may proceed
+          // (the restore is about to replace it anyway, with a snapshot kept).
+          if (!(await ensureResolved('스냅샷 복원', { scope: 'card' }))) {
+            edit.disabled = false;
+            return;
+          }
           await state.cardRestore(c.id);
           setEditMode('bot', 'meta');
         } catch (e) {
@@ -184,7 +192,11 @@ export function renderChatsTab(mount: HTMLElement): void {
       flash(pad, '백엔드에 봇이 아직 올라가지 않았습니다. 연결을 확인해 주세요.');
       return;
     }
-    setEditMode('bot', 'meta');
+    // 봇 편집 is at home in the card - a dirty card passes, a dirty chat has
+    // to be resolved first (one dirty thing at a time).
+    void (async () => {
+      if (await ensureResolved('봇 편집으로 이동', { scope: 'card' })) setEditMode('bot', 'meta');
+    })();
   });
 
   // Only 봇 편집 here. "카드만 다시 읽기" was a second, differently-scoped
@@ -231,19 +243,31 @@ export function renderChatsTab(mount: HTMLElement): void {
     grouped.get(key)!.push(r);
   }
 
+  // Which chat still owes a 반영: filled in once the summary arrives, so the
+  // user can see from the picker where the leave guard will point.
+  const dirtyBadges = new Map<string, HTMLElement>();
   const makeItem = (r: { chat: RisuChat; index: number }) => {
     const loaded = loadedFor(r.chat);
     const edit = el('button', { class: 'ghost tiny', text: '챗 편집' }) as HTMLButtonElement;
+    const dirtyBadge = el('span', {
+      class: 'badge warn', style: { display: 'none' },
+      title: '이 챗에 아직 RisuAI에 반영하지 않은 변경이 있습니다',
+    });
+    if (loaded) dirtyBadges.set(loaded.chatKey, dirtyBadge);
     const item = el('div', {
       class: 'chatitem' + (loaded && loaded.chatKey === state.activeChatKey ? ' current' : ''),
     }, [
       el('span', { class: 'grow', text: String(r.chat.name || `(챗 ${r.index})`) }),
+      dirtyBadge,
       el('span', { class: 'n', text: `${(r.chat.message ?? []).length}턴` }),
       edit,
     ]);
     let busy = false;
     const enter = async () => {
       if (busy) return;
+      // Opening a chat is at home in that chat; anything else dirty (the
+      // card, another chat) is resolved at this door.
+      if (!(await ensureResolved('챗 열기', { scope: 'chat', key: loaded?.chatKey ?? '' }))) return;
       if (loaded) {
         await state.loadTurns(loaded.chatKey);
         setEditMode('chat', 'editor');
@@ -277,6 +301,18 @@ export function renderChatsTab(mount: HTMLElement): void {
     edit.addEventListener('click', (ev) => { ev.stopPropagation(); void enter(); });
     return item;
   };
+  void (async () => {
+    // After the synchronous list build: the await above the loop guarantees
+    // every row has registered its badge before this runs.
+    const s = await state.dirtySummary();
+    if (!s) return;
+    for (const c of s.chats) {
+      const b = dirtyBadges.get(c.chatKey);
+      if (!b || !c.dirty) continue;
+      b.textContent = `미반영 ${c.total || c.conflicts}`;
+      b.style.display = '';
+    }
+  })();
 
   // Unfoldered chats first, then each folder - matching how RisuAI lists them.
   const loose = grouped.get('') ?? [];

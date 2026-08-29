@@ -21,6 +21,7 @@ import { renderBotLoreTab } from './tab-botlore';
 import { renderRegexTab } from './tab-regex';
 import { renderTriggerTab } from './tab-trigger';
 import { buildChatBar, refreshChatBar, shellNotice } from './chatbar';
+import { ensureResolved } from './leaveguard';
 import { buildBotBar, refreshBotBar } from './botbar';
 import { renderAssetsTab } from './tab-assets';
 import { getSettingsBar } from './tab-settings';
@@ -298,20 +299,40 @@ export function buildShell(): void {
       // user has not looked at. Cleared by opening the tab.
       el('span', { class: 'badge warn tabbadge', style: { display: 'none' } }),
     ]);
-    b.addEventListener('click', () => setTab(id));
+    b.addEventListener('click', () => {
+      // Going back to the picker is leaving the edit; the guard asks first.
+      // Moving between tabs of the same scope is not (same working copy).
+      if (id === 'chats' && active !== 'chats') {
+        void (async () => {
+          if (await ensureResolved('선택 화면으로 이동')) setTab(id);
+        })();
+        return;
+      }
+      setTab(id);
+    });
     return b;
   };
 
   const close = el('button', { class: 'ghost', html: ICON.close, title: '닫기' });
   close.addEventListener('click', async () => {
+    // The X is the front door out, and it must not leave work pending behind
+    // it (the browser closing is the one exit that cannot ask; the reopen
+    // merge covers that one).
+    if (!(await ensureResolved('닫기'))) return;
     try { await Risuai.hideContainer(); } catch { /* already hidden */ }
   });
 
   const reload = el('button', {
     class: 'iconbtn', html: ICON.reload,
-    title: 'RisuAI에서 현재 열려 있는 봇과 챗을 다시 읽어 옵니다',
+    title: 'RisuAI에서 현재 열려 있는 봇과 챗을 다시 읽어 옵니다. 미반영 변경이 있으면 먼저 물어봅니다',
   });
-  reload.addEventListener('click', () => { void bootstrap(true); });
+  reload.addEventListener('click', () => {
+    // force=true throws the panel's copy away; with the guard in front it can
+    // no longer do so silently.
+    void (async () => {
+      if (await ensureResolved('다시 읽기')) void bootstrap(true);
+    })();
+  });
 
   const settingsBtn = el('button', {
     class: 'iconbtn', id: 'open-settings', html: ICON.gear,
@@ -416,9 +437,19 @@ state.onChange(() => {
   if (state.openTabRequest) {
     const tab = state.openTabRequest as TabId;
     state.openTabRequest = null;
-    if (CHAT_TABS.has(tab)) setEditMode('chat', tab);
-    else if (BOT_TABS.has(tab)) setEditMode('bot', tab);
-    else if (tab === 'files' || tab === 'chats') setTab(tab);
+    const want: EditMode | null = CHAT_TABS.has(tab) ? 'chat' : BOT_TABS.has(tab) ? 'bot' : null;
+    if (want && want !== mode) {
+      // The agent asked for the other half: that is a mode switch like any
+      // other, and the guard asks the same question first.
+      void (async () => {
+        const except = want === 'bot'
+          ? { scope: 'card' as const }
+          : { scope: 'chat' as const, key: state.activeChatKey };
+        if (await ensureResolved('탭 이동', except)) setEditMode(want, tab);
+      })();
+    } else if (want) {
+      setEditMode(want, tab);
+    } else if (tab === 'files' || tab === 'chats') setTab(tab);
     return;
   }
   // A log line in the agent panel asked for a file: go where files are.

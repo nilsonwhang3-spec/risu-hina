@@ -11,6 +11,20 @@ export interface ChatInfo {
   name: string;
   turns: number;
   originalTurns: number;
+  /** Set when the backend refused the upload (a stub read - RisuAI has not
+   * loaded this chat itself yet). The text says what to do about it. */
+  skipped?: string;
+}
+
+/** GET /workspace/dirty: pending state across the whole bot, for the leave
+ * guard and the picker's badges. */
+export interface DirtySummary {
+  charKey: string;
+  card: { dirty: boolean; total: number; conflicts: number };
+  chats: {
+    chatKey: string; chatId?: string; name: string;
+    dirty: boolean; total: number; conflicts: number;
+  }[];
 }
 
 export interface WorkspaceInfo {
@@ -650,7 +664,14 @@ class AppState {
     const ws = await this.upload({ chatIndex });
     // A single-chat upload answers with just that chat, so it is the one to
     // select - `upload` only re-picks when the previous key went missing.
-    const key = ws.chats[0]?.chatKey ?? '';
+    const info = ws.chats[0];
+    if (info?.skipped) {
+      // The backend refused a stub read (RisuAI has not loaded this chat) and
+      // changed nothing. Opening the editor on it would show 0턴 over a chat
+      // that is not empty - surface the refusal instead.
+      throw new Error(info.skipped);
+    }
+    const key = info?.chatKey ?? '';
     if (key) this.activeChatKey = key;
     await this.loadTurns();
   }
@@ -858,6 +879,18 @@ class AppState {
    * replace or a range delete): internal backups, not the version list. */
   async checkpoint(label: string, auto = false): Promise<void> {
     await transport.post('/checkpoint', { chatKey: this.activeChatKey, label, ...(auto ? { auto } : {}) });
+  }
+
+  /** Pending state across the whole bot - the leave guard's one call. */
+  async dirtySummary(): Promise<DirtySummary | null> {
+    if (!this.activeCharKey) return null;
+    try {
+      return await transport.get<DirtySummary>('/workspace/dirty', { charKey: this.activeCharKey });
+    } catch {
+      // The guard treats "cannot check" as "nothing to resolve": a dead
+      // backend must never lock the user inside the panel.
+      return null;
+    }
   }
 
   async checkpoints(): Promise<{ id: string; label: string; message_count: number; created_at: number }[]> {

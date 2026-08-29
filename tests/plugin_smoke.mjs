@@ -812,6 +812,84 @@ console.log('\ntest_discard_button_resolves_the_session');
         discardBtn()?.style.display);
 }
 
+console.log('\ntest_leave_guard_resolves_on_every_exit');
+{
+  // No path out of an edit leaves work silently pending: X, the 선택 tab and
+  // the mode switch all funnel through the leave guard, which offers 반영 /
+  // 버리기 / 계속 편집 and does not move until one of them answers.
+  const dirtyIt = async (from, to) => {
+    clickTool(document, 'find');
+    await settle(300);
+    if (!optionInput(document, '찾을 문자열')) { clickTool(document, 'find'); await settle(300); }
+    optionInput(document, '찾을 문자열').value = from;
+    optionInput(document, '바꿀 문자열').value = to;
+    clickButton(document, '미리보기');
+    await settle(900);
+    [...document.querySelectorAll('.rpanel.active button')]
+      .find((b) => b.textContent === '적용')
+      .dispatchEvent(new window.Event('click', { bubbles: true }));
+    await settle(1200);
+  };
+  await dirtyIt('페데리코', '페데리꼬');
+
+  // X asks first, and staying really stays.
+  const hides = () => host.calls.filter((c) => c === 'hideContainer').length;
+  const hidesBefore = hides();
+  document.querySelector('header button[title="닫기"]')
+    .dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(800);
+  check('closing asks first', /미반영 변경/.test(document.querySelector('.modalback')?.textContent || ''),
+        document.querySelector('.modalback')?.textContent?.slice(0, 120));
+  check('the container did not hide', hides() === hidesBefore);
+  clickButton(document.querySelector('.modalbox'), '계속 편집');
+  await settle(300);
+  check('staying closes the prompt and keeps the panel', !document.querySelector('.modalback'));
+
+  // Returning to the picker asks too; 버리기 is two-click and then proceeds.
+  document.getElementById('tab-chats')
+    .dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(800);
+  check('picker return asks', /미반영 변경/.test(document.querySelector('.modalback')?.textContent || ''));
+  clickButton(document.querySelector('.modalbox'), '변경사항 버리고 계속');
+  await settle(200);
+  check('discard arms first', /정말 버릴까요/.test(document.querySelector('.modalbox')?.textContent || ''));
+  clickButton(document.querySelector('.modalbox'), '정말 버릴까요?');
+  await settle(1500);
+  check('discard-and-go lands on the picker',
+        document.getElementById('tab-chats')?.classList.contains('active'));
+  check('and the prompt is gone', !document.querySelector('.modalback'));
+
+  // Back into the chat (clean, so the guard passes without a prompt).
+  (document.querySelector('.chatitem.current') || document.querySelector('.chatlist .chatitem'))
+    .dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(900);
+  check('a clean chat opens without a prompt', !document.querySelector('.modalback'));
+  check('the editor is active', document.getElementById('tab-editor')?.classList.contains('active'));
+
+  // Dirty again; this time 반영하고 계속 writes to the host and then moves.
+  await dirtyIt('페데리코', '페데리꼬');
+  document.getElementById('tab-chats')
+    .dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(800);
+  check('the guard is back for the new edit', /미반영 변경/.test(document.querySelector('.modalback')?.textContent || ''));
+  clickButton(document.querySelector('.modalbox'), 'RisuAI에 반영하고 계속');
+  await settle(2000);
+  check('apply-and-go wrote to the host',
+        host.liveChar.chats[0].message.some((m) => m.data.includes('페데리꼬')));
+  check('apply-and-go lands on the picker',
+        document.getElementById('tab-chats')?.classList.contains('active'));
+  check('nothing is pending after apply-and-go',
+        /변경 없음/.test(document.querySelector('.chatbar .changesum')?.textContent || ''),
+        document.querySelector('.chatbar .changesum')?.textContent);
+
+  // Leave the suite where the next scenario expects it: in the editor.
+  (document.querySelector('.chatitem.current') || document.querySelector('.chatlist .chatitem'))
+    .dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(900);
+  check('back in the editor for the next test',
+        document.getElementById('tab-editor')?.classList.contains('active'));
+}
+
 console.log('\ntest_truncate_with_preview');
 {
   check('cut tool activates', clickTool(document, 'cut'));
