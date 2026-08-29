@@ -340,12 +340,13 @@ def fetch_to_scratch(ck: str, wanted: list[str]) -> dict:
     return {"paths": paths, "missing": missing}
 
 
-def stage_file(ck: str, rel: str) -> dict:
-    """Validate a workspace file the agent wants to turn into an asset: it
-    must exist inside the workspace and be a PNG (saveAsset names every key
-    `.png`, so anything else would be mislabelled)."""
+def stage_file(rel: str) -> dict:
+    """Validate a global-space file the agent wants to turn into an asset: it
+    must exist inside the space and be a PNG (saveAsset names every key
+    `.png`, so anything else would be mislabelled). A studio image is adopted
+    by its own path now - the copy hop between two roots is gone."""
     from . import files
-    p = files._resolve(ck, rel)
+    p = files._resolve(files.SPACE, rel)
     if not p.is_file():
         raise AssetError(f"파일이 없습니다: {rel}")
     head = p.read_bytes()[:8] if p.stat().st_size >= 8 else b""
@@ -354,17 +355,17 @@ def stage_file(ck: str, rel: str) -> dict:
     limit = int(settings().get("maxItemBytes") or 0)
     if limit and p.stat().st_size > limit:
         raise AssetError(f"{limit} 바이트를 넘습니다: {rel}")
-    return {"path": p.relative_to(files._root(ck)).as_posix(), "size": p.stat().st_size}
+    return {"path": p.relative_to(files._root(files.SPACE)).as_posix(), "size": p.stat().st_size}
 
 
 def adopt(ck: str, key: str, rel: str, *, name: str = "", field: str = "additional") -> dict:
-    """The host saved a workspace file as an asset and told us the key: put
+    """The host saved a space file as an asset and told us the key: put
     the same bytes in the store under it and append it to the manifest, so
     the next charx or fetch sees it before the next full sync does."""
     from . import files
     if not key_ok(key):
         raise AssetError(f"bad asset key: {key!r}")
-    p = files._resolve(ck, rel)
+    p = files._resolve(files.SPACE, rel)
     if not p.is_file():
         raise AssetError(f"파일이 없습니다: {rel}")
     r = store_bytes(key, p.read_bytes())

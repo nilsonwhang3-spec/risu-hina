@@ -1,8 +1,8 @@
 """The asset studio's domain: prompts in, named images out.
 
-Storage is `files.py` with `scope=STUDIO` (one file API, two roots); NovelAI is
-`nai.py` (written from `docs/09`). What is left is the part in between, and it
-is mostly about **names**:
+Storage is the `studio/` folder of the ONE global space (`files.py`, scope
+SPACE); NovelAI is `nai.py` (written from `docs/09`). What is left is the part
+in between, and it is mostly about **names**:
 
     styles/      a style, as front matter + ## positive / ## negative
     characters/  a character: prompt, negative, reference image, position
@@ -35,7 +35,36 @@ from typing import Any
 
 from . import files, log, nai, workspace
 
-SCOPE = files.STUDIO
+# The studio lives inside the ONE global space, as its studio/ folder. Wire
+# paths are space-rooted ("studio/images/…"); the studio's own scope is gone.
+SCOPE = files.SPACE
+
+# The library's areas (subfolders of studio/), in panel order.
+AREAS = ("styles", "characters", "fragments", "scenes", "images")
+
+# The prefix every studio path carries in the space.
+BASE = "studio"
+
+
+def _rel(rel: str) -> str:
+    """A studio path in its space-rooted form.
+
+    The studio used to be its own root, so bare area paths ("images/고르기")
+    still arrive from old sidecars and Hina's habits; they gain the studio/
+    prefix. Anything else (projects/…, hina/…) passes through untouched - a
+    generated image may legitimately land outside the library (3-4).
+    """
+    r = (rel or "").replace("\\", "/").strip("/")
+    head = r.split("/", 1)[0]
+    if head in AREAS or head == ".studio":
+        return f"{BASE}/{r}"
+    return r
+
+
+def _unstudio(rel: str) -> str:
+    """The bare library-relative form, for slugs that predate the space."""
+    r = _rel(rel)
+    return r[len(BASE) + 1:] if r.startswith(BASE + "/") else r
 
 # `skills.py` already parses this shape; the studio reuses it rather than
 # inventing a second front-matter dialect.
@@ -110,14 +139,14 @@ def read_json(rel: str) -> dict:
 
 
 def _read_text(rel: str) -> str:
-    p = files._resolve(SCOPE, rel)
+    p = files._resolve(SCOPE, _rel(rel))
     if not p.is_file():
         raise StudioError(f"파일이 없습니다: {rel}")
     return p.read_text(encoding="utf-8", errors="replace")
 
 
 def read_bytes(rel: str) -> bytes:
-    p = files._resolve(SCOPE, rel)
+    p = files._resolve(SCOPE, _rel(rel))
     if not p.is_file():
         raise StudioError(f"파일이 없습니다: {rel}")
     return p.read_bytes()
@@ -132,7 +161,7 @@ def listing(area: str) -> list[dict]:
     for p in sorted(base.rglob("*")):
         if not p.is_file() or p.name.startswith("."):
             continue
-        rel = p.relative_to(root()).as_posix()
+        rel = p.relative_to(files._root(SCOPE)).as_posix()
         item = {"path": rel, "name": p.stem, "folder": p.parent.relative_to(base).as_posix()}
         if p.suffix.lower() == ".md" and area == "styles":
             try:
@@ -217,7 +246,7 @@ def fragments() -> FragmentTable:
     for p in sorted(base.rglob("*")):
         if not p.is_file() or p.name.startswith("."):
             continue
-        rel = p.relative_to(root()).as_posix()
+        rel = p.relative_to(files._root(SCOPE)).as_posix()
         # The name a reference uses: path under fragments/, without extension.
         key = p.relative_to(base).as_posix()
         key = key[: -len(p.suffix)] if p.suffix else key
@@ -415,9 +444,12 @@ def save_image(folder: str, name: str, png: bytes, sidecar: dict) -> dict:
     what we asked for and which library files it came from, which the PNG
     cannot know.
     """
-    folder = (folder or "images").strip("/")
-    if not folder.startswith("images"):
-        folder = "images/" + folder
+    # Anywhere in the space the user may write (3-4): studio/images is the
+    # default, projects/<봇>/… is legitimate, the machine areas are not.
+    folder = _rel((folder or "").strip("/")) or f"{BASE}/images"
+    area = folder.split("/", 1)[0]
+    if not files.areas_for(SCOPE).get(area, (False, False))[0]:
+        raise StudioError(f"저장할 수 없는 영역입니다: {folder}")
     dest = files._resolve(SCOPE, folder) / name
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_bytes(png)
@@ -425,30 +457,9 @@ def save_image(folder: str, name: str, png: bytes, sidecar: dict) -> dict:
     side.write_text(json.dumps({**sidecar, "file": name,
                                 "createdAt": time.time()},
                                ensure_ascii=False, indent=2), encoding="utf-8")
-    rel = dest.relative_to(root()).as_posix()
+    rel = dest.relative_to(files._root(SCOPE)).as_posix()
     log.info("studio image %s (%d bytes)", rel, len(png))
     return {"path": rel, "size": len(png)}
-
-
-def stage_to_bot(char_key: str, rel: str) -> dict:
-    """Copy one studio image into a bot's workspace so it can be adopted.
-
-    The whole adoption chain downstream - `propose_asset_add`, the approval
-    queue, `saveAsset`, the card write - already exists and takes a *workspace*
-    path. This is the one hop between the two scopes, and it is a copy: the
-    library keeps its own.
-    """
-    src = files._resolve(SCOPE, rel)
-    if not src.is_file():
-        raise StudioError(f"파일이 없습니다: {rel}")
-    if src.read_bytes()[:4] != b"\x89PNG":
-        raise StudioError(f"PNG 만 에셋으로 넣을 수 있습니다: {rel}")
-    dest = files._resolve(char_key, "out/studio") / src.name
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_bytes(src.read_bytes())
-    out = dest.relative_to(files._root(char_key)).as_posix()
-    log.info("studio -> bot %s: %s", char_key, out)
-    return {"path": out, "size": dest.stat().st_size}
 
 
 # --- one batch ----------------------------------------------------------------
@@ -567,6 +578,7 @@ def inpaint(rel: str, boxes: list[dict], prompt: str, *, model: str,
     prefer, and an inpaint that overwrote it would remove the comparison the
     selector exists to make.
     """
+    rel = _rel(rel)
     png = read_bytes(rel)
     w, h = nai.png_size(png)
     if not w or not h:
@@ -599,7 +611,9 @@ NAMING_DIR = ".studio/naming"
 
 
 def _slug(folder: str) -> str:
-    return re.sub(r"[^A-Za-z0-9]+", "_", folder.strip("/")) or "root"
+    # Slugs are computed on the bare library-relative form so selection files
+    # made before the space unification keep resolving.
+    return re.sub(r"[^A-Za-z0-9]+", "_", _unstudio(folder).strip("/")) or "root"
 
 
 def _side(kind: str, folder: str) -> Path:
@@ -652,6 +666,7 @@ def group(folder: str, pattern: str = "", group_by: str = "emotion") -> dict:
     so a selector that silently showed only the files it understood would hide
     exactly the ones needing attention.
     """
+    folder = _rel(folder)
     base = files._resolve(SCOPE, folder)
     if not base.is_dir():
         raise StudioError(f"폴더가 없습니다: {folder}")
@@ -691,6 +706,7 @@ def rename_plan(folder: str, pairs: list[dict]) -> dict:
     plan is computed first and every problem is reported by name: a collision,
     a missing source, a name that escapes the folder.
     """
+    folder = _rel(folder)
     base = files._resolve(SCOPE, folder)
     ok, problems = [], []
     taken = {p.name for p in base.iterdir() if p.is_file()} if base.is_dir() else set()
@@ -717,6 +733,7 @@ def rename_plan(folder: str, pairs: list[dict]) -> dict:
 
 def rename_apply(folder: str, pairs: list[dict]) -> dict:
     """Apply a checked rename. The sidecar follows its image."""
+    folder = _rel(folder)
     plan = rename_plan(folder, pairs)
     if plan["problems"]:
         raise StudioError(f"{len(plan['problems'])}건에 문제가 있어 아무것도 바꾸지 않았습니다")
@@ -749,6 +766,7 @@ def export_selected(folder: str, *, pattern: str = "", group_by: str = "emotion"
     The empty `.txt` is the useful part: it makes a slot with no answer visible,
     which is what sends you back to generate just that one.
     """
+    folder = _rel(folder)
     g = group(folder, pattern, group_by)
     base = files._resolve(SCOPE, folder)
     out = base / "selected"
@@ -779,7 +797,7 @@ def export_selected(folder: str, *, pattern: str = "", group_by: str = "emotion"
             (out / f"{stem}.txt").write_text("", encoding="utf-8")
             placeholders += 1
 
-    rel = out.relative_to(root()).as_posix()
+    rel = out.relative_to(files._root(SCOPE)).as_posix()
     log.info("studio export %s: %d used, %d inpaint, %d empty", rel, used, inpainted, placeholders)
     return {"folder": rel, "used": used, "inpaint": inpainted, "empty": placeholders,
             "groups": len(g["groups"]), "unmatched": len(g["unmatched"])}
@@ -798,6 +816,7 @@ def duplicates(folder: str) -> dict:
     is usually the deliberate one) and the rest as candidates, and the caller
     decides - a duplicate is not automatically waste.
     """
+    folder = _rel(folder)
     base = files._resolve(SCOPE, folder)
     if not base.is_dir():
         raise StudioError(f"폴더가 없습니다: {folder}")
@@ -806,7 +825,7 @@ def duplicates(folder: str) -> dict:
         if not p.is_file() or p.suffix.lower() not in (".png", ".jpg", ".jpeg", ".webp"):
             continue
         h = hashlib.sha256(p.read_bytes()).hexdigest()
-        seen.setdefault(h, []).append(p.relative_to(root()).as_posix())
+        seen.setdefault(h, []).append(p.relative_to(files._root(SCOPE)).as_posix())
     groups = []
     wasted = 0
     for h, paths in seen.items():
@@ -814,7 +833,7 @@ def duplicates(folder: str) -> dict:
             continue
         keep = min(paths, key=lambda x: (len(Path(x).name), x))
         others = [p for p in paths if p != keep]
-        size = (root() / keep).stat().st_size
+        size = (files._root(SCOPE) / keep).stat().st_size
         wasted += size * len(others)
         groups.append({"hash": h[:16], "keep": keep, "others": others, "size": size})
     return {"folder": folder, "groups": groups,

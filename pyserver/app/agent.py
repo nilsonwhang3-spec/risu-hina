@@ -912,7 +912,7 @@ def build() -> Agent[Deps]:
         if field not in ("additional", "emotion"):
             return "field 는 additional 또는 emotion 이어야 합니다"
         try:
-            info = assets.stage_file(ctx.deps.char_key, path)
+            info = assets.stage_file(path)
         except (assets.AssetError, files.FileError) as e:
             return str(e)
         return _propose(ctx, "host_asset_add",
@@ -969,14 +969,12 @@ def build() -> Agent[Deps]:
         프롬프트 안의 `{{…}}` 는 NovelAI 강조 문법이라 **절대 건드리지 않는다.**
         `<조각>` · `<폴더/조각>` · `<컬렉션.키>` 는 fragments/ 참조이고 생성 직전에 치환된다.
         """
-        rel = path.replace("\\", "/").strip("/")
-        area = rel.split("/")[0]
-        if area not in files.STUDIO_AREAS or area.startswith("."):
-            return f"경로는 {sorted(a for a in files.STUDIO_AREAS if not a.startswith('.'))} 중 하나로 시작해야 합니다"
-        name = rel.split("/")[-1]
-        into = "/".join(rel.split("/")[:-1]) or area
+        rel = studio._rel(path)
+        parts = rel.split("/")
+        if parts[0] != studio.BASE or len(parts) < 3 or parts[1] not in studio.AREAS:
+            return f"경로는 studio/{{{' | '.join(studio.AREAS)}}}/… 이어야 합니다"
         try:
-            r = files.upload(files.STUDIO, name, text=content, into=into)
+            r = files.upload(files.SPACE, parts[-1], text=content, into="/".join(parts[:-1]))
         except files.FileError as e:
             return str(e)
         return f"썼습니다: {r['path']} ({r['size']} 바이트)"
@@ -1053,7 +1051,7 @@ def build() -> Agent[Deps]:
         studio_write 로 규칙을 고치거나, 사용자에게 일괄 이름 변경을 제안한다.
         """
         try:
-            base = files._resolve(files.STUDIO, folder)
+            base = files._resolve(files.SPACE, studio._rel(folder))
             names = sorted(p.name for p in base.glob("*.png"))
         except Exception as e:  # noqa: BLE001
             return str(e)
@@ -1155,8 +1153,9 @@ def build() -> Agent[Deps]:
         made = []
         for path, name in zip(plist, nlist):
             try:
-                staged = studio.stage_to_bot(ck, path)
-                info = assets.stage_file(ck, staged["path"])
+                # The library and the workspace are one space now: the image
+                # is proposed by its own path, no copy hop.
+                info = assets.stage_file(studio._rel(path))
             except Exception as e:  # noqa: BLE001
                 made.append(f"✕ {path}: {e}")
                 continue
@@ -1269,7 +1268,7 @@ def build() -> Agent[Deps]:
     def propose_asset_replace(ctx: RunContext[Deps], name: str, path: str, reason: str) -> str:
         """이름은 그대로 두고 그 에셋의 그림만 바꾸자고 제안한다 (PNG). CBS 참조는 영향 없다."""
         try:
-            info = assets.stage_file(ctx.deps.char_key, path)
+            info = assets.stage_file(path)
         except (assets.AssetError, files.FileError) as e:
             return str(e)
         return _propose(ctx, "host_asset_replace",

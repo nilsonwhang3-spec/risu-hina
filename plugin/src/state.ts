@@ -529,53 +529,12 @@ export interface StudioJob {
 }
 
 /**
- * The asset studio's files.
+ * The asset studio's domain calls (NovelAI, batches, the selector).
  *
- * The same endpoints the bot's workspace uses, addressed with `studio: true`
- * instead of a charKey — the backend serves two roots from one file API
- * (`app/files.py`). A separate object rather than a flag threaded through the
- * ten methods above, because the two scopes must not be mixed up at a call
- * site: nothing here needs a bot, and nothing above may reach the library.
+ * The library's FILES are ordinary space files now - `studio/…` paths through
+ * the shared methods on AppState. Only what is not a file lives here.
  */
 class StudioFiles {
-  private readonly q = { studio: 1 } as const;
-
-  async list(): Promise<FileListing> {
-    return await transport.get<FileListing>('/files', this.q);
-  }
-
-  async read(path: string): Promise<{ path: string; size: number; textual: boolean;
-                                      content: string; truncated?: boolean; note?: string }> {
-    return await transport.get('/files/read', { ...this.q, path });
-  }
-
-  async write(dir: string, name: string, text: string): Promise<{ path: string; size: number }> {
-    return await transport.upload('/files/upload', { studio: true, name, text, dir });
-  }
-
-  async upload(dir: string, name: string, base64: string, extract = false)
-    : Promise<{ path: string; size: number; extracted?: number }> {
-    return await transport.upload('/files/upload', { studio: true, name, base64, dir, extract });
-  }
-
-  /** Bytes for a thumbnail. POST + no-store: a cache in front of the backend
-   *  has been seen serving one GET's body for every query string (docs/06 §1-7). */
-  async bytes(path: string): Promise<Uint8Array> {
-    return await transport.postBinary('/files/download', { studio: true, path });
-  }
-
-  async mkdir(path: string): Promise<void> {
-    await transport.post('/files/mkdir', { studio: true, path });
-  }
-
-  async move(from: string, to: string): Promise<{ to: string }> {
-    return await transport.post('/files/move', { studio: true, from, to });
-  }
-
-  async remove(path: string): Promise<void> {
-    await transport.post('/files/delete', { studio: true, path });
-  }
-
   // --- NovelAI ---------------------------------------------------------------
 
   /** Two meters and the library path. Anlas and the v5 quota are separate. */
@@ -639,7 +598,8 @@ class StudioFiles {
     return await transport.post('/studio/export', { folder, character, pattern });
   }
 
-  /** Copy library images into a bot's workspace so they can be adopted. */
+  /** Check library images for adoption (PNG-ness, size). Nothing is copied:
+   *  the library and the workspace are one space now. */
   async stage(charKey: string, paths: string[]): Promise<{
     staged: { path: string; size: number }[]; failed: { path: string; error: string }[];
   }> {
@@ -1369,14 +1329,15 @@ class AppState {
     throw new Error('백엔드가 다시 올라오지 않았습니다: ' + lastError);
   }
 
-  // --- workspace files ------------------------------------------------------
+  // --- the global file space --------------------------------------------------
   //
-  // Scoped to the character, not the chat: the workspace is per bot, and its
-  // uploads and outputs are shared across that bot's chats.
+  // ONE tree every bot shares (projects/ · studio/ · hina/<봇이름>/). No
+  // charKey: the scope is the space itself. The per-bot SYSTEM view (frozen
+  // originals, machinery) is read-only and reached with `system: 1`.
 
-  /** Save a workspace file to the user's disk through the browser. */
+  /** Save a space file to the user's disk through the browser. */
   async downloadFile(path: string): Promise<number> {
-    const bytes = await transport.postBinary('/files/download', { charKey: this.activeCharKey, path });
+    const bytes = await transport.postBinary('/files/download', { path });
     const name = path.split('/').pop() || 'file';
     host.downloadBytes(name, bytes, name.endsWith('.charx') ? 'application/zip' : 'application/octet-stream');
     return bytes.byteLength;
@@ -1398,20 +1359,24 @@ class AppState {
   }
 
   async files(): Promise<FileListing> {
-    return await transport.get('/files?charKey=' + encodeURIComponent(this.activeCharKey));
+    return await transport.get('/files');
+  }
+
+  /** This bot's SYSTEM directory: frozen originals and machinery, read-only. */
+  async systemFiles(): Promise<FileListing> {
+    return await transport.get('/files?system=1&charKey=' + encodeURIComponent(this.activeCharKey));
   }
 
   async readFile(path: string): Promise<{ path: string; size: number; textual: boolean;
                                           content: string; truncated?: boolean; note?: string }> {
-    return await transport.get('/files/read?charKey=' + encodeURIComponent(this.activeCharKey)
-      + '&path=' + encodeURIComponent(path));
+    return await transport.get('/files/read?path=' + encodeURIComponent(path));
   }
 
   async uploadFile(name: string, content: string, base64 = false, dir = '', extract = false)
     : Promise<{ path: string; size: number; extracted?: number }> {
     return await transport.upload('/files/upload', base64
-      ? { charKey: this.activeCharKey, name, base64: content, dir, extract }
-      : { charKey: this.activeCharKey, name, text: content, dir });
+      ? { name, base64: content, dir, extract }
+      : { name, text: content, dir });
   }
 
   /**
@@ -1422,7 +1387,7 @@ class AppState {
   async uploadBatch(dir: string, entries: { name: string; rel: string; bytes: Uint8Array }[], extract = false)
     : Promise<{ files: { path: string; name: string; size: number; extracted?: number }[]; count: number; size: number; extracted: number }> {
     const header = new TextEncoder().encode(JSON.stringify({
-      charKey: this.activeCharKey, dir, extract,
+      dir, extract,
       files: entries.map((e) => ({ name: e.name, rel: e.rel, size: e.bytes.byteLength })),
     }));
     const total = 4 + header.byteLength + entries.reduce((n, e) => n + e.bytes.byteLength, 0);
@@ -1445,9 +1410,7 @@ class AppState {
   async uploadChunk(dir: string, part: {
     name: string; rel: string; offset: number; total: number; last: boolean; extract?: boolean;
   }, bytes: Uint8Array): Promise<{ done: boolean; received: number; total: number; extracted?: number }> {
-    const header = new TextEncoder().encode(JSON.stringify({
-      charKey: this.activeCharKey, dir, ...part,
-    }));
+    const header = new TextEncoder().encode(JSON.stringify({ dir, ...part }));
     const body = new Uint8Array(4 + header.byteLength + bytes.byteLength);
     new DataView(body.buffer).setUint32(0, header.byteLength);
     body.set(header, 4);
@@ -1457,33 +1420,33 @@ class AppState {
 
   /** Several files or a folder as one zip, handed to the browser to save. */
   async downloadZip(paths: string[], name: string): Promise<number> {
-    const bytes = await transport.postBinary('/files/zip', { charKey: this.activeCharKey, paths, name });
+    const bytes = await transport.postBinary('/files/zip', { paths, name });
     host.downloadBytes(name.endsWith('.zip') ? name : name + '.zip', bytes, 'application/zip');
     return bytes.byteLength;
   }
 
-  /** Raw bytes of a workspace file (an image preview, a thumbnail). POST: see tab-assets. */
+  /** Raw bytes of a space file (an image preview, a thumbnail). POST: see tab-assets. */
   async fileBytes(path: string): Promise<Uint8Array> {
-    return await transport.postBinary('/files/download', { charKey: this.activeCharKey, path });
+    return await transport.postBinary('/files/download', { path });
   }
 
   async mkdirFile(path: string): Promise<void> {
-    await transport.post('/files/mkdir', { charKey: this.activeCharKey, path });
+    await transport.post('/files/mkdir', { path });
   }
 
   async moveFile(from: string, to: string): Promise<{ to: string }> {
-    return await transport.post('/files/move', { charKey: this.activeCharKey, from, to });
+    return await transport.post('/files/move', { from, to });
   }
 
   async deleteFile(path: string): Promise<void> {
-    await transport.post('/files/delete', { charKey: this.activeCharKey, path });
+    await transport.post('/files/delete', { path });
   }
 
   async cleanFiles(areas?: string[]): Promise<{ areas: string[]; removed: number; freed: number }> {
     return await transport.post('/files/clean', { charKey: this.activeCharKey, areas });
   }
 
-  /** The asset studio's library. Same endpoints, other root - see `studio`. */
+  /** The asset studio's domain calls (files go through the shared methods). */
   readonly studio = new StudioFiles();
 
   // --- agent presets --------------------------------------------------------
@@ -2027,7 +1990,7 @@ class AppState {
     const path = String(args.path || '');
     const field = String(args.field || 'additional');
     if (!name || !path) throw new Error('에셋 이름과 파일 경로가 필요합니다');
-    const bytes = await transport.getBinary('/files/download', { charKey: this.activeCharKey, path });
+    const bytes = await transport.getBinary('/files/download', { path });
     if (!(bytes[0] === 0x89 && bytes[1] === 0x50)) throw new Error('PNG 파일만 에셋으로 넣을 수 있습니다');
     const key = await Risuai.saveAsset(bytes);
     if (!key || typeof key !== 'string') throw new Error('RisuAI 가 에셋 키를 돌려주지 않았습니다');

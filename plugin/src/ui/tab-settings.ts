@@ -67,7 +67,7 @@ export function renderSettingsTab(mount: HTMLElement): void {
     // The backend update sits with the connection, right under it: it is the
     // first thing to press when the two sides disagree, and it was buried on
     // the last page before.
-    ['연결', [buildConnectionCard(), buildUpdateCard(), buildDiagnosticCard(), buildAssetsCard()]],
+    ['연결', [buildConnectionCard(), buildUpdateCard(), buildSpaceCard(), buildDiagnosticCard(), buildAssetsCard()]],
     ['API 키/인증', [buildKeysCard()]],
     ['에이전트', [buildPresetsCard({
       onMount: (refresh) => { refreshers.push(refresh); },
@@ -162,6 +162,43 @@ function buildConnectionCard(): HTMLElement {
     ]),
   ]);
 }
+
+function buildSpaceCard(): HTMLElement {
+  const path = el('input', { placeholder: '(비우면 기본: <data>/space)' }) as HTMLInputElement;
+  const out = el('div', { class: 'hint' });
+  const save = el('button', { class: 'primary tiny', text: '저장' }) as HTMLButtonElement;
+  const load = async (): Promise<void> => {
+    try {
+      const d = await state.diagnostics() as { space?: { path?: string; migrated?: boolean } };
+      const sp = d.space ?? {};
+      out.textContent = `현재: ${sp.path ?? state.health?.space ?? '(연결 안 됨)'}`
+        + (sp.migrated ? ' · 기존 파일 이관 완료' : '');
+    } catch {
+      out.textContent = state.health?.space ? `현재: ${state.health.space}` : '';
+    }
+  };
+  save.addEventListener('click', async () => {
+    save.disabled = true;
+    try {
+      await transport.post('/config', { config: { workspace: { globalPath: path.value.trim() } } });
+      out.textContent = '저장했습니다. 파일은 자동으로 옮겨지지 않습니다 — 경로를 바꿨다면 기존 폴더를 직접 옮겨 주세요.';
+    } catch (e) {
+      out.textContent = '저장하지 못했습니다: ' + msg(e);
+    } finally {
+      save.disabled = false;
+    }
+  });
+  refreshers.push(load);
+  void load();
+  return el('div', { class: 'card' }, [
+    el('h2', { text: '파일 공간' }),
+    el('div', { class: 'hint', text: '모든 봇이 공유하는 하나의 파일 공간입니다: projects(직접 관리) · studio(이미지 라이브러리) · hina(AI 작업).' }),
+    el('label', { class: 'field' }, [el('span', { text: '경로' }), path]),
+    el('div', { class: 'row' }, [save]),
+    out,
+  ]);
+}
+
 
 function buildDiagnosticCard(): HTMLElement {
   const out = el('div', { class: 'outbox' });

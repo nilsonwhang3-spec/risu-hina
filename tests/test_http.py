@@ -2025,7 +2025,9 @@ def test_charx_build(s: Server, cw: dict) -> None:
     st, body = s.post("/charx/build", {"charKey": ck, "name": "카드 봇 테스트"})
     check("build succeeds once the asset is there", st == 200 and body.get("ok") is True, str(body)[:200])
     check("one asset in, nothing dropped", body.get("assets") == 1 and body.get("dropped") == 0, str(body)[:200])
-    check("the file lands in out/", body.get("path") == "out/카드 봇 테스트.charx", str(body.get("path")))
+    check("the file lands in the bot's hina out/",
+          str(body.get("path") or "").startswith("hina/")
+          and str(body.get("path")).endswith("/out/카드 봇 테스트.charx"), str(body.get("path")))
 
     # q()'s own first parameter is called `path`, so this query is spelled out.
     dl = lambda p: "/files/download?charKey=" + urllib.parse.quote(ck) + "&path=" + urllib.parse.quote(p)
@@ -2037,9 +2039,10 @@ def test_charx_build(s: Server, cw: dict) -> None:
     check("and a missing file is a 404", st == 404, str(st))
 
     # Read the zip straight off disk (the helper decodes bodies as text).
-    st, files = s.get(q("/files", charKey=ck))
+    # /files serves the global space now; the charx sits at its reported path.
+    st, files = s.get(q("/files"))
     root = files.get("root") or ""
-    with zipfile.ZipFile(Path(root) / "out" / "카드 봇 테스트.charx") as z:
+    with zipfile.ZipFile(Path(root) / body["path"]) as z:
         names = z.namelist()
         check("card.json is the last entry, no module.risum",
               names[-1] == "card.json" and "module.risum" not in names, str(names))
@@ -2080,15 +2083,16 @@ def test_charx_build(s: Server, cw: dict) -> None:
     # adopt: the plugin saved a workspace PNG into RisuAI and reports the key
     # the host chose; the store takes the same bytes under it and the
     # manifest grows by one, so a charx right after already carries it.
-    s.post("/files/upload", {"charKey": ck, "name": "made.png", "base64": base64.b64encode(png).decode()})
+    s.post("/files/upload", {"name": "made.png", "base64": base64.b64encode(png).decode(),
+                             "dir": "projects/어답트"})
     st, body = s.post("/assets/adopt", {"charKey": ck, "key": "assets/hostchose.png",
-                                        "path": "uploads/made.png", "name": "새 그림", "field": "additional"})
+                                        "path": "projects/어답트/made.png", "name": "새 그림", "field": "additional"})
     check("adopt records the host's key", st == 200 and body.get("key") == "assets/hostchose.png", str(body)[:160])
     check("same bytes as aa.png - one blob", body.get("created") is False, str(body)[:160])
     st, body = s.get(q("/assets/list", charKey=ck))
     names = [(i["name"], i["state"]) for i in body.get("items") or []]
     check("the manifest carries the new asset as present", ("새 그림", "present") in names, str(names))
-    st, body = s.post("/assets/adopt", {"charKey": ck, "key": "../x.png", "path": "uploads/made.png"})
+    st, body = s.post("/assets/adopt", {"charKey": ck, "key": "../x.png", "path": "projects/어답트/made.png"})
     check("adopt refuses a bad key", st == 400, str(st))
     st, body = s.post("/assets/adopt", {"charKey": ck, "key": "assets/ok.png", "path": "../../etc/hosts"})
     check("and an escaping path", st == 400, str(st))
@@ -2285,17 +2289,17 @@ def test_workspace_folders_and_family(s: Server, cw: dict) -> None:
     a charx round-trip carries)."""
     print("test_workspace_folders_and_family")
     ck = cw["charKey"]
-    st, body = s.post("/files/mkdir", {"charKey": ck, "path": "uploads/참고"})
-    check("a folder is made inside uploads", st == 200 and body.get("path") == "uploads/참고", str(body)[:120])
-    st, body = s.post("/files/mkdir", {"charKey": ck, "path": "original/x"})
-    check("but not inside original", st == 400, str(st))
-    st, body = s.post("/files/upload", {"charKey": ck, "name": "memo.txt", "text": "hi", "dir": "uploads/참고"})
-    check("an upload can target a folder", st == 200 and body.get("path") == "uploads/참고/memo.txt", str(body)[:120])
-    st, body = s.post("/files/upload", {"charKey": ck, "name": "x.txt", "text": "hi", "dir": "original"})
-    check("an upload cannot target a frozen area", st == 400, str(st))
-    st, body = s.post("/files/upload", {"charKey": ck, "name": "x.txt", "text": "hi", "dir": "out/보관"})
-    check("but out/ and a nested folder are fine", st == 200 and body.get("path") == "out/보관/x.txt", str(body)[:120])
-    s.post("/files/delete", {"charKey": ck, "path": "out/보관"})
+    st, body = s.post("/files/mkdir", {"path": "projects/참고"})
+    check("a folder is made inside projects", st == 200 and body.get("path") == "projects/참고", str(body)[:120])
+    st, body = s.post("/files/mkdir", {"system": 1, "charKey": ck, "path": "original/x"})
+    check("but the SYSTEM view is read-only", st == 403, str(st))
+    st, body = s.post("/files/upload", {"name": "memo.txt", "text": "hi", "dir": "projects/참고"})
+    check("an upload can target a folder", st == 200 and body.get("path") == "projects/참고/memo.txt", str(body)[:120])
+    st, body = s.post("/files/upload", {"system": 1, "charKey": ck, "name": "x.txt", "text": "hi", "dir": "original"})
+    check("an upload cannot target the SYSTEM view", st == 403, str(st))
+    st, body = s.post("/files/upload", {"name": "x.txt", "text": "hi", "dir": "hina/보관"})
+    check("but hina/ and a nested folder are fine", st == 200 and body.get("path") == "hina/보관/x.txt", str(body)[:120])
+    s.post("/files/delete", {"path": "hina/보관"})
 
     # A dropped zip unpacks into a folder named after it; junk and escapes are
     # skipped; and a selection comes back as one zip.
@@ -2308,50 +2312,50 @@ def test_workspace_folders_and_family(s: Server, cw: dict) -> None:
         zf.writestr("sub/b.txt", "B")
         zf.writestr("__MACOSX/._a.txt", "junk")
         zf.writestr("../escape.txt", "X")
-    st, body = s.post("/files/upload", {"charKey": ck, "name": "묶음.zip", "dir": "uploads/참고",
+    st, body = s.post("/files/upload", {"name": "묶음.zip", "dir": "projects/참고",
                                         "base64": _b64.b64encode(buf.getvalue()).decode(), "extract": True})
-    check("a zip can be unpacked on upload", st == 200 and body.get("path") == "uploads/참고/묶음"
+    check("a zip can be unpacked on upload", st == 200 and body.get("path") == "projects/참고/묶음"
           and body.get("extracted") == 2, str(body)[:160])
-    st, files = s.get(q("/files", charKey=ck))
-    up = next(a for a in files["areas"] if a["area"] == "uploads")
+    st, files = s.get(q("/files"))
+    up = next(a for a in files["areas"] if a["area"] == "projects")
     names = {f["path"] for f in up["files"]}
     check("its files land under the folder, nested kept",
-          "uploads/참고/묶음/a.txt" in names and "uploads/참고/묶음/sub/b.txt" in names, str(sorted(names))[:200])
+          "projects/참고/묶음/a.txt" in names and "projects/참고/묶음/sub/b.txt" in names, str(sorted(names))[:200])
     check("junk and escaping members are dropped",
           not any("escape" in n or "MACOSX" in n for n in names))
-    st, raw, hdr = s.post_bytes("/files/zip", {"charKey": ck, "paths": ["uploads/참고/묶음"], "name": "받기"})
+    st, raw, hdr = s.post_bytes("/files/zip", {"paths": ["projects/참고/묶음"], "name": "받기"})
     ctype = next((v for k, v in hdr.items() if k.lower() == "content-type"), "")
     check("a folder downloads as one zip", st == 200 and raw[:2] == b"PK" and "zip" in ctype, f"{st} {ctype}")
     with _zipfile.ZipFile(_io.BytesIO(raw)) as zf:
         got = sorted(zf.namelist())
     check("named relative to the folder's parent", got == ["묶음/a.txt", "묶음/sub/b.txt"], str(got))
-    st, raw, hdr = s.post_bytes("/files/zip", {"charKey": ck, "paths": ["uploads/참고/묶음/a.txt", "uploads/참고/묶음/sub/b.txt"]})
+    st, raw, hdr = s.post_bytes("/files/zip", {"paths": ["projects/참고/묶음/a.txt", "projects/참고/묶음/sub/b.txt"]})
     with _zipfile.ZipFile(_io.BytesIO(raw)) as zf:
         got = sorted(zf.namelist())
     check("several files zip relative to their common parent", got == ["a.txt", "sub/b.txt"], str(got))
-    st, raw, hdr = s.post_bytes("/files/zip", {"charKey": ck, "paths": ["../etc"]})
+    st, raw, hdr = s.post_bytes("/files/zip", {"paths": ["../etc"]})
     check("a path outside the workspace is refused", st == 400, str(st))
-    s.post("/files/delete", {"charKey": ck, "path": "uploads/참고/묶음"})
+    s.post("/files/delete", {"path": "projects/참고/묶음"})
 
     # The folder drop: many files in one binary body, subfolders kept.
     def packed(entries: list[tuple[str, str, bytes]], **hdr_extra: object) -> bytes:
-        header = json.dumps({"charKey": ck, "dir": "uploads/참고", "files": [
+        header = json.dumps({"dir": "projects/참고", "files": [
             {"name": n, "rel": r, "size": len(b)} for n, r, b in entries], **hdr_extra}, ensure_ascii=False).encode()
         return len(header).to_bytes(4, "big") + header + b"".join(b for _, _, b in entries)
     st, body = s.post_raw("/files/upload-many", packed([
         ("a.png", "", b"\x89PNG" + bytes(20)), ("b.txt", "deep/er", "hello".encode()), ("c.bin", "deep", bytes(3))]))
     check("a batch upload lands every file", st == 200 and body.get("count") == 3, str(body)[:160])
-    st, files = s.get(q("/files", charKey=ck))
-    up = next(a for a in files["areas"] if a["area"] == "uploads")
+    st, files = s.get(q("/files"))
+    up = next(a for a in files["areas"] if a["area"] == "projects")
     names = {f["path"]: f["size"] for f in up["files"]}
     check("with subfolders from `rel` and exact bytes",
-          names.get("uploads/참고/a.png") == 24 and names.get("uploads/참고/deep/er/b.txt") == 5
-          and names.get("uploads/참고/deep/c.bin") == 3, str(sorted(names))[:200])
+          names.get("projects/참고/a.png") == 24 and names.get("projects/참고/deep/er/b.txt") == 5
+          and names.get("projects/참고/deep/c.bin") == 3, str(sorted(names))[:200])
     # A file bigger than one body arrives in pieces. A character's .charx is
     # 140-180MB, which the batch path could never take (the body limit is
     # 64MB), so it used to be refused outright.
     def chunk(name: str, offset: int, total: int, blob: bytes, last: bool, **extra: object) -> bytes:
-        header = json.dumps({"charKey": ck, "dir": "uploads/참고", "name": name, "rel": "",
+        header = json.dumps({"dir": "projects/참고", "name": name, "rel": "",
                              "offset": offset, "total": total, "last": last, **extra},
                             ensure_ascii=False).encode()
         return len(header).to_bytes(4, "big") + header + blob
@@ -2359,8 +2363,8 @@ def test_workspace_folders_and_family(s: Server, cw: dict) -> None:
     st, body = s.post_raw("/files/upload-chunk", chunk("큰.bin", 0, len(big), big[:4096], False))
     check("a first chunk is accepted and not finished", st == 200 and body.get("done") is False
           and body.get("received") == 4096, str(body)[:140])
-    st, files = s.get(q("/files", charKey=ck))
-    up = next(a for a in files["areas"] if a["area"] == "uploads")
+    st, files = s.get(q("/files"))
+    up = next(a for a in files["areas"] if a["area"] == "projects")
     check("a half-arrived file is not listed", not any(f["name"].startswith("큰.bin") for f in up["files"]),
           str([f["name"] for f in up["files"]])[:160])
     st, body = s.post_raw("/files/upload-chunk", chunk("큰.bin", 9999, len(big), big[4096:8192], False))
@@ -2369,28 +2373,28 @@ def test_workspace_folders_and_family(s: Server, cw: dict) -> None:
     st, body = s.post_raw("/files/upload-chunk", chunk("큰.bin", 8192, len(big), big[8192:], True))
     check("the last chunk completes the file", st == 200 and body.get("done") is True
           and body.get("size") == len(big), str(body)[:140])
-    st, raw, _hdr = s.post_bytes("/files/download", {"charKey": ck, "path": "uploads/참고/큰.bin"})
+    st, raw, _hdr = s.post_bytes("/files/download", {"path": "projects/참고/큰.bin"})
     check("and the bytes are exactly what was sent", raw == big, f"{len(raw)} vs {len(big)}")
     st, body = s.post_raw("/files/upload-chunk", chunk("짧.bin", 0, 99, b"12345", True))
     check("a size that does not match is refused", st == 400 and "크기" in str(body), str(body)[:120])
-    s.post("/files/delete", {"charKey": ck, "path": "uploads/참고/큰.bin"})
+    s.post("/files/delete", {"path": "projects/참고/큰.bin"})
 
     st, body = s.post_raw("/files/upload-many", packed([("x.txt", "../../escape", b"x")]))
     check("a climbing `rel` is refused", st == 400, str(st))
     bad = packed([("y.txt", "", b"12345")])[:-2]
     st, body = s.post_raw("/files/upload-many", bad)
     check("a body shorter than its header is refused", st == 400, str(body)[:80])
-    s.post("/files/delete", {"charKey": ck, "path": "uploads/참고/deep"})
-    st, files = s.get(q("/files", charKey=ck))
-    up = next(a for a in files["areas"] if a["area"] == "uploads")
-    check("the listing names the folder", "uploads/참고" in (up.get("dirs") or []), str(up.get("dirs")))
-    st, body = s.post("/files/move", {"charKey": ck, "from": "uploads/참고/memo.txt", "to": "out"})
-    check("a file moves between areas, name kept", st == 200 and body.get("to") == "out/memo.txt", str(body)[:120])
-    st, body = s.post("/files/move", {"charKey": ck, "from": "out/memo.txt", "to": "original/memo.txt"})
-    check("but never into original", st == 400, str(st))
-    st, body = s.post("/files/move", {"charKey": ck, "from": "uploads/참고", "to": "uploads/참고/안"})
+    s.post("/files/delete", {"path": "projects/참고/deep"})
+    st, files = s.get(q("/files"))
+    up = next(a for a in files["areas"] if a["area"] == "projects")
+    check("the listing names the folder", "projects/참고" in (up.get("dirs") or []), str(up.get("dirs")))
+    st, body = s.post("/files/move", {"from": "projects/참고/memo.txt", "to": "hina"})
+    check("a file moves between areas, name kept", st == 200 and body.get("to") == "hina/memo.txt", str(body)[:120])
+    st, body = s.post("/files/move", {"from": "hina/memo.txt", "to": ".hina/memo.txt"})
+    check("but never into the machine area", st == 400, str(st))
+    st, body = s.post("/files/move", {"from": "projects/참고", "to": "projects/참고/안"})
     check("nor a folder into itself", st == 400, str(st))
-    st, body = s.post("/files/delete", {"charKey": ck, "path": "out/memo.txt"})
+    st, body = s.post("/files/delete", {"path": "hina/memo.txt"})
 
     # Family: a second bot stamped with this one's key lands in this workspace.
     st, body = s.post("/workspace", {
@@ -2401,11 +2405,13 @@ def test_workspace_folders_and_family(s: Server, cw: dict) -> None:
     })
     ws2 = body.get("workspace") or {}
     check("the copy is its own bot", st == 200 and ws2.get("charKey") and ws2.get("charKey") != ck, str(ws2)[:120])
-    check("in the original's workspace", ws2.get("familyKey") == ck and ws2["paths"]["root"] == files["root"],
+    st, ws1 = s.get(q("/workspace/get", charKey=ck))
+    check("in the original's SYSTEM directory", ws2.get("familyKey") == ck
+          and ws2["paths"]["root"] == ((ws1.get("workspace") or {}).get("paths") or {}).get("root"),
           str(ws2.get("familyKey")) + " " + str(ws2.get("paths", {}).get("root")))
-    st, f2 = s.get(q("/files", charKey=ws2["charKey"]))
-    check("so its file listing is the shared one", f2.get("root") == files.get("root")
-          and any(a["area"] == "uploads" and "uploads/참고" in (a.get("dirs") or []) for a in f2["areas"]), str(f2)[:120])
+    st, f2 = s.get(q("/files", charKey=ws2["charKey"], system=1))
+    st, f1 = s.get(q("/files", charKey=ck, system=1))
+    check("so its SYSTEM listing is the shared one", f2.get("root") == f1.get("root"), str(f2)[:120])
     st, body = s.post("/workspace", {
         "charId": "cha-card-v2", "characterIndex": 6, "cardFull": True,
         "card": {"name": "카드 봇 v2", "chaId": "cha-card-v2", "desc": "v2",

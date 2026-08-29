@@ -299,9 +299,9 @@ def build(ck: str, *, allow_missing: bool = False, filename: str | None = None) 
     dropped = len(entries) - len(kept)
     card["data"]["assets"] = kept
 
-    root = workspace.root(ck)
-    out_dir = root / "out"
-    out_dir.mkdir(parents=True, exist_ok=True)
+    # The deliverable goes to the bot's hina/ out in the global space, so the
+    # files tab (and the download route, which serves the space) can reach it.
+    out_dir = workspace.hina_dir(ck) / "out"
     name = _safe_filename(filename or f"{char.get('name') or 'character'}")
     if not name.lower().endswith(".charx"):
         name += ".charx"
@@ -327,8 +327,9 @@ def build(ck: str, *, allow_missing: bool = False, filename: str | None = None) 
     size = target.stat().st_size
     log.info("charx char=%s file=%s assets=%s dropped=%s bytes=%s %.1fs",
              ck, name, len(kept), dropped, size, time.time() - t0)
+    rel = f"hina/{workspace.bot_folder(ck)}/out/{name}"
     return {
-        "ok": True, "charKey": ck, "file": name, "path": f"out/{name}", "size": size,
+        "ok": True, "charKey": ck, "file": name, "path": rel, "size": size,
         "assets": len(kept), "dropped": dropped, "missing": missing if allow_missing else [],
         "assetBytes": written_bytes, "seconds": round(time.time() - t0, 1),
     }

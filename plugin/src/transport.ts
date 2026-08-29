@@ -36,6 +36,8 @@ export interface HealthInfo {
   /** Whether this backend offers the OpenAI subscription path at all. */
   codexEnabled?: boolean;
   workspaces?: number;
+  /** The global file space's root path. */
+  space?: string;
 }
 
 export type RouteKind = 'unknown' | 'direct' | 'blocked';

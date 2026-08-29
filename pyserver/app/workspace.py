@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from . import card as cardmod
-from . import chatfmt, config, db, store
+from . import chatfmt, config, db, log, store
 from . import memory as mem
 
 SAFE = re.compile(r"[^A-Za-z0-9_.-]")
@@ -38,8 +38,6 @@ SAFE = re.compile(r"[^A-Za-z0-9_.-]")
 class WorkspaceError(ValueError):
     pass
 
-
-STUDIO = "studio"
 
 # Windows-forbidden filename characters plus control bytes. Korean stays: the
 # bot's own name is the folder name, that is the point of the hina/ area.
@@ -124,44 +122,45 @@ def hina_dir(char_key: str) -> Path:
     return base
 
 
-def studio_root() -> Path:
-    """The asset studio library: `studio.libraryPath`, or `<data>/studio`.
+# The studio's own areas. Owned here rather than in files.py because they are
+# subfolders of one SPACE area now, not a scope of their own.
+STUDIO_SUBDIRS = ("styles", "characters", "fragments", "scenes", "images", ".studio")
 
-    Configurable and therefore allowed to sit outside the data directory - a
-    few thousand generated images is a drive decision. `files._resolve`
-    compares *resolved* paths against whatever this returns, so containment
-    holds wherever it points.
+
+def studio_root() -> Path:
+    """The asset studio library: the `studio/` folder of the global space.
+
+    It used to be its own root (`studio.libraryPath`); that setting now only
+    feeds the migration warning. A separate drive is chosen for the whole
+    space (`workspace.globalPath`), not for the studio alone.
     """
-    raw = str((config.section("studio") or {}).get("libraryPath") or "").strip()
-    return (Path(raw).expanduser() if raw else config.DATA_DIR / "studio")
+    return space_root() / "studio"
 
 
 def ensure_studio() -> Path:
     """Create the library's areas. Called on the first studio request rather
     than at boot: an install that never opens the studio grows no folders."""
-    from . import files
+    ensure_space()
     base = studio_root()
-    for area in files.STUDIO_AREAS:
+    for area in STUDIO_SUBDIRS:
         (base / area).mkdir(parents=True, exist_ok=True)
     return base
 
 
 def root(char_key: str) -> Path:
-    """The workspace directory - the bot's own, or its family's.
+    """The SYSTEM directory of one bot - the machinery, not the user's files.
 
-    `STUDIO` is the one key that is not a bot: it answers with the studio
-    library instead. It cannot collide with a real key, because `store.char_key`
-    always produces "c<hash>".
+    card.md, lore.json, the frozen original/ transcripts and .scratch/ (the
+    scoped DB snapshot and the proposal spool) live here, OUTSIDE the global
+    space on purpose: everything inside the space is readable by every bot's
+    sandbox, and another bot's scope.db must not be.
 
     Copies and new versions of one bot (a clone made here, a charx exported
     here and imported again) carry the original's key in
     `extentions.risu_hina.family`, and every one of them lands in that
-    directory: uploads, outputs, scratch and skills are shared across the
-    versions automatically. Rows (turns, card, lore) stay per bot - they are
-    keyed in the database, not by directory.
+    directory. Rows (turns, card, lore) stay per bot - they are keyed in the
+    database, not by directory.
     """
-    if char_key == STUDIO:
-        return studio_root()
     if not char_key or SAFE.sub("", char_key) != char_key:
         raise WorkspaceError(f"unsafe workspace key: {char_key!r}")
     fam = family_of(char_key)
@@ -454,7 +453,8 @@ def write_out(char_key: str, filename: str, text: str) -> str:
     while name.startswith("out/"):
         name = name[4:]
     safe = SAFE.sub("_", name) or "export"
-    path = root(char_key) / "out" / safe
+    # Deliverables live in the global space now, under this bot's name.
+    path = hina_dir(char_key) / "out" / safe
     _write(path, text)
     return str(path)
 
@@ -462,3 +462,106 @@ def write_out(char_key: str, filename: str, text: str) -> str:
 def destroy(char_key: str) -> None:
     shutil.rmtree(root(char_key), ignore_errors=True)
     db.execute("DELETE FROM characters WHERE char_key = ?", (char_key,))
+
+
+# --- the space_v1 migration ---------------------------------------------------
+
+def _move_tree(src: Path, dst: Path, moves: list[dict]) -> None:
+    """Move every file under src into dst, never overwriting: an occupied
+    target shifts the incomer to `이름~1`. Emptied directories are swept."""
+    if not src.is_dir():
+        return
+    for f in sorted(src.rglob("*")):
+        if not f.is_file():
+            continue
+        target = dst / f.relative_to(src)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        stem, suf, n = target.stem, target.suffix, 1
+        while target.exists():
+            target = target.with_name(f"{stem}~{n}{suf}")
+            n += 1
+        shutil.move(str(f), str(target))
+        moves.append({"from": str(f), "to": str(target)})
+    for d in sorted((p for p in src.rglob("*") if p.is_dir()), reverse=True):
+        try:
+            d.rmdir()
+        except OSError:
+            pass
+    try:
+        src.rmdir()
+    except OSError:
+        pass
+
+
+def migrate_to_space() -> dict | None:
+    """One-time move of the per-bot user files and the old studio library
+    into the global space.
+
+    Move + manifest only, never a delete, never an overwrite. The manifest
+    (`space/.hina/migration-space_v1.json`) is what `tools/rollback_space.py`
+    replays in reverse, which is why every single file move is recorded.
+
+    What moves: each bot's uploads/ into projects/<봇폴더>/uploads/, its
+    out/, scratch/ and scripts/ into hina/<봇폴더>/, and `data/studio/` into
+    the space's studio/. What stays: card.md, lore.json, original/, .scratch/
+    (SYSTEM machinery, deliberately outside the space) and skills/ (rebuilt
+    per run). A studio on a configured `studio.libraryPath` is NOT moved -
+    gigabytes across drives is the user's call, and the boot log says so.
+    """
+    if db.has_migration("space_v1"):
+        return None
+    space = ensure_space()
+    moves: list[dict] = []
+
+    studio_note = ""
+    legacy = str((config.section("studio") or {}).get("libraryPath") or "").strip()
+    old_studio = Path(legacy).expanduser() if legacy else config.DATA_DIR / "studio"
+    if legacy:
+        if old_studio.is_dir():
+            studio_note = (f"스튜디오 라이브러리가 {old_studio} 에 그대로 있습니다. 직접 "
+                           f"{studio_root()} 로 옮기거나, 그 드라이브를 쓰려면 workspace.globalPath 를 지정하세요.")
+            log.warn("space_v1: studio.libraryPath is set (%s) - not moved", old_studio)
+    elif old_studio.is_dir():
+        _move_tree(old_studio, studio_root(), moves)
+
+    keys: set[str] = set()
+    try:
+        for r in db.query("SELECT char_key FROM characters"):
+            k = str(r["char_key"])
+            keys.add(family_of(k) or k)
+    except Exception:  # noqa: BLE001 - before the table exists
+        pass
+    if config.WORKSPACE_DIR.is_dir():
+        for d in config.WORKSPACE_DIR.iterdir():
+            if d.is_dir() and SAFE.sub("", d.name) == d.name:
+                keys.add(d.name)
+
+    bots: dict[str, str] = {}
+    for key in sorted(keys):
+        wdir = config.WORKSPACE_DIR / key
+        if not wdir.is_dir():
+            continue
+        folder = bot_folder(key)
+        bots[key] = folder
+        _move_tree(wdir / "uploads", space / "projects" / folder / "uploads", moves)
+        for area in ("out", "scratch", "scripts"):
+            _move_tree(wdir / area, space / "hina" / folder / area, moves)
+
+    manifest = {"version": 1, "movedAt": time.time(), "moves": moves,
+                "bots": bots, "studio": {"legacyPath": legacy, "note": studio_note}}
+    mpath = space / ".hina" / "migration-space_v1.json"
+    mpath.parent.mkdir(parents=True, exist_ok=True)
+    mpath.write_text(json.dumps(manifest, ensure_ascii=False, indent=1), encoding="utf-8")
+    db.mark_migration("space_v1")
+    log.info("space_v1: moved %d files across %d bots%s", len(moves), len(bots),
+             "; studio left in place (libraryPath)" if studio_note else "")
+    return manifest
+
+
+def space_note() -> str:
+    """The migration warning the studio status line carries, if any."""
+    try:
+        m = json.loads((space_root() / ".hina" / "migration-space_v1.json").read_text(encoding="utf-8"))
+        return str((m.get("studio") or {}).get("note") or "")
+    except (OSError, ValueError):
+        return ""

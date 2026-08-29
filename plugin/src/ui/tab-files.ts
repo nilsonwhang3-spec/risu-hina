@@ -1,27 +1,25 @@
 /**
- * The file view - the bot's workspace as a file browser.
+ * The file view - the ONE global space as a file browser.
  *
- *   left     folders only: the areas (업로드 · 결과물 · …) and the folders
- *            inside them, as a tree. Selecting one lists it.
+ *   left     folders only: the areas (프로젝트 · 스튜디오 · AI 작업) and the
+ *            folders inside them, as a tree. Selecting one lists it.
  *   centre   what the selected folder holds - a list (name · size · time), or
  *            a grid of thumbnails when the folder is pictures. Selection with
  *            click / Ctrl / Shift / checkboxes; Delete deletes, Enter opens,
  *            files dropped anywhere on it are uploaded into that folder.
  *   right    the agent, as on every tab.
  *
+ * The space is shared by every bot (that is the point), so this tab renders
+ * with no bot selected at all; only 정리 - a per-bot verb - needs one.
+ *
  * It used to be one tree with every file in it, which read fine at ten files
  * and fell apart at a folder of three hundred assets: no way to pick several,
  * no way to see them, one download button per file. Folder tree plus list is
  * what every file manager does, and the reason is that it scales.
  *
- * **What is shown by default is what a person put in or would take out.** The
- * workspace also holds the frozen originals, the generated helper, the scoped
- * snapshot and the agent's scratch - all of it real, none of it interesting
- * unless something has gone wrong. Those are hidden behind a toggle rather than
- * removed, because "정리" needs to be able to say what it is about to delete.
- * A document the agent wrote into scratch/ or scripts/ is a deliverable that
- * landed in the wrong folder, not an internal file: those get a virtual folder
- * (임시 문서) that is visible without unfolding the internals.
+ * A document the agent left in its scratch/scripts folders is a deliverable
+ * that landed in the wrong place, not an internal file: those get a virtual
+ * folder (임시 문서) so they are visible without digging through hina/.
  *
  * Bulk transfer: several files or a folder come down as one zip built on the
  * backend (POST /files/zip); a dropped folder goes up file by file into the
@@ -34,19 +32,16 @@ import { bindAgent, mountAgent } from './agentpane';
 import { clientLog } from '../transport';
 
 const AREA_LABEL: Record<string, [string, string]> = {
-  uploads: ['업로드', '직접 올리신 참고 파일입니다. 정리해도 남습니다.'],
-  out: ['결과물', 'AI가 만든 산출물입니다. 내려받기 전이면 남겨 두세요.'],
-  original: ['원본', '가져온 그대로의 스냅샷입니다. 비교 기준이라 지울 수 없습니다.'],
-  scripts: ['스크립트', 'AI가 작성해 실행한 파이썬입니다.'],
-  skills: ['스킬', '켜 둔 스크립트 스킬이 실행 때마다 여기로 복사됩니다.'],
-  scratch: ['임시', 'AI의 작업용 파일입니다. 언제 지워도 됩니다.'],
-  '.scratch': ['내부', '스코프 스냅샷과 제안 큐입니다. 다음 실행 때 다시 만들어집니다.'],
+  projects: ['프로젝트', '직접 관리하시는 참고 자료·프로젝트 폴더입니다. 봇 이름 폴더로 나뉩니다.'],
+  studio: ['스튜디오', '프롬프트 재료와 생성 이미지 라이브러리입니다.'],
+  hina: ['AI 작업', '히나가 봇별로 쓰는 스크립트·임시·산출물 폴더입니다.'],
+  '.hina': ['내부', '스킬 복사본과 이관 기록입니다. 다음 실행 때 다시 만들어집니다.'],
 };
 
-/** The two areas a person actually put things in or takes things out of. */
-const USER_AREAS = new Set(['uploads', 'out']);
-/** Internal areas whose document-like files are surfaced anyway. */
-const SURFACE_FROM = new Set(['scratch', 'scripts']);
+/** Every visible area is the user's now - the space is one shared tree. */
+const USER_AREAS = new Set(['projects', 'studio', 'hina']);
+/** The AI work area whose document-like files are surfaced anyway. */
+const SURFACE_FROM = new Set(['hina']);
 const DOCUMENT_EXT = new Set([
   'md', 'markdown', 'txt', 'html', 'htm', 'csv', 'tsv', 'json', 'yaml', 'yml', 'xml', 'rtf', 'pdf', 'docx',
 ]);
@@ -79,7 +74,7 @@ let noticeMount: HTMLElement | null = null;
 let showInternal = false;
 let lastListing: FileListing | null = null;
 let nodes = new Map<string, Folder>();
-let selectedDir = 'uploads';
+let selectedDir = 'projects';
 let selection = new Set<string>();
 /** The row clicked last, for Shift ranges. */
 let anchorPath = '';
@@ -87,20 +82,11 @@ let previewPath = '';
 let confirmDelete = false;
 let view: 'list' | 'grid' = 'list';
 try { if (localStorage.getItem('hina.filesView') === 'grid') view = 'grid'; } catch { /* iframe */ }
-const expanded = new Set<string>(['uploads', 'out']);
+const expanded = new Set<string>(['projects', 'studio']);
 /** Thumbnail blob URLs by path. */
 const thumbs = new Map<string, string>();
 
 export function renderFilesTab(mount: HTMLElement): void {
-  if (!state.activeCharKey) {
-    clear(mount);
-    built = false;
-    mount.appendChild(el('div', { class: 'pad' }, [
-      el('div', { class: 'empty', text: '먼저 “챗 선택” 탭에서 챗을 골라 주세요.' }),
-    ]));
-    return;
-  }
-
   if (!built || !mount.querySelector('.split')) {
     clear(mount);
     const pane = threePane();
@@ -142,7 +128,7 @@ async function refresh(): Promise<void> {
     const data = await state.files();
     lastListing = data;
     buildNodes(data);
-    if (!nodes.has(selectedDir)) selectedDir = nodes.has('uploads') ? 'uploads' : (nodes.keys().next().value ?? '');
+    if (!nodes.has(selectedDir)) selectedDir = nodes.has('projects') ? 'projects' : (nodes.keys().next().value ?? '');
     // Selection survives a refresh only for paths that still exist.
     const alive = new Set(allPaths());
     selection = new Set([...selection].filter((p) => alive.has(p)));
@@ -199,12 +185,14 @@ function buildNodes(data: FileListing): void {
   }
   // Deliverables that landed in an internal folder, listed without unfolding
   // the internals. Only while those are folded - unfolded, they are in place.
-  if (!showInternal) {
+  {
     const docs: WorkspaceFile[] = [];
     let anyArea: FileArea | null = null;
     for (const area of data.areas) {
       if (!SURFACE_FROM.has(area.area)) continue;
-      const mine = area.files.filter(isDocument);
+      // The agent's scratch and scripts folders, wherever the bot folder is.
+      const mine = area.files.filter((f) =>
+        /^hina\/[^/]+\/(scratch|scripts)\//.test(f.path) && isDocument(f));
       if (mine.length) { docs.push(...mine); anyArea = anyArea ?? area; }
     }
     if (docs.length && anyArea) {
@@ -233,7 +221,7 @@ function expandTo(path: string): void {
 function uploadTarget(): string {
   const n = nodes.get(selectedDir);
   if (n && !n.virtual && USER_AREAS.has(n.area.area)) return n.path;
-  return 'uploads';
+  return 'projects';
 }
 
 /** Folders a file may be moved into: the deletable areas and their folders. */
@@ -304,21 +292,15 @@ function drawTree(): void {
   treeMount.appendChild(el('div', { class: 'treehead' }, [uploadBtn, uploadDirBtn, newDir, reloadBtn, filePicker, dirPicker]));
 
   // --- folders ---------------------------------------------------------------
-  let any = false;
+  // The user areas always show, empty or not: an empty 프로젝트 is still the
+  // place to drop the first file. Only a machine area hides when empty.
   const roots = [...nodes.values()].filter((n) => !n.path.includes('/') && n.path !== DOCS_NODE);
   for (const root of roots) {
-    if (!root.area.count && !root.kids.length) continue;
-    any = true;
+    if (root.path.startsWith('.') && !root.area.count && !root.kids.length) continue;
     treeMount.appendChild(nodeRow(root, 0));
   }
   const docs = nodes.get(DOCS_NODE);
-  if (docs) { any = true; treeMount.appendChild(nodeRow(docs, 0)); }
-  if (!any) {
-    treeMount.appendChild(el('div', {
-      class: 'hint', style: { padding: '8px' },
-      text: showInternal ? '파일이 없습니다.' : '올린 파일도 결과물도 아직 없습니다. 파일을 끌어다 놓으면 올라갑니다.',
-    }));
-  }
+  if (docs) treeMount.appendChild(nodeRow(docs, 0));
 
   // --- the hidden half -------------------------------------------------------
   const hidden = data.areas.filter((a) => !USER_AREAS.has(a.area) && a.count > 0);
@@ -330,8 +312,13 @@ function drawTree(): void {
     showInternal = !showInternal;
     void refresh();
   });
-  const cleanBtn = el('button', { class: 'ghost tiny' });
-  armed(cleanBtn, '임시 정리', '정말 정리할까요?', async () => {
+  // 정리 is per bot: this bot's hina/ scratch+scripts and its system scratch.
+  const cleanBtn = el('button', { class: 'ghost tiny' }) as HTMLButtonElement;
+  cleanBtn.disabled = !state.activeCharKey;
+  cleanBtn.title = state.activeCharKey
+    ? '이 봇의 AI 작업 폴더(임시·스크립트)를 비웁니다. 산출물(out)은 남습니다.'
+    : '봇을 열어야 그 봇의 작업 폴더를 정리할 수 있습니다';
+  armed(cleanBtn, '이 봇 정리', '정말 정리할까요?', async () => {
     try {
       const r = await state.cleanFiles();
       notice(`${r.removed}개를 지워 ${fmtSize(r.freed)}를 비웠습니다.`, 'ok');
@@ -352,7 +339,7 @@ function nodeRow(n: Folder, depth: number): HTMLElement {
   const [, why] = AREA_LABEL[n.area.area] ?? ['', ''];
   const branch = el('button', {
     class: 'treebranch' + (n.path === selectedDir ? ' on' : ''),
-    title: n.virtual ? `${SURFACE_FROM.size ? 'scratch/·scripts/' : ''} 에 있는 문서입니다. 여기서 바로 볼 수 있습니다.` : (depth ? n.path : why),
+    title: n.virtual ? 'AI 작업 폴더(임시·스크립트)에 있는 문서입니다. 여기서 바로 볼 수 있습니다.' : (depth ? n.path : why),
   }, [
     el('span', { text: n.virtual ? '📄' : (isOpen && n.kids.length ? '📂' : '📁') }),
     el('span', { class: 'grow', text: n.name, style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }),
@@ -442,7 +429,7 @@ function drawCentre(): void {
     all, dl, zipAll, mv, del,
   ]));
   viewMount.appendChild(el('div', { class: 'filehint', text:
-    (n.virtual ? 'scratch/·scripts/ 에 AI가 남긴 문서입니다. ' : why + ' ')
+    (n.virtual ? 'AI 작업 폴더에 남은 문서입니다. ' : why + ' ')
     + (writable ? '파일이나 폴더를 여기에 끌어다 놓으면 이 폴더에 올라갑니다 (zip 은 풀어서 올릴 수 있습니다). ' : '')
     + '클릭으로 선택, Ctrl·Shift 로 여러 개, 더블클릭·Enter 로 열기' + (deletable ? ', Delete 로 삭제.' : '.') }));
 

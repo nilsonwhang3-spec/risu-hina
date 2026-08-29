@@ -15,9 +15,10 @@
  *           tab does it.
  *   right   Hina, as on every tab
  *
- * The files come from the same endpoints the workspace uses, addressed with
- * `studio: true` (`state.studio`, `app/files.py`). Nothing here reimplements
- * listing, upload, move or delete.
+ * The library is the `studio/` folder of the ONE global space, so its files
+ * ride the shared file methods on `state` with space-rooted paths; only the
+ * domain calls (NovelAI, batches, the selector) live on `state.studio`.
+ * Nothing here reimplements listing, upload, move or delete.
  *
  * A bot IS needed to *adopt* an image into a card - that is gated per action,
  * where it is true, rather than on the whole tab.
@@ -44,18 +45,18 @@ import { bindAgent, mountAgent } from './agentpane';
  * put six unrelated things at one level and said nothing about which were
  * inputs and which were results.
  */
+// The library lives at studio/ inside the ONE global space, so every path
+// here is space-rooted ("studio/images/…").
 const MATERIALS: [string, string][] = [
-  ['styles', '스타일 프롬프트'],
-  ['characters', '캐릭터 프롬프트'],
+  ['studio/styles', '스타일 프롬프트'],
+  ['studio/characters', '캐릭터 프롬프트'],
   // One kind of preset only: a scene list. Model, steps and CFG are the run,
   // not the scene, so they stay on the panel rather than becoming a second
   // sort of preset file.
-  ['scenes', 'SD스튜디오 프리셋'],
-  ['fragments', '조각 프롬프트'],
+  ['studio/scenes', 'SD스튜디오 프리셋'],
+  ['studio/fragments', '조각 프롬프트'],
 ];
-const OUTPUT: [string, string][] = [['images', 'output']];
-const AREA_LABEL: Record<string, string> =
-  Object.fromEntries([...MATERIALS, ...OUTPUT]);
+const OUTPUT: [string, string][] = [['studio/images', 'output']];
 
 /** Areas whose individual files belong in the tree rather than the grid. */
 const LEAF_AREAS = new Set(MATERIALS.map(([a]) => a));
@@ -76,10 +77,10 @@ let viewMount: HTMLElement | null = null;
 let noticeMount: HTMLElement | null = null;
 let listing: FileListing | null = null;
 let roots: Folder[] = [];
-let selected = 'images';
+let selected = 'studio/images';
 /** A prompt file picked in the tree; the centre shows it instead of a listing. */
 let selectedFile = '';
-const open = new Set<string>(['images']);
+const open = new Set<string>(['studio/images']);
 const thumbs = new Map<string, string>();
 
 /** What the generation card is set to. Held across renders, saved per panel. */
@@ -88,7 +89,7 @@ const gen = {
   style: '', character: '', scenePreset: '',
   characterName: '', outfit: '',
   steps: 23, scale: 5, width: 832, height: 1216, count: 1, seed: '',
-  folder: 'images',
+  folder: 'studio/images',
   // The one control that certainly spends Anlas, so it is off unless asked.
   useReference: false, refStrength: 0.6,
   // The selector's regex. Empty means the backend's default; it is edited on
@@ -143,7 +144,7 @@ function notice(text: string, kind: 'ok' | 'err' | '' = ''): void {
 
 export async function refresh(): Promise<void> {
   try {
-    listing = await state.studio.list();
+    listing = await state.files();
   } catch (e) {
     listing = null;
     drawTree();
@@ -162,34 +163,37 @@ export async function refresh(): Promise<void> {
   drawCentre();
 }
 
-/** The listing's flat paths into a tree, one root per area. */
+/** The space listing's studio/ paths into a tree, one root per library area. */
 function build(): void {
   roots = [];
   if (!listing) return;
-  for (const area of listing.areas) {
-    if (area.area.startsWith('.')) continue;  // ours, not the user's
-    const root: Folder = { path: area.area, name: AREA_LABEL[area.area] ?? area.area, children: [], files: [] };
-    const byPath = new Map<string, Folder>([[area.area, root]]);
-    const folder = (path: string): Folder => {
-      const hit = byPath.get(path);
-      if (hit) return hit;
-      const cut = path.lastIndexOf('/');
-      const node: Folder = { path, name: path.slice(cut + 1), children: [], files: [] };
-      byPath.set(path, node);
-      folder(path.slice(0, cut)).children.push(node);
-      return node;
-    };
-    for (const d of area.dirs ?? []) folder(d);
-    for (const f of area.files) {
-      const cut = f.path.lastIndexOf('/');
-      folder(f.path.slice(0, cut)).files.push(f);
-    }
-    roots.push(root);
+  const lib = listing.areas.find((a) => a.area === 'studio');
+  if (!lib) return;
+  const byPath = new Map<string, Folder>();
+  // The five roots exist even when empty - materials first, then output,
+  // which is the order the work goes in.
+  for (const [key, label] of [...MATERIALS, ...OUTPUT]) {
+    const node: Folder = { path: key, name: label, children: [], files: [] };
+    byPath.set(key, node);
+    roots.push(node);
   }
-  // Materials first, then output - the order of the two lists above, which is
-  // the order the work goes in.
-  const rank = Object.keys(AREA_LABEL);
-  roots.sort((a, b) => rank.indexOf(a.path) - rank.indexOf(b.path));
+  const folder = (path: string): Folder | null => {
+    const hit = byPath.get(path);
+    if (hit) return hit;
+    const cut = path.lastIndexOf('/');
+    if (cut <= 0) return null;  // a stray path outside the library areas
+    const parent = folder(path.slice(0, cut));
+    if (!parent) return null;
+    const node: Folder = { path, name: path.slice(cut + 1), children: [], files: [] };
+    byPath.set(path, node);
+    parent.children.push(node);
+    return node;
+  };
+  for (const d of lib.dirs ?? []) folder(d);
+  for (const f of lib.files) {
+    const cut = f.path.lastIndexOf('/');
+    folder(f.path.slice(0, cut))?.files.push(f);
+  }
 }
 
 function find(path: string, nodes = roots): Folder | null {
@@ -224,9 +228,10 @@ function drawTree(): void {
   for (const r of output) treeMount.appendChild(row(r, 0));
 }
 
-/** Which area a path belongs to. */
+/** Which library area a path belongs to ("studio/styles", …). */
 function areaOf(path: string): string {
-  return path.split('/')[0];
+  const parts = path.split('/');
+  return parts[0] === 'studio' ? parts.slice(0, 2).join('/') : parts[0];
 }
 
 function row(n: Folder, depth: number): HTMLElement {
@@ -492,7 +497,7 @@ function openCharacter(path: string): void {
   });
 
   if (path) {
-    void state.studio.read(path).then((r) => {
+    void state.readFile(path).then((r) => {
       try {
         const d = JSON.parse(r.content) as Record<string, unknown>;
         name.value = String(d.name ?? '');
@@ -513,9 +518,9 @@ function openCharacter(path: string): void {
       const dir = folder.value.trim() || 'characters';
       const stem = nm.replace(/[<>:"/\\|?*]/g, '');
       if (refBytes) {
-        await state.studio.upload(dir, stem + '.png', refBytes);
+        await state.uploadFile(stem + '.png', refBytes, true, dir);
       }
-      await state.studio.write(dir, stem + '.json', JSON.stringify({
+      await state.uploadFile(stem + '.json', JSON.stringify({
         name: nm,
         caption: caption.value.trim(),
         negative: negative.value.trim(),
@@ -722,7 +727,7 @@ let drill = '';
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
 function isImagesFolder(path: string): boolean {
-  return path === 'images' || path.startsWith('images/');
+  return path === 'studio/images' || path.startsWith('studio/images/');
 }
 
 async function loadGroups(folder: string): Promise<void> {
@@ -898,9 +903,9 @@ function adoptButton(): HTMLElement {
     try {
       const paths = picked.map((f) => `${selected}/${f}`);
       const r = await state.studio.stage(state.activeCharKey, paths);
-      notice(`${r.staged.length}장을 봇 워크스페이스로 옮겼습니다. `
-        + '히나에게 "방금 옮긴 것들을 감정 이미지로 넣어 줘" 라고 하면 승인 후 카드에 붙습니다.'
-        + (r.failed.length ? ` (${r.failed.length}장 실패)` : ''), 'ok');
+      notice(`${r.staged.length}장을 확인했습니다. `
+        + '히나에게 "채택한 이미지들을 감정 이미지로 넣어 줘" 라고 하면 승인 후 카드에 붙습니다.'
+        + (r.failed.length ? ` (${r.failed.length}장 확인 실패)` : ''), 'ok');
     } catch (e) {
       notice('옮기지 못했습니다: ' + msg(e), 'err');
     } finally { b.disabled = !state.activeCharKey; }
@@ -935,7 +940,7 @@ function drawPromptFile(path: string): void {
   const del = el('button', { class: 'ghost tiny', title: '삭제' }) as HTMLButtonElement;
   armed(del, '✕', '삭제 확인', async () => {
     try {
-      await state.studio.remove(path);
+      await state.deleteFile(path);
       selectedFile = '';
       await refresh();
     } catch (e) { out.textContent = msg(e); }
@@ -949,7 +954,7 @@ function drawPromptFile(path: string): void {
     try {
       const dir = path.slice(0, path.lastIndexOf('/'));
       const name = path.slice(path.lastIndexOf('/') + 1);
-      await state.studio.write(dir, name, box.value);
+      await state.uploadFile(name, box.value, false, dir);
       out.textContent = '저장했습니다.';
       drawGen();  // a renamed style should show up in the picker at once
     } catch (e) {
@@ -957,7 +962,7 @@ function drawPromptFile(path: string): void {
     } finally { save.disabled = false; }
   });
 
-  void state.studio.read(path).then((r) => {
+  void state.readFile(path).then((r) => {
     box.value = r.content;
     if (!r.textual) out.textContent = r.note || '텍스트 파일이 아닙니다.';
   }).catch((e) => { out.textContent = msg(e); });
@@ -965,7 +970,7 @@ function drawPromptFile(path: string): void {
 
 function emptyHint(area: string): string {
   const root = area.split('/')[0];
-  if (root === 'images') return '아직 생성물이 없습니다. 이미지를 여기에 넣거나 히나에게 생성을 부탁하세요.';
+  if (root === 'studio/images') return '아직 생성물이 없습니다. 이미지를 여기에 넣거나 히나에게 생성을 부탁하세요.';
   if (root === 'scenes') return 'SD스튜디오 프리셋이 없습니다 — NAIS3 형식의 scenes[] JSON 을 넣으세요.';
   if (root === 'characters') return '캐릭터가 없습니다 — 프롬프트와 레퍼런스 이미지를 함께 둡니다.';
   return '비어 있습니다.';
@@ -977,7 +982,7 @@ function newFolderButton(node: Folder): HTMLElement {
     const name = (prompt('새 폴더 이름', '') || '').trim();
     if (!name) return;
     b.disabled = true;
-    void state.studio.mkdir(node.path + '/' + name)
+    void state.mkdirFile(node.path + '/' + name)
       .then(() => { open.add(node.path); return refresh(); })
       .catch((e) => notice('폴더를 만들지 못했습니다: ' + msg(e), 'err'))
       .finally(() => { b.disabled = false; });
@@ -995,7 +1000,7 @@ function listRow(f: WorkspaceFile): HTMLElement {
   armed(del, '✕', '삭제 확인', async () => {
     del.disabled = true;
     try {
-      await state.studio.remove(f.path);
+      await state.deleteFile(f.path);
       await refresh();
     } catch (e) {
       del.disabled = false;
@@ -1034,7 +1039,7 @@ async function loadThumb(f: WorkspaceFile, mount: HTMLElement): Promise<void> {
     });
     try {
       if (!mount.isConnected) return;
-      const bytes = await state.studio.bytes(f.path);
+      const bytes = await state.fileBytes(f.path);
       // Copy: a SharedArrayBuffer-backed view is refused by Blob.
       const buf = new Uint8Array(bytes.byteLength);
       buf.set(bytes);

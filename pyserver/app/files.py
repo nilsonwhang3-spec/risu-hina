@@ -57,11 +57,8 @@ AREAS: dict[str, tuple[bool, bool]] = {
     ".scratch": (False, True),
 }
 
-# The studio scope. Not a workspace key: `store.char_key` always produces
-# "c<hash>", so this can never collide with a bot.
-STUDIO = "studio"
-
-# The ONE global space every bot shares. Same non-collision argument as STUDIO.
+# The ONE global space every bot shares. Not a workspace key: `store.char_key`
+# always produces "c<hash>", so this can never collide with a bot.
 SPACE = "space"
 
 # The space's areas. Nothing here is cleanable globally: projects/ and studio/
@@ -80,46 +77,19 @@ SPACE_AREAS: dict[str, tuple[bool, bool]] = {
     ".hina": (False, True),
 }
 
-# The studio's areas. Everything is deletable and **nothing is cleanable**:
-# this is the user's own library, not a scratch space, and "정리" offering to
-# sweep away a folder of generated images would be the worst button in the app.
-STUDIO_AREAS: dict[str, tuple[bool, bool]] = {
-    "styles": (True, False),
-    "characters": (True, False),
-    # Named prompt pieces a scene or a style splices in by `<collection.key>`.
-    "fragments": (True, False),
-    # Scene presets: the NAIS3 file format, verbatim -
-    # {"version":1,"scenes":[{name, prompt, negativePrompt, width, height}]}.
-    # One scene is one image in a batch, and a set of them is an expression
-    # sheet - which is how expression sets are made here, rather than with the
-    # `emotion` director tool (ten times the price, and it infers the emotion
-    # from a finished image instead of stating it).
-    "scenes": (True, False),
-    "images": (True, False),
-    # Ours: naming profiles, per-folder selection maps, group overrides.
-    # Hidden from the panel by the same rule that hides .scratch.
-    ".studio": (False, False),
-}
-
-
 def areas_for(scope: str) -> dict[str, tuple[bool, bool]]:
-    if scope == SPACE:
-        return SPACE_AREAS
-    return STUDIO_AREAS if scope == STUDIO else AREAS
+    return SPACE_AREAS if scope == SPACE else AREAS
 
 
 def upload_targets(scope: str) -> tuple[tuple[str, ...], str]:
     """Where an upload may land, and where it goes when the caller says nothing.
 
-    Narrower than "deletable" on purpose: `scripts/` and `scratch/` are the
-    agent's, and a person dropping a file into them would be a surprise rather
-    than a feature. In the studio every area but our own `.studio` is somewhere
-    a person legitimately puts files, and images are what arrive most.
+    Narrower than "deletable" on purpose: in a bot's SYSTEM view nothing is a
+    place a person legitimately puts files any more; in the space, everything
+    but our own `.hina` is, and projects/ is where reference material arrives.
     """
     if scope == SPACE:
         return tuple(a for a in SPACE_AREAS if not a.startswith(".")), "projects"
-    if scope == STUDIO:
-        return tuple(a for a in STUDIO_AREAS if not a.startswith(".")), "images"
     return ("uploads", "out"), "uploads"
 
 # Preview and upload ceilings. A transcript export can legitimately be large,

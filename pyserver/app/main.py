@@ -104,20 +104,16 @@ def _char(arg: dict) -> str:
 def _scope(arg: dict) -> str:
     """Which file scope a request addresses.
 
-    The file routes serve two roots (see `files.py`): a bot's workspace, which
-    is the default and what every existing caller sends, and the asset studio
-    library, which is global. `studio: true` picks the second. It is a boolean
-    rather than a `scope` string because `/lore` already spends that word on
-    something else (global vs this chat's lorebook), and one wire name meaning
-    two things is how a reader ends up guessing.
+    The global space is the default: the file routes serve everyone's one
+    tree. `system: true` (plus a charKey) addresses a bot's SYSTEM directory
+    instead - the frozen originals and machinery - and that view is read-only
+    at the route level. It is a boolean rather than a `scope` string because
+    `/lore` already spends that word on something else.
     """
-    if arg.get("space"):
-        workspace.ensure_space()
-        return files.SPACE
-    if arg.get("studio"):
-        workspace.ensure_studio()
-        return files.STUDIO
-    return _char(arg)
+    if arg.get("system"):
+        return _char(arg)
+    workspace.ensure_space()
+    return files.SPACE
 
 
 def _chat(arg: dict) -> str:
@@ -168,6 +164,7 @@ def h_health(arg: dict) -> dict:
         "tokenRequired": config.token_required_for(arg.get("_addr") or ""),
         "codexEnabled": config.codex_enabled(),
         "workspaces": len(workspace.list_all()),
+        "space": str(workspace.space_root()),
     }
 
 
@@ -483,7 +480,26 @@ def h_diag(arg: dict) -> dict:
         "assets": assets.summary_for_diag(),
         "counts": counts,
         "routes": len(ROUTES),
+        "space": _space_diag(),
     }
+
+
+def _space_diag() -> dict:
+    root = workspace.space_root()
+    areas: dict[str, dict] = {}
+    for a in ("projects", "studio", "hina"):
+        d = root / a
+        n = size = 0
+        if d.is_dir():
+            for f in d.rglob("*"):
+                if f.is_file():
+                    try:
+                        size += f.stat().st_size
+                    except OSError:
+                        continue
+                    n += 1
+        areas[a] = {"count": n, "size": size}
+    return {"path": str(root), "areas": areas, "migrated": db.has_migration("space_v1")}
 
 
 # --- M0: asset-transfer measurement (bot-edit plan, milestone 0) -------------
@@ -873,10 +889,18 @@ def h_file_read(arg: dict) -> dict:
         raise ApiError(400, str(e))
 
 
+def _write_scope(arg: dict) -> str:
+    """The scope a write may address: the SYSTEM view is read-only here."""
+    scope = _scope(arg)
+    if scope != files.SPACE:
+        raise ApiError(403, "시스템 영역은 읽기 전용입니다")
+    return scope
+
+
 def h_file_upload(arg: dict) -> dict:
     try:
         return files.upload(
-            _scope(arg), str(arg.get("name") or ""),
+            _write_scope(arg), str(arg.get("name") or ""),
             text=arg.get("text") if isinstance(arg.get("text"), str) else None,
             base64_data=arg.get("base64") if isinstance(arg.get("base64"), str) else None,
             into=str(arg.get("dir") or ""),
@@ -900,29 +924,31 @@ def h_file_upload_chunk(arg: dict) -> Any:
 
 def h_file_mkdir(arg: dict) -> dict:
     try:
-        return files.mkdir(_scope(arg), str(arg.get("path") or ""))
+        return files.mkdir(_write_scope(arg), str(arg.get("path") or ""))
     except files.FileError as e:
         raise ApiError(400, str(e))
 
 
 def h_file_move(arg: dict) -> dict:
     try:
-        return files.move(_scope(arg), str(arg.get("from") or ""), str(arg.get("to") or ""))
+        return files.move(_write_scope(arg), str(arg.get("from") or ""), str(arg.get("to") or ""))
     except files.FileError as e:
         raise ApiError(400, str(e))
 
 
 def h_file_delete(arg: dict) -> dict:
     try:
-        return files.delete(_scope(arg), str(arg.get("path") or ""))
+        return files.delete(_write_scope(arg), str(arg.get("path") or ""))
     except files.FileError as e:
         raise ApiError(400, str(e))
 
 
 def h_file_clean(arg: dict) -> dict:
+    # 정리 is a per-bot verb now: this bot's hina/ work areas plus its SYSTEM
+    # .scratch. There is deliberately no space-wide clean.
     raw = arg.get("areas")
     areas = [str(a) for a in raw] if isinstance(raw, list) else None
-    return files.clean(_scope(arg), areas)
+    return files.clean_bot(_char(arg), areas)
 
 
 # --- asset studio -------------------------------------------------------------
@@ -942,6 +968,9 @@ def h_studio_status(arg: dict) -> dict:
         "configured": nai.configured(),
         "library": str(workspace.studio_root()),
     }
+    moved = workspace.space_note()
+    if moved:
+        out["migrationNote"] = moved
     if not out["configured"]:
         out["note"] = "NovelAI 토큰이 없습니다 — 설정 → API 키에 provider 'novelai' 로 추가하면 생성이 켜집니다"
         return out
@@ -966,8 +995,8 @@ def h_studio_model_check(arg: dict) -> dict:
 
 def h_studio_list(arg: dict) -> dict:
     area = str(arg.get("area") or "").strip()
-    if area not in files.STUDIO_AREAS or area.startswith("."):
-        raise ApiError(400, f"area must be one of {sorted(a for a in files.STUDIO_AREAS if not a.startswith('.'))}")
+    if area not in studio.AREAS:
+        raise ApiError(400, f"area must be one of {sorted(studio.AREAS)}")
     return {"area": area, "items": studio.listing(area)}
 
 
@@ -1117,7 +1146,9 @@ def h_studio_export(arg: dict) -> dict:
 
 
 def h_studio_stage(arg: dict) -> dict:
-    """Copy a library image into a bot's workspace so it can be adopted."""
+    """Check library images for adoption. The library and the workspace are
+    one space now, so nothing is copied - the checked global path is exactly
+    what the adoption proposal will carry."""
     paths = arg.get("paths")
     if not isinstance(paths, list) or not paths:
         raise ApiError(400, "paths[] is required")
@@ -1125,8 +1156,8 @@ def h_studio_stage(arg: dict) -> dict:
     out, failed = [], []
     for p in paths:
         try:
-            out.append(studio.stage_to_bot(ck, str(p)))
-        except (studio.StudioError, files.FileError) as e:
+            out.append(assets.stage_file(studio._rel(str(p))))
+        except (assets.AssetError, files.FileError) as e:
             failed.append({"path": p, "error": str(e)})
     return {"charKey": ck, "staged": out, "failed": failed}
 
@@ -2385,7 +2416,7 @@ async def dispatch(path: str, request: Request) -> Response:
         if not isinstance(header, dict) or not isinstance(header.get("files"), list):
             return _json(400, {"error": "header needs files[]"}, origin)
         try:
-            ck = _scope(header)
+            ck = _write_scope(header)
             out = await run_in_threadpool(
                 files.upload_many, ck, str(header.get("dir") or ""), header["files"],
                 raw[4 + hlen:], extract=bool(header.get("extract")))
@@ -2417,7 +2448,7 @@ async def dispatch(path: str, request: Request) -> Response:
         if not isinstance(header, dict):
             return _json(400, {"error": "header must be an object"}, origin)
         try:
-            ck = _scope(header)
+            ck = _write_scope(header)
             out = await run_in_threadpool(
                 files.upload_chunk, ck, str(header.get("dir") or ""),
                 str(header.get("name") or ""), str(header.get("rel") or ""),
@@ -2579,6 +2610,10 @@ async def _startup() -> None:
     await run_in_threadpool(skills.migrate_rows_once)
     await run_in_threadpool(skills.seed_once)
     await run_in_threadpool(skills.defaults_once)
+    # The per-bot user files and the old studio library move into the global
+    # space once (space_v1). Move + manifest only; tools/rollback_space.py
+    # replays the manifest in reverse.
+    await run_in_threadpool(workspace.migrate_to_space)
     # There is always a selected preset; on an existing install it is seeded
     # from whatever config.json already holds, so nothing appears to be lost.
     await run_in_threadpool(presets.ensure_default)

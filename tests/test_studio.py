@@ -61,86 +61,90 @@ workspace.root(CK).mkdir(parents=True, exist_ok=True)
 (workspace.root(CK) / "uploads").mkdir(exist_ok=True)
 (workspace.root(CK) / "uploads" / "secret.txt").write_text("bot only", encoding="utf-8")
 
-print("\ntest_roots_are_separate")
+print("\ntest_studio_is_a_folder_of_the_space")
 lib = workspace.ensure_studio()
-check("studio defaults under the data dir", lib == config.DATA_DIR / "studio", str(lib))
-check("studio is not inside any workspace", config.WORKSPACE_DIR not in lib.parents)
-check("the areas were created", all((lib / a).is_dir() for a in files.STUDIO_AREAS),
+check("the library lives at space/studio", lib == config.DATA_DIR / "space" / "studio", str(lib))
+check("the library areas were created", all((lib / a).is_dir() for a in workspace.STUDIO_SUBDIRS),
       str(sorted(p.name for p in lib.iterdir())))
-check("a bot workspace is elsewhere", files._root(CK) != files._root(files.STUDIO))
+check("the SYSTEM dir stays outside the space",
+      files._root(files.SPACE) not in files._root(CK).parents
+      and files._root(CK) != files._root(files.SPACE))
 
-print("\ntest_area_tables_differ")
-check("studio areas are the studio's", set(files.areas_for(files.STUDIO)) == set(files.STUDIO_AREAS))
-check("bot areas are unchanged", set(files.areas_for(CK)) == set(files.AREAS))
-# The library is the user's own; "정리" must never be able to sweep it.
-check("nothing in the studio is cleanable",
-      not any(c for (_d, c) in files.STUDIO_AREAS.values()),
-      str(files.STUDIO_AREAS))
+print("\ntest_area_tables")
+check("the space's areas", set(files.areas_for(files.SPACE)) == set(files.SPACE_AREAS))
+check("a bot's SYSTEM areas are the old table", set(files.areas_for(CK)) == set(files.AREAS))
+# The user tree is the user's own; "정리" must never be able to sweep it.
+check("nothing visible in the space is cleanable",
+      not any(c for a, (_d, c) in files.SPACE_AREAS.items() if not a.startswith(".")),
+      str(files.SPACE_AREAS))
 
 print("\ntest_the_wall_holds")
 # The containment check compares resolved paths, so these must fail whatever
-# shape the escape takes.
-raises("../ out of the studio", files.read, files.STUDIO, "../workspace/x.txt")
-raises("absolute path into a workspace", files.read, files.STUDIO,
+# shape the escape takes. The wall is around the space now - the SYSTEM dirs
+# (scope.db, original/) are what must stay out of reach.
+raises("../ out of the space", files.read, files.SPACE, "../workspace/x.txt")
+raises("absolute path into a SYSTEM dir", files.read, files.SPACE,
        str(workspace.root(CK) / "uploads" / "secret.txt"))
-raises("deep ../ chain", files.read, files.STUDIO, "images/../../../../etc/passwd")
-raises("a bot cannot read into the studio", files.read, CK, "../studio/styles/x.md")
+raises("deep ../ chain", files.read, files.SPACE, "studio/images/../../../../../etc/passwd")
+raises("a SYSTEM view cannot read into the space", files.read, CK, "../space/studio/styles/x.md")
 
-print("\ntest_files_api_works_in_both_scopes")
-files.upload(files.STUDIO, "note.md", text="# hi", into="styles/테스트")
+print("\ntest_files_api_over_the_space")
+files.upload(files.SPACE, "note.md", text="# hi", into="studio/styles/테스트")
 files.upload(CK, "note.md", text="# bot", into="uploads")
-s_listing = files.listing(files.STUDIO)
+s_listing = files.listing(files.SPACE)
 b_listing = files.listing(CK)
 s_paths = [f["path"] for a in s_listing["areas"] for f in a["files"]]
 b_paths = [f["path"] for a in b_listing["areas"] for f in a["files"]]
-check("studio upload landed in its own tree", "styles/테스트/note.md" in s_paths, str(s_paths))
-check("studio listing does not show the bot's files", "uploads/secret.txt" not in s_paths, str(s_paths))
-check("bot listing does not show the studio's files",
-      not any(p.startswith("styles/") for p in b_paths), str(b_paths))
+check("the upload landed in the library", "studio/styles/테스트/note.md" in s_paths, str(s_paths))
+check("the space listing does not show SYSTEM files", "uploads/secret.txt" not in s_paths, str(s_paths))
+check("a SYSTEM listing does not show the space",
+      not any(p.startswith("studio/") for p in b_paths), str(b_paths))
 check("nested folders survive", (lib / "styles" / "테스트" / "note.md").is_file())
 
-files.mkdir(files.STUDIO, "images/보관")
-files.move(files.STUDIO, "styles/테스트/note.md", "images/보관/note.md")
-check("move works inside the studio", (lib / "images" / "보관" / "note.md").is_file())
-files.delete(files.STUDIO, "images/보관/note.md")
-check("delete works inside the studio", not (lib / "images" / "보관" / "note.md").exists())
+files.mkdir(files.SPACE, "studio/images/보관")
+files.move(files.SPACE, "studio/styles/테스트/note.md", "studio/images/보관/note.md")
+check("move works inside the space", (lib / "images" / "보관" / "note.md").is_file())
+files.delete(files.SPACE, "studio/images/보관/note.md")
+check("delete works inside the space", not (lib / "images" / "보관" / "note.md").exists())
 
 print("\ntest_clean_never_touches_the_library")
-files.upload(files.STUDIO, "keep.md", text="x", into="images")
-before = files.clean(files.STUDIO)
-check("clean removes nothing in the studio", before["removed"] == 0, str(before))
-check("and the file is still there", (lib / "images" / "keep.md").is_file())
+files.upload(files.SPACE, "keep.md", text="x", into="studio/images")
+before = files.clean(files.SPACE)
+check("a space-wide clean can only touch the machine area",
+      set(before["areas"]) <= {".hina"}, str(before))
+check("and the library file is still there", (lib / "images" / "keep.md").is_file())
 
-print("\ntest_library_path_is_configurable")
-elsewhere = Path(tempfile.mkdtemp(prefix="risuhina-lib-"))
-config.update({"studio": {"libraryPath": str(elsewhere)}})
-check("root follows the setting", workspace.studio_root() == elsewhere, str(workspace.studio_root()))
+print("\ntest_space_path_is_configurable")
+elsewhere = Path(tempfile.mkdtemp(prefix="risuhina-space-"))
+config.update({"workspace": {"globalPath": str(elsewhere)}})
+check("the space follows the setting", workspace.space_root() == elsewhere, str(workspace.space_root()))
 workspace.ensure_studio()
-files.upload(files.STUDIO, "far.md", text="x", into="styles")
-check("and files land there", (elsewhere / "styles" / "far.md").is_file())
+files.upload(files.SPACE, "far.md", text="x", into="studio/styles")
+check("and files land there", (elsewhere / "studio" / "styles" / "far.md").is_file())
 # Containment is against the configured root, not the data dir, so an escape
-# attempt from a library outside data/ still has to fail.
-raises("the wall holds outside the data dir", files.read, files.STUDIO, "../../etc/passwd")
-config.update({"studio": {"libraryPath": ""}})
-check("clearing the setting restores the default", workspace.studio_root() == config.DATA_DIR / "studio")
+# attempt from a space outside data/ still has to fail.
+raises("the wall holds outside the data dir", files.read, files.SPACE, "../../etc/passwd")
+config.update({"workspace": {"globalPath": ""}})
+check("clearing the setting restores the default",
+      workspace.space_root() == config.DATA_DIR / "space")
 
 print("\ntest_prompt_assembly")
 from app import studio  # noqa: E402
 
-files.upload(files.STUDIO, "수채화.md", text=(
+files.upload(files.SPACE, "수채화.md", text=(
     "---\nname: 수채화\ndescription: 부드러운 수채\n---\n"
-    "## positive\n스타일A, 스타일B\n\n## negative\n제외A, 제외B\n"), into="styles")
-files.upload(files.STUDIO, "히나.json", text=json.dumps(
+    "## positive\n스타일A, 스타일B\n\n## negative\n제외A, 제외B\n"), into="studio/styles")
+files.upload(files.SPACE, "히나.json", text=json.dumps(
     {"name": "히나", "caption": "캐릭터A", "negative": "제외C"},
-    ensure_ascii=False), into="characters")
-files.upload(files.STUDIO, "기본.json", text=json.dumps(
+    ensure_ascii=False), into="studio/characters")
+files.upload(files.SPACE, "기본.json", text=json.dumps(
     {"version": 1, "scenes": [
         {"name": "happy", "prompt": "<조각프롬.a>, 씬A", "negativePrompt": "", "width": 832, "height": 1216},
         {"name": "sad", "prompt": "씬B", "negativePrompt": "제외D", "width": 512, "height": 512},
         {"name": "angry", "prompt": "{{강조}}, 씬C", "negativePrompt": "", "width": 0, "height": 0}]},
-    ensure_ascii=False), into="scenes")
-files.upload(files.STUDIO, "조각프롬.json", text=json.dumps(
-    {"a": "조각A"}, ensure_ascii=False), into="fragments")
+    ensure_ascii=False), into="studio/scenes")
+files.upload(files.SPACE, "조각프롬.json", text=json.dumps(
+    {"a": "조각A"}, ensure_ascii=False), into="studio/fragments")
 
 s = studio.read_style("styles/수채화.md")
 check("front matter is read", s["name"] == "수채화", s["name"])
@@ -148,7 +152,7 @@ check("positive and negative are split",
       s["positive"] == "스타일A, 스타일B" and s["negative"] == "제외A, 제외B",
       f"{s['positive']!r} / {s['negative']!r}")
 # A file someone pasted a prompt into, with no headings at all, must still work.
-files.upload(files.STUDIO, "민무늬.md", text="본문만 있는 파일", into="styles")
+files.upload(files.SPACE, "민무늬.md", text="본문만 있는 파일", into="studio/styles")
 check("a heading-less style is all positive",
       studio.read_style("styles/민무늬.md")["positive"] == "본문만 있는 파일")
 
@@ -188,8 +192,8 @@ check("a fragment reference is resolved", text == "조각A, {{강조}}", text)
 check("NovelAI emphasis is untouched", "{{강조}}" in text)
 check("nothing was missing", missing == [], str(missing))
 # A whole file by name, and a folder-qualified one. File wins over a key.
-files.upload(files.STUDIO, "조각파일.md", text="조각B", into="fragments")
-files.upload(files.STUDIO, "조각파일.md", text="조각C", into="fragments/폴더")
+files.upload(files.SPACE, "조각파일.md", text="조각B", into="studio/fragments")
+files.upload(files.SPACE, "조각파일.md", text="조각C", into="studio/fragments/폴더")
 whole, _ = studio.resolve_refs("<조각파일>, 씬A")
 check("a whole .md fragment is called by name", whole == "조각B, 씬A", whole)
 nested, _ = studio.resolve_refs("<폴더/조각파일>, 씬A")
@@ -231,14 +235,37 @@ check("an estimate never claims generation is free",
 check("but names the certain cost when references are used",
       studio.estimate({"vibes": [{"path": "x"}, {"path": "y"}]}, 1)["anlasCertain"] == 4)
 
-print("\ntest_staging_crosses_scopes_by_copy")
+print("\ntest_adoption_needs_no_copy")
+# The library and the workspace are one space: an image is adopted by its own
+# global path, checked (PNG-ness) rather than copied.
+from app import assets  # noqa: E402
+
 png = bytes.fromhex("89504e470d0a1a0a") + b"\x00" * 40
 (studio.root() / "images").mkdir(parents=True, exist_ok=True)
 (studio.root() / "images" / "hop.png").write_bytes(png)
-staged = studio.stage_to_bot(CK, "images/hop.png")
-check("it lands in the bot's workspace", staged["path"].startswith("out/studio/"), staged["path"])
+staged = assets.stage_file(studio._rel("images/hop.png"))
+check("the checked path is the global path", staged["path"] == "studio/images/hop.png", staged["path"])
 check("and the library keeps its own", (studio.root() / "images" / "hop.png").is_file())
-raises("a non-PNG is refused", studio.stage_to_bot, CK, "styles/수채화.md")
+
+
+def _stage_md() -> None:
+    assets.stage_file(studio._rel("styles/수채화.md"))
+
+
+def _raises_asset(name: str, fn) -> None:
+    try:
+        fn()
+    except assets.AssetError:
+        print(f"  ok   {name}")
+    except Exception as e:  # noqa: BLE001
+        print(f"  FAIL {name} - raised {type(e).__name__}: {e}")
+        FAILURES.append(name)
+    else:
+        print(f"  FAIL {name} - no error")
+        FAILURES.append(name)
+
+
+_raises_asset("a non-PNG is refused", _stage_md)
 
 print("\ntest_grouping_and_selection")
 shots = studio.root() / "images" / "고르기"
@@ -342,11 +369,11 @@ check("nothing was deleted", len(list(dup.iterdir())) == 4, str(len(list(dup.ite
 
 # Both directions matter and they look nothing alike: a slot with no asset is
 # work to do, an asset nothing names is dead weight.
-files.upload(files.STUDIO, "12종.json", text=json.dumps(
+files.upload(files.SPACE, "12종.json", text=json.dumps(
     {"version": 1, "scenes": [{"name": "happy", "prompt": "씬A"},
                               {"name": "sad", "prompt": "씬B"},
                               {"name": "angry", "prompt": "씬C"}]},
-    ensure_ascii=False), into="scenes")
+    ensure_ascii=False), into="studio/scenes")
 db.execute("INSERT INTO char_assets(char_key, seq, field, name, ext, risu_key) "
            "VALUES(?,?,?,?,?,?)", (CK, 0, "emotion", "happy", "png", "assets/x.png"))
 db.execute("INSERT INTO char_assets(char_key, seq, field, name, ext, risu_key) "
@@ -374,4 +401,4 @@ print()
 if FAILURES:
     print(f"FAIL - {len(FAILURES)} check(s): " + ", ".join(FAILURES))
     sys.exit(1)
-print("PASS - the studio is a second scope and the wall between them holds")
+print("PASS - the studio is a folder of the one space, and the SYSTEM wall holds")

@@ -13,7 +13,7 @@
  *
  *   node tests/plugin_smoke.mjs
  */
-import { readFileSync, existsSync, mkdtempSync, rmSync, mkdirSync, writeFileSync, readdirSync } from 'node:fs';
+import { readFileSync, existsSync, mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -967,17 +967,16 @@ console.log('\ntest_truncate_with_preview');
 
 console.log('\ntest_workspace_files');
 {
-  // Seed the kind of thing the agent leaves behind: a document in scratch/
-  // (a deliverable in the wrong folder) next to a script (internal). Written
-  // straight into the workspace, because there is no HTTP route for it - the
-  // agent's write tool is the only writer.
-  const wsRoot = join(backend.data, 'workspace');
-  const charDir = join(wsRoot, readdirSync(wsRoot)[0]);
-  mkdirSync(join(charDir, 'scratch'), { recursive: true });
-  mkdirSync(join(charDir, 'scripts'), { recursive: true });
-  writeFileSync(join(charDir, 'scratch', 'draft-summary.md'), '# 초안' + String.fromCharCode(10) + '본문');
-  writeFileSync(join(charDir, 'scratch', 'numbers.txt'), '1 2 3');
-  writeFileSync(join(charDir, 'scripts', 'helper.py'), 'print(1)');
+  // Seed the kind of thing the agent leaves behind, in the global space: a
+  // document in its scratch (a deliverable in the wrong folder) next to a
+  // script (internal). Written straight to disk - the agent's write tool is
+  // the only writer.
+  const hinaDir = join(backend.data, 'space', 'hina', '스모크');
+  mkdirSync(join(hinaDir, 'scratch'), { recursive: true });
+  mkdirSync(join(hinaDir, 'scripts'), { recursive: true });
+  writeFileSync(join(hinaDir, 'scratch', 'draft-summary.md'), '# 초안' + String.fromCharCode(10) + '본문');
+  writeFileSync(join(hinaDir, 'scratch', 'numbers.txt'), '1 2 3');
+  writeFileSync(join(hinaDir, 'scripts', 'helper.py'), 'print(1)');
 
   // No pinned download card in the agent panel any more - a file shows up as
   // one line in the log, and the files tab is where files are listed.
@@ -993,21 +992,26 @@ console.log('\ntest_workspace_files');
   const tree = document.querySelector('.panel.active .tree');
   check('upload is offered', !!findButton(tree, '올리기'));
   check('a whole folder can be uploaded', !!findButton(tree, '폴더 올리기'));
-  check('cleaning is offered', !!findButton(tree, '임시 정리'));
+  check('per-bot cleaning is offered', !!findButton(tree, '이 봇 정리'));
 
-  // Only what a person put in or would take out. The frozen originals, the
-  // generated helper and the scratch are real but not interesting.
-  check('internal areas are hidden by default',
-        !/원본/.test(tree?.textContent || ''), (tree?.textContent || '').slice(0, 200));
+  // The space's three areas are the tree roots; the machine area (.hina)
+  // stays behind the toggle.
+  const branches = () => [...document.querySelectorAll('.panel.active .tree .treebranch')];
+  check('the space areas are the tree roots',
+        /스튜디오/.test(tree?.textContent || '') && /AI 작업/.test(tree?.textContent || ''),
+        (tree?.textContent || '').slice(0, 200));
+  check('the machine area is hidden by default',
+        !branches().some((b) => (b.title || '').startsWith('.hina') || /^📁?내부/.test(b.textContent || '')),
+        (tree?.textContent || '').slice(0, 200));
   check('and the toggle says how many are hidden',
         /내부 파일 보기 [(]\d+[)]/.test(tree?.textContent || ''),
         (tree?.textContent || '').slice(-120));
-  // A document in scratch/ is a deliverable: it gets a folder of its own in
-  // the tree, and its files are listed in the centre without unfolding the
-  // internals; the script beside it stays behind the toggle.
-  check('documents in scratch/ get a folder of their own', /임시 문서/.test(tree?.textContent || ''),
+  // A document in the AI work area is a deliverable: it gets a folder of its
+  // own in the tree, and its files are listed in the centre without digging
+  // through hina/; the script beside it stays put.
+  check('documents in the AI scratch get a folder of their own', /임시 문서/.test(tree?.textContent || ''),
         (tree?.textContent || '').slice(0, 300));
-  const docsBranch = [...tree.querySelectorAll('.treebranch')].find((b) => /임시 문서/.test(b.textContent || ''));
+  const docsBranch = branches().find((b) => /임시 문서/.test(b.textContent || ''));
   docsBranch?.dispatchEvent(new window.Event('click', { bubbles: true }));
   await settle(300);
   const centre = () => document.querySelector('.panel.active .left');
@@ -1019,30 +1023,14 @@ console.log('\ntest_workspace_files');
         document.querySelectorAll('.panel.active .filelist .frow input[type=checkbox]').length >= 2);
   check('the files tab button carries a badge slot', !!document.querySelector('#tab-files .tabbadge'));
 
-  clickButton(tree, '내부 파일 보기');
-  await settle(900);
-  const tree2 = document.querySelector('.panel.active .tree');
-  check('revealing shows the frozen original', /원본/.test(tree2?.textContent || ''),
-        (tree2?.textContent || '').slice(0, 200));
-
-  // original/ is the diff baseline: its files list, open and download, but
-  // the delete verb stays disabled however many are selected.
-  const originalBranch = [...tree2.querySelectorAll('.treebranch')].find((b) => /원본/.test(b.textContent || ''));
-  check('the original branch is listed', !!originalBranch);
-  originalBranch?.dispatchEvent(new window.Event('click', { bubbles: true }));
-  await settle(300);
+  // Open one surfaced document: the preview is the same middle pane.
   const rows = [...document.querySelectorAll('.panel.active .filelist .frow:not(.head)')];
-  check('the original folder lists its files', rows.length > 0, String(rows.length));
   rows[0]?.dispatchEvent(new window.Event('click', { bubbles: true }));
   await settle(200);
   check('a row can be selected', !!document.querySelector('.panel.active .filelist .frow.sel'));
-  const bar = document.querySelector('.panel.active .filebar');
-  const delBtn = findButton(bar, '삭제');
-  check('original files cannot be deleted', !!delBtn && delBtn.disabled, delBtn ? String(delBtn.disabled) : 'no button');
-  const dlBtn = findButton(bar, '내려받기');
-  check('but can be downloaded', !!dlBtn && !dlBtn.disabled);
-  const row0 = document.querySelector('.panel.active .filelist .frow:not(.head)');
-  row0?.dispatchEvent(new window.Event('dblclick', { bubbles: true }));
+  const dlBtn = findButton(document.querySelector('.panel.active .filebar'), '내려받기');
+  check('and can be downloaded', !!dlBtn && !dlBtn.disabled);
+  rows[0]?.dispatchEvent(new window.Event('dblclick', { bubbles: true }));
   await settle(900);
   check('double-click opens the file in the middle pane',
         !!document.querySelector('.panel.active .left .filepreview'));
@@ -1050,8 +1038,24 @@ console.log('\ntest_workspace_files');
   await settle(200);
   check('and the list comes back', !!document.querySelector('.panel.active .filelist'));
 
+  clickButton(tree, '내부 파일 보기');
+  await settle(900);
+  check('revealing shows the machine area',
+        branches().some((b) => /내부/.test(b.textContent || '')),
+        (document.querySelector('.panel.active .tree')?.textContent || '').slice(0, 200));
   clickButton(document.querySelector('.panel.active .tree'), '내부 파일 숨기기');
   await settle(600);
+
+  // The frozen originals moved out of this tab: the SYSTEM view is read-only
+  // at the route itself, whatever any UI does.
+  const auth2 = { Authorization: 'Bearer plugin-smoke-token', 'Content-Type': 'application/json' };
+  const ws2 = await (await fetch(backend.url + '/workspace', { headers: auth2 })).json();
+  const ck2 = ws2.workspaces?.[0]?.charKey || '';
+  const rd = await fetch(backend.url + '/files/delete', {
+    method: 'POST', headers: auth2,
+    body: JSON.stringify({ system: 1, charKey: ck2, path: 'original/whatever.md' }),
+  });
+  check('the SYSTEM view refuses deletes at the route', rd.status === 403, String(rd.status));
 }
 
 console.log('\ntest_lore_view');
@@ -1314,8 +1318,9 @@ console.log('\ntest_bot_tabs');
   clickById(document, 'tab-files');
   await settle(900);
   // The tree holds folders; the file is in the centre once 결과물 is picked.
-  const outBranch = [...document.querySelectorAll('.panel.active .tree .treebranch')].find((b) => /결과물/.test(b.textContent || ''));
-  check('out/ is a folder in the tree', !!outBranch, document.querySelector('.panel.active .tree')?.textContent?.slice(0, 200));
+  const outBranch = [...document.querySelectorAll('.panel.active .tree .treebranch')]
+    .find((b) => /^hina\/[^/]+\/out$/.test(b.title || ''));
+  check("the bot's out/ is a folder in the tree", !!outBranch, document.querySelector('.panel.active .tree')?.textContent?.slice(0, 200));
   outBranch?.dispatchEvent(new window.Event('click', { bubbles: true }));
   await settle(300);
   const charxRow = [...document.querySelectorAll('.panel.active .filelist .frow:not(.head)')].find((r) => /\.charx/.test(r.textContent || ''));
@@ -2030,7 +2035,7 @@ console.log('\ntest_studio_selector');
                       '규칙에 안 맞는 이름.png']) {
     await fetch(backend.url + '/files/upload', {
       method: 'POST', headers: auth,
-      body: JSON.stringify({ studio: true, name, base64: png, dir: 'images/고르기' }),
+      body: JSON.stringify({ name, base64: png, dir: 'studio/images/고르기' }),
     });
   }
 
