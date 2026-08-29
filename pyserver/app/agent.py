@@ -1172,6 +1172,49 @@ def build() -> Agent[Deps]:
         return r["note"] + "\n" + ", ".join(r["emotionNames"])
 
     @agent.tool
+    def studio_duplicates(ctx: RunContext[Deps], folder: str) -> str:
+        """폴더 안의 내용이 완전히 같은 이미지들을 찾는다 (지우지는 않는다).
+
+        같은 시드로 다시 돌렸거나 복사해 둔 것들이다. 남길 것 하나와 나머지를
+        보여 주므로, 지울지는 사용자가 정한다 — 중복이 곧 쓰레기는 아니다.
+        지우려면 studio_delete 대신 사용자에게 확인을 받고 files 삭제를 제안할 것.
+        """
+        try:
+            r = studio.duplicates(folder)
+        except Exception as e:  # noqa: BLE001
+            return str(e)
+        if not r["groups"]:
+            return f"{folder}: 중복 없음"
+        out = [f"중복 {r['duplicateFiles']}개 · 낭비 {r['wastedBytes'] // 1024}KB"]
+        for g in r["groups"][:25]:
+            out.append(f"  남길 것: {g['keep']}")
+            out += [f"    = {o}" for o in g["others"][:5]]
+        return "\n".join(out)
+
+    @agent.tool
+    def studio_emotion_check(ctx: RunContext[Deps], preset: str = "") -> str:
+        """이 봇의 감정 에셋이 있어야 할 것과 맞는지 대조한다.
+
+        preset 에 감정 프리셋 경로(emotions/…json)를 주면 **빠진 슬롯**을 알려준다 —
+        그것만 다시 생성하면 된다. 카드 스크립트/본문에서 이름이 한 번도 안 나오는
+        에셋은 **참조 안 됨**으로 따로 보고한다.
+        """
+        if not ctx.deps.char_key:
+            return "봇이 선택돼 있지 않습니다"
+        try:
+            r = studio.emotion_check(ctx.deps.char_key, preset)
+        except Exception as e:  # noqa: BLE001
+            return str(e)
+        out = [f"카드에 있는 감정 에셋 {len(r['have'])}개", r["note"]]
+        if r["missing"]:
+            out.append("빠진 것: " + ", ".join(r["missing"]))
+        if r["unreferenced"]:
+            out.append("어디서도 참조 안 됨: " + ", ".join(r["unreferenced"][:30]))
+        if r["have"]:
+            out.append("있는 것: " + ", ".join(r["have"][:40]))
+        return "\n".join(out)
+
+    @agent.tool
     def studio_recipe(ctx: RunContext[Deps], path: str) -> str:
         """NAI 가 PNG 안에 남긴 생성 파라미터를 읽는다. 밖에서 만든 이미지도 읽힌다.
 

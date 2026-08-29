@@ -1027,6 +1027,19 @@ def h_studio_naming(arg: dict) -> dict:
     return studio.naming_from_bot(_char(arg))
 
 
+def h_studio_duplicates(arg: dict) -> dict:
+    """Byte-identical images in one folder. Reports; never deletes."""
+    try:
+        return studio.duplicates(str(arg.get("folder") or ""))
+    except (studio.StudioError, files.FileError) as e:
+        raise ApiError(400, str(e))
+
+
+def h_studio_emotion_check(arg: dict) -> dict:
+    """The bot's emotion assets against what it is supposed to have."""
+    return studio.emotion_check(_char(arg), str(arg.get("preset") or ""))
+
+
 def h_studio_inpaint(arg: dict) -> dict:
     """Repaint part of one image. Reports the Anlas actually spent."""
     boxes = arg.get("boxes")
@@ -2072,6 +2085,8 @@ ROUTES: dict[str, Handler] = {
     "POST /studio/parse": h_studio_parse,
     "GET /studio/naming": h_studio_naming,
     "POST /studio/inpaint": h_studio_inpaint,
+    "POST /studio/duplicates": h_studio_duplicates,
+    "GET /studio/emotion-check": h_studio_emotion_check,
     "POST /studio/group": h_studio_group,
     "GET /studio/selection": h_studio_selection,
     "POST /studio/selection": h_studio_selection,

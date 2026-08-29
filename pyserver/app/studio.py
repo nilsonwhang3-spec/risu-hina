@@ -23,6 +23,7 @@ regex and why Hina has to be able to rename in bulk.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import shutil
@@ -631,6 +632,88 @@ def export_selected(folder: str, *, pattern: str = "", group_by: str = "emotion"
     log.info("studio export %s: %d used, %d inpaint, %d empty", rel, used, inpainted, placeholders)
     return {"folder": rel, "used": used, "inpaint": inpainted, "empty": placeholders,
             "groups": len(g["groups"]), "unmatched": len(g["unmatched"])}
+
+
+# --- tidying ------------------------------------------------------------------
+
+def duplicates(folder: str) -> dict:
+    """Byte-identical images in one folder, grouped.
+
+    Free to find: the same content hashing the same way is the store's whole
+    premise. Re-running a batch with the same seed, or copying a keeper into a
+    second folder, both leave duplicates that a grid cannot show you.
+
+    Nothing is deleted here. The list names a keeper (the shortest name, which
+    is usually the deliberate one) and the rest as candidates, and the caller
+    decides - a duplicate is not automatically waste.
+    """
+    base = files._resolve(SCOPE, folder)
+    if not base.is_dir():
+        raise StudioError(f"폴더가 없습니다: {folder}")
+    seen: dict[str, list[str]] = {}
+    for p in sorted(base.rglob("*")):
+        if not p.is_file() or p.suffix.lower() not in (".png", ".jpg", ".jpeg", ".webp"):
+            continue
+        h = hashlib.sha256(p.read_bytes()).hexdigest()
+        seen.setdefault(h, []).append(p.relative_to(root()).as_posix())
+    groups = []
+    wasted = 0
+    for h, paths in seen.items():
+        if len(paths) < 2:
+            continue
+        keep = min(paths, key=lambda x: (len(Path(x).name), x))
+        others = [p for p in paths if p != keep]
+        size = (root() / keep).stat().st_size
+        wasted += size * len(others)
+        groups.append({"hash": h[:16], "keep": keep, "others": others, "size": size})
+    return {"folder": folder, "groups": groups,
+            "duplicateFiles": sum(len(g["others"]) for g in groups), "wastedBytes": wasted}
+
+
+def emotion_check(char_key: str, preset: str = "") -> dict:
+    """What the bot has, against what it is supposed to have.
+
+    Two directions, because both are real problems and they look nothing alike:
+
+      missing   an emotion the preset (or the card's own scripts) expects and
+                the card has no asset for - the slot to go and generate.
+      unused    an emotion asset on the card that nothing refers to - dead
+                weight in a charx, or a rename that only half happened.
+
+    The card's scripts are searched for each asset name because that is where
+    RisuAI actually reaches for an emotion; an asset nothing names is unused
+    whatever the list says.
+    """
+    from . import db
+    rows = db.query(
+        "SELECT name FROM char_assets WHERE char_key = ? AND field = 'emotion' ORDER BY seq",
+        (char_key,))
+    have = [str(r["name"] or "") for r in rows if r["name"]]
+
+    wanted: list[str] = []
+    if preset:
+        wanted = list((read_json(preset).get("emotions") or {}).keys())
+
+    # Where an emotion name can actually be reached from: the scripts (Regex
+    # and triggers, whose bodies live in entry_json) and the card's own text.
+    blob = "\n".join(
+        [str(r["entry_json"] or "") for r in
+         db.query("SELECT entry_json FROM card_scripts WHERE char_key = ?", (char_key,))]
+        + [str(r["body"] or "") for r in
+           db.query("SELECT body FROM card_fields WHERE char_key = ?", (char_key,))])
+    referenced = [n for n in have if n and n in blob]
+
+    return {
+        "charKey": char_key,
+        "have": have,
+        "wanted": wanted,
+        "missing": [n for n in wanted if n not in have],
+        # Only meaningful when there are scripts to be referenced from.
+        "unreferenced": [n for n in have if n not in referenced] if blob.strip() else [],
+        "note": ("감정 프리셋을 주면 빠진 슬롯도 알려줍니다."
+                 if not preset else
+                 f"프리셋 {len(wanted)}개 중 {len([n for n in wanted if n not in have])}개가 카드에 없습니다."),
+    }
 
 
 def estimate(spec: dict, images: int) -> dict:

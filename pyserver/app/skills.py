@@ -50,7 +50,7 @@ CATALOG_LIMIT = 6_000      # the whole catalog block
 ALWAYS_LIMIT = 16_000      # bodies of always-on skills, combined
 TEXT_EXT = {".md", ".txt", ".py", ".json", ".yaml", ".yml", ".csv", ".html", ".js", ".lua", ".xml"}
 
-SEED_KEY = "skills_seeded_v4"
+SEED_KEY = "skills_seeded_v5"
 FOLDER_KEY = "skills_folders_v1"
 SEED_DIR = Path(__file__).resolve().parent / "seeds"
 
@@ -652,6 +652,8 @@ SEED_FILES: dict[str, tuple[str, str, bool]] = {
                        "사용자가 .charx 카드 파일을 올렸고 그 내부 구조(설정·에셋·로어북)를 알아야 할 때.", True),
     "charx_unpack.py": ("charx 풀기",
                         "사용자가 올린 .charx 카드를 읽기 좋은 폴더로 풀어 조사해야 할 때.", True),
+    "studio-image-ops.md": ("에셋 스튜디오 이미지 가공",
+                            "에셋 스튜디오의 이미지를 크기 조절·자르기·포맷 변환·메타데이터 제거해야 할 때. Pillow 는 배포 번들에 없어 run_python 에서 설치해 쓴다.", True),
     "arca-html.md": ("아카라이브 HTML 작성",
                      "아카라이브(arca.live)에 붙여넣을 HTML(챗로그·소개글·요약)을 만들 때의 제약.", True),
 }

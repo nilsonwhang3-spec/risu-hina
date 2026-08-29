@@ -284,6 +284,34 @@ check("the inpainting model is derived, not guessed",
 check("and an inpainting id is left alone",
       nai.inpaint_model("nai-diffusion-3-inpainting") == "nai-diffusion-3-inpainting")
 
+print("\ntest_duplicates_and_emotion_check")
+dup = studio.root() / "images" / "중복"
+dup.mkdir(parents=True, exist_ok=True)
+same = PNG + b"same"
+for n in ("a.png", "aa-longer-name.png", "b.png"):
+    (dup / n).write_bytes(same)
+(dup / "different.png").write_bytes(PNG + b"other")
+d = studio.duplicates("images/중복")
+check("identical files are grouped", len(d["groups"]) == 1, str(d["groups"]))
+check("the shortest name is kept", d["groups"][0]["keep"].endswith("a.png"), d["groups"][0]["keep"])
+check("the rest are candidates, not casualties", len(d["groups"][0]["others"]) == 2)
+check("a different file is not a duplicate", d["duplicateFiles"] == 2, str(d["duplicateFiles"]))
+check("nothing was deleted", len(list(dup.iterdir())) == 4, str(len(list(dup.iterdir()))))
+
+# Both directions matter and they look nothing alike: a slot with no asset is
+# work to do, an asset nothing names is dead weight.
+files.upload(files.STUDIO, "12종.json", text=json.dumps(
+    {"name": "12종", "emotions": {"happy": "smile", "sad": "tears", "angry": "frown"}},
+    ensure_ascii=False), into="emotions")
+db.execute("INSERT INTO char_assets(char_key, seq, field, name, ext, risu_key) "
+           "VALUES(?,?,?,?,?,?)", (CK, 0, "emotion", "happy", "png", "assets/x.png"))
+db.execute("INSERT INTO char_assets(char_key, seq, field, name, ext, risu_key) "
+           "VALUES(?,?,?,?,?,?)", (CK, 1, "emotion", "떠돌이", "png", "assets/y.png"))
+e = studio.emotion_check(CK, "emotions/12종.json")
+check("what the card has is listed", set(e["have"]) == {"happy", "떠돌이"}, str(e["have"]))
+check("slots with no asset are named", set(e["missing"]) == {"sad", "angry"}, str(e["missing"]))
+check("and the note counts them", "2개가 카드에 없습니다" in e["note"], e["note"])
+
 print()
 if FAILURES:
     print(f"FAIL - {len(FAILURES)} check(s): " + ", ".join(FAILURES))
