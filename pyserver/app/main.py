@@ -1380,10 +1380,22 @@ def h_commit(arg: dict) -> dict:
 
 
 def h_reset(arg: dict) -> dict:
+    """Discard the chat's working copy - turns, local lorebook and memory as
+    one unit, the same unit a snapshot captures. This used to reset the turns
+    alone, which left lorebook and memory edits silently pending behind a
+    chat the user had just declared clean."""
     tk = _chat(arg)
+    pending = h_changes({"chatKey": tk})
+    ck = _char_of_chat(tk)
     _checkpoint(tk, "reset 직전")
     store.reset_working(tk)
-    return {"ok": True, "chatKey": tk}
+    store.reset_lore_local(ck, tk)
+    mem.reset_working(tk)
+    return {"ok": True, "chatKey": tk,
+            "discarded": {"turns": (pending.get("turns") or {}).get("total") or 0,
+                          "lore": (pending.get("lore") or {}).get("total") or 0,
+                          "memory": (pending.get("memory") or {}).get("total") or 0,
+                          "total": pending.get("total") or 0}}
 
 
 def h_lore_list(arg: dict) -> dict:
@@ -1673,11 +1685,14 @@ def h_conflict_resolve(arg: dict) -> dict:
 
 
 def h_card_reset(arg: dict) -> dict:
+    """Discard the card's working copy, global lorebook included, and say how
+    much went - the bar's confirmation line wants the number, not the verb."""
     ck = _char(arg)
+    pending = cardmod.changes(ck)
     snapshots.create_card(ck, "reset 직전")
     out = cardmod.reset_working(ck)
     out["lore"] = store.reset_lore_global(ck)
-    return {"ok": True, "charKey": ck, **out}
+    return {"ok": True, "charKey": ck, **out, "discarded": pending.get("total") or 0}
 
 
 def h_card_checkpoint_create(arg: dict) -> dict:

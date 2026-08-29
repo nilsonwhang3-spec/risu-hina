@@ -17,7 +17,7 @@ import re
 import uuid
 from typing import Any, Iterable
 
-from . import chatfmt, db, merge
+from . import chatfmt, db, log, merge
 
 INLINE = ("role", "data", "time", "chatId", "name")
 
@@ -77,6 +77,34 @@ def ingest_chat(cha_id: str, chat: dict, chat_index: int | None, *, force: bool 
     doc = chatfmt.decode(chat)
     messages = chat.get("message") or []
     now = db.now()
+
+    # A chat that arrives empty over one we already hold turns for is a
+    # **stub**, not a deletion.
+    #
+    # PocketRisu loads chats lazily: `getCharacterFromIndex` and
+    # `getChatFromIndex` hand back a chat object with no messages for one the
+    # host has not opened yet (host.cloneBot has known this and skipped them).
+    # `message: []` passes every "is this a chat" check there is, so it was
+    # ingested as a real 9-turns-to-0 change - which showed the chat as 0턴
+    # and left 반영 ready to delete nine real turns in RisuAI. Measured on a
+    # live install, 2026-08-29.
+    #
+    # `force` still goes through: the header 🔄 is the stated way to say
+    # "RisuAI really is empty now, take that" - a rare, recoverable
+    # inconvenience against a silent, unrecoverable wipe.
+    if not messages and not force:
+        had = db.one("SELECT COUNT(*) AS n FROM turns_original WHERE chat_key = ?", (tk,))
+        if had and int(had["n"]) > 0:
+            log.warn("refused an empty upload over %d turns chat=%s (%s) - stub read",
+                     int(had["n"]), tk, chat.get("name") or "")
+            return {
+                "chatKey": tk, "charKey": ck, "chatId": chat.get("id"),
+                "chatIndex": chat_index, "name": chat.get("name") or "",
+                "turns": count_turns(tk), "originalTurns": int(had["n"]),
+                "workingReset": False,
+                "skipped": "RisuAI 가 이 챗을 아직 읽어 두지 않았습니다 (턴이 비어 있음). "
+                           "RisuAI 에서 그 챗을 한 번 연 다음 🔄 를 눌러 주세요.",
+            }
 
     rows = []
     for i, m in enumerate(messages):
@@ -582,38 +610,43 @@ def bulk_set(tk: str, edits: list[dict], *, expect: bool = True) -> dict:
     return {"applied": len(edits), "conflicts": []}
 
 
-def rebase_original(tk: str) -> dict:
-    """Make the current working turns the new baseline.
+def restore_turns(tk: str, messages: list[dict]) -> int:
+    """Put a snapshot's turns back into the **working copy**, baseline untouched.
 
-    Called once the plugin has actually written the chat back to RisuAI (or
-    saved it as a copy). Until this runs, every edited turn keeps diffing
-    against the pre-edit text, so a chat where a bulk replace touched all 394
-    turns renders as 394 strike-through rows *after* the edit already shipped -
-    which reads as "everything is still pending" when nothing is.
+    A restore is an edit, not a re-read, and that distinction is the whole bug
+    this fixes. `snapshots.restore` used `ingest_chat(force=True)`, which also
+    rewrites `turns_original` - telling the store "RisuAI holds this". Two
+    things followed from that, and both destroyed the restore:
 
-    Deliberately not automatic on write: the baseline may only move once the
-    host confirms the write landed, and only the client knows that.
+      - 반영 compared the working copy against a baseline that had just been
+        made identical to it, found nothing, and reported 0 written.
+      - the next re-open compared an *untouched* row against RisuAI's different
+        one and, by the adopt rule, took RisuAI's - silently reverting what had
+        just been restored. ("RisuAI에서 2건 내려받았습니다.")
+
+    Writing only `turns` leaves the restored rows differing from the baseline,
+    which is what "I changed this" means everywhere else in this module.
     """
-    before = db.one(
-        "SELECT COUNT(*) AS n FROM turns_original WHERE chat_key = ?", (tk,)
-    )
-    rows = db.query("SELECT * FROM turns WHERE chat_key = ? ORDER BY seq", (tk,))
-    db.execute("DELETE FROM turns_original WHERE chat_key = ?", (tk,))
-    db.executemany(
-        "INSERT INTO turns_original(chat_key, seq, msg_id, role, body, time, name, extras_json) "
-        "VALUES(?,?,?,?,?,?,?,?)",
-        [(tk, r["seq"], r["msg_id"], r["role"], r["body"], r["time"], r["name"], r["extras_json"])
-         for r in rows],
-    )
-    db.execute(
-        "UPDATE chats SET orig_count = ?, updated_at = ? WHERE chat_key = ?",
-        (len(rows), db.now(), tk),
-    )
-    return {
-        "chatKey": tk,
-        "previousBaseline": int(before["n"]) if before else 0,
-        "newBaseline": len(rows),
-    }
+    now = db.now()
+    rows = []
+    for m in messages:
+        extras = {k: v for k, v in m.items() if k not in INLINE}
+        rows.append({
+            "msg_id": str(m.get("chatId") or ""),
+            "role": str(m.get("role") or "char"),
+            "body": str(m.get("data") or ""),
+            "time": _int_or_none(m.get("time")),
+            "name": m.get("name"),
+            "extras_json": db.js(extras) if extras else None,
+            # Dirtiness is body-vs-baseline everywhere else; origin stays
+            # 'original' so a restored row is not mistaken for an insertion.
+            "origin": "original",
+            "conflict_json": None,
+        })
+    with db.transaction():
+        _write_turns(tk, rows, now)
+        db.execute("UPDATE chats SET updated_at = ? WHERE chat_key = ?", (now, tk))
+    return len(rows)
 
 
 def reset_working(tk: str) -> None:
@@ -900,22 +933,6 @@ def lore_changes(ck: str, tk: str) -> dict:
     return out
 
 
-def rebase_lore(ck: str, tk: str) -> int:
-    """Make the working lorebook the baseline, after RisuAI accepted it.
-
-    Same meaning as `rebase_original` for turns and `memory.rebase`: deleted
-    rows go for good, everything else becomes `original` as it stands now.
-    """
-    n = db.execute(
-        "DELETE FROM lore_entries WHERE char_key = ? AND scope = 'local' AND chat_key = ? "
-        "AND origin = 'deleted'", (ck, tk)).rowcount or 0
-    n += db.execute(
-        "UPDATE lore_entries SET origin = 'original', original_json = entry_json "
-        "WHERE char_key = ? AND scope = 'local' AND chat_key = ? AND origin <> 'original'",
-        (ck, tk)).rowcount or 0
-    return n
-
-
 def lore_rows(ck: str, tk: str) -> list[dict]:
     """This chat's local entries, whole rows, for a checkpoint."""
     return [
@@ -941,6 +958,27 @@ def restore_lore_rows(ck: str, tk: str, rows: list[dict]) -> int:
     return len(rows)
 
 
+def reset_lore_local(ck: str, tk: str) -> int:
+    """Working copy back to the baseline for this chat's local lorebook:
+    added rows go, everything else becomes its original again, and conflict
+    marks are cleared - the baseline already holds RisuAI's side, so
+    discarding *is* taking theirs. Rows that predate original_json are left
+    as they stand; there is nothing recorded to return them to."""
+    n = db.execute(
+        "DELETE FROM lore_entries WHERE char_key = ? AND scope = 'local' AND chat_key = ? "
+        "AND origin = 'added'", (ck, tk)).rowcount or 0
+    n += db.execute(
+        "UPDATE lore_entries SET entry_json = original_json, origin = 'original' "
+        "WHERE char_key = ? AND scope = 'local' AND chat_key = ? "
+        "AND origin <> 'original' AND original_json IS NOT NULL",
+        (ck, tk)).rowcount or 0
+    db.execute(
+        "UPDATE lore_entries SET conflict_json = NULL "
+        "WHERE char_key = ? AND scope = 'local' AND chat_key = ? AND conflict_json IS NOT NULL",
+        (ck, tk))
+    return n
+
+
 # The character-level (scope='global', chat_key IS NULL) twins of the four
 # local functions above. Twins rather than a scope parameter on the originals:
 # the local ones are called from the chat pipeline with a chat_key that the
@@ -957,17 +995,6 @@ def lore_changes_global(ck: str) -> dict:
             out[r["origin"]] += 1
     out["total"] = out["added"] + out["edited"] + out["deleted"]
     return out
-
-
-def rebase_lore_global(ck: str) -> int:
-    n = db.execute(
-        "DELETE FROM lore_entries WHERE char_key = ? AND scope = 'global' AND chat_key IS NULL "
-        "AND origin = 'deleted'", (ck,)).rowcount or 0
-    n += db.execute(
-        "UPDATE lore_entries SET origin = 'original', original_json = entry_json "
-        "WHERE char_key = ? AND scope = 'global' AND chat_key IS NULL AND origin <> 'original'",
-        (ck,)).rowcount or 0
-    return n
 
 
 def lore_rows_global(ck: str) -> list[dict]:
@@ -994,8 +1021,10 @@ def restore_lore_rows_global(ck: str, rows: list[dict]) -> int:
 
 def reset_lore_global(ck: str) -> int:
     """Working copy back to the baseline: added rows go, everything else
-    becomes its original again. Rows that predate original_json are left as
-    they stand - there is nothing recorded to return them to."""
+    becomes its original again, and conflict marks are cleared - the baseline
+    already holds RisuAI's side, so discarding *is* taking theirs. Rows that
+    predate original_json are left as they stand - there is nothing recorded
+    to return them to."""
     n = db.execute(
         "DELETE FROM lore_entries WHERE char_key = ? AND scope = 'global' AND chat_key IS NULL "
         "AND origin = 'added'", (ck,)).rowcount or 0
@@ -1004,6 +1033,10 @@ def reset_lore_global(ck: str) -> int:
         "WHERE char_key = ? AND scope = 'global' AND chat_key IS NULL "
         "AND origin <> 'original' AND original_json IS NOT NULL",
         (ck,)).rowcount or 0
+    db.execute(
+        "UPDATE lore_entries SET conflict_json = NULL "
+        "WHERE char_key = ? AND scope = 'global' AND chat_key IS NULL AND conflict_json IS NOT NULL",
+        (ck,))
     return n
 
 

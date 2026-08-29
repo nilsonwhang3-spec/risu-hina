@@ -681,31 +681,6 @@ def _script_baseline(ck: str, kind: str) -> list[dict]:
     return [db.unjs(r["original_json"], {}) for r in rows]
 
 
-def rebase(ck: str) -> dict:
-    """Working copy becomes the baseline, after the host confirmed the write.
-
-    Same contract as store.rebase_original: never automatic on write - only
-    the client knows the write landed. Global lore is rebased by the caller
-    (store.rebase_lore_global), keeping the same shape h_commit has.
-    """
-    # Exact-string match on the marker delete_greeting wrote: json_extract
-    # would be cleaner but JSON1 is not guaranteed on the SQLite 3.31 floor.
-    deleted = db.execute(
-        "DELETE FROM card_fields WHERE char_key = ? AND extra_json = ?",
-        (ck, db.js({"deleted": True}))).rowcount or 0
-    fields = db.execute(
-        "UPDATE card_fields SET original = body WHERE char_key = ? AND "
-        "(original IS NULL OR original <> body)", (ck,)).rowcount or 0
-    s_del = db.execute(
-        "DELETE FROM card_scripts WHERE char_key = ? AND origin = 'deleted'", (ck,)).rowcount or 0
-    s_norm = db.execute(
-        "UPDATE card_scripts SET origin = 'original', original_json = entry_json "
-        "WHERE char_key = ? AND origin <> 'original'", (ck,)).rowcount or 0
-    log.info("card rebase char=%s fields=%s greet_del=%s scripts=%s+%s",
-             ck, fields, deleted, s_norm, s_del)
-    return {"fields": fields, "greetingsDeleted": deleted, "scripts": s_norm + s_del}
-
-
 def reset_working(ck: str) -> dict:
     """Back to the baseline: added rows go, everything else returns to its
     original. Global lore is reset by the caller (store.reset_lore_global)."""
@@ -720,6 +695,13 @@ def reset_working(ck: str) -> dict:
         "UPDATE card_scripts SET entry_json = original_json, origin = 'original' "
         "WHERE char_key = ? AND origin <> 'original' AND original_json IS NOT NULL",
         (ck,)).rowcount or 0
+    # Conflict marks go with the changes they marked: the baseline already
+    # holds RisuAI's side, so discarding *is* taking theirs - a conflict left
+    # standing here would block 반영 over rows that no longer differ.
+    db.execute("UPDATE card_fields SET conflict_json = NULL "
+               "WHERE char_key = ? AND conflict_json IS NOT NULL", (ck,))
+    db.execute("UPDATE card_scripts SET conflict_json = NULL "
+               "WHERE char_key = ? AND conflict_json IS NOT NULL", (ck,))
     return {"fields": fields + added, "scripts": s_added + s_rest}
 
 

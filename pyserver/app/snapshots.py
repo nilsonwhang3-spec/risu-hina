@@ -86,16 +86,21 @@ def restore(chat_key: str, checkpoint_id: str) -> dict:
                  (checkpoint_id, chat_key))
     if row is None:
         raise LookupError(f"unknown checkpoint: {checkpoint_id}")
-    # Snapshot the current state first, so restoring is itself undoable.
+    # Snapshot the current state first, so restoring is itself undoable - but
+    # only ever one of them. Five restores in a row left five identical
+    # "restore 직전" rows, which is most of what made the list unreadable, and
+    # only the newest was ever any use: the one before the restore you just
+    # regretted.
+    db.execute("DELETE FROM checkpoints WHERE chat_key = ? AND label = 'restore 직전'",
+               (chat_key,))
     create(chat_key, "restore 직전")
     env = chatfmt.encode(row["markdown"], db.unjs(row["meta_json"], {}) or {})
     chat_row = store.chat_row(chat_key) or {}
-    store.ingest_chat(
-        (store.character_row(chat_row.get("char_key") or "") or {}).get("cha_id") or "",
-        {**env["data"], "id": chat_row.get("chat_id")},
-        chat_row.get("chat_index"),
-        force=True,
-    )
+    # The working copy only. This used to go through `ingest_chat(force=True)`,
+    # which rewrites the baseline too - see `store.restore_turns` for what that
+    # cost: a restore that 반영 reported as 0 changes and that the next re-open
+    # silently threw away in favour of RisuAI's version.
+    store.restore_turns(chat_key, (env["data"] or {}).get("message") or [])
     # Older checkpoints carry turns only; they restore what they have and say so.
     ck = chat_row.get("char_key") or ""
     lore_n = mem_n = None
@@ -176,7 +181,10 @@ def restore_card(char_key: str, checkpoint_id: str) -> dict:
                  (checkpoint_id, char_key))
     if row is None:
         raise LookupError(f"unknown checkpoint: {checkpoint_id}")
-    # Same as chat restore: snapshot first, so restoring is itself undoable.
+    # Same as chat restore: snapshot first so restoring is undoable, and only
+    # ever one of them (see restore()).
+    db.execute("DELETE FROM card_checkpoints WHERE char_key = ? AND label = 'restore 직전'",
+               (char_key,))
     create_card(char_key, "restore 직전")
     counts = cardmod.restore_rows(char_key, {
         "fields": db.unjs(row["fields_json"], []) or [],

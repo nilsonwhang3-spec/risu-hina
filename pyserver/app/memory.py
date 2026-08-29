@@ -429,6 +429,24 @@ def restore_rows(char_key: str, chat_key: str, snap: dict) -> int:
     return len(rows)
 
 
+def reset_working(chat_key: str) -> int:
+    """Working copy back to the baseline: rows added here go, everything else
+    returns to its original text, and conflict marks are cleared. The memory
+    leg of `POST /reset`, which used to return the turns alone and leave
+    memory edits silently pending behind a chat the user had just declared
+    clean. A row whose baseline was hard-deleted is already gone and stays
+    gone - nothing records what to bring back."""
+    n = db.execute(
+        "DELETE FROM memories WHERE chat_key = ? AND original IS NULL", (chat_key,)).rowcount or 0
+    n += db.execute(
+        "UPDATE memories SET body = original, updated_at = ? "
+        "WHERE chat_key = ? AND body <> original", (db.now(), chat_key)).rowcount or 0
+    db.execute(
+        "UPDATE memories SET conflict_json = NULL WHERE chat_key = ? AND conflict_json IS NOT NULL",
+        (chat_key,))
+    return n
+
+
 def rebase(chat_key: str) -> int:
     """Make the current text the new baseline, after a successful write-back."""
     n = db.execute(
