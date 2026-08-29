@@ -12,10 +12,8 @@
  * indentation.
  */
 import { el, clear, armed, refocusSearch, focusButton, diffCard } from './dom';
-import { setToolbarSearch } from './shell';
 import { state, type LoreEntry } from '../state';
-import { threePane } from './panes';
-import { bindAgent, mountAgent } from './agentpane';
+import { makeTab, listRow, savedText, type NoticeKind, type TabUi } from './kit';
 import { conflictBadge, conflictBox } from './conflicts';
 
 export interface LoreViewOptions {
@@ -26,71 +24,23 @@ export interface LoreViewOptions {
   heading: string;
   /** 목록이 비었을 때 보여줄 안내 줄들. */
   emptyLines: string[];
-  /** 저장 후 안내 (반영이 어디서 일어나는지). */
-  savedNotice: string;
 }
 
 export function makeLoreTab(opts: LoreViewOptions): (mount: HTMLElement) => void {
-  let built = false;
   let treeMount: HTMLElement | null = null;
   let viewMount: HTMLElement | null = null;
-  let noticeMount: HTMLElement | null = null;
   let openId = '';
   let entries: LoreEntry[] = [];
-  let seenEpoch = -1;
-  let seenKey = '';
   /** Folders start closed - 수십 항목이 흔해서 펼친 채로는 벽이 된다. */
   const openFolders = new Set<string>();
   let filterText = '';
+  let ui: TabUi | null = null;
 
-  function render(mount: HTMLElement): void {
-    const key = opts.scope === 'global' ? state.botKey : state.activeCharKey;
-    if (!key) {
-      clear(mount);
-      built = false;
-      mount.appendChild(el('div', { class: 'pad' }, [
-        el('div', { class: 'empty', text: '먼저 “챗 선택” 탭에서 챗을 골라 주세요.' }),
-      ]));
-      return;
-    }
-
-    if (!built || !mount.querySelector('.split')) {
-      clear(mount);
-      const pane = threePane();
-      treeMount = el('div', { class: 'tree' });
-      pane.left.appendChild(treeMount);
-      noticeMount = el('div');
-      viewMount = el('div', { class: 'pad' });
-      pane.centre.appendChild(noticeMount);
-      pane.centre.appendChild(viewMount);
-      mount.appendChild(pane.root);
-      built = true;
-      seenEpoch = state.epoch;
-      seenKey = key;
-      void refresh();
-    } else if (seenEpoch !== state.epoch || seenKey !== key) {
-      // A restore, a reset, a commit, an approved proposal - or the bot tabs
-      // pointing at a different bot - made what this list shows stale.
-      seenEpoch = state.epoch;
-      seenKey = key;
-      openId = '';
-      if (viewMount) clear(viewMount);
-      void refresh();
-    }
-
-    bindAgent({ notice });
-    const inner = mount.querySelector('.right-inner');
-    if (inner) mountAgent(inner as HTMLElement);
+  function notice(text: string, kind: NoticeKind = ''): void {
+    ui?.notice(text, kind);
   }
 
-  function notice(text: string, kind: 'ok' | 'err' | '' = ''): void {
-    if (!noticeMount) return;
-    clear(noticeMount);
-    noticeMount.appendChild(el('div', { class: 'notice ' + kind, style: { margin: '10px 14px 0' }, text }));
-    setTimeout(() => { if (noticeMount) clear(noticeMount); }, 9000);
-  }
-
-  async function refresh(): Promise<void> {
+  async function refreshNow(): Promise<void> {
     if (!treeMount) return;
     clear(treeMount);
     treeMount.appendChild(el('div', { class: 'hint', style: { padding: '8px' }, text: '읽는 중입니다…' }));
@@ -100,11 +50,17 @@ export function makeLoreTab(opts: LoreViewOptions): (mount: HTMLElement) => void
         // The listing is char-wide; this view is one chat's.
         entries = entries.filter((e) => e.chatKey === state.activeChatKey);
       }
-      drawTree();
     } catch (e) {
       clear(treeMount);
       treeMount.appendChild(el('div', { class: 'notice err', text: msg(e) }));
+      return;
     }
+    drawTree();
+    // The open pane follows the reloaded rows: fresh content, or gone if the
+    // row is (a restore, a reset, an approved proposal).
+    const fresh = entries.find((x) => x.id === openId);
+    if (fresh) open(fresh);
+    else if (openId && viewMount) { openId = ''; clear(viewMount); }
   }
 
   function drawTree(): void {
@@ -114,7 +70,7 @@ export function makeLoreTab(opts: LoreViewOptions): (mount: HTMLElement) => void
     const add = el('button', { class: 'primary tiny', text: '새 항목' });
     add.addEventListener('click', () => void create());
     const reloadBtn = el('button', { class: 'ghost tiny', text: '새로고침' });
-    reloadBtn.addEventListener('click', () => void refresh());
+    reloadBtn.addEventListener('click', () => void refreshNow());
     treeMount.appendChild(el('div', { class: 'treehead' }, [add, reloadBtn]));
 
     if (!entries.length) {
@@ -123,14 +79,6 @@ export function makeLoreTab(opts: LoreViewOptions): (mount: HTMLElement) => void
       }
       return;
     }
-
-    // Finding one entry among dozens is the common case; the filter searches
-    // names and content, and a filtered view auto-opens its folders.
-    setToolbarSearch(filterText, (v) => {
-      filterText = v;
-      drawTree();
-      refocusSearch(null);
-    }, '찾기 (이름·내용)');
 
     const needle = filterText.trim().toLowerCase();
     const hit = (e: LoreEntry): boolean => {
@@ -190,56 +138,55 @@ export function makeLoreTab(opts: LoreViewOptions): (mount: HTMLElement) => void
    * apart in seq still lands next to it.
    */
   function entryRow(e: LoreEntry, all: LoreEntry[]): HTMLElement {
-    const name = el('button', {
-      class: 'treefile' + (e.id === openId ? ' on' : ''),
-      text: titleOf(e),
-      title: e.id,
-    });
-    name.addEventListener('click', () => open(e));
-
     const siblings = all.filter((x) => folderOf(x) === folderOf(e));
     const at = siblings.findIndex((x) => x.id === e.id);
     const moveTo = async (neighbor: LoreEntry) => {
       try {
         await state.moveLore(e.id, all.findIndex((x) => x.id === neighbor.id));
-        await refresh();
+        await refreshNow();
       } catch (err) {
         notice('순서를 바꾸지 못했습니다: ' + msg(err), 'err');
       }
     };
-    const up = el('button', { class: 'ghost tiny movebtn', text: '↑', title: '위로' }) as HTMLButtonElement;
-    const down = el('button', { class: 'ghost tiny movebtn', text: '↓', title: '아래로' }) as HTMLButtonElement;
-    up.disabled = at <= 0;
-    down.disabled = at < 0 || at >= siblings.length - 1;
-    up.addEventListener('click', () => void moveTo(siblings[at - 1]));
-    down.addEventListener('click', () => void moveTo(siblings[at + 1]));
 
-    const row = el('div', { class: 'treerow lorecard' }, [name]);
+    const row = listRow({
+      variant: 'tree',
+      selected: e.id === openId,
+      title: el('button', {
+        class: 'treefile' + (e.id === openId ? ' on' : ''),
+        text: titleOf(e),
+        title: e.id,
+      }),
+      // Always-active entries have no trigger keys; without the badge they
+      // look like entries whose keys someone forgot.
+      badges: (e.entry as Record<string, unknown>).alwaysActive
+        ? [{ text: '상시', title: '상시 활성화 — 키워드 없이 항상 삽입됩니다' }]
+        : [],
+      reorder: {
+        up: at > 0 ? () => void moveTo(siblings[at - 1]) : undefined,
+        down: at >= 0 && at < siblings.length - 1 ? () => void moveTo(siblings[at + 1]) : undefined,
+      },
+      onClick: () => open(e),
+    });
     // The priority number beside every entry: a lorebook is read by tiers,
     // and a 100 among 700s and 1000s is the entry someone forgot to place.
     const io = Number((e.entry as Record<string, unknown>).insertorder ?? 100);
-    row.appendChild(el('span', { class: 'hint ordertag', title: '우선순위 (insertorder)', text: String(io) }));
-    // Always-active entries have no trigger keys; without the badge they
-    // look like entries whose keys someone forgot.
-    if ((e.entry as Record<string, unknown>).alwaysActive) {
-      row.appendChild(el('span', { class: 'badge', title: '상시 활성화 — 키워드 없이 항상 삽입됩니다', text: '상시' }));
-    }
+    row.insertBefore(el('span', { class: 'hint ordertag', title: '우선순위 (insertorder)', text: String(io) }),
+                     row.children[1] ?? null);
     if (e.conflict) {
-      row.appendChild(conflictBadge());
+      row.insertBefore(conflictBadge(), row.querySelector('.movebtn'));
     } else if (e.origin !== 'original') {
-      row.appendChild(el('span', { class: 'badge warn', text: e.origin === 'added' ? '추가' : '수정' }));
+      row.insertBefore(el('span', { class: 'badge warn', text: e.origin === 'added' ? '추가' : '수정' }),
+                       row.querySelector('.movebtn'));
     }
-    row.appendChild(up);
-    row.appendChild(down);
     return row;
   }
 
   function open(e: LoreEntry): void {
     if (!viewMount) return;
+    const was = openId;
     openId = e.id;
-    for (const b of Array.from(document.querySelectorAll('.tree .treefile'))) {
-      b.classList.toggle('on', (b as HTMLElement).title === e.id);
-    }
+    if (was !== e.id) drawTree();
 
     const entry = e.entry as Record<string, any>;
     const keys = el('input', { value: String(entry.key ?? entry.keys ?? '') }) as HTMLInputElement;
@@ -307,10 +254,8 @@ export function makeLoreTab(opts: LoreViewOptions): (mount: HTMLElement) => void
         else delete next.folder;
         await state.saveLore(e.id, next);
         if (opts.scope === 'global') void state.refreshBotChanges();
-        notice(opts.savedNotice, 'ok');
-        await refresh();
-        const fresh = entries.find((x) => x.id === e.id);
-        if (fresh) open(fresh);
+        notice(savedText('로어북 항목을'), 'ok');
+        await refreshNow();
       } catch (err) {
         notice('저장하지 못했습니다: ' + msg(err), 'err');
       } finally {
@@ -325,7 +270,7 @@ export function makeLoreTab(opts: LoreViewOptions): (mount: HTMLElement) => void
         if (opts.scope === 'global') void state.refreshBotChanges();
         openId = '';
         if (viewMount) clear(viewMount);
-        await refresh();
+        await refreshNow();
       } catch (err) {
         notice('삭제하지 못했습니다: ' + msg(err), 'err');
       }
@@ -352,7 +297,7 @@ export function makeLoreTab(opts: LoreViewOptions): (mount: HTMLElement) => void
           mine: e.entry, theirs: (e.conflict as Record<string, unknown>).theirs ?? null,
           base: (e.conflict as Record<string, unknown>).base ?? null,
           canTakeTheirs: true,
-        }, () => { void refresh(); })
+        }, () => { void refreshNow(); })
       : null;
 
     clear(viewMount);
@@ -384,7 +329,7 @@ export function makeLoreTab(opts: LoreViewOptions): (mount: HTMLElement) => void
         opts.scope,
       );
       if (opts.scope === 'global') void state.refreshBotChanges();
-      await refresh();
+      await refreshNow();
       const made = entries.find((e) => e.id === id);
       if (made) open(made);
     } catch (e) {
@@ -392,7 +337,27 @@ export function makeLoreTab(opts: LoreViewOptions): (mount: HTMLElement) => void
     }
   }
 
-  return render;
+  return makeTab({
+    gate: opts.scope === 'global' ? 'bot' : 'chat',
+    keys: () => [state.epoch, opts.scope === 'global' ? state.botKey : state.activeChatKey],
+    search: {
+      // Finding one entry among dozens is the common case; the filter searches
+      // names and content, and a filtered view auto-opens its folders.
+      placeholder: '찾기 (이름·내용)',
+      get: () => filterText,
+      set: (v) => { filterText = v; drawTree(); refocusSearch(null); },
+    },
+    build(pane, u) {
+      ui = u;
+      treeMount = el('div', { class: 'tree' });
+      pane.left.appendChild(treeMount);
+      viewMount = el('div', { class: 'pad' });
+      pane.centre.appendChild(viewMount);
+    },
+    async refresh() {
+      await refreshNow();
+    },
+  });
 }
 
 function titleOf(e: LoreEntry): string {

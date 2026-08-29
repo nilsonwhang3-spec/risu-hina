@@ -9,10 +9,8 @@
  * the list shows only comments.
  */
 import { el, clear, armed, refocusSearch, focusButton, diffCard } from './dom';
-import { setToolbarSearch } from './shell';
 import { state, type CardScript, type CardField } from '../state';
-import { threePane } from './panes';
-import { bindAgent, mountAgent } from './agentpane';
+import { makeTab, listRow, savedText, type NoticeKind, type TabUi } from './kit';
 
 const TYPES = ['editinput', 'editoutput', 'editprocess', 'editdisplay'];
 const TYPE_LABEL: Record<string, string> = {
@@ -28,60 +26,39 @@ const BG_LABEL: Record<string, string> = {
   backgroundHTML: '백그라운드 HTML',
 };
 
-let built = false;
 let treeMount: HTMLElement | null = null;
 let viewMount: HTMLElement | null = null;
-let noticeMount: HTMLElement | null = null;
 let openId = '';
 let items: CardScript[] = [];
 let bgFields: CardField[] = [];
-let seenEpoch = -1;
-let seenKey = '';
 let filterText = '';
+let ui: TabUi | null = null;
 
-export function renderRegexTab(mount: HTMLElement): void {
-  if (!state.botKey) {
-    clear(mount);
-    built = false;
-    mount.appendChild(el('div', { class: 'pad' }, [
-      el('div', { class: 'empty', text: '먼저 패널을 연 봇이 있어야 합니다.' }),
-    ]));
-    return;
-  }
-  if (!built || !mount.querySelector('.split')) {
-    clear(mount);
-    const pane = threePane();
+function notice(text: string, kind: NoticeKind = ''): void {
+  ui?.notice(text, kind);
+}
+
+export const renderRegexTab = makeTab({
+  gate: 'bot',
+  keys: () => [state.epoch, state.botKey],
+  search: {
+    placeholder: '찾기 (이름·패턴·본문)',
+    get: () => filterText,
+    set: (v) => { filterText = v; drawTree(); refocusSearch(null); },
+  },
+  build(pane, u) {
+    ui = u;
     treeMount = el('div', { class: 'tree' });
     pane.left.appendChild(treeMount);
-    noticeMount = el('div');
     viewMount = el('div', { class: 'pad' });
-    pane.centre.appendChild(noticeMount);
     pane.centre.appendChild(viewMount);
-    mount.appendChild(pane.root);
-    built = true;
-    seenEpoch = state.epoch;
-    seenKey = state.botKey;
-    void refresh();
-  } else if (seenEpoch !== state.epoch || seenKey !== state.botKey) {
-    seenEpoch = state.epoch;
-    seenKey = state.botKey;
-    openId = '';
-    if (viewMount) clear(viewMount);
-    void refresh();
-  }
-  bindAgent({ notice });
-  const inner = mount.querySelector('.right-inner');
-  if (inner) mountAgent(inner as HTMLElement);
-}
+  },
+  async refresh() {
+    await refreshNow();
+  },
+});
 
-function notice(text: string, kind: 'ok' | 'err' | '' = ''): void {
-  if (!noticeMount) return;
-  clear(noticeMount);
-  noticeMount.appendChild(el('div', { class: 'notice ' + kind, style: { margin: '10px 14px 0' }, text }));
-  setTimeout(() => { if (noticeMount) clear(noticeMount); }, 9000);
-}
-
-async function refresh(): Promise<void> {
+async function refreshNow(): Promise<void> {
   if (!treeMount) return;
   clear(treeMount);
   treeMount.appendChild(el('div', { class: 'hint', style: { padding: '8px' }, text: '읽는 중입니다…' }));
@@ -89,11 +66,19 @@ async function refresh(): Promise<void> {
     items = await state.cardScripts('customscript');
     const r = await state.cardFields();
     bgFields = r.fields.filter((f) => f.field in BG_LABEL);
-    drawTree();
   } catch (e) {
     clear(treeMount);
     treeMount.appendChild(el('div', { class: 'notice err', text: msg(e) }));
+    return;
   }
+  drawTree();
+  // The open pane follows the reloaded rows: fresh content, or gone if the
+  // row is (a restore, a reset, an approved proposal).
+  const freshS = items.find((x) => x.id === openId);
+  const freshF = bgFields.find((x) => x.id === openId);
+  if (freshS) open(freshS);
+  else if (freshF) openField(freshF);
+  else if (openId && viewMount) { openId = ''; clear(viewMount); }
 }
 
 function titleOf(s: CardScript): string {
@@ -110,7 +95,7 @@ function drawTree(): void {
     try {
       const id = await state.addScript('customscript',
         { comment: '새 스크립트', in: '', out: '', type: 'editdisplay' });
-      await refresh();
+      await refreshNow();
       const made = items.find((s) => s.id === id);
       if (made) open(made);
     } catch (e) {
@@ -118,22 +103,24 @@ function drawTree(): void {
     }
   });
   const reloadBtn = el('button', { class: 'ghost tiny', text: '새로고침' });
-  reloadBtn.addEventListener('click', () => void refresh());
+  reloadBtn.addEventListener('click', () => void refreshNow());
   treeMount.appendChild(el('div', { class: 'treehead' }, [add, reloadBtn]));
 
   // The background pair first: it is what people usually come here for.
   if (bgFields.length) {
     treeMount.appendChild(el('div', { class: 'treescope', text: '배경' }));
     for (const f of bgFields) {
-      const name = el('button', {
-        class: 'treefile' + (f.id === openId ? ' on' : ''),
-        text: BG_LABEL[f.field] + (f.body ? ` (${f.body.length}자)` : ' (비어 있음)'),
-        title: f.id,
-      });
-      name.addEventListener('click', () => openField(f));
-      const row = el('div', { class: 'treerow lorecard' }, [name]);
-      if (f.changed) row.appendChild(el('span', { class: 'badge warn', text: '수정' }));
-      treeMount.appendChild(row);
+      treeMount.appendChild(listRow({
+        variant: 'tree',
+        selected: f.id === openId,
+        title: el('button', {
+          class: 'treefile' + (f.id === openId ? ' on' : ''),
+          text: BG_LABEL[f.field] + (f.body ? ` (${f.body.length}자)` : ' (비어 있음)'),
+          title: f.id,
+        }),
+        badges: f.changed ? [{ text: '수정', kind: 'warn' }] : [],
+        onClick: () => openField(f),
+      }));
     }
   }
 
@@ -145,11 +132,6 @@ function drawTree(): void {
     return;
   }
 
-  setToolbarSearch(filterText, (v) => {
-    filterText = v;
-    drawTree();
-    refocusSearch(null);
-  }, '찾기 (이름·패턴·본문)');
   const needle = filterText.trim().toLowerCase();
   const shown = items.map((s, i) => ({ s, i })).filter(({ s }) => {
     if (!needle) return true;
@@ -163,47 +145,42 @@ function drawTree(): void {
 
   for (const { s, i } of shown) {
     const e = s.entry as Record<string, any>;
-    const name = el('button', {
-      class: 'treefile' + (s.id === openId ? ' on' : ''),
-      text: `${i + 1}. ${titleOf(s)}`,
-      title: s.id,
-    });
-    name.addEventListener('click', () => open(s));
-
     const move = async (to: number) => {
       try {
         await state.moveScript(s.id, to);
-        await refresh();
+        await refreshNow();
       } catch (err) {
         notice('순서를 바꾸지 못했습니다: ' + msg(err), 'err');
       }
     };
-    const up = el('button', { class: 'ghost tiny movebtn', text: '↑', title: '위로' }) as HTMLButtonElement;
-    const down = el('button', { class: 'ghost tiny movebtn', text: '↓', title: '아래로' }) as HTMLButtonElement;
-    up.disabled = i <= 0;
-    down.disabled = i >= items.length - 1;
-    up.addEventListener('click', () => void move(i - 1));
-    down.addEventListener('click', () => void move(i + 1));
-
-    const row = el('div', { class: 'treerow lorecard' }, [name]);
     const size = String(e.out ?? '').length;
-    if (size > 2000) row.appendChild(el('span', { class: 'hint', text: `${Math.round(size / 1000)}k자` }));
-    if (s.origin !== 'original') {
-      row.appendChild(el('span', { class: 'badge warn', text: s.origin === 'added' ? '추가' : '수정' }));
-    }
-    row.appendChild(up);
-    row.appendChild(down);
-    treeMount.appendChild(row);
+    const badges: { text: string; kind?: 'ok' | 'warn' | 'err' | '' }[] = [];
+    if (s.origin !== 'original') badges.push({ text: s.origin === 'added' ? '추가' : '수정', kind: 'warn' });
+    treeMount.appendChild(listRow({
+      variant: 'tree',
+      selected: s.id === openId,
+      title: el('button', {
+        class: 'treefile' + (s.id === openId ? ' on' : ''),
+        text: `${i + 1}. ${titleOf(s)}`,
+        title: s.id,
+      }),
+      hint: size > 2000 ? `${Math.round(size / 1000)}k자` : undefined,
+      badges,
+      reorder: {
+        up: i > 0 ? () => void move(i - 1) : undefined,
+        down: i < items.length - 1 ? () => void move(i + 1) : undefined,
+      },
+      onClick: () => open(s),
+    }));
   }
 }
 
 /** backgroundHTML / backgroundCSS - card fields edited on this tab. */
 function openField(f: CardField): void {
   if (!viewMount) return;
+  const was = openId;
   openId = f.id;
-  for (const b of Array.from(document.querySelectorAll('.tree .treefile'))) {
-    b.classList.toggle('on', (b as HTMLElement).title === f.id);
-  }
+  if (was !== f.id) drawTree();
   const body = el('textarea', {
     class: 'codearea', value: f.body, style: { minHeight: '380px' },
   }) as HTMLTextAreaElement;
@@ -212,10 +189,8 @@ function openField(f: CardField): void {
     save.disabled = true;
     try {
       await state.saveCardField(f.id, body.value);
-      notice('저장했습니다. 봇 바의 “반영”을 누르면 RisuAI에 쓰입니다.', 'ok');
-      await refresh();
-      const fresh = bgFields.find((x) => x.id === f.id);
-      if (fresh) openField(fresh);
+      notice(savedText(BG_LABEL[f.field] + ' 을(를)'), 'ok');
+      await refreshNow();
     } catch (err) {
       notice('저장하지 못했습니다: ' + msg(err), 'err');
     } finally {
@@ -235,10 +210,9 @@ function openField(f: CardField): void {
 
 function open(s: CardScript): void {
   if (!viewMount) return;
+  const was = openId;
   openId = s.id;
-  for (const b of Array.from(document.querySelectorAll('.tree .treefile'))) {
-    b.classList.toggle('on', (b as HTMLElement).title === s.id);
-  }
+  if (was !== s.id) drawTree();
 
   const e = s.entry as Record<string, any>;
   const comment = el('input', { value: String(e.comment ?? '') }) as HTMLInputElement;
@@ -269,10 +243,8 @@ function open(s: CardScript): void {
         in: inPat.value, out: outText.value,
         ...(flag.value ? { flag: flag.value } : {}),
       });
-      notice('저장했습니다. 봇 바의 “반영”을 누르면 RisuAI에 쓰입니다.', 'ok');
-      await refresh();
-      const fresh = items.find((x) => x.id === s.id);
-      if (fresh) open(fresh);
+      notice(savedText('스크립트를'), 'ok');
+      await refreshNow();
     } catch (err) {
       notice('저장하지 못했습니다: ' + msg(err), 'err');
     } finally {
@@ -286,7 +258,7 @@ function open(s: CardScript): void {
       await state.deleteScript(s.id);
       openId = '';
       if (viewMount) clear(viewMount);
-      await refresh();
+      await refreshNow();
     } catch (err) {
       notice('삭제하지 못했습니다: ' + msg(err), 'err');
     }

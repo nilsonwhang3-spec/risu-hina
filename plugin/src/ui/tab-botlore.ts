@@ -15,5 +15,4 @@ export const renderBotLoreTab = makeLoreTab({
     '이 봇의 로어북(globalLore)이 비어 있습니다.',
     '여기 항목은 이 봇의 모든 챗에 적용됩니다.',
   ],
-  savedNotice: '저장했습니다. 봇 바의 “반영”을 누르면 카드와 함께 RisuAI에 쓰입니다.',
 });
