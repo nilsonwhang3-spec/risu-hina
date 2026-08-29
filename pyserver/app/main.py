@@ -811,6 +811,12 @@ def h_approve(arg: dict) -> dict:
     if not approve:
         return {"decided": n, "approved": False}
 
+    # One dirty thing at a time: staged edits write this chat, so nothing
+    # else may be holding unapplied work when they land.
+    blocker = workspace.cross_scope_blocker(_char_of_chat(tk), "chat", tk)
+    if blocker:
+        raise ApiError(409, blocker)
+
     # Approval and application are one user action, so applying here keeps the
     # client from having to sequence two calls and handle a half-done state.
     _checkpoint(tk, "에이전트 제안 적용 직전", kind="auto")
@@ -1324,6 +1330,12 @@ def h_patch(arg: dict) -> dict:
     m = mem.patch(tk)
     out["memory"] = {"data": m["memory"], "changed": m["changed"]}
     return out
+
+
+def h_workspace_dirty(arg: dict) -> dict:
+    """Pending state across the whole bot, for the leave guard: the card and
+    every loaded chat, each with its pending total and conflict count."""
+    return workspace.dirty_summary(_char(arg))
 
 
 def h_changes(arg: dict) -> dict:
@@ -1904,6 +1916,7 @@ ROUTES: dict[str, Handler] = {
     "GET /workspace": h_workspace_list,
     "POST /workspace": h_workspace_create,
     "GET /workspace/get": h_workspace_get,
+    "GET /workspace/dirty": h_workspace_dirty,
 
     "GET /turns": h_turns,
     "POST /turn": h_turn_edit,

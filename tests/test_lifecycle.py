@@ -277,6 +277,48 @@ row = db.one("SELECT kind FROM checkpoints WHERE id = ?", (old,))
 check("a pre-13 auto-labelled row is filed as a backup",
       row is not None and row["kind"] == "auto", str(dict(row) if row else None))
 
+print("\ntest_one_dirty_thing_at_a_time")
+# The global single-edit rule: the bot-wide summary the leave guard reads,
+# and the refusal that keeps an approval from opening a second dirty front.
+from app import actions  # noqa: E402
+
+s = workspace.dirty_summary(rk)
+check("everything reads clean after the reset",
+      not s["card"]["dirty"] and all(not c["dirty"] for c in s["chats"]), str(s))
+
+store.set_body(RTK, "r1", "다시 고침")  # the chat goes dirty
+s = workspace.dirty_summary(rk)
+check("the summary sees the dirty chat",
+      any(c["dirty"] and c["chatKey"] == RTK for c in s["chats"]), str(s))
+check("editing the dirty chat itself is allowed",
+      workspace.cross_scope_blocker(rk, "chat", RTK) == "")
+check("writing the card is refused while the chat is dirty",
+      "미반영" in workspace.cross_scope_blocker(rk, "card"),
+      workspace.cross_scope_blocker(rk, "card"))
+RT2 = store.ingest_chat(CHA2, {"id": "chat-r2", "name": "r2", "message": [
+    {"role": "user", "data": "x", "chatId": "q1"}]}, 1)["chatKey"]
+check("a second chat is refused while the first is dirty",
+      "미반영" in workspace.cross_scope_blocker(rk, "chat", RT2),
+      workspace.cross_scope_blocker(rk, "chat", RT2))
+
+# An agent action is refused at the same door, and stays pending - the user
+# resolves the other edit and approves again, nothing is lost.
+aid = actions.propose("card_edit", chat_key=RTK, char_key=rk, summary="t",
+                      args={"id": "nope", "body": "x"})["id"]
+try:
+    actions.decide(aid, True)
+    check("approving a card action while the chat is dirty is refused", False)
+except actions.ActionError as e:
+    check("approving a card action while the chat is dirty is refused",
+          "미반영" in str(e), str(e))
+act = actions.get(aid)
+check("the refused action is still pending, not failed",
+      act is not None and act["status"] == "pending", str(act and act["status"]))
+
+store.reset_working(RTK)
+left_over = workspace.cross_scope_blocker(rk, "card")
+check("and allowed again once the chat is clean", left_over == "", left_over)
+
 print()
 if FAILURES:
     print(f"FAIL - {len(FAILURES)} check(s): " + ", ".join(FAILURES))

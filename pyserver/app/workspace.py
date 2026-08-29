@@ -237,6 +237,58 @@ def materialize(payload: dict, *, force: bool = False) -> dict:
     return info
 
 
+def dirty_summary(char_key: str) -> dict:
+    """What is pending where, for the whole bot - the leave guard's one call.
+
+    The active scope's counts the plugin already tracks (`/changes` and
+    `/card/changes` follow every edit); what it cannot know is a chat left
+    dirty by an earlier session. One shape for both: the card and every
+    loaded chat, each with its pending total and conflict count.
+    """
+    from . import conflicts
+    card_pending = cardmod.changes(char_key)
+    card_conf = conflicts.count_for_card(char_key)
+    card = {"dirty": bool(card_pending.get("total")) or card_conf > 0,
+            "total": card_pending.get("total") or 0, "conflicts": card_conf}
+    chats = []
+    for row in store.chats_of(char_key):
+        tk = str(row.get("chat_key") or "")
+        p = store.patch(tk)
+        t_total = (len(p["edits"]) + len(p["added"]) + len(p["removed"])
+                   + (1 if p["reordered"] else 0))
+        total = t_total + store.lore_changes(char_key, tk)["total"] + mem.changes(tk)["total"]
+        conf = conflicts.count_for_chat(tk)
+        chats.append({
+            "chatKey": tk, "chatId": row.get("chat_id"), "name": row.get("name") or "",
+            "dirty": bool(total or conf), "total": total, "conflicts": conf,
+        })
+    return {"charKey": char_key, "card": card, "chats": chats}
+
+
+def cross_scope_blocker(char_key: str, scope: str, chat_key: str = "") -> str:
+    """The one-dirty-thing-at-a-time rule, as a refusal message ('' = go).
+
+    `scope` is what the caller is about to write. Writing the chat is refused
+    while the card holds unapplied edits (and the other way round), and while
+    any *other* chat does - the write would open a second dirty front behind
+    the user's back, which is exactly what the leave guard exists to prevent.
+    Write-backs and resets are never passed through here: they resolve
+    pending state rather than create it.
+    """
+    summary = dirty_summary(char_key)
+    if scope == "chat" and summary["card"]["dirty"]:
+        return "봇 카드에 미반영 변경이 있습니다. 먼저 반영하거나 취소해 주세요."
+    # Only a chat write is at home in its own chat; a card write is blocked
+    # by *every* dirty chat, the acting one included - that pairing is the
+    # reported bug ("saving the bot quietly re-saved the chat").
+    exempt = chat_key if scope == "chat" else ""
+    others = [c for c in summary["chats"] if c["dirty"] and c["chatKey"] != exempt]
+    if others:
+        name = others[0]["name"] or "다른 챗"
+        return f"'{name}' 챗에 미반영 변경이 있습니다. 먼저 반영하거나 취소해 주세요."
+    return ""
+
+
 def info(char_key: str) -> dict | None:
     row = store.character_row(char_key)
     if row is None:

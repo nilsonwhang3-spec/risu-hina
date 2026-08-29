@@ -99,6 +99,32 @@ def clear(chat_key: str) -> int:
         (chat_key, PENDING)).rowcount or 0
 
 
+def scope_of(action: dict) -> str:
+    """Which working copy an approved action writes: 'chat', 'card' or ''.
+
+    '' covers three shapes on purpose: the host write-backs (they *resolve*
+    pending state rather than create it), snapshot creation (no working copy
+    is touched), and pure UI moves. Lore rows carry their scope themselves -
+    a global entry is card material even though the proposal rode a chat.
+    """
+    kind = action["kind"]
+    if kind in ("memory_edit", "memory_delete", "checkpoint_restore"):
+        return "chat"
+    if kind in ("card_edit", "card_greeting_add", "card_greeting_delete",
+                "script_edit", "script_add", "script_delete",
+                "card_checkpoint_restore"):
+        return "card"
+    if kind == "lore_add":
+        return "card" if (action["args"].get("scope") or "local") == "global" else "chat"
+    if kind in ("lore_edit", "lore_delete", "lore_move"):
+        from . import store
+        row = store.lore_entry(str(action["args"].get("id") or ""))
+        if row is None:
+            return ""
+        return "card" if row.get("scope") == "global" else "chat"
+    return ""
+
+
 def decide(action_id: str, approve: bool) -> dict:
     """Approve and run, or reject. The only place an action actually happens."""
     act = get(action_id)
@@ -110,6 +136,16 @@ def decide(action_id: str, approve: bool) -> dict:
     if not approve:
         _finish(action_id, REJECTED, "")
         return {"id": action_id, "approved": False, "kind": act["kind"]}
+
+    # One dirty thing at a time. An approval that writes a working copy is
+    # refused while the *other* scope (or another chat) holds unapplied work -
+    # it would open a second dirty front behind the user's back.
+    scope = scope_of(act)
+    if scope:
+        from . import workspace
+        blocker = workspace.cross_scope_blocker(act["charKey"], scope, act["chatKey"] or "")
+        if blocker:
+            raise ActionError(blocker)
 
     if act["kind"] in HOST_KINDS:
         # Approved, but the plugin has to do it and report back. Leaving it
