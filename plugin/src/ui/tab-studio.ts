@@ -19,7 +19,7 @@
  * A bot IS needed to *adopt* an image into a card - that is gated per action,
  * where it is true, rather than on the whole tab.
  */
-import { el, clear, armed } from './dom';
+import { el, clear, armed, modal } from './dom';
 import { state, type FileListing, type StudioItem, type StudioStatus, type WorkspaceFile } from '../state';
 import { threePane } from './panes';
 import { bindAgent, mountAgent } from './agentpane';
@@ -61,6 +61,8 @@ const gen = {
   characterName: '', outfit: '',
   steps: 23, scale: 5, width: 832, height: 1216, count: 1, seed: '',
   folder: 'images',
+  // The one control that certainly spends Anlas, so it is off unless asked.
+  useReference: false, refStrength: 0.6,
 };
 let status: StudioStatus | null = null;
 let jobId = '';
@@ -271,7 +273,9 @@ function drawGen(): void {
     el('div', { class: 'row' }, [checkBtn, checkOut]),
     pickerField('스타일', 'styles', 'style'),
     pickerField('캐릭터', 'characters', 'character'),
+    characterButtons(),
     pickerField('감정 프리셋', 'emotions', 'emotionPreset'),
+    referenceToggle(),
   );
 
   const two = (a: HTMLElement, b: HTMLElement) => el('div', { class: 'row' }, [a, b]);
@@ -293,6 +297,48 @@ function drawGen(): void {
   if (jobId) void pollJob();
 }
 
+function characterButtons(): HTMLElement {
+  const add = el('button', { class: 'ghost tiny', text: '＋ 새 캐릭터' });
+  const edit = el('button', { class: 'ghost tiny', text: '편집' }) as HTMLButtonElement;
+  add.addEventListener('click', () => openCharacter(''));
+  edit.addEventListener('click', () => { if (gen.character) openCharacter(gen.character); });
+  edit.disabled = !gen.character;
+  return el('div', { class: 'row' }, [add, edit]);
+}
+
+/**
+ * Whether this batch uses the character's reference image.
+ *
+ * Off by default and labelled with its price, because this is the one control
+ * on the card that certainly spends Anlas: an encode is 2 each, and v5 cannot
+ * do it at all (docs/09 §7). The encoding is cached, so a second batch with
+ * the same reference costs nothing.
+ */
+function referenceToggle(): HTMLElement {
+  const box = el('input', { type: 'checkbox' }) as HTMLInputElement;
+  box.checked = gen.useReference;
+  const strength = el('input', { type: 'number', value: String(gen.refStrength), step: '0.05' }) as HTMLInputElement;
+  strength.addEventListener('change', () => { gen.refStrength = Number(strength.value) || gen.refStrength; });
+  const why = el('div', { class: 'hint' });
+  const sync = () => {
+    gen.useReference = box.checked;
+    const v5 = !gen.model.includes('diffusion-4');
+    why.textContent = !gen.character
+      ? '캐릭터를 먼저 고르세요.'
+      : v5
+        ? 'v5 모델은 레퍼런스를 지원하지 않습니다 — 4.5 를 고르세요.'
+        : (box.checked ? '인코딩 2 Anlas (캐시되면 0). 배치당 한 번입니다.' : '');
+    strength.disabled = !box.checked;
+  };
+  box.addEventListener('change', sync);
+  sync();
+  return el('div', {}, [
+    el('label', { class: 'row' }, [box, el('span', { text: '레퍼런스 이미지 사용 (바이브)' })]),
+    el('label', { class: 'field' }, [el('span', { text: '강도' }), strength]),
+    why,
+  ]);
+}
+
 function spec(): Record<string, unknown> {
   const out: Record<string, unknown> = {
     model: gen.model,
@@ -304,6 +350,11 @@ function spec(): Record<string, unknown> {
   if (gen.character) out.characters = [gen.character];
   if (gen.emotionPreset) out.emotionPreset = gen.emotionPreset;
   if (gen.seed.trim()) out.seed = Number(gen.seed.trim());
+  // A reference is a list entry with its own strength: NovelAI takes several
+  // (reference_*_multiple), and the backend encodes each once per batch.
+  if (gen.useReference && gen.character) {
+    out.vibes = [{ path: gen.character.replace(/\.json$/, '.png'), strength: gen.refStrength }];
+  }
   return out;
 }
 
@@ -318,6 +369,108 @@ function textField(label: string, key: 'seed' | 'characterName' | 'outfit' | 'fo
   const i = el('input', { value: gen[key], placeholder }) as HTMLInputElement;
   i.addEventListener('change', () => { gen[key] = i.value; });
   return el('label', { class: 'field grow' }, [el('span', { text: label }), i]);
+}
+
+/**
+ * The character editor.
+ *
+ * A character is not a line of prose, which is why it is not a `.md` like a
+ * style: it is a caption, a negative, and — the part a text file cannot hold —
+ * a **reference image**. NovelAI takes references as a list with per-item
+ * strengths (`reference_*_multiple`, docs/09 §7), and a reference has to be
+ * encoded before it can be used, at 2 Anlas a time. So the reference lives
+ * beside the JSON as `<name>.png` and is encoded once per batch, cached.
+ *
+ * Position (`char_captions` + `use_coords`) is what puts several characters in
+ * one image; that is the next increment and the field is written here so the
+ * files are already the right shape.
+ */
+function openCharacter(path: string): void {
+  const body = el('div', { class: 'verlist' });
+  const out = el('div', { class: 'hint' });
+  const close = modal(path ? '캐릭터 편집' : '새 캐릭터', body, { sticky: true });
+
+  const name = el('input', { placeholder: '히나' }) as HTMLInputElement;
+  const caption = el('textarea', { rows: '3', placeholder: '1girl, silver hair, blue eyes' }) as HTMLTextAreaElement;
+  const negative = el('textarea', { rows: '2', placeholder: 'multiple girls' }) as HTMLTextAreaElement;
+  const folder = el('input', { value: 'characters', placeholder: 'characters/폴더' }) as HTMLInputElement;
+  const refInfo = el('div', { class: 'hint' });
+  let refBytes: string = '';
+
+  const pickRef = el('input', { type: 'file', accept: 'image/png' }) as HTMLInputElement;
+  pickRef.addEventListener('change', () => {
+    const f = pickRef.files?.[0];
+    if (!f) return;
+    const r = new FileReader();
+    r.onload = () => {
+      const s = String(r.result || '');
+      refBytes = s.slice(s.indexOf(',') + 1);
+      refInfo.textContent = `${f.name} · ${Math.round(f.size / 1024)}KB — 저장하면 함께 들어갑니다`;
+    };
+    r.readAsDataURL(f);
+  });
+
+  if (path) {
+    void state.studio.read(path).then((r) => {
+      try {
+        const d = JSON.parse(r.content) as Record<string, unknown>;
+        name.value = String(d.name ?? '');
+        caption.value = String(d.caption ?? d.prompt ?? '');
+        negative.value = String(d.negative ?? '');
+        folder.value = path.slice(0, path.lastIndexOf('/')) || 'characters';
+        if (d.reference) refInfo.textContent = '레퍼런스: ' + String(d.reference);
+      } catch { out.textContent = '이 파일을 읽지 못했습니다 (JSON 아님).'; }
+    }).catch((e) => { out.textContent = msg(e); });
+  }
+
+  const save = el('button', { class: 'primary', text: '저장' }) as HTMLButtonElement;
+  save.addEventListener('click', async () => {
+    const nm = name.value.trim();
+    if (!nm) { out.textContent = '이름을 입력해 주세요.'; return; }
+    save.disabled = true;
+    try {
+      const dir = folder.value.trim() || 'characters';
+      const stem = nm.replace(/[<>:"/\\|?*]/g, '');
+      if (refBytes) {
+        await state.studio.upload(dir, stem + '.png', refBytes);
+      }
+      await state.studio.write(dir, stem + '.json', JSON.stringify({
+        name: nm,
+        caption: caption.value.trim(),
+        negative: negative.value.trim(),
+        // Beside the JSON, same stem: one thing to move, one thing to delete.
+        reference: refBytes || refInfo.textContent ? `${dir}/${stem}.png` : '',
+        position: null,
+      }, null, 2));
+      close();
+      notice(`캐릭터 “${nm}” 를 저장했습니다.`, 'ok');
+      await refresh();
+      drawGen();
+    } catch (e) {
+      out.textContent = msg(e);
+      save.disabled = false;
+    }
+  });
+  const cancel = el('button', { class: 'ghost', text: '취소' });
+  cancel.addEventListener('click', close);
+
+  const field = (label: string, node: HTMLElement, hint = '') =>
+    el('label', { class: 'field' }, [
+      el('span', { text: label }), node,
+      hint ? el('div', { class: 'hint', text: hint }) : null,
+    ]);
+
+  body.append(
+    field('이름', name, '파일 이름과 프롬프트 조립에 쓰입니다'),
+    field('프롬프트', caption),
+    field('네거티브', negative),
+    field('레퍼런스 이미지 (PNG)', pickRef,
+          '바이브 트랜스퍼용입니다. 인코딩은 회당 2 Anlas 이고 배치마다 한 번만 합니다. v5 모델은 아직 지원하지 않습니다.'),
+    refInfo,
+    field('폴더', folder),
+    el('div', { class: 'row', style: { marginTop: '8px' } }, [save, cancel]),
+    out,
+  );
 }
 
 /** A <select> of one library area, filled when the card is drawn. */
