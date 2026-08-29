@@ -24,6 +24,7 @@ import { buildChatBar, refreshChatBar, shellNotice } from './chatbar';
 import { ensureResolved } from './leaveguard';
 import { buildBotBar, refreshBotBar } from './botbar';
 import { renderAssetsTab } from './tab-assets';
+import { renderStudioTab } from './tab-studio';
 import { getSettingsBar } from './tab-settings';
 
 /**
@@ -35,7 +36,7 @@ import { getSettingsBar } from './tab-settings';
  * the other verbs.
  */
 export type TabId = 'chats' | 'editor' | 'lore' | 'memory' | 'vars'
-  | 'meta' | 'botlore' | 'regex' | 'trigger' | 'assets' | 'files' | 'settings';
+  | 'meta' | 'botlore' | 'regex' | 'trigger' | 'assets' | 'files' | 'studio' | 'settings';
 
 /**
  * What the middle of the tab bar edits: one chat, or the bot's card.
@@ -63,6 +64,8 @@ const CONTENT_TABS: [TabId, string][] = [
   ['trigger', '트리거'],
   ['assets', '에셋'],
   ['files', '워크스페이스 파일'],
+  // Not this bot's, and not any bot's: the studio library outlives them.
+  ['studio', '에셋 스튜디오'],
 ];
 
 /** Tabs that show one chat's material - the only place the chat bar belongs. */
@@ -224,6 +227,7 @@ function renderActive(): void {
   else if (active === 'trigger') renderTriggerTab(node);
   else if (active === 'assets') renderAssetsTab(node);
   else if (active === 'files') renderFilesTab(node);
+  else if (active === 'studio') renderStudioTab(node);
   else renderSettingsTab(node);
 }
 
@@ -394,7 +398,7 @@ export function buildShell(): void {
     el('div', { class: 'tabs' }, [
       ...CONTENT_TABS.flatMap(([id, label]) => (
         id === 'files'
-          ? [el('span', { class: 'tabsep', title: '여기부터는 편집 대상이 아니라 봇의 워크스페이스입니다' }), tabButton(id, label)]
+          ? [el('span', { class: 'tabsep', title: '여기부터는 편집 대상이 아니라 작업 공간입니다 — 봇의 워크스페이스와, 봇과 무관한 에셋 스튜디오' }), tabButton(id, label)]
           : [tabButton(id, label)]
       )),
       syncBadge,

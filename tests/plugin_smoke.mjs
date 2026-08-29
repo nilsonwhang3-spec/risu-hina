@@ -326,11 +326,14 @@ check('shell rendered', !!document.querySelector('.wrap'));
 // Content views in the tab bar; settings is a header verb, not a view. The
 // middle of the bar is modal: chat tabs and bot tabs share the slot and only
 // one set is visible at a time.
-check('eleven content tabs present', document.querySelectorAll('.tab').length === 11,
+check('twelve content tabs present', document.querySelectorAll('.tab').length === 12,
       [...document.querySelectorAll('.tab')].map((t) => t.textContent).join(','));
 check('the workspace files tab is set apart', !!document.querySelector('.tabs .tabsep')
       && document.querySelector('.tabs .tabsep')?.nextElementSibling?.id === 'tab-files');
 check('and named for what it is', /워크스페이스 파일/.test(document.getElementById('tab-files')?.textContent || ''));
+// The studio is the one tab that is not about a bot at all; it sits in the
+// same set-apart zone, after the separator.
+check('the asset studio tab is present', !!document.getElementById('tab-studio'));
 // The bot half opens first (0.6.1): bot tabs visible, chat tabs hidden.
 check('chat tabs start hidden (bot mode)',
       document.getElementById('tab-editor')?.style.display === 'none'
@@ -1884,6 +1887,19 @@ console.log('\ntest_open_a_chat_risuai_does_not_have_open');
         document.querySelector('.chatbar .changesum')?.textContent);
 }
 
+console.log('\ntest_studio_tab');
+{
+  // The library, not a bot: the tree lists the studio's own areas and none of
+  // the workspace's, which is the whole point of the second scope.
+  clickById(document, 'tab-studio');
+  await settle(900);
+  const text = () => document.querySelector('.panel.active')?.textContent || '';
+  check('the studio tab renders its own tree', !!document.querySelector('.panel.active .filetree'));
+  check('it lists the library areas, not the workspace',
+        /생성물/.test(text()) && !/업로드/.test(text()), text().slice(0, 200));
+  check('and Hina is beside it', !!document.querySelector('.panel.active .right-inner'));
+}
+
 console.log('\ntest_no_character_selected');
 host.selectNone();
 clickById(document, 'tab-chats');
@@ -1896,6 +1912,18 @@ try {
 await settle(1200);
 check('no-selection is reported, not thrown',
       /캐릭터가 선택되어 있지 않습니다/.test(document.body.innerHTML));
+{
+  // The studio is not about a bot, so it must still work with none selected -
+  // that is the state a person is in when they open RisuAI to sort images.
+  clickById(document, 'tab-studio');
+  await settle(900);
+  check('the studio still opens with no bot selected',
+        !!document.querySelector('.panel.active .filetree'),
+        (document.querySelector('.panel.active')?.textContent || '').slice(0, 120));
+  check('and does not ask for one',
+        !/캐릭터가 선택되어 있지 않습니다|챗을 골라/.test(
+          document.querySelector('.panel.active')?.textContent || ''));
+}
 
 console.log('\ntest_unload');
 try { await unload?.(); } catch (e) { errors.push('unload threw: ' + e.stack); }

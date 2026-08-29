@@ -459,6 +459,55 @@ export interface BulkPreview {
   changes: { msgId: string; seq: number; role: string; hits: number; before: string; after: string }[];
 }
 
+/**
+ * The asset studio's files.
+ *
+ * The same endpoints the bot's workspace uses, addressed with `studio: true`
+ * instead of a charKey — the backend serves two roots from one file API
+ * (`app/files.py`). A separate object rather than a flag threaded through the
+ * ten methods above, because the two scopes must not be mixed up at a call
+ * site: nothing here needs a bot, and nothing above may reach the library.
+ */
+class StudioFiles {
+  private readonly q = { studio: 1 } as const;
+
+  async list(): Promise<FileListing> {
+    return await transport.get<FileListing>('/files', this.q);
+  }
+
+  async read(path: string): Promise<{ path: string; size: number; textual: boolean;
+                                      content: string; truncated?: boolean; note?: string }> {
+    return await transport.get('/files/read', { ...this.q, path });
+  }
+
+  async write(dir: string, name: string, text: string): Promise<{ path: string; size: number }> {
+    return await transport.upload('/files/upload', { studio: true, name, text, dir });
+  }
+
+  async upload(dir: string, name: string, base64: string, extract = false)
+    : Promise<{ path: string; size: number; extracted?: number }> {
+    return await transport.upload('/files/upload', { studio: true, name, base64, dir, extract });
+  }
+
+  /** Bytes for a thumbnail. POST + no-store: a cache in front of the backend
+   *  has been seen serving one GET's body for every query string (docs/06 §1-7). */
+  async bytes(path: string): Promise<Uint8Array> {
+    return await transport.postBinary('/files/download', { studio: true, path });
+  }
+
+  async mkdir(path: string): Promise<void> {
+    await transport.post('/files/mkdir', { studio: true, path });
+  }
+
+  async move(from: string, to: string): Promise<{ to: string }> {
+    return await transport.post('/files/move', { studio: true, from, to });
+  }
+
+  async remove(path: string): Promise<void> {
+    await transport.post('/files/delete', { studio: true, path });
+  }
+}
+
 class AppState {
   health: HealthInfo | null = null;
   connectError = '';
@@ -1288,6 +1337,9 @@ class AppState {
   async cleanFiles(areas?: string[]): Promise<{ areas: string[]; removed: number; freed: number }> {
     return await transport.post('/files/clean', { charKey: this.activeCharKey, areas });
   }
+
+  /** The asset studio's library. Same endpoints, other root - see `studio`. */
+  readonly studio = new StudioFiles();
 
   // --- agent presets --------------------------------------------------------
 
