@@ -717,6 +717,29 @@ def defaults_once() -> None:
     log.info("skill defaults: enabled %s, retired %s", on, gone)
 
 
+STUDIO_OPS_KEY = "skills_studio_ops_space_v1"
+
+
+def refresh_studio_ops_once() -> None:
+    """The studio moved into the global space (0.11.0). The seeded pixel-work
+    skill's reference still told the agent the sandbox cannot reach the
+    library and to move files first - now wrong in the misleading direction.
+    Replace that one reference file with the current seed, once."""
+    if db.has_migration(STUDIO_OPS_KEY):
+        return
+    db.mark_migration(STUDIO_OPS_KEY)
+    target = next((s for s in list_all()
+                   if s["name"].strip() == "에셋 스튜디오 이미지 가공"), None)
+    if not target:
+        return
+    try:
+        data = (SEED_DIR / "studio-image-ops.md").read_bytes()
+        put_file(target["slug"], "references/studio-image-ops.md", data)
+        log.info("studio image-ops reference refreshed for the space")
+    except (OSError, SkillError) as e:
+        log.warn("could not refresh the studio image-ops reference: %s", e)
+
+
 def _seed_file_skill(label: str, desc: str, filename: str, data: bytes, enabled: bool, order: int) -> dict:
     script = filename.endswith(".py")
     sub = "scripts" if script else "references"

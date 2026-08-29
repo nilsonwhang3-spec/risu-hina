@@ -2610,6 +2610,7 @@ async def _startup() -> None:
     await run_in_threadpool(skills.migrate_rows_once)
     await run_in_threadpool(skills.seed_once)
     await run_in_threadpool(skills.defaults_once)
+    await run_in_threadpool(skills.refresh_studio_ops_once)
     # The per-bot user files and the old studio library move into the global
     # space once (space_v1). Move + manifest only; tools/rollback_space.py
     # replays the manifest in reverse.

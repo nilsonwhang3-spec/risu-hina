@@ -23,20 +23,20 @@ import PIL  # 없으면 ModuleNotFoundError
 
 ## 스튜디오 라이브러리 경로
 
-스튜디오는 **봇 워크스페이스가 아니다.** 샌드박스는 워크스페이스 안에서만 쓸 수 있으므로,
-라이브러리 파일을 다루려면 먼저 워크스페이스로 가져와야 한다:
-
-1. `studio_list('images')` 로 경로를 확인한다.
-2. 손볼 파일은 사용자에게 `studio_adopt` 나 내보내기로 워크스페이스에 옮기게 하거나,
-   `studio_inpaint` 처럼 이미 있는 툴로 처리한다.
-3. `run_python` 안에서는 **워크스페이스 상대 경로**만 쓴다.
+스튜디오는 **전역 공간의 `studio/` 폴더다.** 샌드박스 루트가 전역 공간이므로
+`run_python` 에서 바로 읽고 쓴다 — 옮기는 절차는 없다. cwd 는 `hina/<봇이름>/` 이니
+라이브러리는 `../../studio/images/…` 처럼 위로 올라가거나, `find_files("*.png",
+base="studio/images")` 로 찾은 전역 경로를 `os.environ["RISUHINA_WORKSPACE"]` 에
+이어 붙여 절대 경로로 연다.
 
 ## 자주 쓰는 조리법
 
 ```python
+import os
 from PIL import Image
 
-im = Image.open("uploads/원본.png").convert("RGBA")
+SPACE = os.environ["RISUHINA_WORKSPACE"]
+im = Image.open(os.path.join(SPACE, "studio", "images", "원본.png")).convert("RGBA")
 
 # 1) 긴 변 기준 축소 — 비율 유지
 im.thumbnail((1024, 1024), Image.LANCZOS)

@@ -90,7 +90,8 @@ raises("a SYSTEM view cannot read into the space", files.read, CK, "../space/stu
 
 print("\ntest_files_api_over_the_space")
 files.upload(files.SPACE, "note.md", text="# hi", into="studio/styles/테스트")
-files.upload(CK, "note.md", text="# bot", into="uploads")
+raises("the SYSTEM view takes no uploads",
+       lambda: files.upload(CK, "note.md", text="# bot", into="uploads"))
 s_listing = files.listing(files.SPACE)
 b_listing = files.listing(CK)
 s_paths = [f["path"] for a in s_listing["areas"] for f in a["files"]]

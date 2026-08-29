@@ -24,19 +24,17 @@ SCOPE_TABLES = ("characters", "chats", "turns", "turns_original", "lore_entries"
                 "card_fields", "card_scripts", "char_assets")
 
 
-def install_skills() -> list[str]:
-    """Copy the enabled skill folders into space/.hina/skills/<slug>/.
+def install_skills(home: Path) -> list[str]:
+    """Copy the enabled skill folders into <home>/skills/<slug>/.
 
-    ONE copy for the whole space now, not one per bot: the sandbox root is the
-    space, so every bot's script can read the same folder, and rebuilding it
-    per run keeps the old rule - a skill the user disabled or renamed must not
-    linger as a folder the agent can still find and run.
+    They live in the bot's hina/ home so every path a skill body names
+    (`skills/<slug>/…`, relative to the cwd) keeps working. Rebuilt on every
+    run: a skill the user disabled or renamed must not linger as a folder the
+    agent can still find and run.
     """
     import shutil
 
-    from . import workspace
-
-    out = workspace.ensure_space() / ".hina" / "skills"
+    out = home / "skills"
     try:
         if out.exists():
             shutil.rmtree(out, ignore_errors=True)
@@ -221,7 +219,7 @@ def run(
 
     layout(home, system)
     build_scope_db(system, char_key)
-    install_skills()
+    install_skills(home)
     src = home / "scripts" / "_agent_run.py"
     src.write_text(code, encoding="utf-8")
 
@@ -317,11 +315,14 @@ def describe_helper() -> str:
         Writes still go through the tools (stage_* / propose_*): compute with
         the script, then aim the tool with the ids the script found.
 
-        Where to write - the panel cleans up on these, so please use them:
-          risuhina.scratch("x.json")  throwaway working files
-          risuhina.out("report.md")   deliverables the user downloads
-          uploads/ is read-only.
+        The file space is global and the cwd is this bot's hina/<이름>/ folder:
+          risuhina.scratch("x.json")  throwaway working files (hina/<이름>/scratch)
+          risuhina.out("report.md")   deliverables (hina/<이름>/out)
+          risuhina.uploads() / read_upload(이름)  the user's projects/<이름>/ material
+          ../../studio/…, ../../projects/…  the rest of the space, readable and
+          writable by plain open() - the studio library is ordinary files here.
 
-        The script cannot read or write outside this workspace, cannot see other
-        bots, and cannot start another process. Everything else works normally.
+        The script can read this bot's SYSTEM snapshot (RISUHINA_SYSTEM env:
+        card.md, original/) but not write it, cannot reach other bots' DB rows,
+        and cannot start another process. Everything else works normally.
     """).strip()

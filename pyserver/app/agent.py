@@ -84,12 +84,18 @@ INSTRUCTIONS = """\
   승인을 받은 뒤** 그 다음 턴에 진행해라. 읽기·검색은 어느 화면에서든 된다 — 너는 현재 탭뿐
   아니라 선택된 봇과 챗 전체를 안다.
 
-작업 폴더 규칙 (반드시 지켜라 — 패널이 이 규칙대로 정리한다):
-- `scratch/` 임시 파일. 중간 산출물, 계산 결과, 버려도 되는 것 전부 여기.
-- `out/` 사용자가 내려받을 결과물(md·html·json). 완성된 것만 여기.
-  여기 넣으면 대화창에 내려받기 버튼이 뜬다. 결과물을 만들었으면 반드시 여기 저장하고,
-  "out/ 에 저장했습니다, 대화창에서 내려받으실 수 있습니다"라고 알려라.
-- `uploads/` 사용자가 올린 참고 파일. **읽기 전용이다. 쓰지 마라.**
+작업 공간 규칙 (반드시 지켜라 — 모든 봇이 하나의 전역 공간을 쓴다):
+- `projects/<봇이름>/`  사용자가 직접 관리하는 참고 자료·프로젝트 폴더. **읽기는 자유,
+  구조를 네가 바꾸지 마라.** 사용자가 올린 파일은 대개 여기 있다.
+- `studio/`  이미지 라이브러리(styles·characters·fragments·scenes·images). 프롬프트 카드와
+  생성물이 산다. 읽고 쓸 수 있다.
+- `hina/<봇이름>/`  네 작업 공간이다. 임시는 `scratch/`, 완성 산출물(md·html·json)은 `out/`,
+  스크립트는 `scripts/`. out/ 에 넣으면 대화창에 열기 버튼이 뜬다 — 결과물을 만들었으면
+  반드시 여기 저장하고 "저장했습니다, 파일 탭에서 여실 수 있습니다"라고 알려라.
+- `system/`  이 봇의 원본 스냅샷(카드·원본 전사). **읽기 전용이다.**
+- **파일 위치를 모르면 find_files(이름 글롭) / search_files(내용 검색) 로 먼저 찾아라.**
+  결과 끝의 "총 N개 중 M개 표시"가 전부가 아니라고 말하면, 잘렸다고 사용자에게도 말해라.
+- 다른 봇의 폴더도 보인다. 읽는 것은 자유지만, **요청 없이 다른 봇의 폴더를 수정하지 마라.**
 - **에셋(이미지)도 다룬다.** list_assets 로 목록을 보고 fetch_assets 로 scratch/ 에 꺼내
   run_python(PIL) 으로 가공한 뒤, 결과 PNG 를 propose_asset_add / propose_asset_replace 로
   제안한다. 승인되면 플러그인이 RisuAI 에 저장하고 카드에 붙인다 — 이것은 반영을 기다리지
@@ -99,8 +105,8 @@ INSTRUCTIONS = """\
   RisuAI 규칙: **같은 이름을 가진 에셋 여러 개 = 랜덤 풀**({{asset::이름}} 호출 때 무작위 1개).
   charx 파일명의 `_1`, `_2` 는 파일명 고유화용일 뿐 이름이 아니다. 이름 끝 `.png` 같은 확장자는
   보통 실수이며(호출은 확장자 없는 이름), 일괄 제거는 카드 도구가 한다.
-- 워크스페이스 밖에는 읽기도 쓰기도 할 수 없다. 다른 봇의 데이터도 볼 수 없다.
-- 파일을 만들기 전에 list_files 로 이미 있는지 확인해라. 같은 이름을 덮어쓰지 마라.
+- 전역 공간과 system/ 밖에는 읽기도 쓰기도 할 수 없다. 다른 봇의 DB(챗·로어)도 볼 수 없다.
+- 파일을 만들기 전에 find_files 로 이미 있는지 확인해라. 같은 이름을 덮어쓰지 마라.
 """
 
 
@@ -921,73 +927,33 @@ def build() -> Agent[Deps]:
 
     # --- 에셋 스튜디오 --------------------------------------------------------
     #
-    # The studio is bot-independent: these read and write a global library, not
-    # this bot's workspace, and they work with no bot selected. The one that
-    # crosses back into a bot is `studio_adopt`, which stages a file and then
-    # hands it to the existing propose_asset_add path.
+    # The studio is bot-independent: its library is the studio/ folder of the
+    # global space, and these domain verbs work with no bot selected. The one
+    # that crosses back into a bot is `studio_adopt`, which proposes the image
+    # by its own global path through the existing host_asset_add queue.
 
-    @agent.tool
-    def studio_list(ctx: RunContext[Deps], area: str) -> str:
-        """에셋 스튜디오 라이브러리 목록. area: images | styles | characters | scenes | fragments.
-
-        스튜디오는 봇과 무관한 전역 라이브러리다. 봇이 선택돼 있지 않아도 쓸 수 있다.
-        """
-        try:
-            items = studio.listing(area)
-        except Exception as e:  # noqa: BLE001
-            return f"목록을 읽지 못했습니다: {e}"
-        if not items:
-            return f"{area}/ 가 비어 있습니다"
-        lines = [f"{i['path']}  {i.get('name','')}"
-                 + (f"  감정 {i['count']}개" if i.get("count") else "")
-                 + (f"  — {i['description']}" if i.get("description") else "")
-                 for i in items[:200]]
-        if len(items) > 200:
-            lines.append(f"… 이하 {len(items) - 200}개 생략")
-        return "\n".join(lines)
-
-    @agent.tool
-    def studio_read(ctx: RunContext[Deps], path: str) -> str:
-        """스튜디오의 .md / .json 파일 본문을 읽는다 (styles/…, characters/…, scenes/…, fragments/…)."""
-        try:
-            return studio._read_text(path)[:30000]
-        except Exception as e:  # noqa: BLE001
-            return str(e)
-
-    @agent.tool
-    def studio_write(ctx: RunContext[Deps], path: str, content: str) -> str:
-        """스튜디오에 파일을 쓴다 (스타일 .md, 캐릭터/감정/프리셋 .json).
-
-        경로는 `styles/폴더/이름.md` 처럼 영역으로 시작해야 한다. 덮어쓴다.
-        스타일 .md 는 front matter + `## positive` / `## negative` 형식이다.
-        SD스튜디오 프리셋(scenes/)은 NAIS3 형식이다:
-        `{"version":1,"scenes":[{"name","prompt","negativePrompt","width","height"}]}`.
-        씬 하나가 배치의 한 장이고, 프롬프트·네거티브·크기를 각자 들고 있다.
-        **표정 세트는 이렇게 씬마다 한 장씩 일반 생성으로 뽑는다** — 디렉터 emotion
-        툴이 아니다(10배 비싸고 통제가 안 된다).
-
-        프롬프트 안의 `{{…}}` 는 NovelAI 강조 문법이라 **절대 건드리지 않는다.**
-        `<조각>` · `<폴더/조각>` · `<컬렉션.키>` 는 fragments/ 참조이고 생성 직전에 치환된다.
-        """
-        rel = studio._rel(path)
-        parts = rel.split("/")
-        if parts[0] != studio.BASE or len(parts) < 3 or parts[1] not in studio.AREAS:
-            return f"경로는 studio/{{{' | '.join(studio.AREAS)}}}/… 이어야 합니다"
-        try:
-            r = files.upload(files.SPACE, parts[-1], text=content, into="/".join(parts[:-1]))
-        except files.FileError as e:
-            return str(e)
-        return f"썼습니다: {r['path']} ({r['size']} 바이트)"
+    # NOTE: the studio's FILES are ordinary space files (studio/…) - read and
+    # write them with the general file tools. Only the domain verbs live here.
 
     @agent.tool
     def studio_plan(ctx: RunContext[Deps], spec_json: str) -> str:
         """배치 생성 계획을 세워 본다 (아무것도 만들지 않는다). 먼저 이걸로 확인하고 studio_generate 한다.
 
-        spec 예시:
-        {"model":"nai-diffusion-4-5-full","style":"styles/수채화.md",
-         "characters":["characters/히나.json"],"scenePreset":"scenes/기본.json",
+        spec 예시 (경로는 전역 공간 기준, studio/ 프리픽스):
+        {"model":"nai-diffusion-4-5-full","style":"studio/styles/수채화.md",
+         "characters":["studio/characters/히나.json"],"scenePreset":"studio/scenes/기본.json",
          "characterName":"히나","outfit":"교복","count":1,"seed":4242,
-         "folder":"images/히나","params":{"steps":23,"width":832,"height":1216}}
+         "folder":"studio/images/히나","params":{"steps":23,"width":832,"height":1216}}
+
+        라이브러리 파일은 일반 파일 도구(read_file / write_file)로 읽고 쓴다.
+        스타일 .md 는 front matter + `## positive` / `## negative`. SD스튜디오
+        프리셋(studio/scenes/)은 NAIS3 형식
+        `{"version":1,"scenes":[{"name","prompt","negativePrompt","width","height"}]}` —
+        씬 하나가 배치의 한 장이고, **표정 세트는 씬마다 한 장씩 일반 생성으로 뽑는다**
+        (디렉터 emotion 툴이 아니다: 10배 비싸고 통제가 안 된다).
+        프롬프트 안의 `{{…}}` 는 NovelAI 강조 문법이라 **절대 건드리지 않는다.**
+        `<조각>` · `<폴더/조각>` · `<컬렉션.키>` 는 studio/fragments/ 참조이고 생성 직전에
+        치환된다 — 계획 결과의 unresolved 는 못 찾은 참조다.
 
         이름은 `{character}-{outfit}-{emotion}-{stamp}-{n}` 규칙을 따른다. 이 규칙을
         지키는 것이 나중에 비교 선택기가 그룹을 나누는 조건이다.
@@ -1048,7 +1014,7 @@ def build() -> Agent[Deps]:
         """생성물 폴더의 파일명을 정규식으로 갈라 본다. **안 맞는 파일을 반드시 보고한다.**
 
         이름은 결정론적이지 않다 — 그래서 이 툴이 있다. 안 맞는 것이 있으면
-        studio_write 로 규칙을 고치거나, 사용자에게 일괄 이름 변경을 제안한다.
+        정규식을 고치거나, 사용자에게 studio_rename 일괄 이름 변경을 제안한다.
         """
         try:
             base = files._resolve(files.SPACE, studio._rel(folder))
@@ -1436,27 +1402,92 @@ def build() -> Agent[Deps]:
             parts.append("(출력이 잘렸다)")
         return "\n\n".join(parts) or f"(출력 없음, exit={r.get('exitCode')})"
 
+    # The one virtual prefix over the space: `system/…` reads this bot's own
+    # SYSTEM directory (frozen originals, card.md) - read-only machinery that
+    # deliberately lives outside the shared tree.
+    def _fs(ctx: RunContext[Deps], path: str) -> tuple[str, str]:
+        p = (path or "").replace("\\", "/").strip("/")
+        if p == "system" or p.startswith("system/"):
+            return ctx.deps.char_key, p[6:].lstrip("/")
+        # Skill bodies say `skills/<slug>/…` - relative to the bot's home,
+        # where install_skills puts them.
+        if p == "skills" or p.startswith("skills/"):
+            return files.SPACE, f"hina/{workspace.bot_folder(ctx.deps.char_key)}/{p}"
+        return files.SPACE, p
+
     @agent.tool
     def write_file(ctx: RunContext[Deps], name: str, content: str) -> str:
-        """산출물을 out/ 에 쓴다. md·html 등 사용자가 내려받을 완성품만."""
-        path = workspace.write_out(ctx.deps.char_key, name, content)
+        """파일을 쓴다. 이름만 주면 hina/<봇>/out/ 에 산출물로 저장된다.
+
+        projects/ · studio/ · hina/ 로 시작하는 전체 경로를 주면 그 위치에 쓴다
+        (덮어쓴다 — 먼저 find_files 로 확인해라). 그 밖의 위치는 거부된다.
+        """
+        rel = (name or "").replace("\\", "/").strip("/")
+        area = rel.split("/", 1)[0]
+        if "/" in rel and area in ("projects", "studio", "hina"):
+            try:
+                dest = files._resolve(files.SPACE, rel)
+            except files.FileError as e:
+                return str(e)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(content, encoding="utf-8")
+            return f"{rel} 에 {len(content)}자를 썼습니다"
+        path = workspace.write_out(ctx.deps.char_key, rel, content)
         return f"{path} 에 {len(content)}자를 썼습니다"
 
     @agent.tool
     def list_files(ctx: RunContext[Deps], directory: str = "") -> str:
-        """워크스페이스의 파일 목록. 비워 두면 최상위."""
+        """전역 공간의 파일 목록. 비워 두면 최상위 (projects·studio·hina).
+
+        `system/` 은 이 봇의 원본 스냅샷(읽기 전용)이다: system/original/<챗>.md 등.
+        """
         try:
-            return files.agent_list(ctx.deps.char_key, directory)
+            scope, rel = _fs(ctx, directory)
+            return files.agent_list(scope, rel)
         except files.FileError as e:
             return str(e)
 
     @agent.tool
     def read_file(ctx: RunContext[Deps], path: str) -> str:
-        """워크스페이스 안의 파일을 읽는다. uploads/ 의 참고 자료도 여기로."""
+        """전역 공간(또는 system/)의 파일을 읽는다. 참고 자료는 대개 projects/<봇>/ 에 있다."""
         try:
-            return files.agent_read(ctx.deps.char_key, path)
+            scope, rel = _fs(ctx, path)
+            return files.agent_read(scope, rel)
         except files.FileError as e:
             return str(e)
+
+    @agent.tool
+    def find_files(ctx: RunContext[Deps], pattern: str, base: str = "", limit: int = 200) -> str:
+        """전역 공간에서 파일 이름을 글롭으로 찾는다 (예: "*.png", "히나*", "projects/*/메모/*.md").
+
+        슬래시가 든 패턴은 경로 전체에, 아니면 파일 이름에 맞춘다. 위치를 모르는 파일은
+        먼저 이걸로 찾아라. 결과가 잘리면 마지막 줄이 그렇다고 말한다 — 그대로 전해라.
+        """
+        try:
+            r = files.search_names(files.SPACE, pattern, base=base, limit=max(1, min(500, limit)))
+        except files.FileError as e:
+            return str(e)
+        if not r["total"]:
+            return f"'{pattern}' 에 맞는 파일이 없습니다"
+        lines = [f"{f['path']}  ({f['size']}B)" for f in r["files"]]
+        lines.append(f"총 {r['total']}개 중 {len(r['files'])}개 표시")
+        return "\n".join(lines)
+
+    @agent.tool
+    def search_files(ctx: RunContext[Deps], query: str, glob: str = "", limit: int = 50) -> str:
+        """전역 공간의 텍스트 파일 내용을 검색한다 (부분 문자열, 대소문자 무시).
+
+        glob 으로 경로를 좁힐 수 있다 (예: "projects/히나/*"). 파일당 최대 5줄.
+        마지막 줄이 몇 개를 스캔했고 몇 개가 잘렸는지 말한다 — 그대로 전해라.
+        """
+        try:
+            r = files.search_content(files.SPACE, query, glob=glob, limit=max(1, min(200, limit)))
+        except files.FileError as e:
+            return str(e)
+        lines = [f"{h['path']}:{h['line']}  {h['text']}" for h in r["hits"]]
+        lines.append(f"총 {r['totalHits']}개 히트 중 {len(r['hits'])}개 표시 "
+                     f"(파일 {r['scanned']}개 스캔, {r['skipped']}개 건너뜀)")
+        return "\n".join(lines)
 
     # --- outside world ------------------------------------------------------
 

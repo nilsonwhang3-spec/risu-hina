@@ -2,36 +2,20 @@
 
 A **scope** is one of two roots, and every function here takes one:
 
-    a bot's workspace key   `data/workspaces/<key>/` - per bot, the original home
-    STUDIO                  the asset studio library - global, bot-independent
+    SPACE                   the ONE global space every bot shares - the default
+    a bot's workspace key   `data/workspace/<key>/` - the bot's SYSTEM dir
+                            (frozen originals, machinery), read-only on the wire
 
-The studio was added because generating and sorting images is not work that
-belongs to one bot: you make them, sort them, and only then decide which bot
-gets them. Rather than a second file API, the scope became a parameter - the
-listing, upload, chunked upload, zip extraction, move and delete below are
-identical for both and were not touched when the studio arrived. Only the root
-and the area table differ, and both hang off the scope.
+The space holds everything the user and the agent actually work with:
+projects/ the user manages, studio/ the image library, hina/<봇이름>/ the
+agent's per-bot work areas. The SYSTEM directories stay outside it on purpose -
+everything inside the space is readable by every bot's sandbox, and another
+bot's scope.db must not be.
 
 Every path here is resolved and checked against that scope's root before it is
 touched. The check uses the *resolved* path, so `../` and symlinks are caught -
 a relative path that looks contained can still point anywhere. That check is
-what keeps the two scopes apart as well: a studio path can never resolve into a
-bot's workspace, or the other way round.
-
-Directories carry meaning, and the cleanup rules follow it:
-
-    original/   frozen source snapshots. Never cleaned; losing these loses the
-                only reference the diff is computed against.
-    uploads/    files the user provided. Never cleaned - only they can delete
-                what they chose to put here.
-    scripts/    agent-written .py plus the generated helper. Cleanable.
-    skills/     the user's enabled script skills, copied in per run. Read-only
-                here; the source of truth is the skills table.
-    scratch/    throwaway. Cleanable, and that is what it is for.
-    out/        deliverables. Cleanable, but only on request: the user may not
-                have downloaded them yet.
-    .scratch/   ours - the scoped snapshot and the proposal spool. Cleanable
-                and regenerated on the next run.
+what keeps the SYSTEM dirs out of the space's reach as well.
 """
 from __future__ import annotations
 
@@ -44,16 +28,11 @@ from typing import Any
 
 from . import log, workspace
 
-# Directory -> (may the panel delete files here, is it cleaned by "정리")
+# Directory -> (may the panel delete files here, is it cleaned by "정리").
+# The SYSTEM view: frozen originals (the diff baseline) and our machinery.
 AREAS: dict[str, tuple[bool, bool]] = {
     "original": (False, False),
-    "uploads": (True, False),
-    "scripts": (True, True),
-    # Rebuilt from the skills table on every run, so deleting a file here is
-    # pointless rather than harmful - the panel shows them read-only.
-    "skills": (False, True),
-    "scratch": (True, True),
-    "out": (True, True),
+    # The scoped snapshot and the proposal spool - regenerated on the next run.
     ".scratch": (False, True),
 }
 
@@ -72,8 +51,8 @@ SPACE_AREAS: dict[str, tuple[bool, bool]] = {
     "studio": (True, False),
     # The agent's work areas, one folder per bot name: scripts/scratch/out.
     "hina": (True, False),
-    # Ours: skills copies, the bots.json map, migration manifests. Hidden
-    # from the panel by the same rule that hides .scratch.
+    # Ours: the bots.json map and migration manifests. Hidden from the panel
+    # by the same rule that hides .scratch.
     ".hina": (False, True),
 }
 
@@ -90,7 +69,8 @@ def upload_targets(scope: str) -> tuple[tuple[str, ...], str]:
     """
     if scope == SPACE:
         return tuple(a for a in SPACE_AREAS if not a.startswith(".")), "projects"
-    return ("uploads", "out"), "uploads"
+    # The SYSTEM view takes no uploads at all.
+    return (), ""
 
 # Preview and upload ceilings. A transcript export can legitimately be large,
 # but nothing here needs to be read into a JSON response whole.

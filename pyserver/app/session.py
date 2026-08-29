@@ -275,11 +275,11 @@ async def run(session_id: str, prompt: str, mode: str = "") -> AsyncGenerator[st
         yield _line({"type": "error", "error": f"unknown chat: {chat_key}"})
         return
 
-    # Reference and script skills are files in the space (.hina/skills), and
-    # the agent is told to read them with read_file - so they have to exist
+    # Reference and script skills are files in the bot's hina home, and the
+    # agent is told to read them with read_file - so they have to exist
     # before the turn starts, not only after run_python has been called once.
     ws_dir = workspace.root(crow["char_key"])
-    pyexec.install_skills()
+    pyexec.install_skills(workspace.hina_dir(crow["char_key"]))
 
     deps = agent_mod.Deps(
         chat_key=chat_key,
