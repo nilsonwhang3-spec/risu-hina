@@ -217,6 +217,66 @@ check("nothing is pending after the reset",
       and not store.patch(RTK)["edits"],
       f"lore={store.lore_changes(rk, RTK)} mem={mem.changes(RTK)}")
 
+print("\ntest_snapshot_kinds_prune_and_dedup")
+# 'user' = the version list (saves the user asked for by name); 'auto' = the
+# code protecting itself before something destructive - internal backups.
+listed = snapshots.listing(TK)
+check("restore's own snapshot is kind='auto'",
+      any(c["kind"] == "auto" and c["label"] == "restore 직전" for c in listed),
+      str([(c["label"], c["kind"]) for c in listed]))
+check("a snapshot the user saved is kind='user'",
+      all(c["kind"] == "user" for c in listed if c["label"] in ("두 번째", "되돌릴 지점")),
+      str([(c["label"], c["kind"]) for c in listed]))
+
+# A user snapshot may share an auto label; the restore dedup folds only autos.
+snapshots.create(TK, "restore 직전")  # deliberately the auto label, saved by hand
+snapshots.restore(TK, cid3)
+pairs = [(c["label"], c["kind"]) for c in snapshots.listing(TK)]
+check("the dedup folds only the auto 'restore 직전'",
+      pairs.count(("restore 직전", "user")) == 1 and pairs.count(("restore 직전", "auto")) == 1,
+      str(pairs))
+
+# Autos self-prune as they are taken (keep defaults to 5), so no caller can
+# forget; explicit pruning can tighten, but never to zero - RisuAI has no
+# undo of its own for a plugin write.
+for i in range(9):
+    snapshots.create(TK, f"자동{i}", kind="auto")
+autos = [c for c in snapshots.listing(TK) if c["kind"] == "auto"]
+check("auto snapshots self-prune as they are taken", len(autos) == 5, str(len(autos)))
+n = snapshots.prune_auto(TK, keep=2)
+left = snapshots.listing(TK)
+check("explicit pruning tightens further",
+      n == 3 and len([c for c in left if c["kind"] == "auto"]) == 2, f"n={n}")
+check("every user snapshot survived the pruning",
+      {"두 번째", "되돌릴 지점", "반영 직전", "restore 직전"}
+      <= {c["label"] for c in left if c["kind"] == "user"},
+      str([(c["label"], c["kind"]) for c in left]))
+snapshots.prune_auto(TK, keep=0)
+check("pruning cannot go to zero",
+      len([c for c in snapshots.listing(TK) if c["kind"] == "auto"]) == 1)
+
+# Bot snapshots: the same two kinds, the same pruning.
+snapshots.create_card(rk, "봇 저장")
+for i in range(3):
+    snapshots.create_card(rk, f"봇자동{i}", kind="auto")
+snapshots.prune_auto_card(rk, keep=1)
+cleft = snapshots.listing_card(rk)
+check("card pruning keeps the user save and the newest auto",
+      [c["label"] for c in cleft if c["kind"] == "user"] == ["봇 저장"]
+      and len([c for c in cleft if c["kind"] == "auto"]) == 1,
+      str([(c["label"], c["kind"]) for c in cleft]))
+
+print("\ntest_schema_13_backfills_old_auto_labels")
+# A database from before schema 13 has every snapshot at the column default
+# ('user'); the one-time backfill files the code-written labels as backups.
+old = snapshots.create(TK, "반영 직전")  # lands as 'user', as a pre-13 row would read
+db.execute("UPDATE meta SET value = '12' WHERE key = 'schema_version'")
+db._backfill_snapshot_kinds(db._conn)
+db.execute("UPDATE meta SET value = '13' WHERE key = 'schema_version'")
+row = db.one("SELECT kind FROM checkpoints WHERE id = ?", (old,))
+check("a pre-13 auto-labelled row is filed as a backup",
+      row is not None and row["kind"] == "auto", str(dict(row) if row else None))
+
 print()
 if FAILURES:
     print(f"FAIL - {len(FAILURES)} check(s): " + ", ".join(FAILURES))

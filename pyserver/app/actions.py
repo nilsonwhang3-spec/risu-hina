@@ -200,7 +200,8 @@ def _checkpoint_restore(a: dict) -> str:
 
 def _checkpoint_create(a: dict) -> str:
     from . import snapshots
-    cid = snapshots.create(a["chatKey"], a["args"].get("label") or "에이전트")
+    label = a["args"].get("label")
+    cid = snapshots.create(a["chatKey"], label or "에이전트", kind="user" if label else "auto")
     return f"스냅샷을 저장했습니다 (id={cid})"
 
 
@@ -242,7 +243,8 @@ def _script_delete(a: dict) -> str:
 
 def _card_checkpoint_create(a: dict) -> str:
     from . import snapshots
-    cid = snapshots.create_card(a["charKey"], a["args"].get("label") or "에이전트")
+    label = a["args"].get("label")
+    cid = snapshots.create_card(a["charKey"], label or "에이전트", kind="user" if label else "auto")
     return f"봇 스냅샷을 저장했습니다 (id={cid})"
 
 

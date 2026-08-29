@@ -14,24 +14,40 @@ from . import chatfmt, config, db, log, store
 from . import memory as mem
 
 
-def create(chat_key: str, label: str) -> str:
+def _check_kind(kind: str) -> str:
+    # Two values, checked at the door: everything downstream (the version
+    # list, pruning, the restore dedup) branches on this column.
+    if kind not in ("user", "auto"):
+        raise ValueError(f"unknown snapshot kind: {kind}")
+    return kind
+
+
+def create(chat_key: str, label: str, kind: str = "user") -> str:
     """Snapshot the whole chat: turns, this chat's lorebook, its memory.
 
     One unit, because that is what the user restores. A snapshot that put the
     turns back but left the lorebook holding summaries of turns that had just
     reappeared would be worse than no snapshot.
+
+    `kind='user'` is a save the user asked for by name - the version list.
+    `kind='auto'` is the code protecting itself before something destructive -
+    an internal backup, pruned to the newest few right here, so no caller can
+    forget to.
     """
+    _check_kind(kind)
     md = store.export_markdown(chat_key)
     row = store.chat_row(chat_key) or {}
     ck = row.get("char_key") or ""
     cid = uuid.uuid4().hex
     db.execute(
         "INSERT INTO checkpoints(id, chat_key, label, markdown, meta_json, message_count, created_at, "
-        "lore_json, memory_json) VALUES(?,?,?,?,?,?,?,?,?)",
+        "lore_json, memory_json, kind) VALUES(?,?,?,?,?,?,?,?,?,?)",
         (cid, chat_key, label, md, row.get("meta_json") or "{}",
          chatfmt.message_count(md), db.now(),
-         db.js(store.lore_rows(ck, chat_key)), db.js(mem.rows_for_checkpoint(chat_key))),
+         db.js(store.lore_rows(ck, chat_key)), db.js(mem.rows_for_checkpoint(chat_key)), kind),
     )
+    if kind == "auto":
+        prune_auto(chat_key)
     keep = int((config.section("limits") or {}).get("checkpointKeep") or 50)
     db.execute(
         "DELETE FROM checkpoints WHERE chat_key = ? AND id NOT IN "
@@ -41,9 +57,26 @@ def create(chat_key: str, label: str) -> str:
     return cid
 
 
+def prune_auto(chat_key: str, keep: int | None = None) -> int:
+    """Automatic snapshots are internal backups, not the user's version list,
+    so only the newest few earn their keep. Never touches a 'user' row, and
+    never prunes to zero: RisuAI has no undo of its own for a plugin write,
+    so the backup taken before the last 반영 must stay reachable."""
+    if keep is None:
+        keep = int((config.section("limits") or {}).get("autoBackupKeep") or 5)
+    keep = max(1, int(keep))
+    cur = db.execute(
+        "DELETE FROM checkpoints WHERE chat_key = ? AND kind = 'auto' AND id NOT IN "
+        "(SELECT id FROM checkpoints WHERE chat_key = ? AND kind = 'auto' "
+        "ORDER BY created_at DESC LIMIT ?)",
+        (chat_key, chat_key, keep),
+    )
+    return cur.rowcount or 0
+
+
 def listing(chat_key: str) -> list[dict]:
     rows = db.query(
-        "SELECT id, label, message_count, created_at FROM checkpoints "
+        "SELECT id, label, message_count, created_at, kind FROM checkpoints "
         "WHERE chat_key = ? ORDER BY created_at DESC",
         (chat_key,),
     )
@@ -91,9 +124,9 @@ def restore(chat_key: str, checkpoint_id: str) -> dict:
     # "restore 직전" rows, which is most of what made the list unreadable, and
     # only the newest was ever any use: the one before the restore you just
     # regretted.
-    db.execute("DELETE FROM checkpoints WHERE chat_key = ? AND label = 'restore 직전'",
-               (chat_key,))
-    create(chat_key, "restore 직전")
+    db.execute("DELETE FROM checkpoints WHERE chat_key = ? AND label = 'restore 직전' "
+               "AND kind = 'auto'", (chat_key,))
+    create(chat_key, "restore 직전", kind="auto")
     env = chatfmt.encode(row["markdown"], db.unjs(row["meta_json"], {}) or {})
     chat_row = store.chat_row(chat_key) or {}
     # The working copy only. This used to go through `ingest_chat(force=True)`,
@@ -120,16 +153,20 @@ def restore(chat_key: str, checkpoint_id: str) -> dict:
 # functions rather than nullable-ing chat_key: every consumer above assumes a
 # chat (markdown, message_count), and a bot snapshot has neither.
 
-def create_card(char_key: str, label: str) -> str:
-    """Snapshot the bot as one unit: card fields, scripts, global lorebook."""
+def create_card(char_key: str, label: str, kind: str = "user") -> str:
+    """Snapshot the bot as one unit: card fields, scripts, global lorebook.
+    `kind` as in create()."""
+    _check_kind(kind)
     rows = cardmod.rows_for_checkpoint(char_key)
     cid = uuid.uuid4().hex
     db.execute(
         "INSERT INTO card_checkpoints(id, char_key, label, fields_json, scripts_json, "
-        "lore_json, created_at) VALUES(?,?,?,?,?,?,?)",
+        "lore_json, created_at, kind) VALUES(?,?,?,?,?,?,?,?)",
         (cid, char_key, label, db.js(rows["fields"]), db.js(rows["scripts"]),
-         db.js(store.lore_rows_global(char_key)), db.now()),
+         db.js(store.lore_rows_global(char_key)), db.now(), kind),
     )
+    if kind == "auto":
+        prune_auto_card(char_key)
     keep = int((config.section("limits") or {}).get("checkpointKeep") or 50)
     db.execute(
         "DELETE FROM card_checkpoints WHERE char_key = ? AND id NOT IN "
@@ -139,9 +176,23 @@ def create_card(char_key: str, label: str) -> str:
     return cid
 
 
+def prune_auto_card(char_key: str, keep: int | None = None) -> int:
+    """prune_auto's bot twin - see there for why keep never reaches zero."""
+    if keep is None:
+        keep = int((config.section("limits") or {}).get("autoBackupKeep") or 5)
+    keep = max(1, int(keep))
+    cur = db.execute(
+        "DELETE FROM card_checkpoints WHERE char_key = ? AND kind = 'auto' AND id NOT IN "
+        "(SELECT id FROM card_checkpoints WHERE char_key = ? AND kind = 'auto' "
+        "ORDER BY created_at DESC LIMIT ?)",
+        (char_key, char_key, keep),
+    )
+    return cur.rowcount or 0
+
+
 def listing_card(char_key: str) -> list[dict]:
     rows = db.query(
-        "SELECT id, label, created_at FROM card_checkpoints "
+        "SELECT id, label, created_at, kind FROM card_checkpoints "
         "WHERE char_key = ? ORDER BY created_at DESC",
         (char_key,),
     )
@@ -183,9 +234,9 @@ def restore_card(char_key: str, checkpoint_id: str) -> dict:
         raise LookupError(f"unknown checkpoint: {checkpoint_id}")
     # Same as chat restore: snapshot first so restoring is undoable, and only
     # ever one of them (see restore()).
-    db.execute("DELETE FROM card_checkpoints WHERE char_key = ? AND label = 'restore 직전'",
-               (char_key,))
-    create_card(char_key, "restore 직전")
+    db.execute("DELETE FROM card_checkpoints WHERE char_key = ? AND label = 'restore 직전' "
+               "AND kind = 'auto'", (char_key,))
+    create_card(char_key, "restore 직전", kind="auto")
     counts = cardmod.restore_rows(char_key, {
         "fields": db.unjs(row["fields_json"], []) or [],
         "scripts": db.unjs(row["scripts_json"], []) or [],

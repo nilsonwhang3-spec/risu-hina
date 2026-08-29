@@ -165,8 +165,8 @@ def _snapshot(kind: str, row: dict) -> None:
     try:
         if kind in ("turn", "memory") or (kind == "lore" and row.get("chat_key")):
             if row.get("chat_key"):
-                snapshots.create(str(row["chat_key"]), "충돌 해결 직전")
+                snapshots.create(str(row["chat_key"]), "충돌 해결 직전", kind="auto")
         elif row.get("char_key"):
-            snapshots.create_card(str(row["char_key"]), "충돌 해결 직전")
+            snapshots.create_card(str(row["char_key"]), "충돌 해결 직전", kind="auto")
     except Exception as e:  # noqa: BLE001 - a snapshot failure must not block the fix
         log.warn("conflict snapshot failed: %s", e)

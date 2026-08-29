@@ -813,7 +813,7 @@ def h_approve(arg: dict) -> dict:
 
     # Approval and application are one user action, so applying here keeps the
     # client from having to sequence two calls and handle a half-done state.
-    _checkpoint(tk, "에이전트 제안 적용 직전")
+    _checkpoint(tk, "에이전트 제안 적용 직전", kind="auto")
     out = staging.apply_approved(tk)
     if out["conflicts"]:
         raise ApiError(409, "승인 이후 턴이 바뀌어서 적용하지 않았습니다", conflicts=out["conflicts"])
@@ -1374,7 +1374,7 @@ def h_commit(arg: dict) -> dict:
     """
     tk = _chat(arg)
     pending = h_changes({"chatKey": tk})
-    _checkpoint(tk, str(arg.get("label") or "반영 직전"))
+    _checkpoint(tk, str(arg.get("label") or "반영 직전"), kind="auto")
     log.info("commit chat=%s shipped %s", tk, pending.get("total"))
     return {"chatKey": tk, "shipped": pending.get("total"), "changes": pending}
 
@@ -1387,7 +1387,7 @@ def h_reset(arg: dict) -> dict:
     tk = _chat(arg)
     pending = h_changes({"chatKey": tk})
     ck = _char_of_chat(tk)
-    _checkpoint(tk, "reset 직전")
+    _checkpoint(tk, "reset 직전", kind="auto")
     store.reset_working(tk)
     store.reset_lore_local(ck, tk)
     mem.reset_working(tk)
@@ -1663,7 +1663,7 @@ def h_card_commit(arg: dict) -> dict:
     """The card write landed. Snapshot, and let the client re-read (see h_commit)."""
     ck = _char(arg)
     pending = cardmod.changes(ck)
-    snapshots.create_card(ck, str(arg.get("label") or "반영 직전"))
+    snapshots.create_card(ck, str(arg.get("label") or "반영 직전"), kind="auto")
     log.info("card commit char=%s shipped %s", ck, pending.get("total"))
     return {"charKey": ck, "shipped": pending.get("total"), "changes": pending}
 
@@ -1689,14 +1689,15 @@ def h_card_reset(arg: dict) -> dict:
     much went - the bar's confirmation line wants the number, not the verb."""
     ck = _char(arg)
     pending = cardmod.changes(ck)
-    snapshots.create_card(ck, "reset 직전")
+    snapshots.create_card(ck, "reset 직전", kind="auto")
     out = cardmod.reset_working(ck)
     out["lore"] = store.reset_lore_global(ck)
     return {"ok": True, "charKey": ck, **out, "discarded": pending.get("total") or 0}
 
 
 def h_card_checkpoint_create(arg: dict) -> dict:
-    return {"id": snapshots.create_card(_char(arg), str(arg.get("label") or ""))}
+    kind = "auto" if arg.get("auto") else "user"
+    return {"id": snapshots.create_card(_char(arg), str(arg.get("label") or ""), kind=kind)}
 
 
 def h_card_checkpoint_list(arg: dict) -> dict:
@@ -1738,14 +1739,17 @@ def h_card_checkpoint_restore(arg: dict) -> dict:
 
 # --- checkpoints ------------------------------------------------------------
 
-def _checkpoint(tk: str, label: str) -> str:
+def _checkpoint(tk: str, label: str, kind: str = "user") -> str:
     """Kept as the local name; the implementation lives in snapshots.py so the
     action executor and this handler cannot drift apart."""
-    return snapshots.create(tk, label)
+    return snapshots.create(tk, label, kind=kind)
 
 
 def h_checkpoint_create(arg: dict) -> dict:
-    return {"id": _checkpoint(_chat(arg), str(arg.get("label") or ""))}
+    # `auto: true` marks the plugin's own protective snapshots (before a bulk
+    # replace, a range delete); without it this is the user pressing 저장.
+    kind = "auto" if arg.get("auto") else "user"
+    return {"id": _checkpoint(_chat(arg), str(arg.get("label") or ""), kind=kind)}
 
 
 def h_checkpoint_list(arg: dict) -> dict:

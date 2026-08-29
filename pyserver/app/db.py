@@ -22,7 +22,7 @@ from typing import Any, Iterable, Iterator
 
 from . import config
 
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 
 LOCK = threading.RLock()
 _conn: sqlite3.Connection | None = None
@@ -626,6 +626,12 @@ ADD_COLUMNS = [
     # Older rows have NULL here and restore turns only.
     ("checkpoints", "lore_json", "TEXT"),
     ("checkpoints", "memory_json", "TEXT"),
+    # v13: who took the snapshot. 'user' = the user named and saved it (the
+    # version list); 'auto' = the code saved it before doing something
+    # destructive (an internal backup, pruned to the newest few). A column
+    # rather than a label convention, because the user can rename a label.
+    ("checkpoints", "kind", "TEXT NOT NULL DEFAULT 'user'"),
+    ("card_checkpoints", "kind", "TEXT NOT NULL DEFAULT 'user'"),
 ]
 
 
@@ -674,6 +680,36 @@ def _drop_working_copies(conn: sqlite3.Connection) -> None:
           f"on next open (snapshots kept)", flush=True)
 
 
+# Snapshots the code took before schema 13 gave them a `kind` of their own,
+# by the labels their writers used (mirrors snapshots.py and the plugin's
+# protective checkpoint calls). Used once, to backfill. A user snapshot that
+# was renamed to one of these strings folds into the backups - still visible
+# behind the backups toggle and still restorable, so nothing is lost.
+SNAPSHOT_AUTO_LABELS = (
+    "반영 직전", "reset 직전", "restore 직전", "충돌 해결 직전",
+    "에이전트", "에이전트 제안 적용 직전", "찾기·바꾸기 직전",
+    "턴 삭제 직전", "복사본 저장 직후",
+)
+
+
+def _backfill_snapshot_kinds(conn: sqlite3.Connection) -> None:
+    row = conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()
+    try:
+        was = int(row["value"]) if row else 0
+    except (TypeError, ValueError):
+        was = 0
+    if not was or was >= 13:
+        return
+    marks = ",".join("?" * len(SNAPSHOT_AUTO_LABELS))
+    n = conn.execute(f"UPDATE checkpoints SET kind = 'auto' WHERE label IN ({marks})",
+                     SNAPSHOT_AUTO_LABELS).rowcount or 0
+    n += conn.execute(f"UPDATE card_checkpoints SET kind = 'auto' WHERE label IN ({marks})",
+                      SNAPSHOT_AUTO_LABELS).rowcount or 0
+    if n:
+        print(f"[risu-hina] schema {was} -> {SCHEMA_VERSION}: "
+              f"{n} automatic snapshot(s) filed as backups", flush=True)
+
+
 def _migrate(conn: sqlite3.Connection) -> None:
     with LOCK:
         # Before the DDL, so the tables come back with the new columns.
@@ -689,6 +725,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
             cols = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
             if column not in cols:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+        # After ADD_COLUMNS (the column must exist), before the version bump
+        # (the old version is what says whether to backfill).
+        _backfill_snapshot_kinds(conn)
         conn.execute(
             "INSERT INTO meta(key, value) VALUES('schema_version', ?) "
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
