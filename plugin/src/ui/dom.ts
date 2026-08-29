@@ -134,28 +134,42 @@ export const ICON = {
  * dependable gate. The button arms, relabels, and disarms itself after a few
  * seconds - the same pattern active-recall settled on for the same reason.
  */
-export function armed(button: HTMLButtonElement, label: string, confirmLabel: string, run: () => void): void {
+export interface ArmedControl {
+  arm(): void;
+  fire(): void;
+  disarm(): void;
+  readonly armed: boolean;
+}
+
+export function armed(button: HTMLButtonElement, label: string, confirmLabel: string,
+                      run: () => void): ArmedControl {
   let armedNow = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
-  button.textContent = label;
-  button.addEventListener('click', () => {
-    if (!armedNow) {
-      armedNow = true;
-      button.textContent = confirmLabel;
-      button.classList.add('danger');
-      timer = setTimeout(() => {
-        armedNow = false;
-        button.textContent = label;
-        button.classList.remove('danger');
-      }, 4000);
-      return;
-    }
+  const disarm = () => {
     if (timer) clearTimeout(timer);
     armedNow = false;
     button.textContent = label;
     button.classList.remove('danger');
+  };
+  const arm = () => {
+    if (timer) clearTimeout(timer);
+    armedNow = true;
+    button.textContent = confirmLabel;
+    button.classList.add('danger');
+    timer = setTimeout(disarm, 4000);
+  };
+  const fire = () => {
+    disarm();
     run();
+  };
+  button.textContent = label;
+  button.addEventListener('click', () => {
+    if (!armedNow) arm();
+    else fire();
   });
+  // The controller lets another input path (the Delete key, a bar) share the
+  // same two-step confirm instead of inventing a second one.
+  return { arm, fire, disarm, get armed() { return armedNow; } };
 }
 
 /** Character-level diff, rendered as before/after fragments. */

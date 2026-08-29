@@ -1190,6 +1190,18 @@ console.log('\ntest_chat_variables_view');
   check('the chat bar is on it', document.querySelector('.toolslot .chatbar')?.style.display !== 'none');
   const rows = [...document.querySelectorAll('.panel.active .varrow')];
   check('each fixture variable is a row', rows.length === 4, String(rows.length));
+  // The kit installs a search box on the menu line, even for a short list.
+  const varSearch = document.querySelector('.tabslot .searchbox input');
+  check('the variables view has a filter box on the menu line', !!varSearch);
+  varSearch.value = '$affection';
+  varSearch.dispatchEvent(new window.Event('input', { bubbles: true }));
+  await settle(200);
+  check('filtering narrows the rows',
+        document.querySelectorAll('.panel.active .varrow').length === 1,
+        String(document.querySelectorAll('.panel.active .varrow').length));
+  varSearch.value = '';
+  varSearch.dispatchEvent(new window.Event('input', { bubbles: true }));
+  await settle(200);
   const aff = rows.find((r) => /\$affection/.test(r.textContent || ''));
   check('a $ key is listed with its type', !!aff && /숫자/.test(aff.textContent || ''), aff?.textContent);
   const input = aff?.querySelector('input');

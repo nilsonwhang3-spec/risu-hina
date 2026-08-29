@@ -13,101 +13,97 @@
  * to whatever trigger or script wrote them. Both are shown, because a wrong
  * flag from a trigger poisons the next reply exactly like a wrong summary.
  */
-import { el, clear, armed } from './dom';
+import { el, clear, armed, refocusSearch } from './dom';
 import { state, type MemoryItem } from '../state';
-import { threePane } from './panes';
-import { bindAgent, mountAgent } from './agentpane';
+import { makeTab, savedText, type NoticeKind, type TabUi } from './kit';
 
 const KIND = 'scriptstate';
 
-let built = false;
 let listMount: HTMLElement | null = null;
-let noticeMount: HTMLElement | null = null;
-let seenEpoch = -1;
 let items: MemoryItem[] = [];
+let filter = '';
+let ui: TabUi | null = null;
 
-export function renderVarsTab(mount: HTMLElement): void {
-  if (!state.activeChatKey) {
-    clear(mount);
-    built = false;
-    mount.appendChild(el('div', { class: 'pad' }, [
-      el('div', { class: 'empty', text: '먼저 “챗 선택” 탭에서 챗을 골라 주세요.' }),
-    ]));
-    return;
-  }
+function notice(text: string, kind: NoticeKind = ''): void {
+  ui?.notice(text, kind);
+}
 
-  if (!built || !mount.querySelector('.split')) {
-    clear(mount);
-    const pane = threePane();
-    // No left column: the list is the content, so it takes the middle.
-    pane.left.style.display = 'none';
-    noticeMount = el('div');
+export const renderVarsTab = makeTab({
+  gate: 'chat',
+  keys: () => [state.epoch, state.activeChatKey],
+  // No left column: the list is the content, so it takes the middle.
+  noLeft: true,
+  search: {
+    placeholder: '변수 찾기',
+    get: () => filter,
+    set: (v) => { filter = v; draw(); refocusSearch(null); },
+  },
+  build(pane, u) {
+    ui = u;
     listMount = el('div', { class: 'pad' });
-    pane.centre.appendChild(noticeMount);
     pane.centre.appendChild(listMount);
-    mount.appendChild(pane.root);
-    built = true;
-    seenEpoch = state.epoch;
-    void refresh();
-  } else if (seenEpoch !== state.epoch) {
-    seenEpoch = state.epoch;
-    void refresh();
-  }
+  },
+  async refresh() {
+    if (!listMount) return;
+    clear(listMount);
+    listMount.appendChild(el('div', { class: 'hint', text: '읽는 중입니다…' }));
+    try {
+      const r = await state.memory();
+      items = r.items.filter((i) => i.kind === KIND);
+      draw();
+    } catch (e) {
+      clear(listMount);
+      listMount.appendChild(el('div', { class: 'notice err', text: msg(e) }));
+    }
+  },
+});
 
-  bindAgent({ notice });
-  const inner = mount.querySelector('.right-inner');
-  if (inner) mountAgent(inner as HTMLElement);
-}
-
-function notice(text: string, kind: 'ok' | 'err' | '' = ''): void {
-  if (!noticeMount) return;
-  clear(noticeMount);
-  noticeMount.appendChild(el('div', { class: 'notice ' + kind, style: { margin: '10px 14px 0' }, text }));
-  setTimeout(() => { if (noticeMount) clear(noticeMount); }, 9000);
-}
-
-async function refresh(): Promise<void> {
-  if (!listMount) return;
-  clear(listMount);
-  listMount.appendChild(el('div', { class: 'hint', text: '읽는 중입니다…' }));
+async function refreshNow(): Promise<void> {
   try {
     const r = await state.memory();
     items = r.items.filter((i) => i.kind === KIND);
-    draw();
   } catch (e) {
-    clear(listMount);
-    listMount.appendChild(el('div', { class: 'notice err', text: msg(e) }));
+    notice(msg(e), 'err');
   }
+  draw();
 }
 
 function draw(): void {
   if (!listMount) return;
   clear(listMount);
 
+  const q = filter.trim().toLowerCase();
+  const shown = q
+    ? items.filter((i) => i.title.toLowerCase().includes(q) || i.body.toLowerCase().includes(q))
+    : items;
+
   const changed = items.filter((i) => i.changed || i.isNew).length;
   const head = el('h2', {}, [
     el('span', { text: '챗 변수' }),
     el('span', { class: 'hint', style: { marginLeft: '8px' },
-      text: items.length ? `${items.length}개${changed ? ` · 수정 ${changed}` : ''}` : '없음' }),
+      text: items.length
+        ? `${items.length}개${changed ? ` · 수정 ${changed}` : ''}${q ? ` · 표시 ${shown.length}` : ''}`
+        : '없음' }),
   ]);
 
   const reloadBtn = el('button', { class: 'ghost tiny', text: '새로고침' });
-  reloadBtn.addEventListener('click', () => void refresh());
+  reloadBtn.addEventListener('click', () => void refreshNow());
 
   const card = el('div', { class: 'card' }, [
     el('div', { class: 'row' }, [head, el('span', { class: 'spacer' }), reloadBtn]),
     el('div', {
       class: 'hint', style: { marginBottom: '8px' },
-      text: '`$`로 시작하는 키가 {{getvar}}가 읽는 변수입니다. 나머지는 트리거·Lua가 쓴 값입니다. '
-        + '저장한 값은 위 “반영”을 누르면 턴·로어북·장기기억과 함께 RisuAI에 쓰입니다.',
+      text: '`$`로 시작하는 키가 {{getvar}}가 읽는 변수입니다. 나머지는 트리거·Lua가 쓴 값입니다.',
     }),
   ]);
 
   if (!items.length) {
     card.appendChild(el('div', { class: 'hint', text: '이 챗에는 변수가 없습니다. 봇이 {{setvar}}를 쓰지 않으면 비어 있는 것이 정상입니다.' }));
+  } else if (!shown.length) {
+    card.appendChild(el('div', { class: 'hint', text: `“${filter}” 에 맞는 변수가 없습니다.` }));
   } else {
     const table = el('div', { class: 'vartable' });
-    for (const item of items) table.appendChild(varRow(item));
+    for (const item of shown) table.appendChild(varRow(item));
     card.appendChild(table);
   }
   card.appendChild(buildAdd());
@@ -134,8 +130,8 @@ function varRow(item: MemoryItem): HTMLElement {
     save.disabled = true;
     try {
       await state.saveMemory(item.id, value.value);
-      notice(`${item.title} 을(를) 저장했습니다. 위 “반영”으로 RisuAI에 쓸 수 있습니다.`, 'ok');
-      await refresh();
+      notice(savedText(`${item.title} 을(를)`), 'ok');
+      await refreshNow();
     } catch (e) {
       notice('저장하지 못했습니다: ' + msg(e), 'err');
       save.disabled = false;
@@ -150,7 +146,7 @@ function varRow(item: MemoryItem): HTMLElement {
     if (item.original === null) return;
     try {
       await state.saveMemory(item.id, item.original);
-      await refresh();
+      await refreshNow();
     } catch (e) {
       notice('되돌리지 못했습니다: ' + msg(e), 'err');
     }
@@ -161,7 +157,7 @@ function varRow(item: MemoryItem): HTMLElement {
     try {
       await state.deleteMemory(item.id);
       notice(`${item.title} 을(를) 지웠습니다. 반영하면 RisuAI에서도 사라집니다.`, 'ok');
-      await refresh();
+      await refreshNow();
     } catch (e) {
       notice('삭제하지 못했습니다: ' + msg(e), 'err');
     }
@@ -191,7 +187,7 @@ function buildAdd(): HTMLElement {
       await state.addMemory(KIND, value.value, k);
       key.value = ''; value.value = '';
       notice(`${k} 을(를) 추가했습니다.`, 'ok');
-      await refresh();
+      await refreshNow();
     } catch (e) {
       notice('추가하지 못했습니다: ' + msg(e), 'err');
     } finally {
