@@ -17,60 +17,41 @@
  */
 import { el, clear, armed, focusButton, diffCard } from './dom';
 import { state, type CardScript } from '../state';
-import { threePane } from './panes';
-import { bindAgent, mountAgent } from './agentpane';
+import { makeTab, savedText, type NoticeKind, type TabUi } from './kit';
 
 type Mode = 'lua' | 'v2' | 'v1' | 'none';
 
-let built = false;
 let sideMount: HTMLElement | null = null;
 let viewMount: HTMLElement | null = null;
-let noticeMount: HTMLElement | null = null;
 let items: CardScript[] = [];
-let seenEpoch = -1;
-let seenKey = '';
+let filter = '';
+let ui: TabUi | null = null;
 
-export function renderTriggerTab(mount: HTMLElement): void {
-  if (!state.botKey) {
-    clear(mount);
-    built = false;
-    mount.appendChild(el('div', { class: 'pad' }, [
-      el('div', { class: 'empty', text: '먼저 패널을 연 봇이 있어야 합니다.' }),
-    ]));
-    return;
-  }
-  if (!built || !mount.querySelector('.split')) {
-    clear(mount);
-    const pane = threePane();
+function notice(text: string, kind: NoticeKind = ''): void {
+  ui?.notice(text, kind);
+}
+
+export const renderTriggerTab = makeTab({
+  gate: 'bot',
+  keys: () => [state.epoch, state.botKey],
+  search: {
+    placeholder: '이벤트 찾기',
+    get: () => filter,
+    set: (v) => { filter = v; drawView(); },
+  },
+  build(pane, u) {
+    ui = u;
     sideMount = el('div', { class: 'tree' });
     pane.left.appendChild(sideMount);
-    noticeMount = el('div');
     viewMount = el('div', { class: 'pad' });
-    pane.centre.appendChild(noticeMount);
     pane.centre.appendChild(viewMount);
-    mount.appendChild(pane.root);
-    built = true;
-    seenEpoch = state.epoch;
-    seenKey = state.botKey;
-    void refresh();
-  } else if (seenEpoch !== state.epoch || seenKey !== state.botKey) {
-    seenEpoch = state.epoch;
-    seenKey = state.botKey;
-    void refresh();
-  }
-  bindAgent({ notice });
-  const inner = mount.querySelector('.right-inner');
-  if (inner) mountAgent(inner as HTMLElement);
-}
+  },
+  async refresh() {
+    await refreshNow();
+  },
+});
 
-function notice(text: string, kind: 'ok' | 'err' | '' = ''): void {
-  if (!noticeMount) return;
-  clear(noticeMount);
-  noticeMount.appendChild(el('div', { class: 'notice ' + kind, style: { margin: '10px 14px 0' }, text }));
-  setTimeout(() => { if (noticeMount) clear(noticeMount); }, 9000);
-}
-
-async function refresh(): Promise<void> {
+async function refreshNow(): Promise<void> {
   try {
     items = await state.cardScripts('triggerscript');
   } catch (e) {
@@ -145,8 +126,8 @@ async function switchMode(to: 'lua' | 'v2'): Promise<void> {
         comment: 'New Event', type: 'manual', conditions: [], effect: [],
       });
     }
-    await refresh();
-    notice('모드를 바꿨습니다. 봇 바의 “반영”을 누르면 RisuAI에 쓰입니다.', 'ok');
+    await refreshNow();
+    notice('모드를 바꿨습니다. ' + savedText('트리거를'), 'ok');
   } catch (e) {
     notice('모드를 바꾸지 못했습니다: ' + msg(e), 'err');
   }
@@ -180,8 +161,8 @@ function drawView(): void {
         const effect = Array.isArray(e.effect) ? e.effect.slice() : [{}];
         effect[0] = { ...(effect[0] as Record<string, unknown>), type: 'triggerlua', code: body.value };
         await state.saveScript(s.id, { ...e, effect });
-        notice('저장했습니다. 봇 바의 “반영”을 누르면 RisuAI에 쓰입니다.', 'ok');
-        await refresh();
+        notice(savedText('Lua 트리거를'), 'ok');
+        await refreshNow();
       } catch (err) {
         notice('저장하지 못했습니다: ' + msg(err), 'err');
       } finally {
@@ -208,13 +189,16 @@ function drawView(): void {
   }
 
   // V2 / V1: summarise, do not invent a JSON editor.
-  const rows = items.filter((s, i) => !(mode === 'v2' && i === 0)).map((s) => {
+  const q = filter.trim().toLowerCase();
+  const rows = items.filter((s, i) => !(mode === 'v2' && i === 0))
+    .filter((s) => !q || String((s.entry as Record<string, any>).comment || '').toLowerCase().includes(q))
+    .map((s) => {
     const e = s.entry as Record<string, any>;
     const n = Array.isArray(e.effect) ? e.effect.length : 0;
     const c = Array.isArray(e.conditions) ? e.conditions.length : 0;
     const del = el('button', { class: 'ghost tiny' });
     armed(del, '삭제', '정말?', async () => {
-      try { await state.deleteScript(s.id); await refresh(); } catch (err) { notice(msg(err), 'err'); }
+      try { await state.deleteScript(s.id); await refreshNow(); } catch (err) { notice(msg(err), 'err'); }
     });
     return el('div', { class: 'verrow' }, [
       el('div', { class: 'grow' }, [

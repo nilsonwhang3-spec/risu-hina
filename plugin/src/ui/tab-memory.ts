@@ -12,11 +12,9 @@
  * sibling: list on the left, the entry in the middle, agent on the right, and a
  * diff against the frozen original.
  */
-import { el, clear, armed, focusButton, diffCard } from './dom';
+import { el, clear, armed, focusButton, diffCard, searchBox } from './dom';
 import { state, type MemoryItem } from '../state';
-import { threePane } from './panes';
-import { bindAgent, mountAgent } from './agentpane';
-import { setToolbar } from './shell';
+import { makeTab, savedText, type NoticeKind, type TabUi } from './kit';
 
 const KIND_LABEL: Record<string, string> = {
   hypaV3Data: 'HypaV3',
@@ -26,82 +24,52 @@ const KIND_LABEL: Record<string, string> = {
   lastMemory: '최근 요약',
 };
 
-let built = false;
 let treeMount: HTMLElement | null = null;
 let viewMount: HTMLElement | null = null;
-let noticeMount: HTMLElement | null = null;
-let toolbar: HTMLElement | null = null;
 let countEl: HTMLElement | null = null;
 let openId = '';
 let items: MemoryItem[] = [];
-let seenEpoch = -1;
+let filter = '';
+let ui: TabUi | null = null;
 
-export function renderMemoryTab(mount: HTMLElement): void {
-  if (!state.activeChatKey) {
-    clear(mount);
-    built = false;
-    setToolbar(null);
-    mount.appendChild(el('div', { class: 'pad' }, [
-      el('div', { class: 'empty', text: '먼저 “챗 선택” 탭에서 챗을 골라 주세요.' }),
-    ]));
-    return;
-  }
+function notice(text: string, kind: NoticeKind = ''): void {
+  ui?.notice(text, kind);
+}
 
-  if (!built || !mount.querySelector('.split')) {
-    clear(mount);
-    const pane = threePane();
+export const renderMemoryTab = makeTab({
+  gate: 'chat',
+  keys: () => [state.epoch, state.activeChatKey],
+  build(pane, u) {
+    ui = u;
     treeMount = el('div', { class: 'tree' });
     pane.left.appendChild(treeMount);
-    noticeMount = el('div');
     viewMount = el('div', { class: 'pad' });
-    pane.centre.appendChild(noticeMount);
     pane.centre.appendChild(viewMount);
-    mount.appendChild(pane.root);
-    buildToolbar();
-    built = true;
-    seenEpoch = state.epoch;
-    void refresh();
-  } else if (seenEpoch !== state.epoch) {
-    // A restore, a reset, a commit or an approved proposal changed the rows
-    // underneath this list; what it shows is stale until it reloads.
-    seenEpoch = state.epoch;
-    void refresh();
-  }
+  },
+  async refresh() {
+    await refreshNow();
+  },
+  // Writing the memory back is the chat bar's 반영, the same verb that writes
+  // the turns and the lorebook - this tab used to carry a 반영 of its own with
+  // a narrower meaning, and two buttons with one label is how a user writes
+  // the memory while believing the turns went too. So the toolbar is only a
+  // filter, a reload, and the count.
+  toolbar() {
+    countEl = el('span', { class: 'dim' });
+    syncCount();
+    const reloadBtn = el('button', { class: 'tool', title: '백엔드에서 다시 읽어 옵니다' }, [
+      el('span', { class: 'glyph', text: '↻' }),
+      el('span', { class: 'tool-label', text: '새로고침' }),
+    ]);
+    reloadBtn.addEventListener('click', () => void refreshNow());
+    return el('div', { class: 'toolrow' }, [
+      searchBox(filter, (v) => { filter = v; drawTree(); }, '기억 찾기'),
+      reloadBtn, el('span', { class: 'spacer' }), countEl,
+    ]);
+  },
+});
 
-  if (toolbar) setToolbar(toolbar);
-  bindAgent({ notice });
-  const inner = mount.querySelector('.right-inner');
-  if (inner) mountAgent(inner as HTMLElement);
-}
-
-/**
- * Only a reload here. Writing the memory back is the chat bar's 반영, the same
- * verb that writes the turns and the lorebook - this tab used to carry a 반영
- * of its own with a narrower meaning, and two buttons with one label is how a
- * user writes the memory while believing the turns went too.
- */
-function buildToolbar(): void {
-  countEl = el('span', { class: 'dim' });
-
-  const reloadBtn = el('button', { class: 'tool', title: '백엔드에서 다시 읽어 옵니다' }, [
-    el('span', { class: 'glyph', text: '↻' }),
-    el('span', { class: 'tool-label', text: '새로고침' }),
-  ]);
-  reloadBtn.addEventListener('click', () => void refresh());
-
-  toolbar = el('div', { class: 'toolrow' }, [
-    reloadBtn, el('span', { class: 'spacer' }), countEl,
-  ]);
-}
-
-function notice(text: string, kind: 'ok' | 'err' | '' = ''): void {
-  if (!noticeMount) return;
-  clear(noticeMount);
-  noticeMount.appendChild(el('div', { class: 'notice ' + kind, style: { margin: '10px 14px 0' }, text }));
-  setTimeout(() => { if (noticeMount) clear(noticeMount); }, 9000);
-}
-
-async function refresh(): Promise<void> {
+async function refreshNow(): Promise<void> {
   if (!treeMount) return;
   clear(treeMount);
   treeMount.appendChild(el('div', { class: 'hint', style: { padding: '8px' }, text: '읽는 중입니다…' }));
@@ -110,27 +78,30 @@ async function refresh(): Promise<void> {
     // Variables are the same rows but their own tab (챗 변수); here only the
     // summaries, and the count only counts them.
     items = r.items.filter((i) => i.kind !== 'scriptstate');
-    drawTree(items.filter((i) => i.changed || i.isNew).length);
+    drawTree();
   } catch (e) {
     clear(treeMount);
     treeMount.appendChild(el('div', { class: 'notice err', text: msg(e) }));
   }
 }
 
-function drawTree(changed: number): void {
+function syncCount(): void {
+  if (!countEl) return;
+  const changed = items.filter((i) => i.changed || i.isNew).length;
+  countEl.textContent = items.length
+    ? `${items.length}개${changed ? ` · 수정 ${changed}` : ''}`
+    : '없음';
+}
+
+function drawTree(): void {
   if (!treeMount) return;
   clear(treeMount);
-
-  if (countEl) {
-    countEl.textContent = items.length
-      ? `${items.length}개${changed ? ` · 수정 ${changed}` : ''}`
-      : '없음';
-  }
+  syncCount();
 
   const add = el('button', { class: 'primary tiny', text: '새 항목' });
   add.addEventListener('click', () => void create());
   const reloadBtn = el('button', { class: 'ghost tiny', text: '새로고침' });
-  reloadBtn.addEventListener('click', () => void refresh());
+  reloadBtn.addEventListener('click', () => void refreshNow());
   treeMount.appendChild(el('div', { class: 'treehead' }, [add, reloadBtn]));
 
   if (!items.length) {
@@ -141,9 +112,20 @@ function drawTree(changed: number): void {
     return;
   }
 
-  const kinds = [...new Set(items.map((i) => i.kind))];
+  const q = filter.trim().toLowerCase();
+  const shown = q
+    ? items.filter((i) => i.title.toLowerCase().includes(q) || i.body.toLowerCase().includes(q))
+    : items;
+  if (!shown.length) {
+    treeMount.appendChild(el('div', {
+      class: 'hint', style: { padding: '8px' }, text: `“${filter}” 에 맞는 항목이 없습니다.`,
+    }));
+    return;
+  }
+
+  const kinds = [...new Set(shown.map((i) => i.kind))];
   for (const kind of kinds) {
-    const group = items.filter((i) => i.kind === kind);
+    const group = shown.filter((i) => i.kind === kind);
     treeMount.appendChild(el('div', {
       class: 'treescope',
       text: `${KIND_LABEL[kind] ?? kind} · ${group.length}`,
@@ -183,8 +165,8 @@ function open(item: MemoryItem): void {
     save.disabled = true;
     try {
       await state.saveMemory(item.id, body.value);
-      notice('저장했습니다. 위 “반영”을 누르면 턴·로어북과 함께 RisuAI에 쓰입니다.', 'ok');
-      await refresh();
+      notice(savedText('요약을'), 'ok');
+      await refreshNow();
       // Re-open from the refreshed list. Without this the pane still shows the
       // pre-save item, so the diff against the original - the thing that says
       // what was just changed - does not appear until the entry is reopened.
@@ -210,7 +192,7 @@ function open(item: MemoryItem): void {
       await state.deleteMemory(item.id);
       openId = '';
       if (viewMount) clear(viewMount);
-      await refresh();
+      await refreshNow();
     } catch (e) {
       notice('삭제하지 못했습니다: ' + msg(e), 'err');
     }
@@ -244,7 +226,7 @@ async function create(): Promise<void> {
   const kind = items[0]?.kind || 'hypaV3Data';
   try {
     const made = await state.addMemory(kind, '');
-    await refresh();
+    await refreshNow();
     open(made);
   } catch (e) {
     notice('만들지 못했습니다: ' + msg(e), 'err');
