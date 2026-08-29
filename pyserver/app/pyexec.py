@@ -1,6 +1,6 @@
-"""Run agent-written Python, confined to one bot's workspace.
+"""Run agent-written Python, confined to the global space + the bot's SYSTEM dir.
 
-Capability is unchanged inside the workspace - full stdlib, installed packages,
+Capability is unchanged inside the space - full stdlib, installed packages,
 network. What changed is reach: `sandbox.py` explains the two mechanisms and
 why each is needed. The remaining limits here are reliability, not permission:
 
@@ -24,20 +24,19 @@ SCOPE_TABLES = ("characters", "chats", "turns", "turns_original", "lore_entries"
                 "card_fields", "card_scripts", "char_assets")
 
 
-def install_skills(ws: Path) -> list[str]:
-    """Copy the enabled skill folders into <workspace>/skills/<slug>/.
+def install_skills() -> list[str]:
+    """Copy the enabled skill folders into space/.hina/skills/<slug>/.
 
-    Skills are global and workspaces are per bot, so the folders have to come
-    to the sandbox rather than the sandbox reaching out to them - the audit
-    hook in sandbox.py refuses anything outside the workspace, and that refusal
-    is the point.
-
-    The directory is rebuilt on every run: a skill the user disabled or renamed
-    must not linger as a folder the agent can still find and run.
+    ONE copy for the whole space now, not one per bot: the sandbox root is the
+    space, so every bot's script can read the same folder, and rebuilding it
+    per run keeps the old rule - a skill the user disabled or renamed must not
+    linger as a folder the agent can still find and run.
     """
     import shutil
 
-    out = ws / "skills"
+    from . import workspace
+
+    out = workspace.ensure_space() / ".hina" / "skills"
     try:
         if out.exists():
             shutil.rmtree(out, ignore_errors=True)
@@ -58,22 +57,24 @@ def install_skills(ws: Path) -> list[str]:
     return written
 
 
-def layout(workspace_dir: Path) -> None:
+def layout(home: Path, system: Path) -> None:
     """Create the directories the agent is told to use.
 
-    They exist up front so the instruction to put throwaway files in scratch/
-    and deliverables in out/ describes something real rather than something the
-    agent has to invent.
+    The work areas live in the bot's hina/ folder inside the space; the
+    bootstrap goes to the SYSTEM .scratch/ beside the scoped snapshot, where
+    the child may not write anything else. They exist up front so the
+    instruction to put throwaway files in scratch/ and deliverables in out/
+    describes something real rather than something the agent has to invent.
     """
-    for name in ("scratch", "out", "uploads", "scripts", ".scratch"):
-        (workspace_dir / name).mkdir(parents=True, exist_ok=True)
-    (workspace_dir / "scripts" / "risuhina.py").write_text(sandbox.HELPER, encoding="utf-8")
+    for name in ("scratch", "out", "scripts"):
+        (home / name).mkdir(parents=True, exist_ok=True)
+    (home / "scripts" / "risuhina.py").write_text(sandbox.HELPER, encoding="utf-8")
     # The helper used to be called `realooc`. Any script skill the user already
     # wrote still says `import realooc`, and a rename that breaks those scripts
     # at the moment they are finally needed is not worth the tidiness.
-    (workspace_dir / "scripts" / "realooc.py").write_text(
-        sandbox.LEGACY_HELPER, encoding="utf-8")
-    (workspace_dir / ".scratch" / "_bootstrap.py").write_text(sandbox.BOOTSTRAP, encoding="utf-8")
+    (home / "scripts" / "realooc.py").write_text(sandbox.LEGACY_HELPER, encoding="utf-8")
+    (system / ".scratch").mkdir(parents=True, exist_ok=True)
+    (system / ".scratch" / "_bootstrap.py").write_text(sandbox.BOOTSTRAP, encoding="utf-8")
 
 
 def build_scope_db(workspace_dir: Path, char_key: str) -> Path:
@@ -208,14 +209,29 @@ def run(
     timeout = int(timeout_s or cfg.get("timeoutSeconds") or 120)
     cap = int(max_output or cfg.get("maxOutputBytes") or 256 * 1024)
 
-    layout(workspace_dir)
-    build_scope_db(workspace_dir, char_key)
-    install_skills(workspace_dir)
-    src = workspace_dir / "scripts" / "_agent_run.py"
+    from . import workspace as ws
+
+    # Three places, three roles: the space (shared, read-write), the bot's
+    # hina/ home in it (cwd, work areas), and its SYSTEM dir outside it
+    # (the scoped snapshot and the proposal spool; workspace_dir names it).
+    system = workspace_dir
+    space = ws.ensure_space()
+    home = ws.hina_dir(char_key)
+    project = space / "projects" / ws.bot_folder(char_key)
+
+    layout(home, system)
+    build_scope_db(system, char_key)
+    install_skills()
+    src = home / "scripts" / "_agent_run.py"
     src.write_text(code, encoding="utf-8")
 
     env = {
-        "RISUHINA_WORKSPACE": str(workspace_dir.resolve()),
+        "RISUHINA_WORKSPACE": str(space.resolve()),
+        "RISUHINA_SYSTEM": str(system.resolve()),
+        "RISUHINA_HOME": str(home.resolve()),
+        "RISUHINA_PROJECT": str(project.resolve()),
+        "RISUHINA_SCOPE_DB": str((system / ".scratch" / "scope.db").resolve()),
+        "RISUHINA_STAGED": str((system / ".scratch" / "staged.jsonl").resolve()),
         "RISUHINA_CHAT_KEY": chat_key,
         "RISUHINA_SCRIPT": str(src.resolve()),
         "PYTHONIOENCODING": "utf-8",
@@ -226,19 +242,19 @@ def run(
         # to clean, and these imports are far too small to be worth caching.
         "PYTHONDONTWRITEBYTECODE": "1",
         # scripts/ first so `import risuhina` finds the helper.
-        "PYTHONPATH": str((workspace_dir / "scripts").resolve()),
+        "PYTHONPATH": str((home / "scripts").resolve()),
         "PATH": os.environ.get("PATH", ""),
         "SYSTEMROOT": os.environ.get("SYSTEMROOT", ""),
     }
     if session_id:
         env["RISUHINA_SESSION_ID"] = session_id
 
-    boot = workspace_dir / ".scratch" / "_bootstrap.py"
+    boot = system / ".scratch" / "_bootstrap.py"
     log.debug("run_python chat=%s bytes=%s timeout=%s", chat_key, len(code), timeout)
     try:
         proc = subprocess.run(
             [sys.executable, "-u", str(boot)],
-            cwd=str(workspace_dir), env=env, capture_output=True,
+            cwd=str(home), env=env, capture_output=True,
             timeout=timeout, text=True, encoding="utf-8", errors="replace",
         )
         out, err, rc, timed_out = proc.stdout, proc.stderr, proc.returncode, False

@@ -1,39 +1,48 @@
-"""Confining agent-written Python to one bot's workspace.
+"""Confining agent-written Python to the global space plus its own SYSTEM dir.
 
 This narrows an earlier decision. `run_python` was deliberately unrestricted;
 the ask now is narrower and better: keep the power, but stop it reaching
-another bot's data or the rest of the disk. So the limits here are about
-*scope*, not capability - inside the workspace the agent can do anything.
+another bot's DATA or the rest of the disk. The file space is shared on
+purpose (every bot sees projects/, studio/ and every hina/ folder); what must
+stay per-bot is the DATA axis - another bot's scope.db and frozen originals
+live in that bot's SYSTEM directory, outside the space, where this hook does
+not grant a path.
 
 Two mechanisms, because one alone is not enough:
 
 1. **An audit hook** (`sys.addaudithook`) installed before user code runs. It
    sees every open, rename, unlink and process spawn from inside the
    interpreter, and an audit hook cannot be uninstalled once added. Writes
-   outside the workspace are refused; reads are allowed only inside the
-   workspace or the interpreter's own installation, since imports need that.
-   Spawning a process is refused outright - a child without the hook would
-   make the rest of this decorative.
+   are allowed inside the space and in this bot's SYSTEM .scratch/ (the
+   proposal spool); reads add this bot's SYSTEM dir and the interpreter's own
+   installation, since imports need that. Spawning a process is refused
+   outright - a child without the hook would make the rest of this decorative.
+   Note this is TIGHTER than the per-bot era in one way: the frozen
+   original/ and card.md are readable but no longer writable.
 
 2. **A scoped database.** The child never sees the real DB. The parent exports
-   just this character's rows into `.scratch/scope.db` and the helper reads
-   that, so "only this bot's data" is true by construction rather than by the
-   helper remembering to add a WHERE clause. Proposals are appended to a JSONL
-   file and harvested by the parent, which re-validates every one against the
-   real database - so a script cannot stage an edit to a chat it cannot see.
+   just this character's rows into SYSTEM/.scratch/scope.db and the helper
+   reads that, so "only this bot's data" is true by construction rather than
+   by the helper remembering to add a WHERE clause. Proposals are appended to
+   a JSONL file and harvested by the parent, which re-validates every one
+   against the real database - so a script cannot stage an edit to a chat it
+   cannot see.
 
 None of this is a defence against the operator: they own the machine and can
 run Python directly. It is a defence against an agent making a mess outside the
-folder it was asked to work in.
+folders it was asked to work in.
 """
 from __future__ import annotations
 
-BOOTSTRAP = '''"""Installed before agent code runs. Confines it to one workspace."""
+BOOTSTRAP = '''"""Installed before agent code runs. Confines it to the space + its SYSTEM dir."""
 import os
 import sys
 
-_ROOT = os.path.realpath(os.environ["RISUHINA_WORKSPACE"])
-# Reads outside the workspace are allowed only where imports must reach.
+_ROOT = os.path.realpath(os.environ["RISUHINA_WORKSPACE"])   # the global space
+_SYS = os.path.realpath(os.environ["RISUHINA_SYSTEM"])       # this bot's SYSTEM dir
+_SYS_SCRATCH = os.path.join(_SYS, ".scratch")                # the one writable SYSTEM spot
+# Reads outside the space are allowed only where imports must reach, plus the
+# bot's own SYSTEM dir (frozen originals, the scoped snapshot).
 _READ_OK = tuple(os.path.realpath(p) for p in {
     sys.prefix, sys.base_prefix, os.path.dirname(os.__file__),
     *[p for p in sys.path if p],
@@ -75,19 +84,19 @@ def _hook(event, args):
         elif isinstance(flags, int):
             writing = bool(flags & (os.O_WRONLY | os.O_RDWR | os.O_APPEND | os.O_CREAT))
         if writing:
-            if not _inside(path, (_ROOT,)):
+            if not _inside(path, (_ROOT, _SYS_SCRATCH)):
                 raise SandboxError(
-                    "워크스페이스 밖에는 쓸 수 없습니다: %s (허용: %s)" % (path, _ROOT))
-        elif not _inside(path, (_ROOT,) + _READ_OK):
+                    "작업 공간 밖에는 쓸 수 없습니다: %s (허용: %s)" % (path, _ROOT))
+        elif not _inside(path, (_ROOT, _SYS) + _READ_OK):
             raise SandboxError(
-                "워크스페이스 밖은 읽을 수 없습니다: %s (허용: %s)" % (path, _ROOT))
+                "작업 공간 밖은 읽을 수 없습니다: %s (허용: %s)" % (path, _ROOT))
 
     elif event in ("os.remove", "os.rename", "os.rmdir", "os.mkdir", "os.link", "os.symlink",
                    "os.truncate", "os.chmod", "os.chown", "shutil.copyfile",
                    "shutil.move", "shutil.rmtree"):
         for a in args:
-            if isinstance(a, (str, bytes, os.PathLike)) and not _inside(a, (_ROOT,)):
-                raise SandboxError("워크스페이스 밖은 수정할 수 없습니다: %s" % (a,))
+            if isinstance(a, (str, bytes, os.PathLike)) and not _inside(a, (_ROOT, _SYS_SCRATCH)):
+                raise SandboxError("작업 공간 밖은 수정할 수 없습니다: %s" % (a,))
 
     elif event in ("subprocess.Popen", "os.system", "os.exec", "os.spawn", "os.posix_spawn"):
         # A child process would not carry this hook, which would make every
@@ -96,7 +105,8 @@ def _hook(event, args):
 
 
 sys.addaudithook(_hook)
-os.chdir(_ROOT)
+# The bot's own work area (hina/<봇이름>), so relative paths land there.
+os.chdir(os.environ["RISUHINA_HOME"])
 
 # Hand-off: run the agent's file with __name__ == "__main__" so ordinary
 # `if __name__ == "__main__":` blocks behave as written.
@@ -127,26 +137,30 @@ backend validates and a person approves. A script that edited turns directly
 would bypass the review the whole design rests on, so the capability is not
 offered.
 
-Where to put files - please follow this, the panel cleans up on it:
+The file space is global (projects/ · studio/ · hina/), and the cwd is this
+bot's own hina/<이름>/ folder. Where to put files - the panel cleans on it:
     scratch/   throwaway working files. Safe to delete at any time.
     out/       deliverables the user will download (md, html, json).
-    uploads/   read-only: files the user provided. Do not write here.
+The user's reference material for this bot is projects/<이름>/ - read it,
+do not reorganise it.
 """
 import json
 import os
 import sqlite3
 import uuid
 
-WORKSPACE = os.environ["RISUHINA_WORKSPACE"]
+WORKSPACE = os.environ["RISUHINA_WORKSPACE"]     # the global space
+HOME = os.environ["RISUHINA_HOME"]               # hina/<이 봇 이름>
+PROJECT = os.environ.get("RISUHINA_PROJECT") or WORKSPACE
 CHAT_KEY = os.environ["RISUHINA_CHAT_KEY"]
 SESSION_ID = os.environ.get("RISUHINA_SESSION_ID") or None
 
-SCRATCH = os.path.join(WORKSPACE, "scratch")
-OUT = os.path.join(WORKSPACE, "out")
-UPLOADS = os.path.join(WORKSPACE, "uploads")
+SCRATCH = os.path.join(HOME, "scratch")
+OUT = os.path.join(HOME, "out")
+UPLOADS = PROJECT
 
-_SCOPE_DB = os.path.join(WORKSPACE, ".scratch", "scope.db")
-_STAGED = os.path.join(WORKSPACE, ".scratch", "staged.jsonl")
+_SCOPE_DB = os.environ["RISUHINA_SCOPE_DB"]
+_STAGED = os.environ["RISUHINA_STAGED"]
 
 
 def conn():
@@ -248,14 +262,19 @@ def out(name):
 
 
 def uploads():
-    """Files the user provided, as names."""
+    """The user's project folder for this bot, as relative paths."""
     if not os.path.isdir(UPLOADS):
         return []
-    return sorted(os.listdir(UPLOADS))
+    found = []
+    for base, _dirs, names in os.walk(UPLOADS):
+        for n in names:
+            found.append(os.path.relpath(os.path.join(base, n), UPLOADS).replace(os.sep, "/"))
+    return sorted(found)
 
 
 def read_upload(name):
-    with open(os.path.join(UPLOADS, os.path.basename(name)), "r",
+    """One file from the project folder; subfolder paths are fine."""
+    with open(os.path.join(UPLOADS, name.replace("/", os.sep)), "r",
               encoding="utf-8", errors="replace") as f:
         return f.read()
 '''

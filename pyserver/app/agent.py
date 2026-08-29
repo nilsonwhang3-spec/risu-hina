@@ -1489,7 +1489,7 @@ def build() -> Agent[Deps]:
         run_python 으로 안 되는 것(외부 도구 호출, 파일 변환 프로그램 등)에만 쓴다.
         reason 은 사용자에게 보이는 이유다. 워크스페이스 밖을 건드리는 명령은 제안하지 마라.
         """
-        ws = workspace.root(ctx.deps.char_key)
+        ws = workspace.hina_dir(ctx.deps.char_key)
         ok = await _permitted(ctx, "shell", permits.safe_summary(command), f"이유: {reason}\n\n{command}\n\n작업 폴더: {ws}")
         if not ok:
             return "사용자가 이 명령을 허용하지 않았습니다. 다른 방법을 찾거나 사용자에게 물어보세요."

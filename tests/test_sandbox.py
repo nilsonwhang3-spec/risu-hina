@@ -46,22 +46,23 @@ def make_chat(chat_id: str, name: str, n: int, subject: str) -> dict:
     }
 
 
-def setup() -> tuple[str, str, Path]:
+def setup() -> tuple[str, str, Path, str]:
     db.connect()
     a = workspace.materialize({
         "charId": "cha-alpha", "characterIndex": 0,
         "card": {"name": "알파", "chaId": "cha-alpha", "desc": "알파 설명"},
         "chats": [{"chat": make_chat("alpha-chat", "알파 챗", 6, "알파비밀"), "chatIndex": 0}],
     })
-    # A second bot whose data must be invisible from the first one's scripts.
-    workspace.materialize({
+    # A second bot whose DATA must stay invisible from the first one's scripts.
+    # Its FILES in the space are shared - that is the point of the space.
+    b = workspace.materialize({
         "charId": "cha-beta", "characterIndex": 1,
         "card": {"name": "베타", "chaId": "cha-beta", "desc": "베타 설명"},
         "chats": [{"chat": make_chat("beta-chat", "베타 챗", 4, "베타비밀"), "chatIndex": 0}],
     })
     ck = a["charKey"]
     tk = a["chats"][0]["chatKey"]
-    return ck, tk, workspace.root(ck)
+    return ck, tk, workspace.root(ck), b["charKey"]
 
 
 def run(code: str, ck: str, tk: str, ws: Path) -> dict:
@@ -69,7 +70,8 @@ def run(code: str, ck: str, tk: str, ws: Path) -> dict:
 
 
 def main() -> int:
-    ck, tk, ws = setup()
+    ck, tk, ws, beta = setup()
+    home = workspace.hina_dir(ck)
 
     print("test_normal_work_still_works")
     r = run(
@@ -83,26 +85,53 @@ def main() -> int:
     check("script runs", r["ok"], r.get("stderr", "")[:300])
     check("it can read its own turns", "turns 6" in r["stdout"], r["stdout"][:200])
     check("it can write to scratch/", "wrote 작업 중" in r["stdout"], r["stdout"][:200])
-    check("scratch file exists on disk", (ws / "scratch" / "note.txt").is_file())
+    check("scratch file exists in the bot's hina home", (home / "scratch" / "note.txt").is_file())
 
-    print("\ntest_cannot_escape_the_workspace")
+    print("\ntest_cannot_escape_the_space")
+    r = run("import os; print('cwd', os.getcwd())", ck, tk, ws)
+    check("the cwd is the bot's own hina folder",
+          r["ok"] and r["stdout"].strip().endswith(str(home.name)), r["stdout"][:200])
+
     outside = str((ws.parent / "escaped.txt").resolve()).replace("\\", "\\\\")
     r = run(f"open('{outside}', 'w').write('nope')", ck, tk, ws)
-    check("writing to the parent directory fails", not r["ok"], str(r.get("exitCode")))
-    check("the refusal says why", "워크스페이스 밖" in (r["stderr"] or ""), r["stderr"][:200])
+    check("writing into a SYSTEM parent fails", not r["ok"], str(r.get("exitCode")))
+    check("the refusal says why", "작업 공간 밖" in (r["stderr"] or ""), r["stderr"][:200])
     check("nothing was written", not (ws.parent / "escaped.txt").exists())
 
     r = run("print(open(__import__('os').environ['RISUHINA_DATA_DIR'] + '/config.json').read())",
             ck, tk, ws)
     check("reading the data dir fails", not r["ok"], r["stdout"][:120])
 
-    r = run("import os; print(os.listdir(os.path.dirname(os.environ['RISUHINA_WORKSPACE'])))",
-            ck, tk, ws)
-    # listdir is not an audited open, so it may succeed - what must fail is
-    # actually reading anything it names.
-    other = str((ws.parent / "cb1" / "card.md")).replace("\\", "\\\\")
+    # The space is shared: another bot's files in it are readable on purpose.
+    beta_home = workspace.hina_dir(beta)
+    (beta_home / "out" / "베타글.md").write_text("베타의 산출물", encoding="utf-8")
+    r = run(
+        "import os\n"
+        "p = os.path.join(os.environ['RISUHINA_WORKSPACE'], 'hina', '베타', 'out', '베타글.md')\n"
+        "print(open(p, encoding='utf-8').read())\n",
+        ck, tk, ws)
+    check("another bot's space files are readable (shared on purpose)",
+          r["ok"] and "베타의 산출물" in r["stdout"], (r["stderr"] or r["stdout"])[:200])
+
+    # Its DATA axis is not: the other bot's SYSTEM dir stays out of reach.
+    other = str((workspace.root(beta) / "card.md").resolve()).replace("\\", "\\\\")
     r2 = run(f"print(open(r'{other}', encoding='utf-8').read())", ck, tk, ws)
-    check("reading another workspace's file fails", not r2["ok"], r2["stdout"][:120])
+    check("reading another bot's SYSTEM file fails", not r2["ok"], r2["stdout"][:120])
+
+    # My own SYSTEM dir: readable (the frozen originals are the diff base),
+    # but no longer writable - tighter than the per-bot era.
+    r = run(
+        "import os\n"
+        "sys_dir = os.environ['RISUHINA_SYSTEM']\n"
+        "print('card head', open(os.path.join(sys_dir, 'card.md'), encoding='utf-8').read()[:8])\n",
+        ck, tk, ws)
+    check("my own SYSTEM files are readable", r["ok"], (r["stderr"] or "")[:200])
+    r = run(
+        "import os\n"
+        "sys_dir = os.environ['RISUHINA_SYSTEM']\n"
+        "open(os.path.join(sys_dir, 'card.md'), 'a', encoding='utf-8').write('x')\n",
+        ck, tk, ws)
+    check("but writing them fails", not r["ok"], r["stdout"][:120])
 
     print("\ntest_cannot_shed_the_hook")
     r = run("import subprocess; subprocess.run(['python', '-c', 'print(1)'])", ck, tk, ws)
@@ -161,26 +190,28 @@ def main() -> int:
     check("a proposal for another chat is dropped", got == 0, str(got))
 
     print("\ntest_file_management")
-    files.upload(ck, "참고.md", text="# 참고 자료\n본문")
+    folder = workspace.bot_folder(ck)
+    files.upload(files.SPACE, "참고.md", text="# 참고 자료\n본문", into=f"projects/{folder}")
     listing = files.listing(ck)
     areas = {a["area"]: a for a in listing["areas"]}
-    check("uploads are listed", areas["uploads"]["count"] == 1, str(areas["uploads"]))
-    check("uploads are protected from cleaning", areas["uploads"]["cleanable"] is False)
     check("original is protected from deletion", areas["original"]["deletable"] is False)
-    check("scratch is cleanable", areas["scratch"]["cleanable"] is True)
 
     r = run("import risuhina\nprint(risuhina.uploads())\nprint(risuhina.read_upload('참고.md'))",
             ck, tk, ws)
-    check("the agent can read an upload", "참고 자료" in r["stdout"], r["stdout"][:200])
+    check("the agent can read the project material", "참고 자료" in r["stdout"],
+          (r["stderr"] or r["stdout"])[:200])
 
-    before = files.listing(ck)["totalSize"]
-    cleaned = files.clean(ck)
-    after = files.listing(ck)
-    check("cleaning removed files", cleaned["removed"] > 0, str(cleaned))
-    check("it freed space", after["totalSize"] < before, f"{before} -> {after['totalSize']}")
-    kept = {a["area"]: a["count"] for a in after["areas"]}
-    check("uploads survived cleaning", kept["uploads"] == 1, str(kept))
-    check("original survived cleaning", kept["original"] > 0, str(kept))
+    # 정리 is per bot: this bot's hina scratch/scripts and its SYSTEM .scratch,
+    # never the project material or the deliverables.
+    (home / "scratch" / "쓰레기.txt").write_text("x", encoding="utf-8")
+    (home / "out" / "산출.md").write_text("keep", encoding="utf-8")
+    cleaned = files.clean_bot(ck)
+    check("cleaning swept the bot's scratch", cleaned["removed"] > 0
+          and not (home / "scratch" / "쓰레기.txt").exists(), str(cleaned))
+    check("deliverables survived cleaning", (home / "out" / "산출.md").is_file())
+    check("the project material survived",
+          (workspace.space_root() / "projects" / folder / "참고.md").is_file())
+    check("original survived cleaning", any((ws / "original").iterdir()))
 
     try:
         files.delete(ck, "../escape.txt")
@@ -242,7 +273,7 @@ def main() -> int:
     if FAILURES:
         print(f"FAIL - {len(FAILURES)} check(s): {', '.join(FAILURES)}")
         return 1
-    print("PASS - scripts stay inside one bot's workspace")
+    print("PASS - scripts share the space and cannot reach another bot's DATA")
     return 0
 
 
