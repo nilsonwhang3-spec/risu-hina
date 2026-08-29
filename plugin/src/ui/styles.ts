@@ -527,6 +527,15 @@ button.treefile.on { background: rgba(37, 99, 235, .22); color: var(--textcolor,
 /* The tree column is wider than the turn explorer: file and entry names are
    words, not two-digit ranges. */
 .explorer:has(.tree) { width: 210px; }
+/* The studio's left column carries the generation card under the tree, so it
+   needs room for labelled fields rather than just folder names. */
+.explorer:has(.genpanel) { width: 268px; }
+.genpanel { padding: 4px 8px 12px; }
+.genpanel label.field { margin-bottom: 6px; }
+.genpanel label.field span { display: block; font-size: 11px; opacity: .7; margin-bottom: 2px; }
+.genpanel input, .genpanel select { width: 100%; box-sizing: border-box; }
+.genpanel .row { gap: 6px; align-items: flex-end; }
+.genstatus { margin-top: 8px; display: flex; flex-direction: column; gap: 2px; }
 
 /* --- modal ---------------------------------------------------------------- */
 .modalback {

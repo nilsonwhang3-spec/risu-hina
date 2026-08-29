@@ -20,7 +20,7 @@
  * where it is true, rather than on the whole tab.
  */
 import { el, clear, armed } from './dom';
-import { state, type FileListing, type WorkspaceFile } from '../state';
+import { state, type FileListing, type StudioItem, type StudioStatus, type WorkspaceFile } from '../state';
 import { threePane } from './panes';
 import { bindAgent, mountAgent } from './agentpane';
 
@@ -45,6 +45,7 @@ interface Folder {
 
 let built = false;
 let treeMount: HTMLElement | null = null;
+let genMount: HTMLElement | null = null;
 let viewMount: HTMLElement | null = null;
 let noticeMount: HTMLElement | null = null;
 let listing: FileListing | null = null;
@@ -53,22 +54,45 @@ let selected = 'images';
 const open = new Set<string>(['images']);
 const thumbs = new Map<string, string>();
 
+/** What the generation card is set to. Held across renders, saved per panel. */
+const gen = {
+  model: 'nai-diffusion-4-5-full',
+  style: '', character: '', emotionPreset: '',
+  characterName: '', outfit: '',
+  steps: 23, scale: 5, width: 832, height: 1216, count: 1, seed: '',
+  folder: 'images',
+};
+let status: StudioStatus | null = null;
+let jobId = '';
+let jobTimer: ReturnType<typeof setInterval> | null = null;
+
 export function renderStudioTab(mount: HTMLElement): void {
   if (!built || !mount.querySelector('.split')) {
     clear(mount);
     const pane = threePane();
     treeMount = el('div', { class: 'tree filetree' });
-    pane.left.appendChild(treeMount);
+    genMount = el('div', { class: 'genpanel' });
+    pane.left.append(treeMount, genMount);
     noticeMount = el('div');
     viewMount = el('div', { class: 'pad filepad' });
     pane.centre.append(noticeMount, viewMount);
     mount.appendChild(pane.root);
     built = true;
     void refresh();
+    void loadStatus();
   }
   bindAgent({ notice });
   const inner = mount.querySelector('.right-inner');
   if (inner) mountAgent(inner as HTMLElement);
+}
+
+async function loadStatus(): Promise<void> {
+  try {
+    status = await state.studio.status();
+  } catch (e) {
+    status = { configured: false, library: '', error: msg(e) };
+  }
+  drawGen();
 }
 
 function notice(text: string, kind: 'ok' | 'err' | '' = ''): void {
@@ -174,6 +198,211 @@ function row(n: Folder, depth: number): HTMLElement {
   wrap.appendChild(line);
   if (isOpen) for (const c of n.children) wrap.appendChild(row(c, depth + 1));
   return wrap;
+}
+
+/**
+ * The generation card, under the tree.
+ *
+ * Left, because none of it changes inside one batch: you pick a model, a
+ * style, a character and an emotion set, and then produce a run. The two
+ * meters live here too — Anlas and the v5 quota are different currencies and
+ * neither is derived from the other, so both are shown as NovelAI reports
+ * them (docs/09 §2).
+ */
+function drawGen(): void {
+  if (!genMount) return;
+  clear(genMount);
+  genMount.appendChild(el('div', { class: 'sectionline' }));
+  genMount.appendChild(el('div', { class: 'sectiontitle', text: '생성' }));
+
+  if (!status) {
+    genMount.appendChild(el('div', { class: 'hint', text: '상태를 읽는 중입니다…' }));
+    return;
+  }
+  if (!status.configured) {
+    genMount.appendChild(el('div', { class: 'notice' }, [
+      el('div', { class: 'hint', text: status.note || status.error || 'NovelAI 토큰이 없습니다.' }),
+      el('div', { class: 'hint', style: { marginTop: '4px' },
+                  text: '토큰 없이도 이미지를 넣고, 정리하고, 봇에 반영할 수 있습니다.' }),
+    ]));
+    return;
+  }
+  const acc = status.account;
+  if (acc) {
+    genMount.appendChild(el('div', { class: 'row', style: { gap: '8px' } }, [
+      el('span', { class: 'badge', title: 'Anlas — 레퍼런스 인코딩과 디렉터 툴이 쓰는 잔량',
+                   text: `Anlas ${acc.anlas}` }),
+      el('span', {
+        class: 'badge' + (acc.usageNegative ? ' warn' : ''),
+        title: 'v5 사용량 — Anlas 와 별개의 한도입니다',
+        text: `v5 ${acc.usagePercent ?? '?'}%`,
+      }),
+      el('span', { class: 'hint', text: `tier ${acc.tier ?? '?'}` }),
+    ]));
+  }
+  if (status.error) genMount.appendChild(el('div', { class: 'hint err', text: status.error }));
+
+  const field = (label: string, node: HTMLElement) =>
+    el('label', { class: 'field' }, [el('span', { text: label }), node]);
+
+  const modelInput = el('input', { value: gen.model, placeholder: 'nai-diffusion-4-5-full' }) as HTMLInputElement;
+  modelInput.addEventListener('change', () => { gen.model = modelInput.value.trim(); });
+  const checkBtn = el('button', { class: 'ghost tiny', text: '확인' }) as HTMLButtonElement;
+  const checkOut = el('span', { class: 'hint' });
+  // Free, and the only thing that knows the model list is the service itself
+  // (docs/09 §5) - so this asks rather than validating against a list here.
+  checkBtn.addEventListener('click', async () => {
+    checkBtn.disabled = true;
+    checkOut.textContent = '확인 중…';
+    try {
+      const r = await state.studio.modelCheck(modelInput.value.trim());
+      checkOut.textContent = r.exists
+        ? (r.supportsVibe ? '있음 · 레퍼런스 가능' : '있음 · 레퍼런스 불가(v5)')
+        : '그런 모델이 없습니다';
+    } catch (e) {
+      checkOut.textContent = msg(e);
+    } finally {
+      checkBtn.disabled = false;
+    }
+  });
+
+  genMount.append(
+    field('모델', modelInput),
+    el('div', { class: 'row' }, [checkBtn, checkOut]),
+    pickerField('스타일', 'styles', 'style'),
+    pickerField('캐릭터', 'characters', 'character'),
+    pickerField('감정 프리셋', 'emotions', 'emotionPreset'),
+  );
+
+  const two = (a: HTMLElement, b: HTMLElement) => el('div', { class: 'row' }, [a, b]);
+  genMount.append(
+    two(numField('스텝', 'steps'), numField('CFG', 'scale')),
+    two(numField('가로', 'width'), numField('세로', 'height')),
+    two(numField('장수', 'count'), textField('시드', 'seed', '비우면 랜덤')),
+    two(textField('캐릭터명', 'characterName', '파일 이름에 들어갑니다'),
+        textField('복장', 'outfit', '파일 이름에 들어갑니다')),
+    textField('저장 폴더', 'folder', 'images/…'),
+  );
+
+  const planBtn = el('button', { class: 'ghost tiny', text: '계획 보기' }) as HTMLButtonElement;
+  const runBtn = el('button', { class: 'primary tiny', text: '생성 시작' }) as HTMLButtonElement;
+  planBtn.addEventListener('click', () => void showPlan());
+  runBtn.addEventListener('click', () => void run());
+  genMount.appendChild(el('div', { class: 'row', style: { marginTop: '8px' } }, [planBtn, runBtn]));
+  genMount.appendChild(el('div', { class: 'genstatus' }));
+  if (jobId) void pollJob();
+}
+
+function spec(): Record<string, unknown> {
+  const out: Record<string, unknown> = {
+    model: gen.model,
+    characterName: gen.characterName, outfit: gen.outfit,
+    count: gen.count, folder: gen.folder,
+    params: { steps: gen.steps, scale: gen.scale, width: gen.width, height: gen.height },
+  };
+  if (gen.style) out.style = gen.style;
+  if (gen.character) out.characters = [gen.character];
+  if (gen.emotionPreset) out.emotionPreset = gen.emotionPreset;
+  if (gen.seed.trim()) out.seed = Number(gen.seed.trim());
+  return out;
+}
+
+function numField(label: string, key: 'steps' | 'scale' | 'width' | 'height' | 'count'): HTMLElement {
+  const i = el('input', { value: String(gen[key]), type: 'number' }) as HTMLInputElement;
+  i.addEventListener('change', () => { gen[key] = Number(i.value) || gen[key]; });
+  return el('label', { class: 'field grow' }, [el('span', { text: label }), i]);
+}
+
+function textField(label: string, key: 'seed' | 'characterName' | 'outfit' | 'folder',
+                   placeholder = ''): HTMLElement {
+  const i = el('input', { value: gen[key], placeholder }) as HTMLInputElement;
+  i.addEventListener('change', () => { gen[key] = i.value; });
+  return el('label', { class: 'field grow' }, [el('span', { text: label }), i]);
+}
+
+/** A <select> of one library area, filled when the card is drawn. */
+function pickerField(label: string, area: string, key: 'style' | 'character' | 'emotionPreset'): HTMLElement {
+  const sel = el('select') as HTMLSelectElement;
+  sel.appendChild(el('option', { value: '', text: '(없음)' }));
+  sel.addEventListener('change', () => { gen[key] = sel.value; });
+  void state.studio.items(area).then((r) => {
+    for (const it of r.items as StudioItem[]) {
+      const o = el('option', { value: it.path, text: it.name + (it.count ? ` (${it.count})` : '') });
+      if (it.path === gen[key]) o.setAttribute('selected', 'selected');
+      sel.appendChild(o);
+    }
+    sel.value = gen[key];
+  }).catch(() => { /* the area may simply be empty */ });
+  return el('label', { class: 'field' }, [el('span', { text: label }), sel]);
+}
+
+async function showPlan(): Promise<void> {
+  const out = genMount?.querySelector('.genstatus') as HTMLElement | null;
+  if (!out) return;
+  clear(out);
+  try {
+    const r = await state.studio.plan(spec());
+    out.appendChild(el('div', { class: 'hint', text: `${r.items.length}장 · ${r.estimate.note}` }));
+    for (const i of r.items.slice(0, 12)) {
+      out.appendChild(el('div', { class: 'hint', text: `${i.name}  seed=${i.seed ?? '랜덤'}` }));
+    }
+    if (r.items.length > 12) out.appendChild(el('div', { class: 'hint', text: `… 이하 ${r.items.length - 12}개 생략` }));
+  } catch (e) {
+    out.appendChild(el('div', { class: 'hint err', text: msg(e) }));
+  }
+}
+
+async function run(): Promise<void> {
+  try {
+    const r = await state.studio.generate(spec());
+    jobId = r.jobId;
+    notice(`배치를 시작했습니다 (${r.total}장). ${r.estimate.note}`, 'ok');
+    void pollJob();
+  } catch (e) {
+    notice('시작하지 못했습니다: ' + msg(e), 'err');
+  }
+}
+
+/**
+ * Poll the batch. The same shape the panel already uses for permits and the
+ * asset importer - the backend runs the work and this asks how far it got.
+ */
+async function pollJob(): Promise<void> {
+  if (jobTimer) return;
+  const tick = async () => {
+    const out = genMount?.querySelector('.genstatus') as HTMLElement | null;
+    if (!jobId || !out) return stop();
+    let j;
+    try {
+      j = await state.studio.job(jobId);
+    } catch {
+      return stop();
+    }
+    const p = j.payload;
+    clear(out);
+    out.appendChild(el('div', { class: 'hint', text: `${j.state} · ${p?.done ?? 0}/${p?.total ?? 0}` }));
+    for (const f of (p?.failed ?? []).slice(0, 3)) {
+      out.appendChild(el('div', { class: 'hint err', text: `${f.name}: ${f.error}` }));
+    }
+    if (['done', 'partial', 'error', 'cancelled'].includes(j.state)) {
+      const spent = j.result?.anlasSpent;
+      notice(`배치 ${j.state} — ${j.result?.saved ?? 0}장 저장`
+        + (j.result?.failed ? `, ${j.result.failed}장 실패` : '')
+        + (typeof spent === 'number' ? ` · Anlas ${spent} 소모` : ''),
+        j.state === 'error' ? 'err' : 'ok');
+      jobId = '';
+      stop();
+      await refresh();
+      await loadStatus();
+      return;
+    }
+    const cancel = el('button', { class: 'ghost tiny', text: '중단' });
+    cancel.addEventListener('click', () => { void state.studio.cancelJob(jobId); });
+    out.appendChild(cancel);
+  };
+  const stop = () => { if (jobTimer) { clearInterval(jobTimer); jobTimer = null; } };
+  jobTimer = setInterval(() => { void tick(); }, 1500);
+  await tick();
 }
 
 function drawCentre(): void {

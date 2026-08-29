@@ -1898,6 +1898,18 @@ console.log('\ntest_studio_tab');
   check('it lists the library areas, not the workspace',
         /생성물/.test(text()) && !/업로드/.test(text()), text().slice(0, 200));
   check('and Hina is beside it', !!document.querySelector('.panel.active .right-inner'));
+
+  // The generation card sits under the tree because nothing on it changes
+  // inside one batch. With no NovelAI token it must say so and stay usable -
+  // sorting and adopting need no token at all.
+  await settle(600);
+  const gen = document.querySelector('.genpanel');
+  check('the generation card is in the left column', !!gen);
+  check('a missing NovelAI token is explained, not an error',
+        /토큰/.test(gen?.textContent || ''), (gen?.textContent || '').slice(0, 120));
+  check('and it says the rest still works',
+        /정리하고|반영할 수 있습니다/.test(gen?.textContent || ''),
+        (gen?.textContent || '').slice(0, 200));
 }
 
 console.log('\ntest_no_character_selected');

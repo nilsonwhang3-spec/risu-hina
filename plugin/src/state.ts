@@ -459,6 +459,43 @@ export interface BulkPreview {
   changes: { msgId: string; seq: number; role: string; hits: number; before: string; after: string }[];
 }
 
+/** Anlas and the v5 quota — separate currencies, so both are shown (docs/09 §2). */
+export interface StudioStatus {
+  configured: boolean;
+  library: string;
+  note?: string;
+  error?: string;
+  account?: {
+    anlas: number; fixed: number; purchased: number;
+    usagePercent: number | null; usageNegative: boolean;
+    tier: number | null; active: boolean; expiresAt: number | null;
+  };
+}
+
+export interface StudioItem {
+  path: string; name: string; folder: string;
+  description?: string; count?: number;
+}
+
+export interface PlannedImage {
+  name: string; emotion: string; prompt: string; negative: string;
+  seed: number | null; charCaptions: unknown[];
+}
+
+export interface BatchEstimate {
+  images: number; vibeEncodes: number; anlasCertain: number; note: string;
+}
+
+export interface StudioJob {
+  id: string; kind: string; state: string; error?: string | null;
+  payload: {
+    done: number; total: number; saved: string[];
+    failed: { name: string; error: string }[];
+    anlasBefore: number | null; anlasAfter: number | null;
+  } | null;
+  result: { saved: number; failed: number; anlasSpent: number | null } | null;
+}
+
 /**
  * The asset studio's files.
  *
@@ -505,6 +542,53 @@ class StudioFiles {
 
   async remove(path: string): Promise<void> {
     await transport.post('/files/delete', { studio: true, path });
+  }
+
+  // --- NovelAI ---------------------------------------------------------------
+
+  /** Two meters and the library path. Anlas and the v5 quota are separate. */
+  async status(): Promise<StudioStatus> {
+    return await transport.get<StudioStatus>('/studio/status');
+  }
+
+  /** Does this model id exist? Free — the service is the list (docs/09 §5). */
+  async modelCheck(model: string): Promise<{ model: string; exists: boolean; supportsVibe: boolean }> {
+    return await transport.post('/studio/model-check', { model });
+  }
+
+  async items(area: string): Promise<{ area: string; items: StudioItem[] }> {
+    return await transport.get('/studio/list', { area });
+  }
+
+  /** What a batch would produce, before anything is spent. */
+  async plan(spec: Record<string, unknown>): Promise<{ items: PlannedImage[]; estimate: BatchEstimate }> {
+    return await transport.post('/studio/plan', spec);
+  }
+
+  async generate(spec: Record<string, unknown>): Promise<{ jobId: string; total: number; estimate: BatchEstimate }> {
+    return await transport.post('/studio/generate', spec);
+  }
+
+  async job(id: string): Promise<StudioJob> {
+    return await transport.get<StudioJob>('/studio/job', { id });
+  }
+
+  async cancelJob(id: string): Promise<void> {
+    await transport.post('/studio/job/cancel', { id });
+  }
+
+  /** Split filenames into fields, and say which ones did not match. */
+  async parseNames(names: string[], pattern = ''): Promise<{
+    matched: Record<string, string>[]; unmatched: string[]; pattern: string; fields: string[];
+  }> {
+    return await transport.post('/studio/parse', { names, pattern });
+  }
+
+  /** Copy library images into a bot's workspace so they can be adopted. */
+  async stage(charKey: string, paths: string[]): Promise<{
+    staged: { path: string; size: number }[]; failed: { path: string; error: string }[];
+  }> {
+    return await transport.post('/studio/stage', { charKey, paths });
   }
 }
 
