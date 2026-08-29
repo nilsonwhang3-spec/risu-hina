@@ -124,7 +124,10 @@ def _normalise_chats(payload: dict) -> list[dict]:
         chat = it.get("chat") if isinstance(it, dict) else None
         if not isinstance(chat, dict) or not isinstance(chat.get("message"), list):
             raise WorkspaceError("each entry needs chat.message[]")
-        out.append({"chat": chat, "chatIndex": (it or {}).get("chatIndex")})
+        # `live` = the chat RisuAI has open right now, the plugin's word. A
+        # lazy host never stubs that one, so an empty live chat is real.
+        out.append({"chat": chat, "chatIndex": (it or {}).get("chatIndex"),
+                    "live": bool((it or {}).get("live"))})
     return out
 
 
@@ -157,9 +160,17 @@ def materialize(payload: dict, *, force: bool = False) -> dict:
     chat_reset = force or bool(payload.get("chatReset"))
     for it in items:
         chat = it["chat"]
-        summary = store.ingest_chat(cha_id, chat, it["chatIndex"], force=chat_reset)
+        summary = store.ingest_chat(cha_id, chat, it["chatIndex"],
+                                    force=chat_reset, live=it["live"])
         tk = summary["chatKey"]
         _tally(merged, summary.get("merge"))
+        if summary.get("skipped"):
+            # A refused stub: nothing about this chat may move - not the
+            # frozen original (an empty transcript over the real one), not
+            # the memory rows, not its local lorebook. The summary still
+            # rides along so the panel can show the refusal.
+            ingested.append(summary)
+            continue
 
         # Frozen original: written every time, because the user may have edited
         # in RisuAI since, and a stale original makes every diff wrong.

@@ -147,13 +147,21 @@ check("and the turns are still there",
 sbase = db.query("SELECT body FROM turns_original WHERE chat_key = ? ORDER BY seq", (STK,))
 check("the baseline survived too", len(sbase) == 2, str(len(sbase)))
 # The refusal must name what to do, because the fix is on RisuAI's side.
-check("the refusal says how to fix it", "🔄" in (stub.get("skipped") or ""), stub.get("skipped"))
+check("the refusal says how to fix it", "RisuAI" in (stub.get("skipped") or ""), stub.get("skipped"))
 
-# A chat that is genuinely new and genuinely empty is still allowed in.
+# An empty FIRST upload is a stub too (reported from staging, 2026-08-30:
+# picking an unloaded chat on the picker arrived as 0턴 with its content in
+# RisuAI). It may not found a 0-turn chat...
 fresh = store.ingest_chat(STUB_CHA, {"id": "chat-new", "name": "빈 챗", "message": []}, 1)
-check("a genuinely empty new chat is still accepted", not fresh.get("skipped"), str(fresh))
+check("an empty first upload is refused as a stub", bool(fresh.get("skipped")), str(fresh))
+check("and no chat row was founded on it",
+      store.chat_row(fresh["chatKey"]) is None, str(store.chat_row(fresh["chatKey"])))
+# ...unless the plugin vouches for it: the chat RisuAI has open is never a
+# stub, so its emptiness is real (a genuinely new chat).
+fresh2 = store.ingest_chat(STUB_CHA, {"id": "chat-new", "name": "빈 챗", "message": []}, 1, live=True)
+check("the live chat's empty upload is accepted", not fresh2.get("skipped"), str(fresh2))
 
-# 🔄 (force) is the stated way out when RisuAI really is empty now.
+# 🔄 (force) also goes through: "take RisuAI's state as it is".
 forced = store.ingest_chat(STUB_CHA, {**FULL, "message": []}, 0, force=True)
 check("force still empties the chat - that is what 🔄 means",
       not forced.get("skipped") and forced.get("workingReset") is True

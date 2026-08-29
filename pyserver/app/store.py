@@ -58,7 +58,8 @@ def upsert_character(cha_id: str, name: str, card: dict, char_index: int | None,
     return ck
 
 
-def ingest_chat(cha_id: str, chat: dict, chat_index: int | None, *, force: bool = False) -> dict:
+def ingest_chat(cha_id: str, chat: dict, chat_index: int | None, *,
+                force: bool = False, live: bool = False) -> dict:
     """Load a Chat object into the store. Returns a summary.
 
     Re-ingesting an existing chat never discards edits in progress (only
@@ -78,33 +79,34 @@ def ingest_chat(cha_id: str, chat: dict, chat_index: int | None, *, force: bool 
     messages = chat.get("message") or []
     now = db.now()
 
-    # A chat that arrives empty over one we already hold turns for is a
-    # **stub**, not a deletion.
+    # A chat that arrives empty is a **stub** unless the caller can vouch for
+    # it, and a stub may neither wipe a chat we hold nor found a 0-turn one.
     #
     # PocketRisu loads chats lazily: `getCharacterFromIndex` and
     # `getChatFromIndex` hand back a chat object with no messages for one the
     # host has not opened yet (host.cloneBot has known this and skipped them).
     # `message: []` passes every "is this a chat" check there is, so it was
-    # ingested as a real 9-turns-to-0 change - which showed the chat as 0턴
-    # and left 반영 ready to delete nine real turns in RisuAI. Measured on a
-    # live install, 2026-08-29.
+    # ingested as real - a 9-turns-to-0 change on a chat we held (반영 armed
+    # to delete the real turns), or, reported from the staging round, a chat
+    # picked on the picker arriving as 0턴 with its content sitting in RisuAI.
     #
-    # `force` still goes through: the header 🔄 is the stated way to say
-    # "RisuAI really is empty now, take that" - a rare, recoverable
-    # inconvenience against a silent, unrecoverable wipe.
-    if not messages and not force:
+    # Two vouchers go through: `force` (the header 🔄 - "take RisuAI's state
+    # as it is") and `live` (the chat RisuAI itself has open - the one chat a
+    # lazy host never stubs, so its emptiness is real: a genuinely new chat,
+    # or one genuinely emptied, and the merge handles either).
+    if not messages and not (force or live):
         had = db.one("SELECT COUNT(*) AS n FROM turns_original WHERE chat_key = ?", (tk,))
-        if had and int(had["n"]) > 0:
-            log.warn("refused an empty upload over %d turns chat=%s (%s) - stub read",
-                     int(had["n"]), tk, chat.get("name") or "")
-            return {
-                "chatKey": tk, "charKey": ck, "chatId": chat.get("id"),
-                "chatIndex": chat_index, "name": chat.get("name") or "",
-                "turns": count_turns(tk), "originalTurns": int(had["n"]),
-                "workingReset": False,
-                "skipped": "RisuAI 가 이 챗을 아직 읽어 두지 않았습니다 (턴이 비어 있음). "
-                           "RisuAI 에서 그 챗을 한 번 연 다음 🔄 를 눌러 주세요.",
-            }
+        held = int(had["n"]) if had else 0
+        log.warn("refused an empty upload chat=%s (%s) - stub read, held=%d",
+                 tk, chat.get("name") or "", held)
+        return {
+            "chatKey": tk, "charKey": ck, "chatId": chat.get("id"),
+            "chatIndex": chat_index, "name": chat.get("name") or "",
+            "turns": count_turns(tk), "originalTurns": held,
+            "workingReset": False,
+            "skipped": "RisuAI 가 이 챗을 아직 읽어 두지 않았습니다 (턴이 비어 있음). "
+                       "RisuAI 에서 그 챗을 한 번 연 뒤 다시 시도해 주세요.",
+        }
 
     rows = []
     for i, m in enumerate(messages):

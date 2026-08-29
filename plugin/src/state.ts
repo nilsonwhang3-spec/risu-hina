@@ -606,12 +606,19 @@ class AppState {
       cardReset: Boolean(opts.cardReset),
       chatReset: Boolean(opts.chatReset),
     };
+    // `live` marks the chat RisuAI itself has open: the one chat a lazy host
+    // never hands over as a stub, and therefore the one empty upload the
+    // backend may take at face value (a genuinely new or genuinely emptied
+    // chat). Everything else that arrives empty is a stub and gets refused.
+    const liveId = String(this.liveChat?.id ?? '');
+    const isLive = (c: RisuChat | null | undefined) => !!liveId && String(c?.id ?? '') === liveId;
     if (opts.allChats) {
-      payload.chats = chats.map((c, i) => ({ chat: c, chatIndex: i }));
+      payload.chats = chats.map((c, i) => ({ chat: c, chatIndex: i, live: isLive(c) }));
     } else if (opts.chatIndex !== undefined && opts.chatIndex !== this.slot.chatIndex) {
-      payload.chats = [{ chat: await this.chatAt(opts.chatIndex), chatIndex: opts.chatIndex }];
+      const chat = await this.chatAt(opts.chatIndex);
+      payload.chats = [{ chat, chatIndex: opts.chatIndex, live: isLive(chat) }];
     } else {
-      payload.chats = [{ chat: this.liveChat, chatIndex: this.slot.chatIndex }];
+      payload.chats = [{ chat: this.liveChat, chatIndex: this.slot.chatIndex, live: true }];
     }
     const res = await transport.upload<{ workspace: WorkspaceInfo }>('/workspace', payload);
     this.workspace = res.workspace;

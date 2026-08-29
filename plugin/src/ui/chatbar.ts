@@ -254,7 +254,8 @@ function openApply(anchor: HTMLElement): void {
   body.appendChild(out);
   body.appendChild(el('div', {
     class: 'hint',
-    text: '턴·로어북·장기기억이 한 번에 쓰입니다. 성공하면 그 상태가 새 기준선이 되면서 수정 표시가 사라집니다.',
+    text: '턴·로어북·장기기억이 한 번에 쓰입니다. 반영이 확인되면 RisuAI 상태를 다시 읽어 오고 수정 표시가 사라집니다. '
+      + '반영하지 않고 버리려면 바의 ↩ 변경 취소를 눌러 주세요.',
   }));
 }
 
