@@ -8,7 +8,7 @@ The original plan for bot edit mode (M0 measurements, M2 spec) is `~/.claude/pla
 
 **Releases are manual now (2026-08-29, the user's instruction).** The plugin has users other than us, so **do not release or deploy after every fix**. Land the change, run the gate, leave it on master, and say what is waiting; `tools/release.py`, `gh release create` and the test-server deploy happen **only when the user asks for them**. One mechanical consequence to keep in mind: `tools/bundle.py` writes `plugin/Risu.Hina.Plugin.js` (and the old-name twin) into the repository, and *that committed file is what RisuAI's `+` update check reads* — so a release is not the tag, it is that commit. An ordinary fix commit must leave those two files alone, which `node plugin/build.config.mjs` does by itself (it only writes `plugin/dist/`).
 
-**Code state**: master = **v0.9.6 BETA + the unreleased §1-16 lifecycle rework** (§1-16 the edit-session lifecycle: leave guard, 변경 취소, write verification, snapshot kinds - **schema 13**, not yet released; when it ships, bump the minor - `/workspace/dirty`, the reset payloads and the `kind` column mean the backend and the plugin go together) (§1-15 any chat opens from the picker · §1-14 the repo goes English · §1-13 3-way merge on reopen · §1-12 an intermediate cache blocking the connection (POST probe, no-store) · §1-11 one web-search tool card with three options · §1-10 built-in search measured, mobile, plugin-reload diagnosis · §1-9 search · §1-8 round 10 · §1-7 · §1-6 · §1-5; the docs/07 planning is still pending) — gate ALL GREEN. 0.7.0 changes the minor, so **the version gate trips**: raise the backend and the plugin on the RisuAI side has to be raised with `+` as well (the header says so).
+**Code state**: master = **v0.10.0 BETA** (§1-16 the edit-session lifecycle: leave guard, 변경 취소, write verification, snapshot kinds - **schema 13**; the minor went up because `/workspace/dirty`, the reset payloads and the `kind` column mean the backend and the plugin go together, so **the version gate trips**: update the backend, then press `+` on the plugin in RisuAI) (§1-15 any chat opens from the picker · §1-14 the repo goes English · §1-13 3-way merge on reopen · §1-12 an intermediate cache blocking the connection (POST probe, no-store) · §1-11 one web-search tool card with three options · §1-10 built-in search measured, mobile, plugin-reload diagnosis · §1-9 search · §1-8 round 10 · §1-7 · §1-6 · §1-5; the docs/07 planning is still pending) — gate ALL GREEN. 0.7.0 changes the minor, so **the version gate trips**: raise the backend and the plugin on the RisuAI side has to be raised with `+` as well (the header says so).
 
 **Deployment state (2026-08-25 21:01 `deploy.ps1`, verified in a new SSH session)**:
 
@@ -26,7 +26,7 @@ The original plan for bot edit mode (M0 measurements, M2 spec) is `~/.claude/pla
 
 → **First thing to do**: the user reinstalls `plugin/Risu.Hina.Plugin.js` into RisuAI **by hand, once** (the installed 0.1.0's update-url cannot be read because of CORS) → check that `+` appears from the next release on → verify M2 in real use (§5-2).
 
-## 1-16. 2026-08-30 - the edit-session lifecycle: nothing stays silently pending (unreleased, schema 13)
+## 1-16. 2026-08-30 - v0.10.0: the edit-session lifecycle - nothing stays silently pending (schema 13)
 
 The user rolled the three post-release commits back (`discarded/snapshot-fixes-2026-08-29` keeps them;
 their commit messages are the bug-repro record) and redesigned the lifecycle in one pass. The stated
@@ -72,6 +72,16 @@ Six commits, each gate-green:
   Picker rows carry a "미반영 N" badge; opening a stub chat surfaces the refusal.
 - **plugin: 버전 lists 'user' snapshots only**, autos behind "자동 백업 N개 보기" (restorable, not
   renamable, flagged as possibly behind RisuAI); `/checkpoint/clear` sweeps saved rows only.
+
+Staging round (backend files scp'd to test-server, schema 13 backfill verified live): the user
+confirmed the intended behaviour and caught two more - (1) an empty FIRST upload also founded a
+0-turn chat (the guard only protected chats already held); the rule completed with a `live` flag -
+the plugin marks the chat RisuAI has open, the one chat a lazy host never stubs, and only `live` or
+`force` may ingest empty; `materialize` now stops at a refusal instead of overwriting the frozen
+original and merging memory/lore from the stub. (2) the 반영 popover hint predated the leave guard -
+reworded. Plus, by request: a mode chip in the header (챗 편집 / 봇 편집, edit tabs only) and the
+same line injected into Hina's per-run instructions (`@agent.instructions` over `Deps.mode` - it
+used to learn the mode only from a tool refusal).
 
 Verification: gate ALL GREEN throughout; the smoke walks the unverified write, the discard button,
 X→stay / picker→discard / mode-switch→apply, and the version-list fold end to end. Manual checks
