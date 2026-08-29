@@ -396,6 +396,11 @@ check("a card edit from the studio is refused by name",
 _r = screen_gate("chat", "host_asset_add")
 check("adopt from the chat screen still needs the bot screen",
       _r is not None and "봇 편집" in _r, str(_r))
+# The wire filter must not drop the third screen on the floor (it did once).
+from app import session as _session  # noqa: E402
+
+check("the session accepts the studio screen", "studio" in _session.SCREEN_MODES,
+      str(_session.SCREEN_MODES))
 
 print()
 if FAILURES:

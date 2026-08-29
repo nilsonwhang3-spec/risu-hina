@@ -257,6 +257,11 @@ def neutralise_thinking(history: list, model: Any) -> list:
     return out
 
 
+# The screens the plugin may report. Anything else is treated as unknown - an
+# older plugin, not an error. The studio is the third screen (agent.screen_gate).
+SCREEN_MODES = ("chat", "bot", "studio")
+
+
 async def run(session_id: str, prompt: str, mode: str = "") -> AsyncGenerator[str, None]:
     """Drive one agent turn, yielding NDJSON lines. `mode` is the half of the
     panel the user is looking at ('chat' | 'bot'), see agent.Deps.mode."""
@@ -281,7 +286,7 @@ async def run(session_id: str, prompt: str, mode: str = "") -> AsyncGenerator[st
         char_key=crow["char_key"],
         session_id=session_id,
         workspace_dir=ws_dir,
-        mode=mode if mode in ("chat", "bot") else "",
+        mode=mode if mode in SCREEN_MODES else "",
     )
 
     _save_message(session_id, "user", prompt)
