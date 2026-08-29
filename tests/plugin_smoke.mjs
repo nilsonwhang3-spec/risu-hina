@@ -2064,6 +2064,54 @@ console.log('\ntest_asset_write_verified');
         completed?.detail);
 }
 
+console.log('\ntest_markdown_workspace_images');
+{
+  // A reply containing ![alt](space path) renders the image through the blob
+  // pipeline; a scheme or an escape degrades to the alt text. The image file
+  // is real (uploaded to the backend); only /chat is faked.
+  const auth = { Authorization: 'Bearer plugin-smoke-token', 'Content-Type': 'application/json' };
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
+    .concat(Array(40).fill(0))).toString('base64');
+  await fetch(backend.url + '/files/upload', {
+    method: 'POST', headers: auth,
+    body: JSON.stringify({ name: '마크그림.png', base64: png, dir: 'projects/그림들' }),
+  });
+
+  const orig = globalThis.fetch;
+  globalThis.fetch = async (url, opts) => {
+    const u = String(url);
+    if (u.endsWith('/session') && opts?.body) {
+      return new Response(JSON.stringify({ sessionId: 'smoke-md-img' }), {
+        status: 200, headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    if (u.endsWith('/chat') && opts?.body) {
+      const lines = [
+        JSON.stringify({ type: 'text', text: '결과: ![그림](projects/그림들/마크그림.png) 그리고 ![밖](https://example.com/x.png) 와 ![탈출](../../etc/passwd)' }),
+        JSON.stringify({ type: 'done' }),
+      ].join(String.fromCharCode(10)) + String.fromCharCode(10);
+      return new Response(lines, { status: 200, headers: { 'Content-Type': 'application/x-ndjson' } });
+    }
+    return orig(url, opts);
+  };
+  try {
+    const input = document.querySelector('.panel.active .agentinput');
+    input.value = '이미지 렌더 확인';
+    document.querySelector('.panel.active .sendbtn')
+      ?.dispatchEvent(new window.Event('click', { bubbles: true }));
+    await settle(1200);
+  } finally {
+    globalThis.fetch = orig;
+  }
+  const bubble = [...document.querySelectorAll('.panel.active .bubble.assistant')].pop();
+  check('a space image renders as an <img>', !!bubble?.querySelector('.wsimg img'),
+        (bubble?.textContent || '').slice(0, 160));
+  check('an external URL degrades to its alt text',
+        /\[이미지: 밖\]/.test(bubble?.textContent || ''), (bubble?.textContent || '').slice(0, 200));
+  check('an escaping path degrades too',
+        /\[이미지: 탈출\]/.test(bubble?.textContent || ''), (bubble?.textContent || '').slice(0, 200));
+}
+
 console.log('\ntest_studio_selector');
 {
   // Put candidates in the library through the backend, then drive the

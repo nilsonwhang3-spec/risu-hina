@@ -113,8 +113,8 @@ export function renderBody(raw: string, mode: ViewMode, opts: RenderOptions): HT
 
   for (const piece of splitImages(text)) {
     if (piece.kind === 'img') {
-      // PocketRisu's plugin CSP allows img-src; mainline's does not, so a
-      // broken image must degrade to a readable placeholder rather than a gap.
+      // Both hosts allow img-src blob:/data: now (mainline since 2026-08),
+      // but a broken image must still degrade to a readable placeholder.
       const img = el('img', { class: 'turn-img', src: piece.src, alt: piece.alt || 'image' });
       img.addEventListener('error', () => {
         img.replaceWith(el('span', { class: 'hint', text: `[이미지: ${piece.alt || piece.src}]` }));

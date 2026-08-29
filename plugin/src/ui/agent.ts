@@ -18,6 +18,7 @@
 import { el, clear, popover, TOOL_GLYPH, PAPER_PLANE, ICON } from './dom';
 import { state, type StagedEdit, type AgentSessionInfo, type PendingAction } from '../state';
 import { renderMarkdown } from './markdown';
+import { workspaceImage } from './blobimg';
 import { clientLog } from '../transport';
 import { currentMode } from './shell';
 
@@ -871,7 +872,7 @@ function skillArg(args: unknown): string {
 /** Replace a node's contents with rendered markdown. */
 function setMarkdown(node: HTMLElement, text: string): void {
   clear(node);
-  node.appendChild(renderMarkdown(text));
+  node.appendChild(renderMarkdown(text, { image: (p, a) => workspaceImage(p, a, { thumb: true }) }));
 }
 
 function fmtSize(n: number): string {

@@ -28,6 +28,7 @@
 import { el, clear, armed, popover, refocusSearch, type ArmedControl } from './dom';
 import { state, type FileArea, type FileListing, type WorkspaceFile } from '../state';
 import { makeTab, type NoticeKind, type TabUi } from './kit';
+import { blobUrl } from './blobimg';
 import { clientLog } from '../transport';
 
 const AREA_LABEL: Record<string, [string, string]> = {
@@ -81,8 +82,6 @@ let filterText = '';
 let view: 'list' | 'grid' = 'list';
 try { if (localStorage.getItem('hina.filesView') === 'grid') view = 'grid'; } catch { /* iframe */ }
 const expanded = new Set<string>(['projects', 'studio']);
-/** Thumbnail blob URLs by path. */
-const thumbs = new Map<string, string>();
 let ui: TabUi | null = null;
 
 function notice(text: string, kind: NoticeKind = ''): void {
@@ -561,39 +560,18 @@ function focusList(): void {
   (viewMount?.querySelector('.filelist') as HTMLElement | null)?.focus();
 }
 
-// Thumbnails: a few at a time, from the backend's own copy of the file.
-const THUMB_PARALLEL = 6;
-let thumbActive = 0;
-const thumbQueue: (() => void)[] = [];
+// Thumbnails ride the shared blob pipeline (blobimg.ts: 6 in flight, LRU).
 async function loadThumb(f: WorkspaceFile, mount: HTMLElement): Promise<void> {
-  let url = thumbs.get(f.path + ':' + f.modified) || '';
-  if (!url) {
-    await new Promise<void>((resolve) => {
-      const go = () => { thumbActive += 1; resolve(); };
-      if (thumbActive < THUMB_PARALLEL) go(); else thumbQueue.push(go);
-    });
-    try {
-      if (!mount.isConnected) return;
-      const bytes = await state.fileBytes(f.path);
-      const buf = new Uint8Array(bytes.byteLength);
-      buf.set(bytes);
-      url = URL.createObjectURL(new Blob([buf]));
-      if (thumbs.size > 400) {
-        for (const [k, u] of thumbs) { URL.revokeObjectURL(u); thumbs.delete(k); break; }
-      }
-      thumbs.set(f.path + ':' + f.modified, url);
-    } catch {
-      mount.appendChild(el('div', { class: 'assettype', text: '?' }));
-      return;
-    } finally {
-      thumbActive -= 1;
-      thumbQueue.shift()?.();
-    }
+  try {
+    if (!mount.isConnected) return;
+    const url = await blobUrl(f.path, String(f.modified));
+    if (!mount.isConnected) return;
+    const img = el('img', { src: url, alt: f.name, loading: 'lazy' });
+    img.addEventListener('error', () => img.replaceWith(el('div', { class: 'assettype', text: 'IMG' })));
+    mount.appendChild(img);
+  } catch {
+    mount.appendChild(el('div', { class: 'assettype', text: '?' }));
   }
-  if (!mount.isConnected) return;
-  const img = el('img', { src: url, alt: f.name, loading: 'lazy' });
-  img.addEventListener('error', () => img.replaceWith(el('div', { class: 'assettype', text: 'IMG' })));
-  mount.appendChild(img);
 }
 
 // --- preview -------------------------------------------------------------------
@@ -631,10 +609,7 @@ async function drawPreview(f: WorkspaceFile, n: Folder): Promise<void> {
   if (IMAGE_RE.test(f.name)) {
     body.appendChild(el('div', { class: 'hint', text: '불러오는 중입니다…' }));
     try {
-      const bytes = await state.fileBytes(f.path);
-      const buf = new Uint8Array(bytes.byteLength);
-      buf.set(bytes);
-      const url = URL.createObjectURL(new Blob([buf]));
+      const url = await blobUrl(f.path, String(f.modified));
       clear(body);
       const img = el('img', { src: url, alt: f.name });
       img.addEventListener('error', () => { clear(body); body.appendChild(el('div', { class: 'hint', text: '이 호스트에서는 그림을 표시할 수 없습니다. 내 PC에 저장해서 보세요.' })); });

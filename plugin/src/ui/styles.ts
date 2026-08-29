@@ -5,10 +5,10 @@
  * them makes the panel follow the user's theme for free. Each has a fallback
  * because a fork or an older build may not define all of them.
  *
- * No images in the chrome: mainline RisuAI's plugin CSP has no `img-src`, so
- * anything loaded through <img> is blocked there even though PocketRisu allows
- * it. Inline SVG is markup, not a fetch, so it works on both; the one place an
- * <img> appears - the bot portrait - degrades to initials.
+ * No images in the chrome, still: mainline RisuAI's plugin CSP allows
+ * `img-src blob:` since 2026-08 (docs/06 §1-7), so blob-URL images work on
+ * both hosts now - but the chrome keeps to inline SVG (markup, not a fetch)
+ * and every <img> the panel draws degrades to text when a host refuses it.
  */
 export const CSS = `
 :host, * { box-sizing: border-box; }
@@ -429,6 +429,9 @@ button.iconbtn:hover:not(:disabled) { background: rgba(128,128,128,.14); }
 .thought { color: #7dd3fc; }
 .turn-body.raw { font-family: Consolas, monospace; font-size: 12px; color: var(--textcolor2, #9aa4b8); }
 .turn-body img.turn-img { max-width: 100%; max-height: 320px; border-radius: 5px; margin: 4px 0; }
+/* Space images in markdown (agent bubbles, viewers). */
+.wsimg img { max-width: 100%; border-radius: 5px; margin: 4px 0; }
+.wsimg.thumb img { max-height: 180px; }
 .turn textarea { min-height: 90px; }
 .diff-del { background: rgba(239, 68, 68, .22); text-decoration: line-through; }
 .diff-ins { background: rgba(16, 185, 129, .22); }

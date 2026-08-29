@@ -13,7 +13,15 @@
  */
 import { el } from './dom';
 
-export function renderMarkdown(text: string): DocumentFragment {
+export interface MarkdownOptions {
+  /** How to render `![alt](path)`. Absent = the image renders as its alt
+   *  text: this renderer stays pure DOM and fetches nothing on its own. The
+   *  callback receives whatever sat inside the parentheses; it does its own
+   *  path policing (blobimg.workspaceImage rejects schemes and `..`). */
+  image?: (path: string, alt: string) => HTMLElement;
+}
+
+export function renderMarkdown(text: string, opts: MarkdownOptions = {}): DocumentFragment {
   const frag = document.createDocumentFragment();
   const lines = text.split('\n');
   let i = 0;
@@ -46,7 +54,7 @@ export function renderMarkdown(text: string): DocumentFragment {
     if (heading) {
       const level = Math.min(4, heading[1].length);
       const h = el('div', { class: 'md-h md-h' + level });
-      h.appendChild(inline(heading[2]));
+      h.appendChild(inline(heading[2], opts));
       frag.appendChild(h);
       i++;
       continue;
@@ -59,7 +67,7 @@ export function renderMarkdown(text: string): DocumentFragment {
         i++;
       }
       const q = el('div', { class: 'md-quote' });
-      q.appendChild(renderMarkdown(body.join('\n')));
+      q.appendChild(renderMarkdown(body.join('\n'), opts));
       frag.appendChild(q);
       continue;
     }
@@ -81,12 +89,12 @@ export function renderMarkdown(text: string): DocumentFragment {
       const cellClass = (j: number) => aligns[j] || '';
       const thead = el('thead', {}, [el('tr', {}, header.map((h, j) => {
         const th = el('th', { class: cellClass(j) });
-        th.appendChild(inline(h.trim()));
+        th.appendChild(inline(h.trim(), opts));
         return th;
       }))]);
       const tbody = el('tbody', {}, rows.map((r) => el('tr', {}, header.map((_, j) => {
         const td = el('td', { class: cellClass(j) });
-        td.appendChild(inline((r[j] ?? '').trim()));
+        td.appendChild(inline((r[j] ?? '').trim(), opts));
         return td;
       }))));
       frag.appendChild(el('div', { class: 'md-tablewrap' }, [el('table', { class: 'md-table' }, [thead, tbody])]));
@@ -101,7 +109,7 @@ export function renderMarkdown(text: string): DocumentFragment {
         const m = lines[i].match(/^\s*(?:[-*+]|\d+\.)\s+(.*)$/);
         if (!m) break;
         const li = el('li');
-        li.appendChild(inline(m[1]));
+        li.appendChild(inline(m[1], opts));
         list.appendChild(li);
         i++;
       }
@@ -123,7 +131,7 @@ export function renderMarkdown(text: string): DocumentFragment {
       i++;
     }
     const p = el('div', { class: 'md-p' });
-    p.appendChild(inline(para.join('\n')));
+    p.appendChild(inline(para.join('\n'), opts));
     frag.appendChild(p);
   }
   return frag;
@@ -151,23 +159,31 @@ function isBlockStart(line: string): boolean {
     || /^\s*([-*_])\1{2,}\s*$/.test(line);
 }
 
-const INLINE_RE = /(\*\*[^*\n]+\*\*|__[^_\n]+__|\*[^*\n]+\*|_[^_\n]+_|`[^`\n]+`|\[[^\]\n]+\]\([^)\s]+\))/g;
+const INLINE_RE = /(\*\*[^*\n]+\*\*|__[^_\n]+__|\*[^*\n]+\*|_[^_\n]+_|`[^`\n]+`|!\[[^\]\n]*\]\([^)\s]+\)|\[[^\]\n]+\]\([^)\s]+\))/g;
 
-function inline(text: string): DocumentFragment {
+function inline(text: string, opts: MarkdownOptions): DocumentFragment {
   const frag = document.createDocumentFragment();
   let last = 0;
   let m: RegExpExecArray | null;
   INLINE_RE.lastIndex = 0;
   while ((m = INLINE_RE.exec(text)) !== null) {
     if (m.index > last) frag.appendChild(document.createTextNode(text.slice(last, m.index)));
-    frag.appendChild(token(m[0]));
+    frag.appendChild(token(m[0], opts));
     last = INLINE_RE.lastIndex;
   }
   if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
   return frag;
 }
 
-function token(tok: string): Node {
+function token(tok: string, opts: MarkdownOptions): Node {
+  if (tok.startsWith('![')) {
+    const m = tok.match(/^!\[([^\]]*)\]\(([^)\s]+)\)$/);
+    if (m) {
+      // No fetching here: the caller decides what an image may be, and a
+      // renderer without a callback shows the alt text and nothing else.
+      return opts.image ? opts.image(m[2], m[1]) : document.createTextNode(`[이미지: ${m[1] || m[2]}]`);
+    }
+  }
   if (tok.startsWith('**') || tok.startsWith('__')) {
     return el('strong', { text: tok.slice(2, -2) });
   }
