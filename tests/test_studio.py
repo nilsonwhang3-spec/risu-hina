@@ -384,6 +384,72 @@ check("what the card has is listed", set(e["have"]) == {"happy", "떠돌이"}, s
 check("slots with no asset are named", set(e["missing"]) == {"sad", "angry"}, str(e["missing"]))
 check("and the note counts them", "2개가 카드에 없습니다" in e["note"], e["note"])
 
+# The card model: a style or a character carries its own on/off and order in
+# its front matter, the way a lorebook entry carries alwaysActive/insertorder.
+print("\ntest_prompt_cards")
+files.upload(files.SPACE, "카드A.md", text="---\nname: 카드A\nenabled: true\norder: 20\n---\n스타일A2",
+             into="studio/styles")
+files.upload(files.SPACE, "카드B.md", text="---\nname: 카드B\nenabled: true\n---\n스타일B2\n## negative\n제외B2",
+             into="studio/styles")
+sA = studio.read_style("styles/카드A.md")
+check("enabled and order come from the front matter", sA["enabled"] is True and sA["order"] == 20)
+check("an absent enabled means OFF", studio.read_style("styles/수채화.md")["enabled"] is False)
+check("active styles come in (order, path) order",
+      studio.active("styles") == ["studio/styles/카드A.md", "studio/styles/카드B.md"],
+      str(studio.active("styles")))
+
+r = studio.set_meta("styles/카드A.md", {"enabled": False})
+check("set_meta flips the switch", r["enabled"] is False)
+check("and preserves the body byte for byte",
+      studio._read_text("styles/카드A.md").endswith("---\n스타일A2"))
+studio.set_meta("styles/카드A.md", {"enabled": True, "order": 20})
+
+pos, neg, _caps = studio.compose({"styles": ["styles/카드A.md", "styles/카드B.md"], "characters": []})
+check("plural styles concatenate in order", pos == "스타일A2, 스타일B2", pos)
+check("their negatives collect too", neg == "제외B2", neg)
+pos, _n, _c = studio.compose({"style": "styles/카드B.md", "characters": []})
+check("the legacy singular style still folds in", pos == "스타일B2", pos)
+pos, _n, _c = studio.compose({"characters": []})
+check("unstated styles mean the active cards", pos == "스타일A2, 스타일B2", pos)
+pos, _n, _c = studio.compose({"styles": [], "characters": []})
+check("an explicit empty list means none", pos == "", pos)
+
+print("\ntest_character_folder_cards")
+files.upload(files.SPACE, "레거시.json", text=json.dumps(
+    {"name": "레거시", "caption": "캐릭터B", "negative": "제외D2"}, ensure_ascii=False),
+    into="studio/characters")
+(studio.root() / "characters" / "레거시.png").write_bytes(PNG)
+moved = studio.migrate_characters()
+check("a legacy stem-pair becomes a folder card", moved >= 1
+      and (studio.root() / "characters" / "레거시" / "prompt.md").is_file()
+      and (studio.root() / "characters" / "레거시" / "레거시.png").is_file(),
+      str(moved))
+check("and the legacy files are gone", not (studio.root() / "characters" / "레거시.json").exists())
+check("migration is idempotent", studio.migrate_characters() == 0)
+
+c = studio.read_character("characters/레거시")
+check("the folder card reads whole", c["name"] == "레거시" and c["caption"] == "캐릭터B"
+      and c["negative"] == "제외D2", json.dumps(c, ensure_ascii=False)[:200])
+check("the migrated png became a vibe entry", len(c["vibe"]) == 1
+      and c["vibe"][0]["file"] == "레거시.png" and c["vibe"][0]["strength"] == 0.6, str(c["vibe"]))
+check("a card starts disabled", c["enabled"] is False)
+studio.set_meta("characters/레거시", {"enabled": True})
+check("the folder toggle lands in prompt.md", studio.read_character("characters/레거시")["enabled"] is True)
+lst = studio.listing("characters")
+check("the listing is one card per folder",
+      any(i["path"] == "studio/characters/레거시" and i["vibe"] == 1 for i in lst), str(lst)[:300])
+
+# 히나.json was itself migrated by the earlier listing call - the folder is
+# the card now, and this asserts both folder cards compose together.
+pos, neg, caps = studio.compose({"styles": [], "characters": ["characters/레거시", "characters/히나"]})
+check("two characters become char_captions", len(caps) == 2, str(caps))
+check("no centers means no captions with coords", all(not cc["centers"] for cc in caps))
+
+print("\ntest_selection_slugs")
+check("korean folders no longer share one slug",
+      studio._slug("images/고르기") != studio._slug("images/버리기"),
+      studio._slug("images/고르기"))
+
 # The studio is a third screen, not a half. Adopting an image into the card is
 # the studio's own verb, so it passes the gate there; everything else still
 # belongs to its edit screen, and the refusal names where the user actually is.

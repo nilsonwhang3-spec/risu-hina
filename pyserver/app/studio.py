@@ -103,6 +103,20 @@ def _front_matter(text: str) -> tuple[dict, str]:
     return meta, text[m.end():]
 
 
+def _bool(meta: dict, key: str, default: bool = False) -> bool:
+    v = str(meta.get(key, "")).strip().lower()
+    if not v:
+        return default
+    return v in ("true", "1", "yes", "on")
+
+
+def _order(meta: dict, default: int = 100) -> int:
+    try:
+        return int(str(meta.get("order", "")).strip())
+    except (TypeError, ValueError):
+        return default
+
+
 def read_style(rel: str) -> dict:
     """A style file: front matter, then `## positive` / `## negative`.
 
@@ -128,6 +142,12 @@ def read_style(rel: str) -> dict:
                 positive = (positive + ", " + chunk.strip()).strip(", ") if positive else chunk.strip()
     return {"path": rel, "name": meta.get("name") or Path(rel).stem,
             "description": meta.get("description", ""),
+            # The card's own switch, lorebook-style. Absent means OFF: before
+            # the cards, a style was picked explicitly per run, and an upgrade
+            # that silently concatenated every existing file would change what
+            # gets sent without anyone choosing it.
+            "enabled": _bool(meta, "enabled"),
+            "order": _order(meta),
             "positive": positive, "negative": negative}
 
 
@@ -152,8 +172,182 @@ def read_bytes(rel: str) -> bytes:
     return p.read_bytes()
 
 
+# --- cards: the lorebook model over prompt files -------------------------------
+#
+# A style or a character is a CARD: it carries its own on/off (`enabled`) and
+# its own place in the concatenation (`order`) in its front matter, the way a
+# lorebook entry carries alwaysActive and insertorder. The file is the card -
+# a .studio map would dangle the moment a file is renamed by hand.
+
+META_KEYS = ("enabled", "order", "name", "description")
+
+
+def _card_md(rel: str) -> str:
+    """The .md that carries a card's front matter: the file itself, or the
+    folder character's prompt.md."""
+    r = _rel(rel)
+    p = files._resolve(SCOPE, r)
+    if p.is_dir():
+        return r + "/prompt.md"
+    return r
+
+
+def set_meta(rel: str, changes: dict) -> dict:
+    """Rewrite a card's front matter, byte-preserving the body.
+
+    One writer for the toggle and the editor both: a panel doing its own
+    read-modify-write of the whole file would race a concurrent edit.
+    """
+    md = _card_md(rel)
+    p = files._resolve(SCOPE, md)
+    if not p.is_file():
+        raise StudioError(f"파일이 없습니다: {md}")
+    text = p.read_text(encoding="utf-8", errors="replace")
+    meta, body = _front_matter(text)
+    for k, v in (changes or {}).items():
+        if k not in META_KEYS:
+            raise StudioError(f"front matter 로 바꿀 수 없는 키입니다: {k}")
+        if v is None or v == "":
+            meta.pop(k, None)
+        elif k == "enabled":
+            meta[k] = "true" if v in (True, "true", "True", 1, "1") else "false"
+        elif k == "order":
+            try:
+                meta[k] = str(int(v))
+            except (TypeError, ValueError) as e:
+                raise StudioError(f"order 는 정수여야 합니다: {v!r}") from e
+        else:
+            meta[k] = str(v)
+    fm = "---\n" + "".join(f"{k}: {v}\n" for k, v in meta.items()) + "---\n"
+    with open(p, "w", encoding="utf-8", newline="") as f:
+        f.write(fm + body)
+    return {"path": md, "enabled": _bool(meta, "enabled"), "order": _order(meta),
+            "name": meta.get("name", ""), "description": meta.get("description", "")}
+
+
+def read_character(rel: str) -> dict:
+    """A character card.
+
+    The folder form is the card: `characters/<이름>/` holding `prompt.md`
+    (front matter + ## 프롬프트 / ## 네거티브) and `preset.json` (position and
+    the reference lists). The legacy stem-pair `.json` is still read so old
+    specs and sidecars keep resolving; `migrate_characters` folds them away.
+    """
+    r = _rel(rel)
+    p = files._resolve(SCOPE, r)
+    if p.is_dir() or not r.lower().endswith(".json"):
+        base = r
+        s = read_style(base + "/prompt.md")
+        preset: dict = {}
+        try:
+            preset = read_json(base + "/preset.json")
+        except StudioError:
+            pass
+        return {
+            "path": base,
+            "name": s["name"] if s["name"] != "prompt" else Path(base).name,
+            "caption": s["positive"], "negative": s["negative"],
+            "enabled": s["enabled"], "order": s["order"],
+            "description": s["description"],
+            "position": preset.get("position"),
+            "vibe": [v for v in (preset.get("vibe") or [])
+                     if isinstance(v, dict) and v.get("enabled", True)],
+            "charref": [v for v in (preset.get("charref") or [])
+                        if isinstance(v, dict) and v.get("enabled", True)],
+        }
+    d = read_json(r)
+    return {
+        "path": r, "name": str(d.get("name") or Path(r).stem),
+        "caption": str(d.get("caption") or d.get("prompt") or ""),
+        "negative": str(d.get("negative") or ""),
+        "enabled": bool(d.get("enabled")), "order": int(d.get("order") or 100),
+        "description": str(d.get("description") or ""),
+        "position": d.get("position"), "vibe": [], "charref": [],
+    }
+
+
+def migrate_characters() -> int:
+    """Legacy stem-pair characters become folder cards, once each.
+
+    Idempotent: a folder that already exists is left alone (with a log line),
+    and nothing is deleted until its replacement is written. The vibe cache
+    keys by content hash, so moving the png invalidates nothing.
+    """
+    base = root() / "characters"
+    if not base.is_dir():
+        return 0
+    moved = 0
+    for p in sorted(base.glob("*.json")):
+        try:
+            d = json.loads(p.read_text(encoding="utf-8", errors="replace"))
+        except ValueError:
+            continue
+        if not isinstance(d, dict) or ("caption" not in d and "prompt" not in d):
+            continue
+        folder = base / p.stem
+        if folder.exists():
+            log.warn("studio: %s already has a folder card; the legacy file is left as is", p.stem)
+            continue
+        folder.mkdir()
+        name = str(d.get("name") or p.stem)
+        body = str(d.get("caption") or d.get("prompt") or "")
+        neg = str(d.get("negative") or "")
+        text = f"---\nname: {name}\n---\n## 프롬프트\n{body}\n"
+        if neg:
+            text += f"\n## 네거티브\n{neg}\n"
+        (folder / "prompt.md").write_text(text, encoding="utf-8")
+        vibe = []
+        png = p.with_suffix(".png")
+        if png.is_file():
+            png.rename(folder / png.name)
+            vibe = [{"file": png.name, "strength": 0.6, "informationExtracted": 1.0, "enabled": True}]
+        (folder / "preset.json").write_text(json.dumps(
+            {"version": 1, "position": d.get("position"), "vibe": vibe, "charref": []},
+            ensure_ascii=False, indent=2), encoding="utf-8")
+        p.unlink()
+        moved += 1
+        log.info("studio: character %s migrated to a folder card", p.stem)
+    return moved
+
+
+def active(area: str) -> list[str]:
+    """The enabled cards' paths, in (order, path) order - what a run uses
+    when the spec does not choose explicitly."""
+    rows = [(i.get("order", 100), i["path"]) for i in listing(area) if i.get("enabled")]
+    return [path for _o, path in sorted(rows)]
+
+
+def _character_listing() -> list[dict]:
+    migrate_characters()
+    base = root() / "characters"
+    out: list[dict] = []
+    if not base.is_dir():
+        return out
+    sproot = files._root(SCOPE)
+    for p in sorted(base.iterdir()):
+        if p.name.startswith("."):
+            continue
+        if not p.is_dir():
+            continue  # loose files (a stray png, an unmigratable json) are not cards
+        rel = p.relative_to(sproot).as_posix()
+        try:
+            c = read_character(rel)
+        except StudioError:
+            continue
+        out.append({
+            "path": rel, "name": c["name"], "folder": "",
+            "description": c["description"],
+            "enabled": c["enabled"], "order": c["order"],
+            "vibe": len(c["vibe"]), "charref": len(c["charref"]),
+            "position": c["position"],
+        })
+    return out
+
+
 def listing(area: str) -> list[dict]:
     """Everything in one area, with just enough of each to choose by."""
+    if area == "characters":
+        return _character_listing()
     out = []
     base = root() / area
     if not base.is_dir():
@@ -166,7 +360,8 @@ def listing(area: str) -> list[dict]:
         if p.suffix.lower() == ".md" and area == "styles":
             try:
                 s = read_style(rel)
-                item.update(name=s["name"], description=s["description"])
+                item.update(name=s["name"], description=s["description"],
+                            enabled=s["enabled"], order=s["order"])
             except StudioError:
                 pass
         elif p.suffix.lower() == ".json":
@@ -315,19 +510,39 @@ def read_scenes(rel: str) -> dict:
 
 # --- assembling one request ---------------------------------------------------
 
+def normalize_spec(spec: dict) -> dict:
+    """One spec shape for plan() and the job runner.
+
+    `styles` is plural now (active styles concatenate in card order, like a
+    lorebook); the legacy singular `style` folds in. Styles and characters
+    left unstated default to the ACTIVE cards; an explicit empty list means
+    "none" - the difference between not choosing and choosing nothing.
+    """
+    out = dict(spec)
+    if "styles" not in out:
+        out["styles"] = [out["style"]] if out.get("style") else active("styles")
+    elif out.get("style"):
+        out["styles"] = list(out["styles"] or []) + [out["style"]]
+    out.pop("style", None)
+    if "characters" not in out:
+        out["characters"] = active("characters")
+    return out
+
+
 def compose(spec: dict) -> tuple[str, str, list[dict]]:
     """(positive, negative, char_captions) for one image.
 
-    Order is style, then character, then fragments, then the emotion - the
-    emotion last because it is the thing that varies across a batch and the
-    thing a reader is looking for when they check what was sent.
+    Order is styles (in card order), then characters, then fragments, then
+    the emotion - the emotion last because it is the thing that varies across
+    a batch and the thing a reader is looking for when they check what was
+    sent.
     """
+    spec = normalize_spec(spec)
     pos: list[str] = []
     neg: list[str] = []
 
-    style_rel = str(spec.get("style") or "")
-    if style_rel:
-        s = read_style(style_rel)
+    for style_rel in spec.get("styles") or []:
+        s = read_style(str(style_rel))
         if s["positive"]:
             pos.append(s["positive"])
         if s["negative"]:
@@ -335,7 +550,7 @@ def compose(spec: dict) -> tuple[str, str, list[dict]]:
 
     captions: list[dict] = []
     for ch in spec.get("characters") or []:
-        c = ch if isinstance(ch, dict) else read_json(str(ch))
+        c = ch if isinstance(ch, dict) else read_character(str(ch))
         caption = str(c.get("caption") or c.get("prompt") or "").strip()
         if not caption:
             continue
@@ -471,6 +686,7 @@ def plan(spec: dict) -> list[dict]:
     caller can be told how many images and what they will be called before it
     spends anything.
     """
+    spec = normalize_spec(spec)
     scenes: list[dict] = []
     if spec.get("scenes"):
         picked = spec["scenes"]
@@ -612,7 +828,13 @@ NAMING_DIR = ".studio/naming"
 
 def _slug(folder: str) -> str:
     # Slugs are computed on the bare library-relative form so selection files
-    # made before the space unification keep resolving.
+    # made before the space unification keep resolving. Hangul survives: the
+    # old ASCII-only pattern collapsed every Korean folder name to the same
+    # underscores, so images/고르기 and images/버리기 shared one selection file.
+    return re.sub(r"[^0-9A-Za-z가-힣._-]+", "_", _unstudio(folder).strip("/")) or "root"
+
+
+def _legacy_slug(folder: str) -> str:
     return re.sub(r"[^A-Za-z0-9]+", "_", _unstudio(folder).strip("/")) or "root"
 
 
@@ -623,7 +845,11 @@ def _side(kind: str, folder: str) -> Path:
 def read_selection(folder: str) -> dict:
     p = _side(SELECTION_DIR, folder)
     if not p.is_file():
-        return {}
+        # A selection saved under the old ASCII-collapsed slug is still read
+        # (never written back there - the first save moves it forward).
+        p = root() / SELECTION_DIR / f"{_legacy_slug(folder)}.json"
+        if not p.is_file():
+            return {}
     try:
         return json.loads(p.read_text(encoding="utf-8"))
     except ValueError:

@@ -66,6 +66,20 @@ def _update(job_id: str, **fields: Any) -> None:
 
 def start(spec: dict) -> dict:
     """Expand the batch, record it, and run it in the background."""
+    spec = studio.normalize_spec(spec)
+    # 레퍼런스 사용: without explicit vibes, the active characters' presets
+    # supply them - each enabled vibe entry, resolved against its card folder.
+    if spec.get("useReference") and not spec.get("vibes"):
+        vibes = []
+        for ch in spec.get("characters") or []:
+            c = studio.read_character(str(ch)) if isinstance(ch, str) else ch
+            for v in c.get("vibe") or []:
+                if not c.get("path") or not v.get("file"):
+                    continue
+                vibes.append({"path": f"{c['path']}/{v.get('file')}",
+                              "strength": float(v.get("strength", 0.6)),
+                              "informationExtracted": float(v.get("informationExtracted", 1.0))})
+        spec["vibes"] = vibes
     items = studio.plan(spec)
     if not items:
         raise studio.StudioError("만들 이미지가 없습니다")
@@ -136,13 +150,15 @@ def _run(job_id: str) -> None:
             p["height"] = item["size"]["height"]
         if item.get("charCaptions"):
             p["char_captions"] = item["charCaptions"]
-            p["use_coords"] = True
+            # Coordinates only when someone placed a character: captions alone
+            # with use_coords on would tell the model about positions nobody set.
+            p["use_coords"] = any(c.get("centers") for c in item["charCaptions"])
         try:
             png = nai.generate(model, item["prompt"], item["negative"], p, vibes or None)
             saved = studio.save_image(folder, item["name"], png, {
                 "scene": item.get("scene"), "prompt": item["prompt"],
                 "negative": item["negative"], "model": model, "seed": item.get("seed"),
-                "style": spec.get("style"), "characters": spec.get("characters"),
+                "styles": spec.get("styles"), "characters": spec.get("characters"),
                 "scenePreset": spec.get("scenePreset"),
             })
             payload["saved"].append(saved["path"])

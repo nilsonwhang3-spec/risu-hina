@@ -1000,6 +1000,17 @@ def h_studio_list(arg: dict) -> dict:
     return {"area": area, "items": studio.listing(area)}
 
 
+def h_studio_meta(arg: dict) -> dict:
+    """One card's front matter: the enable toggle and the order, one writer."""
+    changes = arg.get("set")
+    if not isinstance(changes, dict) or not changes:
+        raise ApiError(400, "set{} is required (enabled / order / name / description)")
+    try:
+        return studio.set_meta(str(arg.get("path") or ""), changes)
+    except (studio.StudioError, files.FileError) as e:
+        raise ApiError(400, str(e))
+
+
 def h_studio_plan(arg: dict) -> dict:
     """What a batch would produce, before anything is spent."""
     try:
@@ -2111,6 +2122,7 @@ ROUTES: dict[str, Handler] = {
     "GET /studio/status": h_studio_status,
     "POST /studio/model-check": h_studio_model_check,
     "GET /studio/list": h_studio_list,
+    "POST /studio/meta": h_studio_meta,
     "POST /studio/plan": h_studio_plan,
     "POST /studio/generate": h_studio_generate,
     "GET /studio/job": h_studio_job,

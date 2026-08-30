@@ -936,6 +936,27 @@ def build() -> Agent[Deps]:
     # write them with the general file tools. Only the domain verbs live here.
 
     @agent.tool
+    def studio_meta(ctx: RunContext[Deps], path: str, enabled: str = "", order: int = 0) -> str:
+        """스타일/캐릭터 카드의 활성화·순서를 바꾼다 (로어북처럼 카드가 자기 on/off 를 가진다).
+
+        enabled: "true" | "false" | "" (그대로). order: 0 이면 그대로, 아니면 정수
+        (작을수록 앞에 연결된다, 기본 100). 활성 카드들이 스타일/캐릭터 미지정 시의
+        기본 세트다 - studio_plan 으로 확인하고 바꿔라.
+        """
+        changes: dict = {}
+        if enabled.strip().lower() in ("true", "false"):
+            changes["enabled"] = enabled.strip().lower() == "true"
+        if order:
+            changes["order"] = order
+        if not changes:
+            return "바꿀 것이 없습니다 (enabled 또는 order 를 주세요)"
+        try:
+            r = studio.set_meta(path, changes)
+        except Exception as e:  # noqa: BLE001
+            return str(e)
+        return (f"{r['path']}: enabled={'true' if r['enabled'] else 'false'}, order={r['order']}")
+
+    @agent.tool
     def studio_plan(ctx: RunContext[Deps], spec_json: str) -> str:
         """배치 생성 계획을 세워 본다 (아무것도 만들지 않는다). 먼저 이걸로 확인하고 studio_generate 한다.
 
