@@ -331,11 +331,25 @@ The accepted request, in full (only the director_* keys differ from §3's set):
 }
 ```
 
-Unmeasured still: what `director_reference_secondary_strength_values` does (the name passes
-validation; the Comment shows `director_reference_secondary_strengths: null` either way), whether a
-description caption steers the output semantically (K4 was a 200; quality not compared), and
-multi-reference behaviour (all arrays must be the same length, so the shape is clear even though only
-length 1 was run).
+**Fidelity and the mode caption — measured 2026-08-30 (second run), cross-checked against NAIS3.**
+NAIS3 (github.com/sunanakgo/NAIS3) carries real NovelAI web captures (`tests/fixtures/nai-web-charref.json`,
+2026-07-05) asserting: the UI's 충실도(fidelity) slider is sent as
+`director_reference_secondary_strength_values = [1 - fidelity]` (fidelity 1 → `[0]`), and the
+캐릭터/캐릭터&스타일 mode choice is the `base_caption` string (`"character"` / `"character&style"`).
+Re-probed live here (`--charref … --fidelity 0.6 --charref-mode character`):
+
+- `director_reference_secondary_strength_values: [0.4]` → **200**, and the Comment echoes
+  `director_reference_secondary_strengths: [0.4]` — the value is applied, not dropped (the earlier
+  run without the field showed `null` there).
+- `base_caption: "character"` → 200, echoed verbatim in the Comment's descriptions.
+- Still 5 Anlas (9232 → 9227).
+
+NAIS3's enum also lists `style` / `costume` / `delta` as caption values read from the web bundle;
+only `character&style` (their capture) and `character` (ours) are verified by a response.
+
+Unmeasured still: whether a free-text description caption steers the output semantically (K4 was a
+200; quality not compared), and multi-reference behaviour (all arrays must be the same length, so the
+shape is clear even though only length 1 was run).
 
 Consequence for the studio: the reference is fitted into the orientation-matching bucket **before it
 reaches the backend** — the panel resizes at upload time with a canvas (the browser has one; the

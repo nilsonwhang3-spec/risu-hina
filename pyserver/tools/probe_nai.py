@@ -236,6 +236,11 @@ def main() -> int:
                     help="with --vibe, skip the director tools (~10 Anlas each)")
     ap.add_argument("--vibe", default="", help="path to a PNG (or a saved response ZIP): probe encode-vibe and "
                                               "the director tools with it. COSTS ANLAS (see docs/09 7, 7b)")
+    ap.add_argument("--fidelity", default="", help="0~1, with --charref: send "
+                    "director_reference_secondary_strength_values=[1-fidelity] (the NAIS3 web capture's "
+                    "충실도 mapping) and print what the Comment echoes back")
+    ap.add_argument("--charref-mode", default="", help='with --charref: the descriptions base_caption, '
+                    '"character" or "character&style" (NAI web sends the mode name there)')
     ap.add_argument("--charref", default="", help="path to a PNG (or a saved response ZIP): probe the DIRECTOR "
                                                  "REFERENCE (character reference) request shape. Generation-priced "
                                                  "(free at Opus tier); the balance is printed either side anyway")
@@ -450,10 +455,19 @@ def main() -> int:
             director = {
                 "director_reference_images": [img],
                 "director_reference_descriptions": [
-                    {"caption": {"base_caption": "", "char_captions": []}, "legacy_uc": False}],
+                    {"caption": {"base_caption": args.charref_mode or "", "char_captions": []},
+                     "legacy_uc": False}],
                 "director_reference_information_extracted": [1.0],
                 "director_reference_strength_values": [1.0],
             }
+            if args.fidelity != "":
+                # NAIS3's real web capture: the UI's 충실도 slider is sent as
+                # secondary_strength_values = 1 - fidelity (fidelity 1 -> [0]).
+                fid = float(args.fidelity)
+                director["director_reference_secondary_strength_values"] = [round(1.0 - fid, 4)]
+                print(f"       fidelity {fid} -> secondary_strength_values {director['director_reference_secondary_strength_values']}")
+            if args.charref_mode:
+                print(f"       base_caption: {args.charref_mode!r}")
             params = {
                 "params_version": 3, "width": 832, "height": 1216, "scale": 5,
                 "sampler": "k_euler_ancestral", "steps": 23, "n_samples": 1,
