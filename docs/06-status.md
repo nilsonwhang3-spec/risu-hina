@@ -27,9 +27,10 @@ image into the chat · session loop flushes side events mid-tool · panel adopts
 default model, bogus model refused once · artifacts retired, inline `![](path)` with path
 normalization · splitter clamp measures siblings) **+ §1-24** (검수 tab · 애셋 채택 and 봇에 반영
 only in selected/ · agent → 검수 via studio_open and strip buttons · 중단 cancels the batch ·
-per-panel collapse toggles · live job section in the batch tab)
+per-panel collapse toggles · live job section in the batch tab) **+ §1-25** (log file on disk +
+noise cut · bulk asset/script proposals · one card write for many assets)
 (gate ALL GREEN; the minor went up so the version gate trips when it ships). **Staged on test-server
-2026-08-30 night AT §1-24 (= §1-19~23 included): service stopped → backup `data-backup-20260830-s120`
+2026-08-30 night AT §1-25 (= §1-19~24 included): service stopped → backup `data-backup-20260830-s120`
 (11,358 files) → app/*.py + seeds/studio-image-ops.md + tools/probe_nai.py + requirements.in scp'd,
 msgpack 1.1.0 pip-installed into the bundled interpreter, the 0.11.0 dev bundle refreshed in
 `data/plugin/` (712,599 B served at `/plugin.js`) → `/health` 0.11.0 · 12 workspaces ·
@@ -58,6 +59,30 @@ mixed-cast multi-entry batch from the panel.** Released = **v0.10.0 BETA** (§1-
 `https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js`, and made `tools/bundle.py` write that file into the repository (included in the release commit). In the backend code only VERSION changed.
 
 → **First thing to do**: the user reinstalls `plugin/Risu.Hina.Plugin.js` into RisuAI **by hand, once** (the installed 0.1.0's update-url cannot be read because of CORS) → check that `+` appears from the next release on → verify M2 in real use (§5-2).
+
+## 1-25. 2026-08-30 - 0.11.0 (unreleased, continued): logs on disk, bulk proposals, one card write for many assets
+
+The user asked for the staging log after a rough session (a mass asset delete plus 37 adds became
+~130 single-item approval cards; 전체 승인 crawled and the asset sync "stopped at the 20s mark").
+The ring held four minutes of thumbnail fetches and nothing else, and the service kept nothing on
+disk - so the first fix is the log itself. One commit (`0f8fb29`), gate green, restaged (backup
+`data-backup-20260830-r7`; `data/logs/risuhina.log` verified receiving lines).
+
+- **Logs**: every line lands in `data/logs/risuhina.log` (5 MB x 5, lazily opened) as well as the
+  ring (now 8000). Fast, successful thumbnail/poll requests (`/assets/blob`, `/files/download`,
+  `/workspace/dirty`, `/studio/job*`, `/health`, `/actions`, `/staged`, `/permits`) drop to debug -
+  slow or failing ones still surface. Tracebacks go through the same sink (they went to stdout
+  only). Every action decide/complete logs kind · summary · detail; the plugin logs each asset
+  save and the whole apply with timings; sync errors name the STEP that failed.
+- **Bulk proposals**: `propose_assets_add(items_json)` → ONE `host_asset_add_many` card;
+  `propose_scripts_delete(ids)` → ONE `script_delete_many` card (executor loops, reports misses).
+  The instructions tell the agent to use them past one item.
+- **One card write for many assets**: `applyAssetActions` saves every image (saveAsset per image -
+  the host names keys), then ONE host read, ONE card write, adopt per key, ONE re-read + upload.
+  Per item it was 37 host round trips and 37 card uploads, each restarting the asset sync - the
+  churn behind "멈췄다". The status polls inside the sync get the 180s upload budget instead of
+  the 20s default.
+- Not yet measured: a real bulk approval on staging (needs the user's bot open in RisuAI).
 
 ## 1-24. 2026-08-30 - 0.11.0 (unreleased, continued): the 검수 tab, per-panel collapse, a 중단 that stops the batch
 
