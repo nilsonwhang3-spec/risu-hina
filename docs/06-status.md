@@ -9,8 +9,9 @@ The original plan for bot edit mode (M0 measurements, M2 spec) is `~/.claude/pla
 **Releases are manual now (2026-08-29, the user's instruction).** The plugin has users other than us, so **do not release or deploy after every fix**. Land the change, run the gate, leave it on master, and say what is waiting; `tools/release.py`, `gh release create` and the test-server deploy happen **only when the user asks for them**. One mechanical consequence to keep in mind: `tools/bundle.py` writes `plugin/Risu.Hina.Plugin.js` (and the old-name twin) into the repository, and *that committed file is what RisuAI's `+` update check reads* — so a release is not the tag, it is that commit. An ordinary fix commit must leave those two files alone, which `node plugin/build.config.mjs` does by itself (it only writes `plugin/dist/`).
 
 **Code state**: master = **0.11.0 (unreleased)** - §1-17 the ONE global file space (the studio-asset
-branch rebased in: the asset studio + the space unification, C1-C4 of plan risu-elf-1-distributed-magpie;
-gate ALL GREEN; the minor went up so the version gate trips when it ships). Released = **v0.10.0 BETA** (§1-16 the edit-session lifecycle: leave guard, 변경 취소, write verification, snapshot kinds - **schema 13**; the minor went up because `/workspace/dirty`, the reset payloads and the `kind` column mean the backend and the plugin go together, so **the version gate trips**: update the backend, then press `+` on the plugin in RisuAI) (§1-15 any chat opens from the picker · §1-14 the repo goes English · §1-13 3-way merge on reopen · §1-12 an intermediate cache blocking the connection (POST probe, no-store) · §1-11 one web-search tool card with three options · §1-10 built-in search measured, mobile, plugin-reload diagnosis · §1-9 search · §1-8 round 10 · §1-7 · §1-6 · §1-5; the docs/07 planning is still pending) — gate ALL GREEN. 0.7.0 changes the minor, so **the version gate trips**: raise the backend and the plugin on the RisuAI side has to be raised with `+` as well (the header says so).
+branch rebased in) **+ §1-18 the tab kit · prompt cards · character reference (measured) · artifacts**
+(the whole of plan risu-elf-1-distributed-magpie; gate ALL GREEN; the minor went up so the version
+gate trips when it ships). Released = **v0.10.0 BETA** (§1-16 the edit-session lifecycle: leave guard, 변경 취소, write verification, snapshot kinds - **schema 13**; the minor went up because `/workspace/dirty`, the reset payloads and the `kind` column mean the backend and the plugin go together, so **the version gate trips**: update the backend, then press `+` on the plugin in RisuAI) (§1-15 any chat opens from the picker · §1-14 the repo goes English · §1-13 3-way merge on reopen · §1-12 an intermediate cache blocking the connection (POST probe, no-store) · §1-11 one web-search tool card with three options · §1-10 built-in search measured, mobile, plugin-reload diagnosis · §1-9 search · §1-8 round 10 · §1-7 · §1-6 · §1-5; the docs/07 planning is still pending) — gate ALL GREEN. 0.7.0 changes the minor, so **the version gate trips**: raise the backend and the plugin on the RisuAI side has to be raised with `+` as well (the header says so).
 
 **Deployment state (2026-08-25 21:01 `deploy.ps1`, verified in a new SSH session)**:
 
@@ -27,6 +28,52 @@ gate ALL GREEN; the minor went up so the version gate trips when it ships). Rele
 `https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js`, and made `tools/bundle.py` write that file into the repository (included in the release commit). In the backend code only VERSION changed.
 
 → **First thing to do**: the user reinstalls `plugin/Risu.Hina.Plugin.js` into RisuAI **by hand, once** (the installed 0.1.0's update-url cannot be read because of CORS) → check that `+` appears from the next release on → verify M2 in real use (§5-2).
+
+## 1-18. 2026-08-30 - 0.11.0 (unreleased, continued): the tab kit, prompt cards, artifacts
+
+The rest of plan `risu-elf-1-distributed-magpie.md` (Phases 2-4), on top of §1-17:
+
+- **The tab kit** (`plugin/src/ui/kit.ts`): the five things every tab hand-rolled slightly
+  differently - the gate (one empty-state copy per kind), the rebuild guard (declared `keys()`),
+  the auto-clearing notice (10 byte-identical copies deleted), the menu-line search box (now
+  installed whenever the gate passes; memory/trigger/vars/files gained the filter they lacked),
+  and `savedText` (the 반영 rule worded once). `listRow` covers the two row idioms; `armed()`
+  returns a controller so the Delete key and the 삭제 button share one two-step confirm (the
+  files tab's bespoke confirmBar is gone). `renderActive`'s editor special-case became an
+  explicit list of tabs without a menu-line tool. What is deliberately NOT unified is named in
+  kit.ts's header.
+- **Space images** (`blobimg.ts`): the proven bytes→Blob→objectURL pipeline extracted once
+  (POST download, six in flight, LRU); markdown gains `![alt](path)` behind an opt-in callback,
+  **space-relative paths only** - a scheme, a leading slash or `..` degrades to the alt text
+  (an iframe fetching model-chosen URLs is an exfiltration channel). The stale "mainline has no
+  img-src" comments now state the 2026-08 reality.
+- **Prompt cards** (§2 of the user's ask): a style or a character is a CARD with its own
+  `enabled`/`order` in its front matter (absent = OFF - no silent concatenation on upgrade),
+  toggled on the row, edited in the CENTRE pane (the character modal is gone). A character is a
+  folder card `studio/characters/<이름>/{prompt.md, preset.json, *.png}` with per-reference
+  강도/충실도 presets; legacy stem-pairs migrate lazily. compose/plan speak plural styles;
+  unstated = the active cards, explicit [] = none; the panel sends the active sets explicitly.
+  Fixed on the way: `use_coords` only with real centers, and Korean folder names no longer
+  collapse to one selection slug.
+- **Character reference, measured first** (`docs/09 §7d`, probed live 2026-08-30): descriptions
+  are V4ConditionInput objects, the strengths request field is
+  `director_reference_strength_values`, information_extracted is pinned to exactly 1.0, the
+  image must sit in the 1024×1536/1536×1024 bucket (the per-model internal `/encode-director`
+  does not exist for v5 → v4.5-only), and **an accepted generation costs 5 Anlas, Opus
+  included**. `nai.py` speaks that shape; the editor's 캐릭터 레퍼런스 section is gated on the
+  `/studio/status` charref flag and cover-crops uploads into the bucket with a canvas.
+- **Artifacts and image strips** (§5·§6): the wire vocabulary grew by exactly two events -
+  `artifact` and `images` - pushed by tools through `session.push_stream_event` and drained
+  right after their toolResult. `show_artifact(title, content|path)` writes markdown to
+  `hina/<봇>/out/artifacts/` (files first; slugged, counted duplicates) and the ONE global
+  viewer (`artifact.ts`, re-parented like the agent panel) overlays the current tab's centre -
+  markdown through the DOM whitelist with space images, **never raw HTML** (user decision:
+  AI-authored HTML executing with the plugin's iframe privileges is the line). 닫기 leaves a
+  reopen chip and the file. A finished studio batch pushes its saved paths once as a thumbnail
+  strip; fresh out/ images render the same way.
+- Verified: gate ALL GREEN throughout; migration rehearsal on a data copy (17 files → space,
+  manifest complete, second run a no-op, rollback dry-run clean); headless-Chrome probe at 390px
+  shows docW=390 on the studio and files tabs (no horizontal scroll).
 
 ## 1-17. 2026-08-30 - 0.11.0 (unreleased): the ONE global file space, and the studio rebased into it
 
