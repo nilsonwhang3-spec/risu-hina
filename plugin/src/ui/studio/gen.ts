@@ -7,6 +7,7 @@
  * hub.jobTick so the visible tab patches its progress in place.
  */
 import { el, clear, modal } from '../dom';
+import { askName } from '../kit';
 import { state, type StudioJob } from '../../state';
 import { pickerRow, openListPicker, type PickerEntry } from '../pickers';
 import { S, hub, gen, persistGen, activeOf, spec, checkUnresolved, newCard, msg } from './store';
@@ -246,7 +247,7 @@ export function scenePicker(): HTMLElement {
     emptyHint: '씬 프리셋이 없습니다. › 에서 하나 만들어 주세요.',
     onOpen: () => openListPicker({
       title: '씬 프리셋 선택',
-      hint: '씬마다 한 장씩 (장수만큼 반복) 생성됩니다.',
+      hint: '불러온 프리셋의 씬 카드에서 필요한 것만 골라 예약에 담습니다.',
       load: async () => [
         { id: '', name: '(없음)', hint: '요청 설정 한 장 구성', selected: !gen.scenePreset, noDelete: true },
         ...items.map((i): PickerEntry => ({
@@ -271,12 +272,17 @@ export function scenePicker(): HTMLElement {
         await hub.refreshArea('scenes');
       },
       onCreate: () => {
-        void newCard('scenes').then((path) => {
-          if (!path) return;
-          gen.scenePreset = path;
-          persistGen();
-          S.selectedFile = path;
-          hub.drawCentre();
+        askName('새 씬 프리셋', {
+          label: '이름이 곧 파일명입니다.',
+          placeholder: '예: 감정 세트',
+          onSubmit: async (nm) => {
+            const path = await newCard('scenes', '', nm);
+            if (!path) return;
+            gen.scenePreset = path;
+            persistGen();
+            S.selectedFile = path;
+            hub.drawCentre();
+          },
         });
       },
       createLabel: '새 프리셋 추가',

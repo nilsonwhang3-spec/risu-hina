@@ -1998,9 +1998,13 @@ console.log('\ntest_studio_tab');
   clickButton(tabsBar(), '프롬프트');
   await settle(300);
 
-  // Both rails collapse to a slim strip: the studio is the crowded tab, and
-  // the centre is where the work happens.
-  clickButton(tabsBar(), '◂');
+  // Both rails collapse to a slim strip. The toggles ride the CENTRE strip -
+  // the one place always wide enough (they once pushed the OUTPUT tab out of
+  // the left column).
+  check('the left tab bar carries only its two tabs',
+        (document.querySelectorAll('.panel.active .studiotabs .tab').length === 2)
+        && !document.querySelector('.panel.active .studiotabs .railbtn'));
+  clickButton(document.querySelector('.panel.active .centretabs'), '◂');
   await settle(200);
   const split = document.querySelector('.panel.active .split');
   check('the left rail collapses', !!split?.classList.contains('lcollapse'), split?.className);
@@ -2119,8 +2123,16 @@ console.log('\ntest_studio_named_cards');
   check('the 조각 button opens the organizer in the centre',
         /조각 프롬프트/.test(centre()?.textContent || '') && !!centre()?.querySelector('.fragcols'),
         (centre()?.textContent || '').slice(0, 160));
-  window.prompt = () => '스모크 조각';
+  // window.prompt is gone (it read as a browser security dialog): names come
+  // from a small anchored popover.
   clickButton(centre(), '＋ 조각');
+  await settle(200);
+  const namePop = [...document.querySelectorAll('.applypop')].pop();
+  const nameIn = namePop?.querySelector('input');
+  check('＋ 조각 asks with a popover, not window.prompt', !!nameIn,
+        (namePop?.textContent || '').slice(0, 80));
+  if (nameIn) { nameIn.value = '스모크 조각'; }
+  clickButton(namePop, '만들기');
   await settle(1300);
   const made = await (await fetch(backend.url
     + '/files/read?path=' + encodeURIComponent('studio/fragments/스모크 조각.md'), { headers: auth })).json();
@@ -2142,8 +2154,12 @@ console.log('\ntest_studio_named_cards');
   }
 
   // A grouping folder, and a move into it - the organizer's whole point.
-  window.prompt = () => '스모크그룹';
   clickButton(centre(), '＋ 폴더');
+  await settle(200);
+  const folderPop = [...document.querySelectorAll('.applypop')].pop();
+  const folderIn = folderPop?.querySelector('input');
+  if (folderIn) { folderIn.value = '스모크그룹'; }
+  clickButton(folderPop, '만들기');
   await settle(600);
   check('a folder can be made', /스모크그룹/.test(centre()?.textContent || ''),
         (centre()?.textContent || '').slice(0, 200));
@@ -2300,11 +2316,11 @@ console.log('\ntest_studio_request_settings');
   await settle(200);
 }
 
-console.log('\ntest_studio_batch_and_history');
+console.log('\ntest_studio_history_sections');
 {
-  // Results read BY JOB: the 배치 tab lists one section per batch (newest
-  // first, item grid inside), the 잡 히스토리 tab is the index into them, and
-  // a finished image opens big in the 1장 tab. No trailing 최근 작업 list.
+  // Results live in 잡 히스토리 - one fold-out per JOB with the item grid
+  // inside - while the 배치 tab stays strictly the queue being built. A
+  // finished image opens big in the 1장 tab. No trailing 최근 작업 list.
   clickById(document, 'tab-studio');
   await settle(400);
   const job = {
@@ -2335,16 +2351,11 @@ console.log('\ntest_studio_batch_and_history');
     const centre = () => document.querySelector('.panel.active .centrebody');
     clickButton(document.querySelector('.panel.active .centretabs'), '잡 히스토리');
     await settle(600);
-    const row = [...(centre()?.querySelectorAll('.jobrow') ?? [])]
-      .find((r) => /job_smoke1/.test(r.textContent || ''));
-    check('the history tab lists the batch', !!row, (centre()?.textContent || '').slice(0, 200));
-    row?.dispatchEvent(new window.Event('click', { bubbles: true }));
-    await settle(600);
-    check('picking one jumps to the 배치 tab',
-          [...document.querySelectorAll('.panel.active .centretabs .modebtn')]
-            .some((b) => b.classList.contains('on') && /배치/.test(b.textContent || '')));
     const sec = centre()?.querySelector('.jobsec[data-job="job_smoke1"]');
-    check('the batch is a section of its own', !!sec, (centre()?.textContent || '').slice(0, 200));
+    check('the history tab holds one fold-out per batch', !!sec,
+          (centre()?.textContent || '').slice(0, 200));
+    check('the newest section is unfolded with its grid',
+          !!sec?.hasAttribute('open') && !!sec?.querySelector('.jobgrid'));
     const text = sec?.textContent || '';
     check('the section reads state · progress in the header', /1\/3/.test(text), text.slice(0, 200));
     check('a failed item carries its error in place', /테스트 실패/.test(text));
@@ -2353,10 +2364,15 @@ console.log('\ntest_studio_batch_and_history');
     sec?.querySelector('.jobpic')?.dispatchEvent(new window.Event('click', { bubbles: true }));
     await settle(400);
     check('a finished image opens in the 1장 tab',
-          [...document.querySelectorAll('.panel.active .centretabs .modebtn')]
+          [...document.querySelectorAll('.panel.active .centretabs .tab')]
             .some((b) => b.classList.contains('on') && /1장/.test(b.textContent || ''))
           && !!document.querySelector('.panel.active .bigpreview'),
           (document.querySelector('.panel.active .centretabs')?.textContent || ''));
+    // The batch tab shows the queue only - results moved out.
+    clickButton(document.querySelector('.panel.active .centretabs'), '배치');
+    await settle(500);
+    check('the batch tab carries no result sections', !centre()?.querySelector('.jobsec'),
+          (centre()?.textContent || '').slice(0, 160));
   } finally { globalThis.fetch = orig; }
   clickButton(document.querySelector('.panel.active .centretabs'), '1장');
   await settle(300);
@@ -2731,26 +2747,44 @@ console.log('\ntest_studio_selector');
   check('the selector is one button away', !!findButton(document.querySelector('.panel.active .left'), '감정 사진 선택'));
   clickButton(document.querySelector('.panel.active .left'), '감정 사진 선택');
   await settle(1500);
-  check('the selector replaces the plain grid under images/',
-        !!document.querySelector('.selgrid'), text().slice(0, 160));
-  check('candidates are grouped by the parsed emotion',
-        /happy/.test(text()) && /sad/.test(text()), text().slice(0, 200));
+  check('the selector opens on the group cards',
+        !!document.querySelector('.panel.active .groupcard'), text().slice(0, 160));
+  // 그룹별: one representative card per group, its count on it.
+  const card = (key) => [...document.querySelectorAll('.panel.active .groupcard')]
+    .find((c) => (c.textContent || '').includes(key));
+  check('groups read as representative cards with counts',
+        !!card('happy') && /2장/.test(card('happy')?.textContent || '') && !!card('sad'),
+        text().slice(0, 200));
   // The whole reason this screen exists.
-  check('a name the regex cannot read is shown, not dropped',
+  check('a name the rule cannot read is shown, not dropped',
         /안 맞는 파일|규칙에 안 맞는 이름/.test(text()), text().slice(0, 300));
   check('and it says how to fix it', /일괄로 바꿔/.test(text()));
 
-  const cells = document.querySelectorAll('.selcell');
-  check('every candidate is a cell', cells.length >= 4, String(cells.length));
+  // Click a card → the group unfolds; pick one; ← 그룹 goes back (15).
+  card('happy')?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(400);
+  const cells = document.querySelectorAll('.panel.active .selcell');
+  check('unfolding a group lists its candidates', cells.length === 2, String(cells.length));
   check('each offers three independent flags',
         (cells[0]?.querySelectorAll('.selflags button') || []).length === 3);
   const useBtn = [...(cells[0]?.querySelectorAll('.selflags button') || [])]
     .find((b) => b.textContent === '채택');
   useBtn?.dispatchEvent(new window.Event('click', { bubbles: true }));
   await settle(400);
-  check('choosing one marks it', !!document.querySelector('.selcell.picked'));
-  check('and the group stops reading 미선택',
-        (document.querySelector('.panel.active')?.textContent || '').includes('선택 1'));
+  check('choosing one marks it', !!document.querySelector('.panel.active .selcell.picked'));
+  clickButton(document.querySelector('.panel.active .left'), '← 그룹');
+  await settle(300);
+  check('back on the cards, the chosen group reads 선택 1',
+        /선택 1/.test(card('happy')?.textContent || ''), (card('happy')?.textContent || ''));
+
+  // 전체: one flat grid of every candidate.
+  clickButton(document.querySelector('.panel.active .left'), '전체');
+  await settle(300);
+  check('전체 lists every candidate flat',
+        document.querySelectorAll('.panel.active .selcell').length >= 3,
+        String(document.querySelectorAll('.panel.active .selcell').length));
+  clickButton(document.querySelector('.panel.active .left'), '그룹별');
+  await settle(300);
 
   // Groups with nothing chosen surface as 부족분 - the export placeholders,
   // shown before the export, with a button that reserves them for the next
@@ -2759,31 +2793,21 @@ console.log('\ntest_studio_selector');
         /부족분/.test(text()) && !!findButton(document.querySelector('.panel.active .left'), '부족분 예약에 담기'),
         text().slice(0, 300));
 
-  // 4.14: the same folder re-reads by another parsed field (Group by).
-  const by = document.querySelector('.panel.active select[title="어느 필드로 묶어 볼지"]');
-  check('a group-by picker offers the parsed fields',
-        !!by && [...(by?.querySelectorAll('option') ?? [])].some((o) => o.value === 'character'),
-        [...(by?.querySelectorAll('option') ?? [])].map((o) => o.value).join(','));
-  // linkedom's select.value has no setter: selectedness rides the options.
-  const pickOption = (sel, value) => {
-    for (const o of sel.querySelectorAll('option')) {
-      if (o.value === value) o.setAttribute('selected', 'selected');
-      else o.removeAttribute('selected');
-    }
-    sel.dispatchEvent(new window.Event('change', { bubbles: true }));
-  };
-  if (by) {
-    pickOption(by, 'character');
-    await settle(1400);
-    check('regrouping by character gathers the files under one key',
-          /하나 · 3장/.test(text()), text().slice(0, 260));
-    // Back to emotion so later runs read the folder the usual way.
-    const by2 = document.querySelector('.panel.active select[title="어느 필드로 묶어 볼지"]');
-    if (by2) {
-      pickOption(by2, 'emotion');
-      await settle(1000);
-    }
-  }
+  // 14: the rule is visible - a delimiter and the first filename split into
+  // clickable tokens; pressing a chip makes that token the group key.
+  const chips = [...document.querySelectorAll('.panel.active .tokenchip')];
+  check('the first filename is split into token chips', chips.length >= 2,
+        chips.map((c) => c.textContent).join(' | '));
+  const second = chips.find((c) => (c.textContent || '').startsWith('2·'));
+  second?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(1400);
+  check('picking the 2nd token regroups by it (교복 becomes a group)',
+        !!card('교복'), text().slice(0, 260));
+  // 자동 restores the built-in stamp-anchored rule for later runs.
+  clickButton(document.querySelector('.panel.active .left'), '자동');
+  await settle(1000);
+  check('자동 goes back to the built-in rule', !!card('happy') && !!card('sad'),
+        text().slice(0, 200));
 }
 
 console.log('\ntest_files_copy_and_previews');

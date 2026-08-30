@@ -28,22 +28,36 @@ export function safeWorkspacePath(path: string): boolean {
   return !path.split(/[\\/]/).some((p) => p === '..');
 }
 
-/** The object URL for a space file's bytes, cached. */
+/** The object URL for a space file's bytes, cached.
+ *
+ * A real LRU: a hit re-inserts its key so heavy grids do not evict what is
+ * on screen, and an evicted URL is revoked on a DELAY - revoking at eviction
+ * blanked pictures that were still in the DOM (the picture showed, the cache
+ * turned over, the <img> went empty). Thirty seconds outlives any redraw. */
 export async function blobUrl(path: string, stamp = ''): Promise<string> {
   const key = stamp ? `${path}:${stamp}` : path;
   const hit = cache.get(key);
-  if (hit) return hit;
+  if (hit) {
+    cache.delete(key);
+    cache.set(key, hit);
+    return hit;
+  }
   await new Promise<void>((resolve) => {
     const go = () => { active += 1; resolve(); };
     if (active < PARALLEL) go(); else queue.push(go);
   });
   try {
+    // A second waiter for the same key may have filled it meanwhile.
+    const again = cache.get(key);
+    if (again) return again;
     const bytes = await state.fileBytes(path);
     const buf = new Uint8Array(bytes.byteLength);
     buf.set(bytes);
     const url = URL.createObjectURL(new Blob([buf]));
-    if (cache.size > 400) {
-      for (const [k, u] of cache) { URL.revokeObjectURL(u); cache.delete(k); break; }
+    while (cache.size >= 600) {
+      const [k, u] = cache.entries().next().value as [string, string];
+      cache.delete(k);
+      setTimeout(() => URL.revokeObjectURL(u), 30_000);
     }
     cache.set(key, url);
     return url;

@@ -8,6 +8,7 @@
  * `<이름>`, `<폴더/이름>`, `<컬렉션.키>`.
  */
 import { el, popover } from '../dom';
+import { namePopover } from '../kit';
 import { state, type StudioItem } from '../../state';
 import { S, hub, newCard, cardStem, msg } from './store';
 import { cardEditor } from './editors';
@@ -44,22 +45,26 @@ export function drawFragments(): void {
   const back = el('button', { class: 'ghost tiny', text: '← 돌아가기' });
   back.addEventListener('click', () => { S.centreMode = 'tab'; hub.drawCentre(); });
   const addFolder = el('button', { class: 'ghost tiny', text: '＋ 폴더' });
-  addFolder.addEventListener('click', async () => {
-    const raw = window.prompt('폴더 이름');
-    const nm = cardStem((raw ?? '').trim());
-    if (!nm) return;
-    try {
-      await state.mkdirFile('studio/fragments/' + nm);
-      extraFolders.add(nm);
-      openFolders.add(nm);
-      hub.touchQuiet();
-      hub.drawCentre();
-    } catch (e) {
-      hub.notice('폴더를 만들지 못했습니다: ' + msg(e), 'err');
-    }
+  addFolder.addEventListener('click', () => {
+    namePopover(addFolder, {
+      label: '새 폴더 이름', ok: '만들기',
+      onSubmit: async (raw) => {
+        const nm = cardStem(raw);
+        if (!nm) return;
+        try {
+          await state.mkdirFile('studio/fragments/' + nm);
+          extraFolders.add(nm);
+          openFolders.add(nm);
+          hub.touchQuiet();
+          hub.drawCentre();
+        } catch (e) {
+          hub.notice('폴더를 만들지 못했습니다: ' + msg(e), 'err');
+        }
+      },
+    });
   });
   const add = el('button', { class: 'primary tiny', text: '＋ 조각' });
-  add.addEventListener('click', () => void addFragment(''));
+  add.addEventListener('click', () => addFragment(add, ''));
   const head = el('div', { class: 'row', style: { marginBottom: '6px' } }, [
     back,
     el('span', { class: 'sectiontitle grow', text: `조각 프롬프트 · ${(S.cards.fragments ?? []).length}개` }),
@@ -95,7 +100,7 @@ export function drawFragments(): void {
         hub.drawCentre();
       });
       const addHere = el('button', { class: 'ghost tiny', text: '＋', title: '이 폴더에 조각 추가' });
-      addHere.addEventListener('click', (e) => { e.stopPropagation(); void addFragment(folder); });
+      addHere.addEventListener('click', (e) => { e.stopPropagation(); addFragment(addHere, folder); });
       fhead.appendChild(addHere);
       listCol.appendChild(fhead);
       if (!isOpen) continue;
@@ -155,10 +160,16 @@ export function drawFragments(): void {
   }));
 }
 
-async function addFragment(folder: string): Promise<void> {
-  const path = await newCard('fragments', folder);
-  if (!path) return;
-  if (folder) openFolders.add(folder);
-  selFrag = path;
-  hub.drawCentre();
+function addFragment(anchor: HTMLElement, folder: string): void {
+  namePopover(anchor, {
+    label: folder ? `${folder}/ 에 새 조각 — <${folder}/이름> 으로 참조됩니다` : '새 조각 이름 — <이름> 으로 참조됩니다',
+    ok: '만들기',
+    onSubmit: async (nm) => {
+      const path = await newCard('fragments', folder, nm);
+      if (!path) return;
+      if (folder) openFolders.add(folder);
+      selFrag = path;
+      hub.drawCentre();
+    },
+  });
 }

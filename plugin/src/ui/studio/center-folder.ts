@@ -9,6 +9,7 @@
  * jobs.
  */
 import { el, armed } from '../dom';
+import { namePopover } from '../kit';
 import { state } from '../../state';
 import { workspaceImage } from '../blobimg';
 import { installDrag, installDrop, type Incoming } from '../tree';
@@ -49,13 +50,19 @@ export function drawFolder(node: Folder): void {
   pick.addEventListener('click', () => { S.centreMode = 'selector'; hub.drawCentre(); });
   const mkdir = el('button', { class: 'ghost tiny', text: '＋ 폴더' }) as HTMLButtonElement;
   mkdir.addEventListener('click', () => {
-    const name = (window.prompt('새 폴더 이름', '') || '').trim();
-    if (!name) return;
-    mkdir.disabled = true;
-    void state.mkdirFile(node.path + '/' + name)
-      .then(() => { S.open.add(node.path); hub.touchQuiet(); return hub.refresh(); })
-      .catch((e) => hub.notice('폴더를 만들지 못했습니다: ' + msg(e), 'err'))
-      .finally(() => { mkdir.disabled = false; });
+    namePopover(mkdir, {
+      label: `${node.path}/ 안에 새 폴더`, ok: '만들기',
+      onSubmit: async (name) => {
+        try {
+          await state.mkdirFile(node.path + '/' + name.replace(/[\\/]+/g, '-'));
+          S.open.add(node.path);
+          hub.touchQuiet();
+          await hub.refresh();
+        } catch (e) {
+          hub.notice('폴더를 만들지 못했습니다: ' + msg(e), 'err');
+        }
+      },
+    });
   });
   const cols = el('div', { class: 'row', style: { gap: '2px' } },
     [2, 3, 4].map((n) => {
@@ -74,17 +81,20 @@ export function drawFolder(node: Folder): void {
       await hub.refresh();
     } catch (e) { hub.notice('지우지 못했습니다: ' + msg(e), 'err'); }
   });
+  const selAll = el('button', { class: 'ghost tiny', text: '전체 선택' });
+  const selNone = el('button', { class: 'ghost tiny', text: '해제' }) as HTMLButtonElement;
 
   viewMount.appendChild(el('div', { class: 'row', style: { marginBottom: '8px', flexWrap: 'wrap' } }, [
     close, crumb, el('span', { class: 'grow' }),
-    selInfo, del, mkdir, cols, pick,
+    selInfo, selAll, selNone, del, mkdir, cols, pick,
   ]));
   viewMount.appendChild(el('div', { class: 'hint', style: { marginBottom: '8px' },
-    text: `파일 ${node.files.length} · 하위 폴더 ${node.children.length} — 끌어서 폴더로 옮길 수 있습니다 (왼쪽 OUTPUT 트리 포함)` }));
+    text: `파일 ${node.files.length} · 하위 폴더 ${node.children.length} — 클릭으로 선택 (Shift 범위) · 두 번 클릭으로 크게 · 끌어서 폴더/왼쪽 트리로 이동` }));
 
   const syncBar = () => {
     selInfo.textContent = selection.size ? `${selection.size}개 선택` : '';
     del.style.display = selection.size ? '' : 'none';
+    selNone.style.display = selection.size ? '' : 'none';
   };
   syncBar();
 
@@ -120,33 +130,44 @@ export function drawFolder(node: Folder): void {
   const others = node.files.filter((f) => !IMAGE_RE.test(f.name));
   const imagePaths = images.map((f) => f.path);
 
+  const syncPicked = () => {
+    for (const c of grid.querySelectorAll('.imgcell')) {
+      c.classList.toggle('picked', selection.has((c as HTMLElement).title));
+    }
+    syncBar();
+  };
+  selAll.addEventListener('click', () => {
+    for (const p of imagePaths) selection.add(p);
+    syncPicked();
+  });
+  selNone.addEventListener('click', () => {
+    selection.clear();
+    syncPicked();
+  });
+
   images.forEach((f, ix) => {
     const cell = el('div', { class: 'fcell imgcell' + (selection.has(f.path) ? ' picked' : ''), title: f.path });
     const pic = workspaceImage(f.path, f.name, { thumb: false });
     pic.classList.add('jobpic');
     cell.append(pic, el('div', { class: 'fname' }, [el('span', { class: 'hint', text: f.name })]));
+    // A click SELECTS (Shift for a range) - picking-and-moving is this
+    // screen's job, so it must not need a modifier key. Double-click opens
+    // the image big in the 1장 tab.
     cell.addEventListener('click', (e) => {
       const ev = e as MouseEvent;
       if (ev.shiftKey && anchorPath) {
         const a = imagePaths.indexOf(anchorPath);
-        const b = ix;
         if (a >= 0) {
           selection.clear();
-          for (let i = Math.min(a, b); i <= Math.max(a, b); i++) selection.add(imagePaths[i]);
+          for (let i = Math.min(a, ix); i <= Math.max(a, ix); i++) selection.add(imagePaths[i]);
         }
-      } else if (ev.ctrlKey || ev.metaKey) {
+      } else {
         if (selection.has(f.path)) selection.delete(f.path); else selection.add(f.path);
         anchorPath = f.path;
-      } else {
-        // A plain click opens it big; selection is the modifier gesture.
-        openImage(f.path, imagePaths);
-        return;
       }
-      for (const c of grid.querySelectorAll('.imgcell')) {
-        c.classList.toggle('picked', selection.has((c as HTMLElement).title));
-      }
-      syncBar();
+      syncPicked();
     });
+    cell.addEventListener('dblclick', () => openImage(f.path, imagePaths));
     // Dragging a selected cell moves the whole selection.
     installDrag(cell, () => (selection.has(f.path) ? [...selection] : [f.path]));
     grid.appendChild(cell);

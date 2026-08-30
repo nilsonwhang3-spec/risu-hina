@@ -38,7 +38,7 @@ import { buildLeftOutput } from './left-output';
 import { drawFragments } from './center-frags';
 import { drawSingle, singleTick } from './center-single';
 import { drawBatch, batchTick } from './center-batch';
-import { drawHistory } from './center-history';
+import { drawHistory, historyTick } from './center-history';
 import { drawFolder } from './center-folder';
 import { hasGroups, loadGroups, drawSelector } from './selector';
 
@@ -76,10 +76,16 @@ function applyPanels(): void {
   splitRoot.classList.toggle('rcollapse', panels.right);
 }
 
+function panelOpen(side: 'left' | 'right'): boolean {
+  return !panels[side];
+}
+
 function togglePanel(side: 'left' | 'right'): void {
   panels[side] = !panels[side];
   try { localStorage.setItem(PANELS_KEY, JSON.stringify(panels)); } catch { /* fine */ }
   applyPanels();
+  // The centre strip's arrows read the state; keep them honest.
+  if (S.centreMode === 'tab' && !S.selectedFile) drawCentre();
 }
 
 function rail(side: 'left' | 'right'): HTMLElement {
@@ -101,7 +107,7 @@ export function renderStudioTab(mount: HTMLElement): void {
     splitRoot = pane.root;
 
     // The left column: [프롬프트 | OUTPUT] tabs over the content.
-    tabbar = el('div', { class: 'studiotabs' });
+    tabbar = el('div', { class: 'studiotabs tabstrip' });
     leftContent = el('div', { class: 'tree filetree' });
     S.leftMount = leftContent;
     pane.left.append(tabbar, leftContent);
@@ -228,6 +234,7 @@ function jobTick(): void {
   if (S.centreMode !== 'tab' || S.selectedFile) return;
   if (S.centreTab === 'single') singleTick();
   else if (S.centreTab === 'batch') batchTick();
+  else historyTick();
 }
 
 // The hub: what the sibling modules call to reach back into this file (and
@@ -248,8 +255,11 @@ hub.touchQuiet = touchQuiet;
 function drawLeft(): void {
   if (!tabbar || !leftContent) return;
   clear(tabbar);
+  // Tabs only - the collapse toggles live on the CENTRE strip, which is
+  // always wide enough. Two buttons here once pushed the OUTPUT tab clean
+  // out of the 300px column.
   const mk = (tab: 'prompt' | 'output', label: string): HTMLElement => {
-    const b = el('button', { class: 'modebtn' + (S.leftTab === tab ? ' on' : ''), text: label });
+    const b = el('button', { class: 'tab' + (S.leftTab === tab ? ' on' : ''), text: label });
     b.addEventListener('click', () => {
       if (S.leftTab === tab) return;
       S.leftTab = tab;
@@ -258,12 +268,7 @@ function drawLeft(): void {
     });
     return b;
   };
-  const collapse = el('button', { class: 'ghost tiny railbtn', text: '◂', title: '왼쪽 패널 접기' });
-  collapse.addEventListener('click', () => togglePanel('left'));
-  const collapseR = el('button', { class: 'ghost tiny railbtn', text: '▸', title: 'AI 챗 패널 접기' });
-  collapseR.addEventListener('click', () => togglePanel('right'));
-  tabbar.append(mk('prompt', '프롬프트'), mk('output', 'OUTPUT'),
-                el('span', { class: 'grow' }), collapse, collapseR);
+  tabbar.append(mk('prompt', '프롬프트'), mk('output', 'OUTPUT'));
 
   clear(leftContent);
   if (S.leftTab === 'output') {
@@ -322,9 +327,11 @@ function drawCentre(): void {
     }
   }
 
-  // The tabs: 1장 · 배치 · 잡 히스토리.
+  // The tabs: 1장 · 배치 · 잡 히스토리 - a HORIZONTAL strip (never wraps into
+  // a column), with the two panel-collapse toggles at its ends: the centre is
+  // the one place always wide enough to hold them.
   const mk = (tab: typeof S.centreTab, label: string): HTMLElement => {
-    const b = el('button', { class: 'modebtn' + (S.centreTab === tab ? ' on' : ''), text: label });
+    const b = el('button', { class: 'tab' + (S.centreTab === tab ? ' on' : ''), text: label });
     b.addEventListener('click', () => {
       if (S.centreTab === tab) return;
       S.centreTab = tab;
@@ -333,8 +340,17 @@ function drawCentre(): void {
     });
     return b;
   };
-  viewMount.appendChild(el('div', { class: 'centretabs row' }, [
+  const collapseL = el('button', { class: 'ghost tiny railbtn', text: panelOpen('left') ? '◂' : '▸',
+                                   title: panelOpen('left') ? '프롬프트 패널 접기' : '프롬프트 패널 펼치기' });
+  collapseL.addEventListener('click', () => togglePanel('left'));
+  const collapseR = el('button', { class: 'ghost tiny railbtn', text: panelOpen('right') ? '▸' : '◂',
+                                   title: panelOpen('right') ? 'AI 챗 패널 접기' : 'AI 챗 패널 펼치기' });
+  collapseR.addEventListener('click', () => togglePanel('right'));
+  viewMount.appendChild(el('div', { class: 'centretabs tabstrip' }, [
+    collapseL,
     mk('single', '1장'), mk('batch', '배치'), mk('history', '잡 히스토리'),
+    el('span', { class: 'grow' }),
+    collapseR,
   ]));
   const body = el('div', { class: 'centrebody' });
   viewMount.appendChild(body);

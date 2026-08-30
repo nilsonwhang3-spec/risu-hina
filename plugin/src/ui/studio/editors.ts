@@ -204,7 +204,7 @@ export function drawSceneEditor(path: string): void {
     editorHead(path, [raw, del, save]),
     el('label', { class: 'field' }, [el('span', { text: '이름' }), name]),
     el('div', { class: 'sectiontitle', text: '씬' }),
-    el('div', { class: 'hint', text: '씬마다 한 장씩 (장수만큼 반복) 생성되고, 씬 이름이 파일명의 감정 자리에 들어갑니다.' }),
+    el('div', { class: 'hint', text: '배치 탭에서 이 프리셋을 불러와 필요한 씬만 예약에 담습니다. 씬 이름이 파일명의 감정 자리에 들어갑니다.' }),
     list,
     el('div', { class: 'row', style: { marginTop: '6px' } }, [add]),
     out,

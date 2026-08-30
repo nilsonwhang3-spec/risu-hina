@@ -13,6 +13,7 @@
  * place (hub.syncBadges) instead of redrawing.
  */
 import { el } from '../dom';
+import { askName } from '../kit';
 import { state, type StudioItem } from '../../state';
 import { pickerRow, openListPicker, type PickerEntry } from '../pickers';
 import { S, hub, activeOf, checkUnresolved, newCard, msg } from './store';
@@ -127,10 +128,15 @@ function openStylePicker(): void {
       await hub.refreshArea('styles');
     },
     onCreate: () => {
-      void newCard('styles').then((path) => {
-        if (!path) return;
-        // A fresh style becomes the selection: the very next 생성 uses it.
-        void selectStyle(path);
+      askName('새 스타일', {
+        label: '이름이 곧 파일명입니다.',
+        placeholder: '예: 수채화',
+        onSubmit: async (nm) => {
+          const path = await newCard('styles', '', nm);
+          if (!path) return;
+          // A fresh style becomes the selection: the very next 생성 uses it.
+          void selectStyle(path);
+        },
       });
     },
     createLabel: '새 스타일 추가',

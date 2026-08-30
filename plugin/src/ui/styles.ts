@@ -1042,9 +1042,29 @@ label.row { align-items: center; gap: 6px; }
 .pickrow input[type=checkbox] { margin-top: 3px; }
 
 /* --- the studio's left tabs, collapse rails, and inline editors ------------------ */
-.studiotabs { display: flex; gap: 4px; align-items: center; padding: 6px 6px 2px; }
-.studiotabs .grow { flex: 1; }
-.studiotabs .railbtn { padding: 1px 6px; font-size: 12px; }
+/* Tabs LOOK like tabs: a flat horizontal strip on a baseline rule, the active
+   one underlined in accent - not bordered boxes a form or a button would
+   wear. The strip never wraps into a column. */
+.tabstrip {
+  display: flex; flex-direction: row; flex-wrap: nowrap; align-items: flex-end;
+  gap: 2px; border-bottom: 1px solid var(--borderc, #2b323f); min-width: 0;
+}
+.tabstrip .tab {
+  flex: 0 1 auto; min-width: 0; width: auto; padding: 5px 12px;
+  border: none; background: transparent; border-radius: 6px 6px 0 0;
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+  color: var(--textcolor2, #79839a); font-size: 13px; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; cursor: pointer;
+}
+.tabstrip .tab:hover { color: var(--textcolor, #d8dce4); background: rgba(128, 128, 128, .08); }
+.tabstrip .tab.on {
+  color: var(--textcolor, #d8dce4); font-weight: 700;
+  border-bottom-color: #2563eb;
+}
+.tabstrip .grow { flex: 1 1 0; min-width: 0; }
+.tabstrip .railbtn { flex: 0 0 auto; padding: 1px 6px; font-size: 12px; margin-bottom: 3px; }
+.studiotabs { padding: 6px 6px 0; }
+.centretabs { margin-bottom: 10px; }
 
 /* Collapsed rails: the pane and its gutter vanish, a slim strip stays so the
    panel can be found again. */
@@ -1083,8 +1103,7 @@ div.field { min-width: 0; }
 .fragcols > .fragedit { flex: 1; min-width: 0; }
 .fraglist input { width: 100%; box-sizing: border-box; }
 
-/* The centre tabs (1장 · 배치 · 잡 히스토리). */
-.centretabs { gap: 4px; margin-bottom: 10px; }
+/* The centre tabs (1장 · 배치 · 잡 히스토리) style via .tabstrip above. */
 
 /* 1장: one big picture, then the controls, then the batch strip. */
 .bigpreview {
@@ -1125,6 +1144,13 @@ div.field { min-width: 0; }
 .jobcell .fname { margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .jobrow { cursor: pointer; }
 .jobrow .wsimg.thumb img { max-height: 40px; border-radius: 4px; }
+
+/* The selector's rule chips and group cards. */
+.tokenchip { font-family: var(--mono, monospace); }
+.groupcard { cursor: pointer; }
+.groupcard.picked { outline: 2px solid #2563eb; border-radius: 6px; }
+.groupcard .fname { display: flex; gap: 4px; align-items: center; }
+.groupcard .fname .grow { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* The folder grid (OUTPUT → a folder). */
 .foldergrid { display: grid; gap: 8px; }

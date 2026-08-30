@@ -17,7 +17,7 @@
  *     not a card);
  *   - the agent panel (its own component, re-parented by agentpane.ts).
  */
-import { el, clear, searchBox } from './dom';
+import { el, clear, searchBox, popover, modal } from './dom';
 import { threePane, type ThreePaneParts } from './panes';
 import { bindAgent, mountAgent } from './agentpane';
 import { state } from '../state';
@@ -231,6 +231,64 @@ export function listRow(spec: RowSpec): HTMLElement {
 /** The tree column's action strip (새 항목 · 새로고침 …). */
 export function treeHead(actions: (HTMLElement | null)[]): HTMLElement {
   return el('div', { class: 'treehead' }, actions);
+}
+
+/**
+ * A small anchored name prompt - the panel's replacement for
+ * `window.prompt`, which looks like a browser security dialog and cannot be
+ * styled or validated. Enter submits, Escape/outside closes.
+ */
+export function namePopover(anchor: HTMLElement, opts: {
+  label: string;
+  value?: string;
+  placeholder?: string;
+  ok?: string;
+  onSubmit(value: string): void | Promise<void>;
+}): void {
+  const body = el('div', { class: 'applypop' });
+  const close = popover(anchor, body);
+  const input = el('input', { placeholder: opts.placeholder ?? '', value: opts.value ?? '' }) as HTMLInputElement;
+  const okBtn = el('button', { class: 'primary tiny', text: opts.ok ?? '확인' }) as HTMLButtonElement;
+  okBtn.addEventListener('click', () => {
+    const v = input.value.trim();
+    if (!v) return;
+    close();
+    void opts.onSubmit(v);
+  });
+  input.addEventListener('keydown', (e) => {
+    if ((e as KeyboardEvent).key === 'Enter') okBtn.click();
+  });
+  body.appendChild(el('div', { class: 'hint', text: opts.label }));
+  body.appendChild(el('div', { class: 'row' }, [input, okBtn]));
+  setTimeout(() => input.focus(), 0);
+}
+
+/** The modal flavour of the same prompt, for flows whose anchor is already
+ * gone (e.g. 추가 at the bottom of a picker list that just closed). */
+export function askName(title: string, opts: {
+  label?: string;
+  value?: string;
+  placeholder?: string;
+  ok?: string;
+  onSubmit(value: string): void | Promise<void>;
+}): void {
+  const input = el('input', { placeholder: opts.placeholder ?? '', value: opts.value ?? '' }) as HTMLInputElement;
+  const okBtn = el('button', { class: 'primary tiny', text: opts.ok ?? '만들기' }) as HTMLButtonElement;
+  const body = el('div', {}, [
+    opts.label ? el('div', { class: 'hint', style: { marginBottom: '6px' }, text: opts.label }) : null,
+    el('div', { class: 'row' }, [input, okBtn]),
+  ]);
+  const close = modal(title, body);
+  okBtn.addEventListener('click', () => {
+    const v = input.value.trim();
+    if (!v) return;
+    close();
+    void opts.onSubmit(v);
+  });
+  input.addEventListener('keydown', (e) => {
+    if ((e as KeyboardEvent).key === 'Enter') okBtn.click();
+  });
+  setTimeout(() => input.focus(), 0);
 }
 
 export function refreshButton(onRefresh: () => void): HTMLElement {

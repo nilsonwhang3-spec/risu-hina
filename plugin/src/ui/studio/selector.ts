@@ -2,46 +2,80 @@
  * The comparison selector, under images/.
  *
  * The model is the standalone image-selector tool, reimplemented in the
- * panel's idiom. Two things carried over unchanged because they are the
- * design:
+ * panel's idiom. Carried over unchanged because they are the design:
  *
  *   - three flags per file (use / inpaint / delete), not one radio. A
  *     candidate can be none of them, and "this one needs fixing first" is a
  *     different answer from "this one is the keeper".
- *   - the files the regex could NOT read are a group of their own. Names are
+ *   - the files the rule could NOT read are a group of their own. Names are
  *     not deterministic - that is why this screen exists - so hiding the
  *     unreadable ones would hide exactly the work.
+ *   - two views: 전체 (one flat grid) and 그룹별 (one REPRESENTATIVE card per
+ *     group with its count; click to unfold that group, ← to come back).
+ *
+ * The grouping RULE is visible, not a regex to decode: pick a delimiter and
+ * CLICK the token that is the group key (the chips show the actual first
+ * filename split apart). A raw named-group regex stays behind 고급.
  */
 import { el, clear } from '../dom';
+import { blobUrl } from '../blobimg';
 import { state, type GroupItem, type SelectionMap, type SelectionState,
          type StudioGroups, type WorkspaceFile } from '../../state';
-import { S, hub, gen, msg, adjustReserve, activeCast, castById, type Folder } from './store';
+import { S, hub, gen, msg, adjustReserve, type Folder } from './store';
 import { scenesOf } from './center-batch';
 
 let groups: StudioGroups | null = null;
 let selection: SelectionMap = {};
 let columns = 3;
 let drill = '';
+let viewMode: 'all' | 'group' = 'group';
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 let patternTimer: ReturnType<typeof setTimeout> | null = null;
 
-// The regex and the group-by field, remembered PER FOLDER: a costume-emotion
-// folder and a plain emotion folder read by different rules (4.14).
-interface GroupPrefs { pattern: string; groupBy: string }
+// --- the grouping rule, remembered PER FOLDER (4.14) -------------------------------
+
+interface GroupPrefs {
+  /** 'default' = the stamp-anchored built-in rule; 'delim' = delimiter +
+   * picked token; 'regex' = a raw named-group pattern (고급). */
+  mode: 'default' | 'delim' | 'regex';
+  delimiter: string;
+  tokenIndex: number;
+  pattern: string;
+  groupBy: string;
+}
+const DEF: GroupPrefs = { mode: 'default', delimiter: '-', tokenIndex: 2, pattern: '', groupBy: 'emotion' };
 const PREFS_KEY = 'hina.studioGroupBy';
-let prefs: Record<string, GroupPrefs> = {};
+let prefs: Record<string, Partial<GroupPrefs>> = {};
 try {
-  const saved = JSON.parse(localStorage.getItem(PREFS_KEY) || 'null') as Record<string, GroupPrefs> | null;
+  const saved = JSON.parse(localStorage.getItem(PREFS_KEY) || 'null') as Record<string, Partial<GroupPrefs>> | null;
   if (saved && typeof saved === 'object') prefs = saved;
 } catch { /* storage may be unavailable in the iframe */ }
 
 function prefsFor(folder: string): GroupPrefs {
-  return prefs[folder] ?? { pattern: gen.pattern, groupBy: 'emotion' };
+  const p = prefs[folder] ?? {};
+  // An older save carried only {pattern, groupBy}: a pattern meant regex mode.
+  const mode = p.mode ?? (p.pattern ? 'regex' : 'default');
+  return { ...DEF, ...p, mode };
 }
 
-function setPrefs(folder: string, next: GroupPrefs): void {
-  prefs[folder] = next;
+function setPrefs(folder: string, next: Partial<GroupPrefs>): void {
+  prefs[folder] = { ...prefsFor(folder), ...next };
   try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch { /* fine */ }
+}
+
+/** The delimiter rule as the backend's named-group regex: skip k-1 tokens,
+ * capture the k-th (stopping at a '.', so extensions and the image-selector
+ * style `.2` dedup suffixes never leak into a group key). */
+function delimPattern(d: string, k: number): string {
+  const e = d === ' ' ? ' ' : '\\' + d;
+  const tok = `[^${e}.]`;
+  return k <= 1 ? `^(?P<g>${tok}+)` : `^(?:[^${e}]*${e}){${k - 1}}(?P<g>${tok}+)`;
+}
+
+function effective(p: GroupPrefs): { pattern: string; groupBy: string } {
+  if (p.mode === 'delim') return { pattern: delimPattern(p.delimiter, p.tokenIndex), groupBy: 'g' };
+  if (p.mode === 'regex' && p.pattern.trim()) return { pattern: p.pattern.trim(), groupBy: p.groupBy || 'g' };
+  return { pattern: '', groupBy: p.groupBy || 'emotion' };
 }
 
 /** Whether the loaded groups belong to this folder - drawCentre's gate. */
@@ -51,8 +85,8 @@ export function hasGroups(folder: string): boolean {
 
 export async function loadGroups(folder: string): Promise<void> {
   try {
-    const p = prefsFor(folder);
-    groups = await state.studio.group(folder, p.pattern, p.groupBy);
+    const eff = effective(prefsFor(folder));
+    groups = await state.studio.group(folder, eff.pattern, eff.groupBy);
     selection = {};
     for (const g of [...groups.groups.map((x) => x.items), groups.unmatched].flat()) {
       selection[g.filename] = { ...g.selection };
@@ -79,7 +113,9 @@ export function drawSelector(node: Folder): void {
   if (!S.viewMount || !groups) return;
   const viewMount = S.viewMount;
   const g = groups;
+  const p = prefsFor(node.path);
 
+  // --- top bar: back · title · 전체/그룹별 · columns · bulk · export -------------
   const bar = el('div', { class: 'row', style: { marginBottom: '8px', flexWrap: 'wrap' } });
   const back = el('button', { class: 'ghost tiny', text: '← 폴더', title: '폴더 보기로 돌아갑니다' });
   back.addEventListener('click', () => { S.centreMode = 'folder'; hub.drawCentre(); });
@@ -87,6 +123,12 @@ export function drawSelector(node: Folder): void {
     back,
     el('span', { class: 'sectiontitle grow', text: `${node.path} · ${g.total}장 · 그룹 ${g.groups.length}` }),
   );
+  const mkView = (v: 'all' | 'group', label: string) => {
+    const b = el('button', { class: 'ghost tiny' + (viewMode === v ? ' on' : ''), text: label });
+    b.addEventListener('click', () => { viewMode = v; drill = ''; hub.drawCentre(); });
+    return b;
+  };
+  bar.append(mkView('group', '그룹별'), mkView('all', '전체'));
   for (const n of [2, 3, 4, 5, 6]) {
     const b = el('button', { class: 'ghost tiny' + (columns === n ? ' on' : ''), text: String(n) });
     b.addEventListener('click', () => { columns = n; hub.drawCentre(); });
@@ -110,19 +152,67 @@ export function drawSelector(node: Folder): void {
   bar.append(firstEach, none, exportButton(node), adoptButton());
   viewMount.appendChild(bar);
 
-  // A pattern box with a live count: the regex is the thing most likely to be
-  // wrong, so how many files it reads is on screen while you edit it - and a
-  // group-by picker over the fields the regex actually produced, so one
-  // costume-emotion folder can be read by 복장 today and 감정 tomorrow (4.14).
-  const cur = prefsFor(node.path);
+  // --- the grouping rule, visible ---------------------------------------------------
+  // A delimiter and the actual first filename split into clickable tokens:
+  // the group key is the chip you press, not a regex you decode.
+  const sample = g.groups[0]?.items[0]?.filename ?? g.unmatched[0]?.filename ?? '';
+  const stem = sample.replace(/\.[a-z0-9]+$/i, '');
+  const rule = el('div', { class: 'row', style: { marginBottom: '8px', flexWrap: 'wrap' } });
+  rule.appendChild(el('span', { class: 'hint', text: '구분자' }));
+  const dsel = el('select', { title: '파일명을 나누는 문자' }) as HTMLSelectElement;
+  for (const [v, label] of [['-', '-'], ['_', '_'], ['.', '.'], [' ', '공백']] as const) {
+    const o = el('option', { value: v, text: label });
+    if (p.delimiter === v) o.setAttribute('selected', 'selected');
+    dsel.appendChild(o);
+  }
+  dsel.addEventListener('change', () => {
+    setPrefs(node.path, { delimiter: dsel.value, mode: 'delim' });
+    drill = '';
+    void loadGroups(node.path);
+  });
+  rule.appendChild(dsel);
+  rule.appendChild(el('span', { class: 'hint', text: '그룹 기준' }));
+  if (stem) {
+    const tokens = stem.split(p.delimiter).filter((t) => t !== '');
+    tokens.slice(0, 6).forEach((tok, i) => {
+      const on = p.mode === 'delim' && p.tokenIndex === i + 1;
+      const chip = el('button', {
+        class: 'ghost tiny tokenchip' + (on ? ' on' : ''),
+        text: `${i + 1}·${tok.length > 12 ? tok.slice(0, 12) + '…' : tok}`,
+        title: `${i + 1}번째 조각을 그룹 기준으로 (예: ${tok})`,
+      });
+      chip.addEventListener('click', () => {
+        setPrefs(node.path, { mode: 'delim', tokenIndex: i + 1 });
+        drill = '';
+        void loadGroups(node.path);
+      });
+      rule.appendChild(chip);
+    });
+  }
+  const auto = el('button', { class: 'ghost tiny' + (p.mode === 'default' ? ' on' : ''), text: '자동',
+                              title: '기본 규칙 (캐릭터-감정-날짜-번호 형태를 자동으로 읽습니다)' });
+  auto.addEventListener('click', () => {
+    setPrefs(node.path, { mode: 'default' });
+    drill = '';
+    void loadGroups(node.path);
+  });
+  rule.appendChild(auto);
+  rule.appendChild(el('span', { class: 'hint', text: `읽음 ${g.total - g.unmatched.length} / 못 읽음 ${g.unmatched.length}` }));
+  viewMount.appendChild(rule);
+
+  // 고급: the raw named-group regex, folded away.
+  const adv = el('details', { class: 'advbox', ...(p.mode === 'regex' ? { open: true } : {}) }, [
+    el('summary', { text: '고급 (정규식 규칙)' }),
+  ]);
   const pat = el('input', {
-    value: cur.pattern, placeholder: g.pattern,
-    title: '명명 캡처그룹 정규식 — 예: (?P<costume>[^-]+)-(?P<emotion>[^-]+)',
+    value: p.mode === 'regex' ? p.pattern : '', placeholder: '(?P<costume>[^-]+)-(?P<emotion>[^-]+)',
+    title: '명명 캡처그룹 정규식 — 그룹 이름이 그룹 기준 후보가 됩니다',
   }) as HTMLInputElement;
   pat.addEventListener('input', () => {
     if (patternTimer) clearTimeout(patternTimer);
     patternTimer = setTimeout(() => {
-      setPrefs(node.path, { ...prefsFor(node.path), pattern: pat.value });
+      setPrefs(node.path, { mode: pat.value.trim() ? 'regex' : 'default', pattern: pat.value });
+      drill = '';
       void loadGroups(node.path);
     }, 800);
   });
@@ -134,25 +224,25 @@ export function drawSelector(node: Folder): void {
     by.appendChild(o);
   }
   by.addEventListener('change', () => {
-    setPrefs(node.path, { ...prefsFor(node.path), groupBy: by.value });
+    setPrefs(node.path, { groupBy: by.value });
     drill = '';
     void loadGroups(node.path);
   });
-  viewMount.appendChild(el('div', { class: 'row', style: { marginBottom: '8px', flexWrap: 'wrap' } }, [
-    el('span', { class: 'hint', text: '이름 규칙' }), pat,
-    el('span', { class: 'hint', text: '그룹 기준' }), by,
-    el('span', { class: 'hint', text: `읽음 ${g.total - g.unmatched.length} / 못 읽음 ${g.unmatched.length}` }),
+  adv.appendChild(el('div', { class: 'row', style: { flexWrap: 'wrap' } }, [
+    el('span', { class: 'hint', text: '정규식' }), pat,
+    el('span', { class: 'hint', text: '필드' }), by,
   ]));
+  viewMount.appendChild(adv);
 
   // 부족분: groups where nothing is chosen and nothing is being fixed - the
   // slots the export would leave a placeholder for. One button turns them
-  // into reservations, closing the cycle: 분류 → 부족분 → 다음 배치 (feedback).
+  // into reservations, closing the cycle: 분류 → 부족분 → 다음 배치.
   const missing = g.groups
     .filter((grp) => !grp.items.some((i) => selection[i.filename]?.use || selection[i.filename]?.inpaint))
     .map((grp) => grp.key);
   if (missing.length) {
     const fill = el('button', { class: 'ghost tiny', text: '부족분 예약에 담기',
-      title: '씬 프리셋에서 같은 이름의 씬을 찾아 (지금 출연 × 1장) 씩 배치 예약에 넣습니다' }) as HTMLButtonElement;
+      title: '씬 프리셋에서 같은 이름의 씬을 찾아 1장씩 배치 예약에 넣습니다' }) as HTMLButtonElement;
     fill.addEventListener('click', () => void reserveMissing(missing, fill));
     viewMount.appendChild(el('div', { class: 'row', style: { marginBottom: '8px' } }, [
       el('span', { class: 'badge warn', text: `부족분 ${missing.length}개` }),
@@ -161,40 +251,33 @@ export function drawSelector(node: Folder): void {
     ]));
   }
 
+  // --- the body: a drilled group, the group cards, or the flat grid ------------------
   if (drill) {
     const grp = g.groups.find((x) => x.key === drill);
     const at = g.groups.findIndex((x) => x.key === drill);
     const nav = el('div', { class: 'row', style: { marginBottom: '8px' } });
     const go = (to: number) => { drill = g.groups[to]?.key ?? drill; hub.drawCentre(); };
     const prev = el('button', { class: 'ghost tiny', text: '← 이전' }) as HTMLButtonElement;
-    const back = el('button', { class: 'ghost tiny', text: '전체' });
+    const up = el('button', { class: 'ghost tiny', text: '← 그룹', title: '그룹 카드로 돌아갑니다' });
     const next = el('button', { class: 'ghost tiny', text: '다음 →' }) as HTMLButtonElement;
     prev.disabled = at <= 0;
     next.disabled = at < 0 || at >= g.groups.length - 1;
     prev.addEventListener('click', () => go(at - 1));
     next.addEventListener('click', () => go(at + 1));
-    back.addEventListener('click', () => { drill = ''; hub.drawCentre(); });
-    nav.append(prev, back, next, el('span', { class: 'sectiontitle', text: `${drill} · ${grp?.items.length ?? 0}장` }));
+    up.addEventListener('click', () => { drill = ''; viewMode = 'group'; hub.drawCentre(); });
+    nav.append(up, prev, next, el('span', { class: 'sectiontitle', text: `${drill} · ${grp?.items.length ?? 0}장` }));
     viewMount.appendChild(nav);
     viewMount.appendChild(candidateGrid(grp?.items ?? []));
-    return;
+  } else if (viewMode === 'group') {
+    const grid = el('div', { class: 'agrid selgrid', style: { gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` } });
+    for (const grp of g.groups) grid.appendChild(groupCard(grp));
+    viewMount.appendChild(grid);
+    if (!g.groups.length) viewMount.appendChild(el('div', { class: 'empty', text: '규칙이 읽어낸 그룹이 없습니다 — 구분자와 그룹 기준을 확인하세요.' }));
+  } else {
+    viewMount.appendChild(candidateGrid([...g.groups.flatMap((x) => x.items)]));
   }
 
-  for (const grp of g.groups) {
-    const head = el('div', { class: 'row', style: { marginTop: '10px' } });
-    const open2 = el('button', { class: 'ghost tiny', text: '크게 보기' });
-    open2.addEventListener('click', () => { drill = grp.key; hub.drawCentre(); });
-    const chosen = grp.items.filter((i) => selection[i.filename]?.use).length;
-    head.append(
-      el('span', { class: 'sectiontitle grow', text: `${grp.key} · ${grp.items.length}장` }),
-      el('span', { class: 'badge' + (chosen ? '' : ' warn'), text: chosen ? `선택 ${chosen}` : '미선택' }),
-      open2,
-    );
-    viewMount.appendChild(head);
-    viewMount.appendChild(candidateGrid(grp.items));
-  }
-
-  if (g.unmatched.length) {
+  if (g.unmatched.length && !drill) {
     viewMount.appendChild(el('div', { class: 'sectionline' }));
     viewMount.appendChild(el('div', { class: 'row', style: { marginTop: '10px' } }, [
       el('span', { class: 'sectiontitle grow', text: `이름 규칙에 안 맞는 파일 ${g.unmatched.length}개` }),
@@ -203,6 +286,27 @@ export function drawSelector(node: Folder): void {
       '이 파일들은 그룹에 못 들어갑니다. 히나에게 “이 폴더 이름 규칙에 맞게 일괄로 바꿔 줘” 라고 하세요 (studio_rename).' }));
     viewMount.appendChild(candidateGrid(g.unmatched));
   }
+}
+
+/** 그룹별: one representative card per group - the first image, the count,
+ * and where the choice stands. Click to unfold the group (15). */
+function groupCard(grp: { key: string; items: GroupItem[] }): HTMLElement {
+  const rep = grp.items[0];
+  const chosen = grp.items.filter((i) => selection[i.filename]?.use).length;
+  const fixing = grp.items.filter((i) => selection[i.filename]?.inpaint).length;
+  const pic = el('div', { class: 'assetpic' });
+  if (rep) void loadThumb({ path: rep.path, name: rep.filename, size: 0, modified: 0, textual: false }, pic);
+  const cell = el('div', { class: 'fcell groupcard' + (chosen ? ' picked' : ''), title: `${grp.key} — 눌러서 후보를 펼칩니다` }, [
+    pic,
+    el('div', { class: 'fname row' }, [
+      el('span', { class: 'grow', text: grp.key }),
+      el('span', { class: 'badge', text: `${grp.items.length}장` }),
+      el('span', { class: 'badge' + (chosen ? ' ok' : ' warn'), text: chosen ? `선택 ${chosen}` : '미선택' }),
+      fixing ? el('span', { class: 'badge', text: `수정 ${fixing}` }) : null,
+    ]),
+  ]);
+  cell.addEventListener('click', () => { drill = grp.key; hub.drawCentre(); });
+  return cell;
 }
 
 function candidateGrid(items: GroupItem[]): HTMLElement {
@@ -237,7 +341,7 @@ function candidate(it: GroupItem): HTMLElement {
 }
 
 /** Missing slots become reservations: same-named scenes in the current
- * preset, current cast, one each. Names with no scene are reported. */
+ * preset, one each. Names with no scene are reported. */
 async function reserveMissing(missing: string[], btn: HTMLButtonElement): Promise<void> {
   if (!gen.scenePreset) {
     hub.notice('씬 프리셋이 없습니다 — 배치 탭에서 프리셋을 먼저 고르세요.', 'err');
@@ -248,10 +352,9 @@ async function reserveMissing(missing: string[], btn: HTMLButtonElement): Promis
     const known = new Set((await scenesOf(gen.scenePreset)).map((s) => s.name));
     const found = missing.filter((k) => known.has(k));
     const lost = missing.filter((k) => !known.has(k));
-    for (const k of found) adjustReserve(gen.scenePreset, k, activeCast, +1);
-    const castName = activeCast ? (castById(activeCast)?.name ?? '') : '활성 캐릭터';
+    for (const k of found) adjustReserve(gen.scenePreset, k, +1);
     hub.notice(
-      (found.length ? `${found.length}개를 배치 예약에 담았습니다 (${castName} × 1장씩). ` : '')
+      (found.length ? `${found.length}개를 배치 예약에 담았습니다 (1장씩). ` : '')
       + (lost.length ? `프리셋에 같은 이름의 씬이 없는 것: ${lost.join(', ')}` : ''),
       found.length ? 'ok' : 'err');
   } finally { btn.disabled = false; }
@@ -263,9 +366,9 @@ function exportButton(node: Folder): HTMLElement {
     b.disabled = true;
     try {
       // No character prefix: the filenames in the folder already carry the
-      // cast/card name, and the export's canonical names key on the group.
-      const p = prefsFor(node.path);
-      const r = await state.studio.exportSelected(node.path, '', p.pattern, p.groupBy);
+      // card name, and the export's canonical names key on the group.
+      const eff = effective(prefsFor(node.path));
+      const r = await state.studio.exportSelected(node.path, '', eff.pattern, eff.groupBy);
       hub.notice(`${r.folder} — 채택 ${r.used}, 수정 ${r.inpaint}, 빈 슬롯 ${r.empty}`, 'ok');
       hub.touchQuiet();
       await hub.refresh();
@@ -304,47 +407,21 @@ function adoptButton(): HTMLElement {
   return b;
 }
 
-// Thumbnails, a few at a time, from the backend's copy - the same shape and
-// the same reason as the files tab: POST so an intermediate cache cannot
-// answer every key with one body (docs/06 §1-7).
-const thumbs = new Map<string, string>();
-const THUMB_PARALLEL = 6;
-let thumbActive = 0;
-const thumbQueue: (() => void)[] = [];
-
+// Thumbnails ride the ONE blob pipeline (blobimg) - the selector used to
+// keep its own object-URL cache with the same eviction bug (revoking URLs
+// still in the DOM), which read as "images flicker back to empty boxes".
 export async function loadThumb(f: WorkspaceFile, mount: HTMLElement): Promise<void> {
-  const key = f.path + ':' + f.modified;
-  let url = thumbs.get(key) || '';
-  if (!url) {
-    await new Promise<void>((resolve) => {
-      const go = () => { thumbActive += 1; resolve(); };
-      if (thumbActive < THUMB_PARALLEL) go(); else thumbQueue.push(go);
-    });
-    try {
-      if (!mount.isConnected) return;
-      const bytes = await state.fileBytes(f.path);
-      // Copy: a SharedArrayBuffer-backed view is refused by Blob.
-      const buf = new Uint8Array(bytes.byteLength);
-      buf.set(bytes);
-      url = URL.createObjectURL(new Blob([buf]));
-      if (thumbs.size > 400) {
-        for (const [k, u] of thumbs) { URL.revokeObjectURL(u); thumbs.delete(k); break; }
-      }
-      thumbs.set(key, url);
-    } catch {
-      mount.appendChild(el('div', { class: 'assettype', text: '?' }));
-      return;
-    } finally {
-      thumbActive -= 1;
-      thumbQueue.shift()?.();
-    }
-  }
-  if (!mount.isConnected) return;
-  clear(mount);
-  const img = el('img', { class: 'assetimg', src: url, alt: '' });
-  img.addEventListener('error', () => {
+  try {
+    const url = await blobUrl(f.path);
+    if (!mount.isConnected) return;
     clear(mount);
-    mount.appendChild(el('div', { class: 'assettype', text: '?' }));
-  });
-  mount.appendChild(img);
+    const img = el('img', { class: 'assetimg', src: url, alt: '' });
+    img.addEventListener('error', () => {
+      clear(mount);
+      mount.appendChild(el('div', { class: 'assettype', text: '?' }));
+    });
+    mount.appendChild(img);
+  } catch {
+    if (mount.isConnected) mount.appendChild(el('div', { class: 'assettype', text: '?' }));
+  }
 }

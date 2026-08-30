@@ -63,8 +63,6 @@ export const S = {
   centreMode: 'tab' as 'tab' | 'fragments' | 'folder' | 'selector',
   /** Batch-tab column count (2·3·4). */
   cols: 3,
-  /** The job section the batch tab should scroll to (from the history tab). */
-  focusJob: '',
   /** The single tab's pinned image ('' = follow the live run), and the list
    * ←/→ walks (the job the image came from). */
   viewPath: '',
@@ -168,103 +166,57 @@ export function spec(): Record<string, unknown> {
   return out;
 }
 
-// --- casts (출연): a named character combination -----------------------------------
-//
-// A cast is a CLIENT concept: the server takes character card paths per
-// entry. It lives in studio/casts.json - a file, so the workspace shows it
-// and the agent can read and edit it like every other studio material.
-
-export interface Cast { id: string; name: string; color: string; characters: string[] }
-
-export const CAST_COLORS = ['#38bdf8', '#34d399', '#a78bfa', '#fbbf24', '#e879f9', '#818cf8', '#2dd4bf', '#a3e635'];
-const CASTS_PATH = 'studio/casts.json';
-let castsLoaded = false;
-export let casts: Cast[] = [];
-
-export async function loadCasts(force = false): Promise<Cast[]> {
-  if (castsLoaded && !force) return casts;
-  try {
-    const r = await state.readFile(CASTS_PATH);
-    const d = JSON.parse(r.content) as { casts?: Cast[] };
-    casts = (d.casts ?? []).filter((c) => c && c.id && c.name).map((c) => ({
-      id: String(c.id), name: String(c.name),
-      color: String(c.color || CAST_COLORS[0]),
-      characters: (c.characters ?? []).map(String),
-    }));
-  } catch {
-    casts = []; // no file yet is the ordinary first run
-  }
-  castsLoaded = true;
-  return casts;
-}
-
-export async function saveCasts(next: Cast[]): Promise<void> {
-  casts = next;
-  castsLoaded = true;
-  await state.uploadFile('casts.json',
-    JSON.stringify({ version: 1, casts }, null, 2), false, 'studio');
-  hub.touchQuiet();
-}
-
-export function castById(id: string): Cast | null {
-  return casts.find((c) => c.id === id) ?? null;
-}
-
-/** The cast the reservation pills add to; '' = the ACTIVE character cards. */
-export let activeCast = '';
-try { activeCast = localStorage.getItem('hina.studioCast') || ''; } catch { /* fine */ }
-export function setActiveCast(id: string): void {
-  activeCast = id;
-  try { localStorage.setItem('hina.studioCast', id); } catch { /* fine */ }
-}
-
 // --- reservations: the queue the 배치 tab accumulates -------------------------------
 //
-// reserves[presetPath][sceneName][castId] = count. THE map is the queue: not
-// a multiplication formula but entries piled up scene by scene, cast by cast,
-// each with its own count - and switching presets or casts never resets it
-// (the keys keep everything). 씬 생성 drains the WHOLE map into one job.
+// reserves[presetPath][sceneName] = count. THE map is the queue: not a
+// multiplication formula but entries piled up scene by scene, each with its
+// own count - and switching presets never resets it (the keys keep
+// everything). WHO is drawn comes from the left column's checked character
+// cards at submit time (the user: one place to pick characters, not two).
+// 씬 생성 drains the WHOLE map into one job.
 
-export type ReserveMap = Record<string, Record<string, Record<string, number>>>;
+export type ReserveMap = Record<string, Record<string, number>>;
 const RESERVE_KEY = 'hina.studioReserve';
 export let reserves: ReserveMap = {};
 try {
-  const saved = JSON.parse(localStorage.getItem(RESERVE_KEY) || 'null') as ReserveMap | null;
-  if (saved && typeof saved === 'object') reserves = saved;
+  const saved = JSON.parse(localStorage.getItem(RESERVE_KEY) || 'null') as
+    Record<string, Record<string, number | Record<string, number>>> | null;
+  if (saved && typeof saved === 'object') {
+    // The map briefly had a per-cast third level; fold it back to counts.
+    for (const [preset, scenes] of Object.entries(saved)) {
+      for (const [scene, v] of Object.entries(scenes || {})) {
+        const n = typeof v === 'number' ? v
+          : Object.values(v || {}).reduce((a, b) => a + (Number(b) || 0), 0);
+        if (n > 0) ((reserves[preset] ??= {})[scene] = n);
+      }
+    }
+  }
 } catch { /* storage may be unavailable in the iframe */ }
 
 export function persistReserves(): void {
   try { localStorage.setItem(RESERVE_KEY, JSON.stringify(reserves)); } catch { /* fine */ }
 }
 
-export function adjustReserve(preset: string, scene: string, cast: string, delta: number): void {
+export function adjustReserve(preset: string, scene: string, delta: number): void {
   const p = (reserves[preset] ??= {});
-  const s = (p[scene] ??= {});
-  const next = Math.max(0, (s[cast] ?? 0) + delta);
-  if (next) s[cast] = next; else delete s[cast];
-  if (!Object.keys(s).length) delete p[scene];
+  const next = Math.max(0, (p[scene] ?? 0) + delta);
+  if (next) p[scene] = next; else delete p[scene];
   if (!Object.keys(p).length) delete reserves[preset];
   persistReserves();
 }
 
-export function setReserve(preset: string, scene: string, cast: string, count: number): void {
-  adjustReserve(preset, scene, cast, count - reserveOf(preset, scene, cast));
+export function setReserve(preset: string, scene: string, count: number): void {
+  adjustReserve(preset, scene, count - reserveOf(preset, scene));
 }
 
-export function reserveOf(preset: string, scene: string, cast: string): number {
-  return reserves[preset]?.[scene]?.[cast] ?? 0;
+export function reserveOf(preset: string, scene: string): number {
+  return reserves[preset]?.[scene] ?? 0;
 }
 
-export function sceneReserveTotal(preset: string, scene: string): number {
-  return Object.values(reserves[preset]?.[scene] ?? {}).reduce((a, b) => a + b, 0);
-}
-
-/** Every reservation, across every preset and cast - what 씬 생성 submits. */
+/** Every reservation, across every preset - what 씬 생성 submits. */
 export function reserveTotal(): number {
   let n = 0;
-  for (const p of Object.values(reserves)) {
-    for (const s of Object.values(p)) for (const c of Object.values(s)) n += c;
-  }
+  for (const p of Object.values(reserves)) for (const c of Object.values(p)) n += c;
   return n;
 }
 
@@ -312,13 +264,13 @@ export function freeCardPath(area: string, stem: string, suffix: string, folder 
   }
 }
 
-/** Ask for a name and create one card in `area` (optionally in a grouping
- * folder). Returns the new card's path, or '' when nothing was made. */
-export async function newCard(area: string, folder = ''): Promise<string> {
-  // The name comes first: it is the reference key (fragments), the list row,
-  // and the filename - a timestamp slug was a code nobody could read back.
-  const raw = window.prompt('새 카드 이름');
-  const nm = (raw ?? '').trim();
+/** Create one card in `area` (optionally in a grouping folder) under the
+ * given name - the name comes first: it is the reference key (fragments),
+ * the list row, and the filename. Returns the new card's path, or '' when
+ * nothing was made. The caller collects the name (kit.askName/namePopover -
+ * never window.prompt, which looks like a browser security dialog). */
+export async function newCard(area: string, folder: string, nm: string): Promise<string> {
+  nm = (nm || '').trim();
   if (!nm) return '';
   const stem = cardStem(nm);
   if (!stem) { hub.notice('그 이름으로는 파일을 만들 수 없습니다.', 'err'); return ''; }

@@ -124,17 +124,44 @@ def configured() -> bool:
     return bool(token())
 
 
-def _client(timeout: float = TIMEOUT) -> httpx.Client:
+import threading as _threading
+
+_conn_lock = _threading.Lock()
+_conn: "httpx.Client | None" = None
+_conn_token = ""
+
+
+def _client() -> httpx.Client:
+    """ONE persistent connection, shared and kept alive.
+
+    A client per request meant a TCP+TLS handshake per image - a good part of
+    the "why is NAI slow" gap against clients that reuse the connection
+    (Node's fetch pools by default). httpx.Client is thread-safe for
+    requests; a narrower timeout (the subscription probes) rides per request.
+    The pool is rebuilt when the token changes. Callers must NOT close it -
+    no `with` on what this returns.
+    """
+    global _conn, _conn_token
     t = token()
     if not t:
         raise NaiError("NovelAI 토큰이 없습니다 — 설정 → API 키에 provider 'novelai' 로 추가해 주세요")
-    return httpx.Client(
-        base_url=BASE,
-        headers={"Authorization": f"Bearer {t}",
-                 "Content-Type": "application/json",
-                 "User-Agent": f"{config.APP_NAME}/{config.VERSION}"},
-        timeout=timeout,
-    )
+    with _conn_lock:
+        if _conn is None or _conn_token != t:
+            if _conn is not None:
+                try:
+                    _conn.close()
+                except Exception:  # noqa: BLE001
+                    pass
+            _conn = httpx.Client(
+                base_url=BASE,
+                headers={"Authorization": f"Bearer {t}",
+                         "Content-Type": "application/json",
+                         "User-Agent": f"{config.APP_NAME}/{config.VERSION}"},
+                timeout=TIMEOUT,
+                limits=httpx.Limits(max_keepalive_connections=2, keepalive_expiry=120.0),
+            )
+            _conn_token = t
+        return _conn
 
 
 def _fail(r: httpx.Response, what: str) -> NaiError:
@@ -153,11 +180,10 @@ def _fail(r: httpx.Response, what: str) -> NaiError:
 
 def subscription() -> dict:
     """Anlas and the v5 usage meter. Two separate currencies (docs/09 §2)."""
-    with _client(QUICK_TIMEOUT) as c:
-        r = c.get("/user/subscription")
-        if r.status_code >= 300:
-            raise _fail(r, "구독 정보를 읽지 못했습니다")
-        d = r.json()
+    r = _client().get("/user/subscription", timeout=QUICK_TIMEOUT)
+    if r.status_code >= 300:
+        raise _fail(r, "구독 정보를 읽지 못했습니다")
+    d = r.json()
     steps = d.get("trainingStepsLeft") or {}
     usage = d.get("usage") or {}
     return {
@@ -188,9 +214,8 @@ def exists(model: str) -> bool:
     """Does this model id exist? Free, and cannot generate (see NO_GENERATE)."""
     if not model:
         return False
-    with _client(QUICK_TIMEOUT) as c:
-        r = c.post("/ai/generate-image",
-                   json={"input": "x", "model": model, "parameters": dict(NO_GENERATE)})
+    r = _client().post("/ai/generate-image", timeout=QUICK_TIMEOUT,
+                       json={"input": "x", "model": model, "parameters": dict(NO_GENERATE)})
     if r.status_code == 200:
         # Would mean the guard stopped working - a 200 here is an image we did
         # not want and may have paid for. Loud, not silent.
@@ -316,8 +341,7 @@ def generate(model: str, prompt: str, negative: str = "",
     # input mirrors v4_prompt AFTER the quality/UC merge - one source of text.
     body = {"input": p["v4_prompt"]["caption"]["base_caption"], "model": model,
             "action": "generate", "parameters": p}
-    with _client() as c:
-        r = c.post("/ai/generate-image", json=body)
+    r = _client().post("/ai/generate-image", json=body)
     if r.status_code >= 300:
         raise _fail(r, "생성에 실패했습니다")
     return _unzip(r.content, "생성")
@@ -351,40 +375,39 @@ def generate_stream(model: str, prompt: str, negative: str = "",
     body = {"input": p["v4_prompt"]["caption"]["base_caption"], "model": model,
             "action": "generate", "parameters": p}
     final: bytes | None = None
-    with _client() as c:
-        with c.stream("POST", "/ai/generate-image-stream", json=body,
-                      headers={"Accept": "application/x-msgpack"}) as r:
-            if r.status_code >= 300:
-                r.read()
-                raise _fail(r, "스트리밍 생성에 실패했습니다")
-            buf = b""
-            for chunk in r.iter_bytes():
-                buf += chunk
-                while len(buf) >= 4:
-                    n = int.from_bytes(buf[:4], "big")
-                    if n <= 0 or n > 50 * 1024 * 1024:
-                        raise NaiError(f"스트림 프레임 길이가 이상합니다: {n}")
-                    if len(buf) < 4 + n:
-                        break
-                    frame = buf[4:4 + n]
-                    buf = buf[4 + n:]
+    with _client().stream("POST", "/ai/generate-image-stream", json=body,
+                          headers={"Accept": "application/x-msgpack"}) as r:
+        if r.status_code >= 300:
+            r.read()
+            raise _fail(r, "스트리밍 생성에 실패했습니다")
+        buf = b""
+        for chunk in r.iter_bytes():
+            buf += chunk
+            while len(buf) >= 4:
+                n = int.from_bytes(buf[:4], "big")
+                if n <= 0 or n > 50 * 1024 * 1024:
+                    raise NaiError(f"스트림 프레임 길이가 이상합니다: {n}")
+                if len(buf) < 4 + n:
+                    break
+                frame = buf[4:4 + n]
+                buf = buf[4 + n:]
+                try:
+                    m = msgpack.unpackb(frame, raw=False)
+                except Exception as e:  # noqa: BLE001
+                    raise NaiError(f"스트림 프레임을 읽지 못했습니다: {e}") from e
+                if not isinstance(m, dict):
+                    continue
+                if m.get("error") or (m.get("message") and not m.get("event_type")):
+                    raise NaiError(f"스트림 오류: {m.get('error') or m.get('message')}")
+                ev = m.get("event_type")
+                img = m.get("image")
+                if ev == "intermediate" and img and on_preview is not None:
                     try:
-                        m = msgpack.unpackb(frame, raw=False)
-                    except Exception as e:  # noqa: BLE001
-                        raise NaiError(f"스트림 프레임을 읽지 못했습니다: {e}") from e
-                    if not isinstance(m, dict):
-                        continue
-                    if m.get("error") or (m.get("message") and not m.get("event_type")):
-                        raise NaiError(f"스트림 오류: {m.get('error') or m.get('message')}")
-                    ev = m.get("event_type")
-                    img = m.get("image")
-                    if ev == "intermediate" and img and on_preview is not None:
-                        try:
-                            on_preview(int(m.get("step_ix") or 0), bytes(img))
-                        except Exception:  # noqa: BLE001
-                            pass
-                    elif ev == "final" and img:
-                        final = bytes(img)
+                        on_preview(int(m.get("step_ix") or 0), bytes(img))
+                    except Exception:  # noqa: BLE001
+                        pass
+                elif ev == "final" and img:
+                    final = bytes(img)
     if final is None:
         raise NaiError("스트림이 final 프레임 없이 끝났습니다")
     return final
@@ -415,8 +438,7 @@ def infill(model: str, png: bytes, mask: bytes, prompt: str, negative: str = "",
     p["add_original_image"] = True
     body = {"input": p["v4_prompt"]["caption"]["base_caption"],
             "model": inpaint_model(model), "action": "infill", "parameters": p}
-    with _client() as c:
-        r = c.post("/ai/generate-image", json=body)
+    r = _client().post("/ai/generate-image", json=body)
     if r.status_code >= 300:
         raise _fail(r, "인페인트에 실패했습니다")
     return _unzip(r.content, "인페인트")
@@ -431,8 +453,7 @@ def augment(action: str, model: str, png: bytes, prompt: str = "",
     body = {"req_type": action, "model": model,
             "image": base64.b64encode(png).decode(), "prompt": prompt,
             "width": w, "height": h}
-    with _client() as c:
-        r = c.post("/ai/augment-image", json=body)
+    r = _client().post("/ai/augment-image", json=body)
     if r.status_code >= 300:
         raise _fail(r, f"{action} 에 실패했습니다")
     return _unzip(r.content, action)
@@ -467,12 +488,11 @@ def encode_vibe(png: bytes, model: str, information_extracted: float = 1.0,
     cached = (cache_root / VIBE_CACHE_DIR / f"{key}.bin") if cache_root else None
     if cached and cached.is_file():
         return cached.read_bytes(), True
-    with _client() as c:
-        r = c.post("/ai/encode-vibe", json={
-            "model": model,
-            "image": base64.b64encode(png).decode(),
-            "information_extracted": information_extracted,
-        })
+    r = _client().post("/ai/encode-vibe", json={
+        "model": model,
+        "image": base64.b64encode(png).decode(),
+        "information_extracted": information_extracted,
+    })
     if r.status_code >= 300:
         raise _fail(r, "레퍼런스 인코딩에 실패했습니다")
     if cached:
