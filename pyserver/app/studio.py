@@ -557,13 +557,32 @@ def read_scenes(rel: str) -> dict:
 
 # --- assembling one request ---------------------------------------------------
 
+def _by_name(area: str, entry: str) -> str:
+    """A card named without a path ("오피스 카운셀링") resolved to its path.
+
+    Exact display-name match only; ambiguity is an error that names the
+    candidates rather than a silent first-wins. Anything containing a slash
+    is already a path and passes through untouched.
+    """
+    if "/" in entry:
+        return entry
+    hits = [i["path"] for i in listing(area) if i.get("name") == entry]
+    if len(hits) == 1:
+        return hits[0]
+    if not hits:
+        raise StudioError(f"{area} 에 그런 이름의 카드가 없습니다: {entry}")
+    raise StudioError(f"{area} 에 같은 이름이 여럿입니다: {entry} — 경로로 지정하세요: " + ", ".join(hits))
+
+
 def normalize_spec(spec: dict) -> dict:
     """One spec shape for plan() and the job runner.
 
     `styles` is plural now (active styles concatenate in card order, like a
     lorebook); the legacy singular `style` folds in. Styles and characters
     left unstated default to the ACTIVE cards; an explicit empty list means
-    "none" - the difference between not choosing and choosing nothing.
+    "none" - the difference between not choosing and choosing nothing. An
+    entry without a slash is a card NAME and is resolved against the listing,
+    so 히나 can say "오피스 카운셀링" instead of hunting for the path first.
     """
     out = dict(spec)
     if "styles" not in out:
@@ -573,6 +592,12 @@ def normalize_spec(spec: dict) -> dict:
     out.pop("style", None)
     if "characters" not in out:
         out["characters"] = active("characters")
+    out["styles"] = [_by_name("styles", s) if isinstance(s, str) else s
+                     for s in (out.get("styles") or [])]
+    out["characters"] = [_by_name("characters", c) if isinstance(c, str) else c
+                         for c in (out.get("characters") or [])]
+    if isinstance(out.get("scenePreset"), str) and out["scenePreset"]:
+        out["scenePreset"] = _by_name("scenes", str(out["scenePreset"]))
     return out
 
 

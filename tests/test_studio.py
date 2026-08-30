@@ -164,6 +164,24 @@ check("style, character and emotion are composed in order",
 check("negatives are collected too", "제외A" in neg and "제외C" in neg, neg)
 check("one character needs no char_captions", caps == [], str(caps))
 
+print("\ntest_name_addressing")
+# A card can be named by its display name - the agent says "수채화", not a path.
+n = studio.normalize_spec({"styles": ["수채화"], "characters": []})
+check("a style name resolves to its path", n["styles"] == ["studio/styles/수채화.md"],
+      str(n["styles"]))
+raises("an unknown name is refused", studio.normalize_spec,
+       {"styles": ["없는스타일"], "characters": []})
+files.upload(files.SPACE, "dup1.md", text="---\nname: 중복이름\n---\nA", into="studio/styles")
+files.upload(files.SPACE, "dup2.md", text="---\nname: 중복이름\n---\nB", into="studio/styles")
+try:
+    studio.normalize_spec({"styles": ["중복이름"], "characters": []})
+    check("an ambiguous name is refused with its candidates", False)
+except studio.StudioError as e:
+    check("an ambiguous name is refused with its candidates",
+          "dup1" in str(e) and "dup2" in str(e), str(e))
+files.delete(files.SPACE, "studio/styles/dup1.md")
+files.delete(files.SPACE, "studio/styles/dup2.md")
+
 print("\ntest_naming_and_parsing")
 name = studio.build_name(studio.DEFAULT_TEMPLATE, character="히나",
                          emotion="happy", index=0, stamp="20260829-120000")

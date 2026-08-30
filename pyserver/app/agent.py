@@ -89,7 +89,8 @@ INSTRUCTIONS = """\
 - `projects/<봇이름>/`  사용자가 직접 관리하는 참고 자료·프로젝트 폴더. **읽기는 자유,
   구조를 네가 바꾸지 마라.** 사용자가 올린 파일은 대개 여기 있다.
 - `studio/`  이미지 라이브러리(styles·characters·fragments·scenes·images). 프롬프트 카드와
-  생성물이 산다. 읽고 쓸 수 있다.
+  생성물이 산다. 읽고 쓸 수 있다. **일회성 배치는 spec.scenes 인라인으로** — 임시 프리셋
+  파일을 `studio/scenes/` 에 만들지 마라 (반복용 임시 스펙은 `studio/.studio/adhoc/`).
 - `hina/<봇이름>/`  네 작업 공간이다. 임시는 `scratch/`, 완성 산출물(md·html·json)은 `out/`,
   스크립트는 `scripts/`. out/ 에 넣으면 대화창에 열기 버튼이 뜬다 — 결과물을 만들었으면
   반드시 여기 저장하고 "저장했습니다, 파일 탭에서 여실 수 있습니다"라고 알려라.
@@ -968,25 +969,40 @@ def build() -> Agent[Deps]:
     def studio_plan(ctx: RunContext[Deps], spec_json: str) -> str:
         """배치 생성 계획을 세워 본다 (아무것도 만들지 않는다). 먼저 이걸로 확인하고 studio_generate 한다.
 
-        spec 예시 (경로는 전역 공간 기준, studio/ 프리픽스):
-        {"model":"nai-diffusion-4-5-full","style":"studio/styles/수채화.md",
-         "characters":["studio/characters/히나.json"],"scenePreset":"studio/scenes/기본.json",
-         "characterName":"히나","count":1,"seed":4242,
-         "folder":"studio/images/히나","params":{"steps":23,"width":832,"height":1216}}
+        spec 필드 (전부 선택; 카드는 경로 또는 **표시 이름**으로 — "오피스 카운셀링"
+        같은 이름은 정확 일치로 해석되고, 겹치면 후보를 나열하며 거절한다):
+          model          기본 nai-diffusion-4-5-full
+          styles         ["studio/styles/….md", "이름", …] — 생략하면 활성 카드,
+                         명시적 [] 는 "스타일 없음"
+          characters     경로/이름 리스트 (생략 = 활성 카드). dict 를 직접 넣어
+                         애드혹 캐릭터도 가능({"caption","negative","position"}) —
+                         단 dict 에는 카드 프리셋(레퍼런스)이 붙지 않는다
+          scenes         인라인 씬 리스트 [{"name","prompt","negativePrompt",
+                         "width","height"}, …] — **일회성 생성은 프리셋 파일을
+                         만들지 말고 이걸 쓴다**
+          scenePreset    프리셋 파일 경로/이름. `only:["angry","happy"]` 를 곁들이면
+                         그 씬만 뽑는다 (scenePreset 경로에서만 동작)
+          count / seed   씬당 장수, 시드(주면 씬 안에서 +1 씩 증가)
+          characterName  파일명의 캐릭터 자리 (프롬프트와 무관)
+          folder         저장 폴더 (기본 studio/images)
+          template       파일명 규칙 (기본 {character}-{emotion}-{stamp}-{n},
+                         빈 필드는 구분자째 생략)
+          useReference   true 면 활성 캐릭터 카드의 프리셋(캐릭터 레퍼런스 또는
+                         바이브 — 카드의 refMode 가 고른다)이 실린다
+          extra / negativeExtra   프롬프트/네거티브 끝에 덧붙일 문자열
+          params         {"steps","scale","cfg_rescale","sampler","noise_schedule",
+                         "width","height","qualityToggle","ucPreset", …} —
+                         모르는 키도 그대로 전달된다
 
         라이브러리 파일은 일반 파일 도구(read_file / write_file)로 읽고 쓴다.
         스타일 .md 는 front matter + `## positive` / `## negative`. SD스튜디오
-        프리셋(studio/scenes/)은 NAIS3 형식
-        `{"version":1,"scenes":[{"name","prompt","negativePrompt","width","height"}]}` —
-        씬 하나가 배치의 한 장이고, **표정 세트는 씬마다 한 장씩 일반 생성으로 뽑는다**
-        (디렉터 emotion 툴이 아니다: 10배 비싸고 통제가 안 된다).
+        프리셋(studio/scenes/)은 NAIS3 형식이고, 씬 하나가 배치의 한 장이다.
+        **표정 세트는 씬마다 한 장씩 일반 생성으로 뽑는다** (디렉터 emotion 툴이
+        아니다: 10배 비싸고 통제가 안 된다).
         프롬프트 안의 `{{…}}` 는 NovelAI 강조 문법이라 **절대 건드리지 않는다.**
-        `<조각>` · `<폴더/조각>` · `<컬렉션.키>` 는 studio/fragments/ 참조이고 생성 직전에
-        치환된다 — 계획 결과의 unresolved 는 못 찾은 참조다.
-
-        이름은 `{character}-{emotion}-{stamp}-{n}` 규칙을 따르고, 빈 필드는
-        구분자째 생략된다. 이 규칙을 지키는 것이 나중에 비교 선택기가 그룹을
-        나누는 조건이다.
+        `<조각>` · `<폴더/조각>` · `<컬렉션.키>` 는 studio/fragments/ 참조이고
+        (조각 카드의 front matter 이름으로도 해석된다) 생성 직전에 치환된다 —
+        계획 결과의 unresolved 는 못 찾은 참조다.
         """
         try:
             spec = json.loads(spec_json)
@@ -1005,8 +1021,12 @@ def build() -> Agent[Deps]:
     def studio_generate(ctx: RunContext[Deps], spec_json: str) -> str:
         """배치 생성을 시작한다 (studio_plan 과 같은 spec). 비동기로 돌고 job id 를 돌려준다.
 
-        진행 상황은 studio_job 으로 본다. 레퍼런스(vibes)를 쓰면 인코딩마다 2 Anlas 가
-        확정으로 나가므로, 쓰기 전에 사용자에게 알린다.
+        진행 상황은 studio_job 으로 본다. 레퍼런스는 확정 비용이 든다 — 바이브
+        인코딩 2 Anlas/장(캐시 시 0), 캐릭터 레퍼런스는 **생성 장당 5 Anlas** —
+        쓰기 전에 사용자에게 알린다. 일회성 씬 조합은 spec.scenes 인라인으로
+        보내고, 반복해서 쓸 임시 스펙은 studio/scenes/ 가 아니라
+        `studio/.studio/adhoc/` 에 write_file 로 남긴다 (라이브러리 목록에 안
+        잡히는 내부 영역이다).
         """
         try:
             spec = json.loads(spec_json)

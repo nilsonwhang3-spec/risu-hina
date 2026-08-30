@@ -2629,6 +2629,11 @@ check('no-selection is reported, not thrown',
   check('and does not ask for one',
         !/캐릭터가 선택되어 있지 않습니다|챗을 골라/.test(
           document.querySelector('.panel.active')?.textContent || ''));
+  // The agent panel never surfaces the backend's raw validation string: with
+  // no chat it says the useful sentence instead (agent.ts render guard).
+  check('the agent panel never says chatKey is required',
+        !/chatKey is required/.test(document.querySelector('.panel.active .right')?.textContent || ''),
+        (document.querySelector('.panel.active .right')?.textContent || '').slice(0, 140));
 }
 
 console.log('\ntest_unload');

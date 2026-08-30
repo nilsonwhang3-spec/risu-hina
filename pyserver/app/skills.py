@@ -717,14 +717,15 @@ def defaults_once() -> None:
     log.info("skill defaults: enabled %s, retired %s", on, gone)
 
 
-STUDIO_OPS_KEY = "skills_studio_ops_space_v1"
+# Rotating the key re-copies the seed into existing installs on next boot -
+# _v2 added the batch-spec section (inline scenes, name addressing, adhoc dir).
+STUDIO_OPS_KEY = "skills_studio_ops_space_v2"
 
 
 def refresh_studio_ops_once() -> None:
-    """The studio moved into the global space (0.11.0). The seeded pixel-work
-    skill's reference still told the agent the sandbox cannot reach the
-    library and to move files first - now wrong in the misleading direction.
-    Replace that one reference file with the current seed, once."""
+    """The seeded studio skill's reference drifts as the studio grows (the
+    space move in 0.11.0, then the batch-spec rules). Replace that one
+    reference file with the current seed, once per key rotation."""
     if db.has_migration(STUDIO_OPS_KEY):
         return
     db.mark_migration(STUDIO_OPS_KEY)

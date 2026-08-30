@@ -202,6 +202,21 @@ export class AgentPanel {
 
   private async render(sessionId?: string): Promise<void> {
     clear(this.log);
+    // A session is bound to a chat (the workspace, the approval queue, the
+    // scope DB all hang off it). With none selected the backend can only say
+    // "chatKey is required" - say the useful sentence instead of the error.
+    if (!state.activeChatKey) {
+      // Not loaded: the next mount retries, so picking a chat later un-gates
+      // the panel without an explicit invalidate.
+      this.loaded = false;
+      this.status.textContent = '';
+      this.log.appendChild(el('div', { class: 'notice' }, [
+        el('div', { text: '아직 봇의 챗이 선택되지 않았습니다.' }),
+        el('div', { class: 'hint', text: '챗 탭에서 챗을 하나 고르면 여기서 히나를 부를 수 있습니다.' }),
+      ]));
+      this.send.disabled = true;
+      return;
+    }
     try {
       const s = await state.agentSession(sessionId);
       if (!s.agentReady) {
