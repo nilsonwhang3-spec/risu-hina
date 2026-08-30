@@ -18,8 +18,19 @@ edited in place and the character view · centre = 1장/배치/잡 히스토리 
 (entries jobs, casts) · streaming previews · folder grid with drags · regex group-by and 부족분 →
 reservations; plan `~/.claude/plans/zesty-dazzling-lagoon.md`)
 (gate ALL GREEN; the minor went up so the version gate trips when it ships). **Staged on test-server
-2026-08-30 (backend + dev plugin via `data/plugin/`, space_v1 migration verified 1,868/1,868 with a
-pre-stop backup `data-backup-20260830-space`) - the §1-19 and §1-20 changes are NOT staged yet.** Released = **v0.10.0 BETA** (§1-16 the edit-session lifecycle: leave guard, 변경 취소, write verification, snapshot kinds - **schema 13**; the minor went up because `/workspace/dirty`, the reset payloads and the `kind` column mean the backend and the plugin go together, so **the version gate trips**: update the backend, then press `+` on the plugin in RisuAI) (§1-15 any chat opens from the picker · §1-14 the repo goes English · §1-13 3-way merge on reopen · §1-12 an intermediate cache blocking the connection (POST probe, no-store) · §1-11 one web-search tool card with three options · §1-10 built-in search measured, mobile, plugin-reload diagnosis · §1-9 search · §1-8 round 10 · §1-7 · §1-6 · §1-5; the docs/07 planning is still pending) — gate ALL GREEN. 0.7.0 changes the minor, so **the version gate trips**: raise the backend and the plugin on the RisuAI side has to be raised with `+` as well (the header says so).
+2026-08-30 evening AT §1-20 (= §1-19 included): service stopped → backup `data-backup-20260830-s120`
+(11,358 files) → app/*.py + seeds/studio-image-ops.md + tools/probe_nai.py + requirements.in scp'd,
+msgpack 1.1.0 pip-installed into the bundled interpreter, the 0.11.0 dev bundle refreshed in
+`data/plugin/` (712,599 B served at `/plugin.js`) → `/health` 0.11.0 · 12 workspaces ·
+`/studio/status` charref:true · `?limit=` works · `/studio/job/preview` answers. **The streaming
+endpoint is now MEASURED from this codebase** (two live probe jobs, tier 3, 0 Anlas): an entries-v2
+job generated through `/ai/generate-image-stream` with no fallback warn, and a 28-step run showed
+intermediate frames arriving per step (rev 3→27, step 2/28→26/28, preview b64 12.8→17.5 KB) through
+the rev-gated poll before the final file saved. The cast label fills the filename
+(프로브-probe-…), a castless entry collapses the field (probe2-…). Probe leftovers live in
+`studio/images/스테이징프로브/` (2 images). The user reinstalls the dev plugin once from
+`/plugin.js` (the `+` check still reads the committed 0.10.0 bundle). Still unmeasured live: a
+mixed-cast multi-entry batch from the panel.** Released = **v0.10.0 BETA** (§1-16 the edit-session lifecycle: leave guard, 변경 취소, write verification, snapshot kinds - **schema 13**; the minor went up because `/workspace/dirty`, the reset payloads and the `kind` column mean the backend and the plugin go together, so **the version gate trips**: update the backend, then press `+` on the plugin in RisuAI) (§1-15 any chat opens from the picker · §1-14 the repo goes English · §1-13 3-way merge on reopen · §1-12 an intermediate cache blocking the connection (POST probe, no-store) · §1-11 one web-search tool card with three options · §1-10 built-in search measured, mobile, plugin-reload diagnosis · §1-9 search · §1-8 round 10 · §1-7 · §1-6 · §1-5; the docs/07 planning is still pending) — gate ALL GREEN. 0.7.0 changes the minor, so **the version gate trips**: raise the backend and the plugin on the RisuAI side has to be raised with `+` as well (the header says so).
 
 **Deployment state (2026-08-25 21:01 `deploy.ps1`, verified in a new SSH session)**:
 
@@ -95,9 +106,10 @@ select→enabled front matter→typing saves `## positive`, the character view's
 refMode save, the organizer's create/rename/폴더 이동, reservation piling→ONE entries job→drained
 queue, history→batch section focus→1장 open, regex re-grouping by another field, 부족분 badge);
 the backend suite covers `_plan_entries` (order, casts, per-entry counts, unique names, unknown
-scene refused) and the preview store (rev-gated, memory only). NOT yet verified live: the
-streaming endpoint itself and a real mixed-cast batch - both need the staged machine's token, so
-stage §1-19+§1-20 together when the user asks and watch the first batch's fallback note.
+scene refused) and the preview store (rev-gated, memory only). Staged 2026-08-30 evening and the
+streaming endpoint MEASURED live from this codebase (see §0: intermediate frames per step through
+the rev-gated poll, no fallback). Still unmeasured live: a mixed-cast multi-entry batch driven
+from the panel itself.
 
 ## 1-19. 2026-08-30 - 0.11.0 (unreleased, continued): the first studio field report - 26 items
 
