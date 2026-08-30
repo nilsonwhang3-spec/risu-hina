@@ -971,7 +971,7 @@ def build() -> Agent[Deps]:
         spec 예시 (경로는 전역 공간 기준, studio/ 프리픽스):
         {"model":"nai-diffusion-4-5-full","style":"studio/styles/수채화.md",
          "characters":["studio/characters/히나.json"],"scenePreset":"studio/scenes/기본.json",
-         "characterName":"히나","outfit":"교복","count":1,"seed":4242,
+         "characterName":"히나","count":1,"seed":4242,
          "folder":"studio/images/히나","params":{"steps":23,"width":832,"height":1216}}
 
         라이브러리 파일은 일반 파일 도구(read_file / write_file)로 읽고 쓴다.
@@ -984,8 +984,9 @@ def build() -> Agent[Deps]:
         `<조각>` · `<폴더/조각>` · `<컬렉션.키>` 는 studio/fragments/ 참조이고 생성 직전에
         치환된다 — 계획 결과의 unresolved 는 못 찾은 참조다.
 
-        이름은 `{character}-{outfit}-{emotion}-{stamp}-{n}` 규칙을 따른다. 이 규칙을
-        지키는 것이 나중에 비교 선택기가 그룹을 나누는 조건이다.
+        이름은 `{character}-{emotion}-{stamp}-{n}` 규칙을 따르고, 빈 필드는
+        구분자째 생략된다. 이 규칙을 지키는 것이 나중에 비교 선택기가 그룹을
+        나누는 조건이다.
         """
         try:
             spec = json.loads(spec_json)

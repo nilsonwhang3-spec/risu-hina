@@ -165,16 +165,27 @@ check("negatives are collected too", "제외A" in neg and "제외C" in neg, neg)
 check("one character needs no char_captions", caps == [], str(caps))
 
 print("\ntest_naming_and_parsing")
-name = studio.build_name(studio.DEFAULT_TEMPLATE, character="히나", outfit="교복",
-                         emotion="happy", index=0, stamp="20260829-1200")
-check("the template fills in", name == "히나-교복-happy-20260829-1200-1.png", name)
+name = studio.build_name(studio.DEFAULT_TEMPLATE, character="히나",
+                         emotion="happy", index=0, stamp="20260829-120000")
+check("the template fills in", name == "히나-happy-20260829-120000-1.png", name)
 # The delimiter inside a field would shift every field the parser reads.
 check("a hyphen in a name is neutralised",
       "_" in studio.build_name("{character}-x", character="a-b"),
       studio.build_name("{character}-x", character="a-b"))
-r = studio.parse_names([name, "엉망진창.png"])
-check("a well-formed name parses", r["matched"] and r["matched"][0]["emotion"] == "happy",
-      str(r["matched"]))
+# Empty fields are dropped with their delimiter - no 무제 padding.
+bare = studio.build_name(studio.DEFAULT_TEMPLATE, stamp="20260829-120000")
+check("empty fields are omitted, not padded", bare == "20260829-120000-1.png", bare)
+solo = studio.build_name(studio.DEFAULT_TEMPLATE, emotion="angry", stamp="20260829-120000")
+check("an emotion alone keeps its place", solo == "angry-20260829-120000-1.png", solo)
+r = studio.parse_names([name, bare, solo, "히나-교복-happy-20260829-120000-2.png", "엉망진창.png"])
+by = {d["filename"]: d for d in r["matched"]}
+check("a two-token name parses as character-emotion",
+      by[name].get("character") == "히나" and by[name].get("emotion") == "happy", str(by.get(name)))
+check("a stamp-only name still matches", bare in by, str(r["matched"]))
+check("one token before the stamp is the emotion", by[solo].get("emotion") == "angry", str(by.get(solo)))
+check("a legacy three-token name reads character and emotion",
+      by["히나-교복-happy-20260829-120000-2.png"].get("emotion") == "happy"
+      and by["히나-교복-happy-20260829-120000-2.png"].get("character") == "히나")
 # The whole reason the app exists: names are not deterministic, so what did
 # NOT parse has to be reported rather than dropped.
 check("what did not parse is reported", r["unmatched"] == ["엉망진창.png"], str(r["unmatched"]))
@@ -233,7 +244,7 @@ files.delete(files.SPACE, "studio/fragments/eye-detail.md")
 print("\ntest_batch_plan")
 items = studio.plan({"style": "styles/수채화.md", "characters": ["characters/히나.json"],
                      "scenePreset": "scenes/기본.json", "characterName": "히나",
-                     "outfit": "교복", "count": 2, "seed": 7})
+                     "count": 2, "seed": 7})
 check("one entry per scene x count", len(items) == 6, str(len(items)))
 check("every scene is present", {i["scene"] for i in items} == {"happy", "sad", "angry"},
       str({i["scene"] for i in items}))
@@ -296,8 +307,8 @@ print("\ntest_grouping_and_selection")
 shots = studio.root() / "images" / "고르기"
 shots.mkdir(parents=True, exist_ok=True)
 PNG = bytes.fromhex("89504e470d0a1a0a") + b"\x00" * 40
-for n in ("히나-교복-happy-20260829-1200-1.png", "히나-교복-happy-20260829-1200-2.png",
-          "히나-교복-sad-20260829-1200-1.png", "제멋대로 지은 이름.png"):
+for n in ("히나-happy-20260829-120000-1.png", "히나-happy-20260829-120000-2.png",
+          "히나-교복-sad-20260829-120000-1.png", "제멋대로 지은 이름.png"):
     (shots / n).write_bytes(PNG)
 
 g = studio.group("images/고르기")
@@ -312,8 +323,8 @@ check("what did not parse is carried, not dropped",
       str(g["unmatched"]))
 
 studio.write_selection("images/고르기", {
-    "히나-교복-happy-20260829-1200-1.png": {"use": True, "inpaint": False, "delete": False},
-    "히나-교복-happy-20260829-1200-2.png": {"use": False, "inpaint": True, "delete": False},
+    "히나-happy-20260829-120000-1.png": {"use": True, "inpaint": False, "delete": False},
+    "히나-happy-20260829-120000-2.png": {"use": False, "inpaint": True, "delete": False},
 })
 back = studio.group("images/고르기")
 picked = [i for grp in back["groups"] for i in grp["items"] if i["selection"]["use"]]
@@ -341,12 +352,12 @@ check("export names match the emotionImages convention",
 
 print("\ntest_bulk_rename")
 plan = studio.rename_plan("images/고르기", [
-    {"from": "제멋대로 지은 이름.png", "to": "히나-교복-angry-20260829-1200-1.png"}])
+    {"from": "제멋대로 지은 이름.png", "to": "히나-angry-20260829-120000-1.png"}])
 check("a clean rename plans", plan["rename"] and not plan["problems"], json.dumps(plan, ensure_ascii=False))
 bad = studio.rename_plan("images/고르기", [
     {"from": "없는파일.png", "to": "x.png"},
-    {"from": "히나-교복-sad-20260829-1200-1.png", "to": "히나-교복-happy-20260829-1200-1.png"},
-    {"from": "히나-교복-sad-20260829-1200-1.png", "to": "../탈출.png"}])
+    {"from": "히나-교복-sad-20260829-120000-1.png", "to": "히나-happy-20260829-120000-1.png"},
+    {"from": "히나-교복-sad-20260829-120000-1.png", "to": "../탈출.png"}])
 check("every problem is named", len(bad["problems"]) == 3, json.dumps(bad, ensure_ascii=False))
 check("a rename cannot leave the folder",
       any("폴더" in p["why"] for p in bad["problems"]), str(bad["problems"]))
@@ -354,7 +365,7 @@ check("a rename cannot leave the folder",
 raises("a plan with problems applies nothing", studio.rename_apply, "images/고르기",
        [{"from": "없는파일.png", "to": "x.png"}])
 studio.rename_apply("images/고르기", plan["rename"])
-check("the rename landed", (shots / "히나-교복-angry-20260829-1200-1.png").is_file())
+check("the rename landed", (shots / "히나-angry-20260829-120000-1.png").is_file())
 check("and it now parses into a group",
       "angry" in [x["key"] for x in studio.group("images/고르기")["groups"]])
 
@@ -371,7 +382,7 @@ check("it needs no image library",
 # White is what gets repainted (docs/09 §7c), so an empty box list would
 # repaint nothing and is refused rather than silently doing a no-op.
 raises("no region is refused",
-       lambda: studio.inpaint("images/고르기/히나-교복-sad-20260829-1200-1.png", [], "x",
+       lambda: studio.inpaint("images/고르기/히나-교복-sad-20260829-120000-1.png", [], "x",
                               model="nai-diffusion-4-5-full"))
 check("the inpainting model is derived, not guessed",
       nai.inpaint_model("nai-diffusion-4-5-full") == "nai-diffusion-4-5-full-inpainting")

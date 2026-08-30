@@ -71,11 +71,15 @@ def _unstudio(rel: str) -> str:
 FRONT = re.compile(r"\A---[ \t]*\r?\n(.*?)\r?\n---[ \t]*\r?\n?", re.S)
 SECTION = re.compile(r"^##+\s*(positive|negative|프롬프트|네거티브)\s*$", re.I | re.M)
 
-DEFAULT_TEMPLATE = "{character}-{outfit}-{emotion}-{stamp}-{n}"
+DEFAULT_TEMPLATE = "{character}-{emotion}-{stamp}-{n}"
 
-# What the selector parses back out. Kept beside the template on purpose: the
-# two have to agree, and a reader who changes one must see the other.
-DEFAULT_PARSE = r"^(?P<character>[^-]+)-(?P<outfit>[^-]+)-(?P<emotion>[^-]+)-"
+# What the selector parses back out of a default-named file. The template
+# drops empty fields (no more 무제-무제 padding), so the token count varies:
+# the stamp anchors the parse and what precedes it is [character-][emotion-].
+# Kept beside the template on purpose: the two have to agree, and a reader
+# who changes one must see the other. A caller-supplied regex still wins.
+STAMP_RE = re.compile(r"\d{8}-\d{6}")
+DEFAULT_PARSE_NOTE = "[캐릭터-][감정-]날짜-시각-번호 (기본 규칙)"
 
 
 class StudioError(ValueError):
@@ -609,12 +613,16 @@ _UNSAFE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 def safe_part(text: str) -> str:
     """One field of a filename. The delimiter is stripped too: a hyphen inside
-    a character name would silently shift every field the parser reads."""
-    return _UNSAFE.sub("", str(text or "")).replace("-", "_").strip() or "무제"
+    a character name would silently shift every field the parser reads. An
+    empty field stays empty - build_name drops it rather than padding with a
+    placeholder nobody typed."""
+    return _UNSAFE.sub("", str(text or "")).replace("-", "_").strip()
 
 
 def build_name(template: str, *, character: str = "", outfit: str = "",
                emotion: str = "", index: int = 0, stamp: str = "") -> str:
+    # `outfit` stays accepted for custom templates that still say {outfit};
+    # the default template no longer has the field.
     t = template or DEFAULT_TEMPLATE
     stamp = stamp or time.strftime("%Y%m%d-%H%M%S")
     name = (t.replace("{character}", safe_part(character))
@@ -622,29 +630,57 @@ def build_name(template: str, *, character: str = "", outfit: str = "",
              .replace("{emotion}", safe_part(emotion))
              .replace("{stamp}", stamp)
              .replace("{n}", str(index + 1)))
+    # Empty fields leave doubled delimiters behind; collapse them so a run
+    # with no character name is 감정-날짜-… rather than -감정--….
+    name = re.sub(r"-{2,}", "-", name).strip("-")
     return name + ".png"
 
 
+def _parse_default(n: str) -> dict | None:
+    """A default-templated name back into fields, anchored on the stamp.
+
+    Legacy three-token names ({character}-{outfit}-{emotion}) still read
+    correctly: the character is first and the emotion last either way, and no
+    field can contain the delimiter (safe_part neutralises it)."""
+    m = STAMP_RE.search(n)
+    if not m:
+        return None
+    tokens = [t for t in n[:m.start()].split("-") if t]
+    d: dict[str, str] = {}
+    if len(tokens) == 1:
+        d["emotion"] = tokens[0]
+    elif len(tokens) >= 2:
+        d["character"] = tokens[0]
+        d["emotion"] = tokens[-1]
+    return d
+
+
 def parse_names(names: list[str], pattern: str = "") -> dict:
-    """Split filenames into fields with a regex. Reports what did NOT match.
+    """Split filenames into fields. Reports what did NOT match.
 
     The unmatched list is the point. Names are not deterministic - that is why
     this app exists - so the selector has to show what it could not read and
     hand it to Hina to rename, rather than quietly dropping those files.
+
+    With no pattern the default token rule runs (see DEFAULT_TEMPLATE); a
+    caller-supplied regex replaces it entirely.
     """
-    rx = re.compile(pattern or DEFAULT_PARSE)
+    rx = re.compile(pattern) if pattern else None
     matched: list[dict] = []
     unmatched: list[str] = []
     for n in names:
-        m = rx.search(n)
-        if not m:
+        if rx is not None:
+            m = rx.search(n)
+            d = None if not m else {k: v for k, v in (m.groupdict() or {}).items() if v is not None}
+        else:
+            d = _parse_default(n)
+        if d is None:
             unmatched.append(n)
             continue
-        d = {k: v for k, v in (m.groupdict() or {}).items() if v is not None}
         d["filename"] = n
         matched.append(d)
     return {"matched": matched, "unmatched": unmatched,
-            "pattern": pattern or DEFAULT_PARSE,
+            "pattern": pattern or DEFAULT_PARSE_NOTE,
             "fields": sorted({k for d in matched for k in d if k != "filename"})}
 
 
@@ -721,7 +757,6 @@ def plan(spec: dict) -> list[dict]:
     count = max(1, int(spec.get("count") or 1))
     template = str(spec.get("template") or DEFAULT_TEMPLATE)
     character = str(spec.get("characterName") or "")
-    outfit = str(spec.get("outfit") or "")
     stamp = time.strftime("%Y%m%d-%H%M%S")
     seed = spec.get("seed")
     table = fragments()
@@ -737,7 +772,7 @@ def plan(spec: dict) -> list[dict]:
             pos, missing = resolve_refs(pos, table)
             neg, missing2 = resolve_refs(neg, table)
             entry = {
-                "name": build_name(template, character=character, outfit=outfit,
+                "name": build_name(template, character=character,
                                    emotion=scene["name"], index=i, stamp=stamp),
                 "scene": scene["name"],
                 "prompt": pos,

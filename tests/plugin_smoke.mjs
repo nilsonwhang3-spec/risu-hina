@@ -2340,9 +2340,11 @@ console.log('\ntest_studio_selector');
   // the backend's base64 decode refuses it.
   const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
     .concat(Array(40).fill(0))).toString('base64');
-  for (const name of ['하나-교복-happy-20260829-1200-1.png',
-                      '하나-교복-happy-20260829-1200-2.png',
-                      '하나-교복-sad-20260829-1200-1.png',
+  // Two current-format names, one legacy three-token name (character-outfit-
+  // emotion): the default parser must read the emotion out of both.
+  for (const name of ['하나-happy-20260829-120000-1.png',
+                      '하나-happy-20260829-120000-2.png',
+                      '하나-교복-sad-20260829-120000-1.png',
                       '규칙에 안 맞는 이름.png']) {
     await fetch(backend.url + '/files/upload', {
       method: 'POST', headers: auth,

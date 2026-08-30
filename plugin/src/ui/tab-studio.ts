@@ -73,7 +73,7 @@ let unresolvedTimer: ReturnType<typeof setTimeout> | null = null;
 const gen = {
   model: 'nai-diffusion-4-5-full',
   scenePreset: '',
-  characterName: '', outfit: '',
+  characterName: '',
   steps: 23, scale: 5, width: 832, height: 1216, count: 1, seed: '',
   folder: OUTPUT_ROOT,
   // The one control that certainly spends Anlas, so it is off unless asked.
@@ -468,8 +468,7 @@ function drawGen(): void {
     two(numField('스텝', 'steps'), numField('CFG', 'scale')),
     two(numField('가로', 'width'), numField('세로', 'height')),
     two(numField('장수', 'count'), textField('시드', 'seed', '비우면 랜덤')),
-    two(textField('캐릭터명', 'characterName', '파일 이름에 들어갑니다'),
-        textField('복장', 'outfit', '파일 이름에 들어갑니다')),
+    textField('캐릭터명', 'characterName', '파일 이름에 들어갑니다 (비우면 생략)'),
     textField('저장 폴더', 'folder', 'studio/images/…'),
   );
 
@@ -532,7 +531,7 @@ function spec(): Record<string, unknown> {
     model: gen.model,
     styles: activeOf('styles'),
     characters: activeOf('characters'),
-    characterName: gen.characterName, outfit: gen.outfit,
+    characterName: gen.characterName,
     count: gen.count, folder: gen.folder,
     params: { steps: gen.steps, scale: gen.scale, width: gen.width, height: gen.height },
   };
@@ -548,7 +547,7 @@ function numField(label: string, key: 'steps' | 'scale' | 'width' | 'height' | '
   return el('label', { class: 'field grow' }, [el('span', { text: label }), i]);
 }
 
-function textField(label: string, key: 'seed' | 'characterName' | 'outfit' | 'folder',
+function textField(label: string, key: 'seed' | 'characterName' | 'folder',
                    placeholder = ''): HTMLElement {
   const i = el('input', { value: gen[key], placeholder }) as HTMLInputElement;
   i.addEventListener('change', () => { gen[key] = i.value; });
