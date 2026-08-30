@@ -1026,9 +1026,8 @@ def h_studio_plan(arg: dict) -> dict:
 def h_studio_generate(arg: dict) -> dict:
     if not nai.configured():
         raise ApiError(400, "NovelAI 토큰이 없습니다 — 설정 → API 키에 추가해 주세요")
-    if not str(arg.get("model") or ""):
-        raise ApiError(400, "model is required")
     try:
+        # An empty model falls back to the default inside start().
         return studiojob.start(arg)
     except studio.StudioError as e:
         raise ApiError(400, str(e))

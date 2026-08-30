@@ -334,6 +334,17 @@ export async function loadJobs(force = false): Promise<StudioJob[]> {
   try {
     S.jobs = (await state.studio.jobs()).jobs ?? [];
     jobsStale = false;
+    // A batch the AGENT started (or one from another window) is not ours to
+    // know about otherwise: adopt the running one so the history section
+    // updates live and the buttons read 취소.
+    if (!S.jobId) {
+      const running = S.jobs.find((j) => j.state === 'running' || j.state === 'pending');
+      if (running) {
+        S.jobId = running.id;
+        S.queueJob = running;
+        void pollJob();
+      }
+    }
   } catch { /* keep what we have */ }
   return S.jobs;
 }

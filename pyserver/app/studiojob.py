@@ -104,6 +104,12 @@ def start(spec: dict) -> dict:
     """
     spec = studio.normalize_spec(spec)
     spec.pop("useReference", None)
+    # A missing model is the default, not an empty string sent to NovelAI;
+    # an unfamiliar id is asked about (free, ~330ms) so a typo fails the
+    # batch ONCE with its name instead of failing every image.
+    spec["model"] = str(spec.get("model") or "").strip() or nai.DEFAULT_MODEL
+    if spec["model"] not in nai.KNOWN_MODELS and not nai.exists(spec["model"]):
+        raise studio.StudioError(f"그런 모델이 없습니다: {spec['model']} (기본은 {nai.DEFAULT_MODEL})")
     items = studio.plan(spec)
     if not items:
         raise studio.StudioError("만들 이미지가 없습니다")

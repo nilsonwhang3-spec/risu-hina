@@ -42,12 +42,30 @@ export function splitter(opts: SplitterOptions): HTMLElement {
     return dir === 'column' || dir === 'column-reverse';
   };
 
+  /** What the OTHER panes need: every visible sibling's current size, except
+   * the centre (.left), which counts at its floor - it is the one that
+   * yields. A fixed 320 used to stand in for this, and with the studio's
+   * 300px explorer beside it the agent pane could be dragged past the
+   * container's edge: the centre hit its min-width and the sum overflowed,
+   * so dragging "did nothing" until a tab switch let the width land. */
+  const keepFor = (down: boolean): number => {
+    let keep = 0;
+    for (const c of Array.from(opts.container.children)) {
+      if (c === opts.target || c === gutter) continue;
+      const node = c as HTMLElement;
+      if (!node.offsetParent && getComputedStyle(node).display === 'none') continue;
+      if (node.classList.contains('left')) { keep += down ? 140 : 260; continue; }
+      keep += down ? node.offsetHeight : node.offsetWidth;
+    }
+    return Math.max(down ? 140 : 320, keep);
+  };
+
   const apply = (px: number) => {
     const down = vertical();
     // A stacked layout has far less room, and the transcript needs less of it
     // than the agent does - so the floor drops rather than fighting the screen.
     const min = down ? 160 : (opts.min ?? 250);
-    const keep = down ? 140 : 320;
+    const keep = keepFor(down);
     const span = down ? opts.container.clientHeight : opts.container.clientWidth;
     const size = Math.round(Math.min(Math.max(min, span - keep), Math.max(min, px)));
     opts.target.style.flexBasis = size + 'px';

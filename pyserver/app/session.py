@@ -12,6 +12,7 @@ multi-minute run to finish.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import threading
 import uuid
@@ -332,7 +333,25 @@ async def run(session_id: str, prompt: str, mode: str = "") -> AsyncGenerator[st
         async with ag.run_stream_events(
             prompt, deps=deps, message_history=history
         ) as events:
-            async for ev in events:
+            # Side events are flushed between model events AND while a tool is
+            # still running: a batch that waits minutes inside one tool call
+            # pushes an image every few seconds, and those must reach the
+            # panel now, not after the tool returns. The pending __anext__ is
+            # never cancelled (that would kill the generator) - it is waited
+            # on with a timeout and picked up again.
+            it = events.__aiter__()
+            pending = asyncio.ensure_future(it.__anext__())
+            while True:
+                done, _ = await asyncio.wait({pending}, timeout=1.0)
+                if not done:
+                    for extra in _drain_extra(session_id):
+                        yield _line(extra)
+                    continue
+                try:
+                    ev = pending.result()
+                except StopAsyncIteration:
+                    break
+                pending = asyncio.ensure_future(it.__anext__())
                 for line in _translate(ev, text_acc):
                     yield line
                 # Side events land right after the event whose tool pushed

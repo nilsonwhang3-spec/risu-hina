@@ -22,6 +22,21 @@ const cache = new Map<string, string>();
 
 const SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i;
 
+/**
+ * A model-written path into the space-relative shape the backend takes:
+ * backslashes, a leading slash, an absolute install path or a `data/space/`
+ * prefix are all things the agent has produced for a file it just made.
+ * Schemes and `..` stay refused (see safeWorkspacePath).
+ */
+export function normalizeWorkspacePath(path: string): string {
+  let p = (path || '').trim().replace(/\\/g, '/');
+  if (SCHEME_RE.test(p)) return p;
+  const m = p.match(/(?:^|\/)(?:data\/)?space\/(.+)$/);
+  if (m) p = m[1];
+  p = p.replace(/^\.?\/+/, '');
+  return p;
+}
+
 /** True for a plain space-relative path (Korean names welcome). */
 export function safeWorkspacePath(path: string): boolean {
   if (!path || SCHEME_RE.test(path) || path.startsWith('/') || path.startsWith('\\')) return false;
@@ -80,6 +95,7 @@ export interface ImgOptions {
  * refuses blob: all degrade to `[이미지: …]` rather than a broken picture.
  */
 export function workspaceImage(path: string, alt: string, opts: ImgOptions = {}): HTMLElement {
+  path = normalizeWorkspacePath(path);
   const wrap = el('span', { class: 'wsimg' + (opts.thumb ? ' thumb' : '') });
   const fallback = () => {
     clear(wrap);

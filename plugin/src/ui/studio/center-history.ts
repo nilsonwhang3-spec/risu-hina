@@ -37,6 +37,20 @@ export function drawHistory(mount: HTMLElement): void {
   mount.appendChild(sectionsBox);
   sectionsBox.appendChild(el('div', { class: 'hint', text: '읽는 중입니다…' }));
   void drawSections(true);
+  watch();
+}
+
+// While this tab is showing and no job of ours is running, look every few
+// seconds for one the agent started - loadJobs adopts it, and from then on
+// the ordinary poll drives the live section.
+let watcher: ReturnType<typeof setInterval> | null = null;
+function watch(): void {
+  if (watcher) return;
+  watcher = setInterval(() => {
+    if (!sectionsBox?.isConnected) { clearInterval(watcher!); watcher = null; return; }
+    if (S.jobId) return;
+    void loadJobs(true).then(() => { if (S.jobId) historyTick(); });
+  }, 5000);
 }
 
 /** The live-job heartbeat: rebuild only the running section. */

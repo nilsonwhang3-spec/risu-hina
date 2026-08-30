@@ -36,6 +36,15 @@ from . import config, db, log
 
 BASE = "https://image.novelai.net"
 
+# What a spec without a model gets. The agent's studio_generate call skipped
+# the HTTP handler's "model is required" and sent "" straight to NovelAI,
+# which answered "model doesn't exist" for every image of the batch.
+DEFAULT_MODEL = "nai-diffusion-4-5-full"
+# Ids seen answering 200 in the probe; anything else is asked about first.
+KNOWN_MODELS = {"nai-diffusion-4-5-full", "nai-diffusion-4-5-curated",
+                "nai-diffusion-4-full", "nai-diffusion-4-curated-preview",
+                "nai-diffusion-5-full", "nai-diffusion-5-curated"}
+
 # Measured: validation answers in ~330ms, a generation in 4-8s, and a director
 # call in 6-13s. The long one is the ceiling.
 TIMEOUT = 300.0
