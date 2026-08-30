@@ -266,10 +266,14 @@ export function scenePicker(): HTMLElement {
         hub.drawCentre();
       },
       onDelete: async (e) => {
+        // Cheap on purpose (see the style picker): no listing, no dry plan.
         await state.deleteFile(e.id);
-        if (gen.scenePreset === e.id) { gen.scenePreset = ''; persistGen(); }
-        if (S.selectedFile === e.id) S.selectedFile = '';
-        await hub.refreshArea('scenes');
+        S.cards.scenes = (S.cards.scenes ?? []).filter((i) => i.path !== e.id);
+        let redraw = false;
+        if (gen.scenePreset === e.id) { gen.scenePreset = ''; persistGen(); redraw = true; }
+        if (S.selectedFile === e.id) { S.selectedFile = ''; redraw = true; }
+        if (redraw) hub.drawCentre();
+        hub.touchQuiet();
       },
       onCreate: () => {
         askName('새 씬 프리셋', {

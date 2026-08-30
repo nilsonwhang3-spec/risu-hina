@@ -1093,9 +1093,34 @@ div.field > span:first-child { display: block; font-size: 11px; opacity: .7; mar
 div.field { min-width: 0; }
 
 /* The character editor hosted inside the left column. */
-.charinline { border-left: 2px solid rgba(37, 99, 235, .35); margin: 0 4px 8px 8px; padding: 6px 6px 2px; }
-.charinline textarea, .charinline input { width: 100%; box-sizing: border-box; }
-.charinline input[type=checkbox], .charinline input[type=file] { width: auto; }
+.charinline { margin: 0 4px 8px 4px; padding: 0 4px; }
+.charinline textarea, .charinline input, .charinline select { width: 100%; box-sizing: border-box; }
+.charinline input[type=checkbox], .charinline input[type=file], .charinline input[type=range] { width: auto; }
+/* Left-column editors must be able to SHRINK: promptedit's 42vh floor is for
+   the centre's full-page editors, and it made the column a scroll hunt. */
+textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; resize: vertical; }
+
+/* Reference cards: the picture is the name, ✕ sits ON it, sliders below. */
+.refgrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.refcard { border: 1px solid var(--borderc, #2b323f); border-radius: 8px; padding: 6px; display: flex; flex-direction: column; gap: 4px; }
+.refcard.off { opacity: .55; }
+.refcard.bad { border-color: #ef4444; }
+.refpic { position: relative; min-height: 60px; border-radius: 6px; overflow: hidden; background: var(--darkbg, #171a21); }
+.refpic img { width: 100%; height: auto; display: block; }
+.refx { position: absolute; top: 4px; right: 4px; padding: 0 6px; background: rgba(0, 0, 0, .6); }
+.refslider { display: flex; align-items: center; gap: 6px; }
+.refslider input[type=range] { flex: 1; min-width: 0; margin: 0; }
+.refslider .hint { flex: 0 0 auto; }
+.refval { min-width: 30px; text-align: right; font-family: var(--mono, monospace); }
+.stylefold summary { font-size: 12px; }
+
+/* Notices are toasts in the corner - never a bar that shoves the centre. */
+.toastwrap { position: fixed; top: 12px; right: 12px; z-index: 60; display: flex; flex-direction: column; gap: 6px; max-width: min(420px, 80vw); pointer-events: none; }
+.toast { pointer-events: auto; cursor: pointer; padding: 8px 12px; border-radius: 8px; font-size: 12px;
+         background: var(--darkbg, #171a21); border: 1px solid var(--borderc, #2b323f);
+         box-shadow: 0 6px 20px rgba(0, 0, 0, .35); color: var(--textcolor, #d8dce4); }
+.toast.ok { border-color: rgba(16, 185, 129, .6); }
+.toast.err { border-color: rgba(239, 68, 68, .7); }
 
 /* The fragment organizer in the centre. */
 .fragcols { display: flex; gap: 14px; align-items: flex-start; }

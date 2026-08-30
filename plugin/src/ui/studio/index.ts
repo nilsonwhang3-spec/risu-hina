@@ -148,11 +148,19 @@ async function loadStatus(): Promise<void> {
   if (S.centreMode === 'tab' && !S.selectedFile) drawCentre();
 }
 
+/** A toast in the corner, never a bar that shoves the centre down: a notice
+ * used to land above the tabs and shift everything under the pointer. */
 function notice(text: string, kind: 'ok' | 'err' | '' = ''): void {
-  if (!S.noticeMount) return;
-  clear(S.noticeMount);
-  S.noticeMount.appendChild(el('div', { class: 'notice ' + kind, style: { margin: '10px 14px 0' }, text }));
-  setTimeout(() => { if (S.noticeMount) clear(S.noticeMount); }, 8000);
+  let wrap = document.querySelector<HTMLElement>('.toastwrap');
+  if (!wrap) {
+    wrap = el('div', { class: 'toastwrap' });
+    document.body.appendChild(wrap);
+  }
+  const t = el('div', { class: 'toast ' + kind, text, title: '누르면 닫힙니다' });
+  t.addEventListener('click', () => t.remove());
+  wrap.appendChild(t);
+  while (wrap.children.length > 4) wrap.firstChild?.remove();
+  setTimeout(() => t.remove(), kind === 'err' ? 12000 : 6000);
 }
 
 async function refresh(): Promise<void> {

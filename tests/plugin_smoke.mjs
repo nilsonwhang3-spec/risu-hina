@@ -2260,15 +2260,27 @@ console.log('\ntest_studio_reference_tabs');
   row?.dispatchEvent(new window.Event('click', { bubbles: true }));
   await settle(900);
   const inline = explorer()?.querySelector('.charinline');
-  check('clicking the row expands the editor in place', !!inline,
+  check('clicking the row opens the editor as the column (← 목록 to return)',
+        !!inline && !!findButton(explorer(), '← 목록'),
         (explorer()?.textContent || '').slice(0, 160));
-  const tabs = inline ? [...inline.querySelectorAll('button.modebtn')] : [];
-  check('the reference section is two tabs', tabs.length === 2, String(tabs.length));
+  // Sections [프롬프트 | 레퍼런스], and inside 레퍼런스 the [캐릭터 | 바이브] pair.
+  clickButton(inline, '레퍼런스');
+  await settle(200);
+  const tabs = inline ? [...inline.querySelectorAll('button.tab')] : [];
+  check('the editor is sectioned into tabs', tabs.length === 4, String(tabs.length));
   const vibeTab = tabs.find((b) => /바이브/.test(b.textContent || ''));
   check('a vibe-only legacy preset opens on the vibe tab',
         !!vibeTab?.classList.contains('on'), tabs.map((b) => b.className).join(','));
+  check('the reference card shows no filename and no price',
+        !/v\.png/.test(inline?.textContent || '') && !/Anlas/.test(inline?.textContent || ''),
+        (inline?.textContent || '').slice(0, 200));
+  check('strength rides a slider', !!inline?.querySelector('.refslider input[type=range]'));
+  check('adding an image is a button, not an open form',
+        !!findButton(inline, '＋ 이미지') && !inline?.querySelector('input[type=file]:not([style*="none"])'));
   check('the long reference explainers are gone',
         !/확정으로 나갑니다/.test(inline?.textContent || ''));
+  clickButton(inline, '프롬프트');
+  await settle(100);
   check('position folds under 고급', /고급/.test(inline?.textContent || ''));
   clickButton(inline, '저장');
   await settle(1300);
@@ -2276,6 +2288,8 @@ console.log('\ntest_studio_reference_tabs');
     + encodeURIComponent('studio/characters/스모크캐릭터/preset.json'), { headers: auth })).json();
   check('preset.json records refMode', /"refMode":\s*"vibe"/.test(preset.content || ''),
         (preset.content || '').slice(0, 160));
+  clickButton(explorer(), '← 목록');
+  await settle(300);
   clickButton(explorer(), '← 프롬프트');
   await settle(300);
 }

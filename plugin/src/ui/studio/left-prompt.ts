@@ -30,6 +30,10 @@ let charBadge: HTMLElement | null = null;
 let fragBadge: HTMLElement | null = null;
 let fragErrBadge: HTMLElement | null = null;
 
+function styleOpen(): boolean {
+  try { return localStorage.getItem('hina.studioStyleOpen') !== '0'; } catch { return true; }
+}
+
 function styleItems(): StudioItem[] {
   return [...(S.cards.styles ?? [])].sort((a, b) =>
     ((a.order ?? 100) - (b.order ?? 100)) || a.path.localeCompare(b.path));
@@ -57,12 +61,19 @@ export function buildLeftPrompt(mount: HTMLElement): void {
     }),
   ]));
 
-  // --- the selected style, edited in place --------------------------------------
+  // --- the selected style, edited in place - foldable, remembered ------------------
   const editBox = el('div', { class: 'styleedit' });
-  mount.appendChild(editBox);
   if (cur) buildStyleEditor(editBox, cur.path);
   else editBox.appendChild(el('div', { class: 'hint', style: { padding: '6px 0' },
     text: '스타일을 선택하면 긍정/부정 프롬프트를 여기서 바로 수정합니다.' }));
+  const fold = el('details', { class: 'advbox stylefold', ...(styleOpen() ? { open: true } : {}) }, [
+    el('summary', { text: '프롬프트 수정' }),
+    editBox,
+  ]) as HTMLDetailsElement;
+  fold.addEventListener('toggle', () => {
+    try { localStorage.setItem('hina.studioStyleOpen', fold.open ? '1' : '0'); } catch { /* fine */ }
+  });
+  mount.appendChild(fold);
 
   // --- the tool buttons ----------------------------------------------------------
   const nChars = activeOf('characters').length;
@@ -123,9 +134,14 @@ function openStylePicker(): void {
       hub.drawCentre();
     },
     onDelete: async (e) => {
+      // Cheap on purpose: drop the row from memory and redraw the column.
+      // The full refreshArea (listing + centre rebuild + dry plan) made
+      // every delete feel like a stall.
       await state.deleteFile(e.id);
-      if (S.selectedFile === e.id) S.selectedFile = '';
-      await hub.refreshArea('styles');
+      S.cards.styles = (S.cards.styles ?? []).filter((i) => i.path !== e.id);
+      if (S.selectedFile === e.id) { S.selectedFile = ''; hub.drawCentre(); }
+      hub.drawLeft();
+      hub.touchQuiet();
     },
     onCreate: () => {
       askName('새 스타일', {

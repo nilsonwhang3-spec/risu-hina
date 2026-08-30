@@ -59,6 +59,25 @@ async function moveCards(folder: string, sources: string[]): Promise<void> {
 }
 
 export function buildLeftChars(mount: HTMLElement): void {
+  // An open card takes the column (← 목록 to come back): an editor unfolded
+  // inside the list made the column a scroll hunt nobody could use.
+  if (S.charOpen) {
+    const it = (S.cards.characters ?? []).find((c) => c.path === S.charOpen);
+    const backList = el('button', { class: 'ghost tiny', text: '← 목록' });
+    backList.addEventListener('click', () => { S.charOpen = ''; hub.drawLeft(); });
+    mount.appendChild(el('div', { class: 'row', style: { padding: '6px 6px 4px', gap: '6px' } }, [
+      backList, el('span', { class: 'sectiontitle grow', text: it?.name ?? S.charOpen.split('/').pop() ?? '' }),
+    ]));
+    mount.appendChild(el('div', { class: 'charinline' }, [
+      characterEditor(S.charOpen, {
+        chrome: 'inline',
+        onSaved: (d) => { S.charOpen = d; },
+        onDeleted: () => { S.charOpen = ''; },
+      }),
+    ]));
+    return;
+  }
+
   const back = el('button', { class: 'ghost tiny', text: '← 프롬프트' });
   back.addEventListener('click', () => { S.leftView = 'main'; hub.drawLeft(); });
   const title = el('span', { class: 'sectiontitle grow', text: '캐릭터',
@@ -126,18 +145,7 @@ export function buildLeftChars(mount: HTMLElement): void {
         text: folder ? '(비어 있음 — 카드를 끌어다 놓으세요)' : '(없음)' }));
       continue;
     }
-    for (const it of items) {
-      mount.appendChild(charRow(it));
-      if (S.charOpen === it.path) {
-        mount.appendChild(el('div', { class: 'charinline' }, [
-          characterEditor(it.path, {
-            chrome: 'inline',
-            onSaved: (d) => { S.charOpen = d; },
-            onDeleted: () => { S.charOpen = ''; },
-          }),
-        ]));
-      }
-    }
+    for (const it of items) mount.appendChild(charRow(it));
   }
 }
 
@@ -169,7 +177,7 @@ function charRow(it: StudioItem): HTMLElement {
       },
     },
     onClick: () => {
-      S.charOpen = S.charOpen === it.path ? '' : it.path;
+      S.charOpen = it.path;
       hub.drawLeft();
     },
   });

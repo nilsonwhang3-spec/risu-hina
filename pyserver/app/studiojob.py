@@ -167,6 +167,7 @@ def _run(job_id: str) -> None:
     vibe_cache: dict[tuple[str, float], dict] = {}
     charref_cache: dict[str, str] = {}
     skipped_refs = False
+    bad_refs: set[str] = set()
 
     # Streaming is on unless the spec says otherwise, and turns itself off for
     # the REST of the batch after its first failure: the endpoint's framing is
@@ -204,19 +205,27 @@ def _run(job_id: str) -> None:
             charref_specs = explicit_charrefs
         vibes: list[dict] = []
         charrefs: list[dict] = []
+        # A reference the encoder cannot take (a WebP under a .png name, a
+        # non-bucket size, a missing file) is SKIPPED with its reason kept in
+        # the job note - one bad card must not fail every image in the batch.
         if vibe_specs:
             if not nai.supports_vibe(model):
                 skipped_refs = True
             else:
                 for ref in vibe_specs:
                     key = (str(ref["path"]), float(ref.get("informationExtracted", 1.0)))
-                    if key not in vibe_cache:
-                        png = studio.read_bytes(key[0])
-                        enc, cached = nai.encode_vibe(png, model, key[1], studio.root())
-                        vibe_cache[key] = {"enc": enc}
-                        log.info("studio vibe %s %s", key[0], "(cached)" if cached else "(encoded, 2 Anlas)")
-                    vibes.append(nai.vibe_entry(vibe_cache[key]["enc"],
-                                                float(ref.get("strength", 0.6)), key[1]))
+                    try:
+                        if key not in vibe_cache:
+                            png = studio.read_bytes(key[0])
+                            if nai.png_size(png) == (0, 0):
+                                raise nai.NaiError("PNG 가 아닙니다")
+                            enc, cached = nai.encode_vibe(png, model, key[1], studio.root())
+                            vibe_cache[key] = {"enc": enc}
+                            log.info("studio vibe %s %s", key[0], "(cached)" if cached else "(encoded, 2 Anlas)")
+                        vibes.append(nai.vibe_entry(vibe_cache[key]["enc"],
+                                                    float(ref.get("strength", 0.6)), key[1]))
+                    except Exception as e:  # noqa: BLE001
+                        bad_refs.add(f"{key[0].split('/')[-1]}: {e}")
         if charref_specs:
             if not nai.supports_charref(model):
                 skipped_refs = True
@@ -224,14 +233,17 @@ def _run(job_id: str) -> None:
                 import base64 as _b64
                 for ref in charref_specs:
                     path = str(ref["path"])
-                    if path not in charref_cache:
-                        png = studio.read_bytes(path)
-                        nai.check_charref_png(png, path)
-                        charref_cache[path] = _b64.b64encode(png).decode()
-                    charrefs.append({"image": charref_cache[path],
-                                     "mode": str(ref.get("mode") or "character"),
-                                     "strength": float(ref.get("strength", 0.6)),
-                                     "fidelity": float(ref.get("fidelity", 0.6))})
+                    try:
+                        if path not in charref_cache:
+                            png = studio.read_bytes(path)
+                            nai.check_charref_png(png, path)
+                            charref_cache[path] = _b64.b64encode(png).decode()
+                        charrefs.append({"image": charref_cache[path],
+                                         "mode": str(ref.get("mode") or "character"),
+                                         "strength": float(ref.get("strength", 0.6)),
+                                         "fidelity": float(ref.get("fidelity", 0.6))})
+                    except Exception as e:  # noqa: BLE001
+                        bad_refs.add(f"{path.split('/')[-1]}: {e}")
         return vibes, charrefs
 
     for item in items:
@@ -263,8 +275,14 @@ def _run(job_id: str) -> None:
             p["use_coords"] = any(c.get("centers") for c in item["charCaptions"])
         try:
             vibes, charrefs = item_refs(item)
-            if skipped_refs and "note" not in payload:
-                payload["note"] = "이 모델은 레퍼런스를 지원하지 않아 카드의 레퍼런스를 건너뜁니다."
+            notes = []
+            if skipped_refs:
+                notes.append("이 모델은 레퍼런스를 지원하지 않아 카드의 레퍼런스를 건너뜁니다.")
+            if bad_refs:
+                notes.append("건너뛴 레퍼런스: " + "; ".join(sorted(bad_refs))
+                             + " — 카드를 열어 '맞추기' 또는 저장하면 고쳐집니다.")
+            if notes:
+                payload["note"] = " ".join(notes)
             png = generate_one(item, p, vibes, charrefs)
             saved = studio.save_image(folder, item["name"], png, {
                 "scene": item.get("scene"), "prompt": item["prompt"],
