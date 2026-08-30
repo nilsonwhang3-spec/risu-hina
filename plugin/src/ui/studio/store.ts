@@ -1,0 +1,243 @@
+/**
+ * The studio's shared state and cross-module wiring - no DOM in here.
+ *
+ * The studio used to be one 1900-line module whose functions shared thirty
+ * module-level variables. Split into files, that sharing has to be said out
+ * loud: `S` is the mutable state every studio module reads and writes, and
+ * `hub` is the set of redraw/refresh entry points the owning module registers
+ * so that a save in one pane can redraw another without an import cycle.
+ */
+import { state, type FileListing, type StudioItem, type StudioJob, type StudioStatus,
+         type WorkspaceFile } from '../../state';
+
+// The card areas, in the order the work goes in. styles/characters carry the
+// enable toggle; scenes (SD스튜디오 프리셋) are picked per run; fragments are
+// spliced by <이름> and have no on/off - a reference either resolves or not.
+export const CARD_AREAS: { area: string; label: string; toggle: boolean }[] = [
+  { area: 'styles', label: '스타일 프롬프트', toggle: true },
+  { area: 'characters', label: '캐릭터 프롬프트', toggle: true },
+  { area: 'scenes', label: 'SD스튜디오 프리셋', toggle: false },
+  { area: 'fragments', label: '조각 프롬프트', toggle: false },
+];
+
+export const OUTPUT_ROOT = 'studio/images';
+export const IMAGE_RE = /\.(png|jpe?g|gif|webp|avif|bmp)$/i;
+
+export interface Folder {
+  path: string;
+  name: string;
+  children: Folder[];
+  files: WorkspaceFile[];
+}
+
+/** The studio's mutable state. One object so every module sees one truth. */
+export const S = {
+  /** Mount points, owned by index.ts and set once per build. */
+  cardsMount: null as HTMLElement | null,
+  treeMount: null as HTMLElement | null,
+  genMount: null as HTMLElement | null,
+  viewMount: null as HTMLElement | null,
+  noticeMount: null as HTMLElement | null,
+
+  listing: null as FileListing | null,
+  outputRoot: null as Folder | null,
+  /** The card lists, one per area. */
+  cards: {} as Record<string, StudioItem[]>,
+  selected: OUTPUT_ROOT,
+  /** A card picked in the list; the centre shows its editor instead of a folder. */
+  selectedFile: '',
+  open: new Set<string>([OUTPUT_ROOT]),
+  /** Fragment references no fragment provides, from the last dry plan. */
+  unresolvedRefs: [] as string[],
+
+  status: null as StudioStatus | null,
+  jobId: '',
+  /** The centre shows the live queue instead of a folder while this is on. */
+  queueView: false,
+  queueJob: null as StudioJob | null,
+};
+
+/**
+ * The cross-module entry points. index.ts registers the real functions at
+ * build time; until then they are no-ops, which is also what a module calling
+ * "redraw the cards" before the tab ever rendered should get.
+ */
+export const hub = {
+  drawCards: () => { /* registered by index */ },
+  drawTree: () => { /* registered by index */ },
+  drawGen: () => { /* registered by gen */ },
+  drawCentre: () => { /* registered by index */ },
+  notice: (_text: string, _kind: 'ok' | 'err' | '' = '') => { /* registered by index */ },
+  refresh: async () => { /* registered by index */ },
+  refreshArea: async (_area: string) => { /* registered by index */ },
+  loadStatus: async () => { /* registered by index */ },
+  touchQuiet: (_paths: string[] = []) => { /* registered by index */ },
+};
+
+/** What the generation card is set to. Persisted, so a reload keeps the run
+ * setup. Defaults: steps 28 / CFG 5 are the web client's v4.5 values, rescale
+ * 0.4 and quality tags OFF are this studio's own (user, 2026-08-30). */
+const GEN_KEY = 'hina.studioGen';
+export const gen = {
+  model: 'nai-diffusion-4-5-full',
+  scenePreset: '',
+  characterName: '',
+  steps: 28, scale: 5, rescale: 0.4,
+  sampler: 'k_euler_ancestral', schedule: 'karras',
+  width: 832, height: 1216, count: 1, seed: '',
+  quality: false, ucPreset: 0,
+  folder: OUTPUT_ROOT,
+  // The one control that certainly spends Anlas, so it is off unless asked.
+  // References come from the ACTIVE character cards' presets now.
+  useReference: false,
+  // The selector's regex. Empty means the backend's default; it is edited on
+  // screen because it is the thing most likely to need adjusting.
+  pattern: '',
+};
+try {
+  const savedGen = JSON.parse(localStorage.getItem(GEN_KEY) || 'null') as Partial<typeof gen> | null;
+  if (savedGen && typeof savedGen === 'object') Object.assign(gen, savedGen);
+} catch { /* storage may be unavailable in the iframe */ }
+export function persistGen(): void {
+  try { localStorage.setItem(GEN_KEY, JSON.stringify(gen)); } catch { /* fine */ }
+}
+
+/** The active cards of one area, in (order, path) order - what a run sends. */
+export function activeOf(area: string): string[] {
+  return (S.cards[area] ?? [])
+    .filter((i) => i.enabled)
+    .sort((a, b) => ((a.order ?? 100) - (b.order ?? 100)) || a.path.localeCompare(b.path))
+    .map((i) => i.path);
+}
+
+export function spec(): Record<string, unknown> {
+  // What you see is what is sent: the panel names the active cards explicitly
+  // rather than leaning on the backend default, so the request is inspectable.
+  const out: Record<string, unknown> = {
+    model: gen.model,
+    styles: activeOf('styles'),
+    characters: activeOf('characters'),
+    characterName: gen.characterName,
+    count: gen.count, folder: gen.folder,
+    params: { steps: gen.steps, scale: gen.scale, cfg_rescale: gen.rescale,
+              sampler: gen.sampler, noise_schedule: gen.schedule,
+              width: gen.width, height: gen.height,
+              qualityToggle: gen.quality, ucPreset: gen.ucPreset },
+  };
+  if (gen.scenePreset) out.scenePreset = gen.scenePreset;
+  if (gen.seed.trim()) out.seed = Number(gen.seed.trim());
+  if (gen.useReference) out.useReference = true;
+  return out;
+}
+
+/**
+ * Unresolved fragment references, checked as they change.
+ *
+ * A `<이름>` no fragment provides would generate happily and wrongly, so the
+ * dry plan (count clamped to 1, nothing spent) runs debounced after toggles
+ * and edits, and its unresolved list becomes the 조각 section's badge.
+ */
+let unresolvedTimer: ReturnType<typeof setTimeout> | null = null;
+export function checkUnresolved(): void {
+  if (unresolvedTimer) clearTimeout(unresolvedTimer);
+  unresolvedTimer = setTimeout(async () => {
+    try {
+      const r = await state.studio.plan({ ...spec(), count: 1 });
+      S.unresolvedRefs = [...new Set(r.items.flatMap((i) => i.unresolved ?? []))];
+    } catch {
+      S.unresolvedRefs = [];
+    }
+    hub.drawCards();
+  }, 800);
+}
+
+/** A card name as a filename: the display name IS the identity, so the file
+ * carries it (fragments are referenced as `<이름>`, which resolves by stem). */
+export function cardStem(name: string): string {
+  return name.replace(/[<>:"/\\|?*]/g, '').trim();
+}
+
+/** The first `stem`, `stem-2`, `stem-3` … not taken in this area's listing. */
+export function freeCardPath(area: string, stem: string, suffix: string): string {
+  const taken = new Set((S.cards[area] ?? []).map((i) => i.path));
+  for (let n = 1; ; n++) {
+    const p = `studio/${area}/${stem}${n > 1 ? `-${n}` : ''}${suffix}`;
+    if (!taken.has(p)) return p;
+  }
+}
+
+/** Rename the file/folder behind a card when its name field changed.
+ * Returns the (possibly new) path. A same-name collision keeps the old path
+ * and reports, rather than half-renaming. */
+export async function renameCardFile(path: string, newName: string): Promise<string> {
+  const stem = cardStem(newName);
+  if (!stem) return path;
+  const isDir = !/\.[a-z0-9]+$/i.test(path);
+  const dir = path.slice(0, path.lastIndexOf('/'));
+  const old = path.slice(path.lastIndexOf('/') + 1);
+  const suffix = isDir ? '' : old.slice(old.lastIndexOf('.'));
+  if (old === stem + suffix) return path;
+  const to = `${dir}/${stem}${suffix}`;
+  const r = await state.moveFile(path, to);
+  return r.to;
+}
+
+// --- the output tree model ---------------------------------------------------
+
+/** The space listing's studio/images paths into one tree. */
+export function buildOutput(): void {
+  S.outputRoot = { path: OUTPUT_ROOT, name: 'output', children: [], files: [] };
+  if (!S.listing) return;
+  const lib = S.listing.areas.find((a) => a.area === 'studio');
+  if (!lib) return;
+  const byPath = new Map<string, Folder>([[OUTPUT_ROOT, S.outputRoot]]);
+  const folder = (path: string): Folder | null => {
+    const hit = byPath.get(path);
+    if (hit) return hit;
+    if (!path.startsWith(OUTPUT_ROOT + '/')) return null;
+    const cut = path.lastIndexOf('/');
+    const parent = folder(path.slice(0, cut));
+    if (!parent) return null;
+    const node: Folder = { path, name: path.slice(cut + 1), children: [], files: [] };
+    byPath.set(path, node);
+    parent.children.push(node);
+    return node;
+  };
+  for (const d of lib.dirs ?? []) folder(d);
+  for (const f of lib.files) {
+    if (!f.path.startsWith(OUTPUT_ROOT + '/')) continue;
+    const cut = f.path.lastIndexOf('/');
+    folder(f.path.slice(0, cut))?.files.push(f);
+  }
+}
+
+export function find(path: string, node = S.outputRoot): Folder | null {
+  if (!node) return null;
+  if (node.path === path) return node;
+  for (const c of node.children) {
+    const hit = find(path, c);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+export function countFiles(n: Folder): number {
+  return n.files.length + n.children.reduce((sum, c) => sum + countFiles(c), 0);
+}
+
+// --- small shared formatting ---------------------------------------------------
+
+export function stateLabel(s: string): string {
+  return ({ pending: '대기', running: '진행 중', done: '완료', partial: '일부 실패',
+            error: '오류', cancelled: '중단됨' } as Record<string, string>)[s] ?? s;
+}
+
+export function fmtSize(n: number): string {
+  if (n < 1024) return `${n}B`;
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)}KB`;
+  return `${(n / 1024 / 1024).toFixed(1)}MB`;
+}
+
+export function msg(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
