@@ -25,9 +25,11 @@ cards with sliders, every upload a real bucketed PNG, bad references skipped not
 foldable style editor · cheap preset delete) **+ §1-23** (studio_generate waits and streams each
 image into the chat · session loop flushes side events mid-tool · panel adopts agent-started jobs ·
 default model, bogus model refused once · artifacts retired, inline `![](path)` with path
-normalization · splitter clamp measures siblings)
+normalization · splitter clamp measures siblings) **+ §1-24** (검수 tab · 애셋 채택 and 봇에 반영
+only in selected/ · agent → 검수 via studio_open and strip buttons · 중단 cancels the batch ·
+per-panel collapse toggles · live job section in the batch tab)
 (gate ALL GREEN; the minor went up so the version gate trips when it ships). **Staged on test-server
-2026-08-30 night AT §1-23 (= §1-19~22 included): service stopped → backup `data-backup-20260830-s120`
+2026-08-30 night AT §1-24 (= §1-19~23 included): service stopped → backup `data-backup-20260830-s120`
 (11,358 files) → app/*.py + seeds/studio-image-ops.md + tools/probe_nai.py + requirements.in scp'd,
 msgpack 1.1.0 pip-installed into the bundled interpreter, the 0.11.0 dev bundle refreshed in
 `data/plugin/` (712,599 B served at `/plugin.js`) → `/health` 0.11.0 · 12 workspaces ·
@@ -56,6 +58,31 @@ mixed-cast multi-entry batch from the panel.** Released = **v0.10.0 BETA** (§1-
 `https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js`, and made `tools/bundle.py` write that file into the repository (included in the release commit). In the backend code only VERSION changed.
 
 → **First thing to do**: the user reinstalls `plugin/Risu.Hina.Plugin.js` into RisuAI **by hand, once** (the installed 0.1.0's update-url cannot be read because of CORS) → check that `+` appears from the next release on → verify M2 in real use (§5-2).
+
+## 1-24. 2026-08-30 - 0.11.0 (unreleased, continued): the 검수 tab, per-panel collapse, a 중단 that stops the batch
+
+Ten items from the §1-23 staging, one commit (`09e8648`), gate green, restaged the same night
+(backup `data-backup-20260830-r6`, bundle 728,491 B).
+
+- **Tabs**: `1장 · 배치 · 검수 | 잡 히스토리`. 검수 draws the selector for the OUTPUT folder picked on
+  the left and holds the left column on OUTPUT; a folder click lands there; the tidy-up grid is
+  one button away (정리 / 검수하기). Selector pictures show WHOLE (`.selgrid .assetpic` drops the
+  square crop) - the choice is made on the picture (items 3·4·8·9).
+- **애셋 채택** replaces 내보내기; **봇에 반영 appears only inside a `selected/` folder**, the one an
+  adoption is made from (items 5·6).
+- **The agent can send the user to 검수** (item 2 - there was no path at all): `studio_open(folder)`
+  pushes an `open` event, every batch strip in the chat carries a 검수 button, and the studio
+  consumes `state.openStudioRequest` (folder selected, ancestors unfolded, 검수 tab, left column
+  on OUTPUT).
+- **중단 stops the batch** (item 7): a cut-off turn is flagged per session (`session._STOPPED`, set
+  in the run's except path where the abort lands), and studio_generate's wait loop polls it,
+  cancels the job it started, and returns. Before, the abort closed the stream while the tool
+  thread and NovelAI kept going.
+- **Collapse toggles on the panels themselves** (item 1): a compact one at the end of the left tab
+  bar, one pinned in the agent pane's top corner (`.rcollapsebtn`; the agent panel is shared with
+  every tab, so the studio overlays the button rather than editing it).
+- **The batch tab shows the running job** under the submit (item 10): the history's `jobSection`
+  reused, streaming frame on the cell being drawn; finished jobs stay in 잡 히스토리.
 
 ## 1-23. 2026-08-30 - 0.11.0 (unreleased, continued): batches narrate themselves; artifacts retired
 
