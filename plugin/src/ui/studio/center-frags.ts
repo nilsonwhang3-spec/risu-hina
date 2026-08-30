@@ -42,7 +42,7 @@ export function drawFragments(): void {
   if (!viewMount) return;
 
   const back = el('button', { class: 'ghost tiny', text: '← 돌아가기' });
-  back.addEventListener('click', () => { S.fragmentsView = false; hub.drawCentre(); });
+  back.addEventListener('click', () => { S.centreMode = 'tab'; hub.drawCentre(); });
   const addFolder = el('button', { class: 'ghost tiny', text: '＋ 폴더' });
   addFolder.addEventListener('click', async () => {
     const raw = window.prompt('폴더 이름');

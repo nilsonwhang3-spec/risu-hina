@@ -1,51 +1,33 @@
 /**
- * The generation card, the run/poll loop, and the live queue view.
+ * Generation control: the 요청 설정 modal, the run/cancel/poll loop, and the
+ * recent-jobs cache the batch and history tabs draw from.
  *
- * The card sits under the tree because none of it changes inside one batch:
- * the ACTIVE cards say what is drawn, this card says how. The two meters live
- * here too — Anlas and the v5 quota are different currencies and neither is
- * derived from the other, so both are shown as NovelAI reports them
- * (docs/09 §2).
+ * The generate BUTTONS live on the centre tabs (1장 · 배치); what is shared
+ * is here. The poll never rebuilds the centre - it hands the heartbeat to
+ * hub.jobTick so the visible tab patches its progress in place.
  */
-import { el, clear } from '../dom';
-import { state } from '../../state';
-import { workspaceImage } from '../blobimg';
+import { el, clear, modal } from '../dom';
+import { state, type StudioJob } from '../../state';
 import { pickerRow, openListPicker, type PickerEntry } from '../pickers';
-import { S, hub, gen, persistGen, activeOf, spec, checkUnresolved, newCard, msg, stateLabel } from './store';
+import { S, hub, gen, persistGen, activeOf, spec, checkUnresolved, newCard, msg } from './store';
 
 let jobTimer: ReturnType<typeof setInterval> | null = null;
+let jobsStale = true;
 
-export function drawGen(): void {
-  const genMount = S.genMount;
-  if (!genMount) return;
-  clear(genMount);
-  genMount.appendChild(el('div', { class: 'sectionline' }));
-  genMount.appendChild(el('div', { class: 'sectiontitle', text: '생성' }));
-
-  // What a run will actually send: the active cards, said out loud so the
-  // list on the left and the request stay one thing - with or without a token.
+/** The account meters and what a run will send, for the 1장 tab's head. */
+export function statusRow(): HTMLElement {
+  const row = el('div', { class: 'row', style: { gap: '8px', flexWrap: 'wrap', marginBottom: '6px' } });
   const nStyles = activeOf('styles').length;
   const nChars = activeOf('characters').length;
-  genMount.appendChild(el('div', { class: 'hint', style: { margin: '4px 0' },
-    text: `활성 카드: 스타일 ${nStyles} · 캐릭터 ${nChars} — 위 목록의 체크가 배치에 실립니다` }));
-
+  row.appendChild(el('span', { class: 'hint', text: `활성 카드: 스타일 ${nStyles} · 캐릭터 ${nChars}` }));
   const status = S.status;
   if (!status) {
-    genMount.appendChild(el('div', { class: 'hint', text: '상태를 읽는 중입니다…' }));
-    return;
-  }
-  // No token hides only the run button: planning is free (the dry plan never
-  // spends), and the setup someone types should not vanish with the notice.
-  if (!status.configured) {
-    genMount.appendChild(el('div', { class: 'notice' }, [
-      el('div', { class: 'hint', text: status.note || status.error || 'NovelAI 토큰이 없습니다.' }),
-      el('div', { class: 'hint', style: { marginTop: '4px' },
-                  text: '토큰 없이도 계획을 세우고, 이미지를 넣고, 정리하고, 봇에 반영할 수 있습니다.' }),
-    ]));
+    row.appendChild(el('span', { class: 'hint', text: '상태를 읽는 중입니다…' }));
+    return row;
   }
   const acc = status.account;
   if (acc) {
-    genMount.appendChild(el('div', { class: 'row', style: { gap: '8px' } }, [
+    row.append(
       el('span', { class: 'badge', title: 'Anlas — 레퍼런스 인코딩과 디렉터 툴이 쓰는 잔량',
                    text: `Anlas ${acc.anlas}` }),
       el('span', {
@@ -54,12 +36,30 @@ export function drawGen(): void {
         text: `v5 ${acc.usagePercent ?? '?'}%`,
       }),
       el('span', { class: 'hint', text: `tier ${acc.tier ?? '?'}` }),
-    ]));
+    );
   }
-  if (status.error) genMount.appendChild(el('div', { class: 'hint err', text: status.error }));
+  if (status.error) row.appendChild(el('span', { class: 'hint err', text: status.error }));
+  return row;
+}
 
+/** The no-token notice - planning and sorting stay usable without one. */
+export function tokenNotice(): HTMLElement | null {
+  const status = S.status;
+  if (!status || status.configured) return null;
+  return el('div', { class: 'notice', style: { marginBottom: '6px' } }, [
+    el('div', { class: 'hint', text: status.note || status.error || 'NovelAI 토큰이 없습니다.' }),
+    el('div', { class: 'hint', style: { marginTop: '4px' },
+                text: '토큰 없이도 계획을 세우고, 이미지를 넣고, 정리하고, 봇에 반영할 수 있습니다.' }),
+  ]);
+}
+
+// --- the 요청 설정 modal ------------------------------------------------------------
+
+export function openParamsDialog(): void {
   const field = (label: string, node: HTMLElement) =>
     el('label', { class: 'field' }, [el('span', { text: label }), node]);
+  const two = (a: HTMLElement, b: HTMLElement) => el('div', { class: 'row' }, [a, b]);
+  const out = el('div', {});
 
   const modelInput = el('input', { value: gen.model, placeholder: 'nai-diffusion-4-5-full' }) as HTMLInputElement;
   modelInput.addEventListener('change', () => {
@@ -86,13 +86,10 @@ export function drawGen(): void {
     }
   });
 
-  const two = (a: HTMLElement, b: HTMLElement) => el('div', { class: 'row' }, [a, b]);
+  const planBtn = el('button', { class: 'ghost tiny', text: '계획 보기', title: '무엇이 몇 장 생성될지 미리 봅니다 (무료)' });
+  planBtn.addEventListener('click', () => void showPlan(out));
 
-  // 요청 설정: everything a request carries beyond "what and how many" - the
-  // model, the reference switch, and the sampling parameters - folded away so
-  // the daily controls stay at the top. Its open/closed state is remembered.
-  const req = el('details', { class: 'advbox' }, [
-    el('summary', { text: '요청 설정' }),
+  const body = el('div', { class: 'genform' }, [
     field('모델', modelInput),
     el('div', { class: 'row' }, [checkBtn, checkOut]),
     referenceToggle(),
@@ -106,94 +103,21 @@ export function drawGen(): void {
           { value: 3, label: 'Human Focus' }, { value: 4, label: '없음' }])),
     two(numField('가로', 'width'), numField('세로', 'height')),
     qualityToggle(),
-  ]) as HTMLDetailsElement;
-  try { req.open = localStorage.getItem('hina.studioReqOpen') === '1'; } catch { /* fine */ }
-  req.addEventListener('toggle', () => {
-    try { localStorage.setItem('hina.studioReqOpen', req.open ? '1' : '0'); } catch { /* fine */ }
-  });
-
-  genMount.append(
-    scenePicker(),
-    two(numField('장수', 'count'), textField('시드', 'seed', '비우면 랜덤')),
-    textField('캐릭터명', 'characterName', '파일 이름에 들어갑니다 (비우면 생략)'),
+    two(textField('시드', 'seed', '비우면 랜덤'), textField('캐릭터명', 'characterName', '파일 이름에 들어갑니다 (비우면 생략)')),
     textField('저장 폴더', 'folder', 'studio/images/…'),
-    req,
-  );
-
-  const planBtn = el('button', { class: 'ghost tiny', text: '계획 보기' }) as HTMLButtonElement;
-  const queueBtn = el('button', { class: 'ghost tiny', text: '큐', title: '생성 큐와 최근 작업' }) as HTMLButtonElement;
-  const runBtn = el('button', { class: 'primary tiny', text: '생성 시작' }) as HTMLButtonElement;
-  planBtn.addEventListener('click', () => void showPlan());
-  queueBtn.addEventListener('click', () => { S.queueView = true; hub.drawCentre(); });
-  runBtn.addEventListener('click', () => void run());
-  genMount.appendChild(el('div', { class: 'row', style: { marginTop: '8px' } },
-                          [planBtn, queueBtn, status.configured ? runBtn : null]));
-  genMount.appendChild(el('div', { class: 'genstatus' }));
-  if (S.jobId) void pollJob();
-}
-
-/** The scene preset - one per run, picked the way every preset is picked
- * (compact current row, list with 선택 · 수정 · 삭제 · 추가 behind the ›). */
-function scenePicker(): HTMLElement {
-  const items = S.cards.scenes ?? [];
-  const cur = items.find((i) => i.path === gen.scenePreset) ?? null;
-  const label = (i: { name: string; count?: number }) => i.name + (i.count ? ` (씬 ${i.count})` : '');
-  const row = pickerRow(cur ? { name: label(cur) } : null, {
-    title: items.length ? `저장된 프리셋 ${items.length}개 — 선택 · 수정 · 삭제 · 추가` : '프리셋 추가',
-    emptyHint: '(없음) — 패널 설정 한 장 구성으로 생성합니다.',
-    onOpen: () => openListPicker({
-      title: '씬 프리셋 선택',
-      hint: '씬마다 한 장씩 (장수만큼 반복) 생성됩니다.',
-      load: async () => [
-        { id: '', name: '(없음)', hint: '패널 설정 한 장 구성', selected: !gen.scenePreset, noDelete: true },
-        ...items.map((i): PickerEntry => ({
-          id: i.path, name: label(i), selected: gen.scenePreset === i.path,
-        })),
-      ],
-      onSelect: async (e) => {
-        gen.scenePreset = e.id;
-        persistGen();
-        checkUnresolved();
-        hub.drawGen();
-      },
-      onEdit: (e) => {
-        if (!e.id) return;
-        S.selectedFile = e.id;
-        S.queueView = false;
-        S.fragmentsView = false;
-        hub.drawCentre();
-      },
-      onDelete: async (e) => {
-        await state.deleteFile(e.id);
-        if (gen.scenePreset === e.id) { gen.scenePreset = ''; persistGen(); }
-        if (S.selectedFile === e.id) S.selectedFile = '';
-        await hub.refreshArea('scenes');
-      },
-      onCreate: () => {
-        void newCard('scenes').then((path) => {
-          if (!path) return;
-          gen.scenePreset = path;
-          persistGen();
-          S.selectedFile = path;
-          S.queueView = false;
-          S.fragmentsView = false;
-          hub.drawGen();
-          hub.drawCentre();
-        });
-      },
-      createLabel: '새 프리셋 추가',
-    }),
-  });
-  return el('div', { class: 'field' }, [el('span', { text: 'SD스튜디오 프리셋' }), row]);
+    el('div', { class: 'row', style: { marginTop: '8px' } }, [planBtn]),
+    out,
+  ]);
+  modal('요청 설정', body, { sticky: true });
 }
 
 /**
  * Whether this batch uses the active characters' reference presets.
  *
  * Off by default and labelled with its price, because this is the one control
- * on the card that certainly spends Anlas: an encode is 2 each, and v5 cannot
- * do it at all (docs/09 §7). The encoding is cached, so a second batch with
- * the same reference costs nothing. Strength and 충실도 live on each card.
+ * that certainly spends Anlas: an encode is 2 each, and v5 cannot do it at
+ * all (docs/09 §7). The encoding is cached, so a second batch with the same
+ * reference costs nothing. Strength and 충실도 live on each card.
  */
 let refSync: (() => void) | null = null;
 
@@ -226,7 +150,7 @@ function referenceToggle(): HTMLElement {
   ]);
 }
 
-function numField(label: string, key: 'steps' | 'scale' | 'rescale' | 'width' | 'height' | 'count'): HTMLElement {
+function numField(label: string, key: 'steps' | 'scale' | 'rescale' | 'width' | 'height'): HTMLElement {
   const i = el('input', { value: String(gen[key]), type: 'number',
                           ...(key === 'rescale' ? { step: '0.05', min: '0', max: '1' } : {}) }) as HTMLInputElement;
   i.addEventListener('change', () => {
@@ -268,9 +192,7 @@ function qualityToggle(): HTMLElement {
             [box, el('span', { text: '퀄리티 태그' })]);
 }
 
-async function showPlan(): Promise<void> {
-  const out = S.genMount?.querySelector('.genstatus') as HTMLElement | null;
-  if (!out) return;
+async function showPlan(out: HTMLElement): Promise<void> {
   clear(out);
   try {
     const r = await state.studio.plan(spec());
@@ -294,13 +216,70 @@ async function showPlan(): Promise<void> {
   }
 }
 
-async function run(): Promise<void> {
+// --- the scene preset dropdown (the batch tab's) -----------------------------------
+
+export function scenePicker(): HTMLElement {
+  const items = S.cards.scenes ?? [];
+  const cur = items.find((i) => i.path === gen.scenePreset) ?? null;
+  const label = (i: { name: string; count?: number }) => i.name + (i.count ? ` (씬 ${i.count})` : '');
+  const row = pickerRow(cur ? { name: label(cur) } : null, {
+    title: items.length ? `저장된 프리셋 ${items.length}개 — 선택 · 수정 · 삭제 · 추가` : '프리셋 추가',
+    emptyHint: '씬 프리셋이 없습니다. › 에서 하나 만들어 주세요.',
+    onOpen: () => openListPicker({
+      title: '씬 프리셋 선택',
+      hint: '씬마다 한 장씩 (장수만큼 반복) 생성됩니다.',
+      load: async () => [
+        { id: '', name: '(없음)', hint: '요청 설정 한 장 구성', selected: !gen.scenePreset, noDelete: true },
+        ...items.map((i): PickerEntry => ({
+          id: i.path, name: label(i), selected: gen.scenePreset === i.path,
+        })),
+      ],
+      onSelect: async (e) => {
+        gen.scenePreset = e.id;
+        persistGen();
+        checkUnresolved();
+        hub.drawCentre();
+      },
+      onEdit: (e) => {
+        if (!e.id) return;
+        S.selectedFile = e.id;
+        hub.drawCentre();
+      },
+      onDelete: async (e) => {
+        await state.deleteFile(e.id);
+        if (gen.scenePreset === e.id) { gen.scenePreset = ''; persistGen(); }
+        if (S.selectedFile === e.id) S.selectedFile = '';
+        await hub.refreshArea('scenes');
+      },
+      onCreate: () => {
+        void newCard('scenes').then((path) => {
+          if (!path) return;
+          gen.scenePreset = path;
+          persistGen();
+          S.selectedFile = path;
+          hub.drawCentre();
+        });
+      },
+      createLabel: '새 프리셋 추가',
+    }),
+  });
+  return el('div', { class: 'field grow' }, [el('span', { text: '씬 프리셋' }), row]);
+}
+
+// --- run · cancel · poll -------------------------------------------------------------
+
+/** Start a batch from the current panel setup, with per-call overrides
+ * (the 1장 tab passes `{ scenePreset: '', count: n }`). */
+export async function startRun(overrides: Record<string, unknown> = {}): Promise<void> {
   try {
-    const r = await state.studio.generate(spec());
+    const body = { ...spec(), ...overrides };
+    if (!body.scenePreset) delete body.scenePreset;
+    const r = await state.studio.generate(body);
     S.jobId = r.jobId;
-    hub.notice(`배치를 시작했습니다 (${r.total}장). ${r.estimate.note}`, 'ok');
-    S.queueView = true;
     S.queueJob = null;
+    S.viewPath = '';
+    jobsStale = true;
+    hub.notice(`배치를 시작했습니다 (${r.total}장). ${r.estimate.note}`, 'ok');
     hub.drawCentre();
     void pollJob();
   } catch (e) {
@@ -308,122 +287,47 @@ async function run(): Promise<void> {
   }
 }
 
-/**
- * The live queue, in the centre pane - one row per planned image with where
- * it stands (완료 with its thumbnail, 실패 with the error, 생성 중, 대기).
- * The 1.5s job poll redraws it; the data is the job payload the backend
- * already keeps, plus its `current` marker.
- */
-export function drawQueue(): void {
-  const viewMount = S.viewMount;
-  if (!viewMount) return;
-  clear(viewMount);
-  const back = el('button', { class: 'ghost tiny', text: '← 나가기' });
-  back.addEventListener('click', () => { S.queueView = false; hub.drawCentre(); });
-  const j = S.queueJob;
-  const head = el('div', { class: 'row', style: { marginBottom: '8px' } }, [
-    back,
-    el('span', { class: 'sectiontitle grow', text: '생성 큐' + (j ? ` — ${stateLabel(j.state)}` : '') }),
-  ]);
-  viewMount.appendChild(head);
-  if (!j || !j.payload) {
-    viewMount.appendChild(el('div', { class: 'hint',
-      text: S.jobId ? '읽는 중입니다…' : '진행 중인 배치가 없습니다.' }));
-    void drawRecentJobs();
-    return;
-  }
-  const p = j.payload;
-  const running = j.state === 'running' || j.state === 'pending';
-  const bits: string[] = [`${p.done}/${p.total}`];
-  if (j.created_at) bits.push(`${Math.max(0, Math.round(Date.now() / 1000 - j.created_at))}s 경과`);
-  const spent = j.result?.anlasSpent;
-  if (typeof spent === 'number') bits.push(`Anlas ${spent} 소모`);
-  head.appendChild(el('span', { class: 'hint', text: bits.join(' · ') }));
-  if (running) {
-    const cancel = el('button', { class: 'ghost tiny', text: '중단' });
-    cancel.addEventListener('click', () => { void state.studio.cancelJob(j.id); });
-    head.appendChild(cancel);
-  }
-  if (j.error) viewMount.appendChild(el('div', { class: 'notice err', text: j.error }));
-
-  const savedBy = new Map<string, string>();
-  for (const path of p.saved ?? []) savedBy.set(path.split('/').pop() ?? path, path);
-  const failedBy = new Map((p.failed ?? []).map((f) => [f.name, f.error] as const));
-  const list = el('div', { class: 'verlist' });
-  for (const it of p.items ?? []) {
-    let badge: HTMLElement;
-    let pic: HTMLElement | null = null;
-    const full = savedBy.get(it.name);
-    if (failedBy.has(it.name)) {
-      badge = el('span', { class: 'badge err', text: '실패' });
-    } else if (full) {
-      badge = el('span', { class: 'badge ok', text: '완료' });
-      pic = workspaceImage(full, it.name, { thumb: true });
-    } else if (running && p.current === it.name) {
-      badge = el('span', { class: 'badge warn', text: '생성 중' });
-    } else {
-      badge = el('span', { class: 'badge', text: running ? '대기' : '—' });
-    }
-    list.appendChild(el('div', { class: 'row', style: { alignItems: 'center', gap: '6px', padding: '3px 0' } }, [
-      badge, pic, el('span', { class: 'grow hint', text: it.name }),
-    ]));
-    const err = failedBy.get(it.name);
-    if (err) list.appendChild(el('div', { class: 'hint err', style: { paddingLeft: '8px' }, text: err }));
-  }
-  viewMount.appendChild(list);
-  if (!running) void drawRecentJobs();
+export function cancelRun(): void {
+  if (S.jobId) void state.studio.cancelJob(S.jobId);
 }
 
-/** The last few batches - a way back into a finished queue's detail. */
-async function drawRecentJobs(): Promise<void> {
-  const viewMount = S.viewMount;
-  if (!viewMount) return;
-  const box = el('div', {});
-  viewMount.appendChild(box);
-  let jobs;
+/** How many images the live job still owes (for the 취소 (n) label). */
+export function pendingCount(): number {
+  const p = S.queueJob?.payload;
+  if (!p) return 0;
+  return Math.max(0, p.total - p.done - (p.failed?.length ?? 0));
+}
+
+/** Recent jobs for the batch/history tabs, cached until a run finishes. */
+export async function loadJobs(force = false): Promise<StudioJob[]> {
+  if (!force && !jobsStale && S.jobs.length) return S.jobs;
   try {
-    jobs = (await state.studio.jobs()).jobs ?? [];
-  } catch { return; }
-  if (!box.isConnected || !jobs.length) return;
-  box.appendChild(el('div', { class: 'sectiontitle', style: { marginTop: '12px' }, text: '최근 작업' }));
-  for (const r of jobs) {
-    if (S.queueJob && r.id === S.queueJob.id) continue;
-    const row = el('div', { class: 'chatitem', style: { cursor: 'pointer' }, title: '이 배치의 큐 보기' }, [
-      el('span', { class: 'grow', text: `${stateLabel(r.state)} · ${r.payload?.done ?? 0}/${r.payload?.total ?? 0}` }),
-      el('span', { class: 'hint', text: r.id }),
-    ]);
-    row.addEventListener('click', () => { S.queueJob = r; drawQueue(); });
-    box.appendChild(row);
-  }
+    S.jobs = (await state.studio.jobs()).jobs ?? [];
+    jobsStale = false;
+  } catch { /* keep what we have */ }
+  return S.jobs;
+}
+
+export function markJobsStale(): void {
+  jobsStale = true;
 }
 
 /**
- * Poll the batch. The same shape the panel already uses for permits and the
- * asset importer - the backend runs the work and this asks how far it got.
+ * Poll the batch. The backend runs the work and this asks how far it got;
+ * the visible tab draws the progress (hub.jobTick), and the finish reports,
+ * re-reads the library, and refreshes the meters.
  */
 export async function pollJob(): Promise<void> {
   if (jobTimer) return;
   const tick = async () => {
-    const out = S.genMount?.querySelector('.genstatus') as HTMLElement | null;
-    if (!S.jobId || !out) return stop();
+    if (!S.jobId) return stop();
     let j;
     try {
       j = await state.studio.job(S.jobId);
     } catch {
       return stop();
     }
-    const p = j.payload;
     S.queueJob = j;
-    if (S.queueView) drawQueue();
-    clear(out);
-    const line = el('div', { class: 'hint', style: { cursor: 'pointer' },
-                             title: '진행 상황을 중앙에 크게 봅니다',
-                             text: `${stateLabel(j.state)} · ${p?.done ?? 0}/${p?.total ?? 0}` });
-    line.addEventListener('click', () => { S.queueView = true; hub.drawCentre(); });
-    out.appendChild(line);
-    for (const f of (p?.failed ?? []).slice(0, 3)) {
-      out.appendChild(el('div', { class: 'hint err', text: `${f.name}: ${f.error}` }));
-    }
     if (['done', 'partial', 'error', 'cancelled'].includes(j.state)) {
       const spent = j.result?.anlasSpent;
       hub.notice(`배치 ${j.state} — ${j.result?.saved ?? 0}장 저장`
@@ -431,17 +335,17 @@ export async function pollJob(): Promise<void> {
         + (typeof spent === 'number' ? ` · Anlas ${spent} 소모` : ''),
         j.state === 'error' ? 'err' : 'ok');
       S.jobId = '';
+      jobsStale = true;
       stop();
+      hub.jobTick();
       // The batch wrote images: the files tab gets the news (and the unseen
       // badge) while we re-read our own slice.
-      hub.touchQuiet(p?.saved ?? []);
+      hub.touchQuiet(j.payload?.saved ?? []);
       await hub.refresh();
       await hub.loadStatus();
       return;
     }
-    const cancel = el('button', { class: 'ghost tiny', text: '중단' });
-    cancel.addEventListener('click', () => { void state.studio.cancelJob(S.jobId); });
-    out.appendChild(cancel);
+    hub.jobTick();
   };
   const stop = () => { if (jobTimer) { clearInterval(jobTimer); jobTimer = null; } };
   jobTimer = setInterval(() => { void tick(); }, 1500);

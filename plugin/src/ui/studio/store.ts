@@ -34,7 +34,6 @@ export interface Folder {
 export const S = {
   /** Mount points, owned by index.ts and set once per build. */
   leftMount: null as HTMLElement | null,
-  genMount: null as HTMLElement | null,
   viewMount: null as HTMLElement | null,
   noticeMount: null as HTMLElement | null,
 
@@ -55,21 +54,44 @@ export const S = {
   leftView: 'main' as 'main' | 'characters',
   /** The character card expanded in the left character view. */
   charOpen: '',
-  /** The centre shows the fragment organizer while this is on. */
-  fragmentsView: false,
+
+  /** The centre's tab (persisted), and the mode that can override it:
+   * the fragment organizer, a folder grid, or the comparison selector
+   * (both bound to S.selected). A picked file (S.selectedFile) overrides
+   * everything - an editor is always reachable. */
+  centreTab: 'single' as 'single' | 'batch' | 'history',
+  centreMode: 'tab' as 'tab' | 'fragments' | 'folder' | 'selector',
+  /** Batch-tab column count (2·3·4). */
+  cols: 3,
+  /** The job section the batch tab should scroll to (from the history tab). */
+  focusJob: '',
+  /** The single tab's pinned image ('' = follow the live run), and the list
+   * ←/→ walks (the job the image came from). */
+  viewPath: '',
+  viewList: [] as string[],
+  /** Recent jobs, cached for the batch/history tabs. */
+  jobs: [] as StudioJob[],
 
   status: null as StudioStatus | null,
   jobId: '',
-  /** The centre shows the live queue instead of a folder while this is on. */
-  queueView: false,
   queueJob: null as StudioJob | null,
 };
 try {
   const t = localStorage.getItem('hina.studioLeftTab');
   if (t === 'output') S.leftTab = 'output';
+  const c = localStorage.getItem('hina.studioTab');
+  if (c === 'single' || c === 'batch' || c === 'history') S.centreTab = c;
+  const n = Number(localStorage.getItem('hina.studioCols'));
+  if (n === 2 || n === 3 || n === 4) S.cols = n;
 } catch { /* storage may be unavailable in the iframe */ }
 export function persistLeftTab(): void {
   try { localStorage.setItem('hina.studioLeftTab', S.leftTab); } catch { /* fine */ }
+}
+export function persistCentreTab(): void {
+  try { localStorage.setItem('hina.studioTab', S.centreTab); } catch { /* fine */ }
+}
+export function persistCols(): void {
+  try { localStorage.setItem('hina.studioCols', String(S.cols)); } catch { /* fine */ }
 }
 
 /**
@@ -79,8 +101,10 @@ export function persistLeftTab(): void {
  */
 export const hub = {
   drawLeft: () => { /* registered by index */ },
-  drawGen: () => { /* registered by gen */ },
   drawCentre: () => { /* registered by index */ },
+  /** A live-job heartbeat: the visible tab patches its progress in place
+   * (never a full centre rebuild - inputs keep their focus). */
+  jobTick: () => { /* registered by the centre tabs */ },
   /** Patch count badges (활성 캐릭터, 미해결 조각) in place - called from
    * debounced checks so a keystroke in an editor never rebuilds the column
    * under the caret. */

@@ -129,7 +129,7 @@ function charRow(it: StudioItem): HTMLElement {
         }
         it.enabled = v;
         hub.drawLeft();
-        hub.drawGen();
+        hub.drawCentre();
         checkUnresolved();
         hub.touchQuiet();
       },

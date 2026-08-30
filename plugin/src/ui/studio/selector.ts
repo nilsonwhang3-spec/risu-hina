@@ -59,7 +59,10 @@ export function drawSelector(node: Folder): void {
   const g = groups;
 
   const bar = el('div', { class: 'row', style: { marginBottom: '8px', flexWrap: 'wrap' } });
+  const back = el('button', { class: 'ghost tiny', text: '← 폴더', title: '폴더 보기로 돌아갑니다' });
+  back.addEventListener('click', () => { S.centreMode = 'folder'; hub.drawCentre(); });
   bar.append(
+    back,
     el('span', { class: 'sectiontitle grow', text: `${node.path} · ${g.total}장 · 그룹 ${g.groups.length}` }),
   );
   for (const n of [2, 3, 4, 5, 6]) {

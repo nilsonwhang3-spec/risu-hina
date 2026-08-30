@@ -1094,6 +1094,51 @@ label.row { align-items: center; gap: 6px; }
 .fragcols > .fragedit { flex: 1; min-width: 0; }
 .fraglist input { width: 100%; box-sizing: border-box; }
 
+/* The centre tabs (1장 · 배치 · 잡 히스토리). */
+.centretabs { gap: 4px; margin-bottom: 10px; }
+
+/* 1장: one big picture, then the controls, then the batch strip. */
+.bigpreview {
+  min-height: 58vh; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; border: 1px solid var(--borderc, #2b323f);
+  border-radius: 8px; background: var(--darkbg, #171a21); overflow: hidden;
+}
+.bigpreview img { max-width: 100%; max-height: 72vh; object-fit: contain; display: block; }
+.bigpreview .previewname { padding: 4px 8px; }
+.countbox { width: 56px; text-align: center; }
+.striprow { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; }
+.stripcell { flex: 0 0 72px; height: 72px; padding: 0; overflow: hidden; border-radius: 6px; }
+.stripcell img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.stripcell.on { outline: 2px solid #2563eb; }
+
+/* 배치: one section per JOB, newest first. */
+.jobsec { margin-bottom: 14px; border: 1px solid var(--borderc, #2b323f); border-radius: 8px; padding: 8px; }
+.jobsec.live { border-color: #2563eb; }
+.jobsec.focusjob { outline: 2px solid #2563eb; }
+.jobhead { margin-bottom: 6px; }
+.jobgrid { display: grid; gap: 8px; }
+.jobpic { cursor: zoom-in; display: block; }
+.jobpic img { width: 100%; height: auto; display: block; border-radius: 6px; }
+.jobwait { display: flex; flex-direction: column; gap: 4px; align-items: center; justify-content: center;
+           min-height: 90px; border: 1px dashed var(--borderc, #2b323f); border-radius: 6px; }
+.jobcell .fname { margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jobrow { cursor: pointer; }
+.jobrow .wsimg.thumb img { max-height: 40px; border-radius: 4px; }
+
+/* The folder grid (OUTPUT → a folder). */
+.foldergrid { display: grid; gap: 8px; }
+.foldergrid .foldcell { cursor: pointer; text-align: center; padding: 12px 6px; }
+.foldergrid .foldface { font-size: 30px; }
+.foldergrid .imgcell { cursor: pointer; }
+.foldergrid .imgcell.picked { outline: 2px solid #2563eb; border-radius: 6px; }
+
+/* The 요청 설정 modal form. */
+.genform label.field { margin-bottom: 6px; }
+.genform label.field > span { display: block; font-size: 11px; opacity: .7; margin-bottom: 2px; }
+.genform input, .genform select { width: 100%; box-sizing: border-box; }
+.genform input[type=checkbox] { width: auto; }
+.genform .row { gap: 6px; align-items: flex-end; }
+
 @media (max-width: 900px) {
   .panelrail { display: none !important; }
 }

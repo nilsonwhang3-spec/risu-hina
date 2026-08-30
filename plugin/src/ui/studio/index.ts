@@ -23,19 +23,23 @@
  * A bot IS needed to *adopt* an image into a card - that is gated per action,
  * where it is true, rather than on the whole tab.
  */
-import { el, clear, armed } from './../dom';
-import { state, type StudioItem, type WorkspaceFile } from '../../state';
+import { el, clear } from './../dom';
+import { state, type StudioItem } from '../../state';
 import { threePane } from '../panes';
 import { bindAgent, mountAgent } from '../agentpane';
-import { CARD_AREAS, OUTPUT_ROOT, IMAGE_RE, S, hub, checkUnresolved, persistLeftTab,
-         buildOutput, find, fmtSize, msg, type Folder } from './store';
-import { drawGen, drawQueue } from './gen';
+import { CARD_AREAS, OUTPUT_ROOT, S, hub, checkUnresolved, persistLeftTab, persistCentreTab,
+         buildOutput, find, msg } from './store';
+import { pollJob } from './gen';
 import { drawCardEditor, drawSceneEditor, drawRawFile, rawView } from './editors';
 import { drawCharacterEditor } from './char-edit';
 import { buildLeftPrompt, syncPromptBadges } from './left-prompt';
 import { buildLeftChars } from './left-chars';
 import { buildLeftOutput } from './left-output';
 import { drawFragments } from './center-frags';
+import { drawSingle, singleTick } from './center-single';
+import { drawBatch, batchTick } from './center-batch';
+import { drawHistory } from './center-history';
+import { drawFolder } from './center-folder';
 import { hasGroups, loadGroups, drawSelector } from './selector';
 
 let built = false;
@@ -96,13 +100,11 @@ export function renderStudioTab(mount: HTMLElement): void {
     const pane = threePane();
     splitRoot = pane.root;
 
-    // The left column: [프롬프트 | OUTPUT] tabs over the content, the
-    // generation card pinned under it.
+    // The left column: [프롬프트 | OUTPUT] tabs over the content.
     tabbar = el('div', { class: 'studiotabs' });
     leftContent = el('div', { class: 'tree filetree' });
     S.leftMount = leftContent;
-    S.genMount = el('div', { class: 'genpanel' });
-    pane.left.append(tabbar, leftContent, S.genMount);
+    pane.left.append(tabbar, leftContent);
 
     S.noticeMount = el('div');
     S.viewMount = el('div', { class: 'pad filepad' });
@@ -136,7 +138,8 @@ async function loadStatus(): Promise<void> {
   } catch (e) {
     S.status = { configured: false, library: '', error: msg(e) };
   }
-  drawGen();
+  // The meters live on the centre tabs now.
+  if (S.centreMode === 'tab' && !S.selectedFile) drawCentre();
 }
 
 function notice(text: string, kind: 'ok' | 'err' | '' = ''): void {
@@ -172,9 +175,9 @@ async function refresh(): Promise<void> {
   await migrateSingleStyle();
   buildOutput();
   drawLeft();
-  drawGen();
   drawCentre();
   checkUnresolved();
+  if (S.jobId) void pollJob();
 }
 
 /** The dropdown means ONE style. Cards written before the dropdown could have
@@ -216,17 +219,23 @@ async function refreshArea(area: string): Promise<void> {
   } catch { /* keep what we have; the next full refresh corrects it */ }
   drawLeft();
   drawCentre();
-  drawGen();
   checkUnresolved();
   touchQuiet();
+}
+
+/** The live-job heartbeat lands on whichever tab is showing. */
+function jobTick(): void {
+  if (S.centreMode !== 'tab' || S.selectedFile) return;
+  if (S.centreTab === 'single') singleTick();
+  else if (S.centreTab === 'batch') batchTick();
 }
 
 // The hub: what the sibling modules call to reach back into this file (and
 // gen.ts) without an import cycle. Registered at module load, before any
 // render can run.
 hub.drawLeft = drawLeft;
-hub.drawGen = drawGen;
 hub.drawCentre = drawCentre;
+hub.jobTick = jobTick;
 hub.syncBadges = syncPromptBadges;
 hub.notice = notice;
 hub.refresh = refresh;
@@ -264,31 +273,17 @@ function drawLeft(): void {
   } else {
     buildLeftPrompt(leftContent);
   }
-  // The generation card belongs to the 프롬프트 tab's main view; the character
-  // view and the tree want the column.
-  if (S.genMount) S.genMount.style.display = (S.leftTab === 'prompt' && S.leftView === 'main') ? '' : 'none';
 }
 
-// --- the centre: editors, the organizer, the selector, folders --------------------
+// --- the centre: tabs, and the modes that override them ---------------------------
 
 function drawCentre(): void {
   const viewMount = S.viewMount;
   if (!viewMount) return;
   clear(viewMount);
 
-  // A running (or just-inspected) batch owns the centre until dismissed:
-  // "what is it doing right now" is the question the moment 생성 시작 lands.
-  if (S.queueView) {
-    drawQueue();
-    return;
-  }
-
-  if (S.fragmentsView) {
-    drawFragments();
-    return;
-  }
-
-  // A card picked in a list: its editor, not the folder it lives in.
+  // A card picked in a list: its editor, over everything - an editor is
+  // always reachable, whatever the tabs are doing.
   if (S.selectedFile) {
     const parts = S.selectedFile.split('/');
     if (parts[1] === 'characters' && !/\.[a-z0-9]+$/i.test(S.selectedFile)) {
@@ -303,71 +298,47 @@ function drawCentre(): void {
     return;
   }
 
-  const node = find(S.selected);
-  if (!node) {
-    viewMount.appendChild(el('div', { class: 'empty', text: '폴더를 골라 주세요.' }));
+  if (S.centreMode === 'fragments') {
+    drawFragments();
     return;
   }
 
-  viewMount.appendChild(el('div', { class: 'row', style: { marginBottom: '8px' } }, [
-    el('span', { class: 'sectiontitle grow', text: node.path }),
-    el('span', { class: 'hint', text: `파일 ${node.files.length} · 하위 폴더 ${node.children.length}` }),
-    newFolderButton(node),
-  ]));
-
-  if (!node.files.length && !node.children.length) {
-    viewMount.appendChild(el('div', { class: 'empty', text: '아직 생성물이 없습니다. 이미지를 여기에 넣거나 히나에게 생성을 부탁하세요.' }));
-    return;
-  }
-
-  // Under images/, comparing is the job, so the selector replaces the plain
-  // grid: candidates are looked at against each other, not browsed.
-  if (node.files.some((f) => IMAGE_RE.test(f.name))) {
-    if (!hasGroups(node.path)) {
-      viewMount.appendChild(el('div', { class: 'hint', text: '읽는 중입니다…' }));
-      void loadGroups(node.path);
+  if (S.centreMode === 'folder' || S.centreMode === 'selector') {
+    const node = find(S.selected);
+    if (!node) {
+      S.centreMode = 'tab';
+    } else if (S.centreMode === 'folder') {
+      drawFolder(node);
+      return;
+    } else {
+      // The comparison selector - one button past the folder grid.
+      if (!hasGroups(node.path)) {
+        viewMount.appendChild(el('div', { class: 'hint', text: '읽는 중입니다…' }));
+        void loadGroups(node.path);
+        return;
+      }
+      drawSelector(node);
       return;
     }
-    drawSelector(node);
-    return;
   }
 
-  const list = el('div', { class: 'filelist' });
-  for (const f of node.files) list.appendChild(fileRow(f));
-  viewMount.appendChild(list);
-}
-
-function newFolderButton(node: Folder): HTMLElement {
-  const b = el('button', { class: 'ghost tiny', text: '＋ 폴더' }) as HTMLButtonElement;
-  b.addEventListener('click', () => {
-    const name = (prompt('새 폴더 이름', '') || '').trim();
-    if (!name) return;
-    b.disabled = true;
-    void state.mkdirFile(node.path + '/' + name)
-      .then(() => { S.open.add(node.path); touchQuiet(); return refresh(); })
-      .catch((e) => notice('폴더를 만들지 못했습니다: ' + msg(e), 'err'))
-      .finally(() => { b.disabled = false; });
-  });
-  return b;
-}
-
-function fileRow(f: WorkspaceFile): HTMLElement {
-  const del = el('button', { class: 'ghost tiny', title: '삭제' }) as HTMLButtonElement;
-  const rowEl = el('div', { class: 'chatitem' }, [
-    el('span', { class: 'grow', text: f.name }),
-    el('span', { class: 'n', text: fmtSize(f.size) }),
-    del,
-  ]);
-  armed(del, '✕', '삭제 확인', async () => {
-    del.disabled = true;
-    try {
-      await state.deleteFile(f.path);
-      touchQuiet();
-      await refresh();
-    } catch (e) {
-      del.disabled = false;
-      notice('지우지 못했습니다: ' + msg(e), 'err');
-    }
-  });
-  return rowEl;
+  // The tabs: 1장 · 배치 · 잡 히스토리.
+  const mk = (tab: typeof S.centreTab, label: string): HTMLElement => {
+    const b = el('button', { class: 'modebtn' + (S.centreTab === tab ? ' on' : ''), text: label });
+    b.addEventListener('click', () => {
+      if (S.centreTab === tab) return;
+      S.centreTab = tab;
+      persistCentreTab();
+      drawCentre();
+    });
+    return b;
+  };
+  viewMount.appendChild(el('div', { class: 'centretabs row' }, [
+    mk('single', '1장'), mk('batch', '배치'), mk('history', '잡 히스토리'),
+  ]));
+  const body = el('div', { class: 'centrebody' });
+  viewMount.appendChild(body);
+  if (S.centreTab === 'single') drawSingle(body);
+  else if (S.centreTab === 'batch') drawBatch(body);
+  else drawHistory(body);
 }

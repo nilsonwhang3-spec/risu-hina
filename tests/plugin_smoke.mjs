@@ -2010,17 +2010,22 @@ console.log('\ntest_studio_tab');
   await settle(200);
   check('and expands back', !split?.classList.contains('lcollapse'), split?.className);
 
-  // The generation card sits under the prompt tab because nothing on it
-  // changes inside one batch. With no NovelAI token it must say so and stay
-  // usable - sorting and adopting need no token at all.
+  // The centre is three tabs now (1장 · 배치 · 잡 히스토리); generation
+  // controls live there. With no NovelAI token the 1장 tab must say so and
+  // stay usable - sorting and adopting need no token at all.
   await settle(600);
-  const gen = document.querySelector('.genpanel');
-  check('the generation card is in the left column', !!gen);
+  const centreTabs = document.querySelector('.panel.active .centretabs');
+  check('the centre is three tabs',
+        /1장/.test(centreTabs?.textContent || '') && /배치/.test(centreTabs?.textContent || '')
+        && /잡 히스토리/.test(centreTabs?.textContent || ''),
+        (centreTabs?.textContent || '').slice(0, 80));
+  const body = document.querySelector('.panel.active .centrebody');
+  check('the 1장 tab has the big preview', !!body?.querySelector('.bigpreview'));
   check('a missing NovelAI token is explained, not an error',
-        /토큰/.test(gen?.textContent || ''), (gen?.textContent || '').slice(0, 120));
+        /토큰/.test(body?.textContent || ''), (body?.textContent || '').slice(0, 120));
   check('and it says the rest still works',
-        /정리하고|반영할 수 있습니다/.test(gen?.textContent || ''),
-        (gen?.textContent || '').slice(0, 200));
+        /정리하고|반영할 수 있습니다/.test(body?.textContent || ''),
+        (body?.textContent || '').slice(0, 200));
 }
 
 console.log('\ntest_studio_cards');
@@ -2058,9 +2063,9 @@ console.log('\ntest_studio_cards');
     + '/files/read?path=' + encodeURIComponent('studio/styles/스모크스타일.md'), { headers: auth })).json();
   check('selecting writes the card front matter', /enabled: true/.test(read.content || ''),
         (read.content || '').slice(0, 80));
-  check('and the generation card counts it as active',
-        /활성 카드: 스타일 1/.test(document.querySelector('.genpanel')?.textContent || ''),
-        (document.querySelector('.genpanel')?.textContent || '').slice(0, 160));
+  check('and the 1장 tab counts it as active',
+        /활성 카드: 스타일 1/.test(document.querySelector('.panel.active .centrebody')?.textContent || ''),
+        (document.querySelector('.panel.active .centrebody')?.textContent || '').slice(0, 160));
 
   // The picked style is edited in place - 긍정/부정 split, debounced save.
   const pos = explorer()?.querySelector('.styleedit textarea');
@@ -2091,11 +2096,10 @@ console.log('\ntest_studio_cards');
         [...document.querySelectorAll('.panel.active .left input')]
           .some((i) => i.value === '스모크스타일'),
         (document.querySelector('.panel.active .left')?.textContent || '').slice(0, 120));
-  // The generation card no longer carries a style <select> of its own.
-  check('no style pickers remain on the generation card',
-        ![...document.querySelectorAll('.genpanel select option')]
-          .some((o) => /스모크스타일/.test(o.textContent || '')),
-        String(document.querySelectorAll('.genpanel select').length));
+  // No stray style <select> anywhere - the dropdown row is the one picker.
+  check('no style select pickers remain',
+        ![...document.querySelectorAll('.panel.active select option')]
+          .some((o) => /스모크스타일/.test(o.textContent || '')));
   clickButton(document.querySelector('.panel.active .left'), '← 목록');
   await settle(300);
 }
@@ -2172,9 +2176,11 @@ console.log('\ntest_studio_scene_editor');
   await settle(200);
   clickById(document, 'tab-studio');
   await settle(1100);
-  // The preset is picked (and edited) from the generation card's dropdown.
+  // The preset is picked (and edited) from the 배치 tab's dropdown.
   // (Scope to the modal this click opens - an earlier test may have left one.)
-  document.querySelector('.panel.active .genpanel .presetnow .chev')
+  clickButton(document.querySelector('.panel.active .centretabs'), '배치');
+  await settle(500);
+  document.querySelector('.panel.active .centrebody .presetnow .chev')
     ?.dispatchEvent(new window.Event('click', { bubbles: true }));
   await settle(600);
   const sceneModal = [...document.querySelectorAll('.modalback')].pop();
@@ -2260,16 +2266,18 @@ console.log('\ntest_studio_reference_tabs');
 
 console.log('\ntest_studio_request_settings');
 {
-  // The sampling parameters live in a folded 요청 설정 and the whole set rides
-  // spec.params - what you see on the card is what the backend receives.
+  // The sampling parameters live behind the ⚙ 요청 설정 modal and the whole
+  // set rides spec.params - what you see is what the backend receives.
   clickById(document, 'tab-studio');
   await settle(400);
-  const gp = document.querySelector('.panel.active .genpanel');
-  check('요청 설정 is a folded section', /요청 설정/.test(gp?.textContent || ''),
-        (gp?.textContent || '').slice(0, 200));
-  check('sampler and UC preset are on the card',
-        [...(gp?.querySelectorAll('select option') ?? [])].some((o) => o.value === 'k_euler_ancestral')
-        && [...(gp?.querySelectorAll('select option') ?? [])].some((o) => (o.textContent || '') === 'Heavy'));
+  clickButton(document.querySelector('.panel.active .centrebody'), '⚙ 요청 설정');
+  await settle(400);
+  const dlg = [...document.querySelectorAll('.modalback')].pop();
+  check('요청 설정 opens as a modal', /요청 설정/.test(dlg?.textContent || ''),
+        (dlg?.textContent || '').slice(0, 200));
+  check('sampler and UC preset are in the modal',
+        [...(dlg?.querySelectorAll('select option') ?? [])].some((o) => o.value === 'k_euler_ancestral')
+        && [...(dlg?.querySelectorAll('select option') ?? [])].some((o) => (o.textContent || '') === 'Heavy'));
   const orig = globalThis.fetch;
   let planBody = null;
   globalThis.fetch = async (url, opts) => {
@@ -2277,7 +2285,7 @@ console.log('\ntest_studio_request_settings');
     return orig(url, opts);
   };
   try {
-    clickButton(gp, '계획 보기');
+    clickButton(dlg, '계획 보기');
     await settle(900);
   } finally { globalThis.fetch = orig; }
   check('the request carries the full parameter set',
@@ -2288,20 +2296,22 @@ console.log('\ntest_studio_request_settings');
         && planBody?.params?.ucPreset === 0
         && planBody?.params?.steps === 28,
         JSON.stringify(planBody?.params));
+  pressEscape(document);
+  await settle(200);
 }
 
-console.log('\ntest_studio_queue_view');
+console.log('\ntest_studio_batch_and_history');
 {
-  // The centre can show the batch as a live queue: one row per planned image
-  // with where it stands. Entry is the 큐 button (or 생성 시작 / the status
-  // line); the job payload is faked at the fetch seam.
+  // Results read BY JOB: the 배치 tab lists one section per batch (newest
+  // first, item grid inside), the 잡 히스토리 tab is the index into them, and
+  // a finished image opens big in the 1장 tab. No trailing 최근 작업 list.
   clickById(document, 'tab-studio');
   await settle(400);
   const job = {
-    id: 'job_smoke1', kind: 'studio_generate', state: 'running', error: null,
-    created_at: Date.now() / 1000 - 5, updated_at: Date.now() / 1000,
+    id: 'job_smoke1', kind: 'studio_generate', state: 'partial', error: null,
+    created_at: Date.now() / 1000 - 60, updated_at: Date.now() / 1000,
     payload: {
-      done: 1, total: 3, current: '하나-b-20260830-120000-1.png',
+      done: 1, total: 3,
       saved: ['studio/images/큐/하나-a-20260830-120000-1.png'],
       failed: [{ name: '하나-c-20260830-120000-1.png', error: '테스트 실패' }],
       items: [{ name: '하나-a-20260830-120000-1.png', scene: 'a' },
@@ -2309,7 +2319,7 @@ console.log('\ntest_studio_queue_view');
               { name: '하나-c-20260830-120000-1.png', scene: 'c' }],
       anlasBefore: null, anlasAfter: null,
     },
-    result: null,
+    result: { saved: 1, failed: 1, anlasSpent: 0 },
   };
   const orig = globalThis.fetch;
   globalThis.fetch = async (url, opts) => {
@@ -2322,24 +2332,33 @@ console.log('\ntest_studio_queue_view');
     return orig(url, opts);
   };
   try {
-    clickButton(document.querySelector('.panel.active .genpanel'), '큐');
+    const centre = () => document.querySelector('.panel.active .centrebody');
+    clickButton(document.querySelector('.panel.active .centretabs'), '잡 히스토리');
     await settle(600);
-    const centre = () => document.querySelector('.panel.active .left');
-    check('the queue view opens from the 큐 button',
-          /생성 큐/.test(centre()?.textContent || ''), (centre()?.textContent || '').slice(0, 120));
-    check('recent batches are listed', /최근 작업/.test(centre()?.textContent || ''));
-    const row = [...(centre()?.querySelectorAll('.chatitem') ?? [])]
+    const row = [...(centre()?.querySelectorAll('.jobrow') ?? [])]
       .find((r) => /job_smoke1/.test(r.textContent || ''));
+    check('the history tab lists the batch', !!row, (centre()?.textContent || '').slice(0, 200));
     row?.dispatchEvent(new window.Event('click', { bubbles: true }));
+    await settle(600);
+    check('picking one jumps to the 배치 tab',
+          [...document.querySelectorAll('.panel.active .centretabs .modebtn')]
+            .some((b) => b.classList.contains('on') && /배치/.test(b.textContent || '')));
+    const sec = centre()?.querySelector('.jobsec[data-job="job_smoke1"]');
+    check('the batch is a section of its own', !!sec, (centre()?.textContent || '').slice(0, 200));
+    const text = sec?.textContent || '';
+    check('the section reads state · progress in the header', /1\/3/.test(text), text.slice(0, 200));
+    check('a failed item carries its error in place', /테스트 실패/.test(text));
+    check('the trailing 최근 작업 list is gone', !/최근 작업/.test(centre()?.textContent || ''));
+    // A finished image opens big in the 1장 tab.
+    sec?.querySelector('.jobpic')?.dispatchEvent(new window.Event('click', { bubbles: true }));
     await settle(400);
-    const text = centre()?.textContent || '';
-    check('each planned image is a row with its state',
-          /완료/.test(text) && /생성 중/.test(text) && /실패/.test(text), text.slice(0, 300));
-    check('the failure carries its error', /테스트 실패/.test(text));
-    check('progress and 중단 ride the header', /1\/3/.test(text)
-          && !!findButton(centre(), '중단'));
+    check('a finished image opens in the 1장 tab',
+          [...document.querySelectorAll('.panel.active .centretabs .modebtn')]
+            .some((b) => b.classList.contains('on') && /1장/.test(b.textContent || ''))
+          && !!document.querySelector('.panel.active .bigpreview'),
+          (document.querySelector('.panel.active .centretabs')?.textContent || ''));
   } finally { globalThis.fetch = orig; }
-  clickButton(document.querySelector('.panel.active .left'), '← 나가기');
+  clickButton(document.querySelector('.panel.active .centretabs'), '1장');
   await settle(300);
 }
 
@@ -2632,6 +2651,13 @@ console.log('\ntest_studio_selector');
   await settle(1500);
 
   const text = () => document.querySelector('.panel.active')?.textContent || '';
+  // A folder click shows the folder grid first (4.11); choosing between
+  // candidates is one button deeper (4.13).
+  check('a folder opens as a browsable grid', !!document.querySelector('.panel.active .foldergrid'),
+        text().slice(0, 160));
+  check('the selector is one button away', !!findButton(document.querySelector('.panel.active .left'), '감정 사진 선택'));
+  clickButton(document.querySelector('.panel.active .left'), '감정 사진 선택');
+  await settle(1500);
   check('the selector replaces the plain grid under images/',
         !!document.querySelector('.selgrid'), text().slice(0, 160));
   check('candidates are grouped by the parsed emotion',

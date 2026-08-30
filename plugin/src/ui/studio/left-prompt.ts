@@ -81,8 +81,7 @@ export function buildLeftPrompt(mount: HTMLElement): void {
   const fragBtn = el('button', { class: 'ghost toolbtn', title: '조각 프롬프트 — 중앙에 구조 편집 화면을 엽니다' },
     [el('span', { text: '조각' }), fragBadge, fragErrBadge]);
   fragBtn.addEventListener('click', () => {
-    S.fragmentsView = true;
-    S.queueView = false;
+    S.centreMode = 'fragments';
     S.selectedFile = '';
     hub.drawCentre();
   });
@@ -120,8 +119,6 @@ function openStylePicker(): void {
     onSelect: (e) => selectStyle(e.id),
     onEdit: (e) => {
       S.selectedFile = e.id;
-      S.queueView = false;
-      S.fragmentsView = false;
       hub.drawCentre();
     },
     onDelete: async (e) => {
@@ -158,7 +155,7 @@ async function selectStyle(path: string): Promise<void> {
   pending = null;
   loadedDoc = null;
   hub.drawLeft();
-  hub.drawGen();
+  hub.drawCentre();
   checkUnresolved();
   hub.touchQuiet();
 }

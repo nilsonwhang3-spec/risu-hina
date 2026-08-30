@@ -27,8 +27,8 @@ function spec(): TreeSpec {
       if (node.kids.length) S.open.add(node.path);
       S.selected = node.path;
       S.selectedFile = '';
-      S.queueView = false;
-      S.fragmentsView = false;
+      // A folder click shows the folder's pictures in the centre (4.11).
+      S.centreMode = 'folder';
       hub.drawLeft();
       hub.drawCentre();
     },
