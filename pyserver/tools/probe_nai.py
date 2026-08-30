@@ -236,6 +236,9 @@ def main() -> int:
                     help="with --vibe, skip the director tools (~10 Anlas each)")
     ap.add_argument("--vibe", default="", help="path to a PNG (or a saved response ZIP): probe encode-vibe and "
                                               "the director tools with it. COSTS ANLAS (see docs/09 7, 7b)")
+    ap.add_argument("--charref", default="", help="path to a PNG (or a saved response ZIP): probe the DIRECTOR "
+                                                 "REFERENCE (character reference) request shape. Generation-priced "
+                                                 "(free at Opus tier); the balance is printed either side anyway")
     args = ap.parse_args()
 
     token, source = resolve_token(args.token, args.env_file)
@@ -384,6 +387,98 @@ def main() -> int:
                        "width": 832, "height": 1216, "prompt": "happy"}, raw_dir)
             b1 = anlas()
             print(f"       -> six director calls cost {b0 - b1} Anlas ({b0} -> {b1})")
+
+        if args.charref:
+            # The director reference (캐릭터 레퍼런스), request shape as MEASURED
+            # on 2026-08-30 (docs/09 §7d). Re-running re-checks every fact:
+            #   - director_reference_strength_values is the request name (the
+            #     PNG Comment echoes it back as director_reference_strengths);
+            #   - descriptions are V4ConditionInput objects, not strings;
+            #   - information_extracted must be EXACTLY 1.0 (the validator says
+            #     so in words);
+            #   - the image must be resized to the 1024x1536 / 1536x1024 bucket
+            #     first - other sizes 400 inside the internal /encode-director
+            #     service (the v5 hosts have no such service: v4.5-only);
+            #   - COSTS 5 ANLAS per accepted generation, Opus included.
+            import base64
+            import zipfile
+            import io as _io
+            print("\n[2e/3] director reference (character reference) - COSTS ~5 ANLAS per 200")
+
+            def anlas() -> int:
+                d = c.get("https://image.novelai.net/user/subscription").json()
+                t = d.get("trainingStepsLeft") or {}
+                return int(t.get("fixedTrainingStepsLeft", 0)) + int(t.get("purchasedTrainingSteps", 0))
+
+            def recipe_of(r: httpx.Response) -> dict:
+                """The applied parameters, read back out of the returned PNG."""
+                try:
+                    png = zipfile.ZipFile(_io.BytesIO(r.content)).read("image_0.png")
+                    from app import nai as _nai
+                    return (_nai.recipe(png) or {}).get("parameters") or {}
+                except Exception as e:  # noqa: BLE001
+                    print(f"       (recipe unreadable: {type(e).__name__}: {e})")
+                    return {}
+
+            seed_png = Path(args.charref).read_bytes()
+            if seed_png[:4].hex() == "504b0304":
+                seed_png = zipfile.ZipFile(_io.BytesIO(seed_png)).read("image_0.png")
+            # The bucket resize needs Pillow, which the release bundle never
+            # ships - this is a dev tool, so a missing install is an instruction
+            # rather than an import crash.
+            try:
+                from PIL import Image
+            except ImportError:
+                print("       Pillow is needed to fit the reference into the 1024x1536 bucket:")
+                print("         pyserver/.venv/Scripts/python.exe -m pip install pillow")
+                return 1
+            im = Image.open(_io.BytesIO(seed_png)).convert("RGB")
+            w, h = (1536, 1024) if im.width > im.height else (1024, 1536)
+            want = w / h
+            if im.width / im.height > want:
+                nw = int(im.height * want)
+                im = im.crop(((im.width - nw) // 2, 0, (im.width + nw) // 2, im.height))
+            else:
+                nh = int(im.width / want)
+                im = im.crop((0, (im.height - nh) // 2, im.width, (im.height + nh) // 2))
+            buf = _io.BytesIO()
+            im.resize((w, h), Image.LANCZOS).save(buf, "PNG")
+            img = base64.b64encode(buf.getvalue()).decode()
+            print(f"       reference fitted to {w}x{h}")
+            neg = "blurry"
+
+            director = {
+                "director_reference_images": [img],
+                "director_reference_descriptions": [
+                    {"caption": {"base_caption": "", "char_captions": []}, "legacy_uc": False}],
+                "director_reference_information_extracted": [1.0],
+                "director_reference_strength_values": [1.0],
+            }
+            params = {
+                "params_version": 3, "width": 832, "height": 1216, "scale": 5,
+                "sampler": "k_euler_ancestral", "steps": 23, "n_samples": 1,
+                "seed": 999, "noise_schedule": "karras", "cfg_rescale": 0,
+                "ucPreset": 0, "qualityToggle": True, "negative_prompt": neg,
+                "v4_prompt": {"caption": {"base_caption": "1girl, standing", "char_captions": []},
+                              "use_coords": False, "use_order": True},
+                "v4_negative_prompt": {"caption": {"base_caption": neg, "char_captions": []},
+                                       "legacy_uc": False},
+                **director,
+            }
+            model = args.model or "nai-diffusion-4-5-full"
+            a0 = anlas()
+            print(f"       Anlas before: {a0}")
+            r = probe(c, "POST", "https://image.novelai.net/ai/generate-image",
+                      {"input": "1girl, standing", "model": model, "action": "generate",
+                       "parameters": params}, raw_dir)
+            a1 = anlas()
+            print(f"       -> cost {a0 - a1} Anlas ({a0} -> {a1})")
+            if r is not None and r.status_code < 300:
+                applied = {k: v for k, v in recipe_of(r).items() if "director" in k.lower()}
+                print("       applied director fields in the PNG Comment:")
+                for k in sorted(applied):
+                    print(f"         {k}: {json.dumps(applied[k], ensure_ascii=False)[:140]}")
+            print("       any change from docs/09 §7d belongs in that file.")
 
         if not args.generate:
             print("\n[3/3] generation  SKIPPED (costs Anlas). Re-run with --generate --model <id>.")

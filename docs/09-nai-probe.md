@@ -291,6 +291,58 @@ safe to offer on a chosen asset: it cannot quietly alter the rest of the picture
 
 **Cost: 0 Anlas** at tier 3 (9257 → 9257), same as generation — and subject to the same §4 caveat.
 
+## 7d. Director reference (캐릭터 레퍼런스) — request shape, measured 2026-08-30
+
+Probed with `probe_nai.py --charref` plus an iteration script; every fact below was answered by the
+service (raw bodies in `data/nai-probe/CHARREF_*.zip`). §5b had only shown the *applied* field names
+in a PNG's `Comment`; the request shape differed in two places and the error messages were the map:
+
+1. **`director_reference_descriptions` is a list of `V4ConditionInput`, not strings.** A string 500s
+   with the Go struct name spelled out (`...V4DirectorReference.director_reference_descriptions of
+   type image.V4ConditionInput`). The accepted entry is the `v4_prompt` shape:
+   `{"caption": {"base_caption": "...", "char_captions": []}, "legacy_uc": false}`.
+2. **The strengths request field is `director_reference_strength_values`** — sending the Comment's
+   name (`director_reference_strengths`) counts as absent (`...matching lengths: images=1,
+   descriptions=1, informations=1, strengths=0`). The Comment echoes it back AS
+   `director_reference_strengths`. `0.6` accepted; a per-item float.
+3. **`director_reference_information_extracted` must be EXACTLY `[1.0]`** — the validator says so in
+   words ("must be EXACTLY 1.0 for each entry at this time").
+4. **The image must be fitted to the 1024×1536 (portrait) or 1536×1024 (landscape) bucket first.**
+   Raw base64 PNG is correct (no separate paid encode like vibe), but any other size — 832×1216
+   straight out of generation, 1024×1024, 448×448 — is a 400 from an internal encoder
+   ("Error encoding v4 director references: non-200 response: 400"). Both buckets measured 200.
+   A data: URL is a 500 (parsed, refused); metadata-stripped vs NAI-metadata PNG made no difference.
+5. **v4.5 only.** On `nai-diffusion-5-full` the backend's own error names the architecture:
+   `Post "http://invalid.prod-ai.svc.cluster.local:8081/encode-director": ... no such host` — the
+   per-model internal `/encode-director` service does not exist for v5. (That 400-vs-hostname
+   difference is also how we know the 4.5 encoder is real and our earlier images were the problem.)
+6. **Cost: 5 Anlas per accepted generation, tier 3 (Opus) included** — measured four times in a row
+   (9257→9252→…→9232), no server-side cache across identical references. This is a *certain* cost
+   like vibe encodes, so the studio's estimate must count it per image, not per batch.
+
+The accepted request, in full (only the director_* keys differ from §3's set):
+
+```json
+"parameters": { …the usual v4 set…,
+  "director_reference_images": ["<base64 PNG at 1024x1536 or 1536x1024>"],
+  "director_reference_descriptions": [{"caption": {"base_caption": "", "char_captions": []}, "legacy_uc": false}],
+  "director_reference_information_extracted": [1.0],
+  "director_reference_strength_values": [0.6]
+}
+```
+
+Unmeasured still: what `director_reference_secondary_strength_values` does (the name passes
+validation; the Comment shows `director_reference_secondary_strengths: null` either way), whether a
+description caption steers the output semantically (K4 was a 200; quality not compared), and
+multi-reference behaviour (all arrays must be the same length, so the shape is clear even though only
+length 1 was run).
+
+Consequence for the studio: the reference is fitted into the orientation-matching bucket **before it
+reaches the backend** — the panel resizes at upload time with a canvas (the browser has one; the
+release bundle has no Pillow), `nai.py` only *checks* the size (`png_size` is stdlib) and refuses
+with the bucket named, and `run_python`+Pillow remains the fallback for scripted work. The per-image
+5 Anlas rides the estimate as a certain cost, like vibe encodes.
+
 ## 8. What `app/nai.py` takes from this
 
 - Base `https://image.novelai.net`, bearer token from the `api_keys` row with provider `novelai`.
