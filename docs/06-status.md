@@ -20,8 +20,11 @@ reservations; plan `~/.claude/plans/zesty-dazzling-lagoon.md`) **+ §1-21 the th
 (tabs that read as tabs · characters picked in one place, casts gone · batch = queue only, results
 as history fold-outs · no window.prompt · draggable character folders · click-select folder grid ·
 token-chip grouping with 전체/그룹별 · the LRU blob cache fix · one keep-alive NAI client)
+**+ §1-22 the fourth field report** (character column as list→editor · references as picture
+cards with sliders, every upload a real bucketed PNG, bad references skipped not fatal · toasts ·
+foldable style editor · cheap preset delete)
 (gate ALL GREEN; the minor went up so the version gate trips when it ships). **Staged on test-server
-2026-08-30 evening AT §1-21 (= §1-19·§1-20 included): service stopped → backup `data-backup-20260830-s120`
+2026-08-30 night AT §1-22 (= §1-19~21 included): service stopped → backup `data-backup-20260830-s120`
 (11,358 files) → app/*.py + seeds/studio-image-ops.md + tools/probe_nai.py + requirements.in scp'd,
 msgpack 1.1.0 pip-installed into the bundled interpreter, the 0.11.0 dev bundle refreshed in
 `data/plugin/` (712,599 B served at `/plugin.js`) → `/health` 0.11.0 · 12 workspaces ·
@@ -50,6 +53,31 @@ mixed-cast multi-entry batch from the panel.** Released = **v0.10.0 BETA** (§1-
 `https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js`, and made `tools/bundle.py` write that file into the repository (included in the release commit). In the backend code only VERSION changed.
 
 → **First thing to do**: the user reinstalls `plugin/Risu.Hina.Plugin.js` into RisuAI **by hand, once** (the installed 0.1.0's update-url cannot be read because of CORS) → check that `+` appears from the next release on → verify M2 in real use (§5-2).
+
+## 1-22. 2026-08-30 - 0.11.0 (unreleased, continued): the fourth field report - the character column, real PNG references, toasts
+
+Ten items from the §1-21 staging, one commit (`8238afd`), gate green, restaged the same night
+(backup `data-backup-20260830-r4`, bundle 722,928 B at `/plugin.js`).
+
+- **Root cause of "1장 생성 계속 실패"**: the card's two character references were WebP files
+  under `.png` names (the picker's `accept` is a hint, not a guarantee; the vibe path uploaded
+  raw bytes), so `png_size` read 0x0 and `check_charref_png` refused EVERY generation. Now every
+  picked image goes through a canvas and comes out a real PNG (charrefs letterboxed into the
+  1024x1536 / 1536x1024 buckets), stored entries in the wrong shape are flagged 형식 불일치 with
+  a 맞추기 button and refitted on save, and the runner SKIPS a reference it cannot take - reason
+  kept in the job note - instead of failing the batch. Measured on staging: a job carrying the
+  WebP reference generated (done, 1 saved, 0 failed) with the skip noted. The `[이미지: …]`
+  fallback in the centre (item 3) was the same corrupt file failing to decode.
+- **The character column stays a column**: an open card REPLACES the list (← 목록 returns) with
+  [프롬프트 | 레퍼런스] sections; left-column textareas drop promptedit's 42vh floor (that floor,
+  meant for the centre's full-page editors, was what made the column and the style prompt
+  unshrinkable - items 2 and 9); the style editor folds behind 프롬프트 수정 (remembered).
+- **References redone**: a picture card per entry, ✕ ON the picture (the row-end ✕ had deleted
+  the wrong image), on/off, 강도/충실도 as sliders with the value beside; no filename, no price
+  line; 이미지 추가 is a button over a hidden input; [캐릭터 | 바이브] as a tab strip.
+- **Toasts**: notices land in the corner and never shove the centre under the pointer. Preset
+  delete drops the row from memory and redraws the column instead of re-listing, rebuilding
+  the centre and dry-planning (the "lag").
 
 ## 1-21. 2026-08-30 - 0.11.0 (unreleased, continued): the third field report - tabs, one place for characters, visible grouping
 
