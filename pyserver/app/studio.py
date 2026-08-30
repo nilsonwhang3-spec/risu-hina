@@ -811,14 +811,133 @@ def save_image(folder: str, name: str, png: bytes, sidecar: dict) -> dict:
 
 # --- one batch ----------------------------------------------------------------
 
+def refs_for_characters(paths: list) -> tuple[list[dict], list[dict]]:
+    """The reference images a set of character cards carries, resolved to
+    library paths. What rides a generation follows the CARDS (each card's
+    refMode and per-image enabled flags) - there is no separate switch."""
+    vibes: list[dict] = []
+    charrefs: list[dict] = []
+    for ch in paths or []:
+        try:
+            c = read_character(str(ch)) if isinstance(ch, str) else ch
+        except StudioError:
+            continue
+        if not c.get("path"):
+            continue
+        for v in c.get("vibe") or []:
+            if not v.get("file"):
+                continue
+            vibes.append({"path": f"{c['path']}/{v.get('file')}",
+                          "strength": float(v.get("strength", 0.6)),
+                          "informationExtracted": float(v.get("informationExtracted", 1.0))})
+        for cr in c.get("charref") or []:
+            if not cr.get("file"):
+                continue
+            charrefs.append({"path": f"{c['path']}/{cr.get('file')}",
+                             "mode": str(cr.get("mode") or "character"),
+                             "strength": float(cr.get("strength", 0.6)),
+                             "fidelity": float(cr.get("fidelity", 0.6))})
+    return vibes, charrefs
+
+
+def _entry_scene(entry: dict, spec: dict, cache: dict) -> dict:
+    """One entry's scene: an inline object, or a name looked up in the
+    entry's (or the spec's) scene preset. No scene at all is the plain
+    one-shot composition."""
+    sc = entry.get("scene")
+    if isinstance(sc, dict):
+        return {"name": str(sc.get("name") or ""), "prompt": str(sc.get("prompt") or ""),
+                "negativePrompt": str(sc.get("negativePrompt") or ""),
+                "width": sc.get("width") or None, "height": sc.get("height") or None}
+    if not sc:
+        return {"name": "", "prompt": "", "negativePrompt": "", "width": None, "height": None}
+    preset = str(entry.get("scenePreset") or spec.get("scenePreset") or "")
+    if not preset:
+        raise StudioError(f"씬 이름만으로는 부족합니다 — scenePreset 이 필요합니다: {sc}")
+    preset = _by_name("scenes", preset)
+    if preset not in cache:
+        cache[preset] = read_scenes(preset)["scenes"]
+    for s in cache[preset]:
+        if s["name"] == str(sc):
+            return s
+    raise StudioError(f"프리셋에 그런 씬이 없습니다: {preset} / {sc}")
+
+
+def _plan_entries(spec: dict) -> list[dict]:
+    """The v2 batch shape: an explicit LIST of (scene × characters × count)
+    entries, accumulated as reservations in the panel and submitted as one
+    job. Not a multiplication - each entry carries its own count and its own
+    character combination, so 씬 A 4장 + 씬 B 1장 with different casts is one
+    batch, consumed in order.
+    """
+    template = str(spec.get("template") or DEFAULT_TEMPLATE)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    table = fragments()
+    scene_cache: dict[str, list[dict]] = {}
+    # The {n} index counts per (character, emotion) so two entries that land
+    # on the same name key keep distinct filenames within one stamp.
+    counters: dict[tuple[str, str], int] = {}
+
+    out: list[dict] = []
+    for ix, entry in enumerate(spec.get("entries") or []):
+        if not isinstance(entry, dict):
+            raise StudioError(f"entries[{ix}] 는 객체여야 합니다")
+        scene = _entry_scene(entry, spec, scene_cache)
+        raw_chars = entry.get("characters")
+        chars = ([_by_name("characters", c) if isinstance(c, str) else c for c in raw_chars]
+                 if raw_chars is not None else list(spec.get("characters") or []))
+        cast = str(entry.get("cast") or "")
+        # The filename's {character}: the cast label, else the first card's
+        # own name (the 캐릭터명 form is gone - cards name their output).
+        character = cast
+        if not character and chars:
+            try:
+                character = read_character(str(chars[0]))["name"]
+            except StudioError:
+                character = ""
+        count = max(1, int(entry.get("count") or 1))
+        seed = entry.get("seed", spec.get("seed"))
+        for i in range(count):
+            one = {**spec, "characters": chars,
+                   "emotion": scene.get("prompt") or "",
+                   "negativeExtra": scene.get("negativePrompt") or ""}
+            pos, neg, captions = compose(one)
+            pos, missing = resolve_refs(pos, table)
+            neg, missing2 = resolve_refs(neg, table)
+            key = (character, scene["name"])
+            n = counters.get(key, 0)
+            counters[key] = n + 1
+            item: dict[str, Any] = {
+                "name": build_name(template, character=character,
+                                   emotion=scene["name"], index=n, stamp=stamp),
+                "scene": scene["name"],
+                "prompt": pos,
+                "negative": neg,
+                "charCaptions": captions,
+                "characters": [c if isinstance(c, str) else str(c.get("path") or "") for c in chars],
+                "cast": cast,
+                "entryIx": ix,
+                "seed": (int(seed) + i) if seed not in (None, "") else None,
+            }
+            if scene.get("width") and scene.get("height"):
+                item["size"] = {"width": scene["width"], "height": scene["height"]}
+            if missing or missing2:
+                item["unresolved"] = sorted(set(missing + missing2))
+            out.append(item)
+    return out
+
+
 def plan(spec: dict) -> list[dict]:
     """A batch, expanded into the images it will make.
 
-    One entry per (emotion x count). Expanded before anything is sent so the
-    caller can be told how many images and what they will be called before it
-    spends anything.
+    One entry per (emotion x count) - or, with `entries`, exactly the list
+    the caller queued (see _plan_entries). Expanded before anything is sent
+    so the caller can be told how many images and what they will be called
+    before it spends anything.
     """
     spec = normalize_spec(spec)
+    if spec.get("entries"):
+        return _plan_entries(spec)
     scenes: list[dict] = []
     if spec.get("scenes"):
         picked = spec["scenes"]

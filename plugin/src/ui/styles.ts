@@ -1111,6 +1111,16 @@ label.row { align-items: center; gap: 6px; }
 .stripcell img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .stripcell.on { outline: 2px solid #2563eb; }
 
+/* 배치: the scene cards (the reservation queue's face). */
+.scenegrid { display: grid; gap: 8px; margin-bottom: 8px; }
+.scenecard { border: 1px solid var(--borderc, #2b323f); border-radius: 8px; padding: 6px; }
+.scenecard.reserved { border-color: #2563eb; }
+.sceneface { min-height: 70px; display: flex; align-items: center; justify-content: center;
+             border-radius: 6px; overflow: hidden; background: var(--darkbg, #171a21); }
+.sceneface .jobpic img { max-height: 180px; object-fit: cover; }
+.scenefallback { font-size: 13px; opacity: .6; padding: 20px 4px; }
+.reservenum { min-width: 30px; }
+
 /* 배치: one section per JOB, newest first. */
 .jobsec { margin-bottom: 14px; border: 1px solid var(--borderc, #2b323f); border-radius: 8px; padding: 8px; }
 .jobsec.live { border-color: #2563eb; }

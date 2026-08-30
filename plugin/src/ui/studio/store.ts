@@ -118,20 +118,18 @@ export const hub = {
 
 /** What the generation card is set to. Persisted, so a reload keeps the run
  * setup. Defaults: steps 28 / CFG 5 are the web client's v4.5 values, rescale
- * 0.4 and quality tags OFF are this studio's own (user, 2026-08-30). */
+ * 0.4 and quality tags OFF are this studio's own (user, 2026-08-30).
+ * References follow the CARDS now (no switch), and the filename's
+ * {character} comes from the cast/card - the 캐릭터명 form is gone. */
 const GEN_KEY = 'hina.studioGen';
 export const gen = {
   model: 'nai-diffusion-4-5-full',
   scenePreset: '',
-  characterName: '',
   steps: 28, scale: 5, rescale: 0.4,
   sampler: 'k_euler_ancestral', schedule: 'karras',
   width: 832, height: 1216, count: 1, seed: '',
   quality: false, ucPreset: 0,
   folder: OUTPUT_ROOT,
-  // The one control that certainly spends Anlas, so it is off unless asked.
-  // References come from the ACTIVE character cards' presets now.
-  useReference: false,
   // The selector's regex. Empty means the backend's default; it is edited on
   // screen because it is the thing most likely to need adjusting.
   pattern: '',
@@ -159,7 +157,6 @@ export function spec(): Record<string, unknown> {
     model: gen.model,
     styles: activeOf('styles'),
     characters: activeOf('characters'),
-    characterName: gen.characterName,
     count: gen.count, folder: gen.folder,
     params: { steps: gen.steps, scale: gen.scale, cfg_rescale: gen.rescale,
               sampler: gen.sampler, noise_schedule: gen.schedule,
@@ -168,8 +165,113 @@ export function spec(): Record<string, unknown> {
   };
   if (gen.scenePreset) out.scenePreset = gen.scenePreset;
   if (gen.seed.trim()) out.seed = Number(gen.seed.trim());
-  if (gen.useReference) out.useReference = true;
   return out;
+}
+
+// --- casts (출연): a named character combination -----------------------------------
+//
+// A cast is a CLIENT concept: the server takes character card paths per
+// entry. It lives in studio/casts.json - a file, so the workspace shows it
+// and the agent can read and edit it like every other studio material.
+
+export interface Cast { id: string; name: string; color: string; characters: string[] }
+
+export const CAST_COLORS = ['#38bdf8', '#34d399', '#a78bfa', '#fbbf24', '#e879f9', '#818cf8', '#2dd4bf', '#a3e635'];
+const CASTS_PATH = 'studio/casts.json';
+let castsLoaded = false;
+export let casts: Cast[] = [];
+
+export async function loadCasts(force = false): Promise<Cast[]> {
+  if (castsLoaded && !force) return casts;
+  try {
+    const r = await state.readFile(CASTS_PATH);
+    const d = JSON.parse(r.content) as { casts?: Cast[] };
+    casts = (d.casts ?? []).filter((c) => c && c.id && c.name).map((c) => ({
+      id: String(c.id), name: String(c.name),
+      color: String(c.color || CAST_COLORS[0]),
+      characters: (c.characters ?? []).map(String),
+    }));
+  } catch {
+    casts = []; // no file yet is the ordinary first run
+  }
+  castsLoaded = true;
+  return casts;
+}
+
+export async function saveCasts(next: Cast[]): Promise<void> {
+  casts = next;
+  castsLoaded = true;
+  await state.uploadFile('casts.json',
+    JSON.stringify({ version: 1, casts }, null, 2), false, 'studio');
+  hub.touchQuiet();
+}
+
+export function castById(id: string): Cast | null {
+  return casts.find((c) => c.id === id) ?? null;
+}
+
+/** The cast the reservation pills add to; '' = the ACTIVE character cards. */
+export let activeCast = '';
+try { activeCast = localStorage.getItem('hina.studioCast') || ''; } catch { /* fine */ }
+export function setActiveCast(id: string): void {
+  activeCast = id;
+  try { localStorage.setItem('hina.studioCast', id); } catch { /* fine */ }
+}
+
+// --- reservations: the queue the 배치 tab accumulates -------------------------------
+//
+// reserves[presetPath][sceneName][castId] = count. THE map is the queue: not
+// a multiplication formula but entries piled up scene by scene, cast by cast,
+// each with its own count - and switching presets or casts never resets it
+// (the keys keep everything). 씬 생성 drains the WHOLE map into one job.
+
+export type ReserveMap = Record<string, Record<string, Record<string, number>>>;
+const RESERVE_KEY = 'hina.studioReserve';
+export let reserves: ReserveMap = {};
+try {
+  const saved = JSON.parse(localStorage.getItem(RESERVE_KEY) || 'null') as ReserveMap | null;
+  if (saved && typeof saved === 'object') reserves = saved;
+} catch { /* storage may be unavailable in the iframe */ }
+
+export function persistReserves(): void {
+  try { localStorage.setItem(RESERVE_KEY, JSON.stringify(reserves)); } catch { /* fine */ }
+}
+
+export function adjustReserve(preset: string, scene: string, cast: string, delta: number): void {
+  const p = (reserves[preset] ??= {});
+  const s = (p[scene] ??= {});
+  const next = Math.max(0, (s[cast] ?? 0) + delta);
+  if (next) s[cast] = next; else delete s[cast];
+  if (!Object.keys(s).length) delete p[scene];
+  if (!Object.keys(p).length) delete reserves[preset];
+  persistReserves();
+}
+
+export function setReserve(preset: string, scene: string, cast: string, count: number): void {
+  adjustReserve(preset, scene, cast, count - reserveOf(preset, scene, cast));
+}
+
+export function reserveOf(preset: string, scene: string, cast: string): number {
+  return reserves[preset]?.[scene]?.[cast] ?? 0;
+}
+
+export function sceneReserveTotal(preset: string, scene: string): number {
+  return Object.values(reserves[preset]?.[scene] ?? {}).reduce((a, b) => a + b, 0);
+}
+
+/** Every reservation, across every preset and cast - what 씬 생성 submits. */
+export function reserveTotal(): number {
+  let n = 0;
+  for (const p of Object.values(reserves)) {
+    for (const s of Object.values(p)) for (const c of Object.values(s)) n += c;
+  }
+  return n;
+}
+
+export function clearReserves(preset?: string): void {
+  if (preset) delete reserves[preset];
+  else reserves = {};
+  persistReserves();
 }
 
 /**

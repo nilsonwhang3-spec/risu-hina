@@ -65,7 +65,6 @@ export function openParamsDialog(): void {
   modelInput.addEventListener('change', () => {
     gen.model = modelInput.value.trim();
     persistGen();
-    refSync?.();
   });
   const checkBtn = el('button', { class: 'ghost tiny', text: '확인' }) as HTMLButtonElement;
   const checkOut = el('span', { class: 'hint' });
@@ -92,7 +91,8 @@ export function openParamsDialog(): void {
   const body = el('div', { class: 'genform' }, [
     field('모델', modelInput),
     el('div', { class: 'row' }, [checkBtn, checkOut]),
-    referenceToggle(),
+    // References follow the cards (refMode + per-image enabled) - no switch.
+    refNote(),
     two(numField('스텝', 'steps'), numField('CFG', 'scale')),
     two(numField('Rescale', 'rescale'), selField('샘플러', 'sampler', [
       'k_euler_ancestral', 'k_euler', 'k_dpmpp_2s_ancestral', 'k_dpmpp_2m_sde',
@@ -103,7 +103,7 @@ export function openParamsDialog(): void {
           { value: 3, label: 'Human Focus' }, { value: 4, label: '없음' }])),
     two(numField('가로', 'width'), numField('세로', 'height')),
     qualityToggle(),
-    two(textField('시드', 'seed', '비우면 랜덤'), textField('캐릭터명', 'characterName', '파일 이름에 들어갑니다 (비우면 생략)')),
+    textField('시드', 'seed', '비우면 랜덤'),
     textField('저장 폴더', 'folder', 'studio/images/…'),
     el('div', { class: 'row', style: { marginTop: '8px' } }, [planBtn]),
     out,
@@ -112,42 +112,22 @@ export function openParamsDialog(): void {
 }
 
 /**
- * Whether this batch uses the active characters' reference presets.
- *
- * Off by default and labelled with its price, because this is the one control
- * that certainly spends Anlas: an encode is 2 each, and v5 cannot do it at
- * all (docs/09 §7). The encoding is cached, so a second batch with the same
- * reference costs nothing. Strength and 충실도 live on each card.
+ * References ride per the CARDS now - each character card's refMode and its
+ * per-image enabled flags - so there is no switch here, only the cost said
+ * out loud: an encode is 2 Anlas (cached afterwards), a charref generation
+ * is 5 Anlas each, and a model that cannot take a reference skips it.
  */
-let refSync: (() => void) | null = null;
-
-function referenceToggle(): HTMLElement {
-  const box = el('input', { type: 'checkbox' }) as HTMLInputElement;
-  box.checked = gen.useReference;
-  const why = el('div', { class: 'hint' });
-  const sync = () => {
-    gen.useReference = box.checked;
-    const v5 = !gen.model.includes('diffusion-4');
-    // Both kinds count: a card carries charrefs OR vibes (refMode), and the
-    // listing already reports only the side that will ride.
-    const active = (S.cards.characters ?? []).filter((i) => i.enabled);
-    const charrefN = active.reduce((n, i) => n + (i.charref ?? 0), 0);
-    const vibeN = active.reduce((n, i) => n + (i.vibe ?? 0), 0);
-    why.textContent = v5
-      ? 'v5 모델은 레퍼런스를 지원하지 않습니다 — 4.5 를 고르세요.'
-      : !(charrefN + vibeN)
-        ? '활성 캐릭터 카드에 레퍼런스가 없습니다 — 카드를 열어 이미지를 올려 두세요.'
-        : (box.checked
-            ? `캐릭터 ${charrefN}장 (장당 5 Anlas) · 바이브 ${vibeN}장 (인코딩 2 Anlas, 캐시 시 0)`
-            : '');
-  };
-  box.addEventListener('change', () => { sync(); persistGen(); });
-  refSync = sync;
-  sync();
-  return el('div', {}, [
-    el('label', { class: 'row' }, [box, el('span', { text: '레퍼런스 사용 (활성 카드대로)' })]),
-    why,
-  ]);
+function refNote(): HTMLElement {
+  const v5 = !gen.model.includes('diffusion-4');
+  const active = (S.cards.characters ?? []).filter((i) => i.enabled);
+  const charrefN = active.reduce((n, i) => n + (i.charref ?? 0), 0);
+  const vibeN = active.reduce((n, i) => n + (i.vibe ?? 0), 0);
+  const text = v5 && (charrefN + vibeN)
+    ? '레퍼런스는 카드대로 실리지만, v5 모델은 지원하지 않아 건너뜁니다 — 4.5 를 고르세요.'
+    : (charrefN + vibeN)
+      ? `레퍼런스는 카드대로 실립니다 — 캐릭터 ${charrefN}장 (장당 5 Anlas) · 바이브 ${vibeN}장 (인코딩 2 Anlas, 캐시 시 0)`
+      : '활성 캐릭터 카드에 레퍼런스가 없습니다 — 카드를 열어 이미지를 올려 두면 그대로 실립니다.';
+  return el('div', { class: 'hint', style: { marginBottom: '6px' }, text });
 }
 
 function numField(label: string, key: 'steps' | 'scale' | 'rescale' | 'width' | 'height'): HTMLElement {
@@ -161,7 +141,7 @@ function numField(label: string, key: 'steps' | 'scale' | 'rescale' | 'width' | 
   return el('label', { class: 'field grow' }, [el('span', { text: label }), i]);
 }
 
-function textField(label: string, key: 'seed' | 'characterName' | 'folder',
+function textField(label: string, key: 'seed' | 'folder',
                    placeholder = ''): HTMLElement {
   const i = el('input', { value: gen[key], placeholder }) as HTMLInputElement;
   i.addEventListener('change', () => { gen[key] = i.value; persistGen(); });

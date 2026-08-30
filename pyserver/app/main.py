@@ -1037,7 +1037,11 @@ def h_studio_generate(arg: dict) -> dict:
 def h_studio_job(arg: dict) -> dict:
     job_id = str(arg.get("id") or "")
     if not job_id:
-        return {"jobs": studiojob.recent()}
+        try:
+            limit = max(1, min(100, int(arg.get("limit") or 10)))
+        except (TypeError, ValueError):
+            limit = 10
+        return {"jobs": studiojob.recent(limit)}
     job = studiojob.get(job_id)
     if job is None:
         raise ApiError(404, f"unknown job: {job_id}")

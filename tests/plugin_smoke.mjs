@@ -2362,6 +2362,79 @@ console.log('\ntest_studio_batch_and_history');
   await settle(300);
 }
 
+console.log('\ntest_studio_reservations');
+{
+  // The queue is a MAP: counts pile up per scene card (and per cast), a
+  // preset switch never resets them, and 씬 생성 drains everything into ONE
+  // job as explicit entries - each with its own count.
+  clickById(document, 'tab-studio');
+  await settle(600);
+  clickButton(document.querySelector('.panel.active .centretabs'), '배치');
+  await settle(500);
+  const centre = () => document.querySelector('.panel.active .centrebody');
+  // Pick the scene preset made earlier (스모크씬 개정).
+  centre()?.querySelector('.presetnow .chev')
+    ?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(500);
+  const pickModal = [...document.querySelectorAll('.modalback')].pop();
+  const presetRow = [...(pickModal?.querySelectorAll('.pickrow') ?? [])]
+    .find((r) => /스모크씬 개정/.test(r.textContent || ''));
+  [...(presetRow?.querySelectorAll('button') ?? [])].find((b) => (b.textContent || '') === '선택')
+    ?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(900);
+
+  const card = [...(centre()?.querySelectorAll('.scenecard') ?? [])]
+    .find((c) => /happy/.test(c.textContent || ''));
+  check('the preset unfolds into scene cards', !!card, (centre()?.textContent || '').slice(0, 200));
+  clickButton(card, '＋');
+  await settle(400);
+  clickButton([...(document.querySelectorAll('.panel.active .scenecard') ?? [])]
+    .find((c) => /happy/.test(c.textContent || '')), '＋');
+  await settle(400);
+  check('reservations pile up on the card and the submit counts them',
+        !!findButton(centre(), '씬 생성 2장'), (centre()?.textContent || '').slice(0, 300));
+  check('the queue summary lists the reservation', /예약 목록 — 총 2장/.test(centre()?.textContent || ''));
+
+  // Submit: one job, explicit entries.
+  const orig = globalThis.fetch;
+  let genBody = null;
+  globalThis.fetch = async (url, opts) => {
+    const u = String(url);
+    if (u.endsWith('/studio/generate') && opts?.body) {
+      genBody = JSON.parse(opts.body);
+      return new Response(JSON.stringify({ jobId: 'job_resv1', total: 2,
+        estimate: { images: 2, vibeEncodes: 0, anlasCertain: 0, note: '' } }), {
+        status: 200, headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    if (u.includes('/studio/job')) {
+      return new Response(JSON.stringify({
+        id: 'job_resv1', kind: 'studio_generate', state: 'done', error: null,
+        created_at: Date.now() / 1000, updated_at: Date.now() / 1000,
+        payload: { done: 2, total: 2, saved: [], failed: [], items: [], anlasBefore: null, anlasAfter: null },
+        result: { saved: 2, failed: 0, anlasSpent: 0 }, jobs: [],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    return orig(url, opts);
+  };
+  try {
+    clickButton(centre(), '씬 생성 2장');
+    await settle(1200);
+  } finally { globalThis.fetch = orig; }
+  check('the submit is ONE job of explicit entries',
+        Array.isArray(genBody?.entries) && genBody.entries.length === 1
+        && genBody.entries[0].scene === 'happy' && genBody.entries[0].count === 2
+        && /스모크씬 개정\.json$/.test(String(genBody.entries[0].scenePreset)),
+        JSON.stringify(genBody?.entries));
+  check('the spec no longer carries a characterName form value',
+        !('characterName' in (genBody || {})), JSON.stringify(Object.keys(genBody || {})));
+  await settle(800);
+  check('a drained queue reads zero',
+        !!findButton(document.querySelector('.panel.active .centrebody'), '씬 생성 0장')
+        || /씬 생성 0장/.test(document.querySelector('.panel.active .centrebody')?.textContent || ''),
+        (document.querySelector('.panel.active .centrebody')?.textContent || '').slice(0, 160));
+}
+
 console.log('\ntest_studio_stays_scoped');
 {
   // One switch = one meta write (+ the debounced dry plan). The old

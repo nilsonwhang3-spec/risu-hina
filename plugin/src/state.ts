@@ -531,10 +531,12 @@ export interface StudioJob {
   payload: {
     done: number; total: number; saved: string[];
     failed: { name: string; error: string }[];
-    /** The full expansion, in run order - what the queue view lists. */
-    items?: { name: string; scene?: string }[];
+    /** The full expansion, in run order - what the batch sections list. */
+    items?: { name: string; scene?: string; cast?: string }[];
     /** The image being drawn right now (running jobs only). */
     current?: string;
+    /** A run-time remark (e.g. references skipped on a v5 model). */
+    note?: string;
     anlasBefore: number | null; anlasAfter: number | null;
   } | null;
   result: { saved: number; failed: number; anlasSpent: number | null } | null;

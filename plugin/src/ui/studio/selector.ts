@@ -177,7 +177,9 @@ function exportButton(node: Folder): HTMLElement {
   b.addEventListener('click', async () => {
     b.disabled = true;
     try {
-      const r = await state.studio.exportSelected(node.path, gen.characterName, gen.pattern);
+      // No character prefix: the filenames in the folder already carry the
+      // cast/card name, and the export's canonical names key on the group.
+      const r = await state.studio.exportSelected(node.path, '', gen.pattern);
       hub.notice(`${r.folder} — 채택 ${r.used}, 수정 ${r.inpaint}, 빈 슬롯 ${r.empty}`, 'ok');
       hub.touchQuiet();
       await hub.refresh();

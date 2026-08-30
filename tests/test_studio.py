@@ -289,6 +289,45 @@ check("an estimate never claims generation is free",
 check("but names the certain cost when references are used",
       studio.estimate({"vibes": [{"path": "x"}, {"path": "y"}]}, 1)["anlasCertain"] == 4)
 
+print("\ntest_batch_plan_entries")
+# The v2 shape: the queue IS the list. Per-entry scenes, counts, and casts -
+# 씬 A 3장 + 씬 B 1장 with different characters is ONE job, in order, not a
+# (scenes x count) multiplication.
+# (the legacy 히나.json was folded into a folder card by the earlier plan's
+# listing call - entries address the migrated card)
+items = studio.plan({"styles": ["styles/수채화.md"], "characters": [], "entries": [
+    {"scenePreset": "scenes/기본.json", "scene": "happy", "count": 3,
+     "characters": ["characters/히나"], "cast": "히나 단독"},
+    {"scenePreset": "scenes/기본.json", "scene": "sad", "count": 1},
+    {"scene": {"name": "인라인", "prompt": "커스텀", "width": 640, "height": 640}, "count": 2},
+    {"scenePreset": "scenes/기본.json", "scene": "happy", "count": 1,
+     "characters": ["characters/히나"], "cast": "히나 단독"},
+]})
+check("entries expand to their own counts, in order",
+      [i["scene"] for i in items] == ["happy", "happy", "happy", "sad", "인라인", "인라인", "happy"],
+      str([i["scene"] for i in items]))
+check("the cast label fills the filename's {character}",
+      items[0]["name"].startswith("히나 단독-happy"), items[0]["name"])
+check("the cast and entry index ride each item for the results grid",
+      items[0]["cast"] == "히나 단독" and items[0]["entryIx"] == 0
+      and items[3]["entryIx"] == 1, json.dumps(items[0], ensure_ascii=False)[:200])
+check("an entry names its own characters",
+      items[0]["characters"] == ["characters/히나"] and items[3]["characters"] == [],
+      str(items[0]["characters"]))
+check("an inline scene carries its prompt and size",
+      "커스텀" in items[4]["prompt"] and items[4]["size"] == {"width": 640, "height": 640},
+      items[4]["prompt"])
+check("names stay unique across entries that share a name key",
+      len({i["name"] for i in items}) == len(items), str([i["name"] for i in items]))
+check("a preset scene's own size still wins",
+      next(i for i in items if i["scene"] == "happy")["size"]["width"] == 832,
+      str(next(i for i in items if i["scene"] == "happy").get("size")))
+try:
+    studio.plan({"entries": [{"scenePreset": "scenes/기본.json", "scene": "없는씬", "count": 1}]})
+    check("an unknown scene name is refused", False)
+except studio.StudioError as e:
+    check("an unknown scene name is refused, naming the preset", "없는씬" in str(e), str(e))
+
 print("\ntest_adoption_needs_no_copy")
 # The library and the workspace are one space: an image is adopted by its own
 # global path, checked (PNG-ness) rather than copied.

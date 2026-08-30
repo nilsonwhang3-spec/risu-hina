@@ -65,36 +65,32 @@ def _update(job_id: str, **fields: Any) -> None:
 
 
 def start(spec: dict) -> dict:
-    """Expand the batch, record it, and run it in the background."""
+    """Expand the batch, record it, and run it in the background.
+
+    References follow the CARDS now: each item rides the vibe/charref presets
+    of ITS OWN characters (a v2 `entries` batch mixes casts inside one job),
+    resolved at run time. Explicit `vibes`/`charrefs` lists on the spec are
+    still honored, and the legacy `useReference` key is accepted and ignored.
+    """
     spec = studio.normalize_spec(spec)
-    # 레퍼런스 사용: without explicit lists, the active characters' presets
-    # supply both kinds - each enabled entry, resolved against its card folder.
-    if spec.get("useReference") and not spec.get("vibes"):
-        vibes = []
-        charrefs = []
-        for ch in spec.get("characters") or []:
-            c = studio.read_character(str(ch)) if isinstance(ch, str) else ch
-            if not c.get("path"):
-                continue
-            for v in c.get("vibe") or []:
-                if not v.get("file"):
-                    continue
-                vibes.append({"path": f"{c['path']}/{v.get('file')}",
-                              "strength": float(v.get("strength", 0.6)),
-                              "informationExtracted": float(v.get("informationExtracted", 1.0))})
-            for cr in c.get("charref") or []:
-                if not cr.get("file"):
-                    continue
-                charrefs.append({"path": f"{c['path']}/{cr.get('file')}",
-                                 "mode": str(cr.get("mode") or "character"),
-                                 "strength": float(cr.get("strength", 0.6)),
-                                 "fidelity": float(cr.get("fidelity", 0.6))})
-        spec["vibes"] = vibes
-        if charrefs and not spec.get("charrefs"):
-            spec["charrefs"] = charrefs
+    spec.pop("useReference", None)
     items = studio.plan(spec)
     if not items:
         raise studio.StudioError("만들 이미지가 없습니다")
+
+    # The estimate sees the union of the cards' references (the encodes it
+    # names are per distinct image, which the run-time cache guarantees).
+    model = str(spec.get("model") or "")
+    est = dict(spec)
+    if not est.get("vibes") and not est.get("charrefs"):
+        union = sorted({c for i in items for c in (i.get("characters") or [])}) \
+            or [str(c) for c in spec.get("characters") or []]
+        vibes, charrefs = studio.refs_for_characters(union)
+        if vibes and nai.supports_vibe(model):
+            est["vibes"] = vibes
+        if charrefs and nai.supports_charref(model):
+            est["charrefs"] = charrefs
+
     job_id = "job_" + uuid.uuid4().hex[:12]
     now = db.now()
     payload = {"spec": spec, "items": items, "done": 0, "total": len(items),
@@ -106,8 +102,9 @@ def start(spec: dict) -> dict:
     threading.Thread(target=_run, args=(job_id,), daemon=True,
                      name=f"studio-{job_id}").start()
     return {"jobId": job_id, "total": len(items),
-            "estimate": studio.estimate(spec, len(items)),
-            "items": [{"name": i["name"], "scene": i.get("scene", "")} for i in items],
+            "estimate": studio.estimate(est, len(items)),
+            "items": [{"name": i["name"], "scene": i.get("scene", ""),
+                       "cast": i.get("cast", "")} for i in items],
             # References a scene names but no fragment collection provides.
             # Surfaced at the top so a batch is not started with a hole in
             # every prompt.
@@ -128,35 +125,60 @@ def _run(job_id: str) -> None:
     payload["anlasBefore"] = nai.anlas()
     _update(job_id, state="running", payload_json=payload)
 
-    # References are encoded once for the whole batch: each encode is 2 Anlas,
-    # so doing it per image would multiply the only certain cost by the batch
-    # size. The cache makes a repeat batch free as well. Director references
-    # (charrefs) are raw PNGs, no encode - but each GENERATION carrying one
-    # costs 5 Anlas (docs/09 §7d), which estimate() already said out loud.
-    vibes: list[dict] = []
-    charrefs: list[dict] = []
-    try:
-        for ref in spec.get("vibes") or []:
-            png = studio.read_bytes(str(ref["path"]))
-            enc, cached = nai.encode_vibe(
-                png, model, float(ref.get("informationExtracted", 1.0)), studio.root())
-            vibes.append(nai.vibe_entry(enc, float(ref.get("strength", 0.6)),
-                                        float(ref.get("informationExtracted", 1.0))))
-            log.info("studio vibe %s %s", ref["path"], "(cached)" if cached else "(encoded, 2 Anlas)")
-        for ref in spec.get("charrefs") or []:
+    # References ride per ITEM (each item's own characters), cached so a
+    # repeated image costs one encode: encode_vibe keys on (png, model,
+    # information_extracted) and the in-run caches below skip even the disk
+    # read. Director references (charrefs) are raw PNGs, no encode - but each
+    # GENERATION carrying one costs 5 Anlas (docs/09 §7d), which estimate()
+    # already said out loud. A model that cannot take a reference skips it
+    # with a note instead of refusing the batch.
+    explicit_vibes = spec.get("vibes") or []
+    explicit_charrefs = spec.get("charrefs") or []
+    vibe_cache: dict[tuple[str, float], dict] = {}
+    charref_cache: dict[str, str] = {}
+    skipped_refs = False
+
+    def item_refs(item: dict) -> tuple[list[dict], list[dict]]:
+        nonlocal skipped_refs
+        chars = item.get("characters")
+        if chars is None:  # a legacy expansion: every item shares the spec's cast
+            chars = [str(c) for c in spec.get("characters") or []]
+        vibe_specs, charref_specs = studio.refs_for_characters(chars)
+        if explicit_vibes:
+            vibe_specs = explicit_vibes
+        if explicit_charrefs:
+            charref_specs = explicit_charrefs
+        vibes: list[dict] = []
+        charrefs: list[dict] = []
+        if vibe_specs:
+            if not nai.supports_vibe(model):
+                skipped_refs = True
+            else:
+                for ref in vibe_specs:
+                    key = (str(ref["path"]), float(ref.get("informationExtracted", 1.0)))
+                    if key not in vibe_cache:
+                        png = studio.read_bytes(key[0])
+                        enc, cached = nai.encode_vibe(png, model, key[1], studio.root())
+                        vibe_cache[key] = {"enc": enc}
+                        log.info("studio vibe %s %s", key[0], "(cached)" if cached else "(encoded, 2 Anlas)")
+                    vibes.append(nai.vibe_entry(vibe_cache[key]["enc"],
+                                                float(ref.get("strength", 0.6)), key[1]))
+        if charref_specs:
             if not nai.supports_charref(model):
-                raise nai.NaiError(f"캐릭터 레퍼런스는 v4.5 모델에서만 됩니다 (지금 {model})")
-            png = studio.read_bytes(str(ref["path"]))
-            nai.check_charref_png(png, str(ref["path"]))
-            import base64 as _b64
-            charrefs.append({"image": _b64.b64encode(png).decode(),
-                             "mode": str(ref.get("mode") or "character"),
-                             "strength": float(ref.get("strength", 0.6)),
-                             "fidelity": float(ref.get("fidelity", 0.6))})
-    except Exception as e:  # noqa: BLE001
-        payload["anlasAfter"] = nai.anlas()
-        _update(job_id, state="error", error=str(e), payload_json=payload)
-        return
+                skipped_refs = True
+            else:
+                import base64 as _b64
+                for ref in charref_specs:
+                    path = str(ref["path"])
+                    if path not in charref_cache:
+                        png = studio.read_bytes(path)
+                        nai.check_charref_png(png, path)
+                        charref_cache[path] = _b64.b64encode(png).decode()
+                    charrefs.append({"image": charref_cache[path],
+                                     "mode": str(ref.get("mode") or "character"),
+                                     "strength": float(ref.get("strength", 0.6)),
+                                     "fidelity": float(ref.get("fidelity", 0.6))})
+        return vibes, charrefs
 
     for item in items:
         with _lock:
@@ -184,12 +206,17 @@ def _run(job_id: str) -> None:
             # with use_coords on would tell the model about positions nobody set.
             p["use_coords"] = any(c.get("centers") for c in item["charCaptions"])
         try:
+            vibes, charrefs = item_refs(item)
+            if skipped_refs and "note" not in payload:
+                payload["note"] = "이 모델은 레퍼런스를 지원하지 않아 카드의 레퍼런스를 건너뜁니다."
             png = nai.generate(model, item["prompt"], item["negative"], p,
                                vibes or None, charrefs or None)
             saved = studio.save_image(folder, item["name"], png, {
                 "scene": item.get("scene"), "prompt": item["prompt"],
                 "negative": item["negative"], "model": model, "seed": item.get("seed"),
-                "styles": spec.get("styles"), "characters": spec.get("characters"),
+                "styles": spec.get("styles"),
+                "characters": item.get("characters") or spec.get("characters"),
+                "cast": item.get("cast") or "",
                 "scenePreset": spec.get("scenePreset"),
             })
             payload["saved"].append(saved["path"])
