@@ -13,10 +13,26 @@ import { S, hub, msg, cardStem, renameCardFile } from './store';
 import { splitFront, joinFront } from './stylefile';
 import { editorHead } from './editors';
 
+export interface CharEditorOpts {
+  /** 'centre' (default): ← 목록 head with the path. 'inline': a slim control
+   * row, for hosting the editor inside the left character view. */
+  chrome?: 'centre' | 'inline';
+  /** After a successful save; `dir` is the (possibly renamed) card folder.
+   * Default: select the card in the centre and re-read the area. */
+  onSaved?: (dir: string) => void;
+  /** After a successful delete. Default: clear the centre selection. */
+  onDeleted?: () => void;
+}
+
+/** The centre-pane wrapper (kept for the selectedFile dispatch). */
 export function drawCharacterEditor(dir: string): void {
   if (!S.viewMount) return;
   clear(S.viewMount);
-  const viewMount = S.viewMount;
+  S.viewMount.appendChild(characterEditor(dir, { chrome: 'centre' }));
+}
+
+export function characterEditor(dir: string, opts: CharEditorOpts = {}): HTMLElement {
+  const rootEl = el('div', { class: 'charedit' });
   const isNew = !dir;
   const out = el('div', { class: 'hint' });
 
@@ -233,7 +249,8 @@ export function drawCharacterEditor(dir: string): void {
                                         fidelity: v.fidelity, mode: v.mode, enabled: v.enabled })),
       }, null, 2), false, target);
       hub.notice(`캐릭터 “${nm}” 를 저장했습니다.`, 'ok');
-      S.selectedFile = target;
+      if (opts.onSaved) opts.onSaved(target);
+      else S.selectedFile = target;
       await hub.refreshArea('characters');
     } catch (e) {
       out.textContent = msg(e);
@@ -245,7 +262,8 @@ export function drawCharacterEditor(dir: string): void {
     if (!dir) return;
     try {
       await state.deleteFile(dir);
-      S.selectedFile = '';
+      if (opts.onDeleted) opts.onDeleted();
+      else S.selectedFile = '';
       await hub.refreshArea('characters');
     } catch (e) { out.textContent = msg(e); }
   });
@@ -283,8 +301,13 @@ export function drawCharacterEditor(dir: string): void {
     charBtn.style.display = 'none';
   }
 
-  viewMount.append(
-    editorHead(dir || '새 캐릭터', [isNew ? null : del, save]),
+  const head = (opts.chrome ?? 'centre') === 'centre'
+    ? editorHead(dir || '새 캐릭터', [isNew ? null : del, save])
+    : el('div', { class: 'row', style: { marginBottom: '6px', justifyContent: 'flex-end', gap: '6px' } },
+        [isNew ? null : del, save]);
+
+  rootEl.append(
+    head,
     field('이름', name, '카드 폴더 이름과 프롬프트 조립에 쓰입니다'),
     el('div', { class: 'row', style: { marginBottom: '8px' } }, [
       el('label', { class: 'row' }, [enabledBox, el('span', { text: '활성 (생성에 실림)' })]),
@@ -357,4 +380,5 @@ export function drawCharacterEditor(dir: string): void {
       } catch { /* a fresh card has no preset yet */ }
     }).catch(() => { /* same */ });
   }
+  return rootEl;
 }

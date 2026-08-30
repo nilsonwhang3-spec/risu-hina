@@ -353,23 +353,32 @@ def _character_listing() -> list[dict]:
     if not base.is_dir():
         return out
     sproot = files._root(SCOPE)
-    for p in sorted(base.iterdir()):
-        if p.name.startswith("."):
-            continue
-        if not p.is_dir():
-            continue  # loose files (a stray png, an unmigratable json) are not cards
-        rel = p.relative_to(sproot).as_posix()
-        try:
-            c = read_character(rel)
-        except StudioError:
-            continue
-        out.append({
-            "path": rel, "name": c["name"], "folder": "",
-            "description": c["description"],
-            "enabled": c["enabled"], "order": c["order"],
-            "vibe": len(c["vibe"]), "charref": len(c["charref"]),
-            "position": c["position"],
-        })
+
+    # A card is a directory with a prompt.md; anything else that is a
+    # directory is a GROUPING folder and is walked into, so characters can be
+    # sorted into studio/characters/<폴더>/<카드>. `folder` is the grouping
+    # path ('' at the top), which is what the panel groups the list by.
+    def walk(d, folder: str) -> None:
+        for p in sorted(d.iterdir()):
+            if p.name.startswith(".") or not p.is_dir():
+                continue  # loose files (a stray png, an unmigratable json) are not cards
+            rel = p.relative_to(sproot).as_posix()
+            if not (p / "prompt.md").is_file():
+                walk(p, (folder + "/" + p.name).lstrip("/"))
+                continue
+            try:
+                c = read_character(rel)
+            except StudioError:
+                continue
+            out.append({
+                "path": rel, "name": c["name"], "folder": folder,
+                "description": c["description"],
+                "enabled": c["enabled"], "order": c["order"],
+                "vibe": len(c["vibe"]), "charref": len(c["charref"]),
+                "position": c["position"],
+            })
+
+    walk(base, "")
     return out
 
 

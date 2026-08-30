@@ -10,15 +10,29 @@ import { splitFront, joinFront } from './stylefile';
 
 export function editorHead(path: string, extra: (HTMLElement | null)[] = []): HTMLElement {
   const back = el('button', { class: 'ghost tiny', text: '← 목록' });
-  back.addEventListener('click', () => { S.selectedFile = ''; hub.drawCards(); hub.drawCentre(); });
+  back.addEventListener('click', () => { S.selectedFile = ''; hub.drawLeft(); hub.drawCentre(); });
   return el('div', { class: 'row', style: { marginBottom: '8px' } }, [
     back, el('span', { class: 'sectiontitle grow', text: path }), ...extra,
   ]);
 }
 
-/** A style or fragment .md: front-matter fields above the body. */
+export interface CardEditorOpts {
+  /** 'centre' (default): ← 목록 head with the path. 'inline': slim controls,
+   * for hosting inside the fragment organizer. */
+  chrome?: 'centre' | 'inline';
+  /** After a successful save; `path` is the (possibly renamed) file. */
+  onSaved?: (path: string) => void;
+  onDeleted?: () => void;
+}
+
+/** The centre-pane wrapper (kept for the selectedFile dispatch). */
 export function drawCardEditor(path: string): void {
   if (!S.viewMount) return;
+  S.viewMount.appendChild(cardEditor(path, { chrome: 'centre' }));
+}
+
+/** A style or fragment .md: front-matter fields above the body. */
+export function cardEditor(path: string, opts: CardEditorOpts = {}): HTMLElement {
   const isStyle = path.startsWith('studio/styles/');
   const out = el('div', { class: 'hint' });
   const name = el('input', { placeholder: '(파일 이름)' }) as HTMLInputElement;
@@ -35,7 +49,8 @@ export function drawCardEditor(path: string): void {
   armed(del, '삭제', '정말 지울까요?', async () => {
     try {
       await state.deleteFile(path);
-      S.selectedFile = '';
+      if (opts.onDeleted) opts.onDeleted();
+      else S.selectedFile = '';
       await hub.refreshArea(path.split('/')[1]);
     } catch (e) { out.textContent = msg(e); }
   });
@@ -59,7 +74,11 @@ export function drawCardEditor(path: string): void {
       if (name.value.trim()) {
         try {
           const moved = await renameCardFile(path, name.value.trim());
-          if (moved !== path) { path = moved; S.selectedFile = moved; }
+          if (moved !== path) {
+            if (opts.onSaved) opts.onSaved(moved);
+            else S.selectedFile = moved;
+            path = moved;
+          }
         } catch (e) { out.textContent = '이름은 저장됐지만 파일명 변경은 실패했습니다: ' + msg(e); }
       }
       if (!out.textContent) out.textContent = '저장했습니다.';
@@ -69,8 +88,12 @@ export function drawCardEditor(path: string): void {
     } finally { save.disabled = false; }
   });
 
-  S.viewMount.appendChild(el('div', {}, [
-    editorHead(path, [del, save]),
+  const head = (opts.chrome ?? 'centre') === 'centre'
+    ? editorHead(path, [del, save])
+    : el('div', { class: 'row', style: { marginBottom: '6px', justifyContent: 'flex-end', gap: '6px' } }, [del, save]);
+
+  const rootEl = el('div', {}, [
+    head,
     el('label', { class: 'field' }, [el('span', { text: '이름' }), name]),
     el('label', { class: 'field' }, [el('span', { text: '설명' }), desc]),
     isStyle ? el('div', { class: 'row', style: { marginBottom: '8px' } }, [
@@ -79,7 +102,7 @@ export function drawCardEditor(path: string): void {
     ]) : null,
     el('label', { class: 'field' }, [el('span', { text: isStyle ? '본문 (## positive / ## negative)' : '본문' }), body]),
     out,
-  ]));
+  ]);
 
   void state.readFile(path).then((r) => {
     const { meta, body: b } = splitFront(r.content);
@@ -89,6 +112,7 @@ export function drawCardEditor(path: string): void {
     order.value = meta.get('order') ?? '100';
     body.value = b;
   }).catch((e) => { out.textContent = msg(e); });
+  return rootEl;
 }
 
 /** Scene presets shown raw on request ('원본 JSON') instead of as the form. */

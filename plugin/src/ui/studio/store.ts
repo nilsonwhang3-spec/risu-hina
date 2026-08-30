@@ -33,8 +33,7 @@ export interface Folder {
 /** The studio's mutable state. One object so every module sees one truth. */
 export const S = {
   /** Mount points, owned by index.ts and set once per build. */
-  cardsMount: null as HTMLElement | null,
-  treeMount: null as HTMLElement | null,
+  leftMount: null as HTMLElement | null,
   genMount: null as HTMLElement | null,
   viewMount: null as HTMLElement | null,
   noticeMount: null as HTMLElement | null,
@@ -50,12 +49,28 @@ export const S = {
   /** Fragment references no fragment provides, from the last dry plan. */
   unresolvedRefs: [] as string[],
 
+  /** The left column's tab (프롬프트 · OUTPUT) and, inside 프롬프트, whether
+   * the character view has taken over the column. */
+  leftTab: 'prompt' as 'prompt' | 'output',
+  leftView: 'main' as 'main' | 'characters',
+  /** The character card expanded in the left character view. */
+  charOpen: '',
+  /** The centre shows the fragment organizer while this is on. */
+  fragmentsView: false,
+
   status: null as StudioStatus | null,
   jobId: '',
   /** The centre shows the live queue instead of a folder while this is on. */
   queueView: false,
   queueJob: null as StudioJob | null,
 };
+try {
+  const t = localStorage.getItem('hina.studioLeftTab');
+  if (t === 'output') S.leftTab = 'output';
+} catch { /* storage may be unavailable in the iframe */ }
+export function persistLeftTab(): void {
+  try { localStorage.setItem('hina.studioLeftTab', S.leftTab); } catch { /* fine */ }
+}
 
 /**
  * The cross-module entry points. index.ts registers the real functions at
@@ -63,10 +78,13 @@ export const S = {
  * "redraw the cards" before the tab ever rendered should get.
  */
 export const hub = {
-  drawCards: () => { /* registered by index */ },
-  drawTree: () => { /* registered by index */ },
+  drawLeft: () => { /* registered by index */ },
   drawGen: () => { /* registered by gen */ },
   drawCentre: () => { /* registered by index */ },
+  /** Patch count badges (활성 캐릭터, 미해결 조각) in place - called from
+   * debounced checks so a keystroke in an editor never rebuilds the column
+   * under the caret. */
+  syncBadges: () => { /* registered by the left prompt view */ },
   notice: (_text: string, _kind: 'ok' | 'err' | '' = '') => { /* registered by index */ },
   refresh: async () => { /* registered by index */ },
   refreshArea: async (_area: string) => { /* registered by index */ },
@@ -147,7 +165,7 @@ export function checkUnresolved(): void {
     } catch {
       S.unresolvedRefs = [];
     }
-    hub.drawCards();
+    hub.syncBadges();
   }, 800);
 }
 
@@ -157,12 +175,50 @@ export function cardStem(name: string): string {
   return name.replace(/[<>:"/\\|?*]/g, '').trim();
 }
 
-/** The first `stem`, `stem-2`, `stem-3` … not taken in this area's listing. */
-export function freeCardPath(area: string, stem: string, suffix: string): string {
+/** The first `stem`, `stem-2`, `stem-3` … not taken in this area's listing.
+ * `folder` places the card under `studio/<area>/<folder>/`. */
+export function freeCardPath(area: string, stem: string, suffix: string, folder = ''): string {
   const taken = new Set((S.cards[area] ?? []).map((i) => i.path));
+  const base = `studio/${area}` + (folder ? `/${folder}` : '');
   for (let n = 1; ; n++) {
-    const p = `studio/${area}/${stem}${n > 1 ? `-${n}` : ''}${suffix}`;
+    const p = `${base}/${stem}${n > 1 ? `-${n}` : ''}${suffix}`;
     if (!taken.has(p)) return p;
+  }
+}
+
+/** Ask for a name and create one card in `area` (optionally in a grouping
+ * folder). Returns the new card's path, or '' when nothing was made. */
+export async function newCard(area: string, folder = ''): Promise<string> {
+  // The name comes first: it is the reference key (fragments), the list row,
+  // and the filename - a timestamp slug was a code nobody could read back.
+  const raw = window.prompt('새 카드 이름');
+  const nm = (raw ?? '').trim();
+  if (!nm) return '';
+  const stem = cardStem(nm);
+  if (!stem) { hub.notice('그 이름으로는 파일을 만들 수 없습니다.', 'err'); return ''; }
+  try {
+    let path: string;
+    if (area === 'characters') {
+      path = freeCardPath(area, stem, '', folder);
+      await state.uploadFile('prompt.md', `---\nname: ${nm}\nenabled: false\n---\n## 프롬프트\n`,
+        false, path);
+    } else if (area === 'scenes') {
+      path = freeCardPath(area, stem, '.json', folder);
+      await state.uploadFile(path.split('/').pop()!, JSON.stringify(
+        { version: 1, name: nm, scenes: [{ name: 'happy', prompt: '', negativePrompt: '', width: 0, height: 0 }] },
+        null, 2), false, path.slice(0, path.lastIndexOf('/')));
+    } else {
+      path = freeCardPath(area, stem, '.md', folder);
+      const front = area === 'styles'
+        ? `---\nname: ${nm}\nenabled: false\n---\n`
+        : `---\nname: ${nm}\n---\n`;
+      await state.uploadFile(path.split('/').pop()!, front, false, path.slice(0, path.lastIndexOf('/')));
+    }
+    await hub.refreshArea(area);
+    return path;
+  } catch (e) {
+    hub.notice('만들지 못했습니다: ' + msg(e), 'err');
+    return '';
   }
 }
 

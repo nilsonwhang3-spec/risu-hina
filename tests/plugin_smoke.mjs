@@ -1973,23 +1973,46 @@ console.log('\ntest_open_a_chat_risuai_does_not_have_open');
 
 console.log('\ntest_studio_tab');
 {
-  // The library, not a bot: the tree lists the studio's own areas and none of
-  // the workspace's, which is the whole point of the second scope.
+  // The library, not a bot: the left column is two tabs (프롬프트 · OUTPUT)
+  // over the generation card, and Hina sits beside it.
   clickById(document, 'tab-studio');
   await settle(900);
   const text = () => document.querySelector('.panel.active')?.textContent || '';
-  check('the studio tab renders its own tree', !!document.querySelector('.panel.active .filetree'));
-  check('it lists the library areas, not the workspace',
+  check('the studio tab renders its left column', !!document.querySelector('.panel.active .filetree'));
+  const tabsBar = () => document.querySelector('.panel.active .studiotabs');
+  check('the left column is two tabs',
+        /프롬프트/.test(tabsBar()?.textContent || '') && /OUTPUT/.test(tabsBar()?.textContent || ''),
+        (tabsBar()?.textContent || '').slice(0, 80));
+  check('it lists the library materials, not the workspace',
         /스타일 프롬프트/.test(text()) && !/업로드/.test(text()), text().slice(0, 200));
-  // Two halves: what you write above the rule, what came back below it.
-  check('materials and output are separated by a rule',
-        !!document.querySelector('.panel.active .treesep'));
-  check('the output half is named for what it is', /output/.test(text()));
   check('and Hina is beside it', !!document.querySelector('.panel.active .right-inner'));
 
-  // The generation card sits under the tree because nothing on it changes
-  // inside one batch. With no NovelAI token it must say so and stay usable -
-  // sorting and adopting need no token at all.
+  // The generated side is the OUTPUT tab, drawn by the SAME tree component as
+  // the file tab (the two trees used to be different shapes with different CSS).
+  clickButton(tabsBar(), 'OUTPUT');
+  await settle(300);
+  check('the output tree is behind the OUTPUT tab',
+        [...document.querySelectorAll('.panel.active .explorer .treebranch')]
+          .some((b) => /output/.test(b.textContent || '')),
+        text().slice(0, 160));
+  clickButton(tabsBar(), '프롬프트');
+  await settle(300);
+
+  // Both rails collapse to a slim strip: the studio is the crowded tab, and
+  // the centre is where the work happens.
+  clickButton(tabsBar(), '◂');
+  await settle(200);
+  const split = document.querySelector('.panel.active .split');
+  check('the left rail collapses', !!split?.classList.contains('lcollapse'), split?.className);
+  const railOpen = split?.querySelector('.panelrail.lrail button');
+  check('a slim rail stays to reopen it', !!railOpen);
+  railOpen?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(200);
+  check('and expands back', !split?.classList.contains('lcollapse'), split?.className);
+
+  // The generation card sits under the prompt tab because nothing on it
+  // changes inside one batch. With no NovelAI token it must say so and stay
+  // usable - sorting and adopting need no token at all.
   await settle(600);
   const gen = document.querySelector('.genpanel');
   check('the generation card is in the left column', !!gen);
@@ -2002,7 +2025,9 @@ console.log('\ntest_studio_tab');
 
 console.log('\ntest_studio_cards');
 {
-  // A style is a CARD: a row with its own on/off, edited in the centre pane.
+  // ONE style rides. The dropdown picks it (the agent-preset idiom: compact
+  // current row, 선택 · 수정 · 삭제 · 추가 behind the ›), and the picked
+  // style's 긍정/부정 unfold in the column and save as you type.
   const auth = { Authorization: 'Bearer plugin-smoke-token', 'Content-Type': 'application/json' };
   await fetch(backend.url + '/files/upload', {
     method: 'POST', headers: auth,
@@ -2015,40 +2040,59 @@ console.log('\ntest_studio_cards');
   clickById(document, 'tab-studio');
   await settle(1100);
 
-  const rows = [...document.querySelectorAll('.panel.active .pickrow')];
-  const styleRow = rows.find((r) => /스모크스타일/.test(r.textContent || ''));
-  check('a style renders as a card row', !!styleRow,
-        (document.querySelector('.panel.active .tree')?.textContent || '').slice(0, 200));
-  const toggle = styleRow?.querySelector('input[type=checkbox]');
-  check('the card row carries an enable toggle', !!toggle);
-  check('an absent enabled means OFF (dimmed)', styleRow?.classList.contains('off'),
-        styleRow?.className);
-
-  toggle.checked = true;
-  toggle?.dispatchEvent(new window.Event('change', { bubbles: true }));
-  await settle(1400);
+  const explorer = () => document.querySelector('.panel.active .explorer');
+  const chev = explorer()?.querySelector('.presetnow .chev');
+  check('the style dropdown is a compact row with a chevron', !!chev,
+        (explorer()?.textContent || '').slice(0, 160));
+  chev?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(600);
+  const modalRow = () => [...document.querySelectorAll('.modalback .pickrow')]
+    .find((r) => /스모크스타일/.test(r.textContent || ''));
+  check('the list opens in a modal with the style', !!modalRow(),
+        (document.querySelector('.modalback')?.textContent || '').slice(0, 200));
+  const sel = [...(modalRow()?.querySelectorAll('button') ?? [])]
+    .find((b) => (b.textContent || '') === '선택');
+  sel?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(1200);
   const read = await (await fetch(backend.url
     + '/files/read?path=' + encodeURIComponent('studio/styles/스모크스타일.md'), { headers: auth })).json();
-  check('the toggle writes the card front matter', /enabled: true/.test(read.content || ''),
+  check('selecting writes the card front matter', /enabled: true/.test(read.content || ''),
         (read.content || '').slice(0, 80));
   check('and the generation card counts it as active',
-        /활성 카드: 스타일 [1-9]/.test(document.querySelector('.genpanel')?.textContent || ''),
+        /활성 카드: 스타일 1/.test(document.querySelector('.genpanel')?.textContent || ''),
         (document.querySelector('.genpanel')?.textContent || '').slice(0, 160));
 
-  const row2 = [...document.querySelectorAll('.panel.active .pickrow')]
-    .find((r) => /스모크스타일/.test(r.textContent || ''));
-  row2?.dispatchEvent(new window.Event('click', { bubbles: true }));
-  await settle(600);
-  check('clicking the card opens the centre editor',
-        !!document.querySelector('.panel.active .left textarea.promptedit'),
-        (document.querySelector('.panel.active .left')?.textContent || '').slice(0, 120));
-  check('the editor shows the front matter as fields',
-        [...document.querySelectorAll('.panel.active .left input')]
-          .some((i) => i.value === '스모크스타일'));
+  // The picked style is edited in place - 긍정/부정 split, debounced save.
+  const pos = explorer()?.querySelector('.styleedit textarea');
+  check('the picked style unfolds 긍정/부정 in the column',
+        explorer()?.querySelectorAll('.styleedit textarea').length === 2,
+        (explorer()?.textContent || '').slice(0, 200));
+  if (pos) {
+    pos.value = '스모크, 최고 화질';
+    pos.dispatchEvent(new window.Event('input', { bubbles: true }));
+    await settle(1700);
+    const saved = await (await fetch(backend.url
+      + '/files/read?path=' + encodeURIComponent('studio/styles/스모크스타일.md'), { headers: auth })).json();
+    check('typing saves the style body (## positive)',
+          /## positive[\s\S]*스모크, 최고 화질/.test(saved.content || ''),
+          (saved.content || '').slice(0, 160));
+    check('and keeps the front matter', /name: 스모크스타일/.test(saved.content || ''),
+          (saved.content || '').slice(0, 160));
+  }
 
-  // The old single-select style/character pickers are gone (the remaining
-  // selects are the scene preset and the 요청 설정 parameter dropdowns).
-  check('no style/character pickers remain',
+  // 수정 behind the chevron opens the full centre editor.
+  explorer()?.querySelector('.presetnow .chev')?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(500);
+  const edit = [...(modalRow()?.querySelectorAll('button') ?? [])]
+    .find((b) => (b.textContent || '') === '수정');
+  edit?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(600);
+  check('수정 opens the centre editor',
+        [...document.querySelectorAll('.panel.active .left input')]
+          .some((i) => i.value === '스모크스타일'),
+        (document.querySelector('.panel.active .left')?.textContent || '').slice(0, 120));
+  // The generation card no longer carries a style <select> of its own.
+  check('no style pickers remain on the generation card',
         ![...document.querySelectorAll('.genpanel select option')]
           .some((o) => /스모크스타일/.test(o.textContent || '')),
         String(document.querySelectorAll('.genpanel select').length));
@@ -2058,36 +2102,58 @@ console.log('\ntest_studio_cards');
 
 console.log('\ntest_studio_named_cards');
 {
-  // The name is the identity: a new card asks for its name first, the name is
-  // the filename, and renaming a card in the editor renames the file with it.
+  // Fragments are organized in the centre now: the 조각 button opens the
+  // organizer (folders beside the editor). The name is still the identity: a
+  // new card asks for its name first, the name is the filename, and renaming
+  // a card in the editor renames the file with it.
   const auth = { Authorization: 'Bearer plugin-smoke-token', 'Content-Type': 'application/json' };
   clickById(document, 'tab-studio');
   await settle(700);
+  clickButton(document.querySelector('.panel.active .toolbtns'), '조각');
+  await settle(400);
+  const centre = () => document.querySelector('.panel.active .left');
+  check('the 조각 button opens the organizer in the centre',
+        /조각 프롬프트/.test(centre()?.textContent || '') && !!centre()?.querySelector('.fragcols'),
+        (centre()?.textContent || '').slice(0, 160));
   window.prompt = () => '스모크 조각';
-  const fragHead = [...document.querySelectorAll('.panel.active .explorer .row')]
-    .find((h) => /조각 프롬프트/.test(h.textContent || ''));
-  check('the fragment section header is there', !!fragHead);
-  if (fragHead) clickButton(fragHead, '＋');
+  clickButton(centre(), '＋ 조각');
   await settle(1300);
   const made = await (await fetch(backend.url
     + '/files/read?path=' + encodeURIComponent('studio/fragments/스모크 조각.md'), { headers: auth })).json();
   check('a new fragment file carries the typed name', /name: 스모크 조각/.test(made.content || ''),
         JSON.stringify(made).slice(0, 140));
 
-  const nameBox = [...document.querySelectorAll('.panel.active .left input')]
+  const nameBox = [...(centre()?.querySelectorAll('.fragedit input') ?? [])]
     .find((i) => i.value === '스모크 조각');
-  check('the editor opens on the new card', !!nameBox,
-        (document.querySelector('.panel.active .left')?.textContent || '').slice(0, 120));
+  check('the organizer opens the editor on the new card', !!nameBox,
+        (centre()?.textContent || '').slice(0, 160));
   if (nameBox) {
     nameBox.value = '스모크 조각 II';
-    clickButton(document.querySelector('.panel.active .left'), '저장');
+    clickButton(centre()?.querySelector('.fragedit'), '저장');
     await settle(1500);
     const moved = await (await fetch(backend.url
       + '/files/read?path=' + encodeURIComponent('studio/fragments/스모크 조각 II.md'), { headers: auth })).json();
     check('renaming the card renamed the file', /name: 스모크 조각 II/.test(moved.content || ''),
           JSON.stringify(moved).slice(0, 140));
   }
-  clickButton(document.querySelector('.panel.active .left'), '← 목록');
+
+  // A grouping folder, and a move into it - the organizer's whole point.
+  window.prompt = () => '스모크그룹';
+  clickButton(centre(), '＋ 폴더');
+  await settle(600);
+  check('a folder can be made', /스모크그룹/.test(centre()?.textContent || ''),
+        (centre()?.textContent || '').slice(0, 200));
+  clickButton(centre(), '폴더 이동');
+  await settle(300);
+  const target = [...document.querySelectorAll('.applypop button')]
+    .find((b) => (b.textContent || '') === '스모크그룹');
+  target?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(1200);
+  const movedIn = await (await fetch(backend.url
+    + '/files/read?path=' + encodeURIComponent('studio/fragments/스모크그룹/스모크 조각 II.md'), { headers: auth })).json();
+  check('폴더 이동 moves the file under the folder', /name: 스모크 조각 II/.test(movedIn.content || ''),
+        JSON.stringify(movedIn).slice(0, 140));
+  clickButton(centre(), '← 돌아가기');
   await settle(300);
 }
 
@@ -2106,10 +2172,18 @@ console.log('\ntest_studio_scene_editor');
   await settle(200);
   clickById(document, 'tab-studio');
   await settle(1100);
-  const row = [...document.querySelectorAll('.panel.active .pickrow')]
+  // The preset is picked (and edited) from the generation card's dropdown.
+  // (Scope to the modal this click opens - an earlier test may have left one.)
+  document.querySelector('.panel.active .genpanel .presetnow .chev')
+    ?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(600);
+  const sceneModal = [...document.querySelectorAll('.modalback')].pop();
+  const row = [...(sceneModal?.querySelectorAll('.pickrow') ?? [])]
     .find((r) => /스모크씬/.test(r.textContent || ''));
-  check('the scene preset renders as a card row', !!row);
-  row?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  check('the scene preset is in the dropdown list', !!row,
+        (sceneModal?.textContent || '').slice(0, 200));
+  [...(row?.querySelectorAll('button') ?? [])].find((b) => (b.textContent || '') === '수정')
+    ?.dispatchEvent(new window.Event('click', { bubbles: true }));
   await settle(800);
   const left = document.querySelector('.panel.active .left');
   const sceneName = left && [...left.querySelectorAll('input')].find((i) => i.value === 'happy');
@@ -2138,8 +2212,10 @@ console.log('\ntest_studio_scene_editor');
 
 console.log('\ntest_studio_reference_tabs');
 {
-  // A character card's references are ONE choice: charref and vibe are tabs
-  // (charref default), and preset.json records refMode on save.
+  // A character is handled in the LEFT column now: the 캐릭터 button swaps
+  // the column to the character view, the row's switch is the selection, and
+  // the row expands into the full editor - prompt, references (ONE choice:
+  // charref and vibe are tabs, preset.json records refMode on save).
   const auth = { Authorization: 'Bearer plugin-smoke-token', 'Content-Type': 'application/json' };
   await fetch(backend.url + '/files/upload', { method: 'POST', headers: auth,
     body: JSON.stringify({ name: 'prompt.md', dir: 'studio/characters/스모크캐릭터',
@@ -2152,27 +2228,33 @@ console.log('\ntest_studio_reference_tabs');
   await settle(200);
   clickById(document, 'tab-studio');
   await settle(1100);
-  const row = [...document.querySelectorAll('.panel.active .pickrow')]
+  const explorer = () => document.querySelector('.panel.active .explorer');
+  clickButton(explorer()?.querySelector('.toolbtns'), '캐릭터');
+  await settle(500);
+  const row = [...(explorer()?.querySelectorAll('.pickrow') ?? [])]
     .find((r) => /스모크캐릭터/.test(r.textContent || ''));
-  check('the character card renders', !!row);
+  check('the 캐릭터 button lists the cards in the left column', !!row,
+        (explorer()?.textContent || '').slice(0, 200));
   row?.dispatchEvent(new window.Event('click', { bubbles: true }));
-  await settle(800);
-  const left = document.querySelector('.panel.active .left');
-  const tabs = left ? [...left.querySelectorAll('button.modebtn')] : [];
+  await settle(900);
+  const inline = explorer()?.querySelector('.charinline');
+  check('clicking the row expands the editor in place', !!inline,
+        (explorer()?.textContent || '').slice(0, 160));
+  const tabs = inline ? [...inline.querySelectorAll('button.modebtn')] : [];
   check('the reference section is two tabs', tabs.length === 2, String(tabs.length));
   const vibeTab = tabs.find((b) => /바이브/.test(b.textContent || ''));
   check('a vibe-only legacy preset opens on the vibe tab',
         !!vibeTab?.classList.contains('on'), tabs.map((b) => b.className).join(','));
   check('the long reference explainers are gone',
-        !/확정으로 나갑니다/.test(left?.textContent || ''));
-  check('position folds under 고급', /고급/.test(left?.textContent || ''));
-  clickButton(left, '저장');
+        !/확정으로 나갑니다/.test(inline?.textContent || ''));
+  check('position folds under 고급', /고급/.test(inline?.textContent || ''));
+  clickButton(inline, '저장');
   await settle(1300);
   const preset = await (await fetch(backend.url + '/files/read?path='
     + encodeURIComponent('studio/characters/스모크캐릭터/preset.json'), { headers: auth })).json();
   check('preset.json records refMode', /"refMode":\s*"vibe"/.test(preset.content || ''),
         (preset.content || '').slice(0, 160));
-  clickButton(document.querySelector('.panel.active .left'), '← 목록');
+  clickButton(explorer(), '← 프롬프트');
   await settle(300);
 }
 
@@ -2263,14 +2345,18 @@ console.log('\ntest_studio_queue_view');
 
 console.log('\ntest_studio_stays_scoped');
 {
-  // One checkbox = one meta write (+ the debounced dry plan). The old
+  // One switch = one meta write (+ the debounced dry plan). The old
   // behaviour was a full five-request library re-read per click.
   clickById(document, 'tab-studio');
   await settle(1200);
-  const row = [...document.querySelectorAll('.panel.active .pickrow')]
-    .find((r) => /스모크스타일/.test(r.textContent || ''));
+  const explorer = () => document.querySelector('.panel.active .explorer');
+  clickButton(explorer()?.querySelector('.toolbtns'), '캐릭터');
+  await settle(400);
+  const row = [...(explorer()?.querySelectorAll('.pickrow') ?? [])]
+    .find((r) => /스모크캐릭터/.test(r.textContent || ''));
   const toggle = row?.querySelector('input[type=checkbox]');
-  check('the style row is on screen', !!toggle);
+  check('the character row is on screen', !!toggle,
+        (explorer()?.textContent || '').slice(0, 160));
   const orig = globalThis.fetch;
   const calls = [];
   globalThis.fetch = async (url, opts) => {
@@ -2287,19 +2373,16 @@ console.log('\ntest_studio_stays_scoped');
   check('a toggle costs one meta write, not a library re-read',
         calls.some((u) => u.includes('/studio/meta')) && listCalls === 0 && fileCalls === 0,
         JSON.stringify(calls).slice(0, 240));
-
-  // Folding a section hides its rows, and the fold is remembered.
-  const foldHead = () => [...document.querySelectorAll('.panel.active .secthead')]
-    .find((h) => /조각 프롬프트/.test(h.textContent || ''));
-  foldHead()?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  clickButton(explorer(), '← 프롬프트');
   await settle(200);
-  check('a folded section hides its rows',
-        ![...document.querySelectorAll('.panel.active .pickrow')]
-          .some((r) => /스모크 조각/.test(r.textContent || '')));
-  check('the fold is remembered',
-        (localStorage.getItem('hina.studioSections') || '').includes('fragments'),
-        String(localStorage.getItem('hina.studioSections')));
-  foldHead()?.dispatchEvent(new window.Event('click', { bubbles: true }));
+
+  // The left tab choice is remembered.
+  clickButton(document.querySelector('.panel.active .studiotabs'), 'OUTPUT');
+  await settle(200);
+  check('the left tab is remembered',
+        localStorage.getItem('hina.studioLeftTab') === 'output',
+        String(localStorage.getItem('hina.studioLeftTab')));
+  clickButton(document.querySelector('.panel.active .studiotabs'), '프롬프트');
   await settle(200);
 }
 
@@ -2536,11 +2619,11 @@ console.log('\ntest_studio_selector');
   clickById(document, 'tab-studio');
   await settle(400);
   await settle(900);
-  // Open images/ and walk into the new folder.
-  const openFolder = (label) => [...document.querySelectorAll('.panel.active .treerow')]
+  // The tree is behind the OUTPUT tab now; walk into the new folder there.
+  clickButton(document.querySelector('.panel.active .studiotabs'), 'OUTPUT');
+  await settle(300);
+  const openFolder = (label) => [...document.querySelectorAll('.panel.active .explorer .treebranch')]
     .find((r) => (r.textContent || '').includes(label));
-  // images/ opens by default, so only unfold it if the new folder is not
-  // already on screen - clicking an open row would close it.
   if (!openFolder('고르기')) {
     openFolder('output')?.dispatchEvent(new window.Event('click', { bubbles: true }));
     await settle(500);

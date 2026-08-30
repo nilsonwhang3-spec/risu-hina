@@ -7,12 +7,13 @@
  * shell already survives that state (readHost only sets slotError), and it is
  * the per-tab render functions that bail. This one does not.
  *
- *   left    the prompt CARDS (styles · characters · presets · fragments), the
- *           output tree, and the generation card. A style or a character is a
- *           card with its own on/off and order - the lorebook model - and the
- *           ACTIVE cards are what a run sends.
- *   centre  the picked card's editor, or the picked output folder: for images
- *           that is the comparison selector, otherwise a list.
+ *   left    two tabs. 프롬프트: the ONE selected style edited in place, the
+ *           character view behind the 캐릭터 button, the 조각 button, and the
+ *           generation card. OUTPUT: the studio/images tree. Both rails
+ *           collapse to a slim strip - the studio is the crowded tab, and the
+ *           centre is where the work happens.
+ *   centre  the picked card's editor, the fragment organizer, the live queue,
+ *           or the picked output folder (the comparison selector for images).
  *   right   Hina, as on every tab
  *
  * The library is the `studio/` folder of the ONE global space, so its files
@@ -21,22 +22,20 @@
  *
  * A bot IS needed to *adopt* an image into a card - that is gated per action,
  * where it is true, rather than on the whole tab.
- *
- * This file owns the tab lifecycle, the left card lists and output tree, and
- * the centre dispatch; the pieces live in the sibling modules (store, gen,
- * editors, char-edit, selector) wired together through the store's hub.
  */
 import { el, clear, armed } from './../dom';
 import { state, type StudioItem, type WorkspaceFile } from '../../state';
 import { threePane } from '../panes';
 import { bindAgent, mountAgent } from '../agentpane';
-import { listRow as kitRow } from '../kit';
-import { CARD_AREAS, OUTPUT_ROOT, IMAGE_RE, S, hub, checkUnresolved,
-         cardStem, freeCardPath, buildOutput, find, countFiles, fmtSize, msg,
-         type Folder } from './store';
+import { CARD_AREAS, OUTPUT_ROOT, IMAGE_RE, S, hub, checkUnresolved, persistLeftTab,
+         buildOutput, find, fmtSize, msg, type Folder } from './store';
 import { drawGen, drawQueue } from './gen';
 import { drawCardEditor, drawSceneEditor, drawRawFile, rawView } from './editors';
 import { drawCharacterEditor } from './char-edit';
+import { buildLeftPrompt, syncPromptBadges } from './left-prompt';
+import { buildLeftChars } from './left-chars';
+import { buildLeftOutput } from './left-output';
+import { drawFragments } from './center-frags';
 import { hasGroups, loadGroups, drawSelector } from './selector';
 
 let built = false;
@@ -47,11 +46,46 @@ let renderedRev = -1;
  * deliberate visit and re-reads (files can arrive from another machine, which
  * bumps no rev here); staying put does not. */
 let wasStudioActive = false;
+let splitRoot: HTMLElement | null = null;
+let leftContent: HTMLElement | null = null;
+let tabbar: HTMLElement | null = null;
 
 /** shell.setTab tells us when the user goes elsewhere - there is no emit on a
  * tab switch, so the "came back" signal has to be handed over explicitly. */
 export function noteStudioLeft(): void {
   wasStudioActive = false;
+}
+
+// --- panel collapse ---------------------------------------------------------------
+// Both rails fold to a slim strip: the studio is the crowded tab, and 1장
+// previews and batch grids want the width. Independent toggles, remembered.
+const PANELS_KEY = 'hina.studioPanels';
+const panels = { left: false, right: false };
+try {
+  const saved = JSON.parse(localStorage.getItem(PANELS_KEY) || 'null') as Partial<typeof panels> | null;
+  if (saved && typeof saved === 'object') Object.assign(panels, saved);
+} catch { /* storage may be unavailable in the iframe */ }
+
+function applyPanels(): void {
+  if (!splitRoot) return;
+  splitRoot.classList.toggle('lcollapse', panels.left);
+  splitRoot.classList.toggle('rcollapse', panels.right);
+}
+
+function togglePanel(side: 'left' | 'right'): void {
+  panels[side] = !panels[side];
+  try { localStorage.setItem(PANELS_KEY, JSON.stringify(panels)); } catch { /* fine */ }
+  applyPanels();
+}
+
+function rail(side: 'left' | 'right'): HTMLElement {
+  const openBtn = el('button', { class: 'ghost tiny', text: side === 'left' ? '▸' : '◂',
+                                 title: side === 'left' ? '왼쪽 패널 펼치기' : 'AI 챗 펼치기' });
+  openBtn.addEventListener('click', () => togglePanel(side));
+  return el('div', { class: 'panelrail ' + (side === 'left' ? 'lrail' : 'rrail') }, [
+    openBtn,
+    el('span', { class: 'vlabel', text: side === 'left' ? '프롬프트 · OUTPUT' : 'AI 챗' }),
+  ]);
 }
 
 export function renderStudioTab(mount: HTMLElement): void {
@@ -60,13 +94,25 @@ export function renderStudioTab(mount: HTMLElement): void {
   if (!built || !mount.querySelector('.split')) {
     clear(mount);
     const pane = threePane();
-    S.cardsMount = el('div', { class: 'tree filetree' });
-    S.treeMount = el('div', { class: 'tree filetree' });
+    splitRoot = pane.root;
+
+    // The left column: [프롬프트 | OUTPUT] tabs over the content, the
+    // generation card pinned under it.
+    tabbar = el('div', { class: 'studiotabs' });
+    leftContent = el('div', { class: 'tree filetree' });
+    S.leftMount = leftContent;
     S.genMount = el('div', { class: 'genpanel' });
-    pane.left.append(S.cardsMount, S.treeMount, S.genMount);
+    pane.left.append(tabbar, leftContent, S.genMount);
+
     S.noticeMount = el('div');
     S.viewMount = el('div', { class: 'pad filepad' });
     pane.centre.append(S.noticeMount, S.viewMount);
+
+    // Collapse rails: shown by the lcollapse/rcollapse classes.
+    pane.root.insertBefore(rail('left'), pane.left);
+    pane.root.appendChild(rail('right'));
+    applyPanels();
+
     mount.appendChild(pane.root);
     built = true;
     void refresh();
@@ -112,8 +158,7 @@ async function refresh(): Promise<void> {
     S.cards = Object.fromEntries(CARD_AREAS.map((a, i) => [a.area, areas[i]]));
   } catch (e) {
     S.listing = null;
-    drawCards();
-    drawTree();
+    drawLeft();
     if (S.viewMount) {
       clear(S.viewMount);
       S.viewMount.appendChild(el('div', { class: 'notice err' }, [
@@ -124,11 +169,35 @@ async function refresh(): Promise<void> {
     }
     return;
   }
+  await migrateSingleStyle();
   buildOutput();
-  drawCards();
-  drawTree();
+  drawLeft();
+  drawGen();
   drawCentre();
   checkUnresolved();
+}
+
+/** The dropdown means ONE style. Cards written before the dropdown could have
+ * several enabled; the first (order, path) stays on and the rest are turned
+ * off, said out loud once. */
+let migrated = false;
+async function migrateSingleStyle(): Promise<void> {
+  const on = (S.cards.styles ?? [])
+    .filter((i) => i.enabled)
+    .sort((a, b) => ((a.order ?? 100) - (b.order ?? 100)) || a.path.localeCompare(b.path));
+  if (on.length <= 1) return;
+  const keep = on[0];
+  try {
+    for (const it of on.slice(1)) {
+      await state.studio.setMeta(it.path, { enabled: false });
+      it.enabled = false;
+    }
+    if (!migrated) {
+      notice(`스타일 프롬프트는 이제 1개만 실립니다 — “${keep.name}” 만 남기고 나머지는 껐습니다.`);
+      migrated = true;
+    }
+    touchQuiet();
+  } catch { /* the next refresh tries again */ }
 }
 
 /** Tell the files tab about a studio write without re-reading our own world:
@@ -145,7 +214,7 @@ async function refreshArea(area: string): Promise<void> {
   try {
     S.cards[area] = (await state.studio.items(area)).items;
   } catch { /* keep what we have; the next full refresh corrects it */ }
-  drawCards();
+  drawLeft();
   drawCentre();
   drawGen();
   checkUnresolved();
@@ -155,189 +224,52 @@ async function refreshArea(area: string): Promise<void> {
 // The hub: what the sibling modules call to reach back into this file (and
 // gen.ts) without an import cycle. Registered at module load, before any
 // render can run.
-hub.drawCards = drawCards;
-hub.drawTree = drawTree;
+hub.drawLeft = drawLeft;
 hub.drawGen = drawGen;
 hub.drawCentre = drawCentre;
+hub.syncBadges = syncPromptBadges;
 hub.notice = notice;
 hub.refresh = refresh;
 hub.refreshArea = refreshArea;
 hub.loadStatus = loadStatus;
 hub.touchQuiet = touchQuiet;
 
-// --- the card lists -------------------------------------------------------------
+// --- the left column -----------------------------------------------------------
 
-// Which card sections are folded. Fragments especially grow into the dozens,
-// and four always-open lists made the left column a scroll hunt.
-const SECT_KEY = 'hina.studioSections';
-let sectOpen: Record<string, boolean> = {};
-try { sectOpen = JSON.parse(localStorage.getItem(SECT_KEY) || '{}') as Record<string, boolean> || {}; }
-catch { /* storage may be unavailable in the iframe */ }
-function sectionOpen(area: string): boolean {
-  return sectOpen[area] !== false;
-}
-function toggleSection(area: string): void {
-  sectOpen[area] = !sectionOpen(area);
-  try { localStorage.setItem(SECT_KEY, JSON.stringify(sectOpen)); } catch { /* fine */ }
-  drawCards();
-}
+function drawLeft(): void {
+  if (!tabbar || !leftContent) return;
+  clear(tabbar);
+  const mk = (tab: 'prompt' | 'output', label: string): HTMLElement => {
+    const b = el('button', { class: 'modebtn' + (S.leftTab === tab ? ' on' : ''), text: label });
+    b.addEventListener('click', () => {
+      if (S.leftTab === tab) return;
+      S.leftTab = tab;
+      persistLeftTab();
+      drawLeft();
+    });
+    return b;
+  };
+  const collapse = el('button', { class: 'ghost tiny railbtn', text: '◂', title: '왼쪽 패널 접기' });
+  collapse.addEventListener('click', () => togglePanel('left'));
+  const collapseR = el('button', { class: 'ghost tiny railbtn', text: '▸', title: 'AI 챗 패널 접기' });
+  collapseR.addEventListener('click', () => togglePanel('right'));
+  tabbar.append(mk('prompt', '프롬프트'), mk('output', 'OUTPUT'),
+                el('span', { class: 'grow' }), collapse, collapseR);
 
-function drawCards(): void {
-  const cardsMount = S.cardsMount;
-  if (!cardsMount) return;
-  clear(cardsMount);
-  for (const spec of CARD_AREAS) {
-    const rows = S.cards[spec.area] ?? [];
-    const openNow = sectionOpen(spec.area);
-    const head = el('div', { class: 'row secthead', style: { padding: '4px 6px 0', cursor: 'pointer' },
-                            title: openNow ? '접기' : '펼치기' }, [
-      el('span', { class: 'hint', text: openNow ? '▾' : '▸' }),
-      el('span', { class: 'sectiontitle grow', text: spec.label }),
-      el('span', { class: 'hint', text: String(rows.length) }),
-    ]);
-    head.addEventListener('click', () => toggleSection(spec.area));
-    if (spec.area === 'fragments' && S.unresolvedRefs.length) {
-      head.appendChild(el('span', {
-        class: 'badge err', text: `미해결 ${S.unresolvedRefs.length}`,
-        title: '프롬프트가 참조하는데 조각이 없는 이름: ' + S.unresolvedRefs.join(', '),
-      }));
-    }
-    const add = el('button', { class: 'ghost tiny', text: '＋', title: '새 카드' });
-    add.addEventListener('click', (e) => { e.stopPropagation(); void newCard(spec.area); });
-    head.appendChild(add);
-    cardsMount.appendChild(head);
-
-    if (!openNow) continue;
-    if (!rows.length) {
-      cardsMount.appendChild(el('div', { class: 'hint', style: { padding: '0 10px 4px' }, text: '(없음)' }));
-      continue;
-    }
-    const sorted = [...rows].sort((a, b) =>
-      ((a.order ?? 100) - (b.order ?? 100)) || a.path.localeCompare(b.path));
-    for (const it of sorted) cardsMount.appendChild(cardRow(spec, it));
+  clear(leftContent);
+  if (S.leftTab === 'output') {
+    buildLeftOutput(leftContent);
+  } else if (S.leftView === 'characters') {
+    buildLeftChars(leftContent);
+  } else {
+    buildLeftPrompt(leftContent);
   }
-  cardsMount.appendChild(el('div', {
-    class: 'sectionline treesep',
-    title: '위는 쓰는 것(프롬프트·프리셋), 아래는 나온 것(생성물)입니다',
-  }));
+  // The generation card belongs to the 프롬프트 tab's main view; the character
+  // view and the tree want the column.
+  if (S.genMount) S.genMount.style.display = (S.leftTab === 'prompt' && S.leftView === 'main') ? '' : 'none';
 }
 
-function cardRow(spec: { area: string; toggle: boolean }, it: StudioItem): HTMLElement {
-  const badges: { text: string; kind?: 'ok' | 'warn' | 'err' | '' ; title?: string }[] = [];
-  if (spec.area === 'characters') {
-    if (it.vibe) badges.push({ text: `바이브 ${it.vibe}`, title: '레퍼런스 사용 시 이 카드의 바이브가 실립니다' });
-    if (it.charref) badges.push({ text: `레퍼런스 ${it.charref}` });
-  }
-  if (it.count) badges.push({ text: `씬 ${it.count}` });
-  if (spec.toggle && !it.enabled) badges.push({ text: '꺼짐' });
-
-  const row = kitRow({
-    variant: 'pick',
-    selected: S.selectedFile === it.path,
-    title: it.name || it.path.split('/').pop() || it.path,
-    hint: it.description || undefined,
-    badges,
-    toggle: spec.toggle ? {
-      checked: !!it.enabled,
-      title: '켜면 생성 요청에 이 카드가 실립니다 (순서대로 이어집니다)',
-      onChange: async (v) => {
-        try {
-          await state.studio.setMeta(it.path, { enabled: v });
-        } catch (e) {
-          notice('바꾸지 못했습니다: ' + msg(e), 'err');
-          throw e;
-        }
-        // One meta write changed one row: update it in memory and redraw,
-        // instead of the full five-request library re-read per checkbox.
-        it.enabled = v;
-        drawCards();
-        drawGen();
-        checkUnresolved();
-        touchQuiet();
-      },
-    } : undefined,
-    onClick: () => {
-      S.selectedFile = it.path;
-      drawCards();
-      drawCentre();
-    },
-  });
-  if (spec.toggle && typeof it.order === 'number' && it.order !== 100) {
-    row.appendChild(el('span', { class: 'hint ordertag', title: '연결 순서 (order)', text: String(it.order) }));
-  }
-  return row;
-}
-
-async function newCard(area: string): Promise<void> {
-  // The name comes first: it is the reference key (fragments), the list row,
-  // and the filename - a timestamp slug was a code nobody could read back.
-  const raw = window.prompt('새 카드 이름');
-  const nm = (raw ?? '').trim();
-  if (!nm) return;
-  const stem = cardStem(nm);
-  if (!stem) { notice('그 이름으로는 파일을 만들 수 없습니다.', 'err'); return; }
-  try {
-    if (area === 'characters') {
-      const path = freeCardPath(area, stem, '');
-      await state.uploadFile('prompt.md', `---\nname: ${nm}\nenabled: false\n---\n## 프롬프트\n`,
-        false, path);
-      S.selectedFile = path;
-    } else if (area === 'scenes') {
-      const path = freeCardPath(area, stem, '.json');
-      await state.uploadFile(path.split('/').pop()!, JSON.stringify(
-        { version: 1, name: nm, scenes: [{ name: 'happy', prompt: '', negativePrompt: '', width: 0, height: 0 }] },
-        null, 2), false, 'studio/scenes');
-      S.selectedFile = path;
-    } else {
-      const path = freeCardPath(area, stem, '.md');
-      const front = area === 'styles'
-        ? `---\nname: ${nm}\nenabled: false\n---\n`
-        : `---\nname: ${nm}\n---\n`;
-      await state.uploadFile(path.split('/').pop()!, front, false, `studio/${area}`);
-      S.selectedFile = path;
-    }
-    await refreshArea(area);
-  } catch (e) {
-    notice('만들지 못했습니다: ' + msg(e), 'err');
-  }
-}
-
-// --- the output tree --------------------------------------------------------------
-
-function drawTree(): void {
-  if (!S.treeMount) return;
-  clear(S.treeMount);
-  if (S.outputRoot) S.treeMount.appendChild(row(S.outputRoot, 0));
-}
-
-function row(n: Folder, depth: number): HTMLElement {
-  const wrap = el('div');
-  const isOpen = S.open.has(n.path);
-  const kids = n.children.length > 0;
-  const caret = el('span', { class: 'caret', text: kids ? (isOpen ? '▾' : '▸') : '' });
-  const line = el('button', {
-    class: 'treerow' + (S.selected === n.path && !S.selectedFile ? ' on' : ''),
-    style: { paddingLeft: 6 + depth * 12 + 'px' },
-    title: n.path,
-  }, [
-    caret,
-    el('span', { class: 'grow', text: n.name }),
-    el('span', { class: 'n', text: String(countFiles(n)) }),
-  ]);
-  line.addEventListener('click', () => {
-    if (kids) { if (isOpen) S.open.delete(n.path); else S.open.add(n.path); }
-    S.selected = n.path;
-    S.selectedFile = '';
-    drawCards();
-    drawTree();
-    drawCentre();
-  });
-  wrap.appendChild(line);
-  if (isOpen) for (const c of n.children) wrap.appendChild(row(c, depth + 1));
-  return wrap;
-}
-
-// --- the centre: editors, the selector, folders ---------------------------------
+// --- the centre: editors, the organizer, the selector, folders --------------------
 
 function drawCentre(): void {
   const viewMount = S.viewMount;
@@ -351,7 +283,12 @@ function drawCentre(): void {
     return;
   }
 
-  // A card picked in the list: its editor, not the folder it lives in.
+  if (S.fragmentsView) {
+    drawFragments();
+    return;
+  }
+
+  // A card picked in a list: its editor, not the folder it lives in.
   if (S.selectedFile) {
     const parts = S.selectedFile.split('/');
     if (parts[1] === 'characters' && !/\.[a-z0-9]+$/i.test(S.selectedFile)) {

@@ -1052,6 +1052,51 @@ input[type=checkbox] {
 label.row { align-items: center; gap: 6px; }
 .pickrow { align-items: flex-start; }
 .pickrow input[type=checkbox] { margin-top: 3px; }
+
+/* --- the studio's left tabs, collapse rails, and inline editors ------------------ */
+.studiotabs { display: flex; gap: 4px; align-items: center; padding: 6px 6px 2px; }
+.studiotabs .grow { flex: 1; }
+.studiotabs .railbtn { padding: 1px 6px; font-size: 12px; }
+
+/* Collapsed rails: the pane and its gutter vanish, a slim strip stays so the
+   panel can be found again. */
+.split.lcollapse > .explorer, .split.lcollapse > .gutter.leftside { display: none; }
+.split.rcollapse > .right, .split.rcollapse > .gutter:not(.leftside) { display: none; }
+.panelrail {
+  display: none; flex: 0 0 26px; flex-direction: column; align-items: center;
+  gap: 10px; padding: 8px 0; border: 1px solid var(--borderc, #2b323f);
+  border-radius: 6px; background: var(--darkbg, #171a21);
+}
+.split.lcollapse > .panelrail.lrail { display: flex; }
+.split.rcollapse > .panelrail.rrail { display: flex; }
+.panelrail button { padding: 1px 6px; }
+.panelrail .vlabel { writing-mode: vertical-rl; font-size: 11px; opacity: .55; letter-spacing: 2px; white-space: nowrap; }
+
+/* The tool buttons under the style editor (캐릭터 · 조각). */
+.toolbtns { display: flex; gap: 6px; padding: 6px 8px; }
+.toolbtns .toolbtn { flex: 1; padding: 7px 6px; display: flex; align-items: center; justify-content: center; gap: 6px; }
+
+/* The selected style, edited in place in the left column. */
+.styleedit { padding: 4px 8px 0; }
+.styleedit textarea { width: 100%; box-sizing: border-box; resize: vertical; }
+.styleedit .field { display: block; margin-bottom: 6px; }
+.styleedit .field > span { display: block; font-size: 11px; opacity: .7; margin-bottom: 2px; }
+.genpanel div.field > span:first-child { display: block; font-size: 11px; opacity: .7; margin-bottom: 2px; }
+
+/* The character editor hosted inside the left column. */
+.charinline { border-left: 2px solid rgba(37, 99, 235, .35); margin: 0 4px 8px 8px; padding: 6px 6px 2px; }
+.charinline textarea, .charinline input { width: 100%; box-sizing: border-box; }
+.charinline input[type=checkbox], .charinline input[type=file] { width: auto; }
+
+/* The fragment organizer in the centre. */
+.fragcols { display: flex; gap: 14px; align-items: flex-start; }
+.fragcols > .fraglist { flex: 0 0 250px; min-width: 0; }
+.fragcols > .fragedit { flex: 1; min-width: 0; }
+.fraglist input { width: 100%; box-sizing: border-box; }
+
+@media (max-width: 900px) {
+  .panelrail { display: none !important; }
+}
 `;
 
 export function injectStyles(): void {

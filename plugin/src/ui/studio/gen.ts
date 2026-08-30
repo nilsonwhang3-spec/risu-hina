@@ -10,7 +10,8 @@
 import { el, clear } from '../dom';
 import { state } from '../../state';
 import { workspaceImage } from '../blobimg';
-import { S, hub, gen, persistGen, activeOf, spec, checkUnresolved, msg, stateLabel } from './store';
+import { pickerRow, openListPicker, type PickerEntry } from '../pickers';
+import { S, hub, gen, persistGen, activeOf, spec, checkUnresolved, newCard, msg, stateLabel } from './store';
 
 let jobTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -131,17 +132,59 @@ export function drawGen(): void {
   if (S.jobId) void pollJob();
 }
 
-/** The scene preset <select> - the one thing still picked per run. */
+/** The scene preset - one per run, picked the way every preset is picked
+ * (compact current row, list with 선택 · 수정 · 삭제 · 추가 behind the ›). */
 function scenePicker(): HTMLElement {
-  const sel = el('select') as HTMLSelectElement;
-  sel.appendChild(el('option', { value: '', text: '(없음)' }));
-  for (const it of S.cards.scenes ?? []) {
-    const o = el('option', { value: it.path, text: it.name + (it.count ? ` (${it.count})` : '') });
-    if (it.path === gen.scenePreset) o.setAttribute('selected', 'selected');
-    sel.appendChild(o);
-  }
-  sel.addEventListener('change', () => { gen.scenePreset = sel.value; persistGen(); checkUnresolved(); });
-  return el('label', { class: 'field' }, [el('span', { text: 'SD스튜디오 프리셋' }), sel]);
+  const items = S.cards.scenes ?? [];
+  const cur = items.find((i) => i.path === gen.scenePreset) ?? null;
+  const label = (i: { name: string; count?: number }) => i.name + (i.count ? ` (씬 ${i.count})` : '');
+  const row = pickerRow(cur ? { name: label(cur) } : null, {
+    title: items.length ? `저장된 프리셋 ${items.length}개 — 선택 · 수정 · 삭제 · 추가` : '프리셋 추가',
+    emptyHint: '(없음) — 패널 설정 한 장 구성으로 생성합니다.',
+    onOpen: () => openListPicker({
+      title: '씬 프리셋 선택',
+      hint: '씬마다 한 장씩 (장수만큼 반복) 생성됩니다.',
+      load: async () => [
+        { id: '', name: '(없음)', hint: '패널 설정 한 장 구성', selected: !gen.scenePreset, noDelete: true },
+        ...items.map((i): PickerEntry => ({
+          id: i.path, name: label(i), selected: gen.scenePreset === i.path,
+        })),
+      ],
+      onSelect: async (e) => {
+        gen.scenePreset = e.id;
+        persistGen();
+        checkUnresolved();
+        hub.drawGen();
+      },
+      onEdit: (e) => {
+        if (!e.id) return;
+        S.selectedFile = e.id;
+        S.queueView = false;
+        S.fragmentsView = false;
+        hub.drawCentre();
+      },
+      onDelete: async (e) => {
+        await state.deleteFile(e.id);
+        if (gen.scenePreset === e.id) { gen.scenePreset = ''; persistGen(); }
+        if (S.selectedFile === e.id) S.selectedFile = '';
+        await hub.refreshArea('scenes');
+      },
+      onCreate: () => {
+        void newCard('scenes').then((path) => {
+          if (!path) return;
+          gen.scenePreset = path;
+          persistGen();
+          S.selectedFile = path;
+          S.queueView = false;
+          S.fragmentsView = false;
+          hub.drawGen();
+          hub.drawCentre();
+        });
+      },
+      createLabel: '새 프리셋 추가',
+    }),
+  });
+  return el('div', { class: 'field' }, [el('span', { text: 'SD스튜디오 프리셋' }), row]);
 }
 
 /**
