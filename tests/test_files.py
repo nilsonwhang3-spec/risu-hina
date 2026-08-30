@@ -117,6 +117,26 @@ check("the limit clips rows but not the count", r["total"] == 7 and len(r["files
 r = files.search_names(files.SPACE, "projects/*/메모/*.md")
 check("a slashed pattern matches the whole path", r["total"] == 7, str(r["total"]))
 
+print("\ntest_listing_prefix")
+(space / "studio" / "images" / "셋").mkdir(parents=True, exist_ok=True)
+(space / "studio" / "images" / "셋" / "한장.png").write_bytes(b"\x89PNG\r\n\x1a\npad")
+(space / "studio" / "styles").mkdir(parents=True, exist_ok=True)
+(space / "studio" / "styles" / "무관.md").write_text("x", encoding="utf-8")
+full = files.listing(files.SPACE)
+sliced = files.listing(files.SPACE, "studio/images")
+check("a prefix keeps only its area", [a["area"] for a in sliced["areas"]] == ["studio"],
+      str([a["area"] for a in sliced["areas"]]))
+sfiles = sliced["areas"][0]["files"]
+check("and only the subtree's files, root-relative paths intact",
+      all(f["path"].startswith("studio/images/") for f in sfiles)
+      and any(f["path"] == "studio/images/셋/한장.png" for f in sfiles), str(sfiles)[:200])
+check("the style file is out of the slice",
+      not any("styles" in f["path"] for f in sfiles))
+check("the unfiltered listing still carries everything",
+      any(a["area"] == "projects" for a in full["areas"]))
+check("subtree dirs stay root-relative",
+      "studio/images/셋" in sliced["areas"][0]["dirs"], str(sliced["areas"][0]["dirs"])[:160])
+
 print("\ntest_search_content")
 (base / "긴자료.md").write_text("\n".join(f"줄 {i}: 미도리" for i in range(9)), encoding="utf-8")
 (base / "다른.md").write_text("여기도 미도리 한 번", encoding="utf-8")

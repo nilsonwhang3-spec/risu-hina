@@ -25,7 +25,7 @@ import { buildChatBar, refreshChatBar, shellNotice } from './chatbar';
 import { ensureResolved } from './leaveguard';
 import { buildBotBar, refreshBotBar } from './botbar';
 import { renderAssetsTab } from './tab-assets';
-import { renderStudioTab } from './tab-studio';
+import { noteStudioLeft, renderStudioTab } from './tab-studio';
 import { getSettingsBar } from './tab-settings';
 
 /**
@@ -175,6 +175,8 @@ function syncToolslot(): void {
 export function setTab(tab: TabId): void {
   active = tab;
   state.activeTab = tab;
+  // The studio refreshes on re-entry; a tab switch has no emit, so it is told.
+  if (tab !== 'studio') noteStudioLeft();
   for (const id of ALL_TABS) {
     mounts[id]?.classList.toggle('active', id === tab);
     document.getElementById('tab-' + id)?.classList.toggle('active', id === tab);

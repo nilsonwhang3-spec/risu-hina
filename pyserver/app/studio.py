@@ -336,8 +336,18 @@ def active(area: str) -> list[str]:
     return [path for _o, path in sorted(rows)]
 
 
+_MIGRATED_ONCE = False
+
+
 def _character_listing() -> list[dict]:
-    migrate_characters()
+    # The legacy sweep is idempotent but not free (it opens every loose .json
+    # under characters/), and it used to run on EVERY listing call - toggling
+    # one checkbox re-ran it five times. Once per process is what "migration"
+    # means; a legacy file dropped in later is picked up on the next restart.
+    global _MIGRATED_ONCE
+    if not _MIGRATED_ONCE:
+        migrate_characters()
+        _MIGRATED_ONCE = True
     base = root() / "characters"
     out: list[dict] = []
     if not base.is_dir():

@@ -247,6 +247,15 @@ function installDom() {
     return { height: 0, width: 0, top: 0, left: 0, right: 0, bottom: 0 };
   };
   document.execCommand = () => true;
+  // The panel remembers folds and run settings in localStorage; give it one
+  // so those paths run instead of silently no-op'ing in the catch.
+  const webStore = new Map();
+  globalThis.localStorage = {
+    getItem: (k) => (webStore.has(k) ? webStore.get(k) : null),
+    setItem: (k, v) => { webStore.set(k, String(v)); },
+    removeItem: (k) => { webStore.delete(k); },
+    clear: () => { webStore.clear(); },
+  };
   return document;
 }
 
@@ -2197,6 +2206,48 @@ console.log('\ntest_studio_request_settings');
         && planBody?.params?.ucPreset === 0
         && planBody?.params?.steps === 28,
         JSON.stringify(planBody?.params));
+}
+
+console.log('\ntest_studio_stays_scoped');
+{
+  // One checkbox = one meta write (+ the debounced dry plan). The old
+  // behaviour was a full five-request library re-read per click.
+  clickById(document, 'tab-studio');
+  await settle(1200);
+  const row = [...document.querySelectorAll('.panel.active .pickrow')]
+    .find((r) => /스모크스타일/.test(r.textContent || ''));
+  const toggle = row?.querySelector('input[type=checkbox]');
+  check('the style row is on screen', !!toggle);
+  const orig = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, opts) => {
+    calls.push(String(url).replace(backend.url, ''));
+    return orig(url, opts);
+  };
+  try {
+    toggle.checked = false;
+    toggle?.dispatchEvent(new window.Event('change', { bubbles: true }));
+    await settle(1500);
+  } finally { globalThis.fetch = orig; }
+  const listCalls = calls.filter((u) => u.includes('/studio/list')).length;
+  const fileCalls = calls.filter((u) => u.includes('/files?') || u.endsWith('/files')).length;
+  check('a toggle costs one meta write, not a library re-read',
+        calls.some((u) => u.includes('/studio/meta')) && listCalls === 0 && fileCalls === 0,
+        JSON.stringify(calls).slice(0, 240));
+
+  // Folding a section hides its rows, and the fold is remembered.
+  const foldHead = () => [...document.querySelectorAll('.panel.active .secthead')]
+    .find((h) => /조각 프롬프트/.test(h.textContent || ''));
+  foldHead()?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(200);
+  check('a folded section hides its rows',
+        ![...document.querySelectorAll('.panel.active .pickrow')]
+          .some((r) => /스모크 조각/.test(r.textContent || '')));
+  check('the fold is remembered',
+        (localStorage.getItem('hina.studioSections') || '').includes('fragments'),
+        String(localStorage.getItem('hina.studioSections')));
+  foldHead()?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(200);
 }
 
 console.log('\ntest_studio_screen_mode');

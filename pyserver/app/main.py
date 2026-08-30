@@ -879,7 +879,7 @@ def h_cost(arg: dict) -> dict:
 # --- workspace files --------------------------------------------------------
 
 def h_files(arg: dict) -> dict:
-    return files.listing(_scope(arg))
+    return files.listing(_scope(arg), str(arg.get("prefix") or ""))
 
 
 def h_file_read(arg: dict) -> dict:

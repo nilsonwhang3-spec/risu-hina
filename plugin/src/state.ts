@@ -1371,8 +1371,8 @@ class AppState {
     return r;
   }
 
-  async files(): Promise<FileListing> {
-    return await transport.get('/files');
+  async files(prefix = ''): Promise<FileListing> {
+    return await transport.get('/files' + (prefix ? '?prefix=' + encodeURIComponent(prefix) : ''));
   }
 
   /** This bot's SYSTEM directory: frozen originals and machinery, read-only. */

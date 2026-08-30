@@ -1038,6 +1038,17 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
    sideways. A single over-wide child used to take the whole page with it. */
 .wrap { overflow-x: hidden; }
 .pad { overflow-x: hidden; }
+
+/* Checkboxes, once, at the end so it wins the width:100% + padding that the
+   generic input rule (and .genpanel input) hand every <input>. A checkbox
+   the size of a text field floating mid-row was the complaint. */
+input[type=checkbox] {
+  width: auto; min-width: 0; padding: 0; margin: 0;
+  flex: none; accent-color: #2563eb;
+}
+label.row { align-items: center; gap: 6px; }
+.pickrow { align-items: flex-start; }
+.pickrow input[type=checkbox] { margin-top: 3px; }
 `;
 
 export function injectStyles(): void {

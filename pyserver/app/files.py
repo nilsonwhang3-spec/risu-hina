@@ -104,13 +104,22 @@ def _resolve(scope: str, rel: str) -> Path:
     return candidate
 
 
-def listing(scope: str) -> dict:
-    """Every file in the workspace, grouped by area, with sizes."""
+def listing(scope: str, prefix: str = "") -> dict:
+    """Every file in the workspace, grouped by area, with sizes.
+
+    `prefix` narrows the walk to one subtree ("studio/images"): the studio tab
+    only ever consumes that slice, and without the filter every refresh
+    shipped the entire space - every bot's hina/, every project - to throw it
+    away. Paths in the result stay root-relative either way.
+    """
     root = _root(scope)
+    prefix = (prefix or "").strip("/").replace("\\", "/")
     areas = []
     total = 0
     for name, (deletable, cleanable) in areas_for(scope).items():
-        d = root / name
+        if prefix and prefix != name and not prefix.startswith(name + "/"):
+            continue
+        d = root / prefix if prefix else root / name
         files = []
         size = 0
         if d.is_dir():

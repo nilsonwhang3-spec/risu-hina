@@ -51,7 +51,20 @@ interface Folder {
 }
 
 let built = false;
+/** The filesRev this tab last drew. While the tab stays active, an unrelated
+ * state emit no longer triggers the five-request library re-read. */
+let renderedRev = -1;
+/** Whether the previous render was already this tab: coming BACK is still a
+ * deliberate visit and re-reads (files can arrive from another machine, which
+ * bumps no rev here); staying put does not. */
+let wasStudioActive = false;
 let cardsMount: HTMLElement | null = null;
+
+/** shell.setTab tells us when the user goes elsewhere - there is no emit on a
+ * tab switch, so the "came back" signal has to be handed over explicitly. */
+export function noteStudioLeft(): void {
+  wasStudioActive = false;
+}
 let treeMount: HTMLElement | null = null;
 let genMount: HTMLElement | null = null;
 let viewMount: HTMLElement | null = null;
@@ -101,6 +114,8 @@ let jobId = '';
 let jobTimer: ReturnType<typeof setInterval> | null = null;
 
 export function renderStudioTab(mount: HTMLElement): void {
+  const entering = !wasStudioActive;
+  wasStudioActive = true;
   if (!built || !mount.querySelector('.split')) {
     clear(mount);
     const pane = threePane();
@@ -115,11 +130,12 @@ export function renderStudioTab(mount: HTMLElement): void {
     built = true;
     void refresh();
     void loadStatus();
-  } else {
-    // Re-entering the tab re-reads the library. Files arrive from outside this
-    // view - a batch Hina ran, a drop onto the files tab, another machine
-    // writing into the same library - and a stale tree that silently omits
-    // them is worse than the one extra listing call.
+  } else if (entering || renderedRev !== state.filesRev) {
+    // COMING BACK to the tab re-reads the library (files arrive from outside
+    // any rev - another machine writes into the same space), and so does a
+    // files change while we sit here. What no longer re-reads is every other
+    // state emit - a chat token, a card edit elsewhere - which used to cost
+    // the same five requests each.
     void refresh();
   }
   bindAgent({ notice });
@@ -144,9 +160,11 @@ function notice(text: string, kind: 'ok' | 'err' | '' = ''): void {
 }
 
 export async function refresh(): Promise<void> {
+  renderedRev = state.filesRev;
   try {
     const [l, ...areas] = await Promise.all([
-      state.files(),
+      // Only the output slice: the studio never reads the rest of the space.
+      state.files(OUTPUT_ROOT),
       ...CARD_AREAS.map((a) => state.studio.items(a.area).then((r) => r.items).catch(() => [] as StudioItem[])),
     ]);
     listing = l;
@@ -172,6 +190,27 @@ export async function refresh(): Promise<void> {
   checkUnresolved();
 }
 
+/** Tell the files tab about a studio write without re-reading our own world:
+ * touchFiles bumps filesRev by one, and pre-advancing renderedRev keeps the
+ * guard in renderStudioTab from turning that bump back into a full refresh. */
+function touchQuiet(paths: string[] = []): void {
+  renderedRev = state.filesRev + 1;
+  state.touchFiles(paths);
+}
+
+/** Re-read ONE card area after a save - a card edit cannot change the output
+ * tree or the other areas, so one listing call replaces the old five. */
+async function refreshArea(area: string): Promise<void> {
+  try {
+    cards[area] = (await state.studio.items(area)).items;
+  } catch { /* keep what we have; the next full refresh corrects it */ }
+  drawCards();
+  drawCentre();
+  drawGen();
+  checkUnresolved();
+  touchQuiet();
+}
+
 // --- the card lists -------------------------------------------------------------
 
 /** The active cards of one area, in (order, path) order - what a run sends. */
@@ -182,14 +221,34 @@ function activeOf(area: string): string[] {
     .map((i) => i.path);
 }
 
+// Which card sections are folded. Fragments especially grow into the dozens,
+// and four always-open lists made the left column a scroll hunt.
+const SECT_KEY = 'hina.studioSections';
+let sectOpen: Record<string, boolean> = {};
+try { sectOpen = JSON.parse(localStorage.getItem(SECT_KEY) || '{}') as Record<string, boolean> || {}; }
+catch { /* storage may be unavailable in the iframe */ }
+function sectionOpen(area: string): boolean {
+  return sectOpen[area] !== false;
+}
+function toggleSection(area: string): void {
+  sectOpen[area] = !sectionOpen(area);
+  try { localStorage.setItem(SECT_KEY, JSON.stringify(sectOpen)); } catch { /* fine */ }
+  drawCards();
+}
+
 function drawCards(): void {
   if (!cardsMount) return;
   clear(cardsMount);
   for (const spec of CARD_AREAS) {
     const rows = cards[spec.area] ?? [];
-    const head = el('div', { class: 'row', style: { padding: '4px 6px 0' } }, [
+    const openNow = sectionOpen(spec.area);
+    const head = el('div', { class: 'row secthead', style: { padding: '4px 6px 0', cursor: 'pointer' },
+                            title: openNow ? '접기' : '펼치기' }, [
+      el('span', { class: 'hint', text: openNow ? '▾' : '▸' }),
       el('span', { class: 'sectiontitle grow', text: spec.label }),
+      el('span', { class: 'hint', text: String(rows.length) }),
     ]);
+    head.addEventListener('click', () => toggleSection(spec.area));
     if (spec.area === 'fragments' && unresolvedRefs.length) {
       head.appendChild(el('span', {
         class: 'badge err', text: `미해결 ${unresolvedRefs.length}`,
@@ -197,10 +256,11 @@ function drawCards(): void {
       }));
     }
     const add = el('button', { class: 'ghost tiny', text: '＋', title: '새 카드' });
-    add.addEventListener('click', () => void newCard(spec.area));
+    add.addEventListener('click', (e) => { e.stopPropagation(); void newCard(spec.area); });
     head.appendChild(add);
     cardsMount.appendChild(head);
 
+    if (!openNow) continue;
     if (!rows.length) {
       cardsMount.appendChild(el('div', { class: 'hint', style: { padding: '0 10px 4px' }, text: '(없음)' }));
       continue;
@@ -240,8 +300,13 @@ function cardRow(spec: { area: string; toggle: boolean }, it: StudioItem): HTMLE
           notice('바꾸지 못했습니다: ' + msg(e), 'err');
           throw e;
         }
-        await refresh();
+        // One meta write changed one row: update it in memory and redraw,
+        // instead of the full five-request library re-read per checkbox.
+        it.enabled = v;
+        drawCards();
         drawGen();
+        checkUnresolved();
+        touchQuiet();
       },
     } : undefined,
     onClick: () => {
@@ -299,7 +364,7 @@ async function newCard(area: string): Promise<void> {
       await state.uploadFile(path.split('/').pop()!, front, false, `studio/${area}`);
       selectedFile = path;
     }
-    await refresh();
+    await refreshArea(area);
   } catch (e) {
     notice('만들지 못했습니다: ' + msg(e), 'err');
   }
@@ -759,7 +824,7 @@ function drawCardEditor(path: string): void {
     try {
       await state.deleteFile(path);
       selectedFile = '';
-      await refresh();
+      await refreshArea(path.split('/')[1]);
     } catch (e) { out.textContent = msg(e); }
   });
 
@@ -786,8 +851,7 @@ function drawCardEditor(path: string): void {
         } catch (e) { out.textContent = '이름은 저장됐지만 파일명 변경은 실패했습니다: ' + msg(e); }
       }
       if (!out.textContent) out.textContent = '저장했습니다.';
-      await refresh();
-      drawGen();
+      await refreshArea(isStyle ? 'styles' : 'fragments');
     } catch (e) {
       out.textContent = msg(e);
     } finally { save.disabled = false; }
@@ -1043,8 +1107,7 @@ function drawCharacterEditor(dir: string): void {
       }, null, 2), false, target);
       notice(`캐릭터 “${nm}” 를 저장했습니다.`, 'ok');
       selectedFile = target;
-      await refresh();
-      drawGen();
+      await refreshArea('characters');
     } catch (e) {
       out.textContent = msg(e);
     } finally { save.disabled = false; }
@@ -1056,7 +1119,7 @@ function drawCharacterEditor(dir: string): void {
     try {
       await state.deleteFile(dir);
       selectedFile = '';
-      await refresh();
+      await refreshArea('characters');
     } catch (e) { out.textContent = msg(e); }
   });
 
@@ -1225,7 +1288,7 @@ function drawSceneEditor(path: string): void {
     try {
       await state.deleteFile(path);
       selectedFile = '';
-      await refresh();
+      await refreshArea(path.split('/')[1]);
     } catch (e) { out.textContent = msg(e); }
   });
 
@@ -1248,8 +1311,7 @@ function drawSceneEditor(path: string): void {
         } catch (e) { out.textContent = '이름은 저장됐지만 파일명 변경은 실패했습니다: ' + msg(e); }
       }
       if (!out.textContent) out.textContent = '저장했습니다.';
-      await refresh();
-      drawGen();
+      await refreshArea('scenes');
     } catch (e) {
       out.textContent = msg(e);
     } finally { save.disabled = false; }
@@ -1296,7 +1358,7 @@ function drawRawFile(path: string): void {
     try {
       await state.deleteFile(path);
       selectedFile = '';
-      await refresh();
+      await refreshArea(path.split('/')[1]);
     } catch (e) { out.textContent = msg(e); }
   });
   let form: HTMLElement | null = null;
@@ -1313,8 +1375,7 @@ function drawRawFile(path: string): void {
       const fname = path.slice(path.lastIndexOf('/') + 1);
       await state.uploadFile(fname, box.value, false, dir);
       out.textContent = '저장했습니다.';
-      await refresh();
-      drawGen();
+      await refreshArea(path.split('/')[1]);
     } catch (e) {
       out.textContent = msg(e);
     } finally { save.disabled = false; }
@@ -1392,6 +1453,9 @@ async function pollJob(): Promise<void> {
         j.state === 'error' ? 'err' : 'ok');
       jobId = '';
       stop();
+      // The batch wrote images: the files tab gets the news (and the unseen
+      // badge) while we re-read our own slice.
+      touchQuiet(p?.saved ?? []);
       await refresh();
       await loadStatus();
       return;
@@ -1570,6 +1634,7 @@ function exportButton(node: Folder): HTMLElement {
     try {
       const r = await state.studio.exportSelected(node.path, gen.characterName, gen.pattern);
       notice(`${r.folder} — 채택 ${r.used}, 수정 ${r.inpaint}, 빈 슬롯 ${r.empty}`, 'ok');
+      touchQuiet();
       await refresh();
     } catch (e) {
       notice('내보내지 못했습니다: ' + msg(e), 'err');
@@ -1613,7 +1678,7 @@ function newFolderButton(node: Folder): HTMLElement {
     if (!name) return;
     b.disabled = true;
     void state.mkdirFile(node.path + '/' + name)
-      .then(() => { open.add(node.path); return refresh(); })
+      .then(() => { open.add(node.path); touchQuiet(); return refresh(); })
       .catch((e) => notice('폴더를 만들지 못했습니다: ' + msg(e), 'err'))
       .finally(() => { b.disabled = false; });
   });
@@ -1631,6 +1696,7 @@ function fileRow(f: WorkspaceFile): HTMLElement {
     del.disabled = true;
     try {
       await state.deleteFile(f.path);
+      touchQuiet();
       await refresh();
     } catch (e) {
       del.disabled = false;
