@@ -15,13 +15,34 @@
 import { el, clear } from '../dom';
 import { state, type GroupItem, type SelectionMap, type SelectionState,
          type StudioGroups, type WorkspaceFile } from '../../state';
-import { S, hub, gen, msg, type Folder } from './store';
+import { S, hub, gen, msg, adjustReserve, activeCast, castById, type Folder } from './store';
+import { scenesOf } from './center-batch';
 
 let groups: StudioGroups | null = null;
 let selection: SelectionMap = {};
 let columns = 3;
 let drill = '';
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
+let patternTimer: ReturnType<typeof setTimeout> | null = null;
+
+// The regex and the group-by field, remembered PER FOLDER: a costume-emotion
+// folder and a plain emotion folder read by different rules (4.14).
+interface GroupPrefs { pattern: string; groupBy: string }
+const PREFS_KEY = 'hina.studioGroupBy';
+let prefs: Record<string, GroupPrefs> = {};
+try {
+  const saved = JSON.parse(localStorage.getItem(PREFS_KEY) || 'null') as Record<string, GroupPrefs> | null;
+  if (saved && typeof saved === 'object') prefs = saved;
+} catch { /* storage may be unavailable in the iframe */ }
+
+function prefsFor(folder: string): GroupPrefs {
+  return prefs[folder] ?? { pattern: gen.pattern, groupBy: 'emotion' };
+}
+
+function setPrefs(folder: string, next: GroupPrefs): void {
+  prefs[folder] = next;
+  try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch { /* fine */ }
+}
 
 /** Whether the loaded groups belong to this folder - drawCentre's gate. */
 export function hasGroups(folder: string): boolean {
@@ -30,7 +51,8 @@ export function hasGroups(folder: string): boolean {
 
 export async function loadGroups(folder: string): Promise<void> {
   try {
-    groups = await state.studio.group(folder, gen.pattern);
+    const p = prefsFor(folder);
+    groups = await state.studio.group(folder, p.pattern, p.groupBy);
     selection = {};
     for (const g of [...groups.groups.map((x) => x.items), groups.unmatched].flat()) {
       selection[g.filename] = { ...g.selection };
@@ -89,13 +111,55 @@ export function drawSelector(node: Folder): void {
   viewMount.appendChild(bar);
 
   // A pattern box with a live count: the regex is the thing most likely to be
-  // wrong, so how many files it reads is on screen while you edit it.
-  const pat = el('input', { value: gen.pattern, placeholder: g.pattern }) as HTMLInputElement;
-  pat.addEventListener('change', () => { gen.pattern = pat.value; void loadGroups(S.selected); });
-  viewMount.appendChild(el('div', { class: 'row', style: { marginBottom: '8px' } }, [
+  // wrong, so how many files it reads is on screen while you edit it - and a
+  // group-by picker over the fields the regex actually produced, so one
+  // costume-emotion folder can be read by 복장 today and 감정 tomorrow (4.14).
+  const cur = prefsFor(node.path);
+  const pat = el('input', {
+    value: cur.pattern, placeholder: g.pattern,
+    title: '명명 캡처그룹 정규식 — 예: (?P<costume>[^-]+)-(?P<emotion>[^-]+)',
+  }) as HTMLInputElement;
+  pat.addEventListener('input', () => {
+    if (patternTimer) clearTimeout(patternTimer);
+    patternTimer = setTimeout(() => {
+      setPrefs(node.path, { ...prefsFor(node.path), pattern: pat.value });
+      void loadGroups(node.path);
+    }, 800);
+  });
+  const by = el('select', { title: '어느 필드로 묶어 볼지' }) as HTMLSelectElement;
+  const fields = [...new Set([g.groupBy, ...(g.fields ?? [])])];
+  for (const f of fields) {
+    const o = el('option', { value: f, text: f });
+    if (f === g.groupBy) o.setAttribute('selected', 'selected');
+    by.appendChild(o);
+  }
+  by.addEventListener('change', () => {
+    setPrefs(node.path, { ...prefsFor(node.path), groupBy: by.value });
+    drill = '';
+    void loadGroups(node.path);
+  });
+  viewMount.appendChild(el('div', { class: 'row', style: { marginBottom: '8px', flexWrap: 'wrap' } }, [
     el('span', { class: 'hint', text: '이름 규칙' }), pat,
+    el('span', { class: 'hint', text: '그룹 기준' }), by,
     el('span', { class: 'hint', text: `읽음 ${g.total - g.unmatched.length} / 못 읽음 ${g.unmatched.length}` }),
   ]));
+
+  // 부족분: groups where nothing is chosen and nothing is being fixed - the
+  // slots the export would leave a placeholder for. One button turns them
+  // into reservations, closing the cycle: 분류 → 부족분 → 다음 배치 (feedback).
+  const missing = g.groups
+    .filter((grp) => !grp.items.some((i) => selection[i.filename]?.use || selection[i.filename]?.inpaint))
+    .map((grp) => grp.key);
+  if (missing.length) {
+    const fill = el('button', { class: 'ghost tiny', text: '부족분 예약에 담기',
+      title: '씬 프리셋에서 같은 이름의 씬을 찾아 (지금 출연 × 1장) 씩 배치 예약에 넣습니다' }) as HTMLButtonElement;
+    fill.addEventListener('click', () => void reserveMissing(missing, fill));
+    viewMount.appendChild(el('div', { class: 'row', style: { marginBottom: '8px' } }, [
+      el('span', { class: 'badge warn', text: `부족분 ${missing.length}개` }),
+      el('span', { class: 'hint grow', text: missing.join(', ') }),
+      fill,
+    ]));
+  }
 
   if (drill) {
     const grp = g.groups.find((x) => x.key === drill);
@@ -172,6 +236,27 @@ function candidate(it: GroupItem): HTMLElement {
   return cell2;
 }
 
+/** Missing slots become reservations: same-named scenes in the current
+ * preset, current cast, one each. Names with no scene are reported. */
+async function reserveMissing(missing: string[], btn: HTMLButtonElement): Promise<void> {
+  if (!gen.scenePreset) {
+    hub.notice('씬 프리셋이 없습니다 — 배치 탭에서 프리셋을 먼저 고르세요.', 'err');
+    return;
+  }
+  btn.disabled = true;
+  try {
+    const known = new Set((await scenesOf(gen.scenePreset)).map((s) => s.name));
+    const found = missing.filter((k) => known.has(k));
+    const lost = missing.filter((k) => !known.has(k));
+    for (const k of found) adjustReserve(gen.scenePreset, k, activeCast, +1);
+    const castName = activeCast ? (castById(activeCast)?.name ?? '') : '활성 캐릭터';
+    hub.notice(
+      (found.length ? `${found.length}개를 배치 예약에 담았습니다 (${castName} × 1장씩). ` : '')
+      + (lost.length ? `프리셋에 같은 이름의 씬이 없는 것: ${lost.join(', ')}` : ''),
+      found.length ? 'ok' : 'err');
+  } finally { btn.disabled = false; }
+}
+
 function exportButton(node: Folder): HTMLElement {
   const b = el('button', { class: 'ghost tiny', text: '내보내기' }) as HTMLButtonElement;
   b.addEventListener('click', async () => {
@@ -179,7 +264,8 @@ function exportButton(node: Folder): HTMLElement {
     try {
       // No character prefix: the filenames in the folder already carry the
       // cast/card name, and the export's canonical names key on the group.
-      const r = await state.studio.exportSelected(node.path, '', gen.pattern);
+      const p = prefsFor(node.path);
+      const r = await state.studio.exportSelected(node.path, '', p.pattern, p.groupBy);
       hub.notice(`${r.folder} — 채택 ${r.used}, 수정 ${r.inpaint}, 빈 슬롯 ${r.empty}`, 'ok');
       hub.touchQuiet();
       await hub.refresh();

@@ -2751,6 +2751,39 @@ console.log('\ntest_studio_selector');
   check('choosing one marks it', !!document.querySelector('.selcell.picked'));
   check('and the group stops reading 미선택',
         (document.querySelector('.panel.active')?.textContent || '').includes('선택 1'));
+
+  // Groups with nothing chosen surface as 부족분 - the export placeholders,
+  // shown before the export, with a button that reserves them for the next
+  // batch (the 분류 → 부족분 → 다음 배치 cycle).
+  check('unchosen groups surface as 부족분',
+        /부족분/.test(text()) && !!findButton(document.querySelector('.panel.active .left'), '부족분 예약에 담기'),
+        text().slice(0, 300));
+
+  // 4.14: the same folder re-reads by another parsed field (Group by).
+  const by = document.querySelector('.panel.active select[title="어느 필드로 묶어 볼지"]');
+  check('a group-by picker offers the parsed fields',
+        !!by && [...(by?.querySelectorAll('option') ?? [])].some((o) => o.value === 'character'),
+        [...(by?.querySelectorAll('option') ?? [])].map((o) => o.value).join(','));
+  // linkedom's select.value has no setter: selectedness rides the options.
+  const pickOption = (sel, value) => {
+    for (const o of sel.querySelectorAll('option')) {
+      if (o.value === value) o.setAttribute('selected', 'selected');
+      else o.removeAttribute('selected');
+    }
+    sel.dispatchEvent(new window.Event('change', { bubbles: true }));
+  };
+  if (by) {
+    pickOption(by, 'character');
+    await settle(1400);
+    check('regrouping by character gathers the files under one key',
+          /하나 · 3장/.test(text()), text().slice(0, 260));
+    // Back to emotion so later runs read the folder the usual way.
+    const by2 = document.querySelector('.panel.active select[title="어느 필드로 묶어 볼지"]');
+    if (by2) {
+      pickOption(by2, 'emotion');
+      await settle(1000);
+    }
+  }
 }
 
 console.log('\ntest_files_copy_and_previews');

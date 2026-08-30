@@ -624,11 +624,11 @@ class StudioFiles {
     return await transport.post('/studio/rename', { folder, rename });
   }
 
-  async exportSelected(folder: string, character: string, pattern = ''): Promise<{
+  async exportSelected(folder: string, character: string, pattern = '', groupBy = 'emotion'): Promise<{
     folder: string; used: number; inpaint: number; empty: number;
     groups: number; unmatched: number;
   }> {
-    return await transport.post('/studio/export', { folder, character, pattern });
+    return await transport.post('/studio/export', { folder, character, pattern, groupBy });
   }
 
   /** Check library images for adoption (PNG-ness, size). Nothing is copied:

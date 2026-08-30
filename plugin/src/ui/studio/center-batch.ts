@@ -31,7 +31,7 @@ let liveSection: HTMLElement | null = null;
 /** Scene lists per preset file, re-read when the library rev moves. */
 const sceneCache = new Map<string, { rev: number; scenes: { name: string; prompt: string }[] }>();
 
-async function scenesOf(preset: string): Promise<{ name: string; prompt: string }[]> {
+export async function scenesOf(preset: string): Promise<{ name: string; prompt: string }[]> {
   const hit = sceneCache.get(preset);
   if (hit && hit.rev === state.filesRev) return hit.scenes;
   try {
