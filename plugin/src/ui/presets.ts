@@ -11,7 +11,8 @@
  * both are whole tasks. An editor with a dozen fields unfolding inside a
  * settings page pushes everything else off screen.
  */
-import { el, clear, armed, modal, setSelected, selectedValue, popover } from './dom';
+import { el, clear, modal, setSelected, selectedValue, popover } from './dom';
+import { pickerRow, openListPicker, type PickerEntry } from './pickers';
 import { state, type AgentPreset, type ApiKeyEntry, type CatalogModel, type ProviderProfile, type WebsearchMode, type WebsearchStatus } from '../state';
 import { transport } from '../transport';
 
@@ -68,40 +69,22 @@ export function buildPresetsCard(opts: PresetsCardOptions): HTMLElement {
     await opts.onChanged();
   };
 
+  // One chevron: the list behind it is where 선택, 수정 and 삭제 live, next
+  // to 추가. The current row only says what is running.
   const currentRow = (kind: Kind, p: AgentPreset | null, total: number): HTMLElement => {
-    const pick = el('button', { class: 'ghost', text: `선택 (${total})`, title: '저장된 프리셋 목록' });
-    pick.addEventListener('click', () => openPicker(kind, refresh, say));
+    const onOpen = () => openPicker(kind, refresh, say);
     if (!p) {
-      // Same shape as the filled row: the chevron opens the list (which has
-      // 추가 at the bottom), so both agents are picked the same way.
-      const open = el('button', { class: 'ghost chev', text: '›', title: total ? `저장된 프리셋 ${total}개 — 선택 · 추가` : '프리셋 추가' });
-      open.addEventListener('click', () => openPicker(kind, refresh, say));
-      void pick;
-      return el('div', { class: 'presetnow' }, [
-        el('div', { class: 'grow' }, [
-          el('div', { class: 'hint', text: '프리셋이 없습니다. › 에서 하나 만들어 주세요.' }),
-        ]),
-        open,
-      ]);
+      return pickerRow(null, {
+        title: total ? `저장된 프리셋 ${total}개 — 선택 · 추가` : '프리셋 추가',
+        emptyHint: '프리셋이 없습니다. › 에서 하나 만들어 주세요.',
+        onOpen,
+      });
     }
-    // One chevron: the list behind it is where 수정 and 삭제 live, next to
-    // 추가. The current row only says what is running.
-    const open = el('button', { class: 'ghost chev', text: '›', title: `저장된 프리셋 ${total}개 — 선택 · 수정 · 삭제 · 추가` });
-    open.addEventListener('click', () => openPicker(kind, refresh, say));
-    void pick;
-    const row = el('div', { class: 'presetnow' }, [
-      el('div', { class: 'grow' }, [
-        el('div', { class: 'presetnow-name' }, [
-          el('span', { text: p.name }),
-          !p.apiKey?.set && !p.keyRef && p.provider !== 'codex'
-            ? el('span', { class: 'badge warn', style: { marginLeft: '6px' }, text: '키 없음' })
-            : null,
-        ]),
-        el('div', { class: 'hint', text: summarise(p) }),
-      ]),
-      open,
-    ]);
-    return row;
+    return pickerRow({ name: p.name, hint: summarise(p), badges: keyBadges(p) }, {
+      title: `저장된 프리셋 ${total}개 — 선택 · 수정 · 삭제 · 추가`,
+      emptyHint: '',
+      onOpen,
+    });
   };
 
   // The same probe for both agents: plain answer, then a forced tool call.
@@ -361,84 +344,40 @@ function summarise(p: AgentPreset): string {
 
 // --- the picker ---------------------------------------------------------------
 
-function openPicker(kind: Kind, refresh: () => Promise<void>, say: (t: string, k?: 'ok' | 'err' | '') => void): void {
-  const listMount = el('div');
-  const body = el('div', {}, [
-    el('div', { class: 'hint', style: { marginBottom: '8px' } }, [
-      '선택하면 바로 적용됩니다.',
-    ]),
-    listMount,
-  ]);
-  const close = modal(`${KIND_LABEL[kind]} 프리셋 선택`, body);
+function keyBadges(p: AgentPreset): { text: string; cls: string }[] {
+  return !p.apiKey?.set && !p.keyRef && p.provider !== 'codex' ? [{ text: '키 없음', cls: 'warn' }] : [];
+}
 
-  const draw = async () => {
-    clear(listMount);
-    listMount.appendChild(el('div', { class: 'hint', text: '읽는 중입니다…' }));
-    try {
+function openPicker(kind: Kind, refresh: () => Promise<void>, say: (t: string, k?: 'ok' | 'err' | '') => void): void {
+  openListPicker({
+    title: `${KIND_LABEL[kind]} 프리셋 선택`,
+    load: async () => {
       const r = await state.presets();
       const mine = r.presets.filter((p) => p.kind === kind);
-      clear(listMount);
-      for (const p of mine) listMount.appendChild(row(p, mine.length));
-      const add = el('button', { class: 'primary', text: '새 프리셋 추가', style: { marginTop: '10px' } });
-      add.addEventListener('click', () => {
-        close();
-        openEditor(kind, null, refresh, say);
-      });
-      listMount.appendChild(add);
-    } catch (e) {
-      clear(listMount);
-      listMount.appendChild(el('div', { class: 'notice err', text: msg(e) }));
-    }
-  };
-
-  const row = (p: AgentPreset, total: number): HTMLElement => {
-    const pickArea = el('div', { class: 'grow' }, [
-      el('div', { class: 'pickname' }, [
-        el('span', { text: p.name }),
-        p.selected ? el('span', { class: 'badge ok', text: '사용 중' }) : null,
-        !p.apiKey?.set && !p.keyRef && p.provider !== 'codex' ? el('span', { class: 'badge warn', text: '키 없음' }) : null,
-      ]),
-      el('div', { class: 'hint', text: summarise(p) }),
-    ]);
-    // An explicit 선택, not a click on the row: the row also carries 수정
-    // and 삭제, and a choice that changes what the agent runs should be a
-    // button that says so.
-    const select = el('button', { class: 'primary tiny', text: p.selected ? '사용 중' : '선택' }) as HTMLButtonElement;
-    select.disabled = !!p.selected;
-    select.addEventListener('click', async () => {
-      try {
-        await state.selectPreset(p.id);
-        await refresh();
-        close();
-        say(`“${p.name}” 을(를) 쓰기 시작했습니다.`, 'ok');
-      } catch (e) {
-        say(msg(e), 'err');
-      }
-    });
-    const edit = el('button', { class: 'ghost tiny', text: '수정' });
-    edit.addEventListener('click', () => {
-      close();
-      openEditor(kind, p.id, refresh, say);
-    });
-    const del = el('button', { class: 'ghost tiny' });
-    armed(del, '삭제', '한 번 더', async () => {
-      try {
-        await state.deletePreset(p.id);
-        await draw();
-        await refresh();
-      } catch (e) {
-        // The backend refuses to delete the last general one; that is a rule
-        // worth stating in place rather than as a silent no-op.
-        clear(listMount);
-        listMount.appendChild(el('div', { class: 'notice err', text: msg(e) }));
-        setTimeout(() => void draw(), 2500);
-      }
-    });
-    if (kind === 'general' && total <= 1) del.style.display = 'none';
-    return el('div', { class: 'pickrow' + (p.selected ? ' on' : '') }, [pickArea, select, edit, del]);
-  };
-
-  void draw();
+      return mine.map((p): PickerEntry => ({
+        id: p.id,
+        name: p.name,
+        hint: summarise(p),
+        selected: !!p.selected,
+        badges: keyBadges(p),
+        // The backend refuses to delete the last general one; hiding the
+        // button states the rule instead of surfacing a refusal.
+        noDelete: kind === 'general' && mine.length <= 1,
+      }));
+    },
+    onSelect: async (entry) => {
+      await state.selectPreset(entry.id);
+      await refresh();
+      say(`“${entry.name}” 을(를) 쓰기 시작했습니다.`, 'ok');
+    },
+    onEdit: (entry) => openEditor(kind, entry.id, refresh, say),
+    onDelete: async (entry) => {
+      await state.deletePreset(entry.id);
+      await refresh();
+    },
+    onCreate: () => openEditor(kind, null, refresh, say),
+    createLabel: '새 프리셋 추가',
+  });
 }
 
 // --- the editor ---------------------------------------------------------------

@@ -26,6 +26,7 @@
  * matching subfolders; a dropped .zip is offered to be unpacked on arrival.
  */
 import { el, clear, armed, popover, refocusSearch, type ArmedControl } from './dom';
+import { treeRow, installDrop, type TreeNode, type TreeSpec, type Incoming } from './tree';
 import { state, type FileArea, type FileListing, type WorkspaceFile } from '../state';
 import { makeTab, type NoticeKind, type TabUi } from './kit';
 import { blobUrl, workspaceImage } from './blobimg';
@@ -105,7 +106,7 @@ const kitRender = makeTab({
     pane.left.appendChild(treeMount);
     viewMount = el('div', { class: 'pad filepad' });
     pane.centre.appendChild(viewMount);
-    installDrop(viewMount, () => uploadTarget());
+    installDrop(viewMount, { into: () => uploadTarget(), onFiles: (path, files) => void uploadMany(files, path) });
   },
   async refresh() {
     await refresh();
@@ -289,13 +290,14 @@ function drawTree(): void {
   // --- folders ---------------------------------------------------------------
   // The user areas always show, empty or not: an empty 프로젝트 is still the
   // place to drop the first file. Only a machine area hides when empty.
+  const spec = treeSpec();
   const roots = [...nodes.values()].filter((n) => !n.path.includes('/') && n.path !== DOCS_NODE);
   for (const root of roots) {
     if (root.path.startsWith('.') && !root.area.count && !root.kids.length) continue;
-    treeMount.appendChild(nodeRow(root, 0));
+    treeMount.appendChild(treeRow(toTreeNode(root, 0), 0, spec));
   }
   const docs = nodes.get(DOCS_NODE);
-  if (docs) treeMount.appendChild(nodeRow(docs, 0));
+  if (docs) treeMount.appendChild(treeRow(toTreeNode(docs, 0), 0, spec));
 
   // --- the hidden half -------------------------------------------------------
   const hidden = data.areas.filter((a) => !USER_AREAS.has(a.area) && a.count > 0);
@@ -327,38 +329,38 @@ function drawTree(): void {
   ]));
 }
 
-function nodeRow(n: Folder, depth: number): HTMLElement {
-  const isOpen = expanded.has(n.path);
-  const caret = el('button', { class: 'caret', text: n.kids.length ? (isOpen ? '▾' : '▸') : '' });
-  const count = n.files.length + n.kids.reduce((s, k) => s + countFiles(k), 0);
+function toTreeNode(n: Folder, depth: number): TreeNode {
   const [, why] = AREA_LABEL[n.area.area] ?? ['', ''];
-  const branch = el('button', {
-    class: 'treebranch' + (n.path === selectedDir ? ' on' : ''),
+  return {
+    path: n.path,
+    name: n.name,
+    kids: n.kids.map((k) => toTreeNode(k, depth + 1)),
+    count: countFiles(n),
+    glyph: n.virtual ? '📄' : undefined,
     title: n.virtual ? 'AI 작업 폴더(임시·스크립트)에 있는 문서입니다. 여기서 바로 볼 수 있습니다.' : (depth ? n.path : why),
-  }, [
-    el('span', { text: n.virtual ? '📄' : (isOpen && n.kids.length ? '📂' : '📁') }),
-    el('span', { class: 'grow', text: n.name, style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }),
-    el('span', { class: 'n', text: String(count) }),
-  ]);
-  branch.addEventListener('click', () => {
-    selectedDir = n.path;
-    previewPath = '';
-    selection.clear();
-    if (n.kids.length) expanded.add(n.path);
-    drawTree();
-    drawCentre();
-  });
-  caret.addEventListener('click', (e) => {
-    e.stopPropagation();
-    if (expanded.has(n.path)) expanded.delete(n.path); else expanded.add(n.path);
-    drawTree();
-  });
-  // A folder in the tree is a drop target of its own.
-  if (!n.virtual && USER_AREAS.has(n.area.area)) installDrop(branch, () => n.path);
+    // A folder in the tree is a drop target of its own.
+    droppable: !n.virtual && USER_AREAS.has(n.area.area),
+  };
+}
 
-  const kids = el('div', { class: 'treekids', style: { display: isOpen ? '' : 'none' } },
-    n.kids.map((k) => nodeRow(k, depth + 1)));
-  return el('div', {}, [el('div', { class: 'treerow' }, [caret, branch]), kids]);
+function treeSpec(): TreeSpec {
+  return {
+    expanded,
+    selected: selectedDir,
+    onOpen(node) {
+      selectedDir = node.path;
+      previewPath = '';
+      selection.clear();
+      if (node.kids.length) expanded.add(node.path);
+      drawTree();
+      drawCentre();
+    },
+    onToggle(node) {
+      if (expanded.has(node.path)) expanded.delete(node.path); else expanded.add(node.path);
+      drawTree();
+    },
+    onDropFiles: (path, files) => void uploadMany(files, path),
+  };
 }
 
 function countFiles(n: Folder): number {
@@ -760,62 +762,8 @@ async function downloadSelected(n: Folder): Promise<void> {
 }
 
 // --- upload ----------------------------------------------------------------------
-
-interface Incoming { file: File; rel: string }
-
-/** Drag-and-drop onto `target`; `into()` is read at drop time. */
-function installDrop(target: HTMLElement, into: () => string): void {
-  for (const kind of ['dragover', 'dragenter']) {
-    target.addEventListener(kind, (e) => {
-      const dt = (e as DragEvent).dataTransfer;
-      if (!dt || !Array.from(dt.types).includes('Files')) return;
-      e.preventDefault();
-      e.stopPropagation();
-      target.classList.add('dropping');
-    });
-  }
-  target.addEventListener('dragleave', (e) => {
-    if (!target.contains((e as DragEvent).relatedTarget as globalThis.Node | null)) target.classList.remove('dropping');
-  });
-  target.addEventListener('drop', async (e) => {
-    const dt = (e as DragEvent).dataTransfer;
-    target.classList.remove('dropping');
-    if (!dt) return;
-    e.preventDefault();
-    e.stopPropagation();
-    const files = await collectDrop(dt);
-    if (files.length) void uploadMany(files, into());
-  });
-}
-
-/** Files from a drop, folders walked so their structure comes along. */
-async function collectDrop(dt: DataTransfer): Promise<Incoming[]> {
-  const out: Incoming[] = [];
-  const items = Array.from(dt.items ?? []);
-  const entries = items
-    .map((it) => (it as DataTransferItem & { webkitGetAsEntry?: () => FileSystemEntry | null }).webkitGetAsEntry?.() ?? null)
-    .filter((x): x is FileSystemEntry => !!x);
-  if (!entries.length) {
-    for (const file of Array.from(dt.files)) out.push({ file, rel: '' });
-    return out;
-  }
-  const walk = async (entry: FileSystemEntry, rel: string): Promise<void> => {
-    if (entry.isFile) {
-      const file = await new Promise<File>((res, rej) => (entry as FileSystemFileEntry).file(res, rej));
-      out.push({ file, rel });
-    } else if (entry.isDirectory) {
-      const reader = (entry as FileSystemDirectoryEntry).createReader();
-      const sub = rel ? rel + '/' + entry.name : entry.name;
-      for (;;) {
-        const batch = await new Promise<FileSystemEntry[]>((res, rej) => reader.readEntries(res, rej));
-        if (!batch.length) break;
-        for (const child of batch) await walk(child, sub);
-      }
-    }
-  };
-  for (const entry of entries) await walk(entry, '');
-  return out;
-}
+// Drag-and-drop wiring (installDrop / collectDrop) lives in ./tree, shared
+// with the studio's output tree.
 
 /**
  * Upload a batch into `into` (a folder under uploads/ or out/), one request
