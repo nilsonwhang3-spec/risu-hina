@@ -42,7 +42,10 @@ HOST_KINDS = ("host_writeback", "host_save_copy",
               "host_card_writeback", "host_clone_bot", "host_open_tab",
               # Binary card material: the plugin saves the bytes into RisuAI
               # (saveAsset) and attaches the key to the live card at once.
-              "host_asset_add", "host_asset_replace")
+              "host_asset_add", "host_asset_replace",
+              # Many at once: one card, one card write on the plugin side.
+              # 37 single adds were 37 host reads and 37 card uploads.
+              "host_asset_add_many")
 
 
 class ActionError(ValueError):
@@ -111,7 +114,7 @@ def scope_of(action: dict) -> str:
     if kind in ("memory_edit", "memory_delete", "checkpoint_restore"):
         return "chat"
     if kind in ("card_edit", "card_greeting_add", "card_greeting_delete",
-                "script_edit", "script_add", "script_delete",
+                "script_edit", "script_add", "script_delete", "script_delete_many",
                 "card_checkpoint_restore"):
         return "card"
     if kind == "lore_add":
@@ -133,6 +136,8 @@ def decide(action_id: str, approve: bool) -> dict:
     if act["status"] != PENDING:
         raise ActionError(f"이미 처리된 작업입니다 ({act['status']})")
 
+    log.info("action decide id=%s kind=%s approve=%s summary=%s", action_id, act["kind"], approve,
+             str(act.get("summary") or "")[:120])
     if not approve:
         _finish(action_id, REJECTED, "")
         return {"id": action_id, "approved": False, "kind": act["kind"]}
@@ -170,6 +175,8 @@ def complete(action_id: str, ok: bool, detail: str = "") -> dict:
     act = get(action_id)
     if act is None:
         raise ActionError("없는 작업입니다")
+    (log.info if ok else log.warn)("action %s id=%s kind=%s detail=%s",
+                                   "done" if ok else "FAILED", action_id, act["kind"], detail[:300])
     _finish(action_id, DONE if ok else FAILED, detail[:500])
     return {"id": action_id, "status": DONE if ok else FAILED}
 
@@ -277,6 +284,25 @@ def _script_delete(a: dict) -> str:
     return "스크립트 항목을 지웠습니다"
 
 
+def _script_delete_many(a: dict) -> str:
+    """One approval for a whole list - an asset sweep is dozens of rows, and
+    a card per row was the complaint."""
+    from . import card
+    ids = [str(i) for i in (a["args"].get("ids") or []) if i]
+    done = 0
+    missing = []
+    for i in ids:
+        try:
+            card.delete_script(i)
+            done += 1
+        except Exception as e:  # noqa: BLE001
+            missing.append(f"{i}: {e}")
+    out = f"스크립트 항목 {done}개를 지웠습니다"
+    if missing:
+        out += f" (실패 {len(missing)}: " + "; ".join(missing[:5]) + ")"
+    return out
+
+
 def _card_checkpoint_create(a: dict) -> str:
     from . import snapshots
     label = a["args"].get("label")
@@ -305,6 +331,7 @@ EXECUTORS: dict[str, Callable[[dict], str]] = {
     "script_edit": _script_edit,
     "script_add": _script_add,
     "script_delete": _script_delete,
+    "script_delete_many": _script_delete_many,
     "card_checkpoint_create": _card_checkpoint_create,
     "card_checkpoint_restore": _card_checkpoint_restore,
 }

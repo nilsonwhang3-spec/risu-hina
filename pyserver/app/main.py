@@ -2330,8 +2330,17 @@ def _log(method: str, path: str, status: int, started: float, note: str = "") ->
         log.error(line)
     elif status >= 400:
         log.warn(line)
+    elif path in _CHATTY and ms < 2000:
+        # Thumbnail and poll traffic: hundreds of lines a minute that pushed
+        # a whole studio session out of the ring. Kept at debug; a slow or
+        # failing one still lands at info/warn above.
+        log.debug(line)
     else:
         log.info(line)
+
+
+_CHATTY = {"/assets/blob", "/files/download", "/workspace/dirty", "/studio/job",
+           "/studio/job/preview", "/health", "/actions", "/staged", "/permits"}
 
 
 @app.api_route("/{path:path}", methods=["GET", "POST", "OPTIONS"])

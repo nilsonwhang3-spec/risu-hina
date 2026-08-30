@@ -109,6 +109,8 @@ INSTRUCTIONS = """\
   않고 즉시 RisuAI 에 쓰이는 유일한 카드 변경이다(바이너리라 작업본이 없다). PNG 만 된다.
   에셋의 **이름·삭제**는 카드 재료다: list_scripts("assetref") 로 행을 보고 propose_regex_edit 와
   같은 문법(propose_script_delete / entry 교체)으로 고치면 반영 때 한 번에 쓰인다.
+  **여러 건은 한 제안으로**: 추가는 propose_assets_add(리스트), 삭제는 propose_scripts_delete(id 들)
+  — 건마다 카드를 만들면 승인이 카드 수만큼 느리고 화면이 카드로 덮인다.
   RisuAI 규칙: **같은 이름을 가진 에셋 여러 개 = 랜덤 풀**({{asset::이름}} 호출 때 무작위 1개).
   charx 파일명의 `_1`, `_2` 는 파일명 고유화용일 뿐 이름이 아니다. 이름 끝 `.png` 같은 확장자는
   보통 실수이며(호출은 확장자 없는 이름), 일괄 제거는 카드 도구가 한다.
@@ -826,8 +828,36 @@ def build() -> Agent[Deps]:
                         {"kind": "triggerscript", "entry": entry})
 
     @agent.tool
+    def propose_scripts_delete(ctx: RunContext[Deps], script_ids: str, reason: str) -> str:
+        """Regex / 트리거 / 에셋 참조(assetref) 항목 **여러 개**를 한 번에 지우자고 제안한다 (카드 1장).
+
+        script_ids: 쉼표로 이은 id 들. 둘 이상 지울 때는 반드시 이걸 쓴다 — 한 건씩
+        propose_script_delete 를 부르면 카드가 그 수만큼 쌓인다.
+        """
+        ids = [s.strip() for s in (script_ids or "").split(",") if s.strip()]
+        if not ids:
+            return "script_ids 가 비었습니다"
+        kinds: dict[str, int] = {}
+        missing = []
+        for i in ids:
+            cur = cardmod.script_entry(i)
+            if cur is None:
+                missing.append(i)
+                continue
+            k = "Regex" if cur["kind"] == "customscript" else ("에셋 참조" if cur["kind"] == "assetref" else "트리거")
+            kinds[k] = kinds.get(k, 0) + 1
+        keep = [i for i in ids if i not in missing]
+        if not keep:
+            return "없는 스크립트 항목입니다: " + ", ".join(missing[:5])
+        label = ", ".join(f"{k} {n}개" for k, n in kinds.items())
+        out = _propose(ctx, "script_delete_many", f"{label} 삭제 — {reason}", {"ids": keep})
+        if missing:
+            out += f" (없는 id {len(missing)}개는 제외)"
+        return out
+
+    @agent.tool
     def propose_script_delete(ctx: RunContext[Deps], script_id: str, reason: str) -> str:
-        """Regex 또는 트리거 항목 삭제를 제안한다."""
+        """Regex 또는 트리거 항목 삭제를 제안한다 (여러 개면 propose_scripts_delete)."""
         cur = cardmod.script_entry(script_id)
         if cur is None:
             return "없는 스크립트 항목입니다"
@@ -935,6 +965,45 @@ def build() -> Agent[Deps]:
         return _propose(ctx, "host_asset_add",
                         f"에셋 추가 “{name}” ({field}, {info['size'] // 1024}KB) — {reason}",
                         {"name": name, "path": info["path"], "field": field, "ext": "png"})
+
+    @agent.tool
+    def propose_assets_add(ctx: RunContext[Deps], items_json: str, reason: str,
+                           field: str = "additional") -> str:
+        """여러 PNG 를 이 봇의 에셋으로 **한 번에** 추가하자고 제안한다 (제안 카드 1장).
+
+        items_json: `[{"name": "...", "path": "..."}, …]` — 둘 이상이면 반드시 이걸 쓴다.
+        (한 장씩 propose_asset_add 를 부르면 카드가 그 수만큼 쌓이고 승인도 그만큼 느리다.)
+        field: additional | emotion. 승인되면 플러그인이 전부 저장하고 카드에 한 번에 붙인다.
+        """
+        if field not in ("additional", "emotion"):
+            return "field 는 additional 또는 emotion 이어야 합니다"
+        try:
+            rows = json.loads(items_json)
+        except ValueError as e:
+            return f"items_json 을 읽지 못했습니다: {e}"
+        if not isinstance(rows, list) or not rows:
+            return "items_json 은 비어 있지 않은 리스트여야 합니다"
+        items, bad = [], []
+        for r in rows:
+            name = str((r or {}).get("name") or "").strip()
+            path = str((r or {}).get("path") or "")
+            if not name or not path:
+                bad.append(f"{r!r}: name/path 필요")
+                continue
+            try:
+                info = assets.stage_file(path)
+            except (assets.AssetError, files.FileError) as e:
+                bad.append(f"{path}: {e}")
+                continue
+            items.append({"name": name, "path": info["path"], "field": field, "ext": "png"})
+        if not items:
+            return "추가할 수 있는 항목이 없습니다: " + "; ".join(bad[:5])
+        out = _propose(ctx, "host_asset_add_many",
+                       f"에셋 {len(items)}건 추가 ({field}) — {reason}",
+                       {"items": items, "field": field})
+        if bad:
+            out += f" 제외 {len(bad)}건: " + "; ".join(bad[:5])
+        return out
 
     # --- 에셋 스튜디오 --------------------------------------------------------
     #

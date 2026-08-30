@@ -1709,7 +1709,10 @@ class AppState {
         this.emit();
         detail = '탭을 이동했습니다.';
       } else if (r.host.kind === 'host_asset_add' || r.host.kind === 'host_asset_replace') {
-        detail = await this.applyAssetAction(r.host.kind, r.host.args ?? {});
+        detail = await this.applyAssetActions(r.host.kind, [r.host.args ?? {}]);
+      } else if (r.host.kind === 'host_asset_add_many') {
+        const items = Array.isArray(r.host.args?.items) ? (r.host.args.items as Record<string, unknown>[]) : [];
+        detail = await this.applyAssetActions('host_asset_add', items);
       } else {
         throw new Error('플러그인이 모르는 작업입니다: ' + r.host.kind);
       }
@@ -2017,62 +2020,82 @@ class AppState {
   }
 
   /**
-   * An approved asset proposal: bytes from the workspace -> RisuAI's asset
+   * Approved asset proposals: bytes from the workspace -> RisuAI's asset
    * store (saveAsset, which names the key) -> the live card's reference
    * list -> the backend store under that key. Written to RisuAI at once,
    * unlike text: binary material has no working copy to stage in, and the
    * card re-upload afterwards makes the new reference the baseline.
+   *
+   * MANY items ride ONE host read, ONE card write and ONE re-upload: 37
+   * additions used to be 37 host round trips and 37 card uploads, each of
+   * which also restarted the asset sync - that is the "hangs at the 20s
+   * mark" the user saw, the sync being cancelled and restarted under load.
    */
-  private async applyAssetAction(kind: string, args: Record<string, unknown>): Promise<string> {
+  private async applyAssetActions(kind: string, list: Record<string, unknown>[]): Promise<string> {
     if (!this.isLiveBot || !this.slot) {
       throw new Error('에셋을 넣으려면 RisuAI에서 이 봇이 선택되어 있어야 합니다');
     }
-    const name = String(args.name || '').trim();
-    const path = String(args.path || '');
-    const field = String(args.field || 'additional');
-    if (!name || !path) throw new Error('에셋 이름과 파일 경로가 필요합니다');
-    const bytes = await transport.getBinary('/files/download', { path });
-    if (!(bytes[0] === 0x89 && bytes[1] === 0x50)) throw new Error('PNG 파일만 에셋으로 넣을 수 있습니다');
-    const key = await Risuai.saveAsset(bytes);
-    if (!key || typeof key !== 'string') throw new Error('RisuAI 가 에셋 키를 돌려주지 않았습니다');
+    if (!list.length) throw new Error('넣을 에셋이 없습니다');
+    const t0 = Date.now();
+    // 1. Bytes in, keys out - one saveAsset per image (the host names keys).
+    const saved: { name: string; path: string; field: string; key: string }[] = [];
+    const failed: string[] = [];
+    for (const args of list) {
+      const name = String(args.name || '').trim();
+      const path = String(args.path || '');
+      const field = String(args.field || 'additional');
+      if (!name || !path) { failed.push(`${name || path}: 이름/경로 없음`); continue; }
+      try {
+        const bytes = await transport.getBinary('/files/download', { path });
+        if (!(bytes[0] === 0x89 && bytes[1] === 0x50)) throw new Error('PNG 파일만 에셋으로 넣을 수 있습니다');
+        const key = await Risuai.saveAsset(bytes);
+        if (!key || typeof key !== 'string') throw new Error('RisuAI 가 에셋 키를 돌려주지 않았습니다');
+        saved.push({ name, path, field, key });
+      } catch (e) {
+        failed.push(`${name}: ${e instanceof Error ? e.message : String(e)}`);
+        void clientLog('warn', 'asset save failed', { name, path, error: String(e) });
+      }
+    }
+    if (!saved.length) throw new Error('에셋을 하나도 저장하지 못했습니다: ' + failed.join('; '));
 
+    // 2. One card update carrying every reference.
     const slot = await host.currentSlot();
     const fresh = await host.readCharacter(slot.characterIndex);
     const update: host.CardUpdate = {};
     let placed = '';
     if (kind === 'host_asset_add') {
-      if (field === 'emotion') {
-        const list = Array.isArray(fresh['emotionImages']) ? [...(fresh['emotionImages'] as unknown[])] : [];
-        list.push([name, key]);
-        update.emotionImages = list;
-        placed = '감정 이미지';
-      } else {
-        const list = Array.isArray(fresh['additionalAssets']) ? [...(fresh['additionalAssets'] as unknown[])] : [];
-        list.push([name, key, 'png']);
-        update.additionalAssets = list;
-        placed = '추가 에셋';
+      const emo = Array.isArray(fresh['emotionImages']) ? [...(fresh['emotionImages'] as unknown[])] : [];
+      const add = Array.isArray(fresh['additionalAssets']) ? [...(fresh['additionalAssets'] as unknown[])] : [];
+      let nEmo = 0;
+      let nAdd = 0;
+      for (const s of saved) {
+        if (s.field === 'emotion') { emo.push([s.name, s.key]); nEmo += 1; }
+        else { add.push([s.name, s.key, 'png']); nAdd += 1; }
       }
+      if (nEmo) update.emotionImages = emo;
+      if (nAdd) update.additionalAssets = add;
+      placed = [nEmo ? `감정 이미지 ${nEmo}` : '', nAdd ? `추가 에셋 ${nAdd}` : ''].filter(Boolean).join(' · ');
     } else {
       // Replace: same name, new key, wherever the name lives. CBS references
       // the name, so nothing else in the card has to change.
+      const keyOf = new Map(saved.map((s) => [s.name, s.key]));
       let hits = 0;
       const swap = (arr: unknown, at: number): unknown[] | null => {
         if (!Array.isArray(arr)) return null;
-        const next = arr.map((e) => {
-          if (Array.isArray(e) && String(e[0]) === name) { hits += 1; const c = [...e]; c[at] = key; return c; }
+        return arr.map((e) => {
+          if (Array.isArray(e) && keyOf.has(String(e[0]))) { hits += 1; const c = [...e]; c[at] = keyOf.get(String(e[0])); return c; }
           return e;
         });
-        return next;
       };
       const emo = swap(fresh['emotionImages'], 1);
       const add = swap(fresh['additionalAssets'], 1);
       const cc = Array.isArray(fresh['ccAssets'])
         ? (fresh['ccAssets'] as { name?: unknown; uri?: unknown }[]).map((c) => {
-          if (c && typeof c === 'object' && String(c.name) === name) { hits += 1; return { ...c, uri: key }; }
+          if (c && typeof c === 'object' && keyOf.has(String(c.name))) { hits += 1; return { ...c, uri: keyOf.get(String(c.name)) }; }
           return c;
         })
         : null;
-      if (!hits) throw new Error(`이름이 “${name}” 인 에셋이 카드에 없습니다`);
+      if (!hits) throw new Error(`이름이 “${saved.map((s) => s.name).join(', ')}” 인 에셋이 카드에 없습니다`);
       if (emo) update.emotionImages = emo;
       if (add) update.additionalAssets = add;
       if (cc) update.ccAssets = cc;
@@ -2084,16 +2107,25 @@ class AppState {
     if (!w.verified) {
       throw new Error('카드에 에셋이 반영되지 않았습니다: ' + (w.drift || '재확인 실패'));
     }
-    try {
-      await transport.post('/assets/adopt', { charKey: this.activeCharKey, key, path, name, field });
-    } catch (e) {
-      void clientLog('warn', 'assets/adopt failed', { error: String(e) });
+    // 3. The backend store learns the keys (one call per item is fine: these
+    // are small and the store is local).
+    for (const s of saved) {
+      try {
+        await transport.post('/assets/adopt', { charKey: this.activeCharKey, key: s.key, path: s.path, name: s.name, field: s.field });
+      } catch (e) {
+        void clientLog('warn', 'assets/adopt failed', { name: s.name, error: String(e) });
+      }
     }
-    // The card changed in RisuAI: re-read so the baseline (and the manifest)
-    // carry the new reference, without disturbing the text working copy.
+    // 4. The card changed in RisuAI: re-read ONCE so the baseline (and the
+    // manifest) carry the new references, without disturbing the text
+    // working copy.
     await this.readHost();
     await this.upload();
-    return `에셋 “${name}” 을 RisuAI 에 저장하고 카드에 붙였습니다 (${placed}, ${key}).`;
+    void clientLog('info', 'assets applied', { kind, saved: saved.length, failed: failed.length, ms: Date.now() - t0 });
+    const head = saved.length === 1
+      ? `에셋 “${saved[0].name}” 을 RisuAI 에 저장하고 카드에 붙였습니다 (${placed}, ${saved[0].key}).`
+      : `에셋 ${saved.length}건을 RisuAI 에 저장하고 카드에 한 번에 붙였습니다 (${placed}).`;
+    return head + (failed.length ? ` 실패 ${failed.length}건: ${failed.slice(0, 5).join('; ')}` : '');
   }
 
   /**

@@ -182,6 +182,10 @@ export function syncAssets(
   const sleep = (ms: number) => new Promise<void>((res) => setTimeout(res, ms));
 
   const done = (async (): Promise<SyncProgress> => {
+    // Which call failed is the useful half of a sync error - "20초" alone
+    // named nothing. The status polls also get the upload budget: a backend
+    // busy hashing a big store answered them in more than the default 20s.
+    let step = 'manifest';
     try {
       const refs = extractAssetRefs(char);
       p.total = refs.length;
@@ -198,15 +202,17 @@ export function syncAssets(
       // what is left - that is the list we have to read ourselves.
       if (m.pulling) {
         p.phase = 'pulling';
+        step = 'status(pulling)';
         report();
         while (!cancelled) {
           await sleep(opts.pollMs ?? 1500);
-          const s = await transport.get<StatusReply>('/assets/status', { charKey });
+          const s = await transport.get<StatusReply>('/assets/status', { charKey }, 180_000);
           absorb(s);
           report();
           if (!s.pulling) break;
         }
         if (cancelled) return finish('cancelled');
+        step = 'manifest(after pull)';
         m = await transport.upload<ManifestReply>('/assets/manifest', { charKey, refs, hubPull: false });
         absorb(m);
         report();
@@ -216,12 +222,14 @@ export function syncAssets(
       p.toPush = missing.length;
       if (missing.length) {
         p.phase = 'pushing';
+        step = `push(${missing.length})`;
         report();
         await push(missing);
         if (cancelled) return finish('cancelled');
       }
 
-      const s = await transport.get<StatusReply>('/assets/status', { charKey });
+      step = 'status(final)';
+      const s = await transport.get<StatusReply>('/assets/status', { charKey }, 180_000);
       absorb(s);
       return finish('done');
     } catch (e) {
@@ -230,7 +238,7 @@ export function syncAssets(
         // nothing to gate on.
         return finish('unsupported', '백엔드에 에셋 스토어가 없습니다 (백엔드를 업데이트해 주세요)');
       }
-      return finish('error', e instanceof Error ? e.message : String(e));
+      return finish('error', `${step}: ` + (e instanceof Error ? e.message : String(e)));
     }
   })();
 

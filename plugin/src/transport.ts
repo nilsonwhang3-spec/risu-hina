@@ -186,14 +186,15 @@ export class Transport {
     return await this.raw('GET', '/health', undefined, { withToken: false });
   }
 
-  async get<T = unknown>(path: string, query?: Record<string, string | number | undefined>): Promise<T> {
+  async get<T = unknown>(path: string, query?: Record<string, string | number | undefined>,
+                         timeoutMs?: number): Promise<T> {
     const qs = query
       ? '?' + Object.entries(query)
           .filter(([, v]) => v !== undefined && v !== '')
           .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
           .join('&')
       : '';
-    return this.json<T>('GET', path + qs, undefined);
+    return this.json<T>('GET', path + qs, undefined, timeoutMs);
   }
 
   async post<T = unknown>(path: string, payload: unknown, timeoutMs?: number): Promise<T> {

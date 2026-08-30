@@ -34,8 +34,44 @@ _lock = threading.Lock()
 
 # Bounded on purpose: this is a debugging aid, not an archive, and an unbounded
 # buffer in a long-running process is a slow leak.
-RING_SIZE = 4000
+RING_SIZE = 8000
 _ring: deque[str] = deque(maxlen=RING_SIZE)
+
+# The ring alone lost the story once: a few minutes of thumbnail fetches
+# pushed a whole studio session out of it, and the service (NSSM, no stdout
+# redirect) kept nothing on disk. So every line also lands in
+# data/logs/risuhina.log, rotated by size, opened lazily so the log module
+# has no import-time dependency on config.
+FILE_MAX = 5 * 1024 * 1024
+FILE_KEEP = 5
+_file = None
+_file_path = None
+_file_failed = False
+
+
+def _sink(line: str) -> None:
+    global _file, _file_path, _file_failed
+    if _file_failed:
+        return
+    try:
+        if _file is None:
+            from . import config
+            d = config.DATA_DIR / "logs"
+            d.mkdir(parents=True, exist_ok=True)
+            _file_path = d / "risuhina.log"
+            _file = open(_file_path, "a", encoding="utf-8", buffering=1)
+        _file.write(line + "\n")
+        if _file_path is not None and _file.tell() > FILE_MAX:
+            _file.close()
+            _file = None
+            for i in range(FILE_KEEP - 1, 0, -1):
+                src = _file_path.with_name(f"risuhina.log.{i}")
+                dst = _file_path.with_name(f"risuhina.log.{i + 1}")
+                if src.exists():
+                    src.replace(dst)
+            _file_path.replace(_file_path.with_name("risuhina.log.1"))
+    except Exception:  # noqa: BLE001 - logging must never take the process down
+        _file_failed = True
 
 
 def _emit(level: str, msg: str, *args: Any) -> None:
@@ -48,6 +84,7 @@ def _emit(level: str, msg: str, *args: Any) -> None:
     with _lock:
         _ring.append(line)
         print(line, flush=True)
+        _sink(line)
 
 
 def recent(limit: int = 500, level: str = "") -> list[str]:
@@ -87,11 +124,11 @@ def debug(msg: str, *args: Any) -> None:
 
 
 def exception(prefix: str) -> None:
+    """A traceback, in the ring and the file like every other line - it used
+    to go to stdout only, which the service never kept."""
     import traceback
-    with _lock:
-        print(f"[{time.strftime('%H:%M:%S')}] error {prefix}", flush=True)
-        traceback.print_exc(file=sys.stdout)
-        sys.stdout.flush()
+    tb = traceback.format_exc()
+    _emit("error", "%s\n%s", prefix, tb.rstrip())
 
 
 SECRET_HINTS = ("apikey", "token", "secret", "password", "authorization")
