@@ -22,9 +22,12 @@ as history fold-outs · no window.prompt · draggable character folders · click
 token-chip grouping with 전체/그룹별 · the LRU blob cache fix · one keep-alive NAI client)
 **+ §1-22 the fourth field report** (character column as list→editor · references as picture
 cards with sliders, every upload a real bucketed PNG, bad references skipped not fatal · toasts ·
-foldable style editor · cheap preset delete)
+foldable style editor · cheap preset delete) **+ §1-23** (studio_generate waits and streams each
+image into the chat · session loop flushes side events mid-tool · panel adopts agent-started jobs ·
+default model, bogus model refused once · artifacts retired, inline `![](path)` with path
+normalization · splitter clamp measures siblings)
 (gate ALL GREEN; the minor went up so the version gate trips when it ships). **Staged on test-server
-2026-08-30 night AT §1-22 (= §1-19~21 included): service stopped → backup `data-backup-20260830-s120`
+2026-08-30 night AT §1-23 (= §1-19~22 included): service stopped → backup `data-backup-20260830-s120`
 (11,358 files) → app/*.py + seeds/studio-image-ops.md + tools/probe_nai.py + requirements.in scp'd,
 msgpack 1.1.0 pip-installed into the bundled interpreter, the 0.11.0 dev bundle refreshed in
 `data/plugin/` (712,599 B served at `/plugin.js`) → `/health` 0.11.0 · 12 workspaces ·
@@ -53,6 +56,35 @@ mixed-cast multi-entry batch from the panel.** Released = **v0.10.0 BETA** (§1-
 `https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js`, and made `tools/bundle.py` write that file into the repository (included in the release commit). In the backend code only VERSION changed.
 
 → **First thing to do**: the user reinstalls `plugin/Risu.Hina.Plugin.js` into RisuAI **by hand, once** (the installed 0.1.0's update-url cannot be read because of CORS) → check that `+` appears from the next release on → verify M2 in real use (§5-2).
+
+## 1-23. 2026-08-30 - 0.11.0 (unreleased, continued): batches narrate themselves; artifacts retired
+
+Three items plus one layout report from the §1-22 staging, one commit (`6046ec0`), gate green
+(the real-model agent test ran through the reworked session loop), restaged the same night
+(backup `data-backup-20260830-r5`, bundle 724,354 B). Probed live: a spec WITHOUT a model starts a
+job; `model: nai-bogus` is refused up front with the default named.
+
+- **"model doesn't exist" on every image**: the agent's studio_generate spec carried no model, the
+  tool bypasses the HTTP handler's check, and the runner sent `""` to NovelAI. `nai.DEFAULT_MODEL`
+  fills an empty model, and an id outside `nai.KNOWN_MODELS` is asked about once (`exists()`,
+  free) so a typo fails the batch ONCE with its name.
+- **Batches narrate themselves in the chat** (user: "진행되는대로 대화창에 뿌리게"): studio_generate
+  now waits by default and pushes an `images` event per finished picture (wait=false keeps the
+  old fire-and-forget). For that to show mid-turn, `session.run` flushes side events WHILE a tool
+  is running - the pending model event is awaited with a 1s timeout and never cancelled
+  (cancelling `__anext__` kills the generator). The panel also ADOPTS a running job it did not
+  start: the history tab watches every 5s, `loadJobs` takes it over, and the ordinary poll drives
+  the live section.
+- **Artifacts retired** (user: "아티팩트는 없애고 전부 대화창 통해서, 이미지는 뿌려줘야"): the
+  show_artifact tool and its instruction are gone; the agent answers in the chat and puts images
+  inline as `![설명](space path)`. The `[이미지: …]` text in place of pictures was the model writing
+  paths with a leading slash / backslashes / the install prefix - `normalizeWorkspacePath` strips
+  those before the blob fetch (schemes and `..` still refused). The plugin-side artifact viewer
+  stays as the image lightbox and for the file tab; nothing emits the `artifact` event now.
+- **The agent pane dragged off screen**: the splitter's clamp assumed 320px for everything else;
+  with the studio's 300px explorer plus the centre's 260px floor the sum overflowed, so a drag
+  "did nothing" until a tab switch let the width land beyond the edge. The clamp measures the
+  sibling panes now (the centre counts at its floor).
 
 ## 1-22. 2026-08-30 - 0.11.0 (unreleased, continued): the fourth field report - the character column, real PNG references, toasts
 
