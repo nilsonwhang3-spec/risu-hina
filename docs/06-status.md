@@ -13,9 +13,13 @@ branch rebased in) **+ §1-18 the tab kit · prompt cards · character reference
 (the whole of plan risu-elf-1-distributed-magpie) **+ §1-19 the 26-item studio field report**
 (names as identity · 무제 gone · PNG-embedded recipes · charref fidelity/mode measured · reference
 tabs · request settings · the scoped refresh · the live queue · path copy · the documented spec)
+**+ §1-20 the studio redesign, second field report** (left = 프롬프트/OUTPUT tabs with ONE style
+edited in place and the character view · centre = 1장/배치/잡 히스토리 with the reservation queue
+(entries jobs, casts) · streaming previews · folder grid with drags · regex group-by and 부족분 →
+reservations; plan `~/.claude/plans/zesty-dazzling-lagoon.md`)
 (gate ALL GREEN; the minor went up so the version gate trips when it ships). **Staged on test-server
 2026-08-30 (backend + dev plugin via `data/plugin/`, space_v1 migration verified 1,868/1,868 with a
-pre-stop backup `data-backup-20260830-space`) - the §1-19 fixes are NOT staged yet.** Released = **v0.10.0 BETA** (§1-16 the edit-session lifecycle: leave guard, 변경 취소, write verification, snapshot kinds - **schema 13**; the minor went up because `/workspace/dirty`, the reset payloads and the `kind` column mean the backend and the plugin go together, so **the version gate trips**: update the backend, then press `+` on the plugin in RisuAI) (§1-15 any chat opens from the picker · §1-14 the repo goes English · §1-13 3-way merge on reopen · §1-12 an intermediate cache blocking the connection (POST probe, no-store) · §1-11 one web-search tool card with three options · §1-10 built-in search measured, mobile, plugin-reload diagnosis · §1-9 search · §1-8 round 10 · §1-7 · §1-6 · §1-5; the docs/07 planning is still pending) — gate ALL GREEN. 0.7.0 changes the minor, so **the version gate trips**: raise the backend and the plugin on the RisuAI side has to be raised with `+` as well (the header says so).
+pre-stop backup `data-backup-20260830-space`) - the §1-19 and §1-20 changes are NOT staged yet.** Released = **v0.10.0 BETA** (§1-16 the edit-session lifecycle: leave guard, 변경 취소, write verification, snapshot kinds - **schema 13**; the minor went up because `/workspace/dirty`, the reset payloads and the `kind` column mean the backend and the plugin go together, so **the version gate trips**: update the backend, then press `+` on the plugin in RisuAI) (§1-15 any chat opens from the picker · §1-14 the repo goes English · §1-13 3-way merge on reopen · §1-12 an intermediate cache blocking the connection (POST probe, no-store) · §1-11 one web-search tool card with three options · §1-10 built-in search measured, mobile, plugin-reload diagnosis · §1-9 search · §1-8 round 10 · §1-7 · §1-6 · §1-5; the docs/07 planning is still pending) — gate ALL GREEN. 0.7.0 changes the minor, so **the version gate trips**: raise the backend and the plugin on the RisuAI side has to be raised with `+` as well (the header says so).
 
 **Deployment state (2026-08-25 21:01 `deploy.ps1`, verified in a new SSH session)**:
 
@@ -32,6 +36,68 @@ pre-stop backup `data-backup-20260830-space`) - the §1-19 fixes are NOT staged 
 `https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js`, and made `tools/bundle.py` write that file into the repository (included in the release commit). In the backend code only VERSION changed.
 
 → **First thing to do**: the user reinstalls `plugin/Risu.Hina.Plugin.js` into RisuAI **by hand, once** (the installed 0.1.0's update-url cannot be read because of CORS) → check that `+` appears from the next release on → verify M2 in real use (§5-2).
+
+## 1-20. 2026-08-30 - 0.11.0 (unreleased, continued): the studio redesigned - the second field report
+
+The user kept working in the staged studio and sent a second round (items 1-4.14 plus four
+amendments given during planning). This is the big one: the screen is rebuilt around the loop the
+work actually runs in - generate into a folder → tidy names → classify → see what is missing →
+queue exactly that. Seven commits (M1-M7) plus this ledger, each gate-green, all on master, still
+0.11.0 unreleased. The design record is `~/.claude/plans/zesty-dazzling-lagoon.md`.
+
+- **M1 shared idioms** (`7734cad`): the agent-preset dropdown (compact current row · 선택/수정/삭제/추가
+  behind ›) extracted to `ui/pickers.ts`; the file tab's tree rows + drop wiring to `ui/tree.ts`,
+  now also carrying internal drags (`DRAG_PATHS`). Settings and files tabs unchanged.
+- **M2 the split** (`21f28f0`): tab-studio.ts (1,900 lines, thirty shared module variables) becomes
+  `ui/studio/` - store.ts (the S state object + the hub the modules reach each other through),
+  gen, editors, char-edit, selector, stylefile, index. No behavior change.
+- **M3 the left column** (`d593c57`): [프롬프트 | OUTPUT]. ONE style rides now - a dropdown picks it
+  (the pickers idiom) and its 긍정/부정 unfold in the column, saved as you type (debounced; unsaved
+  edits survive a rebuild - the edit-then-generate-one loop). 캐릭터 swaps the column to a
+  folder-grouped character view whose rows expand into the full editor (references included;
+  the backend lists characters recursively so `studio/characters/<폴더>/<카드>` groups). 조각 opens
+  the fragment organizer in the CENTRE (folders, move, editor beside the list). OUTPUT is the
+  images tree on the shared component - it finally looks like the file tab's. Both rails collapse
+  to a slim strip, remembered per side (the studio is the crowded tab). Styles enabled in numbers
+  migrate to one, said once.
+- **M4 the centre tabs** (`3069d53`): [1장 | 배치 | 잡 히스토리]. 1장 = one big preview + ⚙ 요청 설정
+  (a modal now) + count beside 생성 시작 + the latest batch as a click-to-pin strip (←/→ walks it,
+  라이브 releases the pin). 배치 reads results BY JOB - one section per batch, newest first, item
+  grid at 2·3·4 columns. 잡 히스토리 is the index; picking a row jumps to that section. A finished
+  image anywhere opens big in 1장. An OUTPUT folder opens as a browsable grid (breadcrumb,
+  multi-select, drags that move files onto subfolder cells or the tree, OS drops that upload);
+  the selector moved one button away (감정 사진 선택). The old queue screen and its trailing 최근
+  작업 list are gone; the job poll patches the visible tab in place (hub.jobTick).
+- **M5 the queue of entries** (`71f9d05`): the batch spec's v2 shape is `entries` - each names its
+  scene (preset+name or inline), its own character combination, and its OWN count; plan() expands
+  exactly that list in order, and the {character} filename slot is the cast label, else the first
+  card's name (the 캐릭터명 form is gone). References follow the CARDS per item (encode/PNG caches
+  make mixed casts cost no extra; an unsupported model skips with a note; the 레퍼런스 사용 switch
+  is gone, the legacy key ignored). On screen the queue is the reservation map -
+  reserves[preset][scene][cast] - piled on the scene cards, NEVER reset by switching preset or
+  cast, listed in a fold-out with per-row remove, drained by 씬 생성 n장 into one job. 출연 (casts)
+  live in `studio/casts.json`. Legacy specs (the agent's calls) unchanged.
+- **M6 streaming** (`0b026fc`): docs/09's "no streaming" was about the slash path; the hyphen
+  `/ai/generate-image-stream` + msgpack framing is real (§3 corrected - source is an external
+  client, not yet re-probed here: the dev machine has no token, so the FIRST real batch is the
+  probe, and the runner falls back to ZIP after one failure). The newest intermediate frame lives
+  in studiojob memory, `GET /studio/job/preview` serves it rev-gated, the panel polls at 0.8s into
+  the 1장 preview and the 배치 in-progress cell, and a held frame is only replaced once the
+  finished file loads. msgpack==1.1.0 joins requirements.in.
+- **M7 the selector closes the loop** (`93f1703`): parsing is per FOLDER - a named-capture regex
+  plus a 그룹 기준 picker over the fields that regex produced (복장 today, 감정 tomorrow), export
+  riding the same. Groups with nothing chosen and nothing being fixed surface as 부족분 BEFORE any
+  export, and 부족분 예약에 담기 turns them into reservations (same-named scenes, current cast,
+  one each).
+
+Verified beyond the gate: the smoke suite now drives the new screens end to end (the dropdown
+select→enabled front matter→typing saves `## positive`, the character view's inline editor and
+refMode save, the organizer's create/rename/폴더 이동, reservation piling→ONE entries job→drained
+queue, history→batch section focus→1장 open, regex re-grouping by another field, 부족분 badge);
+the backend suite covers `_plan_entries` (order, casts, per-entry counts, unique names, unknown
+scene refused) and the preview store (rev-gated, memory only). NOT yet verified live: the
+streaming endpoint itself and a real mixed-cast batch - both need the staged machine's token, so
+stage §1-19+§1-20 together when the user asks and watch the first batch's fallback note.
 
 ## 1-19. 2026-08-30 - 0.11.0 (unreleased, continued): the first studio field report - 26 items
 

@@ -552,7 +552,7 @@ button.treefile.on { background: rgba(37, 99, 235, .22); color: var(--textcolor,
 .explorer:has(.tree) { width: 210px; }
 /* The studio's left column carries the generation card under the tree, so it
    needs room for labelled fields rather than just folder names. */
-.explorer:has(.genpanel) { width: 268px; }
+.explorer:has(.studiotabs) { width: 300px; }
 .scenerow { display: flex; flex-direction: column; gap: 4px; padding: 8px 0;
             border-bottom: 1px solid rgba(128,128,128,.12); }
 .advbox { margin: 10px 0; }
@@ -561,18 +561,6 @@ button.treefile.on { background: rgba(37, 99, 235, .22); color: var(--textcolor,
 .foldertag { position: absolute; right: 4px; bottom: 4px; font-size: 14px;
              filter: drop-shadow(0 0 2px rgba(0,0,0,.6)); }
 .scenerow .row input[type=number] { width: 74px; flex: none; }
-.genpanel { padding: 4px 8px 12px; }
-.genpanel label.field { margin-bottom: 6px; }
-.genpanel label.field span { display: block; font-size: 11px; opacity: .7; margin-bottom: 2px; }
-.genpanel input, .genpanel select { width: 100%; box-sizing: border-box; }
-.genpanel .row { gap: 6px; align-items: flex-end; }
-.genstatus { margin-top: 8px; display: flex; flex-direction: column; gap: 2px; }
-/* The rule between what you write and what came back. */
-.treesep { margin: 6px 4px; }
-/* A prompt file sitting in the tree: lighter than a folder, because it is a
-   thing you pick rather than a place you go. */
-.treerow.leafrow { opacity: .85; font-size: 12px; }
-.treerow.leafrow.on { opacity: 1; }
 textarea.promptedit { width: 100%; box-sizing: border-box; min-height: 42vh; font-family: var(--mono, monospace); }
 
 /* --- the comparison selector ---------------------------------------------- */
@@ -1043,7 +1031,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
 .pad { overflow-x: hidden; }
 
 /* Checkboxes, once, at the end so it wins the width:100% + padding that the
-   generic input rule (and .genpanel input) hand every <input>. A checkbox
+   generic input rule (and .genform input) hand every <input>. A checkbox
    the size of a text field floating mid-row was the complaint. */
 input[type=checkbox] {
   width: auto; min-width: 0; padding: 0; margin: 0;
@@ -1081,7 +1069,8 @@ label.row { align-items: center; gap: 6px; }
 .styleedit textarea { width: 100%; box-sizing: border-box; resize: vertical; }
 .styleedit .field { display: block; margin-bottom: 6px; }
 .styleedit .field > span { display: block; font-size: 11px; opacity: .7; margin-bottom: 2px; }
-.genpanel div.field > span:first-child { display: block; font-size: 11px; opacity: .7; margin-bottom: 2px; }
+div.field > span:first-child { display: block; font-size: 11px; opacity: .7; margin-bottom: 2px; }
+div.field { min-width: 0; }
 
 /* The character editor hosted inside the left column. */
 .charinline { border-left: 2px solid rgba(37, 99, 235, .35); margin: 0 4px 8px 8px; padding: 6px 6px 2px; }
