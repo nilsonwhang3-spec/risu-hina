@@ -1120,10 +1120,16 @@ def estimate(spec: dict, images: int) -> dict:
     certainly charged and leaves the rest to the before/after reading.
     """
     encodes = len([v for v in (spec.get("vibes") or []) if not v.get("cached")])
+    charref = bool(spec.get("charrefs"))
+    certain = encodes * 2 + (nai.CHARREF_ANLAS * images if charref else 0)
+    note = ("생성 비용은 구독 등급에 따라 다릅니다 (Opus 는 0). "
+            "레퍼런스 인코딩은 회당 2 Anlas 로 확정입니다.")
+    if charref:
+        note += f" 캐릭터 레퍼런스는 장당 {nai.CHARREF_ANLAS} Anlas 가 확정으로 나갑니다 (Opus 포함)."
+    note += " 배치 전후 잔량을 대조해 실제 차액을 보고합니다."
     return {
         "images": images,
         "vibeEncodes": encodes,
-        "anlasCertain": encodes * 2,
-        "note": "생성 비용은 구독 등급에 따라 다릅니다 (Opus 는 0). "
-                "레퍼런스 인코딩은 회당 2 Anlas 로 확정입니다. 배치 전후 잔량을 대조해 실제 차액을 보고합니다.",
+        "anlasCertain": certain,
+        "note": note,
     }

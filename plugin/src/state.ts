@@ -463,8 +463,11 @@ export interface BulkPreview {
 export interface StudioStatus {
   configured: boolean;
   library: string;
+  /** The backend knows the director-reference request shape (docs/09 §7d). */
+  charref?: boolean;
   note?: string;
   error?: string;
+  migrationNote?: string;
   account?: {
     anlas: number; fixed: number; purchased: number;
     usagePercent: number | null; usageNegative: boolean;

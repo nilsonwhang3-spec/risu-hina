@@ -197,15 +197,36 @@ def _unzip(raw: bytes, what: str) -> bytes:
         raise NaiError(f"{what}: 응답이 ZIP 도 PNG 도 아닙니다 ({len(raw)} 바이트)") from e
 
 
+# The only sizes the internal /encode-director service accepts (docs/09 §7d);
+# anything else is an opaque 400 from inside NovelAI, so the check lives here
+# where the refusal can name the buckets.
+CHARREF_BUCKETS = ((1024, 1536), (1536, 1024))
+# 5 Anlas per accepted generation carrying a director reference - measured
+# four runs in a row at tier 3, no cache (docs/09 §7d). A CERTAIN cost.
+CHARREF_ANLAS = 5
+
+
+def supports_charref(model: str) -> bool:
+    """The per-model /encode-director service exists for v4.5 only: probing
+    v5 named a nonexistent host (docs/09 §7d)."""
+    return "diffusion-4-5" in model
+
+
 def build_parameters(prompt: str, negative: str, params: dict | None = None,
-                     vibes: list[dict] | None = None) -> dict:
+                     vibes: list[dict] | None = None,
+                     charrefs: list[dict] | None = None) -> dict:
     """The `parameters` object for one generation.
 
     `params` is the preset's, merged over DEFAULTS with unknown keys kept - the
     preset is data and may carry fields this file has never heard of. `vibes`
     is a list of {encoding, strength, informationExtracted}: the *multiple*
     naming is NovelAI's and it means exactly that, a list with per-item
-    strengths (docs/09 §7).
+    strengths (docs/09 §7). `charrefs` is a list of {image (b64 PNG at a
+    CHARREF_BUCKETS size), description, strength} - the director reference,
+    whose request shape is docs/09 §7d verbatim: descriptions are
+    V4ConditionInput objects, information_extracted must be exactly 1.0, and
+    the strengths field is `director_reference_strength_values` on the wire
+    even though the PNG Comment echoes it back as `..._strengths`.
     """
     p = {**DEFAULTS, **(params or {})}
     p["negative_prompt"] = negative
@@ -225,14 +246,34 @@ def build_parameters(prompt: str, negative: str, params: dict | None = None,
         p["reference_information_extracted_multiple"] = [
             float(v.get("informationExtracted", 1.0)) for v in vibes]
         p["reference_strength_multiple"] = [float(v.get("strength", 0.6)) for v in vibes]
+    if charrefs:
+        p["director_reference_images"] = [c["image"] for c in charrefs]
+        p["director_reference_descriptions"] = [
+            {"caption": {"base_caption": str(c.get("description") or ""), "char_captions": []},
+             "legacy_uc": False}
+            for c in charrefs]
+        p["director_reference_information_extracted"] = [1.0] * len(charrefs)
+        p["director_reference_strength_values"] = [
+            float(c.get("strength", 1.0)) for c in charrefs]
     return p
 
 
+def check_charref_png(png: bytes, name: str = "") -> None:
+    """Refuse a director reference the internal encoder would 400 on, with
+    the buckets named instead of NovelAI's opaque error."""
+    w, h = png_size(png)
+    if (w, h) not in CHARREF_BUCKETS:
+        raise NaiError(
+            f"캐릭터 레퍼런스는 1024x1536(세로) 또는 1536x1024(가로) PNG 여야 합니다"
+            f"{f': {name}' if name else ''} (지금 {w}x{h}) — 패널이 올릴 때 맞춰 줍니다")
+
+
 def generate(model: str, prompt: str, negative: str = "",
-             params: dict | None = None, vibes: list[dict] | None = None) -> bytes:
+             params: dict | None = None, vibes: list[dict] | None = None,
+             charrefs: list[dict] | None = None) -> bytes:
     """One image, as PNG bytes."""
     body = {"input": prompt, "model": model, "action": "generate",
-            "parameters": build_parameters(prompt, negative, params, vibes)}
+            "parameters": build_parameters(prompt, negative, params, vibes, charrefs)}
     with _client() as c:
         r = c.post("/ai/generate-image", json=body)
     if r.status_code >= 300:

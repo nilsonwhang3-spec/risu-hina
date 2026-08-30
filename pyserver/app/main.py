@@ -967,6 +967,9 @@ def h_studio_status(arg: dict) -> dict:
     out: dict[str, Any] = {
         "configured": nai.configured(),
         "library": str(workspace.studio_root()),
+        # This backend knows the director-reference request shape (docs/09
+        # §7d); an older backend does not, and the panel hides the controls.
+        "charref": True,
     }
     moved = workspace.space_note()
     if moved:

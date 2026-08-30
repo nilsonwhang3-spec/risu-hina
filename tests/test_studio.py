@@ -445,6 +445,38 @@ pos, neg, caps = studio.compose({"styles": [], "characters": ["characters/레거
 check("two characters become char_captions", len(caps) == 2, str(caps))
 check("no centers means no captions with coords", all(not cc["centers"] for cc in caps))
 
+print("\ntest_character_reference")
+from app import nai  # noqa: E402
+
+check("charref is v4.5 only", nai.supports_charref("nai-diffusion-4-5-full")
+      and not nai.supports_charref("nai-diffusion-5-full"))
+bucket = studio.make_mask(1024, 1536, [])
+wrong = studio.make_mask(1024, 1024, [])
+try:
+    nai.check_charref_png(bucket)
+    print("  ok   a bucket-sized PNG passes the check")
+except nai.NaiError as e:
+    check("a bucket-sized PNG passes the check", False, str(e))
+try:
+    nai.check_charref_png(wrong, "x.png")
+    check("an off-bucket PNG is refused with the buckets named", False)
+except nai.NaiError as e:
+    check("an off-bucket PNG is refused with the buckets named",
+          "1024x1536" in str(e) and "x.png" in str(e), str(e))
+
+p = nai.build_parameters("1girl", "blurry", {}, None,
+                         [{"image": "AAAA", "description": "red hair", "strength": 0.6}])
+check("the director request shape is 7d verbatim",
+      p["director_reference_images"] == ["AAAA"]
+      and p["director_reference_descriptions"][0]["caption"]["base_caption"] == "red hair"
+      and p["director_reference_information_extracted"] == [1.0]
+      and p["director_reference_strength_values"] == [0.6],
+      json.dumps({k: v for k, v in p.items() if "director" in k}, ensure_ascii=False)[:200])
+
+est = studio.estimate({"charrefs": [{"path": "x"}]}, 3)
+check("a charref batch names its certain cost", est["anlasCertain"] == 15
+      and "5 Anlas" in est["note"], json.dumps(est, ensure_ascii=False)[:200])
+
 print("\ntest_selection_slugs")
 check("korean folders no longer share one slug",
       studio._slug("images/고르기") != studio._slug("images/버리기"),

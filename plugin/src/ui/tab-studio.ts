@@ -715,8 +715,11 @@ function drawCharacterEditor(dir: string): void {
   const posY = el('input', { type: 'number', step: '0.1', placeholder: 'y 0~1' }) as HTMLInputElement;
 
   interface RefEntry { file: string; strength: number; informationExtracted: number; enabled: boolean; pendingB64?: string }
+  interface CharRefEntry { file: string; strength: number; description: string; enabled: boolean; pendingB64?: string }
   let vibes: RefEntry[] = [];
+  let charrefs: CharRefEntry[] = [];
   const refList = el('div', { class: 'verlist' });
+  const charrefList = el('div', { class: 'verlist' });
 
   const drawRefs = (): void => {
     clear(refList);
@@ -762,6 +765,80 @@ function drawCharacterEditor(dir: string): void {
     pickRef.value = '';
   });
 
+  // --- 캐릭터 레퍼런스 (director reference, docs/09 §7d) ---------------------
+  // The internal encoder accepts only the 1024x1536 / 1536x1024 buckets, so
+  // the upload is fitted here with a canvas (cover-crop by orientation) - the
+  // backend only checks and refuses, it never resizes.
+  const drawCharrefs = (): void => {
+    clear(charrefList);
+    if (!charrefs.length) {
+      charrefList.appendChild(el('div', { class: 'hint', text: '캐릭터 레퍼런스가 없습니다. 올리면 버킷 크기로 맞춰 저장됩니다.' }));
+    }
+    charrefs.forEach((v, i) => {
+      const pic = v.pendingB64
+        ? el('span', { class: 'hint', text: '(저장 시 올라갑니다)' })
+        : workspaceImage(`${dir}/${v.file}`, v.file, { thumb: true });
+      const strength = el('input', { type: 'number', step: '0.05', value: String(v.strength),
+                                     title: '강도 (director_reference_strength)' }) as HTMLInputElement;
+      strength.addEventListener('change', () => { v.strength = Number(strength.value) || v.strength; });
+      const desc = el('input', { value: v.description, placeholder: '설명 (선택)',
+                                 title: '레퍼런스에 붙는 캡션' }) as HTMLInputElement;
+      desc.addEventListener('change', () => { v.description = desc.value; });
+      const on = el('input', { type: 'checkbox', title: '이 레퍼런스를 실을지' }) as HTMLInputElement;
+      on.checked = v.enabled;
+      on.addEventListener('change', () => { v.enabled = on.checked; });
+      const drop = el('button', { class: 'ghost tiny', text: '×', title: '목록에서 빼기 (파일은 남습니다)' });
+      drop.addEventListener('click', () => { charrefs = charrefs.filter((_x, j) => j !== i); drawCharrefs(); });
+      charrefList.appendChild(el('div', { class: 'row', style: { alignItems: 'center', gap: '6px' } }, [
+        on, pic, el('span', { class: 'grow hint', text: v.file }),
+        el('span', { class: 'hint', text: '강도' }), strength, desc,
+        drop,
+      ]));
+    });
+  };
+
+  const fitToBucket = async (f: File): Promise<{ name: string; b64: string } | null> => {
+    try {
+      const url = URL.createObjectURL(f);
+      const img = new Image();
+      await new Promise<void>((res, rej) => {
+        img.onload = () => res();
+        img.onerror = () => rej(new Error('이미지를 읽지 못했습니다'));
+        img.src = url;
+      });
+      const portrait = img.height >= img.width;
+      const w = portrait ? 1024 : 1536;
+      const h = portrait ? 1536 : 1024;
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return null;
+      const scale = Math.max(w / img.width, h / img.height);
+      const dw = img.width * scale;
+      const dh = img.height * scale;
+      ctx.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh);
+      URL.revokeObjectURL(url);
+      const data = canvas.toDataURL('image/png');
+      return { name: f.name.replace(/\.[^.]+$/, '') + `-${w}x${h}.png`,
+               b64: data.slice(data.indexOf(',') + 1) };
+    } catch {
+      return null;
+    }
+  };
+
+  const pickCharref = el('input', { type: 'file', accept: 'image/*', multiple: true }) as HTMLInputElement;
+  pickCharref.addEventListener('change', async () => {
+    for (const f of Array.from(pickCharref.files ?? [])) {
+      const fitted = await fitToBucket(f);
+      if (!fitted) { out.textContent = `${f.name}: 버킷 크기로 맞추지 못했습니다.`; continue; }
+      charrefs.push({ file: fitted.name, strength: 1.0, description: '', enabled: true,
+                      pendingB64: fitted.b64 });
+      drawCharrefs();
+    }
+    pickCharref.value = '';
+  });
+
   const save = el('button', { class: 'primary tiny', text: '저장' }) as HTMLButtonElement;
   save.addEventListener('click', async () => {
     const nm = name.value.trim();
@@ -770,7 +847,7 @@ function drawCharacterEditor(dir: string): void {
     try {
       const stem = nm.replace(/[<>:"/\\|?*]/g, '');
       const target = dir || `studio/characters/${stem}`;
-      for (const v of vibes) {
+      for (const v of [...vibes, ...charrefs]) {
         if (v.pendingB64) {
           await state.uploadFile(v.file, v.pendingB64, true, target);
           delete v.pendingB64;
@@ -788,7 +865,8 @@ function drawCharacterEditor(dir: string): void {
         version: 1, position,
         vibe: vibes.map((v) => ({ file: v.file, strength: v.strength,
                                   informationExtracted: v.informationExtracted, enabled: v.enabled })),
-        charref: [],
+        charref: charrefs.map((v) => ({ file: v.file, strength: v.strength,
+                                        description: v.description, enabled: v.enabled })),
       }, null, 2), false, target);
       notice(`캐릭터 “${nm}” 를 저장했습니다.`, 'ok');
       selectedFile = target;
@@ -832,9 +910,16 @@ function drawCharacterEditor(dir: string): void {
     el('div', { class: 'hint', text: '인코딩은 회당 2 Anlas (캐시되면 0), 배치마다 한 번. v5 모델은 지원하지 않습니다.' }),
     refList,
     field('PNG 추가', pickRef),
+    ...(status?.charref ? [
+      el('div', { class: 'sectiontitle', text: '캐릭터 레퍼런스' }),
+      el('div', { class: 'hint', text: '장당 5 Anlas 가 확정으로 나갑니다 (Opus 포함). 1024×1536/1536×1024 로 맞춰 저장되며, v4.5 전용입니다.' }),
+      charrefList,
+      field('이미지 추가', pickCharref),
+    ] : []),
     out,
   );
   drawRefs();
+  drawCharrefs();
 
   if (dir) {
     void state.readFile(`${dir}/prompt.md`).then((r) => {
@@ -866,7 +951,13 @@ function drawCharacterEditor(dir: string): void {
           informationExtracted: Number(v.informationExtracted ?? 1.0),
           enabled: v.enabled !== false,
         })).filter((v) => v.file);
+        charrefs = ((d as { charref?: CharRefEntry[] }).charref ?? []).map((v) => ({
+          file: String(v.file || ''), strength: Number(v.strength ?? 1.0),
+          description: String(v.description ?? ''),
+          enabled: v.enabled !== false,
+        })).filter((v) => v.file);
         drawRefs();
+        drawCharrefs();
       } catch { /* a fresh card has no preset yet */ }
     }).catch(() => { /* same */ });
   }

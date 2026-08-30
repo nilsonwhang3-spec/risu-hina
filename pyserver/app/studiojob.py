@@ -67,19 +67,30 @@ def _update(job_id: str, **fields: Any) -> None:
 def start(spec: dict) -> dict:
     """Expand the batch, record it, and run it in the background."""
     spec = studio.normalize_spec(spec)
-    # 레퍼런스 사용: without explicit vibes, the active characters' presets
-    # supply them - each enabled vibe entry, resolved against its card folder.
+    # 레퍼런스 사용: without explicit lists, the active characters' presets
+    # supply both kinds - each enabled entry, resolved against its card folder.
     if spec.get("useReference") and not spec.get("vibes"):
         vibes = []
+        charrefs = []
         for ch in spec.get("characters") or []:
             c = studio.read_character(str(ch)) if isinstance(ch, str) else ch
+            if not c.get("path"):
+                continue
             for v in c.get("vibe") or []:
-                if not c.get("path") or not v.get("file"):
+                if not v.get("file"):
                     continue
                 vibes.append({"path": f"{c['path']}/{v.get('file')}",
                               "strength": float(v.get("strength", 0.6)),
                               "informationExtracted": float(v.get("informationExtracted", 1.0))})
+            for cr in c.get("charref") or []:
+                if not cr.get("file"):
+                    continue
+                charrefs.append({"path": f"{c['path']}/{cr.get('file')}",
+                                 "description": str(cr.get("description") or ""),
+                                 "strength": float(cr.get("strength", 1.0))})
         spec["vibes"] = vibes
+        if charrefs and not spec.get("charrefs"):
+            spec["charrefs"] = charrefs
     items = studio.plan(spec)
     if not items:
         raise studio.StudioError("만들 이미지가 없습니다")
@@ -118,8 +129,11 @@ def _run(job_id: str) -> None:
 
     # References are encoded once for the whole batch: each encode is 2 Anlas,
     # so doing it per image would multiply the only certain cost by the batch
-    # size. The cache makes a repeat batch free as well.
+    # size. The cache makes a repeat batch free as well. Director references
+    # (charrefs) are raw PNGs, no encode - but each GENERATION carrying one
+    # costs 5 Anlas (docs/09 §7d), which estimate() already said out loud.
     vibes: list[dict] = []
+    charrefs: list[dict] = []
     try:
         for ref in spec.get("vibes") or []:
             png = studio.read_bytes(str(ref["path"]))
@@ -128,6 +142,15 @@ def _run(job_id: str) -> None:
             vibes.append(nai.vibe_entry(enc, float(ref.get("strength", 0.6)),
                                         float(ref.get("informationExtracted", 1.0))))
             log.info("studio vibe %s %s", ref["path"], "(cached)" if cached else "(encoded, 2 Anlas)")
+        for ref in spec.get("charrefs") or []:
+            if not nai.supports_charref(model):
+                raise nai.NaiError(f"캐릭터 레퍼런스는 v4.5 모델에서만 됩니다 (지금 {model})")
+            png = studio.read_bytes(str(ref["path"]))
+            nai.check_charref_png(png, str(ref["path"]))
+            import base64 as _b64
+            charrefs.append({"image": _b64.b64encode(png).decode(),
+                             "description": str(ref.get("description") or ""),
+                             "strength": float(ref.get("strength", 1.0))})
     except Exception as e:  # noqa: BLE001
         payload["anlasAfter"] = nai.anlas()
         _update(job_id, state="error", error=str(e), payload_json=payload)
@@ -154,7 +177,8 @@ def _run(job_id: str) -> None:
             # with use_coords on would tell the model about positions nobody set.
             p["use_coords"] = any(c.get("centers") for c in item["charCaptions"])
         try:
-            png = nai.generate(model, item["prompt"], item["negative"], p, vibes or None)
+            png = nai.generate(model, item["prompt"], item["negative"], p,
+                               vibes or None, charrefs or None)
             saved = studio.save_image(folder, item["name"], png, {
                 "scene": item.get("scene"), "prompt": item["prompt"],
                 "negative": item["negative"], "model": model, "seed": item.get("seed"),
