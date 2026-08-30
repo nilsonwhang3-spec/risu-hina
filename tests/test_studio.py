@@ -206,6 +206,30 @@ text, missing = studio.resolve_refs("<없는것.x>, 씬A")
 check("an unknown reference is reported", missing == ["<없는것.x>"], str(missing))
 check("and left in the prompt rather than dropped", "<없는것.x>" in text, text)
 
+# The card's front-matter name is an address too: rename the card in the
+# editor and `<새이름>` keeps working without touching the filename.
+files.upload(files.SPACE, "eye-detail.md",
+             text="---\nname: 눈 디테일\n---\n섬세한 눈", into="studio/fragments")
+byname, byname_missing = studio.resolve_refs("<눈 디테일>")
+check("a fragment resolves by its front-matter name", byname == "섬세한 눈", byname)
+check("with nothing reported missing", byname_missing == [], str(byname_missing))
+bystem, _ = studio.resolve_refs("<eye-detail>")
+check("the stem still resolves as before", bystem == "섬세한 눈", bystem)
+# A stem always beats a display name: a name that shadows another file's stem
+# must not hijack that file's references.
+files.upload(files.SPACE, "shadow.md",
+             text="---\nname: 조각파일\n---\n가짜", into="studio/fragments")
+shadowed, _ = studio.resolve_refs("<조각파일>")
+check("a display name never shadows a real stem", shadowed == "조각B", shadowed)
+frag_rows = {i["path"]: i for i in studio.listing("fragments")}
+check("the fragment listing shows the front-matter name",
+      frag_rows["studio/fragments/eye-detail.md"]["name"] == "눈 디테일",
+      str(frag_rows.get("studio/fragments/eye-detail.md")))
+check("and falls back to the stem without one",
+      frag_rows["studio/fragments/조각파일.md"]["name"] == "조각파일")
+files.delete(files.SPACE, "studio/fragments/shadow.md")
+files.delete(files.SPACE, "studio/fragments/eye-detail.md")
+
 print("\ntest_batch_plan")
 items = studio.plan({"style": "styles/수채화.md", "characters": ["characters/히나.json"],
                      "scenePreset": "scenes/기본.json", "characterName": "히나",

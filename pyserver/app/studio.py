@@ -364,6 +364,15 @@ def listing(area: str) -> list[dict]:
                             enabled=s["enabled"], order=s["order"])
             except StudioError:
                 pass
+        elif p.suffix.lower() == ".md" and area == "fragments":
+            # A fragment row shows its front-matter name like every other card;
+            # the resolver accepts that name too (see FragmentTable).
+            try:
+                meta, _body = _front_matter(_read_text(rel))
+                if str(meta.get("name") or "").strip():
+                    item["name"] = str(meta["name"]).strip()
+            except StudioError:
+                pass
         elif p.suffix.lower() == ".json":
             try:
                 d = read_json(rel)
@@ -399,16 +408,18 @@ REF = re.compile(r"<([^<>]+)>")
 class FragmentTable:
     """What `<…>` can name.
 
-    Two forms, and a whole file wins over a key inside one:
+    Three forms, and a whole file wins over a key inside one:
 
-        <조각>            fragments/조각.md   (or .json) - the whole file
+        <조각>            fragments/조각.md   (or .json) - the whole file,
+                          or a card whose front-matter `name` is 조각
         <폴더/조각>       fragments/폴더/조각.md
         <컬렉션.키>       one entry of fragments/컬렉션.json
 
     File-first is what makes the ordering predictable: `<a.b>` is a file called
     `a.b` if there is one, and only otherwise the `b` entry of collection `a`.
     Without that rule a new file could silently shadow a key, or the reverse,
-    depending on which lookup happened to run first.
+    depending on which lookup happened to run first. A front-matter name is the
+    weakest key of all (setdefault after path and stem) for the same reason.
     """
 
     def __init__(self) -> None:
@@ -455,9 +466,16 @@ def fragments() -> FragmentTable:
                 table.collections.setdefault(p.stem, flat)
                 table.files[key] = ", ".join(v for v in flat.values() if v)
             elif p.suffix.lower() == ".md":
-                _, body = _front_matter(_read_text(rel))
-                table.files[key] = body.strip()
-                table.files.setdefault(p.stem, body.strip())
+                meta, body = _front_matter(_read_text(rel))
+                body = body.strip()
+                table.files[key] = body
+                table.files.setdefault(p.stem, body)
+                # The card's front-matter name is addressable too, so renaming
+                # a card in the editor does not orphan `<이름>` references.
+                # setdefault: a real path/stem always wins over a display name.
+                fm_name = str(meta.get("name") or "").strip().strip("/")
+                if fm_name:
+                    table.files.setdefault(fm_name, body)
         except StudioError:
             continue
     return table

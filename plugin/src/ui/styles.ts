@@ -553,6 +553,9 @@ button.treefile.on { background: rgba(37, 99, 235, .22); color: var(--textcolor,
 /* The studio's left column carries the generation card under the tree, so it
    needs room for labelled fields rather than just folder names. */
 .explorer:has(.genpanel) { width: 268px; }
+.scenerow { display: flex; flex-direction: column; gap: 4px; padding: 8px 0;
+            border-bottom: 1px solid rgba(128,128,128,.12); }
+.scenerow .row input[type=number] { width: 74px; flex: none; }
 .genpanel { padding: 4px 8px 12px; }
 .genpanel label.field { margin-bottom: 6px; }
 .genpanel label.field span { display: block; font-size: 11px; opacity: .7; margin-bottom: 2px; }

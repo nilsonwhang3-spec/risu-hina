@@ -243,32 +243,69 @@ function cardRow(spec: { area: string; toggle: boolean }, it: StudioItem): HTMLE
   return row;
 }
 
+/** A card name as a filename: the display name IS the identity, so the file
+ * carries it (fragments are referenced as `<이름>`, which resolves by stem). */
+function cardStem(name: string): string {
+  return name.replace(/[<>:"/\\|?*]/g, '').trim();
+}
+
+/** The first `stem`, `stem-2`, `stem-3` … not taken in this area's listing. */
+function freeCardPath(area: string, stem: string, suffix: string): string {
+  const taken = new Set((cards[area] ?? []).map((i) => i.path));
+  for (let n = 1; ; n++) {
+    const p = `studio/${area}/${stem}${n > 1 ? `-${n}` : ''}${suffix}`;
+    if (!taken.has(p)) return p;
+  }
+}
+
 async function newCard(area: string): Promise<void> {
+  // The name comes first: it is the reference key (fragments), the list row,
+  // and the filename - a timestamp slug was a code nobody could read back.
+  const raw = window.prompt('새 카드 이름');
+  const nm = (raw ?? '').trim();
+  if (!nm) return;
+  const stem = cardStem(nm);
+  if (!stem) { notice('그 이름으로는 파일을 만들 수 없습니다.', 'err'); return; }
   try {
     if (area === 'characters') {
-      selectedFile = '';
-      drawCharacterEditor('');
-      return;
-    }
-    const stamp = new Date().toISOString().slice(5, 16).replace(/[-:T]/g, '');
-    if (area === 'scenes') {
-      const name = `새 프리셋-${stamp}.json`;
-      await state.uploadFile(name, JSON.stringify(
-        { version: 1, name: '새 프리셋', scenes: [{ name: 'happy', prompt: '', negativePrompt: '', width: 0, height: 0 }] },
+      const path = freeCardPath(area, stem, '');
+      await state.uploadFile('prompt.md', `---\nname: ${nm}\nenabled: false\n---\n## 프롬프트\n`,
+        false, path);
+      selectedFile = path;
+    } else if (area === 'scenes') {
+      const path = freeCardPath(area, stem, '.json');
+      await state.uploadFile(path.split('/').pop()!, JSON.stringify(
+        { version: 1, name: nm, scenes: [{ name: 'happy', prompt: '', negativePrompt: '', width: 0, height: 0 }] },
         null, 2), false, 'studio/scenes');
-      selectedFile = `studio/scenes/${name}`;
+      selectedFile = path;
     } else {
-      const name = area === 'styles' ? `새 스타일-${stamp}.md` : `새 조각-${stamp}.md`;
+      const path = freeCardPath(area, stem, '.md');
       const front = area === 'styles'
-        ? '---\nname: 새 스타일\nenabled: true\norder: 100\n---\n'
-        : '---\nname: 새 조각\n---\n';
-      await state.uploadFile(name, front, false, `studio/${area}`);
-      selectedFile = `studio/${area}/${name}`;
+        ? `---\nname: ${nm}\nenabled: false\n---\n`
+        : `---\nname: ${nm}\n---\n`;
+      await state.uploadFile(path.split('/').pop()!, front, false, `studio/${area}`);
+      selectedFile = path;
     }
     await refresh();
   } catch (e) {
     notice('만들지 못했습니다: ' + msg(e), 'err');
   }
+}
+
+/** Rename the file/folder behind a card when its name field changed.
+ * Returns the (possibly new) path. A same-name collision keeps the old path
+ * and reports, rather than half-renaming. */
+async function renameCardFile(path: string, newName: string): Promise<string> {
+  const stem = cardStem(newName);
+  if (!stem) return path;
+  const isDir = !/\.[a-z0-9]+$/i.test(path);
+  const dir = path.slice(0, path.lastIndexOf('/'));
+  const old = path.slice(path.lastIndexOf('/') + 1);
+  const suffix = isDir ? '' : old.slice(old.lastIndexOf('.'));
+  if (old === stem + suffix) return path;
+  const to = `${dir}/${stem}${suffix}`;
+  const r = await state.moveFile(path, to);
+  return r.to;
 }
 
 // --- the output tree --------------------------------------------------------------
@@ -551,6 +588,8 @@ function drawCentre(): void {
       drawCharacterEditor(selectedFile);
     } else if (selectedFile.endsWith('.md')) {
       drawCardEditor(selectedFile);
+    } else if (parts[1] === 'scenes' && selectedFile.endsWith('.json') && !rawView.has(selectedFile)) {
+      drawSceneEditor(selectedFile);
     } else {
       drawRawFile(selectedFile);
     }
@@ -634,7 +673,7 @@ function drawCardEditor(path: string): void {
   const order = el('input', { type: 'number', value: '100', step: '10',
                               title: '작을수록 앞에 이어집니다' }) as HTMLInputElement;
   const body = el('textarea', { rows: '18', class: 'promptedit',
-    placeholder: isStyle ? '## positive\n…\n\n## negative\n…' : '조각 본문 — <이 파일 이름> 으로 참조됩니다',
+    placeholder: isStyle ? '## positive\n…\n\n## negative\n…' : '조각 본문 — <이름> 으로 참조됩니다',
   }) as HTMLTextAreaElement;
 
   const save = el('button', { class: 'primary tiny', text: '저장' }) as HTMLButtonElement;
@@ -649,6 +688,7 @@ function drawCardEditor(path: string): void {
 
   save.addEventListener('click', async () => {
     save.disabled = true;
+    out.textContent = '';
     try {
       const meta = new Map<string, string>();
       if (name.value.trim()) meta.set('name', name.value.trim());
@@ -660,7 +700,15 @@ function drawCardEditor(path: string): void {
       const dir = path.slice(0, path.lastIndexOf('/'));
       const fname = path.slice(path.lastIndexOf('/') + 1);
       await state.uploadFile(fname, joinFront(meta, body.value), false, dir);
-      out.textContent = '저장했습니다.';
+      // The name is the identity: renaming the card renames the file, so a
+      // fragment's `<이름>` keeps resolving and the list shows what you typed.
+      if (name.value.trim()) {
+        try {
+          const moved = await renameCardFile(path, name.value.trim());
+          if (moved !== path) { path = moved; selectedFile = moved; }
+        } catch (e) { out.textContent = '이름은 저장됐지만 파일명 변경은 실패했습니다: ' + msg(e); }
+      }
+      if (!out.textContent) out.textContent = '저장했습니다.';
       await refresh();
       drawGen();
     } catch (e) {
@@ -845,7 +893,14 @@ function drawCharacterEditor(dir: string): void {
     if (!nm) { out.textContent = '이름을 입력해 주세요.'; return; }
     save.disabled = true;
     try {
-      const stem = nm.replace(/[<>:"/\\|?*]/g, '');
+      // Renaming the card renames its folder, same rule as the .md cards.
+      if (dir) {
+        try {
+          const moved = await renameCardFile(dir, nm);
+          if (moved !== dir) dir = moved;
+        } catch (e) { out.textContent = '파일명 변경 실패 (이름만 저장됩니다): ' + msg(e); }
+      }
+      const stem = cardStem(nm);
       const target = dir || `studio/characters/${stem}`;
       for (const v of [...vibes, ...charrefs]) {
         if (v.pendingB64) {
@@ -963,6 +1018,122 @@ function drawCharacterEditor(dir: string): void {
   }
 }
 
+/** Scene presets shown raw on request ('원본 JSON') instead of as the form. */
+const rawView = new Set<string>();
+
+/**
+ * A scene preset as a form: the preset name, then one row per scene. The file
+ * stays NAIS3's shape (read_scenes reads it verbatim) - unknown top-level keys
+ * are preserved on save, and '원본 JSON' opens the raw editor for anything the
+ * form does not show.
+ */
+function drawSceneEditor(path: string): void {
+  if (!viewMount) return;
+  const out = el('div', { class: 'hint' });
+  const name = el('input', { placeholder: '프리셋 이름' }) as HTMLInputElement;
+  const list = el('div', { class: 'verlist' });
+  let extra: Record<string, unknown> = { version: 1 };
+  interface SceneRow { name: string; prompt: string; negativePrompt: string; width: number; height: number }
+  let scenes: SceneRow[] = [];
+
+  const drawRows = (): void => {
+    clear(list);
+    if (!scenes.length) list.appendChild(el('div', { class: 'hint', text: '씬이 없습니다.' }));
+    scenes.forEach((s, i) => {
+      const nm = el('input', { value: s.name, placeholder: '씬 이름 (파일명에 들어갑니다)' }) as HTMLInputElement;
+      nm.addEventListener('change', () => { s.name = nm.value; });
+      const pr = el('textarea', { rows: '2', class: 'promptedit', placeholder: '프롬프트' }) as HTMLTextAreaElement;
+      pr.value = s.prompt;
+      pr.addEventListener('change', () => { s.prompt = pr.value; });
+      const ng = el('input', { value: s.negativePrompt, placeholder: '네거티브 (선택)' }) as HTMLInputElement;
+      ng.addEventListener('change', () => { s.negativePrompt = ng.value; });
+      const w = el('input', { type: 'number', value: s.width ? String(s.width) : '', placeholder: '가로' }) as HTMLInputElement;
+      w.addEventListener('change', () => { s.width = Math.trunc(Number(w.value)) || 0; });
+      const h = el('input', { type: 'number', value: s.height ? String(s.height) : '', placeholder: '세로' }) as HTMLInputElement;
+      h.addEventListener('change', () => { s.height = Math.trunc(Number(h.value)) || 0; });
+      const drop = el('button', { class: 'ghost tiny', text: '×', title: '이 씬을 뺍니다' });
+      drop.addEventListener('click', () => { scenes = scenes.filter((_x, j) => j !== i); drawRows(); });
+      list.appendChild(el('div', { class: 'scenerow' }, [
+        el('div', { class: 'row', style: { gap: '6px' } }, [
+          nm, w, h, drop,
+        ]),
+        pr,
+        ng,
+      ]));
+    });
+  };
+
+  const add = el('button', { class: 'ghost tiny', text: '＋ 씬 추가' });
+  add.addEventListener('click', () => { scenes.push({ name: '', prompt: '', negativePrompt: '', width: 0, height: 0 }); drawRows(); });
+  const raw = el('button', { class: 'ghost tiny', text: '원본 JSON' });
+  raw.addEventListener('click', () => { rawView.add(path); drawCentre(); });
+
+  const save = el('button', { class: 'primary tiny', text: '저장' }) as HTMLButtonElement;
+  const del = el('button', { class: 'ghost tiny' }) as HTMLButtonElement;
+  armed(del, '삭제', '정말 지울까요?', async () => {
+    try {
+      await state.deleteFile(path);
+      selectedFile = '';
+      await refresh();
+    } catch (e) { out.textContent = msg(e); }
+  });
+
+  save.addEventListener('click', async () => {
+    save.disabled = true;
+    out.textContent = '';
+    try {
+      const kept = scenes
+        .map((s) => ({ name: s.name.trim(), prompt: s.prompt, negativePrompt: s.negativePrompt,
+                       width: s.width || 0, height: s.height || 0 }))
+        .filter((s) => s.name);
+      if (scenes.length && !kept.length) { out.textContent = '씬 이름을 하나 이상 채워 주세요.'; return; }
+      const doc = { ...extra, name: name.value.trim() || path.split('/').pop()!.replace(/\.json$/, ''), scenes: kept };
+      const dir = path.slice(0, path.lastIndexOf('/'));
+      await state.uploadFile(path.split('/').pop()!, JSON.stringify(doc, null, 2), false, dir);
+      if (name.value.trim()) {
+        try {
+          const moved = await renameCardFile(path, name.value.trim());
+          if (moved !== path) { path = moved; selectedFile = moved; }
+        } catch (e) { out.textContent = '이름은 저장됐지만 파일명 변경은 실패했습니다: ' + msg(e); }
+      }
+      if (!out.textContent) out.textContent = '저장했습니다.';
+      await refresh();
+      drawGen();
+    } catch (e) {
+      out.textContent = msg(e);
+    } finally { save.disabled = false; }
+  });
+
+  viewMount.appendChild(el('div', {}, [
+    editorHead(path, [raw, del, save]),
+    el('label', { class: 'field' }, [el('span', { text: '이름' }), name]),
+    el('div', { class: 'sectiontitle', text: '씬' }),
+    el('div', { class: 'hint', text: '씬마다 한 장씩 (장수만큼 반복) 생성되고, 씬 이름이 파일명의 감정 자리에 들어갑니다.' }),
+    list,
+    el('div', { class: 'row', style: { marginTop: '6px' } }, [add]),
+    out,
+  ]));
+
+  void state.readFile(path).then((r) => {
+    try {
+      const d = JSON.parse(r.content) as Record<string, unknown>;
+      const { scenes: rawScenes, name: rawName, ...rest } = d;
+      extra = rest;
+      name.value = String(rawName ?? '');
+      scenes = (Array.isArray(rawScenes) ? rawScenes : []).map((s) => ({
+        name: String((s as SceneRow).name ?? ''), prompt: String((s as SceneRow).prompt ?? ''),
+        negativePrompt: String((s as SceneRow).negativePrompt ?? ''),
+        width: Math.trunc(Number((s as SceneRow).width)) || 0,
+        height: Math.trunc(Number((s as SceneRow).height)) || 0,
+      }));
+      drawRows();
+    } catch (e) {
+      out.textContent = 'JSON 을 읽지 못했습니다 — 원본 JSON 으로 여세요: ' + msg(e);
+    }
+  }).catch((e) => { out.textContent = msg(e); });
+  drawRows();
+}
+
 /** A raw file (scene preset JSON, a fragment collection): text in place. */
 function drawRawFile(path: string): void {
   if (!viewMount) return;
@@ -977,7 +1148,12 @@ function drawRawFile(path: string): void {
       await refresh();
     } catch (e) { out.textContent = msg(e); }
   });
-  viewMount.append(editorHead(path, [del, save]), box, out);
+  let form: HTMLElement | null = null;
+  if (rawView.has(path)) {
+    form = el('button', { class: 'ghost tiny', text: '폼 편집' });
+    form.addEventListener('click', () => { rawView.delete(path); drawCentre(); });
+  }
+  viewMount.append(editorHead(path, [form, del, save]), box, out);
 
   save.addEventListener('click', async () => {
     save.disabled = true;

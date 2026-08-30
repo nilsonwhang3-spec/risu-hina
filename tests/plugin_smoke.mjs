@@ -2046,6 +2046,86 @@ console.log('\ntest_studio_cards');
   await settle(300);
 }
 
+console.log('\ntest_studio_named_cards');
+{
+  // The name is the identity: a new card asks for its name first, the name is
+  // the filename, and renaming a card in the editor renames the file with it.
+  const auth = { Authorization: 'Bearer plugin-smoke-token', 'Content-Type': 'application/json' };
+  clickById(document, 'tab-studio');
+  await settle(700);
+  window.prompt = () => '스모크 조각';
+  const fragHead = [...document.querySelectorAll('.panel.active .explorer .row')]
+    .find((h) => /조각 프롬프트/.test(h.textContent || ''));
+  check('the fragment section header is there', !!fragHead);
+  if (fragHead) clickButton(fragHead, '＋');
+  await settle(1300);
+  const made = await (await fetch(backend.url
+    + '/files/read?path=' + encodeURIComponent('studio/fragments/스모크 조각.md'), { headers: auth })).json();
+  check('a new fragment file carries the typed name', /name: 스모크 조각/.test(made.content || ''),
+        JSON.stringify(made).slice(0, 140));
+
+  const nameBox = [...document.querySelectorAll('.panel.active .left input')]
+    .find((i) => i.value === '스모크 조각');
+  check('the editor opens on the new card', !!nameBox,
+        (document.querySelector('.panel.active .left')?.textContent || '').slice(0, 120));
+  if (nameBox) {
+    nameBox.value = '스모크 조각 II';
+    clickButton(document.querySelector('.panel.active .left'), '저장');
+    await settle(1500);
+    const moved = await (await fetch(backend.url
+      + '/files/read?path=' + encodeURIComponent('studio/fragments/스모크 조각 II.md'), { headers: auth })).json();
+    check('renaming the card renamed the file', /name: 스모크 조각 II/.test(moved.content || ''),
+          JSON.stringify(moved).slice(0, 140));
+  }
+  clickButton(document.querySelector('.panel.active .left'), '← 목록');
+  await settle(300);
+}
+
+console.log('\ntest_studio_scene_editor');
+{
+  // A scene preset is a form now - name + scene rows - and the name renames
+  // the file; the raw JSON stays one click away.
+  const auth = { Authorization: 'Bearer plugin-smoke-token', 'Content-Type': 'application/json' };
+  await fetch(backend.url + '/files/upload', {
+    method: 'POST', headers: auth,
+    body: JSON.stringify({ name: '스모크씬.json', dir: 'studio/scenes',
+      text: JSON.stringify({ version: 1, name: '스모크씬', scenes: [
+        { name: 'happy', prompt: '웃음', negativePrompt: '', width: 0, height: 0 }] }) }),
+  });
+  clickById(document, 'tab-files');
+  await settle(200);
+  clickById(document, 'tab-studio');
+  await settle(1100);
+  const row = [...document.querySelectorAll('.panel.active .pickrow')]
+    .find((r) => /스모크씬/.test(r.textContent || ''));
+  check('the scene preset renders as a card row', !!row);
+  row?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(800);
+  const left = document.querySelector('.panel.active .left');
+  const sceneName = left && [...left.querySelectorAll('input')].find((i) => i.value === 'happy');
+  check('the preset opens as a form, not raw JSON', !!sceneName,
+        (left?.textContent || '').slice(0, 160));
+  const presetName = left && [...left.querySelectorAll('input')].find((i) => i.value === '스모크씬');
+  if (presetName) {
+    presetName.value = '스모크씬 개정';
+    clickButton(left, '저장');
+    await settle(1500);
+    const moved = await (await fetch(backend.url
+      + '/files/read?path=' + encodeURIComponent('studio/scenes/스모크씬 개정.json'), { headers: auth })).json();
+    check('renaming the preset renamed the file', /스모크씬 개정/.test(moved.content || ''),
+          JSON.stringify(moved).slice(0, 140));
+  } else {
+    check('renaming the preset renamed the file', false, 'preset name input not found');
+  }
+  clickButton(document.querySelector('.panel.active .left'), '원본 JSON');
+  await settle(400);
+  check('the raw JSON view is one click away',
+        !!findButton(document.querySelector('.panel.active .left'), '폼 편집'),
+        (document.querySelector('.panel.active .left')?.textContent || '').slice(0, 120));
+  clickButton(document.querySelector('.panel.active .left'), '← 목록');
+  await settle(300);
+}
+
 console.log('\ntest_studio_screen_mode');
 {
   // The agent is told the truth about the third screen: while the studio tab
