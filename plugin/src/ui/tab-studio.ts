@@ -7,60 +7,40 @@
  * shell already survives that state (readHost only sets slotError), and it is
  * the per-tab render functions that bail. This one does not.
  *
- *   left    the library, as a tree in two halves - the prompts and presets you
- *           write above the rule, the output below it - plus the generation
- *           card. See MATERIALS/OUTPUT for why the halves behave differently.
- *   centre  the picked prompt, or the picked output folder: for images that is
- *           the comparison selector, otherwise a list, as the workspace files
- *           tab does it.
+ *   left    the prompt CARDS (styles · characters · presets · fragments), the
+ *           output tree, and the generation card. A style or a character is a
+ *           card with its own on/off and order - the lorebook model - and the
+ *           ACTIVE cards are what a run sends.
+ *   centre  the picked card's editor, or the picked output folder: for images
+ *           that is the comparison selector, otherwise a list.
  *   right   Hina, as on every tab
  *
  * The library is the `studio/` folder of the ONE global space, so its files
  * ride the shared file methods on `state` with space-rooted paths; only the
  * domain calls (NovelAI, batches, the selector) live on `state.studio`.
- * Nothing here reimplements listing, upload, move or delete.
  *
  * A bot IS needed to *adopt* an image into a card - that is gated per action,
  * where it is true, rather than on the whole tab.
  */
-import { el, clear, armed, modal } from './dom';
+import { el, clear, armed } from './dom';
 import { state, type FileListing, type GroupItem, type SelectionMap, type SelectionState,
          type StudioGroups, type StudioItem, type StudioStatus, type WorkspaceFile } from '../state';
 import { threePane } from './panes';
 import { bindAgent, mountAgent } from './agentpane';
+import { listRow as kitRow } from './kit';
+import { workspaceImage } from './blobimg';
 
-/**
- * The tree, in two halves with a rule between them.
- *
- * **Materials** are what you write: a handful of prompt files you pick one of,
- * so the tree shows the files themselves as leaves - clicking a style IS
- * choosing it, and making you open a folder to see two files is a step for
- * nothing.
- *
- * **Output** is what comes back: hundreds of images per folder, so the tree
- * shows folders only and the pictures live in the middle pane, exactly as the
- * workspace files tab does.
- *
- * The old flat list (생성물 · 캐릭터 · 스타일 · 감정 프리셋 · 조각 · 생성 프리셋)
- * put six unrelated things at one level and said nothing about which were
- * inputs and which were results.
- */
-// The library lives at studio/ inside the ONE global space, so every path
-// here is space-rooted ("studio/images/…").
-const MATERIALS: [string, string][] = [
-  ['studio/styles', '스타일 프롬프트'],
-  ['studio/characters', '캐릭터 프롬프트'],
-  // One kind of preset only: a scene list. Model, steps and CFG are the run,
-  // not the scene, so they stay on the panel rather than becoming a second
-  // sort of preset file.
-  ['studio/scenes', 'SD스튜디오 프리셋'],
-  ['studio/fragments', '조각 프롬프트'],
+// The card areas, in the order the work goes in. styles/characters carry the
+// enable toggle; scenes (SD스튜디오 프리셋) are picked per run; fragments are
+// spliced by <이름> and have no on/off - a reference either resolves or not.
+const CARD_AREAS: { area: string; label: string; toggle: boolean }[] = [
+  { area: 'styles', label: '스타일 프롬프트', toggle: true },
+  { area: 'characters', label: '캐릭터 프롬프트', toggle: true },
+  { area: 'scenes', label: 'SD스튜디오 프리셋', toggle: false },
+  { area: 'fragments', label: '조각 프롬프트', toggle: false },
 ];
-const OUTPUT: [string, string][] = [['studio/images', 'output']];
 
-/** Areas whose individual files belong in the tree rather than the grid. */
-const LEAF_AREAS = new Set(MATERIALS.map(([a]) => a));
-
+const OUTPUT_ROOT = 'studio/images';
 const IMAGE_RE = /\.(png|jpe?g|gif|webp|avif|bmp)$/i;
 
 interface Folder {
@@ -71,27 +51,34 @@ interface Folder {
 }
 
 let built = false;
+let cardsMount: HTMLElement | null = null;
 let treeMount: HTMLElement | null = null;
 let genMount: HTMLElement | null = null;
 let viewMount: HTMLElement | null = null;
 let noticeMount: HTMLElement | null = null;
 let listing: FileListing | null = null;
-let roots: Folder[] = [];
-let selected = 'studio/images';
-/** A prompt file picked in the tree; the centre shows it instead of a listing. */
+let outputRoot: Folder | null = null;
+/** The card lists, one per area. */
+let cards: Record<string, StudioItem[]> = {};
+let selected = OUTPUT_ROOT;
+/** A card picked in the list; the centre shows its editor instead of a folder. */
 let selectedFile = '';
-const open = new Set<string>(['studio/images']);
+const open = new Set<string>([OUTPUT_ROOT]);
 const thumbs = new Map<string, string>();
+/** Fragment references no fragment provides, from the last dry plan. */
+let unresolvedRefs: string[] = [];
+let unresolvedTimer: ReturnType<typeof setTimeout> | null = null;
 
-/** What the generation card is set to. Held across renders, saved per panel. */
+/** What the generation card is set to. Held across renders, not persisted. */
 const gen = {
   model: 'nai-diffusion-4-5-full',
-  style: '', character: '', scenePreset: '',
+  scenePreset: '',
   characterName: '', outfit: '',
   steps: 23, scale: 5, width: 832, height: 1216, count: 1, seed: '',
-  folder: 'studio/images',
+  folder: OUTPUT_ROOT,
   // The one control that certainly spends Anlas, so it is off unless asked.
-  useReference: false, refStrength: 0.6,
+  // References come from the ACTIVE character cards' presets now.
+  useReference: false,
   // The selector's regex. Empty means the backend's default; it is edited on
   // screen because it is the thing most likely to need adjusting.
   pattern: '',
@@ -104,9 +91,10 @@ export function renderStudioTab(mount: HTMLElement): void {
   if (!built || !mount.querySelector('.split')) {
     clear(mount);
     const pane = threePane();
+    cardsMount = el('div', { class: 'tree filetree' });
     treeMount = el('div', { class: 'tree filetree' });
     genMount = el('div', { class: 'genpanel' });
-    pane.left.append(treeMount, genMount);
+    pane.left.append(cardsMount, treeMount, genMount);
     noticeMount = el('div');
     viewMount = el('div', { class: 'pad filepad' });
     pane.centre.append(noticeMount, viewMount);
@@ -144,9 +132,15 @@ function notice(text: string, kind: 'ok' | 'err' | '' = ''): void {
 
 export async function refresh(): Promise<void> {
   try {
-    listing = await state.files();
+    const [l, ...areas] = await Promise.all([
+      state.files(),
+      ...CARD_AREAS.map((a) => state.studio.items(a.area).then((r) => r.items).catch(() => [] as StudioItem[])),
+    ]);
+    listing = l;
+    cards = Object.fromEntries(CARD_AREAS.map((a, i) => [a.area, areas[i]]));
   } catch (e) {
     listing = null;
+    drawCards();
     drawTree();
     if (viewMount) {
       clear(viewMount);
@@ -158,30 +152,139 @@ export async function refresh(): Promise<void> {
     }
     return;
   }
-  build();
+  buildOutput();
+  drawCards();
   drawTree();
   drawCentre();
+  checkUnresolved();
 }
 
-/** The space listing's studio/ paths into a tree, one root per library area. */
-function build(): void {
-  roots = [];
+// --- the card lists -------------------------------------------------------------
+
+/** The active cards of one area, in (order, path) order - what a run sends. */
+function activeOf(area: string): string[] {
+  return (cards[area] ?? [])
+    .filter((i) => i.enabled)
+    .sort((a, b) => ((a.order ?? 100) - (b.order ?? 100)) || a.path.localeCompare(b.path))
+    .map((i) => i.path);
+}
+
+function drawCards(): void {
+  if (!cardsMount) return;
+  clear(cardsMount);
+  for (const spec of CARD_AREAS) {
+    const rows = cards[spec.area] ?? [];
+    const head = el('div', { class: 'row', style: { padding: '4px 6px 0' } }, [
+      el('span', { class: 'sectiontitle grow', text: spec.label }),
+    ]);
+    if (spec.area === 'fragments' && unresolvedRefs.length) {
+      head.appendChild(el('span', {
+        class: 'badge err', text: `미해결 ${unresolvedRefs.length}`,
+        title: '프롬프트가 참조하는데 조각이 없는 이름: ' + unresolvedRefs.join(', '),
+      }));
+    }
+    const add = el('button', { class: 'ghost tiny', text: '＋', title: '새 카드' });
+    add.addEventListener('click', () => void newCard(spec.area));
+    head.appendChild(add);
+    cardsMount.appendChild(head);
+
+    if (!rows.length) {
+      cardsMount.appendChild(el('div', { class: 'hint', style: { padding: '0 10px 4px' }, text: '(없음)' }));
+      continue;
+    }
+    const sorted = [...rows].sort((a, b) =>
+      ((a.order ?? 100) - (b.order ?? 100)) || a.path.localeCompare(b.path));
+    for (const it of sorted) cardsMount.appendChild(cardRow(spec, it));
+  }
+  cardsMount.appendChild(el('div', {
+    class: 'sectionline treesep',
+    title: '위는 쓰는 것(프롬프트·프리셋), 아래는 나온 것(생성물)입니다',
+  }));
+}
+
+function cardRow(spec: { area: string; toggle: boolean }, it: StudioItem): HTMLElement {
+  const badges: { text: string; kind?: 'ok' | 'warn' | 'err' | '' ; title?: string }[] = [];
+  if (spec.area === 'characters') {
+    if (it.vibe) badges.push({ text: `바이브 ${it.vibe}`, title: '레퍼런스 사용 시 이 카드의 바이브가 실립니다' });
+    if (it.charref) badges.push({ text: `레퍼런스 ${it.charref}` });
+  }
+  if (it.count) badges.push({ text: `씬 ${it.count}` });
+  if (spec.toggle && !it.enabled) badges.push({ text: '꺼짐' });
+
+  const row = kitRow({
+    variant: 'pick',
+    selected: selectedFile === it.path,
+    title: it.name || it.path.split('/').pop() || it.path,
+    hint: it.description || undefined,
+    badges,
+    toggle: spec.toggle ? {
+      checked: !!it.enabled,
+      title: '켜면 생성 요청에 이 카드가 실립니다 (순서대로 이어집니다)',
+      onChange: async (v) => {
+        try {
+          await state.studio.setMeta(it.path, { enabled: v });
+        } catch (e) {
+          notice('바꾸지 못했습니다: ' + msg(e), 'err');
+          throw e;
+        }
+        await refresh();
+        drawGen();
+      },
+    } : undefined,
+    onClick: () => {
+      selectedFile = it.path;
+      drawCards();
+      drawCentre();
+    },
+  });
+  if (spec.toggle && typeof it.order === 'number' && it.order !== 100) {
+    row.appendChild(el('span', { class: 'hint ordertag', title: '연결 순서 (order)', text: String(it.order) }));
+  }
+  return row;
+}
+
+async function newCard(area: string): Promise<void> {
+  try {
+    if (area === 'characters') {
+      selectedFile = '';
+      drawCharacterEditor('');
+      return;
+    }
+    const stamp = new Date().toISOString().slice(5, 16).replace(/[-:T]/g, '');
+    if (area === 'scenes') {
+      const name = `새 프리셋-${stamp}.json`;
+      await state.uploadFile(name, JSON.stringify(
+        { version: 1, name: '새 프리셋', scenes: [{ name: 'happy', prompt: '', negativePrompt: '', width: 0, height: 0 }] },
+        null, 2), false, 'studio/scenes');
+      selectedFile = `studio/scenes/${name}`;
+    } else {
+      const name = area === 'styles' ? `새 스타일-${stamp}.md` : `새 조각-${stamp}.md`;
+      const front = area === 'styles'
+        ? '---\nname: 새 스타일\nenabled: true\norder: 100\n---\n'
+        : '---\nname: 새 조각\n---\n';
+      await state.uploadFile(name, front, false, `studio/${area}`);
+      selectedFile = `studio/${area}/${name}`;
+    }
+    await refresh();
+  } catch (e) {
+    notice('만들지 못했습니다: ' + msg(e), 'err');
+  }
+}
+
+// --- the output tree --------------------------------------------------------------
+
+/** The space listing's studio/images paths into one tree. */
+function buildOutput(): void {
+  outputRoot = { path: OUTPUT_ROOT, name: 'output', children: [], files: [] };
   if (!listing) return;
   const lib = listing.areas.find((a) => a.area === 'studio');
   if (!lib) return;
-  const byPath = new Map<string, Folder>();
-  // The five roots exist even when empty - materials first, then output,
-  // which is the order the work goes in.
-  for (const [key, label] of [...MATERIALS, ...OUTPUT]) {
-    const node: Folder = { path: key, name: label, children: [], files: [] };
-    byPath.set(key, node);
-    roots.push(node);
-  }
+  const byPath = new Map<string, Folder>([[OUTPUT_ROOT, outputRoot]]);
   const folder = (path: string): Folder | null => {
     const hit = byPath.get(path);
     if (hit) return hit;
+    if (!path.startsWith(OUTPUT_ROOT + '/')) return null;
     const cut = path.lastIndexOf('/');
-    if (cut <= 0) return null;  // a stray path outside the library areas
     const parent = folder(path.slice(0, cut));
     if (!parent) return null;
     const node: Folder = { path, name: path.slice(cut + 1), children: [], files: [] };
@@ -191,15 +294,17 @@ function build(): void {
   };
   for (const d of lib.dirs ?? []) folder(d);
   for (const f of lib.files) {
+    if (!f.path.startsWith(OUTPUT_ROOT + '/')) continue;
     const cut = f.path.lastIndexOf('/');
     folder(f.path.slice(0, cut))?.files.push(f);
   }
 }
 
-function find(path: string, nodes = roots): Folder | null {
-  for (const n of nodes) {
-    if (n.path === path) return n;
-    const hit = find(path, n.children);
+function find(path: string, node = outputRoot): Folder | null {
+  if (!node) return null;
+  if (node.path === path) return node;
+  for (const c of node.children) {
+    const hit = find(path, c);
     if (hit) return hit;
   }
   return null;
@@ -212,38 +317,16 @@ function countFiles(n: Folder): number {
 function drawTree(): void {
   if (!treeMount) return;
   clear(treeMount);
-  if (!roots.length) {
-    treeMount.appendChild(el('div', { class: 'hint', style: { padding: '10px' }, text: '라이브러리가 비어 있습니다.' }));
-    return;
-  }
-  const material = roots.filter((r) => LEAF_AREAS.has(r.path));
-  const output = roots.filter((r) => !LEAF_AREAS.has(r.path));
-  for (const r of material) treeMount.appendChild(row(r, 0));
-  if (material.length && output.length) {
-    treeMount.appendChild(el('div', {
-      class: 'sectionline treesep',
-      title: '위는 쓰는 것(프롬프트·프리셋), 아래는 나온 것(생성물)입니다',
-    }));
-  }
-  for (const r of output) treeMount.appendChild(row(r, 0));
-}
-
-/** Which library area a path belongs to ("studio/styles", …). */
-function areaOf(path: string): string {
-  const parts = path.split('/');
-  return parts[0] === 'studio' ? parts.slice(0, 2).join('/') : parts[0];
+  if (outputRoot) treeMount.appendChild(row(outputRoot, 0));
 }
 
 function row(n: Folder, depth: number): HTMLElement {
   const wrap = el('div');
   const isOpen = open.has(n.path);
-  // In the material half a folder's files are leaves in the tree, so a folder
-  // holding only files still unfolds.
-  const leaves = LEAF_AREAS.has(areaOf(n.path)) ? n.files : [];
-  const kids = n.children.length > 0 || leaves.length > 0;
+  const kids = n.children.length > 0;
   const caret = el('span', { class: 'caret', text: kids ? (isOpen ? '▾' : '▸') : '' });
   const line = el('button', {
-    class: 'treerow' + (selected === n.path ? ' on' : ''),
+    class: 'treerow' + (selected === n.path && !selectedFile ? ' on' : ''),
     style: { paddingLeft: 6 + depth * 12 + 'px' },
     title: n.path,
   }, [
@@ -255,53 +338,35 @@ function row(n: Folder, depth: number): HTMLElement {
     if (kids) { if (isOpen) open.delete(n.path); else open.add(n.path); }
     selected = n.path;
     selectedFile = '';
+    drawCards();
     drawTree();
     drawCentre();
   });
   wrap.appendChild(line);
-  if (isOpen) {
-    for (const c of n.children) wrap.appendChild(row(c, depth + 1));
-    for (const f of leaves) wrap.appendChild(leafRow(f, depth + 1));
-  }
+  if (isOpen) for (const c of n.children) wrap.appendChild(row(c, depth + 1));
   return wrap;
-}
-
-/**
- * One prompt file, in the tree. Clicking it IS choosing it — a style or a
- * character is a thing you pick, not a folder you browse into.
- */
-function leafRow(f: WorkspaceFile, depth: number): HTMLElement {
-  const line = el('button', {
-    class: 'treerow leafrow' + (selectedFile === f.path ? ' on' : ''),
-    style: { paddingLeft: 6 + depth * 12 + 'px' },
-    title: f.path,
-  }, [
-    el('span', { class: 'caret' }),
-    el('span', { class: 'grow', text: f.name.replace(/\.(md|json)$/i, '') }),
-  ]);
-  line.addEventListener('click', () => {
-    selectedFile = f.path;
-    selected = f.path.slice(0, f.path.lastIndexOf('/'));
-    drawTree();
-    drawCentre();
-  });
-  return line;
 }
 
 /**
  * The generation card, under the tree.
  *
- * Left, because none of it changes inside one batch: you pick a model, a
- * style, a character and an emotion set, and then produce a run. The two
- * meters live here too — Anlas and the v5 quota are different currencies and
- * neither is derived from the other, so both are shown as NovelAI reports
- * them (docs/09 §2).
+ * Left, because none of it changes inside one batch: the ACTIVE cards say
+ * what is drawn, this card says how. The two meters live here too — Anlas
+ * and the v5 quota are different currencies and neither is derived from the
+ * other, so both are shown as NovelAI reports them (docs/09 §2).
  */
 function drawGen(): void {
   if (!genMount) return;
   clear(genMount);
   genMount.appendChild(el('div', { class: 'sectionline' }));
   genMount.appendChild(el('div', { class: 'sectiontitle', text: '생성' }));
+
+  // What a run will actually send: the active cards, said out loud so the
+  // list on the left and the request stay one thing - with or without a token.
+  const nStyles = activeOf('styles').length;
+  const nChars = activeOf('characters').length;
+  genMount.appendChild(el('div', { class: 'hint', style: { margin: '4px 0' },
+    text: `활성 카드: 스타일 ${nStyles} · 캐릭터 ${nChars} — 위 목록의 체크가 배치에 실립니다` }));
 
   if (!status) {
     genMount.appendChild(el('div', { class: 'hint', text: '상태를 읽는 중입니다…' }));
@@ -357,10 +422,7 @@ function drawGen(): void {
   genMount.append(
     field('모델', modelInput),
     el('div', { class: 'row' }, [checkBtn, checkOut]),
-    pickerField('스타일', 'styles', 'style'),
-    pickerField('캐릭터', 'characters', 'character'),
-    characterButtons(),
-    pickerField('SD스튜디오 프리셋', 'scenes', 'scenePreset'),
+    scenePicker(),
     referenceToggle(),
   );
 
@@ -371,7 +433,7 @@ function drawGen(): void {
     two(numField('장수', 'count'), textField('시드', 'seed', '비우면 랜덤')),
     two(textField('캐릭터명', 'characterName', '파일 이름에 들어갑니다'),
         textField('복장', 'outfit', '파일 이름에 들어갑니다')),
-    textField('저장 폴더', 'folder', 'images/…'),
+    textField('저장 폴더', 'folder', 'studio/images/…'),
   );
 
   const planBtn = el('button', { class: 'ghost tiny', text: '계획 보기' }) as HTMLButtonElement;
@@ -383,64 +445,63 @@ function drawGen(): void {
   if (jobId) void pollJob();
 }
 
-function characterButtons(): HTMLElement {
-  const add = el('button', { class: 'ghost tiny', text: '＋ 새 캐릭터' });
-  const edit = el('button', { class: 'ghost tiny', text: '편집' }) as HTMLButtonElement;
-  add.addEventListener('click', () => openCharacter(''));
-  edit.addEventListener('click', () => { if (gen.character) openCharacter(gen.character); });
-  edit.disabled = !gen.character;
-  return el('div', { class: 'row' }, [add, edit]);
+/** The scene preset <select> - the one thing still picked per run. */
+function scenePicker(): HTMLElement {
+  const sel = el('select') as HTMLSelectElement;
+  sel.appendChild(el('option', { value: '', text: '(없음)' }));
+  for (const it of cards.scenes ?? []) {
+    const o = el('option', { value: it.path, text: it.name + (it.count ? ` (${it.count})` : '') });
+    if (it.path === gen.scenePreset) o.setAttribute('selected', 'selected');
+    sel.appendChild(o);
+  }
+  sel.addEventListener('change', () => { gen.scenePreset = sel.value; checkUnresolved(); });
+  return el('label', { class: 'field' }, [el('span', { text: 'SD스튜디오 프리셋' }), sel]);
 }
 
 /**
- * Whether this batch uses the character's reference image.
+ * Whether this batch uses the active characters' reference presets.
  *
  * Off by default and labelled with its price, because this is the one control
  * on the card that certainly spends Anlas: an encode is 2 each, and v5 cannot
  * do it at all (docs/09 §7). The encoding is cached, so a second batch with
- * the same reference costs nothing.
+ * the same reference costs nothing. Strength and 충실도 live on each card.
  */
 function referenceToggle(): HTMLElement {
   const box = el('input', { type: 'checkbox' }) as HTMLInputElement;
   box.checked = gen.useReference;
-  const strength = el('input', { type: 'number', value: String(gen.refStrength), step: '0.05' }) as HTMLInputElement;
-  strength.addEventListener('change', () => { gen.refStrength = Number(strength.value) || gen.refStrength; });
   const why = el('div', { class: 'hint' });
   const sync = () => {
     gen.useReference = box.checked;
     const v5 = !gen.model.includes('diffusion-4');
-    why.textContent = !gen.character
-      ? '캐릭터를 먼저 고르세요.'
-      : v5
-        ? 'v5 모델은 레퍼런스를 지원하지 않습니다 — 4.5 를 고르세요.'
-        : (box.checked ? '인코딩 2 Anlas (캐시되면 0). 배치당 한 번입니다.' : '');
-    strength.disabled = !box.checked;
+    const refs = (cards.characters ?? []).filter((i) => i.enabled).reduce((n, i) => n + (i.vibe ?? 0), 0);
+    why.textContent = v5
+      ? 'v5 모델은 레퍼런스를 지원하지 않습니다 — 4.5 를 고르세요.'
+      : !refs
+        ? '활성 캐릭터 카드에 레퍼런스가 없습니다 — 카드를 열어 이미지를 올려 두세요.'
+        : (box.checked ? `레퍼런스 ${refs}장 · 인코딩 2 Anlas/장 (캐시되면 0), 배치당 한 번입니다.` : '');
   };
   box.addEventListener('change', sync);
   sync();
   return el('div', {}, [
-    el('label', { class: 'row' }, [box, el('span', { text: '레퍼런스 이미지 사용 (바이브)' })]),
-    el('label', { class: 'field' }, [el('span', { text: '강도' }), strength]),
+    el('label', { class: 'row' }, [box, el('span', { text: '레퍼런스 사용 (활성 카드의 프리셋대로)' })]),
     why,
   ]);
 }
 
 function spec(): Record<string, unknown> {
+  // What you see is what is sent: the panel names the active cards explicitly
+  // rather than leaning on the backend default, so the request is inspectable.
   const out: Record<string, unknown> = {
     model: gen.model,
+    styles: activeOf('styles'),
+    characters: activeOf('characters'),
     characterName: gen.characterName, outfit: gen.outfit,
     count: gen.count, folder: gen.folder,
     params: { steps: gen.steps, scale: gen.scale, width: gen.width, height: gen.height },
   };
-  if (gen.style) out.style = gen.style;
-  if (gen.character) out.characters = [gen.character];
   if (gen.scenePreset) out.scenePreset = gen.scenePreset;
   if (gen.seed.trim()) out.seed = Number(gen.seed.trim());
-  // A reference is a list entry with its own strength: NovelAI takes several
-  // (reference_*_multiple), and the backend encodes each once per batch.
-  if (gen.useReference && gen.character) {
-    out.vibes = [{ path: gen.character.replace(/\.json$/, '.png'), strength: gen.refStrength }];
-  }
+  if (gen.useReference) out.useReference = true;
   return out;
 }
 
@@ -458,87 +519,295 @@ function textField(label: string, key: 'seed' | 'characterName' | 'outfit' | 'fo
 }
 
 /**
- * The character editor.
+ * Unresolved fragment references, checked as they change.
  *
- * A character is not a line of prose, which is why it is not a `.md` like a
- * style: it is a caption, a negative, and — the part a text file cannot hold —
- * a **reference image**. NovelAI takes references as a list with per-item
- * strengths (`reference_*_multiple`, docs/09 §7), and a reference has to be
- * encoded before it can be used, at 2 Anlas a time. So the reference lives
- * beside the JSON as `<name>.png` and is encoded once per batch, cached.
- *
- * Position (`char_captions` + `use_coords`) is what puts several characters in
- * one image; that is the next increment and the field is written here so the
- * files are already the right shape.
+ * A `<이름>` no fragment provides would generate happily and wrongly, so the
+ * dry plan (count clamped to 1, nothing spent) runs debounced after toggles
+ * and edits, and its unresolved list becomes the 조각 section's badge.
  */
-function openCharacter(path: string): void {
-  const body = el('div', { class: 'verlist' });
-  const out = el('div', { class: 'hint' });
-  const close = modal(path ? '캐릭터 편집' : '새 캐릭터', body, { sticky: true });
+function checkUnresolved(): void {
+  if (unresolvedTimer) clearTimeout(unresolvedTimer);
+  unresolvedTimer = setTimeout(async () => {
+    try {
+      const r = await state.studio.plan({ ...spec(), count: 1 });
+      unresolvedRefs = [...new Set(r.items.flatMap((i) => i.unresolved ?? []))];
+    } catch {
+      unresolvedRefs = [];
+    }
+    drawCards();
+  }, 800);
+}
 
-  const name = el('input', { placeholder: '히나' }) as HTMLInputElement;
-  const caption = el('textarea', { rows: '3', placeholder: '이 캐릭터를 그리는 프롬프트 (쉼표로 구분)' }) as HTMLTextAreaElement;
-  const negative = el('textarea', { rows: '2', placeholder: '이 캐릭터에만 붙는 네거티브' }) as HTMLTextAreaElement;
-  const folder = el('input', { value: 'characters', placeholder: 'characters/폴더' }) as HTMLInputElement;
-  const refInfo = el('div', { class: 'hint' });
-  let refBytes: string = '';
+// --- the centre: editors, the selector, folders ---------------------------------
 
-  const pickRef = el('input', { type: 'file', accept: 'image/png' }) as HTMLInputElement;
-  pickRef.addEventListener('change', () => {
-    const f = pickRef.files?.[0];
-    if (!f) return;
-    const r = new FileReader();
-    r.onload = () => {
-      const s = String(r.result || '');
-      refBytes = s.slice(s.indexOf(',') + 1);
-      refInfo.textContent = `${f.name} · ${Math.round(f.size / 1024)}KB — 저장하면 함께 들어갑니다`;
-    };
-    r.readAsDataURL(f);
-  });
+function drawCentre(): void {
+  if (!viewMount) return;
+  clear(viewMount);
 
-  if (path) {
-    void state.readFile(path).then((r) => {
-      try {
-        const d = JSON.parse(r.content) as Record<string, unknown>;
-        name.value = String(d.name ?? '');
-        caption.value = String(d.caption ?? d.prompt ?? '');
-        negative.value = String(d.negative ?? '');
-        folder.value = path.slice(0, path.lastIndexOf('/')) || 'characters';
-        if (d.reference) refInfo.textContent = '레퍼런스: ' + String(d.reference);
-      } catch { out.textContent = '이 파일을 읽지 못했습니다 (JSON 아님).'; }
-    }).catch((e) => { out.textContent = msg(e); });
+  // A card picked in the list: its editor, not the folder it lives in.
+  if (selectedFile) {
+    const parts = selectedFile.split('/');
+    if (parts[1] === 'characters' && !/\.[a-z0-9]+$/i.test(selectedFile)) {
+      drawCharacterEditor(selectedFile);
+    } else if (selectedFile.endsWith('.md')) {
+      drawCardEditor(selectedFile);
+    } else {
+      drawRawFile(selectedFile);
+    }
+    return;
   }
 
-  const save = el('button', { class: 'primary', text: '저장' }) as HTMLButtonElement;
+  const node = find(selected);
+  if (!node) {
+    viewMount.appendChild(el('div', { class: 'empty', text: '폴더를 골라 주세요.' }));
+    return;
+  }
+
+  viewMount.appendChild(el('div', { class: 'row', style: { marginBottom: '8px' } }, [
+    el('span', { class: 'sectiontitle grow', text: node.path }),
+    el('span', { class: 'hint', text: `파일 ${node.files.length} · 하위 폴더 ${node.children.length}` }),
+    newFolderButton(node),
+  ]));
+
+  if (!node.files.length && !node.children.length) {
+    viewMount.appendChild(el('div', { class: 'empty', text: '아직 생성물이 없습니다. 이미지를 여기에 넣거나 히나에게 생성을 부탁하세요.' }));
+    return;
+  }
+
+  // Under images/, comparing is the job, so the selector replaces the plain
+  // grid: candidates are looked at against each other, not browsed.
+  if (node.files.some((f) => IMAGE_RE.test(f.name))) {
+    if (!groups || groups.folder !== node.path) {
+      viewMount.appendChild(el('div', { class: 'hint', text: '읽는 중입니다…' }));
+      void loadGroups(node.path);
+      return;
+    }
+    drawSelector(node);
+    return;
+  }
+
+  const list = el('div', { class: 'filelist' });
+  for (const f of node.files) list.appendChild(fileRow(f));
+  viewMount.appendChild(list);
+}
+
+// --- the card editors -------------------------------------------------------------
+
+// The client-side mirror of studio.FRONT: split the front matter off so the
+// editor shows fields, not fence syntax. The backend stays the writer of
+// meta-only changes (set_meta); a full save goes through upload.
+const FRONT_RE = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*\r?\n?/;
+
+function splitFront(text: string): { meta: Map<string, string>; body: string } {
+  const meta = new Map<string, string>();
+  const m = text.match(FRONT_RE);
+  if (!m) return { meta, body: text };
+  for (const line of m[1].split('\n')) {
+    const at = line.indexOf(':');
+    if (at < 0) continue;
+    meta.set(line.slice(0, at).trim(), line.slice(at + 1).trim().replace(/^["']|["']$/g, ''));
+  }
+  return { meta, body: text.slice(m[0].length) };
+}
+
+function joinFront(meta: Map<string, string>, body: string): string {
+  const lines = [...meta.entries()].filter(([, v]) => v !== '').map(([k, v]) => `${k}: ${v}`);
+  return lines.length ? `---\n${lines.join('\n')}\n---\n${body}` : body;
+}
+
+function editorHead(path: string, extra: (HTMLElement | null)[] = []): HTMLElement {
+  const back = el('button', { class: 'ghost tiny', text: '← 목록' });
+  back.addEventListener('click', () => { selectedFile = ''; drawCards(); drawCentre(); });
+  return el('div', { class: 'row', style: { marginBottom: '8px' } }, [
+    back, el('span', { class: 'sectiontitle grow', text: path }), ...extra,
+  ]);
+}
+
+/** A style or fragment .md: front-matter fields above the body. */
+function drawCardEditor(path: string): void {
+  if (!viewMount) return;
+  const isStyle = path.startsWith('studio/styles/');
+  const out = el('div', { class: 'hint' });
+  const name = el('input', { placeholder: '(파일 이름)' }) as HTMLInputElement;
+  const desc = el('input', { placeholder: '한 줄 설명' }) as HTMLInputElement;
+  const enabledBox = el('input', { type: 'checkbox' }) as HTMLInputElement;
+  const order = el('input', { type: 'number', value: '100', step: '10',
+                              title: '작을수록 앞에 이어집니다' }) as HTMLInputElement;
+  const body = el('textarea', { rows: '18', class: 'promptedit',
+    placeholder: isStyle ? '## positive\n…\n\n## negative\n…' : '조각 본문 — <이 파일 이름> 으로 참조됩니다',
+  }) as HTMLTextAreaElement;
+
+  const save = el('button', { class: 'primary tiny', text: '저장' }) as HTMLButtonElement;
+  const del = el('button', { class: 'ghost tiny' }) as HTMLButtonElement;
+  armed(del, '삭제', '정말 지울까요?', async () => {
+    try {
+      await state.deleteFile(path);
+      selectedFile = '';
+      await refresh();
+    } catch (e) { out.textContent = msg(e); }
+  });
+
+  save.addEventListener('click', async () => {
+    save.disabled = true;
+    try {
+      const meta = new Map<string, string>();
+      if (name.value.trim()) meta.set('name', name.value.trim());
+      if (desc.value.trim()) meta.set('description', desc.value.trim());
+      if (isStyle) {
+        meta.set('enabled', enabledBox.checked ? 'true' : 'false');
+        if (order.value.trim() && order.value.trim() !== '100') meta.set('order', String(Math.trunc(Number(order.value)) || 100));
+      }
+      const dir = path.slice(0, path.lastIndexOf('/'));
+      const fname = path.slice(path.lastIndexOf('/') + 1);
+      await state.uploadFile(fname, joinFront(meta, body.value), false, dir);
+      out.textContent = '저장했습니다.';
+      await refresh();
+      drawGen();
+    } catch (e) {
+      out.textContent = msg(e);
+    } finally { save.disabled = false; }
+  });
+
+  viewMount.appendChild(el('div', {}, [
+    editorHead(path, [del, save]),
+    el('label', { class: 'field' }, [el('span', { text: '이름' }), name]),
+    el('label', { class: 'field' }, [el('span', { text: '설명' }), desc]),
+    isStyle ? el('div', { class: 'row', style: { marginBottom: '8px' } }, [
+      el('label', { class: 'row' }, [enabledBox, el('span', { text: '활성 (생성에 실림)' })]),
+      el('label', { class: 'field', style: { width: '130px', marginBottom: '0' } }, [el('span', { text: '순서' }), order]),
+    ]) : null,
+    el('label', { class: 'field' }, [el('span', { text: isStyle ? '본문 (## positive / ## negative)' : '본문' }), body]),
+    out,
+  ]));
+
+  void state.readFile(path).then((r) => {
+    const { meta, body: b } = splitFront(r.content);
+    name.value = meta.get('name') ?? '';
+    desc.value = meta.get('description') ?? '';
+    enabledBox.checked = (meta.get('enabled') ?? '').toLowerCase() === 'true';
+    order.value = meta.get('order') ?? '100';
+    body.value = b;
+  }).catch((e) => { out.textContent = msg(e); });
+}
+
+/**
+ * The character card editor - a folder card, edited in the centre pane.
+ *
+ * A character is not only text: beside the prompt live the reference images
+ * and their per-item presets (강도/충실도), which is exactly what NovelAI
+ * takes (`reference_*_multiple`, docs/09 §7). Saving writes prompt.md and
+ * preset.json; images upload into the card's folder as they are added.
+ */
+function drawCharacterEditor(dir: string): void {
+  if (!viewMount) return;
+  clear(viewMount);
+  const isNew = !dir;
+  const out = el('div', { class: 'hint' });
+
+  const name = el('input', { placeholder: '히나' }) as HTMLInputElement;
+  const caption = el('textarea', { rows: '4', class: 'promptedit',
+    placeholder: '이 캐릭터를 그리는 프롬프트 (쉼표로 구분)' }) as HTMLTextAreaElement;
+  const negative = el('textarea', { rows: '2', class: 'promptedit',
+    placeholder: '이 캐릭터에만 붙는 네거티브' }) as HTMLTextAreaElement;
+  const enabledBox = el('input', { type: 'checkbox' }) as HTMLInputElement;
+  const order = el('input', { type: 'number', value: '100', step: '10' }) as HTMLInputElement;
+  const posX = el('input', { type: 'number', step: '0.1', placeholder: 'x 0~1' }) as HTMLInputElement;
+  const posY = el('input', { type: 'number', step: '0.1', placeholder: 'y 0~1' }) as HTMLInputElement;
+
+  interface RefEntry { file: string; strength: number; informationExtracted: number; enabled: boolean; pendingB64?: string }
+  let vibes: RefEntry[] = [];
+  const refList = el('div', { class: 'verlist' });
+
+  const drawRefs = (): void => {
+    clear(refList);
+    if (!vibes.length) {
+      refList.appendChild(el('div', { class: 'hint', text: '레퍼런스가 없습니다. PNG 를 올리면 바이브로 실립니다.' }));
+    }
+    vibes.forEach((v, i) => {
+      const pic = v.pendingB64
+        ? el('span', { class: 'hint', text: '(저장 시 올라갑니다)' })
+        : workspaceImage(`${dir}/${v.file}`, v.file, { thumb: true });
+      const strength = el('input', { type: 'number', step: '0.05', value: String(v.strength),
+                                     title: '강도 (reference_strength)' }) as HTMLInputElement;
+      strength.addEventListener('change', () => { v.strength = Number(strength.value) || v.strength; });
+      const ie = el('input', { type: 'number', step: '0.05', value: String(v.informationExtracted),
+                               title: '충실도 (information_extracted)' }) as HTMLInputElement;
+      ie.addEventListener('change', () => { v.informationExtracted = Number(ie.value) || v.informationExtracted; });
+      const on = el('input', { type: 'checkbox', title: '이 레퍼런스를 실을지' }) as HTMLInputElement;
+      on.checked = v.enabled;
+      on.addEventListener('change', () => { v.enabled = on.checked; });
+      const drop = el('button', { class: 'ghost tiny', text: '×', title: '목록에서 빼기 (파일은 남습니다)' });
+      drop.addEventListener('click', () => { vibes = vibes.filter((_x, j) => j !== i); drawRefs(); });
+      refList.appendChild(el('div', { class: 'row', style: { alignItems: 'center', gap: '6px' } }, [
+        on, pic, el('span', { class: 'grow hint', text: v.file }),
+        el('span', { class: 'hint', text: '강도' }), strength,
+        el('span', { class: 'hint', text: '충실도' }), ie,
+        drop,
+      ]));
+    });
+  };
+
+  const pickRef = el('input', { type: 'file', accept: 'image/png', multiple: true }) as HTMLInputElement;
+  pickRef.addEventListener('change', () => {
+    for (const f of Array.from(pickRef.files ?? [])) {
+      const r = new FileReader();
+      r.onload = () => {
+        const s = String(r.result || '');
+        vibes.push({ file: f.name, strength: 0.6, informationExtracted: 1.0, enabled: true,
+                     pendingB64: s.slice(s.indexOf(',') + 1) });
+        drawRefs();
+      };
+      r.readAsDataURL(f);
+    }
+    pickRef.value = '';
+  });
+
+  const save = el('button', { class: 'primary tiny', text: '저장' }) as HTMLButtonElement;
   save.addEventListener('click', async () => {
     const nm = name.value.trim();
     if (!nm) { out.textContent = '이름을 입력해 주세요.'; return; }
     save.disabled = true;
     try {
-      const dir = folder.value.trim() || 'characters';
       const stem = nm.replace(/[<>:"/\\|?*]/g, '');
-      if (refBytes) {
-        await state.uploadFile(stem + '.png', refBytes, true, dir);
+      const target = dir || `studio/characters/${stem}`;
+      for (const v of vibes) {
+        if (v.pendingB64) {
+          await state.uploadFile(v.file, v.pendingB64, true, target);
+          delete v.pendingB64;
+        }
       }
-      await state.uploadFile(stem + '.json', JSON.stringify({
-        name: nm,
-        caption: caption.value.trim(),
-        negative: negative.value.trim(),
-        // Beside the JSON, same stem: one thing to move, one thing to delete.
-        reference: refBytes || refInfo.textContent ? `${dir}/${stem}.png` : '',
-        position: null,
-      }, null, 2));
-      close();
+      const meta = new Map<string, string>([['name', nm]]);
+      meta.set('enabled', enabledBox.checked ? 'true' : 'false');
+      if (order.value.trim() && order.value.trim() !== '100') meta.set('order', String(Math.trunc(Number(order.value)) || 100));
+      let body = `## 프롬프트\n${caption.value.trim()}\n`;
+      if (negative.value.trim()) body += `\n## 네거티브\n${negative.value.trim()}\n`;
+      await state.uploadFile('prompt.md', joinFront(meta, body), false, target);
+      const position = (posX.value.trim() && posY.value.trim())
+        ? { x: Number(posX.value), y: Number(posY.value) } : null;
+      await state.uploadFile('preset.json', JSON.stringify({
+        version: 1, position,
+        vibe: vibes.map((v) => ({ file: v.file, strength: v.strength,
+                                  informationExtracted: v.informationExtracted, enabled: v.enabled })),
+        charref: [],
+      }, null, 2), false, target);
       notice(`캐릭터 “${nm}” 를 저장했습니다.`, 'ok');
+      selectedFile = target;
       await refresh();
       drawGen();
     } catch (e) {
       out.textContent = msg(e);
-      save.disabled = false;
-    }
+    } finally { save.disabled = false; }
   });
-  const cancel = el('button', { class: 'ghost', text: '취소' });
-  cancel.addEventListener('click', close);
+
+  const del = el('button', { class: 'ghost tiny' }) as HTMLButtonElement;
+  armed(del, '삭제', '카드 폴더째 지울까요?', async () => {
+    if (!dir) return;
+    try {
+      await state.deleteFile(dir);
+      selectedFile = '';
+      await refresh();
+    } catch (e) { out.textContent = msg(e); }
+  });
 
   const field = (label: string, node: HTMLElement, hint = '') =>
     el('label', { class: 'field' }, [
@@ -546,33 +815,97 @@ function openCharacter(path: string): void {
       hint ? el('div', { class: 'hint', text: hint }) : null,
     ]);
 
-  body.append(
-    field('이름', name, '파일 이름과 프롬프트 조립에 쓰입니다'),
+  viewMount.append(
+    editorHead(dir || '새 캐릭터', [isNew ? null : del, save]),
+    field('이름', name, '카드 폴더 이름과 프롬프트 조립에 쓰입니다'),
+    el('div', { class: 'row', style: { marginBottom: '8px' } }, [
+      el('label', { class: 'row' }, [enabledBox, el('span', { text: '활성 (생성에 실림)' })]),
+      el('label', { class: 'field', style: { width: '130px', marginBottom: '0' } }, [el('span', { text: '순서' }), order]),
+    ]),
     field('프롬프트', caption),
     field('네거티브', negative),
-    field('레퍼런스 이미지 (PNG)', pickRef,
-          '바이브 트랜스퍼용입니다. 인코딩은 회당 2 Anlas 이고 배치마다 한 번만 합니다. v5 모델은 아직 지원하지 않습니다.'),
-    refInfo,
-    field('폴더', folder),
-    el('div', { class: 'row', style: { marginTop: '8px' } }, [save, cancel]),
+    el('div', { class: 'row', style: { marginBottom: '8px' } }, [
+      el('label', { class: 'field grow', style: { marginBottom: '0' } }, [el('span', { text: '위치 x (여럿일 때)' }), posX]),
+      el('label', { class: 'field grow', style: { marginBottom: '0' } }, [el('span', { text: '위치 y' }), posY]),
+    ]),
+    el('div', { class: 'sectiontitle', text: '바이브 레퍼런스' }),
+    el('div', { class: 'hint', text: '인코딩은 회당 2 Anlas (캐시되면 0), 배치마다 한 번. v5 모델은 지원하지 않습니다.' }),
+    refList,
+    field('PNG 추가', pickRef),
     out,
   );
+  drawRefs();
+
+  if (dir) {
+    void state.readFile(`${dir}/prompt.md`).then((r) => {
+      const { meta, body } = splitFront(r.content);
+      name.value = meta.get('name') ?? dir.split('/').pop() ?? '';
+      enabledBox.checked = (meta.get('enabled') ?? '').toLowerCase() === 'true';
+      order.value = meta.get('order') ?? '100';
+      const secs = body.split(/^##+\s*(프롬프트|네거티브|positive|negative)\s*$/im);
+      if (secs.length === 1) {
+        caption.value = body.trim();
+      } else {
+        for (let i = 1; i + 1 < secs.length; i += 2) {
+          const which = secs[i].toLowerCase();
+          if (which === '네거티브' || which === 'negative') negative.value = secs[i + 1].trim();
+          else caption.value = secs[i + 1].trim();
+        }
+      }
+    }).catch((e) => { out.textContent = msg(e); });
+    void state.readFile(`${dir}/preset.json`).then((r) => {
+      try {
+        const d = JSON.parse(r.content) as { position?: { x?: number; y?: number } | null;
+                                             vibe?: RefEntry[] };
+        if (d.position && typeof d.position === 'object') {
+          posX.value = String(d.position.x ?? '');
+          posY.value = String(d.position.y ?? '');
+        }
+        vibes = (d.vibe ?? []).map((v) => ({
+          file: String(v.file || ''), strength: Number(v.strength ?? 0.6),
+          informationExtracted: Number(v.informationExtracted ?? 1.0),
+          enabled: v.enabled !== false,
+        })).filter((v) => v.file);
+        drawRefs();
+      } catch { /* a fresh card has no preset yet */ }
+    }).catch(() => { /* same */ });
+  }
 }
 
-/** A <select> of one library area, filled when the card is drawn. */
-function pickerField(label: string, area: string, key: 'style' | 'character' | 'scenePreset'): HTMLElement {
-  const sel = el('select') as HTMLSelectElement;
-  sel.appendChild(el('option', { value: '', text: '(없음)' }));
-  sel.addEventListener('change', () => { gen[key] = sel.value; });
-  void state.studio.items(area).then((r) => {
-    for (const it of r.items as StudioItem[]) {
-      const o = el('option', { value: it.path, text: it.name + (it.count ? ` (${it.count})` : '') });
-      if (it.path === gen[key]) o.setAttribute('selected', 'selected');
-      sel.appendChild(o);
-    }
-    sel.value = gen[key];
-  }).catch(() => { /* the area may simply be empty */ });
-  return el('label', { class: 'field' }, [el('span', { text: label }), sel]);
+/** A raw file (scene preset JSON, a fragment collection): text in place. */
+function drawRawFile(path: string): void {
+  if (!viewMount) return;
+  const box = el('textarea', { rows: '22', class: 'promptedit' }) as HTMLTextAreaElement;
+  const out = el('div', { class: 'hint' });
+  const save = el('button', { class: 'primary tiny', text: '저장' }) as HTMLButtonElement;
+  const del = el('button', { class: 'ghost tiny' }) as HTMLButtonElement;
+  armed(del, '삭제', '정말 지울까요?', async () => {
+    try {
+      await state.deleteFile(path);
+      selectedFile = '';
+      await refresh();
+    } catch (e) { out.textContent = msg(e); }
+  });
+  viewMount.append(editorHead(path, [del, save]), box, out);
+
+  save.addEventListener('click', async () => {
+    save.disabled = true;
+    try {
+      const dir = path.slice(0, path.lastIndexOf('/'));
+      const fname = path.slice(path.lastIndexOf('/') + 1);
+      await state.uploadFile(fname, box.value, false, dir);
+      out.textContent = '저장했습니다.';
+      await refresh();
+      drawGen();
+    } catch (e) {
+      out.textContent = msg(e);
+    } finally { save.disabled = false; }
+  });
+
+  void state.readFile(path).then((r) => {
+    box.value = r.content;
+    if (!r.textual) out.textContent = r.note || '텍스트 파일이 아닙니다.';
+  }).catch((e) => { out.textContent = msg(e); });
 }
 
 async function showPlan(): Promise<void> {
@@ -654,60 +987,6 @@ async function pollJob(): Promise<void> {
   await tick();
 }
 
-function drawCentre(): void {
-  if (!viewMount) return;
-  clear(viewMount);
-
-  // A prompt picked in the tree: show it, not the folder it lives in.
-  if (selectedFile) {
-    drawPromptFile(selectedFile);
-    return;
-  }
-
-  const node = find(selected);
-  if (!node) {
-    viewMount.appendChild(el('div', { class: 'empty', text: '폴더를 골라 주세요.' }));
-    return;
-  }
-
-  viewMount.appendChild(el('div', { class: 'row', style: { marginBottom: '8px' } }, [
-    el('span', { class: 'sectiontitle grow', text: node.path }),
-    el('span', { class: 'hint', text: `파일 ${node.files.length} · 하위 폴더 ${node.children.length}` }),
-    newFolderButton(node),
-  ]));
-
-  if (!node.files.length && !node.children.length) {
-    viewMount.appendChild(el('div', { class: 'empty', text: emptyHint(node.path) }));
-    return;
-  }
-
-  // Under images/, comparing is the job, so the selector replaces the plain
-  // grid: candidates are looked at against each other, not browsed.
-  if (isImagesFolder(node.path) && node.files.some((f) => IMAGE_RE.test(f.name))) {
-    if (!groups || groups.folder !== node.path) {
-      viewMount.appendChild(el('div', { class: 'hint', text: '읽는 중입니다…' }));
-      void loadGroups(node.path);
-      return;
-    }
-    drawSelector(node);
-    return;
-  }
-
-  // Pictures read as a grid and everything else as a list: a folder of three
-  // hundred generations is unusable as filenames, and a folder of prompt
-  // files is unusable as blank thumbnails.
-  const pictures = node.files.filter((f) => IMAGE_RE.test(f.name));
-  if (pictures.length && pictures.length >= node.files.length / 2) {
-    const grid = el('div', { class: 'agrid' });
-    for (const f of node.files) grid.appendChild(cell(f));
-    viewMount.appendChild(grid);
-  } else {
-    const list = el('div', { class: 'filelist' });
-    for (const f of node.files) list.appendChild(listRow(f));
-    viewMount.appendChild(list);
-  }
-}
-
 // --- the comparison selector -------------------------------------------------
 //
 // The model is `C:\code\image-selector`, reimplemented here in the panel's
@@ -725,10 +1004,6 @@ let selection: SelectionMap = {};
 let columns = 3;
 let drill = '';
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
-
-function isImagesFolder(path: string): boolean {
-  return path === 'studio/images' || path.startsWith('studio/images/');
-}
 
 async function loadGroups(folder: string): Promise<void> {
   try {
@@ -816,13 +1091,13 @@ function drawSelector(node: Folder): void {
 
   for (const grp of g.groups) {
     const head = el('div', { class: 'row', style: { marginTop: '10px' } });
-    const open = el('button', { class: 'ghost tiny', text: '크게 보기' });
-    open.addEventListener('click', () => { drill = grp.key; drawCentre(); });
+    const open2 = el('button', { class: 'ghost tiny', text: '크게 보기' });
+    open2.addEventListener('click', () => { drill = grp.key; drawCentre(); });
     const chosen = grp.items.filter((i) => selection[i.filename]?.use).length;
     head.append(
       el('span', { class: 'sectiontitle grow', text: `${grp.key} · ${grp.items.length}장` }),
       el('span', { class: 'badge' + (chosen ? '' : ' warn'), text: chosen ? `선택 ${chosen}` : '미선택' }),
-      open,
+      open2,
     );
     viewMount.appendChild(head);
     viewMount.appendChild(candidateGrid(grp.items));
@@ -861,13 +1136,13 @@ function candidate(it: GroupItem): HTMLElement {
     mk('inpaint', '수정', '먼저 고쳐야 합니다'),
     mk('delete', '버림', '지울 후보입니다'),
   );
-  const cell = el('div', { class: cls, title: it.filename }, [
+  const cell2 = el('div', { class: cls, title: it.filename }, [
     pic, el('div', { class: 'fname', text: it.filename }), flags,
   ]);
   // The picture itself toggles 채택: that is the click being made ninety times.
   pic.addEventListener('click', () => flag(it.filename, 'use'));
   void loadThumb({ path: it.path, name: it.filename, size: 0, modified: 0, textual: false }, pic);
-  return cell;
+  return cell2;
 }
 
 function exportButton(node: Folder): HTMLElement {
@@ -913,69 +1188,6 @@ function adoptButton(): HTMLElement {
   return b;
 }
 
-/**
- * One prompt file, editable in place.
- *
- * These are short and are the thing you came to change, so there is no "open
- * an editor" step: the text is here, with a save button. A character opens its
- * own editor instead, because it is not only text (reference image, position).
- */
-function drawPromptFile(path: string): void {
-  if (!viewMount) return;
-  const area = areaOf(path);
-  const box = el('textarea', { rows: '22', class: 'promptedit' }) as HTMLTextAreaElement;
-  const out = el('div', { class: 'hint' });
-  const save = el('button', { class: 'primary tiny', text: '저장' }) as HTMLButtonElement;
-  const back = el('button', { class: 'ghost tiny', text: '← 목록' });
-  back.addEventListener('click', () => { selectedFile = ''; drawTree(); drawCentre(); });
-
-  const head = el('div', { class: 'row', style: { marginBottom: '8px' } }, [
-    back, el('span', { class: 'sectiontitle grow', text: path }),
-  ]);
-  if (area === 'characters' && path.endsWith('.json')) {
-    const edit = el('button', { class: 'ghost tiny', text: '캐릭터 편집기' });
-    edit.addEventListener('click', () => openCharacter(path));
-    head.appendChild(edit);
-  }
-  const del = el('button', { class: 'ghost tiny', title: '삭제' }) as HTMLButtonElement;
-  armed(del, '✕', '삭제 확인', async () => {
-    try {
-      await state.deleteFile(path);
-      selectedFile = '';
-      await refresh();
-    } catch (e) { out.textContent = msg(e); }
-  });
-  head.appendChild(del);
-  head.appendChild(save);
-  viewMount.append(head, box, out);
-
-  save.addEventListener('click', async () => {
-    save.disabled = true;
-    try {
-      const dir = path.slice(0, path.lastIndexOf('/'));
-      const name = path.slice(path.lastIndexOf('/') + 1);
-      await state.uploadFile(name, box.value, false, dir);
-      out.textContent = '저장했습니다.';
-      drawGen();  // a renamed style should show up in the picker at once
-    } catch (e) {
-      out.textContent = msg(e);
-    } finally { save.disabled = false; }
-  });
-
-  void state.readFile(path).then((r) => {
-    box.value = r.content;
-    if (!r.textual) out.textContent = r.note || '텍스트 파일이 아닙니다.';
-  }).catch((e) => { out.textContent = msg(e); });
-}
-
-function emptyHint(area: string): string {
-  const root = area.split('/')[0];
-  if (root === 'studio/images') return '아직 생성물이 없습니다. 이미지를 여기에 넣거나 히나에게 생성을 부탁하세요.';
-  if (root === 'scenes') return 'SD스튜디오 프리셋이 없습니다 — NAIS3 형식의 scenes[] JSON 을 넣으세요.';
-  if (root === 'characters') return '캐릭터가 없습니다 — 프롬프트와 레퍼런스 이미지를 함께 둡니다.';
-  return '비어 있습니다.';
-}
-
 function newFolderButton(node: Folder): HTMLElement {
   const b = el('button', { class: 'ghost tiny', text: '＋ 폴더' }) as HTMLButtonElement;
   b.addEventListener('click', () => {
@@ -990,7 +1202,7 @@ function newFolderButton(node: Folder): HTMLElement {
   return b;
 }
 
-function listRow(f: WorkspaceFile): HTMLElement {
+function fileRow(f: WorkspaceFile): HTMLElement {
   const del = el('button', { class: 'ghost tiny', title: '삭제' }) as HTMLButtonElement;
   const rowEl = el('div', { class: 'chatitem' }, [
     el('span', { class: 'grow', text: f.name }),
@@ -1008,18 +1220,6 @@ function listRow(f: WorkspaceFile): HTMLElement {
     }
   });
   return rowEl;
-}
-
-function cell(f: WorkspaceFile): HTMLElement {
-  const pic = el('div', { class: 'assetpic' });
-  const c = el('div', { class: 'fcell', title: f.path }, [
-    pic,
-    el('div', { class: 'fname', text: f.name }),
-    el('div', { class: 'fsize', text: fmtSize(f.size) }),
-  ]);
-  if (IMAGE_RE.test(f.name)) void loadThumb(f, pic);
-  else pic.appendChild(el('div', { class: 'assettype', text: (f.name.split('.').pop() || '?').toUpperCase().slice(0, 5) }));
-  return c;
 }
 
 // Thumbnails, a few at a time, from the backend's copy - the same shape and

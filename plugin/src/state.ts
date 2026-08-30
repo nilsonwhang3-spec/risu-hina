@@ -503,6 +503,10 @@ export interface StudioGroups {
 export interface StudioItem {
   path: string; name: string; folder: string;
   description?: string; count?: number;
+  /** The card's own switch and place in the concatenation (styles/characters). */
+  enabled?: boolean; order?: number;
+  /** Reference counts on a character card. */
+  vibe?: number; charref?: number;
 }
 
 export interface PlannedImage {
@@ -549,6 +553,12 @@ class StudioFiles {
 
   async items(area: string): Promise<{ area: string; items: StudioItem[] }> {
     return await transport.get('/studio/list', { area });
+  }
+
+  /** One card's front matter: the enable toggle, the order, name, description. */
+  async setMeta(path: string, set: { enabled?: boolean; order?: number; name?: string; description?: string })
+    : Promise<{ path: string; enabled: boolean; order: number }> {
+    return await transport.post('/studio/meta', { path, set });
   }
 
   /** What a batch would produce, before anything is spent. */

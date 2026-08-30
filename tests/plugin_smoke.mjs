@@ -1966,6 +1966,61 @@ console.log('\ntest_studio_tab');
         (gen?.textContent || '').slice(0, 200));
 }
 
+console.log('\ntest_studio_cards');
+{
+  // A style is a CARD: a row with its own on/off, edited in the centre pane.
+  const auth = { Authorization: 'Bearer plugin-smoke-token', 'Content-Type': 'application/json' };
+  await fetch(backend.url + '/files/upload', {
+    method: 'POST', headers: auth,
+    body: JSON.stringify({ name: '스모크스타일.md', dir: 'studio/styles',
+      text: '---' + String.fromCharCode(10) + 'name: 스모크스타일' + String.fromCharCode(10)
+        + '---' + String.fromCharCode(10) + '스타일본문' }),
+  });
+  clickById(document, 'tab-files');
+  await settle(200);
+  clickById(document, 'tab-studio');
+  await settle(1100);
+
+  const rows = [...document.querySelectorAll('.panel.active .pickrow')];
+  const styleRow = rows.find((r) => /스모크스타일/.test(r.textContent || ''));
+  check('a style renders as a card row', !!styleRow,
+        (document.querySelector('.panel.active .tree')?.textContent || '').slice(0, 200));
+  const toggle = styleRow?.querySelector('input[type=checkbox]');
+  check('the card row carries an enable toggle', !!toggle);
+  check('an absent enabled means OFF (dimmed)', styleRow?.classList.contains('off'),
+        styleRow?.className);
+
+  toggle.checked = true;
+  toggle?.dispatchEvent(new window.Event('change', { bubbles: true }));
+  await settle(1400);
+  const read = await (await fetch(backend.url
+    + '/files/read?path=' + encodeURIComponent('studio/styles/스모크스타일.md'), { headers: auth })).json();
+  check('the toggle writes the card front matter', /enabled: true/.test(read.content || ''),
+        (read.content || '').slice(0, 80));
+  check('and the generation card counts it as active',
+        /활성 카드: 스타일 [1-9]/.test(document.querySelector('.genpanel')?.textContent || ''),
+        (document.querySelector('.genpanel')?.textContent || '').slice(0, 160));
+
+  const row2 = [...document.querySelectorAll('.panel.active .pickrow')]
+    .find((r) => /스모크스타일/.test(r.textContent || ''));
+  row2?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(600);
+  check('clicking the card opens the centre editor',
+        !!document.querySelector('.panel.active .left textarea.promptedit'),
+        (document.querySelector('.panel.active .left')?.textContent || '').slice(0, 120));
+  check('the editor shows the front matter as fields',
+        [...document.querySelectorAll('.panel.active .left input')]
+          .some((i) => i.value === '스모크스타일'));
+
+  // The old single-select style/character pickers are gone (the scene preset
+  // is the one <select> a configured account would show).
+  check('no style/character pickers remain',
+        document.querySelectorAll('.genpanel select').length <= 1,
+        String(document.querySelectorAll('.genpanel select').length));
+  clickButton(document.querySelector('.panel.active .left'), '← 목록');
+  await settle(300);
+}
+
 console.log('\ntest_studio_screen_mode');
 {
   // The agent is told the truth about the third screen: while the studio tab
