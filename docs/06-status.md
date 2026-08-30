@@ -15,10 +15,13 @@ branch rebased in) **+ §1-18 the tab kit · prompt cards · character reference
 tabs · request settings · the scoped refresh · the live queue · path copy · the documented spec)
 **+ §1-20 the studio redesign, second field report** (left = 프롬프트/OUTPUT tabs with ONE style
 edited in place and the character view · centre = 1장/배치/잡 히스토리 with the reservation queue
-(entries jobs, casts) · streaming previews · folder grid with drags · regex group-by and 부족분 →
-reservations; plan `~/.claude/plans/zesty-dazzling-lagoon.md`)
+(entries jobs) · streaming previews · folder grid with drags · visible group-by and 부족분 →
+reservations; plan `~/.claude/plans/zesty-dazzling-lagoon.md`) **+ §1-21 the third field report**
+(tabs that read as tabs · characters picked in one place, casts gone · batch = queue only, results
+as history fold-outs · no window.prompt · draggable character folders · click-select folder grid ·
+token-chip grouping with 전체/그룹별 · the LRU blob cache fix · one keep-alive NAI client)
 (gate ALL GREEN; the minor went up so the version gate trips when it ships). **Staged on test-server
-2026-08-30 evening AT §1-20 (= §1-19 included): service stopped → backup `data-backup-20260830-s120`
+2026-08-30 evening AT §1-21 (= §1-19·§1-20 included): service stopped → backup `data-backup-20260830-s120`
 (11,358 files) → app/*.py + seeds/studio-image-ops.md + tools/probe_nai.py + requirements.in scp'd,
 msgpack 1.1.0 pip-installed into the bundled interpreter, the 0.11.0 dev bundle refreshed in
 `data/plugin/` (712,599 B served at `/plugin.js`) → `/health` 0.11.0 · 12 workspaces ·
@@ -47,6 +50,43 @@ mixed-cast multi-entry batch from the panel.** Released = **v0.10.0 BETA** (§1-
 `https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js`, and made `tools/bundle.py` write that file into the repository (included in the release commit). In the backend code only VERSION changed.
 
 → **First thing to do**: the user reinstalls `plugin/Risu.Hina.Plugin.js` into RisuAI **by hand, once** (the installed 0.1.0's update-url cannot be read because of CORS) → check that `+` appears from the next release on → verify M2 in real use (§5-2).
+
+## 1-21. 2026-08-30 - 0.11.0 (unreleased, continued): the third field report - tabs, one place for characters, visible grouping
+
+Seventeen items from live use of the §1-20 staging, one commit (`296bb11`), gate green, restaged
+the same evening (backup `data-backup-20260830-r3`; `/health` 0.11.0, new bundle 715,775 B at
+`/plugin.js`, a timed 2-image probe: 10.6s then 9.5s - the keep-alive shaves the handshake, the
+rest is NovelAI's own generation time).
+
+- **Tabs read as tabs** (`.tabstrip`: flat strip on a baseline rule, active underlined, never
+  wraps into a column) - they used to look like buttons or form fields, and the centre tab strip
+  could stack vertically. The two panel-collapse toggles moved to the CENTRE strip's ends: on the
+  left bar they had pushed the OUTPUT tab out of the 300px column, which also made collapsing
+  unreachable (items 1·2·6·7).
+- **Characters are picked in ONE place** - the left column's checked cards ride the job at submit.
+  The batch tab's cast (출연) concept is gone with its confusing copy (items 8, mid-round user
+  call); the reservation map is plain `[preset][scene] = count` (the brief per-cast shape folds
+  over on load). The 배치 tab is STRICTLY the queue: unfold a preset, `전체 +1` or the per-card
+  ＋ (전체추가/부분추가, item 10), the fold-out 예약 목록, one submit. Results moved to 잡
+  히스토리 as one `<details>` per job - newest open, the live section updating in place with the
+  streaming frame (item 12).
+- **window.prompt is gone** (it reads as a browser security dialog): `kit.namePopover` (anchored)
+  and `kit.askName` (modal) everywhere - new cards, folders, reserve counts (items 4·9).
+- **The character view breathes and its folders WORK**: back+title row, then search+buttons; rows
+  drag onto folder headers (미분류 included) so a card actually moves (items 3·5).
+- **The folder grid selects on plain click** (Shift ranges, double-click opens big), with 전체
+  선택/해제 (item 13).
+- **The selector's grouping is visible**: 전체/그룹별 views - 그룹별 shows one representative
+  card per group with its count and choice state, click unfolds, ← 그룹 returns; the rule is a
+  delimiter plus the first filename split into clickable token chips (자동 = the built-in
+  stamp-anchored rule, the raw regex behind 고급). The chip-built rule is a generated
+  `^(?:[^d]*d){k-1}(?P<g>[^d.]+)` named-group pattern, so the backend needed nothing (items 14·15).
+- **Images stopped flickering to empty boxes**: blobimg's cache is a real LRU (hits re-insert)
+  capped at 600, evictions revoke on a 30s DELAY - revoke-at-eviction was killing object URLs
+  still in the DOM - and the selector rides that one pipeline instead of its own copy (item 16).
+- **NAI latency, the part that was ours**: nai.py keeps ONE persistent keep-alive httpx client
+  (rebuilt on token change; narrow timeouts ride per request) instead of a TCP+TLS handshake per
+  image (item 17; the reference client pools connections by default).
 
 ## 1-20. 2026-08-30 - 0.11.0 (unreleased, continued): the studio redesigned - the second field report
 
