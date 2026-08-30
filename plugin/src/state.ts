@@ -593,6 +593,14 @@ class StudioFiles {
     await transport.post('/studio/job/cancel', { id });
   }
 
+  /** The running job's newest intermediate frame (streaming generation).
+   * `{}` when there is none; `{rev}` alone when `since` already has it. */
+  async jobPreview(id: string, since: number): Promise<{
+    rev?: number; step?: number; total?: number; current?: string; png?: string;
+  }> {
+    return await transport.get('/studio/job/preview', { id, since: String(since) });
+  }
+
   /** Split filenames into fields, and say which ones did not match. */
   async parseNames(names: string[], pattern = ''): Promise<{
     matched: Record<string, string>[]; unmatched: string[]; pattern: string; fields: string[];

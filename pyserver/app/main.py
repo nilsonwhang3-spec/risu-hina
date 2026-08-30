@@ -1052,6 +1052,21 @@ def h_studio_job_cancel(arg: dict) -> dict:
     return {"ok": studiojob.cancel(str(arg.get("id") or ""))}
 
 
+def h_studio_job_preview(arg: dict) -> dict:
+    """The running job's newest intermediate frame (streaming generation).
+
+    `since` is the rev the caller already has: an unchanged frame answers with
+    the rev alone, so the 0.8s poll costs nothing between diffusion steps.
+    An empty object means no frame (not streaming, or the job is done).
+    """
+    job_id = str(arg.get("id") or "")
+    try:
+        since = int(arg.get("since") or 0)
+    except (TypeError, ValueError):
+        since = 0
+    return studiojob.preview(job_id, since) or {}
+
+
 def h_studio_recipe(arg: dict) -> dict:
     """The parameters NovelAI embedded in one of its own PNGs (docs/09 §5b)."""
     try:
@@ -2133,6 +2148,7 @@ ROUTES: dict[str, Handler] = {
     "POST /studio/plan": h_studio_plan,
     "POST /studio/generate": h_studio_generate,
     "GET /studio/job": h_studio_job,
+    "GET /studio/job/preview": h_studio_job_preview,
     "POST /studio/job/cancel": h_studio_job_cancel,
     "POST /studio/recipe": h_studio_recipe,
     "POST /studio/parse": h_studio_parse,

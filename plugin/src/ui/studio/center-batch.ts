@@ -18,7 +18,8 @@ import { S, hub, gen, persistCols, stateLabel, msg, cardStem,
          casts, loadCasts, saveCasts, castById, activeCast, setActiveCast, CAST_COLORS,
          reserves, reserveOf, sceneReserveTotal, reserveTotal, adjustReserve, setReserve,
          clearReserves, persistReserves, type ReserveMap } from './store';
-import { scenePicker, tokenNotice, openParamsDialog, startRun, cancelRun, pendingCount, loadJobs } from './gen';
+import { scenePicker, tokenNotice, openParamsDialog, startRun, cancelRun, pendingCount, loadJobs,
+         livePreview } from './gen';
 import { openImage } from './center-single';
 
 let sectionsBox: HTMLElement | null = null;
@@ -480,7 +481,15 @@ function jobSection(j: StudioJob, live: boolean): HTMLElement {
         el('div', { class: 'hint err', text: err }),
       ]));
     } else if (live && p.current === it.name) {
-      cell.appendChild(el('div', { class: 'jobwait' }, [el('span', { class: 'badge warn', text: '생성 중' })]));
+      // The streaming frame lands on the cell being drawn (4.12).
+      if (livePreview.url) {
+        cell.appendChild(el('div', { class: 'jobpic liveframe' }, [
+          el('img', { src: livePreview.url, alt: it.name }),
+          el('span', { class: 'badge warn', text: `생성 중 ${livePreview.step}/${livePreview.total}` }),
+        ]));
+      } else {
+        cell.appendChild(el('div', { class: 'jobwait' }, [el('span', { class: 'badge warn', text: '생성 중' })]));
+      }
     } else {
       cell.appendChild(el('div', { class: 'jobwait' }, [
         el('span', { class: 'badge', text: live ? '대기' : '—' }),

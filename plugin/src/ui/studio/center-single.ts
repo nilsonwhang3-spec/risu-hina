@@ -10,22 +10,31 @@
 import { el, clear } from '../dom';
 import { blobUrl, safeWorkspacePath } from '../blobimg';
 import { S, hub, gen, persistGen, persistCentreTab, stateLabel } from './store';
-import { statusRow, tokenNotice, openParamsDialog, startRun, cancelRun, pendingCount, loadJobs } from './gen';
+import { statusRow, tokenNotice, openParamsDialog, startRun, cancelRun, pendingCount, loadJobs,
+         livePreview } from './gen';
 
 let previewBox: HTMLElement | null = null;
+let imgEl: HTMLImageElement | null = null;
+let captionEl: HTMLElement | null = null;
+let emptyEl: HTMLElement | null = null;
 let progressLine: HTMLElement | null = null;
 let runBtn: HTMLButtonElement | null = null;
 let stripBox: HTMLElement | null = null;
-/** The image the preview currently shows (to skip pointless reloads). */
-let shownPath = '';
+/** What the <img> currently shows: a workspace path, or 'live'. */
+let shownKey = '';
 
 export function drawSingle(mount: HTMLElement): void {
-  shownPath = '';
+  shownKey = '';
   mount.appendChild(statusRow());
   const notice = tokenNotice();
   if (notice) mount.appendChild(notice);
 
-  previewBox = el('div', { class: 'bigpreview' });
+  // One persistent <img>: frames and finished files swap its src, so a
+  // completed image replaces the held stream frame without a blank flash.
+  imgEl = el('img', { alt: '', style: { display: 'none' } }) as HTMLImageElement;
+  captionEl = el('div', { class: 'hint previewname' });
+  emptyEl = el('div', { class: 'empty' });
+  previewBox = el('div', { class: 'bigpreview' }, [imgEl, captionEl, emptyEl]);
   mount.appendChild(previewBox);
 
   // ← live → : walking the pinned batch.
@@ -96,38 +105,64 @@ function syncControls(): void {
     : '';
 }
 
-/** What the big preview shows: the pinned image, else the run's newest save. */
+/**
+ * What the big preview shows, by priority: the pin, then (while running) the
+ * live stream frame (4.12), then the newest save. A finished file replaces a
+ * held frame only once its blob has loaded - never a blank in between.
+ */
 function syncPreview(): void {
-  const box = previewBox;
-  if (!box?.isConnected) return;
+  const img = imgEl;
+  if (!img || !previewBox?.isConnected || !captionEl || !emptyEl) return;
+  const running = !!S.jobId;
   const saved = S.queueJob?.payload?.saved ?? [];
-  const path = S.viewPath || saved[saved.length - 1] || '';
-  if (path && path === shownPath) return;
-  shownPath = path;
-  clear(box);
-  if (!path) {
-    box.appendChild(el('div', { class: 'empty', text: S.jobId
-      ? '생성 중입니다… 첫 장이 저장되면 여기 나타납니다.'
-      : '생성 시작을 누르거나, 아래 결과에서 한 장을 고르세요.' }));
+  const pinned = S.viewPath;
+  const showEmpty = (text: string) => {
+    if (shownKey) return; // something is on screen - never blank it for a hint
+    emptyEl!.textContent = text;
+    emptyEl!.style.display = '';
+    img.style.display = 'none';
+    captionEl!.style.display = 'none';
+  };
+  const showImg = (key: string, src: string, caption: string) => {
+    shownKey = key;
+    img.src = src;
+    img.style.display = '';
+    emptyEl!.style.display = 'none';
+    captionEl!.textContent = caption;
+    captionEl!.style.display = '';
+  };
+
+  if (!pinned && running && livePreview.url) {
+    // The live frame - unless a pin holds the view (openImage mid-run).
+    showImg('live', livePreview.url,
+            `생성 중 ${livePreview.step}/${livePreview.total}${livePreview.current ? ' · ' + livePreview.current : ''}`);
     return;
   }
-  if (!safeWorkspacePath(path)) return;
-  void blobUrl(path).then((url) => {
-    if (shownPath !== path || !box.isConnected) return;
-    clear(box);
-    const img = el('img', { src: url, alt: path.split('/').pop() ?? path });
-    box.appendChild(img);
-    box.appendChild(el('div', { class: 'hint previewname', text: path }));
+  const path = pinned || saved[saved.length - 1] || '';
+  if (!path) {
+    showEmpty(running
+      ? '생성 중입니다… 첫 프레임이 오면 여기 나타납니다.'
+      : '생성 시작을 누르거나, 아래 결과에서 한 장을 고르세요.');
+    return;
+  }
+  if (path === shownKey || !safeWorkspacePath(path)) return;
+  const want = path;
+  void blobUrl(want).then((url) => {
+    if (!img.isConnected) return;
+    // Still what we want? (the user may have pinned elsewhere meanwhile)
+    const nowPath = S.viewPath || (S.queueJob?.payload?.saved ?? []).slice(-1)[0] || '';
+    if ((S.viewPath || !(S.jobId && livePreview.url)) && nowPath === want) {
+      showImg(want, url, want);
+    }
   }).catch(() => {
-    clear(box);
-    box.appendChild(el('div', { class: 'empty', text: '이미지를 읽지 못했습니다: ' + path }));
+    if (shownKey === '') showEmpty('이미지를 읽지 못했습니다: ' + want);
   });
 }
 
 function walk(dir: 1 | -1): void {
   const list = S.viewList.length ? S.viewList : (S.queueJob?.payload?.saved ?? []);
   if (!list.length) return;
-  const cur = S.viewPath || shownPath;
+  const cur = S.viewPath || shownKey;
   const at = Math.max(0, list.indexOf(cur));
   const to = Math.min(list.length - 1, Math.max(0, at + dir));
   S.viewPath = list[to];
@@ -153,7 +188,7 @@ async function drawStrip(): Promise<void> {
   box.appendChild(el('div', { class: 'hint', style: { marginBottom: '4px' }, text: `${label} 결과 ${saved.length}장` }));
   const row = el('div', { class: 'striprow' });
   for (const path of saved.slice(-24)) {
-    const cell = el('button', { class: 'stripcell' + (path === (S.viewPath || shownPath) ? ' on' : ''), title: path });
+    const cell = el('button', { class: 'stripcell' + (path === (S.viewPath || shownKey) ? ' on' : ''), title: path });
     void blobUrl(path).then((url) => {
       if (!cell.isConnected) return;
       cell.appendChild(el('img', { src: url, alt: path.split('/').pop() ?? path }));

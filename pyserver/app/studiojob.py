@@ -28,6 +28,36 @@ from . import db, log, nai, studio
 _lock = threading.RLock()
 _cancel: set[str] = set()
 
+# Live previews stay in MEMORY, never in the jobs row: an intermediate frame
+# arrives per diffusion step and weighs hundreds of KB - writing payload_json
+# for each would grind SQLite for something worthless one second later.
+_preview: dict[str, dict] = {}
+_preview_lock = threading.Lock()
+
+
+def _preview_put(job_id: str, step: int, total: int, current: str, png: bytes) -> None:
+    with _preview_lock:
+        rev = int(_preview.get(job_id, {}).get("rev", 0)) + 1
+        _preview[job_id] = {"rev": rev, "step": step, "total": total,
+                            "current": current, "png": png}
+
+
+def preview(job_id: str, since: int) -> dict | None:
+    """The newest intermediate frame, or just its rev when `since` has it.
+
+    None means no frame exists (job unknown, finished, or not streaming) - the
+    panel keeps polling the job row either way.
+    """
+    with _preview_lock:
+        p = _preview.get(job_id)
+        if not p:
+            return None
+        if int(p["rev"]) == int(since):
+            return {"rev": p["rev"]}
+        import base64
+        return {"rev": p["rev"], "step": p["step"], "total": p["total"],
+                "current": p["current"], "png": base64.b64encode(p["png"]).decode()}
+
 
 def _row(job_id: str) -> dict | None:
     r = db.one("SELECT * FROM jobs WHERE id = ?", (job_id,))
@@ -138,6 +168,30 @@ def _run(job_id: str) -> None:
     charref_cache: dict[str, str] = {}
     skipped_refs = False
 
+    # Streaming is on unless the spec says otherwise, and turns itself off for
+    # the REST of the batch after its first failure: the endpoint's framing is
+    # measured from one client, so a batch must degrade to slower (ZIP), never
+    # to broken. A content error fails the ZIP retry too and is recorded once.
+    stream_ok = spec.get("streaming") is not False
+
+    def generate_one(item: dict, p: dict, vibes: list[dict], charrefs: list[dict]) -> bytes:
+        nonlocal stream_ok
+        if stream_ok:
+            total_steps = int(p.get("steps") or 28)
+
+            def on_preview(step: int, png: bytes) -> None:
+                _preview_put(job_id, step, total_steps, str(item["name"]), png)
+
+            try:
+                return nai.generate_stream(model, item["prompt"], item["negative"], p,
+                                           vibes or None, charrefs or None,
+                                           on_preview=on_preview)
+            except Exception as e:  # noqa: BLE001
+                stream_ok = False
+                log.warn("studio batch %s: streaming failed (%s) - ZIP fallback for the rest", job_id, e)
+        return nai.generate(model, item["prompt"], item["negative"], p,
+                            vibes or None, charrefs or None)
+
     def item_refs(item: dict) -> tuple[list[dict], list[dict]]:
         nonlocal skipped_refs
         chars = item.get("characters")
@@ -184,6 +238,8 @@ def _run(job_id: str) -> None:
         with _lock:
             if job_id in _cancel:
                 _cancel.discard(job_id)
+                with _preview_lock:
+                    _preview.pop(job_id, None)
                 payload["anlasAfter"] = nai.anlas()
                 _update(job_id, state="cancelled", payload_json=payload)
                 return
@@ -209,8 +265,7 @@ def _run(job_id: str) -> None:
             vibes, charrefs = item_refs(item)
             if skipped_refs and "note" not in payload:
                 payload["note"] = "이 모델은 레퍼런스를 지원하지 않아 카드의 레퍼런스를 건너뜁니다."
-            png = nai.generate(model, item["prompt"], item["negative"], p,
-                               vibes or None, charrefs or None)
+            png = generate_one(item, p, vibes, charrefs)
             saved = studio.save_image(folder, item["name"], png, {
                 "scene": item.get("scene"), "prompt": item["prompt"],
                 "negative": item["negative"], "model": model, "seed": item.get("seed"),
@@ -227,6 +282,8 @@ def _run(job_id: str) -> None:
         payload["done"] += 1
         _update(job_id, payload_json=payload)
 
+    with _preview_lock:
+        _preview.pop(job_id, None)
     payload.pop("current", None)
     payload["anlasAfter"] = nai.anlas()
     before, after = payload["anlasBefore"], payload["anlasAfter"]

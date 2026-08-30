@@ -90,7 +90,15 @@ proven: `parameters: {}` is not enough for the v4.5/v5 models (500), and is *too
 entry `image_0.png`. Measured sizes: 940 597 B (v4.5), 1 270 107 B (v5). So the client unzips; it never gets
 a bare PNG.
 
-`POST /ai/generate-image/stream` — **404 on both hosts.** There is no streaming variant to use.
+`POST /ai/generate-image/stream` — **404 on both hosts.** ~~There is no streaming variant to use.~~
+**Correction (2026-08-30):** the slash path never existed, but the **hyphen** path does:
+`POST image.novelai.net/ai/generate-image-stream`, the ordinary body plus `parameters.stream: "msgpack"`
+and `Accept: application/x-msgpack`. The response is a raw framed binary stream — repeated
+`[4-byte BE length][msgpack map]` — where `event_type: "intermediate"` carries `step_ix` and a small
+preview PNG per diffusion step and `"final"` carries the finished image; errors arrive in-band as
+`error`/`message` fields. Source: an external client's working implementation, not yet re-probed from
+this codebase (the dev machine holds no token). `nai.generate_stream()` implements it with the ZIP path
+as automatic fallback after a first failure, so a wrong detail degrades to slower, never to broken.
 
 ## 4. Cost — every number here is from a **tier 3 (Opus)** account
 
@@ -364,4 +372,6 @@ with the bucket named, and `run_python`+Pillow remains the fallback for scripted
 - `POST /ai/generate-image` → unzip → `image_0.png`.
 - Model id and every generation parameter come from the preset JSON. The only code that knows a model id is
   the check button, and it only knows how to *ask*.
-- No streaming. A batch is N sequential requests, which is why it runs as a `jobs` row and is polled.
+- Streaming exists after all (§3 correction): `/ai/generate-image-stream` + msgpack frames. A batch is
+  still N sequential requests run as a `jobs` row - but each request can stream its intermediate frames,
+  which the backend holds in memory and the panel polls (`GET /studio/job/preview`, rev-gated).

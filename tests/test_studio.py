@@ -328,6 +328,25 @@ try:
 except studio.StudioError as e:
     check("an unknown scene name is refused, naming the preset", "없는씬" in str(e), str(e))
 
+print("\ntest_stream_preview_store")
+# The live frame store: memory only (a per-step frame written to payload_json
+# would grind SQLite), rev-gated so an unchanged poll costs nothing.
+from app import studiojob  # noqa: E402
+
+studiojob._preview_put("job_x", 3, 28, "a.png", b"\x89PNG123")
+p1 = studiojob.preview("job_x", 0)
+check("a frame comes back with its rev, step, and png",
+      p1["rev"] == 1 and p1["step"] == 3 and p1["total"] == 28
+      and p1["current"] == "a.png" and bool(p1["png"]), json.dumps({k: p1[k] for k in ("rev", "step")}))
+check("the same rev answers with the rev alone",
+      studiojob.preview("job_x", p1["rev"]) == {"rev": 1})
+studiojob._preview_put("job_x", 4, 28, "a.png", b"\x89PNG456")
+check("a newer frame advances the rev",
+      studiojob.preview("job_x", p1["rev"])["rev"] == 2)
+check("an unknown job answers None", studiojob.preview("nope", 0) is None)
+with studiojob._preview_lock:
+    studiojob._preview.pop("job_x", None)
+
 print("\ntest_adoption_needs_no_copy")
 # The library and the workspace are one space: an image is adopted by its own
 # global path, checked (PNG-ness) rather than copied.

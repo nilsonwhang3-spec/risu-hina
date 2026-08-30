@@ -2,3 +2,4 @@ fastapi==0.115.6
 uvicorn==0.34.0
 httpx==0.28.1
 pydantic-ai-slim[openai]==2.33.0
+msgpack==1.1.0

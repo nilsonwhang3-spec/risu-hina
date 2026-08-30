@@ -323,6 +323,73 @@ def generate(model: str, prompt: str, negative: str = "",
     return _unzip(r.content, "생성")
 
 
+def generate_stream(model: str, prompt: str, negative: str = "",
+                    params: dict | None = None, vibes: list[dict] | None = None,
+                    charrefs: list[dict] | None = None,
+                    on_preview=None) -> bytes:
+    """One image via `/ai/generate-image-stream`, intermediate frames included.
+
+    The HYPHEN path. docs/09 §7 probed `/ai/generate-image/stream` (slash),
+    got 404, and concluded no streaming exists - that conclusion was about a
+    path that never existed. The hyphen endpoint takes the ordinary body plus
+    `parameters.stream = "msgpack"` and `Accept: application/x-msgpack`, and
+    answers with repeated `[4-byte BE length][msgpack map]` frames:
+    `event_type: "intermediate"` carries `step_ix` and (usually) a small PNG,
+    `"final"` carries the finished image. An in-band `error`/`message` aborts;
+    a stream that ends without a final frame is a failure, and the caller's
+    ZIP path (`generate`) is the fallback.
+
+    `on_preview(step_ix, png_bytes)` is called for each intermediate frame; a
+    preview callback must never kill the image, so its errors are swallowed.
+    """
+    try:
+        import msgpack
+    except ImportError as e:  # pragma: no cover - a dependency, not a state
+        raise NaiError("msgpack 이 설치되어 있지 않습니다 (requirements.in)") from e
+    p = build_parameters(prompt, negative, params, vibes, charrefs)
+    p["stream"] = "msgpack"
+    body = {"input": p["v4_prompt"]["caption"]["base_caption"], "model": model,
+            "action": "generate", "parameters": p}
+    final: bytes | None = None
+    with _client() as c:
+        with c.stream("POST", "/ai/generate-image-stream", json=body,
+                      headers={"Accept": "application/x-msgpack"}) as r:
+            if r.status_code >= 300:
+                r.read()
+                raise _fail(r, "스트리밍 생성에 실패했습니다")
+            buf = b""
+            for chunk in r.iter_bytes():
+                buf += chunk
+                while len(buf) >= 4:
+                    n = int.from_bytes(buf[:4], "big")
+                    if n <= 0 or n > 50 * 1024 * 1024:
+                        raise NaiError(f"스트림 프레임 길이가 이상합니다: {n}")
+                    if len(buf) < 4 + n:
+                        break
+                    frame = buf[4:4 + n]
+                    buf = buf[4 + n:]
+                    try:
+                        m = msgpack.unpackb(frame, raw=False)
+                    except Exception as e:  # noqa: BLE001
+                        raise NaiError(f"스트림 프레임을 읽지 못했습니다: {e}") from e
+                    if not isinstance(m, dict):
+                        continue
+                    if m.get("error") or (m.get("message") and not m.get("event_type")):
+                        raise NaiError(f"스트림 오류: {m.get('error') or m.get('message')}")
+                    ev = m.get("event_type")
+                    img = m.get("image")
+                    if ev == "intermediate" and img and on_preview is not None:
+                        try:
+                            on_preview(int(m.get("step_ix") or 0), bytes(img))
+                        except Exception:  # noqa: BLE001
+                            pass
+                    elif ev == "final" and img:
+                        final = bytes(img)
+    if final is None:
+        raise NaiError("스트림이 final 프레임 없이 끝났습니다")
+    return final
+
+
 def inpaint_model(model: str) -> str:
     """The inpainting twin of a model id.
 

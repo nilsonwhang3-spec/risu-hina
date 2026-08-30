@@ -14,6 +14,45 @@ import { S, hub, gen, persistGen, activeOf, spec, checkUnresolved, newCard, msg 
 let jobTimer: ReturnType<typeof setInterval> | null = null;
 let jobsStale = true;
 
+// --- the live preview (streaming generation) -----------------------------------------
+//
+// The backend consumes NovelAI's msgpack stream and keeps the newest frame in
+// memory; the iframe cannot stream (nativeFetch buffers), so a fast rev-gated
+// poll is the transport: unchanged frames answer with the rev alone. The
+// frame survives its item's completion on purpose (anti-flicker) - the tab
+// swaps it out only once the finished file has loaded.
+
+export const livePreview = { url: '', step: 0, total: 0, current: '' };
+let previewTimer: ReturnType<typeof setInterval> | null = null;
+let previewRev = 0;
+
+function pollPreview(): void {
+  if (previewTimer) return;
+  const tick = async () => {
+    if (!S.jobId) return stopPreview();
+    try {
+      const r = await state.studio.jobPreview(S.jobId, previewRev);
+      if (r.png && typeof r.rev === 'number') {
+        previewRev = r.rev;
+        livePreview.url = 'data:image/png;base64,' + r.png;
+        livePreview.step = r.step ?? 0;
+        livePreview.total = r.total ?? 0;
+        livePreview.current = r.current ?? '';
+        hub.jobTick();
+      } else if (typeof r.rev === 'number') {
+        previewRev = r.rev;
+      }
+    } catch { /* the 1.5s job poll is the authority; previews are best-effort */ }
+  };
+  previewTimer = setInterval(() => { void tick(); }, 800);
+  void tick();
+}
+
+function stopPreview(): void {
+  if (previewTimer) { clearInterval(previewTimer); previewTimer = null; }
+  previewRev = 0;
+}
+
 /** The account meters and what a run will send, for the 1장 tab's head. */
 export function statusRow(): HTMLElement {
   const row = el('div', { class: 'row', style: { gap: '8px', flexWrap: 'wrap', marginBottom: '6px' } });
@@ -262,6 +301,7 @@ export async function startRun(overrides: Record<string, unknown> = {}): Promise
     hub.notice(`배치를 시작했습니다 (${r.total}장). ${r.estimate.note}`, 'ok');
     hub.drawCentre();
     void pollJob();
+    pollPreview();
   } catch (e) {
     hub.notice('시작하지 못했습니다: ' + msg(e), 'err');
   }
@@ -298,6 +338,7 @@ export function markJobsStale(): void {
  * re-reads the library, and refreshes the meters.
  */
 export async function pollJob(): Promise<void> {
+  if (S.jobId) pollPreview();
   if (jobTimer) return;
   const tick = async () => {
     if (!S.jobId) return stop();
@@ -317,6 +358,9 @@ export async function pollJob(): Promise<void> {
       S.jobId = '';
       jobsStale = true;
       stop();
+      stopPreview();
+      // The last streamed frame is HELD (anti-flicker): the tab lets go of it
+      // only once the finished file's blob has loaded in its place.
       hub.jobTick();
       // The batch wrote images: the files tab gets the news (and the unseen
       // badge) while we re-read our own slice.

@@ -1131,6 +1131,8 @@ label.row { align-items: center; gap: 6px; }
 .jobpic img { width: 100%; height: auto; display: block; border-radius: 6px; }
 .jobwait { display: flex; flex-direction: column; gap: 4px; align-items: center; justify-content: center;
            min-height: 90px; border: 1px dashed var(--borderc, #2b323f); border-radius: 6px; }
+.liveframe { position: relative; }
+.liveframe .badge { position: absolute; top: 6px; left: 6px; }
 .jobcell .fname { margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .jobrow { cursor: pointer; }
 .jobrow .wsimg.thumb img { max-height: 40px; border-radius: 4px; }
