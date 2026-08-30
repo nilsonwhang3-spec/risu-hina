@@ -1049,7 +1049,13 @@ def build() -> Agent[Deps]:
         shown = 0
         deadline = _time.time() + 60 * 60
         j = None
+        folder = str(spec.get("folder") or "studio/images")
         while _time.time() < deadline:
+            # The user's 중단 closes the stream; this thread hears of it here.
+            # The batch the tool started is the tool's to stop, too.
+            if session_mod.stopped(ctx.deps.session_id):
+                studiojob.cancel(job_id)
+                return head + " 사용자가 중단했습니다 — 배치도 다음 장에서 멈춥니다."
             j = studiojob.get(job_id) or {}
             p = j.get("payload") or {}
             saved = list(p.get("saved") or [])
@@ -1057,7 +1063,7 @@ def build() -> Agent[Deps]:
                 fresh = saved[shown:]
                 shown = len(saved)
                 session_mod.push_stream_event(ctx.deps.session_id, {
-                    "type": "images", "paths": fresh[-8:],
+                    "type": "images", "paths": fresh[-8:], "folder": folder,
                     "label": f"배치 {job_id} — {shown}/{p.get('total')}장",
                 })
             if j.get("state") in ("done", "partial", "error", "cancelled"):
@@ -1077,6 +1083,21 @@ def build() -> Agent[Deps]:
         for s in (p.get("saved") or [])[-20:]:
             out.append("  " + s)
         return "\n".join(out)
+
+    @agent.tool
+    def studio_open(ctx: RunContext[Deps], folder: str) -> str:
+        """패널의 에셋 스튜디오 **검수 탭**을 이 폴더로 연다 (사용자가 고르고 채택하는 화면).
+
+        배치가 끝나고 "검수해 보세요" 라고 할 때, 또는 사용자가 특정 폴더를 보고
+        싶다고 할 때 부른다. 폴더는 `studio/images/…` 전역 경로.
+        """
+        rel = (folder or "").replace("\\", "/").strip("/")
+        if not rel.startswith("studio/"):
+            return "studio/ 아래 폴더만 열 수 있습니다: " + rel
+        from . import session as session_mod
+        session_mod.push_stream_event(ctx.deps.session_id,
+                                      {"type": "open", "screen": "inspect", "folder": rel})
+        return f"검수 탭을 {rel} 로 열었습니다."
 
     @agent.tool
     def studio_job(ctx: RunContext[Deps], job_id: str = "") -> str:

@@ -117,10 +117,10 @@ export function drawSelector(node: Folder): void {
 
   // --- top bar: back · title · 전체/그룹별 · columns · bulk · export -------------
   const bar = el('div', { class: 'row', style: { marginBottom: '8px', flexWrap: 'wrap' } });
-  const back = el('button', { class: 'ghost tiny', text: '← 폴더', title: '폴더 보기로 돌아갑니다' });
-  back.addEventListener('click', () => { S.centreMode = 'folder'; hub.drawCentre(); });
+  const tidy = el('button', { class: 'ghost tiny', text: '정리', title: '폴더 정리 화면 (선택·이동·삭제·업로드)' });
+  tidy.addEventListener('click', () => { S.centreMode = 'folder'; hub.drawCentre(); });
   bar.append(
-    back,
+    tidy,
     el('span', { class: 'sectiontitle grow', text: `${node.path} · ${g.total}장 · 그룹 ${g.groups.length}` }),
   );
   const mkView = (v: 'all' | 'group', label: string) => {
@@ -149,7 +149,10 @@ export function drawSelector(node: Folder): void {
     hub.drawCentre();
     void state.studio.saveSelection(S.selected, selection);
   });
-  bar.append(firstEach, none, exportButton(node), adoptButton());
+  // 봇에 반영 belongs to the selected/ folder an export made - the folder
+  // one adopts FROM - not to the pool of candidates (user).
+  bar.append(firstEach, none, exportButton(node));
+  if (/\/selected$/.test(node.path)) bar.appendChild(adoptButton());
   viewMount.appendChild(bar);
 
   // --- the grouping rule, visible ---------------------------------------------------
@@ -361,7 +364,8 @@ async function reserveMissing(missing: string[], btn: HTMLButtonElement): Promis
 }
 
 function exportButton(node: Folder): HTMLElement {
-  const b = el('button', { class: 'ghost tiny', text: '내보내기' }) as HTMLButtonElement;
+  const b = el('button', { class: 'primary tiny', text: '애셋 채택',
+                           title: '채택한 이미지를 selected/ 폴더에 정리해 넣습니다 (그 폴더에서 봇에 반영)' }) as HTMLButtonElement;
   b.addEventListener('click', async () => {
     b.disabled = true;
     try {
@@ -369,7 +373,7 @@ function exportButton(node: Folder): HTMLElement {
       // card name, and the export's canonical names key on the group.
       const eff = effective(prefsFor(node.path));
       const r = await state.studio.exportSelected(node.path, '', eff.pattern, eff.groupBy);
-      hub.notice(`${r.folder} — 채택 ${r.used}, 수정 ${r.inpaint}, 빈 슬롯 ${r.empty}`, 'ok');
+      hub.notice(`${r.folder} — 채택 ${r.used}, 수정 ${r.inpaint}, 빈 슬롯 ${r.empty} · selected 폴더를 열면 봇에 반영할 수 있습니다`, 'ok');
       hub.touchQuiet();
       await hub.refresh();
     } catch (e) {

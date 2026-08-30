@@ -1170,6 +1170,14 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
 .jobrow { cursor: pointer; }
 .jobrow .wsimg.thumb img { max-height: 40px; border-radius: 4px; }
 
+/* The selector shows pictures WHOLE (like the history grid), never cropped
+   to a square: the choice is made on the picture, so all of it has to show. */
+.selgrid .assetpic { aspect-ratio: auto; min-height: 60px; }
+.selgrid .assetpic img { height: auto; object-fit: contain; }
+.tabsep { width: 1px; align-self: stretch; margin: 4px 6px; background: var(--borderc, #2b323f); }
+.rcollapsebtn { position: absolute; top: 6px; left: 6px; z-index: 3; }
+.split > .right { position: relative; }
+
 /* The selector's rule chips and group cards. */
 .tokenchip { font-family: var(--mono, monospace); }
 .groupcard { cursor: pointer; }

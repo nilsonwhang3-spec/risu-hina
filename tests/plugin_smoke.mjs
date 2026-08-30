@@ -1998,13 +1998,14 @@ console.log('\ntest_studio_tab');
   clickButton(tabsBar(), '프롬프트');
   await settle(300);
 
-  // Both rails collapse to a slim strip. The toggles ride the CENTRE strip -
-  // the one place always wide enough (they once pushed the OUTPUT tab out of
-  // the left column).
-  check('the left tab bar carries only its two tabs',
+  // Both rails collapse to a slim strip; each panel carries its own toggle
+  // (a compact one, so the two tabs keep their room).
+  check('the left tab bar carries its two tabs and its own collapse toggle',
         (document.querySelectorAll('.panel.active .studiotabs .tab').length === 2)
-        && !document.querySelector('.panel.active .studiotabs .railbtn'));
-  clickButton(document.querySelector('.panel.active .centretabs'), '◂');
+        && !!document.querySelector('.panel.active .studiotabs .railbtn'));
+  check('the agent pane carries its own collapse toggle',
+        !!document.querySelector('.panel.active .split > .right .rcollapsebtn'));
+  clickButton(document.querySelector('.panel.active .studiotabs'), '◂');
   await settle(200);
   const split = document.querySelector('.panel.active .split');
   check('the left rail collapses', !!split?.classList.contains('lcollapse'), split?.className);
@@ -2019,9 +2020,9 @@ console.log('\ntest_studio_tab');
   // stay usable - sorting and adopting need no token at all.
   await settle(600);
   const centreTabs = document.querySelector('.panel.active .centretabs');
-  check('the centre is three tabs',
+  check('the centre is 1장 · 배치 · 검수 | 잡 히스토리',
         /1장/.test(centreTabs?.textContent || '') && /배치/.test(centreTabs?.textContent || '')
-        && /잡 히스토리/.test(centreTabs?.textContent || ''),
+        && /검수/.test(centreTabs?.textContent || '') && /잡 히스토리/.test(centreTabs?.textContent || ''),
         (centreTabs?.textContent || '').slice(0, 80));
   const body = document.querySelector('.panel.active .centrebody');
   check('the 1장 tab has the big preview', !!body?.querySelector('.bigpreview'));
@@ -2754,13 +2755,25 @@ console.log('\ntest_studio_selector');
   await settle(1500);
 
   const text = () => document.querySelector('.panel.active')?.textContent || '';
-  // A folder click shows the folder grid first (4.11); choosing between
-  // candidates is one button deeper (4.13).
-  check('a folder opens as a browsable grid', !!document.querySelector('.panel.active .foldergrid'),
+  // A folder click lands on the 검수 tab (the selector); the tidy-up grid is
+  // one button away (정리) and 검수하기 comes back.
+  check('a folder click opens the 검수 tab',
+        [...document.querySelectorAll('.panel.active .centretabs .tab')]
+          .some((b) => b.classList.contains('on') && /검수/.test(b.textContent || '')),
+        (document.querySelector('.panel.active .centretabs')?.textContent || ''));
+  check('the left column is held on OUTPUT',
+        [...document.querySelectorAll('.panel.active .studiotabs .tab')]
+          .some((b) => b.classList.contains('on') && /OUTPUT/.test(b.textContent || '')));
+  clickButton(document.querySelector('.panel.active .left'), '정리');
+  await settle(500);
+  check('정리 opens the tidy-up grid', !!document.querySelector('.panel.active .foldergrid'),
         text().slice(0, 160));
-  check('the selector is one button away', !!findButton(document.querySelector('.panel.active .left'), '감정 사진 선택'));
-  clickButton(document.querySelector('.panel.active .left'), '감정 사진 선택');
-  await settle(1500);
+  clickButton(document.querySelector('.panel.active .left'), '검수하기');
+  await settle(1200);
+  check('애셋 채택 is the export and 봇에 반영 waits for a selected/ folder',
+        !!findButton(document.querySelector('.panel.active .left'), '애셋 채택')
+        && !findButton(document.querySelector('.panel.active .left'), '봇에 반영'),
+        text().slice(0, 200));
   check('the selector opens on the group cards',
         !!document.querySelector('.panel.active .groupcard'), text().slice(0, 160));
   // 그룹별: one representative card per group, its count on it.

@@ -8,7 +8,7 @@
  * remove, and drained by 씬 생성 n장 into ONE job. WHO is drawn is the left
  * column's checked character cards - one place to pick characters, not two.
  */
-import { el } from '../dom';
+import { el, clear } from '../dom';
 import { namePopover } from '../kit';
 import { state, type StudioJob } from '../../state';
 import { workspaceImage } from '../blobimg';
@@ -16,9 +16,12 @@ import { S, hub, gen, persistCols, stateLabel, activeOf,
          reserves, reserveOf, reserveTotal, adjustReserve, setReserve,
          clearReserves, persistReserves, type ReserveMap } from './store';
 import { scenePicker, tokenNotice, openParamsDialog, startRun, cancelRun, pendingCount, loadJobs } from './gen';
+import { jobSection } from './center-history';
 
 let runBtn: HTMLButtonElement | null = null;
 let progressLine: HTMLElement | null = null;
+/** The running job's section, drawn under the submit while it runs (10). */
+let liveBox: HTMLElement | null = null;
 
 /** Scene lists per preset file, re-read when the library rev moves. */
 const sceneCache = new Map<string, { rev: number; scenes: { name: string; prompt: string }[] }>();
@@ -77,13 +80,26 @@ export function drawBatch(mount: HTMLElement): void {
   mount.appendChild(el('div', { class: 'row', style: { margin: '8px 0', flexWrap: 'wrap' } }, [
     progressLine, el('span', { class: 'grow' }), runBtn,
   ]));
+  liveBox = el('div', {});
+  mount.appendChild(liveBox);
   syncRunBtn();
+  syncLive();
 }
 
-/** The live-job heartbeat: only the button and the progress line move here -
- * the results belong to 잡 히스토리. */
+/** The live-job heartbeat: the button, the progress line, and the running
+ * job's section (streaming frame on the cell being drawn). Finished results
+ * belong to 잡 히스토리. */
 export function batchTick(): void {
   syncRunBtn();
+  syncLive();
+}
+
+function syncLive(): void {
+  if (!liveBox?.isConnected) return;
+  clear(liveBox);
+  if (!S.jobId || !S.queueJob) return;
+  liveBox.appendChild(el('div', { class: 'hint', style: { margin: '6px 0 4px' }, text: '진행 중인 배치 — 완성되는 대로 여기 뜹니다 (끝나면 잡 히스토리로)' }));
+  liveBox.appendChild(jobSection(S.queueJob, true, true));
 }
 
 function syncRunBtn(): void {

@@ -43,11 +43,11 @@ export function drawFolder(node: Folder): void {
     if (i < parts.length - 1) crumb.appendChild(el('span', { class: 'hint', text: '›' }));
   }
 
-  const close = el('button', { class: 'ghost tiny', text: '✕', title: '폴더 보기를 닫고 탭으로 돌아갑니다' });
-  close.addEventListener('click', () => { S.centreMode = 'tab'; hub.drawCentre(); });
-  const pick = el('button', { class: 'primary tiny', text: '감정 사진 선택',
+  const close = el('button', { class: 'ghost tiny', text: '← 검수', title: '검수 화면으로 돌아갑니다' });
+  close.addEventListener('click', () => { S.centreMode = 'tab'; S.centreTab = 'inspect'; hub.drawCentre(); });
+  const pick = el('button', { class: 'primary tiny', text: '검수하기',
                               title: '이 폴더의 후보들을 그룹으로 비교하고 채택합니다' });
-  pick.addEventListener('click', () => { S.centreMode = 'selector'; hub.drawCentre(); });
+  pick.addEventListener('click', () => { S.centreMode = 'tab'; S.centreTab = 'inspect'; hub.drawCentre(); });
   const mkdir = el('button', { class: 'ghost tiny', text: '＋ 폴더' }) as HTMLButtonElement;
   mkdir.addEventListener('click', () => {
     namePopover(mkdir, {

@@ -484,6 +484,11 @@ state.onChange(() => {
     setTab('files');
     return;
   }
+  // The agent (or a batch strip) asked for the studio's 검수 tab.
+  if (state.openStudioRequest && active !== 'studio') {
+    setTab('studio');
+    return;
+  }
   refreshStatus();
   refreshChatBar();
   refreshBotBar();

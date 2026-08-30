@@ -276,6 +276,15 @@ SCREEN_MODES = ("chat", "bot", "studio")
 _EXTRA: dict[str, list[dict]] = {}
 _EXTRA_LOCK = threading.Lock()
 
+# Sessions whose current turn the client cut off (중단). A tool that waits
+# on something long (a batch) polls this and gets out - the abort closes the
+# stream, but a sync tool already running in its thread hears nothing else.
+_STOPPED: set[str] = set()
+
+
+def stopped(session_id: str | None) -> bool:
+    return bool(session_id) and session_id in _STOPPED
+
 
 def push_stream_event(session_id: str | None, obj: dict) -> None:
     """Queue one side event for the running turn. A missing session id means
@@ -320,6 +329,7 @@ async def run(session_id: str, prompt: str, mode: str = "") -> AsyncGenerator[st
     )
 
     _save_message(session_id, "user", prompt)
+    _STOPPED.discard(session_id)
     yield _line({"type": "start", "sessionId": session_id})
 
     model_name = (config.section("agent").get("model") or "")
@@ -396,6 +406,9 @@ async def run(session_id: str, prompt: str, mode: str = "") -> AsyncGenerator[st
         log.info("agent turn session=%s in=%s out=%s cost=%s staged=%s",
                  session_id, counts.get("input"), counts.get("output"), cost, len(pending))
     except BaseException as e:  # noqa: BLE001 - the stream is the only channel back
+        # The client's 중단 closes this generator (GeneratorExit / cancel);
+        # a tool still waiting in its thread learns of it through stopped().
+        _STOPPED.add(session_id)
         # A turn that fails or is cut off must still leave its prompt (and
         # whatever text arrived) in the history: the next turn used to start
         # from the last SUCCESSFUL one, so after one error the agent had never

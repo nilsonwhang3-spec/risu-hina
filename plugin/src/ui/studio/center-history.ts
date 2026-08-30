@@ -91,7 +91,7 @@ async function drawSections(force: boolean): Promise<void> {
   });
 }
 
-function jobSection(j: StudioJob, live: boolean, open: boolean): HTMLElement {
+export function jobSection(j: StudioJob, live: boolean, open: boolean): HTMLElement {
   const p = j.payload;
   const bits: string[] = [];
   if (j.created_at) bits.push(new Date(j.created_at * 1000).toLocaleString());

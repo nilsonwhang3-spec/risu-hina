@@ -771,14 +771,21 @@ export class AgentPanel {
                 showArtifact({ path: p, title: name, kind: 'image' }, { flipMobile: true }));
               strip.appendChild(thumb);
             }
-            if (paths.length > 8) {
-              const more = el('button', { class: 'ghost tiny', text: `외 ${paths.length - 8}장` });
-              more.addEventListener('click', () => state.requestOpenFile(paths[0]));
-              strip.appendChild(more);
-            }
+            // 검수: the studio's inspection tab on the batch's folder - that
+            // is where these get chosen, so the strip offers the way there.
+            const folder = String(e.folder || '') || paths[0].slice(0, paths[0].lastIndexOf('/'));
+            const inspect = el('button', { class: 'ghost tiny', text: paths.length > 8 ? `외 ${paths.length - 8}장 · 검수` : '검수',
+                                           title: '에셋 스튜디오 검수 탭에서 이 폴더를 엽니다' });
+            inspect.addEventListener('click', () => state.requestOpenStudio(folder));
+            strip.appendChild(inspect);
             if (e.label) strip.appendChild(el('div', { class: 'hint', text: String(e.label) }));
             this.log.appendChild(strip);
             this.scroll();
+            break;
+          }
+          case 'open': {
+            // A tool asked for a screen: only the studio's 검수 tab so far.
+            if (e.screen === 'inspect' && e.folder) state.requestOpenStudio(String(e.folder));
             break;
           }
           case 'done': {

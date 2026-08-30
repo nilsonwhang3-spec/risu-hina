@@ -59,7 +59,9 @@ export const S = {
    * the fragment organizer, a folder grid, or the comparison selector
    * (both bound to S.selected). A picked file (S.selectedFile) overrides
    * everything - an editor is always reachable. */
-  centreTab: 'single' as 'single' | 'batch' | 'history',
+  centreTab: 'single' as 'single' | 'batch' | 'inspect' | 'history',
+  /** 'folder' is the tidy-up grid, a sub-view of the 검수 tab; 'selector'
+   * is legacy - the 검수 tab draws the selector itself. */
   centreMode: 'tab' as 'tab' | 'fragments' | 'folder' | 'selector',
   /** Batch-tab column count (2·3·4). */
   cols: 3,
@@ -78,7 +80,7 @@ try {
   const t = localStorage.getItem('hina.studioLeftTab');
   if (t === 'output') S.leftTab = 'output';
   const c = localStorage.getItem('hina.studioTab');
-  if (c === 'single' || c === 'batch' || c === 'history') S.centreTab = c;
+  if (c === 'single' || c === 'batch' || c === 'inspect' || c === 'history') S.centreTab = c;
   const n = Number(localStorage.getItem('hina.studioCols'));
   if (n === 2 || n === 3 || n === 4) S.cols = n;
 } catch { /* storage may be unavailable in the iframe */ }

@@ -992,6 +992,14 @@ class AppState {
     this.emit();
   }
 
+  /** The agent (or a strip in the chat) asked for the studio's 검수 tab on
+   * a folder: the shell switches tabs, the studio consumes the folder. */
+  openStudioRequest: { folder: string } | null = null;
+  requestOpenStudio(folder: string): void {
+    this.openStudioRequest = { folder };
+    this.emit();
+  }
+
   /** The files tab is showing; whatever was unseen has now been seen. */
   markOutputsSeen(): void {
     if (!this.unseenOutputs.length) return;

@@ -5,7 +5,7 @@
  */
 import { state } from '../../state';
 import { treeRow, type TreeNode, type TreeSpec } from '../tree';
-import { S, hub, countFiles, msg, type Folder } from './store';
+import { S, hub, countFiles, msg, persistCentreTab, type Folder } from './store';
 
 function toTreeNode(n: Folder): TreeNode {
   return {
@@ -27,8 +27,11 @@ function spec(): TreeSpec {
       if (node.kids.length) S.open.add(node.path);
       S.selected = node.path;
       S.selectedFile = '';
-      // A folder click shows the folder's pictures in the centre (4.11).
-      S.centreMode = 'folder';
+      // A folder click opens the 검수 tab on it (the tidy-up grid is one
+      // button away there).
+      S.centreMode = 'tab';
+      S.centreTab = 'inspect';
+      persistCentreTab();
       hub.drawLeft();
       hub.drawCentre();
     },

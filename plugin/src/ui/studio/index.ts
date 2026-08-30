@@ -116,16 +116,22 @@ export function renderStudioTab(mount: HTMLElement): void {
     S.viewMount = el('div', { class: 'pad filepad' });
     pane.centre.append(S.noticeMount, S.viewMount);
 
-    // Collapse rails: shown by the lcollapse/rcollapse classes.
+    // Collapse rails: shown by the lcollapse/rcollapse classes. The right
+    // pane's own toggle sits in its top corner (the agent panel inside is
+    // shared with every tab, so the studio pins the button over it).
     pane.root.insertBefore(rail('left'), pane.left);
     pane.root.appendChild(rail('right'));
+    const collapseR = el('button', { class: 'ghost tiny railbtn rcollapsebtn', text: '▸',
+                                     title: panelOpen('right') ? 'AI 챗 패널 접기' : 'AI 챗 패널 펼치기' });
+    collapseR.addEventListener('click', () => togglePanel('right'));
+    pane.right.appendChild(collapseR);
     applyPanels();
 
     mount.appendChild(pane.root);
     built = true;
     void refresh();
     void loadStatus();
-  } else if (entering || renderedRev !== state.filesRev) {
+  } else if (entering || renderedRev !== state.filesRev || state.openStudioRequest) {
     // COMING BACK to the tab re-reads the library (files arrive from outside
     // any rev - another machine writes into the same space), and so does a
     // files change while we sit here. What no longer re-reads is every other
@@ -188,6 +194,25 @@ async function refresh(): Promise<void> {
   }
   await migrateSingleStyle();
   buildOutput();
+  // The agent (or a batch strip in the chat) asked for 검수 on a folder.
+  const want = state.openStudioRequest;
+  if (want) {
+    state.openStudioRequest = null;
+    const folder = want.folder.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+    if (find(folder)) {
+      S.selected = folder;
+      const parts = folder.split('/');
+      for (let i = 2; i <= parts.length; i++) S.open.add(parts.slice(0, i).join('/'));
+      S.selectedFile = '';
+      S.centreMode = 'tab';
+      S.centreTab = 'inspect';
+      S.leftTab = 'output';
+      persistCentreTab();
+      persistLeftTab();
+    } else {
+      notice('그 폴더를 OUTPUT 에서 찾지 못했습니다: ' + folder, 'err');
+    }
+  }
   drawLeft();
   drawCentre();
   checkUnresolved();
@@ -276,7 +301,11 @@ function drawLeft(): void {
     });
     return b;
   };
-  tabbar.append(mk('prompt', '프롬프트'), mk('output', 'OUTPUT'));
+  // The collapse toggle lives on the panel it collapses (user), compact
+  // enough that both tabs keep their room.
+  const collapseL = el('button', { class: 'ghost tiny railbtn', text: '◂', title: '이 패널 접기' });
+  collapseL.addEventListener('click', () => togglePanel('left'));
+  tabbar.append(mk('prompt', '프롬프트'), mk('output', 'OUTPUT'), el('span', { class: 'grow' }), collapseL);
 
   clear(leftContent);
   if (S.leftTab === 'output') {
@@ -348,21 +377,36 @@ function drawCentre(): void {
     });
     return b;
   };
-  const collapseL = el('button', { class: 'ghost tiny railbtn', text: panelOpen('left') ? '◂' : '▸',
-                                   title: panelOpen('left') ? '프롬프트 패널 접기' : '프롬프트 패널 펼치기' });
-  collapseL.addEventListener('click', () => togglePanel('left'));
-  const collapseR = el('button', { class: 'ghost tiny railbtn', text: panelOpen('right') ? '▸' : '◂',
-                                   title: panelOpen('right') ? 'AI 챗 패널 접기' : 'AI 챗 패널 펼치기' });
-  collapseR.addEventListener('click', () => togglePanel('right'));
   viewMount.appendChild(el('div', { class: 'centretabs tabstrip' }, [
-    collapseL,
-    mk('single', '1장'), mk('batch', '배치'), mk('history', '잡 히스토리'),
-    el('span', { class: 'grow' }),
-    collapseR,
+    mk('single', '1장'), mk('batch', '배치'), mk('inspect', '검수'),
+    el('span', { class: 'tabsep' }),
+    mk('history', '잡 히스토리'),
   ]));
   const body = el('div', { class: 'centrebody' });
   viewMount.appendChild(body);
   if (S.centreTab === 'single') drawSingle(body);
   else if (S.centreTab === 'batch') drawBatch(body);
+  else if (S.centreTab === 'inspect') drawInspect(body);
   else drawHistory(body);
+}
+
+/** 검수: the OUTPUT folder picked on the left, as the comparison selector.
+ * The left column is held on OUTPUT while this tab shows (user). */
+function drawInspect(body: HTMLElement): void {
+  if (S.leftTab !== 'output') { S.leftTab = 'output'; persistLeftTab(); drawLeft(); }
+  const node = S.selected && S.selected !== OUTPUT_ROOT ? find(S.selected) : null;
+  if (!node) {
+    body.appendChild(el('div', { class: 'empty', text: '왼쪽 OUTPUT 트리에서 검수할 폴더를 고르세요.' }));
+    return;
+  }
+  if (!node.files.length && !node.children.length) {
+    body.appendChild(el('div', { class: 'empty', text: `${node.path} — 비어 있습니다.` }));
+    return;
+  }
+  if (!hasGroups(node.path)) {
+    body.appendChild(el('div', { class: 'hint', text: '읽는 중입니다…' }));
+    void loadGroups(node.path);
+    return;
+  }
+  drawSelector(node);
 }
