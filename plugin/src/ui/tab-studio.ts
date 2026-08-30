@@ -69,12 +69,18 @@ const thumbs = new Map<string, string>();
 let unresolvedRefs: string[] = [];
 let unresolvedTimer: ReturnType<typeof setTimeout> | null = null;
 
-/** What the generation card is set to. Held across renders, not persisted. */
+/** What the generation card is set to. Persisted, so a reload keeps the run
+ * setup. Defaults: steps 28 / CFG 5 are the web client's v4.5 values, rescale
+ * 0.4 and quality tags OFF are this studio's own (user, 2026-08-30). */
+const GEN_KEY = 'hina.studioGen';
 const gen = {
   model: 'nai-diffusion-4-5-full',
   scenePreset: '',
   characterName: '',
-  steps: 23, scale: 5, width: 832, height: 1216, count: 1, seed: '',
+  steps: 28, scale: 5, rescale: 0.4,
+  sampler: 'k_euler_ancestral', schedule: 'karras',
+  width: 832, height: 1216, count: 1, seed: '',
+  quality: false, ucPreset: 0,
   folder: OUTPUT_ROOT,
   // The one control that certainly spends Anlas, so it is off unless asked.
   // References come from the ACTIVE character cards' presets now.
@@ -83,6 +89,13 @@ const gen = {
   // screen because it is the thing most likely to need adjusting.
   pattern: '',
 };
+try {
+  const savedGen = JSON.parse(localStorage.getItem(GEN_KEY) || 'null') as Partial<typeof gen> | null;
+  if (savedGen && typeof savedGen === 'object') Object.assign(gen, savedGen);
+} catch { /* storage may be unavailable in the iframe */ }
+function persistGen(): void {
+  try { localStorage.setItem(GEN_KEY, JSON.stringify(gen)); } catch { /* fine */ }
+}
 let status: StudioStatus | null = null;
 let jobId = '';
 let jobTimer: ReturnType<typeof setInterval> | null = null;
@@ -409,13 +422,14 @@ function drawGen(): void {
     genMount.appendChild(el('div', { class: 'hint', text: '상태를 읽는 중입니다…' }));
     return;
   }
+  // No token hides only the run button: planning is free (the dry plan never
+  // spends), and the setup someone types should not vanish with the notice.
   if (!status.configured) {
     genMount.appendChild(el('div', { class: 'notice' }, [
       el('div', { class: 'hint', text: status.note || status.error || 'NovelAI 토큰이 없습니다.' }),
       el('div', { class: 'hint', style: { marginTop: '4px' },
-                  text: '토큰 없이도 이미지를 넣고, 정리하고, 봇에 반영할 수 있습니다.' }),
+                  text: '토큰 없이도 계획을 세우고, 이미지를 넣고, 정리하고, 봇에 반영할 수 있습니다.' }),
     ]));
-    return;
   }
   const acc = status.account;
   if (acc) {
@@ -436,7 +450,11 @@ function drawGen(): void {
     el('label', { class: 'field' }, [el('span', { text: label }), node]);
 
   const modelInput = el('input', { value: gen.model, placeholder: 'nai-diffusion-4-5-full' }) as HTMLInputElement;
-  modelInput.addEventListener('change', () => { gen.model = modelInput.value.trim(); });
+  modelInput.addEventListener('change', () => {
+    gen.model = modelInput.value.trim();
+    persistGen();
+    refSync?.();
+  });
   const checkBtn = el('button', { class: 'ghost tiny', text: '확인' }) as HTMLButtonElement;
   const checkOut = el('span', { class: 'hint' });
   // Free, and the only thing that knows the model list is the service itself
@@ -456,27 +474,46 @@ function drawGen(): void {
     }
   });
 
-  genMount.append(
+  const two = (a: HTMLElement, b: HTMLElement) => el('div', { class: 'row' }, [a, b]);
+
+  // 요청 설정: everything a request carries beyond "what and how many" - the
+  // model, the reference switch, and the sampling parameters - folded away so
+  // the daily controls stay at the top. Its open/closed state is remembered.
+  const req = el('details', { class: 'advbox' }, [
+    el('summary', { text: '요청 설정' }),
     field('모델', modelInput),
     el('div', { class: 'row' }, [checkBtn, checkOut]),
-    scenePicker(),
     referenceToggle(),
-  );
-
-  const two = (a: HTMLElement, b: HTMLElement) => el('div', { class: 'row' }, [a, b]);
-  genMount.append(
     two(numField('스텝', 'steps'), numField('CFG', 'scale')),
+    two(numField('Rescale', 'rescale'), selField('샘플러', 'sampler', [
+      'k_euler_ancestral', 'k_euler', 'k_dpmpp_2s_ancestral', 'k_dpmpp_2m_sde',
+      'k_dpmpp_2m', 'k_dpmpp_sde', 'ddim_v3'])),
+    two(selField('스케줄', 'schedule', ['karras', 'native', 'exponential', 'polyexponential']),
+        selField('UC 프리셋', 'ucPreset', [], [
+          { value: 0, label: 'Heavy' }, { value: 1, label: 'Light' },
+          { value: 3, label: 'Human Focus' }, { value: 4, label: '없음' }])),
     two(numField('가로', 'width'), numField('세로', 'height')),
+    qualityToggle(),
+  ]) as HTMLDetailsElement;
+  try { req.open = localStorage.getItem('hina.studioReqOpen') === '1'; } catch { /* fine */ }
+  req.addEventListener('toggle', () => {
+    try { localStorage.setItem('hina.studioReqOpen', req.open ? '1' : '0'); } catch { /* fine */ }
+  });
+
+  genMount.append(
+    scenePicker(),
     two(numField('장수', 'count'), textField('시드', 'seed', '비우면 랜덤')),
     textField('캐릭터명', 'characterName', '파일 이름에 들어갑니다 (비우면 생략)'),
     textField('저장 폴더', 'folder', 'studio/images/…'),
+    req,
   );
 
   const planBtn = el('button', { class: 'ghost tiny', text: '계획 보기' }) as HTMLButtonElement;
   const runBtn = el('button', { class: 'primary tiny', text: '생성 시작' }) as HTMLButtonElement;
   planBtn.addEventListener('click', () => void showPlan());
   runBtn.addEventListener('click', () => void run());
-  genMount.appendChild(el('div', { class: 'row', style: { marginTop: '8px' } }, [planBtn, runBtn]));
+  genMount.appendChild(el('div', { class: 'row', style: { marginTop: '8px' } },
+                          [planBtn, status.configured ? runBtn : null]));
   genMount.appendChild(el('div', { class: 'genstatus' }));
   if (jobId) void pollJob();
 }
@@ -490,7 +527,7 @@ function scenePicker(): HTMLElement {
     if (it.path === gen.scenePreset) o.setAttribute('selected', 'selected');
     sel.appendChild(o);
   }
-  sel.addEventListener('change', () => { gen.scenePreset = sel.value; checkUnresolved(); });
+  sel.addEventListener('change', () => { gen.scenePreset = sel.value; persistGen(); checkUnresolved(); });
   return el('label', { class: 'field' }, [el('span', { text: 'SD스튜디오 프리셋' }), sel]);
 }
 
@@ -502,6 +539,8 @@ function scenePicker(): HTMLElement {
  * do it at all (docs/09 §7). The encoding is cached, so a second batch with
  * the same reference costs nothing. Strength and 충실도 live on each card.
  */
+let refSync: (() => void) | null = null;
+
 function referenceToggle(): HTMLElement {
   const box = el('input', { type: 'checkbox' }) as HTMLInputElement;
   box.checked = gen.useReference;
@@ -509,17 +548,24 @@ function referenceToggle(): HTMLElement {
   const sync = () => {
     gen.useReference = box.checked;
     const v5 = !gen.model.includes('diffusion-4');
-    const refs = (cards.characters ?? []).filter((i) => i.enabled).reduce((n, i) => n + (i.vibe ?? 0), 0);
+    // Both kinds count: a card carries charrefs OR vibes (refMode), and the
+    // listing already reports only the side that will ride.
+    const active = (cards.characters ?? []).filter((i) => i.enabled);
+    const charrefN = active.reduce((n, i) => n + (i.charref ?? 0), 0);
+    const vibeN = active.reduce((n, i) => n + (i.vibe ?? 0), 0);
     why.textContent = v5
       ? 'v5 모델은 레퍼런스를 지원하지 않습니다 — 4.5 를 고르세요.'
-      : !refs
+      : !(charrefN + vibeN)
         ? '활성 캐릭터 카드에 레퍼런스가 없습니다 — 카드를 열어 이미지를 올려 두세요.'
-        : (box.checked ? `레퍼런스 ${refs}장 · 인코딩 2 Anlas/장 (캐시되면 0), 배치당 한 번입니다.` : '');
+        : (box.checked
+            ? `캐릭터 ${charrefN}장 (장당 5 Anlas) · 바이브 ${vibeN}장 (인코딩 2 Anlas, 캐시 시 0)`
+            : '');
   };
-  box.addEventListener('change', sync);
+  box.addEventListener('change', () => { sync(); persistGen(); });
+  refSync = sync;
   sync();
   return el('div', {}, [
-    el('label', { class: 'row' }, [box, el('span', { text: '레퍼런스 사용 (활성 카드의 프리셋대로)' })]),
+    el('label', { class: 'row' }, [box, el('span', { text: '레퍼런스 사용 (활성 카드대로)' })]),
     why,
   ]);
 }
@@ -533,7 +579,10 @@ function spec(): Record<string, unknown> {
     characters: activeOf('characters'),
     characterName: gen.characterName,
     count: gen.count, folder: gen.folder,
-    params: { steps: gen.steps, scale: gen.scale, width: gen.width, height: gen.height },
+    params: { steps: gen.steps, scale: gen.scale, cfg_rescale: gen.rescale,
+              sampler: gen.sampler, noise_schedule: gen.schedule,
+              width: gen.width, height: gen.height,
+              qualityToggle: gen.quality, ucPreset: gen.ucPreset },
   };
   if (gen.scenePreset) out.scenePreset = gen.scenePreset;
   if (gen.seed.trim()) out.seed = Number(gen.seed.trim());
@@ -541,17 +590,46 @@ function spec(): Record<string, unknown> {
   return out;
 }
 
-function numField(label: string, key: 'steps' | 'scale' | 'width' | 'height' | 'count'): HTMLElement {
-  const i = el('input', { value: String(gen[key]), type: 'number' }) as HTMLInputElement;
-  i.addEventListener('change', () => { gen[key] = Number(i.value) || gen[key]; });
+function numField(label: string, key: 'steps' | 'scale' | 'rescale' | 'width' | 'height' | 'count'): HTMLElement {
+  const i = el('input', { value: String(gen[key]), type: 'number',
+                          ...(key === 'rescale' ? { step: '0.05', min: '0', max: '1' } : {}) }) as HTMLInputElement;
+  i.addEventListener('change', () => {
+    const n = Number(i.value);
+    if (!Number.isNaN(n)) gen[key] = n;
+    persistGen();
+  });
   return el('label', { class: 'field grow' }, [el('span', { text: label }), i]);
 }
 
 function textField(label: string, key: 'seed' | 'characterName' | 'folder',
                    placeholder = ''): HTMLElement {
   const i = el('input', { value: gen[key], placeholder }) as HTMLInputElement;
-  i.addEventListener('change', () => { gen[key] = i.value; });
+  i.addEventListener('change', () => { gen[key] = i.value; persistGen(); });
   return el('label', { class: 'field grow' }, [el('span', { text: label }), i]);
+}
+
+function selField(label: string, key: 'sampler' | 'schedule' | 'ucPreset', values: string[],
+                  options?: { value: number; label: string }[]): HTMLElement {
+  const sel = el('select') as HTMLSelectElement;
+  for (const o of options ?? values.map((v) => ({ value: v as string | number, label: v }))) {
+    const opt = el('option', { value: String(o.value), text: String(o.label) });
+    if (String(gen[key]) === String(o.value)) opt.setAttribute('selected', 'selected');
+    sel.appendChild(opt);
+  }
+  sel.addEventListener('change', () => {
+    if (key === 'ucPreset') gen.ucPreset = Number(sel.value) || 0;
+    else gen[key] = sel.value;
+    persistGen();
+  });
+  return el('label', { class: 'field grow' }, [el('span', { text: label }), sel]);
+}
+
+function qualityToggle(): HTMLElement {
+  const box = el('input', { type: 'checkbox' }) as HTMLInputElement;
+  box.checked = gen.quality;
+  box.addEventListener('change', () => { gen.quality = box.checked; persistGen(); });
+  return el('label', { class: 'row', title: '켜면 very aesthetic, masterpiece, no text 가 뒤에 붙습니다' },
+            [box, el('span', { text: '퀄리티 태그' })]);
 }
 
 /**
@@ -762,27 +840,51 @@ function drawCharacterEditor(dir: string): void {
   const posY = el('input', { type: 'number', step: '0.1', placeholder: 'y 0~1' }) as HTMLInputElement;
 
   interface RefEntry { file: string; strength: number; informationExtracted: number; enabled: boolean; pendingB64?: string }
-  interface CharRefEntry { file: string; strength: number; description: string; enabled: boolean; pendingB64?: string }
+  interface CharRefEntry { file: string; strength: number; fidelity: number;
+                           mode: 'character' | 'character&style'; enabled: boolean; pendingB64?: string }
   let vibes: RefEntry[] = [];
   let charrefs: CharRefEntry[] = [];
+  /** 바이브와 캐릭터 레퍼런스는 둘 중 하나만 실린다 - 탭이 그 선택이다. */
+  let refMode: 'charref' | 'vibe' = 'charref';
   const refList = el('div', { class: 'verlist' });
   const charrefList = el('div', { class: 'verlist' });
+
+  // A picked file uploads NOW (into the card folder), not at 저장: the row
+  // shows the real thumbnail immediately and a forgotten save cannot lose the
+  // image. pendingB64 survives only for the legacy no-folder path.
+  const uploadNow = async (fname: string, b64: string): Promise<boolean> => {
+    if (!dir) return false;
+    try {
+      await state.uploadFile(fname, b64, true, dir);
+      return true;
+    } catch (e) {
+      out.textContent = `${fname}: 올리지 못했습니다 — ${msg(e)}`;
+      return false;
+    }
+  };
+
+  const num01 = (value: number, title: string, onChange: (n: number) => void): HTMLInputElement => {
+    const i = el('input', { type: 'number', step: '0.05', min: '0', max: '1',
+                            value: String(value), title }) as HTMLInputElement;
+    i.addEventListener('change', () => {
+      const n = Math.min(1, Math.max(0, Number(i.value)));
+      if (!Number.isNaN(n)) { i.value = String(n); onChange(n); }
+    });
+    return i;
+  };
 
   const drawRefs = (): void => {
     clear(refList);
     if (!vibes.length) {
-      refList.appendChild(el('div', { class: 'hint', text: '레퍼런스가 없습니다. PNG 를 올리면 바이브로 실립니다.' }));
+      refList.appendChild(el('div', { class: 'hint', text: 'PNG 를 올리면 바이브로 실립니다.' }));
     }
     vibes.forEach((v, i) => {
       const pic = v.pendingB64
         ? el('span', { class: 'hint', text: '(저장 시 올라갑니다)' })
         : workspaceImage(`${dir}/${v.file}`, v.file, { thumb: true });
-      const strength = el('input', { type: 'number', step: '0.05', value: String(v.strength),
-                                     title: '강도 (reference_strength)' }) as HTMLInputElement;
-      strength.addEventListener('change', () => { v.strength = Number(strength.value) || v.strength; });
-      const ie = el('input', { type: 'number', step: '0.05', value: String(v.informationExtracted),
-                               title: '충실도 (information_extracted)' }) as HTMLInputElement;
-      ie.addEventListener('change', () => { v.informationExtracted = Number(ie.value) || v.informationExtracted; });
+      const strength = num01(v.strength, '강도 (reference_strength)', (n) => { v.strength = n; });
+      const ie = num01(v.informationExtracted, '충실도 (information_extracted)',
+                       (n) => { v.informationExtracted = n; });
       const on = el('input', { type: 'checkbox', title: '이 레퍼런스를 실을지' }) as HTMLInputElement;
       on.checked = v.enabled;
       on.addEventListener('change', () => { v.enabled = on.checked; });
@@ -802,10 +904,16 @@ function drawCharacterEditor(dir: string): void {
     for (const f of Array.from(pickRef.files ?? [])) {
       const r = new FileReader();
       r.onload = () => {
-        const s = String(r.result || '');
-        vibes.push({ file: f.name, strength: 0.6, informationExtracted: 1.0, enabled: true,
-                     pendingB64: s.slice(s.indexOf(',') + 1) });
-        drawRefs();
+        void (async () => {
+          const s = String(r.result || '');
+          const b64 = s.slice(s.indexOf(',') + 1);
+          const entry: RefEntry = { file: f.name, strength: 0.6, informationExtracted: 1.0, enabled: true };
+          if (!(await uploadNow(f.name, b64))) {
+            if (!dir) entry.pendingB64 = b64; else return;
+          }
+          vibes.push(entry);
+          drawRefs();
+        })();
       };
       r.readAsDataURL(f);
     }
@@ -814,23 +922,24 @@ function drawCharacterEditor(dir: string): void {
 
   // --- 캐릭터 레퍼런스 (director reference, docs/09 §7d) ---------------------
   // The internal encoder accepts only the 1024x1536 / 1536x1024 buckets, so
-  // the upload is fitted here with a canvas (cover-crop by orientation) - the
-  // backend only checks and refuses, it never resizes.
+  // the upload is fitted here with a canvas (letterbox on black, the web
+  // client's own preprocessing) - the backend only checks and refuses.
   const drawCharrefs = (): void => {
     clear(charrefList);
     if (!charrefs.length) {
-      charrefList.appendChild(el('div', { class: 'hint', text: '캐릭터 레퍼런스가 없습니다. 올리면 버킷 크기로 맞춰 저장됩니다.' }));
+      charrefList.appendChild(el('div', { class: 'hint', text: '이미지를 올리면 버킷 크기로 맞춰 저장됩니다.' }));
     }
     charrefs.forEach((v, i) => {
       const pic = v.pendingB64
         ? el('span', { class: 'hint', text: '(저장 시 올라갑니다)' })
         : workspaceImage(`${dir}/${v.file}`, v.file, { thumb: true });
-      const strength = el('input', { type: 'number', step: '0.05', value: String(v.strength),
-                                     title: '강도 (director_reference_strength)' }) as HTMLInputElement;
-      strength.addEventListener('change', () => { v.strength = Number(strength.value) || v.strength; });
-      const desc = el('input', { value: v.description, placeholder: '설명 (선택)',
-                                 title: '레퍼런스에 붙는 캡션' }) as HTMLInputElement;
-      desc.addEventListener('change', () => { v.description = desc.value; });
+      const mode = el('select', { title: '캐릭터만 가져올지, 그림체까지 가져올지' }) as HTMLSelectElement;
+      mode.appendChild(el('option', { value: 'character', text: '캐릭터' }));
+      mode.appendChild(el('option', { value: 'character&style', text: '캐릭터&스타일' }));
+      mode.value = v.mode;
+      mode.addEventListener('change', () => { v.mode = mode.value as CharRefEntry['mode']; });
+      const strength = num01(v.strength, '강도 (strength)', (n) => { v.strength = n; });
+      const fidelity = num01(v.fidelity, '충실도 (fidelity)', (n) => { v.fidelity = n; });
       const on = el('input', { type: 'checkbox', title: '이 레퍼런스를 실을지' }) as HTMLInputElement;
       on.checked = v.enabled;
       on.addEventListener('change', () => { v.enabled = on.checked; });
@@ -838,7 +947,9 @@ function drawCharacterEditor(dir: string): void {
       drop.addEventListener('click', () => { charrefs = charrefs.filter((_x, j) => j !== i); drawCharrefs(); });
       charrefList.appendChild(el('div', { class: 'row', style: { alignItems: 'center', gap: '6px' } }, [
         on, pic, el('span', { class: 'grow hint', text: v.file }),
-        el('span', { class: 'hint', text: '강도' }), strength, desc,
+        mode,
+        el('span', { class: 'hint', text: '강도' }), strength,
+        el('span', { class: 'hint', text: '충실도' }), fidelity,
         drop,
       ]));
     });
@@ -861,7 +972,11 @@ function drawCharacterEditor(dir: string): void {
       canvas.height = h;
       const ctx = canvas.getContext('2d');
       if (!ctx) return null;
-      const scale = Math.max(w / img.width, h / img.height);
+      // Letterbox on black (contain), not crop: the web client pads the same
+      // way, and a reference with its edges cut off references less.
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, w, h);
+      const scale = Math.min(w / img.width, h / img.height);
       const dw = img.width * scale;
       const dh = img.height * scale;
       ctx.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh);
@@ -879,8 +994,12 @@ function drawCharacterEditor(dir: string): void {
     for (const f of Array.from(pickCharref.files ?? [])) {
       const fitted = await fitToBucket(f);
       if (!fitted) { out.textContent = `${f.name}: 버킷 크기로 맞추지 못했습니다.`; continue; }
-      charrefs.push({ file: fitted.name, strength: 1.0, description: '', enabled: true,
-                      pendingB64: fitted.b64 });
+      const entry: CharRefEntry = { file: fitted.name, strength: 0.6, fidelity: 0.6,
+                                    mode: 'character', enabled: true };
+      if (!(await uploadNow(fitted.name, fitted.b64))) {
+        if (!dir) entry.pendingB64 = fitted.b64; else continue;
+      }
+      charrefs.push(entry);
       drawCharrefs();
     }
     pickCharref.value = '';
@@ -916,11 +1035,11 @@ function drawCharacterEditor(dir: string): void {
       const position = (posX.value.trim() && posY.value.trim())
         ? { x: Number(posX.value), y: Number(posY.value) } : null;
       await state.uploadFile('preset.json', JSON.stringify({
-        version: 1, position,
+        version: 1, position, refMode,
         vibe: vibes.map((v) => ({ file: v.file, strength: v.strength,
                                   informationExtracted: v.informationExtracted, enabled: v.enabled })),
         charref: charrefs.map((v) => ({ file: v.file, strength: v.strength,
-                                        description: v.description, enabled: v.enabled })),
+                                        fidelity: v.fidelity, mode: v.mode, enabled: v.enabled })),
       }, null, 2), false, target);
       notice(`캐릭터 “${nm}” 를 저장했습니다.`, 'ok');
       selectedFile = target;
@@ -947,6 +1066,33 @@ function drawCharacterEditor(dir: string): void {
       hint ? el('div', { class: 'hint', text: hint }) : null,
     ]);
 
+  // 레퍼런스는 탭이다: 바이브와 캐릭터 레퍼런스는 함께 실리지 않으므로
+  // (refMode), 두 목록을 나란히 쌓는 대신 하나를 고른다. 기본은 캐릭터.
+  const charBtn = el('button', { class: 'modebtn', text: '캐릭터 레퍼런스' }) as HTMLButtonElement;
+  const vibeBtn = el('button', { class: 'modebtn', text: '바이브 레퍼런스' }) as HTMLButtonElement;
+  const charPane = el('div', {}, [
+    el('div', { class: 'hint', text: '장당 5 Anlas · v4.5 전용' }),
+    charrefList,
+    field('이미지 추가', pickCharref),
+  ]);
+  const vibePane = el('div', {}, [
+    el('div', { class: 'hint', text: '인코딩 2 Anlas/장 (캐시 시 0) · v5 미지원' }),
+    refList,
+    field('PNG 추가', pickRef),
+  ]);
+  const syncRefTabs = (): void => {
+    charBtn.classList.toggle('on', refMode === 'charref');
+    vibeBtn.classList.toggle('on', refMode === 'vibe');
+    charPane.style.display = refMode === 'charref' ? '' : 'none';
+    vibePane.style.display = refMode === 'vibe' ? '' : 'none';
+  };
+  charBtn.addEventListener('click', () => { refMode = 'charref'; syncRefTabs(); });
+  vibeBtn.addEventListener('click', () => { refMode = 'vibe'; syncRefTabs(); });
+  if (status && status.charref === false) {
+    refMode = 'vibe';
+    charBtn.style.display = 'none';
+  }
+
   viewMount.append(
     editorHead(dir || '새 캐릭터', [isNew ? null : del, save]),
     field('이름', name, '카드 폴더 이름과 프롬프트 조립에 쓰입니다'),
@@ -956,22 +1102,20 @@ function drawCharacterEditor(dir: string): void {
     ]),
     field('프롬프트', caption),
     field('네거티브', negative),
-    el('div', { class: 'row', style: { marginBottom: '8px' } }, [
-      el('label', { class: 'field grow', style: { marginBottom: '0' } }, [el('span', { text: '위치 x (여럿일 때)' }), posX]),
-      el('label', { class: 'field grow', style: { marginBottom: '0' } }, [el('span', { text: '위치 y' }), posY]),
+    el('div', { class: 'sectiontitle', text: '레퍼런스' }),
+    el('div', { class: 'row', style: { gap: '6px', marginBottom: '6px' } }, [charBtn, vibeBtn]),
+    charPane,
+    vibePane,
+    el('details', { class: 'advbox' }, [
+      el('summary', { text: '고급' }),
+      el('div', { class: 'row', style: { marginBottom: '8px' } }, [
+        el('label', { class: 'field grow', style: { marginBottom: '0' } }, [el('span', { text: '위치 x (여럿일 때)' }), posX]),
+        el('label', { class: 'field grow', style: { marginBottom: '0' } }, [el('span', { text: '위치 y' }), posY]),
+      ]),
     ]),
-    el('div', { class: 'sectiontitle', text: '바이브 레퍼런스' }),
-    el('div', { class: 'hint', text: '인코딩은 회당 2 Anlas (캐시되면 0), 배치마다 한 번. v5 모델은 지원하지 않습니다.' }),
-    refList,
-    field('PNG 추가', pickRef),
-    ...(status?.charref ? [
-      el('div', { class: 'sectiontitle', text: '캐릭터 레퍼런스' }),
-      el('div', { class: 'hint', text: '장당 5 Anlas 가 확정으로 나갑니다 (Opus 포함). 1024×1536/1536×1024 로 맞춰 저장되며, v4.5 전용입니다.' }),
-      charrefList,
-      field('이미지 추가', pickCharref),
-    ] : []),
     out,
   );
+  syncRefTabs();
   drawRefs();
   drawCharrefs();
 
@@ -995,7 +1139,8 @@ function drawCharacterEditor(dir: string): void {
     void state.readFile(`${dir}/preset.json`).then((r) => {
       try {
         const d = JSON.parse(r.content) as { position?: { x?: number; y?: number } | null;
-                                             vibe?: RefEntry[] };
+                                             refMode?: string; vibe?: RefEntry[];
+                                             charref?: (CharRefEntry & { description?: string })[] };
         if (d.position && typeof d.position === 'object') {
           posX.value = String(d.position.x ?? '');
           posY.value = String(d.position.y ?? '');
@@ -1005,11 +1150,18 @@ function drawCharacterEditor(dir: string): void {
           informationExtracted: Number(v.informationExtracted ?? 1.0),
           enabled: v.enabled !== false,
         })).filter((v) => v.file);
-        charrefs = ((d as { charref?: CharRefEntry[] }).charref ?? []).map((v) => ({
-          file: String(v.file || ''), strength: Number(v.strength ?? 1.0),
-          description: String(v.description ?? ''),
+        charrefs = (d.charref ?? []).map((v) => ({
+          file: String(v.file || ''), strength: Number(v.strength ?? 0.6),
+          fidelity: Number(v.fidelity ?? 0.6),
+          mode: v.mode === 'character&style' ? 'character&style' as const : 'character' as const,
           enabled: v.enabled !== false,
         })).filter((v) => v.file);
+        // Same inference the backend applies: an explicit refMode wins, an
+        // old preset without one means "the list that has something".
+        if (d.refMode === 'vibe' || d.refMode === 'charref') refMode = d.refMode;
+        else if (vibes.length && !charrefs.length) refMode = 'vibe';
+        if (status && status.charref === false) refMode = 'vibe';
+        syncRefTabs();
         drawRefs();
         drawCharrefs();
       } catch { /* a fresh card has no preset yet */ }

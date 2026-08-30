@@ -249,6 +249,20 @@ def read_character(rel: str) -> dict:
             preset = read_json(base + "/preset.json")
         except StudioError:
             pass
+        vibe = [v for v in (preset.get("vibe") or [])
+                if isinstance(v, dict) and v.get("enabled", True)]
+        charref = [v for v in (preset.get("charref") or [])
+                   if isinstance(v, dict) and v.get("enabled", True)]
+        # 바이브와 캐릭터 레퍼런스는 함께 실리지 않는다: refMode 가 고르고,
+        # 반대쪽 목록은 비워서 돌려준다. 명시가 없는 옛 preset 은 "차 있는
+        # 쪽" - 바이브만 있던 카드가 업그레이드로 조용히 꺼지면 안 된다.
+        mode = str(preset.get("refMode") or "").strip()
+        if mode not in ("charref", "vibe"):
+            mode = "vibe" if (vibe and not charref) else "charref"
+        if mode == "vibe":
+            charref = []
+        else:
+            vibe = []
         return {
             "path": base,
             "name": s["name"] if s["name"] != "prompt" else Path(base).name,
@@ -256,10 +270,9 @@ def read_character(rel: str) -> dict:
             "enabled": s["enabled"], "order": s["order"],
             "description": s["description"],
             "position": preset.get("position"),
-            "vibe": [v for v in (preset.get("vibe") or [])
-                     if isinstance(v, dict) and v.get("enabled", True)],
-            "charref": [v for v in (preset.get("charref") or [])
-                        if isinstance(v, dict) and v.get("enabled", True)],
+            "refMode": mode,
+            "vibe": vibe,
+            "charref": charref,
         }
     d = read_json(r)
     return {
@@ -268,7 +281,7 @@ def read_character(rel: str) -> dict:
         "negative": str(d.get("negative") or ""),
         "enabled": bool(d.get("enabled")), "order": int(d.get("order") or 100),
         "description": str(d.get("description") or ""),
-        "position": d.get("position"), "vibe": [], "charref": [],
+        "position": d.get("position"), "refMode": "charref", "vibe": [], "charref": [],
     }
 
 

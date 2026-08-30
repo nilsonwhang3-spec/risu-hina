@@ -86,8 +86,9 @@ def start(spec: dict) -> dict:
                 if not cr.get("file"):
                     continue
                 charrefs.append({"path": f"{c['path']}/{cr.get('file')}",
-                                 "description": str(cr.get("description") or ""),
-                                 "strength": float(cr.get("strength", 1.0))})
+                                 "mode": str(cr.get("mode") or "character"),
+                                 "strength": float(cr.get("strength", 0.6)),
+                                 "fidelity": float(cr.get("fidelity", 0.6))})
         spec["vibes"] = vibes
         if charrefs and not spec.get("charrefs"):
             spec["charrefs"] = charrefs
@@ -149,8 +150,9 @@ def _run(job_id: str) -> None:
             nai.check_charref_png(png, str(ref["path"]))
             import base64 as _b64
             charrefs.append({"image": _b64.b64encode(png).decode(),
-                             "description": str(ref.get("description") or ""),
-                             "strength": float(ref.get("strength", 1.0))})
+                             "mode": str(ref.get("mode") or "character"),
+                             "strength": float(ref.get("strength", 0.6)),
+                             "fidelity": float(ref.get("fidelity", 0.6))})
     except Exception as e:  # noqa: BLE001
         payload["anlasAfter"] = nai.anlas()
         _update(job_id, state="error", error=str(e), payload_json=payload)

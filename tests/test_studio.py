@@ -520,17 +520,72 @@ except nai.NaiError as e:
           "1024x1536" in str(e) and "x.png" in str(e), str(e))
 
 p = nai.build_parameters("1girl", "blurry", {}, None,
-                         [{"image": "AAAA", "description": "red hair", "strength": 0.6}])
+                         [{"image": "AAAA", "mode": "character&style", "strength": 0.8, "fidelity": 0.25}])
 check("the director request shape is 7d verbatim",
       p["director_reference_images"] == ["AAAA"]
-      and p["director_reference_descriptions"][0]["caption"]["base_caption"] == "red hair"
+      and p["director_reference_descriptions"][0]["caption"]["base_caption"] == "character&style"
       and p["director_reference_information_extracted"] == [1.0]
-      and p["director_reference_strength_values"] == [0.6],
+      and p["director_reference_strength_values"] == [0.8],
       json.dumps({k: v for k, v in p.items() if "director" in k}, ensure_ascii=False)[:200])
+check("충실도 rides as secondary = 1 - fidelity",
+      p["director_reference_secondary_strength_values"] == [0.75],
+      str(p.get("director_reference_secondary_strength_values")))
+check("the mode defaults to character",
+      nai.build_parameters("x", "", {}, None, [{"image": "A"}])
+      ["director_reference_descriptions"][0]["caption"]["base_caption"] == "character")
 
 est = studio.estimate({"charrefs": [{"path": "x"}]}, 3)
 check("a charref batch names its certain cost", est["anlasCertain"] == 15
       and "5 Anlas" in est["note"], json.dumps(est, ensure_ascii=False)[:200])
+
+print("\ntest_quality_and_uc_merge")
+# The flags are metadata; the text is what acts (NAIS3 web captures). Quality
+# tags append to the prompt, the UC preset text prefixes the negative, and
+# v4_prompt / v4_negative_prompt carry the merged text so `input` can mirror it.
+pq = nai.build_parameters("1girl", "bad hands", {"qualityToggle": True})
+check("quality tags ride the prompt text",
+      pq["v4_prompt"]["caption"]["base_caption"] == "1girl" + nai.QUALITY_SUFFIX,
+      pq["v4_prompt"]["caption"]["base_caption"])
+check("the Heavy UC preset prefixes the negative",
+      pq["negative_prompt"].startswith("nsfw, lowres") and pq["negative_prompt"].endswith(", bad hands"),
+      pq["negative_prompt"][:80])
+check("v4_negative_prompt matches the merged negative",
+      pq["v4_negative_prompt"]["caption"]["base_caption"] == pq["negative_prompt"])
+pd = nai.build_parameters("x", "y", {})
+check("the defaults are the studio's: steps 28, rescale 0.4, quality OFF",
+      pd["steps"] == 28 and pd["cfg_rescale"] == 0.4
+      and pd["v4_prompt"]["caption"]["base_caption"] == "x",
+      f"steps={pd['steps']} rescale={pd['cfg_rescale']}")
+check("ucPreset 4 (없음) merges nothing",
+      nai.build_parameters("x", "y", {"ucPreset": 4})["negative_prompt"] == "y")
+
+print("\ntest_reference_mode")
+# 바이브와 캐릭터 레퍼런스는 함께 실리지 않는다: refMode 가 고른다.
+_rm = studio.root() / "characters" / "레퍼모드"
+_rm.mkdir(parents=True, exist_ok=True)
+(_rm / "prompt.md").write_text("---\nname: 레퍼모드\nenabled: true\n---\n## 프롬프트\n캐릭터A\n",
+                               encoding="utf-8")
+(_rm / "preset.json").write_text(json.dumps({
+    "version": 1,
+    "vibe": [{"file": "v.png", "strength": 0.5, "enabled": True}],
+    "charref": [{"file": "c.png", "strength": 0.7, "fidelity": 0.3,
+                 "mode": "character", "enabled": True}]}, ensure_ascii=False), encoding="utf-8")
+c = studio.read_character("characters/레퍼모드")
+check("with both lists and no refMode, charref wins",
+      c["refMode"] == "charref" and c["vibe"] == [] and len(c["charref"]) == 1,
+      json.dumps({k: c[k] for k in ("refMode", "vibe", "charref")}, ensure_ascii=False))
+(_rm / "preset.json").write_text(json.dumps({
+    "version": 1, "vibe": [{"file": "v.png"}], "charref": []}), encoding="utf-8")
+c = studio.read_character("characters/레퍼모드")
+check("a vibe-only legacy preset keeps its vibes (no silent upgrade-off)",
+      c["refMode"] == "vibe" and len(c["vibe"]) == 1, c["refMode"])
+(_rm / "preset.json").write_text(json.dumps({
+    "version": 1, "refMode": "vibe",
+    "vibe": [{"file": "v.png"}], "charref": [{"file": "c.png"}]}), encoding="utf-8")
+c = studio.read_character("characters/레퍼모드")
+check("an explicit refMode wins over the inference",
+      c["refMode"] == "vibe" and c["charref"] == [])
+files.delete(files.SPACE, "studio/characters/레퍼모드")
 
 print("\ntest_selection_slugs")
 check("korean folders no longer share one slug",

@@ -2037,10 +2037,11 @@ console.log('\ntest_studio_cards');
         [...document.querySelectorAll('.panel.active .left input')]
           .some((i) => i.value === '스모크스타일'));
 
-  // The old single-select style/character pickers are gone (the scene preset
-  // is the one <select> a configured account would show).
+  // The old single-select style/character pickers are gone (the remaining
+  // selects are the scene preset and the 요청 설정 parameter dropdowns).
   check('no style/character pickers remain',
-        document.querySelectorAll('.genpanel select').length <= 1,
+        ![...document.querySelectorAll('.genpanel select option')]
+          .some((o) => /스모크스타일/.test(o.textContent || '')),
         String(document.querySelectorAll('.genpanel select').length));
   clickButton(document.querySelector('.panel.active .left'), '← 목록');
   await settle(300);
@@ -2124,6 +2125,78 @@ console.log('\ntest_studio_scene_editor');
         (document.querySelector('.panel.active .left')?.textContent || '').slice(0, 120));
   clickButton(document.querySelector('.panel.active .left'), '← 목록');
   await settle(300);
+}
+
+console.log('\ntest_studio_reference_tabs');
+{
+  // A character card's references are ONE choice: charref and vibe are tabs
+  // (charref default), and preset.json records refMode on save.
+  const auth = { Authorization: 'Bearer plugin-smoke-token', 'Content-Type': 'application/json' };
+  await fetch(backend.url + '/files/upload', { method: 'POST', headers: auth,
+    body: JSON.stringify({ name: 'prompt.md', dir: 'studio/characters/스모크캐릭터',
+      text: '---\nname: 스모크캐릭터\nenabled: true\n---\n## 프롬프트\n1girl' }) });
+  await fetch(backend.url + '/files/upload', { method: 'POST', headers: auth,
+    body: JSON.stringify({ name: 'preset.json', dir: 'studio/characters/스모크캐릭터',
+      text: JSON.stringify({ version: 1,
+        vibe: [{ file: 'v.png', strength: 0.5, enabled: true }], charref: [] }) }) });
+  clickById(document, 'tab-files');
+  await settle(200);
+  clickById(document, 'tab-studio');
+  await settle(1100);
+  const row = [...document.querySelectorAll('.panel.active .pickrow')]
+    .find((r) => /스모크캐릭터/.test(r.textContent || ''));
+  check('the character card renders', !!row);
+  row?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(800);
+  const left = document.querySelector('.panel.active .left');
+  const tabs = left ? [...left.querySelectorAll('button.modebtn')] : [];
+  check('the reference section is two tabs', tabs.length === 2, String(tabs.length));
+  const vibeTab = tabs.find((b) => /바이브/.test(b.textContent || ''));
+  check('a vibe-only legacy preset opens on the vibe tab',
+        !!vibeTab?.classList.contains('on'), tabs.map((b) => b.className).join(','));
+  check('the long reference explainers are gone',
+        !/확정으로 나갑니다/.test(left?.textContent || ''));
+  check('position folds under 고급', /고급/.test(left?.textContent || ''));
+  clickButton(left, '저장');
+  await settle(1300);
+  const preset = await (await fetch(backend.url + '/files/read?path='
+    + encodeURIComponent('studio/characters/스모크캐릭터/preset.json'), { headers: auth })).json();
+  check('preset.json records refMode', /"refMode":\s*"vibe"/.test(preset.content || ''),
+        (preset.content || '').slice(0, 160));
+  clickButton(document.querySelector('.panel.active .left'), '← 목록');
+  await settle(300);
+}
+
+console.log('\ntest_studio_request_settings');
+{
+  // The sampling parameters live in a folded 요청 설정 and the whole set rides
+  // spec.params - what you see on the card is what the backend receives.
+  clickById(document, 'tab-studio');
+  await settle(400);
+  const gp = document.querySelector('.panel.active .genpanel');
+  check('요청 설정 is a folded section', /요청 설정/.test(gp?.textContent || ''),
+        (gp?.textContent || '').slice(0, 200));
+  check('sampler and UC preset are on the card',
+        [...(gp?.querySelectorAll('select option') ?? [])].some((o) => o.value === 'k_euler_ancestral')
+        && [...(gp?.querySelectorAll('select option') ?? [])].some((o) => (o.textContent || '') === 'Heavy'));
+  const orig = globalThis.fetch;
+  let planBody = null;
+  globalThis.fetch = async (url, opts) => {
+    if (String(url).endsWith('/studio/plan') && opts?.body) planBody = JSON.parse(opts.body);
+    return orig(url, opts);
+  };
+  try {
+    clickButton(gp, '계획 보기');
+    await settle(900);
+  } finally { globalThis.fetch = orig; }
+  check('the request carries the full parameter set',
+        planBody?.params?.cfg_rescale === 0.4
+        && planBody?.params?.sampler === 'k_euler_ancestral'
+        && planBody?.params?.noise_schedule === 'karras'
+        && planBody?.params?.qualityToggle === false
+        && planBody?.params?.ucPreset === 0
+        && planBody?.params?.steps === 28,
+        JSON.stringify(planBody?.params));
 }
 
 console.log('\ntest_studio_screen_mode');

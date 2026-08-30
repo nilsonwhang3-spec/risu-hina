@@ -48,19 +48,40 @@ NO_GENERATE = {"width": 7, "height": 7}
 
 # A floor that returned 200 on nai-diffusion-4-5-full and -5-full. Accepted as
 # a set; no field here is proven individually necessary, and a preset may
-# replace any of it.
+# replace any of it. steps 28 / scale 5 are the web client's v4.5 defaults
+# (NAIS3 nai-models.ts); cfg_rescale 0.4 and quality tags OFF are this
+# studio's own defaults (user, 2026-08-30).
 DEFAULTS: dict[str, Any] = {
     "params_version": 3,
     "width": 832,
     "height": 1216,
     "scale": 5,
     "sampler": "k_euler_ancestral",
-    "steps": 23,
+    "steps": 28,
     "n_samples": 1,
     "ucPreset": 0,
-    "qualityToggle": True,
-    "cfg_rescale": 0,
+    "qualityToggle": False,
+    "cfg_rescale": 0.4,
     "noise_schedule": "karras",
+}
+
+# Quality tags and the UC preset are CLIENT-side text merges: the NAI web
+# client appends/prepends these strings itself and sends qualityToggle /
+# ucPreset only as metadata. Text and index mapping are NAIS3's byte-asserted
+# web captures (tests/fixtures/nai-web-*.json there), adopted verbatim -
+# index 2 is unused by the web UI and 4 means none.
+QUALITY_SUFFIX = ", very aesthetic, masterpiece, no text"
+_UC_HEAVY = ("nsfw, lowres, artistic error, film grain, scan artifacts, worst quality, "
+             "bad quality, jpeg artifacts, very displeasing, chromatic aberration, dithering, "
+             "halftone, screentone, multiple views, logo, too many watermarks, negative space, "
+             "blank page")
+UC_PRESETS: dict[int, str] = {
+    0: _UC_HEAVY,
+    1: ("nsfw, lowres, artistic error, scan artifacts, worst quality, bad quality, "
+        "jpeg artifacts, multiple views, very displeasing, too many watermarks, "
+        "negative space, blank page"),
+    3: _UC_HEAVY + ", @_@, mismatched pupils, glowing eyes, bad anatomy",
+    4: "",
 }
 
 # `req_type` values the service recognises. An unknown one is refused by name,
@@ -223,13 +244,29 @@ def build_parameters(prompt: str, negative: str, params: dict | None = None,
     is a list of {encoding, strength, informationExtracted}: the *multiple*
     naming is NovelAI's and it means exactly that, a list with per-item
     strengths (docs/09 §7). `charrefs` is a list of {image (b64 PNG at a
-    CHARREF_BUCKETS size), description, strength} - the director reference,
+    CHARREF_BUCKETS size), mode, strength, fidelity} - the director reference,
     whose request shape is docs/09 §7d verbatim: descriptions are
-    V4ConditionInput objects, information_extracted must be exactly 1.0, and
-    the strengths field is `director_reference_strength_values` on the wire
-    even though the PNG Comment echoes it back as `..._strengths`.
+    V4ConditionInput objects whose base_caption is the MODE
+    ("character" / "character&style"), information_extracted must be exactly
+    1.0, the strengths field is `director_reference_strength_values` on the
+    wire even though the PNG Comment echoes it back as `..._strengths`, and
+    충실도 rides as `secondary_strength_values = 1 - fidelity`.
+
+    qualityToggle / ucPreset are applied HERE as text (§7d cross-check with
+    NAIS3: the web client merges these strings itself and sends the flags as
+    metadata). The merged prompt is what `v4_prompt` carries - a caller that
+    needs the top-level `input` must read it back from there so the two can
+    never disagree.
     """
     p = {**DEFAULTS, **(params or {})}
+    if p.get("qualityToggle"):
+        prompt = f"{prompt}{QUALITY_SUFFIX}" if prompt.strip() else QUALITY_SUFFIX.strip(", ")
+    try:
+        uc = UC_PRESETS.get(int(p.get("ucPreset") or 0), "")
+    except (TypeError, ValueError):
+        uc = ""
+    if uc:
+        negative = f"{uc}, {negative}" if negative.strip() else uc
     p["negative_prompt"] = negative
     p["v4_prompt"] = {
         "caption": {"base_caption": prompt,
@@ -250,12 +287,14 @@ def build_parameters(prompt: str, negative: str, params: dict | None = None,
     if charrefs:
         p["director_reference_images"] = [c["image"] for c in charrefs]
         p["director_reference_descriptions"] = [
-            {"caption": {"base_caption": str(c.get("description") or ""), "char_captions": []},
+            {"caption": {"base_caption": str(c.get("mode") or "character"), "char_captions": []},
              "legacy_uc": False}
             for c in charrefs]
         p["director_reference_information_extracted"] = [1.0] * len(charrefs)
         p["director_reference_strength_values"] = [
-            float(c.get("strength", 1.0)) for c in charrefs]
+            float(c.get("strength", 0.6)) for c in charrefs]
+        p["director_reference_secondary_strength_values"] = [
+            round(1.0 - float(c.get("fidelity", 0.6)), 4) for c in charrefs]
     return p
 
 
@@ -273,8 +312,10 @@ def generate(model: str, prompt: str, negative: str = "",
              params: dict | None = None, vibes: list[dict] | None = None,
              charrefs: list[dict] | None = None) -> bytes:
     """One image, as PNG bytes."""
-    body = {"input": prompt, "model": model, "action": "generate",
-            "parameters": build_parameters(prompt, negative, params, vibes, charrefs)}
+    p = build_parameters(prompt, negative, params, vibes, charrefs)
+    # input mirrors v4_prompt AFTER the quality/UC merge - one source of text.
+    body = {"input": p["v4_prompt"]["caption"]["base_caption"], "model": model,
+            "action": "generate", "parameters": p}
     with _client() as c:
         r = c.post("/ai/generate-image", json=body)
     if r.status_code >= 300:
@@ -305,7 +346,8 @@ def infill(model: str, png: bytes, mask: bytes, prompt: str, negative: str = "",
     p["image"] = base64.b64encode(png).decode()
     p["mask"] = base64.b64encode(mask).decode()
     p["add_original_image"] = True
-    body = {"input": prompt, "model": inpaint_model(model), "action": "infill", "parameters": p}
+    body = {"input": p["v4_prompt"]["caption"]["base_caption"],
+            "model": inpaint_model(model), "action": "infill", "parameters": p}
     with _client() as c:
         r = c.post("/ai/generate-image", json=body)
     if r.status_code >= 300:
