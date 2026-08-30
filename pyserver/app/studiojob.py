@@ -165,6 +165,11 @@ def _run(job_id: str) -> None:
                 payload["anlasAfter"] = nai.anlas()
                 _update(job_id, state="cancelled", payload_json=payload)
                 return
+        # Which image is being drawn RIGHT NOW - the queue view's one fact
+        # that done/total cannot give. Written before the generation so a
+        # poll during the 4-8s wait sees it.
+        payload["current"] = item["name"]
+        _update(job_id, payload_json=payload)
         p = dict(params)
         if item.get("seed") is not None:
             p["seed"] = item["seed"]
@@ -195,6 +200,7 @@ def _run(job_id: str) -> None:
         payload["done"] += 1
         _update(job_id, payload_json=payload)
 
+    payload.pop("current", None)
     payload["anlasAfter"] = nai.anlas()
     before, after = payload["anlasBefore"], payload["anlasAfter"]
     spent = (before - after) if (before or 0) >= 0 and (after or 0) >= 0 else None

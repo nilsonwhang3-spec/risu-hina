@@ -527,9 +527,14 @@ export interface BatchEstimate {
 
 export interface StudioJob {
   id: string; kind: string; state: string; error?: string | null;
+  created_at?: number; updated_at?: number;
   payload: {
     done: number; total: number; saved: string[];
     failed: { name: string; error: string }[];
+    /** The full expansion, in run order - what the queue view lists. */
+    items?: { name: string; scene?: string }[];
+    /** The image being drawn right now (running jobs only). */
+    current?: string;
     anlasBefore: number | null; anlasAfter: number | null;
   } | null;
   result: { saved: number; failed: number; anlasSpent: number | null } | null;
@@ -575,6 +580,11 @@ class StudioFiles {
 
   async job(id: string): Promise<StudioJob> {
     return await transport.get<StudioJob>('/studio/job', { id });
+  }
+
+  /** The last few batches, newest first - the queue view's 최근 작업 list. */
+  async jobs(): Promise<{ jobs: StudioJob[] }> {
+    return await transport.get('/studio/job');
   }
 
   async cancelJob(id: string): Promise<void> {

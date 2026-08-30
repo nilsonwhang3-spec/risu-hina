@@ -2208,6 +2208,59 @@ console.log('\ntest_studio_request_settings');
         JSON.stringify(planBody?.params));
 }
 
+console.log('\ntest_studio_queue_view');
+{
+  // The centre can show the batch as a live queue: one row per planned image
+  // with where it stands. Entry is the 큐 button (or 생성 시작 / the status
+  // line); the job payload is faked at the fetch seam.
+  clickById(document, 'tab-studio');
+  await settle(400);
+  const job = {
+    id: 'job_smoke1', kind: 'studio_generate', state: 'running', error: null,
+    created_at: Date.now() / 1000 - 5, updated_at: Date.now() / 1000,
+    payload: {
+      done: 1, total: 3, current: '하나-b-20260830-120000-1.png',
+      saved: ['studio/images/큐/하나-a-20260830-120000-1.png'],
+      failed: [{ name: '하나-c-20260830-120000-1.png', error: '테스트 실패' }],
+      items: [{ name: '하나-a-20260830-120000-1.png', scene: 'a' },
+              { name: '하나-b-20260830-120000-1.png', scene: 'b' },
+              { name: '하나-c-20260830-120000-1.png', scene: 'c' }],
+      anlasBefore: null, anlasAfter: null,
+    },
+    result: null,
+  };
+  const orig = globalThis.fetch;
+  globalThis.fetch = async (url, opts) => {
+    const u = String(url);
+    if (u.includes('/studio/job')) {
+      return new Response(JSON.stringify({ jobs: [job] }), {
+        status: 200, headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    return orig(url, opts);
+  };
+  try {
+    clickButton(document.querySelector('.panel.active .genpanel'), '큐');
+    await settle(600);
+    const centre = () => document.querySelector('.panel.active .left');
+    check('the queue view opens from the 큐 button',
+          /생성 큐/.test(centre()?.textContent || ''), (centre()?.textContent || '').slice(0, 120));
+    check('recent batches are listed', /최근 작업/.test(centre()?.textContent || ''));
+    const row = [...(centre()?.querySelectorAll('.chatitem') ?? [])]
+      .find((r) => /job_smoke1/.test(r.textContent || ''));
+    row?.dispatchEvent(new window.Event('click', { bubbles: true }));
+    await settle(400);
+    const text = centre()?.textContent || '';
+    check('each planned image is a row with its state',
+          /완료/.test(text) && /생성 중/.test(text) && /실패/.test(text), text.slice(0, 300));
+    check('the failure carries its error', /테스트 실패/.test(text));
+    check('progress and 중단 ride the header', /1\/3/.test(text)
+          && !!findButton(centre(), '중단'));
+  } finally { globalThis.fetch = orig; }
+  clickButton(document.querySelector('.panel.active .left'), '← 나가기');
+  await settle(300);
+}
+
 console.log('\ntest_studio_stays_scoped');
 {
   // One checkbox = one meta write (+ the debounced dry plan). The old

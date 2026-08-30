@@ -24,7 +24,8 @@
  */
 import { el, clear, armed } from './dom';
 import { state, type FileListing, type GroupItem, type SelectionMap, type SelectionState,
-         type StudioGroups, type StudioItem, type StudioStatus, type WorkspaceFile } from '../state';
+         type StudioGroups, type StudioItem, type StudioJob, type StudioStatus,
+         type WorkspaceFile } from '../state';
 import { threePane } from './panes';
 import { bindAgent, mountAgent } from './agentpane';
 import { listRow as kitRow } from './kit';
@@ -112,6 +113,9 @@ function persistGen(): void {
 let status: StudioStatus | null = null;
 let jobId = '';
 let jobTimer: ReturnType<typeof setInterval> | null = null;
+/** The centre shows the live queue instead of a folder while this is on. */
+let queueView = false;
+let queueJob: StudioJob | null = null;
 
 export function renderStudioTab(mount: HTMLElement): void {
   const entering = !wasStudioActive;
@@ -574,11 +578,13 @@ function drawGen(): void {
   );
 
   const planBtn = el('button', { class: 'ghost tiny', text: '계획 보기' }) as HTMLButtonElement;
+  const queueBtn = el('button', { class: 'ghost tiny', text: '큐', title: '생성 큐와 최근 작업' }) as HTMLButtonElement;
   const runBtn = el('button', { class: 'primary tiny', text: '생성 시작' }) as HTMLButtonElement;
   planBtn.addEventListener('click', () => void showPlan());
+  queueBtn.addEventListener('click', () => { queueView = true; drawCentre(); });
   runBtn.addEventListener('click', () => void run());
   genMount.appendChild(el('div', { class: 'row', style: { marginTop: '8px' } },
-                          [planBtn, status.configured ? runBtn : null]));
+                          [planBtn, queueBtn, status.configured ? runBtn : null]));
   genMount.appendChild(el('div', { class: 'genstatus' }));
   if (jobId) void pollJob();
 }
@@ -722,6 +728,13 @@ function checkUnresolved(): void {
 function drawCentre(): void {
   if (!viewMount) return;
   clear(viewMount);
+
+  // A running (or just-inspected) batch owns the centre until dismissed:
+  // "what is it doing right now" is the question the moment 생성 시작 lands.
+  if (queueView) {
+    drawQueue();
+    return;
+  }
 
   // A card picked in the list: its editor, not the folder it lives in.
   if (selectedFile) {
@@ -1418,9 +1431,104 @@ async function run(): Promise<void> {
     const r = await state.studio.generate(spec());
     jobId = r.jobId;
     notice(`배치를 시작했습니다 (${r.total}장). ${r.estimate.note}`, 'ok');
+    queueView = true;
+    queueJob = null;
+    drawCentre();
     void pollJob();
   } catch (e) {
     notice('시작하지 못했습니다: ' + msg(e), 'err');
+  }
+}
+
+function stateLabel(s: string): string {
+  return ({ pending: '대기', running: '진행 중', done: '완료', partial: '일부 실패',
+            error: '오류', cancelled: '중단됨' } as Record<string, string>)[s] ?? s;
+}
+
+/**
+ * The live queue, in the centre pane - one row per planned image with where
+ * it stands (완료 with its thumbnail, 실패 with the error, 생성 중, 대기).
+ * The 1.5s job poll redraws it; the data is the job payload the backend
+ * already keeps, plus its `current` marker.
+ */
+function drawQueue(): void {
+  if (!viewMount) return;
+  clear(viewMount);
+  const back = el('button', { class: 'ghost tiny', text: '← 나가기' });
+  back.addEventListener('click', () => { queueView = false; drawCentre(); });
+  const j = queueJob;
+  const head = el('div', { class: 'row', style: { marginBottom: '8px' } }, [
+    back,
+    el('span', { class: 'sectiontitle grow', text: '생성 큐' + (j ? ` — ${stateLabel(j.state)}` : '') }),
+  ]);
+  viewMount.appendChild(head);
+  if (!j || !j.payload) {
+    viewMount.appendChild(el('div', { class: 'hint',
+      text: jobId ? '읽는 중입니다…' : '진행 중인 배치가 없습니다.' }));
+    void drawRecentJobs();
+    return;
+  }
+  const p = j.payload;
+  const running = j.state === 'running' || j.state === 'pending';
+  const bits: string[] = [`${p.done}/${p.total}`];
+  if (j.created_at) bits.push(`${Math.max(0, Math.round(Date.now() / 1000 - j.created_at))}s 경과`);
+  const spent = j.result?.anlasSpent;
+  if (typeof spent === 'number') bits.push(`Anlas ${spent} 소모`);
+  head.appendChild(el('span', { class: 'hint', text: bits.join(' · ') }));
+  if (running) {
+    const cancel = el('button', { class: 'ghost tiny', text: '중단' });
+    cancel.addEventListener('click', () => { void state.studio.cancelJob(j.id); });
+    head.appendChild(cancel);
+  }
+  if (j.error) viewMount.appendChild(el('div', { class: 'notice err', text: j.error }));
+
+  const savedBy = new Map<string, string>();
+  for (const path of p.saved ?? []) savedBy.set(path.split('/').pop() ?? path, path);
+  const failedBy = new Map((p.failed ?? []).map((f) => [f.name, f.error] as const));
+  const list = el('div', { class: 'verlist' });
+  for (const it of p.items ?? []) {
+    let badge: HTMLElement;
+    let pic: HTMLElement | null = null;
+    const full = savedBy.get(it.name);
+    if (failedBy.has(it.name)) {
+      badge = el('span', { class: 'badge err', text: '실패' });
+    } else if (full) {
+      badge = el('span', { class: 'badge ok', text: '완료' });
+      pic = workspaceImage(full, it.name, { thumb: true });
+    } else if (running && p.current === it.name) {
+      badge = el('span', { class: 'badge warn', text: '생성 중' });
+    } else {
+      badge = el('span', { class: 'badge', text: running ? '대기' : '—' });
+    }
+    list.appendChild(el('div', { class: 'row', style: { alignItems: 'center', gap: '6px', padding: '3px 0' } }, [
+      badge, pic, el('span', { class: 'grow hint', text: it.name }),
+    ]));
+    const err = failedBy.get(it.name);
+    if (err) list.appendChild(el('div', { class: 'hint err', style: { paddingLeft: '8px' }, text: err }));
+  }
+  viewMount.appendChild(list);
+  if (!running) void drawRecentJobs();
+}
+
+/** The last few batches - a way back into a finished queue's detail. */
+async function drawRecentJobs(): Promise<void> {
+  if (!viewMount) return;
+  const box = el('div', {});
+  viewMount.appendChild(box);
+  let jobs: StudioJob[] = [];
+  try {
+    jobs = (await state.studio.jobs()).jobs ?? [];
+  } catch { return; }
+  if (!box.isConnected || !jobs.length) return;
+  box.appendChild(el('div', { class: 'sectiontitle', style: { marginTop: '12px' }, text: '최근 작업' }));
+  for (const r of jobs) {
+    if (queueJob && r.id === queueJob.id) continue;
+    const row = el('div', { class: 'chatitem', style: { cursor: 'pointer' }, title: '이 배치의 큐 보기' }, [
+      el('span', { class: 'grow', text: `${stateLabel(r.state)} · ${r.payload?.done ?? 0}/${r.payload?.total ?? 0}` }),
+      el('span', { class: 'hint', text: r.id }),
+    ]);
+    row.addEventListener('click', () => { queueJob = r; drawQueue(); });
+    box.appendChild(row);
   }
 }
 
@@ -1440,8 +1548,14 @@ async function pollJob(): Promise<void> {
       return stop();
     }
     const p = j.payload;
+    queueJob = j;
+    if (queueView) drawQueue();
     clear(out);
-    out.appendChild(el('div', { class: 'hint', text: `${j.state} · ${p?.done ?? 0}/${p?.total ?? 0}` }));
+    const line = el('div', { class: 'hint', style: { cursor: 'pointer' },
+                             title: '진행 상황을 중앙에 크게 봅니다',
+                             text: `${stateLabel(j.state)} · ${p?.done ?? 0}/${p?.total ?? 0}` });
+    line.addEventListener('click', () => { queueView = true; drawCentre(); });
+    out.appendChild(line);
     for (const f of (p?.failed ?? []).slice(0, 3)) {
       out.appendChild(el('div', { class: 'hint err', text: `${f.name}: ${f.error}` }));
     }
