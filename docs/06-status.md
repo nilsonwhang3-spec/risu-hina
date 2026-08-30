@@ -10,14 +10,18 @@ The original plan for bot edit mode (M0 measurements, M2 spec) is `~/.claude/pla
 
 **Code state**: master = **0.11.0 (unreleased)** - §1-17 the ONE global file space (the studio-asset
 branch rebased in) **+ §1-18 the tab kit · prompt cards · character reference (measured) · artifacts**
-(the whole of plan risu-elf-1-distributed-magpie; gate ALL GREEN; the minor went up so the version
-gate trips when it ships). Released = **v0.10.0 BETA** (§1-16 the edit-session lifecycle: leave guard, 변경 취소, write verification, snapshot kinds - **schema 13**; the minor went up because `/workspace/dirty`, the reset payloads and the `kind` column mean the backend and the plugin go together, so **the version gate trips**: update the backend, then press `+` on the plugin in RisuAI) (§1-15 any chat opens from the picker · §1-14 the repo goes English · §1-13 3-way merge on reopen · §1-12 an intermediate cache blocking the connection (POST probe, no-store) · §1-11 one web-search tool card with three options · §1-10 built-in search measured, mobile, plugin-reload diagnosis · §1-9 search · §1-8 round 10 · §1-7 · §1-6 · §1-5; the docs/07 planning is still pending) — gate ALL GREEN. 0.7.0 changes the minor, so **the version gate trips**: raise the backend and the plugin on the RisuAI side has to be raised with `+` as well (the header says so).
+(the whole of plan risu-elf-1-distributed-magpie) **+ §1-19 the 26-item studio field report**
+(names as identity · 무제 gone · PNG-embedded recipes · charref fidelity/mode measured · reference
+tabs · request settings · the scoped refresh · the live queue · path copy · the documented spec)
+(gate ALL GREEN; the minor went up so the version gate trips when it ships). **Staged on test-server
+2026-08-30 (backend + dev plugin via `data/plugin/`, space_v1 migration verified 1,868/1,868 with a
+pre-stop backup `data-backup-20260830-space`) - the §1-19 fixes are NOT staged yet.** Released = **v0.10.0 BETA** (§1-16 the edit-session lifecycle: leave guard, 변경 취소, write verification, snapshot kinds - **schema 13**; the minor went up because `/workspace/dirty`, the reset payloads and the `kind` column mean the backend and the plugin go together, so **the version gate trips**: update the backend, then press `+` on the plugin in RisuAI) (§1-15 any chat opens from the picker · §1-14 the repo goes English · §1-13 3-way merge on reopen · §1-12 an intermediate cache blocking the connection (POST probe, no-store) · §1-11 one web-search tool card with three options · §1-10 built-in search measured, mobile, plugin-reload diagnosis · §1-9 search · §1-8 round 10 · §1-7 · §1-6 · §1-5; the docs/07 planning is still pending) — gate ALL GREEN. 0.7.0 changes the minor, so **the version gate trips**: raise the backend and the plugin on the RisuAI side has to be raised with `+` as well (the header says so).
 
 **Deployment state (2026-08-25 21:01 `deploy.ps1`, verified in a new SSH session)**:
 
 | Where | What | Notes |
 |---|---|---|
-| test-server **running** | **0.10.0 BETA** (2026-08-30, `/update/apply` from the release (after a staging round of the same code by scp) -> new SSH session `/health` 0.10.0 `agentReady:true` `codexEnabled:true`, 12 workspaces; schema 13 backfill verified live (chat auto 9, card auto 2 / user 1); `data-backup-20260830` was taken with the service stopped before the schema migration. The user still has to press `+` on the plugin - the minor went up, so the version gate holds the panel until then). That update overwrote the 2026-08-29 asset-studio staging (scp of `app/*.py` + seeds + a dev plugin build into `data/plugin/`, unreleased) — the studio code lives only on this branch again, while that machine’s `data/studio` (characters/ included) is still on disk. 0.9.6 was (2026-08-29, `/update/apply` → new SSH session `/health` 0.9.6 `agentReady:true` `codexEnabled:true`, 10 workspaces intact). 0.9.5 was (2026-08-29, `/update/apply` → `/health` 0.9.5 `agentReady:true`). 0.8.3 was (evening of 2026-08-28, `/update/apply` → `/health` 0.8.3 `agentReady:true`; the user's setting, which had been `provider=native`, was migrated to **mode=native** — measured remotely via `/websearch/test`: on the general agent glm-5.3-flash@ollama.com, **the Ollama cloud web_search API in 1.4 s**, a result list (including the release page body), `nativeShape=ollama` remembered). 0.8.2 was (2026-08-28, `/update/apply` → `/health` 0.8.2; confirmed `native` added to the `/websearch` provider list). 0.8.1 was (2026-08-27 23:20, `/update/apply`; `/websearch` duckduckgo and the search test OK, 9 skills seeded). 0.8.0 was (22:05). 0.7.2 was (21:45; skill default migration, POST blob verified). 0.7.1 was (21:08, the same way; `/config/test` `ok:true toolCalls:1`, hook skill seeding confirmed). 0.7.0 was (2026-08-27 20:33 — I ran `curl -X POST /update/apply` over loopback via ssh → the updater fetched the GitHub asset, installed it and restarted NSSM; new session `/health` 0.7.0 `agentReady:true`; the user only has to press `+` on the plugin in RisuAI). Before that, 0.5.2 — clean install at `D:\code\risu-hina`, **NSSM service `RisuHina`** (`cmd.exe /c start.bat 6020`, Automatic, the same way as ActiveRecall and risuai). On the night of 2026-08-26, over ssh: removed the damaged `pyserver\python` → unpacked the 0.5.2 zip over the folder (keeping `data/`) → `nssm stop/start` → confirmed `/health` 0.5.2 `agentReady:true` | Old data at `D:\code\risu-elf-backup\data` (**not migrated** — to move it, stop the service first; the first startup adopts `risuelf.db→risuhina.db`) |
+| test-server **running** | **0.11.0 (unreleased, STAGED 2026-08-30)** — scp of `app/*.py` + seeds + tools + the dev plugin bundle into `data/plugin/` (served at `/plugin.js`); service stopped, `data` backed up to `data-backup-20260830-space` (11,263 files), then the space_v1 boot migration verified: manifest 1,868 moves = the pre-inventory exactly, 0 left in the old workspaces, 34 original/ files untouched, Korean bot folders intact on disk, `/health` 0.11.0 + space path, `/diag migrated:true`, `/studio/status charref:true`. Trap found: remote `pyserver\tools` was a 20KB FILE from the 2026-08-29 staging (scp'd without the dir) — deleted, mkdir, re-sent. The user installs the 0.11.0 dev plugin once from the backend's `/plugin.js` (the `+` check reads the committed 0.10.0 bundle). Previously: **0.10.0 BETA** (2026-08-30, `/update/apply` from the release (after a staging round of the same code by scp) -> new SSH session `/health` 0.10.0 `agentReady:true` `codexEnabled:true`, 12 workspaces; schema 13 backfill verified live (chat auto 9, card auto 2 / user 1); `data-backup-20260830` was taken with the service stopped before the schema migration. The user still has to press `+` on the plugin - the minor went up, so the version gate holds the panel until then). That update overwrote the 2026-08-29 asset-studio staging (scp of `app/*.py` + seeds + a dev plugin build into `data/plugin/`, unreleased) — the studio code lives only on this branch again, while that machine’s `data/studio` (characters/ included) is still on disk. 0.9.6 was (2026-08-29, `/update/apply` → new SSH session `/health` 0.9.6 `agentReady:true` `codexEnabled:true`, 10 workspaces intact). 0.9.5 was (2026-08-29, `/update/apply` → `/health` 0.9.5 `agentReady:true`). 0.8.3 was (evening of 2026-08-28, `/update/apply` → `/health` 0.8.3 `agentReady:true`; the user's setting, which had been `provider=native`, was migrated to **mode=native** — measured remotely via `/websearch/test`: on the general agent glm-5.3-flash@ollama.com, **the Ollama cloud web_search API in 1.4 s**, a result list (including the release page body), `nativeShape=ollama` remembered). 0.8.2 was (2026-08-28, `/update/apply` → `/health` 0.8.2; confirmed `native` added to the `/websearch` provider list). 0.8.1 was (2026-08-27 23:20, `/update/apply`; `/websearch` duckduckgo and the search test OK, 9 skills seeded). 0.8.0 was (22:05). 0.7.2 was (21:45; skill default migration, POST blob verified). 0.7.1 was (21:08, the same way; `/config/test` `ok:true toolCalls:1`, hook skill seeding confirmed). 0.7.0 was (2026-08-27 20:33 — I ran `curl -X POST /update/apply` over loopback via ssh → the updater fetched the GitHub asset, installed it and restarted NSSM; new session `/health` 0.7.0 `agentReady:true`; the user only has to press `+` on the plugin in RisuAI). Before that, 0.5.2 — clean install at `D:\code\risu-hina`, **NSSM service `RisuHina`** (`cmd.exe /c start.bat 6020`, Automatic, the same way as ActiveRecall and risuai). On the night of 2026-08-26, over ssh: removed the damaged `pyserver\python` → unpacked the 0.5.2 zip over the folder (keeping `data/`) → `nssm stop/start` → confirmed `/health` 0.5.2 `agentReady:true` | Old data at `D:\code\risu-elf-backup\data` (**not migrated** — to move it, stop the service first; the first startup adopts `risuelf.db→risuhina.db`) |
 | test-server config | `pocketrisu.savePath = D:\code\risu-nodeonly\Risuai-NodeOnly\save` → `/diag` `fastPath:true, serverWrite:true` | Reads the PocketRisu on the same PC directly through SQLite |
 | GitHub releases | **v0.9.6 · BETA Latest** (2026-08-29, commit `1abd018` — plugin-only change; the backend moved by its version number alone, so the patch level does not trip the gate and `+` on the plugin is enough) · v0.9.5 (2026-08-29, commit `cc7f403`) · v0.9.4 · v0.9.3 · v0.9.2 · v0.9.1 · v0.9.0 · v0.8.4 · v0.8.3 (2026-08-28, commit `32dca6e`) · v0.8.2 (commit `28a2073`) · v0.8.1 (2026-08-27 23:19) · v0.8.0 · v0.7.2 · v0.7.1 · v0.7.0 (2026-08-27 20:32, 4 assets, done by me directly with `gh release create` — it went through even in auto mode; the notes go in the scratchpad because `tools/bundle.py` empties `release/`) · v0.6.2 · v0.6.1 · v0.6.0 · v0.5.2 · … · v0.1.0 | `gh release create` is blocked by the auto-mode classifier — in manual permission mode I run it myself (0.3.1, 0.3.2). test-server has 0.3.2 deployed and verified, and the raw URL is 0.3.2 too |
 | Plugin installed in RisuAI | **0.3.1 has to be reinstalled by hand once** — the installed copy's `//@update-url` is a release URL with no CORS, so `+` never appears (docs/04 B.4) | After that it is the raw URL, so `+` appears |
@@ -28,6 +32,57 @@ gate trips when it ships). Released = **v0.10.0 BETA** (§1-16 the edit-session 
 `https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js`, and made `tools/bundle.py` write that file into the repository (included in the release commit). In the backend code only VERSION changed.
 
 → **First thing to do**: the user reinstalls `plugin/Risu.Hina.Plugin.js` into RisuAI **by hand, once** (the installed 0.1.0's update-url cannot be read because of CORS) → check that `+` appears from the next release on → verify M2 in real use (§5-2).
+
+## 1-19. 2026-08-30 - 0.11.0 (unreleased, continued): the first studio field report - 26 items
+
+The user staged 0.11.0 on test-server (see §0's table) and used the studio for real; 26 items of
+feedback came back. Nine commits (P1-P9), each gate-green, all on master, still 0.11.0 unreleased:
+
+- **P1 names are the identity**: a new card asks for its name first and the name IS the filename
+  (timestamp slugs gone); renaming a card renames its file/folder via `/files/move`; the fragment
+  table registers front-matter names (weakest key - path and stem always win) so `<이름>` keeps
+  resolving after a rename; the fragment listing shows the name; scene presets get a structured
+  editor (name + scene rows, raw JSON one click away). Creating a character writes its folder up
+  front, which also fixed the blank new-character form being wiped by any refresh.
+- **P2 filenames without 무제**: empty template fields are dropped with their delimiter instead of
+  being padded with 무제; the outfit field is gone (user: a sim bot is not one character - the
+  캐릭터명 box stays manual, never derived from cards); the default parse is a token rule anchored
+  on the stamp ([character-][emotion-]stamp-n) that still reads legacy three-token names.
+- **P3 the png carries its own recipe**: no more .json sidecar per image - the request record is a
+  `hina-params` tEXt chunk (base64 JSON after IHDR, zlib.crc32 by hand, NAIS3's own trick);
+  `nai.recipe()` reads it back as `hina`. Legacy sidecars stay on disk (user decision).
+- **P4 probe**: `--fidelity` / `--charref-mode` on the charref probe, run live (5 Anlas):
+  `director_reference_secondary_strength_values=[0.4]` -> 200 and the Comment echoes it (it was
+  null without the field), base_caption "character" accepted. Cross-checked with NAIS3's captured
+  web payloads (fidelity rides as secondary = 1 - fidelity; the 캐릭터/캐릭터&스타일 mode is the
+  base_caption). docs/09 §7d updated.
+- **P5 references and request settings**: charref entries are {file, strength .6, fidelity .6,
+  mode 'character'} (description gone); a card's charref/vibe are TABS with a stored refMode -
+  the two never ride together (an old preset keeps whichever list it has); picked images upload
+  immediately; the bucket fit letterboxes on black; position folds under 고급; quality tags / UC
+  preset merged as TEXT with the flags as metadata (NAIS3 capture); defaults steps 28,
+  cfg_rescale 0.4, quality OFF, UC Heavy; the gen card grew a folded persistent 요청 설정
+  (sampler/schedule/UC/quality included) and the reference notice counts charrefs too.
+- **P6 the tab stops re-reading the world**: re-reads only on tab re-entry or a filesRev change
+  (one checkbox used to cost 7-9 requests and a full rebuild); a toggle is one meta write + an
+  in-memory row; `GET /files?prefix=` walks one subtree; migrate_characters once per process;
+  studio writes finally bump filesRev (files tab freshness); the four card sections fold
+  (persisted); checkboxes get one global rule instead of text-field styling.
+- **P7 a live queue in the centre**: one row per planned image (완료+thumbnail / 실패+error /
+  생성 중 via the worker's new `current` marker / 대기), progress, elapsed, Anlas on finish,
+  중단, and a 최근 작업 list riding the previously-unused id-less `GET /studio/job`.
+- **P8 files**: 경로 복사 buttons (crumb, preview, settings 파일 공간); the grid toggle looks at
+  the whole subtree and folder cells preview their first nested image.
+- **P9 agent**: the panel says "챗 탭에서 챗을 고르면…" instead of surfacing `chatKey is
+  required`; studio_plan/generate docstrings document every accepted spec field (inline scenes,
+  scenePreset+only, styles[], template, useReference, costs); cards resolve by display name in
+  specs (exact match, ambiguity refused with candidates); the temp-preset rule lands in the
+  instructions and the seeded skill (key rotated to _v2): one-off batches use inline scenes,
+  repeatable ad-hoc specs go to `studio/.studio/adhoc/`, never into studio/scenes/.
+
+Verified beyond the gate: headless-Chrome CDP probe at 390px (device metrics override on the
+harness `/app` page) - docW=390 with the studio tab, the unfolded list, 요청 설정 open, the queue
+view, the character editor (both reference tabs present), and the files tab.
 
 ## 1-18. 2026-08-30 - 0.11.0 (unreleased, continued): the tab kit, prompt cards, artifacts
 
