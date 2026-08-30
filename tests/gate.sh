@@ -39,6 +39,8 @@ run "studio scope isolation" "$PY" tests/test_studio.py
 # The global space: upload targets, per-bot cleanup, and searches that must
 # state what they clipped.
 run "global file space" "$PY" tests/test_files.py
+# Side events (artifact / images) and the artifact writer's file rules.
+run "stream side events" "$PY" tests/test_stream_events.py
 # Real model, real tool loop. Skips itself when no credentials are configured,
 # so the gate stays runnable offline.
 run "agent end-to-end (real model)" "$PY" tests/test_agent.py

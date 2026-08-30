@@ -459,6 +459,27 @@ def write_out(char_key: str, filename: str, text: str) -> str:
     return str(path)
 
 
+def write_artifact(char_key: str, title: str, text: str) -> str:
+    """An artifact the agent wants shown: a file first, an event second.
+
+    It lands under the bot's own deliverables (hina/<봇>/out/artifacts/) so it
+    survives the session, shows in the files tab, and is the user's to manage.
+    The slug is the title; a taken name counts up rather than overwriting -
+    two artifacts titled 비교 보고서 are two files. Returns the space-relative
+    path the stream event (and the viewer) uses.
+    """
+    slug = _FOLDER_BAD.sub("", title).strip().strip(".").replace(" ", "-")[:60] or "artifact"
+    base = hina_dir(char_key) / "out" / "artifacts"
+    base.mkdir(parents=True, exist_ok=True)
+    path = base / f"{slug}.md"
+    n = 2
+    while path.exists():
+        path = base / f"{slug}-{n}.md"
+        n += 1
+    _write(path, text)
+    return path.relative_to(space_root()).as_posix()
+
+
 def destroy(char_key: str) -> None:
     shutil.rmtree(root(char_key), ignore_errors=True)
     db.execute("DELETE FROM characters WHERE char_key = ?", (char_key,))

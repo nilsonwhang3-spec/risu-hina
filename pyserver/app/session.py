@@ -13,6 +13,7 @@ multi-minute run to finish.
 from __future__ import annotations
 
 import json
+import threading
 import uuid
 from typing import Any, AsyncGenerator
 
@@ -261,6 +262,34 @@ def neutralise_thinking(history: list, model: Any) -> list:
 # older plugin, not an error. The studio is the third screen (agent.screen_gate).
 SCREEN_MODES = ("chat", "bot", "studio")
 
+# --- side events ----------------------------------------------------------------
+#
+# Tools that want to say something structured to the panel - an artifact to
+# show, images to strip in - cannot reach the NDJSON stream themselves: they
+# run inside pydantic-ai, and _translate only sees the library's events. So
+# they push here, keyed by session, and run() drains the queue after every
+# translated event (landing the line right after its toolResult) and once
+# more before done. The wire vocabulary stays exactly:
+#   start | text | tool | toolResult | artifact | images | done | error
+
+_EXTRA: dict[str, list[dict]] = {}
+_EXTRA_LOCK = threading.Lock()
+
+
+def push_stream_event(session_id: str | None, obj: dict) -> None:
+    """Queue one side event for the running turn. A missing session id means
+    there is no stream to land on; the push is dropped rather than raised -
+    the tool's text return still says what happened."""
+    if not session_id:
+        return
+    with _EXTRA_LOCK:
+        _EXTRA.setdefault(session_id, []).append(obj)
+
+
+def _drain_extra(session_id: str) -> list[dict]:
+    with _EXTRA_LOCK:
+        return _EXTRA.pop(session_id, [])
+
 
 async def run(session_id: str, prompt: str, mode: str = "") -> AsyncGenerator[str, None]:
     """Drive one agent turn, yielding NDJSON lines. `mode` is the half of the
@@ -306,7 +335,13 @@ async def run(session_id: str, prompt: str, mode: str = "") -> AsyncGenerator[st
             async for ev in events:
                 for line in _translate(ev, text_acc):
                     yield line
+                # Side events land right after the event whose tool pushed
+                # them - "showed it mid-turn" is the whole point.
+                for extra in _drain_extra(session_id):
+                    yield _line(extra)
             result = events.result
+        for extra in _drain_extra(session_id):
+            yield _line(extra)
 
         usage = result.usage
         cost, counts = _price(model_name, usage)
@@ -354,6 +389,8 @@ async def run(session_id: str, prompt: str, mode: str = "") -> AsyncGenerator[st
     finally:
         # "이번 턴 항상 허용" and any unanswered prompt end with the turn.
         permits.end_turn(session_id)
+        # A side event pushed after the last drain has no stream to land on.
+        _drain_extra(session_id)
 
 
 def _save_partial_history(session_id: str, prompt: str, partial: str, why: str) -> None:

@@ -249,6 +249,10 @@ export const TOOL_GLYPH: Record<string, [string, string]> = {
   list_files: ['📁', '파일 목록'],
   read_file: ['📄', '파일 읽기'],
   web_search: ['🌐', '웹 검색'],
+  show_artifact: ['📊', '아티팩트'],
+  find_files: ['🔍', '파일 찾기'],
+  search_files: ['🔍', '내용 검색'],
+  studio_meta: ['🎛', '카드'],
 };
 
 /** A paper plane, for the send button. */

@@ -15,6 +15,7 @@ returns first lines, not bodies, on purpose.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -95,6 +96,9 @@ INSTRUCTIONS = """\
 - `system/`  이 봇의 원본 스냅샷(카드·원본 전사). **읽기 전용이다.**
 - **파일 위치를 모르면 find_files(이름 글롭) / search_files(내용 검색) 로 먼저 찾아라.**
   결과 끝의 "총 N개 중 M개 표시"가 전부가 아니라고 말하면, 잘렸다고 사용자에게도 말해라.
+- **긴 결과물은 show_artifact 로 패널 중앙에 카드로 보여라.** 보고서·비교표·정리본을
+  채팅에 통째로 붙여넣지 마라 — content 에 마크다운(이미지는 `![설명](전역 경로)`)을 주면
+  파일로 저장되고 바로 표시된다. 이미 만든 파일·이미지는 path 로 보여준다.
 - 다른 봇의 폴더도 보인다. 읽는 것은 자유지만, **요청 없이 다른 봇의 폴더를 수정하지 마라.**
 - **에셋(이미지)도 다룬다.** list_assets 로 목록을 보고 fetch_assets 로 scratch/ 에 꺼내
   run_python(PIL) 으로 가공한 뒤, 결과 PNG 를 propose_asset_add / propose_asset_replace 로
@@ -1476,6 +1480,37 @@ def build() -> Agent[Deps]:
             return files.agent_read(scope, rel)
         except files.FileError as e:
             return str(e)
+
+    IMAGE_EXT = re.compile(r"\.(png|jpe?g|gif|webp|avif|bmp)$", re.I)
+
+    @agent.tool
+    def show_artifact(ctx: RunContext[Deps], title: str, content: str = "", path: str = "") -> str:
+        """결과물(보고서·비교표·정리본·이미지)을 패널 중앙에 카드로 표시한다.
+
+        긴 결과를 채팅에 통째로 붙여넣지 말고 이걸 써라. content 에 마크다운을
+        주면 hina/<봇>/out/artifacts/ 에 파일로 저장하고 바로 표시한다. 이미 있는
+        파일을 보여주려면 path 에 전역 경로를 준다 (md·txt·이미지).
+        마크다운 안 `![설명](전역 경로)` 는 이미지로 렌더링된다. HTML 은
+        렌더링되지 않는다 - 마크다운으로 써라. 표시는 승인 없이 즉시 된다
+        (읽기 전용이므로); 닫아도 파일 탭에서 다시 열 수 있다.
+        """
+        title = (title or "").strip() or "아티팩트"
+        if content:
+            rel = workspace.write_artifact(ctx.deps.char_key, title, content)
+        else:
+            rel = (path or "").replace("\\", "/").strip("/")
+            try:
+                p = files._resolve(files.SPACE, rel)
+            except files.FileError as e:
+                return str(e)
+            if not p.is_file():
+                return f"파일이 없습니다: {rel}"
+        kind = "image" if IMAGE_EXT.search(rel) else ("markdown" if rel.endswith((".md", ".markdown")) else "text")
+        from . import session as session_mod
+        session_mod.push_stream_event(ctx.deps.session_id,
+                                      {"type": "artifact", "path": rel, "title": title[:120], "kind": kind})
+        return (f"아티팩트 «{title}» 를 패널에 표시했습니다 ({rel}). "
+                "닫아도 파일 탭에서 다시 열 수 있습니다.")
 
     @agent.tool
     def find_files(ctx: RunContext[Deps], pattern: str, base: str = "", limit: int = 200) -> str:
