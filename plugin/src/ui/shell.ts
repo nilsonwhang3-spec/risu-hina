@@ -9,6 +9,7 @@ import { describeSync, syncBusy } from '../assets';
 import { injectStyles } from './styles';
 import { state } from '../state';
 import { transport, clientLog } from '../transport';
+import { remountArtifact } from './artifact';
 import { renderChatsTab } from './tab-chats';
 import { renderEditorTab } from './tab-editor';
 import { renderFilesTab } from './tab-files';
@@ -232,6 +233,8 @@ function renderActive(): void {
   else if (active === 'files') renderFilesTab(node);
   else if (active === 'studio') renderStudioTab(node);
   else renderSettingsTab(node);
+  // The artifact viewer follows the active tab's centre pane, like the agent.
+  remountArtifact();
 }
 
 /**

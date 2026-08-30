@@ -19,8 +19,11 @@ import { el, clear, popover, TOOL_GLYPH, PAPER_PLANE, ICON } from './dom';
 import { state, type StagedEdit, type AgentSessionInfo, type PendingAction } from '../state';
 import { renderMarkdown } from './markdown';
 import { workspaceImage } from './blobimg';
+import { showArtifact } from './artifact';
 import { clientLog } from '../transport';
 import { currentMode } from './shell';
+
+const IMG_RE = /\.(png|jpe?g|gif|webp|avif|bmp)$/i;
 
 export interface AgentPanelHooks {
   /** Show staged proposals as previews in the turn list. */
@@ -319,13 +322,33 @@ export class AgentPanel {
       const fresh = files.filter((f) => !before.has(f.path));
       if (!fresh.length) return;
       state.touchFiles(fresh.map((f) => f.path));
-      for (const f of fresh) {
+      // Artifacts already announced themselves with a chip; images read as a
+      // strip; the rest stay one outline line each.
+      const plain = fresh.filter((f) => !f.path.includes('/out/artifacts/') && !IMG_RE.test(f.name));
+      const pics = fresh.filter((f) => !f.path.includes('/out/artifacts/') && IMG_RE.test(f.name));
+      for (const f of plain) {
         const line = el('button', { class: 'outline', title: '파일 탭에서 엽니다' }, [
           el('span', { class: 'glyph', text: '📄' }),
           el('span', { class: 'grow', text: `${f.name} · ${fmtSize(f.size)} — out/ 에 저장했습니다. 파일 탭에서 열기 →` }),
         ]);
         line.addEventListener('click', () => state.requestOpenFile(f.path));
         this.log.appendChild(line);
+      }
+      if (pics.length) {
+        const strip = el('div', { class: 'imgstrip' });
+        for (const f of pics.slice(0, 8)) {
+          const thumb = workspaceImage(f.path, f.name, { thumb: true });
+          thumb.style.cursor = 'pointer';
+          thumb.addEventListener('click', () =>
+            showArtifact({ path: f.path, title: f.name, kind: 'image' }, { flipMobile: true }));
+          strip.appendChild(thumb);
+        }
+        if (pics.length > 8) {
+          const more = el('button', { class: 'ghost tiny', text: `외 ${pics.length - 8}장` });
+          more.addEventListener('click', () => state.requestOpenFile(pics[0].path));
+          strip.appendChild(more);
+        }
+        this.log.appendChild(strip);
       }
       this.scroll();
     } catch { /* the panel already reports connection failure */ }
@@ -700,6 +723,46 @@ export class AgentPanel {
             const detail = name === 'load_skill' ? skillArg(e.args) : '';
             traceSegment().push(name, detail);
             setThinking(true, (TOOL_GLYPH[name]?.[1] ?? name) + (detail ? `: ${detail}` : '') + ' 중입니다…');
+            this.scroll();
+            break;
+          }
+          case 'artifact': {
+            // The tool already wrote the file; this shows it in the centre
+            // pane mid-turn, and leaves a chip that reopens it after 닫기.
+            const spec = { path: String(e.path ?? ''), title: String(e.title ?? ''),
+                           kind: e.kind as 'markdown' | 'image' | 'text' | undefined };
+            if (!spec.path) break;
+            showArtifact(spec);
+            const chip = el('button', { class: 'outline artifactchip', title: '중앙 패널에 다시 엽니다' }, [
+              el('span', { class: 'glyph', text: '📊' }),
+              el('span', { class: 'grow', text: `${spec.title || spec.path} — 중앙 패널에 표시했습니다` }),
+            ]);
+            chip.addEventListener('click', () => showArtifact(spec, { flipMobile: true }));
+            this.log.appendChild(chip);
+            this.scroll();
+            break;
+          }
+          case 'images': {
+            // Fresh images from a tool (a batch's saved paths): a thumbnail
+            // strip in place, each opening large in the artifact viewer.
+            const paths = Array.isArray(e.paths) ? (e.paths as string[]).filter(Boolean) : [];
+            if (!paths.length) break;
+            const strip = el('div', { class: 'imgstrip' });
+            for (const p of paths.slice(0, 8)) {
+              const name = p.slice(p.lastIndexOf('/') + 1);
+              const thumb = workspaceImage(p, name, { thumb: true });
+              thumb.style.cursor = 'pointer';
+              thumb.addEventListener('click', () =>
+                showArtifact({ path: p, title: name, kind: 'image' }, { flipMobile: true }));
+              strip.appendChild(thumb);
+            }
+            if (paths.length > 8) {
+              const more = el('button', { class: 'ghost tiny', text: `외 ${paths.length - 8}장` });
+              more.addEventListener('click', () => state.requestOpenFile(paths[0]));
+              strip.appendChild(more);
+            }
+            if (e.label) strip.appendChild(el('div', { class: 'hint', text: String(e.label) }));
+            this.log.appendChild(strip);
             this.scroll();
             break;
           }

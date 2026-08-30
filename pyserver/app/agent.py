@@ -142,6 +142,10 @@ _SCREEN_LABEL = {"chat": "챗 편집", "bot": "봇 편집", "studio": "에셋 �
 # is for, so these pass the screen gate there (the approval queue still runs).
 _STUDIO_KINDS = frozenset({"host_asset_add", "host_asset_replace"})
 
+# Batches whose saved images were already shown as a strip: a job is polled
+# many times, and the pictures should appear once.
+_IMAGES_SENT: set[str] = set()
+
 
 def _screen_refusal(mode: str, need: str) -> str | None:
     """A refusal when the tool's material belongs to a screen the user is not on."""
@@ -1023,6 +1027,15 @@ def build() -> Agent[Deps]:
         if not j:
             return f"그런 배치가 없습니다: {job_id}"
         p = j.get("payload") or {}
+        # A finished batch shows its images in the panel once, as a strip -
+        # the same poll that tells the model tells the user.
+        if j.get("state") in ("done", "partial") and p.get("saved") and job_id not in _IMAGES_SENT:
+            _IMAGES_SENT.add(job_id)
+            from . import session as session_mod
+            session_mod.push_stream_event(ctx.deps.session_id, {
+                "type": "images", "paths": list(p["saved"])[-24:],
+                "label": f"배치 {job_id} — {len(p['saved'])}장",
+            })
         out = [f"{j['state']}  {p.get('done')}/{p.get('total')}"]
         if j.get("error"):
             out.append("오류: " + str(j["error"]))

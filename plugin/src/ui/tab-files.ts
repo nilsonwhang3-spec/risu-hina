@@ -28,7 +28,9 @@
 import { el, clear, armed, popover, refocusSearch, type ArmedControl } from './dom';
 import { state, type FileArea, type FileListing, type WorkspaceFile } from '../state';
 import { makeTab, type NoticeKind, type TabUi } from './kit';
-import { blobUrl } from './blobimg';
+import { blobUrl, workspaceImage } from './blobimg';
+import { renderMarkdown } from './markdown';
+import { showArtifact } from './artifact';
 import { clientLog } from '../transport';
 
 const AREA_LABEL: Record<string, [string, string]> = {
@@ -632,7 +634,18 @@ async function drawPreview(f: WorkspaceFile, n: Folder): Promise<void> {
     const r = await state.readFile(f.path);
     clear(body);
     if (r.truncated) body.appendChild(el('div', { class: 'hint', text: '앞부분만 표시합니다.' }));
-    body.appendChild(el('pre', { class: 'mono filepreview', text: r.content || r.note || '(비어 있습니다)' }));
+    if (/\.(md|markdown)$/i.test(f.name)) {
+      // The same body the artifact viewer shows - rendered, with a way to
+      // open it as the card.
+      const big = el('button', { class: 'ghost tiny', text: '카드로 크게 보기', title: '중앙 패널 카드로 엽니다' });
+      big.addEventListener('click', () =>
+        showArtifact({ path: f.path, title: f.name, kind: 'markdown' }, { flipMobile: true }));
+      body.appendChild(el('div', { class: 'row', style: { marginBottom: '6px' } }, [big]));
+      body.appendChild(el('div', { class: 'filepreview' },
+        [renderMarkdown(r.content, { image: (p, a) => workspaceImage(p, a) })]));
+    } else {
+      body.appendChild(el('pre', { class: 'mono filepreview', text: r.content || r.note || '(비어 있습니다)' }));
+    }
   } catch (e) {
     clear(body);
     body.appendChild(el('div', { class: 'notice err', text: msg(e) }));

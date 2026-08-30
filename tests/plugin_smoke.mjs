@@ -1063,6 +1063,31 @@ console.log('\ntest_workspace_files');
   const rows2 = [...document.querySelectorAll('.panel.active .filelist .frow:not(.head)')];
   rows2[0]?.dispatchEvent(new window.Event('click', { bubbles: true }));
   await settle(150);
+
+  // The markdown preview renders (not a <pre>), and can open as the card.
+  rows2[0]?.dispatchEvent(new window.Event('dblclick', { bubbles: true }));
+  await settle(900);
+  check('a markdown preview renders as markdown',
+        !!document.querySelector('.panel.active .filepreview .md-h, .panel.active .filepreview .md-p'),
+        (document.querySelector('.panel.active .left')?.textContent || '').slice(0, 120));
+  clickButton(document.querySelector('.panel.active .left'), '카드로 크게 보기');
+  await settle(700);
+  const av = document.querySelector('.panel.active .split > .left .artifactview');
+  check('카드로 크게 보기 opens the artifact viewer', !!av);
+  check('the viewer names the file', /draft-summary\.md/.test(av?.textContent || ''),
+        (av?.textContent || '').slice(0, 120));
+  // The viewer follows the active tab's centre.
+  clickById(document, 'tab-lore');
+  await settle(700);
+  check('the artifact viewer follows a tab switch',
+        !!document.querySelector('.panel.active .artifactview'));
+  clickButton(document.querySelector('.panel.active .artifactview'), '닫기');
+  await settle(200);
+  check('닫기 removes the viewer', !document.querySelector('.artifactview'));
+  clickById(document, 'tab-files');
+  await settle(500);
+  clickButton(document.querySelector('.panel.active .left'), '목록으로');
+  await settle(200);
   rows[0]?.dispatchEvent(new window.Event('dblclick', { bubbles: true }));
   await settle(900);
   check('double-click opens the file in the middle pane',
@@ -2165,6 +2190,64 @@ console.log('\ntest_markdown_workspace_images');
         /\[이미지: 밖\]/.test(bubble?.textContent || ''), (bubble?.textContent || '').slice(0, 200));
   check('an escaping path degrades too',
         /\[이미지: 탈출\]/.test(bubble?.textContent || ''), (bubble?.textContent || '').slice(0, 200));
+}
+
+console.log('\ntest_artifact_and_images_events');
+{
+  // The two side events: an artifact opens the centre card mid-turn and
+  // leaves a reopen chip; an images event renders a thumbnail strip. The
+  // artifact file is real; only /chat is faked.
+  const auth = { Authorization: 'Bearer plugin-smoke-token', 'Content-Type': 'application/json' };
+  await fetch(backend.url + '/files/upload', {
+    method: 'POST', headers: auth,
+    body: JSON.stringify({ name: '보고서.md', dir: 'projects/그림들',
+      text: '# 스모크 보고서' + String.fromCharCode(10) + '본문 한 줄' }),
+  });
+  const orig = globalThis.fetch;
+  globalThis.fetch = async (url, opts) => {
+    const u = String(url);
+    if (u.endsWith('/session') && opts?.body) {
+      return new Response(JSON.stringify({ sessionId: 'smoke-artifact' }), {
+        status: 200, headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    if (u.endsWith('/chat') && opts?.body) {
+      const lines = [
+        JSON.stringify({ type: 'artifact', path: 'projects/그림들/보고서.md', title: '스모크 보고서', kind: 'markdown' }),
+        JSON.stringify({ type: 'images', paths: ['projects/그림들/마크그림.png'], label: '배치 스모크' }),
+        JSON.stringify({ type: 'done' }),
+      ].join(String.fromCharCode(10)) + String.fromCharCode(10);
+      return new Response(lines, { status: 200, headers: { 'Content-Type': 'application/x-ndjson' } });
+    }
+    return orig(url, opts);
+  };
+  try {
+    const input = document.querySelector('.panel.active .agentinput');
+    input.value = '아티팩트 확인';
+    document.querySelector('.panel.active .sendbtn')
+      ?.dispatchEvent(new window.Event('click', { bubbles: true }));
+    await settle(1400);
+  } finally {
+    globalThis.fetch = orig;
+  }
+  const av = document.querySelector('.panel.active .split > .left .artifactview');
+  check('an artifact event opens the centre card', !!av,
+        (document.querySelector('.panel.active .left')?.textContent || '').slice(0, 120));
+  check('with the title and the rendered body',
+        /스모크 보고서/.test(av?.textContent || '') && !!av?.querySelector('.md-h, .md-p'),
+        (av?.textContent || '').slice(0, 160));
+  const chip = [...document.querySelectorAll('.panel.active .artifactchip')].pop();
+  check('the log keeps a reopen chip', !!chip && /스모크 보고서/.test(chip.textContent || ''));
+  check('an images event renders a thumbnail strip',
+        !!document.querySelector('.panel.active .imgstrip .wsimg'),
+        (document.querySelector('.panel.active .agentlog')?.textContent || '').slice(-200));
+  clickButton(document.querySelector('.panel.active .artifactview'), '닫기');
+  await settle(200);
+  chip?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(700);
+  check('the chip reopens the artifact', !!document.querySelector('.panel.active .artifactview'));
+  clickButton(document.querySelector('.panel.active .artifactview'), '닫기');
+  await settle(200);
 }
 
 console.log('\ntest_studio_selector');

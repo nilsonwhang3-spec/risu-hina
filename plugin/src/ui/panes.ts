@@ -114,3 +114,11 @@ export function showMobileAgent(): void {
   try { localStorage.setItem(VIEW_KEY, mobileView); } catch { /* fine */ }
   syncAll();
 }
+
+/** Show the centre side on a phone (the user tapped an artifact chip). */
+export function showMobileCentre(): void {
+  if (mobileView === 'centre') return;
+  mobileView = 'centre';
+  try { localStorage.setItem(VIEW_KEY, mobileView); } catch { /* fine */ }
+  syncAll();
+}

@@ -432,6 +432,26 @@ button.iconbtn:hover:not(:disabled) { background: rgba(128,128,128,.14); }
 /* Space images in markdown (agent bubbles, viewers). */
 .wsimg img { max-width: 100%; border-radius: 5px; margin: 4px 0; }
 .wsimg.thumb img { max-height: 180px; }
+
+/* The artifact viewer: an overlay over the CENTRE pane only - the left
+   column and the agent stay usable while it is open. */
+.split > .left { position: relative; }
+.artifactview {
+  position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column;
+  background: var(--darkbg, #171717); border-left: 1px solid var(--borderc, #444);
+}
+.artifacthead {
+  display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+  border-bottom: 1px solid var(--borderc, #444);
+}
+.artifacttitle { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.artifactbody { flex: 1; overflow: auto; padding: 12px 16px; }
+.artifactbody img { max-width: 100%; }
+.artifactchip { text-align: left; }
+
+/* A strip of fresh images in the agent log. */
+.imgstrip { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0; }
+.imgstrip .wsimg img { max-height: 72px; border-radius: 6px; margin: 0; }
 .turn textarea { min-height: 90px; }
 .diff-del { background: rgba(239, 68, 68, .22); text-decoration: line-through; }
 .diff-ins { background: rgba(16, 185, 129, .22); }
