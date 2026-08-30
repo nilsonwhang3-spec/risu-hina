@@ -633,7 +633,7 @@ export function copyToClipboard(text: string): boolean {
   ta.style.position = 'fixed';
   ta.style.left = '-9999px';
   document.body.appendChild(ta);
-  ta.select();
+  try { ta.select(); } catch { /* bare DOM impls (tests) have no selection */ }
   let ok = false;
   try { ok = document.execCommand('copy'); } catch { ok = false; }
   ta.remove();

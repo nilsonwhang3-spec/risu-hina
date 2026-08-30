@@ -14,6 +14,7 @@ import { buildSkillsCard } from './skills';
 import { agentPanel } from './agentpane';
 import { buildDebugCard, buildUpdateCard } from './debugpanel';
 import { transport } from '../transport';
+import { copyToClipboard } from '../host';
 
 let aboutMount: HTMLElement | null = null;
 
@@ -190,11 +191,17 @@ function buildSpaceCard(): HTMLElement {
   });
   refreshers.push(load);
   void load();
+  const copy = el('button', { class: 'ghost tiny', text: '복사', title: '경로를 클립보드로' });
+  copy.addEventListener('click', () => {
+    const v = path.value.trim() || state.health?.space || '';
+    copy.textContent = v && copyToClipboard(v) ? '복사됨' : '복사';
+    setTimeout(() => { copy.textContent = '복사'; }, 1500);
+  });
   return el('div', { class: 'card' }, [
     el('h2', { text: '파일 공간' }),
     el('div', { class: 'hint', text: '모든 봇이 공유하는 하나의 파일 공간입니다: projects(직접 관리) · studio(이미지 라이브러리) · hina(AI 작업).' }),
     el('label', { class: 'field' }, [el('span', { text: '경로' }), path]),
-    el('div', { class: 'row' }, [save]),
+    el('div', { class: 'row' }, [save, copy]),
     out,
   ]);
 }

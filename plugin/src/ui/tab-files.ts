@@ -31,6 +31,7 @@ import { makeTab, type NoticeKind, type TabUi } from './kit';
 import { blobUrl, workspaceImage } from './blobimg';
 import { renderMarkdown } from './markdown';
 import { showArtifact } from './artifact';
+import { copyToClipboard } from '../host';
 import { clientLog } from '../transport';
 
 const AREA_LABEL: Record<string, [string, string]> = {
@@ -382,7 +383,7 @@ function drawCentre(): void {
 
   const writable = !n.virtual && USER_AREAS.has(n.area.area);
   const deletable = n.area.deletable;
-  const hasImages = n.files.some((f) => IMAGE_RE.test(f.name));
+  const hasImages = hasImagesDeep(n);
   const [, why] = AREA_LABEL[n.area.area] ?? ['', ''];
 
   // --- bar ---------------------------------------------------------------------
@@ -417,6 +418,7 @@ function drawCentre(): void {
 
   viewMount.appendChild(el('div', { class: 'filebar' }, [
     el('span', { class: 'filecrumb', text: n.virtual ? '임시 문서' : n.path + '/' }),
+    n.virtual ? null : copyPathButton(n.path),
     el('span', { class: 'hint', text: `${n.files.length}개` + (n.kids.length ? ` · 폴더 ${n.kids.length}` : '') }),
     el('span', { class: 'spacer' }),
     hasImages ? viewBtn : null,
@@ -543,6 +545,24 @@ function listRow(e: { path: string; name: string; file?: WorkspaceFile; node?: F
   return row;
 }
 
+/** Whether this folder or anything under it holds an image - the grid toggle
+ * used to look only at the folder's own files, so a tree of subfolders full
+ * of assets offered no 미리보기 at all. */
+function hasImagesDeep(node: Folder): boolean {
+  if (node.files.some((f) => IMAGE_RE.test(f.name))) return true;
+  return node.kids.some(hasImagesDeep);
+}
+
+function firstImage(node: Folder): WorkspaceFile | null {
+  const own = node.files.find((f) => IMAGE_RE.test(f.name));
+  if (own) return own;
+  for (const k of node.kids) {
+    const hit = firstImage(k);
+    if (hit) return hit;
+  }
+  return null;
+}
+
 function gridCell(e: { path: string; name: string; file?: WorkspaceFile; node?: Folder }, order: { path: string }[], n: Folder): HTMLElement {
   const pic = el('div', { class: 'assetpic' });
   const cell = el('div', { class: 'fcell' + (selection.has(e.path) ? ' sel' : ''), title: e.path }, [
@@ -550,8 +570,12 @@ function gridCell(e: { path: string; name: string; file?: WorkspaceFile; node?: 
     el('div', { class: 'fname', text: e.name }),
     el('div', { class: 'fsize', text: e.file ? fmtSize(e.file.size) : `폴더 · ${countFiles(e.node!)}개` }),
   ]);
-  if (e.node) pic.appendChild(el('div', { class: 'assettype', text: '📁' }));
-  else if (e.file && IMAGE_RE.test(e.name)) void loadThumb(e.file, pic);
+  if (e.node) {
+    // A folder previews its first image, with the folder mark in the corner.
+    const peek = firstImage(e.node);
+    if (peek) void loadThumb(peek, pic);
+    pic.appendChild(el('div', { class: peek ? 'foldertag' : 'assettype', text: '📁' }));
+  } else if (e.file && IMAGE_RE.test(e.name)) void loadThumb(e.file, pic);
   else pic.appendChild(el('div', { class: 'assettype', text: (e.name.split('.').pop() || '?').toUpperCase().slice(0, 5) }));
   cell.addEventListener('click', (ev) => { pick(e.path, ev as MouseEvent, order); drawCentre(); focusList(); });
   cell.addEventListener('dblclick', () => openEntry(e.path, n));
@@ -560,6 +584,18 @@ function gridCell(e: { path: string; name: string; file?: WorkspaceFile; node?: 
 
 function focusList(): void {
   (viewMount?.querySelector('.filelist') as HTMLElement | null)?.focus();
+}
+
+/** 경로 복사 - the space path is what gets pasted into 히나 requests and
+ * external tools, and selecting it by hand from a crumb was the complaint. */
+function copyPathButton(path: string): HTMLElement {
+  const b = el('button', { class: 'ghost tiny', text: '📋', title: '경로 복사' });
+  b.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    b.textContent = copyToClipboard(path) ? '복사됨' : '실패';
+    setTimeout(() => { b.textContent = '📋'; }, 1500);
+  });
+  return b;
 }
 
 // Thumbnails ride the shared blob pipeline (blobimg.ts: 6 in flight, LRU).
@@ -600,6 +636,7 @@ async function drawPreview(f: WorkspaceFile, n: Folder): Promise<void> {
   const head = el('div', { class: 'filebar' }, [
     back,
     el('span', { class: 'filecrumb', text: f.path }),
+    copyPathButton(f.path),
     el('span', { class: 'hint', text: `${fmtSize(f.size)} · ${fmtWhen(f.modified)} · ${AREA_LABEL[n.area.area]?.[0] ?? n.area.area}` }),
     el('span', { class: 'spacer' }),
     save, out,

@@ -2571,6 +2571,41 @@ console.log('\ntest_studio_selector');
         (document.querySelector('.panel.active')?.textContent || '').includes('선택 1'));
 }
 
+console.log('\ntest_files_copy_and_previews');
+{
+  // The path crumb gets a copy button, and 미리보기 works from any level:
+  // the studio root's images all live in subfolders, which used to mean no
+  // grid toggle and no thumbnails there at all.
+  clickById(document, 'tab-files');
+  await settle(900);
+  // The selector test uploaded straight to the backend (no rev bump), so
+  // refresh the listing the way a person would.
+  clickButton(document.querySelector('.panel.active'), '새로고침');
+  await settle(900);
+  const row = [...document.querySelectorAll('.panel.active .treerow')]
+    .find((r) => /스튜디오/.test(r.textContent || ''));
+  check('the studio area is in the tree', !!row);
+  row?.querySelector('.treebranch')?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(500);
+  const bar = document.querySelector('.panel.active .filebar');
+  const copy = [...(bar?.querySelectorAll('button') ?? [])].find((b) => b.title === '경로 복사');
+  check('the path has a copy button', !!copy, bar?.textContent || '');
+  copy?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(100);
+  check('copying acknowledges', copy?.textContent === '복사됨', copy?.textContent || '');
+  const auth2 = { Authorization: 'Bearer plugin-smoke-token' };
+  const ls = await (await fetch(backend.url + '/files?prefix=studio/images', { headers: auth2 })).json();
+  const gridToggle = findButton(bar, '미리보기') || findButton(bar, '목록 보기');
+  check('a folder whose images are all nested still offers the grid', !!gridToggle,
+        'bar=' + (bar?.textContent || '') + ' | backend files='
+        + JSON.stringify((ls.areas?.[0]?.files ?? []).map((f) => f.path)).slice(0, 200));
+  if (findButton(bar, '미리보기')) clickButton(bar, '미리보기');
+  await settle(700);
+  check('folder cells preview their first nested image',
+        !!document.querySelector('.panel.active .fcell .foldertag'),
+        (document.querySelector('.panel.active .filelist')?.textContent || '').slice(0, 160));
+}
+
 console.log('\ntest_no_character_selected');
 host.selectNone();
 clickById(document, 'tab-chats');
