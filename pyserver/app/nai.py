@@ -22,6 +22,7 @@ Three things are deliberately **not** hardcoded:
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import io
 import json
@@ -411,6 +412,14 @@ def recipe(png: bytes) -> dict:
                     out["parameters"] = json.loads(text)
                 except ValueError:
                     out["comment"] = text
+            elif name == "hina-params":
+                # Our own record (studio.png_embed): what was asked for and
+                # which library files it came from. base64(JSON) because tEXt
+                # is Latin-1 only.
+                try:
+                    out["hina"] = json.loads(base64.b64decode(text))
+                except (ValueError, binascii.Error):
+                    out[name.lower()] = text
             else:
                 out[name.lower()] = text
         off += 12 + length

@@ -389,6 +389,26 @@ check("the inpainting model is derived, not guessed",
 check("and an inpainting id is left alone",
       nai.inpaint_model("nai-diffusion-3-inpainting") == "nai-diffusion-3-inpainting")
 
+print("\ntest_png_carries_its_recipe")
+# save_image embeds what we asked for as a hina-params tEXt chunk instead of
+# writing a .json sidecar beside every image (which doubled every folder).
+saved = studio.save_image("images/기록", "임베드-happy-20260829-120000-1.png",
+                          mask, {"scene": "happy", "prompt": "웃음", "model": "테스트"})
+rec_dir = studio.root() / "images" / "기록"
+check("no sidecar is written", list(rec_dir.glob("*.json")) == [],
+      str(list(rec_dir.glob("*.json"))))
+emb = (rec_dir / "임베드-happy-20260829-120000-1.png").read_bytes()
+check("the file is still a PNG", emb[:8] == b"\x89PNG\r\n\x1a\n")
+check("and still reads as an image", nai.png_size(emb) == (64, 48), str(nai.png_size(emb)))
+rec = nai.recipe(emb)
+check("the record reads back from the PNG itself",
+      rec.get("hina", {}).get("prompt") == "웃음" and rec["hina"]["scene"] == "happy",
+      json.dumps(rec, ensure_ascii=False)[:160])
+check("with the filename and a timestamp riding along",
+      rec["hina"]["file"] == "임베드-happy-20260829-120000-1.png" and rec["hina"]["createdAt"] > 0)
+check("a non-PNG passes through png_embed untouched",
+      studio.png_embed(b"not a png", {"x": 1}) == b"not a png")
+
 print("\ntest_duplicates_and_emotion_check")
 dup = studio.root() / "images" / "중복"
 dup.mkdir(parents=True, exist_ok=True)

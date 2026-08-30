@@ -25,11 +25,13 @@ regex and why Hina has to be able to rename in bulk.
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import re
 import shutil
 import time
+import zlib
 from pathlib import Path
 from typing import Any
 
@@ -705,13 +707,35 @@ def naming_from_bot(char_key: str) -> dict:
 
 # --- writing a result ---------------------------------------------------------
 
-def save_image(folder: str, name: str, png: bytes, sidecar: dict) -> dict:
-    """The PNG plus its sidecar.
+PARAMS_KEYWORD = "hina-params"
 
-    The sidecar is an **index, not the truth**: a NovelAI PNG already carries
-    every applied parameter in its own metadata (docs/09 §5b). This records
-    what we asked for and which library files it came from, which the PNG
-    cannot know.
+
+def png_embed(png: bytes, payload: dict, keyword: str = PARAMS_KEYWORD) -> bytes:
+    """One tEXt chunk right after IHDR, value = base64 of the payload JSON.
+
+    tEXt is Latin-1 only, hence the base64 (same trick as NAIS3's
+    nais3-params). Anything that is not a PNG comes back unchanged: the image
+    is the deliverable and the metadata is best-effort.
+    """
+    if png[:8] != b"\x89PNG\r\n\x1a\n" or len(png) < 33:
+        return png
+    # IHDR is required to be the first chunk; splice in right behind it.
+    ihdr_end = 8 + 12 + int.from_bytes(png[8:12], "big")
+    data = (keyword.encode("latin-1") + b"\x00"
+            + base64.b64encode(json.dumps(payload, ensure_ascii=False).encode("utf-8")))
+    chunk = len(data).to_bytes(4, "big") + b"tEXt" + data \
+        + zlib.crc32(b"tEXt" + data).to_bytes(4, "big")
+    return png[:ihdr_end] + chunk + png[ihdr_end:]
+
+
+def save_image(folder: str, name: str, png: bytes, sidecar: dict) -> dict:
+    """The PNG, carrying its own record.
+
+    What we asked for and which library files it came from is embedded as a
+    `hina-params` tEXt chunk - the PNG's own NovelAI `Comment` (docs/09 §5b)
+    stays the truth about applied parameters; ours is the index. It used to be
+    a .json sidecar beside every image, which doubled every folder; legacy
+    sidecars are left alone (user decision) and nothing ever read them back.
     """
     # Anywhere in the space the user may write (3-4): studio/images is the
     # default, projects/<봇>/… is legitimate, the machine areas are not.
@@ -721,14 +745,11 @@ def save_image(folder: str, name: str, png: bytes, sidecar: dict) -> dict:
         raise StudioError(f"저장할 수 없는 영역입니다: {folder}")
     dest = files._resolve(SCOPE, folder) / name
     dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_bytes(png)
-    side = dest.with_suffix(".json")
-    side.write_text(json.dumps({**sidecar, "file": name,
-                                "createdAt": time.time()},
-                               ensure_ascii=False, indent=2), encoding="utf-8")
+    body = png_embed(png, {**sidecar, "file": name, "createdAt": time.time()})
+    dest.write_bytes(body)
     rel = dest.relative_to(files._root(SCOPE)).as_posix()
-    log.info("studio image %s (%d bytes)", rel, len(png))
-    return {"path": rel, "size": len(png)}
+    log.info("studio image %s (%d bytes)", rel, len(body))
+    return {"path": rel, "size": len(body)}
 
 
 # --- one batch ----------------------------------------------------------------
