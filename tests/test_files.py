@@ -66,7 +66,8 @@ for area in ("projects", "studio", "hina", ".hina"):
 up = files.upload(files.SPACE, "참고.md", text="# 자료", into="")
 check("an upload lands in projects/ by default", up["path"].startswith("projects/"), up["path"])
 up2 = files.upload(files.SPACE, "조각.md", text="x", into="studio/fragments")
-check("an explicit studio folder is honoured", up2["path"] == "studio/fragments/조각.md", up2["path"])
+check("an explicit studio folder is honoured (and canonicalised)",
+      up2["path"] == "studio/config/fragments/조각.md", up2["path"])
 raises("the machine area refuses uploads", files.upload, files.SPACE, "x.md", text="x", into=".hina")
 raises("escapes are refused on the resolved path", files._resolve, files.SPACE, "../risuhina.db")
 raises("a space path cannot climb into a bot workspace",
@@ -118,24 +119,38 @@ r = files.search_names(files.SPACE, "projects/*/메모/*.md")
 check("a slashed pattern matches the whole path", r["total"] == 7, str(r["total"]))
 
 print("\ntest_listing_prefix")
-(space / "studio" / "images" / "셋").mkdir(parents=True, exist_ok=True)
-(space / "studio" / "images" / "셋" / "한장.png").write_bytes(b"\x89PNG\r\n\x1a\npad")
-(space / "studio" / "styles").mkdir(parents=True, exist_ok=True)
-(space / "studio" / "styles" / "무관.md").write_text("x", encoding="utf-8")
+(space / "studio" / "output" / "셋").mkdir(parents=True, exist_ok=True)
+(space / "studio" / "output" / "셋" / "한장.png").write_bytes(b"\x89PNG\r\n\x1a\npad")
+(space / "studio" / "config" / "styles").mkdir(parents=True, exist_ok=True)
+(space / "studio" / "config" / "styles" / "무관.md").write_text("x", encoding="utf-8")
 full = files.listing(files.SPACE)
+# The flat-era prefix still slices the moved tree (studio_canon at the door).
 sliced = files.listing(files.SPACE, "studio/images")
 check("a prefix keeps only its area", [a["area"] for a in sliced["areas"]] == ["studio"],
       str([a["area"] for a in sliced["areas"]]))
 sfiles = sliced["areas"][0]["files"]
 check("and only the subtree's files, root-relative paths intact",
-      all(f["path"].startswith("studio/images/") for f in sfiles)
-      and any(f["path"] == "studio/images/셋/한장.png" for f in sfiles), str(sfiles)[:200])
+      all(f["path"].startswith("studio/output/") for f in sfiles)
+      and any(f["path"] == "studio/output/셋/한장.png" for f in sfiles), str(sfiles)[:200])
 check("the style file is out of the slice",
       not any("styles" in f["path"] for f in sfiles))
 check("the unfiltered listing still carries everything",
       any(a["area"] == "projects" for a in full["areas"]))
 check("subtree dirs stay root-relative",
-      "studio/images/셋" in sliced["areas"][0]["dirs"], str(sliced["areas"][0]["dirs"])[:160])
+      "studio/output/셋" in sliced["areas"][0]["dirs"], str(sliced["areas"][0]["dirs"])[:160])
+
+print("\ntest_copy")
+r = files.copy(files.SPACE, "studio/output/셋/한장.png", "studio/output/셋")
+check("a paste into the same folder counts up",
+      r["to"] == "studio/output/셋/한장 (2).png"
+      and (space / "studio" / "output" / "셋" / "한장 (2).png").is_file(), str(r))
+r2 = files.copy(files.SPACE, "studio/output/셋", "projects")
+check("a folder copies whole", r2["to"] == "projects/셋"
+      and (space / "projects" / "셋" / "한장.png").is_file(), str(r2))
+raises("a folder cannot be copied into itself",
+       files.copy, files.SPACE, "studio/output/셋", "studio/output/셋")
+raises("the machine area refuses copies",
+       files.copy, files.SPACE, "studio/output/셋/한장.png", ".hina")
 
 print("\ntest_search_content")
 (base / "긴자료.md").write_text("\n".join(f"줄 {i}: 미도리" for i in range(9)), encoding="utf-8")

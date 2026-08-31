@@ -1040,14 +1040,15 @@ console.log('\ntest_workspace_files');
   const dlBtn = findButton(document.querySelector('.panel.active .filebar'), '내려받기');
   check('and can be downloaded', !!dlBtn && !dlBtn.disabled);
 
-  // 삭제 is the shared two-step confirm now: first click arms, the second
-  // fires. Arm and let it lapse rather than deleting the fixture.
+  // 삭제 is an icon with the shared two-step confirm: first click arms (the
+  // icon becomes the red confirm text), the second fires. Arm and let it
+  // lapse rather than deleting the fixture.
   const delBar = [...document.querySelectorAll('.panel.active .filebar button')]
-    .find((b) => /^삭제/.test(b.textContent || ''));
-  check('the delete button is armed on the bar', !!delBar && !delBar.disabled);
+    .find((b) => /^삭제/.test(b.getAttribute('title') || ''));
+  check('the delete button is on the bar (icon + title)', !!delBar && !delBar.disabled);
   delBar?.dispatchEvent(new window.Event('click', { bubbles: true }));
   await settle(100);
-  check('the first click arms it, not deletes', /정말 지울까요/.test(delBar?.textContent || ''),
+  check('the first click arms it, not deletes', /정말/.test(delBar?.textContent || ''),
         delBar?.textContent);
   // Escape clears the selection (and the redraw disarms the button).
   const esc = new window.Event('keydown', { bubbles: true });
@@ -1055,9 +1056,10 @@ console.log('\ntest_workspace_files');
   document.querySelector('.panel.active .filelist')?.dispatchEvent(esc);
   await settle(150);
 
-  // The kit's folder filter narrows the visible rows.
-  const fileSearch = document.querySelector('.tabslot .searchbox input');
-  check('the files tab has a filter box on the menu line', !!fileSearch);
+  // The folder filter is a fold-out icon on the filebar now (item 14) - the
+  // input is in the DOM whether or not it is unfolded.
+  const fileSearch = document.querySelector('.panel.active .filebar .fsearch input');
+  check('the files tab has a fold-out filter on the filebar', !!fileSearch);
   if (fileSearch) {
     fileSearch.value = 'draft';
     fileSearch.dispatchEvent(new window.Event('input', { bubbles: true }));
@@ -2861,11 +2863,16 @@ console.log('\ntest_files_copy_and_previews');
   check('copying acknowledges', copy?.textContent === '복사됨', copy?.textContent || '');
   const auth2 = { Authorization: 'Bearer plugin-smoke-token' };
   const ls = await (await fetch(backend.url + '/files?prefix=studio/images', { headers: auth2 })).json();
-  const gridToggle = findButton(bar, '미리보기') || findButton(bar, '목록 보기');
-  check('a folder whose images are all nested still offers the grid', !!gridToggle,
+  // The view toggle is an icon; its title says which way it flips.
+  const gridToggle = () => [...(bar?.querySelectorAll('button') ?? [])]
+    .find((b) => /^미리보기|^목록 보기/.test(b.getAttribute('title') || ''));
+  check('a folder whose images are all nested still offers the grid', !!gridToggle(),
         'bar=' + (bar?.textContent || '') + ' | backend files='
         + JSON.stringify((ls.areas?.[0]?.files ?? []).map((f) => f.path)).slice(0, 200));
-  if (findButton(bar, '미리보기')) clickButton(bar, '미리보기');
+  const gt = gridToggle();
+  if (gt && /^미리보기/.test(gt.getAttribute('title') || '')) {
+    gt.dispatchEvent(new window.Event('click', { bubbles: true }));
+  }
   await settle(700);
   check('folder cells preview their first nested image',
         !!document.querySelector('.panel.active .fcell .foldertag'),

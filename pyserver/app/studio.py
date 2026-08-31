@@ -4,10 +4,10 @@ Storage is the `studio/` folder of the ONE global space (`files.py`, scope
 SPACE); NovelAI is `nai.py` (written from `docs/09`). What is left is the part
 in between, and it is mostly about **names**:
 
-    styles/      a style, as front matter + ## positive / ## negative
-    characters/  a character: prompt, negative, reference image, position
-    fragments/   named pieces, spliced in by `<조각>`, `<폴더/조각>` or `<컬렉션.키>`
-    scenes/      NAIS3 scene presets, read verbatim. One scene is one image in
+    config/styles/      a style, as front matter + ## positive / ## negative
+    config/characters/  a character: prompt, negative, reference image, position
+    config/fragments/   named pieces, spliced in by `<조각>`, `<폴더/조각>` or `<컬렉션.키>`
+    config/scenes/      NAIS3 scene presets, read verbatim. One scene is one image in
                  a batch and carries its own prompt, negative and size. **This
                  is how expression sheets are made** - an ordinary generation
                  per scene with the character and seed held fixed - not with
@@ -15,7 +15,9 @@ in between, and it is mostly about **names**:
                  infers the emotion from a finished image rather than stating
                  it. Generation parameters (model, steps, CFG) are not in here:
                  they are the run, not the scene, and live on the panel.
-    images/      the output, plus a `.json` sidecar per file
+    config/.studio/     our machinery (selection files, vibe cache, adhoc specs)
+    output/      the results (was images/; the material and the results were
+                 one flat level, which is what the config/output split fixes)
 
 A generated file's name is what the comparison selector later parses back into
 character and emotion, so the naming template and that parser are one decision,
@@ -49,24 +51,39 @@ BASE = "studio"
 
 
 def _rel(rel: str) -> str:
-    """A studio path in its space-rooted form.
+    """A studio path in its space-rooted, two-tier form.
 
     The studio used to be its own root, so bare area paths ("images/고르기")
     still arrive from old sidecars and Hina's habits; they gain the studio/
-    prefix. Anything else (projects/…, hina/…) passes through untouched - a
-    generated image may legitimately land outside the library (3-4).
+    prefix, and `workspace.studio_canon` folds the flat-era layout into
+    config/ + output/. Anything else (projects/…, hina/…) passes through
+    untouched - a generated image may legitimately land outside the library.
     """
     r = (rel or "").replace("\\", "/").strip("/")
     head = r.split("/", 1)[0]
     if head in AREAS or head == ".studio":
-        return f"{BASE}/{r}"
+        r = f"{BASE}/{r}"
+    if r == BASE or r.startswith(BASE + "/"):
+        return workspace.studio_canon(r)
     return r
 
 
 def _unstudio(rel: str) -> str:
-    """The bare library-relative form, for slugs that predate the space."""
+    """The flat-era library-relative form - the slug key, so selection files
+    written before the config/output split (and before the space) resolve."""
     r = _rel(rel)
-    return r[len(BASE) + 1:] if r.startswith(BASE + "/") else r
+    if r.startswith(BASE + "/"):
+        r = r[len(BASE) + 1:]
+    if r == "output" or r.startswith("output/"):
+        r = "images" + r[len("output"):]
+    elif r.startswith("config/"):
+        r = r[len("config/"):]
+    return r
+
+
+def config_dir(area: str) -> Path:
+    """One material area's directory (config/<area>)."""
+    return root() / "config" / area
 
 # `skills.py` already parses this shape; the studio reuses it rather than
 # inventing a second front-matter dialect.
@@ -292,7 +309,7 @@ def migrate_characters() -> int:
     and nothing is deleted until its replacement is written. The vibe cache
     keys by content hash, so moving the png invalidates nothing.
     """
-    base = root() / "characters"
+    base = config_dir("characters")
     if not base.is_dir():
         return 0
     moved = 0
@@ -348,7 +365,7 @@ def _character_listing() -> list[dict]:
     if not _MIGRATED_ONCE:
         migrate_characters()
         _MIGRATED_ONCE = True
-    base = root() / "characters"
+    base = config_dir("characters")
     out: list[dict] = []
     if not base.is_dir():
         return out
@@ -387,7 +404,7 @@ def listing(area: str) -> list[dict]:
     if area == "characters":
         return _character_listing()
     out = []
-    base = root() / area
+    base = root() / "output" if area == "images" else config_dir(area)
     if not base.is_dir():
         return out
     for p in sorted(base.rglob("*")):
@@ -484,7 +501,7 @@ def fragments() -> FragmentTable:
     values joined, so `<컬렉션>` means "all of it") and each key on its own.
     """
     table = FragmentTable()
-    base = root() / "fragments"
+    base = config_dir("fragments")
     if not base.is_dir():
         return table
     for p in sorted(base.rglob("*")):
@@ -794,9 +811,9 @@ def save_image(folder: str, name: str, png: bytes, sidecar: dict) -> dict:
     a .json sidecar beside every image, which doubled every folder; legacy
     sidecars are left alone (user decision) and nothing ever read them back.
     """
-    # Anywhere in the space the user may write (3-4): studio/images is the
+    # Anywhere in the space the user may write (3-4): studio/output is the
     # default, projects/<봇>/… is legitimate, the machine areas are not.
-    folder = _rel((folder or "").strip("/")) or f"{BASE}/images"
+    folder = _rel((folder or "").strip("/")) or f"{BASE}/output"
     area = folder.split("/", 1)[0]
     if not files.areas_for(SCOPE).get(area, (False, False))[0]:
         raise StudioError(f"저장할 수 없는 영역입니다: {folder}")
@@ -1071,9 +1088,9 @@ def inpaint(rel: str, boxes: list[dict], prompt: str, *, model: str,
 # `delete` is what to throw away - a file can legitimately be none of them,
 # which is why one radio would not do.
 
-SELECTION_DIR = ".studio/selection"
-GROUP_DIR = ".studio/groups"
-NAMING_DIR = ".studio/naming"
+SELECTION_DIR = "config/.studio/selection"
+GROUP_DIR = "config/.studio/groups"
+NAMING_DIR = "config/.studio/naming"
 
 
 def _slug(folder: str) -> str:

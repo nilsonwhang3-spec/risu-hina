@@ -561,6 +561,12 @@ class StudioFiles {
     return await transport.post('/studio/model-check', { model });
   }
 
+  /** Danbooru-tag autocomplete, proxied from NovelAI's suggest endpoint.
+   * Empty when no token is configured - the editor types fine without it. */
+  async suggestTags(q: string, model = ''): Promise<{ tags: { tag: string; count: number }[] }> {
+    return await transport.get('/studio/tag-suggest', { q, model });
+  }
+
   async items(area: string): Promise<{ area: string; items: StudioItem[] }> {
     return await transport.get('/studio/list', { area });
   }
@@ -1477,6 +1483,12 @@ class AppState {
 
   async moveFile(from: string, to: string): Promise<{ to: string }> {
     return await transport.post('/files/move', { from, to });
+  }
+
+  /** Server-side copy (the context menu's 복사/붙여넣기). A taken name counts
+   * up to `이름 (2)` on the backend rather than refusing. */
+  async copyFile(from: string, to: string): Promise<{ to: string }> {
+    return await transport.post('/files/copy', { from, to });
   }
 
   async deleteFile(path: string): Promise<void> {

@@ -23,11 +23,12 @@ import PIL  # 없으면 ModuleNotFoundError
 
 ## 스튜디오 라이브러리 경로
 
-스튜디오는 **전역 공간의 `studio/` 폴더다.** 샌드박스 루트가 전역 공간이므로
-`run_python` 에서 바로 읽고 쓴다 — 옮기는 절차는 없다. cwd 는 `hina/<봇이름>/` 이니
-라이브러리는 `../../studio/images/…` 처럼 위로 올라가거나, `find_files("*.png",
-base="studio/images")` 로 찾은 전역 경로를 `os.environ["RISUHINA_WORKSPACE"]` 에
-이어 붙여 절대 경로로 연다.
+스튜디오는 **전역 공간의 `studio/` 폴더다** — 재료는 `studio/config/`
+(styles·characters·fragments·scenes), 생성 결과는 `studio/output/`. 샌드박스
+루트가 전역 공간이므로 `run_python` 에서 바로 읽고 쓴다 — 옮기는 절차는 없다.
+cwd 는 `hina/<봇이름>/` 이니 라이브러리는 `../../studio/output/…` 처럼 위로
+올라가거나, `find_files("*.png", base="studio/output")` 로 찾은 전역 경로를
+`os.environ["RISUHINA_WORKSPACE"]` 에 이어 붙여 절대 경로로 연다.
 
 ## 배치 스펙 — 임시 프리셋은 프리셋 목록에 만들지 않는다
 
@@ -39,13 +40,13 @@ base="studio/images")` 로 찾은 전역 경로를 `os.environ["RISUHINA_WORKSPA
 {"styles": ["오피스 카운셀링"], "characters": ["베아트리체"],
  "scenes": [{"name": "angry", "prompt": "angry, frown"},
             {"name": "childlike_whining", "prompt": "childlike, whining"}],
- "characterName": "베아트리체", "folder": "studio/images/베아트리체"}
+ "characterName": "베아트리체", "folder": "studio/output/베아트리체"}
 ```
 
 기존 프리셋의 일부만 쓸 때는 `"scenePreset": "<프리셋>", "only": ["angry"]`.
-반복해서 쓸 임시 스펙만 파일로 남기되, **`studio/scenes/` 가 아니라
-`studio/.studio/adhoc/` 에** write_file 로 쓴다 — 라이브러리 목록에 잡히지 않는
-내부 영역이라 사용자의 프리셋 목록을 어지럽히지 않는다.
+반복해서 쓸 임시 스펙만 파일로 남기되, **`studio/config/scenes/` 가 아니라
+`studio/config/.studio/adhoc/` 에** write_file 로 쓴다 — 라이브러리 목록에 잡히지
+않는 내부 영역이라 사용자의 프리셋 목록을 어지럽히지 않는다.
 
 ## 자주 쓰는 조리법
 
@@ -54,7 +55,7 @@ import os
 from PIL import Image
 
 SPACE = os.environ["RISUHINA_WORKSPACE"]
-im = Image.open(os.path.join(SPACE, "studio", "images", "원본.png")).convert("RGBA")
+im = Image.open(os.path.join(SPACE, "studio", "output", "원본.png")).convert("RGBA")
 
 # 1) 긴 변 기준 축소 — 비율 유지
 im.thumbnail((1024, 1024), Image.LANCZOS)

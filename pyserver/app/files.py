@@ -96,6 +96,11 @@ def _resolve(scope: str, rel: str) -> Path:
     root = _root(scope)
     if not rel or rel in (".", "/"):
         return root
+    # Flat-era studio paths (studio/styles, studio/images, studio/.studio)
+    # keep resolving after the config/output split - old sidecars, saved
+    # specs and the agent's habits all still say them.
+    if scope == SPACE:
+        rel = workspace.studio_canon(rel)
     candidate = (root / rel.replace("\\", "/").lstrip("/")).resolve()
     # Compare resolved paths: `../` and symlinks both disappear into the
     # resolution, so checking the raw string would miss them.
@@ -114,6 +119,8 @@ def listing(scope: str, prefix: str = "") -> dict:
     """
     root = _root(scope)
     prefix = (prefix or "").strip("/").replace("\\", "/")
+    if scope == SPACE and prefix:
+        prefix = workspace.studio_canon(prefix)
     areas = []
     total = 0
     for name, (deletable, cleanable) in areas_for(scope).items():
@@ -476,6 +483,40 @@ def move(scope: str, src_rel: str, dst_rel: str) -> dict:
     shutil.move(str(src), str(dst))
     out = dst.relative_to(_root(scope)).as_posix()
     log.info("move scope=%s %s -> %s", scope, src_rel, out)
+    return {"from": src_rel, "to": out}
+
+
+def copy(scope: str, src_rel: str, dst_rel: str) -> dict:
+    """Copy a file or folder within the deletable areas (the context menu's
+    복사/붙여넣기). `dst_rel` may be a folder (the name is kept) or a full new
+    path; a taken name counts up to `이름 (2)` rather than refusing - a paste
+    into the same folder is the common case, and it should just work."""
+    src = _resolve(scope, src_rel)
+    if not src.exists():
+        raise FileError(f"없습니다: {src_rel}")
+    if src == _root(scope):
+        raise FileError("워크스페이스 자체는 복사할 수 없습니다")
+    dst = _resolve(scope, dst_rel)
+    if dst.is_dir():
+        dst = dst / src.name
+    for p in (src, dst):
+        area = _area_of(scope, p)
+        if not areas_for(scope).get(area, (False, False))[0]:
+            raise FileError(f"{area}/ 는 복사할 수 없는 영역입니다")
+    if src.is_dir() and (dst == src or src in dst.parents):
+        raise FileError("폴더를 자기 안으로 복사할 수 없습니다")
+    stem, suffix = (dst.stem, dst.suffix) if src.is_file() else (dst.name, "")
+    n = 2
+    while dst.exists():
+        dst = dst.with_name(f"{stem} ({n}){suffix}")
+        n += 1
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if src.is_dir():
+        shutil.copytree(src, dst)
+    else:
+        shutil.copy2(src, dst)
+    out = dst.relative_to(_root(scope)).as_posix()
+    log.info("copy scope=%s %s -> %s", scope, src_rel, out)
     return {"from": src_rel, "to": out}
 
 

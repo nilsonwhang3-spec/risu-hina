@@ -468,6 +468,13 @@ def _explain(e: Exception) -> str:
         return "모델 쪽에서 요청 한도에 걸렸습니다. 잠시 후 다시 시도해 주세요."
     if "timeout" in low or "timed out" in low:
         return "모델 응답이 시간 안에 오지 않았습니다. 지시를 짧게 나눠 주시거나 다시 시도해 주세요."
+    # httpx's RemoteProtocolError: the peer closed mid-body (an idle keep-alive
+    # the server dropped, a proxy cutting a long stream). Transient in every
+    # observed case - say so instead of quoting the library's sentence.
+    if ("peer closed connection" in low or "incomplete chunked read" in low
+            or "remoteprotocolerror" in raw.lower() or "server disconnected" in low):
+        return ("연결이 응답 도중 끊겼습니다 (일시적인 네트워크/프록시 문제일 가능성이 큽니다). "
+                "같은 지시를 한 번 더 보내 주세요 — 진행하던 내용은 대화 기록에 남아 있습니다.")
     if "not found" in low and "model" in low:
         return "설정된 모델 이름을 찾지 못했습니다. 설정 탭에서 모델명을 확인해 주세요."
     return raw

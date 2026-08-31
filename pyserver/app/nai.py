@@ -103,7 +103,7 @@ DIRECTOR_ACTIONS = ("emotion", "bg-removal", "lineart", "declutter", "colorize",
 # result is cached by (image, model, information_extracted) - all three change
 # the output. Re-encoding one reference across a batch of thirty is thirty
 # times the price of encoding it once.
-VIBE_CACHE_DIR = ".studio/vibe"
+VIBE_CACHE_DIR = "config/.studio/vibe"
 
 
 class NaiError(RuntimeError):
@@ -173,6 +173,36 @@ def _client() -> httpx.Client:
         return _conn
 
 
+def _reset_conn() -> None:
+    global _conn
+    with _conn_lock:
+        if _conn is not None:
+            try:
+                _conn.close()
+            except Exception:  # noqa: BLE001
+                pass
+            _conn = None
+
+
+def _req(method: str, path: str, **kw: Any) -> httpx.Response:
+    """One request, retried once on a torn connection.
+
+    The keep-alive client is the speed win, and its cost is exactly this
+    failure: a connection the server quietly closed while idle raises
+    RemoteProtocolError ("peer closed connection without sending complete
+    message body") on the next use. Nothing usable arrived, so one retry on a
+    fresh connection is safe - and it is the difference between a batch image
+    failing and nobody noticing anything.
+    """
+    try:
+        return _client().request(method, path, **kw)
+    except (httpx.RemoteProtocolError, httpx.ReadError, httpx.ConnectError) as e:
+        log.warn("nai: %s %s tore mid-flight (%s: %s) - retrying once on a fresh connection",
+                 method, path, type(e).__name__, e)
+        _reset_conn()
+        return _client().request(method, path, **kw)
+
+
 def _fail(r: httpx.Response, what: str) -> NaiError:
     """NovelAI's errors are short and worth quoting; a 500 has no body worth
     reading, so say what we asked for instead of pretending it explained."""
@@ -189,7 +219,7 @@ def _fail(r: httpx.Response, what: str) -> NaiError:
 
 def subscription() -> dict:
     """Anlas and the v5 usage meter. Two separate currencies (docs/09 §2)."""
-    r = _client().get("/user/subscription", timeout=QUICK_TIMEOUT)
+    r = _req("GET", "/user/subscription", timeout=QUICK_TIMEOUT)
     if r.status_code >= 300:
         raise _fail(r, "구독 정보를 읽지 못했습니다")
     d = r.json()
@@ -223,8 +253,8 @@ def exists(model: str) -> bool:
     """Does this model id exist? Free, and cannot generate (see NO_GENERATE)."""
     if not model:
         return False
-    r = _client().post("/ai/generate-image", timeout=QUICK_TIMEOUT,
-                       json={"input": "x", "model": model, "parameters": dict(NO_GENERATE)})
+    r = _req("POST", "/ai/generate-image", timeout=QUICK_TIMEOUT,
+             json={"input": "x", "model": model, "parameters": dict(NO_GENERATE)})
     if r.status_code == 200:
         # Would mean the guard stopped working - a 200 here is an image we did
         # not want and may have paid for. Loud, not silent.
@@ -350,10 +380,51 @@ def generate(model: str, prompt: str, negative: str = "",
     # input mirrors v4_prompt AFTER the quality/UC merge - one source of text.
     body = {"input": p["v4_prompt"]["caption"]["base_caption"], "model": model,
             "action": "generate", "parameters": p}
-    r = _client().post("/ai/generate-image", json=body)
+    r = _req("POST", "/ai/generate-image", json=body)
     if r.status_code >= 300:
         raise _fail(r, "생성에 실패했습니다")
     return _unzip(r.content, "생성")
+
+
+# One suggestion query is tiny and the same prefixes repeat while typing, so a
+# small in-process cache keeps the autocomplete from hammering NovelAI.
+_SUGGEST_CACHE: dict[tuple[str, str], list[dict]] = {}
+
+
+def suggest_tags(query: str, model: str = "") -> list[dict]:
+    """Danbooru-tag suggestions from NovelAI's own endpoint.
+
+    `GET /ai/generate-image/suggest-tags?model=…&prompt=…` - the endpoint the
+    NAI web client types against (NAIS3 endpoints.ts names it too). The
+    response shape is treated as data: anything without a `tag` is dropped,
+    unknown fields ride along untouched.
+    """
+    q = (query or "").strip()
+    model = (model or "").strip() or DEFAULT_MODEL
+    if len(q) < 2:
+        return []
+    key = (model, q.lower())
+    hit = _SUGGEST_CACHE.get(key)
+    if hit is not None:
+        return hit
+    r = _req("GET", "/ai/generate-image/suggest-tags",
+             params={"model": model, "prompt": q}, timeout=QUICK_TIMEOUT)
+    if r.status_code >= 300:
+        raise _fail(r, "태그 추천을 받지 못했습니다")
+    try:
+        raw = r.json().get("tags") or []
+    except ValueError:
+        raw = []
+    out: list[dict] = []
+    for t in raw:
+        if isinstance(t, dict) and t.get("tag"):
+            out.append({"tag": str(t["tag"]),
+                        "count": int(t.get("count") or 0),
+                        "confidence": t.get("confidence")})
+    if len(_SUGGEST_CACHE) > 512:
+        _SUGGEST_CACHE.clear()
+    _SUGGEST_CACHE[key] = out
+    return out
 
 
 def generate_stream(model: str, prompt: str, negative: str = "",
@@ -447,7 +518,7 @@ def infill(model: str, png: bytes, mask: bytes, prompt: str, negative: str = "",
     p["add_original_image"] = True
     body = {"input": p["v4_prompt"]["caption"]["base_caption"],
             "model": inpaint_model(model), "action": "infill", "parameters": p}
-    r = _client().post("/ai/generate-image", json=body)
+    r = _req("POST", "/ai/generate-image", json=body)
     if r.status_code >= 300:
         raise _fail(r, "인페인트에 실패했습니다")
     return _unzip(r.content, "인페인트")
@@ -462,7 +533,7 @@ def augment(action: str, model: str, png: bytes, prompt: str = "",
     body = {"req_type": action, "model": model,
             "image": base64.b64encode(png).decode(), "prompt": prompt,
             "width": w, "height": h}
-    r = _client().post("/ai/augment-image", json=body)
+    r = _req("POST", "/ai/augment-image", json=body)
     if r.status_code >= 300:
         raise _fail(r, f"{action} 에 실패했습니다")
     return _unzip(r.content, action)
@@ -497,7 +568,7 @@ def encode_vibe(png: bytes, model: str, information_extracted: float = 1.0,
     cached = (cache_root / VIBE_CACHE_DIR / f"{key}.bin") if cache_root else None
     if cached and cached.is_file():
         return cached.read_bytes(), True
-    r = _client().post("/ai/encode-vibe", json={
+    r = _req("POST", "/ai/encode-vibe", json={
         "model": model,
         "image": base64.b64encode(png).decode(),
         "information_extracted": information_extracted,

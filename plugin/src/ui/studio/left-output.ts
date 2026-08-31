@@ -1,5 +1,5 @@
 /**
- * The left OUTPUT tab: the studio/images tree, rendered by the shared tree
+ * The left OUTPUT tab: the studio/output tree, rendered by the shared tree
  * component so it looks and behaves like the file tab's tree (glyphs,
  * selection highlight, drop outline) instead of a column of bordered buttons.
  */

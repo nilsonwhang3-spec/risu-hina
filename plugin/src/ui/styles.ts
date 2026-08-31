@@ -1202,6 +1202,85 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
 @media (max-width: 900px) {
   .panelrail { display: none !important; }
 }
+
+/* --- context menu (file rows) -------------------------------------------------- */
+.ctxmenu {
+  position: fixed; z-index: 240; min-width: 168px; padding: 4px;
+  background: var(--darkbg, #171b23); border: 1px solid var(--borderc, #2b323f);
+  border-radius: 7px; box-shadow: 0 12px 32px rgba(0,0,0,.5);
+}
+.ctxmenu button {
+  display: block; width: 100%; text-align: left; padding: 5px 10px;
+  border: none; background: transparent; border-radius: 4px; font-size: 12px;
+}
+.ctxmenu button:hover:not(:disabled) { background: rgba(128,128,128,.14); }
+.ctxmenu button.danger { color: #f87171; background: transparent; }
+.ctxmenu button.danger:hover:not(:disabled) { background: rgba(239,68,68,.14); }
+.ctxmenu .ctxsep { height: 1px; background: var(--borderc, #2b323f); margin: 4px 2px; }
+
+/* --- the upload overlay: a fixed card no redraw can eat ------------------------- */
+.uploadpanel {
+  position: fixed; right: 14px; bottom: 14px; z-index: 85;
+  width: min(340px, calc(100vw - 28px)); padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 6px; font-size: 12px;
+  background: var(--darkbg, #171b23); border: 1px solid var(--borderc, #2b323f);
+  border-radius: 9px; box-shadow: 0 12px 32px rgba(0,0,0,.5);
+}
+.uploadpanel .uphead { display: flex; align-items: center; gap: 6px; font-weight: 700; }
+.uploadpanel .uphead .iconbtn { margin-left: auto; padding: 0 6px; }
+.uploadpanel .upline {
+  display: flex; gap: 8px; color: var(--textcolor2, #79839a);
+  white-space: nowrap; overflow: hidden;
+}
+.uploadpanel .upline .grow { overflow: hidden; text-overflow: ellipsis; }
+.uploadpanel .assetbar { max-width: none; height: 6px; margin-top: 0; }
+.uploadpanel .uperr { color: #f87171; white-space: normal; }
+.uploadpanel.done { border-color: rgba(16,185,129,.55); }
+.uploadpanel.failed { border-color: rgba(239,68,68,.6); }
+
+/* --- filebar: icon verbs and the fold-out search -------------------------------- */
+.filebar .iconbtn { padding: 3px 7px; display: inline-flex; align-items: center; }
+.filebar .iconbtn.on { background: rgba(37,99,235,.18); border-radius: 5px; }
+.fsearch { display: inline-flex; align-items: center; gap: 2px; }
+.fsearch input {
+  width: 0; min-width: 0; padding: 3px 0; border-color: transparent;
+  background: transparent; transition: width .15s ease;
+}
+.fsearch.open input {
+  width: 150px; padding: 3px 8px;
+  border-color: var(--borderc, #2b323f); background: var(--darkbg, #171b23);
+}
+
+/* --- syntax tints: the mirror behind a textarea --------------------------------- */
+.hlwrap { position: relative; display: block; }
+.hlwrap > textarea.hl-on { position: relative; z-index: 1; background: transparent; }
+.hlmirror {
+  position: absolute; inset: 0; overflow: hidden; pointer-events: none;
+  color: transparent; white-space: pre-wrap; word-break: break-word;
+  background: var(--darkbg, #171b23); border-radius: 5px;
+}
+.hlmirror span { border-radius: 3px; }
+
+/* --- autocomplete popup ---------------------------------------------------------- */
+.suggestpop {
+  position: fixed; z-index: 260; min-width: 200px; max-width: 300px; overflow: hidden;
+  background: var(--darkbg, #171b23); border: 1px solid var(--borderc, #2b323f);
+  border-radius: 7px; box-shadow: 0 12px 32px rgba(0,0,0,.5);
+}
+.suggestpop button {
+  display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+  border: none; border-radius: 0; background: transparent; padding: 4px 10px;
+  font-family: ui-monospace, Consolas, monospace; font-size: 12px;
+}
+.suggestpop button.on { background: rgba(37,99,235,.2); }
+.suggestpop .cnt { margin-left: auto; color: var(--textcolor2, #79839a); font-size: 10.5px; }
+.suggestpop .frag { color: #5cbe7d; }
+
+/* --- the tab bar's mode chip (봇 편집 / 챗 편집) --------------------------------- */
+.tabs .modetab { align-self: center; margin: 0 4px 0 0; white-space: nowrap; }
+
+/* File rows and grid cells as drop targets for internal drags. */
+.frow.dropping, .fcell.dropping { outline: 2px dashed #7dd3fc; outline-offset: -2px; }
 `;
 
 export function injectStyles(): void {

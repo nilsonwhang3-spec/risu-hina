@@ -4,9 +4,15 @@
  * the raw-text fallback for anything else.
  */
 import { el, clear, armed } from '../dom';
+import { attachHilite } from '../hilite';
 import { state } from '../../state';
-import { S, hub, msg, renameCardFile } from './store';
+import { S, hub, msg, areaOfPath, renameCardFile } from './store';
 import { splitFront, joinFront } from './stylefile';
+
+/** Fragment names for `<` completion, shared by every prompt editor here. */
+function fragNames(): string[] {
+  return (S.cards.fragments ?? []).map((i) => i.name);
+}
 
 export function editorHead(path: string, extra: (HTMLElement | null)[] = []): HTMLElement {
   const back = el('button', { class: 'ghost tiny', text: '← 목록' });
@@ -33,7 +39,7 @@ export function drawCardEditor(path: string): void {
 
 /** A style or fragment .md: front-matter fields above the body. */
 export function cardEditor(path: string, opts: CardEditorOpts = {}): HTMLElement {
-  const isStyle = path.startsWith('studio/styles/');
+  const isStyle = areaOfPath(path) === 'styles';
   const out = el('div', { class: 'hint' });
   const name = el('input', { placeholder: '(파일 이름)' }) as HTMLInputElement;
   const desc = el('input', { placeholder: '한 줄 설명' }) as HTMLInputElement;
@@ -43,6 +49,7 @@ export function cardEditor(path: string, opts: CardEditorOpts = {}): HTMLElement
   const body = el('textarea', { rows: '18', class: 'promptedit',
     placeholder: isStyle ? '## positive\n…\n\n## negative\n…' : '조각 본문 — <이름> 으로 참조됩니다',
   }) as HTMLTextAreaElement;
+  setTimeout(() => attachHilite(body, { mode: 'nai', fragments: fragNames }), 0);
 
   const save = el('button', { class: 'primary tiny', text: '저장' }) as HTMLButtonElement;
   const del = el('button', { class: 'ghost tiny' }) as HTMLButtonElement;
@@ -51,7 +58,7 @@ export function cardEditor(path: string, opts: CardEditorOpts = {}): HTMLElement
       await state.deleteFile(path);
       if (opts.onDeleted) opts.onDeleted();
       else S.selectedFile = '';
-      await hub.refreshArea(path.split('/')[1]);
+      await hub.refreshArea(areaOfPath(path));
     } catch (e) { out.textContent = msg(e); }
   });
 
@@ -142,6 +149,7 @@ export function drawSceneEditor(path: string): void {
       const pr = el('textarea', { rows: '2', class: 'promptedit', placeholder: '프롬프트' }) as HTMLTextAreaElement;
       pr.value = s.prompt;
       pr.addEventListener('change', () => { s.prompt = pr.value; });
+      setTimeout(() => attachHilite(pr, { mode: 'nai', fragments: fragNames }), 0);
       const ng = el('input', { value: s.negativePrompt, placeholder: '네거티브 (선택)' }) as HTMLInputElement;
       ng.addEventListener('change', () => { s.negativePrompt = ng.value; });
       const w = el('input', { type: 'number', value: s.width ? String(s.width) : '', placeholder: '가로' }) as HTMLInputElement;
@@ -171,7 +179,7 @@ export function drawSceneEditor(path: string): void {
     try {
       await state.deleteFile(path);
       S.selectedFile = '';
-      await hub.refreshArea(path.split('/')[1]);
+      await hub.refreshArea(areaOfPath(path));
     } catch (e) { out.textContent = msg(e); }
   });
 
@@ -241,7 +249,7 @@ export function drawRawFile(path: string): void {
     try {
       await state.deleteFile(path);
       S.selectedFile = '';
-      await hub.refreshArea(path.split('/')[1]);
+      await hub.refreshArea(areaOfPath(path));
     } catch (e) { out.textContent = msg(e); }
   });
   let form: HTMLElement | null = null;
@@ -258,7 +266,7 @@ export function drawRawFile(path: string): void {
       const fname = path.slice(path.lastIndexOf('/') + 1);
       await state.uploadFile(fname, box.value, false, dir);
       out.textContent = '저장했습니다.';
-      await hub.refreshArea(path.split('/')[1]);
+      await hub.refreshArea(areaOfPath(path));
     } catch (e) {
       out.textContent = msg(e);
     } finally { save.disabled = false; }

@@ -29,6 +29,13 @@ normalization · splitter clamp measures siblings) **+ §1-24** (검수 tab · �
 only in selected/ · agent → 검수 via studio_open and strip buttons · 중단 cancels the batch ·
 per-panel collapse toggles · live job section in the batch tab) **+ §1-25** (log file on disk +
 noise cut · bulk asset/script proposals · one card write for many assets)
+**+ §1-26 the files/studio field report** (studio_v2: config/ + output/ two-tier layout with a
+boot migration and path canon on every door · filebar icons + fold-out search · right-click
+rename/copy/paste (`/files/copy`) · internal drag-move · the corner upload overlay with a real
+progress bar · '선택' → '‹ 뒤로' + a mode chip on the tab bar · NAI prompt tints + NAI tag
+autocomplete (`/studio/tag-suggest`) · markdown tints on lorebook bodies · write_file refuses
+projects/ · NAI torn-connection retry + a friendly RemoteProtocolError message · the realooc
+old-name note)
 (gate ALL GREEN; the minor went up so the version gate trips when it ships). **Staged on test-server
 2026-08-30 night AT §1-25 (= §1-19~24 included): service stopped → backup `data-backup-20260830-s120`
 (11,358 files) → app/*.py + seeds/studio-image-ops.md + tools/probe_nai.py + requirements.in scp'd,
@@ -81,6 +88,63 @@ mixed-cast multi-entry batch from the panel.** Released = **v0.10.0 BETA** (§1-
 - Historical note kept below: the one-time manual reinstall advice for 0.1.0-era installs.
 
 → (historical) **First thing to do**: the user reinstalls `plugin/Risu.Hina.Plugin.js` into RisuAI **by hand, once** (the installed 0.1.0's update-url cannot be read because of CORS) → check that `+` appears from the next release on → verify M2 in real use (§5-2).
+
+## 1-26. 2026-08-31 - 0.11.0 (unreleased, continued): the files/studio field report (14 items + 2 agent errors)
+
+Fourteen usability items from real use plus two errors the agent itself reported, one commit,
+gate ALL GREEN (real-model agent test included). **Not yet staged to test-server** - restage per
+[[risu-hina-staging-deploy]] when the user asks; the studio_v2 boot migration will move that
+machine's `space/studio` into the new shape on first start (stop → backup → copy → start).
+
+- **studio_v2 layout (item 5)**: the studio is two tiers now - `studio/config/{styles,characters,
+  fragments,scenes,.studio}` for material and `studio/output/` for results (was a flat level where
+  images/ sat beside the cards). One-time boot migration (`workspace.migrate_studio_v2`, manifest
+  `space/.hina/migration-studio_v2.json`, move-only); `workspace.studio_canon` folds every
+  flat-era path (`studio/styles/…`, `studio/images/…`, `studio/.studio/…`) at `files._resolve`,
+  the listing prefix, and `studio._rel`, so old sidecars, saved specs, selection slugs
+  (`_unstudio` keys on the flat form) and agent habits keep resolving. Plugin constants moved
+  (`OUTPUT_ROOT='studio/output'`, `CONFIG_ROOT`, `areaOfPath`/`canonPath`; persisted gen.folder
+  and reservation keys are canonicalised on load).
+- **Files tab (items 1·2·14)**: 전체 선택 · 보기 토글 · 이동 · 삭제 are SVG icon buttons with
+  tooltips (`FICON`, `armedIcon` keeps the two-step confirm on an icon); '이 폴더에서 찾기' is a
+  fold-out search icon on the filebar (the menu-line box that ate a full row is gone - the kit
+  search stays for the other list tabs).
+- **Right-click menu (item 11)**: 열기 · 이름 바꾸기 · 복사/잘라내기/붙여넣기 (server-side
+  `POST /files/copy`, collisions count up to `이름 (2)`) · 경로 복사 · 내려받기 · 삭제 (arms the
+  bar's confirm, never a one-click delete). Ctrl+C/X/V on the list too; empty-space right-click
+  pastes into the current folder. `dom.menuAt` is the shared context-menu primitive.
+- **Internal drag (item 3)**: rows/cells drag as the selection (shared DRAG_PATHS); tree folders
+  AND centre folder rows accept the drop as a move (`moveSelected`).
+- **Upload overlay (items 6·7)**: a fixed corner card (`.uploadpanel`) with a byte-accurate
+  progress bar, per-file errors collected on the card, and the zip question moved onto it. The
+  old progress line was prepended into the centre pane and ANY redraw mid-upload cleared it -
+  that is the "100MB 드래그했는데 아무 표시 없음" report. The overlay is outside the pane, so
+  nothing eats it.
+- **Mode legibility (items 12·13)**: inside an edit screen the first tab reads '‹ 뒤로' (back to
+  the picker, leave-guard unchanged); a 봇 편집/챗 편집 chip sits on the tab bar naming the group.
+- **Prompt editors (items 9·10, NAIS3 reference C:\\code\\NAIS3-1.0.25.zip)**: `ui/hilite.ts` -
+  mirror-behind-textarea background tints (glyphs stay native: selection/caret/IME untouched),
+  NAIS3's weight parser verbatim ({}=×1.05, []=÷1.05, `N::…::` numeric, red=emphasis/blue=
+  de-emphasis, green=<조각>, grey=#comment), attached to the style editor, fragment/scene/character
+  prompt boxes. Autocomplete: `<` completes fragment names locally; other tokens hit
+  `GET /studio/tag-suggest` → `nai.suggest_tags` proxying NovelAI's own
+  `/ai/generate-image/suggest-tags` (no bundled tag DB; empty when no token; in-process cache).
+- **Markdown tints (item 8)**: the same mirror in 'md' mode on lorebook content boxes (headings,
+  **bold**, `code`, links, quotes, {{CBS}} extents).
+- **Agent hygiene (item 4)**: write_file refuses `projects/` outright (산출물 → hina/<봇>/out,
+  임시 → scratch/), instructions + helper docstring say temp docs/scripts live ONLY under
+  hina/<봇>/.
+- **Agent-reported error 1 (realooc)**: the helper's old name still works (`scripts/realooc.py`
+  shim was always written); the run_python tool description now says so, so the model stops
+  claiming the helper is missing and rerouting by path.
+- **Agent-reported error 2 (RemoteProtocolError)**: `nai._req` retries ONCE on a torn connection
+  (RemoteProtocolError/ReadError/ConnectError - the keep-alive client's known failure: the server
+  closes an idle connection mid-reuse) for every non-stream NAI call; the streaming path already
+  degrades to the ZIP fallback. `session._explain` maps "peer closed connection / incomplete
+  chunked read" to a plain-Korean "일시적 - 같은 지시를 다시" message instead of the httpx text.
+- Tests: test_studio/test_files updated to the two-tier layout + new `studio_canon`, slug-compat
+  and `files.copy` checks; smoke updated for the icon bar, fold-out search and title-based
+  lookups.
 
 ## 1-25. 2026-08-30 - 0.11.0 (unreleased, continued): logs on disk, bulk proposals, one card write for many assets
 

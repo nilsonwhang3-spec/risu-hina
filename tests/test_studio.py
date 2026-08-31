@@ -96,24 +96,26 @@ s_listing = files.listing(files.SPACE)
 b_listing = files.listing(CK)
 s_paths = [f["path"] for a in s_listing["areas"] for f in a["files"]]
 b_paths = [f["path"] for a in b_listing["areas"] for f in a["files"]]
-check("the upload landed in the library", "studio/styles/테스트/note.md" in s_paths, str(s_paths))
+check("a flat-era path lands in the two-tier tree",
+      "studio/config/styles/테스트/note.md" in s_paths, str(s_paths))
 check("the space listing does not show SYSTEM files", "uploads/secret.txt" not in s_paths, str(s_paths))
 check("a SYSTEM listing does not show the space",
       not any(p.startswith("studio/") for p in b_paths), str(b_paths))
-check("nested folders survive", (lib / "styles" / "테스트" / "note.md").is_file())
+check("nested folders survive", (lib / "config" / "styles" / "테스트" / "note.md").is_file())
 
 files.mkdir(files.SPACE, "studio/images/보관")
 files.move(files.SPACE, "studio/styles/테스트/note.md", "studio/images/보관/note.md")
-check("move works inside the space", (lib / "images" / "보관" / "note.md").is_file())
-files.delete(files.SPACE, "studio/images/보관/note.md")
-check("delete works inside the space", not (lib / "images" / "보관" / "note.md").exists())
+check("move works inside the space (legacy paths canonicalised)",
+      (lib / "output" / "보관" / "note.md").is_file())
+files.delete(files.SPACE, "studio/output/보관/note.md")
+check("delete works inside the space", not (lib / "output" / "보관" / "note.md").exists())
 
 print("\ntest_clean_never_touches_the_library")
-files.upload(files.SPACE, "keep.md", text="x", into="studio/images")
+files.upload(files.SPACE, "keep.md", text="x", into="studio/output")
 before = files.clean(files.SPACE)
 check("a space-wide clean can only touch the machine area",
       set(before["areas"]) <= {".hina"}, str(before))
-check("and the library file is still there", (lib / "images" / "keep.md").is_file())
+check("and the library file is still there", (lib / "output" / "keep.md").is_file())
 
 print("\ntest_space_path_is_configurable")
 elsewhere = Path(tempfile.mkdtemp(prefix="risuhina-space-"))
@@ -121,7 +123,7 @@ config.update({"workspace": {"globalPath": str(elsewhere)}})
 check("the space follows the setting", workspace.space_root() == elsewhere, str(workspace.space_root()))
 workspace.ensure_studio()
 files.upload(files.SPACE, "far.md", text="x", into="studio/styles")
-check("and files land there", (elsewhere / "studio" / "styles" / "far.md").is_file())
+check("and files land there", (elsewhere / "studio" / "config" / "styles" / "far.md").is_file())
 # Containment is against the configured root, not the data dir, so an escape
 # attempt from a space outside data/ still has to fail.
 raises("the wall holds outside the data dir", files.read, files.SPACE, "../../etc/passwd")
@@ -167,7 +169,7 @@ check("one character needs no char_captions", caps == [], str(caps))
 print("\ntest_name_addressing")
 # A card can be named by its display name - the agent says "수채화", not a path.
 n = studio.normalize_spec({"styles": ["수채화"], "characters": []})
-check("a style name resolves to its path", n["styles"] == ["studio/styles/수채화.md"],
+check("a style name resolves to its path", n["styles"] == ["studio/config/styles/수채화.md"],
       str(n["styles"]))
 raises("an unknown name is refused", studio.normalize_spec,
        {"styles": ["없는스타일"], "characters": []})
@@ -252,10 +254,10 @@ shadowed, _ = studio.resolve_refs("<조각파일>")
 check("a display name never shadows a real stem", shadowed == "조각B", shadowed)
 frag_rows = {i["path"]: i for i in studio.listing("fragments")}
 check("the fragment listing shows the front-matter name",
-      frag_rows["studio/fragments/eye-detail.md"]["name"] == "눈 디테일",
-      str(frag_rows.get("studio/fragments/eye-detail.md")))
+      frag_rows["studio/config/fragments/eye-detail.md"]["name"] == "눈 디테일",
+      str(frag_rows.get("studio/config/fragments/eye-detail.md")))
 check("and falls back to the stem without one",
-      frag_rows["studio/fragments/조각파일.md"]["name"] == "조각파일")
+      frag_rows["studio/config/fragments/조각파일.md"]["name"] == "조각파일")
 files.delete(files.SPACE, "studio/fragments/shadow.md")
 files.delete(files.SPACE, "studio/fragments/eye-detail.md")
 
@@ -353,11 +355,12 @@ print("\ntest_adoption_needs_no_copy")
 from app import assets  # noqa: E402
 
 png = bytes.fromhex("89504e470d0a1a0a") + b"\x00" * 40
-(studio.root() / "images").mkdir(parents=True, exist_ok=True)
-(studio.root() / "images" / "hop.png").write_bytes(png)
+(studio.root() / "output").mkdir(parents=True, exist_ok=True)
+(studio.root() / "output" / "hop.png").write_bytes(png)
 staged = assets.stage_file(studio._rel("images/hop.png"))
-check("the checked path is the global path", staged["path"] == "studio/images/hop.png", staged["path"])
-check("and the library keeps its own", (studio.root() / "images" / "hop.png").is_file())
+check("the checked path is the global (canonical) path",
+      staged["path"] == "studio/output/hop.png", staged["path"])
+check("and the library keeps its own", (studio.root() / "output" / "hop.png").is_file())
 
 
 def _stage_md() -> None:
@@ -380,7 +383,7 @@ def _raises_asset(name: str, fn) -> None:
 _raises_asset("a non-PNG is refused", _stage_md)
 
 print("\ntest_grouping_and_selection")
-shots = studio.root() / "images" / "고르기"
+shots = studio.root() / "output" / "고르기"
 shots.mkdir(parents=True, exist_ok=True)
 PNG = bytes.fromhex("89504e470d0a1a0a") + b"\x00" * 40
 for n in ("히나-happy-20260829-120000-1.png", "히나-happy-20260829-120000-2.png",
@@ -470,7 +473,7 @@ print("\ntest_png_carries_its_recipe")
 # writing a .json sidecar beside every image (which doubled every folder).
 saved = studio.save_image("images/기록", "임베드-happy-20260829-120000-1.png",
                           mask, {"scene": "happy", "prompt": "웃음", "model": "테스트"})
-rec_dir = studio.root() / "images" / "기록"
+rec_dir = studio.root() / "output" / "기록"
 check("no sidecar is written", list(rec_dir.glob("*.json")) == [],
       str(list(rec_dir.glob("*.json"))))
 emb = (rec_dir / "임베드-happy-20260829-120000-1.png").read_bytes()
@@ -486,7 +489,7 @@ check("a non-PNG passes through png_embed untouched",
       studio.png_embed(b"not a png", {"x": 1}) == b"not a png")
 
 print("\ntest_duplicates_and_emotion_check")
-dup = studio.root() / "images" / "중복"
+dup = studio.root() / "output" / "중복"
 dup.mkdir(parents=True, exist_ok=True)
 same = PNG + b"same"
 for n in ("a.png", "aa-longer-name.png", "b.png"):
@@ -526,7 +529,7 @@ sA = studio.read_style("styles/카드A.md")
 check("enabled and order come from the front matter", sA["enabled"] is True and sA["order"] == 20)
 check("an absent enabled means OFF", studio.read_style("styles/수채화.md")["enabled"] is False)
 check("active styles come in (order, path) order",
-      studio.active("styles") == ["studio/styles/카드A.md", "studio/styles/카드B.md"],
+      studio.active("styles") == ["studio/config/styles/카드A.md", "studio/config/styles/카드B.md"],
       str(studio.active("styles")))
 
 r = studio.set_meta("styles/카드A.md", {"enabled": False})
@@ -549,13 +552,13 @@ print("\ntest_character_folder_cards")
 files.upload(files.SPACE, "레거시.json", text=json.dumps(
     {"name": "레거시", "caption": "캐릭터B", "negative": "제외D2"}, ensure_ascii=False),
     into="studio/characters")
-(studio.root() / "characters" / "레거시.png").write_bytes(PNG)
+(studio.config_dir("characters") / "레거시.png").write_bytes(PNG)
 moved = studio.migrate_characters()
 check("a legacy stem-pair becomes a folder card", moved >= 1
-      and (studio.root() / "characters" / "레거시" / "prompt.md").is_file()
-      and (studio.root() / "characters" / "레거시" / "레거시.png").is_file(),
+      and (studio.config_dir("characters") / "레거시" / "prompt.md").is_file()
+      and (studio.config_dir("characters") / "레거시" / "레거시.png").is_file(),
       str(moved))
-check("and the legacy files are gone", not (studio.root() / "characters" / "레거시.json").exists())
+check("and the legacy files are gone", not (studio.config_dir("characters") / "레거시.json").exists())
 check("migration is idempotent", studio.migrate_characters() == 0)
 
 c = studio.read_character("characters/레거시")
@@ -568,7 +571,7 @@ studio.set_meta("characters/레거시", {"enabled": True})
 check("the folder toggle lands in prompt.md", studio.read_character("characters/레거시")["enabled"] is True)
 lst = studio.listing("characters")
 check("the listing is one card per folder",
-      any(i["path"] == "studio/characters/레거시" and i["vibe"] == 1 for i in lst), str(lst)[:300])
+      any(i["path"] == "studio/config/characters/레거시" and i["vibe"] == 1 for i in lst), str(lst)[:300])
 
 # 히나.json was itself migrated by the earlier listing call - the folder is
 # the card now, and this asserts both folder cards compose together.
@@ -637,7 +640,7 @@ check("ucPreset 4 (없음) merges nothing",
 
 print("\ntest_reference_mode")
 # 바이브와 캐릭터 레퍼런스는 함께 실리지 않는다: refMode 가 고른다.
-_rm = studio.root() / "characters" / "레퍼모드"
+_rm = studio.config_dir("characters") / "레퍼모드"
 _rm.mkdir(parents=True, exist_ok=True)
 (_rm / "prompt.md").write_text("---\nname: 레퍼모드\nenabled: true\n---\n## 프롬프트\n캐릭터A\n",
                                encoding="utf-8")
@@ -667,6 +670,26 @@ print("\ntest_selection_slugs")
 check("korean folders no longer share one slug",
       studio._slug("images/고르기") != studio._slug("images/버리기"),
       studio._slug("images/고르기"))
+# The config/output split must not orphan old selection files: the slug is
+# computed on the flat-era form, so output/고르기 keys the same file that
+# images/고르기 wrote before the migration.
+check("output/ slugs like the flat images/ it replaced",
+      studio._slug("studio/output/고르기") == studio._slug("images/고르기"),
+      studio._slug("studio/output/고르기"))
+
+print("\ntest_studio_canon")
+check("flat areas fold into config/",
+      workspace.studio_canon("studio/styles/a.md") == "studio/config/styles/a.md")
+check("images folds into output",
+      workspace.studio_canon("studio/images/고르기/x.png") == "studio/output/고르기/x.png"
+      and workspace.studio_canon("studio/images") == "studio/output")
+check(".studio folds under config/",
+      workspace.studio_canon("studio/.studio/adhoc/s.json") == "studio/config/.studio/adhoc/s.json")
+check("two-tier paths pass through",
+      workspace.studio_canon("studio/config/styles/a.md") == "studio/config/styles/a.md"
+      and workspace.studio_canon("studio/output/x.png") == "studio/output/x.png")
+check("non-studio paths are untouched",
+      workspace.studio_canon("projects/봇/images/x.png") == "projects/봇/images/x.png")
 
 # The studio is a third screen, not a half. Adopting an image into the card is
 # the studio's own verb, so it passes the gate there; everything else still

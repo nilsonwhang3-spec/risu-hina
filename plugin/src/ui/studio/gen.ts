@@ -144,7 +144,7 @@ export function openParamsDialog(): void {
     two(numField('가로', 'width'), numField('세로', 'height')),
     qualityToggle(),
     textField('시드', 'seed', '비우면 랜덤'),
-    textField('저장 폴더', 'folder', 'studio/images/…'),
+    textField('저장 폴더', 'folder', 'studio/output/…'),
     el('div', { class: 'row', style: { marginTop: '8px' } }, [planBtn]),
     out,
   ]);

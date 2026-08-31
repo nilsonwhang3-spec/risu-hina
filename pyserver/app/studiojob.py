@@ -155,7 +155,7 @@ def _run(job_id: str) -> None:
     spec = payload.get("spec") or {}
     items = payload.get("items") or []
     model = str(spec.get("model") or "")
-    folder = str(spec.get("folder") or "images")
+    folder = str(spec.get("folder") or "studio/output")
     params = dict(spec.get("params") or {})
 
     payload["anlasBefore"] = nai.anlas()

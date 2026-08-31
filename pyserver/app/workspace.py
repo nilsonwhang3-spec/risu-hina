@@ -124,7 +124,38 @@ def hina_dir(char_key: str) -> Path:
 
 # The studio's own areas. Owned here rather than in files.py because they are
 # subfolders of one SPACE area now, not a scope of their own.
-STUDIO_SUBDIRS = ("styles", "characters", "fragments", "scenes", "images", ".studio")
+#
+# Two tiers since studio_v2 (the user's ask): `config/` holds the material
+# (prompt cards, presets, our .studio machinery) and `output/` the results.
+# The old flat layout put images/ beside styles/ as if a generated batch were
+# one more kind of card.
+STUDIO_SUBDIRS = ("config/styles", "config/characters", "config/fragments",
+                  "config/scenes", "config/.studio", "output")
+
+# The flat-era area names, still arriving from old sidecars, agent habits and
+# saved specs. `studio_canon` folds them into the two-tier layout.
+_STUDIO_LEGACY_AREAS = {"styles", "characters", "fragments", "scenes"}
+
+
+def studio_canon(rel: str) -> str:
+    """A studio path in its two-tier form; anything else passes untouched.
+
+    "studio/styles/x.md" → "studio/config/styles/x.md", "studio/images/고르기"
+    → "studio/output/고르기", "studio/.studio/…" → "studio/config/.studio/…".
+    Applied at `files._resolve` for the whole space, so every old reference -
+    a sidecar, a saved spec, a script the agent wrote last week - keeps
+    landing on the file that actually moved.
+    """
+    r = (rel or "").replace("\\", "/").lstrip("/")
+    if r != "studio" and not r.startswith("studio/"):
+        return rel
+    rest = r[len("studio/"):]
+    head, sep, tail = rest.partition("/")
+    if head in _STUDIO_LEGACY_AREAS or head == ".studio":
+        return "studio/config/" + rest
+    if head == "images":
+        return "studio/output" + (("/" + tail) if sep else "")
+    return r
 
 
 def studio_root() -> Path:
@@ -577,6 +608,31 @@ def migrate_to_space() -> dict | None:
     log.info("space_v1: moved %d files across %d bots%s", len(moves), len(bots),
              "; studio left in place (libraryPath)" if studio_note else "")
     return manifest
+
+
+def migrate_studio_v2() -> dict | None:
+    """One-time fold of the flat studio layout into config/ + output/.
+
+    Move + manifest, never a delete or an overwrite (`_move_tree` shifts a
+    taken name to `이름~1`). Runs after `migrate_to_space`, so a legacy
+    `data/studio` has already arrived at `space/studio` in the flat shape.
+    """
+    if db.has_migration("studio_v2"):
+        return None
+    base = studio_root()
+    moves: list[dict] = []
+    if base.is_dir():
+        for area in sorted(_STUDIO_LEGACY_AREAS | {".studio"}):
+            _move_tree(base / area, base / "config" / area, moves)
+        _move_tree(base / "images", base / "output", moves)
+    if moves:
+        manifest = {"version": 1, "movedAt": time.time(), "moves": moves}
+        mpath = space_root() / ".hina" / "migration-studio_v2.json"
+        mpath.parent.mkdir(parents=True, exist_ok=True)
+        mpath.write_text(json.dumps(manifest, ensure_ascii=False, indent=1), encoding="utf-8")
+    db.mark_migration("studio_v2")
+    log.info("studio_v2: %d files moved into config/ + output/", len(moves))
+    return {"moves": len(moves)}
 
 
 def space_note() -> str:

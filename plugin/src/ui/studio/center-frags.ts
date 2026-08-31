@@ -52,7 +52,7 @@ export function drawFragments(): void {
         const nm = cardStem(raw);
         if (!nm) return;
         try {
-          await state.mkdirFile('studio/fragments/' + nm);
+          await state.mkdirFile('studio/config/fragments/' + nm);
           extraFolders.add(nm);
           openFolders.add(nm);
           hub.touchQuiet();
@@ -139,7 +139,7 @@ export function drawFragments(): void {
       b.addEventListener('click', async () => {
         close();
         try {
-          const r = await state.moveFile(selFrag, 'studio/fragments' + (t ? '/' + t : ''));
+          const r = await state.moveFile(selFrag, 'studio/config/fragments' + (t ? '/' + t : ''));
           selFrag = r.to;
           await hub.refreshArea('fragments');
         } catch (e) {

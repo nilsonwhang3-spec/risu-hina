@@ -15,6 +15,7 @@
  * disk in the wrong shape is flagged and refitted on save.
  */
 import { el, clear, armed } from '../dom';
+import { attachHilite } from '../hilite';
 import { state } from '../../state';
 import { blobUrl } from '../blobimg';
 import { S, hub, msg, cardStem, renameCardFile } from './store';
@@ -97,6 +98,11 @@ export function characterEditor(dir: string, opts: CharEditorOpts = {}): HTMLEle
     placeholder: '이 캐릭터를 그리는 프롬프트 (쉼표로 구분)' }) as HTMLTextAreaElement;
   const negative = el('textarea', { rows: '2', class: 'promptedit compact',
     placeholder: '이 캐릭터에만 붙는 네거티브' }) as HTMLTextAreaElement;
+  const fragNames = () => (S.cards.fragments ?? []).map((i) => i.name);
+  setTimeout(() => {
+    attachHilite(caption, { mode: 'nai', fragments: fragNames });
+    attachHilite(negative, { mode: 'nai', fragments: fragNames });
+  }, 0);
   const enabledBox = el('input', { type: 'checkbox' }) as HTMLInputElement;
   const order = el('input', { type: 'number', value: '100', step: '10' }) as HTMLInputElement;
   const posX = el('input', { type: 'number', step: '0.1', placeholder: 'x 0~1' }) as HTMLInputElement;
@@ -297,7 +303,7 @@ export function characterEditor(dir: string, opts: CharEditorOpts = {}): HTMLEle
         } catch (e) { out.textContent = '파일명 변경 실패 (이름만 저장됩니다): ' + msg(e); }
       }
       const stem = cardStem(nm);
-      const target = dir || `studio/characters/${stem}`;
+      const target = dir || `studio/config/characters/${stem}`;
       // Anything flagged is refitted here, so a save never leaves a reference
       // the encoder will refuse.
       for (const v of charrefs) if (v.bad) await refit(v);

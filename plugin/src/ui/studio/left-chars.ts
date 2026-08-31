@@ -42,10 +42,10 @@ function grouped(): Map<string, StudioItem[]> {
 
 /** File dragged cards under `folder` ('' = back to the top level). */
 async function moveCards(folder: string, sources: string[]): Promise<void> {
-  const dstDir = 'studio/characters' + (folder ? '/' + folder : '');
+  const dstDir = 'studio/config/characters' + (folder ? '/' + folder : '');
   try {
     for (const src of sources) {
-      if (!src.startsWith('studio/characters/')) continue;
+      if (!src.startsWith('studio/config/characters/')) continue;
       const parent = src.slice(0, src.lastIndexOf('/'));
       if (parent === dstDir || dstDir.startsWith(src + '/')) continue;
       const r = await state.moveFile(src, dstDir);
@@ -96,7 +96,7 @@ export function buildLeftChars(mount: HTMLElement): void {
         const nm = cardStem(raw);
         if (!nm) return;
         try {
-          await state.mkdirFile('studio/characters/' + nm);
+          await state.mkdirFile('studio/config/characters/' + nm);
           extraFolders.add(nm);
           openFolders.add(nm);
           hub.touchQuiet();

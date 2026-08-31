@@ -936,6 +936,13 @@ def h_file_move(arg: dict) -> dict:
         raise ApiError(400, str(e))
 
 
+def h_file_copy(arg: dict) -> dict:
+    try:
+        return files.copy(_write_scope(arg), str(arg.get("from") or ""), str(arg.get("to") or ""))
+    except files.FileError as e:
+        raise ApiError(400, str(e))
+
+
 def h_file_delete(arg: dict) -> dict:
     try:
         return files.delete(_write_scope(arg), str(arg.get("path") or ""))
@@ -982,6 +989,24 @@ def h_studio_status(arg: dict) -> dict:
     except nai.NaiError as e:
         out["error"] = str(e)
     return out
+
+
+def h_studio_tag_suggest(arg: dict) -> dict:
+    """Danbooru-tag autocomplete, proxied from NovelAI's own suggest endpoint.
+
+    Empty rather than an error when no token is configured: the prompt editor
+    types fine without suggestions, and a red toast per keystroke would not
+    help anyone add a token."""
+    q = str(arg.get("q") or "")
+    model = str(arg.get("model") or "")
+    if not nai.configured():
+        return {"tags": []}
+    try:
+        return {"tags": nai.suggest_tags(q, model)}
+    except nai.NaiError as e:
+        # Autocomplete is a convenience; a failure is a log line, not a toast.
+        log.warn("tag-suggest failed: %s", e)
+        return {"tags": []}
 
 
 def h_studio_model_check(arg: dict) -> dict:
@@ -2141,6 +2166,7 @@ ROUTES: dict[str, Handler] = {
     "GET /diag/rs-probe": h_diag_rs_probe,
 
     "GET /studio/status": h_studio_status,
+    "GET /studio/tag-suggest": h_studio_tag_suggest,
     "POST /studio/model-check": h_studio_model_check,
     "GET /studio/list": h_studio_list,
     "POST /studio/meta": h_studio_meta,
@@ -2222,6 +2248,7 @@ ROUTES: dict[str, Handler] = {
     "POST /files/delete": h_file_delete,
     "POST /files/mkdir": h_file_mkdir,
     "POST /files/move": h_file_move,
+    "POST /files/copy": h_file_copy,
     "POST /files/clean": h_file_clean,
 
     "GET /workspace": h_workspace_list,
@@ -2658,6 +2685,8 @@ async def _startup() -> None:
     # space once (space_v1). Move + manifest only; tools/rollback_space.py
     # replays the manifest in reverse.
     await run_in_threadpool(workspace.migrate_to_space)
+    # The studio's flat layout folds into config/ + output/ once (studio_v2).
+    await run_in_threadpool(workspace.migrate_studio_v2)
     # There is always a selected preset; on an existing install it is seeded
     # from whatever config.json already holds, so nothing appears to be lost.
     await run_in_threadpool(presets.ensure_default)

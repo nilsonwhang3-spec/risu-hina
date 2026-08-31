@@ -12,6 +12,7 @@
  * indentation.
  */
 import { el, clear, armed, refocusSearch, focusButton, diffCard } from './dom';
+import { attachHilite } from './hilite';
 import { state, type LoreEntry } from '../state';
 import { makeTab, listRow, savedText, type NoticeKind, type TabUi } from './kit';
 import { conflictBadge, conflictBox } from './conflicts';
@@ -209,6 +210,9 @@ export function makeLoreTab(opts: LoreViewOptions): (mount: HTMLElement) => void
       value: String(entry.content ?? ''),
       style: { minHeight: '300px' },
     });
+    // Markdown landmarks (### 제목 · **강조** · {{CBS}}) as background tints,
+    // so a lorebook body reads as structure rather than a wall (item 8).
+    setTimeout(() => attachHilite(content as HTMLTextAreaElement, { mode: 'md' }), 0);
     // insertorder: RisuAI's one number for both "survives the token budget"
     // and "goes first in the prompt" (bigger wins both). It had no field
     // here, so every entry the panel made sat at the default 100.

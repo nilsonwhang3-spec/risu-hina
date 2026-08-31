@@ -25,10 +25,10 @@
  * backend (POST /files/zip); a dropped folder goes up file by file into the
  * matching subfolders; a dropped .zip is offered to be unpacked on arrival.
  */
-import { el, clear, armed, popover, refocusSearch, type ArmedControl } from './dom';
-import { treeRow, installDrop, type TreeNode, type TreeSpec, type Incoming } from './tree';
+import { el, clear, armed, menuAt, popover, svg, type ArmedControl } from './dom';
+import { treeRow, installDrop, installDrag, type TreeNode, type TreeSpec, type Incoming } from './tree';
 import { state, type FileArea, type FileListing, type WorkspaceFile } from '../state';
-import { makeTab, type NoticeKind, type TabUi } from './kit';
+import { makeTab, namePopover, type NoticeKind, type TabUi } from './kit';
 import { blobUrl, workspaceImage } from './blobimg';
 import { renderMarkdown } from './markdown';
 import { showArtifact } from './artifact';
@@ -37,7 +37,7 @@ import { clientLog } from '../transport';
 
 const AREA_LABEL: Record<string, [string, string]> = {
   projects: ['프로젝트', '직접 관리하시는 참고 자료·프로젝트 폴더입니다. 봇 이름 폴더로 나뉩니다.'],
-  studio: ['스튜디오', '프롬프트 재료와 생성 이미지 라이브러리입니다.'],
+  studio: ['스튜디오', '이미지 라이브러리입니다. config/ 에 프롬프트 재료, output/ 에 생성 결과가 삽니다.'],
   hina: ['AI 작업', '히나가 봇별로 쓰는 스크립트·임시·산출물 폴더입니다.'],
   '.hina': ['내부', '스킬 복사본과 이관 기록입니다. 다음 실행 때 다시 만들어집니다.'],
 };
@@ -53,6 +53,22 @@ const IMAGE_RE = /\.(png|jpe?g|gif|webp|avif|bmp)$/i;
 const TEXT_UPLOAD_RE = /\.(md|txt|json|jsonl|csv|py|html?|css|js|ya?ml|xml|log|sql)$/i;
 /** The virtual folder of surfaced documents. */
 const DOCS_NODE = '@docs';
+
+// Filebar glyphs: inline SVG, never emoji - the picture glyphs rendered as
+// stray letters on a machine without a colour emoji font (same reason the
+// rows carry extension tags instead of pictograms).
+const FICON = {
+  selectAll: svg('<path d="m2 13 4 4L14 7"/><path d="m10 15 3 3 9-11"/>', 15),
+  list: svg('<path d="M8 6h13M8 12h13M8 18h13"/><path d="M3 6h.01M3 12h.01M3 18h.01"/>', 15),
+  grid: svg('<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>', 15),
+  move: svg('<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><path d="M12 10v7"/><path d="m9 14 3 3 3-3"/>', 15),
+  trash: svg('<path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>', 15),
+  search: svg('<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>', 15),
+};
+
+/** The internal clipboard for the context menu's 복사/잘라내기 → 붙여넣기.
+ * Paths only - the bytes stay on the backend (files/copy · files/move). */
+let clipboard: { op: 'copy' | 'cut'; paths: string[] } | null = null;
 
 function isDocument(f: WorkspaceFile): boolean {
   const ext = (f.name.split('.').pop() || '').toLowerCase();
@@ -95,11 +111,9 @@ function notice(text: string, kind: NoticeKind = ''): void {
 const kitRender = makeTab({
   // A pending open-request is a staleness key: consuming it is refresh's job.
   keys: () => [state.filesRev, state.openFileRequest],
-  search: {
-    placeholder: '이 폴더에서 찾기',
-    get: () => filterText,
-    set: (v) => { filterText = v; drawCentre(); refocusSearch(null); },
-  },
+  // Deliberately no menu-line search: the folder filter is a fold-out icon on
+  // the filebar itself (the full-width box spent a whole row on a field that
+  // is empty almost always - field report item 14).
   build(pane, u) {
     ui = u;
     treeMount = el('div', { class: 'tree filetree' });
@@ -360,6 +374,8 @@ function treeSpec(): TreeSpec {
       drawTree();
     },
     onDropFiles: (path, files) => void uploadMany(files, path),
+    // Rows dragged from the centre land in a tree folder (item 3).
+    onDropMove: (path, sources) => void moveSelected(sources, path),
   };
 }
 
@@ -389,20 +405,24 @@ function drawCentre(): void {
   const [, why] = AREA_LABEL[n.area.area] ?? ['', ''];
 
   // --- bar ---------------------------------------------------------------------
+  // The verbs are icons with tooltips now (field report items 1-2): five text
+  // buttons ate the row and the crumb had no room left.
   const selCount = selection.size;
+  const iconBtn = (html: string, title: string): HTMLButtonElement =>
+    el('button', { class: 'iconbtn', html, title }) as HTMLButtonElement;
   const dl = el('button', { class: 'ghost tiny', text: selCount > 1 ? `내려받기 (${selCount}, zip)` : '내려받기', title: '내 PC에 저장합니다. 여러 개나 폴더는 zip 하나로 받습니다.' }) as HTMLButtonElement;
   dl.disabled = !selCount;
   dl.addEventListener('click', () => void downloadSelected(n));
-  const mv = el('button', { class: 'ghost tiny', text: '이동', title: '고른 항목을 다른 폴더로 옮깁니다' }) as HTMLButtonElement;
+  const mv = iconBtn(FICON.move, selCount ? `이동 (${selCount}) — 다른 폴더로 옮깁니다` : '이동 — 고른 항목을 다른 폴더로 옮깁니다');
   mv.disabled = !selCount || !deletable;
   mv.addEventListener('click', () => openMove(mv));
-  const del = el('button', { class: 'ghost tiny', title: 'Delete 키로도 됩니다' }) as HTMLButtonElement;
+  const del = iconBtn(FICON.trash, (selCount ? `삭제 (${selCount})` : '삭제') + ' — Delete 키로도 됩니다');
   del.disabled = !selCount || !deletable;
-  delCtrl = armed(del, selCount ? `삭제 (${selCount})` : '삭제',
-                  `정말 지울까요? (${selCount})`, () => void runDelete(n));
-  const all = el('button', { class: 'ghost tiny', text: '전체 선택', title: 'Ctrl+A' });
+  delCtrl = armedIcon(del, FICON.trash, `정말? (${selCount})`, () => void runDelete(n));
+  const all = iconBtn(FICON.selectAll, '전체 선택 (Ctrl+A)');
   all.addEventListener('click', () => { selectAll(n); drawCentre(); });
-  const viewBtn = el('button', { class: 'ghost tiny', text: view === 'grid' ? '목록 보기' : '미리보기', title: '그림이 있는 폴더는 썸네일로 볼 수 있습니다' });
+  const viewBtn = iconBtn(view === 'grid' ? FICON.list : FICON.grid,
+                          view === 'grid' ? '목록 보기' : '미리보기 — 썸네일로 봅니다');
   viewBtn.addEventListener('click', () => {
     view = view === 'grid' ? 'list' : 'grid';
     try { localStorage.setItem('hina.filesView', view); } catch { /* fine */ }
@@ -418,18 +438,50 @@ function drawCentre(): void {
     } catch (e) { notice('받지 못했습니다: ' + msg(e), 'err'); } finally { zipAll.disabled = false; }
   });
 
+  // 이 폴더에서 찾기, folded into an icon (item 14): the box only takes room
+  // while it is open, and it opens right where the list it filters lives.
+  const searchWrap = el('span', { class: 'fsearch' + (filterText ? ' open' : '') });
+  const searchInput = el('input', { placeholder: '이 폴더에서 찾기', value: filterText }) as HTMLInputElement;
+  const searchBtn = iconBtn(FICON.search, '이 폴더에서 찾기');
+  searchBtn.addEventListener('click', () => {
+    searchWrap.classList.add('open');
+    searchInput.focus();
+  });
+  searchInput.addEventListener('input', () => {
+    filterText = searchInput.value;
+    drawCentre();
+    const again = viewMount?.querySelector('.fsearch input') as HTMLInputElement | null;
+    if (again) {
+      again.focus();
+      try { again.setSelectionRange(again.value.length, again.value.length); } catch { /* fine */ }
+    }
+  });
+  searchInput.addEventListener('keydown', (ev) => {
+    if ((ev as KeyboardEvent).key === 'Escape') {
+      filterText = '';
+      drawCentre();
+      focusList();
+    }
+  });
+  searchInput.addEventListener('blur', () => {
+    if (!searchInput.value) searchWrap.classList.remove('open');
+  });
+  searchWrap.append(searchBtn, searchInput);
+
   viewMount.appendChild(el('div', { class: 'filebar' }, [
     el('span', { class: 'filecrumb', text: n.virtual ? '임시 문서' : n.path + '/' }),
     n.virtual ? null : copyPathButton(n.path),
     el('span', { class: 'hint', text: `${n.files.length}개` + (n.kids.length ? ` · 폴더 ${n.kids.length}` : '') }),
     el('span', { class: 'spacer' }),
+    searchWrap,
     hasImages ? viewBtn : null,
     all, dl, zipAll, mv, del,
   ]));
   viewMount.appendChild(el('div', { class: 'filehint', text:
     (n.virtual ? 'AI 작업 폴더에 남은 문서입니다. ' : why + ' ')
-    + (writable ? '파일이나 폴더를 여기에 끌어다 놓으면 이 폴더에 올라갑니다 (zip 은 풀어서 올릴 수 있습니다). ' : '')
-    + '클릭으로 선택, Ctrl·Shift 로 여러 개, 더블클릭·Enter 로 열기' + (deletable ? ', Delete 로 삭제.' : '.') }));
+    + (writable ? '파일이나 폴더를 끌어다 놓으면 올라가고, 행을 왼쪽 트리의 폴더로 끌면 옮겨집니다. ' : '')
+    + '클릭으로 선택, Ctrl·Shift 로 여러 개, 더블클릭·Enter 로 열기, 우클릭에 이름 바꾸기·복사·붙여넣기'
+    + (deletable ? ', Delete 로 삭제.' : '.') }));
 
   // --- rows ----------------------------------------------------------------------
   const list = el('div', { class: 'filelist', tabindex: '0' });
@@ -471,7 +523,25 @@ function drawCentre(): void {
       e.preventDefault();
       selectAll(n);
       drawCentre();
+    } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c' && selection.size) {
+      clipboard = { op: 'copy', paths: [...selection] };
+      notice(`${clipboard.paths.length}개를 복사했습니다 — 붙여넣을 폴더에서 우클릭하거나 Ctrl+V.`);
+    } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'x' && selection.size && deletable) {
+      clipboard = { op: 'cut', paths: [...selection] };
+      notice(`${clipboard.paths.length}개를 잘라냈습니다 — 붙여넣을 폴더에서 우클릭하거나 Ctrl+V.`);
+    } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v' && clipboard && writable) {
+      void pasteInto(uploadTarget());
     }
+  });
+  // Right-click on the empty part of the list: paste into this folder.
+  list.addEventListener('contextmenu', (ev) => {
+    if ((ev.target as HTMLElement).closest('.frow:not(.head), .fcell')) return;
+    ev.preventDefault();
+    menuAt((ev as MouseEvent).clientX, (ev as MouseEvent).clientY, [
+      { label: clipboard ? `붙여넣기 (${clipboard.paths.length})` : '붙여넣기',
+        disabled: !clipboard || !writable, onClick: () => void pasteInto(uploadTarget()) },
+      { label: '전체 선택', onClick: () => { selectAll(n); drawCentre(); } },
+    ]);
   });
   viewMount.appendChild(list);
 }
@@ -544,7 +614,156 @@ function listRow(e: { path: string; name: string; file?: WorkspaceFile; node?: F
   });
   row.addEventListener('click', (ev) => { pick(e.path, ev as MouseEvent, order); drawCentre(); focusList(); });
   row.addEventListener('dblclick', () => openEntry(e.path, n));
+  wireRowDnd(row, e, n);
+  row.addEventListener('contextmenu', (ev) => openRowMenu(ev as MouseEvent, e, n));
   return row;
+}
+
+/** Rows drag as the selection; a folder row is a drop target of its own. */
+function wireRowDnd(row: HTMLElement, e: { path: string; node?: Folder }, n: Folder): void {
+  if (!n.virtual) installDrag(row, () => (selection.has(e.path) ? [...selection] : [e.path]));
+  if (e.node && !n.virtual && USER_AREAS.has(n.area.area)) {
+    installDrop(row, {
+      into: () => e.path,
+      onFiles: (path, files) => void uploadMany(files, path),
+      onMove: (path, sources) => void moveSelected(sources, path),
+    });
+  }
+}
+
+/** The right-click menu on a row or cell (field report item 11). */
+function openRowMenu(ev: MouseEvent, e: { path: string; name: string; file?: WorkspaceFile; node?: Folder }, n: Folder): void {
+  ev.preventDefault();
+  ev.stopPropagation();
+  // Right-clicking outside the selection retargets it, like every file manager.
+  if (!selection.has(e.path)) {
+    selection = new Set([e.path]);
+    anchorPath = e.path;
+    drawCentre();
+  }
+  const paths = [...selection];
+  const many = paths.length > 1;
+  const can = n.area.deletable && !n.virtual;
+  const pasteTarget = e.node ? e.path : selectedDir;
+  menuAt(ev.clientX, ev.clientY, [
+    { label: '열기', disabled: many, onClick: () => openEntry(e.path, n) },
+    { label: '이름 바꾸기', disabled: many || !can, onClick: () => renameEntry(e) },
+    null,
+    { label: many ? `복사 (${paths.length})` : '복사',
+      onClick: () => { clipboard = { op: 'copy', paths }; notice(`${paths.length}개를 복사했습니다 — 붙여넣을 폴더에서 우클릭하세요.`); } },
+    { label: many ? `잘라내기 (${paths.length})` : '잘라내기', disabled: !can,
+      onClick: () => { clipboard = { op: 'cut', paths }; notice(`${paths.length}개를 잘라냈습니다 — 붙여넣을 폴더에서 우클릭하세요.`); } },
+    { label: clipboard ? `붙여넣기 (${clipboard.paths.length})` : '붙여넣기', disabled: !clipboard,
+      onClick: () => void pasteInto(pasteTarget) },
+    null,
+    { label: '경로 복사', onClick: () => { copyToClipboard(e.path); notice('경로를 복사했습니다.', 'ok'); } },
+    { label: many ? `내려받기 (${paths.length})` : '내려받기', onClick: () => void downloadSelected(n) },
+    null,
+    // The two-step confirm stays: the menu arms the bar's delete, the red
+    // button fires it - a context menu must not be a one-click shredder.
+    { label: many ? `삭제 (${paths.length})…` : '삭제…', danger: true, disabled: !can,
+      onClick: () => { delCtrl?.arm(); notice('삭제하려면 막대의 빨간 확인 버튼을 한 번 더 누르세요.'); } },
+  ]);
+}
+
+function renameEntry(e: { path: string; name: string }): void {
+  const anchor = (viewMount?.querySelector('.filebar') as HTMLElement | null) ?? viewMount;
+  if (!anchor) return;
+  namePopover(anchor, {
+    label: `${e.name} → 새 이름`,
+    value: e.name,
+    ok: '바꾸기',
+    onSubmit: async (raw) => {
+      const nm = raw.replace(/[\\/]+/g, '-').trim();
+      if (!nm || nm === e.name) return;
+      const dir = e.path.includes('/') ? e.path.slice(0, e.path.lastIndexOf('/')) : '';
+      try {
+        const r = await state.moveFile(e.path, (dir ? dir + '/' : '') + nm);
+        if (previewPath === e.path) previewPath = r.to;
+        selection = new Set([r.to]);
+        notice('이름을 바꿨습니다.', 'ok');
+        state.touchFiles();
+        await refresh();
+      } catch (err) {
+        notice('바꾸지 못했습니다: ' + msg(err), 'err');
+      }
+    },
+  });
+}
+
+async function pasteInto(target: string): Promise<void> {
+  const clip = clipboard;
+  if (!clip) return;
+  let done = 0;
+  try {
+    for (const p of clip.paths) {
+      if (p === target || target.startsWith(p + '/')) continue;
+      if (clip.op === 'copy') await state.copyFile(p, target);
+      else await state.moveFile(p, target);
+      done += 1;
+    }
+    notice(`${done}개를 ${target}/ 에 ${clip.op === 'copy' ? '복사' : '이동'}했습니다.`, 'ok');
+  } catch (e) {
+    notice(`${done}개를 처리한 뒤 실패했습니다: ` + msg(e), 'err');
+  }
+  // A cut is spent by its paste; a copy can paste again elsewhere.
+  if (clip.op === 'cut') {
+    clipboard = null;
+    selection.clear();
+  }
+  state.touchFiles();
+  await refresh();
+}
+
+/** Internal drag onto a tree folder (or a folder row): move the batch. */
+async function moveSelected(sources: string[], target: string): Promise<void> {
+  const list = sources.filter((p) => p !== target && !target.startsWith(p + '/'));
+  if (!list.length) return;
+  let done = 0;
+  try {
+    for (const p of list) {
+      await state.moveFile(p, target);
+      done += 1;
+    }
+    notice(`${done}개를 ${target}/ 로 옮겼습니다.`, 'ok');
+  } catch (e) {
+    notice(`${done}개를 옮긴 뒤 실패했습니다: ` + msg(e), 'err');
+  }
+  selection.clear();
+  previewPath = '';
+  state.touchFiles();
+  await refresh();
+}
+
+/** `armed()` writes textContent, which would blow away an SVG icon - this is
+ * the same two-step confirm with the icon restored on disarm. */
+function armedIcon(button: HTMLButtonElement, iconHtml: string, confirmLabel: string,
+                   run: () => void): ArmedControl {
+  let armedNow = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const disarm = () => {
+    if (timer) clearTimeout(timer);
+    armedNow = false;
+    button.innerHTML = iconHtml;
+    button.classList.remove('danger');
+  };
+  const arm = () => {
+    if (timer) clearTimeout(timer);
+    armedNow = true;
+    button.textContent = confirmLabel;
+    button.classList.add('danger');
+    timer = setTimeout(disarm, 4000);
+  };
+  const fire = () => {
+    disarm();
+    run();
+  };
+  button.innerHTML = iconHtml;
+  button.addEventListener('click', () => {
+    if (!armedNow) arm();
+    else fire();
+  });
+  return { arm, fire, disarm, get armed() { return armedNow; } };
 }
 
 /** Whether this folder or anything under it holds an image - the grid toggle
@@ -581,6 +800,8 @@ function gridCell(e: { path: string; name: string; file?: WorkspaceFile; node?: 
   else pic.appendChild(el('div', { class: 'assettype', text: (e.name.split('.').pop() || '?').toUpperCase().slice(0, 5) }));
   cell.addEventListener('click', (ev) => { pick(e.path, ev as MouseEvent, order); drawCentre(); focusList(); });
   cell.addEventListener('dblclick', () => openEntry(e.path, n));
+  wireRowDnd(cell, e, n);
+  cell.addEventListener('contextmenu', (ev) => openRowMenu(ev as MouseEvent, e, n));
   return cell;
 }
 
@@ -765,40 +986,117 @@ async function downloadSelected(n: Folder): Promise<void> {
 // Drag-and-drop wiring (installDrop / collectDrop) lives in ./tree, shared
 // with the studio's output tree.
 
+// The upload overlay: a fixed card in the corner that NO redraw can eat. The
+// old progress line was prepended into the centre pane, and any refresh
+// mid-upload (a state emit, a folder click) cleared it - a 100MB drop showed
+// nothing at all (field report item 6). The bar is the graph item 7 asked
+// for; errors collect on the card instead of racing past as notices.
+let upPanel: HTMLElement | null = null;
+let upHideTimer: ReturnType<typeof setTimeout> | null = null;
+
+interface UploadUi {
+  ask: HTMLElement;
+  set(sentBytes: number, totalBytes: number, label: string): void;
+  error(text: string): void;
+  finish(ok: boolean, text: string): void;
+}
+
+function uploadUi(title: string): UploadUi {
+  if (upHideTimer) {
+    clearTimeout(upHideTimer);
+    upHideTimer = null;
+  }
+  upPanel?.remove();
+  const closeBtn = el('button', { class: 'iconbtn', text: '✕', title: '닫기' });
+  const ask = el('div');
+  const label = el('span', { class: 'grow', text: title });
+  const num = el('span');
+  const fill = el('div', { class: 'assetfill' });
+  const errs = el('div', { class: 'uperr', style: { display: 'none' } });
+  const panel = el('div', { class: 'uploadpanel' }, [
+    el('div', { class: 'uphead' }, [el('span', { text: '올리기' }), closeBtn]),
+    ask,
+    el('div', { class: 'upline' }, [label, num]),
+    el('div', { class: 'assetbar' }, [fill]),
+    errs,
+  ]);
+  closeBtn.addEventListener('click', () => {
+    panel.remove();
+    if (upPanel === panel) upPanel = null;
+  });
+  document.body.appendChild(panel);
+  upPanel = panel;
+  return {
+    ask,
+    set(sentBytes, totalBytes, text) {
+      num.textContent = text;
+      fill.style.width = totalBytes ? `${Math.min(100, (sentBytes / totalBytes) * 100).toFixed(1)}%` : '0%';
+    },
+    error(text) {
+      errs.style.display = '';
+      errs.appendChild(el('div', { text }));
+    },
+    finish(ok, text) {
+      num.textContent = text;
+      fill.style.width = '100%';
+      fill.style.background = ok ? '#10b981' : '#ef4444';
+      panel.classList.add(ok ? 'done' : 'failed');
+      // A clean finish tidies itself away; a failure stays until dismissed.
+      if (ok) {
+        upHideTimer = setTimeout(() => {
+          panel.remove();
+          if (upPanel === panel) upPanel = null;
+        }, 6000);
+      }
+    },
+  };
+}
+
 /**
- * Upload a batch into `into` (a folder under uploads/ or out/), one request
- * per file, reporting progress in the centre. Zips are asked about first:
- * unpacked into a folder named after them, or stored as they are.
+ * Upload a batch into `into`, reporting progress on the corner overlay as a
+ * byte-accurate bar. Zips are asked about first (on the overlay, where the
+ * question survives redraws): unpacked into a folder named after them, or
+ * stored as they are.
  */
 async function uploadMany(files: Incoming[], into: string): Promise<void> {
-  if (!viewMount) return;
+  if (!files.length) return;
+  const ui = uploadUi(`${into}/ 에 ${files.length}개`);
   const zips = files.filter((f) => /\.zip$/i.test(f.file.name));
   const plain = files.filter((f) => !/\.zip$/i.test(f.file.name));
   let extractZips: boolean | null = zips.length ? null : false;
   if (zips.length) {
     extractZips = await new Promise<boolean | null>((resolve) => {
-      const ask = el('div', { class: 'zipask' });
+      const askRow = el('div', { class: 'zipask' });
       const unpack = el('button', { class: 'primary tiny', text: '풀어서 올리기' });
       const keep = el('button', { class: 'ghost tiny', text: 'zip 그대로 올리기' });
       const cancel = el('button', { class: 'ghost tiny', text: '취소' });
-      unpack.addEventListener('click', () => { ask.remove(); resolve(true); });
-      keep.addEventListener('click', () => { ask.remove(); resolve(false); });
-      cancel.addEventListener('click', () => { ask.remove(); resolve(null); });
-      ask.append(
+      unpack.addEventListener('click', () => { askRow.remove(); resolve(true); });
+      keep.addEventListener('click', () => { askRow.remove(); resolve(false); });
+      cancel.addEventListener('click', () => { askRow.remove(); resolve(null); });
+      askRow.append(
         el('span', { text: `zip ${zips.length}개 (${zips.map((z) => z.file.name).slice(0, 3).join(', ')}${zips.length > 3 ? ' …' : ''}) —` }),
         unpack, keep, cancel,
       );
-      (viewMount?.querySelector('.fileslot') ?? viewMount)?.prepend(ask);
+      ui.ask.appendChild(askRow);
     });
-    if (extractZips === null && !plain.length) return;
+    if (extractZips === null && !plain.length) {
+      ui.finish(true, '취소했습니다');
+      return;
+    }
   }
   const todo = extractZips === null ? plain : [...plain, ...zips];
-  const prog = el('div', { class: 'uploadprog' });
-  (viewMount.querySelector('.fileslot') ?? viewMount).prepend(prog);
+  const totalBytes = todo.reduce((s, t) => s + t.file.size, 0) || 1;
+  let sentBytes = 0;
   let done = 0;
   let failed = 0;
   let extracted = 0;
   const t0 = Date.now();
+  const paint = (extraNote = ''): void => {
+    const secs = Math.max(1, Math.round((Date.now() - t0) / 1000));
+    ui.set(sentBytes, totalBytes,
+           extraNote || `${done + failed}/${todo.length} · ${fmtSize(sentBytes)}/${fmtSize(totalBytes)} · ${secs}초`);
+  };
+  paint();
 
   // Batches of raw bytes, ~16MB each, two in flight: a thousand small files
   // is ~60 requests instead of a thousand, with no base64 in between.
@@ -824,6 +1122,7 @@ async function uploadMany(files: Incoming[], into: string): Promise<void> {
   const sendBig = async ({ file, rel }: Incoming): Promise<void> => {
     const name = file.name;
     const extract = !!extractZips && /\.zip$/i.test(name);
+    const before = sentBytes;
     try {
       for (let offset = 0; offset < file.size; offset += BATCH) {
         const end = Math.min(file.size, offset + BATCH);
@@ -831,17 +1130,20 @@ async function uploadMany(files: Incoming[], into: string): Promise<void> {
         await state.uploadChunk(into, {
           name, rel, offset, total: file.size, last: end >= file.size, extract,
         }, bytes);
-        const pct = Math.round((end / file.size) * 100);
-        prog.textContent = `${name} 올리는 중 ${pct}% (${Math.round(end / 1048576)}/${Math.round(file.size / 1048576)}MB)`;
+        sentBytes = before + end;
+        paint(`${name} ${Math.round((end / file.size) * 100)}% (${Math.round(end / 1048576)}/${Math.round(file.size / 1048576)}MB)`);
       }
       done += 1;
     } catch (e) {
       failed += 1;
-      notice(`${name}: ` + msg(e), 'err');
+      sentBytes = before + file.size;
+      ui.error(`${name}: ` + msg(e));
     }
+    paint();
   };
 
   const sendBatch = async (batch: Incoming[]): Promise<void> => {
+    const bytes = batch.reduce((s, b) => s + b.file.size, 0);
     try {
       const entries = await Promise.all(batch.map(async ({ file, rel }) => ({
         name: file.name, rel, bytes: new Uint8Array(await file.arrayBuffer()),
@@ -849,6 +1151,7 @@ async function uploadMany(files: Incoming[], into: string): Promise<void> {
       const r = await state.uploadBatch(into, entries, !!extractZips);
       done += r.count;
       extracted += r.extracted;
+      sentBytes += bytes;
     } catch (e) {
       // A batch that failed whole: retry its files one at a time so a single
       // bad file does not take its neighbours with it.
@@ -859,23 +1162,25 @@ async function uploadMany(files: Incoming[], into: string): Promise<void> {
           if (r.extracted) extracted += r.extracted;
         } catch (e2) {
           failed += 1;
-          notice(`${file.name}: ` + msg(e2), 'err');
+          ui.error(`${file.name}: ` + msg(e2));
         }
+        sentBytes += file.size;
       }
       void e;
     }
-    const secs = Math.max(1, Math.round((Date.now() - t0) / 1000));
-    prog.textContent = `올리는 중 ${done + failed}/${todo.length} (${secs}초)`;
+    paint();
   };
-  prog.textContent = `올리는 중 0/${todo.length}`;
   let next = 0;
   const worker = async () => { while (next < batches.length) await sendBatch(batches[next++]); };
   await Promise.all([worker(), worker()]);
   // The large ones after the batches, one at a time: their pieces are ordered
   // and the progress line is per file.
   for (const item of big) await sendBig(item);
-  prog.remove();
-  notice(`${done}개를 ${into}/ 에 올렸습니다.` + (extracted ? ` (zip 에서 ${extracted}개 풀림)` : '') + (failed ? ` 실패 ${failed}개.` : ''), failed ? 'err' : 'ok');
+  const summary = `${done}개를 ${into}/ 에 올렸습니다.`
+    + (extracted ? ` (zip 에서 ${extracted}개 풀림)` : '')
+    + (failed ? ` 실패 ${failed}개.` : '');
+  ui.finish(!failed, failed ? `완료 · 실패 ${failed}개` : '완료');
+  notice(summary, failed ? 'err' : 'ok');
   if (nodes.has(into)) { selectedDir = into; expandTo(into); }
   state.touchFiles();
   await refresh();

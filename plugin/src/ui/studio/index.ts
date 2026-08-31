@@ -9,7 +9,7 @@
  *
  *   left    two tabs. 프롬프트: the ONE selected style edited in place, the
  *           character view behind the 캐릭터 button, the 조각 button, and the
- *           generation card. OUTPUT: the studio/images tree. Both rails
+ *           generation card. OUTPUT: the studio/output tree. Both rails
  *           collapse to a slim strip - the studio is the crowded tab, and the
  *           centre is where the work happens.
  *   centre  the picked card's editor, the fragment organizer, the live queue,
@@ -27,8 +27,8 @@ import { el, clear } from './../dom';
 import { state, type StudioItem } from '../../state';
 import { threePane } from '../panes';
 import { bindAgent, mountAgent } from '../agentpane';
-import { CARD_AREAS, OUTPUT_ROOT, S, hub, checkUnresolved, persistLeftTab, persistCentreTab,
-         buildOutput, find, msg } from './store';
+import { CARD_AREAS, OUTPUT_ROOT, S, hub, areaOfPath, canonPath, checkUnresolved,
+         persistLeftTab, persistCentreTab, buildOutput, find, msg } from './store';
 import { pollJob } from './gen';
 import { drawCardEditor, drawSceneEditor, drawRawFile, rawView } from './editors';
 import { drawCharacterEditor } from './char-edit';
@@ -198,7 +198,7 @@ async function refresh(): Promise<void> {
   const want = state.openStudioRequest;
   if (want) {
     state.openStudioRequest = null;
-    const folder = want.folder.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+    const folder = canonPath(want.folder);
     if (find(folder)) {
       S.selected = folder;
       const parts = folder.split('/');
@@ -327,12 +327,12 @@ function drawCentre(): void {
   // A card picked in a list: its editor, over everything - an editor is
   // always reachable, whatever the tabs are doing.
   if (S.selectedFile) {
-    const parts = S.selectedFile.split('/');
-    if (parts[1] === 'characters' && !/\.[a-z0-9]+$/i.test(S.selectedFile)) {
+    const area = areaOfPath(S.selectedFile);
+    if (area === 'characters' && !/\.[a-z0-9]+$/i.test(S.selectedFile)) {
       drawCharacterEditor(S.selectedFile);
     } else if (S.selectedFile.endsWith('.md')) {
       drawCardEditor(S.selectedFile);
-    } else if (parts[1] === 'scenes' && S.selectedFile.endsWith('.json') && !rawView.has(S.selectedFile)) {
+    } else if (area === 'scenes' && S.selectedFile.endsWith('.json') && !rawView.has(S.selectedFile)) {
       drawSceneEditor(S.selectedFile);
     } else {
       drawRawFile(S.selectedFile);

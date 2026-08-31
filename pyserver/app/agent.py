@@ -88,17 +88,20 @@ INSTRUCTIONS = """\
 작업 공간 규칙 (반드시 지켜라 — 모든 봇이 하나의 전역 공간을 쓴다):
 - `projects/<봇이름>/`  사용자가 직접 관리하는 참고 자료·프로젝트 폴더. **읽기는 자유,
   구조를 네가 바꾸지 마라.** 사용자가 올린 파일은 대개 여기 있다.
-- `studio/`  이미지 라이브러리(styles·characters·fragments·scenes·images). 프롬프트 카드와
-  생성물이 산다. 읽고 쓸 수 있다. **일회성 배치는 spec.scenes 인라인으로** — 임시 프리셋
-  파일을 `studio/scenes/` 에 만들지 마라 (반복용 임시 스펙은 `studio/.studio/adhoc/`).
+- `studio/`  이미지 라이브러리. 재료는 `studio/config/` 아래(styles·characters·fragments·
+  scenes·.studio), 생성 결과는 `studio/output/` 이다. 읽고 쓸 수 있다. **일회성 배치는
+  spec.scenes 인라인으로** — 임시 프리셋 파일을 `studio/config/scenes/` 에 만들지 마라
+  (반복용 임시 스펙은 `studio/config/.studio/adhoc/`).
 - `hina/<봇이름>/`  네 작업 공간이다. 임시는 `scratch/`, 완성 산출물(md·html·json)은 `out/`,
   스크립트는 `scripts/`. out/ 에 넣으면 대화창에 열기 버튼이 뜬다 — 결과물을 만들었으면
   반드시 여기 저장하고 "저장했습니다, 파일 탭에서 여실 수 있습니다"라고 알려라.
+  **임시 문서·임시 스크립트는 반드시 이 폴더 안에만 만든다** — projects/ 나 studio/ 에
+  스크래치 파일을 남기지 마라 (write_file 도 projects/ 쓰기를 거부한다).
 - `system/`  이 봇의 원본 스냅샷(카드·원본 전사). **읽기 전용이다.**
 - **파일 위치를 모르면 find_files(이름 글롭) / search_files(내용 검색) 로 먼저 찾아라.**
   결과 끝의 "총 N개 중 M개 표시"가 전부가 아니라고 말하면, 잘렸다고 사용자에게도 말해라.
 - **결과는 대화창에 직접 답한다** (별도 카드·아티팩트 없음). 보고서·비교표는 마크다운으로
-  답하고, **이미지는 `![설명](studio/images/…/파일.png)` 처럼 전역 경로로 넣으면 대화창에
+  답하고, **이미지는 `![설명](studio/output/…/파일.png)` 처럼 전역 경로로 넣으면 대화창에
   바로 그림으로 뜬다** — 경로는 `studio/…`, `projects/…`, `hina/…` 로 시작하는 공간 경로만
   (드라이브 문자·URL·`..` 는 안 그려진다). 배치 결과는 studio_generate 가 완성되는 대로 대화창에
   뿌려 주니 결과 이미지를 다시 나열할 필요는 없다. 긴 문서는 out/ 에 write_file 로도 남겨라.
@@ -1043,7 +1046,7 @@ def build() -> Agent[Deps]:
         spec 필드 (전부 선택; 카드는 경로 또는 **표시 이름**으로 — "오피스 카운셀링"
         같은 이름은 정확 일치로 해석되고, 겹치면 후보를 나열하며 거절한다):
           model          기본 nai-diffusion-4-5-full
-          styles         ["studio/styles/….md", "이름", …] — 생략하면 활성 카드,
+          styles         ["studio/config/styles/….md", "이름", …] — 생략하면 활성 카드,
                          명시적 [] 는 "스타일 없음"
           characters     경로/이름 리스트 (생략 = 활성 카드). dict 를 직접 넣어
                          애드혹 캐릭터도 가능({"caption","negative","position"}) —
@@ -1055,7 +1058,7 @@ def build() -> Agent[Deps]:
                          그 씬만 뽑는다 (scenePreset 경로에서만 동작)
           count / seed   씬당 장수, 시드(주면 씬 안에서 +1 씩 증가)
           characterName  파일명의 캐릭터 자리 (프롬프트와 무관)
-          folder         저장 폴더 (기본 studio/images)
+          folder         저장 폴더 (기본 studio/output)
           template       파일명 규칙 (기본 {character}-{emotion}-{stamp}-{n},
                          빈 필드는 구분자째 생략)
           useReference   true 면 활성 캐릭터 카드의 프리셋(캐릭터 레퍼런스 또는
@@ -1067,11 +1070,11 @@ def build() -> Agent[Deps]:
 
         라이브러리 파일은 일반 파일 도구(read_file / write_file)로 읽고 쓴다.
         스타일 .md 는 front matter + `## positive` / `## negative`. SD스튜디오
-        프리셋(studio/scenes/)은 NAIS3 형식이고, 씬 하나가 배치의 한 장이다.
+        프리셋(studio/config/scenes/)은 NAIS3 형식이고, 씬 하나가 배치의 한 장이다.
         **표정 세트는 씬마다 한 장씩 일반 생성으로 뽑는다** (디렉터 emotion 툴이
         아니다: 10배 비싸고 통제가 안 된다).
         프롬프트 안의 `{{…}}` 는 NovelAI 강조 문법이라 **절대 건드리지 않는다.**
-        `<조각>` · `<폴더/조각>` · `<컬렉션.키>` 는 studio/fragments/ 참조이고
+        `<조각>` · `<폴더/조각>` · `<컬렉션.키>` 는 studio/config/fragments/ 참조이고
         (조각 카드의 front matter 이름으로도 해석된다) 생성 직전에 치환된다 —
         계획 결과의 unresolved 는 못 찾은 참조다.
         """
@@ -1099,7 +1102,7 @@ def build() -> Agent[Deps]:
         레퍼런스는 확정 비용이 든다 — 바이브 인코딩 2 Anlas/장(캐시 시 0),
         캐릭터 레퍼런스는 **생성 장당 5 Anlas** — 쓰기 전에 사용자에게 알린다.
         일회성 씬 조합은 spec.scenes 인라인으로 보내고, 반복해서 쓸 임시 스펙은
-        studio/scenes/ 가 아니라 `studio/.studio/adhoc/` 에 write_file 로 남긴다.
+        studio/config/scenes/ 가 아니라 `studio/config/.studio/adhoc/` 에 write_file 로 남긴다.
         """
         try:
             spec = json.loads(spec_json)
@@ -1118,7 +1121,7 @@ def build() -> Agent[Deps]:
         shown = 0
         deadline = _time.time() + 60 * 60
         j = None
-        folder = str(spec.get("folder") or "studio/images")
+        folder = str(spec.get("folder") or "studio/output")
         while _time.time() < deadline:
             # The user's 중단 closes the stream; this thread hears of it here.
             # The batch the tool started is the tool's to stop, too.
@@ -1158,7 +1161,7 @@ def build() -> Agent[Deps]:
         """패널의 에셋 스튜디오 **검수 탭**을 이 폴더로 연다 (사용자가 고르고 채택하는 화면).
 
         배치가 끝나고 "검수해 보세요" 라고 할 때, 또는 사용자가 특정 폴더를 보고
-        싶다고 할 때 부른다. 폴더는 `studio/images/…` 전역 경로.
+        싶다고 할 때 부른다. 폴더는 `studio/output/…` 전역 경로.
         """
         rel = (folder or "").replace("\\", "/").strip("/")
         if not rel.startswith("studio/"):
@@ -1610,12 +1613,19 @@ def build() -> Agent[Deps]:
     def write_file(ctx: RunContext[Deps], name: str, content: str) -> str:
         """파일을 쓴다. 이름만 주면 hina/<봇>/out/ 에 산출물로 저장된다.
 
-        projects/ · studio/ · hina/ 로 시작하는 전체 경로를 주면 그 위치에 쓴다
-        (덮어쓴다 — 먼저 find_files 로 확인해라). 그 밖의 위치는 거부된다.
+        studio/ · hina/ 로 시작하는 전체 경로를 주면 그 위치에 쓴다
+        (덮어쓴다 — 먼저 find_files 로 확인해라). projects/ 는 사용자가 직접
+        관리하는 영역이라 이 도구로는 쓸 수 없다. 그 밖의 위치도 거부된다.
         """
         rel = (name or "").replace("\\", "/").strip("/")
         area = rel.split("/", 1)[0]
-        if "/" in rel and area in ("projects", "studio", "hina"):
+        if area == "projects":
+            # The user's own tree (the instruction says read-only; this makes
+            # it true): a scratch note the agent parks there is exactly the
+            # mess the hina/ areas exist to hold.
+            return ("projects/ 는 사용자가 직접 관리하는 영역이라 쓰지 않습니다. "
+                    "산출물은 hina/<봇>/out/, 임시 문서·스크립트는 hina/<봇>/scratch/ 에 저장하세요.")
+        if "/" in rel and area in ("studio", "hina"):
             try:
                 dest = files._resolve(files.SPACE, rel)
             except files.FileError as e:

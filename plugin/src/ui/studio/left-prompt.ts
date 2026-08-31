@@ -14,6 +14,7 @@
  */
 import { el } from '../dom';
 import { askName } from '../kit';
+import { attachHilite } from '../hilite';
 import { state, type StudioItem } from '../../state';
 import { pickerRow, openListPicker, type PickerEntry } from '../pickers';
 import { S, hub, activeOf, checkUnresolved, newCard, msg } from './store';
@@ -194,6 +195,11 @@ function buildStyleEditor(mountEl: HTMLElement, path: string): void {
     el('label', { class: 'field' }, [el('span', { text: '부정 프롬프트' }), neg]),
     status,
   );
+  // NAI syntax tints ({} · [] · N::…:: · <조각> · #주석) plus tag/fragment
+  // autocomplete, NAIS3-style (item 9-10 of the field report).
+  const fragNames = () => (S.cards.fragments ?? []).map((i) => i.name);
+  attachHilite(pos, { mode: 'nai', fragments: fragNames });
+  attachHilite(neg, { mode: 'nai', fragments: fragNames });
 
   const fill = (positive: string, negative: string) => {
     pos.value = positive;

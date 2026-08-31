@@ -488,6 +488,63 @@ export function diffCard(before: string | null, after: string, opts: { code?: bo
   ]);
 }
 
+export interface MenuItem {
+  label: string;
+  danger?: boolean;
+  disabled?: boolean;
+  onClick(): void;
+}
+
+/**
+ * A context menu at a screen position (the right-click on a file row).
+ *
+ * Same dismissal contract as `popover` (click-away, Escape), plus a second
+ * right-click anywhere closes the first menu rather than stacking one on top
+ * of the other. `null` in the item list draws a separator.
+ */
+export function menuAt(x: number, y: number, items: (MenuItem | null)[]): () => void {
+  const menu = el('div', { class: 'ctxmenu' });
+  for (const item of items) {
+    if (item === null) {
+      menu.appendChild(el('div', { class: 'ctxsep' }));
+      continue;
+    }
+    const b = el('button', { class: item.danger ? 'danger' : '', text: item.label }) as HTMLButtonElement;
+    b.disabled = !!item.disabled;
+    b.addEventListener('click', () => {
+      close();
+      item.onClick();
+    });
+    menu.appendChild(b);
+  }
+  document.body.appendChild(menu);
+  const vw = window.innerWidth || 1024;
+  const vh = window.innerHeight || 768;
+  const mw = menu.offsetWidth || 180;
+  const mh = menu.offsetHeight || 200;
+  menu.style.left = Math.max(4, Math.min(x, vw - mw - 4)) + 'px';
+  menu.style.top = Math.max(4, Math.min(y, vh - mh - 4)) + 'px';
+
+  const close = () => {
+    menu.remove();
+    document.removeEventListener('click', away, true);
+    document.removeEventListener('contextmenu', away, true);
+    document.removeEventListener('keydown', esc, true);
+  };
+  const away = (e: Event) => {
+    if (!menu.contains(e.target as Node)) close();
+  };
+  const esc = (e: Event) => {
+    if ((e as KeyboardEvent).key === 'Escape') close();
+  };
+  setTimeout(() => {
+    document.addEventListener('click', away, true);
+    document.addEventListener('contextmenu', away, true);
+    document.addEventListener('keydown', esc, true);
+  }, 0);
+  return close;
+}
+
 export function popover(anchor: HTMLElement, content: HTMLElement): () => void {
   const pop = el('div', { class: 'popover' }, [content]);
   document.body.appendChild(pop);

@@ -325,4 +325,9 @@ def describe_helper() -> str:
         The script can read this bot's SYSTEM snapshot (RISUHINA_SYSTEM env:
         card.md, original/) but not write it, cannot reach other bots' DB rows,
         and cannot start another process. Everything else works normally.
+
+        `import realooc` 은 같은 헬퍼의 옛 이름이며 계속 동작한다 (스크립트
+        스킬이 그렇게 말해도 경로를 바꿀 필요 없다). 임시 파일·스크립트는
+        반드시 hina/<봇>/ 안(scratch/·scripts/)에 만든다 — projects/ 는
+        사용자의 영역이라 임시 파일을 두지 않는다.
     """).strip()

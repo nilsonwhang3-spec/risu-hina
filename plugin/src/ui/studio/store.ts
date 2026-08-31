@@ -20,8 +20,29 @@ export const CARD_AREAS: { area: string; label: string; toggle: boolean }[] = [
   { area: 'fragments', label: '조각 프롬프트', toggle: false },
 ];
 
-export const OUTPUT_ROOT = 'studio/images';
+export const OUTPUT_ROOT = 'studio/output';
+/** The material tier (studio_v2): cards live under studio/config/<area>. */
+export const CONFIG_ROOT = 'studio/config';
 export const IMAGE_RE = /\.(png|jpe?g|gif|webp|avif|bmp)$/i;
+
+/** The flat-era studio paths, folded into the two-tier layout - persisted
+ * state (gen.folder, reservation keys) predates the split. */
+export function canonPath(p: string): string {
+  const r = (p || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+  const m = /^studio\/(styles|characters|fragments|scenes|\.studio)(\/.*)?$/.exec(r);
+  if (m) return `studio/config/${m[1]}${m[2] ?? ''}`;
+  const im = /^studio\/images(\/.*)?$/.exec(r);
+  if (im) return `studio/output${im[1] ?? ''}`;
+  return r;
+}
+
+/** The card area a config path belongs to ('styles', 'scenes', …), '' for
+ * anything outside the material tier - what refreshArea and the editor
+ * dispatch key on now that paths carry the config/ segment. */
+export function areaOfPath(path: string): string {
+  const m = /^studio\/config\/([^/]+)/.exec(canonPath(path));
+  return m ? m[1] : '';
+}
 
 export interface Folder {
   path: string;
@@ -137,6 +158,8 @@ export const gen = {
 try {
   const savedGen = JSON.parse(localStorage.getItem(GEN_KEY) || 'null') as Partial<typeof gen> | null;
   if (savedGen && typeof savedGen === 'object') Object.assign(gen, savedGen);
+  // A folder saved before the config/output split still points at images/.
+  gen.folder = canonPath(gen.folder) || OUTPUT_ROOT;
 } catch { /* storage may be unavailable in the iframe */ }
 export function persistGen(): void {
   try { localStorage.setItem(GEN_KEY, JSON.stringify(gen)); } catch { /* fine */ }
@@ -185,11 +208,12 @@ try {
     Record<string, Record<string, number | Record<string, number>>> | null;
   if (saved && typeof saved === 'object') {
     // The map briefly had a per-cast third level; fold it back to counts.
+    // Preset keys saved before the config/output split are canonicalised.
     for (const [preset, scenes] of Object.entries(saved)) {
       for (const [scene, v] of Object.entries(scenes || {})) {
         const n = typeof v === 'number' ? v
           : Object.values(v || {}).reduce((a, b) => a + (Number(b) || 0), 0);
-        if (n > 0) ((reserves[preset] ??= {})[scene] = n);
+        if (n > 0) ((reserves[canonPath(preset)] ??= {})[scene] = n);
       }
     }
   }
@@ -256,10 +280,10 @@ export function cardStem(name: string): string {
 }
 
 /** The first `stem`, `stem-2`, `stem-3` … not taken in this area's listing.
- * `folder` places the card under `studio/<area>/<folder>/`. */
+ * `folder` places the card under `studio/config/<area>/<folder>/`. */
 export function freeCardPath(area: string, stem: string, suffix: string, folder = ''): string {
   const taken = new Set((S.cards[area] ?? []).map((i) => i.path));
-  const base = `studio/${area}` + (folder ? `/${folder}` : '');
+  const base = `${CONFIG_ROOT}/${area}` + (folder ? `/${folder}` : '');
   for (let n = 1; ; n++) {
     const p = `${base}/${stem}${n > 1 ? `-${n}` : ''}${suffix}`;
     if (!taken.has(p)) return p;
@@ -320,7 +344,7 @@ export async function renameCardFile(path: string, newName: string): Promise<str
 
 // --- the output tree model ---------------------------------------------------
 
-/** The space listing's studio/images paths into one tree. */
+/** The space listing's studio/output paths into one tree. */
 export function buildOutput(): void {
   S.outputRoot = { path: OUTPUT_ROOT, name: 'output', children: [], files: [] };
   if (!S.listing) return;

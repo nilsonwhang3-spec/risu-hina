@@ -97,6 +97,28 @@ function syncModeTabs(): void {
     const b = document.getElementById('tab-' + id);
     if (b) b.style.display = mode === 'bot' ? '' : 'none';
   }
+  syncBackTab();
+}
+
+/** The tab bar's mode chip: which half the mode tabs belong to. */
+const modeChip = el('span', { class: 'badge modechip modetab' });
+
+/**
+ * Inside an edit screen the first tab is the way BACK, and it says so:
+ * '선택' reads as one more content tab, and the user asked for a back
+ * affordance once a mode has been entered. On the picker itself it stays
+ * '선택' - there is nothing to go back to.
+ */
+function syncBackTab(): void {
+  const label = document.querySelector('#tab-chats .tablabel') as HTMLElement | null;
+  const btn = document.getElementById('tab-chats');
+  const inEdit = active !== 'chats';
+  if (label) label.textContent = inEdit ? '‹ 뒤로' : '선택';
+  if (btn) btn.title = inEdit ? '선택 화면으로 돌아갑니다 (봇·챗 다시 고르기)' : '봇과 챗을 고르는 화면입니다';
+  modeChip.textContent = mode === 'chat' ? '챗 편집' : '봇 편집';
+  modeChip.title = mode === 'chat'
+    ? '이 챗의 재료(턴·챗 로어북·장기기억·챗 변수)를 고치는 화면입니다'
+    : '봇 카드의 재료(메타·인사말·봇 로어북·Regex·트리거·에셋)를 고치는 화면입니다';
 }
 
 const ALL_TABS: TabId[] = [...CONTENT_TABS.map(([id]) => id), 'settings'];
@@ -183,6 +205,7 @@ export function setTab(tab: TabId): void {
   }
   // The gear is a toggle, so it has to look pressed while settings is open.
   document.getElementById('open-settings')?.classList.toggle('on', tab === 'settings');
+  syncBackTab();
   renderActive();
   syncSettingsBar();
   syncToolslot();
@@ -200,7 +223,7 @@ function syncSettingsBar(): void {
   const row = document.querySelector('.tabs') as HTMLElement | null;
   if (!row) return;
   const inSettings = active === 'settings';
-  for (const b of Array.from(row.querySelectorAll('.tab, .tabsep'))) {
+  for (const b of Array.from(row.querySelectorAll('.tab, .tabsep, .modetab'))) {
     (b as HTMLElement).style.display = inSettings ? 'none' : '';
   }
   if (!inSettings) syncModeTabs();
@@ -321,7 +344,7 @@ export function buildShell(): void {
 
   const tabButton = (id: TabId, label: string) => {
     const b = el('button', { class: 'tab', id: 'tab-' + id }, [
-      el('span', { text: label }),
+      el('span', { class: 'tablabel', text: label }),
       // Only the files tab ever fills this: the count of agent outputs the
       // user has not looked at. Cleared by opening the tab.
       el('span', { class: 'badge warn tabbadge', style: { display: 'none' } }),
@@ -407,6 +430,10 @@ export function buildShell(): void {
       ...CONTENT_TABS.flatMap(([id, label]) => (
         id === 'files'
           ? [el('span', { class: 'tabsep', title: '여기부터는 편집 대상이 아니라 작업 공간입니다 — 봇의 워크스페이스와, 봇과 무관한 에셋 스튜디오' }), tabButton(id, label)]
+          // The mode chip sits right after the back tab, naming the group of
+          // tabs beside it (봇 편집 / 챗 편집) - the user asked for the mode
+          // to be readable at the tab bar, not only in the title row.
+          : id === 'chats' ? [tabButton(id, label), modeChip]
           : [tabButton(id, label)]
       )),
       syncBadge,
