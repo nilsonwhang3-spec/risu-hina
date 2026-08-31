@@ -762,6 +762,10 @@ export class AgentPanel {
             // strip in place, each opening large in the artifact viewer.
             const paths = Array.isArray(e.paths) ? (e.paths as string[]).filter(Boolean) : [];
             if (!paths.length) break;
+            // The files (and studio) tabs learn of the new images NOW, not on
+            // a manual 새로고침 - the §1-28 report ("생성해도 새로고침 해야
+            // 보임") was exactly this missing bump.
+            state.touchFiles(paths);
             const strip = el('div', { class: 'imgstrip' });
             for (const p of paths.slice(0, 8)) {
               const name = p.slice(p.lastIndexOf('/') + 1);
@@ -796,6 +800,12 @@ export class AgentPanel {
             // until the cards are in, then mark the turn finished.
             setThinking(true, '제안·변경 카드를 정리하는 중입니다…');
             await this.refreshStaged();
+            // The turn may have written files ANYWHERE in the space
+            // (write_file into studio/, a script into scratch/), and the
+            // out/-watcher above only sees hina/*/out. One rev bump per
+            // finished turn keeps the files and studio tabs honest without
+            // anyone pressing 새로고침 (§1-28).
+            state.touchFiles();
             finish('완료');
             bubble.appendChild(this.costLine(
               e.usage as Record<string, unknown> | undefined,

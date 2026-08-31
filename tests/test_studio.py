@@ -368,6 +368,52 @@ check("an unknown job answers None", studiojob.preview("nope", 0) is None)
 with studiojob._preview_lock:
     studiojob._preview.pop("job_x", None)
 
+print("\ntest_batches_run_serially")
+# NovelAI locks concurrent generation per account (HTTP 429 / "Concurrent
+# generation is locked" - the §1-28 field report), so jobs started together
+# must take turns. Two jobs, a fake generator that counts overlap: max
+# concurrency has to be 1 and both still finish.
+import threading as _th  # noqa: E402
+import time as _t  # noqa: E402
+
+from app import nai as _nai  # noqa: E402
+
+_orig_gen, _orig_anlas = _nai.generate, _nai.anlas
+_par = {"cur": 0, "max": 0}
+_plk = _th.Lock()
+
+
+def _fake_gen(model, prompt, negative="", params=None, vibes=None, charrefs=None):
+    with _plk:
+        _par["cur"] += 1
+        _par["max"] = max(_par["max"], _par["cur"])
+    _t.sleep(0.2)
+    with _plk:
+        _par["cur"] -= 1
+    return studio.make_mask(8, 8, [])
+
+
+_nai.generate = _fake_gen
+_nai.anlas = lambda: -1
+try:
+    from app import studiojob as _sj  # noqa: E402
+
+    _specs = [{"model": "nai-diffusion-4-5-full", "styles": [], "characters": [],
+               "scenes": [{"name": f"s{i}", "prompt": "a"}], "count": 2,
+               "streaming": False, "folder": "studio/output/직렬테스트"} for i in (1, 2)]
+    _ids = [_sj.start(s)["jobId"] for s in _specs]
+    _deadline = _t.time() + 30
+    while _t.time() < _deadline:
+        _states = {( _sj.get(i) or {}).get("state") for i in _ids}
+        if _states <= {"done", "partial", "error"}:
+            break
+        _t.sleep(0.2)
+    check("both jobs finished", _states == {"done"}, str(_states))
+    check("they never generated concurrently", _par["max"] == 1, str(_par))
+finally:
+    _nai.generate = _orig_gen
+    _nai.anlas = _orig_anlas
+
 print("\ntest_adoption_needs_no_copy")
 # The library and the workspace are one space: an image is adopted by its own
 # global path, checked (PNG-ness) rather than copied.
@@ -656,6 +702,12 @@ check("the defaults are the studio's: steps 28, rescale 0.4, quality OFF",
       f"steps={pd['steps']} rescale={pd['cfg_rescale']}")
 check("ucPreset 4 (없음) merges nothing",
       nai.build_parameters("x", "y", {"ucPreset": 4})["negative_prompt"] == "y")
+# The ecosystem numbering (novelai-python, koishi bot) says 2 = None; specs
+# written against it used to hit our get() default only by luck (§1-28).
+check("ucPreset 2 is None too, explicitly",
+      2 in nai.UC_PRESETS and nai.build_parameters("x", "y", {"ucPreset": 2})["negative_prompt"] == "y")
+check("ucPreset 3 is Human Focus, NOT None",
+      nai.build_parameters("x", "y", {"ucPreset": 3})["negative_prompt"].startswith("nsfw"))
 
 print("\ntest_reference_mode")
 # 바이브와 캐릭터 레퍼런스는 함께 실리지 않는다: refMode 가 고른다.

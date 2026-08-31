@@ -38,7 +38,9 @@ projects/ · NAI torn-connection retry + a friendly RemoteProtocolError message 
 old-name note) **+ §1-27** (중단 kills the running run_python subprocess · multi-line fragments
 are a random one-line pool per image (NAIS3 semantics, recursive, depth 10) · the splitter
 re-clamps on container resize + an actual-overflow belt, so the agent pane can no longer sit
-past the right edge)
+past the right edge) **+ §1-28** (the NSFW asset-generation pitfalls SKILL seeded from the
+user's try-and-error notes · ucPreset 2 = None for real · batches globally serial (429 guard) ·
+agent-made files show up without a manual 새로고침)
 (gate ALL GREEN; the minor went up so the version gate trips when it ships). **Staged on test-server
 2026-08-30 night AT §1-25 (= §1-19~24 included): service stopped → backup `data-backup-20260830-s120`
 (11,358 files) → app/*.py + seeds/studio-image-ops.md + tools/probe_nai.py + requirements.in scp'd,
@@ -91,6 +93,36 @@ mixed-cast multi-entry batch from the panel.** Released = **v0.10.0 BETA** (§1-
 - Historical note kept below: the one-time manual reinstall advice for 0.1.0-era installs.
 
 → (historical) **First thing to do**: the user reinstalls `plugin/Risu.Hina.Plugin.js` into RisuAI **by hand, once** (the installed 0.1.0's update-url cannot be read because of CORS) → check that `+` appears from the next release on → verify M2 in real use (§5-2).
+
+## 1-28. 2026-08-31 - 0.11.0 (unreleased, continued): the NSFW-assets skill, ucPreset 2, serial batches, no-refresh file visibility
+
+The user's generation try-and-error notes become a SKILL, plus one bug ("파일을 생성하면
+새로고침 해야 보임"). One commit, gate ALL GREEN. Not yet staged.
+
+- **New seeded skill "NSFW 에셋 생성 함정"** (`seeds/studio-nsfw-assets.md`, SEED_KEY → v6 so
+  existing installs gain it on next boot; name-deduped). The user's document, adapted to this
+  backend: charref letterbox rule (contain into 1024×1536, never crop) · the ucPreset table with
+  the recipe-verification step (`studio_recipe` → `parameters.uc` must not start with `nsfw,`)
+  · never `male`/`boy` in negatives (they suppress the man; fix the partner in positive) ·
+  female-charref solo-composition bias countermeasures (1boy/hetero up front, full body wide
+  shot, adhoc male, slightly lower ref strength) · partially-undressed vs nude variant prompts ·
+  style/composition tag separation for two-person scenes · serial batches with Anlas
+  before/after checks · the pre-flight checklist and the post-generation recipe/image checks.
+  studio_generate's docstring points at the skill for NSFW runs.
+- **ucPreset 2 is None for real** (`nai.UC_PRESETS[2] = ""`): the ecosystem numbering
+  (novelai-python, koishi bot - 0 Heavy · 1 Light · 2 None · 3 Human Focus) said 2, our table
+  only had 4; a spec saying 2 fell through `get()`'s default only by luck. Both are explicit
+  now, 3 stays Human Focus, tests pin all three.
+- **Batches are globally serial** (`studiojob._GEN_GATE`): NovelAI locks concurrent generation
+  per account (HTTP 429 / "Concurrent generation is locked" from the user's parallel job
+  registrations), so a job now waits its turn - state stays `pending` while queued (the panel
+  reads 대기), 취소 still works in the queue, and the agent docstring says to check one batch's
+  results before starting the next. test_studio proves two jobs never overlap a generation.
+- **Files show up without 새로고침**: the agent panel's out/-watcher only saw `hina/*/out`, so
+  a write_file into studio/ or a script's scratch/ product stayed invisible until the manual
+  refresh. Now every `images` stream event bumps `touchFiles(paths)` mid-turn and every `done`
+  bumps `touchFiles()` once - the files tab (filesRev key) and the studio (renderedRev guard)
+  re-read on their own. Panel-driven batch completion already did this (gen.ts touchQuiet).
 
 ## 1-27. 2026-08-31 - 0.11.0 (unreleased, continued): abort kills scripts, fragment random lines, splitter re-clamp
 

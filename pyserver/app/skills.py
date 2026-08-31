@@ -50,7 +50,10 @@ CATALOG_LIMIT = 6_000      # the whole catalog block
 ALWAYS_LIMIT = 16_000      # bodies of always-on skills, combined
 TEXT_EXT = {".md", ".txt", ".py", ".json", ".yaml", ".yml", ".csv", ".html", ".js", ".lua", ".xml"}
 
-SEED_KEY = "skills_seeded_v5"
+# v6 added the NSFW asset-generation pitfalls reference (§1-28); rotating the
+# key re-runs seed_once, which dedupes by name, so existing installs gain
+# only the new skill.
+SEED_KEY = "skills_seeded_v6"
 FOLDER_KEY = "skills_folders_v1"
 SEED_DIR = Path(__file__).resolve().parent / "seeds"
 
@@ -654,6 +657,8 @@ SEED_FILES: dict[str, tuple[str, str, bool]] = {
                         "사용자가 올린 .charx 카드를 읽기 좋은 폴더로 풀어 조사해야 할 때.", True),
     "studio-image-ops.md": ("에셋 스튜디오 이미지 가공",
                             "에셋 스튜디오의 이미지를 크기 조절·자르기·포맷 변환·메타데이터 제거해야 할 때. Pillow 는 배포 번들에 없어 run_python 에서 설치해 쓴다.", True),
+    "studio-nsfw-assets.md": ("NSFW 에셋 생성 함정",
+                              "성인(NSFW) 이미지 에셋을 생성·배치하기 전에 반드시. ucPreset None 지정(2)과 레시피 확인, 네거티브에 male/boy 금지, 여성 레퍼런스의 단독 구도 편향 대응, 의상 변형(partially undressed/nude) 프롬프트, 배치 직렬 실행, 생성 전·후 체크리스트.", True),
     "arca-html.md": ("아카라이브 HTML 작성",
                      "아카라이브(arca.live)에 붙여넣을 HTML(챗로그·소개글·요약)을 만들 때의 제약.", True),
 }

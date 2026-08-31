@@ -77,8 +77,12 @@ DEFAULTS: dict[str, Any] = {
 # Quality tags and the UC preset are CLIENT-side text merges: the NAI web
 # client appends/prepends these strings itself and sends qualityToggle /
 # ucPreset only as metadata. Text and index mapping are NAIS3's byte-asserted
-# web captures (tests/fixtures/nai-web-*.json there), adopted verbatim -
-# index 2 is unused by the web UI and 4 means none.
+# web captures (tests/fixtures/nai-web-*.json there), adopted verbatim.
+# **None is BOTH 2 and 4**: the wider NovelAI ecosystem numbers the presets
+# 0 Heavy · 1 Light · 2 None · 3 Human Focus (novelai-python, koishi
+# novelai-bot), while the web UI's own index used 4 for none - a spec saying
+# `ucPreset: 2` used to fall through get()'s default only by luck, so both
+# are explicit now (§1-28: the NSFW field report's UC trap).
 QUALITY_SUFFIX = ", very aesthetic, masterpiece, no text"
 _UC_HEAVY = ("nsfw, lowres, artistic error, film grain, scan artifacts, worst quality, "
              "bad quality, jpeg artifacts, very displeasing, chromatic aberration, dithering, "
@@ -89,6 +93,7 @@ UC_PRESETS: dict[int, str] = {
     1: ("nsfw, lowres, artistic error, scan artifacts, worst quality, bad quality, "
         "jpeg artifacts, multiple views, very displeasing, too many watermarks, "
         "negative space, blank page"),
+    2: "",
     3: _UC_HEAVY + ", @_@, mismatched pupils, glowing eyes, bad anatomy",
     4: "",
 }

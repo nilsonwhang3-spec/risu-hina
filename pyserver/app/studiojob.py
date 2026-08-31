@@ -28,6 +28,13 @@ from . import db, log, nai, studio
 _lock = threading.RLock()
 _cancel: set[str] = set()
 
+# ONE batch generates at a time, globally. NovelAI locks concurrent
+# generation per account ("Concurrent generation is locked", HTTP 429), so
+# jobs started together - an agent queuing per-character batches, the panel
+# on top of an agent run - must take turns, not race. A job waiting its turn
+# stays `pending` (the panel reads that as 대기) and still honours 취소.
+_GEN_GATE = threading.Lock()
+
 # Live previews stay in MEMORY, never in the jobs row: an intermediate frame
 # arrives per diffusion step and weighs hundreds of KB - writing payload_json
 # for each would grind SQLite for something worthless one second later.
@@ -148,6 +155,20 @@ def start(spec: dict) -> dict:
 
 
 def _run(job_id: str) -> None:
+    # Wait for the account's one generation slot, cancellable while queued.
+    while not _GEN_GATE.acquire(timeout=1.0):
+        with _lock:
+            if job_id in _cancel:
+                _cancel.discard(job_id)
+                _update(job_id, state="cancelled")
+                return
+    try:
+        _run_locked(job_id)
+    finally:
+        _GEN_GATE.release()
+
+
+def _run_locked(job_id: str) -> None:
     job = _row(job_id)
     if not job:
         return
