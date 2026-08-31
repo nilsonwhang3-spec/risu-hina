@@ -237,6 +237,25 @@ text, missing = studio.resolve_refs("<없는것.x>, 씬A")
 check("an unknown reference is reported", missing == ["<없는것.x>"], str(missing))
 check("and left in the prompt rather than dropped", "<없는것.x>" in text, text)
 
+# A multi-line fragment is a random POOL: one line per resolution, comment
+# and blank lines never candidates, the picked line's own refs resolved
+# (NAIS3's wildcard semantic - §1-27, "그중 1줄만 랜덤").
+files.upload(files.SPACE, "눈색.md",
+             text="# 아래에서 한 줄\nblue eyes\n\nred eyes, <조각프롬.a>\ngreen eyes",
+             into="studio/fragments")
+lo, _m = studio.resolve_refs("<눈색>", rng=lambda: 0.0)
+check("a multi-line fragment picks ONE line (first at rng=0)", lo == "blue eyes", lo)
+hi, _m = studio.resolve_refs("<눈색>", rng=lambda: 0.999)
+check("and the last at rng→1, comments/blanks never candidates", hi == "green eyes", hi)
+mid, mid_missing = studio.resolve_refs("<눈색>", rng=lambda: 0.5)
+check("a picked line's own reference resolves recursively",
+      mid == "red eyes, 조각A" and mid_missing == [], mid)
+rolled = {studio.resolve_refs("<눈색>")[0] for _ in range(40)}
+check("the default rng actually varies the pick", len(rolled) >= 2, str(rolled))
+check("a single-line fragment is untouched by the pool rule",
+      studio.resolve_refs("<조각파일>")[0] == "조각B")
+files.delete(files.SPACE, "studio/fragments/눈색.md")
+
 # The card's front-matter name is an address too: rename the card in the
 # editor and `<새이름>` keeps working without touching the filename.
 files.upload(files.SPACE, "eye-detail.md",

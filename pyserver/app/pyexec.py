@@ -16,9 +16,38 @@ import sqlite3
 import subprocess
 import sys
 import textwrap
+import threading
 from pathlib import Path
 
 from . import config, db, log, sandbox, staging, skills
+
+# The scripts a session has in flight, so the user's 중단 can actually stop
+# them: the abort closes the stream, but subprocess.run() used to block its
+# tool thread until the child finished on its own - "중단해도 스크립트가
+# 계속 돈다" was the report. The audit hook already forbids grandchildren,
+# so killing the one child ends everything the script started.
+_RUNNING: dict[str, list[subprocess.Popen]] = {}
+_RUN_LOCK = threading.Lock()
+
+
+def abort(session_id: str | None) -> int:
+    """Kill this session's running scripts (called from the turn's abort path).
+
+    Returns how many were killed. Safe to call with nothing running."""
+    if not session_id:
+        return 0
+    with _RUN_LOCK:
+        procs = list(_RUNNING.get(session_id) or [])
+    n = 0
+    for p in procs:
+        try:
+            p.kill()
+            n += 1
+        except OSError:
+            pass
+    if n:
+        log.info("run_python: %s script(s) killed on abort session=%s", n, session_id)
+    return n
 
 SCOPE_TABLES = ("characters", "chats", "turns", "turns_original", "lore_entries",
                 "card_fields", "card_scripts", "char_assets")
@@ -250,19 +279,43 @@ def run(
     boot = system / ".scratch" / "_bootstrap.py"
     log.debug("run_python chat=%s bytes=%s timeout=%s", chat_key, len(code), timeout)
     try:
-        proc = subprocess.run(
+        # Popen rather than subprocess.run: the handle is registered so the
+        # session's abort path (`abort()`) can kill a script mid-flight.
+        proc = subprocess.Popen(
             [sys.executable, "-u", str(boot)],
-            cwd=str(home), env=env, capture_output=True,
-            timeout=timeout, text=True, encoding="utf-8", errors="replace",
+            cwd=str(home), env=env,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, encoding="utf-8", errors="replace",
         )
-        out, err, rc, timed_out = proc.stdout, proc.stderr, proc.returncode, False
-    except subprocess.TimeoutExpired as e:
-        out = e.stdout if isinstance(e.stdout, str) else ""
-        err = e.stderr if isinstance(e.stderr, str) else ""
-        rc, timed_out = -1, True
+        if session_id:
+            with _RUN_LOCK:
+                _RUNNING.setdefault(session_id, []).append(proc)
+        try:
+            try:
+                out, err = proc.communicate(timeout=timeout)
+                rc, timed_out = proc.returncode, False
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                out, err = proc.communicate()
+                rc, timed_out = -1, True
+        finally:
+            if session_id:
+                with _RUN_LOCK:
+                    lst = _RUNNING.get(session_id)
+                    if lst and proc in lst:
+                        lst.remove(proc)
+                    if lst is not None and not lst:
+                        _RUNNING.pop(session_id, None)
     except Exception as e:  # noqa: BLE001 - report, never crash the request
         return {"ok": False, "error": f"{type(e).__name__}: {e}", "stdout": "", "stderr": "",
                 "exitCode": -1, "timedOut": False, "staged": 0}
+
+    # A nonzero exit right after the user's 중단 is the kill above landing,
+    # not a script bug - name it so the model does not diagnose a crash.
+    aborted = False
+    if rc != 0 and not timed_out and session_id:
+        from . import session as session_mod  # lazy: session imports this module
+        aborted = session_mod.stopped(session_id)
 
     staged = harvest(workspace_dir, chat_key, session_id)
 
@@ -270,13 +323,16 @@ def run(
         "ok": rc == 0 and not timed_out,
         "exitCode": rc,
         "timedOut": timed_out,
-        "stdout": out[:cap],
-        "stderr": err[:cap],
-        "truncated": len(out) > cap or len(err) > cap,
+        "aborted": aborted,
+        "stdout": (out or "")[:cap],
+        "stderr": (err or "")[:cap],
+        "truncated": len(out or "") > cap or len(err or "") > cap,
         "staged": staged,
     }
     if timed_out:
         result["error"] = f"{timeout}초 안에 끝나지 않아서 중단했습니다"
+    elif aborted:
+        result["error"] = "사용자가 중단해서 스크립트를 종료했습니다"
     log.info("run_python chat=%s rc=%s timeout=%s out=%sB staged=%s",
              chat_key, rc, timed_out, len(out), staged)
     return result

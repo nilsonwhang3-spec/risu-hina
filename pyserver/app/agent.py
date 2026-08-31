@@ -1076,7 +1076,8 @@ def build() -> Agent[Deps]:
         프롬프트 안의 `{{…}}` 는 NovelAI 강조 문법이라 **절대 건드리지 않는다.**
         `<조각>` · `<폴더/조각>` · `<컬렉션.키>` 는 studio/config/fragments/ 참조이고
         (조각 카드의 front matter 이름으로도 해석된다) 생성 직전에 치환된다 —
-        계획 결과의 unresolved 는 못 찾은 참조다.
+        계획 결과의 unresolved 는 못 찾은 참조다. **여러 줄 조각은 장마다
+        랜덤으로 1줄만** 실린다 (# 주석·빈 줄 제외, 고른 줄 안의 <참조> 재귀).
         """
         try:
             spec = json.loads(spec_json)

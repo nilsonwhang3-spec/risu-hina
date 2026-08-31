@@ -30,6 +30,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import random
 import re
 import shutil
 import time
@@ -536,7 +537,22 @@ def fragments() -> FragmentTable:
     return table
 
 
-def resolve_refs(text: str, table: FragmentTable | None = None) -> tuple[str, list[str]]:
+def _fragment_lines(text: str) -> list[str]:
+    """The substitution candidates of one fragment body (NAIS3's
+    contentToLines, adopted): lines trimmed, blank lines and `#` comment
+    lines out. A multi-line fragment is a RANDOM POOL - one line per image -
+    not a block."""
+    return [ln.strip() for ln in text.split("\n")
+            if ln.strip() and not ln.strip().startswith("#")]
+
+
+# A fragment line may itself reference fragments; recursion is depth-guarded
+# so a self-referencing pool cannot loop forever (NAIS3's guard, same value).
+MAX_REF_DEPTH = 10
+
+
+def resolve_refs(text: str, table: FragmentTable | None = None,
+                 rng=None) -> tuple[str, list[str]]:
     """Splice fragment references in. Returns (text, unresolved references).
 
     An unknown reference is **left in the text and reported**, never dropped:
@@ -544,20 +560,34 @@ def resolve_refs(text: str, table: FragmentTable | None = None) -> tuple[str, li
     wrongly, and the caller could not tell. Same rule as the selector's
     unreadable filenames.
 
+    A fragment whose body has several lines contributes **one line, picked at
+    random per call** - plan() resolves per image, so every image of a batch
+    rolls its own (the NAIS3 wildcard semantic the fragments came from).
+    Comment (`#`) and blank lines are never candidates, and the picked line's
+    own `<참조>` are resolved recursively (depth-guarded).
+
     `{{…}}` is NovelAI's emphasis and is not a reference - the pattern only
-    matches `<…>`, so emphasis passes through untouched.
+    matches `<…>`, so emphasis passes through untouched. `rng` is a
+    `random.random`-shaped hook for deterministic tests.
     """
     table = fragments() if table is None else table
+    roll = rng or random.random
     missing: list[str] = []
 
-    def sub(m: re.Match[str]) -> str:
-        hit = table.get(m.group(1))
-        if hit is None:
-            missing.append(m.group(0))
-            return m.group(0)
-        return hit
+    def expand(s: str, depth: int) -> str:
+        def sub(m: re.Match[str]) -> str:
+            hit = table.get(m.group(1))
+            if hit is None:
+                missing.append(m.group(0))
+                return m.group(0)
+            lines = _fragment_lines(hit)
+            if not lines:
+                return ""  # a body of comments alone contributes nothing
+            picked = lines[int(roll() * len(lines)) % len(lines)] if len(lines) > 1 else lines[0]
+            return expand(picked, depth + 1) if depth < MAX_REF_DEPTH else picked
+        return REF.sub(sub, s)
 
-    return REF.sub(sub, text), missing
+    return expand(text, 0), missing
 
 
 def read_scenes(rel: str) -> dict:

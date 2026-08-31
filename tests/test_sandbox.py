@@ -87,6 +87,34 @@ def main() -> int:
     check("it can write to scratch/", "wrote 작업 중" in r["stdout"], r["stdout"][:200])
     check("scratch file exists in the bot's hina home", (home / "scratch" / "note.txt").is_file())
 
+    print("\ntest_abort_kills_a_running_script")
+    # The user's 중단 must end the PROCESS, not just the narration: the tool
+    # thread used to block in subprocess.run until the script finished on its
+    # own (§1-27). Register the stop, kill via abort(), and the run returns
+    # long before its timeout with the abort named.
+    import threading as _threading
+    import time as _time
+    from app import session as _session
+    _session._STOPPED.add("sess-abort")
+    _res: dict = {}
+
+    def _bg() -> None:
+        _res.update(pyexec.run("import time\nprint('start', flush=True)\ntime.sleep(60)\n",
+                               ws, tk, ck, session_id="sess-abort", timeout_s=90))
+
+    _th = _threading.Thread(target=_bg)
+    _t0 = _time.time()
+    _th.start()
+    while _time.time() - _t0 < 15 and not pyexec.abort("sess-abort"):
+        _time.sleep(0.2)
+    _th.join(timeout=20)
+    _session._STOPPED.discard("sess-abort")
+    check("the script died well before its timeout",
+          not _th.is_alive() and _time.time() - _t0 < 30, str(_res)[:200])
+    check("the result says it was aborted, not crashed",
+          _res.get("ok") is False and _res.get("aborted") is True
+          and "중단" in str(_res.get("error") or ""), str(_res)[:200])
+
     print("\ntest_cannot_escape_the_space")
     r = run("import os; print('cwd', os.getcwd())", ck, tk, ws)
     check("the cwd is the bot's own hina folder",

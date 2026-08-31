@@ -76,7 +76,8 @@ export function drawFragments(): void {
   ]);
   viewMount.appendChild(head);
   viewMount.appendChild(el('div', { class: 'hint', style: { marginBottom: '8px' },
-    text: '프롬프트에서 <이름> · <폴더/이름> · <컬렉션.키> 로 참조합니다. 이름이 곧 참조 키입니다.' }));
+    text: '프롬프트에서 <이름> · <폴더/이름> · <컬렉션.키> 로 참조합니다. 이름이 곧 참조 키입니다. '
+      + '여러 줄 조각은 장마다 랜덤으로 1줄만 실립니다 (# 주석·빈 줄 제외).' }));
 
   const listCol = el('div', { class: 'fraglist' });
   const editCol = el('div', { class: 'fragedit' });

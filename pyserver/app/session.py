@@ -409,6 +409,10 @@ async def run(session_id: str, prompt: str, mode: str = "") -> AsyncGenerator[st
         # The client's 중단 closes this generator (GeneratorExit / cancel);
         # a tool still waiting in its thread learns of it through stopped().
         _STOPPED.add(session_id)
+        # A script the turn started is a separate PROCESS that hears nothing:
+        # kill it here, or 중단 only stops the narration while the script
+        # keeps running to the end (the §1-27 report).
+        pyexec.abort(session_id)
         # A turn that fails or is cut off must still leave its prompt (and
         # whatever text arrived) in the history: the next turn used to start
         # from the last SUCCESSFUL one, so after one error the agent had never

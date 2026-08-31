@@ -67,8 +67,20 @@ export function splitter(opts: SplitterOptions): HTMLElement {
     const min = down ? 160 : (opts.min ?? 250);
     const keep = keepFor(down);
     const span = down ? opts.container.clientHeight : opts.container.clientWidth;
-    const size = Math.round(Math.min(Math.max(min, span - keep), Math.max(min, px)));
+    let size = Math.round(Math.min(Math.max(min, span - keep), Math.max(min, px)));
     opts.target.style.flexBasis = size + 'px';
+    // Belt: keepFor GUESSES the centre's floor, and a child whose intrinsic
+    // min-content beats it (an unbreakable path string, a wide preview) still
+    // pushes the far pane past the edge. Measure the actual overflow after
+    // the basis lands and take it back out of the target. Horizontal only -
+    // a stacked column scrolls vertically by design.
+    if (!down) {
+      const over = opts.container.scrollWidth - opts.container.clientWidth;
+      if (over > 0 && size - over >= min) {
+        size -= over;
+        opts.target.style.flexBasis = size + 'px';
+      }
+    }
     return size;
   };
 
@@ -78,6 +90,23 @@ export function splitter(opts: SplitterOptions): HTMLElement {
       if (Number.isFinite(n) && n > 0) apply(n);
     }).catch(() => { /* first run */ });
   }
+
+  // The container itself resizes - the RisuAI window narrows, a studio rail
+  // collapses - and a px basis with flex-shrink:0 does not follow: the agent
+  // pane sat past the right edge until the next drag (§1-27, seen on the
+  // studio's 1장/배치). Re-clamp the current basis whenever the container
+  // moves; the stored preference is untouched, so widening the window gives
+  // the pane its size back on the next apply.
+  try {
+    let lastSpan = 0;
+    new ResizeObserver(() => {
+      const span = vertical() ? opts.container.clientHeight : opts.container.clientWidth;
+      if (span === lastSpan) return; // basis changes re-fire the observer; only the container matters
+      lastSpan = span;
+      const cur = parseInt(opts.target.style.flexBasis || '0', 10);
+      if (cur > 0) apply(cur);
+    }).observe(opts.container);
+  } catch { /* no ResizeObserver in the test DOM */ }
 
   let dragging = false;
   gutter.addEventListener('pointerdown', (e) => {

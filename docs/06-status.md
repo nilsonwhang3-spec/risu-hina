@@ -35,7 +35,10 @@ rename/copy/paste (`/files/copy`) · internal drag-move · the corner upload ove
 progress bar · '선택' → '‹ 뒤로' + a mode chip on the tab bar · NAI prompt tints + NAI tag
 autocomplete (`/studio/tag-suggest`) · markdown tints on lorebook bodies · write_file refuses
 projects/ · NAI torn-connection retry + a friendly RemoteProtocolError message · the realooc
-old-name note)
+old-name note) **+ §1-27** (중단 kills the running run_python subprocess · multi-line fragments
+are a random one-line pool per image (NAIS3 semantics, recursive, depth 10) · the splitter
+re-clamps on container resize + an actual-overflow belt, so the agent pane can no longer sit
+past the right edge)
 (gate ALL GREEN; the minor went up so the version gate trips when it ships). **Staged on test-server
 2026-08-30 night AT §1-25 (= §1-19~24 included): service stopped → backup `data-backup-20260830-s120`
 (11,358 files) → app/*.py + seeds/studio-image-ops.md + tools/probe_nai.py + requirements.in scp'd,
@@ -88,6 +91,35 @@ mixed-cast multi-entry batch from the panel.** Released = **v0.10.0 BETA** (§1-
 - Historical note kept below: the one-time manual reinstall advice for 0.1.0-era installs.
 
 → (historical) **First thing to do**: the user reinstalls `plugin/Risu.Hina.Plugin.js` into RisuAI **by hand, once** (the installed 0.1.0's update-url cannot be read because of CORS) → check that `+` appears from the next release on → verify M2 in real use (§5-2).
+
+## 1-27. 2026-08-31 - 0.11.0 (unreleased, continued): abort kills scripts, fragment random lines, splitter re-clamp
+
+Three items from the §1-26 round's use, one commit, gate ALL GREEN. Not yet staged.
+
+- **중단 now kills a running script** ("AI 스크립트 중일 때 중단 요청해도 중단이 잘 안됨"): the
+  abort closed the NDJSON stream and set `_STOPPED`, but `run_python`'s tool thread sat in
+  `subprocess.run` until the child finished on its own. `pyexec` now uses Popen, registers the
+  process per session (`_RUNNING`), and `session.run`'s abort path calls `pyexec.abort(session_id)`
+  right after `_STOPPED.add` - the child dies (the audit hook already forbids grandchildren, so
+  nothing survives it), and the result comes back `aborted: true` with "사용자가 중단해서
+  스크립트를 종료했습니다" instead of reading as a crash. `tests/test_sandbox.py` proves the kill
+  lands well before the timeout.
+- **Multi-line fragments are a random pool** ("여러 줄 조각은 그중 1줄만 적용되는 랜덤"): NAIS3's
+  wildcard semantic, now in `studio.resolve_refs` - candidates are the body's lines with blanks
+  and `#` comment lines dropped (`_fragment_lines` = NAIS3 contentToLines), ONE line picked per
+  resolution (plan() resolves per image, so each image of a batch rolls its own), and the picked
+  line's own `<참조>` resolve recursively (depth 10, NAIS3's guard). A body that is all comments
+  contributes ''. `rng` hook for deterministic tests; single-line fragments unchanged. The
+  editors' hints and studio_plan's docstring say the rule. NOT adopted (undocumented to users,
+  can come later if asked): `<*이름>` sequential, `<a|b|c>` inline, `(a/b)` wildcards.
+- **The splitter can no longer push the agent pane off-screen** (studio 1장/배치 report): the
+  `.right` basis is a stored PX with flex-shrink 0, and nothing re-clamped it when the CONTAINER
+  narrowed (RisuAI window resize, a rail collapse) - the §1-23 clamp only ran at drag time. A
+  ResizeObserver on the container re-applies the clamp when its span moves (guarded against
+  basis-change refires; the stored preference is untouched so widening restores), and apply()
+  grew a belt: after the basis lands, actual `scrollWidth - clientWidth` overflow is taken back
+  out of the target - covering any child whose intrinsic min-content beats the 260px floor guess.
+  Horizontal only; the stacked mobile column scrolls by design.
 
 ## 1-26. 2026-08-31 - 0.11.0 (unreleased, continued): the files/studio field report (14 items + 2 agent errors)
 

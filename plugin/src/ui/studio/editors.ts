@@ -47,7 +47,8 @@ export function cardEditor(path: string, opts: CardEditorOpts = {}): HTMLElement
   const order = el('input', { type: 'number', value: '100', step: '10',
                               title: '작을수록 앞에 이어집니다' }) as HTMLInputElement;
   const body = el('textarea', { rows: '18', class: 'promptedit',
-    placeholder: isStyle ? '## positive\n…\n\n## negative\n…' : '조각 본문 — <이름> 으로 참조됩니다',
+    placeholder: isStyle ? '## positive\n…\n\n## negative\n…'
+      : '조각 본문 — <이름> 으로 참조됩니다. 여러 줄이면 장마다 1줄이 랜덤으로 실립니다 (#줄·빈 줄 제외)',
   }) as HTMLTextAreaElement;
   setTimeout(() => attachHilite(body, { mode: 'nai', fragments: fragNames }), 0);
 
