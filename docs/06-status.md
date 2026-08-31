@@ -58,7 +58,29 @@ mixed-cast multi-entry batch from the panel.** Released = **v0.10.0 BETA** (§1-
 **0.3.1 (night of 2026-08-25)** — the real reason `+` never appeared was not "same version" but **CORS**: RisuAI reads `//@update-url` with a browser `fetch`, and the redirect response from the release URL carries no CORS header. Changed `//@update-url` to
 `https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js`, and made `tools/bundle.py` write that file into the repository (included in the release commit). In the backend code only VERSION changed.
 
-→ **First thing to do**: the user reinstalls `plugin/Risu.Hina.Plugin.js` into RisuAI **by hand, once** (the installed 0.1.0's update-url cannot be read because of CORS) → check that `+` appears from the next release on → verify M2 in real use (§5-2).
+**Handoff 2026-08-31 (the studio feedback marathon, §1-19 ~ §1-25).** Where the next session picks up:
+
+- **State**: master = 0.11.0 unreleased through §1-25, gate ALL GREEN, test-server staged AT §1-25
+  (service `RisuHina`, dev bundle served at `/plugin.js`; deploy-day backups `data-backup-20260830-*`
+  s120/r3~r7 are on that machine and can be pruned once the user is happy). The design record for
+  the whole redesign is `~/.claude/plans/zesty-dazzling-lagoon.md`; each round's ledger is
+  §1-20~§1-25 below.
+- **The user's next actions**: reinstall the dev plugin once from the backend's `/plugin.js`
+  (the `+` check still reads the committed 0.10.0 bundle), then use the studio for real.
+- **Waiting to be measured live** (needs the user's bot open / real use):
+  ① a BULK approval - 여러 에셋을 `propose_assets_add`/`propose_scripts_delete` 한 카드로 제안받아
+  전체 승인 (§1-25's one-card-write path; watch `data/logs/risuhina.log`, which now keeps the
+  whole story) · ② a multi-entry batch driven from the 배치 tab (reservations across presets)
+  · ③ streaming previews and the chat narration during an agent-run batch (§1-23) · ④ 검수 tab
+  round trip: 폴더 → 그룹별 검수 → 애셋 채택 → selected/ → 봇에 반영.
+- **When feedback comes back**: continue the ledger at **§1-26**, same shape (one commit per
+  round, gate, restage by [[risu-hina-staging-deploy]]-style scp - stop → backup → copy changed
+  `app/*.py` + `plugin/dist` bundle → start → `/health`).
+- **Release only when the user asks** (§5-1 has the procedure; the version gate will trip -
+  minor went up - so the backend and the plugin `+` go together).
+- Historical note kept below: the one-time manual reinstall advice for 0.1.0-era installs.
+
+→ (historical) **First thing to do**: the user reinstalls `plugin/Risu.Hina.Plugin.js` into RisuAI **by hand, once** (the installed 0.1.0's update-url cannot be read because of CORS) → check that `+` appears from the next release on → verify M2 in real use (§5-2).
 
 ## 1-25. 2026-08-30 - 0.11.0 (unreleased, continued): logs on disk, bulk proposals, one card write for many assets
 
