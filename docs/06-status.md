@@ -72,9 +72,13 @@ mixed-cast multi-entry batch from the panel.** Released = **v0.10.0 BETA** (§1-
 
 **Handoff 2026-08-31 (the studio feedback marathon, §1-19 ~ §1-25).** Where the next session picks up:
 
-- **State**: master = 0.11.0 unreleased through §1-25, gate ALL GREEN, test-server staged AT §1-25
-  (service `RisuHina`, dev bundle served at `/plugin.js`; deploy-day backups `data-backup-20260830-*`
-  s120/r3~r7 are on that machine and can be pruned once the user is happy). The design record for
+- **State**: master = 0.11.0 unreleased through §1-28, gate ALL GREEN, test-server staged AT §1-28
+  (2026-08-31 night: stop → backup `data-backup-20260831` (20,576 files) → 10 app modules + 2
+  seeds + the 764,648B dev bundle → start; verified live: `/health` 0.11.0, **studio_v2 moved
+  1,809 files into config/+output/** (manifest 511KB), skills seed v6 landed the NSFW skill,
+  `/studio/tag-suggest` answered real NovelAI candidates in 763ms. Service `RisuHina`, dev
+  bundle served at `/plugin.js`; older backups `data-backup-20260830-*` s120/r3~r7 plus
+  `data-backup-20260831` can be pruned once the user is happy). The design record for
   the whole redesign is `~/.claude/plans/zesty-dazzling-lagoon.md`; each round's ledger is
   §1-20~§1-25 below.
 - **The user's next actions**: reinstall the dev plugin once from the backend's `/plugin.js`
@@ -97,7 +101,8 @@ mixed-cast multi-entry batch from the panel.** Released = **v0.10.0 BETA** (§1-
 ## 1-28. 2026-08-31 - 0.11.0 (unreleased, continued): the NSFW-assets skill, ucPreset 2, serial batches, no-refresh file visibility
 
 The user's generation try-and-error notes become a SKILL, plus one bug ("파일을 생성하면
-새로고침 해야 보임"). One commit, gate ALL GREEN. Not yet staged.
+새로고침 해야 보임"). One commit, gate ALL GREEN. Staged to test-server 2026-08-31 night
+together with §1-26·§1-27 (see §0 Handoff for the verified record).
 
 - **New seeded skill "NSFW 에셋 생성 함정"** (`seeds/studio-nsfw-assets.md`, SEED_KEY → v6 so
   existing installs gain it on next boot; name-deduped). The user's document, adapted to this
@@ -126,7 +131,8 @@ The user's generation try-and-error notes become a SKILL, plus one bug ("파일�
 
 ## 1-27. 2026-08-31 - 0.11.0 (unreleased, continued): abort kills scripts, fragment random lines, splitter re-clamp
 
-Three items from the §1-26 round's use, one commit, gate ALL GREEN. Not yet staged.
+Three items from the §1-26 round's use, one commit, gate ALL GREEN. Staged 2026-08-31 night
+(with §1-26 and §1-28).
 
 - **중단 now kills a running script** ("AI 스크립트 중일 때 중단 요청해도 중단이 잘 안됨"): the
   abort closed the NDJSON stream and set `_STOPPED`, but `run_python`'s tool thread sat in
@@ -156,9 +162,9 @@ Three items from the §1-26 round's use, one commit, gate ALL GREEN. Not yet sta
 ## 1-26. 2026-08-31 - 0.11.0 (unreleased, continued): the files/studio field report (14 items + 2 agent errors)
 
 Fourteen usability items from real use plus two errors the agent itself reported, one commit,
-gate ALL GREEN (real-model agent test included). **Not yet staged to test-server** - restage per
-[[risu-hina-staging-deploy]] when the user asks; the studio_v2 boot migration will move that
-machine's `space/studio` into the new shape on first start (stop → backup → copy → start).
+gate ALL GREEN (real-model agent test included). Staged 2026-08-31 night (with §1-27·§1-28);
+the studio_v2 boot migration moved the machine's `space/studio` into the new shape on first
+start - 1,809 files, manifest recorded, verified live (§0 Handoff).
 
 - **studio_v2 layout (item 5)**: the studio is two tiers now - `studio/config/{styles,characters,
   fragments,scenes,.studio}` for material and `studio/output/` for results (was a flat level where
