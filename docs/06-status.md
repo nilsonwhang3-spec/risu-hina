@@ -104,7 +104,7 @@ mixed-cast multi-entry batch from the panel.** Released = **v0.10.0 BETA** (§1-
 
 **Handoff 2026-08-31 (the studio feedback marathon, §1-19 ~ §1-25).** Where the next session picks up:
 
-- **State**: master = 0.11.0 unreleased through §1-29, gate ALL GREEN, test-server staged AT §1-28
+- **State**: master = 0.11.0 unreleased through §1-29 (commit 9c22085), gate ALL GREEN, test-server staged AT §1-29 (2026-09-02)
   (2026-08-31 night: stop → backup `data-backup-20260831` (20,576 files) → 10 app modules + 2
   seeds + the 764,648B dev bundle → start; verified live: `/health` 0.11.0, **studio_v2 moved
   1,809 files into config/+output/** (manifest 511KB), skills seed v6 landed the NSFW skill,
@@ -163,6 +163,15 @@ Seventeen items of real-use feedback, one working session, plan `~/.claude/plans
 Not done here (deliberate): storage relocation of machinery (rejected), per-category danbooru
 tint colours (NAI suggest-tags drops `category`; a 1-line pass-through when wanted), md/nai
 집중 편집 tints (only code modes wired), marquee edge auto-scroll.
+
+**Staged on test-server 2026-09-02 (commit 9c22085)**: stop → backup `data-backup-20260902`
+(20,590 files) → files.py/main.py/studio.py + requirements.in → **pillow 11.3.0 pip-installed
+into the bundled interpreter** → dev bundle 803,875 B into `data/plugin/` → start. Verified:
+`/health` 0.11.0 · a real probe image (`스테이징프로브/probe2-…png`, 1.9 MB) answers `/files/thumb`
+as **16 KB image/webp** · `?hidden=1` carries the per-area `hidden` counts · the once-missing
+route registration answers ("no such file", not "no route"). The user reinstalls the dev plugin
+once from `/plugin.js` (the §1-29 UI ships in the bundle). Release still waits on the user —
+the release note must say existing installs re-run setup for pillow.
 
 ## 1-28. 2026-08-31 - 0.11.0 (unreleased, continued): the NSFW-assets skill, ucPreset 2, serial batches, no-refresh file visibility
 
