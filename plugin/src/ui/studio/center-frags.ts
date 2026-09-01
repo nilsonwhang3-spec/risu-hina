@@ -12,6 +12,7 @@ import { namePopover } from '../kit';
 import { state, type StudioItem } from '../../state';
 import { S, hub, newCard, cardStem, msg } from './store';
 import { cardEditor } from './editors';
+import { installDrag } from '../tree';
 
 let selFrag = '';
 const openFolders = new Set<string>(['']);
@@ -76,7 +77,7 @@ export function drawFragments(): void {
   ]);
   viewMount.appendChild(head);
   viewMount.appendChild(el('div', { class: 'hint', style: { marginBottom: '8px' },
-    text: '프롬프트에서 <이름> · <폴더/이름> · <컬렉션.키> 로 참조합니다. 이름이 곧 참조 키입니다. '
+    text: '프롬프트에서 <이름> · <폴더/이름> · <컬렉션.키> 로 참조합니다. 이름이 곧 참조 키이고, 같은 이름이 여러 폴더에 있으면 <폴더/이름> 으로 구분해 주세요. '
       + '여러 줄 조각은 장마다 랜덤으로 1줄만 실립니다 (# 주석·빈 줄 제외).' }));
 
   const listCol = el('div', { class: 'fraglist' });
@@ -86,6 +87,11 @@ export function drawFragments(): void {
   const search = el('input', { placeholder: '이름·설명 검색', value: filter }) as HTMLInputElement;
   search.addEventListener('input', () => { filter = search.value; hub.drawCentre(); });
   listCol.appendChild(el('div', { style: { marginBottom: '4px' } }, [search]));
+
+  // Duplicate stems across folders are invisible in the picker otherwise:
+  // both render as the bare name while a bare <name> resolves to just one.
+  const stemCount = new Map<string, number>();
+  for (const it of S.cards.fragments ?? []) stemCount.set(it.name, (stemCount.get(it.name) ?? 0) + 1);
 
   const groups = grouped();
   for (const [folder, items] of groups) {
@@ -115,10 +121,18 @@ export function drawFragments(): void {
     for (const it of items) {
       const row = el('div', { class: 'pickrow' + (selFrag === it.path ? ' on' : ''), title: it.path }, [
         el('div', { class: 'grow' }, [
-          el('div', { class: 'pickname' }, [el('span', { text: it.name })]),
+          el('div', { class: 'pickname' }, [
+            el('span', { text: it.name }),
+            (stemCount.get(it.name) ?? 0) > 1 ? el('span', {
+              class: 'badge warn', text: '중복 이름',
+              title: '같은 이름이 여러 폴더에 있습니다 — <폴더/이름> 으로 구분하세요. 폴더 없는 <이름> 은 최상위(없으면 정렬순) 조각으로 풀립니다.',
+            }) : null,
+          ]),
           it.description ? el('div', { class: 'hint', text: it.description }) : null,
         ]),
       ]);
+      // Draggable into the chat: the fragment FILE, for Hina to read.
+      installDrag(row, () => [it.path]);
       row.addEventListener('click', () => { selFrag = it.path; hub.drawCentre(); });
       listCol.appendChild(row);
     }

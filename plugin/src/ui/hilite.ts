@@ -86,6 +86,12 @@ function weightBackground(weight: number): string | null {
 
 const FRAGMENT_BG = 'rgba(92, 190, 125, 0.3)';
 const COMMENT_BG = 'rgba(128, 128, 136, 0.28)';
+// Shared tint palette for the code modes (regex / lua): the same colour
+// families nai and md already use, kept faint - these are tints, not a lexer.
+const STRING_BG = 'rgba(92, 190, 125, 0.22)';
+const KEYWORD_BG = 'rgba(96, 145, 235, 0.18)';
+const META_BG = 'rgba(233, 94, 80, 0.18)';
+const CBS_BG = 'rgba(124, 92, 255, 0.24)';
 
 interface Span { start: number; end: number; bg: string; prio: number }
 
@@ -148,7 +154,87 @@ function mdRanges(text: string): Range[] {
     ...regexSpans(text, /`[^`\n]+`/g, 'rgba(128, 128, 136, 0.3)', 3),
     ...regexSpans(text, /\[[^\]\n]+\]\([^)\n]+\)/g, 'rgba(92, 190, 125, 0.22)', 2),
     // RisuAI CBS calls ride lorebook text; seeing their extent is the point.
-    ...regexSpans(text, /\{\{[^{}\n]+\}\}/g, 'rgba(124, 92, 255, 0.24)', 4),
+    ...regexSpans(text, /\{\{[^{}\n]+\}\}/g, CBS_BG, 4),
+  ];
+  return flatten(text, spans);
+}
+
+/** find (in) - a regular expression: classes green, escapes red, operators blue. */
+function regexRanges(text: string): Range[] {
+  const spans: Span[] = [
+    ...regexSpans(text, /\[(?:\\.|[^\]\\])*\]/g, STRING_BG, 3),
+    ...regexSpans(text, /\\u[0-9a-fA-F]{4}|\\x[0-9a-fA-F]{2}|\\./g, META_BG, 4),
+    ...regexSpans(text, /[*+?|]|\{\d+(?:,\d*)?\}|\((?:\?[:=!<]*)?|\)/g, KEYWORD_BG, 2),
+  ];
+  return flatten(text, spans);
+}
+
+/** replace (out) / backgroundHTML: CBS calls, $ backrefs, HTML comments.
+ * (These bodies are HTML by the kiloline - a full HTML mode is out of scope.) */
+function regexOutRanges(text: string): Range[] {
+  const spans: Span[] = [
+    ...regexSpans(text, /\{\{[^{}\n]+\}\}/g, CBS_BG, 4),
+    ...regexSpans(text, /\$(?:\d{1,2}|&|<[^>\n]+>)/g, KEYWORD_BG, 3),
+    ...regexSpans(text, /<!--[\s\S]*?-->/g, COMMENT_BG, 2),
+  ];
+  return flatten(text, spans);
+}
+
+// Lua comments and strings cross lines, so one scanner walks the text once.
+// Keywords ride regexSpans at a LOWER prio and lose inside these islands -
+// flatten()'s prio rule does the context tracking for free.
+function luaIslands(text: string): Span[] {
+  const out: Span[] = [];
+  const n = text.length;
+  // '[' then '='* then '[' -> the '=' count, else null.
+  const longOpen = (at: number): number | null => {
+    if (text[at] !== '[') return null;
+    let j = at + 1;
+    while (text[j] === '=') j++;
+    return text[j] === '[' ? j - at - 1 : null;
+  };
+  const longClose = (from: number, eq: number): number => {
+    const close = ']' + '='.repeat(eq) + ']';
+    const at = text.indexOf(close, from);
+    return at === -1 ? n : at + close.length;
+  };
+  let i = 0;
+  while (i < n) {
+    const c = text[i];
+    if (c === '-' && text[i + 1] === '-') {
+      const eq = longOpen(i + 2);
+      let end: number;
+      if (eq !== null) end = longClose(i + 4 + eq, eq);
+      else { const nl = text.indexOf('\n', i); end = nl === -1 ? n : nl; }
+      out.push({ start: i, end, bg: COMMENT_BG, prio: 5 });
+      i = end;
+    } else if (c === '"' || c === "'") {
+      let j = i + 1;
+      while (j < n && text[j] !== c && text[j] !== '\n') { if (text[j] === '\\') j++; j++; }
+      const end = j < n && text[j] === c ? j + 1 : j;
+      out.push({ start: i, end, bg: STRING_BG, prio: 4 });
+      i = Math.max(end, i + 1);
+    } else {
+      const eq = longOpen(i);
+      if (eq !== null) {
+        const end = longClose(i + 2 + eq, eq);
+        out.push({ start: i, end, bg: STRING_BG, prio: 4 });
+        i = end;
+      } else i++;
+    }
+  }
+  return out;
+}
+
+// The RisuAI hook names ride along with the language keywords: these bodies
+// are trigger scripts, and the hooks are what a reader scans for (the list
+// mirrors pyserver/app/seeds/risuai-lua.md).
+const LUA_KEYWORDS = /\b(?:and|break|do|elseif|else|end|false|for|function|goto|if|in|local|nil|not|or|repeat|return|then|true|until|while|onStart|onOutput|onInput|onButtonClick|listenEdit|getChatVar|setChatVar)\b/g;
+
+function luaRanges(text: string): Range[] {
+  const spans: Span[] = [
+    ...luaIslands(text),
+    ...regexSpans(text, LUA_KEYWORDS, KEYWORD_BG, 1),
   ];
   return flatten(text, spans);
 }
@@ -212,12 +298,16 @@ function fmtCount(count: number): string {
 }
 
 export interface HiliteOpts {
-  mode: 'nai' | 'md';
+  mode: 'nai' | 'md' | 'regex' | 'regex-out' | 'lua';
   /** Fragment names for `<` completion (nai mode). */
   fragments?: () => string[];
   /** Turn tag autocomplete off (a negative box may still want colours). */
   noSuggest?: boolean;
 }
+
+const RANGES: Record<HiliteOpts['mode'], (text: string) => Range[]> = {
+  nai: naiRanges, md: mdRanges, regex: regexRanges, 'regex-out': regexOutRanges, lua: luaRanges,
+};
 
 /**
  * Attach colouring (and, in nai mode, autocomplete) to one textarea.
@@ -233,12 +323,34 @@ export function attachHilite(ta: HTMLTextAreaElement, opts: HiliteOpts): void {
   ta.parentNode.insertBefore(wrap, ta);
   wrap.appendChild(mirror);
   wrap.appendChild(ta);
+  try {
+    // .codearea and .promptedit boxes carry different backgrounds; capture the
+    // one this textarea had before hl-on turns it transparent, so the mirror
+    // repaints it instead of the stylesheet's --darkbg default.
+    const bg = getComputedStyle(ta).backgroundColor;
+    if (bg && bg !== 'transparent' && bg !== 'rgba(0, 0, 0, 0)') mirror.style.backgroundColor = bg;
+  } catch { /* test DOM: no computed styles */ }
   ta.classList.add('hl-on');
 
   const render = (): void => {
     copyTypography(ta, mirror);
+    try {
+      // The textarea loses content width to its own scrollbar; the mirror
+      // (overflow:hidden) does not. Pad the difference into the mirror or the
+      // wrap points differ and every line after the first wrap slides.
+      // (Deliberately not in copyTypography - caretCoords sizes by clientWidth
+      // and would double-shrink.) linkedom: offsetWidth is 0, so no-op.
+      if (ta.offsetWidth > 0) {
+        const cs = getComputedStyle(ta);
+        const bl = parseFloat(cs.borderLeftWidth) || 0;
+        const br = parseFloat(cs.borderRightWidth) || 0;
+        const sbw = Math.max(0, ta.offsetWidth - ta.clientWidth - bl - br);
+        mirror.style.paddingRight = `${(parseFloat(cs.paddingRight) || 0) + sbw}px`;
+        mirror.style.width = `${ta.offsetWidth}px`;
+      }
+    } catch { /* test DOM: no computed styles */ }
     const text = ta.value;
-    const ranges = opts.mode === 'nai' ? naiRanges(text) : mdRanges(text);
+    const ranges = RANGES[opts.mode](text);
     while (mirror.firstChild) mirror.removeChild(mirror.firstChild);
     for (const r of ranges) {
       const piece = text.slice(r.start, r.end);
@@ -291,7 +403,15 @@ function attachSuggest(ta: HTMLTextAreaElement, opts: HiliteOpts): void {
     items.slice(0, 8).forEach((s, i) => {
       const b = el('button', { class: i === selected ? 'on' : '' });
       if (s.kind === 'frag') {
-        b.appendChild(el('span', { class: 'frag', text: `<${s.name}>` }));
+        // Folder-qualified keys render the folder as a dim prefix; insertion
+        // (complete()) still uses the full key.
+        const cut = s.name.lastIndexOf('/');
+        if (cut > 0) {
+          b.appendChild(el('span', { class: 'fold', text: '<' + s.name.slice(0, cut + 1) }));
+          b.appendChild(el('span', { class: 'frag', text: s.name.slice(cut + 1) + '>' }));
+        } else {
+          b.appendChild(el('span', { class: 'frag', text: `<${s.name}>` }));
+        }
       } else {
         b.appendChild(el('span', { text: s.tag }));
         const c = fmtCount(s.count);

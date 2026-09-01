@@ -432,6 +432,14 @@ button.iconbtn:hover:not(:disabled) { background: rgba(128,128,128,.14); }
 /* Space images in markdown (agent bubbles, viewers). */
 .wsimg img { max-width: 100%; border-radius: 5px; margin: 4px 0; }
 .wsimg.thumb img { max-height: 180px; }
+/* Reserved-aspect placeholder: the cell keeps the image's shape before the
+   bytes arrive - no zero-height blanks, no layout jump. */
+.wsimg.phbox {
+  display: block; width: 100%; overflow: hidden; border-radius: 6px;
+  background: rgba(128,128,136,.08);
+}
+.wsimg.phbox img { width: 100%; height: 100%; object-fit: contain; margin: 0; max-height: none; }
+.wsimg.phbox > .hint { display: flex; align-items: center; justify-content: center; height: 100%; padding: 4px; }
 
 /* The artifact viewer: an overlay over the CENTRE pane only - the left
    column and the agent stay usable while it is open. */
@@ -550,6 +558,10 @@ button.treefile.on { background: rgba(37, 99, 235, .22); color: var(--textcolor,
 /* The tree column is wider than the turn explorer: file and entry names are
    words, not two-digit ranges. */
 .explorer:has(.tree) { width: 210px; }
+/* Reserve the scrollbar lane whether or not the tree overflows: without this
+   the 9px scrollbar eats the count pill's right inset the moment studio/
+   unfolds, and the pill sits flush against the panel border. */
+.explorer:has(.filetree) { scrollbar-gutter: stable; }
 /* The studio's left column carries the generation card under the tree, so it
    needs room for labelled fields rather than just folder names. */
 .explorer:has(.studiotabs) { width: 300px; }
@@ -710,6 +722,9 @@ label.checkrow input { width: auto; }
   resize: vertical;
 }
 .agentinput.dropping { border-color: #7dd3fc; background: rgba(125, 211, 252, .08); }
+/* The whole agent panel is a drop target for reference chips. */
+.agentpanel.dropping { outline: 2px dashed #7dd3fc; outline-offset: -3px; }
+.agentpanel.dropping .agentinput { border-color: #7dd3fc; background: rgba(125,211,252,.08); }
 button.sendbtn { padding: 9px 12px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 /* Attach above send, in a column beside the box. */
 .agentbtns { display: flex; flex-direction: column; gap: 4px; flex-shrink: 0; justify-content: flex-end; }
@@ -776,6 +791,9 @@ textarea.focusarea.codearea { font-size: 12.5px; line-height: 1.55; }
 .filetree .treebranch { padding: 3px 6px; gap: 4px; }
 .filetree .treebranch.on { background: rgba(37, 99, 235, .22); color: var(--textcolor, #d8dce4); }
 .filetree .treebranch.dropping { outline: 2px dashed #7dd3fc; outline-offset: -2px; }
+/* The whole left column is a drop target (falls back to the current folder);
+   a folder branch under the pointer still wins via its own handler. */
+.filedrop.dropping { outline: 2px dashed #7dd3fc; outline-offset: -3px; background: rgba(125,211,252,.05); }
 .filetree .treekids { padding-left: 12px; }
 .filetree .caret {
   width: 16px; flex-shrink: 0; padding: 0; border: none; background: transparent;
@@ -783,11 +801,29 @@ textarea.focusarea.codearea { font-size: 12.5px; line-height: 1.55; }
 }
 .filetree .treebranch { overflow: hidden; }
 .filetree .treebranch .n {
-  flex-shrink: 0; margin-left: auto; padding: 0 6px; border-radius: 9px;
+  flex-shrink: 0; margin-left: auto; margin-right: 2px; padding: 0 6px; border-radius: 9px;
   font-size: 11px; font-variant-numeric: tabular-nums; line-height: 16px;
   color: var(--textcolor, #d8dce4); background: rgba(128,128,128,.22);
 }
 .filetree .treebranch.on .n { background: rgba(37, 99, 235, .45); }
+/* Segmented control: a bordered pill so grouped small buttons read as ONE
+   control (column picker, view-mode toggle). */
+.segctl {
+  display: inline-flex; align-items: stretch; border: 1px solid var(--borderc, #2b323f);
+  border-radius: 7px; overflow: hidden;
+}
+.segctl .seglabel {
+  display: flex; align-items: center; padding: 0 6px; font-size: 11px;
+  color: var(--textcolor2, #79839a); border-right: 1px solid var(--borderc, #2b323f);
+}
+.segctl button { border: none; border-radius: 0; background: transparent; padding: 3px 9px; font-size: 11.5px; }
+.segctl button + button { border-left: 1px solid var(--borderc, #2b323f); }
+.segctl button.on { background: rgba(37, 99, 235, .28); color: var(--textcolor, #d8dce4); }
+
+/* Tree-head verbs are icon-only; keep the rules scoped - .treehead itself is
+   shared by five other tabs that stay text buttons. */
+.filetree .treehead { gap: 2px; }
+.filetree .treehead .iconbtn { padding: 4px 7px; }
 .frow .ftag {
   display: inline-block; min-width: 34px; margin-right: 7px; padding: 0 4px; border-radius: 3px;
   font-family: Consolas, monospace; font-size: 10px; text-align: center; line-height: 15px;
@@ -799,6 +835,8 @@ textarea.focusarea.codearea { font-size: 12.5px; line-height: 1.55; }
 .filelist { outline: none; border: 1px solid var(--borderc, #2b323f); border-radius: 6px; min-height: 220px; }
 .filelist:focus-within { border-color: rgba(37, 99, 235, .55); }
 .filelist.dropping, .pad.dropping .filelist { outline: 2px dashed #7dd3fc; outline-offset: -2px; background: rgba(125, 211, 252, .06); }
+/* The rubber-band overlay: fixed = viewport coords, no host math. */
+.marquee { position: fixed; z-index: 230; border: 1px dashed #7dd3fc; background: rgba(125,211,252,.12); pointer-events: none; }
 .frow {
   display: grid; grid-template-columns: 22px 1fr 76px 118px; gap: 8px; align-items: center;
   padding: 5px 8px; border-bottom: 1px solid rgba(128,128,128,.08); font-size: 12px; user-select: none;
@@ -1140,24 +1178,44 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
 .bigpreview .previewname { padding: 4px 8px; }
 .countbox { width: 56px; text-align: center; }
 .striprow { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; }
-.stripcell { flex: 0 0 72px; height: 72px; padding: 0; overflow: hidden; border-radius: 6px; }
-.stripcell img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* --- the bottom generation strip (replaces the old history tab) ------------- */
+.genstrip { flex: 0 0 auto; border-top: 1px solid var(--borderc, #2b323f); padding: 4px 10px 6px; }
+.genstrip .striphead { margin-bottom: 2px; }
+.genstrip.folded .striprow { display: none; }
+.genstrip .stripcell { position: relative; }
+.genstrip .stripcell.live { outline: 2px solid #f59e0b; }
+.genstrip .stripbadge { position: absolute; top: 2px; left: 2px; font-size: 10px; }
+.stripcell { flex: 0 0 auto; height: 72px; aspect-ratio: 832 / 1216; padding: 0; overflow: hidden; border-radius: 6px; }
+.stripcell img { width: 100%; height: 100%; object-fit: contain; display: block; }
 .stripcell.on { outline: 2px solid #2563eb; }
 
 /* 배치: the scene cards (the reservation queue's face). */
 .scenegrid { display: grid; gap: 8px; margin-bottom: 8px; }
 .scenecard { border: 1px solid var(--borderc, #2b323f); border-radius: 8px; padding: 6px; }
 .scenecard.reserved { border-color: #2563eb; }
-.sceneface { min-height: 70px; display: flex; align-items: center; justify-content: center;
-             border-radius: 6px; overflow: hidden; background: var(--darkbg, #171a21); }
-.sceneface .jobpic img { max-height: 180px; object-fit: cover; }
+/* Batch progress rides the cards (usability item 13): the scene being drawn
+   gets a ring and a step bar; the bar above the submit is one segment per
+   image (green saved · red failed · amber current, part-filled by step). */
+.scenecard.working { border-color: #f59e0b; box-shadow: 0 0 0 1px rgba(245,158,11,.4); }
+.sceneprog { margin-top: 4px; }
+.sceneprog-track { height: 4px; border-radius: 2px; background: rgba(128,128,136,.25); overflow: hidden; }
+.sceneprog-fill { height: 100%; width: 0; background: #f59e0b; transition: width .3s; }
+.sceneprog-label { display: block; margin-top: 2px; font-size: 10.5px; }
+.batchbar { margin: 6px 0 2px; }
+.batchsegs { display: flex; gap: 2px; height: 8px; margin-bottom: 3px; }
+.batchseg { flex: 1 1 0; min-width: 3px; border-radius: 2px; background: rgba(128,128,136,.22); overflow: hidden; position: relative; }
+.batchseg.ok { background: #10b981; }
+.batchseg.fail { background: #ef4444; }
+.batchseg.cur { background: rgba(245,158,11,.25); }
+.batchseg-fill { height: 100%; width: 0; background: #f59e0b; }
+.sceneface { min-height: 70px; display: flex; align-items: center; justify-content: center; }
+.sceneface .jobpic { width: 100%; }
 .scenefallback { font-size: 13px; opacity: .6; padding: 20px 4px; }
 .reservenum { min-width: 30px; }
 
 /* 배치: one section per JOB, newest first. */
 .jobsec { margin-bottom: 14px; border: 1px solid var(--borderc, #2b323f); border-radius: 8px; padding: 8px; }
 .jobsec.live { border-color: #2563eb; }
-.jobsec.focusjob { outline: 2px solid #2563eb; }
 .jobhead { margin-bottom: 6px; }
 .jobgrid { display: grid; gap: 8px; }
 .jobpic { cursor: zoom-in; display: block; }
@@ -1167,8 +1225,6 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
 .liveframe { position: relative; }
 .liveframe .badge { position: absolute; top: 6px; left: 6px; }
 .jobcell .fname { margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.jobrow { cursor: pointer; }
-.jobrow .wsimg.thumb img { max-height: 40px; border-radius: 4px; }
 
 /* The selector shows pictures WHOLE (like the history grid), never cropped
    to a square: the choice is made on the picture, so all of it has to show. */
@@ -1253,13 +1309,23 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
 
 /* --- syntax tints: the mirror behind a textarea --------------------------------- */
 .hlwrap { position: relative; display: block; }
-.hlwrap > textarea.hl-on { position: relative; z-index: 1; background: transparent; }
+.hlwrap > textarea.hl-on { position: relative; z-index: 1; background: transparent; box-sizing: border-box; }
 .hlmirror {
   position: absolute; inset: 0; overflow: hidden; pointer-events: none;
-  color: transparent; white-space: pre-wrap; word-break: break-word;
+  /* The wrap declarations are only the no-computed-style fallback: at runtime
+     copyTypography() inlines the textarea's own computed values over them.
+     Chromium textareas compute pre-wrap + normal + break-word. */
+  color: transparent; white-space: pre-wrap; word-break: normal; overflow-wrap: break-word;
   background: var(--darkbg, #171b23); border-radius: 5px;
 }
-.hlmirror span { border-radius: 3px; }
+/* Inline backgrounds only paint the font's content area (~1.15em) while the
+   editors run line-height 1.6: pad the band to fill the line box (0.22em is
+   about half that leading - a visual tuning constant), and close wrapped
+   fragments into their own rounded boxes. */
+.hlmirror span {
+  border-radius: 3px; padding-block: 0.22em;
+  -webkit-box-decoration-break: clone; box-decoration-break: clone;
+}
 
 /* --- autocomplete popup ---------------------------------------------------------- */
 .suggestpop {
@@ -1275,6 +1341,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
 .suggestpop button.on { background: rgba(37,99,235,.2); }
 .suggestpop .cnt { margin-left: auto; color: var(--textcolor2, #79839a); font-size: 10.5px; }
 .suggestpop .frag { color: #5cbe7d; }
+.suggestpop .fold { color: var(--textcolor2, #79839a); }
 
 /* --- the tab bar's mode chip (봇 편집 / 챗 편집) --------------------------------- */
 .tabs .modetab { align-self: center; margin: 0 4px 0 0; white-space: nowrap; }

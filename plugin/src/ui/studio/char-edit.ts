@@ -18,7 +18,7 @@ import { el, clear, armed } from '../dom';
 import { attachHilite } from '../hilite';
 import { state } from '../../state';
 import { blobUrl } from '../blobimg';
-import { S, hub, msg, cardStem, renameCardFile } from './store';
+import { S, hub, msg, cardStem, renameCardFile, fragKeys } from './store';
 import { splitFront, joinFront } from './stylefile';
 import { editorHead } from './editors';
 
@@ -98,7 +98,7 @@ export function characterEditor(dir: string, opts: CharEditorOpts = {}): HTMLEle
     placeholder: '이 캐릭터를 그리는 프롬프트 (쉼표로 구분)' }) as HTMLTextAreaElement;
   const negative = el('textarea', { rows: '2', class: 'promptedit compact',
     placeholder: '이 캐릭터에만 붙는 네거티브' }) as HTMLTextAreaElement;
-  const fragNames = () => (S.cards.fragments ?? []).map((i) => i.name);
+  const fragNames = () => fragKeys();
   setTimeout(() => {
     attachHilite(caption, { mode: 'nai', fragments: fragNames });
     attachHilite(negative, { mode: 'nai', fragments: fragNames });

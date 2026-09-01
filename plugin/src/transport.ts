@@ -228,9 +228,12 @@ export class Transport {
     return body as T;
   }
 
-  /** POST that answers bytes - a zip of workspace files. */
-  async postBinary(path: string, payload: unknown): Promise<Uint8Array> {
-    const res = await this.raw('POST', path, payload, { timeoutMs: UPLOAD_TIMEOUT_MS });
+  /** POST that answers bytes - a zip of workspace files, an image, a thumb.
+   * The default timeout stays generous (a charx download runs minutes);
+   * image callers pass a short one so a hung fetch frees its semaphore slot
+   * in seconds instead of holding it for three minutes. */
+  async postBinary(path: string, payload: unknown, timeoutMs = UPLOAD_TIMEOUT_MS): Promise<Uint8Array> {
+    const res = await this.raw('POST', path, payload, { timeoutMs });
     if (!res.ok) throw await toError(res);
     return new Uint8Array(await res.arrayBuffer());
   }

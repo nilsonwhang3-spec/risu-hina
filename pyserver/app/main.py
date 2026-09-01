@@ -638,6 +638,10 @@ def h_file_download(arg: dict) -> Any:
     raise ApiError(500, "files/download must be dispatched directly")
 
 
+def h_file_thumb(arg: dict) -> Any:
+    raise ApiError(500, "files/thumb must be dispatched directly")
+
+
 def h_assets_adopt(arg: dict) -> dict:
     """The plugin saved a workspace file into RisuAI; record the key here."""
     ck = _char(arg)
@@ -879,7 +883,7 @@ def h_cost(arg: dict) -> dict:
 # --- workspace files --------------------------------------------------------
 
 def h_files(arg: dict) -> dict:
-    return files.listing(_scope(arg), str(arg.get("prefix") or ""))
+    return files.listing(_scope(arg), str(arg.get("prefix") or ""), bool(arg.get("hidden")))
 
 
 def h_file_read(arg: dict) -> dict:
@@ -930,7 +934,12 @@ def h_file_mkdir(arg: dict) -> dict:
 
 
 def h_file_move(arg: dict) -> dict:
+    # `paths` batches (body shape precedent: the zip route); `from` stays for
+    # renames and older callers.
     try:
+        paths = arg.get("paths")
+        if isinstance(paths, list) and paths:
+            return files.move_many(_write_scope(arg), [str(x) for x in paths], str(arg.get("to") or ""))
         return files.move(_write_scope(arg), str(arg.get("from") or ""), str(arg.get("to") or ""))
     except files.FileError as e:
         raise ApiError(400, str(e))
@@ -938,6 +947,9 @@ def h_file_move(arg: dict) -> dict:
 
 def h_file_copy(arg: dict) -> dict:
     try:
+        paths = arg.get("paths")
+        if isinstance(paths, list) and paths:
+            return files.copy_many(_write_scope(arg), [str(x) for x in paths], str(arg.get("to") or ""))
         return files.copy(_write_scope(arg), str(arg.get("from") or ""), str(arg.get("to") or ""))
     except files.FileError as e:
         raise ApiError(400, str(e))
@@ -945,6 +957,9 @@ def h_file_copy(arg: dict) -> dict:
 
 def h_file_delete(arg: dict) -> dict:
     try:
+        paths = arg.get("paths")
+        if isinstance(paths, list) and paths:
+            return files.delete_many(_write_scope(arg), [str(x) for x in paths])
         return files.delete(_write_scope(arg), str(arg.get("path") or ""))
     except files.FileError as e:
         raise ApiError(400, str(e))
@@ -2200,6 +2215,8 @@ ROUTES: dict[str, Handler] = {
     "GET /charx/preview": h_charx_preview,
     "POST /charx/build": h_charx_build,
     "GET /files/download": h_file_download,
+    "GET /files/thumb": h_file_thumb,
+    "POST /files/thumb": h_file_thumb,
     "POST /files/zip": h_file_zip,
     "POST /files/upload-many": h_file_upload_many,
     "POST /files/upload-chunk": h_file_upload_chunk,
@@ -2421,6 +2438,44 @@ async def dispatch(path: str, request: Request) -> Response:
             media_type="application/javascript; charset=utf-8",
             headers={**config.cors_headers(origin), "Cache-Control": "no-cache"},
         )
+
+    if key in ("GET /files/thumb", "POST /files/thumb"):
+        # A small WebP preview of a space image (usability batch item 4): the
+        # studio grids used to pull the full ~2MB PNG per cell through the
+        # plugin's RPC relay. files.thumb_bytes renders ~360px into a disk
+        # cache keyed by (path, mtime, w); anything it cannot thumb streams
+        # the original, so this route never breaks a picture /files/download
+        # could serve. no-store for the tunnel-edge reason documented below.
+        if request.method == "POST":
+            raw = await request.body()
+            try:
+                arg.update(json.loads(raw) if raw else {})
+            except ValueError:
+                return _json(400, {"error": "body is not valid JSON"}, origin)
+        try:
+            ck = _scope(arg)
+            target = files._resolve(ck, str(arg.get("path") or ""))
+        except ApiError as e:
+            _log(request.method, pathname, e.status, started, str(e))
+            return _json(e.status, e.payload, origin)
+        except files.FileError as e:
+            _log(request.method, pathname, 400, started, str(e))
+            return _json(400, {"error": str(e)}, origin)
+        if not target.is_file():
+            _log(request.method, pathname, 404, started, str(arg.get("path") or ""))
+            return _json(404, {"error": "no such file", "path": arg.get("path")}, origin)
+        try:
+            width = max(64, min(1024, int(arg.get("w") or 360)))
+        except (TypeError, ValueError):
+            width = 360
+        data, mime = await run_in_threadpool(files.thumb_bytes, target, width)
+        if not mime:
+            mime = _MIME.get(target.suffix.lower().lstrip("."), "application/octet-stream")
+        _log(request.method, pathname, 200, started, f"{target.name} {len(data) // 1024}KB thumb")
+        return Response(content=data, media_type=mime, headers={
+            **config.cors_headers(origin),
+            "Cache-Control": "no-store",
+        })
 
     if key in ("GET /files/download", "POST /files/download"):
         # A workspace file as bytes, for things the JSON preview cannot carry

@@ -18,6 +18,7 @@
 import { el, clear, armed, focusButton, diffCard } from './dom';
 import { state, type CardScript } from '../state';
 import { makeTab, savedText, type NoticeKind, type TabUi } from './kit';
+import { attachHilite } from './hilite';
 
 type Mode = 'lua' | 'v2' | 'v1' | 'none';
 
@@ -153,6 +154,7 @@ function drawView(): void {
       class: 'codearea', value: String(first.code ?? ''),
       style: { minHeight: '520px' }, spellcheck: 'false',
     }) as HTMLTextAreaElement;
+    setTimeout(() => attachHilite(body, { mode: 'lua' }), 0);
     const save = el('button', { class: 'primary', text: '저장' }) as HTMLButtonElement;
     save.addEventListener('click', async () => {
       save.disabled = true;
@@ -177,7 +179,7 @@ function drawView(): void {
       el('h2', {}, [
         el('span', { text: 'Lua' + (s.origin !== 'original' ? ' · 수정됨' : '') }),
         el('span', { class: 'spacer' }),
-        focusButton(body, 'Lua 트리거', { code: true }),
+        focusButton(body, 'Lua 트리거', { code: true, hilite: { mode: 'lua' } }),
       ]),
       body,
       diff,

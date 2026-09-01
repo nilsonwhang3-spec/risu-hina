@@ -1,3 +1,4 @@
+import { attachHilite, type HiliteOpts } from './hilite';
 /** Small DOM helpers. No framework, no eval - the sandbox CSP blocks eval. */
 
 type Attrs = Record<string, unknown>;
@@ -126,6 +127,44 @@ export const ICON = {
   gear: svg('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.14.6.66 1.03 1.28 1.05H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>', 17),
   warn: svg('<path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>', 16),
 };
+
+/** A compact icon-only button: inline SVG plus a tooltip that STARTS with the
+ * old text label - the smoke tests find these controls by title prefix. */
+export function iconBtn(html: string, title: string): HTMLButtonElement {
+  return el('button', { class: 'iconbtn', html, title }) as HTMLButtonElement;
+}
+
+// --- segmented controls -----------------------------------------------------------
+
+export interface SegItem { label: string; title?: string; on: boolean; pick: () => void }
+
+/** One bordered pill of small buttons: a group that reads as ONE control,
+ * not stray digits among the toolbar (usability batch item 8). */
+export function segCtl(items: SegItem[]): HTMLElement {
+  return el('div', { class: 'segctl' }, items.map((it) => {
+    const b = el('button', { class: it.on ? 'on' : '', text: it.label, title: it.title ?? '' });
+    b.addEventListener('click', it.pick);
+    return b;
+  }));
+}
+
+/** The column-count picker every studio grid shares. `set` is expected to
+ * patch the live grid's gridTemplateColumns itself - picking a width must
+ * not cost a full centre redraw (and its thumbnails). */
+export function colPicker(opts: { values: number[]; get: () => number; set: (n: number) => void }): HTMLElement {
+  const btns = opts.values.map((n) => {
+    const b = el('button', { text: String(n), title: `${n}열로 보기` });
+    b.addEventListener('click', () => { opts.set(n); sync(); });
+    return b;
+  });
+  const sync = (): void => {
+    btns.forEach((b, i) => b.classList.toggle('on', opts.values[i] === opts.get()));
+  };
+  sync();
+  return el('div', { class: 'segctl colpick', title: '열 수' }, [
+    el('span', { class: 'seglabel', text: '▦' }), ...btns,
+  ]);
+}
 
 /**
  * Two-click confirm for anything destructive.
@@ -334,7 +373,7 @@ export function modal(title: string, body: HTMLElement, opts: {
  * step to forget and Escape loses nothing; 완료 just closes. The source's
  * own `input` listeners fire too, so a character count keeps counting.
  */
-export function focusEdit(source: HTMLTextAreaElement, title: string, opts: { code?: boolean } = {}): void {
+export function focusEdit(source: HTMLTextAreaElement, title: string, opts: { code?: boolean; hilite?: HiliteOpts } = {}): void {
   const big = el('textarea', {
     class: 'focusarea' + (opts.code ? ' codearea' : ''),
     spellcheck: opts.code ? 'false' : 'true',
@@ -357,6 +396,10 @@ export function focusEdit(source: HTMLTextAreaElement, title: string, opts: { co
     ]),
   ]);
   const close = modal(title, body, { cls: 'focusmodal', sticky: true });
+  // Tint the big copy too - the source box's mirror does not come along.
+  // (dom <-> hilite is an import cycle; harmless, attachHilite runs at event
+  // time, long after both modules initialised.)
+  if (opts.hilite) attachHilite(big, opts.hilite);
   done.addEventListener('click', close);
   setTimeout(() => {
     big.focus();
@@ -365,7 +408,7 @@ export function focusEdit(source: HTMLTextAreaElement, title: string, opts: { co
 }
 
 /** A ⤢ button that opens `focusEdit` on the box - the same one on every tab. */
-export function focusButton(source: HTMLTextAreaElement, title: string, opts: { code?: boolean } = {}): HTMLElement {
+export function focusButton(source: HTMLTextAreaElement, title: string, opts: { code?: boolean; hilite?: HiliteOpts } = {}): HTMLElement {
   const b = el('button', { class: 'ghost tiny focusbtn', text: '⤢ 집중 편집', title: '화면 전체로 크게 편집합니다' });
   b.addEventListener('click', () => focusEdit(source, title, opts));
   return b;

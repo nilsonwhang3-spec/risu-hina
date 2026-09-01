@@ -24,6 +24,12 @@ let jobsStale = true;
 // swaps it out only once the finished file has loaded.
 
 export const livePreview = { url: '', step: 0, total: 0, current: '' };
+/** ms-per-step EMA measured from preview ticks - the server keeps no
+ * timestamps, and poll arrival is steady enough at 800ms for an estimate. */
+let emaStepMs = 0;
+let lastStepAt = 0;
+let lastStep = 0;
+export function stepMsEma(): number { return emaStepMs; }
 let previewTimer: ReturnType<typeof setInterval> | null = null;
 let previewRev = 0;
 
@@ -39,6 +45,14 @@ function pollPreview(): void {
         livePreview.step = r.step ?? 0;
         livePreview.total = r.total ?? 0;
         livePreview.current = r.current ?? '';
+        const now = Date.now();
+        const step = r.step ?? 0;
+        if (lastStepAt && step > lastStep) {
+          const per = (now - lastStepAt) / (step - lastStep);
+          emaStepMs = emaStepMs ? emaStepMs * 0.7 + per * 0.3 : per;
+        }
+        lastStepAt = now;
+        lastStep = step;
         hub.jobTick();
       } else if (typeof r.rev === 'number') {
         previewRev = r.rev;
@@ -52,6 +66,8 @@ function pollPreview(): void {
 function stopPreview(): void {
   if (previewTimer) { clearInterval(previewTimer); previewTimer = null; }
   previewRev = 0;
+  lastStepAt = 0;
+  lastStep = 0;
 }
 
 /** The account meters and what a run will send, for the 1장 tab's head. */
@@ -244,7 +260,7 @@ export function scenePicker(): HTMLElement {
   const label = (i: { name: string; count?: number }) => i.name + (i.count ? ` (씬 ${i.count})` : '');
   const row = pickerRow(cur ? { name: label(cur) } : null, {
     title: items.length ? `저장된 프리셋 ${items.length}개 — 선택 · 수정 · 삭제 · 추가` : '프리셋 추가',
-    emptyHint: '씬 프리셋이 없습니다. › 에서 하나 만들어 주세요.',
+    emptyHint: items.length ? '선택된 씬 프리셋 없음 — › 에서 고르세요' : '씬 프리셋이 없습니다. › 에서 하나 만들어 주세요.',
     onOpen: () => openListPicker({
       title: '씬 프리셋 선택',
       hint: '불러온 프리셋의 씬 카드에서 필요한 것만 골라 예약에 담습니다.',

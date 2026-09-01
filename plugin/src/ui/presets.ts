@@ -76,7 +76,7 @@ export function buildPresetsCard(opts: PresetsCardOptions): HTMLElement {
     if (!p) {
       return pickerRow(null, {
         title: total ? `저장된 프리셋 ${total}개 — 선택 · 추가` : '프리셋 추가',
-        emptyHint: '프리셋이 없습니다. › 에서 하나 만들어 주세요.',
+        emptyHint: total ? '선택된 프리셋 없음 — › 에서 고르세요' : '프리셋이 없습니다. › 에서 하나 만들어 주세요.',
         onOpen,
       });
     }

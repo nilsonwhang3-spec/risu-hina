@@ -11,6 +11,7 @@
 import { el, clear, armed, refocusSearch, focusButton, diffCard } from './dom';
 import { state, type CardScript, type CardField } from '../state';
 import { makeTab, listRow, savedText, type NoticeKind, type TabUi } from './kit';
+import { attachHilite } from './hilite';
 
 const TYPES = ['editinput', 'editoutput', 'editprocess', 'editdisplay'];
 const TYPE_LABEL: Record<string, string> = {
@@ -184,6 +185,7 @@ function openField(f: CardField): void {
   const body = el('textarea', {
     class: 'codearea', value: f.body, style: { minHeight: '380px' },
   }) as HTMLTextAreaElement;
+  setTimeout(() => attachHilite(body, { mode: 'regex-out' }), 0);
   const save = el('button', { class: 'primary', text: '저장' }) as HTMLButtonElement;
   save.addEventListener('click', async () => {
     save.disabled = true;
@@ -200,7 +202,7 @@ function openField(f: CardField): void {
   clear(viewMount);
   viewMount.appendChild(el('div', { class: 'card' }, [
     el('h2', {}, [el('span', { text: BG_LABEL[f.field] }), el('span', { class: 'spacer' }),
-                  focusButton(body, BG_LABEL[f.field], { code: true })]),
+                  focusButton(body, BG_LABEL[f.field], { code: true, hilite: { mode: 'regex-out' } })]),
     el('div', { class: 'hint', text: 'CSS는 보통 여기(백그라운드 HTML)의 <style> 안에 들어갑니다.' }),
     el('label', { class: 'field' }, [body]),
     f.changed ? diffCard(f.original, f.body, { code: true }) : null,
@@ -228,9 +230,11 @@ function open(s: CardScript): void {
   const inPat = el('textarea', {
     class: 'codearea', value: String(e.in ?? ''), style: { minHeight: '60px' },
   }) as HTMLTextAreaElement;
+  setTimeout(() => attachHilite(inPat, { mode: 'regex' }), 0);
   const outText = el('textarea', {
     class: 'codearea', value: String(e.out ?? ''), style: { minHeight: '260px' },
   }) as HTMLTextAreaElement;
+  setTimeout(() => attachHilite(outText, { mode: 'regex-out' }), 0);
   const flag = el('input', { value: String(e.flag ?? ''), placeholder: '예: g' }) as HTMLInputElement;
 
   const save = el('button', { class: 'primary', text: '저장' }) as HTMLButtonElement;
@@ -279,7 +283,7 @@ function open(s: CardScript): void {
   clear(viewMount);
   viewMount.appendChild(el('div', { class: 'card' }, [
     el('h2', {}, [el('span', { text: 'Regex 스크립트' }), el('span', { class: 'spacer' }),
-                  focusButton(outText, String(e.comment || 'Regex 스크립트') + ' — 바꾸기 (out)', { code: true })]),
+                  focusButton(outText, String(e.comment || 'Regex 스크립트') + ' — 바꾸기 (out)', { code: true, hilite: { mode: 'regex-out' } })]),
     el('label', { class: 'field' }, [el('span', { text: '이름 (comment)' }), comment]),
     el('label', { class: 'field' }, [el('span', { text: '종류 (type)' }), type]),
     el('label', { class: 'field' }, [

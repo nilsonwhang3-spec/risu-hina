@@ -25,10 +25,10 @@
  * backend (POST /files/zip); a dropped folder goes up file by file into the
  * matching subfolders; a dropped .zip is offered to be unpacked on arrival.
  */
-import { el, clear, armed, menuAt, popover, svg, type ArmedControl } from './dom';
+import { el, clear, armed, menuAt, popover, svg, ICON, iconBtn, type ArmedControl } from './dom';
 import { treeRow, installDrop, installDrag, type TreeNode, type TreeSpec, type Incoming } from './tree';
 import { state, type FileArea, type FileListing, type WorkspaceFile } from '../state';
-import { makeTab, namePopover, type NoticeKind, type TabUi } from './kit';
+import { makeTab, namePopover, askName, type NoticeKind, type TabUi } from './kit';
 import { blobUrl, workspaceImage } from './blobimg';
 import { renderMarkdown } from './markdown';
 import { showArtifact } from './artifact';
@@ -64,11 +64,17 @@ const FICON = {
   move: svg('<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><path d="M12 10v7"/><path d="m9 14 3 3 3-3"/>', 15),
   trash: svg('<path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>', 15),
   search: svg('<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>', 15),
+  upload: svg('<path d="M12 16V4"/><path d="m6 9 6-5 6 5"/><path d="M4 20h16"/>', 15),
+  folderUp: svg('<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><path d="M12 17v-7"/><path d="m9 13 3-3 3 3"/>', 15),
+  newFolder: svg('<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><path d="M12 10v6"/><path d="M9 13h6"/>', 15),
 };
 
 /** The internal clipboard for the context menu's 복사/잘라내기 → 붙여넣기.
  * Paths only - the bytes stay on the backend (files/copy · files/move). */
 let clipboard: { op: 'copy' | 'cut'; paths: string[] } | null = null;
+/** Tree multi-select (Ctrl/Shift), separate from the centre's file selection. */
+let treeSel = new Set<string>();
+let treeAnchor = '';
 
 function isDocument(f: WorkspaceFile): boolean {
   const ext = (f.name.split('.').pop() || '').toLowerCase();
@@ -118,6 +124,30 @@ const kitRender = makeTab({
     ui = u;
     treeMount = el('div', { class: 'tree filetree' });
     pane.left.appendChild(treeMount);
+    // Keyboard verbs on the tree: branch <button> focus bubbles up here.
+    treeMount.tabIndex = 0;
+    treeMount.addEventListener('keydown', (ev) => {
+      const e = ev as KeyboardEvent;
+      const paths = [...treeSel].filter((q) => q !== DOCS_NODE && q.includes('/'));
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c' && paths.length) {
+        clipboard = { op: 'copy', paths };
+        notice(`${paths.length}개를 복사했습니다 — 붙여넣을 폴더에서 Ctrl+V.`);
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'x' && paths.length) {
+        clipboard = { op: 'cut', paths };
+        notice(`${paths.length}개를 잘라냈습니다 — 붙여넣을 폴더에서 Ctrl+V.`);
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v' && clipboard) {
+        void pasteInto(uploadTarget());
+      } else if ((e.key === 'Delete' || e.key === 'Backspace') && paths.length) {
+        e.preventDefault();
+        const rect = treeMount!.getBoundingClientRect();
+        treeDeleteConfirm(paths, { clientX: rect.left + 40, clientY: rect.top + 60 });
+      } else if (e.key === 'Escape') {
+        treeSel = new Set([selectedDir]);
+        drawTree();
+      }
+    });
+    pane.left.classList.add('filedrop');
+    installDrop(pane.left, { into: () => uploadTarget(), onFiles: (path, files) => void uploadMany(files, path), onMove: (path, sources) => void moveSelected(sources, path) });
     viewMount = el('div', { class: 'pad filepad' });
     pane.centre.appendChild(viewMount);
     installDrop(viewMount, { into: () => uploadTarget(), onFiles: (path, files) => void uploadMany(files, path) });
@@ -135,10 +165,11 @@ export function renderFilesTab(mount: HTMLElement): void {
 async function refresh(): Promise<void> {
   if (!treeMount) return;
   try {
-    const data = await state.files();
+    const data = await state.files('', showInternal);
     lastListing = data;
     buildNodes(data);
     if (!nodes.has(selectedDir)) selectedDir = nodes.has('projects') ? 'projects' : (nodes.keys().next().value ?? '');
+    treeSel = new Set([...treeSel].filter((q) => nodes.has(q)));
     // Selection survives a refresh only for paths that still exist.
     const alive = new Set(allPaths());
     selection = new Set([...selection].filter((p) => alive.has(p)));
@@ -222,6 +253,23 @@ function allPaths(): string[] {
   return out;
 }
 
+/** Tree rows top-to-bottom as drawn (Shift ranges walk this). */
+function visibleTreePaths(): string[] {
+  const out: string[] = [];
+  const walk = (f: Folder): void => {
+    out.push(f.path);
+    if (expanded.has(f.path)) for (const k of f.kids) walk(k);
+  };
+  const roots = [...nodes.values()].filter((q) => !q.path.includes('/') && q.path !== DOCS_NODE);
+  for (const root of roots) {
+    if (root.path.startsWith('.') && !root.area.count && !root.kids.length) continue;
+    walk(root);
+  }
+  const docs = nodes.get(DOCS_NODE);
+  if (docs) out.push(docs.path);
+  return out;
+}
+
 function expandTo(path: string): void {
   const parts = path.split('/');
   for (let i = 1; i <= parts.length; i++) expanded.add(parts.slice(0, i).join('/'));
@@ -269,11 +317,11 @@ function drawTree(): void {
     dirPicker.value = '';
     void uploadMany(files, uploadTarget());
   });
-  const uploadBtn = el('button', { class: 'primary tiny', text: '올리기', title: '파일을 골라 지금 폴더에 올립니다' });
+  const uploadBtn = iconBtn(FICON.upload, '올리기 — 파일을 골라 지금 폴더에 올립니다');
   uploadBtn.addEventListener('click', () => filePicker.click());
-  const uploadDirBtn = el('button', { class: 'ghost tiny', text: '폴더 올리기', title: '폴더째 올립니다 (안의 폴더 구조 유지)' });
+  const uploadDirBtn = iconBtn(FICON.folderUp, '폴더 올리기 — 폴더째 올립니다 (안의 폴더 구조 유지)');
   uploadDirBtn.addEventListener('click', () => dirPicker.click());
-  const newDir = el('button', { class: 'ghost tiny', text: '새 폴더', title: '지금 폴더 안에 폴더를 만듭니다' });
+  const newDir = iconBtn(FICON.newFolder, '새 폴더 — 지금 폴더 안에 폴더를 만듭니다');
   newDir.addEventListener('click', () => {
     const body = el('div', { class: 'applypop' });
     const close = popover(newDir, body);
@@ -297,7 +345,7 @@ function drawTree(): void {
     body.appendChild(el('div', { class: 'row' }, [name, ok]));
     setTimeout(() => name.focus(), 0);
   });
-  const reloadBtn = el('button', { class: 'ghost tiny', text: '새로고침' });
+  const reloadBtn = iconBtn(ICON.reload, '새로고침');
   reloadBtn.addEventListener('click', () => void refresh());
   treeMount.appendChild(el('div', { class: 'treehead' }, [uploadBtn, uploadDirBtn, newDir, reloadBtn, filePicker, dirPicker]));
 
@@ -314,10 +362,15 @@ function drawTree(): void {
   if (docs) treeMount.appendChild(treeRow(toTreeNode(docs, 0), 0, spec));
 
   // --- the hidden half -------------------------------------------------------
-  const hidden = data.areas.filter((a) => !USER_AREAS.has(a.area) && a.count > 0);
+  // ONE switch for everything held back: the machine area (.hina), dot
+  // folders (검수 머시너리 등) and the per-run regenerated files the server
+  // filters out of the default listing (usability batch item 1).
+  const hiddenN = data.areas.reduce((n, a) => n + (a.hidden ?? 0), 0)
+    + data.areas.filter((a) => !USER_AREAS.has(a.area)).reduce((n, a) => n + a.count, 0);
   const toggle = el('button', {
     class: 'ghost tiny',
-    text: showInternal ? '내부 파일 숨기기' : `내부 파일 보기 (${hidden.reduce((n, a) => n + a.count, 0)})`,
+    title: '점(.) 폴더, 매 실행 재생성되는 머시너리(skills·헬퍼 스크립트), 내부 영역을 함께 보이거나 숨깁니다',
+    text: showInternal ? '숨김 파일 숨기기' : `숨김 파일 보기 (${hiddenN})`,
   });
   toggle.addEventListener('click', () => {
     showInternal = !showInternal;
@@ -357,17 +410,49 @@ function toTreeNode(n: Folder, depth: number): TreeNode {
   };
 }
 
+/** A plain click: ONE folder selected and shown in the centre. */
+function selectTreeFolder(path: string): void {
+  const f = nodes.get(path);
+  treeSel = new Set([path]);
+  treeAnchor = path;
+  selectedDir = path;
+  previewPath = '';
+  selection.clear();
+  if (f && f.kids.length) expanded.add(path);
+  drawTree();
+  drawCentre();
+}
+
 function treeSpec(): TreeSpec {
   return {
     expanded,
-    selected: selectedDir,
-    onOpen(node) {
-      selectedDir = node.path;
-      previewPath = '';
-      selection.clear();
-      if (node.kids.length) expanded.add(node.path);
-      drawTree();
-      drawCentre();
+    selected: treeSel.size ? treeSel : new Set([selectedDir]),
+    onOpen(node, ev) {
+      // The centre's pick() grammar on folders: Ctrl toggles membership,
+      // Shift ranges over the rows as drawn, plain selects the one.
+      if (ev.ctrlKey || ev.metaKey) {
+        if (!treeSel.size) treeSel.add(selectedDir);
+        if (treeSel.has(node.path)) treeSel.delete(node.path);
+        else treeSel.add(node.path);
+        if (!treeSel.size) treeSel.add(node.path);
+        treeAnchor = node.path;
+        drawTree();
+        return;
+      }
+      if (ev.shiftKey && treeAnchor) {
+        const vis = visibleTreePaths();
+        const a = vis.indexOf(treeAnchor);
+        const b = vis.indexOf(node.path);
+        if (a !== -1 && b !== -1) {
+          treeSel = new Set(vis.slice(Math.min(a, b), Math.max(a, b) + 1));
+          drawTree();
+          return;
+        }
+      }
+      selectTreeFolder(node.path);
+    },
+    onContext(node, ev) {
+      openTreeMenu(node, ev);
     },
     onToggle(node) {
       if (expanded.has(node.path)) expanded.delete(node.path); else expanded.add(node.path);
@@ -408,8 +493,6 @@ function drawCentre(): void {
   // The verbs are icons with tooltips now (field report items 1-2): five text
   // buttons ate the row and the crumb had no room left.
   const selCount = selection.size;
-  const iconBtn = (html: string, title: string): HTMLButtonElement =>
-    el('button', { class: 'iconbtn', html, title }) as HTMLButtonElement;
   const dl = el('button', { class: 'ghost tiny', text: selCount > 1 ? `내려받기 (${selCount}, zip)` : '내려받기', title: '내 PC에 저장합니다. 여러 개나 폴더는 zip 하나로 받습니다.' }) as HTMLButtonElement;
   dl.disabled = !selCount;
   dl.addEventListener('click', () => void downloadSelected(n));
@@ -543,7 +626,72 @@ function drawCentre(): void {
       { label: '전체 선택', onClick: () => { selectAll(n); drawCentre(); } },
     ]);
   });
+  installMarquee(list);
   viewMount.appendChild(list);
+}
+
+/**
+ * Rubber-band selection (usability item 15), from EMPTY space only: every
+ * row/cell is draggable=true and a native dragstart fires before any
+ * movement threshold could be judged, so a marquee over a row would break
+ * drag-to-move. The list tail and the grid gaps are the free ground. Rows
+ * are keyed by their title (= the path); classes toggle in place and ONE
+ * drawCentre lands at the end - never inside the move loop. The overlay is
+ * position:fixed, so no host geometry to keep in sync (viewport coords).
+ * (Not covered by the smoke suite - linkedom has no PointerEvent/layout.)
+ */
+function installMarquee(list: HTMLElement): void {
+  let origin: { x: number; y: number } | null = null;
+  let base: Set<string> | null = null;
+  let box: HTMLElement | null = null;
+  let rects: { path: string; r: DOMRect; el: HTMLElement }[] = [];
+  const stop = (): void => {
+    origin = null;
+    base = null;
+    box?.remove();
+    box = null;
+    rects = [];
+  };
+  list.addEventListener('pointerdown', (ev) => {
+    const e = ev as PointerEvent;
+    if (e.button !== 0) return;
+    if ((e.target as HTMLElement).closest('.frow, .fcell, input, button, a, select, textarea')) return;
+    origin = { x: e.clientX, y: e.clientY };
+    base = (e.ctrlKey || e.metaKey) ? new Set(selection) : new Set();
+    try { list.setPointerCapture(e.pointerId); } catch { /* test DOM */ }
+  });
+  list.addEventListener('pointermove', (ev) => {
+    const e = ev as PointerEvent;
+    if (!origin || !base) return;
+    if (!box) {
+      if (Math.abs(e.clientX - origin.x) < 4 && Math.abs(e.clientY - origin.y) < 4) return;
+      box = el('div', { class: 'marquee' });
+      document.body.appendChild(box);
+      rects = [...list.querySelectorAll<HTMLElement>('.frow:not(.head), .fcell')]
+        .map((r) => ({ path: r.title, r: r.getBoundingClientRect(), el: r }));
+    }
+    const left = Math.min(e.clientX, origin.x);
+    const top = Math.min(e.clientY, origin.y);
+    const right = Math.max(e.clientX, origin.x);
+    const bottom = Math.max(e.clientY, origin.y);
+    box.style.left = `${left}px`;
+    box.style.top = `${top}px`;
+    box.style.width = `${right - left}px`;
+    box.style.height = `${bottom - top}px`;
+    selection = new Set(base);
+    for (const { path, r, el: rowEl } of rects) {
+      if (r.left < right && r.right > left && r.top < bottom && r.bottom > top) selection.add(path);
+      rowEl.classList.toggle('sel', selection.has(path));
+    }
+  });
+  const finish = (): void => {
+    if (!origin) return;
+    const dragged = !!box;
+    stop();
+    if (dragged) drawCentre();
+  };
+  list.addEventListener('pointerup', finish);
+  list.addEventListener('pointercancel', () => stop());
 }
 
 function findFile(path: string): WorkspaceFile | undefined {
@@ -666,6 +814,99 @@ function openRowMenu(ev: MouseEvent, e: { path: string; name: string; file?: Wor
   ]);
 }
 
+/** The tree's context menu: the centre rows' verbs, on folders. Right-click
+ * outside the selection retargets it (openRowMenu's convention). */
+function openTreeMenu(node: TreeNode, ev: MouseEvent): void {
+  if (!treeSel.has(node.path)) {
+    treeSel = new Set([node.path]);
+    treeAnchor = node.path;
+    drawTree();
+  }
+  const paths = [...treeSel].filter((q) => q !== DOCS_NODE);
+  if (!paths.length) return;
+  const many = paths.length > 1;
+  const writableAt = (q: string): boolean => {
+    const f = nodes.get(q);
+    return !!f && !f.virtual && USER_AREAS.has(f.area.area);
+  };
+  // Area roots and the virtual node take no destructive verbs.
+  const can = paths.every((q) => q.includes('/') && writableAt(q));
+  const hereOk = !many && writableAt(node.path);
+  menuAt(ev.clientX, ev.clientY, [
+    { label: '열기', disabled: many, onClick: () => selectTreeFolder(node.path) },
+    { label: '새 폴더', disabled: !hereOk, onClick: () => treeNewFolder(node.path) },
+    { label: '이름 바꾸기', disabled: many || !can, onClick: () => renameEntry({ path: node.path, name: node.name }) },
+    null,
+    { label: many ? `복사 (${paths.length})` : '복사', disabled: !can,
+      onClick: () => { clipboard = { op: 'copy', paths }; notice(`${paths.length}개를 복사했습니다 — 붙여넣을 폴더에서 우클릭하거나 Ctrl+V.`); } },
+    { label: many ? `잘라내기 (${paths.length})` : '잘라내기', disabled: !can,
+      onClick: () => { clipboard = { op: 'cut', paths }; notice(`${paths.length}개를 잘라냈습니다 — 붙여넣을 폴더에서 우클릭하거나 Ctrl+V.`); } },
+    { label: clipboard ? `붙여넣기 (${clipboard.paths.length})` : '붙여넣기',
+      disabled: !clipboard || !hereOk,
+      onClick: () => void pasteInto(node.path) },
+    null,
+    { label: '경로 복사', disabled: many,
+      onClick: () => { copyToClipboard(node.path); notice('경로를 복사했습니다.', 'ok'); } },
+    { label: many ? `내려받기 (${paths.length}, zip)` : '내려받기 (zip)', onClick: () => void treeDownload(paths) },
+    null,
+    { label: many ? `삭제 (${paths.length})…` : '삭제…', danger: true, disabled: !can,
+      onClick: () => treeDeleteConfirm(paths, ev) },
+  ]);
+}
+
+/** No window.confirm in the sandboxed iframe: the confirm is a SECOND menu
+ * with one red item at the same spot (the armed-button pattern, as a menu). */
+function treeDeleteConfirm(paths: string[], ev: { clientX: number; clientY: number }): void {
+  menuAt(ev.clientX, ev.clientY, [
+    { label: `정말 삭제 (${paths.length}개 폴더, 안의 파일 포함)`, danger: true,
+      onClick: () => void treeDelete(paths) },
+  ]);
+}
+
+async function treeDelete(paths: string[]): Promise<void> {
+  try {
+    const r = await state.deleteFiles(paths);
+    notice(r.failed.length
+      ? `${r.done}개를 지웠습니다. ${r.failed.length}개 실패 — ${r.failed[0].error}`
+      : `${r.done}개를 지웠습니다.`, r.failed.length ? 'err' : 'ok');
+  } catch (e) {
+    notice('지우지 못했습니다: ' + msg(e), 'err');
+  }
+  treeSel.clear();
+  state.touchFiles();
+  await refresh();
+}
+
+async function treeDownload(paths: string[]): Promise<void> {
+  const name = paths.length === 1 ? (paths[0].split('/').pop() ?? 'files') : 'files';
+  try {
+    const bytes = await state.downloadZip(paths, name);
+    notice(`${fmtSize(bytes)} zip 을 브라우저 다운로드로 넘겼습니다.`, 'ok');
+  } catch (e) {
+    notice('내려받지 못했습니다: ' + msg(e), 'err');
+  }
+}
+
+function treeNewFolder(where: string): void {
+  askName('새 폴더', {
+    label: `${where}/ 안에`,
+    placeholder: '폴더 이름',
+    ok: '만들기',
+    onSubmit: async (raw) => {
+      const nm = raw.trim().replace(/[\\/]+/g, '-');
+      if (!nm) return;
+      try {
+        await state.mkdirFile(where + '/' + nm);
+        expandTo(where + '/' + nm);
+        state.touchFiles();
+        await refresh();
+      } catch (e) {
+        notice('만들지 못했습니다: ' + msg(e), 'err');
+      }
+    },
+  });
+}
+
 function renameEntry(e: { path: string; name: string }): void {
   const anchor = (viewMount?.querySelector('.filebar') as HTMLElement | null) ?? viewMount;
   if (!anchor) return;
@@ -691,20 +932,24 @@ function renameEntry(e: { path: string; name: string }): void {
   });
 }
 
+/** One notice for a batched verb: the count, and who was skipped why. */
+function batchText(r: { done: number; failed: { path: string; error: string }[] }, target: string, verb: string): string {
+  const head = `${r.done}개를 ${target}/ 에 ${verb}했습니다.`;
+  if (!r.failed.length) return head;
+  const names = r.failed.slice(0, 3).map((f) => f.path.split('/').pop()).join(', ');
+  return `${head} ${r.failed.length}개는 건너뜀 (${names}${r.failed.length > 3 ? ' 외' : ''}) — ${r.failed[0].error}`;
+}
+
 async function pasteInto(target: string): Promise<void> {
   const clip = clipboard;
   if (!clip) return;
-  let done = 0;
+  const list = clip.paths.filter((p) => p !== target && !target.startsWith(p + '/'));
+  if (!list.length) return;
   try {
-    for (const p of clip.paths) {
-      if (p === target || target.startsWith(p + '/')) continue;
-      if (clip.op === 'copy') await state.copyFile(p, target);
-      else await state.moveFile(p, target);
-      done += 1;
-    }
-    notice(`${done}개를 ${target}/ 에 ${clip.op === 'copy' ? '복사' : '이동'}했습니다.`, 'ok');
+    const r = clip.op === 'copy' ? await state.copyFiles(list, target) : await state.moveFiles(list, target);
+    notice(batchText(r, target, clip.op === 'copy' ? '복사' : '이동'), r.failed.length ? 'err' : 'ok');
   } catch (e) {
-    notice(`${done}개를 처리한 뒤 실패했습니다: ` + msg(e), 'err');
+    notice('처리하지 못했습니다: ' + msg(e), 'err');
   }
   // A cut is spent by its paste; a copy can paste again elsewhere.
   if (clip.op === 'cut') {
@@ -719,15 +964,11 @@ async function pasteInto(target: string): Promise<void> {
 async function moveSelected(sources: string[], target: string): Promise<void> {
   const list = sources.filter((p) => p !== target && !target.startsWith(p + '/'));
   if (!list.length) return;
-  let done = 0;
   try {
-    for (const p of list) {
-      await state.moveFile(p, target);
-      done += 1;
-    }
-    notice(`${done}개를 ${target}/ 로 옮겼습니다.`, 'ok');
+    const r = await state.moveFiles(list, target);
+    notice(batchText(r, target, '이동'), r.failed.length ? 'err' : 'ok');
   } catch (e) {
-    notice(`${done}개를 옮긴 뒤 실패했습니다: ` + msg(e), 'err');
+    notice('옮기지 못했습니다: ' + msg(e), 'err');
   }
   selection.clear();
   previewPath = '';
@@ -809,8 +1050,9 @@ function focusList(): void {
   (viewMount?.querySelector('.filelist') as HTMLElement | null)?.focus();
 }
 
-/** 경로 복사 - the space path is what gets pasted into 히나 requests and
- * external tools, and selecting it by hand from a crumb was the complaint. */
+/** 경로 복사 - the space path external tools take. Referencing a file to
+ * 히나 is a drag into the chat now (a chip, no typing); the copy button
+ * stays for everything outside this app. */
 function copyPathButton(path: string): HTMLElement {
   const b = el('button', { class: 'ghost tiny', text: '📋', title: '경로 복사' });
   b.addEventListener('click', (ev) => {
@@ -825,7 +1067,7 @@ function copyPathButton(path: string): HTMLElement {
 async function loadThumb(f: WorkspaceFile, mount: HTMLElement): Promise<void> {
   try {
     if (!mount.isConnected) return;
-    const url = await blobUrl(f.path, String(f.modified));
+    const url = await blobUrl(f.path, String(f.modified), { thumb: true });
     if (!mount.isConnected) return;
     const img = el('img', { src: url, alt: f.name, loading: 'lazy' });
     img.addEventListener('error', () => img.replaceWith(el('div', { class: 'assettype', text: 'IMG' })));
@@ -917,16 +1159,14 @@ async function drawPreview(f: WorkspaceFile, n: Folder): Promise<void> {
 async function runDelete(n: Folder): Promise<void> {
   const paths = [...selection];
   if (!paths.length) return;
-  let done = 0;
   try {
-    for (const p of paths) {
-      await state.deleteFile(p);
-      done += 1;
-      if (previewPath === p) previewPath = '';
-    }
-    notice(`${done}개를 지웠습니다.`, 'ok');
+    const r = await state.deleteFiles(paths);
+    if (paths.includes(previewPath)) previewPath = '';
+    notice(r.failed.length
+      ? `${r.done}개를 지웠습니다. ${r.failed.length}개 실패 — ${r.failed[0].error}`
+      : `${r.done}개를 지웠습니다.`, r.failed.length ? 'err' : 'ok');
   } catch (e) {
-    notice(`${done}개를 지운 뒤 실패했습니다: ` + msg(e), 'err');
+    notice('지우지 못했습니다: ' + msg(e), 'err');
   }
   selection.clear();
   state.touchFiles();
@@ -945,12 +1185,11 @@ function openMove(anchor: HTMLElement): void {
     const b = el('button', { class: 'catrow', text: '📁 ' + target });
     b.addEventListener('click', async () => {
       close();
-      let done = 0;
       try {
-        for (const p of paths) { await state.moveFile(p, target); done += 1; }
-        notice(`${done}개를 ${target}/ 로 옮겼습니다.`, 'ok');
+        const r = await state.moveFiles(paths, target);
+        notice(batchText(r, target, '이동'), r.failed.length ? 'err' : 'ok');
       } catch (e) {
-        notice(`${done}개를 옮긴 뒤 실패했습니다: ` + msg(e), 'err');
+        notice('옮기지 못했습니다: ' + msg(e), 'err');
       }
       selection.clear();
       previewPath = '';

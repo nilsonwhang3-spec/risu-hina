@@ -269,6 +269,17 @@ const clickById = (document, id) => {
 const findButton = (document, text) =>
   [...document.querySelectorAll('button')].find((b) => (b.textContent || '').includes(text));
 
+// Icon-only buttons carry their old label as the tooltip's prefix.
+const findByTitle = (document, prefix) =>
+  [...document.querySelectorAll('button')].find((b) => (b.title || '').startsWith(prefix));
+
+const clickByTitle = (document, prefix) => {
+  const b = findByTitle(document, prefix);
+  if (!b) return false;
+  b.dispatchEvent(new window.Event('click', { bubbles: true }));
+  return true;
+};
+
 const clickButton = (document, text) => {
   const b = findButton(document, text);
   if (!b) return false;
@@ -999,8 +1010,8 @@ console.log('\ntest_workspace_files');
   check('the agent came along', !!document.querySelector('.panel.active .agentpanel'));
 
   const tree = document.querySelector('.panel.active .tree');
-  check('upload is offered', !!findButton(tree, '올리기'));
-  check('a whole folder can be uploaded', !!findButton(tree, '폴더 올리기'));
+  check('upload is offered', !!findByTitle(tree, '올리기'));
+  check('a whole folder can be uploaded', !!findByTitle(tree, '폴더 올리기'));
   check('per-bot cleaning is offered', !!findButton(tree, '이 봇 정리'));
 
   // The space's three areas are the tree roots; the machine area (.hina)
@@ -1013,7 +1024,7 @@ console.log('\ntest_workspace_files');
         !branches().some((b) => (b.title || '').startsWith('.hina') || /^📁?내부/.test(b.textContent || '')),
         (tree?.textContent || '').slice(0, 200));
   check('and the toggle says how many are hidden',
-        /내부 파일 보기 [(]\d+[)]/.test(tree?.textContent || ''),
+        /숨김 파일 보기 [(]\d+[)]/.test(tree?.textContent || ''),
         (tree?.textContent || '').slice(-120));
   // A document in the AI work area is a deliverable: it gets a folder of its
   // own in the tree, and its files are listed in the centre without digging
@@ -1107,13 +1118,34 @@ console.log('\ntest_workspace_files');
   await settle(200);
   check('and the list comes back', !!document.querySelector('.panel.active .filelist'));
 
-  clickButton(tree, '내부 파일 보기');
+  clickButton(tree, '숨김 파일 보기');
   await settle(900);
   check('revealing shows the machine area',
         branches().some((b) => /내부/.test(b.textContent || '')),
         (document.querySelector('.panel.active .tree')?.textContent || '').slice(0, 200));
-  clickButton(document.querySelector('.panel.active .tree'), '내부 파일 숨기기');
+  clickButton(document.querySelector('.panel.active .tree'), '숨김 파일 숨기기');
   await settle(600);
+
+  // Tree context menu + Ctrl multi-select (usability items 14-15).
+  const projRow = branches().find((b) => /프로젝트/.test(b.textContent || ''));
+  projRow?.dispatchEvent(new window.Event('contextmenu', { bubbles: true, cancelable: true }));
+  await settle(200);
+  check('right-click on a tree folder opens the folder verbs',
+        !!document.querySelector('.ctxmenu') && /붙여넣기/.test(document.querySelector('.ctxmenu')?.textContent || ''),
+        document.querySelector('.ctxmenu')?.textContent || 'no menu');
+  pressEscape(document);
+  await settle(200);
+  const stuRow = branches().find((b) => /스튜디오/.test(b.textContent || ''));
+  const ctrlClick = new window.Event('click', { bubbles: true });
+  ctrlClick.ctrlKey = true;
+  stuRow?.dispatchEvent(ctrlClick);
+  await settle(200);
+  check('Ctrl-click multi-selects tree folders',
+        document.querySelectorAll('.panel.active .tree .treebranch.on').length >= 2,
+        String(document.querySelectorAll('.panel.active .tree .treebranch.on').length));
+  branches().find((b) => /프로젝트/.test(b.textContent || ''))
+    ?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(300);
 
   // The frozen originals moved out of this tab: the SYSTEM view is read-only
   // at the route itself, whatever any UI does.
@@ -2022,10 +2054,12 @@ console.log('\ntest_studio_tab');
   // stay usable - sorting and adopting need no token at all.
   await settle(600);
   const centreTabs = document.querySelector('.panel.active .centretabs');
-  check('the centre is 1장 · 배치 · 검수 | 잡 히스토리',
+  check('the centre is three tabs; the history tab folded into the strip',
         /1장/.test(centreTabs?.textContent || '') && /배치/.test(centreTabs?.textContent || '')
-        && /검수/.test(centreTabs?.textContent || '') && /잡 히스토리/.test(centreTabs?.textContent || ''),
+        && /검수/.test(centreTabs?.textContent || '') && !/잡 히스토리/.test(centreTabs?.textContent || ''),
         (centreTabs?.textContent || '').slice(0, 80));
+  check('the bottom strip is mounted under the centre',
+        !!document.querySelector('.panel.active .genstrip'));
   const body = document.querySelector('.panel.active .centrebody');
   check('the 1장 tab has the big preview', !!body?.querySelector('.bigpreview'));
   check('a missing NovelAI token is explained, not an error',
@@ -2333,13 +2367,11 @@ console.log('\ntest_studio_request_settings');
   await settle(200);
 }
 
-console.log('\ntest_studio_history_sections');
+console.log('\ntest_studio_bottom_strip');
 {
-  // Results live in 잡 히스토리 - one fold-out per JOB with the item grid
-  // inside - while the 배치 tab stays strictly the queue being built. A
-  // finished image opens big in the 1장 tab. No trailing 최근 작업 list.
-  clickById(document, 'tab-studio');
-  await settle(400);
+  // The 잡 히스토리 tab is gone: recent results ride a strip fixed under
+  // every centre view, and the running job's fold-out (jobSection) belongs
+  // to the batch tab's live box. A strip cell opens big in the 1장 tab.
   const job = {
     id: 'job_smoke1', kind: 'studio_generate', state: 'partial', error: null,
     created_at: Date.now() / 1000 - 60, updated_at: Date.now() / 1000,
@@ -2354,6 +2386,8 @@ console.log('\ntest_studio_history_sections');
     },
     result: { saved: 1, failed: 1, anlasSpent: 0 },
   };
+  clickById(document, 'tab-files');
+  await settle(400);
   const orig = globalThis.fetch;
   globalThis.fetch = async (url, opts) => {
     const u = String(url);
@@ -2365,22 +2399,21 @@ console.log('\ntest_studio_history_sections');
     return orig(url, opts);
   };
   try {
+    // COMING BACK re-reads the library and the job list into the strip.
+    clickById(document, 'tab-studio');
+    await settle(900);
     const centre = () => document.querySelector('.panel.active .centrebody');
-    clickButton(document.querySelector('.panel.active .centretabs'), '잡 히스토리');
-    await settle(600);
-    const sec = centre()?.querySelector('.jobsec[data-job="job_smoke1"]');
-    check('the history tab holds one fold-out per batch', !!sec,
-          (centre()?.textContent || '').slice(0, 200));
-    check('the newest section is unfolded with its grid',
-          !!sec?.hasAttribute('open') && !!sec?.querySelector('.jobgrid'));
-    const text = sec?.textContent || '';
-    check('the section reads state · progress in the header', /1\/3/.test(text), text.slice(0, 200));
-    check('a failed item carries its error in place', /테스트 실패/.test(text));
-    check('the trailing 최근 작업 list is gone', !/최근 작업/.test(centre()?.textContent || ''));
-    // A finished image opens big in the 1장 tab.
-    sec?.querySelector('.jobpic')?.dispatchEvent(new window.Event('click', { bubbles: true }));
+    check('the history tab is gone from the centre tabs',
+          !/잡 히스토리/.test(document.querySelector('.panel.active .centretabs')?.textContent || ''));
+    const strip = document.querySelector('.panel.active .genstrip');
+    check('the bottom strip is mounted under the centre', !!strip);
+    check('the strip holds the saved image as a cell', !!strip?.querySelector('.stripcell'),
+          (strip?.textContent || '').slice(0, 160));
+    check('the strip head counts the recent saves', /최근 생성 1장/.test(strip?.textContent || ''),
+          (strip?.textContent || '').slice(0, 120));
+    strip?.querySelector('.stripcell')?.dispatchEvent(new window.Event('click', { bubbles: true }));
     await settle(400);
-    check('a finished image opens in the 1장 tab',
+    check('a strip cell opens in the 1장 tab',
           [...document.querySelectorAll('.panel.active .centretabs .tab')]
             .some((b) => b.classList.contains('on') && /1장/.test(b.textContent || ''))
           && !!document.querySelector('.panel.active .bigpreview'),
@@ -2794,8 +2827,8 @@ console.log('\ntest_studio_selector');
   await settle(400);
   const cells = document.querySelectorAll('.panel.active .selcell');
   check('unfolding a group lists its candidates', cells.length === 2, String(cells.length));
-  check('each offers three independent flags',
-        (cells[0]?.querySelectorAll('.selflags button') || []).length === 3);
+  check('each offers the three flags plus 대표',
+        (cells[0]?.querySelectorAll('.selflags button') || []).length === 4);
   const useBtn = [...(cells[0]?.querySelectorAll('.selflags button') || [])]
     .find((b) => b.textContent === '채택');
   useBtn?.dispatchEvent(new window.Event('click', { bubbles: true }));
@@ -2848,7 +2881,7 @@ console.log('\ntest_files_copy_and_previews');
   await settle(900);
   // The selector test uploaded straight to the backend (no rev bump), so
   // refresh the listing the way a person would.
-  clickButton(document.querySelector('.panel.active'), '새로고침');
+  clickByTitle(document.querySelector('.panel.active'), '새로고침');
   await settle(900);
   const row = [...document.querySelectorAll('.panel.active .treerow')]
     .find((r) => /스튜디오/.test(r.textContent || ''));

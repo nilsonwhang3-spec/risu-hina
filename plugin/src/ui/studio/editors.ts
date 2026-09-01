@@ -6,12 +6,12 @@
 import { el, clear, armed } from '../dom';
 import { attachHilite } from '../hilite';
 import { state } from '../../state';
-import { S, hub, msg, areaOfPath, renameCardFile } from './store';
+import { S, hub, msg, areaOfPath, renameCardFile, fragKeys } from './store';
 import { splitFront, joinFront } from './stylefile';
 
-/** Fragment names for `<` completion, shared by every prompt editor here. */
+/** Fragment keys for `<` completion, shared by every prompt editor here. */
 function fragNames(): string[] {
-  return (S.cards.fragments ?? []).map((i) => i.name);
+  return fragKeys();
 }
 
 export function editorHead(path: string, extra: (HTMLElement | null)[] = []): HTMLElement {

@@ -17,8 +17,12 @@ import { state } from '../state';
 const PARALLEL = 6;
 let active = 0;
 const queue: (() => void)[] = [];
-/** path[:stamp] -> object URL. */
+/** path[:stamp] -> object URL (thumb keys carry a t: prefix). */
 const cache = new Map<string, string>();
+/** One fetch per key even when a grid rebuild asks again before it lands. */
+const inflight = new Map<string, Promise<string>>();
+/** Images only: short timeout so a hung fetch frees its 1-of-6 slot fast. */
+const IMAGE_TIMEOUT_MS = 45_000;
 
 const SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i;
 
@@ -49,14 +53,33 @@ export function safeWorkspacePath(path: string): boolean {
  * on screen, and an evicted URL is revoked on a DELAY - revoking at eviction
  * blanked pictures that were still in the DOM (the picture showed, the cache
  * turned over, the <img> went empty). Thirty seconds outlives any redraw. */
-export async function blobUrl(path: string, stamp = ''): Promise<string> {
-  const key = stamp ? `${path}:${stamp}` : path;
+export interface BlobOptions {
+  /** Fetch the server-side WebP thumbnail instead of the original bytes. */
+  thumb?: boolean;
+}
+
+export async function blobUrl(path: string, stamp = '', opts: BlobOptions = {}): Promise<string> {
+  const key = (opts.thumb ? 't:' : '') + (stamp ? `${path}:${stamp}` : path);
   const hit = cache.get(key);
   if (hit) {
     cache.delete(key);
     cache.set(key, hit);
     return hit;
   }
+  // In-flight dedup: drawCentre() rebuilds used to fetch the same cell twice
+  // - both callers passed the semaphore before either had filled the cache.
+  const running = inflight.get(key);
+  if (running) return running;
+  const job = fetchBlob(path, key, opts);
+  inflight.set(key, job);
+  try {
+    return await job;
+  } finally {
+    inflight.delete(key);
+  }
+}
+
+async function fetchBlob(path: string, key: string, opts: BlobOptions): Promise<string> {
   await new Promise<void>((resolve) => {
     const go = () => { active += 1; resolve(); };
     if (active < PARALLEL) go(); else queue.push(go);
@@ -65,7 +88,9 @@ export async function blobUrl(path: string, stamp = ''): Promise<string> {
     // A second waiter for the same key may have filled it meanwhile.
     const again = cache.get(key);
     if (again) return again;
-    const bytes = await state.fileBytes(path);
+    const bytes = opts.thumb
+      ? await state.fileThumb(path)
+      : await state.fileBytes(path, IMAGE_TIMEOUT_MS);
     const buf = new Uint8Array(bytes.byteLength);
     buf.set(bytes);
     const url = URL.createObjectURL(new Blob([buf]));
@@ -83,10 +108,42 @@ export async function blobUrl(path: string, stamp = ''): Promise<string> {
 }
 
 export interface ImgOptions {
-  /** Thumbnail sizing (the .thumb class caps the height). */
+  /** Thumbnail: fetches the server-side WebP preview AND caps the height
+   * (.thumb class). Full bytes stay for big previews. */
   thumb?: boolean;
   /** Cache-buster, usually the file's mtime. */
   stamp?: string;
+  /** Reserve the cell at this CSS aspect-ratio (e.g. '832 / 1216') so grids
+   * never show zero-height blanks or jump when the bytes arrive. */
+  aspect?: string;
+  /** Fetch only when the cell first scrolls near the viewport. */
+  lazy?: boolean;
+}
+
+// --- lazy loading ----------------------------------------------------------------
+
+/** Cells waiting for their first moment on screen. */
+const pending = new Map<Element, () => void>();
+let io: IntersectionObserver | null = null;
+try {
+  io = new IntersectionObserver((entries) => {
+    for (const e of entries) {
+      if (!e.isIntersecting) continue;
+      io?.unobserve(e.target);
+      const cb = pending.get(e.target);
+      pending.delete(e.target);
+      cb?.();
+    }
+  }, { rootMargin: '300px' });
+} catch {
+  io = null; // linkedom (and very old engines): fetch immediately instead
+}
+
+/** Run `cb` when `elm` first comes near the viewport; immediately without IO. */
+function whenVisible(elm: Element, cb: () => void): void {
+  if (!io) { cb(); return; }
+  pending.set(elm, cb);
+  io.observe(elm);
 }
 
 /**
@@ -96,7 +153,8 @@ export interface ImgOptions {
  */
 export function workspaceImage(path: string, alt: string, opts: ImgOptions = {}): HTMLElement {
   path = normalizeWorkspacePath(path);
-  const wrap = el('span', { class: 'wsimg' + (opts.thumb ? ' thumb' : '') });
+  const wrap = el('span', { class: 'wsimg' + (opts.thumb ? ' thumb' : '') + (opts.aspect ? ' phbox' : '') });
+  if (opts.aspect) wrap.style.aspectRatio = opts.aspect;
   const fallback = () => {
     clear(wrap);
     wrap.appendChild(el('span', { class: 'hint', text: `[이미지: ${alt || path}]` }));
@@ -105,11 +163,15 @@ export function workspaceImage(path: string, alt: string, opts: ImgOptions = {})
     fallback();
     return wrap;
   }
-  void blobUrl(path, opts.stamp).then((url) => {
-    const img = el('img', { src: url, alt: alt || path, loading: 'lazy' });
-    img.addEventListener('error', fallback);
-    clear(wrap);
-    wrap.appendChild(img);
-  }).catch(fallback);
+  const start = (): void => {
+    void blobUrl(path, opts.stamp, { thumb: opts.thumb }).then((url) => {
+      const img = el('img', { src: url, alt: alt || path, loading: 'lazy' });
+      img.addEventListener('error', fallback);
+      clear(wrap);
+      wrap.appendChild(img);
+    }).catch(fallback);
+  };
+  if (opts.lazy) whenVisible(wrap, start);
+  else start();
   return wrap;
 }

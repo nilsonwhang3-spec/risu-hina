@@ -22,6 +22,7 @@ import { workspaceImage } from './blobimg';
 import { showArtifact } from './artifact';
 import { clientLog } from '../transport';
 import { currentMode } from './shell';
+import { installDrop } from './tree';
 
 const IMG_RE = /\.(png|jpe?g|gif|webp|avif|bmp)$/i;
 
@@ -110,21 +111,7 @@ export class AgentPanel {
       e.preventDefault();
       void this.attachAll(files);
     });
-    for (const kind of ['dragover', 'dragenter']) {
-      this.input.addEventListener(kind, (e) => {
-        e.preventDefault();
-        this.input.classList.add('dropping');
-      });
-    }
-    for (const kind of ['dragleave', 'drop']) {
-      this.input.addEventListener(kind, () => this.input.classList.remove('dropping'));
-    }
-    this.input.addEventListener('drop', (e) => {
-      const files = Array.from((e as DragEvent).dataTransfer?.files ?? []);
-      if (!files.length) return;
-      e.preventDefault();
-      void this.attachAll(files);
-    });
+    // (Drops target the whole panel now - installDrop below the root.)
 
     this.root = el('div', { class: 'agentpanel' }, [
       el('div', { class: 'agenthead' }, [this.status, fresh, this.historyBtn]),
@@ -137,6 +124,20 @@ export class AgentPanel {
       // control competing with the text rather than an option on sending.
       el('div', { class: 'agentcompose' }, [this.input, el('div', { class: 'agentbtns' }, [clip, this.send]), this.picker]),
     ]);
+
+    // The WHOLE panel takes drops (log, chips, compose): OS files upload as
+    // before (folders now walked via collectDrop), and internal drags - tree
+    // rows, studio cells, fragment cards, card assets - attach as reference
+    // chips, no upload: the agent reads paths itself (read_file/list_files).
+    // Installed once here: the panel is a shared instance re-parented between
+    // tabs, so these listeners survive every re-mount.
+    installDrop(this.root, {
+      into: () => '',
+      effect: 'copy',
+      onFiles: (_p, incoming) => void this.attachAll(incoming.map((i) => i.file)),
+      onMove: (_p, sources) => this.attachPaths(sources),
+      onAssets: (names) => this.attachAssets(names),
+    });
   }
 
   /**
@@ -183,8 +184,54 @@ export class AgentPanel {
     }
   }
 
+  /** Reference chips for workspace paths dragged in: no upload - the path
+   * already lives in the space, and the agent reads it itself. (This is the
+   * 경로 복사 workaround turned into a gesture.) */
+  private attachPaths(paths: string[]): void {
+    for (const path of paths) {
+      if (!path || this.attached.includes(path)) continue;
+      this.attached.push(path);
+      const chip = el('span', { class: 'attachchip', title: path });
+      if (IMG_RE.test(path)) chip.appendChild(workspaceImage(path, path.split('/').pop() ?? path, { thumb: true }));
+      chip.appendChild(el('span', { text: path.split('/').pop() || path }));
+      const drop = el('button', { class: 'ghost tiny', text: '×', title: '이 메시지에서 빼기' });
+      drop.addEventListener('click', () => {
+        this.attached = this.attached.filter((q) => q !== path);
+        chip.remove();
+        if (!this.attachBar.children.length) this.attachBar.style.display = 'none';
+      });
+      chip.appendChild(drop);
+      this.attachBar.appendChild(chip);
+      this.attachBar.style.display = 'flex';
+    }
+  }
+
+  /** Card assets have no workspace path: the chip carries the NAME and the
+   * composed message points the agent at list_assets / fetch_assets. */
+  private attachedAssets: string[] = [];
+  private attachAssets(names: string[]): void {
+    for (const name of names) {
+      if (!name || this.attachedAssets.includes(name)) continue;
+      this.attachedAssets.push(name);
+      const chip = el('span', { class: 'attachchip', title: '카드 에셋: ' + name }, [
+        el('span', { class: 'hint', text: '에셋' }),
+        el('span', { text: name }),
+      ]);
+      const drop = el('button', { class: 'ghost tiny', text: '×', title: '이 메시지에서 빼기' });
+      drop.addEventListener('click', () => {
+        this.attachedAssets = this.attachedAssets.filter((q) => q !== name);
+        chip.remove();
+        if (!this.attachBar.children.length) this.attachBar.style.display = 'none';
+      });
+      chip.appendChild(drop);
+      this.attachBar.appendChild(chip);
+      this.attachBar.style.display = 'flex';
+    }
+  }
+
   private clearAttachments(): void {
     this.attached = [];
+    this.attachedAssets = [];
     clear(this.attachBar);
     this.attachBar.style.display = 'none';
   }
@@ -573,16 +620,24 @@ export class AgentPanel {
   private async submit(): Promise<void> {
     const typed = this.input.value.trim();
     // An attachment on its own is a complete message: "here, look at this".
-    if ((!typed && !this.attached.length) || this.busy) return;
+    if ((!typed && !this.attached.length && !this.attachedAssets.length) || this.busy) return;
 
     // The paths go in the message rather than the file contents. The agent has
     // read_file, so it fetches what it needs and only what it needs - and a
     // pasted file would otherwise be re-sent on every turn of the tool loop.
     const files = this.attached.slice();
-    const prompt = files.length
-      ? (typed ? typed + '\n\n' : '')
-        + '첨부한 파일: ' + files.join(', ')
-        + '\n(워크스페이스에 올려 뒀습니다. read_file 로 읽어 주세요.)'
+    const assets = this.attachedAssets.slice();
+    const extras: string[] = [];
+    if (files.length) {
+      extras.push('첨부한 파일/폴더: ' + files.join(', ')
+        + '\n(워크스페이스 경로입니다. 파일은 read_file 로 읽고, 폴더는 list_files 로 안을 봐 주세요.)');
+    }
+    if (assets.length) {
+      extras.push('첨부한 카드 에셋: ' + assets.join(', ')
+        + '\n(list_assets 로 확인하고 fetch_assets 로 scratch/ 에 꺼내 봐 주세요.)');
+    }
+    const prompt = extras.length
+      ? (typed ? typed + '\n\n' : '') + extras.join('\n\n')
       : typed;
 
     this.busy = true;

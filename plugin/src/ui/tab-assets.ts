@@ -20,6 +20,7 @@ import { state, type AssetItem, type CardScript } from '../state';
 import { transport } from '../transport';
 import { describeSync, syncBusy } from '../assets';
 import { makeTab, type NoticeKind, type TabUi } from './kit';
+import { DRAG_ASSETS } from './tree';
 
 const FIELD_LABEL: Record<string, string> = {
   image: '프로필',
@@ -228,6 +229,15 @@ function cell(c: Cell): HTMLElement {
   const pic = el('div', { class: 'assetpic' });
   box.appendChild(pic);
   void loadThumb(c, pic);
+  // Draggable into the chat: the payload is the asset NAME - no workspace
+  // path exists (bytes live in RisuAI's store; the agent uses fetch_assets).
+  box.draggable = true;
+  box.addEventListener('dragstart', (e) => {
+    const dt = (e as DragEvent).dataTransfer;
+    if (!dt) return;
+    dt.setData(DRAG_ASSETS, JSON.stringify([c.name || c.key]));
+    dt.effectAllowed = 'copy';
+  });
 
   const nameEl = el('div', { class: 'assetname', text: c.name || '(이름 없음)', title: `${c.key}${c.size ? ' · ' + mb(c.size) : ''}` });
   if (c.row && editable()) {

@@ -29,7 +29,7 @@ import { threePane } from '../panes';
 import { bindAgent, mountAgent } from '../agentpane';
 import { CARD_AREAS, OUTPUT_ROOT, S, hub, areaOfPath, canonPath, checkUnresolved,
          persistLeftTab, persistCentreTab, buildOutput, find, msg } from './store';
-import { pollJob } from './gen';
+import { pollJob, loadJobs, markJobsStale } from './gen';
 import { drawCardEditor, drawSceneEditor, drawRawFile, rawView } from './editors';
 import { drawCharacterEditor } from './char-edit';
 import { buildLeftPrompt, syncPromptBadges } from './left-prompt';
@@ -38,7 +38,7 @@ import { buildLeftOutput } from './left-output';
 import { drawFragments } from './center-frags';
 import { drawSingle, singleTick } from './center-single';
 import { drawBatch, batchTick } from './center-batch';
-import { drawHistory, historyTick } from './center-history';
+import { buildStrip, stripTick, refreshStrip } from './strip';
 import { drawFolder } from './center-folder';
 import { hasGroups, loadGroups, drawSelector } from './selector';
 
@@ -70,10 +70,16 @@ try {
   if (saved && typeof saved === 'object') Object.assign(panels, saved);
 } catch { /* storage may be unavailable in the iframe */ }
 
+/** 검수 folds the chat automatically (non-persisted): review is the one
+ * screen where Hina is rarely needed and the grid wants the width. A manual
+ * toggle wins and clears it; leaving 검수 restores the panel. */
+let autoRight = false;
+let wasInspect = false;
+
 function applyPanels(): void {
   if (!splitRoot) return;
   splitRoot.classList.toggle('lcollapse', panels.left);
-  splitRoot.classList.toggle('rcollapse', panels.right);
+  splitRoot.classList.toggle('rcollapse', panels.right || autoRight);
 }
 
 function panelOpen(side: 'left' | 'right'): boolean {
@@ -81,7 +87,12 @@ function panelOpen(side: 'left' | 'right'): boolean {
 }
 
 function togglePanel(side: 'left' | 'right'): void {
-  panels[side] = !panels[side];
+  if (side === 'right' && autoRight) {
+    // The auto-fold from entering 검수: one manual toggle only reopens it.
+    autoRight = false;
+  } else {
+    panels[side] = !panels[side];
+  }
   try { localStorage.setItem(PANELS_KEY, JSON.stringify(panels)); } catch { /* fine */ }
   applyPanels();
   // The centre strip's arrows read the state; keep them honest.
@@ -115,6 +126,9 @@ export function renderStudioTab(mount: HTMLElement): void {
     S.noticeMount = el('div');
     S.viewMount = el('div', { class: 'pad filepad' });
     pane.centre.append(S.noticeMount, S.viewMount);
+    // The bottom strip sits AFTER the scrolling .pad, so it is the fixed bar
+    // under every centre view (the .left column is a flex column).
+    pane.centre.appendChild(buildStrip());
 
     // Collapse rails: shown by the lcollapse/rcollapse classes. The right
     // pane's own toggle sits in its top corner (the agent panel inside is
@@ -131,6 +145,13 @@ export function renderStudioTab(mount: HTMLElement): void {
     built = true;
     void refresh();
     void loadStatus();
+    // Relocated from the old history tab: while the studio shows and nothing
+    // of ours runs, look every few seconds for a batch the agent (or another
+    // window) started - loadJobs adopts it and the ordinary poll takes over.
+    setInterval(() => {
+      if (!wasStudioActive || S.jobId) return;
+      void loadJobs(true).then(() => hub.jobTick());
+    }, 5000);
   } else if (entering || renderedRev !== state.filesRev || state.openStudioRequest) {
     // COMING BACK to the tab re-reads the library (files arrive from outside
     // any rev - another machine writes into the same space), and so does a
@@ -216,6 +237,8 @@ async function refresh(): Promise<void> {
   drawLeft();
   drawCentre();
   checkUnresolved();
+  markJobsStale();
+  void refreshStrip();
   if (S.jobId) void pollJob();
 }
 
@@ -264,10 +287,10 @@ async function refreshArea(area: string): Promise<void> {
 
 /** The live-job heartbeat lands on whichever tab is showing. */
 function jobTick(): void {
+  stripTick();
   if (S.centreMode !== 'tab' || S.selectedFile) return;
   if (S.centreTab === 'single') singleTick();
   else if (S.centreTab === 'batch') batchTick();
-  else historyTick();
 }
 
 // The hub: what the sibling modules call to reach back into this file (and
@@ -324,6 +347,14 @@ function drawCentre(): void {
   if (!viewMount) return;
   clear(viewMount);
 
+  // Entering any 검수 surface (the tab, the folder grid, the selector) folds
+  // the chat once; leaving restores it unless the user toggled meanwhile.
+  const inInspect = (S.centreMode === 'tab' && !S.selectedFile && S.centreTab === 'inspect')
+    || S.centreMode === 'folder' || S.centreMode === 'selector';
+  if (inInspect && !wasInspect && !panels.right) { autoRight = true; applyPanels(); }
+  else if (!inInspect && wasInspect && autoRight) { autoRight = false; applyPanels(); }
+  wasInspect = inInspect;
+
   // A card picked in a list: its editor, over everything - an editor is
   // always reachable, whatever the tabs are doing.
   if (S.selectedFile) {
@@ -364,7 +395,7 @@ function drawCentre(): void {
     }
   }
 
-  // The tabs: 1장 · 배치 · 잡 히스토리 - a HORIZONTAL strip (never wraps into
+  // The tabs: 1장 · 배치 · 검수 - a HORIZONTAL strip (never wraps into
   // a column), with the two panel-collapse toggles at its ends: the centre is
   // the one place always wide enough to hold them.
   const mk = (tab: typeof S.centreTab, label: string): HTMLElement => {
@@ -379,15 +410,12 @@ function drawCentre(): void {
   };
   viewMount.appendChild(el('div', { class: 'centretabs tabstrip' }, [
     mk('single', '1장'), mk('batch', '배치'), mk('inspect', '검수'),
-    el('span', { class: 'tabsep' }),
-    mk('history', '잡 히스토리'),
   ]));
   const body = el('div', { class: 'centrebody' });
   viewMount.appendChild(body);
   if (S.centreTab === 'single') drawSingle(body);
   else if (S.centreTab === 'batch') drawBatch(body);
-  else if (S.centreTab === 'inspect') drawInspect(body);
-  else drawHistory(body);
+  else drawInspect(body);
 }
 
 /** 검수: the OUTPUT folder picked on the left, as the comparison selector.

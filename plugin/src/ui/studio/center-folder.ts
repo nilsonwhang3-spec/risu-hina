@@ -8,7 +8,7 @@
  * because sorting a folder and choosing between candidates are different
  * jobs.
  */
-import { el, armed } from '../dom';
+import { el, colPicker, armed } from '../dom';
 import { namePopover } from '../kit';
 import { state } from '../../state';
 import { workspaceImage } from '../blobimg';
@@ -64,12 +64,12 @@ export function drawFolder(node: Folder): void {
       },
     });
   });
-  const cols = el('div', { class: 'row', style: { gap: '2px' } },
-    [2, 3, 4].map((n) => {
-      const b = el('button', { class: 'ghost tiny' + (S.cols === n ? ' on' : ''), text: String(n) });
-      b.addEventListener('click', () => { S.cols = n as 2 | 3 | 4; persistCols(); hub.drawCentre(); });
-      return b;
-    }));
+  const cols = colPicker({ values: [2, 3, 4], get: () => S.cols, set: (n) => {
+    S.cols = n as 2 | 3 | 4; persistCols();
+    for (const gEl of Array.from(document.querySelectorAll<HTMLElement>('.foldergrid'))) {
+      gEl.style.gridTemplateColumns = `repeat(${S.cols}, minmax(0, 1fr))`;
+    }
+  } });
 
   const del = el('button', { class: 'ghost tiny' }) as HTMLButtonElement;
   const selInfo = el('span', { class: 'hint' });

@@ -489,6 +489,25 @@ check("a group with nothing chosen leaves a placeholder",
       "히나-sad.txt" in names, str(names))
 check("the counts are reported", r["used"] == 1 and r["inpaint"] == 1 and r["empty"] == 1,
       json.dumps(r, ensure_ascii=False))
+
+print("\ntest_rep_priority")
+# The 대표 flag: written only when set (three-flag-era files keep their exact
+# shape), passed through group() untouched, and the flagged image takes the
+# canonical name on export - without one, filename order stands, as above.
+(shots / "히나-happy-20260829-120000-2.png").write_bytes(PNG + b"REP")
+studio.write_selection("images/고르기", {
+    "히나-happy-20260829-120000-1.png": {"use": True, "inpaint": False, "delete": False},
+    "히나-happy-20260829-120000-2.png": {"use": True, "inpaint": False, "delete": False, "rep": True},
+})
+back_rep = studio.group("images/고르기")
+reps = [i["filename"] for grp in back_rep["groups"] for i in grp["items"] if i["selection"].get("rep")]
+check("rep survives a round trip", reps == ["히나-happy-20260829-120000-2.png"], str(reps))
+r_rep = studio.export_selected("images/고르기", character="히나")
+check("the rep takes the canonical name",
+      (shots / "selected" / "히나-happy.png").read_bytes().endswith(b"REP"),
+      json.dumps(r_rep, ensure_ascii=False))
+check("the runner-up gets the .2 suffix",
+      (shots / "selected" / "히나-happy.2.png").is_file())
 # `<character>-<emotion>` is exactly RisuAI's emotionImages naming, which is
 # why the export is directly adoptable.
 check("export names match the emotionImages convention",

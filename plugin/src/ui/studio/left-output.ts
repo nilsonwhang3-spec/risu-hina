@@ -22,7 +22,7 @@ function spec(): TreeSpec {
   return {
     expanded: S.open,
     // The highlight follows the folder only while the centre shows it.
-    selected: S.selectedFile ? '' : S.selected,
+    selected: new Set(S.selectedFile ? [] : [S.selected]),
     onOpen(node) {
       if (node.kids.length) S.open.add(node.path);
       S.selected = node.path;
@@ -42,11 +42,11 @@ function spec(): TreeSpec {
     // Rows dragged from the centre grid land in a folder here.
     onDropMove(path, sources) {
       void (async () => {
+        const list = sources.filter((src) => src !== path && !path.startsWith(src + '/'));
+        if (!list.length) return;
         try {
-          for (const src of sources) {
-            if (src === path || path.startsWith(src + '/')) continue;
-            await state.moveFile(src, path);
-          }
+          const r = await state.moveFiles(list, path);
+          if (r.failed.length) hub.notice(`${r.done}개 이동, ${r.failed.length}개는 건너뜀 — ${r.failed[0].error}`, 'err');
           hub.touchQuiet();
           await hub.refresh();
         } catch (e) {

@@ -219,6 +219,13 @@ export interface WorkspaceFile {
   textual: boolean;
 }
 
+/** A batched fs verb's answer: what worked, and who was skipped why. */
+export interface BatchFsResult {
+  done: number;
+  results: Record<string, string>[];
+  failed: { path: string; error: string }[];
+}
+
 export interface FileArea {
   area: string;
   /** Whether the panel may delete individual files here. */
@@ -227,6 +234,8 @@ export interface FileArea {
   cleanable: boolean;
   count: number;
   size: number;
+  /** Files held back by the default machinery/dot filter (hidden=1 reveals). */
+  hidden?: number;
   files: WorkspaceFile[];
   /** Folders inside the area, empty ones included. */
   dirs?: string[];
@@ -482,7 +491,7 @@ export interface StudioStatus {
  * is what goes to the bot, `inpaint` is what needs fixing first, `delete` is
  * what to throw away — and a candidate can legitimately be none of them.
  */
-export interface SelectionState { use: boolean; inpaint: boolean; delete: boolean }
+export interface SelectionState { use: boolean; inpaint: boolean; delete: boolean; rep?: boolean }
 export type SelectionMap = Record<string, SelectionState>;
 
 export interface GroupItem {
@@ -532,7 +541,7 @@ export interface StudioJob {
     done: number; total: number; saved: string[];
     failed: { name: string; error: string }[];
     /** The full expansion, in run order - what the batch sections list. */
-    items?: { name: string; scene?: string; cast?: string }[];
+    items?: { name: string; scene?: string; cast?: string; entryIx?: number }[];
     /** The image being drawn right now (running jobs only). */
     current?: string;
     /** A run-time remark (e.g. references skipped on a v5 model). */
@@ -1405,8 +1414,11 @@ class AppState {
     return r;
   }
 
-  async files(prefix = ''): Promise<FileListing> {
-    return await transport.get('/files' + (prefix ? '?prefix=' + encodeURIComponent(prefix) : ''));
+  async files(prefix = '', hidden = false): Promise<FileListing> {
+    const q: string[] = [];
+    if (prefix) q.push('prefix=' + encodeURIComponent(prefix));
+    if (hidden) q.push('hidden=1');
+    return await transport.get('/files' + (q.length ? '?' + q.join('&') : ''));
   }
 
   /** This bot's SYSTEM directory: frozen originals and machinery, read-only. */
@@ -1473,8 +1485,14 @@ class AppState {
   }
 
   /** Raw bytes of a space file (an image preview, a thumbnail). POST: see tab-assets. */
-  async fileBytes(path: string): Promise<Uint8Array> {
-    return await transport.postBinary('/files/download', { path });
+  async fileBytes(path: string, timeoutMs?: number): Promise<Uint8Array> {
+    return await transport.postBinary('/files/download', { path }, timeoutMs);
+  }
+
+  /** A small server-side WebP preview (Pillow); the server streams the
+   * original bytes instead when it cannot thumb, so callers need no fallback. */
+  async fileThumb(path: string, w = 360): Promise<Uint8Array> {
+    return await transport.postBinary('/files/thumb', { path, w }, 25_000);
   }
 
   async mkdirFile(path: string): Promise<void> {
@@ -1493,6 +1511,20 @@ class AppState {
 
   async deleteFile(path: string): Promise<void> {
     await transport.post('/files/delete', { path });
+  }
+
+  // Batched verbs: ONE round trip for N paths; a name clash or a missing
+  // file lands in `failed` while the rest of the batch proceeds.
+  async moveFiles(paths: string[], to: string): Promise<BatchFsResult> {
+    return await transport.post('/files/move', { paths, to });
+  }
+
+  async copyFiles(paths: string[], to: string): Promise<BatchFsResult> {
+    return await transport.post('/files/copy', { paths, to });
+  }
+
+  async deleteFiles(paths: string[]): Promise<BatchFsResult> {
+    return await transport.post('/files/delete', { paths });
   }
 
   async cleanFiles(areas?: string[]): Promise<{ areas: string[]; removed: number; freed: number }> {

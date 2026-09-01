@@ -1156,8 +1156,11 @@ def read_selection(folder: str) -> dict:
 def write_selection(folder: str, selections: dict) -> dict:
     p = _side(SELECTION_DIR, folder)
     p.parent.mkdir(parents=True, exist_ok=True)
+    # `rep` (the group's representative) is written only when set, so files
+    # and tests from the three-flag era keep their exact shape.
     clean = {str(k): {"use": bool(v.get("use")), "inpaint": bool(v.get("inpaint")),
-                      "delete": bool(v.get("delete"))}
+                      "delete": bool(v.get("delete")),
+                      **({"rep": True} if v.get("rep") else {})}
              for k, v in (selections or {}).items() if isinstance(v, dict)}
     p.write_text(json.dumps(clean, ensure_ascii=False, indent=2), encoding="utf-8")
     return {"folder": folder, "count": len(clean)}
@@ -1305,7 +1308,9 @@ def export_selected(folder: str, *, pattern: str = "", group_by: str = "emotion"
     for grp in g["groups"]:
         chosen = [i for i in grp["items"] if i["selection"].get("use")]
         fixing = [i for i in grp["items"] if i["selection"].get("inpaint")]
-        for i, item in enumerate(sorted(chosen, key=lambda x: x["filename"])):
+        # The representative (if flagged) takes the canonical name; without
+        # one this degenerates to the old filename order exactly.
+        for i, item in enumerate(sorted(chosen, key=lambda x: (not x["selection"].get("rep"), x["filename"]))):
             ext = Path(item["filename"]).suffix
             shutil.copy2(base / item["filename"], out / name_for(grp["key"], i, ext))
             used += 1

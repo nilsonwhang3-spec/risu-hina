@@ -20,6 +20,7 @@ what keeps the SYSTEM dirs out of the space's reach as well.
 from __future__ import annotations
 
 import base64
+import hashlib
 import os
 import shutil
 import time
@@ -109,13 +110,40 @@ def _resolve(scope: str, rel: str) -> Path:
     return candidate
 
 
-def listing(scope: str, prefix: str = "") -> dict:
+# The three helper files pyexec.layout()/run_python rewrite on EVERY run -
+# hidden by exact name, so agent-authored scripts stay visible (and the @docs
+# surfacing keeps seeing them). See pyserver/app/pyexec.py.
+_MACHINERY_SCRIPTS = {"risuhina.py", "realooc.py", "_agent_run.py"}
+
+
+def _machinery(rel: str) -> bool:
+    """Regenerated-every-run machinery: hina/<bot>/skills/** (rmtree+copytree
+    per run) and the helper scripts. scratch/ and user scripts stay visible."""
+    parts = rel.split("/")
+    if len(parts) >= 3 and parts[0] == "hina" and parts[2] == "skills":
+        return True
+    return (len(parts) == 4 and parts[0] == "hina" and parts[2] == "scripts"
+            and parts[3] in _MACHINERY_SCRIPTS)
+
+
+def _listing_hidden(rel: str) -> bool:
+    """Default-hidden in the tree (usability batch item 1): any dot component
+    - the LEAF included, unlike `_hidden`, which spares it for search - or
+    machinery. `include_hidden` (the panel's one toggle) reveals them."""
+    return any(p.startswith(".") for p in rel.split("/")) or _machinery(rel)
+
+
+def listing(scope: str, prefix: str = "", include_hidden: bool = False) -> dict:
     """Every file in the workspace, grouped by area, with sizes.
 
     `prefix` narrows the walk to one subtree ("studio/images"): the studio tab
     only ever consumes that slice, and without the filter every refresh
     shipped the entire space - every bot's hina/, every project - to throw it
     away. Paths in the result stay root-relative either way.
+
+    Hidden files (see `_listing_hidden`) are skipped unless `include_hidden`,
+    but their bytes still count into `size`/`totalSize` - the footer's disk
+    usage stays the truth. Each area reports how many it held back.
     """
     root = _root(scope)
     prefix = (prefix or "").strip("/").replace("\\", "/")
@@ -129,6 +157,7 @@ def listing(scope: str, prefix: str = "") -> dict:
         d = root / prefix if prefix else root / name
         files = []
         size = 0
+        hidden_n = 0
         if d.is_dir():
             for f in sorted(d.rglob("*")):
                 if not f.is_file() or f.name.endswith(PART_SUFFIX):
@@ -138,8 +167,12 @@ def listing(scope: str, prefix: str = "") -> dict:
                 except OSError:
                     continue
                 size += st.st_size
+                rel_p = f.relative_to(root).as_posix()
+                if not include_hidden and _listing_hidden(rel_p):
+                    hidden_n += 1
+                    continue
                 files.append({
-                    "path": f.relative_to(root).as_posix(),
+                    "path": rel_p,
                     "name": f.name,
                     "size": st.st_size,
                     "modified": st.st_mtime,
@@ -147,8 +180,8 @@ def listing(scope: str, prefix: str = "") -> dict:
                 })
         total += size
         dirs = sorted(
-            d.relative_to(root).as_posix() for d in (d.rglob("*") if d.is_dir() else [])
-            if d.is_dir() and not d.name.startswith(".")
+            q.relative_to(root).as_posix() for q in (d.rglob("*") if d.is_dir() else [])
+            if q.is_dir() and (include_hidden or not _listing_hidden(q.relative_to(root).as_posix()))
         ) if d.is_dir() else []
         areas.append({
             "area": name,
@@ -156,6 +189,7 @@ def listing(scope: str, prefix: str = "") -> dict:
             "cleanable": cleanable,
             "count": len(files),
             "size": size,
+            "hidden": hidden_n,
             "files": files,
             # Folders, empty ones included - the files tab draws them and
             # offers them as move targets.
@@ -541,6 +575,31 @@ def delete(scope: str, rel: str) -> dict:
     return {"deleted": rel}
 
 
+def _many(rels: list[str], fn) -> dict:
+    """Batch wrapper: one HTTP round trip instead of N (a 300-file paste used
+    to be 300 requests). A per-item failure lands in `failed` and the batch
+    goes on - move's name-clash refusal must not abort the other 299."""
+    results, failed = [], []
+    for rel in rels:
+        try:
+            results.append(fn(rel))
+        except FileError as e:
+            failed.append({"path": rel, "error": str(e)})
+    return {"done": len(results), "results": results, "failed": failed}
+
+
+def delete_many(scope: str, rels: list[str]) -> dict:
+    return _many(rels, lambda r: delete(scope, r))
+
+
+def move_many(scope: str, rels: list[str], dst_rel: str) -> dict:
+    return _many(rels, lambda r: move(scope, r, dst_rel))
+
+
+def copy_many(scope: str, rels: list[str], dst_rel: str) -> dict:
+    return _many(rels, lambda r: copy(scope, r, dst_rel))
+
+
 def clean(scope: str, areas: list[str] | None = None) -> dict:
     """Empty the cleanable areas. Never touches original/ or uploads/."""
     root = _root(scope)
@@ -734,3 +793,58 @@ def stats(scope: str) -> dict[str, Any]:
         "byArea": {a["area"]: {"count": a["count"], "size": a["size"]} for a in data["areas"]},
         "generatedAt": time.time(),
     }
+
+
+# --- thumbnails -------------------------------------------------------------------
+
+_THUMB_KEEP = 2000
+_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".bmp"}
+
+
+def _thumb_dir() -> Path:
+    return workspace.space_root() / "studio" / "config" / ".studio" / "thumbs"
+
+
+def thumb_bytes(target: Path, width: int = 360) -> tuple[bytes, str | None]:
+    """A small WebP preview of an image, disk-cached by (path, mtime, width).
+
+    Returns (bytes, mime). Anything that cannot be thumbed - not an image,
+    Pillow missing, decode failure - returns the ORIGINAL bytes with mime None
+    (the caller picks its own): a broken thumbnailer must never turn into a
+    broken picture that /files/download could have served.
+    """
+    if target.suffix.lower() not in _IMAGE_SUFFIXES:
+        return target.read_bytes(), None
+    try:
+        from PIL import Image  # optional dependency: pillow (requirements.in)
+    except Exception:
+        return target.read_bytes(), None
+    try:
+        st = target.stat()
+        key = hashlib.sha1(f"{target}|{st.st_mtime_ns}|{width}".encode()).hexdigest()
+        cdir = _thumb_dir()
+        cp = cdir / f"{key}.webp"
+        if cp.is_file():
+            return cp.read_bytes(), "image/webp"
+        with Image.open(target) as im:
+            if im.mode not in ("RGB", "RGBA"):
+                im = im.convert("RGBA")
+            im.thumbnail((width, width * 2))
+            cdir.mkdir(parents=True, exist_ok=True)
+            tmp = cp.with_name(cp.name + ".tmp")
+            im.save(tmp, "WEBP", quality=82)
+            tmp.replace(cp)
+        _prune_thumbs(cdir)
+        return cp.read_bytes(), "image/webp"
+    except Exception:
+        return target.read_bytes(), None
+
+
+def _prune_thumbs(cdir: Path) -> None:
+    """Opportunistic cap: drop the oldest entries once the cache passes ~2000."""
+    try:
+        entries = sorted(cdir.glob("*.webp"), key=lambda q: q.stat().st_mtime)
+        for q in entries[: max(0, len(entries) - _THUMB_KEEP)]:
+            q.unlink(missing_ok=True)
+    except OSError:
+        pass

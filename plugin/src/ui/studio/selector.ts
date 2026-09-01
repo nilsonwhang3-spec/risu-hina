@@ -17,18 +17,21 @@
  * CLICK the token that is the group key (the chips show the actual first
  * filename split apart). A raw named-group regex stays behind 고급.
  */
-import { el, clear } from '../dom';
+import { el, segCtl, colPicker, clear } from '../dom';
 import { blobUrl } from '../blobimg';
 import { state, type GroupItem, type SelectionMap, type SelectionState,
          type StudioGroups, type WorkspaceFile } from '../../state';
-import { S, hub, gen, msg, adjustReserve, type Folder } from './store';
+import { S, hub, gen, msg, adjustReserve, type Folder, persistSelCols } from './store';
 import { scenesOf } from './center-batch';
 
 let groups: StudioGroups | null = null;
 let selection: SelectionMap = {};
-let columns = 3;
 let drill = '';
-let viewMode: 'all' | 'group' = 'group';
+let viewMode: 'all' | 'group' | 'rep' = 'group';
+/** Per-cell/per-group refreshers: a flag click patches in place - the old
+ * full drawCentre re-fetched every thumbnail (the dominant review lag). */
+const cellSyncs = new Map<string, () => void>();
+let missingSync: (() => void) | null = null;
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 let patternTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -99,14 +102,41 @@ export async function loadGroups(folder: string): Promise<void> {
 }
 
 /** Debounced, like image-selector: a click should not wait on a round trip. */
-function flag(filename: string, key: keyof SelectionState): void {
-  const cur = selection[filename] || { use: false, inpaint: false, delete: false };
-  selection[filename] = { ...cur, [key]: !cur[key] };
-  hub.drawCentre();
+function queueSave(): void {
   if (saveTimer) clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
     void state.studio.saveSelection(S.selected, selection).catch(() => { /* retried on the next click */ });
   }, 500);
+}
+
+function flag(filename: string, key: keyof SelectionState): void {
+  const cur = selection[filename] || { use: false, inpaint: false, delete: false };
+  selection[filename] = { ...cur, [key]: !cur[key] };
+  cellSyncs.get(filename)?.();
+  missingSync?.();
+  queueSave();
+}
+
+/** 대표 is exclusive per group; turning it on also 채택s the image (the
+ * export writes chosen files only, and the rep takes the canonical name). */
+function flagRep(filename: string, groupItems: GroupItem[]): void {
+  const cur = !!selection[filename]?.rep;
+  for (const gi of groupItems) {
+    const s = selection[gi.filename] || { use: false, inpaint: false, delete: false };
+    const want = gi.filename === filename ? !cur : false;
+    if (!!s.rep !== want) {
+      selection[gi.filename] = { ...s, rep: want, ...(want ? { use: true } : {}) };
+      cellSyncs.get(gi.filename)?.();
+    }
+  }
+  missingSync?.();
+  queueSave();
+}
+
+/** Bulk actions: apply, then refresh every registered cell/card in place. */
+function syncAllCells(): void {
+  for (const s of cellSyncs.values()) s();
+  missingSync?.();
 }
 
 export function drawSelector(node: Folder): void {
@@ -114,6 +144,8 @@ export function drawSelector(node: Folder): void {
   const viewMount = S.viewMount;
   const g = groups;
   const p = prefsFor(node.path);
+  cellSyncs.clear();
+  missingSync = null;
 
   // --- top bar: back · title · 전체/그룹별 · columns · bulk · export -------------
   const bar = el('div', { class: 'row', style: { marginBottom: '8px', flexWrap: 'wrap' } });
@@ -123,30 +155,29 @@ export function drawSelector(node: Folder): void {
     tidy,
     el('span', { class: 'sectiontitle grow', text: `${node.path} · ${g.total}장 · 그룹 ${g.groups.length}` }),
   );
-  const mkView = (v: 'all' | 'group', label: string) => {
-    const b = el('button', { class: 'ghost tiny' + (viewMode === v ? ' on' : ''), text: label });
-    b.addEventListener('click', () => { viewMode = v; drill = ''; hub.drawCentre(); });
-    return b;
-  };
-  bar.append(mkView('group', '그룹별'), mkView('all', '전체'));
-  for (const n of [2, 3, 4, 5, 6]) {
-    const b = el('button', { class: 'ghost tiny' + (columns === n ? ' on' : ''), text: String(n) });
-    b.addEventListener('click', () => { columns = n; hub.drawCentre(); });
-    bar.appendChild(b);
-  }
+  const mkView = (v: 'all' | 'group' | 'rep', label: string) => ({
+    label, on: viewMode === v, pick: () => { viewMode = v; drill = ''; hub.drawCentre(); },
+  });
+  bar.append(segCtl([mkView('group', '그룹별'), mkView('all', '전체'), mkView('rep', '대표')]));
+  bar.appendChild(colPicker({ values: [2, 3, 4, 5, 6], get: () => S.selCols, set: (n) => {
+    S.selCols = n; persistSelCols();
+    for (const gEl of Array.from(document.querySelectorAll<HTMLElement>('.selgrid'))) {
+      gEl.style.gridTemplateColumns = `repeat(${S.selCols}, minmax(0, 1fr))`;
+    }
+  } }));
   const firstEach = el('button', { class: 'ghost tiny', text: '그룹마다 첫 장' });
   firstEach.addEventListener('click', () => {
     for (const grp of g.groups) {
       const f = grp.items[0];
       if (f) selection[f.filename] = { ...selection[f.filename], use: true };
     }
-    hub.drawCentre();
+    syncAllCells();
     void state.studio.saveSelection(S.selected, selection);
   });
   const none = el('button', { class: 'ghost tiny', text: '선택 해제' });
   none.addEventListener('click', () => {
-    for (const k of Object.keys(selection)) selection[k] = { ...selection[k], use: false };
-    hub.drawCentre();
+    for (const k of Object.keys(selection)) selection[k] = { ...selection[k], use: false, rep: false };
+    syncAllCells();
     void state.studio.saveSelection(S.selected, selection);
   });
   // 봇에 반영 belongs to the selected/ folder an export made - the folder
@@ -168,30 +199,38 @@ export function drawSelector(node: Folder): void {
     if (p.delimiter === v) o.setAttribute('selected', 'selected');
     dsel.appendChild(o);
   }
+  // Changing the delimiter only re-splits the sample: the reload (and the
+  // rule change) happens when a token chip is PICKED, so the grid never
+  // reshuffles under the pointer mid-decision.
+  let stagedDelim = p.delimiter;
   dsel.addEventListener('change', () => {
-    setPrefs(node.path, { delimiter: dsel.value, mode: 'delim' });
-    drill = '';
-    void loadGroups(node.path);
+    stagedDelim = dsel.value;
+    renderChips();
   });
   rule.appendChild(dsel);
   rule.appendChild(el('span', { class: 'hint', text: '그룹 기준' }));
-  if (stem) {
-    const tokens = stem.split(p.delimiter).filter((t) => t !== '');
+  const chipsBox = el('span', { class: 'row', style: { gap: '2px', flexWrap: 'wrap' } });
+  rule.appendChild(chipsBox);
+  const renderChips = (): void => {
+    clear(chipsBox);
+    if (!stem) return;
+    const tokens = stem.split(stagedDelim).filter((t) => t !== '');
     tokens.slice(0, 6).forEach((tok, i) => {
-      const on = p.mode === 'delim' && p.tokenIndex === i + 1;
+      const on = p.mode === 'delim' && p.delimiter === stagedDelim && p.tokenIndex === i + 1;
       const chip = el('button', {
         class: 'ghost tiny tokenchip' + (on ? ' on' : ''),
         text: `${i + 1}·${tok.length > 12 ? tok.slice(0, 12) + '…' : tok}`,
         title: `${i + 1}번째 조각을 그룹 기준으로 (예: ${tok})`,
       });
       chip.addEventListener('click', () => {
-        setPrefs(node.path, { mode: 'delim', tokenIndex: i + 1 });
+        setPrefs(node.path, { mode: 'delim', delimiter: stagedDelim, tokenIndex: i + 1 });
         drill = '';
         void loadGroups(node.path);
       });
-      rule.appendChild(chip);
+      chipsBox.appendChild(chip);
     });
-  }
+  };
+  renderChips();
   const auto = el('button', { class: 'ghost tiny' + (p.mode === 'default' ? ' on' : ''), text: '자동',
                               title: '기본 규칙 (캐릭터-감정-날짜-번호 형태를 자동으로 읽습니다)' });
   auto.addEventListener('click', () => {
@@ -200,7 +239,11 @@ export function drawSelector(node: Folder): void {
     void loadGroups(node.path);
   });
   rule.appendChild(auto);
-  rule.appendChild(el('span', { class: 'hint', text: `읽음 ${g.total - g.unmatched.length} / 못 읽음 ${g.unmatched.length}` }));
+  rule.appendChild(el('span', { class: 'hint', text: `읽음 ${g.total - g.unmatched.length}` }));
+  if (g.unmatched.length) {
+    rule.appendChild(el('span', { class: 'badge warn', text: `못 읽음 ${g.unmatched.length}`,
+      title: '이름 규칙이 못 읽은 파일 — 아래 별도 목록에 있습니다' }));
+  }
   viewMount.appendChild(rule);
 
   // 고급: the raw named-group regex, folded away.
@@ -240,19 +283,25 @@ export function drawSelector(node: Folder): void {
   // 부족분: groups where nothing is chosen and nothing is being fixed - the
   // slots the export would leave a placeholder for. One button turns them
   // into reservations, closing the cycle: 분류 → 부족분 → 다음 배치.
-  const missing = g.groups
-    .filter((grp) => !grp.items.some((i) => selection[i.filename]?.use || selection[i.filename]?.inpaint))
-    .map((grp) => grp.key);
-  if (missing.length) {
+  const missingBox = el('div', {});
+  viewMount.appendChild(missingBox);
+  const renderMissing = (): void => {
+    clear(missingBox);
+    const missing = g.groups
+      .filter((grp) => !grp.items.some((i) => selection[i.filename]?.use || selection[i.filename]?.inpaint))
+      .map((grp) => grp.key);
+    if (!missing.length) return;
     const fill = el('button', { class: 'ghost tiny', text: '부족분 예약에 담기',
       title: '씬 프리셋에서 같은 이름의 씬을 찾아 1장씩 배치 예약에 넣습니다' }) as HTMLButtonElement;
     fill.addEventListener('click', () => void reserveMissing(missing, fill));
-    viewMount.appendChild(el('div', { class: 'row', style: { marginBottom: '8px' } }, [
+    missingBox.appendChild(el('div', { class: 'row', style: { marginBottom: '8px' } }, [
       el('span', { class: 'badge warn', text: `부족분 ${missing.length}개` }),
       el('span', { class: 'hint grow', text: missing.join(', ') }),
       fill,
     ]));
-  }
+  };
+  renderMissing();
+  missingSync = renderMissing;
 
   // --- the body: a drilled group, the group cards, or the flat grid ------------------
   if (drill) {
@@ -270,12 +319,35 @@ export function drawSelector(node: Folder): void {
     up.addEventListener('click', () => { drill = ''; viewMode = 'group'; hub.drawCentre(); });
     nav.append(up, prev, next, el('span', { class: 'sectiontitle', text: `${drill} · ${grp?.items.length ?? 0}장` }));
     viewMount.appendChild(nav);
-    viewMount.appendChild(candidateGrid(grp?.items ?? []));
+    viewMount.appendChild(candidateGrid(grp?.items ?? [], grp?.items));
   } else if (viewMode === 'group') {
-    const grid = el('div', { class: 'agrid selgrid', style: { gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` } });
+    const grid = el('div', { class: 'agrid selgrid', style: { gridTemplateColumns: `repeat(${S.selCols}, minmax(0, 1fr))` } });
     for (const grp of g.groups) grid.appendChild(groupCard(grp));
     viewMount.appendChild(grid);
     if (!g.groups.length) viewMount.appendChild(el('div', { class: 'empty', text: '규칙이 읽어낸 그룹이 없습니다 — 구분자와 그룹 기준을 확인하세요.' }));
+  } else if (viewMode === 'rep') {
+    // 대표 모아보기: the chosen representative per group side by side - the
+    // "씬별 대표 이미지" answer sheet. Click through to the group's candidates.
+    const grid = el('div', { class: 'agrid selgrid', style: { gridTemplateColumns: `repeat(${S.selCols}, minmax(0, 1fr))` } });
+    for (const grp of g.groups) {
+      const chosen = grp.items.find((i) => selection[i.filename]?.rep)
+        ?? grp.items.find((i) => selection[i.filename]?.use);
+      const pic = el('div', { class: 'assetpic' });
+      const cellR = el('div', { class: 'fcell groupcard' + (chosen ? ' picked' : ''),
+                                title: `${grp.key} — 눌러서 후보를 펼칩니다` }, [
+        pic,
+        el('div', { class: 'fname row' }, [
+          el('span', { class: 'grow', text: grp.key }),
+          chosen ? null : el('span', { class: 'badge warn', text: '대표 없음' }),
+        ]),
+      ]);
+      if (chosen) void loadThumb({ path: chosen.path, name: chosen.filename, size: 0, modified: 0, textual: false }, pic);
+      else pic.appendChild(el('div', { class: 'assettype', text: '—' }));
+      cellR.addEventListener('click', () => { drill = grp.key; hub.drawCentre(); });
+      grid.appendChild(cellR);
+    }
+    viewMount.appendChild(grid);
+    if (!g.groups.length) viewMount.appendChild(el('div', { class: 'empty', text: '규칙이 읽어낸 그룹이 없습니다.' }));
   } else {
     viewMount.appendChild(candidateGrid([...g.groups.flatMap((x) => x.items)]));
   }
@@ -294,39 +366,51 @@ export function drawSelector(node: Folder): void {
 /** 그룹별: one representative card per group - the first image, the count,
  * and where the choice stands. Click to unfold the group (15). */
 function groupCard(grp: { key: string; items: GroupItem[] }): HTMLElement {
-  const rep = grp.items[0];
-  const chosen = grp.items.filter((i) => selection[i.filename]?.use).length;
-  const fixing = grp.items.filter((i) => selection[i.filename]?.inpaint).length;
+  // The face prefers the flagged 대표, then any chosen image, then the first.
+  const face = grp.items.find((i) => selection[i.filename]?.rep)
+    ?? grp.items.find((i) => selection[i.filename]?.use)
+    ?? grp.items[0];
   const pic = el('div', { class: 'assetpic' });
-  if (rep) void loadThumb({ path: rep.path, name: rep.filename, size: 0, modified: 0, textual: false }, pic);
-  const cell = el('div', { class: 'fcell groupcard' + (chosen ? ' picked' : ''), title: `${grp.key} — 눌러서 후보를 펼칩니다` }, [
+  if (face) void loadThumb({ path: face.path, name: face.filename, size: 0, modified: 0, textual: false }, pic);
+  const chosenBadge = el('span', { class: 'badge' });
+  const fixBadge = el('span', { class: 'badge' });
+  const cell = el('div', { class: 'fcell groupcard', title: `${grp.key} — 눌러서 후보를 펼칩니다` }, [
     pic,
     el('div', { class: 'fname row' }, [
       el('span', { class: 'grow', text: grp.key }),
       el('span', { class: 'badge', text: `${grp.items.length}장` }),
-      el('span', { class: 'badge' + (chosen ? ' ok' : ' warn'), text: chosen ? `선택 ${chosen}` : '미선택' }),
-      fixing ? el('span', { class: 'badge', text: `수정 ${fixing}` }) : null,
+      chosenBadge, fixBadge,
     ]),
   ]);
+  const sync = (): void => {
+    const chosen = grp.items.filter((i) => selection[i.filename]?.use).length;
+    const fixing = grp.items.filter((i) => selection[i.filename]?.inpaint).length;
+    cell.classList.toggle('picked', chosen > 0);
+    chosenBadge.className = 'badge' + (chosen ? ' ok' : ' warn');
+    chosenBadge.textContent = chosen ? `선택 ${chosen}` : '미선택';
+    fixBadge.style.display = fixing ? '' : 'none';
+    fixBadge.textContent = fixing ? `수정 ${fixing}` : '';
+  };
+  sync();
+  cellSyncs.set('grp:' + grp.key, sync);
   cell.addEventListener('click', () => { drill = grp.key; hub.drawCentre(); });
   return cell;
 }
 
-function candidateGrid(items: GroupItem[]): HTMLElement {
-  const grid = el('div', { class: 'agrid selgrid', style: { gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` } });
-  for (const it of items) grid.appendChild(candidate(it));
+function candidateGrid(items: GroupItem[], groupItems?: GroupItem[]): HTMLElement {
+  const grid = el('div', { class: 'agrid selgrid', style: { gridTemplateColumns: `repeat(${S.selCols}, minmax(0, 1fr))` } });
+  for (const it of items) grid.appendChild(candidate(it, groupItems));
   return grid;
 }
 
-function candidate(it: GroupItem): HTMLElement {
-  const s = selection[it.filename] || { use: false, inpaint: false, delete: false };
+function candidate(it: GroupItem, groupItems?: GroupItem[]): HTMLElement {
   const pic = el('div', { class: 'assetpic' });
-  const cls = 'fcell selcell'
-    + (s.use ? ' picked' : '') + (s.inpaint ? ' fixing' : '') + (s.delete ? ' dropping' : '');
+  const btns = new Map<string, HTMLElement>();
   const flags = el('div', { class: 'row selflags' });
   const mk = (key: keyof SelectionState, label: string, title: string) => {
-    const b = el('button', { class: 'ghost tiny' + (s[key] ? ' on' : ''), text: label, title });
+    const b = el('button', { class: 'ghost tiny', text: label, title });
     b.addEventListener('click', (ev) => { ev.stopPropagation(); flag(it.filename, key); });
+    btns.set(key, b);
     return b;
   };
   flags.append(
@@ -334,9 +418,29 @@ function candidate(it: GroupItem): HTMLElement {
     mk('inpaint', '수정', '먼저 고쳐야 합니다'),
     mk('delete', '버림', '지울 후보입니다'),
   );
-  const cell2 = el('div', { class: cls, title: it.filename }, [
+  if (groupItems) {
+    // Only where the group is known (drill view): 대표 is a per-group choice.
+    const b = el('button', { class: 'ghost tiny', text: '대표',
+      title: '그룹의 대표로 (그룹당 1장 · 내보낼 때 정식 이름을 가져갑니다)' });
+    b.addEventListener('click', (ev) => { ev.stopPropagation(); flagRep(it.filename, groupItems); });
+    btns.set('rep', b);
+    flags.appendChild(b);
+  }
+  const cell2 = el('div', { class: 'fcell selcell', title: it.filename }, [
     pic, el('div', { class: 'fname', text: it.filename }), flags,
   ]);
+  const sync = (): void => {
+    const s = selection[it.filename] || { use: false, inpaint: false, delete: false };
+    cell2.classList.toggle('picked', !!s.use);
+    cell2.classList.toggle('fixing', !!s.inpaint);
+    cell2.classList.toggle('dropping', !!s.delete);
+    btns.get('use')?.classList.toggle('on', !!s.use);
+    btns.get('inpaint')?.classList.toggle('on', !!s.inpaint);
+    btns.get('delete')?.classList.toggle('on', !!s.delete);
+    btns.get('rep')?.classList.toggle('on', !!s.rep);
+  };
+  sync();
+  cellSyncs.set(it.filename, sync);
   // The picture itself toggles 채택: that is the click being made ninety times.
   pic.addEventListener('click', () => flag(it.filename, 'use'));
   void loadThumb({ path: it.path, name: it.filename, size: 0, modified: 0, textual: false }, pic);
@@ -416,7 +520,7 @@ function adoptButton(): HTMLElement {
 // still in the DOM), which read as "images flicker back to empty boxes".
 export async function loadThumb(f: WorkspaceFile, mount: HTMLElement): Promise<void> {
   try {
-    const url = await blobUrl(f.path);
+    const url = await blobUrl(f.path, '', { thumb: true });
     if (!mount.isConnected) return;
     clear(mount);
     const img = el('img', { class: 'assetimg', src: url, alt: '' });

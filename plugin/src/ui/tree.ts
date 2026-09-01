@@ -14,6 +14,8 @@ import { el } from './dom';
 
 /** The dataTransfer type for internal drags: JSON array of workspace paths. */
 export const DRAG_PATHS = 'text/x-hina-paths';
+/** RisuAI card-asset NAMES (no workspace path exists for them). */
+export const DRAG_ASSETS = 'text/x-hina-assets';
 
 export interface Incoming { file: File; rel: string }
 
@@ -33,9 +35,12 @@ export interface TreeNode {
 export interface TreeSpec {
   /** Caller-owned; the tree only reads it. Toggling happens in onToggle. */
   expanded: Set<string>;
-  selected: string;
-  onOpen(node: TreeNode): void;
+  /** Multi-select: every path in the set draws highlighted. */
+  selected: Set<string>;
+  onOpen(node: TreeNode, ev: MouseEvent): void;
   onToggle(node: TreeNode): void;
+  /** Right-click on a row (the files tab's folder verbs). */
+  onContext?(node: TreeNode, ev: MouseEvent): void;
   /** OS files dropped on a droppable folder row. */
   onDropFiles?(path: string, files: Incoming[]): void;
   /** Internal rows dropped on a droppable folder row. */
@@ -47,14 +52,20 @@ export function treeRow(n: TreeNode, depth: number, spec: TreeSpec): HTMLElement
   const isOpen = spec.expanded.has(n.path);
   const caret = el('button', { class: 'caret', text: n.kids.length ? (isOpen ? '▾' : '▸') : '' });
   const branch = el('button', {
-    class: 'treebranch' + (n.path === spec.selected ? ' on' : ''),
+    class: 'treebranch' + (spec.selected.has(n.path) ? ' on' : ''),
     title: n.title ?? n.path,
   }, [
     el('span', { text: n.glyph ?? (isOpen && n.kids.length ? '📂' : '📁') }),
     el('span', { class: 'grow', text: n.name, style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }),
     n.count == null ? null : el('span', { class: 'n', text: String(n.count) }),
   ]);
-  branch.addEventListener('click', () => spec.onOpen(n));
+  branch.addEventListener('click', (e) => spec.onOpen(n, e as MouseEvent));
+  if (spec.onContext) {
+    branch.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      spec.onContext!(n, e as MouseEvent);
+    });
+  }
   caret.addEventListener('click', (e) => {
     e.stopPropagation();
     spec.onToggle(n);
@@ -76,6 +87,11 @@ export interface DropSpec {
   into(): string;
   onFiles?(path: string, files: Incoming[]): void;
   onMove?(path: string, sources: string[]): void;
+  /** Card-asset names (DRAG_ASSETS) - the chat's reference chips. */
+  onAssets?(names: string[]): void;
+  /** Cursor feel: 'move' (default) for tidy-up targets, 'copy' for reference
+   * targets like the chat - the same drag source serves both. */
+  effect?: 'copy' | 'move';
 }
 
 /** Drag-and-drop onto `target`: OS files, or internal DRAG_PATHS rows. */
@@ -83,13 +99,17 @@ export function installDrop(target: HTMLElement, spec: DropSpec): void {
   const accepts = (dt: DataTransfer | null): boolean => {
     if (!dt) return false;
     const types = Array.from(dt.types);
-    return (!!spec.onFiles && types.includes('Files')) || (!!spec.onMove && types.includes(DRAG_PATHS));
+    return (!!spec.onFiles && types.includes('Files'))
+      || (!!spec.onMove && types.includes(DRAG_PATHS))
+      || (!!spec.onAssets && types.includes(DRAG_ASSETS));
   };
   for (const kind of ['dragover', 'dragenter']) {
     target.addEventListener(kind, (e) => {
-      if (!accepts((e as DragEvent).dataTransfer)) return;
+      const dt = (e as DragEvent).dataTransfer;
+      if (!accepts(dt)) return;
       e.preventDefault();
       e.stopPropagation();
+      if (dt) dt.dropEffect = spec.effect ?? 'move';
       target.classList.add('dropping');
     });
   }
@@ -102,6 +122,14 @@ export function installDrop(target: HTMLElement, spec: DropSpec): void {
     if (!dt) return;
     e.preventDefault();
     e.stopPropagation();
+    const assets = dt.getData(DRAG_ASSETS);
+    if (assets && spec.onAssets) {
+      try {
+        const names = JSON.parse(assets) as string[];
+        if (Array.isArray(names) && names.length) spec.onAssets(names.map(String));
+      } catch { /* a foreign drag that lied about its type */ }
+      return;
+    }
     const moved = dt.getData(DRAG_PATHS);
     if (moved && spec.onMove) {
       try {
@@ -123,7 +151,9 @@ export function installDrag(target: HTMLElement, paths: () => string[]): void {
     const dt = (e as DragEvent).dataTransfer;
     if (!dt) return;
     dt.setData(DRAG_PATHS, JSON.stringify(paths()));
-    dt.effectAllowed = 'move';
+    // copyMove: the same row moves into a folder OR references into the chat;
+    // the drop target picks the cursor via DropSpec.effect.
+    dt.effectAllowed = 'copyMove';
   });
 }
 
@@ -154,4 +184,25 @@ export async function collectDrop(dt: DataTransfer): Promise<Incoming[]> {
   };
   for (const entry of entries) await walk(entry, '');
   return out;
+}
+
+let guardInstalled = false;
+
+/**
+ * Cancel the browser's default for UNCLAIMED drags, once per document.
+ *
+ * Every real target (installDrop, the agent input) stopPropagation()s what it
+ * accepts, so anything reaching the document is a drop on dead space - and
+ * the browser's default for a dropped FILE is "navigate away to it", which
+ * replaced the whole app with the image. Bubble phase, and dropEffect 'none'
+ * keeps the no-drop cursor honest over dead zones.
+ */
+export function installDropGuard(doc: Document): void {
+  if (guardInstalled) return;
+  guardInstalled = true;
+  doc.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'none';
+  });
+  doc.addEventListener('drop', (e) => e.preventDefault());
 }

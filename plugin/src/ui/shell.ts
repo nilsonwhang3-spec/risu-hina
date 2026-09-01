@@ -27,6 +27,7 @@ import { buildBotBar, refreshBotBar } from './botbar';
 import { renderAssetsTab } from './tab-assets';
 import { noteStudioLeft, renderStudioTab } from './tab-studio';
 import { getSettingsBar } from './tab-settings';
+import { installDropGuard } from './tree';
 
 /**
  * Content views in the tab bar; settings is not one of them.
@@ -338,6 +339,7 @@ export function refreshStatus(): void {
 
 export function buildShell(): void {
   injectStyles();
+  installDropGuard(document);
   clear(document.body);
 
   healthEl = el('div', { class: 'status' });

@@ -40,7 +40,39 @@ are a random one-line pool per image (NAIS3 semantics, recursive, depth 10) · t
 re-clamps on container resize + an actual-overflow belt, so the agent pane can no longer sit
 past the right edge) **+ §1-28** (the NSFW asset-generation pitfalls SKILL seeded from the
 user's try-and-error notes · ucPreset 2 = None for real · batches globally serial (429 guard) ·
-agent-made files show up without a manual 새로고침)
+agent-made files show up without a manual 새로고침) **+ §1-29 the 17-item usability batch**
+(2026-09-01; plan `~/.claude/plans/risu-elf-async-melody.md`. Files: machinery default-hidden
+behind ONE 숨김 파일 toggle (server filter, `hidden=1` reveals; sizes stay disk-truth) · a
+document-level drop guard, so an OS file dropped on dead space no longer navigates the app away,
+and the whole tree column is a drop target · count-pill inset + `scrollbar-gutter` · icon tree-head
+(smoke finds them by title prefix) · tree multi-select (Ctrl/Shift) + right-click folder verbs
+(two-menu delete confirm, no window.confirm) + tree keyboard Ctrl+C/X/V·Del · batched
+`paths[]` move/copy/delete (one round trip, per-item failures reported, clash no longer aborts) ·
+empty-space rubber-band in the centre (tree marquee ruled out: native dragstart wins). Studio:
+Pillow server thumbnails (`/files/thumb`, ~360px WebP disk-cached by path+mtime+w under
+`config/.studio/thumbs`, non-thumbable streams the original; **pillow joined requirements.in — 기존
+설치는 재 setup**) + in-flight dedup + 45s/25s image timeouts + reserved-aspect `phbox` cells +
+IntersectionObserver lazy grids · mirror tints fixed for real (scrollbar-width compensation,
+`padding-block` bands + `box-decoration-break: clone`, textarea-background capture) · the 잡
+히스토리 tab REPLACED by the always-visible bottom strip (newest saves, live cell with step badge;
+jobSection survives as the batch live box; adoption watcher relocated to a studio-level 5s tick) ·
+scene cards keep 832/1216, memoised scene→thumb map, ± patches in place · the working scene gets a
+ring + step bar and the submit row a one-segment-per-image bar with a client-EMA ETA; syncLive
+diff-patches instead of rebuilding every 1.5s · 검수: flag clicks patch in place (the full-redraw
+lag is gone), delimiter changes only re-split the chips (reload on pick), 대표 flag (exclusive per
+group, implies 채택, takes the canonical name on export — `rep` written only when set so old
+selection files keep their shape) + a 대표 gallery view, 못 읽음 as a warn badge, chat auto-folds
+on entering 검수 and restores on leave (manual toggle wins) · one segCtl/colPicker component for
+every column row (selCols persisted for the selector). Editors: regex / regex-out (CBS · $backrefs ·
+HTML comments) / lua (island scanner: cross-line strings+comments, keywords lose inside them)
+tint modes on the same mirror, 집중 편집 tinted too (dom↔hilite cycle is call-time-safe) · fragment
+autocomplete offers folder-qualified keys (`<폴더/조각>` already resolved server-side; the popup
+dims the folder; duplicate stems get a 중복 이름 badge; `<.../이름>` NOT adopted, consistent with
+the NAIS3 restraint list) · neutral '선택된 … 없음' empty-hints on the three pickers. Chat: the
+whole agent panel takes drops — internal rows/cells/fragment cards attach as PATH chips (no
+upload; the message says read_file/list_files), card assets ride a new `DRAG_ASSETS` payload as
+NAME chips (fetch_assets), OS folders now walk in via collectDrop; sources advertise `copyMove`
+and targets pick the cursor.)
 (gate ALL GREEN; the minor went up so the version gate trips when it ships). **Staged on test-server
 2026-08-30 night AT §1-25 (= §1-19~24 included): service stopped → backup `data-backup-20260830-s120`
 (11,358 files) → app/*.py + seeds/studio-image-ops.md + tools/probe_nai.py + requirements.in scp'd,
@@ -72,7 +104,7 @@ mixed-cast multi-entry batch from the panel.** Released = **v0.10.0 BETA** (§1-
 
 **Handoff 2026-08-31 (the studio feedback marathon, §1-19 ~ §1-25).** Where the next session picks up:
 
-- **State**: master = 0.11.0 unreleased through §1-28, gate ALL GREEN, test-server staged AT §1-28
+- **State**: master = 0.11.0 unreleased through §1-29, gate ALL GREEN, test-server staged AT §1-28
   (2026-08-31 night: stop → backup `data-backup-20260831` (20,576 files) → 10 app modules + 2
   seeds + the 764,648B dev bundle → start; verified live: `/health` 0.11.0, **studio_v2 moved
   1,809 files into config/+output/** (manifest 511KB), skills seed v6 landed the NSFW skill,
@@ -97,6 +129,40 @@ mixed-cast multi-entry batch from the panel.** Released = **v0.10.0 BETA** (§1-
 - Historical note kept below: the one-time manual reinstall advice for 0.1.0-era installs.
 
 → (historical) **First thing to do**: the user reinstalls `plugin/Risu.Hina.Plugin.js` into RisuAI **by hand, once** (the installed 0.1.0's update-url cannot be read because of CORS) → check that `+` appears from the next release on → verify M2 in real use (§5-2).
+
+## 1-29. 2026-09-01 - 0.11.0 (unreleased, continued): the 17-item usability batch (tree · thumbnails · bottom strip · 검수 · code tints · chat drops)
+
+Seventeen items of real-use feedback, one working session, plan `~/.claude/plans/risu-elf-async-melody.md`
+(the full §0 chain entry carries the per-item summary). The record-worthy decisions:
+
+- **Tree clutter is a DISPLAY filter, not a move** (the user chose this over relocating
+  `.studio`/skills out of the space): `files.listing(include_hidden=)` skips dot components
+  (leaf included) + `hina/<bot>/skills/**` + the three regenerated helper scripts, counts them
+  per area, and the one 숨김 파일 toggle sends `hidden=1`. Sizes stay disk-truth. `_hidden`
+  (search) is unchanged and spares the leaf; the listing filter deliberately does not.
+- **Thumbnails are server-side** (the user chose Pillow): `/files/thumb` is REGISTERED IN THE
+  ROUTES TABLE like `/files/download` — the table doubles as the allow-list and an unregistered
+  raw route 404s "no route" before the special-cases run (found the hard way: the markdown-image
+  smoke check was the only caller that asserted an actual `<img>`). Pillow missing / non-image /
+  decode failure all stream the original bytes, so the route can never break a picture.
+  **pillow==11.3.0 joined requirements.in: existing installs need a re-setup** (release note).
+- **`<.../이름>` recursive fragment lookup NOT adopted** (consistent with the NAIS3 restraint
+  list further up): the backend already resolves `<폴더/조각>`, the actual gap was the completer
+  never offering folder-qualified keys. Duplicate stems now carry a 중복 이름 badge instead of a
+  silent first-match.
+- **No tree marquee**: every row/cell is `draggable`, and a native dragstart fires before any
+  movement threshold can be judged — the centre rubber-band therefore starts from EMPTY space
+  only, and the tree (nested `<button>`s in a 210px column) keeps Ctrl/Shift + the context menu.
+- **`rep` is written only when set**, so three-flag-era selection files and the pinned test
+  shapes stay byte-identical; on export the rep takes the canonical name via a sort key that
+  degenerates to the old filename order without one.
+- Smoke pins that moved with the UI: tree-head buttons are found **by title prefix**
+  (`findByTitle`), the tab list is three tabs + `.genstrip`, `.selflags` is 4 buttons, the
+  숨김 파일 toggle label, and the history-sections test became the bottom-strip test.
+
+Not done here (deliberate): storage relocation of machinery (rejected), per-category danbooru
+tint colours (NAI suggest-tags drops `category`; a 1-line pass-through when wanted), md/nai
+집중 편집 tints (only code modes wired), marquee edge auto-scroll.
 
 ## 1-28. 2026-08-31 - 0.11.0 (unreleased, continued): the NSFW-assets skill, ucPreset 2, serial batches, no-refresh file visibility
 

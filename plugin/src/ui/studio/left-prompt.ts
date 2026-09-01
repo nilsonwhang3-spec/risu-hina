@@ -17,7 +17,7 @@ import { askName } from '../kit';
 import { attachHilite } from '../hilite';
 import { state, type StudioItem } from '../../state';
 import { pickerRow, openListPicker, type PickerEntry } from '../pickers';
-import { S, hub, activeOf, checkUnresolved, newCard, msg } from './store';
+import { S, hub, activeOf, checkUnresolved, newCard, msg, fragKeys } from './store';
 import { parseStyleDoc, buildStyleDoc, type StyleDoc } from './stylefile';
 
 /** Unsaved inline edits, kept across a column rebuild so a redraw (a toggle,
@@ -57,7 +57,7 @@ export function buildLeftPrompt(mount: HTMLElement): void {
   mount.appendChild(el('div', { style: { padding: '4px 8px 0' } }, [
     pickerRow(cur ? { name: cur.name, hint: cur.description || undefined } : null, {
       title: pickTitle,
-      emptyHint: '스타일이 없습니다. › 에서 하나 만들어 주세요.',
+      emptyHint: items.length ? '선택된 스타일 없음 — › 에서 고르세요' : '스타일이 없습니다. › 에서 하나 만들어 주세요.',
       onOpen: openStylePicker,
     }),
   ]));
@@ -197,7 +197,7 @@ function buildStyleEditor(mountEl: HTMLElement, path: string): void {
   );
   // NAI syntax tints ({} · [] · N::…:: · <조각> · #주석) plus tag/fragment
   // autocomplete, NAIS3-style (item 9-10 of the field report).
-  const fragNames = () => (S.cards.fragments ?? []).map((i) => i.name);
+  const fragNames = () => fragKeys();
   attachHilite(pos, { mode: 'nai', fragments: fragNames });
   attachHilite(neg, { mode: 'nai', fragments: fragNames });
 

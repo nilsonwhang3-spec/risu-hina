@@ -189,7 +189,7 @@ async function drawStrip(): Promise<void> {
   const row = el('div', { class: 'striprow' });
   for (const path of saved.slice(-24)) {
     const cell = el('button', { class: 'stripcell' + (path === (S.viewPath || shownKey) ? ' on' : ''), title: path });
-    void blobUrl(path).then((url) => {
+    void blobUrl(path, '', { thumb: true }).then((url) => {
       if (!cell.isConnected) return;
       cell.appendChild(el('img', { src: url, alt: path.split('/').pop() ?? path }));
     }).catch(() => { /* the strip survives a missing file */ });

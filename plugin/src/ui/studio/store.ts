@@ -80,12 +80,14 @@ export const S = {
    * the fragment organizer, a folder grid, or the comparison selector
    * (both bound to S.selected). A picked file (S.selectedFile) overrides
    * everything - an editor is always reachable. */
-  centreTab: 'single' as 'single' | 'batch' | 'inspect' | 'history',
+  centreTab: 'single' as 'single' | 'batch' | 'inspect',
   /** 'folder' is the tidy-up grid, a sub-view of the 검수 tab; 'selector'
    * is legacy - the 검수 tab draws the selector itself. */
   centreMode: 'tab' as 'tab' | 'fragments' | 'folder' | 'selector',
-  /** Batch-tab column count (2·3·4). */
+  /** Batch/folder column count (2·3·4). */
   cols: 3,
+  /** 검수 selector column count (2..6) - its cells are smaller. */
+  selCols: 3,
   /** The single tab's pinned image ('' = follow the live run), and the list
    * ←/→ walks (the job the image came from). */
   viewPath: '',
@@ -101,9 +103,12 @@ try {
   const t = localStorage.getItem('hina.studioLeftTab');
   if (t === 'output') S.leftTab = 'output';
   const c = localStorage.getItem('hina.studioTab');
-  if (c === 'single' || c === 'batch' || c === 'inspect' || c === 'history') S.centreTab = c;
+  // 'history' persisted by an older build falls through to the default.
+  if (c === 'single' || c === 'batch' || c === 'inspect') S.centreTab = c;
   const n = Number(localStorage.getItem('hina.studioCols'));
   if (n === 2 || n === 3 || n === 4) S.cols = n;
+  const sc = Number(localStorage.getItem('hina.studioSelCols'));
+  if (sc >= 2 && sc <= 6) S.selCols = sc;
 } catch { /* storage may be unavailable in the iframe */ }
 export function persistLeftTab(): void {
   try { localStorage.setItem('hina.studioLeftTab', S.leftTab); } catch { /* fine */ }
@@ -113,6 +118,9 @@ export function persistCentreTab(): void {
 }
 export function persistCols(): void {
   try { localStorage.setItem('hina.studioCols', String(S.cols)); } catch { /* fine */ }
+}
+export function persistSelCols(): void {
+  try { localStorage.setItem('hina.studioSelCols', String(S.selCols)); } catch { /* fine */ }
 }
 
 /**
@@ -275,6 +283,17 @@ export function checkUnresolved(): void {
 
 /** A card name as a filename: the display name IS the identity, so the file
  * carries it (fragments are referenced as `<이름>`, which resolves by stem). */
+/** Autocomplete keys for `<` completion: folder-qualified when the fragment
+ * lives in a folder. The qualified form is the strongest backend key (exact
+ * file hit) and self-disambiguates duplicate stems - a bare <name> resolves
+ * top-level-first, then in sorted folder order (studio.py fragments()). */
+export function fragKeys(): string[] {
+  return (S.cards.fragments ?? []).map((it) => {
+    const f = it.folder && it.folder !== '.' ? it.folder : '';
+    return f ? `${f}/${it.name}` : it.name;
+  });
+}
+
 export function cardStem(name: string): string {
   return name.replace(/[<>:"/\\|?*]/g, '').trim();
 }

@@ -139,6 +139,62 @@ check("the unfiltered listing still carries everything",
 check("subtree dirs stay root-relative",
       "studio/output/셋" in sliced["areas"][0]["dirs"], str(sliced["areas"][0]["dirs"])[:160])
 
+print("\ntest_listing_hidden")
+# Machinery is default-hidden from the tree (usability batch item 1): any dot
+# component (leaf included), hina/<bot>/skills/**, and the three regenerated
+# helper scripts. hidden=1 reveals everything; sizes stay disk-truth.
+(space / "studio" / "config" / ".studio" / "selection").mkdir(parents=True, exist_ok=True)
+(space / "studio" / "config" / ".studio" / "selection" / "숨김.json").write_text("{}", encoding="utf-8")
+(space / "hina" / "봇A" / "skills" / "스킬").mkdir(parents=True, exist_ok=True)
+(space / "hina" / "봇A" / "skills" / "스킬" / "SKILL.md").write_text("x", encoding="utf-8")
+(space / "hina" / "봇A" / "scripts").mkdir(parents=True, exist_ok=True)
+(space / "hina" / "봇A" / "scripts" / "risuhina.py").write_text("x", encoding="utf-8")
+(space / "hina" / "봇A" / "scripts" / "내가쓴.py").write_text("x", encoding="utf-8")
+vis = files.listing(files.SPACE)
+vpaths = [f["path"] for a in vis["areas"] for f in a["files"]]
+check("dot components are hidden by default",
+      not any(".studio" in q for q in vpaths), str([q for q in vpaths if ".studio" in q]))
+check("skills and helper scripts hide, user scripts stay",
+      not any("/skills/" in q for q in vpaths)
+      and not any(q.endswith("scripts/risuhina.py") for q in vpaths)
+      and any(q.endswith("scripts/내가쓴.py") for q in vpaths),
+      str([q for q in vpaths if "봇A" in q]))
+check("the held-back files are counted per area",
+      sum(a.get("hidden", 0) for a in vis["areas"]) >= 3,
+      str([(a["area"], a.get("hidden")) for a in vis["areas"]]))
+check(".studio dirs are out of the folder list",
+      not any(".studio" in dd for a in vis["areas"] for dd in a.get("dirs", [])))
+allv = files.listing(files.SPACE, include_hidden=True)
+apaths = [f["path"] for a in allv["areas"] for f in a["files"]]
+check("include_hidden reveals them",
+      any(".studio" in q for q in apaths) and any("/skills/" in q for q in apaths))
+check("sizes count the hidden bytes either way",
+      vis["totalSize"] == allv["totalSize"], f"{vis['totalSize']} vs {allv['totalSize']}")
+
+print("\ntest_batch_verbs")
+# One round trip for N paths; a per-item failure lands in `failed` and the
+# batch continues (move's name-clash refusal must not abort the rest).
+bsrc = space / "projects" / "배치테스트"
+bsrc.mkdir(parents=True, exist_ok=True)
+for n in ("갑.txt", "을.txt", "병.txt"):
+    (bsrc / n).write_text(n, encoding="utf-8")
+bdst = space / "projects" / "배치목적지"
+bdst.mkdir(parents=True, exist_ok=True)
+(bdst / "을.txt").write_text("자리 차지", encoding="utf-8")
+r = files.move_many(files.SPACE, ["projects/배치테스트/갑.txt", "projects/배치테스트/을.txt",
+                                  "projects/배치테스트/병.txt"], "projects/배치목적지")
+check("a clash is reported, the rest still move",
+      r["done"] == 2 and len(r["failed"]) == 1 and r["failed"][0]["path"].endswith("을.txt"),
+      str(r))
+check("the moved files landed", (bdst / "갑.txt").is_file() and (bdst / "병.txt").is_file())
+r = files.copy_many(files.SPACE, ["projects/배치목적지/갑.txt"], "projects/배치목적지")
+check("a batched copy dedupes like the single verb",
+      r["done"] == 1 and r["results"][0]["to"].endswith("갑 (2).txt"), str(r))
+r = files.delete_many(files.SPACE, ["projects/배치목적지/갑 (2).txt", "projects/없는파일.txt"])
+check("delete reports the missing one and removes the real one",
+      r["done"] == 1 and len(r["failed"]) == 1 and not (bdst / "갑 (2).txt").exists(),
+      str(r))
+
 print("\ntest_copy")
 r = files.copy(files.SPACE, "studio/output/셋/한장.png", "studio/output/셋")
 check("a paste into the same folder counts up",
