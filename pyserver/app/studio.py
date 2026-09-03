@@ -7,7 +7,7 @@ in between, and it is mostly about **names**:
     config/styles/      a style, as front matter + ## positive / ## negative
     config/characters/  a character: prompt, negative, reference image, position
     config/fragments/   named pieces, spliced in by `<조각>`, `<폴더/조각>` or `<컬렉션.키>`
-    config/scenes/      NAIS3 scene presets, read verbatim. One scene is one image in
+    config/scenes/      the reference tool scene presets, read verbatim. One scene is one image in
                  a batch and carries its own prompt, negative and size. **This
                  is how expression sheets are made** - an ordinary generation
                  per scene with the character and seed held fixed - not with
@@ -443,7 +443,7 @@ def listing(area: str) -> list[dict]:
 
 # --- fragments and scenes ------------------------------------------------------
 #
-# A scene file is NAIS3's, read verbatim rather than converted:
+# A scene file is the reference tool's, read verbatim rather than converted:
 #
 #     {"version": 1, "scenes": [
 #        {"name": "angry", "prompt": "<조각프롬>, angry, frown",
@@ -538,7 +538,7 @@ def fragments() -> FragmentTable:
 
 
 def _fragment_lines(text: str) -> list[str]:
-    """The substitution candidates of one fragment body (NAIS3's
+    """The substitution candidates of one fragment body (the reference tool's
     contentToLines, adopted): lines trimmed, blank lines and `#` comment
     lines out. A multi-line fragment is a RANDOM POOL - one line per image -
     not a block."""
@@ -547,7 +547,7 @@ def _fragment_lines(text: str) -> list[str]:
 
 
 # A fragment line may itself reference fragments; recursion is depth-guarded
-# so a self-referencing pool cannot loop forever (NAIS3's guard, same value).
+# so a self-referencing pool cannot loop forever (the reference tool's guard, same value).
 MAX_REF_DEPTH = 10
 
 
@@ -562,7 +562,7 @@ def resolve_refs(text: str, table: FragmentTable | None = None,
 
     A fragment whose body has several lines contributes **one line, picked at
     random per call** - plan() resolves per image, so every image of a batch
-    rolls its own (the NAIS3 wildcard semantic the fragments came from).
+    rolls its own (the the reference tool wildcard semantic the fragments came from).
     Comment (`#`) and blank lines are never candidates, and the picked line's
     own `<참조>` are resolved recursively (depth-guarded).
 
@@ -591,11 +591,11 @@ def resolve_refs(text: str, table: FragmentTable | None = None,
 
 
 def read_scenes(rel: str) -> dict:
-    """A scene preset file, in NAIS3's shape."""
+    """A scene preset file, in the reference tool's shape."""
     d = read_json(rel)
     raw = d.get("scenes")
     if not isinstance(raw, list):
-        raise StudioError(f"{rel}: scenes[] 가 없습니다 (NAIS3 씬 프리셋 형식이어야 합니다)")
+        raise StudioError(f"{rel}: scenes[] 가 없습니다 (씬 프리셋 형식이어야 합니다)")
     scenes = []
     for s in raw:
         if not isinstance(s, dict) or not str(s.get("name") or "").strip():
@@ -817,8 +817,8 @@ PARAMS_KEYWORD = "hina-params"
 def png_embed(png: bytes, payload: dict, keyword: str = PARAMS_KEYWORD) -> bytes:
     """One tEXt chunk right after IHDR, value = base64 of the payload JSON.
 
-    tEXt is Latin-1 only, hence the base64 (same trick as NAIS3's
-    nais3-params). Anything that is not a PNG comes back unchanged: the image
+    tEXt is Latin-1 only, hence the base64 (the same trick the reference
+    tool's params chunk uses). Anything that is not a PNG comes back unchanged: the image
     is the deliverable and the metadata is best-effort.
     """
     if png[:8] != b"\x89PNG\r\n\x1a\n" or len(png) < 33:

@@ -212,7 +212,7 @@ check("what did not parse is reported", r["unmatched"] == ["엉망진창.png"], 
 
 print("\ntest_scene_presets")
 sc = studio.read_scenes("scenes/기본.json")
-check("the NAIS3 file is read verbatim", len(sc["scenes"]) == 3, str(len(sc["scenes"])))
+check("the the reference tool file is read verbatim", len(sc["scenes"]) == 3, str(len(sc["scenes"])))
 check("each scene carries its own size",
       sc["scenes"][1]["width"] == 512 and sc["scenes"][0]["width"] == 832)
 check("a zero size means 'use the run\'s'", sc["scenes"][2]["width"] is None)
@@ -239,7 +239,7 @@ check("and left in the prompt rather than dropped", "<없는것.x>" in text, tex
 
 # A multi-line fragment is a random POOL: one line per resolution, comment
 # and blank lines never candidates, the picked line's own refs resolved
-# (NAIS3's wildcard semantic - §1-27, "그중 1줄만 랜덤").
+# (the reference tool's wildcard semantic - §1-27, "그중 1줄만 랜덤").
 files.upload(files.SPACE, "눈색.md",
              text="# 아래에서 한 줄\nblue eyes\n\nred eyes, <조각프롬.a>\ngreen eyes",
              into="studio/fragments")
@@ -708,7 +708,7 @@ check("a charref batch names its certain cost", est["anlasCertain"] == 15
       and "5 Anlas" in est["note"], json.dumps(est, ensure_ascii=False)[:200])
 
 print("\ntest_quality_and_uc_merge")
-# The flags are metadata; the text is what acts (NAIS3 web captures). Quality
+# The flags are metadata; the text is what acts (the reference tool web captures). Quality
 # tags append to the prompt, the UC preset text prefixes the negative, and
 # v4_prompt / v4_negative_prompt carry the merged text so `input` can mirror it.
 pq = nai.build_parameters("1girl", "bad hands", {"qualityToggle": True})

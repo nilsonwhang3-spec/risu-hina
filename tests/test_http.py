@@ -79,14 +79,14 @@ class Server:
         self.port = free_port()
         self.token = "test-token-" + str(self.port)
         self.data = Path(tempfile.mkdtemp(prefix="risuhina-test-"))
-        # The subscription path is only present when the operator put the flag
-        # in config.json by hand; the suite exercises the feature, so it seeds
-        # one. `codex=False` is the shipped default and is asserted on its own
-        # server (test_codex_is_off_unless_enabled).
-        if codex:
+        # The subscription path ships ON; an operator turns it off by putting
+        # `"OPENAI_CODEX": 0` in config.json by hand. `codex=False` seeds that
+        # hand edit and is asserted on its own server
+        # (test_codex_off_by_hand_edit).
+        if not codex:
             self.data.mkdir(parents=True, exist_ok=True)
             (self.data / "config.json").write_text(
-                json.dumps({"OPENAI_CODEX": 1}, ensure_ascii=False), encoding="utf-8")
+                json.dumps({"OPENAI_CODEX": 0}, ensure_ascii=False), encoding="utf-8")
         py = os.environ.get("RISUHINA_TEST_PY") or str(PYSERVER / ".venv" / "Scripts" / "python.exe")
         if not Path(py).exists():
             py = sys.executable
@@ -2218,12 +2218,12 @@ def test_keys_and_agent_kinds(s: Server) -> None:
 def test_codex_is_off_unless_enabled() -> None:
     """The shipped default: the subscription path is not offered at all.
 
-    Its own server, because the rest of the suite seeds the flag to exercise
-    the feature. The key ships in the config template at 0, and nothing but a
-    hand-edited config.json can turn it on - a settings patch cannot, since
-    `config.update` only walks sections.
+    Its own server, seeded with the hand edit `"OPENAI_CODEX": 0`. The key
+    ships in the config template at 1 (asserted on the shared server below),
+    and nothing but a hand-edited config.json can turn it off - a settings
+    patch cannot flip it either way, since `config.update` only walks sections.
     """
-    print("test_codex_is_off_unless_enabled")
+    print("test_codex_off_by_hand_edit")
     s = Server(codex=False)
     try:
         if not s.wait_ready():
@@ -2231,15 +2231,13 @@ def test_codex_is_off_unless_enabled() -> None:
             return
         st, h = s.get("/health", token=None)
         check("health says it is not offered", h.get("codexEnabled") is False, str(h)[:200])
-        tmpl = json.loads((s.data / "config.json").read_text(encoding="utf-8"))
-        check("the config template ships the flag at 0", tmpl.get("OPENAI_CODEX") == 0, str(tmpl.get("OPENAI_CODEX")))
         st, _ = s.get("/codex/status")
         check("its routes are not there at all", st == 404, str(st))
         st, body = s.post("/presets/save", {"name": "구독", "values": {"provider": "codex", "model": "m"}})
         check("and a preset cannot select it", st == 400, f"{st} {str(body)[:100]}")
         st, body = s.post("/config", {"config": {"OPENAI_CODEX": 1}})
         st, h = s.get("/health", token=None)
-        check("and a settings patch cannot turn it on", h.get("codexEnabled") is False, str(h)[:200])
+        check("and a settings patch cannot turn it back on", h.get("codexEnabled") is False, str(h)[:200])
     finally:
         s.stop()
 
@@ -2259,6 +2257,9 @@ def test_codex_subscription_preset(s: Server) -> None:
     check("with PKCE, the codex client id and the codex redirect",
           qs.get("code_challenge_method") == ["S256"] and qs.get("client_id") == ["app_EMoamEEZ73f0CkXaXp7hrann"]
           and qs.get("redirect_uri") == ["http://localhost:1455/auth/callback"] and bool(qs.get("state")), str(qs)[:200])
+    check("and it presents itself as risu-hina, not another program", qs.get("originator") == ["risu-hina"], str(qs.get("originator")))
+    tmpl = json.loads((s.data / "config.json").read_text(encoding="utf-8"))
+    check("the config template ships the flag at 1", tmpl.get("OPENAI_CODEX") == 1, str(tmpl.get("OPENAI_CODEX")))
     state = qs["state"][0]
     check("the pending attempt is known", s.get(q("/codex/login/status", state=state))[1].get("known") is True)
     st, body = s.post("/codex/login/complete", {"redirect": "http://localhost:1455/auth/callback?code=abc&state=WRONG"})

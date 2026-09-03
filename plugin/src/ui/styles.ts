@@ -151,7 +151,7 @@ button.outline:hover { background: rgba(37,99,235,.18); }
 }
 .tab.active { color: var(--textcolor, #d8dce4); border-bottom-color: #2563eb; font-weight: 700; }
 /* The asset importer's progress at the end of the tab row. */
-/* The studio's layout toggles, on the tab row before the sync badge. */
+/* The panel fold toggles (every three-pane tab), on the tab row before the sync badge. */
 .layoutslot { margin-left: auto; align-items: center; gap: 2px; }
 .layoutslot .laybtn.on { background: rgba(37,99,235,.18); }
 .layoutslot + .syncbadge { margin-left: 8px; }
@@ -639,6 +639,19 @@ textarea.promptedit { width: 100%; box-sizing: border-box; min-height: 42vh; fon
 .pickrow input[type=checkbox] { width: auto; flex-shrink: 0; }
 .pickrow .grow { flex: 1; min-width: 0; cursor: pointer; }
 .pickname { display: flex; align-items: center; gap: 6px; }
+/* Dense variant (the studio's cast list): half the air, smaller hint. */
+.pickrow.compact { padding: 3px 6px; gap: 6px; align-items: center; }
+.pickrow.compact .hint { font-size: 11px; line-height: 1.3; }
+.pickrow.compact .pickname { font-size: 12.5px; }
+/* A slide toggle over a hidden checkbox; the checked knob paints it blue. */
+.switch { position: relative; display: inline-flex; flex: none; width: 28px; height: 16px; cursor: pointer; margin: 0; }
+.switch input { position: absolute; opacity: 0; width: 0; height: 0; margin: 0; }
+.switch .knob { position: absolute; inset: 0; border-radius: 8px; background: rgba(128,128,128,.35); transition: background .15s; }
+.switch .knob::after { content: ''; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%;
+  background: #fff; transition: transform .15s; }
+.switch input:checked + .knob { background: #2563eb; }
+.switch input:checked + .knob::after { transform: translateX(12px); }
+.switch input:focus-visible + .knob { outline: 2px solid rgba(37,99,235,.6); outline-offset: 1px; }
 
 /* The one preset the agent is actually using. */
 .presetnow {
@@ -1163,9 +1176,10 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
 .toast.err { border-color: rgba(239, 68, 68, .7); }
 
 /* The fragment organizer in the centre. */
-.fragcols { display: flex; gap: 14px; align-items: flex-start; }
-.fragcols > .fraglist { flex: 0 0 250px; min-width: 0; }
-.fragcols > .fragedit { flex: 1; min-width: 0; }
+.fragcols { display: flex; gap: 14px; align-items: flex-start; width: 100%; }
+.fragcols > .fraglist { flex: 0 0 220px; min-width: 0; }
+.fragcols > .fragedit { flex: 1 1 auto; min-width: 0; width: 100%; }
+.fragedit textarea.promptedit { min-height: 50vh; }
 .fraglist input { width: 100%; box-sizing: border-box; }
 
 /* The centre tabs (1장 · 배치 · 잡 히스토리) style via .tabstrip above. */

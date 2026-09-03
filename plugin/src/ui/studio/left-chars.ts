@@ -159,8 +159,12 @@ function charRow(it: StudioItem): HTMLElement {
     title: it.name || it.path.split('/').pop() || it.path,
     hint: it.description || undefined,
     badges,
+    // Dense rows and a slide toggle: the checkbox-and-air version read as a
+    // settings page, not a cast list (§1-31).
+    cls: 'compact',
     toggle: {
       checked: !!it.enabled,
+      style: 'switch',
       title: '켜면 생성 요청에 이 캐릭터가 실립니다 (순서대로 이어집니다)',
       onChange: async (v) => {
         try {

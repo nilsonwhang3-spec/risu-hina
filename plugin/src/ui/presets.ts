@@ -746,7 +746,11 @@ export function buildCodexBox(modelInput: HTMLInputElement | null, withLogin: bo
     ? el('div', { class: 'card codexbox' }, [
       el('h2', { text: 'OpenAI 구독 (Codex)' }),
       el('div', { class: 'hint', style: { marginBottom: '6px' }, text:
-        'Codex CLI 와 같은 방식으로 ChatGPT Plus/Pro 계정에 로그인해 chatgpt.com 의 codex 백엔드를 씁니다. 로그인해 두면 에이전트 프리셋의 API 키 선택에서 "OpenAI 구독" 을 고를 수 있습니다. 공식 API 가 아니라 OpenAI 쪽 변경에 깨질 수 있고, 그때는 오류를 그대로 보여 줍니다.' }),
+        'Codex OAuth 로 ChatGPT Plus/Pro 계정에 로그인해 chatgpt.com 의 codex 백엔드를 씁니다. 요청에는 risu-hina 이름으로 접속합니다. 로그인해 두면 에이전트 프리셋의 API 키 선택에서 "OpenAI 구독" 을 고를 수 있습니다. 공식 API 가 아니라 OpenAI 쪽 변경에 깨질 수 있고, 그때는 오류를 그대로 보여 줍니다.' }),
+      el('div', { class: 'notice warn', style: { marginBottom: '6px' } }, [
+        el('span', { text: '오픈소스 에이전트 프로그램에서 Codex 구독 사용은 명시적으로 허용되지 않았습니다. 개인의 책임하에 사용해 주세요. ' }),
+        el('strong', { text: '(특히 챗챈에서 언급은 자제하여 주십시오.)' }),
+      ]),
       line,
       el('div', { class: 'row', style: { marginTop: '6px' } }, [login, logout]),
       pasteRow,

@@ -1070,7 +1070,7 @@ def build() -> Agent[Deps]:
 
         라이브러리 파일은 일반 파일 도구(read_file / write_file)로 읽고 쓴다.
         스타일 .md 는 front matter + `## positive` / `## negative`. SD스튜디오
-        프리셋(studio/config/scenes/)은 NAIS3 형식이고, 씬 하나가 배치의 한 장이다.
+        프리셋(studio/config/scenes/)은 씬 프리셋 형식이고, 씬 하나가 배치의 한 장이다.
         **표정 세트는 씬마다 한 장씩 일반 생성으로 뽑는다** (디렉터 emotion 툴이
         아니다: 10배 비싸고 통제가 안 된다).
         프롬프트 안의 `{{…}}` 는 NovelAI 강조 문법이라 **절대 건드리지 않는다.**

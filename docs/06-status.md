@@ -36,7 +36,7 @@ progress bar · '선택' → '‹ 뒤로' + a mode chip on the tab bar · NAI pr
 autocomplete (`/studio/tag-suggest`) · markdown tints on lorebook bodies · write_file refuses
 projects/ · NAI torn-connection retry + a friendly RemoteProtocolError message · the realooc
 old-name note) **+ §1-27** (중단 kills the running run_python subprocess · multi-line fragments
-are a random one-line pool per image (NAIS3 semantics, recursive, depth 10) · the splitter
+are a random one-line pool per image (the reference tool semantics, recursive, depth 10) · the splitter
 re-clamps on container resize + an actual-overflow belt, so the agent pane can no longer sit
 past the right edge) **+ §1-28** (the NSFW asset-generation pitfalls SKILL seeded from the
 user's try-and-error notes · ucPreset 2 = None for real · batches globally serial (429 guard) ·
@@ -68,7 +68,7 @@ HTML comments) / lua (island scanner: cross-line strings+comments, keywords lose
 tint modes on the same mirror, 집중 편집 tinted too (dom↔hilite cycle is call-time-safe) · fragment
 autocomplete offers folder-qualified keys (`<폴더/조각>` already resolved server-side; the popup
 dims the folder; duplicate stems get a 중복 이름 badge; `<.../이름>` NOT adopted, consistent with
-the NAIS3 restraint list) · neutral '선택된 … 없음' empty-hints on the three pickers. Chat: the
+the the reference tool restraint list) · neutral '선택된 … 없음' empty-hints on the three pickers. Chat: the
 whole agent panel takes drops — internal rows/cells/fragment cards attach as PATH chips (no
 upload; the message says read_file/list_files), card assets ride a new `DRAG_ASSETS` payload as
 NAME chips (fetch_assets), OS folders now walk in via collectDrop; sources advertise `copyMove`
@@ -111,9 +111,27 @@ mixed-cast multi-entry batch from the panel.** Released = **v0.10.0 BETA** (§1-
 **0.3.1 (night of 2026-08-25)** — the real reason `+` never appeared was not "same version" but **CORS**: RisuAI reads `//@update-url` with a browser `fetch`, and the redirect response from the release URL carries no CORS header. Changed `//@update-url` to
 `https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js`, and made `tools/bundle.py` write that file into the repository (included in the release commit). In the backend code only VERSION changed.
 
+**+ §1-31 the release round (2026-09-03)**: the agent's prompt and welcome follow the ACTIVE
+TAB's half (`shell.activeHalf`: 봇 on a bot tab, 챗 on a chat tab; synced on every mount since
+`load()` dedupes renders) · the cast list is dense rows with a slide toggle (`listRow` grew
+`toggle.style: 'switch'` + `cls`; `.switch` CSS) · the fold icons are on the tab row for EVERY
+three-pane tab (`panes.installFoldControls`, one remembered state `hina.panelFold`; the shell
+re-installs them after a render that reused a cached split; the studio opts out and keeps its
+own auto-fold) · the fragment organizer auto-folds the chat like 검수 and the list column is
+220px (the "half width" was the agent pane's 50% default) · **Codex login ships ON**
+(`OPENAI_CODEX` default 1; a hand-edited 0 turns it off; `codexEnabled` on /health), the card
+carries the responsibility caveat with the parenthesis in `<strong>`, and the `originator` on the
+authorization URL and every request is **`risu-hina`** (the OAuth client id stays Codex CLI's
+public app id - OpenAI issues no other for this flow) · the name sweep: no other program or
+plugin is named in code, comments, tests or tracked docs any more (the NovelAI reference tool
+became "the reference tool"; the two provider profiles for the opencode.ai API endpoints stay,
+they are a vendor, not a benchmark). Two OLD commit messages still name other programs and are
+left as history (no rewrite of a public master). Smoke: +11 checks (placeholder per half, fold
+icons outside the studio, compact rows + switch, the caveat card and its `<strong>`).
+
 **Handoff 2026-08-31 (the studio feedback marathon, §1-19 ~ §1-25).** Where the next session picks up:
 
-- **State**: master = 0.11.0 unreleased; committed through §1-29 (`9c22085`), **§1-30 sits in the WORKING TREE uncommitted - its gate re-run is pending** (see §1-30's Status), test-server staged AT §1-29 (2026-09-02; §1-30 unstaged)
+- **State (2026-09-03)**: master = **0.11.0 RELEASED** - the release commit is the §1-31 commit (§1-30 landed as `4a4432f` the same day, gate ALL GREEN). test-server is still staged AT §1-29 (2026-09-02): the next deploy there is the release itself ([[risu-hina-staging-deploy]] shape, or the package over the folder). The user's next action: real-use test of §1-30/§1-31, and `+` on the plugin once the backend is updated.
   (2026-08-31 night: stop → backup `data-backup-20260831` (20,576 files) → 10 app modules + 2
   seeds + the 764,648B dev bundle → start; verified live: `/health` 0.11.0, **studio_v2 moved
   1,809 files into config/+output/** (manifest 511KB), skills seed v6 landed the NSFW skill,
@@ -138,6 +156,51 @@ mixed-cast multi-entry batch from the panel.** Released = **v0.10.0 BETA** (§1-
 - Historical note kept below: the one-time manual reinstall advice for 0.1.0-era installs.
 
 → (historical) **First thing to do**: the user reinstalls `plugin/Risu.Hina.Plugin.js` into RisuAI **by hand, once** (the installed 0.1.0's update-url cannot be read because of CORS) → check that `+` appears from the next release on → verify M2 in real use (§5-2).
+
+## 1-31. 2026-09-03 - 0.11.0 RELEASE: seven pre-release fixes and the name sweep
+
+The user's "몇가지만 추가 수정하고 릴리즈" round, one commit = the release commit.
+
+- **The agent's copy follows the half in front of the user.** The compose box said "챗에서 …"
+  while a bot card was being edited. `shell.activeHalf()` answers 봇 for a bot tab and 챗 for a
+  chat tab (falling back to the mode chip elsewhere), and both the placeholder and the welcome's
+  three examples read it. It is re-synced on every `mountAgent` because `load()` dedupes renders
+  and a tab switch is exactly what changes the half.
+- **The cast list is a list, not a settings page**: `listRow` learned `cls` (the row gets
+  `compact`: 3px padding, 11px hint) and `toggle.style: 'switch'` (a hidden checkbox under a
+  28×16 knob; clicks stop at the label so the row's own click stays a select). Only 캐릭터 uses it
+  so far; skills and presets keep their checkboxes.
+- **Fold icons everywhere.** `panes.installFoldControls(root)` puts the two `.laybtn` icons on the
+  shell tab row for any `threePane` split and applies one remembered state (`hina.panelFold`,
+  shared across tabs). Cached splits (the kit tabs and the editor keep theirs) are covered by the
+  shell re-installing after `renderActive`. The studio passes `{ controls: false }` and keeps its
+  own state, because 검수 (and now the fragment organizer) auto-fold there.
+- **The fragment organizer had half the screen** because the agent pane takes 50% by default;
+  it now auto-folds the chat the way 검수 does (manual toggle wins, leaving restores), the list
+  column is 220px, the editor takes the rest and its textarea starts at 50vh.
+- **Codex login on by default.** `config.DEFAULTS["OPENAI_CODEX"] = 1`; `codex_enabled()` reads
+  the flag with 1 as the fallback; the only way off is a hand-edited 0 (a settings patch still
+  cannot reach a top-level key - asserted). The card says how the login works and carries the
+  caveat verbatim: "오픈소스 에이전트 프로그램에서 Codex 구독 사용은 명시적으로 허용되지 않았습니다.
+  개인의 책임하에 사용해 주세요." with **(특히 챗챈에서 언급은 자제하여 주십시오.)** in `<strong>`.
+- **No disguise.** The module presented itself as another program (`originator: codex_cli_rs`).
+  It is `risu-hina` now, on the authorization URL and on every request header. What cannot change
+  is the OAuth `client_id`: it is Codex CLI's public app id, and OpenAI issues no other for this
+  flow - the docstring says so instead of implying otherwise. Whether the backend accepts an
+  unfamiliar originator is the one thing this session could not measure (no login here); the
+  user's real-use test covers it, and the fallback is one constant.
+- **The name sweep.** Every mention of another RisuAI plugin or tool in code, comments, tests,
+  smoke and tracked docs is gone (40+ sites; the NovelAI reference tool is "the reference tool",
+  its GitHub URL and zip path dropped, the user-facing scene error and the agent's system prompt
+  no longer name it). Kept on purpose: the two `PROFILES` for the opencode.ai API endpoints -
+  they are a vendor's service the user can point a preset at, not a benchmark. Two old commit
+  messages (the providers commit, the docs-naming commit) still carry names; rewriting a public
+  master's history for that is not worth the update-url breakage, so they stay.
+
+**Status**: tsc · build · test_http (codex flag flipped: template ships 1, hand edit 0 verified on
+its own server, originator asserted) · test_providers · smoke (600+11) green piecewise; the gate
+runs once more before the release commit. Release = `tools/release.py` → gate → commit (the two
+committed plugin bundles included) → tag `v0.11.0` → push → `gh release create`.
 
 ## 1-30. 2026-09-02 - 0.11.0 (unreleased, continued): panel toggles on the tab row, the compact multi-token rule, OUTPUT-tree verbs
 
@@ -201,7 +264,7 @@ Seventeen items of real-use feedback, one working session, plan `~/.claude/plans
   smoke check was the only caller that asserted an actual `<img>`). Pillow missing / non-image /
   decode failure all stream the original bytes, so the route can never break a picture.
   **pillow==11.3.0 joined requirements.in: existing installs need a re-setup** (release note).
-- **`<.../이름>` recursive fragment lookup NOT adopted** (consistent with the NAIS3 restraint
+- **`<.../이름>` recursive fragment lookup NOT adopted** (consistent with the the reference tool restraint
   list further up): the backend already resolves `<폴더/조각>`, the actual gap was the completer
   never offering folder-qualified keys. Duplicate stems now carry a 중복 이름 badge instead of a
   silent first-match.
@@ -272,11 +335,11 @@ Three items from the §1-26 round's use, one commit, gate ALL GREEN. Staged 2026
   nothing survives it), and the result comes back `aborted: true` with "사용자가 중단해서
   스크립트를 종료했습니다" instead of reading as a crash. `tests/test_sandbox.py` proves the kill
   lands well before the timeout.
-- **Multi-line fragments are a random pool** ("여러 줄 조각은 그중 1줄만 적용되는 랜덤"): NAIS3's
+- **Multi-line fragments are a random pool** ("여러 줄 조각은 그중 1줄만 적용되는 랜덤"): the reference tool's
   wildcard semantic, now in `studio.resolve_refs` - candidates are the body's lines with blanks
-  and `#` comment lines dropped (`_fragment_lines` = NAIS3 contentToLines), ONE line picked per
+  and `#` comment lines dropped (`_fragment_lines` = the reference tool contentToLines), ONE line picked per
   resolution (plan() resolves per image, so each image of a batch rolls its own), and the picked
-  line's own `<참조>` resolve recursively (depth 10, NAIS3's guard). A body that is all comments
+  line's own `<참조>` resolve recursively (depth 10, the reference tool's guard). A body that is all comments
   contributes ''. `rng` hook for deterministic tests; single-line fragments unchanged. The
   editors' hints and studio_plan's docstring say the rule. NOT adopted (undocumented to users,
   can come later if asked): `<*이름>` sequential, `<a|b|c>` inline, `(a/b)` wildcards.
@@ -322,9 +385,9 @@ start - 1,809 files, manifest recorded, verified live (§0 Handoff).
   nothing eats it.
 - **Mode legibility (items 12·13)**: inside an edit screen the first tab reads '‹ 뒤로' (back to
   the picker, leave-guard unchanged); a 봇 편집/챗 편집 chip sits on the tab bar naming the group.
-- **Prompt editors (items 9·10, NAIS3 reference C:\\code\\NAIS3-1.0.25.zip)**: `ui/hilite.ts` -
+- **Prompt editors (items 9·10, reference-tool source zip)**: `ui/hilite.ts` -
   mirror-behind-textarea background tints (glyphs stay native: selection/caret/IME untouched),
-  NAIS3's weight parser verbatim ({}=×1.05, []=÷1.05, `N::…::` numeric, red=emphasis/blue=
+  the reference tool's weight parser verbatim ({}=×1.05, []=÷1.05, `N::…::` numeric, red=emphasis/blue=
   de-emphasis, green=<조각>, grey=#comment), attached to the style editor, fragment/scene/character
   prompt boxes. Autocomplete: `<` completes fragment names locally; other tokens hit
   `GET /studio/tag-suggest` → `nai.suggest_tags` proxying NovelAI's own
@@ -565,18 +628,18 @@ feedback came back. Nine commits (P1-P9), each gate-green, all on master, still 
   캐릭터명 box stays manual, never derived from cards); the default parse is a token rule anchored
   on the stamp ([character-][emotion-]stamp-n) that still reads legacy three-token names.
 - **P3 the png carries its own recipe**: no more .json sidecar per image - the request record is a
-  `hina-params` tEXt chunk (base64 JSON after IHDR, zlib.crc32 by hand, NAIS3's own trick);
+  `hina-params` tEXt chunk (base64 JSON after IHDR, zlib.crc32 by hand, the reference tool's own trick);
   `nai.recipe()` reads it back as `hina`. Legacy sidecars stay on disk (user decision).
 - **P4 probe**: `--fidelity` / `--charref-mode` on the charref probe, run live (5 Anlas):
   `director_reference_secondary_strength_values=[0.4]` -> 200 and the Comment echoes it (it was
-  null without the field), base_caption "character" accepted. Cross-checked with NAIS3's captured
+  null without the field), base_caption "character" accepted. Cross-checked with the reference tool's captured
   web payloads (fidelity rides as secondary = 1 - fidelity; the 캐릭터/캐릭터&스타일 mode is the
   base_caption). docs/09 §7d updated.
 - **P5 references and request settings**: charref entries are {file, strength .6, fidelity .6,
   mode 'character'} (description gone); a card's charref/vibe are TABS with a stored refMode -
   the two never ride together (an old preset keeps whichever list it has); picked images upload
   immediately; the bucket fit letterboxes on black; position folds under 고급; quality tags / UC
-  preset merged as TEXT with the flags as metadata (NAIS3 capture); defaults steps 28,
+  preset merged as TEXT with the flags as metadata (the reference tool capture); defaults steps 28,
   cfg_rescale 0.4, quality OFF, UC Heavy; the gen card grew a folded persistent 요청 설정
   (sampler/schedule/UC/quality included) and the reference notice counts charrefs too.
 - **P6 the tab stops re-reading the world**: re-reads only on tab re-entry or a filesRev change

@@ -237,7 +237,7 @@ def main() -> int:
     ap.add_argument("--vibe", default="", help="path to a PNG (or a saved response ZIP): probe encode-vibe and "
                                               "the director tools with it. COSTS ANLAS (see docs/09 7, 7b)")
     ap.add_argument("--fidelity", default="", help="0~1, with --charref: send "
-                    "director_reference_secondary_strength_values=[1-fidelity] (the NAIS3 web capture's "
+                    "director_reference_secondary_strength_values=[1-fidelity] (the the reference tool web capture's "
                     "충실도 mapping) and print what the Comment echoes back")
     ap.add_argument("--charref-mode", default="", help='with --charref: the descriptions base_caption, '
                     '"character" or "character&style" (NAI web sends the mode name there)')
@@ -461,7 +461,7 @@ def main() -> int:
                 "director_reference_strength_values": [1.0],
             }
             if args.fidelity != "":
-                # NAIS3's real web capture: the UI's 충실도 slider is sent as
+                # the reference tool's real web capture: the UI's 충실도 slider is sent as
                 # secondary_strength_values = 1 - fidelity (fidelity 1 -> [0]).
                 fid = float(args.fidelity)
                 director["director_reference_secondary_strength_values"] = [round(1.0 - fid, 4)]

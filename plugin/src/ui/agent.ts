@@ -21,7 +21,7 @@ import { renderMarkdown } from './markdown';
 import { workspaceImage } from './blobimg';
 import { showArtifact } from './artifact';
 import { clientLog } from '../transport';
-import { currentMode } from './shell';
+import { activeHalf } from './shell';
 import { installDrop } from './tree';
 
 const IMG_RE = /\.(png|jpe?g|gif|webp|avif|bmp)$/i;
@@ -68,10 +68,8 @@ export class AgentPanel {
     });
     this.historyBtn.addEventListener('click', () => void this.openHistory());
 
-    this.input = el('textarea', {
-      class: 'agentinput',
-      placeholder: '챗에서 수정이나 조정이 필요한 부분을 말씀하세요. 궁금한 점이 있다면 무엇이든 물어보세요.',
-    });
+    this.input = el('textarea', { class: 'agentinput' });
+    this.syncPlaceholder();
     this.input.addEventListener('keydown', (e) => {
       const ev = e as KeyboardEvent;
       // Enter sends, Shift+Enter newlines - the chat convention. Multi-line
@@ -287,6 +285,7 @@ export class AgentPanel {
           this.addBubble('assistant', String(m.content ?? ''), m.usage ?? undefined, m.cost);
         }
       }
+      this.syncPlaceholder();
       if (!s.messages.length) this.log.appendChild(this.welcome());
       this.setStaged(s.staged ?? []);
       void this.refreshActions();
@@ -295,6 +294,17 @@ export class AgentPanel {
     } catch (e) {
       this.status.textContent = e instanceof Error ? e.message : String(e);
     }
+  }
+
+  /** The input's prompt names the half that is open: 봇 on a bot tab, 챗 on
+   * a chat tab (the user read "챗에서" while editing a card). Called on every
+   * mount too - load() dedupes renders, and a tab switch changes the half. */
+  syncPlaceholder(): void {
+    const where = activeHalf() === 'bot' ? '봇' : '챗';
+    this.input.placeholder = `${where}에서 수정이나 조정이 필요한 부분을 말씀하세요. 궁금한 점이 있다면 무엇이든 물어보세요.`;
+    // The welcome's examples follow the half as well.
+    const w = this.log.querySelector('.welcome');
+    if (w) w.replaceWith(this.welcome());
   }
 
   /**
@@ -309,7 +319,7 @@ export class AgentPanel {
   private welcome(): HTMLElement {
     // The examples follow the tab bar's mode: a chat's three sizes of job, or
     // the card's - the agent is the same, the material in front of it differs.
-    const bot = currentMode() === 'bot';
+    const bot = activeHalf() === 'bot';
     const examples = bot
       ? [
         '봇 로어북을 훑어서 겹치거나 빈 항목을 정리하고 폴더로 묶어줘',

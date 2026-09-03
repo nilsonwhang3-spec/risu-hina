@@ -149,10 +149,11 @@ MAX_BODY_BYTES = _env_int("RISUHINA_MAX_BODY_BYTES", 64 * 1024 * 1024)
 # --- defaults ---------------------------------------------------------------
 
 DEFAULTS: dict[str, Any] = {
-    # Off by default, and only an operator editing config.json by hand can
-    # turn it on - the settings API ignores non-section keys, so nothing the
-    # panel sends can reach it. See CODEX_FLAG below.
-    "OPENAI_CODEX": 0,
+    # On by default (the user's call, 2026-09-03; the settings card carries
+    # the caveat). Only an operator editing config.json by hand can turn it
+    # off - the settings API ignores non-section keys, so nothing the panel
+    # sends can reach it. See CODEX_FLAG below.
+    "OPENAI_CODEX": 1,
     "agent": {
         # OpenAI-compatible surface; a gateway normalises the providers behind
         # it. Same reasoning as active-recall's llm.py - the portability lives
@@ -332,16 +333,16 @@ def section(name: str) -> dict:
     return dict(load().get(name) or {})
 
 
-# The OpenAI subscription path. Ships as 0 in the config template and stays
-# off unless the operator sets `"OPENAI_CODEX": 1` in config.json by hand -
+# The OpenAI subscription path. Ships as 1 in the config template; an
+# operator who wants it gone sets `"OPENAI_CODEX": 0` in config.json by hand -
 # `update()` skips top-level non-section keys, so no settings patch from the
-# panel can reach it. With it off the routes are not there, a preset cannot
-# select it, and the settings page does not offer it.
+# panel can flip it either way. With it off the routes are not there, a
+# preset cannot select it, and the settings page does not offer it.
 CODEX_FLAG = "OPENAI_CODEX"
 
 
 def codex_enabled() -> bool:
-    return str(load().get(CODEX_FLAG, 0)).strip().lower() in ("1", "true", "yes", "on")
+    return str(load().get(CODEX_FLAG, 1)).strip().lower() in ("1", "true", "yes", "on")
 
 
 OLD_MAX_TOKENS_DEFAULT = 8000

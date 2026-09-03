@@ -1,7 +1,7 @@
 /**
  * Background-tint syntax colouring and autocomplete for plain textareas.
  *
- * The structure is NAIS3's prompt editor (its NAIS2 postmortem, adopted):
+ * The structure is the reference prompt editor's (its predecessor's postmortem, adopted):
  * the TEXTAREA alone draws the glyphs - selection, caret and IME all stay
  * native - while a mirror <div> behind it repeats the text transparently and
  * paints only backgrounds. Both layers share the same typography (copied
@@ -11,7 +11,7 @@
  * background bands are what survives contact with a real editor.
  *
  * Two modes:
- *   'nai'  NovelAI prompt syntax - {} emphasis / [] de-emphasis per NAIS3's
+ *   'nai'  NovelAI prompt syntax - {} emphasis / [] de-emphasis per the reference tool's
  *          parser, N::…:: numeric weights, <조각> references (green),
  *          # comment lines (grey) - plus autocomplete: `<` completes
  *          fragment names, any other token asks the backend's
@@ -23,7 +23,7 @@
 import { el } from './dom';
 import { state } from '../state';
 
-// --- NAI weight parsing (NAIS3 prompt-weights.ts, algorithm adopted) -----------
+// --- NAI weight parsing (the reference tool prompt-weights.ts, algorithm adopted) -----------
 
 interface WeightSegment { start: number; end: number; weight: number }
 
@@ -73,7 +73,7 @@ function parseWeights(text: string): WeightSegment[] {
 }
 
 /** Emphasis (>1) reds, de-emphasis (<1) and negatives blue; 1.0 is silent.
- * The exact rgba curve is NAIS3's, so both editors read the same. */
+ * The exact rgba curve is the reference tool's, so both editors read the same. */
 function weightBackground(weight: number): string | null {
   if (weight === 1) return null;
   if (weight <= 0) return 'rgba(96, 145, 235, 0.45)';
@@ -242,7 +242,7 @@ function luaRanges(text: string): Range[] {
 // --- the mirror ------------------------------------------------------------------
 
 // What the mirror must copy for its line breaks to match the textarea's
-// exactly (NAIS3 caret.ts's list, plus the box itself).
+// exactly (the reference tool caret.ts's list, plus the box itself).
 const COPY_PROPS = [
   'fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'letterSpacing',
   'lineHeight', 'textTransform', 'wordSpacing', 'textIndent', 'whiteSpace',
@@ -288,7 +288,7 @@ function caretCoords(ta: HTMLTextAreaElement, position: number): { left: number;
 
 type Suggestion = { kind: 'frag'; name: string } | { kind: 'tag'; tag: string; count: number };
 
-// Where a danbooru-tag token starts (NAIS3's separator set; ':' covers '::').
+// Where a danbooru-tag token starts (the reference tool's separator set; ':' covers '::').
 const TAG_TOKEN_SEPARATORS = /[,\n{}[\]|<>:/]/;
 
 function fmtCount(count: number): string {

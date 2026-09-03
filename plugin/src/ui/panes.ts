@@ -14,8 +14,9 @@
  * per tab. There is one conversation with one agent; three panels would mean
  * three histories and three costs for what the user experiences as one chat.
  */
-import { el } from './dom';
+import { el, ICON, iconBtn } from './dom';
 import { splitter } from './splitter';
+import { setLayoutControls } from './shell';
 
 export interface ThreePaneParts {
   root: HTMLElement;
@@ -28,7 +29,7 @@ export interface ThreePaneParts {
  * Build the split. `leftNode` is placed as-is so a component can own it (the
  * turn explorer keeps its own element and its own state across renders).
  */
-export function threePane(leftNode?: HTMLElement): ThreePaneParts {
+export function threePane(leftNode?: HTMLElement, opts: { controls?: boolean } = {}): ThreePaneParts {
   const left = leftNode ?? el('div', { class: 'explorer' });
   const centre = el('div', { class: 'left' });
   const right = el('div', { class: 'right' }, [el('div', { class: 'right-inner' })]);
@@ -43,8 +44,58 @@ export function threePane(leftNode?: HTMLElement): ThreePaneParts {
   // First child: under the mobile breakpoint the split is a column and the
   // bar sits across its top. Desktop CSS hides it.
   root.insertBefore(mobileBar(root), root.firstChild);
+  if (opts.controls !== false) installFoldControls(root);
 
   return { root, left, centre, right };
+}
+
+// --- desktop: fold the side panels --------------------------------------------------
+//
+// The studio grew VS Code-style fold icons on the tab row (§1-30) and the
+// user wanted them everywhere: a lorebook entry or a long turn wants the width
+// as much as a batch grid does. One shared state for every three-pane tab, so
+// folding the agent on 로어북 keeps it folded on 메타. The studio keeps its own
+// (검수 auto-folds) and opts out.
+const FOLD_KEY = 'hina.panelFold';
+const fold = { left: false, right: false };
+try {
+  const saved = JSON.parse(localStorage.getItem(FOLD_KEY) || 'null') as Partial<typeof fold> | null;
+  if (saved && typeof saved === 'object') Object.assign(fold, saved);
+} catch { /* storage may be unavailable in the iframe */ }
+let foldRoot: HTMLElement | null = null;
+let foldL: HTMLElement | null = null;
+let foldR: HTMLElement | null = null;
+
+function applyFold(): void {
+  if (foldRoot) {
+    foldRoot.classList.toggle('lcollapse', fold.left);
+    foldRoot.classList.toggle('rcollapse', fold.right);
+  }
+  foldL?.classList.toggle('on', !fold.left);
+  foldR?.classList.toggle('on', !fold.right);
+}
+
+function toggleFold(side: 'left' | 'right'): void {
+  fold[side] = !fold[side];
+  try { localStorage.setItem(FOLD_KEY, JSON.stringify(fold)); } catch { /* fine */ }
+  applyFold();
+}
+
+/** Register the two fold icons on the shell tab row for this split, and apply
+ * the remembered state. Called by threePane, and by the shell after a render
+ * that reused a cached split (the row is cleared on every tab switch). */
+export function installFoldControls(root: HTMLElement): void {
+  foldRoot = root;
+  if (!foldL || !foldR) {
+    foldL = iconBtn(ICON.layoutL, '왼쪽 패널(목록) 접기/펼치기');
+    foldL.classList.add('laybtn');
+    foldL.addEventListener('click', () => toggleFold('left'));
+    foldR = iconBtn(ICON.layoutR, 'AI 챗 패널 접기/펼치기');
+    foldR.classList.add('laybtn');
+    foldR.addEventListener('click', () => toggleFold('right'));
+  }
+  setLayoutControls(el('span', { class: 'row', style: { gap: '2px' } }, [foldL, foldR]));
+  applyFold();
 }
 
 // --- phones: one view at a time ---------------------------------------------

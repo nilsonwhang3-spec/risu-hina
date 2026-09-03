@@ -123,7 +123,8 @@ export function renderStudioTab(mount: HTMLElement): void {
   ensureLayoutControls();
   if (!built || !mount.querySelector('.split')) {
     clear(mount);
-    const pane = threePane();
+    // The studio runs its own fold state (검수 auto-fold); no shared controls.
+    const pane = threePane(undefined, { controls: false });
     splitRoot = pane.root;
 
     // The left column: [프롬프트 | OUTPUT] tabs over the content.
@@ -343,10 +344,12 @@ function drawCentre(): void {
   if (!viewMount) return;
   clear(viewMount);
 
-  // Entering any 검수 surface (the tab, the folder grid, the selector) folds
-  // the chat once; leaving restores it unless the user toggled meanwhile.
+  // Entering any 검수 surface (the tab, the folder grid, the selector) or the
+  // fragment organizer folds the chat once; leaving restores it unless the
+  // user toggled meanwhile. Both are wide screens: a grid, or a list beside
+  // an editor that was living on half the centre (§1-31).
   const inInspect = (S.centreMode === 'tab' && !S.selectedFile && S.centreTab === 'inspect')
-    || S.centreMode === 'folder' || S.centreMode === 'selector';
+    || S.centreMode === 'folder' || S.centreMode === 'selector' || S.centreMode === 'fragments';
   if (inInspect && !wasInspect && !panels.right) { autoRight = true; applyPanels(); }
   else if (!inInspect && wasInspect && autoRight) { autoRight = false; applyPanels(); }
   wasInspect = inInspect;

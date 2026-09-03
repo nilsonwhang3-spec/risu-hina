@@ -58,7 +58,7 @@ NO_GENERATE = {"width": 7, "height": 7}
 # A floor that returned 200 on nai-diffusion-4-5-full and -5-full. Accepted as
 # a set; no field here is proven individually necessary, and a preset may
 # replace any of it. steps 28 / scale 5 are the web client's v4.5 defaults
-# (NAIS3 nai-models.ts); cfg_rescale 0.4 and quality tags OFF are this
+# (the reference tool nai-models.ts); cfg_rescale 0.4 and quality tags OFF are this
 # studio's own defaults (user, 2026-08-30).
 DEFAULTS: dict[str, Any] = {
     "params_version": 3,
@@ -76,7 +76,7 @@ DEFAULTS: dict[str, Any] = {
 
 # Quality tags and the UC preset are CLIENT-side text merges: the NAI web
 # client appends/prepends these strings itself and sends qualityToggle /
-# ucPreset only as metadata. Text and index mapping are NAIS3's byte-asserted
+# ucPreset only as metadata. Text and index mapping are the reference tool's byte-asserted
 # web captures (tests/fixtures/nai-web-*.json there), adopted verbatim.
 # **None is BOTH 2 and 4**: the wider NovelAI ecosystem numbers the presets
 # 0 Heavy · 1 Light · 2 None · 3 Human Focus (novelai-python, koishi
@@ -322,7 +322,7 @@ def build_parameters(prompt: str, negative: str, params: dict | None = None,
     충실도 rides as `secondary_strength_values = 1 - fidelity`.
 
     qualityToggle / ucPreset are applied HERE as text (§7d cross-check with
-    NAIS3: the web client merges these strings itself and sends the flags as
+    the reference tool: the web client merges these strings itself and sends the flags as
     metadata). The merged prompt is what `v4_prompt` carries - a caller that
     needs the top-level `input` must read it back from there so the two can
     never disagree.
@@ -400,7 +400,7 @@ def suggest_tags(query: str, model: str = "") -> list[dict]:
     """Danbooru-tag suggestions from NovelAI's own endpoint.
 
     `GET /ai/generate-image/suggest-tags?model=…&prompt=…` - the endpoint the
-    NAI web client types against (NAIS3 endpoints.ts names it too). The
+    NAI web client types against (the reference tool endpoints.ts names it too). The
     response shape is treated as data: anything without a `tag` is dropped,
     unknown fields ride along untouched.
     """

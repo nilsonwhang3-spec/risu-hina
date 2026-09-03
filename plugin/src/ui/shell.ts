@@ -4,6 +4,7 @@
  * Sections stay in the DOM and are toggled with CSS rather than being rebuilt,
  * so switching tabs does not lose scroll position or an in-progress edit.
  */
+import { installFoldControls } from './panes';
 import { el, clear, ICON, searchBox } from './dom';
 import { describeSync, syncBusy } from '../assets';
 import { injectStyles } from './styles';
@@ -86,6 +87,14 @@ export function setEditMode(m: EditMode, tab?: TabId): void {
 }
 
 export function currentMode(): EditMode {
+  return mode;
+}
+
+/** Which half the ACTIVE tab shows: a bot tab is the bot's whatever the mode
+ * chip says (the agent's copy follows the material in front of the user). */
+export function activeHalf(): EditMode {
+  if (BOT_TABS.has(active)) return 'bot';
+  if (CHAT_TABS.has(active)) return 'chat';
   return mode;
 }
 
@@ -270,6 +279,12 @@ function renderActive(): void {
   else if (active === 'files') renderFilesTab(node);
   else if (active === 'studio') renderStudioTab(node);
   else renderSettingsTab(node);
+  // A tab that reused its cached split did not pass through threePane: put the
+  // fold icons back for it (the row was cleared above).
+  if (active !== 'studio') {
+    const split = node.querySelector('.split') as HTMLElement | null;
+    if (split) installFoldControls(split);
+  }
   // The artifact viewer follows the active tab's centre pane, like the agent.
   remountArtifact();
 }

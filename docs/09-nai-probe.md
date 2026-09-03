@@ -178,10 +178,10 @@ Read back from our own 2026-08-29 image (`data/nai-probe/GEN_v45.zip`):
 
 Three consequences, and they are the useful part of this whole probe:
 
-1. **`char_captions[]` + `use_coords` is the multi-character mechanism.** NAIS3's "up to 6 characters with
+1. **`char_captions[]` + `use_coords` is the multi-character mechanism.** the reference tool's "up to 6 characters with
    positions" is this list. A character in the studio is a `char_caption`, not a line of prose.
 2. **The `*_multiple[]` naming says vibe transfer takes a *list* of references with per-item strengths**, and
-   `reference_information_extracted` is the *encoded* form — which is why NAIS3 keeps an encoding cache. The
+   `reference_information_extracted` is the *encoded* form — which is why the reference tool keeps an encoding cache. The
    studio should cache the same way: encode a reference once, reuse it across a batch.
 3. **A NAI PNG is self-describing.** The studio can import any NAI image — including ones made elsewhere — and
    recover its exact recipe. "Make more like this one" needs no bookkeeping of ours; the sidecar JSON becomes an
@@ -257,7 +257,7 @@ Every one of these answered **200 with a ZIP**, same envelope as generation:
 An unknown action is refused by name (`400 Model doesn't support action <name>`), which is how the list was
 found.
 
-> **The `emotion` action is not how expression sets are normally made** (user, 2026-08-29; NAIS does it the
+> **The `emotion` action is not how expression sets are normally made** (user, 2026-08-29; the usual expression-set tools do it the
 > other way). The usual route is an **emotion preset**: a named set of scene/emotion prompt fragments sent with
 > an ordinary generation, one generation per emotion, holding the character prompt, seed and vibe constant.
 > That is both cheaper — a generation against ~10 Anlas for a director call — and more controllable, because
@@ -339,8 +339,8 @@ The accepted request, in full (only the director_* keys differ from §3's set):
 }
 ```
 
-**Fidelity and the mode caption — measured 2026-08-30 (second run), cross-checked against NAIS3.**
-NAIS3 (github.com/sunanakgo/NAIS3) carries real NovelAI web captures (`tests/fixtures/nai-web-charref.json`,
+**Fidelity and the mode caption — measured 2026-08-30 (second run), cross-checked against the reference tool.**
+The reference tool (its public source) carries real NovelAI web captures (`tests/fixtures/nai-web-charref.json`,
 2026-07-05) asserting: the UI's 충실도(fidelity) slider is sent as
 `director_reference_secondary_strength_values = [1 - fidelity]` (fidelity 1 → `[0]`), and the
 캐릭터/캐릭터&스타일 mode choice is the `base_caption` string (`"character"` / `"character&style"`).
@@ -352,7 +352,7 @@ Re-probed live here (`--charref … --fidelity 0.6 --charref-mode character`):
 - `base_caption: "character"` → 200, echoed verbatim in the Comment's descriptions.
 - Still 5 Anlas (9232 → 9227).
 
-NAIS3's enum also lists `style` / `costume` / `delta` as caption values read from the web bundle;
+the reference tool's enum also lists `style` / `costume` / `delta` as caption values read from the web bundle;
 only `character&style` (their capture) and `character` (ours) are verified by a response.
 
 Unmeasured still: whether a free-text description caption steers the output semantically (K4 was a

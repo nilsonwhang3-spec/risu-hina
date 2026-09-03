@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.10.0
+//@display-name Risu Hina v0.11.0
 //@api 3.0
-//@version 0.10.0
+//@version 0.11.0
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -104,7 +104,7 @@
       this.tokenSafe = true;
       this.lastHealth = body;
       this.probeInfo = "";
-      this.gate = versionGate("0.10.0", String(body.version || ""));
+      this.gate = versionGate("0.11.0", String(body.version || ""));
       return body;
     }
     /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -132,9 +132,9 @@
       if (post.status !== 404 && post.status !== 405) return post;
       return await this.raw("GET", "/health", void 0, { withToken: false });
     }
-    async get(path, query) {
+    async get(path, query, timeoutMs) {
       const qs = query ? "?" + Object.entries(query).filter(([, v]) => v !== void 0 && v !== "").map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`).join("&") : "";
-      return this.json("GET", path + qs, void 0);
+      return this.json("GET", path + qs, void 0, timeoutMs);
     }
     async post(path, payload, timeoutMs) {
       return this.json("POST", path, payload, timeoutMs);
@@ -158,9 +158,12 @@
       if (isRaw(body)) throw new BackendError(res.status, "\uBC31\uC5D4\uB4DC \uB300\uC2E0 \uB2E4\uB978 \uC751\uB2F5\uC774 \uC654\uC2B5\uB2C8\uB2E4 (JSON \uC774 \uC544\uB2D8)");
       return body;
     }
-    /** POST that answers bytes - a zip of workspace files. */
-    async postBinary(path, payload) {
-      const res = await this.raw("POST", path, payload, { timeoutMs: UPLOAD_TIMEOUT_MS });
+    /** POST that answers bytes - a zip of workspace files, an image, a thumb.
+     * The default timeout stays generous (a charx download runs minutes);
+     * image callers pass a short one so a hung fetch frees its semaphore slot
+     * in seconds instead of holding it for three minutes. */
+    async postBinary(path, payload, timeoutMs = UPLOAD_TIMEOUT_MS) {
+      const res = await this.raw("POST", path, payload, { timeoutMs });
       if (!res.ok) throw await toError(res);
       return new Uint8Array(await res.arrayBuffer());
     }
@@ -297,1603 +300,17 @@
   }
   async function toError(res) {
     const body = await readJson(res);
-    let msg16 = body && typeof body === "object" && "error" in body ? String(body.error) : `HTTP ${res.status}`;
+    let msg19 = body && typeof body === "object" && "error" in body ? String(body.error) : `HTTP ${res.status}`;
     if (res.status === 401) {
-      msg16 = '\uD1A0\uD070\uC774 \uB9DE\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4. \uBC31\uC5D4\uB4DC PC \uC758 data/token.txt \uB0B4\uC6A9\uC744 \u2699 \u2192 \uC5F0\uACB0 \u2192 \uD1A0\uD070\uC5D0 \uB123\uACE0 "\uC800\uC7A5\uD558\uACE0 \uC5F0\uACB0"\uC744 \uB20C\uB7EC \uC8FC\uC138\uC694 (127.0.0.1 \uB85C \uC811\uC18D\uD560 \uB54C\uB294 \uBE44\uC6CC\uB3C4 \uB429\uB2C8\uB2E4).';
+      msg19 = '\uD1A0\uD070\uC774 \uB9DE\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4. \uBC31\uC5D4\uB4DC PC \uC758 data/token.txt \uB0B4\uC6A9\uC744 \u2699 \u2192 \uC5F0\uACB0 \u2192 \uD1A0\uD070\uC5D0 \uB123\uACE0 "\uC800\uC7A5\uD558\uACE0 \uC5F0\uACB0"\uC744 \uB20C\uB7EC \uC8FC\uC138\uC694 (127.0.0.1 \uB85C \uC811\uC18D\uD560 \uB54C\uB294 \uBE44\uC6CC\uB3C4 \uB429\uB2C8\uB2E4).';
     } else if (res.status === 429) {
-      msg16 = "\uD2C0\uB9B0 \uD1A0\uD070\uC774 \uC5EC\uB7EC \uBC88 \uAC70\uBD80\uB418\uC5B4 \uC7A0\uC2DC \uB9C9\uD614\uC2B5\uB2C8\uB2E4. 1\uBD84 \uB4A4 \uB2E4\uC2DC \uC2DC\uB3C4\uD574 \uC8FC\uC138\uC694.";
+      msg19 = "\uD2C0\uB9B0 \uD1A0\uD070\uC774 \uC5EC\uB7EC \uBC88 \uAC70\uBD80\uB418\uC5B4 \uC7A0\uC2DC \uB9C9\uD614\uC2B5\uB2C8\uB2E4. 1\uBD84 \uB4A4 \uB2E4\uC2DC \uC2DC\uB3C4\uD574 \uC8FC\uC138\uC694.";
     }
-    return new BackendError(res.status, msg16, body);
+    return new BackendError(res.status, msg19, body);
   }
   var transport = new Transport();
   function clientLog(level, event, detail) {
     return transport.post("/clientlog", { level, event, detail }).then(() => void 0).catch(() => void 0);
-  }
-
-  // src/ui/dom.ts
-  function el(tag, attrs = {}, children = []) {
-    const node = document.createElement(tag);
-    for (const [k, v] of Object.entries(attrs)) {
-      if (v === null || v === void 0 || v === false) continue;
-      if (k === "class") node.className = String(v);
-      else if (k === "text") node.textContent = String(v);
-      else if (k === "html") node.innerHTML = String(v);
-      else if (k === "style" && typeof v === "object") Object.assign(node.style, v);
-      else if (k === "dataset" && typeof v === "object") Object.assign(node.dataset, v);
-      else if (k.startsWith("on") && typeof v === "function") {
-        node.addEventListener(k.slice(2).toLowerCase(), v);
-      } else if (k === "value" && node instanceof HTMLTextAreaElement) {
-        node.value = String(v);
-      } else if (k === "value" && node instanceof HTMLInputElement) {
-        node.value = String(v);
-      } else if (k === "checked" && node instanceof HTMLInputElement) {
-        node.checked = Boolean(v);
-      } else if (v === true) {
-        node.setAttribute(k, "");
-      } else {
-        node.setAttribute(k, String(v));
-      }
-    }
-    const list2 = Array.isArray(children) ? children : [children];
-    for (const c of list2) {
-      if (c === null || c === void 0 || c === false) continue;
-      node.appendChild(typeof c === "string" ? document.createTextNode(c) : c);
-    }
-    return node;
-  }
-  function searchBox(value, onInput, placeholder = "\uCC3E\uAE30") {
-    const input = el("input", { class: "searchinput", placeholder, value });
-    input.addEventListener("input", () => onInput(input.value));
-    return el("div", { class: "searchbox" }, [input]);
-  }
-  function refocusSearch(root) {
-    const input = root?.querySelector(".searchbox input") ?? document.querySelector(".tabslot .searchbox input");
-    if (!input) return;
-    input.focus();
-    try {
-      input.setSelectionRange(input.value.length, input.value.length);
-    } catch {
-    }
-  }
-  function setSelected(sel, value) {
-    for (const opt of Array.from(sel.querySelectorAll("option"))) {
-      const on = opt.value === value;
-      opt.selected = on;
-      if (on) opt.setAttribute("selected", "");
-      else opt.removeAttribute("selected");
-    }
-    try {
-      sel.value = value;
-    } catch {
-    }
-  }
-  function selectedValue(sel) {
-    const options = Array.from(sel.querySelectorAll("option"));
-    const live = options.find((o) => o.selected === true && o.hasAttribute("selected") === false) ?? (typeof sel.value === "string" && sel.value !== "" && options.find((o) => o.value === sel.value)) ?? options.find((o) => o.selected === true);
-    if (live) return live.value;
-    const stamped = sel.querySelector("option[selected]");
-    return stamped?.value ?? sel.value ?? options[0]?.value ?? "";
-  }
-  function clear(node) {
-    while (node.firstChild) node.removeChild(node.firstChild);
-  }
-  function svg(path, size = 20) {
-    return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${path}</svg>`;
-  }
-  var ICON = {
-    app: svg('<path d="M4 4h16v12H8l-4 4z"/><path d="M8 9h8"/><path d="M8 12h5"/>'),
-    close: svg('<path d="M18 6 6 18M6 6l12 12"/>', 18),
-    // A drawn arrow rather than the 🔄 emoji: the emoji renders at a different
-    // weight and baseline from every other control in the header.
-    reload: svg('<path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/>', 17),
-    check: svg('<path d="m5 13 4 4L19 7"/>', 16),
-    clip: svg('<path d="M21.4 11.1 12.3 20.2a5 5 0 0 1-7.1-7.1l9.2-9.2a3.3 3.3 0 1 1 4.7 4.7l-9.2 9.2a1.7 1.7 0 0 1-2.4-2.4l8.5-8.5"/>', 17),
-    pencil: svg('<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/>', 15),
-    gear: svg('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.14.6.66 1.03 1.28 1.05H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>', 17),
-    warn: svg('<path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>', 16)
-  };
-  function armed(button, label, confirmLabel, run) {
-    let armedNow = false;
-    let timer;
-    button.textContent = label;
-    button.addEventListener("click", () => {
-      if (!armedNow) {
-        armedNow = true;
-        button.textContent = confirmLabel;
-        button.classList.add("danger");
-        timer = setTimeout(() => {
-          armedNow = false;
-          button.textContent = label;
-          button.classList.remove("danger");
-        }, 4e3);
-        return;
-      }
-      if (timer) clearTimeout(timer);
-      armedNow = false;
-      button.textContent = label;
-      button.classList.remove("danger");
-      run();
-    });
-  }
-  function diffFragments(before, after) {
-    let head = 0;
-    const max = Math.min(before.length, after.length);
-    while (head < max && before[head] === after[head]) head++;
-    let tail = 0;
-    while (tail < max - head && before[before.length - 1 - tail] === after[after.length - 1 - tail]) tail++;
-    const mk = (text2, cls) => {
-      const frag = document.createDocumentFragment();
-      frag.appendChild(document.createTextNode(text2.slice(0, head)));
-      const mid = text2.slice(head, text2.length - tail);
-      if (mid) frag.appendChild(el("span", { class: cls, text: mid }));
-      frag.appendChild(document.createTextNode(text2.slice(text2.length - tail)));
-      return frag;
-    };
-    return { before: mk(before, "diff-del"), after: mk(after, "diff-ins") };
-  }
-  function fmtTime(ms) {
-    const n = Number(ms);
-    if (!Number.isFinite(n) || n <= 0) return "";
-    try {
-      return new Date(n).toISOString().slice(0, 16).replace("T", " ");
-    } catch {
-      return "";
-    }
-  }
-  var TOOL = {
-    snapshot: "\u{1F516}",
-    discard: "\u21A9",
-    versions: "\u{1F558}",
-    apply: "\u{1F4BE}",
-    export: "\u2B07",
-    find: "\u{1F50D}",
-    cut: "\u2702",
-    view: "\u{1F441}",
-    reload: "\u{1F504}",
-    newChat: "\u2795",
-    history: "\u{1F5C2}",
-    info: "\u24D8"
-  };
-  var TOOL_GLYPH = {
-    list_turns: ["\u{1F4CB}", "\uD6D1\uAE30"],
-    read_turns: ["\u{1F4D6}", "\uC77D\uAE30"],
-    search_turns: ["\u{1F50D}", "\uAC80\uC0C9"],
-    read_card: ["\u{1FAAA}", "\uCE74\uB4DC"],
-    read_lore: ["\u{1F4DA}", "\uB85C\uC5B4"],
-    read_memory: ["\u{1F9E0}", "\uC694\uC57D"],
-    list_skills: ["\u{1F9E9}", "\uC2A4\uD0AC \uBAA9\uB85D"],
-    load_skill: ["\u{1F9E9}", "\uC2A4\uD0AC"],
-    stage_edit: ["\u270F\uFE0F", "\uC218\uC815 \uC81C\uC548"],
-    stage_bulk: ["\u270F\uFE0F", "\uC77C\uAD04 \uC81C\uC548"],
-    stage_delete: ["\u2702\uFE0F", "\uC0AD\uC81C \uC81C\uC548"],
-    list_staged: ["\u{1F4CC}", "\uC81C\uC548 \uD655\uC778"],
-    run_python: ["\u{1F40D}", "\uC2A4\uD06C\uB9BD\uD2B8"],
-    write_file: ["\u{1F4BE}", "\uD30C\uC77C \uC4F0\uAE30"],
-    list_files: ["\u{1F4C1}", "\uD30C\uC77C \uBAA9\uB85D"],
-    read_file: ["\u{1F4C4}", "\uD30C\uC77C \uC77D\uAE30"],
-    web_search: ["\u{1F310}", "\uC6F9 \uAC80\uC0C9"]
-  };
-  var PAPER_PLANE = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4z"/></svg>';
-  function modal(title, body, opts = {}) {
-    const closeBtn = el("button", { class: "iconbtn", html: ICON.close, title: "\uB2EB\uAE30" });
-    const box = el("div", { class: "modalbox" + (opts.wide ? " wide" : "") + (opts.cls ? " " + opts.cls : "") }, [
-      el("div", { class: "modalhead" }, [
-        el("h2", { text: title }),
-        el("span", { class: "spacer" }),
-        closeBtn
-      ]),
-      el("div", { class: "modalbody" }, [body])
-    ]);
-    const back = el("div", { class: "modalback" }, [box]);
-    document.body.appendChild(back);
-    let closed = false;
-    const close = () => {
-      if (closed) return;
-      closed = true;
-      back.remove();
-      document.removeEventListener("keydown", esc, true);
-      opts.onClose?.();
-    };
-    const esc = (e) => {
-      if (e.key === "Escape") close();
-    };
-    closeBtn.addEventListener("click", close);
-    back.addEventListener("click", (e) => {
-      if (e.target === back && !opts.sticky) close();
-    });
-    document.addEventListener("keydown", esc, true);
-    setTimeout(() => box.querySelector("input, textarea, select, button")?.focus(), 0);
-    return close;
-  }
-  function focusEdit(source, title, opts = {}) {
-    const big = el("textarea", {
-      class: "focusarea" + (opts.code ? " codearea" : ""),
-      spellcheck: opts.code ? "false" : "true"
-    });
-    big.value = source.value;
-    const count = el("span", { class: "hint", text: `${big.value.length}\uC790` });
-    const sync = () => {
-      source.value = big.value;
-      count.textContent = `${big.value.length}\uC790`;
-      source.dispatchEvent(new Event("input", { bubbles: true }));
-    };
-    big.addEventListener("input", sync);
-    const done = el("button", { class: "primary", text: "\uC644\uB8CC" });
-    const body = el("div", { class: "focusbody" }, [
-      big,
-      el("div", { class: "row focusfoot" }, [
-        count,
-        el("span", { class: "hint grow", text: "\uC785\uB825\uC740 \uBC14\uB85C \uC6D0\uB798 \uC0C1\uC790\uC5D0 \uBC18\uC601\uB429\uB2C8\uB2E4. \uC800\uC7A5\uC740 \uC6D0\uB798 \uD654\uBA74\uC758 \uC800\uC7A5 \uBC84\uD2BC\uC73C\uB85C \uD569\uB2C8\uB2E4." }),
-        done
-      ])
-    ]);
-    const close = modal(title, body, { cls: "focusmodal", sticky: true });
-    done.addEventListener("click", close);
-    setTimeout(() => {
-      big.focus();
-      try {
-        big.setSelectionRange(source.selectionStart, source.selectionEnd);
-      } catch {
-      }
-    }, 0);
-  }
-  function focusButton(source, title, opts = {}) {
-    const b = el("button", { class: "ghost tiny focusbtn", text: "\u2922 \uC9D1\uC911 \uD3B8\uC9D1", title: "\uD654\uBA74 \uC804\uCCB4\uB85C \uD06C\uAC8C \uD3B8\uC9D1\uD569\uB2C8\uB2E4" });
-    b.addEventListener("click", () => focusEdit(source, title, opts));
-    return b;
-  }
-  function lineDiff(before, after) {
-    const a = before.split("\n");
-    const b = after.split("\n");
-    let head = 0;
-    while (head < a.length && head < b.length && a[head] === b[head]) head++;
-    let tail = 0;
-    while (tail < a.length - head && tail < b.length - head && a[a.length - 1 - tail] === b[b.length - 1 - tail]) tail++;
-    const out = [];
-    for (let i = 0; i < head; i++) out.push({ kind: "same", text: a[i] });
-    const am = a.slice(head, a.length - tail);
-    const bm = b.slice(head, b.length - tail);
-    if (am.length && bm.length && am.length * bm.length <= 4e6) {
-      const n = am.length, m = bm.length;
-      const dp = [];
-      for (let i2 = 0; i2 <= n; i2++) dp.push(new Uint32Array(m + 1));
-      for (let i2 = n - 1; i2 >= 0; i2--) {
-        for (let j2 = m - 1; j2 >= 0; j2--) {
-          dp[i2][j2] = am[i2] === bm[j2] ? dp[i2 + 1][j2 + 1] + 1 : Math.max(dp[i2 + 1][j2], dp[i2][j2 + 1]);
-        }
-      }
-      let i = 0, j = 0;
-      while (i < n && j < m) {
-        if (am[i] === bm[j]) {
-          out.push({ kind: "same", text: am[i] });
-          i++;
-          j++;
-        } else if (dp[i + 1][j] >= dp[i][j + 1]) {
-          out.push({ kind: "del", text: am[i] });
-          i++;
-        } else {
-          out.push({ kind: "ins", text: bm[j] });
-          j++;
-        }
-      }
-      while (i < n) out.push({ kind: "del", text: am[i++] });
-      while (j < m) out.push({ kind: "ins", text: bm[j++] });
-    } else {
-      for (const t of am) out.push({ kind: "del", text: t });
-      for (const t of bm) out.push({ kind: "ins", text: t });
-    }
-    for (let i = a.length - tail; i < a.length; i++) out.push({ kind: "same", text: a[i] });
-    return out;
-  }
-  function diffView(before, after, opts = {}) {
-    const lines = lineDiff(before, after);
-    const ctx = opts.context ?? 2;
-    const dels = lines.filter((l) => l.kind === "del").length;
-    const ins = lines.filter((l) => l.kind === "ins").length;
-    const root = el("div", { class: "diffview" + (opts.code ? " code" : "") });
-    root.appendChild(el("div", { class: "diffsum" }, [
-      el("span", { class: "diff-ins-n", text: `+${ins}` }),
-      el("span", { class: "diff-del-n", text: `\u2212${dels}` }),
-      el("span", { class: "hint", text: dels || ins ? " \uC904 (\uAE30\uC900\uC120 \u2192 \uC9C0\uAE08)" : " \uC904 \u2014 \uB0B4\uC6A9\uC774 \uAC19\uC2B5\uB2C8\uB2E4" })
-    ]));
-    const show = new Array(lines.length).fill(false);
-    lines.forEach((l, i) => {
-      if (l.kind === "same") return;
-      for (let k = Math.max(0, i - ctx); k <= Math.min(lines.length - 1, i + ctx); k++) show[k] = true;
-    });
-    let hidden = 0;
-    const flush = () => {
-      if (hidden) root.appendChild(el("div", { class: "diffskip", text: `\u2026 ${hidden}\uC904 \uAC19\uC74C \u2026` }));
-      hidden = 0;
-    };
-    lines.forEach((l, i) => {
-      if (!show[i]) {
-        hidden++;
-        return;
-      }
-      flush();
-      root.appendChild(el("div", { class: "diffline " + l.kind }, [
-        el("span", { class: "diffmark", text: l.kind === "del" ? "\u2212" : l.kind === "ins" ? "+" : " " }),
-        el("span", { class: "difftext", text: l.text || " " })
-      ]));
-    });
-    flush();
-    return root;
-  }
-  function diffCard(before, after, opts = {}) {
-    if (before === null || before === after) return null;
-    const lines = lineDiff(before, after);
-    const n = lines.filter((l) => l.kind !== "same").length;
-    const body = el("div", { class: "diffbody", style: { display: opts.open ? "" : "none" } });
-    const toggle = el("button", { class: "ghost tiny", text: opts.open ? "\uBCC0\uACBD \uB0B4\uC6A9 \uC811\uAE30" : `\uBCC0\uACBD \uB0B4\uC6A9 \uBCF4\uAE30 (${n}\uC904)` });
-    toggle.addEventListener("click", () => {
-      const open4 = body.style.display === "none";
-      if (open4 && !body.childElementCount) body.appendChild(diffView(before, after, { code: opts.code }));
-      body.style.display = open4 ? "" : "none";
-      toggle.textContent = open4 ? "\uBCC0\uACBD \uB0B4\uC6A9 \uC811\uAE30" : `\uBCC0\uACBD \uB0B4\uC6A9 \uBCF4\uAE30 (${n}\uC904)`;
-    });
-    if (opts.open) body.appendChild(diffView(before, after, { code: opts.code }));
-    return el("div", { class: "diffcard" }, [
-      el("div", { class: "row" }, [
-        el("span", { class: "hint grow", text: `\uAE30\uC900\uC120\uACFC \uB2E4\uB985\uB2C8\uB2E4 (${before.length}\uC790 \u2192 ${after.length}\uC790).` }),
-        toggle
-      ]),
-      body
-    ]);
-  }
-  function popover(anchor, content) {
-    const pop = el("div", { class: "popover" }, [content]);
-    document.body.appendChild(pop);
-    const rect = anchor.getBoundingClientRect();
-    const vw = window.innerWidth || 1024;
-    const vh = window.innerHeight || 768;
-    pop.style.maxWidth = Math.max(200, vw - 16) + "px";
-    const pw = pop.offsetWidth || 300;
-    const ph = pop.offsetHeight || 200;
-    const left = Math.max(8, Math.min(rect.left, vw - pw - 8));
-    const below = rect.bottom + 4;
-    const top = below + ph > vh - 8 ? Math.max(8, rect.top - ph - 4) : below;
-    pop.style.left = left + "px";
-    pop.style.top = top + "px";
-    const close = () => {
-      pop.remove();
-      document.removeEventListener("click", away, true);
-      document.removeEventListener("keydown", esc, true);
-    };
-    const away = (e) => {
-      const t = e.target;
-      if (!pop.contains(t) && !anchor.contains(t)) close();
-    };
-    const esc = (e) => {
-      if (e.key === "Escape") close();
-    };
-    setTimeout(() => {
-      document.addEventListener("click", away, true);
-      document.addEventListener("keydown", esc, true);
-    }, 0);
-    return close;
-  }
-
-  // src/assets.ts
-  function extractAssetRefs(char) {
-    const out = [];
-    const seen = /* @__PURE__ */ new Set();
-    const push = (field, name, key) => {
-      if (typeof key !== "string" || !key.startsWith("assets/")) return;
-      if (seen.has(key)) return;
-      seen.add(key);
-      out.push({ field, name, key });
-    };
-    push("image", "\uD504\uB85C\uD544", char.image);
-    for (const e of asArray(char["emotionImages"])) {
-      if (Array.isArray(e)) push("emotion", String(e[0] ?? ""), e[1]);
-    }
-    for (const a of asArray(char["additionalAssets"])) {
-      if (Array.isArray(a)) push("additional", String(a[0] ?? ""), a[1]);
-    }
-    for (const c of asArray(char["ccAssets"])) {
-      if (c && typeof c === "object") {
-        const cc = c;
-        push("cc", String(cc.name ?? ""), cc.uri);
-      }
-    }
-    const vits = char["vits"];
-    if (vits && vits.files && typeof vits.files === "object") {
-      for (const [k, v] of Object.entries(vits.files)) push("vits", k, v);
-    }
-    return out;
-  }
-  function asArray(v) {
-    return Array.isArray(v) ? v : [];
-  }
-  function b64encode(bytes) {
-    let bin = "";
-    const CHUNK = 32768;
-    for (let i = 0; i < bytes.length; i += CHUNK) {
-      const part = bytes.subarray(i, i + CHUNK);
-      bin += String.fromCharCode.apply(null, part);
-    }
-    return btoa(bin);
-  }
-  var BATCH_BYTES = 8 * 1024 * 1024;
-  var BATCH_ITEMS = 50;
-  function syncAssets(char, charKey, opts, onProgress) {
-    let cancelled = false;
-    const p = {
-      charKey,
-      phase: "manifest",
-      total: 0,
-      present: 0,
-      missing: 0,
-      failed: 0,
-      bytes: 0,
-      read: 0,
-      readFailed: 0,
-      sent: 0,
-      sentBytes: 0,
-      toPush: 0,
-      fastFilled: 0,
-      pull: null,
-      complete: false,
-      error: "",
-      startedAt: Date.now(),
-      finishedAt: 0
-    };
-    const report = () => {
-      try {
-        onProgress(p);
-      } catch {
-      }
-    };
-    const absorb = (r) => {
-      p.total = r.total;
-      p.present = r.present;
-      p.missing = Array.isArray(r.missing) ? r.missing.length : r.missing;
-      p.failed = r.failed;
-      p.bytes = r.bytes;
-      p.pull = r.pull ?? null;
-      p.complete = !!r.complete;
-    };
-    const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
-    const done = (async () => {
-      try {
-        const refs = extractAssetRefs(char);
-        p.total = refs.length;
-        report();
-        let m = await transport.upload("/assets/manifest", {
-          charKey,
-          refs,
-          hubPull: opts.hubPull
-        });
-        absorb(m);
-        p.fastFilled = m.fastFilled ?? 0;
-        report();
-        if (m.pulling) {
-          p.phase = "pulling";
-          report();
-          while (!cancelled) {
-            await sleep(opts.pollMs ?? 1500);
-            const s2 = await transport.get("/assets/status", { charKey });
-            absorb(s2);
-            report();
-            if (!s2.pulling) break;
-          }
-          if (cancelled) return finish("cancelled");
-          m = await transport.upload("/assets/manifest", { charKey, refs, hubPull: false });
-          absorb(m);
-          report();
-        }
-        const missing = Array.isArray(m.missing) ? m.missing : [];
-        p.toPush = missing.length;
-        if (missing.length) {
-          p.phase = "pushing";
-          report();
-          await push(missing);
-          if (cancelled) return finish("cancelled");
-        }
-        const s = await transport.get("/assets/status", { charKey });
-        absorb(s);
-        return finish("done");
-      } catch (e) {
-        if (e instanceof BackendError && e.status === 404) {
-          return finish("unsupported", "\uBC31\uC5D4\uB4DC\uC5D0 \uC5D0\uC14B \uC2A4\uD1A0\uC5B4\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4 (\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8\uD574 \uC8FC\uC138\uC694)");
-        }
-        return finish("error", e instanceof Error ? e.message : String(e));
-      }
-    })();
-    function finish(phase, error = "") {
-      p.phase = phase;
-      p.error = error;
-      p.finishedAt = Date.now();
-      if (phase === "unsupported") p.complete = true;
-      report();
-      return p;
-    }
-    async function push(keys) {
-      const failed = [];
-      let batch = [];
-      let batchBytes = 0;
-      let uploading = Promise.resolve();
-      let inTransit = 0;
-      const flush = () => {
-        if (!batch.length) return;
-        const items5 = batch;
-        const bytes = batchBytes;
-        batch = [];
-        batchBytes = 0;
-        inTransit += 1;
-        uploading = uploading.then(async () => {
-          try {
-            const r = await transport.upload(
-              "/assets/upload",
-              { charKey, items: items5 }
-            );
-            p.sent += r.stored;
-            p.sentBytes += bytes;
-            for (const b of r.bad ?? []) failed.push(b.key);
-          } finally {
-            inTransit -= 1;
-          }
-          report();
-        });
-      };
-      let next = 0;
-      const worker = async () => {
-        while (!cancelled) {
-          const i = next++;
-          if (i >= keys.length) return;
-          const key = keys[i];
-          let bytes = null;
-          try {
-            const raw = await Risuai.readImage(key);
-            if (raw && raw.byteLength) {
-              bytes = raw instanceof Uint8Array ? raw : new Uint8Array(raw);
-            }
-          } catch {
-          }
-          if (!bytes) {
-            failed.push(key);
-            p.readFailed += 1;
-            report();
-            continue;
-          }
-          p.read += 1;
-          batch.push({ key, data: b64encode(bytes) });
-          batchBytes += bytes.byteLength;
-          if (batchBytes >= BATCH_BYTES || batch.length >= BATCH_ITEMS) flush();
-          report();
-          if (inTransit >= 2) await uploading;
-        }
-      };
-      const n = Math.max(1, Math.min(8, opts.concurrency));
-      await Promise.all(Array.from({ length: n }, () => worker()));
-      if (!cancelled) flush();
-      await uploading;
-      if (failed.length && !cancelled) {
-        try {
-          await transport.post("/assets/fail", {
-            charKey,
-            keys: failed,
-            reason: "readImage returned nothing"
-          });
-        } catch {
-        }
-      }
-    }
-    return { cancel: () => {
-      cancelled = true;
-    }, done };
-  }
-  function describeSync(p) {
-    if (!p) return "";
-    const mb2 = (n) => (n / 1048576).toFixed(1) + "MB";
-    switch (p.phase) {
-      case "manifest":
-        return `\uC5D0\uC14B \uBAA9\uB85D \uB300\uC870 \uC911 \xB7 ${p.total}\uAC1C`;
-      case "pulling": {
-        const d = p.pull;
-        return d ? `\uBC31\uC5D4\uB4DC\uAC00 \uD5C8\uBE0C\uC5D0\uC11C \uBC1B\uB294 \uC911 ${d.done}/${d.total}` + (d.notFound ? ` \xB7 \uC5C6\uC74C ${d.notFound}` : "") : "\uBC31\uC5D4\uB4DC\uAC00 \uD5C8\uBE0C\uC5D0\uC11C \uBC1B\uB294 \uC911";
-      }
-      case "pushing":
-        return `\uC5D0\uC14B \uC784\uD3EC\uD2B8 \uC911 ${p.read + p.readFailed}/${p.toPush} \xB7 \uC804\uC1A1 ${mb2(p.sentBytes)}`;
-      case "done": {
-        if (!p.total) return "\uCC38\uC870\uD558\uB294 \uC5D0\uC14B \uC5C6\uC74C";
-        const src = [];
-        if (p.fastFilled) src.push(`\uAC19\uC740 PC \uC758 PocketRisu DB ${p.fastFilled}`);
-        if (p.pull && p.pull.ok) src.push(`\uD5C8\uBE0C ${p.pull.ok}`);
-        if (p.sent) src.push(`\uC774 \uBE0C\uB77C\uC6B0\uC800 ${p.sent}`);
-        return `\uC5D0\uC14B ${p.present}/${p.total}\uAC1C \xB7 ${mb2(p.bytes)}` + (src.length ? ` \xB7 \uC774\uBC88\uC5D0 ${src.join(", ")}` : " \xB7 \uC774\uBBF8 \uC788\uC5C8\uC74C") + (p.failed ? ` \xB7 \uC77D\uAE30 \uC2E4\uD328 ${p.failed}` : "");
-      }
-      case "cancelled":
-        return `\uC5D0\uC14B \uC784\uD3EC\uD2B8 \uC911\uB2E8\uB428 (${p.present}/${p.total})`;
-      case "unsupported":
-        return p.error;
-      case "error":
-        return "\uC5D0\uC14B \uC784\uD3EC\uD2B8 \uC2E4\uD328: " + p.error;
-    }
-    return "";
-  }
-  function syncBusy(p) {
-    return !!p && (p.phase === "manifest" || p.phase === "pulling" || p.phase === "pushing");
-  }
-
-  // src/ui/styles.ts
-  var CSS = `
-:host, * { box-sizing: border-box; }
-body {
-  margin: 0;
-  font: 13px/1.6 -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Malgun Gothic', sans-serif;
-  background: var(--bgcolor, #12141a);
-  color: var(--textcolor, #d8dce4);
-}
-button, input, textarea, select { font: inherit; color: inherit; }
-button {
-  padding: 6px 12px; border-radius: 6px; cursor: pointer;
-  border: 1px solid var(--borderc, #2b323f);
-  background: var(--darkbutton, #1b202a);
-  /* A label never breaks mid-word ("\uC9C4\uB2E8 \uC815/\uBCF4"): the row wraps instead. */
-  white-space: nowrap; flex-shrink: 0;
-}
-button:hover:not(:disabled) { filter: brightness(1.25); }
-button:disabled { opacity: .45; cursor: default; }
-button.primary { background: #2563eb; border-color: #2563eb; color: #fff; }
-button.danger { background: #b91c1c; border-color: #b91c1c; color: #fff; }
-button.ghost { background: transparent; }
-input, textarea, select {
-  background: var(--darkbg, #171b23);
-  border: 1px solid var(--borderc, #2b323f);
-  border-radius: 5px; padding: 6px 9px; width: 100%;
-}
-textarea { resize: vertical; line-height: 1.6; }
-a { color: #7dd3fc; }
-code { font-family: Consolas, monospace; font-size: 12px; }
-
-/* Scrollbars: a light translucent thumb with no rail drawn across the panel.
-   Firefox takes the standard property, Chromium the webkit one. */
-* { scrollbar-width: thin; scrollbar-color: rgba(190, 200, 215, .28) transparent; }
-::-webkit-scrollbar { width: 9px; height: 9px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb {
-  background: rgba(190, 200, 215, .22); border-radius: 6px;
-  border: 2px solid transparent; background-clip: content-box;
-}
-::-webkit-scrollbar-thumb:hover { background: rgba(190, 200, 215, .42); background-clip: content-box; }
-::-webkit-scrollbar-corner { background: transparent; }
-
-.wrap { display: flex; flex-direction: column; height: 100vh; }
-header {
-  display: flex; align-items: center; gap: 8px; padding: 8px 14px;
-  border-bottom: 1px solid var(--borderc, #2b323f); flex-shrink: 0;
-}
-header h1 { margin: 0; font-size: 14px; font-weight: 700; display: flex; align-items: center; gap: 7px; }
-.spacer { flex: 1; }
-.dim { color: var(--textcolor2, #79839a); font-size: 12px; font-weight: 400; }
-
-/* Backend health, inline in the title row. It is one dot and a version - it
-   never justified a full row of its own above a panel whose job is showing a
-   long transcript. */
-.status {
-  display: flex; align-items: center; gap: 6px; min-width: 0;
-  font-size: 12px; padding: 2px 8px; border-radius: 20px;
-  background: rgba(16, 185, 129, .10);
-}
-.status.bad { background: rgba(239, 68, 68, .14); }
-.status.warn { background: rgba(245, 158, 11, .13); }
-.status .chatname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.healthdot { width: 7px; height: 7px; border-radius: 50%; background: #10b981; flex-shrink: 0; }
-.status.bad .healthdot { background: #ef4444; }
-.status.warn .healthdot { background: #f59e0b; }
-
-/* The active tab's tool row, full width under the tabs. */
-.toolslot {
-  flex-shrink: 0; display: flex; align-items: center; flex-wrap: wrap;
-  border-bottom: 1px solid var(--borderc, #2b323f);
-}
-.toolslot .toolrow { border-bottom: none; }
-.toolslot .chatbar { flex: 0 0 auto; padding-right: 4px; }
-.toolslot .chatbar + .tabslot:not([style*="none"])::before {
-  content: ''; display: inline-block; width: 1px; height: 18px;
-  background: var(--borderc, #2b323f); margin: 0 4px; vertical-align: middle;
-}
-.toolslot .tabslot { flex: 1 1 auto; display: flex; align-items: center; min-width: 0; }
-.toolslot .tabslot > .toolrow { flex: 1 1 auto; }
-.chatbar .changesum { font-size: 11px; margin-left: 4px; white-space: nowrap; }
-.chatbar .applybadge { margin-left: 2px; }
-.shellnotice:empty { display: none; }
-.tab .tabbadge { margin-left: 5px; font-size: 10px; padding: 0 5px; }
-.tchip.skill { background: rgba(37,99,235,.16); border-color: rgba(37,99,235,.35); }
-.skillfiles .pickrow { padding: 3px 6px; font-size: 12px; }
-.hint.dim { opacity: .7; }
-.tabsep { width: 1px; align-self: stretch; margin: 6px 6px; background: var(--borderc, #2b323f); }
-.vartable { display: flex; flex-direction: column; gap: 4px; }
-.varrow {
-  display: grid; grid-template-columns: minmax(90px, 1.2fr) 60px minmax(120px, 2fr) auto;
-  gap: 8px; align-items: center; padding: 4px 6px; border-radius: 5px;
-}
-.varrow.changed { background: rgba(245,158,11,.08); }
-.varrow:hover { background: rgba(128,128,128,.08); }
-.varkey { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
-.vartype { font-size: 11px; }
-.varvalue input { width: 100%; }
-.varops { display: flex; gap: 4px; align-items: center; }
-.varadd input { flex: 1; min-width: 90px; }
-@media (max-width: 720px) {
-  .varrow { grid-template-columns: 1fr 1fr; }
-  .varrow .varvalue { grid-column: 1 / -1; }
-  .varrow .varops { grid-column: 1 / -1; justify-content: flex-end; }
-}
-button.outline {
-  display: flex; align-items: center; gap: 6px; width: 100%; text-align: left;
-  margin: 4px 0; padding: 6px 8px; font-size: 12px;
-  background: rgba(37,99,235,.10); border-color: rgba(37,99,235,.25);
-}
-button.outline:hover { background: rgba(37,99,235,.18); }
-.shellnotice .notice { margin: 6px 10px 0; }
-.applypop .row { margin-top: 6px; }
-.applypop .row button { width: 100%; }
-
-/* Eleven tabs now; on a narrow panel the bar scrolls rather than wrapping. */
-.tabs { display: flex; gap: 2px; padding: 0 10px; border-bottom: 1px solid var(--borderc, #2b323f); flex-shrink: 0; overflow-x: auto; overflow-y: hidden; }
-.tabs .tab { white-space: nowrap; }
-
-/* Regex patterns, HTML payloads, trigger JSON - text where columns matter. */
-.codearea { font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace; font-size: 12px; }
-
-/* The apply verb when a gate (bot not selected, assets importing) blocks it. */
-.tool.dimmed { opacity: 0.45; }
-
-/* The shared list filter, and the list rows that carry reorder buttons. */
-.searchbox { padding: 4px 8px; }
-.searchbox input { width: 100%; }
-.treerow.lorecard {
-  border: 1px solid var(--borderc, #2b323f); border-radius: 6px;
-  padding: 3px 6px 3px 3px; margin: 3px 6px;
-}
-.movebtn { padding: 1px 6px; min-width: 0; }
-/* Trigger mode switch, drawn like RisuAI's own V2 / Lua buttons. */
-.modebtn { padding: 3px 10px; font-size: 12px; border: 1px solid transparent; }
-.modebtn.on { border-color: #2563eb; color: var(--textcolor, #d8dce4); font-weight: 700; }
-.tab {
-  padding: 8px 16px; border: none; background: none; border-radius: 0;
-  color: var(--textcolor2, #79839a); border-bottom: 2px solid transparent; margin-bottom: -1px;
-}
-.tab.active { color: var(--textcolor, #d8dce4); border-bottom-color: #2563eb; font-weight: 700; }
-/* The asset importer's progress at the end of the tab row. */
-.syncbadge {
-  margin-left: auto; align-self: center; padding: 2px 8px; border-radius: 4px; font-size: 11px;
-  color: var(--textcolor2, #79839a); border: 1px solid var(--borderc, #2b323f); white-space: nowrap;
-}
-.syncbadge.busy { color: #f59e0b; border-color: rgba(245,158,11,.5); }
-.syncbadge.err { color: #ef4444; border-color: rgba(239,68,68,.5); }
-
-main { flex: 1; min-height: 0; display: flex; }
-.panel { display: none; flex: 1; min-height: 0; }
-.panel.active { display: flex; }
-.pad { padding: 14px; overflow-y: auto; flex: 1; }
-
-/* Flat sections rather than accented rounded cards. A coloured left rail on
-   every block turns the panel into stripes and communicates nothing, because
-   everything has one; emphasis is kept for blocks that need it. */
-.card {
-  border: 1px solid var(--borderc, #2b323f); border-radius: 6px;
-  padding: 11px; margin-bottom: 10px; background: transparent;
-}
-.card h2 {
-  margin: 0 0 9px; font-size: 11px; font-weight: 700; letter-spacing: .04em;
-  text-transform: uppercase; color: var(--textcolor2, #79839a);
-}
-.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-/* A result box under a button row: spaced from the row only when it has something. */
-.outbox:not(:empty) { margin-top: 10px; }
-.card > .notice, .card > div > .notice { margin-top: 8px; }
-.row + .row { margin-top: 8px; }
-.grow { flex: 1; min-width: 0; }
-label.field { display: block; margin-bottom: 10px; }
-label.field > span { display: block; margin-bottom: 4px; color: var(--textcolor2, #79839a); font-size: 12px; }
-
-.notice {
-  padding: 8px 10px; border-radius: 5px; margin-bottom: 10px; font-size: 12px;
-  background: rgba(245, 158, 11, .10);
-}
-.notice.err { background: rgba(239, 68, 68, .12); }
-.notice.ok { background: rgba(16, 185, 129, .12); }
-
-/* The lorebook entry's insertorder, beside its name. */
-.ordertag {
-  flex-shrink: 0; padding: 0 5px; border-radius: 3px; font-size: 10.5px;
-  font-family: Consolas, monospace; font-variant-numeric: tabular-nums;
-  background: rgba(128,128,128,.14);
-}
-.badge {
-  display: inline-block; padding: 1px 7px; border-radius: 4px; font-size: 11px;
-  border: 1px solid var(--borderc, #2b323f);
-}
-.badge.ok { color: #10b981; border-color: rgba(16,185,129,.5); }
-.badge.warn { color: #f59e0b; border-color: rgba(245,158,11,.5); }
-.badge.err { color: #ef4444; border-color: rgba(239,68,68,.5); }
-
-.empty { padding: 36px 20px; text-align: center; color: var(--textcolor2, #79839a); }
-pre.mono {
-  font-family: Consolas, monospace; font-size: 11px; white-space: pre-wrap;
-  word-break: break-all; max-height: 200px; overflow: auto;
-  background: rgba(128,128,128,.08); border-radius: 5px; padding: 8px; margin: 6px 0 0;
-}
-.hint { color: var(--textcolor2, #79839a); font-size: 12px; }
-.sectionline { height: 1px; background: var(--borderc, #2b323f); margin: 16px 0 12px; }
-.sectiontitle {
-  font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
-  color: var(--textcolor2, #79839a); margin-bottom: 8px;
-}
-
-/* --- chat selection ------------------------------------------------------ */
-
-.botcard { display: flex; gap: 12px; align-items: flex-start; }
-.botportrait, .botinitials {
-  width: 72px; height: 72px; border-radius: 8px; flex-shrink: 0;
-  background: rgba(128,128,128,.12);
-}
-.botportrait { object-fit: cover; }
-.botinitials {
-  display: flex; align-items: center; justify-content: center;
-  font-size: 24px; font-weight: 700; color: var(--textcolor2, #79839a);
-}
-.botname { font-size: 15px; font-weight: 700; }
-/* The background asset importer, under the bot's name on the picker. */
-.assetsync { margin-top: 4px; }
-/* The assets tab: a grid of thumbnails with the name under each, like RisuAI's. */
-.assetgrid {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 10px; margin-bottom: 14px;
-}
-.assetcell {
-  border: 1px solid var(--borderc, #2b323f); border-radius: 6px; padding: 6px; min-width: 0;
-  display: flex; flex-direction: column; gap: 4px;
-}
-.assetcell.changed { border-color: rgba(245,158,11,.6); }
-.assetcell.failed { border-color: rgba(239,68,68,.5); }
-.assetpic {
-  aspect-ratio: 1 / 1; border-radius: 4px; overflow: hidden; display: flex; align-items: center;
-  justify-content: center; background: rgba(128,128,128,.08);
-}
-.assetpic img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.assetname {
-  font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.assetname.editable { cursor: text; }
-.assetname.editable:hover { text-decoration: underline dotted; }
-.assetrename { width: 100%; font-size: 12px; padding: 2px 4px; }
-.assetmeta { display: flex; align-items: center; gap: 4px; font-size: 10px; color: var(--textcolor2, #79839a); }
-.assetmeta .tiny { margin-left: auto; padding: 0 5px; }
-.assettype {
-  display: inline-block; padding: 14px 18px; border-radius: 6px; font-size: 12px;
-  color: var(--textcolor2, #79839a); background: rgba(128,128,128,.10);
-}
-/* The chevron that opens a preset list; the settings sections in the tab row. */
-.chev { font-size: 20px; line-height: 1; padding: 2px 12px; }
-.tabs .subtabs { display: flex; gap: 2px; align-items: center; }
-.tabs .subtabs .subtab { padding: 8px 14px; }
-.steps { margin: 6px 0 0 18px; padding: 0; }
-.steps li { margin: 2px 0; }
-.thinking .stopbtn { margin-left: 8px; }
-/* A shell / pip request waiting on the user, inside the assistant bubble. */
-.permit {
-  border: 1px solid rgba(245,158,11,.6); border-radius: 6px; padding: 8px 10px; margin: 6px 0;
-  background: rgba(245,158,11,.07);
-}
-.permit.allowed { border-color: rgba(16,185,129,.5); background: rgba(16,185,129,.06); }
-.permit.denied { border-color: rgba(239,68,68,.5); background: rgba(239,68,68,.06); }
-.permit-title { font-weight: 700; font-size: 12px; margin-bottom: 4px; }
-.permit pre.mono { max-height: 140px; }
-.settingsclose { margin-left: auto; }
-.snaplist .verrow { padding: 4px 0; }
-/* Folders in the files tree: a label row, files indented under it. */
-.folderrow .folderlabel { cursor: default; color: var(--textcolor2, #79839a); }
-.folderkids { margin-left: 14px; border-left: 1px solid rgba(128,128,128,.18); padding-left: 4px; }
-/* API key form rows and the model catalog picker. */
-.keyform { border: 1px dashed var(--borderc, #2b323f); border-radius: 6px; padding: 8px; margin: 6px 0; }
-.keyform .row input { flex: 1; min-width: 120px; }
-.catalogpop { width: min(520px, calc(100vw - 32px)); max-width: none; box-sizing: border-box; }
-.catalogpop input { width: 100%; min-width: 0; box-sizing: border-box; }
-.catalogpop .row { min-width: 0; }
-.cataloglist { max-height: 320px; overflow-y: auto; margin-top: 6px; }
-.catrow {
-  display: flex; gap: 8px; width: 100%; text-align: left; padding: 5px 6px; border: none;
-  background: transparent; border-radius: 4px; font-size: 12px;
-}
-.catrow:hover { background: rgba(128,128,128,.12); }
-.assetline { gap: 8px; }
-.assetline.err .hint { color: #ef4444; }
-.assetline.warn .hint { color: #f59e0b; }
-.assetbar {
-  height: 3px; margin-top: 4px; border-radius: 2px; overflow: hidden;
-  background: rgba(128,128,128,.18); max-width: 360px;
-}
-.assetfill { height: 100%; width: 0; background: #2563eb; transition: width .3s; }
-.assetbar.indeterminate .assetfill {
-  width: 30%; animation: assetslide 1.2s ease-in-out infinite alternate;
-}
-@keyframes assetslide { from { margin-left: 0; } to { margin-left: 70%; } }
-
-.folder { margin-bottom: 4px; }
-.folderhead {
-  display: flex; align-items: center; gap: 7px; width: 100%; text-align: left;
-  padding: 6px 8px; border: none; background: transparent; border-radius: 5px;
-  color: var(--textcolor2, #79839a); font-size: 12px;
-}
-.folderhead:hover { background: rgba(128,128,128,.10); }
-.folderdot { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; background: #79839a; }
-.folderbody { display: none; padding-left: 10px; }
-.folderbody.open { display: block; }
-/* On a desktop-width panel a borderless full-width row reads as prose, not a
-   list: cap the width and rule every row so the chats read as chats. */
-.chatlist, .folder {
-  display: flex; flex-direction: column; max-width: 640px;
-  border: 1px solid var(--borderc, #2b323f); border-radius: 6px; overflow: hidden;
-}
-.folder { display: block; margin-bottom: 6px; }
-.chatlist { margin-bottom: 6px; }
-.chatitem {
-  display: flex; align-items: center; gap: 9px; padding: 8px 10px; cursor: pointer;
-  border-bottom: 1px solid var(--borderc, #2b323f);
-}
-.chatlist .chatitem:last-child, .folderbody .chatitem:last-child { border-bottom: none; }
-.chatitem:hover { background: rgba(128,128,128,.10); }
-.chatitem.presetnow, .chatitem.current { background: rgba(37,99,235,.10); }
-.chatitem .n { color: var(--textcolor2, #79839a); font-size: 11px; min-width: 40px; text-align: right; }
-
-/* --- editor: explorer | turns | tools ------------------------------------ */
-
-.split { display: flex; flex: 1; min-height: 0; width: 100%; }
-/* Phone-only view switch (panes.ts); the mobile block below shows it. */
-.mbar { display: none; }
-
-/* A folded section inside a card: a summary line, the rest on demand. */
-details.fold > summary {
-  cursor: pointer; font-size: 12.5px; color: var(--textcolor2, #79839a); padding: 6px 8px;
-  border: 1px dashed var(--borderc, #2b323f); border-radius: 6px; list-style: none;
-}
-details.fold > summary::before { content: '\u25B8 '; }
-details.fold[open] > summary::before { content: '\u25BE '; }
-details.fold[open] > summary { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
-details.fold > .foldbody {
-  padding: 10px 10px 6px; border: 1px dashed var(--borderc, #2b323f); border-top: none;
-  border-radius: 0 0 6px 6px;
-}
-.explorer {
-  width: 118px; flex-shrink: 0; overflow-y: auto; padding: 6px 4px;
-  border-right: 1px solid var(--borderc, #2b323f);
-}
-.expgroup {
-  display: block; width: 100%; text-align: left; padding: 5px 8px; margin-bottom: 2px;
-  border: none; background: transparent; border-radius: 5px; font-size: 12px;
-  color: var(--textcolor2, #79839a); font-variant-numeric: tabular-nums;
-}
-.expgroup:hover { background: rgba(128,128,128,.12); }
-.expgroup.on { background: rgba(37,99,235,.18); color: var(--textcolor, #d8dce4); }
-.expmark { font-size: 10px; margin-left: 5px; }
-
-.left {
-  flex: 1; min-width: 260px; display: flex; flex-direction: column; position: relative;
-  /* Lifted off the surrounding panels: the transcript is the subject, the
-     explorer and tools are chrome around it. */
-  background: rgba(255, 255, 255, .035);
-}
-/* The agent takes half the width by default: the conversation is where the
-   work happens and 380px wrapped every sentence of it. */
-.right { flex: 0 0 50%; min-width: 250px; display: flex; flex-direction: column; }
-/* touch-action: none is what makes the drag work on a phone - without it the
-   browser claims the touch for scrolling and fires pointercancel at once. */
-.gutter { flex: 0 0 5px; cursor: col-resize; background: var(--borderc, #2b323f); opacity: .45; touch-action: none; }
-.gutter.leftside { flex-basis: 4px; }
-.gutter:hover, .gutter.dragging { opacity: 1; background: #2563eb; }
-
-.toolrow {
-  display: flex; align-items: center; gap: 3px; padding: 6px 8px; flex-wrap: wrap;
-  border-bottom: 1px solid var(--borderc, #2b323f); flex-shrink: 0;
-}
-.toolrow .sep { width: 1px; height: 18px; background: var(--borderc, #2b323f); margin: 0 4px; }
-button.tool {
-  display: flex; align-items: center; gap: 5px; padding: 4px 8px;
-  background: transparent; border-color: transparent;
-}
-button.tool:hover:not(:disabled) { background: rgba(128,128,128,.12); }
-button.tool.on { background: rgba(37,99,235,.18); }
-button.tool .glyph { font-size: 14px; line-height: 1; }
-button.tool .tool-label { font-size: 12px; }
-button.iconbtn { padding: 4px 8px; background: transparent; border-color: transparent; font-size: 14px; }
-button.iconbtn:hover:not(:disabled) { background: rgba(128,128,128,.14); }
-
-.scroller { flex: 1; overflow-y: auto; position: relative; }
-.spacerTop, .spacerBottom { width: 100%; }
-
-.turn { padding: 8px 12px; border-bottom: 1px solid rgba(128,128,128,.10); }
-.turn.changed { background: rgba(37, 99, 235, .06); }
-.turn.isnew { background: rgba(16, 185, 129, .06); }
-.turn.preview { background: rgba(245, 158, 11, .07); }
-.turn.doomed { background: rgba(239, 68, 68, .09); opacity: .7; }
-.turn.doomed .turn-body { text-decoration: line-through; }
-.turn-head {
-  display: flex; gap: 8px; align-items: center; color: var(--textcolor2, #79839a);
-  font-size: 11px; margin-bottom: 3px;
-}
-.turn-head .spacer { flex: 1; }
-.turn-no {
-  /* Tabular figures and a fixed min-width so the numbers form a column: a
-     ragged left edge makes a 394-turn list much harder to scan. */
-  min-width: 30px; padding: 1px 5px; border-radius: 4px; text-align: right;
-  font-family: Consolas, monospace; font-variant-numeric: tabular-nums;
-  font-size: 11px; font-weight: 700;
-  background: rgba(128,128,128,.16); color: var(--textcolor, #d7dce6);
-}
-.turn.changed .turn-no { background: rgba(37, 99, 235, .32); }
-.turn.isnew .turn-no { background: rgba(16, 185, 129, .30); }
-.turn.doomed .turn-no { background: rgba(239, 68, 68, .30); }
-.turn-role { font-weight: 700; }
-.turn-role.user { color: #7dd3fc; }
-.turn-role.char { color: #fbbf24; }
-.turn-body { white-space: pre-wrap; word-break: break-word; }
-/* Speech and inner thought, the two the logs actually mark. The card's own
-   regexes do this on the chat screen; the stored text is flat without it. */
-.speech { color: #f0a04b; }
-.thought { color: #7dd3fc; }
-.turn-body.raw { font-family: Consolas, monospace; font-size: 12px; color: var(--textcolor2, #9aa4b8); }
-.turn-body img.turn-img { max-width: 100%; max-height: 320px; border-radius: 5px; margin: 4px 0; }
-.turn textarea { min-height: 90px; }
-.diff-del { background: rgba(239, 68, 68, .22); text-decoration: line-through; }
-.diff-ins { background: rgba(16, 185, 129, .22); }
-.before-label { color: var(--textcolor2, #79839a); font-size: 11px; margin-top: 4px; }
-button.tiny { padding: 1px 7px; font-size: 11px; border-radius: 4px; }
-button.iconbtn.tiny { padding: 2px 4px; display: inline-flex; align-items: center; }
-
-/* The turn editor. Tall on purpose - a turn is often a screen of prose, and
-   the whole reason this left the row is that a few lines were not enough. */
-.turneditwrap { display: flex; flex-direction: column; }
-textarea.turnedit {
-  min-height: 46vh; max-height: 62vh; line-height: 1.7; font-size: 13px;
-  resize: vertical;
-}
-
-.filterbar {
-  display: flex; align-items: center; gap: 8px; flex-shrink: 0;
-  padding: 5px 12px; font-size: 11.5px;
-  background: rgba(245, 158, 11, .12);
-  border-bottom: 1px solid rgba(245, 158, 11, .3);
-  color: var(--textcolor, #d7dce6);
-}
-.filterbar .spacer { flex: 1; }
-.rangerow { display: flex; align-items: center; gap: 6px; margin-bottom: 7px; }
-.rangerow input { width: 74px; text-align: center; }
-
-/* --- files \xB7 presets \xB7 skills --------------------------------------------- */
-.filerow {
-  display: flex; align-items: center; gap: 8px; padding: 3px 0;
-  border-bottom: 1px solid rgba(128,128,128,.08);
-}
-.filerow:last-child { border-bottom: none; }
-button.linkish {
-  flex: 1; min-width: 0; padding: 2px 0; border: none; background: none;
-  text-align: left; color: var(--textcolor, #d7dce6); font-size: 12px;
-  font-family: Consolas, monospace; overflow: hidden; text-overflow: ellipsis;
-  white-space: nowrap; border-radius: 0;
-}
-button.linkish:hover { color: #7dd3fc; text-decoration: underline; }
-.filepreview {
-  max-height: 320px; overflow: auto; white-space: pre-wrap; word-break: break-word;
-  font-size: 11.5px; line-height: 1.5;
-}
-.presetrow, .skillrow {
-  padding: 7px 0; border-bottom: 1px solid rgba(128,128,128,.10);
-  display: flex; align-items: center; gap: 6px;
-}
-.skillrow { display: block; }
-.presetrow:last-child, .skillrow:last-child { border-bottom: none; }
-.presetrow .grow { flex: 1; min-width: 0; }
-.skillbody {
-  margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-/* --- settings sub-tabs ---------------------------------------------------- */
-.settingswrap { display: flex; flex-direction: column; flex: 1; min-height: 0; }
-.subtabs {
-  display: flex; gap: 2px; padding: 0 12px; flex-shrink: 0; flex-wrap: wrap;
-  border-bottom: 1px solid var(--borderc, #2b323f);
-}
-.subtab {
-  padding: 7px 13px; border: none; background: none; border-radius: 0; font-size: 12px;
-  color: var(--textcolor2, #79839a); border-bottom: 2px solid transparent; margin-bottom: -1px;
-}
-.subtab.active { color: var(--textcolor, #d8dce4); border-bottom-color: #2563eb; font-weight: 700; }
-.subpane { display: none; }
-.subpane.active { display: block; }
-
-/* --- tree (files \xB7 lorebook \xB7 memory) ------------------------------------- */
-.tree { display: flex; flex-direction: column; gap: 1px; padding: 4px; min-width: 0; }
-.treehead, .treefoot {
-  display: flex; align-items: center; gap: 5px; flex-wrap: wrap;
-  padding: 5px 4px; border-bottom: 1px solid var(--borderc, #2b323f);
-}
-.treefoot { border-bottom: none; border-top: 1px solid var(--borderc, #2b323f); margin-top: 6px; }
-.treescope {
-  padding: 7px 5px 3px; font-size: 10.5px; font-weight: 700; letter-spacing: .04em;
-  text-transform: uppercase; color: var(--textcolor2, #79839a);
-}
-.treebranch {
-  display: flex; align-items: center; gap: 5px; width: 100%;
-  padding: 4px 6px; border: none; background: transparent; border-radius: 5px;
-  font-size: 12px; color: var(--textcolor, #d8dce4); text-align: left;
-}
-.treebranch:hover { background: rgba(128,128,128,.12); }
-.treekids { padding-left: 9px; }
-.treerow { display: flex; align-items: center; gap: 3px; }
-button.treefile {
-  flex: 1; min-width: 0; padding: 3px 6px; border: none; background: transparent;
-  border-radius: 5px; text-align: left; font-size: 12px;
-  color: var(--textcolor2, #9aa4b8);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-button.treefile:hover { background: rgba(128,128,128,.12); color: var(--textcolor, #d8dce4); }
-button.treefile.on { background: rgba(37, 99, 235, .22); color: var(--textcolor, #d8dce4); }
-
-/* The tree column is wider than the turn explorer: file and entry names are
-   words, not two-digit ranges. */
-.explorer:has(.tree) { width: 210px; }
-
-/* --- modal ---------------------------------------------------------------- */
-.modalback {
-  position: fixed; inset: 0; z-index: 90; display: flex;
-  align-items: center; justify-content: center; padding: 24px;
-  background: rgba(0, 0, 0, .55);
-}
-.modalbox {
-  display: flex; flex-direction: column; width: 100%; max-width: 460px;
-  max-height: 100%; border-radius: 9px;
-  background: var(--bgcolor, #12141a);
-  border: 1px solid var(--borderc, #2b323f);
-  box-shadow: 0 18px 48px rgba(0, 0, 0, .5);
-}
-.modalbox.wide { max-width: 620px; }
-.modalhead {
-  display: flex; align-items: center; gap: 8px; flex-shrink: 0;
-  padding: 11px 14px; border-bottom: 1px solid var(--borderc, #2b323f);
-}
-.modalhead h2 {
-  margin: 0; font-size: 12px; font-weight: 700; letter-spacing: .04em;
-  text-transform: uppercase; color: var(--textcolor2, #79839a);
-}
-.modalbody { padding: 14px; overflow-y: auto; }
-.modalbody .card { border: none; padding: 0; margin-bottom: 0; }
-
-/* One row per preset or skill inside a picker. */
-.pickrow {
-  display: flex; align-items: center; gap: 8px; padding: 8px 4px;
-  border-bottom: 1px solid rgba(128,128,128,.10);
-}
-.pickrow:last-child { border-bottom: none; }
-.pickrow.on { background: rgba(37, 99, 235, .12); border-radius: 5px; }
-/* A disabled skill is still stored - dimmed, not hidden. */
-.pickrow.off .pickname { opacity: .55; }
-.pickrow input[type=checkbox] { width: auto; flex-shrink: 0; }
-.pickrow .grow { flex: 1; min-width: 0; cursor: pointer; }
-.pickname { display: flex; align-items: center; gap: 6px; }
-
-/* The one preset the agent is actually using. */
-.presetnow {
-  display: flex; align-items: center; gap: 10px;
-  padding: 9px 11px; border-radius: 6px; margin-bottom: 9px;
-  background: rgba(37, 99, 235, .10);
-  border: 1px solid rgba(37, 99, 235, .30);
-}
-.presetnow .grow { min-width: 0; }
-.presetnow-name { font-weight: 700; }
-
-.field select {
-  width: 100%; padding: 6px 8px; border-radius: 5px; font-size: 12px;
-  background: var(--bgcolor, #1a1f27); color: var(--textcolor, #d7dce6);
-  border: 1px solid var(--borderc, #2b323f);
-}
-
-/* --- right panel --------------------------------------------------------- */
-
-.right-inner { display: flex; flex-direction: column; flex: 1; min-height: 0; }
-.rtabs { display: flex; gap: 2px; padding: 0 8px; border-bottom: 1px solid var(--borderc, #2b323f); flex-shrink: 0; }
-.rtab {
-  padding: 7px 13px; border: none; background: none; border-radius: 0; font-size: 12px;
-  color: var(--textcolor2, #79839a); border-bottom: 2px solid transparent; margin-bottom: -1px;
-}
-.rtab.active { color: var(--textcolor, #d8dce4); border-bottom-color: #2563eb; font-weight: 700; }
-.rpanel { display: none; min-height: 0; }
-.rpanel.active { display: block; overflow-y: auto; }
-.rpanel.agentwrap.active { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
-
-button.modebtn {
-  display: block; width: 100%; text-align: left; margin-bottom: 5px;
-  background: transparent; border-color: var(--borderc, #2b323f);
-}
-button.modebtn.on { border-color: #2563eb; background: rgba(37, 99, 235, .12); }
-button.modebtn.todo { opacity: .55; }
-label.checkrow { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; font-size: 12px; }
-label.checkrow input { width: auto; }
-
-.popover {
-  position: fixed; z-index: 200; min-width: 280px; max-width: 380px;
-  max-height: 340px; overflow-y: auto; padding: 8px;
-  background: var(--darkbg, #171b23); border: 1px solid var(--borderc, #2b323f);
-  border-radius: 7px; box-shadow: 0 12px 32px rgba(0,0,0,.5);
-}
-.verrow, .sessrow { display: flex; align-items: center; gap: 8px; padding: 6px 4px; }
-.verrow + .verrow, .sessrow + .sessrow { border-top: 1px solid rgba(128,128,128,.12); }
-.sessrow { cursor: pointer; }
-.sessrow:hover { background: rgba(128,128,128,.10); }
-
-/* --- agent ---------------------------------------------------------------
- *
- * The agent column sits on a slightly lifted ground of its own. The three
- * panels were all the same dark, so the boundary between "the transcript" and
- * "the conversation about the transcript" had to be inferred from the content.
- * --darkbg is PocketRisu's own second surface, so this follows the host theme
- * rather than inventing a colour that only suits one of them.
- */
-.agentwrap { flex: 1; min-height: 0; }
-.agentpanel {
-  display: flex; flex-direction: column; height: 100%; padding: 8px 10px; gap: 7px;
-  background: var(--darkbg, rgba(255, 255, 255, .022));
-}
-.right { background: var(--darkbg, rgba(255, 255, 255, .022)); }
-.agenthead { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
-.agentlog { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 9px; }
-.bubble { border-radius: 6px; padding: 7px 10px; }
-.bubble.user { background: rgba(37, 99, 235, .12); }
-.bubble.assistant { background: rgba(255, 255, 255, .05); }
-.bubble.note { background: transparent; border: 1px dashed rgba(255, 255, 255, .18); font-size: 12px; opacity: .85; }
-.bubble.note.ok { border-color: rgba(34, 197, 94, .5); }
-.bubble.note.err { border-color: rgba(239, 68, 68, .5); }
-.bubble-body { white-space: pre-wrap; word-break: break-word; }
-.costline { margin-top: 5px; font-size: 11px; color: var(--textcolor2, #79839a); }
-.trace { margin-bottom: 5px; display: flex; flex-wrap: wrap; gap: 4px; }
-.tchip {
-  display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px;
-  border-radius: 4px; font-size: 11px; background: rgba(128,128,128,.14);
-  color: var(--textcolor2, #79839a);
-}
-.tchip .tx { color: #7dd3fc; font-weight: 700; }
-.agentcompose { display: flex; gap: 6px; align-items: flex-end; flex-shrink: 0; }
-/* One line taller than it was: two lines of Korean plus room to see a third
-   coming, which is about the length of a real instruction here. The box is
-   the flexible part and may shrink below its content: with width:100% and no
-   min-width it kept its size when the panel was dragged narrow and pushed
-   the send button out of the visible column. */
-.agentinput {
-  flex: 1 1 auto; min-width: 0; width: auto; max-width: 100%; min-height: 82px; max-height: min(220px, 40vh);
-  background: var(--bgcolor, #12141a);
-  /* Height only. The default handle also drags the width, and a box pulled
-     wider than its column pushed the attach and send buttons off the panel. */
-  resize: vertical;
-}
-.agentinput.dropping { border-color: #7dd3fc; background: rgba(125, 211, 252, .08); }
-button.sendbtn { padding: 9px 12px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-/* Attach above send, in a column beside the box. */
-.agentbtns { display: flex; flex-direction: column; gap: 4px; flex-shrink: 0; justify-content: flex-end; }
-.agentbtns button { width: 42px; justify-content: center; }
-/* --- merge conflicts -------------------------------------------------------
-   Red rather than the ordinary amber "\uC218\uC815": an edit badge says "this will be
-   written", a conflict badge says "this cannot be written until you choose". */
-.badge.conflict { background: rgba(239, 68, 68, .18); border-color: rgba(239, 68, 68, .55); color: #fca5a5; }
-.tabbadge.conflict { background: rgba(239, 68, 68, .22); border-color: rgba(239, 68, 68, .6); }
-.conflictbox {
-  border: 1px solid rgba(239, 68, 68, .45); border-radius: 7px; padding: 8px 10px; margin: 8px 0;
-  background: rgba(239, 68, 68, .06);
-}
-.conflicthead { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; flex-wrap: wrap; }
-.conflictrow { border-top: 1px solid var(--borderc, #2b323f); padding-top: 8px; margin-top: 8px; }
-.conflictname { font-size: 12.5px; color: var(--textcolor2, #79839a); margin-bottom: 4px; }
-
-/* A snapshot row whose delete is on its way to the backend. */
-.verrow.deleting, .chatitem.deleting { opacity: .4; }
-
-/* --- \uC9D1\uC911 \uD3B8\uC9D1: one text box, the whole screen ------------------------------ */
-.modalbox.focusmodal { max-width: none; width: calc(100vw - 48px); height: calc(100vh - 48px); }
-.modalbox.focusmodal .modalbody { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-.focusbody { display: flex; flex-direction: column; flex: 1; min-height: 0; gap: 8px; }
-textarea.focusarea { flex: 1; min-height: 0; resize: none; font-size: 14px; line-height: 1.7; }
-textarea.focusarea.codearea { font-size: 12.5px; line-height: 1.55; }
-.focusfoot { flex-shrink: 0; }
-.card h2 .focusbtn { text-transform: none; letter-spacing: 0; font-weight: 400; }
-.card h2 { display: flex; align-items: center; gap: 8px; }
-
-/* --- line diff: an IDE's margin, on the material the panel edits ------------- */
-.diffcard { margin: 2px 0 10px; }
-.diffbody { margin-top: 6px; }
-.diffview {
-  border: 1px solid var(--borderc, #2b323f); border-radius: 5px; overflow: auto;
-  max-height: 440px; font-size: 12px;
-}
-.diffview.code { font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace; font-size: 11.5px; }
-.diffsum {
-  display: flex; gap: 6px; align-items: center; padding: 4px 8px; font-size: 11px;
-  border-bottom: 1px solid var(--borderc, #2b323f); position: sticky; top: 0;
-  background: var(--bgcolor, #12141a);
-}
-.diff-ins-n { color: #10b981; font-weight: 700; }
-.diff-del-n { color: #ef4444; font-weight: 700; }
-.diffline { display: flex; line-height: 1.55; border-left: 3px solid transparent; }
-.diffline.ins { background: rgba(16, 185, 129, .13); border-left-color: #10b981; }
-.diffline.del { background: rgba(239, 68, 68, .13); border-left-color: #ef4444; }
-.diffmark {
-  width: 20px; flex-shrink: 0; text-align: center; user-select: none;
-  color: var(--textcolor2, #79839a); font-family: Consolas, monospace;
-}
-.diffline.ins .diffmark { color: #10b981; }
-.diffline.del .diffmark { color: #ef4444; }
-.difftext { white-space: pre-wrap; word-break: break-word; flex: 1; padding-right: 8px; }
-.diffskip {
-  padding: 2px 8px; font-size: 11px; text-align: center;
-  color: var(--textcolor2, #79839a); background: rgba(128,128,128,.08);
-}
-.diffmeta { margin: -4px 0 8px; }
-
-/* --- workspace files: tree | list \xB7 grid ------------------------------------ */
-.filetree .treerow { gap: 0; }
-.filetree .treebranch { padding: 3px 6px; gap: 4px; }
-.filetree .treebranch.on { background: rgba(37, 99, 235, .22); color: var(--textcolor, #d8dce4); }
-.filetree .treebranch.dropping { outline: 2px dashed #7dd3fc; outline-offset: -2px; }
-.filetree .treekids { padding-left: 12px; }
-.filetree .caret {
-  width: 16px; flex-shrink: 0; padding: 0; border: none; background: transparent;
-  color: var(--textcolor2, #79839a); font-size: 10px; text-align: center;
-}
-.filetree .treebranch { overflow: hidden; }
-.filetree .treebranch .n {
-  flex-shrink: 0; margin-left: auto; padding: 0 6px; border-radius: 9px;
-  font-size: 11px; font-variant-numeric: tabular-nums; line-height: 16px;
-  color: var(--textcolor, #d8dce4); background: rgba(128,128,128,.22);
-}
-.filetree .treebranch.on .n { background: rgba(37, 99, 235, .45); }
-.frow .ftag {
-  display: inline-block; min-width: 34px; margin-right: 7px; padding: 0 4px; border-radius: 3px;
-  font-family: Consolas, monospace; font-size: 10px; text-align: center; line-height: 15px;
-  color: var(--textcolor2, #79839a); background: rgba(128,128,128,.16);
-}
-.filebar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
-.filecrumb { font-weight: 700; font-family: Consolas, monospace; font-size: 12.5px; }
-.filehint { font-size: 11px; color: var(--textcolor2, #79839a); margin-bottom: 6px; }
-.filelist { outline: none; border: 1px solid var(--borderc, #2b323f); border-radius: 6px; min-height: 220px; }
-.filelist:focus-within { border-color: rgba(37, 99, 235, .55); }
-.filelist.dropping, .pad.dropping .filelist { outline: 2px dashed #7dd3fc; outline-offset: -2px; background: rgba(125, 211, 252, .06); }
-.frow {
-  display: grid; grid-template-columns: 22px 1fr 76px 118px; gap: 8px; align-items: center;
-  padding: 5px 8px; border-bottom: 1px solid rgba(128,128,128,.08); font-size: 12px; user-select: none;
-}
-.frow:last-child { border-bottom: none; }
-.frow:hover { background: rgba(128,128,128,.08); }
-.frow.sel { background: rgba(37, 99, 235, .18); }
-.frow.head {
-  font-size: 10.5px; color: var(--textcolor2, #79839a); font-weight: 700;
-  text-transform: uppercase; letter-spacing: .04em; background: rgba(128,128,128,.05);
-}
-.frow .fname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.frow .fname .ficon { margin-right: 5px; }
-.frow .fsize { text-align: right; font-variant-numeric: tabular-nums; color: var(--textcolor2, #79839a); }
-.frow .ftime { color: var(--textcolor2, #79839a); font-variant-numeric: tabular-nums; font-size: 11px; }
-.frow input[type=checkbox] { width: auto; margin: 0; }
-.fgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 10px; padding: 10px; }
-.fcell {
-  border: 1px solid var(--borderc, #2b323f); border-radius: 6px; padding: 6px;
-  display: flex; flex-direction: column; gap: 4px; user-select: none; min-width: 0;
-}
-.fcell:hover { background: rgba(128,128,128,.06); }
-.fcell.sel { border-color: #2563eb; background: rgba(37, 99, 235, .12); }
-.fcell .fname { font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fcell .fsize { font-size: 10px; color: var(--textcolor2, #79839a); }
-.confirmbar {
-  display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 6px 10px;
-  border-radius: 5px; background: rgba(239, 68, 68, .12); margin-bottom: 8px; font-size: 12px;
-}
-.uploadprog { font-size: 12px; margin-bottom: 8px; color: var(--textcolor2, #79839a); }
-.zipask {
-  display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 6px 10px;
-  border-radius: 5px; background: rgba(125, 211, 252, .1); margin-bottom: 8px; font-size: 12px;
-}
-.fpreview img { max-width: 100%; max-height: 70vh; border-radius: 5px; display: block; }
-.fempty { padding: 28px 16px; text-align: center; color: var(--textcolor2, #79839a); font-size: 12px; }
-@media (max-width: 760px) {
-  .frow { grid-template-columns: 22px 1fr 70px; }
-  .frow .ftime { display: none; }
-  .modalbox.focusmodal { width: 100%; height: 100%; }
-}
-button.attachbtn { padding: 8px 9px; display: flex; align-items: center; flex-shrink: 0; }
-
-.attachbar { display: flex; flex-wrap: wrap; gap: 5px; flex-shrink: 0; }
-.attachchip {
-  display: inline-flex; align-items: center; gap: 5px; max-width: 100%;
-  padding: 2px 4px 2px 8px; border-radius: 5px; font-size: 11.5px;
-  background: rgba(125, 211, 252, .14); border: 1px solid rgba(125, 211, 252, .3);
-}
-.attachchip > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.attachchip.bad { background: rgba(239, 68, 68, .14); border-color: rgba(239, 68, 68, .35); }
-.stagedbox { flex-shrink: 0; max-height: 42%; overflow-y: auto; }
-.card.staged { border-color: rgba(245,158,11,.45); background: rgba(245,158,11,.06); }
-.stagedrow { display: flex; gap: 8px; align-items: center; padding: 3px 0; flex-wrap: wrap; }
-.stagedrow .grow { flex: 1; min-width: 120px; }
-
-/* An empty conversation, saying what to ask for. */
-.welcome { display: flex; flex-direction: column; gap: 6px; padding: 4px 2px; }
-.welcome-title { font-weight: 700; font-size: 13px; }
-.welcome-foot { margin-top: 4px; }
-button.exbtn {
-  display: flex; align-items: flex-start; gap: 7px; width: 100%; text-align: left;
-  padding: 8px 10px; font-size: 12px; line-height: 1.5;
-  background: rgba(255, 255, 255, .045);
-  border: 1px solid var(--borderc, #2b323f);
-}
-button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; background: rgba(37, 99, 235, .12); }
-.exmark { color: #7dd3fc; flex-shrink: 0; }
-
-/* --- markdown in agent replies ------------------------------------------- */
-.md-p { margin: 0 0 6px; }
-.md-p:last-child { margin-bottom: 0; }
-.md-tablewrap { overflow-x: auto; margin: 4px 0 8px; }
-.md-table { border-collapse: collapse; font-size: 12px; min-width: 50%; }
-.md-table th, .md-table td { border: 1px solid rgba(128,128,128,.3); padding: 3px 7px; text-align: left; vertical-align: top; }
-.md-table th { background: rgba(255,255,255,.06); font-weight: 600; }
-.md-table td.num, .md-table th.num { text-align: right; }
-.md-table td.mid, .md-table th.mid { text-align: center; }
-.snaplist { margin: 6px 0 4px; }
-.verrow .badge.modechip { background: var(--accent, #7c5cff); color: #fff; opacity: .85; }
-.badge.now { background: rgba(37, 99, 235, .25); }
-.md-h { font-weight: 700; margin: 8px 0 4px; }
-.md-h1 { font-size: 15px; }
-.md-h2 { font-size: 14px; }
-.md-h3, .md-h4 { font-size: 13px; color: var(--textcolor2, #9aa4b8); }
-.md-list { margin: 4px 0 6px; padding-left: 20px; }
-.md-list li { margin-bottom: 2px; }
-.md-quote {
-  margin: 4px 0 6px; padding: 2px 0 2px 10px;
-  border-left: 2px solid rgba(128,128,128,.4); color: var(--textcolor2, #9aa4b8);
-}
-.md-code {
-  margin: 5px 0; padding: 8px; border-radius: 5px; overflow-x: auto;
-  background: rgba(0,0,0,.28); font-family: Consolas, monospace; font-size: 11.5px;
-}
-.md-code code { white-space: pre; }
-.md-inline-code {
-  padding: 1px 4px; border-radius: 3px; background: rgba(128,128,128,.2);
-  font-family: Consolas, monospace; font-size: 12px;
-}
-.md-hr { border: none; border-top: 1px solid var(--borderc, #2b323f); margin: 8px 0; }
-
-/* --- thinking indicator --------------------------------------------------- */
-.thinking { display: flex; align-items: center; gap: 7px; margin-bottom: 5px; }
-.elapsed {
-  font-family: Consolas, monospace; font-variant-numeric: tabular-nums;
-  font-size: 11px; color: var(--textcolor2, #79839a);
-  padding: 0 5px; border-radius: 4px; background: rgba(128,128,128,.14);
-}
-.elapsed.done { background: transparent; padding: 0; }
-.dots.stopped i { animation: none; opacity: .2; }
-.thinkingtext { font-size: 11px; color: var(--textcolor2, #79839a); }
-.dots { display: inline-flex; gap: 3px; }
-.dots i {
-  width: 5px; height: 5px; border-radius: 50%; background: #7dd3fc;
-  animation: blink 1.1s infinite ease-in-out;
-}
-.dots i:nth-child(2) { animation-delay: .18s; }
-.dots i:nth-child(3) { animation-delay: .36s; }
-@keyframes blink { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
-
-/* --- narrow screens -------------------------------------------------------
- *
- * Pocket RisuAI on a phone gets the same panel, and two things broke there:
- * the agent column sat off the right edge because the split is horizontal, and
- * wide fields in the settings pushed the page sideways.
- *
- * The split stacks instead of shrinking. That ordering is deliberate - on a
- * phone the agent is the thing being used and the transcript is the thing being
- * checked, so the transcript takes what is left rather than the other way
- * round. The same gutter still resizes, just vertically (see splitter.ts).
- */
-.mtoggle { display: none; }
-@media (max-width: 760px) {
-  .split { flex-direction: column; position: relative; }
-
-  /* One view at a time (panes.ts): the agent, or the explorer + editor.
-     Drags set flex-basis inline, so the shown side must win with !important. */
-  .split .gutter { display: none; }
-  .split.m-agent > .explorer, .split.m-agent > .left { display: none; }
-  .split.m-centre > .right { display: none; }
-  .split.m-agent > .right { flex: 1 1 auto !important; min-height: 0; }
-  .split.m-centre > .left { flex: 1 1 auto !important; }
-
-  /* The view switch is a bar across the top of the split, not a floating
-     pill: the pill sat on the attach and send buttons in the agent view and
-     its label named the *other* view, which read as the current one. Two
-     segments, the lit one is where you are. */
-  .mbar {
-    display: flex; align-items: center; gap: 6px; padding: 5px 8px; flex-shrink: 0;
-    border-bottom: 1px solid var(--borderc, #2b323f); background: rgba(255, 255, 255, .03);
-  }
-  .mbar .mseg { display: flex; border: 1px solid var(--borderc, #2b323f); border-radius: 6px; overflow: hidden; }
-  .mbar .mseg button {
-    border: none; border-radius: 0; padding: 5px 13px; font-size: 12px; background: transparent;
-    color: var(--textcolor2, #79839a);
-  }
-  .mbar .mseg button.on { background: rgba(37, 99, 235, .28); color: var(--textcolor, #d8dce4); font-weight: 700; }
-  .mbar .mlist { margin-left: auto; font-size: 12px; padding: 4px 10px; }
-  .split.m-agent .mbar .mlist { display: none; }
-
-  /* The explorer becomes a scrolling strip of jump targets across the top
-     rather than a column eating a third of a 390px screen. */
-  .explorer {
-    /* The base rule is a block column; a strip has to say it is a flex row. */
-    display: flex; flex-direction: row; align-items: center;
-    width: auto; max-width: none; flex-shrink: 0;
-    overflow-x: auto; overflow-y: hidden;
-    border-right: none; border-bottom: 1px solid var(--borderc, #2b323f);
-    padding: 5px 8px; gap: 5px;
-  }
-  .tree { padding: 2px; }
-  /* A tree (lorebook, meta fields, regex...) is a list, not a strip: it
-     scrolls vertically, starts short so the entry below it gets the screen,
-     and the bar's \uBAA9\uB85D button opens it to most of the height. It was pinned
-     at 190px with overflow hidden - the fifth item on was unreachable. */
-  .explorer:has(.tree) { display: block; width: auto; max-height: 150px; overflow-y: auto; overflow-x: hidden; }
-  .split.m-list > .explorer:has(.tree) { max-height: 62%; }
-  .explorer:has(.tree) .tree { width: 100%; }
-
-  /* One line of status. The pill wrapped to three lines on a phone and took
-     80px of a screen that has none to spare. */
-  header .status { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; }
-  header .status > * { white-space: nowrap; }
-  .status .botname { display: none; }
-  .explorer .expgroup {
-    flex-shrink: 0; width: auto; min-width: 72px; margin-bottom: 0;
-    white-space: nowrap;
-  }
-
-  .left { min-width: 0; min-height: 120px; }
-  /* flex-basis is set inline by the drag, so height must not be pinned here -
-     these only decide who yields when there is not enough room. */
-  .right { min-width: 0; flex-basis: 55%; min-height: 180px; }
-
-  .gutter {
-    width: auto; height: 7px; cursor: row-resize;
-    background-image: linear-gradient(to right, transparent 42%,
-      rgba(190,200,215,.35) 42%, rgba(190,200,215,.35) 58%, transparent 58%);
-  }
-
-  /* The tool row wraps instead of scrolling off the edge. */
-  .toolrow { flex-wrap: wrap; row-gap: 4px; }
-  .toolrow .spacer { flex-basis: 100%; height: 0; }
-  .tool-label { display: none; }
-
-  header { padding: 7px 10px; gap: 6px; }
-  header h1 span { display: none; }
-  .status .chatname { display: none; }
-  .tab { padding: 8px 11px; }
-  .pad { padding: 10px; }
-
-  /* Nothing may push the page sideways. Rows become columns and every control
-     is allowed to shrink below its content width - a fixed-width input in a
-     flex row is what put the settings fields past the right edge. */
-  .row { flex-wrap: wrap; }
-  .row > * { min-width: 0; }
-  .rangerow input { width: 64px; }
-  .field select, .field input, .field textarea { max-width: 100%; }
-  .modalback { padding: 0; }
-  .modalbox, .modalbox.wide { max-width: none; height: 100%; border-radius: 0; }
-  .filepreview { font-size: 11px; }
-  .pickrow { flex-wrap: wrap; row-gap: 4px; }
-  .pickrow .grow { flex-basis: 100%; }
-}
-
-/* Belt and braces: whatever the width, the panel itself never scrolls
-   sideways. A single over-wide child used to take the whole page with it. */
-.wrap { overflow-x: hidden; }
-.pad { overflow-x: hidden; }
-`;
-  function injectStyles() {
-    if (document.getElementById("risu-hina-style")) return;
-    const style = document.createElement("style");
-    style.id = "risu-hina-style";
-    style.textContent = CSS;
-    (document.head || document.documentElement).appendChild(style);
   }
 
   // src/host.ts
@@ -2183,7 +600,15 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         verified = false;
         drift = `${missed.field} \uC774(\uAC00) \uC4F0\uAE30 \uC804 \uAC12 \uADF8\uB300\uB85C\uC785\uB2C8\uB2E4`;
       }
-      const LISTS = ["globalLore", "alternateGreetings", "customscript", "triggerscript"];
+      const LISTS = [
+        "globalLore",
+        "alternateGreetings",
+        "customscript",
+        "triggerscript",
+        "additionalAssets",
+        "emotionImages",
+        "ccAssets"
+      ];
       for (const k of LISTS) {
         if (verified && update[k] && canon(after[k] ?? []) !== canon(update[k])) {
           verified = false;
@@ -2292,7 +717,10 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     ta.style.position = "fixed";
     ta.style.left = "-9999px";
     document.body.appendChild(ta);
-    ta.select();
+    try {
+      ta.select();
+    } catch {
+    }
     let ok = false;
     try {
       ok = document.execCommand("copy");
@@ -2303,7 +731,322 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     return ok;
   }
 
+  // src/assets.ts
+  function extractAssetRefs(char) {
+    const out = [];
+    const seen = /* @__PURE__ */ new Set();
+    const push = (field, name, key) => {
+      if (typeof key !== "string" || !key.startsWith("assets/")) return;
+      if (seen.has(key)) return;
+      seen.add(key);
+      out.push({ field, name, key });
+    };
+    push("image", "\uD504\uB85C\uD544", char.image);
+    for (const e of asArray(char["emotionImages"])) {
+      if (Array.isArray(e)) push("emotion", String(e[0] ?? ""), e[1]);
+    }
+    for (const a of asArray(char["additionalAssets"])) {
+      if (Array.isArray(a)) push("additional", String(a[0] ?? ""), a[1]);
+    }
+    for (const c of asArray(char["ccAssets"])) {
+      if (c && typeof c === "object") {
+        const cc = c;
+        push("cc", String(cc.name ?? ""), cc.uri);
+      }
+    }
+    const vits = char["vits"];
+    if (vits && vits.files && typeof vits.files === "object") {
+      for (const [k, v] of Object.entries(vits.files)) push("vits", k, v);
+    }
+    return out;
+  }
+  function asArray(v) {
+    return Array.isArray(v) ? v : [];
+  }
+  function b64encode(bytes) {
+    let bin = "";
+    const CHUNK = 32768;
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+      const part = bytes.subarray(i, i + CHUNK);
+      bin += String.fromCharCode.apply(null, part);
+    }
+    return btoa(bin);
+  }
+  var BATCH_BYTES = 8 * 1024 * 1024;
+  var BATCH_ITEMS = 50;
+  function syncAssets(char, charKey, opts, onProgress) {
+    let cancelled = false;
+    const p = {
+      charKey,
+      phase: "manifest",
+      total: 0,
+      present: 0,
+      missing: 0,
+      failed: 0,
+      bytes: 0,
+      read: 0,
+      readFailed: 0,
+      sent: 0,
+      sentBytes: 0,
+      toPush: 0,
+      fastFilled: 0,
+      pull: null,
+      complete: false,
+      error: "",
+      startedAt: Date.now(),
+      finishedAt: 0
+    };
+    const report = () => {
+      try {
+        onProgress(p);
+      } catch {
+      }
+    };
+    const absorb = (r) => {
+      p.total = r.total;
+      p.present = r.present;
+      p.missing = Array.isArray(r.missing) ? r.missing.length : r.missing;
+      p.failed = r.failed;
+      p.bytes = r.bytes;
+      p.pull = r.pull ?? null;
+      p.complete = !!r.complete;
+    };
+    const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
+    const done = (async () => {
+      let step = "manifest";
+      try {
+        const refs = extractAssetRefs(char);
+        p.total = refs.length;
+        report();
+        let m = await transport.upload("/assets/manifest", {
+          charKey,
+          refs,
+          hubPull: opts.hubPull
+        });
+        absorb(m);
+        p.fastFilled = m.fastFilled ?? 0;
+        report();
+        if (m.pulling) {
+          p.phase = "pulling";
+          step = "status(pulling)";
+          report();
+          while (!cancelled) {
+            await sleep(opts.pollMs ?? 1500);
+            const s2 = await transport.get("/assets/status", { charKey }, 18e4);
+            absorb(s2);
+            report();
+            if (!s2.pulling) break;
+          }
+          if (cancelled) return finish("cancelled");
+          step = "manifest(after pull)";
+          m = await transport.upload("/assets/manifest", { charKey, refs, hubPull: false });
+          absorb(m);
+          report();
+        }
+        const missing = Array.isArray(m.missing) ? m.missing : [];
+        p.toPush = missing.length;
+        if (missing.length) {
+          p.phase = "pushing";
+          step = `push(${missing.length})`;
+          report();
+          await push(missing);
+          if (cancelled) return finish("cancelled");
+        }
+        step = "status(final)";
+        const s = await transport.get("/assets/status", { charKey }, 18e4);
+        absorb(s);
+        return finish("done");
+      } catch (e) {
+        if (e instanceof BackendError && e.status === 404) {
+          return finish("unsupported", "\uBC31\uC5D4\uB4DC\uC5D0 \uC5D0\uC14B \uC2A4\uD1A0\uC5B4\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4 (\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8\uD574 \uC8FC\uC138\uC694)");
+        }
+        return finish("error", `${step}: ` + (e instanceof Error ? e.message : String(e)));
+      }
+    })();
+    function finish(phase, error = "") {
+      p.phase = phase;
+      p.error = error;
+      p.finishedAt = Date.now();
+      if (phase === "unsupported") p.complete = true;
+      report();
+      return p;
+    }
+    async function push(keys) {
+      const failed = [];
+      let batch = [];
+      let batchBytes = 0;
+      let uploading = Promise.resolve();
+      let inTransit = 0;
+      const flush = () => {
+        if (!batch.length) return;
+        const items5 = batch;
+        const bytes = batchBytes;
+        batch = [];
+        batchBytes = 0;
+        inTransit += 1;
+        uploading = uploading.then(async () => {
+          try {
+            const r = await transport.upload(
+              "/assets/upload",
+              { charKey, items: items5 }
+            );
+            p.sent += r.stored;
+            p.sentBytes += bytes;
+            for (const b of r.bad ?? []) failed.push(b.key);
+          } finally {
+            inTransit -= 1;
+          }
+          report();
+        });
+      };
+      let next = 0;
+      const worker = async () => {
+        while (!cancelled) {
+          const i = next++;
+          if (i >= keys.length) return;
+          const key = keys[i];
+          let bytes = null;
+          try {
+            const raw = await Risuai.readImage(key);
+            if (raw && raw.byteLength) {
+              bytes = raw instanceof Uint8Array ? raw : new Uint8Array(raw);
+            }
+          } catch {
+          }
+          if (!bytes) {
+            failed.push(key);
+            p.readFailed += 1;
+            report();
+            continue;
+          }
+          p.read += 1;
+          batch.push({ key, data: b64encode(bytes) });
+          batchBytes += bytes.byteLength;
+          if (batchBytes >= BATCH_BYTES || batch.length >= BATCH_ITEMS) flush();
+          report();
+          if (inTransit >= 2) await uploading;
+        }
+      };
+      const n = Math.max(1, Math.min(8, opts.concurrency));
+      await Promise.all(Array.from({ length: n }, () => worker()));
+      if (!cancelled) flush();
+      await uploading;
+      if (failed.length && !cancelled) {
+        try {
+          await transport.post("/assets/fail", {
+            charKey,
+            keys: failed,
+            reason: "readImage returned nothing"
+          });
+        } catch {
+        }
+      }
+    }
+    return { cancel: () => {
+      cancelled = true;
+    }, done };
+  }
+  function describeSync(p) {
+    if (!p) return "";
+    const mb2 = (n) => (n / 1048576).toFixed(1) + "MB";
+    switch (p.phase) {
+      case "manifest":
+        return `\uC5D0\uC14B \uBAA9\uB85D \uB300\uC870 \uC911 \xB7 ${p.total}\uAC1C`;
+      case "pulling": {
+        const d = p.pull;
+        return d ? `\uBC31\uC5D4\uB4DC\uAC00 \uD5C8\uBE0C\uC5D0\uC11C \uBC1B\uB294 \uC911 ${d.done}/${d.total}` + (d.notFound ? ` \xB7 \uC5C6\uC74C ${d.notFound}` : "") : "\uBC31\uC5D4\uB4DC\uAC00 \uD5C8\uBE0C\uC5D0\uC11C \uBC1B\uB294 \uC911";
+      }
+      case "pushing":
+        return `\uC5D0\uC14B \uC784\uD3EC\uD2B8 \uC911 ${p.read + p.readFailed}/${p.toPush} \xB7 \uC804\uC1A1 ${mb2(p.sentBytes)}`;
+      case "done": {
+        if (!p.total) return "\uCC38\uC870\uD558\uB294 \uC5D0\uC14B \uC5C6\uC74C";
+        const src = [];
+        if (p.fastFilled) src.push(`\uAC19\uC740 PC \uC758 PocketRisu DB ${p.fastFilled}`);
+        if (p.pull && p.pull.ok) src.push(`\uD5C8\uBE0C ${p.pull.ok}`);
+        if (p.sent) src.push(`\uC774 \uBE0C\uB77C\uC6B0\uC800 ${p.sent}`);
+        return `\uC5D0\uC14B ${p.present}/${p.total}\uAC1C \xB7 ${mb2(p.bytes)}` + (src.length ? ` \xB7 \uC774\uBC88\uC5D0 ${src.join(", ")}` : " \xB7 \uC774\uBBF8 \uC788\uC5C8\uC74C") + (p.failed ? ` \xB7 \uC77D\uAE30 \uC2E4\uD328 ${p.failed}` : "");
+      }
+      case "cancelled":
+        return `\uC5D0\uC14B \uC784\uD3EC\uD2B8 \uC911\uB2E8\uB428 (${p.present}/${p.total})`;
+      case "unsupported":
+        return p.error;
+      case "error":
+        return "\uC5D0\uC14B \uC784\uD3EC\uD2B8 \uC2E4\uD328: " + p.error;
+    }
+    return "";
+  }
+  function syncBusy(p) {
+    return !!p && (p.phase === "manifest" || p.phase === "pulling" || p.phase === "pushing");
+  }
+
   // src/state.ts
+  var StudioFiles = class {
+    // --- NovelAI ---------------------------------------------------------------
+    /** Two meters and the library path. Anlas and the v5 quota are separate. */
+    async status() {
+      return await transport.get("/studio/status");
+    }
+    /** Does this model id exist? Free — the service is the list (docs/09 §5). */
+    async modelCheck(model) {
+      return await transport.post("/studio/model-check", { model });
+    }
+    /** Danbooru-tag autocomplete, proxied from NovelAI's suggest endpoint.
+     * Empty when no token is configured - the editor types fine without it. */
+    async suggestTags(q, model = "") {
+      return await transport.get("/studio/tag-suggest", { q, model });
+    }
+    async items(area) {
+      return await transport.get("/studio/list", { area });
+    }
+    /** One card's front matter: the enable toggle, the order, name, description. */
+    async setMeta(path, set) {
+      return await transport.post("/studio/meta", { path, set });
+    }
+    /** What a batch would produce, before anything is spent. */
+    async plan(spec3) {
+      return await transport.post("/studio/plan", spec3);
+    }
+    async generate(spec3) {
+      return await transport.post("/studio/generate", spec3);
+    }
+    async job(id) {
+      return await transport.get("/studio/job", { id });
+    }
+    /** The last few batches, newest first - the queue view's 최근 작업 list. */
+    async jobs() {
+      return await transport.get("/studio/job");
+    }
+    async cancelJob(id) {
+      await transport.post("/studio/job/cancel", { id });
+    }
+    /** The running job's newest intermediate frame (streaming generation).
+     * `{}` when there is none; `{rev}` alone when `since` already has it. */
+    async jobPreview(id, since) {
+      return await transport.get("/studio/job/preview", { id, since: String(since) });
+    }
+    /** Split filenames into fields, and say which ones did not match. */
+    async parseNames(names, pattern = "") {
+      return await transport.post("/studio/parse", { names, pattern });
+    }
+    /** One folder's images, gathered into groups to choose between. */
+    async group(folder, pattern = "", groupBy = "emotion") {
+      return await transport.post("/studio/group", { folder, pattern, groupBy });
+    }
+    async saveSelection(folder, selections) {
+      await transport.post("/studio/selection", { folder, selections });
+    }
+    async renamePlan(folder, rename) {
+      return await transport.post("/studio/rename", { folder, rename });
+    }
+    async exportSelected(folder, character, pattern = "", groupBy = "emotion") {
+      return await transport.post("/studio/export", { folder, character, pattern, groupBy });
+    }
+    /** Check library images for adoption (PNG-ness, size). Nothing is copied:
+     *  the library and the workspace are one space now. */
+    async stage(charKey, paths) {
+      return await transport.post("/studio/stage", { charKey, paths });
+    }
+  };
   var AppState = class {
     health = null;
     connectError = "";
@@ -2316,6 +1059,9 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     lastMerge = null;
     /** Which half of the panel is open ('chat' | 'bot'); the shell keeps it current, the agent is told. */
     editMode = "bot";
+    /** The active tab id, verbatim from the shell. The studio is a third screen
+     * (neither half), and the agent has to be told the truth about it. */
+    activeTab = "";
     activeChatKey = "";
     botChanges = null;
     /**
@@ -2623,6 +1369,13 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       this.openFileRequest = path;
       this.emit();
     }
+    /** The agent (or a strip in the chat) asked for the studio's 검수 tab on
+     * a folder: the shell switches tabs, the studio consumes the folder. */
+    openStudioRequest = null;
+    requestOpenStudio(folder) {
+      this.openStudioRequest = { folder };
+      this.emit();
+    }
     /** The files tab is showing; whatever was unseen has now been seen. */
     markOutputsSeen() {
       if (!this.unseenOutputs.length) return;
@@ -2836,7 +1589,11 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         const r = await transport.post("/session", { chatKey: this.activeChatKey });
         this.sessionId = r.sessionId;
       }
-      yield* transport.stream("/chat", { sessionId: this.sessionId, prompt, mode: this.editMode }, signal);
+      yield* transport.stream("/chat", {
+        sessionId: this.sessionId,
+        prompt,
+        mode: this.activeTab === "studio" ? "studio" : this.editMode
+      }, signal);
     }
     // --- merge conflicts ------------------------------------------------------
     /** Rows where our copy and RisuAI's both moved since the last open. */
@@ -2942,13 +1699,14 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       }
       throw new Error("\uBC31\uC5D4\uB4DC\uAC00 \uB2E4\uC2DC \uC62C\uB77C\uC624\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4: " + lastError);
     }
-    // --- workspace files ------------------------------------------------------
+    // --- the global file space --------------------------------------------------
     //
-    // Scoped to the character, not the chat: the workspace is per bot, and its
-    // uploads and outputs are shared across that bot's chats.
-    /** Save a workspace file to the user's disk through the browser. */
+    // ONE tree every bot shares (projects/ · studio/ · hina/<봇이름>/). No
+    // charKey: the scope is the space itself. The per-bot SYSTEM view (frozen
+    // originals, machinery) is read-only and reached with `system: 1`.
+    /** Save a space file to the user's disk through the browser. */
     async downloadFile(path) {
-      const bytes = await transport.postBinary("/files/download", { charKey: this.activeCharKey, path });
+      const bytes = await transport.postBinary("/files/download", { path });
       const name = path.split("/").pop() || "file";
       downloadBytes(name, bytes, name.endsWith(".charx") ? "application/zip" : "application/octet-stream");
       return bytes.byteLength;
@@ -2967,14 +1725,21 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       this.touchFiles([r.path]);
       return r;
     }
-    async files() {
-      return await transport.get("/files?charKey=" + encodeURIComponent(this.activeCharKey));
+    async files(prefix = "", hidden = false) {
+      const q = [];
+      if (prefix) q.push("prefix=" + encodeURIComponent(prefix));
+      if (hidden) q.push("hidden=1");
+      return await transport.get("/files" + (q.length ? "?" + q.join("&") : ""));
+    }
+    /** This bot's SYSTEM directory: frozen originals and machinery, read-only. */
+    async systemFiles() {
+      return await transport.get("/files?system=1&charKey=" + encodeURIComponent(this.activeCharKey));
     }
     async readFile(path) {
-      return await transport.get("/files/read?charKey=" + encodeURIComponent(this.activeCharKey) + "&path=" + encodeURIComponent(path));
+      return await transport.get("/files/read?path=" + encodeURIComponent(path));
     }
     async uploadFile(name, content, base64 = false, dir = "", extract = false) {
-      return await transport.upload("/files/upload", base64 ? { charKey: this.activeCharKey, name, base64: content, dir, extract } : { charKey: this.activeCharKey, name, text: content, dir });
+      return await transport.upload("/files/upload", base64 ? { name, base64: content, dir, extract } : { name, text: content, dir });
     }
     /**
      * A batch of files as one binary body: [u32 header length][JSON header][bytes…].
@@ -2983,7 +1748,6 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
      */
     async uploadBatch(dir, entries, extract = false) {
       const header = new TextEncoder().encode(JSON.stringify({
-        charKey: this.activeCharKey,
         dir,
         extract,
         files: entries.map((e) => ({ name: e.name, rel: e.rel, size: e.bytes.byteLength }))
@@ -3008,11 +1772,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
      * only appears in the workspace once the last one lands.
      */
     async uploadChunk(dir, part, bytes) {
-      const header = new TextEncoder().encode(JSON.stringify({
-        charKey: this.activeCharKey,
-        dir,
-        ...part
-      }));
+      const header = new TextEncoder().encode(JSON.stringify({ dir, ...part }));
       const body = new Uint8Array(4 + header.byteLength + bytes.byteLength);
       new DataView(body.buffer).setUint32(0, header.byteLength);
       body.set(header, 4);
@@ -3021,26 +1781,49 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     }
     /** Several files or a folder as one zip, handed to the browser to save. */
     async downloadZip(paths, name) {
-      const bytes = await transport.postBinary("/files/zip", { charKey: this.activeCharKey, paths, name });
+      const bytes = await transport.postBinary("/files/zip", { paths, name });
       downloadBytes(name.endsWith(".zip") ? name : name + ".zip", bytes, "application/zip");
       return bytes.byteLength;
     }
-    /** Raw bytes of a workspace file (an image preview, a thumbnail). POST: see tab-assets. */
-    async fileBytes(path) {
-      return await transport.postBinary("/files/download", { charKey: this.activeCharKey, path });
+    /** Raw bytes of a space file (an image preview, a thumbnail). POST: see tab-assets. */
+    async fileBytes(path, timeoutMs) {
+      return await transport.postBinary("/files/download", { path }, timeoutMs);
+    }
+    /** A small server-side WebP preview (Pillow); the server streams the
+     * original bytes instead when it cannot thumb, so callers need no fallback. */
+    async fileThumb(path, w = 360) {
+      return await transport.postBinary("/files/thumb", { path, w }, 25e3);
     }
     async mkdirFile(path) {
-      await transport.post("/files/mkdir", { charKey: this.activeCharKey, path });
+      await transport.post("/files/mkdir", { path });
     }
     async moveFile(from, to) {
-      return await transport.post("/files/move", { charKey: this.activeCharKey, from, to });
+      return await transport.post("/files/move", { from, to });
+    }
+    /** Server-side copy (the context menu's 복사/붙여넣기). A taken name counts
+     * up to `이름 (2)` on the backend rather than refusing. */
+    async copyFile(from, to) {
+      return await transport.post("/files/copy", { from, to });
     }
     async deleteFile(path) {
-      await transport.post("/files/delete", { charKey: this.activeCharKey, path });
+      await transport.post("/files/delete", { path });
+    }
+    // Batched verbs: ONE round trip for N paths; a name clash or a missing
+    // file lands in `failed` while the rest of the batch proceeds.
+    async moveFiles(paths, to) {
+      return await transport.post("/files/move", { paths, to });
+    }
+    async copyFiles(paths, to) {
+      return await transport.post("/files/copy", { paths, to });
+    }
+    async deleteFiles(paths) {
+      return await transport.post("/files/delete", { paths });
     }
     async cleanFiles(areas) {
       return await transport.post("/files/clean", { charKey: this.activeCharKey, areas });
     }
+    /** The asset studio's domain calls (files go through the shared methods). */
+    studio = new StudioFiles();
     // --- agent presets --------------------------------------------------------
     async presets() {
       return await transport.get("/presets");
@@ -3089,8 +1872,8 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       await transport.post("/keys/delete", { id });
     }
     /** models.dev, through the backend's daily cache. */
-    async modelCatalog(q, provider = "", refresh8 = false) {
-      return await transport.get("/models/catalog", { q, provider, refresh: refresh8 ? "1" : "" });
+    async modelCatalog(q, provider = "", refresh3 = false) {
+      return await transport.get("/models/catalog", { q, provider, refresh: refresh3 ? "1" : "" });
     }
     // --- OpenAI subscription (codex) login -----------------------------------------
     async codexStatus() {
@@ -3203,7 +1986,10 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
           this.emit();
           detail = "\uD0ED\uC744 \uC774\uB3D9\uD588\uC2B5\uB2C8\uB2E4.";
         } else if (r.host.kind === "host_asset_add" || r.host.kind === "host_asset_replace") {
-          detail = await this.applyAssetAction(r.host.kind, r.host.args ?? {});
+          detail = await this.applyAssetActions(r.host.kind, [r.host.args ?? {}]);
+        } else if (r.host.kind === "host_asset_add_many") {
+          const items5 = Array.isArray(r.host.args?.items) ? r.host.args.items : [];
+          detail = await this.applyAssetActions("host_asset_add", items5);
         } else {
           throw new Error("\uD50C\uB7EC\uADF8\uC778\uC774 \uBAA8\uB974\uB294 \uC791\uC5C5\uC785\uB2C8\uB2E4: " + r.host.kind);
         }
@@ -3475,79 +2261,112 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       this.emit();
     }
     /**
-     * An approved asset proposal: bytes from the workspace -> RisuAI's asset
+     * Approved asset proposals: bytes from the workspace -> RisuAI's asset
      * store (saveAsset, which names the key) -> the live card's reference
      * list -> the backend store under that key. Written to RisuAI at once,
      * unlike text: binary material has no working copy to stage in, and the
      * card re-upload afterwards makes the new reference the baseline.
+     *
+     * MANY items ride ONE host read, ONE card write and ONE re-upload: 37
+     * additions used to be 37 host round trips and 37 card uploads, each of
+     * which also restarted the asset sync - that is the "hangs at the 20s
+     * mark" the user saw, the sync being cancelled and restarted under load.
      */
-    async applyAssetAction(kind, args) {
+    async applyAssetActions(kind, list2) {
       if (!this.isLiveBot || !this.slot) {
         throw new Error("\uC5D0\uC14B\uC744 \uB123\uC73C\uB824\uBA74 RisuAI\uC5D0\uC11C \uC774 \uBD07\uC774 \uC120\uD0DD\uB418\uC5B4 \uC788\uC5B4\uC57C \uD569\uB2C8\uB2E4");
       }
-      const name = String(args.name || "").trim();
-      const path = String(args.path || "");
-      const field = String(args.field || "additional");
-      if (!name || !path) throw new Error("\uC5D0\uC14B \uC774\uB984\uACFC \uD30C\uC77C \uACBD\uB85C\uAC00 \uD544\uC694\uD569\uB2C8\uB2E4");
-      const bytes = await transport.getBinary("/files/download", { charKey: this.activeCharKey, path });
-      if (!(bytes[0] === 137 && bytes[1] === 80)) throw new Error("PNG \uD30C\uC77C\uB9CC \uC5D0\uC14B\uC73C\uB85C \uB123\uC744 \uC218 \uC788\uC2B5\uB2C8\uB2E4");
-      const key = await Risuai.saveAsset(bytes);
-      if (!key || typeof key !== "string") throw new Error("RisuAI \uAC00 \uC5D0\uC14B \uD0A4\uB97C \uB3CC\uB824\uC8FC\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4");
+      if (!list2.length) throw new Error("\uB123\uC744 \uC5D0\uC14B\uC774 \uC5C6\uC2B5\uB2C8\uB2E4");
+      const t0 = Date.now();
+      const saved = [];
+      const failed = [];
+      for (const args of list2) {
+        const name = String(args.name || "").trim();
+        const path = String(args.path || "");
+        const field = String(args.field || "additional");
+        if (!name || !path) {
+          failed.push(`${name || path}: \uC774\uB984/\uACBD\uB85C \uC5C6\uC74C`);
+          continue;
+        }
+        try {
+          const bytes = await transport.getBinary("/files/download", { path });
+          if (!(bytes[0] === 137 && bytes[1] === 80)) throw new Error("PNG \uD30C\uC77C\uB9CC \uC5D0\uC14B\uC73C\uB85C \uB123\uC744 \uC218 \uC788\uC2B5\uB2C8\uB2E4");
+          const key = await Risuai.saveAsset(bytes);
+          if (!key || typeof key !== "string") throw new Error("RisuAI \uAC00 \uC5D0\uC14B \uD0A4\uB97C \uB3CC\uB824\uC8FC\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4");
+          saved.push({ name, path, field, key });
+        } catch (e) {
+          failed.push(`${name}: ${e instanceof Error ? e.message : String(e)}`);
+          void clientLog("warn", "asset save failed", { name, path, error: String(e) });
+        }
+      }
+      if (!saved.length) throw new Error("\uC5D0\uC14B\uC744 \uD558\uB098\uB3C4 \uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + failed.join("; "));
       const slot = await currentSlot();
       const fresh = await readCharacter(slot.characterIndex);
       const update = {};
       let placed = "";
       if (kind === "host_asset_add") {
-        if (field === "emotion") {
-          const list2 = Array.isArray(fresh["emotionImages"]) ? [...fresh["emotionImages"]] : [];
-          list2.push([name, key]);
-          update.emotionImages = list2;
-          placed = "\uAC10\uC815 \uC774\uBBF8\uC9C0";
-        } else {
-          const list2 = Array.isArray(fresh["additionalAssets"]) ? [...fresh["additionalAssets"]] : [];
-          list2.push([name, key, "png"]);
-          update.additionalAssets = list2;
-          placed = "\uCD94\uAC00 \uC5D0\uC14B";
+        const emo = Array.isArray(fresh["emotionImages"]) ? [...fresh["emotionImages"]] : [];
+        const add = Array.isArray(fresh["additionalAssets"]) ? [...fresh["additionalAssets"]] : [];
+        let nEmo = 0;
+        let nAdd = 0;
+        for (const s of saved) {
+          if (s.field === "emotion") {
+            emo.push([s.name, s.key]);
+            nEmo += 1;
+          } else {
+            add.push([s.name, s.key, "png"]);
+            nAdd += 1;
+          }
         }
+        if (nEmo) update.emotionImages = emo;
+        if (nAdd) update.additionalAssets = add;
+        placed = [nEmo ? `\uAC10\uC815 \uC774\uBBF8\uC9C0 ${nEmo}` : "", nAdd ? `\uCD94\uAC00 \uC5D0\uC14B ${nAdd}` : ""].filter(Boolean).join(" \xB7 ");
       } else {
+        const keyOf = new Map(saved.map((s) => [s.name, s.key]));
         let hits = 0;
         const swap = (arr, at) => {
           if (!Array.isArray(arr)) return null;
-          const next = arr.map((e) => {
-            if (Array.isArray(e) && String(e[0]) === name) {
+          return arr.map((e) => {
+            if (Array.isArray(e) && keyOf.has(String(e[0]))) {
               hits += 1;
               const c = [...e];
-              c[at] = key;
+              c[at] = keyOf.get(String(e[0]));
               return c;
             }
             return e;
           });
-          return next;
         };
         const emo = swap(fresh["emotionImages"], 1);
         const add = swap(fresh["additionalAssets"], 1);
         const cc = Array.isArray(fresh["ccAssets"]) ? fresh["ccAssets"].map((c) => {
-          if (c && typeof c === "object" && String(c.name) === name) {
+          if (c && typeof c === "object" && keyOf.has(String(c.name))) {
             hits += 1;
-            return { ...c, uri: key };
+            return { ...c, uri: keyOf.get(String(c.name)) };
           }
           return c;
         }) : null;
-        if (!hits) throw new Error(`\uC774\uB984\uC774 \u201C${name}\u201D \uC778 \uC5D0\uC14B\uC774 \uCE74\uB4DC\uC5D0 \uC5C6\uC2B5\uB2C8\uB2E4`);
+        if (!hits) throw new Error(`\uC774\uB984\uC774 \u201C${saved.map((s) => s.name).join(", ")}\u201D \uC778 \uC5D0\uC14B\uC774 \uCE74\uB4DC\uC5D0 \uC5C6\uC2B5\uB2C8\uB2E4`);
         if (emo) update.emotionImages = emo;
         if (add) update.additionalAssets = add;
         if (cc) update.ccAssets = cc;
         placed = `${hits}\uACF3 \uAD50\uCCB4`;
       }
-      await writeCharacter(slot.characterIndex, fresh.chaId, update);
-      try {
-        await transport.post("/assets/adopt", { charKey: this.activeCharKey, key, path, name, field });
-      } catch (e) {
-        void clientLog("warn", "assets/adopt failed", { error: String(e) });
+      const w = await writeCharacter(slot.characterIndex, fresh.chaId, update);
+      if (!w.verified) {
+        throw new Error("\uCE74\uB4DC\uC5D0 \uC5D0\uC14B\uC774 \uBC18\uC601\uB418\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4: " + (w.drift || "\uC7AC\uD655\uC778 \uC2E4\uD328"));
+      }
+      for (const s of saved) {
+        try {
+          await transport.post("/assets/adopt", { charKey: this.activeCharKey, key: s.key, path: s.path, name: s.name, field: s.field });
+        } catch (e) {
+          void clientLog("warn", "assets/adopt failed", { name: s.name, error: String(e) });
+        }
       }
       await this.readHost();
       await this.upload();
-      return `\uC5D0\uC14B \u201C${name}\u201D \uC744 RisuAI \uC5D0 \uC800\uC7A5\uD558\uACE0 \uCE74\uB4DC\uC5D0 \uBD99\uC600\uC2B5\uB2C8\uB2E4 (${placed}, ${key}).`;
+      void clientLog("info", "assets applied", { kind, saved: saved.length, failed: failed.length, ms: Date.now() - t0 });
+      const head = saved.length === 1 ? `\uC5D0\uC14B \u201C${saved[0].name}\u201D \uC744 RisuAI \uC5D0 \uC800\uC7A5\uD558\uACE0 \uCE74\uB4DC\uC5D0 \uBD99\uC600\uC2B5\uB2C8\uB2E4 (${placed}, ${saved[0].key}).` : `\uC5D0\uC14B ${saved.length}\uAC74\uC744 RisuAI \uC5D0 \uC800\uC7A5\uD558\uACE0 \uCE74\uB4DC\uC5D0 \uD55C \uBC88\uC5D0 \uBD99\uC600\uC2B5\uB2C8\uB2E4 (${placed}).`;
+      return head + (failed.length ? ` \uC2E4\uD328 ${failed.length}\uAC74: ${failed.slice(0, 5).join("; ")}` : "");
     }
     /**
      * 새 봇으로 저장: keep editing this bot, and keep what it was.
@@ -3596,6 +2415,2828 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     return btoa(bin);
   }
   var state = new AppState();
+
+  // src/ui/hilite.ts
+  var STEP = 1.05;
+  var NUMERIC_OPEN = /^(-?\d+(?:\.\d+)?)::/;
+  function parseWeights(text2) {
+    const segments = [];
+    let braces = 0;
+    let brackets = 0;
+    const numeric = [];
+    const effective2 = () => {
+      const base = numeric.length > 0 ? numeric[numeric.length - 1] : 1;
+      return base * Math.pow(STEP, braces) * Math.pow(STEP, -brackets);
+    };
+    let segStart = 0;
+    let segWeight = effective2();
+    const boundary = (pos) => {
+      const w = effective2();
+      if (w === segWeight) return;
+      if (pos > segStart) segments.push({ start: segStart, end: pos, weight: segWeight });
+      segStart = pos;
+      segWeight = w;
+    };
+    let i = 0;
+    while (i < text2.length) {
+      const ch = text2[i];
+      if (ch === "{") {
+        braces++;
+        boundary(i);
+        i++;
+      } else if (ch === "}") {
+        if (braces > 0) braces--;
+        boundary(i + 1);
+        i++;
+      } else if (ch === "[") {
+        brackets++;
+        boundary(i);
+        i++;
+      } else if (ch === "]") {
+        if (brackets > 0) brackets--;
+        boundary(i + 1);
+        i++;
+      } else if (text2.startsWith("::", i) && numeric.length > 0) {
+        numeric.pop();
+        boundary(i + 2);
+        i += 2;
+      } else {
+        const m = NUMERIC_OPEN.exec(text2.slice(i));
+        if (m) {
+          numeric.push(Number(m[1]));
+          boundary(i);
+          i += m[0].length;
+        } else i++;
+      }
+    }
+    if (text2.length > segStart) segments.push({ start: segStart, end: text2.length, weight: segWeight });
+    return segments;
+  }
+  function weightBackground(weight) {
+    if (weight === 1) return null;
+    if (weight <= 0) return "rgba(96, 145, 235, 0.45)";
+    const steps = Math.abs(Math.log(weight) / Math.log(STEP));
+    const alpha = Math.min(0.1 + steps * 0.09, 0.48);
+    return weight > 1 ? `rgba(233, 94, 80, ${alpha.toFixed(3)})` : `rgba(96, 145, 235, ${alpha.toFixed(3)})`;
+  }
+  var FRAGMENT_BG = "rgba(92, 190, 125, 0.3)";
+  var COMMENT_BG = "rgba(128, 128, 136, 0.28)";
+  var STRING_BG = "rgba(92, 190, 125, 0.22)";
+  var KEYWORD_BG = "rgba(96, 145, 235, 0.18)";
+  var META_BG = "rgba(233, 94, 80, 0.18)";
+  var CBS_BG = "rgba(124, 92, 255, 0.24)";
+  function flatten(text2, spans, weights = []) {
+    const bounds = /* @__PURE__ */ new Set([0, text2.length]);
+    for (const s of spans) {
+      bounds.add(s.start);
+      bounds.add(s.end);
+    }
+    for (const s of weights) {
+      bounds.add(s.start);
+      bounds.add(s.end);
+    }
+    const sorted = [...bounds].filter((n) => n >= 0 && n <= text2.length).sort((a, b) => a - b);
+    const ranges = [];
+    for (let i = 0; i < sorted.length - 1; i++) {
+      const start = sorted[i];
+      const end = sorted[i + 1];
+      let best = null;
+      for (const s of spans) {
+        if (s.start <= start && start < s.end && (!best || s.prio > best.prio)) best = s;
+      }
+      const bg = best ? best.bg : weightBackground(weights.find((s) => s.start <= start && start < s.end)?.weight ?? 1);
+      const prev = ranges[ranges.length - 1];
+      if (prev && prev.bg === bg) prev.end = end;
+      else ranges.push({ start, end, bg });
+    }
+    return ranges;
+  }
+  function lineSpans(text2, test, bg, prio) {
+    const out = [];
+    let offset = 0;
+    for (const line of text2.split("\n")) {
+      if (test(line)) out.push({ start: offset, end: offset + line.length, bg, prio });
+      offset += line.length + 1;
+    }
+    return out;
+  }
+  function regexSpans(text2, re, bg, prio) {
+    const out = [];
+    for (const m of text2.matchAll(re)) {
+      if (m.index !== void 0 && m[0]) out.push({ start: m.index, end: m.index + m[0].length, bg, prio });
+    }
+    return out;
+  }
+  function naiRanges(text2) {
+    const spans = [
+      ...regexSpans(text2, /<[^<>\n]+>/g, FRAGMENT_BG, 2),
+      ...lineSpans(text2, (l) => l.trimStart().startsWith("#"), COMMENT_BG, 3)
+    ];
+    return flatten(text2, spans, parseWeights(text2));
+  }
+  function mdRanges(text2) {
+    const spans = [
+      ...lineSpans(text2, (l) => /^#{1,6}\s/.test(l), "rgba(125, 211, 252, 0.16)", 1),
+      ...lineSpans(text2, (l) => /^\s*>/.test(l), "rgba(128, 128, 136, 0.18)", 1),
+      ...regexSpans(text2, /\*\*[^*\n]+\*\*/g, "rgba(233, 94, 80, 0.18)", 2),
+      ...regexSpans(text2, /`[^`\n]+`/g, "rgba(128, 128, 136, 0.3)", 3),
+      ...regexSpans(text2, /\[[^\]\n]+\]\([^)\n]+\)/g, "rgba(92, 190, 125, 0.22)", 2),
+      // RisuAI CBS calls ride lorebook text; seeing their extent is the point.
+      ...regexSpans(text2, /\{\{[^{}\n]+\}\}/g, CBS_BG, 4)
+    ];
+    return flatten(text2, spans);
+  }
+  function regexRanges(text2) {
+    const spans = [
+      ...regexSpans(text2, /\[(?:\\.|[^\]\\])*\]/g, STRING_BG, 3),
+      ...regexSpans(text2, /\\u[0-9a-fA-F]{4}|\\x[0-9a-fA-F]{2}|\\./g, META_BG, 4),
+      ...regexSpans(text2, /[*+?|]|\{\d+(?:,\d*)?\}|\((?:\?[:=!<]*)?|\)/g, KEYWORD_BG, 2)
+    ];
+    return flatten(text2, spans);
+  }
+  function regexOutRanges(text2) {
+    const spans = [
+      ...regexSpans(text2, /\{\{[^{}\n]+\}\}/g, CBS_BG, 4),
+      ...regexSpans(text2, /\$(?:\d{1,2}|&|<[^>\n]+>)/g, KEYWORD_BG, 3),
+      ...regexSpans(text2, /<!--[\s\S]*?-->/g, COMMENT_BG, 2)
+    ];
+    return flatten(text2, spans);
+  }
+  function luaIslands(text2) {
+    const out = [];
+    const n = text2.length;
+    const longOpen = (at) => {
+      if (text2[at] !== "[") return null;
+      let j = at + 1;
+      while (text2[j] === "=") j++;
+      return text2[j] === "[" ? j - at - 1 : null;
+    };
+    const longClose = (from, eq) => {
+      const close = "]" + "=".repeat(eq) + "]";
+      const at = text2.indexOf(close, from);
+      return at === -1 ? n : at + close.length;
+    };
+    let i = 0;
+    while (i < n) {
+      const c = text2[i];
+      if (c === "-" && text2[i + 1] === "-") {
+        const eq = longOpen(i + 2);
+        let end;
+        if (eq !== null) end = longClose(i + 4 + eq, eq);
+        else {
+          const nl = text2.indexOf("\n", i);
+          end = nl === -1 ? n : nl;
+        }
+        out.push({ start: i, end, bg: COMMENT_BG, prio: 5 });
+        i = end;
+      } else if (c === '"' || c === "'") {
+        let j = i + 1;
+        while (j < n && text2[j] !== c && text2[j] !== "\n") {
+          if (text2[j] === "\\") j++;
+          j++;
+        }
+        const end = j < n && text2[j] === c ? j + 1 : j;
+        out.push({ start: i, end, bg: STRING_BG, prio: 4 });
+        i = Math.max(end, i + 1);
+      } else {
+        const eq = longOpen(i);
+        if (eq !== null) {
+          const end = longClose(i + 2 + eq, eq);
+          out.push({ start: i, end, bg: STRING_BG, prio: 4 });
+          i = end;
+        } else i++;
+      }
+    }
+    return out;
+  }
+  var LUA_KEYWORDS = /\b(?:and|break|do|elseif|else|end|false|for|function|goto|if|in|local|nil|not|or|repeat|return|then|true|until|while|onStart|onOutput|onInput|onButtonClick|listenEdit|getChatVar|setChatVar)\b/g;
+  function luaRanges(text2) {
+    const spans = [
+      ...luaIslands(text2),
+      ...regexSpans(text2, LUA_KEYWORDS, KEYWORD_BG, 1)
+    ];
+    return flatten(text2, spans);
+  }
+  var COPY_PROPS = [
+    "fontFamily",
+    "fontSize",
+    "fontWeight",
+    "fontStyle",
+    "letterSpacing",
+    "lineHeight",
+    "textTransform",
+    "wordSpacing",
+    "textIndent",
+    "whiteSpace",
+    "wordBreak",
+    "overflowWrap",
+    "tabSize",
+    "boxSizing",
+    "paddingTop",
+    "paddingRight",
+    "paddingBottom",
+    "paddingLeft",
+    "borderTopWidth",
+    "borderRightWidth",
+    "borderBottomWidth",
+    "borderLeftWidth"
+  ];
+  function copyTypography(from, to) {
+    try {
+      const cs = getComputedStyle(from);
+      for (const p of COPY_PROPS) {
+        to.style[p] = cs[p];
+      }
+      to.style.borderStyle = "solid";
+      to.style.borderColor = "transparent";
+    } catch {
+    }
+  }
+  function caretCoords(ta, position) {
+    const div = document.createElement("div");
+    try {
+      copyTypography(ta, div);
+    } catch {
+    }
+    div.style.position = "absolute";
+    div.style.visibility = "hidden";
+    div.style.left = "-9999px";
+    div.style.top = "0";
+    div.style.width = `${ta.clientWidth || 300}px`;
+    div.style.whiteSpace = "pre-wrap";
+    div.textContent = ta.value.slice(0, position);
+    const marker = document.createElement("span");
+    marker.textContent = ta.value.slice(position, position + 1) || "\u200B";
+    div.appendChild(marker);
+    document.body.appendChild(div);
+    const coords = { left: marker.offsetLeft, top: marker.offsetTop, height: marker.offsetHeight || 18 };
+    div.remove();
+    return coords;
+  }
+  var TAG_TOKEN_SEPARATORS = /[,\n{}[\]|<>:/]/;
+  function fmtCount(count) {
+    if (count >= 1e6) return `${(count / 1e6).toFixed(1)}M`;
+    if (count >= 1e3) return `${Math.round(count / 1e3)}k`;
+    return count > 0 ? String(count) : "";
+  }
+  var RANGES = {
+    nai: naiRanges,
+    md: mdRanges,
+    regex: regexRanges,
+    "regex-out": regexOutRanges,
+    lua: luaRanges
+  };
+  function attachHilite(ta, opts) {
+    if (!ta.parentNode || ta.parentElement && ta.parentElement.classList.contains("hlwrap")) return;
+    const wrap = el("div", { class: "hlwrap" });
+    const mirror = el("div", { class: "hlmirror", "aria-hidden": "true" });
+    ta.parentNode.insertBefore(wrap, ta);
+    wrap.appendChild(mirror);
+    wrap.appendChild(ta);
+    try {
+      const bg = getComputedStyle(ta).backgroundColor;
+      if (bg && bg !== "transparent" && bg !== "rgba(0, 0, 0, 0)") mirror.style.backgroundColor = bg;
+    } catch {
+    }
+    ta.classList.add("hl-on");
+    const render = () => {
+      copyTypography(ta, mirror);
+      try {
+        if (ta.offsetWidth > 0) {
+          const cs = getComputedStyle(ta);
+          const bl = parseFloat(cs.borderLeftWidth) || 0;
+          const br = parseFloat(cs.borderRightWidth) || 0;
+          const sbw = Math.max(0, ta.offsetWidth - ta.clientWidth - bl - br);
+          mirror.style.paddingRight = `${(parseFloat(cs.paddingRight) || 0) + sbw}px`;
+          mirror.style.width = `${ta.offsetWidth}px`;
+        }
+      } catch {
+      }
+      const text2 = ta.value;
+      const ranges = RANGES[opts.mode](text2);
+      while (mirror.firstChild) mirror.removeChild(mirror.firstChild);
+      for (const r of ranges) {
+        const piece = text2.slice(r.start, r.end);
+        if (!piece) continue;
+        const span = document.createElement("span");
+        span.textContent = piece;
+        if (r.bg) span.style.background = r.bg;
+        mirror.appendChild(span);
+      }
+      if (text2.endsWith("\n")) mirror.appendChild(document.createTextNode("\u200B"));
+      mirror.scrollTop = ta.scrollTop;
+      mirror.scrollLeft = ta.scrollLeft;
+    };
+    const syncScroll = () => {
+      mirror.scrollTop = ta.scrollTop;
+      mirror.scrollLeft = ta.scrollLeft;
+    };
+    ta.addEventListener("input", render);
+    ta.addEventListener("scroll", syncScroll);
+    try {
+      new ResizeObserver(render).observe(ta);
+    } catch {
+    }
+    render();
+    if (opts.mode === "nai" && !opts.noSuggest) attachSuggest(ta, opts);
+  }
+  function attachSuggest(ta, opts) {
+    let pop = null;
+    let items5 = [];
+    let selected = 0;
+    let tokenStart = -1;
+    let seq = 0;
+    let timer = null;
+    const close = () => {
+      pop?.remove();
+      pop = null;
+      items5 = [];
+    };
+    const draw2 = () => {
+      if (!items5.length) {
+        close();
+        return;
+      }
+      if (!pop) {
+        pop = el("div", { class: "suggestpop" });
+        document.body.appendChild(pop);
+      }
+      while (pop.firstChild) pop.removeChild(pop.firstChild);
+      items5.slice(0, 8).forEach((s, i) => {
+        const b = el("button", { class: i === selected ? "on" : "" });
+        if (s.kind === "frag") {
+          const cut = s.name.lastIndexOf("/");
+          if (cut > 0) {
+            b.appendChild(el("span", { class: "fold", text: "<" + s.name.slice(0, cut + 1) }));
+            b.appendChild(el("span", { class: "frag", text: s.name.slice(cut + 1) + ">" }));
+          } else {
+            b.appendChild(el("span", { class: "frag", text: `<${s.name}>` }));
+          }
+        } else {
+          b.appendChild(el("span", { text: s.tag }));
+          const c = fmtCount(s.count);
+          if (c) b.appendChild(el("span", { class: "cnt", text: c }));
+        }
+        b.addEventListener("mousedown", (e) => {
+          e.preventDefault();
+          complete(items5[i]);
+        });
+        pop.appendChild(b);
+      });
+      try {
+        const caret = caretCoords(ta, ta.selectionStart);
+        const rect = ta.getBoundingClientRect();
+        const vh = window.innerHeight || 768;
+        const est = Math.min(items5.length, 8) * 26 + 8;
+        let left = rect.left + caret.left - ta.scrollLeft;
+        let top = rect.top + caret.top - ta.scrollTop + caret.height + 4;
+        left = Math.max(8, Math.min(left, (window.innerWidth || 1024) - 280));
+        if (top + est > vh - 8) top = rect.top + caret.top - ta.scrollTop - est - 4;
+        pop.style.left = left + "px";
+        pop.style.top = Math.max(8, top) + "px";
+      } catch {
+      }
+    };
+    const refresh3 = () => {
+      if (timer) clearTimeout(timer);
+      const mySeq = ++seq;
+      const cursor = ta.selectionStart;
+      const before = ta.value.slice(0, cursor);
+      const lineStart = before.lastIndexOf("\n") + 1;
+      if (before.slice(lineStart).trimStart().startsWith("#")) {
+        close();
+        return;
+      }
+      const frag = /<([^<>|]*)$/.exec(before);
+      if (frag && opts.fragments) {
+        const q = frag[1].toLowerCase();
+        const names = opts.fragments().filter((n) => n.toLowerCase().includes(q)).slice(0, 8);
+        tokenStart = cursor - frag[1].length;
+        items5 = names.map((name) => ({ kind: "frag", name }));
+        selected = 0;
+        draw2();
+        return;
+      }
+      let sepIx = -1;
+      for (let i = before.length - 1; i >= 0; i--) {
+        if (TAG_TOKEN_SEPARATORS.test(before[i])) {
+          sepIx = i;
+          break;
+        }
+      }
+      const rawToken = before.slice(sepIx + 1);
+      const token2 = rawToken.trimStart();
+      if (token2.trim().length < 2) {
+        close();
+        return;
+      }
+      tokenStart = sepIx + 1 + (rawToken.length - token2.length);
+      timer = setTimeout(() => {
+        void state.studio.suggestTags(token2.trim()).then((r) => {
+          if (seq !== mySeq) return;
+          items5 = (r.tags ?? []).map((t) => ({ kind: "tag", tag: t.tag, count: t.count ?? 0 }));
+          selected = 0;
+          draw2();
+        }).catch(() => {
+        });
+      }, 160);
+    };
+    const complete = (s) => {
+      if (tokenStart < 0) return;
+      const cursor = ta.selectionStart;
+      let insert = s.kind === "frag" ? s.name + ">" : s.tag;
+      if (!ta.value.slice(cursor).trimStart().startsWith(",")) insert += ", ";
+      ta.value = ta.value.slice(0, tokenStart) + insert + ta.value.slice(cursor);
+      close();
+      const pos = tokenStart + insert.length;
+      try {
+        ta.setSelectionRange(pos, pos);
+      } catch {
+      }
+      ta.focus();
+      ta.dispatchEvent(new Event("input", { bubbles: true }));
+    };
+    ta.addEventListener("input", refresh3);
+    ta.addEventListener("keydown", (ev) => {
+      const e = ev;
+      if (!items5.length) return;
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        selected = (selected + 1) % Math.min(items5.length, 8);
+        draw2();
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        selected = (selected - 1 + Math.min(items5.length, 8)) % Math.min(items5.length, 8);
+        draw2();
+      } else if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault();
+        complete(items5[selected]);
+      } else if (e.key === "Escape") {
+        close();
+      }
+    });
+    ta.addEventListener("blur", () => {
+      if (timer) clearTimeout(timer);
+      seq++;
+      setTimeout(close, 150);
+    });
+  }
+
+  // src/ui/dom.ts
+  function el(tag, attrs = {}, children = []) {
+    const node = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs)) {
+      if (v === null || v === void 0 || v === false) continue;
+      if (k === "class") node.className = String(v);
+      else if (k === "text") node.textContent = String(v);
+      else if (k === "html") node.innerHTML = String(v);
+      else if (k === "style" && typeof v === "object") Object.assign(node.style, v);
+      else if (k === "dataset" && typeof v === "object") Object.assign(node.dataset, v);
+      else if (k.startsWith("on") && typeof v === "function") {
+        node.addEventListener(k.slice(2).toLowerCase(), v);
+      } else if (k === "value" && node instanceof HTMLTextAreaElement) {
+        node.value = String(v);
+      } else if (k === "value" && node instanceof HTMLInputElement) {
+        node.value = String(v);
+      } else if (k === "checked" && node instanceof HTMLInputElement) {
+        node.checked = Boolean(v);
+      } else if (v === true) {
+        node.setAttribute(k, "");
+      } else {
+        node.setAttribute(k, String(v));
+      }
+    }
+    const list2 = Array.isArray(children) ? children : [children];
+    for (const c of list2) {
+      if (c === null || c === void 0 || c === false) continue;
+      node.appendChild(typeof c === "string" ? document.createTextNode(c) : c);
+    }
+    return node;
+  }
+  function searchBox(value, onInput, placeholder = "\uCC3E\uAE30") {
+    const input = el("input", { class: "searchinput", placeholder, value });
+    input.addEventListener("input", () => onInput(input.value));
+    return el("div", { class: "searchbox" }, [input]);
+  }
+  function refocusSearch(root2) {
+    const input = root2?.querySelector(".searchbox input") ?? document.querySelector(".tabslot .searchbox input");
+    if (!input) return;
+    input.focus();
+    try {
+      input.setSelectionRange(input.value.length, input.value.length);
+    } catch {
+    }
+  }
+  function setSelected(sel, value) {
+    for (const opt of Array.from(sel.querySelectorAll("option"))) {
+      const on = opt.value === value;
+      opt.selected = on;
+      if (on) opt.setAttribute("selected", "");
+      else opt.removeAttribute("selected");
+    }
+    try {
+      sel.value = value;
+    } catch {
+    }
+  }
+  function selectedValue(sel) {
+    const options = Array.from(sel.querySelectorAll("option"));
+    const live = options.find((o) => o.selected === true && o.hasAttribute("selected") === false) ?? (typeof sel.value === "string" && sel.value !== "" && options.find((o) => o.value === sel.value)) ?? options.find((o) => o.selected === true);
+    if (live) return live.value;
+    const stamped = sel.querySelector("option[selected]");
+    return stamped?.value ?? sel.value ?? options[0]?.value ?? "";
+  }
+  function clear(node) {
+    while (node.firstChild) node.removeChild(node.firstChild);
+  }
+  function svg(path, size = 20) {
+    return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${path}</svg>`;
+  }
+  var ICON = {
+    app: svg('<path d="M4 4h16v12H8l-4 4z"/><path d="M8 9h8"/><path d="M8 12h5"/>'),
+    close: svg('<path d="M18 6 6 18M6 6l12 12"/>', 18),
+    // A drawn arrow rather than the 🔄 emoji: the emoji renders at a different
+    // weight and baseline from every other control in the header.
+    reload: svg('<path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/>', 17),
+    check: svg('<path d="m5 13 4 4L19 7"/>', 16),
+    clip: svg('<path d="M21.4 11.1 12.3 20.2a5 5 0 0 1-7.1-7.1l9.2-9.2a3.3 3.3 0 1 1 4.7 4.7l-9.2 9.2a1.7 1.7 0 0 1-2.4-2.4l8.5-8.5"/>', 17),
+    pencil: svg('<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/>', 15),
+    gear: svg('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.14.6.66 1.03 1.28 1.05H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>', 17),
+    warn: svg('<path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>', 16),
+    // VS Code-style layout toggles: the frame, the divider, and tick marks on
+    // the side the button controls (studio panel fold/unfold, §1-30).
+    layoutL: svg('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M9 5v14"/><path d="M5.5 8.5h1.5M5.5 11h1.5M5.5 13.5h1.5"/>', 16),
+    layoutR: svg('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M15 5v14"/><path d="M17 8.5h1.5M17 11h1.5M17 13.5h1.5"/>', 16)
+  };
+  function iconBtn(html, title) {
+    return el("button", { class: "iconbtn", html, title });
+  }
+  function segCtl(items5) {
+    return el("div", { class: "segctl" }, items5.map((it) => {
+      const b = el("button", { class: it.on ? "on" : "", text: it.label, title: it.title ?? "" });
+      b.addEventListener("click", it.pick);
+      return b;
+    }));
+  }
+  function colPicker(opts) {
+    const btns = opts.values.map((n) => {
+      const b = el("button", { text: String(n), title: `${n}\uC5F4\uB85C \uBCF4\uAE30` });
+      b.addEventListener("click", () => {
+        opts.set(n);
+        sync();
+      });
+      return b;
+    });
+    const sync = () => {
+      btns.forEach((b, i) => b.classList.toggle("on", opts.values[i] === opts.get()));
+    };
+    sync();
+    return el("div", { class: "segctl colpick", title: "\uC5F4 \uC218" }, [
+      el("span", { class: "seglabel", text: "\u25A6" }),
+      ...btns
+    ]);
+  }
+  function armed(button, label, confirmLabel, run) {
+    let armedNow = false;
+    let timer;
+    const disarm = () => {
+      if (timer) clearTimeout(timer);
+      armedNow = false;
+      button.textContent = label;
+      button.classList.remove("danger");
+    };
+    const arm = () => {
+      if (timer) clearTimeout(timer);
+      armedNow = true;
+      button.textContent = confirmLabel;
+      button.classList.add("danger");
+      timer = setTimeout(disarm, 4e3);
+    };
+    const fire = () => {
+      disarm();
+      run();
+    };
+    button.textContent = label;
+    button.addEventListener("click", () => {
+      if (!armedNow) arm();
+      else fire();
+    });
+    return { arm, fire, disarm, get armed() {
+      return armedNow;
+    } };
+  }
+  function diffFragments(before, after) {
+    let head = 0;
+    const max = Math.min(before.length, after.length);
+    while (head < max && before[head] === after[head]) head++;
+    let tail = 0;
+    while (tail < max - head && before[before.length - 1 - tail] === after[after.length - 1 - tail]) tail++;
+    const mk = (text2, cls) => {
+      const frag = document.createDocumentFragment();
+      frag.appendChild(document.createTextNode(text2.slice(0, head)));
+      const mid = text2.slice(head, text2.length - tail);
+      if (mid) frag.appendChild(el("span", { class: cls, text: mid }));
+      frag.appendChild(document.createTextNode(text2.slice(text2.length - tail)));
+      return frag;
+    };
+    return { before: mk(before, "diff-del"), after: mk(after, "diff-ins") };
+  }
+  function fmtTime(ms) {
+    const n = Number(ms);
+    if (!Number.isFinite(n) || n <= 0) return "";
+    try {
+      return new Date(n).toISOString().slice(0, 16).replace("T", " ");
+    } catch {
+      return "";
+    }
+  }
+  var TOOL = {
+    snapshot: "\u{1F516}",
+    discard: "\u21A9",
+    versions: "\u{1F558}",
+    apply: "\u{1F4BE}",
+    export: "\u2B07",
+    find: "\u{1F50D}",
+    cut: "\u2702",
+    view: "\u{1F441}",
+    reload: "\u{1F504}",
+    newChat: "\u2795",
+    history: "\u{1F5C2}",
+    info: "\u24D8"
+  };
+  var TOOL_GLYPH = {
+    list_turns: ["\u{1F4CB}", "\uD6D1\uAE30"],
+    read_turns: ["\u{1F4D6}", "\uC77D\uAE30"],
+    search_turns: ["\u{1F50D}", "\uAC80\uC0C9"],
+    read_card: ["\u{1FAAA}", "\uCE74\uB4DC"],
+    read_lore: ["\u{1F4DA}", "\uB85C\uC5B4"],
+    read_memory: ["\u{1F9E0}", "\uC694\uC57D"],
+    list_skills: ["\u{1F9E9}", "\uC2A4\uD0AC \uBAA9\uB85D"],
+    load_skill: ["\u{1F9E9}", "\uC2A4\uD0AC"],
+    stage_edit: ["\u270F\uFE0F", "\uC218\uC815 \uC81C\uC548"],
+    stage_bulk: ["\u270F\uFE0F", "\uC77C\uAD04 \uC81C\uC548"],
+    stage_delete: ["\u2702\uFE0F", "\uC0AD\uC81C \uC81C\uC548"],
+    list_staged: ["\u{1F4CC}", "\uC81C\uC548 \uD655\uC778"],
+    run_python: ["\u{1F40D}", "\uC2A4\uD06C\uB9BD\uD2B8"],
+    write_file: ["\u{1F4BE}", "\uD30C\uC77C \uC4F0\uAE30"],
+    list_files: ["\u{1F4C1}", "\uD30C\uC77C \uBAA9\uB85D"],
+    read_file: ["\u{1F4C4}", "\uD30C\uC77C \uC77D\uAE30"],
+    web_search: ["\u{1F310}", "\uC6F9 \uAC80\uC0C9"],
+    show_artifact: ["\u{1F4CA}", "\uC544\uD2F0\uD329\uD2B8"],
+    find_files: ["\u{1F50D}", "\uD30C\uC77C \uCC3E\uAE30"],
+    search_files: ["\u{1F50D}", "\uB0B4\uC6A9 \uAC80\uC0C9"],
+    studio_meta: ["\u{1F39B}", "\uCE74\uB4DC"]
+  };
+  var PAPER_PLANE = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4z"/></svg>';
+  function modal(title, body, opts = {}) {
+    const closeBtn = el("button", { class: "iconbtn", html: ICON.close, title: "\uB2EB\uAE30" });
+    const box = el("div", { class: "modalbox" + (opts.wide ? " wide" : "") + (opts.cls ? " " + opts.cls : "") }, [
+      el("div", { class: "modalhead" }, [
+        el("h2", { text: title }),
+        el("span", { class: "spacer" }),
+        closeBtn
+      ]),
+      el("div", { class: "modalbody" }, [body])
+    ]);
+    const back = el("div", { class: "modalback" }, [box]);
+    document.body.appendChild(back);
+    let closed = false;
+    const close = () => {
+      if (closed) return;
+      closed = true;
+      back.remove();
+      document.removeEventListener("keydown", esc, true);
+      opts.onClose?.();
+    };
+    const esc = (e) => {
+      if (e.key === "Escape") close();
+    };
+    closeBtn.addEventListener("click", close);
+    back.addEventListener("click", (e) => {
+      if (e.target === back && !opts.sticky) close();
+    });
+    document.addEventListener("keydown", esc, true);
+    setTimeout(() => box.querySelector("input, textarea, select, button")?.focus(), 0);
+    return close;
+  }
+  function focusEdit(source, title, opts = {}) {
+    const big = el("textarea", {
+      class: "focusarea" + (opts.code ? " codearea" : ""),
+      spellcheck: opts.code ? "false" : "true"
+    });
+    big.value = source.value;
+    const count = el("span", { class: "hint", text: `${big.value.length}\uC790` });
+    const sync = () => {
+      source.value = big.value;
+      count.textContent = `${big.value.length}\uC790`;
+      source.dispatchEvent(new Event("input", { bubbles: true }));
+    };
+    big.addEventListener("input", sync);
+    const done = el("button", { class: "primary", text: "\uC644\uB8CC" });
+    const body = el("div", { class: "focusbody" }, [
+      big,
+      el("div", { class: "row focusfoot" }, [
+        count,
+        el("span", { class: "hint grow", text: "\uC785\uB825\uC740 \uBC14\uB85C \uC6D0\uB798 \uC0C1\uC790\uC5D0 \uBC18\uC601\uB429\uB2C8\uB2E4. \uC800\uC7A5\uC740 \uC6D0\uB798 \uD654\uBA74\uC758 \uC800\uC7A5 \uBC84\uD2BC\uC73C\uB85C \uD569\uB2C8\uB2E4." }),
+        done
+      ])
+    ]);
+    const close = modal(title, body, { cls: "focusmodal", sticky: true });
+    if (opts.hilite) attachHilite(big, opts.hilite);
+    done.addEventListener("click", close);
+    setTimeout(() => {
+      big.focus();
+      try {
+        big.setSelectionRange(source.selectionStart, source.selectionEnd);
+      } catch {
+      }
+    }, 0);
+  }
+  function focusButton(source, title, opts = {}) {
+    const b = el("button", { class: "ghost tiny focusbtn", text: "\u2922 \uC9D1\uC911 \uD3B8\uC9D1", title: "\uD654\uBA74 \uC804\uCCB4\uB85C \uD06C\uAC8C \uD3B8\uC9D1\uD569\uB2C8\uB2E4" });
+    b.addEventListener("click", () => focusEdit(source, title, opts));
+    return b;
+  }
+  function lineDiff(before, after) {
+    const a = before.split("\n");
+    const b = after.split("\n");
+    let head = 0;
+    while (head < a.length && head < b.length && a[head] === b[head]) head++;
+    let tail = 0;
+    while (tail < a.length - head && tail < b.length - head && a[a.length - 1 - tail] === b[b.length - 1 - tail]) tail++;
+    const out = [];
+    for (let i = 0; i < head; i++) out.push({ kind: "same", text: a[i] });
+    const am = a.slice(head, a.length - tail);
+    const bm = b.slice(head, b.length - tail);
+    if (am.length && bm.length && am.length * bm.length <= 4e6) {
+      const n = am.length, m = bm.length;
+      const dp = [];
+      for (let i2 = 0; i2 <= n; i2++) dp.push(new Uint32Array(m + 1));
+      for (let i2 = n - 1; i2 >= 0; i2--) {
+        for (let j2 = m - 1; j2 >= 0; j2--) {
+          dp[i2][j2] = am[i2] === bm[j2] ? dp[i2 + 1][j2 + 1] + 1 : Math.max(dp[i2 + 1][j2], dp[i2][j2 + 1]);
+        }
+      }
+      let i = 0, j = 0;
+      while (i < n && j < m) {
+        if (am[i] === bm[j]) {
+          out.push({ kind: "same", text: am[i] });
+          i++;
+          j++;
+        } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+          out.push({ kind: "del", text: am[i] });
+          i++;
+        } else {
+          out.push({ kind: "ins", text: bm[j] });
+          j++;
+        }
+      }
+      while (i < n) out.push({ kind: "del", text: am[i++] });
+      while (j < m) out.push({ kind: "ins", text: bm[j++] });
+    } else {
+      for (const t of am) out.push({ kind: "del", text: t });
+      for (const t of bm) out.push({ kind: "ins", text: t });
+    }
+    for (let i = a.length - tail; i < a.length; i++) out.push({ kind: "same", text: a[i] });
+    return out;
+  }
+  function diffView(before, after, opts = {}) {
+    const lines = lineDiff(before, after);
+    const ctx = opts.context ?? 2;
+    const dels = lines.filter((l) => l.kind === "del").length;
+    const ins = lines.filter((l) => l.kind === "ins").length;
+    const root2 = el("div", { class: "diffview" + (opts.code ? " code" : "") });
+    root2.appendChild(el("div", { class: "diffsum" }, [
+      el("span", { class: "diff-ins-n", text: `+${ins}` }),
+      el("span", { class: "diff-del-n", text: `\u2212${dels}` }),
+      el("span", { class: "hint", text: dels || ins ? " \uC904 (\uAE30\uC900\uC120 \u2192 \uC9C0\uAE08)" : " \uC904 \u2014 \uB0B4\uC6A9\uC774 \uAC19\uC2B5\uB2C8\uB2E4" })
+    ]));
+    const show = new Array(lines.length).fill(false);
+    lines.forEach((l, i) => {
+      if (l.kind === "same") return;
+      for (let k = Math.max(0, i - ctx); k <= Math.min(lines.length - 1, i + ctx); k++) show[k] = true;
+    });
+    let hidden = 0;
+    const flush = () => {
+      if (hidden) root2.appendChild(el("div", { class: "diffskip", text: `\u2026 ${hidden}\uC904 \uAC19\uC74C \u2026` }));
+      hidden = 0;
+    };
+    lines.forEach((l, i) => {
+      if (!show[i]) {
+        hidden++;
+        return;
+      }
+      flush();
+      root2.appendChild(el("div", { class: "diffline " + l.kind }, [
+        el("span", { class: "diffmark", text: l.kind === "del" ? "\u2212" : l.kind === "ins" ? "+" : " " }),
+        el("span", { class: "difftext", text: l.text || " " })
+      ]));
+    });
+    flush();
+    return root2;
+  }
+  function diffCard(before, after, opts = {}) {
+    if (before === null || before === after) return null;
+    const lines = lineDiff(before, after);
+    const n = lines.filter((l) => l.kind !== "same").length;
+    const body = el("div", { class: "diffbody", style: { display: opts.open ? "" : "none" } });
+    const toggle = el("button", { class: "ghost tiny", text: opts.open ? "\uBCC0\uACBD \uB0B4\uC6A9 \uC811\uAE30" : `\uBCC0\uACBD \uB0B4\uC6A9 \uBCF4\uAE30 (${n}\uC904)` });
+    toggle.addEventListener("click", () => {
+      const open4 = body.style.display === "none";
+      if (open4 && !body.childElementCount) body.appendChild(diffView(before, after, { code: opts.code }));
+      body.style.display = open4 ? "" : "none";
+      toggle.textContent = open4 ? "\uBCC0\uACBD \uB0B4\uC6A9 \uC811\uAE30" : `\uBCC0\uACBD \uB0B4\uC6A9 \uBCF4\uAE30 (${n}\uC904)`;
+    });
+    if (opts.open) body.appendChild(diffView(before, after, { code: opts.code }));
+    return el("div", { class: "diffcard" }, [
+      el("div", { class: "row" }, [
+        el("span", { class: "hint grow", text: `\uAE30\uC900\uC120\uACFC \uB2E4\uB985\uB2C8\uB2E4 (${before.length}\uC790 \u2192 ${after.length}\uC790).` }),
+        toggle
+      ]),
+      body
+    ]);
+  }
+  function menuAt(x, y, items5) {
+    const menu = el("div", { class: "ctxmenu" });
+    for (const item of items5) {
+      if (item === null) {
+        menu.appendChild(el("div", { class: "ctxsep" }));
+        continue;
+      }
+      const b = el("button", { class: item.danger ? "danger" : "", text: item.label });
+      b.disabled = !!item.disabled;
+      b.addEventListener("click", () => {
+        close();
+        item.onClick();
+      });
+      menu.appendChild(b);
+    }
+    document.body.appendChild(menu);
+    const vw = window.innerWidth || 1024;
+    const vh = window.innerHeight || 768;
+    const mw = menu.offsetWidth || 180;
+    const mh = menu.offsetHeight || 200;
+    menu.style.left = Math.max(4, Math.min(x, vw - mw - 4)) + "px";
+    menu.style.top = Math.max(4, Math.min(y, vh - mh - 4)) + "px";
+    const close = () => {
+      menu.remove();
+      document.removeEventListener("click", away, true);
+      document.removeEventListener("contextmenu", away, true);
+      document.removeEventListener("keydown", esc, true);
+    };
+    const away = (e) => {
+      if (!menu.contains(e.target)) close();
+    };
+    const esc = (e) => {
+      if (e.key === "Escape") close();
+    };
+    setTimeout(() => {
+      document.addEventListener("click", away, true);
+      document.addEventListener("contextmenu", away, true);
+      document.addEventListener("keydown", esc, true);
+    }, 0);
+    return close;
+  }
+  function popover(anchor, content) {
+    const pop = el("div", { class: "popover" }, [content]);
+    document.body.appendChild(pop);
+    const rect = anchor.getBoundingClientRect();
+    const vw = window.innerWidth || 1024;
+    const vh = window.innerHeight || 768;
+    pop.style.maxWidth = Math.max(200, vw - 16) + "px";
+    const pw = pop.offsetWidth || 300;
+    const ph = pop.offsetHeight || 200;
+    const left = Math.max(8, Math.min(rect.left, vw - pw - 8));
+    const below = rect.bottom + 4;
+    const top = below + ph > vh - 8 ? Math.max(8, rect.top - ph - 4) : below;
+    pop.style.left = left + "px";
+    pop.style.top = top + "px";
+    const close = () => {
+      pop.remove();
+      document.removeEventListener("click", away, true);
+      document.removeEventListener("keydown", esc, true);
+    };
+    const away = (e) => {
+      const t = e.target;
+      if (!pop.contains(t) && !anchor.contains(t)) close();
+    };
+    const esc = (e) => {
+      if (e.key === "Escape") close();
+    };
+    setTimeout(() => {
+      document.addEventListener("click", away, true);
+      document.addEventListener("keydown", esc, true);
+    }, 0);
+    return close;
+  }
+
+  // src/ui/splitter.ts
+  function splitter(opts) {
+    const gutter = el("div", { class: "gutter" + (opts.side === "left" ? " leftside" : ""), title: "\uB4DC\uB798\uADF8\uD574\uC11C \uD328\uB110 \uD06C\uAE30\uB97C \uC870\uC808\uD569\uB2C8\uB2E4" });
+    const vertical = () => {
+      const dir = getComputedStyle(opts.container).flexDirection;
+      return dir === "column" || dir === "column-reverse";
+    };
+    const keepFor = (down) => {
+      let keep = 0;
+      for (const c of Array.from(opts.container.children)) {
+        if (c === opts.target || c === gutter) continue;
+        const node = c;
+        if (!node.offsetParent && getComputedStyle(node).display === "none") continue;
+        if (node.classList.contains("left")) {
+          keep += down ? 140 : 260;
+          continue;
+        }
+        keep += down ? node.offsetHeight : node.offsetWidth;
+      }
+      return Math.max(down ? 140 : 320, keep);
+    };
+    const apply = (px) => {
+      const down = vertical();
+      const min = down ? 160 : opts.min ?? 250;
+      const keep = keepFor(down);
+      const span = down ? opts.container.clientHeight : opts.container.clientWidth;
+      let size = Math.round(Math.min(Math.max(min, span - keep), Math.max(min, px)));
+      opts.target.style.flexBasis = size + "px";
+      if (!down) {
+        const over = opts.container.scrollWidth - opts.container.clientWidth;
+        if (over > 0 && size - over >= min) {
+          size -= over;
+          opts.target.style.flexBasis = size + "px";
+        }
+      }
+      return size;
+    };
+    if (opts.storageKey) {
+      void Risuai.pluginStorage.getItem(opts.storageKey).then((v) => {
+        const n = Number(v);
+        if (Number.isFinite(n) && n > 0) apply(n);
+      }).catch(() => {
+      });
+    }
+    try {
+      let lastSpan = 0;
+      new ResizeObserver(() => {
+        const span = vertical() ? opts.container.clientHeight : opts.container.clientWidth;
+        if (span === lastSpan) return;
+        lastSpan = span;
+        const cur = parseInt(opts.target.style.flexBasis || "0", 10);
+        if (cur > 0) apply(cur);
+      }).observe(opts.container);
+    } catch {
+    }
+    let dragging = false;
+    gutter.addEventListener("pointerdown", (e) => {
+      const ev = e;
+      dragging = true;
+      gutter.classList.add("dragging");
+      gutter.setPointerCapture(ev.pointerId);
+      ev.preventDefault();
+    });
+    gutter.addEventListener("pointermove", (e) => {
+      if (!dragging) return;
+      const ev = e;
+      const rect = opts.container.getBoundingClientRect();
+      const left = opts.side === "left";
+      apply(vertical() ? left ? ev.clientY - rect.top : rect.bottom - ev.clientY : left ? ev.clientX - rect.left : rect.right - ev.clientX);
+    });
+    const end = (e) => {
+      if (!dragging) return;
+      dragging = false;
+      gutter.classList.remove("dragging");
+      try {
+        gutter.releasePointerCapture(e.pointerId);
+      } catch {
+      }
+      if (opts.storageKey) {
+        const w = parseInt(opts.target.style.flexBasis || "0", 10);
+        if (w > 0) void Risuai.pluginStorage.setItem(opts.storageKey, w).catch(() => void 0);
+      }
+    };
+    gutter.addEventListener("pointerup", end);
+    gutter.addEventListener("pointercancel", end);
+    gutter.addEventListener("dblclick", () => {
+      const back = apply(opts.side === "left" ? 210 : vertical() ? 360 : Math.round(opts.container.clientWidth / 2));
+      if (opts.storageKey) void Risuai.pluginStorage.setItem(opts.storageKey, back).catch(() => void 0);
+    });
+    return gutter;
+  }
+
+  // src/ui/panes.ts
+  function threePane(leftNode, opts = {}) {
+    const left = leftNode ?? el("div", { class: "explorer" });
+    const centre = el("div", { class: "left" });
+    const right = el("div", { class: "right" }, [el("div", { class: "right-inner" })]);
+    const root2 = el("div", { class: "split" }, [left]);
+    root2.appendChild(splitter({ target: left, container: root2, storageKey: "treeWidth", side: "left", min: 120 }));
+    root2.appendChild(centre);
+    root2.appendChild(splitter({ target: right, container: root2, storageKey: "panelWidth2" }));
+    root2.appendChild(right);
+    root2.insertBefore(mobileBar(root2), root2.firstChild);
+    if (opts.controls !== false) installFoldControls(root2);
+    return { root: root2, left, centre, right };
+  }
+  var FOLD_KEY = "hina.panelFold";
+  var fold = { left: false, right: false };
+  try {
+    const saved = JSON.parse(localStorage.getItem(FOLD_KEY) || "null");
+    if (saved && typeof saved === "object") Object.assign(fold, saved);
+  } catch {
+  }
+  var foldRoot = null;
+  var foldL = null;
+  var foldR = null;
+  function applyFold() {
+    if (foldRoot) {
+      foldRoot.classList.toggle("lcollapse", fold.left);
+      foldRoot.classList.toggle("rcollapse", fold.right);
+    }
+    foldL?.classList.toggle("on", !fold.left);
+    foldR?.classList.toggle("on", !fold.right);
+  }
+  function toggleFold(side) {
+    fold[side] = !fold[side];
+    try {
+      localStorage.setItem(FOLD_KEY, JSON.stringify(fold));
+    } catch {
+    }
+    applyFold();
+  }
+  function installFoldControls(root2) {
+    foldRoot = root2;
+    if (!foldL || !foldR) {
+      foldL = iconBtn(ICON.layoutL, "\uC67C\uCABD \uD328\uB110(\uBAA9\uB85D) \uC811\uAE30/\uD3BC\uCE58\uAE30");
+      foldL.classList.add("laybtn");
+      foldL.addEventListener("click", () => toggleFold("left"));
+      foldR = iconBtn(ICON.layoutR, "AI \uCC57 \uD328\uB110 \uC811\uAE30/\uD3BC\uCE58\uAE30");
+      foldR.classList.add("laybtn");
+      foldR.addEventListener("click", () => toggleFold("right"));
+    }
+    setLayoutControls(el("span", { class: "row", style: { gap: "2px" } }, [foldL, foldR]));
+    applyFold();
+  }
+  var VIEW_KEY = "hina.mobileView";
+  var mobileView = "agent";
+  try {
+    const v = localStorage.getItem(VIEW_KEY);
+    if (v === "centre" || v === "agent") mobileView = v;
+  } catch {
+  }
+  var toggles = /* @__PURE__ */ new Map();
+  function syncAll() {
+    for (const [root2, t] of [...toggles]) {
+      if (!root2.isConnected && toggles.size > 1) {
+        toggles.delete(root2);
+        continue;
+      }
+      t();
+    }
+  }
+  var mobileList = false;
+  function mobileBar(root2) {
+    const editBtn = el("button", { text: "\u{1F4C4} \uD3B8\uC9D1", title: "\uD3B8\uC9D1 \uD654\uBA74 (\uBAA8\uBC14\uC77C)" });
+    const agentBtn = el("button", { text: "\u{1F4AC} AI \uCC57", title: "AI \uCC57 (\uBAA8\uBC14\uC77C)" });
+    const listBtn = el("button", { class: "ghost tiny mlist", title: "\uC67C\uCABD \uBAA9\uB85D\uC744 \uD3BC\uCE58\uAC70\uB098 \uC811\uC2B5\uB2C8\uB2E4" });
+    const bar3 = el("div", { class: "mbar" }, [el("div", { class: "mseg" }, [editBtn, agentBtn]), listBtn]);
+    const sync = () => {
+      root2.classList.toggle("m-agent", mobileView === "agent");
+      root2.classList.toggle("m-centre", mobileView === "centre");
+      root2.classList.toggle("m-list", mobileList);
+      editBtn.classList.toggle("on", mobileView === "centre");
+      agentBtn.classList.toggle("on", mobileView === "agent");
+      listBtn.textContent = mobileList ? "\u2630 \uBAA9\uB85D \uC811\uAE30" : "\u2630 \uBAA9\uB85D \uD3BC\uCE58\uAE30";
+      listBtn.style.display = root2.querySelector(".explorer .tree") ? "" : "none";
+    };
+    const pick2 = (v) => {
+      if (mobileView === v) return;
+      mobileView = v;
+      try {
+        localStorage.setItem(VIEW_KEY, mobileView);
+      } catch {
+      }
+      syncAll();
+    };
+    editBtn.addEventListener("click", () => pick2("centre"));
+    agentBtn.addEventListener("click", () => pick2("agent"));
+    listBtn.addEventListener("click", () => {
+      mobileList = !mobileList;
+      syncAll();
+    });
+    toggles.set(root2, sync);
+    sync();
+    setTimeout(sync, 0);
+    return bar3;
+  }
+  function showMobileCentre() {
+    if (mobileView === "centre") return;
+    mobileView = "centre";
+    try {
+      localStorage.setItem(VIEW_KEY, mobileView);
+    } catch {
+    }
+    syncAll();
+  }
+
+  // src/ui/styles.ts
+  var CSS = `
+:host, * { box-sizing: border-box; }
+body {
+  margin: 0;
+  font: 13px/1.6 -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Malgun Gothic', sans-serif;
+  background: var(--bgcolor, #12141a);
+  color: var(--textcolor, #d8dce4);
+}
+button, input, textarea, select { font: inherit; color: inherit; }
+button {
+  padding: 6px 12px; border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--borderc, #2b323f);
+  background: var(--darkbutton, #1b202a);
+  /* A label never breaks mid-word ("\uC9C4\uB2E8 \uC815/\uBCF4"): the row wraps instead. */
+  white-space: nowrap; flex-shrink: 0;
+}
+button:hover:not(:disabled) { filter: brightness(1.25); }
+button:disabled { opacity: .45; cursor: default; }
+button.primary { background: #2563eb; border-color: #2563eb; color: #fff; }
+button.danger { background: #b91c1c; border-color: #b91c1c; color: #fff; }
+button.ghost { background: transparent; }
+input, textarea, select {
+  background: var(--darkbg, #171b23);
+  border: 1px solid var(--borderc, #2b323f);
+  border-radius: 5px; padding: 6px 9px; width: 100%;
+}
+textarea { resize: vertical; line-height: 1.6; }
+a { color: #7dd3fc; }
+code { font-family: Consolas, monospace; font-size: 12px; }
+
+/* Scrollbars: a light translucent thumb with no rail drawn across the panel.
+   Firefox takes the standard property, Chromium the webkit one. */
+* { scrollbar-width: thin; scrollbar-color: rgba(190, 200, 215, .28) transparent; }
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: rgba(190, 200, 215, .22); border-radius: 6px;
+  border: 2px solid transparent; background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover { background: rgba(190, 200, 215, .42); background-clip: content-box; }
+::-webkit-scrollbar-corner { background: transparent; }
+
+.wrap { display: flex; flex-direction: column; height: 100vh; }
+header {
+  display: flex; align-items: center; gap: 8px; padding: 8px 14px;
+  border-bottom: 1px solid var(--borderc, #2b323f); flex-shrink: 0;
+}
+header h1 { margin: 0; font-size: 14px; font-weight: 700; display: flex; align-items: center; gap: 7px; }
+.spacer { flex: 1; }
+.dim { color: var(--textcolor2, #79839a); font-size: 12px; font-weight: 400; }
+
+/* Backend health, inline in the title row. It is one dot and a version - it
+   never justified a full row of its own above a panel whose job is showing a
+   long transcript. */
+.status {
+  display: flex; align-items: center; gap: 6px; min-width: 0;
+  font-size: 12px; padding: 2px 8px; border-radius: 20px;
+  background: rgba(16, 185, 129, .10);
+}
+.status.bad { background: rgba(239, 68, 68, .14); }
+.status.warn { background: rgba(245, 158, 11, .13); }
+.status .chatname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.healthdot { width: 7px; height: 7px; border-radius: 50%; background: #10b981; flex-shrink: 0; }
+.status.bad .healthdot { background: #ef4444; }
+.status.warn .healthdot { background: #f59e0b; }
+
+/* The active tab's tool row, full width under the tabs. */
+.toolslot {
+  flex-shrink: 0; display: flex; align-items: center; flex-wrap: wrap;
+  border-bottom: 1px solid var(--borderc, #2b323f);
+}
+.toolslot .toolrow { border-bottom: none; }
+.toolslot .chatbar { flex: 0 0 auto; padding-right: 4px; }
+.toolslot .chatbar + .tabslot:not([style*="none"])::before {
+  content: ''; display: inline-block; width: 1px; height: 18px;
+  background: var(--borderc, #2b323f); margin: 0 4px; vertical-align: middle;
+}
+.toolslot .tabslot { flex: 1 1 auto; display: flex; align-items: center; min-width: 0; }
+.toolslot .tabslot > .toolrow { flex: 1 1 auto; }
+.chatbar .changesum { font-size: 11px; margin-left: 4px; white-space: nowrap; }
+.chatbar .applybadge { margin-left: 2px; }
+.shellnotice:empty { display: none; }
+.tab .tabbadge { margin-left: 5px; font-size: 10px; padding: 0 5px; }
+.tchip.skill { background: rgba(37,99,235,.16); border-color: rgba(37,99,235,.35); }
+.skillfiles .pickrow { padding: 3px 6px; font-size: 12px; }
+.hint.dim { opacity: .7; }
+.tabsep { width: 1px; align-self: stretch; margin: 6px 6px; background: var(--borderc, #2b323f); }
+.vartable { display: flex; flex-direction: column; gap: 4px; }
+.varrow {
+  display: grid; grid-template-columns: minmax(90px, 1.2fr) 60px minmax(120px, 2fr) auto;
+  gap: 8px; align-items: center; padding: 4px 6px; border-radius: 5px;
+}
+.varrow.changed { background: rgba(245,158,11,.08); }
+.varrow:hover { background: rgba(128,128,128,.08); }
+.varkey { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.vartype { font-size: 11px; }
+.varvalue input { width: 100%; }
+.varops { display: flex; gap: 4px; align-items: center; }
+.varadd input { flex: 1; min-width: 90px; }
+@media (max-width: 720px) {
+  .varrow { grid-template-columns: 1fr 1fr; }
+  .varrow .varvalue { grid-column: 1 / -1; }
+  .varrow .varops { grid-column: 1 / -1; justify-content: flex-end; }
+}
+button.outline {
+  display: flex; align-items: center; gap: 6px; width: 100%; text-align: left;
+  margin: 4px 0; padding: 6px 8px; font-size: 12px;
+  background: rgba(37,99,235,.10); border-color: rgba(37,99,235,.25);
+}
+button.outline:hover { background: rgba(37,99,235,.18); }
+.shellnotice .notice { margin: 6px 10px 0; }
+.applypop .row { margin-top: 6px; }
+.applypop .row button { width: 100%; }
+
+/* Eleven tabs now; on a narrow panel the bar scrolls rather than wrapping. */
+.tabs { display: flex; gap: 2px; padding: 0 10px; border-bottom: 1px solid var(--borderc, #2b323f); flex-shrink: 0; overflow-x: auto; overflow-y: hidden; }
+.tabs .tab { white-space: nowrap; }
+
+/* Regex patterns, HTML payloads, trigger JSON - text where columns matter. */
+.codearea { font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace; font-size: 12px; }
+
+/* The apply verb when a gate (bot not selected, assets importing) blocks it. */
+.tool.dimmed { opacity: 0.45; }
+
+/* The shared list filter, and the list rows that carry reorder buttons. */
+.searchbox { padding: 4px 8px; }
+.searchbox input { width: 100%; }
+.treerow.lorecard {
+  border: 1px solid var(--borderc, #2b323f); border-radius: 6px;
+  padding: 3px 6px 3px 3px; margin: 3px 6px;
+}
+.movebtn { padding: 1px 6px; min-width: 0; }
+/* Trigger mode switch, drawn like RisuAI's own V2 / Lua buttons. */
+.modebtn { padding: 3px 10px; font-size: 12px; border: 1px solid transparent; }
+.modebtn.on { border-color: #2563eb; color: var(--textcolor, #d8dce4); font-weight: 700; }
+.tab {
+  padding: 8px 16px; border: none; background: none; border-radius: 0;
+  color: var(--textcolor2, #79839a); border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.tab.active { color: var(--textcolor, #d8dce4); border-bottom-color: #2563eb; font-weight: 700; }
+/* The asset importer's progress at the end of the tab row. */
+/* The panel fold toggles (every three-pane tab), on the tab row before the sync badge. */
+.layoutslot { margin-left: auto; align-items: center; gap: 2px; }
+.layoutslot .laybtn.on { background: rgba(37,99,235,.18); }
+.layoutslot + .syncbadge { margin-left: 8px; }
+.syncbadge {
+  margin-left: auto; align-self: center; padding: 2px 8px; border-radius: 4px; font-size: 11px;
+  color: var(--textcolor2, #79839a); border: 1px solid var(--borderc, #2b323f); white-space: nowrap;
+}
+.syncbadge.busy { color: #f59e0b; border-color: rgba(245,158,11,.5); }
+.syncbadge.err { color: #ef4444; border-color: rgba(239,68,68,.5); }
+
+main { flex: 1; min-height: 0; display: flex; }
+.panel { display: none; flex: 1; min-height: 0; }
+.panel.active { display: flex; }
+.pad { padding: 14px; overflow-y: auto; flex: 1; }
+
+/* Flat sections rather than accented rounded cards. A coloured left rail on
+   every block turns the panel into stripes and communicates nothing, because
+   everything has one; emphasis is kept for blocks that need it. */
+.card {
+  border: 1px solid var(--borderc, #2b323f); border-radius: 6px;
+  padding: 11px; margin-bottom: 10px; background: transparent;
+}
+.card h2 {
+  margin: 0 0 9px; font-size: 11px; font-weight: 700; letter-spacing: .04em;
+  text-transform: uppercase; color: var(--textcolor2, #79839a);
+}
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+/* A result box under a button row: spaced from the row only when it has something. */
+.outbox:not(:empty) { margin-top: 10px; }
+.card > .notice, .card > div > .notice { margin-top: 8px; }
+.row + .row { margin-top: 8px; }
+.grow { flex: 1; min-width: 0; }
+label.field { display: block; margin-bottom: 10px; }
+label.field > span { display: block; margin-bottom: 4px; color: var(--textcolor2, #79839a); font-size: 12px; }
+
+.notice {
+  padding: 8px 10px; border-radius: 5px; margin-bottom: 10px; font-size: 12px;
+  background: rgba(245, 158, 11, .10);
+}
+.notice.err { background: rgba(239, 68, 68, .12); }
+.notice.ok { background: rgba(16, 185, 129, .12); }
+
+/* The lorebook entry's insertorder, beside its name. */
+.ordertag {
+  flex-shrink: 0; padding: 0 5px; border-radius: 3px; font-size: 10.5px;
+  font-family: Consolas, monospace; font-variant-numeric: tabular-nums;
+  background: rgba(128,128,128,.14);
+}
+.badge {
+  display: inline-block; padding: 1px 7px; border-radius: 4px; font-size: 11px;
+  border: 1px solid var(--borderc, #2b323f);
+}
+.badge.ok { color: #10b981; border-color: rgba(16,185,129,.5); }
+.badge.warn { color: #f59e0b; border-color: rgba(245,158,11,.5); }
+.badge.err { color: #ef4444; border-color: rgba(239,68,68,.5); }
+
+.empty { padding: 36px 20px; text-align: center; color: var(--textcolor2, #79839a); }
+pre.mono {
+  font-family: Consolas, monospace; font-size: 11px; white-space: pre-wrap;
+  word-break: break-all; max-height: 200px; overflow: auto;
+  background: rgba(128,128,128,.08); border-radius: 5px; padding: 8px; margin: 6px 0 0;
+}
+.hint { color: var(--textcolor2, #79839a); font-size: 12px; }
+.sectionline { height: 1px; background: var(--borderc, #2b323f); margin: 16px 0 12px; }
+.sectiontitle {
+  font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--textcolor2, #79839a); margin-bottom: 8px;
+}
+
+/* --- chat selection ------------------------------------------------------ */
+
+.botcard { display: flex; gap: 12px; align-items: flex-start; }
+.botportrait, .botinitials {
+  width: 72px; height: 72px; border-radius: 8px; flex-shrink: 0;
+  background: rgba(128,128,128,.12);
+}
+.botportrait { object-fit: cover; }
+.botinitials {
+  display: flex; align-items: center; justify-content: center;
+  font-size: 24px; font-weight: 700; color: var(--textcolor2, #79839a);
+}
+.botname { font-size: 15px; font-weight: 700; }
+/* The background asset importer, under the bot's name on the picker. */
+.assetsync { margin-top: 4px; }
+/* The assets tab: a grid of thumbnails with the name under each, like RisuAI's. */
+.assetgrid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 10px; margin-bottom: 14px;
+}
+.assetcell {
+  border: 1px solid var(--borderc, #2b323f); border-radius: 6px; padding: 6px; min-width: 0;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.assetcell.changed { border-color: rgba(245,158,11,.6); }
+.assetcell.failed { border-color: rgba(239,68,68,.5); }
+.assetpic {
+  aspect-ratio: 1 / 1; border-radius: 4px; overflow: hidden; display: flex; align-items: center;
+  justify-content: center; background: rgba(128,128,128,.08);
+}
+.assetpic img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.assetname {
+  font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.assetname.editable { cursor: text; }
+.assetname.editable:hover { text-decoration: underline dotted; }
+.assetrename { width: 100%; font-size: 12px; padding: 2px 4px; }
+.assetmeta { display: flex; align-items: center; gap: 4px; font-size: 10px; color: var(--textcolor2, #79839a); }
+.assetmeta .tiny { margin-left: auto; padding: 0 5px; }
+.assettype {
+  display: inline-block; padding: 14px 18px; border-radius: 6px; font-size: 12px;
+  color: var(--textcolor2, #79839a); background: rgba(128,128,128,.10);
+}
+/* The chevron that opens a preset list; the settings sections in the tab row. */
+.chev { font-size: 20px; line-height: 1; padding: 2px 12px; }
+.tabs .subtabs { display: flex; gap: 2px; align-items: center; }
+.tabs .subtabs .subtab { padding: 8px 14px; }
+.steps { margin: 6px 0 0 18px; padding: 0; }
+.steps li { margin: 2px 0; }
+.thinking .stopbtn { margin-left: 8px; }
+/* A shell / pip request waiting on the user, inside the assistant bubble. */
+.permit {
+  border: 1px solid rgba(245,158,11,.6); border-radius: 6px; padding: 8px 10px; margin: 6px 0;
+  background: rgba(245,158,11,.07);
+}
+.permit.allowed { border-color: rgba(16,185,129,.5); background: rgba(16,185,129,.06); }
+.permit.denied { border-color: rgba(239,68,68,.5); background: rgba(239,68,68,.06); }
+.permit-title { font-weight: 700; font-size: 12px; margin-bottom: 4px; }
+.permit pre.mono { max-height: 140px; }
+.settingsclose { margin-left: auto; }
+.snaplist .verrow { padding: 4px 0; }
+/* Folders in the files tree: a label row, files indented under it. */
+.folderrow .folderlabel { cursor: default; color: var(--textcolor2, #79839a); }
+.folderkids { margin-left: 14px; border-left: 1px solid rgba(128,128,128,.18); padding-left: 4px; }
+/* API key form rows and the model catalog picker. */
+.keyform { border: 1px dashed var(--borderc, #2b323f); border-radius: 6px; padding: 8px; margin: 6px 0; }
+.keyform .row input { flex: 1; min-width: 120px; }
+.catalogpop { width: min(520px, calc(100vw - 32px)); max-width: none; box-sizing: border-box; }
+.catalogpop input { width: 100%; min-width: 0; box-sizing: border-box; }
+.catalogpop .row { min-width: 0; }
+.cataloglist { max-height: 320px; overflow-y: auto; margin-top: 6px; }
+.catrow {
+  display: flex; gap: 8px; width: 100%; text-align: left; padding: 5px 6px; border: none;
+  background: transparent; border-radius: 4px; font-size: 12px;
+}
+.catrow:hover { background: rgba(128,128,128,.12); }
+.assetline { gap: 8px; }
+.assetline.err .hint { color: #ef4444; }
+.assetline.warn .hint { color: #f59e0b; }
+.assetbar {
+  height: 3px; margin-top: 4px; border-radius: 2px; overflow: hidden;
+  background: rgba(128,128,128,.18); max-width: 360px;
+}
+.assetfill { height: 100%; width: 0; background: #2563eb; transition: width .3s; }
+.assetbar.indeterminate .assetfill {
+  width: 30%; animation: assetslide 1.2s ease-in-out infinite alternate;
+}
+@keyframes assetslide { from { margin-left: 0; } to { margin-left: 70%; } }
+
+.folder { margin-bottom: 4px; }
+.folderhead {
+  display: flex; align-items: center; gap: 7px; width: 100%; text-align: left;
+  padding: 6px 8px; border: none; background: transparent; border-radius: 5px;
+  color: var(--textcolor2, #79839a); font-size: 12px;
+}
+.folderhead:hover { background: rgba(128,128,128,.10); }
+.folderdot { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; background: #79839a; }
+.folderbody { display: none; padding-left: 10px; }
+.folderbody.open { display: block; }
+/* On a desktop-width panel a borderless full-width row reads as prose, not a
+   list: cap the width and rule every row so the chats read as chats. */
+.chatlist, .folder {
+  display: flex; flex-direction: column; max-width: 640px;
+  border: 1px solid var(--borderc, #2b323f); border-radius: 6px; overflow: hidden;
+}
+.folder { display: block; margin-bottom: 6px; }
+.chatlist { margin-bottom: 6px; }
+.chatitem {
+  display: flex; align-items: center; gap: 9px; padding: 8px 10px; cursor: pointer;
+  border-bottom: 1px solid var(--borderc, #2b323f);
+}
+.chatlist .chatitem:last-child, .folderbody .chatitem:last-child { border-bottom: none; }
+.chatitem:hover { background: rgba(128,128,128,.10); }
+.chatitem.presetnow, .chatitem.current { background: rgba(37,99,235,.10); }
+.chatitem .n { color: var(--textcolor2, #79839a); font-size: 11px; min-width: 40px; text-align: right; }
+
+/* --- editor: explorer | turns | tools ------------------------------------ */
+
+.split { display: flex; flex: 1; min-height: 0; width: 100%; }
+/* Phone-only view switch (panes.ts); the mobile block below shows it. */
+.mbar { display: none; }
+
+/* A folded section inside a card: a summary line, the rest on demand. */
+details.fold > summary {
+  cursor: pointer; font-size: 12.5px; color: var(--textcolor2, #79839a); padding: 6px 8px;
+  border: 1px dashed var(--borderc, #2b323f); border-radius: 6px; list-style: none;
+}
+details.fold > summary::before { content: '\u25B8 '; }
+details.fold[open] > summary::before { content: '\u25BE '; }
+details.fold[open] > summary { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+details.fold > .foldbody {
+  padding: 10px 10px 6px; border: 1px dashed var(--borderc, #2b323f); border-top: none;
+  border-radius: 0 0 6px 6px;
+}
+.explorer {
+  width: 118px; flex-shrink: 0; overflow-y: auto; padding: 6px 4px;
+  border-right: 1px solid var(--borderc, #2b323f);
+}
+.expgroup {
+  display: block; width: 100%; text-align: left; padding: 5px 8px; margin-bottom: 2px;
+  border: none; background: transparent; border-radius: 5px; font-size: 12px;
+  color: var(--textcolor2, #79839a); font-variant-numeric: tabular-nums;
+}
+.expgroup:hover { background: rgba(128,128,128,.12); }
+.expgroup.on { background: rgba(37,99,235,.18); color: var(--textcolor, #d8dce4); }
+.expmark { font-size: 10px; margin-left: 5px; }
+
+.left {
+  flex: 1; min-width: 260px; display: flex; flex-direction: column; position: relative;
+  /* Lifted off the surrounding panels: the transcript is the subject, the
+     explorer and tools are chrome around it. */
+  background: rgba(255, 255, 255, .035);
+}
+/* The agent takes half the width by default: the conversation is where the
+   work happens and 380px wrapped every sentence of it. */
+.right { flex: 0 0 50%; min-width: 250px; display: flex; flex-direction: column; }
+/* touch-action: none is what makes the drag work on a phone - without it the
+   browser claims the touch for scrolling and fires pointercancel at once. */
+.gutter { flex: 0 0 5px; cursor: col-resize; background: var(--borderc, #2b323f); opacity: .45; touch-action: none; }
+.gutter.leftside { flex-basis: 4px; }
+.gutter:hover, .gutter.dragging { opacity: 1; background: #2563eb; }
+/* A 5px line is honest to look at and mean to grab: an invisible 4px apron on
+   both sides catches the pointer for it (\xA71-30 - the studio's right panel). */
+.gutter { position: relative; }
+.gutter::after { content: ''; position: absolute; top: 0; bottom: 0; left: -4px; right: -4px; }
+
+.toolrow {
+  display: flex; align-items: center; gap: 3px; padding: 6px 8px; flex-wrap: wrap;
+  border-bottom: 1px solid var(--borderc, #2b323f); flex-shrink: 0;
+}
+.toolrow .sep { width: 1px; height: 18px; background: var(--borderc, #2b323f); margin: 0 4px; }
+button.tool {
+  display: flex; align-items: center; gap: 5px; padding: 4px 8px;
+  background: transparent; border-color: transparent;
+}
+button.tool:hover:not(:disabled) { background: rgba(128,128,128,.12); }
+button.tool.on { background: rgba(37,99,235,.18); }
+button.tool .glyph { font-size: 14px; line-height: 1; }
+button.tool .tool-label { font-size: 12px; }
+button.iconbtn { padding: 4px 8px; background: transparent; border-color: transparent; font-size: 14px; }
+button.iconbtn:hover:not(:disabled) { background: rgba(128,128,128,.14); }
+button.iconbtn.on { background: rgba(37,99,235,.18); }
+/* The review rule popover (\xA71-30): compact editor behind one summary button. */
+.rulepop { min-width: 240px; max-width: 340px; }
+.rulepop .advbox { margin-top: 6px; }
+
+.scroller { flex: 1; overflow-y: auto; position: relative; }
+.spacerTop, .spacerBottom { width: 100%; }
+
+.turn { padding: 8px 12px; border-bottom: 1px solid rgba(128,128,128,.10); }
+.turn.changed { background: rgba(37, 99, 235, .06); }
+.turn.isnew { background: rgba(16, 185, 129, .06); }
+.turn.preview { background: rgba(245, 158, 11, .07); }
+.turn.doomed { background: rgba(239, 68, 68, .09); opacity: .7; }
+.turn.doomed .turn-body { text-decoration: line-through; }
+.turn-head {
+  display: flex; gap: 8px; align-items: center; color: var(--textcolor2, #79839a);
+  font-size: 11px; margin-bottom: 3px;
+}
+.turn-head .spacer { flex: 1; }
+.turn-no {
+  /* Tabular figures and a fixed min-width so the numbers form a column: a
+     ragged left edge makes a 394-turn list much harder to scan. */
+  min-width: 30px; padding: 1px 5px; border-radius: 4px; text-align: right;
+  font-family: Consolas, monospace; font-variant-numeric: tabular-nums;
+  font-size: 11px; font-weight: 700;
+  background: rgba(128,128,128,.16); color: var(--textcolor, #d7dce6);
+}
+.turn.changed .turn-no { background: rgba(37, 99, 235, .32); }
+.turn.isnew .turn-no { background: rgba(16, 185, 129, .30); }
+.turn.doomed .turn-no { background: rgba(239, 68, 68, .30); }
+.turn-role { font-weight: 700; }
+.turn-role.user { color: #7dd3fc; }
+.turn-role.char { color: #fbbf24; }
+.turn-body { white-space: pre-wrap; word-break: break-word; }
+/* Speech and inner thought, the two the logs actually mark. The card's own
+   regexes do this on the chat screen; the stored text is flat without it. */
+.speech { color: #f0a04b; }
+.thought { color: #7dd3fc; }
+.turn-body.raw { font-family: Consolas, monospace; font-size: 12px; color: var(--textcolor2, #9aa4b8); }
+.turn-body img.turn-img { max-width: 100%; max-height: 320px; border-radius: 5px; margin: 4px 0; }
+/* Space images in markdown (agent bubbles, viewers). */
+.wsimg img { max-width: 100%; border-radius: 5px; margin: 4px 0; }
+.wsimg.thumb img { max-height: 180px; }
+/* Reserved-aspect placeholder: the cell keeps the image's shape before the
+   bytes arrive - no zero-height blanks, no layout jump. */
+.wsimg.phbox {
+  display: block; width: 100%; overflow: hidden; border-radius: 6px;
+  background: rgba(128,128,136,.08);
+}
+.wsimg.phbox img { width: 100%; height: 100%; object-fit: contain; margin: 0; max-height: none; }
+.wsimg.phbox > .hint { display: flex; align-items: center; justify-content: center; height: 100%; padding: 4px; }
+
+/* The artifact viewer: an overlay over the CENTRE pane only - the left
+   column and the agent stay usable while it is open. */
+.split > .left { position: relative; }
+.artifactview {
+  position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column;
+  background: var(--darkbg, #171717); border-left: 1px solid var(--borderc, #444);
+}
+.artifacthead {
+  display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+  border-bottom: 1px solid var(--borderc, #444);
+}
+.artifacttitle { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.artifactbody { flex: 1; overflow: auto; padding: 12px 16px; }
+.artifactbody img { max-width: 100%; }
+.artifactchip { text-align: left; }
+
+/* A strip of fresh images in the agent log. */
+.imgstrip { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0; }
+.imgstrip .wsimg img { max-height: 72px; border-radius: 6px; margin: 0; }
+.turn textarea { min-height: 90px; }
+.diff-del { background: rgba(239, 68, 68, .22); text-decoration: line-through; }
+.diff-ins { background: rgba(16, 185, 129, .22); }
+.before-label { color: var(--textcolor2, #79839a); font-size: 11px; margin-top: 4px; }
+button.tiny { padding: 1px 7px; font-size: 11px; border-radius: 4px; }
+button.iconbtn.tiny { padding: 2px 4px; display: inline-flex; align-items: center; }
+
+/* The turn editor. Tall on purpose - a turn is often a screen of prose, and
+   the whole reason this left the row is that a few lines were not enough. */
+.turneditwrap { display: flex; flex-direction: column; }
+textarea.turnedit {
+  min-height: 46vh; max-height: 62vh; line-height: 1.7; font-size: 13px;
+  resize: vertical;
+}
+
+.filterbar {
+  display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+  padding: 5px 12px; font-size: 11.5px;
+  background: rgba(245, 158, 11, .12);
+  border-bottom: 1px solid rgba(245, 158, 11, .3);
+  color: var(--textcolor, #d7dce6);
+}
+.filterbar .spacer { flex: 1; }
+.rangerow { display: flex; align-items: center; gap: 6px; margin-bottom: 7px; }
+.rangerow input { width: 74px; text-align: center; }
+
+/* --- files \xB7 presets \xB7 skills --------------------------------------------- */
+.filerow {
+  display: flex; align-items: center; gap: 8px; padding: 3px 0;
+  border-bottom: 1px solid rgba(128,128,128,.08);
+}
+.filerow:last-child { border-bottom: none; }
+button.linkish {
+  flex: 1; min-width: 0; padding: 2px 0; border: none; background: none;
+  text-align: left; color: var(--textcolor, #d7dce6); font-size: 12px;
+  font-family: Consolas, monospace; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; border-radius: 0;
+}
+button.linkish:hover { color: #7dd3fc; text-decoration: underline; }
+.filepreview {
+  max-height: 320px; overflow: auto; white-space: pre-wrap; word-break: break-word;
+  font-size: 11.5px; line-height: 1.5;
+}
+.presetrow, .skillrow {
+  padding: 7px 0; border-bottom: 1px solid rgba(128,128,128,.10);
+  display: flex; align-items: center; gap: 6px;
+}
+.skillrow { display: block; }
+.presetrow:last-child, .skillrow:last-child { border-bottom: none; }
+.presetrow .grow { flex: 1; min-width: 0; }
+.skillbody {
+  margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* --- settings sub-tabs ---------------------------------------------------- */
+.settingswrap { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.subtabs {
+  display: flex; gap: 2px; padding: 0 12px; flex-shrink: 0; flex-wrap: wrap;
+  border-bottom: 1px solid var(--borderc, #2b323f);
+}
+.subtab {
+  padding: 7px 13px; border: none; background: none; border-radius: 0; font-size: 12px;
+  color: var(--textcolor2, #79839a); border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.subtab.active { color: var(--textcolor, #d8dce4); border-bottom-color: #2563eb; font-weight: 700; }
+.subpane { display: none; }
+.subpane.active { display: block; }
+
+/* --- tree (files \xB7 lorebook \xB7 memory) ------------------------------------- */
+.tree { display: flex; flex-direction: column; gap: 1px; padding: 4px; min-width: 0; }
+.treehead, .treefoot {
+  display: flex; align-items: center; gap: 5px; flex-wrap: wrap;
+  padding: 5px 4px; border-bottom: 1px solid var(--borderc, #2b323f);
+}
+.treefoot { border-bottom: none; border-top: 1px solid var(--borderc, #2b323f); margin-top: 6px; }
+.treescope {
+  padding: 7px 5px 3px; font-size: 10.5px; font-weight: 700; letter-spacing: .04em;
+  text-transform: uppercase; color: var(--textcolor2, #79839a);
+}
+.treebranch {
+  display: flex; align-items: center; gap: 5px; width: 100%;
+  padding: 4px 6px; border: none; background: transparent; border-radius: 5px;
+  font-size: 12px; color: var(--textcolor, #d8dce4); text-align: left;
+}
+.treebranch:hover { background: rgba(128,128,128,.12); }
+.treekids { padding-left: 9px; }
+.treerow { display: flex; align-items: center; gap: 3px; }
+button.treefile {
+  flex: 1; min-width: 0; padding: 3px 6px; border: none; background: transparent;
+  border-radius: 5px; text-align: left; font-size: 12px;
+  color: var(--textcolor2, #9aa4b8);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+button.treefile:hover { background: rgba(128,128,128,.12); color: var(--textcolor, #d8dce4); }
+button.treefile.on { background: rgba(37, 99, 235, .22); color: var(--textcolor, #d8dce4); }
+
+/* The tree column is wider than the turn explorer: file and entry names are
+   words, not two-digit ranges. */
+.explorer:has(.tree) { width: 210px; }
+/* Reserve the scrollbar lane whether or not the tree overflows: without this
+   the 9px scrollbar eats the count pill's right inset the moment studio/
+   unfolds, and the pill sits flush against the panel border. */
+.explorer:has(.filetree) { scrollbar-gutter: stable; }
+/* The studio's left column carries the generation card under the tree, so it
+   needs room for labelled fields rather than just folder names. */
+.explorer:has(.studiotabs) { width: 300px; }
+.scenerow { display: flex; flex-direction: column; gap: 4px; padding: 8px 0;
+            border-bottom: 1px solid rgba(128,128,128,.12); }
+.advbox { margin: 10px 0; }
+.advbox summary { cursor: pointer; font-size: 12px; opacity: .7; margin-bottom: 6px; }
+.assetpic { position: relative; }
+.foldertag { position: absolute; right: 4px; bottom: 4px; font-size: 14px;
+             filter: drop-shadow(0 0 2px rgba(0,0,0,.6)); }
+.scenerow .row input[type=number] { width: 74px; flex: none; }
+textarea.promptedit { width: 100%; box-sizing: border-box; min-height: 42vh; font-family: var(--mono, monospace); }
+
+/* --- the comparison selector ---------------------------------------------- */
+/* Column count is set inline (2..6) because it is the user's control, not a
+   breakpoint: how many candidates fit side by side is a judgement about the
+   pictures, not about the window. */
+.selgrid { display: grid; gap: 8px; }
+.selcell { border: 2px solid transparent; border-radius: 6px; padding: 4px; }
+/* The three states have to be readable at a glance across a wall of thumbnails,
+   so they are borders and not badges. */
+.selcell.picked   { border-color: var(--ok, #34d399); }
+.selcell.fixing   { border-color: var(--warn, #fbbf24); }
+.selcell.dropping { border-color: var(--err, #f87171); opacity: .45; }
+.selflags { gap: 4px; justify-content: center; margin-top: 4px; }
+.selflags button.on { background: var(--accent, #6366f1); color: #fff; }
+.selcell .assetpic { cursor: pointer; }
+
+/* --- modal ---------------------------------------------------------------- */
+.modalback {
+  position: fixed; inset: 0; z-index: 90; display: flex;
+  align-items: center; justify-content: center; padding: 24px;
+  background: rgba(0, 0, 0, .55);
+}
+.modalbox {
+  display: flex; flex-direction: column; width: 100%; max-width: 460px;
+  max-height: 100%; border-radius: 9px;
+  background: var(--bgcolor, #12141a);
+  border: 1px solid var(--borderc, #2b323f);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, .5);
+}
+.modalbox.wide { max-width: 620px; }
+.modalhead {
+  display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+  padding: 11px 14px; border-bottom: 1px solid var(--borderc, #2b323f);
+}
+.modalhead h2 {
+  margin: 0; font-size: 12px; font-weight: 700; letter-spacing: .04em;
+  text-transform: uppercase; color: var(--textcolor2, #79839a);
+}
+.modalbody { padding: 14px; overflow-y: auto; }
+.modalbody .card { border: none; padding: 0; margin-bottom: 0; }
+
+/* One row per preset or skill inside a picker. */
+.pickrow {
+  display: flex; align-items: center; gap: 8px; padding: 8px 4px;
+  border-bottom: 1px solid rgba(128,128,128,.10);
+}
+.pickrow:last-child { border-bottom: none; }
+.pickrow.on { background: rgba(37, 99, 235, .12); border-radius: 5px; }
+/* A disabled skill is still stored - dimmed, not hidden. */
+.pickrow.off .pickname { opacity: .55; }
+.pickrow input[type=checkbox] { width: auto; flex-shrink: 0; }
+.pickrow .grow { flex: 1; min-width: 0; cursor: pointer; }
+.pickname { display: flex; align-items: center; gap: 6px; }
+/* Dense variant (the studio's cast list): half the air, smaller hint. */
+.pickrow.compact { padding: 3px 6px; gap: 6px; align-items: center; }
+.pickrow.compact .hint { font-size: 11px; line-height: 1.3; }
+.pickrow.compact .pickname { font-size: 12.5px; }
+/* A slide toggle over a hidden checkbox; the checked knob paints it blue. */
+.switch { position: relative; display: inline-flex; flex: none; width: 28px; height: 16px; cursor: pointer; margin: 0; }
+.switch input { position: absolute; opacity: 0; width: 0; height: 0; margin: 0; }
+.switch .knob { position: absolute; inset: 0; border-radius: 8px; background: rgba(128,128,128,.35); transition: background .15s; }
+.switch .knob::after { content: ''; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%;
+  background: #fff; transition: transform .15s; }
+.switch input:checked + .knob { background: #2563eb; }
+.switch input:checked + .knob::after { transform: translateX(12px); }
+.switch input:focus-visible + .knob { outline: 2px solid rgba(37,99,235,.6); outline-offset: 1px; }
+
+/* The one preset the agent is actually using. */
+.presetnow {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 11px; border-radius: 6px; margin-bottom: 9px;
+  background: rgba(37, 99, 235, .10);
+  border: 1px solid rgba(37, 99, 235, .30);
+}
+.presetnow .grow { min-width: 0; }
+.presetnow-name { font-weight: 700; }
+
+.field select {
+  width: 100%; padding: 6px 8px; border-radius: 5px; font-size: 12px;
+  background: var(--bgcolor, #1a1f27); color: var(--textcolor, #d7dce6);
+  border: 1px solid var(--borderc, #2b323f);
+}
+
+/* --- right panel --------------------------------------------------------- */
+
+.right-inner { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.rtabs { display: flex; gap: 2px; padding: 0 8px; border-bottom: 1px solid var(--borderc, #2b323f); flex-shrink: 0; }
+.rtab {
+  padding: 7px 13px; border: none; background: none; border-radius: 0; font-size: 12px;
+  color: var(--textcolor2, #79839a); border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.rtab.active { color: var(--textcolor, #d8dce4); border-bottom-color: #2563eb; font-weight: 700; }
+.rpanel { display: none; min-height: 0; }
+.rpanel.active { display: block; overflow-y: auto; }
+.rpanel.agentwrap.active { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+
+button.modebtn {
+  display: block; width: 100%; text-align: left; margin-bottom: 5px;
+  background: transparent; border-color: var(--borderc, #2b323f);
+}
+button.modebtn.on { border-color: #2563eb; background: rgba(37, 99, 235, .12); }
+button.modebtn.todo { opacity: .55; }
+label.checkrow { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; font-size: 12px; }
+label.checkrow input { width: auto; }
+
+.popover {
+  position: fixed; z-index: 200; min-width: 280px; max-width: 380px;
+  max-height: 340px; overflow-y: auto; padding: 8px;
+  background: var(--darkbg, #171b23); border: 1px solid var(--borderc, #2b323f);
+  border-radius: 7px; box-shadow: 0 12px 32px rgba(0,0,0,.5);
+}
+.verrow, .sessrow { display: flex; align-items: center; gap: 8px; padding: 6px 4px; }
+.verrow + .verrow, .sessrow + .sessrow { border-top: 1px solid rgba(128,128,128,.12); }
+.sessrow { cursor: pointer; }
+.sessrow:hover { background: rgba(128,128,128,.10); }
+
+/* --- agent ---------------------------------------------------------------
+ *
+ * The agent column sits on a slightly lifted ground of its own. The three
+ * panels were all the same dark, so the boundary between "the transcript" and
+ * "the conversation about the transcript" had to be inferred from the content.
+ * --darkbg is PocketRisu's own second surface, so this follows the host theme
+ * rather than inventing a colour that only suits one of them.
+ */
+.agentwrap { flex: 1; min-height: 0; }
+.agentpanel {
+  display: flex; flex-direction: column; height: 100%; padding: 8px 10px; gap: 7px;
+  background: var(--darkbg, rgba(255, 255, 255, .022));
+}
+.right { background: var(--darkbg, rgba(255, 255, 255, .022)); }
+.agenthead { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.agentlog { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 9px; }
+.bubble { border-radius: 6px; padding: 7px 10px; }
+.bubble.user { background: rgba(37, 99, 235, .12); }
+.bubble.assistant { background: rgba(255, 255, 255, .05); }
+.bubble.note { background: transparent; border: 1px dashed rgba(255, 255, 255, .18); font-size: 12px; opacity: .85; }
+.bubble.note.ok { border-color: rgba(34, 197, 94, .5); }
+.bubble.note.err { border-color: rgba(239, 68, 68, .5); }
+.bubble-body { white-space: pre-wrap; word-break: break-word; }
+.costline { margin-top: 5px; font-size: 11px; color: var(--textcolor2, #79839a); }
+.trace { margin-bottom: 5px; display: flex; flex-wrap: wrap; gap: 4px; }
+.tchip {
+  display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px;
+  border-radius: 4px; font-size: 11px; background: rgba(128,128,128,.14);
+  color: var(--textcolor2, #79839a);
+}
+.tchip .tx { color: #7dd3fc; font-weight: 700; }
+.agentcompose { display: flex; gap: 6px; align-items: flex-end; flex-shrink: 0; }
+/* One line taller than it was: two lines of Korean plus room to see a third
+   coming, which is about the length of a real instruction here. The box is
+   the flexible part and may shrink below its content: with width:100% and no
+   min-width it kept its size when the panel was dragged narrow and pushed
+   the send button out of the visible column. */
+.agentinput {
+  flex: 1 1 auto; min-width: 0; width: auto; max-width: 100%; min-height: 82px; max-height: min(220px, 40vh);
+  background: var(--bgcolor, #12141a);
+  /* Height only. The default handle also drags the width, and a box pulled
+     wider than its column pushed the attach and send buttons off the panel. */
+  resize: vertical;
+}
+.agentinput.dropping { border-color: #7dd3fc; background: rgba(125, 211, 252, .08); }
+/* The whole agent panel is a drop target for reference chips. */
+.agentpanel.dropping { outline: 2px dashed #7dd3fc; outline-offset: -3px; }
+.agentpanel.dropping .agentinput { border-color: #7dd3fc; background: rgba(125,211,252,.08); }
+button.sendbtn { padding: 9px 12px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+/* Attach above send, in a column beside the box. */
+.agentbtns { display: flex; flex-direction: column; gap: 4px; flex-shrink: 0; justify-content: flex-end; }
+.agentbtns button { width: 42px; justify-content: center; }
+/* --- merge conflicts -------------------------------------------------------
+   Red rather than the ordinary amber "\uC218\uC815": an edit badge says "this will be
+   written", a conflict badge says "this cannot be written until you choose". */
+.badge.conflict { background: rgba(239, 68, 68, .18); border-color: rgba(239, 68, 68, .55); color: #fca5a5; }
+.tabbadge.conflict { background: rgba(239, 68, 68, .22); border-color: rgba(239, 68, 68, .6); }
+.conflictbox {
+  border: 1px solid rgba(239, 68, 68, .45); border-radius: 7px; padding: 8px 10px; margin: 8px 0;
+  background: rgba(239, 68, 68, .06);
+}
+.conflicthead { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; flex-wrap: wrap; }
+.conflictrow { border-top: 1px solid var(--borderc, #2b323f); padding-top: 8px; margin-top: 8px; }
+.conflictname { font-size: 12.5px; color: var(--textcolor2, #79839a); margin-bottom: 4px; }
+
+/* A snapshot row whose delete is on its way to the backend. */
+.verrow.deleting, .chatitem.deleting { opacity: .4; }
+
+/* --- \uC9D1\uC911 \uD3B8\uC9D1: one text box, the whole screen ------------------------------ */
+.modalbox.focusmodal { max-width: none; width: calc(100vw - 48px); height: calc(100vh - 48px); }
+.modalbox.focusmodal .modalbody { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.focusbody { display: flex; flex-direction: column; flex: 1; min-height: 0; gap: 8px; }
+textarea.focusarea { flex: 1; min-height: 0; resize: none; font-size: 14px; line-height: 1.7; }
+textarea.focusarea.codearea { font-size: 12.5px; line-height: 1.55; }
+.focusfoot { flex-shrink: 0; }
+.card h2 .focusbtn { text-transform: none; letter-spacing: 0; font-weight: 400; }
+.card h2 { display: flex; align-items: center; gap: 8px; }
+
+/* --- line diff: an IDE's margin, on the material the panel edits ------------- */
+.diffcard { margin: 2px 0 10px; }
+.diffbody { margin-top: 6px; }
+.diffview {
+  border: 1px solid var(--borderc, #2b323f); border-radius: 5px; overflow: auto;
+  max-height: 440px; font-size: 12px;
+}
+.diffview.code { font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace; font-size: 11.5px; }
+.diffsum {
+  display: flex; gap: 6px; align-items: center; padding: 4px 8px; font-size: 11px;
+  border-bottom: 1px solid var(--borderc, #2b323f); position: sticky; top: 0;
+  background: var(--bgcolor, #12141a);
+}
+.diff-ins-n { color: #10b981; font-weight: 700; }
+.diff-del-n { color: #ef4444; font-weight: 700; }
+.diffline { display: flex; line-height: 1.55; border-left: 3px solid transparent; }
+.diffline.ins { background: rgba(16, 185, 129, .13); border-left-color: #10b981; }
+.diffline.del { background: rgba(239, 68, 68, .13); border-left-color: #ef4444; }
+.diffmark {
+  width: 20px; flex-shrink: 0; text-align: center; user-select: none;
+  color: var(--textcolor2, #79839a); font-family: Consolas, monospace;
+}
+.diffline.ins .diffmark { color: #10b981; }
+.diffline.del .diffmark { color: #ef4444; }
+.difftext { white-space: pre-wrap; word-break: break-word; flex: 1; padding-right: 8px; }
+.diffskip {
+  padding: 2px 8px; font-size: 11px; text-align: center;
+  color: var(--textcolor2, #79839a); background: rgba(128,128,128,.08);
+}
+.diffmeta { margin: -4px 0 8px; }
+
+/* --- workspace files: tree | list \xB7 grid ------------------------------------ */
+.filetree .treerow { gap: 0; }
+.filetree .treebranch { padding: 3px 6px; gap: 4px; }
+.filetree .treebranch.on { background: rgba(37, 99, 235, .22); color: var(--textcolor, #d8dce4); }
+.filetree .treebranch.dropping { outline: 2px dashed #7dd3fc; outline-offset: -2px; }
+/* The whole left column is a drop target (falls back to the current folder);
+   a folder branch under the pointer still wins via its own handler. */
+.filedrop.dropping { outline: 2px dashed #7dd3fc; outline-offset: -3px; background: rgba(125,211,252,.05); }
+.filetree .treekids { padding-left: 12px; }
+.filetree .caret {
+  width: 16px; flex-shrink: 0; padding: 0; border: none; background: transparent;
+  color: var(--textcolor2, #79839a); font-size: 10px; text-align: center;
+}
+.filetree .treebranch { overflow: hidden; }
+.filetree .treebranch .n {
+  flex-shrink: 0; margin-left: auto; margin-right: 2px; padding: 0 6px; border-radius: 9px;
+  font-size: 11px; font-variant-numeric: tabular-nums; line-height: 16px;
+  color: var(--textcolor, #d8dce4); background: rgba(128,128,128,.22);
+}
+.filetree .treebranch.on .n { background: rgba(37, 99, 235, .45); }
+/* Segmented control: a bordered pill so grouped small buttons read as ONE
+   control (column picker, view-mode toggle). */
+.segctl {
+  display: inline-flex; align-items: stretch; border: 1px solid var(--borderc, #2b323f);
+  border-radius: 7px; overflow: hidden;
+}
+.segctl .seglabel {
+  display: flex; align-items: center; padding: 0 6px; font-size: 11px;
+  color: var(--textcolor2, #79839a); border-right: 1px solid var(--borderc, #2b323f);
+}
+.segctl button { border: none; border-radius: 0; background: transparent; padding: 3px 9px; font-size: 11.5px; }
+.segctl button + button { border-left: 1px solid var(--borderc, #2b323f); }
+.segctl button.on { background: rgba(37, 99, 235, .28); color: var(--textcolor, #d8dce4); }
+
+/* Tree-head verbs are icon-only; keep the rules scoped - .treehead itself is
+   shared by five other tabs that stay text buttons. */
+.filetree .treehead { gap: 2px; }
+.filetree .treehead .iconbtn { padding: 4px 7px; }
+.frow .ftag {
+  display: inline-block; min-width: 34px; margin-right: 7px; padding: 0 4px; border-radius: 3px;
+  font-family: Consolas, monospace; font-size: 10px; text-align: center; line-height: 15px;
+  color: var(--textcolor2, #79839a); background: rgba(128,128,128,.16);
+}
+.filebar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.filecrumb { font-weight: 700; font-family: Consolas, monospace; font-size: 12.5px; }
+.filehint { font-size: 11px; color: var(--textcolor2, #79839a); margin-bottom: 6px; }
+.filelist { outline: none; border: 1px solid var(--borderc, #2b323f); border-radius: 6px; min-height: 220px; }
+.filelist:focus-within { border-color: rgba(37, 99, 235, .55); }
+.filelist.dropping, .pad.dropping .filelist { outline: 2px dashed #7dd3fc; outline-offset: -2px; background: rgba(125, 211, 252, .06); }
+/* The rubber-band overlay: fixed = viewport coords, no host math. */
+.marquee { position: fixed; z-index: 230; border: 1px dashed #7dd3fc; background: rgba(125,211,252,.12); pointer-events: none; }
+.frow {
+  display: grid; grid-template-columns: 22px 1fr 76px 118px; gap: 8px; align-items: center;
+  padding: 5px 8px; border-bottom: 1px solid rgba(128,128,128,.08); font-size: 12px; user-select: none;
+}
+.frow:last-child { border-bottom: none; }
+.frow:hover { background: rgba(128,128,128,.08); }
+.frow.sel { background: rgba(37, 99, 235, .18); }
+.frow.head {
+  font-size: 10.5px; color: var(--textcolor2, #79839a); font-weight: 700;
+  text-transform: uppercase; letter-spacing: .04em; background: rgba(128,128,128,.05);
+}
+.frow .fname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.frow .fname .ficon { margin-right: 5px; }
+.frow .fsize { text-align: right; font-variant-numeric: tabular-nums; color: var(--textcolor2, #79839a); }
+.frow .ftime { color: var(--textcolor2, #79839a); font-variant-numeric: tabular-nums; font-size: 11px; }
+.frow input[type=checkbox] { width: auto; margin: 0; }
+.fgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 10px; padding: 10px; }
+.fcell {
+  border: 1px solid var(--borderc, #2b323f); border-radius: 6px; padding: 6px;
+  display: flex; flex-direction: column; gap: 4px; user-select: none; min-width: 0;
+}
+.fcell:hover { background: rgba(128,128,128,.06); }
+.fcell.sel { border-color: #2563eb; background: rgba(37, 99, 235, .12); }
+.fcell .fname { font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fcell .fsize { font-size: 10px; color: var(--textcolor2, #79839a); }
+.confirmbar {
+  display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 6px 10px;
+  border-radius: 5px; background: rgba(239, 68, 68, .12); margin-bottom: 8px; font-size: 12px;
+}
+.uploadprog { font-size: 12px; margin-bottom: 8px; color: var(--textcolor2, #79839a); }
+.zipask {
+  display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 6px 10px;
+  border-radius: 5px; background: rgba(125, 211, 252, .1); margin-bottom: 8px; font-size: 12px;
+}
+.fpreview img { max-width: 100%; max-height: 70vh; border-radius: 5px; display: block; }
+.fempty { padding: 28px 16px; text-align: center; color: var(--textcolor2, #79839a); font-size: 12px; }
+@media (max-width: 760px) {
+  .frow { grid-template-columns: 22px 1fr 70px; }
+  .frow .ftime { display: none; }
+  .modalbox.focusmodal { width: 100%; height: 100%; }
+}
+button.attachbtn { padding: 8px 9px; display: flex; align-items: center; flex-shrink: 0; }
+
+.attachbar { display: flex; flex-wrap: wrap; gap: 5px; flex-shrink: 0; }
+.attachchip {
+  display: inline-flex; align-items: center; gap: 5px; max-width: 100%;
+  padding: 2px 4px 2px 8px; border-radius: 5px; font-size: 11.5px;
+  background: rgba(125, 211, 252, .14); border: 1px solid rgba(125, 211, 252, .3);
+}
+.attachchip > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attachchip.bad { background: rgba(239, 68, 68, .14); border-color: rgba(239, 68, 68, .35); }
+.stagedbox { flex-shrink: 0; max-height: 42%; overflow-y: auto; }
+.card.staged { border-color: rgba(245,158,11,.45); background: rgba(245,158,11,.06); }
+.stagedrow { display: flex; gap: 8px; align-items: center; padding: 3px 0; flex-wrap: wrap; }
+.stagedrow .grow { flex: 1; min-width: 120px; }
+
+/* An empty conversation, saying what to ask for. */
+.welcome { display: flex; flex-direction: column; gap: 6px; padding: 4px 2px; }
+.welcome-title { font-weight: 700; font-size: 13px; }
+.welcome-foot { margin-top: 4px; }
+button.exbtn {
+  display: flex; align-items: flex-start; gap: 7px; width: 100%; text-align: left;
+  padding: 8px 10px; font-size: 12px; line-height: 1.5;
+  background: rgba(255, 255, 255, .045);
+  border: 1px solid var(--borderc, #2b323f);
+}
+button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; background: rgba(37, 99, 235, .12); }
+.exmark { color: #7dd3fc; flex-shrink: 0; }
+
+/* --- markdown in agent replies ------------------------------------------- */
+.md-p { margin: 0 0 6px; }
+.md-p:last-child { margin-bottom: 0; }
+.md-tablewrap { overflow-x: auto; margin: 4px 0 8px; }
+.md-table { border-collapse: collapse; font-size: 12px; min-width: 50%; }
+.md-table th, .md-table td { border: 1px solid rgba(128,128,128,.3); padding: 3px 7px; text-align: left; vertical-align: top; }
+.md-table th { background: rgba(255,255,255,.06); font-weight: 600; }
+.md-table td.num, .md-table th.num { text-align: right; }
+.md-table td.mid, .md-table th.mid { text-align: center; }
+.snaplist { margin: 6px 0 4px; }
+.verrow .badge.modechip { background: var(--accent, #7c5cff); color: #fff; opacity: .85; }
+.badge.now { background: rgba(37, 99, 235, .25); }
+.md-h { font-weight: 700; margin: 8px 0 4px; }
+.md-h1 { font-size: 15px; }
+.md-h2 { font-size: 14px; }
+.md-h3, .md-h4 { font-size: 13px; color: var(--textcolor2, #9aa4b8); }
+.md-list { margin: 4px 0 6px; padding-left: 20px; }
+.md-list li { margin-bottom: 2px; }
+.md-quote {
+  margin: 4px 0 6px; padding: 2px 0 2px 10px;
+  border-left: 2px solid rgba(128,128,128,.4); color: var(--textcolor2, #9aa4b8);
+}
+.md-code {
+  margin: 5px 0; padding: 8px; border-radius: 5px; overflow-x: auto;
+  background: rgba(0,0,0,.28); font-family: Consolas, monospace; font-size: 11.5px;
+}
+.md-code code { white-space: pre; }
+.md-inline-code {
+  padding: 1px 4px; border-radius: 3px; background: rgba(128,128,128,.2);
+  font-family: Consolas, monospace; font-size: 12px;
+}
+.md-hr { border: none; border-top: 1px solid var(--borderc, #2b323f); margin: 8px 0; }
+
+/* --- thinking indicator --------------------------------------------------- */
+.thinking { display: flex; align-items: center; gap: 7px; margin-bottom: 5px; }
+.elapsed {
+  font-family: Consolas, monospace; font-variant-numeric: tabular-nums;
+  font-size: 11px; color: var(--textcolor2, #79839a);
+  padding: 0 5px; border-radius: 4px; background: rgba(128,128,128,.14);
+}
+.elapsed.done { background: transparent; padding: 0; }
+.dots.stopped i { animation: none; opacity: .2; }
+.thinkingtext { font-size: 11px; color: var(--textcolor2, #79839a); }
+.dots { display: inline-flex; gap: 3px; }
+.dots i {
+  width: 5px; height: 5px; border-radius: 50%; background: #7dd3fc;
+  animation: blink 1.1s infinite ease-in-out;
+}
+.dots i:nth-child(2) { animation-delay: .18s; }
+.dots i:nth-child(3) { animation-delay: .36s; }
+@keyframes blink { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
+
+/* --- narrow screens -------------------------------------------------------
+ *
+ * Pocket RisuAI on a phone gets the same panel, and two things broke there:
+ * the agent column sat off the right edge because the split is horizontal, and
+ * wide fields in the settings pushed the page sideways.
+ *
+ * The split stacks instead of shrinking. That ordering is deliberate - on a
+ * phone the agent is the thing being used and the transcript is the thing being
+ * checked, so the transcript takes what is left rather than the other way
+ * round. The same gutter still resizes, just vertically (see splitter.ts).
+ */
+.mtoggle { display: none; }
+@media (max-width: 760px) {
+  .split { flex-direction: column; position: relative; }
+
+  /* One view at a time (panes.ts): the agent, or the explorer + editor.
+     Drags set flex-basis inline, so the shown side must win with !important. */
+  .split .gutter { display: none; }
+  .split.m-agent > .explorer, .split.m-agent > .left { display: none; }
+  .split.m-centre > .right { display: none; }
+  .split.m-agent > .right { flex: 1 1 auto !important; min-height: 0; }
+  .split.m-centre > .left { flex: 1 1 auto !important; }
+
+  /* The view switch is a bar across the top of the split, not a floating
+     pill: the pill sat on the attach and send buttons in the agent view and
+     its label named the *other* view, which read as the current one. Two
+     segments, the lit one is where you are. */
+  .mbar {
+    display: flex; align-items: center; gap: 6px; padding: 5px 8px; flex-shrink: 0;
+    border-bottom: 1px solid var(--borderc, #2b323f); background: rgba(255, 255, 255, .03);
+  }
+  .mbar .mseg { display: flex; border: 1px solid var(--borderc, #2b323f); border-radius: 6px; overflow: hidden; }
+  .mbar .mseg button {
+    border: none; border-radius: 0; padding: 5px 13px; font-size: 12px; background: transparent;
+    color: var(--textcolor2, #79839a);
+  }
+  .mbar .mseg button.on { background: rgba(37, 99, 235, .28); color: var(--textcolor, #d8dce4); font-weight: 700; }
+  .mbar .mlist { margin-left: auto; font-size: 12px; padding: 4px 10px; }
+  .split.m-agent .mbar .mlist { display: none; }
+
+  /* The explorer becomes a scrolling strip of jump targets across the top
+     rather than a column eating a third of a 390px screen. */
+  .explorer {
+    /* The base rule is a block column; a strip has to say it is a flex row. */
+    display: flex; flex-direction: row; align-items: center;
+    width: auto; max-width: none; flex-shrink: 0;
+    overflow-x: auto; overflow-y: hidden;
+    border-right: none; border-bottom: 1px solid var(--borderc, #2b323f);
+    padding: 5px 8px; gap: 5px;
+  }
+  .tree { padding: 2px; }
+  /* A tree (lorebook, meta fields, regex...) is a list, not a strip: it
+     scrolls vertically, starts short so the entry below it gets the screen,
+     and the bar's \uBAA9\uB85D button opens it to most of the height. It was pinned
+     at 190px with overflow hidden - the fifth item on was unreachable. */
+  .explorer:has(.tree) { display: block; width: auto; max-height: 150px; overflow-y: auto; overflow-x: hidden; }
+  .split.m-list > .explorer:has(.tree) { max-height: 62%; }
+  .explorer:has(.tree) .tree { width: 100%; }
+
+  /* One line of status. The pill wrapped to three lines on a phone and took
+     80px of a screen that has none to spare. */
+  header .status { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; }
+  header .status > * { white-space: nowrap; }
+  .status .botname { display: none; }
+  .explorer .expgroup {
+    flex-shrink: 0; width: auto; min-width: 72px; margin-bottom: 0;
+    white-space: nowrap;
+  }
+
+  .left { min-width: 0; min-height: 120px; }
+  /* flex-basis is set inline by the drag, so height must not be pinned here -
+     these only decide who yields when there is not enough room. */
+  .right { min-width: 0; flex-basis: 55%; min-height: 180px; }
+
+  .gutter {
+    width: auto; height: 7px; cursor: row-resize;
+    background-image: linear-gradient(to right, transparent 42%,
+      rgba(190,200,215,.35) 42%, rgba(190,200,215,.35) 58%, transparent 58%);
+  }
+
+  /* The tool row wraps instead of scrolling off the edge. */
+  .toolrow { flex-wrap: wrap; row-gap: 4px; }
+  .toolrow .spacer { flex-basis: 100%; height: 0; }
+  .tool-label { display: none; }
+
+  header { padding: 7px 10px; gap: 6px; }
+  header h1 span { display: none; }
+  .status .chatname { display: none; }
+  .tab { padding: 8px 11px; }
+  .pad { padding: 10px; }
+
+  /* Nothing may push the page sideways. Rows become columns and every control
+     is allowed to shrink below its content width - a fixed-width input in a
+     flex row is what put the settings fields past the right edge. */
+  .row { flex-wrap: wrap; }
+  .row > * { min-width: 0; }
+  .rangerow input { width: 64px; }
+  .field select, .field input, .field textarea { max-width: 100%; }
+  .modalback { padding: 0; }
+  .modalbox, .modalbox.wide { max-width: none; height: 100%; border-radius: 0; }
+  .filepreview { font-size: 11px; }
+  .pickrow { flex-wrap: wrap; row-gap: 4px; }
+  .pickrow .grow { flex-basis: 100%; }
+}
+
+/* Belt and braces: whatever the width, the panel itself never scrolls
+   sideways. A single over-wide child used to take the whole page with it. */
+.wrap { overflow-x: hidden; }
+.pad { overflow-x: hidden; }
+
+/* Checkboxes, once, at the end so it wins the width:100% + padding that the
+   generic input rule (and .genform input) hand every <input>. A checkbox
+   the size of a text field floating mid-row was the complaint. */
+input[type=checkbox] {
+  width: auto; min-width: 0; padding: 0; margin: 0;
+  flex: none; accent-color: #2563eb;
+}
+label.row { align-items: center; gap: 6px; }
+.pickrow { align-items: flex-start; }
+.pickrow input[type=checkbox] { margin-top: 3px; }
+
+/* --- the studio's left tabs, collapse rails, and inline editors ------------------ */
+/* Tabs LOOK like tabs: a flat horizontal strip on a baseline rule, the active
+   one underlined in accent - not bordered boxes a form or a button would
+   wear. The strip never wraps into a column. */
+.tabstrip {
+  display: flex; flex-direction: row; flex-wrap: nowrap; align-items: flex-end;
+  gap: 2px; border-bottom: 1px solid var(--borderc, #2b323f); min-width: 0;
+}
+.tabstrip .tab {
+  flex: 0 1 auto; min-width: 0; width: auto; padding: 5px 12px;
+  border: none; background: transparent; border-radius: 6px 6px 0 0;
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+  color: var(--textcolor2, #79839a); font-size: 13px; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; cursor: pointer;
+}
+.tabstrip .tab:hover { color: var(--textcolor, #d8dce4); background: rgba(128, 128, 128, .08); }
+.tabstrip .tab.on {
+  color: var(--textcolor, #d8dce4); font-weight: 700;
+  border-bottom-color: #2563eb;
+}
+.tabstrip .grow { flex: 1 1 0; min-width: 0; }
+.studiotabs { padding: 6px 6px 0; }
+.centretabs { margin-bottom: 10px; }
+
+/* Collapsed rails: the pane and its gutter vanish, a slim strip stays so the
+   panel can be found again. */
+.split.lcollapse > .explorer, .split.lcollapse > .gutter.leftside { display: none; }
+.split.rcollapse > .right, .split.rcollapse > .gutter:not(.leftside) { display: none; }
+
+/* The tool buttons under the style editor (\uCE90\uB9AD\uD130 \xB7 \uC870\uAC01). */
+.toolbtns { display: flex; gap: 6px; padding: 6px 8px; }
+.toolbtns .toolbtn { flex: 1; padding: 7px 6px; display: flex; align-items: center; justify-content: center; gap: 6px; }
+
+/* The selected style, edited in place in the left column. */
+.styleedit { padding: 4px 8px 0; }
+.styleedit textarea { width: 100%; box-sizing: border-box; resize: vertical; }
+.styleedit .field { display: block; margin-bottom: 6px; }
+.styleedit .field > span { display: block; font-size: 11px; opacity: .7; margin-bottom: 2px; }
+div.field > span:first-child { display: block; font-size: 11px; opacity: .7; margin-bottom: 2px; }
+div.field { min-width: 0; }
+
+/* The character editor hosted inside the left column. */
+.charinline { margin: 0 4px 8px 4px; padding: 0 4px; }
+.charinline textarea, .charinline input, .charinline select { width: 100%; box-sizing: border-box; }
+.charinline input[type=checkbox], .charinline input[type=file], .charinline input[type=range] { width: auto; }
+/* Left-column editors must be able to SHRINK: promptedit's 42vh floor is for
+   the centre's full-page editors, and it made the column a scroll hunt. */
+textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; resize: vertical; }
+
+/* Reference cards: the picture is the name, \u2715 sits ON it, sliders below. */
+.refgrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.refcard { border: 1px solid var(--borderc, #2b323f); border-radius: 8px; padding: 6px; display: flex; flex-direction: column; gap: 4px; }
+.refcard.off { opacity: .55; }
+.refcard.bad { border-color: #ef4444; }
+.refpic { position: relative; min-height: 60px; border-radius: 6px; overflow: hidden; background: var(--darkbg, #171a21); }
+.refpic img { width: 100%; height: auto; display: block; }
+.refx { position: absolute; top: 4px; right: 4px; padding: 0 6px; background: rgba(0, 0, 0, .6); }
+.refslider { display: flex; align-items: center; gap: 6px; }
+.refslider input[type=range] { flex: 1; min-width: 0; margin: 0; }
+.refslider .hint { flex: 0 0 auto; }
+.refval { min-width: 30px; text-align: right; font-family: var(--mono, monospace); }
+.stylefold summary { font-size: 12px; }
+
+/* Notices are toasts in the corner - never a bar that shoves the centre. */
+.toastwrap { position: fixed; top: 12px; right: 12px; z-index: 60; display: flex; flex-direction: column; gap: 6px; max-width: min(420px, 80vw); pointer-events: none; }
+.toast { pointer-events: auto; cursor: pointer; padding: 8px 12px; border-radius: 8px; font-size: 12px;
+         background: var(--darkbg, #171a21); border: 1px solid var(--borderc, #2b323f);
+         box-shadow: 0 6px 20px rgba(0, 0, 0, .35); color: var(--textcolor, #d8dce4); }
+.toast.ok { border-color: rgba(16, 185, 129, .6); }
+.toast.err { border-color: rgba(239, 68, 68, .7); }
+
+/* The fragment organizer in the centre. */
+.fragcols { display: flex; gap: 14px; align-items: flex-start; width: 100%; }
+.fragcols > .fraglist { flex: 0 0 220px; min-width: 0; }
+.fragcols > .fragedit { flex: 1 1 auto; min-width: 0; width: 100%; }
+.fragedit textarea.promptedit { min-height: 50vh; }
+.fraglist input { width: 100%; box-sizing: border-box; }
+
+/* The centre tabs (1\uC7A5 \xB7 \uBC30\uCE58 \xB7 \uC7A1 \uD788\uC2A4\uD1A0\uB9AC) style via .tabstrip above. */
+
+/* 1\uC7A5: one big picture, then the controls, then the batch strip. */
+.bigpreview {
+  min-height: 58vh; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; border: 1px solid var(--borderc, #2b323f);
+  border-radius: 8px; background: var(--darkbg, #171a21); overflow: hidden;
+}
+.bigpreview img { max-width: 100%; max-height: 72vh; object-fit: contain; display: block; }
+.bigpreview .previewname { padding: 4px 8px; }
+.countbox { width: 56px; text-align: center; }
+.striprow { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; }
+/* --- the bottom generation strip (replaces the old history tab) ------------- */
+.genstrip { flex: 0 0 auto; border-top: 1px solid var(--borderc, #2b323f); padding: 4px 10px 6px; }
+.genstrip .striphead { margin-bottom: 2px; }
+.genstrip.folded .striprow { display: none; }
+.genstrip .stripcell { position: relative; }
+.genstrip .stripcell.live { outline: 2px solid #f59e0b; }
+.genstrip .stripbadge { position: absolute; top: 2px; left: 2px; font-size: 10px; }
+.stripcell { flex: 0 0 auto; height: 72px; aspect-ratio: 832 / 1216; padding: 0; overflow: hidden; border-radius: 6px; }
+.stripcell img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.stripcell.on { outline: 2px solid #2563eb; }
+
+/* \uBC30\uCE58: the scene cards (the reservation queue's face). */
+.scenegrid { display: grid; gap: 8px; margin-bottom: 8px; }
+.scenecard { border: 1px solid var(--borderc, #2b323f); border-radius: 8px; padding: 6px; }
+.scenecard.reserved { border-color: #2563eb; }
+/* Batch progress rides the cards (usability item 13): the scene being drawn
+   gets a ring and a step bar; the bar above the submit is one segment per
+   image (green saved \xB7 red failed \xB7 amber current, part-filled by step). */
+.scenecard.working { border-color: #f59e0b; box-shadow: 0 0 0 1px rgba(245,158,11,.4); }
+.sceneprog { margin-top: 4px; }
+.sceneprog-track { height: 4px; border-radius: 2px; background: rgba(128,128,136,.25); overflow: hidden; }
+.sceneprog-fill { height: 100%; width: 0; background: #f59e0b; transition: width .3s; }
+.sceneprog-label { display: block; margin-top: 2px; font-size: 10.5px; }
+.batchbar { margin: 6px 0 2px; }
+.batchsegs { display: flex; gap: 2px; height: 8px; margin-bottom: 3px; }
+.batchseg { flex: 1 1 0; min-width: 3px; border-radius: 2px; background: rgba(128,128,136,.22); overflow: hidden; position: relative; }
+.batchseg.ok { background: #10b981; }
+.batchseg.fail { background: #ef4444; }
+.batchseg.cur { background: rgba(245,158,11,.25); }
+.batchseg-fill { height: 100%; width: 0; background: #f59e0b; }
+.sceneface { min-height: 70px; display: flex; align-items: center; justify-content: center; }
+.sceneface .jobpic { width: 100%; }
+.scenefallback { font-size: 13px; opacity: .6; padding: 20px 4px; }
+.reservenum { min-width: 30px; }
+
+/* \uBC30\uCE58: one section per JOB, newest first. */
+.jobsec { margin-bottom: 14px; border: 1px solid var(--borderc, #2b323f); border-radius: 8px; padding: 8px; }
+.jobsec.live { border-color: #2563eb; }
+.jobhead { margin-bottom: 6px; }
+.jobgrid { display: grid; gap: 8px; }
+.jobpic { cursor: zoom-in; display: block; }
+.jobpic img { width: 100%; height: auto; display: block; border-radius: 6px; }
+.jobwait { display: flex; flex-direction: column; gap: 4px; align-items: center; justify-content: center;
+           min-height: 90px; border: 1px dashed var(--borderc, #2b323f); border-radius: 6px; }
+.liveframe { position: relative; }
+.liveframe .badge { position: absolute; top: 6px; left: 6px; }
+.jobcell .fname { margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* The selector shows pictures WHOLE (like the history grid), never cropped
+   to a square: the choice is made on the picture, so all of it has to show. */
+.selgrid .assetpic { aspect-ratio: auto; min-height: 60px; }
+.selgrid .assetpic img { height: auto; object-fit: contain; }
+.tabsep { width: 1px; align-self: stretch; margin: 4px 6px; background: var(--borderc, #2b323f); }
+.split > .right { position: relative; }
+
+/* The selector's rule chips and group cards. */
+.tokenchip { font-family: var(--mono, monospace); }
+.groupcard { cursor: pointer; }
+.groupcard.picked { outline: 2px solid #2563eb; border-radius: 6px; }
+.groupcard .fname { display: flex; gap: 4px; align-items: center; }
+.groupcard .fname .grow { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* The folder grid (OUTPUT \u2192 a folder). */
+.foldergrid { display: grid; gap: 8px; }
+.foldergrid .foldcell { cursor: pointer; text-align: center; padding: 12px 6px; }
+.foldergrid .foldface { font-size: 30px; }
+.foldergrid .imgcell { cursor: pointer; }
+.foldergrid .imgcell.picked { outline: 2px solid #2563eb; border-radius: 6px; }
+
+/* The \uC694\uCCAD \uC124\uC815 modal form. */
+.genform label.field { margin-bottom: 6px; }
+.genform label.field > span { display: block; font-size: 11px; opacity: .7; margin-bottom: 2px; }
+.genform input, .genform select { width: 100%; box-sizing: border-box; }
+.genform input[type=checkbox] { width: auto; }
+.genform .row { gap: 6px; align-items: flex-end; }
+
+@media (max-width: 900px) {
+  .layoutslot { display: none !important; }
+}
+
+/* --- context menu (file rows) -------------------------------------------------- */
+.ctxmenu {
+  position: fixed; z-index: 240; min-width: 168px; padding: 4px;
+  background: var(--darkbg, #171b23); border: 1px solid var(--borderc, #2b323f);
+  border-radius: 7px; box-shadow: 0 12px 32px rgba(0,0,0,.5);
+}
+.ctxmenu button {
+  display: block; width: 100%; text-align: left; padding: 5px 10px;
+  border: none; background: transparent; border-radius: 4px; font-size: 12px;
+}
+.ctxmenu button:hover:not(:disabled) { background: rgba(128,128,128,.14); }
+.ctxmenu button.danger { color: #f87171; background: transparent; }
+.ctxmenu button.danger:hover:not(:disabled) { background: rgba(239,68,68,.14); }
+.ctxmenu .ctxsep { height: 1px; background: var(--borderc, #2b323f); margin: 4px 2px; }
+
+/* --- the upload overlay: a fixed card no redraw can eat ------------------------- */
+.uploadpanel {
+  position: fixed; right: 14px; bottom: 14px; z-index: 85;
+  width: min(340px, calc(100vw - 28px)); padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 6px; font-size: 12px;
+  background: var(--darkbg, #171b23); border: 1px solid var(--borderc, #2b323f);
+  border-radius: 9px; box-shadow: 0 12px 32px rgba(0,0,0,.5);
+}
+.uploadpanel .uphead { display: flex; align-items: center; gap: 6px; font-weight: 700; }
+.uploadpanel .uphead .iconbtn { margin-left: auto; padding: 0 6px; }
+.uploadpanel .upline {
+  display: flex; gap: 8px; color: var(--textcolor2, #79839a);
+  white-space: nowrap; overflow: hidden;
+}
+.uploadpanel .upline .grow { overflow: hidden; text-overflow: ellipsis; }
+.uploadpanel .assetbar { max-width: none; height: 6px; margin-top: 0; }
+.uploadpanel .uperr { color: #f87171; white-space: normal; }
+.uploadpanel.done { border-color: rgba(16,185,129,.55); }
+.uploadpanel.failed { border-color: rgba(239,68,68,.6); }
+
+/* --- filebar: icon verbs and the fold-out search -------------------------------- */
+.filebar .iconbtn { padding: 3px 7px; display: inline-flex; align-items: center; }
+.filebar .iconbtn.on { background: rgba(37,99,235,.18); border-radius: 5px; }
+.fsearch { display: inline-flex; align-items: center; gap: 2px; }
+.fsearch input {
+  width: 0; min-width: 0; padding: 3px 0; border-color: transparent;
+  background: transparent; transition: width .15s ease;
+}
+.fsearch.open input {
+  width: 150px; padding: 3px 8px;
+  border-color: var(--borderc, #2b323f); background: var(--darkbg, #171b23);
+}
+
+/* --- syntax tints: the mirror behind a textarea --------------------------------- */
+.hlwrap { position: relative; display: block; }
+.hlwrap > textarea.hl-on { position: relative; z-index: 1; background: transparent; box-sizing: border-box; }
+.hlmirror {
+  position: absolute; inset: 0; overflow: hidden; pointer-events: none;
+  /* The wrap declarations are only the no-computed-style fallback: at runtime
+     copyTypography() inlines the textarea's own computed values over them.
+     Chromium textareas compute pre-wrap + normal + break-word. */
+  color: transparent; white-space: pre-wrap; word-break: normal; overflow-wrap: break-word;
+  background: var(--darkbg, #171b23); border-radius: 5px;
+}
+/* Inline backgrounds only paint the font's content area (~1.15em) while the
+   editors run line-height 1.6: pad the band to fill the line box (0.22em is
+   about half that leading - a visual tuning constant), and close wrapped
+   fragments into their own rounded boxes. */
+.hlmirror span {
+  border-radius: 3px; padding-block: 0.22em;
+  -webkit-box-decoration-break: clone; box-decoration-break: clone;
+}
+
+/* --- autocomplete popup ---------------------------------------------------------- */
+.suggestpop {
+  position: fixed; z-index: 260; min-width: 200px; max-width: 300px; overflow: hidden;
+  background: var(--darkbg, #171b23); border: 1px solid var(--borderc, #2b323f);
+  border-radius: 7px; box-shadow: 0 12px 32px rgba(0,0,0,.5);
+}
+.suggestpop button {
+  display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+  border: none; border-radius: 0; background: transparent; padding: 4px 10px;
+  font-family: ui-monospace, Consolas, monospace; font-size: 12px;
+}
+.suggestpop button.on { background: rgba(37,99,235,.2); }
+.suggestpop .cnt { margin-left: auto; color: var(--textcolor2, #79839a); font-size: 10.5px; }
+.suggestpop .frag { color: #5cbe7d; }
+.suggestpop .fold { color: var(--textcolor2, #79839a); }
+
+/* --- the tab bar's mode chip (\uBD07 \uD3B8\uC9D1 / \uCC57 \uD3B8\uC9D1) --------------------------------- */
+.tabs .modetab { align-self: center; margin: 0 4px 0 0; white-space: nowrap; }
+
+/* File rows and grid cells as drop targets for internal drags. */
+.frow.dropping, .fcell.dropping { outline: 2px dashed #7dd3fc; outline-offset: -2px; }
+`;
+  function injectStyles() {
+    if (document.getElementById("risu-hina-style")) return;
+    const style = document.createElement("style");
+    style.id = "risu-hina-style";
+    style.textContent = CSS;
+    (document.head || document.documentElement).appendChild(style);
+  }
+
+  // src/ui/markdown.ts
+  function renderMarkdown(text2, opts = {}) {
+    const frag = document.createDocumentFragment();
+    const lines = text2.split("\n");
+    let i = 0;
+    while (i < lines.length) {
+      const line = lines[i];
+      const fence = line.match(/^\s*```(\w*)\s*$/);
+      if (fence) {
+        const lang = fence[1];
+        const body = [];
+        i++;
+        while (i < lines.length && !/^\s*```\s*$/.test(lines[i])) body.push(lines[i++]);
+        i++;
+        const pre = el("pre", { class: "md-code" }, [el("code", { text: body.join("\n") })]);
+        if (lang) pre.dataset.lang = lang;
+        frag.appendChild(pre);
+        continue;
+      }
+      if (/^\s*([-*_])\1{2,}\s*$/.test(line)) {
+        frag.appendChild(el("hr", { class: "md-hr" }));
+        i++;
+        continue;
+      }
+      const heading = line.match(/^(#{1,4})\s+(.*)$/);
+      if (heading) {
+        const level = Math.min(4, heading[1].length);
+        const h = el("div", { class: "md-h md-h" + level });
+        h.appendChild(inline(heading[2], opts));
+        frag.appendChild(h);
+        i++;
+        continue;
+      }
+      if (/^\s*>\s?/.test(line)) {
+        const body = [];
+        while (i < lines.length && /^\s*>\s?/.test(lines[i])) {
+          body.push(lines[i].replace(/^\s*>\s?/, ""));
+          i++;
+        }
+        const q = el("div", { class: "md-quote" });
+        q.appendChild(renderMarkdown(body.join("\n"), opts));
+        frag.appendChild(q);
+        continue;
+      }
+      if (line.includes("|") && i + 1 < lines.length && isTableSeparator(lines[i + 1])) {
+        const header = splitRow(line);
+        const aligns = splitRow(lines[i + 1]).map((c) => {
+          const t = c.trim();
+          return t.startsWith(":") && t.endsWith(":") ? "mid" : t.endsWith(":") ? "num" : "";
+        });
+        i += 2;
+        const rows = [];
+        while (i < lines.length && lines[i].includes("|") && lines[i].trim()) {
+          rows.push(splitRow(lines[i]));
+          i++;
+        }
+        const cellClass = (j) => aligns[j] || "";
+        const thead = el("thead", {}, [el("tr", {}, header.map((h, j) => {
+          const th = el("th", { class: cellClass(j) });
+          th.appendChild(inline(h.trim(), opts));
+          return th;
+        }))]);
+        const tbody = el("tbody", {}, rows.map((r) => el("tr", {}, header.map((_, j) => {
+          const td = el("td", { class: cellClass(j) });
+          td.appendChild(inline((r[j] ?? "").trim(), opts));
+          return td;
+        }))));
+        frag.appendChild(el("div", { class: "md-tablewrap" }, [el("table", { class: "md-table" }, [thead, tbody])]));
+        continue;
+      }
+      const bullet = line.match(/^\s*([-*+]|\d+\.)\s+/);
+      if (bullet) {
+        const ordered = /\d/.test(bullet[1]);
+        const list2 = el(ordered ? "ol" : "ul", { class: "md-list" });
+        while (i < lines.length) {
+          const m = lines[i].match(/^\s*(?:[-*+]|\d+\.)\s+(.*)$/);
+          if (!m) break;
+          const li = el("li");
+          li.appendChild(inline(m[1], opts));
+          list2.appendChild(li);
+          i++;
+        }
+        frag.appendChild(list2);
+        continue;
+      }
+      if (!line.trim()) {
+        i++;
+        continue;
+      }
+      const para = [];
+      while (i < lines.length && lines[i].trim() && !isBlockStart(lines[i]) && !(lines[i].includes("|") && isTableSeparator(lines[i + 1] ?? ""))) {
+        para.push(lines[i]);
+        i++;
+      }
+      const p = el("div", { class: "md-p" });
+      p.appendChild(inline(para.join("\n"), opts));
+      frag.appendChild(p);
+    }
+    return frag;
+  }
+  function isTableSeparator(line) {
+    const cells2 = splitRow(line);
+    return cells2.length > 0 && cells2.every((c) => /^\s*:?-{1,}:?\s*$/.test(c)) && /-{2,}/.test(line);
+  }
+  function splitRow(line) {
+    let s = line.trim();
+    if (s.startsWith("|")) s = s.slice(1);
+    if (s.endsWith("|") && !s.endsWith("\\|")) s = s.slice(0, -1);
+    return s.split(/(?<!\\)\|/).map((c) => c.replace(/\\\|/g, "|"));
+  }
+  function isBlockStart(line) {
+    return /^\s*```/.test(line) || /^#{1,4}\s/.test(line) || /^\s*>/.test(line) || /^\s*(?:[-*+]|\d+\.)\s/.test(line) || /^\s*([-*_])\1{2,}\s*$/.test(line);
+  }
+  var INLINE_RE = /(\*\*[^*\n]+\*\*|__[^_\n]+__|\*[^*\n]+\*|_[^_\n]+_|`[^`\n]+`|!\[[^\]\n]*\]\([^)\s]+\)|\[[^\]\n]+\]\([^)\s]+\))/g;
+  function inline(text2, opts) {
+    const frag = document.createDocumentFragment();
+    let last = 0;
+    let m;
+    INLINE_RE.lastIndex = 0;
+    while ((m = INLINE_RE.exec(text2)) !== null) {
+      if (m.index > last) frag.appendChild(document.createTextNode(text2.slice(last, m.index)));
+      frag.appendChild(token(m[0], opts));
+      last = INLINE_RE.lastIndex;
+    }
+    if (last < text2.length) frag.appendChild(document.createTextNode(text2.slice(last)));
+    return frag;
+  }
+  function token(tok, opts) {
+    if (tok.startsWith("![")) {
+      const m = tok.match(/^!\[([^\]]*)\]\(([^)\s]+)\)$/);
+      if (m) {
+        return opts.image ? opts.image(m[2], m[1]) : document.createTextNode(`[\uC774\uBBF8\uC9C0: ${m[1] || m[2]}]`);
+      }
+    }
+    if (tok.startsWith("**") || tok.startsWith("__")) {
+      return el("strong", { text: tok.slice(2, -2) });
+    }
+    if (tok.startsWith("`")) {
+      return el("code", { class: "md-inline-code", text: tok.slice(1, -1) });
+    }
+    if (tok.startsWith("[")) {
+      const m = tok.match(/^\[([^\]]+)\]\(([^)\s]+)\)$/);
+      if (m) {
+        const href = /^https?:\/\//i.test(m[2]) ? m[2] : "";
+        return href ? el("a", { href, target: "_blank", rel: "noopener noreferrer", text: m[1] }) : document.createTextNode(m[1]);
+      }
+    }
+    return el("em", { text: tok.slice(1, -1) });
+  }
+
+  // src/ui/blobimg.ts
+  var PARALLEL = 6;
+  var active = 0;
+  var queue = [];
+  var cache = /* @__PURE__ */ new Map();
+  var inflight = /* @__PURE__ */ new Map();
+  var IMAGE_TIMEOUT_MS = 45e3;
+  var SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i;
+  function normalizeWorkspacePath(path) {
+    let p = (path || "").trim().replace(/\\/g, "/");
+    if (SCHEME_RE.test(p)) return p;
+    const m = p.match(/(?:^|\/)(?:data\/)?space\/(.+)$/);
+    if (m) p = m[1];
+    p = p.replace(/^\.?\/+/, "");
+    return p;
+  }
+  function safeWorkspacePath(path) {
+    if (!path || SCHEME_RE.test(path) || path.startsWith("/") || path.startsWith("\\")) return false;
+    return !path.split(/[\\/]/).some((p) => p === "..");
+  }
+  async function blobUrl(path, stamp = "", opts = {}) {
+    const key = (opts.thumb ? "t:" : "") + (stamp ? `${path}:${stamp}` : path);
+    const hit = cache.get(key);
+    if (hit) {
+      cache.delete(key);
+      cache.set(key, hit);
+      return hit;
+    }
+    const running = inflight.get(key);
+    if (running) return running;
+    const job = fetchBlob(path, key, opts);
+    inflight.set(key, job);
+    try {
+      return await job;
+    } finally {
+      inflight.delete(key);
+    }
+  }
+  async function fetchBlob(path, key, opts) {
+    await new Promise((resolve) => {
+      const go = () => {
+        active += 1;
+        resolve();
+      };
+      if (active < PARALLEL) go();
+      else queue.push(go);
+    });
+    try {
+      const again = cache.get(key);
+      if (again) return again;
+      const bytes = opts.thumb ? await state.fileThumb(path) : await state.fileBytes(path, IMAGE_TIMEOUT_MS);
+      const buf = new Uint8Array(bytes.byteLength);
+      buf.set(bytes);
+      const url = URL.createObjectURL(new Blob([buf]));
+      while (cache.size >= 600) {
+        const [k, u] = cache.entries().next().value;
+        cache.delete(k);
+        setTimeout(() => URL.revokeObjectURL(u), 3e4);
+      }
+      cache.set(key, url);
+      return url;
+    } finally {
+      active -= 1;
+      queue.shift()?.();
+    }
+  }
+  var pending = /* @__PURE__ */ new Map();
+  var io = null;
+  try {
+    io = new IntersectionObserver((entries) => {
+      for (const e of entries) {
+        if (!e.isIntersecting) continue;
+        io?.unobserve(e.target);
+        const cb = pending.get(e.target);
+        pending.delete(e.target);
+        cb?.();
+      }
+    }, { rootMargin: "300px" });
+  } catch {
+    io = null;
+  }
+  function whenVisible(elm, cb) {
+    if (!io) {
+      cb();
+      return;
+    }
+    pending.set(elm, cb);
+    io.observe(elm);
+  }
+  function workspaceImage(path, alt, opts = {}) {
+    path = normalizeWorkspacePath(path);
+    const wrap = el("span", { class: "wsimg" + (opts.thumb ? " thumb" : "") + (opts.aspect ? " phbox" : "") });
+    if (opts.aspect) wrap.style.aspectRatio = opts.aspect;
+    const fallback = () => {
+      clear(wrap);
+      wrap.appendChild(el("span", { class: "hint", text: `[\uC774\uBBF8\uC9C0: ${alt || path}]` }));
+    };
+    if (!safeWorkspacePath(path) || typeof URL === "undefined" || typeof URL.createObjectURL !== "function") {
+      fallback();
+      return wrap;
+    }
+    const start = () => {
+      void blobUrl(path, opts.stamp, { thumb: opts.thumb }).then((url) => {
+        const img = el("img", { src: url, alt: alt || path, loading: "lazy" });
+        img.addEventListener("error", fallback);
+        clear(wrap);
+        wrap.appendChild(img);
+      }).catch(fallback);
+    };
+    if (opts.lazy) whenVisible(wrap, start);
+    else start();
+    return wrap;
+  }
+
+  // src/ui/artifact.ts
+  var view = null;
+  var current = null;
+  function build() {
+    const body = el("div", { class: "artifactbody" });
+    const title = el("span", { class: "artifacttitle grow" });
+    const openFile = el("button", { class: "ghost tiny", text: "\uD30C\uC77C \uD0ED\uC5D0\uC11C \uC5F4\uAE30" });
+    openFile.addEventListener("click", () => {
+      if (current) state.requestOpenFile(current.path);
+    });
+    const close = el("button", { class: "ghost tiny", text: "\uB2EB\uAE30" });
+    close.addEventListener("click", () => closeArtifact());
+    return el("div", { class: "artifactview" }, [
+      el("div", { class: "artifacthead" }, [title, openFile, close]),
+      body
+    ]);
+  }
+  async function load(spec3) {
+    if (!view) return;
+    const body = view.querySelector(".artifactbody");
+    const title = view.querySelector(".artifacttitle");
+    title.textContent = spec3.title || spec3.path;
+    title.title = spec3.path;
+    clear(body);
+    body.appendChild(el("div", { class: "hint", text: "\uC5EC\uB294 \uC911\uC785\uB2C8\uB2E4\u2026" }));
+    const kind = spec3.kind ?? (/\.(png|jpe?g|gif|webp|avif|bmp)$/i.test(spec3.path) ? "image" : /\.(md|markdown)$/i.test(spec3.path) ? "markdown" : "text");
+    try {
+      if (kind === "image") {
+        clear(body);
+        body.appendChild(workspaceImage(spec3.path, spec3.title));
+        return;
+      }
+      const r = await state.readFile(spec3.path);
+      clear(body);
+      if (r.truncated) body.appendChild(el("div", { class: "hint", text: "\uC55E\uBD80\uBD84\uB9CC \uD45C\uC2DC\uD569\uB2C8\uB2E4 \u2014 \uC804\uCCB4\uB294 \uD30C\uC77C \uD0ED\uC5D0\uC11C." }));
+      if (kind === "markdown") {
+        body.appendChild(renderMarkdown(r.content, { image: (p, a) => workspaceImage(p, a) }));
+      } else {
+        body.appendChild(el("pre", { class: "mono filepreview", text: r.content || r.note || "(\uBE44\uC5B4 \uC788\uC2B5\uB2C8\uB2E4)" }));
+      }
+    } catch (e) {
+      clear(body);
+      body.appendChild(el("div", { class: "notice err", text: e instanceof Error ? e.message : String(e) }));
+    }
+  }
+  function centreOf() {
+    return document.querySelector(".panel.active .split > .left");
+  }
+  function showArtifact(spec3, opts = {}) {
+    current = spec3;
+    if (!view) view = build();
+    const centre = centreOf();
+    if (centre && view.parentElement !== centre) centre.appendChild(view);
+    view.style.display = "";
+    void load(spec3);
+    if (opts.flipMobile) showMobileCentre();
+  }
+  function closeArtifact() {
+    if (view) {
+      view.style.display = "none";
+      view.remove();
+    }
+    current = null;
+  }
+  function remountArtifact() {
+    if (!view || !current) return;
+    const centre = centreOf();
+    if (!centre) {
+      view.remove();
+      return;
+    }
+    if (view.parentElement !== centre) centre.appendChild(view);
+  }
 
   // src/ui/conflicts.ts
   var REASON = {
@@ -3723,8 +5364,8 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
   var applyBadge = null;
   var summaryEl = null;
   var noticeMount = null;
-  function buildChatBar(notice9) {
-    noticeMount = notice9;
+  function buildChatBar(notice10) {
+    noticeMount = notice10;
     applyBadge = el("span", { class: "badge warn applybadge", style: { display: "none" } });
     applyBtn = el("button", {
       class: "tool",
@@ -3819,8 +5460,8 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     }
     if (c.memory.changed) out.push(`\uC7A5\uAE30\uAE30\uC5B5 ${c.memory.changed}`);
     if (c.memory.vars) out.push(`\uCC57 \uBCC0\uC218 ${c.memory.vars}`);
-    const pending = (c.staged || 0) + (c.actions || 0);
-    if (pending) out.push(`\uC81C\uC548 ${pending} \uB300\uAE30`);
+    const pending3 = (c.staged || 0) + (c.actions || 0);
+    if (pending3) out.push(`\uC81C\uC548 ${pending3} \uB300\uAE30`);
     return out;
   }
   function shellNotice(text2, kind = "") {
@@ -3994,23 +5635,23 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       }
       if (users.length > 12) body.appendChild(el("div", { class: "hint", text: `\uADF8 \uC678 ${users.length - 12}\uAC1C` }));
       if (autos.length) {
-        const fold = el("div", { class: "autofold" });
+        const fold2 = el("div", { class: "autofold" });
         const toggle = el("button", { class: "ghost tiny", text: `\uC790\uB3D9 \uBC31\uC5C5 ${autos.length}\uAC1C \uBCF4\uAE30` });
         toggle.addEventListener("click", () => {
-          if (fold.childElementCount) {
-            clear(fold);
+          if (fold2.childElementCount) {
+            clear(fold2);
             toggle.textContent = `\uC790\uB3D9 \uBC31\uC5C5 ${autos.length}\uAC1C \uBCF4\uAE30`;
             return;
           }
           toggle.textContent = "\uC790\uB3D9 \uBC31\uC5C5 \uC811\uAE30";
-          fold.appendChild(el("div", {
+          fold2.appendChild(el("div", {
             class: "hint",
             text: "\uC790\uB3D9 \uBC31\uC5C5\uC740 \uBC18\uC601\xB7\uB418\uB3CC\uB9AC\uAE30 \uC9C1\uC804\uC5D0 \uB0A8\uAE34 \uB0B4\uBD80\uC6A9 \uC0AC\uBCF8\uC785\uB2C8\uB2E4. RisuAI\uC758 \uD604\uC7AC \uB0B4\uC6A9\uBCF4\uB2E4 \uACFC\uAC70\uC77C \uC218 \uC788\uC2B5\uB2C8\uB2E4."
           }));
-          for (const c of autos) fold.appendChild(verRow(c, { auto: true }));
+          for (const c of autos) fold2.appendChild(verRow(c, { auto: true }));
         });
         body.appendChild(el("div", { class: "row", style: { marginTop: "8px" } }, [toggle]));
-        body.appendChild(fold);
+        body.appendChild(fold2);
       }
       body.appendChild(snapshotCleanup(users.length, async (keep) => {
         const n = await state.clearCheckpoints(keep);
@@ -4423,11 +6064,11 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     }
     const needle = filterText.trim().toLowerCase();
     const rows = liveChats.map((c, i) => ({ chat: c, index: i })).filter((r) => !needle || String(r.chat.name ?? "").toLowerCase().includes(needle));
-    const grouped = /* @__PURE__ */ new Map();
+    const grouped3 = /* @__PURE__ */ new Map();
     for (const r of rows) {
       const key = String(r.chat.folderId ?? "");
-      if (!grouped.has(key)) grouped.set(key, []);
-      grouped.get(key).push(r);
+      if (!grouped3.has(key)) grouped3.set(key, []);
+      grouped3.get(key).push(r);
     }
     const dirtyBadges = /* @__PURE__ */ new Map();
     const makeItem = (r) => {
@@ -4487,14 +6128,14 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         b.style.display = "";
       }
     })();
-    const loose = grouped.get("") ?? [];
+    const loose = grouped3.get("") ?? [];
     if (loose.length) {
       const list2 = el("div", { class: "chatlist" });
       for (const r of loose) list2.appendChild(makeItem(r));
       pad.appendChild(list2);
     }
     for (const f of folders) {
-      const items5 = grouped.get(String(f.id)) ?? [];
+      const items5 = grouped3.get(String(f.id)) ?? [];
       if (!items5.length) continue;
       const body = el("div", { class: "folderbody" });
       for (const r of items5) body.appendChild(makeItem(r));
@@ -4512,7 +6153,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       pad.appendChild(el("div", { class: "folder" }, [head, body]));
     }
     const known = new Set(folders.map((f) => String(f.id)));
-    const orphans = [...grouped.entries()].filter(([k]) => k !== "" && !known.has(k)).flatMap(([, v]) => v);
+    const orphans = [...grouped3.entries()].filter(([k]) => k !== "" && !known.has(k)).flatMap(([, v]) => v);
     if (orphans.length) {
       const list2 = el("div", { class: "chatlist" });
       for (const r of orphans) list2.appendChild(makeItem(r));
@@ -4535,9 +6176,9 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       const bytes = await Risuai.readImage(path);
       if (!bytes || !bytes.byteLength) return;
       if (portraitUrl) URL.revokeObjectURL(portraitUrl);
-      const view2 = bytes;
-      const buf = new Uint8Array(view2.byteLength);
-      buf.set(view2);
+      const view3 = bytes;
+      const buf = new Uint8Array(view3.byteLength);
+      buf.set(view3);
       portraitUrl = URL.createObjectURL(new Blob([buf]));
       const img = el("img", { class: "botportrait", src: portraitUrl, alt: "" });
       img.addEventListener("error", () => img.replaceWith(mount));
@@ -4605,11 +6246,11 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         const inGroup = this.turns.filter((t) => t.seq >= start && t.seq <= end);
         if (!inGroup.length) continue;
         const changed = inGroup.filter((t) => t.changed || t.isNew).length;
-        const pending = preview2 ? inGroup.filter((t) => preview2.has(t.msgId)).length : 0;
+        const pending3 = preview2 ? inGroup.filter((t) => preview2.has(t.msgId)).length : 0;
         const doomed = deleting2 ? inGroup.filter((t) => deleting2.has(t.msgId)).length : 0;
         const marks = [];
         if (changed) marks.push(`\u270E${changed}`);
-        if (pending) marks.push(`\u25C6${pending}`);
+        if (pending3) marks.push(`\u25C6${pending3}`);
         if (doomed) marks.push(`\u2715${doomed}`);
         const b = el("button", {
           class: "expgroup" + (start === this.activeStart ? " on" : ""),
@@ -4625,277 +6266,140 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     }
   };
 
-  // src/ui/splitter.ts
-  function splitter(opts) {
-    const gutter = el("div", { class: "gutter" + (opts.side === "left" ? " leftside" : ""), title: "\uB4DC\uB798\uADF8\uD574\uC11C \uD328\uB110 \uD06C\uAE30\uB97C \uC870\uC808\uD569\uB2C8\uB2E4" });
-    const vertical = () => {
-      const dir = getComputedStyle(opts.container).flexDirection;
-      return dir === "column" || dir === "column-reverse";
-    };
-    const apply = (px) => {
-      const down = vertical();
-      const min = down ? 160 : opts.min ?? 250;
-      const keep = down ? 140 : 320;
-      const span = down ? opts.container.clientHeight : opts.container.clientWidth;
-      const size = Math.round(Math.min(Math.max(min, span - keep), Math.max(min, px)));
-      opts.target.style.flexBasis = size + "px";
-      return size;
-    };
-    if (opts.storageKey) {
-      void Risuai.pluginStorage.getItem(opts.storageKey).then((v) => {
-        const n = Number(v);
-        if (Number.isFinite(n) && n > 0) apply(n);
-      }).catch(() => {
+  // src/ui/tree.ts
+  var DRAG_PATHS = "text/x-hina-paths";
+  var DRAG_ASSETS = "text/x-hina-assets";
+  function treeRow(n, depth, spec3) {
+    const isOpen = spec3.expanded.has(n.path);
+    const caret = el("button", { class: "caret", text: n.kids.length ? isOpen ? "\u25BE" : "\u25B8" : "" });
+    const branch = el("button", {
+      class: "treebranch" + (spec3.selected.has(n.path) ? " on" : ""),
+      title: n.title ?? n.path
+    }, [
+      el("span", { text: n.glyph ?? (isOpen && n.kids.length ? "\u{1F4C2}" : "\u{1F4C1}") }),
+      el("span", { class: "grow", text: n.name, style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }),
+      n.count == null ? null : el("span", { class: "n", text: String(n.count) })
+    ]);
+    branch.addEventListener("click", (e) => spec3.onOpen(n, e));
+    if (spec3.onContext) {
+      branch.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        spec3.onContext(n, e);
       });
     }
-    let dragging = false;
-    gutter.addEventListener("pointerdown", (e) => {
-      const ev = e;
-      dragging = true;
-      gutter.classList.add("dragging");
-      gutter.setPointerCapture(ev.pointerId);
-      ev.preventDefault();
+    caret.addEventListener("click", (e) => {
+      e.stopPropagation();
+      spec3.onToggle(n);
     });
-    gutter.addEventListener("pointermove", (e) => {
-      if (!dragging) return;
-      const ev = e;
-      const rect = opts.container.getBoundingClientRect();
-      const left = opts.side === "left";
-      apply(vertical() ? left ? ev.clientY - rect.top : rect.bottom - ev.clientY : left ? ev.clientX - rect.left : rect.right - ev.clientX);
+    if (n.droppable && (spec3.onDropFiles || spec3.onDropMove)) {
+      installDrop(branch, {
+        into: () => n.path,
+        onFiles: spec3.onDropFiles,
+        onMove: spec3.onDropMove
+      });
+    }
+    const kids = el(
+      "div",
+      { class: "treekids", style: { display: isOpen ? "" : "none" } },
+      n.kids.map((k) => treeRow(k, depth + 1, spec3))
+    );
+    return el("div", {}, [el("div", { class: "treerow" }, [caret, branch]), kids]);
+  }
+  function installDrop(target, spec3) {
+    const accepts = (dt) => {
+      if (!dt) return false;
+      const types = Array.from(dt.types);
+      return !!spec3.onFiles && types.includes("Files") || !!spec3.onMove && types.includes(DRAG_PATHS) || !!spec3.onAssets && types.includes(DRAG_ASSETS);
+    };
+    for (const kind of ["dragover", "dragenter"]) {
+      target.addEventListener(kind, (e) => {
+        const dt = e.dataTransfer;
+        if (!accepts(dt)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (dt) dt.dropEffect = spec3.effect ?? "move";
+        target.classList.add("dropping");
+      });
+    }
+    target.addEventListener("dragleave", (e) => {
+      if (!target.contains(e.relatedTarget)) target.classList.remove("dropping");
     });
-    const end = (e) => {
-      if (!dragging) return;
-      dragging = false;
-      gutter.classList.remove("dragging");
-      try {
-        gutter.releasePointerCapture(e.pointerId);
-      } catch {
+    target.addEventListener("drop", async (e) => {
+      const dt = e.dataTransfer;
+      target.classList.remove("dropping");
+      if (!dt) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const assets = dt.getData(DRAG_ASSETS);
+      if (assets && spec3.onAssets) {
+        try {
+          const names = JSON.parse(assets);
+          if (Array.isArray(names) && names.length) spec3.onAssets(names.map(String));
+        } catch {
+        }
+        return;
       }
-      if (opts.storageKey) {
-        const w = parseInt(opts.target.style.flexBasis || "0", 10);
-        if (w > 0) void Risuai.pluginStorage.setItem(opts.storageKey, w).catch(() => void 0);
+      const moved = dt.getData(DRAG_PATHS);
+      if (moved && spec3.onMove) {
+        try {
+          const sources = JSON.parse(moved);
+          if (Array.isArray(sources) && sources.length) spec3.onMove(spec3.into(), sources.map(String));
+        } catch {
+        }
+        return;
+      }
+      if (!spec3.onFiles) return;
+      const files = await collectDrop(dt);
+      if (files.length) spec3.onFiles(spec3.into(), files);
+    });
+  }
+  function installDrag(target, paths) {
+    target.draggable = true;
+    target.addEventListener("dragstart", (e) => {
+      const dt = e.dataTransfer;
+      if (!dt) return;
+      dt.setData(DRAG_PATHS, JSON.stringify(paths()));
+      dt.effectAllowed = "copyMove";
+    });
+  }
+  async function collectDrop(dt) {
+    const out = [];
+    const items5 = Array.from(dt.items ?? []);
+    const entries = items5.map((it) => it.webkitGetAsEntry?.() ?? null).filter((x) => !!x);
+    if (!entries.length) {
+      for (const file of Array.from(dt.files)) out.push({ file, rel: "" });
+      return out;
+    }
+    const walk2 = async (entry, rel) => {
+      if (entry.isFile) {
+        const file = await new Promise((res, rej) => entry.file(res, rej));
+        out.push({ file, rel });
+      } else if (entry.isDirectory) {
+        const reader = entry.createReader();
+        const sub = rel ? rel + "/" + entry.name : entry.name;
+        for (; ; ) {
+          const batch = await new Promise((res, rej) => reader.readEntries(res, rej));
+          if (!batch.length) break;
+          for (const child of batch) await walk2(child, sub);
+        }
       }
     };
-    gutter.addEventListener("pointerup", end);
-    gutter.addEventListener("pointercancel", end);
-    gutter.addEventListener("dblclick", () => {
-      const back = apply(opts.side === "left" ? 210 : vertical() ? 360 : Math.round(opts.container.clientWidth / 2));
-      if (opts.storageKey) void Risuai.pluginStorage.setItem(opts.storageKey, back).catch(() => void 0);
+    for (const entry of entries) await walk2(entry, "");
+    return out;
+  }
+  var guardInstalled = false;
+  function installDropGuard(doc) {
+    if (guardInstalled) return;
+    guardInstalled = true;
+    doc.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "none";
     });
-    return gutter;
-  }
-
-  // src/ui/panes.ts
-  function threePane(leftNode) {
-    const left = leftNode ?? el("div", { class: "explorer" });
-    const centre = el("div", { class: "left" });
-    const right = el("div", { class: "right" }, [el("div", { class: "right-inner" })]);
-    const root = el("div", { class: "split" }, [left]);
-    root.appendChild(splitter({ target: left, container: root, storageKey: "treeWidth", side: "left", min: 120 }));
-    root.appendChild(centre);
-    root.appendChild(splitter({ target: right, container: root, storageKey: "panelWidth2" }));
-    root.appendChild(right);
-    root.insertBefore(mobileBar(root), root.firstChild);
-    return { root, left, centre, right };
-  }
-  var VIEW_KEY = "hina.mobileView";
-  var mobileView = "agent";
-  try {
-    const v = localStorage.getItem(VIEW_KEY);
-    if (v === "centre" || v === "agent") mobileView = v;
-  } catch {
-  }
-  var toggles = /* @__PURE__ */ new Map();
-  function syncAll() {
-    for (const [root, t] of [...toggles]) {
-      if (!root.isConnected && toggles.size > 1) {
-        toggles.delete(root);
-        continue;
-      }
-      t();
-    }
-  }
-  var mobileList = false;
-  function mobileBar(root) {
-    const editBtn = el("button", { text: "\u{1F4C4} \uD3B8\uC9D1", title: "\uD3B8\uC9D1 \uD654\uBA74 (\uBAA8\uBC14\uC77C)" });
-    const agentBtn = el("button", { text: "\u{1F4AC} AI \uCC57", title: "AI \uCC57 (\uBAA8\uBC14\uC77C)" });
-    const listBtn = el("button", { class: "ghost tiny mlist", title: "\uC67C\uCABD \uBAA9\uB85D\uC744 \uD3BC\uCE58\uAC70\uB098 \uC811\uC2B5\uB2C8\uB2E4" });
-    const bar3 = el("div", { class: "mbar" }, [el("div", { class: "mseg" }, [editBtn, agentBtn]), listBtn]);
-    const sync = () => {
-      root.classList.toggle("m-agent", mobileView === "agent");
-      root.classList.toggle("m-centre", mobileView === "centre");
-      root.classList.toggle("m-list", mobileList);
-      editBtn.classList.toggle("on", mobileView === "centre");
-      agentBtn.classList.toggle("on", mobileView === "agent");
-      listBtn.textContent = mobileList ? "\u2630 \uBAA9\uB85D \uC811\uAE30" : "\u2630 \uBAA9\uB85D \uD3BC\uCE58\uAE30";
-      listBtn.style.display = root.querySelector(".explorer .tree") ? "" : "none";
-    };
-    const pick2 = (v) => {
-      if (mobileView === v) return;
-      mobileView = v;
-      try {
-        localStorage.setItem(VIEW_KEY, mobileView);
-      } catch {
-      }
-      syncAll();
-    };
-    editBtn.addEventListener("click", () => pick2("centre"));
-    agentBtn.addEventListener("click", () => pick2("agent"));
-    listBtn.addEventListener("click", () => {
-      mobileList = !mobileList;
-      syncAll();
-    });
-    toggles.set(root, sync);
-    sync();
-    setTimeout(sync, 0);
-    return bar3;
-  }
-
-  // src/ui/markdown.ts
-  function renderMarkdown(text2) {
-    const frag = document.createDocumentFragment();
-    const lines = text2.split("\n");
-    let i = 0;
-    while (i < lines.length) {
-      const line = lines[i];
-      const fence = line.match(/^\s*```(\w*)\s*$/);
-      if (fence) {
-        const lang = fence[1];
-        const body = [];
-        i++;
-        while (i < lines.length && !/^\s*```\s*$/.test(lines[i])) body.push(lines[i++]);
-        i++;
-        const pre = el("pre", { class: "md-code" }, [el("code", { text: body.join("\n") })]);
-        if (lang) pre.dataset.lang = lang;
-        frag.appendChild(pre);
-        continue;
-      }
-      if (/^\s*([-*_])\1{2,}\s*$/.test(line)) {
-        frag.appendChild(el("hr", { class: "md-hr" }));
-        i++;
-        continue;
-      }
-      const heading = line.match(/^(#{1,4})\s+(.*)$/);
-      if (heading) {
-        const level = Math.min(4, heading[1].length);
-        const h = el("div", { class: "md-h md-h" + level });
-        h.appendChild(inline(heading[2]));
-        frag.appendChild(h);
-        i++;
-        continue;
-      }
-      if (/^\s*>\s?/.test(line)) {
-        const body = [];
-        while (i < lines.length && /^\s*>\s?/.test(lines[i])) {
-          body.push(lines[i].replace(/^\s*>\s?/, ""));
-          i++;
-        }
-        const q = el("div", { class: "md-quote" });
-        q.appendChild(renderMarkdown(body.join("\n")));
-        frag.appendChild(q);
-        continue;
-      }
-      if (line.includes("|") && i + 1 < lines.length && isTableSeparator(lines[i + 1])) {
-        const header = splitRow(line);
-        const aligns = splitRow(lines[i + 1]).map((c) => {
-          const t = c.trim();
-          return t.startsWith(":") && t.endsWith(":") ? "mid" : t.endsWith(":") ? "num" : "";
-        });
-        i += 2;
-        const rows = [];
-        while (i < lines.length && lines[i].includes("|") && lines[i].trim()) {
-          rows.push(splitRow(lines[i]));
-          i++;
-        }
-        const cellClass = (j) => aligns[j] || "";
-        const thead = el("thead", {}, [el("tr", {}, header.map((h, j) => {
-          const th = el("th", { class: cellClass(j) });
-          th.appendChild(inline(h.trim()));
-          return th;
-        }))]);
-        const tbody = el("tbody", {}, rows.map((r) => el("tr", {}, header.map((_, j) => {
-          const td = el("td", { class: cellClass(j) });
-          td.appendChild(inline((r[j] ?? "").trim()));
-          return td;
-        }))));
-        frag.appendChild(el("div", { class: "md-tablewrap" }, [el("table", { class: "md-table" }, [thead, tbody])]));
-        continue;
-      }
-      const bullet = line.match(/^\s*([-*+]|\d+\.)\s+/);
-      if (bullet) {
-        const ordered = /\d/.test(bullet[1]);
-        const list2 = el(ordered ? "ol" : "ul", { class: "md-list" });
-        while (i < lines.length) {
-          const m = lines[i].match(/^\s*(?:[-*+]|\d+\.)\s+(.*)$/);
-          if (!m) break;
-          const li = el("li");
-          li.appendChild(inline(m[1]));
-          list2.appendChild(li);
-          i++;
-        }
-        frag.appendChild(list2);
-        continue;
-      }
-      if (!line.trim()) {
-        i++;
-        continue;
-      }
-      const para = [];
-      while (i < lines.length && lines[i].trim() && !isBlockStart(lines[i]) && !(lines[i].includes("|") && isTableSeparator(lines[i + 1] ?? ""))) {
-        para.push(lines[i]);
-        i++;
-      }
-      const p = el("div", { class: "md-p" });
-      p.appendChild(inline(para.join("\n")));
-      frag.appendChild(p);
-    }
-    return frag;
-  }
-  function isTableSeparator(line) {
-    const cells2 = splitRow(line);
-    return cells2.length > 0 && cells2.every((c) => /^\s*:?-{1,}:?\s*$/.test(c)) && /-{2,}/.test(line);
-  }
-  function splitRow(line) {
-    let s = line.trim();
-    if (s.startsWith("|")) s = s.slice(1);
-    if (s.endsWith("|") && !s.endsWith("\\|")) s = s.slice(0, -1);
-    return s.split(/(?<!\\)\|/).map((c) => c.replace(/\\\|/g, "|"));
-  }
-  function isBlockStart(line) {
-    return /^\s*```/.test(line) || /^#{1,4}\s/.test(line) || /^\s*>/.test(line) || /^\s*(?:[-*+]|\d+\.)\s/.test(line) || /^\s*([-*_])\1{2,}\s*$/.test(line);
-  }
-  var INLINE_RE = /(\*\*[^*\n]+\*\*|__[^_\n]+__|\*[^*\n]+\*|_[^_\n]+_|`[^`\n]+`|\[[^\]\n]+\]\([^)\s]+\))/g;
-  function inline(text2) {
-    const frag = document.createDocumentFragment();
-    let last = 0;
-    let m;
-    INLINE_RE.lastIndex = 0;
-    while ((m = INLINE_RE.exec(text2)) !== null) {
-      if (m.index > last) frag.appendChild(document.createTextNode(text2.slice(last, m.index)));
-      frag.appendChild(token(m[0]));
-      last = INLINE_RE.lastIndex;
-    }
-    if (last < text2.length) frag.appendChild(document.createTextNode(text2.slice(last)));
-    return frag;
-  }
-  function token(tok) {
-    if (tok.startsWith("**") || tok.startsWith("__")) {
-      return el("strong", { text: tok.slice(2, -2) });
-    }
-    if (tok.startsWith("`")) {
-      return el("code", { class: "md-inline-code", text: tok.slice(1, -1) });
-    }
-    if (tok.startsWith("[")) {
-      const m = tok.match(/^\[([^\]]+)\]\(([^)\s]+)\)$/);
-      if (m) {
-        const href = /^https?:\/\//i.test(m[2]) ? m[2] : "";
-        return href ? el("a", { href, target: "_blank", rel: "noopener noreferrer", text: m[1] }) : document.createTextNode(m[1]);
-      }
-    }
-    return el("em", { text: tok.slice(1, -1) });
+    doc.addEventListener("drop", (e) => e.preventDefault());
   }
 
   // src/ui/agent.ts
+  var IMG_RE = /\.(png|jpe?g|gif|webp|avif|bmp)$/i;
   var AgentPanel = class {
     constructor(hooks2) {
       this.hooks = hooks2;
@@ -4915,10 +6419,8 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         text: "\uC774\uC804 \uB300\uD654"
       });
       this.historyBtn.addEventListener("click", () => void this.openHistory());
-      this.input = el("textarea", {
-        class: "agentinput",
-        placeholder: "\uCC57\uC5D0\uC11C \uC218\uC815\uC774\uB098 \uC870\uC815\uC774 \uD544\uC694\uD55C \uBD80\uBD84\uC744 \uB9D0\uC500\uD558\uC138\uC694. \uAD81\uAE08\uD55C \uC810\uC774 \uC788\uB2E4\uBA74 \uBB34\uC5C7\uC774\uB4E0 \uBB3C\uC5B4\uBCF4\uC138\uC694."
-      });
+      this.input = el("textarea", { class: "agentinput" });
+      this.syncPlaceholder();
       this.input.addEventListener("keydown", (e) => {
         const ev = e;
         if (ev.key === "Enter" && !ev.shiftKey) {
@@ -4933,29 +6435,14 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         void this.attachAll(Array.from(this.picker.files ?? []));
         this.picker.value = "";
       });
-      const clip = el("button", {
+      const clip2 = el("button", {
         class: "ghost attachbtn",
         title: "\uD30C\uC77C \uCCA8\uBD80 \u2014 \uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4\uC5D0 \uC62C\uB77C\uAC11\uB2C8\uB2E4",
         html: ICON.clip
       });
-      clip.addEventListener("click", () => this.picker.click());
+      clip2.addEventListener("click", () => this.picker.click());
       this.input.addEventListener("paste", (e) => {
         const files = Array.from(e.clipboardData?.files ?? []);
-        if (!files.length) return;
-        e.preventDefault();
-        void this.attachAll(files);
-      });
-      for (const kind of ["dragover", "dragenter"]) {
-        this.input.addEventListener(kind, (e) => {
-          e.preventDefault();
-          this.input.classList.add("dropping");
-        });
-      }
-      for (const kind of ["dragleave", "drop"]) {
-        this.input.addEventListener(kind, () => this.input.classList.remove("dropping"));
-      }
-      this.input.addEventListener("drop", (e) => {
-        const files = Array.from(e.dataTransfer?.files ?? []);
         if (!files.length) return;
         e.preventDefault();
         void this.attachAll(files);
@@ -4969,8 +6456,15 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         // The two buttons stack beside the box, attach above send: the box is
         // two lines tall anyway, and a clip on the far left read as a third
         // control competing with the text rather than an option on sending.
-        el("div", { class: "agentcompose" }, [this.input, el("div", { class: "agentbtns" }, [clip, this.send]), this.picker])
+        el("div", { class: "agentcompose" }, [this.input, el("div", { class: "agentbtns" }, [clip2, this.send]), this.picker])
       ]);
+      installDrop(this.root, {
+        into: () => "",
+        effect: "copy",
+        onFiles: (_p, incoming) => void this.attachAll(incoming.map((i) => i.file)),
+        onMove: (_p, sources) => this.attachPaths(sources),
+        onAssets: (names) => this.attachAssets(names)
+      });
     }
     root;
     log;
@@ -5032,8 +6526,52 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         }
       }
     }
+    /** Reference chips for workspace paths dragged in: no upload - the path
+     * already lives in the space, and the agent reads it itself. (This is the
+     * 경로 복사 workaround turned into a gesture.) */
+    attachPaths(paths) {
+      for (const path of paths) {
+        if (!path || this.attached.includes(path)) continue;
+        this.attached.push(path);
+        const chip = el("span", { class: "attachchip", title: path });
+        if (IMG_RE.test(path)) chip.appendChild(workspaceImage(path, path.split("/").pop() ?? path, { thumb: true }));
+        chip.appendChild(el("span", { text: path.split("/").pop() || path }));
+        const drop = el("button", { class: "ghost tiny", text: "\xD7", title: "\uC774 \uBA54\uC2DC\uC9C0\uC5D0\uC11C \uBE7C\uAE30" });
+        drop.addEventListener("click", () => {
+          this.attached = this.attached.filter((q) => q !== path);
+          chip.remove();
+          if (!this.attachBar.children.length) this.attachBar.style.display = "none";
+        });
+        chip.appendChild(drop);
+        this.attachBar.appendChild(chip);
+        this.attachBar.style.display = "flex";
+      }
+    }
+    /** Card assets have no workspace path: the chip carries the NAME and the
+     * composed message points the agent at list_assets / fetch_assets. */
+    attachedAssets = [];
+    attachAssets(names) {
+      for (const name of names) {
+        if (!name || this.attachedAssets.includes(name)) continue;
+        this.attachedAssets.push(name);
+        const chip = el("span", { class: "attachchip", title: "\uCE74\uB4DC \uC5D0\uC14B: " + name }, [
+          el("span", { class: "hint", text: "\uC5D0\uC14B" }),
+          el("span", { text: name })
+        ]);
+        const drop = el("button", { class: "ghost tiny", text: "\xD7", title: "\uC774 \uBA54\uC2DC\uC9C0\uC5D0\uC11C \uBE7C\uAE30" });
+        drop.addEventListener("click", () => {
+          this.attachedAssets = this.attachedAssets.filter((q) => q !== name);
+          chip.remove();
+          if (!this.attachBar.children.length) this.attachBar.style.display = "none";
+        });
+        chip.appendChild(drop);
+        this.attachBar.appendChild(chip);
+        this.attachBar.style.display = "flex";
+      }
+    }
     clearAttachments() {
       this.attached = [];
+      this.attachedAssets = [];
       clear(this.attachBar);
       this.attachBar.style.display = "none";
     }
@@ -5048,6 +6586,16 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     }
     async render(sessionId) {
       clear(this.log);
+      if (!state.activeChatKey) {
+        this.loaded = false;
+        this.status.textContent = "";
+        this.log.appendChild(el("div", { class: "notice" }, [
+          el("div", { text: "\uC544\uC9C1 \uBD07\uC758 \uCC57\uC774 \uC120\uD0DD\uB418\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4." }),
+          el("div", { class: "hint", text: "\uCC57 \uD0ED\uC5D0\uC11C \uCC57\uC744 \uD558\uB098 \uACE0\uB974\uBA74 \uC5EC\uAE30\uC11C \uD788\uB098\uB97C \uBD80\uB97C \uC218 \uC788\uC2B5\uB2C8\uB2E4." })
+        ]));
+        this.send.disabled = true;
+        return;
+      }
       try {
         const s = await state.agentSession(sessionId);
         if (!s.agentReady) {
@@ -5070,6 +6618,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
             this.addBubble("assistant", String(m.content ?? ""), m.usage ?? void 0, m.cost);
           }
         }
+        this.syncPlaceholder();
         if (!s.messages.length) this.log.appendChild(this.welcome());
         this.setStaged(s.staged ?? []);
         void this.refreshActions();
@@ -5078,6 +6627,15 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       } catch (e) {
         this.status.textContent = e instanceof Error ? e.message : String(e);
       }
+    }
+    /** The input's prompt names the half that is open: 봇 on a bot tab, 챗 on
+     * a chat tab (the user read "챗에서" while editing a card). Called on every
+     * mount too - load() dedupes renders, and a tab switch changes the half. */
+    syncPlaceholder() {
+      const where = activeHalf() === "bot" ? "\uBD07" : "\uCC57";
+      this.input.placeholder = `${where}\uC5D0\uC11C \uC218\uC815\uC774\uB098 \uC870\uC815\uC774 \uD544\uC694\uD55C \uBD80\uBD84\uC744 \uB9D0\uC500\uD558\uC138\uC694. \uAD81\uAE08\uD55C \uC810\uC774 \uC788\uB2E4\uBA74 \uBB34\uC5C7\uC774\uB4E0 \uBB3C\uC5B4\uBCF4\uC138\uC694.`;
+      const w = this.log.querySelector(".welcome");
+      if (w) w.replaceWith(this.welcome());
     }
     /**
      * What an empty conversation says.
@@ -5089,7 +6647,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
      * it: they are starting points to edit, not commands.
      */
     welcome() {
-      const bot = currentMode() === "bot";
+      const bot = activeHalf() === "bot";
       const examples = bot ? [
         "\uBD07 \uB85C\uC5B4\uBD81\uC744 \uD6D1\uC5B4\uC11C \uACB9\uCE58\uAC70\uB098 \uBE48 \uD56D\uBAA9\uC744 \uC815\uB9AC\uD558\uACE0 \uD3F4\uB354\uB85C \uBB36\uC5B4\uC918",
         "\uD37C\uC2A4\uD2B8 \uBA54\uC2DC\uC9C0\uC640 \uB300\uCCB4 \uC778\uC0AC\uB9D0\uC758 \uB9D0\uD22C\uB97C \uC124\uBA85(desc)\uACFC \uB9DE\uCDB0\uC918",
@@ -5140,8 +6698,8 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     async refreshOutputs() {
       try {
         const listing = await state.files();
-        const out = listing.areas.find((a) => a.area === "out");
-        const files = out?.files ?? [];
+        const hina = listing.areas.find((a) => a.area === "hina");
+        const files = (hina?.files ?? []).filter((f) => /^hina\/[^/]+\/out\//.test(f.path));
         const stamp = files.map((f) => `${f.path}:${f.size}:${f.modified}`).join("|");
         if (!this.outPrimed) {
           this.outPrimed = true;
@@ -5154,13 +6712,30 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         const fresh = files.filter((f) => !before.has(f.path));
         if (!fresh.length) return;
         state.touchFiles(fresh.map((f) => f.path));
-        for (const f of fresh) {
+        const plain = fresh.filter((f) => !f.path.includes("/out/artifacts/") && !IMG_RE.test(f.name));
+        const pics = fresh.filter((f) => !f.path.includes("/out/artifacts/") && IMG_RE.test(f.name));
+        for (const f of plain) {
           const line = el("button", { class: "outline", title: "\uD30C\uC77C \uD0ED\uC5D0\uC11C \uC5FD\uB2C8\uB2E4" }, [
             el("span", { class: "glyph", text: "\u{1F4C4}" }),
             el("span", { class: "grow", text: `${f.name} \xB7 ${fmtSize(f.size)} \u2014 out/ \uC5D0 \uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4. \uD30C\uC77C \uD0ED\uC5D0\uC11C \uC5F4\uAE30 \u2192` })
           ]);
           line.addEventListener("click", () => state.requestOpenFile(f.path));
           this.log.appendChild(line);
+        }
+        if (pics.length) {
+          const strip2 = el("div", { class: "imgstrip" });
+          for (const f of pics.slice(0, 8)) {
+            const thumb = workspaceImage(f.path, f.name, { thumb: true });
+            thumb.style.cursor = "pointer";
+            thumb.addEventListener("click", () => showArtifact({ path: f.path, title: f.name, kind: "image" }, { flipMobile: true }));
+            strip2.appendChild(thumb);
+          }
+          if (pics.length > 8) {
+            const more = el("button", { class: "ghost tiny", text: `\uC678 ${pics.length - 8}\uC7A5` });
+            more.addEventListener("click", () => state.requestOpenFile(pics[0].path));
+            strip2.appendChild(more);
+          }
+          this.log.appendChild(strip2);
         }
         this.scroll();
       } catch {
@@ -5343,9 +6918,17 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     }
     async submit() {
       const typed = this.input.value.trim();
-      if (!typed && !this.attached.length || this.busy) return;
+      if (!typed && !this.attached.length && !this.attachedAssets.length || this.busy) return;
       const files = this.attached.slice();
-      const prompt = files.length ? (typed ? typed + "\n\n" : "") + "\uCCA8\uBD80\uD55C \uD30C\uC77C: " + files.join(", ") + "\n(\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4\uC5D0 \uC62C\uB824 \uB480\uC2B5\uB2C8\uB2E4. read_file \uB85C \uC77D\uC5B4 \uC8FC\uC138\uC694.)" : typed;
+      const assets = this.attachedAssets.slice();
+      const extras = [];
+      if (files.length) {
+        extras.push("\uCCA8\uBD80\uD55C \uD30C\uC77C/\uD3F4\uB354: " + files.join(", ") + "\n(\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 \uACBD\uB85C\uC785\uB2C8\uB2E4. \uD30C\uC77C\uC740 read_file \uB85C \uC77D\uACE0, \uD3F4\uB354\uB294 list_files \uB85C \uC548\uC744 \uBD10 \uC8FC\uC138\uC694.)");
+      }
+      if (assets.length) {
+        extras.push("\uCCA8\uBD80\uD55C \uCE74\uB4DC \uC5D0\uC14B: " + assets.join(", ") + "\n(list_assets \uB85C \uD655\uC778\uD558\uACE0 fetch_assets \uB85C scratch/ \uC5D0 \uAEBC\uB0B4 \uBD10 \uC8FC\uC138\uC694.)");
+      }
+      const prompt = extras.length ? (typed ? typed + "\n\n" : "") + extras.join("\n\n") : typed;
       this.busy = true;
       this.input.value = "";
       this.clearAttachments();
@@ -5469,9 +7052,56 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
               this.scroll();
               break;
             }
+            case "artifact": {
+              const spec3 = {
+                path: String(e.path ?? ""),
+                title: String(e.title ?? ""),
+                kind: e.kind
+              };
+              if (!spec3.path) break;
+              showArtifact(spec3);
+              const chip = el("button", { class: "outline artifactchip", title: "\uC911\uC559 \uD328\uB110\uC5D0 \uB2E4\uC2DC \uC5FD\uB2C8\uB2E4" }, [
+                el("span", { class: "glyph", text: "\u{1F4CA}" }),
+                el("span", { class: "grow", text: `${spec3.title || spec3.path} \u2014 \uC911\uC559 \uD328\uB110\uC5D0 \uD45C\uC2DC\uD588\uC2B5\uB2C8\uB2E4` })
+              ]);
+              chip.addEventListener("click", () => showArtifact(spec3, { flipMobile: true }));
+              this.log.appendChild(chip);
+              this.scroll();
+              break;
+            }
+            case "images": {
+              const paths = Array.isArray(e.paths) ? e.paths.filter(Boolean) : [];
+              if (!paths.length) break;
+              state.touchFiles(paths);
+              const strip2 = el("div", { class: "imgstrip" });
+              for (const p of paths.slice(0, 8)) {
+                const name = p.slice(p.lastIndexOf("/") + 1);
+                const thumb = workspaceImage(p, name, { thumb: true });
+                thumb.style.cursor = "pointer";
+                thumb.addEventListener("click", () => showArtifact({ path: p, title: name, kind: "image" }, { flipMobile: true }));
+                strip2.appendChild(thumb);
+              }
+              const folder = String(e.folder || "") || paths[0].slice(0, paths[0].lastIndexOf("/"));
+              const inspect = el("button", {
+                class: "ghost tiny",
+                text: paths.length > 8 ? `\uC678 ${paths.length - 8}\uC7A5 \xB7 \uAC80\uC218` : "\uAC80\uC218",
+                title: "\uC5D0\uC14B \uC2A4\uD29C\uB514\uC624 \uAC80\uC218 \uD0ED\uC5D0\uC11C \uC774 \uD3F4\uB354\uB97C \uC5FD\uB2C8\uB2E4"
+              });
+              inspect.addEventListener("click", () => state.requestOpenStudio(folder));
+              strip2.appendChild(inspect);
+              if (e.label) strip2.appendChild(el("div", { class: "hint", text: String(e.label) }));
+              this.log.appendChild(strip2);
+              this.scroll();
+              break;
+            }
+            case "open": {
+              if (e.screen === "inspect" && e.folder) state.requestOpenStudio(String(e.folder));
+              break;
+            }
             case "done": {
               setThinking(true, "\uC81C\uC548\xB7\uBCC0\uACBD \uCE74\uB4DC\uB97C \uC815\uB9AC\uD558\uB294 \uC911\uC785\uB2C8\uB2E4\u2026");
               await this.refreshStaged();
+              state.touchFiles();
               finish("\uC644\uB8CC");
               bubble.appendChild(this.costLine(
                 e.usage,
@@ -5614,7 +7244,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
   }
   function setMarkdown(node, text2) {
     clear(node);
-    node.appendChild(renderMarkdown(text2));
+    node.appendChild(renderMarkdown(text2, { image: (p, a) => workspaceImage(p, a, { thumb: true }) }));
   }
   function fmtSize(n) {
     if (!n) return "0B";
@@ -5669,6 +7299,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         requestAnimationFrame(restore);
       }
     }
+    p.syncPlaceholder();
     void p.load();
   }
 
@@ -6005,6 +7636,180 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     return box;
   }
 
+  // src/ui/kit.ts
+  function makeNotice(margin = "10px 14px 0") {
+    const mount = el("div");
+    let timer = null;
+    return {
+      mount,
+      show(text2, kind = "") {
+        clear(mount);
+        mount.appendChild(el("div", { class: "notice " + kind, style: { margin }, text: text2 }));
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => clear(mount), 9e3);
+      }
+    };
+  }
+  var GATE_COPY = {
+    chat: "\uBA3C\uC800 \u201C\uC120\uD0DD\u201D \uD0ED\uC5D0\uC11C \uCC57\uC744 \uACE8\uB77C \uC8FC\uC138\uC694.",
+    bot: "\uBA3C\uC800 \uD328\uB110\uC744 \uC5F0 \uBD07\uC774 \uC788\uC5B4\uC57C \uD569\uB2C8\uB2E4. RisuAI\uC5D0\uC11C \uBD07\uC744 \uC5F4\uACE0 \uB2E4\uC2DC \uC5EC\uC138\uC694."
+  };
+  function savedText(what) {
+    return `${what} \uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4. \uBC18\uC601\uC744 \uB204\uB974\uAE30 \uC804\uAE4C\uC9C0 RisuAI \uC6D0\uBCF8\uC5D0\uB294 \uC4F0\uC774\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4.`;
+  }
+  function makeTab(spec3) {
+    let built2 = false;
+    let seen = "";
+    const n = makeNotice();
+    return (mount) => {
+      const gate = spec3.gate ?? "none";
+      const pass = gate === "none" || (gate === "chat" ? !!state.activeChatKey : !!state.activeCharKey);
+      if (!pass) {
+        clear(mount);
+        built2 = false;
+        mount.appendChild(el("div", { class: "pad" }, [
+          el("div", { class: "empty", text: GATE_COPY[gate] })
+        ]));
+        return;
+      }
+      const key = JSON.stringify(spec3.keys());
+      if (!built2 || !mount.querySelector(".split")) {
+        clear(mount);
+        const pane = threePane();
+        if (spec3.noLeft) pane.left.style.display = "none";
+        pane.centre.appendChild(n.mount);
+        spec3.build(pane, { notice: n.show });
+        mount.appendChild(pane.root);
+        built2 = true;
+        seen = key;
+        void spec3.refresh();
+      } else if (seen !== key) {
+        seen = key;
+        void spec3.refresh();
+      }
+      setToolbar(spec3.toolbar?.() ?? (spec3.search ? searchBox(spec3.search.get(), (v) => spec3.search.set(v), spec3.search.placeholder ?? "\uCC3E\uAE30") : null));
+      bindAgent({ notice: n.show });
+      const inner = mount.querySelector(".right-inner");
+      if (inner) mountAgent(inner);
+    };
+  }
+  function listRow(spec3) {
+    const badges = (spec3.badges ?? []).map((b) => el("span", { class: ("badge " + (b.kind ?? "")).trim(), text: b.text, ...b.title ? { title: b.title } : {} }));
+    let toggle = null;
+    let toggleNode = null;
+    if (spec3.toggle) {
+      toggle = el("input", {
+        type: "checkbox",
+        ...spec3.toggle.title ? { title: spec3.toggle.title } : {}
+      });
+      toggleNode = toggle;
+      if (spec3.toggle.style === "switch") {
+        toggleNode = el(
+          "label",
+          { class: "switch", ...spec3.toggle.title ? { title: spec3.toggle.title } : {} },
+          [toggle, el("span", { class: "knob" })]
+        );
+        toggleNode.addEventListener("click", (e) => e.stopPropagation());
+      }
+      toggle.checked = spec3.toggle.checked;
+      toggle.addEventListener("click", (e) => e.stopPropagation());
+      toggle.addEventListener("change", async () => {
+        try {
+          await spec3.toggle.onChange(toggle.checked);
+        } catch {
+          toggle.checked = !toggle.checked;
+        }
+      });
+    }
+    const reorder = [];
+    if (spec3.reorder) {
+      const up = el("button", { class: "movebtn", text: "\u2191", title: "\uC704\uB85C" });
+      const down = el("button", { class: "movebtn", text: "\u2193", title: "\uC544\uB798\uB85C" });
+      up.disabled = !spec3.reorder.up;
+      down.disabled = !spec3.reorder.down;
+      up.addEventListener("click", (e) => {
+        e.stopPropagation();
+        spec3.reorder.up?.();
+      });
+      down.addEventListener("click", (e) => {
+        e.stopPropagation();
+        spec3.reorder.down?.();
+      });
+      reorder.push(up, down);
+    }
+    for (const a of spec3.actions ?? []) a.addEventListener("click", (e) => e.stopPropagation());
+    const title = typeof spec3.title === "string" ? el("span", { text: spec3.title }) : spec3.title;
+    let row;
+    if (spec3.variant === "pick") {
+      row = el("div", {
+        class: "pickrow" + (spec3.toggle && !spec3.toggle.checked ? " off" : "") + (spec3.cls ? " " + spec3.cls : "") + (spec3.selected ? " on" : "")
+      }, [
+        toggleNode,
+        el("div", { class: "grow" }, [
+          el("div", { class: "pickname" }, [title, ...badges]),
+          spec3.hint != null ? el("div", { class: "hint", text: spec3.hint }) : null,
+          spec3.sub != null ? el("div", { class: "hint dim", text: spec3.sub }) : null
+        ]),
+        ...reorder,
+        ...spec3.actions ?? []
+      ]);
+    } else {
+      row = el("div", {
+        class: "treerow lorecard" + (spec3.selected ? " on" : "")
+      }, [
+        toggleNode,
+        title,
+        ...badges,
+        spec3.hint != null ? el("span", { class: "hint", text: spec3.hint }) : null,
+        ...reorder,
+        ...spec3.actions ?? []
+      ]);
+    }
+    if (spec3.dimmed) row.style.opacity = "0.55";
+    if (spec3.onClick) {
+      row.addEventListener("click", () => spec3.onClick());
+      row.style.cursor = "pointer";
+    }
+    return row;
+  }
+  function namePopover(anchor, opts) {
+    const body = el("div", { class: "applypop" });
+    const close = popover(anchor, body);
+    const input = el("input", { placeholder: opts.placeholder ?? "", value: opts.value ?? "" });
+    const okBtn = el("button", { class: "primary tiny", text: opts.ok ?? "\uD655\uC778" });
+    okBtn.addEventListener("click", () => {
+      const v = input.value.trim();
+      if (!v) return;
+      close();
+      void opts.onSubmit(v);
+    });
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") okBtn.click();
+    });
+    body.appendChild(el("div", { class: "hint", text: opts.label }));
+    body.appendChild(el("div", { class: "row" }, [input, okBtn]));
+    setTimeout(() => input.focus(), 0);
+  }
+  function askName(title, opts) {
+    const input = el("input", { placeholder: opts.placeholder ?? "", value: opts.value ?? "" });
+    const okBtn = el("button", { class: "primary tiny", text: opts.ok ?? "\uB9CC\uB4E4\uAE30" });
+    const body = el("div", {}, [
+      opts.label ? el("div", { class: "hint", style: { marginBottom: "6px" }, text: opts.label }) : null,
+      el("div", { class: "row" }, [input, okBtn])
+    ]);
+    const close = modal(title, body);
+    okBtn.addEventListener("click", () => {
+      const v = input.value.trim();
+      if (!v) return;
+      close();
+      void opts.onSubmit(v);
+    });
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") okBtn.click();
+    });
+    setTimeout(() => input.focus(), 0);
+  }
+
   // src/ui/tab-editor.ts
   var list = null;
   var rightMount = null;
@@ -6029,7 +7834,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       clear(mount);
       setToolbar(null);
       mount.appendChild(el("div", { class: "pad" }, [
-        el("div", { class: "empty", text: "\uBA3C\uC800 \u201C\uCC57 \uC120\uD0DD\u201D \uD0ED\uC5D0\uC11C \uCC57\uC744 \uACE8\uB77C \uC8FC\uC138\uC694." })
+        el("div", { class: "empty", text: GATE_COPY.chat })
       ]));
       return;
     }
@@ -6284,14 +8089,14 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       const n = Number(jump.value);
       if (Number.isFinite(n)) list?.scrollToSeq(n);
     });
-    const root = el("div", {}, [
+    const root2 = el("div", {}, [
       el("div", { class: "card" }, [el("h2", { text: "\uBCF4\uAE30 \uBAA8\uB4DC" }), ...rows]),
       optsBox,
       buildRangeCard(),
       el("div", { class: "card" }, [diffToggle, el("div", { style: { marginTop: "8px" } }, [jump])])
     ]);
     setMode(viewMode);
-    return root;
+    return root2;
   }
   function buildRangeCard() {
     const first = state.turns.length ? state.turns[0].seq : 0;
@@ -6521,16 +8326,13 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
 
   // src/ui/tab-files.ts
   var AREA_LABEL = {
-    uploads: ["\uC5C5\uB85C\uB4DC", "\uC9C1\uC811 \uC62C\uB9AC\uC2E0 \uCC38\uACE0 \uD30C\uC77C\uC785\uB2C8\uB2E4. \uC815\uB9AC\uD574\uB3C4 \uB0A8\uC2B5\uB2C8\uB2E4."],
-    out: ["\uACB0\uACFC\uBB3C", "AI\uAC00 \uB9CC\uB4E0 \uC0B0\uCD9C\uBB3C\uC785\uB2C8\uB2E4. \uB0B4\uB824\uBC1B\uAE30 \uC804\uC774\uBA74 \uB0A8\uACA8 \uB450\uC138\uC694."],
-    original: ["\uC6D0\uBCF8", "\uAC00\uC838\uC628 \uADF8\uB300\uB85C\uC758 \uC2A4\uB0C5\uC0F7\uC785\uB2C8\uB2E4. \uBE44\uAD50 \uAE30\uC900\uC774\uB77C \uC9C0\uC6B8 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4."],
-    scripts: ["\uC2A4\uD06C\uB9BD\uD2B8", "AI\uAC00 \uC791\uC131\uD574 \uC2E4\uD589\uD55C \uD30C\uC774\uC36C\uC785\uB2C8\uB2E4."],
-    skills: ["\uC2A4\uD0AC", "\uCF1C \uB454 \uC2A4\uD06C\uB9BD\uD2B8 \uC2A4\uD0AC\uC774 \uC2E4\uD589 \uB54C\uB9C8\uB2E4 \uC5EC\uAE30\uB85C \uBCF5\uC0AC\uB429\uB2C8\uB2E4."],
-    scratch: ["\uC784\uC2DC", "AI\uC758 \uC791\uC5C5\uC6A9 \uD30C\uC77C\uC785\uB2C8\uB2E4. \uC5B8\uC81C \uC9C0\uC6CC\uB3C4 \uB429\uB2C8\uB2E4."],
-    ".scratch": ["\uB0B4\uBD80", "\uC2A4\uCF54\uD504 \uC2A4\uB0C5\uC0F7\uACFC \uC81C\uC548 \uD050\uC785\uB2C8\uB2E4. \uB2E4\uC74C \uC2E4\uD589 \uB54C \uB2E4\uC2DC \uB9CC\uB4E4\uC5B4\uC9D1\uB2C8\uB2E4."]
+    projects: ["\uD504\uB85C\uC81D\uD2B8", "\uC9C1\uC811 \uAD00\uB9AC\uD558\uC2DC\uB294 \uCC38\uACE0 \uC790\uB8CC\xB7\uD504\uB85C\uC81D\uD2B8 \uD3F4\uB354\uC785\uB2C8\uB2E4. \uBD07 \uC774\uB984 \uD3F4\uB354\uB85C \uB098\uB269\uB2C8\uB2E4."],
+    studio: ["\uC2A4\uD29C\uB514\uC624", "\uC774\uBBF8\uC9C0 \uB77C\uC774\uBE0C\uB7EC\uB9AC\uC785\uB2C8\uB2E4. config/ \uC5D0 \uD504\uB86C\uD504\uD2B8 \uC7AC\uB8CC, output/ \uC5D0 \uC0DD\uC131 \uACB0\uACFC\uAC00 \uC0BD\uB2C8\uB2E4."],
+    hina: ["AI \uC791\uC5C5", "\uD788\uB098\uAC00 \uBD07\uBCC4\uB85C \uC4F0\uB294 \uC2A4\uD06C\uB9BD\uD2B8\xB7\uC784\uC2DC\xB7\uC0B0\uCD9C\uBB3C \uD3F4\uB354\uC785\uB2C8\uB2E4."],
+    ".hina": ["\uB0B4\uBD80", "\uC2A4\uD0AC \uBCF5\uC0AC\uBCF8\uACFC \uC774\uAD00 \uAE30\uB85D\uC785\uB2C8\uB2E4. \uB2E4\uC74C \uC2E4\uD589 \uB54C \uB2E4\uC2DC \uB9CC\uB4E4\uC5B4\uC9D1\uB2C8\uB2E4."]
   };
-  var USER_AREAS = /* @__PURE__ */ new Set(["uploads", "out"]);
-  var SURFACE_FROM = /* @__PURE__ */ new Set(["scratch", "scripts"]);
+  var USER_AREAS = /* @__PURE__ */ new Set(["projects", "studio", "hina"]);
+  var SURFACE_FROM = /* @__PURE__ */ new Set(["hina"]);
   var DOCUMENT_EXT = /* @__PURE__ */ new Set([
     "md",
     "markdown",
@@ -6550,78 +8352,98 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
   var IMAGE_RE = /\.(png|jpe?g|gif|webp|avif|bmp)$/i;
   var TEXT_UPLOAD_RE = /\.(md|txt|json|jsonl|csv|py|html?|css|js|ya?ml|xml|log|sql)$/i;
   var DOCS_NODE = "@docs";
+  var FICON = {
+    selectAll: svg('<path d="m2 13 4 4L14 7"/><path d="m10 15 3 3 9-11"/>', 15),
+    list: svg('<path d="M8 6h13M8 12h13M8 18h13"/><path d="M3 6h.01M3 12h.01M3 18h.01"/>', 15),
+    grid: svg('<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>', 15),
+    move: svg('<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><path d="M12 10v7"/><path d="m9 14 3 3 3-3"/>', 15),
+    trash: svg('<path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>', 15),
+    search: svg('<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>', 15),
+    upload: svg('<path d="M12 16V4"/><path d="m6 9 6-5 6 5"/><path d="M4 20h16"/>', 15),
+    folderUp: svg('<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><path d="M12 17v-7"/><path d="m9 13 3-3 3 3"/>', 15),
+    newFolder: svg('<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><path d="M12 10v6"/><path d="M9 13h6"/>', 15)
+  };
+  var clipboard = null;
+  var treeSel = /* @__PURE__ */ new Set();
+  var treeAnchor = "";
   function isDocument(f) {
     const ext = (f.name.split(".").pop() || "").toLowerCase();
     return ext !== f.name.toLowerCase() && DOCUMENT_EXT.has(ext);
   }
-  var built = false;
-  var seenFilesRev = -1;
   var treeMount = null;
   var viewMount = null;
-  var noticeMount3 = null;
   var showInternal = false;
   var lastListing = null;
   var nodes = /* @__PURE__ */ new Map();
-  var selectedDir = "uploads";
+  var selectedDir = "projects";
   var selection = /* @__PURE__ */ new Set();
   var anchorPath = "";
   var previewPath = "";
-  var confirmDelete = false;
-  var view = "list";
+  var delCtrl = null;
+  var filterText2 = "";
+  var view2 = "list";
   try {
-    if (localStorage.getItem("hina.filesView") === "grid") view = "grid";
+    if (localStorage.getItem("hina.filesView") === "grid") view2 = "grid";
   } catch {
   }
-  var expanded = /* @__PURE__ */ new Set(["uploads", "out"]);
-  var thumbs = /* @__PURE__ */ new Map();
-  function renderFilesTab(mount) {
-    if (!state.activeCharKey) {
-      clear(mount);
-      built = false;
-      mount.appendChild(el("div", { class: "pad" }, [
-        el("div", { class: "empty", text: "\uBA3C\uC800 \u201C\uCC57 \uC120\uD0DD\u201D \uD0ED\uC5D0\uC11C \uCC57\uC744 \uACE8\uB77C \uC8FC\uC138\uC694." })
-      ]));
-      return;
-    }
-    if (!built || !mount.querySelector(".split")) {
-      clear(mount);
-      const pane = threePane();
+  var expanded = /* @__PURE__ */ new Set(["projects", "studio"]);
+  var ui = null;
+  function notice2(text2, kind = "") {
+    ui?.notice(text2, kind);
+  }
+  var kitRender = makeTab({
+    // A pending open-request is a staleness key: consuming it is refresh's job.
+    keys: () => [state.filesRev, state.openFileRequest],
+    // Deliberately no menu-line search: the folder filter is a fold-out icon on
+    // the filebar itself (the full-width box spent a whole row on a field that
+    // is empty almost always - field report item 14).
+    build(pane, u) {
+      ui = u;
       treeMount = el("div", { class: "tree filetree" });
       pane.left.appendChild(treeMount);
-      noticeMount3 = el("div");
+      treeMount.tabIndex = 0;
+      treeMount.addEventListener("keydown", (ev) => {
+        const e = ev;
+        const paths = [...treeSel].filter((q) => q !== DOCS_NODE && q.includes("/"));
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c" && paths.length) {
+          clipboard = { op: "copy", paths };
+          notice2(`${paths.length}\uAC1C\uB97C \uBCF5\uC0AC\uD588\uC2B5\uB2C8\uB2E4 \u2014 \uBD99\uC5EC\uB123\uC744 \uD3F4\uB354\uC5D0\uC11C Ctrl+V.`);
+        } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "x" && paths.length) {
+          clipboard = { op: "cut", paths };
+          notice2(`${paths.length}\uAC1C\uB97C \uC798\uB77C\uB0C8\uC2B5\uB2C8\uB2E4 \u2014 \uBD99\uC5EC\uB123\uC744 \uD3F4\uB354\uC5D0\uC11C Ctrl+V.`);
+        } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v" && clipboard) {
+          void pasteInto(uploadTarget());
+        } else if ((e.key === "Delete" || e.key === "Backspace") && paths.length) {
+          e.preventDefault();
+          const rect = treeMount.getBoundingClientRect();
+          treeDeleteConfirm(paths, { clientX: rect.left + 40, clientY: rect.top + 60 });
+        } else if (e.key === "Escape") {
+          treeSel = /* @__PURE__ */ new Set([selectedDir]);
+          drawTree();
+        }
+      });
+      pane.left.classList.add("filedrop");
+      installDrop(pane.left, { into: () => uploadTarget(), onFiles: (path, files) => void uploadMany(files, path), onMove: (path, sources) => void moveSelected(sources, path) });
       viewMount = el("div", { class: "pad filepad" });
-      pane.centre.appendChild(noticeMount3);
       pane.centre.appendChild(viewMount);
-      installDrop(viewMount, () => uploadTarget());
-      mount.appendChild(pane.root);
-      mountAgent(pane.right.querySelector(".right-inner"));
-      built = true;
-      seenFilesRev = state.filesRev;
-      void refresh();
-    } else if (seenFilesRev !== state.filesRev) {
-      seenFilesRev = state.filesRev;
-      void refresh();
+      installDrop(viewMount, { into: () => uploadTarget(), onFiles: (path, files) => void uploadMany(files, path) });
+    },
+    async refresh() {
+      await refresh();
     }
+  });
+  function renderFilesTab(mount) {
+    kitRender(mount);
     state.markOutputsSeen();
-    bindAgent({ notice: notice2 });
-    const inner = mount.querySelector(".right-inner");
-    if (inner) mountAgent(inner);
-  }
-  function notice2(text2, kind = "") {
-    if (!noticeMount3) return;
-    clear(noticeMount3);
-    noticeMount3.appendChild(el("div", { class: "notice " + kind, style: { margin: "10px 14px 0" }, text: text2 }));
-    setTimeout(() => {
-      if (noticeMount3) clear(noticeMount3);
-    }, 9e3);
   }
   async function refresh() {
     if (!treeMount) return;
     try {
-      const data = await state.files();
+      const data = await state.files("", showInternal);
       lastListing = data;
       buildNodes(data);
-      if (!nodes.has(selectedDir)) selectedDir = nodes.has("uploads") ? "uploads" : nodes.keys().next().value ?? "";
+      if (!nodes.has(selectedDir)) selectedDir = nodes.has("projects") ? "projects" : nodes.keys().next().value ?? "";
+      treeSel = new Set([...treeSel].filter((q) => nodes.has(q)));
       const alive = new Set(allPaths());
       selection = new Set([...selection].filter((p) => alive.has(p)));
       const want = state.openFileRequest;
@@ -6650,8 +8472,8 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     nodes = /* @__PURE__ */ new Map();
     const shown = data.areas.filter((a) => showInternal || USER_AREAS.has(a.area));
     for (const area of shown) {
-      const root = { path: area.area, name: AREA_LABEL[area.area]?.[0] ?? area.area, area, kids: [], files: [] };
-      nodes.set(root.path, root);
+      const root2 = { path: area.area, name: AREA_LABEL[area.area]?.[0] ?? area.area, area, kids: [], files: [] };
+      nodes.set(root2.path, root2);
       const ensure = (path) => {
         const have = nodes.get(path);
         if (have) return have;
@@ -6672,12 +8494,12 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         n.files.sort((a, b) => a.name.localeCompare(b.name));
       }
     }
-    if (!showInternal) {
+    {
       const docs = [];
       let anyArea = null;
       for (const area of data.areas) {
         if (!SURFACE_FROM.has(area.area)) continue;
-        const mine = area.files.filter(isDocument);
+        const mine = area.files.filter((f) => /^hina\/[^/]+\/(scratch|scripts)\//.test(f.path) && isDocument(f));
         if (mine.length) {
           docs.push(...mine);
           anyArea = anyArea ?? area;
@@ -6703,6 +8525,21 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     }
     return out;
   }
+  function visibleTreePaths() {
+    const out = [];
+    const walk2 = (f) => {
+      out.push(f.path);
+      if (expanded.has(f.path)) for (const k of f.kids) walk2(k);
+    };
+    const roots = [...nodes.values()].filter((q) => !q.path.includes("/") && q.path !== DOCS_NODE);
+    for (const root2 of roots) {
+      if (root2.path.startsWith(".") && !root2.area.count && !root2.kids.length) continue;
+      walk2(root2);
+    }
+    const docs = nodes.get(DOCS_NODE);
+    if (docs) out.push(docs.path);
+    return out;
+  }
   function expandTo(path) {
     const parts = path.split("/");
     for (let i = 1; i <= parts.length; i++) expanded.add(parts.slice(0, i).join("/"));
@@ -6710,7 +8547,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
   function uploadTarget() {
     const n = nodes.get(selectedDir);
     if (n && !n.virtual && USER_AREAS.has(n.area.area)) return n.path;
-    return "uploads";
+    return "projects";
   }
   function moveTargets() {
     const out = [];
@@ -6741,11 +8578,11 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       dirPicker.value = "";
       void uploadMany(files, uploadTarget());
     });
-    const uploadBtn = el("button", { class: "primary tiny", text: "\uC62C\uB9AC\uAE30", title: "\uD30C\uC77C\uC744 \uACE8\uB77C \uC9C0\uAE08 \uD3F4\uB354\uC5D0 \uC62C\uB9BD\uB2C8\uB2E4" });
+    const uploadBtn = iconBtn(FICON.upload, "\uC62C\uB9AC\uAE30 \u2014 \uD30C\uC77C\uC744 \uACE8\uB77C \uC9C0\uAE08 \uD3F4\uB354\uC5D0 \uC62C\uB9BD\uB2C8\uB2E4");
     uploadBtn.addEventListener("click", () => filePicker.click());
-    const uploadDirBtn = el("button", { class: "ghost tiny", text: "\uD3F4\uB354 \uC62C\uB9AC\uAE30", title: "\uD3F4\uB354\uC9F8 \uC62C\uB9BD\uB2C8\uB2E4 (\uC548\uC758 \uD3F4\uB354 \uAD6C\uC870 \uC720\uC9C0)" });
+    const uploadDirBtn = iconBtn(FICON.folderUp, "\uD3F4\uB354 \uC62C\uB9AC\uAE30 \u2014 \uD3F4\uB354\uC9F8 \uC62C\uB9BD\uB2C8\uB2E4 (\uC548\uC758 \uD3F4\uB354 \uAD6C\uC870 \uC720\uC9C0)");
     uploadDirBtn.addEventListener("click", () => dirPicker.click());
-    const newDir = el("button", { class: "ghost tiny", text: "\uC0C8 \uD3F4\uB354", title: "\uC9C0\uAE08 \uD3F4\uB354 \uC548\uC5D0 \uD3F4\uB354\uB97C \uB9CC\uB4ED\uB2C8\uB2E4" });
+    const newDir = iconBtn(FICON.newFolder, "\uC0C8 \uD3F4\uB354 \u2014 \uC9C0\uAE08 \uD3F4\uB354 \uC548\uC5D0 \uD3F4\uB354\uB97C \uB9CC\uB4ED\uB2C8\uB2E4");
     newDir.addEventListener("click", () => {
       const body = el("div", { class: "applypop" });
       const close = popover(newDir, body);
@@ -6771,39 +8608,31 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       body.appendChild(el("div", { class: "row" }, [name, ok]));
       setTimeout(() => name.focus(), 0);
     });
-    const reloadBtn = el("button", { class: "ghost tiny", text: "\uC0C8\uB85C\uACE0\uCE68" });
+    const reloadBtn = iconBtn(ICON.reload, "\uC0C8\uB85C\uACE0\uCE68");
     reloadBtn.addEventListener("click", () => void refresh());
     treeMount.appendChild(el("div", { class: "treehead" }, [uploadBtn, uploadDirBtn, newDir, reloadBtn, filePicker, dirPicker]));
-    let any = false;
+    const spec3 = treeSpec();
     const roots = [...nodes.values()].filter((n) => !n.path.includes("/") && n.path !== DOCS_NODE);
-    for (const root of roots) {
-      if (!root.area.count && !root.kids.length) continue;
-      any = true;
-      treeMount.appendChild(nodeRow(root, 0));
+    for (const root2 of roots) {
+      if (root2.path.startsWith(".") && !root2.area.count && !root2.kids.length) continue;
+      treeMount.appendChild(treeRow(toTreeNode(root2, 0), 0, spec3));
     }
     const docs = nodes.get(DOCS_NODE);
-    if (docs) {
-      any = true;
-      treeMount.appendChild(nodeRow(docs, 0));
-    }
-    if (!any) {
-      treeMount.appendChild(el("div", {
-        class: "hint",
-        style: { padding: "8px" },
-        text: showInternal ? "\uD30C\uC77C\uC774 \uC5C6\uC2B5\uB2C8\uB2E4." : "\uC62C\uB9B0 \uD30C\uC77C\uB3C4 \uACB0\uACFC\uBB3C\uB3C4 \uC544\uC9C1 \uC5C6\uC2B5\uB2C8\uB2E4. \uD30C\uC77C\uC744 \uB04C\uC5B4\uB2E4 \uB193\uC73C\uBA74 \uC62C\uB77C\uAC11\uB2C8\uB2E4."
-      }));
-    }
-    const hidden = data.areas.filter((a) => !USER_AREAS.has(a.area) && a.count > 0);
+    if (docs) treeMount.appendChild(treeRow(toTreeNode(docs, 0), 0, spec3));
+    const hiddenN = data.areas.reduce((n, a) => n + (a.hidden ?? 0), 0) + data.areas.filter((a) => !USER_AREAS.has(a.area)).reduce((n, a) => n + a.count, 0);
     const toggle = el("button", {
       class: "ghost tiny",
-      text: showInternal ? "\uB0B4\uBD80 \uD30C\uC77C \uC228\uAE30\uAE30" : `\uB0B4\uBD80 \uD30C\uC77C \uBCF4\uAE30 (${hidden.reduce((n, a) => n + a.count, 0)})`
+      title: "\uC810(.) \uD3F4\uB354, \uB9E4 \uC2E4\uD589 \uC7AC\uC0DD\uC131\uB418\uB294 \uBA38\uC2DC\uB108\uB9AC(skills\xB7\uD5EC\uD37C \uC2A4\uD06C\uB9BD\uD2B8), \uB0B4\uBD80 \uC601\uC5ED\uC744 \uD568\uAED8 \uBCF4\uC774\uAC70\uB098 \uC228\uAE41\uB2C8\uB2E4",
+      text: showInternal ? "\uC228\uAE40 \uD30C\uC77C \uC228\uAE30\uAE30" : `\uC228\uAE40 \uD30C\uC77C \uBCF4\uAE30 (${hiddenN})`
     });
     toggle.addEventListener("click", () => {
       showInternal = !showInternal;
       void refresh();
     });
     const cleanBtn = el("button", { class: "ghost tiny" });
-    armed(cleanBtn, "\uC784\uC2DC \uC815\uB9AC", "\uC815\uB9D0 \uC815\uB9AC\uD560\uAE4C\uC694?", async () => {
+    cleanBtn.disabled = !state.activeCharKey;
+    cleanBtn.title = state.activeCharKey ? "\uC774 \uBD07\uC758 AI \uC791\uC5C5 \uD3F4\uB354(\uC784\uC2DC\xB7\uC2A4\uD06C\uB9BD\uD2B8)\uB97C \uBE44\uC6C1\uB2C8\uB2E4. \uC0B0\uCD9C\uBB3C(out)\uC740 \uB0A8\uC2B5\uB2C8\uB2E4." : "\uBD07\uC744 \uC5F4\uC5B4\uC57C \uADF8 \uBD07\uC758 \uC791\uC5C5 \uD3F4\uB354\uB97C \uC815\uB9AC\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4";
+    armed(cleanBtn, "\uC774 \uBD07 \uC815\uB9AC", "\uC815\uB9D0 \uC815\uB9AC\uD560\uAE4C\uC694?", async () => {
       try {
         const r = await state.cleanFiles();
         notice2(`${r.removed}\uAC1C\uB97C \uC9C0\uC6CC ${fmtSize2(r.freed)}\uB97C \uBE44\uC6E0\uC2B5\uB2C8\uB2E4.`, "ok");
@@ -6818,41 +8647,68 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       el("div", { class: "hint", text: `\uC804\uCCB4 ${fmtSize2(data.totalSize)}` })
     ]));
   }
-  function nodeRow(n, depth) {
-    const isOpen = expanded.has(n.path);
-    const caret = el("button", { class: "caret", text: n.kids.length ? isOpen ? "\u25BE" : "\u25B8" : "" });
-    const count = n.files.length + n.kids.reduce((s, k) => s + countFiles(k), 0);
+  function toTreeNode(n, depth) {
     const [, why] = AREA_LABEL[n.area.area] ?? ["", ""];
-    const branch = el("button", {
-      class: "treebranch" + (n.path === selectedDir ? " on" : ""),
-      title: n.virtual ? `${SURFACE_FROM.size ? "scratch/\xB7scripts/" : ""} \uC5D0 \uC788\uB294 \uBB38\uC11C\uC785\uB2C8\uB2E4. \uC5EC\uAE30\uC11C \uBC14\uB85C \uBCFC \uC218 \uC788\uC2B5\uB2C8\uB2E4.` : depth ? n.path : why
-    }, [
-      el("span", { text: n.virtual ? "\u{1F4C4}" : isOpen && n.kids.length ? "\u{1F4C2}" : "\u{1F4C1}" }),
-      el("span", { class: "grow", text: n.name, style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }),
-      el("span", { class: "n", text: String(count) })
-    ]);
-    branch.addEventListener("click", () => {
-      selectedDir = n.path;
-      previewPath = "";
-      selection.clear();
-      confirmDelete = false;
-      if (n.kids.length) expanded.add(n.path);
-      drawTree();
-      drawCentre();
-    });
-    caret.addEventListener("click", (e) => {
-      e.stopPropagation();
-      if (expanded.has(n.path)) expanded.delete(n.path);
-      else expanded.add(n.path);
-      drawTree();
-    });
-    if (!n.virtual && USER_AREAS.has(n.area.area)) installDrop(branch, () => n.path);
-    const kids = el(
-      "div",
-      { class: "treekids", style: { display: isOpen ? "" : "none" } },
-      n.kids.map((k) => nodeRow(k, depth + 1))
-    );
-    return el("div", {}, [el("div", { class: "treerow" }, [caret, branch]), kids]);
+    return {
+      path: n.path,
+      name: n.name,
+      kids: n.kids.map((k) => toTreeNode(k, depth + 1)),
+      count: countFiles(n),
+      glyph: n.virtual ? "\u{1F4C4}" : void 0,
+      title: n.virtual ? "AI \uC791\uC5C5 \uD3F4\uB354(\uC784\uC2DC\xB7\uC2A4\uD06C\uB9BD\uD2B8)\uC5D0 \uC788\uB294 \uBB38\uC11C\uC785\uB2C8\uB2E4. \uC5EC\uAE30\uC11C \uBC14\uB85C \uBCFC \uC218 \uC788\uC2B5\uB2C8\uB2E4." : depth ? n.path : why,
+      // A folder in the tree is a drop target of its own.
+      droppable: !n.virtual && USER_AREAS.has(n.area.area)
+    };
+  }
+  function selectTreeFolder(path) {
+    const f = nodes.get(path);
+    treeSel = /* @__PURE__ */ new Set([path]);
+    treeAnchor = path;
+    selectedDir = path;
+    previewPath = "";
+    selection.clear();
+    if (f && f.kids.length) expanded.add(path);
+    drawTree();
+    drawCentre();
+  }
+  function treeSpec() {
+    return {
+      expanded,
+      selected: treeSel.size ? treeSel : /* @__PURE__ */ new Set([selectedDir]),
+      onOpen(node, ev) {
+        if (ev.ctrlKey || ev.metaKey) {
+          if (!treeSel.size) treeSel.add(selectedDir);
+          if (treeSel.has(node.path)) treeSel.delete(node.path);
+          else treeSel.add(node.path);
+          if (!treeSel.size) treeSel.add(node.path);
+          treeAnchor = node.path;
+          drawTree();
+          return;
+        }
+        if (ev.shiftKey && treeAnchor) {
+          const vis = visibleTreePaths();
+          const a = vis.indexOf(treeAnchor);
+          const b = vis.indexOf(node.path);
+          if (a !== -1 && b !== -1) {
+            treeSel = new Set(vis.slice(Math.min(a, b), Math.max(a, b) + 1));
+            drawTree();
+            return;
+          }
+        }
+        selectTreeFolder(node.path);
+      },
+      onContext(node, ev) {
+        openTreeMenu(node, ev);
+      },
+      onToggle(node) {
+        if (expanded.has(node.path)) expanded.delete(node.path);
+        else expanded.add(node.path);
+        drawTree();
+      },
+      onDropFiles: (path, files) => void uploadMany(files, path),
+      // Rows dragged from the centre land in a tree folder (item 3).
+      onDropMove: (path, sources) => void moveSelected(sources, path)
+    };
   }
   function countFiles(n) {
     return n.files.length + n.kids.reduce((s, k) => s + countFiles(k), 0);
@@ -6875,28 +8731,35 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     }
     const writable = !n.virtual && USER_AREAS.has(n.area.area);
     const deletable = n.area.deletable;
-    const hasImages = n.files.some((f) => IMAGE_RE.test(f.name));
+    const hasImages = hasImagesDeep(n);
     const [, why] = AREA_LABEL[n.area.area] ?? ["", ""];
     const selCount = selection.size;
     const dl = el("button", { class: "ghost tiny", text: selCount > 1 ? `\uB0B4\uB824\uBC1B\uAE30 (${selCount}, zip)` : "\uB0B4\uB824\uBC1B\uAE30", title: "\uB0B4 PC\uC5D0 \uC800\uC7A5\uD569\uB2C8\uB2E4. \uC5EC\uB7EC \uAC1C\uB098 \uD3F4\uB354\uB294 zip \uD558\uB098\uB85C \uBC1B\uC2B5\uB2C8\uB2E4." });
     dl.disabled = !selCount;
     dl.addEventListener("click", () => void downloadSelected(n));
-    const mv = el("button", { class: "ghost tiny", text: "\uC774\uB3D9", title: "\uACE0\uB978 \uD56D\uBAA9\uC744 \uB2E4\uB978 \uD3F4\uB354\uB85C \uC62E\uAE41\uB2C8\uB2E4" });
+    const mv = iconBtn(FICON.move, selCount ? `\uC774\uB3D9 (${selCount}) \u2014 \uB2E4\uB978 \uD3F4\uB354\uB85C \uC62E\uAE41\uB2C8\uB2E4` : "\uC774\uB3D9 \u2014 \uACE0\uB978 \uD56D\uBAA9\uC744 \uB2E4\uB978 \uD3F4\uB354\uB85C \uC62E\uAE41\uB2C8\uB2E4");
     mv.disabled = !selCount || !deletable;
     mv.addEventListener("click", () => openMove(mv));
-    const del = el("button", { class: "ghost tiny", text: selCount ? `\uC0AD\uC81C (${selCount})` : "\uC0AD\uC81C", title: "Delete \uD0A4\uB85C\uB3C4 \uB429\uB2C8\uB2E4" });
+    const del = iconBtn(FICON.trash, (selCount ? `\uC0AD\uC81C (${selCount})` : "\uC0AD\uC81C") + " \u2014 Delete \uD0A4\uB85C\uB3C4 \uB429\uB2C8\uB2E4");
     del.disabled = !selCount || !deletable;
-    del.addEventListener("click", () => requestDelete());
-    const all = el("button", { class: "ghost tiny", text: "\uC804\uCCB4 \uC120\uD0DD", title: "Ctrl+A" });
+    delCtrl = armedIcon(del, FICON.trash, `\uC815\uB9D0? (${selCount})`, () => void runDelete(n));
+    const allNow = n.kids.length + n.files.length;
+    const allOn = selCount > 0 && selCount >= allNow;
+    const all = iconBtn(FICON.selectAll, allOn ? "\uC804\uCCB4 \uC120\uD0DD \uD574\uC81C (Esc)" : "\uC804\uCCB4 \uC120\uD0DD (Ctrl+A)");
+    all.classList.toggle("on", allOn);
     all.addEventListener("click", () => {
-      selectAll(n);
+      if (allOn) selection.clear();
+      else selectAll(n);
       drawCentre();
     });
-    const viewBtn = el("button", { class: "ghost tiny", text: view === "grid" ? "\uBAA9\uB85D \uBCF4\uAE30" : "\uBBF8\uB9AC\uBCF4\uAE30", title: "\uADF8\uB9BC\uC774 \uC788\uB294 \uD3F4\uB354\uB294 \uC378\uB124\uC77C\uB85C \uBCFC \uC218 \uC788\uC2B5\uB2C8\uB2E4" });
+    const viewBtn = iconBtn(
+      view2 === "grid" ? FICON.list : FICON.grid,
+      view2 === "grid" ? "\uBAA9\uB85D \uBCF4\uAE30" : "\uBBF8\uB9AC\uBCF4\uAE30 \u2014 \uC378\uB124\uC77C\uB85C \uBD05\uB2C8\uB2E4"
+    );
     viewBtn.addEventListener("click", () => {
-      view = view === "grid" ? "list" : "grid";
+      view2 = view2 === "grid" ? "list" : "grid";
       try {
-        localStorage.setItem("hina.filesView", view);
+        localStorage.setItem("hina.filesView", view2);
       } catch {
       }
       drawCentre();
@@ -6914,10 +8777,42 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         zipAll.disabled = false;
       }
     });
+    const searchWrap = el("span", { class: "fsearch" + (filterText2 ? " open" : "") });
+    const searchInput = el("input", { placeholder: "\uC774 \uD3F4\uB354\uC5D0\uC11C \uCC3E\uAE30", value: filterText2 });
+    const searchBtn = iconBtn(FICON.search, "\uC774 \uD3F4\uB354\uC5D0\uC11C \uCC3E\uAE30");
+    searchBtn.addEventListener("click", () => {
+      searchWrap.classList.add("open");
+      searchInput.focus();
+    });
+    searchInput.addEventListener("input", () => {
+      filterText2 = searchInput.value;
+      drawCentre();
+      const again = viewMount?.querySelector(".fsearch input");
+      if (again) {
+        again.focus();
+        try {
+          again.setSelectionRange(again.value.length, again.value.length);
+        } catch {
+        }
+      }
+    });
+    searchInput.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape") {
+        filterText2 = "";
+        drawCentre();
+        focusList();
+      }
+    });
+    searchInput.addEventListener("blur", () => {
+      if (!searchInput.value) searchWrap.classList.remove("open");
+    });
+    searchWrap.append(searchBtn, searchInput);
     viewMount.appendChild(el("div", { class: "filebar" }, [
       el("span", { class: "filecrumb", text: n.virtual ? "\uC784\uC2DC \uBB38\uC11C" : n.path + "/" }),
+      n.virtual ? null : copyPathButton(n.path),
       el("span", { class: "hint", text: `${n.files.length}\uAC1C` + (n.kids.length ? ` \xB7 \uD3F4\uB354 ${n.kids.length}` : "") }),
       el("span", { class: "spacer" }),
+      searchWrap,
       hasImages ? viewBtn : null,
       all,
       dl,
@@ -6925,18 +8820,16 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       mv,
       del
     ]));
-    viewMount.appendChild(el("div", { class: "filehint", text: (n.virtual ? "scratch/\xB7scripts/ \uC5D0 AI\uAC00 \uB0A8\uAE34 \uBB38\uC11C\uC785\uB2C8\uB2E4. " : why + " ") + (writable ? "\uD30C\uC77C\uC774\uB098 \uD3F4\uB354\uB97C \uC5EC\uAE30\uC5D0 \uB04C\uC5B4\uB2E4 \uB193\uC73C\uBA74 \uC774 \uD3F4\uB354\uC5D0 \uC62C\uB77C\uAC11\uB2C8\uB2E4 (zip \uC740 \uD480\uC5B4\uC11C \uC62C\uB9B4 \uC218 \uC788\uC2B5\uB2C8\uB2E4). " : "") + "\uD074\uB9AD\uC73C\uB85C \uC120\uD0DD, Ctrl\xB7Shift \uB85C \uC5EC\uB7EC \uAC1C, \uB354\uBE14\uD074\uB9AD\xB7Enter \uB85C \uC5F4\uAE30" + (deletable ? ", Delete \uB85C \uC0AD\uC81C." : ".") }));
-    const barSlot = el("div", { class: "fileslot" });
-    viewMount.appendChild(barSlot);
-    if (confirmDelete && selCount && deletable) barSlot.appendChild(confirmBar(n));
+    viewMount.appendChild(el("div", { class: "filehint", text: (n.virtual ? "AI \uC791\uC5C5 \uD3F4\uB354\uC5D0 \uB0A8\uC740 \uBB38\uC11C\uC785\uB2C8\uB2E4. " : why + " ") + (writable ? "\uD30C\uC77C\uC774\uB098 \uD3F4\uB354\uB97C \uB04C\uC5B4\uB2E4 \uB193\uC73C\uBA74 \uC62C\uB77C\uAC00\uACE0, \uD589\uC744 \uC67C\uCABD \uD2B8\uB9AC\uC758 \uD3F4\uB354\uB85C \uB04C\uBA74 \uC62E\uACA8\uC9D1\uB2C8\uB2E4. " : "") + "\uD074\uB9AD\uC73C\uB85C \uC120\uD0DD, Ctrl\xB7Shift \uB85C \uC5EC\uB7EC \uAC1C, \uB354\uBE14\uD074\uB9AD\xB7Enter \uB85C \uC5F4\uAE30, \uC6B0\uD074\uB9AD\uC5D0 \uC774\uB984 \uBC14\uAFB8\uAE30\xB7\uBCF5\uC0AC\xB7\uBD99\uC5EC\uB123\uAE30" + (deletable ? ", Delete \uB85C \uC0AD\uC81C." : ".") }));
     const list2 = el("div", { class: "filelist", tabindex: "0" });
+    const q = filterText2.trim().toLowerCase();
     const entries = [
       ...n.kids.map((k) => ({ path: k.path, name: k.name, node: k })),
       ...n.files.map((f) => ({ path: f.path, name: f.name, file: f }))
-    ];
+    ].filter((e) => !q || e.name.toLowerCase().includes(q));
     if (!entries.length) {
-      list2.appendChild(el("div", { class: "fempty", text: writable ? "\uBE44\uC5B4 \uC788\uC2B5\uB2C8\uB2E4. \uD30C\uC77C\uC744 \uB04C\uC5B4\uB2E4 \uB193\uAC70\uB098 \uC67C\uCABD \u201C\uC62C\uB9AC\uAE30\u201D\uB97C \uB204\uB974\uC138\uC694." : "\uBE44\uC5B4 \uC788\uC2B5\uB2C8\uB2E4." }));
-    } else if (view === "grid" && hasImages) {
+      list2.appendChild(el("div", { class: "fempty", text: q ? `\u201C${filterText2}\u201D \uC5D0 \uB9DE\uB294 \uD56D\uBAA9\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.` : writable ? "\uBE44\uC5B4 \uC788\uC2B5\uB2C8\uB2E4. \uD30C\uC77C\uC744 \uB04C\uC5B4\uB2E4 \uB193\uAC70\uB098 \uC67C\uCABD \u201C\uC62C\uB9AC\uAE30\u201D\uB97C \uB204\uB974\uC138\uC694." : "\uBE44\uC5B4 \uC788\uC2B5\uB2C8\uB2E4." }));
+    } else if (view2 === "grid" && hasImages) {
       const grid = el("div", { class: "fgrid" });
       for (const e of entries) grid.appendChild(gridCell(e, entries, n));
       list2.appendChild(grid);
@@ -6947,29 +8840,117 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         el("span", { class: "fsize", text: "\uD06C\uAE30" }),
         el("span", { class: "ftime", text: "\uC218\uC815" })
       ]));
-      for (const e of entries) list2.appendChild(listRow(e, entries, n));
+      for (const e of entries) list2.appendChild(listRow2(e, entries, n));
     }
     list2.addEventListener("keydown", (ev) => {
       const e = ev;
       if (e.key === "Delete" || e.key === "Backspace") {
         e.preventDefault();
-        if (confirmDelete) void runDelete(n);
-        else requestDelete();
+        if (delCtrl && !del.disabled) {
+          if (delCtrl.armed) delCtrl.fire();
+          else delCtrl.arm();
+        }
       } else if (e.key === "Enter") {
         e.preventDefault();
         const first = [...selection][0];
         if (first) openEntry(first, n);
       } else if (e.key === "Escape") {
         selection.clear();
-        confirmDelete = false;
         drawCentre();
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
         e.preventDefault();
         selectAll(n);
         drawCentre();
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c" && selection.size) {
+        clipboard = { op: "copy", paths: [...selection] };
+        notice2(`${clipboard.paths.length}\uAC1C\uB97C \uBCF5\uC0AC\uD588\uC2B5\uB2C8\uB2E4 \u2014 \uBD99\uC5EC\uB123\uC744 \uD3F4\uB354\uC5D0\uC11C \uC6B0\uD074\uB9AD\uD558\uAC70\uB098 Ctrl+V.`);
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "x" && selection.size && deletable) {
+        clipboard = { op: "cut", paths: [...selection] };
+        notice2(`${clipboard.paths.length}\uAC1C\uB97C \uC798\uB77C\uB0C8\uC2B5\uB2C8\uB2E4 \u2014 \uBD99\uC5EC\uB123\uC744 \uD3F4\uB354\uC5D0\uC11C \uC6B0\uD074\uB9AD\uD558\uAC70\uB098 Ctrl+V.`);
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v" && clipboard && writable) {
+        void pasteInto(uploadTarget());
       }
     });
+    list2.addEventListener("contextmenu", (ev) => {
+      if (ev.target.closest(".frow:not(.head), .fcell")) return;
+      ev.preventDefault();
+      menuAt(ev.clientX, ev.clientY, [
+        {
+          label: clipboard ? `\uBD99\uC5EC\uB123\uAE30 (${clipboard.paths.length})` : "\uBD99\uC5EC\uB123\uAE30",
+          disabled: !clipboard || !writable,
+          onClick: () => void pasteInto(uploadTarget())
+        },
+        { label: "\uC804\uCCB4 \uC120\uD0DD", onClick: () => {
+          selectAll(n);
+          drawCentre();
+        } },
+        {
+          label: "\uC120\uD0DD \uD574\uC81C",
+          disabled: !selection.size,
+          onClick: () => {
+            selection.clear();
+            drawCentre();
+          }
+        }
+      ]);
+    });
+    installMarquee(list2);
     viewMount.appendChild(list2);
+  }
+  function installMarquee(list2) {
+    let origin = null;
+    let base = null;
+    let box = null;
+    let rects = [];
+    const stop = () => {
+      origin = null;
+      base = null;
+      box?.remove();
+      box = null;
+      rects = [];
+    };
+    list2.addEventListener("pointerdown", (ev) => {
+      const e = ev;
+      if (e.button !== 0) return;
+      if (e.target.closest(".frow, .fcell, input, button, a, select, textarea")) return;
+      origin = { x: e.clientX, y: e.clientY };
+      base = e.ctrlKey || e.metaKey ? new Set(selection) : /* @__PURE__ */ new Set();
+      try {
+        list2.setPointerCapture(e.pointerId);
+      } catch {
+      }
+    });
+    list2.addEventListener("pointermove", (ev) => {
+      const e = ev;
+      if (!origin || !base) return;
+      if (!box) {
+        if (Math.abs(e.clientX - origin.x) < 4 && Math.abs(e.clientY - origin.y) < 4) return;
+        box = el("div", { class: "marquee" });
+        document.body.appendChild(box);
+        rects = [...list2.querySelectorAll(".frow:not(.head), .fcell")].map((r) => ({ path: r.title, r: r.getBoundingClientRect(), el: r }));
+      }
+      const left = Math.min(e.clientX, origin.x);
+      const top = Math.min(e.clientY, origin.y);
+      const right = Math.max(e.clientX, origin.x);
+      const bottom = Math.max(e.clientY, origin.y);
+      box.style.left = `${left}px`;
+      box.style.top = `${top}px`;
+      box.style.width = `${right - left}px`;
+      box.style.height = `${bottom - top}px`;
+      selection = new Set(base);
+      for (const { path, r, el: rowEl } of rects) {
+        if (r.left < right && r.right > left && r.top < bottom && r.bottom > top) selection.add(path);
+        rowEl.classList.toggle("sel", selection.has(path));
+      }
+    });
+    const finish = () => {
+      if (!origin) return;
+      const dragged = !!box;
+      stop();
+      if (dragged) drawCentre();
+    };
+    list2.addEventListener("pointerup", finish);
+    list2.addEventListener("pointercancel", () => stop());
   }
   function findFile(path) {
     for (const n of nodes.values()) {
@@ -6997,7 +8978,6 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       selection = /* @__PURE__ */ new Set([path]);
       anchorPath = path;
     }
-    confirmDelete = false;
   }
   function openEntry(path, n) {
     const kid = n.kids.find((k) => k.path === path);
@@ -7012,7 +8992,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     previewPath = path;
     drawCentre();
   }
-  function listRow(e, order, n) {
+  function listRow2(e, order, n) {
     const box = el("input", { type: "checkbox" });
     box.checked = selection.has(e.path);
     const row = el("div", { class: "frow" + (selection.has(e.path) ? " sel" : ""), title: e.path }, [
@@ -7032,7 +9012,6 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       if (box.checked) selection.add(e.path);
       else selection.delete(e.path);
       anchorPath = e.path;
-      confirmDelete = false;
       drawCentre();
       focusList();
     });
@@ -7042,7 +9021,287 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       focusList();
     });
     row.addEventListener("dblclick", () => openEntry(e.path, n));
+    wireRowDnd(row, e, n);
+    row.addEventListener("contextmenu", (ev) => openRowMenu(ev, e, n));
     return row;
+  }
+  function wireRowDnd(row, e, n) {
+    if (!n.virtual) installDrag(row, () => selection.has(e.path) ? [...selection] : [e.path]);
+    if (e.node && !n.virtual && USER_AREAS.has(n.area.area)) {
+      installDrop(row, {
+        into: () => e.path,
+        onFiles: (path, files) => void uploadMany(files, path),
+        onMove: (path, sources) => void moveSelected(sources, path)
+      });
+    }
+  }
+  function openRowMenu(ev, e, n) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    if (!selection.has(e.path)) {
+      selection = /* @__PURE__ */ new Set([e.path]);
+      anchorPath = e.path;
+      drawCentre();
+    }
+    const paths = [...selection];
+    const many = paths.length > 1;
+    const can = n.area.deletable && !n.virtual;
+    const pasteTarget = e.node ? e.path : selectedDir;
+    menuAt(ev.clientX, ev.clientY, [
+      { label: "\uC5F4\uAE30", disabled: many, onClick: () => openEntry(e.path, n) },
+      { label: "\uC774\uB984 \uBC14\uAFB8\uAE30", disabled: many || !can, onClick: () => renameEntry(e) },
+      null,
+      {
+        label: many ? `\uBCF5\uC0AC (${paths.length})` : "\uBCF5\uC0AC",
+        onClick: () => {
+          clipboard = { op: "copy", paths };
+          notice2(`${paths.length}\uAC1C\uB97C \uBCF5\uC0AC\uD588\uC2B5\uB2C8\uB2E4 \u2014 \uBD99\uC5EC\uB123\uC744 \uD3F4\uB354\uC5D0\uC11C \uC6B0\uD074\uB9AD\uD558\uC138\uC694.`);
+        }
+      },
+      {
+        label: many ? `\uC798\uB77C\uB0B4\uAE30 (${paths.length})` : "\uC798\uB77C\uB0B4\uAE30",
+        disabled: !can,
+        onClick: () => {
+          clipboard = { op: "cut", paths };
+          notice2(`${paths.length}\uAC1C\uB97C \uC798\uB77C\uB0C8\uC2B5\uB2C8\uB2E4 \u2014 \uBD99\uC5EC\uB123\uC744 \uD3F4\uB354\uC5D0\uC11C \uC6B0\uD074\uB9AD\uD558\uC138\uC694.`);
+        }
+      },
+      {
+        label: clipboard ? `\uBD99\uC5EC\uB123\uAE30 (${clipboard.paths.length})` : "\uBD99\uC5EC\uB123\uAE30",
+        disabled: !clipboard,
+        onClick: () => void pasteInto(pasteTarget)
+      },
+      null,
+      { label: "\uACBD\uB85C \uBCF5\uC0AC", onClick: () => {
+        copyToClipboard(e.path);
+        notice2("\uACBD\uB85C\uB97C \uBCF5\uC0AC\uD588\uC2B5\uB2C8\uB2E4.", "ok");
+      } },
+      { label: many ? `\uB0B4\uB824\uBC1B\uAE30 (${paths.length})` : "\uB0B4\uB824\uBC1B\uAE30", onClick: () => void downloadSelected(n) },
+      null,
+      // The two-step confirm stays: the menu arms the bar's delete, the red
+      // button fires it - a context menu must not be a one-click shredder.
+      {
+        label: many ? `\uC0AD\uC81C (${paths.length})\u2026` : "\uC0AD\uC81C\u2026",
+        danger: true,
+        disabled: !can,
+        onClick: () => {
+          delCtrl?.arm();
+          notice2("\uC0AD\uC81C\uD558\uB824\uBA74 \uB9C9\uB300\uC758 \uBE68\uAC04 \uD655\uC778 \uBC84\uD2BC\uC744 \uD55C \uBC88 \uB354 \uB204\uB974\uC138\uC694.");
+        }
+      }
+    ]);
+  }
+  function openTreeMenu(node, ev) {
+    if (!treeSel.has(node.path)) {
+      treeSel = /* @__PURE__ */ new Set([node.path]);
+      treeAnchor = node.path;
+      drawTree();
+    }
+    const paths = [...treeSel].filter((q) => q !== DOCS_NODE);
+    if (!paths.length) return;
+    const many = paths.length > 1;
+    const writableAt = (q) => {
+      const f = nodes.get(q);
+      return !!f && !f.virtual && USER_AREAS.has(f.area.area);
+    };
+    const can = paths.every((q) => q.includes("/") && writableAt(q));
+    const hereOk = !many && writableAt(node.path);
+    menuAt(ev.clientX, ev.clientY, [
+      { label: "\uC5F4\uAE30", disabled: many, onClick: () => selectTreeFolder(node.path) },
+      { label: "\uC0C8 \uD3F4\uB354", disabled: !hereOk, onClick: () => treeNewFolder(node.path) },
+      { label: "\uC774\uB984 \uBC14\uAFB8\uAE30", disabled: many || !can, onClick: () => renameEntry({ path: node.path, name: node.name }) },
+      null,
+      {
+        label: many ? `\uBCF5\uC0AC (${paths.length})` : "\uBCF5\uC0AC",
+        disabled: !can,
+        onClick: () => {
+          clipboard = { op: "copy", paths };
+          notice2(`${paths.length}\uAC1C\uB97C \uBCF5\uC0AC\uD588\uC2B5\uB2C8\uB2E4 \u2014 \uBD99\uC5EC\uB123\uC744 \uD3F4\uB354\uC5D0\uC11C \uC6B0\uD074\uB9AD\uD558\uAC70\uB098 Ctrl+V.`);
+        }
+      },
+      {
+        label: many ? `\uC798\uB77C\uB0B4\uAE30 (${paths.length})` : "\uC798\uB77C\uB0B4\uAE30",
+        disabled: !can,
+        onClick: () => {
+          clipboard = { op: "cut", paths };
+          notice2(`${paths.length}\uAC1C\uB97C \uC798\uB77C\uB0C8\uC2B5\uB2C8\uB2E4 \u2014 \uBD99\uC5EC\uB123\uC744 \uD3F4\uB354\uC5D0\uC11C \uC6B0\uD074\uB9AD\uD558\uAC70\uB098 Ctrl+V.`);
+        }
+      },
+      {
+        label: clipboard ? `\uBD99\uC5EC\uB123\uAE30 (${clipboard.paths.length})` : "\uBD99\uC5EC\uB123\uAE30",
+        disabled: !clipboard || !hereOk,
+        onClick: () => void pasteInto(node.path)
+      },
+      null,
+      {
+        label: "\uACBD\uB85C \uBCF5\uC0AC",
+        disabled: many,
+        onClick: () => {
+          copyToClipboard(node.path);
+          notice2("\uACBD\uB85C\uB97C \uBCF5\uC0AC\uD588\uC2B5\uB2C8\uB2E4.", "ok");
+        }
+      },
+      { label: many ? `\uB0B4\uB824\uBC1B\uAE30 (${paths.length}, zip)` : "\uB0B4\uB824\uBC1B\uAE30 (zip)", onClick: () => void treeDownload(paths) },
+      null,
+      {
+        label: many ? `\uC0AD\uC81C (${paths.length})\u2026` : "\uC0AD\uC81C\u2026",
+        danger: true,
+        disabled: !can,
+        onClick: () => treeDeleteConfirm(paths, ev)
+      }
+    ]);
+  }
+  function treeDeleteConfirm(paths, ev) {
+    menuAt(ev.clientX, ev.clientY, [
+      {
+        label: `\uC815\uB9D0 \uC0AD\uC81C (${paths.length}\uAC1C \uD3F4\uB354, \uC548\uC758 \uD30C\uC77C \uD3EC\uD568)`,
+        danger: true,
+        onClick: () => void treeDelete(paths)
+      }
+    ]);
+  }
+  async function treeDelete(paths) {
+    try {
+      const r = await state.deleteFiles(paths);
+      notice2(r.failed.length ? `${r.done}\uAC1C\uB97C \uC9C0\uC6E0\uC2B5\uB2C8\uB2E4. ${r.failed.length}\uAC1C \uC2E4\uD328 \u2014 ${r.failed[0].error}` : `${r.done}\uAC1C\uB97C \uC9C0\uC6E0\uC2B5\uB2C8\uB2E4.`, r.failed.length ? "err" : "ok");
+    } catch (e) {
+      notice2("\uC9C0\uC6B0\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg5(e), "err");
+    }
+    treeSel.clear();
+    state.touchFiles();
+    await refresh();
+  }
+  async function treeDownload(paths) {
+    const name = paths.length === 1 ? paths[0].split("/").pop() ?? "files" : "files";
+    try {
+      const bytes = await state.downloadZip(paths, name);
+      notice2(`${fmtSize2(bytes)} zip \uC744 \uBE0C\uB77C\uC6B0\uC800 \uB2E4\uC6B4\uB85C\uB4DC\uB85C \uB118\uACBC\uC2B5\uB2C8\uB2E4.`, "ok");
+    } catch (e) {
+      notice2("\uB0B4\uB824\uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg5(e), "err");
+    }
+  }
+  function treeNewFolder(where) {
+    askName("\uC0C8 \uD3F4\uB354", {
+      label: `${where}/ \uC548\uC5D0`,
+      placeholder: "\uD3F4\uB354 \uC774\uB984",
+      ok: "\uB9CC\uB4E4\uAE30",
+      onSubmit: async (raw) => {
+        const nm = raw.trim().replace(/[\\/]+/g, "-");
+        if (!nm) return;
+        try {
+          await state.mkdirFile(where + "/" + nm);
+          expandTo(where + "/" + nm);
+          state.touchFiles();
+          await refresh();
+        } catch (e) {
+          notice2("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg5(e), "err");
+        }
+      }
+    });
+  }
+  function renameEntry(e) {
+    const anchor = viewMount?.querySelector(".filebar") ?? viewMount;
+    if (!anchor) return;
+    namePopover(anchor, {
+      label: `${e.name} \u2192 \uC0C8 \uC774\uB984`,
+      value: e.name,
+      ok: "\uBC14\uAFB8\uAE30",
+      onSubmit: async (raw) => {
+        const nm = raw.replace(/[\\/]+/g, "-").trim();
+        if (!nm || nm === e.name) return;
+        const dir = e.path.includes("/") ? e.path.slice(0, e.path.lastIndexOf("/")) : "";
+        try {
+          const r = await state.moveFile(e.path, (dir ? dir + "/" : "") + nm);
+          if (previewPath === e.path) previewPath = r.to;
+          selection = /* @__PURE__ */ new Set([r.to]);
+          notice2("\uC774\uB984\uC744 \uBC14\uAFE8\uC2B5\uB2C8\uB2E4.", "ok");
+          state.touchFiles();
+          await refresh();
+        } catch (err) {
+          notice2("\uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg5(err), "err");
+        }
+      }
+    });
+  }
+  function batchText(r, target, verb) {
+    const head = `${r.done}\uAC1C\uB97C ${target}/ \uC5D0 ${verb}\uD588\uC2B5\uB2C8\uB2E4.`;
+    if (!r.failed.length) return head;
+    const names = r.failed.slice(0, 3).map((f) => f.path.split("/").pop()).join(", ");
+    return `${head} ${r.failed.length}\uAC1C\uB294 \uAC74\uB108\uB700 (${names}${r.failed.length > 3 ? " \uC678" : ""}) \u2014 ${r.failed[0].error}`;
+  }
+  async function pasteInto(target) {
+    const clip2 = clipboard;
+    if (!clip2) return;
+    const list2 = clip2.paths.filter((p) => p !== target && !target.startsWith(p + "/"));
+    if (!list2.length) return;
+    try {
+      const r = clip2.op === "copy" ? await state.copyFiles(list2, target) : await state.moveFiles(list2, target);
+      notice2(batchText(r, target, clip2.op === "copy" ? "\uBCF5\uC0AC" : "\uC774\uB3D9"), r.failed.length ? "err" : "ok");
+    } catch (e) {
+      notice2("\uCC98\uB9AC\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg5(e), "err");
+    }
+    if (clip2.op === "cut") {
+      clipboard = null;
+      selection.clear();
+    }
+    state.touchFiles();
+    await refresh();
+  }
+  async function moveSelected(sources, target) {
+    const list2 = sources.filter((p) => p !== target && !target.startsWith(p + "/"));
+    if (!list2.length) return;
+    try {
+      const r = await state.moveFiles(list2, target);
+      notice2(batchText(r, target, "\uC774\uB3D9"), r.failed.length ? "err" : "ok");
+    } catch (e) {
+      notice2("\uC62E\uAE30\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg5(e), "err");
+    }
+    selection.clear();
+    previewPath = "";
+    state.touchFiles();
+    await refresh();
+  }
+  function armedIcon(button, iconHtml, confirmLabel, run) {
+    let armedNow = false;
+    let timer;
+    const disarm = () => {
+      if (timer) clearTimeout(timer);
+      armedNow = false;
+      button.innerHTML = iconHtml;
+      button.classList.remove("danger");
+    };
+    const arm = () => {
+      if (timer) clearTimeout(timer);
+      armedNow = true;
+      button.textContent = confirmLabel;
+      button.classList.add("danger");
+      timer = setTimeout(disarm, 4e3);
+    };
+    const fire = () => {
+      disarm();
+      run();
+    };
+    button.innerHTML = iconHtml;
+    button.addEventListener("click", () => {
+      if (!armedNow) arm();
+      else fire();
+    });
+    return { arm, fire, disarm, get armed() {
+      return armedNow;
+    } };
+  }
+  function hasImagesDeep(node) {
+    if (node.files.some((f) => IMAGE_RE.test(f.name))) return true;
+    return node.kids.some(hasImagesDeep);
+  }
+  function firstImage(node) {
+    const own = node.files.find((f) => IMAGE_RE.test(f.name));
+    if (own) return own;
+    for (const k of node.kids) {
+      const hit = firstImage(k);
+      if (hit) return hit;
+    }
+    return null;
   }
   function gridCell(e, order, n) {
     const pic = el("div", { class: "assetpic" });
@@ -7051,8 +9310,11 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       el("div", { class: "fname", text: e.name }),
       el("div", { class: "fsize", text: e.file ? fmtSize2(e.file.size) : `\uD3F4\uB354 \xB7 ${countFiles(e.node)}\uAC1C` })
     ]);
-    if (e.node) pic.appendChild(el("div", { class: "assettype", text: "\u{1F4C1}" }));
-    else if (e.file && IMAGE_RE.test(e.name)) void loadThumb(e.file, pic);
+    if (e.node) {
+      const peek = firstImage(e.node);
+      if (peek) void loadThumb(peek, pic);
+      pic.appendChild(el("div", { class: peek ? "foldertag" : "assettype", text: "\u{1F4C1}" }));
+    } else if (e.file && IMAGE_RE.test(e.name)) void loadThumb(e.file, pic);
     else pic.appendChild(el("div", { class: "assettype", text: (e.name.split(".").pop() || "?").toUpperCase().slice(0, 5) }));
     cell2.addEventListener("click", (ev) => {
       pick(e.path, ev, order);
@@ -7060,51 +9322,35 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       focusList();
     });
     cell2.addEventListener("dblclick", () => openEntry(e.path, n));
+    wireRowDnd(cell2, e, n);
+    cell2.addEventListener("contextmenu", (ev) => openRowMenu(ev, e, n));
     return cell2;
   }
   function focusList() {
     viewMount?.querySelector(".filelist")?.focus();
   }
-  var THUMB_PARALLEL = 6;
-  var thumbActive = 0;
-  var thumbQueue = [];
+  function copyPathButton(path) {
+    const b = el("button", { class: "ghost tiny", text: "\u{1F4CB}", title: "\uACBD\uB85C \uBCF5\uC0AC" });
+    b.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      b.textContent = copyToClipboard(path) ? "\uBCF5\uC0AC\uB428" : "\uC2E4\uD328";
+      setTimeout(() => {
+        b.textContent = "\u{1F4CB}";
+      }, 1500);
+    });
+    return b;
+  }
   async function loadThumb(f, mount) {
-    let url = thumbs.get(f.path + ":" + f.modified) || "";
-    if (!url) {
-      await new Promise((resolve) => {
-        const go = () => {
-          thumbActive += 1;
-          resolve();
-        };
-        if (thumbActive < THUMB_PARALLEL) go();
-        else thumbQueue.push(go);
-      });
-      try {
-        if (!mount.isConnected) return;
-        const bytes = await state.fileBytes(f.path);
-        const buf = new Uint8Array(bytes.byteLength);
-        buf.set(bytes);
-        url = URL.createObjectURL(new Blob([buf]));
-        if (thumbs.size > 400) {
-          for (const [k, u] of thumbs) {
-            URL.revokeObjectURL(u);
-            thumbs.delete(k);
-            break;
-          }
-        }
-        thumbs.set(f.path + ":" + f.modified, url);
-      } catch {
-        mount.appendChild(el("div", { class: "assettype", text: "?" }));
-        return;
-      } finally {
-        thumbActive -= 1;
-        thumbQueue.shift()?.();
-      }
+    try {
+      if (!mount.isConnected) return;
+      const url = await blobUrl(f.path, String(f.modified), { thumb: true });
+      if (!mount.isConnected) return;
+      const img = el("img", { src: url, alt: f.name, loading: "lazy" });
+      img.addEventListener("error", () => img.replaceWith(el("div", { class: "assettype", text: "IMG" })));
+      mount.appendChild(img);
+    } catch {
+      mount.appendChild(el("div", { class: "assettype", text: "?" }));
     }
-    if (!mount.isConnected) return;
-    const img = el("img", { src: url, alt: f.name, loading: "lazy" });
-    img.addEventListener("error", () => img.replaceWith(el("div", { class: "assettype", text: "IMG" })));
-    mount.appendChild(img);
   }
   async function drawPreview(f, n) {
     if (!viewMount) return;
@@ -7132,6 +9378,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     const head = el("div", { class: "filebar" }, [
       back,
       el("span", { class: "filecrumb", text: f.path }),
+      copyPathButton(f.path),
       el("span", { class: "hint", text: `${fmtSize2(f.size)} \xB7 ${fmtWhen(f.modified)} \xB7 ${AREA_LABEL[n.area.area]?.[0] ?? n.area.area}` }),
       el("span", { class: "spacer" }),
       save,
@@ -7143,10 +9390,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     if (IMAGE_RE.test(f.name)) {
       body.appendChild(el("div", { class: "hint", text: "\uBD88\uB7EC\uC624\uB294 \uC911\uC785\uB2C8\uB2E4\u2026" }));
       try {
-        const bytes = await state.fileBytes(f.path);
-        const buf = new Uint8Array(bytes.byteLength);
-        buf.set(bytes);
-        const url = URL.createObjectURL(new Blob([buf]));
+        const url = await blobUrl(f.path, String(f.modified));
         clear(body);
         const img = el("img", { src: url, alt: f.name });
         img.addEventListener("error", () => {
@@ -7172,59 +9416,35 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       const r = await state.readFile(f.path);
       clear(body);
       if (r.truncated) body.appendChild(el("div", { class: "hint", text: "\uC55E\uBD80\uBD84\uB9CC \uD45C\uC2DC\uD569\uB2C8\uB2E4." }));
-      body.appendChild(el("pre", { class: "mono filepreview", text: r.content || r.note || "(\uBE44\uC5B4 \uC788\uC2B5\uB2C8\uB2E4)" }));
+      if (/\.(md|markdown)$/i.test(f.name)) {
+        const big = el("button", { class: "ghost tiny", text: "\uCE74\uB4DC\uB85C \uD06C\uAC8C \uBCF4\uAE30", title: "\uC911\uC559 \uD328\uB110 \uCE74\uB4DC\uB85C \uC5FD\uB2C8\uB2E4" });
+        big.addEventListener("click", () => showArtifact({ path: f.path, title: f.name, kind: "markdown" }, { flipMobile: true }));
+        body.appendChild(el("div", { class: "row", style: { marginBottom: "6px" } }, [big]));
+        body.appendChild(el(
+          "div",
+          { class: "filepreview" },
+          [renderMarkdown(r.content, { image: (p, a) => workspaceImage(p, a) })]
+        ));
+      } else {
+        body.appendChild(el("pre", { class: "mono filepreview", text: r.content || r.note || "(\uBE44\uC5B4 \uC788\uC2B5\uB2C8\uB2E4)" }));
+      }
     } catch (e) {
       clear(body);
       body.appendChild(el("div", { class: "notice err", text: msg5(e) }));
     }
   }
-  function requestDelete() {
-    const n = nodes.get(selectedDir);
-    if (!n || !selection.size) return;
-    if (!n.area.deletable) {
-      notice2(`${n.name} \uC548\uC758 \uD30C\uC77C\uC740 \uC9C0\uC6B8 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4.`);
-      return;
-    }
-    confirmDelete = true;
-    drawCentre();
-    focusList();
-  }
-  function confirmBar(n) {
-    const yes = el("button", { class: "danger tiny", text: "\uC0AD\uC81C" });
-    const no = el("button", { class: "ghost tiny", text: "\uCDE8\uC18C" });
-    yes.addEventListener("click", () => void runDelete(n));
-    no.addEventListener("click", () => {
-      confirmDelete = false;
-      drawCentre();
-      focusList();
-    });
-    const names = [...selection].map((p) => p.slice(p.lastIndexOf("/") + 1));
-    return el("div", { class: "confirmbar" }, [
-      el("span", { text: `${selection.size}\uAC1C\uB97C \uC9C0\uC6B8\uAE4C\uC694? ` + names.slice(0, 3).join(", ") + (names.length > 3 ? " \u2026" : "") }),
-      el("span", { class: "hint", text: "(Delete \uB97C \uD55C \uBC88 \uB354 \uB204\uB974\uBA74 \uC9C0\uC6C1\uB2C8\uB2E4)" }),
-      el("span", { class: "spacer" }),
-      yes,
-      no
-    ]);
-  }
   async function runDelete(n) {
     const paths = [...selection];
-    confirmDelete = false;
     if (!paths.length) return;
-    let done = 0;
     try {
-      for (const p of paths) {
-        await state.deleteFile(p);
-        done += 1;
-        if (previewPath === p) previewPath = "";
-      }
-      notice2(`${done}\uAC1C\uB97C \uC9C0\uC6E0\uC2B5\uB2C8\uB2E4.`, "ok");
+      const r = await state.deleteFiles(paths);
+      if (paths.includes(previewPath)) previewPath = "";
+      notice2(r.failed.length ? `${r.done}\uAC1C\uB97C \uC9C0\uC6E0\uC2B5\uB2C8\uB2E4. ${r.failed.length}\uAC1C \uC2E4\uD328 \u2014 ${r.failed[0].error}` : `${r.done}\uAC1C\uB97C \uC9C0\uC6E0\uC2B5\uB2C8\uB2E4.`, r.failed.length ? "err" : "ok");
     } catch (e) {
-      notice2(`${done}\uAC1C\uB97C \uC9C0\uC6B4 \uB4A4 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: ` + msg5(e), "err");
+      notice2("\uC9C0\uC6B0\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg5(e), "err");
     }
     selection.clear();
     state.touchFiles();
-    seenFilesRev = state.filesRev;
     await refresh();
     focusList();
   }
@@ -7239,20 +9459,15 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       const b = el("button", { class: "catrow", text: "\u{1F4C1} " + target });
       b.addEventListener("click", async () => {
         close();
-        let done = 0;
         try {
-          for (const p of paths) {
-            await state.moveFile(p, target);
-            done += 1;
-          }
-          notice2(`${done}\uAC1C\uB97C ${target}/ \uB85C \uC62E\uACBC\uC2B5\uB2C8\uB2E4.`, "ok");
+          const r = await state.moveFiles(paths, target);
+          notice2(batchText(r, target, "\uC774\uB3D9"), r.failed.length ? "err" : "ok");
         } catch (e) {
-          notice2(`${done}\uAC1C\uB97C \uC62E\uAE34 \uB4A4 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: ` + msg5(e), "err");
+          notice2("\uC62E\uAE30\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg5(e), "err");
         }
         selection.clear();
         previewPath = "";
         state.touchFiles();
-        seenFilesRev = state.filesRev;
         await refresh();
       });
       body.appendChild(b);
@@ -7276,94 +9491,110 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       notice2("\uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg5(e), "err");
     }
   }
-  function installDrop(target, into) {
-    for (const kind of ["dragover", "dragenter"]) {
-      target.addEventListener(kind, (e) => {
-        const dt = e.dataTransfer;
-        if (!dt || !Array.from(dt.types).includes("Files")) return;
-        e.preventDefault();
-        e.stopPropagation();
-        target.classList.add("dropping");
-      });
+  var upPanel = null;
+  var upHideTimer = null;
+  function uploadUi(title) {
+    if (upHideTimer) {
+      clearTimeout(upHideTimer);
+      upHideTimer = null;
     }
-    target.addEventListener("dragleave", (e) => {
-      if (!target.contains(e.relatedTarget)) target.classList.remove("dropping");
+    upPanel?.remove();
+    const closeBtn = el("button", { class: "iconbtn", text: "\u2715", title: "\uB2EB\uAE30" });
+    const ask = el("div");
+    const label = el("span", { class: "grow", text: title });
+    const num = el("span");
+    const fill = el("div", { class: "assetfill" });
+    const errs = el("div", { class: "uperr", style: { display: "none" } });
+    const panel2 = el("div", { class: "uploadpanel" }, [
+      el("div", { class: "uphead" }, [el("span", { text: "\uC62C\uB9AC\uAE30" }), closeBtn]),
+      ask,
+      el("div", { class: "upline" }, [label, num]),
+      el("div", { class: "assetbar" }, [fill]),
+      errs
+    ]);
+    closeBtn.addEventListener("click", () => {
+      panel2.remove();
+      if (upPanel === panel2) upPanel = null;
     });
-    target.addEventListener("drop", async (e) => {
-      const dt = e.dataTransfer;
-      target.classList.remove("dropping");
-      if (!dt) return;
-      e.preventDefault();
-      e.stopPropagation();
-      const files = await collectDrop(dt);
-      if (files.length) void uploadMany(files, into());
-    });
-  }
-  async function collectDrop(dt) {
-    const out = [];
-    const items5 = Array.from(dt.items ?? []);
-    const entries = items5.map((it) => it.webkitGetAsEntry?.() ?? null).filter((x) => !!x);
-    if (!entries.length) {
-      for (const file of Array.from(dt.files)) out.push({ file, rel: "" });
-      return out;
-    }
-    const walk = async (entry, rel) => {
-      if (entry.isFile) {
-        const file = await new Promise((res, rej) => entry.file(res, rej));
-        out.push({ file, rel });
-      } else if (entry.isDirectory) {
-        const reader = entry.createReader();
-        const sub = rel ? rel + "/" + entry.name : entry.name;
-        for (; ; ) {
-          const batch = await new Promise((res, rej) => reader.readEntries(res, rej));
-          if (!batch.length) break;
-          for (const child of batch) await walk(child, sub);
+    document.body.appendChild(panel2);
+    upPanel = panel2;
+    return {
+      ask,
+      set(sentBytes, totalBytes, text2) {
+        num.textContent = text2;
+        fill.style.width = totalBytes ? `${Math.min(100, sentBytes / totalBytes * 100).toFixed(1)}%` : "0%";
+      },
+      error(text2) {
+        errs.style.display = "";
+        errs.appendChild(el("div", { text: text2 }));
+      },
+      finish(ok, text2) {
+        num.textContent = text2;
+        fill.style.width = "100%";
+        fill.style.background = ok ? "#10b981" : "#ef4444";
+        panel2.classList.add(ok ? "done" : "failed");
+        if (ok) {
+          upHideTimer = setTimeout(() => {
+            panel2.remove();
+            if (upPanel === panel2) upPanel = null;
+          }, 6e3);
         }
       }
     };
-    for (const entry of entries) await walk(entry, "");
-    return out;
   }
   async function uploadMany(files, into) {
-    if (!viewMount) return;
+    if (!files.length) return;
+    const ui8 = uploadUi(`${into}/ \uC5D0 ${files.length}\uAC1C`);
     const zips = files.filter((f) => /\.zip$/i.test(f.file.name));
     const plain = files.filter((f) => !/\.zip$/i.test(f.file.name));
     let extractZips = zips.length ? null : false;
     if (zips.length) {
       extractZips = await new Promise((resolve) => {
-        const ask = el("div", { class: "zipask" });
+        const askRow = el("div", { class: "zipask" });
         const unpack = el("button", { class: "primary tiny", text: "\uD480\uC5B4\uC11C \uC62C\uB9AC\uAE30" });
         const keep = el("button", { class: "ghost tiny", text: "zip \uADF8\uB300\uB85C \uC62C\uB9AC\uAE30" });
         const cancel = el("button", { class: "ghost tiny", text: "\uCDE8\uC18C" });
         unpack.addEventListener("click", () => {
-          ask.remove();
+          askRow.remove();
           resolve(true);
         });
         keep.addEventListener("click", () => {
-          ask.remove();
+          askRow.remove();
           resolve(false);
         });
         cancel.addEventListener("click", () => {
-          ask.remove();
+          askRow.remove();
           resolve(null);
         });
-        ask.append(
+        askRow.append(
           el("span", { text: `zip ${zips.length}\uAC1C (${zips.map((z) => z.file.name).slice(0, 3).join(", ")}${zips.length > 3 ? " \u2026" : ""}) \u2014` }),
           unpack,
           keep,
           cancel
         );
-        (viewMount?.querySelector(".fileslot") ?? viewMount)?.prepend(ask);
+        ui8.ask.appendChild(askRow);
       });
-      if (extractZips === null && !plain.length) return;
+      if (extractZips === null && !plain.length) {
+        ui8.finish(true, "\uCDE8\uC18C\uD588\uC2B5\uB2C8\uB2E4");
+        return;
+      }
     }
     const todo = extractZips === null ? plain : [...plain, ...zips];
-    const prog = el("div", { class: "uploadprog" });
-    (viewMount.querySelector(".fileslot") ?? viewMount).prepend(prog);
+    const totalBytes = todo.reduce((s, t) => s + t.file.size, 0) || 1;
+    let sentBytes = 0;
     let done = 0;
     let failed = 0;
     let extracted = 0;
     const t0 = Date.now();
+    const paint = (extraNote = "") => {
+      const secs = Math.max(1, Math.round((Date.now() - t0) / 1e3));
+      ui8.set(
+        sentBytes,
+        totalBytes,
+        extraNote || `${done + failed}/${todo.length} \xB7 ${fmtSize2(sentBytes)}/${fmtSize2(totalBytes)} \xB7 ${secs}\uCD08`
+      );
+    };
+    paint();
     const BATCH = 16 * 1024 * 1024;
     const batches = [];
     const big = [];
@@ -7386,6 +9617,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     const sendBig = async ({ file, rel }) => {
       const name = file.name;
       const extract = !!extractZips && /\.zip$/i.test(name);
+      const before = sentBytes;
       try {
         for (let offset = 0; offset < file.size; offset += BATCH) {
           const end = Math.min(file.size, offset + BATCH);
@@ -7398,16 +9630,19 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
             last: end >= file.size,
             extract
           }, bytes);
-          const pct = Math.round(end / file.size * 100);
-          prog.textContent = `${name} \uC62C\uB9AC\uB294 \uC911 ${pct}% (${Math.round(end / 1048576)}/${Math.round(file.size / 1048576)}MB)`;
+          sentBytes = before + end;
+          paint(`${name} ${Math.round(end / file.size * 100)}% (${Math.round(end / 1048576)}/${Math.round(file.size / 1048576)}MB)`);
         }
         done += 1;
       } catch (e) {
         failed += 1;
-        notice2(`${name}: ` + msg5(e), "err");
+        sentBytes = before + file.size;
+        ui8.error(`${name}: ` + msg5(e));
       }
+      paint();
     };
     const sendBatch = async (batch) => {
+      const bytes = batch.reduce((s, b) => s + b.file.size, 0);
       try {
         const entries = await Promise.all(batch.map(async ({ file, rel }) => ({
           name: file.name,
@@ -7417,6 +9652,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         const r = await state.uploadBatch(into, entries, !!extractZips);
         done += r.count;
         extracted += r.extracted;
+        sentBytes += bytes;
       } catch (e) {
         for (const { file, rel } of batch) {
           try {
@@ -7425,28 +9661,27 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
             if (r.extracted) extracted += r.extracted;
           } catch (e2) {
             failed += 1;
-            notice2(`${file.name}: ` + msg5(e2), "err");
+            ui8.error(`${file.name}: ` + msg5(e2));
           }
+          sentBytes += file.size;
         }
       }
-      const secs = Math.max(1, Math.round((Date.now() - t0) / 1e3));
-      prog.textContent = `\uC62C\uB9AC\uB294 \uC911 ${done + failed}/${todo.length} (${secs}\uCD08)`;
+      paint();
     };
-    prog.textContent = `\uC62C\uB9AC\uB294 \uC911 0/${todo.length}`;
     let next = 0;
     const worker = async () => {
       while (next < batches.length) await sendBatch(batches[next++]);
     };
     await Promise.all([worker(), worker()]);
     for (const item of big) await sendBig(item);
-    prog.remove();
-    notice2(`${done}\uAC1C\uB97C ${into}/ \uC5D0 \uC62C\uB838\uC2B5\uB2C8\uB2E4.` + (extracted ? ` (zip \uC5D0\uC11C ${extracted}\uAC1C \uD480\uB9BC)` : "") + (failed ? ` \uC2E4\uD328 ${failed}\uAC1C.` : ""), failed ? "err" : "ok");
+    const summary = `${done}\uAC1C\uB97C ${into}/ \uC5D0 \uC62C\uB838\uC2B5\uB2C8\uB2E4.` + (extracted ? ` (zip \uC5D0\uC11C ${extracted}\uAC1C \uD480\uB9BC)` : "") + (failed ? ` \uC2E4\uD328 ${failed}\uAC1C.` : "");
+    ui8.finish(!failed, failed ? `\uC644\uB8CC \xB7 \uC2E4\uD328 ${failed}\uAC1C` : "\uC644\uB8CC");
+    notice2(summary, failed ? "err" : "ok");
     if (nodes.has(into)) {
       selectedDir = into;
       expandTo(into);
     }
     state.touchFiles();
-    seenFilesRev = state.filesRev;
     await refresh();
   }
   async function uploadOne(file, dir, extract) {
@@ -7489,60 +9724,17 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
 
   // src/ui/lore-view.ts
   function makeLoreTab(opts) {
-    let built8 = false;
     let treeMount5 = null;
     let viewMount6 = null;
-    let noticeMount10 = null;
     let openId4 = "";
     let entries = [];
-    let seenEpoch7 = -1;
-    let seenKey5 = "";
-    const openFolders = /* @__PURE__ */ new Set();
-    let filterText5 = "";
-    function render(mount) {
-      const key = opts.scope === "global" ? state.botKey : state.activeCharKey;
-      if (!key) {
-        clear(mount);
-        built8 = false;
-        mount.appendChild(el("div", { class: "pad" }, [
-          el("div", { class: "empty", text: "\uBA3C\uC800 \u201C\uCC57 \uC120\uD0DD\u201D \uD0ED\uC5D0\uC11C \uCC57\uC744 \uACE8\uB77C \uC8FC\uC138\uC694." })
-        ]));
-        return;
-      }
-      if (!built8 || !mount.querySelector(".split")) {
-        clear(mount);
-        const pane = threePane();
-        treeMount5 = el("div", { class: "tree" });
-        pane.left.appendChild(treeMount5);
-        noticeMount10 = el("div");
-        viewMount6 = el("div", { class: "pad" });
-        pane.centre.appendChild(noticeMount10);
-        pane.centre.appendChild(viewMount6);
-        mount.appendChild(pane.root);
-        built8 = true;
-        seenEpoch7 = state.epoch;
-        seenKey5 = key;
-        void refresh8();
-      } else if (seenEpoch7 !== state.epoch || seenKey5 !== key) {
-        seenEpoch7 = state.epoch;
-        seenKey5 = key;
-        openId4 = "";
-        if (viewMount6) clear(viewMount6);
-        void refresh8();
-      }
-      bindAgent({ notice: notice9 });
-      const inner = mount.querySelector(".right-inner");
-      if (inner) mountAgent(inner);
+    const openFolders3 = /* @__PURE__ */ new Set();
+    let filterText6 = "";
+    let ui8 = null;
+    function notice10(text2, kind = "") {
+      ui8?.notice(text2, kind);
     }
-    function notice9(text2, kind = "") {
-      if (!noticeMount10) return;
-      clear(noticeMount10);
-      noticeMount10.appendChild(el("div", { class: "notice " + kind, style: { margin: "10px 14px 0" }, text: text2 }));
-      setTimeout(() => {
-        if (noticeMount10) clear(noticeMount10);
-      }, 9e3);
-    }
-    async function refresh8() {
+    async function refreshNow7() {
       if (!treeMount5) return;
       clear(treeMount5);
       treeMount5.appendChild(el("div", { class: "hint", style: { padding: "8px" }, text: "\uC77D\uB294 \uC911\uC785\uB2C8\uB2E4\u2026" }));
@@ -7551,10 +9743,17 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         if (opts.scope === "local") {
           entries = entries.filter((e) => e.chatKey === state.activeChatKey);
         }
-        drawTree5();
       } catch (e) {
         clear(treeMount5);
         treeMount5.appendChild(el("div", { class: "notice err", text: msg6(e) }));
+        return;
+      }
+      drawTree5();
+      const fresh = entries.find((x) => x.id === openId4);
+      if (fresh) open4(fresh);
+      else if (openId4 && viewMount6) {
+        openId4 = "";
+        clear(viewMount6);
       }
     }
     function drawTree5() {
@@ -7563,7 +9762,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       const add = el("button", { class: "primary tiny", text: "\uC0C8 \uD56D\uBAA9" });
       add.addEventListener("click", () => void create2());
       const reloadBtn = el("button", { class: "ghost tiny", text: "\uC0C8\uB85C\uACE0\uCE68" });
-      reloadBtn.addEventListener("click", () => void refresh8());
+      reloadBtn.addEventListener("click", () => void refreshNow7());
       treeMount5.appendChild(el("div", { class: "treehead" }, [add, reloadBtn]));
       if (!entries.length) {
         for (const line of opts.emptyLines) {
@@ -7571,12 +9770,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         }
         return;
       }
-      setToolbarSearch(filterText5, (v) => {
-        filterText5 = v;
-        drawTree5();
-        refocusSearch(null);
-      }, "\uCC3E\uAE30 (\uC774\uB984\xB7\uB0B4\uC6A9)");
-      const needle = filterText5.trim().toLowerCase();
+      const needle = filterText6.trim().toLowerCase();
       const hit = (e) => {
         if (!needle) return true;
         const entry = e.entry;
@@ -7599,7 +9793,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       for (const [folder, group] of byFolder) {
         if (folder && named.length) {
           const label = names.get(folder) || shortId(folder);
-          const isOpen = !!needle || openFolders.has(folder);
+          const isOpen = !!needle || openFolders3.has(folder);
           const caret = el("span", { text: isOpen ? "\u25BE" : "\u25B8" });
           const head = el("button", { class: "treebranch", title: folder }, [
             caret,
@@ -7609,9 +9803,9 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
           const kids = el("div", { class: "treekids" }, group.map((e) => entryRow(e, items5)));
           kids.style.display = isOpen ? "block" : "none";
           head.addEventListener("click", () => {
-            if (openFolders.has(folder)) openFolders.delete(folder);
-            else openFolders.add(folder);
-            const now = openFolders.has(folder);
+            if (openFolders3.has(folder)) openFolders3.delete(folder);
+            else openFolders3.add(folder);
+            const now = openFolders3.has(folder);
             kids.style.display = now ? "block" : "none";
             caret.textContent = now ? "\u25BE" : "\u25B8";
           });
@@ -7622,49 +9816,53 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       }
     }
     function entryRow(e, all) {
-      const name = el("button", {
-        class: "treefile" + (e.id === openId4 ? " on" : ""),
-        text: titleOf(e),
-        title: e.id
-      });
-      name.addEventListener("click", () => open4(e));
       const siblings = all.filter((x) => folderOf(x) === folderOf(e));
       const at = siblings.findIndex((x) => x.id === e.id);
       const moveTo = async (neighbor) => {
         try {
           await state.moveLore(e.id, all.findIndex((x) => x.id === neighbor.id));
-          await refresh8();
+          await refreshNow7();
         } catch (err) {
-          notice9("\uC21C\uC11C\uB97C \uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg6(err), "err");
+          notice10("\uC21C\uC11C\uB97C \uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg6(err), "err");
         }
       };
-      const up = el("button", { class: "ghost tiny movebtn", text: "\u2191", title: "\uC704\uB85C" });
-      const down = el("button", { class: "ghost tiny movebtn", text: "\u2193", title: "\uC544\uB798\uB85C" });
-      up.disabled = at <= 0;
-      down.disabled = at < 0 || at >= siblings.length - 1;
-      up.addEventListener("click", () => void moveTo(siblings[at - 1]));
-      down.addEventListener("click", () => void moveTo(siblings[at + 1]));
-      const row = el("div", { class: "treerow lorecard" }, [name]);
-      const io = Number(e.entry.insertorder ?? 100);
-      row.appendChild(el("span", { class: "hint ordertag", title: "\uC6B0\uC120\uC21C\uC704 (insertorder)", text: String(io) }));
-      if (e.entry.alwaysActive) {
-        row.appendChild(el("span", { class: "badge", title: "\uC0C1\uC2DC \uD65C\uC131\uD654 \u2014 \uD0A4\uC6CC\uB4DC \uC5C6\uC774 \uD56D\uC0C1 \uC0BD\uC785\uB429\uB2C8\uB2E4", text: "\uC0C1\uC2DC" }));
-      }
+      const row = listRow({
+        variant: "tree",
+        selected: e.id === openId4,
+        title: el("button", {
+          class: "treefile" + (e.id === openId4 ? " on" : ""),
+          text: titleOf(e),
+          title: e.id
+        }),
+        // Always-active entries have no trigger keys; without the badge they
+        // look like entries whose keys someone forgot.
+        badges: e.entry.alwaysActive ? [{ text: "\uC0C1\uC2DC", title: "\uC0C1\uC2DC \uD65C\uC131\uD654 \u2014 \uD0A4\uC6CC\uB4DC \uC5C6\uC774 \uD56D\uC0C1 \uC0BD\uC785\uB429\uB2C8\uB2E4" }] : [],
+        reorder: {
+          up: at > 0 ? () => void moveTo(siblings[at - 1]) : void 0,
+          down: at >= 0 && at < siblings.length - 1 ? () => void moveTo(siblings[at + 1]) : void 0
+        },
+        onClick: () => open4(e)
+      });
+      const io2 = Number(e.entry.insertorder ?? 100);
+      row.insertBefore(
+        el("span", { class: "hint ordertag", title: "\uC6B0\uC120\uC21C\uC704 (insertorder)", text: String(io2) }),
+        row.children[1] ?? null
+      );
       if (e.conflict) {
-        row.appendChild(conflictBadge());
+        row.insertBefore(conflictBadge(), row.querySelector(".movebtn"));
       } else if (e.origin !== "original") {
-        row.appendChild(el("span", { class: "badge warn", text: e.origin === "added" ? "\uCD94\uAC00" : "\uC218\uC815" }));
+        row.insertBefore(
+          el("span", { class: "badge warn", text: e.origin === "added" ? "\uCD94\uAC00" : "\uC218\uC815" }),
+          row.querySelector(".movebtn")
+        );
       }
-      row.appendChild(up);
-      row.appendChild(down);
       return row;
     }
     function open4(e) {
       if (!viewMount6) return;
+      const was = openId4;
       openId4 = e.id;
-      for (const b of Array.from(document.querySelectorAll(".tree .treefile"))) {
-        b.classList.toggle("on", b.title === e.id);
-      }
+      if (was !== e.id) drawTree5();
       const entry = e.entry;
       const keys = el("input", { value: String(entry.key ?? entry.keys ?? "") });
       const comment = el("input", { value: String(entry.comment ?? entry.name ?? "") });
@@ -7682,6 +9880,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         value: String(entry.content ?? ""),
         style: { minHeight: "300px" }
       });
+      setTimeout(() => attachHilite(content, { mode: "md" }), 0);
       const order = el("input", {
         type: "number",
         step: "10",
@@ -7720,12 +9919,10 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
           else delete next.folder;
           await state.saveLore(e.id, next);
           if (opts.scope === "global") void state.refreshBotChanges();
-          notice9(opts.savedNotice, "ok");
-          await refresh8();
-          const fresh = entries.find((x) => x.id === e.id);
-          if (fresh) open4(fresh);
+          notice10(savedText("\uB85C\uC5B4\uBD81 \uD56D\uBAA9\uC744"), "ok");
+          await refreshNow7();
         } catch (err) {
-          notice9("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg6(err), "err");
+          notice10("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg6(err), "err");
         } finally {
           save.disabled = false;
         }
@@ -7737,9 +9934,9 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
           if (opts.scope === "global") void state.refreshBotChanges();
           openId4 = "";
           if (viewMount6) clear(viewMount6);
-          await refresh8();
+          await refreshNow7();
         } catch (err) {
-          notice9("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg6(err), "err");
+          notice10("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg6(err), "err");
         }
       });
       const orig = e.origin === "edited" && e.original ? e.original : null;
@@ -7763,7 +9960,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         base: e.conflict.base ?? null,
         canTakeTheirs: true
       }, () => {
-        void refresh8();
+        void refreshNow7();
       }) : null;
       clear(viewMount6);
       viewMount6.appendChild(el("div", { class: "card" }, [
@@ -7796,14 +9993,38 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
           opts.scope
         );
         if (opts.scope === "global") void state.refreshBotChanges();
-        await refresh8();
+        await refreshNow7();
         const made = entries.find((e) => e.id === id);
         if (made) open4(made);
       } catch (e) {
-        notice9("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg6(e), "err");
+        notice10("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg6(e), "err");
       }
     }
-    return render;
+    return makeTab({
+      gate: opts.scope === "global" ? "bot" : "chat",
+      keys: () => [state.epoch, opts.scope === "global" ? state.botKey : state.activeChatKey],
+      search: {
+        // Finding one entry among dozens is the common case; the filter searches
+        // names and content, and a filtered view auto-opens its folders.
+        placeholder: "\uCC3E\uAE30 (\uC774\uB984\xB7\uB0B4\uC6A9)",
+        get: () => filterText6,
+        set: (v) => {
+          filterText6 = v;
+          drawTree5();
+          refocusSearch(null);
+        }
+      },
+      build(pane, u) {
+        ui8 = u;
+        treeMount5 = el("div", { class: "tree" });
+        pane.left.appendChild(treeMount5);
+        viewMount6 = el("div", { class: "pad" });
+        pane.centre.appendChild(viewMount6);
+      },
+      async refresh() {
+        await refreshNow7();
+      }
+    });
   }
   function titleOf(e) {
     const entry = e.entry;
@@ -7842,8 +10063,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     emptyLines: [
       "\uC774 \uCC57\uC758 \uB85C\uC5B4\uBD81 \uD56D\uBAA9\uC774 \uC5C6\uC2B5\uB2C8\uB2E4. \uB300\uBD80\uBD84\uC758 \uCC57\uC740 \uBE44\uC5B4 \uC788\uB294 \uAC83\uC774 \uC815\uC0C1\uC785\uB2C8\uB2E4.",
       "\uBD07 \uC804\uCCB4 \uB85C\uC5B4\uBD81\uC740 \u201C\uBD07 \uB85C\uC5B4\uBD81\u201D \uD0ED\uC5D0\uC11C \uB2E4\uB8F9\uB2C8\uB2E4."
-    ],
-    savedNotice: "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4. \uC704 \u201C\uBC18\uC601\u201D\uC744 \uB204\uB974\uBA74 \uD134\xB7\uC7A5\uAE30\uAE30\uC5B5\uACFC \uD568\uAED8 RisuAI\uC5D0 \uC4F0\uC785\uB2C8\uB2E4."
+    ]
   });
 
   // src/ui/tab-memory.ts
@@ -7854,92 +10074,79 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     supaMemory: "SupaMemory",
     lastMemory: "\uCD5C\uADFC \uC694\uC57D"
   };
-  var built2 = false;
   var treeMount2 = null;
   var viewMount2 = null;
-  var noticeMount4 = null;
-  var toolbar = null;
   var countEl2 = null;
   var openId = "";
   var items = [];
-  var seenEpoch = -1;
-  function renderMemoryTab(mount) {
-    if (!state.activeChatKey) {
-      clear(mount);
-      built2 = false;
-      setToolbar(null);
-      mount.appendChild(el("div", { class: "pad" }, [
-        el("div", { class: "empty", text: "\uBA3C\uC800 \u201C\uCC57 \uC120\uD0DD\u201D \uD0ED\uC5D0\uC11C \uCC57\uC744 \uACE8\uB77C \uC8FC\uC138\uC694." })
-      ]));
-      return;
-    }
-    if (!built2 || !mount.querySelector(".split")) {
-      clear(mount);
-      const pane = threePane();
+  var filter = "";
+  var ui2 = null;
+  function notice3(text2, kind = "") {
+    ui2?.notice(text2, kind);
+  }
+  var renderMemoryTab = makeTab({
+    gate: "chat",
+    keys: () => [state.epoch, state.activeChatKey],
+    build(pane, u) {
+      ui2 = u;
       treeMount2 = el("div", { class: "tree" });
       pane.left.appendChild(treeMount2);
-      noticeMount4 = el("div");
       viewMount2 = el("div", { class: "pad" });
-      pane.centre.appendChild(noticeMount4);
       pane.centre.appendChild(viewMount2);
-      mount.appendChild(pane.root);
-      buildToolbar2();
-      built2 = true;
-      seenEpoch = state.epoch;
-      void refresh2();
-    } else if (seenEpoch !== state.epoch) {
-      seenEpoch = state.epoch;
-      void refresh2();
+    },
+    async refresh() {
+      await refreshNow();
+    },
+    // Writing the memory back is the chat bar's 반영, the same verb that writes
+    // the turns and the lorebook - this tab used to carry a 반영 of its own with
+    // a narrower meaning, and two buttons with one label is how a user writes
+    // the memory while believing the turns went too. So the toolbar is only a
+    // filter, a reload, and the count.
+    toolbar() {
+      countEl2 = el("span", { class: "dim" });
+      syncCount();
+      const reloadBtn = el("button", { class: "tool", title: "\uBC31\uC5D4\uB4DC\uC5D0\uC11C \uB2E4\uC2DC \uC77D\uC5B4 \uC635\uB2C8\uB2E4" }, [
+        el("span", { class: "glyph", text: "\u21BB" }),
+        el("span", { class: "tool-label", text: "\uC0C8\uB85C\uACE0\uCE68" })
+      ]);
+      reloadBtn.addEventListener("click", () => void refreshNow());
+      return el("div", { class: "toolrow" }, [
+        searchBox(filter, (v) => {
+          filter = v;
+          drawTree2();
+        }, "\uAE30\uC5B5 \uCC3E\uAE30"),
+        reloadBtn,
+        el("span", { class: "spacer" }),
+        countEl2
+      ]);
     }
-    if (toolbar) setToolbar(toolbar);
-    bindAgent({ notice: notice3 });
-    const inner = mount.querySelector(".right-inner");
-    if (inner) mountAgent(inner);
-  }
-  function buildToolbar2() {
-    countEl2 = el("span", { class: "dim" });
-    const reloadBtn = el("button", { class: "tool", title: "\uBC31\uC5D4\uB4DC\uC5D0\uC11C \uB2E4\uC2DC \uC77D\uC5B4 \uC635\uB2C8\uB2E4" }, [
-      el("span", { class: "glyph", text: "\u21BB" }),
-      el("span", { class: "tool-label", text: "\uC0C8\uB85C\uACE0\uCE68" })
-    ]);
-    reloadBtn.addEventListener("click", () => void refresh2());
-    toolbar = el("div", { class: "toolrow" }, [
-      reloadBtn,
-      el("span", { class: "spacer" }),
-      countEl2
-    ]);
-  }
-  function notice3(text2, kind = "") {
-    if (!noticeMount4) return;
-    clear(noticeMount4);
-    noticeMount4.appendChild(el("div", { class: "notice " + kind, style: { margin: "10px 14px 0" }, text: text2 }));
-    setTimeout(() => {
-      if (noticeMount4) clear(noticeMount4);
-    }, 9e3);
-  }
-  async function refresh2() {
+  });
+  async function refreshNow() {
     if (!treeMount2) return;
     clear(treeMount2);
     treeMount2.appendChild(el("div", { class: "hint", style: { padding: "8px" }, text: "\uC77D\uB294 \uC911\uC785\uB2C8\uB2E4\u2026" }));
     try {
       const r = await state.memory();
       items = r.items.filter((i) => i.kind !== "scriptstate");
-      drawTree2(items.filter((i) => i.changed || i.isNew).length);
+      drawTree2();
     } catch (e) {
       clear(treeMount2);
       treeMount2.appendChild(el("div", { class: "notice err", text: msg7(e) }));
     }
   }
-  function drawTree2(changed) {
+  function syncCount() {
+    if (!countEl2) return;
+    const changed = items.filter((i) => i.changed || i.isNew).length;
+    countEl2.textContent = items.length ? `${items.length}\uAC1C${changed ? ` \xB7 \uC218\uC815 ${changed}` : ""}` : "\uC5C6\uC74C";
+  }
+  function drawTree2() {
     if (!treeMount2) return;
     clear(treeMount2);
-    if (countEl2) {
-      countEl2.textContent = items.length ? `${items.length}\uAC1C${changed ? ` \xB7 \uC218\uC815 ${changed}` : ""}` : "\uC5C6\uC74C";
-    }
+    syncCount();
     const add = el("button", { class: "primary tiny", text: "\uC0C8 \uD56D\uBAA9" });
     add.addEventListener("click", () => void create());
     const reloadBtn = el("button", { class: "ghost tiny", text: "\uC0C8\uB85C\uACE0\uCE68" });
-    reloadBtn.addEventListener("click", () => void refresh2());
+    reloadBtn.addEventListener("click", () => void refreshNow());
     treeMount2.appendChild(el("div", { class: "treehead" }, [add, reloadBtn]));
     if (!items.length) {
       treeMount2.appendChild(el("div", {
@@ -7949,9 +10156,19 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       }));
       return;
     }
-    const kinds = [...new Set(items.map((i) => i.kind))];
+    const q = filter.trim().toLowerCase();
+    const shown = q ? items.filter((i) => i.title.toLowerCase().includes(q) || i.body.toLowerCase().includes(q)) : items;
+    if (!shown.length) {
+      treeMount2.appendChild(el("div", {
+        class: "hint",
+        style: { padding: "8px" },
+        text: `\u201C${filter}\u201D \uC5D0 \uB9DE\uB294 \uD56D\uBAA9\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.`
+      }));
+      return;
+    }
+    const kinds = [...new Set(shown.map((i) => i.kind))];
     for (const kind of kinds) {
-      const group = items.filter((i) => i.kind === kind);
+      const group = shown.filter((i) => i.kind === kind);
       treeMount2.appendChild(el("div", {
         class: "treescope",
         text: `${KIND_LABEL[kind] ?? kind} \xB7 ${group.length}`
@@ -7989,8 +10206,8 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       save.disabled = true;
       try {
         await state.saveMemory(item.id, body.value);
-        notice3("\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4. \uC704 \u201C\uBC18\uC601\u201D\uC744 \uB204\uB974\uBA74 \uD134\xB7\uB85C\uC5B4\uBD81\uACFC \uD568\uAED8 RisuAI\uC5D0 \uC4F0\uC785\uB2C8\uB2E4.", "ok");
-        await refresh2();
+        notice3(savedText("\uC694\uC57D\uC744"), "ok");
+        await refreshNow();
         const fresh = items.find((i) => i.id === item.id);
         if (fresh) open(fresh);
       } catch (e) {
@@ -8011,7 +10228,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         await state.deleteMemory(item.id);
         openId = "";
         if (viewMount2) clear(viewMount2);
-        await refresh2();
+        await refreshNow();
       } catch (e) {
         notice3("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg7(e), "err");
       }
@@ -8041,7 +10258,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     const kind = items[0]?.kind || "hypaV3Data";
     try {
       const made = await state.addMemory(kind, "");
-      await refresh2();
+      await refreshNow();
       open(made);
     } catch (e) {
       notice3("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg7(e), "err");
@@ -8053,88 +10270,86 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
 
   // src/ui/tab-vars.ts
   var KIND2 = "scriptstate";
-  var built3 = false;
   var listMount = null;
-  var noticeMount5 = null;
-  var seenEpoch2 = -1;
   var items2 = [];
-  function renderVarsTab(mount) {
-    if (!state.activeChatKey) {
-      clear(mount);
-      built3 = false;
-      mount.appendChild(el("div", { class: "pad" }, [
-        el("div", { class: "empty", text: "\uBA3C\uC800 \u201C\uCC57 \uC120\uD0DD\u201D \uD0ED\uC5D0\uC11C \uCC57\uC744 \uACE8\uB77C \uC8FC\uC138\uC694." })
-      ]));
-      return;
-    }
-    if (!built3 || !mount.querySelector(".split")) {
-      clear(mount);
-      const pane = threePane();
-      pane.left.style.display = "none";
-      noticeMount5 = el("div");
-      listMount = el("div", { class: "pad" });
-      pane.centre.appendChild(noticeMount5);
-      pane.centre.appendChild(listMount);
-      mount.appendChild(pane.root);
-      built3 = true;
-      seenEpoch2 = state.epoch;
-      void refresh3();
-    } else if (seenEpoch2 !== state.epoch) {
-      seenEpoch2 = state.epoch;
-      void refresh3();
-    }
-    bindAgent({ notice: notice4 });
-    const inner = mount.querySelector(".right-inner");
-    if (inner) mountAgent(inner);
-  }
+  var filter2 = "";
+  var ui3 = null;
   function notice4(text2, kind = "") {
-    if (!noticeMount5) return;
-    clear(noticeMount5);
-    noticeMount5.appendChild(el("div", { class: "notice " + kind, style: { margin: "10px 14px 0" }, text: text2 }));
-    setTimeout(() => {
-      if (noticeMount5) clear(noticeMount5);
-    }, 9e3);
+    ui3?.notice(text2, kind);
   }
-  async function refresh3() {
-    if (!listMount) return;
-    clear(listMount);
-    listMount.appendChild(el("div", { class: "hint", text: "\uC77D\uB294 \uC911\uC785\uB2C8\uB2E4\u2026" }));
+  var renderVarsTab = makeTab({
+    gate: "chat",
+    keys: () => [state.epoch, state.activeChatKey],
+    // No left column: the list is the content, so it takes the middle.
+    noLeft: true,
+    search: {
+      placeholder: "\uBCC0\uC218 \uCC3E\uAE30",
+      get: () => filter2,
+      set: (v) => {
+        filter2 = v;
+        draw();
+        refocusSearch(null);
+      }
+    },
+    build(pane, u) {
+      ui3 = u;
+      listMount = el("div", { class: "pad" });
+      pane.centre.appendChild(listMount);
+    },
+    async refresh() {
+      if (!listMount) return;
+      clear(listMount);
+      listMount.appendChild(el("div", { class: "hint", text: "\uC77D\uB294 \uC911\uC785\uB2C8\uB2E4\u2026" }));
+      try {
+        const r = await state.memory();
+        items2 = r.items.filter((i) => i.kind === KIND2);
+        draw();
+      } catch (e) {
+        clear(listMount);
+        listMount.appendChild(el("div", { class: "notice err", text: msg8(e) }));
+      }
+    }
+  });
+  async function refreshNow2() {
     try {
       const r = await state.memory();
       items2 = r.items.filter((i) => i.kind === KIND2);
-      draw();
     } catch (e) {
-      clear(listMount);
-      listMount.appendChild(el("div", { class: "notice err", text: msg8(e) }));
+      notice4(msg8(e), "err");
     }
+    draw();
   }
   function draw() {
     if (!listMount) return;
     clear(listMount);
+    const q = filter2.trim().toLowerCase();
+    const shown = q ? items2.filter((i) => i.title.toLowerCase().includes(q) || i.body.toLowerCase().includes(q)) : items2;
     const changed = items2.filter((i) => i.changed || i.isNew).length;
     const head = el("h2", {}, [
       el("span", { text: "\uCC57 \uBCC0\uC218" }),
       el("span", {
         class: "hint",
         style: { marginLeft: "8px" },
-        text: items2.length ? `${items2.length}\uAC1C${changed ? ` \xB7 \uC218\uC815 ${changed}` : ""}` : "\uC5C6\uC74C"
+        text: items2.length ? `${items2.length}\uAC1C${changed ? ` \xB7 \uC218\uC815 ${changed}` : ""}${q ? ` \xB7 \uD45C\uC2DC ${shown.length}` : ""}` : "\uC5C6\uC74C"
       })
     ]);
     const reloadBtn = el("button", { class: "ghost tiny", text: "\uC0C8\uB85C\uACE0\uCE68" });
-    reloadBtn.addEventListener("click", () => void refresh3());
+    reloadBtn.addEventListener("click", () => void refreshNow2());
     const card = el("div", { class: "card" }, [
       el("div", { class: "row" }, [head, el("span", { class: "spacer" }), reloadBtn]),
       el("div", {
         class: "hint",
         style: { marginBottom: "8px" },
-        text: "`$`\uB85C \uC2DC\uC791\uD558\uB294 \uD0A4\uAC00 {{getvar}}\uAC00 \uC77D\uB294 \uBCC0\uC218\uC785\uB2C8\uB2E4. \uB098\uBA38\uC9C0\uB294 \uD2B8\uB9AC\uAC70\xB7Lua\uAC00 \uC4F4 \uAC12\uC785\uB2C8\uB2E4. \uC800\uC7A5\uD55C \uAC12\uC740 \uC704 \u201C\uBC18\uC601\u201D\uC744 \uB204\uB974\uBA74 \uD134\xB7\uB85C\uC5B4\uBD81\xB7\uC7A5\uAE30\uAE30\uC5B5\uACFC \uD568\uAED8 RisuAI\uC5D0 \uC4F0\uC785\uB2C8\uB2E4."
+        text: "`$`\uB85C \uC2DC\uC791\uD558\uB294 \uD0A4\uAC00 {{getvar}}\uAC00 \uC77D\uB294 \uBCC0\uC218\uC785\uB2C8\uB2E4. \uB098\uBA38\uC9C0\uB294 \uD2B8\uB9AC\uAC70\xB7Lua\uAC00 \uC4F4 \uAC12\uC785\uB2C8\uB2E4."
       })
     ]);
     if (!items2.length) {
       card.appendChild(el("div", { class: "hint", text: "\uC774 \uCC57\uC5D0\uB294 \uBCC0\uC218\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4. \uBD07\uC774 {{setvar}}\uB97C \uC4F0\uC9C0 \uC54A\uC73C\uBA74 \uBE44\uC5B4 \uC788\uB294 \uAC83\uC774 \uC815\uC0C1\uC785\uB2C8\uB2E4." }));
+    } else if (!shown.length) {
+      card.appendChild(el("div", { class: "hint", text: `\u201C${filter2}\u201D \uC5D0 \uB9DE\uB294 \uBCC0\uC218\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4.` }));
     } else {
       const table = el("div", { class: "vartable" });
-      for (const item of items2) table.appendChild(varRow(item));
+      for (const item of shown) table.appendChild(varRow(item));
       card.appendChild(table);
     }
     card.appendChild(buildAdd());
@@ -8166,8 +10381,8 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       save.disabled = true;
       try {
         await state.saveMemory(item.id, value.value);
-        notice4(`${item.title} \uC744(\uB97C) \uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4. \uC704 \u201C\uBC18\uC601\u201D\uC73C\uB85C RisuAI\uC5D0 \uC4F8 \uC218 \uC788\uC2B5\uB2C8\uB2E4.`, "ok");
-        await refresh3();
+        notice4(savedText(`${item.title} \uC744(\uB97C)`), "ok");
+        await refreshNow2();
       } catch (e) {
         notice4("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg8(e), "err");
         save.disabled = false;
@@ -8183,7 +10398,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       if (item.original === null) return;
       try {
         await state.saveMemory(item.id, item.original);
-        await refresh3();
+        await refreshNow2();
       } catch (e) {
         notice4("\uB418\uB3CC\uB9AC\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg8(e), "err");
       }
@@ -8193,7 +10408,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       try {
         await state.deleteMemory(item.id);
         notice4(`${item.title} \uC744(\uB97C) \uC9C0\uC6E0\uC2B5\uB2C8\uB2E4. \uBC18\uC601\uD558\uBA74 RisuAI\uC5D0\uC11C\uB3C4 \uC0AC\uB77C\uC9D1\uB2C8\uB2E4.`, "ok");
-        await refresh3();
+        await refreshNow2();
       } catch (e) {
         notice4("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg8(e), "err");
       }
@@ -8222,7 +10437,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         key.value = "";
         value.value = "";
         notice4(`${k} \uC744(\uB97C) \uCD94\uAC00\uD588\uC2B5\uB2C8\uB2E4.`, "ok");
-        await refresh3();
+        await refreshNow2();
       } catch (e) {
         notice4("\uCD94\uAC00\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg8(e), "err");
       } finally {
@@ -8232,6 +10447,108 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     return el("div", { class: "varadd row", style: { marginTop: "10px" } }, [key, value, add]);
   }
   function msg8(e) {
+    return e instanceof Error ? e.message : String(e);
+  }
+
+  // src/ui/pickers.ts
+  function pickerRow(current2, opts) {
+    const open4 = el("button", { class: "ghost chev", text: "\u203A", title: opts.title });
+    open4.addEventListener("click", () => opts.onOpen());
+    if (!current2) {
+      return el("div", { class: "presetnow" }, [
+        el("div", { class: "grow" }, [el("div", { class: "hint", text: opts.emptyHint })]),
+        open4
+      ]);
+    }
+    return el("div", { class: "presetnow" }, [
+      el("div", { class: "grow" }, [
+        el("div", { class: "presetnow-name" }, [
+          el("span", { text: current2.name }),
+          ...(current2.badges ?? []).map((b) => el("span", { class: "badge " + (b.cls ?? ""), style: { marginLeft: "6px" }, text: b.text }))
+        ]),
+        current2.hint ? el("div", { class: "hint", text: current2.hint }) : null
+      ]),
+      open4
+    ]);
+  }
+  function openListPicker(spec3) {
+    const listMount2 = el("div");
+    const body = el("div", {}, [
+      el("div", { class: "hint", style: { marginBottom: "8px" }, text: spec3.hint ?? "\uC120\uD0DD\uD558\uBA74 \uBC14\uB85C \uC801\uC6A9\uB429\uB2C8\uB2E4." }),
+      listMount2
+    ]);
+    const close = modal(spec3.title, body);
+    const selectedLabel = spec3.selectedLabel ?? "\uC0AC\uC6A9 \uC911";
+    const draw2 = async () => {
+      clear(listMount2);
+      listMount2.appendChild(el("div", { class: "hint", text: "\uC77D\uB294 \uC911\uC785\uB2C8\uB2E4\u2026" }));
+      try {
+        const entries = await spec3.load();
+        clear(listMount2);
+        for (const entry of entries) listMount2.appendChild(row(entry));
+        if (spec3.onCreate) {
+          const add = el("button", { class: "primary", text: spec3.createLabel ?? "\uC0C8\uB85C \uCD94\uAC00", style: { marginTop: "10px" } });
+          add.addEventListener("click", () => {
+            close();
+            spec3.onCreate?.();
+          });
+          listMount2.appendChild(add);
+        }
+      } catch (e) {
+        clear(listMount2);
+        listMount2.appendChild(el("div", { class: "notice err", text: msg9(e) }));
+      }
+    };
+    const complain = (e) => {
+      clear(listMount2);
+      listMount2.appendChild(el("div", { class: "notice err", text: msg9(e) }));
+      setTimeout(() => void draw2(), 2500);
+    };
+    const row = (entry) => {
+      const pickArea = el("div", { class: "grow" }, [
+        el("div", { class: "pickname" }, [
+          el("span", { text: entry.name }),
+          entry.selected ? el("span", { class: "badge ok", text: selectedLabel }) : null,
+          ...(entry.badges ?? []).map((b) => el("span", { class: "badge " + (b.cls ?? ""), text: b.text }))
+        ]),
+        entry.hint ? el("div", { class: "hint", text: entry.hint }) : null
+      ]);
+      const select = el("button", { class: "primary tiny", text: entry.selected ? selectedLabel : "\uC120\uD0DD" });
+      select.disabled = !!entry.selected;
+      select.addEventListener("click", async () => {
+        try {
+          await spec3.onSelect(entry);
+          close();
+        } catch (e) {
+          complain(e);
+        }
+      });
+      const cells2 = [pickArea, select];
+      if (spec3.onEdit) {
+        const edit = el("button", { class: "ghost tiny", text: "\uC218\uC815" });
+        edit.addEventListener("click", () => {
+          close();
+          spec3.onEdit?.(entry);
+        });
+        cells2.push(edit);
+      }
+      if (spec3.onDelete && !entry.noDelete) {
+        const del = el("button", { class: "ghost tiny" });
+        armed(del, "\uC0AD\uC81C", "\uD55C \uBC88 \uB354", async () => {
+          try {
+            await spec3.onDelete?.(entry);
+            await draw2();
+          } catch (e) {
+            complain(e);
+          }
+        });
+        cells2.push(del);
+      }
+      return el("div", { class: "pickrow" + (entry.selected ? " on" : "") }, cells2);
+    };
+    void draw2();
+  }
+  function msg9(e) {
     return e instanceof Error ? e.message : String(e);
   }
 
@@ -8258,7 +10575,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       clear(out);
       out.appendChild(el("div", { class: "notice " + kind, text: text2 }));
     };
-    const refresh8 = async () => {
+    const refresh3 = async () => {
       clear(generalMount);
       generalMount.appendChild(el("div", { class: "hint", text: "\uC77D\uB294 \uC911\uC785\uB2C8\uB2E4\u2026" }));
       try {
@@ -8268,36 +10585,24 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         generalMount.appendChild(currentRow("general", r.selected, general.length));
       } catch (e) {
         clear(generalMount);
-        generalMount.appendChild(el("div", { class: "notice err", text: msg9(e) }));
+        generalMount.appendChild(el("div", { class: "notice err", text: msg10(e) }));
       }
       await opts.onChanged();
     };
     const currentRow = (kind, p, total) => {
-      const pick2 = el("button", { class: "ghost", text: `\uC120\uD0DD (${total})`, title: "\uC800\uC7A5\uB41C \uD504\uB9AC\uC14B \uBAA9\uB85D" });
-      pick2.addEventListener("click", () => openPicker(kind, refresh8, say));
+      const onOpen = () => openPicker(kind, refresh3, say);
       if (!p) {
-        const open5 = el("button", { class: "ghost chev", text: "\u203A", title: total ? `\uC800\uC7A5\uB41C \uD504\uB9AC\uC14B ${total}\uAC1C \u2014 \uC120\uD0DD \xB7 \uCD94\uAC00` : "\uD504\uB9AC\uC14B \uCD94\uAC00" });
-        open5.addEventListener("click", () => openPicker(kind, refresh8, say));
-        return el("div", { class: "presetnow" }, [
-          el("div", { class: "grow" }, [
-            el("div", { class: "hint", text: "\uD504\uB9AC\uC14B\uC774 \uC5C6\uC2B5\uB2C8\uB2E4. \u203A \uC5D0\uC11C \uD558\uB098 \uB9CC\uB4E4\uC5B4 \uC8FC\uC138\uC694." })
-          ]),
-          open5
-        ]);
+        return pickerRow(null, {
+          title: total ? `\uC800\uC7A5\uB41C \uD504\uB9AC\uC14B ${total}\uAC1C \u2014 \uC120\uD0DD \xB7 \uCD94\uAC00` : "\uD504\uB9AC\uC14B \uCD94\uAC00",
+          emptyHint: total ? "\uC120\uD0DD\uB41C \uD504\uB9AC\uC14B \uC5C6\uC74C \u2014 \u203A \uC5D0\uC11C \uACE0\uB974\uC138\uC694" : "\uD504\uB9AC\uC14B\uC774 \uC5C6\uC2B5\uB2C8\uB2E4. \u203A \uC5D0\uC11C \uD558\uB098 \uB9CC\uB4E4\uC5B4 \uC8FC\uC138\uC694.",
+          onOpen
+        });
       }
-      const open4 = el("button", { class: "ghost chev", text: "\u203A", title: `\uC800\uC7A5\uB41C \uD504\uB9AC\uC14B ${total}\uAC1C \u2014 \uC120\uD0DD \xB7 \uC218\uC815 \xB7 \uC0AD\uC81C \xB7 \uCD94\uAC00` });
-      open4.addEventListener("click", () => openPicker(kind, refresh8, say));
-      const row = el("div", { class: "presetnow" }, [
-        el("div", { class: "grow" }, [
-          el("div", { class: "presetnow-name" }, [
-            el("span", { text: p.name }),
-            !p.apiKey?.set && !p.keyRef && p.provider !== "codex" ? el("span", { class: "badge warn", style: { marginLeft: "6px" }, text: "\uD0A4 \uC5C6\uC74C" }) : null
-          ]),
-          el("div", { class: "hint", text: summarise(p) })
-        ]),
-        open4
-      ]);
-      return row;
+      return pickerRow({ name: p.name, hint: summarise(p), badges: keyBadges(p) }, {
+        title: `\uC800\uC7A5\uB41C \uD504\uB9AC\uC14B ${total}\uAC1C \u2014 \uC120\uD0DD \xB7 \uC218\uC815 \xB7 \uC0AD\uC81C \xB7 \uCD94\uAC00`,
+        emptyHint: "",
+        onOpen
+      });
     };
     const testButton = (kind, box) => {
       const testBtn = el("button", { class: "ghost", text: "\uC5F0\uACB0 \uD14C\uC2A4\uD2B8" });
@@ -8322,15 +10627,15 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
           }
         } catch (e) {
           clear(box);
-          box.appendChild(el("div", { class: "notice err", text: msg9(e) }));
+          box.appendChild(el("div", { class: "notice err", text: msg10(e) }));
         } finally {
           testBtn.disabled = false;
         }
       });
       return testBtn;
     };
-    opts.onMount?.(refresh8);
-    void refresh8();
+    opts.onMount?.(refresh3);
+    void refresh3();
     return el("div", {}, [
       el("div", { class: "card" }, [
         el("h2", { text: "\uC77C\uBC18 \uC5D0\uC774\uC804\uD2B8" }),
@@ -8405,7 +10710,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       modeNote.textContent = st?.modes.find((x) => x.id === m)?.note ?? "";
     };
     modeSel.addEventListener("change", syncMode);
-    const load = async () => {
+    const load2 = async () => {
       try {
         const [r, k] = await Promise.all([state.websearch(), state.apiKeys().catch(() => ({ keys: [] }))]);
         st = r;
@@ -8437,7 +10742,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         status.textContent = r.ready ? `\uC9C0\uAE08: ${r.modes.find((m) => m.id === r.mode)?.name ?? r.mode} \u2014 \uAC80\uC0C9 \uAC00\uB2A5` : `\uAC80\uC0C9 \uBD88\uAC00: ${r.whyNot}`;
         status.className = "hint " + (r.ready ? "" : "diff-del-n");
       } catch (e) {
-        status.textContent = msg9(e);
+        status.textContent = msg10(e);
       }
     };
     const patch = () => {
@@ -8463,12 +10768,12 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         await state.saveWebsearch(patch());
         gKey.value = "";
         pKey.value = "";
-        await load();
+        await load2();
         clear(out);
         out.appendChild(el("div", { class: "notice ok", text: "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4." }));
       } catch (e) {
         clear(out);
-        out.appendChild(el("div", { class: "notice err", text: msg9(e) }));
+        out.appendChild(el("div", { class: "notice err", text: msg10(e) }));
       } finally {
         save.disabled = false;
       }
@@ -8484,7 +10789,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         gKey.value = "";
         pKey.value = "";
         const r = await state.testWebsearch(q.value.trim() || "RisuAI \uCD5C\uC2E0 \uB9B4\uB9AC\uC2A4 \uBC84\uC804");
-        await load();
+        await load2();
         clear(out);
         out.appendChild(el("div", { class: "notice " + (r.ok ? "ok" : "err") }, [
           el("div", { text: r.ok ? `\uAC80\uC0C9\uB429\uB2C8\uB2E4 \xB7 ${r.detail} \xB7 ${(r.ms / 1e3).toFixed(1)}\uCD08` : `\uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4${r.detail ? " \xB7 " + r.detail : ""}` }),
@@ -8492,12 +10797,12 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         ]));
       } catch (e) {
         clear(out);
-        out.appendChild(el("div", { class: "notice err", text: msg9(e) }));
+        out.appendChild(el("div", { class: "notice err", text: msg10(e) }));
       } finally {
         test.disabled = false;
       }
     });
-    void load();
+    void load2();
     return el("div", { class: "card", id: "websearch-card" }, [
       el("h2", { text: "\uC6F9 \uAC80\uC0C9 \uD234" }),
       el("div", { class: "hint", style: { marginBottom: "8px" }, text: "\uC77C\uBC18 \uC5D0\uC774\uC804\uD2B8\uAC00 \uC678\uBD80 \uC0AC\uC2E4\uC774 \uD544\uC694\uD560 \uB54C \uC4F0\uB294 web_search \uD234\uC785\uB2C8\uB2E4. \uB204\uAC00 \uAC80\uC0C9\uD560\uC9C0 \uD558\uB098\uB97C \uACE0\uB985\uB2C8\uB2E4." }),
@@ -8523,78 +10828,41 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     if (p.instructions) bits.push("\uAE30\uBCF8\uC9C0\uCE68 \uC788\uC74C");
     return bits.join(" \xB7 ");
   }
-  function openPicker(kind, refresh8, say) {
-    const listMount2 = el("div");
-    const body = el("div", {}, [
-      el("div", { class: "hint", style: { marginBottom: "8px" } }, [
-        "\uC120\uD0DD\uD558\uBA74 \uBC14\uB85C \uC801\uC6A9\uB429\uB2C8\uB2E4."
-      ]),
-      listMount2
-    ]);
-    const close = modal(`${KIND_LABEL2[kind]} \uD504\uB9AC\uC14B \uC120\uD0DD`, body);
-    const draw2 = async () => {
-      clear(listMount2);
-      listMount2.appendChild(el("div", { class: "hint", text: "\uC77D\uB294 \uC911\uC785\uB2C8\uB2E4\u2026" }));
-      try {
+  function keyBadges(p) {
+    return !p.apiKey?.set && !p.keyRef && p.provider !== "codex" ? [{ text: "\uD0A4 \uC5C6\uC74C", cls: "warn" }] : [];
+  }
+  function openPicker(kind, refresh3, say) {
+    openListPicker({
+      title: `${KIND_LABEL2[kind]} \uD504\uB9AC\uC14B \uC120\uD0DD`,
+      load: async () => {
         const r = await state.presets();
         const mine = r.presets.filter((p) => p.kind === kind);
-        clear(listMount2);
-        for (const p of mine) listMount2.appendChild(row(p, mine.length));
-        const add = el("button", { class: "primary", text: "\uC0C8 \uD504\uB9AC\uC14B \uCD94\uAC00", style: { marginTop: "10px" } });
-        add.addEventListener("click", () => {
-          close();
-          openEditor(kind, null, refresh8, say);
-        });
-        listMount2.appendChild(add);
-      } catch (e) {
-        clear(listMount2);
-        listMount2.appendChild(el("div", { class: "notice err", text: msg9(e) }));
-      }
-    };
-    const row = (p, total) => {
-      const pickArea = el("div", { class: "grow" }, [
-        el("div", { class: "pickname" }, [
-          el("span", { text: p.name }),
-          p.selected ? el("span", { class: "badge ok", text: "\uC0AC\uC6A9 \uC911" }) : null,
-          !p.apiKey?.set && !p.keyRef && p.provider !== "codex" ? el("span", { class: "badge warn", text: "\uD0A4 \uC5C6\uC74C" }) : null
-        ]),
-        el("div", { class: "hint", text: summarise(p) })
-      ]);
-      const select = el("button", { class: "primary tiny", text: p.selected ? "\uC0AC\uC6A9 \uC911" : "\uC120\uD0DD" });
-      select.disabled = !!p.selected;
-      select.addEventListener("click", async () => {
-        try {
-          await state.selectPreset(p.id);
-          await refresh8();
-          close();
-          say(`\u201C${p.name}\u201D \uC744(\uB97C) \uC4F0\uAE30 \uC2DC\uC791\uD588\uC2B5\uB2C8\uB2E4.`, "ok");
-        } catch (e) {
-          say(msg9(e), "err");
-        }
-      });
-      const edit = el("button", { class: "ghost tiny", text: "\uC218\uC815" });
-      edit.addEventListener("click", () => {
-        close();
-        openEditor(kind, p.id, refresh8, say);
-      });
-      const del = el("button", { class: "ghost tiny" });
-      armed(del, "\uC0AD\uC81C", "\uD55C \uBC88 \uB354", async () => {
-        try {
-          await state.deletePreset(p.id);
-          await draw2();
-          await refresh8();
-        } catch (e) {
-          clear(listMount2);
-          listMount2.appendChild(el("div", { class: "notice err", text: msg9(e) }));
-          setTimeout(() => void draw2(), 2500);
-        }
-      });
-      if (kind === "general" && total <= 1) del.style.display = "none";
-      return el("div", { class: "pickrow" + (p.selected ? " on" : "") }, [pickArea, select, edit, del]);
-    };
-    void draw2();
+        return mine.map((p) => ({
+          id: p.id,
+          name: p.name,
+          hint: summarise(p),
+          selected: !!p.selected,
+          badges: keyBadges(p),
+          // The backend refuses to delete the last general one; hiding the
+          // button states the rule instead of surfacing a refusal.
+          noDelete: kind === "general" && mine.length <= 1
+        }));
+      },
+      onSelect: async (entry) => {
+        await state.selectPreset(entry.id);
+        await refresh3();
+        say(`\u201C${entry.name}\u201D \uC744(\uB97C) \uC4F0\uAE30 \uC2DC\uC791\uD588\uC2B5\uB2C8\uB2E4.`, "ok");
+      },
+      onEdit: (entry) => openEditor(kind, entry.id, refresh3, say),
+      onDelete: async (entry) => {
+        await state.deletePreset(entry.id);
+        await refresh3();
+      },
+      onCreate: () => openEditor(kind, null, refresh3, say),
+      createLabel: "\uC0C8 \uD504\uB9AC\uC14B \uCD94\uAC00"
+    });
   }
-  function openEditor(kind, id, refresh8, say) {
+  function openEditor(kind, id, refresh3, say) {
     const name = el("input", { placeholder: kind === "search" ? "\uD504\uB9AC\uC14B \uC774\uB984 (\uC608: Gemini \uAC80\uC0C9)" : "\uD504\uB9AC\uC14B \uC774\uB984 (\uC608: \uC815\uBC00 \xB7 \uC800\uB834\uC774)" });
     const agentName = el("input", { placeholder: "\uD788\uB098" });
     const baseUrl = el("input", { placeholder: kind === "search" ? "https://generativelanguage.googleapis.com/v1beta/openai" : "https://ai-gateway.vercel.sh/v1" });
@@ -8613,7 +10881,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     const paramsNote = el("div", { class: "hint", style: { marginTop: "-4px", marginBottom: "10px" } });
     const provBox = el("div", { class: "notice", style: { marginBottom: "10px", display: "none" } });
     let providers = [];
-    const cache = el("input", { type: "checkbox" });
+    const cache2 = el("input", { type: "checkbox" });
     const flex = el("input", { type: "checkbox" });
     const instructions = el("textarea", {
       placeholder: kind === "search" ? "\uAC80\uC0C9 \uC5D0\uC774\uC804\uD2B8\uAC00 \uC9C0\uD0AC \uC9C0\uCE68 (\uC608: \uD55C\uAD6D\uC5B4 \uC790\uB8CC \uC6B0\uC120, \uCD9C\uCC98 3\uAC1C \uC774\uC0C1). \uBE44\uC6CC \uB450\uC154\uB3C4 \uB429\uB2C8\uB2E4." : "\uC5D0\uC774\uC804\uD2B8\uAC00 \uD56D\uC0C1 \uC9C0\uD0AC \uC9C0\uCE68\uC744 \uC801\uC5B4 \uC8FC\uC138\uC694. \uBE44\uC6CC \uB450\uC154\uB3C4 \uB429\uB2C8\uB2E4.",
@@ -8630,11 +10898,11 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     const urlRow = el("label", { class: "field" }, [el("span", { text: "Base URL" }), baseUrl]);
     const codexBox = buildCodexBox(model, false);
     const isCodex = () => selectedValue(keySel) === CODEX_KEY;
-    const syncCount = () => {
+    const syncCount2 = () => {
       instCount.textContent = `${instructions.value.length}\uC790`;
     };
-    instructions.addEventListener("input", syncCount);
-    syncCount();
+    instructions.addEventListener("input", syncCount2);
+    syncCount2();
     const syncKeyRow = () => {
       const codex = isCodex();
       const fromKeyPage = !codex && !!selectedValue(keySel);
@@ -8690,7 +10958,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       model.value = m.id;
       if (api && !baseUrl.value) baseUrl.value = api;
     }));
-    const load = async () => {
+    const load2 = async () => {
       try {
         const r = await state.presets();
         keepSentinel = r.keepSentinel || keepSentinel;
@@ -8707,7 +10975,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         if (!p) {
           agentName.value = r.defaultAgentName || "\uD788\uB098";
           instructions.value = r.defaultInstructions?.[kind] || "";
-          syncCount();
+          syncCount2();
           keyNote.textContent = "\uC124\uC815\uB418\uC9C0 \uC54A\uC74C";
           syncKeyRow();
           syncProvider();
@@ -8722,15 +10990,15 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         params.value = p.params || "";
         setSelected(reasoning, p.reasoning || "");
         setSelected(keySel, p.provider === "codex" ? CODEX_KEY : p.keyRef || "");
-        cache.checked = p.cache;
+        cache2.checked = p.cache;
         flex.checked = p.flex;
         instructions.value = p.instructions || "";
-        syncCount();
+        syncCount2();
         syncKeyRow();
         syncProvider();
         keyNote.textContent = p.apiKey?.set ? `\uC124\uC815\uB428 (${p.apiKey.length}\uC790) \u2014 \uBC14\uAFB8\uB824\uBA74 \uC0C8\uB85C \uC785\uB825` : "\uC124\uC815\uB418\uC9C0 \uC54A\uC74C";
       } catch (e) {
-        keyNote.textContent = msg9(e);
+        keyNote.textContent = msg10(e);
       }
     };
     const save = el("button", { class: "primary", text: "\uC800\uC7A5" });
@@ -8760,7 +11028,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         el(
           "label",
           { class: "checkrow", title: "\uAC19\uC740 \uC9C0\uC2DC\uBB38\xB7\uD234 \uC815\uC758\uB97C \uB2E4\uC2DC \uBCF4\uB0BC \uB54C \uCE90\uC2DC\uB97C \uD0DC\uC6C1\uB2C8\uB2E4" },
-          [cache, el("span", { text: "\uD504\uB86C\uD504\uD2B8 \uCE90\uC2DC" })]
+          [cache2, el("span", { text: "\uD504\uB86C\uD504\uD2B8 \uCE90\uC2DC" })]
         ),
         el(
           "label",
@@ -8803,23 +11071,23 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
           temperature: temperature.value.trim() === "" ? "" : Number(temperature.value),
           params: params.value.trim(),
           reasoning: selectedValue(reasoning),
-          cache: cache.checked,
+          cache: cache2.checked,
           flex: flex.checked,
           instructions: instructions.value,
           agentName: agentName.value.trim() || void 0
         }, id ?? void 0);
         close();
-        await refresh8();
+        await refresh3();
         say(saved.selected ? "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4." : `\u201C${saved.name}\u201D \uC744(\uB97C) \uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4. \uC4F0\uB824\uBA74 \uC544\uB798\uC5D0\uC11C \uC120\uD0DD\uD558\uC138\uC694.`, "ok");
-        openPicker(kind, refresh8, say);
+        openPicker(kind, refresh3, say);
       } catch (e) {
         clear(out);
-        out.appendChild(el("div", { class: "notice err", text: msg9(e) }));
+        out.appendChild(el("div", { class: "notice err", text: msg10(e) }));
       } finally {
         save.disabled = false;
       }
     });
-    void load();
+    void load2();
   }
   function buildCodexBox(modelInput, withLogin) {
     const line = el("div", { class: "hint" });
@@ -8839,7 +11107,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         poll = null;
       }
     };
-    const refresh8 = async () => {
+    const refresh3 = async () => {
       try {
         const s = await state.codexStatus();
         line.textContent = s.loggedIn ? `\uB85C\uADF8\uC778\uB428 \xB7 ${s.email || s.accountId.slice(0, 8)}${s.plan ? " \xB7 " + s.plan : ""}` : "\uB85C\uADF8\uC778\uB418\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4. ChatGPT Plus/Pro \uACC4\uC815\uC73C\uB85C \uB85C\uADF8\uC778\uD558\uBA74 \uAD6C\uB3C5\uC73C\uB85C \uC5D0\uC774\uC804\uD2B8\uB97C \uB3CC\uB9BD\uB2C8\uB2E4.";
@@ -8860,7 +11128,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
           }
         }
       } catch (e) {
-        line.textContent = msg9(e);
+        line.textContent = msg10(e);
       }
     };
     login.addEventListener("click", async () => {
@@ -8908,7 +11176,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
             if (st.done || st.loggedIn) {
               stopPoll();
               clear(out);
-              await refresh8();
+              await refresh3();
             } else if (st.error) {
               stopPoll();
               out.appendChild(el("div", { class: "notice err", text: st.error }));
@@ -8917,7 +11185,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
           }
         }, 2e3);
       } catch (e) {
-        out.appendChild(el("div", { class: "notice err", text: msg9(e) }));
+        out.appendChild(el("div", { class: "notice err", text: msg10(e) }));
       } finally {
         login.disabled = false;
       }
@@ -8928,10 +11196,10 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         await state.codexLoginComplete(paste.value.trim(), pendingState);
         clear(out);
         paste.value = "";
-        await refresh8();
+        await refresh3();
       } catch (e) {
         clear(out);
-        out.appendChild(el("div", { class: "notice err", text: msg9(e) }));
+        out.appendChild(el("div", { class: "notice err", text: msg10(e) }));
       } finally {
         finish.disabled = false;
       }
@@ -8939,14 +11207,18 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     logout.addEventListener("click", async () => {
       try {
         await state.codexLogout();
-        await refresh8();
+        await refresh3();
       } catch (e) {
-        out.appendChild(el("div", { class: "notice err", text: msg9(e) }));
+        out.appendChild(el("div", { class: "notice err", text: msg10(e) }));
       }
     });
-    const root = withLogin ? el("div", { class: "card codexbox" }, [
+    const root2 = withLogin ? el("div", { class: "card codexbox" }, [
       el("h2", { text: "OpenAI \uAD6C\uB3C5 (Codex)" }),
-      el("div", { class: "hint", style: { marginBottom: "6px" }, text: 'Codex CLI \uC640 \uAC19\uC740 \uBC29\uC2DD\uC73C\uB85C ChatGPT Plus/Pro \uACC4\uC815\uC5D0 \uB85C\uADF8\uC778\uD574 chatgpt.com \uC758 codex \uBC31\uC5D4\uB4DC\uB97C \uC501\uB2C8\uB2E4. \uB85C\uADF8\uC778\uD574 \uB450\uBA74 \uC5D0\uC774\uC804\uD2B8 \uD504\uB9AC\uC14B\uC758 API \uD0A4 \uC120\uD0DD\uC5D0\uC11C "OpenAI \uAD6C\uB3C5" \uC744 \uACE0\uB97C \uC218 \uC788\uC2B5\uB2C8\uB2E4. \uACF5\uC2DD API \uAC00 \uC544\uB2C8\uB77C OpenAI \uCABD \uBCC0\uACBD\uC5D0 \uAE68\uC9C8 \uC218 \uC788\uACE0, \uADF8\uB54C\uB294 \uC624\uB958\uB97C \uADF8\uB300\uB85C \uBCF4\uC5EC \uC90D\uB2C8\uB2E4.' }),
+      el("div", { class: "hint", style: { marginBottom: "6px" }, text: 'Codex OAuth \uB85C ChatGPT Plus/Pro \uACC4\uC815\uC5D0 \uB85C\uADF8\uC778\uD574 chatgpt.com \uC758 codex \uBC31\uC5D4\uB4DC\uB97C \uC501\uB2C8\uB2E4. \uC694\uCCAD\uC5D0\uB294 risu-hina \uC774\uB984\uC73C\uB85C \uC811\uC18D\uD569\uB2C8\uB2E4. \uB85C\uADF8\uC778\uD574 \uB450\uBA74 \uC5D0\uC774\uC804\uD2B8 \uD504\uB9AC\uC14B\uC758 API \uD0A4 \uC120\uD0DD\uC5D0\uC11C "OpenAI \uAD6C\uB3C5" \uC744 \uACE0\uB97C \uC218 \uC788\uC2B5\uB2C8\uB2E4. \uACF5\uC2DD API \uAC00 \uC544\uB2C8\uB77C OpenAI \uCABD \uBCC0\uACBD\uC5D0 \uAE68\uC9C8 \uC218 \uC788\uACE0, \uADF8\uB54C\uB294 \uC624\uB958\uB97C \uADF8\uB300\uB85C \uBCF4\uC5EC \uC90D\uB2C8\uB2E4.' }),
+      el("div", { class: "notice warn", style: { marginBottom: "6px" } }, [
+        el("span", { text: "\uC624\uD508\uC18C\uC2A4 \uC5D0\uC774\uC804\uD2B8 \uD504\uB85C\uADF8\uB7A8\uC5D0\uC11C Codex \uAD6C\uB3C5 \uC0AC\uC6A9\uC740 \uBA85\uC2DC\uC801\uC73C\uB85C \uD5C8\uC6A9\uB418\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4. \uAC1C\uC778\uC758 \uCC45\uC784\uD558\uC5D0 \uC0AC\uC6A9\uD574 \uC8FC\uC138\uC694. " }),
+        el("strong", { text: "(\uD2B9\uD788 \uCC57\uCC48\uC5D0\uC11C \uC5B8\uAE09\uC740 \uC790\uC81C\uD558\uC5EC \uC8FC\uC2ED\uC2DC\uC624.)" })
+      ]),
       line,
       el("div", { class: "row", style: { marginTop: "6px" } }, [login, logout]),
       pasteRow,
@@ -8959,8 +11231,8 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       el("div", { class: "hint", text: "\uC774 \uBC31\uC5D4\uB4DC\uAC00 \uBC1B\uB294 \uBAA8\uB378 (\uB204\uB974\uBA74 \uCC44\uC6CC\uC9D1\uB2C8\uB2E4):" }),
       models
     ]);
-    root.style.display = "none";
-    return { root, refresh: refresh8 };
+    root2.style.display = "none";
+    return { root: root2, refresh: refresh3 };
   }
   function openCatalogPicker(anchor, onPick) {
     const input = el("input", { placeholder: "\uD504\uB85C\uBC14\uC774\uB354\uB098 \uBAA8\uB378 \uC774\uB984 (\uC608: gemini, anthropic, gpt-5)" });
@@ -8995,7 +11267,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         if (r.truncated) list2.appendChild(el("div", { class: "hint", text: "\uB354 \uC788\uC2B5\uB2C8\uB2E4 \u2014 \uAC80\uC0C9\uC5B4\uB97C \uC881\uD600 \uC8FC\uC138\uC694." }));
       } catch (e) {
         clear(list2);
-        list2.appendChild(el("div", { class: "notice err", text: msg9(e) }));
+        list2.appendChild(el("div", { class: "notice err", text: msg10(e) }));
       }
     };
     input.addEventListener("input", () => {
@@ -9011,7 +11283,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     }
     return sel;
   }
-  function msg9(e) {
+  function msg10(e) {
     return e instanceof Error ? e.message : String(e);
   }
 
@@ -9026,7 +11298,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       clear(out);
       out.appendChild(el("div", { class: "notice " + kind, text: text2 }));
     };
-    const refresh8 = async () => {
+    const refresh3 = async () => {
       clear(listMount2);
       listMount2.appendChild(el("div", { class: "hint", text: "\uC77D\uB294 \uC911\uC785\uB2C8\uB2E4\u2026" }));
       try {
@@ -9042,7 +11314,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         for (const s of r.skills) listMount2.appendChild(row(s));
       } catch (e) {
         clear(listMount2);
-        listMount2.appendChild(el("div", { class: "notice err", text: msg10(e) }));
+        listMount2.appendChild(el("div", { class: "notice err", text: msg11(e) }));
       }
     };
     const row = (s) => {
@@ -9050,21 +11322,21 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       toggle.addEventListener("change", async () => {
         try {
           await state.toggleSkill(s.id, toggle.checked);
-          await refresh8();
+          await refresh3();
         } catch (e) {
           toggle.checked = !toggle.checked;
-          say(msg10(e), "err");
+          say(msg11(e), "err");
         }
       });
       const editBtn = el("button", { class: "ghost tiny", text: "\uC218\uC815" });
-      editBtn.addEventListener("click", () => void openEditor2(s.id, refresh8, say, { maxBody, maxDesc }));
+      editBtn.addEventListener("click", () => void openEditor2(s.id, refresh3, say, { maxBody, maxDesc }));
       const del = el("button", { class: "ghost tiny" });
       armed(del, "\uC0AD\uC81C", "\uD3F4\uB354\uC9F8 \uC9C0\uC6C1\uB2C8\uB2E4", async () => {
         try {
           await state.deleteSkill(s.id);
-          await refresh8();
+          await refresh3();
         } catch (e) {
-          say(msg10(e), "err");
+          say(msg11(e), "err");
         }
       });
       const files = s.files?.length ? ` \xB7 \uD30C\uC77C ${s.files.length}` : "";
@@ -9085,17 +11357,17 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       ]);
     };
     const addBtn = el("button", { class: "primary", text: "\uC2A4\uD0AC \uCD94\uAC00" });
-    addBtn.addEventListener("click", () => void openEditor2(null, refresh8, say, { maxBody, maxDesc }));
+    addBtn.addEventListener("click", () => void openEditor2(null, refresh3, say, { maxBody, maxDesc }));
     const picker = el("input", { type: "file", accept: ".md,.txt,.py,.zip", style: { display: "none" } });
     picker.addEventListener("change", async () => {
       const file = picker.files?.[0];
       if (!file) return;
       try {
         const skill = await state.uploadSkill(file);
-        await refresh8();
+        await refresh3();
         say(`\u201C${skill.name}\u201D \uC2A4\uD0AC\uC744 \uB9CC\uB4E4\uC5C8\uC2B5\uB2C8\uB2E4 (skills/${skill.id}). \uC124\uBA85\uC744 \uB2E4\uB4EC\uC5B4 \uB450\uBA74 \uC5D0\uC774\uC804\uD2B8\uAC00 \uB354 \uC815\uD655\uD788 \uACE0\uB985\uB2C8\uB2E4.`, "ok");
       } catch (e) {
-        say("\uC5C5\uB85C\uB4DC\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg10(e), "err");
+        say("\uC5C5\uB85C\uB4DC\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg11(e), "err");
       } finally {
         picker.value = "";
       }
@@ -9116,13 +11388,13 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
           el("pre", { class: "mono filepreview", text: r.prompt || "(\uCF1C \uB454 \uC2A4\uD0AC\uC774 \uC5C6\uC2B5\uB2C8\uB2E4)" })
         ]), { wide: true });
       } catch (e) {
-        say(msg10(e), "err");
+        say(msg11(e), "err");
       } finally {
         previewBtn.disabled = false;
       }
     });
-    void refresh8();
-    opts.onMount?.(refresh8);
+    void refresh3();
+    opts.onMount?.(refresh3);
     return el("div", { class: "card" }, [
       el("h2", { text: "\uC2A4\uD0AC" }),
       el("div", { class: "hint", style: { marginBottom: "8px" } }, [
@@ -9135,13 +11407,13 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       out
     ]);
   }
-  async function openEditor2(id, refresh8, say, caps) {
+  async function openEditor2(id, refresh3, say, caps) {
     let skill = null;
     if (id) {
       try {
         skill = await state.skill(id);
       } catch (e) {
-        say(msg10(e), "err");
+        say(msg11(e), "err");
         return;
       }
     }
@@ -9192,11 +11464,11 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
           always: always.checked
         });
         close();
-        await refresh8();
+        await refresh3();
         say("\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4.", "ok");
       } catch (e) {
         clear(out);
-        out.appendChild(el("div", { class: "notice err", text: msg10(e) }));
+        out.appendChild(el("div", { class: "notice err", text: msg11(e) }));
       } finally {
         save.disabled = false;
       }
@@ -9221,7 +11493,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
             draw2();
           } catch (e) {
             clear(out);
-            out.appendChild(el("div", { class: "notice err", text: msg10(e) }));
+            out.appendChild(el("div", { class: "notice err", text: msg11(e) }));
           }
         });
         list2.appendChild(el("div", { class: "pickrow" }, [
@@ -9248,7 +11520,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         say(`${r.path} \uC744(\uB97C) \uB123\uC5C8\uC2B5\uB2C8\uB2E4. \uBCF8\uBB38\uC5D0\uC11C skills/${skill.id}/${r.path} \uB85C \uAC00\uB9AC\uCF1C \uC8FC\uC138\uC694.`, "ok");
       } catch (e) {
         clear(out);
-        out.appendChild(el("div", { class: "notice err", text: msg10(e) }));
+        out.appendChild(el("div", { class: "notice err", text: msg11(e) }));
       } finally {
         picker.value = "";
       }
@@ -9267,7 +11539,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)}KB`;
     return `${(n / 1024 / 1024).toFixed(1)}MB`;
   }
-  function msg10(e) {
+  function msg11(e) {
     return e instanceof Error ? e.message : String(e);
   }
 
@@ -9316,7 +11588,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
           out.appendChild(notes);
         }
       } catch (e) {
-        say(msg11(e), "err");
+        say(msg12(e), "err");
       } finally {
         checkBtn.disabled = false;
       }
@@ -9335,7 +11607,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         const version = await state.waitForBackend(90);
         say(`\uBC31\uC5D4\uB4DC\uAC00 v${version} \uC73C\uB85C \uB2E4\uC2DC \uC2DC\uC791\uD588\uC2B5\uB2C8\uB2E4.`, "ok");
       } catch (e) {
-        say("\uC124\uCE58 \uB610\uB294 \uC7AC\uC2DC\uC791\uC744 \uD655\uC778\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg11(e) + " \u2014 \uC7A0\uC2DC \uD6C4 \uC0C8\uB85C\uACE0\uCE68\uD574\uC11C \uBC84\uC804\uC744 \uD655\uC778\uD574 \uC8FC\uC138\uC694.", "err");
+        say("\uC124\uCE58 \uB610\uB294 \uC7AC\uC2DC\uC791\uC744 \uD655\uC778\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg12(e) + " \u2014 \uC7A0\uC2DC \uD6C4 \uC0C8\uB85C\uACE0\uCE68\uD574\uC11C \uBC84\uC804\uC744 \uD655\uC778\uD574 \uC8FC\uC138\uC694.", "err");
       } finally {
         checkBtn.disabled = false;
       }
@@ -9391,7 +11663,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.10.0",
+            version: "0.11.0",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -9411,7 +11683,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         };
         show("\uC9C4\uB2E8 \uC815\uBCF4", JSON.stringify(report, null, 2));
       } catch (e) {
-        say("\uC9C4\uB2E8 \uC815\uBCF4\uB97C \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg11(e), "err");
+        say("\uC9C4\uB2E8 \uC815\uBCF4\uB97C \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg12(e), "err");
       } finally {
         diagBtn.disabled = false;
       }
@@ -9423,7 +11695,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         const r = await state.logs(400, selectedLevel(levelSel));
         show("\uC11C\uBC84 \uB85C\uADF8", r.lines.join("\n") || "(\uBE44\uC5B4 \uC788\uC2B5\uB2C8\uB2E4)");
       } catch (e) {
-        say("\uB85C\uADF8\uB97C \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg11(e), "err");
+        say("\uB85C\uADF8\uB97C \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg12(e), "err");
       } finally {
         logBtn.disabled = false;
       }
@@ -9461,7 +11733,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1e4);
   }
-  function msg11(e) {
+  function msg12(e) {
     return e instanceof Error ? e.message : String(e);
   }
 
@@ -9500,19 +11772,19 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       // The backend update sits with the connection, right under it: it is the
       // first thing to press when the two sides disagree, and it was buried on
       // the last page before.
-      ["\uC5F0\uACB0", [buildConnectionCard(), buildUpdateCard(), buildDiagnosticCard(), buildAssetsCard()]],
+      ["\uC5F0\uACB0", [buildConnectionCard(), buildUpdateCard(), buildSpaceCard(), buildDiagnosticCard(), buildAssetsCard()]],
       ["API \uD0A4/\uC778\uC99D", [buildKeysCard()]],
       ["\uC5D0\uC774\uC804\uD2B8", [buildPresetsCard({
-        onMount: (refresh8) => {
-          refreshers.push(refresh8);
+        onMount: (refresh3) => {
+          refreshers.push(refresh3);
         },
         onChanged: async () => {
           await state.connect();
           agentPanel().invalidate();
         }
       })]],
-      ["\uC2A4\uD0AC", [buildSkillsCard({ onMount: (refresh8) => {
-        refreshers.push(refresh8);
+      ["\uC2A4\uD0AC", [buildSkillsCard({ onMount: (refresh3) => {
+        refreshers.push(refresh3);
       } })]],
       ["\uC815\uBCF4 \xB7 \uB85C\uADF8", [buildCatalogCard(), buildDebugCard(), aboutMount]]
     ];
@@ -9582,6 +11854,48 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       ])
     ]);
   }
+  function buildSpaceCard() {
+    const path = el("input", { placeholder: "(\uBE44\uC6B0\uBA74 \uAE30\uBCF8: <data>/space)" });
+    const out = el("div", { class: "hint" });
+    const save = el("button", { class: "primary tiny", text: "\uC800\uC7A5" });
+    const load2 = async () => {
+      try {
+        const d = await state.diagnostics();
+        const sp = d.space ?? {};
+        out.textContent = `\uD604\uC7AC: ${sp.path ?? state.health?.space ?? "(\uC5F0\uACB0 \uC548 \uB428)"}` + (sp.migrated ? " \xB7 \uAE30\uC874 \uD30C\uC77C \uC774\uAD00 \uC644\uB8CC" : "");
+      } catch {
+        out.textContent = state.health?.space ? `\uD604\uC7AC: ${state.health.space}` : "";
+      }
+    };
+    save.addEventListener("click", async () => {
+      save.disabled = true;
+      try {
+        await transport.post("/config", { config: { workspace: { globalPath: path.value.trim() } } });
+        out.textContent = "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4. \uD30C\uC77C\uC740 \uC790\uB3D9\uC73C\uB85C \uC62E\uACA8\uC9C0\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4 \u2014 \uACBD\uB85C\uB97C \uBC14\uAFE8\uB2E4\uBA74 \uAE30\uC874 \uD3F4\uB354\uB97C \uC9C1\uC811 \uC62E\uACA8 \uC8FC\uC138\uC694.";
+      } catch (e) {
+        out.textContent = "\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg13(e);
+      } finally {
+        save.disabled = false;
+      }
+    });
+    refreshers.push(load2);
+    void load2();
+    const copy = el("button", { class: "ghost tiny", text: "\uBCF5\uC0AC", title: "\uACBD\uB85C\uB97C \uD074\uB9BD\uBCF4\uB4DC\uB85C" });
+    copy.addEventListener("click", () => {
+      const v = path.value.trim() || state.health?.space || "";
+      copy.textContent = v && copyToClipboard(v) ? "\uBCF5\uC0AC\uB428" : "\uBCF5\uC0AC";
+      setTimeout(() => {
+        copy.textContent = "\uBCF5\uC0AC";
+      }, 1500);
+    });
+    return el("div", { class: "card" }, [
+      el("h2", { text: "\uD30C\uC77C \uACF5\uAC04" }),
+      el("div", { class: "hint", text: "\uBAA8\uB4E0 \uBD07\uC774 \uACF5\uC720\uD558\uB294 \uD558\uB098\uC758 \uD30C\uC77C \uACF5\uAC04\uC785\uB2C8\uB2E4: projects(\uC9C1\uC811 \uAD00\uB9AC) \xB7 studio(\uC774\uBBF8\uC9C0 \uB77C\uC774\uBE0C\uB7EC\uB9AC) \xB7 hina(AI \uC791\uC5C5)." }),
+      el("label", { class: "field" }, [el("span", { text: "\uACBD\uB85C" }), path]),
+      el("div", { class: "row" }, [save, copy]),
+      out
+    ]);
+  }
   function buildDiagnosticCard() {
     const out = el("div", { class: "outbox" });
     const run = el("button", { text: "\uC5F0\uACB0 \uC9C4\uB2E8" });
@@ -9638,7 +11952,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     const savePath = el("input", { placeholder: "D:\\path\\to\\Risuai-NodeOnly\\save  (PocketRisu \uC758 save \uD3F4\uB354, \uBC31\uC5D4\uB4DC\uC640 \uAC19\uC740 PC\uC77C \uB54C)" });
     const stats = el("div", { class: "hint" });
     const out = el("div", { class: "outbox" });
-    const load = async () => {
+    const load2 = async () => {
       try {
         const { config } = await state.getConfig();
         const pr = config.pocketrisu || {};
@@ -9653,14 +11967,14 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         stats.textContent = "";
       }
     };
-    void load();
+    void load2();
     const save = el("button", { class: "primary", text: "\uC800\uC7A5" });
     save.addEventListener("click", async () => {
       save.disabled = true;
       clear(out);
       try {
         await state.setConfig({ pocketrisu: { savePath: savePath.value.trim() } });
-        await load();
+        await load2();
         out.appendChild(el("div", { class: "notice ok", text: "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4. \uB2E4\uC74C \uC5D0\uC14B \uB3D9\uAE30\uD654\uBD80\uD130 \uC801\uC6A9\uB429\uB2C8\uB2E4." }));
       } catch (e) {
         out.appendChild(el("div", { class: "notice err", text: "\uC800\uC7A5 \uC2E4\uD328: " + (e instanceof Error ? e.message : String(e)) }));
@@ -9675,7 +11989,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       clear(out);
       try {
         const r = await transport.post("/assets/gc", {});
-        await load();
+        await load2();
         out.appendChild(el("div", { class: "notice ok", text: `\uC815\uB9AC\uD588\uC2B5\uB2C8\uB2E4: \uD30C\uC77C ${r.removed}\uAC1C \xB7 ${(r.freed / 1048576).toFixed(1)}MB \uD655\uBCF4 \xB7 \uACE0\uC544 \uD0A4 ${r.orphanKeys}\uAC1C` }));
       } catch (e) {
         out.appendChild(el("div", { class: "notice err", text: "GC \uC2E4\uD328: " + (e instanceof Error ? e.message : String(e)) }));
@@ -9694,6 +12008,90 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         "\uACBD\uB85C\uB97C \uC8FC\uBA74 \uBC31\uC5D4\uB4DC\uAC00 risuai.db \uB97C \uC77D\uAE30 \uC804\uC6A9\uC73C\uB85C \uC5F4\uC5B4 \uBE60\uC9C4 \uC5D0\uC14B\uC744 \uACE7\uBC14\uB85C \uCC44\uC6C1\uB2C8\uB2E4."
       ])
     ]);
+  }
+  function msg13(e) {
+    return e instanceof Error ? e.message : String(e);
+  }
+  function buildNaiCard() {
+    const meters = el("div", { class: "row", style: { gap: "8px", marginBottom: "8px" } });
+    const input = el("input", { type: "password", placeholder: "NovelAI \uD37C\uC2DC\uC2A4\uD134\uD2B8 \uD1A0\uD070" });
+    const out = el("div", { class: "outbox" });
+    const save = el("button", { class: "primary tiny", text: "\uC800\uC7A5" });
+    const test = el("button", { class: "ghost tiny", text: "\uC5F0\uACB0 \uD655\uC778" });
+    let existingId = "";
+    const refresh3 = async () => {
+      clear(meters);
+      let st;
+      try {
+        st = await state.studio.status();
+      } catch (e) {
+        meters.appendChild(el("span", { class: "hint err", text: msg13(e) }));
+        return;
+      }
+      if (!st.configured) {
+        meters.appendChild(el("span", { class: "hint", text: st.note || "\uD1A0\uD070\uC774 \uC544\uC9C1 \uC5C6\uC2B5\uB2C8\uB2E4." }));
+      } else if (st.account) {
+        const a = st.account;
+        meters.append(
+          el("span", { class: "badge", title: "\uB808\uD37C\uB7F0\uC2A4 \uC778\uCF54\uB529\uACFC \uB514\uB809\uD130 \uD234\uC774 \uC4F0\uB294 \uC794\uB7C9", text: `Anlas ${a.anlas}` }),
+          // Two currencies, neither derived from the other (docs/09 §2).
+          el("span", { class: "badge", title: "v5 \uC0AC\uC6A9\uB7C9 \u2014 Anlas \uC640 \uBCC4\uAC1C\uC758 \uD55C\uB3C4", text: `v5 ${a.usagePercent ?? "?"}%` }),
+          el("span", { class: "hint", text: `tier ${a.tier ?? "?"}${a.active ? "" : " \xB7 \uB9CC\uB8CC"}` })
+        );
+      } else if (st.error) {
+        meters.appendChild(el("span", { class: "hint err", text: st.error }));
+      }
+      try {
+        const { keys } = await state.apiKeys();
+        const hit = keys.find((k) => (k.provider || "").toLowerCase() === "novelai");
+        existingId = hit?.id ?? "";
+        input.placeholder = hit?.apiKey?.set ? `\uC124\uC815\uB428 (${hit.apiKey.length}\uC790) \u2014 \uBC14\uAFC0 \uB54C\uB9CC \uC785\uB825` : "NovelAI \uD37C\uC2DC\uC2A4\uD134\uD2B8 \uD1A0\uD070";
+      } catch {
+      }
+    };
+    save.addEventListener("click", async () => {
+      const v = input.value.trim();
+      if (!v) {
+        out.textContent = "\uD1A0\uD070\uC744 \uC785\uB825\uD574 \uC8FC\uC138\uC694.";
+        return;
+      }
+      save.disabled = true;
+      out.textContent = "";
+      try {
+        await state.saveApiKey(
+          { name: "NovelAI", provider: "novelai", apiKey: v, baseUrl: "", note: "" },
+          existingId || void 0
+        );
+        input.value = "";
+        await refresh3();
+        out.textContent = "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4.";
+      } catch (e) {
+        out.textContent = msg13(e);
+      } finally {
+        save.disabled = false;
+      }
+    });
+    test.addEventListener("click", async () => {
+      test.disabled = true;
+      out.textContent = "\uD655\uC778 \uC911\u2026";
+      try {
+        const st = await state.studio.status();
+        out.textContent = st.configured && st.account ? `\uC5F0\uACB0\uB428 \u2014 Anlas ${st.account.anlas}, tier ${st.account.tier}` : st.error || st.note || "\uD1A0\uD070\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.";
+      } catch (e) {
+        out.textContent = msg13(e);
+      } finally {
+        test.disabled = false;
+      }
+    });
+    const root2 = el("div", { class: "card" }, [
+      el("h2", { text: "NovelAI" }),
+      el("div", { class: "hint", style: { marginBottom: "8px" }, text: "\uC5D0\uC14B \uC2A4\uD29C\uB514\uC624\uAC00 \uC774\uBBF8\uC9C0\uB97C \uC0DD\uC131\uD560 \uB54C \uC501\uB2C8\uB2E4. NovelAI \uACC4\uC815 \uC124\uC815\uC758 \uD37C\uC2DC\uC2A4\uD134\uD2B8 \uD1A0\uD070\uC744 \uB123\uC73C\uC138\uC694. \uD1A0\uD070 \uC5C6\uC774\uB3C4 \uC2A4\uD29C\uB514\uC624\uC5D0\uC11C \uC774\uBBF8\uC9C0\uB97C \uB123\uACE0, \uACE0\uB974\uACE0, \uBD07\uC5D0 \uBC18\uC601\uD558\uB294 \uAC83\uC740 \uB429\uB2C8\uB2E4." }),
+      meters,
+      el("label", { class: "field" }, [el("span", { text: "\uD37C\uC2DC\uC2A4\uD134\uD2B8 \uD1A0\uD070" }), input]),
+      el("div", { class: "row" }, [save, test]),
+      out
+    ]);
+    return { root: root2, refresh: refresh3 };
   }
   function buildKeysCard() {
     const listMount2 = el("div");
@@ -9829,6 +12227,9 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     refreshers.push(draw2);
     void draw2();
     const offered = transport.health?.codexEnabled === true;
+    const nai = buildNaiCard();
+    refreshers.push(nai.refresh);
+    void nai.refresh();
     const codex = buildCodexBox(null, true);
     codex.root.style.display = "";
     if (offered) {
@@ -9843,6 +12244,9 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         el("div", { class: "row", style: { marginTop: "8px" } }, [add]),
         out
       ]),
+      // NovelAI below the general keys: exactly one is ever in play, and what
+      // belongs beside it is the balance, not a key length in a list.
+      nai.root,
       offered ? codex.root : null
     ]);
   }
@@ -9851,16 +12255,16 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     const out = el("div", { class: "outbox" });
     const meta = el("div", { class: "hint" });
     let timer = null;
-    const run = async (refresh8 = false) => {
+    const run = async (refresh3 = false) => {
       const q = input.value.trim();
       clear(out);
-      if (q.length < 2 && !refresh8) {
+      if (q.length < 2 && !refresh3) {
         meta.textContent = "";
         return;
       }
       out.appendChild(el("div", { class: "hint", text: "\uCC3E\uB294 \uC911\u2026" }));
       try {
-        const r = await state.modelCatalog(q, "", refresh8);
+        const r = await state.modelCatalog(q, "", refresh3);
         clear(out);
         meta.textContent = `models.dev \xB7 \uD504\uB85C\uBC14\uC774\uB354 ${r.totalProviders}\uAC1C` + (r.cachedAt ? ` \xB7 \uAC31\uC2E0 ${new Date(r.cachedAt * 1e3).toLocaleString()}` : "") + (r.stale ? " \xB7 \uC624\uB798\uB428" : "");
         if (r.providers.length) {
@@ -9907,7 +12311,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.10.0"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.11.0"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -9935,59 +12339,40 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     characterVersion: 100,
     creatorNotes: 110
   };
-  var built4 = false;
   var treeMount3 = null;
   var viewMount3 = null;
-  var noticeMount6 = null;
   var openId2 = "";
   var fields = [];
   var full = true;
-  var seenEpoch3 = -1;
-  var seenKey = "";
-  var filterText2 = "";
-  function renderMetaTab(mount) {
-    if (!state.botKey) {
-      clear(mount);
-      built4 = false;
-      mount.appendChild(el("div", { class: "pad" }, [
-        el("div", { class: "empty", text: "\uBA3C\uC800 \uD328\uB110\uC744 \uC5F0 \uBD07\uC774 \uC788\uC5B4\uC57C \uD569\uB2C8\uB2E4. RisuAI\uC5D0\uC11C \uBD07\uC744 \uC5F4\uACE0 \uB2E4\uC2DC \uC5EC\uC138\uC694." })
-      ]));
-      return;
-    }
-    if (!built4 || !mount.querySelector(".split")) {
-      clear(mount);
-      const pane = threePane();
+  var filterText3 = "";
+  var ui4 = null;
+  function notice5(text2, kind = "") {
+    ui4?.notice(text2, kind);
+  }
+  var renderMetaTab = makeTab({
+    gate: "bot",
+    keys: () => [state.epoch, state.botKey],
+    search: {
+      placeholder: "\uCC3E\uAE30 (\uC774\uB984\xB7\uBCF8\uBB38)",
+      get: () => filterText3,
+      set: (v) => {
+        filterText3 = v;
+        drawTree3();
+        refocusSearch(null);
+      }
+    },
+    build(pane, u) {
+      ui4 = u;
       treeMount3 = el("div", { class: "tree" });
       pane.left.appendChild(treeMount3);
-      noticeMount6 = el("div");
       viewMount3 = el("div", { class: "pad" });
-      pane.centre.appendChild(noticeMount6);
       pane.centre.appendChild(viewMount3);
-      mount.appendChild(pane.root);
-      built4 = true;
-      seenEpoch3 = state.epoch;
-      seenKey = state.botKey;
-      void refresh4();
-    } else if (seenEpoch3 !== state.epoch || seenKey !== state.botKey) {
-      seenEpoch3 = state.epoch;
-      seenKey = state.botKey;
-      openId2 = "";
-      if (viewMount3) clear(viewMount3);
-      void refresh4();
+    },
+    async refresh() {
+      await refreshNow3();
     }
-    bindAgent({ notice: notice5 });
-    const inner = mount.querySelector(".right-inner");
-    if (inner) mountAgent(inner);
-  }
-  function notice5(text2, kind = "") {
-    if (!noticeMount6) return;
-    clear(noticeMount6);
-    noticeMount6.appendChild(el("div", { class: "notice " + kind, style: { margin: "10px 14px 0" }, text: text2 }));
-    setTimeout(() => {
-      if (noticeMount6) clear(noticeMount6);
-    }, 9e3);
-  }
-  async function refresh4() {
+  });
+  async function refreshNow3() {
     if (!treeMount3) return;
     clear(treeMount3);
     treeMount3.appendChild(el("div", { class: "hint", style: { padding: "8px" }, text: "\uC77D\uB294 \uC911\uC785\uB2C8\uB2E4\u2026" }));
@@ -9995,10 +12380,17 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       const r = await state.cardFields();
       fields = r.fields.filter((f) => !NOT_HERE.has(f.field));
       full = r.full;
-      drawTree3();
     } catch (e) {
       clear(treeMount3);
-      treeMount3.appendChild(el("div", { class: "notice err", text: msg12(e) }));
+      treeMount3.appendChild(el("div", { class: "notice err", text: msg14(e) }));
+      return;
+    }
+    drawTree3();
+    const fresh = fields.find((x) => x.id === openId2);
+    if (fresh) open2(fresh);
+    else if (openId2 && viewMount3) {
+      openId2 = "";
+      clear(viewMount3);
     }
   }
   function labelOf(f) {
@@ -10012,15 +12404,15 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     addGreet.addEventListener("click", async () => {
       try {
         const made = await state.addGreeting("");
-        await refresh4();
+        await refreshNow3();
         const fresh = fields.find((f) => f.id === made.id);
         if (fresh) open2(fresh);
       } catch (e) {
-        notice5("\uCD94\uAC00\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg12(e), "err");
+        notice5("\uCD94\uAC00\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg14(e), "err");
       }
     });
     const reloadBtn = el("button", { class: "ghost tiny", text: "\uC0C8\uB85C\uACE0\uCE68" });
-    reloadBtn.addEventListener("click", () => void refresh4());
+    reloadBtn.addEventListener("click", () => void refreshNow3());
     treeMount3.appendChild(el("div", { class: "treehead" }, [addGreet, reloadBtn]));
     if (!full) {
       treeMount3.appendChild(el("div", {
@@ -10029,12 +12421,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         text: "\uAD6C\uBC84\uC804 \uC5C5\uB85C\uB4DC \uC0C1\uD0DC\uC785\uB2C8\uB2E4. \uD328\uB110\uC744 \uB2EB\uC558\uB2E4 \uB2E4\uC2DC \uC5F4\uBA74 \uC804\uCCB4 \uCE74\uB4DC\uB85C \uAC31\uC2E0\uB429\uB2C8\uB2E4."
       }));
     }
-    setToolbarSearch(filterText2, (v) => {
-      filterText2 = v;
-      drawTree3();
-      refocusSearch(null);
-    }, "\uCC3E\uAE30 (\uC774\uB984\xB7\uBCF8\uBB38)");
-    const needle = filterText2.trim().toLowerCase();
+    const needle = filterText3.trim().toLowerCase();
     const shown = fields.filter((f) => !needle || labelOf(f).toLowerCase().includes(needle) || f.body.toLowerCase().includes(needle));
     shown.sort((a, b) => (FIELD_RANK[a.field] ?? 50) - (FIELD_RANK[b.field] ?? 50) || a.seq - b.seq);
     let ruled = false;
@@ -10058,10 +12445,9 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
   }
   function open2(f) {
     if (!viewMount3) return;
+    const was = openId2;
     openId2 = f.id;
-    for (const b of Array.from(document.querySelectorAll(".tree .treefile"))) {
-      b.classList.toggle("on", b.title === f.id);
-    }
+    if (was !== f.id) drawTree3();
     const body = el("textarea", {
       value: f.body,
       style: { minHeight: f.field === "name" ? "48px" : "340px" }
@@ -10071,12 +12457,10 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       save.disabled = true;
       try {
         await state.saveCardField(f.id, body.value);
-        notice5(f.deleted ? "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4. \uC0AD\uC81C \uD45C\uC2DC\uB294 \uD574\uC81C\uB418\uC5C8\uC2B5\uB2C8\uB2E4." : "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4. \uBD07 \uBC14\uC758 \u201C\uBC18\uC601\u201D\uC744 \uB204\uB974\uBA74 RisuAI\uC5D0 \uC4F0\uC785\uB2C8\uB2E4.", "ok");
-        await refresh4();
-        const fresh = fields.find((x) => x.id === f.id);
-        if (fresh) open2(fresh);
+        notice5(f.deleted ? "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4. \uC0AD\uC81C \uD45C\uC2DC\uB294 \uD574\uC81C\uB418\uC5C8\uC2B5\uB2C8\uB2E4." : savedText("\uCE74\uB4DC \uD544\uB4DC\uB97C"), "ok");
+        await refreshNow3();
       } catch (e) {
-        notice5("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg12(e), "err");
+        notice5("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg14(e), "err");
       } finally {
         save.disabled = false;
       }
@@ -10089,9 +12473,9 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
           await state.deleteGreeting(f.id);
           openId2 = "";
           if (viewMount3) clear(viewMount3);
-          await refresh4();
+          await refreshNow3();
         } catch (e) {
-          notice5("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg12(e), "err");
+          notice5("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg14(e), "err");
         }
       });
       buttons.push(del);
@@ -10110,7 +12494,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       base: f.conflict.base ?? null,
       canTakeTheirs: true
     }, () => {
-      void refresh4();
+      void refreshNow3();
     }) : null;
     clear(viewMount3);
     viewMount3.appendChild(el("div", { class: "card" }, [
@@ -10126,7 +12510,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       el("div", { class: "row" }, buttons)
     ]));
   }
-  function msg12(e) {
+  function msg14(e) {
     return e instanceof Error ? e.message : String(e);
   }
 
@@ -10138,8 +12522,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     emptyLines: [
       "\uC774 \uBD07\uC758 \uB85C\uC5B4\uBD81(globalLore)\uC774 \uBE44\uC5B4 \uC788\uC2B5\uB2C8\uB2E4.",
       "\uC5EC\uAE30 \uD56D\uBAA9\uC740 \uC774 \uBD07\uC758 \uBAA8\uB4E0 \uCC57\uC5D0 \uC801\uC6A9\uB429\uB2C8\uB2E4."
-    ],
-    savedNotice: "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4. \uBD07 \uBC14\uC758 \u201C\uBC18\uC601\u201D\uC744 \uB204\uB974\uBA74 \uCE74\uB4DC\uC640 \uD568\uAED8 RisuAI\uC5D0 \uC4F0\uC785\uB2C8\uB2E4."
+    ]
   });
 
   // src/ui/tab-regex.ts
@@ -10153,59 +12536,40 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
   var BG_LABEL = {
     backgroundHTML: "\uBC31\uADF8\uB77C\uC6B4\uB4DC HTML"
   };
-  var built5 = false;
   var treeMount4 = null;
   var viewMount4 = null;
-  var noticeMount7 = null;
   var openId3 = "";
   var items3 = [];
   var bgFields = [];
-  var seenEpoch4 = -1;
-  var seenKey2 = "";
-  var filterText3 = "";
-  function renderRegexTab(mount) {
-    if (!state.botKey) {
-      clear(mount);
-      built5 = false;
-      mount.appendChild(el("div", { class: "pad" }, [
-        el("div", { class: "empty", text: "\uBA3C\uC800 \uD328\uB110\uC744 \uC5F0 \uBD07\uC774 \uC788\uC5B4\uC57C \uD569\uB2C8\uB2E4." })
-      ]));
-      return;
-    }
-    if (!built5 || !mount.querySelector(".split")) {
-      clear(mount);
-      const pane = threePane();
+  var filterText4 = "";
+  var ui5 = null;
+  function notice6(text2, kind = "") {
+    ui5?.notice(text2, kind);
+  }
+  var renderRegexTab = makeTab({
+    gate: "bot",
+    keys: () => [state.epoch, state.botKey],
+    search: {
+      placeholder: "\uCC3E\uAE30 (\uC774\uB984\xB7\uD328\uD134\xB7\uBCF8\uBB38)",
+      get: () => filterText4,
+      set: (v) => {
+        filterText4 = v;
+        drawTree4();
+        refocusSearch(null);
+      }
+    },
+    build(pane, u) {
+      ui5 = u;
       treeMount4 = el("div", { class: "tree" });
       pane.left.appendChild(treeMount4);
-      noticeMount7 = el("div");
       viewMount4 = el("div", { class: "pad" });
-      pane.centre.appendChild(noticeMount7);
       pane.centre.appendChild(viewMount4);
-      mount.appendChild(pane.root);
-      built5 = true;
-      seenEpoch4 = state.epoch;
-      seenKey2 = state.botKey;
-      void refresh5();
-    } else if (seenEpoch4 !== state.epoch || seenKey2 !== state.botKey) {
-      seenEpoch4 = state.epoch;
-      seenKey2 = state.botKey;
-      openId3 = "";
-      if (viewMount4) clear(viewMount4);
-      void refresh5();
+    },
+    async refresh() {
+      await refreshNow4();
     }
-    bindAgent({ notice: notice6 });
-    const inner = mount.querySelector(".right-inner");
-    if (inner) mountAgent(inner);
-  }
-  function notice6(text2, kind = "") {
-    if (!noticeMount7) return;
-    clear(noticeMount7);
-    noticeMount7.appendChild(el("div", { class: "notice " + kind, style: { margin: "10px 14px 0" }, text: text2 }));
-    setTimeout(() => {
-      if (noticeMount7) clear(noticeMount7);
-    }, 9e3);
-  }
-  async function refresh5() {
+  });
+  async function refreshNow4() {
     if (!treeMount4) return;
     clear(treeMount4);
     treeMount4.appendChild(el("div", { class: "hint", style: { padding: "8px" }, text: "\uC77D\uB294 \uC911\uC785\uB2C8\uB2E4\u2026" }));
@@ -10213,10 +12577,19 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       items3 = await state.cardScripts("customscript");
       const r = await state.cardFields();
       bgFields = r.fields.filter((f) => f.field in BG_LABEL);
-      drawTree4();
     } catch (e) {
       clear(treeMount4);
-      treeMount4.appendChild(el("div", { class: "notice err", text: msg13(e) }));
+      treeMount4.appendChild(el("div", { class: "notice err", text: msg15(e) }));
+      return;
+    }
+    drawTree4();
+    const freshS = items3.find((x) => x.id === openId3);
+    const freshF = bgFields.find((x) => x.id === openId3);
+    if (freshS) open3(freshS);
+    else if (freshF) openField(freshF);
+    else if (openId3 && viewMount4) {
+      openId3 = "";
+      clear(viewMount4);
     }
   }
   function titleOf2(s) {
@@ -10233,28 +12606,30 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
           "customscript",
           { comment: "\uC0C8 \uC2A4\uD06C\uB9BD\uD2B8", in: "", out: "", type: "editdisplay" }
         );
-        await refresh5();
+        await refreshNow4();
         const made = items3.find((s) => s.id === id);
         if (made) open3(made);
       } catch (e) {
-        notice6("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg13(e), "err");
+        notice6("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg15(e), "err");
       }
     });
     const reloadBtn = el("button", { class: "ghost tiny", text: "\uC0C8\uB85C\uACE0\uCE68" });
-    reloadBtn.addEventListener("click", () => void refresh5());
+    reloadBtn.addEventListener("click", () => void refreshNow4());
     treeMount4.appendChild(el("div", { class: "treehead" }, [add, reloadBtn]));
     if (bgFields.length) {
       treeMount4.appendChild(el("div", { class: "treescope", text: "\uBC30\uACBD" }));
       for (const f of bgFields) {
-        const name = el("button", {
-          class: "treefile" + (f.id === openId3 ? " on" : ""),
-          text: BG_LABEL[f.field] + (f.body ? ` (${f.body.length}\uC790)` : " (\uBE44\uC5B4 \uC788\uC74C)"),
-          title: f.id
-        });
-        name.addEventListener("click", () => openField(f));
-        const row = el("div", { class: "treerow lorecard" }, [name]);
-        if (f.changed) row.appendChild(el("span", { class: "badge warn", text: "\uC218\uC815" }));
-        treeMount4.appendChild(row);
+        treeMount4.appendChild(listRow({
+          variant: "tree",
+          selected: f.id === openId3,
+          title: el("button", {
+            class: "treefile" + (f.id === openId3 ? " on" : ""),
+            text: BG_LABEL[f.field] + (f.body ? ` (${f.body.length}\uC790)` : " (\uBE44\uC5B4 \uC788\uC74C)"),
+            title: f.id
+          }),
+          badges: f.changed ? [{ text: "\uC218\uC815", kind: "warn" }] : [],
+          onClick: () => openField(f)
+        }));
       }
     }
     if (!items3.length) {
@@ -10265,12 +12640,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       }));
       return;
     }
-    setToolbarSearch(filterText3, (v) => {
-      filterText3 = v;
-      drawTree4();
-      refocusSearch(null);
-    }, "\uCC3E\uAE30 (\uC774\uB984\xB7\uD328\uD134\xB7\uBCF8\uBB38)");
-    const needle = filterText3.trim().toLowerCase();
+    const needle = filterText4.trim().toLowerCase();
     const shown = items3.map((s, i) => ({ s, i })).filter(({ s }) => {
       if (!needle) return true;
       const e = s.entry;
@@ -10282,59 +12652,55 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     }));
     for (const { s, i } of shown) {
       const e = s.entry;
-      const name = el("button", {
-        class: "treefile" + (s.id === openId3 ? " on" : ""),
-        text: `${i + 1}. ${titleOf2(s)}`,
-        title: s.id
-      });
-      name.addEventListener("click", () => open3(s));
       const move = async (to) => {
         try {
           await state.moveScript(s.id, to);
-          await refresh5();
+          await refreshNow4();
         } catch (err) {
-          notice6("\uC21C\uC11C\uB97C \uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg13(err), "err");
+          notice6("\uC21C\uC11C\uB97C \uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg15(err), "err");
         }
       };
-      const up = el("button", { class: "ghost tiny movebtn", text: "\u2191", title: "\uC704\uB85C" });
-      const down = el("button", { class: "ghost tiny movebtn", text: "\u2193", title: "\uC544\uB798\uB85C" });
-      up.disabled = i <= 0;
-      down.disabled = i >= items3.length - 1;
-      up.addEventListener("click", () => void move(i - 1));
-      down.addEventListener("click", () => void move(i + 1));
-      const row = el("div", { class: "treerow lorecard" }, [name]);
       const size = String(e.out ?? "").length;
-      if (size > 2e3) row.appendChild(el("span", { class: "hint", text: `${Math.round(size / 1e3)}k\uC790` }));
-      if (s.origin !== "original") {
-        row.appendChild(el("span", { class: "badge warn", text: s.origin === "added" ? "\uCD94\uAC00" : "\uC218\uC815" }));
-      }
-      row.appendChild(up);
-      row.appendChild(down);
-      treeMount4.appendChild(row);
+      const badges = [];
+      if (s.origin !== "original") badges.push({ text: s.origin === "added" ? "\uCD94\uAC00" : "\uC218\uC815", kind: "warn" });
+      treeMount4.appendChild(listRow({
+        variant: "tree",
+        selected: s.id === openId3,
+        title: el("button", {
+          class: "treefile" + (s.id === openId3 ? " on" : ""),
+          text: `${i + 1}. ${titleOf2(s)}`,
+          title: s.id
+        }),
+        hint: size > 2e3 ? `${Math.round(size / 1e3)}k\uC790` : void 0,
+        badges,
+        reorder: {
+          up: i > 0 ? () => void move(i - 1) : void 0,
+          down: i < items3.length - 1 ? () => void move(i + 1) : void 0
+        },
+        onClick: () => open3(s)
+      }));
     }
   }
   function openField(f) {
     if (!viewMount4) return;
+    const was = openId3;
     openId3 = f.id;
-    for (const b of Array.from(document.querySelectorAll(".tree .treefile"))) {
-      b.classList.toggle("on", b.title === f.id);
-    }
+    if (was !== f.id) drawTree4();
     const body = el("textarea", {
       class: "codearea",
       value: f.body,
       style: { minHeight: "380px" }
     });
+    setTimeout(() => attachHilite(body, { mode: "regex-out" }), 0);
     const save = el("button", { class: "primary", text: "\uC800\uC7A5" });
     save.addEventListener("click", async () => {
       save.disabled = true;
       try {
         await state.saveCardField(f.id, body.value);
-        notice6("\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4. \uBD07 \uBC14\uC758 \u201C\uBC18\uC601\u201D\uC744 \uB204\uB974\uBA74 RisuAI\uC5D0 \uC4F0\uC785\uB2C8\uB2E4.", "ok");
-        await refresh5();
-        const fresh = bgFields.find((x) => x.id === f.id);
-        if (fresh) openField(fresh);
+        notice6(savedText(BG_LABEL[f.field] + " \uC744(\uB97C)"), "ok");
+        await refreshNow4();
       } catch (err) {
-        notice6("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg13(err), "err");
+        notice6("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg15(err), "err");
       } finally {
         save.disabled = false;
       }
@@ -10344,7 +12710,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       el("h2", {}, [
         el("span", { text: BG_LABEL[f.field] }),
         el("span", { class: "spacer" }),
-        focusButton(body, BG_LABEL[f.field], { code: true })
+        focusButton(body, BG_LABEL[f.field], { code: true, hilite: { mode: "regex-out" } })
       ]),
       el("div", { class: "hint", text: "CSS\uB294 \uBCF4\uD1B5 \uC5EC\uAE30(\uBC31\uADF8\uB77C\uC6B4\uB4DC HTML)\uC758 <style> \uC548\uC5D0 \uB4E4\uC5B4\uAC11\uB2C8\uB2E4." }),
       el("label", { class: "field" }, [body]),
@@ -10354,10 +12720,9 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
   }
   function open3(s) {
     if (!viewMount4) return;
+    const was = openId3;
     openId3 = s.id;
-    for (const b of Array.from(document.querySelectorAll(".tree .treefile"))) {
-      b.classList.toggle("on", b.title === s.id);
-    }
+    if (was !== s.id) drawTree4();
     const e = s.entry;
     const comment = el("input", { value: String(e.comment ?? "") });
     const curType = String(e.type ?? "editdisplay");
@@ -10372,12 +12737,14 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       value: String(e.in ?? ""),
       style: { minHeight: "60px" }
     });
+    setTimeout(() => attachHilite(inPat, { mode: "regex" }), 0);
     const outText = el("textarea", {
       class: "codearea",
       value: String(e.out ?? ""),
       style: { minHeight: "260px" }
     });
-    const flag = el("input", { value: String(e.flag ?? ""), placeholder: "\uC608: g" });
+    setTimeout(() => attachHilite(outText, { mode: "regex-out" }), 0);
+    const flag2 = el("input", { value: String(e.flag ?? ""), placeholder: "\uC608: g" });
     const save = el("button", { class: "primary", text: "\uC800\uC7A5" });
     save.addEventListener("click", async () => {
       save.disabled = true;
@@ -10388,14 +12755,12 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
           type: type.value,
           in: inPat.value,
           out: outText.value,
-          ...flag.value ? { flag: flag.value } : {}
+          ...flag2.value ? { flag: flag2.value } : {}
         });
-        notice6("\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4. \uBD07 \uBC14\uC758 \u201C\uBC18\uC601\u201D\uC744 \uB204\uB974\uBA74 RisuAI\uC5D0 \uC4F0\uC785\uB2C8\uB2E4.", "ok");
-        await refresh5();
-        const fresh = items3.find((x) => x.id === s.id);
-        if (fresh) open3(fresh);
+        notice6(savedText("\uC2A4\uD06C\uB9BD\uD2B8\uB97C"), "ok");
+        await refreshNow4();
       } catch (err) {
-        notice6("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg13(err), "err");
+        notice6("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg15(err), "err");
       } finally {
         save.disabled = false;
       }
@@ -10406,9 +12771,9 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         await state.deleteScript(s.id);
         openId3 = "";
         if (viewMount4) clear(viewMount4);
-        await refresh5();
+        await refreshNow4();
       } catch (err) {
-        notice6("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg13(err), "err");
+        notice6("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg15(err), "err");
       }
     });
     const orig = s.origin === "edited" && s.original ? s.original : null;
@@ -10424,7 +12789,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       el("h2", {}, [
         el("span", { text: "Regex \uC2A4\uD06C\uB9BD\uD2B8" }),
         el("span", { class: "spacer" }),
-        focusButton(outText, String(e.comment || "Regex \uC2A4\uD06C\uB9BD\uD2B8") + " \u2014 \uBC14\uAFB8\uAE30 (out)", { code: true })
+        focusButton(outText, String(e.comment || "Regex \uC2A4\uD06C\uB9BD\uD2B8") + " \u2014 \uBC14\uAFB8\uAE30 (out)", { code: true, hilite: { mode: "regex-out" } })
       ]),
       el("label", { class: "field" }, [el("span", { text: "\uC774\uB984 (comment)" }), comment]),
       el("label", { class: "field" }, [el("span", { text: "\uC885\uB958 (type)" }), type]),
@@ -10436,70 +12801,53 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         el("span", { text: "\uBC14\uAFB8\uAE30 (out) \u2014 background HTML\uB3C4 \uC5EC\uAE30\uC5D0 \uB4E4\uC5B4\uAC11\uB2C8\uB2E4" }),
         outText
       ]),
-      el("label", { class: "field" }, [el("span", { text: "\uD50C\uB798\uADF8 (flag)" }), flag]),
+      el("label", { class: "field" }, [el("span", { text: "\uD50C\uB798\uADF8 (flag)" }), flag2]),
       small.length ? el("div", { class: "hint diffmeta", text: "\uAE30\uC900\uC120\uACFC \uB2E4\uB978 \uD56D\uBAA9 \u2014 " + small.join(" \xB7 ") }) : null,
       diff,
       el("div", { class: "row" }, [save, del])
     ]));
   }
-  function msg13(e) {
+  function msg15(e) {
     return e instanceof Error ? e.message : String(e);
   }
 
   // src/ui/tab-trigger.ts
-  var built6 = false;
   var sideMount = null;
   var viewMount5 = null;
-  var noticeMount8 = null;
   var items4 = [];
-  var seenEpoch5 = -1;
-  var seenKey3 = "";
-  function renderTriggerTab(mount) {
-    if (!state.botKey) {
-      clear(mount);
-      built6 = false;
-      mount.appendChild(el("div", { class: "pad" }, [
-        el("div", { class: "empty", text: "\uBA3C\uC800 \uD328\uB110\uC744 \uC5F0 \uBD07\uC774 \uC788\uC5B4\uC57C \uD569\uB2C8\uB2E4." })
-      ]));
-      return;
-    }
-    if (!built6 || !mount.querySelector(".split")) {
-      clear(mount);
-      const pane = threePane();
+  var filter3 = "";
+  var ui6 = null;
+  function notice7(text2, kind = "") {
+    ui6?.notice(text2, kind);
+  }
+  var renderTriggerTab = makeTab({
+    gate: "bot",
+    keys: () => [state.epoch, state.botKey],
+    search: {
+      placeholder: "\uC774\uBCA4\uD2B8 \uCC3E\uAE30",
+      get: () => filter3,
+      set: (v) => {
+        filter3 = v;
+        drawView();
+      }
+    },
+    build(pane, u) {
+      ui6 = u;
       sideMount = el("div", { class: "tree" });
       pane.left.appendChild(sideMount);
-      noticeMount8 = el("div");
       viewMount5 = el("div", { class: "pad" });
-      pane.centre.appendChild(noticeMount8);
       pane.centre.appendChild(viewMount5);
-      mount.appendChild(pane.root);
-      built6 = true;
-      seenEpoch5 = state.epoch;
-      seenKey3 = state.botKey;
-      void refresh6();
-    } else if (seenEpoch5 !== state.epoch || seenKey3 !== state.botKey) {
-      seenEpoch5 = state.epoch;
-      seenKey3 = state.botKey;
-      void refresh6();
+    },
+    async refresh() {
+      await refreshNow5();
     }
-    bindAgent({ notice: notice7 });
-    const inner = mount.querySelector(".right-inner");
-    if (inner) mountAgent(inner);
-  }
-  function notice7(text2, kind = "") {
-    if (!noticeMount8) return;
-    clear(noticeMount8);
-    noticeMount8.appendChild(el("div", { class: "notice " + kind, style: { margin: "10px 14px 0" }, text: text2 }));
-    setTimeout(() => {
-      if (noticeMount8) clear(noticeMount8);
-    }, 9e3);
-  }
-  async function refresh6() {
+  });
+  async function refreshNow5() {
     try {
       items4 = await state.cardScripts("triggerscript");
     } catch (e) {
       items4 = [];
-      notice7("\uD2B8\uB9AC\uAC70\uB97C \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg14(e), "err");
+      notice7("\uD2B8\uB9AC\uAC70\uB97C \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg16(e), "err");
     }
     drawSide();
     drawView();
@@ -10561,10 +12909,10 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
           effect: []
         });
       }
-      await refresh6();
-      notice7("\uBAA8\uB4DC\uB97C \uBC14\uAFE8\uC2B5\uB2C8\uB2E4. \uBD07 \uBC14\uC758 \u201C\uBC18\uC601\u201D\uC744 \uB204\uB974\uBA74 RisuAI\uC5D0 \uC4F0\uC785\uB2C8\uB2E4.", "ok");
+      await refreshNow5();
+      notice7("\uBAA8\uB4DC\uB97C \uBC14\uAFE8\uC2B5\uB2C8\uB2E4. " + savedText("\uD2B8\uB9AC\uAC70\uB97C"), "ok");
     } catch (e) {
-      notice7("\uBAA8\uB4DC\uB97C \uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg14(e), "err");
+      notice7("\uBAA8\uB4DC\uB97C \uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg16(e), "err");
     }
   }
   function drawView() {
@@ -10585,6 +12933,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         style: { minHeight: "520px" },
         spellcheck: "false"
       });
+      setTimeout(() => attachHilite(body, { mode: "lua" }), 0);
       const save = el("button", { class: "primary", text: "\uC800\uC7A5" });
       save.addEventListener("click", async () => {
         save.disabled = true;
@@ -10592,10 +12941,10 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
           const effect = Array.isArray(e.effect) ? e.effect.slice() : [{}];
           effect[0] = { ...effect[0], type: "triggerlua", code: body.value };
           await state.saveScript(s.id, { ...e, effect });
-          notice7("\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4. \uBD07 \uBC14\uC758 \u201C\uBC18\uC601\u201D\uC744 \uB204\uB974\uBA74 RisuAI\uC5D0 \uC4F0\uC785\uB2C8\uB2E4.", "ok");
-          await refresh6();
+          notice7(savedText("Lua \uD2B8\uB9AC\uAC70\uB97C"), "ok");
+          await refreshNow5();
         } catch (err) {
-          notice7("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg14(err), "err");
+          notice7("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg16(err), "err");
         } finally {
           save.disabled = false;
         }
@@ -10606,7 +12955,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         el("h2", {}, [
           el("span", { text: "Lua" + (s.origin !== "original" ? " \xB7 \uC218\uC815\uB428" : "") }),
           el("span", { class: "spacer" }),
-          focusButton(body, "Lua \uD2B8\uB9AC\uAC70", { code: true })
+          focusButton(body, "Lua \uD2B8\uB9AC\uAC70", { code: true, hilite: { mode: "lua" } })
         ]),
         body,
         diff,
@@ -10615,7 +12964,8 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       ]));
       return;
     }
-    const rows = items4.filter((s, i) => !(mode2 === "v2" && i === 0)).map((s) => {
+    const q = filter3.trim().toLowerCase();
+    const rows = items4.filter((s, i) => !(mode2 === "v2" && i === 0)).filter((s) => !q || String(s.entry.comment || "").toLowerCase().includes(q)).map((s) => {
       const e = s.entry;
       const n = Array.isArray(e.effect) ? e.effect.length : 0;
       const c = Array.isArray(e.conditions) ? e.conditions.length : 0;
@@ -10623,9 +12973,9 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       armed(del, "\uC0AD\uC81C", "\uC815\uB9D0?", async () => {
         try {
           await state.deleteScript(s.id);
-          await refresh6();
+          await refreshNow5();
         } catch (err) {
-          notice7(msg14(err), "err");
+          notice7(msg16(err), "err");
         }
       });
       return el("div", { class: "verrow" }, [
@@ -10642,7 +12992,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       ...rows.length ? rows : [el("div", { class: "hint", text: "\uC774\uBCA4\uD2B8\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4." })]
     ]));
   }
-  function msg14(e) {
+  function msg16(e) {
     return e instanceof Error ? e.message : String(e);
   }
 
@@ -10720,7 +13070,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         const n = await state.cardReset();
         shellNotice("\uCE74\uB4DC\uC758 \uBBF8\uBC18\uC601 \uBCC0\uACBD\uC744 \uBC84\uB838\uC2B5\uB2C8\uB2E4" + (n ? ` (${n}\uAC74)` : "") + ". \uC791\uC5C5\uBCF8\uC774 \uAE30\uC900\uC120(RisuAI \uC0C1\uD0DC)\uC73C\uB85C \uB3CC\uC544\uAC14\uC2B5\uB2C8\uB2E4.", "ok");
       } catch (e) {
-        shellNotice("\uBCC0\uACBD \uCDE8\uC18C\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg15(e), "err");
+        shellNotice("\uBCC0\uACBD \uCDE8\uC18C\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg17(e), "err");
       }
     });
     summaryEl2 = el("span", { class: "dim changesum", title: "\uC774 \uBD07\uC758 \uCE74\uB4DC\uC5D0\uC11C \uC544\uC9C1 RisuAI\uC5D0 \uC4F0\uC9C0 \uC54A\uC740 \uBCC0\uACBD" });
@@ -10742,12 +13092,12 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       value: state.workspace?.characterName || "character",
       placeholder: "\uD30C\uC77C \uC774\uB984 (.charx)"
     });
-    const build = el("button", { class: "primary", text: "charx \uB9CC\uB4E4\uAE30" });
+    const build2 = el("button", { class: "primary", text: "charx \uB9CC\uB4E4\uAE30" });
     const buildAnyway = el("button", { class: "ghost", text: "\uBE60\uC9C4 \uC5D0\uC14B \uBE7C\uACE0 \uB9CC\uB4E4\uAE30" });
-    build.disabled = !!blocked;
+    build2.disabled = !!blocked;
     buildAnyway.style.display = "none";
     const run = async (allowMissing) => {
-      build.disabled = buildAnyway.disabled = true;
+      build2.disabled = buildAnyway.disabled = true;
       clear(out);
       out.appendChild(el("div", { class: "hint", text: "\uB9CC\uB4DC\uB294 \uC911\uC785\uB2C8\uB2E4\u2026 \uC5D0\uC14B\uC774 \uB9CE\uC73C\uBA74 \uBA87 \uBD84 \uAC78\uB9BD\uB2C8\uB2E4." }));
       try {
@@ -10762,14 +13112,14 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
           out.appendChild(el("div", { class: "notice err", text: `\uC5D0\uC14B ${missing.length}\uAC1C\uAC00 \uC2A4\uD1A0\uC5B4\uC5D0 \uC5C6\uC5B4 \uB9CC\uB4E4\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4: ` + missing.slice(0, 6).map((m) => m.name || m.type).join(", ") + (missing.length > 6 ? " \u2026" : "") }));
           buildAnyway.style.display = "";
         } else {
-          out.appendChild(el("div", { class: "notice err", text: "charx \uB97C \uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg15(e) }));
+          out.appendChild(el("div", { class: "notice err", text: "charx \uB97C \uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg17(e) }));
         }
       } finally {
-        build.disabled = !!charxBlockReason();
+        build2.disabled = !!charxBlockReason();
         buildAnyway.disabled = false;
       }
     };
-    build.addEventListener("click", () => {
+    build2.addEventListener("click", () => {
       void run(false);
     });
     buildAnyway.addEventListener("click", () => {
@@ -10777,7 +13127,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     });
     body.appendChild(el("div", { class: "hint", text: "\uC791\uC5C5\uBCF8 \uCE74\uB4DC(\uBA54\uD0C0\xB7\uC778\uC0AC\uB9D0\xB7\uBD07 \uB85C\uC5B4\uBD81\xB7Regex\xB7\uD2B8\uB9AC\uAC70\xB7\uC5D0\uC14B \uC774\uB984)\uC640 \uC2A4\uD1A0\uC5B4\uC758 \uC774\uBBF8\uC9C0\uB85C charx \uB97C \uB9CC\uB4ED\uB2C8\uB2E4. \uBC18\uC601\uD558\uC9C0 \uC54A\uC740 \uD3B8\uC9D1\uB3C4 \uB4E4\uC5B4\uAC11\uB2C8\uB2E4. module.risum \uC5C6\uC774 card.json \uC5D0 \uC778\uB77C\uC778\uC73C\uB85C \uB2F4\uAE30\uBA70 RisuAI\xB7PocketRisu \uAC00 \uADF8\uB300\uB85C \uAC00\uC838\uC635\uB2C8\uB2E4." }));
     body.appendChild(el("div", { class: "row" }, [nameInput]));
-    body.appendChild(el("div", { class: "row" }, [build, buildAnyway]));
+    body.appendChild(el("div", { class: "row" }, [build2, buildAnyway]));
     body.appendChild(out);
   }
   function refreshBotBar() {
@@ -10819,7 +13169,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     if (x.deleted) bits.push(`\u2212${x.deleted}`);
     return bits.join(" ");
   }
-  function msg15(e) {
+  function msg17(e) {
     return e instanceof Error ? e.message : String(e);
   }
   function openApply2(anchor) {
@@ -10862,7 +13212,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
           close();
         }
       } catch (e) {
-        const m = msg15(e);
+        const m = msg17(e);
         out.textContent = m;
         void clientLog("error", "cardWriteBack failed", { error: m });
         shellNotice("\uCE74\uB4DC \uBC18\uC601\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + m, "err");
@@ -10893,9 +13243,9 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         body.appendChild(el("div", { class: "hint", text: "\uBC31\uC5C5 \uBD07\uC740 RisuAI \uBD07 \uBAA9\uB85D\uC5D0 \uC0C8 \uCE90\uB9AD\uD130\uB85C \uC788\uC2B5\uB2C8\uB2E4. \uCC57\uB3C4 \uD568\uAED8 \uBCF5\uC0AC\uB418\uC5C8\uACE0 \uC5D0\uC14B\uC740 \uACF5\uC720\uD569\uB2C8\uB2E4." }));
         body.appendChild(el("div", { class: "row", style: { marginTop: "8px" } }, [ok]));
       } catch (e) {
-        void clientLog("error", "saveAsNewBot failed", { error: msg15(e) });
-        shellNotice("\uC0C8 \uBD07\uC73C\uB85C \uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg15(e), "err");
-        out.textContent = "\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg15(e);
+        void clientLog("error", "saveAsNewBot failed", { error: msg17(e) });
+        shellNotice("\uC0C8 \uBD07\uC73C\uB85C \uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg17(e), "err");
+        out.textContent = "\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg17(e);
         saveNew.disabled = !!applyBlockReason();
         saveNew.textContent = was;
       }
@@ -10939,7 +13289,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
             close();
             shellNotice("\uCE74\uB4DC\xB7\uBD07 \uB85C\uC5B4\uBD81\xB7\uC2A4\uD06C\uB9BD\uD2B8\uB97C \uB418\uB3CC\uB838\uC2B5\uB2C8\uB2E4. \uB418\uB3CC\uB9AC\uAE30 \uC9C1\uC804 \uC0C1\uD0DC\uB3C4 \uC2A4\uB0C5\uC0F7\uC73C\uB85C \uB0A8\uACA8 \uB450\uC5C8\uC2B5\uB2C8\uB2E4.", "ok");
           } catch (e) {
-            shellNotice("\uBCF5\uC6D0\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg15(e), "err");
+            shellNotice("\uBCF5\uC6D0\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg17(e), "err");
           }
         });
         const title = el("div", {}, [
@@ -10964,7 +13314,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
           } catch (e) {
             row.classList.remove("deleting");
             del.disabled = false;
-            shellNotice("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg15(e), "err");
+            shellNotice("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg17(e), "err");
           }
         });
         row.append(
@@ -10983,23 +13333,23 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       }
       if (users.length > 12) body.appendChild(el("div", { class: "hint", text: `\uADF8 \uC678 ${users.length - 12}\uAC1C` }));
       if (autos.length) {
-        const fold = el("div", { class: "autofold" });
+        const fold2 = el("div", { class: "autofold" });
         const toggle = el("button", { class: "ghost tiny", text: `\uC790\uB3D9 \uBC31\uC5C5 ${autos.length}\uAC1C \uBCF4\uAE30` });
         toggle.addEventListener("click", () => {
-          if (fold.childElementCount) {
-            clear(fold);
+          if (fold2.childElementCount) {
+            clear(fold2);
             toggle.textContent = `\uC790\uB3D9 \uBC31\uC5C5 ${autos.length}\uAC1C \uBCF4\uAE30`;
             return;
           }
           toggle.textContent = "\uC790\uB3D9 \uBC31\uC5C5 \uC811\uAE30";
-          fold.appendChild(el("div", {
+          fold2.appendChild(el("div", {
             class: "hint",
             text: "\uC790\uB3D9 \uBC31\uC5C5\uC740 \uBC18\uC601\xB7\uB418\uB3CC\uB9AC\uAE30 \uC9C1\uC804\uC5D0 \uB0A8\uAE34 \uB0B4\uBD80\uC6A9 \uC0AC\uBCF8\uC785\uB2C8\uB2E4. RisuAI\uC758 \uD604\uC7AC \uB0B4\uC6A9\uBCF4\uB2E4 \uACFC\uAC70\uC77C \uC218 \uC788\uC2B5\uB2C8\uB2E4."
           }));
-          for (const c of autos) fold.appendChild(verRow(c, { auto: true }));
+          for (const c of autos) fold2.appendChild(verRow(c, { auto: true }));
         });
         body.appendChild(el("div", { class: "row", style: { marginTop: "8px" } }, [toggle]));
-        body.appendChild(fold);
+        body.appendChild(fold2);
       }
       body.appendChild(snapshotCleanup(users.length, async (keep) => {
         const n = await state.clearCardCheckpoints(keep);
@@ -11008,7 +13358,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       }));
     } catch (e) {
       clear(body);
-      body.appendChild(el("div", { class: "hint", text: msg15(e) }));
+      body.appendChild(el("div", { class: "hint", text: msg17(e) }));
     }
   }
 
@@ -11021,69 +13371,39 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     vits: "VITS \uC74C\uC131"
   };
   var FIELD_ORDER = ["image", "emotion", "additional", "cc", "vits"];
-  var built7 = false;
   var gridMount = null;
-  var noticeMount9 = null;
   var sideMount2 = null;
   var cells = [];
-  var seenEpoch6 = -1;
-  var seenKey4 = "";
-  var seenSyncAt = 0;
-  var seenBusy = false;
-  var filterText4 = "";
-  var thumbs2 = /* @__PURE__ */ new Map();
-  function renderAssetsTab(mount) {
-    if (!state.botKey) {
-      clear(mount);
-      built7 = false;
-      mount.appendChild(el("div", { class: "pad" }, [
-        el("div", { class: "empty", text: "\uBA3C\uC800 \uD328\uB110\uC744 \uC5F0 \uBD07\uC774 \uC788\uC5B4\uC57C \uD569\uB2C8\uB2E4." })
-      ]));
-      return;
-    }
-    const syncAt = state.assetSync?.finishedAt ?? 0;
-    const busy = syncBusy(state.assetSync);
-    if (!built7 || !mount.querySelector(".split")) {
-      clear(mount);
-      const pane = threePane();
+  var filterText5 = "";
+  var thumbs = /* @__PURE__ */ new Map();
+  var ui7 = null;
+  function notice8(text2, kind = "") {
+    ui7?.notice(text2, kind);
+  }
+  var renderAssetsTab = makeTab({
+    gate: "bot",
+    keys: () => [state.epoch, state.botKey, state.assetSync?.finishedAt ?? 0, syncBusy(state.assetSync)],
+    search: {
+      placeholder: "\uC5D0\uC14B \uCC3E\uAE30",
+      get: () => filterText5,
+      set: (v) => {
+        filterText5 = v;
+        drawGrid();
+        refocusSearch(null);
+      }
+    },
+    build(pane, u) {
+      ui7 = u;
       sideMount2 = el("div", { class: "tree" });
       pane.left.appendChild(sideMount2);
-      noticeMount9 = el("div");
       gridMount = el("div", { class: "pad" });
-      pane.centre.appendChild(noticeMount9);
       pane.centre.appendChild(gridMount);
-      mount.appendChild(pane.root);
-      built7 = true;
-      seenEpoch6 = state.epoch;
-      seenKey4 = state.botKey;
-      seenSyncAt = syncAt;
-      seenBusy = busy;
-      void refresh7();
-    } else if (seenEpoch6 !== state.epoch || seenKey4 !== state.botKey || seenSyncAt !== syncAt || seenBusy !== busy) {
-      seenEpoch6 = state.epoch;
-      seenKey4 = state.botKey;
-      seenSyncAt = syncAt;
-      seenBusy = busy;
-      void refresh7();
+    },
+    async refresh() {
+      await refreshNow6();
     }
-    setToolbarSearch(filterText4, (v) => {
-      filterText4 = v;
-      drawGrid();
-      refocusSearch(null);
-    }, "\uC5D0\uC14B \uCC3E\uAE30");
-    bindAgent({ notice: notice8 });
-    const inner = mount.querySelector(".right-inner");
-    if (inner) mountAgent(inner);
-  }
-  function notice8(text2, kind = "") {
-    if (!noticeMount9) return;
-    clear(noticeMount9);
-    noticeMount9.appendChild(el("div", { class: "notice " + kind, style: { margin: "10px 14px 0" }, text: text2 }));
-    setTimeout(() => {
-      if (noticeMount9) clear(noticeMount9);
-    }, 9e3);
-  }
-  async function refresh7() {
+  });
+  async function refreshNow6() {
     let rows = [];
     let store = [];
     try {
@@ -11164,7 +13484,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         const r = await transport.post("/card/assets/rename", { charKey: state.botKey, mode: "strip-ext" });
         notice8(r.changed ? `${r.changed}\uAC1C \uC774\uB984\uC5D0\uC11C \uD655\uC7A5\uC790\uB97C \uB5D0\uC2B5\uB2C8\uB2E4. \uBD07 \uBC14\uC758 \u201C\uBC18\uC601\u201D\uC744 \uB204\uB974\uBA74 RisuAI\uC5D0 \uC4F0\uC785\uB2C8\uB2E4.` : "\uD655\uC7A5\uC790\uAC00 \uBD99\uC740 \uC774\uB984\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.", r.changed ? "ok" : "");
         void state.refreshBotChanges();
-        await refresh7();
+        await refreshNow6();
       } catch (e) {
         notice8("\uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + (e instanceof Error ? e.message : String(e)), "err");
       } finally {
@@ -11194,7 +13514,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         });
         notice8(`${r.changed}\uAC1C \uC774\uB984\uC744 \uBC14\uAFE8\uC2B5\uB2C8\uB2E4. \uBD07 \uBC14\uC758 \u201C\uBC18\uC601\u201D\uC744 \uB204\uB974\uBA74 RisuAI\uC5D0 \uC4F0\uC785\uB2C8\uB2E4.`, r.changed ? "ok" : "");
         void state.refreshBotChanges();
-        await refresh7();
+        await refreshNow6();
         close();
       } catch (e) {
         out.textContent = e instanceof Error ? e.message : String(e);
@@ -11217,7 +13537,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     if (!editable()) {
       gridMount.appendChild(el("div", { class: "notice", text: "\uC5D0\uC14B \uB3D9\uAE30\uD654 \uC911\uC785\uB2C8\uB2E4\u2026 \uB3D9\uAE30\uD654\uAC00 \uB05D\uB098\uAE30 \uC804\uAE4C\uC9C0 \uC5D0\uC14B \uD3B8\uC9D1\uC774 \uBD88\uAC00\uD569\uB2C8\uB2E4. \uB2E4\uB978 \uD0ED\uACFC \uBC18\uC601\uC740 \uADF8\uB300\uB85C \uC4F8 \uC218 \uC788\uC2B5\uB2C8\uB2E4." }));
     }
-    const needle = filterText4.trim().toLowerCase();
+    const needle = filterText5.trim().toLowerCase();
     const shown = cells.filter((c) => !needle || c.name.toLowerCase().includes(needle) || c.key.toLowerCase().includes(needle));
     if (!shown.length) {
       gridMount.appendChild(el("div", { class: "empty", text: cells.length ? "\uAC80\uC0C9 \uACB0\uACFC\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4." : "\uC774 \uBD07\uC740 \uC5D0\uC14B\uC744 \uCC38\uC870\uD558\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4." }));
@@ -11238,6 +13558,13 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     const pic = el("div", { class: "assetpic" });
     box.appendChild(pic);
     void loadThumb2(c, pic);
+    box.draggable = true;
+    box.addEventListener("dragstart", (e) => {
+      const dt = e.dataTransfer;
+      if (!dt) return;
+      dt.setData(DRAG_ASSETS, JSON.stringify([c.name || c.key]));
+      dt.effectAllowed = "copy";
+    });
     const nameEl = el("div", { class: "assetname", text: c.name || "(\uC774\uB984 \uC5C6\uC74C)", title: `${c.key}${c.size ? " \xB7 " + mb(c.size) : ""}` });
     if (c.row && editable()) {
       nameEl.classList.add("editable");
@@ -11258,7 +13585,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
         try {
           await state.deleteScript(row.id);
           void state.refreshBotChanges();
-          await refresh7();
+          await refreshNow6();
         } catch (e) {
           notice8("\uC9C0\uC6B0\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + (e instanceof Error ? e.message : String(e)), "err");
         }
@@ -11281,7 +13608,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       try {
         await state.saveScript(row.id, { ...row.entry, name: v });
         void state.refreshBotChanges();
-        await refresh7();
+        await refreshNow6();
       } catch (e) {
         notice8("\uC774\uB984\uC744 \uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + (e instanceof Error ? e.message : String(e)), "err");
         input.replaceWith(nameEl);
@@ -11299,24 +13626,24 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     } catch {
     }
   }
-  var THUMB_PARALLEL2 = 6;
-  var thumbActive2 = 0;
-  var thumbQueue2 = [];
+  var THUMB_PARALLEL = 6;
+  var thumbActive = 0;
+  var thumbQueue = [];
   function thumbSlot() {
     return new Promise((resolve) => {
       const grant = () => {
-        thumbActive2 += 1;
+        thumbActive += 1;
         let released = false;
         resolve(() => {
           if (released) return;
           released = true;
-          thumbActive2 -= 1;
-          const next = thumbQueue2.shift();
+          thumbActive -= 1;
+          const next = thumbQueue.shift();
           if (next) next();
         });
       };
-      if (thumbActive2 < THUMB_PARALLEL2) grant();
-      else thumbQueue2.push(grant);
+      if (thumbActive < THUMB_PARALLEL) grant();
+      else thumbQueue.push(grant);
     });
   }
   async function thumbBytes(c) {
@@ -11340,24 +13667,24 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       mount.appendChild(el("div", { class: "assettype", text: c.ext.toUpperCase() }));
       return;
     }
-    let url = thumbs2.get(c.key) || "";
+    let url = thumbs.get(c.key) || "";
     if (!url) {
       const release = await thumbSlot();
       try {
         if (!mount.isConnected) return;
-        const view2 = await thumbBytes(c);
-        if (view2) {
-          const buf = new Uint8Array(view2.byteLength);
-          buf.set(view2);
+        const view3 = await thumbBytes(c);
+        if (view3) {
+          const buf = new Uint8Array(view3.byteLength);
+          buf.set(view3);
           url = URL.createObjectURL(new Blob([buf]));
-          if (thumbs2.size > 400) {
-            for (const [k, u] of thumbs2) {
+          if (thumbs.size > 400) {
+            for (const [k, u] of thumbs) {
               URL.revokeObjectURL(u);
-              thumbs2.delete(k);
+              thumbs.delete(k);
               break;
             }
           }
-          thumbs2.set(c.key, url);
+          thumbs.set(c.key, url);
         }
       } finally {
         release();
@@ -11373,6 +13700,4267 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     mount.appendChild(img);
   }
 
+  // src/ui/studio/store.ts
+  var CARD_AREAS = [
+    { area: "styles", label: "\uC2A4\uD0C0\uC77C \uD504\uB86C\uD504\uD2B8", toggle: true },
+    { area: "characters", label: "\uCE90\uB9AD\uD130 \uD504\uB86C\uD504\uD2B8", toggle: true },
+    { area: "scenes", label: "SD\uC2A4\uD29C\uB514\uC624 \uD504\uB9AC\uC14B", toggle: false },
+    { area: "fragments", label: "\uC870\uAC01 \uD504\uB86C\uD504\uD2B8", toggle: false }
+  ];
+  var OUTPUT_ROOT = "studio/output";
+  var CONFIG_ROOT = "studio/config";
+  var IMAGE_RE2 = /\.(png|jpe?g|gif|webp|avif|bmp)$/i;
+  function canonPath(p) {
+    const r = (p || "").replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+    const m = /^studio\/(styles|characters|fragments|scenes|\.studio)(\/.*)?$/.exec(r);
+    if (m) return `studio/config/${m[1]}${m[2] ?? ""}`;
+    const im = /^studio\/images(\/.*)?$/.exec(r);
+    if (im) return `studio/output${im[1] ?? ""}`;
+    return r;
+  }
+  function areaOfPath(path) {
+    const m = /^studio\/config\/([^/]+)/.exec(canonPath(path));
+    return m ? m[1] : "";
+  }
+  var S = {
+    /** Mount points, owned by index.ts and set once per build. */
+    leftMount: null,
+    viewMount: null,
+    noticeMount: null,
+    listing: null,
+    outputRoot: null,
+    /** The card lists, one per area. */
+    cards: {},
+    selected: OUTPUT_ROOT,
+    /** A card picked in the list; the centre shows its editor instead of a folder. */
+    selectedFile: "",
+    open: /* @__PURE__ */ new Set([OUTPUT_ROOT]),
+    /** Fragment references no fragment provides, from the last dry plan. */
+    unresolvedRefs: [],
+    /** The left column's tab (프롬프트 · OUTPUT) and, inside 프롬프트, whether
+     * the character view has taken over the column. */
+    leftTab: "prompt",
+    leftView: "main",
+    /** The character card expanded in the left character view. */
+    charOpen: "",
+    /** The centre's tab (persisted), and the mode that can override it:
+     * the fragment organizer, a folder grid, or the comparison selector
+     * (both bound to S.selected). A picked file (S.selectedFile) overrides
+     * everything - an editor is always reachable. */
+    centreTab: "single",
+    /** 'folder' is the tidy-up grid, a sub-view of the 검수 tab; 'selector'
+     * is legacy - the 검수 tab draws the selector itself. */
+    centreMode: "tab",
+    /** Batch/folder column count (2·3·4). */
+    cols: 3,
+    /** 검수 selector column count (2..6) - its cells are smaller. */
+    selCols: 3,
+    /** The single tab's pinned image ('' = follow the live run), and the list
+     * ←/→ walks (the job the image came from). */
+    viewPath: "",
+    viewList: [],
+    /** Recent jobs, cached for the batch/history tabs. */
+    jobs: [],
+    status: null,
+    jobId: "",
+    queueJob: null
+  };
+  try {
+    const t = localStorage.getItem("hina.studioLeftTab");
+    if (t === "output") S.leftTab = "output";
+    const c = localStorage.getItem("hina.studioTab");
+    if (c === "single" || c === "batch" || c === "inspect") S.centreTab = c;
+    const n = Number(localStorage.getItem("hina.studioCols"));
+    if (n === 2 || n === 3 || n === 4) S.cols = n;
+    const sc = Number(localStorage.getItem("hina.studioSelCols"));
+    if (sc >= 2 && sc <= 6) S.selCols = sc;
+  } catch {
+  }
+  function persistLeftTab() {
+    try {
+      localStorage.setItem("hina.studioLeftTab", S.leftTab);
+    } catch {
+    }
+  }
+  function persistCentreTab() {
+    try {
+      localStorage.setItem("hina.studioTab", S.centreTab);
+    } catch {
+    }
+  }
+  function persistCols() {
+    try {
+      localStorage.setItem("hina.studioCols", String(S.cols));
+    } catch {
+    }
+  }
+  function persistSelCols() {
+    try {
+      localStorage.setItem("hina.studioSelCols", String(S.selCols));
+    } catch {
+    }
+  }
+  var hub = {
+    drawLeft: () => {
+    },
+    drawCentre: () => {
+    },
+    /** A live-job heartbeat: the visible tab patches its progress in place
+     * (never a full centre rebuild - inputs keep their focus). */
+    jobTick: () => {
+    },
+    /** Patch count badges (활성 캐릭터, 미해결 조각) in place - called from
+     * debounced checks so a keystroke in an editor never rebuilds the column
+     * under the caret. */
+    syncBadges: () => {
+    },
+    notice: (_text, _kind = "") => {
+    },
+    refresh: async () => {
+    },
+    refreshArea: async (_area) => {
+    },
+    loadStatus: async () => {
+    },
+    touchQuiet: (_paths = []) => {
+    }
+  };
+  var GEN_KEY = "hina.studioGen";
+  var gen = {
+    model: "nai-diffusion-4-5-full",
+    scenePreset: "",
+    steps: 28,
+    scale: 5,
+    rescale: 0.4,
+    sampler: "k_euler_ancestral",
+    schedule: "karras",
+    width: 832,
+    height: 1216,
+    count: 1,
+    seed: "",
+    quality: false,
+    ucPreset: 0,
+    folder: OUTPUT_ROOT,
+    // The selector's regex. Empty means the backend's default; it is edited on
+    // screen because it is the thing most likely to need adjusting.
+    pattern: ""
+  };
+  try {
+    const savedGen = JSON.parse(localStorage.getItem(GEN_KEY) || "null");
+    if (savedGen && typeof savedGen === "object") Object.assign(gen, savedGen);
+    gen.folder = canonPath(gen.folder) || OUTPUT_ROOT;
+  } catch {
+  }
+  function persistGen() {
+    try {
+      localStorage.setItem(GEN_KEY, JSON.stringify(gen));
+    } catch {
+    }
+  }
+  function activeOf(area) {
+    return (S.cards[area] ?? []).filter((i) => i.enabled).sort((a, b) => (a.order ?? 100) - (b.order ?? 100) || a.path.localeCompare(b.path)).map((i) => i.path);
+  }
+  function spec() {
+    const out = {
+      model: gen.model,
+      styles: activeOf("styles"),
+      characters: activeOf("characters"),
+      count: gen.count,
+      folder: gen.folder,
+      params: {
+        steps: gen.steps,
+        scale: gen.scale,
+        cfg_rescale: gen.rescale,
+        sampler: gen.sampler,
+        noise_schedule: gen.schedule,
+        width: gen.width,
+        height: gen.height,
+        qualityToggle: gen.quality,
+        ucPreset: gen.ucPreset
+      }
+    };
+    if (gen.scenePreset) out.scenePreset = gen.scenePreset;
+    if (gen.seed.trim()) out.seed = Number(gen.seed.trim());
+    return out;
+  }
+  var RESERVE_KEY = "hina.studioReserve";
+  var reserves = {};
+  try {
+    const saved = JSON.parse(localStorage.getItem(RESERVE_KEY) || "null");
+    if (saved && typeof saved === "object") {
+      for (const [preset, scenes] of Object.entries(saved)) {
+        for (const [scene, v] of Object.entries(scenes || {})) {
+          const n = typeof v === "number" ? v : Object.values(v || {}).reduce((a, b) => a + (Number(b) || 0), 0);
+          if (n > 0) (reserves[canonPath(preset)] ??= {})[scene] = n;
+        }
+      }
+    }
+  } catch {
+  }
+  function persistReserves() {
+    try {
+      localStorage.setItem(RESERVE_KEY, JSON.stringify(reserves));
+    } catch {
+    }
+  }
+  function adjustReserve(preset, scene, delta) {
+    const p = reserves[preset] ??= {};
+    const next = Math.max(0, (p[scene] ?? 0) + delta);
+    if (next) p[scene] = next;
+    else delete p[scene];
+    if (!Object.keys(p).length) delete reserves[preset];
+    persistReserves();
+  }
+  function setReserve(preset, scene, count) {
+    adjustReserve(preset, scene, count - reserveOf(preset, scene));
+  }
+  function reserveOf(preset, scene) {
+    return reserves[preset]?.[scene] ?? 0;
+  }
+  function reserveTotal() {
+    let n = 0;
+    for (const p of Object.values(reserves)) for (const c of Object.values(p)) n += c;
+    return n;
+  }
+  function clearReserves(preset) {
+    if (preset) delete reserves[preset];
+    else reserves = {};
+    persistReserves();
+  }
+  var unresolvedTimer = null;
+  function checkUnresolved() {
+    if (unresolvedTimer) clearTimeout(unresolvedTimer);
+    unresolvedTimer = setTimeout(async () => {
+      try {
+        const r = await state.studio.plan({ ...spec(), count: 1 });
+        S.unresolvedRefs = [...new Set(r.items.flatMap((i) => i.unresolved ?? []))];
+      } catch {
+        S.unresolvedRefs = [];
+      }
+      hub.syncBadges();
+    }, 800);
+  }
+  function fragKeys() {
+    return (S.cards.fragments ?? []).map((it) => {
+      const f = it.folder && it.folder !== "." ? it.folder : "";
+      return f ? `${f}/${it.name}` : it.name;
+    });
+  }
+  function cardStem(name) {
+    return name.replace(/[<>:"/\\|?*]/g, "").trim();
+  }
+  function freeCardPath(area, stem, suffix, folder = "") {
+    const taken = new Set((S.cards[area] ?? []).map((i) => i.path));
+    const base = `${CONFIG_ROOT}/${area}` + (folder ? `/${folder}` : "");
+    for (let n = 1; ; n++) {
+      const p = `${base}/${stem}${n > 1 ? `-${n}` : ""}${suffix}`;
+      if (!taken.has(p)) return p;
+    }
+  }
+  async function newCard(area, folder, nm) {
+    nm = (nm || "").trim();
+    if (!nm) return "";
+    const stem = cardStem(nm);
+    if (!stem) {
+      hub.notice("\uADF8 \uC774\uB984\uC73C\uB85C\uB294 \uD30C\uC77C\uC744 \uB9CC\uB4E4 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4.", "err");
+      return "";
+    }
+    try {
+      let path;
+      if (area === "characters") {
+        path = freeCardPath(area, stem, "", folder);
+        await state.uploadFile(
+          "prompt.md",
+          `---
+name: ${nm}
+enabled: false
+---
+## \uD504\uB86C\uD504\uD2B8
+`,
+          false,
+          path
+        );
+      } else if (area === "scenes") {
+        path = freeCardPath(area, stem, ".json", folder);
+        await state.uploadFile(path.split("/").pop(), JSON.stringify(
+          { version: 1, name: nm, scenes: [{ name: "happy", prompt: "", negativePrompt: "", width: 0, height: 0 }] },
+          null,
+          2
+        ), false, path.slice(0, path.lastIndexOf("/")));
+      } else {
+        path = freeCardPath(area, stem, ".md", folder);
+        const front = area === "styles" ? `---
+name: ${nm}
+enabled: false
+---
+` : `---
+name: ${nm}
+---
+`;
+        await state.uploadFile(path.split("/").pop(), front, false, path.slice(0, path.lastIndexOf("/")));
+      }
+      await hub.refreshArea(area);
+      return path;
+    } catch (e) {
+      hub.notice("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+      return "";
+    }
+  }
+  async function renameCardFile(path, newName) {
+    const stem = cardStem(newName);
+    if (!stem) return path;
+    const isDir = !/\.[a-z0-9]+$/i.test(path);
+    const dir = path.slice(0, path.lastIndexOf("/"));
+    const old = path.slice(path.lastIndexOf("/") + 1);
+    const suffix = isDir ? "" : old.slice(old.lastIndexOf("."));
+    if (old === stem + suffix) return path;
+    const to = `${dir}/${stem}${suffix}`;
+    const r = await state.moveFile(path, to);
+    return r.to;
+  }
+  function buildOutput() {
+    S.outputRoot = { path: OUTPUT_ROOT, name: "output", children: [], files: [] };
+    if (!S.listing) return;
+    const lib = S.listing.areas.find((a) => a.area === "studio");
+    if (!lib) return;
+    const byPath = /* @__PURE__ */ new Map([[OUTPUT_ROOT, S.outputRoot]]);
+    const folder = (path) => {
+      const hit = byPath.get(path);
+      if (hit) return hit;
+      if (!path.startsWith(OUTPUT_ROOT + "/")) return null;
+      const cut = path.lastIndexOf("/");
+      const parent = folder(path.slice(0, cut));
+      if (!parent) return null;
+      const node = { path, name: path.slice(cut + 1), children: [], files: [] };
+      byPath.set(path, node);
+      parent.children.push(node);
+      return node;
+    };
+    for (const d of lib.dirs ?? []) folder(d);
+    for (const f of lib.files) {
+      if (!f.path.startsWith(OUTPUT_ROOT + "/")) continue;
+      const cut = f.path.lastIndexOf("/");
+      folder(f.path.slice(0, cut))?.files.push(f);
+    }
+  }
+  function find(path, node = S.outputRoot) {
+    if (!node) return null;
+    if (node.path === path) return node;
+    for (const c of node.children) {
+      const hit = find(path, c);
+      if (hit) return hit;
+    }
+    return null;
+  }
+  function countFiles2(n) {
+    return n.files.length + n.children.reduce((sum, c) => sum + countFiles2(c), 0);
+  }
+  function stateLabel(s) {
+    return {
+      pending: "\uB300\uAE30",
+      running: "\uC9C4\uD589 \uC911",
+      done: "\uC644\uB8CC",
+      partial: "\uC77C\uBD80 \uC2E4\uD328",
+      error: "\uC624\uB958",
+      cancelled: "\uC911\uB2E8\uB428"
+    }[s] ?? s;
+  }
+  function fmtSize4(n) {
+    if (n < 1024) return `${n}B`;
+    if (n < 1024 * 1024) return `${Math.round(n / 1024)}KB`;
+    return `${(n / 1024 / 1024).toFixed(1)}MB`;
+  }
+  function msg18(e) {
+    return e instanceof Error ? e.message : String(e);
+  }
+
+  // src/ui/studio/gen.ts
+  var jobTimer = null;
+  var jobsStale = true;
+  var livePreview = { url: "", step: 0, total: 0, current: "" };
+  var emaStepMs = 0;
+  var lastStepAt = 0;
+  var lastStep = 0;
+  function stepMsEma() {
+    return emaStepMs;
+  }
+  var previewTimer = null;
+  var previewRev = 0;
+  function pollPreview() {
+    if (previewTimer) return;
+    const tick = async () => {
+      if (!S.jobId) return stopPreview();
+      try {
+        const r = await state.studio.jobPreview(S.jobId, previewRev);
+        if (r.png && typeof r.rev === "number") {
+          previewRev = r.rev;
+          livePreview.url = "data:image/png;base64," + r.png;
+          livePreview.step = r.step ?? 0;
+          livePreview.total = r.total ?? 0;
+          livePreview.current = r.current ?? "";
+          const now = Date.now();
+          const step = r.step ?? 0;
+          if (lastStepAt && step > lastStep) {
+            const per = (now - lastStepAt) / (step - lastStep);
+            emaStepMs = emaStepMs ? emaStepMs * 0.7 + per * 0.3 : per;
+          }
+          lastStepAt = now;
+          lastStep = step;
+          hub.jobTick();
+        } else if (typeof r.rev === "number") {
+          previewRev = r.rev;
+        }
+      } catch {
+      }
+    };
+    previewTimer = setInterval(() => {
+      void tick();
+    }, 800);
+    void tick();
+  }
+  function stopPreview() {
+    if (previewTimer) {
+      clearInterval(previewTimer);
+      previewTimer = null;
+    }
+    previewRev = 0;
+    lastStepAt = 0;
+    lastStep = 0;
+  }
+  function statusRow() {
+    const row = el("div", { class: "row", style: { gap: "8px", flexWrap: "wrap", marginBottom: "6px" } });
+    const nStyles = activeOf("styles").length;
+    const nChars = activeOf("characters").length;
+    row.appendChild(el("span", { class: "hint", text: `\uD65C\uC131 \uCE74\uB4DC: \uC2A4\uD0C0\uC77C ${nStyles} \xB7 \uCE90\uB9AD\uD130 ${nChars}` }));
+    const status = S.status;
+    if (!status) {
+      row.appendChild(el("span", { class: "hint", text: "\uC0C1\uD0DC\uB97C \uC77D\uB294 \uC911\uC785\uB2C8\uB2E4\u2026" }));
+      return row;
+    }
+    const acc = status.account;
+    if (acc) {
+      row.append(
+        el("span", {
+          class: "badge",
+          title: "Anlas \u2014 \uB808\uD37C\uB7F0\uC2A4 \uC778\uCF54\uB529\uACFC \uB514\uB809\uD130 \uD234\uC774 \uC4F0\uB294 \uC794\uB7C9",
+          text: `Anlas ${acc.anlas}`
+        }),
+        el("span", {
+          class: "badge" + (acc.usageNegative ? " warn" : ""),
+          title: "v5 \uC0AC\uC6A9\uB7C9 \u2014 Anlas \uC640 \uBCC4\uAC1C\uC758 \uD55C\uB3C4\uC785\uB2C8\uB2E4",
+          text: `v5 ${acc.usagePercent ?? "?"}%`
+        }),
+        el("span", { class: "hint", text: `tier ${acc.tier ?? "?"}` })
+      );
+    }
+    if (status.error) row.appendChild(el("span", { class: "hint err", text: status.error }));
+    return row;
+  }
+  function tokenNotice() {
+    const status = S.status;
+    if (!status || status.configured) return null;
+    return el("div", { class: "notice", style: { marginBottom: "6px" } }, [
+      el("div", { class: "hint", text: status.note || status.error || "NovelAI \uD1A0\uD070\uC774 \uC5C6\uC2B5\uB2C8\uB2E4." }),
+      el("div", {
+        class: "hint",
+        style: { marginTop: "4px" },
+        text: "\uD1A0\uD070 \uC5C6\uC774\uB3C4 \uACC4\uD68D\uC744 \uC138\uC6B0\uACE0, \uC774\uBBF8\uC9C0\uB97C \uB123\uACE0, \uC815\uB9AC\uD558\uACE0, \uBD07\uC5D0 \uBC18\uC601\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4."
+      })
+    ]);
+  }
+  function openParamsDialog() {
+    const field = (label, node) => el("label", { class: "field" }, [el("span", { text: label }), node]);
+    const two = (a, b) => el("div", { class: "row" }, [a, b]);
+    const out = el("div", {});
+    const modelInput = el("input", { value: gen.model, placeholder: "nai-diffusion-4-5-full" });
+    modelInput.addEventListener("change", () => {
+      gen.model = modelInput.value.trim();
+      persistGen();
+    });
+    const checkBtn = el("button", { class: "ghost tiny", text: "\uD655\uC778" });
+    const checkOut = el("span", { class: "hint" });
+    checkBtn.addEventListener("click", async () => {
+      checkBtn.disabled = true;
+      checkOut.textContent = "\uD655\uC778 \uC911\u2026";
+      try {
+        const r = await state.studio.modelCheck(modelInput.value.trim());
+        checkOut.textContent = r.exists ? r.supportsVibe ? "\uC788\uC74C \xB7 \uB808\uD37C\uB7F0\uC2A4 \uAC00\uB2A5" : "\uC788\uC74C \xB7 \uB808\uD37C\uB7F0\uC2A4 \uBD88\uAC00(v5)" : "\uADF8\uB7F0 \uBAA8\uB378\uC774 \uC5C6\uC2B5\uB2C8\uB2E4";
+      } catch (e) {
+        checkOut.textContent = msg18(e);
+      } finally {
+        checkBtn.disabled = false;
+      }
+    });
+    const planBtn = el("button", { class: "ghost tiny", text: "\uACC4\uD68D \uBCF4\uAE30", title: "\uBB34\uC5C7\uC774 \uBA87 \uC7A5 \uC0DD\uC131\uB420\uC9C0 \uBBF8\uB9AC \uBD05\uB2C8\uB2E4 (\uBB34\uB8CC)" });
+    planBtn.addEventListener("click", () => void showPlan(out));
+    const body = el("div", { class: "genform" }, [
+      field("\uBAA8\uB378", modelInput),
+      el("div", { class: "row" }, [checkBtn, checkOut]),
+      // References follow the cards (refMode + per-image enabled) - no switch.
+      refNote(),
+      two(numField("\uC2A4\uD15D", "steps"), numField("CFG", "scale")),
+      two(numField("Rescale", "rescale"), selField("\uC0D8\uD50C\uB7EC", "sampler", [
+        "k_euler_ancestral",
+        "k_euler",
+        "k_dpmpp_2s_ancestral",
+        "k_dpmpp_2m_sde",
+        "k_dpmpp_2m",
+        "k_dpmpp_sde",
+        "ddim_v3"
+      ])),
+      two(
+        selField("\uC2A4\uCF00\uC904", "schedule", ["karras", "native", "exponential", "polyexponential"]),
+        selField("UC \uD504\uB9AC\uC14B", "ucPreset", [], [
+          { value: 0, label: "Heavy" },
+          { value: 1, label: "Light" },
+          { value: 3, label: "Human Focus" },
+          { value: 4, label: "\uC5C6\uC74C" }
+        ])
+      ),
+      two(numField("\uAC00\uB85C", "width"), numField("\uC138\uB85C", "height")),
+      qualityToggle(),
+      textField("\uC2DC\uB4DC", "seed", "\uBE44\uC6B0\uBA74 \uB79C\uB364"),
+      textField("\uC800\uC7A5 \uD3F4\uB354", "folder", "studio/output/\u2026"),
+      el("div", { class: "row", style: { marginTop: "8px" } }, [planBtn]),
+      out
+    ]);
+    modal("\uC694\uCCAD \uC124\uC815", body, { sticky: true });
+  }
+  function refNote() {
+    const v5 = !gen.model.includes("diffusion-4");
+    const active3 = (S.cards.characters ?? []).filter((i) => i.enabled);
+    const charrefN = active3.reduce((n, i) => n + (i.charref ?? 0), 0);
+    const vibeN = active3.reduce((n, i) => n + (i.vibe ?? 0), 0);
+    const text2 = v5 && charrefN + vibeN ? "\uB808\uD37C\uB7F0\uC2A4\uB294 \uCE74\uB4DC\uB300\uB85C \uC2E4\uB9AC\uC9C0\uB9CC, v5 \uBAA8\uB378\uC740 \uC9C0\uC6D0\uD558\uC9C0 \uC54A\uC544 \uAC74\uB108\uB701\uB2C8\uB2E4 \u2014 4.5 \uB97C \uACE0\uB974\uC138\uC694." : charrefN + vibeN ? `\uB808\uD37C\uB7F0\uC2A4\uB294 \uCE74\uB4DC\uB300\uB85C \uC2E4\uB9BD\uB2C8\uB2E4 \u2014 \uCE90\uB9AD\uD130 ${charrefN}\uC7A5 (\uC7A5\uB2F9 5 Anlas) \xB7 \uBC14\uC774\uBE0C ${vibeN}\uC7A5 (\uC778\uCF54\uB529 2 Anlas, \uCE90\uC2DC \uC2DC 0)` : "\uD65C\uC131 \uCE90\uB9AD\uD130 \uCE74\uB4DC\uC5D0 \uB808\uD37C\uB7F0\uC2A4\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4 \u2014 \uCE74\uB4DC\uB97C \uC5F4\uC5B4 \uC774\uBBF8\uC9C0\uB97C \uC62C\uB824 \uB450\uBA74 \uADF8\uB300\uB85C \uC2E4\uB9BD\uB2C8\uB2E4.";
+    return el("div", { class: "hint", style: { marginBottom: "6px" }, text: text2 });
+  }
+  function numField(label, key) {
+    const i = el("input", {
+      value: String(gen[key]),
+      type: "number",
+      ...key === "rescale" ? { step: "0.05", min: "0", max: "1" } : {}
+    });
+    i.addEventListener("change", () => {
+      const n = Number(i.value);
+      if (!Number.isNaN(n)) gen[key] = n;
+      persistGen();
+    });
+    return el("label", { class: "field grow" }, [el("span", { text: label }), i]);
+  }
+  function textField(label, key, placeholder = "") {
+    const i = el("input", { value: gen[key], placeholder });
+    i.addEventListener("change", () => {
+      gen[key] = i.value;
+      persistGen();
+    });
+    return el("label", { class: "field grow" }, [el("span", { text: label }), i]);
+  }
+  function selField(label, key, values, options) {
+    const sel = el("select");
+    for (const o of options ?? values.map((v) => ({ value: v, label: v }))) {
+      const opt = el("option", { value: String(o.value), text: String(o.label) });
+      if (String(gen[key]) === String(o.value)) opt.setAttribute("selected", "selected");
+      sel.appendChild(opt);
+    }
+    sel.addEventListener("change", () => {
+      if (key === "ucPreset") gen.ucPreset = Number(sel.value) || 0;
+      else gen[key] = sel.value;
+      persistGen();
+    });
+    return el("label", { class: "field grow" }, [el("span", { text: label }), sel]);
+  }
+  function qualityToggle() {
+    const box = el("input", { type: "checkbox" });
+    box.checked = gen.quality;
+    box.addEventListener("change", () => {
+      gen.quality = box.checked;
+      persistGen();
+    });
+    return el(
+      "label",
+      { class: "row", title: "\uCF1C\uBA74 very aesthetic, masterpiece, no text \uAC00 \uB4A4\uC5D0 \uBD99\uC2B5\uB2C8\uB2E4" },
+      [box, el("span", { text: "\uD004\uB9AC\uD2F0 \uD0DC\uADF8" })]
+    );
+  }
+  async function showPlan(out) {
+    clear(out);
+    try {
+      const r = await state.studio.plan(spec());
+      out.appendChild(el("div", { class: "hint", text: `${r.items.length}\uC7A5 \xB7 ${r.estimate.note}` }));
+      const unresolved = [...new Set(r.items.flatMap((i) => i.unresolved ?? []))];
+      if (unresolved.length) {
+        out.appendChild(el("div", { class: "notice err" }, [
+          el("div", { text: `\uC870\uAC01\uC744 \uCC3E\uC9C0 \uBABB\uD55C \uCC38\uC870 ${unresolved.length}\uAC1C` }),
+          el("div", { class: "hint", text: unresolved.join(", ") }),
+          el("div", { class: "hint", text: "\uC870\uAC01 \uD504\uB86C\uD504\uD2B8\uC5D0 \uADF8 \uC774\uB984\uC758 \uCEEC\uB809\uC158\uC744 \uB9CC\uB4E4\uC5B4 \uC8FC\uC138\uC694. \uC9C0\uAE08 \uC0DD\uC131\uD558\uBA74 \uD504\uB86C\uD504\uD2B8\uC5D0 \uADF8\uB300\uB85C \uB4E4\uC5B4\uAC11\uB2C8\uB2E4." })
+        ]));
+      }
+      for (const i of r.items.slice(0, 12)) {
+        out.appendChild(el("div", { class: "hint", text: `${i.name}  seed=${i.seed ?? "\uB79C\uB364"}` }));
+      }
+      if (r.items.length > 12) out.appendChild(el("div", { class: "hint", text: `\u2026 \uC774\uD558 ${r.items.length - 12}\uAC1C \uC0DD\uB7B5` }));
+    } catch (e) {
+      out.appendChild(el("div", { class: "hint err", text: msg18(e) }));
+    }
+  }
+  function scenePicker() {
+    const items5 = S.cards.scenes ?? [];
+    const cur = items5.find((i) => i.path === gen.scenePreset) ?? null;
+    const label = (i) => i.name + (i.count ? ` (\uC52C ${i.count})` : "");
+    const row = pickerRow(cur ? { name: label(cur) } : null, {
+      title: items5.length ? `\uC800\uC7A5\uB41C \uD504\uB9AC\uC14B ${items5.length}\uAC1C \u2014 \uC120\uD0DD \xB7 \uC218\uC815 \xB7 \uC0AD\uC81C \xB7 \uCD94\uAC00` : "\uD504\uB9AC\uC14B \uCD94\uAC00",
+      emptyHint: items5.length ? "\uC120\uD0DD\uB41C \uC52C \uD504\uB9AC\uC14B \uC5C6\uC74C \u2014 \u203A \uC5D0\uC11C \uACE0\uB974\uC138\uC694" : "\uC52C \uD504\uB9AC\uC14B\uC774 \uC5C6\uC2B5\uB2C8\uB2E4. \u203A \uC5D0\uC11C \uD558\uB098 \uB9CC\uB4E4\uC5B4 \uC8FC\uC138\uC694.",
+      onOpen: () => openListPicker({
+        title: "\uC52C \uD504\uB9AC\uC14B \uC120\uD0DD",
+        hint: "\uBD88\uB7EC\uC628 \uD504\uB9AC\uC14B\uC758 \uC52C \uCE74\uB4DC\uC5D0\uC11C \uD544\uC694\uD55C \uAC83\uB9CC \uACE8\uB77C \uC608\uC57D\uC5D0 \uB2F4\uC2B5\uB2C8\uB2E4.",
+        load: async () => [
+          { id: "", name: "(\uC5C6\uC74C)", hint: "\uC694\uCCAD \uC124\uC815 \uD55C \uC7A5 \uAD6C\uC131", selected: !gen.scenePreset, noDelete: true },
+          ...items5.map((i) => ({
+            id: i.path,
+            name: label(i),
+            selected: gen.scenePreset === i.path
+          }))
+        ],
+        onSelect: async (e) => {
+          gen.scenePreset = e.id;
+          persistGen();
+          checkUnresolved();
+          hub.drawCentre();
+        },
+        onEdit: (e) => {
+          if (!e.id) return;
+          S.selectedFile = e.id;
+          hub.drawCentre();
+        },
+        onDelete: async (e) => {
+          await state.deleteFile(e.id);
+          S.cards.scenes = (S.cards.scenes ?? []).filter((i) => i.path !== e.id);
+          let redraw = false;
+          if (gen.scenePreset === e.id) {
+            gen.scenePreset = "";
+            persistGen();
+            redraw = true;
+          }
+          if (S.selectedFile === e.id) {
+            S.selectedFile = "";
+            redraw = true;
+          }
+          if (redraw) hub.drawCentre();
+          hub.touchQuiet();
+        },
+        onCreate: () => {
+          askName("\uC0C8 \uC52C \uD504\uB9AC\uC14B", {
+            label: "\uC774\uB984\uC774 \uACE7 \uD30C\uC77C\uBA85\uC785\uB2C8\uB2E4.",
+            placeholder: "\uC608: \uAC10\uC815 \uC138\uD2B8",
+            onSubmit: async (nm) => {
+              const path = await newCard("scenes", "", nm);
+              if (!path) return;
+              gen.scenePreset = path;
+              persistGen();
+              S.selectedFile = path;
+              hub.drawCentre();
+            }
+          });
+        },
+        createLabel: "\uC0C8 \uD504\uB9AC\uC14B \uCD94\uAC00"
+      })
+    });
+    return el("div", { class: "field grow" }, [el("span", { text: "\uC52C \uD504\uB9AC\uC14B" }), row]);
+  }
+  async function startRun(overrides = {}) {
+    try {
+      const body = { ...spec(), ...overrides };
+      if (!body.scenePreset) delete body.scenePreset;
+      const r = await state.studio.generate(body);
+      S.jobId = r.jobId;
+      S.queueJob = null;
+      S.viewPath = "";
+      jobsStale = true;
+      hub.notice(`\uBC30\uCE58\uB97C \uC2DC\uC791\uD588\uC2B5\uB2C8\uB2E4 (${r.total}\uC7A5). ${r.estimate.note}`, "ok");
+      hub.drawCentre();
+      void pollJob();
+      pollPreview();
+    } catch (e) {
+      hub.notice("\uC2DC\uC791\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+    }
+  }
+  function cancelRun() {
+    if (S.jobId) void state.studio.cancelJob(S.jobId);
+  }
+  function pendingCount() {
+    const p = S.queueJob?.payload;
+    if (!p) return 0;
+    return Math.max(0, p.total - p.done - (p.failed?.length ?? 0));
+  }
+  async function loadJobs(force = false) {
+    if (!force && !jobsStale && S.jobs.length) return S.jobs;
+    try {
+      S.jobs = (await state.studio.jobs()).jobs ?? [];
+      jobsStale = false;
+      if (!S.jobId) {
+        const running = S.jobs.find((j) => j.state === "running" || j.state === "pending");
+        if (running) {
+          S.jobId = running.id;
+          S.queueJob = running;
+          void pollJob();
+        }
+      }
+    } catch {
+    }
+    return S.jobs;
+  }
+  function markJobsStale() {
+    jobsStale = true;
+  }
+  async function pollJob() {
+    if (S.jobId) pollPreview();
+    if (jobTimer) return;
+    const tick = async () => {
+      if (!S.jobId) return stop();
+      let j;
+      try {
+        j = await state.studio.job(S.jobId);
+      } catch {
+        return stop();
+      }
+      S.queueJob = j;
+      if (["done", "partial", "error", "cancelled"].includes(j.state)) {
+        const spent = j.result?.anlasSpent;
+        hub.notice(
+          `\uBC30\uCE58 ${j.state} \u2014 ${j.result?.saved ?? 0}\uC7A5 \uC800\uC7A5` + (j.result?.failed ? `, ${j.result.failed}\uC7A5 \uC2E4\uD328` : "") + (typeof spent === "number" ? ` \xB7 Anlas ${spent} \uC18C\uBAA8` : ""),
+          j.state === "error" ? "err" : "ok"
+        );
+        S.jobId = "";
+        jobsStale = true;
+        stop();
+        stopPreview();
+        hub.jobTick();
+        hub.touchQuiet(j.payload?.saved ?? []);
+        await hub.refresh();
+        await hub.loadStatus();
+        return;
+      }
+      hub.jobTick();
+    };
+    const stop = () => {
+      if (jobTimer) {
+        clearInterval(jobTimer);
+        jobTimer = null;
+      }
+    };
+    jobTimer = setInterval(() => {
+      void tick();
+    }, 1500);
+    await tick();
+  }
+
+  // src/ui/studio/stylefile.ts
+  var FRONT_RE = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*\r?\n?/;
+  function splitFront(text2) {
+    const meta = /* @__PURE__ */ new Map();
+    const m = text2.match(FRONT_RE);
+    if (!m) return { meta, body: text2 };
+    for (const line of m[1].split("\n")) {
+      const at = line.indexOf(":");
+      if (at < 0) continue;
+      meta.set(line.slice(0, at).trim(), line.slice(at + 1).trim().replace(/^["']|["']$/g, ""));
+    }
+    return { meta, body: text2.slice(m[0].length) };
+  }
+  function joinFront(meta, body) {
+    const lines = [...meta.entries()].filter(([, v]) => v !== "").map(([k, v]) => `${k}: ${v}`);
+    return lines.length ? `---
+${lines.join("\n")}
+---
+${body}` : body;
+  }
+  var STYLE_SECTION = /^##+\s*(positive|negative|프롬프트|네거티브)\s*$/im;
+  function parseStyleDoc(text2) {
+    const { meta, body } = splitFront(text2);
+    const parts = body.split(new RegExp(STYLE_SECTION.source, "gim"));
+    let positive = "";
+    let negative = "";
+    if (parts.length === 1) {
+      positive = body.trim();
+    } else {
+      const head = parts[0].trim();
+      if (head) positive = head;
+      for (let i = 1; i + 1 < parts.length; i += 2) {
+        const name = parts[i].toLowerCase();
+        const chunk = parts[i + 1].trim();
+        if (name === "negative" || name === "\uB124\uAC70\uD2F0\uBE0C") negative = chunk;
+        else positive = positive ? (positive + ", " + chunk).replace(/^, |, $/g, "") : chunk;
+      }
+    }
+    return { meta, positive, negative };
+  }
+  function buildStyleDoc(doc) {
+    let body = `## positive
+${doc.positive.trim()}
+`;
+    if (doc.negative.trim()) body += `
+## negative
+${doc.negative.trim()}
+`;
+    return joinFront(doc.meta, body);
+  }
+
+  // src/ui/studio/editors.ts
+  function fragNames() {
+    return fragKeys();
+  }
+  function editorHead(path, extra = []) {
+    const back = el("button", { class: "ghost tiny", text: "\u2190 \uBAA9\uB85D" });
+    back.addEventListener("click", () => {
+      S.selectedFile = "";
+      hub.drawLeft();
+      hub.drawCentre();
+    });
+    return el("div", { class: "row", style: { marginBottom: "8px" } }, [
+      back,
+      el("span", { class: "sectiontitle grow", text: path }),
+      ...extra
+    ]);
+  }
+  function drawCardEditor(path) {
+    if (!S.viewMount) return;
+    S.viewMount.appendChild(cardEditor(path, { chrome: "centre" }));
+  }
+  function cardEditor(path, opts = {}) {
+    const isStyle = areaOfPath(path) === "styles";
+    const out = el("div", { class: "hint" });
+    const name = el("input", { placeholder: "(\uD30C\uC77C \uC774\uB984)" });
+    const desc = el("input", { placeholder: "\uD55C \uC904 \uC124\uBA85" });
+    const enabledBox = el("input", { type: "checkbox" });
+    const order = el("input", {
+      type: "number",
+      value: "100",
+      step: "10",
+      title: "\uC791\uC744\uC218\uB85D \uC55E\uC5D0 \uC774\uC5B4\uC9D1\uB2C8\uB2E4"
+    });
+    const body = el("textarea", {
+      rows: "18",
+      class: "promptedit",
+      placeholder: isStyle ? "## positive\n\u2026\n\n## negative\n\u2026" : "\uC870\uAC01 \uBCF8\uBB38 \u2014 <\uC774\uB984> \uC73C\uB85C \uCC38\uC870\uB429\uB2C8\uB2E4. \uC5EC\uB7EC \uC904\uC774\uBA74 \uC7A5\uB9C8\uB2E4 1\uC904\uC774 \uB79C\uB364\uC73C\uB85C \uC2E4\uB9BD\uB2C8\uB2E4 (#\uC904\xB7\uBE48 \uC904 \uC81C\uC678)"
+    });
+    setTimeout(() => attachHilite(body, { mode: "nai", fragments: fragNames }), 0);
+    const save = el("button", { class: "primary tiny", text: "\uC800\uC7A5" });
+    const del = el("button", { class: "ghost tiny" });
+    armed(del, "\uC0AD\uC81C", "\uC815\uB9D0 \uC9C0\uC6B8\uAE4C\uC694?", async () => {
+      try {
+        await state.deleteFile(path);
+        if (opts.onDeleted) opts.onDeleted();
+        else S.selectedFile = "";
+        await hub.refreshArea(areaOfPath(path));
+      } catch (e) {
+        out.textContent = msg18(e);
+      }
+    });
+    save.addEventListener("click", async () => {
+      save.disabled = true;
+      out.textContent = "";
+      try {
+        const meta = /* @__PURE__ */ new Map();
+        if (name.value.trim()) meta.set("name", name.value.trim());
+        if (desc.value.trim()) meta.set("description", desc.value.trim());
+        if (isStyle) {
+          meta.set("enabled", enabledBox.checked ? "true" : "false");
+          if (order.value.trim() && order.value.trim() !== "100") meta.set("order", String(Math.trunc(Number(order.value)) || 100));
+        }
+        const dir = path.slice(0, path.lastIndexOf("/"));
+        const fname = path.slice(path.lastIndexOf("/") + 1);
+        await state.uploadFile(fname, joinFront(meta, body.value), false, dir);
+        if (name.value.trim()) {
+          try {
+            const moved = await renameCardFile(path, name.value.trim());
+            if (moved !== path) {
+              if (opts.onSaved) opts.onSaved(moved);
+              else S.selectedFile = moved;
+              path = moved;
+            }
+          } catch (e) {
+            out.textContent = "\uC774\uB984\uC740 \uC800\uC7A5\uB410\uC9C0\uB9CC \uD30C\uC77C\uBA85 \uBCC0\uACBD\uC740 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e);
+          }
+        }
+        if (!out.textContent) out.textContent = "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4.";
+        await hub.refreshArea(isStyle ? "styles" : "fragments");
+      } catch (e) {
+        out.textContent = msg18(e);
+      } finally {
+        save.disabled = false;
+      }
+    });
+    const head = (opts.chrome ?? "centre") === "centre" ? editorHead(path, [del, save]) : el("div", { class: "row", style: { marginBottom: "6px", justifyContent: "flex-end", gap: "6px" } }, [del, save]);
+    const rootEl = el("div", {}, [
+      head,
+      el("label", { class: "field" }, [el("span", { text: "\uC774\uB984" }), name]),
+      el("label", { class: "field" }, [el("span", { text: "\uC124\uBA85" }), desc]),
+      isStyle ? el("div", { class: "row", style: { marginBottom: "8px" } }, [
+        el("label", { class: "row" }, [enabledBox, el("span", { text: "\uD65C\uC131 (\uC0DD\uC131\uC5D0 \uC2E4\uB9BC)" })]),
+        el("label", { class: "field", style: { width: "130px", marginBottom: "0" } }, [el("span", { text: "\uC21C\uC11C" }), order])
+      ]) : null,
+      el("label", { class: "field" }, [el("span", { text: isStyle ? "\uBCF8\uBB38 (## positive / ## negative)" : "\uBCF8\uBB38" }), body]),
+      out
+    ]);
+    void state.readFile(path).then((r) => {
+      const { meta, body: b } = splitFront(r.content);
+      name.value = meta.get("name") ?? "";
+      desc.value = meta.get("description") ?? "";
+      enabledBox.checked = (meta.get("enabled") ?? "").toLowerCase() === "true";
+      order.value = meta.get("order") ?? "100";
+      body.value = b;
+    }).catch((e) => {
+      out.textContent = msg18(e);
+    });
+    return rootEl;
+  }
+  var rawView = /* @__PURE__ */ new Set();
+  function drawSceneEditor(path) {
+    if (!S.viewMount) return;
+    const out = el("div", { class: "hint" });
+    const name = el("input", { placeholder: "\uD504\uB9AC\uC14B \uC774\uB984" });
+    const list2 = el("div", { class: "verlist" });
+    let extra = { version: 1 };
+    let scenes = [];
+    const drawRows = () => {
+      clear(list2);
+      if (!scenes.length) list2.appendChild(el("div", { class: "hint", text: "\uC52C\uC774 \uC5C6\uC2B5\uB2C8\uB2E4." }));
+      scenes.forEach((s, i) => {
+        const nm = el("input", { value: s.name, placeholder: "\uC52C \uC774\uB984 (\uD30C\uC77C\uBA85\uC5D0 \uB4E4\uC5B4\uAC11\uB2C8\uB2E4)" });
+        nm.addEventListener("change", () => {
+          s.name = nm.value;
+        });
+        const pr = el("textarea", { rows: "2", class: "promptedit", placeholder: "\uD504\uB86C\uD504\uD2B8" });
+        pr.value = s.prompt;
+        pr.addEventListener("change", () => {
+          s.prompt = pr.value;
+        });
+        setTimeout(() => attachHilite(pr, { mode: "nai", fragments: fragNames }), 0);
+        const ng = el("input", { value: s.negativePrompt, placeholder: "\uB124\uAC70\uD2F0\uBE0C (\uC120\uD0DD)" });
+        ng.addEventListener("change", () => {
+          s.negativePrompt = ng.value;
+        });
+        const w = el("input", { type: "number", value: s.width ? String(s.width) : "", placeholder: "\uAC00\uB85C" });
+        w.addEventListener("change", () => {
+          s.width = Math.trunc(Number(w.value)) || 0;
+        });
+        const h = el("input", { type: "number", value: s.height ? String(s.height) : "", placeholder: "\uC138\uB85C" });
+        h.addEventListener("change", () => {
+          s.height = Math.trunc(Number(h.value)) || 0;
+        });
+        const drop = el("button", { class: "ghost tiny", text: "\xD7", title: "\uC774 \uC52C\uC744 \uBE8D\uB2C8\uB2E4" });
+        drop.addEventListener("click", () => {
+          scenes = scenes.filter((_x, j) => j !== i);
+          drawRows();
+        });
+        list2.appendChild(el("div", { class: "scenerow" }, [
+          el("div", { class: "row", style: { gap: "6px" } }, [
+            nm,
+            w,
+            h,
+            drop
+          ]),
+          pr,
+          ng
+        ]));
+      });
+    };
+    const add = el("button", { class: "ghost tiny", text: "\uFF0B \uC52C \uCD94\uAC00" });
+    add.addEventListener("click", () => {
+      scenes.push({ name: "", prompt: "", negativePrompt: "", width: 0, height: 0 });
+      drawRows();
+    });
+    const raw = el("button", { class: "ghost tiny", text: "\uC6D0\uBCF8 JSON" });
+    raw.addEventListener("click", () => {
+      rawView.add(path);
+      hub.drawCentre();
+    });
+    const save = el("button", { class: "primary tiny", text: "\uC800\uC7A5" });
+    const del = el("button", { class: "ghost tiny" });
+    armed(del, "\uC0AD\uC81C", "\uC815\uB9D0 \uC9C0\uC6B8\uAE4C\uC694?", async () => {
+      try {
+        await state.deleteFile(path);
+        S.selectedFile = "";
+        await hub.refreshArea(areaOfPath(path));
+      } catch (e) {
+        out.textContent = msg18(e);
+      }
+    });
+    save.addEventListener("click", async () => {
+      save.disabled = true;
+      out.textContent = "";
+      try {
+        const kept = scenes.map((s) => ({
+          name: s.name.trim(),
+          prompt: s.prompt,
+          negativePrompt: s.negativePrompt,
+          width: s.width || 0,
+          height: s.height || 0
+        })).filter((s) => s.name);
+        if (scenes.length && !kept.length) {
+          out.textContent = "\uC52C \uC774\uB984\uC744 \uD558\uB098 \uC774\uC0C1 \uCC44\uC6CC \uC8FC\uC138\uC694.";
+          return;
+        }
+        const doc = { ...extra, name: name.value.trim() || path.split("/").pop().replace(/\.json$/, ""), scenes: kept };
+        const dir = path.slice(0, path.lastIndexOf("/"));
+        await state.uploadFile(path.split("/").pop(), JSON.stringify(doc, null, 2), false, dir);
+        if (name.value.trim()) {
+          try {
+            const moved = await renameCardFile(path, name.value.trim());
+            if (moved !== path) {
+              path = moved;
+              S.selectedFile = moved;
+            }
+          } catch (e) {
+            out.textContent = "\uC774\uB984\uC740 \uC800\uC7A5\uB410\uC9C0\uB9CC \uD30C\uC77C\uBA85 \uBCC0\uACBD\uC740 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e);
+          }
+        }
+        if (!out.textContent) out.textContent = "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4.";
+        await hub.refreshArea("scenes");
+      } catch (e) {
+        out.textContent = msg18(e);
+      } finally {
+        save.disabled = false;
+      }
+    });
+    S.viewMount.appendChild(el("div", {}, [
+      editorHead(path, [raw, del, save]),
+      el("label", { class: "field" }, [el("span", { text: "\uC774\uB984" }), name]),
+      el("div", { class: "sectiontitle", text: "\uC52C" }),
+      el("div", { class: "hint", text: "\uBC30\uCE58 \uD0ED\uC5D0\uC11C \uC774 \uD504\uB9AC\uC14B\uC744 \uBD88\uB7EC\uC640 \uD544\uC694\uD55C \uC52C\uB9CC \uC608\uC57D\uC5D0 \uB2F4\uC2B5\uB2C8\uB2E4. \uC52C \uC774\uB984\uC774 \uD30C\uC77C\uBA85\uC758 \uAC10\uC815 \uC790\uB9AC\uC5D0 \uB4E4\uC5B4\uAC11\uB2C8\uB2E4." }),
+      list2,
+      el("div", { class: "row", style: { marginTop: "6px" } }, [add]),
+      out
+    ]));
+    void state.readFile(path).then((r) => {
+      try {
+        const d = JSON.parse(r.content);
+        const { scenes: rawScenes, name: rawName, ...rest } = d;
+        extra = rest;
+        name.value = String(rawName ?? "");
+        scenes = (Array.isArray(rawScenes) ? rawScenes : []).map((s) => ({
+          name: String(s.name ?? ""),
+          prompt: String(s.prompt ?? ""),
+          negativePrompt: String(s.negativePrompt ?? ""),
+          width: Math.trunc(Number(s.width)) || 0,
+          height: Math.trunc(Number(s.height)) || 0
+        }));
+        drawRows();
+      } catch (e) {
+        out.textContent = "JSON \uC744 \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4 \u2014 \uC6D0\uBCF8 JSON \uC73C\uB85C \uC5EC\uC138\uC694: " + msg18(e);
+      }
+    }).catch((e) => {
+      out.textContent = msg18(e);
+    });
+    drawRows();
+  }
+  function drawRawFile(path) {
+    if (!S.viewMount) return;
+    const box = el("textarea", { rows: "22", class: "promptedit" });
+    const out = el("div", { class: "hint" });
+    const save = el("button", { class: "primary tiny", text: "\uC800\uC7A5" });
+    const del = el("button", { class: "ghost tiny" });
+    armed(del, "\uC0AD\uC81C", "\uC815\uB9D0 \uC9C0\uC6B8\uAE4C\uC694?", async () => {
+      try {
+        await state.deleteFile(path);
+        S.selectedFile = "";
+        await hub.refreshArea(areaOfPath(path));
+      } catch (e) {
+        out.textContent = msg18(e);
+      }
+    });
+    let form = null;
+    if (rawView.has(path)) {
+      form = el("button", { class: "ghost tiny", text: "\uD3FC \uD3B8\uC9D1" });
+      form.addEventListener("click", () => {
+        rawView.delete(path);
+        hub.drawCentre();
+      });
+    }
+    S.viewMount.append(editorHead(path, [form, del, save]), box, out);
+    save.addEventListener("click", async () => {
+      save.disabled = true;
+      try {
+        const dir = path.slice(0, path.lastIndexOf("/"));
+        const fname = path.slice(path.lastIndexOf("/") + 1);
+        await state.uploadFile(fname, box.value, false, dir);
+        out.textContent = "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4.";
+        await hub.refreshArea(areaOfPath(path));
+      } catch (e) {
+        out.textContent = msg18(e);
+      } finally {
+        save.disabled = false;
+      }
+    });
+    void state.readFile(path).then((r) => {
+      box.value = r.content;
+      if (!r.textual) out.textContent = r.note || "\uD14D\uC2A4\uD2B8 \uD30C\uC77C\uC774 \uC544\uB2D9\uB2C8\uB2E4.";
+    }).catch((e) => {
+      out.textContent = msg18(e);
+    });
+  }
+
+  // src/ui/studio/char-edit.ts
+  function drawCharacterEditor(dir) {
+    if (!S.viewMount) return;
+    clear(S.viewMount);
+    S.viewMount.appendChild(characterEditor(dir, { chrome: "centre" }));
+  }
+  var BUCKETS = [[1024, 1536], [1536, 1024]];
+  async function decode(src) {
+    const img = new Image();
+    await new Promise((res, rej) => {
+      img.onload = () => res();
+      img.onerror = () => rej(new Error("\uC774\uBBF8\uC9C0\uB97C \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4"));
+      img.src = src;
+    });
+    return img;
+  }
+  function toPng(img, bucket) {
+    const portrait = img.height >= img.width;
+    const w = bucket ? portrait ? 1024 : 1536 : img.width;
+    const h = bucket ? portrait ? 1536 : 1024 : img.height;
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("canvas \uB97C \uC4F8 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4");
+    if (bucket) {
+      ctx.fillStyle = "#000";
+      ctx.fillRect(0, 0, w, h);
+      const scale = Math.min(w / img.width, h / img.height);
+      const dw = img.width * scale;
+      const dh = img.height * scale;
+      ctx.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh);
+    } else {
+      ctx.drawImage(img, 0, 0);
+    }
+    const data = canvas.toDataURL("image/png");
+    return data.slice(data.indexOf(",") + 1);
+  }
+  function pngName(original, bucket, w, h) {
+    const stem = original.replace(/\.[^.]+$/, "").replace(/-\d+x\d+$/, "");
+    return bucket ? `${stem}-${w}x${h}.png` : `${stem}.png`;
+  }
+  function characterEditor(dir, opts = {}) {
+    const rootEl = el("div", { class: "charedit" });
+    const isNew = !dir;
+    const out = el("div", { class: "hint" });
+    const name = el("input", { placeholder: "\uD788\uB098" });
+    const caption = el("textarea", {
+      rows: "5",
+      class: "promptedit compact",
+      placeholder: "\uC774 \uCE90\uB9AD\uD130\uB97C \uADF8\uB9AC\uB294 \uD504\uB86C\uD504\uD2B8 (\uC27C\uD45C\uB85C \uAD6C\uBD84)"
+    });
+    const negative = el("textarea", {
+      rows: "2",
+      class: "promptedit compact",
+      placeholder: "\uC774 \uCE90\uB9AD\uD130\uC5D0\uB9CC \uBD99\uB294 \uB124\uAC70\uD2F0\uBE0C"
+    });
+    const fragNames2 = () => fragKeys();
+    setTimeout(() => {
+      attachHilite(caption, { mode: "nai", fragments: fragNames2 });
+      attachHilite(negative, { mode: "nai", fragments: fragNames2 });
+    }, 0);
+    const enabledBox = el("input", { type: "checkbox" });
+    const order = el("input", { type: "number", value: "100", step: "10" });
+    const posX = el("input", { type: "number", step: "0.1", placeholder: "x 0~1" });
+    const posY = el("input", { type: "number", step: "0.1", placeholder: "y 0~1" });
+    let vibes = [];
+    let charrefs = [];
+    let refMode = "charref";
+    const refList = el("div", { class: "refgrid" });
+    const charrefList = el("div", { class: "refgrid" });
+    const uploadNow = async (fname, b64) => {
+      if (!dir) {
+        out.textContent = "\uBA3C\uC800 \uC774\uB984\uC744 \uC815\uD558\uACE0 \uC800\uC7A5\uD55C \uB4A4 \uC774\uBBF8\uC9C0\uB97C \uC62C\uB824 \uC8FC\uC138\uC694.";
+        return false;
+      }
+      try {
+        await state.uploadFile(fname, b64, true, dir);
+        return true;
+      } catch (e) {
+        out.textContent = `${fname}: \uC62C\uB9AC\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4 \u2014 ${msg18(e)}`;
+        return false;
+      }
+    };
+    const slider = (label, value, onChange) => {
+      const i = el("input", { type: "range", min: "0", max: "1", step: "0.05", value: String(value) });
+      const v = el("span", { class: "hint refval", text: value.toFixed(2) });
+      i.addEventListener("input", () => {
+        const n = Math.min(1, Math.max(0, Number(i.value)));
+        v.textContent = n.toFixed(2);
+        onChange(n);
+      });
+      return el("div", { class: "refslider" }, [el("span", { class: "hint", text: label }), i, v]);
+    };
+    const refCard = (file, enabled, bad, onToggle, onRemove, onFix, controls) => {
+      const pic = el("div", { class: "refpic" });
+      void blobUrl(`${dir}/${file}`).then((url) => {
+        if (!pic.isConnected) return;
+        pic.appendChild(el("img", { src: url, alt: file }));
+      }).catch(() => {
+        pic.appendChild(el("span", { class: "hint", text: "\uC77D\uC9C0 \uBABB\uD568" }));
+      });
+      const x = el("button", { class: "ghost tiny refx", text: "\u2715", title: "\uC774 \uB808\uD37C\uB7F0\uC2A4\uB97C \uBAA9\uB85D\uC5D0\uC11C \uBE8D\uB2C8\uB2E4 (\uD30C\uC77C\uC740 \uB0A8\uC2B5\uB2C8\uB2E4)" });
+      x.addEventListener("click", (e) => {
+        e.stopPropagation();
+        onRemove();
+      });
+      pic.appendChild(x);
+      const on = el("input", { type: "checkbox", title: "\uC774 \uB808\uD37C\uB7F0\uC2A4\uB97C \uC2E4\uC744\uC9C0" });
+      on.checked = enabled;
+      on.addEventListener("change", () => onToggle(on.checked));
+      const card = el("div", { class: "refcard" + (enabled ? "" : " off") + (bad ? " bad" : "") }, [
+        pic,
+        el("label", { class: "row", style: { gap: "4px" } }, [on, el("span", { class: "hint", text: "\uC0AC\uC6A9" })]),
+        ...controls
+      ]);
+      if (bad) {
+        const fix = el("button", { class: "ghost tiny", text: "\uB9DE\uCD94\uAE30", title: bad });
+        fix.addEventListener("click", async () => {
+          if (!onFix) return;
+          fix.disabled = true;
+          try {
+            await onFix();
+          } finally {
+            fix.disabled = false;
+          }
+        });
+        card.appendChild(el("div", { class: "row", style: { gap: "4px" } }, [
+          el("span", { class: "badge err", text: "\uD615\uC2DD \uBD88\uC77C\uCE58" }),
+          fix
+        ]));
+      }
+      return card;
+    };
+    const drawCharrefs = () => {
+      clear(charrefList);
+      if (!charrefs.length) {
+        charrefList.appendChild(el("div", { class: "hint", text: "\uB808\uD37C\uB7F0\uC2A4 \uC774\uBBF8\uC9C0\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4." }));
+      }
+      charrefs.forEach((v, i) => {
+        const mode2 = el("select", { title: "\uCE90\uB9AD\uD130\uB9CC \uAC00\uC838\uC62C\uC9C0, \uADF8\uB9BC\uCCB4\uAE4C\uC9C0 \uAC00\uC838\uC62C\uC9C0" });
+        mode2.appendChild(el("option", { value: "character", text: "\uCE90\uB9AD\uD130" }));
+        mode2.appendChild(el("option", { value: "character&style", text: "\uCE90\uB9AD\uD130&\uC2A4\uD0C0\uC77C" }));
+        mode2.value = v.mode;
+        mode2.addEventListener("change", () => {
+          v.mode = mode2.value;
+        });
+        charrefList.appendChild(refCard(
+          v.file,
+          v.enabled,
+          v.bad,
+          (on) => {
+            v.enabled = on;
+          },
+          () => {
+            charrefs = charrefs.filter((_x, j) => j !== i);
+            drawCharrefs();
+          },
+          async () => {
+            await refit(v);
+            drawCharrefs();
+          },
+          [
+            mode2,
+            slider("\uAC15\uB3C4", v.strength, (n) => {
+              v.strength = n;
+            }),
+            slider("\uCDA9\uC2E4\uB3C4", v.fidelity, (n) => {
+              v.fidelity = n;
+            })
+          ]
+        ));
+      });
+    };
+    const drawRefs = () => {
+      clear(refList);
+      if (!vibes.length) {
+        refList.appendChild(el("div", { class: "hint", text: "\uBC14\uC774\uBE0C \uC774\uBBF8\uC9C0\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4." }));
+      }
+      vibes.forEach((v, i) => {
+        refList.appendChild(refCard(
+          v.file,
+          v.enabled,
+          v.bad,
+          (on) => {
+            v.enabled = on;
+          },
+          () => {
+            vibes = vibes.filter((_x, j) => j !== i);
+            drawRefs();
+          },
+          async () => {
+            await repng(v);
+            drawRefs();
+          },
+          [
+            slider("\uAC15\uB3C4", v.strength, (n) => {
+              v.strength = n;
+            }),
+            slider("\uC815\uBCF4\uB7C9", v.informationExtracted, (n) => {
+              v.informationExtracted = n;
+            })
+          ]
+        ));
+      });
+    };
+    const refit = async (v) => {
+      try {
+        const img = await decode(await blobUrl(`${dir}/${v.file}`));
+        const b64 = toPng(img, true);
+        const portrait = img.height >= img.width;
+        const fname = pngName(v.file, true, portrait ? 1024 : 1536, portrait ? 1536 : 1024);
+        if (await uploadNow(fname, b64)) {
+          v.file = fname;
+          delete v.bad;
+        }
+      } catch (e) {
+        out.textContent = msg18(e);
+      }
+    };
+    const repng = async (v) => {
+      try {
+        const img = await decode(await blobUrl(`${dir}/${v.file}`));
+        const fname = pngName(v.file, false, 0, 0);
+        if (await uploadNow(fname, toPng(img, false))) {
+          v.file = fname;
+          delete v.bad;
+        }
+      } catch (e) {
+        out.textContent = msg18(e);
+      }
+    };
+    const audit = async () => {
+      for (const v of charrefs) {
+        try {
+          const bytes = await state.fileBytes(`${dir}/${v.file}`);
+          const isPng = bytes.length > 24 && bytes[0] === 137 && bytes[1] === 80;
+          const w = isPng ? (bytes[16] << 24 | bytes[17] << 16 | bytes[18] << 8 | bytes[19]) >>> 0 : 0;
+          const h = isPng ? (bytes[20] << 24 | bytes[21] << 16 | bytes[22] << 8 | bytes[23]) >>> 0 : 0;
+          const ok = BUCKETS.some(([bw, bh]) => bw === w && bh === h);
+          v.bad = ok ? void 0 : isPng ? `${w}x${h} \u2014 1024x1536 / 1536x1024 \uC774\uC5B4\uC57C \uD569\uB2C8\uB2E4` : "PNG \uAC00 \uC544\uB2D9\uB2C8\uB2E4";
+        } catch {
+        }
+      }
+      for (const v of vibes) {
+        try {
+          const bytes = await state.fileBytes(`${dir}/${v.file}`);
+          v.bad = bytes.length > 8 && bytes[0] === 137 && bytes[1] === 80 ? void 0 : "PNG \uAC00 \uC544\uB2D9\uB2C8\uB2E4";
+        } catch {
+        }
+      }
+      drawCharrefs();
+      drawRefs();
+    };
+    const pickCharref = el("input", { type: "file", accept: "image/*", multiple: true, style: { display: "none" } });
+    pickCharref.addEventListener("change", async () => {
+      for (const f of Array.from(pickCharref.files ?? [])) {
+        try {
+          const url = URL.createObjectURL(f);
+          const img = await decode(url);
+          URL.revokeObjectURL(url);
+          const b64 = toPng(img, true);
+          const portrait = img.height >= img.width;
+          const fname = pngName(f.name, true, portrait ? 1024 : 1536, portrait ? 1536 : 1024);
+          if (!await uploadNow(fname, b64)) continue;
+          charrefs.push({ file: fname, strength: 0.6, fidelity: 0.6, mode: "character", enabled: true });
+        } catch (e) {
+          out.textContent = `${f.name}: ${msg18(e)}`;
+        }
+      }
+      pickCharref.value = "";
+      drawCharrefs();
+    });
+    const pickRef = el("input", { type: "file", accept: "image/*", multiple: true, style: { display: "none" } });
+    pickRef.addEventListener("change", async () => {
+      for (const f of Array.from(pickRef.files ?? [])) {
+        try {
+          const url = URL.createObjectURL(f);
+          const img = await decode(url);
+          URL.revokeObjectURL(url);
+          const fname = pngName(f.name, false, 0, 0);
+          if (!await uploadNow(fname, toPng(img, false))) continue;
+          vibes.push({ file: fname, strength: 0.6, informationExtracted: 1, enabled: true });
+        } catch (e) {
+          out.textContent = `${f.name}: ${msg18(e)}`;
+        }
+      }
+      pickRef.value = "";
+      drawRefs();
+    });
+    const addCharref = el("button", { class: "ghost tiny", text: "\uFF0B \uC774\uBBF8\uC9C0", title: "\uC138\uB85C 1024x1536 / \uAC00\uB85C 1536x1024 PNG \uB85C \uB9DE\uCDB0 \uC62C\uB9BD\uB2C8\uB2E4" });
+    addCharref.addEventListener("click", () => pickCharref.click());
+    const addVibe = el("button", { class: "ghost tiny", text: "\uFF0B \uC774\uBBF8\uC9C0", title: "PNG \uB85C \uBCC0\uD658\uD574 \uC62C\uB9BD\uB2C8\uB2E4" });
+    addVibe.addEventListener("click", () => pickRef.click());
+    const save = el("button", { class: "primary tiny", text: "\uC800\uC7A5" });
+    save.addEventListener("click", async () => {
+      const nm = name.value.trim();
+      if (!nm) {
+        out.textContent = "\uC774\uB984\uC744 \uC785\uB825\uD574 \uC8FC\uC138\uC694.";
+        return;
+      }
+      save.disabled = true;
+      try {
+        if (dir) {
+          try {
+            const moved = await renameCardFile(dir, nm);
+            if (moved !== dir) dir = moved;
+          } catch (e) {
+            out.textContent = "\uD30C\uC77C\uBA85 \uBCC0\uACBD \uC2E4\uD328 (\uC774\uB984\uB9CC \uC800\uC7A5\uB429\uB2C8\uB2E4): " + msg18(e);
+          }
+        }
+        const stem = cardStem(nm);
+        const target = dir || `studio/config/characters/${stem}`;
+        for (const v of charrefs) if (v.bad) await refit(v);
+        for (const v of vibes) if (v.bad) await repng(v);
+        const meta = /* @__PURE__ */ new Map([["name", nm]]);
+        meta.set("enabled", enabledBox.checked ? "true" : "false");
+        if (order.value.trim() && order.value.trim() !== "100") meta.set("order", String(Math.trunc(Number(order.value)) || 100));
+        let body = `## \uD504\uB86C\uD504\uD2B8
+${caption.value.trim()}
+`;
+        if (negative.value.trim()) body += `
+## \uB124\uAC70\uD2F0\uBE0C
+${negative.value.trim()}
+`;
+        await state.uploadFile("prompt.md", joinFront(meta, body), false, target);
+        const position = posX.value.trim() && posY.value.trim() ? { x: Number(posX.value), y: Number(posY.value) } : null;
+        await state.uploadFile("preset.json", JSON.stringify({
+          version: 1,
+          position,
+          refMode,
+          vibe: vibes.map((v) => ({
+            file: v.file,
+            strength: v.strength,
+            informationExtracted: v.informationExtracted,
+            enabled: v.enabled
+          })),
+          charref: charrefs.map((v) => ({
+            file: v.file,
+            strength: v.strength,
+            fidelity: v.fidelity,
+            mode: v.mode,
+            enabled: v.enabled
+          }))
+        }, null, 2), false, target);
+        hub.notice(`\uCE90\uB9AD\uD130 \u201C${nm}\u201D \uB97C \uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4.`, "ok");
+        if (opts.onSaved) opts.onSaved(target);
+        else S.selectedFile = target;
+        await hub.refreshArea("characters");
+      } catch (e) {
+        out.textContent = msg18(e);
+      } finally {
+        save.disabled = false;
+      }
+    });
+    const del = el("button", { class: "ghost tiny" });
+    armed(del, "\uC0AD\uC81C", "\uCE74\uB4DC \uD3F4\uB354\uC9F8 \uC9C0\uC6B8\uAE4C\uC694?", async () => {
+      if (!dir) return;
+      try {
+        await state.deleteFile(dir);
+        if (opts.onDeleted) opts.onDeleted();
+        else S.selectedFile = "";
+        await hub.refreshArea("characters");
+      } catch (e) {
+        out.textContent = msg18(e);
+      }
+    });
+    const field = (label, node, hint = "") => el("label", { class: "field" }, [
+      el("span", { text: label }),
+      node,
+      hint ? el("div", { class: "hint", text: hint }) : null
+    ]);
+    let section = "prompt";
+    const promptPane = el("div", {}, [
+      field("\uC774\uB984", name),
+      el("div", { class: "row", style: { marginBottom: "8px" } }, [
+        el("label", { class: "row" }, [enabledBox, el("span", { text: "\uD65C\uC131 (\uC0DD\uC131\uC5D0 \uC2E4\uB9BC)" })]),
+        el("label", { class: "field", style: { width: "110px", marginBottom: "0" } }, [el("span", { text: "\uC21C\uC11C" }), order])
+      ]),
+      field("\uD504\uB86C\uD504\uD2B8", caption),
+      field("\uB124\uAC70\uD2F0\uBE0C", negative),
+      el("details", { class: "advbox" }, [
+        el("summary", { text: "\uACE0\uAE09 (\uC704\uCE58)" }),
+        el("div", { class: "row", style: { marginBottom: "8px" } }, [
+          el("label", { class: "field grow", style: { marginBottom: "0" } }, [el("span", { text: "\uC704\uCE58 x (\uC5EC\uB7FF\uC77C \uB54C)" }), posX]),
+          el("label", { class: "field grow", style: { marginBottom: "0" } }, [el("span", { text: "\uC704\uCE58 y" }), posY])
+        ])
+      ])
+    ]);
+    const charBtn = el("button", { class: "tab", text: "\uCE90\uB9AD\uD130" });
+    const vibeBtn = el("button", { class: "tab", text: "\uBC14\uC774\uBE0C" });
+    const charPane = el("div", {}, [
+      el("div", { class: "row", style: { margin: "6px 0" } }, [
+        el("span", { class: "hint grow", text: "\uCE90\uB9AD\uD130 \uB808\uD37C\uB7F0\uC2A4 \xB7 v4.5 \uC804\uC6A9" }),
+        addCharref
+      ]),
+      charrefList
+    ]);
+    const vibePane = el("div", {}, [
+      el("div", { class: "row", style: { margin: "6px 0" } }, [
+        el("span", { class: "hint grow", text: "\uBC14\uC774\uBE0C \uD2B8\uB79C\uC2A4\uD37C" }),
+        addVibe
+      ]),
+      refList
+    ]);
+    const syncRefTabs = () => {
+      charBtn.classList.toggle("on", refMode === "charref");
+      vibeBtn.classList.toggle("on", refMode === "vibe");
+      charPane.style.display = refMode === "charref" ? "" : "none";
+      vibePane.style.display = refMode === "vibe" ? "" : "none";
+    };
+    charBtn.addEventListener("click", () => {
+      refMode = "charref";
+      syncRefTabs();
+    });
+    vibeBtn.addEventListener("click", () => {
+      refMode = "vibe";
+      syncRefTabs();
+    });
+    if (S.status && S.status.charref === false) {
+      refMode = "vibe";
+      charBtn.style.display = "none";
+    }
+    const refsPane = el("div", {}, [
+      el("div", { class: "tabstrip", style: { marginBottom: "4px" } }, [charBtn, vibeBtn]),
+      el("div", { class: "hint", text: "\uB458 \uC911 \uD558\uB098\uB9CC \uC2E4\uB9BD\uB2C8\uB2E4 \u2014 \uC9C0\uAE08 \uC5F4\uB9B0 \uD0ED\uC774 \uC2E4\uB9AC\uB294 \uCABD\uC785\uB2C8\uB2E4." }),
+      charPane,
+      vibePane,
+      pickCharref,
+      pickRef
+    ]);
+    const secPrompt = el("button", { class: "tab", text: "\uD504\uB86C\uD504\uD2B8" });
+    const secRefs = el("button", { class: "tab", text: "\uB808\uD37C\uB7F0\uC2A4" });
+    const syncSection = () => {
+      secPrompt.classList.toggle("on", section === "prompt");
+      secRefs.classList.toggle("on", section === "refs");
+      promptPane.style.display = section === "prompt" ? "" : "none";
+      refsPane.style.display = section === "refs" ? "" : "none";
+    };
+    secPrompt.addEventListener("click", () => {
+      section = "prompt";
+      syncSection();
+    });
+    secRefs.addEventListener("click", () => {
+      section = "refs";
+      syncSection();
+    });
+    const head = (opts.chrome ?? "centre") === "centre" ? editorHead(dir || "\uC0C8 \uCE90\uB9AD\uD130", [isNew ? null : del, save]) : el(
+      "div",
+      { class: "row", style: { marginBottom: "6px", justifyContent: "flex-end", gap: "6px" } },
+      [isNew ? null : del, save]
+    );
+    rootEl.append(
+      head,
+      el("div", { class: "tabstrip", style: { marginBottom: "8px" } }, [secPrompt, secRefs]),
+      promptPane,
+      refsPane,
+      out
+    );
+    syncSection();
+    syncRefTabs();
+    drawRefs();
+    drawCharrefs();
+    if (dir) {
+      void state.readFile(`${dir}/prompt.md`).then((r) => {
+        const { meta, body } = splitFront(r.content);
+        name.value = meta.get("name") ?? dir.split("/").pop() ?? "";
+        enabledBox.checked = (meta.get("enabled") ?? "").toLowerCase() === "true";
+        order.value = meta.get("order") ?? "100";
+        const secs = body.split(/^##+\s*(프롬프트|네거티브|positive|negative)\s*$/im);
+        if (secs.length === 1) {
+          caption.value = body.trim();
+        } else {
+          for (let i = 1; i + 1 < secs.length; i += 2) {
+            const which = secs[i].toLowerCase();
+            if (which === "\uB124\uAC70\uD2F0\uBE0C" || which === "negative") negative.value = secs[i + 1].trim();
+            else caption.value = secs[i + 1].trim();
+          }
+        }
+      }).catch((e) => {
+        out.textContent = msg18(e);
+      });
+      void state.readFile(`${dir}/preset.json`).then((r) => {
+        try {
+          const d = JSON.parse(r.content);
+          if (d.position && typeof d.position === "object") {
+            posX.value = String(d.position.x ?? "");
+            posY.value = String(d.position.y ?? "");
+          }
+          vibes = (d.vibe ?? []).map((v) => ({
+            file: String(v.file || ""),
+            strength: Number(v.strength ?? 0.6),
+            informationExtracted: Number(v.informationExtracted ?? 1),
+            enabled: v.enabled !== false
+          })).filter((v) => v.file);
+          charrefs = (d.charref ?? []).map((v) => ({
+            file: String(v.file || ""),
+            strength: Number(v.strength ?? 0.6),
+            fidelity: Number(v.fidelity ?? 0.6),
+            mode: v.mode === "character&style" ? "character&style" : "character",
+            enabled: v.enabled !== false
+          })).filter((v) => v.file);
+          if (d.refMode === "vibe" || d.refMode === "charref") refMode = d.refMode;
+          else if (vibes.length && !charrefs.length) refMode = "vibe";
+          if (S.status && S.status.charref === false) refMode = "vibe";
+          syncRefTabs();
+          drawRefs();
+          drawCharrefs();
+          void audit();
+        } catch {
+        }
+      }).catch(() => {
+      });
+    }
+    return rootEl;
+  }
+
+  // src/ui/studio/left-prompt.ts
+  var pending2 = null;
+  var loadedDoc = null;
+  var saveTimer = null;
+  var charBadge = null;
+  var fragBadge = null;
+  var fragErrBadge = null;
+  function styleOpen() {
+    try {
+      return localStorage.getItem("hina.studioStyleOpen") !== "0";
+    } catch {
+      return true;
+    }
+  }
+  function styleItems() {
+    return [...S.cards.styles ?? []].sort((a, b) => (a.order ?? 100) - (b.order ?? 100) || a.path.localeCompare(b.path));
+  }
+  function currentStyle() {
+    const path = activeOf("styles")[0];
+    return (S.cards.styles ?? []).find((i) => i.path === path) ?? null;
+  }
+  function buildLeftPrompt(mount) {
+    const cur = currentStyle();
+    const items5 = styleItems();
+    const pickTitle = items5.length ? `\uC800\uC7A5\uB41C \uC2A4\uD0C0\uC77C ${items5.length}\uAC1C \u2014 \uC120\uD0DD \xB7 \uC218\uC815 \xB7 \uC0AD\uC81C \xB7 \uCD94\uAC00` : "\uC2A4\uD0C0\uC77C \uCD94\uAC00";
+    mount.appendChild(el("div", { class: "sectiontitle", style: { padding: "6px 8px 0" }, text: "\uC2A4\uD0C0\uC77C \uD504\uB86C\uD504\uD2B8" }));
+    mount.appendChild(el("div", { style: { padding: "4px 8px 0" } }, [
+      pickerRow(cur ? { name: cur.name, hint: cur.description || void 0 } : null, {
+        title: pickTitle,
+        emptyHint: items5.length ? "\uC120\uD0DD\uB41C \uC2A4\uD0C0\uC77C \uC5C6\uC74C \u2014 \u203A \uC5D0\uC11C \uACE0\uB974\uC138\uC694" : "\uC2A4\uD0C0\uC77C\uC774 \uC5C6\uC2B5\uB2C8\uB2E4. \u203A \uC5D0\uC11C \uD558\uB098 \uB9CC\uB4E4\uC5B4 \uC8FC\uC138\uC694.",
+        onOpen: openStylePicker
+      })
+    ]));
+    const editBox = el("div", { class: "styleedit" });
+    if (cur) buildStyleEditor(editBox, cur.path);
+    else editBox.appendChild(el("div", {
+      class: "hint",
+      style: { padding: "6px 0" },
+      text: "\uC2A4\uD0C0\uC77C\uC744 \uC120\uD0DD\uD558\uBA74 \uAE0D\uC815/\uBD80\uC815 \uD504\uB86C\uD504\uD2B8\uB97C \uC5EC\uAE30\uC11C \uBC14\uB85C \uC218\uC815\uD569\uB2C8\uB2E4."
+    }));
+    const fold2 = el("details", { class: "advbox stylefold", ...styleOpen() ? { open: true } : {} }, [
+      el("summary", { text: "\uD504\uB86C\uD504\uD2B8 \uC218\uC815" }),
+      editBox
+    ]);
+    fold2.addEventListener("toggle", () => {
+      try {
+        localStorage.setItem("hina.studioStyleOpen", fold2.open ? "1" : "0");
+      } catch {
+      }
+    });
+    mount.appendChild(fold2);
+    const nChars = activeOf("characters").length;
+    charBadge = el("span", { class: "badge" + (nChars ? " ok" : ""), text: String(nChars) });
+    const charBtn = el(
+      "button",
+      { class: "ghost toolbtn", title: "\uCE90\uB9AD\uD130 \uD504\uB86C\uD504\uD2B8 \u2014 \uC774 \uC5F4\uC774 \uCE90\uB9AD\uD130 \uBAA9\uB85D\uC73C\uB85C \uBC14\uB01D\uB2C8\uB2E4" },
+      [el("span", { text: "\uCE90\uB9AD\uD130" }), charBadge]
+    );
+    charBtn.addEventListener("click", () => {
+      S.leftView = "characters";
+      hub.drawLeft();
+    });
+    const nFrags = (S.cards.fragments ?? []).length;
+    fragBadge = el("span", { class: "badge", text: String(nFrags) });
+    fragErrBadge = el("span", {
+      class: "badge err",
+      style: { display: S.unresolvedRefs.length ? "" : "none" },
+      text: `\uBBF8\uD574\uACB0 ${S.unresolvedRefs.length}`,
+      title: "\uD504\uB86C\uD504\uD2B8\uAC00 \uCC38\uC870\uD558\uB294\uB370 \uC870\uAC01\uC774 \uC5C6\uB294 \uC774\uB984"
+    });
+    const fragBtn = el(
+      "button",
+      { class: "ghost toolbtn", title: "\uC870\uAC01 \uD504\uB86C\uD504\uD2B8 \u2014 \uC911\uC559\uC5D0 \uAD6C\uC870 \uD3B8\uC9D1 \uD654\uBA74\uC744 \uC5FD\uB2C8\uB2E4" },
+      [el("span", { text: "\uC870\uAC01" }), fragBadge, fragErrBadge]
+    );
+    fragBtn.addEventListener("click", () => {
+      S.centreMode = "fragments";
+      S.selectedFile = "";
+      hub.drawCentre();
+    });
+    mount.appendChild(el("div", { class: "toolbtns" }, [charBtn, fragBtn]));
+  }
+  function syncPromptBadges() {
+    if (charBadge?.isConnected) {
+      const n = activeOf("characters").length;
+      charBadge.textContent = String(n);
+      charBadge.className = "badge" + (n ? " ok" : "");
+    }
+    if (fragBadge?.isConnected) fragBadge.textContent = String((S.cards.fragments ?? []).length);
+    if (fragErrBadge?.isConnected) {
+      fragErrBadge.style.display = S.unresolvedRefs.length ? "" : "none";
+      fragErrBadge.textContent = `\uBBF8\uD574\uACB0 ${S.unresolvedRefs.length}`;
+      fragErrBadge.title = "\uD504\uB86C\uD504\uD2B8\uAC00 \uCC38\uC870\uD558\uB294\uB370 \uC870\uAC01\uC774 \uC5C6\uB294 \uC774\uB984: " + S.unresolvedRefs.join(", ");
+    }
+  }
+  function openStylePicker() {
+    void flushSave();
+    openListPicker({
+      title: "\uC2A4\uD0C0\uC77C \uD504\uB86C\uD504\uD2B8 \uC120\uD0DD",
+      hint: "\uD55C \uBC88\uC5D0 \uD558\uB098\uB9CC \uC2E4\uB9BD\uB2C8\uB2E4. \uC120\uD0DD\uD558\uBA74 \uBC14\uB85C \uC801\uC6A9\uB429\uB2C8\uB2E4.",
+      load: async () => styleItems().map((i) => ({
+        id: i.path,
+        name: i.name,
+        hint: i.description || void 0,
+        selected: !!i.enabled
+      })),
+      onSelect: (e) => selectStyle(e.id),
+      onEdit: (e) => {
+        S.selectedFile = e.id;
+        hub.drawCentre();
+      },
+      onDelete: async (e) => {
+        await state.deleteFile(e.id);
+        S.cards.styles = (S.cards.styles ?? []).filter((i) => i.path !== e.id);
+        if (S.selectedFile === e.id) {
+          S.selectedFile = "";
+          hub.drawCentre();
+        }
+        hub.drawLeft();
+        hub.touchQuiet();
+      },
+      onCreate: () => {
+        askName("\uC0C8 \uC2A4\uD0C0\uC77C", {
+          label: "\uC774\uB984\uC774 \uACE7 \uD30C\uC77C\uBA85\uC785\uB2C8\uB2E4.",
+          placeholder: "\uC608: \uC218\uCC44\uD654",
+          onSubmit: async (nm) => {
+            const path = await newCard("styles", "", nm);
+            if (!path) return;
+            void selectStyle(path);
+          }
+        });
+      },
+      createLabel: "\uC0C8 \uC2A4\uD0C0\uC77C \uCD94\uAC00"
+    });
+  }
+  async function selectStyle(path) {
+    const styles = S.cards.styles ?? [];
+    for (const it of styles) {
+      if (it.path !== path && it.enabled) {
+        await state.studio.setMeta(it.path, { enabled: false });
+        it.enabled = false;
+      }
+    }
+    const target = styles.find((i) => i.path === path);
+    if (target && !target.enabled) {
+      await state.studio.setMeta(path, { enabled: true });
+      target.enabled = true;
+    }
+    pending2 = null;
+    loadedDoc = null;
+    hub.drawLeft();
+    hub.drawCentre();
+    checkUnresolved();
+    hub.touchQuiet();
+  }
+  function buildStyleEditor(mountEl, path) {
+    const pos = el("textarea", { rows: "7", class: "promptedit", placeholder: "\uAE0D\uC815 \uD504\uB86C\uD504\uD2B8" });
+    const neg = el("textarea", { rows: "4", class: "promptedit", placeholder: "\uBD80\uC815 \uD504\uB86C\uD504\uD2B8" });
+    const status = el("div", { class: "hint", style: { minHeight: "14px" } });
+    mountEl.append(
+      el("label", { class: "field" }, [el("span", { text: "\uAE0D\uC815 \uD504\uB86C\uD504\uD2B8" }), pos]),
+      el("label", { class: "field" }, [el("span", { text: "\uBD80\uC815 \uD504\uB86C\uD504\uD2B8" }), neg]),
+      status
+    );
+    const fragNames2 = () => fragKeys();
+    attachHilite(pos, { mode: "nai", fragments: fragNames2 });
+    attachHilite(neg, { mode: "nai", fragments: fragNames2 });
+    const fill = (positive, negative) => {
+      pos.value = positive;
+      neg.value = negative;
+    };
+    if (pending2 && pending2.path === path) {
+      fill(pending2.positive, pending2.negative);
+      schedule(path, status);
+    } else if (loadedDoc && loadedDoc.path === path) {
+      fill(loadedDoc.doc.positive, loadedDoc.doc.negative);
+    } else {
+      status.textContent = "\uC77D\uB294 \uC911\uC785\uB2C8\uB2E4\u2026";
+      void state.readFile(path).then((r) => {
+        const doc = parseStyleDoc(r.content);
+        loadedDoc = { path, doc };
+        if (!pending2 || pending2.path !== path) {
+          if (pos.isConnected) fill(doc.positive, doc.negative);
+        }
+        status.textContent = "";
+      }).catch((e) => {
+        status.textContent = msg18(e);
+      });
+    }
+    const onEdit = () => {
+      pending2 = { path, positive: pos.value, negative: neg.value };
+      schedule(path, status);
+    };
+    pos.addEventListener("input", onEdit);
+    neg.addEventListener("input", onEdit);
+  }
+  function schedule(path, status) {
+    if (saveTimer) clearTimeout(saveTimer);
+    status.textContent = "\uC218\uC815 \uC911\u2026";
+    saveTimer = setTimeout(() => {
+      void flushSave().then((ok) => {
+        if (ok && status.isConnected) {
+          status.textContent = `\uC800\uC7A5\uB428 ${(/* @__PURE__ */ new Date()).toLocaleTimeString()}`;
+        }
+      });
+    }, 800);
+  }
+  async function flushSave() {
+    if (saveTimer) {
+      clearTimeout(saveTimer);
+      saveTimer = null;
+    }
+    const p = pending2;
+    if (!p) return false;
+    let meta;
+    if (loadedDoc && loadedDoc.path === p.path) {
+      meta = loadedDoc.doc.meta;
+    } else {
+      try {
+        meta = parseStyleDoc((await state.readFile(p.path)).content).meta;
+      } catch (e) {
+        hub.notice("\uC2A4\uD0C0\uC77C\uC744 \uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+        return false;
+      }
+    }
+    const doc = { meta, positive: p.positive, negative: p.negative };
+    try {
+      const dir = p.path.slice(0, p.path.lastIndexOf("/"));
+      const fname = p.path.slice(p.path.lastIndexOf("/") + 1);
+      await state.uploadFile(fname, buildStyleDoc(doc), false, dir);
+      loadedDoc = { path: p.path, doc };
+      if (pending2 === p) pending2 = null;
+      hub.touchQuiet();
+      checkUnresolved();
+      return true;
+    } catch (e) {
+      hub.notice("\uC2A4\uD0C0\uC77C\uC744 \uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+      return false;
+    }
+  }
+
+  // src/ui/studio/left-chars.ts
+  var openFolders = /* @__PURE__ */ new Set([""]);
+  var extraFolders = /* @__PURE__ */ new Set();
+  var filter4 = "";
+  function grouped() {
+    const out = /* @__PURE__ */ new Map();
+    const norm2 = (f) => f === "." ? "" : f;
+    for (const f of extraFolders) out.set(f, []);
+    const q = filter4.trim().toLowerCase();
+    const items5 = (S.cards.characters ?? []).filter((i) => !q || i.name.toLowerCase().includes(q) || (i.description ?? "").toLowerCase().includes(q));
+    for (const it of items5.sort((a, b) => (a.order ?? 100) - (b.order ?? 100) || a.path.localeCompare(b.path))) {
+      const key = norm2(it.folder ?? "");
+      if (!out.has(key)) out.set(key, []);
+      out.get(key).push(it);
+      if (key) extraFolders.delete(key);
+    }
+    return new Map([...out.entries()].sort(([a], [b]) => a === "" ? -1 : b === "" ? 1 : a.localeCompare(b)));
+  }
+  async function moveCards(folder, sources) {
+    const dstDir = "studio/config/characters" + (folder ? "/" + folder : "");
+    try {
+      for (const src of sources) {
+        if (!src.startsWith("studio/config/characters/")) continue;
+        const parent = src.slice(0, src.lastIndexOf("/"));
+        if (parent === dstDir || dstDir.startsWith(src + "/")) continue;
+        const r = await state.moveFile(src, dstDir);
+        if (S.charOpen === src) S.charOpen = r.to;
+      }
+      if (folder) openFolders.add(folder);
+      await hub.refreshArea("characters");
+    } catch (e) {
+      hub.notice("\uC62E\uAE30\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+    }
+  }
+  function buildLeftChars(mount) {
+    if (S.charOpen) {
+      const it = (S.cards.characters ?? []).find((c) => c.path === S.charOpen);
+      const backList = el("button", { class: "ghost tiny", text: "\u2190 \uBAA9\uB85D" });
+      backList.addEventListener("click", () => {
+        S.charOpen = "";
+        hub.drawLeft();
+      });
+      mount.appendChild(el("div", { class: "row", style: { padding: "6px 6px 4px", gap: "6px" } }, [
+        backList,
+        el("span", { class: "sectiontitle grow", text: it?.name ?? S.charOpen.split("/").pop() ?? "" })
+      ]));
+      mount.appendChild(el("div", { class: "charinline" }, [
+        characterEditor(S.charOpen, {
+          chrome: "inline",
+          onSaved: (d) => {
+            S.charOpen = d;
+          },
+          onDeleted: () => {
+            S.charOpen = "";
+          }
+        })
+      ]));
+      return;
+    }
+    const back = el("button", { class: "ghost tiny", text: "\u2190 \uD504\uB86C\uD504\uD2B8" });
+    back.addEventListener("click", () => {
+      S.leftView = "main";
+      hub.drawLeft();
+    });
+    const title = el("span", {
+      class: "sectiontitle grow",
+      text: "\uCE90\uB9AD\uD130",
+      title: "\uCE74\uB4DC\uB97C \uD3F4\uB354 \uC81C\uBAA9\uC73C\uB85C \uB04C\uC5B4\uB2E4 \uB193\uC73C\uBA74 \uADF8 \uD3F4\uB354\uB85C \uC62E\uACA8\uC9D1\uB2C8\uB2E4"
+    });
+    mount.appendChild(el("div", { class: "row", style: { padding: "6px 6px 0", gap: "6px" } }, [
+      back,
+      title
+    ]));
+    const search = el("input", { class: "grow", placeholder: "\uC774\uB984\xB7\uC124\uBA85 \uAC80\uC0C9", value: filter4 });
+    search.addEventListener("input", () => {
+      filter4 = search.value;
+      hub.drawLeft();
+    });
+    const addFolder = el("button", { class: "ghost tiny", text: "\uFF0B \uD3F4\uB354", title: "\uCE90\uB9AD\uD130\uB97C \uBB36\uB294 \uD3F4\uB354\uB97C \uB9CC\uB4ED\uB2C8\uB2E4" });
+    addFolder.addEventListener("click", () => {
+      namePopover(addFolder, {
+        label: "\uC0C8 \uD3F4\uB354 \uC774\uB984",
+        ok: "\uB9CC\uB4E4\uAE30",
+        onSubmit: async (raw) => {
+          const nm = cardStem(raw);
+          if (!nm) return;
+          try {
+            await state.mkdirFile("studio/config/characters/" + nm);
+            extraFolders.add(nm);
+            openFolders.add(nm);
+            hub.touchQuiet();
+            hub.drawLeft();
+          } catch (e) {
+            hub.notice("\uD3F4\uB354\uB97C \uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+          }
+        }
+      });
+    });
+    const add = el("button", { class: "primary tiny", text: "\uFF0B \uCE90\uB9AD\uD130" });
+    add.addEventListener("click", () => addCharacter(add, ""));
+    mount.appendChild(el("div", { class: "row", style: { padding: "4px 6px 6px", gap: "4px" } }, [
+      search,
+      addFolder,
+      add
+    ]));
+    const groups2 = grouped();
+    if (![...groups2.values()].some((v) => v.length) && !extraFolders.size) {
+      mount.appendChild(el("div", {
+        class: "hint",
+        style: { padding: "4px 10px" },
+        text: filter4 ? "\uAC80\uC0C9 \uACB0\uACFC\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4." : "\uCE90\uB9AD\uD130\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4. \uFF0B \uCE90\uB9AD\uD130 \uB85C \uB9CC\uB4E4\uC5B4 \uC8FC\uC138\uC694."
+      }));
+    }
+    for (const [folder, items5] of groups2) {
+      const isOpen = folder === "" || openFolders.has(folder);
+      const head = el("div", {
+        class: "row secthead",
+        style: { padding: "4px 6px 0", cursor: folder ? "pointer" : "default" },
+        title: folder ? isOpen ? "\uC811\uAE30 \xB7 \uCE74\uB4DC\uB97C \uB04C\uC5B4\uB2E4 \uB193\uC73C\uBA74 \uC774 \uD3F4\uB354\uB85C" : "\uD3BC\uCE58\uAE30" : "\uCE74\uB4DC\uB97C \uB04C\uC5B4\uB2E4 \uB193\uC73C\uBA74 \uBBF8\uBD84\uB958\uB85C"
+      }, [
+        el("span", { class: "hint", text: folder ? isOpen ? "\u25BE" : "\u25B8" : "" }),
+        el("span", { class: "sectiontitle grow", text: folder || "\uBBF8\uBD84\uB958" }),
+        el("span", { class: "hint", text: String(items5.length) })
+      ]);
+      installDrop(head, { into: () => folder, onMove: (f, sources) => void moveCards(f, sources) });
+      if (folder) {
+        head.addEventListener("click", () => {
+          if (openFolders.has(folder)) openFolders.delete(folder);
+          else openFolders.add(folder);
+          hub.drawLeft();
+        });
+        const addHere = el("button", { class: "ghost tiny", text: "\uFF0B", title: "\uC774 \uD3F4\uB354\uC5D0 \uCE90\uB9AD\uD130 \uCD94\uAC00" });
+        addHere.addEventListener("click", (e) => {
+          e.stopPropagation();
+          addCharacter(addHere, folder);
+        });
+        head.appendChild(addHere);
+      }
+      mount.appendChild(head);
+      if (!isOpen) continue;
+      if (!items5.length) {
+        mount.appendChild(el("div", {
+          class: "hint",
+          style: { padding: "0 10px 4px" },
+          text: folder ? "(\uBE44\uC5B4 \uC788\uC74C \u2014 \uCE74\uB4DC\uB97C \uB04C\uC5B4\uB2E4 \uB193\uC73C\uC138\uC694)" : "(\uC5C6\uC74C)"
+        }));
+        continue;
+      }
+      for (const it of items5) mount.appendChild(charRow(it));
+    }
+  }
+  function charRow(it) {
+    const badges = [];
+    if (it.vibe) badges.push({ text: `\uBC14\uC774\uBE0C ${it.vibe}`, title: "\uC774 \uCE74\uB4DC\uC758 \uBC14\uC774\uBE0C\uAC00 \uD568\uAED8 \uC2E4\uB9BD\uB2C8\uB2E4" });
+    if (it.charref) badges.push({ text: `\uB808\uD37C\uB7F0\uC2A4 ${it.charref}` });
+    const row = listRow({
+      variant: "pick",
+      selected: S.charOpen === it.path,
+      title: it.name || it.path.split("/").pop() || it.path,
+      hint: it.description || void 0,
+      badges,
+      // Dense rows and a slide toggle: the checkbox-and-air version read as a
+      // settings page, not a cast list (§1-31).
+      cls: "compact",
+      toggle: {
+        checked: !!it.enabled,
+        style: "switch",
+        title: "\uCF1C\uBA74 \uC0DD\uC131 \uC694\uCCAD\uC5D0 \uC774 \uCE90\uB9AD\uD130\uAC00 \uC2E4\uB9BD\uB2C8\uB2E4 (\uC21C\uC11C\uB300\uB85C \uC774\uC5B4\uC9D1\uB2C8\uB2E4)",
+        onChange: async (v) => {
+          try {
+            await state.studio.setMeta(it.path, { enabled: v });
+          } catch (e) {
+            hub.notice("\uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+            throw e;
+          }
+          it.enabled = v;
+          hub.drawLeft();
+          hub.drawCentre();
+          checkUnresolved();
+          hub.touchQuiet();
+        }
+      },
+      onClick: () => {
+        S.charOpen = it.path;
+        hub.drawLeft();
+      }
+    });
+    installDrag(row, () => [it.path]);
+    return row;
+  }
+  function addCharacter(anchor, folder) {
+    namePopover(anchor, {
+      label: folder ? `${folder}/ \uC5D0 \uC0C8 \uCE90\uB9AD\uD130` : "\uC0C8 \uCE90\uB9AD\uD130 \uC774\uB984",
+      placeholder: "\uC608: \uC720\uB098",
+      ok: "\uB9CC\uB4E4\uAE30",
+      onSubmit: async (nm) => {
+        const path = await newCard("characters", folder, nm);
+        if (!path) return;
+        if (folder) openFolders.add(folder);
+        S.charOpen = path;
+        hub.drawLeft();
+      }
+    });
+  }
+
+  // src/ui/studio/left-output.ts
+  var clip = null;
+  function toTreeNode2(n) {
+    return {
+      path: n.path,
+      name: n.name,
+      kids: n.children.map(toTreeNode2),
+      count: countFiles2(n),
+      title: n.path,
+      droppable: true
+    };
+  }
+  function spec2() {
+    return {
+      expanded: S.open,
+      // The highlight follows the folder only while the centre shows it.
+      selected: new Set(S.selectedFile ? [] : [S.selected]),
+      onOpen(node) {
+        openFolder(node);
+      },
+      onContext(node, ev) {
+        openOutputMenu(node, ev);
+      },
+      onToggle(node) {
+        if (S.open.has(node.path)) S.open.delete(node.path);
+        else S.open.add(node.path);
+        hub.drawLeft();
+      },
+      // Rows dragged from the centre grid land in a folder here.
+      onDropMove(path, sources) {
+        void (async () => {
+          const list2 = sources.filter((src) => src !== path && !path.startsWith(src + "/"));
+          if (!list2.length) return;
+          try {
+            const r = await state.moveFiles(list2, path);
+            if (r.failed.length) hub.notice(`${r.done}\uAC1C \uC774\uB3D9, ${r.failed.length}\uAC1C\uB294 \uAC74\uB108\uB700 \u2014 ${r.failed[0].error}`, "err");
+            hub.touchQuiet();
+            await hub.refresh();
+          } catch (e) {
+            hub.notice("\uC62E\uAE30\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+          }
+        })();
+      }
+    };
+  }
+  function openFolder(node) {
+    if (node.kids.length) S.open.add(node.path);
+    S.selected = node.path;
+    S.selectedFile = "";
+    S.centreMode = "tab";
+    S.centreTab = "inspect";
+    persistCentreTab();
+    hub.drawLeft();
+    hub.drawCentre();
+  }
+  function openOutputMenu(node, ev) {
+    const isRoot = node.path === (S.outputRoot?.path ?? "studio/output");
+    menuAt(ev.clientX, ev.clientY, [
+      { label: "\uAC80\uC218 \uC5F4\uAE30", onClick: () => openFolder(node) },
+      { label: "\uC0C8 \uD3F4\uB354", onClick: () => newFolderIn(node.path) },
+      { label: "\uC774\uB984 \uBC14\uAFB8\uAE30", disabled: isRoot, onClick: () => renameFolder(node) },
+      null,
+      {
+        label: "\uBCF5\uC0AC",
+        disabled: isRoot,
+        onClick: () => {
+          clip = { op: "copy", paths: [node.path] };
+          hub.notice("\uBCF5\uC0AC\uD588\uC2B5\uB2C8\uB2E4 \u2014 \uBD99\uC5EC\uB123\uC744 \uD3F4\uB354\uC5D0\uC11C \uC6B0\uD074\uB9AD\uD558\uC138\uC694.");
+        }
+      },
+      {
+        label: "\uC798\uB77C\uB0B4\uAE30",
+        disabled: isRoot,
+        onClick: () => {
+          clip = { op: "cut", paths: [node.path] };
+          hub.notice("\uC798\uB77C\uB0C8\uC2B5\uB2C8\uB2E4 \u2014 \uBD99\uC5EC\uB123\uC744 \uD3F4\uB354\uC5D0\uC11C \uC6B0\uD074\uB9AD\uD558\uC138\uC694.");
+        }
+      },
+      {
+        label: clip ? `\uBD99\uC5EC\uB123\uAE30 (${clip.paths.length})` : "\uBD99\uC5EC\uB123\uAE30",
+        disabled: !clip,
+        onClick: () => void pasteIn(node.path)
+      },
+      null,
+      { label: "\uACBD\uB85C \uBCF5\uC0AC", onClick: () => {
+        copyToClipboard(node.path);
+        hub.notice("\uACBD\uB85C\uB97C \uBCF5\uC0AC\uD588\uC2B5\uB2C8\uB2E4.", "ok");
+      } },
+      { label: "\uB0B4\uB824\uBC1B\uAE30 (zip)", onClick: () => void zipFolder(node.path) },
+      null,
+      // The two-step confirm as a second one-item menu: no window.confirm in
+      // the sandboxed iframe (the file tree's convention).
+      { label: "\uC0AD\uC81C\u2026", danger: true, disabled: isRoot, onClick: () => confirmDelete(node.path, ev) }
+    ]);
+  }
+  function newFolderIn(where) {
+    askName("\uC0C8 \uD3F4\uB354", {
+      label: `${where}/ \uC548\uC5D0`,
+      placeholder: "\uD3F4\uB354 \uC774\uB984",
+      ok: "\uB9CC\uB4E4\uAE30",
+      onSubmit: async (raw) => {
+        const nm = raw.trim().replace(/[\\/]+/g, "-");
+        if (!nm) return;
+        try {
+          await state.mkdirFile(where + "/" + nm);
+          S.open.add(where);
+          hub.touchQuiet();
+          await hub.refresh();
+        } catch (e) {
+          hub.notice("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+        }
+      }
+    });
+  }
+  function renameFolder(node) {
+    askName("\uC774\uB984 \uBC14\uAFB8\uAE30", {
+      label: `${node.name} \u2192 \uC0C8 \uC774\uB984`,
+      value: node.name,
+      ok: "\uBC14\uAFB8\uAE30",
+      onSubmit: async (raw) => {
+        const nm = raw.trim().replace(/[\\/]+/g, "-");
+        if (!nm || nm === node.name) return;
+        const dir = node.path.slice(0, node.path.lastIndexOf("/"));
+        try {
+          const r = await state.moveFile(node.path, dir + "/" + nm);
+          if (S.selected === node.path || S.selected.startsWith(node.path + "/")) S.selected = r.to;
+          hub.touchQuiet();
+          await hub.refresh();
+        } catch (e) {
+          hub.notice("\uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+        }
+      }
+    });
+  }
+  async function pasteIn(target) {
+    const c = clip;
+    if (!c) return;
+    const list2 = c.paths.filter((q) => q !== target && !target.startsWith(q + "/"));
+    if (!list2.length) return;
+    try {
+      const r = c.op === "copy" ? await state.copyFiles(list2, target) : await state.moveFiles(list2, target);
+      hub.notice(
+        r.failed.length ? `${r.done}\uAC1C \uCC98\uB9AC, ${r.failed.length}\uAC1C\uB294 \uAC74\uB108\uB700 \u2014 ${r.failed[0].error}` : `${r.done}\uAC1C\uB97C ${target}/ \uC5D0 ${c.op === "copy" ? "\uBCF5\uC0AC" : "\uC774\uB3D9"}\uD588\uC2B5\uB2C8\uB2E4.`,
+        r.failed.length ? "err" : "ok"
+      );
+    } catch (e) {
+      hub.notice("\uCC98\uB9AC\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+    }
+    if (c.op === "cut") clip = null;
+    hub.touchQuiet();
+    await hub.refresh();
+  }
+  async function zipFolder(path) {
+    try {
+      const bytes = await state.downloadZip([path], path.split("/").pop() ?? "output");
+      hub.notice(`${fmtSize4(bytes)} zip \uC744 \uBE0C\uB77C\uC6B0\uC800 \uB2E4\uC6B4\uB85C\uB4DC\uB85C \uB118\uACBC\uC2B5\uB2C8\uB2E4.`, "ok");
+    } catch (e) {
+      hub.notice("\uB0B4\uB824\uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+    }
+  }
+  function confirmDelete(path, ev) {
+    menuAt(ev.clientX, ev.clientY, [
+      { label: "\uC815\uB9D0 \uC0AD\uC81C (\uD3F4\uB354\uC9F8, \uC548\uC758 \uD30C\uC77C \uD3EC\uD568)", danger: true, onClick: () => void doDelete(path) }
+    ]);
+  }
+  async function doDelete(path) {
+    try {
+      const r = await state.deleteFiles([path]);
+      hub.notice(
+        r.failed.length ? `\uC9C0\uC6B0\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4 \u2014 ${r.failed[0].error}` : "\uC9C0\uC6E0\uC2B5\uB2C8\uB2E4.",
+        r.failed.length ? "err" : "ok"
+      );
+    } catch (e) {
+      hub.notice("\uC9C0\uC6B0\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+    }
+    if (S.selected === path || S.selected.startsWith(path + "/")) S.selected = S.outputRoot?.path ?? "studio/output";
+    hub.touchQuiet();
+    await hub.refresh();
+  }
+  function buildLeftOutput(mount) {
+    if (!S.outputRoot) return;
+    mount.appendChild(treeRow(toTreeNode2(S.outputRoot), 0, spec2()));
+  }
+
+  // src/ui/studio/center-frags.ts
+  var selFrag = "";
+  var openFolders2 = /* @__PURE__ */ new Set([""]);
+  var extraFolders2 = /* @__PURE__ */ new Set();
+  var filter5 = "";
+  function norm(f) {
+    return f === "." ? "" : f;
+  }
+  function grouped2() {
+    const out = /* @__PURE__ */ new Map([["", []]]);
+    for (const f of extraFolders2) out.set(f, []);
+    const q = filter5.trim().toLowerCase();
+    for (const it of [...S.cards.fragments ?? []].sort((a, b) => a.path.localeCompare(b.path))) {
+      if (q && !it.name.toLowerCase().includes(q) && !(it.description ?? "").toLowerCase().includes(q)) continue;
+      const key = norm(it.folder ?? "");
+      if (!out.has(key)) out.set(key, []);
+      out.get(key).push(it);
+      if (key) extraFolders2.delete(key);
+    }
+    return new Map([...out.entries()].sort(([a], [b]) => a === "" ? -1 : b === "" ? 1 : a.localeCompare(b)));
+  }
+  function drawFragments() {
+    const viewMount6 = S.viewMount;
+    if (!viewMount6) return;
+    const back = el("button", { class: "ghost tiny", text: "\u2190 \uB3CC\uC544\uAC00\uAE30" });
+    back.addEventListener("click", () => {
+      S.centreMode = "tab";
+      hub.drawCentre();
+    });
+    const addFolder = el("button", { class: "ghost tiny", text: "\uFF0B \uD3F4\uB354" });
+    addFolder.addEventListener("click", () => {
+      namePopover(addFolder, {
+        label: "\uC0C8 \uD3F4\uB354 \uC774\uB984",
+        ok: "\uB9CC\uB4E4\uAE30",
+        onSubmit: async (raw) => {
+          const nm = cardStem(raw);
+          if (!nm) return;
+          try {
+            await state.mkdirFile("studio/config/fragments/" + nm);
+            extraFolders2.add(nm);
+            openFolders2.add(nm);
+            hub.touchQuiet();
+            hub.drawCentre();
+          } catch (e) {
+            hub.notice("\uD3F4\uB354\uB97C \uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+          }
+        }
+      });
+    });
+    const add = el("button", { class: "primary tiny", text: "\uFF0B \uC870\uAC01" });
+    add.addEventListener("click", () => addFragment(add, ""));
+    const head = el("div", { class: "row", style: { marginBottom: "6px" } }, [
+      back,
+      el("span", { class: "sectiontitle grow", text: `\uC870\uAC01 \uD504\uB86C\uD504\uD2B8 \xB7 ${(S.cards.fragments ?? []).length}\uAC1C` }),
+      S.unresolvedRefs.length ? el("span", {
+        class: "badge err",
+        text: `\uBBF8\uD574\uACB0 ${S.unresolvedRefs.length}`,
+        title: "\uD504\uB86C\uD504\uD2B8\uAC00 \uCC38\uC870\uD558\uB294\uB370 \uC870\uAC01\uC774 \uC5C6\uB294 \uC774\uB984: " + S.unresolvedRefs.join(", ")
+      }) : null,
+      addFolder,
+      add
+    ]);
+    viewMount6.appendChild(head);
+    viewMount6.appendChild(el("div", {
+      class: "hint",
+      style: { marginBottom: "8px" },
+      text: "\uD504\uB86C\uD504\uD2B8\uC5D0\uC11C <\uC774\uB984> \xB7 <\uD3F4\uB354/\uC774\uB984> \xB7 <\uCEEC\uB809\uC158.\uD0A4> \uB85C \uCC38\uC870\uD569\uB2C8\uB2E4. \uC774\uB984\uC774 \uACE7 \uCC38\uC870 \uD0A4\uC774\uACE0, \uAC19\uC740 \uC774\uB984\uC774 \uC5EC\uB7EC \uD3F4\uB354\uC5D0 \uC788\uC73C\uBA74 <\uD3F4\uB354/\uC774\uB984> \uC73C\uB85C \uAD6C\uBD84\uD574 \uC8FC\uC138\uC694. \uC5EC\uB7EC \uC904 \uC870\uAC01\uC740 \uC7A5\uB9C8\uB2E4 \uB79C\uB364\uC73C\uB85C 1\uC904\uB9CC \uC2E4\uB9BD\uB2C8\uB2E4 (# \uC8FC\uC11D\xB7\uBE48 \uC904 \uC81C\uC678)."
+    }));
+    const listCol = el("div", { class: "fraglist" });
+    const editCol = el("div", { class: "fragedit" });
+    viewMount6.appendChild(el("div", { class: "fragcols" }, [listCol, editCol]));
+    const search = el("input", { placeholder: "\uC774\uB984\xB7\uC124\uBA85 \uAC80\uC0C9", value: filter5 });
+    search.addEventListener("input", () => {
+      filter5 = search.value;
+      hub.drawCentre();
+    });
+    listCol.appendChild(el("div", { style: { marginBottom: "4px" } }, [search]));
+    const stemCount = /* @__PURE__ */ new Map();
+    for (const it of S.cards.fragments ?? []) stemCount.set(it.name, (stemCount.get(it.name) ?? 0) + 1);
+    const groups2 = grouped2();
+    for (const [folder, items5] of groups2) {
+      if (folder) {
+        const isOpen = openFolders2.has(folder);
+        const fhead = el("div", { class: "row secthead", style: { padding: "4px 2px 0", cursor: "pointer" } }, [
+          el("span", { class: "hint", text: isOpen ? "\u25BE" : "\u25B8" }),
+          el("span", { class: "sectiontitle grow", text: folder }),
+          el("span", { class: "hint", text: String(items5.length) })
+        ]);
+        fhead.addEventListener("click", () => {
+          if (openFolders2.has(folder)) openFolders2.delete(folder);
+          else openFolders2.add(folder);
+          hub.drawCentre();
+        });
+        const addHere = el("button", { class: "ghost tiny", text: "\uFF0B", title: "\uC774 \uD3F4\uB354\uC5D0 \uC870\uAC01 \uCD94\uAC00" });
+        addHere.addEventListener("click", (e) => {
+          e.stopPropagation();
+          addFragment(addHere, folder);
+        });
+        fhead.appendChild(addHere);
+        listCol.appendChild(fhead);
+        if (!isOpen) continue;
+        if (!items5.length) {
+          listCol.appendChild(el("div", { class: "hint", style: { padding: "0 8px 4px" }, text: "(\uBE44\uC5B4 \uC788\uC74C)" }));
+          continue;
+        }
+      } else if (!items5.length) {
+        continue;
+      }
+      for (const it of items5) {
+        const row = el("div", { class: "pickrow" + (selFrag === it.path ? " on" : ""), title: it.path }, [
+          el("div", { class: "grow" }, [
+            el("div", { class: "pickname" }, [
+              el("span", { text: it.name }),
+              (stemCount.get(it.name) ?? 0) > 1 ? el("span", {
+                class: "badge warn",
+                text: "\uC911\uBCF5 \uC774\uB984",
+                title: "\uAC19\uC740 \uC774\uB984\uC774 \uC5EC\uB7EC \uD3F4\uB354\uC5D0 \uC788\uC2B5\uB2C8\uB2E4 \u2014 <\uD3F4\uB354/\uC774\uB984> \uC73C\uB85C \uAD6C\uBD84\uD558\uC138\uC694. \uD3F4\uB354 \uC5C6\uB294 <\uC774\uB984> \uC740 \uCD5C\uC0C1\uC704(\uC5C6\uC73C\uBA74 \uC815\uB82C\uC21C) \uC870\uAC01\uC73C\uB85C \uD480\uB9BD\uB2C8\uB2E4."
+              }) : null
+            ]),
+            it.description ? el("div", { class: "hint", text: it.description }) : null
+          ])
+        ]);
+        installDrag(row, () => [it.path]);
+        row.addEventListener("click", () => {
+          selFrag = it.path;
+          hub.drawCentre();
+        });
+        listCol.appendChild(row);
+      }
+    }
+    if (!selFrag) {
+      editCol.appendChild(el("div", { class: "empty", text: "\uC67C\uCABD\uC5D0\uC11C \uC870\uAC01\uC744 \uACE0\uB974\uAC70\uB098 \uFF0B \uC870\uAC01 \uC73C\uB85C \uB9CC\uB4E4\uC5B4 \uC8FC\uC138\uC694." }));
+      return;
+    }
+    const moveBtn = el("button", { class: "ghost tiny", text: "\uD3F4\uB354 \uC774\uB3D9" });
+    moveBtn.addEventListener("click", () => {
+      const body = el("div", { class: "applypop" });
+      const close = popover(moveBtn, body);
+      const targets = ["", ...[...grouped2().keys()].filter((k) => k)];
+      for (const t of targets) {
+        const cur = norm((S.cards.fragments ?? []).find((i) => i.path === selFrag)?.folder ?? "");
+        const b = el("button", { class: "ghost tiny", text: t || "(\uCD5C\uC0C1\uC704)" });
+        b.disabled = t === cur;
+        b.addEventListener("click", async () => {
+          close();
+          try {
+            const r = await state.moveFile(selFrag, "studio/config/fragments" + (t ? "/" + t : ""));
+            selFrag = r.to;
+            await hub.refreshArea("fragments");
+          } catch (e) {
+            hub.notice("\uC62E\uAE30\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+          }
+        });
+        body.appendChild(b);
+      }
+    });
+    editCol.appendChild(el("div", { class: "row", style: { marginBottom: "4px" } }, [
+      el("span", { class: "sectiontitle grow", text: selFrag }),
+      moveBtn
+    ]));
+    editCol.appendChild(cardEditor(selFrag, {
+      chrome: "inline",
+      onSaved: (p) => {
+        selFrag = p;
+      },
+      onDeleted: () => {
+        selFrag = "";
+      }
+    }));
+  }
+  function addFragment(anchor, folder) {
+    namePopover(anchor, {
+      label: folder ? `${folder}/ \uC5D0 \uC0C8 \uC870\uAC01 \u2014 <${folder}/\uC774\uB984> \uC73C\uB85C \uCC38\uC870\uB429\uB2C8\uB2E4` : "\uC0C8 \uC870\uAC01 \uC774\uB984 \u2014 <\uC774\uB984> \uC73C\uB85C \uCC38\uC870\uB429\uB2C8\uB2E4",
+      ok: "\uB9CC\uB4E4\uAE30",
+      onSubmit: async (nm) => {
+        const path = await newCard("fragments", folder, nm);
+        if (!path) return;
+        if (folder) openFolders2.add(folder);
+        selFrag = path;
+        hub.drawCentre();
+      }
+    });
+  }
+
+  // src/ui/studio/center-single.ts
+  var previewBox = null;
+  var imgEl = null;
+  var captionEl = null;
+  var emptyEl = null;
+  var progressLine = null;
+  var runBtn = null;
+  var stripBox = null;
+  var shownKey = "";
+  function drawSingle(mount) {
+    shownKey = "";
+    mount.appendChild(statusRow());
+    const notice10 = tokenNotice();
+    if (notice10) mount.appendChild(notice10);
+    imgEl = el("img", { alt: "", style: { display: "none" } });
+    captionEl = el("div", { class: "hint previewname" });
+    emptyEl = el("div", { class: "empty" });
+    previewBox = el("div", { class: "bigpreview" }, [imgEl, captionEl, emptyEl]);
+    mount.appendChild(previewBox);
+    const prev = el("button", { class: "ghost tiny", text: "\u25C0", title: "\uAC19\uC740 \uBC30\uCE58\uC758 \uC774\uC804 \uC7A5" });
+    const next = el("button", { class: "ghost tiny", text: "\u25B6", title: "\uAC19\uC740 \uBC30\uCE58\uC758 \uB2E4\uC74C \uC7A5" });
+    const live = el("button", { class: "ghost tiny", text: "\uB77C\uC774\uBE0C", title: "\uACE0\uC815\uC744 \uD480\uACE0 \uC9C4\uD589 \uC911\uC778 \uC0DD\uC131\uC744 \uB530\uB77C\uAC11\uB2C8\uB2E4" });
+    prev.addEventListener("click", () => walk(-1));
+    next.addEventListener("click", () => walk(1));
+    live.addEventListener("click", () => {
+      S.viewPath = "";
+      syncPreview();
+    });
+    const params = el("button", { class: "ghost tiny", text: "\u2699 \uC694\uCCAD \uC124\uC815" });
+    params.addEventListener("click", () => openParamsDialog());
+    const minus = el("button", { class: "ghost tiny", text: "\u2212" });
+    const plus = el("button", { class: "ghost tiny", text: "\uFF0B" });
+    const count = el("input", {
+      type: "number",
+      value: String(gen.count),
+      min: "1",
+      max: "99",
+      class: "countbox",
+      title: "\uC7A5\uC218"
+    });
+    const setCount = (n) => {
+      gen.count = Math.min(99, Math.max(1, Math.trunc(n) || 1));
+      count.value = String(gen.count);
+      persistGen();
+    };
+    minus.addEventListener("click", () => setCount(gen.count - 1));
+    plus.addEventListener("click", () => setCount(gen.count + 1));
+    count.addEventListener("change", () => setCount(Number(count.value)));
+    runBtn = el("button", { class: "primary tiny" });
+    runBtn.addEventListener("click", () => {
+      if (S.jobId) cancelRun();
+      else void startRun({ scenePreset: "", count: gen.count });
+    });
+    progressLine = el("span", { class: "hint" });
+    mount.appendChild(el("div", { class: "row", style: { margin: "8px 0", flexWrap: "wrap" } }, [
+      prev,
+      live,
+      next,
+      el("span", { class: "grow" }),
+      progressLine,
+      params,
+      el("div", { class: "row", style: { gap: "2px" } }, [minus, count, plus]),
+      runBtn
+    ]));
+    stripBox = el("div", { class: "stripthumbs" });
+    mount.appendChild(stripBox);
+    syncControls();
+    syncPreview();
+    void drawStrip();
+  }
+  function singleTick() {
+    if (!previewBox?.isConnected) return;
+    syncControls();
+    syncPreview();
+    void drawStrip();
+  }
+  function syncControls() {
+    if (!runBtn?.isConnected || !progressLine) return;
+    const running = !!S.jobId;
+    runBtn.style.display = S.status && !S.status.configured && !running ? "none" : "";
+    runBtn.textContent = running ? `\uCDE8\uC18C (${pendingCount()})` : "\uC0DD\uC131 \uC2DC\uC791";
+    runBtn.classList.toggle("danger", running);
+    const p = S.queueJob?.payload;
+    progressLine.textContent = running && p ? `${stateLabel(S.queueJob.state)} \xB7 ${p.done}/${p.total}${p.current ? " \xB7 " + p.current : ""}` : "";
+  }
+  function syncPreview() {
+    const img = imgEl;
+    if (!img || !previewBox?.isConnected || !captionEl || !emptyEl) return;
+    const running = !!S.jobId;
+    const saved = S.queueJob?.payload?.saved ?? [];
+    const pinned = S.viewPath;
+    const showEmpty = (text2) => {
+      if (shownKey) return;
+      emptyEl.textContent = text2;
+      emptyEl.style.display = "";
+      img.style.display = "none";
+      captionEl.style.display = "none";
+    };
+    const showImg = (key, src, caption) => {
+      shownKey = key;
+      img.src = src;
+      img.style.display = "";
+      emptyEl.style.display = "none";
+      captionEl.textContent = caption;
+      captionEl.style.display = "";
+    };
+    if (!pinned && running && livePreview.url) {
+      showImg(
+        "live",
+        livePreview.url,
+        `\uC0DD\uC131 \uC911 ${livePreview.step}/${livePreview.total}${livePreview.current ? " \xB7 " + livePreview.current : ""}`
+      );
+      return;
+    }
+    const path = pinned || saved[saved.length - 1] || "";
+    if (!path) {
+      showEmpty(running ? "\uC0DD\uC131 \uC911\uC785\uB2C8\uB2E4\u2026 \uCCAB \uD504\uB808\uC784\uC774 \uC624\uBA74 \uC5EC\uAE30 \uB098\uD0C0\uB0A9\uB2C8\uB2E4." : "\uC0DD\uC131 \uC2DC\uC791\uC744 \uB204\uB974\uAC70\uB098, \uC544\uB798 \uACB0\uACFC\uC5D0\uC11C \uD55C \uC7A5\uC744 \uACE0\uB974\uC138\uC694.");
+      return;
+    }
+    if (path === shownKey || !safeWorkspacePath(path)) return;
+    const want = path;
+    void blobUrl(want).then((url) => {
+      if (!img.isConnected) return;
+      const nowPath = S.viewPath || (S.queueJob?.payload?.saved ?? []).slice(-1)[0] || "";
+      if ((S.viewPath || !(S.jobId && livePreview.url)) && nowPath === want) {
+        showImg(want, url, want);
+      }
+    }).catch(() => {
+      if (shownKey === "") showEmpty("\uC774\uBBF8\uC9C0\uB97C \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + want);
+    });
+  }
+  function walk(dir) {
+    const list2 = S.viewList.length ? S.viewList : S.queueJob?.payload?.saved ?? [];
+    if (!list2.length) return;
+    const cur = S.viewPath || shownKey;
+    const at = Math.max(0, list2.indexOf(cur));
+    const to = Math.min(list2.length - 1, Math.max(0, at + dir));
+    S.viewPath = list2[to];
+    if (!S.viewList.length) S.viewList = [...list2];
+    syncPreview();
+  }
+  async function drawStrip() {
+    const box = stripBox;
+    if (!box?.isConnected) return;
+    let saved = S.queueJob?.payload?.saved ?? [];
+    let label = "\uC774\uBC88 \uBC30\uCE58";
+    if (!saved.length) {
+      const jobs = await loadJobs();
+      const last = jobs.find((j) => (j.payload?.saved?.length ?? 0) > 0);
+      saved = last?.payload?.saved ?? [];
+      label = "\uCD5C\uADFC \uBC30\uCE58";
+    }
+    if (!box.isConnected) return;
+    clear(box);
+    if (!saved.length) return;
+    box.appendChild(el("div", { class: "hint", style: { marginBottom: "4px" }, text: `${label} \uACB0\uACFC ${saved.length}\uC7A5` }));
+    const row = el("div", { class: "striprow" });
+    for (const path of saved.slice(-24)) {
+      const cell2 = el("button", { class: "stripcell" + (path === (S.viewPath || shownKey) ? " on" : ""), title: path });
+      void blobUrl(path, "", { thumb: true }).then((url) => {
+        if (!cell2.isConnected) return;
+        cell2.appendChild(el("img", { src: url, alt: path.split("/").pop() ?? path }));
+      }).catch(() => {
+      });
+      cell2.addEventListener("click", () => {
+        S.viewPath = path;
+        S.viewList = [...saved];
+        syncPreview();
+        for (const c of row.children) c.classList.toggle("on", c.title === path);
+      });
+      row.appendChild(cell2);
+    }
+    box.appendChild(row);
+  }
+  function openImage(path, list2) {
+    S.viewPath = path;
+    S.viewList = [...list2];
+    S.centreTab = "single";
+    S.centreMode = "tab";
+    persistCentreTab();
+    hub.drawCentre();
+  }
+
+  // src/ui/studio/center-history.ts
+  var openState = /* @__PURE__ */ new Map();
+  function jobSection(j, live, open4) {
+    const p = j.payload;
+    const bits = [];
+    if (j.created_at) bits.push(new Date(j.created_at * 1e3).toLocaleString());
+    bits.push(stateLabel(j.state));
+    if (p) bits.push(`${p.done}/${p.total}`);
+    const spent = j.result?.anlasSpent;
+    if (typeof spent === "number") bits.push(`Anlas ${spent}`);
+    const sec = el("details", {
+      class: "jobsec" + (live ? " live" : ""),
+      dataset: { job: j.id },
+      ...open4 ? { open: true } : {}
+    });
+    sec.appendChild(el("summary", { class: "jobhead" }, [
+      live ? el("span", { class: "badge warn", text: "\uC9C4\uD589 \uC911" }) : null,
+      el("span", { class: "sectiontitle", text: bits.join(" \xB7 ") }),
+      el("span", { class: "hint", text: j.id })
+    ]));
+    sec.addEventListener("toggle", () => {
+      openState.set(j.id, sec.open);
+    });
+    if (j.error) sec.appendChild(el("div", { class: "notice err", text: j.error }));
+    if (!p) return sec;
+    if (p.note) sec.appendChild(el("div", { class: "hint", text: p.note }));
+    const savedBy = /* @__PURE__ */ new Map();
+    for (const path of p.saved ?? []) savedBy.set(path.split("/").pop() ?? path, path);
+    const failedBy = new Map((p.failed ?? []).map((f) => [f.name, f.error]));
+    const savedList = p.saved ?? [];
+    const grid = el("div", { class: "jobgrid", style: { gridTemplateColumns: `repeat(${S.cols}, minmax(0, 1fr))` } });
+    for (const it of p.items ?? []) {
+      const full2 = savedBy.get(it.name);
+      const err = failedBy.get(it.name);
+      const cell2 = el("div", { class: "jobcell", title: it.name });
+      if (full2) {
+        const pic = workspaceImage(full2, it.name, { thumb: true, aspect: "832 / 1216", lazy: true });
+        pic.classList.add("jobpic");
+        pic.addEventListener("click", () => openImage(full2, savedList));
+        cell2.append(pic);
+      } else if (err) {
+        cell2.appendChild(el("div", { class: "jobwait err" }, [
+          el("span", { class: "badge err", text: "\uC2E4\uD328" }),
+          el("div", { class: "hint err", text: err })
+        ]));
+      } else if (live && p.current === it.name) {
+        if (livePreview.url) {
+          cell2.appendChild(el("div", { class: "jobpic liveframe" }, [
+            el("img", { src: livePreview.url, alt: it.name }),
+            el("span", { class: "badge warn", text: `\uC0DD\uC131 \uC911 ${livePreview.step}/${livePreview.total}` })
+          ]));
+        } else {
+          cell2.appendChild(el("div", { class: "jobwait" }, [el("span", { class: "badge warn", text: "\uC0DD\uC131 \uC911" })]));
+        }
+      } else {
+        cell2.appendChild(el("div", { class: "jobwait" }, [
+          el("span", { class: "badge", text: live ? "\uB300\uAE30" : "\u2014" })
+        ]));
+      }
+      cell2.appendChild(el("div", { class: "fname" }, [
+        it.scene ? el("span", { class: "badge", text: it.scene, style: { marginRight: "4px" } }) : null,
+        it.cast ? el("span", { class: "badge", text: it.cast, style: { marginRight: "4px" } }) : null,
+        el("span", { class: "hint", text: it.name })
+      ]));
+      grid.appendChild(cell2);
+    }
+    sec.appendChild(grid);
+    return sec;
+  }
+
+  // src/ui/studio/center-batch.ts
+  var runBtn2 = null;
+  var progressLine2 = null;
+  var liveBox = null;
+  var summaryBox = null;
+  var cardRegs = /* @__PURE__ */ new Map();
+  var batchBar = null;
+  var barKey = "";
+  var barCur = null;
+  var barEta = null;
+  var sceneCache = /* @__PURE__ */ new Map();
+  async function scenesOf(preset) {
+    const hit = sceneCache.get(preset);
+    if (hit && hit.rev === state.filesRev) return hit.scenes;
+    try {
+      const d = JSON.parse((await state.readFile(preset)).content);
+      const scenes = (d.scenes ?? []).map((s) => ({ name: String(s.name ?? ""), prompt: String(s.prompt ?? "") })).filter((s) => s.name);
+      sceneCache.set(preset, { rev: state.filesRev, scenes });
+      return scenes;
+    } catch {
+      return [];
+    }
+  }
+  function drawBatch(mount) {
+    const notice10 = tokenNotice();
+    if (notice10) mount.appendChild(notice10);
+    const params = el("button", { class: "ghost tiny", text: "\u2699 \uC694\uCCAD \uC124\uC815" });
+    params.addEventListener("click", () => openParamsDialog());
+    const cols = colPicker({ values: [2, 3, 4], get: () => S.cols, set: (n) => {
+      S.cols = n;
+      persistCols();
+      for (const gEl of Array.from(document.querySelectorAll(".scenegrid, .jobgrid"))) {
+        gEl.style.gridTemplateColumns = `repeat(${S.cols}, minmax(0, 1fr))`;
+      }
+    } });
+    mount.appendChild(el("div", { class: "row", style: { marginBottom: "6px", flexWrap: "wrap" } }, [
+      scenePicker(),
+      params,
+      cols
+    ]));
+    const nChars = activeOf("characters").length;
+    mount.appendChild(el("div", {
+      class: "hint",
+      style: { marginBottom: "6px" },
+      text: `\uCE90\uB9AD\uD130\uB294 \uC88C\uCE21\uC5D0\uC11C \uCF20 \uCE74\uB4DC\uAC00 \uC2E4\uB9BD\uB2C8\uB2E4 (\uC9C0\uAE08 ${nChars}\uAC1C) \xB7 \uC52C \uCE74\uB4DC\uC758 \uFF0B \uB85C \uD544\uC694\uD55C \uC52C\uB9CC \uC608\uC57D\uC5D0 \uB2F4\uC2B5\uB2C8\uB2E4`
+    }));
+    const cardsBox = el("div", {});
+    mount.appendChild(cardsBox);
+    void drawSceneCards(cardsBox);
+    const summary = el("div", {});
+    mount.appendChild(summary);
+    summaryBox = summary;
+    drawSummary(summary);
+    batchBar = el("div", { class: "batchbar", style: { display: "none" } });
+    mount.appendChild(batchBar);
+    runBtn2 = el("button", { class: "primary tiny" });
+    runBtn2.addEventListener("click", () => {
+      if (S.jobId) cancelRun();
+      else void submitReserved();
+    });
+    progressLine2 = el("span", { class: "hint" });
+    mount.appendChild(el("div", { class: "row", style: { margin: "8px 0", flexWrap: "wrap" } }, [
+      progressLine2,
+      el("span", { class: "grow" }),
+      runBtn2
+    ]));
+    liveBox = el("div", {});
+    mount.appendChild(liveBox);
+    syncRunBtn();
+    syncLive();
+  }
+  function batchTick() {
+    syncRunBtn();
+    syncSceneProgress();
+    syncBatchBar();
+    syncLive();
+  }
+  var liveSec = null;
+  var liveKey = "";
+  function syncLive() {
+    if (!liveBox?.isConnected) return;
+    if (!S.jobId || !S.queueJob) {
+      if (liveSec || liveBox.childNodes.length) {
+        clear(liveBox);
+        liveSec = null;
+        liveKey = "";
+      }
+      return;
+    }
+    const p = S.queueJob.payload;
+    const key = [
+      S.queueJob.id,
+      S.queueJob.state,
+      p?.done ?? 0,
+      p?.saved?.length ?? 0,
+      p?.failed?.length ?? 0,
+      p?.current ?? ""
+    ].join("|");
+    if (liveSec?.isConnected && key === liveKey) {
+      const frame = liveSec.querySelector(".liveframe img");
+      if (frame && livePreview.url && frame.src !== livePreview.url) frame.src = livePreview.url;
+      const badge = liveSec.querySelector(".liveframe .badge");
+      if (badge) badge.textContent = (badge.textContent || "").replace(/\d+\/\d+/, `${livePreview.step}/${livePreview.total}`);
+      return;
+    }
+    liveKey = key;
+    clear(liveBox);
+    liveBox.appendChild(el("div", {
+      class: "hint",
+      style: { margin: "6px 0 4px" },
+      text: "\uC9C4\uD589 \uC911\uC778 \uBC30\uCE58 \u2014 \uC644\uC131\uB418\uB294 \uB300\uB85C \uC5EC\uAE30 \uB728\uACE0, \uC544\uB798 \uCD5C\uADFC \uC0DD\uC131 \uC2A4\uD2B8\uB9BD\uC5D0\uB3C4 \uC313\uC785\uB2C8\uB2E4"
+    }));
+    liveSec = jobSection(S.queueJob, true, true);
+    liveBox.appendChild(liveSec);
+  }
+  function syncRunBtn() {
+    if (!runBtn2?.isConnected || !progressLine2) return;
+    const running = !!S.jobId;
+    const total = reserveTotal();
+    runBtn2.style.display = S.status && !S.status.configured && !running ? "none" : "";
+    runBtn2.textContent = running ? `\uCDE8\uC18C (${pendingCount()})` : `\uC52C \uC0DD\uC131 ${total}\uC7A5`;
+    runBtn2.classList.toggle("danger", running);
+    runBtn2.disabled = !running && total === 0;
+    runBtn2.title = running ? "" : "\uBAA8\uB4E0 \uD504\uB9AC\uC14B\uC758 \uC608\uC57D\uC744 \uD558\uB098\uC758 JOB \uC73C\uB85C \uC0DD\uC131\uD569\uB2C8\uB2E4 (\uC21C\uC11C\uB300\uB85C) \xB7 \uACB0\uACFC\uB294 \uC544\uB798 \uCD5C\uADFC \uC0DD\uC131 \uC2A4\uD2B8\uB9BD\uACFC \uAC80\uC218\uC5D0";
+    const p = S.queueJob?.payload;
+    progressLine2.textContent = running && p ? `${stateLabel(S.queueJob.state)} \xB7 ${p.done}/${p.total}${p.current ? " \xB7 " + p.current : ""}` : "";
+  }
+  function currentScene() {
+    const p = S.queueJob?.payload;
+    if (!S.jobId || !p?.current) return "";
+    return p.items?.find((i) => i.name === p.current)?.scene ?? "";
+  }
+  function syncSceneProgress() {
+    const p = S.queueJob?.payload;
+    const scene = currentScene();
+    for (const [name, r] of cardRegs) {
+      const working = !!scene && name === scene;
+      r.card.classList.toggle("working", working);
+      if (!working) {
+        r.prog.style.display = "none";
+        continue;
+      }
+      r.prog.style.display = "";
+      const frac = livePreview.total ? Math.min(1, livePreview.step / livePreview.total) : 0;
+      r.fill.style.width = `${Math.round(frac * 100)}%`;
+      let done = 0;
+      let mine = 0;
+      for (const it of p?.items ?? []) {
+        if (it.scene !== name) continue;
+        mine += 1;
+        if (p?.saved?.some((s) => (s.split("/").pop() ?? s) === it.name)) done += 1;
+      }
+      r.label.textContent = `${done}/${mine} \xB7 step ${livePreview.step}/${livePreview.total}`;
+    }
+  }
+  function syncBatchBar() {
+    if (!batchBar?.isConnected) return;
+    const p = S.queueJob?.payload;
+    if (!S.jobId || !p?.total) {
+      batchBar.style.display = "none";
+      barKey = "";
+      return;
+    }
+    batchBar.style.display = "";
+    const failedN = p.failed?.length ?? 0;
+    const key = `${S.queueJob.id}|${p.total}|${p.saved?.length ?? 0}|${failedN}|${p.current ?? ""}`;
+    if (key !== barKey) {
+      barKey = key;
+      clear(batchBar);
+      barCur = null;
+      const segs = el("div", { class: "batchsegs" });
+      const savedBy = new Set((p.saved ?? []).map((s) => s.split("/").pop() ?? s));
+      const failedBy = new Set((p.failed ?? []).map((f) => f.name));
+      for (const it of p.items ?? []) {
+        const seg = el("div", { class: "batchseg", title: it.name });
+        if (savedBy.has(it.name)) seg.classList.add("ok");
+        else if (failedBy.has(it.name)) seg.classList.add("fail");
+        else if (p.current === it.name) {
+          seg.classList.add("cur");
+          barCur = el("div", { class: "batchseg-fill" });
+          seg.appendChild(barCur);
+        }
+        segs.appendChild(seg);
+      }
+      barEta = el("span", { class: "hint" });
+      batchBar.append(segs, barEta);
+    }
+    if (barCur) {
+      const frac = livePreview.total ? Math.min(1, livePreview.step / livePreview.total) : 0;
+      barCur.style.width = `${Math.round(frac * 100)}%`;
+    }
+    if (barEta) {
+      const per = stepMsEma();
+      const remain = Math.max(0, p.total - p.done - failedN);
+      if (per && livePreview.total && remain) {
+        const secs = Math.round((livePreview.total - livePreview.step + Math.max(0, remain - 1) * livePreview.total) * per / 1e3);
+        barEta.textContent = `\uB0A8\uC740 ${remain}\uC7A5 \xB7 \uC57D ${secs >= 60 ? Math.round(secs / 60) + "\uBD84" : secs + "\uCD08"}`;
+      } else {
+        barEta.textContent = "";
+      }
+    }
+  }
+  async function drawSceneCards(box) {
+    if (!gen.scenePreset) {
+      box.appendChild(el("div", {
+        class: "hint",
+        style: { margin: "4px 0 8px" },
+        text: "\uC52C \uD504\uB9AC\uC14B\uC744 \uBD88\uB7EC\uC624\uBA74 \uC52C \uCE74\uB4DC\uAC00 \uD3BC\uCCD0\uC9D1\uB2C8\uB2E4. \uD544\uC694\uD55C \uC52C\uC744 \uACE8\uB77C \uC608\uC57D\uC5D0 \uB2F4\uACE0, \uC608\uC57D\uC740 \uD504\uB9AC\uC14B\uC744 \uC624\uAC00\uBA70 \uC790\uC720\uB86D\uAC8C \uC313\uC785\uB2C8\uB2E4."
+      }));
+      return;
+    }
+    const scenes = await scenesOf(gen.scenePreset);
+    if (!box.isConnected) return;
+    if (!scenes.length) {
+      box.appendChild(el("div", { class: "hint", text: "\uC774 \uD504\uB9AC\uC14B\uC5D0 \uC52C\uC774 \uC5C6\uC2B5\uB2C8\uB2E4 \u2014 \uB4DC\uB86D\uB2E4\uC6B4\uC758 \uC218\uC815\uC5D0\uC11C \uC52C\uC744 \uCD94\uAC00\uD558\uC138\uC694." }));
+      return;
+    }
+    const addAll = el("button", { class: "ghost tiny", text: "\uC804\uCCB4 +1", title: "\uC774 \uD504\uB9AC\uC14B\uC758 \uBAA8\uB4E0 \uC52C\uC744 \uD55C \uC7A5\uC529 \uC608\uC57D\uC5D0 \uB2F4\uC2B5\uB2C8\uB2E4" });
+    addAll.addEventListener("click", () => {
+      for (const s of scenes) adjustReserve(gen.scenePreset, s.name, 1);
+      hub.drawCentre();
+    });
+    const clearHere = el("button", { class: "ghost tiny", text: "\uC774 \uD504\uB9AC\uC14B \uC608\uC57D \uBE44\uC6B0\uAE30" });
+    clearHere.disabled = !Object.keys(reserves[gen.scenePreset] ?? {}).length;
+    clearHere.addEventListener("click", () => {
+      clearReserves(gen.scenePreset);
+      hub.drawCentre();
+    });
+    box.appendChild(el("div", { class: "row", style: { marginBottom: "6px" } }, [
+      el("span", { class: "sectiontitle grow", text: `\uC52C ${scenes.length}\uAC1C` }),
+      addAll,
+      clearHere
+    ]));
+    const jobs = await loadJobs();
+    if (!box.isConnected) return;
+    const thumbs2 = sceneThumbs(jobs);
+    cardSyncs.clear();
+    cardRegs.clear();
+    const grid = el("div", { class: "scenegrid", style: { gridTemplateColumns: `repeat(${S.cols}, minmax(0, 1fr))` } });
+    for (const scene of scenes) grid.appendChild(sceneCard(scene, thumbs2));
+    box.appendChild(grid);
+  }
+  var thumbMemo = null;
+  function sceneThumbs(jobs) {
+    const key = jobs.map((j) => j.id + ":" + (j.payload?.saved?.length ?? 0)).join("|");
+    if (thumbMemo?.key === key) return thumbMemo.map;
+    const map = /* @__PURE__ */ new Map();
+    for (const j of jobs) {
+      const p = j.payload;
+      if (!p?.items || !p.saved?.length) continue;
+      const savedBy = /* @__PURE__ */ new Map();
+      for (const path of p.saved) savedBy.set(path.split("/").pop() ?? path, path);
+      for (const it of p.items) {
+        if (it.scene && !map.has(it.scene)) {
+          const hit = savedBy.get(it.name);
+          if (hit) map.set(it.scene, hit);
+        }
+      }
+    }
+    thumbMemo = { key, map };
+    return map;
+  }
+  var cardSyncs = /* @__PURE__ */ new Map();
+  function syncSceneNums() {
+    for (const s of cardSyncs.values()) s();
+  }
+  function sceneCard(scene, thumbs2) {
+    const preset = gen.scenePreset;
+    const mine = reserveOf(preset, scene.name);
+    const face = el("div", { class: "sceneface" });
+    const thumb = thumbs2.get(scene.name) ?? "";
+    if (thumb) {
+      const pic = workspaceImage(thumb, scene.name, { thumb: true, aspect: "832 / 1216", lazy: true });
+      pic.classList.add("jobpic");
+      face.appendChild(pic);
+    } else {
+      face.appendChild(el("div", { class: "scenefallback", text: scene.name }));
+    }
+    const minus = el("button", { class: "ghost tiny", text: "\u2212", title: "\uC608\uC57D\uC744 \uD558\uB098 \uBE8D\uB2C8\uB2E4" });
+    const num = el("button", { class: "ghost tiny reservenum", text: String(mine), title: "\uB20C\uB7EC\uC11C \uC7A5\uC218\uB97C \uC9C1\uC811 \uC785\uB825" });
+    const plus = el("button", { class: "ghost tiny", text: "\uFF0B", title: "\uC774 \uC52C\uC744 \uD55C \uC7A5 \uC608\uC57D\uC5D0 \uB2F4\uC2B5\uB2C8\uB2E4" });
+    minus.addEventListener("click", () => {
+      adjustReserve(preset, scene.name, -1);
+      sync();
+    });
+    plus.addEventListener("click", () => {
+      adjustReserve(preset, scene.name, 1);
+      sync();
+    });
+    num.addEventListener("click", () => {
+      namePopover(num, {
+        label: `${scene.name} \u2014 \uC608\uC57D \uC7A5\uC218`,
+        value: String(mine),
+        ok: "\uC801\uC6A9",
+        onSubmit: (raw) => {
+          const n = Math.max(0, Math.trunc(Number(raw)) || 0);
+          setReserve(preset, scene.name, n);
+          sync();
+        }
+      });
+    });
+    const fill = el("div", { class: "sceneprog-fill" });
+    const plabel = el("span", { class: "sceneprog-label hint" });
+    const prog = el("div", { class: "sceneprog", style: { display: "none" } }, [
+      el("div", { class: "sceneprog-track" }, [fill]),
+      plabel
+    ]);
+    const card = el("div", { class: "scenecard" + (mine ? " reserved" : ""), title: scene.prompt || scene.name }, [
+      face,
+      prog,
+      el("div", { class: "row", style: { marginTop: "4px" } }, [
+        el("span", { class: "grow", text: scene.name }),
+        minus,
+        num,
+        plus
+      ])
+    ]);
+    const sync = () => {
+      const m = reserveOf(preset, scene.name);
+      num.textContent = String(m);
+      card.classList.toggle("reserved", m > 0);
+      syncRunBtn();
+      syncSummary();
+    };
+    cardSyncs.set(scene.name, sync);
+    cardRegs.set(scene.name, { card, prog, fill, label: plabel });
+    return card;
+  }
+  function syncSummary() {
+    if (!summaryBox?.isConnected) return;
+    const wasOpen = summaryBox.querySelector("details")?.open ?? true;
+    clear(summaryBox);
+    drawSummary(summaryBox, wasOpen);
+  }
+  function drawSummary(box, open4 = true) {
+    const total = reserveTotal();
+    if (!total) return;
+    const outside = Object.keys(reserves).filter((p) => p !== gen.scenePreset);
+    const outsideN = outside.reduce((n, p) => n + Object.values(reserves[p]).reduce((a, b) => a + b, 0), 0);
+    const det = el("details", { class: "advbox", ...open4 ? { open: true } : {} });
+    det.appendChild(el("summary", {}, [
+      el("span", { text: `\uC608\uC57D \uBAA9\uB85D \u2014 \uCD1D ${total}\uC7A5` }),
+      outsideN ? el("span", {
+        class: "badge",
+        style: { marginLeft: "6px" },
+        title: "\uC9C0\uAE08 \uD654\uBA74\uC758 \uD504\uB9AC\uC14B \uBC16\uC5D0 \uC313\uC778 \uC608\uC57D \u2014 \uC81C\uCD9C\uC5D0 \uD568\uAED8 \uC2E4\uB9BD\uB2C8\uB2E4",
+        text: `\uB2E4\uB978 \uD504\uB9AC\uC14B ${outsideN}\uC7A5`
+      }) : null
+    ]));
+    const list2 = el("div", { class: "verlist" });
+    for (const [preset, scenes] of Object.entries(reserves)) {
+      for (const [scene, n] of Object.entries(scenes)) {
+        const drop = el("button", { class: "ghost tiny", text: "\u2715", title: "\uC774 \uC608\uC57D\uB9CC \uBE8D\uB2C8\uB2E4" });
+        drop.addEventListener("click", () => {
+          setReserve(preset, scene, 0);
+          syncSceneNums();
+          syncRunBtn();
+          syncSummary();
+        });
+        list2.appendChild(el("div", { class: "row", style: { padding: "2px 0" } }, [
+          el("span", { class: "hint", text: preset.split("/").pop()?.replace(/\.json$/, "") ?? preset }),
+          el("span", { class: "grow", text: `${scene} \xD7 ${n}` }),
+          drop
+        ]));
+      }
+    }
+    const clearAll = el("button", { class: "ghost tiny", text: "\uC804\uCCB4 \uC608\uC57D \uCDE8\uC18C" });
+    clearAll.addEventListener("click", () => {
+      clearReserves();
+      hub.drawCentre();
+    });
+    det.appendChild(list2);
+    det.appendChild(el("div", { class: "row", style: { marginTop: "4px" } }, [clearAll]));
+    box.appendChild(det);
+  }
+  async function submitReserved() {
+    const entries = [];
+    const skipped = [];
+    const leftover = {};
+    for (const [preset, scenes] of Object.entries(reserves)) {
+      const known = new Set((await scenesOf(preset)).map((s) => s.name));
+      for (const [scene, count] of Object.entries(scenes)) {
+        if (!count) continue;
+        if (!known.has(scene)) {
+          skipped.push(`${preset.split("/").pop()} / ${scene}`);
+          (leftover[preset] ??= {})[scene] = count;
+          continue;
+        }
+        entries.push({ scenePreset: preset, scene, count });
+      }
+    }
+    if (!entries.length) {
+      hub.notice(skipped.length ? "\uC608\uC57D\uB41C \uC52C\uC744 \uD504\uB9AC\uC14B\uC5D0\uC11C \uCC3E\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + skipped.join(", ") : "\uC608\uC57D\uC774 \uC5C6\uC2B5\uB2C8\uB2E4 \u2014 \uC52C \uCE74\uB4DC\uC758 \uFF0B \uB85C \uC313\uC544 \uC8FC\uC138\uC694.", "err");
+      return;
+    }
+    if (skipped.length) {
+      hub.notice("\uC77C\uBD80 \uC52C\uC744 \uCC3E\uC9C0 \uBABB\uD574 \uAC74\uB108\uB701\uB2C8\uB2E4 (\uC608\uC57D\uC740 \uB0A8\uC2B5\uB2C8\uB2E4): " + skipped.join(", "), "err");
+    }
+    await startRun({ entries, scenePreset: "" });
+    if (S.jobId) {
+      for (const k of Object.keys(reserves)) delete reserves[k];
+      Object.assign(reserves, leftover);
+      persistReserves();
+      hub.drawCentre();
+    }
+  }
+
+  // src/ui/studio/strip.ts
+  var FOLD_KEY2 = "hina.studioStrip";
+  var CAP = 20;
+  var folded = false;
+  try {
+    folded = localStorage.getItem(FOLD_KEY2) === "1";
+  } catch {
+  }
+  var root = null;
+  var headLine = null;
+  var rowBox = null;
+  var liveImg = null;
+  var liveBadge = null;
+  var lastKey = "";
+  function jobsNow() {
+    const jobs = [...S.jobs];
+    const q = S.queueJob;
+    if (q) {
+      const ix = jobs.findIndex((j) => j.id === q.id);
+      if (ix >= 0) jobs[ix] = q;
+      else jobs.unshift(q);
+    }
+    return jobs;
+  }
+  function buildStrip() {
+    const fold2 = el("button", {
+      class: "ghost tiny",
+      text: folded ? "\u25B4" : "\u25BE",
+      title: "\uCD5C\uADFC \uC0DD\uC131 \uC811\uAE30/\uD3BC\uCE58\uAE30"
+    });
+    fold2.addEventListener("click", () => {
+      folded = !folded;
+      try {
+        localStorage.setItem(FOLD_KEY2, folded ? "1" : "0");
+      } catch {
+      }
+      root?.classList.toggle("folded", folded);
+      fold2.textContent = folded ? "\u25B4" : "\u25BE";
+    });
+    headLine = el("span", { class: "hint grow", text: "\uCD5C\uADFC \uC0DD\uC131" });
+    rowBox = el("div", { class: "striprow" });
+    root = el("div", { class: "genstrip" + (folded ? " folded" : "") }, [
+      el("div", { class: "row striphead" }, [headLine, fold2]),
+      rowBox
+    ]);
+    return root;
+  }
+  async function refreshStrip() {
+    if (!root) return;
+    await loadJobs();
+    renderStrip();
+  }
+  function stripTick() {
+    if (!root?.isConnected) return;
+    renderStrip();
+    if (S.jobId && livePreview.url && liveImg) {
+      liveImg.src = livePreview.url;
+      if (liveBadge) liveBadge.textContent = `${livePreview.step}/${livePreview.total}`;
+    }
+  }
+  function renderStrip() {
+    if (!rowBox || !headLine) return;
+    const jobs = jobsNow();
+    const key = (S.jobId ? "run|" : "") + jobs.map((j) => j.id + ":" + (j.payload?.saved?.length ?? 0)).join("|");
+    if (key === lastKey) return;
+    lastKey = key;
+    let count = 0;
+    for (const j of jobs) count += j.payload?.saved?.length ?? 0;
+    const head = jobs[0];
+    const parts = [`\uCD5C\uADFC \uC0DD\uC131 ${count}\uC7A5`];
+    if (head) {
+      const p = head.payload;
+      parts.push(stateLabel(head.state) + (S.jobId && p ? ` ${p.done}/${p.total}` : ""));
+    }
+    headLine.textContent = parts.join(" \xB7 ");
+    clear(rowBox);
+    liveImg = null;
+    liveBadge = null;
+    if (S.jobId) {
+      liveImg = el("img", { alt: "" });
+      if (livePreview.url) liveImg.src = livePreview.url;
+      liveBadge = el("span", {
+        class: "badge warn stripbadge",
+        text: `${livePreview.step}/${livePreview.total}`
+      });
+      rowBox.appendChild(el("div", { class: "stripcell live" }, [liveImg, liveBadge]));
+    }
+    let shown = 0;
+    for (const j of jobs) {
+      const saved = j.payload?.saved ?? [];
+      for (let i = saved.length - 1; i >= 0; i--) {
+        if (shown >= CAP) return;
+        shown += 1;
+        const path = saved[i];
+        const cell2 = el("button", { class: "stripcell", title: path });
+        void blobUrl(path, "", { thumb: true }).then((url) => {
+          if (!cell2.isConnected) return;
+          cell2.appendChild(el("img", { src: url, alt: path.split("/").pop() ?? path }));
+        }).catch(() => {
+        });
+        cell2.addEventListener("click", () => openImage(path, saved));
+        rowBox.appendChild(cell2);
+      }
+    }
+  }
+
+  // src/ui/studio/center-folder.ts
+  var selection2 = /* @__PURE__ */ new Set();
+  var anchorPath2 = "";
+  function drawFolder(node) {
+    const viewMount6 = S.viewMount;
+    if (!viewMount6) return;
+    for (const p of [...selection2]) if (!p.startsWith(node.path + "/")) selection2.delete(p);
+    const crumb = el("div", { class: "row", style: { gap: "2px", flexWrap: "wrap" } });
+    const parts = node.path.split("/");
+    for (let i = 1; i < parts.length; i++) {
+      const path = parts.slice(0, i + 1).join("/");
+      if (!path.startsWith(OUTPUT_ROOT)) continue;
+      const label = path === OUTPUT_ROOT ? "output" : parts[i];
+      const b = el("button", { class: "ghost tiny", text: label });
+      b.addEventListener("click", () => {
+        S.selected = path;
+        selection2.clear();
+        hub.drawLeft();
+        hub.drawCentre();
+      });
+      crumb.appendChild(b);
+      if (i < parts.length - 1) crumb.appendChild(el("span", { class: "hint", text: "\u203A" }));
+    }
+    const close = el("button", { class: "ghost tiny", text: "\u2190 \uAC80\uC218", title: "\uAC80\uC218 \uD654\uBA74\uC73C\uB85C \uB3CC\uC544\uAC11\uB2C8\uB2E4" });
+    close.addEventListener("click", () => {
+      S.centreMode = "tab";
+      S.centreTab = "inspect";
+      hub.drawCentre();
+    });
+    const pick2 = el("button", {
+      class: "primary tiny",
+      text: "\uAC80\uC218\uD558\uAE30",
+      title: "\uC774 \uD3F4\uB354\uC758 \uD6C4\uBCF4\uB4E4\uC744 \uADF8\uB8F9\uC73C\uB85C \uBE44\uAD50\uD558\uACE0 \uCC44\uD0DD\uD569\uB2C8\uB2E4"
+    });
+    pick2.addEventListener("click", () => {
+      S.centreMode = "tab";
+      S.centreTab = "inspect";
+      hub.drawCentre();
+    });
+    const mkdir = el("button", { class: "ghost tiny", text: "\uFF0B \uD3F4\uB354" });
+    mkdir.addEventListener("click", () => {
+      namePopover(mkdir, {
+        label: `${node.path}/ \uC548\uC5D0 \uC0C8 \uD3F4\uB354`,
+        ok: "\uB9CC\uB4E4\uAE30",
+        onSubmit: async (name) => {
+          try {
+            await state.mkdirFile(node.path + "/" + name.replace(/[\\/]+/g, "-"));
+            S.open.add(node.path);
+            hub.touchQuiet();
+            await hub.refresh();
+          } catch (e) {
+            hub.notice("\uD3F4\uB354\uB97C \uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+          }
+        }
+      });
+    });
+    const cols = colPicker({ values: [2, 3, 4], get: () => S.cols, set: (n) => {
+      S.cols = n;
+      persistCols();
+      for (const gEl of Array.from(document.querySelectorAll(".foldergrid"))) {
+        gEl.style.gridTemplateColumns = `repeat(${S.cols}, minmax(0, 1fr))`;
+      }
+    } });
+    const del = el("button", { class: "ghost tiny" });
+    const selInfo = el("span", { class: "hint" });
+    armed(del, "\uC0AD\uC81C", "\uD55C \uBC88 \uB354", async () => {
+      try {
+        for (const p of [...selection2]) await state.deleteFile(p);
+        selection2.clear();
+        hub.touchQuiet();
+        await hub.refresh();
+      } catch (e) {
+        hub.notice("\uC9C0\uC6B0\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+      }
+    });
+    const selAll = el("button", { class: "ghost tiny", text: "\uC804\uCCB4 \uC120\uD0DD" });
+    const selNone = el("button", { class: "ghost tiny", text: "\uD574\uC81C" });
+    viewMount6.appendChild(el("div", { class: "row", style: { marginBottom: "8px", flexWrap: "wrap" } }, [
+      close,
+      crumb,
+      el("span", { class: "grow" }),
+      selInfo,
+      selAll,
+      selNone,
+      del,
+      mkdir,
+      cols,
+      pick2
+    ]));
+    viewMount6.appendChild(el("div", {
+      class: "hint",
+      style: { marginBottom: "8px" },
+      text: `\uD30C\uC77C ${node.files.length} \xB7 \uD558\uC704 \uD3F4\uB354 ${node.children.length} \u2014 \uD074\uB9AD\uC73C\uB85C \uC120\uD0DD (Shift \uBC94\uC704) \xB7 \uB450 \uBC88 \uD074\uB9AD\uC73C\uB85C \uD06C\uAC8C \xB7 \uB04C\uC5B4\uC11C \uD3F4\uB354/\uC67C\uCABD \uD2B8\uB9AC\uB85C \uC774\uB3D9`
+    }));
+    const syncBar = () => {
+      selInfo.textContent = selection2.size ? `${selection2.size}\uAC1C \uC120\uD0DD` : "";
+      del.style.display = selection2.size ? "" : "none";
+      selNone.style.display = selection2.size ? "" : "none";
+    };
+    syncBar();
+    const grid = el("div", { class: "foldergrid", style: { gridTemplateColumns: `repeat(${S.cols}, minmax(0, 1fr))` } });
+    viewMount6.appendChild(grid);
+    for (const child of node.children) {
+      const cell2 = el("div", { class: "fcell foldcell", title: child.path }, [
+        el("div", { class: "foldface", text: "\u{1F4C1}" }),
+        el("div", { class: "fname" }, [
+          el("span", { text: child.name }),
+          el("span", { class: "n", text: String(countFiles2(child)) })
+        ])
+      ]);
+      cell2.addEventListener("click", () => {
+        S.selected = child.path;
+        S.open.add(node.path);
+        selection2.clear();
+        hub.drawLeft();
+        hub.drawCentre();
+      });
+      installDrop(cell2, {
+        into: () => child.path,
+        onMove: (path, sources) => void moveInto(path, sources),
+        onFiles: (path, files) => void uploadInto(path, files)
+      });
+      grid.appendChild(cell2);
+    }
+    const images = node.files.filter((f) => IMAGE_RE2.test(f.name));
+    const others = node.files.filter((f) => !IMAGE_RE2.test(f.name));
+    const imagePaths = images.map((f) => f.path);
+    const syncPicked = () => {
+      for (const c of grid.querySelectorAll(".imgcell")) {
+        c.classList.toggle("picked", selection2.has(c.title));
+      }
+      syncBar();
+    };
+    selAll.addEventListener("click", () => {
+      for (const p of imagePaths) selection2.add(p);
+      syncPicked();
+    });
+    selNone.addEventListener("click", () => {
+      selection2.clear();
+      syncPicked();
+    });
+    images.forEach((f, ix) => {
+      const cell2 = el("div", { class: "fcell imgcell" + (selection2.has(f.path) ? " picked" : ""), title: f.path });
+      const pic = workspaceImage(f.path, f.name, { thumb: false });
+      pic.classList.add("jobpic");
+      cell2.append(pic, el("div", { class: "fname" }, [el("span", { class: "hint", text: f.name })]));
+      cell2.addEventListener("click", (e) => {
+        const ev = e;
+        if (ev.shiftKey && anchorPath2) {
+          const a = imagePaths.indexOf(anchorPath2);
+          if (a >= 0) {
+            selection2.clear();
+            for (let i = Math.min(a, ix); i <= Math.max(a, ix); i++) selection2.add(imagePaths[i]);
+          }
+        } else {
+          if (selection2.has(f.path)) selection2.delete(f.path);
+          else selection2.add(f.path);
+          anchorPath2 = f.path;
+        }
+        syncPicked();
+      });
+      cell2.addEventListener("dblclick", () => openImage(f.path, imagePaths));
+      installDrag(cell2, () => selection2.has(f.path) ? [...selection2] : [f.path]);
+      grid.appendChild(cell2);
+    });
+    if (others.length) {
+      const list2 = el("div", { class: "filelist", style: { marginTop: "10px" } });
+      for (const f of others) {
+        list2.appendChild(el("div", { class: "chatitem" }, [
+          el("span", { class: "grow", text: f.name }),
+          el("span", { class: "n", text: fmtSize4(f.size) })
+        ]));
+      }
+      viewMount6.appendChild(list2);
+    }
+    if (!node.files.length && !node.children.length) {
+      grid.appendChild(el("div", { class: "empty", text: "\uBE44\uC5B4 \uC788\uC2B5\uB2C8\uB2E4. \uC774\uBBF8\uC9C0\uB97C \uB04C\uC5B4\uB2E4 \uB193\uAC70\uB098 \uBC30\uCE58\uB97C \uC774 \uD3F4\uB354\uB85C \uC800\uC7A5\uD558\uC138\uC694." }));
+    }
+    installDrop(viewMount6, {
+      into: () => node.path,
+      onFiles: (path, files) => void uploadInto(path, files)
+    });
+  }
+  async function moveInto(target, sources) {
+    try {
+      for (const src of sources) {
+        if (src === target || target.startsWith(src + "/")) continue;
+        await state.moveFile(src, target);
+      }
+      selection2.clear();
+      hub.touchQuiet();
+      await hub.refresh();
+    } catch (e) {
+      hub.notice("\uC62E\uAE30\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+    }
+  }
+  async function uploadInto(dir, files) {
+    try {
+      for (const f of files) {
+        const b64 = await new Promise((res, rej) => {
+          const r = new FileReader();
+          r.onload = () => {
+            const s = String(r.result || "");
+            res(s.slice(s.indexOf(",") + 1));
+          };
+          r.onerror = () => rej(new Error("\uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4"));
+          r.readAsDataURL(f.file);
+        });
+        await state.uploadFile(f.file.name, b64, true, dir + (f.rel ? "/" + f.rel : ""));
+      }
+      hub.notice(`${files.length}\uAC1C\uB97C \uC62C\uB838\uC2B5\uB2C8\uB2E4.`, "ok");
+      hub.touchQuiet();
+      await hub.refresh();
+    } catch (e) {
+      hub.notice("\uC62C\uB9AC\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+    }
+  }
+
+  // src/ui/studio/selector.ts
+  var groups = null;
+  var selection3 = {};
+  var drill = "";
+  var viewMode2 = "group";
+  var cellSyncs = /* @__PURE__ */ new Map();
+  var missingSync = null;
+  var saveTimer2 = null;
+  var patternTimer = null;
+  var DEF = { mode: "default", delimiter: "-", tokens: [2], pattern: "", groupBy: "emotion" };
+  var PREFS_KEY = "hina.studioGroupBy";
+  var prefs = {};
+  try {
+    const saved = JSON.parse(localStorage.getItem(PREFS_KEY) || "null");
+    if (saved && typeof saved === "object") prefs = saved;
+  } catch {
+  }
+  function prefsFor(folder) {
+    const p = prefs[folder] ?? {};
+    const mode2 = p.mode ?? (p.pattern ? "regex" : "default");
+    const tokens = p.tokens && p.tokens.length ? p.tokens : p.tokenIndex ? [p.tokenIndex] : DEF.tokens;
+    return { ...DEF, ...p, mode: mode2, tokens };
+  }
+  function setPrefs(folder, next) {
+    prefs[folder] = { ...prefsFor(folder), ...next };
+    try {
+      localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
+    } catch {
+    }
+  }
+  function delimPattern(d, tokens) {
+    const e = d === " " ? " " : "\\" + d;
+    const tok = `[^${e}.]`;
+    const max = Math.max(...tokens);
+    const set = new Set(tokens);
+    const parts = [];
+    for (let i = 1; i <= max; i++) parts.push(set.has(i) ? `(?P<t${i}>${tok}+)` : `[^${e}]*`);
+    return "^" + parts.join(e);
+  }
+  function effective(p) {
+    if (p.mode === "delim") {
+      const tokens = [...p.tokens].sort((a, b) => a - b);
+      return { pattern: delimPattern(p.delimiter, tokens), groupBy: tokens.map((i) => "t" + i).join("+") };
+    }
+    if (p.mode === "regex" && p.pattern.trim()) return { pattern: p.pattern.trim(), groupBy: p.groupBy || "g" };
+    return { pattern: "", groupBy: p.groupBy || "emotion" };
+  }
+  function ruleSummary(p) {
+    if (p.mode === "regex" && p.pattern.trim()) return "\uADDC\uCE59: \uC815\uADDC\uC2DD";
+    if (p.mode === "delim") {
+      const d = p.delimiter === " " ? "\uACF5\uBC31" : p.delimiter;
+      return `\uADDC\uCE59: ${d} \xB7 ${[...p.tokens].sort((a, b) => a - b).join("+")}\uBC88\uC9F8`;
+    }
+    return "\uADDC\uCE59: \uC790\uB3D9";
+  }
+  function hasGroups(folder) {
+    return !!groups && groups.folder === folder;
+  }
+  async function loadGroups(folder) {
+    try {
+      const eff = effective(prefsFor(folder));
+      groups = await state.studio.group(folder, eff.pattern, eff.groupBy);
+      selection3 = {};
+      for (const g of [...groups.groups.map((x) => x.items), groups.unmatched].flat()) {
+        selection3[g.filename] = { ...g.selection };
+      }
+    } catch (e) {
+      groups = null;
+      hub.notice("\uADF8\uB8F9\uC744 \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+    }
+    hub.drawCentre();
+  }
+  function queueSave() {
+    if (saveTimer2) clearTimeout(saveTimer2);
+    saveTimer2 = setTimeout(() => {
+      void state.studio.saveSelection(S.selected, selection3).catch(() => {
+      });
+    }, 500);
+  }
+  function flag(filename, key) {
+    const cur = selection3[filename] || { use: false, inpaint: false, delete: false };
+    selection3[filename] = { ...cur, [key]: !cur[key] };
+    cellSyncs.get(filename)?.();
+    missingSync?.();
+    queueSave();
+  }
+  function flagRep(filename, groupItems) {
+    const cur = !!selection3[filename]?.rep;
+    for (const gi of groupItems) {
+      const s = selection3[gi.filename] || { use: false, inpaint: false, delete: false };
+      const want = gi.filename === filename ? !cur : false;
+      if (!!s.rep !== want) {
+        selection3[gi.filename] = { ...s, rep: want, ...want ? { use: true } : {} };
+        cellSyncs.get(gi.filename)?.();
+      }
+    }
+    missingSync?.();
+    queueSave();
+  }
+  function syncAllCells() {
+    for (const s of cellSyncs.values()) s();
+    missingSync?.();
+  }
+  function drawSelector(node) {
+    if (!S.viewMount || !groups) return;
+    const viewMount6 = S.viewMount;
+    const g = groups;
+    const p = prefsFor(node.path);
+    cellSyncs.clear();
+    missingSync = null;
+    const bar3 = el("div", { class: "row", style: { marginBottom: "8px", flexWrap: "wrap" } });
+    const tidy = el("button", { class: "ghost tiny", text: "\uC815\uB9AC", title: "\uD3F4\uB354 \uC815\uB9AC \uD654\uBA74 (\uC120\uD0DD\xB7\uC774\uB3D9\xB7\uC0AD\uC81C\xB7\uC5C5\uB85C\uB4DC)" });
+    tidy.addEventListener("click", () => {
+      S.centreMode = "folder";
+      hub.drawCentre();
+    });
+    bar3.append(
+      tidy,
+      el("span", { class: "sectiontitle grow", text: `${node.path} \xB7 ${g.total}\uC7A5 \xB7 \uADF8\uB8F9 ${g.groups.length}` })
+    );
+    const mkView = (v, label) => ({
+      label,
+      on: viewMode2 === v,
+      pick: () => {
+        viewMode2 = v;
+        drill = "";
+        hub.drawCentre();
+      }
+    });
+    bar3.append(segCtl([mkView("group", "\uADF8\uB8F9\uBCC4"), mkView("all", "\uC804\uCCB4"), mkView("rep", "\uB300\uD45C")]));
+    bar3.appendChild(colPicker({ values: [2, 3, 4, 5, 6], get: () => S.selCols, set: (n) => {
+      S.selCols = n;
+      persistSelCols();
+      for (const gEl of Array.from(document.querySelectorAll(".selgrid"))) {
+        gEl.style.gridTemplateColumns = `repeat(${S.selCols}, minmax(0, 1fr))`;
+      }
+    } }));
+    const firstEach = el("button", { class: "ghost tiny", text: "\uADF8\uB8F9\uB9C8\uB2E4 \uCCAB \uC7A5" });
+    firstEach.addEventListener("click", () => {
+      for (const grp of g.groups) {
+        const f = grp.items[0];
+        if (f) selection3[f.filename] = { ...selection3[f.filename], use: true };
+      }
+      syncAllCells();
+      void state.studio.saveSelection(S.selected, selection3);
+    });
+    const none = el("button", { class: "ghost tiny", text: "\uC120\uD0DD \uD574\uC81C" });
+    none.addEventListener("click", () => {
+      for (const k of Object.keys(selection3)) selection3[k] = { ...selection3[k], use: false, rep: false };
+      syncAllCells();
+      void state.studio.saveSelection(S.selected, selection3);
+    });
+    bar3.append(firstEach, none, exportButton(node));
+    if (/\/selected$/.test(node.path)) bar3.appendChild(adoptButton());
+    viewMount6.appendChild(bar3);
+    const ruleBtn = el("button", {
+      class: "ghost tiny rulebtn",
+      text: ruleSummary(p),
+      title: "\uAD6C\uBD84\uC790\uC640 \uADF8\uB8F9 \uAE30\uC900\uC744 \uACE0\uCE69\uB2C8\uB2E4 (\uD1A0\uD070\uC740 \uBCF5\uC218 \uC120\uD0DD \uAC00\uB2A5)"
+    });
+    ruleBtn.addEventListener("click", () => openRulePopover(ruleBtn, node));
+    bar3.appendChild(ruleBtn);
+    if (g.unmatched.length) {
+      bar3.appendChild(el("span", {
+        class: "badge warn",
+        text: `\uBABB \uC77D\uC74C ${g.unmatched.length}`,
+        title: "\uC774\uB984 \uADDC\uCE59\uC774 \uBABB \uC77D\uC740 \uD30C\uC77C \u2014 \uC544\uB798 \uBCC4\uB3C4 \uBAA9\uB85D\uC5D0 \uC788\uC2B5\uB2C8\uB2E4"
+      }));
+    }
+    const missingBox = el("div", {});
+    viewMount6.appendChild(missingBox);
+    const renderMissing = () => {
+      clear(missingBox);
+      const missing = g.groups.filter((grp) => !grp.items.some((i) => selection3[i.filename]?.use || selection3[i.filename]?.inpaint)).map((grp) => grp.key);
+      if (!missing.length) return;
+      const fill = el("button", {
+        class: "ghost tiny",
+        text: "\uBD80\uC871\uBD84 \uC608\uC57D\uC5D0 \uB2F4\uAE30",
+        title: "\uC52C \uD504\uB9AC\uC14B\uC5D0\uC11C \uAC19\uC740 \uC774\uB984\uC758 \uC52C\uC744 \uCC3E\uC544 1\uC7A5\uC529 \uBC30\uCE58 \uC608\uC57D\uC5D0 \uB123\uC2B5\uB2C8\uB2E4"
+      });
+      fill.addEventListener("click", () => void reserveMissing(missing, fill));
+      missingBox.appendChild(el("div", { class: "row", style: { marginBottom: "8px" } }, [
+        el("span", { class: "badge warn", text: `\uBD80\uC871\uBD84 ${missing.length}\uAC1C` }),
+        el("span", { class: "hint grow", text: missing.join(", ") }),
+        fill
+      ]));
+    };
+    renderMissing();
+    missingSync = renderMissing;
+    if (drill) {
+      const grp = g.groups.find((x) => x.key === drill);
+      const at = g.groups.findIndex((x) => x.key === drill);
+      const nav = el("div", { class: "row", style: { marginBottom: "8px" } });
+      const go = (to) => {
+        drill = g.groups[to]?.key ?? drill;
+        hub.drawCentre();
+      };
+      const prev = el("button", { class: "ghost tiny", text: "\u2190 \uC774\uC804" });
+      const up = el("button", { class: "ghost tiny", text: "\u2190 \uADF8\uB8F9", title: "\uADF8\uB8F9 \uCE74\uB4DC\uB85C \uB3CC\uC544\uAC11\uB2C8\uB2E4" });
+      const next = el("button", { class: "ghost tiny", text: "\uB2E4\uC74C \u2192" });
+      prev.disabled = at <= 0;
+      next.disabled = at < 0 || at >= g.groups.length - 1;
+      prev.addEventListener("click", () => go(at - 1));
+      next.addEventListener("click", () => go(at + 1));
+      up.addEventListener("click", () => {
+        drill = "";
+        viewMode2 = "group";
+        hub.drawCentre();
+      });
+      nav.append(up, prev, next, el("span", { class: "sectiontitle", text: `${drill} \xB7 ${grp?.items.length ?? 0}\uC7A5` }));
+      viewMount6.appendChild(nav);
+      viewMount6.appendChild(candidateGrid(grp?.items ?? [], grp?.items));
+    } else if (viewMode2 === "group") {
+      const grid = el("div", { class: "agrid selgrid", style: { gridTemplateColumns: `repeat(${S.selCols}, minmax(0, 1fr))` } });
+      for (const grp of g.groups) grid.appendChild(groupCard(grp));
+      viewMount6.appendChild(grid);
+      if (!g.groups.length) viewMount6.appendChild(el("div", { class: "empty", text: "\uADDC\uCE59\uC774 \uC77D\uC5B4\uB0B8 \uADF8\uB8F9\uC774 \uC5C6\uC2B5\uB2C8\uB2E4 \u2014 \uAD6C\uBD84\uC790\uC640 \uADF8\uB8F9 \uAE30\uC900\uC744 \uD655\uC778\uD558\uC138\uC694." }));
+    } else if (viewMode2 === "rep") {
+      const grid = el("div", { class: "agrid selgrid", style: { gridTemplateColumns: `repeat(${S.selCols}, minmax(0, 1fr))` } });
+      for (const grp of g.groups) {
+        const chosen = grp.items.find((i) => selection3[i.filename]?.rep) ?? grp.items.find((i) => selection3[i.filename]?.use);
+        const pic = el("div", { class: "assetpic" });
+        const cellR = el("div", {
+          class: "fcell groupcard" + (chosen ? " picked" : ""),
+          title: `${grp.key} \u2014 \uB20C\uB7EC\uC11C \uD6C4\uBCF4\uB97C \uD3BC\uCE69\uB2C8\uB2E4`
+        }, [
+          pic,
+          el("div", { class: "fname row" }, [
+            el("span", { class: "grow", text: grp.key }),
+            chosen ? null : el("span", { class: "badge warn", text: "\uB300\uD45C \uC5C6\uC74C" })
+          ])
+        ]);
+        if (chosen) void loadThumb3({ path: chosen.path, name: chosen.filename, size: 0, modified: 0, textual: false }, pic);
+        else pic.appendChild(el("div", { class: "assettype", text: "\u2014" }));
+        cellR.addEventListener("click", () => {
+          drill = grp.key;
+          hub.drawCentre();
+        });
+        grid.appendChild(cellR);
+      }
+      viewMount6.appendChild(grid);
+      if (!g.groups.length) viewMount6.appendChild(el("div", { class: "empty", text: "\uADDC\uCE59\uC774 \uC77D\uC5B4\uB0B8 \uADF8\uB8F9\uC774 \uC5C6\uC2B5\uB2C8\uB2E4." }));
+    } else {
+      viewMount6.appendChild(candidateGrid([...g.groups.flatMap((x) => x.items)]));
+    }
+    if (g.unmatched.length && !drill) {
+      viewMount6.appendChild(el("div", { class: "sectionline" }));
+      viewMount6.appendChild(el("div", { class: "row", style: { marginTop: "10px" } }, [
+        el("span", { class: "sectiontitle grow", text: `\uC774\uB984 \uADDC\uCE59\uC5D0 \uC548 \uB9DE\uB294 \uD30C\uC77C ${g.unmatched.length}\uAC1C` })
+      ]));
+      viewMount6.appendChild(el("div", { class: "hint", text: "\uC774 \uD30C\uC77C\uB4E4\uC740 \uADF8\uB8F9\uC5D0 \uBABB \uB4E4\uC5B4\uAC11\uB2C8\uB2E4. \uD788\uB098\uC5D0\uAC8C \u201C\uC774 \uD3F4\uB354 \uC774\uB984 \uADDC\uCE59\uC5D0 \uB9DE\uAC8C \uC77C\uAD04\uB85C \uBC14\uAFD4 \uC918\u201D \uB77C\uACE0 \uD558\uC138\uC694 (studio_rename)." }));
+      viewMount6.appendChild(candidateGrid(g.unmatched));
+    }
+  }
+  function groupCard(grp) {
+    const face = grp.items.find((i) => selection3[i.filename]?.rep) ?? grp.items.find((i) => selection3[i.filename]?.use) ?? grp.items[0];
+    const pic = el("div", { class: "assetpic" });
+    if (face) void loadThumb3({ path: face.path, name: face.filename, size: 0, modified: 0, textual: false }, pic);
+    const chosenBadge = el("span", { class: "badge" });
+    const fixBadge = el("span", { class: "badge" });
+    const cell2 = el("div", { class: "fcell groupcard", title: `${grp.key} \u2014 \uB20C\uB7EC\uC11C \uD6C4\uBCF4\uB97C \uD3BC\uCE69\uB2C8\uB2E4` }, [
+      pic,
+      el("div", { class: "fname row" }, [
+        el("span", { class: "grow", text: grp.key }),
+        el("span", { class: "badge", text: `${grp.items.length}\uC7A5` }),
+        chosenBadge,
+        fixBadge
+      ])
+    ]);
+    const sync = () => {
+      const chosen = grp.items.filter((i) => selection3[i.filename]?.use).length;
+      const fixing = grp.items.filter((i) => selection3[i.filename]?.inpaint).length;
+      cell2.classList.toggle("picked", chosen > 0);
+      chosenBadge.className = "badge" + (chosen ? " ok" : " warn");
+      chosenBadge.textContent = chosen ? `\uC120\uD0DD ${chosen}` : "\uBBF8\uC120\uD0DD";
+      fixBadge.style.display = fixing ? "" : "none";
+      fixBadge.textContent = fixing ? `\uC218\uC815 ${fixing}` : "";
+    };
+    sync();
+    cellSyncs.set("grp:" + grp.key, sync);
+    cell2.addEventListener("click", () => {
+      drill = grp.key;
+      hub.drawCentre();
+    });
+    return cell2;
+  }
+  function candidateGrid(items5, groupItems) {
+    const grid = el("div", { class: "agrid selgrid", style: { gridTemplateColumns: `repeat(${S.selCols}, minmax(0, 1fr))` } });
+    for (const it of items5) grid.appendChild(candidate(it, groupItems));
+    return grid;
+  }
+  function candidate(it, groupItems) {
+    const pic = el("div", { class: "assetpic" });
+    const btns = /* @__PURE__ */ new Map();
+    const flags = el("div", { class: "row selflags" });
+    const mk = (key, label, title) => {
+      const b = el("button", { class: "ghost tiny", text: label, title });
+      b.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        flag(it.filename, key);
+      });
+      btns.set(key, b);
+      return b;
+    };
+    flags.append(
+      mk("use", "\uCC44\uD0DD", "\uC774\uAC78 \uBD07\uC5D0 \uB123\uC2B5\uB2C8\uB2E4"),
+      mk("inpaint", "\uC218\uC815", "\uBA3C\uC800 \uACE0\uCCD0\uC57C \uD569\uB2C8\uB2E4"),
+      mk("delete", "\uBC84\uB9BC", "\uC9C0\uC6B8 \uD6C4\uBCF4\uC785\uB2C8\uB2E4")
+    );
+    if (groupItems) {
+      const b = el("button", {
+        class: "ghost tiny",
+        text: "\uB300\uD45C",
+        title: "\uADF8\uB8F9\uC758 \uB300\uD45C\uB85C (\uADF8\uB8F9\uB2F9 1\uC7A5 \xB7 \uB0B4\uBCF4\uB0BC \uB54C \uC815\uC2DD \uC774\uB984\uC744 \uAC00\uC838\uAC11\uB2C8\uB2E4)"
+      });
+      b.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        flagRep(it.filename, groupItems);
+      });
+      btns.set("rep", b);
+      flags.appendChild(b);
+    }
+    const cell2 = el("div", { class: "fcell selcell", title: it.filename }, [
+      pic,
+      el("div", { class: "fname", text: it.filename }),
+      flags
+    ]);
+    const sync = () => {
+      const s = selection3[it.filename] || { use: false, inpaint: false, delete: false };
+      cell2.classList.toggle("picked", !!s.use);
+      cell2.classList.toggle("fixing", !!s.inpaint);
+      cell2.classList.toggle("dropping", !!s.delete);
+      btns.get("use")?.classList.toggle("on", !!s.use);
+      btns.get("inpaint")?.classList.toggle("on", !!s.inpaint);
+      btns.get("delete")?.classList.toggle("on", !!s.delete);
+      btns.get("rep")?.classList.toggle("on", !!s.rep);
+    };
+    sync();
+    cellSyncs.set(it.filename, sync);
+    pic.addEventListener("click", () => flag(it.filename, "use"));
+    void loadThumb3({ path: it.path, name: it.filename, size: 0, modified: 0, textual: false }, pic);
+    return cell2;
+  }
+  function openRulePopover(anchor, node) {
+    const p = prefsFor(node.path);
+    const g = groups;
+    const sample = g?.groups[0]?.items[0]?.filename ?? g?.unmatched[0]?.filename ?? "";
+    const stem = sample.replace(/\.[a-z0-9]+$/i, "");
+    let stagedDelim = p.delimiter;
+    const staged = new Set(p.mode === "delim" ? p.tokens : []);
+    let applyTimer = null;
+    const applyDelim = () => {
+      if (!staged.size) return;
+      if (applyTimer) clearTimeout(applyTimer);
+      applyTimer = setTimeout(() => {
+        setPrefs(node.path, { mode: "delim", delimiter: stagedDelim, tokens: [...staged].sort((a, b) => a - b) });
+        drill = "";
+        void loadGroups(node.path);
+      }, 350);
+    };
+    const body = el("div", { class: "rulepop" });
+    const dsel = el("select", { title: "\uD30C\uC77C\uBA85\uC744 \uB098\uB204\uB294 \uBB38\uC790" });
+    for (const [v, label] of [["-", "-"], ["_", "_"], [".", "."], [" ", "\uACF5\uBC31"]]) {
+      const o = el("option", { value: v, text: label });
+      if (stagedDelim === v) o.setAttribute("selected", "selected");
+      dsel.appendChild(o);
+    }
+    const chipsBox = el("div", { class: "row", style: { gap: "2px", flexWrap: "wrap" } });
+    const renderChips = () => {
+      clear(chipsBox);
+      if (!stem) {
+        chipsBox.appendChild(el("span", { class: "hint", text: "\uC0D8\uD50C \uD30C\uC77C\uC774 \uC5C6\uC2B5\uB2C8\uB2E4" }));
+        return;
+      }
+      const toks = stem.split(stagedDelim).filter((q) => q !== "");
+      toks.slice(0, 6).forEach((tok, i) => {
+        const chip = el("button", {
+          class: "ghost tiny tokenchip" + (staged.has(i + 1) ? " on" : ""),
+          text: `${i + 1}\xB7${tok.length > 12 ? tok.slice(0, 12) + "\u2026" : tok}`,
+          title: `${i + 1}\uBC88\uC9F8 \uC870\uAC01\uC744 \uADF8\uB8F9 \uAE30\uC900\uC5D0 \uB123\uAC70\uB098 \uBE8D\uB2C8\uB2E4 (\uC608: ${tok})`
+        });
+        chip.addEventListener("click", () => {
+          if (staged.has(i + 1)) {
+            if (staged.size > 1) staged.delete(i + 1);
+          } else {
+            staged.add(i + 1);
+          }
+          chip.classList.toggle("on", staged.has(i + 1));
+          applyDelim();
+        });
+        chipsBox.appendChild(chip);
+      });
+    };
+    dsel.addEventListener("change", () => {
+      stagedDelim = dsel.value;
+      staged.clear();
+      renderChips();
+    });
+    renderChips();
+    const auto = el("button", {
+      class: "ghost tiny" + (p.mode === "default" ? " on" : ""),
+      text: "\uC790\uB3D9",
+      title: "\uAE30\uBCF8 \uADDC\uCE59 (\uCE90\uB9AD\uD130-\uAC10\uC815-\uB0A0\uC9DC-\uBC88\uD638 \uD615\uD0DC\uB97C \uC790\uB3D9\uC73C\uB85C \uC77D\uC2B5\uB2C8\uB2E4)"
+    });
+    auto.addEventListener("click", () => {
+      setPrefs(node.path, { mode: "default" });
+      drill = "";
+      void loadGroups(node.path);
+    });
+    body.append(
+      el("div", { class: "row" }, [el("span", { class: "hint", text: "\uAD6C\uBD84\uC790" }), dsel, auto]),
+      el("div", { class: "hint", style: { margin: "6px 0 2px" }, text: "\uADF8\uB8F9 \uAE30\uC900 \u2014 \uCE69\uC744 \uB20C\uB7EC \uB123\uACE0 \uBE8D\uB2C8\uB2E4 (\uBCF5\uC218 \uC120\uD0DD)" }),
+      chipsBox
+    );
+    const pat = el("input", {
+      value: p.mode === "regex" ? p.pattern : "",
+      placeholder: "(?P<costume>[^-]+)-(?P<emotion>[^-]+)",
+      title: "\uBA85\uBA85 \uCEA1\uCC98\uADF8\uB8F9 \uC815\uADDC\uC2DD \u2014 \uADF8\uB8F9 \uC774\uB984\uC774 \uADF8\uB8F9 \uAE30\uC900 \uD6C4\uBCF4\uAC00 \uB429\uB2C8\uB2E4"
+    });
+    pat.addEventListener("input", () => {
+      if (patternTimer) clearTimeout(patternTimer);
+      patternTimer = setTimeout(() => {
+        setPrefs(node.path, { mode: pat.value.trim() ? "regex" : "default", pattern: pat.value });
+        drill = "";
+        void loadGroups(node.path);
+      }, 800);
+    });
+    const by = el("select", { title: "\uC5B4\uB290 \uD544\uB4DC\uB85C \uBB36\uC5B4 \uBCFC\uC9C0" });
+    const fields2 = [.../* @__PURE__ */ new Set([g?.groupBy ?? "", ...g?.fields ?? []])].filter(Boolean);
+    for (const f of fields2) {
+      const o = el("option", { value: f, text: f });
+      if (f === g?.groupBy) o.setAttribute("selected", "selected");
+      by.appendChild(o);
+    }
+    by.addEventListener("change", () => {
+      setPrefs(node.path, { groupBy: by.value });
+      drill = "";
+      void loadGroups(node.path);
+    });
+    body.appendChild(el("details", { class: "advbox", ...p.mode === "regex" ? { open: true } : {} }, [
+      el("summary", { text: "\uACE0\uAE09 (\uC815\uADDC\uC2DD \uADDC\uCE59)" }),
+      el("div", { class: "row", style: { flexWrap: "wrap" } }, [
+        el("span", { class: "hint", text: "\uC815\uADDC\uC2DD" }),
+        pat,
+        el("span", { class: "hint", text: "\uD544\uB4DC" }),
+        by
+      ])
+    ]));
+    popover(anchor, body);
+  }
+  async function reserveMissing(missing, btn) {
+    if (!gen.scenePreset) {
+      hub.notice("\uC52C \uD504\uB9AC\uC14B\uC774 \uC5C6\uC2B5\uB2C8\uB2E4 \u2014 \uBC30\uCE58 \uD0ED\uC5D0\uC11C \uD504\uB9AC\uC14B\uC744 \uBA3C\uC800 \uACE0\uB974\uC138\uC694.", "err");
+      return;
+    }
+    btn.disabled = true;
+    try {
+      const known = new Set((await scenesOf(gen.scenePreset)).map((s) => s.name));
+      const found = missing.filter((k) => known.has(k));
+      const lost = missing.filter((k) => !known.has(k));
+      for (const k of found) adjustReserve(gen.scenePreset, k, 1);
+      hub.notice(
+        (found.length ? `${found.length}\uAC1C\uB97C \uBC30\uCE58 \uC608\uC57D\uC5D0 \uB2F4\uC558\uC2B5\uB2C8\uB2E4 (1\uC7A5\uC529). ` : "") + (lost.length ? `\uD504\uB9AC\uC14B\uC5D0 \uAC19\uC740 \uC774\uB984\uC758 \uC52C\uC774 \uC5C6\uB294 \uAC83: ${lost.join(", ")}` : ""),
+        found.length ? "ok" : "err"
+      );
+    } finally {
+      btn.disabled = false;
+    }
+  }
+  function exportButton(node) {
+    const b = el("button", {
+      class: "primary tiny",
+      text: "\uC560\uC14B \uCC44\uD0DD",
+      title: "\uCC44\uD0DD\uD55C \uC774\uBBF8\uC9C0\uB97C selected/ \uD3F4\uB354\uC5D0 \uC815\uB9AC\uD574 \uB123\uC2B5\uB2C8\uB2E4 (\uADF8 \uD3F4\uB354\uC5D0\uC11C \uBD07\uC5D0 \uBC18\uC601)"
+    });
+    b.addEventListener("click", async () => {
+      b.disabled = true;
+      try {
+        const eff = effective(prefsFor(node.path));
+        const r = await state.studio.exportSelected(node.path, "", eff.pattern, eff.groupBy);
+        hub.notice(`${r.folder} \u2014 \uCC44\uD0DD ${r.used}, \uC218\uC815 ${r.inpaint}, \uBE48 \uC2AC\uB86F ${r.empty} \xB7 selected \uD3F4\uB354\uB97C \uC5F4\uBA74 \uBD07\uC5D0 \uBC18\uC601\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4`, "ok");
+        hub.touchQuiet();
+        await hub.refresh();
+      } catch (e) {
+        hub.notice("\uB0B4\uBCF4\uB0B4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+      } finally {
+        b.disabled = false;
+      }
+    });
+    return b;
+  }
+  function adoptButton() {
+    const b = el("button", { class: "primary tiny", text: "\uBD07\uC5D0 \uBC18\uC601" });
+    b.title = state.activeCharKey ? "\uCC44\uD0DD\uD55C \uC774\uBBF8\uC9C0\uB97C \uC774 \uBD07\uC758 \uAC10\uC815 \uC774\uBBF8\uC9C0\uB85C \uB123\uC790\uACE0 \uC81C\uC548\uD569\uB2C8\uB2E4" : "RisuAI\uC5D0\uC11C \uBD07\uC744 \uC5F4\uC5B4\uC57C \uBC18\uC601\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4";
+    b.disabled = !state.activeCharKey;
+    b.addEventListener("click", async () => {
+      const picked = Object.entries(selection3).filter(([, s]) => s.use).map(([f]) => f);
+      if (!picked.length) {
+        hub.notice("\uCC44\uD0DD\uD55C \uC774\uBBF8\uC9C0\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4.", "err");
+        return;
+      }
+      b.disabled = true;
+      try {
+        const paths = picked.map((f) => `${S.selected}/${f}`);
+        const r = await state.studio.stage(state.activeCharKey, paths);
+        hub.notice(`${r.staged.length}\uC7A5\uC744 \uD655\uC778\uD588\uC2B5\uB2C8\uB2E4. \uD788\uB098\uC5D0\uAC8C "\uCC44\uD0DD\uD55C \uC774\uBBF8\uC9C0\uB4E4\uC744 \uAC10\uC815 \uC774\uBBF8\uC9C0\uB85C \uB123\uC5B4 \uC918" \uB77C\uACE0 \uD558\uBA74 \uC2B9\uC778 \uD6C4 \uCE74\uB4DC\uC5D0 \uBD99\uC2B5\uB2C8\uB2E4.` + (r.failed.length ? ` (${r.failed.length}\uC7A5 \uD655\uC778 \uC2E4\uD328)` : ""), "ok");
+      } catch (e) {
+        hub.notice("\uC62E\uAE30\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+      } finally {
+        b.disabled = !state.activeCharKey;
+      }
+    });
+    return b;
+  }
+  async function loadThumb3(f, mount) {
+    try {
+      const url = await blobUrl(f.path, "", { thumb: true });
+      if (!mount.isConnected) return;
+      clear(mount);
+      const img = el("img", { class: "assetimg", src: url, alt: "" });
+      img.addEventListener("error", () => {
+        clear(mount);
+        mount.appendChild(el("div", { class: "assettype", text: "?" }));
+      });
+      mount.appendChild(img);
+    } catch {
+      if (mount.isConnected) mount.appendChild(el("div", { class: "assettype", text: "?" }));
+    }
+  }
+
+  // src/ui/studio/index.ts
+  var built = false;
+  var renderedRev = -1;
+  var wasStudioActive = false;
+  var splitRoot = null;
+  var leftContent = null;
+  var tabbar = null;
+  function noteStudioLeft() {
+    wasStudioActive = false;
+  }
+  var PANELS_KEY = "hina.studioPanels";
+  var panels = { left: false, right: false };
+  try {
+    const saved = JSON.parse(localStorage.getItem(PANELS_KEY) || "null");
+    if (saved && typeof saved === "object") Object.assign(panels, saved);
+  } catch {
+  }
+  var autoRight = false;
+  var wasInspect = false;
+  var layBtnL = null;
+  var layBtnR = null;
+  function applyPanels() {
+    if (!splitRoot) return;
+    splitRoot.classList.toggle("lcollapse", panels.left);
+    splitRoot.classList.toggle("rcollapse", panels.right || autoRight);
+    layBtnL?.classList.toggle("on", !panels.left);
+    layBtnR?.classList.toggle("on", !(panels.right || autoRight));
+  }
+  function togglePanel(side) {
+    if (side === "right" && autoRight) {
+      autoRight = false;
+    } else {
+      panels[side] = !panels[side];
+    }
+    try {
+      localStorage.setItem(PANELS_KEY, JSON.stringify(panels));
+    } catch {
+    }
+    applyPanels();
+    if (S.centreMode === "tab" && !S.selectedFile) drawCentre2();
+  }
+  function ensureLayoutControls() {
+    if (!layBtnL || !layBtnR) {
+      layBtnL = iconBtn(ICON.layoutL, "\uC67C\uCABD \uD328\uB110(\uD504\uB86C\uD504\uD2B8\xB7OUTPUT) \uC811\uAE30/\uD3BC\uCE58\uAE30");
+      layBtnL.classList.add("laybtn");
+      layBtnL.addEventListener("click", () => togglePanel("left"));
+      layBtnR = iconBtn(ICON.layoutR, "AI \uCC57 \uD328\uB110 \uC811\uAE30/\uD3BC\uCE58\uAE30");
+      layBtnR.classList.add("laybtn");
+      layBtnR.addEventListener("click", () => togglePanel("right"));
+    }
+    setLayoutControls(el("span", { class: "row", style: { gap: "2px" } }, [layBtnL, layBtnR]));
+    applyPanels();
+  }
+  function renderStudioTab(mount) {
+    const entering = !wasStudioActive;
+    wasStudioActive = true;
+    ensureLayoutControls();
+    if (!built || !mount.querySelector(".split")) {
+      clear(mount);
+      const pane = threePane(void 0, { controls: false });
+      splitRoot = pane.root;
+      tabbar = el("div", { class: "studiotabs tabstrip" });
+      leftContent = el("div", { class: "tree filetree" });
+      S.leftMount = leftContent;
+      pane.left.append(tabbar, leftContent);
+      S.noticeMount = el("div");
+      S.viewMount = el("div", { class: "pad filepad" });
+      pane.centre.append(S.noticeMount, S.viewMount);
+      pane.centre.appendChild(buildStrip());
+      applyPanels();
+      mount.appendChild(pane.root);
+      built = true;
+      void refresh2();
+      void loadStatus();
+      setInterval(() => {
+        if (!wasStudioActive || S.jobId) return;
+        void loadJobs(true).then(() => hub.jobTick());
+      }, 5e3);
+    } else if (entering || renderedRev !== state.filesRev || state.openStudioRequest) {
+      void refresh2();
+    }
+    bindAgent({ notice: notice9 });
+    const inner = mount.querySelector(".right-inner");
+    if (inner) mountAgent(inner);
+  }
+  async function loadStatus() {
+    try {
+      S.status = await state.studio.status();
+    } catch (e) {
+      S.status = { configured: false, library: "", error: msg18(e) };
+    }
+    if (S.centreMode === "tab" && !S.selectedFile) drawCentre2();
+  }
+  function notice9(text2, kind = "") {
+    let wrap = document.querySelector(".toastwrap");
+    if (!wrap) {
+      wrap = el("div", { class: "toastwrap" });
+      document.body.appendChild(wrap);
+    }
+    const t = el("div", { class: "toast " + kind, text: text2, title: "\uB204\uB974\uBA74 \uB2EB\uD799\uB2C8\uB2E4" });
+    t.addEventListener("click", () => t.remove());
+    wrap.appendChild(t);
+    while (wrap.children.length > 4) wrap.firstChild?.remove();
+    setTimeout(() => t.remove(), kind === "err" ? 12e3 : 6e3);
+  }
+  async function refresh2() {
+    renderedRev = state.filesRev;
+    try {
+      const [l, ...areas] = await Promise.all([
+        // Only the output slice: the studio never reads the rest of the space.
+        state.files(OUTPUT_ROOT),
+        ...CARD_AREAS.map((a) => state.studio.items(a.area).then((r) => r.items).catch(() => []))
+      ]);
+      S.listing = l;
+      S.cards = Object.fromEntries(CARD_AREAS.map((a, i) => [a.area, areas[i]]));
+    } catch (e) {
+      S.listing = null;
+      drawLeft();
+      if (S.viewMount) {
+        clear(S.viewMount);
+        S.viewMount.appendChild(el("div", { class: "notice err" }, [
+          el("div", { text: "\uC2A4\uD29C\uB514\uC624 \uB77C\uC774\uBE0C\uB7EC\uB9AC\uB97C \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4." }),
+          el("div", { class: "hint", text: e instanceof Error ? e.message : String(e) }),
+          el("div", { class: "hint", text: "\uC124\uC815 \u2192 \uC5F0\uACB0\uC5D0\uC11C \uBC31\uC5D4\uB4DC \uC0C1\uD0DC\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." })
+        ]));
+      }
+      return;
+    }
+    await migrateSingleStyle();
+    buildOutput();
+    const want = state.openStudioRequest;
+    if (want) {
+      state.openStudioRequest = null;
+      const folder = canonPath(want.folder);
+      if (find(folder)) {
+        S.selected = folder;
+        const parts = folder.split("/");
+        for (let i = 2; i <= parts.length; i++) S.open.add(parts.slice(0, i).join("/"));
+        S.selectedFile = "";
+        S.centreMode = "tab";
+        S.centreTab = "inspect";
+        S.leftTab = "output";
+        persistCentreTab();
+        persistLeftTab();
+      } else {
+        notice9("\uADF8 \uD3F4\uB354\uB97C OUTPUT \uC5D0\uC11C \uCC3E\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + folder, "err");
+      }
+    }
+    drawLeft();
+    drawCentre2();
+    checkUnresolved();
+    markJobsStale();
+    void refreshStrip();
+    if (S.jobId) void pollJob();
+  }
+  var migrated = false;
+  async function migrateSingleStyle() {
+    const on = (S.cards.styles ?? []).filter((i) => i.enabled).sort((a, b) => (a.order ?? 100) - (b.order ?? 100) || a.path.localeCompare(b.path));
+    if (on.length <= 1) return;
+    const keep = on[0];
+    try {
+      for (const it of on.slice(1)) {
+        await state.studio.setMeta(it.path, { enabled: false });
+        it.enabled = false;
+      }
+      if (!migrated) {
+        notice9(`\uC2A4\uD0C0\uC77C \uD504\uB86C\uD504\uD2B8\uB294 \uC774\uC81C 1\uAC1C\uB9CC \uC2E4\uB9BD\uB2C8\uB2E4 \u2014 \u201C${keep.name}\u201D \uB9CC \uB0A8\uAE30\uACE0 \uB098\uBA38\uC9C0\uB294 \uAED0\uC2B5\uB2C8\uB2E4.`);
+        migrated = true;
+      }
+      touchQuiet();
+    } catch {
+    }
+  }
+  function touchQuiet(paths = []) {
+    renderedRev = state.filesRev + 1;
+    state.touchFiles(paths);
+  }
+  async function refreshArea(area) {
+    try {
+      S.cards[area] = (await state.studio.items(area)).items;
+    } catch {
+    }
+    drawLeft();
+    drawCentre2();
+    checkUnresolved();
+    touchQuiet();
+  }
+  function jobTick() {
+    stripTick();
+    if (S.centreMode !== "tab" || S.selectedFile) return;
+    if (S.centreTab === "single") singleTick();
+    else if (S.centreTab === "batch") batchTick();
+  }
+  hub.drawLeft = drawLeft;
+  hub.drawCentre = drawCentre2;
+  hub.jobTick = jobTick;
+  hub.syncBadges = syncPromptBadges;
+  hub.notice = notice9;
+  hub.refresh = refresh2;
+  hub.refreshArea = refreshArea;
+  hub.loadStatus = loadStatus;
+  hub.touchQuiet = touchQuiet;
+  function drawLeft() {
+    if (!tabbar || !leftContent) return;
+    clear(tabbar);
+    const mk = (tab, label) => {
+      const b = el("button", { class: "tab" + (S.leftTab === tab ? " on" : ""), text: label });
+      b.addEventListener("click", () => {
+        if (S.leftTab === tab) return;
+        S.leftTab = tab;
+        persistLeftTab();
+        drawLeft();
+      });
+      return b;
+    };
+    tabbar.append(mk("prompt", "\uD504\uB86C\uD504\uD2B8"), mk("output", "OUTPUT"));
+    clear(leftContent);
+    if (S.leftTab === "output") {
+      buildLeftOutput(leftContent);
+    } else if (S.leftView === "characters") {
+      buildLeftChars(leftContent);
+    } else {
+      buildLeftPrompt(leftContent);
+    }
+  }
+  function drawCentre2() {
+    const viewMount6 = S.viewMount;
+    if (!viewMount6) return;
+    clear(viewMount6);
+    const inInspect = S.centreMode === "tab" && !S.selectedFile && S.centreTab === "inspect" || S.centreMode === "folder" || S.centreMode === "selector" || S.centreMode === "fragments";
+    if (inInspect && !wasInspect && !panels.right) {
+      autoRight = true;
+      applyPanels();
+    } else if (!inInspect && wasInspect && autoRight) {
+      autoRight = false;
+      applyPanels();
+    }
+    wasInspect = inInspect;
+    if (S.selectedFile) {
+      const area = areaOfPath(S.selectedFile);
+      if (area === "characters" && !/\.[a-z0-9]+$/i.test(S.selectedFile)) {
+        drawCharacterEditor(S.selectedFile);
+      } else if (S.selectedFile.endsWith(".md")) {
+        drawCardEditor(S.selectedFile);
+      } else if (area === "scenes" && S.selectedFile.endsWith(".json") && !rawView.has(S.selectedFile)) {
+        drawSceneEditor(S.selectedFile);
+      } else {
+        drawRawFile(S.selectedFile);
+      }
+      return;
+    }
+    if (S.centreMode === "fragments") {
+      drawFragments();
+      return;
+    }
+    if (S.centreMode === "folder" || S.centreMode === "selector") {
+      const node = find(S.selected);
+      if (!node) {
+        S.centreMode = "tab";
+      } else if (S.centreMode === "folder") {
+        drawFolder(node);
+        return;
+      } else {
+        if (!hasGroups(node.path)) {
+          viewMount6.appendChild(el("div", { class: "hint", text: "\uC77D\uB294 \uC911\uC785\uB2C8\uB2E4\u2026" }));
+          void loadGroups(node.path);
+          return;
+        }
+        drawSelector(node);
+        return;
+      }
+    }
+    const mk = (tab, label) => {
+      const b = el("button", { class: "tab" + (S.centreTab === tab ? " on" : ""), text: label });
+      b.addEventListener("click", () => {
+        if (S.centreTab === tab) return;
+        S.centreTab = tab;
+        persistCentreTab();
+        drawCentre2();
+      });
+      return b;
+    };
+    viewMount6.appendChild(el("div", { class: "centretabs tabstrip" }, [
+      mk("single", "1\uC7A5"),
+      mk("batch", "\uBC30\uCE58"),
+      mk("inspect", "\uAC80\uC218")
+    ]));
+    const body = el("div", { class: "centrebody" });
+    viewMount6.appendChild(body);
+    if (S.centreTab === "single") drawSingle(body);
+    else if (S.centreTab === "batch") drawBatch(body);
+    else drawInspect(body);
+  }
+  function drawInspect(body) {
+    if (S.leftTab !== "output") {
+      S.leftTab = "output";
+      persistLeftTab();
+      drawLeft();
+    }
+    const node = S.selected && S.selected !== OUTPUT_ROOT ? find(S.selected) : null;
+    if (!node) {
+      body.appendChild(el("div", { class: "empty", text: "\uC67C\uCABD OUTPUT \uD2B8\uB9AC\uC5D0\uC11C \uAC80\uC218\uD560 \uD3F4\uB354\uB97C \uACE0\uB974\uC138\uC694." }));
+      return;
+    }
+    if (!node.files.length && !node.children.length) {
+      body.appendChild(el("div", { class: "empty", text: `${node.path} \u2014 \uBE44\uC5B4 \uC788\uC2B5\uB2C8\uB2E4.` }));
+      return;
+    }
+    if (!hasGroups(node.path)) {
+      body.appendChild(el("div", { class: "hint", text: "\uC77D\uB294 \uC911\uC785\uB2C8\uB2E4\u2026" }));
+      void loadGroups(node.path);
+      return;
+    }
+    drawSelector(node);
+  }
+
   // src/ui/shell.ts
   var mode = "bot";
   var CONTENT_TABS = [
@@ -11386,7 +17974,9 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     ["regex", "Regex"],
     ["trigger", "\uD2B8\uB9AC\uAC70"],
     ["assets", "\uC5D0\uC14B"],
-    ["files", "\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 \uD30C\uC77C"]
+    ["files", "\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 \uD30C\uC77C"],
+    // Not this bot's, and not any bot's: the studio library outlives them.
+    ["studio", "\uC5D0\uC14B \uC2A4\uD29C\uB514\uC624"]
   ];
   var CHAT_TABS = /* @__PURE__ */ new Set(["editor", "lore", "memory", "vars"]);
   var BOT_TABS = /* @__PURE__ */ new Set(["meta", "botlore", "regex", "trigger", "assets"]);
@@ -11395,9 +17985,11 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     state.editMode = m;
     syncModeTabs();
     if (tab) setTab(tab);
-    else if ((m === "chat" ? BOT_TABS : CHAT_TABS).has(active)) setTab("chats");
+    else if ((m === "chat" ? BOT_TABS : CHAT_TABS).has(active2)) setTab("chats");
   }
-  function currentMode() {
+  function activeHalf() {
+    if (BOT_TABS.has(active2)) return "bot";
+    if (CHAT_TABS.has(active2)) return "chat";
     return mode;
   }
   function syncModeTabs() {
@@ -11409,9 +18001,20 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       const b = document.getElementById("tab-" + id);
       if (b) b.style.display = mode === "bot" ? "" : "none";
     }
+    syncBackTab();
+  }
+  var modeChip = el("span", { class: "badge modechip modetab" });
+  function syncBackTab() {
+    const label = document.querySelector("#tab-chats .tablabel");
+    const btn = document.getElementById("tab-chats");
+    const inEdit = active2 !== "chats";
+    if (label) label.textContent = inEdit ? "\u2039 \uB4A4\uB85C" : "\uC120\uD0DD";
+    if (btn) btn.title = inEdit ? "\uC120\uD0DD \uD654\uBA74\uC73C\uB85C \uB3CC\uC544\uAC11\uB2C8\uB2E4 (\uBD07\xB7\uCC57 \uB2E4\uC2DC \uACE0\uB974\uAE30)" : "\uBD07\uACFC \uCC57\uC744 \uACE0\uB974\uB294 \uD654\uBA74\uC785\uB2C8\uB2E4";
+    modeChip.textContent = mode === "chat" ? "\uCC57 \uD3B8\uC9D1" : "\uBD07 \uD3B8\uC9D1";
+    modeChip.title = mode === "chat" ? "\uC774 \uCC57\uC758 \uC7AC\uB8CC(\uD134\xB7\uCC57 \uB85C\uC5B4\uBD81\xB7\uC7A5\uAE30\uAE30\uC5B5\xB7\uCC57 \uBCC0\uC218)\uB97C \uACE0\uCE58\uB294 \uD654\uBA74\uC785\uB2C8\uB2E4" : "\uBD07 \uCE74\uB4DC\uC758 \uC7AC\uB8CC(\uBA54\uD0C0\xB7\uC778\uC0AC\uB9D0\xB7\uBD07 \uB85C\uC5B4\uBD81\xB7Regex\xB7\uD2B8\uB9AC\uAC70\xB7\uC5D0\uC14B)\uB97C \uACE0\uCE58\uB294 \uD654\uBA74\uC785\uB2C8\uB2E4";
   }
   var ALL_TABS = [...CONTENT_TABS.map(([id]) => id), "settings"];
-  var active = "chats";
+  var active2 = "chats";
   var mounted = false;
   var mounts = {};
   var healthEl = null;
@@ -11420,6 +18023,12 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
   var botBarEl = null;
   var tabSlot = null;
   var syncBadge = el("span", { class: "syncbadge", style: { display: "none" } });
+  var layoutSlot = el("span", { class: "layoutslot", style: { display: "none" } });
+  function setLayoutControls(node) {
+    clear(layoutSlot);
+    if (node) layoutSlot.appendChild(node);
+    layoutSlot.style.display = node ? "flex" : "none";
+  }
   function refreshSyncBadge() {
     const p = state.assetSync;
     if (!p || !state.botKey) {
@@ -11454,8 +18063,8 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
   }
   function syncToolslot() {
     if (!toolbarSlot || !chatBarEl || !botBarEl || !tabSlot) return;
-    const showChat = !!state.activeChatKey && CHAT_TABS.has(active);
-    const showBot = !!state.botKey && BOT_TABS.has(active);
+    const showChat = !!state.activeChatKey && CHAT_TABS.has(active2);
+    const showBot = !!state.botKey && BOT_TABS.has(active2);
     chatBarEl.style.display = showChat ? "" : "none";
     botBarEl.style.display = showBot ? "" : "none";
     const showTab2 = tabSlot.childElementCount > 0;
@@ -11463,12 +18072,15 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     toolbarSlot.style.display = showChat || showBot || showTab2 ? "" : "none";
   }
   function setTab(tab) {
-    active = tab;
+    active2 = tab;
+    state.activeTab = tab;
+    if (tab !== "studio") noteStudioLeft();
     for (const id of ALL_TABS) {
       mounts[id]?.classList.toggle("active", id === tab);
       document.getElementById("tab-" + id)?.classList.toggle("active", id === tab);
     }
     document.getElementById("open-settings")?.classList.toggle("on", tab === "settings");
+    syncBackTab();
     renderActive();
     syncSettingsBar();
     syncToolslot();
@@ -11478,8 +18090,8 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
   function syncSettingsBar() {
     const row = document.querySelector(".tabs");
     if (!row) return;
-    const inSettings = active === "settings";
-    for (const b of Array.from(row.querySelectorAll(".tab, .tabsep"))) {
+    const inSettings = active2 === "settings";
+    for (const b of Array.from(row.querySelectorAll(".tab, .tabsep, .modetab"))) {
       b.style.display = inSettings ? "none" : "";
     }
     if (!inSettings) syncModeTabs();
@@ -11491,21 +18103,28 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     }
   }
   function renderActive() {
-    const node = mounts[active];
+    const node = mounts[active2];
     if (!node) return;
-    if (active !== "editor") setToolbar(null);
-    if (active === "chats") renderChatsTab(node);
-    else if (active === "editor") renderEditorTab(node);
-    else if (active === "lore") renderLoreTab(node);
-    else if (active === "memory") renderMemoryTab(node);
-    else if (active === "vars") renderVarsTab(node);
-    else if (active === "meta") renderMetaTab(node);
-    else if (active === "botlore") renderBotLoreTab(node);
-    else if (active === "regex") renderRegexTab(node);
-    else if (active === "trigger") renderTriggerTab(node);
-    else if (active === "assets") renderAssetsTab(node);
-    else if (active === "files") renderFilesTab(node);
+    if (active2 === "chats" || active2 === "settings" || active2 === "studio") setToolbar(null);
+    if (active2 !== "studio") setLayoutControls(null);
+    if (active2 === "chats") renderChatsTab(node);
+    else if (active2 === "editor") renderEditorTab(node);
+    else if (active2 === "lore") renderLoreTab(node);
+    else if (active2 === "memory") renderMemoryTab(node);
+    else if (active2 === "vars") renderVarsTab(node);
+    else if (active2 === "meta") renderMetaTab(node);
+    else if (active2 === "botlore") renderBotLoreTab(node);
+    else if (active2 === "regex") renderRegexTab(node);
+    else if (active2 === "trigger") renderTriggerTab(node);
+    else if (active2 === "assets") renderAssetsTab(node);
+    else if (active2 === "files") renderFilesTab(node);
+    else if (active2 === "studio") renderStudioTab(node);
     else renderSettingsTab(node);
+    if (active2 !== "studio") {
+      const split = node.querySelector(".split");
+      if (split) installFoldControls(split);
+    }
+    remountArtifact();
   }
   function refreshStatus() {
     if (!healthEl) return;
@@ -11519,7 +18138,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.10.0"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.11.0"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
@@ -11531,7 +18150,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       }
     }
     if (bootPhase) healthEl.appendChild(el("span", { class: "hint bootphase", text: "\xB7 " + bootPhase }));
-    if (CHAT_TABS.has(active) || BOT_TABS.has(active)) {
+    if (CHAT_TABS.has(active2) || BOT_TABS.has(active2)) {
       healthEl.appendChild(el("span", {
         class: "badge modechip",
         text: mode === "chat" ? "\uCC57 \uD3B8\uC9D1" : "\uBD07 \uD3B8\uC9D1",
@@ -11550,17 +18169,18 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
   }
   function buildShell() {
     injectStyles();
+    installDropGuard(document);
     clear(document.body);
     healthEl = el("div", { class: "status" });
     const tabButton = (id, label) => {
       const b = el("button", { class: "tab", id: "tab-" + id }, [
-        el("span", { text: label }),
+        el("span", { class: "tablabel", text: label }),
         // Only the files tab ever fills this: the count of agent outputs the
         // user has not looked at. Cleared by opening the tab.
         el("span", { class: "badge warn tabbadge", style: { display: "none" } })
       ]);
       b.addEventListener("click", () => {
-        if (id === "chats" && active !== "chats") {
+        if (id === "chats" && active2 !== "chats") {
           void (async () => {
             if (await ensureResolved("\uC120\uD0DD \uD654\uBA74\uC73C\uB85C \uC774\uB3D9")) setTab(id);
           })();
@@ -11596,9 +18216,9 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     });
     let cameFrom = "chats";
     settingsBtn.addEventListener("click", () => {
-      if (active === "settings") setTab(cameFrom);
+      if (active2 === "settings") setTab(cameFrom);
       else {
-        cameFrom = active;
+        cameFrom = active2;
         setTab("settings");
       }
     });
@@ -11613,7 +18233,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.10.0" }),
+        el("span", { class: "dim", text: "v0.11.0" }),
         healthEl,
         el("span", { class: "spacer" }),
         reload,
@@ -11625,7 +18245,8 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       // margin-left:auto, which pushed 워크스페이스 파일 to the opposite edge
       // of the bar from the tab it belongs beside.
       el("div", { class: "tabs" }, [
-        ...CONTENT_TABS.flatMap(([id, label]) => id === "files" ? [el("span", { class: "tabsep", title: "\uC5EC\uAE30\uBD80\uD130\uB294 \uD3B8\uC9D1 \uB300\uC0C1\uC774 \uC544\uB2C8\uB77C \uBD07\uC758 \uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4\uC785\uB2C8\uB2E4" }), tabButton(id, label)] : [tabButton(id, label)]),
+        ...CONTENT_TABS.flatMap(([id, label]) => id === "files" ? [el("span", { class: "tabsep", title: "\uC5EC\uAE30\uBD80\uD130\uB294 \uD3B8\uC9D1 \uB300\uC0C1\uC774 \uC544\uB2C8\uB77C \uC791\uC5C5 \uACF5\uAC04\uC785\uB2C8\uB2E4 \u2014 \uBD07\uC758 \uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4\uC640, \uBD07\uACFC \uBB34\uAD00\uD55C \uC5D0\uC14B \uC2A4\uD29C\uB514\uC624" }), tabButton(id, label)] : id === "chats" ? [tabButton(id, label), modeChip] : [tabButton(id, label)]),
+        layoutSlot,
         syncBadge
       ]),
       toolbarSlot,
@@ -11643,7 +18264,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
     if (badge) {
       const n = state.unseenOutputs.length;
       badge.textContent = String(n);
-      badge.style.display = n && active !== "files" ? "" : "none";
+      badge.style.display = n && active2 !== "files" ? "" : "none";
     }
     const c = state.botChanges;
     const per = {
@@ -11682,8 +18303,12 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       } else if (tab === "files" || tab === "chats") setTab(tab);
       return;
     }
-    if (state.openFileRequest && active !== "files") {
+    if (state.openFileRequest && active2 !== "files") {
       setTab("files");
+      return;
+    }
+    if (state.openStudioRequest && active2 !== "studio") {
+      setTab("studio");
       return;
     }
     refreshStatus();
@@ -11696,7 +18321,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
   });
   async function bootstrap(force = false) {
     if (!mounted) buildShell();
-    setTab(active);
+    setTab(active2);
     const t0 = Date.now();
     setBootPhase("\uBC31\uC5D4\uB4DC\uC5D0 \uC5F0\uACB0\uD558\uB294 \uC911\u2026");
     await transport.detectPlatform();
@@ -11875,6 +18500,6 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.10.0"} loaded`);
+    console.log(`[risu-hina] v${"0.11.0"} loaded`);
   })();
 })();

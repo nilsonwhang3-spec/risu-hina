@@ -63,6 +63,7 @@ export function mountAgent(into: HTMLElement): void {
       requestAnimationFrame(restore);
     }
   }
+  p.syncPlaceholder();
   void p.load();
 }
 

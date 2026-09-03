@@ -204,7 +204,7 @@ export interface WriteResult {
  * be three re-reads and three chances for the last write to carry a stale
  * copy of the other two. One read, one compose, one write.
  *
- * Mirrors the only prior art for writing chats back (cocoAgent): re-read
+ * The write protocol, the same one any careful chat writer uses: re-read
  * without the cache, confirm we are still looking at the same chat, confirm
  * each edited turn still holds the text the user was shown, then write once.
  * Any mismatch aborts the whole write rather than applying part of it.

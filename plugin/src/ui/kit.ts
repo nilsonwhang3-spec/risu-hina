@@ -143,8 +143,11 @@ export interface RowSpec {
   /** Second hint line, dimmed (paths, sizes). */
   sub?: string;
   badges?: { text: string; kind?: 'ok' | 'warn' | 'err' | '' ; title?: string }[];
-  /** The enable checkbox. Dims the row via `.off` while unchecked. */
-  toggle?: { checked: boolean; title?: string; onChange(v: boolean): Promise<void> | void };
+  /** The enable control. Dims the row via `.off` while unchecked. `style:
+   *  'switch'` draws it as a slide toggle (.switch) instead of a checkbox. */
+  toggle?: { checked: boolean; title?: string; style?: 'checkbox' | 'switch'; onChange(v: boolean): Promise<void> | void };
+  /** Extra classes on the row (e.g. `compact` for dense lists). */
+  cls?: string;
   /** The ↑↓ pair (.movebtn), tree rows only. */
   reorder?: { up?: () => void; down?: () => void };
   actions?: HTMLElement[];
@@ -163,10 +166,17 @@ export function listRow(spec: RowSpec): HTMLElement {
     el('span', { class: ('badge ' + (b.kind ?? '')).trim(), text: b.text, ...(b.title ? { title: b.title } : {}) }));
 
   let toggle: HTMLInputElement | null = null;
+  let toggleNode: HTMLElement | null = null;
   if (spec.toggle) {
     toggle = el('input', {
       type: 'checkbox', ...(spec.toggle.title ? { title: spec.toggle.title } : {}),
     }) as HTMLInputElement;
+    toggleNode = toggle;
+    if (spec.toggle.style === 'switch') {
+      toggleNode = el('label', { class: 'switch', ...(spec.toggle.title ? { title: spec.toggle.title } : {}) },
+        [toggle, el('span', { class: 'knob' })]);
+      toggleNode.addEventListener('click', (e) => e.stopPropagation());
+    }
     toggle.checked = spec.toggle.checked;
     toggle.addEventListener('click', (e) => e.stopPropagation());
     toggle.addEventListener('change', async () => {
@@ -196,10 +206,10 @@ export function listRow(spec: RowSpec): HTMLElement {
   let row: HTMLElement;
   if (spec.variant === 'pick') {
     row = el('div', {
-      class: 'pickrow' + (spec.toggle && !spec.toggle.checked ? ' off' : '')
+      class: 'pickrow' + (spec.toggle && !spec.toggle.checked ? ' off' : '') + (spec.cls ? ' ' + spec.cls : '')
         + (spec.selected ? ' on' : ''),
     }, [
-      toggle,
+      toggleNode,
       el('div', { class: 'grow' }, [
         el('div', { class: 'pickname' }, [title, ...badges]),
         spec.hint != null ? el('div', { class: 'hint', text: spec.hint }) : null,
@@ -212,7 +222,7 @@ export function listRow(spec: RowSpec): HTMLElement {
     row = el('div', {
       class: 'treerow lorecard' + (spec.selected ? ' on' : ''),
     }, [
-      toggle,
+      toggleNode,
       title,
       ...badges,
       spec.hint != null ? el('span', { class: 'hint', text: spec.hint }) : null,

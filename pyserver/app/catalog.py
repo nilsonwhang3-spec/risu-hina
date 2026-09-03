@@ -2,7 +2,7 @@
 
 "Which base URL does this provider use and what are its models called" is
 the question every preset starts with, and the answer changes monthly.
-models.dev (https://models.dev/api.json, maintained by the opencode team)
+models.dev (https://models.dev/api.json, a community-maintained catalog)
 publishes exactly that - ~200 providers with their API base, docs link and
 every model's id, context/output limits, prices and capabilities - so the
 settings page searches it instead of shipping a list that would be stale by

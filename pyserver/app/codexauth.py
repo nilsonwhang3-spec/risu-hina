@@ -12,8 +12,12 @@ base URL and key.
 What is known and what is not
 -----------------------------
 Endpoints, client id, scopes, headers and the "stream only, store false"
-rule are what Codex CLI (codex-rs/login, codex-rs/core) and opencode's
-openai-codex plugin use, read in 2025. None of it is a documented API.
+rule are what Codex CLI (codex-rs/login, codex-rs/core) uses, read in 2025.
+None of it is a documented API. The OAuth client id is Codex CLI's public
+app id - OpenAI issues no other for this flow, so there is nothing else to
+present at the authorization server. Everything that is OURS to name says so:
+the `originator` sent on the authorization URL and on every request is
+"risu-hina", not another program's.
 OpenAI can change or gate it; when that happens this stops working and the
 error is surfaced as-is, never papered over. The user chose this knowing
 that (docs/04 F.5).
@@ -57,7 +61,7 @@ TOKEN_URL = "https://auth.openai.com/oauth/token"
 REDIRECT_URI = "http://localhost:1455/auth/callback"
 CALLBACK_PORT = 1455
 SCOPE = "openid profile email offline_access"
-ORIGINATOR = "codex_cli_rs"
+ORIGINATOR = "risu-hina"
 CODEX_BASE = "https://chatgpt.com/backend-api/codex"
 AUTH_CLAIM = "https://api.openai.com/auth"
 

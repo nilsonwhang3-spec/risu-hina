@@ -1518,6 +1518,10 @@ console.log('\ntest_save_as_new_bot');
   await settle(600);
   clickButton(document.querySelector('.panel.active .tree'), '설명 (desc)');
   await settle(400);
+  // §1-31: in bot-edit mode the compose box asks about the 봇.
+  check('the compose box asks about the 봇 in bot mode',
+        /^봇에서/.test(document.querySelector('.agentinput')?.getAttribute('placeholder') || ''),
+        document.querySelector('.agentinput')?.getAttribute('placeholder'));
   const c = document.querySelector('.panel.active .left');
   c.querySelector('textarea').value = '새 봇으로 저장 전에 고친 설명';
   clickButton(c, '저장');
@@ -1615,10 +1619,16 @@ check('agent credential card present', !!findButton(document, '연결 테스트'
   check('with an 편집 and an AI 챗 segment', bars.every((b) => /편집/.test(b.textContent) && /AI 챗/.test(b.textContent)));
 }
 {
-  // The subscription path is off unless this backend's operator enabled it,
-  // so the key page must not offer it (the smoke backend uses the default).
-  check('the key page offers no subscription login',
-        !/OPENAI 구독|OpenAI 로그인/i.test(document.body.textContent || ''));
+  // §1-31: the subscription path ships ON (an operator turns it off by hand),
+  // so the key page offers the login - under the caveat, whose parenthesis is
+  // the emphasised part.
+  const codexCard = [...document.querySelectorAll('.card')].find((c) => /OpenAI 구독/.test(c.textContent || ''));
+  check('the key page offers the subscription login by default',
+        !!codexCard && !!findButton(codexCard, 'OpenAI 로그인'), (codexCard?.textContent || '').slice(0, 120));
+  check('under the responsibility caveat', /개인의 책임하에/.test(codexCard?.textContent || ''));
+  check('whose parenthesis is emphasised', /챗챈/.test(codexCard?.querySelector('strong')?.textContent || ''),
+        codexCard?.querySelector('strong')?.textContent);
+  check('and it says the requests carry the risu-hina name', /risu-hina/.test(codexCard?.textContent || ''));
   const pw = [...document.querySelectorAll('input')].filter((i) => i.getAttribute('type') === 'password');
   check('api key field is a password input', pw.length >= 1, String(pw.length));
   const body = document.body.innerHTML;
@@ -1660,10 +1670,9 @@ console.log('\ntest_agent_presets_ui');
   const selects = [...(box?.querySelectorAll('select') || [])];
   const credSel = selects.find((s) => /직접 입력/.test(s.textContent || ''));
   check('the API key can be borrowed from the key page', !!credSel);
-  // Not among them here: the subscription path is offered only when this
-  // backend's operator turned it on, and the smoke backend is the default.
-  check('and the subscription is not offered when the backend does not enable it',
-        !/OpenAI 구독/.test(credSel?.textContent || ''), credSel?.textContent?.slice(0, 80));
+  // The subscription is among them by default (§1-31; off only by a hand edit).
+  check('and the subscription is offered by default',
+        /OpenAI 구독/.test(credSel?.textContent || ''), credSel?.textContent?.slice(0, 80));
   const reasoningSel = selects.find((s) => /high/.test(s.textContent || ''));
   check('reasoning level is settable', !!reasoningSel);
   const opts = [...(reasoningSel?.querySelectorAll('option') || [])]
@@ -1848,6 +1857,23 @@ console.log('\ntest_agent_panel');
   check('agent panel rendered', !!document.querySelector('.agentpanel'));
   check('attaching a file is offered', !!document.querySelector('.attachbtn'));
   check('has a compose box', !!document.querySelector('.agentinput'));
+  // §1-31: the prompt names the open half - 챗 here (chat-edit mode).
+  check('the compose box asks about the 챗 in chat mode',
+        /^챗에서/.test(document.querySelector('.agentinput')?.getAttribute('placeholder') || ''),
+        document.querySelector('.agentinput')?.getAttribute('placeholder'));
+  // §1-31: the fold icons are on the tab row for EVERY three-pane tab, not
+  // just the studio, and they fold this tab's split.
+  {
+    const btns = [...document.querySelectorAll('.layoutslot .laybtn')];
+    check('the fold icons sit on the tab row outside the studio', btns.length === 2, String(btns.length));
+    const sp = document.querySelector('.panel.active .split');
+    btns[1]?.dispatchEvent(new window.Event('click', { bubbles: true }));
+    await settle(200);
+    check('the agent panel folds on the editor tab', !!sp?.classList.contains('rcollapse'), sp?.className);
+    btns[1]?.dispatchEvent(new window.Event('click', { bubbles: true }));
+    await settle(200);
+    check('and unfolds', !sp?.classList.contains('rcollapse'), sp?.className);
+  }
   // The test backend has no agent credentials, so the panel must say so
   // rather than offering a send button that will always fail.
   check('missing credentials are reported',
@@ -2299,6 +2325,9 @@ console.log('\ntest_studio_reference_tabs');
     .find((r) => /스모크캐릭터/.test(r.textContent || ''));
   check('the 캐릭터 button lists the cards in the left column', !!row,
         (explorer()?.textContent || '').slice(0, 200));
+  // §1-31: dense rows, and the enable control is a slide toggle, not a checkbox.
+  check('the cast rows are compact', !!row?.classList.contains('compact'), row?.className);
+  check('with a slide toggle for enable', !!row?.querySelector('.switch input[type=checkbox]'));
   row?.dispatchEvent(new window.Event('click', { bubbles: true }));
   await settle(900);
   const inline = explorer()?.querySelector('.charinline');

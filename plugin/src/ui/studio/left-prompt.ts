@@ -196,7 +196,7 @@ function buildStyleEditor(mountEl: HTMLElement, path: string): void {
     status,
   );
   // NAI syntax tints ({} · [] · N::…:: · <조각> · #주석) plus tag/fragment
-  // autocomplete, NAIS3-style (item 9-10 of the field report).
+  // autocomplete, reference-tool-style (item 9-10 of the field report).
   const fragNames = () => fragKeys();
   attachHilite(pos, { mode: 'nai', fragments: fragNames });
   attachHilite(neg, { mode: 'nai', fragments: fragNames });
