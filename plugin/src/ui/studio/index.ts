@@ -23,7 +23,7 @@
  * A bot IS needed to *adopt* an image into a card - that is gated per action,
  * where it is true, rather than on the whole tab.
  */
-import { el, clear } from './../dom';
+import { el, clear, ICON, iconBtn } from './../dom';
 import { state, type StudioItem } from '../../state';
 import { threePane } from '../panes';
 import { bindAgent, mountAgent } from '../agentpane';
@@ -41,6 +41,7 @@ import { drawBatch, batchTick } from './center-batch';
 import { buildStrip, stripTick, refreshStrip } from './strip';
 import { drawFolder } from './center-folder';
 import { hasGroups, loadGroups, drawSelector } from './selector';
+import { setLayoutControls } from '../shell';
 
 let built = false;
 /** The filesRev this tab last drew. While the tab stays active, an unrelated
@@ -76,14 +77,15 @@ try {
 let autoRight = false;
 let wasInspect = false;
 
+let layBtnL: HTMLElement | null = null;
+let layBtnR: HTMLElement | null = null;
+
 function applyPanels(): void {
   if (!splitRoot) return;
   splitRoot.classList.toggle('lcollapse', panels.left);
   splitRoot.classList.toggle('rcollapse', panels.right || autoRight);
-}
-
-function panelOpen(side: 'left' | 'right'): boolean {
-  return !panels[side];
+  layBtnL?.classList.toggle('on', !panels.left);
+  layBtnR?.classList.toggle('on', !(panels.right || autoRight));
 }
 
 function togglePanel(side: 'left' | 'right'): void {
@@ -99,19 +101,26 @@ function togglePanel(side: 'left' | 'right'): void {
   if (S.centreMode === 'tab' && !S.selectedFile) drawCentre();
 }
 
-function rail(side: 'left' | 'right'): HTMLElement {
-  const openBtn = el('button', { class: 'ghost tiny', text: side === 'left' ? '▸' : '◂',
-                                 title: side === 'left' ? '왼쪽 패널 펼치기' : 'AI 챗 펼치기' });
-  openBtn.addEventListener('click', () => togglePanel(side));
-  return el('div', { class: 'panelrail ' + (side === 'left' ? 'lrail' : 'rrail') }, [
-    openBtn,
-    el('span', { class: 'vlabel', text: side === 'left' ? '프롬프트 · OUTPUT' : 'AI 챗' }),
-  ]);
+/** The two panel toggles, registered on the SHELL tab row (§1-30) - VS Code
+ * style, instead of slim rails and a button floating over the agent header
+ * (which sat on top of its own controls and made the right side feel broken). */
+function ensureLayoutControls(): void {
+  if (!layBtnL || !layBtnR) {
+    layBtnL = iconBtn(ICON.layoutL, '왼쪽 패널(프롬프트·OUTPUT) 접기/펼치기');
+    layBtnL.classList.add('laybtn');
+    layBtnL.addEventListener('click', () => togglePanel('left'));
+    layBtnR = iconBtn(ICON.layoutR, 'AI 챗 패널 접기/펼치기');
+    layBtnR.classList.add('laybtn');
+    layBtnR.addEventListener('click', () => togglePanel('right'));
+  }
+  setLayoutControls(el('span', { class: 'row', style: { gap: '2px' } }, [layBtnL, layBtnR]));
+  applyPanels();
 }
 
 export function renderStudioTab(mount: HTMLElement): void {
   const entering = !wasStudioActive;
   wasStudioActive = true;
+  ensureLayoutControls();
   if (!built || !mount.querySelector('.split')) {
     clear(mount);
     const pane = threePane();
@@ -130,15 +139,6 @@ export function renderStudioTab(mount: HTMLElement): void {
     // under every centre view (the .left column is a flex column).
     pane.centre.appendChild(buildStrip());
 
-    // Collapse rails: shown by the lcollapse/rcollapse classes. The right
-    // pane's own toggle sits in its top corner (the agent panel inside is
-    // shared with every tab, so the studio pins the button over it).
-    pane.root.insertBefore(rail('left'), pane.left);
-    pane.root.appendChild(rail('right'));
-    const collapseR = el('button', { class: 'ghost tiny railbtn rcollapsebtn', text: '▸',
-                                     title: panelOpen('right') ? 'AI 챗 패널 접기' : 'AI 챗 패널 펼치기' });
-    collapseR.addEventListener('click', () => togglePanel('right'));
-    pane.right.appendChild(collapseR);
     applyPanels();
 
     mount.appendChild(pane.root);
@@ -324,11 +324,7 @@ function drawLeft(): void {
     });
     return b;
   };
-  // The collapse toggle lives on the panel it collapses (user), compact
-  // enough that both tabs keep their room.
-  const collapseL = el('button', { class: 'ghost tiny railbtn', text: '◂', title: '이 패널 접기' });
-  collapseL.addEventListener('click', () => togglePanel('left'));
-  tabbar.append(mk('prompt', '프롬프트'), mk('output', 'OUTPUT'), el('span', { class: 'grow' }), collapseL);
+  tabbar.append(mk('prompt', '프롬프트'), mk('output', 'OUTPUT'));
 
   clear(leftContent);
   if (S.leftTab === 'output') {

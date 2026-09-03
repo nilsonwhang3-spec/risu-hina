@@ -466,6 +466,12 @@ check("what did not parse is carried, not dropped",
       [u["filename"] for u in g["unmatched"]] == ["제멋대로 지은 이름.png"],
       str(g["unmatched"]))
 
+# Composite group_by (§1-30): two captured tokens, grouped by both joined.
+gc = studio.group("images/고르기", r"^(?P<t1>[^-.]+)-(?P<t2>[^-.]+)", "t1+t2")
+kc = sorted(x["key"] for x in gc["groups"])
+check("a composite key joins the captured tokens",
+      "히나-happy" in kc and "히나-교복" in kc, str(kc))
+
 studio.write_selection("images/고르기", {
     "히나-happy-20260829-120000-1.png": {"use": True, "inpaint": False, "delete": False},
     "히나-happy-20260829-120000-2.png": {"use": False, "inpaint": True, "delete": False},

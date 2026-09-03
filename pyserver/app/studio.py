@@ -1184,6 +1184,17 @@ def save_naming_profile(char_key: str, profile: dict) -> dict:
     return profile
 
 
+def _group_key(fields: dict, group_by: str) -> str:
+    """One field, or a `+`-joined composite (usability §1-30): 1-2-3.webp can
+    group by token 1, by token 2, or by 1 AND 2 together. Composite parts join
+    with '-' - it is a display/grouping key, not a filename."""
+    if "+" not in group_by:
+        return fields.get(group_by) or "(없음)"
+    parts = [fields.get(f) or "" for f in group_by.split("+")]
+    joined = "-".join([q for q in parts if q])
+    return joined or "(없음)"
+
+
 def group(folder: str, pattern: str = "", group_by: str = "emotion") -> dict:
     """The folder's images, gathered into groups to choose between.
 
@@ -1203,7 +1214,7 @@ def group(folder: str, pattern: str = "", group_by: str = "emotion") -> dict:
 
     groups: dict[str, list[dict]] = {}
     for m in parsed["matched"]:
-        key = m.get(group_by) or "(없음)"
+        key = _group_key(m, group_by)
         groups.setdefault(key, []).append({
             "filename": m["filename"],
             "path": f"{folder.strip('/')}/{m['filename']}",

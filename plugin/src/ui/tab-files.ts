@@ -502,8 +502,16 @@ function drawCentre(): void {
   const del = iconBtn(FICON.trash, (selCount ? `삭제 (${selCount})` : '삭제') + ' — Delete 키로도 됩니다');
   del.disabled = !selCount || !deletable;
   delCtrl = armedIcon(del, FICON.trash, `정말? (${selCount})`, () => void runDelete(n));
-  const all = iconBtn(FICON.selectAll, '전체 선택 (Ctrl+A)');
-  all.addEventListener('click', () => { selectAll(n); drawCentre(); });
+  // Toggle: everything already selected -> the same button DEselects (§1-30).
+  const allNow = n.kids.length + n.files.length;
+  const allOn = selCount > 0 && selCount >= allNow;
+  const all = iconBtn(FICON.selectAll, allOn ? '전체 선택 해제 (Esc)' : '전체 선택 (Ctrl+A)');
+  all.classList.toggle('on', allOn);
+  all.addEventListener('click', () => {
+    if (allOn) selection.clear();
+    else selectAll(n);
+    drawCentre();
+  });
   const viewBtn = iconBtn(view === 'grid' ? FICON.list : FICON.grid,
                           view === 'grid' ? '목록 보기' : '미리보기 — 썸네일로 봅니다');
   viewBtn.addEventListener('click', () => {
@@ -624,6 +632,8 @@ function drawCentre(): void {
       { label: clipboard ? `붙여넣기 (${clipboard.paths.length})` : '붙여넣기',
         disabled: !clipboard || !writable, onClick: () => void pasteInto(uploadTarget()) },
       { label: '전체 선택', onClick: () => { selectAll(n); drawCentre(); } },
+      { label: '선택 해제', disabled: !selection.size,
+        onClick: () => { selection.clear(); drawCentre(); } },
     ]);
   });
   installMarquee(list);

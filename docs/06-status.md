@@ -72,7 +72,16 @@ the NAIS3 restraint list) · neutral '선택된 … 없음' empty-hints on the t
 whole agent panel takes drops — internal rows/cells/fragment cards attach as PATH chips (no
 upload; the message says read_file/list_files), card assets ride a new `DRAG_ASSETS` payload as
 NAME chips (fetch_assets), OS folders now walk in via collectDrop; sources advertise `copyMove`
-and targets pick the cursor.)
+and targets pick the cursor.) **+ §1-30 six §1-29-use follow-ups** (2026-09-02:
+studio panel toggles = VS Code-style icons on the SHELL tab row beside the 에셋 badge
+(`shell.setLayoutControls`; rails + the overlay button over the agent header retired - the
+overlay was most of "the right panel is hard to adjust") + an invisible 4px apron each side of
+every gutter · the 검수 grouping rule folds into ONE `규칙:` button opening a popover, and its
+token chips MULTI-select (1-2-3.webp groups by 1, by 2, or by 1+2 - the pattern captures each
+selected position and the backend `_group_key` joins `t1+t2` composites; legacy `tokenIndex`
+saves fold into `tokens[]`) · the OUTPUT tree carries the file tab's right-click folder verbs
+(새 폴더 · rename · copy/cut/paste · path · zip · two-menu delete) · the files tab select-all
+icon toggles to deselect and the empty-space menu gains 선택 해제.)
 (gate ALL GREEN; the minor went up so the version gate trips when it ships). **Staged on test-server
 2026-08-30 night AT §1-25 (= §1-19~24 included): service stopped → backup `data-backup-20260830-s120`
 (11,358 files) → app/*.py + seeds/studio-image-ops.md + tools/probe_nai.py + requirements.in scp'd,
@@ -104,7 +113,7 @@ mixed-cast multi-entry batch from the panel.** Released = **v0.10.0 BETA** (§1-
 
 **Handoff 2026-08-31 (the studio feedback marathon, §1-19 ~ §1-25).** Where the next session picks up:
 
-- **State**: master = 0.11.0 unreleased through §1-29 (commit 9c22085), gate ALL GREEN, test-server staged AT §1-29 (2026-09-02)
+- **State**: master = 0.11.0 unreleased; committed through §1-29 (`9c22085`), **§1-30 sits in the WORKING TREE uncommitted - its gate re-run is pending** (see §1-30's Status), test-server staged AT §1-29 (2026-09-02; §1-30 unstaged)
   (2026-08-31 night: stop → backup `data-backup-20260831` (20,576 files) → 10 app modules + 2
   seeds + the 764,648B dev bundle → start; verified live: `/health` 0.11.0, **studio_v2 moved
   1,809 files into config/+output/** (manifest 511KB), skills seed v6 landed the NSFW skill,
@@ -129,6 +138,52 @@ mixed-cast multi-entry batch from the panel.** Released = **v0.10.0 BETA** (§1-
 - Historical note kept below: the one-time manual reinstall advice for 0.1.0-era installs.
 
 → (historical) **First thing to do**: the user reinstalls `plugin/Risu.Hina.Plugin.js` into RisuAI **by hand, once** (the installed 0.1.0's update-url cannot be read because of CORS) → check that `+` appears from the next release on → verify M2 in real use (§5-2).
+
+## 1-30. 2026-09-02 - 0.11.0 (unreleased, continued): panel toggles on the tab row, the compact multi-token rule, OUTPUT-tree verbs
+
+Six follow-ups from §1-29's first real use, one commit.
+
+- **Panel toggles are VS Code-style icons on the SHELL tab row** (beside the 에셋 sync badge;
+  `shell.setLayoutControls`, the studio registers them on every render): the slim rails and the
+  button floating over the agent header are gone - that overlay sat on the agent's own controls
+  and was most of "the right panel is hard to adjust". Every splitter gutter also grew an
+  invisible 4px apron per side (a 5px line is honest to look at and mean to grab). 검수's
+  auto-fold reads back into the icons' on-state, and a manual toggle still wins.
+- **The 검수 grouping rule folds into ONE compact button** (`규칙: - · 1+2번째`) opening a
+  popover: delimiter, token chips, 자동, and the raw regex behind 고급. The old full-width row
+  of labels + chips ate two lines above every grid.
+- **Token chips MULTI-select** (the user's ask: `1-2-3.webp` must group by 1, by 2, or by 1 AND
+  2): the delim pattern captures every selected position (`t1`, `t2`, …) and the backend joins
+  `t1+t2` composites with '-' (`_group_key` - a display/grouping key, not a filename). Legacy
+  single-`tokenIndex` saves fold into `tokens[]` on read; a chip toggle applies after a 350ms
+  debounce and the popover survives the redraw.
+- **The OUTPUT tree carries the file tab's right-click folder verbs** (검수 열기 · 새 폴더 ·
+  rename · copy/cut/paste on a studio-side clipboard · 경로 복사 · zip · the two-menu delete
+  confirm) - same shared tree component, same conventions.
+- The files tab's select-all icon **toggles** (everything selected → the same button deselects)
+  and the empty-space context menu gains 선택 해제.
+- Smoke pins moved with the UI: the rail checks became header `.laybtn` fold/unfold clicks, the
+  token chips are found inside the rule popover (multi-select asserted: a `하나-교복` composite
+  card), and the rule row is asserted as one `.rulebtn`.
+
+**Status (2026-09-03, session ended on the user's 문서화-하고-종료 - START HERE)**: all six items
+are implemented and UNCOMMITTED in the working tree (last commit = §1-29's docs `9dcf825`).
+Verified piecewise green: tsc, the build, every backend suite (test_studio incl. the composite-key
+test) inside the one full gate run - whose ONLY failure was a smoke ASSERTION typo: the
+multi-select check looked for `히나-교복` (the backend fixture's name) while the smoke fixture is
+`하나-…`; the failure detail itself showed the feature working (`규칙: - · 1+2번째`, groups
+`하나-happy`/`하나-교복`). After the one-character fix the smoke suite re-ran standalone to
+**PASS (600 checks, the multi-select check ok)**. What did NOT happen: one continuous
+`gate.sh` ALL GREEN, and the §1-30 commit. **Next session: `bash tests/gate.sh` once (expect ALL
+GREEN), then commit §1-30 as one commit.** Trap reminder: a killed gate/smoke can orphan a
+`node tests/plugin_smoke.mjs` process that makes the NEXT gate hang forever - none left this
+time (checked), but look at `tasklist` before running.
+
+**Closed 2026-09-03**: `gate.sh` ALL GREEN in one continuous run, §1-30 committed. The "hang"
+had a cause, not just a trap: the smoke printed PASS and then never exited - the plugin leaves
+timers alive (sync polling, thumbnail LRU) and the script had no `process.exit(0)` after the
+verdict, so every gate since §1-29 stalled on its last line until the harness killed it. Fixed
+in the same commit (explicit exit after PASS); an orphaned smoke is no longer expected.
 
 ## 1-29. 2026-09-01 - 0.11.0 (unreleased, continued): the 17-item usability batch (tree · thumbnails · bottom strip · 검수 · code tints · chat drops)
 

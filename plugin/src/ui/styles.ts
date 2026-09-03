@@ -151,6 +151,10 @@ button.outline:hover { background: rgba(37,99,235,.18); }
 }
 .tab.active { color: var(--textcolor, #d8dce4); border-bottom-color: #2563eb; font-weight: 700; }
 /* The asset importer's progress at the end of the tab row. */
+/* The studio's layout toggles, on the tab row before the sync badge. */
+.layoutslot { margin-left: auto; align-items: center; gap: 2px; }
+.layoutslot .laybtn.on { background: rgba(37,99,235,.18); }
+.layoutslot + .syncbadge { margin-left: 8px; }
 .syncbadge {
   margin-left: auto; align-self: center; padding: 2px 8px; border-radius: 4px; font-size: 11px;
   color: var(--textcolor2, #79839a); border: 1px solid var(--borderc, #2b323f); white-space: nowrap;
@@ -377,6 +381,10 @@ details.fold > .foldbody {
 .gutter { flex: 0 0 5px; cursor: col-resize; background: var(--borderc, #2b323f); opacity: .45; touch-action: none; }
 .gutter.leftside { flex-basis: 4px; }
 .gutter:hover, .gutter.dragging { opacity: 1; background: #2563eb; }
+/* A 5px line is honest to look at and mean to grab: an invisible 4px apron on
+   both sides catches the pointer for it (§1-30 - the studio's right panel). */
+.gutter { position: relative; }
+.gutter::after { content: ''; position: absolute; top: 0; bottom: 0; left: -4px; right: -4px; }
 
 .toolrow {
   display: flex; align-items: center; gap: 3px; padding: 6px 8px; flex-wrap: wrap;
@@ -393,6 +401,10 @@ button.tool .glyph { font-size: 14px; line-height: 1; }
 button.tool .tool-label { font-size: 12px; }
 button.iconbtn { padding: 4px 8px; background: transparent; border-color: transparent; font-size: 14px; }
 button.iconbtn:hover:not(:disabled) { background: rgba(128,128,128,.14); }
+button.iconbtn.on { background: rgba(37,99,235,.18); }
+/* The review rule popover (§1-30): compact editor behind one summary button. */
+.rulepop { min-width: 240px; max-width: 340px; }
+.rulepop .advbox { margin-top: 6px; }
 
 .scroller { flex: 1; overflow-y: auto; position: relative; }
 .spacerTop, .spacerBottom { width: 100%; }
@@ -1100,7 +1112,6 @@ label.row { align-items: center; gap: 6px; }
   border-bottom-color: #2563eb;
 }
 .tabstrip .grow { flex: 1 1 0; min-width: 0; }
-.tabstrip .railbtn { flex: 0 0 auto; padding: 1px 6px; font-size: 12px; margin-bottom: 3px; }
 .studiotabs { padding: 6px 6px 0; }
 .centretabs { margin-bottom: 10px; }
 
@@ -1108,15 +1119,6 @@ label.row { align-items: center; gap: 6px; }
    panel can be found again. */
 .split.lcollapse > .explorer, .split.lcollapse > .gutter.leftside { display: none; }
 .split.rcollapse > .right, .split.rcollapse > .gutter:not(.leftside) { display: none; }
-.panelrail {
-  display: none; flex: 0 0 26px; flex-direction: column; align-items: center;
-  gap: 10px; padding: 8px 0; border: 1px solid var(--borderc, #2b323f);
-  border-radius: 6px; background: var(--darkbg, #171a21);
-}
-.split.lcollapse > .panelrail.lrail { display: flex; }
-.split.rcollapse > .panelrail.rrail { display: flex; }
-.panelrail button { padding: 1px 6px; }
-.panelrail .vlabel { writing-mode: vertical-rl; font-size: 11px; opacity: .55; letter-spacing: 2px; white-space: nowrap; }
 
 /* The tool buttons under the style editor (캐릭터 · 조각). */
 .toolbtns { display: flex; gap: 6px; padding: 6px 8px; }
@@ -1231,7 +1233,6 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
 .selgrid .assetpic { aspect-ratio: auto; min-height: 60px; }
 .selgrid .assetpic img { height: auto; object-fit: contain; }
 .tabsep { width: 1px; align-self: stretch; margin: 4px 6px; background: var(--borderc, #2b323f); }
-.rcollapsebtn { position: absolute; top: 6px; left: 6px; z-index: 3; }
 .split > .right { position: relative; }
 
 /* The selector's rule chips and group cards. */
@@ -1256,7 +1257,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
 .genform .row { gap: 6px; align-items: flex-end; }
 
 @media (max-width: 900px) {
-  .panelrail { display: none !important; }
+  .layoutslot { display: none !important; }
 }
 
 /* --- context menu (file rows) -------------------------------------------------- */

@@ -17,7 +17,7 @@
  * CLICK the token that is the group key (the chips show the actual first
  * filename split apart). A raw named-group regex stays behind 고급.
  */
-import { el, segCtl, colPicker, clear } from '../dom';
+import { el, segCtl, colPicker, clear, popover } from '../dom';
 import { blobUrl } from '../blobimg';
 import { state, type GroupItem, type SelectionMap, type SelectionState,
          type StudioGroups, type WorkspaceFile } from '../../state';
@@ -39,14 +39,18 @@ let patternTimer: ReturnType<typeof setTimeout> | null = null;
 
 interface GroupPrefs {
   /** 'default' = the stamp-anchored built-in rule; 'delim' = delimiter +
-   * picked token; 'regex' = a raw named-group pattern (고급). */
+   * picked tokens; 'regex' = a raw named-group pattern (고급). */
   mode: 'default' | 'delim' | 'regex';
   delimiter: string;
-  tokenIndex: number;
+  /** The picked token positions, 1-based - MULTI-select (§1-30): 1-2-3.webp
+   * can group by 1, by 2, or by 1+2 joined. */
+  tokens: number[];
+  /** Legacy single-token saves (pre §1-30); folded into `tokens` on read. */
+  tokenIndex?: number;
   pattern: string;
   groupBy: string;
 }
-const DEF: GroupPrefs = { mode: 'default', delimiter: '-', tokenIndex: 2, pattern: '', groupBy: 'emotion' };
+const DEF: GroupPrefs = { mode: 'default', delimiter: '-', tokens: [2], pattern: '', groupBy: 'emotion' };
 const PREFS_KEY = 'hina.studioGroupBy';
 let prefs: Record<string, Partial<GroupPrefs>> = {};
 try {
@@ -58,7 +62,9 @@ function prefsFor(folder: string): GroupPrefs {
   const p = prefs[folder] ?? {};
   // An older save carried only {pattern, groupBy}: a pattern meant regex mode.
   const mode = p.mode ?? (p.pattern ? 'regex' : 'default');
-  return { ...DEF, ...p, mode };
+  const tokens = p.tokens && p.tokens.length ? p.tokens
+    : (p.tokenIndex ? [p.tokenIndex] : DEF.tokens);
+  return { ...DEF, ...p, mode, tokens };
 }
 
 function setPrefs(folder: string, next: Partial<GroupPrefs>): void {
@@ -66,19 +72,36 @@ function setPrefs(folder: string, next: Partial<GroupPrefs>): void {
   try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch { /* fine */ }
 }
 
-/** The delimiter rule as the backend's named-group regex: skip k-1 tokens,
- * capture the k-th (stopping at a '.', so extensions and the image-selector
- * style `.2` dedup suffixes never leak into a group key). */
-function delimPattern(d: string, k: number): string {
+/** The delimiter rule as the backend's named-group regex: every SELECTED
+ * position is a capture (stopping at '.', so extensions and the `.2` dedup
+ * suffixes never leak in), the rest are skipped. The backend joins t1+t2
+ * composites into one key. */
+function delimPattern(d: string, tokens: number[]): string {
   const e = d === ' ' ? ' ' : '\\' + d;
   const tok = `[^${e}.]`;
-  return k <= 1 ? `^(?P<g>${tok}+)` : `^(?:[^${e}]*${e}){${k - 1}}(?P<g>${tok}+)`;
+  const max = Math.max(...tokens);
+  const set = new Set(tokens);
+  const parts: string[] = [];
+  for (let i = 1; i <= max; i++) parts.push(set.has(i) ? `(?P<t${i}>${tok}+)` : `[^${e}]*`);
+  return '^' + parts.join(e);
 }
 
 function effective(p: GroupPrefs): { pattern: string; groupBy: string } {
-  if (p.mode === 'delim') return { pattern: delimPattern(p.delimiter, p.tokenIndex), groupBy: 'g' };
+  if (p.mode === 'delim') {
+    const tokens = [...p.tokens].sort((a, b) => a - b);
+    return { pattern: delimPattern(p.delimiter, tokens), groupBy: tokens.map((i) => 't' + i).join('+') };
+  }
   if (p.mode === 'regex' && p.pattern.trim()) return { pattern: p.pattern.trim(), groupBy: p.groupBy || 'g' };
   return { pattern: '', groupBy: p.groupBy || 'emotion' };
+}
+
+function ruleSummary(p: GroupPrefs): string {
+  if (p.mode === 'regex' && p.pattern.trim()) return '규칙: 정규식';
+  if (p.mode === 'delim') {
+    const d = p.delimiter === ' ' ? '공백' : p.delimiter;
+    return `규칙: ${d} · ${[...p.tokens].sort((a, b) => a - b).join('+')}번째`;
+  }
+  return '규칙: 자동';
 }
 
 /** Whether the loaded groups belong to this folder - drawCentre's gate. */
@@ -186,99 +209,17 @@ export function drawSelector(node: Folder): void {
   if (/\/selected$/.test(node.path)) bar.appendChild(adoptButton());
   viewMount.appendChild(bar);
 
-  // --- the grouping rule, visible ---------------------------------------------------
-  // A delimiter and the actual first filename split into clickable tokens:
-  // the group key is the chip you press, not a regex you decode.
-  const sample = g.groups[0]?.items[0]?.filename ?? g.unmatched[0]?.filename ?? '';
-  const stem = sample.replace(/\.[a-z0-9]+$/i, '');
-  const rule = el('div', { class: 'row', style: { marginBottom: '8px', flexWrap: 'wrap' } });
-  rule.appendChild(el('span', { class: 'hint', text: '구분자' }));
-  const dsel = el('select', { title: '파일명을 나누는 문자' }) as HTMLSelectElement;
-  for (const [v, label] of [['-', '-'], ['_', '_'], ['.', '.'], [' ', '공백']] as const) {
-    const o = el('option', { value: v, text: label });
-    if (p.delimiter === v) o.setAttribute('selected', 'selected');
-    dsel.appendChild(o);
-  }
-  // Changing the delimiter only re-splits the sample: the reload (and the
-  // rule change) happens when a token chip is PICKED, so the grid never
-  // reshuffles under the pointer mid-decision.
-  let stagedDelim = p.delimiter;
-  dsel.addEventListener('change', () => {
-    stagedDelim = dsel.value;
-    renderChips();
-  });
-  rule.appendChild(dsel);
-  rule.appendChild(el('span', { class: 'hint', text: '그룹 기준' }));
-  const chipsBox = el('span', { class: 'row', style: { gap: '2px', flexWrap: 'wrap' } });
-  rule.appendChild(chipsBox);
-  const renderChips = (): void => {
-    clear(chipsBox);
-    if (!stem) return;
-    const tokens = stem.split(stagedDelim).filter((t) => t !== '');
-    tokens.slice(0, 6).forEach((tok, i) => {
-      const on = p.mode === 'delim' && p.delimiter === stagedDelim && p.tokenIndex === i + 1;
-      const chip = el('button', {
-        class: 'ghost tiny tokenchip' + (on ? ' on' : ''),
-        text: `${i + 1}·${tok.length > 12 ? tok.slice(0, 12) + '…' : tok}`,
-        title: `${i + 1}번째 조각을 그룹 기준으로 (예: ${tok})`,
-      });
-      chip.addEventListener('click', () => {
-        setPrefs(node.path, { mode: 'delim', delimiter: stagedDelim, tokenIndex: i + 1 });
-        drill = '';
-        void loadGroups(node.path);
-      });
-      chipsBox.appendChild(chip);
-    });
-  };
-  renderChips();
-  const auto = el('button', { class: 'ghost tiny' + (p.mode === 'default' ? ' on' : ''), text: '자동',
-                              title: '기본 규칙 (캐릭터-감정-날짜-번호 형태를 자동으로 읽습니다)' });
-  auto.addEventListener('click', () => {
-    setPrefs(node.path, { mode: 'default' });
-    drill = '';
-    void loadGroups(node.path);
-  });
-  rule.appendChild(auto);
-  rule.appendChild(el('span', { class: 'hint', text: `읽음 ${g.total - g.unmatched.length}` }));
+  // --- the grouping rule: ONE compact control (§1-30) -------------------------------
+  // The editor folds behind a small summary button - the old full-width row of
+  // labels + chips ate two lines above every grid. Tokens are MULTI-select.
+  const ruleBtn = el('button', { class: 'ghost tiny rulebtn', text: ruleSummary(p),
+    title: '구분자와 그룹 기준을 고칩니다 (토큰은 복수 선택 가능)' });
+  ruleBtn.addEventListener('click', () => openRulePopover(ruleBtn, node));
+  bar.appendChild(ruleBtn);
   if (g.unmatched.length) {
-    rule.appendChild(el('span', { class: 'badge warn', text: `못 읽음 ${g.unmatched.length}`,
+    bar.appendChild(el('span', { class: 'badge warn', text: `못 읽음 ${g.unmatched.length}`,
       title: '이름 규칙이 못 읽은 파일 — 아래 별도 목록에 있습니다' }));
   }
-  viewMount.appendChild(rule);
-
-  // 고급: the raw named-group regex, folded away.
-  const adv = el('details', { class: 'advbox', ...(p.mode === 'regex' ? { open: true } : {}) }, [
-    el('summary', { text: '고급 (정규식 규칙)' }),
-  ]);
-  const pat = el('input', {
-    value: p.mode === 'regex' ? p.pattern : '', placeholder: '(?P<costume>[^-]+)-(?P<emotion>[^-]+)',
-    title: '명명 캡처그룹 정규식 — 그룹 이름이 그룹 기준 후보가 됩니다',
-  }) as HTMLInputElement;
-  pat.addEventListener('input', () => {
-    if (patternTimer) clearTimeout(patternTimer);
-    patternTimer = setTimeout(() => {
-      setPrefs(node.path, { mode: pat.value.trim() ? 'regex' : 'default', pattern: pat.value });
-      drill = '';
-      void loadGroups(node.path);
-    }, 800);
-  });
-  const by = el('select', { title: '어느 필드로 묶어 볼지' }) as HTMLSelectElement;
-  const fields = [...new Set([g.groupBy, ...(g.fields ?? [])])];
-  for (const f of fields) {
-    const o = el('option', { value: f, text: f });
-    if (f === g.groupBy) o.setAttribute('selected', 'selected');
-    by.appendChild(o);
-  }
-  by.addEventListener('change', () => {
-    setPrefs(node.path, { groupBy: by.value });
-    drill = '';
-    void loadGroups(node.path);
-  });
-  adv.appendChild(el('div', { class: 'row', style: { flexWrap: 'wrap' } }, [
-    el('span', { class: 'hint', text: '정규식' }), pat,
-    el('span', { class: 'hint', text: '필드' }), by,
-  ]));
-  viewMount.appendChild(adv);
 
   // 부족분: groups where nothing is chosen and nothing is being fixed - the
   // slots the export would leave a placeholder for. One button turns them
@@ -445,6 +386,113 @@ function candidate(it: GroupItem, groupItems?: GroupItem[]): HTMLElement {
   pic.addEventListener('click', () => flag(it.filename, 'use'));
   void loadThumb({ path: it.path, name: it.filename, size: 0, modified: 0, textual: false }, pic);
   return cell2;
+}
+
+/** The rule editor: delimiter, multi-select token chips, 자동, and the raw
+ * regex behind 고급 - in a popover, not a full-width row (§1-30). A chip
+ * toggle applies after a short debounce; the popover survives the redraw. */
+function openRulePopover(anchor: HTMLElement, node: Folder): void {
+  const p = prefsFor(node.path);
+  const g = groups;
+  const sample = g?.groups[0]?.items[0]?.filename ?? g?.unmatched[0]?.filename ?? '';
+  const stem = sample.replace(/\.[a-z0-9]+$/i, '');
+  let stagedDelim = p.delimiter;
+  const staged = new Set<number>(p.mode === 'delim' ? p.tokens : []);
+  let applyTimer: ReturnType<typeof setTimeout> | null = null;
+  const applyDelim = (): void => {
+    if (!staged.size) return;
+    if (applyTimer) clearTimeout(applyTimer);
+    applyTimer = setTimeout(() => {
+      setPrefs(node.path, { mode: 'delim', delimiter: stagedDelim, tokens: [...staged].sort((a, b) => a - b) });
+      drill = '';
+      void loadGroups(node.path);
+    }, 350);
+  };
+
+  const body = el('div', { class: 'rulepop' });
+  const dsel = el('select', { title: '파일명을 나누는 문자' }) as HTMLSelectElement;
+  for (const [v, label] of [['-', '-'], ['_', '_'], ['.', '.'], [' ', '공백']] as const) {
+    const o = el('option', { value: v, text: label });
+    if (stagedDelim === v) o.setAttribute('selected', 'selected');
+    dsel.appendChild(o);
+  }
+  const chipsBox = el('div', { class: 'row', style: { gap: '2px', flexWrap: 'wrap' } });
+  const renderChips = (): void => {
+    clear(chipsBox);
+    if (!stem) {
+      chipsBox.appendChild(el('span', { class: 'hint', text: '샘플 파일이 없습니다' }));
+      return;
+    }
+    const toks = stem.split(stagedDelim).filter((q) => q !== '');
+    toks.slice(0, 6).forEach((tok, i) => {
+      const chip = el('button', {
+        class: 'ghost tiny tokenchip' + (staged.has(i + 1) ? ' on' : ''),
+        text: `${i + 1}·${tok.length > 12 ? tok.slice(0, 12) + '…' : tok}`,
+        title: `${i + 1}번째 조각을 그룹 기준에 넣거나 뺍니다 (예: ${tok})`,
+      });
+      chip.addEventListener('click', () => {
+        // Multi-select: toggle membership; the last one cannot leave.
+        if (staged.has(i + 1)) {
+          if (staged.size > 1) staged.delete(i + 1);
+        } else {
+          staged.add(i + 1);
+        }
+        chip.classList.toggle('on', staged.has(i + 1));
+        applyDelim();
+      });
+      chipsBox.appendChild(chip);
+    });
+  };
+  dsel.addEventListener('change', () => {
+    stagedDelim = dsel.value;
+    staged.clear(); // a new delimiter starts a new pick; nothing applies yet
+    renderChips();
+  });
+  renderChips();
+  const auto = el('button', { class: 'ghost tiny' + (p.mode === 'default' ? ' on' : ''), text: '자동',
+    title: '기본 규칙 (캐릭터-감정-날짜-번호 형태를 자동으로 읽습니다)' });
+  auto.addEventListener('click', () => {
+    setPrefs(node.path, { mode: 'default' });
+    drill = '';
+    void loadGroups(node.path);
+  });
+  body.append(
+    el('div', { class: 'row' }, [el('span', { class: 'hint', text: '구분자' }), dsel, auto]),
+    el('div', { class: 'hint', style: { margin: '6px 0 2px' }, text: '그룹 기준 — 칩을 눌러 넣고 뺍니다 (복수 선택)' }),
+    chipsBox,
+  );
+  const pat = el('input', {
+    value: p.mode === 'regex' ? p.pattern : '', placeholder: '(?P<costume>[^-]+)-(?P<emotion>[^-]+)',
+    title: '명명 캡처그룹 정규식 — 그룹 이름이 그룹 기준 후보가 됩니다',
+  }) as HTMLInputElement;
+  pat.addEventListener('input', () => {
+    if (patternTimer) clearTimeout(patternTimer);
+    patternTimer = setTimeout(() => {
+      setPrefs(node.path, { mode: pat.value.trim() ? 'regex' : 'default', pattern: pat.value });
+      drill = '';
+      void loadGroups(node.path);
+    }, 800);
+  });
+  const by = el('select', { title: '어느 필드로 묶어 볼지' }) as HTMLSelectElement;
+  const fields = [...new Set([g?.groupBy ?? '', ...(g?.fields ?? [])])].filter(Boolean);
+  for (const f of fields) {
+    const o = el('option', { value: f, text: f });
+    if (f === g?.groupBy) o.setAttribute('selected', 'selected');
+    by.appendChild(o);
+  }
+  by.addEventListener('change', () => {
+    setPrefs(node.path, { groupBy: by.value });
+    drill = '';
+    void loadGroups(node.path);
+  });
+  body.appendChild(el('details', { class: 'advbox', ...(p.mode === 'regex' ? { open: true } : {}) }, [
+    el('summary', { text: '고급 (정규식 규칙)' }),
+    el('div', { class: 'row', style: { flexWrap: 'wrap' } }, [
+      el('span', { class: 'hint', text: '정규식' }), pat,
+      el('span', { class: 'hint', text: '필드' }), by,
+    ]),
+  ]));
+  popover(anchor, body);
 }
 
 /** Missing slots become reservations: same-named scenes in the current

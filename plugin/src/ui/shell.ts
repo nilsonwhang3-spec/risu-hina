@@ -135,6 +135,16 @@ let tabSlot: HTMLElement | null = null;
 /** End of the tab row: the asset importer's progress, visible from any tab. */
 const syncBadge = el('span', { class: 'syncbadge', style: { display: 'none' } });
 
+/** Studio layout toggles (VS Code-style), shown only while that tab is up -
+ * on the tab row beside the 에셋 sync badge, one line above the content. */
+const layoutSlot = el('span', { class: 'layoutslot', style: { display: 'none' } });
+
+export function setLayoutControls(node: HTMLElement | null): void {
+  clear(layoutSlot);
+  if (node) layoutSlot.appendChild(node);
+  layoutSlot.style.display = node ? 'flex' : 'none';
+}
+
 function refreshSyncBadge(): void {
   const p = state.assetSync;
   if (!p || !state.botKey) { syncBadge.style.display = 'none'; return; }
@@ -246,6 +256,7 @@ function renderActive(): void {
   // Tabs without a menu-line tool of their own; every kit tab and the editor
   // install (or clear) theirs on each render.
   if (active === 'chats' || active === 'settings' || active === 'studio') setToolbar(null);
+  if (active !== 'studio') setLayoutControls(null);
   if (active === 'chats') renderChatsTab(node);
   else if (active === 'editor') renderEditorTab(node);
   else if (active === 'lore') renderLoreTab(node);
@@ -438,6 +449,7 @@ export function buildShell(): void {
           : id === 'chats' ? [tabButton(id, label), modeChip]
           : [tabButton(id, label)]
       )),
+      layoutSlot,
       syncBadge,
     ]),
     toolbarSlot,

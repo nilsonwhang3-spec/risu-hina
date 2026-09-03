@@ -2034,20 +2034,25 @@ console.log('\ntest_studio_tab');
 
   // Both rails collapse to a slim strip; each panel carries its own toggle
   // (a compact one, so the two tabs keep their room).
-  check('the left tab bar carries its two tabs and its own collapse toggle',
-        (document.querySelectorAll('.panel.active .studiotabs .tab').length === 2)
-        && !!document.querySelector('.panel.active .studiotabs .railbtn'));
-  check('the agent pane carries its own collapse toggle',
-        !!document.querySelector('.panel.active .split > .right .rcollapsebtn'));
-  clickButton(document.querySelector('.panel.active .studiotabs'), '◂');
-  await settle(200);
+  check('the left tab bar carries its two tabs',
+        document.querySelectorAll('.panel.active .studiotabs .tab').length === 2);
+  // §1-30: the panel toggles are VS Code-style icons on the SHELL tab row
+  // (beside the 에셋 sync badge) - no rails, no button over the agent header.
+  const layBtns = [...document.querySelectorAll('.layoutslot .laybtn')];
+  check('the layout toggles sit on the tab row', layBtns.length === 2, String(layBtns.length));
   const split = document.querySelector('.panel.active .split');
-  check('the left rail collapses', !!split?.classList.contains('lcollapse'), split?.className);
-  const railOpen = split?.querySelector('.panelrail.lrail button');
-  check('a slim rail stays to reopen it', !!railOpen);
-  railOpen?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  layBtns[0]?.dispatchEvent(new window.Event('click', { bubbles: true }));
   await settle(200);
-  check('and expands back', !split?.classList.contains('lcollapse'), split?.className);
+  check('the left panel folds from the header', !!split?.classList.contains('lcollapse'), split?.className);
+  layBtns[0]?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(200);
+  check('and unfolds back', !split?.classList.contains('lcollapse'), split?.className);
+  layBtns[1]?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(200);
+  check('the chat panel folds too', !!split?.classList.contains('rcollapse'), split?.className);
+  layBtns[1]?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(200);
+  check('and returns', !split?.classList.contains('rcollapse'), split?.className);
 
   // The centre is three tabs now (1장 · 배치 · 잡 히스토리); generation
   // controls live there. With no NovelAI token the 1장 tab must say so and
@@ -2855,21 +2860,35 @@ console.log('\ntest_studio_selector');
         /부족분/.test(text()) && !!findButton(document.querySelector('.panel.active .left'), '부족분 예약에 담기'),
         text().slice(0, 300));
 
-  // 14: the rule is visible - a delimiter and the first filename split into
-  // clickable tokens; pressing a chip makes that token the group key.
-  const chips = [...document.querySelectorAll('.panel.active .tokenchip')];
+  // §1-30: the rule folds behind one compact button; tokens MULTI-select.
+  const ruleBtn = [...document.querySelectorAll('.panel.active .rulebtn')].pop();
+  check('the rule is one compact button', !!ruleBtn,
+        document.querySelector('.panel.active .left')?.textContent?.slice(0, 160) || '');
+  ruleBtn?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(300);
+  const rulePop = () => [...document.querySelectorAll('.popover')].pop();
+  const chips = [...(rulePop()?.querySelectorAll('.tokenchip') ?? [])];
   check('the first filename is split into token chips', chips.length >= 2,
         chips.map((c) => c.textContent).join(' | '));
   const second = chips.find((c) => (c.textContent || '').startsWith('2·'));
   second?.dispatchEvent(new window.Event('click', { bubbles: true }));
-  await settle(1400);
+  await settle(1600);
   check('picking the 2nd token regroups by it (교복 becomes a group)',
         !!card('교복'), text().slice(0, 260));
+  // Multi-select: token 1 JOINS token 2 - the key reads 하나-교복 (§1-30).
+  const firstChip = [...(rulePop()?.querySelectorAll('.tokenchip') ?? [])]
+    .find((c) => (c.textContent || '').startsWith('1·'));
+  firstChip?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(1600);
+  check('a second token joins the key (multi-select)',
+        !!card('하나-교복'), text().slice(0, 260));
   // 자동 restores the built-in stamp-anchored rule for later runs.
-  clickButton(document.querySelector('.panel.active .left'), '자동');
+  clickButton(rulePop(), '자동');
   await settle(1000);
   check('자동 goes back to the built-in rule', !!card('happy') && !!card('sad'),
         text().slice(0, 200));
+  pressEscape(document);
+  await settle(200);
 }
 
 console.log('\ntest_files_copy_and_previews');
@@ -2967,3 +2986,6 @@ if (failures.length || errors.length) {
   process.exit(1);
 }
 console.log('PASS - plugin loads, renders, edits, and writes back');
+// The plugin leaves timers behind (sync polling, thumbnail LRU); the verdict
+// is printed, so exit explicitly instead of waiting on handles that never close.
+process.exit(0);
