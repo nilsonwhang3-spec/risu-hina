@@ -11,7 +11,7 @@ import { injectStyles } from './styles';
 import { state } from '../state';
 import { transport, clientLog } from '../transport';
 import { remountArtifact } from './artifact';
-import { renderChatsTab } from './tab-chats';
+import { renderChatsTab, refreshAssetSyncLine } from './tab-chats';
 import { renderEditorTab } from './tab-editor';
 import { renderFilesTab } from './tab-files';
 import { renderLoreTab } from './tab-lore';
@@ -544,6 +544,15 @@ state.onChange(() => {
   if (state.openStudioRequest && active !== 'studio') {
     setTab('studio');
     return;
+  }
+  // A running sync's progress tick: the badge and the picker's one line
+  // update in place; nothing else about the page changed, so nothing else
+  // is rebuilt (the full rebuild every 400ms was the flicker on the 선택
+  // screen). A settled sync emits without a reason and takes the full path.
+  if (state.emitReason === 'assetSync') {
+    refreshSyncBadge();
+    if (active === 'chats' && mounts.chats && refreshAssetSyncLine(mounts.chats)) return;
+    if (active !== 'chats') return;
   }
   refreshStatus();
   refreshChatBar();

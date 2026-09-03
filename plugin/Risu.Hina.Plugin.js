@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.11.0
+//@display-name Risu Hina v0.11.1
 //@api 3.0
-//@version 0.11.0
+//@version 0.11.1
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -104,7 +104,7 @@
       this.tokenSafe = true;
       this.lastHealth = body;
       this.probeInfo = "";
-      this.gate = versionGate("0.11.0", String(body.version || ""));
+      this.gate = versionGate("0.11.1", String(body.version || ""));
       return body;
     }
     /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -1072,6 +1072,12 @@
     assetSync = null;
     assetSyncCtl = null;
     assetSyncEmitAt = 0;
+    /** Why the current emit fired, for listeners that want to do less than a
+     *  full render: 'assetSync' = a progress tick of a RUNNING sync (the picker
+     *  used to rebuild its whole page - portrait reload included - every 400ms,
+     *  which read as flicker). Settled syncs emit with no reason. Set only for
+     *  the synchronous span of emit(). */
+    emitReason = "";
     turns = [];
     totalTurns = 0;
     warnings = [];
@@ -1297,7 +1303,12 @@
         const settled = !syncBusy(p);
         if (settled || now - this.assetSyncEmitAt > 400) {
           this.assetSyncEmitAt = now;
-          this.emit();
+          this.emitReason = settled ? "" : "assetSync";
+          try {
+            this.emit();
+          } finally {
+            this.emitReason = "";
+          }
         }
       });
       this.assetSync = null;
@@ -3866,7 +3877,7 @@ pre.mono {
 
 /* --- editor: explorer | turns | tools ------------------------------------ */
 
-.split { display: flex; flex: 1; min-height: 0; width: 100%; }
+.split { display: flex; flex: 1; min-height: 0; min-width: 0; width: 100%; }
 /* Phone-only view switch (panes.ts); the mobile block below shows it. */
 .mbar { display: none; }
 
@@ -4723,7 +4734,11 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
 .countbox { width: 56px; text-align: center; }
 .striprow { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; }
 /* --- the bottom generation strip (replaces the old history tab) ------------- */
-.genstrip { flex: 0 0 auto; border-top: 1px solid var(--borderc, #2b323f); padding: 4px 10px 6px; }
+/* min-width 0 on the strip and the split: a long row of cells is a scroll
+   container, and its intrinsic width used to size the split's min-content, so
+   the centre grew past the screen and pushed the agent pane off it (\xA71-32). */
+.genstrip { flex: 0 0 auto; min-width: 0; max-width: 100%; border-top: 1px solid var(--borderc, #2b323f); padding: 4px 10px 6px; }
+.striprow { min-width: 0; }
 .genstrip .striphead { margin-bottom: 2px; }
 .genstrip.folded .striprow { display: none; }
 .genstrip .stripcell { position: relative; }
@@ -5989,6 +6004,12 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       wrap.appendChild(line);
     }
     return wrap;
+  }
+  function refreshAssetSyncLine(mount) {
+    const old = mount.querySelector(".assetsync");
+    if (!old) return false;
+    old.replaceWith(assetSyncLine());
+    return true;
   }
   var portraitUrl = "";
   var filterText = "";
@@ -11663,7 +11684,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.11.0",
+            version: "0.11.1",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -12311,7 +12332,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.11.0"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.11.1"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -18138,7 +18159,7 @@ ${negative.value.trim()}
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.11.0"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.11.1"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
@@ -18233,7 +18254,7 @@ ${negative.value.trim()}
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.11.0" }),
+        el("span", { class: "dim", text: "v0.11.1" }),
         healthEl,
         el("span", { class: "spacer" }),
         reload,
@@ -18310,6 +18331,11 @@ ${negative.value.trim()}
     if (state.openStudioRequest && active2 !== "studio") {
       setTab("studio");
       return;
+    }
+    if (state.emitReason === "assetSync") {
+      refreshSyncBadge();
+      if (active2 === "chats" && mounts.chats && refreshAssetSyncLine(mounts.chats)) return;
+      if (active2 !== "chats") return;
     }
     refreshStatus();
     refreshChatBar();
@@ -18500,6 +18526,6 @@ ${negative.value.trim()}
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.11.0"} loaded`);
+    console.log(`[risu-hina] v${"0.11.1"} loaded`);
   })();
 })();

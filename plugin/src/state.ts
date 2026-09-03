@@ -682,6 +682,12 @@ class AppState {
   assetSync: SyncProgress | null = null;
   private assetSyncCtl: SyncController | null = null;
   private assetSyncEmitAt = 0;
+  /** Why the current emit fired, for listeners that want to do less than a
+   *  full render: 'assetSync' = a progress tick of a RUNNING sync (the picker
+   *  used to rebuild its whole page - portrait reload included - every 400ms,
+   *  which read as flicker). Settled syncs emit with no reason. Set only for
+   *  the synchronous span of emit(). */
+  emitReason: '' | 'assetSync' = '';
   turns: Turn[] = [];
   totalTurns = 0;
   warnings: string[] = [];
@@ -931,7 +937,8 @@ class AppState {
       const settled = !syncBusy(p);
       if (settled || now - this.assetSyncEmitAt > 400) {
         this.assetSyncEmitAt = now;
-        this.emit();
+        this.emitReason = settled ? '' : 'assetSync';
+        try { this.emit(); } finally { this.emitReason = ''; }
       }
     });
     this.assetSync = null;

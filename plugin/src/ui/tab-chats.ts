@@ -139,6 +139,14 @@ function assetSyncLine(): HTMLElement {
   return wrap;
 }
 
+/** A sync progress tick: swap the one line, leave the page alone (§1-32). */
+export function refreshAssetSyncLine(mount: HTMLElement): boolean {
+  const old = mount.querySelector('.assetsync');
+  if (!old) return false;
+  old.replaceWith(assetSyncLine());
+  return true;
+}
+
 /** Blob URLs for portraits, revoked when the tab is rebuilt. */
 let portraitUrl = '';
 let filterText = '';

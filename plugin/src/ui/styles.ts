@@ -338,7 +338,7 @@ pre.mono {
 
 /* --- editor: explorer | turns | tools ------------------------------------ */
 
-.split { display: flex; flex: 1; min-height: 0; width: 100%; }
+.split { display: flex; flex: 1; min-height: 0; min-width: 0; width: 100%; }
 /* Phone-only view switch (panes.ts); the mobile block below shows it. */
 .mbar { display: none; }
 
@@ -1195,7 +1195,11 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
 .countbox { width: 56px; text-align: center; }
 .striprow { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; }
 /* --- the bottom generation strip (replaces the old history tab) ------------- */
-.genstrip { flex: 0 0 auto; border-top: 1px solid var(--borderc, #2b323f); padding: 4px 10px 6px; }
+/* min-width 0 on the strip and the split: a long row of cells is a scroll
+   container, and its intrinsic width used to size the split's min-content, so
+   the centre grew past the screen and pushed the agent pane off it (§1-32). */
+.genstrip { flex: 0 0 auto; min-width: 0; max-width: 100%; border-top: 1px solid var(--borderc, #2b323f); padding: 4px 10px 6px; }
+.striprow { min-width: 0; }
 .genstrip .striphead { margin-bottom: 2px; }
 .genstrip.folded .striprow { display: none; }
 .genstrip .stripcell { position: relative; }

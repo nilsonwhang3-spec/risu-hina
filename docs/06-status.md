@@ -111,6 +111,14 @@ mixed-cast multi-entry batch from the panel.** Released = **v0.10.0 BETA** (§1-
 **0.3.1 (night of 2026-08-25)** — the real reason `+` never appeared was not "same version" but **CORS**: RisuAI reads `//@update-url` with a browser `fetch`, and the redirect response from the release URL carries no CORS header. Changed `//@update-url` to
 `https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js`, and made `tools/bundle.py` write that file into the repository (included in the release commit). In the backend code only VERSION changed.
 
+**+ §1-32 (2026-09-03 night, 0.11.1)**: `.split` and the bottom `.genstrip`/`.striprow` carry
+`min-width: 0` - a long strip of cells is a scroll container whose intrinsic width sized the
+split's min-content, so the centre grew past the screen and pushed the agent pane off it · a
+RUNNING asset sync emits with `state.emitReason = 'assetSync'` and the shell answers it with the
+badge + an in-place swap of the picker's one `.assetsync` line (`tab-chats.refreshAssetSyncLine`)
+instead of `renderActive()` - the 400ms full rebuild (portrait reload included) was the flicker
+on the 선택 screen; settled syncs still emit plainly and take the full path.
+
 **+ §1-31 the release round (2026-09-03)**: the agent's prompt and welcome follow the ACTIVE
 TAB's half (`shell.activeHalf`: 봇 on a bot tab, 챗 on a chat tab; synced on every mount since
 `load()` dedupes renders) · the cast list is dense rows with a slide toggle (`listRow` grew
@@ -131,7 +139,7 @@ icons outside the studio, compact rows + switch, the caveat card and its `<stron
 
 **Handoff 2026-08-31 (the studio feedback marathon, §1-19 ~ §1-25).** Where the next session picks up:
 
-- **State (2026-09-03)**: master = **0.11.0 RELEASED** - the release commit is the §1-31 commit (§1-30 landed as `4a4432f` the same day, gate ALL GREEN). test-server is still staged AT §1-29 (2026-09-02): the next deploy there is the release itself ([[risu-hina-staging-deploy]] shape, or the package over the folder). The user's next action: real-use test of §1-30/§1-31, and `+` on the plugin once the backend is updated.
+- **State (2026-09-03 night)**: master = **0.11.1 RELEASED** (§1-32, two first-use fixes on 0.11.0: the split no longer grows past the screen because of the bottom strip; a running asset sync no longer rebuilds the 선택 page every 400ms). 0.11.0 (`31d7a71`) was released earlier the same evening and hand-deployed to test-server (backup `data-backup-20260903`, six app modules + the bundle to `data/plugin/`, `/plugin.js` hash = release bundle). 0.11.1 is a PATCH: the version gate stays quiet, so test-server updates through 설정 → 백엔드 업데이트 (release assets) and the plugin through `+`. The user's next action: update both, then the Codex originator real-use check.
   (2026-08-31 night: stop → backup `data-backup-20260831` (20,576 files) → 10 app modules + 2
   seeds + the 764,648B dev bundle → start; verified live: `/health` 0.11.0, **studio_v2 moved
   1,809 files into config/+output/** (manifest 511KB), skills seed v6 landed the NSFW skill,
@@ -156,6 +164,29 @@ icons outside the studio, compact rows + switch, the caveat card and its `<stron
 - Historical note kept below: the one-time manual reinstall advice for 0.1.0-era installs.
 
 → (historical) **First thing to do**: the user reinstalls `plugin/Risu.Hina.Plugin.js` into RisuAI **by hand, once** (the installed 0.1.0's update-url cannot be read because of CORS) → check that `+` appears from the next release on → verify M2 in real use (§5-2).
+
+## 1-32. 2026-09-03 (night) - 0.11.1: the strip that widened the split, the sync that flickered the picker
+
+Two items from the first minutes of 0.11.0 in use, one patch release.
+
+- **The centre grew past the screen in the studio** once the bottom strip held a batch's worth of
+  results. Cause: `.striprow` is `overflow-x: auto`, but a scroll container's intrinsic width is
+  still its content's, and `.split` (a flex item of `.panel.active`) had `min-width: auto` - so
+  the split's min-content became the strip's full width, the split refused to shrink, and the
+  agent pane went off the right edge. Fix: `min-width: 0` on `.split`, `.genstrip` and
+  `.striprow` (plus `max-width: 100%` on the strip). Not measurable in the smoke (no layout);
+  reasoned from the flexbox min-size rules and to be confirmed in use.
+- **The 선택 screen flickered while assets synced.** Every progress emit (throttled to 400ms)
+  went through the shell's generic `renderActive()`, which rebuilt the whole picker - the bot
+  card's portrait re-fetched as a blob each time, the snapshot list re-mounted, and the page
+  moved. Now a running sync sets `state.emitReason = 'assetSync'` for the span of its emit; the
+  shell refreshes the tab-row badge and, on the picker, swaps only the `.assetsync` line
+  (`refreshAssetSyncLine`); other tabs ignore the tick. A settled sync (done/error/cancelled)
+  emits without a reason and takes the full path, so the assets tab's keyed render still sees
+  `finishedAt` move.
+
+**Status**: tsc · build · smoke green; version 0.11.1 in the four places (package.json,
+package-lock ×2, config.py); gate → release commit → tag → push → `gh release create`.
 
 ## 1-31. 2026-09-03 - 0.11.0 RELEASE: seven pre-release fixes and the name sweep
 
