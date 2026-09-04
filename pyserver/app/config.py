@@ -278,6 +278,12 @@ DEFAULTS: dict[str, Any] = {
         # empty means `<data>/space`. Files are never moved automatically
         # when this changes.
         "globalPath": "",
+        # Automatic sweep of the agent's temporary files (§1-34): files in
+        # every bot's hina/<봇>/scratch/ older than scratchDays, its
+        # hina/<봇>/scripts/ older than scriptsDays, and stray upload
+        # `.part` fragments older than a day. 0 turns a sweep off. Runs at
+        # boot and every autoCleanHours.
+        "autoClean": {"scratchDays": 7, "scriptsDays": 30, "everyHours": 6},
     },
 }
 

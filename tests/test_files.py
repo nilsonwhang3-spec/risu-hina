@@ -108,6 +108,24 @@ check("the SYSTEM .scratch went with it", not (sysdir / "scope.db").exists())
 r = files.clean_bot(CK, ["out"])
 check("out/ is swept only on request", not (od / "산출.md").exists(), str(r))
 
+print("\ntest_sweep_temp")
+old = hd / "scratch" / "오래된.txt"
+old.write_text("x", encoding="utf-8")
+os.utime(old, (0, 0))  # 1970: older than any TTL
+(hd / "scratch" / "새것.txt").write_text("y", encoding="utf-8")
+(hd / "scripts" / "옛스크립트.py").write_text("pass", encoding="utf-8")
+os.utime(hd / "scripts" / "옛스크립트.py", (0, 0))
+(od / "산출.md").write_text("keep", encoding="utf-8")
+os.utime(od / "산출.md", (0, 0))
+part = workspace.space_root() / "projects" / f1 / "big.bin.part"
+part.write_bytes(b"x")
+os.utime(part, (0, 0))
+r = files.sweep_temp(7, 30)
+check("old scratch, old scripts and stale .part go", r["removed"] == 3, str(r))
+check("fresh scratch stays", (hd / "scratch" / "새것.txt").exists())
+check("deliverables are never swept, however old", (od / "산출.md").exists())
+check("a sweep with 0 days is off", files.sweep_temp(0, 0)["removed"] == 0)
+
 print("\ntest_migrate_out_v3")
 legacy = workspace.space_root() / "hina" / f1 / "out"
 legacy.mkdir(parents=True, exist_ok=True)

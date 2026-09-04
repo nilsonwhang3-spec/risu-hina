@@ -147,8 +147,11 @@ export function refreshAssetSyncLine(mount: HTMLElement): boolean {
   return true;
 }
 
-/** Blob URLs for portraits, revoked when the tab is rebuilt. */
+/** The portrait: one blob URL and one decoded <img>, reused across rebuilds
+ * (see loadPortrait). Revoked when the path changes. */
 let portraitUrl = '';
+let portraitImg: HTMLImageElement | null = null;
+let portraitPath = '';
 let filterText = '';
 
 export function renderChatsTab(mount: HTMLElement): void {
@@ -390,6 +393,16 @@ function initials(name: string): string {
  */
 async function loadPortrait(path: string | undefined, mount: HTMLElement): Promise<void> {
   if (!path) return;
+  // The picker is rebuilt on every settled emit while the assets sync (and
+  // on a dozen other state changes while a bot loads); reading the portrait
+  // through the host bridge each time showed the initials, then the picture,
+  // then the initials again - "the card image blinks a few times" (§1-34).
+  // One decoded <img> per portrait path, moved into place: no reload, no
+  // blink. The blob URL lives as long as the path is the current one.
+  if (portraitPath === path && portraitImg) {
+    mount.replaceWith(portraitImg);
+    return;
+  }
   try {
     const bytes = await Risuai.readImage(path);
     if (!bytes || !(bytes as Uint8Array).byteLength) return;
@@ -401,8 +414,12 @@ async function loadPortrait(path: string | undefined, mount: HTMLElement): Promi
     buf.set(view);
     portraitUrl = URL.createObjectURL(new Blob([buf]));
     const img = el('img', { class: 'botportrait', src: portraitUrl, alt: '' });
-    img.addEventListener('error', () => img.replaceWith(mount));
-    mount.replaceWith(img);
+    img.addEventListener('error', () => { img.replaceWith(mount); portraitImg = null; portraitPath = ''; });
+    portraitImg = img;
+    portraitPath = path;
+    // The mount may already have been rebuilt away by a later render; that
+    // render took the cached image itself, so only a live mount is swapped.
+    if (mount.isConnected) mount.replaceWith(img);
   } catch {
     /* keep the initials */
   }

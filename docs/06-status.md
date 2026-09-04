@@ -111,6 +111,21 @@ mixed-cast multi-entry batch from the panel.** Released = **v0.10.0 BETA** (§1-
 **0.3.1 (night of 2026-08-25)** — the real reason `+` never appeared was not "same version" but **CORS**: RisuAI reads `//@update-url` with a browser `fetch`, and the redirect response from the release URL carries no CORS header. Changed `//@update-url` to
 `https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js`, and made `tools/bundle.py` write that file into the repository (included in the release commit). In the backend code only VERSION changed.
 
+**+ §1-34 (2026-09-05, four first-use reports on §1-33, unreleased)**: ① the bot portrait
+blinked while assets synced - every settled emit rebuilt the picker and re-read the portrait
+through the host bridge (initials → picture → initials); `tab-chats.loadPortrait` keeps ONE
+decoded `<img>` per path and moves it into place on a rebuild. ② with 38 cells in the bottom
+strip the centre went fixed-width and the agent gutter would not drag: `min-width:0` (§1-32)
+did not stop the strip's 2254px intrinsic width from propagating through `.left` and
+`.panel`; `.genstrip { contain: inline-size }` does (harness: centre 2254 → 950). ③ automatic
+temp cleanup: `files.sweep_temp` (hina/<봇>/scratch older than 7 days, scripts older than 30,
+`.part` fragments older than a day; deliverables and the studio never), `files.auto_clean`
+reads `config workspace.autoClean {scratchDays, scriptsDays, everyHours}`, `main._auto_clean_loop`
+runs it at boot and every 6h. ④ Ctrl+C / Ctrl+X in the tree did nothing visible: the click
+that selected the row also rebuilt the tree, focus fell to `<body>`, and the key never reached
+the tree; `drawTree` restores focus to the selected row, and the rows show the clipboard
+(`clipcut` dims, `clipcopy` dashed) via `TreeNode.cls`. `test_files` covers the sweep.
+
 **+ §1-33 (2026-09-05, unreleased — the file-space cleanup + a real-browser UI pass)**: the
 user's two asks. (1) *Files.* The agent's `hina/<봇>/` is INTERNAL now: the files tab hides it
 behind the one 숨김 toggle (`DEFAULT_AREAS` = projects·studio; `USER_AREAS` still says where
@@ -179,6 +194,8 @@ icons outside the studio, compact rows + switch, the caveat card and its `<stron
 
 **Handoff 2026-08-31 (the studio feedback marathon, §1-19 ~ §1-25).** Where the next session picks up:
 
+- **State (2026-09-05, later)**: + **§1-34** (portrait blink, strip containment, auto temp
+  sweep, tree clipboard focus) - restaged on test-server the same way.
 - **State (2026-09-05)**: master = 0.11.1 + **§1-33 unreleased** (files: hina/ hidden,
   deliverables in `projects/<봇>/out/` with the `out_v3` boot migration, 이 봇만, 검수 on any
   folder, the rule popover redone, the two-splitter overflow fixed). When it ships the

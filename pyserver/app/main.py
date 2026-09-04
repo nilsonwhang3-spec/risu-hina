@@ -16,6 +16,7 @@ and run in the threadpool; a slow disk read can never stall the event loop.
 """
 from __future__ import annotations
 
+import asyncio
 import hmac
 import inspect
 import json
@@ -2756,7 +2757,20 @@ async def _startup() -> None:
     # There is always a selected preset; on an existing install it is seeded
     # from whatever config.json already holds, so nothing appears to be lost.
     await run_in_threadpool(presets.ensure_default)
+    # The agent's temp files (hina/<봇>/scratch·scripts, .part fragments) are
+    # swept by age at boot and on a timer (§1-34, config workspace.autoClean).
+    asyncio.get_running_loop().create_task(_auto_clean_loop())
     log.info("ready port=%s agent=%s", config.PORT, "on" if agent_ready() else "off")
+
+
+async def _auto_clean_loop() -> None:
+    while True:
+        try:
+            await run_in_threadpool(files.auto_clean)
+        except Exception as e:  # noqa: BLE001 - a sweep must never take the server down
+            log.warn("auto-clean failed: %s", e)
+        hours = float(((config.section("workspace") or {}).get("autoClean") or {}).get("everyHours") or 6)
+        await asyncio.sleep(max(1.0, hours) * 3600)
 
 
 @app.on_event("shutdown")

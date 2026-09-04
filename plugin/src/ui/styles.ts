@@ -1231,6 +1231,14 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
    container, and its intrinsic width used to size the split's min-content, so
    the centre grew past the screen and pushed the agent pane off it (§1-32). */
 .genstrip { flex: 0 0 auto; min-width: 0; max-width: 100%; border-top: 1px solid var(--borderc, #2b323f); padding: 4px 10px 6px; }
+/* §1-34: min-width:0 was not enough - a strip of 38 cells still handed its
+   2254px intrinsic width up through .left and .panel (both stretched, and
+   the agent pane could not be dragged wider). Size containment makes the
+   strip contribute nothing to its ancestors' intrinsic size. */
+.genstrip { contain: inline-size; }
+/* Tree rows on the clipboard: cut rows dim, copied rows carry a dashed edge. */
+.treebranch.clipcut { opacity: .5; }
+.treebranch.clipcopy { outline: 1px dashed var(--textcolor2, #79839a); outline-offset: -1px; }
 .striprow { min-width: 0; }
 .genstrip .striphead { margin-bottom: 2px; }
 .genstrip.folded .striprow { display: none; }

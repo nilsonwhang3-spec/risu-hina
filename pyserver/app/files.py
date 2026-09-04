@@ -643,6 +643,61 @@ def _sweep(d: Path) -> tuple[int, int]:
     return removed, freed
 
 
+def sweep_temp(scratch_days: float = 7, scripts_days: float = 30) -> dict:
+    """The automatic cleanup of the agent's temporary files (§1-34).
+
+    Every bot's hina/<봇>/scratch/ older than `scratch_days`, its scripts/
+    older than `scripts_days` (the runner's `_agent_run.py` is rewritten each
+    run, so age is the right key there too), and `.part` upload fragments
+    older than a day anywhere in the space. Age is mtime. Emptied folders
+    go; the scratch/ and scripts/ roots stay. Deliverables (projects/<봇>/out)
+    and the studio are never touched: the user asked for "temp", not "old".
+    """
+    now = time.time()
+    removed = freed = 0
+    base = workspace.space_root() / "hina"
+    plan: list[tuple[Path, float]] = []
+    if base.is_dir():
+        for bot in base.iterdir():
+            if not bot.is_dir():
+                continue
+            if scratch_days > 0:
+                plan.append((bot / "scratch", scratch_days * 86400))
+            if scripts_days > 0:
+                plan.append((bot / "scripts", scripts_days * 86400))
+    for d, ttl in plan:
+        if not d.is_dir():
+            continue
+        for f in sorted(d.rglob("*"), reverse=True):
+            try:
+                if f.is_file() and now - f.stat().st_mtime > ttl:
+                    freed += f.stat().st_size
+                    f.unlink()
+                    removed += 1
+                elif f.is_dir() and not any(f.iterdir()):
+                    f.rmdir()
+            except OSError:
+                continue
+    try:
+        for f in workspace.space_root().rglob("*.part"):
+            if f.is_file() and now - f.stat().st_mtime > 86400:
+                freed += f.stat().st_size
+                f.unlink()
+                removed += 1
+    except OSError:
+        pass
+    if removed:
+        log.info("auto-clean: removed %s temp files, freed %s bytes", removed, freed)
+    return {"removed": removed, "freed": freed}
+
+
+def auto_clean() -> dict:
+    """`sweep_temp` with the configured ages (config.json workspace.autoClean)."""
+    from . import config
+    cfg = (config.section("workspace") or {}).get("autoClean") or {}
+    return sweep_temp(float(cfg.get("scratchDays") or 0), float(cfg.get("scriptsDays") or 0))
+
+
 def clean_bot(char_key: str, areas: list[str] | None = None) -> dict:
     """정리, per bot, in the global space: this bot's hina/ scratch and
     scripts by default, out/ only on request (the user may not have taken the

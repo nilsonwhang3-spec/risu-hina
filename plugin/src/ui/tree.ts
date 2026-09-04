@@ -30,6 +30,8 @@ export interface TreeNode {
   title?: string;
   /** Whether this folder accepts drops (uploads and internal moves). */
   droppable?: boolean;
+  /** Extra class on the branch button (clipboard state, §1-34). */
+  cls?: string;
 }
 
 export interface TreeSpec {
@@ -52,7 +54,7 @@ export function treeRow(n: TreeNode, depth: number, spec: TreeSpec): HTMLElement
   const isOpen = spec.expanded.has(n.path);
   const caret = el('button', { class: 'caret', text: n.kids.length ? (isOpen ? '▾' : '▸') : '' });
   const branch = el('button', {
-    class: 'treebranch' + (spec.selected.has(n.path) ? ' on' : ''),
+    class: 'treebranch' + (spec.selected.has(n.path) ? ' on' : '') + (n.cls ? ' ' + n.cls : ''),
     title: n.title ?? n.path,
   }, [
     el('span', { text: n.glyph ?? (isOpen && n.kids.length ? '📂' : '📁') }),

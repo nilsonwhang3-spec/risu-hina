@@ -131,9 +131,11 @@ const kitRender = makeTab({
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c' && paths.length) {
         clipboard = { op: 'copy', paths };
         notice(`${paths.length}개를 복사했습니다 — 붙여넣을 폴더에서 Ctrl+V.`);
+        drawTree(); // the rows show the clipboard state
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'x' && paths.length) {
         clipboard = { op: 'cut', paths };
         notice(`${paths.length}개를 잘라냈습니다 — 붙여넣을 폴더에서 Ctrl+V.`);
+        drawTree();
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v' && clipboard) {
         void pasteInto(uploadTarget());
       } else if ((e.key === 'Delete' || e.key === 'Backspace') && paths.length) {
@@ -286,6 +288,10 @@ function moveTargets(): string[] {
 
 function drawTree(): void {
   if (!treeMount || !lastListing) return;
+  // A click on a branch focuses that button; the redraw threw the button
+  // away and focus fell to <body>, so the very next Ctrl+C reached nothing
+  // (§1-34). Remember, rebuild, then give focus back to the selected row.
+  const hadFocus = treeMount.contains(document.activeElement);
   clear(treeMount);
   const data = lastListing;
 
@@ -396,6 +402,10 @@ function drawTree(): void {
   treeMount.appendChild(el('div', { class: 'treefoot' }, [
     mineBtn, toggle, cleanBtn, el('div', { class: 'hint', text: `전체 ${fmtSize(data.totalSize)}` }),
   ]));
+  if (hadFocus) {
+    const row = treeMount.querySelector<HTMLElement>('.treebranch.on') ?? treeMount;
+    try { row.focus({ preventScroll: true }); } catch { /* no focus() in the test DOM */ }
+  }
 }
 
 function toTreeNode(n: Folder, depth: number): TreeNode {
@@ -407,6 +417,10 @@ function toTreeNode(n: Folder, depth: number): TreeNode {
     count: countFiles(n),
     glyph: n.virtual ? '📄' : undefined,
     title: n.virtual ? 'AI 작업 폴더(임시·스크립트)에 있는 문서입니다. 여기서 바로 볼 수 있습니다.' : (depth ? n.path : why),
+    // The clipboard is visible on the rows themselves (§1-34): a cut folder
+    // dims, a copied one gets a dashed edge - Ctrl+C used to change nothing
+    // on screen.
+    cls: clipboard?.paths.includes(n.path) ? (clipboard.op === 'cut' ? 'clipcut' : 'clipcopy') : undefined,
     // A folder in the tree is a drop target of its own.
     droppable: !n.virtual && USER_AREAS.has(n.area.area),
   };
