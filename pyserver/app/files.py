@@ -656,7 +656,8 @@ def clean_bot(char_key: str, areas: list[str] | None = None) -> dict:
     base = workspace.space_root() / "hina" / workspace.bot_folder(char_key)
     removed = freed = 0
     for area in targets:
-        r, f = _sweep(base / area)
+        # Deliverables live in the project folder since out_v3.
+        r, f = _sweep(workspace.out_dir(char_key) if area == "out" else base / area)
         removed += r
         freed += f
     r, f = _sweep(workspace.root(char_key) / ".scratch")

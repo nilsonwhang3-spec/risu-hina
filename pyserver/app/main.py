@@ -883,7 +883,16 @@ def h_cost(arg: dict) -> dict:
 # --- workspace files --------------------------------------------------------
 
 def h_files(arg: dict) -> dict:
-    return files.listing(_scope(arg), str(arg.get("prefix") or ""), bool(arg.get("hidden")))
+    out = files.listing(_scope(arg), str(arg.get("prefix") or ""), bool(arg.get("hidden")))
+    # The panel's "이 봇만" filter needs the bot's folder name under projects/
+    # and hina/ - pinned in bots.json, so it is asked for, not guessed.
+    bot = str(arg.get("bot") or "")
+    if bot:
+        try:
+            out["botFolder"] = workspace.bot_folder(bot)
+        except workspace.WorkspaceError:
+            out["botFolder"] = ""
+    return out
 
 
 def h_file_read(arg: dict) -> dict:
@@ -2742,6 +2751,8 @@ async def _startup() -> None:
     await run_in_threadpool(workspace.migrate_to_space)
     # The studio's flat layout folds into config/ + output/ once (studio_v2).
     await run_in_threadpool(workspace.migrate_studio_v2)
+    # Deliverables leave the (now hidden) hina/ area for projects/<봇>/out once.
+    await run_in_threadpool(workspace.migrate_out_v3)
     # There is always a selected preset; on an existing install it is seeded
     # from whatever config.json already holds, so nothing appears to be lost.
     await run_in_threadpool(presets.ensure_default)

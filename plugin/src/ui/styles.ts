@@ -126,6 +126,10 @@ button.outline:hover { background: rgba(37,99,235,.18); }
 
 /* Eleven tabs now; on a narrow panel the bar scrolls rather than wrapping. */
 .tabs { display: flex; gap: 2px; padding: 0 10px; border-bottom: 1px solid var(--borderc, #2b323f); flex-shrink: 0; overflow-x: auto; overflow-y: hidden; }
+/* A scrolling tab row shows no scrollbar: the bar under the tabs on a phone
+   read as a broken control (§1-33). setTab scrolls the lit tab into view. */
+.tabs, .tabstrip { scrollbar-width: none; }
+.tabs::-webkit-scrollbar, .tabstrip::-webkit-scrollbar { display: none; }
 .tabs .tab { white-space: nowrap; }
 
 /* Regex patterns, HTML payloads, trigger JSON - text where columns matter. */
@@ -403,8 +407,36 @@ button.iconbtn { padding: 4px 8px; background: transparent; border-color: transp
 button.iconbtn:hover:not(:disabled) { background: rgba(128,128,128,.14); }
 button.iconbtn.on { background: rgba(37,99,235,.18); }
 /* The review rule popover (§1-30): compact editor behind one summary button. */
-.rulepop { min-width: 240px; max-width: 340px; }
+.rulepop { min-width: 260px; max-width: 380px; }
 .rulepop .advbox { margin-top: 6px; }
+/* The sample filename as a strip of toggle chips joined by the delimiter
+   glyph - it reads as the name it came from (§1-33). */
+.rulepop .samplenav { margin-top: 8px; gap: 4px; }
+.rulepop .samplenav .hint:first-child { margin-right: 4px; }
+.tokstrip { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; margin: 4px 0 2px; }
+.tokstrip .delimglyph { color: var(--textcolor2, #79839a); font-family: var(--mono, monospace); font-size: 11px; }
+.tokstrip .tokenchip {
+  display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; font-size: 11.5px;
+  border: 1px solid var(--borderc, #2b323f); border-radius: 5px; background: transparent;
+  color: var(--textcolor2, #79839a); cursor: pointer;
+}
+.tokstrip .tokenchip .idx {
+  font-size: 9.5px; padding: 0 4px; border-radius: 3px; background: rgba(128,128,128,.18);
+  color: var(--textcolor2, #79839a); font-family: var(--mono, monospace);
+}
+.tokstrip .tokenchip.on { border-color: #2563eb; background: rgba(37, 99, 235, .22); color: var(--textcolor, #d8dce4); }
+.tokstrip .tokenchip.on .idx { background: #2563eb; color: #fff; }
+.ruleresult { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 8px; font-size: 12px; }
+/* The 검수 head: the path is a path, not a shouted heading. */
+.sectiontitle.path {
+  text-transform: none; letter-spacing: 0; font-size: 12px; font-weight: 600;
+  margin-bottom: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
+}
+.selhead, .seltools { flex-wrap: wrap; }
+.seltools .spacer { flex: 1 1 0; }
+.selhead .badge.warn { cursor: pointer; }
+.extrahead { padding: 10px 8px 4px; }
+.extrahead .sectiontitle { margin-bottom: 0; }
 
 .scroller { flex: 1; overflow-y: auto; position: relative; }
 .spacerTop, .spacerBottom { width: 100%; }

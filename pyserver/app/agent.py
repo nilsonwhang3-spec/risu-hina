@@ -87,16 +87,18 @@ INSTRUCTIONS = """\
 
 작업 공간 규칙 (반드시 지켜라 — 모든 봇이 하나의 전역 공간을 쓴다):
 - `projects/<봇이름>/`  사용자가 직접 관리하는 참고 자료·프로젝트 폴더. **읽기는 자유,
-  구조를 네가 바꾸지 마라.** 사용자가 올린 파일은 대개 여기 있다.
+  구조를 네가 바꾸지 마라.** 사용자가 올린 파일은 대개 여기 있다. 예외는 하나 —
+  **완성 산출물(md·html·json·charx)은 `projects/<봇이름>/out/` 에 저장한다** (write_file 에
+  이름만 주면 여기로 간다). out/ 에 넣으면 대화창에 열기 버튼이 뜬다 — 결과물을 만들었으면
+  반드시 여기 저장하고 "저장했습니다, 파일 탭에서 여실 수 있습니다"라고 알려라.
 - `studio/`  이미지 라이브러리. 재료는 `studio/config/` 아래(styles·characters·fragments·
   scenes·.studio), 생성 결과는 `studio/output/` 이다. 읽고 쓸 수 있다. **일회성 배치는
   spec.scenes 인라인으로** — 임시 프리셋 파일을 `studio/config/scenes/` 에 만들지 마라
   (반복용 임시 스펙은 `studio/config/.studio/adhoc/`).
-- `hina/<봇이름>/`  네 작업 공간이다. 임시는 `scratch/`, 완성 산출물(md·html·json)은 `out/`,
-  스크립트는 `scripts/`. out/ 에 넣으면 대화창에 열기 버튼이 뜬다 — 결과물을 만들었으면
-  반드시 여기 저장하고 "저장했습니다, 파일 탭에서 여실 수 있습니다"라고 알려라.
-  **임시 문서·임시 스크립트는 반드시 이 폴더 안에만 만든다** — projects/ 나 studio/ 에
-  스크래치 파일을 남기지 마라 (write_file 도 projects/ 쓰기를 거부한다).
+- `hina/<봇이름>/`  네 내부 작업 공간이다 — **사용자 화면에는 기본적으로 보이지 않는다.**
+  임시는 `scratch/`, 스크립트는 `scripts/`. **임시 문서·임시 스크립트는 반드시 이 폴더
+  안에만 만든다** — projects/(out/ 제외) 나 studio/ 에 스크래치 파일을 남기지 마라
+  (write_file 도 그런 쓰기를 거부한다). 사용자에게 보여 줄 파일을 여기 두면 사용자는 못 찾는다.
 - `system/`  이 봇의 원본 스냅샷(카드·원본 전사). **읽기 전용이다.**
 - **파일 위치를 모르면 find_files(이름 글롭) / search_files(내용 검색) 로 먼저 찾아라.**
   결과 끝의 "총 N개 중 M개 표시"가 전부가 아니라고 말하면, 잘렸다고 사용자에게도 말해라.
@@ -104,7 +106,9 @@ INSTRUCTIONS = """\
   답하고, **이미지는 `![설명](studio/output/…/파일.png)` 처럼 전역 경로로 넣으면 대화창에
   바로 그림으로 뜬다** — 경로는 `studio/…`, `projects/…`, `hina/…` 로 시작하는 공간 경로만
   (드라이브 문자·URL·`..` 는 안 그려진다). 배치 결과는 studio_generate 가 완성되는 대로 대화창에
-  뿌려 주니 결과 이미지를 다시 나열할 필요는 없다. 긴 문서는 out/ 에 write_file 로도 남겨라.
+  뿌려 주니 결과 이미지를 다시 나열할 필요는 없다. 긴 문서는 write_file 로도 남겨라
+  (이름만 주면 projects/<봇이름>/out/ 에 저장된다). 이 봇을 위한 이미지 배치는 기본적으로
+  `studio/output/<봇이름>/` 에 들어간다 — 사용자가 검수 탭에서 그 폴더를 열어 고른다.
 - 다른 봇의 폴더도 보인다. 읽는 것은 자유지만, **요청 없이 다른 봇의 폴더를 수정하지 마라.**
 - **에셋(이미지)도 다룬다.** list_assets 로 목록을 보고 fetch_assets 로 scratch/ 에 꺼내
   run_python(PIL) 으로 가공한 뒤, 결과 PNG 를 propose_asset_add / propose_asset_replace 로
@@ -1058,7 +1062,7 @@ def build() -> Agent[Deps]:
                          그 씬만 뽑는다 (scenePreset 경로에서만 동작)
           count / seed   씬당 장수, 시드(주면 씬 안에서 +1 씩 증가)
           characterName  파일명의 캐릭터 자리 (프롬프트와 무관)
-          folder         저장 폴더 (기본 studio/output)
+          folder         저장 폴더 (기본 studio/output/<봇이름>)
           template       파일명 규칙 (기본 {character}-{emotion}-{stamp}-{n},
                          빈 필드는 구분자째 생략)
           useReference   true 면 활성 캐릭터 카드의 프리셋(캐릭터 레퍼런스 또는
@@ -1112,6 +1116,11 @@ def build() -> Agent[Deps]:
         """
         try:
             spec = json.loads(spec_json)
+            if isinstance(spec, dict) and not str(spec.get("folder") or "").strip():
+                # A batch for THIS bot lands in its own output folder, so the
+                # 검수 tab has one place to look (§1-33). A spec that names a
+                # folder keeps it.
+                spec["folder"] = f"studio/output/{workspace.bot_folder(ctx.deps.char_key)}"
             r = studiojob.start(spec)
         except Exception as e:  # noqa: BLE001
             return f"시작하지 못했습니다: {e}"
@@ -1617,21 +1626,24 @@ def build() -> Agent[Deps]:
 
     @agent.tool
     def write_file(ctx: RunContext[Deps], name: str, content: str) -> str:
-        """파일을 쓴다. 이름만 주면 hina/<봇>/out/ 에 산출물로 저장된다.
+        """파일을 쓴다. 이름만 주면 projects/<봇>/out/ 에 산출물로 저장된다.
 
-        studio/ · hina/ 로 시작하는 전체 경로를 주면 그 위치에 쓴다
-        (덮어쓴다 — 먼저 find_files 로 확인해라). projects/ 는 사용자가 직접
-        관리하는 영역이라 이 도구로는 쓸 수 없다. 그 밖의 위치도 거부된다.
+        studio/ · hina/ 로 시작하는 전체 경로, 또는 이 봇의 projects/<봇>/out/…
+        경로를 주면 그 위치에 쓴다 (덮어쓴다 — 먼저 find_files 로 확인해라).
+        projects/ 의 나머지는 사용자가 직접 관리하는 영역이라 이 도구로는 쓸 수
+        없다. 그 밖의 위치도 거부된다.
         """
         rel = (name or "").replace("\\", "/").strip("/")
         area = rel.split("/", 1)[0]
-        if area == "projects":
+        own_out = workspace.out_rel(ctx.deps.char_key)
+        if area == "projects" and not (rel == own_out or rel.startswith(own_out + "/")):
             # The user's own tree (the instruction says read-only; this makes
             # it true): a scratch note the agent parks there is exactly the
-            # mess the hina/ areas exist to hold.
-            return ("projects/ 는 사용자가 직접 관리하는 영역이라 쓰지 않습니다. "
-                    "산출물은 hina/<봇>/out/, 임시 문서·스크립트는 hina/<봇>/scratch/ 에 저장하세요.")
-        if "/" in rel and area in ("studio", "hina"):
+            # mess the hina/ areas exist to hold. The bot's own out/ is the
+            # one carve-out - that is where deliverables go.
+            return (f"projects/ 는 사용자가 직접 관리하는 영역이라 쓰지 않습니다. "
+                    f"산출물은 {own_out}/, 임시 문서·스크립트는 hina/<봇>/scratch/ 에 저장하세요.")
+        if "/" in rel and area in ("studio", "hina", "projects"):
             try:
                 dest = files._resolve(files.SPACE, rel)
             except files.FileError as e:

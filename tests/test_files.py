@@ -84,23 +84,43 @@ CK3 = store.upsert_character("cha-files-test-3", 'A\\/:*?"<>|B', {"name": "x"}, 
 f3 = workspace.bot_folder(CK3)
 check("forbidden filename characters are stripped", f3 == "AB", f3)
 hd = workspace.hina_dir(CK)
-check("hina_dir creates the three work areas",
-      all((hd / s).is_dir() for s in ("scripts", "scratch", "out")), str(hd))
+check("hina_dir creates the two internal work areas",
+      all((hd / s).is_dir() for s in ("scripts", "scratch")) and not (hd / "out").exists(), str(hd))
+od = workspace.out_dir(CK)
+check("deliverables live in the bot's project folder (out_v3)",
+      od == workspace.space_root() / "projects" / f1 / "out" and od.is_dir(), str(od))
+check("write_out says the space-relative path",
+      workspace.write_out(CK, "out/보고.md", "x") == f"projects/{f1}/out/보고.md"
+      and (od / "보고.md").read_text(encoding="utf-8") == "x")
 
 print("\ntest_clean_bot")
 (hd / "scratch" / "임시.txt").write_text("x", encoding="utf-8")
 (hd / "scripts" / "일.py").write_text("pass", encoding="utf-8")
-(hd / "out" / "산출.md").write_text("keep", encoding="utf-8")
+(od / "산출.md").write_text("keep", encoding="utf-8")
 sysdir = workspace.root(CK) / ".scratch"
 sysdir.mkdir(parents=True, exist_ok=True)
 (sysdir / "scope.db").write_bytes(b"x")
 r = files.clean_bot(CK)
 check("default clean sweeps scratch and scripts", not (hd / "scratch" / "임시.txt").exists()
       and not (hd / "scripts" / "일.py").exists(), str(r))
-check("out/ survives a default clean", (hd / "out" / "산출.md").exists())
+check("out/ survives a default clean", (od / "산출.md").exists())
 check("the SYSTEM .scratch went with it", not (sysdir / "scope.db").exists())
 r = files.clean_bot(CK, ["out"])
-check("out/ is swept only on request", not (hd / "out" / "산출.md").exists(), str(r))
+check("out/ is swept only on request", not (od / "산출.md").exists(), str(r))
+
+print("\ntest_migrate_out_v3")
+legacy = workspace.space_root() / "hina" / f1 / "out"
+legacy.mkdir(parents=True, exist_ok=True)
+(legacy / "옛산출.md").write_text("old", encoding="utf-8")
+(od / "옛산출.md").write_text("new", encoding="utf-8")
+db.execute("DELETE FROM meta WHERE key = ?", ("mig_out_v3",))
+r = workspace.migrate_out_v3()
+check("hina/<bot>/out moved into projects/<bot>/out", r is not None and r["moves"] == 1, str(r))
+check("a taken name shifts instead of overwriting",
+      (od / "옛산출.md").read_text(encoding="utf-8") == "new" and (od / "옛산출~1.md").exists(),
+      str(sorted(p.name for p in od.iterdir())))
+check("the emptied legacy folder is gone", not legacy.exists())
+check("it runs once", workspace.migrate_out_v3() is None)
 
 print("\ntest_search_names")
 base = space / "projects" / "파일 봇"

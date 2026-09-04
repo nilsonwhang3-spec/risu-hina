@@ -6,11 +6,13 @@
  * rename, copy/cut/paste (a studio-side clipboard), path, zip, delete.
  */
 import { state } from '../../state';
-import { menuAt } from '../dom';
+import { el, menuAt } from '../dom';
 import { askName } from '../kit';
+import { openListPicker } from '../pickers';
 import { copyToClipboard } from '../../host';
 import { treeRow, type TreeNode, type TreeSpec } from '../tree';
-import { S, hub, countFiles, fmtSize, msg, persistCentreTab, type Folder } from './store';
+import { S, hub, countFiles, fmtSize, msg, persistCentreTab, persistLeftTab,
+         addExtra, removeExtra, IMAGE_RE, type Folder } from './store';
 
 /** The OUTPUT tree's own clipboard (paths only; bytes stay on the backend). */
 let clip: { op: 'copy' | 'cut'; paths: string[] } | null = null;
@@ -186,4 +188,74 @@ async function doDelete(path: string): Promise<void> {
 export function buildLeftOutput(mount: HTMLElement): void {
   if (!S.outputRoot) return;
   mount.appendChild(treeRow(toTreeNode(S.outputRoot), 0, spec()));
+
+  // --- folders outside OUTPUT, pinned for 검수 (§1-33) ---------------------------
+  // A project's picture folder or an agent batch that landed elsewhere is
+  // reviewed the same way; the pin only says where to look.
+  const pick = el('button', { class: 'ghost tiny', text: '폴더 열기…',
+    title: 'OUTPUT 밖의 폴더를 검수 목록에 넣습니다 (프로젝트·AI 내부 등)' });
+  pick.addEventListener('click', () => openFolderPicker());
+  mount.appendChild(el('div', { class: 'row extrahead' }, [
+    el('span', { class: 'sectiontitle grow', style: { marginBottom: '0' }, text: '다른 폴더' }), pick,
+  ]));
+  if (!S.extraRoots.length) {
+    mount.appendChild(el('div', { class: 'hint', style: { padding: '2px 8px 6px' },
+      text: '파일 탭에서 폴더를 우클릭해 “검수 열기”를 눌러도 여기 들어옵니다.' }));
+  }
+  const extraSpec: TreeSpec = { ...spec(), onContext(node, ev) { openExtraMenu(node, ev); } };
+  for (const r of S.extraRoots) mount.appendChild(treeRow(toTreeNode(r), 0, extraSpec));
+}
+
+function openExtraMenu(node: TreeNode, ev: MouseEvent): void {
+  const isPin = S.extraRoots.some((r) => r.path === node.path);
+  menuAt(ev.clientX, ev.clientY, [
+    { label: '검수 열기', onClick: () => openFolder(node) },
+    { label: '경로 복사', onClick: () => { copyToClipboard(node.path); hub.notice('경로를 복사했습니다.', 'ok'); } },
+    { label: '내려받기 (zip)', onClick: () => void zipFolder(node.path) },
+    null,
+    { label: '목록에서 빼기', disabled: !isPin, onClick: () => {
+      removeExtra(node.path);
+      if (S.selected === node.path || S.selected.startsWith(node.path + '/')) S.selected = S.outputRoot?.path ?? 'studio/output';
+      hub.drawLeft();
+      hub.drawCentre();
+    } },
+  ]);
+}
+
+/** The picker: every folder in the space that directly holds pictures,
+ * OUTPUT excluded (those are in the tree already). One listing call. */
+export function openFolderPicker(): void {
+  openListPicker({
+    title: '검수할 폴더',
+    hint: '그림이 든 폴더만 보입니다. 고르면 왼쪽 “다른 폴더”에 들어가고 검수가 열립니다.',
+    selectedLabel: '열림',
+    async load() {
+      const listing = await state.files('', true);
+      const counts = new Map<string, number>();
+      for (const a of listing.areas) {
+        for (const f of a.files) {
+          if (!IMAGE_RE.test(f.name) || !f.path.includes('/')) continue;
+          const dir = f.path.slice(0, f.path.lastIndexOf('/'));
+          if (dir === 'studio/output' || dir.startsWith('studio/output/')) continue;
+          if (dir.startsWith('studio/config/')) continue;
+          counts.set(dir, (counts.get(dir) ?? 0) + 1);
+        }
+      }
+      return [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([dir, n]) => ({
+        id: dir, name: dir, hint: `${n}장`, selected: S.extraRoots.some((r) => r.path === dir),
+      }));
+    },
+    async onSelect(entry) {
+      addExtra(entry.id);
+      // The tree needs the folder's own listing: a full refresh reads it.
+      S.selected = entry.id;
+      S.selectedFile = '';
+      S.centreMode = 'tab';
+      S.centreTab = 'inspect';
+      S.leftTab = 'output';
+      persistCentreTab();
+      persistLeftTab();
+      await hub.refresh();
+    },
+  });
 }

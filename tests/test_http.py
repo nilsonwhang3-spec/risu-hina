@@ -2025,8 +2025,8 @@ def test_charx_build(s: Server, cw: dict) -> None:
     st, body = s.post("/charx/build", {"charKey": ck, "name": "카드 봇 테스트"})
     check("build succeeds once the asset is there", st == 200 and body.get("ok") is True, str(body)[:200])
     check("one asset in, nothing dropped", body.get("assets") == 1 and body.get("dropped") == 0, str(body)[:200])
-    check("the file lands in the bot's hina out/",
-          str(body.get("path") or "").startswith("hina/")
+    check("the file lands in the bot's project out/",
+          str(body.get("path") or "").startswith("projects/")
           and str(body.get("path")).endswith("/out/카드 봇 테스트.charx"), str(body.get("path")))
 
     # q()'s own first parameter is called `path`, so this query is spelled out.

@@ -246,6 +246,8 @@ export interface FileListing {
   root: string;
   totalSize: number;
   areas: FileArea[];
+  /** The asked-for bot's folder name under projects/ and hina/ (`bot=`). */
+  botFolder?: string;
 }
 
 export interface AgentPreset {
@@ -1421,10 +1423,12 @@ class AppState {
     return r;
   }
 
-  async files(prefix = '', hidden = false): Promise<FileListing> {
+  async files(prefix = '', hidden = false, bot = ''): Promise<FileListing> {
     const q: string[] = [];
     if (prefix) q.push('prefix=' + encodeURIComponent(prefix));
     if (hidden) q.push('hidden=1');
+    // The listing names this bot's folder back (`botFolder`) for "이 봇만".
+    if (bot) q.push('bot=' + encodeURIComponent(bot));
     return await transport.get('/files' + (q.length ? '?' + q.join('&') : ''));
   }
 

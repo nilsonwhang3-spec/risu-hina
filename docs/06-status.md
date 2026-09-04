@@ -111,6 +111,46 @@ mixed-cast multi-entry batch from the panel.** Released = **v0.10.0 BETA** (§1-
 **0.3.1 (night of 2026-08-25)** — the real reason `+` never appeared was not "same version" but **CORS**: RisuAI reads `//@update-url` with a browser `fetch`, and the redirect response from the release URL carries no CORS header. Changed `//@update-url` to
 `https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js`, and made `tools/bundle.py` write that file into the repository (included in the release commit). In the backend code only VERSION changed.
 
+**+ §1-33 (2026-09-05, unreleased — the file-space cleanup + a real-browser UI pass)**: the
+user's two asks. (1) *Files.* The agent's `hina/<봇>/` is INTERNAL now: the files tab hides it
+behind the one 숨김 toggle (`DEFAULT_AREAS` = projects·studio; `USER_AREAS` still says where
+drops may land), the 임시 문서 virtual folder is gone (3,104 "documents" on the real install
+= noise), and **deliverables live in `projects/<봇>/out/`** (`workspace.out_dir/out_rel`;
+`write_out`, `write_artifact`, the charx build, the sandbox helper `risuhina.out()` via
+`RISUHINA_OUT`, `clean_bot(["out"])`, the agent prompt + `write_file`'s one carve-out under
+projects/, the panel's out/-watcher on `(projects|hina)/*/out/`). Boot migration **`out_v3`**
+(`migrate_out_v3`, manifest `.hina/migration-out_v3.json`, `_move_tree` = never overwrite).
+`write_out` keeps Hangul names (the ASCII `SAFE` made 보고서.md into `___.md`). `studio_generate`
+without a folder lands in `studio/output/<봇폴더>/`. Files tab: **"이 봇만"** toggle
+(`GET /files?bot=` answers `botFolder`; projects/·hina/ narrowed to it, persisted), the
+three-line how-to paragraph folded into one line + `ⓘ 사용법`, a folder of pictures gets
+**"검수 열기 (에셋 스튜디오)"** in its right-click menu (`openTabRequest='studio'` +
+`requestOpenStudio`). (2) *검수 anywhere.* The studio pins folders outside OUTPUT
+(`store.extraPaths` in `hina.studioExtraFolders`, `S.extraRoots` built from one prefix listing
+each, `find()` searches every root); the OUTPUT tab shows them under **다른 폴더** with a
+`폴더 열기…` picker (every space folder that directly holds pictures) and 목록에서 빼기; the
+backend never cared (`_rel` passes projects/·hina/ through). (3) *The 검수 rule.* The summary
+button says what it produced (`규칙: 자동 → 그룹 6`), the popover shows ANY file as the sample
+(‹ ›), the tokens as a chip strip joined by the delimiter glyph with index badges, a 묶는 기준
+segment for 자동 mode (감정 · 캐릭터 · 캐릭터+감정), and a live result line (그룹 N · 못 읽음 M,
+plus "장마다 그룹 하나" when the rule is too fine); 못 읽음 is a button into the popover and the
+unmatched section has 규칙 바꾸기. (4) *Layout, measured in the harness at 1254px.* The
+selector toolbar is two rows (head: 정리 · path · rule · 못 읽음; tools: view · columns · bulk ·
+애셋 채택), the path title no longer shouts (`.sectiontitle.path`, the uppercase turned v3 into
+V3), columns default to **자동** (`auto-fill, minmax(190px,1fr)`; `selCols` 0). **The real
+overflow bug**: two splitters each clamped its stored width against the OTHER's current one
+(stored widths arrive async; a hidden panel measures 0), so tree 384 + agent 627 overflowed
+a 1254px viewport by 37px and the agent pane sat past the edge. `splitter.ts` now keeps a
+per-container registry, `applyAll` re-clamps the siblings, the belt measures overflow against
+the nearest clipping ancestor / viewport (the split and its `.panel` both grow), a hidden
+split (span 0) is left alone, observers watch the viewport + the split itself, and `shell.setTab`
+re-clamps the shown split at 0/800ms (ResizeObservers only run while the tab is painted -
+the harness in a background tab proved it). `reclamp()` is also called by the fold toggles.
+Tab rows hide their scrollbar and `setTab` scrolls the lit tab into view (phone). Tests: the
+smoke's files section seeds `projects/Parma Knights/out`, expects hina/ hidden and 이 봇만,
+and reads chips by their `.idx` badge; `test_files` covers `out_dir`/`write_out`/`out_v3`.
+Gate ALL GREEN (test_http re-run after the charx path fix). **Unreleased, not staged.**
+
 **+ §1-32 (2026-09-03 night, 0.11.1)**: `.split` and the bottom `.genstrip`/`.striprow` carry
 `min-width: 0` - a long strip of cells is a scroll container whose intrinsic width sized the
 split's min-content, so the centre grew past the screen and pushed the agent pane off it · a
@@ -139,6 +179,11 @@ icons outside the studio, compact rows + switch, the caveat card and its `<stron
 
 **Handoff 2026-08-31 (the studio feedback marathon, §1-19 ~ §1-25).** Where the next session picks up:
 
+- **State (2026-09-05)**: master = 0.11.1 + **§1-33 unreleased** (files: hina/ hidden,
+  deliverables in `projects/<봇>/out/` with the `out_v3` boot migration, 이 봇만, 검수 on any
+  folder, the rule popover redone, the two-splitter overflow fixed). When it ships the
+  backend and plugin go together (the out/ move + `?bot=`), so bump the MINOR. The live
+  site at 2026-09-05 06:40 KST ran 0.11.1 on both ends (test-server updated by the user).
 - **State (2026-09-03 night)**: master = **0.11.1 RELEASED** (§1-32, two first-use fixes on 0.11.0: the split no longer grows past the screen because of the bottom strip; a running asset sync no longer rebuilds the 선택 page every 400ms). 0.11.0 (`31d7a71`) was released earlier the same evening and hand-deployed to test-server (backup `data-backup-20260903`, six app modules + the bundle to `data/plugin/`, `/plugin.js` hash = release bundle). 0.11.1 is a PATCH: the version gate stays quiet, so test-server updates through 설정 → 백엔드 업데이트 (release assets) and the plugin through `+`. The user's next action: update both, then the Codex originator real-use check.
   (2026-08-31 night: stop → backup `data-backup-20260831` (20,576 files) → 10 app modules + 2
   seeds + the 764,648B dev bundle → start; verified live: `/health` 0.11.0, **studio_v2 moved

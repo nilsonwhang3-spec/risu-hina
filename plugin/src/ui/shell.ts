@@ -5,6 +5,7 @@
  * so switching tabs does not lose scroll position or an in-progress edit.
  */
 import { installFoldControls } from './panes';
+import { reclamp } from './splitter';
 import { el, clear, ICON, searchBox } from './dom';
 import { describeSync, syncBusy } from '../assets';
 import { injectStyles } from './styles';
@@ -223,6 +224,11 @@ export function setTab(tab: TabId): void {
     mounts[id]?.classList.toggle('active', id === tab);
     document.getElementById('tab-' + id)?.classList.toggle('active', id === tab);
   }
+  // On a phone the tab row scrolls; the lit tab has to be the one on screen,
+  // or the user cannot tell where they are (§1-33).
+  try {
+    document.getElementById('tab-' + tab)?.scrollIntoView({ inline: 'nearest', block: 'nearest' });
+  } catch { /* no layout in the test DOM */ }
   // The gear is a toggle, so it has to look pressed while settings is open.
   document.getElementById('open-settings')?.classList.toggle('on', tab === 'settings');
   syncBackTab();
@@ -230,6 +236,14 @@ export function setTab(tab: TabId): void {
   syncSettingsBar();
   syncToolslot();
   refreshTabBadges();
+  // The shown split fits itself around the remembered pane widths now, and
+  // again once its content has landed (a listing that widens the centre).
+  // ResizeObservers do the same, but only while the tab is being painted.
+  const shown = mounts[tab]?.querySelector('.split') as HTMLElement | null;
+  if (shown) {
+    setTimeout(() => reclamp(shown), 0);
+    setTimeout(() => reclamp(shown), 800);
+  }
   // The header's mode chip follows the active tab (edit tabs only).
   refreshStatus();
 }
@@ -532,7 +546,7 @@ state.onChange(() => {
       })();
     } else if (want) {
       setEditMode(want, tab);
-    } else if (tab === 'files' || tab === 'chats') setTab(tab);
+    } else if (tab === 'files' || tab === 'chats' || tab === 'studio') setTab(tab);
     return;
   }
   // A log line in the agent panel asked for a file: go where files are.

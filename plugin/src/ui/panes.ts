@@ -15,7 +15,7 @@
  * three histories and three costs for what the user experiences as one chat.
  */
 import { el, ICON, iconBtn } from './dom';
-import { splitter } from './splitter';
+import { splitter, reclamp } from './splitter';
 import { setLayoutControls } from './shell';
 
 export interface ThreePaneParts {
@@ -70,6 +70,8 @@ function applyFold(): void {
   if (foldRoot) {
     foldRoot.classList.toggle('lcollapse', fold.left);
     foldRoot.classList.toggle('rcollapse', fold.right);
+    // A rail unfolding has to fit again beside the remembered widths.
+    reclamp(foldRoot);
   }
   foldL?.classList.toggle('on', !fold.left);
   foldR?.classList.toggle('on', !fold.right);

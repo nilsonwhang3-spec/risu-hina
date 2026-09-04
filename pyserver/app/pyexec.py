@@ -257,6 +257,7 @@ def run(
         "RISUHINA_SYSTEM": str(system.resolve()),
         "RISUHINA_HOME": str(home.resolve()),
         "RISUHINA_PROJECT": str(project.resolve()),
+        "RISUHINA_OUT": str(ws.out_dir(char_key).resolve()),
         "RISUHINA_SCOPE_DB": str((system / ".scratch" / "scope.db").resolve()),
         "RISUHINA_STAGED": str((system / ".scratch" / "staged.jsonl").resolve()),
         "RISUHINA_CHAT_KEY": chat_key,

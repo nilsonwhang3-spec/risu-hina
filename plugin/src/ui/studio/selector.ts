@@ -95,13 +95,30 @@ function effective(p: GroupPrefs): { pattern: string; groupBy: string } {
   return { pattern: '', groupBy: p.groupBy || 'emotion' };
 }
 
-function ruleSummary(p: GroupPrefs): string {
-  if (p.mode === 'regex' && p.pattern.trim()) return '규칙: 정규식';
-  if (p.mode === 'delim') {
+/** What the rule is, and what it produced - the count is the feedback the
+ * old label lacked ("규칙: 자동" said nothing about 37 groups for 39 files). */
+function ruleSummary(p: GroupPrefs, g: StudioGroups | null): string {
+  let rule = '자동';
+  if (p.mode === 'regex' && p.pattern.trim()) rule = '정규식';
+  else if (p.mode === 'delim') {
     const d = p.delimiter === ' ' ? '공백' : p.delimiter;
-    return `규칙: ${d} · ${[...p.tokens].sort((a, b) => a - b).join('+')}번째`;
+    rule = `${d} · ${[...p.tokens].sort((a, b) => a - b).join('+')}번째`;
+  } else if (p.groupBy && p.groupBy !== 'emotion') {
+    rule = `자동 · ${FIELD_LABEL[p.groupBy] ?? p.groupBy}`;
   }
-  return '규칙: 자동';
+  return g ? `규칙: ${rule} → 그룹 ${g.groups.length}` : `규칙: ${rule}`;
+}
+
+const FIELD_LABEL: Record<string, string> = {
+  emotion: '감정', character: '캐릭터', 'character+emotion': '캐릭터+감정',
+};
+
+/** The grid's columns: a fixed count, or 자동 = as many ~190px cells as fit
+ * (§1-33: three 450px-tall cards per row was the default on a laptop). */
+function gridCols(): string {
+  return S.selCols > 0
+    ? `repeat(${S.selCols}, minmax(0, 1fr))`
+    : 'repeat(auto-fill, minmax(190px, 1fr))';
 }
 
 /** Whether the loaded groups belong to this folder - drawCentre's gate. */
@@ -170,24 +187,30 @@ export function drawSelector(node: Folder): void {
   cellSyncs.clear();
   missingSync = null;
 
-  // --- top bar: back · title · 전체/그룹별 · columns · bulk · export -------------
-  const bar = el('div', { class: 'row', style: { marginBottom: '8px', flexWrap: 'wrap' } });
+  // --- top: TWO rows (§1-33). The one row of eleven controls overflowed a
+  // laptop and read as a wall. Row 1 = where you are + the rule; row 2 =
+  // how to look + what to do.
+  const head = el('div', { class: 'row selhead', style: { marginBottom: '6px' } });
   const tidy = el('button', { class: 'ghost tiny', text: '정리', title: '폴더 정리 화면 (선택·이동·삭제·업로드)' });
   tidy.addEventListener('click', () => { S.centreMode = 'folder'; hub.drawCentre(); });
-  bar.append(
+  head.append(
     tidy,
-    el('span', { class: 'sectiontitle grow', text: `${node.path} · ${g.total}장 · 그룹 ${g.groups.length}` }),
+    el('span', { class: 'sectiontitle path grow', title: node.path,
+                 text: `${node.path} · ${g.total}장` }),
   );
+  viewMount.appendChild(head);
+  const bar = el('div', { class: 'row seltools', style: { marginBottom: '8px' } });
   const mkView = (v: 'all' | 'group' | 'rep', label: string) => ({
     label, on: viewMode === v, pick: () => { viewMode = v; drill = ''; hub.drawCentre(); },
   });
   bar.append(segCtl([mkView('group', '그룹별'), mkView('all', '전체'), mkView('rep', '대표')]));
-  bar.appendChild(colPicker({ values: [2, 3, 4, 5, 6], get: () => S.selCols, set: (n) => {
+  bar.appendChild(colPicker({ values: [0, 2, 3, 4, 5, 6], labels: { 0: '자동' }, get: () => S.selCols, set: (n) => {
     S.selCols = n; persistSelCols();
     for (const gEl of Array.from(document.querySelectorAll<HTMLElement>('.selgrid'))) {
-      gEl.style.gridTemplateColumns = `repeat(${S.selCols}, minmax(0, 1fr))`;
+      gEl.style.gridTemplateColumns = gridCols();
     }
   } }));
+  bar.appendChild(el('span', { class: 'spacer' }));
   const firstEach = el('button', { class: 'ghost tiny', text: '그룹마다 첫 장' });
   firstEach.addEventListener('click', () => {
     for (const grp of g.groups) {
@@ -209,16 +232,18 @@ export function drawSelector(node: Folder): void {
   if (/\/selected$/.test(node.path)) bar.appendChild(adoptButton());
   viewMount.appendChild(bar);
 
-  // --- the grouping rule: ONE compact control (§1-30) -------------------------------
-  // The editor folds behind a small summary button - the old full-width row of
-  // labels + chips ate two lines above every grid. Tokens are MULTI-select.
-  const ruleBtn = el('button', { class: 'ghost tiny rulebtn', text: ruleSummary(p),
-    title: '구분자와 그룹 기준을 고칩니다 (토큰은 복수 선택 가능)' });
+  // --- the grouping rule: ONE compact control (§1-30), on the head row ----------
+  // The editor folds behind a summary button that also says what the rule
+  // produced. Tokens are MULTI-select.
+  const ruleBtn = el('button', { class: 'ghost tiny rulebtn', text: ruleSummary(p, g),
+    title: '파일 이름을 어떻게 나눠 그룹을 만들지 고칩니다 (토큰은 복수 선택 가능)' });
   ruleBtn.addEventListener('click', () => openRulePopover(ruleBtn, node));
-  bar.appendChild(ruleBtn);
+  head.appendChild(ruleBtn);
   if (g.unmatched.length) {
-    bar.appendChild(el('span', { class: 'badge warn', text: `못 읽음 ${g.unmatched.length}`,
-      title: '이름 규칙이 못 읽은 파일 — 아래 별도 목록에 있습니다' }));
+    const badge = el('button', { class: 'ghost tiny badge warn', text: `못 읽음 ${g.unmatched.length}`,
+      title: '이름 규칙이 못 읽은 파일 — 아래 별도 목록에 있습니다. 누르면 규칙 편집이 열립니다' });
+    badge.addEventListener('click', () => openRulePopover(ruleBtn, node));
+    head.appendChild(badge);
   }
 
   // 부족분: groups where nothing is chosen and nothing is being fixed - the
@@ -262,14 +287,14 @@ export function drawSelector(node: Folder): void {
     viewMount.appendChild(nav);
     viewMount.appendChild(candidateGrid(grp?.items ?? [], grp?.items));
   } else if (viewMode === 'group') {
-    const grid = el('div', { class: 'agrid selgrid', style: { gridTemplateColumns: `repeat(${S.selCols}, minmax(0, 1fr))` } });
+    const grid = el('div', { class: 'agrid selgrid', style: { gridTemplateColumns: gridCols() } });
     for (const grp of g.groups) grid.appendChild(groupCard(grp));
     viewMount.appendChild(grid);
     if (!g.groups.length) viewMount.appendChild(el('div', { class: 'empty', text: '규칙이 읽어낸 그룹이 없습니다 — 구분자와 그룹 기준을 확인하세요.' }));
   } else if (viewMode === 'rep') {
     // 대표 모아보기: the chosen representative per group side by side - the
     // "씬별 대표 이미지" answer sheet. Click through to the group's candidates.
-    const grid = el('div', { class: 'agrid selgrid', style: { gridTemplateColumns: `repeat(${S.selCols}, minmax(0, 1fr))` } });
+    const grid = el('div', { class: 'agrid selgrid', style: { gridTemplateColumns: gridCols() } });
     for (const grp of g.groups) {
       const chosen = grp.items.find((i) => selection[i.filename]?.rep)
         ?? grp.items.find((i) => selection[i.filename]?.use);
@@ -298,8 +323,17 @@ export function drawSelector(node: Folder): void {
     viewMount.appendChild(el('div', { class: 'row', style: { marginTop: '10px' } }, [
       el('span', { class: 'sectiontitle grow', text: `이름 규칙에 안 맞는 파일 ${g.unmatched.length}개` }),
     ]));
-    viewMount.appendChild(el('div', { class: 'hint', text:
-      '이 파일들은 그룹에 못 들어갑니다. 히나에게 “이 폴더 이름 규칙에 맞게 일괄로 바꿔 줘” 라고 하세요 (studio_rename).' }));
+    const fix = el('button', { class: 'ghost tiny', text: '규칙 바꾸기',
+      title: '구분자 규칙으로 바꾸면 대개 읽힙니다' });
+    fix.addEventListener('click', () => {
+      const anchor = viewMount.querySelector<HTMLElement>('.rulebtn');
+      if (anchor) openRulePopover(anchor, node);
+    });
+    viewMount.appendChild(el('div', { class: 'row' }, [
+      el('span', { class: 'hint grow', text:
+        '이 파일들은 지금 규칙으로는 그룹에 못 들어갑니다. 규칙을 바꾸거나, 히나에게 “이 폴더 이름 규칙에 맞게 일괄로 바꿔 줘” 라고 하세요.' }),
+      fix,
+    ]));
     viewMount.appendChild(candidateGrid(g.unmatched));
   }
 }
@@ -339,7 +373,7 @@ function groupCard(grp: { key: string; items: GroupItem[] }): HTMLElement {
 }
 
 function candidateGrid(items: GroupItem[], groupItems?: GroupItem[]): HTMLElement {
-  const grid = el('div', { class: 'agrid selgrid', style: { gridTemplateColumns: `repeat(${S.selCols}, minmax(0, 1fr))` } });
+  const grid = el('div', { class: 'agrid selgrid', style: { gridTemplateColumns: gridCols() } });
   for (const it of items) grid.appendChild(candidate(it, groupItems));
   return grid;
 }
@@ -394,42 +428,86 @@ function candidate(it: GroupItem, groupItems?: GroupItem[]): HTMLElement {
 function openRulePopover(anchor: HTMLElement, node: Folder): void {
   const p = prefsFor(node.path);
   const g = groups;
-  const sample = g?.groups[0]?.items[0]?.filename ?? g?.unmatched[0]?.filename ?? '';
-  const stem = sample.replace(/\.[a-z0-9]+$/i, '');
+  // Every file is a sample (‹ › cycles): the rule used to be shown on the
+  // first file only, which is exactly the one the user was not asking about.
+  const names = g ? [...g.groups.flatMap((x) => x.items.map((i) => i.filename)), ...g.unmatched.map((u) => u.filename)] : [];
+  let sampleAt = 0;
+  const stemOf = (n: string): string => n.replace(/\.[a-z0-9]+$/i, '');
   let stagedDelim = p.delimiter;
   const staged = new Set<number>(p.mode === 'delim' ? p.tokens : []);
+  let mode: GroupPrefs['mode'] = p.mode;
   let applyTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const body = el('div', { class: 'rulepop' });
+  // What the rule produced, refreshed after every change: the feedback loop
+  // the old popover lacked (a chip toggled, and nothing said what happened).
+  const result = el('div', { class: 'ruleresult' });
+  const syncResult = (): void => {
+    const gg = groups;
+    if (!gg) { result.textContent = '읽는 중…'; return; }
+    clear(result);
+    result.append(
+      el('span', { class: 'badge ok', text: `그룹 ${gg.groups.length}` }),
+      el('span', { class: 'badge' + (gg.unmatched.length ? ' warn' : ''), text: `못 읽음 ${gg.unmatched.length}` }),
+      el('span', { class: 'hint', text: `${gg.total}장` }),
+    );
+    if (gg.groups.length === gg.total && gg.total > 1) {
+      result.appendChild(el('span', { class: 'hint', text: '— 장마다 그룹 하나: 기준이 너무 잘게 나뉩니다' }));
+    }
+  };
+  const reload = (): void => {
+    drill = '';
+    void loadGroups(node.path).then(() => { syncResult(); syncModeRow(); });
+  };
   const applyDelim = (): void => {
     if (!staged.size) return;
     if (applyTimer) clearTimeout(applyTimer);
     applyTimer = setTimeout(() => {
       setPrefs(node.path, { mode: 'delim', delimiter: stagedDelim, tokens: [...staged].sort((a, b) => a - b) });
-      drill = '';
-      void loadGroups(node.path);
+      mode = 'delim';
+      reload();
     }, 350);
   };
 
-  const body = el('div', { class: 'rulepop' });
+  // --- row 1: the delimiter, and 자동 ---------------------------------------------
   const dsel = el('select', { title: '파일명을 나누는 문자' }) as HTMLSelectElement;
-  for (const [v, label] of [['-', '-'], ['_', '_'], ['.', '.'], [' ', '공백']] as const) {
+  for (const [v, label] of [['-', '- (하이픈)'], ['_', '_ (밑줄)'], ['.', '. (점)'], [' ', '공백']] as const) {
     const o = el('option', { value: v, text: label });
     if (stagedDelim === v) o.setAttribute('selected', 'selected');
     dsel.appendChild(o);
   }
-  const chipsBox = el('div', { class: 'row', style: { gap: '2px', flexWrap: 'wrap' } });
+  const auto = el('button', { class: 'ghost tiny', text: '자동',
+    title: '기본 규칙: 캐릭터-감정-날짜-시각-번호 로 지은 이름(스튜디오 기본)을 읽습니다' });
+  auto.addEventListener('click', () => {
+    setPrefs(node.path, { mode: 'default' });
+    mode = 'default';
+    reload();
+  });
+
+  // --- row 2: the sample, split into toggle chips that READ as the filename --
+  const nav = el('div', { class: 'row samplenav' });
+  const prev = el('button', { class: 'ghost tiny', text: '‹', title: '이전 파일' }) as HTMLButtonElement;
+  const next = el('button', { class: 'ghost tiny', text: '›', title: '다음 파일' }) as HTMLButtonElement;
+  const which = el('span', { class: 'hint' });
+  nav.append(el('span', { class: 'hint', text: '예시' }), prev, which, next);
+  const chipsBox = el('div', { class: 'tokstrip' });
   const renderChips = (): void => {
     clear(chipsBox);
-    if (!stem) {
+    const sample = names[sampleAt] ?? '';
+    which.textContent = names.length ? `${sampleAt + 1}/${names.length}` : '없음';
+    prev.disabled = sampleAt <= 0;
+    next.disabled = sampleAt >= names.length - 1;
+    if (!sample) {
       chipsBox.appendChild(el('span', { class: 'hint', text: '샘플 파일이 없습니다' }));
       return;
     }
-    const toks = stem.split(stagedDelim).filter((q) => q !== '');
-    toks.slice(0, 6).forEach((tok, i) => {
+    const toks = stemOf(sample).split(stagedDelim).filter((q) => q !== '');
+    toks.slice(0, 8).forEach((tok, i) => {
+      if (i) chipsBox.appendChild(el('span', { class: 'delimglyph', text: stagedDelim === ' ' ? '␣' : stagedDelim }));
       const chip = el('button', {
-        class: 'ghost tiny tokenchip' + (staged.has(i + 1) ? ' on' : ''),
-        text: `${i + 1}·${tok.length > 12 ? tok.slice(0, 12) + '…' : tok}`,
-        title: `${i + 1}번째 조각을 그룹 기준에 넣거나 뺍니다 (예: ${tok})`,
-      });
+        class: 'tokenchip' + (staged.has(i + 1) ? ' on' : ''),
+        title: `${i + 1}번째 조각을 그룹 기준에 넣거나 뺍니다`,
+      }, [el('span', { class: 'idx', text: String(i + 1) }), el('span', { text: tok.length > 14 ? tok.slice(0, 14) + '…' : tok })]);
       chip.addEventListener('click', () => {
         // Multi-select: toggle membership; the last one cannot leave.
         if (staged.has(i + 1)) {
@@ -442,25 +520,49 @@ function openRulePopover(anchor: HTMLElement, node: Folder): void {
       });
       chipsBox.appendChild(chip);
     });
+    if (toks.length > 8) chipsBox.appendChild(el('span', { class: 'hint', text: '…' }));
   };
+  prev.addEventListener('click', () => { sampleAt = Math.max(0, sampleAt - 1); renderChips(); });
+  next.addEventListener('click', () => { sampleAt = Math.min(names.length - 1, sampleAt + 1); renderChips(); });
   dsel.addEventListener('change', () => {
     stagedDelim = dsel.value;
     staged.clear(); // a new delimiter starts a new pick; nothing applies yet
     renderChips();
   });
   renderChips();
-  const auto = el('button', { class: 'ghost tiny' + (p.mode === 'default' ? ' on' : ''), text: '자동',
-    title: '기본 규칙 (캐릭터-감정-날짜-번호 형태를 자동으로 읽습니다)' });
-  auto.addEventListener('click', () => {
-    setPrefs(node.path, { mode: 'default' });
-    drill = '';
-    void loadGroups(node.path);
-  });
+
+  // --- row 3: in 자동 mode, WHICH field groups (감정 · 캐릭터 · 둘 다) ----------
+  const modeRow = el('div', { class: 'row', style: { marginTop: '6px' } });
+  const syncModeRow = (): void => {
+    clear(modeRow);
+    auto.classList.toggle('on', mode === 'default');
+    const cur = prefsFor(node.path);
+    if (mode === 'default') {
+      const by = cur.groupBy || 'emotion';
+      const mk = (v: string, label: string) => ({
+        label, on: by === v, pick: () => { setPrefs(node.path, { mode: 'default', groupBy: v }); reload(); },
+      });
+      modeRow.append(el('span', { class: 'hint', text: '묶는 기준' }),
+        segCtl([mk('emotion', '감정'), mk('character', '캐릭터'), mk('character+emotion', '캐릭터+감정')]));
+    } else if (mode === 'delim') {
+      modeRow.appendChild(el('span', { class: 'hint',
+        text: `켜진 조각(${[...staged].sort((a, b) => a - b).join('+') || '없음'})이 같은 파일끼리 한 그룹이 됩니다` }));
+    } else {
+      modeRow.appendChild(el('span', { class: 'hint', text: '정규식 규칙이 켜져 있습니다 (고급)' }));
+    }
+  };
+  syncModeRow();
+  syncResult();
+
   body.append(
-    el('div', { class: 'row' }, [el('span', { class: 'hint', text: '구분자' }), dsel, auto]),
-    el('div', { class: 'hint', style: { margin: '6px 0 2px' }, text: '그룹 기준 — 칩을 눌러 넣고 뺍니다 (복수 선택)' }),
+    el('div', { class: 'row' }, [el('span', { class: 'hint', text: '나누기' }), dsel, auto]),
+    nav,
     chipsBox,
+    modeRow,
+    result,
   );
+
+  // --- 고급: the raw regex ---------------------------------------------------------
   const pat = el('input', {
     value: p.mode === 'regex' ? p.pattern : '', placeholder: '(?P<costume>[^-]+)-(?P<emotion>[^-]+)',
     title: '명명 캡처그룹 정규식 — 그룹 이름이 그룹 기준 후보가 됩니다',
@@ -469,8 +571,8 @@ function openRulePopover(anchor: HTMLElement, node: Folder): void {
     if (patternTimer) clearTimeout(patternTimer);
     patternTimer = setTimeout(() => {
       setPrefs(node.path, { mode: pat.value.trim() ? 'regex' : 'default', pattern: pat.value });
-      drill = '';
-      void loadGroups(node.path);
+      mode = pat.value.trim() ? 'regex' : 'default';
+      reload();
     }, 800);
   });
   const by = el('select', { title: '어느 필드로 묶어 볼지' }) as HTMLSelectElement;
@@ -482,8 +584,7 @@ function openRulePopover(anchor: HTMLElement, node: Folder): void {
   }
   by.addEventListener('change', () => {
     setPrefs(node.path, { groupBy: by.value });
-    drill = '';
-    void loadGroups(node.path);
+    reload();
   });
   body.appendChild(el('details', { class: 'advbox', ...(p.mode === 'regex' ? { open: true } : {}) }, [
     el('summary', { text: '고급 (정규식 규칙)' }),

@@ -28,13 +28,14 @@ import { state, type StudioItem } from '../../state';
 import { threePane } from '../panes';
 import { bindAgent, mountAgent } from '../agentpane';
 import { CARD_AREAS, OUTPUT_ROOT, S, hub, areaOfPath, canonPath, checkUnresolved,
-         persistLeftTab, persistCentreTab, buildOutput, find, msg } from './store';
+         persistLeftTab, persistCentreTab, buildOutput, buildExtras, extraPaths, addExtra,
+         isOutputPath, find, msg } from './store';
 import { pollJob, loadJobs, markJobsStale } from './gen';
 import { drawCardEditor, drawSceneEditor, drawRawFile, rawView } from './editors';
 import { drawCharacterEditor } from './char-edit';
 import { buildLeftPrompt, syncPromptBadges } from './left-prompt';
 import { buildLeftChars } from './left-chars';
-import { buildLeftOutput } from './left-output';
+import { buildLeftOutput, openFolderPicker } from './left-output';
 import { drawFragments } from './center-frags';
 import { drawSingle, singleTick } from './center-single';
 import { drawBatch, batchTick } from './center-batch';
@@ -42,6 +43,7 @@ import { buildStrip, stripTick, refreshStrip } from './strip';
 import { drawFolder } from './center-folder';
 import { hasGroups, loadGroups, drawSelector } from './selector';
 import { setLayoutControls } from '../shell';
+import { reclamp } from '../splitter';
 
 let built = false;
 /** The filesRev this tab last drew. While the tab stays active, an unrelated
@@ -84,6 +86,7 @@ function applyPanels(): void {
   if (!splitRoot) return;
   splitRoot.classList.toggle('lcollapse', panels.left);
   splitRoot.classList.toggle('rcollapse', panels.right || autoRight);
+  reclamp(splitRoot);
   layBtnL?.classList.toggle('on', !panels.left);
   layBtnR?.classList.toggle('on', !(panels.right || autoRight));
 }
@@ -216,11 +219,15 @@ async function refresh(): Promise<void> {
   }
   await migrateSingleStyle();
   buildOutput();
-  // The agent (or a batch strip in the chat) asked for 검수 on a folder.
+  // The agent (or a batch strip in the chat, or the files tab) asked for
+  // 검수 on a folder. One outside OUTPUT gets pinned first (§1-33).
   const want = state.openStudioRequest;
+  const wantFolder = want ? canonPath(want.folder) : '';
+  if (wantFolder && !isOutputPath(wantFolder)) addExtra(wantFolder);
+  await loadExtras();
   if (want) {
     state.openStudioRequest = null;
-    const folder = canonPath(want.folder);
+    const folder = wantFolder;
     if (find(folder)) {
       S.selected = folder;
       const parts = folder.split('/');
@@ -232,7 +239,7 @@ async function refresh(): Promise<void> {
       persistCentreTab();
       persistLeftTab();
     } else {
-      notice('그 폴더를 OUTPUT 에서 찾지 못했습니다: ' + folder, 'err');
+      notice('그 폴더를 찾지 못했습니다: ' + folder, 'err');
     }
   }
   drawLeft();
@@ -241,6 +248,15 @@ async function refresh(): Promise<void> {
   markJobsStale();
   void refreshStrip();
   if (S.jobId) void pollJob();
+}
+
+/** The pinned folders' own listings (one request each; usually zero or one). */
+async function loadExtras(): Promise<void> {
+  const pairs = await Promise.all(extraPaths.map(async (p) => {
+    try { return [p, await state.files(p)] as const; } catch { return [p, null] as const; }
+  }));
+  buildExtras(Object.fromEntries(pairs));
+  for (const p of extraPaths) S.open.add(p);
 }
 
 /** The dropdown means ONE style. Cards written before the dropdown could have
@@ -423,7 +439,13 @@ function drawInspect(body: HTMLElement): void {
   if (S.leftTab !== 'output') { S.leftTab = 'output'; persistLeftTab(); drawLeft(); }
   const node = S.selected && S.selected !== OUTPUT_ROOT ? find(S.selected) : null;
   if (!node) {
-    body.appendChild(el('div', { class: 'empty', text: '왼쪽 OUTPUT 트리에서 검수할 폴더를 고르세요.' }));
+    const pick = el('button', { class: 'ghost tiny', text: '다른 폴더 열기…',
+      title: 'OUTPUT 밖의 폴더(프로젝트 등)도 검수할 수 있습니다' });
+    pick.addEventListener('click', () => openFolderPicker());
+    body.appendChild(el('div', { class: 'empty' }, [
+      el('div', { text: '왼쪽 OUTPUT 트리에서 검수할 폴더를 고르세요.' }),
+      el('div', { class: 'row', style: { justifyContent: 'center', marginTop: '10px' } }, [pick]),
+    ]));
     return;
   }
   if (!node.files.length && !node.children.length) {

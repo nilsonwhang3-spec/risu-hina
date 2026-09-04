@@ -987,15 +987,17 @@ console.log('\ntest_truncate_with_preview');
 
 console.log('\ntest_workspace_files');
 {
-  // Seed the kind of thing the agent leaves behind, in the global space: a
-  // document in its scratch (a deliverable in the wrong folder) next to a
-  // script (internal). Written straight to disk - the agent's write tool is
-  // the only writer.
+  // Seed the kind of thing the agent leaves behind, in the global space:
+  // deliverables in the bot's project out/ (§1-33) and a script in its
+  // internal hina/ area. Written straight to disk - the agent's write tool
+  // is the only writer.
   const hinaDir = join(backend.data, 'space', 'hina', '스모크');
+  const outDir = join(backend.data, 'space', 'projects', 'Parma Knights', 'out');
   mkdirSync(join(hinaDir, 'scratch'), { recursive: true });
   mkdirSync(join(hinaDir, 'scripts'), { recursive: true });
-  writeFileSync(join(hinaDir, 'scratch', 'draft-summary.md'), '# 초안' + String.fromCharCode(10) + '본문');
-  writeFileSync(join(hinaDir, 'scratch', 'numbers.txt'), '1 2 3');
+  mkdirSync(outDir, { recursive: true });
+  writeFileSync(join(outDir, 'draft-summary.md'), '# 초안' + String.fromCharCode(10) + '본문');
+  writeFileSync(join(outDir, 'numbers.txt'), '1 2 3');
   writeFileSync(join(hinaDir, 'scripts', 'helper.py'), 'print(1)');
 
   // No pinned download card in the agent panel any more - a file shows up as
@@ -1017,25 +1019,34 @@ console.log('\ntest_workspace_files');
   // The space's three areas are the tree roots; the machine area (.hina)
   // stays behind the toggle.
   const branches = () => [...document.querySelectorAll('.panel.active .tree .treebranch')];
-  check('the space areas are the tree roots',
-        /스튜디오/.test(tree?.textContent || '') && /AI 작업/.test(tree?.textContent || ''),
+  check('the user areas are the tree roots',
+        /스튜디오/.test(tree?.textContent || '') && /프로젝트/.test(tree?.textContent || ''),
         (tree?.textContent || '').slice(0, 200));
+  // The agent's hina/ is internal now (§1-33): behind the 숨김 toggle.
+  check('the AI internal area is hidden by default', !/AI 내부/.test(tree?.textContent || ''),
+        (tree?.textContent || '').slice(0, 200));
+  check('the per-bot filter is offered', !!findButton(tree, '이 봇만'));
   check('the machine area is hidden by default',
         !branches().some((b) => (b.title || '').startsWith('.hina') || /^📁?내부/.test(b.textContent || '')),
         (tree?.textContent || '').slice(0, 200));
   check('and the toggle says how many are hidden',
         /숨김 파일 보기 [(]\d+[)]/.test(tree?.textContent || ''),
         (tree?.textContent || '').slice(-120));
-  // A document in the AI work area is a deliverable: it gets a folder of its
-  // own in the tree, and its files are listed in the centre without digging
-  // through hina/; the script beside it stays put.
-  check('documents in the AI scratch get a folder of their own', /임시 문서/.test(tree?.textContent || ''),
+  // Deliverables live in the bot's project folder: projects/<봇>/out. The
+  // old 임시 문서 virtual folder is gone with hina/ hidden.
+  check('no virtual 임시 문서 folder any more', !/임시 문서/.test(tree?.textContent || ''),
         (tree?.textContent || '').slice(0, 300));
-  const docsBranch = branches().find((b) => /임시 문서/.test(b.textContent || ''));
-  docsBranch?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  const botBranch = branches().find((b) => (b.title || '') === 'projects/Parma Knights');
+  check("the bot's project folder is in the tree", !!botBranch, (tree?.textContent || '').slice(0, 300));
+  botBranch?.dispatchEvent(new window.Event('click', { bubbles: true }));
   await settle(300);
   const centre = () => document.querySelector('.panel.active .left');
-  check('the centre lists the surfaced documents',
+  const outRow = [...document.querySelectorAll('.panel.active .filelist .frow:not(.head)')]
+    .find((r) => /out/.test(r.textContent || ''));
+  check('and lists its out/ folder', !!outRow, (centre()?.textContent || '').slice(0, 300));
+  outRow?.dispatchEvent(new window.Event('dblclick', { bubbles: true }));
+  await settle(300);
+  check('the centre lists the deliverables',
         /draft-summary\.md/.test(centre()?.textContent || '') && /numbers\.txt/.test(centre()?.textContent || ''),
         (centre()?.textContent || '').slice(0, 300));
   check('the script stays out of it', !/helper\.py/.test(centre()?.textContent || ''));
@@ -1432,7 +1443,7 @@ console.log('\ntest_bot_tabs');
   await settle(900);
   // The tree holds folders; the file is in the centre once 결과물 is picked.
   const outBranch = [...document.querySelectorAll('.panel.active .tree .treebranch')]
-    .find((b) => /^hina\/[^/]+\/out$/.test(b.title || ''));
+    .find((b) => /^projects\/[^/]+\/out$/.test(b.title || ''));
   check("the bot's out/ is a folder in the tree", !!outBranch, document.querySelector('.panel.active .tree')?.textContent?.slice(0, 200));
   outBranch?.dispatchEvent(new window.Event('click', { bubbles: true }));
   await settle(300);
@@ -2899,14 +2910,16 @@ console.log('\ntest_studio_selector');
   const chips = [...(rulePop()?.querySelectorAll('.tokenchip') ?? [])];
   check('the first filename is split into token chips', chips.length >= 2,
         chips.map((c) => c.textContent).join(' | '));
-  const second = chips.find((c) => (c.textContent || '').startsWith('2·'));
+  // §1-33: a chip is [idx][token]; the index badge is its first span.
+  const chipIdx = (c) => c.querySelector('.idx')?.textContent || (c.textContent || '').split('·')[0];
+  const second = chips.find((c) => chipIdx(c) === '2');
   second?.dispatchEvent(new window.Event('click', { bubbles: true }));
   await settle(1600);
   check('picking the 2nd token regroups by it (교복 becomes a group)',
         !!card('교복'), text().slice(0, 260));
   // Multi-select: token 1 JOINS token 2 - the key reads 하나-교복 (§1-30).
   const firstChip = [...(rulePop()?.querySelectorAll('.tokenchip') ?? [])]
-    .find((c) => (c.textContent || '').startsWith('1·'));
+    .find((c) => chipIdx(c) === '1');
   firstChip?.dispatchEvent(new window.Event('click', { bubbles: true }));
   await settle(1600);
   check('a second token joins the key (multi-select)',

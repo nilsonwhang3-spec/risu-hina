@@ -115,11 +115,34 @@ def bot_folder(char_key: str) -> str:
 
 
 def hina_dir(char_key: str) -> Path:
-    """The agent's own work area for one bot: hina/<봇폴더>/{scripts,scratch,out}."""
+    """The agent's own work area for one bot: hina/<봇폴더>/{scripts,scratch}.
+
+    Internal by design (§1-33): the panel hides hina/ behind the 숨김 toggle,
+    so nothing the user is meant to pick up lives here any more - the
+    deliverables moved to `out_dir` (projects/<봇>/out/).
+    """
     base = space_root() / "hina" / bot_folder(char_key)
-    for sub in ("scripts", "scratch", "out"):
+    for sub in ("scripts", "scratch"):
         (base / sub).mkdir(parents=True, exist_ok=True)
     return base
+
+
+def out_dir(char_key: str) -> Path:
+    """Where this bot's deliverables land: projects/<봇폴더>/out/.
+
+    The user's ask (§1-33): the agent's scratch and scripts stay out of sight,
+    and what it produces for the user sits inside the bot's own project
+    folder, beside the material the user manages. The only place under
+    projects/ the agent may write.
+    """
+    base = space_root() / "projects" / bot_folder(char_key) / "out"
+    base.mkdir(parents=True, exist_ok=True)
+    return base
+
+
+def out_rel(char_key: str) -> str:
+    """`out_dir` as a space-relative path (what the tools say out loud)."""
+    return f"projects/{bot_folder(char_key)}/out"
 
 
 # The studio's own areas. Owned here rather than in files.py because they are
@@ -483,24 +506,26 @@ def write_out(char_key: str, filename: str, text: str) -> str:
     name = filename.strip().replace("\\", "/")
     while name.startswith("out/"):
         name = name[4:]
-    safe = SAFE.sub("_", name) or "export"
-    # Deliverables live in the global space now, under this bot's name.
-    path = hina_dir(char_key) / "out" / safe
+    # Korean names survive (the old ASCII-only SAFE turned 보고서.md into
+    # ___.md); only what a filesystem refuses is dropped.
+    safe = _FOLDER_BAD.sub("", name.split("/")[-1]).strip().strip(".") or "export"
+    # Deliverables live in the bot's project folder (projects/<봇>/out/).
+    path = out_dir(char_key) / safe
     _write(path, text)
-    return str(path)
+    return path.relative_to(space_root()).as_posix()
 
 
 def write_artifact(char_key: str, title: str, text: str) -> str:
     """An artifact the agent wants shown: a file first, an event second.
 
-    It lands under the bot's own deliverables (hina/<봇>/out/artifacts/) so it
-    survives the session, shows in the files tab, and is the user's to manage.
-    The slug is the title; a taken name counts up rather than overwriting -
-    two artifacts titled 비교 보고서 are two files. Returns the space-relative
-    path the stream event (and the viewer) uses.
+    It lands under the bot's own deliverables (projects/<봇>/out/artifacts/) so
+    it survives the session, shows in the files tab, and is the user's to
+    manage. The slug is the title; a taken name counts up rather than
+    overwriting - two artifacts titled 비교 보고서 are two files. Returns the
+    space-relative path the stream event (and the viewer) uses.
     """
     slug = _FOLDER_BAD.sub("", title).strip().strip(".").replace(" ", "-")[:60] or "artifact"
-    base = hina_dir(char_key) / "out" / "artifacts"
+    base = out_dir(char_key) / "artifacts"
     base.mkdir(parents=True, exist_ok=True)
     path = base / f"{slug}.md"
     n = 2
@@ -632,6 +657,30 @@ def migrate_studio_v2() -> dict | None:
         mpath.write_text(json.dumps(manifest, ensure_ascii=False, indent=1), encoding="utf-8")
     db.mark_migration("studio_v2")
     log.info("studio_v2: %d files moved into config/ + output/", len(moves))
+    return {"moves": len(moves)}
+
+
+def migrate_out_v3() -> dict | None:
+    """One-time move of every bot's deliverables out of hina/ (§1-33).
+
+    hina/<봇>/out/ → projects/<봇>/out/, move + manifest, never an overwrite
+    (`_move_tree`). hina/ is hidden from the panel from now on, so a file
+    left there would be a file the user could no longer find.
+    """
+    if db.has_migration("out_v3"):
+        return None
+    base = space_root() / "hina"
+    moves: list[dict] = []
+    if base.is_dir():
+        for bot in sorted(p for p in base.iterdir() if p.is_dir()):
+            _move_tree(bot / "out", space_root() / "projects" / bot.name / "out", moves)
+    if moves:
+        manifest = {"version": 1, "movedAt": time.time(), "moves": moves}
+        mpath = space_root() / ".hina" / "migration-out_v3.json"
+        mpath.parent.mkdir(parents=True, exist_ok=True)
+        mpath.write_text(json.dumps(manifest, ensure_ascii=False, indent=1), encoding="utf-8")
+    db.mark_migration("out_v3")
+    log.info("out_v3: %d deliverables moved into projects/<봇>/out", len(moves))
     return {"moves": len(moves)}
 
 

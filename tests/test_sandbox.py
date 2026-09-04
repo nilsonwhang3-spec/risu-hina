@@ -131,11 +131,11 @@ def main() -> int:
     check("reading the data dir fails", not r["ok"], r["stdout"][:120])
 
     # The space is shared: another bot's files in it are readable on purpose.
-    beta_home = workspace.hina_dir(beta)
-    (beta_home / "out" / "베타글.md").write_text("베타의 산출물", encoding="utf-8")
+    beta_out = workspace.out_dir(beta)
+    (beta_out / "베타글.md").write_text("베타의 산출물", encoding="utf-8")
     r = run(
         "import os\n"
-        "p = os.path.join(os.environ['RISUHINA_WORKSPACE'], 'hina', '베타', 'out', '베타글.md')\n"
+        "p = os.path.join(os.environ['RISUHINA_WORKSPACE'], 'projects', '베타', 'out', '베타글.md')\n"
         "print(open(p, encoding='utf-8').read())\n",
         ck, tk, ws)
     check("another bot's space files are readable (shared on purpose)",
@@ -232,11 +232,11 @@ def main() -> int:
     # 정리 is per bot: this bot's hina scratch/scripts and its SYSTEM .scratch,
     # never the project material or the deliverables.
     (home / "scratch" / "쓰레기.txt").write_text("x", encoding="utf-8")
-    (home / "out" / "산출.md").write_text("keep", encoding="utf-8")
+    (workspace.out_dir(ck) / "산출.md").write_text("keep", encoding="utf-8")
     cleaned = files.clean_bot(ck)
     check("cleaning swept the bot's scratch", cleaned["removed"] > 0
           and not (home / "scratch" / "쓰레기.txt").exists(), str(cleaned))
-    check("deliverables survived cleaning", (home / "out" / "산출.md").is_file())
+    check("deliverables survived cleaning", (workspace.out_dir(ck) / "산출.md").is_file())
     check("the project material survived",
           (workspace.space_root() / "projects" / folder / "참고.md").is_file())
     check("original survived cleaning", any((ws / "original").iterdir()))

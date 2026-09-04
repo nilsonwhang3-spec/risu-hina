@@ -38,17 +38,18 @@ import { clientLog } from '../transport';
 const AREA_LABEL: Record<string, [string, string]> = {
   projects: ['프로젝트', '직접 관리하시는 참고 자료·프로젝트 폴더입니다. 봇 이름 폴더로 나뉩니다.'],
   studio: ['스튜디오', '이미지 라이브러리입니다. config/ 에 프롬프트 재료, output/ 에 생성 결과가 삽니다.'],
-  hina: ['AI 작업', '히나가 봇별로 쓰는 스크립트·임시·산출물 폴더입니다.'],
+  hina: ['AI 내부', '히나가 봇별로 쓰는 스크립트·임시 폴더입니다. 산출물은 프로젝트/<봇>/out 에 있습니다.'],
   '.hina': ['내부', '스킬 복사본과 이관 기록입니다. 다음 실행 때 다시 만들어집니다.'],
 };
 
-/** Every visible area is the user's now - the space is one shared tree. */
+/** Areas the user may write into (drop, paste, new folder). */
 const USER_AREAS = new Set(['projects', 'studio', 'hina']);
-/** The AI work area whose document-like files are surfaced anyway. */
-const SURFACE_FROM = new Set(['hina']);
-const DOCUMENT_EXT = new Set([
-  'md', 'markdown', 'txt', 'html', 'htm', 'csv', 'tsv', 'json', 'yaml', 'yml', 'xml', 'rtf', 'pdf', 'docx',
-]);
+/** Areas shown without the 숨김 toggle (§1-33): the agent's hina/ is internal
+ * now - its deliverables moved to projects/<봇>/out, so nothing the user is
+ * meant to find lives there. */
+const DEFAULT_AREAS = new Set(['projects', 'studio']);
+/** Folders whose second segment is the bot: what "이 봇만" filters on. */
+const PER_BOT_AREAS = new Set(['projects', 'hina']);
 const IMAGE_RE = /\.(png|jpe?g|gif|webp|avif|bmp)$/i;
 const TEXT_UPLOAD_RE = /\.(md|txt|json|jsonl|csv|py|html?|css|js|ya?ml|xml|log|sql)$/i;
 /** The virtual folder of surfaced documents. */
@@ -76,11 +77,6 @@ let clipboard: { op: 'copy' | 'cut'; paths: string[] } | null = null;
 let treeSel = new Set<string>();
 let treeAnchor = '';
 
-function isDocument(f: WorkspaceFile): boolean {
-  const ext = (f.name.split('.').pop() || '').toLowerCase();
-  return ext !== f.name.toLowerCase() && DOCUMENT_EXT.has(ext);
-}
-
 /** One folder in the tree. */
 interface Folder {
   path: string;
@@ -95,6 +91,9 @@ interface Folder {
 let treeMount: HTMLElement | null = null;
 let viewMount: HTMLElement | null = null;
 let showInternal = false;
+/** "이 봇만": projects/ and hina/ narrowed to the open bot's folder. */
+let onlyMine = false;
+try { onlyMine = localStorage.getItem('hina.filesOnlyMine') === '1'; } catch { /* iframe */ }
 let lastListing: FileListing | null = null;
 let nodes = new Map<string, Folder>();
 let selectedDir = 'projects';
@@ -165,7 +164,7 @@ export function renderFilesTab(mount: HTMLElement): void {
 async function refresh(): Promise<void> {
   if (!treeMount) return;
   try {
-    const data = await state.files('', showInternal);
+    const data = await state.files('', showInternal, state.activeCharKey);
     lastListing = data;
     buildNodes(data);
     if (!nodes.has(selectedDir)) selectedDir = nodes.has('projects') ? 'projects' : (nodes.keys().next().value ?? '');
@@ -200,7 +199,11 @@ async function refresh(): Promise<void> {
 
 function buildNodes(data: FileListing): void {
   nodes = new Map();
-  const shown = data.areas.filter((a) => showInternal || USER_AREAS.has(a.area));
+  const shown = data.areas.filter((a) => showInternal || DEFAULT_AREAS.has(a.area));
+  // "이 봇만": a per-bot area keeps only the open bot's folder.
+  const mine = onlyMine && data.botFolder ? data.botFolder : '';
+  const keep = (area: string, path: string): boolean =>
+    !mine || !PER_BOT_AREAS.has(area) || path === `${area}/${mine}` || path.startsWith(`${area}/${mine}/`);
   for (const area of shown) {
     const root: Folder = { path: area.area, name: AREA_LABEL[area.area]?.[0] ?? area.area, area, kids: [], files: [] };
     nodes.set(root.path, root);
@@ -214,8 +217,9 @@ function buildNodes(data: FileListing): void {
       nodes.set(path, node);
       return node;
     };
-    for (const d of area.dirs ?? []) ensure(d);
+    for (const d of area.dirs ?? []) if (keep(area.area, d)) ensure(d);
     for (const f of area.files) {
+      if (!keep(area.area, f.path)) continue;
       const dir = f.path.includes('/') ? f.path.slice(0, f.path.lastIndexOf('/')) : area.area;
       ensure(dir).files.push(f);
     }
@@ -224,24 +228,9 @@ function buildNodes(data: FileListing): void {
       n.files.sort((a, b) => a.name.localeCompare(b.name));
     }
   }
-  // Deliverables that landed in an internal folder, listed without unfolding
-  // the internals. Only while those are folded - unfolded, they are in place.
-  {
-    const docs: WorkspaceFile[] = [];
-    let anyArea: FileArea | null = null;
-    for (const area of data.areas) {
-      if (!SURFACE_FROM.has(area.area)) continue;
-      // The agent's scratch and scripts folders, wherever the bot folder is.
-      const mine = area.files.filter((f) =>
-        /^hina\/[^/]+\/(scratch|scripts)\//.test(f.path) && isDocument(f));
-      if (mine.length) { docs.push(...mine); anyArea = anyArea ?? area; }
-    }
-    if (docs.length && anyArea) {
-      nodes.set(DOCS_NODE, {
-        path: DOCS_NODE, name: '임시 문서', area: { ...anyArea, deletable: true }, kids: [], files: docs, virtual: true,
-      });
-    }
-  }
+  // The old 임시 문서 virtual folder (documents surfaced out of the agent's
+  // scratch) is gone: on a real install it held thousands of internal files
+  // and read as noise. Deliverables have a real folder now (projects/<봇>/out).
 }
 
 function allPaths(): string[] {
@@ -366,14 +355,27 @@ function drawTree(): void {
   // folders (검수 머시너리 등) and the per-run regenerated files the server
   // filters out of the default listing (usability batch item 1).
   const hiddenN = data.areas.reduce((n, a) => n + (a.hidden ?? 0), 0)
-    + data.areas.filter((a) => !USER_AREAS.has(a.area)).reduce((n, a) => n + a.count, 0);
+    + data.areas.filter((a) => !DEFAULT_AREAS.has(a.area)).reduce((n, a) => n + a.count, 0);
   const toggle = el('button', {
     class: 'ghost tiny',
-    title: '점(.) 폴더, 매 실행 재생성되는 머시너리(skills·헬퍼 스크립트), 내부 영역을 함께 보이거나 숨깁니다',
+    title: 'AI 내부 영역(hina/: 임시·스크립트), 점(.) 폴더, 매 실행 재생성되는 머시너리를 함께 보이거나 숨깁니다',
     text: showInternal ? '숨김 파일 숨기기' : `숨김 파일 보기 (${hiddenN})`,
   });
   toggle.addEventListener('click', () => {
     showInternal = !showInternal;
+    void refresh();
+  });
+  // "이 봇만": the tree narrowed to the open bot's project (and internal)
+  // folder - a space shared by twelve bots is twelve times the tree.
+  const mineBtn = el('button', { class: 'ghost tiny' + (onlyMine ? ' on' : '') }) as HTMLButtonElement;
+  mineBtn.textContent = '이 봇만';
+  mineBtn.disabled = !state.activeCharKey;
+  mineBtn.title = state.activeCharKey
+    ? (onlyMine ? '모든 봇의 폴더를 보입니다' : `프로젝트·AI 내부에서 이 봇의 폴더(${data.botFolder || '…'})만 보입니다`)
+    : '봇을 열어야 그 봇의 폴더만 볼 수 있습니다';
+  mineBtn.addEventListener('click', () => {
+    onlyMine = !onlyMine;
+    try { localStorage.setItem('hina.filesOnlyMine', onlyMine ? '1' : '0'); } catch { /* fine */ }
     void refresh();
   });
   // 정리 is per bot: this bot's hina/ scratch+scripts and its system scratch.
@@ -392,7 +394,7 @@ function drawTree(): void {
     }
   });
   treeMount.appendChild(el('div', { class: 'treefoot' }, [
-    toggle, cleanBtn, el('div', { class: 'hint', text: `전체 ${fmtSize(data.totalSize)}` }),
+    mineBtn, toggle, cleanBtn, el('div', { class: 'hint', text: `전체 ${fmtSize(data.totalSize)}` }),
   ]));
 }
 
@@ -568,11 +570,17 @@ function drawCentre(): void {
     hasImages ? viewBtn : null,
     all, dl, zipAll, mv, del,
   ]));
-  viewMount.appendChild(el('div', { class: 'filehint', text:
-    (n.virtual ? 'AI 작업 폴더에 남은 문서입니다. ' : why + ' ')
-    + (writable ? '파일이나 폴더를 끌어다 놓으면 올라가고, 행을 왼쪽 트리의 폴더로 끌면 옮겨집니다. ' : '')
+  // One line of context, and the interaction cheat-sheet behind ⓘ: the
+  // three-line paragraph sat above every listing and was read once (§1-33).
+  const howto = (writable ? '파일이나 폴더를 끌어다 놓으면 올라가고, 행을 왼쪽 트리의 폴더로 끌면 옮겨집니다. ' : '')
     + '클릭으로 선택, Ctrl·Shift 로 여러 개, 더블클릭·Enter 로 열기, 우클릭에 이름 바꾸기·복사·붙여넣기'
-    + (deletable ? ', Delete 로 삭제.' : '.') }));
+    + (deletable ? ', Delete 로 삭제.' : '.');
+  if (!n.path.includes('/') || n.virtual) {
+    viewMount.appendChild(el('div', { class: 'filehint row' }, [
+      el('span', { class: 'grow', text: n.virtual ? 'AI 작업 폴더에 남은 문서입니다.' : why }),
+      el('button', { class: 'ghost tiny', text: 'ⓘ 사용법', title: howto }),
+    ]));
+  }
 
   // --- rows ----------------------------------------------------------------------
   const list = el('div', { class: 'filelist', tabindex: '0' });
@@ -842,8 +850,14 @@ function openTreeMenu(node: TreeNode, ev: MouseEvent): void {
   // Area roots and the virtual node take no destructive verbs.
   const can = paths.every((q) => q.includes('/') && writableAt(q));
   const hereOk = !many && writableAt(node.path);
+  const here = nodes.get(node.path);
+  const pictures = !!here && !here.virtual && node.path.includes('/') && here.files.some((f) => IMAGE_RE.test(f.name));
   menuAt(ev.clientX, ev.clientY, [
     { label: '열기', disabled: many, onClick: () => selectTreeFolder(node.path) },
+    // Any folder of pictures can be reviewed: 검수 is not tied to
+    // studio/output any more (§1-33).
+    { label: '검수 열기 (에셋 스튜디오)', disabled: many || !pictures,
+      onClick: () => { state.openTabRequest = 'studio'; state.requestOpenStudio(node.path); } },
     { label: '새 폴더', disabled: !hereOk, onClick: () => treeNewFolder(node.path) },
     { label: '이름 바꾸기', disabled: many || !can, onClick: () => renameEntry({ path: node.path, name: node.name }) },
     null,

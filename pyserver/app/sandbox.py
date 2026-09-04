@@ -138,9 +138,11 @@ would bypass the review the whole design rests on, so the capability is not
 offered.
 
 The file space is global (projects/ · studio/ · hina/), and the cwd is this
-bot's own hina/<이름>/ folder. Where to put files - the panel cleans on it:
-    scratch/   throwaway working files. Safe to delete at any time.
-    out/       deliverables the user will download (md, html, json).
+bot's own hina/<이름>/ folder - an internal area the panel keeps hidden.
+Where to put files - the panel cleans on it:
+    scratch/   throwaway working files (hina/<이름>/scratch). Safe to delete.
+    out(name)  deliverables the user will pick up: projects/<이름>/out/ -
+               the ONLY place under projects/ a script may write.
 The user's reference material for this bot is projects/<이름>/ - read it,
 do not reorganise it.
 """
@@ -156,7 +158,7 @@ CHAT_KEY = os.environ["RISUHINA_CHAT_KEY"]
 SESSION_ID = os.environ.get("RISUHINA_SESSION_ID") or None
 
 SCRATCH = os.path.join(HOME, "scratch")
-OUT = os.path.join(HOME, "out")
+OUT = os.environ.get("RISUHINA_OUT") or os.path.join(PROJECT, "out")
 UPLOADS = PROJECT
 
 _SCOPE_DB = os.environ["RISUHINA_SCOPE_DB"]
@@ -256,7 +258,7 @@ def scratch(name):
 
 
 def out(name):
-    """Path for a deliverable the user will download."""
+    """Path for a deliverable the user will pick up (projects/<이름>/out/)."""
     os.makedirs(OUT, exist_ok=True)
     return os.path.join(OUT, os.path.basename(name))
 

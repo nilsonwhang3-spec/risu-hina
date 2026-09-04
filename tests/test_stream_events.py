@@ -57,8 +57,8 @@ check("no session means no queue, quietly", session._drain_extra("") == [])
 print("\ntest_write_artifact")
 CK = store.upsert_character("cha-stream-test", "스트림 봇", {"name": "스트림 봇"}, 0)
 rel = workspace.write_artifact(CK, "비교 보고서", "# 본문\n한 줄")
-check("the artifact lands under the bot's out/artifacts",
-      rel.startswith("hina/") and "/out/artifacts/" in rel and rel.endswith("비교-보고서.md"), rel)
+check("the artifact lands under the bot's project out/artifacts",
+      rel.startswith("projects/") and "/out/artifacts/" in rel and rel.endswith("비교-보고서.md"), rel)
 check("and holds the text", (workspace.space_root() / rel).read_text(encoding="utf-8") == "# 본문\n한 줄")
 rel2 = workspace.write_artifact(CK, "비교 보고서", "둘째")
 check("a taken title counts up instead of overwriting", rel2.endswith("비교-보고서-2.md"), rel2)

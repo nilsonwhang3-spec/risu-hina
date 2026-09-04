@@ -373,11 +373,14 @@ export class AgentPanel {
   private async refreshOutputs(): Promise<void> {
     try {
       const listing = await state.files();
-      // Deliverables live at hina/<봇>/out/ in the global space. Every bot's
-      // out is watched: only one agent runs here at a time, and a fresh file
-      // in any of them is this turn's product.
-      const hina = listing.areas.find((a) => a.area === 'hina');
-      const files = (hina?.files ?? []).filter((f) => /^hina\/[^/]+\/out\//.test(f.path));
+      // Deliverables live at projects/<봇>/out/ in the global space (§1-33;
+      // the legacy hina/<봇>/out is still watched for an old backend). Every
+      // bot's out is watched: only one agent runs here at a time, and a
+      // fresh file in any of them is this turn's product.
+      const files = listing.areas
+        .filter((a) => a.area === 'projects' || a.area === 'hina')
+        .flatMap((a) => a.files)
+        .filter((f) => /^(projects|hina)\/[^/]+\/out\//.test(f.path));
       const stamp = files.map((f) => `${f.path}:${f.size}:${f.modified}`).join('|');
       // The first look is the baseline - files from earlier sessions are
       // already in the files tab and do not need announcing again. A flag,

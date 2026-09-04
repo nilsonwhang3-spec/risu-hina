@@ -155,9 +155,11 @@ export function segCtl(items: SegItem[]): HTMLElement {
 /** The column-count picker every studio grid shares. `set` is expected to
  * patch the live grid's gridTemplateColumns itself - picking a width must
  * not cost a full centre redraw (and its thumbnails). */
-export function colPicker(opts: { values: number[]; get: () => number; set: (n: number) => void }): HTMLElement {
+export function colPicker(opts: { values: number[]; get: () => number; set: (n: number) => void;
+                                 labels?: Record<number, string> }): HTMLElement {
   const btns = opts.values.map((n) => {
-    const b = el('button', { text: String(n), title: `${n}열로 보기` });
+    const label = opts.labels?.[n] ?? String(n);
+    const b = el('button', { text: label, title: opts.labels?.[n] ? `${label} — 폭에 맞춰 열 수를 정합니다` : `${n}열로 보기` });
     b.addEventListener('click', () => { opts.set(n); sync(); });
     return b;
   });

@@ -60,6 +60,9 @@ export const S = {
 
   listing: null as FileListing | null,
   outputRoot: null as Folder | null,
+  /** Folders outside studio/output pinned for 검수 (§1-33): a project's
+   * image folder, an agent's scratch batch - anywhere in the space. */
+  extraRoots: [] as Folder[],
   /** The card lists, one per area. */
   cards: {} as Record<string, StudioItem[]>,
   selected: OUTPUT_ROOT,
@@ -86,8 +89,8 @@ export const S = {
   centreMode: 'tab' as 'tab' | 'fragments' | 'folder' | 'selector',
   /** Batch/folder column count (2·3·4). */
   cols: 3,
-  /** 검수 selector column count (2..6) - its cells are smaller. */
-  selCols: 3,
+  /** 검수 selector column count (2..6), 0 = 자동 (auto-fill by width). */
+  selCols: 0,
   /** The single tab's pinned image ('' = follow the live run), and the list
    * ←/→ walks (the job the image came from). */
   viewPath: '',
@@ -108,7 +111,8 @@ try {
   const n = Number(localStorage.getItem('hina.studioCols'));
   if (n === 2 || n === 3 || n === 4) S.cols = n;
   const sc = Number(localStorage.getItem('hina.studioSelCols'));
-  if (sc >= 2 && sc <= 6) S.selCols = sc;
+  // 0 = 자동 (auto-fill by width, §1-33) - the default on a fresh install.
+  if (sc === 0 || (sc >= 2 && sc <= 6)) S.selCols = sc;
 } catch { /* storage may be unavailable in the iframe */ }
 export function persistLeftTab(): void {
   try { localStorage.setItem('hina.studioLeftTab', S.leftTab); } catch { /* fine */ }
@@ -390,11 +394,94 @@ export function buildOutput(): void {
   }
 }
 
-export function find(path: string, node = S.outputRoot): Folder | null {
+// --- folders outside OUTPUT, pinned for 검수 (§1-33) ---------------------------
+
+const EXTRA_KEY = 'hina.studioExtraFolders';
+/** The pinned space paths, persisted; their trees are S.extraRoots. */
+export let extraPaths: string[] = [];
+try {
+  const saved = JSON.parse(localStorage.getItem(EXTRA_KEY) || '[]') as unknown;
+  if (Array.isArray(saved)) extraPaths = saved.filter((x): x is string => typeof x === 'string' && !!x);
+} catch { /* storage may be unavailable in the iframe */ }
+
+function persistExtras(): void {
+  try { localStorage.setItem(EXTRA_KEY, JSON.stringify(extraPaths)); } catch { /* fine */ }
+}
+
+export function isOutputPath(path: string): boolean {
+  return path === OUTPUT_ROOT || path.startsWith(OUTPUT_ROOT + '/');
+}
+
+/** Pin a folder (idempotent). Returns whether it was new. */
+export function addExtra(path: string): boolean {
+  const p = canonPath(path);
+  if (!p || isOutputPath(p) || extraPaths.includes(p)) return false;
+  // A folder inside one already pinned is reachable through it.
+  if (extraPaths.some((q) => p.startsWith(q + '/'))) return false;
+  extraPaths = [...extraPaths, p];
+  persistExtras();
+  return true;
+}
+
+export function removeExtra(path: string): void {
+  extraPaths = extraPaths.filter((q) => q !== path);
+  S.extraRoots = S.extraRoots.filter((r) => r.path !== path);
+  persistExtras();
+}
+
+/** One tree per pinned folder, each from its own prefix listing. A folder
+ * whose listing failed (deleted meanwhile) still shows, empty, so the pin
+ * can be removed. */
+export function buildExtras(listings: Record<string, FileListing | null>): void {
+  S.extraRoots = extraPaths.map((p) => {
+    const root: Folder = { path: p, name: p.split('/').pop() || p, children: [], files: [] };
+    const l = listings[p];
+    if (!l) return root;
+    const byPath = new Map<string, Folder>([[p, root]]);
+    const folder = (path: string): Folder | null => {
+      const hit = byPath.get(path);
+      if (hit) return hit;
+      if (!path.startsWith(p + '/')) return null;
+      const cut = path.lastIndexOf('/');
+      const parent = folder(path.slice(0, cut));
+      if (!parent) return null;
+      const node: Folder = { path, name: path.slice(cut + 1), children: [], files: [] };
+      byPath.set(path, node);
+      parent.children.push(node);
+      return node;
+    };
+    for (const a of l.areas) {
+      for (const d of a.dirs ?? []) folder(d);
+      for (const f of a.files) {
+        if (f.path !== p && !f.path.startsWith(p + '/')) continue;
+        const cut = f.path.lastIndexOf('/');
+        folder(f.path.slice(0, cut))?.files.push(f);
+      }
+    }
+    return root;
+  });
+}
+
+/** Find a folder by path - in the OUTPUT tree and the pinned trees when no
+ * root is given, or under the given root. */
+export function find(path: string, node?: Folder | null): Folder | null {
+  if (node === undefined) {
+    const hit = findIn(path, S.outputRoot);
+    if (hit) return hit;
+    for (const r of S.extraRoots) {
+      const h = findIn(path, r);
+      if (h) return h;
+    }
+    return null;
+  }
+  return findIn(path, node);
+}
+
+function findIn(path: string, node: Folder | null): Folder | null {
   if (!node) return null;
   if (node.path === path) return node;
   for (const c of node.children) {
-    const hit = find(path, c);
+    const hit = findIn(path, c);
     if (hit) return hit;
   }
   return null;
