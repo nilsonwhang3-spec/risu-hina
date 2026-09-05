@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.11.1
+//@display-name Risu Hina v0.12.0
 //@api 3.0
-//@version 0.11.1
+//@version 0.12.0
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -104,7 +104,7 @@
       this.tokenSafe = true;
       this.lastHealth = body;
       this.probeInfo = "";
-      this.gate = versionGate("0.11.1", String(body.version || ""));
+      this.gate = versionGate("0.12.0", String(body.version || ""));
       return body;
     }
     /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -1387,11 +1387,26 @@
       this.openStudioRequest = { folder };
       this.emit();
     }
-    /** The files tab is showing; whatever was unseen has now been seen. */
+    /** Everything unseen has been seen (a reset; the files tab no longer
+     * calls this on open - a folder is seen when it is LOOKED AT, §1-36). */
     markOutputsSeen() {
       if (!this.unseenOutputs.length) return;
       this.unseenOutputs = [];
       this.emit();
+    }
+    /** The files directly in `dir` have been looked at: their dots go, the
+     * tab badge shrinks by that many. Files deeper down stay unseen. */
+    markOutputsSeenIn(dir) {
+      const before = this.unseenOutputs.length;
+      this.unseenOutputs = this.unseenOutputs.filter((p) => {
+        const cut = p.lastIndexOf("/");
+        return (cut < 0 ? "" : p.slice(0, cut)) !== dir;
+      });
+      if (this.unseenOutputs.length !== before) this.emit();
+    }
+    /** Whether an unseen file sits in `dir` or anywhere below it. */
+    hasUnseenUnder(dir) {
+      return this.unseenOutputs.some((p) => p.startsWith(dir + "/"));
     }
     /**
      * Edit one turn and patch it locally instead of reloading everything.
@@ -1736,10 +1751,11 @@
       this.touchFiles([r.path]);
       return r;
     }
-    async files(prefix = "", hidden = false) {
+    async files(prefix = "", hidden = false, bot = "") {
       const q = [];
       if (prefix) q.push("prefix=" + encodeURIComponent(prefix));
       if (hidden) q.push("hidden=1");
+      if (bot) q.push("bot=" + encodeURIComponent(bot));
       return await transport.get("/files" + (q.length ? "?" + q.join("&") : ""));
     }
     /** This bot's SYSTEM directory: frozen originals and machinery, read-only. */
@@ -2991,7 +3007,8 @@
   }
   function colPicker(opts) {
     const btns = opts.values.map((n) => {
-      const b = el("button", { text: String(n), title: `${n}\uC5F4\uB85C \uBCF4\uAE30` });
+      const label = opts.labels?.[n] ?? String(n);
+      const b = el("button", { text: label, title: opts.labels?.[n] ? `${label} \u2014 \uD3ED\uC5D0 \uB9DE\uCDB0 \uC5F4 \uC218\uB97C \uC815\uD569\uB2C8\uB2E4` : `${n}\uC5F4\uB85C \uBCF4\uAE30` });
       b.addEventListener("click", () => {
         opts.set(n);
         sync();
@@ -3342,9 +3359,35 @@
   }
 
   // src/ui/splitter.ts
+  var registry = /* @__PURE__ */ new WeakMap();
+  function reclamp(container) {
+    for (const fn of registry.get(container) ?? []) fn();
+  }
+  function limitRight(node) {
+    let right = typeof document !== "undefined" ? document.documentElement.clientWidth : Infinity;
+    if (typeof getComputedStyle !== "function") return right;
+    for (let p = node.parentElement; p; p = p.parentElement) {
+      const ox = getComputedStyle(p).overflowX;
+      if (ox && ox !== "visible") {
+        right = Math.min(right, p.getBoundingClientRect().right);
+        break;
+      }
+    }
+    return right;
+  }
+  function limitNode(node) {
+    if (typeof getComputedStyle === "function") {
+      for (let p = node.parentElement; p; p = p.parentElement) {
+        const ox = getComputedStyle(p).overflowX;
+        if (ox && ox !== "visible") return p;
+      }
+    }
+    return node.parentElement ?? node;
+  }
   function splitter(opts) {
     const gutter = el("div", { class: "gutter" + (opts.side === "left" ? " leftside" : ""), title: "\uB4DC\uB798\uADF8\uD574\uC11C \uD328\uB110 \uD06C\uAE30\uB97C \uC870\uC808\uD569\uB2C8\uB2E4" });
     const vertical = () => {
+      if (typeof getComputedStyle !== "function") return false;
       const dir = getComputedStyle(opts.container).flexDirection;
       return dir === "column" || dir === "column-reverse";
     };
@@ -3367,10 +3410,14 @@
       const min = down ? 160 : opts.min ?? 250;
       const keep = keepFor(down);
       const span = down ? opts.container.clientHeight : opts.container.clientWidth;
+      if (span <= 0) {
+        const cur = parseInt(opts.target.style.flexBasis || "0", 10);
+        return cur > 0 ? cur : px;
+      }
       let size = Math.round(Math.min(Math.max(min, span - keep), Math.max(min, px)));
       opts.target.style.flexBasis = size + "px";
       if (!down) {
-        const over = opts.container.scrollWidth - opts.container.clientWidth;
+        const over = Math.round(opts.container.getBoundingClientRect().right - limitRight(opts.container));
         if (over > 0 && size - over >= min) {
           size -= over;
           opts.target.style.flexBasis = size + "px";
@@ -3378,21 +3425,44 @@
       }
       return size;
     };
+    const reapply = () => {
+      if (vertical()) return;
+      const cur = parseInt(opts.target.style.flexBasis || "0", 10);
+      if (cur > 0) apply(cur);
+    };
+    {
+      const list2 = registry.get(opts.container) ?? [];
+      if (opts.side === "left") list2.push(reapply);
+      else list2.unshift(reapply);
+      registry.set(opts.container, list2);
+    }
+    const applyAll = (px) => {
+      const size = apply(px);
+      for (const fn of registry.get(opts.container) ?? []) if (fn !== reapply) fn();
+      return size;
+    };
     if (opts.storageKey) {
       void Risuai.pluginStorage.getItem(opts.storageKey).then((v) => {
         const n = Number(v);
-        if (Number.isFinite(n) && n > 0) apply(n);
+        if (Number.isFinite(n) && n > 0) applyAll(n);
       }).catch(() => {
       });
     }
     try {
-      let lastSpan = 0;
+      let lastOuter = 0;
+      let lastOwn = 0;
+      const watched = typeof document !== "undefined" ? document.documentElement : limitNode(opts.container);
       new ResizeObserver(() => {
-        const span = vertical() ? opts.container.clientHeight : opts.container.clientWidth;
-        if (span === lastSpan) return;
-        lastSpan = span;
-        const cur = parseInt(opts.target.style.flexBasis || "0", 10);
-        if (cur > 0) apply(cur);
+        const span = vertical() ? watched.clientHeight : watched.clientWidth;
+        if (span === lastOuter) return;
+        lastOuter = span;
+        reapply();
+      }).observe(watched);
+      new ResizeObserver(() => {
+        const own = vertical() ? opts.container.offsetHeight : opts.container.offsetWidth;
+        if (own === lastOwn || own === 0) return;
+        lastOwn = own;
+        reapply();
       }).observe(opts.container);
     } catch {
     }
@@ -3419,6 +3489,7 @@
         gutter.releasePointerCapture(e.pointerId);
       } catch {
       }
+      for (const fn of registry.get(opts.container) ?? []) if (fn !== reapply) fn();
       if (opts.storageKey) {
         const w = parseInt(opts.target.style.flexBasis || "0", 10);
         if (w > 0) void Risuai.pluginStorage.setItem(opts.storageKey, w).catch(() => void 0);
@@ -3427,7 +3498,7 @@
     gutter.addEventListener("pointerup", end);
     gutter.addEventListener("pointercancel", end);
     gutter.addEventListener("dblclick", () => {
-      const back = apply(opts.side === "left" ? 210 : vertical() ? 360 : Math.round(opts.container.clientWidth / 2));
+      const back = applyAll(opts.side === "left" ? 210 : vertical() ? 360 : Math.round(opts.container.clientWidth / 2));
       if (opts.storageKey) void Risuai.pluginStorage.setItem(opts.storageKey, back).catch(() => void 0);
     });
     return gutter;
@@ -3461,6 +3532,7 @@
     if (foldRoot) {
       foldRoot.classList.toggle("lcollapse", fold.left);
       foldRoot.classList.toggle("rcollapse", fold.right);
+      reclamp(foldRoot);
     }
     foldL?.classList.toggle("on", !fold.left);
     foldR?.classList.toggle("on", !fold.right);
@@ -3665,6 +3737,10 @@ button.outline:hover { background: rgba(37,99,235,.18); }
 
 /* Eleven tabs now; on a narrow panel the bar scrolls rather than wrapping. */
 .tabs { display: flex; gap: 2px; padding: 0 10px; border-bottom: 1px solid var(--borderc, #2b323f); flex-shrink: 0; overflow-x: auto; overflow-y: hidden; }
+/* A scrolling tab row shows no scrollbar: the bar under the tabs on a phone
+   read as a broken control (\xA71-33). setTab scrolls the lit tab into view. */
+.tabs, .tabstrip { scrollbar-width: none; }
+.tabs::-webkit-scrollbar, .tabstrip::-webkit-scrollbar { display: none; }
 .tabs .tab { white-space: nowrap; }
 
 /* Regex patterns, HTML payloads, trigger JSON - text where columns matter. */
@@ -3942,8 +4018,36 @@ button.iconbtn { padding: 4px 8px; background: transparent; border-color: transp
 button.iconbtn:hover:not(:disabled) { background: rgba(128,128,128,.14); }
 button.iconbtn.on { background: rgba(37,99,235,.18); }
 /* The review rule popover (\xA71-30): compact editor behind one summary button. */
-.rulepop { min-width: 240px; max-width: 340px; }
+.rulepop { min-width: 260px; max-width: 380px; }
 .rulepop .advbox { margin-top: 6px; }
+/* The sample filename as a strip of toggle chips joined by the delimiter
+   glyph - it reads as the name it came from (\xA71-33). */
+.rulepop .samplenav { margin-top: 8px; gap: 4px; }
+.rulepop .samplenav .hint:first-child { margin-right: 4px; }
+.tokstrip { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; margin: 4px 0 2px; }
+.tokstrip .delimglyph { color: var(--textcolor2, #79839a); font-family: var(--mono, monospace); font-size: 11px; }
+.tokstrip .tokenchip {
+  display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; font-size: 11.5px;
+  border: 1px solid var(--borderc, #2b323f); border-radius: 5px; background: transparent;
+  color: var(--textcolor2, #79839a); cursor: pointer;
+}
+.tokstrip .tokenchip .idx {
+  font-size: 9.5px; padding: 0 4px; border-radius: 3px; background: rgba(128,128,128,.18);
+  color: var(--textcolor2, #79839a); font-family: var(--mono, monospace);
+}
+.tokstrip .tokenchip.on { border-color: #2563eb; background: rgba(37, 99, 235, .22); color: var(--textcolor, #d8dce4); }
+.tokstrip .tokenchip.on .idx { background: #2563eb; color: #fff; }
+.ruleresult { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 8px; font-size: 12px; }
+/* The \uAC80\uC218 head: the path is a path, not a shouted heading. */
+.sectiontitle.path {
+  text-transform: none; letter-spacing: 0; font-size: 12px; font-weight: 600;
+  margin-bottom: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
+}
+.selhead, .seltools { flex-wrap: wrap; }
+.seltools .spacer { flex: 1 1 0; }
+.selhead .badge.warn { cursor: pointer; }
+.extrahead { padding: 10px 8px 4px; }
+.extrahead .sectiontitle { margin-bottom: 0; }
 
 .scroller { flex: 1; overflow-y: auto; position: relative; }
 .spacerTop, .spacerBottom { width: 100%; }
@@ -4738,6 +4842,24 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
    container, and its intrinsic width used to size the split's min-content, so
    the centre grew past the screen and pushed the agent pane off it (\xA71-32). */
 .genstrip { flex: 0 0 auto; min-width: 0; max-width: 100%; border-top: 1px solid var(--borderc, #2b323f); padding: 4px 10px 6px; }
+/* \xA71-34: min-width:0 was not enough - a strip of 38 cells still handed its
+   2254px intrinsic width up through .left and .panel (both stretched, and
+   the agent pane could not be dragged wider). Size containment makes the
+   strip contribute nothing to its ancestors' intrinsic size. */
+.genstrip { contain: inline-size; }
+/* \xA71-35: and the centre column itself - a wide grid, a long job history or
+   an unbreakable path in any tab used to hand its intrinsic width up the
+   chain, and the centre could not be dragged below that. The centre's floor
+   is its min-width (260px) and nothing else; its content clips/scrolls. */
+.split > .left { contain: inline-size; }
+/* Tree rows on the clipboard: cut rows dim, copied rows carry a dashed edge. */
+/* New (unseen) files and the folders holding them (\xA71-36). */
+.newdot {
+  display: inline-block; width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto;
+  background: #ef4444; margin: 0 2px 0 5px; vertical-align: middle;
+}
+.treebranch.clipcut, .frow.clipcut, .fcell.clipcut { opacity: .5; }
+.treebranch.clipcopy, .frow.clipcopy, .fcell.clipcopy { outline: 1px dashed var(--textcolor2, #79839a); outline-offset: -1px; }
 .striprow { min-width: 0; }
 .genstrip .striphead { margin-bottom: 2px; }
 .genstrip.folded .striprow { display: none; }
@@ -6012,6 +6134,8 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     return true;
   }
   var portraitUrl = "";
+  var portraitImg = null;
+  var portraitPath = "";
   var filterText = "";
   function renderChatsTab(mount) {
     clear(mount);
@@ -6193,6 +6317,10 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
   }
   async function loadPortrait(path, mount) {
     if (!path) return;
+    if (portraitPath === path && portraitImg) {
+      mount.replaceWith(portraitImg);
+      return;
+    }
     try {
       const bytes = await Risuai.readImage(path);
       if (!bytes || !bytes.byteLength) return;
@@ -6202,8 +6330,14 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       buf.set(view3);
       portraitUrl = URL.createObjectURL(new Blob([buf]));
       const img = el("img", { class: "botportrait", src: portraitUrl, alt: "" });
-      img.addEventListener("error", () => img.replaceWith(mount));
-      mount.replaceWith(img);
+      img.addEventListener("error", () => {
+        img.replaceWith(mount);
+        portraitImg = null;
+        portraitPath = "";
+      });
+      portraitImg = img;
+      portraitPath = path;
+      if (mount.isConnected) mount.replaceWith(img);
     } catch {
     }
   }
@@ -6294,11 +6428,12 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     const isOpen = spec3.expanded.has(n.path);
     const caret = el("button", { class: "caret", text: n.kids.length ? isOpen ? "\u25BE" : "\u25B8" : "" });
     const branch = el("button", {
-      class: "treebranch" + (spec3.selected.has(n.path) ? " on" : ""),
+      class: "treebranch" + (spec3.selected.has(n.path) ? " on" : "") + (n.cls ? " " + n.cls : ""),
       title: n.title ?? n.path
     }, [
       el("span", { text: n.glyph ?? (isOpen && n.kids.length ? "\u{1F4C2}" : "\u{1F4C1}") }),
       el("span", { class: "grow", text: n.name, style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }),
+      n.dot ? el("span", { class: "newdot", title: "\uC544\uC9C1 \uC548 \uBCF8 \uC0C8 \uD30C\uC77C\uC774 \uC788\uC2B5\uB2C8\uB2E4" }) : null,
       n.count == null ? null : el("span", { class: "n", text: String(n.count) })
     ]);
     branch.addEventListener("click", (e) => spec3.onOpen(n, e));
@@ -6719,8 +6854,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     async refreshOutputs() {
       try {
         const listing = await state.files();
-        const hina = listing.areas.find((a) => a.area === "hina");
-        const files = (hina?.files ?? []).filter((f) => /^hina\/[^/]+\/out\//.test(f.path));
+        const files = listing.areas.filter((a) => a.area === "projects" || a.area === "hina").flatMap((a) => a.files).filter((f) => /^(projects|hina)\/[^/]+\/out\//.test(f.path));
         const stamp = files.map((f) => `${f.path}:${f.size}:${f.modified}`).join("|");
         if (!this.outPrimed) {
           this.outPrimed = true;
@@ -8349,27 +8483,12 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
   var AREA_LABEL = {
     projects: ["\uD504\uB85C\uC81D\uD2B8", "\uC9C1\uC811 \uAD00\uB9AC\uD558\uC2DC\uB294 \uCC38\uACE0 \uC790\uB8CC\xB7\uD504\uB85C\uC81D\uD2B8 \uD3F4\uB354\uC785\uB2C8\uB2E4. \uBD07 \uC774\uB984 \uD3F4\uB354\uB85C \uB098\uB269\uB2C8\uB2E4."],
     studio: ["\uC2A4\uD29C\uB514\uC624", "\uC774\uBBF8\uC9C0 \uB77C\uC774\uBE0C\uB7EC\uB9AC\uC785\uB2C8\uB2E4. config/ \uC5D0 \uD504\uB86C\uD504\uD2B8 \uC7AC\uB8CC, output/ \uC5D0 \uC0DD\uC131 \uACB0\uACFC\uAC00 \uC0BD\uB2C8\uB2E4."],
-    hina: ["AI \uC791\uC5C5", "\uD788\uB098\uAC00 \uBD07\uBCC4\uB85C \uC4F0\uB294 \uC2A4\uD06C\uB9BD\uD2B8\xB7\uC784\uC2DC\xB7\uC0B0\uCD9C\uBB3C \uD3F4\uB354\uC785\uB2C8\uB2E4."],
+    hina: ["AI \uB0B4\uBD80", "\uD788\uB098\uAC00 \uBD07\uBCC4\uB85C \uC4F0\uB294 \uC2A4\uD06C\uB9BD\uD2B8\xB7\uC784\uC2DC \uD3F4\uB354\uC785\uB2C8\uB2E4. \uC0B0\uCD9C\uBB3C\uC740 \uD504\uB85C\uC81D\uD2B8/<\uBD07>/out \uC5D0 \uC788\uC2B5\uB2C8\uB2E4."],
     ".hina": ["\uB0B4\uBD80", "\uC2A4\uD0AC \uBCF5\uC0AC\uBCF8\uACFC \uC774\uAD00 \uAE30\uB85D\uC785\uB2C8\uB2E4. \uB2E4\uC74C \uC2E4\uD589 \uB54C \uB2E4\uC2DC \uB9CC\uB4E4\uC5B4\uC9D1\uB2C8\uB2E4."]
   };
   var USER_AREAS = /* @__PURE__ */ new Set(["projects", "studio", "hina"]);
-  var SURFACE_FROM = /* @__PURE__ */ new Set(["hina"]);
-  var DOCUMENT_EXT = /* @__PURE__ */ new Set([
-    "md",
-    "markdown",
-    "txt",
-    "html",
-    "htm",
-    "csv",
-    "tsv",
-    "json",
-    "yaml",
-    "yml",
-    "xml",
-    "rtf",
-    "pdf",
-    "docx"
-  ]);
+  var DEFAULT_AREAS = /* @__PURE__ */ new Set(["projects", "studio"]);
+  var PER_BOT_AREAS = /* @__PURE__ */ new Set(["projects", "hina"]);
   var IMAGE_RE = /\.(png|jpe?g|gif|webp|avif|bmp)$/i;
   var TEXT_UPLOAD_RE = /\.(md|txt|json|jsonl|csv|py|html?|css|js|ya?ml|xml|log|sql)$/i;
   var DOCS_NODE = "@docs";
@@ -8387,13 +8506,14 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
   var clipboard = null;
   var treeSel = /* @__PURE__ */ new Set();
   var treeAnchor = "";
-  function isDocument(f) {
-    const ext = (f.name.split(".").pop() || "").toLowerCase();
-    return ext !== f.name.toLowerCase() && DOCUMENT_EXT.has(ext);
-  }
   var treeMount = null;
   var viewMount = null;
   var showInternal = false;
+  var onlyMine = true;
+  try {
+    if (localStorage.getItem("hina.filesOnlyMine") === "0") onlyMine = false;
+  } catch {
+  }
   var lastListing = null;
   var nodes = /* @__PURE__ */ new Map();
   var selectedDir = "projects";
@@ -8429,9 +8549,11 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c" && paths.length) {
           clipboard = { op: "copy", paths };
           notice2(`${paths.length}\uAC1C\uB97C \uBCF5\uC0AC\uD588\uC2B5\uB2C8\uB2E4 \u2014 \uBD99\uC5EC\uB123\uC744 \uD3F4\uB354\uC5D0\uC11C Ctrl+V.`);
+          drawTree();
         } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "x" && paths.length) {
           clipboard = { op: "cut", paths };
           notice2(`${paths.length}\uAC1C\uB97C \uC798\uB77C\uB0C8\uC2B5\uB2C8\uB2E4 \u2014 \uBD99\uC5EC\uB123\uC744 \uD3F4\uB354\uC5D0\uC11C Ctrl+V.`);
+          drawTree();
         } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v" && clipboard) {
           void pasteInto(uploadTarget());
         } else if ((e.key === "Delete" || e.key === "Backspace") && paths.length) {
@@ -8455,12 +8577,11 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
   });
   function renderFilesTab(mount) {
     kitRender(mount);
-    state.markOutputsSeen();
   }
   async function refresh() {
     if (!treeMount) return;
     try {
-      const data = await state.files("", showInternal);
+      const data = await state.files("", showInternal, state.activeCharKey);
       lastListing = data;
       buildNodes(data);
       if (!nodes.has(selectedDir)) selectedDir = nodes.has("projects") ? "projects" : nodes.keys().next().value ?? "";
@@ -8491,7 +8612,9 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
   }
   function buildNodes(data) {
     nodes = /* @__PURE__ */ new Map();
-    const shown = data.areas.filter((a) => showInternal || USER_AREAS.has(a.area));
+    const shown = data.areas.filter((a) => showInternal || DEFAULT_AREAS.has(a.area));
+    const mine = onlyMine && data.botFolder ? data.botFolder : "";
+    const keep = (area, path) => !mine || !PER_BOT_AREAS.has(area) || path === `${area}/${mine}` || path.startsWith(`${area}/${mine}/`);
     for (const area of shown) {
       const root2 = { path: area.area, name: AREA_LABEL[area.area]?.[0] ?? area.area, area, kids: [], files: [] };
       nodes.set(root2.path, root2);
@@ -8505,36 +8628,15 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         nodes.set(path, node);
         return node;
       };
-      for (const d of area.dirs ?? []) ensure(d);
+      for (const d of area.dirs ?? []) if (keep(area.area, d)) ensure(d);
       for (const f of area.files) {
+        if (!keep(area.area, f.path)) continue;
         const dir = f.path.includes("/") ? f.path.slice(0, f.path.lastIndexOf("/")) : area.area;
         ensure(dir).files.push(f);
       }
       for (const n of nodes.values()) {
         n.kids.sort((a, b) => a.name.localeCompare(b.name));
         n.files.sort((a, b) => a.name.localeCompare(b.name));
-      }
-    }
-    {
-      const docs = [];
-      let anyArea = null;
-      for (const area of data.areas) {
-        if (!SURFACE_FROM.has(area.area)) continue;
-        const mine = area.files.filter((f) => /^hina\/[^/]+\/(scratch|scripts)\//.test(f.path) && isDocument(f));
-        if (mine.length) {
-          docs.push(...mine);
-          anyArea = anyArea ?? area;
-        }
-      }
-      if (docs.length && anyArea) {
-        nodes.set(DOCS_NODE, {
-          path: DOCS_NODE,
-          name: "\uC784\uC2DC \uBB38\uC11C",
-          area: { ...anyArea, deletable: true },
-          kids: [],
-          files: docs,
-          virtual: true
-        });
       }
     }
   }
@@ -8581,6 +8683,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
   }
   function drawTree() {
     if (!treeMount || !lastListing) return;
+    const hadFocus = treeMount.contains(document.activeElement);
     clear(treeMount);
     const data = lastListing;
     const filePicker = el("input", { type: "file", multiple: true, style: { display: "none" } });
@@ -8640,14 +8743,26 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     }
     const docs = nodes.get(DOCS_NODE);
     if (docs) treeMount.appendChild(treeRow(toTreeNode(docs, 0), 0, spec3));
-    const hiddenN = data.areas.reduce((n, a) => n + (a.hidden ?? 0), 0) + data.areas.filter((a) => !USER_AREAS.has(a.area)).reduce((n, a) => n + a.count, 0);
+    const hiddenN = data.areas.reduce((n, a) => n + (a.hidden ?? 0), 0) + data.areas.filter((a) => !DEFAULT_AREAS.has(a.area)).reduce((n, a) => n + a.count, 0);
     const toggle = el("button", {
       class: "ghost tiny",
-      title: "\uC810(.) \uD3F4\uB354, \uB9E4 \uC2E4\uD589 \uC7AC\uC0DD\uC131\uB418\uB294 \uBA38\uC2DC\uB108\uB9AC(skills\xB7\uD5EC\uD37C \uC2A4\uD06C\uB9BD\uD2B8), \uB0B4\uBD80 \uC601\uC5ED\uC744 \uD568\uAED8 \uBCF4\uC774\uAC70\uB098 \uC228\uAE41\uB2C8\uB2E4",
+      title: "AI \uB0B4\uBD80 \uC601\uC5ED(hina/: \uC784\uC2DC\xB7\uC2A4\uD06C\uB9BD\uD2B8), \uC810(.) \uD3F4\uB354, \uB9E4 \uC2E4\uD589 \uC7AC\uC0DD\uC131\uB418\uB294 \uBA38\uC2DC\uB108\uB9AC\uB97C \uD568\uAED8 \uBCF4\uC774\uAC70\uB098 \uC228\uAE41\uB2C8\uB2E4",
       text: showInternal ? "\uC228\uAE40 \uD30C\uC77C \uC228\uAE30\uAE30" : `\uC228\uAE40 \uD30C\uC77C \uBCF4\uAE30 (${hiddenN})`
     });
     toggle.addEventListener("click", () => {
       showInternal = !showInternal;
+      void refresh();
+    });
+    const mineBtn = el("button", { class: "ghost tiny" + (onlyMine ? " on" : "") });
+    mineBtn.textContent = onlyMine && state.activeCharKey ? "\uC804\uCCB4 \uBCF4\uAE30" : "\uC774 \uBD07\uB9CC";
+    mineBtn.disabled = !state.activeCharKey;
+    mineBtn.title = state.activeCharKey ? onlyMine ? "\uBAA8\uB4E0 \uBD07\uC758 \uD504\uB85C\uC81D\uD2B8 \uD3F4\uB354\uB97C \uBCF4\uC785\uB2C8\uB2E4 (\uC9C0\uAE08\uC740 \uC774 \uBD07\uB9CC)" : `\uD504\uB85C\uC81D\uD2B8\xB7AI \uB0B4\uBD80\uC5D0\uC11C \uC774 \uBD07\uC758 \uD3F4\uB354(${data.botFolder || "\u2026"})\uB9CC \uBCF4\uC785\uB2C8\uB2E4` : "\uBD07\uC744 \uC5F4\uC5B4\uC57C \uADF8 \uBD07\uC758 \uD3F4\uB354\uB9CC \uBCFC \uC218 \uC788\uC2B5\uB2C8\uB2E4";
+    mineBtn.addEventListener("click", () => {
+      onlyMine = !onlyMine;
+      try {
+        localStorage.setItem("hina.filesOnlyMine", onlyMine ? "1" : "0");
+      } catch {
+      }
       void refresh();
     });
     const cleanBtn = el("button", { class: "ghost tiny" });
@@ -8663,10 +8778,18 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       }
     });
     treeMount.appendChild(el("div", { class: "treefoot" }, [
+      mineBtn,
       toggle,
       cleanBtn,
       el("div", { class: "hint", text: `\uC804\uCCB4 ${fmtSize2(data.totalSize)}` })
     ]));
+    if (hadFocus) {
+      const row = treeMount.querySelector(".treebranch.on") ?? treeMount;
+      try {
+        row.focus({ preventScroll: true });
+      } catch {
+      }
+    }
   }
   function toTreeNode(n, depth) {
     const [, why] = AREA_LABEL[n.area.area] ?? ["", ""];
@@ -8677,6 +8800,11 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       count: countFiles(n),
       glyph: n.virtual ? "\u{1F4C4}" : void 0,
       title: n.virtual ? "AI \uC791\uC5C5 \uD3F4\uB354(\uC784\uC2DC\xB7\uC2A4\uD06C\uB9BD\uD2B8)\uC5D0 \uC788\uB294 \uBB38\uC11C\uC785\uB2C8\uB2E4. \uC5EC\uAE30\uC11C \uBC14\uB85C \uBCFC \uC218 \uC788\uC2B5\uB2C8\uB2E4." : depth ? n.path : why,
+      // The clipboard is visible on the rows themselves (§1-34): a cut folder
+      // dims, a copied one gets a dashed edge - Ctrl+C used to change nothing
+      // on screen.
+      cls: clipboard?.paths.includes(n.path) ? clipboard.op === "cut" ? "clipcut" : "clipcopy" : void 0,
+      dot: !n.virtual && state.hasUnseenUnder(n.path),
       // A folder in the tree is a drop target of its own.
       droppable: !n.virtual && USER_AREAS.has(n.area.area)
     };
@@ -8689,6 +8817,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     previewPath = "";
     selection.clear();
     if (f && f.kids.length) expanded.add(path);
+    state.markOutputsSeenIn(path);
     drawTree();
     drawCentre();
   }
@@ -8736,6 +8865,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
   }
   function drawCentre() {
     if (!viewMount) return;
+    const hadFocus = viewMount.contains(document.activeElement);
     clear(viewMount);
     const n = nodes.get(selectedDir);
     if (!n) {
@@ -8841,7 +8971,13 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       mv,
       del
     ]));
-    viewMount.appendChild(el("div", { class: "filehint", text: (n.virtual ? "AI \uC791\uC5C5 \uD3F4\uB354\uC5D0 \uB0A8\uC740 \uBB38\uC11C\uC785\uB2C8\uB2E4. " : why + " ") + (writable ? "\uD30C\uC77C\uC774\uB098 \uD3F4\uB354\uB97C \uB04C\uC5B4\uB2E4 \uB193\uC73C\uBA74 \uC62C\uB77C\uAC00\uACE0, \uD589\uC744 \uC67C\uCABD \uD2B8\uB9AC\uC758 \uD3F4\uB354\uB85C \uB04C\uBA74 \uC62E\uACA8\uC9D1\uB2C8\uB2E4. " : "") + "\uD074\uB9AD\uC73C\uB85C \uC120\uD0DD, Ctrl\xB7Shift \uB85C \uC5EC\uB7EC \uAC1C, \uB354\uBE14\uD074\uB9AD\xB7Enter \uB85C \uC5F4\uAE30, \uC6B0\uD074\uB9AD\uC5D0 \uC774\uB984 \uBC14\uAFB8\uAE30\xB7\uBCF5\uC0AC\xB7\uBD99\uC5EC\uB123\uAE30" + (deletable ? ", Delete \uB85C \uC0AD\uC81C." : ".") }));
+    const howto = (writable ? "\uD30C\uC77C\uC774\uB098 \uD3F4\uB354\uB97C \uB04C\uC5B4\uB2E4 \uB193\uC73C\uBA74 \uC62C\uB77C\uAC00\uACE0, \uD589\uC744 \uC67C\uCABD \uD2B8\uB9AC\uC758 \uD3F4\uB354\uB85C \uB04C\uBA74 \uC62E\uACA8\uC9D1\uB2C8\uB2E4. " : "") + "\uD074\uB9AD\uC73C\uB85C \uC120\uD0DD, Ctrl\xB7Shift \uB85C \uC5EC\uB7EC \uAC1C, \uB354\uBE14\uD074\uB9AD\xB7Enter \uB85C \uC5F4\uAE30, \uC6B0\uD074\uB9AD\uC5D0 \uC774\uB984 \uBC14\uAFB8\uAE30\xB7\uBCF5\uC0AC\xB7\uBD99\uC5EC\uB123\uAE30" + (deletable ? ", Delete \uB85C \uC0AD\uC81C." : ".");
+    if (!n.path.includes("/") || n.virtual) {
+      viewMount.appendChild(el("div", { class: "filehint row" }, [
+        el("span", { class: "grow", text: n.virtual ? "AI \uC791\uC5C5 \uD3F4\uB354\uC5D0 \uB0A8\uC740 \uBB38\uC11C\uC785\uB2C8\uB2E4." : why }),
+        el("button", { class: "ghost tiny", text: "\u24D8 \uC0AC\uC6A9\uBC95", title: howto })
+      ]));
+    }
     const list2 = el("div", { class: "filelist", tabindex: "0" });
     const q = filterText2.trim().toLowerCase();
     const entries = [
@@ -8885,9 +9021,11 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c" && selection.size) {
         clipboard = { op: "copy", paths: [...selection] };
         notice2(`${clipboard.paths.length}\uAC1C\uB97C \uBCF5\uC0AC\uD588\uC2B5\uB2C8\uB2E4 \u2014 \uBD99\uC5EC\uB123\uC744 \uD3F4\uB354\uC5D0\uC11C \uC6B0\uD074\uB9AD\uD558\uAC70\uB098 Ctrl+V.`);
+        drawCentre();
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "x" && selection.size && deletable) {
         clipboard = { op: "cut", paths: [...selection] };
         notice2(`${clipboard.paths.length}\uAC1C\uB97C \uC798\uB77C\uB0C8\uC2B5\uB2C8\uB2E4 \u2014 \uBD99\uC5EC\uB123\uC744 \uD3F4\uB354\uC5D0\uC11C \uC6B0\uD074\uB9AD\uD558\uAC70\uB098 Ctrl+V.`);
+        drawCentre();
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v" && clipboard && writable) {
         void pasteInto(uploadTarget());
       }
@@ -8917,6 +9055,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     });
     installMarquee(list2);
     viewMount.appendChild(list2);
+    if (hadFocus) focusList();
   }
   function installMarquee(list2) {
     let origin = null;
@@ -9016,14 +9155,15 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
   function listRow2(e, order, n) {
     const box = el("input", { type: "checkbox" });
     box.checked = selection.has(e.path);
-    const row = el("div", { class: "frow" + (selection.has(e.path) ? " sel" : ""), title: e.path }, [
+    const row = el("div", { class: "frow" + (selection.has(e.path) ? " sel" : "") + clipClass(e.path), title: e.path }, [
       box,
       // A folder glyph for folders; files carry their extension as a small tag
       // instead of a pictogram - the picture glyphs rendered as stray letters
       // on a machine without a colour emoji font.
       el("span", { class: "fname" }, [
         e.node ? el("span", { class: "ficon", text: "\u{1F4C1}" }) : el("span", { class: "ftag", text: extOf(e.name) }),
-        el("span", { text: e.name })
+        el("span", { text: e.name }),
+        isNew(e) ? el("span", { class: "newdot", title: "\uC0C8 \uD30C\uC77C" }) : null
       ]),
       el("span", { class: "fsize", text: e.file ? fmtSize2(e.file.size) : `${countFiles(e.node)}\uAC1C` }),
       el("span", { class: "ftime", text: e.file ? fmtWhen(e.file.modified) : "" })
@@ -9099,16 +9239,17 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       } },
       { label: many ? `\uB0B4\uB824\uBC1B\uAE30 (${paths.length})` : "\uB0B4\uB824\uBC1B\uAE30", onClick: () => void downloadSelected(n) },
       null,
-      // The two-step confirm stays: the menu arms the bar's delete, the red
-      // button fires it - a context menu must not be a one-click shredder.
+      // The two-step confirm stays, but as a SECOND menu at the same spot (the
+      // tree's convention): "press the red button on the bar" sent people to a
+      // bar that had wrapped or scrolled out of sight - "there is no red
+      // button" (§1-37). A context menu still must not be a one-click shredder.
       {
         label: many ? `\uC0AD\uC81C (${paths.length})\u2026` : "\uC0AD\uC81C\u2026",
         danger: true,
         disabled: !can,
-        onClick: () => {
-          delCtrl?.arm();
-          notice2("\uC0AD\uC81C\uD558\uB824\uBA74 \uB9C9\uB300\uC758 \uBE68\uAC04 \uD655\uC778 \uBC84\uD2BC\uC744 \uD55C \uBC88 \uB354 \uB204\uB974\uC138\uC694.");
-        }
+        onClick: () => menuAt(ev.clientX, ev.clientY, [
+          { label: `\uC815\uB9D0 \uC0AD\uC81C (${paths.length}\uAC1C)`, danger: true, onClick: () => void runDelete(n) }
+        ])
       }
     ]);
   }
@@ -9127,8 +9268,20 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     };
     const can = paths.every((q) => q.includes("/") && writableAt(q));
     const hereOk = !many && writableAt(node.path);
+    const here = nodes.get(node.path);
+    const pictures = !!here && !here.virtual && node.path.includes("/") && here.files.some((f) => IMAGE_RE.test(f.name));
     menuAt(ev.clientX, ev.clientY, [
       { label: "\uC5F4\uAE30", disabled: many, onClick: () => selectTreeFolder(node.path) },
+      // Any folder of pictures can be reviewed: 검수 is not tied to
+      // studio/output any more (§1-33).
+      {
+        label: "\uAC80\uC218 \uC5F4\uAE30 (\uC5D0\uC14B \uC2A4\uD29C\uB514\uC624)",
+        disabled: many || !pictures,
+        onClick: () => {
+          state.openTabRequest = "studio";
+          state.requestOpenStudio(node.path);
+        }
+      },
       { label: "\uC0C8 \uD3F4\uB354", disabled: !hereOk, onClick: () => treeNewFolder(node.path) },
       { label: "\uC774\uB984 \uBC14\uAFB8\uAE30", disabled: many || !can, onClick: () => renameEntry({ path: node.path, name: node.name }) },
       null,
@@ -9326,9 +9479,9 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
   }
   function gridCell(e, order, n) {
     const pic = el("div", { class: "assetpic" });
-    const cell2 = el("div", { class: "fcell" + (selection.has(e.path) ? " sel" : ""), title: e.path }, [
+    const cell2 = el("div", { class: "fcell" + (selection.has(e.path) ? " sel" : "") + clipClass(e.path), title: e.path }, [
       pic,
-      el("div", { class: "fname", text: e.name }),
+      el("div", { class: "fname" }, [el("span", { text: e.name }), isNew(e) ? el("span", { class: "newdot", title: "\uC0C8 \uD30C\uC77C" }) : null]),
       el("div", { class: "fsize", text: e.file ? fmtSize2(e.file.size) : `\uD3F4\uB354 \xB7 ${countFiles(e.node)}\uAC1C` })
     ]);
     if (e.node) {
@@ -9348,7 +9501,17 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     return cell2;
   }
   function focusList() {
-    viewMount?.querySelector(".filelist")?.focus();
+    try {
+      viewMount?.querySelector(".filelist")?.focus({ preventScroll: true });
+    } catch {
+    }
+  }
+  function isNew(e) {
+    return e.node ? state.hasUnseenUnder(e.path) : state.unseenOutputs.includes(e.path);
+  }
+  function clipClass(path) {
+    if (!clipboard || !clipboard.paths.includes(path)) return "";
+    return clipboard.op === "cut" ? " clipcut" : " clipcopy";
   }
   function copyPathButton(path) {
     const b = el("button", { class: "ghost tiny", text: "\u{1F4CB}", title: "\uACBD\uB85C \uBCF5\uC0AC" });
@@ -11684,7 +11847,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.11.1",
+            version: "0.12.0",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -12332,7 +12495,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.11.1"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.12.0"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -13750,6 +13913,9 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     noticeMount: null,
     listing: null,
     outputRoot: null,
+    /** Folders outside studio/output pinned for 검수 (§1-33): a project's
+     * image folder, an agent's scratch batch - anywhere in the space. */
+    extraRoots: [],
     /** The card lists, one per area. */
     cards: {},
     selected: OUTPUT_ROOT,
@@ -13774,8 +13940,8 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     centreMode: "tab",
     /** Batch/folder column count (2·3·4). */
     cols: 3,
-    /** 검수 selector column count (2..6) - its cells are smaller. */
-    selCols: 3,
+    /** 검수 selector column count (2..6), 0 = 자동 (auto-fill by width). */
+    selCols: 0,
     /** The single tab's pinned image ('' = follow the live run), and the list
      * ←/→ walks (the job the image came from). */
     viewPath: "",
@@ -13794,7 +13960,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     const n = Number(localStorage.getItem("hina.studioCols"));
     if (n === 2 || n === 3 || n === 4) S.cols = n;
     const sc = Number(localStorage.getItem("hina.studioSelCols"));
-    if (sc >= 2 && sc <= 6) S.selCols = sc;
+    if (sc === 0 || sc >= 2 && sc <= 6) S.selCols = sc;
   } catch {
   }
   function persistLeftTab() {
@@ -14064,11 +14230,81 @@ name: ${nm}
       folder(f.path.slice(0, cut))?.files.push(f);
     }
   }
-  function find(path, node = S.outputRoot) {
+  var EXTRA_KEY = "hina.studioExtraFolders";
+  var extraPaths = [];
+  try {
+    const saved = JSON.parse(localStorage.getItem(EXTRA_KEY) || "[]");
+    if (Array.isArray(saved)) extraPaths = saved.filter((x) => typeof x === "string" && !!x);
+  } catch {
+  }
+  function persistExtras() {
+    try {
+      localStorage.setItem(EXTRA_KEY, JSON.stringify(extraPaths));
+    } catch {
+    }
+  }
+  function isOutputPath(path) {
+    return path === OUTPUT_ROOT || path.startsWith(OUTPUT_ROOT + "/");
+  }
+  function addExtra(path) {
+    const p = canonPath(path);
+    if (!p || isOutputPath(p) || extraPaths.includes(p)) return false;
+    if (extraPaths.some((q) => p.startsWith(q + "/"))) return false;
+    extraPaths = [...extraPaths, p];
+    persistExtras();
+    return true;
+  }
+  function removeExtra(path) {
+    extraPaths = extraPaths.filter((q) => q !== path);
+    S.extraRoots = S.extraRoots.filter((r) => r.path !== path);
+    persistExtras();
+  }
+  function buildExtras(listings) {
+    S.extraRoots = extraPaths.map((p) => {
+      const root2 = { path: p, name: p.split("/").pop() || p, children: [], files: [] };
+      const l = listings[p];
+      if (!l) return root2;
+      const byPath = /* @__PURE__ */ new Map([[p, root2]]);
+      const folder = (path) => {
+        const hit = byPath.get(path);
+        if (hit) return hit;
+        if (!path.startsWith(p + "/")) return null;
+        const cut = path.lastIndexOf("/");
+        const parent = folder(path.slice(0, cut));
+        if (!parent) return null;
+        const node = { path, name: path.slice(cut + 1), children: [], files: [] };
+        byPath.set(path, node);
+        parent.children.push(node);
+        return node;
+      };
+      for (const a of l.areas) {
+        for (const d of a.dirs ?? []) folder(d);
+        for (const f of a.files) {
+          if (f.path !== p && !f.path.startsWith(p + "/")) continue;
+          const cut = f.path.lastIndexOf("/");
+          folder(f.path.slice(0, cut))?.files.push(f);
+        }
+      }
+      return root2;
+    });
+  }
+  function find(path, node) {
+    if (node === void 0) {
+      const hit = findIn(path, S.outputRoot);
+      if (hit) return hit;
+      for (const r of S.extraRoots) {
+        const h = findIn(path, r);
+        if (h) return h;
+      }
+      return null;
+    }
+    return findIn(path, node);
+  }
+  function findIn(path, node) {
     if (!node) return null;
     if (node.path === path) return node;
     for (const c of node.children) {
-      const hit = find(path, c);
+      const hit = findIn(path, c);
       if (hit) return hit;
     }
     return null;
@@ -14865,7 +15101,7 @@ ${doc.negative.trim()}
   }
   function characterEditor(dir, opts = {}) {
     const rootEl = el("div", { class: "charedit" });
-    const isNew = !dir;
+    const isNew2 = !dir;
     const out = el("div", { class: "hint" });
     const name = el("input", { placeholder: "\uD788\uB098" });
     const caption = el("textarea", {
@@ -15268,10 +15504,10 @@ ${negative.value.trim()}
       section = "refs";
       syncSection();
     });
-    const head = (opts.chrome ?? "centre") === "centre" ? editorHead(dir || "\uC0C8 \uCE90\uB9AD\uD130", [isNew ? null : del, save]) : el(
+    const head = (opts.chrome ?? "centre") === "centre" ? editorHead(dir || "\uC0C8 \uCE90\uB9AD\uD130", [isNew2 ? null : del, save]) : el(
       "div",
       { class: "row", style: { marginBottom: "6px", justifyContent: "flex-end", gap: "6px" } },
-      [isNew ? null : del, save]
+      [isNew2 ? null : del, save]
     );
     rootEl.append(
       head,
@@ -15418,7 +15654,13 @@ ${negative.value.trim()}
       S.selectedFile = "";
       hub.drawCentre();
     });
-    mount.appendChild(el("div", { class: "toolbtns" }, [charBtn, fragBtn]));
+    const paramsBtn = el(
+      "button",
+      { class: "ghost toolbtn", title: "\uC694\uCCAD \uC124\uC815 \u2014 \uBAA8\uB378\xB7\uD06C\uAE30\xB7\uC2A4\uD15D\xB7UC \uB4F1 \uC0DD\uC131 \uC694\uCCAD\uC758 \uD30C\uB77C\uBBF8\uD130" },
+      [el("span", { text: "\u2699 \uC694\uCCAD \uC124\uC815" })]
+    );
+    paramsBtn.addEventListener("click", () => openParamsDialog());
+    mount.appendChild(el("div", { class: "toolbtns" }, [charBtn, fragBtn, paramsBtn]));
   }
   function syncPromptBadges() {
     if (charBadge?.isConnected) {
@@ -15786,6 +16028,20 @@ ${negative.value.trim()}
 
   // src/ui/studio/left-output.ts
   var clip = null;
+  function setClip(op, paths) {
+    clip = paths.length ? { op, paths } : null;
+    if (clip) {
+      hub.notice(`${paths.length}\uAC1C\uB97C ${op === "copy" ? "\uBCF5\uC0AC" : "\uC798\uB77C\uB0B4\uAE30"}\uD588\uC2B5\uB2C8\uB2E4 \u2014 \uBD99\uC5EC\uB123\uC744 \uD3F4\uB354\uC5D0\uC11C Ctrl+V \uB610\uB294 \uC6B0\uD074\uB9AD.`);
+    }
+    hub.drawLeft();
+  }
+  function hasClip() {
+    return !!clip;
+  }
+  function clipClass2(path) {
+    if (!clip || !clip.paths.includes(path)) return "";
+    return clip.op === "cut" ? " clipcut" : " clipcopy";
+  }
   function toTreeNode2(n) {
     return {
       path: n.path,
@@ -15793,8 +16049,25 @@ ${negative.value.trim()}
       kids: n.children.map(toTreeNode2),
       count: countFiles2(n),
       title: n.path,
-      droppable: true
+      droppable: true,
+      cls: clipClass2(n.path).trim() || void 0
     };
+  }
+  function isRoot(path) {
+    return path === (S.outputRoot?.path ?? "studio/output") || S.extraRoots.some((r) => r.path === path);
+  }
+  function onTreeKey(ev) {
+    const ctrl = ev.ctrlKey || ev.metaKey;
+    if (!ctrl) return;
+    const k = ev.key.toLowerCase();
+    const sel = S.selected;
+    if ((k === "c" || k === "x") && sel && !isRoot(sel)) {
+      ev.preventDefault();
+      setClip(k === "c" ? "copy" : "cut", [sel]);
+    } else if (k === "v" && clip && sel) {
+      ev.preventDefault();
+      void pasteIn(sel);
+    }
   }
   function spec2() {
     return {
@@ -15840,15 +16113,15 @@ ${negative.value.trim()}
     hub.drawCentre();
   }
   function openOutputMenu(node, ev) {
-    const isRoot = node.path === (S.outputRoot?.path ?? "studio/output");
+    const isRoot2 = node.path === (S.outputRoot?.path ?? "studio/output");
     menuAt(ev.clientX, ev.clientY, [
       { label: "\uAC80\uC218 \uC5F4\uAE30", onClick: () => openFolder(node) },
       { label: "\uC0C8 \uD3F4\uB354", onClick: () => newFolderIn(node.path) },
-      { label: "\uC774\uB984 \uBC14\uAFB8\uAE30", disabled: isRoot, onClick: () => renameFolder(node) },
+      { label: "\uC774\uB984 \uBC14\uAFB8\uAE30", disabled: isRoot2, onClick: () => renameFolder(node) },
       null,
       {
         label: "\uBCF5\uC0AC",
-        disabled: isRoot,
+        disabled: isRoot2,
         onClick: () => {
           clip = { op: "copy", paths: [node.path] };
           hub.notice("\uBCF5\uC0AC\uD588\uC2B5\uB2C8\uB2E4 \u2014 \uBD99\uC5EC\uB123\uC744 \uD3F4\uB354\uC5D0\uC11C \uC6B0\uD074\uB9AD\uD558\uC138\uC694.");
@@ -15856,7 +16129,7 @@ ${negative.value.trim()}
       },
       {
         label: "\uC798\uB77C\uB0B4\uAE30",
-        disabled: isRoot,
+        disabled: isRoot2,
         onClick: () => {
           clip = { op: "cut", paths: [node.path] };
           hub.notice("\uC798\uB77C\uB0C8\uC2B5\uB2C8\uB2E4 \u2014 \uBD99\uC5EC\uB123\uC744 \uD3F4\uB354\uC5D0\uC11C \uC6B0\uD074\uB9AD\uD558\uC138\uC694.");
@@ -15876,7 +16149,7 @@ ${negative.value.trim()}
       null,
       // The two-step confirm as a second one-item menu: no window.confirm in
       // the sandboxed iframe (the file tree's convention).
-      { label: "\uC0AD\uC81C\u2026", danger: true, disabled: isRoot, onClick: () => confirmDelete(node.path, ev) }
+      { label: "\uC0AD\uC81C\u2026", danger: true, disabled: isRoot2, onClick: () => confirmDelete(node.path, ev) }
     ]);
   }
   function newFolderIn(where) {
@@ -15965,7 +16238,85 @@ ${negative.value.trim()}
   }
   function buildLeftOutput(mount) {
     if (!S.outputRoot) return;
+    mount.tabIndex = 0;
+    mount.onkeydown = onTreeKey;
     mount.appendChild(treeRow(toTreeNode2(S.outputRoot), 0, spec2()));
+    const pick2 = el("button", {
+      class: "ghost tiny",
+      text: "\uD3F4\uB354 \uC5F4\uAE30\u2026",
+      title: "OUTPUT \uBC16\uC758 \uD3F4\uB354\uB97C \uAC80\uC218 \uBAA9\uB85D\uC5D0 \uB123\uC2B5\uB2C8\uB2E4 (\uD504\uB85C\uC81D\uD2B8\xB7AI \uB0B4\uBD80 \uB4F1)"
+    });
+    pick2.addEventListener("click", () => openFolderPicker());
+    mount.appendChild(el("div", { class: "row extrahead" }, [
+      el("span", { class: "sectiontitle grow", style: { marginBottom: "0" }, text: "\uB2E4\uB978 \uD3F4\uB354" }),
+      pick2
+    ]));
+    if (!S.extraRoots.length) {
+      mount.appendChild(el("div", {
+        class: "hint",
+        style: { padding: "2px 8px 6px" },
+        text: "\uD30C\uC77C \uD0ED\uC5D0\uC11C \uD3F4\uB354\uB97C \uC6B0\uD074\uB9AD\uD574 \u201C\uAC80\uC218 \uC5F4\uAE30\u201D\uB97C \uB20C\uB7EC\uB3C4 \uC5EC\uAE30 \uB4E4\uC5B4\uC635\uB2C8\uB2E4."
+      }));
+    }
+    const extraSpec = { ...spec2(), onContext(node, ev) {
+      openExtraMenu(node, ev);
+    } };
+    for (const r of S.extraRoots) mount.appendChild(treeRow(toTreeNode2(r), 0, extraSpec));
+  }
+  function openExtraMenu(node, ev) {
+    const isPin = S.extraRoots.some((r) => r.path === node.path);
+    menuAt(ev.clientX, ev.clientY, [
+      { label: "\uAC80\uC218 \uC5F4\uAE30", onClick: () => openFolder(node) },
+      { label: "\uACBD\uB85C \uBCF5\uC0AC", onClick: () => {
+        copyToClipboard(node.path);
+        hub.notice("\uACBD\uB85C\uB97C \uBCF5\uC0AC\uD588\uC2B5\uB2C8\uB2E4.", "ok");
+      } },
+      { label: "\uB0B4\uB824\uBC1B\uAE30 (zip)", onClick: () => void zipFolder(node.path) },
+      null,
+      { label: "\uBAA9\uB85D\uC5D0\uC11C \uBE7C\uAE30", disabled: !isPin, onClick: () => {
+        removeExtra(node.path);
+        if (S.selected === node.path || S.selected.startsWith(node.path + "/")) S.selected = S.outputRoot?.path ?? "studio/output";
+        hub.drawLeft();
+        hub.drawCentre();
+      } }
+    ]);
+  }
+  function openFolderPicker() {
+    openListPicker({
+      title: "\uAC80\uC218\uD560 \uD3F4\uB354",
+      hint: "\uADF8\uB9BC\uC774 \uB4E0 \uD3F4\uB354\uB9CC \uBCF4\uC785\uB2C8\uB2E4. \uACE0\uB974\uBA74 \uC67C\uCABD \u201C\uB2E4\uB978 \uD3F4\uB354\u201D\uC5D0 \uB4E4\uC5B4\uAC00\uACE0 \uAC80\uC218\uAC00 \uC5F4\uB9BD\uB2C8\uB2E4.",
+      selectedLabel: "\uC5F4\uB9BC",
+      async load() {
+        const listing = await state.files("", true);
+        const counts2 = /* @__PURE__ */ new Map();
+        for (const a of listing.areas) {
+          for (const f of a.files) {
+            if (!IMAGE_RE2.test(f.name) || !f.path.includes("/")) continue;
+            const dir = f.path.slice(0, f.path.lastIndexOf("/"));
+            if (dir === "studio/output" || dir.startsWith("studio/output/")) continue;
+            if (dir.startsWith("studio/config/")) continue;
+            counts2.set(dir, (counts2.get(dir) ?? 0) + 1);
+          }
+        }
+        return [...counts2.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([dir, n]) => ({
+          id: dir,
+          name: dir,
+          hint: `${n}\uC7A5`,
+          selected: S.extraRoots.some((r) => r.path === dir)
+        }));
+      },
+      async onSelect(entry) {
+        addExtra(entry.id);
+        S.selected = entry.id;
+        S.selectedFile = "";
+        S.centreMode = "tab";
+        S.centreTab = "inspect";
+        S.leftTab = "output";
+        persistCentreTab();
+        persistLeftTab();
+        await hub.refresh();
+      }
+    });
   }
 
   // src/ui/studio/center-frags.ts
@@ -16180,8 +16531,6 @@ ${negative.value.trim()}
       S.viewPath = "";
       syncPreview();
     });
-    const params = el("button", { class: "ghost tiny", text: "\u2699 \uC694\uCCAD \uC124\uC815" });
-    params.addEventListener("click", () => openParamsDialog());
     const minus = el("button", { class: "ghost tiny", text: "\u2212" });
     const plus = el("button", { class: "ghost tiny", text: "\uFF0B" });
     const count = el("input", {
@@ -16212,7 +16561,6 @@ ${negative.value.trim()}
       next,
       el("span", { class: "grow" }),
       progressLine,
-      params,
       el("div", { class: "row", style: { gap: "2px" } }, [minus, count, plus]),
       runBtn
     ]));
@@ -16431,8 +16779,6 @@ ${negative.value.trim()}
   function drawBatch(mount) {
     const notice10 = tokenNotice();
     if (notice10) mount.appendChild(notice10);
-    const params = el("button", { class: "ghost tiny", text: "\u2699 \uC694\uCCAD \uC124\uC815" });
-    params.addEventListener("click", () => openParamsDialog());
     const cols = colPicker({ values: [2, 3, 4], get: () => S.cols, set: (n) => {
       S.cols = n;
       persistCols();
@@ -16442,7 +16788,6 @@ ${negative.value.trim()}
     } });
     mount.appendChild(el("div", { class: "row", style: { marginBottom: "6px", flexWrap: "wrap" } }, [
       scenePicker(),
-      params,
       cols
     ]));
     const nChars = activeOf("characters").length;
@@ -17019,9 +17364,30 @@ ${negative.value.trim()}
     };
     syncBar();
     const grid = el("div", { class: "foldergrid", style: { gridTemplateColumns: `repeat(${S.cols}, minmax(0, 1fr))` } });
+    grid.tabIndex = 0;
+    grid.addEventListener("keydown", (ev) => {
+      const e = ev;
+      const ctrl = e.ctrlKey || e.metaKey;
+      const k = e.key.toLowerCase();
+      if (ctrl && (k === "c" || k === "x") && selection2.size) {
+        e.preventDefault();
+        setClip(k === "c" ? "copy" : "cut", [...selection2]);
+        for (const c of Array.from(grid.children)) {
+          c.classList.toggle("clipcut", k === "x" && selection2.has(c.title));
+          c.classList.toggle("clipcopy", k === "c" && selection2.has(c.title));
+        }
+      } else if (ctrl && k === "v" && hasClip()) {
+        e.preventDefault();
+        void pasteIn(node.path);
+      } else if (e.key === "Escape" && selection2.size) {
+        selection2.clear();
+        for (const c of Array.from(grid.children)) c.classList.remove("picked");
+        syncBar();
+      }
+    });
     viewMount6.appendChild(grid);
     for (const child of node.children) {
-      const cell2 = el("div", { class: "fcell foldcell", title: child.path }, [
+      const cell2 = el("div", { class: "fcell foldcell" + clipClass2(child.path), title: child.path }, [
         el("div", { class: "foldface", text: "\u{1F4C1}" }),
         el("div", { class: "fname" }, [
           el("span", { text: child.name }),
@@ -17060,7 +17426,7 @@ ${negative.value.trim()}
       syncPicked();
     });
     images.forEach((f, ix) => {
-      const cell2 = el("div", { class: "fcell imgcell" + (selection2.has(f.path) ? " picked" : ""), title: f.path });
+      const cell2 = el("div", { class: "fcell imgcell" + (selection2.has(f.path) ? " picked" : "") + clipClass2(f.path), title: f.path });
       const pic = workspaceImage(f.path, f.name, { thumb: false });
       pic.classList.add("jobpic");
       cell2.append(pic, el("div", { class: "fname" }, [el("span", { class: "hint", text: f.name })]));
@@ -17183,13 +17549,24 @@ ${negative.value.trim()}
     if (p.mode === "regex" && p.pattern.trim()) return { pattern: p.pattern.trim(), groupBy: p.groupBy || "g" };
     return { pattern: "", groupBy: p.groupBy || "emotion" };
   }
-  function ruleSummary(p) {
-    if (p.mode === "regex" && p.pattern.trim()) return "\uADDC\uCE59: \uC815\uADDC\uC2DD";
-    if (p.mode === "delim") {
+  function ruleSummary(p, g) {
+    let rule = "\uC790\uB3D9";
+    if (p.mode === "regex" && p.pattern.trim()) rule = "\uC815\uADDC\uC2DD";
+    else if (p.mode === "delim") {
       const d = p.delimiter === " " ? "\uACF5\uBC31" : p.delimiter;
-      return `\uADDC\uCE59: ${d} \xB7 ${[...p.tokens].sort((a, b) => a - b).join("+")}\uBC88\uC9F8`;
+      rule = `${d} \xB7 ${[...p.tokens].sort((a, b) => a - b).join("+")}\uBC88\uC9F8`;
+    } else if (p.groupBy && p.groupBy !== "emotion") {
+      rule = `\uC790\uB3D9 \xB7 ${FIELD_LABEL2[p.groupBy] ?? p.groupBy}`;
     }
-    return "\uADDC\uCE59: \uC790\uB3D9";
+    return g ? `\uADDC\uCE59: ${rule} \u2192 \uADF8\uB8F9 ${g.groups.length}` : `\uADDC\uCE59: ${rule}`;
+  }
+  var FIELD_LABEL2 = {
+    emotion: "\uAC10\uC815",
+    character: "\uCE90\uB9AD\uD130",
+    "character+emotion": "\uCE90\uB9AD\uD130+\uAC10\uC815"
+  };
+  function gridCols() {
+    return S.selCols > 0 ? `repeat(${S.selCols}, minmax(0, 1fr))` : "repeat(auto-fill, minmax(190px, 1fr))";
   }
   function hasGroups(folder) {
     return !!groups && groups.folder === folder;
@@ -17246,16 +17623,22 @@ ${negative.value.trim()}
     const p = prefsFor(node.path);
     cellSyncs.clear();
     missingSync = null;
-    const bar3 = el("div", { class: "row", style: { marginBottom: "8px", flexWrap: "wrap" } });
+    const head = el("div", { class: "row selhead", style: { marginBottom: "6px" } });
     const tidy = el("button", { class: "ghost tiny", text: "\uC815\uB9AC", title: "\uD3F4\uB354 \uC815\uB9AC \uD654\uBA74 (\uC120\uD0DD\xB7\uC774\uB3D9\xB7\uC0AD\uC81C\xB7\uC5C5\uB85C\uB4DC)" });
     tidy.addEventListener("click", () => {
       S.centreMode = "folder";
       hub.drawCentre();
     });
-    bar3.append(
+    head.append(
       tidy,
-      el("span", { class: "sectiontitle grow", text: `${node.path} \xB7 ${g.total}\uC7A5 \xB7 \uADF8\uB8F9 ${g.groups.length}` })
+      el("span", {
+        class: "sectiontitle path grow",
+        title: node.path,
+        text: `${node.path} \xB7 ${g.total}\uC7A5`
+      })
     );
+    viewMount6.appendChild(head);
+    const bar3 = el("div", { class: "row seltools", style: { marginBottom: "8px" } });
     const mkView = (v, label) => ({
       label,
       on: viewMode2 === v,
@@ -17266,13 +17649,14 @@ ${negative.value.trim()}
       }
     });
     bar3.append(segCtl([mkView("group", "\uADF8\uB8F9\uBCC4"), mkView("all", "\uC804\uCCB4"), mkView("rep", "\uB300\uD45C")]));
-    bar3.appendChild(colPicker({ values: [2, 3, 4, 5, 6], get: () => S.selCols, set: (n) => {
+    bar3.appendChild(colPicker({ values: [0, 2, 3, 4, 5, 6], labels: { 0: "\uC790\uB3D9" }, get: () => S.selCols, set: (n) => {
       S.selCols = n;
       persistSelCols();
       for (const gEl of Array.from(document.querySelectorAll(".selgrid"))) {
-        gEl.style.gridTemplateColumns = `repeat(${S.selCols}, minmax(0, 1fr))`;
+        gEl.style.gridTemplateColumns = gridCols();
       }
     } }));
+    bar3.appendChild(el("span", { class: "spacer" }));
     const firstEach = el("button", { class: "ghost tiny", text: "\uADF8\uB8F9\uB9C8\uB2E4 \uCCAB \uC7A5" });
     firstEach.addEventListener("click", () => {
       for (const grp of g.groups) {
@@ -17293,17 +17677,19 @@ ${negative.value.trim()}
     viewMount6.appendChild(bar3);
     const ruleBtn = el("button", {
       class: "ghost tiny rulebtn",
-      text: ruleSummary(p),
-      title: "\uAD6C\uBD84\uC790\uC640 \uADF8\uB8F9 \uAE30\uC900\uC744 \uACE0\uCE69\uB2C8\uB2E4 (\uD1A0\uD070\uC740 \uBCF5\uC218 \uC120\uD0DD \uAC00\uB2A5)"
+      text: ruleSummary(p, g),
+      title: "\uD30C\uC77C \uC774\uB984\uC744 \uC5B4\uB5BB\uAC8C \uB098\uB220 \uADF8\uB8F9\uC744 \uB9CC\uB4E4\uC9C0 \uACE0\uCE69\uB2C8\uB2E4 (\uD1A0\uD070\uC740 \uBCF5\uC218 \uC120\uD0DD \uAC00\uB2A5)"
     });
     ruleBtn.addEventListener("click", () => openRulePopover(ruleBtn, node));
-    bar3.appendChild(ruleBtn);
+    head.appendChild(ruleBtn);
     if (g.unmatched.length) {
-      bar3.appendChild(el("span", {
-        class: "badge warn",
+      const badge = el("button", {
+        class: "ghost tiny badge warn",
         text: `\uBABB \uC77D\uC74C ${g.unmatched.length}`,
-        title: "\uC774\uB984 \uADDC\uCE59\uC774 \uBABB \uC77D\uC740 \uD30C\uC77C \u2014 \uC544\uB798 \uBCC4\uB3C4 \uBAA9\uB85D\uC5D0 \uC788\uC2B5\uB2C8\uB2E4"
-      }));
+        title: "\uC774\uB984 \uADDC\uCE59\uC774 \uBABB \uC77D\uC740 \uD30C\uC77C \u2014 \uC544\uB798 \uBCC4\uB3C4 \uBAA9\uB85D\uC5D0 \uC788\uC2B5\uB2C8\uB2E4. \uB204\uB974\uBA74 \uADDC\uCE59 \uD3B8\uC9D1\uC774 \uC5F4\uB9BD\uB2C8\uB2E4"
+      });
+      badge.addEventListener("click", () => openRulePopover(ruleBtn, node));
+      head.appendChild(badge);
     }
     const missingBox = el("div", {});
     viewMount6.appendChild(missingBox);
@@ -17349,12 +17735,12 @@ ${negative.value.trim()}
       viewMount6.appendChild(nav);
       viewMount6.appendChild(candidateGrid(grp?.items ?? [], grp?.items));
     } else if (viewMode2 === "group") {
-      const grid = el("div", { class: "agrid selgrid", style: { gridTemplateColumns: `repeat(${S.selCols}, minmax(0, 1fr))` } });
+      const grid = el("div", { class: "agrid selgrid", style: { gridTemplateColumns: gridCols() } });
       for (const grp of g.groups) grid.appendChild(groupCard(grp));
       viewMount6.appendChild(grid);
       if (!g.groups.length) viewMount6.appendChild(el("div", { class: "empty", text: "\uADDC\uCE59\uC774 \uC77D\uC5B4\uB0B8 \uADF8\uB8F9\uC774 \uC5C6\uC2B5\uB2C8\uB2E4 \u2014 \uAD6C\uBD84\uC790\uC640 \uADF8\uB8F9 \uAE30\uC900\uC744 \uD655\uC778\uD558\uC138\uC694." }));
     } else if (viewMode2 === "rep") {
-      const grid = el("div", { class: "agrid selgrid", style: { gridTemplateColumns: `repeat(${S.selCols}, minmax(0, 1fr))` } });
+      const grid = el("div", { class: "agrid selgrid", style: { gridTemplateColumns: gridCols() } });
       for (const grp of g.groups) {
         const chosen = grp.items.find((i) => selection3[i.filename]?.rep) ?? grp.items.find((i) => selection3[i.filename]?.use);
         const pic = el("div", { class: "assetpic" });
@@ -17386,7 +17772,19 @@ ${negative.value.trim()}
       viewMount6.appendChild(el("div", { class: "row", style: { marginTop: "10px" } }, [
         el("span", { class: "sectiontitle grow", text: `\uC774\uB984 \uADDC\uCE59\uC5D0 \uC548 \uB9DE\uB294 \uD30C\uC77C ${g.unmatched.length}\uAC1C` })
       ]));
-      viewMount6.appendChild(el("div", { class: "hint", text: "\uC774 \uD30C\uC77C\uB4E4\uC740 \uADF8\uB8F9\uC5D0 \uBABB \uB4E4\uC5B4\uAC11\uB2C8\uB2E4. \uD788\uB098\uC5D0\uAC8C \u201C\uC774 \uD3F4\uB354 \uC774\uB984 \uADDC\uCE59\uC5D0 \uB9DE\uAC8C \uC77C\uAD04\uB85C \uBC14\uAFD4 \uC918\u201D \uB77C\uACE0 \uD558\uC138\uC694 (studio_rename)." }));
+      const fix = el("button", {
+        class: "ghost tiny",
+        text: "\uADDC\uCE59 \uBC14\uAFB8\uAE30",
+        title: "\uAD6C\uBD84\uC790 \uADDC\uCE59\uC73C\uB85C \uBC14\uAFB8\uBA74 \uB300\uAC1C \uC77D\uD799\uB2C8\uB2E4"
+      });
+      fix.addEventListener("click", () => {
+        const anchor = viewMount6.querySelector(".rulebtn");
+        if (anchor) openRulePopover(anchor, node);
+      });
+      viewMount6.appendChild(el("div", { class: "row" }, [
+        el("span", { class: "hint grow", text: "\uC774 \uD30C\uC77C\uB4E4\uC740 \uC9C0\uAE08 \uADDC\uCE59\uC73C\uB85C\uB294 \uADF8\uB8F9\uC5D0 \uBABB \uB4E4\uC5B4\uAC11\uB2C8\uB2E4. \uADDC\uCE59\uC744 \uBC14\uAFB8\uAC70\uB098, \uD788\uB098\uC5D0\uAC8C \u201C\uC774 \uD3F4\uB354 \uC774\uB984 \uADDC\uCE59\uC5D0 \uB9DE\uAC8C \uC77C\uAD04\uB85C \uBC14\uAFD4 \uC918\u201D \uB77C\uACE0 \uD558\uC138\uC694." }),
+        fix
+      ]));
       viewMount6.appendChild(candidateGrid(g.unmatched));
     }
   }
@@ -17423,7 +17821,7 @@ ${negative.value.trim()}
     return cell2;
   }
   function candidateGrid(items5, groupItems) {
-    const grid = el("div", { class: "agrid selgrid", style: { gridTemplateColumns: `repeat(${S.selCols}, minmax(0, 1fr))` } });
+    const grid = el("div", { class: "agrid selgrid", style: { gridTemplateColumns: gridCols() } });
     for (const it of items5) grid.appendChild(candidate(it, groupItems));
     return grid;
   }
@@ -17482,41 +17880,86 @@ ${negative.value.trim()}
   function openRulePopover(anchor, node) {
     const p = prefsFor(node.path);
     const g = groups;
-    const sample = g?.groups[0]?.items[0]?.filename ?? g?.unmatched[0]?.filename ?? "";
-    const stem = sample.replace(/\.[a-z0-9]+$/i, "");
+    const names = g ? [...g.groups.flatMap((x) => x.items.map((i) => i.filename)), ...g.unmatched.map((u) => u.filename)] : [];
+    let sampleAt = 0;
+    const stemOf = (n) => n.replace(/\.[a-z0-9]+$/i, "");
     let stagedDelim = p.delimiter;
     const staged = new Set(p.mode === "delim" ? p.tokens : []);
+    let mode2 = p.mode;
     let applyTimer = null;
+    const body = el("div", { class: "rulepop" });
+    const result = el("div", { class: "ruleresult" });
+    const syncResult = () => {
+      const gg = groups;
+      if (!gg) {
+        result.textContent = "\uC77D\uB294 \uC911\u2026";
+        return;
+      }
+      clear(result);
+      result.append(
+        el("span", { class: "badge ok", text: `\uADF8\uB8F9 ${gg.groups.length}` }),
+        el("span", { class: "badge" + (gg.unmatched.length ? " warn" : ""), text: `\uBABB \uC77D\uC74C ${gg.unmatched.length}` }),
+        el("span", { class: "hint", text: `${gg.total}\uC7A5` })
+      );
+      if (gg.groups.length === gg.total && gg.total > 1) {
+        result.appendChild(el("span", { class: "hint", text: "\u2014 \uC7A5\uB9C8\uB2E4 \uADF8\uB8F9 \uD558\uB098: \uAE30\uC900\uC774 \uB108\uBB34 \uC798\uAC8C \uB098\uB269\uB2C8\uB2E4" }));
+      }
+    };
+    const reload = () => {
+      drill = "";
+      void loadGroups(node.path).then(() => {
+        syncResult();
+        syncModeRow();
+      });
+    };
     const applyDelim = () => {
       if (!staged.size) return;
       if (applyTimer) clearTimeout(applyTimer);
       applyTimer = setTimeout(() => {
         setPrefs(node.path, { mode: "delim", delimiter: stagedDelim, tokens: [...staged].sort((a, b) => a - b) });
-        drill = "";
-        void loadGroups(node.path);
+        mode2 = "delim";
+        reload();
       }, 350);
     };
-    const body = el("div", { class: "rulepop" });
     const dsel = el("select", { title: "\uD30C\uC77C\uBA85\uC744 \uB098\uB204\uB294 \uBB38\uC790" });
-    for (const [v, label] of [["-", "-"], ["_", "_"], [".", "."], [" ", "\uACF5\uBC31"]]) {
+    for (const [v, label] of [["-", "- (\uD558\uC774\uD508)"], ["_", "_ (\uBC11\uC904)"], [".", ". (\uC810)"], [" ", "\uACF5\uBC31"]]) {
       const o = el("option", { value: v, text: label });
       if (stagedDelim === v) o.setAttribute("selected", "selected");
       dsel.appendChild(o);
     }
-    const chipsBox = el("div", { class: "row", style: { gap: "2px", flexWrap: "wrap" } });
+    const auto = el("button", {
+      class: "ghost tiny",
+      text: "\uC790\uB3D9",
+      title: "\uAE30\uBCF8 \uADDC\uCE59: \uCE90\uB9AD\uD130-\uAC10\uC815-\uB0A0\uC9DC-\uC2DC\uAC01-\uBC88\uD638 \uB85C \uC9C0\uC740 \uC774\uB984(\uC2A4\uD29C\uB514\uC624 \uAE30\uBCF8)\uC744 \uC77D\uC2B5\uB2C8\uB2E4"
+    });
+    auto.addEventListener("click", () => {
+      setPrefs(node.path, { mode: "default" });
+      mode2 = "default";
+      reload();
+    });
+    const nav = el("div", { class: "row samplenav" });
+    const prev = el("button", { class: "ghost tiny", text: "\u2039", title: "\uC774\uC804 \uD30C\uC77C" });
+    const next = el("button", { class: "ghost tiny", text: "\u203A", title: "\uB2E4\uC74C \uD30C\uC77C" });
+    const which = el("span", { class: "hint" });
+    nav.append(el("span", { class: "hint", text: "\uC608\uC2DC" }), prev, which, next);
+    const chipsBox = el("div", { class: "tokstrip" });
     const renderChips = () => {
       clear(chipsBox);
-      if (!stem) {
+      const sample = names[sampleAt] ?? "";
+      which.textContent = names.length ? `${sampleAt + 1}/${names.length}` : "\uC5C6\uC74C";
+      prev.disabled = sampleAt <= 0;
+      next.disabled = sampleAt >= names.length - 1;
+      if (!sample) {
         chipsBox.appendChild(el("span", { class: "hint", text: "\uC0D8\uD50C \uD30C\uC77C\uC774 \uC5C6\uC2B5\uB2C8\uB2E4" }));
         return;
       }
-      const toks = stem.split(stagedDelim).filter((q) => q !== "");
-      toks.slice(0, 6).forEach((tok, i) => {
+      const toks = stemOf(sample).split(stagedDelim).filter((q) => q !== "");
+      toks.slice(0, 8).forEach((tok, i) => {
+        if (i) chipsBox.appendChild(el("span", { class: "delimglyph", text: stagedDelim === " " ? "\u2423" : stagedDelim }));
         const chip = el("button", {
-          class: "ghost tiny tokenchip" + (staged.has(i + 1) ? " on" : ""),
-          text: `${i + 1}\xB7${tok.length > 12 ? tok.slice(0, 12) + "\u2026" : tok}`,
-          title: `${i + 1}\uBC88\uC9F8 \uC870\uAC01\uC744 \uADF8\uB8F9 \uAE30\uC900\uC5D0 \uB123\uAC70\uB098 \uBE8D\uB2C8\uB2E4 (\uC608: ${tok})`
-        });
+          class: "tokenchip" + (staged.has(i + 1) ? " on" : ""),
+          title: `${i + 1}\uBC88\uC9F8 \uC870\uAC01\uC744 \uADF8\uB8F9 \uAE30\uC900\uC5D0 \uB123\uAC70\uB098 \uBE8D\uB2C8\uB2E4`
+        }, [el("span", { class: "idx", text: String(i + 1) }), el("span", { text: tok.length > 14 ? tok.slice(0, 14) + "\u2026" : tok })]);
         chip.addEventListener("click", () => {
           if (staged.has(i + 1)) {
             if (staged.size > 1) staged.delete(i + 1);
@@ -17528,27 +17971,58 @@ ${negative.value.trim()}
         });
         chipsBox.appendChild(chip);
       });
+      if (toks.length > 8) chipsBox.appendChild(el("span", { class: "hint", text: "\u2026" }));
     };
+    prev.addEventListener("click", () => {
+      sampleAt = Math.max(0, sampleAt - 1);
+      renderChips();
+    });
+    next.addEventListener("click", () => {
+      sampleAt = Math.min(names.length - 1, sampleAt + 1);
+      renderChips();
+    });
     dsel.addEventListener("change", () => {
       stagedDelim = dsel.value;
       staged.clear();
       renderChips();
     });
     renderChips();
-    const auto = el("button", {
-      class: "ghost tiny" + (p.mode === "default" ? " on" : ""),
-      text: "\uC790\uB3D9",
-      title: "\uAE30\uBCF8 \uADDC\uCE59 (\uCE90\uB9AD\uD130-\uAC10\uC815-\uB0A0\uC9DC-\uBC88\uD638 \uD615\uD0DC\uB97C \uC790\uB3D9\uC73C\uB85C \uC77D\uC2B5\uB2C8\uB2E4)"
-    });
-    auto.addEventListener("click", () => {
-      setPrefs(node.path, { mode: "default" });
-      drill = "";
-      void loadGroups(node.path);
-    });
+    const modeRow = el("div", { class: "row", style: { marginTop: "6px" } });
+    const syncModeRow = () => {
+      clear(modeRow);
+      auto.classList.toggle("on", mode2 === "default");
+      const cur = prefsFor(node.path);
+      if (mode2 === "default") {
+        const by2 = cur.groupBy || "emotion";
+        const mk = (v, label) => ({
+          label,
+          on: by2 === v,
+          pick: () => {
+            setPrefs(node.path, { mode: "default", groupBy: v });
+            reload();
+          }
+        });
+        modeRow.append(
+          el("span", { class: "hint", text: "\uBB36\uB294 \uAE30\uC900" }),
+          segCtl([mk("emotion", "\uAC10\uC815"), mk("character", "\uCE90\uB9AD\uD130"), mk("character+emotion", "\uCE90\uB9AD\uD130+\uAC10\uC815")])
+        );
+      } else if (mode2 === "delim") {
+        modeRow.appendChild(el("span", {
+          class: "hint",
+          text: `\uCF1C\uC9C4 \uC870\uAC01(${[...staged].sort((a, b) => a - b).join("+") || "\uC5C6\uC74C"})\uC774 \uAC19\uC740 \uD30C\uC77C\uB07C\uB9AC \uD55C \uADF8\uB8F9\uC774 \uB429\uB2C8\uB2E4`
+        }));
+      } else {
+        modeRow.appendChild(el("span", { class: "hint", text: "\uC815\uADDC\uC2DD \uADDC\uCE59\uC774 \uCF1C\uC838 \uC788\uC2B5\uB2C8\uB2E4 (\uACE0\uAE09)" }));
+      }
+    };
+    syncModeRow();
+    syncResult();
     body.append(
-      el("div", { class: "row" }, [el("span", { class: "hint", text: "\uAD6C\uBD84\uC790" }), dsel, auto]),
-      el("div", { class: "hint", style: { margin: "6px 0 2px" }, text: "\uADF8\uB8F9 \uAE30\uC900 \u2014 \uCE69\uC744 \uB20C\uB7EC \uB123\uACE0 \uBE8D\uB2C8\uB2E4 (\uBCF5\uC218 \uC120\uD0DD)" }),
-      chipsBox
+      el("div", { class: "row" }, [el("span", { class: "hint", text: "\uB098\uB204\uAE30" }), dsel, auto]),
+      nav,
+      chipsBox,
+      modeRow,
+      result
     );
     const pat = el("input", {
       value: p.mode === "regex" ? p.pattern : "",
@@ -17559,8 +18033,8 @@ ${negative.value.trim()}
       if (patternTimer) clearTimeout(patternTimer);
       patternTimer = setTimeout(() => {
         setPrefs(node.path, { mode: pat.value.trim() ? "regex" : "default", pattern: pat.value });
-        drill = "";
-        void loadGroups(node.path);
+        mode2 = pat.value.trim() ? "regex" : "default";
+        reload();
       }, 800);
     });
     const by = el("select", { title: "\uC5B4\uB290 \uD544\uB4DC\uB85C \uBB36\uC5B4 \uBCFC\uC9C0" });
@@ -17572,8 +18046,7 @@ ${negative.value.trim()}
     }
     by.addEventListener("change", () => {
       setPrefs(node.path, { groupBy: by.value });
-      drill = "";
-      void loadGroups(node.path);
+      reload();
     });
     body.appendChild(el("details", { class: "advbox", ...p.mode === "regex" ? { open: true } : {} }, [
       el("summary", { text: "\uACE0\uAE09 (\uC815\uADDC\uC2DD \uADDC\uCE59)" }),
@@ -17691,6 +18164,7 @@ ${negative.value.trim()}
     if (!splitRoot) return;
     splitRoot.classList.toggle("lcollapse", panels.left);
     splitRoot.classList.toggle("rcollapse", panels.right || autoRight);
+    reclamp(splitRoot);
     layBtnL?.classList.toggle("on", !panels.left);
     layBtnR?.classList.toggle("on", !(panels.right || autoRight));
   }
@@ -17797,9 +18271,12 @@ ${negative.value.trim()}
     await migrateSingleStyle();
     buildOutput();
     const want = state.openStudioRequest;
+    const wantFolder = want ? canonPath(want.folder) : "";
+    if (wantFolder && !isOutputPath(wantFolder)) addExtra(wantFolder);
+    await loadExtras();
     if (want) {
       state.openStudioRequest = null;
-      const folder = canonPath(want.folder);
+      const folder = wantFolder;
       if (find(folder)) {
         S.selected = folder;
         const parts = folder.split("/");
@@ -17811,7 +18288,7 @@ ${negative.value.trim()}
         persistCentreTab();
         persistLeftTab();
       } else {
-        notice9("\uADF8 \uD3F4\uB354\uB97C OUTPUT \uC5D0\uC11C \uCC3E\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + folder, "err");
+        notice9("\uADF8 \uD3F4\uB354\uB97C \uCC3E\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + folder, "err");
       }
     }
     drawLeft();
@@ -17820,6 +18297,17 @@ ${negative.value.trim()}
     markJobsStale();
     void refreshStrip();
     if (S.jobId) void pollJob();
+  }
+  async function loadExtras() {
+    const pairs = await Promise.all(extraPaths.map(async (p) => {
+      try {
+        return [p, await state.files(p)];
+      } catch {
+        return [p, null];
+      }
+    }));
+    buildExtras(Object.fromEntries(pairs));
+    for (const p of extraPaths) S.open.add(p);
   }
   var migrated = false;
   async function migrateSingleStyle() {
@@ -17882,6 +18370,7 @@ ${negative.value.trim()}
       return b;
     };
     tabbar.append(mk("prompt", "\uD504\uB86C\uD504\uD2B8"), mk("output", "OUTPUT"));
+    const hadFocus = leftContent.contains(document.activeElement);
     clear(leftContent);
     if (S.leftTab === "output") {
       buildLeftOutput(leftContent);
@@ -17889,6 +18378,13 @@ ${negative.value.trim()}
       buildLeftChars(leftContent);
     } else {
       buildLeftPrompt(leftContent);
+    }
+    if (hadFocus) {
+      const row = leftContent.querySelector(".treebranch.on") ?? leftContent;
+      try {
+        row.focus({ preventScroll: true });
+      } catch {
+      }
     }
   }
   function drawCentre2() {
@@ -17967,7 +18463,16 @@ ${negative.value.trim()}
     }
     const node = S.selected && S.selected !== OUTPUT_ROOT ? find(S.selected) : null;
     if (!node) {
-      body.appendChild(el("div", { class: "empty", text: "\uC67C\uCABD OUTPUT \uD2B8\uB9AC\uC5D0\uC11C \uAC80\uC218\uD560 \uD3F4\uB354\uB97C \uACE0\uB974\uC138\uC694." }));
+      const pick2 = el("button", {
+        class: "ghost tiny",
+        text: "\uB2E4\uB978 \uD3F4\uB354 \uC5F4\uAE30\u2026",
+        title: "OUTPUT \uBC16\uC758 \uD3F4\uB354(\uD504\uB85C\uC81D\uD2B8 \uB4F1)\uB3C4 \uAC80\uC218\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4"
+      });
+      pick2.addEventListener("click", () => openFolderPicker());
+      body.appendChild(el("div", { class: "empty" }, [
+        el("div", { text: "\uC67C\uCABD OUTPUT \uD2B8\uB9AC\uC5D0\uC11C \uAC80\uC218\uD560 \uD3F4\uB354\uB97C \uACE0\uB974\uC138\uC694." }),
+        el("div", { class: "row", style: { justifyContent: "center", marginTop: "10px" } }, [pick2])
+      ]));
       return;
     }
     if (!node.files.length && !node.children.length) {
@@ -18100,12 +18605,21 @@ ${negative.value.trim()}
       mounts[id]?.classList.toggle("active", id === tab);
       document.getElementById("tab-" + id)?.classList.toggle("active", id === tab);
     }
+    try {
+      document.getElementById("tab-" + tab)?.scrollIntoView({ inline: "nearest", block: "nearest" });
+    } catch {
+    }
     document.getElementById("open-settings")?.classList.toggle("on", tab === "settings");
     syncBackTab();
     renderActive();
     syncSettingsBar();
     syncToolslot();
     refreshTabBadges();
+    const shown = mounts[tab]?.querySelector(".split");
+    if (shown) {
+      setTimeout(() => reclamp(shown), 0);
+      setTimeout(() => reclamp(shown), 800);
+    }
     refreshStatus();
   }
   function syncSettingsBar() {
@@ -18159,7 +18673,7 @@ ${negative.value.trim()}
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.11.1"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.12.0"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
@@ -18254,7 +18768,7 @@ ${negative.value.trim()}
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.11.1" }),
+        el("span", { class: "dim", text: "v0.12.0" }),
         healthEl,
         el("span", { class: "spacer" }),
         reload,
@@ -18321,7 +18835,7 @@ ${negative.value.trim()}
         })();
       } else if (want) {
         setEditMode(want, tab);
-      } else if (tab === "files" || tab === "chats") setTab(tab);
+      } else if (tab === "files" || tab === "chats" || tab === "studio") setTab(tab);
       return;
     }
     if (state.openFileRequest && active2 !== "files") {
@@ -18526,6 +19040,6 @@ ${negative.value.trim()}
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.11.1"} loaded`);
+    console.log(`[risu-hina] v${"0.12.0"} loaded`);
   })();
 })();

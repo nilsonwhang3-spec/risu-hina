@@ -1,4 +1,4 @@
-# 06. Implementation status — as of 2026-08-29 (v0.9.6 BETA, Risu Hina)
+# 06. Implementation status — as of 2026-09-06 (v0.12.0 BETA, Risu Hina)
 
 One page for whoever picks this up next session (= me). What exists, what changed, how far it is deployed,
 and what is left. The *why* of the design is `docs/04` (assets and charx are in Appendix E), the storage layout is `docs/02`, the deployment environment is `docs/00`.
@@ -219,6 +219,13 @@ icons outside the studio, compact rows + switch, the caveat card and its `<stron
 
 **Handoff 2026-08-31 (the studio feedback marathon, §1-19 ~ §1-25).** Where the next session picks up:
 
+- **State (2026-09-06)**: **v0.12.0 BETA RELEASED** = §1-33 ~ §1-37 (the file-space cleanup,
+  검수 anywhere, the rule popover, the two-splitter overflow, the portrait blink, strip/centre
+  containment, the auto temp sweep, clipboard keys everywhere, red dots for unseen files, 이 봇만
+  by default, the row-menu delete confirm). The MINOR went up: backend and plugin go together
+  (`/files?bot=`, deliverables in `projects/<봇>/out/`, `out_v3`), so the version gate trips -
+  update the backend, then `+` on the plugin. Release notes: the scratchpad `notes-0.12.0.md`
+  (bundle.py empties `release/`). test-server: deployed by `/update/apply` after the release.
 - **State (2026-09-05, later)**: + **§1-34** (portrait blink, strip containment, auto temp
   sweep, tree clipboard focus) - restaged on test-server the same way.
 - **State (2026-09-05)**: master = 0.11.1 + **§1-33 unreleased** (files: hina/ hidden,
