@@ -26,7 +26,7 @@ from pydantic_ai.providers.openai import OpenAIProvider
 
 from . import (actions, assets, codexauth, config, files, log, permits, presets, providers, pyexec, skills, snapshots, textedit,
                staging, store, websearch, workspace)
-from . import nai, studio, studiojob
+from . import nai, studio, studiojob, toolsigs
 from . import card as cardmod
 from . import memory as mem
 
@@ -221,19 +221,34 @@ def _client(base: str, key: str, drop: set[str], timeout: float) -> Any:
     """An AsyncOpenAI for an OpenAI-compatible endpoint that drops the request
     fields the plan forbids. Wrapping `create` is the only place where
     stream_options / parallel_tool_calls / tool_choice can be removed - no
-    model setting switches those off."""
+    model setting switches those off.
+
+    The same wrapper carries Gemini's thought signatures (§1-38). Gemini 3
+    thinking models return `extra_content.google.thought_signature` on every
+    tool call and REQUIRE it back on that call when the history is replayed;
+    pydantic-ai's OpenAI model neither keeps nor sends the field, so the
+    second model call of any tool-using turn came back 400 "Function call
+    is missing a thought_signature". Captured here (streamed deltas and
+    plain responses), persisted by tool_call_id (`db` tool_sigs - the
+    history is stored and replayed across turns), and re-attached to the
+    assistant messages on the way out. Any provider that does not send the
+    field is untouched.
+    """
     import openai
     c = openai.AsyncOpenAI(base_url=base, api_key=key, timeout=timeout)
-    if drop:
-        for res in (c.chat.completions, c.responses):
-            orig = res.create
+    for res in (c.chat.completions, c.responses):
+        orig = res.create
+        chat = res is c.chat.completions
 
-            async def create(*a: Any, _orig: Any = orig, **kw: Any) -> Any:
-                for k in drop:
-                    kw.pop(k, None)
-                return await _orig(*a, **kw)
+        async def create(*a: Any, _orig: Any = orig, _chat: bool = chat, **kw: Any) -> Any:
+            for k in drop:
+                kw.pop(k, None)
+            if _chat:
+                toolsigs.attach(kw.get("messages"))
+            out = await _orig(*a, **kw)
+            return toolsigs.capture(out) if _chat else out
 
-            res.create = create  # type: ignore[method-assign]
+        res.create = create  # type: ignore[method-assign]
     return c
 
 

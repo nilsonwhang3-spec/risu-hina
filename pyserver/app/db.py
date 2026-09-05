@@ -470,6 +470,20 @@ DDL = [
     """,
     "CREATE INDEX IF NOT EXISTS actions_chat ON pending_actions(chat_key, status, created_at)",
 
+    # --- provider tool-call signatures (§1-38) ------------------------------
+    #
+    # Gemini's thought_signature per tool_call_id, replayed on the next
+    # request (toolsigs.py). Its own table rather than a column on the stored
+    # history: the history is opaque pydantic-ai JSON, and a signature has to
+    # survive compaction and re-serialisation of that JSON unchanged.
+    """
+    CREATE TABLE IF NOT EXISTS tool_sigs (
+        tool_call_id TEXT PRIMARY KEY,
+        payload_json TEXT NOT NULL,
+        created_at   REAL NOT NULL
+    )
+    """,
+
     # --- the card itself (schema 8, bot editing) ----------------------------
     #
     # Card prose fields as rows, for the same reason memories are rows: they

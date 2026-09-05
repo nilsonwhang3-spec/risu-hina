@@ -2144,6 +2144,22 @@ def h_checkpoint_restore(arg: dict) -> dict:
 # --- the approval queue -----------------------------------------------------
 
 def h_actions(arg: dict) -> dict:
+    # `charKey` lists EVERY pending proposal of the bot, each with the chat it
+    # rode on (§1-38): the bars' "제안 N 대기" counts across chats, and the
+    # agent panel only ever showed the active chat's - the rest piled up
+    # with no way to see or discard them.
+    ck = str(arg.get("charKey") or "").strip()
+    if ck and not arg.get("chatKey"):
+        rows = db.query(
+            "SELECT * FROM pending_actions WHERE char_key = ? AND status = 'pending' ORDER BY created_at", (ck,))
+        names = {str(r.get("chat_key") or ""): str(r.get("name") or "") for r in store.chats_of(ck)}
+        out = []
+        for r in rows:
+            a = actions._row(r)
+            a["chatKey"] = str(r["chat_key"])
+            a["chatName"] = names.get(str(r["chat_key"]), "")
+            out.append(a)
+        return {"actions": out}
     return {"actions": actions.pending(_chat(arg))}
 
 
@@ -2169,6 +2185,15 @@ def h_action_complete(arg: dict) -> dict:
 
 
 def h_actions_clear(arg: dict) -> dict:
+    ck = str(arg.get("charKey") or "").strip()
+    if ck and not arg.get("chatKey"):
+        # Every pending proposal of the bot, marked rejected (not deleted:
+        # the log of what was proposed and turned down stays).
+        n = db.execute(
+            "UPDATE pending_actions SET status = 'rejected', decided_at = ? "
+            "WHERE char_key = ? AND status = 'pending'", (db.now(), ck)).rowcount or 0
+        log.info("actions cleared char=%s n=%s", ck, n)
+        return {"cleared": n}
     return {"cleared": actions.clear(_chat(arg))}
 
 

@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.12.0
+//@display-name Risu Hina v0.13.0
 //@api 3.0
-//@version 0.12.0
+//@version 0.13.0
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -104,7 +104,7 @@
       this.tokenSafe = true;
       this.lastHealth = body;
       this.probeInfo = "";
-      this.gate = versionGate("0.12.0", String(body.version || ""));
+      this.gate = versionGate("0.13.0", String(body.version || ""));
       return body;
     }
     /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -1971,6 +1971,22 @@
       );
       return r.actions;
     }
+    /** Every pending proposal of the open bot, whichever chat it rode on. */
+    async actionsForBot() {
+      if (!this.activeCharKey) return [];
+      const r = await transport.get(
+        "/actions?charKey=" + encodeURIComponent(this.activeCharKey)
+      );
+      return r.actions;
+    }
+    /** Reject every pending proposal of the open bot. */
+    async clearBotActions() {
+      const r = await transport.post("/actions/clear", { charKey: this.activeCharKey });
+      this.bump();
+      void this.refreshChanges();
+      void this.refreshBotChanges();
+      return r.cleared;
+    }
     /**
      * Approve or reject one proposal, and carry it out if it is ours to do.
      *
@@ -1979,9 +1995,9 @@
      * only exist inside this iframe. The result is reported back either way, so
      * a failure here does not leave a queue entry claiming success.
      */
-    async decideAction(id, approve) {
+    async decideAction(id, approve, chatKey = "") {
       const r = await transport.post("/actions/decide", {
-        chatKey: this.activeChatKey,
+        chatKey: chatKey || this.activeChatKey,
         id,
         approve
       });
@@ -3006,7 +3022,7 @@
     }));
   }
   function colPicker(opts) {
-    const btns = opts.values.map((n) => {
+    const btns2 = opts.values.map((n) => {
       const label = opts.labels?.[n] ?? String(n);
       const b = el("button", { text: label, title: opts.labels?.[n] ? `${label} \u2014 \uD3ED\uC5D0 \uB9DE\uCDB0 \uC5F4 \uC218\uB97C \uC815\uD569\uB2C8\uB2E4` : `${n}\uC5F4\uB85C \uBCF4\uAE30` });
       b.addEventListener("click", () => {
@@ -3016,12 +3032,12 @@
       return b;
     });
     const sync = () => {
-      btns.forEach((b, i) => b.classList.toggle("on", opts.values[i] === opts.get()));
+      btns2.forEach((b, i) => b.classList.toggle("on", opts.values[i] === opts.get()));
     };
     sync();
     return el("div", { class: "segctl colpick", title: "\uC5F4 \uC218" }, [
       el("span", { class: "seglabel", text: "\u25A6" }),
-      ...btns
+      ...btns2
     ]);
   }
   function armed(button, label, confirmLabel, run) {
@@ -5494,6 +5510,101 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     ]), { wide: true });
   }
 
+  // src/ui/pendingpop.ts
+  var btns = /* @__PURE__ */ new WeakMap();
+  function syncPendingChip(anchor, count) {
+    let b = btns.get(anchor);
+    if (!b) {
+      b = el("button", { class: "ghost tiny pendingchip", title: "\uB300\uAE30 \uC911\uC778 \uC81C\uC548\uC744 \uBCF4\uACE0 \uC2B9\uC778\uD558\uAC70\uB098 \uAC70\uC808\uD569\uB2C8\uB2E4" });
+      b.addEventListener("click", () => openPendingPopover(b));
+      anchor.after(b);
+      btns.set(anchor, b);
+    }
+    b.textContent = `\uC81C\uC548 ${count} \uB300\uAE30`;
+    b.style.display = count > 0 ? "" : "none";
+  }
+  function openPendingPopover(anchor) {
+    const body = el("div", { class: "applypop pendingpop" });
+    const close = popover(anchor, body);
+    const list2 = el("div", {});
+    const head = el("div", { class: "row", style: { marginBottom: "6px" } });
+    body.append(head, list2);
+    const draw2 = async () => {
+      clear(head);
+      clear(list2);
+      list2.appendChild(el("div", { class: "hint", text: "\uC77D\uB294 \uC911\uC785\uB2C8\uB2E4\u2026" }));
+      let items5 = [];
+      try {
+        items5 = await state.actionsForBot();
+      } catch (e) {
+        clear(list2);
+        list2.appendChild(el("div", { class: "notice err", text: e instanceof Error ? e.message : String(e) }));
+        return;
+      }
+      clear(list2);
+      head.appendChild(el("span", {
+        class: "sectiontitle grow",
+        style: { marginBottom: "0" },
+        text: `\uB300\uAE30 \uC911\uC778 \uC81C\uC548 ${items5.length}\uAC74`
+      }));
+      if (!items5.length) {
+        list2.appendChild(el("div", { class: "hint", text: "\uB300\uAE30 \uC911\uC778 \uC81C\uC548\uC774 \uC5C6\uC2B5\uB2C8\uB2E4." }));
+        return;
+      }
+      const rejectAll = el("button", { class: "ghost tiny", text: "\uC804\uCCB4 \uAC70\uC808" });
+      rejectAll.addEventListener("click", async () => {
+        rejectAll.disabled = true;
+        try {
+          const n = await state.clearBotActions();
+          list2.appendChild(el("div", { class: "hint", text: `${n}\uAC74\uC744 \uAC70\uC808\uD588\uC2B5\uB2C8\uB2E4.` }));
+        } catch (e) {
+          list2.appendChild(el("div", { class: "notice err", text: e instanceof Error ? e.message : String(e) }));
+        }
+        await draw2();
+      });
+      head.appendChild(rejectAll);
+      for (const a of items5) {
+        const mine = !a.chatKey || a.chatKey === state.activeChatKey;
+        const yes = el("button", { class: "primary tiny", text: a.byHost ? "\uC2B9\uC778\xB7\uC2E4\uD589" : "\uC2B9\uC778" });
+        const no = el("button", { class: "ghost tiny", text: "\uAC70\uC808" });
+        const busy = el("span", { class: "hint" });
+        yes.disabled = !mine;
+        yes.title = mine ? "" : "\uC774 \uC81C\uC548\uC774 \uC62C\uB77C\uC628 \uCC57\uC744 \uC5F4\uC5B4\uC57C \uC2B9\uC778\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4";
+        const decide = async (approve) => {
+          yes.disabled = no.disabled = true;
+          busy.textContent = approve ? "\uC2E4\uD589 \uC911\u2026" : "\uAC70\uC808 \uC911\u2026";
+          try {
+            await state.decideAction(a.id, approve, a.chatKey || "");
+            void state.refreshChanges();
+            void state.refreshBotChanges();
+          } catch (e) {
+            busy.textContent = "";
+            list2.insertBefore(el("div", { class: "notice err", text: e instanceof Error ? e.message : String(e) }), row);
+            yes.disabled = !mine;
+            no.disabled = false;
+            return;
+          }
+          await draw2();
+        };
+        yes.addEventListener("click", () => void decide(true));
+        no.addEventListener("click", () => void decide(false));
+        const row = el("div", { class: "stagedrow" }, [
+          a.byHost ? el("span", { class: "badge err", text: "RisuAI" }) : null,
+          el("div", { class: "grow" }, [
+            el("div", { text: a.summary }),
+            el("div", { class: "hint", text: (a.chatName ? `\uCC57: ${a.chatName}` : "\uC774 \uBD07") + (mine ? "" : " \xB7 \uB2E4\uB978 \uCC57") })
+          ]),
+          busy,
+          yes,
+          no
+        ]);
+        list2.appendChild(row);
+      }
+    };
+    void draw2();
+    return void 0;
+  }
+
   // src/ui/chatbar.ts
   var bar = null;
   var applyBtn = null;
@@ -5569,6 +5680,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     const conflicts = c?.conflicts ?? 0;
     if (conflicts) parts.unshift(`\u26A0 \uCDA9\uB3CC ${conflicts}`);
     summaryEl.textContent = parts.length ? parts.join(" \xB7 ") : state.activeChatKey ? "\uBCC0\uACBD \uC5C6\uC74C" : "";
+    syncPendingChip(summaryEl, c?.actions || 0);
     const total = c?.total ?? 0;
     applyBadge.textContent = String(total);
     applyBadge.style.display = total ? "" : "none";
@@ -11847,7 +11959,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.12.0",
+            version: "0.13.0",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -12495,7 +12607,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.12.0"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.13.0"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -13319,6 +13431,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     const c = state.botChanges;
     const parts = describe2(c);
     summaryEl2.textContent = parts.length ? parts.join(" \xB7 ") : state.botKey ? "\uBCC0\uACBD \uC5C6\uC74C" : "";
+    syncPendingChip(summaryEl2, c?.actions || 0);
     const total = c?.total ?? 0;
     applyBadge2.textContent = String(total);
     applyBadge2.style.display = total ? "" : "none";
@@ -17827,7 +17940,7 @@ ${negative.value.trim()}
   }
   function candidate(it, groupItems) {
     const pic = el("div", { class: "assetpic" });
-    const btns = /* @__PURE__ */ new Map();
+    const btns2 = /* @__PURE__ */ new Map();
     const flags = el("div", { class: "row selflags" });
     const mk = (key, label, title) => {
       const b = el("button", { class: "ghost tiny", text: label, title });
@@ -17835,7 +17948,7 @@ ${negative.value.trim()}
         ev.stopPropagation();
         flag(it.filename, key);
       });
-      btns.set(key, b);
+      btns2.set(key, b);
       return b;
     };
     flags.append(
@@ -17853,7 +17966,7 @@ ${negative.value.trim()}
         ev.stopPropagation();
         flagRep(it.filename, groupItems);
       });
-      btns.set("rep", b);
+      btns2.set("rep", b);
       flags.appendChild(b);
     }
     const cell2 = el("div", { class: "fcell selcell", title: it.filename }, [
@@ -17866,10 +17979,10 @@ ${negative.value.trim()}
       cell2.classList.toggle("picked", !!s.use);
       cell2.classList.toggle("fixing", !!s.inpaint);
       cell2.classList.toggle("dropping", !!s.delete);
-      btns.get("use")?.classList.toggle("on", !!s.use);
-      btns.get("inpaint")?.classList.toggle("on", !!s.inpaint);
-      btns.get("delete")?.classList.toggle("on", !!s.delete);
-      btns.get("rep")?.classList.toggle("on", !!s.rep);
+      btns2.get("use")?.classList.toggle("on", !!s.use);
+      btns2.get("inpaint")?.classList.toggle("on", !!s.inpaint);
+      btns2.get("delete")?.classList.toggle("on", !!s.delete);
+      btns2.get("rep")?.classList.toggle("on", !!s.rep);
     };
     sync();
     cellSyncs.set(it.filename, sync);
@@ -18673,7 +18786,7 @@ ${negative.value.trim()}
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.12.0"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.13.0"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
@@ -18768,7 +18881,7 @@ ${negative.value.trim()}
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.12.0" }),
+        el("span", { class: "dim", text: "v0.13.0" }),
         healthEl,
         el("span", { class: "spacer" }),
         reload,
@@ -19040,6 +19153,6 @@ ${negative.value.trim()}
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.12.0"} loaded`);
+    console.log(`[risu-hina] v${"0.13.0"} loaded`);
   })();
 })();
