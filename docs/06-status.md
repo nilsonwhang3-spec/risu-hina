@@ -1,4 +1,4 @@
-# 06. Implementation status — as of 2026-09-06 (v0.12.0 BETA, Risu Hina)
+# 06. Implementation status — as of 2026-09-06 (v0.13.0 BETA, Risu Hina)
 
 One page for whoever picks this up next session (= me). What exists, what changed, how far it is deployed,
 and what is left. The *why* of the design is `docs/04` (assets and charx are in Appendix E), the storage layout is `docs/02`, the deployment environment is `docs/00`.
@@ -111,6 +111,25 @@ mixed-cast multi-entry batch from the panel.** Released = **v0.10.0 BETA** (§1-
 **0.3.1 (night of 2026-08-25)** — the real reason `+` never appeared was not "same version" but **CORS**: RisuAI reads `//@update-url` with a browser `fetch`, and the redirect response from the release URL carries no CORS header. Changed `//@update-url` to
 `https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js`, and made `tools/bundle.py` write that file into the repository (included in the release commit). In the backend code only VERSION changed.
 
+**+ §1-38 (2026-09-06, 0.13.0)**: ① **Gemini 3 thought signatures.** A user hit `400 Function
+call is missing a thought_signature in functionCall parts … default_api:list_lore, position 8`
+on gemini-3.8-flash. Cause: Gemini's OpenAI-compatible endpoint returns
+`extra_content.google.thought_signature` on every tool call and requires it back when the
+history is replayed; pydantic-ai 2.33's OpenAI chat model has no code for the field, so the
+second model call of any tool-using turn failed. Fix: `app/toolsigs.py` - `capture` reads the
+field off plain responses and streamed deltas (a `_StreamProxy` that maps index→id for
+signatures arriving on a later delta), `remember` keeps it by tool_call_id in the new
+`tool_sigs` table (the history is persisted and replayed across turns/sessions; pruned after
+30 days), `attach` puts it back on the request's assistant tool calls; wired in `agent._client`'s
+existing `create` wrapper, chat/completions only. `tests/test_toolsigs.py` joins the gate. ②
+**"제안 10 대기 … 이거 어케 함".** The bars counted every pending proposal of the bot; the
+agent panel's approval card only ever listed the ACTIVE chat's, so proposals from other chats
+or ended sessions piled up behind a number nobody could act on. `GET /actions?charKey=` lists
+them all (with `chatKey`/`chatName`), `POST /actions/clear {charKey}` rejects them all, and the
+chip is a button (`ui/pendingpop.ts`, `syncPendingChip` on both bars): a popover with per-row
+거절 everywhere, 승인 where the proposal's chat is the open one, and 전체 거절. MINOR bump
+(0.13.0): the plugin calls the new listing.
+
 **+ §1-37 (2026-09-05, unreleased)**: multi-file delete from the row context menu - "press the
 red button on the bar" pointed at a bar that had wrapped or scrolled away; the menu now opens
 the tree's two-menu confirm (`정말 삭제 (N개)`) at the cursor and runs `runDelete`.
@@ -219,6 +238,9 @@ icons outside the studio, compact rows + switch, the caveat card and its `<stron
 
 **Handoff 2026-08-31 (the studio feedback marathon, §1-19 ~ §1-25).** Where the next session picks up:
 
+- **State (2026-09-06, later)**: **v0.13.0 BETA RELEASED** = §1-38 (Gemini thought signatures
+  round-trip via `toolsigs.py` + `tool_sigs` table; the "제안 N 대기" chip opens a bot-wide
+  proposal popover with reject/approve/전체 거절). MINOR: backend, then plugin `+`.
 - **State (2026-09-06)**: **v0.12.0 BETA RELEASED** = §1-33 ~ §1-37 (the file-space cleanup,
   검수 anywhere, the rule popover, the two-splitter overflow, the portrait blink, strip/centre
   containment, the auto temp sweep, clipboard keys everywhere, red dots for unseen files, 이 봇만

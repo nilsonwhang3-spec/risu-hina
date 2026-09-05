@@ -16,6 +16,7 @@ import { state, type Changes } from '../state';
 import * as host from '../host';
 import { clientLog } from '../transport';
 import { openConflicts } from './conflicts';
+import { syncPendingChip } from './pendingpop';
 
 let bar: HTMLElement | null = null;
 let applyBtn: HTMLElement | null = null;
@@ -100,6 +101,8 @@ export function refreshChatBar(): void {
   const conflicts = c?.conflicts ?? 0;
   if (conflicts) parts.unshift(`⚠ 충돌 ${conflicts}`);
   summaryEl.textContent = parts.length ? parts.join(' · ') : (state.activeChatKey ? '변경 없음' : '');
+  // The proposals chip is a button (§1-38): the count alone was a dead end.
+  syncPendingChip(summaryEl, c?.actions || 0);
   const total = c?.total ?? 0;
   applyBadge.textContent = String(total);
   applyBadge.style.display = total ? '' : 'none';

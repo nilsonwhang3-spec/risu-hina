@@ -18,6 +18,7 @@ import { state, type CardChanges } from '../state';
 import { shellNotice, openSnapshotName, snapshotCleanup } from './chatbar';
 import { clientLog } from '../transport';
 import { openConflicts } from './conflicts';
+import { syncPendingChip } from './pendingpop';
 
 let bar: HTMLElement | null = null;
 let applyBtn: HTMLButtonElement | null = null;
@@ -172,6 +173,7 @@ export function refreshBotBar(): void {
   const c = state.botChanges;
   const parts = describe(c);
   summaryEl.textContent = parts.length ? parts.join(' · ') : (state.botKey ? '변경 없음' : '');
+  syncPendingChip(summaryEl, c?.actions || 0);
   const total = c?.total ?? 0;
   applyBadge.textContent = String(total);
   applyBadge.style.display = total ? '' : 'none';

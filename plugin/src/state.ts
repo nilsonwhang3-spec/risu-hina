@@ -399,6 +399,9 @@ export interface PendingAction {
   /** True when only the plugin can carry it out (RisuAI write, save a copy). */
   byHost: boolean;
   createdAt: number;
+  /** The chat the proposal rode on (bot-wide listing, §1-38). */
+  chatKey?: string;
+  chatName?: string;
 }
 
 export interface CardField {
@@ -1735,6 +1738,23 @@ class AppState {
     return r.actions;
   }
 
+  /** Every pending proposal of the open bot, whichever chat it rode on. */
+  async actionsForBot(): Promise<PendingAction[]> {
+    if (!this.activeCharKey) return [];
+    const r = await transport.get(
+      '/actions?charKey=' + encodeURIComponent(this.activeCharKey)) as { actions: PendingAction[] };
+    return r.actions;
+  }
+
+  /** Reject every pending proposal of the open bot. */
+  async clearBotActions(): Promise<number> {
+    const r = await transport.post('/actions/clear', { charKey: this.activeCharKey }) as { cleared: number };
+    this.bump();
+    void this.refreshChanges();
+    void this.refreshBotChanges();
+    return r.cleared;
+  }
+
   /**
    * Approve or reject one proposal, and carry it out if it is ours to do.
    *
@@ -1743,9 +1763,9 @@ class AppState {
    * only exist inside this iframe. The result is reported back either way, so
    * a failure here does not leave a queue entry claiming success.
    */
-  async decideAction(id: string, approve: boolean): Promise<string> {
+  async decideAction(id: string, approve: boolean, chatKey = ''): Promise<string> {
     const r = await transport.post('/actions/decide', {
-      chatKey: this.activeChatKey, id, approve,
+      chatKey: chatKey || this.activeChatKey, id, approve,
     }) as { approved: boolean; result?: string; host?: { kind: string; args: Record<string, any> } };
 
     if (!r.approved) return '거절했습니다.';

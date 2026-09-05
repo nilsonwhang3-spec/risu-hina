@@ -1161,6 +1161,13 @@ def test_action_queue(s: Server, ws: dict) -> None:
     st, body = s.post("/actions/clear", {"chatKey": a})
     check("the queue can be cleared", st == 200, str(body)[:120])
 
+    # §1-38: the bot-wide listing and clear the "제안 N 대기" chip uses.
+    ck = str(ws.get("charKey") or "")
+    st, body = s.get(q("/actions", charKey=ck))
+    check("the bot-wide queue is readable", st == 200 and isinstance(body.get("actions"), list), str(body)[:120])
+    st, body = s.post("/actions/clear", {"charKey": ck})
+    check("and can be rejected wholesale", st == 200 and body.get("cleared") == 0, str(body)[:120])
+
 
 def card_payload(chats: list[dict], **extra: object) -> dict:
     """A bot with every modelled material plus fields we deliberately do not

@@ -1,6 +1,6 @@
 {
   "name": "risu-hina-plugin",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "private": true,
   "//risuhinaRepo": "owner/repo on GitHub. Empty means no //@update-url is emitted.",
   "risuhinaRepo": "nilsonwhang3-spec/risu-hina",
