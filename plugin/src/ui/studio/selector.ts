@@ -121,14 +121,21 @@ function gridCols(): string {
     : 'repeat(auto-fill, minmax(190px, 1fr))';
 }
 
-/** Whether the loaded groups belong to this folder - drawCentre's gate. */
+/** The filesRev the groups were read at: a batch that lands, an upload, a
+ * rename - any file change - re-reads them (§1-39: the screen used to keep
+ * the old folder until the tab was left and re-entered). */
+let groupsRev = -1;
+
+/** Whether the loaded groups belong to this folder AND are current -
+ * drawCentre's gate. */
 export function hasGroups(folder: string): boolean {
-  return !!groups && groups.folder === folder;
+  return !!groups && groups.folder === folder && groupsRev === state.filesRev;
 }
 
 export async function loadGroups(folder: string): Promise<void> {
   try {
     const eff = effective(prefsFor(folder));
+    groupsRev = state.filesRev;
     groups = await state.studio.group(folder, eff.pattern, eff.groupBy);
     selection = {};
     for (const g of [...groups.groups.map((x) => x.items), groups.unmatched].flat()) {
@@ -151,24 +158,13 @@ function queueSave(): void {
 
 function flag(filename: string, key: keyof SelectionState): void {
   const cur = selection[filename] || { use: false, inpaint: false, delete: false };
-  selection[filename] = { ...cur, [key]: !cur[key] };
+  const next: SelectionState = { ...cur, [key]: !cur[key] };
+  // 채택 and 버림 are answers to the same question (§1-39): turning one on
+  // turns the other off. 수정 ("fix first") stays independent.
+  if (key === 'use' && next.use) next.delete = false;
+  if (key === 'delete' && next.delete) { next.use = false; next.rep = false; }
+  selection[filename] = next;
   cellSyncs.get(filename)?.();
-  missingSync?.();
-  queueSave();
-}
-
-/** 대표 is exclusive per group; turning it on also 채택s the image (the
- * export writes chosen files only, and the rep takes the canonical name). */
-function flagRep(filename: string, groupItems: GroupItem[]): void {
-  const cur = !!selection[filename]?.rep;
-  for (const gi of groupItems) {
-    const s = selection[gi.filename] || { use: false, inpaint: false, delete: false };
-    const want = gi.filename === filename ? !cur : false;
-    if (!!s.rep !== want) {
-      selection[gi.filename] = { ...s, rep: want, ...(want ? { use: true } : {}) };
-      cellSyncs.get(gi.filename)?.();
-    }
-  }
   missingSync?.();
   queueSave();
 }
@@ -203,7 +199,10 @@ export function drawSelector(node: Folder): void {
   const mkView = (v: 'all' | 'group' | 'rep', label: string) => ({
     label, on: viewMode === v, pick: () => { viewMode = v; drill = ''; hub.drawCentre(); },
   });
-  bar.append(segCtl([mkView('group', '그룹별'), mkView('all', '전체'), mkView('rep', '대표')]));
+  // 대표 (the per-group representative) is gone from the screen (§1-39: "왜?"
+  // - one more flag nobody asked for); the export still takes the first
+  // 채택 as the canonical name. Old selection files keep their rep bits.
+  bar.append(segCtl([mkView('group', '그룹별'), mkView('all', '전체')]));
   bar.appendChild(colPicker({ values: [0, 2, 3, 4, 5, 6], labels: { 0: '자동' }, get: () => S.selCols, set: (n) => {
     S.selCols = n; persistSelCols();
     for (const gEl of Array.from(document.querySelectorAll<HTMLElement>('.selgrid'))) {
@@ -211,15 +210,6 @@ export function drawSelector(node: Folder): void {
     }
   } }));
   bar.appendChild(el('span', { class: 'spacer' }));
-  const firstEach = el('button', { class: 'ghost tiny', text: '그룹마다 첫 장' });
-  firstEach.addEventListener('click', () => {
-    for (const grp of g.groups) {
-      const f = grp.items[0];
-      if (f) selection[f.filename] = { ...selection[f.filename], use: true };
-    }
-    syncAllCells();
-    void state.studio.saveSelection(S.selected, selection);
-  });
   const none = el('button', { class: 'ghost tiny', text: '선택 해제' });
   none.addEventListener('click', () => {
     for (const k of Object.keys(selection)) selection[k] = { ...selection[k], use: false, rep: false };
@@ -228,7 +218,7 @@ export function drawSelector(node: Folder): void {
   });
   // 봇에 반영 belongs to the selected/ folder an export made - the folder
   // one adopts FROM - not to the pool of candidates (user).
-  bar.append(firstEach, none, exportButton(node));
+  bar.append(none, exportButton(node));
   if (/\/selected$/.test(node.path)) bar.appendChild(adoptButton());
   viewMount.appendChild(bar);
 
@@ -246,22 +236,22 @@ export function drawSelector(node: Folder): void {
     head.appendChild(badge);
   }
 
-  // 부족분: groups where nothing is chosen and nothing is being fixed - the
-  // slots the export would leave a placeholder for. One button turns them
-  // into reservations, closing the cycle: 분류 → 부족분 → 다음 배치.
+  // 부족분: a group that exists but has NO 채택 yet (§1-39, user: not a
+  // comparison against the preset - a group with candidates and no pick).
+  // The button reserves a re-run for the ones the current preset can name.
   const missingBox = el('div', {});
   viewMount.appendChild(missingBox);
   const renderMissing = (): void => {
     clear(missingBox);
     const missing = g.groups
-      .filter((grp) => !grp.items.some((i) => selection[i.filename]?.use || selection[i.filename]?.inpaint))
+      .filter((grp) => !grp.items.some((i) => selection[i.filename]?.use))
       .map((grp) => grp.key);
     if (!missing.length) return;
-    const fill = el('button', { class: 'ghost tiny', text: '부족분 예약에 담기',
-      title: '씬 프리셋에서 같은 이름의 씬을 찾아 1장씩 배치 예약에 넣습니다' }) as HTMLButtonElement;
+    const fill = el('button', { class: 'ghost tiny', text: '부족분 다시 생성 예약',
+      title: '채택이 없는 그룹을 배치 예약에 1장씩 넣습니다 (현재 씬 프리셋에 같은 이름의 씬이 있는 것만)' }) as HTMLButtonElement;
     fill.addEventListener('click', () => void reserveMissing(missing, fill));
     missingBox.appendChild(el('div', { class: 'row', style: { marginBottom: '8px' } }, [
-      el('span', { class: 'badge warn', text: `부족분 ${missing.length}개` }),
+      el('span', { class: 'badge warn', text: `채택 없는 그룹 ${missing.length}개`, title: '후보는 있는데 아직 채택한 장이 없는 그룹' }),
       el('span', { class: 'hint grow', text: missing.join(', ') }),
       fill,
     ]));
@@ -291,29 +281,6 @@ export function drawSelector(node: Folder): void {
     for (const grp of g.groups) grid.appendChild(groupCard(grp));
     viewMount.appendChild(grid);
     if (!g.groups.length) viewMount.appendChild(el('div', { class: 'empty', text: '규칙이 읽어낸 그룹이 없습니다 — 구분자와 그룹 기준을 확인하세요.' }));
-  } else if (viewMode === 'rep') {
-    // 대표 모아보기: the chosen representative per group side by side - the
-    // "씬별 대표 이미지" answer sheet. Click through to the group's candidates.
-    const grid = el('div', { class: 'agrid selgrid', style: { gridTemplateColumns: gridCols() } });
-    for (const grp of g.groups) {
-      const chosen = grp.items.find((i) => selection[i.filename]?.rep)
-        ?? grp.items.find((i) => selection[i.filename]?.use);
-      const pic = el('div', { class: 'assetpic' });
-      const cellR = el('div', { class: 'fcell groupcard' + (chosen ? ' picked' : ''),
-                                title: `${grp.key} — 눌러서 후보를 펼칩니다` }, [
-        pic,
-        el('div', { class: 'fname row' }, [
-          el('span', { class: 'grow', text: grp.key }),
-          chosen ? null : el('span', { class: 'badge warn', text: '대표 없음' }),
-        ]),
-      ]);
-      if (chosen) void loadThumb({ path: chosen.path, name: chosen.filename, size: 0, modified: 0, textual: false }, pic);
-      else pic.appendChild(el('div', { class: 'assettype', text: '—' }));
-      cellR.addEventListener('click', () => { drill = grp.key; hub.drawCentre(); });
-      grid.appendChild(cellR);
-    }
-    viewMount.appendChild(grid);
-    if (!g.groups.length) viewMount.appendChild(el('div', { class: 'empty', text: '규칙이 읽어낸 그룹이 없습니다.' }));
   } else {
     viewMount.appendChild(candidateGrid([...g.groups.flatMap((x) => x.items)]));
   }
@@ -393,14 +360,8 @@ function candidate(it: GroupItem, groupItems?: GroupItem[]): HTMLElement {
     mk('inpaint', '수정', '먼저 고쳐야 합니다'),
     mk('delete', '버림', '지울 후보입니다'),
   );
-  if (groupItems) {
-    // Only where the group is known (drill view): 대표 is a per-group choice.
-    const b = el('button', { class: 'ghost tiny', text: '대표',
-      title: '그룹의 대표로 (그룹당 1장 · 내보낼 때 정식 이름을 가져갑니다)' });
-    b.addEventListener('click', (ev) => { ev.stopPropagation(); flagRep(it.filename, groupItems); });
-    btns.set('rep', b);
-    flags.appendChild(b);
-  }
+  // (the 대표 button is retired, §1-39; groupItems is kept for callers)
+  void groupItems;
   const cell2 = el('div', { class: 'fcell selcell', title: it.filename }, [
     pic, el('div', { class: 'fname', text: it.filename }), flags,
   ]);
@@ -669,7 +630,8 @@ function adoptButton(): HTMLElement {
 // still in the DOM), which read as "images flicker back to empty boxes".
 export async function loadThumb(f: WorkspaceFile, mount: HTMLElement): Promise<void> {
   try {
-    const url = await blobUrl(f.path, '', { thumb: true });
+    // Review wants a sharper picture than the file grids: ~720px (§1-39).
+    const url = await blobUrl(f.path, '', { thumb: true, w: 720 });
     if (!mount.isConnected) return;
     clear(mount);
     const img = el('img', { class: 'assetimg', src: url, alt: '' });

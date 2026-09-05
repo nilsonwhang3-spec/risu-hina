@@ -1099,12 +1099,18 @@ def build() -> Agent[Deps]:
         랜덤으로 1줄만** 실린다 (# 주석·빈 줄 제외, 고른 줄 안의 <참조> 재귀).
         """
         try:
-            spec = json.loads(spec_json)
-            items = studio.plan(spec)
+            parsed = json.loads(spec_json)
+            # An array of specs (a batch file holding several runs) plans as
+            # the concatenation, one run after another (§1-39).
+            specs = parsed if isinstance(parsed, list) else [parsed]
+            items = []
+            for spec in specs:
+                items.extend(studio.plan(spec))
+            spec = specs[0] if specs else {}
         except Exception as e:  # noqa: BLE001
             return f"계획을 세우지 못했습니다: {e}"
         est = studio.estimate(spec, len(items))
-        lines = [f"{len(items)}장 · {est['note']}"]
+        lines = [(f"{len(specs)}개 사양, " if len(specs) > 1 else "") + f"{len(items)}장 · {est['note']}"]
         for i in items[:40]:
             lines.append(f"  {i['name']}  seed={i['seed']}  {i['prompt'][:70]}")
         if len(items) > 40:
@@ -1121,21 +1127,41 @@ def build() -> Agent[Deps]:
         로 job id 만 받고 studio_job 으로 확인한다.
         **배치는 전역 직렬이다** — 여러 잡을 등록하면 순서대로 대기한다(NovelAI 는
         계정당 동시 생성을 잠근다). 캐릭터별 잡을 한꺼번에 쌓지 말고, 한 배치의
-        결과를 확인한 뒤 다음을 시작해라. **성인(NSFW) 에셋이면 시작 전에
-        load_skill("NSFW 에셋 생성 함정") 을 먼저 읽는다** (ucPreset: 2 명시,
-        네거티브 male/boy 금지, 레시피 검증 등).
+        결과를 확인한 뒤 다음을 시작해라.
         레퍼런스는 확정 비용이 든다 — 바이브 인코딩 2 Anlas/장(캐시 시 0),
         캐릭터 레퍼런스는 **생성 장당 5 Anlas** — 쓰기 전에 사용자에게 알린다.
         일회성 씬 조합은 spec.scenes 인라인으로 보내고, 반복해서 쓸 임시 스펙은
         studio/config/scenes/ 가 아니라 `studio/config/.studio/adhoc/` 에 write_file 로 남긴다.
+        **spec 은 하나의 객체 또는 객체의 배열** — 배열이면 순서대로 각각 한 잡으로
+        돌린다 (배치 명세 파일이 여러 사양을 담고 있어도 그대로 넘겨라).
         """
         try:
-            spec = json.loads(spec_json)
-            if isinstance(spec, dict) and not str(spec.get("folder") or "").strip():
-                # A batch for THIS bot lands in its own output folder, so the
-                # 검수 tab has one place to look (§1-33). A spec that names a
-                # folder keeps it.
-                spec["folder"] = f"studio/output/{workspace.bot_folder(ctx.deps.char_key)}"
+            parsed = json.loads(spec_json)
+            specs = parsed if isinstance(parsed, list) else [parsed]
+            if not specs or not all(isinstance(s, dict) for s in specs):
+                return "spec 은 객체이거나 객체의 배열이어야 합니다."
+            for spec in specs:
+                if not str(spec.get("folder") or "").strip():
+                    # A batch for THIS bot lands in its own output folder, so
+                    # the 검수 tab has one place to look (§1-33). A spec that
+                    # names a folder keeps it.
+                    spec["folder"] = f"studio/output/{workspace.bot_folder(ctx.deps.char_key)}"
+        except Exception as e:  # noqa: BLE001
+            return f"시작하지 못했습니다: {e}"
+        if len(specs) == 1:
+            return _studio_generate_one(ctx, specs[0], wait)
+        # Several specs: one job each, in order (the runner serialises them
+        # anyway); each one's result is a paragraph of the answer (§1-39).
+        outs = []
+        for i, spec in enumerate(specs, 1):
+            outs.append(f"[배치 {i}/{len(specs)}] " + _studio_generate_one(ctx, spec, wait))
+            from . import session as session_mod
+            if session_mod.stopped(ctx.deps.session_id):
+                break
+        return "\n\n".join(outs)
+
+    def _studio_generate_one(ctx: RunContext[Deps], spec: dict, wait: bool) -> str:
+        try:
             r = studiojob.start(spec)
         except Exception as e:  # noqa: BLE001
             return f"시작하지 못했습니다: {e}"

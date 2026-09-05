@@ -2175,10 +2175,8 @@ console.log('\ntest_studio_cards');
     .find((b) => (b.textContent || '') === '수정');
   edit?.dispatchEvent(new window.Event('click', { bubbles: true }));
   await settle(600);
-  check('수정 opens the centre editor',
-        [...document.querySelectorAll('.panel.active .left input')]
-          .some((i) => i.value === '스모크스타일'),
-        (document.querySelector('.panel.active .left')?.textContent || '').slice(0, 120));
+  // §1-39: a style has no 수정 row - it is edited in place in the left column.
+  check('the style list offers no separate 수정 (edited on the left)', !edit);
   // No stray style <select> anywhere - the dropdown row is the one picker.
   check('no style select pickers remain',
         ![...document.querySelectorAll('.panel.active select option')]
@@ -2872,8 +2870,8 @@ console.log('\ntest_studio_selector');
   await settle(400);
   const cells = document.querySelectorAll('.panel.active .selcell');
   check('unfolding a group lists its candidates', cells.length === 2, String(cells.length));
-  check('each offers the three flags plus 대표',
-        (cells[0]?.querySelectorAll('.selflags button') || []).length === 4);
+  check('each offers the three flags (대표 retired, §1-39)',
+        (cells[0]?.querySelectorAll('.selflags button') || []).length === 3);
   const useBtn = [...(cells[0]?.querySelectorAll('.selflags button') || [])]
     .find((b) => b.textContent === '채택');
   useBtn?.dispatchEvent(new window.Event('click', { bubbles: true }));
@@ -2896,8 +2894,8 @@ console.log('\ntest_studio_selector');
   // Groups with nothing chosen surface as 부족분 - the export placeholders,
   // shown before the export, with a button that reserves them for the next
   // batch (the 분류 → 부족분 → 다음 배치 cycle).
-  check('unchosen groups surface as 부족분',
-        /부족분/.test(text()) && !!findButton(document.querySelector('.panel.active .left'), '부족분 예약에 담기'),
+  check('groups with no 채택 surface as 채택 없는 그룹 (§1-39)',
+        /채택 없는 그룹/.test(text()) && !!findButton(document.querySelector('.panel.active .left'), '부족분 다시 생성 예약'),
         text().slice(0, 300));
 
   // §1-30: the rule folds behind one compact button; tokens MULTI-select.

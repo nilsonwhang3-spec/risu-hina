@@ -550,7 +550,8 @@ def load(name_or_slug: str) -> str:
         names = ", ".join(s["name"] for s in enabled_skills()) or "(없음)"
         return f"그런 스킬이 없습니다: {name_or_slug!r}. 있는 스킬: {names}"
     if not sk["enabled"]:
-        return f"스킬 “{sk['name']}” 은 꺼져 있습니다. 사용자가 설정에서 켜야 쓸 수 있습니다."
+        return (f"스킬 “{sk['name']}” 은 사용자가 꺼 두었습니다 — 부르지 말고, 그 스킬 없이 진행하세요. "
+                "(꺼진 스킬은 카탈로그에도 없습니다; 다시 시도하지 마세요.)")
     lines = [f"# 스킬: {sk['name']}", f"_{sk['description']}_", "", sk["body"] or "(본문 없음)"]
     if sk["files"]:
         lines.append("")
@@ -635,7 +636,30 @@ SEEDS: list[tuple[str, str, str]] = [
 # Seeds that were shipped once and are retired: removed from installs that
 # still carry them untouched (the user asked; the agent does the job as well
 # without a procedure card).
-RETIRED_SEEDS = ("말투 통일",)
+RETIRED_SEEDS = ("말투 통일", "NSFW 에셋 생성 함정")
+# Bumped when RETIRED_SEEDS grows, so an existing install sweeps the new
+# entry once (defaults_once ran on 0.7.2 installs and never again).
+RETIRE_KEY = "skills_retire_v2"
+
+
+def retire_once() -> None:
+    """Remove retired seeds an existing install still carries (§1-39: the
+    NSFW pitfalls card confused more than it helped, and studio_generate no
+    longer asks for it - a disabled skill the prompt still named was a
+    load_skill failure every time)."""
+    if db.has_migration(RETIRE_KEY):
+        return
+    gone = 0
+    for s in list_all():
+        if s["name"].strip() in RETIRED_SEEDS:
+            try:
+                delete(s["slug"])
+                gone += 1
+            except Exception as e:  # noqa: BLE001
+                log.warn("retire %s: %s", s["slug"], e)
+    db.mark_migration(RETIRE_KEY)
+    if gone:
+        log.info("skills: retired %s seed(s)", gone)
 
 # filename -> (display name, description, starts enabled). All on by default
 # since 0.7.2: a reference the agent may need is worth its catalog line, and
@@ -657,8 +681,6 @@ SEED_FILES: dict[str, tuple[str, str, bool]] = {
                         "사용자가 올린 .charx 카드를 읽기 좋은 폴더로 풀어 조사해야 할 때.", True),
     "studio-image-ops.md": ("에셋 스튜디오 이미지 가공",
                             "에셋 스튜디오의 이미지를 크기 조절·자르기·포맷 변환·메타데이터 제거해야 할 때. Pillow 는 배포 번들에 없어 run_python 에서 설치해 쓴다.", True),
-    "studio-nsfw-assets.md": ("NSFW 에셋 생성 함정",
-                              "성인(NSFW) 이미지 에셋을 생성·배치하기 전에 반드시. ucPreset None 지정(2)과 레시피 확인, 네거티브에 male/boy 금지, 여성 레퍼런스의 단독 구도 편향 대응, 의상 변형(partially undressed/nude) 프롬프트, 배치 직렬 실행, 생성 전·후 체크리스트.", True),
     "arca-html.md": ("아카라이브 HTML 작성",
                      "아카라이브(arca.live)에 붙여넣을 HTML(챗로그·소개글·요약)을 만들 때의 제약.", True),
 }

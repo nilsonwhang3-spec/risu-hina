@@ -1852,7 +1852,7 @@ def test_skills(s: Server) -> None:
     st, body = s.get("/skills/preview")
     check("a disabled skill leaves the catalog", "테스트 스킬" not in (body.get("prompt") or ""), (body.get("prompt") or "")[:200])
     st, body = s.get(q("/skills/preview", name="테스트 스킬"))
-    check("and cannot be loaded", "꺼져" in (body.get("prompt") or ""), (body.get("prompt") or "")[:200])
+    check("and cannot be loaded", "꺼 두었습니다" in (body.get("prompt") or ""), (body.get("prompt") or "")[:200])
     st, body = s.get("/skills")
     kept = [x for x in body.get("skills") or [] if x.get("id") == sid]
     check("but it is still stored", len(kept) == 1 and kept[0].get("enabled") is False, str(kept)[:200])

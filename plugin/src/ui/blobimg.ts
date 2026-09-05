@@ -56,10 +56,12 @@ export function safeWorkspacePath(path: string): boolean {
 export interface BlobOptions {
   /** Fetch the server-side WebP thumbnail instead of the original bytes. */
   thumb?: boolean;
+  /** Thumbnail width (default 360; 검수 asks for 720, §1-39). */
+  w?: number;
 }
 
 export async function blobUrl(path: string, stamp = '', opts: BlobOptions = {}): Promise<string> {
-  const key = (opts.thumb ? 't:' : '') + (stamp ? `${path}:${stamp}` : path);
+  const key = (opts.thumb ? `t${opts.w || 360}:` : '') + (stamp ? `${path}:${stamp}` : path);
   const hit = cache.get(key);
   if (hit) {
     cache.delete(key);
@@ -89,7 +91,7 @@ async function fetchBlob(path: string, key: string, opts: BlobOptions): Promise<
     const again = cache.get(key);
     if (again) return again;
     const bytes = opts.thumb
-      ? await state.fileThumb(path)
+      ? await state.fileThumb(path, opts.w || 360)
       : await state.fileBytes(path, IMAGE_TIMEOUT_MS);
     const buf = new Uint8Array(bytes.byteLength);
     buf.set(bytes);

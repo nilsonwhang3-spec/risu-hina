@@ -206,7 +206,7 @@ async function refresh(): Promise<void> {
 
 function buildNodes(data: FileListing): void {
   nodes = new Map();
-  const shown = data.areas.filter((a) => showInternal || DEFAULT_AREAS.has(a.area));
+  const shown = (data.areas ?? []).filter((a) => showInternal || DEFAULT_AREAS.has(a.area));
   // "이 봇만": a per-bot area keeps only the open bot's folder.
   const mine = onlyMine && data.botFolder ? data.botFolder : '';
   const keep = (area: string, path: string): boolean =>
@@ -586,11 +586,18 @@ function drawCentre(): void {
   });
   searchWrap.append(searchBtn, searchInput);
 
+  // A folder of pictures offers 검수 right here (§1-39): the path from the
+  // files tab to the studio's selector was a right-click menu nobody found.
+  const ownPics = !n.virtual && n.path.includes('/') && n.files.some((f) => IMAGE_RE.test(f.name));
+  const inspectBtn = el('button', { class: 'primary tiny', text: '검수',
+    title: '이 폴더의 그림을 에셋 스튜디오 검수 화면에서 비교·채택합니다' });
+  inspectBtn.addEventListener('click', () => { state.openTabRequest = 'studio'; state.requestOpenStudio(n.path); });
   viewMount.appendChild(el('div', { class: 'filebar' }, [
     el('span', { class: 'filecrumb', text: n.virtual ? '임시 문서' : n.path + '/' }),
     n.virtual ? null : copyPathButton(n.path),
     el('span', { class: 'hint', text: `${n.files.length}개` + (n.kids.length ? ` · 폴더 ${n.kids.length}` : '') }),
     el('span', { class: 'spacer' }),
+    ownPics ? inspectBtn : null,
     searchWrap,
     hasImages ? viewBtn : null,
     all, dl, zipAll, mv, del,
@@ -1184,7 +1191,8 @@ async function drawPreview(f: WorkspaceFile, n: Folder): Promise<void> {
   if (IMAGE_RE.test(f.name)) {
     body.appendChild(el('div', { class: 'hint', text: '불러오는 중입니다…' }));
     try {
-      const url = await blobUrl(f.path, String(f.modified));
+      // A 1024px thumbnail, not the multi-MB original: the preview used to sit on a spinner past the 45s image timeout for big PNGs (§1-39).
+      const url = await blobUrl(f.path, String(f.modified), { thumb: true, w: 1024 });
       clear(body);
       const img = el('img', { src: url, alt: f.name });
       img.addEventListener('error', () => { clear(body); body.appendChild(el('div', { class: 'hint', text: '이 호스트에서는 그림을 표시할 수 없습니다. 내 PC에 저장해서 보세요.' })); });
