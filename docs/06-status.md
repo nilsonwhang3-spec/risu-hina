@@ -111,6 +111,10 @@ mixed-cast multi-entry batch from the panel.** Released = **v0.10.0 BETA** (§1-
 **0.3.1 (night of 2026-08-25)** — the real reason `+` never appeared was not "same version" but **CORS**: RisuAI reads `//@update-url` with a browser `fetch`, and the redirect response from the release URL carries no CORS header. Changed `//@update-url` to
 `https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js`, and made `tools/bundle.py` write that file into the repository (included in the release commit). In the backend code only VERSION changed.
 
+**+ §1-37 (2026-09-05, unreleased)**: multi-file delete from the row context menu - "press the
+red button on the bar" pointed at a bar that had wrapped or scrolled away; the menu now opens
+the tree's two-menu confirm (`정말 삭제 (N개)`) at the cursor and runs `runDelete`.
+
 **+ §1-36 (2026-09-05, two more, unreleased)**: ① "1 in the workspace - but where?": the tab
 badge no longer clears on opening the files tab; an unseen file keeps a red dot on its row and
 on every folder above it in the tree (`TreeNode.dot`, `state.hasUnseenUnder`), and looking at

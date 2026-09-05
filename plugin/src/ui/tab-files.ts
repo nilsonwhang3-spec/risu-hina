@@ -856,10 +856,14 @@ function openRowMenu(ev: MouseEvent, e: { path: string; name: string; file?: Wor
     { label: '경로 복사', onClick: () => { copyToClipboard(e.path); notice('경로를 복사했습니다.', 'ok'); } },
     { label: many ? `내려받기 (${paths.length})` : '내려받기', onClick: () => void downloadSelected(n) },
     null,
-    // The two-step confirm stays: the menu arms the bar's delete, the red
-    // button fires it - a context menu must not be a one-click shredder.
+    // The two-step confirm stays, but as a SECOND menu at the same spot (the
+    // tree's convention): "press the red button on the bar" sent people to a
+    // bar that had wrapped or scrolled out of sight - "there is no red
+    // button" (§1-37). A context menu still must not be a one-click shredder.
     { label: many ? `삭제 (${paths.length})…` : '삭제…', danger: true, disabled: !can,
-      onClick: () => { delCtrl?.arm(); notice('삭제하려면 막대의 빨간 확인 버튼을 한 번 더 누르세요.'); } },
+      onClick: () => menuAt(ev.clientX, ev.clientY, [
+        { label: `정말 삭제 (${paths.length}개)`, danger: true, onClick: () => void runDelete(n) },
+      ]) },
   ]);
 }
 
