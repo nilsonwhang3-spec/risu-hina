@@ -1449,7 +1449,14 @@ class AppState {
     if (hidden) q.push('hidden=1');
     // The listing names this bot's folder back (`botFolder`) for "이 봇만".
     if (bot) q.push('bot=' + encodeURIComponent(bot));
-    return await transport.get('/files' + (q.length ? '?' + q.join('&') : ''));
+    const r = await transport.get<FileListing | null>('/files' + (q.length ? '?' + q.join('&') : ''));
+    // A reply without `areas` (an empty body while the backend restarts, a
+    // proxy's placeholder) used to surface as "Cannot read properties of
+    // null (reading 'areas')" in the files tab (§1-39). Name the condition.
+    if (!r || !Array.isArray(r.areas)) {
+      throw new Error('파일 목록을 받지 못했습니다 (백엔드가 재시작 중이거나 응답이 비어 있음) — 잠시 뒤 새로고침하세요.');
+    }
+    return r;
   }
 
   /** This bot's SYSTEM directory: frozen originals and machinery, read-only. */

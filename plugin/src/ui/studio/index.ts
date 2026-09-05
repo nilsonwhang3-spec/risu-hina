@@ -37,7 +37,7 @@ import { buildLeftPrompt, syncPromptBadges } from './left-prompt';
 import { buildLeftChars } from './left-chars';
 import { buildLeftOutput, openFolderPicker } from './left-output';
 import { drawFragments } from './center-frags';
-import { drawSingle, singleTick } from './center-single';
+import { drawSingle, singleTick, syncControls } from './center-single';
 import { drawBatch, batchTick } from './center-batch';
 import { buildStrip, stripTick, refreshStrip } from './strip';
 import { drawFolder } from './center-folder';
@@ -153,7 +153,12 @@ export function renderStudioTab(mount: HTMLElement): void {
     // of ours runs, look every few seconds for a batch the agent (or another
     // window) started - loadJobs adopts it and the ordinary poll takes over.
     setInterval(() => {
-      if (!wasStudioActive || S.jobId) return;
+      if (!wasStudioActive) return;
+      // Files changed under us (the agent wrote a card, a batch landed) and
+      // no render asked for a refresh: re-read now rather than on the next
+      // tab visit (§1-39 "AI 로 수정한 뒤 표시 안 됨").
+      if (renderedRev !== state.filesRev && !S.jobId) { void refresh(); return; }
+      if (S.jobId) return;
       void loadJobs(true).then(() => hub.jobTick());
     }, 5000);
   } else if (entering || renderedRev !== state.filesRev || state.openStudioRequest) {
@@ -305,6 +310,7 @@ async function refreshArea(area: string): Promise<void> {
 /** The live-job heartbeat lands on whichever tab is showing. */
 function jobTick(): void {
   stripTick();
+  syncControls(); // the left column's 생성 시작/취소 follows the run wherever the centre is
   if (S.centreMode !== 'tab' || S.selectedFile) return;
   if (S.centreTab === 'single') singleTick();
   else if (S.centreTab === 'batch') batchTick();

@@ -45,7 +45,26 @@ export function drawSingle(mount: HTMLElement): void {
   next.addEventListener('click', () => walk(1));
   live.addEventListener('click', () => { S.viewPath = ''; syncPreview(); });
 
-  // 요청 설정 moved to the left column's tool row (§1-35).
+  // The count and 생성 시작 live in the left column now (buildRunControls,
+  // §1-39); this row keeps the walk and the progress line.
+  progressLine = el('span', { class: 'hint' });
+  mount.appendChild(el('div', { class: 'row', style: { margin: '8px 0', flexWrap: 'wrap' } }, [
+    prev, live, next,
+    el('span', { class: 'grow' }),
+    progressLine,
+  ]));
+
+  stripBox = el('div', { class: 'stripthumbs' });
+  mount.appendChild(stripBox);
+
+  syncControls();
+  syncPreview();
+  void drawStrip();
+}
+
+/** The 1장 run controls - count ± and 생성 시작/취소 - mounted by the left
+ * prompt column (§1-39). One live instance: the newest build owns runBtn. */
+export function buildRunControls(): HTMLElement {
   const minus = el('button', { class: 'ghost tiny', text: '−' });
   const plus = el('button', { class: 'ghost tiny', text: '＋' });
   const count = el('input', { type: 'number', value: String(gen.count), min: '1', max: '99',
@@ -65,22 +84,14 @@ export function drawSingle(mount: HTMLElement): void {
     // The 1장 loop is the current setup only - no scene preset expansion.
     else void startRun({ scenePreset: '', count: gen.count });
   });
-
-  progressLine = el('span', { class: 'hint' });
-  mount.appendChild(el('div', { class: 'row', style: { margin: '8px 0', flexWrap: 'wrap' } }, [
-    prev, live, next,
-    el('span', { class: 'grow' }),
-    progressLine,
+  const row = el('div', { class: 'row', style: { gap: '6px' } }, [
+    el('span', { class: 'hint', text: '장수' }),
     el('div', { class: 'row', style: { gap: '2px' } }, [minus, count, plus]),
+    el('span', { class: 'grow' }),
     runBtn,
-  ]));
-
-  stripBox = el('div', { class: 'stripthumbs' });
-  mount.appendChild(stripBox);
-
+  ]);
   syncControls();
-  syncPreview();
-  void drawStrip();
+  return row;
 }
 
 /** The live-job heartbeat (from pollJob): patch, never rebuild. */
@@ -91,16 +102,21 @@ export function singleTick(): void {
   void drawStrip();
 }
 
-function syncControls(): void {
-  if (!runBtn?.isConnected || !progressLine) return;
+/** The run button (left column) and the progress line (1장 tab) are patched
+ * independently: either may be absent while the other is on screen. */
+export function syncControls(): void {
   const running = !!S.jobId;
-  runBtn.style.display = (S.status && !S.status.configured && !running) ? 'none' : '';
-  runBtn.textContent = running ? `취소 (${pendingCount()})` : '생성 시작';
-  runBtn.classList.toggle('danger', running);
-  const p = S.queueJob?.payload;
-  progressLine.textContent = running && p
-    ? `${stateLabel(S.queueJob!.state)} · ${p.done}/${p.total}${p.current ? ' · ' + p.current : ''}`
-    : '';
+  if (runBtn) {
+    runBtn.style.display = (S.status && !S.status.configured && !running) ? 'none' : '';
+    runBtn.textContent = running ? `취소 (${pendingCount()})` : '생성 시작';
+    runBtn.classList.toggle('danger', running);
+  }
+  if (progressLine?.isConnected) {
+    const p = S.queueJob?.payload;
+    progressLine.textContent = running && p
+      ? `${stateLabel(S.queueJob!.state)} · ${p.done}/${p.total}${p.current ? ' · ' + p.current : ''}`
+      : '';
+  }
 }
 
 /**

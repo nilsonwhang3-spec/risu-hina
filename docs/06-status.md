@@ -1,4 +1,4 @@
-# 06. Implementation status — as of 2026-09-06 (v0.13.0 BETA, Risu Hina)
+# 06. Implementation status — as of 2026-09-06 (v0.13.1 BETA, Risu Hina)
 
 One page for whoever picks this up next session (= me). What exists, what changed, how far it is deployed,
 and what is left. The *why* of the design is `docs/04` (assets and charx are in Appendix E), the storage layout is `docs/02`, the deployment environment is `docs/00`.
@@ -110,6 +110,25 @@ mixed-cast multi-entry batch from the panel.** Released = **v0.10.0 BETA** (§1-
 
 **0.3.1 (night of 2026-08-25)** — the real reason `+` never appeared was not "same version" but **CORS**: RisuAI reads `//@update-url` with a browser `fetch`, and the redirect response from the release URL carries no CORS header. Changed `//@update-url` to
 `https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js`, and made `tools/bundle.py` write that file into the repository (included in the release commit). In the backend code only VERSION changed.
+
+**+ §1-39 (2026-09-06, 0.13.1 - the 17-item field report after 0.13.0)**: ① `state.files`
+names an empty/odd listing reply instead of "Cannot read properties of null (reading 'areas')"
+(+ `buildNodes` guard). ② the studio's 5s tick re-reads when `filesRev` moved (the agent's
+card edits showed only on the next tab visit). ③ a style is edited on the LEFT only - the
+picker's 수정 row (centre card editor) is gone. ④ the 1장 count + 생성 시작/취소 moved to the
+left column (`center-single.buildRunControls`, `syncControls` tolerant of either half missing,
+`jobTick` calls it). ⑤ the NSFW pitfalls skill is retired (seed removed, `RETIRED_SEEDS` +
+`retire_once` sweeps existing installs; `studio_generate` no longer asks for it). ⑥ `skills.load`
+on a disabled skill says "부르지 말 것". ⑦ `studio_plan`/`studio_generate` accept an ARRAY of
+specs (each a job, in order; `_studio_generate_one`). ⑧ 검수 thumbnails at 720px
+(`blobUrl {w}` → `/files/thumb?w=`), the files-tab preview at 1024px thumb instead of the
+original bytes. ⑨ 채택/버림 are exclusive; the 대표 flag/view are retired. ⑩ 부족분 = a group
+with no 채택 (not a preset comparison); the button says 부족분 다시 생성 예약. ⑪ `save_image`
+never overwrites (`이름 (2).png`). ⑫ `_parse_default` reads stampless names
+(`character-emotion-n`, `emotion-n`, `character-emotion`) instead of sending the whole folder
+to 못 읽음. ⑬ 그룹마다 첫 장 removed. ⑭ the selector re-reads groups when `filesRev` moved
+(`groupsRev`; the screen cached the old folder). ⑮ a 검수 button on the files-tab bar of any
+folder with pictures.
 
 **+ §1-38 (2026-09-06, 0.13.0)**: ① **Gemini 3 thought signatures.** A user hit `400 Function
 call is missing a thought_signature in functionCall parts … default_api:list_lore, position 8`

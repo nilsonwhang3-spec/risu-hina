@@ -750,6 +750,20 @@ def _parse_default(n: str) -> dict | None:
     field can contain the delimiter (safe_part neutralises it)."""
     m = STAMP_RE.search(n)
     if not m:
+        # No stamp (a custom template, renamed files): the shape the user's
+        # own regex spelled out - `character-emotion-n.ext`, where the last
+        # token is the copy number (§1-39). Two tokens = character-emotion.
+        # This used to be an unmatched file, which put a whole folder into
+        # 못 읽음 and one image per "group" in the selector.
+        stem = re.sub(r"\.[A-Za-z0-9]+$", "", n)
+        stem = re.sub(r" \(\d+\)$", "", stem)      # the never-overwrite suffix
+        tokens = [t for t in stem.split("-") if t]
+        if len(tokens) >= 3 and tokens[-1].isdigit():
+            return {"character": tokens[0], "emotion": "-".join(tokens[1:-1]), "n": tokens[-1]}
+        if len(tokens) == 2 and tokens[-1].isdigit():
+            return {"emotion": tokens[0], "n": tokens[1]}       # emotion-n
+        if len(tokens) == 2:
+            return {"character": tokens[0], "emotion": tokens[1]}
         return None
     tokens = [t for t in n[:m.start()].split("-") if t]
     d: dict[str, str] = {}
@@ -849,6 +863,15 @@ def save_image(folder: str, name: str, png: bytes, sidecar: dict) -> dict:
         raise StudioError(f"저장할 수 없는 영역입니다: {folder}")
     dest = files._resolve(SCOPE, folder) / name
     dest.parent.mkdir(parents=True, exist_ok=True)
+    # Never overwrite (§1-39): a template without {stamp}, or two batches in
+    # the same second, produced the same name and the newer image silently
+    # replaced the older. A taken name counts up: 이름 (2).png, (3)…
+    if dest.exists():
+        stem, suf, k = dest.stem, dest.suffix, 2
+        while dest.exists():
+            dest = dest.with_name(f"{stem} ({k}){suf}")
+            k += 1
+        name = dest.name
     body = png_embed(png, {**sidecar, "file": name, "createdAt": time.time()})
     dest.write_bytes(body)
     rel = dest.relative_to(files._root(SCOPE)).as_posix()
