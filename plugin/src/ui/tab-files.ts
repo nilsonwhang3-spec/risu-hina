@@ -92,8 +92,10 @@ let treeMount: HTMLElement | null = null;
 let viewMount: HTMLElement | null = null;
 let showInternal = false;
 /** "이 봇만": projects/ and hina/ narrowed to the open bot's folder. */
-let onlyMine = false;
-try { onlyMine = localStorage.getItem('hina.filesOnlyMine') === '1'; } catch { /* iframe */ }
+// The bot's own folders are the default view (§1-36, user); 전체 보기 (every
+// bot's project) is the option, remembered.
+let onlyMine = true;
+try { if (localStorage.getItem('hina.filesOnlyMine') === '0') onlyMine = false; } catch { /* iframe */ }
 let lastListing: FileListing | null = null;
 let nodes = new Map<string, Folder>();
 let selectedDir = 'projects';
@@ -160,7 +162,10 @@ const kitRender = makeTab({
 
 export function renderFilesTab(mount: HTMLElement): void {
   kitRender(mount);
-  state.markOutputsSeen();
+  // Opening the tab no longer clears the badge (§1-36): a new file stays
+  // marked - a dot on its folder in the tree and on its row - until that
+  // folder is actually looked at. "1 in the workspace, but where?" was the
+  // question the bare badge left open.
 }
 
 async function refresh(): Promise<void> {
@@ -374,10 +379,12 @@ function drawTree(): void {
   // "이 봇만": the tree narrowed to the open bot's project (and internal)
   // folder - a space shared by twelve bots is twelve times the tree.
   const mineBtn = el('button', { class: 'ghost tiny' + (onlyMine ? ' on' : '') }) as HTMLButtonElement;
-  mineBtn.textContent = '이 봇만';
+  // The label names what a click DOES: showing this bot only is the default,
+  // so the button offers 전체 보기; once everything shows, it offers 이 봇만.
+  mineBtn.textContent = onlyMine && state.activeCharKey ? '전체 보기' : '이 봇만';
   mineBtn.disabled = !state.activeCharKey;
   mineBtn.title = state.activeCharKey
-    ? (onlyMine ? '모든 봇의 폴더를 보입니다' : `프로젝트·AI 내부에서 이 봇의 폴더(${data.botFolder || '…'})만 보입니다`)
+    ? (onlyMine ? '모든 봇의 프로젝트 폴더를 보입니다 (지금은 이 봇만)' : `프로젝트·AI 내부에서 이 봇의 폴더(${data.botFolder || '…'})만 보입니다`)
     : '봇을 열어야 그 봇의 폴더만 볼 수 있습니다';
   mineBtn.addEventListener('click', () => {
     onlyMine = !onlyMine;
@@ -421,6 +428,7 @@ function toTreeNode(n: Folder, depth: number): TreeNode {
     // dims, a copied one gets a dashed edge - Ctrl+C used to change nothing
     // on screen.
     cls: clipboard?.paths.includes(n.path) ? (clipboard.op === 'cut' ? 'clipcut' : 'clipcopy') : undefined,
+    dot: !n.virtual && state.hasUnseenUnder(n.path),
     // A folder in the tree is a drop target of its own.
     droppable: !n.virtual && USER_AREAS.has(n.area.area),
   };
@@ -435,6 +443,8 @@ function selectTreeFolder(path: string): void {
   previewPath = '';
   selection.clear();
   if (f && f.kids.length) expanded.add(path);
+  // Looking at a folder is what marks its new files seen (§1-36).
+  state.markOutputsSeenIn(path);
   drawTree();
   drawCentre();
 }
@@ -787,6 +797,7 @@ function listRow(e: { path: string; name: string; file?: WorkspaceFile; node?: F
     el('span', { class: 'fname' }, [
       e.node ? el('span', { class: 'ficon', text: '📁' }) : el('span', { class: 'ftag', text: extOf(e.name) }),
       el('span', { text: e.name }),
+      isNew(e) ? el('span', { class: 'newdot', title: '새 파일' }) : null,
     ]),
     el('span', { class: 'fsize', text: e.file ? fmtSize(e.file.size) : `${countFiles(e.node!)}개` }),
     el('span', { class: 'ftime', text: e.file ? fmtWhen(e.file.modified) : '' }),
@@ -1073,7 +1084,7 @@ function gridCell(e: { path: string; name: string; file?: WorkspaceFile; node?: 
   const pic = el('div', { class: 'assetpic' });
   const cell = el('div', { class: 'fcell' + (selection.has(e.path) ? ' sel' : '') + clipClass(e.path), title: e.path }, [
     pic,
-    el('div', { class: 'fname', text: e.name }),
+    el('div', { class: 'fname' }, [el('span', { text: e.name }), isNew(e) ? el('span', { class: 'newdot', title: '새 파일' }) : null]),
     el('div', { class: 'fsize', text: e.file ? fmtSize(e.file.size) : `폴더 · ${countFiles(e.node!)}개` }),
   ]);
   if (e.node) {
@@ -1092,6 +1103,12 @@ function gridCell(e: { path: string; name: string; file?: WorkspaceFile; node?: 
 
 function focusList(): void {
   try { (viewMount?.querySelector('.filelist') as HTMLElement | null)?.focus({ preventScroll: true }); } catch { /* test DOM */ }
+}
+
+/** A file the agent/studio made that has not been looked at, or a folder
+ * holding one (§1-36). */
+function isNew(e: { path: string; node?: Folder }): boolean {
+  return e.node ? state.hasUnseenUnder(e.path) : state.unseenOutputs.includes(e.path);
 }
 
 /** The clipboard shown on a row/cell: ' clipcut' | ' clipcopy' | ''. */

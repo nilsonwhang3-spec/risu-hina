@@ -1025,7 +1025,7 @@ console.log('\ntest_workspace_files');
   // The agent's hina/ is internal now (§1-33): behind the 숨김 toggle.
   check('the AI internal area is hidden by default', !/AI 내부/.test(tree?.textContent || ''),
         (tree?.textContent || '').slice(0, 200));
-  check('the per-bot filter is offered', !!findButton(tree, '이 봇만'));
+  check('the per-bot filter is offered (default on: the button offers 전체 보기)', !!findButton(tree, '전체 보기') || !!findButton(tree, '이 봇만'));
   check('the machine area is hidden by default',
         !branches().some((b) => (b.title || '').startsWith('.hina') || /^📁?내부/.test(b.textContent || '')),
         (tree?.textContent || '').slice(0, 200));

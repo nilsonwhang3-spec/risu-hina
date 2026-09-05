@@ -1242,6 +1242,11 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
    is its min-width (260px) and nothing else; its content clips/scrolls. */
 .split > .left { contain: inline-size; }
 /* Tree rows on the clipboard: cut rows dim, copied rows carry a dashed edge. */
+/* New (unseen) files and the folders holding them (§1-36). */
+.newdot {
+  display: inline-block; width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto;
+  background: #ef4444; margin: 0 2px 0 5px; vertical-align: middle;
+}
 .treebranch.clipcut, .frow.clipcut, .fcell.clipcut { opacity: .5; }
 .treebranch.clipcopy, .frow.clipcopy, .fcell.clipcopy { outline: 1px dashed var(--textcolor2, #79839a); outline-offset: -1px; }
 .striprow { min-width: 0; }

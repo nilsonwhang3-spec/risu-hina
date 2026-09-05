@@ -32,6 +32,8 @@ export interface TreeNode {
   droppable?: boolean;
   /** Extra class on the branch button (clipboard state, §1-34). */
   cls?: string;
+  /** A red dot: something new (unseen) is in here (§1-36). */
+  dot?: boolean;
 }
 
 export interface TreeSpec {
@@ -59,6 +61,7 @@ export function treeRow(n: TreeNode, depth: number, spec: TreeSpec): HTMLElement
   }, [
     el('span', { text: n.glyph ?? (isOpen && n.kids.length ? '📂' : '📁') }),
     el('span', { class: 'grow', text: n.name, style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }),
+    n.dot ? el('span', { class: 'newdot', title: '아직 안 본 새 파일이 있습니다' }) : null,
     n.count == null ? null : el('span', { class: 'n', text: String(n.count) }),
   ]);
   branch.addEventListener('click', (e) => spec.onOpen(n, e as MouseEvent));

@@ -1024,11 +1024,28 @@ class AppState {
     this.emit();
   }
 
-  /** The files tab is showing; whatever was unseen has now been seen. */
+  /** Everything unseen has been seen (a reset; the files tab no longer
+   * calls this on open - a folder is seen when it is LOOKED AT, §1-36). */
   markOutputsSeen(): void {
     if (!this.unseenOutputs.length) return;
     this.unseenOutputs = [];
     this.emit();
+  }
+
+  /** The files directly in `dir` have been looked at: their dots go, the
+   * tab badge shrinks by that many. Files deeper down stay unseen. */
+  markOutputsSeenIn(dir: string): void {
+    const before = this.unseenOutputs.length;
+    this.unseenOutputs = this.unseenOutputs.filter((p) => {
+      const cut = p.lastIndexOf('/');
+      return (cut < 0 ? '' : p.slice(0, cut)) !== dir;
+    });
+    if (this.unseenOutputs.length !== before) this.emit();
+  }
+
+  /** Whether an unseen file sits in `dir` or anywhere below it. */
+  hasUnseenUnder(dir: string): boolean {
+    return this.unseenOutputs.some((p) => p.startsWith(dir + '/'));
   }
 
   /**

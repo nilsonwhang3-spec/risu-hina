@@ -111,6 +111,13 @@ mixed-cast multi-entry batch from the panel.** Released = **v0.10.0 BETA** (§1-
 **0.3.1 (night of 2026-08-25)** — the real reason `+` never appeared was not "same version" but **CORS**: RisuAI reads `//@update-url` with a browser `fetch`, and the redirect response from the release URL carries no CORS header. Changed `//@update-url` to
 `https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js`, and made `tools/bundle.py` write that file into the repository (included in the release commit). In the backend code only VERSION changed.
 
+**+ §1-36 (2026-09-05, two more, unreleased)**: ① "1 in the workspace - but where?": the tab
+badge no longer clears on opening the files tab; an unseen file keeps a red dot on its row and
+on every folder above it in the tree (`TreeNode.dot`, `state.hasUnseenUnder`), and looking at
+a folder (`selectTreeFolder` → `state.markOutputsSeenIn`) is what marks its files seen. ② the
+bot's own folders are the default view: `onlyMine` defaults to true and the button offers
+`전체 보기` (or `이 봇만` once everything shows); remembered in `hina.filesOnlyMine`.
+
 **+ §1-35 (2026-09-05, three more, unreleased)**: ① `⚙ 요청 설정` is a third tool button
 in the left 프롬프트 column (with 캐릭터 · 조각), gone from the 1장 and 배치 toolbars - the
 request parameters belong with the material, not with whichever view is open. ② the centre
