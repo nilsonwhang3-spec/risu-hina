@@ -1236,9 +1236,14 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
    the agent pane could not be dragged wider). Size containment makes the
    strip contribute nothing to its ancestors' intrinsic size. */
 .genstrip { contain: inline-size; }
+/* §1-35: and the centre column itself - a wide grid, a long job history or
+   an unbreakable path in any tab used to hand its intrinsic width up the
+   chain, and the centre could not be dragged below that. The centre's floor
+   is its min-width (260px) and nothing else; its content clips/scrolls. */
+.split > .left { contain: inline-size; }
 /* Tree rows on the clipboard: cut rows dim, copied rows carry a dashed edge. */
-.treebranch.clipcut { opacity: .5; }
-.treebranch.clipcopy { outline: 1px dashed var(--textcolor2, #79839a); outline-offset: -1px; }
+.treebranch.clipcut, .frow.clipcut, .fcell.clipcut { opacity: .5; }
+.treebranch.clipcopy, .frow.clipcopy, .fcell.clipcopy { outline: 1px dashed var(--textcolor2, #79839a); outline-offset: -1px; }
 .striprow { min-width: 0; }
 .genstrip .striphead { margin-bottom: 2px; }
 .genstrip.folded .striprow { display: none; }

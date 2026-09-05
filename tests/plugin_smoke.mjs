@@ -2382,7 +2382,7 @@ console.log('\ntest_studio_request_settings');
   // set rides spec.params - what you see is what the backend receives.
   clickById(document, 'tab-studio');
   await settle(400);
-  clickButton(document.querySelector('.panel.active .centrebody'), '⚙ 요청 설정');
+  clickButton(document.querySelector('.panel.active .explorer'), '⚙ 요청 설정'); // §1-35: the left column's tool row
   await settle(400);
   const dlg = [...document.querySelectorAll('.modalback')].pop();
   check('요청 설정 opens as a modal', /요청 설정/.test(dlg?.textContent || ''),

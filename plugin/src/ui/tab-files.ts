@@ -488,6 +488,7 @@ function countFiles(n: Folder): number {
 
 function drawCentre(): void {
   if (!viewMount) return;
+  const hadFocus = viewMount.contains(document.activeElement);
   clear(viewMount);
   const n = nodes.get(selectedDir);
   if (!n) {
@@ -639,9 +640,11 @@ function drawCentre(): void {
     } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c' && selection.size) {
       clipboard = { op: 'copy', paths: [...selection] };
       notice(`${clipboard.paths.length}개를 복사했습니다 — 붙여넣을 폴더에서 우클릭하거나 Ctrl+V.`);
+      drawCentre(); // rows show the clipboard
     } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'x' && selection.size && deletable) {
       clipboard = { op: 'cut', paths: [...selection] };
       notice(`${clipboard.paths.length}개를 잘라냈습니다 — 붙여넣을 폴더에서 우클릭하거나 Ctrl+V.`);
+      drawCentre();
     } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v' && clipboard && writable) {
       void pasteInto(uploadTarget());
     }
@@ -660,6 +663,9 @@ function drawCentre(): void {
   });
   installMarquee(list);
   viewMount.appendChild(list);
+  // The redraw that followed a row click used to drop focus to <body>, so the
+  // next Ctrl+C reached nothing (§1-35); the list takes it back.
+  if (hadFocus) focusList();
 }
 
 /**
@@ -773,7 +779,7 @@ function openEntry(path: string, n: Folder): void {
 function listRow(e: { path: string; name: string; file?: WorkspaceFile; node?: Folder }, order: { path: string }[], n: Folder): HTMLElement {
   const box = el('input', { type: 'checkbox' }) as HTMLInputElement;
   box.checked = selection.has(e.path);
-  const row = el('div', { class: 'frow' + (selection.has(e.path) ? ' sel' : ''), title: e.path }, [
+  const row = el('div', { class: 'frow' + (selection.has(e.path) ? ' sel' : '') + clipClass(e.path), title: e.path }, [
     box,
     // A folder glyph for folders; files carry their extension as a small tag
     // instead of a pictogram - the picture glyphs rendered as stray letters
@@ -1065,7 +1071,7 @@ function firstImage(node: Folder): WorkspaceFile | null {
 
 function gridCell(e: { path: string; name: string; file?: WorkspaceFile; node?: Folder }, order: { path: string }[], n: Folder): HTMLElement {
   const pic = el('div', { class: 'assetpic' });
-  const cell = el('div', { class: 'fcell' + (selection.has(e.path) ? ' sel' : ''), title: e.path }, [
+  const cell = el('div', { class: 'fcell' + (selection.has(e.path) ? ' sel' : '') + clipClass(e.path), title: e.path }, [
     pic,
     el('div', { class: 'fname', text: e.name }),
     el('div', { class: 'fsize', text: e.file ? fmtSize(e.file.size) : `폴더 · ${countFiles(e.node!)}개` }),
@@ -1085,7 +1091,13 @@ function gridCell(e: { path: string; name: string; file?: WorkspaceFile; node?: 
 }
 
 function focusList(): void {
-  (viewMount?.querySelector('.filelist') as HTMLElement | null)?.focus();
+  try { (viewMount?.querySelector('.filelist') as HTMLElement | null)?.focus({ preventScroll: true }); } catch { /* test DOM */ }
+}
+
+/** The clipboard shown on a row/cell: ' clipcut' | ' clipcopy' | ''. */
+function clipClass(path: string): string {
+  if (!clipboard || !clipboard.paths.includes(path)) return '';
+  return clipboard.op === 'cut' ? ' clipcut' : ' clipcopy';
 }
 
 /** 경로 복사 - the space path external tools take. Referencing a file to

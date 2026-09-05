@@ -10,7 +10,7 @@
 import { el, clear } from '../dom';
 import { blobUrl, safeWorkspacePath } from '../blobimg';
 import { S, hub, gen, persistGen, persistCentreTab, stateLabel } from './store';
-import { statusRow, tokenNotice, openParamsDialog, startRun, cancelRun, pendingCount, loadJobs,
+import { statusRow, tokenNotice, startRun, cancelRun, pendingCount, loadJobs,
          livePreview } from './gen';
 
 let previewBox: HTMLElement | null = null;
@@ -45,8 +45,7 @@ export function drawSingle(mount: HTMLElement): void {
   next.addEventListener('click', () => walk(1));
   live.addEventListener('click', () => { S.viewPath = ''; syncPreview(); });
 
-  const params = el('button', { class: 'ghost tiny', text: '⚙ 요청 설정' });
-  params.addEventListener('click', () => openParamsDialog());
+  // 요청 설정 moved to the left column's tool row (§1-35).
   const minus = el('button', { class: 'ghost tiny', text: '−' });
   const plus = el('button', { class: 'ghost tiny', text: '＋' });
   const count = el('input', { type: 'number', value: String(gen.count), min: '1', max: '99',
@@ -72,7 +71,6 @@ export function drawSingle(mount: HTMLElement): void {
     prev, live, next,
     el('span', { class: 'grow' }),
     progressLine,
-    params,
     el('div', { class: 'row', style: { gap: '2px' } }, [minus, count, plus]),
     runBtn,
   ]));

@@ -15,6 +15,7 @@ import { workspaceImage } from '../blobimg';
 import { installDrag, installDrop, type Incoming } from '../tree';
 import { S, hub, IMAGE_RE, OUTPUT_ROOT, persistCols, countFiles, fmtSize, msg, type Folder } from './store';
 import { openImage } from './center-single';
+import { setClip, hasClip, pasteIn, clipClass } from './left-output';
 
 const selection = new Set<string>();
 let anchorPath = '';
@@ -100,11 +101,34 @@ export function drawFolder(node: Folder): void {
 
   // --- the grid ----------------------------------------------------------------------
   const grid = el('div', { class: 'foldergrid', style: { gridTemplateColumns: `repeat(${S.cols}, minmax(0, 1fr))` } });
+  // Ctrl+C / Ctrl+X on the selected cells, Ctrl+V into this folder - the
+  // studio clipboard the OUTPUT tree uses (§1-35). Escape clears the selection.
+  grid.tabIndex = 0;
+  grid.addEventListener('keydown', (ev) => {
+    const e = ev as KeyboardEvent;
+    const ctrl = e.ctrlKey || e.metaKey;
+    const k = e.key.toLowerCase();
+    if (ctrl && (k === 'c' || k === 'x') && selection.size) {
+      e.preventDefault();
+      setClip(k === 'c' ? 'copy' : 'cut', [...selection]);
+      for (const c of Array.from(grid.children) as HTMLElement[]) {
+        c.classList.toggle('clipcut', k === 'x' && selection.has(c.title));
+        c.classList.toggle('clipcopy', k === 'c' && selection.has(c.title));
+      }
+    } else if (ctrl && k === 'v' && hasClip()) {
+      e.preventDefault();
+      void pasteIn(node.path);
+    } else if (e.key === 'Escape' && selection.size) {
+      selection.clear();
+      for (const c of Array.from(grid.children) as HTMLElement[]) c.classList.remove('picked');
+      syncBar();
+    }
+  });
   viewMount.appendChild(grid);
 
   // Subfolders first - each one a drop target for the tidy-up drags.
   for (const child of node.children) {
-    const cell = el('div', { class: 'fcell foldcell', title: child.path }, [
+    const cell = el('div', { class: 'fcell foldcell' + clipClass(child.path), title: child.path }, [
       el('div', { class: 'foldface', text: '📁' }),
       el('div', { class: 'fname' }, [
         el('span', { text: child.name }),
@@ -146,7 +170,7 @@ export function drawFolder(node: Folder): void {
   });
 
   images.forEach((f, ix) => {
-    const cell = el('div', { class: 'fcell imgcell' + (selection.has(f.path) ? ' picked' : ''), title: f.path });
+    const cell = el('div', { class: 'fcell imgcell' + (selection.has(f.path) ? ' picked' : '') + clipClass(f.path), title: f.path });
     const pic = workspaceImage(f.path, f.name, { thumb: false });
     pic.classList.add('jobpic');
     cell.append(pic, el('div', { class: 'fname' }, [el('span', { class: 'hint', text: f.name })]));

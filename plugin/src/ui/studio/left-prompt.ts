@@ -18,6 +18,7 @@ import { attachHilite } from '../hilite';
 import { state, type StudioItem } from '../../state';
 import { pickerRow, openListPicker, type PickerEntry } from '../pickers';
 import { S, hub, activeOf, checkUnresolved, newCard, msg, fragKeys } from './store';
+import { openParamsDialog } from './gen';
 import { parseStyleDoc, buildStyleDoc, type StyleDoc } from './stylefile';
 
 /** Unsaved inline edits, kept across a column rebuild so a redraw (a toggle,
@@ -98,7 +99,13 @@ export function buildLeftPrompt(mount: HTMLElement): void {
     S.selectedFile = '';
     hub.drawCentre();
   });
-  mount.appendChild(el('div', { class: 'toolbtns' }, [charBtn, fragBtn]));
+  // 요청 설정 lives here with the other material (§1-35, user): model ·
+  // size · steps · UC are part of the prompt setup, not of the 1장 or 배치
+  // view that happens to be open.
+  const paramsBtn = el('button', { class: 'ghost toolbtn', title: '요청 설정 — 모델·크기·스텝·UC 등 생성 요청의 파라미터' },
+    [el('span', { text: '⚙ 요청 설정' })]);
+  paramsBtn.addEventListener('click', () => openParamsDialog());
+  mount.appendChild(el('div', { class: 'toolbtns' }, [charBtn, fragBtn, paramsBtn]));
 }
 
 /** Patch the counts without rebuilding the column (typing-safe). */

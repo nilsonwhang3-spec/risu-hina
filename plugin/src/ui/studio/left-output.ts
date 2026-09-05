@@ -14,8 +14,27 @@ import { treeRow, type TreeNode, type TreeSpec } from '../tree';
 import { S, hub, countFiles, fmtSize, msg, persistCentreTab, persistLeftTab,
          addExtra, removeExtra, IMAGE_RE, type Folder } from './store';
 
-/** The OUTPUT tree's own clipboard (paths only; bytes stay on the backend). */
+/** The studio's clipboard (paths only; bytes stay on the backend) - shared
+ * by the OUTPUT tree and the 정리 grid (§1-35). */
 let clip: { op: 'copy' | 'cut'; paths: string[] } | null = null;
+
+export function setClip(op: 'copy' | 'cut', paths: string[]): void {
+  clip = paths.length ? { op, paths } : null;
+  if (clip) {
+    hub.notice(`${paths.length}개를 ${op === 'copy' ? '복사' : '잘라내기'}했습니다 — 붙여넣을 폴더에서 Ctrl+V 또는 우클릭.`);
+  }
+  hub.drawLeft();
+}
+
+export function hasClip(): boolean {
+  return !!clip;
+}
+
+/** ' clipcut' | ' clipcopy' | '' for a path on the clipboard. */
+export function clipClass(path: string): string {
+  if (!clip || !clip.paths.includes(path)) return '';
+  return clip.op === 'cut' ? ' clipcut' : ' clipcopy';
+}
 
 function toTreeNode(n: Folder): TreeNode {
   return {
@@ -25,7 +44,28 @@ function toTreeNode(n: Folder): TreeNode {
     count: countFiles(n),
     title: n.path,
     droppable: true,
+    cls: clipClass(n.path).trim() || undefined,
   };
+}
+
+/** Whether a path is one of the tree roots (OUTPUT or a pin): no cut/copy. */
+function isRoot(path: string): boolean {
+  return path === (S.outputRoot?.path ?? 'studio/output') || S.extraRoots.some((r) => r.path === path);
+}
+
+/** Ctrl+C / Ctrl+X on the selected folder, Ctrl+V into it (§1-35). */
+function onTreeKey(ev: KeyboardEvent): void {
+  const ctrl = ev.ctrlKey || ev.metaKey;
+  if (!ctrl) return;
+  const k = ev.key.toLowerCase();
+  const sel = S.selected;
+  if ((k === 'c' || k === 'x') && sel && !isRoot(sel)) {
+    ev.preventDefault();
+    setClip(k === 'c' ? 'copy' : 'cut', [sel]);
+  } else if (k === 'v' && clip && sel) {
+    ev.preventDefault();
+    void pasteIn(sel);
+  }
 }
 
 function spec(): TreeSpec {
@@ -138,7 +178,7 @@ function renameFolder(node: TreeNode): void {
   });
 }
 
-async function pasteIn(target: string): Promise<void> {
+export async function pasteIn(target: string): Promise<void> {
   const c = clip;
   if (!c) return;
   const list = c.paths.filter((q) => q !== target && !target.startsWith(q + '/'));
@@ -187,6 +227,10 @@ async function doDelete(path: string): Promise<void> {
 
 export function buildLeftOutput(mount: HTMLElement): void {
   if (!S.outputRoot) return;
+  // Keyboard verbs on the tree (a property, not addEventListener: the mount
+  // outlives every rebuild and must carry exactly one handler).
+  mount.tabIndex = 0;
+  mount.onkeydown = onTreeKey;
   mount.appendChild(treeRow(toTreeNode(S.outputRoot), 0, spec()));
 
   // --- folders outside OUTPUT, pinned for 검수 (§1-33) ---------------------------

@@ -343,6 +343,9 @@ function drawLeft(): void {
   };
   tabbar.append(mk('prompt', '프롬프트'), mk('output', 'OUTPUT'));
 
+  // A branch click rebuilds this column; focus comes back to the selected
+  // row so Ctrl+C/X/V keep working (§1-35, as in the files tab).
+  const hadFocus = leftContent.contains(document.activeElement);
   clear(leftContent);
   if (S.leftTab === 'output') {
     buildLeftOutput(leftContent);
@@ -350,6 +353,10 @@ function drawLeft(): void {
     buildLeftChars(leftContent);
   } else {
     buildLeftPrompt(leftContent);
+  }
+  if (hadFocus) {
+    const row = leftContent.querySelector<HTMLElement>('.treebranch.on') ?? leftContent;
+    try { row.focus({ preventScroll: true }); } catch { /* test DOM */ }
   }
 }
 

@@ -15,7 +15,7 @@ import { workspaceImage } from '../blobimg';
 import { S, hub, gen, persistCols, stateLabel, activeOf,
          reserves, reserveOf, reserveTotal, adjustReserve, setReserve,
          clearReserves, persistReserves, type ReserveMap } from './store';
-import { scenePicker, tokenNotice, openParamsDialog, startRun, cancelRun, pendingCount, loadJobs,
+import { scenePicker, tokenNotice, startRun, cancelRun, pendingCount, loadJobs,
          livePreview, stepMsEma } from './gen';
 import { jobSection } from './center-history';
 
@@ -55,8 +55,7 @@ export function drawBatch(mount: HTMLElement): void {
   if (notice) mount.appendChild(notice);
 
   // --- toolbar -----------------------------------------------------------------
-  const params = el('button', { class: 'ghost tiny', text: '⚙ 요청 설정' });
-  params.addEventListener('click', () => openParamsDialog());
+  // 요청 설정 moved to the left column's tool row (§1-35).
   const cols = colPicker({ values: [2, 3, 4], get: () => S.cols, set: (n) => {
     S.cols = n as 2 | 3 | 4; persistCols();
     for (const gEl of Array.from(document.querySelectorAll<HTMLElement>('.scenegrid, .jobgrid'))) {
@@ -64,7 +63,7 @@ export function drawBatch(mount: HTMLElement): void {
     }
   } });
   mount.appendChild(el('div', { class: 'row', style: { marginBottom: '6px', flexWrap: 'wrap' } }, [
-    scenePicker(), params, cols,
+    scenePicker(), cols,
   ]));
   const nChars = activeOf('characters').length;
   mount.appendChild(el('div', { class: 'hint', style: { marginBottom: '6px' },
