@@ -1,4 +1,4 @@
-# 06. Implementation status — as of 2026-09-06 (v0.14.1 BETA, Risu Hina)
+# 06. Implementation status — as of 2026-09-06 (v0.14.2 BETA, Risu Hina)
 
 One page for whoever picks this up next session (= me). What exists, what changed, how far it is deployed,
 and what is left. The *why* of the design is `docs/04` (assets and charx are in Appendix E), the storage layout is `docs/02`, the deployment environment is `docs/00`.
