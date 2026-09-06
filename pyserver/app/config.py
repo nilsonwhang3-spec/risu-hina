@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any
 
 APP_NAME = "risu-hina"
-VERSION = "0.13.3"
+VERSION = "0.14.0"
 
 # Renamed from REALOOC_* to RISUHINA_*. The old names are still honoured, and
 # not as politeness: the launcher, the control script and any service wrapper
@@ -223,6 +223,20 @@ DEFAULTS: dict[str, Any] = {
         "apiKey": "",
         "baseUrl": "",
         "maxResults": 5,
+    },
+    "vision": {
+        "mode": "",              # native | helper | off ('' = off; see vision.mode())
+        "nativeProbe": {},       # {"model","ok","at","error"} written by the card's test
+        "helperBaseUrl": "",     # OpenAI-compatible root (…/v1, …/v1beta/openai)
+        "helperModel": "",       # '' = vision.HELPER_DEFAULT_MODEL
+        "helperKeyRef": "",      # an api_keys row id, or
+        "helperApiKey": "",      # a key typed in (secret: KEEP-able, redacted by name)
+        "helperInstructions": "",
+        "maxWidth": 768,         # longest side sent to a model
+        "detail": "auto",        # low | high | auto
+        "maxImagesPerCall": 6,
+        "maxCallsPerTurn": 12,
+        "timeoutSeconds": 60,
     },
     "python": {
         # Not a permission boundary - an explicit user decision (plan section 5.1).

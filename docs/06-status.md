@@ -1,4 +1,4 @@
-# 06. Implementation status — as of 2026-09-06 (v0.13.3 BETA, Risu Hina)
+# 06. Implementation status — as of 2026-09-06 (v0.14.0 BETA, Risu Hina)
 
 One page for whoever picks this up next session (= me). What exists, what changed, how far it is deployed,
 and what is left. The *why* of the design is `docs/04` (assets and charx are in Appendix E), the storage layout is `docs/02`, the deployment environment is `docs/00`.
@@ -110,6 +110,33 @@ mixed-cast multi-entry batch from the panel.** Released = **v0.10.0 BETA** (§1-
 
 **0.3.1 (night of 2026-08-25)** — the real reason `+` never appeared was not "same version" but **CORS**: RisuAI reads `//@update-url` with a browser `fetch`, and the redirect response from the release URL carries no CORS header. Changed `//@update-url` to
 `https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js`, and made `tools/bundle.py` write that file into the repository (included in the release commit). In the backend code only VERSION changed.
+
+**+ §1-42 (2026-09-06, 0.14.0 - the vision tool; plan `~/.claude/plans/serialized-watching-boole.md`,
+design `docs/10-vision-tool.md`)**: the agent can LOOK at images. `app/vision.py` mirrors
+websearch.py: modes native (the agent's own model sees the picture via `ToolReturn` +
+`BinaryImage`, gated on a two-colour-PNG probe remembered as `vision.nativeProbe`) / helper (any
+OpenAI-compatible vision endpoint, `image_url` data URIs, key via `keys.resolve`, loopback needs
+none) / off (numbers only). Tools `view_image`, `compare_images`, `image_metrics` (Pillow:
+brightness · contrast · sharpness · letterbox · dhash near-duplicates · NAI recipe; header-only
+dims without Pillow), `review_folder` (groups + numbers + helper JSON verdicts or attached
+pictures), `suggest_selection` (→ `studio.merge_suggestions`, a `suggest {verdict, reason, by, at}`
+per file beside the flags; `write_selection` preserves it). Refusals (`is_refusal`: HTTP safety
+bodies, finish reasons, blockReason, empty answers, EN/KO sentences) degrade to `VISION REFUSED`
++ numbers; the INSTRUCTIONS "Seeing images" bullet says never to describe an unseen image.
+History hygiene: `scrub_history` before both persists, `_msg_chars`/`_msg_text`/`_short`
+image-aware, `reset_turn` per turn. Routes `GET /vision`, `POST /vision/test`; config
+`vision.*`; `"vision"` in the capability flags. Panel: `buildVisionCard` after the web-search
+card; `viewed` and `suggestions` stream events; 검수 `.sugline` badges with 적용/× and the bulk
+`제안 N건 모두 적용`/`제안 지우기`; TOOL_GLYPH entries. Skill seed `vision-loop.md` (보고 조정하기,
+SEED_KEY v7). Tests: `tests/test_vision.py` (gate), test_http vision checks, smoke card + badge
+checks. MINOR (0.14.0): backend and plugin go together. **Not measured with real vision models
+yet** - the manual checklist is in docs/10 §Verification. Also in this round, from a field
+report ("AI 창의 썸네일이 반복된다 / 새 에셋을 만들었다는데 옛 파일만"): the panel's blob cache
+keyed thumbnails by PATH alone, so a file rewritten under the same name kept its old picture
+until a reload - `blobimg.evictBlob(paths)` on every `images` event and studio `touchQuiet`,
+and `studio.group()` items carry `modified` (mtime) which the selector stamps into the cache
+key. (Since 0.13.1 `save_image` never overwrites, so the second symptom was the same stale
+picture, not a lost file.)
 
 **+ §1-41 (2026-09-06, 0.13.3 - four more)**: ① **the agent's instructions are English** - the
 whole `agent.INSTRUCTIONS` block and all 74 tool docstrings (spliced by function name from

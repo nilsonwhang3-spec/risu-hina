@@ -18,7 +18,7 @@
 import { el, clear, popover, TOOL_GLYPH, PAPER_PLANE, ICON } from './dom';
 import { state, type StagedEdit, type AgentSessionInfo, type PendingAction } from '../state';
 import { renderMarkdown } from './markdown';
-import { workspaceImage } from './blobimg';
+import { workspaceImage, evictBlob } from './blobimg';
 import { showArtifact } from './artifact';
 import { clientLog } from '../transport';
 import { activeHalf } from './shell';
@@ -832,7 +832,10 @@ export class AgentPanel {
             if (!paths.length) break;
             // The files (and studio) tabs learn of the new images NOW, not on
             // a manual 새로고침 - the §1-28 report ("생성해도 새로고침 해야
-            // 보임") was exactly this missing bump.
+            // 보임") was exactly this missing bump. Cached thumbnails for
+            // those paths go too: a re-run under the same names must show
+            // the new pictures (§1-42).
+            evictBlob(paths);
             state.touchFiles(paths);
             const strip = el('div', { class: 'imgstrip' });
             for (const p of paths.slice(0, 8)) {
@@ -853,6 +856,41 @@ export class AgentPanel {
             strip.appendChild(inspect);
             if (e.label) strip.appendChild(el('div', { class: 'hint', text: String(e.label) }));
             this.log.appendChild(strip);
+            this.scroll();
+            break;
+          }
+          case 'viewed': {
+            // What a vision tool LOOKED at (§1-42): a small strip, no files-tab
+            // bump (nothing new was written), no 검수 button.
+            const paths = Array.isArray(e.paths) ? (e.paths as string[]).filter(Boolean) : [];
+            if (!paths.length) break;
+            const strip = el('div', { class: 'imgstrip viewed' });
+            for (const p of paths.slice(0, 8)) {
+              const name = p.slice(p.lastIndexOf('/') + 1);
+              const thumb = workspaceImage(p, name, { thumb: true });
+              thumb.style.cursor = 'pointer';
+              thumb.addEventListener('click', () =>
+                showArtifact({ path: p, title: name, kind: 'image' }, { flipMobile: true }));
+              strip.appendChild(thumb);
+            }
+            strip.appendChild(el('div', { class: 'hint', text: `👁 ${String(e.label || '보기')}`
+              + (paths.length > 8 ? ` · 외 ${paths.length - 8}장` : '') + (e.mode ? ` · ${String(e.mode)}` : '') }));
+            this.log.appendChild(strip);
+            this.scroll();
+            break;
+          }
+          case 'suggestions': {
+            // Review verdicts were written into a folder's selection file:
+            // the 검수 tab re-reads on its next draw (filesRev), and the chip
+            // is the way there.
+            state.touchFiles([]);
+            const folder = String(e.folder || '');
+            const chip = el('button', { class: 'outline', title: '검수 탭에서 제안을 확인하고 적용합니다' }, [
+              el('span', { class: 'glyph', text: '🏷' }),
+              el('span', { class: 'grow', text: `검수 제안 ${Number(e.count) || 0}건 (채택 ${Number(e.use) || 0} · 버림 ${Number(e.delete) || 0} · 수정 ${Number(e.inpaint) || 0}) — 검수 열기 →` }),
+            ]);
+            chip.addEventListener('click', () => state.requestOpenStudio(folder, 'all'));
+            this.log.appendChild(chip);
             this.scroll();
             break;
           }

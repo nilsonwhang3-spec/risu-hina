@@ -13,7 +13,7 @@
  */
 import { el, clear, modal, setSelected, selectedValue, popover } from './dom';
 import { pickerRow, openListPicker, type PickerEntry } from './pickers';
-import { state, type AgentPreset, type ApiKeyEntry, type CatalogModel, type ProviderProfile, type WebsearchMode, type WebsearchStatus } from '../state';
+import { state, type AgentPreset, type ApiKeyEntry, type CatalogModel, type ProviderProfile, type WebsearchMode, type WebsearchStatus, type VisionMode, type VisionStatus } from '../state';
 import { transport } from '../transport';
 
 type Kind = 'general' | 'search';
@@ -133,6 +133,7 @@ export function buildPresetsCard(opts: PresetsCardOptions): HTMLElement {
       ]),
     ]),
     buildWebsearchCard(),
+    buildVisionCard(),
   ]);
 }
 
@@ -149,6 +150,192 @@ export function buildPresetsCard(opts: PresetsCardOptions): HTMLElement {
  * "search provider" card - a model and an engine that could not be tested
  * as one thing, and whose split nobody could explain in one sentence.
  */
+/**
+ * The vision tool card (§1-42): who looks at images for the agent - its own
+ * model (after a probe proves it sees), a separate OpenAI-compatible vision
+ * helper, or nobody (numbers only). One 테스트 does what the tool does.
+ */
+function buildVisionCard(): HTMLElement {
+  const modeSel = el('select') as HTMLSelectElement;
+  const modeNote = el('div', { class: 'hint', style: { margin: '4px 0 10px' } });
+  const status = el('div', { class: 'hint', style: { marginBottom: '8px' } });
+  const out = el('div', { class: 'outbox' });
+  let st: VisionStatus | null = null;
+  let keep = '__keep__';
+  let keyList: ApiKeyEntry[] = [];
+
+  // --- 1. native ---
+  const nativeInfo = el('div', { class: 'hint' });
+  const nativePane = el('div', { class: 'wsmode' }, [nativeInfo]);
+
+  // --- 2. helper ---
+  const hUrl = el('input', { placeholder: 'https://generativelanguage.googleapis.com/v1beta/openai 또는 http://127.0.0.1:11434/v1' }) as HTMLInputElement;
+  const hModel = el('input', { placeholder: 'gemini-2.5-flash' }) as HTMLInputElement;
+  const hKeySel = el('select') as HTMLSelectElement;
+  const hKey = el('input', { type: 'password', placeholder: 'API 키 (로컬 Ollama 는 비워 둠)' }) as HTMLInputElement;
+  const hKeyRow = el('label', { class: 'field' }, [el('span', { text: 'API 키 직접 입력' }), hKey]);
+  const hInstr = el('textarea', { rows: '4' }) as HTMLTextAreaElement;
+  const hReset = el('button', { class: 'ghost tiny', text: '기본 지침으로' });
+  hReset.addEventListener('click', () => { hInstr.value = st?.helper.defaultInstructions ?? ''; });
+  const syncHelperKey = () => { hKeyRow.style.display = selectedValue(hKeySel) ? 'none' : ''; };
+  hKeySel.addEventListener('change', syncHelperKey);
+  const helperPane = el('div', { class: 'wsmode' }, [
+    el('div', { class: 'hint', style: { marginBottom: '8px' },
+      text: 'OpenAI 호환 chat/completions 에 그림을 실어 보냅니다. 성인 이미지가 많다면 무검열/로컬 모델(예: Ollama 의 llava·qwen2.5-vl, 주소 http://127.0.0.1:11434/v1)을 권합니다 — 외부 API 는 거절할 수 있고, 거절되면 툴이 "VISION REFUSED" 로 알립니다.' }),
+    el('label', { class: 'field' }, [el('span', { text: '주소 (baseUrl)' }), hUrl]),
+    el('label', { class: 'field' }, [el('span', { text: '모델' }), hModel]),
+    el('label', { class: 'field' }, [el('span', { text: 'API 키 (키 목록에서)' }), hKeySel]),
+    hKeyRow,
+    el('label', { class: 'field' }, [el('span', { text: '비전 모델 지침' }), hInstr]),
+    el('div', { class: 'row' }, [hReset]),
+  ]);
+
+  // --- 3. off ---
+  const offPane = el('div', { class: 'wsmode' }, [
+    el('div', { class: 'hint', text: '모델 없이 수치(크기·밝기·선명도·레터박스·중복)만 잽니다. 에이전트는 그림의 내용을 판단하지 못하고 그렇다고 말합니다.' }),
+  ]);
+
+  // --- common ---
+  const maxW = el('input', { type: 'number', min: '128', max: '2048', step: '64', value: '768' }) as HTMLInputElement;
+  const detail = el('select') as HTMLSelectElement;
+  for (const [v, t] of [['auto', 'auto'], ['low', 'low (싸고 빠름)'], ['high', 'high (세밀)']]) detail.appendChild(el('option', { value: v, text: t }));
+  const maxCalls = el('input', { type: 'number', min: '1', max: '100', value: '12' }) as HTMLInputElement;
+  const commonPane = el('div', { class: 'row', style: { flexWrap: 'wrap', gap: '10px', marginTop: '6px' } }, [
+    el('label', { class: 'field' }, [el('span', { text: '최대 변 길이 (px)' }), maxW]),
+    el('label', { class: 'field' }, [el('span', { text: '디테일' }), detail]),
+    el('label', { class: 'field' }, [el('span', { text: '턴당 최대 호출' }), maxCalls]),
+  ]);
+
+  const panes: Record<VisionMode, HTMLElement> = { native: nativePane, helper: helperPane, off: offPane };
+  const syncMode = () => {
+    const m = selectedValue(modeSel) as VisionMode;
+    for (const [id, pane] of Object.entries(panes)) pane.style.display = id === m ? '' : 'none';
+    commonPane.style.display = m === 'off' ? 'none' : '';
+    modeNote.textContent = st?.modes.find((x) => x.id === m)?.note ?? '';
+  };
+  modeSel.addEventListener('change', syncMode);
+
+  const load = async () => {
+    try {
+      const [r, k] = await Promise.all([state.vision(), state.apiKeys().catch(() => ({ keys: [] as ApiKeyEntry[] }))]);
+      st = r;
+      keep = r.keepSentinel || keep;
+      keyList = k.keys ?? [];
+      clear(modeSel);
+      for (const m of r.modes) modeSel.appendChild(el('option', { value: m.id, text: `${r.modes.indexOf(m) + 1}. ${m.name}` }));
+      setSelected(modeSel, r.mode);
+      // native
+      clear(nativeInfo);
+      nativeInfo.appendChild(el('div', { text: `일반 에이전트: ${r.agent.model || '(모델 없음)'} @ ${r.agent.host || '(주소 없음)'}` }));
+      const p = r.nativeProbe || {};
+      nativeInfo.appendChild(el('div', { class: r.nativeProbeStale || (p.model && !p.ok) ? 'diff-del-n' : '', text:
+        !p.model ? '아직 확인 안 됨 — 테스트를 누르면 두 색 그림을 보내 이 모델이 실제로 보는지 확인하고 기억합니다.'
+        : r.nativeProbeStale ? `모델이 바뀌었습니다 (확인된 것: ${p.model}) — 다시 테스트하세요.`
+        : p.ok ? `확인됨 ${p.at || ''} · ${p.model}`
+        : `이 모델은 이미지를 보지 못했습니다 (${p.error || ''}) — 보조 비전 모델을 쓰세요.` }));
+      // helper
+      hUrl.value = r.helper.baseUrl || '';
+      hModel.value = r.helper.model === r.helper.defaultModel ? '' : r.helper.model;
+      hModel.placeholder = r.helper.defaultModel;
+      clear(hKeySel);
+      hKeySel.appendChild(el('option', { value: '', text: r.helper.apiKeySet ? '(직접 입력한 키 사용)' : '(직접 입력 / 없음)' }));
+      for (const key of keyList) hKeySel.appendChild(el('option', { value: key.id, text: `${key.name}${key.provider ? ' · ' + key.provider : ''}` }));
+      setSelected(hKeySel, r.helper.keyRef);
+      hKey.placeholder = r.helper.apiKeySet ? '(저장된 키 유지 — 바꾸려면 입력)' : 'API 키 (로컬 Ollama 는 비워 둠)';
+      hInstr.value = r.helper.instructions;
+      hInstr.placeholder = r.helper.defaultInstructions;
+      syncHelperKey();
+      maxW.value = String(r.maxWidth || 768);
+      setSelected(detail, r.detail || 'auto');
+      maxCalls.value = String(r.maxCallsPerTurn || 12);
+      syncMode();
+      status.textContent = (r.ready ? `지금: ${r.modes.find((m) => m.id === r.mode)?.name ?? r.mode} — 사용 가능` : `사용 불가: ${r.whyNot}`)
+        + (r.pillow ? '' : ' · Pillow 없음: 수치 분석이 제한됩니다');
+      status.className = 'hint ' + (r.ready ? '' : 'diff-del-n');
+    } catch (e) {
+      status.textContent = msg(e);
+    }
+  };
+
+  const patch = (): Record<string, unknown> => {
+    const m = selectedValue(modeSel) as VisionMode;
+    const p: Record<string, unknown> = { mode: m };
+    if (m === 'helper') {
+      p.helperBaseUrl = hUrl.value.trim();
+      p.helperModel = hModel.value.trim();
+      p.helperKeyRef = selectedValue(hKeySel);
+      p.helperApiKey = hKey.value ? hKey.value : (st?.helper.apiKeySet ? keep : '');
+      p.helperInstructions = hInstr.value.trim();
+    }
+    if (m !== 'off') {
+      p.maxWidth = Math.max(128, Math.min(2048, Number(maxW.value) || 768));
+      p.detail = selectedValue(detail) || 'auto';
+      p.maxCallsPerTurn = Math.max(1, Math.min(100, Number(maxCalls.value) || 12));
+    }
+    return p;
+  };
+
+  const save = el('button', { class: 'primary', text: '저장' }) as HTMLButtonElement;
+  save.addEventListener('click', async () => {
+    save.disabled = true;
+    try {
+      await state.saveVision(patch());
+      hKey.value = '';
+      await load();
+      clear(out);
+      out.appendChild(el('div', { class: 'notice ok', text: '저장했습니다.' }));
+    } catch (e) {
+      clear(out);
+      out.appendChild(el('div', { class: 'notice err', text: msg(e) }));
+    } finally {
+      save.disabled = false;
+    }
+  });
+
+  const path = el('input', { placeholder: '테스트 이미지 경로 (비우면 내장 두 색 그림) — studio/output/…/x.png' }) as HTMLInputElement;
+  const test = el('button', { class: 'ghost', text: '테스트' }) as HTMLButtonElement;
+  test.addEventListener('click', async () => {
+    test.disabled = true;
+    clear(out);
+    out.appendChild(el('div', { class: 'hint', text: '저장하고 보는 중입니다… (메인 모델 확인은 한 번의 실제 호출입니다)' }));
+    try {
+      await state.saveVision(patch());
+      hKey.value = '';
+      const r = await state.testVision(path.value.trim(), '');
+      await load();
+      clear(out);
+      const head = r.ok
+        ? `봅니다 · ${r.detail} · ${(r.ms / 1000).toFixed(1)}초`
+        : (r.refused ? `거절됨 — 이 모델은 이 그림을 묘사하지 않습니다. 무검열/로컬 모델로 바꾸거나 다른 이미지를 시도하세요.` : `실패했습니다${r.detail ? ' · ' + r.detail : ''}`);
+      out.appendChild(el('div', { class: 'notice ' + (r.ok ? 'ok' : 'err') }, [
+        el('div', { text: head }),
+        el('pre', { class: 'mono', style: { maxHeight: '220px' }, text: r.text || r.error || '' }),
+        r.metrics ? el('pre', { class: 'mono hint', style: { maxHeight: '140px' }, text: JSON.stringify(r.metrics, null, 1) }) : null,
+      ]));
+    } catch (e) {
+      clear(out);
+      out.appendChild(el('div', { class: 'notice err', text: msg(e) }));
+    } finally {
+      test.disabled = false;
+    }
+  });
+
+  void load();
+  return el('div', { class: 'card', id: 'vision-card' }, [
+    el('h2', { text: '비전 툴' }),
+    el('div', { class: 'hint', style: { marginBottom: '8px' }, text: '일반 에이전트가 이미지를 직접 보고 판단·검수·조정할 때 쓰는 view_image · compare_images · review_folder 툴입니다. 누가 볼지 하나를 고릅니다.' }),
+    status,
+    el('label', { class: 'field' }, [el('span', { text: '보기 옵션' }), modeSel]),
+    modeNote,
+    nativePane,
+    helperPane,
+    offPane,
+    commonPane,
+    el('div', { class: 'row', style: { marginTop: '8px' } }, [save, path, test]),
+    out,
+  ]);
+}
+
 function buildWebsearchCard(): HTMLElement {
   const modeSel = el('select') as HTMLSelectElement;
   const modeNote = el('div', { class: 'hint', style: { margin: '4px 0 10px' } });

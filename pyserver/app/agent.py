@@ -26,7 +26,7 @@ from pydantic_ai.providers.openai import OpenAIProvider
 
 from . import (actions, assets, codexauth, config, files, log, permits, presets, providers, pyexec, skills, snapshots, textedit,
                staging, store, websearch, workspace)
-from . import nai, studio, studiojob, toolsigs
+from . import nai, studio, studiojob, toolsigs, vision
 from . import card as cardmod
 from . import memory as mem
 
@@ -68,6 +68,14 @@ Principles:
 - **External facts come from web_search.** For source material, canon, terminology or anything
   recent that is outside your knowledge, use the web_search tool and pass the source URLs to the
   user. If it answers that search is not configured, relay that as it is and never invent facts.
+- **Seeing images.** You cannot see an image unless a vision tool returned it or described it
+  THIS turn. Use view_image (one) / compare_images (several) before judging what is drawn, and
+  image_metrics for blur, brightness, borders and duplicates without a model. If a tool says
+  VISION REFUSED or vision is off, say so and report only the measured numbers - never guess
+  the content. Adult content is common here: a refusal is the vision model's limit, not the
+  user's fault; point at ⚙ → 에이전트 → 비전 툴 (an uncensored/local helper can be set there).
+  Generation loop: generate → view → change ONE thing (a prompt term, the seed, the scale) →
+  regenerate → compare; stop after three rounds and report.
 - **Know RisuAI's processing order and speak from it.** One turn runs editinput (regex, saved) ->
   start triggers -> editprocess (regex, per request, not saved) -> prompt assembly -> Lua
   editRequest (the whole request array) -> the model -> editoutput (regex, saved) -> output
@@ -294,6 +302,11 @@ def _msg_chars(m: Any) -> int:
         c = getattr(p, "content", None)
         if isinstance(c, str):
             n += len(c)
+        elif isinstance(c, list):
+            # A picture attached by a vision tool counts as a short line, not
+            # as the repr of its bytes (§1-42).
+            for item in c:
+                n += len(item) if isinstance(item, str) else 64
         elif c is not None:
             n += len(str(c))
         a = getattr(p, "args", None)
@@ -311,6 +324,8 @@ def _msg_text(m: Any) -> str:
         c = getattr(p, "content", None)
         if kind == "user-prompt" and isinstance(c, str):
             bits.append(f"[사용자] {c}")
+        elif kind == "user-prompt" and isinstance(c, list):
+            bits.append("[사용자] " + " ".join(x if isinstance(x, str) else "[이미지]" for x in c)[:300])
         elif kind == "text" and isinstance(c, str):
             bits.append(f"[에이전트] {c}")
         elif kind == "tool-call":
@@ -1823,6 +1838,195 @@ def build() -> Agent[Deps]:
     # The description is read at registration, so it is set before, not after.
     web_search.__doc__ = websearch.tool_doc()
     agent.tool(web_search)
+
+    # --- seeing images (§1-42) -------------------------------------------------
+    # Always registered, like web_search: when vision is off the tools still
+    # return the measured numbers and say why the picture was not looked at.
+    async def view_image(ctx: RunContext[Deps], path: str, question: str = "") -> Any:
+        """Look at ONE image in the space (studio/..., projects/..., hina/...) and answer a
+        question about it: what is drawn, whether it matches the intended prompt, hands/eyes/limbs,
+        cropping, text or watermarks. ALWAYS call this before saying anything about an image's
+        content - never describe an image you have not viewed in this turn.
+
+        What comes back depends on the vision setting: your own model sees the picture (it is
+        attached right after this result), or a helper model's description, plus measured numbers
+        (size, brightness, sharpness, letterbox, near-duplicates) and, for NAI PNGs, the embedded
+        prompt/seed. If the result starts with VISION REFUSED, you have NOT seen the image: report
+        only the numbers and tell the user the vision model declined.
+        """
+        return await vision.view(ctx.deps.session_id, [path], question)
+
+    async def compare_images(ctx: RunContext[Deps], paths: str, question: str = "") -> Any:
+        """Look at 2-6 images at once (comma- or newline-separated space paths) and rank or contrast
+        them: which best matches the prompt, what differs, which are near-duplicates. Cheaper
+        than several view_image calls. Same rules as view_image (VISION REFUSED = not seen).
+        """
+        rels = [p.strip() for p in re.split(r"[,\n]", paths or "") if p.strip()]
+        return await vision.view(ctx.deps.session_id, rels, question, label=f"비교 {len(rels)}장")
+
+    @agent.tool
+    def image_metrics(ctx: RunContext[Deps], path: str) -> str:
+        """Numbers only, no model: size, format, brightness, contrast, sharpness (blur),
+        letterbox borders, near-duplicates in the same folder (perceptual hash) and the NAI
+        prompt/seed when embedded. Works when vision is off or refused. Use it to pre-filter a
+        large folder before looking at candidates.
+        """
+        try:
+            m = vision.metrics(path)
+            return vision.fmt_metrics(m, vision.near_duplicates(path))
+        except vision.VisionError as e:
+            return f"cannot measure: {e}"
+        except Exception as e:  # noqa: BLE001
+            return f"metrics failed: {type(e).__name__}: {str(e)[:200]}"
+
+    agent.tool(view_image)
+    agent.tool(compare_images)
+
+    async def review_folder(ctx: RunContext[Deps], folder: str, criteria: str = "", pattern: str = "",
+                            group_by: str = "", limit: int = 24) -> Any:
+        """Gather a folder's candidates for review: the groups (by the filename rule), numbers per
+        file (blur, brightness, borders, duplicates) and - in helper mode - a verdict per image from
+        the vision helper against `criteria`; in native mode the images are attached for you to judge
+        (up to `limit`, largest groups first). Read the result, decide, then write your verdicts with
+        suggest_selection. This call changes nothing. `criteria` says what a keeper looks like
+        (e.g. "smiling, full face visible, hands correct"); `pattern`/`group_by` are studio_group's.
+        """
+        return await _review_folder(ctx, folder, criteria, pattern, group_by, limit)
+
+    async def _review_folder(ctx: RunContext[Deps], folder: str, criteria: str, pattern: str,
+                             group_by: str, limit: int) -> Any:
+        from pydantic_ai.messages import ToolReturn
+        try:
+            g = studio.group(folder, pattern, group_by or "emotion")
+        except studio.StudioError as e:
+            return f"cannot read the folder: {e}"
+        items = [(grp["key"], it) for grp in sorted(g["groups"], key=lambda x: -len(x["items"])) for it in grp["items"]]
+        items += [("(unmatched)", it) for it in g["unmatched"]]
+        if not items:
+            return f"{g['folder']}: no images."
+        limit = max(1, min(48, int(limit or 24)))
+        lines = [f"{g['folder']} · {g['total']} images · {len(g['groups'])} groups · 못 읽음 {len(g['unmatched'])}"]
+        try:
+            dup = studio.duplicates(folder)
+            if dup.get("groups"):
+                lines.append("byte-identical duplicates: " + "; ".join(", ".join(x) for x in dup["groups"][:8]))
+        except Exception:  # noqa: BLE001
+            pass
+        shown = items[:limit]
+        for key, it in shown:
+            try:
+                m = vision.metrics(it["path"])
+                extra = (f" · 밝기 {m.get('brightness')} · {m.get('sharpnessLabel', '')}"
+                         + (" · 레터박스" if any((m.get("letterbox") or {}).values()) else "")) if "brightness" in m else ""
+            except Exception:  # noqa: BLE001
+                extra = ""
+            flags = it.get("selection") or {}
+            fl = "".join(k[0] for k in ("use", "inpaint", "delete") if flags.get(k)) or "-"
+            lines.append(f"  {it['filename']}  group={key}  flags={fl}{extra}")
+        if len(items) > limit:
+            lines.append(f"  … {len(items) - limit} more not shown (raise limit or narrow with pattern)")
+        m = vision.mode()
+        if m == "off" or not vision.ready():
+            lines.append(f"(vision not available - numbers only; {vision.why_not()})")
+            return "\n".join(lines)
+        crit = criteria.strip() or "a clean, complete image that matches its group name"
+        if m == "helper":
+            # One helper call per batch of images, asking for JSON verdicts.
+            verdict_lines = []
+            batch: list = []
+            for key, it in shown:
+                batch.append((key, it))
+                if len(batch) == vision.max_images():
+                    verdict_lines += await _helper_verdicts(ctx, batch, crit)
+                    batch = []
+            if batch:
+                verdict_lines += await _helper_verdicts(ctx, batch, crit)
+            lines.append("")
+            lines.append("helper verdicts (write the ones you agree with via suggest_selection):")
+            lines += verdict_lines
+            return "\n".join(lines)
+        # native: attach the pictures
+        loaded = []
+        for key, it in shown:
+            try:
+                loaded.append(vision.load_image(it["path"]))
+            except vision.VisionError:
+                continue
+        if not loaded:
+            return "\n".join(lines)
+        session_mod = __import__("app.session", fromlist=["push_stream_event"]) if False else None  # noqa: F841
+        vision._push(ctx.deps.session_id, {"type": "viewed", "paths": [x.rel for x in loaded],
+                                           "label": f"폴더 검수 {len(loaded)}장", "mode": "native"})
+        lines.append("")
+        lines.append(f"The {len(loaded)} images are attached below, labelled [n] in the same order as the list. "
+                     f"Criteria: {crit}. Decide per image, then call suggest_selection.")
+        return ToolReturn(return_value="\n".join(lines), content=vision._image_content(loaded))
+
+    async def _helper_verdicts(ctx: RunContext[Deps], batch: list, criteria: str) -> list[str]:
+        loaded = []
+        names = []
+        for key, it in batch:
+            try:
+                loaded.append(vision.load_image(it["path"]))
+                names.append(it["filename"])
+            except vision.VisionError as e:
+                names.append(it["filename"])
+                loaded.append(None)
+        real = [x for x in loaded if x is not None]
+        if not real:
+            return [f"  {n}: cannot load" for n in names]
+        n = vision._take_call(ctx.deps.session_id)
+        if n is None:
+            return [f"  {x.rel.split('/')[-1]}: (vision budget used up)" for x in real]
+        q = (f"Criteria for a keeper: {criteria}. For EACH image, answer as a JSON list only: "
+             f'[{{"n": 1, "verdict": "use|delete|inpaint", "reason": "one short sentence"}}, …]. '
+             "use = keep as is, inpaint = keep but a part needs fixing, delete = discard.")
+        try:
+            text = await vision.describe_with_helper(real, q)
+        except vision.RefusalError as e:
+            return [f"  {x.rel.split('/')[-1]}: VISION REFUSED ({e.code}) - numbers only" for x in real]
+        except Exception as e:  # noqa: BLE001
+            return [f"  {x.rel.split('/')[-1]}: helper failed - {type(e).__name__}" for x in real]
+        vision._push(ctx.deps.session_id, {"type": "viewed", "paths": [x.rel for x in real],
+                                           "label": "폴더 검수 (helper)", "mode": "helper"})
+        raw = text.strip()
+        raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw, flags=re.S)
+        out = []
+        try:
+            arr = json.loads(raw)
+            by_n = {int(x.get("n")): x for x in arr if isinstance(x, dict) and str(x.get("n", "")).isdigit()}
+            for i, x in enumerate(real, 1):
+                v = by_n.get(i) or {}
+                out.append(f"  {x.rel.split('/')[-1]}: {v.get('verdict', '?')} - {str(v.get('reason') or '')[:160]}")
+        except Exception:  # noqa: BLE001
+            out.append("  (helper did not answer in JSON) " + raw[:600].replace("\n", " "))
+        return out
+
+    @agent.tool
+    def suggest_selection(ctx: RunContext[Deps], folder: str, suggestions_json: str) -> str:
+        """Write SUGGESTIONS (not decisions) into a folder's 검수 tab. suggestions_json is a JSON
+        list of {"file": "name.png", "verdict": "use|delete|inpaint|none", "reason": "…"}; "none"
+        clears an earlier suggestion. The user sees an 'AI 제안' badge per image and applies or
+        ignores it. Afterwards say exactly: 검수 탭에 제안을 적었습니다 — 확인해 주세요. Never
+        delete, export or adopt on the strength of a suggestion.
+        """
+        try:
+            items = json.loads(suggestions_json)
+            if not isinstance(items, list):
+                return "suggestions_json must be a JSON list."
+            by = ("helper " + vision._helper()[2]) if vision.mode() == "helper" else (config.section("agent").get("model") or "agent")
+            r = studio.merge_suggestions(folder, items, by=str(by)[:80])
+        except (ValueError, studio.StudioError) as e:
+            return f"could not write suggestions: {e}"
+        vision._push(ctx.deps.session_id, {"type": "suggestions", "folder": r["folder"], "count": r["count"],
+                                           "use": r["use"], "delete": r["delete"], "inpaint": r["inpaint"]})
+        note = f"wrote {r['count']} suggestions to {r['folder']} (use {r['use']}, delete {r['delete']}, inpaint {r['inpaint']}"
+        note += f", cleared {r['cleared']})" if r["cleared"] else ")"
+        if r["unknown"]:
+            note += f"; not in the folder: {', '.join(r['unknown'][:8])}"
+        return note + " — the user decides in the 검수 tab."
+
+    agent.tool(review_folder)
 
     return agent
 

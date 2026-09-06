@@ -1603,6 +1603,13 @@ check('agent credential card present', !!findButton(document, '연결 테스트'
   const modeSel = card?.querySelector('select');
   const modes = [...(modeSel?.options || [])].map((o) => o.value);
   check('three search options, in order', modes.join(',') === 'native,gemini,provider', modes.join(','));
+  // §1-42: the vision tool card sits right after the web-search card.
+  const vcard = document.getElementById('vision-card');
+  check('the vision tool card follows the web search card', !!vcard && card?.nextElementSibling === vcard);
+  const vmodes = [...(vcard?.querySelector('select')?.options || [])].map((o) => o.value);
+  check('three vision options, in order', vmodes.join(',') === 'native,helper,off', vmodes.join(','));
+  check('the helper pane has an address field', !![...(vcard?.querySelectorAll('input') || [])].some((i) => /baseUrl|11434|openai/.test(i.placeholder || '')));
+  check('the vision card offers a test with an image path', !![...(vcard?.querySelectorAll('input') || [])].some((i) => /이미지 경로/.test(i.placeholder || '')));
   // linkedom's <select> has no settable .value: the stamped `selected`
   // attribute is what setSelected wrote and what selectedValue falls back to.
   const chosen = () => modeSel?.querySelector('option[selected]')?.value;
@@ -2871,6 +2878,30 @@ console.log('\ntest_studio_selector');
   await settle(400);
   const cells = document.querySelectorAll('.panel.active .selcell');
   check('unfolding a group lists its candidates', cells.length === 2, String(cells.length));
+  // §1-42: an AI suggestion seeded in the selection file shows on the cell.
+  {
+    const sel = await (await fetch(backend.url + '/studio/selection?folder=' + encodeURIComponent('studio/output/고르기'), { headers: auth })).json();
+    const cur = (sel && sel.selections) || {};
+    cur['하나-happy-20260829-120000-2.png'] = { use: false, inpaint: false, delete: false,
+      suggest: { verdict: 'inpaint', reason: '손가락 수정', by: 'smoke', at: 'now' } };
+    await fetch(backend.url + '/studio/selection', { method: 'POST', headers: auth,
+      body: JSON.stringify({ folder: 'studio/output/고르기', selections: cur }) });
+    // Re-entering the tab re-reads the library and forgets the cached groups.
+    clickById(document, 'tab-files');
+    await settle(300);
+    clickById(document, 'tab-studio');
+    await settle(1200);
+    card('happy')?.dispatchEvent(new window.Event('click', { bubbles: true }));
+    await settle(400);
+    const sug = document.querySelector('.panel.active .selcell .sugline.sug-inpaint');
+    check('a seeded AI suggestion shows on the candidate', !!sug && /AI 제안: 수정/.test(sug.textContent || ''),
+          (document.querySelector('.panel.active .left')?.textContent || '').slice(0, 200));
+    clickButton(sug, '적용');
+    await settle(200);
+    const cellOf = sug?.closest('.selcell');
+    check('적용 turns the suggestion into the 수정 flag', !!cellOf && cellOf.classList.contains('fixing')
+          && !cellOf.querySelector('.sugline.sug-inpaint'), cellOf?.className);
+  }
   check('each offers the three flags (대표 retired, §1-39)',
         (cells[0]?.querySelectorAll('.selflags button') || []).length === 3);
   const useBtn = [...(cells[0]?.querySelectorAll('.selflags button') || [])]

@@ -200,6 +200,31 @@ export interface WebsearchTest {
   ok: boolean; mode: WebsearchMode; detail: string; query?: string; text?: string; error?: string; ms: number;
 }
 
+/** The vision tool (§1-42): who looks at images, and whether it can. */
+export type VisionMode = 'native' | 'helper' | 'off';
+
+export interface VisionStatus {
+  modes: { id: VisionMode; name: string; note: string }[];
+  mode: VisionMode;
+  agent: { model: string; host: string };
+  nativeProbe: { model?: string; ok?: boolean; at?: string; error?: string };
+  nativeProbeStale: boolean;
+  helper: {
+    baseUrl: string; model: string; defaultModel: string; keyRef: string; apiKeySet: boolean;
+    instructions: string; defaultInstructions: string; effectiveHost: string;
+  };
+  maxWidth: number; detail: string; maxImagesPerCall: number; maxCallsPerTurn: number; timeoutSeconds: number;
+  pillow: boolean;
+  ready: boolean;
+  whyNot: string;
+  keepSentinel: string;
+}
+
+export interface VisionTest {
+  ok: boolean; mode: VisionMode; detail: string; path?: string; text?: string;
+  metrics?: Record<string, unknown> | null; refused: boolean; ms: number; error?: string;
+}
+
 export interface CharxPreview {
   charKey: string; name: string; assets: number; present: number;
   missing: { name: string; type: string; key: string }[];
@@ -496,7 +521,9 @@ export interface StudioStatus {
  * is what goes to the bot, `inpaint` is what needs fixing first, `delete` is
  * what to throw away — and a candidate can legitimately be none of them.
  */
-export interface SelectionState { use: boolean; inpaint: boolean; delete: boolean; rep?: boolean }
+/** An AI review suggestion riding beside the flags (§1-42); the user applies or ignores it. */
+export interface SelectionSuggest { verdict: 'use' | 'delete' | 'inpaint'; reason: string; by: string; at: string }
+export interface SelectionState { use: boolean; inpaint: boolean; delete: boolean; rep?: boolean; suggest?: SelectionSuggest }
 export type SelectionMap = Record<string, SelectionState>;
 
 export interface GroupItem {
@@ -504,6 +531,8 @@ export interface GroupItem {
   path: string;
   fields?: Record<string, string>;
   selection: SelectionState;
+  /** mtime (ms) - the thumbnail cache stamp, so a rewritten file shows anew. */
+  modified?: number;
 }
 
 export interface StudioGroups {
@@ -1362,6 +1391,22 @@ class AppState {
    *  shapes at up to a minute each, so the wait is generous. */
   async testWebsearch(query: string): Promise<WebsearchTest> {
     return await transport.post('/websearch/test', { query }, 330_000);
+  }
+
+  // --- the vision tool (§1-42) ---------------------------------------------
+
+  async vision(): Promise<VisionStatus> {
+    return await transport.get('/vision');
+  }
+
+  async saveVision(patch: Record<string, unknown>): Promise<void> {
+    await transport.post('/config', { config: { vision: patch } });
+  }
+
+  /** One real look in the configured mode (the native probe goes through
+   * the agent model, which can take a while). */
+  async testVision(path = '', question = ''): Promise<VisionTest> {
+    return await transport.post('/vision/test', { path, question }, 180_000);
   }
 
   // --- diagnostics ----------------------------------------------------------

@@ -207,6 +207,13 @@ export function hasGroups(folder: string): boolean {
   return !!groups && groups.folder === folder && groupsRev === state.filesRev;
 }
 
+/** A library re-read (entering the tab, a refresh) forgets the groups too:
+ * a selection file written by the agent (suggestions) is only visible
+ * through a fresh group() call. */
+export function invalidateGroups(): void {
+  groupsRev = -1;
+}
+
 export async function loadGroups(folder: string): Promise<void> {
   try {
     const eff = effective(prefsFor(folder));
@@ -231,6 +238,8 @@ function queueSave(): void {
   }, 500);
 }
 
+const SUG_LABEL: Record<string, string> = { use: '채택', delete: '버림', inpaint: '수정' };
+
 function flag(filename: string, key: keyof SelectionState): void {
   const cur = selection[filename] || { use: false, inpaint: false, delete: false };
   const next: SelectionState = { ...cur, [key]: !cur[key] };
@@ -238,10 +247,42 @@ function flag(filename: string, key: keyof SelectionState): void {
   // turns the other off. 수정 ("fix first") stays independent.
   if (key === 'use' && next.use) next.delete = false;
   if (key === 'delete' && next.delete) { next.use = false; next.rep = false; }
+  // A manual flag that matches the AI's suggestion makes it a decision.
+  if (next.suggest && next.suggest.verdict === key && next[key]) delete next.suggest;
   selection[filename] = next;
   cellSyncs.get(filename)?.();
   missingSync?.();
   queueSave();
+}
+
+/** Turn the AI's suggestion into the flag it names, and drop the suggestion. */
+function applySuggest(filename: string): void {
+  const cur = selection[filename];
+  const g = cur?.suggest;
+  if (!cur || !g) return;
+  const next: SelectionState = { ...cur };
+  delete next.suggest;
+  if (g.verdict === 'use') { next.use = true; next.delete = false; }
+  else if (g.verdict === 'delete') { next.delete = true; next.use = false; next.rep = false; }
+  else if (g.verdict === 'inpaint') next.inpaint = true;
+  selection[filename] = next;
+  cellSyncs.get(filename)?.();
+  missingSync?.();
+  queueSave();
+}
+
+function dropSuggest(filename: string): void {
+  const cur = selection[filename];
+  if (!cur?.suggest) return;
+  const next: SelectionState = { ...cur };
+  delete next.suggest;
+  selection[filename] = next;
+  cellSyncs.get(filename)?.();
+  queueSave();
+}
+
+function suggestCount(): number {
+  return Object.values(selection).filter((s) => !!s.suggest).length;
 }
 
 /** Bulk actions: apply, then refresh every registered cell/card in place. */
@@ -294,6 +335,22 @@ export function drawSelector(node: Folder): void {
   });
   // 봇에 반영 belongs to the selected/ folder an export made - the folder
   // one adopts FROM - not to the pool of candidates (user).
+  // AI suggestions, in bulk (§1-42): apply them all, or clear them all.
+  const nSug = suggestCount();
+  if (nSug) {
+    const applyAll = el('button', { class: 'ghost tiny', text: `제안 ${nSug}건 모두 적용`,
+      title: 'AI 제안(채택·버림·수정)을 전부 표시로 바꿉니다' });
+    applyAll.addEventListener('click', () => {
+      for (const f of Object.keys(selection)) if (selection[f]?.suggest) applySuggest(f);
+      hub.drawCentre();
+    });
+    const clearAll = el('button', { class: 'ghost tiny', text: '제안 지우기' });
+    clearAll.addEventListener('click', () => {
+      for (const f of Object.keys(selection)) if (selection[f]?.suggest) dropSuggest(f);
+      hub.drawCentre();
+    });
+    bar.append(applyAll, clearAll);
+  }
   bar.append(none, exportButton(node));
   if (/\/selected$/.test(node.path)) bar.appendChild(adoptButton());
   viewMount.appendChild(bar);
@@ -331,10 +388,11 @@ export function drawSelector(node: Folder): void {
     const FOLD = 6;
     const names = el('span', { class: 'hint grow' });
     let open = false;
-    const more = el('button', { class: 'ghost tiny', style: { display: missing.length > FOLD ? '' : 'none' } });
+    const more = el('button', { class: 'ghost tiny' });
+    more.style.display = missing.length > FOLD ? '' : 'none';
     const syncNames = (): void => {
       names.textContent = open || missing.length <= FOLD ? missing.join(', ') : missing.slice(0, FOLD).join(', ') + ' …';
-      more.textContent = open ? '접기' : `외 ${missing.length - FOLD}개 · 펼치기`;
+      more.textContent = missing.length > FOLD ? (open ? '접기' : `외 ${missing.length - FOLD}개 · 펼치기`) : '';
     };
     more.addEventListener('click', () => { open = !open; syncNames(); });
     syncNames();
@@ -401,15 +459,16 @@ function groupCard(grp: { key: string; items: GroupItem[] }): HTMLElement {
     ?? grp.items.find((i) => selection[i.filename]?.use)
     ?? grp.items[0];
   const pic = el('div', { class: 'assetpic' });
-  if (face) void loadThumb({ path: face.path, name: face.filename, size: 0, modified: 0, textual: false }, pic);
+  if (face) void loadThumb({ path: face.path, name: face.filename, size: 0, modified: face.modified || 0, textual: false }, pic);
   const chosenBadge = el('span', { class: 'badge' });
   const fixBadge = el('span', { class: 'badge' });
+  const sugBadge = el('span', { class: 'badge sug', title: 'AI 제안이 있는 후보' });
   const cell = el('div', { class: 'fcell groupcard', title: `${grp.key} — 눌러서 후보를 펼칩니다` }, [
     pic,
     el('div', { class: 'fname row' }, [
       el('span', { class: 'grow', text: grp.key }),
       el('span', { class: 'badge', text: `${grp.items.length}장` }),
-      chosenBadge, fixBadge,
+      chosenBadge, fixBadge, sugBadge,
     ]),
   ]);
   const sync = (): void => {
@@ -420,6 +479,9 @@ function groupCard(grp: { key: string; items: GroupItem[] }): HTMLElement {
     chosenBadge.textContent = chosen ? `선택 ${chosen}` : '미선택';
     fixBadge.style.display = fixing ? '' : 'none';
     fixBadge.textContent = fixing ? `수정 ${fixing}` : '';
+    const sugN = grp.items.filter((i) => selection[i.filename]?.suggest).length;
+    sugBadge.style.display = sugN ? '' : 'none';
+    sugBadge.textContent = sugN ? `제안 ${sugN}` : '';
   };
   sync();
   cellSyncs.set('grp:' + grp.key, sync);
@@ -450,8 +512,11 @@ function candidate(it: GroupItem, groupItems?: GroupItem[]): HTMLElement {
   );
   // (the 대표 button is retired, §1-39; groupItems is kept for callers)
   void groupItems;
+  // The AI's suggestion (§1-42): a line under the flags with the verdict and
+  // its reason, 적용 to make it the decision, × to dismiss it.
+  const sug = el('div', { class: 'sugline', style: { display: 'none' } });
   const cell2 = el('div', { class: 'fcell selcell', title: it.filename }, [
-    pic, el('div', { class: 'fname', text: it.filename }), flags,
+    pic, el('div', { class: 'fname', text: it.filename }), flags, sug,
   ]);
   const sync = (): void => {
     const s = selection[it.filename] || { use: false, inpaint: false, delete: false };
@@ -462,12 +527,26 @@ function candidate(it: GroupItem, groupItems?: GroupItem[]): HTMLElement {
     btns.get('inpaint')?.classList.toggle('on', !!s.inpaint);
     btns.get('delete')?.classList.toggle('on', !!s.delete);
     btns.get('rep')?.classList.toggle('on', !!s.rep);
+    clear(sug);
+    const g = s.suggest;
+    if (!g) { sug.style.display = 'none'; sug.className = 'sugline'; return; }
+    sug.style.display = '';
+    sug.className = 'sugline sug-' + g.verdict;
+    const apply = el('button', { class: 'ghost tiny', text: '적용', title: `AI 제안대로 ${SUG_LABEL[g.verdict]} 표시` });
+    apply.addEventListener('click', (ev) => { ev.stopPropagation(); applySuggest(it.filename); });
+    const drop = el('button', { class: 'ghost tiny', text: '×', title: '제안 지우기' });
+    drop.addEventListener('click', (ev) => { ev.stopPropagation(); dropSuggest(it.filename); });
+    sug.append(
+      el('span', { class: 'badge', text: `AI 제안: ${SUG_LABEL[g.verdict] ?? g.verdict}`, title: `${g.by || 'AI'} · ${g.at || ''}` }),
+      el('span', { class: 'hint grow sugreason', text: g.reason || '', title: g.reason || '' }),
+      apply, drop,
+    );
   };
   sync();
   cellSyncs.set(it.filename, sync);
   // The picture itself toggles 채택: that is the click being made ninety times.
   pic.addEventListener('click', () => flag(it.filename, 'use'));
-  void loadThumb({ path: it.path, name: it.filename, size: 0, modified: 0, textual: false }, pic);
+  void loadThumb({ path: it.path, name: it.filename, size: 0, modified: it.modified || 0, textual: false }, pic);
   return cell2;
 }
 
@@ -719,7 +798,8 @@ function adoptButton(): HTMLElement {
 export async function loadThumb(f: WorkspaceFile, mount: HTMLElement): Promise<void> {
   try {
     // Review wants a sharper picture than the file grids: ~720px (§1-39).
-    const url = await blobUrl(f.path, '', { thumb: true, w: 720 });
+    // The mtime stamps the cache key so a rewritten file is fetched anew.
+    const url = await blobUrl(f.path, f.modified ? String(f.modified) : '', { thumb: true, w: 720 });
     if (!mount.isConnected) return;
     clear(mount);
     const img = el('img', { class: 'assetimg', src: url, alt: '' });

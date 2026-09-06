@@ -437,6 +437,16 @@ button.iconbtn.on { background: rgba(37,99,235,.18); }
 .selhead .badge.warn { cursor: pointer; }
 .extrahead { padding: 10px 8px 4px; }
 /* The 썸네일 view's big pick: the clicked image above the grid (§1-40). */
+/* AI review suggestions in the 검수 cells (§1-42). */
+.sugline { display: flex; align-items: center; gap: 4px; margin-top: 4px; padding: 3px 4px; border-radius: 5px;
+  background: rgba(128,128,128,.08); border-left: 3px solid var(--textcolor2, #79839a); font-size: 11px; }
+.sugline.sug-use { border-left-color: #22c55e; }
+.sugline.sug-delete { border-left-color: #ef4444; }
+.sugline.sug-inpaint { border-left-color: #f59e0b; }
+.sugline .sugreason { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.badge.sug { background: rgba(99, 102, 241, .22); }
+/* What the agent looked at: a smaller strip than fresh results. */
+.imgstrip.viewed .wsimg img { max-height: 56px; opacity: .92; }
 .bigpick { margin: 0 0 10px; text-align: center; }
 .bigpick img { max-width: 100%; max-height: 42vh; border-radius: 6px; display: inline-block; }
 .extrahead .sectiontitle { margin-bottom: 0; }

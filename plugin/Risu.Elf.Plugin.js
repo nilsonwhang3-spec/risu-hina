@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.13.3
+//@display-name Risu Hina v0.14.0
 //@api 3.0
-//@version 0.13.3
+//@version 0.14.0
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -104,7 +104,7 @@
       this.tokenSafe = true;
       this.lastHealth = body;
       this.probeInfo = "";
-      this.gate = versionGate("0.13.3", String(body.version || ""));
+      this.gate = versionGate("0.14.0", String(body.version || ""));
       return body;
     }
     /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -1685,6 +1685,18 @@
     async testWebsearch(query) {
       return await transport.post("/websearch/test", { query }, 33e4);
     }
+    // --- the vision tool (§1-42) ---------------------------------------------
+    async vision() {
+      return await transport.get("/vision");
+    }
+    async saveVision(patch) {
+      await transport.post("/config", { config: { vision: patch } });
+    }
+    /** One real look in the configured mode (the native probe goes through
+     * the agent model, which can take a while). */
+    async testVision(path = "", question = "") {
+      return await transport.post("/vision/test", { path, question }, 18e4);
+    }
     // --- diagnostics ----------------------------------------------------------
     async logs(limit = 300, level = "") {
       return await transport.get(
@@ -3133,7 +3145,12 @@
     show_artifact: ["\u{1F4CA}", "\uC544\uD2F0\uD329\uD2B8"],
     find_files: ["\u{1F50D}", "\uD30C\uC77C \uCC3E\uAE30"],
     search_files: ["\u{1F50D}", "\uB0B4\uC6A9 \uAC80\uC0C9"],
-    studio_meta: ["\u{1F39B}", "\uCE74\uB4DC"]
+    studio_meta: ["\u{1F39B}", "\uCE74\uB4DC"],
+    view_image: ["\u{1F441}", "\uC774\uBBF8\uC9C0 \uBCF4\uAE30"],
+    compare_images: ["\u{1F441}", "\uC774\uBBF8\uC9C0 \uBE44\uAD50"],
+    image_metrics: ["\u{1F4D0}", "\uC774\uBBF8\uC9C0 \uC218\uCE58"],
+    review_folder: ["\u{1F50E}", "\uD3F4\uB354 \uAC80\uC218"],
+    suggest_selection: ["\u{1F3F7}", "\uAC80\uC218 \uC81C\uC548"]
   };
   var PAPER_PLANE = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4z"/></svg>';
   function modal(title, body, opts = {}) {
@@ -4068,6 +4085,16 @@ button.iconbtn.on { background: rgba(37,99,235,.18); }
 .selhead .badge.warn { cursor: pointer; }
 .extrahead { padding: 10px 8px 4px; }
 /* The \uC378\uB124\uC77C view's big pick: the clicked image above the grid (\xA71-40). */
+/* AI review suggestions in the \uAC80\uC218 cells (\xA71-42). */
+.sugline { display: flex; align-items: center; gap: 4px; margin-top: 4px; padding: 3px 4px; border-radius: 5px;
+  background: rgba(128,128,128,.08); border-left: 3px solid var(--textcolor2, #79839a); font-size: 11px; }
+.sugline.sug-use { border-left-color: #22c55e; }
+.sugline.sug-delete { border-left-color: #ef4444; }
+.sugline.sug-inpaint { border-left-color: #f59e0b; }
+.sugline .sugreason { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.badge.sug { background: rgba(99, 102, 241, .22); }
+/* What the agent looked at: a smaller strip than fresh results. */
+.imgstrip.viewed .wsimg img { max-height: 56px; opacity: .92; }
 .bigpick { margin: 0 0 10px; text-align: center; }
 .bigpick img { max-width: 100%; max-height: 42vh; border-radius: 6px; display: inline-block; }
 .extrahead .sectiontitle { margin-bottom: 0; }
@@ -5229,6 +5256,19 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
   function safeWorkspacePath(path) {
     if (!path || SCHEME_RE.test(path) || path.startsWith("/") || path.startsWith("\\")) return false;
     return !path.split(/[\\/]/).some((p) => p === "..");
+  }
+  function evictBlob(paths) {
+    const doomed = [];
+    for (const k of cache.keys()) {
+      const bare = k.replace(/^t\d*:/, "");
+      const p = bare.includes(":") ? bare.slice(0, bare.lastIndexOf(":")) : bare;
+      if (!paths || paths.includes(p) || paths.includes(bare)) doomed.push(k);
+    }
+    for (const k of doomed) {
+      const u = cache.get(k);
+      cache.delete(k);
+      if (u) setTimeout(() => URL.revokeObjectURL(u), 3e4);
+    }
   }
   async function blobUrl(path, stamp = "", opts = {}) {
     const key = (opts.thumb ? `t${opts.w || 360}:` : "") + (stamp ? `${path}:${stamp}` : path);
@@ -7346,6 +7386,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
             case "images": {
               const paths = Array.isArray(e.paths) ? e.paths.filter(Boolean) : [];
               if (!paths.length) break;
+              evictBlob(paths);
               state.touchFiles(paths);
               const strip2 = el("div", { class: "imgstrip" });
               for (const p of paths.slice(0, 8)) {
@@ -7365,6 +7406,34 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
               strip2.appendChild(inspect);
               if (e.label) strip2.appendChild(el("div", { class: "hint", text: String(e.label) }));
               this.log.appendChild(strip2);
+              this.scroll();
+              break;
+            }
+            case "viewed": {
+              const paths = Array.isArray(e.paths) ? e.paths.filter(Boolean) : [];
+              if (!paths.length) break;
+              const strip2 = el("div", { class: "imgstrip viewed" });
+              for (const p of paths.slice(0, 8)) {
+                const name = p.slice(p.lastIndexOf("/") + 1);
+                const thumb = workspaceImage(p, name, { thumb: true });
+                thumb.style.cursor = "pointer";
+                thumb.addEventListener("click", () => showArtifact({ path: p, title: name, kind: "image" }, { flipMobile: true }));
+                strip2.appendChild(thumb);
+              }
+              strip2.appendChild(el("div", { class: "hint", text: `\u{1F441} ${String(e.label || "\uBCF4\uAE30")}` + (paths.length > 8 ? ` \xB7 \uC678 ${paths.length - 8}\uC7A5` : "") + (e.mode ? ` \xB7 ${String(e.mode)}` : "") }));
+              this.log.appendChild(strip2);
+              this.scroll();
+              break;
+            }
+            case "suggestions": {
+              state.touchFiles([]);
+              const folder = String(e.folder || "");
+              const chip = el("button", { class: "outline", title: "\uAC80\uC218 \uD0ED\uC5D0\uC11C \uC81C\uC548\uC744 \uD655\uC778\uD558\uACE0 \uC801\uC6A9\uD569\uB2C8\uB2E4" }, [
+                el("span", { class: "glyph", text: "\u{1F3F7}" }),
+                el("span", { class: "grow", text: `\uAC80\uC218 \uC81C\uC548 ${Number(e.count) || 0}\uAC74 (\uCC44\uD0DD ${Number(e.use) || 0} \xB7 \uBC84\uB9BC ${Number(e.delete) || 0} \xB7 \uC218\uC815 ${Number(e.inpaint) || 0}) \u2014 \uAC80\uC218 \uC5F4\uAE30 \u2192` })
+              ]);
+              chip.addEventListener("click", () => state.requestOpenStudio(folder, "all"));
+              this.log.appendChild(chip);
               this.scroll();
               break;
             }
@@ -10961,7 +11030,172 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           "\uD14C\uC2A4\uD2B8\uB294 \uC77C\uBC18 \uC751\uB2F5\uACFC \uD234 \uD638\uCD9C\uC744 \uB530\uB85C \uD655\uC778\uD569\uB2C8\uB2E4. \uD234 \uD638\uCD9C\uC774 \uC548 \uB418\uBA74 \uC5D0\uC774\uC804\uD2B8\uAC00 \uB3D9\uC791\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4."
         ])
       ]),
-      buildWebsearchCard()
+      buildWebsearchCard(),
+      buildVisionCard()
+    ]);
+  }
+  function buildVisionCard() {
+    const modeSel = el("select");
+    const modeNote = el("div", { class: "hint", style: { margin: "4px 0 10px" } });
+    const status = el("div", { class: "hint", style: { marginBottom: "8px" } });
+    const out = el("div", { class: "outbox" });
+    let st = null;
+    let keep = "__keep__";
+    let keyList = [];
+    const nativeInfo = el("div", { class: "hint" });
+    const nativePane = el("div", { class: "wsmode" }, [nativeInfo]);
+    const hUrl = el("input", { placeholder: "https://generativelanguage.googleapis.com/v1beta/openai \uB610\uB294 http://127.0.0.1:11434/v1" });
+    const hModel = el("input", { placeholder: "gemini-2.5-flash" });
+    const hKeySel = el("select");
+    const hKey = el("input", { type: "password", placeholder: "API \uD0A4 (\uB85C\uCEEC Ollama \uB294 \uBE44\uC6CC \uB460)" });
+    const hKeyRow = el("label", { class: "field" }, [el("span", { text: "API \uD0A4 \uC9C1\uC811 \uC785\uB825" }), hKey]);
+    const hInstr = el("textarea", { rows: "4" });
+    const hReset = el("button", { class: "ghost tiny", text: "\uAE30\uBCF8 \uC9C0\uCE68\uC73C\uB85C" });
+    hReset.addEventListener("click", () => {
+      hInstr.value = st?.helper.defaultInstructions ?? "";
+    });
+    const syncHelperKey = () => {
+      hKeyRow.style.display = selectedValue(hKeySel) ? "none" : "";
+    };
+    hKeySel.addEventListener("change", syncHelperKey);
+    const helperPane = el("div", { class: "wsmode" }, [
+      el("div", {
+        class: "hint",
+        style: { marginBottom: "8px" },
+        text: 'OpenAI \uD638\uD658 chat/completions \uC5D0 \uADF8\uB9BC\uC744 \uC2E4\uC5B4 \uBCF4\uB0C5\uB2C8\uB2E4. \uC131\uC778 \uC774\uBBF8\uC9C0\uAC00 \uB9CE\uB2E4\uBA74 \uBB34\uAC80\uC5F4/\uB85C\uCEEC \uBAA8\uB378(\uC608: Ollama \uC758 llava\xB7qwen2.5-vl, \uC8FC\uC18C http://127.0.0.1:11434/v1)\uC744 \uAD8C\uD569\uB2C8\uB2E4 \u2014 \uC678\uBD80 API \uB294 \uAC70\uC808\uD560 \uC218 \uC788\uACE0, \uAC70\uC808\uB418\uBA74 \uD234\uC774 "VISION REFUSED" \uB85C \uC54C\uB9BD\uB2C8\uB2E4.'
+      }),
+      el("label", { class: "field" }, [el("span", { text: "\uC8FC\uC18C (baseUrl)" }), hUrl]),
+      el("label", { class: "field" }, [el("span", { text: "\uBAA8\uB378" }), hModel]),
+      el("label", { class: "field" }, [el("span", { text: "API \uD0A4 (\uD0A4 \uBAA9\uB85D\uC5D0\uC11C)" }), hKeySel]),
+      hKeyRow,
+      el("label", { class: "field" }, [el("span", { text: "\uBE44\uC804 \uBAA8\uB378 \uC9C0\uCE68" }), hInstr]),
+      el("div", { class: "row" }, [hReset])
+    ]);
+    const offPane = el("div", { class: "wsmode" }, [
+      el("div", { class: "hint", text: "\uBAA8\uB378 \uC5C6\uC774 \uC218\uCE58(\uD06C\uAE30\xB7\uBC1D\uAE30\xB7\uC120\uBA85\uB3C4\xB7\uB808\uD130\uBC15\uC2A4\xB7\uC911\uBCF5)\uB9CC \uC7BD\uB2C8\uB2E4. \uC5D0\uC774\uC804\uD2B8\uB294 \uADF8\uB9BC\uC758 \uB0B4\uC6A9\uC744 \uD310\uB2E8\uD558\uC9C0 \uBABB\uD558\uACE0 \uADF8\uB807\uB2E4\uACE0 \uB9D0\uD569\uB2C8\uB2E4." })
+    ]);
+    const maxW = el("input", { type: "number", min: "128", max: "2048", step: "64", value: "768" });
+    const detail = el("select");
+    for (const [v, t] of [["auto", "auto"], ["low", "low (\uC2F8\uACE0 \uBE60\uB984)"], ["high", "high (\uC138\uBC00)"]]) detail.appendChild(el("option", { value: v, text: t }));
+    const maxCalls = el("input", { type: "number", min: "1", max: "100", value: "12" });
+    const commonPane = el("div", { class: "row", style: { flexWrap: "wrap", gap: "10px", marginTop: "6px" } }, [
+      el("label", { class: "field" }, [el("span", { text: "\uCD5C\uB300 \uBCC0 \uAE38\uC774 (px)" }), maxW]),
+      el("label", { class: "field" }, [el("span", { text: "\uB514\uD14C\uC77C" }), detail]),
+      el("label", { class: "field" }, [el("span", { text: "\uD134\uB2F9 \uCD5C\uB300 \uD638\uCD9C" }), maxCalls])
+    ]);
+    const panes = { native: nativePane, helper: helperPane, off: offPane };
+    const syncMode = () => {
+      const m = selectedValue(modeSel);
+      for (const [id, pane] of Object.entries(panes)) pane.style.display = id === m ? "" : "none";
+      commonPane.style.display = m === "off" ? "none" : "";
+      modeNote.textContent = st?.modes.find((x) => x.id === m)?.note ?? "";
+    };
+    modeSel.addEventListener("change", syncMode);
+    const load2 = async () => {
+      try {
+        const [r, k] = await Promise.all([state.vision(), state.apiKeys().catch(() => ({ keys: [] }))]);
+        st = r;
+        keep = r.keepSentinel || keep;
+        keyList = k.keys ?? [];
+        clear(modeSel);
+        for (const m of r.modes) modeSel.appendChild(el("option", { value: m.id, text: `${r.modes.indexOf(m) + 1}. ${m.name}` }));
+        setSelected(modeSel, r.mode);
+        clear(nativeInfo);
+        nativeInfo.appendChild(el("div", { text: `\uC77C\uBC18 \uC5D0\uC774\uC804\uD2B8: ${r.agent.model || "(\uBAA8\uB378 \uC5C6\uC74C)"} @ ${r.agent.host || "(\uC8FC\uC18C \uC5C6\uC74C)"}` }));
+        const p = r.nativeProbe || {};
+        nativeInfo.appendChild(el("div", { class: r.nativeProbeStale || p.model && !p.ok ? "diff-del-n" : "", text: !p.model ? "\uC544\uC9C1 \uD655\uC778 \uC548 \uB428 \u2014 \uD14C\uC2A4\uD2B8\uB97C \uB204\uB974\uBA74 \uB450 \uC0C9 \uADF8\uB9BC\uC744 \uBCF4\uB0B4 \uC774 \uBAA8\uB378\uC774 \uC2E4\uC81C\uB85C \uBCF4\uB294\uC9C0 \uD655\uC778\uD558\uACE0 \uAE30\uC5B5\uD569\uB2C8\uB2E4." : r.nativeProbeStale ? `\uBAA8\uB378\uC774 \uBC14\uB00C\uC5C8\uC2B5\uB2C8\uB2E4 (\uD655\uC778\uB41C \uAC83: ${p.model}) \u2014 \uB2E4\uC2DC \uD14C\uC2A4\uD2B8\uD558\uC138\uC694.` : p.ok ? `\uD655\uC778\uB428 ${p.at || ""} \xB7 ${p.model}` : `\uC774 \uBAA8\uB378\uC740 \uC774\uBBF8\uC9C0\uB97C \uBCF4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4 (${p.error || ""}) \u2014 \uBCF4\uC870 \uBE44\uC804 \uBAA8\uB378\uC744 \uC4F0\uC138\uC694.` }));
+        hUrl.value = r.helper.baseUrl || "";
+        hModel.value = r.helper.model === r.helper.defaultModel ? "" : r.helper.model;
+        hModel.placeholder = r.helper.defaultModel;
+        clear(hKeySel);
+        hKeySel.appendChild(el("option", { value: "", text: r.helper.apiKeySet ? "(\uC9C1\uC811 \uC785\uB825\uD55C \uD0A4 \uC0AC\uC6A9)" : "(\uC9C1\uC811 \uC785\uB825 / \uC5C6\uC74C)" }));
+        for (const key of keyList) hKeySel.appendChild(el("option", { value: key.id, text: `${key.name}${key.provider ? " \xB7 " + key.provider : ""}` }));
+        setSelected(hKeySel, r.helper.keyRef);
+        hKey.placeholder = r.helper.apiKeySet ? "(\uC800\uC7A5\uB41C \uD0A4 \uC720\uC9C0 \u2014 \uBC14\uAFB8\uB824\uBA74 \uC785\uB825)" : "API \uD0A4 (\uB85C\uCEEC Ollama \uB294 \uBE44\uC6CC \uB460)";
+        hInstr.value = r.helper.instructions;
+        hInstr.placeholder = r.helper.defaultInstructions;
+        syncHelperKey();
+        maxW.value = String(r.maxWidth || 768);
+        setSelected(detail, r.detail || "auto");
+        maxCalls.value = String(r.maxCallsPerTurn || 12);
+        syncMode();
+        status.textContent = (r.ready ? `\uC9C0\uAE08: ${r.modes.find((m) => m.id === r.mode)?.name ?? r.mode} \u2014 \uC0AC\uC6A9 \uAC00\uB2A5` : `\uC0AC\uC6A9 \uBD88\uAC00: ${r.whyNot}`) + (r.pillow ? "" : " \xB7 Pillow \uC5C6\uC74C: \uC218\uCE58 \uBD84\uC11D\uC774 \uC81C\uD55C\uB429\uB2C8\uB2E4");
+        status.className = "hint " + (r.ready ? "" : "diff-del-n");
+      } catch (e) {
+        status.textContent = msg10(e);
+      }
+    };
+    const patch = () => {
+      const m = selectedValue(modeSel);
+      const p = { mode: m };
+      if (m === "helper") {
+        p.helperBaseUrl = hUrl.value.trim();
+        p.helperModel = hModel.value.trim();
+        p.helperKeyRef = selectedValue(hKeySel);
+        p.helperApiKey = hKey.value ? hKey.value : st?.helper.apiKeySet ? keep : "";
+        p.helperInstructions = hInstr.value.trim();
+      }
+      if (m !== "off") {
+        p.maxWidth = Math.max(128, Math.min(2048, Number(maxW.value) || 768));
+        p.detail = selectedValue(detail) || "auto";
+        p.maxCallsPerTurn = Math.max(1, Math.min(100, Number(maxCalls.value) || 12));
+      }
+      return p;
+    };
+    const save = el("button", { class: "primary", text: "\uC800\uC7A5" });
+    save.addEventListener("click", async () => {
+      save.disabled = true;
+      try {
+        await state.saveVision(patch());
+        hKey.value = "";
+        await load2();
+        clear(out);
+        out.appendChild(el("div", { class: "notice ok", text: "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4." }));
+      } catch (e) {
+        clear(out);
+        out.appendChild(el("div", { class: "notice err", text: msg10(e) }));
+      } finally {
+        save.disabled = false;
+      }
+    });
+    const path = el("input", { placeholder: "\uD14C\uC2A4\uD2B8 \uC774\uBBF8\uC9C0 \uACBD\uB85C (\uBE44\uC6B0\uBA74 \uB0B4\uC7A5 \uB450 \uC0C9 \uADF8\uB9BC) \u2014 studio/output/\u2026/x.png" });
+    const test = el("button", { class: "ghost", text: "\uD14C\uC2A4\uD2B8" });
+    test.addEventListener("click", async () => {
+      test.disabled = true;
+      clear(out);
+      out.appendChild(el("div", { class: "hint", text: "\uC800\uC7A5\uD558\uACE0 \uBCF4\uB294 \uC911\uC785\uB2C8\uB2E4\u2026 (\uBA54\uC778 \uBAA8\uB378 \uD655\uC778\uC740 \uD55C \uBC88\uC758 \uC2E4\uC81C \uD638\uCD9C\uC785\uB2C8\uB2E4)" }));
+      try {
+        await state.saveVision(patch());
+        hKey.value = "";
+        const r = await state.testVision(path.value.trim(), "");
+        await load2();
+        clear(out);
+        const head = r.ok ? `\uBD05\uB2C8\uB2E4 \xB7 ${r.detail} \xB7 ${(r.ms / 1e3).toFixed(1)}\uCD08` : r.refused ? `\uAC70\uC808\uB428 \u2014 \uC774 \uBAA8\uB378\uC740 \uC774 \uADF8\uB9BC\uC744 \uBB18\uC0AC\uD558\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4. \uBB34\uAC80\uC5F4/\uB85C\uCEEC \uBAA8\uB378\uB85C \uBC14\uAFB8\uAC70\uB098 \uB2E4\uB978 \uC774\uBBF8\uC9C0\uB97C \uC2DC\uB3C4\uD558\uC138\uC694.` : `\uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4${r.detail ? " \xB7 " + r.detail : ""}`;
+        out.appendChild(el("div", { class: "notice " + (r.ok ? "ok" : "err") }, [
+          el("div", { text: head }),
+          el("pre", { class: "mono", style: { maxHeight: "220px" }, text: r.text || r.error || "" }),
+          r.metrics ? el("pre", { class: "mono hint", style: { maxHeight: "140px" }, text: JSON.stringify(r.metrics, null, 1) }) : null
+        ]));
+      } catch (e) {
+        clear(out);
+        out.appendChild(el("div", { class: "notice err", text: msg10(e) }));
+      } finally {
+        test.disabled = false;
+      }
+    });
+    void load2();
+    return el("div", { class: "card", id: "vision-card" }, [
+      el("h2", { text: "\uBE44\uC804 \uD234" }),
+      el("div", { class: "hint", style: { marginBottom: "8px" }, text: "\uC77C\uBC18 \uC5D0\uC774\uC804\uD2B8\uAC00 \uC774\uBBF8\uC9C0\uB97C \uC9C1\uC811 \uBCF4\uACE0 \uD310\uB2E8\xB7\uAC80\uC218\xB7\uC870\uC815\uD560 \uB54C \uC4F0\uB294 view_image \xB7 compare_images \xB7 review_folder \uD234\uC785\uB2C8\uB2E4. \uB204\uAC00 \uBCFC\uC9C0 \uD558\uB098\uB97C \uACE0\uB985\uB2C8\uB2E4." }),
+      status,
+      el("label", { class: "field" }, [el("span", { text: "\uBCF4\uAE30 \uC635\uC158" }), modeSel]),
+      modeNote,
+      nativePane,
+      helperPane,
+      offPane,
+      commonPane,
+      el("div", { class: "row", style: { marginTop: "8px" } }, [save, path, test]),
+      out
     ]);
   }
   function buildWebsearchCard() {
@@ -11977,7 +12211,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.13.3",
+            version: "0.14.0",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -12625,7 +12859,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.13.3"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.14.0"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -17480,6 +17714,9 @@ ${negative.value.trim()}
   function hasGroups(folder) {
     return !!groups && groups.folder === folder && groupsRev === state.filesRev;
   }
+  function invalidateGroups() {
+    groupsRev = -1;
+  }
   async function loadGroups(folder) {
     try {
       const eff = effective(prefsFor(folder));
@@ -17502,6 +17739,7 @@ ${negative.value.trim()}
       });
     }, 500);
   }
+  var SUG_LABEL = { use: "\uCC44\uD0DD", delete: "\uBC84\uB9BC", inpaint: "\uC218\uC815" };
   function flag(filename, key) {
     const cur = selection2[filename] || { use: false, inpaint: false, delete: false };
     const next = { ...cur, [key]: !cur[key] };
@@ -17510,10 +17748,42 @@ ${negative.value.trim()}
       next.use = false;
       next.rep = false;
     }
+    if (next.suggest && next.suggest.verdict === key && next[key]) delete next.suggest;
     selection2[filename] = next;
     cellSyncs.get(filename)?.();
     missingSync?.();
     queueSave();
+  }
+  function applySuggest(filename) {
+    const cur = selection2[filename];
+    const g = cur?.suggest;
+    if (!cur || !g) return;
+    const next = { ...cur };
+    delete next.suggest;
+    if (g.verdict === "use") {
+      next.use = true;
+      next.delete = false;
+    } else if (g.verdict === "delete") {
+      next.delete = true;
+      next.use = false;
+      next.rep = false;
+    } else if (g.verdict === "inpaint") next.inpaint = true;
+    selection2[filename] = next;
+    cellSyncs.get(filename)?.();
+    missingSync?.();
+    queueSave();
+  }
+  function dropSuggest(filename) {
+    const cur = selection2[filename];
+    if (!cur?.suggest) return;
+    const next = { ...cur };
+    delete next.suggest;
+    selection2[filename] = next;
+    cellSyncs.get(filename)?.();
+    queueSave();
+  }
+  function suggestCount() {
+    return Object.values(selection2).filter((s) => !!s.suggest).length;
   }
   function syncAllCells() {
     for (const s of cellSyncs.values()) s();
@@ -17566,6 +17836,24 @@ ${negative.value.trim()}
       syncAllCells();
       void state.studio.saveSelection(S.selected, selection2);
     });
+    const nSug = suggestCount();
+    if (nSug) {
+      const applyAll = el("button", {
+        class: "ghost tiny",
+        text: `\uC81C\uC548 ${nSug}\uAC74 \uBAA8\uB450 \uC801\uC6A9`,
+        title: "AI \uC81C\uC548(\uCC44\uD0DD\xB7\uBC84\uB9BC\xB7\uC218\uC815)\uC744 \uC804\uBD80 \uD45C\uC2DC\uB85C \uBC14\uAFC9\uB2C8\uB2E4"
+      });
+      applyAll.addEventListener("click", () => {
+        for (const f of Object.keys(selection2)) if (selection2[f]?.suggest) applySuggest(f);
+        hub.drawCentre();
+      });
+      const clearAll = el("button", { class: "ghost tiny", text: "\uC81C\uC548 \uC9C0\uC6B0\uAE30" });
+      clearAll.addEventListener("click", () => {
+        for (const f of Object.keys(selection2)) if (selection2[f]?.suggest) dropSuggest(f);
+        hub.drawCentre();
+      });
+      bar3.append(applyAll, clearAll);
+    }
     bar3.append(none, exportButton(node));
     if (/\/selected$/.test(node.path)) bar3.appendChild(adoptButton());
     viewMount6.appendChild(bar3);
@@ -17600,10 +17888,11 @@ ${negative.value.trim()}
       const FOLD = 6;
       const names = el("span", { class: "hint grow" });
       let open4 = false;
-      const more = el("button", { class: "ghost tiny", style: { display: missing.length > FOLD ? "" : "none" } });
+      const more = el("button", { class: "ghost tiny" });
+      more.style.display = missing.length > FOLD ? "" : "none";
       const syncNames = () => {
         names.textContent = open4 || missing.length <= FOLD ? missing.join(", ") : missing.slice(0, FOLD).join(", ") + " \u2026";
-        more.textContent = open4 ? "\uC811\uAE30" : `\uC678 ${missing.length - FOLD}\uAC1C \xB7 \uD3BC\uCE58\uAE30`;
+        more.textContent = missing.length > FOLD ? open4 ? "\uC811\uAE30" : `\uC678 ${missing.length - FOLD}\uAC1C \xB7 \uD3BC\uCE58\uAE30` : "";
       };
       more.addEventListener("click", () => {
         open4 = !open4;
@@ -17674,16 +17963,18 @@ ${negative.value.trim()}
   function groupCard(grp) {
     const face = grp.items.find((i) => selection2[i.filename]?.rep) ?? grp.items.find((i) => selection2[i.filename]?.use) ?? grp.items[0];
     const pic = el("div", { class: "assetpic" });
-    if (face) void loadThumb3({ path: face.path, name: face.filename, size: 0, modified: 0, textual: false }, pic);
+    if (face) void loadThumb3({ path: face.path, name: face.filename, size: 0, modified: face.modified || 0, textual: false }, pic);
     const chosenBadge = el("span", { class: "badge" });
     const fixBadge = el("span", { class: "badge" });
+    const sugBadge = el("span", { class: "badge sug", title: "AI \uC81C\uC548\uC774 \uC788\uB294 \uD6C4\uBCF4" });
     const cell2 = el("div", { class: "fcell groupcard", title: `${grp.key} \u2014 \uB20C\uB7EC\uC11C \uD6C4\uBCF4\uB97C \uD3BC\uCE69\uB2C8\uB2E4` }, [
       pic,
       el("div", { class: "fname row" }, [
         el("span", { class: "grow", text: grp.key }),
         el("span", { class: "badge", text: `${grp.items.length}\uC7A5` }),
         chosenBadge,
-        fixBadge
+        fixBadge,
+        sugBadge
       ])
     ]);
     const sync = () => {
@@ -17694,6 +17985,9 @@ ${negative.value.trim()}
       chosenBadge.textContent = chosen ? `\uC120\uD0DD ${chosen}` : "\uBBF8\uC120\uD0DD";
       fixBadge.style.display = fixing ? "" : "none";
       fixBadge.textContent = fixing ? `\uC218\uC815 ${fixing}` : "";
+      const sugN = grp.items.filter((i) => selection2[i.filename]?.suggest).length;
+      sugBadge.style.display = sugN ? "" : "none";
+      sugBadge.textContent = sugN ? `\uC81C\uC548 ${sugN}` : "";
     };
     sync();
     cellSyncs.set("grp:" + grp.key, sync);
@@ -17726,10 +18020,12 @@ ${negative.value.trim()}
       mk("inpaint", "\uC218\uC815", "\uBA3C\uC800 \uACE0\uCCD0\uC57C \uD569\uB2C8\uB2E4"),
       mk("delete", "\uBC84\uB9BC", "\uC9C0\uC6B8 \uD6C4\uBCF4\uC785\uB2C8\uB2E4")
     );
+    const sug = el("div", { class: "sugline", style: { display: "none" } });
     const cell2 = el("div", { class: "fcell selcell", title: it.filename }, [
       pic,
       el("div", { class: "fname", text: it.filename }),
-      flags
+      flags,
+      sug
     ]);
     const sync = () => {
       const s = selection2[it.filename] || { use: false, inpaint: false, delete: false };
@@ -17740,11 +18036,36 @@ ${negative.value.trim()}
       btns2.get("inpaint")?.classList.toggle("on", !!s.inpaint);
       btns2.get("delete")?.classList.toggle("on", !!s.delete);
       btns2.get("rep")?.classList.toggle("on", !!s.rep);
+      clear(sug);
+      const g = s.suggest;
+      if (!g) {
+        sug.style.display = "none";
+        sug.className = "sugline";
+        return;
+      }
+      sug.style.display = "";
+      sug.className = "sugline sug-" + g.verdict;
+      const apply = el("button", { class: "ghost tiny", text: "\uC801\uC6A9", title: `AI \uC81C\uC548\uB300\uB85C ${SUG_LABEL[g.verdict]} \uD45C\uC2DC` });
+      apply.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        applySuggest(it.filename);
+      });
+      const drop = el("button", { class: "ghost tiny", text: "\xD7", title: "\uC81C\uC548 \uC9C0\uC6B0\uAE30" });
+      drop.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        dropSuggest(it.filename);
+      });
+      sug.append(
+        el("span", { class: "badge", text: `AI \uC81C\uC548: ${SUG_LABEL[g.verdict] ?? g.verdict}`, title: `${g.by || "AI"} \xB7 ${g.at || ""}` }),
+        el("span", { class: "hint grow sugreason", text: g.reason || "", title: g.reason || "" }),
+        apply,
+        drop
+      );
     };
     sync();
     cellSyncs.set(it.filename, sync);
     pic.addEventListener("click", () => flag(it.filename, "use"));
-    void loadThumb3({ path: it.path, name: it.filename, size: 0, modified: 0, textual: false }, pic);
+    void loadThumb3({ path: it.path, name: it.filename, size: 0, modified: it.modified || 0, textual: false }, pic);
     return cell2;
   }
   function openRulePopover(anchor, node) {
@@ -17995,7 +18316,7 @@ ${negative.value.trim()}
   }
   async function loadThumb3(f, mount) {
     try {
-      const url = await blobUrl(f.path, "", { thumb: true, w: 720 });
+      const url = await blobUrl(f.path, f.modified ? String(f.modified) : "", { thumb: true, w: 720 });
       if (!mount.isConnected) return;
       clear(mount);
       const img = el("img", { class: "assetimg", src: url, alt: "" });
@@ -18385,6 +18706,7 @@ ${negative.value.trim()}
     }
     await migrateSingleStyle();
     buildOutput();
+    invalidateGroups();
     const want = state.openStudioRequest;
     const wantFolder = want ? canonPath(want.folder) : "";
     if (wantFolder && !isOutputPath(wantFolder)) addExtra(wantFolder);
@@ -18445,6 +18767,7 @@ ${negative.value.trim()}
   }
   function touchQuiet(paths = []) {
     renderedRev = state.filesRev + 1;
+    if (paths.length) evictBlob(paths);
     state.touchFiles(paths);
   }
   async function refreshArea(area) {
@@ -18800,7 +19123,7 @@ ${negative.value.trim()}
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.13.3"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.14.0"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
@@ -18895,7 +19218,7 @@ ${negative.value.trim()}
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.13.3" }),
+        el("span", { class: "dim", text: "v0.14.0" }),
         healthEl,
         el("span", { class: "spacer" }),
         reload,
@@ -19167,6 +19490,6 @@ ${negative.value.trim()}
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.13.3"} loaded`);
+    console.log(`[risu-hina] v${"0.14.0"} loaded`);
   })();
 })();

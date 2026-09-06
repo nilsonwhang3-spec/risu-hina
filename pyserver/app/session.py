@@ -32,7 +32,7 @@ from pydantic_ai.messages import (
 
 from . import agent as agent_mod
 from . import providers
-from . import config, db, log, permits, presets, pyexec, skills, staging, store, workspace
+from . import config, db, log, permits, presets, pyexec, skills, staging, store, vision, workspace
 
 _agent_cache: dict[str, Any] = {}
 
@@ -271,7 +271,10 @@ SCREEN_MODES = ("chat", "bot", "studio")
 # they push here, keyed by session, and run() drains the queue after every
 # translated event (landing the line right after its toolResult) and once
 # more before done. The wire vocabulary stays exactly:
-#   start | text | tool | toolResult | artifact | images | done | error
+#   start | text | tool | toolResult | artifact | images | open | viewed | suggestions | done | error
+# `viewed` (§1-42) is what the agent LOOKED at through a vision tool - a small
+# strip, no file-tab bump; `suggestions` says review verdicts were written
+# into a folder's selection file, and the panel reloads the 검수 tab.
 
 _EXTRA: dict[str, list[dict]] = {}
 _EXTRA_LOCK = threading.Lock()
@@ -330,6 +333,7 @@ async def run(session_id: str, prompt: str, mode: str = "") -> AsyncGenerator[st
 
     _save_message(session_id, "user", prompt)
     _STOPPED.discard(session_id)
+    vision.reset_turn(session_id)
     yield _line({"type": "start", "sessionId": session_id})
 
     model_name = (config.section("agent").get("model") or "")
@@ -385,6 +389,9 @@ async def run(session_id: str, prompt: str, mode: str = "") -> AsyncGenerator[st
         # pay to summarise the same old messages again.
         compacted = agent_mod.COMPACTED.pop(session_id, None)
         stored = (compacted + list(result.new_messages())) if compacted is not None else result.all_messages()
+        # Pictures the vision tools attached stay in THIS turn only: the stored
+        # history carries a placeholder, not 100KB of base64 per image (§1-42).
+        stored = vision.scrub_history(stored)
         _save_message(session_id, "history",
                       json.loads(ModelMessagesTypeAdapter.dump_json(stored)))
         db.execute(
@@ -425,6 +432,7 @@ async def run(session_id: str, prompt: str, mode: str = "") -> AsyncGenerator[st
     finally:
         # "이번 턴 항상 허용" and any unanswered prompt end with the turn.
         permits.end_turn(session_id)
+        vision.reset_turn(session_id)
         # A side event pushed after the last drain has no stream to land on.
         _drain_extra(session_id)
 
@@ -435,6 +443,7 @@ def _save_partial_history(session_id: str, prompt: str, partial: str, why: str) 
         history.append(ModelRequest(parts=[UserPromptPart(content=prompt)]))
         note = (partial + "\n\n" if partial else "") + f"(이 턴은 완료되지 못했습니다: {why})"
         history.append(ModelResponse(parts=[TextPart(content=note)]))
+        history = vision.scrub_history(history)
         _save_message(session_id, "history",
                       json.loads(ModelMessagesTypeAdapter.dump_json(history)))
     except Exception as e2:  # noqa: BLE001 - best effort, never masks the real error
@@ -522,6 +531,7 @@ def _translate(ev: Any, acc: list[str]) -> list[str]:
 def _short(v: Any, n: int = 300) -> str:
     if v is None:
         return ""
+    v = vision.short_content(v)   # a binary part is a label, not its repr
     s = v if isinstance(v, str) else json.dumps(v, ensure_ascii=False, default=str)
     return s if len(s) <= n else s[:n] + " …"
 
