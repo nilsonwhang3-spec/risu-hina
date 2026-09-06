@@ -294,6 +294,9 @@ def _model() -> "OpenAIChatModel | OpenAIResponsesModel":
 # in place of the original (see _compact_history).
 COMPACTED: dict[str, list] = {}
 KEEP_TAIL = 6
+# Sessions whose summary the model refused: the mechanical fallback goes
+# first from then on, instead of paying for the same refusal every turn.
+SUMMARY_REFUSED: set[str] = set()
 
 
 def _msg_chars(m: Any) -> int:
@@ -443,6 +446,8 @@ async def compact_history(session_id: str, messages: list) -> list:
     transcript = "\n\n".join(_msg_text(m) for m in head)[-120000:]
     summary = ""
     try:
+        if session_id in SUMMARY_REFUSED:
+            raise RuntimeError("summary skipped: refused earlier in this session")
         summariser = Agent(_model(), instructions=(
             "다음은 편집 도구 안에서 사용자와 에이전트가 나눈 대화 기록이다. 이어서 작업할 수 있도록 "
             "**한국어로 1500자 이내** 요약해라: 사용자가 원한 것, 확정된 결정, 이미 제안·승인된 변경(id 포함), "
@@ -451,6 +456,8 @@ async def compact_history(session_id: str, messages: list) -> list:
         summary = str(r.output).strip()
     except Exception as e:  # noqa: BLE001 - a failed summary must not fail the turn
         log.warn("history compaction failed: %s", str(e).splitlines()[0][:200])
+        if session_id and ("content_filter" in str(e) or "PROHIBITED" in str(e) or "SAFETY" in str(e)):
+            SUMMARY_REFUSED.add(session_id)
     if summary:
         compacted = [
             ModelRequest(parts=[UserPromptPart(content="[이전 대화 요약 - 앞선 대화는 이 요약으로 대체되었습니다]\n" + summary)]),
