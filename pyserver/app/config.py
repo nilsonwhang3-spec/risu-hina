@@ -370,6 +370,8 @@ def codex_enabled() -> bool:
 
 OLD_MAX_TOKENS_DEFAULT = 8000
 MIGRATION_KEY = "cfg_maxtokens_32k"
+OLD_HISTORY_BUDGET = 240000
+HISTORY_MIGRATION_KEY = "cfg_history_120k"
 
 
 def migrate_once(has_run, mark) -> None:
@@ -387,6 +389,15 @@ def migrate_once(has_run, mark) -> None:
         print(f"[{APP_NAME}] agent.maxTokens {OLD_MAX_TOKENS_DEFAULT} -> "
               f"{DEFAULTS['agent']['maxTokens']} (old default raised)", flush=True)
     mark(MIGRATION_KEY)
+    # The same for the history budget (§1-46): 240K was the template's number,
+    # and it made 500K-token turns even with pruning.
+    if not has_run(HISTORY_MIGRATION_KEY):
+        cur = load().get("agent") or {}
+        if int(cur.get("historyBudgetChars") or 0) == OLD_HISTORY_BUDGET:
+            update({"agent": {"historyBudgetChars": DEFAULTS["agent"]["historyBudgetChars"]}})
+            print(f"[{APP_NAME}] agent.historyBudgetChars {OLD_HISTORY_BUDGET} -> "
+                  f"{DEFAULTS['agent']['historyBudgetChars']} (old default lowered)", flush=True)
+        mark(HISTORY_MIGRATION_KEY)
 
 
 # Fields never returned in full. The settings UI shows whether one is set and
