@@ -298,6 +298,11 @@ export const TOOL_GLYPH: Record<string, [string, string]> = {
   find_files: ['🔍', '파일 찾기'],
   search_files: ['🔍', '내용 검색'],
   studio_meta: ['🎛', '카드'],
+  view_image: ['👁', '이미지 보기'],
+  compare_images: ['👁', '이미지 비교'],
+  image_metrics: ['📐', '이미지 수치'],
+  review_folder: ['🔎', '폴더 검수'],
+  suggest_selection: ['🏷', '검수 제안'],
 };
 
 /** A paper plane, for the send button. */

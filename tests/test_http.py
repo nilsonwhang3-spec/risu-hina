@@ -1161,6 +1161,24 @@ def test_action_queue(s: Server, ws: dict) -> None:
     st, body = s.post("/actions/clear", {"chatKey": a})
     check("the queue can be cleared", st == 200, str(body)[:120])
 
+    # §1-42: the vision card's status/test and the selection file's `suggest`.
+    st, body = s.get("/vision")
+    check("the vision card status is readable", st == 200 and len(body.get("modes") or []) == 3
+          and body.get("mode") == "off" and body.get("keepSentinel"), str(body)[:160])
+    st, body = s.post("/config", {"config": {"vision": {"mode": "helper", "helperBaseUrl": "http://127.0.0.1:9/v1",
+                                                         "helperApiKey": "sk-vision-secret"}}})
+    check("the helper key saves", st == 200, str(body)[:120])
+    st, body = s.get("/config")
+    vc = (body.get("config") or body).get("vision") or {}
+    check("and is redacted", "sk-vision-secret" not in json.dumps(body) and vc.get("helperApiKey") != "sk-vision-secret", str(vc)[:160])
+    st, body = s.get("/vision")
+    check("the card knows a key is set", body.get("helper", {}).get("apiKeySet") is True and body.get("ready") is True, str(body.get("helper"))[:160])
+    st, body = s.post("/vision/test", {})
+    check("a test against a dead helper fails cleanly", st == 200 and body.get("ok") is False and body.get("error"), str(body)[:160])
+    s.post("/config", {"config": {"vision": {"mode": "off"}}})
+    st, body = s.post("/vision/test", {})
+    check("in off mode the test still answers with the sample", st == 200 and body.get("ok") is True and body.get("mode") == "off", str(body)[:160])
+
     # §1-38: the bot-wide listing and clear the "제안 N 대기" chip uses.
     ck = str(ws.get("charKey") or "")
     st, body = s.get(q("/actions", charKey=ck))

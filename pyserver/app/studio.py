@@ -33,6 +33,7 @@ import json
 import random
 import re
 import shutil
+import threading
 import time
 import zlib
 from pathlib import Path
@@ -1183,10 +1184,63 @@ def write_selection(folder: str, selections: dict) -> dict:
     # and tests from the three-flag era keep their exact shape.
     clean = {str(k): {"use": bool(v.get("use")), "inpaint": bool(v.get("inpaint")),
                       "delete": bool(v.get("delete")),
-                      **({"rep": True} if v.get("rep") else {})}
+                      **({"rep": True} if v.get("rep") else {}),
+                      # An AI suggestion (§1-42) rides beside the flags; written
+                      # only when present so older files keep their exact shape.
+                      **({"suggest": _clean_suggest(v["suggest"])} if _valid_suggest(v.get("suggest")) else {})}
              for k, v in (selections or {}).items() if isinstance(v, dict)}
     p.write_text(json.dumps(clean, ensure_ascii=False, indent=2), encoding="utf-8")
     return {"folder": folder, "count": len(clean)}
+
+
+SUGGEST_VERDICTS = ("use", "delete", "inpaint")
+_SUGGEST_LOCK = threading.Lock()
+
+
+def _valid_suggest(s: Any) -> bool:
+    return isinstance(s, dict) and str(s.get("verdict") or "") in SUGGEST_VERDICTS
+
+
+def _clean_suggest(s: dict) -> dict:
+    return {"verdict": str(s.get("verdict")), "reason": str(s.get("reason") or "")[:300],
+            "by": str(s.get("by") or "")[:80], "at": str(s.get("at") or "")[:40]}
+
+
+def merge_suggestions(folder: str, items: list[dict], by: str) -> dict:
+    """Write AI review suggestions into the folder's selection file without
+    touching the user's flags (§1-42). `verdict: "none"` clears one. Files
+    that do not exist in the folder are reported, not written."""
+    folder = _rel(folder)
+    base = files._resolve(SCOPE, folder)
+    if not base.is_dir():
+        raise StudioError(f"폴더가 없습니다: {folder}")
+    at = time.strftime("%Y-%m-%dT%H:%M:%S")
+    counts = {"use": 0, "delete": 0, "inpaint": 0}
+    cleared = 0
+    unknown: list[str] = []
+    with _SUGGEST_LOCK:
+        cur = read_selection(folder)
+        for it in items or []:
+            if not isinstance(it, dict):
+                continue
+            name = Path(str(it.get("file") or "")).name
+            if not name or not (base / name).is_file():
+                if name:
+                    unknown.append(name)
+                continue
+            entry = dict(cur.get(name) or {"use": False, "inpaint": False, "delete": False})
+            verdict = str(it.get("verdict") or "none").strip().lower()
+            if verdict in SUGGEST_VERDICTS:
+                entry["suggest"] = {"verdict": verdict, "reason": str(it.get("reason") or "")[:300], "by": by, "at": at}
+                counts[verdict] += 1
+            else:
+                if entry.pop("suggest", None) is not None:
+                    cleared += 1
+            cur[name] = entry
+        write_selection(folder, cur)
+    log.info("studio suggestions %s: use=%s delete=%s inpaint=%s cleared=%s unknown=%s by=%s",
+             folder, counts["use"], counts["delete"], counts["inpaint"], cleared, len(unknown), by)
+    return {"folder": folder, "count": sum(counts.values()), **counts, "cleared": cleared, "unknown": unknown}
 
 
 def naming_profile(char_key: str) -> dict:
@@ -1235,6 +1289,14 @@ def group(folder: str, pattern: str = "", group_by: str = "emotion") -> dict:
     parsed = parse_names(names, pattern)
     sel = read_selection(folder)
 
+    def _mtime(name: str) -> int:
+        # The panel stamps its thumbnail cache with this, so a file rewritten
+        # under the same name shows its new picture (§1-42).
+        try:
+            return int((base / name).stat().st_mtime * 1000)
+        except OSError:
+            return 0
+
     groups: dict[str, list[dict]] = {}
     for m in parsed["matched"]:
         key = _group_key(m, group_by)
@@ -1243,6 +1305,7 @@ def group(folder: str, pattern: str = "", group_by: str = "emotion") -> dict:
             "path": f"{folder.strip('/')}/{m['filename']}",
             "fields": {k: v for k, v in m.items() if k != "filename"},
             "selection": sel.get(m["filename"], {"use": False, "inpaint": False, "delete": False}),
+            "modified": _mtime(m["filename"]),
         })
     return {
         "folder": folder,
@@ -1252,7 +1315,8 @@ def group(folder: str, pattern: str = "", group_by: str = "emotion") -> dict:
         "groups": [{"key": k, "items": v} for k, v in sorted(groups.items())],
         # Shown as its own group so it cannot be missed.
         "unmatched": [{"filename": n, "path": f"{folder.strip('/')}/{n}",
-                       "selection": sel.get(n, {"use": False, "inpaint": False, "delete": False})}
+                       "selection": sel.get(n, {"use": False, "inpaint": False, "delete": False}),
+                       "modified": _mtime(n)}
                       for n in parsed["unmatched"]],
         "total": len(names),
     }

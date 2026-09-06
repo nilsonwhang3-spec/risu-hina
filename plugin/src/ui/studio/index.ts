@@ -24,6 +24,7 @@
  * where it is true, rather than on the whole tab.
  */
 import { el, clear, ICON, iconBtn } from './../dom';
+import { evictBlob } from '../blobimg';
 import { state, type StudioItem } from '../../state';
 import { threePane } from '../panes';
 import { bindAgent, mountAgent } from '../agentpane';
@@ -41,7 +42,7 @@ import { drawSingle, singleTick, syncControls } from './center-single';
 import { drawBatch, batchTick } from './center-batch';
 import { buildStrip, stripTick, refreshStrip } from './strip';
 import { drawFolder } from './center-folder';
-import { hasGroups, loadGroups, drawSelector, setViewMode, drawSelectedGallery } from './selector';
+import { hasGroups, loadGroups, drawSelector, setViewMode, drawSelectedGallery, invalidateGroups } from './selector';
 import { setLayoutControls } from '../shell';
 import { reclamp } from '../splitter';
 
@@ -224,6 +225,7 @@ async function refresh(): Promise<void> {
   }
   await migrateSingleStyle();
   buildOutput();
+  invalidateGroups();
   // The agent (or a batch strip in the chat, or the files tab) asked for
   // 검수 on a folder. One outside OUTPUT gets pinned first (§1-33).
   const want = state.openStudioRequest;
@@ -294,6 +296,9 @@ async function migrateSingleStyle(): Promise<void> {
  * guard in renderStudioTab from turning that bump back into a full refresh. */
 function touchQuiet(paths: string[] = []): void {
   renderedRev = state.filesRev + 1;
+  // A batch that rewrote files under existing names must not keep showing
+  // the old thumbnails (§1-42).
+  if (paths.length) evictBlob(paths);
   state.touchFiles(paths);
 }
 

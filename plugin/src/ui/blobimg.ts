@@ -60,6 +60,25 @@ export interface BlobOptions {
   w?: number;
 }
 
+/** Forget every cached object URL for these paths (or all, with none): a
+ * file rewritten under the same name - a regenerated batch, an inpaint, an
+ * upload over an old one - showed its OLD picture until the panel reloaded
+ * (§1-42 "썸네일이 캐시가 있는지 반복"). The URLs are revoked a little later
+ * so an <img> still on screen finishes loading. */
+export function evictBlob(paths?: string[]): void {
+  const doomed: string[] = [];
+  for (const k of cache.keys()) {
+    const bare = k.replace(/^t\d*:/, '');
+    const p = bare.includes(':') ? bare.slice(0, bare.lastIndexOf(':')) : bare;
+    if (!paths || paths.includes(p) || paths.includes(bare)) doomed.push(k);
+  }
+  for (const k of doomed) {
+    const u = cache.get(k);
+    cache.delete(k);
+    if (u) setTimeout(() => URL.revokeObjectURL(u), 30_000);
+  }
+}
+
 export async function blobUrl(path: string, stamp = '', opts: BlobOptions = {}): Promise<string> {
   const key = (opts.thumb ? `t${opts.w || 360}:` : '') + (stamp ? `${path}:${stamp}` : path);
   const hit = cache.get(key);

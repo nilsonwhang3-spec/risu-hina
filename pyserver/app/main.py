@@ -35,7 +35,7 @@ from starlette.concurrency import run_in_threadpool
 
 from . import (chatfmt, config, db, files, log, nai, presets, session, skills, staging,
                store, websearch, workspace)
-from . import actions, assets, catalog, charx, codexauth, conflicts, keys, permits, providers, snapshots, updater
+from . import actions, assets, catalog, charx, codexauth, conflicts, keys, permits, providers, snapshots, updater, vision
 from . import studio, studiojob
 from . import card as cardmod
 from . import memory as mem
@@ -171,6 +171,16 @@ def h_health(arg: dict) -> dict:
 
 def h_config_get(arg: dict) -> dict:
     return {"config": config.redacted(), "keepSentinel": config.KEEP}
+
+
+def h_vision(arg: dict) -> dict:
+    return {**vision.status(), "keepSentinel": config.KEEP}
+
+
+async def h_vision_test(arg: dict) -> dict:
+    """The vision card's 테스트: the built-in sample or a chosen image, in the
+    configured mode (the native probe writes its verdict)."""
+    return await vision.test(str(arg.get("path") or "")[:500], str(arg.get("question") or "")[:300])
 
 
 def h_websearch(arg: dict) -> dict:
@@ -478,6 +488,7 @@ def h_diag(arg: dict) -> dict:
             "flex": bool(agent_cfg.get("flex")),
         },
         "webSearch": websearch.configured(),
+        "vision": vision.ready(),
         "assets": assets.summary_for_diag(),
         "counts": counts,
         "routes": len(ROUTES),
@@ -816,6 +827,7 @@ def h_session_get(arg: dict) -> dict:
         "staged": staging.pending(tk),
         "agentReady": agent_ready(),
         "webSearch": websearch.configured(),
+        "vision": vision.ready(),
     }
     if s is not None:
         out["session"] = {"sessionId": s["id"], "chatKey": s["chat_key"], "title": s["title"]}
@@ -2262,6 +2274,8 @@ ROUTES: dict[str, Handler] = {
     "POST /config/test": h_config_test,
     "GET /websearch": h_websearch,
     "POST /websearch/test": h_websearch_test,
+    "GET /vision": h_vision,
+    "POST /vision/test": h_vision_test,
 
     "GET /presets": h_presets,
     "POST /presets/save": h_preset_save,
