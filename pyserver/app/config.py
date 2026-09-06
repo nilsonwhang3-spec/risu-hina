@@ -381,14 +381,6 @@ def migrate_once(has_run, mark) -> None:
     first-run template, and it makes the agent fail before it says anything.
     Guarded by a marker so a user who later chooses 8000 deliberately keeps it.
     """
-    if has_run(MIGRATION_KEY):
-        return
-    cur = load().get("agent") or {}
-    if int(cur.get("maxTokens") or 0) == OLD_MAX_TOKENS_DEFAULT:
-        update({"agent": {"maxTokens": DEFAULTS["agent"]["maxTokens"]}})
-        print(f"[{APP_NAME}] agent.maxTokens {OLD_MAX_TOKENS_DEFAULT} -> "
-              f"{DEFAULTS['agent']['maxTokens']} (old default raised)", flush=True)
-    mark(MIGRATION_KEY)
     # The same for the history budget (§1-46): 240K was the template's number,
     # and it made 500K-token turns even with pruning.
     if not has_run(HISTORY_MIGRATION_KEY):
@@ -398,6 +390,14 @@ def migrate_once(has_run, mark) -> None:
             print(f"[{APP_NAME}] agent.historyBudgetChars {OLD_HISTORY_BUDGET} -> "
                   f"{DEFAULTS['agent']['historyBudgetChars']} (old default lowered)", flush=True)
         mark(HISTORY_MIGRATION_KEY)
+    if has_run(MIGRATION_KEY):
+        return
+    cur = load().get("agent") or {}
+    if int(cur.get("maxTokens") or 0) == OLD_MAX_TOKENS_DEFAULT:
+        update({"agent": {"maxTokens": DEFAULTS["agent"]["maxTokens"]}})
+        print(f"[{APP_NAME}] agent.maxTokens {OLD_MAX_TOKENS_DEFAULT} -> "
+              f"{DEFAULTS['agent']['maxTokens']} (old default raised)", flush=True)
+    mark(MIGRATION_KEY)
 
 
 # Fields never returned in full. The settings UI shows whether one is set and
