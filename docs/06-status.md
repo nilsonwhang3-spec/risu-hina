@@ -111,6 +111,19 @@ mixed-cast multi-entry batch from the panel.** Released = **v0.10.0 BETA** (§1-
 **0.3.1 (night of 2026-08-25)** — the real reason `+` never appeared was not "same version" but **CORS**: RisuAI reads `//@update-url` with a browser `fetch`, and the redirect response from the release URL carries no CORS header. Changed `//@update-url` to
 `https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js`, and made `tools/bundle.py` write that file into the repository (included in the release commit). In the backend code only VERSION changed.
 
+**+ §1-47 (2026-09-06, unreleased) - 고급 설정 (공통)**: a foldable card at the bottom of ⚙ →
+에이전트 (`buildAdvancedCard`, folded by default) with six per-turn cost knobs, each with a
+Korean explanation and "blank = recommended": `historyBudgetChars` 120000, `pruneKeepTurns` 2,
+`pruneClipChars` 600, `maxRequestsPerTurn` 40, `maxToolCallsPerTurn` 30, `maxInputTokensPerTurn`
+0 (= off). The last three become pydantic-ai `UsageLimits` (`agent.turn_limits()`, passed to
+`run_stream_events`); exceeding one ends the turn with a message naming the card. The card
+shows a live simulation (요청 1회 ≈ 15K fixed + budget/2; 보통 턴 = × measured average
+requests; 최악 턴 = × the request cap; the input cap's position) and a 실측 line from the new
+`GET /agent/usage?turns=30` (avg/max input, requests, per-request, tool calls, cache share).
+`prune_tool_parts` reads its numbers from config. Also §1-46's follow-ups: a stopped turn keeps
+the pruned history; the 240K→120K budget migration `cfg_history_120k` (runs before the older
+maxTokens marker's early return).
+
 **+ §1-46 (2026-09-06, after 0.14.1, unreleased)**: (1) the agent asks before regenerating:
 the "Seeing images" rule now says look → report what was seen and the one change → wait for
 the user; an autonomous loop only when the user explicitly asked for one ("알아서 고쳐").

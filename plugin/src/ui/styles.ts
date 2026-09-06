@@ -447,6 +447,10 @@ button.iconbtn.danger { background: #b91c1c; border-color: #b91c1c; color: #fff;
 .artifactmodal .artifactview img { max-width: 100%; max-height: 78vh; display: block; margin: 0 auto; }
 .artifactmodal .artifactbody { max-height: 80vh; overflow: auto; }
 .artifactmodal .artifacthead { margin-bottom: 6px; }
+/* 고급 설정 (§1-47). */
+.advfield { margin-bottom: 10px; }
+.advfield input { max-width: 180px; }
+.advsim { margin-top: 10px; padding: 8px 10px; border: 1px solid var(--borderc, #2b323f); border-radius: 6px; font-size: 12px; line-height: 1.6; }
 /* Foldable settings cards (§1-43). */
 .card.foldable .foldhead { cursor: pointer; display: flex; align-items: center; gap: 6px; user-select: none; }
 .card.foldable.folded { padding-bottom: 8px; }

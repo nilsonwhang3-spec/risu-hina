@@ -196,6 +196,14 @@ DEFAULTS: dict[str, Any] = {
         # ~15K fixed prompt. It was 240K: with 7-14 requests a turn that made
         # 500K+ input turns even after pruning (§1-46 measurement).
         "historyBudgetChars": 120000,
+        # 고급 설정 (§1-47): the per-turn limits the settings card exposes.
+        # 0 = no limit. Tool traffic older than pruneKeepTurns user turns is
+        # clipped to pruneClipChars every turn.
+        "pruneKeepTurns": 2,
+        "pruneClipChars": 600,
+        "maxRequestsPerTurn": 40,
+        "maxToolCallsPerTurn": 30,
+        "maxInputTokensPerTurn": 0,
     },
     # The search agent: a second, smaller model the general agent hands a
     # research question to (agent.web_research). Same keys as `agent`;

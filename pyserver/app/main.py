@@ -1109,6 +1109,38 @@ def h_studio_job(arg: dict) -> dict:
     return job
 
 
+def h_agent_usage(arg: dict) -> dict:
+    """The last N turns' token counts, for the 고급 설정 card's 실측 line:
+    requests per turn, input per request, cache share."""
+    n = max(1, min(200, int(arg.get("turns") or 30)))
+    rows = db.query("SELECT usage_json, ts FROM agent_messages WHERE usage_json IS NOT NULL "
+                  "ORDER BY ts DESC LIMIT ?", (n,))
+    turns = []
+    for r in rows:
+        u = db.unjs(r["usage_json"], None) or {}
+        inp = int(u.get("input") or 0)
+        req = int(u.get("requests") or 0)
+        if not inp or not req:
+            continue
+        turns.append({"input": inp, "requests": req, "cacheRead": int(u.get("cacheRead") or 0),
+                      "toolCalls": int(u.get("toolCalls") or 0), "ts": r["ts"]})
+    if not turns:
+        return {"turns": 0}
+    tot_in = sum(t["input"] for t in turns)
+    tot_req = sum(t["requests"] for t in turns)
+    return {
+        "turns": len(turns),
+        "avgInput": tot_in // len(turns),
+        "maxInput": max(t["input"] for t in turns),
+        "avgRequests": round(tot_req / len(turns), 1),
+        "maxRequests": max(t["requests"] for t in turns),
+        "avgPerRequest": tot_in // max(1, tot_req),
+        "avgToolCalls": round(sum(t["toolCalls"] for t in turns) / len(turns), 1),
+        "cacheShare": round(sum(t["cacheRead"] for t in turns) / tot_in, 2) if tot_in else 0,
+        "since": min(t["ts"] for t in turns),
+    }
+
+
 def h_agent_stop(arg: dict) -> dict:
     sid = str(arg.get("sessionId") or "")
     if not sid:
@@ -2245,6 +2277,7 @@ ROUTES: dict[str, Handler] = {
     "GET /studio/job/preview": h_studio_job_preview,
     "POST /studio/job/cancel": h_studio_job_cancel,
     "POST /agent/stop": h_agent_stop,
+    "GET /agent/usage": h_agent_usage,
     "POST /studio/recipe": h_studio_recipe,
     "POST /studio/parse": h_studio_parse,
     "GET /studio/naming": h_studio_naming,

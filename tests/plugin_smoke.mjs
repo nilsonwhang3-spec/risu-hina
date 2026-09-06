@@ -1610,6 +1610,15 @@ check('agent credential card present', !!findButton(document, '연결 테스트'
   check('three vision options, in order', vmodes.join(',') === 'native,helper,off', vmodes.join(','));
   check('the helper pane has an address field', !![...(vcard?.querySelectorAll('input') || [])].some((i) => /baseUrl|11434|openai/.test(i.placeholder || '')));
   check('the vision card offers a test with an image path', !![...(vcard?.querySelectorAll('input') || [])].some((i) => /이미지 경로/.test(i.placeholder || '')));
+  // §1-47: 고급 설정 (공통) at the bottom of the 에이전트 pane, folded, with the six knobs and the simulation.
+  await settle(600);
+  const adv = document.getElementById('agent-advanced-card');
+  check('the 고급 설정 card exists and starts folded', !!adv && adv.classList.contains('folded'));
+  check('six advanced fields with recommended placeholders', (adv?.querySelectorAll('.advfield input').length || 0) === 6
+        && [...(adv?.querySelectorAll('.advfield input') || [])].every((i) => /권장/.test(i.placeholder)));
+  check('the simulation names a per-request estimate', /요청 1회/.test(adv?.querySelector('.advsim')?.textContent || ''));
+  adv?.querySelector('.foldhead')?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  check('the heading unfolds it', !adv?.classList.contains('folded') || adv?.querySelector('.foldbody')?.style.display === '');
   // linkedom's <select> has no settable .value: the stamped `selected`
   // attribute is what setSelected wrote and what selectedValue falls back to.
   const chosen = () => modeSel?.querySelector('option[selected]')?.value;
