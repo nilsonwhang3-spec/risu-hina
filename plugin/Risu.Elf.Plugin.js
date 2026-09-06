@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.14.3
+//@display-name Risu Hina v0.14.4
 //@api 3.0
-//@version 0.14.3
+//@version 0.14.4
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -104,7 +104,7 @@
       this.tokenSafe = true;
       this.lastHealth = body;
       this.probeInfo = "";
-      this.gate = versionGate("0.14.3", String(body.version || ""));
+      this.gate = versionGate("0.14.4", String(body.version || ""));
       return body;
     }
     /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -4107,6 +4107,7 @@ button.iconbtn.danger { background: #b91c1c; border-color: #b91c1c; color: #fff;
 .agentloading { padding: 12px; }
 .anlasmeter { cursor: pointer; font-size: 11.5px; padding: 2px 8px; }
 .anlasmeter.warn { background: rgba(251,191,36,.18); color: var(--warn, #fbbf24); }
+.seltools .selicon { font-size: 13px; padding: 2px 7px; }
 /* \uACE0\uAE09 \uC124\uC815 (\xA71-47). */
 .advfield { margin-bottom: 10px; }
 .advfield input { max-width: 180px; }
@@ -4730,6 +4731,18 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
   .split.m-agent > .explorer, .split.m-agent > .left { display: none; }
   .split.m-centre > .right { display: none; }
   .split.m-agent > .right { flex: 1 1 auto !important; min-height: 0; }
+  /* The agent pane must never be wider than the phone (\xA71-54: "\uC624\uB978\uCABD\uC774 \uD654\uBA74
+     \uBC16\uC73C\uB85C \uB098\uAC04\uB2E4, \uCD95\uC18C\uD574\uB3C4 \uC548 \uC904\uC5B4\uB4E6"): a code block, a long path, a tool
+     card or a wide table used to push the pane past the viewport, and the
+     stacked layout let it. Everything inside wraps or scrolls in place. */
+  .split > .right, .agentpanel, .agentlog { min-width: 0; max-width: 100vw; overflow-x: hidden; }
+  .agentlog > * { max-width: 100%; min-width: 0; }
+  .bubble, .bubble-body, .toolcard, .stagedcard, .artifactchip, .thinking { max-width: 100%; min-width: 0; box-sizing: border-box; }
+  .bubble-body, .bubble-body * { overflow-wrap: anywhere; }
+  .agentlog pre, .bubble pre, .agentlog code, .agentlog table { max-width: 100%; overflow-x: auto; white-space: pre-wrap; word-break: break-all; display: block; box-sizing: border-box; }
+  .agentcompose { min-width: 0; }
+  .agentcompose .agentinput { min-width: 0; width: 100%; }
+  .imgstrip img, .wsimg img { max-width: 100%; }
   .split.m-centre > .left { flex: 1 1 auto !important; }
 
   /* The view switch is a bar across the top of the split, not a floating
@@ -5290,6 +5303,16 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     if (!path || SCHEME_RE.test(path) || path.startsWith("/") || path.startsWith("\\")) return false;
     return !path.split(/[\\/]/).some((p) => p === "..");
   }
+  function smallScreen() {
+    try {
+      return window.matchMedia("(max-width: 760px), (pointer: coarse) and (max-width: 1024px)").matches;
+    } catch {
+      return false;
+    }
+  }
+  function cacheCap() {
+    return smallScreen() ? 90 : 600;
+  }
   function evictBlob(paths) {
     const doomed = [];
     for (const k of cache.keys()) {
@@ -5337,7 +5360,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       const buf = new Uint8Array(bytes.byteLength);
       buf.set(bytes);
       const url = URL.createObjectURL(new Blob([buf]));
-      while (cache.size >= 600) {
+      while (cache.size >= cacheCap()) {
         const [k, u] = cache.entries().next().value;
         cache.delete(k);
         setTimeout(() => URL.revokeObjectURL(u), 3e4);
@@ -6767,6 +6790,11 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       });
       this.send = el("button", { class: "primary sendbtn", title: "\uBCF4\uB0B4\uAE30 (Enter)", html: PAPER_PLANE });
       this.send.addEventListener("click", () => void this.submit());
+      this.send.addEventListener("mousedown", (e) => e.preventDefault());
+      this.send.addEventListener("touchend", (e) => {
+        e.preventDefault();
+        void this.submit();
+      }, { passive: false });
       this.picker = el("input", { type: "file", multiple: true, style: { display: "none" } });
       this.picker.addEventListener("change", () => {
         void this.attachAll(Array.from(this.picker.files ?? []));
@@ -7438,7 +7466,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
               inspect.addEventListener("click", () => state.requestOpenStudio(folder, "all"));
               strip2.appendChild(inspect);
               if (e.label) strip2.appendChild(el("div", { class: "hint", text: String(e.label) }));
-              this.log.appendChild(strip2);
+              bubble.insertBefore(strip2, thinking);
               this.scroll();
               break;
             }
@@ -7454,7 +7482,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
                 strip2.appendChild(thumb);
               }
               strip2.appendChild(el("div", { class: "hint", text: `\u{1F441} ${String(e.label || "\uBCF4\uAE30")}` + (paths.length > 8 ? ` \xB7 \uC678 ${paths.length - 8}\uC7A5` : "") + (e.mode ? ` \xB7 ${String(e.mode)}` : "") }));
-              this.log.appendChild(strip2);
+              bubble.insertBefore(strip2, thinking);
               this.scroll();
               break;
             }
@@ -12456,7 +12484,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.14.3",
+            version: "0.14.4",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -13104,7 +13132,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.14.3"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.14.4"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -18126,9 +18154,10 @@ ${negative.value.trim()}
     } }));
     bar3.appendChild(el("span", { class: "spacer" }));
     const rereview = el("button", {
-      class: "ghost tiny",
-      text: "AI \uC7AC\uAC80\uC218",
-      title: "\uD788\uB098\uC5D0\uAC8C \uC774 \uD3F4\uB354\uB97C \uB2E4\uC2DC \uAC80\uC218\uD574 \uC81C\uC548\uC744 \uC0C8\uB85C \uC801\uC5B4 \uB2EC\uB77C\uACE0 \uD569\uB2C8\uB2E4 (\uD45C\uC2DC\uB294 \uBC14\uAFB8\uC9C0 \uC54A\uC74C)"
+      class: "ghost tiny selicon",
+      text: "\u{1F50D}",
+      "aria-label": "AI \uC7AC\uAC80\uC218",
+      title: "AI \uC7AC\uAC80\uC218 - \uD788\uB098\uC5D0\uAC8C \uC774 \uD3F4\uB354\uB97C \uB2E4\uC2DC \uAC80\uC218\uD574 \uC81C\uC548\uC744 \uC0C8\uB85C \uC801\uC5B4 \uB2EC\uB77C\uACE0 \uD569\uB2C8\uB2E4 (\uD45C\uC2DC\uB294 \uBC14\uAFB8\uC9C0 \uC54A\uC74C)"
     });
     rereview.addEventListener("click", () => {
       state.requestPrompt(`"${node.path}" \uD3F4\uB354\uB97C \uC7AC\uAC80\uC218\uD574 \uC918. review_folder \uB85C \uBCF4\uACE0 suggest_selection \uC73C\uB85C \uC81C\uC548\uC744 \uC0C8\uB85C \uC801\uC5B4 \uC918 (\uAE30\uC874 \uC81C\uC548\uC740 \uAC31\uC2E0). \uD45C\uC2DC(\uCC44\uD0DD\xB7\uBC84\uB9BC\xB7\uC218\uC815)\uB294 \uBC14\uAFB8\uC9C0 \uB9D0\uACE0, \uB2E4 \uC801\uC73C\uBA74 \uAC80\uC218 \uD0ED\uC744 \uC5F4\uC5B4 \uC918.`);
@@ -18143,15 +18172,16 @@ ${negative.value.trim()}
     const nSug = suggestCount();
     if (nSug) {
       const applyAll = el("button", {
-        class: "ghost tiny",
-        text: `\uC81C\uC548 ${nSug}\uAC74 \uBAA8\uB450 \uC801\uC6A9`,
-        title: "AI \uC81C\uC548(\uCC44\uD0DD\xB7\uBC84\uB9BC\xB7\uC218\uC815)\uC744 \uC804\uBD80 \uD45C\uC2DC\uB85C \uBC14\uAFC9\uB2C8\uB2E4"
+        class: "ghost tiny selicon",
+        text: `\u2714 ${nSug}`,
+        "aria-label": `\uC81C\uC548 ${nSug}\uAC74 \uBAA8\uB450 \uC801\uC6A9`,
+        title: `\uC81C\uC548 ${nSug}\uAC74 \uBAA8\uB450 \uC801\uC6A9 - AI \uC81C\uC548(\uCC44\uD0DD\xB7\uBC84\uB9BC\xB7\uC218\uC815)\uC744 \uC804\uBD80 \uD45C\uC2DC\uB85C \uBC14\uAFC9\uB2C8\uB2E4`
       });
       applyAll.addEventListener("click", () => {
         for (const f of Object.keys(selection2)) if (selection2[f]?.suggest) applySuggest(f);
         hub.drawCentre();
       });
-      const clearAll = el("button", { class: "ghost tiny", text: "\uC81C\uC548 \uC9C0\uC6B0\uAE30" });
+      const clearAll = el("button", { class: "ghost tiny selicon", text: "\u{1F9F9}", "aria-label": "\uC81C\uC548 \uC9C0\uC6B0\uAE30", title: "\uC81C\uC548 \uC9C0\uC6B0\uAE30 - AI \uC81C\uC548\uC744 \uBAA8\uB450 \uC9C0\uC6C1\uB2C8\uB2E4 (\uD45C\uC2DC\uB294 \uADF8\uB300\uB85C)" });
       clearAll.addEventListener("click", () => {
         for (const f of Object.keys(selection2)) if (selection2[f]?.suggest) dropSuggest(f);
         hub.drawCentre();
@@ -18368,7 +18398,8 @@ ${negative.value.trim()}
     };
     sync();
     cellSyncs.set(it.filename, sync);
-    pic.addEventListener("click", () => flag(it.filename, "use"));
+    pic.style.cursor = "zoom-in";
+    pic.addEventListener("click", () => showArtifact({ path: it.path, title: it.filename, kind: "image" }));
     void loadThumb3({ path: it.path, name: it.filename, size: 0, modified: it.modified || 0, textual: false }, pic);
     return cell2;
   }
@@ -18620,7 +18651,7 @@ ${negative.value.trim()}
   }
   async function loadThumb3(f, mount) {
     try {
-      const url = await blobUrl(f.path, f.modified ? String(f.modified) : "", { thumb: true, w: 720 });
+      const url = await blobUrl(f.path, f.modified ? String(f.modified) : "", { thumb: true, w: smallScreen() ? 360 : 720 });
       if (!mount.isConnected) return;
       clear(mount);
       const img = el("img", { class: "assetimg", src: url, alt: "" });
@@ -19459,7 +19490,7 @@ ${negative.value.trim()}
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.14.3"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.14.4"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
@@ -19554,7 +19585,7 @@ ${negative.value.trim()}
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.14.3" }),
+        el("span", { class: "dim", text: "v0.14.4" }),
         healthEl,
         el("span", { class: "spacer" }),
         reload,
@@ -19788,6 +19819,25 @@ ${negative.value.trim()}
     } catch (e) {
       console.log("[risu-hina] config resolve failed", e);
     }
+    try {
+      const nav = performance.getEntriesByType?.("navigation")?.[0];
+      void clientLog("info", "plugin boot", {
+        navigation: nav?.type ?? "?",
+        ua: navigator.userAgent.slice(0, 120),
+        viewport: `${window.innerWidth}x${window.innerHeight}`,
+        memory: navigator.deviceMemory ?? null
+      });
+      window.addEventListener("error", (ev) => {
+        void clientLog("error", "uncaught error", { message: String(ev.message).slice(0, 300), file: String(ev.filename || "").slice(-80), line: ev.lineno });
+      });
+      window.addEventListener("unhandledrejection", (ev) => {
+        void clientLog("error", "unhandled rejection", { reason: String(ev.reason).slice(0, 300) });
+      });
+      window.addEventListener("pagehide", (ev) => {
+        void clientLog("info", "pagehide", { persisted: ev.persisted, visibility: document.visibilityState });
+      });
+    } catch {
+    }
     const open4 = async () => {
       try {
         await Risuai.showContainer("fullscreen");
@@ -19826,6 +19876,6 @@ ${negative.value.trim()}
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.14.3"} loaded`);
+    console.log(`[risu-hina] v${"0.14.4"} loaded`);
   })();
 })();
