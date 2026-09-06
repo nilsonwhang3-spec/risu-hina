@@ -1262,7 +1262,9 @@ def h_studio_inpaint(arg: dict) -> dict:
                            negative=str(arg.get("negative") or ""),
                            composite=str(arg.get("composite") or "feather"),
                            padding_px=int(arg.get("paddingPx") or 0),
-                           feather_px=int(arg.get("featherPx") or 0))
+                           feather_px=int(arg.get("featherPx") or 0),
+                           inherit=arg.get("inherit", True) not in (False, 0, "0", "false"),
+                           strength=float(arg.get("strength") or 1.0))
     except (studio.StudioError, files.FileError) as e:
         raise ApiError(400, str(e))
     except nai.NaiError as e:

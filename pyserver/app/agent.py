@@ -1556,17 +1556,27 @@ def build() -> Agent[Deps]:
     @agent.tool
     def studio_inpaint(ctx: RunContext[Deps], path: str, boxes_json: str, prompt: str,
                        model: str = "nai-diffusion-4-5-full", negative: str = "",
-                       padding_px: int = 0, feather_px: int = 0, composite: str = "feather") -> str:
+                       padding_px: int = 0, feather_px: int = 0, composite: str = "feather",
+                       inherit: bool = True, strength: float = 1.0) -> str:
         """Redraw only part of an image. The original stays; the result is a new file beside it.
 
         boxes_json = [{"x":0.25,"y":0.15,"w":0.5,"h":0.35}] - RATIOS 0..1.
-        (x,y is the top-left corner, w,h width/height. Several boxes are allowed.)
-        Default composite="feather": the model repaints the boxes grown by padding_px (default
-        ~4.5% of the short side, so it sees the surroundings) and the result is blended into the
-        original with a Gaussian-feathered edge of feather_px (default ~2.5%, 12..64) - no
-        rectangle outline. Far from the boxes the picture stays exactly as it was. Raise
-        feather_px (32..48) on skin/background, keep 24..32 on fine line work like hands.
-        composite="server" is the old hard overlay (exact outside, hard edge).
+        (x,y is the top-left corner, w,h width/height. Several boxes are allowed.) Make the box
+        generous - the whole hand plus some wrist, at least ~15% of the short side - the model
+        needs room to draw a coherent part.
+
+        prompt / negative name ONLY what should change ("five fingers, natural grip" /
+        "extra fingers"). With inherit=True (default) the picture's own prompt, negative,
+        character captions and sampler settings are read from the PNG and put BEHIND the fix,
+        so scene, character and style stay what they were - a fix sent alone repaints the box
+        as a new subject (an arm box came back holding a face). inherit=False sends the fix
+        alone. strength 1.0 = the box is repainted entirely (the web's inpaint default).
+
+        composite="feather" (default): the model repaints the boxes grown by padding_px
+        (default ~4.5% of the short side) and the frame is blended into the original with a
+        Gaussian edge of sigma feather_px (default ~1.2%, 8..32; visible width about 4x that).
+        padding is raised to at least 3.7x feather automatically. Far from the boxes the
+        picture stays byte-identical. composite="server" is the hard overlay along the box.
 
         The cost depends on the account tier. Anlas is compared before and after and the actual
         charge reported, so confirm with one image before running several.
@@ -1577,7 +1587,8 @@ def build() -> Agent[Deps]:
                 return 'boxes_json 은 [{"x":…,"y":…,"w":…,"h":…}] 배열이어야 합니다 (0~1 비율)'
             before = nai.anlas()
             r = studio.inpaint(path, boxes, prompt, model=model, negative=negative,
-                               composite=composite, padding_px=padding_px, feather_px=feather_px)
+                               composite=composite, padding_px=padding_px, feather_px=feather_px,
+                               inherit=inherit, strength=strength)
             after = nai.anlas()
         except Exception as e:  # noqa: BLE001
             return str(e)
@@ -1591,6 +1602,7 @@ def build() -> Agent[Deps]:
             "label": "inpaint",
         })
         return (f"{r['path']} 로 저장했습니다 ({r['size'] // 1024}KB)."
+                + ("" if (r.get("inherited") or not inherit) else " 원본 PNG 에 레시피가 없어 수정문만 보냈습니다.")
                 + (f" Anlas {before} → {after} ({spent} 소모)." if spent is not None else ""))
 
     @agent.tool

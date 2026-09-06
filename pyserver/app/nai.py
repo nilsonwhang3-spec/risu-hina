@@ -503,29 +503,49 @@ def inpaint_model(model: str) -> str:
 
     `infill` is refused by the ordinary models by name, and every generation
     has a `-inpainting` id (docs/09 §7c), so the caller names the model it is
-    working with and this points at the right one.
+    working with and this points at the right one. v5 curated is the one
+    exception: it has no twin of its own and the web client routes it to the
+    v4.5 curated inpainter (the reference tool's model table).
     """
-    return model if model.endswith("-inpainting") else model + "-inpainting"
+    if model.endswith("-inpainting"):
+        return model
+    if model == "nai-diffusion-5-curated":
+        return "nai-diffusion-4-5-curated-inpainting"
+    return model + "-inpainting"
 
 
 def infill(model: str, png: bytes, mask: bytes, prompt: str, negative: str = "",
-           params: dict | None = None, add_original: bool = True) -> bytes:
+           params: dict | None = None, add_original: bool = True,
+           strength: float = 1.0) -> bytes:
     """Repaint the white part of `mask` and leave the rest alone.
 
-    Measured: with `add_original_image` everything outside the mask comes back
-    byte-identical (docs/09 §7c), which is what makes this safe to offer on an
-    asset someone has already chosen - it cannot quietly change the rest.
+    Measured (docs/09 §7c, 2026-09-06 addendum):
 
-    `add_original=False` asks for the model's whole frame instead: the server
-    overlay pastes the original back along the mask's HARD edge, and that
-    edge is baked into the result. studio.inpaint's feather path composites
-    the frame itself with a soft mask (§1-57).
+    - **The mask must sit on the 8px latent grid.** A rectangle whose edges
+      are not multiples of 8 comes back with a grey frame along the edge and
+      the ORIGINAL showing through the repaint like a ghost - the §1-57
+      failure report. Snapped to 8, the same request is clean. Callers build
+      masks with `studio.make_mask`, which snaps.
+    - With `add_original_image` everything outside the mask is byte-identical,
+      which is what makes this safe on an asset someone has already chosen.
+      With it off the frame is the model's decode everywhere (outside differs
+      by ~2/255) - also clean once the mask is aligned; the overlay was never
+      the ghost's cause.
+    - `inpaintImg2ImgStrength` (web default 1.0) and `noise` 0 are what the web
+      client sends; leaving them out changes nothing visible, they ride along
+      for parity. So do the two sampler flags the web sets and the server
+      defaults differently (`deliberate_euler_ancestral_bug` false,
+      `prefer_brownian` true) - a preset may still override them.
     """
     w, h = png_size(png)
     p = build_parameters(prompt, negative, {**(params or {}), "width": w, "height": h})
     p["image"] = base64.b64encode(png).decode()
     p["mask"] = base64.b64encode(mask).decode()
     p["add_original_image"] = bool(add_original)
+    p["inpaintImg2ImgStrength"] = float(strength)
+    p["noise"] = 0
+    p.setdefault("deliberate_euler_ancestral_bug", False)
+    p.setdefault("prefer_brownian", True)
     body = {"input": p["v4_prompt"]["caption"]["base_caption"],
             "model": inpaint_model(model), "action": "infill", "parameters": p}
     r = _req("POST", "/ai/generate-image", json=body)
@@ -603,6 +623,29 @@ def png_size(png: bytes) -> tuple[int, int]:
     if len(png) < 24 or png[:4] != b"\x89PNG":
         return 0, 0
     return int.from_bytes(png[16:20], "big"), int.from_bytes(png[20:24], "big")
+
+
+def png_text_chunks(png: bytes) -> list[tuple[str, str]]:
+    """Every tEXt chunk before the image data, as (keyword, text).
+
+    The feather inpaint re-saves through an image library, which drops the
+    chunks the service wrote (`Comment` above all) - this is how they are
+    carried across so the result stays as self-describing as the source.
+    """
+    out: list[tuple[str, str]] = []
+    if png[:8] != b"\x89PNG\r\n\x1a\n":
+        return out
+    off = 8
+    while off + 12 <= len(png):
+        length = int.from_bytes(png[off:off + 4], "big")
+        kind = png[off + 4:off + 8]
+        if kind == b"IDAT":
+            break
+        if kind == b"tEXt":
+            key, _, value = png[off + 8:off + 8 + length].partition(b"\x00")
+            out.append((key.decode("latin-1", "replace"), value.decode("utf-8", "replace")))
+        off += 12 + length
+    return out
 
 
 def recipe(png: bytes) -> dict:
