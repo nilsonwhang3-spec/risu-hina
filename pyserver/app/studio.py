@@ -1090,7 +1090,7 @@ def plan(spec: dict) -> list[dict]:
 
 # --- inpainting ---------------------------------------------------------------
 
-def make_mask(width: int, height: int, boxes: list[dict]) -> bytes:
+def make_mask(width: int, height: int, boxes: list[dict], pad_px: int = 0) -> bytes:
     """A mask PNG: white where it should be repainted, black elsewhere.
 
     Written with `zlib` and nothing else **on purpose**. Pillow is not in the
@@ -1101,17 +1101,14 @@ def make_mask(width: int, height: int, boxes: list[dict]) -> bytes:
     is a `run_python` script's business, where Pillow is available.
 
     Boxes are fractions of the image (0..1) so a caller can say "the top third"
-    without knowing the resolution.
+    without knowing the resolution. `pad_px` grows every box by that many
+    pixels on each side (the generation mask of the feather path, §1-57).
     """
     import struct
     import zlib
 
     px = bytearray(width * height)
-    for b in boxes:
-        x0 = max(0, min(width, int(float(b.get("x", 0)) * width)))
-        y0 = max(0, min(height, int(float(b.get("y", 0)) * height)))
-        x1 = max(x0, min(width, int((float(b.get("x", 0)) + float(b.get("w", 0))) * width)))
-        y1 = max(y0, min(height, int((float(b.get("y", 0)) + float(b.get("h", 0))) * height)))
+    for x0, y0, x1, y1 in _box_pixels(width, height, boxes, pad_px):
         for y in range(y0, y1):
             base = y * width
             for x in range(x0, x1):
@@ -1134,8 +1131,118 @@ def make_mask(width: int, height: int, boxes: list[dict]) -> bytes:
             + chunk(b"IEND", b""))
 
 
+def _box_pixels(width: int, height: int, boxes: list[dict], pad_px: int = 0) -> list[tuple[int, int, int, int]]:
+    """Fractional boxes as clamped pixel rectangles, each grown by pad_px."""
+    out = []
+    for b in boxes:
+        fx, fy = float(b.get("x", 0)), float(b.get("y", 0))
+        fw, fh = float(b.get("w", 0)), float(b.get("h", 0))
+        x0 = max(0, min(width, int(fx * width) - pad_px))
+        y0 = max(0, min(height, int(fy * height) - pad_px))
+        x1 = max(x0, min(width, int((fx + fw) * width) + pad_px))
+        y1 = max(y0, min(height, int((fy + fh) * height) + pad_px))
+        out.append((x0, y0, x1, y1))
+    return out
+
+
+def feather_defaults(width: int, height: int) -> tuple[int, int]:
+    """(padding_px, feather_px) for a picture of this size: ~46 / ~26 at 1024."""
+    short = min(width, height)
+    pad = max(24, min(96, round(short * 0.045)))
+    feather = max(12, min(64, round(short * 0.025)))
+    return pad, feather
+
+
+def _pillow():
+    try:
+        from PIL import Image, ImageDraw, ImageFilter  # optional dependency
+        return Image, ImageDraw, ImageFilter
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def blend_mask_bytes(width: int, height: int, boxes: list[dict], feather_px: int) -> bytes | None:
+    """The soft mask the feather path composites with, as an L-mode PNG (for
+    tests and debugging); None without Pillow."""
+    pil = _pillow()
+    if pil is None:
+        return None
+    Image, ImageDraw, ImageFilter = pil
+    m = _blend_mask(Image, ImageDraw, ImageFilter, width, height, boxes, feather_px)
+    import io
+    buf = io.BytesIO()
+    m.save(buf, "PNG")
+    return buf.getvalue()
+
+
+def _blend_mask(Image, ImageDraw, ImageFilter, width: int, height: int, boxes: list[dict], feather_px: int):
+    # One mask for every box, blurred ONCE: blurring per box and compositing
+    # in turn leaves seams and doubled density where boxes overlap.
+    m = Image.new("L", (width, height), 0)
+    d = ImageDraw.Draw(m)
+    for x0, y0, x1, y1 in _box_pixels(width, height, boxes, 0):
+        if x1 > x0 and y1 > y0:
+            d.rectangle((x0, y0, x1 - 1, y1 - 1), fill=255)
+    if feather_px > 0:
+        m = m.filter(ImageFilter.GaussianBlur(radius=feather_px))
+    return m
+
+
+def _flatten_rgb(Image, im, background=(255, 255, 255)):
+    """RGBA (even an alpha of 254 everywhere) flattened to RGB: the API and
+    the composite must not see stray alpha."""
+    if im.mode == "RGB":
+        return im
+    if im.mode != "RGBA":
+        return im.convert("RGB")
+    bg = Image.new("RGBA", im.size, background + (255,))
+    return Image.alpha_composite(bg, im).convert("RGB")
+
+
+def _feather_inpaint(png: bytes, w: int, h: int, boxes: list[dict], *, model: str, prompt: str,
+                     negative: str, params: dict | None, padding_px: int, feather_px: int) -> bytes:
+    """The dual-mask path (§1-57).
+
+    The model repaints a GENERATION mask - the boxes grown by `padding_px`, so
+    it sees enough of the surroundings - with the server overlay OFF, and the
+    whole frame comes back. The result is then pasted over the original with
+    a BLEND mask - the boxes themselves, Gaussian-feathered by `feather_px` -
+    so the edge is a gradient, not a rectangle. With the overlay on, the
+    server pastes the original back along the hard mask edge and that edge is
+    baked into the bytes before any client feathering could help (the
+    report: a wider box still showed the same rectangle outline).
+    """
+    import io
+    Image, ImageDraw, ImageFilter = _pillow()
+    with Image.open(io.BytesIO(png)) as src:
+        original = src.copy()
+    # The API sees a flattened RGB frame (no stray alpha); the composite
+    # happens in the ORIGINAL's mode, so an emotion sprite keeps its
+    # transparency and every pixel outside the box stays byte-identical.
+    if original.mode not in ("RGB", "RGBA"):
+        original = original.convert("RGBA" if "A" in original.getbands() or original.mode == "P" else "RGB")
+    buf = io.BytesIO()
+    _flatten_rgb(Image, original).save(buf, "PNG")
+    flat_png = buf.getvalue()
+    gen_mask = make_mask(w, h, boxes, pad_px=padding_px)
+    out = nai.infill(model, flat_png, gen_mask, prompt, negative, params, add_original=False)
+    with Image.open(io.BytesIO(out)) as res:
+        generated = _flatten_rgb(Image, res.copy())
+    if generated.size != original.size:
+        generated = generated.resize(original.size, Image.LANCZOS)
+    if original.mode == "RGBA":
+        generated = generated.convert("RGBA")
+        generated.putalpha(original.getchannel("A"))
+    blend = _blend_mask(Image, ImageDraw, ImageFilter, w, h, boxes, feather_px)
+    final = Image.composite(generated, original, blend)
+    buf = io.BytesIO()
+    final.save(buf, "PNG")
+    return buf.getvalue()
+
+
 def inpaint(rel: str, boxes: list[dict], prompt: str, *, model: str,
-            negative: str = "", params: dict | None = None, suffix: str = "") -> dict:
+            negative: str = "", params: dict | None = None, suffix: str = "",
+            composite: str = "feather", padding_px: int = 0, feather_px: int = 0) -> dict:
     """Repaint part of a library image and save the result beside it.
 
     Under the SOURCE name: save_image never overwrites, so the result lands
@@ -1154,15 +1261,31 @@ def inpaint(rel: str, boxes: list[dict], prompt: str, *, model: str,
         raise StudioError(f"PNG 이 아닙니다: {rel}")
     if not boxes:
         raise StudioError("다시 그릴 영역이 필요합니다 (x, y, w, h — 0~1 비율)")
-    mask = make_mask(w, h, boxes)
-    out = nai.infill(model, png, mask, prompt, negative, params)
+    # `composite`: "feather" (default) = the dual-mask path above, which needs
+    # Pillow; "server" = the old hard overlay (add_original_image). Without
+    # Pillow the feather request falls back to the server overlay and says so
+    # in the record.
+    mode = composite if composite in ("feather", "server") else "feather"
+    dpad, dfeather = feather_defaults(w, h)
+    padding_px = int(padding_px) if padding_px and int(padding_px) > 0 else dpad
+    feather_px = int(feather_px) if feather_px and int(feather_px) >= 0 else dfeather
+    if mode == "feather" and _pillow() is None:
+        mode = "server"
+    if mode == "feather":
+        out = _feather_inpaint(png, w, h, boxes, model=model, prompt=prompt, negative=negative,
+                               params=params, padding_px=padding_px, feather_px=feather_px)
+    else:
+        mask = make_mask(w, h, boxes)
+        out = nai.infill(model, png, mask, prompt, negative, params)
     src = Path(rel)
     name = f"{src.stem}{suffix}.png"
     folder = str(src.parent).replace("\\", "/")
     saved = save_image(folder, name, out, {
         "inpaintOf": rel, "boxes": boxes, "prompt": prompt, "negative": negative,
-        "model": nai.inpaint_model(model),
+        "model": nai.inpaint_model(model), "composite": mode,
+        **({"paddingPx": padding_px, "featherPx": feather_px} if mode == "feather" else {}),
     })
+    saved["composite"] = mode
     return saved
 
 

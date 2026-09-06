@@ -82,7 +82,7 @@ export function drawBatch(mount: HTMLElement): void {
 
   runBtn = el('button', { class: 'primary tiny' }) as HTMLButtonElement;
   runBtn.addEventListener('click', () => {
-    if (S.jobId) cancelRun();
+    if (S.jobId) void cancelRun();
     else void submitReserved();
   });
   progressLine = el('span', { class: 'hint' });

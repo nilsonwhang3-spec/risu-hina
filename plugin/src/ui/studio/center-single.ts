@@ -76,7 +76,7 @@ export function buildRunControls(): HTMLElement {
 
   runBtn = el('button', { class: 'primary tiny' }) as HTMLButtonElement;
   runBtn.addEventListener('click', () => {
-    if (S.jobId) cancelRun();
+    if (S.jobId) void cancelRun();
     // The 1장 loop is the current setup only - no scene preset expansion.
     else void startRun({ scenePreset: '', count: gen.count });
   });

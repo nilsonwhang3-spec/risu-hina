@@ -111,6 +111,37 @@ mixed-cast multi-entry batch from the panel.** Released = **v0.10.0 BETA** (§1-
 **0.3.1 (night of 2026-08-25)** — the real reason `+` never appeared was not "same version" but **CORS**: RisuAI reads `//@update-url` with a browser `fetch`, and the redirect response from the release URL carries no CORS header. Changed `//@update-url` to
 `https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js`, and made `tools/bundle.py` write that file into the repository (included in the release commit). In the backend code only VERSION changed.
 
+**+ §1-58 (2026-09-06, unreleased) - the batch that would not leave, and a folder picker that is
+a tree**: (1) after a network error the 배치 tab kept the job on screen for good and 취소 did
+nothing: `pollJob`'s tick ENDED the poll on the first failed fetch and left `S.jobId` set, and the
+5s scan skipped `loadJobs` while a job id was set. Now a failed tick keeps polling (a notice after
+8 misses), a 404/empty answer forgets the job, `loadJobs` reconciles the job on screen against the
+server's list (absent → forgotten with a notice; finished → the normal finish path, `finishJob`;
+running without a poll → adopted), the scan re-reads the list whenever the poll is not alive, and
+취소 awaits the cancel and then reconciles the same way. (2) 검수할 폴더 (다른 폴더 열기) was a flat
+list of every folder path - two thousand pictures under the studio made it unusable. It is a tree
+now (`treeRow`, top two levels open, a folder with no pictures of its own is dimmed and only
+unfolds) with a filter box that opens every folder on the way to a match; the count is the folder
+and everything below it.
+
+**+ §1-57 (2026-09-06, unreleased) - inpaint with a feathered edge**: the report (with the
+analysis): a wider box still showed the same rectangle outline, because NovelAI's
+`add_original_image` pastes the original back along the HARD mask edge inside the returned
+bytes - nothing done afterwards can soften it. `studio.inpaint` now runs a dual-mask path
+(`composite="feather"`, default): the GENERATION mask is the boxes grown by `padding_px` (default
+~4.5% of the short side, 24..96) so the model sees its surroundings, sent with the overlay OFF
+(`nai.infill(..., add_original=False)`); the whole frame comes back and is composited over the
+original with a BLEND mask - the boxes themselves, one L-mode mask for all boxes blurred ONCE with
+`GaussianBlur(feather_px)` (default ~2.5%, 12..64). The API gets a flattened RGB frame; the
+composite happens in the original's mode, so an RGBA sprite keeps its alpha and every pixel away
+from the boxes stays byte-identical. `composite="server"` keeps the old hard overlay; without
+Pillow the feather request falls back to it and the record says so (`composite`, `paddingPx`,
+`featherPx` in the PNG recipe). `studio_inpaint` (agent) and `POST /studio/inpaint` take
+`padding_px` / `feather_px` / `composite`. test_studio `test_inpaint_feather` (fake NovelAI,
+last because it needs Pillow): overlay off, generation mask grown, far pixel identical with alpha,
+centre = the frame, a monotonic gradient across the edge, an L blend mask with mid-values, and the
+server mode unchanged.
+
 **+ §1-56 (2026-09-06, 0.14.5) - one turn per session: a lost connection no longer forks the
 conversation**. The report: after a network error, "계속 진행해줘" redid the PREVIOUS job instead
 of the last instruction. The log (15:15:28 `POST /chat`, 15:18:03 `agent chat failed Load failed`,
