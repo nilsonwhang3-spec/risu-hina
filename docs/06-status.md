@@ -111,6 +111,14 @@ mixed-cast multi-entry batch from the panel.** Released = **v0.10.0 BETA** (§1-
 **0.3.1 (night of 2026-08-25)** — the real reason `+` never appeared was not "same version" but **CORS**: RisuAI reads `//@update-url` with a browser `fetch`, and the redirect response from the release URL carries no CORS header. Changed `//@update-url` to
 `https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js`, and made `tools/bundle.py` write that file into the repository (included in the release commit). In the backend code only VERSION changed.
 
+**+ §1-46 (2026-09-06, after 0.14.1, unreleased)**: (1) the agent asks before regenerating:
+the "Seeing images" rule now says look → report what was seen and the one change → wait for
+the user; an autonomous loop only when the user explicitly asked for one ("알아서 고쳐").
+`seeds/vision-loop.md` says the same (existing installs keep their seeded copy - the built-in
+rule governs anyway). (2) 검수 tools row gets **AI 재검수**: `state.requestPrompt(text)` →
+agentpane.ts types it into the one panel (`AgentPanel.sendText`; a toast when a turn is
+running) - the prompt asks for review_folder → suggest_selection with flags untouched.
+
 **+ §1-45 (2026-09-06, → v0.14.1)**: the centre panel's armed delete label ("정말? (N)") was
 invisible - `button.iconbtn` (transparent, later in the sheet) outranked `button.danger`; a
 `button.iconbtn.danger` rule paints it red. Released as 0.14.1 with §1-43/§1-44.

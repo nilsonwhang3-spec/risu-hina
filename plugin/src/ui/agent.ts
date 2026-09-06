@@ -630,6 +630,14 @@ export class AgentPanel {
     return el('div', { class: 'costline', text: bits.join(' · ') });
   }
 
+  /** Send `text` as if the user typed it. False when a turn is running. */
+  sendText(text: string): boolean {
+    if (this.busy) return false;
+    this.input.value = text;
+    void this.submit();
+    return true;
+  }
+
   private async submit(): Promise<void> {
     const typed = this.input.value.trim();
     // An attachment on its own is a complete message: "here, look at this".

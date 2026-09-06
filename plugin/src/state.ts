@@ -1043,6 +1043,14 @@ class AppState {
     this.emit();
   }
 
+  /** A screen asked the agent something on the user's behalf (검수's AI 재검수,
+   * §1-46): the agent panel sends it as if typed. */
+  promptRequest: string | null = null;
+  requestPrompt(text: string): void {
+    this.promptRequest = text;
+    this.emit();
+  }
+
   requestOpenFile(path: string): void {
     this.openFileRequest = path;
     this.emit();

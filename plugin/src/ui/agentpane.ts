@@ -12,7 +12,7 @@
  * turn list, and elsewhere there is no turn list to paint on.
  */
 import { AgentPanel, type AgentPanelHooks } from './agent';
-import type { StagedEdit } from '../state';
+import { state, type StagedEdit } from '../state';
 
 let panel: AgentPanel | null = null;
 
@@ -49,6 +49,24 @@ export function bindAgent(next: Partial<AgentPanelHooks>): void {
  * not: a detached element loses its scroll offset, so a tab switch used to
  * land the conversation at the top. It is saved and put back after layout.
  */
+// A prompt a screen asked for (검수's AI 재검수): typed into the one panel.
+state.onChange(() => {
+  const text = state.promptRequest;
+  if (!text) return;
+  state.promptRequest = null;
+  if (!agentPanel().sendText(text)) toastBusy();
+});
+
+function toastBusy(): void {
+  let wrap = document.querySelector<HTMLElement>('.toastwrap');
+  if (!wrap) { wrap = document.createElement('div'); wrap.className = 'toastwrap'; document.body.appendChild(wrap); }
+  const t = document.createElement('div');
+  t.className = 'toast';
+  t.textContent = '히나가 아직 작업 중입니다 - 끝나면 다시 눌러 주세요.';
+  wrap.appendChild(t);
+  setTimeout(() => t.remove(), 2500);
+}
+
 export function mountAgent(into: HTMLElement): void {
   const p = agentPanel();
   if (p.root.parentElement !== into) {
