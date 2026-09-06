@@ -56,6 +56,12 @@ function isRoot(path: string): boolean {
 /** Ctrl+C / Ctrl+X on the selected folder(s), Ctrl+V into the open one,
  * Delete → the two-menu confirm (§1-35, §1-40). */
 function onTreeKey(ev: KeyboardEvent): void {
+  // The handler sits on the shared left column; a key typed into a prompt
+  // textarea (프롬프트 tab) or a name box must never reach it (§1-41: Delete
+  // in the style editor opened "정말 삭제").
+  if (S.leftTab !== 'output') return;
+  const t = ev.target as HTMLElement | null;
+  if (t && (t.closest('input, textarea, select, [contenteditable="true"]'))) return;
   const ctrl = ev.ctrlKey || ev.metaKey;
   const k = ev.key.toLowerCase();
   const sel = S.selected;

@@ -326,9 +326,21 @@ export function drawSelector(node: Folder): void {
     const fill = el('button', { class: 'ghost tiny', text: '부족분 다시 생성 예약',
       title: '채택이 없는 그룹을 배치 예약에 1장씩 넣습니다 (현재 씬 프리셋에 같은 이름의 씬이 있는 것만)' }) as HTMLButtonElement;
     fill.addEventListener('click', () => void reserveMissing(missing, fill));
+    // The list folds (§1-41): forty group names took a third of the screen.
+    // Six show, the rest behind "외 N개 · 펼치기".
+    const FOLD = 6;
+    const names = el('span', { class: 'hint grow' });
+    let open = false;
+    const more = el('button', { class: 'ghost tiny', style: { display: missing.length > FOLD ? '' : 'none' } });
+    const syncNames = (): void => {
+      names.textContent = open || missing.length <= FOLD ? missing.join(', ') : missing.slice(0, FOLD).join(', ') + ' …';
+      more.textContent = open ? '접기' : `외 ${missing.length - FOLD}개 · 펼치기`;
+    };
+    more.addEventListener('click', () => { open = !open; syncNames(); });
+    syncNames();
     missingBox.appendChild(el('div', { class: 'row', style: { marginBottom: '8px' } }, [
       el('span', { class: 'badge warn', text: `채택 없는 그룹 ${missing.length}개`, title: '후보는 있는데 아직 채택한 장이 없는 그룹' }),
-      el('span', { class: 'hint grow', text: missing.join(', ') }),
+      names, more,
       fill,
     ]));
   };

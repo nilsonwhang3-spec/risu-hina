@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.13.2
+//@display-name Risu Hina v0.13.3
 //@api 3.0
-//@version 0.13.2
+//@version 0.13.3
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -104,7 +104,7 @@
       this.tokenSafe = true;
       this.lastHealth = body;
       this.probeInfo = "";
-      this.gate = versionGate("0.13.2", String(body.version || ""));
+      this.gate = versionGate("0.13.3", String(body.version || ""));
       return body;
     }
     /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -11977,7 +11977,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.13.2",
+            version: "0.13.3",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -12625,7 +12625,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.13.2"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.13.3"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -16341,6 +16341,9 @@ ${negative.value.trim()}
     return path === (S.outputRoot?.path ?? "studio/output") || S.extraRoots.some((r) => r.path === path);
   }
   function onTreeKey(ev) {
+    if (S.leftTab !== "output") return;
+    const t = ev.target;
+    if (t && t.closest('input, textarea, select, [contenteditable="true"]')) return;
     const ctrl = ev.ctrlKey || ev.metaKey;
     const k = ev.key.toLowerCase();
     const sel = S.selected;
@@ -17594,9 +17597,23 @@ ${negative.value.trim()}
         title: "\uCC44\uD0DD\uC774 \uC5C6\uB294 \uADF8\uB8F9\uC744 \uBC30\uCE58 \uC608\uC57D\uC5D0 1\uC7A5\uC529 \uB123\uC2B5\uB2C8\uB2E4 (\uD604\uC7AC \uC52C \uD504\uB9AC\uC14B\uC5D0 \uAC19\uC740 \uC774\uB984\uC758 \uC52C\uC774 \uC788\uB294 \uAC83\uB9CC)"
       });
       fill.addEventListener("click", () => void reserveMissing(missing, fill));
+      const FOLD = 6;
+      const names = el("span", { class: "hint grow" });
+      let open4 = false;
+      const more = el("button", { class: "ghost tiny", style: { display: missing.length > FOLD ? "" : "none" } });
+      const syncNames = () => {
+        names.textContent = open4 || missing.length <= FOLD ? missing.join(", ") : missing.slice(0, FOLD).join(", ") + " \u2026";
+        more.textContent = open4 ? "\uC811\uAE30" : `\uC678 ${missing.length - FOLD}\uAC1C \xB7 \uD3BC\uCE58\uAE30`;
+      };
+      more.addEventListener("click", () => {
+        open4 = !open4;
+        syncNames();
+      });
+      syncNames();
       missingBox.appendChild(el("div", { class: "row", style: { marginBottom: "8px" } }, [
         el("span", { class: "badge warn", text: `\uCC44\uD0DD \uC5C6\uB294 \uADF8\uB8F9 ${missing.length}\uAC1C`, title: "\uD6C4\uBCF4\uB294 \uC788\uB294\uB370 \uC544\uC9C1 \uCC44\uD0DD\uD55C \uC7A5\uC774 \uC5C6\uB294 \uADF8\uB8F9" }),
-        el("span", { class: "hint grow", text: missing.join(", ") }),
+        names,
+        more,
         fill
       ]));
     };
@@ -18783,7 +18800,7 @@ ${negative.value.trim()}
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.13.2"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.13.3"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
@@ -18878,7 +18895,7 @@ ${negative.value.trim()}
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.13.2" }),
+        el("span", { class: "dim", text: "v0.13.3" }),
         healthEl,
         el("span", { class: "spacer" }),
         reload,
@@ -19150,6 +19167,6 @@ ${negative.value.trim()}
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.13.2"} loaded`);
+    console.log(`[risu-hina] v${"0.13.3"} loaded`);
   })();
 })();
