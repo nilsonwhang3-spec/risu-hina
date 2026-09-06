@@ -19,7 +19,7 @@
  */
 import { el, segCtl, colPicker, clear, popover } from '../dom';
 import { showArtifact } from '../artifact';
-import { blobUrl } from '../blobimg';
+import { blobUrl, smallScreen } from '../blobimg';
 import { state, type GroupItem, type SelectionMap, type SelectionState,
          type StudioGroups, type WorkspaceFile } from '../../state';
 import { S, hub, gen, msg, adjustReserve, countFiles, type Folder, persistSelCols } from './store';
@@ -843,7 +843,7 @@ export async function loadThumb(f: WorkspaceFile, mount: HTMLElement): Promise<v
   try {
     // Review wants a sharper picture than the file grids: ~720px (§1-39).
     // The mtime stamps the cache key so a rewritten file is fetched anew.
-    const url = await blobUrl(f.path, f.modified ? String(f.modified) : '', { thumb: true, w: 720 });
+    const url = await blobUrl(f.path, f.modified ? String(f.modified) : '', { thumb: true, w: smallScreen() ? 360 : 720 });
     if (!mount.isConnected) return;
     clear(mount);
     const img = el('img', { class: 'assetimg', src: url, alt: '' });

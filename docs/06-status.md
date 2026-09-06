@@ -111,6 +111,17 @@ mixed-cast multi-entry batch from the panel.** Released = **v0.10.0 BETA** (§1-
 **0.3.1 (night of 2026-08-25)** — the real reason `+` never appeared was not "same version" but **CORS**: RisuAI reads `//@update-url` with a browser `fetch`, and the redirect response from the release URL carries no CORS header. Changed `//@update-url` to
 `https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js`, and made `tools/bundle.py` write that file into the repository (included in the release commit). In the backend code only VERSION changed.
 
+**+ §1-53 (2026-09-06, unreleased) - iPhone**: (1) the send button: a tap blurred the textarea,
+the keyboard closed, the layout shifted and the click landed nowhere - `mousedown` keeps focus
+(preventDefault) and `touchend` submits directly; (2) "검수에 들어가면 계속 리셋": the likeliest
+cause is iOS reloading the page when the tab runs out of memory - the blob cache held up to 600
+object URLs of 720px thumbs. `blobimg.smallScreen()` (≤760px, or coarse pointer ≤1024px) caps
+the cache at 90 and the 검수 thumbs at 360px; (3) to SEE it in the log: the plugin now posts
+`plugin boot` with the navigation type (reload / back_forward / navigate), UA, viewport and
+deviceMemory, plus `uncaught error`, `unhandled rejection` and `pagehide` - a phone that
+reloads shows as `pagehide` followed by `plugin boot navigation=reload` in
+`data/logs/risuhina.log` (⚙ → 정보 · 로그).
+
 **+ §1-52 (2026-09-06, unreleased) - the default name rule with fallbacks**: why a rule at all:
 the selector groups candidates of one scene, and the name is the only thing every image
 carries; the rule reads what our template writes (`{character}-{emotion}-{stamp}-{n}`). It

@@ -65,6 +65,19 @@ export interface BlobOptions {
  * upload over an old one - showed its OLD picture until the panel reloaded
  * (§1-42 "썸네일이 캐시가 있는지 반복"). The URLs are revoked a little later
  * so an <img> still on screen finishes loading. */
+/** How many object URLs to keep: a desktop can hold hundreds, a phone
+ * cannot - iOS reloads the whole page when the tab runs out of memory, which
+ * showed as 검수 "계속 리셋" on an iPhone (§1-53). */
+export function smallScreen(): boolean {
+  try {
+    return window.matchMedia('(max-width: 760px), (pointer: coarse) and (max-width: 1024px)').matches;
+  } catch { return false; }
+}
+
+function cacheCap(): number {
+  return smallScreen() ? 90 : 600;
+}
+
 export function evictBlob(paths?: string[]): void {
   const doomed: string[] = [];
   for (const k of cache.keys()) {
@@ -115,7 +128,7 @@ async function fetchBlob(path: string, key: string, opts: BlobOptions): Promise<
     const buf = new Uint8Array(bytes.byteLength);
     buf.set(bytes);
     const url = URL.createObjectURL(new Blob([buf]));
-    while (cache.size >= 600) {
+    while (cache.size >= cacheCap()) {
       const [k, u] = cache.entries().next().value as [string, string];
       cache.delete(k);
       setTimeout(() => URL.revokeObjectURL(u), 30_000);
