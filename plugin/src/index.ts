@@ -44,6 +44,31 @@ async function resolveConfig(): Promise<{ url: string; token: string }> {
     console.log('[risu-hina] config resolve failed', e);
   }
 
+  // §1-53: a phone that "keeps resetting" leaves no trace on the server -
+  // log how this page load came about (reload / back_forward / navigate),
+  // the device, and every uncaught error and page hide, so the server log
+  // (⚙ → 정보 · 로그) tells whether the browser reloaded the whole page.
+  try {
+    const nav = (performance.getEntriesByType?.('navigation')?.[0] as PerformanceNavigationTiming | undefined);
+    void clientLog('info', 'plugin boot', {
+      navigation: nav?.type ?? '?',
+      ua: navigator.userAgent.slice(0, 120),
+      viewport: `${window.innerWidth}x${window.innerHeight}`,
+      memory: (navigator as unknown as { deviceMemory?: number }).deviceMemory ?? null,
+    });
+    window.addEventListener('error', (ev) => {
+      void clientLog('error', 'uncaught error', { message: String(ev.message).slice(0, 300), file: String(ev.filename || '').slice(-80), line: ev.lineno });
+    });
+    window.addEventListener('unhandledrejection', (ev) => {
+      void clientLog('error', 'unhandled rejection', { reason: String((ev as PromiseRejectionEvent).reason).slice(0, 300) });
+    });
+    window.addEventListener('pagehide', (ev) => {
+      // sendBeacon-less: the POST may or may not make it; the next boot's
+      // navigation type says what happened either way.
+      void clientLog('info', 'pagehide', { persisted: (ev as PageTransitionEvent).persisted, visibility: document.visibilityState });
+    });
+  } catch { /* logging must never break the plugin */ }
+
   const open = async () => {
     try {
       // showContainer first, then paint: revealing an empty panel immediately

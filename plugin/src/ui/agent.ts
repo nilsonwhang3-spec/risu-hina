@@ -82,6 +82,11 @@ export class AgentPanel {
 
     this.send = el('button', { class: 'primary sendbtn', title: '보내기 (Enter)', html: PAPER_PLANE });
     this.send.addEventListener('click', () => void this.submit());
+    // iPhone (§1-53): a tap on the button blurred the textarea, the keyboard
+    // closed, the layout shifted, and the click landed nowhere. Keeping focus
+    // on pointerdown and submitting on touchend makes the tap count.
+    this.send.addEventListener('mousedown', (e) => e.preventDefault());
+    this.send.addEventListener('touchend', (e) => { e.preventDefault(); void this.submit(); }, { passive: false });
 
     // --- attachments ---------------------------------------------------------
     //
