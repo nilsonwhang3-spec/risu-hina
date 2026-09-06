@@ -1076,6 +1076,18 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
   .split.m-agent > .explorer, .split.m-agent > .left { display: none; }
   .split.m-centre > .right { display: none; }
   .split.m-agent > .right { flex: 1 1 auto !important; min-height: 0; }
+  /* The agent pane must never be wider than the phone (§1-54: "오른쪽이 화면
+     밖으로 나간다, 축소해도 안 줄어듦"): a code block, a long path, a tool
+     card or a wide table used to push the pane past the viewport, and the
+     stacked layout let it. Everything inside wraps or scrolls in place. */
+  .split > .right, .agentpanel, .agentlog { min-width: 0; max-width: 100vw; overflow-x: hidden; }
+  .agentlog > * { max-width: 100%; min-width: 0; }
+  .bubble, .bubble-body, .toolcard, .stagedcard, .artifactchip, .thinking { max-width: 100%; min-width: 0; box-sizing: border-box; }
+  .bubble-body, .bubble-body * { overflow-wrap: anywhere; }
+  .agentlog pre, .bubble pre, .agentlog code, .agentlog table { max-width: 100%; overflow-x: auto; white-space: pre-wrap; word-break: break-all; display: block; box-sizing: border-box; }
+  .agentcompose { min-width: 0; }
+  .agentcompose .agentinput { min-width: 0; width: 100%; }
+  .imgstrip img, .wsimg img { max-width: 100%; }
   .split.m-centre > .left { flex: 1 1 auto !important; }
 
   /* The view switch is a bar across the top of the split, not a floating

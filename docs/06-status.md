@@ -111,6 +111,13 @@ mixed-cast multi-entry batch from the panel.** Released = **v0.10.0 BETA** (§1-
 **0.3.1 (night of 2026-08-25)** — the real reason `+` never appeared was not "same version" but **CORS**: RisuAI reads `//@update-url` with a browser `fetch`, and the redirect response from the release URL carries no CORS header. Changed `//@update-url` to
 `https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js`, and made `tools/bundle.py` write that file into the repository (included in the release commit). In the backend code only VERSION changed.
 
+**+ §1-54 (2026-09-06, unreleased) - iPhone, the agent pane wider than the screen**: in the
+stacked (≤760px) layout nothing capped the pane's width, so a code block, a long path, a tool
+card or a wide table pushed it past the viewport and pinch-zoom could not bring it back. The
+mobile block now caps `.right`/`.agentpanel`/`.agentlog` at 100vw with overflow-x hidden, makes
+every child `max-width: 100%`, wraps text anywhere, and turns pre/code/table into wrapping,
+in-place-scrolling blocks; the composer's textarea is `min-width: 0`.
+
 **+ §1-53 (2026-09-06, unreleased) - iPhone**: (1) the send button: a tap blurred the textarea,
 the keyboard closed, the layout shifted and the click landed nowhere - `mousedown` keeps focus
 (preventDefault) and `touchend` submits directly; (2) "검수에 들어가면 계속 리셋": the likeliest
