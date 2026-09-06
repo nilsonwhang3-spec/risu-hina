@@ -299,6 +299,35 @@ safe to offer on a chosen asset: it cannot quietly alter the rest of the picture
 
 **Cost: 0 Anlas** at tier 3 (9257 → 9257), same as generation — and subject to the same §4 caveat.
 
+### 7c-2. Inpainting, measured properly (2026-09-06, after the §1-59 ghost report)
+
+Ten `infill` calls on `characters/히나.png` (832×1216, its own `Comment` recipe), one box over the
+face (`x .30 y .14 w .40 h .26`), fix "closed eyes, open mouth, laughing". Mean channel difference
+inside / outside the box against the source, and what the eye saw:
+
+| run | overlay | extra | prompt | box mask | inside | outside | seen |
+|---|---|---|---|---|---|---|---|
+| r1 | on | — | fix only | raw px | 34.9 | 0.00 | **grey frame on the edge, original ghosted through** |
+| r2 | off | — | fix only | raw px | 34.2 | 1.82 | same frame + ghost; outside re-decoded (~2/255) |
+| r3 | off | `inpaintImg2ImgStrength 1, noise 0` | fix only | raw px | 36.2 | 1.83 | same |
+| r4 | on | strength 1 | fix only | raw px | 33.2 | 0.00 | same |
+| r5 | on | strength 1 | fix + recipe | raw px | 25.8 | 0.00 | same frame, closer style |
+| r6 | on | strength 1 | fix + recipe | **8px snapped** | 19.0 | 0.00 | **clean**; thin bright seam on the bottom edge |
+| r7 | on | + web sampler flags | fix + recipe | 8px | 19.4 | 0.00 | clean, same seam |
+| r8 | on | — | fix only | 8px | 21.8 | 0.00 | clean; earrings appeared, style drifts |
+| r9 | off | strength 1 | fix + recipe | 8px | 20.4 | 1.79 | clean, same seam |
+| r10 | on | — | fix + recipe | 8px | 23.2 | 0.00 | clean, same seam |
+
+So: **the mask must sit on the 8px latent grid.** Raw-pixel rectangles (the §1-57 masks: `int(0.34*1024)`
+= 348, not a multiple of 8) are what produced the ghost and the frame; overlay, strength and the
+sampler flags change nothing about it. The `Comment` of every result says `request_type:
+NativeInfillingRequest`, `img2img: null`, and the server's own defaults `deliberate_euler_ancestral_bug:
+true`, `prefer_brownian: false` (the web client sends false/true). A thin seam stays on the generation
+mask's edge in every aligned run - the client feather keeps the blend at ≈0 there. Recipe inheritance is
+a quality gain, not the fix (r8 vs r6). Anlas: 4547 → 4547 over the first six calls; the account was in
+use elsewhere at the time (`429 Concurrent generation is locked` twice), so the later drift of 5 is
+unattributed. Script and outputs were kept outside the repository.
+
 ## 7d. Director reference (캐릭터 레퍼런스) — request shape, measured 2026-08-30
 
 Probed with `probe_nai.py --charref` plus an iteration script; every fact below was answered by the

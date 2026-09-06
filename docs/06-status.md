@@ -111,6 +111,42 @@ mixed-cast multi-entry batch from the panel.** Released = **v0.10.0 BETA** (§1-
 **0.3.1 (night of 2026-08-25)** — the real reason `+` never appeared was not "same version" but **CORS**: RisuAI reads `//@update-url` with a browser `fetch`, and the redirect response from the release URL carries no CORS header. Changed `//@update-url` to
 `https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js`, and made `tools/bundle.py` write that file into the repository (included in the release commit). In the backend code only VERSION changed.
 
+**+ §1-59 (2026-09-06, unreleased) - inpaint: the ghost was the mask**. The report: two §1-57
+results (`인페인트실패_Mibu Sayaka-*.png`, `composite=feather, paddingPx 46, featherPx 32`) showed the
+original shining through the repaint inside the box, one of them with a face where an arm was asked
+for. Measured against the service (docs/09 §7c addendum, ten `infill` calls on a 832×1216 source,
+0 Anlas): **a mask rectangle whose edges are not multiples of 8 comes back with a grey frame along the
+edge and the original ghosted through the repaint - every time**; the same request with the edges
+snapped to the 8px latent grid is clean, with the overlay on or off, with or without
+`inpaintImg2ImgStrength`. So (1) `studio.make_mask` snaps every rectangle OUTWARD to 8
+(`MASK_SNAP`, `_box_pixels(snap=)`) and the feather path keeps the server overlay **ON** again
+(outside the generation mask the bytes are the original's - the §1-57 "overlay off" reasoning was
+wrong about the cause; both are clean once aligned). (2) The blend geometry was translucent by
+construction: the old mask blurred the box in place, so the box EDGE sat at 50% and a 133px box never
+reached 90% at its centre. Now `feather_px` is the σ of the edge, the blend rectangle is the box grown
+by 2σ (0.98 at the box edge) and `padding_px` is forced to ≥ 3.7σ (`FEATHER_REACH`) so the thin seam
+the service leaves along the generation mask's edge (seen in every aligned run) falls where the blend
+is ≈0. Defaults at 1024: σ 12, padding 46. (3) A fix sent alone ("anatomically correct female left
+arm…") costs the model the scene: `studio.inherit_recipe` puts the fix IN FRONT of the source PNG's
+own `Comment` prompt/uc, carries its sampler settings and `char_captions`, and switches the
+quality/UC merges off (the base text already holds them; the DEFAULTS' Heavy preset had been putting
+`nsfw` into the negative of an NSFW repaint). `inherit=False` sends the fix alone; a PNG without a
+recipe falls back to our `hina-params` sidecar and the record says `inherited: false`. (4) The
+feather re-save dropped the service's `Comment`; `nai.png_text_chunks` carries it (and Source,
+Software, Title, Description) into the composite, so an inpaint result reads back with `nai.recipe`
+and a second inpaint on it inherits `basePrompt` from `hina-params` rather than the stacked text.
+`nai.infill` also sends the web's `inpaintImg2ImgStrength` (the new `strength`, default 1.0),
+`noise 0`, `deliberate_euler_ancestral_bug false`, `prefer_brownian true`; `nai.inpaint_model` maps
+`nai-diffusion-5-curated` to `nai-diffusion-4-5-curated-inpainting` (there is no v5 curated
+inpainter). `studio_inpaint` (agent) and `POST /studio/inpaint` take `inherit` / `strength`; the
+tool's docstring now says the prompt is the fix only and the box should be generous. test_studio:
+snap outward + clamp, `feather_defaults` reach, overlay ON, grid-aligned generation mask, blend ≥ 0.98
+at the box edge and ≤ 0.05 at the seam, a small box fully repainted, Comment surviving the composite,
+inheritance (fix in front, caller params win, merges off, `basePrompt` recorded), `inherit=False`, the
+server path's mask on the grid too. Verified with the real service on `characters/히나.png` (feather
+default, fix "closed eyes, open mouth, laughing"): clean face, no frame, no seam, watercolor style
+kept.
+
 **+ §1-58 (2026-09-06, 0.14.6) - the batch that would not leave, and a folder picker that is
 a tree**: (1) after a network error the 배치 tab kept the job on screen for good and 취소 did
 nothing: `pollJob`'s tick ENDED the poll on the first failed fetch and left `S.jobId` set, and the

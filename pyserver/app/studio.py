@@ -1089,6 +1089,18 @@ def plan(spec: dict) -> list[dict]:
 
 
 # --- inpainting ---------------------------------------------------------------
+#
+# Measured 2026-09-06 (docs/09 §7c addendum), after the §1-57 failure report:
+# the ghost - the original showing through the repaint under a grey frame -
+# was the MASK, not the overlay. A rectangle whose edges do not sit on the
+# service's 8px latent grid comes back that way every time; the same request
+# with the edges snapped to 8 is clean, with the overlay on or off, with or
+# without a strength. So every mask made here is snapped outward to 8, and the
+# feather path keeps the server overlay ON (outside the generation mask the
+# bytes are the original's, which the blend can lean on).
+
+MASK_SNAP = 8
+
 
 def make_mask(width: int, height: int, boxes: list[dict], pad_px: int = 0) -> bytes:
     """A mask PNG: white where it should be repainted, black elsewhere.
@@ -1102,13 +1114,15 @@ def make_mask(width: int, height: int, boxes: list[dict], pad_px: int = 0) -> by
 
     Boxes are fractions of the image (0..1) so a caller can say "the top third"
     without knowing the resolution. `pad_px` grows every box by that many
-    pixels on each side (the generation mask of the feather path, §1-57).
+    pixels on each side (the generation mask of the feather path, §1-57). The
+    rectangle is then snapped OUTWARD to the 8px grid (`MASK_SNAP`) - the
+    measured condition for a clean repaint (see above).
     """
     import struct
     import zlib
 
     px = bytearray(width * height)
-    for x0, y0, x1, y1 in _box_pixels(width, height, boxes, pad_px):
+    for x0, y0, x1, y1 in _box_pixels(width, height, boxes, pad_px, snap=MASK_SNAP):
         for y in range(y0, y1):
             base = y * width
             for x in range(x0, x1):
@@ -1131,26 +1145,53 @@ def make_mask(width: int, height: int, boxes: list[dict], pad_px: int = 0) -> by
             + chunk(b"IEND", b""))
 
 
-def _box_pixels(width: int, height: int, boxes: list[dict], pad_px: int = 0) -> list[tuple[int, int, int, int]]:
-    """Fractional boxes as clamped pixel rectangles, each grown by pad_px."""
+def _box_pixels(width: int, height: int, boxes: list[dict], pad_px: int = 0,
+                snap: int = 1) -> list[tuple[int, int, int, int]]:
+    """Fractional boxes as clamped pixel rectangles, each grown by pad_px and,
+    with `snap` > 1, widened to the next multiple of it on every side."""
     out = []
     for b in boxes:
         fx, fy = float(b.get("x", 0)), float(b.get("y", 0))
         fw, fh = float(b.get("w", 0)), float(b.get("h", 0))
-        x0 = max(0, min(width, int(fx * width) - pad_px))
-        y0 = max(0, min(height, int(fy * height) - pad_px))
-        x1 = max(x0, min(width, int((fx + fw) * width) + pad_px))
-        y1 = max(y0, min(height, int((fy + fh) * height) + pad_px))
+        x0 = int(fx * width) - pad_px
+        y0 = int(fy * height) - pad_px
+        x1 = int((fx + fw) * width) + pad_px
+        y1 = int((fy + fh) * height) + pad_px
+        if snap > 1:
+            x0, y0 = (x0 // snap) * snap, (y0 // snap) * snap
+            x1, y1 = -(-x1 // snap) * snap, -(-y1 // snap) * snap
+        x0 = max(0, min(width, x0))
+        y0 = max(0, min(height, y0))
+        x1 = max(x0, min(width, x1))
+        y1 = max(y0, min(height, y1))
         out.append((x0, y0, x1, y1))
     return out
 
 
+# The blend must be ~1 inside the box and ~0 where the generation mask ends,
+# because the seam the service leaves along that edge (a thin bright line in
+# every measured run) has to fall where the original is taken. The blend
+# rectangle is the box grown by 2σ (Φ(2) = 0.98 at the box edge) and the
+# generation mask must reach at least 3.7σ past the box (Φ(-1.7) = 0.045 at
+# the seam, on a pixel that is the original's outside it anyway).
+FEATHER_REACH = 3.7
+
+
 def feather_defaults(width: int, height: int) -> tuple[int, int]:
-    """(padding_px, feather_px) for a picture of this size: ~46 / ~26 at 1024."""
+    """(padding_px, feather_px) for a picture of this size: ~46 / ~12 at 1024.
+
+    `feather_px` is the σ of the edge gradient (visible width about 4σ);
+    `padding_px` is how far past the box the model repaints, and is never
+    less than `FEATHER_REACH` σ."""
     short = min(width, height)
+    feather = max(8, min(32, round(short * 0.012)))
     pad = max(24, min(96, round(short * 0.045)))
-    feather = max(12, min(64, round(short * 0.025)))
-    return pad, feather
+    return max(pad, _min_padding(feather)), feather
+
+
+def _min_padding(feather_px: int) -> int:
+    import math
+    return int(math.ceil(FEATHER_REACH * feather_px))
 
 
 def _pillow():
@@ -1177,10 +1218,13 @@ def blend_mask_bytes(width: int, height: int, boxes: list[dict], feather_px: int
 
 def _blend_mask(Image, ImageDraw, ImageFilter, width: int, height: int, boxes: list[dict], feather_px: int):
     # One mask for every box, blurred ONCE: blurring per box and compositing
-    # in turn leaves seams and doubled density where boxes overlap.
+    # in turn leaves seams and doubled density where boxes overlap. The
+    # rectangle is the box grown by 2σ so the box itself stays ≥ 0.98 (the
+    # old mask blurred the box in place and left its edge at 50%, half the
+    # asked-for area translucent by construction).
     m = Image.new("L", (width, height), 0)
     d = ImageDraw.Draw(m)
-    for x0, y0, x1, y1 in _box_pixels(width, height, boxes, 0):
+    for x0, y0, x1, y1 in _box_pixels(width, height, boxes, 2 * feather_px):
         if x1 > x0 and y1 > y0:
             d.rectangle((x0, y0, x1 - 1, y1 - 1), fill=255)
     if feather_px > 0:
@@ -1200,20 +1244,22 @@ def _flatten_rgb(Image, im, background=(255, 255, 255)):
 
 
 def _feather_inpaint(png: bytes, w: int, h: int, boxes: list[dict], *, model: str, prompt: str,
-                     negative: str, params: dict | None, padding_px: int, feather_px: int) -> bytes:
-    """The dual-mask path (§1-57).
+                     negative: str, params: dict | None, padding_px: int, feather_px: int,
+                     strength: float = 1.0) -> bytes:
+    """The dual-mask path (§1-57, geometry corrected in §1-59).
 
-    The model repaints a GENERATION mask - the boxes grown by `padding_px`, so
-    it sees enough of the surroundings - with the server overlay OFF, and the
-    whole frame comes back. The result is then pasted over the original with
-    a BLEND mask - the boxes themselves, Gaussian-feathered by `feather_px` -
-    so the edge is a gradient, not a rectangle. With the overlay on, the
-    server pastes the original back along the hard mask edge and that edge is
-    baked into the bytes before any client feathering could help (the
-    report: a wider box still showed the same rectangle outline).
+    The model repaints a GENERATION mask - the boxes grown by `padding_px`,
+    snapped to the latent grid - with the server overlay ON, so outside that
+    mask the frame is the original byte for byte. The frame is then pasted
+    over the original with a BLEND mask - the boxes grown by 2σ and
+    Gaussian-feathered by σ = `feather_px` - so the box is all new picture,
+    the edge is a gradient, and the seam the service leaves at the generation
+    mask's edge lands where the blend is already ~0.
     """
     import io
     Image, ImageDraw, ImageFilter = _pillow()
+    from PIL import ImageChops
+    from PIL.PngImagePlugin import PngInfo
     with Image.open(io.BytesIO(png)) as src:
         original = src.copy()
     # The API sees a flattened RGB frame (no stray alpha); the composite
@@ -1221,28 +1267,100 @@ def _feather_inpaint(png: bytes, w: int, h: int, boxes: list[dict], *, model: st
     # transparency and every pixel outside the box stays byte-identical.
     if original.mode not in ("RGB", "RGBA"):
         original = original.convert("RGBA" if "A" in original.getbands() or original.mode == "P" else "RGB")
+    flat = _flatten_rgb(Image, original)
     buf = io.BytesIO()
-    _flatten_rgb(Image, original).save(buf, "PNG")
+    flat.save(buf, "PNG")
     flat_png = buf.getvalue()
     gen_mask = make_mask(w, h, boxes, pad_px=padding_px)
-    out = nai.infill(model, flat_png, gen_mask, prompt, negative, params, add_original=False)
+    out = nai.infill(model, flat_png, gen_mask, prompt, negative, params,
+                     add_original=True, strength=strength)
     with Image.open(io.BytesIO(out)) as res:
         generated = _flatten_rgb(Image, res.copy())
     if generated.size != original.size:
         generated = generated.resize(original.size, Image.LANCZOS)
+    else:
+        # The measured promise the blend leans on: outside the generation
+        # mask the service returned the original. Say so if it ever stops.
+        with Image.open(io.BytesIO(gen_mask)) as gm:
+            outside = ImageChops.invert(gm.convert("L"))
+        leak = ImageChops.multiply(ImageChops.difference(generated, flat).convert("L"), outside)
+        if leak.getbbox():
+            log.warn("studio inpaint: the frame differs from the original OUTSIDE the mask (bbox %s) - "
+                     "the service's overlay did not hold; the blend hides it only near the boxes",
+                     leak.getbbox())
     if original.mode == "RGBA":
         generated = generated.convert("RGBA")
         generated.putalpha(original.getchannel("A"))
     blend = _blend_mask(Image, ImageDraw, ImageFilter, w, h, boxes, feather_px)
     final = Image.composite(generated, original, blend)
+    # The service's own record (Comment above all) rides across the re-save,
+    # so the result reads back with nai.recipe like any other NovelAI PNG.
+    info = PngInfo()
+    for key, text in nai.png_text_chunks(out):
+        if key in ("Comment", "Source", "Software", "Title", "Description", "Generation_time"):
+            info.add_text(key, text)
     buf = io.BytesIO()
-    final.save(buf, "PNG")
+    final.save(buf, "PNG", pnginfo=info)
     return buf.getvalue()
+
+
+_RECIPE_SAMPLER_KEYS = ("steps", "scale", "sampler", "cfg_rescale", "noise_schedule")
+
+
+def _join(fix: str, base: str) -> str:
+    fix, base = fix.strip().strip(",").strip(), base.strip()
+    if fix and base:
+        return f"{fix}, {base}"
+    return fix or base
+
+
+def inherit_recipe(png: bytes, prompt: str, negative: str, params: dict | None) -> tuple[str, str, dict, str | None]:
+    """The source picture's own recipe under the fix.
+
+    `prompt`/`negative` describe only what to change ("closed eyes, laughing").
+    Sent alone they cost the model every other word that made the picture -
+    scene, character, style - and a box in a nude scene repainted with "female
+    arm" came back holding a face (the §1-57 report). The web client keeps the
+    whole prompt while inpainting, so this does the same from what the PNG
+    already carries: the service's `Comment` (applied prompt, uc, sampler
+    settings, character captions), or failing that our own `hina-params`
+    sidecar (what was asked for). Returns (prompt, negative, params, base
+    prompt used or None when nothing was found).
+
+    The base text already holds the quality suffix and the UC preset text, so
+    both merges are switched off here; an explicit `params` still wins."""
+    rc = nai.recipe(png)
+    hina = rc.get("hina") if isinstance(rc.get("hina"), dict) else {}
+    applied = rc.get("parameters") if isinstance(rc.get("parameters"), dict) else {}
+    inherited: dict[str, Any] = {}
+    base_prompt = str(hina.get("basePrompt") or "")
+    base_neg = str(hina.get("baseNegative") or "")
+    if applied.get("prompt"):
+        base_prompt = base_prompt or str(applied.get("prompt") or "")
+        base_neg = base_neg or str(applied.get("uc") or "")
+        for k in _RECIPE_SAMPLER_KEYS:
+            if applied.get(k) is not None:
+                inherited[k] = applied[k]
+        cc = ((applied.get("v4_prompt") or {}).get("caption") or {}).get("char_captions")
+        if cc:
+            inherited["char_captions"] = cc
+        ncc = ((applied.get("v4_negative_prompt") or {}).get("caption") or {}).get("char_captions")
+        if ncc:
+            inherited["negative_char_captions"] = ncc
+    elif hina.get("prompt"):
+        base_prompt = base_prompt or str(hina.get("prompt") or "")
+        base_neg = base_neg or str(hina.get("negative") or "")
+    if not base_prompt:
+        return prompt, negative, dict(params or {}), None
+    inherited["qualityToggle"] = False
+    inherited["ucPreset"] = 2
+    return _join(prompt, base_prompt), _join(negative, base_neg), {**inherited, **(params or {})}, base_prompt
 
 
 def inpaint(rel: str, boxes: list[dict], prompt: str, *, model: str,
             negative: str = "", params: dict | None = None, suffix: str = "",
-            composite: str = "feather", padding_px: int = 0, feather_px: int = 0) -> dict:
+            composite: str = "feather", padding_px: int = 0, feather_px: int = 0,
+            inherit: bool = True, strength: float = 1.0) -> dict:
     """Repaint part of a library image and save the result beside it.
 
     Under the SOURCE name: save_image never overwrites, so the result lands
@@ -1253,6 +1371,10 @@ def inpaint(rel: str, boxes: list[dict], prompt: str, *, model: str,
     A new file, never in place: the original is a candidate someone may still
     prefer, and an inpaint that overwrote it would remove the comparison the
     selector exists to make.
+
+    `inherit` (default) puts the fix in front of the source's own prompt and
+    settings (`inherit_recipe`); `strength` is the web's inpaint strength
+    (1.0 = repaint the box entirely).
     """
     rel = _rel(rel)
     png = read_bytes(rel)
@@ -1261,31 +1383,39 @@ def inpaint(rel: str, boxes: list[dict], prompt: str, *, model: str,
         raise StudioError(f"PNG 이 아닙니다: {rel}")
     if not boxes:
         raise StudioError("다시 그릴 영역이 필요합니다 (x, y, w, h — 0~1 비율)")
+    base_prompt = None
+    if inherit:
+        prompt, negative, params, base_prompt = inherit_recipe(png, prompt, negative, params)
     # `composite`: "feather" (default) = the dual-mask path above, which needs
-    # Pillow; "server" = the old hard overlay (add_original_image). Without
+    # Pillow; "server" = the hard overlay along the (snapped) box. Without
     # Pillow the feather request falls back to the server overlay and says so
     # in the record.
     mode = composite if composite in ("feather", "server") else "feather"
     dpad, dfeather = feather_defaults(w, h)
-    padding_px = int(padding_px) if padding_px and int(padding_px) > 0 else dpad
     feather_px = int(feather_px) if feather_px and int(feather_px) >= 0 else dfeather
+    padding_px = int(padding_px) if padding_px and int(padding_px) > 0 else dpad
+    padding_px = max(padding_px, _min_padding(feather_px))
     if mode == "feather" and _pillow() is None:
         mode = "server"
     if mode == "feather":
         out = _feather_inpaint(png, w, h, boxes, model=model, prompt=prompt, negative=negative,
-                               params=params, padding_px=padding_px, feather_px=feather_px)
+                               params=params, padding_px=padding_px, feather_px=feather_px,
+                               strength=strength)
     else:
         mask = make_mask(w, h, boxes)
-        out = nai.infill(model, png, mask, prompt, negative, params)
+        out = nai.infill(model, png, mask, prompt, negative, params, strength=strength)
     src = Path(rel)
     name = f"{src.stem}{suffix}.png"
     folder = str(src.parent).replace("\\", "/")
     saved = save_image(folder, name, out, {
         "inpaintOf": rel, "boxes": boxes, "prompt": prompt, "negative": negative,
-        "model": nai.inpaint_model(model), "composite": mode,
+        "model": nai.inpaint_model(model), "composite": mode, "maskSnap": MASK_SNAP,
+        "strength": strength, "inherited": base_prompt is not None,
+        **({"basePrompt": base_prompt} if base_prompt else {}),
         **({"paddingPx": padding_px, "featherPx": feather_px} if mode == "feather" else {}),
     })
     saved["composite"] = mode
+    saved["inherited"] = base_prompt is not None
     return saved
 
 

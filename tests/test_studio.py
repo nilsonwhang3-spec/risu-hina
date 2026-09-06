@@ -571,6 +571,16 @@ check("the inpainting model is derived, not guessed",
       nai.inpaint_model("nai-diffusion-4-5-full") == "nai-diffusion-4-5-full-inpainting")
 check("and an inpainting id is left alone",
       nai.inpaint_model("nai-diffusion-3-inpainting") == "nai-diffusion-3-inpainting")
+check("v5 curated goes to the v4.5 curated inpainter (it has none of its own)",
+      nai.inpaint_model("nai-diffusion-5-curated") == "nai-diffusion-4-5-curated-inpainting")
+# §1-59: the measured cause of the ghosted repaint was a mask edge off the
+# 8px latent grid. Every rectangle is widened to the grid, never narrowed.
+check("box edges snap outward to 8", studio._box_pixels(200, 200, [{"x": 0.1, "y": 0.1, "w": 0.3, "h": 0.3}], snap=8)
+      == [(16, 16, 80, 80)], str(studio._box_pixels(200, 200, [{"x": 0.1, "y": 0.1, "w": 0.3, "h": 0.3}], snap=8)))
+check("and stay inside the picture", studio._box_pixels(100, 100, [{"x": 0.9, "y": 0.9, "w": 0.5, "h": 0.5}], 10, snap=8)
+      == [(80, 80, 100, 100)])
+_pad, _sig = studio.feather_defaults(1024, 1024)
+check("padding reaches past the feather's tail", _pad >= 3.7 * _sig and _sig == 12, f"{_pad}/{_sig}")
 
 print("\ntest_png_carries_its_recipe")
 # save_image embeds what we asked for as a hina-params tEXt chunk instead of
@@ -854,17 +864,24 @@ print("\ntest_inpaint_feather")
 # the original, inside it red, and across the edge a gradient - not a step.
 try:
     from PIL import Image as _FI
+    from PIL.PngImagePlugin import PngInfo
     import io as _fio
     _real_infill = nai.infill
     _seen = {}
 
-    def _fake_infill(model, png, mask, prompt, negative="", params=None, add_original=True):
+    def _fake_infill(model, png, mask, prompt, negative="", params=None, add_original=True, strength=1.0):
         _seen["mask"] = mask
         _seen["add_original"] = add_original
+        _seen["prompt"] = prompt
+        _seen["negative"] = negative
+        _seen["params"] = params
         w, h = nai.png_size(png)
         _seen["size"] = (w, h)
+        from PIL.PngImagePlugin import PngInfo as _PI
+        _info = _PI()
+        _info.add_text("Comment", json.dumps({"prompt": prompt, "uc": negative, "steps": 7}))
         b = _fio.BytesIO()
-        _FI.new("RGB", (w, h), (220, 30, 30)).save(b, "PNG")
+        _FI.new("RGB", (w, h), (220, 30, 30)).save(b, "PNG", pnginfo=_info)
         return b.getvalue()
 
     nai.infill = _fake_infill
@@ -873,13 +890,17 @@ try:
         _FI.new("RGBA", (256, 256), (30, 30, 220, 254)).save(_b, "PNG")
         _srcrel = studio.save_image("images/페더", "파랑.png", _b.getvalue(), {"scene": "t"})["path"]
         _box = [{"x": 0.25, "y": 0.25, "w": 0.5, "h": 0.5}]
-        _r = studio.inpaint(_srcrel, _box, "빨강", model="nai-diffusion-4-5-full", feather_px=16, padding_px=24)
+        _r = studio.inpaint(_srcrel, _box, "빨강", model="nai-diffusion-4-5-full", feather_px=8, padding_px=24)
         check("the record says feather", _r.get("composite") == "feather", str(_r)[:120])
-        check("the server overlay is OFF", _seen.get("add_original") is False)
+        check("the server overlay stays ON (§1-59: the ghost was the mask, not the overlay)", _seen.get("add_original") is True)
         check("the API gets the flattened original at the same size", _seen.get("size") == (256, 256))
+        check("a source without a recipe sends the fix alone and says so",
+              _seen.get("prompt") == "빨강" and _r.get("inherited") is False, str(_seen.get("prompt")))
         with _FI.open(_fio.BytesIO(_seen["mask"])) as _gm:
             _gmp = _gm.convert("L")
-            check("the generation mask is the box grown by padding", _gmp.getpixel((64 - 20, 128)) == 255 and _gmp.getpixel((64 - 30, 128)) == 0)
+            # box 64..192 grown by max(24, ceil(3.7*8)=30) = 34..222, snapped outward to 32..224
+            check("the generation mask is the box grown by padding, on the 8px grid",
+                  _gmp.getpixel((32, 128)) == 255 and _gmp.getpixel((31, 128)) == 0 and _gmp.getpixel((223, 128)) == 255 and _gmp.getpixel((224, 128)) == 0)
         with _FI.open(_fio.BytesIO(studio.read_bytes(_r["path"]))) as _out:
             check("the result keeps the original's mode (alpha survives)", _out.mode == "RGBA", _out.mode)
             check("far from the box the original is untouched, alpha included", _out.getpixel((4, 4)) == (30, 30, 220, 254), str(_out.getpixel((4, 4))))
@@ -888,12 +909,43 @@ try:
             _row = [_o.getpixel((x, 128))[0] for x in range(40, 90)]
             check("the edge is a gradient, not a step", any(40 < v < 210 for v in _row), str(_row))
             check("and monotonic across the edge", all(_row[i] <= _row[i + 1] + 2 for i in range(len(_row) - 1)))
-        _bm = studio.blend_mask_bytes(256, 256, _box, 16)
+        _bm = studio.blend_mask_bytes(256, 256, _box, 8)
         with _FI.open(_fio.BytesIO(_bm)) as _m:
             _vals = set(_m.getdata())
             check("the blend mask is L with mid-values", _m.mode == "L" and 0 in _vals and 255 in _vals and any(0 < v < 255 for v in _vals))
+            check("the whole box is new picture (>= 0.98 at its edge)", _m.getpixel((64, 128)) >= 248 and _m.getpixel((128, 128)) == 255, str(_m.getpixel((64, 128))))
+            check("and ~0 where the generation mask ends (the service's seam)", _m.getpixel((32, 128)) <= 13, str(_m.getpixel((32, 128))))
+        _small = studio.blend_mask_bytes(256, 256, [{"x": 0.4, "y": 0.4, "w": 0.2, "h": 0.2}], 8)
+        with _FI.open(_fio.BytesIO(_small)) as _m:
+            check("a small box is still fully repainted at its centre", _m.getpixel((128, 128)) == 255, str(_m.getpixel((128, 128))))
+        with _FI.open(_fio.BytesIO(studio.read_bytes(_r["path"]))) as _out:
+            _rc = nai.recipe(studio.read_bytes(_r["path"]))
+            check("the service's Comment survives the composite", (_rc.get("parameters") or {}).get("steps") == 7, str(_rc)[:120])
+            check("beside our own record", (_rc.get("hina") or {}).get("maskSnap") == 8 and _rc["hina"].get("inherited") is False)
+        # Inheritance: a source that carries a NovelAI Comment lends its prompt,
+        # uc, sampler settings and character captions; the fix goes in front.
+        _ci = PngInfo()
+        _ci.add_text("Comment", json.dumps({"prompt": "1girl, watercolor, very aesthetic", "uc": "lowres", "steps": 23, "scale": 6.5,
+                                            "sampler": "k_euler", "cfg_rescale": 0.1, "noise_schedule": "karras",
+                                            "v4_prompt": {"caption": {"base_caption": "x", "char_captions": [{"char_caption": "girl, red eyes", "centers": [{"x": 0.5, "y": 0.5}]}]}}}))
+        _b2 = _fio.BytesIO()
+        _FI.new("RGB", (256, 256), (30, 30, 220)).save(_b2, "PNG", pnginfo=_ci)
+        _srcrc = studio.save_image("images/페더", "레시피.png", _b2.getvalue(), {"scene": "t"})["path"]
+        _r3 = studio.inpaint(_srcrc, _box, "closed eyes", model="nai-diffusion-4-5-full", negative="open eyes", params={"scale": 5})
+        check("the fix goes in front of the source's prompt", _seen.get("prompt") == "closed eyes, 1girl, watercolor, very aesthetic", str(_seen.get("prompt")))
+        check("and of its negative", _seen.get("negative") == "open eyes, lowres", str(_seen.get("negative")))
+        _p = _seen.get("params") or {}
+        check("sampler settings and character captions ride along, caller params win",
+              _p.get("steps") == 23 and _p.get("sampler") == "k_euler" and _p.get("scale") == 5
+              and _p.get("char_captions") == [{"char_caption": "girl, red eyes", "centers": [{"x": 0.5, "y": 0.5}]}], str(_p)[:200])
+        check("quality/UC merges are off (the base text already holds them)", _p.get("qualityToggle") is False and _p.get("ucPreset") == 2)
+        check("the record names the base prompt", _r3.get("inherited") is True and nai.recipe(studio.read_bytes(_r3["path"]))["hina"].get("basePrompt") == "1girl, watercolor, very aesthetic")
+        _r4 = studio.inpaint(_srcrc, _box, "closed eyes", model="nai-diffusion-4-5-full", inherit=False)
+        check("inherit=False sends the fix alone", _seen.get("prompt") == "closed eyes" and _r4.get("inherited") is False)
         _r2 = studio.inpaint(_srcrel, _box, "빨강", model="nai-diffusion-4-5-full", composite="server")
-        check("composite=server keeps the old hard path", _r2.get("composite") == "server" and _seen.get("add_original") is True)
+        check("composite=server keeps the hard path", _r2.get("composite") == "server" and _seen.get("add_original") is True)
+        with _FI.open(_fio.BytesIO(_seen["mask"])) as _sm:
+            check("and its mask is on the grid too", _sm.convert("L").getpixel((64, 128)) == 255 and _sm.convert("L").getpixel((63, 128)) == 0)
     finally:
         nai.infill = _real_infill
 except ImportError:
