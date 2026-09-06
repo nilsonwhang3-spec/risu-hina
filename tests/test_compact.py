@@ -124,6 +124,37 @@ def main() -> int:
     check("schema 14 migration prunes every session to two snapshots", n_hist == 2, str(n_hist))
     check("schema version advanced", db.one("SELECT value FROM meta WHERE key = 'schema_version'")["value"] == str(db.SCHEMA_VERSION))
 
+    print("one turn per session (§1-56)")
+    # A turn the phone lost keeps running; the next prompt must stop it and
+    # start from a history that includes the cut-off prompt.
+    prev = asyncio.Event()
+    session._ACTIVE["sq"] = prev
+
+    async def _race() -> float:
+        loop = asyncio.get_event_loop()
+        loop.call_later(0.2, prev.set)
+        t0 = loop.time()
+        await session._supersede("sq")
+        return loop.time() - t0
+
+    waited = asyncio.run(_race())
+    check("the new turn flags the old one stopped", session.stopped("sq"))
+    check("and waits for it to finish", 0.15 <= waited < 5, f"{waited:.2f}s")
+    session._STOPPED.discard("sq")
+    # A partial save from a turn that outlived the wait must not bury the
+    # history a newer turn wrote meanwhile.
+    db.execute("INSERT INTO sessions(id, chat_key, title, created_at, updated_at) VALUES(?,?,?,?,?)",
+               ("sq", "chat-q", "", 1, 1))
+    session._save_message("sq", "history", [{"turn": "old"}])
+    since = session._last_history_seq("sq")
+    session._save_message("sq", "history", [{"turn": "newer"}])
+    session._save_partial_history("sq", "stale prompt", "", "중단됨", since=since)
+    newest = db.one("SELECT content_json FROM agent_messages WHERE session_id = 'sq' AND role = 'history' ORDER BY seq DESC LIMIT 1")
+    check("a superseded turn's partial save is skipped", "stale prompt" not in newest["content_json"] and "newer" in newest["content_json"])
+    session._save_partial_history("sq", "live prompt", "", "중단됨", since=session._last_history_seq("sq"))
+    newest = db.one("SELECT content_json FROM agent_messages WHERE session_id = 'sq' AND role = 'history' ORDER BY seq DESC LIMIT 1")
+    check("an un-superseded turn's partial save lands", "live prompt" in newest["content_json"])
+
     print("explicit stop")
     session.note_job("sx", "job-1")
     r = session.stop("sx")

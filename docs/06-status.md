@@ -1,4 +1,4 @@
-# 06. Implementation status — as of 2026-09-06 (v0.14.4 BETA, Risu Hina)
+# 06. Implementation status — as of 2026-09-06 (v0.14.5 BETA, Risu Hina)
 
 One page for whoever picks this up next session (= me). What exists, what changed, how far it is deployed,
 and what is left. The *why* of the design is `docs/04` (assets and charx are in Appendix E), the storage layout is `docs/02`, the deployment environment is `docs/00`.
@@ -111,7 +111,22 @@ mixed-cast multi-entry batch from the panel.** Released = **v0.10.0 BETA** (§1-
 **0.3.1 (night of 2026-08-25)** — the real reason `+` never appeared was not "same version" but **CORS**: RisuAI reads `//@update-url` with a browser `fetch`, and the redirect response from the release URL carries no CORS header. Changed `//@update-url` to
 `https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js`, and made `tools/bundle.py` write that file into the repository (included in the release commit). In the backend code only VERSION changed.
 
-**+ §1-55 (2026-09-06, unreleased) - iPhone memory: the whole plugin on a budget**. The phone kept
+**+ §1-56 (2026-09-06, 0.14.5) - one turn per session: a lost connection no longer forks the
+conversation**. The report: after a network error, "계속 진행해줘" redid the PREVIOUS job instead
+of the last instruction. The log (15:15:28 `POST /chat`, 15:18:03 `agent chat failed Load failed`,
+no `agent turn` line, 15:18:13 the re-sent prompt, 15:21:12 its completion) shows why: the phone's
+fetch died but the backend turn kept running; the re-sent prompt started a SECOND turn from a
+history that had never heard the first; and when the zombie finally died, `_save_partial_history`
+appended its stale prompt + "(이 턴은 완료되지 못했습니다)" on top of the newer history - the next
+turn's most recent user message was the OLD one. Now `run()` records the active turn per session
+(`_ACTIVE`); a new turn calls `stop()` on it and waits (≤20s) for its partial save, so the cut-off
+prompt is in the history the new turn reads; a partial save whose turn was superseded (a newer
+history row exists since it started) is skipped and logged; a cancelled/dropped turn logs `agent
+turn cut off` instead of nothing. The panel says after a dropped fetch that the backend may still
+be working and that the next message stops it and keeps the lost request. test_compact covers the
+wait, the flag and both partial-save cases.
+
+**+ §1-55 (2026-09-06, 0.14.5) - iPhone memory: the whole plugin on a budget**. The phone kept
 reloading (`plugin boot` at 15:40:46 / 15:41:07 / 15:41:30 / 15:42:09 in the staging log, iOS 18.7).
 What the log showed right after each boot: **`GET /session -> 200 1337ms 164249KB`** - the agent
 panel downloaded 164MB of JSON per open. `session.messages()` returned every `agent_messages` row,

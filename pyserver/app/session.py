@@ -343,6 +343,40 @@ def stopped(session_id: str | None) -> bool:
     return bool(session_id) and session_id in _STOPPED
 
 
+# The turn running per session, as the event its `finally` sets. One turn
+# per session at a time (§1-56): a phone whose fetch died ("Load failed")
+# left the turn running here, the user's re-sent prompt started a SECOND
+# turn from a history that had never heard the first one, and when the
+# first finally died it wrote its stale prompt on top of the newer history -
+# the next "계속 진행해줘" then redid the old job.
+_ACTIVE: dict[str, asyncio.Event] = {}
+SUPERSEDE_WAIT_S = 20.0
+
+
+async def _supersede(session_id: str) -> None:
+    """Stop the turn already running for this session and wait for it to
+    save its partial history, so the new turn starts from a history that
+    includes the cut-off prompt."""
+    prev = _ACTIVE.get(session_id)
+    if prev is None or prev.is_set():
+        return
+    stop(session_id)
+    t0 = asyncio.get_event_loop().time()
+    try:
+        await asyncio.wait_for(prev.wait(), SUPERSEDE_WAIT_S)
+        log.info("agent turn superseded session=%s waited=%.1fs",
+                 session_id, asyncio.get_event_loop().time() - t0)
+    except asyncio.TimeoutError:
+        log.warn("agent turn superseded session=%s: the old turn did not end in %.0fs",
+                 session_id, SUPERSEDE_WAIT_S)
+
+
+def _last_history_seq(session_id: str) -> int:
+    row = db.one("SELECT COALESCE(MAX(seq), -1) AS m FROM agent_messages "
+                 "WHERE session_id = ? AND role = 'history'", (session_id,))
+    return int(row["m"]) if row else -1
+
+
 def note_job(session_id: str | None, job_id: str) -> None:
     if session_id and job_id:
         _JOBS.setdefault(session_id, set()).add(job_id)
@@ -406,6 +440,15 @@ async def run(session_id: str, prompt: str, mode: str = "") -> AsyncGenerator[st
         workspace_dir=ws_dir,
         mode=mode if mode in SCREEN_MODES else "",
     )
+
+    # One turn per session: a turn the client lost is stopped and its prompt
+    # lands in the history before this one reads it.
+    await _supersede(session_id)
+    done_ev = asyncio.Event()
+    _ACTIVE[session_id] = done_ev
+    # The newest history row when this turn started: a partial save later
+    # must not bury a history a newer turn wrote meanwhile.
+    hist0 = _last_history_seq(session_id)
 
     _save_message(session_id, "user", prompt)
     _STOPPED.discard(session_id)
@@ -507,8 +550,12 @@ async def run(session_id: str, prompt: str, mode: str = "") -> AsyncGenerator[st
         # whatever text arrived) in the history: the next turn used to start
         # from the last SUCCESSFUL one, so after one error the agent had never
         # heard the prompts in between and lost the thread.
-        _save_partial_history(session_id, prompt, "".join(text_acc), _explain(e) if isinstance(e, Exception) else "중단됨")
+        _save_partial_history(session_id, prompt, "".join(text_acc),
+                              _explain(e) if isinstance(e, Exception) else "중단됨", since=hist0)
         if not isinstance(e, Exception):
+            # A dropped connection (cancel / GeneratorExit) used to leave no
+            # line at all - the one case that matters most to read back.
+            log.info("agent turn cut off session=%s (%s)", session_id, type(e).__name__)
             raise
         if isinstance(e, TurnStopped):
             log.info("agent turn stopped session=%s", session_id)
@@ -521,14 +568,24 @@ async def run(session_id: str, prompt: str, mode: str = "") -> AsyncGenerator[st
         vision.reset_turn(session_id)
         # A side event pushed after the last drain has no stream to land on.
         _drain_extra(session_id)
+        done_ev.set()
+        if _ACTIVE.get(session_id) is done_ev:
+            _ACTIVE.pop(session_id, None)
 
 
-def _save_partial_history(session_id: str, prompt: str, partial: str, why: str) -> None:
+def _save_partial_history(session_id: str, prompt: str, partial: str, why: str,
+                          since: int | None = None) -> None:
     try:
         # The pruned/compacted form this turn started from is the one to keep:
         # re-reading the stored row would throw the pruning away, and the next
         # turn would prune the same chars again (seen twice in a row, §1-46).
         compacted = agent_mod.COMPACTED.pop(session_id, None)
+        # A newer turn already wrote its history (this one was superseded and
+        # outlived the wait): writing ours now would put a stale, cut-off
+        # prompt on top of the conversation the user actually continued.
+        if since is not None and _last_history_seq(session_id) != since:
+            log.warn("partial history skipped session=%s: a newer turn wrote history first", session_id)
+            return
         history = list(compacted) if compacted is not None else list(_history(session_id))
         history.append(ModelRequest(parts=[UserPromptPart(content=prompt)]))
         note = (partial + "\n\n" if partial else "") + f"(이 턴은 완료되지 못했습니다: {why})"
