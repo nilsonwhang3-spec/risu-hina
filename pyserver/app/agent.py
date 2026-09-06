@@ -335,30 +335,113 @@ def _msg_text(m: Any) -> str:
     return "\n".join(bits) if bits else f"[{who}]"
 
 
+# Tool traffic older than this many user turns is clipped to PRUNE_CLIP chars
+# before every turn (§1-44): a run_python transcript or a read_file body from
+# ten turns ago is paid for on every later request, and the agent can always
+# call the tool again. The clip is deterministic and needs no model.
+PRUNE_KEEP_TURNS = 2
+PRUNE_CLIP = 600
+PRUNE_NOTE = "\n…[{n}자 생략 - 오래된 툴 결과는 잘립니다; 필요하면 툴을 다시 호출]"
+
+
+def _is_user_turn(m: Any) -> bool:
+    return any(getattr(p, "part_kind", "") == "user-prompt" for p in getattr(m, "parts", []) or [])
+
+
+def _turn_starts(messages: list) -> list[int]:
+    return [i for i, m in enumerate(messages) if _is_user_turn(m)]
+
+
+def prune_tool_parts(messages: list, keep_turns: int = PRUNE_KEEP_TURNS, clip: int = PRUNE_CLIP) -> tuple[list, int]:
+    """Clip tool returns and oversized tool-call args in every turn but the
+    last `keep_turns`. Returns (messages, chars saved); the input is not
+    mutated. Idempotent: a clipped part is under the limit already."""
+    import dataclasses
+    starts = _turn_starts(messages)
+    cut = starts[-keep_turns] if len(starts) >= keep_turns else 0
+    if cut <= 0:
+        return messages, 0
+    saved = 0
+    out = list(messages)
+    for i in range(cut):
+        m = out[i]
+        parts = list(getattr(m, "parts", []) or [])
+        changed = False
+        for j, part in enumerate(parts):
+            kind = getattr(part, "part_kind", "")
+            if kind in ("tool-return", "retry-prompt"):
+                c = getattr(part, "content", None)
+                if isinstance(c, str) and len(c) > clip + 120:
+                    saved += len(c) - clip
+                    parts[j] = dataclasses.replace(part, content=c[:clip] + PRUNE_NOTE.format(n=len(c) - clip))
+                    changed = True
+            elif kind == "tool-call":
+                a = getattr(part, "args", None)
+                text = a if isinstance(a, str) else (json.dumps(a, ensure_ascii=False) if a is not None else "")
+                if len(text) > clip + 120:
+                    saved += len(text) - clip
+                    # A dict stays a dict: providers re-serialise call args, and
+                    # some validate them as JSON on the way back in.
+                    stub = {"_clipped": text[:clip], "_note": f"{len(text) - clip}자 생략"}
+                    parts[j] = dataclasses.replace(part, args=json.dumps(stub, ensure_ascii=False) if isinstance(a, str) else stub)
+                    changed = True
+        if changed:
+            out[i] = dataclasses.replace(m, parts=parts)
+    return out, saved
+
+
+def _drop_turns(messages: list, budget: int, keep_tail: int) -> tuple[list, list[str]]:
+    """Drop whole turns from the front until the rest fits `budget`, never
+    fewer than `keep_tail` messages kept. Returns (rest, dropped user prompts)."""
+    starts = _turn_starts(messages)
+    dropped: list[str] = []
+    rest = messages
+    while sum(_msg_chars(m) for m in rest) > budget and len(starts) > 1 and len(rest) > keep_tail:
+        nxt = starts[1]
+        for m in rest[:nxt]:
+            for p in getattr(m, "parts", []) or []:
+                if getattr(p, "part_kind", "") == "user-prompt" and isinstance(getattr(p, "content", None), str):
+                    dropped.append(p.content[:160])
+        rest = rest[nxt:]
+        starts = [i - nxt for i in starts[1:]]
+    return rest, dropped
+
+
 async def compact_history(session_id: str, messages: list) -> list:
     """Keep the conversation inside the model's budget.
 
-    When the stored history grows past `agent.historyBudgetChars`, everything
-    but the last KEEP_TAIL messages is summarised by the model into one
-    Korean note and replaced by a (summary request, acknowledgement) pair.
-    Called by session.run before each turn (pydantic-ai 2.x has no history
-    processor hook). The result is remembered in COMPACTED so session.run
-    stores it - the summary is paid for once, not on every later turn.
+    Three stages, cheapest first. (1) Old tool traffic is clipped every turn
+    (prune_tool_parts). (2) Past `agent.historyBudgetChars`, everything but
+    the last KEEP_TAIL messages is summarised by the model into one Korean
+    note. (3) When the summary fails - the model refusing an adult transcript
+    was the §1-44 case, and it failed on EVERY turn of a 100MB session, each
+    request carrying the whole thing - whole turns are dropped from the front
+    with a plain list of the dropped requests, so the budget holds without a
+    model. Called by session.run before each turn (pydantic-ai 2.x has no
+    history processor hook). Whatever changed is remembered in COMPACTED so
+    session.run stores it - the work is paid for once, not on every later turn.
     """
     budget = int(config.section("agent").get("historyBudgetChars") or 0)
+    before = sum(_msg_chars(m) for m in messages)
+    messages, saved = prune_tool_parts(messages)
+    if saved and session_id:
+        COMPACTED[session_id] = messages
+        log.info("history pruned session=%s -%s chars", session_id, saved)
     if budget <= 0 or len(messages) <= KEEP_TAIL + 2:
         return messages
-    total = sum(_msg_chars(m) for m in messages)
+    total = before - saved
     if total <= budget:
         return messages
     head, tail = messages[:-KEEP_TAIL], messages[-KEEP_TAIL:]
     # Never cut between a tool call and its return: extend the tail back to a
     # user prompt boundary.
-    while head and not any(getattr(p, "part_kind", "") == "user-prompt" for p in getattr(tail[0], "parts", [])):
+    while head and not _is_user_turn(tail[0]):
         tail.insert(0, head.pop())
         if not head:
             return messages
+    from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
     transcript = "\n\n".join(_msg_text(m) for m in head)[-120000:]
+    summary = ""
     try:
         summariser = Agent(_model(), instructions=(
             "다음은 편집 도구 안에서 사용자와 에이전트가 나눈 대화 기록이다. 이어서 작업할 수 있도록 "
@@ -367,16 +450,29 @@ async def compact_history(session_id: str, messages: list) -> list:
         r = await summariser.run(transcript, model_settings={"temperature": 0.1, "max_tokens": 4000})  # type: ignore[arg-type]
         summary = str(r.output).strip()
     except Exception as e:  # noqa: BLE001 - a failed summary must not fail the turn
-        log.warn("history compaction failed: %s", e)
-        return messages
-    from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
-    compacted = [
-        ModelRequest(parts=[UserPromptPart(content="[이전 대화 요약 — 앞선 대화는 이 요약으로 대체되었습니다]\n" + summary)]),
-        ModelResponse(parts=[TextPart(content="요약을 확인했습니다. 이어서 진행합니다.")]),
-    ] + tail
+        log.warn("history compaction failed: %s", str(e).splitlines()[0][:200])
+    if summary:
+        compacted = [
+            ModelRequest(parts=[UserPromptPart(content="[이전 대화 요약 - 앞선 대화는 이 요약으로 대체되었습니다]\n" + summary)]),
+            ModelResponse(parts=[TextPart(content="요약을 확인했습니다. 이어서 진행합니다.")]),
+        ] + tail
+        how = "summary"
+    else:
+        # Mechanical fallback: drop turns from the front until the rest fits,
+        # keeping a bare list of what was asked so the thread is not lost.
+        rest, dropped = _drop_turns(messages, budget, KEEP_TAIL)
+        if not dropped:
+            return messages
+        listing = "\n".join(f"- {d}" for d in dropped)[-3000:]
+        compacted = [
+            ModelRequest(parts=[UserPromptPart(content=(
+                f"[이전 대화 {len(dropped)}턴 생략 - 요약 모델이 실패해 앞부분을 잘랐습니다. 생략된 사용자 요청들:]\n" + listing))]),
+            ModelResponse(parts=[TextPart(content="확인했습니다. 이어서 진행합니다.")]),
+        ] + rest
+        how = "drop"
     if session_id:
         COMPACTED[session_id] = compacted
-    log.info("history compacted session=%s %s msgs/%s chars -> %s msgs", session_id,
+    log.info("history compacted(%s) session=%s %s msgs/%s chars -> %s msgs", how, session_id,
              len(messages), total, len(compacted))
     return compacted
 
@@ -1194,6 +1290,8 @@ def build() -> Agent[Deps]:
         except Exception as e:  # noqa: BLE001
             return f"시작하지 못했습니다: {e}"
         job_id = r["jobId"]
+        from . import session as session_mod
+        session_mod.note_job(ctx.deps.session_id, job_id)
         head = f"배치를 시작했습니다 (id={job_id}, {r['total']}장). {r['estimate']['note']}"
         if not wait:
             return head + " studio_job 으로 진행을 확인하세요."

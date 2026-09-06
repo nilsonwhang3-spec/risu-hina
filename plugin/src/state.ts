@@ -1316,6 +1316,13 @@ class AppState {
     }, signal);
   }
 
+  /** 중단 as a request the backend hears at once (§1-44): the aborted fetch
+   * alone reaches it only at the turn's next write when a proxy sits between. */
+  async stopAgent(): Promise<void> {
+    if (!this.sessionId) return;
+    try { await transport.post('/agent/stop', { sessionId: this.sessionId }); } catch { /* the abort still stands */ }
+  }
+
   // --- merge conflicts ------------------------------------------------------
 
   /** Rows where our copy and RisuAI's both moved since the last open. */

@@ -680,7 +680,7 @@ export class AgentPanel {
     // so far into the history, so the next turn still knows what was asked.
     const abort = new AbortController();
     const stopBtn = el('button', { class: 'ghost tiny stopbtn', text: '중단', title: '이 턴을 중단합니다' });
-    stopBtn.addEventListener('click', () => { abort.abort(); stopBtn.disabled = true; });
+    stopBtn.addEventListener('click', () => { void state.stopAgent(); abort.abort(); stopBtn.disabled = true; });
     const thinking = el('div', { class: 'thinking' }, [
       el('span', { class: 'dots' }, [el('i'), el('i'), el('i')]),
       thinkingText,
