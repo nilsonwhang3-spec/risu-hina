@@ -91,9 +91,9 @@ DEFAULT_INSTRUCTIONS = {
         "never the stiff \"~합니다\" or the blunt \"~해\" unless the user asks for it."
     ),
     "search": (
-        "당신은 메인 에이전트를 도와 웹검색을 지원하는 유능한 어시스턴트입니다. 웹검색을 요청 받을 경우, "
-        "필요한 검색을 하고 내용을 전달하세요. 검색 이외의 다른 요청이 올 경우, 메인 에이전트가 수행해야 "
-        "한다고 답하세요."
+        "You are a capable assistant that runs web searches for the main agent. When asked to search, "
+        "run the searches needed and report what you found. For any request other than a search, answer "
+        "that the main agent has to do it."
     ),
 }
 

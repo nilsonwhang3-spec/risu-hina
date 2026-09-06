@@ -1,4 +1,4 @@
-# 06. Implementation status — as of 2026-09-06 (v0.13.2 BETA, Risu Hina)
+# 06. Implementation status — as of 2026-09-06 (v0.13.3 BETA, Risu Hina)
 
 One page for whoever picks this up next session (= me). What exists, what changed, how far it is deployed,
 and what is left. The *why* of the design is `docs/04` (assets and charx are in Appendix E), the storage layout is `docs/02`, the deployment environment is `docs/00`.
@@ -110,6 +110,18 @@ mixed-cast multi-entry batch from the panel.** Released = **v0.10.0 BETA** (§1-
 
 **0.3.1 (night of 2026-08-25)** — the real reason `+` never appeared was not "same version" but **CORS**: RisuAI reads `//@update-url` with a browser `fetch`, and the redirect response from the release URL carries no CORS header. Changed `//@update-url` to
 `https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js`, and made `tools/bundle.py` write that file into the repository (included in the release commit). In the backend code only VERSION changed.
+
+**+ §1-41 (2026-09-06, 0.13.3 - four more)**: ① **the agent's instructions are English** - the
+whole `agent.INSTRUCTIONS` block and all 74 tool docstrings (spliced by function name from
+the scratchpad `docstrings_en.py`; the Korean that remains is quoted UI wording, skill names
+and example paths the model must reproduce verbatim), plus the `search` preset instruction.
+The answer language rule stays (polite Korean). ② **deliverables go where they belong**: the
+instructions name subfolders (`projects/<bot>/로어북/`, `보고서/`, `out/` only as the fallback,
+`studio/output/<bot>/<topic>/` for images) and demand the exact path in the answer;
+`write_file` accepts any path under THIS bot's project folder (other bots' stay read-only).
+③ the 채택 없는 그룹 list folds at six names (`외 N개 · 펼치기`). ④ Delete in the left
+프롬프트 editor opened "정말 삭제": the OUTPUT tree's key handler sits on the shared left
+column - it now ignores the 프롬프트 tab and any key typed into an input/textarea.
 
 **+ §1-40 (2026-09-06, 0.13.2 - six more)**: ① a `selected/` folder in 검수 shows the CHOSEN
 images as a gallery (`selector.drawSelectedGallery`: 봇에 반영 over the whole folder, the empty
