@@ -437,6 +437,19 @@ button.iconbtn.on { background: rgba(37,99,235,.18); }
 .selhead .badge.warn { cursor: pointer; }
 .extrahead { padding: 10px 8px 4px; }
 /* The 썸네일 view's big pick: the clicked image above the grid (§1-40). */
+/* The artifact viewer is a modal (§1-43): wide, the picture as large as the
+   screen allows, text scrolls inside. */
+.modalbox.artifactmodal { max-width: min(96vw, 1400px); width: auto; }
+.artifactmodal .artifactview img { max-width: 100%; max-height: 78vh; display: block; margin: 0 auto; }
+.artifactmodal .artifactbody { max-height: 80vh; overflow: auto; }
+.artifactmodal .artifacthead { margin-bottom: 6px; }
+/* Foldable settings cards (§1-43). */
+.card.foldable .foldhead { cursor: pointer; display: flex; align-items: center; gap: 6px; user-select: none; }
+.card.foldable.folded { padding-bottom: 8px; }
+.foldcaret { font-size: 12px; color: var(--textcolor2, #79839a); }
+/* The assets tab's 크게 보기 button on a cell. */
+.assetcell .bigbtn { position: absolute; top: 4px; right: 4px; font-size: 11px; padding: 1px 6px; opacity: .8; }
+.assetcell { position: relative; }
 /* AI review suggestions in the 검수 cells (§1-42). */
 .sugline { display: flex; align-items: center; gap: 4px; margin-top: 4px; padding: 3px 4px; border-radius: 5px;
   background: rgba(128,128,128,.08); border-left: 3px solid var(--textcolor2, #79839a); font-size: 11px; }

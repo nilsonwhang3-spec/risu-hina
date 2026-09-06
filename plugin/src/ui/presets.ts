@@ -151,6 +151,28 @@ export function buildPresetsCard(opts: PresetsCardOptions): HTMLElement {
  * as one thing, and whose split nobody could explain in one sentence.
  */
 /**
+ * A settings card whose body folds behind its heading (§1-43): the web-search
+ * and vision cards are long and rarely revisited, so they start folded and
+ * remember the choice per card.
+ */
+function foldableCard(id: string, title: string, body: (HTMLElement | null)[]): HTMLElement {
+  const key = 'hina.foldCard.' + id;
+  let open = false;
+  try { open = localStorage.getItem(key) === '1'; } catch { /* iframe */ }
+  const caret = el('span', { class: 'foldcaret', text: open ? '▾' : '▸' });
+  const head = el('h2', { class: 'foldhead', title: '접기/펼치기' }, [caret, el('span', { text: title })]);
+  const box = el('div', { class: 'foldbody' }, body);
+  box.style.display = open ? '' : 'none';
+  head.addEventListener('click', () => {
+    open = !open;
+    box.style.display = open ? '' : 'none';
+    caret.textContent = open ? '▾' : '▸';
+    try { localStorage.setItem(key, open ? '1' : '0'); } catch { /* fine */ }
+  });
+  return el('div', { class: 'card foldable' + (open ? '' : ' folded'), id }, [head, box]);
+}
+
+/**
  * The vision tool card (§1-42): who looks at images for the agent - its own
  * model (after a probe proves it sees), a separate OpenAI-compatible vision
  * helper, or nobody (numbers only). One 테스트 does what the tool does.
@@ -177,12 +199,22 @@ function buildVisionCard(): HTMLElement {
   const hInstr = el('textarea', { rows: '4' }) as HTMLTextAreaElement;
   const hReset = el('button', { class: 'ghost tiny', text: '기본 지침으로' });
   hReset.addEventListener('click', () => { hInstr.value = st?.helper.defaultInstructions ?? ''; });
-  const syncHelperKey = () => { hKeyRow.style.display = selectedValue(hKeySel) ? 'none' : ''; };
+  // A key picked from the list carries its own address (keys.resolve): the
+  // baseUrl field goes away with it (§1-43, user).
+  const hUrlRow = el('label', { class: 'field' }, [el('span', { text: '주소 (baseUrl)' }), hUrl]);
+  const hUrlNote = el('div', { class: 'hint', style: { display: 'none' }, text: '주소는 선택한 API 키에 저장된 것을 씁니다.' });
+  const syncHelperKey = () => {
+    const ref = !!selectedValue(hKeySel);
+    hKeyRow.style.display = ref ? 'none' : '';
+    hUrlRow.style.display = ref ? 'none' : '';
+    hUrlNote.style.display = ref ? '' : 'none';
+  };
   hKeySel.addEventListener('change', syncHelperKey);
   const helperPane = el('div', { class: 'wsmode' }, [
     el('div', { class: 'hint', style: { marginBottom: '8px' },
       text: 'OpenAI 호환 chat/completions 에 그림을 실어 보냅니다. 성인 이미지가 많다면 무검열/로컬 모델(예: Ollama 의 llava·qwen2.5-vl, 주소 http://127.0.0.1:11434/v1)을 권합니다 — 외부 API 는 거절할 수 있고, 거절되면 툴이 "VISION REFUSED" 로 알립니다.' }),
-    el('label', { class: 'field' }, [el('span', { text: '주소 (baseUrl)' }), hUrl]),
+    hUrlRow,
+    hUrlNote,
     el('label', { class: 'field' }, [el('span', { text: '모델' }), hModel]),
     el('label', { class: 'field' }, [el('span', { text: 'API 키 (키 목록에서)' }), hKeySel]),
     hKeyRow,
@@ -261,7 +293,8 @@ function buildVisionCard(): HTMLElement {
     const m = selectedValue(modeSel) as VisionMode;
     const p: Record<string, unknown> = { mode: m };
     if (m === 'helper') {
-      p.helperBaseUrl = hUrl.value.trim();
+      // With a key from the list the key's own address applies (the field is hidden).
+      p.helperBaseUrl = selectedValue(hKeySel) ? '' : hUrl.value.trim();
       p.helperModel = hModel.value.trim();
       p.helperKeyRef = selectedValue(hKeySel);
       p.helperApiKey = hKey.value ? hKey.value : (st?.helper.apiKeySet ? keep : '');
@@ -321,8 +354,7 @@ function buildVisionCard(): HTMLElement {
   });
 
   void load();
-  return el('div', { class: 'card', id: 'vision-card' }, [
-    el('h2', { text: '비전 툴' }),
+  return foldableCard('vision-card', '비전 툴', [
     el('div', { class: 'hint', style: { marginBottom: '8px' }, text: '일반 에이전트가 이미지를 직접 보고 판단·검수·조정할 때 쓰는 view_image · compare_images · review_folder 툴입니다. 누가 볼지 하나를 고릅니다.' }),
     status,
     el('label', { class: 'field' }, [el('span', { text: '보기 옵션' }), modeSel]),
@@ -502,8 +534,7 @@ function buildWebsearchCard(): HTMLElement {
   });
 
   void load();
-  return el('div', { class: 'card', id: 'websearch-card' }, [
-    el('h2', { text: '웹 검색 툴' }),
+  return foldableCard('websearch-card', '웹 검색 툴', [
     el('div', { class: 'hint', style: { marginBottom: '8px' }, text: '일반 에이전트가 외부 사실이 필요할 때 쓰는 web_search 툴입니다. 누가 검색할지 하나를 고릅니다.' }),
     status,
     el('label', { class: 'field' }, [el('span', { text: '검색 옵션' }), modeSel]),

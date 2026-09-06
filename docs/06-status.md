@@ -111,6 +111,21 @@ mixed-cast multi-entry batch from the panel.** Released = **v0.10.0 BETA** (§1-
 **0.3.1 (night of 2026-08-25)** — the real reason `+` never appeared was not "same version" but **CORS**: RisuAI reads `//@update-url` with a browser `fetch`, and the redirect response from the release URL carries no CORS header. Changed `//@update-url` to
 `https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js`, and made `tools/bundle.py` write that file into the repository (included in the release commit). In the backend code only VERSION changed.
 
+**+ §1-43 (2026-09-06, field report after 0.14.0, 5 items)**: (1) the vision card hides the
+주소 field when a key is picked from the list (the key's own address applies; the card saves
+`helperBaseUrl: ''`); (2) the web-search and vision cards are FOLDABLE (`foldableCard` in
+presets.ts, heading toggles, folded by default, choice remembered per card in localStorage);
+(3) the artifact viewer is a MODAL (`ui/artifact.ts` → `dom.modal`, class `artifactmodal`) instead
+of an overlay parked in the active tab's centre: a preview the agent opened no longer sits on
+top of 검수 ("파일이 열려 있을 때 검수가 안 열림"), and it is the one way anything is shown large
+- the files tab's 카드로 크게 보기, the chat strips, the reopen chip, and now the assets tab;
+`remountArtifact` is a no-op kept for the shell; (4) 검수 no longer folds the agent pane
+automatically (`autoRight` removed from studio/index.ts - the manual toggles are the only fold);
+(5) the 에셋 tab's grid cells get a `⤢ 크게` button and a zoom-in cursor on the picture: the asset
+at full size in the same modal (bytes from the store via `thumbBytes`, passed as a ready `<img>`
+through the new `ArtifactSpec.node`). Smoke: the viewer checks target `.modalback .artifactview`
+and close through the modal's ✕. Plugin-only round - nothing to stage on the backend.
+
 **+ §1-42 (2026-09-06, 0.14.0 - the vision tool; plan `~/.claude/plans/serialized-watching-boole.md`,
 design `docs/10-vision-tool.md`)**: the agent can LOOK at images. `app/vision.py` mirrors
 websearch.py: modes native (the agent's own model sees the picture via `ToolReturn` +

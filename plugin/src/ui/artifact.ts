@@ -1,61 +1,44 @@
 /**
- * The artifact viewer - one card the agent can put in front of the user.
+ * The artifact viewer - one card the agent (or a tab) can put in front of
+ * the user: a picture, a markdown document, a text file.
  *
- * ONE global instance, re-parented into the current tab's centre pane the way
- * the agent panel is (agentpane.ts): an artifact belongs to the conversation,
- * and the conversation is global. It overlays the centre only - the left
- * column and the agent stay visible and usable, so the user keeps talking to
- * 히나 while reading.
+ * It is a MODAL now (§1-43). It used to be an overlay parked in the active
+ * tab's centre pane and re-parented on every tab switch; that left it sitting
+ * on top of whatever the tab wanted to show next - the 검수 tab most of all
+ * ("파일 미리보기를 한 뒤 검수를 눌러도 미리보기가 안 닫힌다"). A modal is above
+ * every tab, closes with ✕/Escape/backdrop, and is the one way an asset is
+ * shown large (the files tab, the chat strips, the assets tab all use it).
  *
  * Content is loaded from the FILE the event names, never carried in the
- * event: the file is the artifact (hina/<봇>/out/artifacts/…, or any space
- * path), so it survives the session, shows in the files tab, and closing the
- * card loses nothing. Markdown renders through the DOM-only whitelist with
- * space images; raw HTML never renders - that decision is the security line
- * (an AI-authored page executing with the plugin's iframe privileges), not a
- * missing feature.
- *
- * No leave-guard involvement: the viewer holds no edit state.
+ * event: the file is the artifact (projects/<봇>/out/…, or any space path),
+ * so it survives the session and closing the card loses nothing. Markdown
+ * renders through the DOM-only whitelist with space images; raw HTML never
+ * renders - that decision is the security line, not a missing feature.
  */
-import { el, clear } from './dom';
+import { el, clear, modal } from './dom';
 import { state } from '../state';
 import { renderMarkdown } from './markdown';
 import { workspaceImage } from './blobimg';
-import { showMobileCentre } from './panes';
 
 export interface ArtifactSpec {
   path: string;
   title: string;
   kind?: 'markdown' | 'image' | 'text';
+  /** A ready <img>/element to show instead of loading `path` (assets whose
+   * bytes are not a space path). */
+  node?: HTMLElement;
 }
 
-let view: HTMLElement | null = null;
 let current: ArtifactSpec | null = null;
+let closeCurrent: (() => void) | null = null;
 
-function build(): HTMLElement {
-  const body = el('div', { class: 'artifactbody' });
-  const title = el('span', { class: 'artifacttitle grow' });
-  const openFile = el('button', { class: 'ghost tiny', text: '파일 탭에서 열기' });
-  openFile.addEventListener('click', () => {
-    if (current) state.requestOpenFile(current.path);
-  });
-  const close = el('button', { class: 'ghost tiny', text: '닫기' });
-  close.addEventListener('click', () => closeArtifact());
-  return el('div', { class: 'artifactview' }, [
-    el('div', { class: 'artifacthead' }, [title, openFile, close]),
-    body,
-  ]);
-}
-
-async function load(spec: ArtifactSpec): Promise<void> {
-  if (!view) return;
-  const body = view.querySelector('.artifactbody') as HTMLElement;
-  const title = view.querySelector('.artifacttitle') as HTMLElement;
-  title.textContent = spec.title || spec.path;
-  title.title = spec.path;
+async function fill(body: HTMLElement, spec: ArtifactSpec): Promise<void> {
   clear(body);
+  if (spec.node) {
+    body.appendChild(spec.node);
+    return;
+  }
   body.appendChild(el('div', { class: 'hint', text: '여는 중입니다…' }));
-
   const kind = spec.kind
     ?? (/\.(png|jpe?g|gif|webp|avif|bmp)$/i.test(spec.path) ? 'image'
       : /\.(md|markdown)$/i.test(spec.path) ? 'markdown' : 'text');
@@ -79,43 +62,31 @@ async function load(spec: ArtifactSpec): Promise<void> {
   }
 }
 
-/** The centre pane of the active tab, where the overlay lives. */
-function centreOf(): HTMLElement | null {
-  return document.querySelector('.panel.active .split > .left');
-}
-
-export function showArtifact(spec: ArtifactSpec, opts: { flipMobile?: boolean } = {}): void {
+export function showArtifact(spec: ArtifactSpec, _opts: { flipMobile?: boolean } = {}): void {
+  closeArtifact();
   current = spec;
-  if (!view) view = build();
-  const centre = centreOf();
-  if (centre && view.parentElement !== centre) centre.appendChild(view);
-  view.style.display = '';
-  void load(spec);
-  // Arriving mid-turn never steals a phone's one view; a deliberate tap does.
-  if (opts.flipMobile) showMobileCentre();
+  const body = el('div', { class: 'artifactbody' });
+  const head = el('div', { class: 'artifacthead row' });
+  if (spec.path && !spec.node) {
+    const openFile = el('button', { class: 'ghost tiny', text: '파일 탭에서 열기' });
+    openFile.addEventListener('click', () => { closeArtifact(); state.requestOpenFile(spec.path); });
+    head.append(el('span', { class: 'hint grow', text: spec.path }), openFile);
+  }
+  const view = el('div', { class: 'artifactview' }, [head, body]);
+  closeCurrent = modal(spec.title || spec.path, view, { wide: true, cls: 'artifactmodal', onClose: () => { current = null; closeCurrent = null; } });
+  void fill(body, spec);
 }
 
 export function closeArtifact(): void {
-  if (view) {
-    view.style.display = 'none';
-    view.remove();
-  }
+  const c = closeCurrent;
+  closeCurrent = null;
   current = null;
+  c?.();
 }
 
-/**
- * Follow the active tab: called by the shell after a tab render. A tab whose
- * centre is missing (선택, 설정) parks the viewer; it reappears on the next
- * tab that has one.
- */
+/** Kept for the shell's tab-render hook: a modal needs no re-parenting. */
 export function remountArtifact(): void {
-  if (!view || !current) return;
-  const centre = centreOf();
-  if (!centre) {
-    view.remove();
-    return;
-  }
-  if (view.parentElement !== centre) centre.appendChild(view);
+  /* nothing to do - the viewer is a modal above every tab */
 }
 
 /** For the agent log's reopen chip. */
