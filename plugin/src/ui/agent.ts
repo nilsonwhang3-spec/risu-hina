@@ -1001,6 +1001,13 @@ export class AgentPanel {
     } catch (e) {
       finish('중단됨');
       bubble.appendChild(el('div', { class: 'notice err', text: msg(e) }));
+      // A dropped fetch (a phone's "Load failed") ends only THIS side: the
+      // backend may still be working the request. The next message stops
+      // that turn and keeps its request in the conversation (§1-56).
+      if (!abort.signal.aborted) {
+        bubble.appendChild(el('div', { class: 'hint', text:
+          '연결이 끊겼습니다. 백엔드에서는 이 요청이 계속 진행 중일 수 있습니다 — 다음 메시지를 보내면 그 턴을 멈추고, 끊긴 요청까지 대화에 남긴 채 이어갑니다.' }));
+      }
       void clientLog('error', 'agent chat failed', { error: String(e) });
     } finally {
       flushText();
