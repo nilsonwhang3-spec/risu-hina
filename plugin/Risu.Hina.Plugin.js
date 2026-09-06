@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.14.7
+//@display-name Risu Hina v0.14.8
 //@api 3.0
-//@version 0.14.7
+//@version 0.14.8
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -104,7 +104,7 @@
       this.tokenSafe = true;
       this.lastHealth = body;
       this.probeInfo = "";
-      this.gate = versionGate("0.14.7", String(body.version || ""));
+      this.gate = versionGate("0.14.8", String(body.version || ""));
       return body;
     }
     /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -5317,6 +5317,10 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
 
 /* The selector shows pictures WHOLE (like the history grid), never cropped
    to a square: the choice is made on the picture, so all of it has to show. */
+.folderrow { display: flex; align-items: center; }
+.folderrow .treebranch { flex: 1; min-width: 0; }
+.folderrow .folderedit { flex: 0 0 auto; margin-left: 2px; }
+.folderrow.on .treebranch { font-weight: 600; }
 .selgrid .assetpic { aspect-ratio: auto; min-height: 60px; }
 .selgrid .assetpic img { height: auto; object-fit: contain; }
 .tabsep { width: 1px; align-self: stretch; margin: 4px 6px; background: var(--borderc, #2b323f); }
@@ -10511,9 +10515,11 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       clear(treeMount5);
       const add = el("button", { class: "primary tiny", text: "\uC0C8 \uD56D\uBAA9" });
       add.addEventListener("click", () => void create2());
+      const addFolder = el("button", { class: "ghost tiny", text: "\uC0C8 \uD3F4\uB354" });
+      addFolder.addEventListener("click", () => void createFolder());
       const reloadBtn = el("button", { class: "ghost tiny", text: "\uC0C8\uB85C\uACE0\uCE68" });
       reloadBtn.addEventListener("click", () => void refreshNow7());
-      treeMount5.appendChild(el("div", { class: "treehead" }, [add, reloadBtn]));
+      treeMount5.appendChild(el("div", { class: "treehead" }, [add, addFolder, reloadBtn]));
       if (!entries.length) {
         for (const line of opts.emptyLines) {
           treeMount5.appendChild(el("div", { class: "hint", style: { padding: "4px 8px" }, text: line }));
@@ -10539,9 +10545,13 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         if (!byFolder.has(f)) byFolder.set(f, []);
         byFolder.get(f).push(e);
       }
+      if (!needle) {
+        for (const k of names.keys()) if (!byFolder.has(k)) byFolder.set(k, []);
+      }
       const named = [...byFolder.keys()].filter(Boolean);
       for (const [folder, group] of byFolder) {
         if (folder && named.length) {
+          const folderEntry = entries.find((x) => isFolder(x) && String(x.entry.key ?? "").trim() === folder);
           const label = names.get(folder) || shortId(folder);
           const isOpen = !!needle || openFolders3.has(folder);
           const caret = el("span", { text: isOpen ? "\u25BE" : "\u25B8" });
@@ -10550,6 +10560,16 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
             el("span", { class: "grow", text: label }),
             el("span", { class: "hint", text: String(group.length) })
           ]);
+          const edit = el("button", {
+            class: "ghost tiny folderedit",
+            text: folderEntry ? "\u270E" : "\uD3F4\uB354 \uB9CC\uB4E4\uAE30",
+            title: folderEntry ? "\uD3F4\uB354 \uC774\uB984\xB7\uC0AD\uC81C" : "RisuAI \uC5D0\uB294 \uC774 \uD3F4\uB354 \uD56D\uBAA9\uC774 \uC5C6\uC2B5\uB2C8\uB2E4 \u2014 \uB9CC\uB4E4\uC5B4\uC57C \uD3F4\uB354\uB85C \uBCF4\uC785\uB2C8\uB2E4"
+          });
+          edit.addEventListener("click", (ev) => {
+            ev.stopPropagation();
+            if (folderEntry) open4(folderEntry);
+            else void createFolder(folder, label);
+          });
           const kids = el("div", { class: "treekids" }, group.map((e) => entryRow(e, items5)));
           kids.style.display = isOpen ? "block" : "none";
           head.addEventListener("click", () => {
@@ -10559,11 +10579,61 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
             kids.style.display = now ? "block" : "none";
             caret.textContent = now ? "\u25BE" : "\u25B8";
           });
-          treeMount5.appendChild(el("div", {}, [head, kids]));
+          treeMount5.appendChild(el("div", {}, [el("div", { class: "folderrow" + (folderEntry && folderEntry.id === openId4 ? " on" : "") }, [head, edit]), kids]));
         } else {
           for (const e of group) treeMount5.appendChild(entryRow(e, items5));
         }
       }
+    }
+    function openFolder2(e) {
+      if (!viewMount6) return;
+      const entry = e.entry;
+      const key = String(entry.key ?? "").trim();
+      const comment = el("input", { value: String(entry.comment ?? entry.name ?? "") });
+      const members = entries.filter((x) => !isFolder(x) && folderOf(x) === key);
+      const save = el("button", { class: "primary", text: "\uC800\uC7A5" });
+      save.addEventListener("click", async () => {
+        save.disabled = true;
+        try {
+          await state.saveLore(e.id, { ...entry, mode: "folder", key: key || folderKey(), comment: comment.value, content: "" });
+          if (opts.scope === "global") void state.refreshBotChanges();
+          notice10(savedText("\uD3F4\uB354\uB97C"), "ok");
+          await refreshNow7();
+        } catch (err) {
+          notice10("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg6(err), "err");
+        } finally {
+          save.disabled = false;
+        }
+      });
+      const toEntry = el("button", { class: "ghost", text: "\uC77C\uBC18 \uD56D\uBAA9\uC73C\uB85C" });
+      toEntry.addEventListener("click", async () => {
+        try {
+          await state.saveLore(e.id, { ...entry, mode: "normal", comment: comment.value });
+          if (opts.scope === "global") void state.refreshBotChanges();
+          await refreshNow7();
+        } catch (err) {
+          notice10("\uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg6(err), "err");
+        }
+      });
+      const del = el("button", { class: "ghost" });
+      armed(del, "\uC0AD\uC81C", members.length ? `\uD56D\uBAA9 ${members.length}\uAC1C\uB294 \uB0A8\uC2B5\uB2C8\uB2E4. \uD3F4\uB354\uB9CC \uC9C0\uC6B8\uAE4C\uC694?` : "\uC815\uB9D0 \uC9C0\uC6B8\uAE4C\uC694?", async () => {
+        try {
+          await state.deleteLore(e.id);
+          if (opts.scope === "global") void state.refreshBotChanges();
+          openId4 = "";
+          if (viewMount6) clear(viewMount6);
+          await refreshNow7();
+        } catch (err) {
+          notice10("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg6(err), "err");
+        }
+      });
+      clear(viewMount6);
+      viewMount6.appendChild(el("div", { class: "card" }, [
+        el("h2", {}, [el("span", { text: "\uD3F4\uB354" })]),
+        el("label", { class: "field" }, [el("span", { text: "\uC774\uB984 (comment)" }), comment]),
+        el("div", { class: "hint", text: `\uD3F4\uB354 id (key): ${key || "(\uC800\uC7A5\uD558\uBA74 \uC0DD\uAE41\uB2C8\uB2E4)"} \xB7 \uD56D\uBAA9 ${members.length}\uAC1C \xB7 RisuAI \uB294 mode=folder \uC778 \uC774 \uD56D\uBAA9\uC774 \uC788\uC5B4\uC57C \uD3F4\uB354\uB85C \uBCF4\uC5EC \uC90D\uB2C8\uB2E4` }),
+        el("div", { class: "row" }, [save, toEntry, del])
+      ]));
     }
     function entryRow(e, all) {
       const siblings = all.filter((x) => folderOf(x) === folderOf(e));
@@ -10613,6 +10683,10 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       const was = openId4;
       openId4 = e.id;
       if (was !== e.id) drawTree5();
+      if (isFolder(e)) {
+        openFolder2(e);
+        return;
+      }
       const entry = e.entry;
       const keys = el("input", { value: String(entry.key ?? entry.keys ?? "") });
       const comment = el("input", { value: String(entry.comment ?? entry.name ?? "") });
@@ -10653,6 +10727,17 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           return o;
         })
       ]);
+      const toFolder = el("button", { class: "ghost", text: "\uD3F4\uB354\uB85C \uC804\uD658", title: "\uC774 \uD56D\uBAA9\uC744 \uD3F4\uB354 \uCEE8\uD14C\uC774\uB108(mode=folder)\uB85C \uBC14\uAFC9\uB2C8\uB2E4. \uBCF8\uBB38\uC740 \uBC84\uB824\uC9D1\uB2C8\uB2E4." });
+      toFolder.addEventListener("click", async () => {
+        try {
+          const key = String(entry.key ?? "").trim() || folderKey();
+          await state.saveLore(e.id, { ...entry, mode: "folder", key, comment: comment.value, content: "", alwaysActive: false });
+          if (opts.scope === "global") void state.refreshBotChanges();
+          await refreshNow7();
+        } catch (err) {
+          notice10("\uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg6(err), "err");
+        }
+      });
       const save = el("button", { class: "primary", text: "\uC800\uC7A5" });
       save.addEventListener("click", async () => {
         save.disabled = true;
@@ -10733,8 +10818,22 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         el("label", { class: "field" }, [el("span", { text: "\uB0B4\uC6A9" }), content]),
         metaChanged.length ? el("div", { class: "hint diffmeta", text: "\uAE30\uC900\uC120\uACFC \uB2E4\uB978 \uD56D\uBAA9 \u2014 " + metaChanged.join(" \xB7 ") }) : null,
         diff,
-        el("div", { class: "row" }, [save, del])
+        el("div", { class: "row" }, [save, del, el("span", { class: "spacer" }), toFolder])
       ]));
+    }
+    async function createFolder(key = "", name = "") {
+      try {
+        const id = await state.addLore(
+          { mode: "folder", key: key || folderKey(), comment: name || "\uC0C8 \uD3F4\uB354", content: "", alwaysActive: false, insertorder: 100 },
+          opts.scope
+        );
+        if (opts.scope === "global") void state.refreshBotChanges();
+        await refreshNow7();
+        const made = entries.find((e) => e.id === id);
+        if (made) open4(made);
+      } catch (e) {
+        notice10("\uD3F4\uB354\uB97C \uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg6(e), "err");
+      }
     }
     async function create2() {
       try {
@@ -10797,6 +10896,10 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       if (key) names.set(key, String(entry.comment || "").trim() || "\uC774\uB984 \uC5C6\uB294 \uD3F4\uB354");
     }
     return names;
+  }
+  function folderKey() {
+    const rnd = Math.random().toString(16).slice(2, 10) + Date.now().toString(16).slice(-4);
+    return "folder-" + rnd;
   }
   function shortId(id) {
     return id.length > 10 ? `\uD3F4\uB354 ${id.slice(0, 6)}\u2026` : `\uD3F4\uB354 ${id}`;
@@ -12786,7 +12889,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.14.7",
+            version: "0.14.8",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -13437,7 +13540,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.14.7"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.14.8"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -19110,6 +19213,9 @@ ${negative.value.trim()}
             clear(mount);
             mount.appendChild(el("div", { class: "assettype", text: "?" }));
           });
+          img.addEventListener("load", () => {
+            if (img.naturalWidth > 0 && img.naturalHeight > 0) mount.style.aspectRatio = `${img.naturalWidth} / ${img.naturalHeight}`;
+          });
           mount.appendChild(img);
         } catch {
           if (mount.isConnected && my === gen2) mount.appendChild(el("div", { class: "assettype", text: "?" }));
@@ -19117,6 +19223,7 @@ ${negative.value.trim()}
       })();
     }, unloadByDefault() ? () => {
       gen2 += 1;
+      if (!mount.style.aspectRatio && mount.offsetWidth && mount.offsetHeight) mount.style.aspectRatio = `${mount.offsetWidth} / ${mount.offsetHeight}`;
       clear(mount);
     } : void 0);
   }
@@ -19963,7 +20070,7 @@ ${negative.value.trim()}
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.14.7"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.14.8"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
@@ -20059,7 +20166,7 @@ ${negative.value.trim()}
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.14.7" }),
+        el("span", { class: "dim", text: "v0.14.8" }),
         healthEl,
         el("span", { class: "spacer" }),
         reload,
@@ -20376,6 +20483,6 @@ ${negative.value.trim()}
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.14.7"} loaded`);
+    console.log(`[risu-hina] v${"0.14.8"} loaded`);
   })();
 })();
