@@ -843,6 +843,14 @@ export function loadThumb(f: WorkspaceFile, mount: HTMLElement): void {
   // Fetched when the cell nears the viewport and, on a phone, dropped again
   // when it scrolls far away: a 400-candidate folder used to decode every
   // picture at once (§1-55).
+  //
+  // The cell must keep its height while the picture is away (§1-60): the
+  // review grid sizes cells by the picture (`aspect-ratio: auto`), so a
+  // cleared cell fell to its 60px minimum and grew back on return - every
+  // unload above the viewport moved the page, and iOS Safari has no scroll
+  // anchoring to hide it ("the next picture jumps to the top"). Once the
+  // picture has loaded its ratio is pinned on the cell as an inline
+  // aspect-ratio, which the clear leaves in place.
   let gen = 0;
   watchImage(mount, () => {
     const my = ++gen;
@@ -853,15 +861,24 @@ export function loadThumb(f: WorkspaceFile, mount: HTMLElement): void {
         const url = await blobUrl(f.path, f.modified ? String(f.modified) : '', { thumb: true, w: smallScreen() ? 360 : 720 });
         if (!mount.isConnected || my !== gen) return;
         clear(mount);
-        const img = el('img', { class: 'assetimg', src: url, alt: '' });
+        const img = el('img', { class: 'assetimg', src: url, alt: '' }) as HTMLImageElement;
         img.addEventListener('error', () => {
           clear(mount);
           mount.appendChild(el('div', { class: 'assettype', text: '?' }));
+        });
+        img.addEventListener('load', () => {
+          if (img.naturalWidth > 0 && img.naturalHeight > 0) mount.style.aspectRatio = `${img.naturalWidth} / ${img.naturalHeight}`;
         });
         mount.appendChild(img);
       } catch {
         if (mount.isConnected && my === gen) mount.appendChild(el('div', { class: 'assettype', text: '?' }));
       }
     })();
-  }, unloadByDefault() ? () => { gen += 1; clear(mount); } : undefined);
+  }, unloadByDefault() ? () => {
+    gen += 1;
+    // No ratio yet (the picture never finished loading): freeze the box as
+    // it is rather than let it collapse.
+    if (!mount.style.aspectRatio && mount.offsetWidth && mount.offsetHeight) mount.style.aspectRatio = `${mount.offsetWidth} / ${mount.offsetHeight}`;
+    clear(mount);
+  } : undefined);
 }
