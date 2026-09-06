@@ -111,6 +111,17 @@ mixed-cast multi-entry batch from the panel.** Released = **v0.10.0 BETA** (§1-
 **0.3.1 (night of 2026-08-25)** — the real reason `+` never appeared was not "same version" but **CORS**: RisuAI reads `//@update-url` with a browser `fetch`, and the redirect response from the release URL carries no CORS header. Changed `//@update-url` to
 `https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js`, and made `tools/bundle.py` write that file into the repository (included in the release commit). In the backend code only VERSION changed.
 
+**+ §1-52 (2026-09-06, unreleased) - the default name rule with fallbacks**: why a rule at all:
+the selector groups candidates of one scene, and the name is the only thing every image
+carries; the rule reads what our template writes (`{character}-{emotion}-{stamp}-{n}`). It
+used to return None for anything else (one token, a `-fix` suffix, `a--b--c.2`), which put the
+file in 못 읽음 - hidden from the groups. `_parse_default` now falls back in order: (1) stamp →
+[character-][emotion-]stamp[-n] as before (legacy first/last); (2) no stamp → strip the " (N)"
+copy suffix and a trailing sequence number in any spelling (-N _N .N " N"), character = first
+`-` token, emotion = the rest joined; (3) no `-` → the whole stem is the emotion, a group of its
+own. Never 못 읽음 under the default rule (a user regex that misses still reports). Tests in
+test_studio.py (copy suffix, double hyphens + dotted number, emotion_N, camera names).
+
 **+ §1-51 (2026-09-06, after 0.14.3, unreleased)**: (1) 검수 tools row: AI 재검수 / 제안 N건 모두
 적용 / 제안 지우기 are icon buttons (🔍 · ✔ N · 🧹, `aria-label` + title carry the words); (2) the
 chat's image/viewed strips go ABOVE the "…중입니다" row like text (a strip under it read as

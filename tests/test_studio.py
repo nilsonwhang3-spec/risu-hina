@@ -206,9 +206,24 @@ check("one token before the stamp is the emotion", by[solo].get("emotion") == "a
 check("a legacy three-token name reads character and emotion",
       by["히나-교복-happy-20260829-120000-2.png"].get("emotion") == "happy"
       and by["히나-교복-happy-20260829-120000-2.png"].get("character") == "히나")
-# The whole reason the app exists: names are not deterministic, so what did
-# NOT parse has to be reported rather than dropped.
-check("what did not parse is reported", r["unmatched"] == ["엉망진창.png"], str(r["unmatched"]))
+# §1-52: the default rule never gives up - a name without the delimiter is
+# its own group (the whole stem as the emotion) instead of 못 읽음.
+check("a delimiter-less name is its own group, not unmatched",
+      r["unmatched"] == [] and by["엉망진창.png"].get("emotion") == "엉망진창", str(r["unmatched"]) + str(by.get("엉망진창.png")))
+r2 = studio.parse_names(["Ichijou Midori-sex_doggy-1 (3).png", "Chiba Erika--fellatio--Chiba Erika_fellatio.2.png",
+                         "happy_3.png", "IMG 0007.png", "히나-happy-20260829-120000-2 (2).png"])
+b2 = {d["filename"]: d for d in r2["matched"]}
+check("copy suffix and sequence number are stripped",
+      b2["Ichijou Midori-sex_doggy-1 (3).png"] == {"character": "Ichijou Midori", "emotion": "sex_doggy", "n": "1", "filename": "Ichijou Midori-sex_doggy-1 (3).png"},
+      str(b2.get("Ichijou Midori-sex_doggy-1 (3).png")))
+check("double hyphens and a dotted number still read",
+      b2["Chiba Erika--fellatio--Chiba Erika_fellatio.2.png"].get("character") == "Chiba Erika"
+      and b2["Chiba Erika--fellatio--Chiba Erika_fellatio.2.png"].get("n") == "2",
+      str(b2.get("Chiba Erika--fellatio--Chiba Erika_fellatio.2.png")))
+check("emotion_N reads emotion and n", b2["happy_3.png"] == {"emotion": "happy", "n": "3", "filename": "happy_3.png"}, str(b2.get("happy_3.png")))
+check("a camera-style name groups by its word", b2["IMG 0007.png"].get("emotion") == "IMG" and b2["IMG 0007.png"].get("n") == "0007")
+check("a stamped name with a copy suffix keeps its n", b2["히나-happy-20260829-120000-2 (2).png"].get("n") == "2"
+      and b2["히나-happy-20260829-120000-2 (2).png"].get("emotion") == "happy")
 
 print("\ntest_scene_presets")
 sc = studio.read_scenes("scenes/기본.json")
@@ -456,15 +471,14 @@ for n in ("히나-happy-20260829-120000-1.png", "히나-happy-20260829-120000-2.
     (shots / n).write_bytes(PNG)
 
 g = studio.group("images/고르기")
-check("groups come from the filename", [x["key"] for x in g["groups"]] == ["happy", "sad"],
+check("groups come from the filename", [x["key"] for x in g["groups"]] == ["happy", "sad", "제멋대로 지은 이름"],
       str([x["key"] for x in g["groups"]]))
 check("candidates land in their group",
       len(g["groups"][0]["items"]) == 2 and len(g["groups"][1]["items"]) == 1)
-# The point of the whole design: a name the regex cannot read is SHOWN, not
-# dropped, because that is the file that needs attention.
-check("what did not parse is carried, not dropped",
-      [u["filename"] for u in g["unmatched"]] == ["제멋대로 지은 이름.png"],
-      str(g["unmatched"]))
+# §1-52: a free-form name is its own group under the default rule (a custom
+# regex that misses it still reports it as unmatched - see below).
+check("a free-form name is its own group", "제멋대로 지은 이름" in [x["key"] for x in g["groups"]] and g["unmatched"] == [],
+      str([x["key"] for x in g["groups"]]) + str(g["unmatched"]))
 
 # Composite group_by (§1-30): two captured tokens, grouped by both joined.
 gc = studio.group("images/고르기", r"^(?P<t1>[^-.]+)-(?P<t2>[^-.]+)", "t1+t2")
@@ -493,7 +507,7 @@ check("the one to fix goes to inpaint/", (sel_dir / "inpaint").is_dir() and
 # The empty .txt is what sends you back to generate just that slot.
 check("a group with nothing chosen leaves a placeholder",
       "히나-sad.txt" in names, str(names))
-check("the counts are reported", r["used"] == 1 and r["inpaint"] == 1 and r["empty"] == 1,
+check("the counts are reported", r["used"] == 1 and r["inpaint"] == 1 and r["empty"] == 2,
       json.dumps(r, ensure_ascii=False))
 
 print("\ntest_rep_priority")
