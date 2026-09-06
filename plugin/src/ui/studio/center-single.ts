@@ -7,10 +7,10 @@
  * pins it into the preview (←/→ walks the batch), and the live run stops
  * hijacking the view while a pin holds (라이브 releases it).
  */
-import { el, clear } from '../dom';
+import { el } from '../dom';
 import { blobUrl, safeWorkspacePath } from '../blobimg';
 import { S, hub, gen, persistGen, persistCentreTab, stateLabel } from './store';
-import { statusRow, tokenNotice, startRun, cancelRun, pendingCount, loadJobs,
+import { statusRow, tokenNotice, startRun, cancelRun, pendingCount,
          livePreview } from './gen';
 
 let previewBox: HTMLElement | null = null;
@@ -19,7 +19,6 @@ let captionEl: HTMLElement | null = null;
 let emptyEl: HTMLElement | null = null;
 let progressLine: HTMLElement | null = null;
 let runBtn: HTMLButtonElement | null = null;
-let stripBox: HTMLElement | null = null;
 /** What the <img> currently shows: a workspace path, or 'live'. */
 let shownKey = '';
 
@@ -54,12 +53,9 @@ export function drawSingle(mount: HTMLElement): void {
     progressLine,
   ]));
 
-  stripBox = el('div', { class: 'stripthumbs' });
-  mount.appendChild(stripBox);
 
   syncControls();
   syncPreview();
-  void drawStrip();
 }
 
 /** The 1장 run controls - count ± and 생성 시작/취소 - mounted by the left
@@ -99,7 +95,6 @@ export function singleTick(): void {
   if (!previewBox?.isConnected) return;
   syncControls();
   syncPreview();
-  void drawStrip();
 }
 
 /** The run button (left column) and the progress line (1장 tab) are patched
@@ -184,39 +179,7 @@ function walk(dir: 1 | -1): void {
   syncPreview();
 }
 
-/** The latest batch's results, as a click-to-pin strip (4.9). */
-async function drawStrip(): Promise<void> {
-  const box = stripBox;
-  if (!box?.isConnected) return;
-  let saved = S.queueJob?.payload?.saved ?? [];
-  let label = '이번 배치';
-  if (!saved.length) {
-    const jobs = await loadJobs();
-    const last = jobs.find((j) => (j.payload?.saved?.length ?? 0) > 0);
-    saved = last?.payload?.saved ?? [];
-    label = '최근 배치';
-  }
-  if (!box.isConnected) return;
-  clear(box);
-  if (!saved.length) return;
-  box.appendChild(el('div', { class: 'hint', style: { marginBottom: '4px' }, text: `${label} 결과 ${saved.length}장` }));
-  const row = el('div', { class: 'striprow' });
-  for (const path of saved.slice(-24)) {
-    const cell = el('button', { class: 'stripcell' + (path === (S.viewPath || shownKey) ? ' on' : ''), title: path });
-    void blobUrl(path, '', { thumb: true }).then((url) => {
-      if (!cell.isConnected) return;
-      cell.appendChild(el('img', { src: url, alt: path.split('/').pop() ?? path }));
-    }).catch(() => { /* the strip survives a missing file */ });
-    cell.addEventListener('click', () => {
-      S.viewPath = path;
-      S.viewList = [...saved];
-      syncPreview();
-      for (const c of row.children) c.classList.toggle('on', (c as HTMLElement).title === path);
-    });
-    row.appendChild(cell);
-  }
-  box.appendChild(row);
-}
+// (the per-tab result strip is gone, §1-40: the bottom 최근 생성 strip is the one list)
 
 /** Open one image big in the 1장 tab, ←/→ walking `list` (4.4a). The pin
  * keeps a mid-run click from being overwritten by the stream. */

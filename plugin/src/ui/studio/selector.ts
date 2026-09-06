@@ -21,7 +21,7 @@ import { el, segCtl, colPicker, clear, popover } from '../dom';
 import { blobUrl } from '../blobimg';
 import { state, type GroupItem, type SelectionMap, type SelectionState,
          type StudioGroups, type WorkspaceFile } from '../../state';
-import { S, hub, gen, msg, adjustReserve, type Folder, persistSelCols } from './store';
+import { S, hub, gen, msg, adjustReserve, countFiles, type Folder, persistSelCols } from './store';
 import { scenesOf } from './center-batch';
 
 let groups: StudioGroups | null = null;
@@ -126,6 +126,81 @@ function gridCols(): string {
  * the old folder until the tab was left and re-entered). */
 let groupsRev = -1;
 
+/** The chat's 검수 button asks for the flat view (§1-40). */
+export function setViewMode(v: 'all' | 'group'): void {
+  viewMode = v;
+  drill = '';
+}
+
+/** The 검수 ⇄ 썸네일 switch on the head row of both views (§1-40). */
+export function viewSwitch(current: 'inspect' | 'grid'): HTMLElement {
+  return segCtl([
+    { label: '검수', on: current === 'inspect', title: '그룹으로 비교하고 채택·수정·버림을 표시합니다',
+      pick: () => { if (current !== 'inspect') { S.centreMode = 'tab'; S.centreTab = 'inspect'; hub.drawCentre(); } } },
+    { label: '썸네일', on: current === 'grid', title: '폴더의 그림을 그대로 보고 고르고·옮기고·지웁니다',
+      pick: () => { if (current !== 'grid') { S.centreMode = 'folder'; hub.drawCentre(); } } },
+  ]);
+}
+
+/** A `selected/` folder is the answer, not the question (§1-40): the chosen
+ * images as a gallery with 봇에 반영, the empty slots listed, the inpaint/
+ * folder named - not the group selector asking to choose again. */
+export function drawSelectedGallery(node: Folder): void {
+  if (!S.viewMount) return;
+  const viewMount = S.viewMount;
+  const pics = node.files.filter((f) => /\.(png|jpe?g|webp|gif|avif)$/i.test(f.name));
+  const slots = node.files.filter((f) => /\.txt$/i.test(f.name)).map((f) => f.name.replace(/\.txt$/i, ''));
+  const inpaint = node.children.find((c) => c.name === 'inpaint');
+  const head = el('div', { class: 'row selhead', style: { marginBottom: '6px' } });
+  const back = el('button', { class: 'ghost tiny', text: '‹ 후보 폴더', title: '이 selected 가 나온 폴더로 돌아갑니다' });
+  back.addEventListener('click', () => {
+    S.selected = node.path.slice(0, node.path.lastIndexOf('/'));
+    hub.drawLeft(); hub.drawCentre();
+  });
+  head.append(back, el('span', { class: 'sectiontitle path grow', title: node.path,
+    text: `${node.path} · 채택 ${pics.length}장` + (slots.length ? ` · 빈 슬롯 ${slots.length}` : '') }));
+  head.appendChild(viewSwitch('inspect'));
+  viewMount.appendChild(head);
+  const bar = el('div', { class: 'row seltools', style: { marginBottom: '8px' } }, [
+    el('span', { class: 'hint grow', text: '애셋 채택으로 정리된 결과입니다. 봇에 반영하면 이 그림들이 감정 이미지로 제안됩니다.' }),
+  ]);
+  const adopt = el('button', { class: 'primary tiny', text: '봇에 반영' }) as HTMLButtonElement;
+  adopt.title = state.activeCharKey ? '이 폴더의 그림을 이 봇의 감정 이미지로 넣자고 제안합니다' : 'RisuAI에서 봇을 열어야 반영할 수 있습니다';
+  adopt.disabled = !state.activeCharKey || !pics.length;
+  adopt.addEventListener('click', async () => {
+    adopt.disabled = true;
+    try {
+      const r = await state.studio.stage(state.activeCharKey, pics.map((f) => f.path));
+      hub.notice(`${r.staged.length}장을 확인했습니다. 히나에게 "채택한 이미지들을 감정 이미지로 넣어 줘" 라고 하면 승인 후 카드에 붙습니다.`
+        + (r.failed.length ? ` (${r.failed.length}장 확인 실패)` : ''), 'ok');
+    } catch (e) {
+      hub.notice('옮기지 못했습니다: ' + msg(e), 'err');
+    } finally { adopt.disabled = !state.activeCharKey; }
+  });
+  bar.appendChild(adopt);
+  viewMount.appendChild(bar);
+  if (slots.length) {
+    viewMount.appendChild(el('div', { class: 'row', style: { marginBottom: '8px' } }, [
+      el('span', { class: 'badge warn', text: `빈 슬롯 ${slots.length}` }),
+      el('span', { class: 'hint grow', text: slots.join(', ') + ' — 채택이 없던 그룹입니다' }),
+    ]));
+  }
+  const grid = el('div', { class: 'agrid selgrid', style: { gridTemplateColumns: gridCols() } });
+  for (const f of pics) {
+    const pic = el('div', { class: 'assetpic' });
+    const cell = el('div', { class: 'fcell selcell picked', title: f.path }, [pic, el('div', { class: 'fname', text: f.name })]);
+    void loadThumb(f, pic);
+    grid.appendChild(cell);
+  }
+  viewMount.appendChild(grid);
+  if (!pics.length) viewMount.appendChild(el('div', { class: 'empty', text: '채택된 그림이 없습니다.' }));
+  if (inpaint) {
+    const open = el('button', { class: 'ghost tiny', text: `inpaint/ (수정 필요 ${countFiles(inpaint)}장) 열기` });
+    open.addEventListener('click', () => { S.selected = inpaint.path; S.open.add(node.path); hub.drawLeft(); hub.drawCentre(); });
+    viewMount.appendChild(el('div', { class: 'row', style: { marginTop: '10px' } }, [open]));
+  }
+}
+
 /** Whether the loaded groups belong to this folder AND are current -
  * drawCentre's gate. */
 export function hasGroups(folder: string): boolean {
@@ -190,10 +265,11 @@ export function drawSelector(node: Folder): void {
   const tidy = el('button', { class: 'ghost tiny', text: '정리', title: '폴더 정리 화면 (선택·이동·삭제·업로드)' });
   tidy.addEventListener('click', () => { S.centreMode = 'folder'; hub.drawCentre(); });
   head.append(
-    tidy,
+    viewSwitch('inspect'),
     el('span', { class: 'sectiontitle path grow', title: node.path,
                  text: `${node.path} · ${g.total}장` }),
   );
+  void tidy;
   viewMount.appendChild(head);
   const bar = el('div', { class: 'row seltools', style: { marginBottom: '8px' } });
   const mkView = (v: 'all' | 'group' | 'rep', label: string) => ({

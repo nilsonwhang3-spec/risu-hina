@@ -16,6 +16,8 @@ import { installDrag, installDrop, type Incoming } from '../tree';
 import { S, hub, IMAGE_RE, OUTPUT_ROOT, persistCols, countFiles, fmtSize, msg, type Folder } from './store';
 import { openImage } from './center-single';
 import { setClip, hasClip, pasteIn, clipClass } from './left-output';
+import { viewSwitch } from './selector';
+import { blobUrl } from '../blobimg';
 
 const selection = new Set<string>();
 let anchorPath = '';
@@ -44,11 +46,9 @@ export function drawFolder(node: Folder): void {
     if (i < parts.length - 1) crumb.appendChild(el('span', { class: 'hint', text: '›' }));
   }
 
-  const close = el('button', { class: 'ghost tiny', text: '← 검수', title: '검수 화면으로 돌아갑니다' });
-  close.addEventListener('click', () => { S.centreMode = 'tab'; S.centreTab = 'inspect'; hub.drawCentre(); });
-  const pick = el('button', { class: 'primary tiny', text: '검수하기',
-                              title: '이 폴더의 후보들을 그룹으로 비교하고 채택합니다' });
-  pick.addEventListener('click', () => { S.centreMode = 'tab'; S.centreTab = 'inspect'; hub.drawCentre(); });
+  // The 검수 ⇄ 썸네일 switch, the same control the selector's head carries (§1-40).
+  const close = viewSwitch('grid');
+  const pick = el('span');
   const mkdir = el('button', { class: 'ghost tiny', text: '＋ 폴더' }) as HTMLButtonElement;
   mkdir.addEventListener('click', () => {
     namePopover(mkdir, {
@@ -90,7 +90,20 @@ export function drawFolder(node: Folder): void {
     selInfo, selAll, selNone, del, mkdir, cols, pick,
   ]));
   viewMount.appendChild(el('div', { class: 'hint', style: { marginBottom: '8px' },
-    text: `파일 ${node.files.length} · 하위 폴더 ${node.children.length} — 클릭으로 선택 (Shift 범위) · 두 번 클릭으로 크게 · 끌어서 폴더/왼쪽 트리로 이동` }));
+    text: `파일 ${node.files.length} · 하위 폴더 ${node.children.length} — 클릭으로 선택하면 위에 크게 보입니다 (Shift 범위) · 두 번 클릭으로 1장 탭에 · 끌어서 폴더/왼쪽 트리로 이동` }));
+  // The picked image, large, above the grid (§1-40: "그림 누르면 선택된 그림
+  // 보여주기"). Patched on click, never rebuilt.
+  const bigPick = el('div', { class: 'bigpick', style: { display: 'none' } });
+  const bigImg = el('img', { alt: '' }) as HTMLImageElement;
+  const bigName = el('div', { class: 'hint previewname' });
+  bigPick.append(bigImg, bigName);
+  viewMount.appendChild(bigPick);
+  const showBig = (path: string): void => {
+    bigName.textContent = path.split('/').pop() ?? path;
+    bigPick.style.display = '';
+    void blobUrl(path, '', { thumb: true, w: 1024 }).then((url) => { if (bigPick.isConnected) bigImg.src = url; })
+      .catch(() => { bigPick.style.display = 'none'; });
+  };
 
   const syncBar = () => {
     selInfo.textContent = selection.size ? `${selection.size}개 선택` : '';
@@ -190,6 +203,7 @@ export function drawFolder(node: Folder): void {
         anchorPath = f.path;
       }
       syncPicked();
+      showBig(f.path);
     });
     cell.addEventListener('dblclick', () => openImage(f.path, imagePaths));
     // Dragging a selected cell moves the whole selection.

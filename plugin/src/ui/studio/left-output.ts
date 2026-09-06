@@ -53,30 +53,85 @@ function isRoot(path: string): boolean {
   return path === (S.outputRoot?.path ?? 'studio/output') || S.extraRoots.some((r) => r.path === path);
 }
 
-/** Ctrl+C / Ctrl+X on the selected folder, Ctrl+V into it (§1-35). */
+/** Ctrl+C / Ctrl+X on the selected folder(s), Ctrl+V into the open one,
+ * Delete → the two-menu confirm (§1-35, §1-40). */
 function onTreeKey(ev: KeyboardEvent): void {
   const ctrl = ev.ctrlKey || ev.metaKey;
-  if (!ctrl) return;
   const k = ev.key.toLowerCase();
   const sel = S.selected;
-  if ((k === 'c' || k === 'x') && sel && !isRoot(sel)) {
+  const many = treeSel.size > 1 ? [...treeSel].filter((p) => !isRoot(p)) : (sel && !isRoot(sel) ? [sel] : []);
+  if (ctrl && (k === 'c' || k === 'x') && many.length) {
     ev.preventDefault();
-    setClip(k === 'c' ? 'copy' : 'cut', [sel]);
-  } else if (k === 'v' && clip && sel) {
+    setClip(k === 'c' ? 'copy' : 'cut', many);
+  } else if (ctrl && k === 'v' && clip && sel) {
     ev.preventDefault();
     void pasteIn(sel);
+  } else if ((ev.key === 'Delete' || ev.key === 'Backspace') && many.length) {
+    ev.preventDefault();
+    const row = (ev.currentTarget as HTMLElement).querySelector<HTMLElement>('.treebranch.on');
+    const r = row?.getBoundingClientRect();
+    confirmDelete(many, { clientX: (r?.left ?? 40) + 40, clientY: (r?.bottom ?? 60) + 4 });
+  } else if (ev.key === 'Escape' && treeSel.size > 1) {
+    treeSel = new Set([sel]);
+    hub.drawLeft();
   }
+}
+
+/** Tree multi-select (Ctrl toggles, Shift ranges over the rows as drawn,
+ * §1-40) - the files tab's grammar. A plain click opens the folder and
+ * resets the set to it. The context menu's verbs act on the whole set. */
+let treeSel = new Set<string>();
+let treeAnchor = '';
+
+/** Rows top-to-bottom as drawn (S.open decides what is unfolded). */
+function visiblePaths(): string[] {
+  const out: string[] = [];
+  const walk = (n: Folder): void => {
+    out.push(n.path);
+    if (S.open.has(n.path)) for (const c of n.children) walk(c);
+  };
+  if (S.outputRoot) walk(S.outputRoot);
+  for (const r of S.extraRoots) walk(r);
+  return out;
+}
+
+/** The paths a verb acts on: the multi-selection when the clicked row is in
+ * it, else that row alone. */
+function targets(node: TreeNode): string[] {
+  return treeSel.size > 1 && treeSel.has(node.path) ? [...treeSel] : [node.path];
 }
 
 function spec(): TreeSpec {
   return {
     expanded: S.open,
-    // The highlight follows the folder only while the centre shows it.
-    selected: new Set(S.selectedFile ? [] : [S.selected]),
-    onOpen(node) {
+    // The highlight follows the folder(s): the multi-selection, or the one
+    // the centre shows.
+    selected: treeSel.size > 1 ? treeSel : new Set(S.selectedFile ? [] : [S.selected]),
+    onOpen(node, ev) {
+      if (ev.ctrlKey || ev.metaKey) {
+        if (!treeSel.size) treeSel.add(S.selected);
+        if (treeSel.has(node.path)) treeSel.delete(node.path); else treeSel.add(node.path);
+        if (!treeSel.size) treeSel.add(node.path);
+        treeAnchor = node.path;
+        hub.drawLeft();
+        return;
+      }
+      if (ev.shiftKey && (treeAnchor || S.selected)) {
+        const vis = visiblePaths();
+        const a = vis.indexOf(treeAnchor || S.selected);
+        const b = vis.indexOf(node.path);
+        if (a !== -1 && b !== -1) {
+          treeSel = new Set(vis.slice(Math.min(a, b), Math.max(a, b) + 1));
+          hub.drawLeft();
+          return;
+        }
+      }
+      treeSel = new Set([node.path]);
+      treeAnchor = node.path;
       openFolder(node);
     },
     onContext(node, ev) {
+      if (!treeSel.has(node.path)) { treeSel = new Set([node.path]); treeAnchor = node.path; hub.drawLeft(); }
       openOutputMenu(node, ev);
     },
     onToggle(node) {
@@ -115,25 +170,29 @@ function openFolder(node: TreeNode): void {
 }
 
 function openOutputMenu(node: TreeNode, ev: MouseEvent): void {
-  const isRoot = node.path === (S.outputRoot?.path ?? 'studio/output');
+  const paths = targets(node).filter((p) => !isRoot(p));
+  const many = paths.length > 1;
+  const rootHere = isRoot(node.path);
   menuAt(ev.clientX, ev.clientY, [
-    { label: '검수 열기', onClick: () => openFolder(node) },
-    { label: '새 폴더', onClick: () => newFolderIn(node.path) },
-    { label: '이름 바꾸기', disabled: isRoot, onClick: () => renameFolder(node) },
+    { label: '검수 열기', disabled: many, onClick: () => openFolder(node) },
+    { label: '새 폴더', disabled: many, onClick: () => newFolderIn(node.path) },
+    { label: '이름 바꾸기', disabled: many || rootHere, onClick: () => renameFolder(node) },
     null,
-    { label: '복사', disabled: isRoot,
-      onClick: () => { clip = { op: 'copy', paths: [node.path] }; hub.notice('복사했습니다 — 붙여넣을 폴더에서 우클릭하세요.'); } },
-    { label: '잘라내기', disabled: isRoot,
-      onClick: () => { clip = { op: 'cut', paths: [node.path] }; hub.notice('잘라냈습니다 — 붙여넣을 폴더에서 우클릭하세요.'); } },
-    { label: clip ? `붙여넣기 (${clip.paths.length})` : '붙여넣기', disabled: !clip,
+    { label: many ? `복사 (${paths.length})` : '복사', disabled: !paths.length,
+      onClick: () => setClip('copy', paths) },
+    { label: many ? `잘라내기 (${paths.length})` : '잘라내기', disabled: !paths.length,
+      onClick: () => setClip('cut', paths) },
+    { label: clip ? `붙여넣기 (${clip.paths.length})` : '붙여넣기', disabled: !clip || many,
       onClick: () => void pasteIn(node.path) },
     null,
-    { label: '경로 복사', onClick: () => { copyToClipboard(node.path); hub.notice('경로를 복사했습니다.', 'ok'); } },
-    { label: '내려받기 (zip)', onClick: () => void zipFolder(node.path) },
+    { label: '경로 복사', disabled: many, onClick: () => { copyToClipboard(node.path); hub.notice('경로를 복사했습니다.', 'ok'); } },
+    { label: many ? `내려받기 (${paths.length}, zip)` : '내려받기 (zip)', disabled: !paths.length,
+      onClick: () => void zipFolders(paths) },
     null,
     // The two-step confirm as a second one-item menu: no window.confirm in
     // the sandboxed iframe (the file tree's convention).
-    { label: '삭제…', danger: true, disabled: isRoot, onClick: () => confirmDelete(node.path, ev) },
+    { label: many ? `삭제 (${paths.length})…` : '삭제…', danger: true, disabled: !paths.length,
+      onClick: () => confirmDelete(paths, ev) },
   ]);
 }
 
@@ -198,29 +257,36 @@ export async function pasteIn(target: string): Promise<void> {
 }
 
 async function zipFolder(path: string): Promise<void> {
+  await zipFolders([path]);
+}
+
+async function zipFolders(paths: string[]): Promise<void> {
   try {
-    const bytes = await state.downloadZip([path], path.split('/').pop() ?? 'output');
+    const name = paths.length === 1 ? (paths[0].split('/').pop() ?? 'output') : 'output';
+    const bytes = await state.downloadZip(paths, name);
     hub.notice(`${fmtSize(bytes)} zip 을 브라우저 다운로드로 넘겼습니다.`, 'ok');
   } catch (e) {
     hub.notice('내려받지 못했습니다: ' + msg(e), 'err');
   }
 }
 
-function confirmDelete(path: string, ev: { clientX: number; clientY: number }): void {
+function confirmDelete(paths: string[], ev: { clientX: number; clientY: number }): void {
   menuAt(ev.clientX, ev.clientY, [
-    { label: '정말 삭제 (폴더째, 안의 파일 포함)', danger: true, onClick: () => void doDelete(path) },
+    { label: `정말 삭제 (${paths.length}개 폴더째, 안의 파일 포함)`, danger: true, onClick: () => void doDelete(paths) },
   ]);
 }
 
-async function doDelete(path: string): Promise<void> {
+async function doDelete(paths: string[]): Promise<void> {
   try {
-    const r = await state.deleteFiles([path]);
-    hub.notice(r.failed.length ? `지우지 못했습니다 — ${r.failed[0].error}` : '지웠습니다.',
-               r.failed.length ? 'err' : 'ok');
+    const r = await state.deleteFiles(paths);
+    hub.notice(r.failed.length
+      ? `${r.done}개를 지웠습니다. ${r.failed.length}개 실패 — ${r.failed[0].error}`
+      : `${r.done}개를 지웠습니다.`, r.failed.length ? 'err' : 'ok');
   } catch (e) {
     hub.notice('지우지 못했습니다: ' + msg(e), 'err');
   }
-  if (S.selected === path || S.selected.startsWith(path + '/')) S.selected = S.outputRoot?.path ?? 'studio/output';
+  if (paths.some((p) => S.selected === p || S.selected.startsWith(p + '/'))) S.selected = S.outputRoot?.path ?? 'studio/output';
+  treeSel = new Set([S.selected]);
   hub.touchQuiet();
   await hub.refresh();
 }

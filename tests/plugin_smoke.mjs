@@ -2842,11 +2842,12 @@ console.log('\ntest_studio_selector');
   check('the left column is held on OUTPUT',
         [...document.querySelectorAll('.panel.active .studiotabs .tab')]
           .some((b) => b.classList.contains('on') && /OUTPUT/.test(b.textContent || '')));
-  clickButton(document.querySelector('.panel.active .left'), '정리');
+  // §1-40: 검수 ⇄ 썸네일 is one switch on the head row.
+  clickButton(document.querySelector('.panel.active .left'), '썸네일');
   await settle(500);
-  check('정리 opens the tidy-up grid', !!document.querySelector('.panel.active .foldergrid'),
+  check('썸네일 opens the tidy-up grid', !!document.querySelector('.panel.active .foldergrid'),
         text().slice(0, 160));
-  clickButton(document.querySelector('.panel.active .left'), '검수하기');
+  clickButton(document.querySelector('.panel.active .left .segctl'), '검수'); // §1-40: the head switch
   await settle(1200);
   check('애셋 채택 is the export and 봇에 반영 waits for a selected/ folder',
         !!findButton(document.querySelector('.panel.active .left'), '애셋 채택')
