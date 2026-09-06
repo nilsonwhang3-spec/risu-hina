@@ -15,10 +15,10 @@
  * and then proposes should read as a sentence, and repeats collapse to ×N so a
  * long run does not become a wall of identical chips.
  */
-import { el, clear, popover, TOOL_GLYPH, PAPER_PLANE, ICON } from './dom';
+import { el, clear, popover, TOOL_GLYPH, PAPER_PLANE, ICON, pollWhileVisible } from './dom';
 import { state, type StagedEdit, type AgentSessionInfo, type PendingAction } from '../state';
 import { renderMarkdown } from './markdown';
-import { workspaceImage, evictBlob } from './blobimg';
+import { workspaceImage, evictBlob, smallScreen } from './blobimg';
 import { showArtifact } from './artifact';
 import { clientLog } from '../transport';
 import { activeHalf } from './shell';
@@ -250,7 +250,12 @@ export class AgentPanel {
     this.loaded = false;
   }
 
-  private async render(sessionId?: string): Promise<void> {
+  /** How many past messages one open parses: a phone reloads the whole
+   * page when the tab runs out of memory, so it starts small and pages in
+   * on request (§1-55). */
+  private static pageSize(): number { return smallScreen() ? 40 : 200; }
+
+  private async render(sessionId?: string, limit = AgentPanel.pageSize()): Promise<void> {
     clear(this.log);
     // A session is bound to a chat (the workspace, the approval queue, the
     // scope DB all hang off it). With none selected the backend can only say
@@ -270,7 +275,7 @@ export class AgentPanel {
     const loading = el('div', { class: 'hint agentloading', text: '대화를 불러오는 중입니다…' });
     this.log.appendChild(loading);
     try {
-      const s = await state.agentSession(sessionId);
+      const s = await state.agentSession(sessionId, limit);
       loading.remove();
       if (!s.agentReady) {
         this.status.textContent = '';
@@ -287,6 +292,12 @@ export class AgentPanel {
       this.send.disabled = false;
       this.status.textContent = s.session ? '' : '새 대화';
 
+      const hidden = Math.max(0, (s.messagesTotal ?? s.messages.length) - s.messages.length);
+      if (hidden > 0) {
+        const more = el('button', { class: 'ghost tiny', text: `이전 메시지 ${hidden}개 더 보기` });
+        more.addEventListener('click', () => { void this.render(s.session?.sessionId, limit + AgentPanel.pageSize() * 4); });
+        this.log.appendChild(el('div', { class: 'bubble note' }, [more]));
+      }
       for (const m of s.messages) {
         if (m.role === 'user') this.addBubble('user', String(m.content ?? ''));
         else if (m.role === 'assistant') {
@@ -613,12 +624,14 @@ export class AgentPanel {
     const node = el('div', { class: `bubble ${role}` }, [body]);
     if (role === 'assistant') node.appendChild(this.costLine(usage, cost));
     this.log.appendChild(node);
+    this.trimLog();
     return body;
   }
 
   /** A one-line event in the conversation (an approval ran, a run was stopped). */
   private note(text: string, kind: 'ok' | 'err' | '' = ''): void {
     this.log.appendChild(el('div', { class: 'bubble note' + (kind ? ' ' + kind : ''), text }));
+    this.trimLog();
     this.scroll();
   }
 
@@ -695,6 +708,7 @@ export class AgentPanel {
     // 중단: aborts the stream; the backend saves the prompt and what arrived
     // so far into the history, so the next turn still knows what was asked.
     const abort = new AbortController();
+    this.abortCtl = abort;
     const stopBtn = el('button', { class: 'ghost tiny stopbtn', text: '중단', title: '이 턴을 중단합니다' });
     stopBtn.addEventListener('click', () => { void state.stopAgent(); abort.abort(); stopBtn.disabled = true; });
     const thinking = el('div', { class: 'thinking' }, [
@@ -789,19 +803,36 @@ export class AgentPanel {
       tracker = null;
       this.scroll();
     };
-    const permitPoll = setInterval(async () => {
-      try {
-        for (const p of await state.permits()) {
-          if (shown.has(p.id)) continue;
-          shown.add(p.id);
-          askPermit(p);
-        }
-      } catch { /* the stream reports real failures */ }
+    const stopPermitPoll = pollWhileVisible(() => {
+      void (async () => {
+        try {
+          for (const p of await state.permits()) {
+            if (shown.has(p.id)) continue;
+            shown.add(p.id);
+            askPermit(p);
+          }
+        } catch { /* the stream reports real failures */ }
+      })();
     }, 1500);
+
+    // Streamed prose is re-rendered as markdown at most every 120ms, not per
+    // token: a 30KB answer used to rebuild its whole DOM thousands of times
+    // (§1-55). Any other event flushes first so order is kept.
+    let textTimer: ReturnType<typeof setTimeout> | null = null;
+    let textTarget: HTMLElement | null = null;
+    const flushText = (): void => {
+      if (textTimer !== null) { clearTimeout(textTimer); textTimer = null; }
+      if (textTarget) { setMarkdown(textTarget, textAcc); this.scroll(); }
+    };
+    const scheduleText = (node: HTMLElement): void => {
+      if (textTarget !== node) { flushText(); textTarget = node; }
+      if (textTimer === null) textTimer = setTimeout(flushText, 120);
+    };
 
     try {
       for await (const ev of state.agentChat(prompt, abort.signal)) {
         const e = ev as Record<string, unknown>;
+        if (e.type !== 'text') flushText();
         switch (e.type) {
           case 'text': {
             const node = proseSegment();
@@ -809,8 +840,7 @@ export class AgentPanel {
             // Text is arriving, so the indicator would only repeat "alive";
             // it comes back the moment the model turns to a tool again.
             setThinking(false);
-            setMarkdown(node, textAcc);
-            this.scroll();
+            scheduleText(node);
             break;
           }
           case 'tool': {
@@ -973,7 +1003,9 @@ export class AgentPanel {
       bubble.appendChild(el('div', { class: 'notice err', text: msg(e) }));
       void clientLog('error', 'agent chat failed', { error: String(e) });
     } finally {
-      clearInterval(permitPoll);
+      flushText();
+      stopPermitPoll();
+      this.abortCtl = null;
       // A turn that ended without the clock being stopped (an early return,
       // a stream that closed without 'done') still gets its footer.
       if (this.timer !== null) finish('종료');
@@ -981,6 +1013,42 @@ export class AgentPanel {
       this.send.disabled = false;
       this.scroll();
     }
+  }
+
+  /** The turn in flight, so a teardown can stop it. */
+  private abortCtl: AbortController | null = null;
+
+  /** Take the panel down for good: the running turn, its clock, its DOM. */
+  destroy(): void {
+    try { this.abortCtl?.abort(); } catch { /* not running */ }
+    this.clearTimer();
+    this.root.remove();
+  }
+
+  /** How many entries the log keeps on screen: the panel lives as long as
+   * the page, and a long afternoon of tool cards and thumbnails is what a
+   * phone runs out of memory on (§1-55). */
+  private static maxLog(): number { return smallScreen() ? 60 : 300; }
+
+  /** Fold the oldest entries once the log is past its cap. */
+  private trimLog(): void {
+    const max = AgentPanel.maxLog();
+    let extra = this.log.childElementCount - max;
+    if (extra <= 0) return;
+    let fold = this.log.querySelector(':scope > .foldnote') as HTMLElement | null;
+    let n = fold ? Number(fold.dataset.n || 0) : 0;
+    while (extra-- > 0) {
+      const first = fold ? fold.nextElementSibling : this.log.firstElementChild;
+      if (!first) break;
+      first.remove();
+      n += 1;
+    }
+    if (!fold) {
+      fold = el('div', { class: 'bubble note foldnote' });
+      this.log.insertBefore(fold, this.log.firstChild);
+    }
+    fold.dataset.n = String(n);
+    fold.textContent = `이전 항목 ${n}개를 접었습니다 (메모리) — 대화 목록에서 열면 다시 볼 수 있습니다`;
   }
 
   private async refreshStaged(): Promise<void> {

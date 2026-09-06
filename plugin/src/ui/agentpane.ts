@@ -86,5 +86,8 @@ export function mountAgent(into: HTMLElement): void {
 }
 
 export function resetAgentPane(): void {
+  // The old panel's DOM, timers and stream go with it - it used to be
+  // dropped from the variable and left in whichever column held it (§1-55).
+  panel?.destroy();
   panel = null;
 }

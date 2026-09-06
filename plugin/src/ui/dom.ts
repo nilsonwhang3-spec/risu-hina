@@ -640,3 +640,52 @@ export function popover(anchor: HTMLElement, content: HTMLElement): () => void {
   }, 0);
   return close;
 }
+
+// --- timers that respect the page's visibility (§1-55) ---------------------------
+
+/** Every running poll, so the `mem` log line can count them. */
+const polls = new Set<object>();
+
+/**
+ * `setInterval` that stops while the page is hidden and starts again (with
+ * one immediate tick) when it shows, and that skips a tick `wanted()` says
+ * is pointless. A backgrounded phone used to keep every poll running - the
+ * fetches and DOM writes landed exactly when iOS decides which tab to evict.
+ * Returns the disposer.
+ */
+export function pollWhileVisible(fn: () => void, ms: number, wanted: () => boolean = () => true): () => void {
+  let timer: ReturnType<typeof setInterval> | null = null;
+  const token = {};
+  const hidden = (): boolean => {
+    try { return document.visibilityState === 'hidden'; } catch { return false; }
+  };
+  const tick = (): void => {
+    if (hidden() || !wanted()) return;
+    fn();
+  };
+  const start = (): void => {
+    if (timer !== null) return;
+    timer = setInterval(tick, ms);
+    polls.add(token);
+  };
+  const stop = (): void => {
+    if (timer === null) return;
+    clearInterval(timer);
+    timer = null;
+    polls.delete(token);
+  };
+  const onVis = (): void => {
+    if (hidden()) stop();
+    else { start(); tick(); }
+  };
+  try { document.addEventListener('visibilitychange', onVis); } catch { /* no document events */ }
+  if (!hidden()) start();
+  return () => {
+    stop();
+    try { document.removeEventListener('visibilitychange', onVis); } catch { /* ignore */ }
+  };
+}
+
+export function activePolls(): number {
+  return polls.size;
+}

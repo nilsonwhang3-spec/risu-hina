@@ -371,8 +371,18 @@ export function attachHilite(ta: HTMLTextAreaElement, opts: HiliteOpts): void {
   ta.addEventListener('input', render);
   ta.addEventListener('scroll', syncScroll);
   try {
-    // The drag-resize handle changes the box without an input event.
-    new ResizeObserver(render).observe(ta);
+    // The drag-resize handle changes the box without an input event. One
+    // observer per textarea: decorating it again replaces the old one, and
+    // an observer whose textarea left the page disconnects itself (§1-55).
+    const slot = ta as HTMLTextAreaElement & { __hinaRo?: ResizeObserver; __hinaMounted?: boolean };
+    slot.__hinaRo?.disconnect();
+    const ro = new ResizeObserver(() => {
+      if (ta.isConnected) slot.__hinaMounted = true;
+      else if (slot.__hinaMounted) { ro.disconnect(); return; }
+      render();
+    });
+    slot.__hinaRo = ro;
+    ro.observe(ta);
   } catch { /* no ResizeObserver in the test DOM */ }
   render();
 

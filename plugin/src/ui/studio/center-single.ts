@@ -11,7 +11,7 @@ import { el } from '../dom';
 import { blobUrl, safeWorkspacePath } from '../blobimg';
 import { S, hub, gen, persistGen, persistCentreTab, stateLabel } from './store';
 import { statusRow, tokenNotice, startRun, cancelRun, pendingCount,
-         livePreview } from './gen';
+         livePreview, releasePreview } from './gen';
 
 let previewBox: HTMLElement | null = null;
 let imgEl: HTMLImageElement | null = null;
@@ -162,6 +162,8 @@ function syncPreview(): void {
     const nowPath = S.viewPath || (S.queueJob?.payload?.saved ?? []).slice(-1)[0] || '';
     if ((S.viewPath || !(S.jobId && livePreview.url)) && nowPath === want) {
       showImg(want, url, want);
+      // The finished file is on screen: the held stream frame can go.
+      if (!S.jobId) releasePreview();
     }
   }).catch(() => {
     if (shownKey === '') showEmpty('이미지를 읽지 못했습니다: ' + want);

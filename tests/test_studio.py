@@ -824,4 +824,27 @@ print()
 if FAILURES:
     print(f"FAIL - {len(FAILURES)} check(s): " + ", ".join(FAILURES))
     sys.exit(1)
+print("\ntest_preview_scaled_for_phones")
+# Last on purpose: test_inpaint_mask checks that nothing so far pulled in
+# Pillow, and this one does.
+studiojob._preview_put("job_x", 3, 28, "a.png", b"\x89PNG123")
+# A phone asks for a scaled WebP (§1-55): a real PNG comes back smaller as
+# `img`/`mime`; bytes Pillow cannot read fall back to the PNG as before.
+check("a frame Pillow cannot decode still answers the png", "png" in studiojob.preview("job_x", 0, w=64))
+try:
+    from PIL import Image as _Img
+    import io as _io
+    _buf = _io.BytesIO()
+    _Img.new("RGB", (832, 1216), (200, 40, 40)).save(_buf, "PNG")
+    studiojob._preview_put("job_x", 5, 28, "a.png", _buf.getvalue())
+    _small = studiojob.preview("job_x", 0, w=64)
+    check("w=64 answers a WebP", _small.get("mime") == "image/webp" and "img" in _small and "png" not in _small, str(_small)[:80])
+    check("the scaled frame is far smaller than the PNG",
+          len(_small["img"]) < len(studiojob.preview("job_x", 0)["png"]) // 4)
+    check("the scaled bytes are cached with the frame", studiojob._preview["job_x"]["small"][0] == 64)
+except ImportError:
+    print("  (no Pillow: scaled preview check skipped)")
+with studiojob._preview_lock:
+    studiojob._preview.pop("job_x", None)
+
 print("PASS - the studio is a folder of the one space, and the SYSTEM wall holds")

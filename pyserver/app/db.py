@@ -22,7 +22,7 @@ from typing import Any, Iterable, Iterator
 
 from . import config
 
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 
 LOCK = threading.RLock()
 _conn: sqlite3.Connection | None = None
@@ -724,6 +724,48 @@ def _backfill_snapshot_kinds(conn: sqlite3.Connection) -> None:
               f"{n} automatic snapshot(s) filed as backups", flush=True)
 
 
+def _prune_history_snapshots(conn: sqlite3.Connection) -> bool:
+    """Schema 14: keep only the newest two `history` rows per agent session.
+
+    Every turn stored the whole pydantic-ai history as a new row and nothing
+    ever removed the old ones - 236 rows / 218MB on one install, all of it
+    shipped to the plugin on every panel open (§1-55). Only the newest row
+    is read back (session._history). Returns True when rows were removed, so
+    the caller can VACUUM once the transaction is done.
+    """
+    row = conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()
+    try:
+        was = int(row["value"]) if row else 0
+    except (TypeError, ValueError):
+        was = 0
+    if not was or was >= 14:
+        return False
+    before = conn.execute(
+        "SELECT COUNT(*) AS n, COALESCE(SUM(LENGTH(content_json)), 0) AS b "
+        "FROM agent_messages WHERE role = 'history'").fetchone()
+    n = conn.execute(
+        "DELETE FROM agent_messages WHERE role = 'history' AND NOT EXISTS ("
+        "  SELECT 1 FROM ("
+        "    SELECT session_id, seq, ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY seq DESC) AS rn "
+        "    FROM agent_messages WHERE role = 'history') k "
+        "  WHERE k.session_id = agent_messages.session_id AND k.seq = agent_messages.seq AND k.rn <= 2)"
+    ).rowcount or 0
+    print(f"[risu-hina] schema {was} -> {SCHEMA_VERSION}: {n} of {before['n']} agent history "
+          f"snapshot(s) removed ({before['b'] // 1024 // 1024}MB stored before)", flush=True)
+    return n > 0
+
+
+def _vacuum(conn: sqlite3.Connection) -> None:
+    """Give the freed pages back to the OS - outside any transaction."""
+    try:
+        size = lambda: conn.execute("PRAGMA page_count").fetchone()[0] * conn.execute("PRAGMA page_size").fetchone()[0]  # noqa: E731
+        b0 = size()
+        conn.execute("VACUUM")
+        print(f"[risu-hina] vacuum: {b0 // 1024 // 1024}MB -> {size() // 1024 // 1024}MB", flush=True)
+    except sqlite3.Error as e:
+        print(f"[risu-hina] vacuum skipped: {e}", flush=True)
+
+
 def _migrate(conn: sqlite3.Connection) -> None:
     with LOCK:
         # Before the DDL, so the tables come back with the new columns.
@@ -742,12 +784,15 @@ def _migrate(conn: sqlite3.Connection) -> None:
         # After ADD_COLUMNS (the column must exist), before the version bump
         # (the old version is what says whether to backfill).
         _backfill_snapshot_kinds(conn)
+        shrunk = _prune_history_snapshots(conn)
         conn.execute(
             "INSERT INTO meta(key, value) VALUES('schema_version', ?) "
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
             (str(SCHEMA_VERSION),),
         )
         conn.commit()
+        if shrunk:
+            _vacuum(conn)
 
 
 # --- small helpers ----------------------------------------------------------

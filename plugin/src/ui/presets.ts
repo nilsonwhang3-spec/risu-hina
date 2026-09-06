@@ -11,7 +11,7 @@
  * both are whole tasks. An editor with a dozen fields unfolding inside a
  * settings page pushes everything else off screen.
  */
-import { el, clear, modal, setSelected, selectedValue, popover } from './dom';
+import { el, clear, modal, setSelected, selectedValue, popover, pollWhileVisible } from './dom';
 import { pickerRow, openListPicker, type PickerEntry } from './pickers';
 import { state, type AgentPreset, type ApiKeyEntry, type CatalogModel, type ProviderProfile, type WebsearchMode, type WebsearchStatus, type VisionMode, type VisionStatus } from '../state';
 import { transport } from '../transport';
@@ -1004,9 +1004,9 @@ export function buildCodexBox(modelInput: HTMLInputElement | null, withLogin: bo
   pasteRow.style.display = 'none';
   const models = el('div', { class: 'row' });
   let pendingState = '';
-  let poll: ReturnType<typeof setInterval> | null = null;
+  let poll: (() => void) | null = null;
 
-  const stopPoll = () => { if (poll) { clearInterval(poll); poll = null; } };
+  const stopPoll = () => { if (poll) { poll(); poll = null; } };
   const refresh = async (): Promise<void> => {
     try {
       const s = await state.codexStatus();
@@ -1058,12 +1058,18 @@ export function buildCodexBox(modelInput: HTMLInputElement | null, withLogin: bo
       pasteRow.style.display = '';
       try { window.open(r.url, '_blank', 'noopener'); } catch { /* popup blocked: the link is there */ }
       stopPoll();
-      poll = setInterval(async () => {
-        try {
-          const st = await state.codexLoginStatus(pendingState);
-          if (st.done || st.loggedIn) { stopPoll(); clear(out); await refresh(); }
-          else if (st.error) { stopPoll(); out.appendChild(el('div', { class: 'notice err', text: st.error })); }
-        } catch { /* keep polling */ }
+      // Stops while the page is hidden, and for good once this card is gone
+      // from the page - navigating away mid-login used to leave it polling
+      // forever (§1-55).
+      poll = pollWhileVisible(() => {
+        if (!out.isConnected) { stopPoll(); return; }
+        void (async () => {
+          try {
+            const st = await state.codexLoginStatus(pendingState);
+            if (st.done || st.loggedIn) { stopPoll(); clear(out); await refresh(); }
+            else if (st.error) { stopPoll(); out.appendChild(el('div', { class: 'notice err', text: st.error })); }
+          } catch { /* keep polling */ }
+        })();
       }, 2000);
     } catch (e) {
       out.appendChild(el('div', { class: 'notice err', text: msg(e) }));

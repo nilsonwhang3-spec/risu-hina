@@ -182,18 +182,30 @@ export function splitter(opts: SplitterOptions): HTMLElement {
     // The split is built before it is mounted, so its clipping ancestor is
     // unknown here; the viewport is the thing a window resize moves anyway.
     const watched = typeof document !== 'undefined' ? document.documentElement : limitNode(opts.container);
-    new ResizeObserver(() => {
+    // Both observers let go once the split is gone from the page: a pane
+    // rebuilt on every bot switch used to leave its old observers on the
+    // document root forever, each pinning a detached split (§1-55).
+    let mounted = false;
+    const gone = (): boolean => {
+      if (opts.container.isConnected) { mounted = true; return false; }
+      return mounted;
+    };
+    const outer = new ResizeObserver(() => {
+      if (gone()) { outer.disconnect(); return; }
       const span = vertical() ? watched.clientHeight : watched.clientWidth;
       if (span === lastOuter) return;
       lastOuter = span;
       reapply();
-    }).observe(watched);
-    new ResizeObserver(() => {
+    });
+    outer.observe(watched);
+    const inner = new ResizeObserver(() => {
+      if (gone()) { inner.disconnect(); return; }
       const own = vertical() ? opts.container.offsetHeight : opts.container.offsetWidth;
       if (own === lastOwn || own === 0) return;
       lastOwn = own;
       reapply();
-    }).observe(opts.container);
+    });
+    inner.observe(opts.container);
   } catch { /* no ResizeObserver in the test DOM */ }
 
   let dragging = false;

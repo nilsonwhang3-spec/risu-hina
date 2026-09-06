@@ -260,20 +260,29 @@ export class Transport {
     const reader = body.getReader();
     const dec = new TextDecoder();
     let buf = '';
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buf += dec.decode(value, { stream: true });
-      let nl: number;
-      while ((nl = buf.indexOf('\n')) >= 0) {
-        const line = buf.slice(0, nl);
-        buf = buf.slice(nl + 1);
-        const v = parseLine(line);
-        if (v !== undefined) yield v;
+    // 중단 (or a consumer that stops iterating) must release the body too,
+    // or the response keeps buffering behind an abandoned reader (§1-55).
+    const onAbort = () => { void reader.cancel().catch(() => { /* already closed */ }); };
+    signal?.addEventListener('abort', onAbort);
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let nl: number;
+        while ((nl = buf.indexOf('\n')) >= 0) {
+          const line = buf.slice(0, nl);
+          buf = buf.slice(nl + 1);
+          const v = parseLine(line);
+          if (v !== undefined) yield v;
+        }
       }
+      const tail = parseLine(buf);
+      if (tail !== undefined) yield tail;
+    } finally {
+      signal?.removeEventListener('abort', onAbort);
+      void reader.cancel().catch(() => { /* already closed */ });
     }
-    const tail = parseLine(buf);
-    if (tail !== undefined) yield tail;
   }
 
   private async json<T>(method: 'GET' | 'POST', path: string, payload?: unknown, timeoutMs?: number): Promise<T> {

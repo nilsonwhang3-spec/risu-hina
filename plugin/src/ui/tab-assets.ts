@@ -22,6 +22,7 @@ import { describeSync, syncBusy } from '../assets';
 import { makeTab, type NoticeKind, type TabUi } from './kit';
 import { DRAG_ASSETS } from './tree';
 import { showArtifact } from './artifact';
+import { blobFrom, watchImage, unloadByDefault } from './blobimg';
 
 const FIELD_LABEL: Record<string, string> = {
   image: '프로필',
@@ -48,7 +49,6 @@ let gridMount: HTMLElement | null = null;
 let sideMount: HTMLElement | null = null;
 let cells: Cell[] = [];
 let filterText = '';
-const thumbs = new Map<string, string>();
 let ui: TabUi | null = null;
 
 function notice(text: string, kind: NoticeKind = ''): void {
@@ -321,27 +321,10 @@ function beginRename(c: Cell, nameEl: HTMLElement): void {
  * burst of them times out. The backend store answers from disk, and a small
  * window keeps it - and the tunnel in front of it - steady.
  */
-const THUMB_PARALLEL = 6;
-let thumbActive = 0;
-const thumbQueue: (() => void)[] = [];
-
-function thumbSlot(): Promise<() => void> {
-  return new Promise((resolve) => {
-    const grant = () => {
-      thumbActive += 1;
-      let released = false;
-      resolve(() => {
-        if (released) return;
-        released = true;
-        thumbActive -= 1;
-        const next = thumbQueue.shift();
-        if (next) next();
-      });
-    };
-    if (thumbActive < THUMB_PARALLEL) grant();
-    else thumbQueue.push(grant);
-  });
-}
+// The window, the object-URL cache and its byte budget are blobimg's - this
+// tab used to keep a second cache of 400 FULL-SIZE assets that nothing ever
+// emptied (§1-55).
+const assetKey = (c: Cell): string => `asset:${c.key}`;
 
 /** The bytes of one asset: the backend store first, the host as fallback. */
 async function thumbBytes(c: Cell): Promise<Uint8Array | null> {
@@ -368,56 +351,43 @@ async function thumbBytes(c: Cell): Promise<Uint8Array | null> {
 /** The asset at full size in the artifact modal (the bytes come from the
  * store, not a space path, so the modal gets a ready <img>). */
 async function openBig(c: Cell): Promise<void> {
-  let url = thumbs.get(c.key) || '';
-  if (!url) {
-    try {
-      const view = await thumbBytes(c);
-      if (view) {
-        const buf = new Uint8Array(view.byteLength);
-        buf.set(view);
-        url = URL.createObjectURL(new Blob([buf]));
-        thumbs.set(c.key, url);
-      }
-    } catch { /* the modal says so below */ }
-  }
+  let url = '';
+  try {
+    url = await blobFrom(assetKey(c), () => thumbBytes(c));
+  } catch { /* the modal says so below */ }
   const node = url
     ? el('img', { src: url, alt: c.name || c.key })
     : el('div', { class: 'hint', text: '이미지를 읽지 못했습니다 (동기화 전이거나 실패).' });
   showArtifact({ path: '', title: `${c.name || c.key}${c.size ? ' · ' + mb(c.size) : ''}`, kind: 'image', node });
 }
 
-async function loadThumb(c: Cell, mount: HTMLElement): Promise<void> {
+function loadThumb(c: Cell, mount: HTMLElement): void {
   const isImage = /^(png|jpe?g|gif|webp|avif|bmp)$/i.test(c.ext);
   if (!isImage) {
     mount.appendChild(el('div', { class: 'assettype', text: c.ext.toUpperCase() }));
     return;
   }
-  let url = thumbs.get(c.key) || '';
-  if (!url) {
-    const release = await thumbSlot();
-    try {
-      // The grid may have been redrawn while this waited in the queue.
-      if (!mount.isConnected) return;
-      const view = await thumbBytes(c);
-      if (view) {
-        const buf = new Uint8Array(view.byteLength);
-        buf.set(view);
-        url = URL.createObjectURL(new Blob([buf]));
-        if (thumbs.size > 400) {
-          for (const [k, u] of thumbs) { URL.revokeObjectURL(u); thumbs.delete(k); break; }
-        }
-        thumbs.set(c.key, url);
+  // Fetched when the cell nears the viewport; on a phone dropped again far
+  // from it. Assets have no server thumbnail (the bytes are the store's), so
+  // the byte budget matters most here.
+  let gen = 0;
+  watchImage(mount, () => {
+    const my = ++gen;
+    void (async () => {
+      let url = '';
+      try {
+        // The grid may have been redrawn while this waited in the queue.
+        if (!mount.isConnected) return;
+        url = await blobFrom(assetKey(c), () => thumbBytes(c));
+      } catch { /* placeholder below */ }
+      if (!mount.isConnected || my !== gen) return;
+      if (!url) {
+        mount.appendChild(el('div', { class: 'assettype', text: c.state === 'missing' ? '없음' : c.ext.toUpperCase() }));
+        return;
       }
-    } finally {
-      release();
-    }
-  }
-  if (!url) {
-    mount.appendChild(el('div', { class: 'assettype', text: c.state === 'missing' ? '없음' : c.ext.toUpperCase() }));
-    return;
-  }
-  if (!mount.isConnected) return;
-  const img = el('img', { src: url, alt: c.name, loading: 'lazy' });
-  img.addEventListener('error', () => img.replaceWith(el('div', { class: 'assettype', text: c.ext.toUpperCase() })));
-  mount.appendChild(img);
+      const img = el('img', { src: url, alt: c.name, loading: 'lazy' });
+      img.addEventListener('error', () => img.replaceWith(el('div', { class: 'assettype', text: c.ext.toUpperCase() })));
+      mount.appendChild(img);
+    })();
+  }, unloadByDefault() ? () => { gen += 1; for (const i of Array.from(mount.querySelectorAll('img'))) i.remove(); } : undefined);
 }

@@ -29,7 +29,7 @@ import { el, clear, armed, menuAt, popover, svg, ICON, iconBtn, type ArmedContro
 import { treeRow, installDrop, installDrag, type TreeNode, type TreeSpec, type Incoming } from './tree';
 import { state, type FileArea, type FileListing, type WorkspaceFile } from '../state';
 import { makeTab, namePopover, askName, type NoticeKind, type TabUi } from './kit';
-import { blobUrl, workspaceImage } from './blobimg';
+import { blobUrl, workspaceImage, watchImage, unloadByDefault } from './blobimg';
 import { renderMarkdown } from './markdown';
 import { showArtifact } from './artifact';
 import { copyToClipboard } from '../host';
@@ -1142,17 +1142,24 @@ function copyPathButton(path: string): HTMLElement {
 }
 
 // Thumbnails ride the shared blob pipeline (blobimg.ts: 6 in flight, LRU).
-async function loadThumb(f: WorkspaceFile, mount: HTMLElement): Promise<void> {
-  try {
-    if (!mount.isConnected) return;
-    const url = await blobUrl(f.path, String(f.modified), { thumb: true });
-    if (!mount.isConnected) return;
-    const img = el('img', { src: url, alt: f.name, loading: 'lazy' });
-    img.addEventListener('error', () => img.replaceWith(el('div', { class: 'assettype', text: 'IMG' })));
-    mount.appendChild(img);
-  } catch {
-    mount.appendChild(el('div', { class: 'assettype', text: '?' }));
-  }
+// Fetched near the viewport, and on a phone dropped far from it (§1-55).
+function loadThumb(f: WorkspaceFile, mount: HTMLElement): void {
+  let gen = 0;
+  watchImage(mount, () => {
+    const my = ++gen;
+    void (async () => {
+      try {
+        if (!mount.isConnected) return;
+        const url = await blobUrl(f.path, String(f.modified), { thumb: true });
+        if (!mount.isConnected || my !== gen) return;
+        const img = el('img', { src: url, alt: f.name, loading: 'lazy' });
+        img.addEventListener('error', () => img.replaceWith(el('div', { class: 'assettype', text: 'IMG' })));
+        mount.appendChild(img);
+      } catch {
+        if (my === gen) mount.appendChild(el('div', { class: 'assettype', text: '?' }));
+      }
+    })();
+  }, unloadByDefault() ? () => { gen += 1; for (const i of Array.from(mount.querySelectorAll('img'))) i.remove(); } : undefined);
 }
 
 // --- preview -------------------------------------------------------------------

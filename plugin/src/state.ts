@@ -152,6 +152,9 @@ export interface AgentSession {
   session: { sessionId: string; chatKey: string; title: string } | null;
   messages: { seq: number; role: string; content: unknown; cost: number | null;
               usage: Record<string, unknown> | null }[];
+  /** Shown messages in the whole session; more than `messages.length` when
+   * a `limit` clipped the list (§1-55). */
+  messagesTotal?: number;
   staged: StagedEdit[];
   agentReady?: boolean;
   webSearch?: boolean;
@@ -644,10 +647,12 @@ class StudioFiles {
 
   /** The running job's newest intermediate frame (streaming generation).
    * `{}` when there is none; `{rev}` alone when `since` already has it. */
-  async jobPreview(id: string, since: number): Promise<{
-    rev?: number; step?: number; total?: number; current?: string; png?: string;
+  /** `w` > 0 asks for a frame scaled to that width as WebP (`img`/`mime`)
+   * instead of the full PNG (§1-55). */
+  async jobPreview(id: string, since: number, w = 0): Promise<{
+    rev?: number; step?: number; total?: number; current?: string; png?: string; img?: string; mime?: string;
   }> {
-    return await transport.get('/studio/job/preview', { id, since: String(since) });
+    return await transport.get('/studio/job/preview', { id, since: String(since), w: w > 0 ? String(w) : undefined });
   }
 
   /** Split filenames into fields, and say which ones did not match. */
@@ -1285,10 +1290,14 @@ class AppState {
 
   sessionId = '';
 
-  async agentSession(sessionId?: string): Promise<AgentSession> {
+  /** `limit` = only the last n shown messages: a phone parses 40, not a
+   * whole afternoon (the 164MB /session of §1-55 was history rows, now
+   * excluded server-side; the limit keeps the rest small too). */
+  async agentSession(sessionId?: string, limit = 0): Promise<AgentSession> {
     const r = await transport.get<AgentSession>('/session', {
       chatKey: this.activeChatKey,
       sessionId: sessionId || undefined,
+      limit: limit > 0 ? limit : undefined,
     });
     this.sessionId = r.session?.sessionId ?? '';
     return r;
@@ -1580,6 +1589,11 @@ class AppState {
     const bytes = await transport.postBinary('/files/zip', { paths, name });
     host.downloadBytes(name.endsWith('.zip') ? name : name + '.zip', bytes, 'application/zip');
     return bytes.byteLength;
+  }
+
+  /** Size and pixel dimensions of a space file without its bytes (§1-55). */
+  async fileStat(path: string): Promise<{ size: number; width: number; height: number; format: string }> {
+    return await transport.post('/files/stat', { path });
   }
 
   /** Raw bytes of a space file (an image preview, a thumbnail). POST: see tab-assets. */

@@ -7,7 +7,20 @@
  */
 import { transport, clientLog } from './transport';
 import { bootstrap } from './ui/shell';
-import { ICON } from './ui/dom';
+import { ICON, pollWhileVisible } from './ui/dom';
+import { smallScreen } from './ui/blobimg';
+import { memSnapshot } from './ui/mem';
+
+/** When this page last hid, from the previous life of this iframe: a phone
+ * that shows `pagehide` followed by a boot seconds later was reloaded by
+ * iOS, not reopened by the user. Storage may be walled off in the sandbox. */
+const HIDE_KEY = 'risuhina.pagehide';
+function lastHide(): number {
+  try { return Number(localStorage.getItem(HIDE_KEY) || 0); } catch { return 0; }
+}
+function stampHide(): void {
+  try { localStorage.setItem(HIDE_KEY, String(Date.now())); } catch { /* sandboxed */ }
+}
 
 const DEFAULT_URL = 'http://127.0.0.1:6020';
 
@@ -50,12 +63,20 @@ async function resolveConfig(): Promise<{ url: string; token: string }> {
   // (⚙ → 정보 · 로그) tells whether the browser reloaded the whole page.
   try {
     const nav = (performance.getEntriesByType?.('navigation')?.[0] as PerformanceNavigationTiming | undefined);
+    const hid = lastHide();
     void clientLog('info', 'plugin boot', {
       navigation: nav?.type ?? '?',
       ua: navigator.userAgent.slice(0, 120),
       viewport: `${window.innerWidth}x${window.innerHeight}`,
       memory: (navigator as unknown as { deviceMemory?: number }).deviceMemory ?? null,
+      // Seconds since this iframe last hid: a small number after no user
+      // action is the memory-reload signature (§1-55).
+      sinceHideS: hid ? Math.round((Date.now() - hid) / 1000) : null,
+      phone: smallScreen(),
     });
+    // The plugin's own memory numbers, while the page shows: every 30s on a
+    // phone (the one that reloads), every 5 minutes elsewhere.
+    pollWhileVisible(() => { void clientLog('debug', 'mem', memSnapshot()); }, smallScreen() ? 30_000 : 300_000);
     window.addEventListener('error', (ev) => {
       void clientLog('error', 'uncaught error', { message: String(ev.message).slice(0, 300), file: String(ev.filename || '').slice(-80), line: ev.lineno });
     });
@@ -63,9 +84,13 @@ async function resolveConfig(): Promise<{ url: string; token: string }> {
       void clientLog('error', 'unhandled rejection', { reason: String((ev as PromiseRejectionEvent).reason).slice(0, 300) });
     });
     window.addEventListener('pagehide', (ev) => {
+      stampHide();
       // sendBeacon-less: the POST may or may not make it; the next boot's
-      // navigation type says what happened either way.
-      void clientLog('info', 'pagehide', { persisted: (ev as PageTransitionEvent).persisted, visibility: document.visibilityState });
+      // navigation type (and sinceHideS) says what happened either way.
+      void clientLog('info', 'pagehide', { persisted: (ev as PageTransitionEvent).persisted, visibility: document.visibilityState, mem: memSnapshot() });
+    });
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') stampHide();
     });
   } catch { /* logging must never break the plugin */ }
 
