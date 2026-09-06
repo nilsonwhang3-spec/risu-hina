@@ -380,7 +380,7 @@ async def run(session_id: str, prompt: str, mode: str = "") -> AsyncGenerator[st
         history = await agent_mod.compact_history(session_id, _history(session_id))
         history = neutralise_thinking(history, ag.model)
         async with ag.run_stream_events(
-            prompt, deps=deps, message_history=history
+            prompt, deps=deps, message_history=history, usage_limits=agent_mod.turn_limits(),
         ) as events:
             # Side events are flushed between model events AND while a tool is
             # still running: a batch that waits minutes inside one tool call
@@ -506,6 +506,9 @@ def _explain(e: Exception) -> str:
     """
     if isinstance(e, TurnStopped):
         return "중단됨"
+    if type(e).__name__ == "UsageLimitExceeded":
+        return ("이 턴의 한도에 도달해 멈췄습니다 (" + str(e)[:160] + "). 이어서 하려면 다시 말씀해 주세요; "
+                "한도는 ⚙ → 에이전트 → 고급 설정에서 바꿀 수 있습니다.")
     raw = f"{type(e).__name__}: {e}"
     text = str(e)
     limit = config.section("agent").get("maxTokens")

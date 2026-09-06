@@ -359,11 +359,37 @@ def _turn_starts(messages: list) -> list[int]:
     return [i for i, m in enumerate(messages) if _is_user_turn(m)]
 
 
-def prune_tool_parts(messages: list, keep_turns: int = PRUNE_KEEP_TURNS, clip: int = PRUNE_CLIP) -> tuple[list, int]:
+def _int_cfg(key: str, default: int) -> int:
+    try:
+        v = config.section("agent").get(key)
+        return int(v) if v is not None and str(v).strip() != "" else default
+    except (TypeError, ValueError):
+        return default
+
+
+def turn_limits() -> Any:
+    """The pydantic-ai UsageLimits for one turn, from the 고급 설정 numbers
+    (0 = unlimited)."""
+    from pydantic_ai import UsageLimits
+    req = _int_cfg("maxRequestsPerTurn", 40)
+    calls = _int_cfg("maxToolCallsPerTurn", 30)
+    tokens = _int_cfg("maxInputTokensPerTurn", 0)
+    return UsageLimits(
+        request_limit=req if req > 0 else None,
+        tool_calls_limit=calls if calls > 0 else None,
+        input_tokens_limit=tokens if tokens > 0 else None,
+    )
+
+
+def prune_tool_parts(messages: list, keep_turns: int | None = None, clip: int | None = None) -> tuple[list, int]:
     """Clip tool returns and oversized tool-call args in every turn but the
     last `keep_turns`. Returns (messages, chars saved); the input is not
     mutated. Idempotent: a clipped part is under the limit already."""
     import dataclasses
+    if keep_turns is None:
+        keep_turns = max(1, _int_cfg("pruneKeepTurns", PRUNE_KEEP_TURNS))
+    if clip is None:
+        clip = max(100, _int_cfg("pruneClipChars", PRUNE_CLIP))
     starts = _turn_starts(messages)
     cut = starts[-keep_turns] if len(starts) >= keep_turns else 0
     if cut <= 0:

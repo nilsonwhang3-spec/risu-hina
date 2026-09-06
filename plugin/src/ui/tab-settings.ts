@@ -9,7 +9,7 @@
  */
 import { el, clear, armed, modal } from './dom';
 import { state, type ApiKeyEntry, type ProviderProfile } from '../state';
-import { buildPresetsCard, buildCodexBox } from './presets';
+import { buildPresetsCard, buildCodexBox, buildAdvancedCard } from './presets';
 import { buildSkillsCard } from './skills';
 import { agentPanel } from './agentpane';
 import { buildDebugCard, buildUpdateCard } from './debugpanel';
@@ -78,7 +78,7 @@ export function renderSettingsTab(mount: HTMLElement): void {
         // credentials here leaves it still saying they are not set.
         agentPanel().invalidate();
       },
-    })]],
+    }), buildAdvancedCard()]],
     ['스킬', [buildSkillsCard({ onMount: (refresh) => { refreshers.push(refresh); } })]],
     ['정보 · 로그', [buildCatalogCard(), buildDebugCard(), aboutMount]],
   ];

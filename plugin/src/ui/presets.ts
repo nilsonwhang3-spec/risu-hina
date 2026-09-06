@@ -172,6 +172,137 @@ function foldableCard(id: string, title: string, body: (HTMLElement | null)[]): 
   return el('div', { class: 'card foldable' + (open ? '' : ' folded'), id }, [head, box]);
 }
 
+/** One 고급 설정 field: the number, what it does, and what leaving it blank means. */
+interface AdvField { key: string; label: string; def: number; unit: string; help: string; zeroMeansOff?: boolean }
+
+const ADV_FIELDS: AdvField[] = [
+  { key: 'historyBudgetChars', label: '히스토리 예산', def: 120000, unit: '자',
+    help: '대화 기록이 이 글자 수를 넘으면 앞부분을 요약하거나(요약 모델이 거절하면 통째로) 잘라냅니다. 요청마다 다시 보내는 기록의 상한이라, 요청당 토큰을 직접 정합니다. 12만 자 ≈ 5~7만 토큰.' },
+  { key: 'pruneKeepTurns', label: '툴 결과 그대로 두는 턴 수', def: 2, unit: '턴',
+    help: '최근 이 턴 수 안의 툴 결과(스크립트 출력·읽은 파일·생성 스펙)는 그대로 두고, 더 오래된 것은 아래 글자 수로 자릅니다. 자른 결과가 필요하면 히나가 툴을 다시 부릅니다.' },
+  { key: 'pruneClipChars', label: '오래된 툴 결과 자르기', def: 600, unit: '자',
+    help: '오래된 툴 결과 하나를 남길 길이. 100 아래로는 내려가지 않습니다.' },
+  { key: 'maxRequestsPerTurn', label: '턴당 최대 모델 요청', def: 40, unit: '회', zeroMeansOff: true,
+    help: '한 번의 대화 턴에서 모델을 부르는 횟수 상한. 툴을 한 번 쓸 때마다 한 번 더 부르고, 매번 기록 전체를 다시 보냅니다. 넘으면 턴이 멈추고 이유를 말합니다. 0 = 제한 없음.' },
+  { key: 'maxToolCallsPerTurn', label: '턴당 최대 툴 호출', def: 30, unit: '회', zeroMeansOff: true,
+    help: '한 턴에서 툴(스크립트·파일·생성·비전)을 부르는 횟수 상한. 0 = 제한 없음.' },
+  { key: 'maxInputTokensPerTurn', label: '턴당 입력 토큰 상한', def: 0, unit: '토큰', zeroMeansOff: true,
+    help: '한 턴에 보낸 입력 토큰의 합계가 이 값을 넘으면 멈춥니다. 비용을 직접 막는 안전장치. 0 = 제한 없음 (권장: 예상 최대치의 1.5배, 예 800000).' },
+];
+
+const FIXED_PROMPT_TOKENS = 15000;
+
+function fmtN(n: number): string { return Math.round(n).toLocaleString(); }
+
+/**
+ * 고급 설정 (§1-47): the per-turn cost knobs, with the arithmetic behind
+ * them shown live and the last turns' real numbers beside it. Folded by
+ * default - the presets above are the everyday part.
+ */
+export function buildAdvancedCard(): HTMLElement {
+  const inputs = new Map<string, HTMLInputElement>();
+  const status = el('div', { class: 'hint' });
+  const sim = el('div', { class: 'advsim' });
+  const measured = el('div', { class: 'hint', style: { marginTop: '6px' } });
+  let usage: Record<string, number> | null = null;
+
+  const val = (f: AdvField): number => {
+    const raw = (inputs.get(f.key)?.value ?? '').trim();
+    if (raw === '') return f.def;
+    const n = Number(raw);
+    return Number.isFinite(n) && n >= 0 ? Math.floor(n) : f.def;
+  };
+
+  const drawSim = () => {
+    const budget = val(ADV_FIELDS[0]);
+    const req = val(ADV_FIELDS[3]);
+    const calls = val(ADV_FIELDS[4]);
+    const capTok = val(ADV_FIELDS[5]);
+    const histTok = budget / 2;
+    const perReq = FIXED_PROMPT_TOKENS + histTok;
+    const reqUsed = req > 0 ? req : 50;
+    const worst = perReq * reqUsed;
+    const typical = perReq * Math.min(reqUsed, usage?.avgRequests || 8);
+    clear(sim);
+    sim.append(
+      el('div', { class: 'sectiontitle', text: '예상 시뮬레이션' }),
+      el('div', { text: `요청 1회 ≈ 고정 프롬프트 ${fmtN(FIXED_PROMPT_TOKENS)} + 기록 ${fmtN(histTok)} = 약 ${fmtN(perReq)} 토큰` }),
+      el('div', { text: `보통 턴 (요청 ${fmtN(Math.min(reqUsed, usage?.avgRequests || 8))}회) ≈ ${fmtN(typical)} 토큰` }),
+      el('div', { text: `최악 턴 (요청 ${req > 0 ? fmtN(req) : '50(라이브러리 기본)'}회) ≈ ${fmtN(worst)} 토큰` + (calls > 0 ? ` · 툴 호출 ${fmtN(calls)}회에서도 멈춤` : '') }),
+      el('div', { text: capTok > 0
+        ? (capTok < typical ? `⚠ 입력 상한 ${fmtN(capTok)} 이 보통 턴보다 작습니다 - 대부분의 턴이 중간에 멈춥니다.` : `입력 상한 ${fmtN(capTok)}: 최악 턴의 ${fmtN(capTok / worst * 100)}% 지점에서 멈춥니다.`)
+        : '입력 상한 없음: 최악 턴까지 허용합니다.' }),
+      el('div', { class: 'hint', text: '기록은 글자 2자 ≈ 1토큰으로, 고정 프롬프트(지침+툴 스키마)는 약 1.5만 토큰으로 잡았습니다. 캐시 히트는 할인되지만 여기엔 반영하지 않았습니다.' }),
+    );
+  };
+
+  const drawMeasured = () => {
+    if (!usage || !usage.turns) { measured.textContent = '실측: 아직 기록된 턴이 없습니다.'; return; }
+    const since = new Date(usage.since * 1000);
+    measured.textContent = `실측 (최근 ${usage.turns}턴, ${since.getMonth() + 1}/${since.getDate()} ${String(since.getHours()).padStart(2, '0')}:${String(since.getMinutes()).padStart(2, '0')} 이후): `
+      + `턴당 입력 평균 ${fmtN(usage.avgInput)} · 최대 ${fmtN(usage.maxInput)} · 요청 평균 ${usage.avgRequests}회(최대 ${usage.maxRequests}) · `
+      + `요청당 ${fmtN(usage.avgPerRequest)} 토큰 · 툴 호출 평균 ${usage.avgToolCalls}회 · 캐시 ${Math.round((usage.cacheShare || 0) * 100)}%`;
+  };
+
+  const rows = ADV_FIELDS.map((f) => {
+    const input = el('input', { type: 'number', min: '0', placeholder: `${f.def.toLocaleString()} (권장)` }) as HTMLInputElement;
+    input.addEventListener('input', drawSim);
+    inputs.set(f.key, input);
+    return el('div', { class: 'advfield' }, [
+      el('label', { class: 'field' }, [el('span', { text: `${f.label} (${f.unit})` }), input]),
+      el('div', { class: 'hint', text: f.help + (f.zeroMeansOff ? '' : ' 비우면 권장값을 씁니다.') }),
+    ]);
+  });
+
+  const load = async () => {
+    try {
+      const [{ config }, u] = await Promise.all([
+        state.getConfig(),
+        transport.get<Record<string, number>>('/agent/usage', { turns: '30' }).catch(() => null),
+      ]);
+      const a = (config.agent ?? {}) as Record<string, unknown>;
+      for (const f of ADV_FIELDS) {
+        const v = a[f.key];
+        const inp = inputs.get(f.key)!;
+        inp.value = v === undefined || v === null || Number(v) === f.def ? '' : String(v);
+      }
+      usage = u;
+      drawMeasured();
+      drawSim();
+    } catch (e) {
+      status.textContent = '읽지 못했습니다: ' + (e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const save = el('button', { class: 'primary tiny', text: '저장' }) as HTMLButtonElement;
+  save.addEventListener('click', async () => {
+    save.disabled = true;
+    const patch: Record<string, number> = {};
+    for (const f of ADV_FIELDS) patch[f.key] = val(f);
+    try {
+      await state.setConfig({ agent: patch });
+      status.textContent = '저장했습니다. 다음 턴부터 적용됩니다.';
+      await load();
+    } catch (e) {
+      status.textContent = '저장 실패: ' + (e instanceof Error ? e.message : String(e));
+    } finally {
+      save.disabled = false;
+    }
+  });
+  const reset = el('button', { class: 'ghost tiny', text: '권장값으로' });
+  reset.addEventListener('click', () => { for (const inp of inputs.values()) inp.value = ''; drawSim(); });
+
+  void load();
+  return foldableCard('agent-advanced-card', '고급 설정 (공통)', [
+    el('div', { class: 'hint', style: { marginBottom: '8px' },
+      text: '모든 프리셋에 공통인 턴당 비용 조절입니다. 한 턴 = 사용자의 말 한 번에 히나가 툴을 오가며 답을 끝내는 것. 툴을 부를 때마다 모델을 다시 부르고 기록 전체를 다시 보내므로, 턴 비용 = 요청 수 × (고정 프롬프트 + 기록)입니다.' }),
+    ...rows,
+    sim,
+    measured,
+    el('div', { class: 'row', style: { marginTop: '8px' } }, [save, reset, status]),
+  ]);
+}
+
 /**
  * The vision tool card (§1-42): who looks at images for the agent - its own
  * model (after a probe proves it sees), a separate OpenAI-compatible vision
