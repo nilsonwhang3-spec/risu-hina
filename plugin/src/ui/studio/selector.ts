@@ -327,6 +327,14 @@ export function drawSelector(node: Folder): void {
     }
   } }));
   bar.appendChild(el('span', { class: 'spacer' }));
+  // AI 재검수 (§1-46): the same as typing "이 폴더 재검수 해줘" in the chat -
+  // review_folder → suggest_selection, suggestions refreshed, nothing flagged.
+  const rereview = el('button', { class: 'ghost tiny', text: 'AI 재검수',
+    title: '히나에게 이 폴더를 다시 검수해 제안을 새로 적어 달라고 합니다 (표시는 바꾸지 않음)' });
+  rereview.addEventListener('click', () => {
+    state.requestPrompt(`"${node.path}" 폴더를 재검수해 줘. review_folder 로 보고 suggest_selection 으로 제안을 새로 적어 줘 (기존 제안은 갱신). 표시(채택·버림·수정)는 바꾸지 말고, 다 적으면 검수 탭을 열어 줘.`);
+  });
+  bar.appendChild(rereview);
   const none = el('button', { class: 'ghost tiny', text: '선택 해제' });
   none.addEventListener('click', () => {
     for (const k of Object.keys(selection)) selection[k] = { ...selection[k], use: false, rep: false };
