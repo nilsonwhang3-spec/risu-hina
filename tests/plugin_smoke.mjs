@@ -1105,16 +1105,16 @@ console.log('\ntest_workspace_files');
         (document.querySelector('.panel.active .left')?.textContent || '').slice(0, 120));
   clickButton(document.querySelector('.panel.active .left'), '카드로 크게 보기');
   await settle(700);
-  const av = document.querySelector('.panel.active .split > .left .artifactview');
-  check('카드로 크게 보기 opens the artifact viewer', !!av);
+  const av = document.querySelector('.modalback .artifactview');
+  check('카드로 크게 보기 opens the artifact modal', !!av);
   check('the viewer names the file', /draft-summary\.md/.test(av?.textContent || ''),
         (av?.textContent || '').slice(0, 120));
   // The viewer follows the active tab's centre.
   clickById(document, 'tab-lore');
   await settle(700);
-  check('the artifact viewer follows a tab switch',
-        !!document.querySelector('.panel.active .artifactview'));
-  clickButton(document.querySelector('.panel.active .artifactview'), '닫기');
+  check('the artifact modal stays over a tab switch',
+        !!document.querySelector('.modalback .artifactview'));
+  document.querySelector('.modalback .modalhead .iconbtn')?.dispatchEvent(new window.Event('click', { bubbles: true }));
   await settle(200);
   check('닫기 removes the viewer', !document.querySelector('.artifactview'));
   clickById(document, 'tab-files');
@@ -2778,8 +2778,8 @@ console.log('\ntest_artifact_and_images_events');
   } finally {
     globalThis.fetch = orig;
   }
-  const av = document.querySelector('.panel.active .split > .left .artifactview');
-  check('an artifact event opens the centre card', !!av,
+  const av = document.querySelector('.modalback .artifactview');
+  check('an artifact event opens the artifact modal', !!av,
         (document.querySelector('.panel.active .left')?.textContent || '').slice(0, 120));
   check('with the title and the rendered body',
         /스모크 보고서/.test(av?.textContent || '') && !!av?.querySelector('.md-h, .md-p'),
@@ -2789,12 +2789,12 @@ console.log('\ntest_artifact_and_images_events');
   check('an images event renders a thumbnail strip',
         !!document.querySelector('.panel.active .imgstrip .wsimg'),
         (document.querySelector('.panel.active .agentlog')?.textContent || '').slice(-200));
-  clickButton(document.querySelector('.panel.active .artifactview'), '닫기');
+  document.querySelector('.modalback .modalhead .iconbtn')?.dispatchEvent(new window.Event('click', { bubbles: true }));
   await settle(200);
   chip?.dispatchEvent(new window.Event('click', { bubbles: true }));
   await settle(700);
-  check('the chip reopens the artifact', !!document.querySelector('.panel.active .artifactview'));
-  clickButton(document.querySelector('.panel.active .artifactview'), '닫기');
+  check('the chip reopens the artifact', !!document.querySelector('.modalback .artifactview'));
+  document.querySelector('.modalback .modalhead .iconbtn')?.dispatchEvent(new window.Event('click', { bubbles: true }));
   await settle(200);
 }
 

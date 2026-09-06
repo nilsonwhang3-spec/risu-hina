@@ -74,11 +74,8 @@ try {
   if (saved && typeof saved === 'object') Object.assign(panels, saved);
 } catch { /* storage may be unavailable in the iframe */ }
 
-/** 검수 folds the chat automatically (non-persisted): review is the one
- * screen where Hina is rarely needed and the grid wants the width. A manual
- * toggle wins and clears it; leaving 검수 restores the panel. */
-let autoRight = false;
-let wasInspect = false;
+/* 검수 no longer folds the chat automatically (§1-43): the user found the
+ * auto-fold in the way. Only the manual toggles on the tab row fold panels. */
 
 let layBtnL: HTMLElement | null = null;
 let layBtnR: HTMLElement | null = null;
@@ -86,19 +83,14 @@ let layBtnR: HTMLElement | null = null;
 function applyPanels(): void {
   if (!splitRoot) return;
   splitRoot.classList.toggle('lcollapse', panels.left);
-  splitRoot.classList.toggle('rcollapse', panels.right || autoRight);
+  splitRoot.classList.toggle('rcollapse', panels.right);
   reclamp(splitRoot);
   layBtnL?.classList.toggle('on', !panels.left);
-  layBtnR?.classList.toggle('on', !(panels.right || autoRight));
+  layBtnR?.classList.toggle('on', !panels.right);
 }
 
 function togglePanel(side: 'left' | 'right'): void {
-  if (side === 'right' && autoRight) {
-    // The auto-fold from entering 검수: one manual toggle only reopens it.
-    autoRight = false;
-  } else {
-    panels[side] = !panels[side];
-  }
+  panels[side] = !panels[side];
   try { localStorage.setItem(PANELS_KEY, JSON.stringify(panels)); } catch { /* fine */ }
   applyPanels();
   // The centre strip's arrows read the state; keep them honest.
@@ -379,16 +371,6 @@ function drawCentre(): void {
   const viewMount = S.viewMount;
   if (!viewMount) return;
   clear(viewMount);
-
-  // Entering any 검수 surface (the tab, the folder grid, the selector) or the
-  // fragment organizer folds the chat once; leaving restores it unless the
-  // user toggled meanwhile. Both are wide screens: a grid, or a list beside
-  // an editor that was living on half the centre (§1-31).
-  const inInspect = (S.centreMode === 'tab' && !S.selectedFile && S.centreTab === 'inspect')
-    || S.centreMode === 'folder' || S.centreMode === 'selector' || S.centreMode === 'fragments';
-  if (inInspect && !wasInspect && !panels.right) { autoRight = true; applyPanels(); }
-  else if (!inInspect && wasInspect && autoRight) { autoRight = false; applyPanels(); }
-  wasInspect = inInspect;
 
   // A card picked in a list: its editor, over everything - an editor is
   // always reachable, whatever the tabs are doing.

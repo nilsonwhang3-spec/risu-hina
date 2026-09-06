@@ -21,6 +21,7 @@ import { transport } from '../transport';
 import { describeSync, syncBusy } from '../assets';
 import { makeTab, type NoticeKind, type TabUi } from './kit';
 import { DRAG_ASSETS } from './tree';
+import { showArtifact } from './artifact';
 
 const FIELD_LABEL: Record<string, string> = {
   image: '프로필',
@@ -229,6 +230,16 @@ function cell(c: Cell): HTMLElement {
   const pic = el('div', { class: 'assetpic' });
   box.appendChild(pic);
   void loadThumb(c, pic);
+  // 크게 보기 (§1-43): the picture large in the artifact modal - the same
+  // viewer the files tab and the chat strips use. A click on the picture
+  // does it too; the button is the discoverable way.
+  if (/^(png|jpe?g|gif|webp|avif|bmp)$/i.test(c.ext)) {
+    const big = el('button', { class: 'ghost tiny bigbtn', text: '⤢ 크게', title: '크게 보기' });
+    big.addEventListener('click', (ev) => { ev.stopPropagation(); void openBig(c); });
+    box.appendChild(big);
+    pic.style.cursor = 'zoom-in';
+    pic.addEventListener('click', () => void openBig(c));
+  }
   // Draggable into the chat: the payload is the asset NAME - no workspace
   // path exists (bytes live in RisuAI's store; the agent uses fetch_assets).
   box.draggable = true;
@@ -352,6 +363,27 @@ async function thumbBytes(c: Cell): Promise<Uint8Array | null> {
     if (bytes && (bytes as Uint8Array).byteLength) return bytes as Uint8Array;
   } catch { /* nothing to show */ }
   return null;
+}
+
+/** The asset at full size in the artifact modal (the bytes come from the
+ * store, not a space path, so the modal gets a ready <img>). */
+async function openBig(c: Cell): Promise<void> {
+  let url = thumbs.get(c.key) || '';
+  if (!url) {
+    try {
+      const view = await thumbBytes(c);
+      if (view) {
+        const buf = new Uint8Array(view.byteLength);
+        buf.set(view);
+        url = URL.createObjectURL(new Blob([buf]));
+        thumbs.set(c.key, url);
+      }
+    } catch { /* the modal says so below */ }
+  }
+  const node = url
+    ? el('img', { src: url, alt: c.name || c.key })
+    : el('div', { class: 'hint', text: '이미지를 읽지 못했습니다 (동기화 전이거나 실패).' });
+  showArtifact({ path: '', title: `${c.name || c.key}${c.size ? ' · ' + mb(c.size) : ''}`, kind: 'image', node });
 }
 
 async function loadThumb(c: Cell, mount: HTMLElement): Promise<void> {
