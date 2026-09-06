@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.14.0
+//@display-name Risu Hina v0.14.1
 //@api 3.0
-//@version 0.14.0
+//@version 0.14.1
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -104,7 +104,7 @@
       this.tokenSafe = true;
       this.lastHealth = body;
       this.probeInfo = "";
-      this.gate = versionGate("0.14.0", String(body.version || ""));
+      this.gate = versionGate("0.14.1", String(body.version || ""));
       return body;
     }
     /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -1383,8 +1383,8 @@
     /** The agent (or a strip in the chat) asked for the studio's 검수 tab on
      * a folder: the shell switches tabs, the studio consumes the folder. */
     openStudioRequest = null;
-    requestOpenStudio(folder, view3) {
-      this.openStudioRequest = { folder, view: view3 };
+    requestOpenStudio(folder, view2) {
+      this.openStudioRequest = { folder, view: view2 };
       this.emit();
     }
     /** Everything unseen has been seen (a reset; the files tab no longer
@@ -1620,6 +1620,15 @@
         prompt,
         mode: this.activeTab === "studio" ? "studio" : this.editMode
       }, signal);
+    }
+    /** 중단 as a request the backend hears at once (§1-44): the aborted fetch
+     * alone reaches it only at the turn's next write when a proxy sits between. */
+    async stopAgent() {
+      if (!this.sessionId) return;
+      try {
+        await transport.post("/agent/stop", { sessionId: this.sessionId });
+      } catch {
+      }
     }
     // --- merge conflicts ------------------------------------------------------
     /** Rows where our copy and RisuAI's both moved since the last open. */
@@ -3647,15 +3656,6 @@
     setTimeout(sync, 0);
     return bar3;
   }
-  function showMobileCentre() {
-    if (mobileView === "centre") return;
-    mobileView = "centre";
-    try {
-      localStorage.setItem(VIEW_KEY, mobileView);
-    } catch {
-    }
-    syncAll();
-  }
 
   // src/ui/styles.ts
   var CSS = `
@@ -4054,6 +4054,10 @@ button.tool .tool-label { font-size: 12px; }
 button.iconbtn { padding: 4px 8px; background: transparent; border-color: transparent; font-size: 14px; }
 button.iconbtn:hover:not(:disabled) { background: rgba(128,128,128,.14); }
 button.iconbtn.on { background: rgba(37,99,235,.18); }
+/* An armed icon verb (\uC0AD\uC81C \u2192 \uC815\uB9D0?) must be SEEN: the transparent icon rule
+   above outranked .danger by order, so the confirm label was grey on nothing
+   (\xA71-45 field report). */
+button.iconbtn.danger { background: #b91c1c; border-color: #b91c1c; color: #fff; border-radius: 5px; font-size: 11px; white-space: nowrap; padding: 3px 8px; }
 /* The review rule popover (\xA71-30): compact editor behind one summary button. */
 .rulepop { min-width: 260px; max-width: 380px; }
 .rulepop .advbox { margin-top: 6px; }
@@ -4085,6 +4089,19 @@ button.iconbtn.on { background: rgba(37,99,235,.18); }
 .selhead .badge.warn { cursor: pointer; }
 .extrahead { padding: 10px 8px 4px; }
 /* The \uC378\uB124\uC77C view's big pick: the clicked image above the grid (\xA71-40). */
+/* The artifact viewer is a modal (\xA71-43): wide, the picture as large as the
+   screen allows, text scrolls inside. */
+.modalbox.artifactmodal { max-width: min(96vw, 1400px); width: auto; }
+.artifactmodal .artifactview img { max-width: 100%; max-height: 78vh; display: block; margin: 0 auto; }
+.artifactmodal .artifactbody { max-height: 80vh; overflow: auto; }
+.artifactmodal .artifacthead { margin-bottom: 6px; }
+/* Foldable settings cards (\xA71-43). */
+.card.foldable .foldhead { cursor: pointer; display: flex; align-items: center; gap: 6px; user-select: none; }
+.card.foldable.folded { padding-bottom: 8px; }
+.foldcaret { font-size: 12px; color: var(--textcolor2, #79839a); }
+/* The assets tab's \uD06C\uAC8C \uBCF4\uAE30 button on a cell. */
+.assetcell .bigbtn { position: absolute; top: 4px; right: 4px; font-size: 11px; padding: 1px 6px; opacity: .8; }
+.assetcell { position: relative; }
 /* AI review suggestions in the \uAC80\uC218 cells (\xA71-42). */
 .sugline { display: flex; align-items: center; gap: 4px; margin-top: 4px; padding: 3px 4px; border-radius: 5px;
   background: rgba(128,128,128,.08); border-left: 3px solid var(--textcolor2, #79839a); font-size: 11px; }
@@ -5365,29 +5382,14 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
   }
 
   // src/ui/artifact.ts
-  var view = null;
   var current = null;
-  function build() {
-    const body = el("div", { class: "artifactbody" });
-    const title = el("span", { class: "artifacttitle grow" });
-    const openFile = el("button", { class: "ghost tiny", text: "\uD30C\uC77C \uD0ED\uC5D0\uC11C \uC5F4\uAE30" });
-    openFile.addEventListener("click", () => {
-      if (current) state.requestOpenFile(current.path);
-    });
-    const close = el("button", { class: "ghost tiny", text: "\uB2EB\uAE30" });
-    close.addEventListener("click", () => closeArtifact());
-    return el("div", { class: "artifactview" }, [
-      el("div", { class: "artifacthead" }, [title, openFile, close]),
-      body
-    ]);
-  }
-  async function load(spec3) {
-    if (!view) return;
-    const body = view.querySelector(".artifactbody");
-    const title = view.querySelector(".artifacttitle");
-    title.textContent = spec3.title || spec3.path;
-    title.title = spec3.path;
+  var closeCurrent = null;
+  async function fill(body, spec3) {
     clear(body);
+    if (spec3.node) {
+      body.appendChild(spec3.node);
+      return;
+    }
     body.appendChild(el("div", { class: "hint", text: "\uC5EC\uB294 \uC911\uC785\uB2C8\uB2E4\u2026" }));
     const kind = spec3.kind ?? (/\.(png|jpe?g|gif|webp|avif|bmp)$/i.test(spec3.path) ? "image" : /\.(md|markdown)$/i.test(spec3.path) ? "markdown" : "text");
     try {
@@ -5409,33 +5411,33 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       body.appendChild(el("div", { class: "notice err", text: e instanceof Error ? e.message : String(e) }));
     }
   }
-  function centreOf() {
-    return document.querySelector(".panel.active .split > .left");
-  }
-  function showArtifact(spec3, opts = {}) {
+  function showArtifact(spec3, _opts = {}) {
+    closeArtifact();
     current = spec3;
-    if (!view) view = build();
-    const centre = centreOf();
-    if (centre && view.parentElement !== centre) centre.appendChild(view);
-    view.style.display = "";
-    void load(spec3);
-    if (opts.flipMobile) showMobileCentre();
+    const body = el("div", { class: "artifactbody" });
+    const head = el("div", { class: "artifacthead row" });
+    if (spec3.path && !spec3.node) {
+      const openFile = el("button", { class: "ghost tiny", text: "\uD30C\uC77C \uD0ED\uC5D0\uC11C \uC5F4\uAE30" });
+      openFile.addEventListener("click", () => {
+        closeArtifact();
+        state.requestOpenFile(spec3.path);
+      });
+      head.append(el("span", { class: "hint grow", text: spec3.path }), openFile);
+    }
+    const view2 = el("div", { class: "artifactview" }, [head, body]);
+    closeCurrent = modal(spec3.title || spec3.path, view2, { wide: true, cls: "artifactmodal", onClose: () => {
+      current = null;
+      closeCurrent = null;
+    } });
+    void fill(body, spec3);
   }
   function closeArtifact() {
-    if (view) {
-      view.style.display = "none";
-      view.remove();
-    }
+    const c = closeCurrent;
+    closeCurrent = null;
     current = null;
+    c?.();
   }
   function remountArtifact() {
-    if (!view || !current) return;
-    const centre = centreOf();
-    if (!centre) {
-      view.remove();
-      return;
-    }
-    if (view.parentElement !== centre) centre.appendChild(view);
   }
 
   // src/ui/conflicts.ts
@@ -6268,9 +6270,9 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       if (p.phase === "pulling" && p.pull && p.pull.total) ratio = p.pull.done / p.pull.total;
       else if (p.phase === "pushing" && p.toPush) ratio = (p.read + p.readFailed) / p.toPush;
       const bar3 = el("div", { class: "assetbar" + (ratio < 0 ? " indeterminate" : "") });
-      const fill = el("div", { class: "assetfill" });
-      if (ratio >= 0) fill.style.width = Math.round(Math.min(1, ratio) * 100) + "%";
-      bar3.appendChild(fill);
+      const fill2 = el("div", { class: "assetfill" });
+      if (ratio >= 0) fill2.style.width = Math.round(Math.min(1, ratio) * 100) + "%";
+      bar3.appendChild(fill2);
       wrap.appendChild(line);
       wrap.appendChild(bar3);
     } else {
@@ -6484,9 +6486,9 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       const bytes = await Risuai.readImage(path);
       if (!bytes || !bytes.byteLength) return;
       if (portraitUrl) URL.revokeObjectURL(portraitUrl);
-      const view3 = bytes;
-      const buf = new Uint8Array(view3.byteLength);
-      buf.set(view3);
+      const view2 = bytes;
+      const buf = new Uint8Array(view2.byteLength);
+      buf.set(view2);
       portraitUrl = URL.createObjectURL(new Blob([buf]));
       const img = el("img", { class: "botportrait", src: portraitUrl, alt: "" });
       img.addEventListener("error", () => {
@@ -7257,6 +7259,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       const abort = new AbortController();
       const stopBtn = el("button", { class: "ghost tiny stopbtn", text: "\uC911\uB2E8", title: "\uC774 \uD134\uC744 \uC911\uB2E8\uD569\uB2C8\uB2E4" });
       stopBtn.addEventListener("click", () => {
+        void state.stopAgent();
         abort.abort();
         stopBtn.disabled = true;
       });
@@ -8710,9 +8713,9 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
   var previewPath = "";
   var delCtrl = null;
   var filterText2 = "";
-  var view2 = "list";
+  var view = "list";
   try {
-    if (localStorage.getItem("hina.filesView") === "grid") view2 = "grid";
+    if (localStorage.getItem("hina.filesView") === "grid") view = "grid";
   } catch {
   }
   var expanded = /* @__PURE__ */ new Set(["projects", "studio"]);
@@ -9092,13 +9095,13 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       drawCentre();
     });
     const viewBtn = iconBtn(
-      view2 === "grid" ? FICON.list : FICON.grid,
-      view2 === "grid" ? "\uBAA9\uB85D \uBCF4\uAE30" : "\uBBF8\uB9AC\uBCF4\uAE30 \u2014 \uC378\uB124\uC77C\uB85C \uBD05\uB2C8\uB2E4"
+      view === "grid" ? FICON.list : FICON.grid,
+      view === "grid" ? "\uBAA9\uB85D \uBCF4\uAE30" : "\uBBF8\uB9AC\uBCF4\uAE30 \u2014 \uC378\uB124\uC77C\uB85C \uBD05\uB2C8\uB2E4"
     );
     viewBtn.addEventListener("click", () => {
-      view2 = view2 === "grid" ? "list" : "grid";
+      view = view === "grid" ? "list" : "grid";
       try {
-        localStorage.setItem("hina.filesView", view2);
+        localStorage.setItem("hina.filesView", view);
       } catch {
       }
       drawCentre();
@@ -9185,7 +9188,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     ].filter((e) => !q || e.name.toLowerCase().includes(q));
     if (!entries.length) {
       list2.appendChild(el("div", { class: "fempty", text: q ? `\u201C${filterText2}\u201D \uC5D0 \uB9DE\uB294 \uD56D\uBAA9\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.` : writable ? "\uBE44\uC5B4 \uC788\uC2B5\uB2C8\uB2E4. \uD30C\uC77C\uC744 \uB04C\uC5B4\uB2E4 \uB193\uAC70\uB098 \uC67C\uCABD \u201C\uC62C\uB9AC\uAE30\u201D\uB97C \uB204\uB974\uC138\uC694." : "\uBE44\uC5B4 \uC788\uC2B5\uB2C8\uB2E4." }));
-    } else if (view2 === "grid" && hasImages) {
+    } else if (view === "grid" && hasImages) {
       const grid = el("div", { class: "fgrid" });
       for (const e of entries) grid.appendChild(gridCell(e, entries, n));
       list2.appendChild(grid);
@@ -9886,13 +9889,13 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     const ask = el("div");
     const label = el("span", { class: "grow", text: title });
     const num = el("span");
-    const fill = el("div", { class: "assetfill" });
+    const fill2 = el("div", { class: "assetfill" });
     const errs = el("div", { class: "uperr", style: { display: "none" } });
     const panel2 = el("div", { class: "uploadpanel" }, [
       el("div", { class: "uphead" }, [el("span", { text: "\uC62C\uB9AC\uAE30" }), closeBtn]),
       ask,
       el("div", { class: "upline" }, [label, num]),
-      el("div", { class: "assetbar" }, [fill]),
+      el("div", { class: "assetbar" }, [fill2]),
       errs
     ]);
     closeBtn.addEventListener("click", () => {
@@ -9905,7 +9908,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       ask,
       set(sentBytes, totalBytes, text2) {
         num.textContent = text2;
-        fill.style.width = totalBytes ? `${Math.min(100, sentBytes / totalBytes * 100).toFixed(1)}%` : "0%";
+        fill2.style.width = totalBytes ? `${Math.min(100, sentBytes / totalBytes * 100).toFixed(1)}%` : "0%";
       },
       error(text2) {
         errs.style.display = "";
@@ -9913,8 +9916,8 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       },
       finish(ok, text2) {
         num.textContent = text2;
-        fill.style.width = "100%";
-        fill.style.background = ok ? "#10b981" : "#ef4444";
+        fill2.style.width = "100%";
+        fill2.style.background = ok ? "#10b981" : "#ef4444";
         panel2.classList.add(ok ? "done" : "failed");
         if (ok) {
           upHideTimer = setTimeout(() => {
@@ -11034,6 +11037,28 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       buildVisionCard()
     ]);
   }
+  function foldableCard(id, title, body) {
+    const key = "hina.foldCard." + id;
+    let open4 = false;
+    try {
+      open4 = localStorage.getItem(key) === "1";
+    } catch {
+    }
+    const caret = el("span", { class: "foldcaret", text: open4 ? "\u25BE" : "\u25B8" });
+    const head = el("h2", { class: "foldhead", title: "\uC811\uAE30/\uD3BC\uCE58\uAE30" }, [caret, el("span", { text: title })]);
+    const box = el("div", { class: "foldbody" }, body);
+    box.style.display = open4 ? "" : "none";
+    head.addEventListener("click", () => {
+      open4 = !open4;
+      box.style.display = open4 ? "" : "none";
+      caret.textContent = open4 ? "\u25BE" : "\u25B8";
+      try {
+        localStorage.setItem(key, open4 ? "1" : "0");
+      } catch {
+      }
+    });
+    return el("div", { class: "card foldable" + (open4 ? "" : " folded"), id }, [head, box]);
+  }
   function buildVisionCard() {
     const modeSel = el("select");
     const modeNote = el("div", { class: "hint", style: { margin: "4px 0 10px" } });
@@ -11054,8 +11079,13 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     hReset.addEventListener("click", () => {
       hInstr.value = st?.helper.defaultInstructions ?? "";
     });
+    const hUrlRow = el("label", { class: "field" }, [el("span", { text: "\uC8FC\uC18C (baseUrl)" }), hUrl]);
+    const hUrlNote = el("div", { class: "hint", style: { display: "none" }, text: "\uC8FC\uC18C\uB294 \uC120\uD0DD\uD55C API \uD0A4\uC5D0 \uC800\uC7A5\uB41C \uAC83\uC744 \uC501\uB2C8\uB2E4." });
     const syncHelperKey = () => {
-      hKeyRow.style.display = selectedValue(hKeySel) ? "none" : "";
+      const ref = !!selectedValue(hKeySel);
+      hKeyRow.style.display = ref ? "none" : "";
+      hUrlRow.style.display = ref ? "none" : "";
+      hUrlNote.style.display = ref ? "" : "none";
     };
     hKeySel.addEventListener("change", syncHelperKey);
     const helperPane = el("div", { class: "wsmode" }, [
@@ -11064,7 +11094,8 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         style: { marginBottom: "8px" },
         text: 'OpenAI \uD638\uD658 chat/completions \uC5D0 \uADF8\uB9BC\uC744 \uC2E4\uC5B4 \uBCF4\uB0C5\uB2C8\uB2E4. \uC131\uC778 \uC774\uBBF8\uC9C0\uAC00 \uB9CE\uB2E4\uBA74 \uBB34\uAC80\uC5F4/\uB85C\uCEEC \uBAA8\uB378(\uC608: Ollama \uC758 llava\xB7qwen2.5-vl, \uC8FC\uC18C http://127.0.0.1:11434/v1)\uC744 \uAD8C\uD569\uB2C8\uB2E4 \u2014 \uC678\uBD80 API \uB294 \uAC70\uC808\uD560 \uC218 \uC788\uACE0, \uAC70\uC808\uB418\uBA74 \uD234\uC774 "VISION REFUSED" \uB85C \uC54C\uB9BD\uB2C8\uB2E4.'
       }),
-      el("label", { class: "field" }, [el("span", { text: "\uC8FC\uC18C (baseUrl)" }), hUrl]),
+      hUrlRow,
+      hUrlNote,
       el("label", { class: "field" }, [el("span", { text: "\uBAA8\uB378" }), hModel]),
       el("label", { class: "field" }, [el("span", { text: "API \uD0A4 (\uD0A4 \uBAA9\uB85D\uC5D0\uC11C)" }), hKeySel]),
       hKeyRow,
@@ -11091,7 +11122,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       modeNote.textContent = st?.modes.find((x) => x.id === m)?.note ?? "";
     };
     modeSel.addEventListener("change", syncMode);
-    const load2 = async () => {
+    const load = async () => {
       try {
         const [r, k] = await Promise.all([state.vision(), state.apiKeys().catch(() => ({ keys: [] }))]);
         st = r;
@@ -11129,7 +11160,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       const m = selectedValue(modeSel);
       const p = { mode: m };
       if (m === "helper") {
-        p.helperBaseUrl = hUrl.value.trim();
+        p.helperBaseUrl = selectedValue(hKeySel) ? "" : hUrl.value.trim();
         p.helperModel = hModel.value.trim();
         p.helperKeyRef = selectedValue(hKeySel);
         p.helperApiKey = hKey.value ? hKey.value : st?.helper.apiKeySet ? keep : "";
@@ -11148,7 +11179,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       try {
         await state.saveVision(patch());
         hKey.value = "";
-        await load2();
+        await load();
         clear(out);
         out.appendChild(el("div", { class: "notice ok", text: "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4." }));
       } catch (e) {
@@ -11168,7 +11199,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         await state.saveVision(patch());
         hKey.value = "";
         const r = await state.testVision(path.value.trim(), "");
-        await load2();
+        await load();
         clear(out);
         const head = r.ok ? `\uBD05\uB2C8\uB2E4 \xB7 ${r.detail} \xB7 ${(r.ms / 1e3).toFixed(1)}\uCD08` : r.refused ? `\uAC70\uC808\uB428 \u2014 \uC774 \uBAA8\uB378\uC740 \uC774 \uADF8\uB9BC\uC744 \uBB18\uC0AC\uD558\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4. \uBB34\uAC80\uC5F4/\uB85C\uCEEC \uBAA8\uB378\uB85C \uBC14\uAFB8\uAC70\uB098 \uB2E4\uB978 \uC774\uBBF8\uC9C0\uB97C \uC2DC\uB3C4\uD558\uC138\uC694.` : `\uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4${r.detail ? " \xB7 " + r.detail : ""}`;
         out.appendChild(el("div", { class: "notice " + (r.ok ? "ok" : "err") }, [
@@ -11183,9 +11214,8 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         test.disabled = false;
       }
     });
-    void load2();
-    return el("div", { class: "card", id: "vision-card" }, [
-      el("h2", { text: "\uBE44\uC804 \uD234" }),
+    void load();
+    return foldableCard("vision-card", "\uBE44\uC804 \uD234", [
       el("div", { class: "hint", style: { marginBottom: "8px" }, text: "\uC77C\uBC18 \uC5D0\uC774\uC804\uD2B8\uAC00 \uC774\uBBF8\uC9C0\uB97C \uC9C1\uC811 \uBCF4\uACE0 \uD310\uB2E8\xB7\uAC80\uC218\xB7\uC870\uC815\uD560 \uB54C \uC4F0\uB294 view_image \xB7 compare_images \xB7 review_folder \uD234\uC785\uB2C8\uB2E4. \uB204\uAC00 \uBCFC\uC9C0 \uD558\uB098\uB97C \uACE0\uB985\uB2C8\uB2E4." }),
       status,
       el("label", { class: "field" }, [el("span", { text: "\uBCF4\uAE30 \uC635\uC158" }), modeSel]),
@@ -11258,7 +11288,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       modeNote.textContent = st?.modes.find((x) => x.id === m)?.note ?? "";
     };
     modeSel.addEventListener("change", syncMode);
-    const load2 = async () => {
+    const load = async () => {
       try {
         const [r, k] = await Promise.all([state.websearch(), state.apiKeys().catch(() => ({ keys: [] }))]);
         st = r;
@@ -11316,7 +11346,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         await state.saveWebsearch(patch());
         gKey.value = "";
         pKey.value = "";
-        await load2();
+        await load();
         clear(out);
         out.appendChild(el("div", { class: "notice ok", text: "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4." }));
       } catch (e) {
@@ -11337,7 +11367,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         gKey.value = "";
         pKey.value = "";
         const r = await state.testWebsearch(q.value.trim() || "RisuAI \uCD5C\uC2E0 \uB9B4\uB9AC\uC2A4 \uBC84\uC804");
-        await load2();
+        await load();
         clear(out);
         out.appendChild(el("div", { class: "notice " + (r.ok ? "ok" : "err") }, [
           el("div", { text: r.ok ? `\uAC80\uC0C9\uB429\uB2C8\uB2E4 \xB7 ${r.detail} \xB7 ${(r.ms / 1e3).toFixed(1)}\uCD08` : `\uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4${r.detail ? " \xB7 " + r.detail : ""}` }),
@@ -11350,9 +11380,8 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         test.disabled = false;
       }
     });
-    void load2();
-    return el("div", { class: "card", id: "websearch-card" }, [
-      el("h2", { text: "\uC6F9 \uAC80\uC0C9 \uD234" }),
+    void load();
+    return foldableCard("websearch-card", "\uC6F9 \uAC80\uC0C9 \uD234", [
       el("div", { class: "hint", style: { marginBottom: "8px" }, text: "\uC77C\uBC18 \uC5D0\uC774\uC804\uD2B8\uAC00 \uC678\uBD80 \uC0AC\uC2E4\uC774 \uD544\uC694\uD560 \uB54C \uC4F0\uB294 web_search \uD234\uC785\uB2C8\uB2E4. \uB204\uAC00 \uAC80\uC0C9\uD560\uC9C0 \uD558\uB098\uB97C \uACE0\uB985\uB2C8\uB2E4." }),
       status,
       el("label", { class: "field" }, [el("span", { text: "\uAC80\uC0C9 \uC635\uC158" }), modeSel]),
@@ -11474,8 +11503,8 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       clear(provBox);
       provBox.style.display = p ? "" : "none";
       if (!p) return;
-      const fill = el("button", { class: "ghost tiny", text: "\uC608\uC2DC JSON \uCC44\uC6B0\uAE30" });
-      fill.addEventListener("click", () => {
+      const fill2 = el("button", { class: "ghost tiny", text: "\uC608\uC2DC JSON \uCC44\uC6B0\uAE30" });
+      fill2.addEventListener("click", () => {
         let cur = {};
         try {
           cur = params.value.trim() ? JSON.parse(params.value) : {};
@@ -11493,7 +11522,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       if (p.unsupported.length) provBox.appendChild(el("div", { class: "hint", text: "\uBCF4\uB0B4\uC9C0 \uC54A\uB294 \uD544\uB4DC: " + p.unsupported.join(", ") }));
       if (p.modelExample) provBox.appendChild(el("div", { class: "hint", text: "\uBAA8\uB378 \uC774\uB984 \uC608: " + p.modelExample }));
       const row = el("div", { class: "row", style: { marginTop: "4px" } }, [
-        Object.keys(p.template).length ? fill : null,
+        Object.keys(p.template).length ? fill2 : null,
         p.docs ? el("a", { href: p.docs, target: "_blank", rel: "noopener", class: "hint", text: "\uBB38\uC11C \u2197" }) : null
       ]);
       provBox.appendChild(row);
@@ -11506,7 +11535,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       model.value = m.id;
       if (api && !baseUrl.value) baseUrl.value = api;
     }));
-    const load2 = async () => {
+    const load = async () => {
       try {
         const r = await state.presets();
         keepSentinel = r.keepSentinel || keepSentinel;
@@ -11635,7 +11664,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         save.disabled = false;
       }
     });
-    void load2();
+    void load();
   }
   function buildCodexBox(modelInput, withLogin) {
     const line = el("div", { class: "hint" });
@@ -12211,7 +12240,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.14.0",
+            version: "0.14.1",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -12406,7 +12435,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     const path = el("input", { placeholder: "(\uBE44\uC6B0\uBA74 \uAE30\uBCF8: <data>/space)" });
     const out = el("div", { class: "hint" });
     const save = el("button", { class: "primary tiny", text: "\uC800\uC7A5" });
-    const load2 = async () => {
+    const load = async () => {
       try {
         const d = await state.diagnostics();
         const sp = d.space ?? {};
@@ -12426,8 +12455,8 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         save.disabled = false;
       }
     });
-    refreshers.push(load2);
-    void load2();
+    refreshers.push(load);
+    void load();
     const copy = el("button", { class: "ghost tiny", text: "\uBCF5\uC0AC", title: "\uACBD\uB85C\uB97C \uD074\uB9BD\uBCF4\uB4DC\uB85C" });
     copy.addEventListener("click", () => {
       const v = path.value.trim() || state.health?.space || "";
@@ -12500,7 +12529,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     const savePath = el("input", { placeholder: "D:\\path\\to\\Risuai-NodeOnly\\save  (PocketRisu \uC758 save \uD3F4\uB354, \uBC31\uC5D4\uB4DC\uC640 \uAC19\uC740 PC\uC77C \uB54C)" });
     const stats = el("div", { class: "hint" });
     const out = el("div", { class: "outbox" });
-    const load2 = async () => {
+    const load = async () => {
       try {
         const { config } = await state.getConfig();
         const pr = config.pocketrisu || {};
@@ -12515,14 +12544,14 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         stats.textContent = "";
       }
     };
-    void load2();
+    void load();
     const save = el("button", { class: "primary", text: "\uC800\uC7A5" });
     save.addEventListener("click", async () => {
       save.disabled = true;
       clear(out);
       try {
         await state.setConfig({ pocketrisu: { savePath: savePath.value.trim() } });
-        await load2();
+        await load();
         out.appendChild(el("div", { class: "notice ok", text: "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4. \uB2E4\uC74C \uC5D0\uC14B \uB3D9\uAE30\uD654\uBD80\uD130 \uC801\uC6A9\uB429\uB2C8\uB2E4." }));
       } catch (e) {
         out.appendChild(el("div", { class: "notice err", text: "\uC800\uC7A5 \uC2E4\uD328: " + (e instanceof Error ? e.message : String(e)) }));
@@ -12537,7 +12566,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       clear(out);
       try {
         const r = await transport.post("/assets/gc", {});
-        await load2();
+        await load();
         out.appendChild(el("div", { class: "notice ok", text: `\uC815\uB9AC\uD588\uC2B5\uB2C8\uB2E4: \uD30C\uC77C ${r.removed}\uAC1C \xB7 ${(r.freed / 1048576).toFixed(1)}MB \uD655\uBCF4 \xB7 \uACE0\uC544 \uD0A4 ${r.orphanKeys}\uAC1C` }));
       } catch (e) {
         out.appendChild(el("div", { class: "notice err", text: "GC \uC2E4\uD328: " + (e instanceof Error ? e.message : String(e)) }));
@@ -12859,7 +12888,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.14.0"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.14.1"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -13640,12 +13669,12 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       value: state.workspace?.characterName || "character",
       placeholder: "\uD30C\uC77C \uC774\uB984 (.charx)"
     });
-    const build2 = el("button", { class: "primary", text: "charx \uB9CC\uB4E4\uAE30" });
+    const build = el("button", { class: "primary", text: "charx \uB9CC\uB4E4\uAE30" });
     const buildAnyway = el("button", { class: "ghost", text: "\uBE60\uC9C4 \uC5D0\uC14B \uBE7C\uACE0 \uB9CC\uB4E4\uAE30" });
-    build2.disabled = !!blocked;
+    build.disabled = !!blocked;
     buildAnyway.style.display = "none";
     const run = async (allowMissing) => {
-      build2.disabled = buildAnyway.disabled = true;
+      build.disabled = buildAnyway.disabled = true;
       clear(out);
       out.appendChild(el("div", { class: "hint", text: "\uB9CC\uB4DC\uB294 \uC911\uC785\uB2C8\uB2E4\u2026 \uC5D0\uC14B\uC774 \uB9CE\uC73C\uBA74 \uBA87 \uBD84 \uAC78\uB9BD\uB2C8\uB2E4." }));
       try {
@@ -13663,11 +13692,11 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           out.appendChild(el("div", { class: "notice err", text: "charx \uB97C \uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg17(e) }));
         }
       } finally {
-        build2.disabled = !!charxBlockReason();
+        build.disabled = !!charxBlockReason();
         buildAnyway.disabled = false;
       }
     };
-    build2.addEventListener("click", () => {
+    build.addEventListener("click", () => {
       void run(false);
     });
     buildAnyway.addEventListener("click", () => {
@@ -13675,7 +13704,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     });
     body.appendChild(el("div", { class: "hint", text: "\uC791\uC5C5\uBCF8 \uCE74\uB4DC(\uBA54\uD0C0\xB7\uC778\uC0AC\uB9D0\xB7\uBD07 \uB85C\uC5B4\uBD81\xB7Regex\xB7\uD2B8\uB9AC\uAC70\xB7\uC5D0\uC14B \uC774\uB984)\uC640 \uC2A4\uD1A0\uC5B4\uC758 \uC774\uBBF8\uC9C0\uB85C charx \uB97C \uB9CC\uB4ED\uB2C8\uB2E4. \uBC18\uC601\uD558\uC9C0 \uC54A\uC740 \uD3B8\uC9D1\uB3C4 \uB4E4\uC5B4\uAC11\uB2C8\uB2E4. module.risum \uC5C6\uC774 card.json \uC5D0 \uC778\uB77C\uC778\uC73C\uB85C \uB2F4\uAE30\uBA70 RisuAI\xB7PocketRisu \uAC00 \uADF8\uB300\uB85C \uAC00\uC838\uC635\uB2C8\uB2E4." }));
     body.appendChild(el("div", { class: "row" }, [nameInput]));
-    body.appendChild(el("div", { class: "row" }, [build2, buildAnyway]));
+    body.appendChild(el("div", { class: "row" }, [build, buildAnyway]));
     body.appendChild(out);
   }
   function refreshBotBar() {
@@ -14107,6 +14136,16 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     const pic = el("div", { class: "assetpic" });
     box.appendChild(pic);
     void loadThumb2(c, pic);
+    if (/^(png|jpe?g|gif|webp|avif|bmp)$/i.test(c.ext)) {
+      const big = el("button", { class: "ghost tiny bigbtn", text: "\u2922 \uD06C\uAC8C", title: "\uD06C\uAC8C \uBCF4\uAE30" });
+      big.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        void openBig(c);
+      });
+      box.appendChild(big);
+      pic.style.cursor = "zoom-in";
+      pic.addEventListener("click", () => void openBig(c));
+    }
     box.draggable = true;
     box.addEventListener("dragstart", (e) => {
       const dt = e.dataTransfer;
@@ -14210,6 +14249,23 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     }
     return null;
   }
+  async function openBig(c) {
+    let url = thumbs.get(c.key) || "";
+    if (!url) {
+      try {
+        const view2 = await thumbBytes(c);
+        if (view2) {
+          const buf = new Uint8Array(view2.byteLength);
+          buf.set(view2);
+          url = URL.createObjectURL(new Blob([buf]));
+          thumbs.set(c.key, url);
+        }
+      } catch {
+      }
+    }
+    const node = url ? el("img", { src: url, alt: c.name || c.key }) : el("div", { class: "hint", text: "\uC774\uBBF8\uC9C0\uB97C \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4 (\uB3D9\uAE30\uD654 \uC804\uC774\uAC70\uB098 \uC2E4\uD328)." });
+    showArtifact({ path: "", title: `${c.name || c.key}${c.size ? " \xB7 " + mb(c.size) : ""}`, kind: "image", node });
+  }
   async function loadThumb2(c, mount) {
     const isImage = /^(png|jpe?g|gif|webp|avif|bmp)$/i.test(c.ext);
     if (!isImage) {
@@ -14221,10 +14277,10 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       const release = await thumbSlot();
       try {
         if (!mount.isConnected) return;
-        const view3 = await thumbBytes(c);
-        if (view3) {
-          const buf = new Uint8Array(view3.byteLength);
-          buf.set(view3);
+        const view2 = await thumbBytes(c);
+        if (view2) {
+          const buf = new Uint8Array(view2.byteLength);
+          buf.set(view2);
           url = URL.createObjectURL(new Blob([buf]));
           if (thumbs.size > 400) {
             for (const [k, u] of thumbs) {
@@ -16265,22 +16321,22 @@ ${negative.value.trim()}
     const fragNames2 = () => fragKeys();
     attachHilite(pos, { mode: "nai", fragments: fragNames2 });
     attachHilite(neg, { mode: "nai", fragments: fragNames2 });
-    const fill = (positive, negative) => {
+    const fill2 = (positive, negative) => {
       pos.value = positive;
       neg.value = negative;
     };
     if (pending2 && pending2.path === path) {
-      fill(pending2.positive, pending2.negative);
+      fill2(pending2.positive, pending2.negative);
       schedule(path, status);
     } else if (loadedDoc && loadedDoc.path === path) {
-      fill(loadedDoc.doc.positive, loadedDoc.doc.negative);
+      fill2(loadedDoc.doc.positive, loadedDoc.doc.negative);
     } else {
       status.textContent = "\uC77D\uB294 \uC911\uC785\uB2C8\uB2E4\u2026";
       void state.readFile(path).then((r) => {
         const doc = parseStyleDoc(r.content);
         loadedDoc = { path, doc };
         if (!pending2 || pending2.path !== path) {
-          if (pos.isConnected) fill(doc.positive, doc.negative);
+          if (pos.isConnected) fill2(doc.positive, doc.negative);
         }
         status.textContent = "";
       }).catch((e) => {
@@ -17336,10 +17392,10 @@ ${negative.value.trim()}
         }
       });
     });
-    const fill = el("div", { class: "sceneprog-fill" });
+    const fill2 = el("div", { class: "sceneprog-fill" });
     const plabel = el("span", { class: "sceneprog-label hint" });
     const prog = el("div", { class: "sceneprog", style: { display: "none" } }, [
-      el("div", { class: "sceneprog-track" }, [fill]),
+      el("div", { class: "sceneprog-track" }, [fill2]),
       plabel
     ]);
     const card = el("div", { class: "scenecard" + (mine ? " reserved" : ""), title: scene.prompt || scene.name }, [
@@ -17360,7 +17416,7 @@ ${negative.value.trim()}
       syncSummary();
     };
     cardSyncs.set(scene.name, sync);
-    cardRegs.set(scene.name, { card, prog, fill, label: plabel });
+    cardRegs.set(scene.name, { card, prog, fill: fill2, label: plabel });
     return card;
   }
   function syncSummary() {
@@ -17879,12 +17935,12 @@ ${negative.value.trim()}
       clear(missingBox);
       const missing = g.groups.filter((grp) => !grp.items.some((i) => selection2[i.filename]?.use)).map((grp) => grp.key);
       if (!missing.length) return;
-      const fill = el("button", {
+      const fill2 = el("button", {
         class: "ghost tiny",
         text: "\uBD80\uC871\uBD84 \uB2E4\uC2DC \uC0DD\uC131 \uC608\uC57D",
         title: "\uCC44\uD0DD\uC774 \uC5C6\uB294 \uADF8\uB8F9\uC744 \uBC30\uCE58 \uC608\uC57D\uC5D0 1\uC7A5\uC529 \uB123\uC2B5\uB2C8\uB2E4 (\uD604\uC7AC \uC52C \uD504\uB9AC\uC14B\uC5D0 \uAC19\uC740 \uC774\uB984\uC758 \uC52C\uC774 \uC788\uB294 \uAC83\uB9CC)"
       });
-      fill.addEventListener("click", () => void reserveMissing(missing, fill));
+      fill2.addEventListener("click", () => void reserveMissing(missing, fill2));
       const FOLD = 6;
       const names = el("span", { class: "hint grow" });
       let open4 = false;
@@ -17903,7 +17959,7 @@ ${negative.value.trim()}
         el("span", { class: "badge warn", text: `\uCC44\uD0DD \uC5C6\uB294 \uADF8\uB8F9 ${missing.length}\uAC1C`, title: "\uD6C4\uBCF4\uB294 \uC788\uB294\uB370 \uC544\uC9C1 \uCC44\uD0DD\uD55C \uC7A5\uC774 \uC5C6\uB294 \uADF8\uB8F9" }),
         names,
         more,
-        fill
+        fill2
       ]));
     };
     renderMissing();
@@ -18587,24 +18643,18 @@ ${negative.value.trim()}
     if (saved && typeof saved === "object") Object.assign(panels, saved);
   } catch {
   }
-  var autoRight = false;
-  var wasInspect = false;
   var layBtnL = null;
   var layBtnR = null;
   function applyPanels() {
     if (!splitRoot) return;
     splitRoot.classList.toggle("lcollapse", panels.left);
-    splitRoot.classList.toggle("rcollapse", panels.right || autoRight);
+    splitRoot.classList.toggle("rcollapse", panels.right);
     reclamp(splitRoot);
     layBtnL?.classList.toggle("on", !panels.left);
-    layBtnR?.classList.toggle("on", !(panels.right || autoRight));
+    layBtnR?.classList.toggle("on", !panels.right);
   }
   function togglePanel(side) {
-    if (side === "right" && autoRight) {
-      autoRight = false;
-    } else {
-      panels[side] = !panels[side];
-    }
+    panels[side] = !panels[side];
     try {
       localStorage.setItem(PANELS_KEY, JSON.stringify(panels));
     } catch {
@@ -18831,15 +18881,6 @@ ${negative.value.trim()}
     const viewMount6 = S.viewMount;
     if (!viewMount6) return;
     clear(viewMount6);
-    const inInspect = S.centreMode === "tab" && !S.selectedFile && S.centreTab === "inspect" || S.centreMode === "folder" || S.centreMode === "selector" || S.centreMode === "fragments";
-    if (inInspect && !wasInspect && !panels.right) {
-      autoRight = true;
-      applyPanels();
-    } else if (!inInspect && wasInspect && autoRight) {
-      autoRight = false;
-      applyPanels();
-    }
-    wasInspect = inInspect;
     if (S.selectedFile) {
       const area = areaOfPath(S.selectedFile);
       if (area === "characters" && !/\.[a-z0-9]+$/i.test(S.selectedFile)) {
@@ -19123,7 +19164,7 @@ ${negative.value.trim()}
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.14.0"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.14.1"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
@@ -19218,7 +19259,7 @@ ${negative.value.trim()}
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.14.0" }),
+        el("span", { class: "dim", text: "v0.14.1" }),
         healthEl,
         el("span", { class: "spacer" }),
         reload,
@@ -19490,6 +19531,6 @@ ${negative.value.trim()}
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.14.0"} loaded`);
+    console.log(`[risu-hina] v${"0.14.1"} loaded`);
   })();
 })();

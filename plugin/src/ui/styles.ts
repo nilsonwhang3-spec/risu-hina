@@ -406,6 +406,10 @@ button.tool .tool-label { font-size: 12px; }
 button.iconbtn { padding: 4px 8px; background: transparent; border-color: transparent; font-size: 14px; }
 button.iconbtn:hover:not(:disabled) { background: rgba(128,128,128,.14); }
 button.iconbtn.on { background: rgba(37,99,235,.18); }
+/* An armed icon verb (삭제 → 정말?) must be SEEN: the transparent icon rule
+   above outranked .danger by order, so the confirm label was grey on nothing
+   (§1-45 field report). */
+button.iconbtn.danger { background: #b91c1c; border-color: #b91c1c; color: #fff; border-radius: 5px; font-size: 11px; white-space: nowrap; padding: 3px 8px; }
 /* The review rule popover (§1-30): compact editor behind one summary button. */
 .rulepop { min-width: 260px; max-width: 380px; }
 .rulepop .advbox { margin-top: 6px; }
