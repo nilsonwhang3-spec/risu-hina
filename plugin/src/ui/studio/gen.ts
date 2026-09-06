@@ -10,6 +10,7 @@ import { el, clear, modal, pollWhileVisible } from '../dom';
 import { smallScreen } from '../blobimg';
 import { askName } from '../kit';
 import { state, type StudioJob } from '../../state';
+import { BackendError } from '../../transport';
 import { pickerRow, openListPicker, type PickerEntry } from '../pickers';
 import { S, hub, gen, persistGen, activeOf, spec, checkUnresolved, newCard, msg } from './store';
 
@@ -373,8 +374,37 @@ export async function startRun(overrides: Record<string, unknown> = {}): Promise
   }
 }
 
-export function cancelRun(): void {
-  if (S.jobId) void state.studio.cancelJob(S.jobId);
+export async function cancelRun(): Promise<void> {
+  if (!S.jobId) return;
+  try {
+    await state.studio.cancelJob(S.jobId);
+  } catch (e) {
+    hub.notice('취소 요청이 닿지 않았습니다: ' + msg(e), 'err');
+  }
+  // Whatever the server says now is the truth: a job it no longer has (a
+  // restart, a batch that ended while the phone was offline) leaves the
+  // screen (§1-58 "취소 눌러도 소용없음").
+  await loadJobs(true);
+  if (S.jobId && !jobTimer) void pollJob();
+}
+
+/** Drop the job from the screen: it is gone server-side or finished. */
+function forgetJob(reason: string): void {
+  const stopPoll = jobTimer;
+  S.jobId = '';
+  S.queueJob = null;
+  jobsStale = true;
+  if (stopPoll) { stopPoll(); jobTimer = null; }
+  stopPreview();
+  releasePreview();
+  if (reason) hub.notice(reason, '');
+  hub.jobTick();
+  hub.drawCentre();
+}
+
+/** True while the 1.5s job poll is running. */
+export function jobPollAlive(): boolean {
+  return jobTimer !== null;
 }
 
 /** How many images the live job still owes (for the 취소 (n) label). */
@@ -400,9 +430,41 @@ export async function loadJobs(force = false): Promise<StudioJob[]> {
         S.queueJob = running;
         void pollJob();
       }
+    } else {
+      // The job on screen against the server's list (§1-58): after a
+      // network error the poll used to die and the batch tab kept showing a
+      // job that had long finished - or that a restart had forgotten.
+      const mine = S.jobs.find((j) => j.id === S.jobId);
+      if (!mine) forgetJob('화면의 배치가 서버에 없어 지웠습니다 (재시작되었거나 끝났습니다).');
+      else if (['done', 'partial', 'error', 'cancelled'].includes(mine.state)) await finishJob(mine);
+      else if (!jobTimer) void pollJob();
     }
   } catch { /* keep what we have */ }
   return S.jobs;
+}
+
+/** A job the server reports finished: report, let go, re-read the library. */
+async function finishJob(j: StudioJob): Promise<void> {
+  const spent = j.result?.anlasSpent;
+  hub.notice(`배치 ${j.state} — ${j.result?.saved ?? 0}장 저장`
+    + (j.result?.failed ? `, ${j.result.failed}장 실패` : '')
+    + (typeof spent === 'number' ? ` · Anlas ${spent} 소모` : ''),
+    j.state === 'error' ? 'err' : 'ok');
+  S.queueJob = j;
+  S.jobId = '';
+  jobsStale = true;
+  if (jobTimer) { jobTimer(); jobTimer = null; }
+  stopPreview();
+  // The last streamed frame is HELD (anti-flicker): the tab lets go of it
+  // only once the finished file's blob has loaded in its place - and in
+  // any case soon after, so a frame nobody swaps out is not kept all day.
+  setTimeout(releasePreview, 20_000);
+  hub.jobTick();
+  // The batch wrote images: the files tab gets the news (and the unseen
+  // badge) while we re-read our own slice.
+  hub.touchQuiet(j.payload?.saved ?? []);
+  await hub.refresh();
+  await hub.loadStatus();
 }
 
 export function markJobsStale(): void {
@@ -417,35 +479,26 @@ export function markJobsStale(): void {
 export async function pollJob(): Promise<void> {
   if (S.jobId) pollPreview();
   if (jobTimer) return;
+  let misses = 0;
   const tick = async () => {
     if (!S.jobId) return stop();
     let j;
     try {
       j = await state.studio.job(S.jobId);
-    } catch {
-      return stop();
+      misses = 0;
+    } catch (e) {
+      // A dropped connection used to END the poll and leave the job on
+      // screen for good (§1-58). Keep asking - the network comes back, or
+      // the server says the job is gone.
+      if (e instanceof BackendError && e.status === 404) { forgetJob('화면의 배치가 서버에 없어 지웠습니다.'); return; }
+      misses += 1;
+      if (misses === 8) hub.notice('배치 상태를 읽지 못하고 있습니다 (연결 확인). 계속 다시 시도합니다.', 'err');
+      return;
     }
+    if (!j || !j.id) { forgetJob('화면의 배치가 서버에 없어 지웠습니다.'); return; }
     S.queueJob = j;
     if (['done', 'partial', 'error', 'cancelled'].includes(j.state)) {
-      const spent = j.result?.anlasSpent;
-      hub.notice(`배치 ${j.state} — ${j.result?.saved ?? 0}장 저장`
-        + (j.result?.failed ? `, ${j.result.failed}장 실패` : '')
-        + (typeof spent === 'number' ? ` · Anlas ${spent} 소모` : ''),
-        j.state === 'error' ? 'err' : 'ok');
-      S.jobId = '';
-      jobsStale = true;
-      stop();
-      stopPreview();
-      // The last streamed frame is HELD (anti-flicker): the tab lets go of it
-      // only once the finished file's blob has loaded in its place - and in
-      // any case soon after, so a frame nobody swaps out is not kept all day.
-      setTimeout(releasePreview, 20_000);
-      hub.jobTick();
-      // The batch wrote images: the files tab gets the news (and the unseen
-      // badge) while we re-read our own slice.
-      hub.touchQuiet(j.payload?.saved ?? []);
-      await hub.refresh();
-      await hub.loadStatus();
+      await finishJob(j);
       return;
     }
     hub.jobTick();

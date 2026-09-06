@@ -847,4 +847,56 @@ except ImportError:
 with studiojob._preview_lock:
     studiojob._preview.pop("job_x", None)
 
+
+print("\ntest_inpaint_feather")
+# §1-57: the dual-mask path. A fake NovelAI returns a solid red frame; the
+# original is solid blue. Far from the box the result must be byte-for-byte
+# the original, inside it red, and across the edge a gradient - not a step.
+try:
+    from PIL import Image as _FI
+    import io as _fio
+    _real_infill = nai.infill
+    _seen = {}
+
+    def _fake_infill(model, png, mask, prompt, negative="", params=None, add_original=True):
+        _seen["mask"] = mask
+        _seen["add_original"] = add_original
+        w, h = nai.png_size(png)
+        _seen["size"] = (w, h)
+        b = _fio.BytesIO()
+        _FI.new("RGB", (w, h), (220, 30, 30)).save(b, "PNG")
+        return b.getvalue()
+
+    nai.infill = _fake_infill
+    try:
+        _b = _fio.BytesIO()
+        _FI.new("RGBA", (256, 256), (30, 30, 220, 254)).save(_b, "PNG")
+        _srcrel = studio.save_image("images/페더", "파랑.png", _b.getvalue(), {"scene": "t"})["path"]
+        _box = [{"x": 0.25, "y": 0.25, "w": 0.5, "h": 0.5}]
+        _r = studio.inpaint(_srcrel, _box, "빨강", model="nai-diffusion-4-5-full", feather_px=16, padding_px=24)
+        check("the record says feather", _r.get("composite") == "feather", str(_r)[:120])
+        check("the server overlay is OFF", _seen.get("add_original") is False)
+        check("the API gets the flattened original at the same size", _seen.get("size") == (256, 256))
+        with _FI.open(_fio.BytesIO(_seen["mask"])) as _gm:
+            _gmp = _gm.convert("L")
+            check("the generation mask is the box grown by padding", _gmp.getpixel((64 - 20, 128)) == 255 and _gmp.getpixel((64 - 30, 128)) == 0)
+        with _FI.open(_fio.BytesIO(studio.read_bytes(_r["path"]))) as _out:
+            check("the result keeps the original's mode (alpha survives)", _out.mode == "RGBA", _out.mode)
+            check("far from the box the original is untouched, alpha included", _out.getpixel((4, 4)) == (30, 30, 220, 254), str(_out.getpixel((4, 4))))
+            check("inside the box it is the model's frame", _out.getpixel((128, 128)) == (220, 30, 30, 254), str(_out.getpixel((128, 128))))
+            _o = _out.convert("RGB")
+            _row = [_o.getpixel((x, 128))[0] for x in range(40, 90)]
+            check("the edge is a gradient, not a step", any(40 < v < 210 for v in _row), str(_row))
+            check("and monotonic across the edge", all(_row[i] <= _row[i + 1] + 2 for i in range(len(_row) - 1)))
+        _bm = studio.blend_mask_bytes(256, 256, _box, 16)
+        with _FI.open(_fio.BytesIO(_bm)) as _m:
+            _vals = set(_m.getdata())
+            check("the blend mask is L with mid-values", _m.mode == "L" and 0 in _vals and 255 in _vals and any(0 < v < 255 for v in _vals))
+        _r2 = studio.inpaint(_srcrel, _box, "빨강", model="nai-diffusion-4-5-full", composite="server")
+        check("composite=server keeps the old hard path", _r2.get("composite") == "server" and _seen.get("add_original") is True)
+    finally:
+        nai.infill = _real_infill
+except ImportError:
+    print("  (no Pillow: feather check skipped)")
+
 print("PASS - the studio is a folder of the one space, and the SYSTEM wall holds")

@@ -1259,7 +1259,10 @@ def h_studio_inpaint(arg: dict) -> dict:
         r = studio.inpaint(str(arg.get("path") or ""), boxes,
                            str(arg.get("prompt") or ""),
                            model=str(arg.get("model") or "nai-diffusion-4-5-full"),
-                           negative=str(arg.get("negative") or ""))
+                           negative=str(arg.get("negative") or ""),
+                           composite=str(arg.get("composite") or "feather"),
+                           padding_px=int(arg.get("paddingPx") or 0),
+                           feather_px=int(arg.get("featherPx") or 0))
     except (studio.StudioError, files.FileError) as e:
         raise ApiError(400, str(e))
     except nai.NaiError as e:

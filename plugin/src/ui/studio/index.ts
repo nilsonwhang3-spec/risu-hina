@@ -31,7 +31,7 @@ import { bindAgent, mountAgent } from '../agentpane';
 import { CARD_AREAS, OUTPUT_ROOT, S, hub, areaOfPath, canonPath, checkUnresolved,
          persistLeftTab, persistCentreTab, buildOutput, buildExtras, extraPaths, addExtra,
          isOutputPath, find, msg } from './store';
-import { pollJob, loadJobs, markJobsStale } from './gen';
+import { pollJob, loadJobs, markJobsStale, jobPollAlive } from './gen';
 import { drawCardEditor, drawSceneEditor, drawRawFile, rawView } from './editors';
 import { drawCharacterEditor } from './char-edit';
 import { buildLeftPrompt, syncPromptBadges } from './left-prompt';
@@ -178,7 +178,10 @@ export function renderStudioTab(mount: HTMLElement): void {
       // 검수 on screen: re-read its folder even while a batch runs (§1-48).
       if (S.centreMode === 'selector' || (S.centreMode === 'tab' && !S.selectedFile && S.centreTab === 'inspect')) void pollGroups();
       if (renderedRev !== state.filesRev && !S.jobId) { void refresh(); return; }
-      if (S.jobId) return;
+      // A job on screen whose poll is not running (it never survives a
+      // page reload; a network error used to kill it): re-read the list,
+      // which adopts, finishes or forgets it (§1-58).
+      if (S.jobId && jobPollAlive()) return;
       void loadJobs(true).then(() => hub.jobTick());
     }, 5000, () => wasStudioActive);
   } else if (entering || renderedRev !== state.filesRev || state.openStudioRequest) {

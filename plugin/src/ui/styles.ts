@@ -513,6 +513,9 @@ button.iconbtn.danger { background: #b91c1c; border-color: #b91c1c; color: #fff;
 .thought { color: #7dd3fc; }
 .turn-body.raw { font-family: Consolas, monospace; font-size: 12px; color: var(--textcolor2, #9aa4b8); }
 .turn-body img.turn-img { max-width: 100%; max-height: 320px; border-radius: 5px; margin: 4px 0; }
+/* The folder picker tree (검수할 폴더): a folder with no pictures of its own is only a way down. */
+.pickertree { max-height: 60vh; overflow: auto; }
+.pickertree .treebranch.dim { opacity: .6; }
 /* Space images in markdown (agent bubbles, viewers). */
 .wsimg img { max-width: 100%; border-radius: 5px; margin: 4px 0; }
 .wsimg.thumb img { max-height: 180px; }

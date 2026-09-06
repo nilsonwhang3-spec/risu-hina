@@ -509,18 +509,23 @@ def inpaint_model(model: str) -> str:
 
 
 def infill(model: str, png: bytes, mask: bytes, prompt: str, negative: str = "",
-           params: dict | None = None) -> bytes:
+           params: dict | None = None, add_original: bool = True) -> bytes:
     """Repaint the white part of `mask` and leave the rest alone.
 
     Measured: with `add_original_image` everything outside the mask comes back
     byte-identical (docs/09 §7c), which is what makes this safe to offer on an
     asset someone has already chosen - it cannot quietly change the rest.
+
+    `add_original=False` asks for the model's whole frame instead: the server
+    overlay pastes the original back along the mask's HARD edge, and that
+    edge is baked into the result. studio.inpaint's feather path composites
+    the frame itself with a soft mask (§1-57).
     """
     w, h = png_size(png)
     p = build_parameters(prompt, negative, {**(params or {}), "width": w, "height": h})
     p["image"] = base64.b64encode(png).decode()
     p["mask"] = base64.b64encode(mask).decode()
-    p["add_original_image"] = True
+    p["add_original_image"] = bool(add_original)
     body = {"input": p["v4_prompt"]["caption"]["base_caption"],
             "model": inpaint_model(model), "action": "infill", "parameters": p}
     r = _req("POST", "/ai/generate-image", json=body)

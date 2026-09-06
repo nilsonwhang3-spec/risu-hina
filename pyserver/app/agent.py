@@ -1555,12 +1555,18 @@ def build() -> Agent[Deps]:
 
     @agent.tool
     def studio_inpaint(ctx: RunContext[Deps], path: str, boxes_json: str, prompt: str,
-                       model: str = "nai-diffusion-4-5-full", negative: str = "") -> str:
-        """Redraw only part of an image. The original stays; the result is a new file with `-fix` appended.
+                       model: str = "nai-diffusion-4-5-full", negative: str = "",
+                       padding_px: int = 0, feather_px: int = 0, composite: str = "feather") -> str:
+        """Redraw only part of an image. The original stays; the result is a new file beside it.
 
         boxes_json = [{"x":0.25,"y":0.15,"w":0.5,"h":0.35}] - RATIOS 0..1.
         (x,y is the top-left corner, w,h width/height. Several boxes are allowed.)
-        Only the inside of the boxes changes; the OUTSIDE stays exactly as the original.
+        Default composite="feather": the model repaints the boxes grown by padding_px (default
+        ~4.5% of the short side, so it sees the surroundings) and the result is blended into the
+        original with a Gaussian-feathered edge of feather_px (default ~2.5%, 12..64) - no
+        rectangle outline. Far from the boxes the picture stays exactly as it was. Raise
+        feather_px (32..48) on skin/background, keep 24..32 on fine line work like hands.
+        composite="server" is the old hard overlay (exact outside, hard edge).
 
         The cost depends on the account tier. Anlas is compared before and after and the actual
         charge reported, so confirm with one image before running several.
@@ -1570,7 +1576,8 @@ def build() -> Agent[Deps]:
             if not isinstance(boxes, list) or not boxes:
                 return 'boxes_json 은 [{"x":…,"y":…,"w":…,"h":…}] 배열이어야 합니다 (0~1 비율)'
             before = nai.anlas()
-            r = studio.inpaint(path, boxes, prompt, model=model, negative=negative)
+            r = studio.inpaint(path, boxes, prompt, model=model, negative=negative,
+                               composite=composite, padding_px=padding_px, feather_px=feather_px)
             after = nai.anlas()
         except Exception as e:  # noqa: BLE001
             return str(e)

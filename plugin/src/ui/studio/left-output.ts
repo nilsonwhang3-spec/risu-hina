@@ -6,9 +6,8 @@
  * rename, copy/cut/paste (a studio-side clipboard), path, zip, delete.
  */
 import { state } from '../../state';
-import { el, menuAt } from '../dom';
+import { el, menuAt, modal, searchBox, clear } from '../dom';
 import { askName } from '../kit';
-import { openListPicker } from '../pickers';
 import { copyToClipboard } from '../../host';
 import { treeRow, type TreeNode, type TreeSpec } from '../tree';
 import { S, hub, countFiles, fmtSize, msg, persistCentreTab, persistLeftTab,
@@ -338,40 +337,121 @@ function openExtraMenu(node: TreeNode, ev: MouseEvent): void {
   ]);
 }
 
-/** The picker: every folder in the space that directly holds pictures,
- * OUTPUT excluded (those are in the tree already). One listing call. */
+/** A folder of the picker's tree: pictures directly inside, and below. */
+interface PickDir {
+  path: string;
+  name: string;
+  kids: Map<string, PickDir>;
+  own: number;
+  total: number;
+}
+
+/** The picker: every folder in the space that holds pictures, as a TREE
+ * with a filter box - a flat list of a thousand paths was unusable once the
+ * space held two thousand pictures (§1-58). OUTPUT is excluded (it is in
+ * the tree already). One listing call. */
 export function openFolderPicker(): void {
-  openListPicker({
-    title: '검수할 폴더',
-    hint: '그림이 든 폴더만 보입니다. 고르면 왼쪽 “다른 폴더”에 들어가고 검수가 열립니다.',
-    selectedLabel: '열림',
-    async load() {
+  const listMount = el('div', { class: 'tree filetree pickertree' });
+  let filter = '';
+  let root: PickDir | null = null;
+  const expanded = new Set<string>();
+  const hint = el('div', { class: 'hint', style: { marginBottom: '8px' },
+    text: '그림이 든 폴더만 보입니다. 폴더를 고르면 왼쪽 “다른 폴더”에 들어가고 검수가 열립니다. 숫자는 하위 폴더까지 합한 장수입니다.' });
+  const box = searchBox('', (v) => { filter = v.trim().toLowerCase(); draw(); }, '폴더 이름으로 좁히기');
+  const close = modal('검수할 폴더', el('div', {}, [hint, box, listMount]), { wide: true });
+
+  const build = (paths: string[]): PickDir => {
+    const top: PickDir = { path: '', name: '', kids: new Map(), own: 0, total: 0 };
+    for (const p of paths) {
+      const dir = p.slice(0, p.lastIndexOf('/'));
+      let cur = top;
+      let acc = '';
+      for (const seg of dir.split('/')) {
+        acc = acc ? `${acc}/${seg}` : seg;
+        let k = cur.kids.get(seg);
+        if (!k) { k = { path: acc, name: seg, kids: new Map(), own: 0, total: 0 }; cur.kids.set(seg, k); }
+        k.total += 1;
+        cur = k;
+      }
+      cur.own += 1;
+    }
+    return top;
+  };
+  const matches = (d: PickDir): boolean => !filter || d.path.toLowerCase().includes(filter) || [...d.kids.values()].some(matches);
+  const toNode = (d: PickDir): TreeNode => ({
+    path: d.path,
+    name: d.name,
+    kids: [...d.kids.values()].filter(matches).sort((a, b) => a.name.localeCompare(b.name)).map(toNode),
+    count: d.total,
+    title: `${d.path} — 여기 ${d.own}장, 하위 포함 ${d.total}장`,
+    cls: (S.extraRoots.some((r) => r.path === d.path) ? 'on ' : '') + (d.own ? '' : 'dim'),
+    glyph: d.own ? undefined : '📁',
+  });
+  const pick = async (path: string): Promise<void> => {
+    addExtra(path);
+    // The tree needs the folder's own listing: a full refresh reads it.
+    S.selected = path;
+    S.selectedFile = '';
+    S.centreMode = 'tab';
+    S.centreTab = 'inspect';
+    S.leftTab = 'output';
+    persistCentreTab();
+    persistLeftTab();
+    close();
+    await hub.refresh();
+  };
+  const spec: TreeSpec = {
+    expanded,
+    selected: new Set(S.extraRoots.map((r) => r.path)),
+    onOpen(node) {
+      if (node.count && (root ? findDir(root, node.path)?.own : 0)) void pick(node.path);
+      else { if (expanded.has(node.path)) expanded.delete(node.path); else expanded.add(node.path); draw(); }
+    },
+    onToggle(node) {
+      if (expanded.has(node.path)) expanded.delete(node.path); else expanded.add(node.path);
+      draw();
+    },
+  };
+  const findDir = (d: PickDir, path: string): PickDir | null => {
+    if (d.path === path) return d;
+    for (const k of d.kids.values()) {
+      if (path === k.path || path.startsWith(k.path + '/')) return findDir(k, path);
+    }
+    return null;
+  };
+  const draw = (): void => {
+    clear(listMount);
+    if (!root) { listMount.appendChild(el('div', { class: 'hint', text: '읽는 중입니다…' })); return; }
+    // A filter opens every folder on the way to a match; otherwise the top
+    // two levels are open and the rest fold.
+    if (filter) {
+      const openAll = (d: PickDir): void => { if (matches(d)) { expanded.add(d.path); for (const k of d.kids.values()) openAll(k); } };
+      for (const k of root.kids.values()) openAll(k);
+    }
+    const tops = [...root.kids.values()].filter(matches).sort((a, b) => a.name.localeCompare(b.name));
+    if (!tops.length) { listMount.appendChild(el('div', { class: 'empty', text: filter ? '맞는 폴더가 없습니다.' : '그림이 든 폴더가 없습니다.' })); return; }
+    for (const t of tops) listMount.appendChild(treeRow(toNode(t), 0, spec));
+  };
+  draw();
+  void (async () => {
+    try {
       const listing = await state.files('', true);
-      const counts = new Map<string, number>();
+      const paths: string[] = [];
       for (const a of listing.areas) {
         for (const f of a.files) {
           if (!IMAGE_RE.test(f.name) || !f.path.includes('/')) continue;
           const dir = f.path.slice(0, f.path.lastIndexOf('/'));
           if (dir === 'studio/output' || dir.startsWith('studio/output/')) continue;
           if (dir.startsWith('studio/config/')) continue;
-          counts.set(dir, (counts.get(dir) ?? 0) + 1);
+          paths.push(f.path);
         }
       }
-      return [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([dir, n]) => ({
-        id: dir, name: dir, hint: `${n}장`, selected: S.extraRoots.some((r) => r.path === dir),
-      }));
-    },
-    async onSelect(entry) {
-      addExtra(entry.id);
-      // The tree needs the folder's own listing: a full refresh reads it.
-      S.selected = entry.id;
-      S.selectedFile = '';
-      S.centreMode = 'tab';
-      S.centreTab = 'inspect';
-      S.leftTab = 'output';
-      persistCentreTab();
-      persistLeftTab();
-      await hub.refresh();
-    },
-  });
+      root = build(paths);
+      for (const k of root.kids.values()) { expanded.add(k.path); for (const kk of k.kids.values()) expanded.add(kk.path); }
+      draw();
+    } catch (e) {
+      clear(listMount);
+      listMount.appendChild(el('div', { class: 'notice err', text: '폴더 목록을 읽지 못했습니다: ' + msg(e) }));
+    }
+  })();
 }
