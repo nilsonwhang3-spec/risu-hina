@@ -1109,6 +1109,13 @@ def h_studio_job(arg: dict) -> dict:
     return job
 
 
+def h_agent_stop(arg: dict) -> dict:
+    sid = str(arg.get("sessionId") or "")
+    if not sid:
+        return {"ok": False, "error": "sessionId 가 필요합니다"}
+    return session.stop(sid)
+
+
 def h_studio_job_cancel(arg: dict) -> dict:
     return {"ok": studiojob.cancel(str(arg.get("id") or ""))}
 
@@ -2237,6 +2244,7 @@ ROUTES: dict[str, Handler] = {
     "GET /studio/job": h_studio_job,
     "GET /studio/job/preview": h_studio_job_preview,
     "POST /studio/job/cancel": h_studio_job_cancel,
+    "POST /agent/stop": h_agent_stop,
     "POST /studio/recipe": h_studio_recipe,
     "POST /studio/parse": h_studio_parse,
     "GET /studio/naming": h_studio_naming,

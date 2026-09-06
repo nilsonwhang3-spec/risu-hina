@@ -176,6 +176,9 @@ def _price(model: str, usage: Any) -> tuple[float | None, dict]:
         "output": getattr(usage, "output_tokens", None),
         "requests": getattr(usage, "requests", None),
         "toolCalls": getattr(usage, "tool_calls", None),
+        # Prompt-cache hits, when the provider reports them: input billed at
+        # the cached rate. "How much of the 8M was really re-read" - this.
+        "cacheRead": getattr(usage, "cache_read_tokens", None),
     }
 
     reported = getattr(usage, "cost", None)
@@ -285,8 +288,39 @@ _EXTRA_LOCK = threading.Lock()
 _STOPPED: set[str] = set()
 
 
+# Batches a session's tools started (studio_generate): 중단 cancels them too,
+# awaited or not.
+_JOBS: dict[str, set[str]] = {}
+
+
+class TurnStopped(Exception):
+    """The user pressed 중단 (POST /agent/stop) while the turn was running."""
+
+
 def stopped(session_id: str | None) -> bool:
     return bool(session_id) and session_id in _STOPPED
+
+
+def note_job(session_id: str | None, job_id: str) -> None:
+    if session_id and job_id:
+        _JOBS.setdefault(session_id, set()).add(job_id)
+
+
+def stop(session_id: str) -> dict:
+    """중단 as an explicit request, not a dropped connection (§1-44): a proxy
+    between the browser and the backend may keep the upstream stream open
+    long after the client aborted, so the turn learned of 중단 only at its
+    next write - one image later for a batch, never for a silent tool. This
+    flags the session, kills its script, cancels its batches; the run loop
+    sees the flag within a second and ends the turn."""
+    from . import studiojob
+    _STOPPED.add(session_id)
+    pyexec.abort(session_id)
+    jobs = _JOBS.pop(session_id, set())
+    for j in jobs:
+        studiojob.cancel(j)
+    log.info("agent stop session=%s jobs=%s", session_id, len(jobs))
+    return {"ok": True, "jobsCancelled": len(jobs)}
 
 
 def push_stream_event(session_id: str | None, obj: dict) -> None:
@@ -333,6 +367,7 @@ async def run(session_id: str, prompt: str, mode: str = "") -> AsyncGenerator[st
 
     _save_message(session_id, "user", prompt)
     _STOPPED.discard(session_id)
+    _JOBS.pop(session_id, None)
     vision.reset_turn(session_id)
     yield _line({"type": "start", "sessionId": session_id})
 
@@ -357,6 +392,11 @@ async def run(session_id: str, prompt: str, mode: str = "") -> AsyncGenerator[st
             pending = asyncio.ensure_future(it.__anext__())
             while True:
                 done, _ = await asyncio.wait({pending}, timeout=1.0)
+                if stopped(session_id):
+                    # POST /agent/stop: end the turn now. The tool thread, if
+                    # any, keeps polling stopped() and gets out on its own.
+                    pending.cancel()
+                    raise TurnStopped()
                 if not done:
                     for extra in _drain_extra(session_id):
                         yield _line(extra)
@@ -427,7 +467,10 @@ async def run(session_id: str, prompt: str, mode: str = "") -> AsyncGenerator[st
         _save_partial_history(session_id, prompt, "".join(text_acc), _explain(e) if isinstance(e, Exception) else "중단됨")
         if not isinstance(e, Exception):
             raise
-        log.exception(f"agent run failed session={session_id}")
+        if isinstance(e, TurnStopped):
+            log.info("agent turn stopped session=%s", session_id)
+        else:
+            log.exception(f"agent run failed session={session_id}")
         yield _line({"type": "error", "error": _explain(e)})
     finally:
         # "이번 턴 항상 허용" and any unanswered prompt end with the turn.
@@ -457,6 +500,8 @@ def _explain(e: Exception) -> str:
     settings screen. The token-budget one in particular reads as a prompt
     problem when the fix is a number in the settings tab.
     """
+    if isinstance(e, TurnStopped):
+        return "중단됨"
     raw = f"{type(e).__name__}: {e}"
     text = str(e)
     limit = config.section("agent").get("maxTokens")

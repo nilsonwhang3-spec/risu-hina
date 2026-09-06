@@ -111,6 +111,24 @@ mixed-cast multi-entry batch from the panel.** Released = **v0.10.0 BETA** (§1-
 **0.3.1 (night of 2026-08-25)** — the real reason `+` never appeared was not "same version" but **CORS**: RisuAI reads `//@update-url` with a browser `fetch`, and the redirect response from the release URL carries no CORS header. Changed `//@update-url` to
 `https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js`, and made `tools/bundle.py` write that file into the repository (included in the release commit). In the backend code only VERSION changed.
 
+**+ §1-44 (2026-09-06, the 8M-token turns and 중단)**: measured on zikmunt-pc: one session's
+stored history had grown to 104MB (694 messages, 178 run_python calls), turns of 7-30 model
+requests billed 5-14M input tokens each, and the log showed `history compaction failed:
+… finish_reason 'content_filter: PROHIBITED_CONTENT'` on EVERY turn - Gemini refused to
+summarise the adult transcript, so nothing was ever compacted and each request carried the
+whole session. Fix in `agent.compact_history`, three stages: (1) `prune_tool_parts` clips tool
+returns and oversized call args older than the last 2 user turns to 600 chars every turn (no
+model; dict args stay dicts); (2) the model summary as before; (3) when the summary fails,
+`_drop_turns` drops whole turns from the front with a plain list of the dropped requests, so
+the budget (`agent.historyBudgetChars`, 240K) holds without a model. Whatever changed lands
+in COMPACTED and is stored. `usage.cacheRead` is recorded beside input/output so the ledger
+says how much of the input was cached. 중단: the plugin's abort alone reached the backend
+only at the turn's next write (a proxy keeps the upstream open), so a batch ran one more
+image and a silent tool never heard it. New `POST /agent/stop {sessionId}` (`session.stop`):
+flags the session, kills its script, cancels every batch its tools started (`note_job` in
+`_studio_generate_one`), and the run loop raises `TurnStopped` within a second. The plugin's
+중단 posts it before aborting the fetch. Test `tests/test_compact.py` in the gate.
+
 **+ §1-43 (2026-09-06, field report after 0.14.0, 5 items)**: (1) the vision card hides the
 주소 field when a key is picked from the list (the key's own address applies; the card saves
 `helperBaseUrl: ''`); (2) the web-search and vision cards are FOLDABLE (`foldableCard` in
