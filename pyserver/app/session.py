@@ -482,7 +482,11 @@ async def run(session_id: str, prompt: str, mode: str = "") -> AsyncGenerator[st
 
 def _save_partial_history(session_id: str, prompt: str, partial: str, why: str) -> None:
     try:
-        history = list(_history(session_id))
+        # The pruned/compacted form this turn started from is the one to keep:
+        # re-reading the stored row would throw the pruning away, and the next
+        # turn would prune the same chars again (seen twice in a row, §1-46).
+        compacted = agent_mod.COMPACTED.pop(session_id, None)
+        history = list(compacted) if compacted is not None else list(_history(session_id))
         history.append(ModelRequest(parts=[UserPromptPart(content=prompt)]))
         note = (partial + "\n\n" if partial else "") + f"(이 턴은 완료되지 못했습니다: {why})"
         history.append(ModelResponse(parts=[TextPart(content=note)]))
