@@ -68,6 +68,10 @@ Principles:
 - **External facts come from web_search.** For source material, canon, terminology or anything
   recent that is outside your knowledge, use the web_search tool and pass the source URLs to the
   user. If it answers that search is not configured, relay that as it is and never invent facts.
+- **"이어서" / "다시 진행해" means the LAST request.** Resume whatever the user's most recent
+  message asked that is not finished yet. Never redo an earlier request that already completed -
+  the history's older turns (and any "이전 대화 생략" note) are the record of done work, not a
+  to-do list. If nothing is left unfinished, say so and ask what to do next.
 - **Ask with the proposal on the table.** When you want confirmation for an edit ("이대로
   진행할까요?"), stage it first (propose_* / the studio's plan) so the approval card is in front of
   the user with the question - a question with nothing to approve leaves them guessing what
@@ -507,7 +511,8 @@ async def compact_history(session_id: str, messages: list) -> list:
         listing = "\n".join(f"- {d}" for d in dropped)[-3000:]
         compacted = [
             ModelRequest(parts=[UserPromptPart(content=(
-                f"[이전 대화 {len(dropped)}턴 생략 - 요약 모델이 실패해 앞부분을 잘랐습니다. 생략된 사용자 요청들:]\n" + listing))]),
+                f"[이전 대화 {len(dropped)}턴 생략 - 요약 모델이 실패해 앞부분을 잘랐습니다. "
+                f"아래는 그때 이미 처리된 요청들의 목록일 뿐이며 할 일이 아닙니다 - 다시 하지 마세요:]\n" + listing))]),
             ModelResponse(parts=[TextPart(content="확인했습니다. 이어서 진행합니다.")]),
         ] + rest
         how = "drop"

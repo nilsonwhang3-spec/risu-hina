@@ -450,6 +450,8 @@ button.iconbtn.danger { background: #b91c1c; border-color: #b91c1c; color: #fff;
 .artifactmodal .artifacthead { margin-bottom: 6px; }
 .quickreply { gap: 6px; margin-top: 6px; }
 .agentloading { padding: 12px; }
+.anlasmeter { cursor: pointer; font-size: 11.5px; padding: 2px 8px; }
+.anlasmeter.warn { background: rgba(251,191,36,.18); color: var(--warn, #fbbf24); }
 /* 고급 설정 (§1-47). */
 .advfield { margin-bottom: 10px; }
 .advfield input { max-width: 180px; }
