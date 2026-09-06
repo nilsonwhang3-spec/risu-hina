@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.14.1
+//@display-name Risu Hina v0.14.2
 //@api 3.0
-//@version 0.14.1
+//@version 0.14.2
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -104,7 +104,7 @@
       this.tokenSafe = true;
       this.lastHealth = body;
       this.probeInfo = "";
-      this.gate = versionGate("0.14.1", String(body.version || ""));
+      this.gate = versionGate("0.14.2", String(body.version || ""));
       return body;
     }
     /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -1374,6 +1374,13 @@
     touchFiles(newOutputs = []) {
       for (const p of newOutputs) if (!this.unseenOutputs.includes(p)) this.unseenOutputs.push(p);
       this.filesRev += 1;
+      this.emit();
+    }
+    /** A screen asked the agent something on the user's behalf (검수's AI 재검수,
+     * §1-46): the agent panel sends it as if typed. */
+    promptRequest = null;
+    requestPrompt(text2) {
+      this.promptRequest = text2;
       this.emit();
     }
     requestOpenFile(path) {
@@ -4095,6 +4102,10 @@ button.iconbtn.danger { background: #b91c1c; border-color: #b91c1c; color: #fff;
 .artifactmodal .artifactview img { max-width: 100%; max-height: 78vh; display: block; margin: 0 auto; }
 .artifactmodal .artifactbody { max-height: 80vh; overflow: auto; }
 .artifactmodal .artifacthead { margin-bottom: 6px; }
+/* \uACE0\uAE09 \uC124\uC815 (\xA71-47). */
+.advfield { margin-bottom: 10px; }
+.advfield input { max-width: 180px; }
+.advsim { margin-top: 10px; padding: 8px 10px; border: 1px solid var(--borderc, #2b323f); border-radius: 6px; font-size: 12px; line-height: 1.6; }
 /* Foldable settings cards (\xA71-43). */
 .card.foldable .foldhead { cursor: pointer; display: flex; align-items: center; gap: 6px; user-select: none; }
 .card.foldable.folded { padding-bottom: 8px; }
@@ -7232,6 +7243,13 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       }
       return el("div", { class: "costline", text: bits.join(" \xB7 ") });
     }
+    /** Send `text` as if the user typed it. False when a turn is running. */
+    sendText(text2) {
+      if (this.busy) return false;
+      this.input.value = text2;
+      void this.submit();
+      return true;
+    }
     async submit() {
       const typed = this.input.value.trim();
       if (!typed && !this.attached.length && !this.attachedAssets.length || this.busy) return;
@@ -7629,6 +7647,25 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
   }
   function bindAgent(next) {
     hooks = { ...hooks, ...next };
+  }
+  state.onChange(() => {
+    const text2 = state.promptRequest;
+    if (!text2) return;
+    state.promptRequest = null;
+    if (!agentPanel().sendText(text2)) toastBusy();
+  });
+  function toastBusy() {
+    let wrap = document.querySelector(".toastwrap");
+    if (!wrap) {
+      wrap = document.createElement("div");
+      wrap.className = "toastwrap";
+      document.body.appendChild(wrap);
+    }
+    const t = document.createElement("div");
+    t.className = "toast";
+    t.textContent = "\uD788\uB098\uAC00 \uC544\uC9C1 \uC791\uC5C5 \uC911\uC785\uB2C8\uB2E4 - \uB05D\uB098\uBA74 \uB2E4\uC2DC \uB20C\uB7EC \uC8FC\uC138\uC694.";
+    wrap.appendChild(t);
+    setTimeout(() => t.remove(), 2500);
   }
   function mountAgent(into) {
     const p = agentPanel();
@@ -11059,6 +11096,158 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     });
     return el("div", { class: "card foldable" + (open4 ? "" : " folded"), id }, [head, box]);
   }
+  var ADV_FIELDS = [
+    {
+      key: "historyBudgetChars",
+      label: "\uD788\uC2A4\uD1A0\uB9AC \uC608\uC0B0",
+      def: 12e4,
+      unit: "\uC790",
+      help: "\uB300\uD654 \uAE30\uB85D\uC774 \uC774 \uAE00\uC790 \uC218\uB97C \uB118\uC73C\uBA74 \uC55E\uBD80\uBD84\uC744 \uC694\uC57D\uD558\uAC70\uB098(\uC694\uC57D \uBAA8\uB378\uC774 \uAC70\uC808\uD558\uBA74 \uD1B5\uC9F8\uB85C) \uC798\uB77C\uB0C5\uB2C8\uB2E4. \uC694\uCCAD\uB9C8\uB2E4 \uB2E4\uC2DC \uBCF4\uB0B4\uB294 \uAE30\uB85D\uC758 \uC0C1\uD55C\uC774\uB77C, \uC694\uCCAD\uB2F9 \uD1A0\uD070\uC744 \uC9C1\uC811 \uC815\uD569\uB2C8\uB2E4. 12\uB9CC \uC790 \u2248 5~7\uB9CC \uD1A0\uD070."
+    },
+    {
+      key: "pruneKeepTurns",
+      label: "\uD234 \uACB0\uACFC \uADF8\uB300\uB85C \uB450\uB294 \uD134 \uC218",
+      def: 2,
+      unit: "\uD134",
+      help: "\uCD5C\uADFC \uC774 \uD134 \uC218 \uC548\uC758 \uD234 \uACB0\uACFC(\uC2A4\uD06C\uB9BD\uD2B8 \uCD9C\uB825\xB7\uC77D\uC740 \uD30C\uC77C\xB7\uC0DD\uC131 \uC2A4\uD399)\uB294 \uADF8\uB300\uB85C \uB450\uACE0, \uB354 \uC624\uB798\uB41C \uAC83\uC740 \uC544\uB798 \uAE00\uC790 \uC218\uB85C \uC790\uB985\uB2C8\uB2E4. \uC790\uB978 \uACB0\uACFC\uAC00 \uD544\uC694\uD558\uBA74 \uD788\uB098\uAC00 \uD234\uC744 \uB2E4\uC2DC \uBD80\uB985\uB2C8\uB2E4."
+    },
+    {
+      key: "pruneClipChars",
+      label: "\uC624\uB798\uB41C \uD234 \uACB0\uACFC \uC790\uB974\uAE30",
+      def: 600,
+      unit: "\uC790",
+      help: "\uC624\uB798\uB41C \uD234 \uACB0\uACFC \uD558\uB098\uB97C \uB0A8\uAE38 \uAE38\uC774. 100 \uC544\uB798\uB85C\uB294 \uB0B4\uB824\uAC00\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4."
+    },
+    {
+      key: "maxRequestsPerTurn",
+      label: "\uD134\uB2F9 \uCD5C\uB300 \uBAA8\uB378 \uC694\uCCAD",
+      def: 40,
+      unit: "\uD68C",
+      zeroMeansOff: true,
+      help: "\uD55C \uBC88\uC758 \uB300\uD654 \uD134\uC5D0\uC11C \uBAA8\uB378\uC744 \uBD80\uB974\uB294 \uD69F\uC218 \uC0C1\uD55C. \uD234\uC744 \uD55C \uBC88 \uC4F8 \uB54C\uB9C8\uB2E4 \uD55C \uBC88 \uB354 \uBD80\uB974\uACE0, \uB9E4\uBC88 \uAE30\uB85D \uC804\uCCB4\uB97C \uB2E4\uC2DC \uBCF4\uB0C5\uB2C8\uB2E4. \uB118\uC73C\uBA74 \uD134\uC774 \uBA48\uCD94\uACE0 \uC774\uC720\uB97C \uB9D0\uD569\uB2C8\uB2E4. 0 = \uC81C\uD55C \uC5C6\uC74C."
+    },
+    {
+      key: "maxToolCallsPerTurn",
+      label: "\uD134\uB2F9 \uCD5C\uB300 \uD234 \uD638\uCD9C",
+      def: 30,
+      unit: "\uD68C",
+      zeroMeansOff: true,
+      help: "\uD55C \uD134\uC5D0\uC11C \uD234(\uC2A4\uD06C\uB9BD\uD2B8\xB7\uD30C\uC77C\xB7\uC0DD\uC131\xB7\uBE44\uC804)\uC744 \uBD80\uB974\uB294 \uD69F\uC218 \uC0C1\uD55C. 0 = \uC81C\uD55C \uC5C6\uC74C."
+    },
+    {
+      key: "maxInputTokensPerTurn",
+      label: "\uD134\uB2F9 \uC785\uB825 \uD1A0\uD070 \uC0C1\uD55C",
+      def: 0,
+      unit: "\uD1A0\uD070",
+      zeroMeansOff: true,
+      help: "\uD55C \uD134\uC5D0 \uBCF4\uB0B8 \uC785\uB825 \uD1A0\uD070\uC758 \uD569\uACC4\uAC00 \uC774 \uAC12\uC744 \uB118\uC73C\uBA74 \uBA48\uCDA5\uB2C8\uB2E4. \uBE44\uC6A9\uC744 \uC9C1\uC811 \uB9C9\uB294 \uC548\uC804\uC7A5\uCE58. 0 = \uC81C\uD55C \uC5C6\uC74C (\uAD8C\uC7A5: \uC608\uC0C1 \uCD5C\uB300\uCE58\uC758 1.5\uBC30, \uC608 800000)."
+    }
+  ];
+  var FIXED_PROMPT_TOKENS = 15e3;
+  function fmtN(n) {
+    return Math.round(n).toLocaleString();
+  }
+  function buildAdvancedCard() {
+    const inputs = /* @__PURE__ */ new Map();
+    const status = el("div", { class: "hint" });
+    const sim = el("div", { class: "advsim" });
+    const measured = el("div", { class: "hint", style: { marginTop: "6px" } });
+    let usage = null;
+    const val = (f) => {
+      const raw = (inputs.get(f.key)?.value ?? "").trim();
+      if (raw === "") return f.def;
+      const n = Number(raw);
+      return Number.isFinite(n) && n >= 0 ? Math.floor(n) : f.def;
+    };
+    const drawSim = () => {
+      const budget = val(ADV_FIELDS[0]);
+      const req = val(ADV_FIELDS[3]);
+      const calls = val(ADV_FIELDS[4]);
+      const capTok = val(ADV_FIELDS[5]);
+      const histTok = budget / 2;
+      const perReq = FIXED_PROMPT_TOKENS + histTok;
+      const reqUsed = req > 0 ? req : 50;
+      const worst = perReq * reqUsed;
+      const typical = perReq * Math.min(reqUsed, usage?.avgRequests || 8);
+      clear(sim);
+      sim.append(
+        el("div", { class: "sectiontitle", text: "\uC608\uC0C1 \uC2DC\uBBAC\uB808\uC774\uC158" }),
+        el("div", { text: `\uC694\uCCAD 1\uD68C \u2248 \uACE0\uC815 \uD504\uB86C\uD504\uD2B8 ${fmtN(FIXED_PROMPT_TOKENS)} + \uAE30\uB85D ${fmtN(histTok)} = \uC57D ${fmtN(perReq)} \uD1A0\uD070` }),
+        el("div", { text: `\uBCF4\uD1B5 \uD134 (\uC694\uCCAD ${fmtN(Math.min(reqUsed, usage?.avgRequests || 8))}\uD68C) \u2248 ${fmtN(typical)} \uD1A0\uD070` }),
+        el("div", { text: `\uCD5C\uC545 \uD134 (\uC694\uCCAD ${req > 0 ? fmtN(req) : "50(\uB77C\uC774\uBE0C\uB7EC\uB9AC \uAE30\uBCF8)"}\uD68C) \u2248 ${fmtN(worst)} \uD1A0\uD070` + (calls > 0 ? ` \xB7 \uD234 \uD638\uCD9C ${fmtN(calls)}\uD68C\uC5D0\uC11C\uB3C4 \uBA48\uCDA4` : "") }),
+        el("div", { text: capTok > 0 ? capTok < typical ? `\u26A0 \uC785\uB825 \uC0C1\uD55C ${fmtN(capTok)} \uC774 \uBCF4\uD1B5 \uD134\uBCF4\uB2E4 \uC791\uC2B5\uB2C8\uB2E4 - \uB300\uBD80\uBD84\uC758 \uD134\uC774 \uC911\uAC04\uC5D0 \uBA48\uCDA5\uB2C8\uB2E4.` : `\uC785\uB825 \uC0C1\uD55C ${fmtN(capTok)}: \uCD5C\uC545 \uD134\uC758 ${fmtN(capTok / worst * 100)}% \uC9C0\uC810\uC5D0\uC11C \uBA48\uCDA5\uB2C8\uB2E4.` : "\uC785\uB825 \uC0C1\uD55C \uC5C6\uC74C: \uCD5C\uC545 \uD134\uAE4C\uC9C0 \uD5C8\uC6A9\uD569\uB2C8\uB2E4." }),
+        el("div", { class: "hint", text: "\uAE30\uB85D\uC740 \uAE00\uC790 2\uC790 \u2248 1\uD1A0\uD070\uC73C\uB85C, \uACE0\uC815 \uD504\uB86C\uD504\uD2B8(\uC9C0\uCE68+\uD234 \uC2A4\uD0A4\uB9C8)\uB294 \uC57D 1.5\uB9CC \uD1A0\uD070\uC73C\uB85C \uC7A1\uC558\uC2B5\uB2C8\uB2E4. \uCE90\uC2DC \uD788\uD2B8\uB294 \uD560\uC778\uB418\uC9C0\uB9CC \uC5EC\uAE30\uC5D4 \uBC18\uC601\uD558\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4." })
+      );
+    };
+    const drawMeasured = () => {
+      if (!usage || !usage.turns) {
+        measured.textContent = "\uC2E4\uCE21: \uC544\uC9C1 \uAE30\uB85D\uB41C \uD134\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.";
+        return;
+      }
+      const since = new Date(usage.since * 1e3);
+      measured.textContent = `\uC2E4\uCE21 (\uCD5C\uADFC ${usage.turns}\uD134, ${since.getMonth() + 1}/${since.getDate()} ${String(since.getHours()).padStart(2, "0")}:${String(since.getMinutes()).padStart(2, "0")} \uC774\uD6C4): \uD134\uB2F9 \uC785\uB825 \uD3C9\uADE0 ${fmtN(usage.avgInput)} \xB7 \uCD5C\uB300 ${fmtN(usage.maxInput)} \xB7 \uC694\uCCAD \uD3C9\uADE0 ${usage.avgRequests}\uD68C(\uCD5C\uB300 ${usage.maxRequests}) \xB7 \uC694\uCCAD\uB2F9 ${fmtN(usage.avgPerRequest)} \uD1A0\uD070 \xB7 \uD234 \uD638\uCD9C \uD3C9\uADE0 ${usage.avgToolCalls}\uD68C \xB7 \uCE90\uC2DC ${Math.round((usage.cacheShare || 0) * 100)}%`;
+    };
+    const rows = ADV_FIELDS.map((f) => {
+      const input = el("input", { type: "number", min: "0", placeholder: `${f.def.toLocaleString()} (\uAD8C\uC7A5)` });
+      input.addEventListener("input", drawSim);
+      inputs.set(f.key, input);
+      return el("div", { class: "advfield" }, [
+        el("label", { class: "field" }, [el("span", { text: `${f.label} (${f.unit})` }), input]),
+        el("div", { class: "hint", text: f.help + (f.zeroMeansOff ? "" : " \uBE44\uC6B0\uBA74 \uAD8C\uC7A5\uAC12\uC744 \uC501\uB2C8\uB2E4.") })
+      ]);
+    });
+    const load = async () => {
+      try {
+        const [{ config }, u] = await Promise.all([
+          state.getConfig(),
+          transport.get("/agent/usage", { turns: "30" }).catch(() => null)
+        ]);
+        const a = config.agent ?? {};
+        for (const f of ADV_FIELDS) {
+          const v = a[f.key];
+          const inp = inputs.get(f.key);
+          inp.value = v === void 0 || v === null || Number(v) === f.def ? "" : String(v);
+        }
+        usage = u;
+        drawMeasured();
+        drawSim();
+      } catch (e) {
+        status.textContent = "\uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + (e instanceof Error ? e.message : String(e));
+      }
+    };
+    const save = el("button", { class: "primary tiny", text: "\uC800\uC7A5" });
+    save.addEventListener("click", async () => {
+      save.disabled = true;
+      const patch = {};
+      for (const f of ADV_FIELDS) patch[f.key] = val(f);
+      try {
+        await state.setConfig({ agent: patch });
+        status.textContent = "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4. \uB2E4\uC74C \uD134\uBD80\uD130 \uC801\uC6A9\uB429\uB2C8\uB2E4.";
+        await load();
+      } catch (e) {
+        status.textContent = "\uC800\uC7A5 \uC2E4\uD328: " + (e instanceof Error ? e.message : String(e));
+      } finally {
+        save.disabled = false;
+      }
+    });
+    const reset = el("button", { class: "ghost tiny", text: "\uAD8C\uC7A5\uAC12\uC73C\uB85C" });
+    reset.addEventListener("click", () => {
+      for (const inp of inputs.values()) inp.value = "";
+      drawSim();
+    });
+    void load();
+    return foldableCard("agent-advanced-card", "\uACE0\uAE09 \uC124\uC815 (\uACF5\uD1B5)", [
+      el("div", {
+        class: "hint",
+        style: { marginBottom: "8px" },
+        text: "\uBAA8\uB4E0 \uD504\uB9AC\uC14B\uC5D0 \uACF5\uD1B5\uC778 \uD134\uB2F9 \uBE44\uC6A9 \uC870\uC808\uC785\uB2C8\uB2E4. \uD55C \uD134 = \uC0AC\uC6A9\uC790\uC758 \uB9D0 \uD55C \uBC88\uC5D0 \uD788\uB098\uAC00 \uD234\uC744 \uC624\uAC00\uBA70 \uB2F5\uC744 \uB05D\uB0B4\uB294 \uAC83. \uD234\uC744 \uBD80\uB97C \uB54C\uB9C8\uB2E4 \uBAA8\uB378\uC744 \uB2E4\uC2DC \uBD80\uB974\uACE0 \uAE30\uB85D \uC804\uCCB4\uB97C \uB2E4\uC2DC \uBCF4\uB0B4\uBBC0\uB85C, \uD134 \uBE44\uC6A9 = \uC694\uCCAD \uC218 \xD7 (\uACE0\uC815 \uD504\uB86C\uD504\uD2B8 + \uAE30\uB85D)\uC785\uB2C8\uB2E4."
+      }),
+      ...rows,
+      sim,
+      measured,
+      el("div", { class: "row", style: { marginTop: "8px" } }, [save, reset, status])
+    ]);
+  }
   function buildVisionCard() {
     const modeSel = el("select");
     const modeNote = el("div", { class: "hint", style: { margin: "4px 0 10px" } });
@@ -12240,7 +12429,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.14.1",
+            version: "0.14.2",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -12359,7 +12548,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           await state.connect();
           agentPanel().invalidate();
         }
-      })]],
+      }), buildAdvancedCard()]],
       ["\uC2A4\uD0AC", [buildSkillsCard({ onMount: (refresh3) => {
         refreshers.push(refresh3);
       } })]],
@@ -12888,7 +13077,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.14.1"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.14.2"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -17773,6 +17962,29 @@ ${negative.value.trim()}
   function invalidateGroups() {
     groupsRev = -1;
   }
+  function groupSig(g) {
+    if (!g) return "";
+    return [...g.groups.flatMap((x) => x.items), ...g.unmatched].map((i) => `${i.filename}:${i.modified ?? 0}`).sort().join("|");
+  }
+  async function pollGroups() {
+    if (!groups || !S.selected || groups.folder !== S.selected) return;
+    const folder = groups.folder;
+    try {
+      const eff = effective(prefsFor(folder));
+      const fresh = await state.studio.group(folder, eff.pattern, eff.groupBy);
+      if (!groups || groups.folder !== folder) return;
+      if (groupSig(fresh) === groupSig(groups)) return;
+      const mine = selection2;
+      groups = fresh;
+      groupsRev = state.filesRev;
+      selection2 = {};
+      for (const g of [...groups.groups.map((x) => x.items), groups.unmatched].flat()) {
+        selection2[g.filename] = mine[g.filename] ? { ...g.selection, ...mine[g.filename] } : { ...g.selection };
+      }
+      hub.drawCentre();
+    } catch {
+    }
+  }
   async function loadGroups(folder) {
     try {
       const eff = effective(prefsFor(folder));
@@ -17886,6 +18098,15 @@ ${negative.value.trim()}
       }
     } }));
     bar3.appendChild(el("span", { class: "spacer" }));
+    const rereview = el("button", {
+      class: "ghost tiny",
+      text: "AI \uC7AC\uAC80\uC218",
+      title: "\uD788\uB098\uC5D0\uAC8C \uC774 \uD3F4\uB354\uB97C \uB2E4\uC2DC \uAC80\uC218\uD574 \uC81C\uC548\uC744 \uC0C8\uB85C \uC801\uC5B4 \uB2EC\uB77C\uACE0 \uD569\uB2C8\uB2E4 (\uD45C\uC2DC\uB294 \uBC14\uAFB8\uC9C0 \uC54A\uC74C)"
+    });
+    rereview.addEventListener("click", () => {
+      state.requestPrompt(`"${node.path}" \uD3F4\uB354\uB97C \uC7AC\uAC80\uC218\uD574 \uC918. review_folder \uB85C \uBCF4\uACE0 suggest_selection \uC73C\uB85C \uC81C\uC548\uC744 \uC0C8\uB85C \uC801\uC5B4 \uC918 (\uAE30\uC874 \uC81C\uC548\uC740 \uAC31\uC2E0). \uD45C\uC2DC(\uCC44\uD0DD\xB7\uBC84\uB9BC\xB7\uC218\uC815)\uB294 \uBC14\uAFB8\uC9C0 \uB9D0\uACE0, \uB2E4 \uC801\uC73C\uBA74 \uAC80\uC218 \uD0ED\uC744 \uC5F4\uC5B4 \uC918.`);
+    });
+    bar3.appendChild(rereview);
     const none = el("button", { class: "ghost tiny", text: "\uC120\uD0DD \uD574\uC81C" });
     none.addEventListener("click", () => {
       for (const k of Object.keys(selection2)) selection2[k] = { ...selection2[k], use: false, rep: false };
@@ -18697,6 +18918,7 @@ ${negative.value.trim()}
       void loadStatus();
       setInterval(() => {
         if (!wasStudioActive) return;
+        if (S.centreMode === "selector" || S.centreMode === "tab" && !S.selectedFile && S.centreTab === "inspect") void pollGroups();
         if (renderedRev !== state.filesRev && !S.jobId) {
           void refresh2();
           return;
@@ -19164,7 +19386,7 @@ ${negative.value.trim()}
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.14.1"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.14.2"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
@@ -19259,7 +19481,7 @@ ${negative.value.trim()}
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.14.1" }),
+        el("span", { class: "dim", text: "v0.14.2" }),
         healthEl,
         el("span", { class: "spacer" }),
         reload,
@@ -19531,6 +19753,6 @@ ${negative.value.trim()}
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.14.1"} loaded`);
+    console.log(`[risu-hina] v${"0.14.2"} loaded`);
   })();
 })();
