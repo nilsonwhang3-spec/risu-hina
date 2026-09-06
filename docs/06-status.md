@@ -111,6 +111,14 @@ mixed-cast multi-entry batch from the panel.** Released = **v0.10.0 BETA** (§1-
 **0.3.1 (night of 2026-08-25)** — the real reason `+` never appeared was not "same version" but **CORS**: RisuAI reads `//@update-url` with a browser `fetch`, and the redirect response from the release URL carries no CORS header. Changed `//@update-url` to
 `https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js`, and made `tools/bundle.py` write that file into the repository (included in the release commit). In the backend code only VERSION changed.
 
+**+ §1-49 (2026-09-06, after 0.14.2, unreleased)**: (1) the agent panel says "대화를 불러오는
+중입니다…" while the session loads; (2) the artifact modal is bounded (88vw/1200px, 90vh, the
+head stays put) and has a worded "닫기 (Esc)" beside the ✕; (3) a turn that ends on a question
+("이대로 진행할까요?") gets quick replies 네, 진행해 주세요 / 아니요 (typed replies, nothing is
+approved by them), and the INSTRUCTIONS say to stage the proposal before asking so the card is
+there; (4) the studio's left column is not rebuilt while a field in it has focus (a batch
+re-rendered it per image and ate keystrokes) - the redraw waits for blur.
+
 **+ §1-48 (2026-09-06, unreleased)**: files that land in a 검수 folder while it is on screen
 were not shown ("재생성/inpaint 후 `이름 (3).png` 이 검수기에 안 나타남"): the grid served its
 cached groups until filesRev moved, and an agent inpaint / a script copy / a batch adopted as

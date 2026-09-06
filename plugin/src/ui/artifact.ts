@@ -72,6 +72,12 @@ export function showArtifact(spec: ArtifactSpec, _opts: { flipMobile?: boolean }
     openFile.addEventListener('click', () => { closeArtifact(); state.requestOpenFile(spec.path); });
     head.append(el('span', { class: 'hint grow', text: spec.path }), openFile);
   }
+  // A second, worded way out next to the ✕ (users missed the icon on a
+  // picture that filled the screen, §1-49).
+  const closeBtn = el('button', { class: 'ghost tiny', text: '닫기 (Esc)' });
+  closeBtn.addEventListener('click', () => closeArtifact());
+  if (!head.childElementCount) head.appendChild(el('span', { class: 'grow' }));
+  head.appendChild(closeBtn);
   const view = el('div', { class: 'artifactview' }, [head, body]);
   closeCurrent = modal(spec.title || spec.path, view, { wide: true, cls: 'artifactmodal', onClose: () => { current = null; closeCurrent = null; } });
   void fill(body, spec);

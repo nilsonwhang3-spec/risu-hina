@@ -262,8 +262,11 @@ export class AgentPanel {
       this.send.disabled = true;
       return;
     }
+    const loading = el('div', { class: 'hint agentloading', text: '대화를 불러오는 중입니다…' });
+    this.log.appendChild(loading);
     try {
       const s = await state.agentSession(sessionId);
+      loading.remove();
       if (!s.agentReady) {
         this.status.textContent = '';
         this.log.appendChild(el('div', { class: 'notice' }, [
@@ -925,6 +928,17 @@ export class AgentPanel {
             bubble.appendChild(this.costLine(
               e.usage as Record<string, unknown> | undefined,
               (e.cost as number | null | undefined) ?? null));
+            // The model ended on a question ("이대로 진행할까요?"): answer with
+            // one click instead of typing (§1-49). The buttons are only a
+            // typed reply - nothing is approved by them.
+            if (/(할까요|진행|괜찮|해도 될|원하시|할지|고를까요|어떻게)[^\n?]{0,40}\?\s*$/.test(textAcc.trim())) {
+              const yes = el('button', { class: 'primary tiny', text: '네, 진행해 주세요' });
+              const no = el('button', { class: 'ghost tiny', text: '아니요' });
+              const row = el('div', { class: 'row quickreply' }, [yes, no]);
+              yes.addEventListener('click', () => { row.remove(); this.sendText('네, 그대로 진행해 주세요.'); });
+              no.addEventListener('click', () => { row.remove(); this.input.value = '아니요, '; this.input.focus(); });
+              bubble.appendChild(row);
+            }
             // A turn ends when the model stops, not when the job is done. One
             // click asks it to pick up where it left off, history and all.
             const more = el('button', { class: 'ghost tiny continuebtn', text: '계속 이어서', title: '방금 턴에서 끝내지 못한 작업을 이어갑니다' });
