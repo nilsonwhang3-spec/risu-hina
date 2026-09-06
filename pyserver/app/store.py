@@ -791,6 +791,28 @@ def _next_seq(ck: str, scope: str, tk: str | None) -> int:
     return int(row["m"]) + 1 if row else 0
 
 
+# RisuAI's lorebook entry modes (seeds/risuai-lorebook.md §1). A folder is an
+# entry too: mode 'folder', its `key` is the id its members name in their own
+# `folder`, its `comment` is the name shown, and it is never injected. An
+# entry written without a mode is 'normal' to RisuAI - which is why a folder
+# the agent made through the plain add tool showed up in RisuAI as an ordinary
+# entry and its members as orphans (§1-61).
+LORE_MODES = ("normal", "constant", "multiple", "child", "folder")
+
+
+def lore_folder_key() -> str:
+    """A fresh folder id. Membership is string equality, so any unique string
+    does; the prefix keeps it readable in a list."""
+    return "folder-" + uuid.uuid4().hex[:12]
+
+
+def lore_folder_entry(comment: str, key: str = "", insertorder: int = 100) -> dict:
+    """The entry RisuAI recognises as a folder."""
+    return {"mode": "folder", "key": (key or "").strip() or lore_folder_key(),
+            "comment": comment, "content": "", "alwaysActive": False,
+            "insertorder": int(insertorder)}
+
+
 def add_lore(ck: str, entry: dict, scope: str = "global", tk: str | None = None) -> str:
     row = db.one(
         "SELECT COALESCE(MAX(seq), -1) AS m FROM lore_entries WHERE char_key = ? AND scope = ?",

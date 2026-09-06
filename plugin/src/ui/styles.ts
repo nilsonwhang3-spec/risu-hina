@@ -1353,6 +1353,10 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
 
 /* The selector shows pictures WHOLE (like the history grid), never cropped
    to a square: the choice is made on the picture, so all of it has to show. */
+.folderrow { display: flex; align-items: center; }
+.folderrow .treebranch { flex: 1; min-width: 0; }
+.folderrow .folderedit { flex: 0 0 auto; margin-left: 2px; }
+.folderrow.on .treebranch { font-weight: 600; }
 .selgrid .assetpic { aspect-ratio: auto; min-height: 60px; }
 .selgrid .assetpic img { height: auto; object-fit: contain; }
 .tabsep { width: 1px; align-self: stretch; margin: 4px 6px; background: var(--borderc, #2b323f); }

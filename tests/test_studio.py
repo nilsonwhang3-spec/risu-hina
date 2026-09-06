@@ -582,6 +582,17 @@ check("and stay inside the picture", studio._box_pixels(100, 100, [{"x": 0.9, "y
 _pad, _sig = studio.feather_defaults(1024, 1024)
 check("padding reaches past the feather's tail", _pad >= 3.7 * _sig and _sig == 12, f"{_pad}/{_sig}")
 
+print("\ntest_lore_folder_entry")
+# §1-61: RisuAI shows a folder only for an entry with mode 'folder'; the
+# helper the agent tool and the HTTP path share builds exactly that.
+_f1 = store.lore_folder_entry("캐릭터")
+_f2 = store.lore_folder_entry("장소", key="my-folder")
+check("a folder entry has mode folder and no body", _f1["mode"] == "folder" and _f1["content"] == "" and _f1["alwaysActive"] is False)
+check("its id is generated and readable", _f1["key"].startswith("folder-") and len(_f1["key"]) > 10, _f1["key"])
+check("two folders never share an id", store.lore_folder_entry("x")["key"] != _f1["key"])
+check("a given id is kept", _f2["key"] == "my-folder" and _f2["comment"] == "장소")
+check("the mode list is RisuAI's", store.LORE_MODES == ("normal", "constant", "multiple", "child", "folder"))
+
 print("\ntest_png_carries_its_recipe")
 # save_image embeds what we asked for as a hina-params tEXt chunk instead of
 # writing a .json sidecar beside every image (which doubled every folder).

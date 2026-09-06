@@ -756,8 +756,9 @@ def build() -> Agent[Deps]:
         The structure comes with it: `#n` is the array order (adjust with propose_lore_move),
         `folder=` is the containing folder, and a `[folder]` row is the folder itself (a container,
         not an entry - RisuAI stores a folder as a lorebook entry with mode='folder', and membership
-        is member.folder == the folder entry's key). Reorganise folders by changing members'
-        folder values with propose_lore_edit.
+        is member.folder == the folder entry's key). Make a folder with propose_lore_add(mode="folder")
+        (its key is the folder id members use), turn an entry into one with
+        propose_lore_edit(mode="folder"), and reorganise by changing members' folder values.
         """
         entries = store.lore(ctx.deps.char_key, scope or None)
         if not entries:
@@ -833,16 +834,21 @@ def build() -> Agent[Deps]:
     @agent.tool
     def propose_lore_edit(ctx: RunContext[Deps], lore_id: str, content: str,
                           reason: str, keys: str = "", comment: str = "",
-                          insert_order: int = -1, folder: str = "") -> str:
+                          insert_order: int = -1, folder: str = "", mode: str = "") -> str:
         """Propose rewriting a lorebook entry AS A WHOLE (content is the complete new body).
 
         For one part, use propose_lore_replace - rewriting everything risks dropping or altering the
-        other sentences. keys, comment and folder left empty, and insert_order = -1, keep their values.
-        To change only the priority or keywords, put the original body (from read_lore_entry) in content.
+        other sentences. keys, comment, folder and mode left empty, and insert_order = -1, keep their
+        values. To change only the priority or keywords, put the original body (from read_lore_entry)
+        in content. mode is RisuAI's entry kind: normal | constant | multiple | child | folder.
+        mode="folder" turns the entry into a folder CONTAINER (RisuAI shows it as a folder only with
+        this mode; the key becomes the folder id its members name in `folder`, generated if empty).
         """
         cur = store.lore_entry(lore_id)
         if cur is None:
             return "없는 로어북 항목입니다"
+        if mode and mode not in store.LORE_MODES:
+            return f"mode 는 {', '.join(store.LORE_MODES)} 중 하나입니다"
         entry = dict(cur["entry"] or {})
         entry["content"] = content
         if keys:
@@ -853,15 +859,20 @@ def build() -> Agent[Deps]:
             entry["insertorder"] = int(insert_order)
         if folder:
             entry["folder"] = folder
+        if mode:
+            entry["mode"] = mode
+            if mode == "folder" and not str(entry.get("key") or "").strip():
+                entry["key"] = store.lore_folder_key()
         label = entry.get("comment") or entry.get("key") or lore_id
-        return _propose(ctx, "lore_edit", f"로어북 “{label}” 수정 — {reason}",
+        what = "폴더로 전환" if mode == "folder" and str((cur["entry"] or {}).get("mode") or "") != "folder" else "수정"
+        return _propose(ctx, "lore_edit", f"로어북 “{label}” {what} — {reason}",
                         {"id": lore_id, "entry": entry})
 
     @agent.tool
     def propose_lore_add(ctx: RunContext[Deps], comment: str, keys: str,
                          content: str, reason: str, scope: str = "local",
                          always_active: bool = False, insert_order: int = 100,
-                         folder: str = "") -> str:
+                         folder: str = "", mode: str = "normal") -> str:
         """Propose adding a lorebook entry. Read the skill "RisuAI 로어북 작성 규칙" first.
 
         content is markdown starting with `### Title` (#### subheadings + bullets). insert_order is
@@ -871,12 +882,27 @@ def build() -> Agent[Deps]:
         The default scope is this chat's lorebook (local). scope="global" is the bot-wide lorebook and
         affects EVERY chat of this bot - use it only when the user explicitly says the bot lorebook.
         always_active=True means always inserted without keywords - leave keys empty then.
+
+        mode is RisuAI's entry kind: normal (default) | constant | multiple | child | folder.
+        **A folder is made with mode="folder"**: comment is the folder's name, keys is its id (leave
+        empty to get one generated - the answer names it), content is ignored. RisuAI shows a folder
+        ONLY for an entry with this mode; members then carry that id in `folder`. Make the folder
+        first, then add or edit the members with folder=<that id>.
         """
         if scope not in ("local", "global"):
             return "scope 는 local 또는 global 입니다"
+        if mode not in store.LORE_MODES:
+            return f"mode 는 {', '.join(store.LORE_MODES)} 중 하나입니다"
         where = "봇 로어북(global)" if scope == "global" else "이 챗 로어북"
+        if mode == "folder":
+            entry = store.lore_folder_entry(comment, keys, int(insert_order))
+            if folder:
+                entry["folder"] = folder
+            return _propose(ctx, "lore_add", f"{where}에 폴더 “{comment}” 추가 (id={entry['key']}) — {reason}",
+                            {"entry": entry, "scope": scope})
         entry = {"key": "" if always_active else keys, "comment": comment, "content": content,
-                 "alwaysActive": bool(always_active), "insertorder": int(insert_order)}
+                 "alwaysActive": bool(always_active), "insertorder": int(insert_order),
+                 "mode": mode}
         if folder:
             entry["folder"] = folder
         return _propose(ctx, "lore_add", f"{where}에 “{comment}” 추가 (우선순위 {int(insert_order)}) — {reason}",

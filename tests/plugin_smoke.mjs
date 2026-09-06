@@ -1241,6 +1241,53 @@ console.log('\ntest_lore_view');
         (document.querySelector('.panel.active .tree')?.textContent || '').slice(0, 200));
 }
 
+console.log('\ntest_lore_folders');
+{
+  // §1-61: a folder is an entry with mode 'folder'. The tree can make one,
+  // shows it even while empty, opens it as a folder (name + id, no body),
+  // and an ordinary entry can be turned into one.
+  clickById(document, 'tab-lore');
+  await settle(600);
+  const tree = () => document.querySelector('.panel.active .tree');
+  check('the tree offers a new folder', !!findButton(tree(), '새 폴더'));
+  clickButton(tree(), '새 폴더');
+  await settle(1100);
+  const pane = document.querySelector('.panel.active .left');
+  check('a folder opens as a folder, not an entry',
+        /폴더 id \(key\): folder-/.test(pane?.textContent || '') && !pane?.querySelector('textarea'),
+        (pane?.textContent || '').slice(0, 160));
+  check('an empty folder still has a row in the tree',
+        /새 폴더/.test(tree()?.textContent || '') && !!tree()?.querySelector('.folderrow .folderedit'),
+        (tree()?.textContent || '').slice(0, 200));
+  const folderInput = pane.querySelector('input');
+  folderInput.value = '스모크 폴더';
+  clickButton(pane, '저장');
+  await settle(1100);
+  check('the folder is renamed in the tree', /스모크 폴더/.test(tree()?.textContent || ''));
+  check('and the folder editor stays a folder editor after the save',
+        /폴더 id \(key\): folder-/.test(document.querySelector('.panel.active .left')?.textContent || ''));
+  // The ordinary entry from the previous test can become a folder too.
+  const entryBtn = [...tree().querySelectorAll('button.treefile')].find((b) => /스모크 항목/.test(b.textContent || ''));
+  check('the ordinary entry is still listed', !!entryBtn);
+  if (entryBtn) {
+    entryBtn.dispatchEvent(new window.Event('click', { bubbles: true }));
+    await settle(600);
+    const editor = document.querySelector('.panel.active .left');
+    check('an entry offers 폴더로 전환', !!findButton(editor, '폴더로 전환'));
+    clickButton(editor, '폴더로 전환');
+    await settle(1100);
+    const after = document.querySelector('.panel.active .left');
+    check('it reopens as a folder with its own id',
+          /폴더 id \(key\): folder-/.test(after?.textContent || '') && !after?.querySelector('textarea'),
+          (after?.textContent || '').slice(0, 160));
+    // and back, so the next tests see the entry they expect
+    clickButton(after, '일반 항목으로');
+    await settle(1100);
+    const back = document.querySelector('.panel.active .left');
+    check('and back to an entry', !!back?.querySelector('textarea') && !!findButton(back, '폴더로 전환'));
+  }
+}
+
 console.log('\ntest_memory_view');
 {
   clickById(document, 'tab-memory');
