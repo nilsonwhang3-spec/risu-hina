@@ -866,7 +866,8 @@ export class AgentPanel {
             inspect.addEventListener('click', () => state.requestOpenStudio(folder, 'all'));
             strip.appendChild(inspect);
             if (e.label) strip.appendChild(el('div', { class: 'hint', text: String(e.label) }));
-            this.log.appendChild(strip);
+            // Above the "…중입니다" row, like text: a strip under it read as the turn having stopped (§1-51).
+            bubble.insertBefore(strip, thinking);
             this.scroll();
             break;
           }
@@ -886,7 +887,8 @@ export class AgentPanel {
             }
             strip.appendChild(el('div', { class: 'hint', text: `👁 ${String(e.label || '보기')}`
               + (paths.length > 8 ? ` · 외 ${paths.length - 8}장` : '') + (e.mode ? ` · ${String(e.mode)}` : '') }));
-            this.log.appendChild(strip);
+            // Above the "…중입니다" row, like text: a strip under it read as the turn having stopped (§1-51).
+            bubble.insertBefore(strip, thinking);
             this.scroll();
             break;
           }

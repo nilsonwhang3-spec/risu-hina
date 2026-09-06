@@ -1108,8 +1108,13 @@ def make_mask(width: int, height: int, boxes: list[dict]) -> bytes:
 
 
 def inpaint(rel: str, boxes: list[dict], prompt: str, *, model: str,
-            negative: str = "", params: dict | None = None, suffix: str = "-fix") -> dict:
+            negative: str = "", params: dict | None = None, suffix: str = "") -> dict:
     """Repaint part of a library image and save the result beside it.
+
+    Under the SOURCE name: save_image never overwrites, so the result lands
+    as `이름 (2).png` in the same folder and the 검수 grid reads it into the
+    same group (the old "-fix" suffix made a name the token rule could not
+    read, so the result never showed - §1-51).
 
     A new file, never in place: the original is a candidate someone may still
     prefer, and an inpaint that overwrote it would remove the comparison the
