@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.13.1
+//@display-name Risu Hina v0.13.2
 //@api 3.0
-//@version 0.13.1
+//@version 0.13.2
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -104,7 +104,7 @@
       this.tokenSafe = true;
       this.lastHealth = body;
       this.probeInfo = "";
-      this.gate = versionGate("0.13.1", String(body.version || ""));
+      this.gate = versionGate("0.13.2", String(body.version || ""));
       return body;
     }
     /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -1383,8 +1383,8 @@
     /** The agent (or a strip in the chat) asked for the studio's 검수 tab on
      * a folder: the shell switches tabs, the studio consumes the folder. */
     openStudioRequest = null;
-    requestOpenStudio(folder) {
-      this.openStudioRequest = { folder };
+    requestOpenStudio(folder, view3) {
+      this.openStudioRequest = { folder, view: view3 };
       this.emit();
     }
     /** Everything unseen has been seen (a reset; the files tab no longer
@@ -4067,6 +4067,9 @@ button.iconbtn.on { background: rgba(37,99,235,.18); }
 .seltools .spacer { flex: 1 1 0; }
 .selhead .badge.warn { cursor: pointer; }
 .extrahead { padding: 10px 8px 4px; }
+/* The \uC378\uB124\uC77C view's big pick: the clicked image above the grid (\xA71-40). */
+.bigpick { margin: 0 0 10px; text-align: center; }
+.bigpick img { max-width: 100%; max-height: 42vh; border-radius: 6px; display: inline-block; }
 .extrahead .sectiontitle { margin-bottom: 0; }
 
 .scroller { flex: 1; overflow-y: auto; position: relative; }
@@ -7358,7 +7361,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
                 text: paths.length > 8 ? `\uC678 ${paths.length - 8}\uC7A5 \xB7 \uAC80\uC218` : "\uAC80\uC218",
                 title: "\uC5D0\uC14B \uC2A4\uD29C\uB514\uC624 \uAC80\uC218 \uD0ED\uC5D0\uC11C \uC774 \uD3F4\uB354\uB97C \uC5FD\uB2C8\uB2E4"
               });
-              inspect.addEventListener("click", () => state.requestOpenStudio(folder));
+              inspect.addEventListener("click", () => state.requestOpenStudio(folder, "all"));
               strip2.appendChild(inspect);
               if (e.label) strip2.appendChild(el("div", { class: "hint", text: String(e.label) }));
               this.log.appendChild(strip2);
@@ -11974,7 +11977,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.13.1",
+            version: "0.13.2",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -12622,7 +12625,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.13.1"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.13.2"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -15709,7 +15712,6 @@ ${negative.value.trim()}
   var emptyEl = null;
   var progressLine = null;
   var runBtn = null;
-  var stripBox = null;
   var shownKey = "";
   function drawSingle(mount) {
     shownKey = "";
@@ -15738,11 +15740,8 @@ ${negative.value.trim()}
       el("span", { class: "grow" }),
       progressLine
     ]));
-    stripBox = el("div", { class: "stripthumbs" });
-    mount.appendChild(stripBox);
     syncControls();
     syncPreview();
-    void drawStrip();
   }
   function buildRunControls() {
     const minus = el("button", { class: "ghost tiny", text: "\u2212" });
@@ -15781,7 +15780,6 @@ ${negative.value.trim()}
     if (!previewBox?.isConnected) return;
     syncControls();
     syncPreview();
-    void drawStrip();
   }
   function syncControls() {
     const running = !!S.jobId;
@@ -15850,39 +15848,6 @@ ${negative.value.trim()}
     S.viewPath = list2[to];
     if (!S.viewList.length) S.viewList = [...list2];
     syncPreview();
-  }
-  async function drawStrip() {
-    const box = stripBox;
-    if (!box?.isConnected) return;
-    let saved = S.queueJob?.payload?.saved ?? [];
-    let label = "\uC774\uBC88 \uBC30\uCE58";
-    if (!saved.length) {
-      const jobs = await loadJobs();
-      const last = jobs.find((j) => (j.payload?.saved?.length ?? 0) > 0);
-      saved = last?.payload?.saved ?? [];
-      label = "\uCD5C\uADFC \uBC30\uCE58";
-    }
-    if (!box.isConnected) return;
-    clear(box);
-    if (!saved.length) return;
-    box.appendChild(el("div", { class: "hint", style: { marginBottom: "4px" }, text: `${label} \uACB0\uACFC ${saved.length}\uC7A5` }));
-    const row = el("div", { class: "striprow" });
-    for (const path of saved.slice(-24)) {
-      const cell2 = el("button", { class: "stripcell" + (path === (S.viewPath || shownKey) ? " on" : ""), title: path });
-      void blobUrl(path, "", { thumb: true }).then((url) => {
-        if (!cell2.isConnected) return;
-        cell2.appendChild(el("img", { src: url, alt: path.split("/").pop() ?? path }));
-      }).catch(() => {
-      });
-      cell2.addEventListener("click", () => {
-        S.viewPath = path;
-        S.viewList = [...saved];
-        syncPreview();
-        for (const c of row.children) c.classList.toggle("on", c.title === path);
-      });
-      row.appendChild(cell2);
-    }
-    box.appendChild(row);
   }
   function openImage(path, list2) {
     S.viewPath = path;
@@ -16377,26 +16342,76 @@ ${negative.value.trim()}
   }
   function onTreeKey(ev) {
     const ctrl = ev.ctrlKey || ev.metaKey;
-    if (!ctrl) return;
     const k = ev.key.toLowerCase();
     const sel = S.selected;
-    if ((k === "c" || k === "x") && sel && !isRoot(sel)) {
+    const many = treeSel2.size > 1 ? [...treeSel2].filter((p) => !isRoot(p)) : sel && !isRoot(sel) ? [sel] : [];
+    if (ctrl && (k === "c" || k === "x") && many.length) {
       ev.preventDefault();
-      setClip(k === "c" ? "copy" : "cut", [sel]);
-    } else if (k === "v" && clip && sel) {
+      setClip(k === "c" ? "copy" : "cut", many);
+    } else if (ctrl && k === "v" && clip && sel) {
       ev.preventDefault();
       void pasteIn(sel);
+    } else if ((ev.key === "Delete" || ev.key === "Backspace") && many.length) {
+      ev.preventDefault();
+      const row = ev.currentTarget.querySelector(".treebranch.on");
+      const r = row?.getBoundingClientRect();
+      confirmDelete(many, { clientX: (r?.left ?? 40) + 40, clientY: (r?.bottom ?? 60) + 4 });
+    } else if (ev.key === "Escape" && treeSel2.size > 1) {
+      treeSel2 = /* @__PURE__ */ new Set([sel]);
+      hub.drawLeft();
     }
+  }
+  var treeSel2 = /* @__PURE__ */ new Set();
+  var treeAnchor2 = "";
+  function visiblePaths() {
+    const out = [];
+    const walk2 = (n) => {
+      out.push(n.path);
+      if (S.open.has(n.path)) for (const c of n.children) walk2(c);
+    };
+    if (S.outputRoot) walk2(S.outputRoot);
+    for (const r of S.extraRoots) walk2(r);
+    return out;
+  }
+  function targets(node) {
+    return treeSel2.size > 1 && treeSel2.has(node.path) ? [...treeSel2] : [node.path];
   }
   function spec2() {
     return {
       expanded: S.open,
-      // The highlight follows the folder only while the centre shows it.
-      selected: new Set(S.selectedFile ? [] : [S.selected]),
-      onOpen(node) {
+      // The highlight follows the folder(s): the multi-selection, or the one
+      // the centre shows.
+      selected: treeSel2.size > 1 ? treeSel2 : new Set(S.selectedFile ? [] : [S.selected]),
+      onOpen(node, ev) {
+        if (ev.ctrlKey || ev.metaKey) {
+          if (!treeSel2.size) treeSel2.add(S.selected);
+          if (treeSel2.has(node.path)) treeSel2.delete(node.path);
+          else treeSel2.add(node.path);
+          if (!treeSel2.size) treeSel2.add(node.path);
+          treeAnchor2 = node.path;
+          hub.drawLeft();
+          return;
+        }
+        if (ev.shiftKey && (treeAnchor2 || S.selected)) {
+          const vis = visiblePaths();
+          const a = vis.indexOf(treeAnchor2 || S.selected);
+          const b = vis.indexOf(node.path);
+          if (a !== -1 && b !== -1) {
+            treeSel2 = new Set(vis.slice(Math.min(a, b), Math.max(a, b) + 1));
+            hub.drawLeft();
+            return;
+          }
+        }
+        treeSel2 = /* @__PURE__ */ new Set([node.path]);
+        treeAnchor2 = node.path;
         openFolder(node);
       },
       onContext(node, ev) {
+        if (!treeSel2.has(node.path)) {
+          treeSel2 = /* @__PURE__ */ new Set([node.path]);
+          treeAnchor2 = node.path;
+          hub.drawLeft();
+        }
         openOutputMenu(node, ev);
       },
       onToggle(node) {
@@ -16432,43 +16447,48 @@ ${negative.value.trim()}
     hub.drawCentre();
   }
   function openOutputMenu(node, ev) {
-    const isRoot2 = node.path === (S.outputRoot?.path ?? "studio/output");
+    const paths = targets(node).filter((p) => !isRoot(p));
+    const many = paths.length > 1;
+    const rootHere = isRoot(node.path);
     menuAt(ev.clientX, ev.clientY, [
-      { label: "\uAC80\uC218 \uC5F4\uAE30", onClick: () => openFolder(node) },
-      { label: "\uC0C8 \uD3F4\uB354", onClick: () => newFolderIn(node.path) },
-      { label: "\uC774\uB984 \uBC14\uAFB8\uAE30", disabled: isRoot2, onClick: () => renameFolder(node) },
+      { label: "\uAC80\uC218 \uC5F4\uAE30", disabled: many, onClick: () => openFolder(node) },
+      { label: "\uC0C8 \uD3F4\uB354", disabled: many, onClick: () => newFolderIn(node.path) },
+      { label: "\uC774\uB984 \uBC14\uAFB8\uAE30", disabled: many || rootHere, onClick: () => renameFolder(node) },
       null,
       {
-        label: "\uBCF5\uC0AC",
-        disabled: isRoot2,
-        onClick: () => {
-          clip = { op: "copy", paths: [node.path] };
-          hub.notice("\uBCF5\uC0AC\uD588\uC2B5\uB2C8\uB2E4 \u2014 \uBD99\uC5EC\uB123\uC744 \uD3F4\uB354\uC5D0\uC11C \uC6B0\uD074\uB9AD\uD558\uC138\uC694.");
-        }
+        label: many ? `\uBCF5\uC0AC (${paths.length})` : "\uBCF5\uC0AC",
+        disabled: !paths.length,
+        onClick: () => setClip("copy", paths)
       },
       {
-        label: "\uC798\uB77C\uB0B4\uAE30",
-        disabled: isRoot2,
-        onClick: () => {
-          clip = { op: "cut", paths: [node.path] };
-          hub.notice("\uC798\uB77C\uB0C8\uC2B5\uB2C8\uB2E4 \u2014 \uBD99\uC5EC\uB123\uC744 \uD3F4\uB354\uC5D0\uC11C \uC6B0\uD074\uB9AD\uD558\uC138\uC694.");
-        }
+        label: many ? `\uC798\uB77C\uB0B4\uAE30 (${paths.length})` : "\uC798\uB77C\uB0B4\uAE30",
+        disabled: !paths.length,
+        onClick: () => setClip("cut", paths)
       },
       {
         label: clip ? `\uBD99\uC5EC\uB123\uAE30 (${clip.paths.length})` : "\uBD99\uC5EC\uB123\uAE30",
-        disabled: !clip,
+        disabled: !clip || many,
         onClick: () => void pasteIn(node.path)
       },
       null,
-      { label: "\uACBD\uB85C \uBCF5\uC0AC", onClick: () => {
+      { label: "\uACBD\uB85C \uBCF5\uC0AC", disabled: many, onClick: () => {
         copyToClipboard(node.path);
         hub.notice("\uACBD\uB85C\uB97C \uBCF5\uC0AC\uD588\uC2B5\uB2C8\uB2E4.", "ok");
       } },
-      { label: "\uB0B4\uB824\uBC1B\uAE30 (zip)", onClick: () => void zipFolder(node.path) },
+      {
+        label: many ? `\uB0B4\uB824\uBC1B\uAE30 (${paths.length}, zip)` : "\uB0B4\uB824\uBC1B\uAE30 (zip)",
+        disabled: !paths.length,
+        onClick: () => void zipFolders(paths)
+      },
       null,
       // The two-step confirm as a second one-item menu: no window.confirm in
       // the sandboxed iframe (the file tree's convention).
-      { label: "\uC0AD\uC81C\u2026", danger: true, disabled: isRoot2, onClick: () => confirmDelete(node.path, ev) }
+      {
+        label: many ? `\uC0AD\uC81C (${paths.length})\u2026` : "\uC0AD\uC81C\u2026",
+        danger: true,
+        disabled: !paths.length,
+        onClick: () => confirmDelete(paths, ev)
+      }
     ]);
   }
   function newFolderIn(where) {
@@ -16529,29 +16549,31 @@ ${negative.value.trim()}
     await hub.refresh();
   }
   async function zipFolder(path) {
+    await zipFolders([path]);
+  }
+  async function zipFolders(paths) {
     try {
-      const bytes = await state.downloadZip([path], path.split("/").pop() ?? "output");
+      const name = paths.length === 1 ? paths[0].split("/").pop() ?? "output" : "output";
+      const bytes = await state.downloadZip(paths, name);
       hub.notice(`${fmtSize4(bytes)} zip \uC744 \uBE0C\uB77C\uC6B0\uC800 \uB2E4\uC6B4\uB85C\uB4DC\uB85C \uB118\uACBC\uC2B5\uB2C8\uB2E4.`, "ok");
     } catch (e) {
       hub.notice("\uB0B4\uB824\uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
     }
   }
-  function confirmDelete(path, ev) {
+  function confirmDelete(paths, ev) {
     menuAt(ev.clientX, ev.clientY, [
-      { label: "\uC815\uB9D0 \uC0AD\uC81C (\uD3F4\uB354\uC9F8, \uC548\uC758 \uD30C\uC77C \uD3EC\uD568)", danger: true, onClick: () => void doDelete(path) }
+      { label: `\uC815\uB9D0 \uC0AD\uC81C (${paths.length}\uAC1C \uD3F4\uB354\uC9F8, \uC548\uC758 \uD30C\uC77C \uD3EC\uD568)`, danger: true, onClick: () => void doDelete(paths) }
     ]);
   }
-  async function doDelete(path) {
+  async function doDelete(paths) {
     try {
-      const r = await state.deleteFiles([path]);
-      hub.notice(
-        r.failed.length ? `\uC9C0\uC6B0\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4 \u2014 ${r.failed[0].error}` : "\uC9C0\uC6E0\uC2B5\uB2C8\uB2E4.",
-        r.failed.length ? "err" : "ok"
-      );
+      const r = await state.deleteFiles(paths);
+      hub.notice(r.failed.length ? `${r.done}\uAC1C\uB97C \uC9C0\uC6E0\uC2B5\uB2C8\uB2E4. ${r.failed.length}\uAC1C \uC2E4\uD328 \u2014 ${r.failed[0].error}` : `${r.done}\uAC1C\uB97C \uC9C0\uC6E0\uC2B5\uB2C8\uB2E4.`, r.failed.length ? "err" : "ok");
     } catch (e) {
       hub.notice("\uC9C0\uC6B0\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
     }
-    if (S.selected === path || S.selected.startsWith(path + "/")) S.selected = S.outputRoot?.path ?? "studio/output";
+    if (paths.some((p) => S.selected === p || S.selected.startsWith(p + "/"))) S.selected = S.outputRoot?.path ?? "studio/output";
+    treeSel2 = /* @__PURE__ */ new Set([S.selected]);
     hub.touchQuiet();
     await hub.refresh();
   }
@@ -16776,8 +16798,8 @@ ${negative.value.trim()}
     moveBtn.addEventListener("click", () => {
       const body = el("div", { class: "applypop" });
       const close = popover(moveBtn, body);
-      const targets = ["", ...[...grouped2().keys()].filter((k) => k)];
-      for (const t of targets) {
+      const targets2 = ["", ...[...grouped2().keys()].filter((k) => k)];
+      for (const t of targets2) {
         const cur = norm((S.cards.fragments ?? []).find((i) => i.path === selFrag)?.folder ?? "");
         const b = el("button", { class: "ghost tiny", text: t || "(\uCD5C\uC0C1\uC704)" });
         b.disabled = t === cur;
@@ -16822,80 +16844,9 @@ ${negative.value.trim()}
     });
   }
 
-  // src/ui/studio/center-history.ts
-  var openState = /* @__PURE__ */ new Map();
-  function jobSection(j, live, open4) {
-    const p = j.payload;
-    const bits = [];
-    if (j.created_at) bits.push(new Date(j.created_at * 1e3).toLocaleString());
-    bits.push(stateLabel(j.state));
-    if (p) bits.push(`${p.done}/${p.total}`);
-    const spent = j.result?.anlasSpent;
-    if (typeof spent === "number") bits.push(`Anlas ${spent}`);
-    const sec = el("details", {
-      class: "jobsec" + (live ? " live" : ""),
-      dataset: { job: j.id },
-      ...open4 ? { open: true } : {}
-    });
-    sec.appendChild(el("summary", { class: "jobhead" }, [
-      live ? el("span", { class: "badge warn", text: "\uC9C4\uD589 \uC911" }) : null,
-      el("span", { class: "sectiontitle", text: bits.join(" \xB7 ") }),
-      el("span", { class: "hint", text: j.id })
-    ]));
-    sec.addEventListener("toggle", () => {
-      openState.set(j.id, sec.open);
-    });
-    if (j.error) sec.appendChild(el("div", { class: "notice err", text: j.error }));
-    if (!p) return sec;
-    if (p.note) sec.appendChild(el("div", { class: "hint", text: p.note }));
-    const savedBy = /* @__PURE__ */ new Map();
-    for (const path of p.saved ?? []) savedBy.set(path.split("/").pop() ?? path, path);
-    const failedBy = new Map((p.failed ?? []).map((f) => [f.name, f.error]));
-    const savedList = p.saved ?? [];
-    const grid = el("div", { class: "jobgrid", style: { gridTemplateColumns: `repeat(${S.cols}, minmax(0, 1fr))` } });
-    for (const it of p.items ?? []) {
-      const full2 = savedBy.get(it.name);
-      const err = failedBy.get(it.name);
-      const cell2 = el("div", { class: "jobcell", title: it.name });
-      if (full2) {
-        const pic = workspaceImage(full2, it.name, { thumb: true, aspect: "832 / 1216", lazy: true });
-        pic.classList.add("jobpic");
-        pic.addEventListener("click", () => openImage(full2, savedList));
-        cell2.append(pic);
-      } else if (err) {
-        cell2.appendChild(el("div", { class: "jobwait err" }, [
-          el("span", { class: "badge err", text: "\uC2E4\uD328" }),
-          el("div", { class: "hint err", text: err })
-        ]));
-      } else if (live && p.current === it.name) {
-        if (livePreview.url) {
-          cell2.appendChild(el("div", { class: "jobpic liveframe" }, [
-            el("img", { src: livePreview.url, alt: it.name }),
-            el("span", { class: "badge warn", text: `\uC0DD\uC131 \uC911 ${livePreview.step}/${livePreview.total}` })
-          ]));
-        } else {
-          cell2.appendChild(el("div", { class: "jobwait" }, [el("span", { class: "badge warn", text: "\uC0DD\uC131 \uC911" })]));
-        }
-      } else {
-        cell2.appendChild(el("div", { class: "jobwait" }, [
-          el("span", { class: "badge", text: live ? "\uB300\uAE30" : "\u2014" })
-        ]));
-      }
-      cell2.appendChild(el("div", { class: "fname" }, [
-        it.scene ? el("span", { class: "badge", text: it.scene, style: { marginRight: "4px" } }) : null,
-        it.cast ? el("span", { class: "badge", text: it.cast, style: { marginRight: "4px" } }) : null,
-        el("span", { class: "hint", text: it.name })
-      ]));
-      grid.appendChild(cell2);
-    }
-    sec.appendChild(grid);
-    return sec;
-  }
-
   // src/ui/studio/center-batch.ts
   var runBtn2 = null;
   var progressLine2 = null;
-  var liveBox = null;
   var summaryBox = null;
   var cardRegs = /* @__PURE__ */ new Map();
   var batchBar = null;
@@ -16955,54 +16906,12 @@ ${negative.value.trim()}
       el("span", { class: "grow" }),
       runBtn2
     ]));
-    liveBox = el("div", {});
-    mount.appendChild(liveBox);
     syncRunBtn();
-    syncLive();
   }
   function batchTick() {
     syncRunBtn();
     syncSceneProgress();
     syncBatchBar();
-    syncLive();
-  }
-  var liveSec = null;
-  var liveKey = "";
-  function syncLive() {
-    if (!liveBox?.isConnected) return;
-    if (!S.jobId || !S.queueJob) {
-      if (liveSec || liveBox.childNodes.length) {
-        clear(liveBox);
-        liveSec = null;
-        liveKey = "";
-      }
-      return;
-    }
-    const p = S.queueJob.payload;
-    const key = [
-      S.queueJob.id,
-      S.queueJob.state,
-      p?.done ?? 0,
-      p?.saved?.length ?? 0,
-      p?.failed?.length ?? 0,
-      p?.current ?? ""
-    ].join("|");
-    if (liveSec?.isConnected && key === liveKey) {
-      const frame = liveSec.querySelector(".liveframe img");
-      if (frame && livePreview.url && frame.src !== livePreview.url) frame.src = livePreview.url;
-      const badge = liveSec.querySelector(".liveframe .badge");
-      if (badge) badge.textContent = (badge.textContent || "").replace(/\d+\/\d+/, `${livePreview.step}/${livePreview.total}`);
-      return;
-    }
-    liveKey = key;
-    clear(liveBox);
-    liveBox.appendChild(el("div", {
-      class: "hint",
-      style: { margin: "6px 0 4px" },
-      text: "\uC9C4\uD589 \uC911\uC778 \uBC30\uCE58 \u2014 \uC644\uC131\uB418\uB294 \uB300\uB85C \uC5EC\uAE30 \uB728\uACE0, \uC544\uB798 \uCD5C\uADFC \uC0DD\uC131 \uC2A4\uD2B8\uB9BD\uC5D0\uB3C4 \uC313\uC785\uB2C8\uB2E4"
-    }));
-    liveSec = jobSection(S.queueJob, true, true);
-    liveBox.appendChild(liveSec);
   }
   function syncRunBtn() {
     if (!runBtn2?.isConnected || !progressLine2) return;
@@ -17402,248 +17311,9 @@ ${negative.value.trim()}
     }
   }
 
-  // src/ui/studio/center-folder.ts
-  var selection2 = /* @__PURE__ */ new Set();
-  var anchorPath2 = "";
-  function drawFolder(node) {
-    const viewMount6 = S.viewMount;
-    if (!viewMount6) return;
-    for (const p of [...selection2]) if (!p.startsWith(node.path + "/")) selection2.delete(p);
-    const crumb = el("div", { class: "row", style: { gap: "2px", flexWrap: "wrap" } });
-    const parts = node.path.split("/");
-    for (let i = 1; i < parts.length; i++) {
-      const path = parts.slice(0, i + 1).join("/");
-      if (!path.startsWith(OUTPUT_ROOT)) continue;
-      const label = path === OUTPUT_ROOT ? "output" : parts[i];
-      const b = el("button", { class: "ghost tiny", text: label });
-      b.addEventListener("click", () => {
-        S.selected = path;
-        selection2.clear();
-        hub.drawLeft();
-        hub.drawCentre();
-      });
-      crumb.appendChild(b);
-      if (i < parts.length - 1) crumb.appendChild(el("span", { class: "hint", text: "\u203A" }));
-    }
-    const close = el("button", { class: "ghost tiny", text: "\u2190 \uAC80\uC218", title: "\uAC80\uC218 \uD654\uBA74\uC73C\uB85C \uB3CC\uC544\uAC11\uB2C8\uB2E4" });
-    close.addEventListener("click", () => {
-      S.centreMode = "tab";
-      S.centreTab = "inspect";
-      hub.drawCentre();
-    });
-    const pick2 = el("button", {
-      class: "primary tiny",
-      text: "\uAC80\uC218\uD558\uAE30",
-      title: "\uC774 \uD3F4\uB354\uC758 \uD6C4\uBCF4\uB4E4\uC744 \uADF8\uB8F9\uC73C\uB85C \uBE44\uAD50\uD558\uACE0 \uCC44\uD0DD\uD569\uB2C8\uB2E4"
-    });
-    pick2.addEventListener("click", () => {
-      S.centreMode = "tab";
-      S.centreTab = "inspect";
-      hub.drawCentre();
-    });
-    const mkdir = el("button", { class: "ghost tiny", text: "\uFF0B \uD3F4\uB354" });
-    mkdir.addEventListener("click", () => {
-      namePopover(mkdir, {
-        label: `${node.path}/ \uC548\uC5D0 \uC0C8 \uD3F4\uB354`,
-        ok: "\uB9CC\uB4E4\uAE30",
-        onSubmit: async (name) => {
-          try {
-            await state.mkdirFile(node.path + "/" + name.replace(/[\\/]+/g, "-"));
-            S.open.add(node.path);
-            hub.touchQuiet();
-            await hub.refresh();
-          } catch (e) {
-            hub.notice("\uD3F4\uB354\uB97C \uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
-          }
-        }
-      });
-    });
-    const cols = colPicker({ values: [2, 3, 4], get: () => S.cols, set: (n) => {
-      S.cols = n;
-      persistCols();
-      for (const gEl of Array.from(document.querySelectorAll(".foldergrid"))) {
-        gEl.style.gridTemplateColumns = `repeat(${S.cols}, minmax(0, 1fr))`;
-      }
-    } });
-    const del = el("button", { class: "ghost tiny" });
-    const selInfo = el("span", { class: "hint" });
-    armed(del, "\uC0AD\uC81C", "\uD55C \uBC88 \uB354", async () => {
-      try {
-        for (const p of [...selection2]) await state.deleteFile(p);
-        selection2.clear();
-        hub.touchQuiet();
-        await hub.refresh();
-      } catch (e) {
-        hub.notice("\uC9C0\uC6B0\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
-      }
-    });
-    const selAll = el("button", { class: "ghost tiny", text: "\uC804\uCCB4 \uC120\uD0DD" });
-    const selNone = el("button", { class: "ghost tiny", text: "\uD574\uC81C" });
-    viewMount6.appendChild(el("div", { class: "row", style: { marginBottom: "8px", flexWrap: "wrap" } }, [
-      close,
-      crumb,
-      el("span", { class: "grow" }),
-      selInfo,
-      selAll,
-      selNone,
-      del,
-      mkdir,
-      cols,
-      pick2
-    ]));
-    viewMount6.appendChild(el("div", {
-      class: "hint",
-      style: { marginBottom: "8px" },
-      text: `\uD30C\uC77C ${node.files.length} \xB7 \uD558\uC704 \uD3F4\uB354 ${node.children.length} \u2014 \uD074\uB9AD\uC73C\uB85C \uC120\uD0DD (Shift \uBC94\uC704) \xB7 \uB450 \uBC88 \uD074\uB9AD\uC73C\uB85C \uD06C\uAC8C \xB7 \uB04C\uC5B4\uC11C \uD3F4\uB354/\uC67C\uCABD \uD2B8\uB9AC\uB85C \uC774\uB3D9`
-    }));
-    const syncBar = () => {
-      selInfo.textContent = selection2.size ? `${selection2.size}\uAC1C \uC120\uD0DD` : "";
-      del.style.display = selection2.size ? "" : "none";
-      selNone.style.display = selection2.size ? "" : "none";
-    };
-    syncBar();
-    const grid = el("div", { class: "foldergrid", style: { gridTemplateColumns: `repeat(${S.cols}, minmax(0, 1fr))` } });
-    grid.tabIndex = 0;
-    grid.addEventListener("keydown", (ev) => {
-      const e = ev;
-      const ctrl = e.ctrlKey || e.metaKey;
-      const k = e.key.toLowerCase();
-      if (ctrl && (k === "c" || k === "x") && selection2.size) {
-        e.preventDefault();
-        setClip(k === "c" ? "copy" : "cut", [...selection2]);
-        for (const c of Array.from(grid.children)) {
-          c.classList.toggle("clipcut", k === "x" && selection2.has(c.title));
-          c.classList.toggle("clipcopy", k === "c" && selection2.has(c.title));
-        }
-      } else if (ctrl && k === "v" && hasClip()) {
-        e.preventDefault();
-        void pasteIn(node.path);
-      } else if (e.key === "Escape" && selection2.size) {
-        selection2.clear();
-        for (const c of Array.from(grid.children)) c.classList.remove("picked");
-        syncBar();
-      }
-    });
-    viewMount6.appendChild(grid);
-    for (const child of node.children) {
-      const cell2 = el("div", { class: "fcell foldcell" + clipClass2(child.path), title: child.path }, [
-        el("div", { class: "foldface", text: "\u{1F4C1}" }),
-        el("div", { class: "fname" }, [
-          el("span", { text: child.name }),
-          el("span", { class: "n", text: String(countFiles2(child)) })
-        ])
-      ]);
-      cell2.addEventListener("click", () => {
-        S.selected = child.path;
-        S.open.add(node.path);
-        selection2.clear();
-        hub.drawLeft();
-        hub.drawCentre();
-      });
-      installDrop(cell2, {
-        into: () => child.path,
-        onMove: (path, sources) => void moveInto(path, sources),
-        onFiles: (path, files) => void uploadInto(path, files)
-      });
-      grid.appendChild(cell2);
-    }
-    const images = node.files.filter((f) => IMAGE_RE2.test(f.name));
-    const others = node.files.filter((f) => !IMAGE_RE2.test(f.name));
-    const imagePaths = images.map((f) => f.path);
-    const syncPicked = () => {
-      for (const c of grid.querySelectorAll(".imgcell")) {
-        c.classList.toggle("picked", selection2.has(c.title));
-      }
-      syncBar();
-    };
-    selAll.addEventListener("click", () => {
-      for (const p of imagePaths) selection2.add(p);
-      syncPicked();
-    });
-    selNone.addEventListener("click", () => {
-      selection2.clear();
-      syncPicked();
-    });
-    images.forEach((f, ix) => {
-      const cell2 = el("div", { class: "fcell imgcell" + (selection2.has(f.path) ? " picked" : "") + clipClass2(f.path), title: f.path });
-      const pic = workspaceImage(f.path, f.name, { thumb: false });
-      pic.classList.add("jobpic");
-      cell2.append(pic, el("div", { class: "fname" }, [el("span", { class: "hint", text: f.name })]));
-      cell2.addEventListener("click", (e) => {
-        const ev = e;
-        if (ev.shiftKey && anchorPath2) {
-          const a = imagePaths.indexOf(anchorPath2);
-          if (a >= 0) {
-            selection2.clear();
-            for (let i = Math.min(a, ix); i <= Math.max(a, ix); i++) selection2.add(imagePaths[i]);
-          }
-        } else {
-          if (selection2.has(f.path)) selection2.delete(f.path);
-          else selection2.add(f.path);
-          anchorPath2 = f.path;
-        }
-        syncPicked();
-      });
-      cell2.addEventListener("dblclick", () => openImage(f.path, imagePaths));
-      installDrag(cell2, () => selection2.has(f.path) ? [...selection2] : [f.path]);
-      grid.appendChild(cell2);
-    });
-    if (others.length) {
-      const list2 = el("div", { class: "filelist", style: { marginTop: "10px" } });
-      for (const f of others) {
-        list2.appendChild(el("div", { class: "chatitem" }, [
-          el("span", { class: "grow", text: f.name }),
-          el("span", { class: "n", text: fmtSize4(f.size) })
-        ]));
-      }
-      viewMount6.appendChild(list2);
-    }
-    if (!node.files.length && !node.children.length) {
-      grid.appendChild(el("div", { class: "empty", text: "\uBE44\uC5B4 \uC788\uC2B5\uB2C8\uB2E4. \uC774\uBBF8\uC9C0\uB97C \uB04C\uC5B4\uB2E4 \uB193\uAC70\uB098 \uBC30\uCE58\uB97C \uC774 \uD3F4\uB354\uB85C \uC800\uC7A5\uD558\uC138\uC694." }));
-    }
-    installDrop(viewMount6, {
-      into: () => node.path,
-      onFiles: (path, files) => void uploadInto(path, files)
-    });
-  }
-  async function moveInto(target, sources) {
-    try {
-      for (const src of sources) {
-        if (src === target || target.startsWith(src + "/")) continue;
-        await state.moveFile(src, target);
-      }
-      selection2.clear();
-      hub.touchQuiet();
-      await hub.refresh();
-    } catch (e) {
-      hub.notice("\uC62E\uAE30\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
-    }
-  }
-  async function uploadInto(dir, files) {
-    try {
-      for (const f of files) {
-        const b64 = await new Promise((res, rej) => {
-          const r = new FileReader();
-          r.onload = () => {
-            const s = String(r.result || "");
-            res(s.slice(s.indexOf(",") + 1));
-          };
-          r.onerror = () => rej(new Error("\uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4"));
-          r.readAsDataURL(f.file);
-        });
-        await state.uploadFile(f.file.name, b64, true, dir + (f.rel ? "/" + f.rel : ""));
-      }
-      hub.notice(`${files.length}\uAC1C\uB97C \uC62C\uB838\uC2B5\uB2C8\uB2E4.`, "ok");
-      hub.touchQuiet();
-      await hub.refresh();
-    } catch (e) {
-      hub.notice("\uC62C\uB9AC\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
-    }
-  }
-
   // src/ui/studio/selector.ts
   var groups = null;
-  var selection3 = {};
+  var selection2 = {};
   var drill = "";
   var viewMode2 = "group";
   var cellSyncs = /* @__PURE__ */ new Map();
@@ -17708,6 +17378,102 @@ ${negative.value.trim()}
     return S.selCols > 0 ? `repeat(${S.selCols}, minmax(0, 1fr))` : "repeat(auto-fill, minmax(190px, 1fr))";
   }
   var groupsRev = -1;
+  function setViewMode(v) {
+    viewMode2 = v;
+    drill = "";
+  }
+  function viewSwitch(current2) {
+    return segCtl([
+      {
+        label: "\uAC80\uC218",
+        on: current2 === "inspect",
+        title: "\uADF8\uB8F9\uC73C\uB85C \uBE44\uAD50\uD558\uACE0 \uCC44\uD0DD\xB7\uC218\uC815\xB7\uBC84\uB9BC\uC744 \uD45C\uC2DC\uD569\uB2C8\uB2E4",
+        pick: () => {
+          if (current2 !== "inspect") {
+            S.centreMode = "tab";
+            S.centreTab = "inspect";
+            hub.drawCentre();
+          }
+        }
+      },
+      {
+        label: "\uC378\uB124\uC77C",
+        on: current2 === "grid",
+        title: "\uD3F4\uB354\uC758 \uADF8\uB9BC\uC744 \uADF8\uB300\uB85C \uBCF4\uACE0 \uACE0\uB974\uACE0\xB7\uC62E\uAE30\uACE0\xB7\uC9C0\uC6C1\uB2C8\uB2E4",
+        pick: () => {
+          if (current2 !== "grid") {
+            S.centreMode = "folder";
+            hub.drawCentre();
+          }
+        }
+      }
+    ]);
+  }
+  function drawSelectedGallery(node) {
+    if (!S.viewMount) return;
+    const viewMount6 = S.viewMount;
+    const pics = node.files.filter((f) => /\.(png|jpe?g|webp|gif|avif)$/i.test(f.name));
+    const slots = node.files.filter((f) => /\.txt$/i.test(f.name)).map((f) => f.name.replace(/\.txt$/i, ""));
+    const inpaint = node.children.find((c) => c.name === "inpaint");
+    const head = el("div", { class: "row selhead", style: { marginBottom: "6px" } });
+    const back = el("button", { class: "ghost tiny", text: "\u2039 \uD6C4\uBCF4 \uD3F4\uB354", title: "\uC774 selected \uAC00 \uB098\uC628 \uD3F4\uB354\uB85C \uB3CC\uC544\uAC11\uB2C8\uB2E4" });
+    back.addEventListener("click", () => {
+      S.selected = node.path.slice(0, node.path.lastIndexOf("/"));
+      hub.drawLeft();
+      hub.drawCentre();
+    });
+    head.append(back, el("span", {
+      class: "sectiontitle path grow",
+      title: node.path,
+      text: `${node.path} \xB7 \uCC44\uD0DD ${pics.length}\uC7A5` + (slots.length ? ` \xB7 \uBE48 \uC2AC\uB86F ${slots.length}` : "")
+    }));
+    head.appendChild(viewSwitch("inspect"));
+    viewMount6.appendChild(head);
+    const bar3 = el("div", { class: "row seltools", style: { marginBottom: "8px" } }, [
+      el("span", { class: "hint grow", text: "\uC560\uC14B \uCC44\uD0DD\uC73C\uB85C \uC815\uB9AC\uB41C \uACB0\uACFC\uC785\uB2C8\uB2E4. \uBD07\uC5D0 \uBC18\uC601\uD558\uBA74 \uC774 \uADF8\uB9BC\uB4E4\uC774 \uAC10\uC815 \uC774\uBBF8\uC9C0\uB85C \uC81C\uC548\uB429\uB2C8\uB2E4." })
+    ]);
+    const adopt = el("button", { class: "primary tiny", text: "\uBD07\uC5D0 \uBC18\uC601" });
+    adopt.title = state.activeCharKey ? "\uC774 \uD3F4\uB354\uC758 \uADF8\uB9BC\uC744 \uC774 \uBD07\uC758 \uAC10\uC815 \uC774\uBBF8\uC9C0\uB85C \uB123\uC790\uACE0 \uC81C\uC548\uD569\uB2C8\uB2E4" : "RisuAI\uC5D0\uC11C \uBD07\uC744 \uC5F4\uC5B4\uC57C \uBC18\uC601\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4";
+    adopt.disabled = !state.activeCharKey || !pics.length;
+    adopt.addEventListener("click", async () => {
+      adopt.disabled = true;
+      try {
+        const r = await state.studio.stage(state.activeCharKey, pics.map((f) => f.path));
+        hub.notice(`${r.staged.length}\uC7A5\uC744 \uD655\uC778\uD588\uC2B5\uB2C8\uB2E4. \uD788\uB098\uC5D0\uAC8C "\uCC44\uD0DD\uD55C \uC774\uBBF8\uC9C0\uB4E4\uC744 \uAC10\uC815 \uC774\uBBF8\uC9C0\uB85C \uB123\uC5B4 \uC918" \uB77C\uACE0 \uD558\uBA74 \uC2B9\uC778 \uD6C4 \uCE74\uB4DC\uC5D0 \uBD99\uC2B5\uB2C8\uB2E4.` + (r.failed.length ? ` (${r.failed.length}\uC7A5 \uD655\uC778 \uC2E4\uD328)` : ""), "ok");
+      } catch (e) {
+        hub.notice("\uC62E\uAE30\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+      } finally {
+        adopt.disabled = !state.activeCharKey;
+      }
+    });
+    bar3.appendChild(adopt);
+    viewMount6.appendChild(bar3);
+    if (slots.length) {
+      viewMount6.appendChild(el("div", { class: "row", style: { marginBottom: "8px" } }, [
+        el("span", { class: "badge warn", text: `\uBE48 \uC2AC\uB86F ${slots.length}` }),
+        el("span", { class: "hint grow", text: slots.join(", ") + " \u2014 \uCC44\uD0DD\uC774 \uC5C6\uB358 \uADF8\uB8F9\uC785\uB2C8\uB2E4" })
+      ]));
+    }
+    const grid = el("div", { class: "agrid selgrid", style: { gridTemplateColumns: gridCols() } });
+    for (const f of pics) {
+      const pic = el("div", { class: "assetpic" });
+      const cell2 = el("div", { class: "fcell selcell picked", title: f.path }, [pic, el("div", { class: "fname", text: f.name })]);
+      void loadThumb3(f, pic);
+      grid.appendChild(cell2);
+    }
+    viewMount6.appendChild(grid);
+    if (!pics.length) viewMount6.appendChild(el("div", { class: "empty", text: "\uCC44\uD0DD\uB41C \uADF8\uB9BC\uC774 \uC5C6\uC2B5\uB2C8\uB2E4." }));
+    if (inpaint) {
+      const open4 = el("button", { class: "ghost tiny", text: `inpaint/ (\uC218\uC815 \uD544\uC694 ${countFiles2(inpaint)}\uC7A5) \uC5F4\uAE30` });
+      open4.addEventListener("click", () => {
+        S.selected = inpaint.path;
+        S.open.add(node.path);
+        hub.drawLeft();
+        hub.drawCentre();
+      });
+      viewMount6.appendChild(el("div", { class: "row", style: { marginTop: "10px" } }, [open4]));
+    }
+  }
   function hasGroups(folder) {
     return !!groups && groups.folder === folder && groupsRev === state.filesRev;
   }
@@ -17716,9 +17482,9 @@ ${negative.value.trim()}
       const eff = effective(prefsFor(folder));
       groupsRev = state.filesRev;
       groups = await state.studio.group(folder, eff.pattern, eff.groupBy);
-      selection3 = {};
+      selection2 = {};
       for (const g of [...groups.groups.map((x) => x.items), groups.unmatched].flat()) {
-        selection3[g.filename] = { ...g.selection };
+        selection2[g.filename] = { ...g.selection };
       }
     } catch (e) {
       groups = null;
@@ -17729,19 +17495,19 @@ ${negative.value.trim()}
   function queueSave() {
     if (saveTimer2) clearTimeout(saveTimer2);
     saveTimer2 = setTimeout(() => {
-      void state.studio.saveSelection(S.selected, selection3).catch(() => {
+      void state.studio.saveSelection(S.selected, selection2).catch(() => {
       });
     }, 500);
   }
   function flag(filename, key) {
-    const cur = selection3[filename] || { use: false, inpaint: false, delete: false };
+    const cur = selection2[filename] || { use: false, inpaint: false, delete: false };
     const next = { ...cur, [key]: !cur[key] };
     if (key === "use" && next.use) next.delete = false;
     if (key === "delete" && next.delete) {
       next.use = false;
       next.rep = false;
     }
-    selection3[filename] = next;
+    selection2[filename] = next;
     cellSyncs.get(filename)?.();
     missingSync?.();
     queueSave();
@@ -17764,7 +17530,7 @@ ${negative.value.trim()}
       hub.drawCentre();
     });
     head.append(
-      tidy,
+      viewSwitch("inspect"),
       el("span", {
         class: "sectiontitle path grow",
         title: node.path,
@@ -17793,9 +17559,9 @@ ${negative.value.trim()}
     bar3.appendChild(el("span", { class: "spacer" }));
     const none = el("button", { class: "ghost tiny", text: "\uC120\uD0DD \uD574\uC81C" });
     none.addEventListener("click", () => {
-      for (const k of Object.keys(selection3)) selection3[k] = { ...selection3[k], use: false, rep: false };
+      for (const k of Object.keys(selection2)) selection2[k] = { ...selection2[k], use: false, rep: false };
       syncAllCells();
-      void state.studio.saveSelection(S.selected, selection3);
+      void state.studio.saveSelection(S.selected, selection2);
     });
     bar3.append(none, exportButton(node));
     if (/\/selected$/.test(node.path)) bar3.appendChild(adoptButton());
@@ -17820,7 +17586,7 @@ ${negative.value.trim()}
     viewMount6.appendChild(missingBox);
     const renderMissing = () => {
       clear(missingBox);
-      const missing = g.groups.filter((grp) => !grp.items.some((i) => selection3[i.filename]?.use)).map((grp) => grp.key);
+      const missing = g.groups.filter((grp) => !grp.items.some((i) => selection2[i.filename]?.use)).map((grp) => grp.key);
       if (!missing.length) return;
       const fill = el("button", {
         class: "ghost tiny",
@@ -17889,7 +17655,7 @@ ${negative.value.trim()}
     }
   }
   function groupCard(grp) {
-    const face = grp.items.find((i) => selection3[i.filename]?.rep) ?? grp.items.find((i) => selection3[i.filename]?.use) ?? grp.items[0];
+    const face = grp.items.find((i) => selection2[i.filename]?.rep) ?? grp.items.find((i) => selection2[i.filename]?.use) ?? grp.items[0];
     const pic = el("div", { class: "assetpic" });
     if (face) void loadThumb3({ path: face.path, name: face.filename, size: 0, modified: 0, textual: false }, pic);
     const chosenBadge = el("span", { class: "badge" });
@@ -17904,8 +17670,8 @@ ${negative.value.trim()}
       ])
     ]);
     const sync = () => {
-      const chosen = grp.items.filter((i) => selection3[i.filename]?.use).length;
-      const fixing = grp.items.filter((i) => selection3[i.filename]?.inpaint).length;
+      const chosen = grp.items.filter((i) => selection2[i.filename]?.use).length;
+      const fixing = grp.items.filter((i) => selection2[i.filename]?.inpaint).length;
       cell2.classList.toggle("picked", chosen > 0);
       chosenBadge.className = "badge" + (chosen ? " ok" : " warn");
       chosenBadge.textContent = chosen ? `\uC120\uD0DD ${chosen}` : "\uBBF8\uC120\uD0DD";
@@ -17949,7 +17715,7 @@ ${negative.value.trim()}
       flags
     ]);
     const sync = () => {
-      const s = selection3[it.filename] || { use: false, inpaint: false, delete: false };
+      const s = selection2[it.filename] || { use: false, inpaint: false, delete: false };
       cell2.classList.toggle("picked", !!s.use);
       cell2.classList.toggle("fixing", !!s.inpaint);
       cell2.classList.toggle("dropping", !!s.delete);
@@ -18192,7 +17958,7 @@ ${negative.value.trim()}
     b.title = state.activeCharKey ? "\uCC44\uD0DD\uD55C \uC774\uBBF8\uC9C0\uB97C \uC774 \uBD07\uC758 \uAC10\uC815 \uC774\uBBF8\uC9C0\uB85C \uB123\uC790\uACE0 \uC81C\uC548\uD569\uB2C8\uB2E4" : "RisuAI\uC5D0\uC11C \uBD07\uC744 \uC5F4\uC5B4\uC57C \uBC18\uC601\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4";
     b.disabled = !state.activeCharKey;
     b.addEventListener("click", async () => {
-      const picked = Object.entries(selection3).filter(([, s]) => s.use).map(([f]) => f);
+      const picked = Object.entries(selection2).filter(([, s]) => s.use).map(([f]) => f);
       if (!picked.length) {
         hub.notice("\uCC44\uD0DD\uD55C \uC774\uBBF8\uC9C0\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4.", "err");
         return;
@@ -18223,6 +17989,246 @@ ${negative.value.trim()}
       mount.appendChild(img);
     } catch {
       if (mount.isConnected) mount.appendChild(el("div", { class: "assettype", text: "?" }));
+    }
+  }
+
+  // src/ui/studio/center-folder.ts
+  var selection3 = /* @__PURE__ */ new Set();
+  var anchorPath2 = "";
+  function drawFolder(node) {
+    const viewMount6 = S.viewMount;
+    if (!viewMount6) return;
+    for (const p of [...selection3]) if (!p.startsWith(node.path + "/")) selection3.delete(p);
+    const crumb = el("div", { class: "row", style: { gap: "2px", flexWrap: "wrap" } });
+    const parts = node.path.split("/");
+    for (let i = 1; i < parts.length; i++) {
+      const path = parts.slice(0, i + 1).join("/");
+      if (!path.startsWith(OUTPUT_ROOT)) continue;
+      const label = path === OUTPUT_ROOT ? "output" : parts[i];
+      const b = el("button", { class: "ghost tiny", text: label });
+      b.addEventListener("click", () => {
+        S.selected = path;
+        selection3.clear();
+        hub.drawLeft();
+        hub.drawCentre();
+      });
+      crumb.appendChild(b);
+      if (i < parts.length - 1) crumb.appendChild(el("span", { class: "hint", text: "\u203A" }));
+    }
+    const close = viewSwitch("grid");
+    const pick2 = el("span");
+    const mkdir = el("button", { class: "ghost tiny", text: "\uFF0B \uD3F4\uB354" });
+    mkdir.addEventListener("click", () => {
+      namePopover(mkdir, {
+        label: `${node.path}/ \uC548\uC5D0 \uC0C8 \uD3F4\uB354`,
+        ok: "\uB9CC\uB4E4\uAE30",
+        onSubmit: async (name) => {
+          try {
+            await state.mkdirFile(node.path + "/" + name.replace(/[\\/]+/g, "-"));
+            S.open.add(node.path);
+            hub.touchQuiet();
+            await hub.refresh();
+          } catch (e) {
+            hub.notice("\uD3F4\uB354\uB97C \uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+          }
+        }
+      });
+    });
+    const cols = colPicker({ values: [2, 3, 4], get: () => S.cols, set: (n) => {
+      S.cols = n;
+      persistCols();
+      for (const gEl of Array.from(document.querySelectorAll(".foldergrid"))) {
+        gEl.style.gridTemplateColumns = `repeat(${S.cols}, minmax(0, 1fr))`;
+      }
+    } });
+    const del = el("button", { class: "ghost tiny" });
+    const selInfo = el("span", { class: "hint" });
+    armed(del, "\uC0AD\uC81C", "\uD55C \uBC88 \uB354", async () => {
+      try {
+        for (const p of [...selection3]) await state.deleteFile(p);
+        selection3.clear();
+        hub.touchQuiet();
+        await hub.refresh();
+      } catch (e) {
+        hub.notice("\uC9C0\uC6B0\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+      }
+    });
+    const selAll = el("button", { class: "ghost tiny", text: "\uC804\uCCB4 \uC120\uD0DD" });
+    const selNone = el("button", { class: "ghost tiny", text: "\uD574\uC81C" });
+    viewMount6.appendChild(el("div", { class: "row", style: { marginBottom: "8px", flexWrap: "wrap" } }, [
+      close,
+      crumb,
+      el("span", { class: "grow" }),
+      selInfo,
+      selAll,
+      selNone,
+      del,
+      mkdir,
+      cols,
+      pick2
+    ]));
+    viewMount6.appendChild(el("div", {
+      class: "hint",
+      style: { marginBottom: "8px" },
+      text: `\uD30C\uC77C ${node.files.length} \xB7 \uD558\uC704 \uD3F4\uB354 ${node.children.length} \u2014 \uD074\uB9AD\uC73C\uB85C \uC120\uD0DD\uD558\uBA74 \uC704\uC5D0 \uD06C\uAC8C \uBCF4\uC785\uB2C8\uB2E4 (Shift \uBC94\uC704) \xB7 \uB450 \uBC88 \uD074\uB9AD\uC73C\uB85C 1\uC7A5 \uD0ED\uC5D0 \xB7 \uB04C\uC5B4\uC11C \uD3F4\uB354/\uC67C\uCABD \uD2B8\uB9AC\uB85C \uC774\uB3D9`
+    }));
+    const bigPick = el("div", { class: "bigpick", style: { display: "none" } });
+    const bigImg = el("img", { alt: "" });
+    const bigName = el("div", { class: "hint previewname" });
+    bigPick.append(bigImg, bigName);
+    viewMount6.appendChild(bigPick);
+    const showBig = (path) => {
+      bigName.textContent = path.split("/").pop() ?? path;
+      bigPick.style.display = "";
+      void blobUrl(path, "", { thumb: true, w: 1024 }).then((url) => {
+        if (bigPick.isConnected) bigImg.src = url;
+      }).catch(() => {
+        bigPick.style.display = "none";
+      });
+    };
+    const syncBar = () => {
+      selInfo.textContent = selection3.size ? `${selection3.size}\uAC1C \uC120\uD0DD` : "";
+      del.style.display = selection3.size ? "" : "none";
+      selNone.style.display = selection3.size ? "" : "none";
+    };
+    syncBar();
+    const grid = el("div", { class: "foldergrid", style: { gridTemplateColumns: `repeat(${S.cols}, minmax(0, 1fr))` } });
+    grid.tabIndex = 0;
+    grid.addEventListener("keydown", (ev) => {
+      const e = ev;
+      const ctrl = e.ctrlKey || e.metaKey;
+      const k = e.key.toLowerCase();
+      if (ctrl && (k === "c" || k === "x") && selection3.size) {
+        e.preventDefault();
+        setClip(k === "c" ? "copy" : "cut", [...selection3]);
+        for (const c of Array.from(grid.children)) {
+          c.classList.toggle("clipcut", k === "x" && selection3.has(c.title));
+          c.classList.toggle("clipcopy", k === "c" && selection3.has(c.title));
+        }
+      } else if (ctrl && k === "v" && hasClip()) {
+        e.preventDefault();
+        void pasteIn(node.path);
+      } else if (e.key === "Escape" && selection3.size) {
+        selection3.clear();
+        for (const c of Array.from(grid.children)) c.classList.remove("picked");
+        syncBar();
+      }
+    });
+    viewMount6.appendChild(grid);
+    for (const child of node.children) {
+      const cell2 = el("div", { class: "fcell foldcell" + clipClass2(child.path), title: child.path }, [
+        el("div", { class: "foldface", text: "\u{1F4C1}" }),
+        el("div", { class: "fname" }, [
+          el("span", { text: child.name }),
+          el("span", { class: "n", text: String(countFiles2(child)) })
+        ])
+      ]);
+      cell2.addEventListener("click", () => {
+        S.selected = child.path;
+        S.open.add(node.path);
+        selection3.clear();
+        hub.drawLeft();
+        hub.drawCentre();
+      });
+      installDrop(cell2, {
+        into: () => child.path,
+        onMove: (path, sources) => void moveInto(path, sources),
+        onFiles: (path, files) => void uploadInto(path, files)
+      });
+      grid.appendChild(cell2);
+    }
+    const images = node.files.filter((f) => IMAGE_RE2.test(f.name));
+    const others = node.files.filter((f) => !IMAGE_RE2.test(f.name));
+    const imagePaths = images.map((f) => f.path);
+    const syncPicked = () => {
+      for (const c of grid.querySelectorAll(".imgcell")) {
+        c.classList.toggle("picked", selection3.has(c.title));
+      }
+      syncBar();
+    };
+    selAll.addEventListener("click", () => {
+      for (const p of imagePaths) selection3.add(p);
+      syncPicked();
+    });
+    selNone.addEventListener("click", () => {
+      selection3.clear();
+      syncPicked();
+    });
+    images.forEach((f, ix) => {
+      const cell2 = el("div", { class: "fcell imgcell" + (selection3.has(f.path) ? " picked" : "") + clipClass2(f.path), title: f.path });
+      const pic = workspaceImage(f.path, f.name, { thumb: false });
+      pic.classList.add("jobpic");
+      cell2.append(pic, el("div", { class: "fname" }, [el("span", { class: "hint", text: f.name })]));
+      cell2.addEventListener("click", (e) => {
+        const ev = e;
+        if (ev.shiftKey && anchorPath2) {
+          const a = imagePaths.indexOf(anchorPath2);
+          if (a >= 0) {
+            selection3.clear();
+            for (let i = Math.min(a, ix); i <= Math.max(a, ix); i++) selection3.add(imagePaths[i]);
+          }
+        } else {
+          if (selection3.has(f.path)) selection3.delete(f.path);
+          else selection3.add(f.path);
+          anchorPath2 = f.path;
+        }
+        syncPicked();
+        showBig(f.path);
+      });
+      cell2.addEventListener("dblclick", () => openImage(f.path, imagePaths));
+      installDrag(cell2, () => selection3.has(f.path) ? [...selection3] : [f.path]);
+      grid.appendChild(cell2);
+    });
+    if (others.length) {
+      const list2 = el("div", { class: "filelist", style: { marginTop: "10px" } });
+      for (const f of others) {
+        list2.appendChild(el("div", { class: "chatitem" }, [
+          el("span", { class: "grow", text: f.name }),
+          el("span", { class: "n", text: fmtSize4(f.size) })
+        ]));
+      }
+      viewMount6.appendChild(list2);
+    }
+    if (!node.files.length && !node.children.length) {
+      grid.appendChild(el("div", { class: "empty", text: "\uBE44\uC5B4 \uC788\uC2B5\uB2C8\uB2E4. \uC774\uBBF8\uC9C0\uB97C \uB04C\uC5B4\uB2E4 \uB193\uAC70\uB098 \uBC30\uCE58\uB97C \uC774 \uD3F4\uB354\uB85C \uC800\uC7A5\uD558\uC138\uC694." }));
+    }
+    installDrop(viewMount6, {
+      into: () => node.path,
+      onFiles: (path, files) => void uploadInto(path, files)
+    });
+  }
+  async function moveInto(target, sources) {
+    try {
+      for (const src of sources) {
+        if (src === target || target.startsWith(src + "/")) continue;
+        await state.moveFile(src, target);
+      }
+      selection3.clear();
+      hub.touchQuiet();
+      await hub.refresh();
+    } catch (e) {
+      hub.notice("\uC62E\uAE30\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+    }
+  }
+  async function uploadInto(dir, files) {
+    try {
+      for (const f of files) {
+        const b64 = await new Promise((res, rej) => {
+          const r = new FileReader();
+          r.onload = () => {
+            const s = String(r.result || "");
+            res(s.slice(s.indexOf(",") + 1));
+          };
+          r.onerror = () => rej(new Error("\uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4"));
+          r.readAsDataURL(f.file);
+        });
+        await state.uploadFile(f.file.name, b64, true, dir + (f.rel ? "/" + f.rel : ""));
+      }
+      hub.notice(`${files.length}\uAC1C\uB97C \uC62C\uB838\uC2B5\uB2C8\uB2E4.`, "ok");
+      hub.touchQuiet();
+      await hub.refresh();
+    } catch (e) {
+      hub.notice("\uC62C\uB9AC\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
     }
   }
 
@@ -18370,6 +18376,7 @@ ${negative.value.trim()}
       state.openStudioRequest = null;
       const folder = wantFolder;
       if (find(folder)) {
+        if (want.view) setViewMode(want.view);
         S.selected = folder;
         const parts = folder.split("/");
         for (let i = 2; i <= parts.length; i++) S.open.add(parts.slice(0, i).join("/"));
@@ -18572,6 +18579,16 @@ ${negative.value.trim()}
       body.appendChild(el("div", { class: "empty", text: `${node.path} \u2014 \uBE44\uC5B4 \uC788\uC2B5\uB2C8\uB2E4.` }));
       return;
     }
+    if (/\/selected$/.test(node.path)) {
+      const keep = S.viewMount;
+      S.viewMount = body;
+      try {
+        drawSelectedGallery(node);
+      } finally {
+        S.viewMount = keep;
+      }
+      return;
+    }
     if (!hasGroups(node.path)) {
       body.appendChild(el("div", { class: "hint", text: "\uC77D\uB294 \uC911\uC785\uB2C8\uB2E4\u2026" }));
       void loadGroups(node.path);
@@ -18766,7 +18783,7 @@ ${negative.value.trim()}
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.13.1"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.13.2"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
@@ -18861,7 +18878,7 @@ ${negative.value.trim()}
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.13.1" }),
+        el("span", { class: "dim", text: "v0.13.2" }),
         healthEl,
         el("span", { class: "spacer" }),
         reload,
@@ -19133,6 +19150,6 @@ ${negative.value.trim()}
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.13.1"} loaded`);
+    console.log(`[risu-hina] v${"0.13.2"} loaded`);
   })();
 })();

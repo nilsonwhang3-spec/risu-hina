@@ -41,7 +41,7 @@ import { drawSingle, singleTick, syncControls } from './center-single';
 import { drawBatch, batchTick } from './center-batch';
 import { buildStrip, stripTick, refreshStrip } from './strip';
 import { drawFolder } from './center-folder';
-import { hasGroups, loadGroups, drawSelector } from './selector';
+import { hasGroups, loadGroups, drawSelector, setViewMode, drawSelectedGallery } from './selector';
 import { setLayoutControls } from '../shell';
 import { reclamp } from '../splitter';
 
@@ -234,6 +234,8 @@ async function refresh(): Promise<void> {
     state.openStudioRequest = null;
     const folder = wantFolder;
     if (find(folder)) {
+      // The chat's 검수 asks for the flat view - every image with its flags.
+      if (want.view) setViewMode(want.view);
       S.selected = folder;
       const parts = folder.split('/');
       for (let i = 2; i <= parts.length; i++) S.open.add(parts.slice(0, i).join('/'));
@@ -463,6 +465,13 @@ function drawInspect(body: HTMLElement): void {
   }
   if (!node.files.length && !node.children.length) {
     body.appendChild(el('div', { class: 'empty', text: `${node.path} — 비어 있습니다.` }));
+    return;
+  }
+  // A selected/ folder shows what was chosen, not the selector again (§1-40).
+  if (/\/selected$/.test(node.path)) {
+    const keep = S.viewMount;
+    S.viewMount = body;
+    try { drawSelectedGallery(node); } finally { S.viewMount = keep; }
     return;
   }
   if (!hasGroups(node.path)) {

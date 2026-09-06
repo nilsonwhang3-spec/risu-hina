@@ -1021,9 +1021,9 @@ class AppState {
 
   /** The agent (or a strip in the chat) asked for the studio's 검수 tab on
    * a folder: the shell switches tabs, the studio consumes the folder. */
-  openStudioRequest: { folder: string } | null = null;
-  requestOpenStudio(folder: string): void {
-    this.openStudioRequest = { folder };
+  openStudioRequest: { folder: string; view?: 'all' | 'group' } | null = null;
+  requestOpenStudio(folder: string, view?: 'all' | 'group'): void {
+    this.openStudioRequest = { folder, view };
     this.emit();
   }
 

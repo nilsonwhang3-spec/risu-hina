@@ -848,7 +848,8 @@ export class AgentPanel {
             const folder = String(e.folder || '') || paths[0].slice(0, paths[0].lastIndexOf('/'));
             const inspect = el('button', { class: 'ghost tiny', text: paths.length > 8 ? `외 ${paths.length - 8}장 · 검수` : '검수',
                                            title: '에셋 스튜디오 검수 탭에서 이 폴더를 엽니다' });
-            inspect.addEventListener('click', () => state.requestOpenStudio(folder));
+            // Flat view with the flags on every image (§1-40): the chat's 검수 is "decide these", not "browse groups".
+            inspect.addEventListener('click', () => state.requestOpenStudio(folder, 'all'));
             strip.appendChild(inspect);
             if (e.label) strip.appendChild(el('div', { class: 'hint', text: String(e.label) }));
             this.log.appendChild(strip);

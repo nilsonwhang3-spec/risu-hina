@@ -436,6 +436,9 @@ button.iconbtn.on { background: rgba(37,99,235,.18); }
 .seltools .spacer { flex: 1 1 0; }
 .selhead .badge.warn { cursor: pointer; }
 .extrahead { padding: 10px 8px 4px; }
+/* The 썸네일 view's big pick: the clicked image above the grid (§1-40). */
+.bigpick { margin: 0 0 10px; text-align: center; }
+.bigpick img { max-width: 100%; max-height: 42vh; border-radius: 6px; display: inline-block; }
 .extrahead .sectiontitle { margin-bottom: 0; }
 
 .scroller { flex: 1; overflow-y: auto; position: relative; }

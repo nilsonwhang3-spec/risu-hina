@@ -1,4 +1,4 @@
-# 06. Implementation status — as of 2026-09-06 (v0.13.1 BETA, Risu Hina)
+# 06. Implementation status — as of 2026-09-06 (v0.13.2 BETA, Risu Hina)
 
 One page for whoever picks this up next session (= me). What exists, what changed, how far it is deployed,
 and what is left. The *why* of the design is `docs/04` (assets and charx are in Appendix E), the storage layout is `docs/02`, the deployment environment is `docs/00`.
@@ -110,6 +110,19 @@ mixed-cast multi-entry batch from the panel.** Released = **v0.10.0 BETA** (§1-
 
 **0.3.1 (night of 2026-08-25)** — the real reason `+` never appeared was not "same version" but **CORS**: RisuAI reads `//@update-url` with a browser `fetch`, and the redirect response from the release URL carries no CORS header. Changed `//@update-url` to
 `https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js`, and made `tools/bundle.py` write that file into the repository (included in the release commit). In the backend code only VERSION changed.
+
+**+ §1-40 (2026-09-06, 0.13.2 - six more)**: ① a `selected/` folder in 검수 shows the CHOSEN
+images as a gallery (`selector.drawSelectedGallery`: 봇에 반영 over the whole folder, the empty
+`.txt` slots listed, `inpaint/` one click away) instead of the group selector asking again.
+② the OUTPUT tree multi-selects (Ctrl/Shift, `left-output.treeSel`, `visiblePaths`); the
+context menu's 복사/잘라내기/내려받기/삭제 act on the set, Delete asks the two-menu confirm,
+Escape collapses. ③ the chat's 검수 button opens the FLAT view with the flags on every image
+(`requestOpenStudio(folder, 'all')` → `selector.setViewMode`). ④ 검수 ⇄ 썸네일 is one
+segmented switch on both heads (`selector.viewSwitch`; the 정리 button and the grid's
+← 검수/검수하기 buttons are gone). ⑤ in the 썸네일 grid a click shows the picture large above
+the grid (`.bigpick`, 1024px thumb); double-click still opens the 1장 tab. ⑥ the 1장 tab's
+per-batch result strip and the 배치 tab's live section under the submit are gone - the bottom
+최근 생성 strip is the one list (`jobSection` no longer used by the batch tab).
 
 **+ §1-39 (2026-09-06, 0.13.1 - the 17-item field report after 0.13.0)**: ① `state.files`
 names an empty/odd listing reply instead of "Cannot read properties of null (reading 'areas')"

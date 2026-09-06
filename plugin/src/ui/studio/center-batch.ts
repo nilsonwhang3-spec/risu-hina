@@ -17,12 +17,9 @@ import { S, hub, gen, persistCols, stateLabel, activeOf,
          clearReserves, persistReserves, type ReserveMap } from './store';
 import { scenePicker, tokenNotice, startRun, cancelRun, pendingCount, loadJobs,
          livePreview, stepMsEma } from './gen';
-import { jobSection } from './center-history';
 
 let runBtn: HTMLButtonElement | null = null;
 let progressLine: HTMLElement | null = null;
-/** The running job's section, drawn under the submit while it runs (10). */
-let liveBox: HTMLElement | null = null;
 /** The queue summary, rebuilt alone when a reservation moves. */
 let summaryBox: HTMLElement | null = null;
 /** Per-scene card registry: the working ring and its mini step bar. */
@@ -92,10 +89,7 @@ export function drawBatch(mount: HTMLElement): void {
   mount.appendChild(el('div', { class: 'row', style: { margin: '8px 0', flexWrap: 'wrap' } }, [
     progressLine, el('span', { class: 'grow' }), runBtn,
   ]));
-  liveBox = el('div', {});
-  mount.appendChild(liveBox);
   syncRunBtn();
-  syncLive();
 }
 
 /** The live-job heartbeat: the button, the progress line, and the running
@@ -105,36 +99,10 @@ export function batchTick(): void {
   syncRunBtn();
   syncSceneProgress();
   syncBatchBar();
-  syncLive();
 }
 
-let liveSec: HTMLElement | null = null;
-let liveKey = '';
-function syncLive(): void {
-  if (!liveBox?.isConnected) return;
-  if (!S.jobId || !S.queueJob) {
-    if (liveSec || liveBox.childNodes.length) { clear(liveBox); liveSec = null; liveKey = ''; }
-    return;
-  }
-  const p = S.queueJob.payload;
-  const key = [S.queueJob.id, S.queueJob.state, p?.done ?? 0, p?.saved?.length ?? 0,
-               p?.failed?.length ?? 0, p?.current ?? ''].join('|');
-  if (liveSec?.isConnected && key === liveKey) {
-    // Same shape - only the streaming frame moved. Patch it in place instead
-    // of rebuilding every <img> in the section (the old 1.5s jank).
-    const frame = liveSec.querySelector<HTMLImageElement>('.liveframe img');
-    if (frame && livePreview.url && frame.src !== livePreview.url) frame.src = livePreview.url;
-    const badge = liveSec.querySelector<HTMLElement>('.liveframe .badge');
-    if (badge) badge.textContent = (badge.textContent || '').replace(/\d+\/\d+/, `${livePreview.step}/${livePreview.total}`);
-    return;
-  }
-  liveKey = key;
-  clear(liveBox);
-  liveBox.appendChild(el('div', { class: 'hint', style: { margin: '6px 0 4px' },
-    text: '진행 중인 배치 — 완성되는 대로 여기 뜨고, 아래 최근 생성 스트립에도 쌓입니다' }));
-  liveSec = jobSection(S.queueJob, true, true);
-  liveBox.appendChild(liveSec);
-}
+// (the live job section under the submit is gone, §1-40: the strip + the
+// scene rings carry the run)
 
 function syncRunBtn(): void {
   if (!runBtn?.isConnected || !progressLine) return;
