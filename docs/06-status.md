@@ -1,4 +1,4 @@
-# 06. Implementation status — as of 2026-09-06 (v0.14.0 BETA, Risu Hina)
+# 06. Implementation status — as of 2026-09-06 (v0.14.1 BETA, Risu Hina)
 
 One page for whoever picks this up next session (= me). What exists, what changed, how far it is deployed,
 and what is left. The *why* of the design is `docs/04` (assets and charx are in Appendix E), the storage layout is `docs/02`, the deployment environment is `docs/00`.
@@ -110,6 +110,10 @@ mixed-cast multi-entry batch from the panel.** Released = **v0.10.0 BETA** (§1-
 
 **0.3.1 (night of 2026-08-25)** — the real reason `+` never appeared was not "same version" but **CORS**: RisuAI reads `//@update-url` with a browser `fetch`, and the redirect response from the release URL carries no CORS header. Changed `//@update-url` to
 `https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js`, and made `tools/bundle.py` write that file into the repository (included in the release commit). In the backend code only VERSION changed.
+
+**+ §1-45 (2026-09-06, → v0.14.1)**: the centre panel's armed delete label ("정말? (N)") was
+invisible - `button.iconbtn` (transparent, later in the sheet) outranked `button.danger`; a
+`button.iconbtn.danger` rule paints it red. Released as 0.14.1 with §1-43/§1-44.
 
 **+ §1-44 (2026-09-06, the 8M-token turns and 중단)**: measured on zikmunt-pc: one session's
 stored history had grown to 104MB (694 messages, 178 run_python calls), turns of 7-30 model
