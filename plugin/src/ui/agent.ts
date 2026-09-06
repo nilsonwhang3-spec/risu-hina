@@ -944,7 +944,7 @@ export class AgentPanel {
             const more = el('button', { class: 'ghost tiny continuebtn', text: '계속 이어서', title: '방금 턴에서 끝내지 못한 작업을 이어갑니다' });
             more.addEventListener('click', () => {
               more.remove();
-              this.input.value = '이어서 진행해 주세요. 방금 턴에서 끝내지 못한 작업이 있으면 마저 해 주세요.';
+              this.input.value = '이어서 진행해 주세요: 내 마지막 메시지(직전 요청)에서 끝내지 못한 작업만 마저 해 주세요. 그 전에 이미 끝난 요청은 다시 하지 마세요.';
               void this.submit();
             });
             bubble.appendChild(el('div', { class: 'row', style: { marginTop: '4px' } }, [more]));

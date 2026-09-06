@@ -79,6 +79,23 @@ try {
 
 let layBtnL: HTMLElement | null = null;
 let layBtnR: HTMLElement | null = null;
+/** The Anlas meter on the shell tab row (§1-50): always in view, refreshed
+ * with every status read (a finished batch reads it again). */
+let anlasBadge: HTMLElement | null = null;
+
+function drawAnlas(): void {
+  if (!anlasBadge) return;
+  const acc = S.status?.account;
+  if (!acc) {
+    anlasBadge.textContent = S.status?.error ? 'Anlas ?' : 'Anlas …';
+    anlasBadge.title = S.status?.error || 'NovelAI 잔량을 읽는 중입니다';
+    anlasBadge.classList.remove('warn');
+    return;
+  }
+  anlasBadge.textContent = `Anlas ${Number(acc.anlas).toLocaleString()}`;
+  anlasBadge.title = `NovelAI Anlas 잔량 ${acc.anlas} · v5 사용량 ${acc.usagePercent ?? '?'}% · tier ${acc.tier ?? '?'} (배치가 끝날 때마다 다시 읽습니다)`;
+  anlasBadge.classList.toggle('warn', Number(acc.anlas) < 200);
+}
 
 function applyPanels(): void {
   if (!splitRoot) return;
@@ -109,7 +126,12 @@ function ensureLayoutControls(): void {
     layBtnR.classList.add('laybtn');
     layBtnR.addEventListener('click', () => togglePanel('right'));
   }
-  setLayoutControls(el('span', { class: 'row', style: { gap: '2px' } }, [layBtnL, layBtnR]));
+  if (!anlasBadge) {
+    anlasBadge = el('span', { class: 'badge anlasmeter', text: 'Anlas …' });
+    anlasBadge.addEventListener('click', () => { void loadStatus(); });
+    drawAnlas();
+  }
+  setLayoutControls(el('span', { class: 'row', style: { gap: '6px' } }, [anlasBadge, layBtnL, layBtnR]));
   applyPanels();
 }
 
@@ -175,6 +197,7 @@ async function loadStatus(): Promise<void> {
   } catch (e) {
     S.status = { configured: false, library: '', error: msg(e) };
   }
+  drawAnlas();
   // The meters live on the centre tabs now.
   if (S.centreMode === 'tab' && !S.selectedFile) drawCentre();
 }
@@ -194,7 +217,21 @@ function notice(text: string, kind: 'ok' | 'err' | '' = ''): void {
   setTimeout(() => t.remove(), kind === 'err' ? 12000 : 6000);
 }
 
+let refreshPending = false;
+
 async function refresh(): Promise<void> {
+  // Never rebuild the studio under the user's caret (§1-50): an agent batch
+  // bumps filesRev per image, and each bump used to redraw both columns -
+  // the prompt being typed lost focus and caret every few seconds. The
+  // refresh waits for blur.
+  const ae = document.activeElement as HTMLElement | null;
+  if (ae && splitRoot && splitRoot.contains(ae) && /^(TEXTAREA|INPUT|SELECT)$/.test(ae.tagName)) {
+    if (!refreshPending) {
+      refreshPending = true;
+      ae.addEventListener('blur', () => { refreshPending = false; void refresh(); }, { once: true });
+    }
+    return;
+  }
   renderedRev = state.filesRev;
   try {
     const [l, ...areas] = await Promise.all([

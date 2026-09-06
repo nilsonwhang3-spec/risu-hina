@@ -111,6 +111,15 @@ mixed-cast multi-entry batch from the panel.** Released = **v0.10.0 BETA** (§1-
 **0.3.1 (night of 2026-08-25)** — the real reason `+` never appeared was not "same version" but **CORS**: RisuAI reads `//@update-url` with a browser `fetch`, and the redirect response from the release URL carries no CORS header. Changed `//@update-url` to
 `https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js`, and made `tools/bundle.py` write that file into the repository (included in the release commit). In the backend code only VERSION changed.
 
+**+ §1-50 (2026-09-06, unreleased)**: (1) the studio's `refresh()` (both columns) also waits
+for blur while a field in the studio has focus - §1-49 guarded only drawLeft, and an AGENT
+batch's `images` events go through touchFiles (not touchQuiet), so every image re-ran the whole
+refresh; (2) an **Anlas meter** on the shell tab row beside the layout toggles (`anlasmeter`,
+warn under 200, click = re-read; loadStatus updates it, a finished batch calls loadStatus);
+(3) "다시 진행해" redoing an earlier turn: the INSTRUCTIONS say 이어서 means the LAST request and
+older turns are done work, the 계속 이어서 button's text says the same, and the drop-fallback
+note now says its list is of already-handled requests, not a to-do list.
+
 **+ §1-49 (2026-09-06, after 0.14.2, unreleased)**: (1) the agent panel says "대화를 불러오는
 중입니다…" while the session loads; (2) the artifact modal is bounded (88vw/1200px, 90vh, the
 head stays put) and has a worded "닫기 (Esc)" beside the ✕; (3) a turn that ends on a question
