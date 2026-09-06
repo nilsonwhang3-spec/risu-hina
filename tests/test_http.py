@@ -2110,6 +2110,15 @@ def test_charx_build(s: Server, cw: dict) -> None:
     # manifest grows by one, so a charx right after already carries it.
     s.post("/files/upload", {"name": "made.png", "base64": base64.b64encode(png).decode(),
                              "dir": "projects/어답트"})
+    # §1-55: the studio's reference audit asks for the header, not the bytes.
+    st, body = s.post("/files/stat", {"path": "projects/어답트/made.png"})
+    check("files/stat reads size and PNG dimensions",
+          st == 200 and body.get("format") == "png" and body.get("width", 0) > 0
+          and body.get("height", 0) > 0 and body.get("size", 0) == len(png), str(body)[:160])
+    st, body = s.post("/files/stat", {"path": "projects/어답트/없음.png"})
+    check("files/stat of a missing file is a 404", st == 404, str(st))
+    st, body = s.post("/files/stat", {"path": "../../etc/hosts"})
+    check("files/stat refuses an escaping path", st == 400, str(st))
     st, body = s.post("/assets/adopt", {"charKey": ck, "key": "assets/hostchose.png",
                                         "path": "projects/어답트/made.png", "name": "새 그림", "field": "additional"})
     check("adopt records the host's key", st == 200 and body.get("key") == "assets/hostchose.png", str(body)[:160])

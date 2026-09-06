@@ -50,7 +50,16 @@ export class TurnList {
     this.scroller = el('div', { class: 'scroller' }, [this.topSpacer, this.body, this.bottomSpacer]);
     this.root = this.scroller;
     this.scroller.addEventListener('scroll', () => this.schedule());
-    window.addEventListener('resize', () => this.schedule());
+    window.addEventListener('resize', this.onResize);
+  }
+
+  private onResize = (): void => this.schedule();
+
+  /** The editor rebuilds its list on a bot switch: the window listener of
+   * the old one used to keep the whole list alive (§1-55). */
+  destroy(): void {
+    window.removeEventListener('resize', this.onResize);
+    this.root.remove();
   }
 
   setTurns(turns: Turn[]): void {

@@ -138,6 +138,9 @@ export const hub = {
   /** A live-job heartbeat: the visible tab patches its progress in place
    * (never a full centre rebuild - inputs keep their focus). */
   jobTick: () => { /* registered by the centre tabs */ },
+  /** Whether the studio is the tab on screen - polls that only feed its
+   * pictures skip their ticks otherwise (§1-55). */
+  studioShowing: (): boolean => true,
   /** Patch count badges (활성 캐릭터, 미해결 조각) in place - called from
    * debounced checks so a keystroke in an editor never rebuilds the column
    * under the caret. */

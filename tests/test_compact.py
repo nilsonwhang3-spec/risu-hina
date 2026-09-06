@@ -98,6 +98,32 @@ def main() -> int:
         agent_mod.Agent, agent_mod._model = real_agent, real_model  # type: ignore[assignment]
         config.update({"agent": {"historyBudgetChars": saved_cfg.get("historyBudgetChars")}})
 
+    print("session messages and history pruning (§1-55)")
+    from app import db
+    db.execute("INSERT INTO sessions(id, chat_key, title, created_at, updated_at) VALUES(?,?,?,?,?)",
+               ("sm", "chat-m", "", 1, 1))
+    session._save_message("sm", "user", "질문")
+    session._save_message("sm", "assistant", "답")
+    for i in range(5):
+        session._save_message("sm", "history", [{"i": i, "pad": "x" * 5000}])
+        session.prune_history("sm")
+    kept = db.query("SELECT seq, content_json FROM agent_messages WHERE session_id = 'sm' AND role = 'history' ORDER BY seq")
+    check("only the newest two snapshots stay", len(kept) == 2, str([r["seq"] for r in kept]))
+    check("the newest snapshot is the one read back", '"i": 4' in kept[-1]["content_json"])
+    shown = session.messages("sm")
+    check("the panel list has no history rows", [m["role"] for m in shown] == ["user", "assistant"], str(shown)[:200])
+    check("limit returns the LAST n", [m["role"] for m in session.messages("sm", 1)] == ["assistant"])
+    check("messages_total counts shown rows only", session.messages_total("sm") == 2)
+    conn = db.connect()
+    conn.execute("UPDATE meta SET value = '13' WHERE key = 'schema_version'")
+    conn.commit()
+    for i in range(6):
+        session._save_message("sm", "history", [{"i": 10 + i}])
+    db._migrate(conn)
+    n_hist = db.one("SELECT COUNT(*) AS n FROM agent_messages WHERE role = 'history'")["n"]
+    check("schema 14 migration prunes every session to two snapshots", n_hist == 2, str(n_hist))
+    check("schema version advanced", db.one("SELECT value FROM meta WHERE key = 'schema_version'")["value"] == str(db.SCHEMA_VERSION))
+
     print("explicit stop")
     session.note_job("sx", "job-1")
     r = session.stop("sx")

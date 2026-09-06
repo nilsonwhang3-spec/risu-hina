@@ -10,6 +10,13 @@
  * leading slash or a `..` segment renders as a text placeholder - an iframe
  * fetching arbitrary model-chosen URLs is an exfiltration channel, and the
  * images this app shows are local files anyway.
+ *
+ * Memory (§1-55): the cache is bounded in BYTES as well as entries, a
+ * revoked URL is released at once unless a picture on screen still shows it,
+ * and a grid cell far off screen drops its <img> (the decoded bitmap is what
+ * costs - a 360px thumb is 20KB on the wire and ~700KB decoded) and fetches
+ * again when it comes back. iOS reloads the whole page when a tab runs out
+ * of memory; the plugin's own numbers are logged as `mem` (see blobStats).
  */
 import { el, clear } from './dom';
 import { state } from '../state';
@@ -17,12 +24,16 @@ import { state } from '../state';
 const PARALLEL = 6;
 let active = 0;
 const queue: (() => void)[] = [];
-/** path[:stamp] -> object URL (thumb keys carry a t: prefix). */
-const cache = new Map<string, string>();
+interface Entry { url: string; bytes: number }
+/** path[:stamp] -> object URL (thumb keys carry a t: prefix; asset keys an asset: prefix). */
+const cache = new Map<string, Entry>();
+let cacheBytes = 0;
 /** One fetch per key even when a grid rebuild asks again before it lands. */
 const inflight = new Map<string, Promise<string>>();
 /** Images only: short timeout so a hung fetch frees its 1-of-6 slot fast. */
 const IMAGE_TIMEOUT_MS = 45_000;
+/** URLs evicted while a connected <img> still showed them - revoked later. */
+let deferredRevokes = 0;
 
 const SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i;
 
@@ -47,12 +58,6 @@ export function safeWorkspacePath(path: string): boolean {
   return !path.split(/[\\/]/).some((p) => p === '..');
 }
 
-/** The object URL for a space file's bytes, cached.
- *
- * A real LRU: a hit re-inserts its key so heavy grids do not evict what is
- * on screen, and an evicted URL is revoked on a DELAY - revoking at eviction
- * blanked pictures that were still in the DOM (the picture showed, the cache
- * turned over, the <img> went empty). Thirty seconds outlives any redraw. */
 export interface BlobOptions {
   /** Fetch the server-side WebP thumbnail instead of the original bytes. */
   thumb?: boolean;
@@ -60,24 +65,62 @@ export interface BlobOptions {
   w?: number;
 }
 
-/** Forget every cached object URL for these paths (or all, with none): a
- * file rewritten under the same name - a regenerated batch, an inpaint, an
- * upload over an old one - showed its OLD picture until the panel reloaded
- * (§1-42 "썸네일이 캐시가 있는지 반복"). The URLs are revoked a little later
- * so an <img> still on screen finishes loading. */
-/** How many object URLs to keep: a desktop can hold hundreds, a phone
- * cannot - iOS reloads the whole page when the tab runs out of memory, which
- * showed as 검수 "계속 리셋" on an iPhone (§1-53). */
+/** A phone: ≤760px, or a coarse pointer up to 1024px. iOS reloads the whole
+ * page when the tab runs out of memory, which showed as 검수 "계속 리셋" on
+ * an iPhone (§1-53); every budget below is smaller here. */
 export function smallScreen(): boolean {
   try {
     return window.matchMedia('(max-width: 760px), (pointer: coarse) and (max-width: 1024px)').matches;
   } catch { return false; }
 }
 
+/** How many object URLs to keep: a desktop can hold hundreds, a phone cannot. */
 function cacheCap(): number {
   return smallScreen() ? 90 : 600;
 }
 
+/** ...and how many bytes: a count alone let ninety 3MB originals through. */
+function byteCap(): number {
+  return smallScreen() ? 24 * 1024 * 1024 : 256 * 1024 * 1024;
+}
+
+/** The plugin's own memory numbers, for the `mem` log line and ⚙ → 정보. */
+export function blobStats(): { count: number; bytes: number; inflight: number; deferredRevokes: number; countCap: number; byteCap: number } {
+  return { count: cache.size, bytes: cacheBytes, inflight: inflight.size, deferredRevokes, countCap: cacheCap(), byteCap: byteCap() };
+}
+
+/** Let go of a URL: at once when nothing on screen shows it, else after a
+ * grace long enough for any redraw (revoking at eviction blanked pictures
+ * that were still in the DOM - the cache turned over, the <img> went empty). */
+function release(url: string): void {
+  let shown = false;
+  try {
+    const img = document.querySelector(`img[src="${url}"]`);
+    shown = !!img && img.isConnected;
+  } catch { shown = true; }
+  if (!shown) { URL.revokeObjectURL(url); return; }
+  deferredRevokes += 1;
+  setTimeout(() => { deferredRevokes -= 1; URL.revokeObjectURL(url); }, 30_000);
+}
+
+function drop(key: string, e: Entry): void {
+  cache.delete(key);
+  cacheBytes -= e.bytes;
+  release(e.url);
+}
+
+/** Make room for `incoming` bytes: oldest first, by count and by bytes. */
+function makeRoom(incoming: number): void {
+  while (cache.size && (cache.size >= cacheCap() || cacheBytes + incoming > byteCap())) {
+    const first = cache.entries().next().value as [string, Entry];
+    drop(first[0], first[1]);
+  }
+}
+
+/** Forget every cached object URL for these paths (or all, with none): a
+ * file rewritten under the same name - a regenerated batch, an inpaint, an
+ * upload over an old one - showed its OLD picture until the panel reloaded
+ * (§1-42 "썸네일이 캐시가 있는지 반복"). */
 export function evictBlob(paths?: string[]): void {
   const doomed: string[] = [];
   for (const k of cache.keys()) {
@@ -86,25 +129,37 @@ export function evictBlob(paths?: string[]): void {
     if (!paths || paths.includes(p) || paths.includes(bare)) doomed.push(k);
   }
   for (const k of doomed) {
-    const u = cache.get(k);
-    cache.delete(k);
-    if (u) setTimeout(() => URL.revokeObjectURL(u), 30_000);
+    const e = cache.get(k);
+    if (e) drop(k, e);
   }
 }
 
+/** The object URL for a space file's bytes, cached (a real LRU: a hit
+ * re-inserts its key so heavy grids do not evict what is on screen). */
 export async function blobUrl(path: string, stamp = '', opts: BlobOptions = {}): Promise<string> {
   const key = (opts.thumb ? `t${opts.w || 360}:` : '') + (stamp ? `${path}:${stamp}` : path);
+  return blobFrom(key, () => opts.thumb
+    ? state.fileThumb(path, opts.w || 360)
+    : state.fileBytes(path, IMAGE_TIMEOUT_MS));
+}
+
+/**
+ * The same cache and fetch window for bytes that are not a space file - a
+ * RisuAI asset by key, say. `fetch` runs inside the 1-of-6 slot; a null
+ * result rejects so the caller shows its own placeholder.
+ */
+export async function blobFrom(key: string, fetch: () => Promise<Uint8Array | null | undefined>): Promise<string> {
   const hit = cache.get(key);
   if (hit) {
     cache.delete(key);
     cache.set(key, hit);
-    return hit;
+    return hit.url;
   }
   // In-flight dedup: drawCentre() rebuilds used to fetch the same cell twice
   // - both callers passed the semaphore before either had filled the cache.
   const running = inflight.get(key);
   if (running) return running;
-  const job = fetchBlob(path, key, opts);
+  const job = fetchBlob(key, fetch);
   inflight.set(key, job);
   try {
     return await job;
@@ -113,7 +168,7 @@ export async function blobUrl(path: string, stamp = '', opts: BlobOptions = {}):
   }
 }
 
-async function fetchBlob(path: string, key: string, opts: BlobOptions): Promise<string> {
+async function fetchBlob(key: string, fetch: () => Promise<Uint8Array | null | undefined>): Promise<string> {
   await new Promise<void>((resolve) => {
     const go = () => { active += 1; resolve(); };
     if (active < PARALLEL) go(); else queue.push(go);
@@ -121,19 +176,14 @@ async function fetchBlob(path: string, key: string, opts: BlobOptions): Promise<
   try {
     // A second waiter for the same key may have filled it meanwhile.
     const again = cache.get(key);
-    if (again) return again;
-    const bytes = opts.thumb
-      ? await state.fileThumb(path, opts.w || 360)
-      : await state.fileBytes(path, IMAGE_TIMEOUT_MS);
-    const buf = new Uint8Array(bytes.byteLength);
-    buf.set(bytes);
-    const url = URL.createObjectURL(new Blob([buf]));
-    while (cache.size >= cacheCap()) {
-      const [k, u] = cache.entries().next().value as [string, string];
-      cache.delete(k);
-      setTimeout(() => URL.revokeObjectURL(u), 30_000);
-    }
-    cache.set(key, url);
+    if (again) return again.url;
+    const bytes = await fetch();
+    if (!bytes || !bytes.byteLength) throw new Error('no bytes');
+    // Blob copies its parts, so the bytes are not held twice here.
+    const url = URL.createObjectURL(new Blob([bytes as unknown as BlobPart]));
+    makeRoom(bytes.byteLength);
+    cache.set(key, { url, bytes: bytes.byteLength });
+    cacheBytes += bytes.byteLength;
     return url;
   } finally {
     active -= 1;
@@ -150,34 +200,59 @@ export interface ImgOptions {
   /** Reserve the cell at this CSS aspect-ratio (e.g. '832 / 1216') so grids
    * never show zero-height blanks or jump when the bytes arrive. */
   aspect?: string;
-  /** Fetch only when the cell first scrolls near the viewport. */
+  /** Fetch only when the cell first scrolls near the viewport. Default: on
+   * for thumbnails. */
   lazy?: boolean;
+  /** Drop the <img> again when the cell scrolls far away (decoded bitmaps
+   * are the phone's real cost); it is fetched anew on return. Default: on
+   * for thumbnails on a small screen. */
+  unload?: boolean;
 }
 
-// --- lazy loading ----------------------------------------------------------------
+// --- visibility ------------------------------------------------------------------
 
-/** Cells waiting for their first moment on screen. */
-const pending = new Map<Element, () => void>();
+interface Slot { load: () => void; unload?: () => void; loaded: boolean }
+/** Cells with a picture that follows the viewport. Weak: a cell a redraw
+ * threw away before it ever scrolled into view must not be pinned here. */
+const slots = new WeakMap<Element, Slot>();
 let io: IntersectionObserver | null = null;
 try {
   io = new IntersectionObserver((entries) => {
     for (const e of entries) {
-      if (!e.isIntersecting) continue;
-      io?.unobserve(e.target);
-      const cb = pending.get(e.target);
-      pending.delete(e.target);
-      cb?.();
+      const slot = slots.get(e.target);
+      if (!slot) { io?.unobserve(e.target); continue; }
+      if (e.isIntersecting) {
+        if (!slot.loaded) {
+          slot.loaded = true;
+          slot.load();
+        }
+        if (!slot.unload) { io?.unobserve(e.target); slots.delete(e.target); }
+      } else if (slot.loaded && slot.unload) {
+        slot.loaded = false;
+        slot.unload();
+      }
     }
-  }, { rootMargin: '300px' });
+  }, { rootMargin: '600px' });
 } catch {
   io = null; // linkedom (and very old engines): fetch immediately instead
 }
 
-/** Run `cb` when `elm` first comes near the viewport; immediately without IO. */
-function whenVisible(elm: Element, cb: () => void): void {
-  if (!io) { cb(); return; }
-  pending.set(elm, cb);
+/**
+ * Run `load` when `elm` first comes near the viewport, and - given `unload`
+ * - run it when the cell leaves and `load` again when it returns. Without an
+ * IntersectionObserver `load` runs at once and nothing is ever unloaded.
+ */
+export function watchImage(elm: Element, load: () => void, unload?: () => void): void {
+  // A tick later either way: cells are built before they are appended, and
+  // a loader that checks `isConnected` at once would see false.
+  if (!io) { setTimeout(load, 0); return; }
+  slots.set(elm, { load, unload, loaded: false });
   io.observe(elm);
+}
+
+/** Whether pictures should let go of their bitmaps off screen. */
+export function unloadByDefault(): boolean {
+  return smallScreen();
 }
 
 /**
@@ -197,15 +272,33 @@ export function workspaceImage(path: string, alt: string, opts: ImgOptions = {})
     fallback();
     return wrap;
   }
+  const lazy = opts.lazy ?? !!opts.thumb;
+  const unload = opts.unload ?? (!!opts.thumb && unloadByDefault());
+  let gen = 0;
+  let held = false;
   const start = (): void => {
+    const my = ++gen;
     void blobUrl(path, opts.stamp, { thumb: opts.thumb }).then((url) => {
-      const img = el('img', { src: url, alt: alt || path, loading: 'lazy' });
+      if (my !== gen) return; // unloaded (or reloaded) meanwhile
+      const img = el('img', { src: url, alt: alt || path, loading: 'lazy' }) as HTMLImageElement;
       img.addEventListener('error', fallback);
       clear(wrap);
       wrap.appendChild(img);
+      if (held) { held = false; wrap.style.width = ''; wrap.style.height = ''; wrap.style.display = ''; }
     }).catch(fallback);
   };
-  if (opts.lazy) whenVisible(wrap, start);
+  const stop = (): void => {
+    gen += 1;
+    // Keep the cell's size so the page does not jump when the picture goes.
+    if (!opts.aspect && wrap.offsetWidth && wrap.offsetHeight) {
+      wrap.style.width = wrap.offsetWidth + 'px';
+      wrap.style.height = wrap.offsetHeight + 'px';
+      wrap.style.display = 'inline-block';
+      held = true;
+    }
+    clear(wrap);
+  };
+  if (lazy || unload) watchImage(wrap, start, unload ? stop : undefined);
   else start();
   return wrap;
 }

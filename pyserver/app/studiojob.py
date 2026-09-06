@@ -49,11 +49,16 @@ def _preview_put(job_id: str, step: int, total: int, current: str, png: bytes) -
                             "current": current, "png": png}
 
 
-def preview(job_id: str, since: int) -> dict | None:
+def preview(job_id: str, since: int, w: int = 0) -> dict | None:
     """The newest intermediate frame, or just its rev when `since` has it.
 
     None means no frame exists (job unknown, finished, or not streaming) - the
     panel keeps polling the job row either way.
+
+    `w` > 0 asks for a frame no wider than that, as WebP: a phone polled a
+    full 832x1216 PNG every 0.8s and decoded it three times over (§1-55).
+    The scaled bytes are kept with the frame so the poll never re-encodes
+    the same rev. Without Pillow the PNG is served as before.
     """
     with _preview_lock:
         p = _preview.get(job_id)
@@ -62,8 +67,33 @@ def preview(job_id: str, since: int) -> dict | None:
         if int(p["rev"]) == int(since):
             return {"rev": p["rev"]}
         import base64
-        return {"rev": p["rev"], "step": p["step"], "total": p["total"],
-                "current": p["current"], "png": base64.b64encode(p["png"]).decode()}
+        out = {"rev": p["rev"], "step": p["step"], "total": p["total"], "current": p["current"]}
+        if w > 0:
+            small = p.get("small")
+            if not small or small[0] != w:
+                small = (w, _shrink(p["png"], w))
+                p["small"] = small
+            if small[1] is not None:
+                out["img"] = base64.b64encode(small[1]).decode()
+                out["mime"] = "image/webp"
+                return out
+        out["png"] = base64.b64encode(p["png"]).decode()
+        return out
+
+
+def _shrink(png: bytes, w: int) -> bytes | None:
+    try:
+        from PIL import Image  # optional dependency: pillow
+        import io
+        with Image.open(io.BytesIO(png)) as im:
+            if im.mode not in ("RGB", "RGBA"):
+                im = im.convert("RGB")
+            im.thumbnail((w, w * 2))
+            buf = io.BytesIO()
+            im.save(buf, "WEBP", quality=70)
+            return buf.getvalue()
+    except Exception:  # noqa: BLE001 - a preview is best-effort
+        return None
 
 
 def _row(job_id: str) -> dict | None:

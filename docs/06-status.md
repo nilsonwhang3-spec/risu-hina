@@ -111,6 +111,46 @@ mixed-cast multi-entry batch from the panel.** Released = **v0.10.0 BETA** (§1-
 **0.3.1 (night of 2026-08-25)** — the real reason `+` never appeared was not "same version" but **CORS**: RisuAI reads `//@update-url` with a browser `fetch`, and the redirect response from the release URL carries no CORS header. Changed `//@update-url` to
 `https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js`, and made `tools/bundle.py` write that file into the repository (included in the release commit). In the backend code only VERSION changed.
 
+**+ §1-55 (2026-09-06, unreleased) - iPhone memory: the whole plugin on a budget**. The phone kept
+reloading (`plugin boot` at 15:40:46 / 15:41:07 / 15:41:30 / 15:42:09 in the staging log, iOS 18.7).
+What the log showed right after each boot: **`GET /session -> 200 1337ms 164249KB`** - the agent
+panel downloaded 164MB of JSON per open. `session.messages()` returned every `agent_messages` row,
+and the `history` rows (the pydantic-ai wire form saved after EVERY turn, 87 rows / 139MB for the
+active session, 236 rows / 218MB in the DB) came along; the plugin rendered user/assistant and threw
+the rest away. Only the newest history row is ever read back. Fixes, by group:
+(1) **backend**: `messages()` returns user/assistant only, takes `limit` (the LAST n) and the reply
+carries `messagesTotal`; `prune_history()` keeps the newest two snapshots per session after every
+save; **schema 14** prunes every session once and VACUUMs (both logged). The panel asks for 40 on a
+phone / 200 elsewhere and offers "이전 메시지 N개 더 보기".
+(2) **pictures** (`blobimg.ts`): the object-URL cache is capped in BYTES (24MB phone / 256MB desktop)
+as well as count; an evicted URL is revoked at once unless a connected `<img>` still shows it (then
+30s); the defensive byte copy is gone; the IntersectionObserver map is a WeakMap; and `watchImage()`
+gives every grid cell a picture that follows the viewport - fetched within 600px of it and, on a
+phone, DROPPED when it scrolls far away (the decoded bitmap is the real cost: a 20KB thumb is ~700KB
+decoded). Wired into the studio folder grid (which fetched every ORIGINAL in the folder, eagerly -
+the single worst line), 검수, the files grid, the assets tab (its private 400-entry full-size cache
+is gone; it rides the same budget under `asset:` keys), the strip and the reference cards (720px
+thumbs). `char-edit`'s audit reads PNG headers through the new `POST /files/stat` instead of
+downloading each multi-MB reference.
+(3) **studio**: the live preview is ONE object URL shared by its three `<img>`s instead of a base64
+data URL rebuilt per 0.8s poll and decoded three times; a phone asks `/studio/job/preview?w=512`
+and gets a WebP (~20-40KB, cached per rev with the frame); `releasePreview()` lets the held frame go
+once the finished file shows (and 20s after the job in any case).
+(4) **DOM and timers**: `pollWhileVisible()` (dom.ts) replaces `setInterval` for the studio's 5s
+scan, the preview and job polls, the codex login poll and the permit poll - all pause while the
+page is hidden and the studio ones skip ticks while another tab shows (closing the panel now calls
+`noteStudioLeft()`); streamed prose is re-rendered at most every 120ms, not per token; the agent log
+folds entries past 60 (phone) / 300; `resetAgentPane()` destroys the old panel (abort, clock,
+DOM); the NDJSON reader is cancelled on abort; splitter ResizeObservers disconnect once their split
+left the page, hilite's is one-per-textarea and self-disconnecting, TurnList has `destroy()`; on a
+phone a content tab left alone for 60s gives its DOM back (rebuilt on the next visit).
+(5) **telemetry**: `mem` lines every 30s on a phone (blob count/MB, images, DOM nodes, agent log
+length, running polls, heap where Chrome offers it) and in ⚙ → 진단 정보; the boot line carries
+`sinceHideS` (seconds since the previous `pagehide`, from localStorage) and `phone`. Tests:
+test_compact (messages/limit/prune/migration), test_http (`/files/stat`), test_studio (scaled
+preview, last because it needs Pillow). Deferred: virtualising the 검수 grid's DOM (lazy+unload made
+the pictures cheap; the cells themselves are text).
+
 **+ §1-54 (2026-09-06, unreleased) - iPhone, the agent pane wider than the screen**: in the
 stacked (≤760px) layout nothing capped the pane's width, so a code block, a long path, a tool
 card or a wide table pushed it past the viewport and pinch-zoom could not bring it back. The

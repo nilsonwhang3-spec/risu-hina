@@ -6,13 +6,14 @@
  * is here. The poll never rebuilds the centre - it hands the heartbeat to
  * hub.jobTick so the visible tab patches its progress in place.
  */
-import { el, clear, modal } from '../dom';
+import { el, clear, modal, pollWhileVisible } from '../dom';
+import { smallScreen } from '../blobimg';
 import { askName } from '../kit';
 import { state, type StudioJob } from '../../state';
 import { pickerRow, openListPicker, type PickerEntry } from '../pickers';
 import { S, hub, gen, persistGen, activeOf, spec, checkUnresolved, newCard, msg } from './store';
 
-let jobTimer: ReturnType<typeof setInterval> | null = null;
+let jobTimer: (() => void) | null = null;
 let jobsStale = true;
 
 // --- the live preview (streaming generation) -----------------------------------------
@@ -30,18 +31,54 @@ let emaStepMs = 0;
 let lastStepAt = 0;
 let lastStep = 0;
 export function stepMsEma(): number { return emaStepMs; }
-let previewTimer: ReturnType<typeof setInterval> | null = null;
+let previewStop: (() => void) | null = null;
 let previewRev = 0;
+/** The object URL behind livePreview.url - ours to revoke. */
+let previewOwned = '';
+
+/** One frame as ONE object URL shared by every <img> that shows it. It used
+ * to be a base64 data URL, rebuilt per 0.8s poll and decoded afresh by each
+ * of three <img>s (§1-55). The previous URL goes once the swap has painted. */
+function setFrame(b64: string, mime: string): void {
+  let url = '';
+  try {
+    if (typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
+      const bin = atob(b64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      url = URL.createObjectURL(new Blob([bytes as unknown as BlobPart], { type: mime }));
+    }
+  } catch { url = ''; }
+  const old = previewOwned;
+  if (url) {
+    previewOwned = url;
+    livePreview.url = url;
+  } else {
+    previewOwned = '';
+    livePreview.url = `data:${mime};base64,` + b64;
+  }
+  if (old) setTimeout(() => URL.revokeObjectURL(old), 2000);
+}
+
+/** Let the held frame go (the finished file is on screen, or nothing is). */
+export function releasePreview(): void {
+  const old = previewOwned;
+  previewOwned = '';
+  livePreview.url = '';
+  if (old) setTimeout(() => URL.revokeObjectURL(old), 2000);
+}
 
 function pollPreview(): void {
-  if (previewTimer) return;
+  if (previewStop) return;
   const tick = async () => {
     if (!S.jobId) return stopPreview();
     try {
-      const r = await state.studio.jobPreview(S.jobId, previewRev);
-      if (r.png && typeof r.rev === 'number') {
+      // A phone gets a 512px WebP; a desktop the full frame.
+      const r = await state.studio.jobPreview(S.jobId, previewRev, smallScreen() ? 512 : 0);
+      const b64 = r.img || r.png;
+      if (b64 && typeof r.rev === 'number') {
         previewRev = r.rev;
-        livePreview.url = 'data:image/png;base64,' + r.png;
+        setFrame(b64, r.img ? (r.mime || 'image/webp') : 'image/png');
         livePreview.step = r.step ?? 0;
         livePreview.total = r.total ?? 0;
         livePreview.current = r.current ?? '';
@@ -59,12 +96,15 @@ function pollPreview(): void {
       }
     } catch { /* the 1.5s job poll is the authority; previews are best-effort */ }
   };
-  previewTimer = setInterval(() => { void tick(); }, 800);
+  // Paused while the page is hidden or the studio is not the tab on screen:
+  // nothing shows the frame then, and a backgrounded phone must not keep
+  // decoding pictures.
+  previewStop = pollWhileVisible(() => { void tick(); }, 800, () => !!S.jobId && hub.studioShowing());
   void tick();
 }
 
 function stopPreview(): void {
-  if (previewTimer) { clearInterval(previewTimer); previewTimer = null; }
+  if (previewStop) { previewStop(); previewStop = null; }
   previewRev = 0;
   lastStepAt = 0;
   lastStep = 0;
@@ -397,7 +437,9 @@ export async function pollJob(): Promise<void> {
       stop();
       stopPreview();
       // The last streamed frame is HELD (anti-flicker): the tab lets go of it
-      // only once the finished file's blob has loaded in its place.
+      // only once the finished file's blob has loaded in its place - and in
+      // any case soon after, so a frame nobody swaps out is not kept all day.
+      setTimeout(releasePreview, 20_000);
       hub.jobTick();
       // The batch wrote images: the files tab gets the news (and the unseen
       // badge) while we re-read our own slice.
@@ -408,7 +450,7 @@ export async function pollJob(): Promise<void> {
     }
     hub.jobTick();
   };
-  const stop = () => { if (jobTimer) { clearInterval(jobTimer); jobTimer = null; } };
-  jobTimer = setInterval(() => { void tick(); }, 1500);
+  const stop = () => { if (jobTimer) { jobTimer(); jobTimer = null; } };
+  jobTimer = pollWhileVisible(() => { void tick(); }, 1500);
   await tick();
 }

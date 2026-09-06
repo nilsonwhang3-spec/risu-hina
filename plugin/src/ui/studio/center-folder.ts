@@ -184,7 +184,11 @@ export function drawFolder(node: Folder): void {
 
   images.forEach((f, ix) => {
     const cell = el('div', { class: 'fcell imgcell' + (selection.has(f.path) ? ' picked' : '') + clipClass(f.path), title: f.path });
-    const pic = workspaceImage(f.path, f.name, { thumb: false });
+    // Thumbnails, lazily: this grid used to fetch every ORIGINAL in the
+    // folder at once - hundreds of MB for one output folder, and the first
+    // thing to reload an iPhone (§1-55). Double-click still opens the full
+    // picture in the 1장 tab.
+    const pic = workspaceImage(f.path, f.name, { thumb: true, stamp: f.modified ? String(f.modified) : '' });
     pic.classList.add('jobpic');
     cell.append(pic, el('div', { class: 'fname' }, [el('span', { class: 'hint', text: f.name })]));
     // A click SELECTS (Shift for a range) - picking-and-moving is this

@@ -8,7 +8,7 @@
  * per-job fold-outs survive as jobSection, drawn by the batch tab's live box.
  */
 import { el, clear } from '../dom';
-import { blobUrl } from '../blobimg';
+import { blobUrl, watchImage, unloadByDefault } from '../blobimg';
 import { type StudioJob } from '../../state';
 import { S, stateLabel } from './store';
 import { loadJobs, livePreview } from './gen';
@@ -113,10 +113,15 @@ function renderStrip(): void {
       shown += 1;
       const path = saved[i];
       const cell = el('button', { class: 'stripcell', title: path });
-      void blobUrl(path, '', { thumb: true }).then((url) => {
-        if (!cell.isConnected) return;
-        cell.appendChild(el('img', { src: url, alt: path.split('/').pop() ?? path }));
-      }).catch(() => { /* the strip survives a missing file */ });
+      // The strip sits under every centre view: its pictures follow the
+      // viewport like a grid cell's (fetched near it, dropped far from it
+      // on a phone) rather than staying decoded for the whole session.
+      watchImage(cell, () => {
+        void blobUrl(path, '', { thumb: true }).then((url) => {
+          if (!cell.isConnected) return;
+          cell.appendChild(el('img', { src: url, alt: path.split('/').pop() ?? path }));
+        }).catch(() => { /* the strip survives a missing file */ });
+      }, unloadByDefault() ? () => { for (const i of Array.from(cell.querySelectorAll('img'))) i.remove(); } : undefined);
       cell.addEventListener('click', () => openImage(path, saved));
       rowBox.appendChild(cell);
     }

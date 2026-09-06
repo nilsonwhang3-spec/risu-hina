@@ -112,16 +112,58 @@ def load(session_id: str) -> dict | None:
     return {"sessionId": row["id"], "chatKey": row["chat_key"], "title": row["title"]}
 
 
-def messages(session_id: str) -> list[dict]:
-    rows = db.query(
-        "SELECT seq, role, content_json, cost_usd, usage_json, ts FROM agent_messages "
-        "WHERE session_id = ? ORDER BY seq", (session_id,)
-    )
+# What the panel shows. The `history` rows (the pydantic-ai wire form the
+# next turn resumes from) are NOT in this list: they were, and one session's
+# 87 snapshots came to 139MB of JSON that the plugin parsed and threw away on
+# every panel open - on an iPhone that alone reloaded the tab (§1-55).
+SHOWN_ROLES = ("user", "assistant")
+
+
+def messages(session_id: str, limit: int | None = None) -> list[dict]:
+    """The shown messages in order; the LAST `limit` of them when given."""
+    if limit and limit > 0:
+        rows = db.query(
+            "SELECT seq, role, content_json, cost_usd, usage_json, ts FROM agent_messages "
+            "WHERE session_id = ? AND role IN ('user', 'assistant') ORDER BY seq DESC LIMIT ?",
+            (session_id, int(limit)),
+        )
+        rows = list(reversed(rows))
+    else:
+        rows = db.query(
+            "SELECT seq, role, content_json, cost_usd, usage_json, ts FROM agent_messages "
+            "WHERE session_id = ? AND role IN ('user', 'assistant') ORDER BY seq", (session_id,)
+        )
     return [
         {"seq": r["seq"], "role": r["role"], "content": db.unjs(r["content_json"], ""),
          "cost": r["cost_usd"], "usage": db.unjs(r["usage_json"], None), "ts": r["ts"]}
         for r in rows
     ]
+
+
+def messages_total(session_id: str) -> int:
+    row = db.one(
+        "SELECT COUNT(*) AS n FROM agent_messages WHERE session_id = ? AND role IN ('user', 'assistant')",
+        (session_id,),
+    )
+    return int(row["n"]) if row else 0
+
+
+# Snapshots to keep per session. Only the newest is ever read (`_history`);
+# the second survives a crash between the INSERT of a new one and the DELETE
+# of the old ones.
+HISTORY_KEEP = 2
+
+
+def prune_history(session_id: str, keep: int = HISTORY_KEEP) -> int:
+    """Drop every history snapshot but the newest `keep`. Returns rows removed."""
+    with db.LOCK:
+        cur = db.execute(
+            "DELETE FROM agent_messages WHERE session_id = ? AND role = 'history' AND seq NOT IN ("
+            "  SELECT seq FROM agent_messages WHERE session_id = ? AND role = 'history' "
+            "  ORDER BY seq DESC LIMIT ?)",
+            (session_id, session_id, int(keep)),
+        )
+        return int(getattr(cur, "rowcount", 0) or 0)
 
 
 def _next_seq(session_id: str) -> int:
@@ -434,6 +476,7 @@ async def run(session_id: str, prompt: str, mode: str = "") -> AsyncGenerator[st
         stored = vision.scrub_history(stored)
         _save_message(session_id, "history",
                       json.loads(ModelMessagesTypeAdapter.dump_json(stored)))
+        prune_history(session_id)
         db.execute(
             "INSERT INTO cost_ledger(session_id, chat_key, model, in_tokens, out_tokens, "
             "cost_usd, priced, ts) VALUES(?,?,?,?,?,?,?,?)",
@@ -493,6 +536,7 @@ def _save_partial_history(session_id: str, prompt: str, partial: str, why: str) 
         history = vision.scrub_history(history)
         _save_message(session_id, "history",
                       json.loads(ModelMessagesTypeAdapter.dump_json(history)))
+        prune_history(session_id)
     except Exception as e2:  # noqa: BLE001 - best effort, never masks the real error
         log.warn("partial history save failed session=%s: %s", session_id, e2)
 

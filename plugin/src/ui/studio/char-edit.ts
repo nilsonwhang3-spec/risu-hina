@@ -144,7 +144,8 @@ export function characterEditor(dir: string, opts: CharEditorOpts = {}): HTMLEle
                    onToggle: (v: boolean) => void, onRemove: () => void, onFix: (() => Promise<void>) | null,
                    controls: HTMLElement[]): HTMLElement => {
     const pic = el('div', { class: 'refpic' });
-    void blobUrl(`${dir}/${file}`).then((url) => {
+    // A 720px thumbnail of the 1024x1536 reference, not the original (§1-55).
+    void blobUrl(`${dir}/${file}`, '', { thumb: true, w: 720 }).then((url) => {
       if (!pic.isConnected) return;
       pic.appendChild(el('img', { src: url, alt: file }));
     }).catch(() => { pic.appendChild(el('span', { class: 'hint', text: '읽지 못함' })); });
@@ -231,20 +232,19 @@ export function characterEditor(dir: string, opts: CharEditorOpts = {}): HTMLEle
 
   /** Flag entries whose stored bytes are not what the encoder wants. */
   const audit = async (): Promise<void> => {
+    // The server reads the header; the multi-MB files stay where they are (§1-55).
     for (const v of charrefs) {
       try {
-        const bytes = await state.fileBytes(`${dir}/${v.file}`);
-        const isPng = bytes.length > 24 && bytes[0] === 0x89 && bytes[1] === 0x50;
-        const w = isPng ? ((bytes[16] << 24) | (bytes[17] << 16) | (bytes[18] << 8) | bytes[19]) >>> 0 : 0;
-        const h = isPng ? ((bytes[20] << 24) | (bytes[21] << 16) | (bytes[22] << 8) | bytes[23]) >>> 0 : 0;
-        const ok = BUCKETS.some(([bw, bh]) => bw === w && bh === h);
-        v.bad = ok ? undefined : (isPng ? `${w}x${h} — 1024x1536 / 1536x1024 이어야 합니다` : 'PNG 가 아닙니다');
+        const s = await state.fileStat(`${dir}/${v.file}`);
+        const isPng = s.format === 'png';
+        const ok = isPng && BUCKETS.some(([bw, bh]) => bw === s.width && bh === s.height);
+        v.bad = ok ? undefined : (isPng ? `${s.width}x${s.height} — 1024x1536 / 1536x1024 이어야 합니다` : 'PNG 가 아닙니다');
       } catch { /* a missing file shows as 읽지 못함 */ }
     }
     for (const v of vibes) {
       try {
-        const bytes = await state.fileBytes(`${dir}/${v.file}`);
-        v.bad = (bytes.length > 8 && bytes[0] === 0x89 && bytes[1] === 0x50) ? undefined : 'PNG 가 아닙니다';
+        const s = await state.fileStat(`${dir}/${v.file}`);
+        v.bad = s.format === 'png' ? undefined : 'PNG 가 아닙니다';
       } catch { /* same */ }
     }
     drawCharrefs();

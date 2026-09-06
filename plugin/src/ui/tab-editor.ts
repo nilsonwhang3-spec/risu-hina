@@ -75,6 +75,7 @@ export function renderEditorTab(mount: HTMLElement): void {
 
   if (!list || !mount.querySelector('.split')) {
     clear(mount);
+    list?.destroy();
     list = new TurnList({
       showOriginal: () => showOriginal,
       viewMode: () => viewMode,

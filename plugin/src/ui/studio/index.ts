@@ -23,7 +23,7 @@
  * A bot IS needed to *adopt* an image into a card - that is gated per action,
  * where it is true, rather than on the whole tab.
  */
-import { el, clear, ICON, iconBtn } from './../dom';
+import { el, clear, ICON, iconBtn, pollWhileVisible } from './../dom';
 import { evictBlob } from '../blobimg';
 import { state, type StudioItem } from '../../state';
 import { threePane } from '../panes';
@@ -60,6 +60,8 @@ let tabbar: HTMLElement | null = null;
 
 /** shell.setTab tells us when the user goes elsewhere - there is no emit on a
  * tab switch, so the "came back" signal has to be handed over explicitly. */
+hub.studioShowing = () => wasStudioActive;
+
 export function noteStudioLeft(): void {
   wasStudioActive = false;
 }
@@ -167,8 +169,9 @@ export function renderStudioTab(mount: HTMLElement): void {
     // Relocated from the old history tab: while the studio shows and nothing
     // of ours runs, look every few seconds for a batch the agent (or another
     // window) started - loadJobs adopts it and the ordinary poll takes over.
-    setInterval(() => {
-      if (!wasStudioActive) return;
+    // Paused while the page is hidden and skipped while another tab shows
+    // (§1-55): a backgrounded phone used to keep asking every five seconds.
+    pollWhileVisible(() => {
       // Files changed under us (the agent wrote a card, a batch landed) and
       // no render asked for a refresh: re-read now rather than on the next
       // tab visit (§1-39 "AI 로 수정한 뒤 표시 안 됨").
@@ -177,7 +180,7 @@ export function renderStudioTab(mount: HTMLElement): void {
       if (renderedRev !== state.filesRev && !S.jobId) { void refresh(); return; }
       if (S.jobId) return;
       void loadJobs(true).then(() => hub.jobTick());
-    }, 5000);
+    }, 5000, () => wasStudioActive);
   } else if (entering || renderedRev !== state.filesRev || state.openStudioRequest) {
     // COMING BACK to the tab re-reads the library (files arrive from outside
     // any rev - another machine writes into the same space), and so does a

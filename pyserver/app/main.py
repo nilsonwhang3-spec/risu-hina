@@ -654,6 +654,38 @@ def h_file_thumb(arg: dict) -> Any:
     raise ApiError(500, "files/thumb must be dispatched directly")
 
 
+def h_file_stat(arg: dict) -> dict:
+    """Size and, for a PNG/JPEG/WebP, the pixel size of one space file.
+
+    The studio's reference audit used to download every multi-MB charref to
+    read the 8 bytes of its PNG header (§1-55).
+    """
+    try:
+        target = files._resolve(_scope(arg), str(arg.get("path") or ""))
+    except files.FileError as e:
+        raise ApiError(400, str(e))
+    if not target.is_file():
+        raise ApiError(404, "no such file", path=arg.get("path"))
+    st = target.stat()
+    out: dict[str, Any] = {"path": arg.get("path"), "size": st.st_size, "modified": st.st_mtime,
+                           "width": 0, "height": 0, "format": ""}
+    try:
+        with target.open("rb") as f:
+            head = f.read(32)
+        if head[:8] == b"\x89PNG\r\n\x1a\n" and len(head) >= 24:
+            out["format"] = "png"
+            out["width"] = int.from_bytes(head[16:20], "big")
+            out["height"] = int.from_bytes(head[20:24], "big")
+        else:
+            from PIL import Image  # optional dependency: pillow
+            with Image.open(target) as im:
+                out["format"] = (im.format or "").lower()
+                out["width"], out["height"] = im.size
+    except Exception:  # noqa: BLE001 - not an image, or no Pillow: size alone
+        pass
+    return out
+
+
 def h_assets_adopt(arg: dict) -> dict:
     """The plugin saved a workspace file into RisuAI; record the key here."""
     ck = _char(arg)
@@ -821,9 +853,16 @@ def h_session_get(arg: dict) -> dict:
     s = session.load(want) if want else session.latest(tk)
     if want and s is not None:
         s = db.one("SELECT * FROM sessions WHERE id = ?", (want,))
+    # `limit` = the LAST n shown messages (a phone asks for 40); `messagesTotal`
+    # tells the panel whether there is more to page in (§1-55).
+    try:
+        limit = int(arg.get("limit") or 0)
+    except (TypeError, ValueError):
+        limit = 0
     out: dict[str, Any] = {
         "session": None,
         "messages": [],
+        "messagesTotal": 0,
         "staged": staging.pending(tk),
         "agentReady": agent_ready(),
         "webSearch": websearch.configured(),
@@ -831,7 +870,8 @@ def h_session_get(arg: dict) -> dict:
     }
     if s is not None:
         out["session"] = {"sessionId": s["id"], "chatKey": s["chat_key"], "title": s["title"]}
-        out["messages"] = session.messages(s["id"])
+        out["messages"] = session.messages(s["id"], limit or None)
+        out["messagesTotal"] = session.messages_total(s["id"])
     return out
 
 
@@ -1164,7 +1204,11 @@ def h_studio_job_preview(arg: dict) -> dict:
         since = int(arg.get("since") or 0)
     except (TypeError, ValueError):
         since = 0
-    return studiojob.preview(job_id, since) or {}
+    try:
+        w = int(arg.get("w") or 0)
+    except (TypeError, ValueError):
+        w = 0
+    return studiojob.preview(job_id, since, w) or {}
 
 
 def h_studio_recipe(arg: dict) -> dict:
@@ -2305,6 +2349,8 @@ ROUTES: dict[str, Handler] = {
     "GET /files/download": h_file_download,
     "GET /files/thumb": h_file_thumb,
     "POST /files/thumb": h_file_thumb,
+    "GET /files/stat": h_file_stat,
+    "POST /files/stat": h_file_stat,
     "POST /files/zip": h_file_zip,
     "POST /files/upload-many": h_file_upload_many,
     "POST /files/upload-chunk": h_file_upload_chunk,
@@ -2474,7 +2520,8 @@ def _log(method: str, path: str, status: int, started: float, note: str = "") ->
 
 
 _CHATTY = {"/assets/blob", "/files/download", "/workspace/dirty", "/studio/job",
-           "/studio/job/preview", "/health", "/actions", "/staged", "/permits"}
+           "/studio/job/preview", "/health", "/actions", "/staged", "/permits",
+           "/files/stat", "/clientlog"}
 
 
 @app.api_route("/{path:path}", methods=["GET", "POST", "OPTIONS"])

@@ -19,7 +19,7 @@
  */
 import { el, segCtl, colPicker, clear, popover } from '../dom';
 import { showArtifact } from '../artifact';
-import { blobUrl, smallScreen } from '../blobimg';
+import { blobUrl, smallScreen, watchImage, unloadByDefault } from '../blobimg';
 import { state, type GroupItem, type SelectionMap, type SelectionState,
          type StudioGroups, type WorkspaceFile } from '../../state';
 import { S, hub, gen, msg, adjustReserve, countFiles, type Folder, persistSelCols } from './store';
@@ -839,20 +839,29 @@ function adoptButton(): HTMLElement {
 // Thumbnails ride the ONE blob pipeline (blobimg) - the selector used to
 // keep its own object-URL cache with the same eviction bug (revoking URLs
 // still in the DOM), which read as "images flicker back to empty boxes".
-export async function loadThumb(f: WorkspaceFile, mount: HTMLElement): Promise<void> {
-  try {
-    // Review wants a sharper picture than the file grids: ~720px (§1-39).
-    // The mtime stamps the cache key so a rewritten file is fetched anew.
-    const url = await blobUrl(f.path, f.modified ? String(f.modified) : '', { thumb: true, w: smallScreen() ? 360 : 720 });
-    if (!mount.isConnected) return;
-    clear(mount);
-    const img = el('img', { class: 'assetimg', src: url, alt: '' });
-    img.addEventListener('error', () => {
-      clear(mount);
-      mount.appendChild(el('div', { class: 'assettype', text: '?' }));
-    });
-    mount.appendChild(img);
-  } catch {
-    if (mount.isConnected) mount.appendChild(el('div', { class: 'assettype', text: '?' }));
-  }
+export function loadThumb(f: WorkspaceFile, mount: HTMLElement): void {
+  // Fetched when the cell nears the viewport and, on a phone, dropped again
+  // when it scrolls far away: a 400-candidate folder used to decode every
+  // picture at once (§1-55).
+  let gen = 0;
+  watchImage(mount, () => {
+    const my = ++gen;
+    void (async () => {
+      try {
+        // Review wants a sharper picture than the file grids: ~720px (§1-39).
+        // The mtime stamps the cache key so a rewritten file is fetched anew.
+        const url = await blobUrl(f.path, f.modified ? String(f.modified) : '', { thumb: true, w: smallScreen() ? 360 : 720 });
+        if (!mount.isConnected || my !== gen) return;
+        clear(mount);
+        const img = el('img', { class: 'assetimg', src: url, alt: '' });
+        img.addEventListener('error', () => {
+          clear(mount);
+          mount.appendChild(el('div', { class: 'assettype', text: '?' }));
+        });
+        mount.appendChild(img);
+      } catch {
+        if (mount.isConnected && my === gen) mount.appendChild(el('div', { class: 'assettype', text: '?' }));
+      }
+    })();
+  }, unloadByDefault() ? () => { gen += 1; clear(mount); } : undefined);
 }

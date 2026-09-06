@@ -19,6 +19,7 @@ import { state } from '../state';
 import { renderMarkdown } from './markdown';
 import { transport } from '../transport';
 import * as host from '../host';
+import { memSnapshot } from './mem';
 
 /**
  * Updating, in the order it actually happens.
@@ -180,6 +181,9 @@ export function buildDebugCard(): HTMLElement {
           chatKey: state.activeChatKey,
           turns: state.turns.length,
         },
+        // What the plugin holds in the browser right now (§1-55): read this
+        // on the phone that keeps reloading.
+        memory: memSnapshot(),
       };
       show('진단 정보', JSON.stringify(report, null, 2));
     } catch (e) {

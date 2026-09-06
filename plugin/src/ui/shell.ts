@@ -7,6 +7,7 @@
 import { installFoldControls } from './panes';
 import { reclamp } from './splitter';
 import { el, clear, ICON, searchBox } from './dom';
+import { smallScreen } from './blobimg';
 import { describeSync, syncBusy } from '../assets';
 import { injectStyles } from './styles';
 import { state } from '../state';
@@ -215,6 +216,27 @@ function syncToolslot(): void {
   toolbarSlot.style.display = showChat || showBot || showTab ? '' : 'none';
 }
 
+/** Tabs whose DOM is rebuilt from state on the next visit (the kit tabs
+ * and the editor check for their `.split`); the studio keeps its own
+ * state in its DOM and the chats/settings tabs are cheap. */
+const PRUNABLE: TabId[] = ['editor', 'lore', 'memory', 'vars', 'meta', 'botlore', 'regex', 'trigger', 'assets', 'files'];
+let pruneTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** On a phone, a tab left alone for a minute gives its DOM back: every tab
+ * stayed mounted forever, so one visit each to files, assets and the editor
+ * kept three grids of pictures alive together (§1-55). */
+function schedulePrune(): void {
+  if (pruneTimer !== null) { clearTimeout(pruneTimer); pruneTimer = null; }
+  if (!smallScreen()) return;
+  pruneTimer = setTimeout(() => {
+    pruneTimer = null;
+    for (const id of PRUNABLE) {
+      const m = mounts[id];
+      if (id !== active && m && m.childElementCount) clear(m);
+    }
+  }, 60_000);
+}
+
 export function setTab(tab: TabId): void {
   active = tab;
   state.activeTab = tab;
@@ -236,6 +258,7 @@ export function setTab(tab: TabId): void {
   syncSettingsBar();
   syncToolslot();
   refreshTabBadges();
+  schedulePrune();
   // The shown split fits itself around the remembered pane widths now, and
   // again once its content has landed (a listing that widens the centre).
   // ResizeObservers do the same, but only while the tab is being painted.
@@ -411,6 +434,8 @@ export function buildShell(): void {
     // it (the browser closing is the one exit that cannot ask; the reopen
     // merge covers that one).
     if (!(await ensureResolved('닫기'))) return;
+    // A closed panel shows nothing: the studio's polls stop asking (§1-55).
+    noteStudioLeft();
     try { await Risuai.hideContainer(); } catch { /* already hidden */ }
   });
 
