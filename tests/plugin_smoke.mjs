@@ -2880,7 +2880,7 @@ console.log('\ntest_studio_selector');
   // §1-52: a free-form name is a group of its own under the default rule -
   // shown as a card, never 못 읽음 (a custom regex that misses still reports).
   check('a free-form name is its own group card, not 못 읽음',
-        !!card('제멋대로') && !/안 맞는 파일/.test(text()), text().slice(0, 300));
+        !!card('규칙에 안 맞는 이름') && !/안 맞는 파일/.test(text()), text().slice(0, 300));
 
   // Click a card → the group unfolds; pick one; ← 그룹 goes back (15).
   card('happy')?.dispatchEvent(new window.Event('click', { bubbles: true }));
