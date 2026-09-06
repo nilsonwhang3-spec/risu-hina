@@ -2904,7 +2904,7 @@ console.log('\ntest_studio_selector');
     await settle(400);
     const sug = document.querySelector('.panel.active .selcell .sugline.sug-inpaint');
     check('the 검수 tools row offers AI 재검수 (§1-46)',
-          [...document.querySelectorAll('.panel.active .seltools button')].some((b) => b.textContent === 'AI 재검수'));
+          [...document.querySelectorAll('.panel.active .seltools button')].some((b) => b.getAttribute('aria-label') === 'AI 재검수'));
     check('a seeded AI suggestion shows on the candidate', !!sug && /AI 제안: 수정/.test(sug.textContent || ''),
           (document.querySelector('.panel.active .left')?.textContent || '').slice(0, 200));
     clickButton(sug, '적용');

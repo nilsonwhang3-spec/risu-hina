@@ -111,6 +111,15 @@ mixed-cast multi-entry batch from the panel.** Released = **v0.10.0 BETA** (§1-
 **0.3.1 (night of 2026-08-25)** — the real reason `+` never appeared was not "same version" but **CORS**: RisuAI reads `//@update-url` with a browser `fetch`, and the redirect response from the release URL carries no CORS header. Changed `//@update-url` to
 `https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js`, and made `tools/bundle.py` write that file into the repository (included in the release commit). In the backend code only VERSION changed.
 
+**+ §1-51 (2026-09-06, after 0.14.3, unreleased)**: (1) 검수 tools row: AI 재검수 / 제안 N건 모두
+적용 / 제안 지우기 are icon buttons (🔍 · ✔ N · 🧹, `aria-label` + title carry the words); (2) the
+chat's image/viewed strips go ABOVE the "…중입니다" row like text (a strip under it read as
+"stopped"); (3) `studio.inpaint` saves under the SOURCE name - save_image's never-overwrite
+makes `이름 (2).png` in the same folder, which the 검수 parser reads into the same group; the
+old `-fix` suffix produced a name the token rule could not read, so the result never showed;
+(4) in 검수 a click on the picture opens it in the artifact modal (the flags are the buttons
+under it; the picture no longer toggles 채택).
+
 **+ §1-50 (2026-09-06, unreleased)**: (1) the studio's `refresh()` (both columns) also waits
 for blur while a field in the studio has focus - §1-49 guarded only drawLeft, and an AGENT
 batch's `images` events go through touchFiles (not touchQuiet), so every image re-ran the whole

@@ -18,6 +18,7 @@
  * filename split apart). A raw named-group regex stays behind 고급.
  */
 import { el, segCtl, colPicker, clear, popover } from '../dom';
+import { showArtifact } from '../artifact';
 import { blobUrl } from '../blobimg';
 import { state, type GroupItem, type SelectionMap, type SelectionState,
          type StudioGroups, type WorkspaceFile } from '../../state';
@@ -362,8 +363,8 @@ export function drawSelector(node: Folder): void {
   bar.appendChild(el('span', { class: 'spacer' }));
   // AI 재검수 (§1-46): the same as typing "이 폴더 재검수 해줘" in the chat -
   // review_folder → suggest_selection, suggestions refreshed, nothing flagged.
-  const rereview = el('button', { class: 'ghost tiny', text: 'AI 재검수',
-    title: '히나에게 이 폴더를 다시 검수해 제안을 새로 적어 달라고 합니다 (표시는 바꾸지 않음)' });
+  const rereview = el('button', { class: 'ghost tiny selicon', text: '🔍', 'aria-label': 'AI 재검수',
+    title: 'AI 재검수 - 히나에게 이 폴더를 다시 검수해 제안을 새로 적어 달라고 합니다 (표시는 바꾸지 않음)' });
   rereview.addEventListener('click', () => {
     state.requestPrompt(`"${node.path}" 폴더를 재검수해 줘. review_folder 로 보고 suggest_selection 으로 제안을 새로 적어 줘 (기존 제안은 갱신). 표시(채택·버림·수정)는 바꾸지 말고, 다 적으면 검수 탭을 열어 줘.`);
   });
@@ -379,13 +380,13 @@ export function drawSelector(node: Folder): void {
   // AI suggestions, in bulk (§1-42): apply them all, or clear them all.
   const nSug = suggestCount();
   if (nSug) {
-    const applyAll = el('button', { class: 'ghost tiny', text: `제안 ${nSug}건 모두 적용`,
-      title: 'AI 제안(채택·버림·수정)을 전부 표시로 바꿉니다' });
+    const applyAll = el('button', { class: 'ghost tiny selicon', text: `✔ ${nSug}`, 'aria-label': `제안 ${nSug}건 모두 적용`,
+      title: `제안 ${nSug}건 모두 적용 - AI 제안(채택·버림·수정)을 전부 표시로 바꿉니다` });
     applyAll.addEventListener('click', () => {
       for (const f of Object.keys(selection)) if (selection[f]?.suggest) applySuggest(f);
       hub.drawCentre();
     });
-    const clearAll = el('button', { class: 'ghost tiny', text: '제안 지우기' });
+    const clearAll = el('button', { class: 'ghost tiny selicon', text: '🧹', 'aria-label': '제안 지우기', title: '제안 지우기 - AI 제안을 모두 지웁니다 (표시는 그대로)' });
     clearAll.addEventListener('click', () => {
       for (const f of Object.keys(selection)) if (selection[f]?.suggest) dropSuggest(f);
       hub.drawCentre();
@@ -585,8 +586,10 @@ function candidate(it: GroupItem, groupItems?: GroupItem[]): HTMLElement {
   };
   sync();
   cellSyncs.set(it.filename, sync);
-  // The picture itself toggles 채택: that is the click being made ninety times.
-  pic.addEventListener('click', () => flag(it.filename, 'use'));
+  // The picture opens large (§1-51, user: "채택/수정/버림 외를 누르면 자세히 보기");
+  // the flags are the buttons under it.
+  pic.style.cursor = 'zoom-in';
+  pic.addEventListener('click', () => showArtifact({ path: it.path, title: it.filename, kind: 'image' }));
   void loadThumb({ path: it.path, name: it.filename, size: 0, modified: it.modified || 0, textual: false }, pic);
   return cell2;
 }

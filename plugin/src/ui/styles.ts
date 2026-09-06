@@ -452,6 +452,7 @@ button.iconbtn.danger { background: #b91c1c; border-color: #b91c1c; color: #fff;
 .agentloading { padding: 12px; }
 .anlasmeter { cursor: pointer; font-size: 11.5px; padding: 2px 8px; }
 .anlasmeter.warn { background: rgba(251,191,36,.18); color: var(--warn, #fbbf24); }
+.seltools .selicon { font-size: 13px; padding: 2px 7px; }
 /* 고급 설정 (§1-47). */
 .advfield { margin-bottom: 10px; }
 .advfield input { max-width: 180px; }
