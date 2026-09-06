@@ -1,4 +1,4 @@
-# 06. Implementation status — as of 2026-09-06 (v0.14.5 BETA, Risu Hina)
+# 06. Implementation status — as of 2026-09-06 (v0.14.6 BETA, Risu Hina)
 
 One page for whoever picks this up next session (= me). What exists, what changed, how far it is deployed,
 and what is left. The *why* of the design is `docs/04` (assets and charx are in Appendix E), the storage layout is `docs/02`, the deployment environment is `docs/00`.
@@ -111,7 +111,7 @@ mixed-cast multi-entry batch from the panel.** Released = **v0.10.0 BETA** (§1-
 **0.3.1 (night of 2026-08-25)** — the real reason `+` never appeared was not "same version" but **CORS**: RisuAI reads `//@update-url` with a browser `fetch`, and the redirect response from the release URL carries no CORS header. Changed `//@update-url` to
 `https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js`, and made `tools/bundle.py` write that file into the repository (included in the release commit). In the backend code only VERSION changed.
 
-**+ §1-58 (2026-09-06, unreleased) - the batch that would not leave, and a folder picker that is
+**+ §1-58 (2026-09-06, 0.14.6) - the batch that would not leave, and a folder picker that is
 a tree**: (1) after a network error the 배치 tab kept the job on screen for good and 취소 did
 nothing: `pollJob`'s tick ENDED the poll on the first failed fetch and left `S.jobId` set, and the
 5s scan skipped `loadJobs` while a job id was set. Now a failed tick keeps polling (a notice after
@@ -124,7 +124,7 @@ now (`treeRow`, top two levels open, a folder with no pictures of its own is dim
 unfolds) with a filter box that opens every folder on the way to a match; the count is the folder
 and everything below it.
 
-**+ §1-57 (2026-09-06, unreleased) - inpaint with a feathered edge**: the report (with the
+**+ §1-57 (2026-09-06, 0.14.6) - inpaint with a feathered edge**: the report (with the
 analysis): a wider box still showed the same rectangle outline, because NovelAI's
 `add_original_image` pastes the original back along the HARD mask edge inside the returned
 bytes - nothing done afterwards can soften it. `studio.inpaint` now runs a dual-mask path

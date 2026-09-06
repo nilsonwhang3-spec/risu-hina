@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.14.5
+//@display-name Risu Hina v0.14.6
 //@api 3.0
-//@version 0.14.5
+//@version 0.14.6
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -104,7 +104,7 @@
       this.tokenSafe = true;
       this.lastHealth = body;
       this.probeInfo = "";
-      this.gate = versionGate("0.14.5", String(body.version || ""));
+      this.gate = versionGate("0.14.6", String(body.version || ""));
       return body;
     }
     /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -4477,6 +4477,9 @@ button.iconbtn.danger { background: #b91c1c; border-color: #b91c1c; color: #fff;
 .thought { color: #7dd3fc; }
 .turn-body.raw { font-family: Consolas, monospace; font-size: 12px; color: var(--textcolor2, #9aa4b8); }
 .turn-body img.turn-img { max-width: 100%; max-height: 320px; border-radius: 5px; margin: 4px 0; }
+/* The folder picker tree (\uAC80\uC218\uD560 \uD3F4\uB354): a folder with no pictures of its own is only a way down. */
+.pickertree { max-height: 60vh; overflow: auto; }
+.pickertree .treebranch.dim { opacity: .6; }
 /* Space images in markdown (agent bubbles, viewers). */
 .wsimg img { max-width: 100%; border-radius: 5px; margin: 4px 0; }
 .wsimg.thumb img { max-height: 180px; }
@@ -12783,7 +12786,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.14.5",
+            version: "0.14.6",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -13434,7 +13437,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.14.5"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.14.6"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -15605,8 +15608,33 @@ name: ${nm}
       hub.notice("\uC2DC\uC791\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
     }
   }
-  function cancelRun() {
-    if (S.jobId) void state.studio.cancelJob(S.jobId);
+  async function cancelRun() {
+    if (!S.jobId) return;
+    try {
+      await state.studio.cancelJob(S.jobId);
+    } catch (e) {
+      hub.notice("\uCDE8\uC18C \uC694\uCCAD\uC774 \uB2FF\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+    }
+    await loadJobs(true);
+    if (S.jobId && !jobTimer) void pollJob();
+  }
+  function forgetJob(reason) {
+    const stopPoll = jobTimer;
+    S.jobId = "";
+    S.queueJob = null;
+    jobsStale = true;
+    if (stopPoll) {
+      stopPoll();
+      jobTimer = null;
+    }
+    stopPreview();
+    releasePreview();
+    if (reason) hub.notice(reason, "");
+    hub.jobTick();
+    hub.drawCentre();
+  }
+  function jobPollAlive() {
+    return jobTimer !== null;
   }
   function pendingCount() {
     const p = S.queueJob?.payload;
@@ -15625,10 +15653,35 @@ name: ${nm}
           S.queueJob = running;
           void pollJob();
         }
+      } else {
+        const mine = S.jobs.find((j) => j.id === S.jobId);
+        if (!mine) forgetJob("\uD654\uBA74\uC758 \uBC30\uCE58\uAC00 \uC11C\uBC84\uC5D0 \uC5C6\uC5B4 \uC9C0\uC6E0\uC2B5\uB2C8\uB2E4 (\uC7AC\uC2DC\uC791\uB418\uC5C8\uAC70\uB098 \uB05D\uB0AC\uC2B5\uB2C8\uB2E4).");
+        else if (["done", "partial", "error", "cancelled"].includes(mine.state)) await finishJob(mine);
+        else if (!jobTimer) void pollJob();
       }
     } catch {
     }
     return S.jobs;
+  }
+  async function finishJob(j) {
+    const spent = j.result?.anlasSpent;
+    hub.notice(
+      `\uBC30\uCE58 ${j.state} \u2014 ${j.result?.saved ?? 0}\uC7A5 \uC800\uC7A5` + (j.result?.failed ? `, ${j.result.failed}\uC7A5 \uC2E4\uD328` : "") + (typeof spent === "number" ? ` \xB7 Anlas ${spent} \uC18C\uBAA8` : ""),
+      j.state === "error" ? "err" : "ok"
+    );
+    S.queueJob = j;
+    S.jobId = "";
+    jobsStale = true;
+    if (jobTimer) {
+      jobTimer();
+      jobTimer = null;
+    }
+    stopPreview();
+    setTimeout(releasePreview, 2e4);
+    hub.jobTick();
+    hub.touchQuiet(j.payload?.saved ?? []);
+    await hub.refresh();
+    await hub.loadStatus();
   }
   function markJobsStale() {
     jobsStale = true;
@@ -15636,30 +15689,29 @@ name: ${nm}
   async function pollJob() {
     if (S.jobId) pollPreview();
     if (jobTimer) return;
+    let misses = 0;
     const tick = async () => {
       if (!S.jobId) return stop();
       let j;
       try {
         j = await state.studio.job(S.jobId);
-      } catch {
-        return stop();
+        misses = 0;
+      } catch (e) {
+        if (e instanceof BackendError && e.status === 404) {
+          forgetJob("\uD654\uBA74\uC758 \uBC30\uCE58\uAC00 \uC11C\uBC84\uC5D0 \uC5C6\uC5B4 \uC9C0\uC6E0\uC2B5\uB2C8\uB2E4.");
+          return;
+        }
+        misses += 1;
+        if (misses === 8) hub.notice("\uBC30\uCE58 \uC0C1\uD0DC\uB97C \uC77D\uC9C0 \uBABB\uD558\uACE0 \uC788\uC2B5\uB2C8\uB2E4 (\uC5F0\uACB0 \uD655\uC778). \uACC4\uC18D \uB2E4\uC2DC \uC2DC\uB3C4\uD569\uB2C8\uB2E4.", "err");
+        return;
+      }
+      if (!j || !j.id) {
+        forgetJob("\uD654\uBA74\uC758 \uBC30\uCE58\uAC00 \uC11C\uBC84\uC5D0 \uC5C6\uC5B4 \uC9C0\uC6E0\uC2B5\uB2C8\uB2E4.");
+        return;
       }
       S.queueJob = j;
       if (["done", "partial", "error", "cancelled"].includes(j.state)) {
-        const spent = j.result?.anlasSpent;
-        hub.notice(
-          `\uBC30\uCE58 ${j.state} \u2014 ${j.result?.saved ?? 0}\uC7A5 \uC800\uC7A5` + (j.result?.failed ? `, ${j.result.failed}\uC7A5 \uC2E4\uD328` : "") + (typeof spent === "number" ? ` \xB7 Anlas ${spent} \uC18C\uBAA8` : ""),
-          j.state === "error" ? "err" : "ok"
-        );
-        S.jobId = "";
-        jobsStale = true;
-        stop();
-        stopPreview();
-        setTimeout(releasePreview, 2e4);
-        hub.jobTick();
-        hub.touchQuiet(j.payload?.saved ?? []);
-        await hub.refresh();
-        await hub.loadStatus();
+        await finishJob(j);
         return;
       }
       hub.jobTick();
@@ -16596,7 +16648,7 @@ ${negative.value.trim()}
     count.addEventListener("change", () => setCount(Number(count.value)));
     runBtn = el("button", { class: "primary tiny" });
     runBtn.addEventListener("click", () => {
-      if (S.jobId) cancelRun();
+      if (S.jobId) void cancelRun();
       else void startRun({ scenePreset: "", count: gen.count });
     });
     const row = el("div", { class: "row", style: { gap: "6px" } }, [
@@ -17459,41 +17511,133 @@ ${negative.value.trim()}
     ]);
   }
   function openFolderPicker() {
-    openListPicker({
-      title: "\uAC80\uC218\uD560 \uD3F4\uB354",
-      hint: "\uADF8\uB9BC\uC774 \uB4E0 \uD3F4\uB354\uB9CC \uBCF4\uC785\uB2C8\uB2E4. \uACE0\uB974\uBA74 \uC67C\uCABD \u201C\uB2E4\uB978 \uD3F4\uB354\u201D\uC5D0 \uB4E4\uC5B4\uAC00\uACE0 \uAC80\uC218\uAC00 \uC5F4\uB9BD\uB2C8\uB2E4.",
-      selectedLabel: "\uC5F4\uB9BC",
-      async load() {
+    const listMount2 = el("div", { class: "tree filetree pickertree" });
+    let filter6 = "";
+    let root2 = null;
+    const expanded2 = /* @__PURE__ */ new Set();
+    const hint = el("div", {
+      class: "hint",
+      style: { marginBottom: "8px" },
+      text: "\uADF8\uB9BC\uC774 \uB4E0 \uD3F4\uB354\uB9CC \uBCF4\uC785\uB2C8\uB2E4. \uD3F4\uB354\uB97C \uACE0\uB974\uBA74 \uC67C\uCABD \u201C\uB2E4\uB978 \uD3F4\uB354\u201D\uC5D0 \uB4E4\uC5B4\uAC00\uACE0 \uAC80\uC218\uAC00 \uC5F4\uB9BD\uB2C8\uB2E4. \uC22B\uC790\uB294 \uD558\uC704 \uD3F4\uB354\uAE4C\uC9C0 \uD569\uD55C \uC7A5\uC218\uC785\uB2C8\uB2E4."
+    });
+    const box = searchBox("", (v) => {
+      filter6 = v.trim().toLowerCase();
+      draw2();
+    }, "\uD3F4\uB354 \uC774\uB984\uC73C\uB85C \uC881\uD788\uAE30");
+    const close = modal("\uAC80\uC218\uD560 \uD3F4\uB354", el("div", {}, [hint, box, listMount2]), { wide: true });
+    const build = (paths) => {
+      const top = { path: "", name: "", kids: /* @__PURE__ */ new Map(), own: 0, total: 0 };
+      for (const p of paths) {
+        const dir = p.slice(0, p.lastIndexOf("/"));
+        let cur = top;
+        let acc = "";
+        for (const seg of dir.split("/")) {
+          acc = acc ? `${acc}/${seg}` : seg;
+          let k = cur.kids.get(seg);
+          if (!k) {
+            k = { path: acc, name: seg, kids: /* @__PURE__ */ new Map(), own: 0, total: 0 };
+            cur.kids.set(seg, k);
+          }
+          k.total += 1;
+          cur = k;
+        }
+        cur.own += 1;
+      }
+      return top;
+    };
+    const matches = (d) => !filter6 || d.path.toLowerCase().includes(filter6) || [...d.kids.values()].some(matches);
+    const toNode = (d) => ({
+      path: d.path,
+      name: d.name,
+      kids: [...d.kids.values()].filter(matches).sort((a, b) => a.name.localeCompare(b.name)).map(toNode),
+      count: d.total,
+      title: `${d.path} \u2014 \uC5EC\uAE30 ${d.own}\uC7A5, \uD558\uC704 \uD3EC\uD568 ${d.total}\uC7A5`,
+      cls: (S.extraRoots.some((r) => r.path === d.path) ? "on " : "") + (d.own ? "" : "dim"),
+      glyph: d.own ? void 0 : "\u{1F4C1}"
+    });
+    const pick2 = async (path) => {
+      addExtra(path);
+      S.selected = path;
+      S.selectedFile = "";
+      S.centreMode = "tab";
+      S.centreTab = "inspect";
+      S.leftTab = "output";
+      persistCentreTab();
+      persistLeftTab();
+      close();
+      await hub.refresh();
+    };
+    const spec3 = {
+      expanded: expanded2,
+      selected: new Set(S.extraRoots.map((r) => r.path)),
+      onOpen(node) {
+        if (node.count && (root2 ? findDir(root2, node.path)?.own : 0)) void pick2(node.path);
+        else {
+          if (expanded2.has(node.path)) expanded2.delete(node.path);
+          else expanded2.add(node.path);
+          draw2();
+        }
+      },
+      onToggle(node) {
+        if (expanded2.has(node.path)) expanded2.delete(node.path);
+        else expanded2.add(node.path);
+        draw2();
+      }
+    };
+    const findDir = (d, path) => {
+      if (d.path === path) return d;
+      for (const k of d.kids.values()) {
+        if (path === k.path || path.startsWith(k.path + "/")) return findDir(k, path);
+      }
+      return null;
+    };
+    const draw2 = () => {
+      clear(listMount2);
+      if (!root2) {
+        listMount2.appendChild(el("div", { class: "hint", text: "\uC77D\uB294 \uC911\uC785\uB2C8\uB2E4\u2026" }));
+        return;
+      }
+      if (filter6) {
+        const openAll = (d) => {
+          if (matches(d)) {
+            expanded2.add(d.path);
+            for (const k of d.kids.values()) openAll(k);
+          }
+        };
+        for (const k of root2.kids.values()) openAll(k);
+      }
+      const tops = [...root2.kids.values()].filter(matches).sort((a, b) => a.name.localeCompare(b.name));
+      if (!tops.length) {
+        listMount2.appendChild(el("div", { class: "empty", text: filter6 ? "\uB9DE\uB294 \uD3F4\uB354\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4." : "\uADF8\uB9BC\uC774 \uB4E0 \uD3F4\uB354\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4." }));
+        return;
+      }
+      for (const t of tops) listMount2.appendChild(treeRow(toNode(t), 0, spec3));
+    };
+    draw2();
+    void (async () => {
+      try {
         const listing = await state.files("", true);
-        const counts2 = /* @__PURE__ */ new Map();
+        const paths = [];
         for (const a of listing.areas) {
           for (const f of a.files) {
             if (!IMAGE_RE2.test(f.name) || !f.path.includes("/")) continue;
             const dir = f.path.slice(0, f.path.lastIndexOf("/"));
             if (dir === "studio/output" || dir.startsWith("studio/output/")) continue;
             if (dir.startsWith("studio/config/")) continue;
-            counts2.set(dir, (counts2.get(dir) ?? 0) + 1);
+            paths.push(f.path);
           }
         }
-        return [...counts2.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([dir, n]) => ({
-          id: dir,
-          name: dir,
-          hint: `${n}\uC7A5`,
-          selected: S.extraRoots.some((r) => r.path === dir)
-        }));
-      },
-      async onSelect(entry) {
-        addExtra(entry.id);
-        S.selected = entry.id;
-        S.selectedFile = "";
-        S.centreMode = "tab";
-        S.centreTab = "inspect";
-        S.leftTab = "output";
-        persistCentreTab();
-        persistLeftTab();
-        await hub.refresh();
+        root2 = build(paths);
+        for (const k of root2.kids.values()) {
+          expanded2.add(k.path);
+          for (const kk of k.kids.values()) expanded2.add(kk.path);
+        }
+        draw2();
+      } catch (e) {
+        clear(listMount2);
+        listMount2.appendChild(el("div", { class: "notice err", text: "\uD3F4\uB354 \uBAA9\uB85D\uC744 \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e) }));
       }
-    });
+    })();
   }
 
   // src/ui/studio/center-frags.ts
@@ -17733,7 +17877,7 @@ ${negative.value.trim()}
     mount.appendChild(batchBar);
     runBtn2 = el("button", { class: "primary tiny" });
     runBtn2.addEventListener("click", () => {
-      if (S.jobId) cancelRun();
+      if (S.jobId) void cancelRun();
       else void submitReserved();
     });
     progressLine2 = el("span", { class: "hint" });
@@ -19314,7 +19458,7 @@ ${negative.value.trim()}
           void refresh2();
           return;
         }
-        if (S.jobId) return;
+        if (S.jobId && jobPollAlive()) return;
         void loadJobs(true).then(() => hub.jobTick());
       }, 5e3, () => wasStudioActive);
     } else if (entering || renderedRev !== state.filesRev || state.openStudioRequest) {
@@ -19819,7 +19963,7 @@ ${negative.value.trim()}
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.14.5"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.14.6"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
@@ -19915,7 +20059,7 @@ ${negative.value.trim()}
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.14.5" }),
+        el("span", { class: "dim", text: "v0.14.6" }),
         healthEl,
         el("span", { class: "spacer" }),
         reload,
@@ -20232,6 +20376,6 @@ ${negative.value.trim()}
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.14.5"} loaded`);
+    console.log(`[risu-hina] v${"0.14.6"} loaded`);
   })();
 })();
