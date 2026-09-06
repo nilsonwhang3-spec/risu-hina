@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.14.2
+//@display-name Risu Hina v0.14.3
 //@api 3.0
-//@version 0.14.2
+//@version 0.14.3
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -104,7 +104,7 @@
       this.tokenSafe = true;
       this.lastHealth = body;
       this.probeInfo = "";
-      this.gate = versionGate("0.14.2", String(body.version || ""));
+      this.gate = versionGate("0.14.3", String(body.version || ""));
       return body;
     }
     /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -4098,10 +4098,15 @@ button.iconbtn.danger { background: #b91c1c; border-color: #b91c1c; color: #fff;
 /* The \uC378\uB124\uC77C view's big pick: the clicked image above the grid (\xA71-40). */
 /* The artifact viewer is a modal (\xA71-43): wide, the picture as large as the
    screen allows, text scrolls inside. */
-.modalbox.artifactmodal { max-width: min(96vw, 1400px); width: auto; }
-.artifactmodal .artifactview img { max-width: 100%; max-height: 78vh; display: block; margin: 0 auto; }
-.artifactmodal .artifactbody { max-height: 80vh; overflow: auto; }
+.modalbox.artifactmodal { max-width: min(88vw, 1200px); width: auto; max-height: 90vh; display: flex; flex-direction: column; }
+.artifactmodal .modalbody { overflow: auto; min-height: 0; }
+.artifactmodal .artifactview img { max-width: 100%; max-height: 72vh; width: auto; display: block; margin: 0 auto; }
+.artifactmodal .artifactbody { overflow: auto; }
 .artifactmodal .artifacthead { margin-bottom: 6px; }
+.quickreply { gap: 6px; margin-top: 6px; }
+.agentloading { padding: 12px; }
+.anlasmeter { cursor: pointer; font-size: 11.5px; padding: 2px 8px; }
+.anlasmeter.warn { background: rgba(251,191,36,.18); color: var(--warn, #fbbf24); }
 /* \uACE0\uAE09 \uC124\uC815 (\xA71-47). */
 .advfield { margin-bottom: 10px; }
 .advfield input { max-width: 180px; }
@@ -5435,6 +5440,10 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       });
       head.append(el("span", { class: "hint grow", text: spec3.path }), openFile);
     }
+    const closeBtn = el("button", { class: "ghost tiny", text: "\uB2EB\uAE30 (Esc)" });
+    closeBtn.addEventListener("click", () => closeArtifact());
+    if (!head.childElementCount) head.appendChild(el("span", { class: "grow" }));
+    head.appendChild(closeBtn);
     const view2 = el("div", { class: "artifactview" }, [head, body]);
     closeCurrent = modal(spec3.title || spec3.path, view2, { wide: true, cls: "artifactmodal", onClose: () => {
       current = null;
@@ -6924,8 +6933,11 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         this.send.disabled = true;
         return;
       }
+      const loading = el("div", { class: "hint agentloading", text: "\uB300\uD654\uB97C \uBD88\uB7EC\uC624\uB294 \uC911\uC785\uB2C8\uB2E4\u2026" });
+      this.log.appendChild(loading);
       try {
         const s = await state.agentSession(sessionId);
+        loading.remove();
         if (!s.agentReady) {
           this.status.textContent = "";
           this.log.appendChild(el("div", { class: "notice" }, [
@@ -7471,10 +7483,25 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
                 e.usage,
                 e.cost ?? null
               ));
+              if (/(할까요|진행|괜찮|해도 될|원하시|할지|고를까요|어떻게)[^\n?]{0,40}\?\s*$/.test(textAcc.trim())) {
+                const yes = el("button", { class: "primary tiny", text: "\uB124, \uC9C4\uD589\uD574 \uC8FC\uC138\uC694" });
+                const no = el("button", { class: "ghost tiny", text: "\uC544\uB2C8\uC694" });
+                const row = el("div", { class: "row quickreply" }, [yes, no]);
+                yes.addEventListener("click", () => {
+                  row.remove();
+                  this.sendText("\uB124, \uADF8\uB300\uB85C \uC9C4\uD589\uD574 \uC8FC\uC138\uC694.");
+                });
+                no.addEventListener("click", () => {
+                  row.remove();
+                  this.input.value = "\uC544\uB2C8\uC694, ";
+                  this.input.focus();
+                });
+                bubble.appendChild(row);
+              }
               const more = el("button", { class: "ghost tiny continuebtn", text: "\uACC4\uC18D \uC774\uC5B4\uC11C", title: "\uBC29\uAE08 \uD134\uC5D0\uC11C \uB05D\uB0B4\uC9C0 \uBABB\uD55C \uC791\uC5C5\uC744 \uC774\uC5B4\uAC11\uB2C8\uB2E4" });
               more.addEventListener("click", () => {
                 more.remove();
-                this.input.value = "\uC774\uC5B4\uC11C \uC9C4\uD589\uD574 \uC8FC\uC138\uC694. \uBC29\uAE08 \uD134\uC5D0\uC11C \uB05D\uB0B4\uC9C0 \uBABB\uD55C \uC791\uC5C5\uC774 \uC788\uC73C\uBA74 \uB9C8\uC800 \uD574 \uC8FC\uC138\uC694.";
+                this.input.value = "\uC774\uC5B4\uC11C \uC9C4\uD589\uD574 \uC8FC\uC138\uC694: \uB0B4 \uB9C8\uC9C0\uB9C9 \uBA54\uC2DC\uC9C0(\uC9C1\uC804 \uC694\uCCAD)\uC5D0\uC11C \uB05D\uB0B4\uC9C0 \uBABB\uD55C \uC791\uC5C5\uB9CC \uB9C8\uC800 \uD574 \uC8FC\uC138\uC694. \uADF8 \uC804\uC5D0 \uC774\uBBF8 \uB05D\uB09C \uC694\uCCAD\uC740 \uB2E4\uC2DC \uD558\uC9C0 \uB9C8\uC138\uC694.";
                 void this.submit();
               });
               bubble.appendChild(el("div", { class: "row", style: { marginTop: "4px" } }, [more]));
@@ -12429,7 +12456,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.14.2",
+            version: "0.14.3",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -13077,7 +13104,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.14.2"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.14.3"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -18866,6 +18893,20 @@ ${negative.value.trim()}
   }
   var layBtnL = null;
   var layBtnR = null;
+  var anlasBadge = null;
+  function drawAnlas() {
+    if (!anlasBadge) return;
+    const acc = S.status?.account;
+    if (!acc) {
+      anlasBadge.textContent = S.status?.error ? "Anlas ?" : "Anlas \u2026";
+      anlasBadge.title = S.status?.error || "NovelAI \uC794\uB7C9\uC744 \uC77D\uB294 \uC911\uC785\uB2C8\uB2E4";
+      anlasBadge.classList.remove("warn");
+      return;
+    }
+    anlasBadge.textContent = `Anlas ${Number(acc.anlas).toLocaleString()}`;
+    anlasBadge.title = `NovelAI Anlas \uC794\uB7C9 ${acc.anlas} \xB7 v5 \uC0AC\uC6A9\uB7C9 ${acc.usagePercent ?? "?"}% \xB7 tier ${acc.tier ?? "?"} (\uBC30\uCE58\uAC00 \uB05D\uB0A0 \uB54C\uB9C8\uB2E4 \uB2E4\uC2DC \uC77D\uC2B5\uB2C8\uB2E4)`;
+    anlasBadge.classList.toggle("warn", Number(acc.anlas) < 200);
+  }
   function applyPanels() {
     if (!splitRoot) return;
     splitRoot.classList.toggle("lcollapse", panels.left);
@@ -18892,7 +18933,14 @@ ${negative.value.trim()}
       layBtnR.classList.add("laybtn");
       layBtnR.addEventListener("click", () => togglePanel("right"));
     }
-    setLayoutControls(el("span", { class: "row", style: { gap: "2px" } }, [layBtnL, layBtnR]));
+    if (!anlasBadge) {
+      anlasBadge = el("span", { class: "badge anlasmeter", text: "Anlas \u2026" });
+      anlasBadge.addEventListener("click", () => {
+        void loadStatus();
+      });
+      drawAnlas();
+    }
+    setLayoutControls(el("span", { class: "row", style: { gap: "6px" } }, [anlasBadge, layBtnL, layBtnR]));
     applyPanels();
   }
   function renderStudioTab(mount) {
@@ -18939,6 +18987,7 @@ ${negative.value.trim()}
     } catch (e) {
       S.status = { configured: false, library: "", error: msg18(e) };
     }
+    drawAnlas();
     if (S.centreMode === "tab" && !S.selectedFile) drawCentre2();
   }
   function notice9(text2, kind = "") {
@@ -18953,7 +19002,19 @@ ${negative.value.trim()}
     while (wrap.children.length > 4) wrap.firstChild?.remove();
     setTimeout(() => t.remove(), kind === "err" ? 12e3 : 6e3);
   }
+  var refreshPending = false;
   async function refresh2() {
+    const ae = document.activeElement;
+    if (ae && splitRoot && splitRoot.contains(ae) && /^(TEXTAREA|INPUT|SELECT)$/.test(ae.tagName)) {
+      if (!refreshPending) {
+        refreshPending = true;
+        ae.addEventListener("blur", () => {
+          refreshPending = false;
+          void refresh2();
+        }, { once: true });
+      }
+      return;
+    }
     renderedRev = state.filesRev;
     try {
       const [l, ...areas] = await Promise.all([
@@ -19068,8 +19129,20 @@ ${negative.value.trim()}
   hub.refreshArea = refreshArea;
   hub.loadStatus = loadStatus;
   hub.touchQuiet = touchQuiet;
+  var leftRedrawPending = false;
   function drawLeft() {
     if (!tabbar || !leftContent) return;
+    const ae = document.activeElement;
+    if (ae && leftContent.contains(ae) && /^(TEXTAREA|INPUT|SELECT)$/.test(ae.tagName)) {
+      if (!leftRedrawPending) {
+        leftRedrawPending = true;
+        ae.addEventListener("blur", () => {
+          leftRedrawPending = false;
+          drawLeft();
+        }, { once: true });
+      }
+      return;
+    }
     clear(tabbar);
     const mk = (tab, label) => {
       const b = el("button", { class: "tab" + (S.leftTab === tab ? " on" : ""), text: label });
@@ -19386,7 +19459,7 @@ ${negative.value.trim()}
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.14.2"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.14.3"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
@@ -19481,7 +19554,7 @@ ${negative.value.trim()}
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.14.2" }),
+        el("span", { class: "dim", text: "v0.14.3" }),
         healthEl,
         el("span", { class: "spacer" }),
         reload,
@@ -19753,6 +19826,6 @@ ${negative.value.trim()}
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.14.2"} loaded`);
+    console.log(`[risu-hina] v${"0.14.3"} loaded`);
   })();
 })();
