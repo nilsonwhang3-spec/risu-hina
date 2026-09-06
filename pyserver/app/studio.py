@@ -100,7 +100,7 @@ DEFAULT_TEMPLATE = "{character}-{emotion}-{stamp}-{n}"
 # Kept beside the template on purpose: the two have to agree, and a reader
 # who changes one must see the other. A caller-supplied regex still wins.
 STAMP_RE = re.compile(r"\d{8}-\d{6}")
-DEFAULT_PARSE_NOTE = "[캐릭터-][감정-]날짜-시각-번호 (기본 규칙)"
+DEFAULT_PARSE_NOTE = "[캐릭터-]감정[-날짜-시각][-번호] (기본 규칙; 안 맞으면 이름 전체가 감정)"
 
 
 class StudioError(ValueError):
@@ -743,36 +743,63 @@ def build_name(template: str, *, character: str = "", outfit: str = "",
     return name + ".png"
 
 
-def _parse_default(n: str) -> dict | None:
-    """A default-templated name back into fields, anchored on the stamp.
+# The never-overwrite copy suffix (save_image) and a trailing sequence number
+# in any of the spellings people and tools use: "-1", "_1", ".1", " 1", "(1)".
+_COPY_RE = re.compile(r" \(\d+\)$")
+_SEQ_RE = re.compile(r"[-_. ]?(\d{1,4})$")
 
-    Legacy three-token names ({character}-{outfit}-{emotion}) still read
-    correctly: the character is first and the emotion last either way, and no
-    field can contain the delimiter (safe_part neutralises it)."""
+
+def _parse_default(n: str) -> dict | None:
+    """A filename back into fields, with fallbacks - never None for a name
+    with any letters in it (§1-52).
+
+    Why a rule at all: the selector groups CANDIDATES of the same scene so the
+    user can pick between them, and the only thing every image carries is its
+    name. The rule reads the name our own template writes
+    ({character}-{emotion}-{stamp}-{n}) and, in order of confidence:
+
+    1. stamp present  -> [character-][emotion-]stamp[-n]; a legacy
+       character-outfit-emotion reads first/last.
+    2. no stamp       -> strip the " (N)" copy suffix and a trailing sequence
+       number (-N _N .N " N"), then character = first '-' token, emotion = the
+       rest joined ("Ichijou Midori-sex_x-1 (3).png" -> character, emotion,
+       n=1; "a--b--c.2.png" -> character a, emotion "b-c", n=2).
+    3. no '-' at all  -> the whole stem is the emotion: a group of its own,
+       shown, selectable, never "못 읽음". A user-supplied regex still decides
+       everything when one is set.
+    """
     m = STAMP_RE.search(n)
-    if not m:
-        # No stamp (a custom template, renamed files): the shape the user's
-        # own regex spelled out - `character-emotion-n.ext`, where the last
-        # token is the copy number (§1-39). Two tokens = character-emotion.
-        # This used to be an unmatched file, which put a whole folder into
-        # 못 읽음 and one image per "group" in the selector.
-        stem = re.sub(r"\.[A-Za-z0-9]+$", "", n)
-        stem = re.sub(r" \(\d+\)$", "", stem)      # the never-overwrite suffix
-        tokens = [t for t in stem.split("-") if t]
-        if len(tokens) >= 3 and tokens[-1].isdigit():
-            return {"character": tokens[0], "emotion": "-".join(tokens[1:-1]), "n": tokens[-1]}
-        if len(tokens) == 2 and tokens[-1].isdigit():
-            return {"emotion": tokens[0], "n": tokens[1]}       # emotion-n
-        if len(tokens) == 2:
-            return {"character": tokens[0], "emotion": tokens[1]}
+    if m:
+        tokens = [t for t in n[:m.start()].split("-") if t]
+        d: dict[str, str] = {}
+        if len(tokens) == 1:
+            d["emotion"] = tokens[0]
+        elif len(tokens) >= 2:
+            d["character"] = tokens[0]
+            d["emotion"] = tokens[-1]
+        tail = re.sub(r"\.[A-Za-z0-9]+$", "", n[m.end():])
+        tail = _COPY_RE.sub("", tail)
+        seq = re.fullmatch(r"-?(\d+)", tail)
+        if seq:
+            d["n"] = seq.group(1)
+        return d
+    stem = re.sub(r"\.[A-Za-z0-9]+$", "", n)
+    stem = _COPY_RE.sub("", stem).strip()
+    if not stem:
         return None
-    tokens = [t for t in n[:m.start()].split("-") if t]
-    d: dict[str, str] = {}
+    d = {}
+    sm = _SEQ_RE.search(stem)
+    if sm and sm.start() > 0:
+        d["n"] = sm.group(1)
+        stem = stem[:sm.start()].strip()
+    tokens = [t.strip() for t in stem.split("-") if t.strip()]
+    if not tokens:
+        return None
     if len(tokens) == 1:
         d["emotion"] = tokens[0]
-    elif len(tokens) >= 2:
+    else:
         d["character"] = tokens[0]
-        d["emotion"] = tokens[-1]
+        d["emotion"] = "-".join(tokens[1:])
     return d
 
 
