@@ -332,8 +332,22 @@ hub.touchQuiet = touchQuiet;
 
 // --- the left column -----------------------------------------------------------
 
+let leftRedrawPending = false;
+
 function drawLeft(): void {
   if (!tabbar || !leftContent) return;
+  // A batch lands a file every few seconds and each one re-renders the tab;
+  // rebuilding the prompt editor under the caret ate keystrokes and read as
+  // "입력이 계속 리셋됨" (§1-49). While a field in this column has focus the
+  // redraw waits for blur.
+  const ae = document.activeElement as HTMLElement | null;
+  if (ae && leftContent.contains(ae) && /^(TEXTAREA|INPUT|SELECT)$/.test(ae.tagName)) {
+    if (!leftRedrawPending) {
+      leftRedrawPending = true;
+      ae.addEventListener('blur', () => { leftRedrawPending = false; drawLeft(); }, { once: true });
+    }
+    return;
+  }
   clear(tabbar);
   // Tabs only - the collapse toggles live on the CENTRE strip, which is
   // always wide enough. Two buttons here once pushed the OUTPUT tab clean

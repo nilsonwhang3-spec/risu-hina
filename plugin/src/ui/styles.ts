@@ -443,10 +443,13 @@ button.iconbtn.danger { background: #b91c1c; border-color: #b91c1c; color: #fff;
 /* The 썸네일 view's big pick: the clicked image above the grid (§1-40). */
 /* The artifact viewer is a modal (§1-43): wide, the picture as large as the
    screen allows, text scrolls inside. */
-.modalbox.artifactmodal { max-width: min(96vw, 1400px); width: auto; }
-.artifactmodal .artifactview img { max-width: 100%; max-height: 78vh; display: block; margin: 0 auto; }
-.artifactmodal .artifactbody { max-height: 80vh; overflow: auto; }
+.modalbox.artifactmodal { max-width: min(88vw, 1200px); width: auto; max-height: 90vh; display: flex; flex-direction: column; }
+.artifactmodal .modalbody { overflow: auto; min-height: 0; }
+.artifactmodal .artifactview img { max-width: 100%; max-height: 72vh; width: auto; display: block; margin: 0 auto; }
+.artifactmodal .artifactbody { overflow: auto; }
 .artifactmodal .artifacthead { margin-bottom: 6px; }
+.quickreply { gap: 6px; margin-top: 6px; }
+.agentloading { padding: 12px; }
 /* 고급 설정 (§1-47). */
 .advfield { margin-bottom: 10px; }
 .advfield input { max-width: 180px; }
