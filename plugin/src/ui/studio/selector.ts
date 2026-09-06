@@ -214,6 +214,39 @@ export function invalidateGroups(): void {
   groupsRev = -1;
 }
 
+/** What the grid shows, as one string: a file added, removed or rewritten
+ * changes it. */
+function groupSig(g: typeof groups): string {
+  if (!g) return '';
+  return [...g.groups.flatMap((x) => x.items), ...g.unmatched].map((i) => `${i.filename}:${i.modified ?? 0}`).sort().join('|');
+}
+
+/** Re-read the folder while the user is looking at it (§1-48): a file the
+ * agent inpainted, a regenerated "이름 (3).png", a copy a script made - none
+ * of those bump filesRev in time, and the cached groups hid them until the
+ * next tab visit. One group() call every few seconds from the studio tick,
+ * redrawing only when the set of files actually changed. */
+export async function pollGroups(): Promise<void> {
+  if (!groups || !S.selected || groups.folder !== S.selected) return;
+  const folder = groups.folder;
+  try {
+    const eff = effective(prefsFor(folder));
+    const fresh = await state.studio.group(folder, eff.pattern, eff.groupBy);
+    if (!groups || groups.folder !== folder) return;
+    if (groupSig(fresh) === groupSig(groups)) return;
+    // Keep flags the user just clicked (the debounced save may not have
+    // landed) for files that are still there; new files take the server's.
+    const mine = selection;
+    groups = fresh;
+    groupsRev = state.filesRev;
+    selection = {};
+    for (const g of [...groups.groups.map((x) => x.items), groups.unmatched].flat()) {
+      selection[g.filename] = mine[g.filename] ? { ...g.selection, ...mine[g.filename] } : { ...g.selection };
+    }
+    hub.drawCentre();
+  } catch { /* the next tick tries again */ }
+}
+
 export async function loadGroups(folder: string): Promise<void> {
   try {
     const eff = effective(prefsFor(folder));

@@ -111,6 +111,15 @@ mixed-cast multi-entry batch from the panel.** Released = **v0.10.0 BETA** (§1-
 **0.3.1 (night of 2026-08-25)** — the real reason `+` never appeared was not "same version" but **CORS**: RisuAI reads `//@update-url` with a browser `fetch`, and the redirect response from the release URL carries no CORS header. Changed `//@update-url` to
 `https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js`, and made `tools/bundle.py` write that file into the repository (included in the release commit). In the backend code only VERSION changed.
 
+**+ §1-48 (2026-09-06, unreleased)**: files that land in a 검수 folder while it is on screen
+were not shown ("재생성/inpaint 후 `이름 (3).png` 이 검수기에 안 나타남"): the grid served its
+cached groups until filesRev moved, and an agent inpaint / a script copy / a batch adopted as
+S.jobId never moved it in time. `selector.pollGroups()` re-reads the folder from the studio's
+5s tick whenever 검수 is showing (also while a batch runs) and redraws only when the set of
+files or their mtimes changed, keeping flags the user just clicked. `studio_inpaint` now
+pushes an `images` event like a batch does. (The backend parses `…-1 (3).png` correctly -
+the never-overwrite suffix is stripped before the token rule.)
+
 **+ §1-47 (2026-09-06, unreleased) - 고급 설정 (공통)**: a foldable card at the bottom of ⚙ →
 에이전트 (`buildAdvancedCard`, folded by default) with six per-turn cost knobs, each with a
 Korean explanation and "blank = recommended": `historyBudgetChars` 120000, `pruneKeepTurns` 2,

@@ -42,7 +42,7 @@ import { drawSingle, singleTick, syncControls } from './center-single';
 import { drawBatch, batchTick } from './center-batch';
 import { buildStrip, stripTick, refreshStrip } from './strip';
 import { drawFolder } from './center-folder';
-import { hasGroups, loadGroups, drawSelector, setViewMode, drawSelectedGallery, invalidateGroups } from './selector';
+import { hasGroups, loadGroups, drawSelector, setViewMode, drawSelectedGallery, invalidateGroups, pollGroups } from './selector';
 import { setLayoutControls } from '../shell';
 import { reclamp } from '../splitter';
 
@@ -150,6 +150,8 @@ export function renderStudioTab(mount: HTMLElement): void {
       // Files changed under us (the agent wrote a card, a batch landed) and
       // no render asked for a refresh: re-read now rather than on the next
       // tab visit (§1-39 "AI 로 수정한 뒤 표시 안 됨").
+      // 검수 on screen: re-read its folder even while a batch runs (§1-48).
+      if (S.centreMode === 'selector' || (S.centreMode === 'tab' && !S.selectedFile && S.centreTab === 'inspect')) void pollGroups();
       if (renderedRev !== state.filesRev && !S.jobId) { void refresh(); return; }
       if (S.jobId) return;
       void loadJobs(true).then(() => hub.jobTick());
