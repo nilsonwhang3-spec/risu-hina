@@ -192,7 +192,10 @@ DEFAULTS: dict[str, Any] = {
         # When the stored conversation grows past this many characters
         # (~1/3 as many tokens), the older part is summarised by the model
         # once and replaced (agent._compact_history). 0 turns it off.
-        "historyBudgetChars": 240000,
+        # 120K chars ≈ 50-70K tokens of history per request on top of the
+        # ~15K fixed prompt. It was 240K: with 7-14 requests a turn that made
+        # 500K+ input turns even after pruning (§1-46 measurement).
+        "historyBudgetChars": 120000,
     },
     # The search agent: a second, smaller model the general agent hands a
     # research question to (agent.web_research). Same keys as `agent`;
