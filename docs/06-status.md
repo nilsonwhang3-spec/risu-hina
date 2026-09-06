@@ -111,7 +111,7 @@ mixed-cast multi-entry batch from the panel.** Released = **v0.10.0 BETA** (§1-
 **0.3.1 (night of 2026-08-25)** — the real reason `+` never appeared was not "same version" but **CORS**: RisuAI reads `//@update-url` with a browser `fetch`, and the redirect response from the release URL carries no CORS header. Changed `//@update-url` to
 `https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js`, and made `tools/bundle.py` write that file into the repository (included in the release commit). In the backend code only VERSION changed.
 
-**+ §1-59 (2026-09-06, unreleased) - inpaint: the ghost was the mask**. The report: two §1-57
+**+ §1-59 (2026-09-06, 0.14.7) - inpaint: the ghost was the mask**. The report: two §1-57
 results (`인페인트실패_Mibu Sayaka-*.png`, `composite=feather, paddingPx 46, featherPx 32`) showed the
 original shining through the repaint inside the box, one of them with a face where an arm was asked
 for. Measured against the service (docs/09 §7c addendum, ten `infill` calls on a 832×1216 source,
