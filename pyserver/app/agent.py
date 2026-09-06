@@ -1566,6 +1566,14 @@ def build() -> Agent[Deps]:
         except Exception as e:  # noqa: BLE001
             return str(e)
         spent = before - after if before >= 0 and after >= 0 else None
+        # The panel learns of the new file the way it does for a batch: the
+        # strip shows it and the 검수 grid re-reads the folder (§1-48).
+        from . import session as session_mod
+        out_path = str(r["path"])
+        session_mod.push_stream_event(ctx.deps.session_id, {
+            "type": "images", "paths": [out_path], "folder": out_path.rsplit("/", 1)[0] if "/" in out_path else "",
+            "label": "inpaint",
+        })
         return (f"{r['path']} 로 저장했습니다 ({r['size'] // 1024}KB)."
                 + (f" Anlas {before} → {after} ({spent} 소모)." if spent is not None else ""))
 
