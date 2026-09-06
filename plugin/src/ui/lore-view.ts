@@ -70,9 +70,14 @@ export function makeLoreTab(opts: LoreViewOptions): (mount: HTMLElement) => void
 
     const add = el('button', { class: 'primary tiny', text: '새 항목' });
     add.addEventListener('click', () => void create());
+    // A folder is an entry with mode 'folder' (§1-61): RisuAI shows a folder
+    // only for such an entry, so the tree offers to make one - before, the
+    // only way was RisuAI's own editor and moving members one by one.
+    const addFolder = el('button', { class: 'ghost tiny', text: '새 폴더' });
+    addFolder.addEventListener('click', () => void createFolder());
     const reloadBtn = el('button', { class: 'ghost tiny', text: '새로고침' });
     reloadBtn.addEventListener('click', () => void refreshNow());
-    treeMount.appendChild(el('div', { class: 'treehead' }, [add, reloadBtn]));
+    treeMount.appendChild(el('div', { class: 'treehead' }, [add, addFolder, reloadBtn]));
 
     if (!entries.length) {
       for (const line of opts.emptyLines) {
@@ -105,9 +110,13 @@ export function makeLoreTab(opts: LoreViewOptions): (mount: HTMLElement) => void
       if (!byFolder.has(f)) byFolder.set(f, []);
       byFolder.get(f)!.push(e);
     }
+    // A folder with no members yet (just made, or emptied) is still a folder:
+    // without a row it could neither be renamed nor filled.
+    if (!needle) for (const k of names.keys()) if (!byFolder.has(k)) byFolder.set(k, []);
     const named = [...byFolder.keys()].filter(Boolean);
     for (const [folder, group] of byFolder) {
       if (folder && named.length) {
+        const folderEntry = entries.find((x) => isFolder(x) && String((x.entry as Record<string, any>).key ?? '').trim() === folder);
         const label = names.get(folder) || shortId(folder);
         const isOpen = !!needle || openFolders.has(folder);
         const caret = el('span', { text: isOpen ? '▾' : '▸' });
@@ -116,6 +125,19 @@ export function makeLoreTab(opts: LoreViewOptions): (mount: HTMLElement) => void
           el('span', { class: 'grow', text: label }),
           el('span', { class: 'hint', text: String(group.length) }),
         ]);
+        // ✎ opens the folder entry itself (name, id, delete, back to an
+        // entry). A folder whose entry is missing - members naming an id no
+        // folder has - offers to make that entry, which is what RisuAI needs.
+        const edit = el('button', {
+          class: 'ghost tiny folderedit',
+          text: folderEntry ? '✎' : '폴더 만들기',
+          title: folderEntry ? '폴더 이름·삭제' : 'RisuAI 에는 이 폴더 항목이 없습니다 — 만들어야 폴더로 보입니다',
+        });
+        edit.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          if (folderEntry) open(folderEntry);
+          else void createFolder(folder, label);
+        });
         const kids = el('div', { class: 'treekids' }, group.map((e) => entryRow(e, items)));
         kids.style.display = isOpen ? 'block' : 'none';
         head.addEventListener('click', () => {
@@ -125,11 +147,65 @@ export function makeLoreTab(opts: LoreViewOptions): (mount: HTMLElement) => void
           kids.style.display = now ? 'block' : 'none';
           caret.textContent = now ? '▾' : '▸';
         });
-        treeMount.appendChild(el('div', {}, [head, kids]));
+        treeMount.appendChild(el('div', {}, [el('div', { class: 'folderrow' + (folderEntry && folderEntry.id === openId ? ' on' : '') }, [head, edit]), kids]));
       } else {
         for (const e of group) treeMount.appendChild(entryRow(e, items));
       }
     }
+  }
+
+  /** The folder entry's own editor: name and id, delete, and back to an entry. */
+  function openFolder(e: LoreEntry): void {
+    if (!viewMount) return;
+    const entry = e.entry as Record<string, any>;
+    const key = String(entry.key ?? '').trim();
+    const comment = el('input', { value: String(entry.comment ?? entry.name ?? '') }) as HTMLInputElement;
+    const members = entries.filter((x) => !isFolder(x) && folderOf(x) === key);
+    const save = el('button', { class: 'primary', text: '저장' });
+    save.addEventListener('click', async () => {
+      save.disabled = true;
+      try {
+        await state.saveLore(e.id, { ...entry, mode: 'folder', key: key || folderKey(), comment: comment.value, content: '' });
+        if (opts.scope === 'global') void state.refreshBotChanges();
+        notice(savedText('폴더를'), 'ok');
+        await refreshNow();
+      } catch (err) {
+        notice('저장하지 못했습니다: ' + msg(err), 'err');
+      } finally {
+        save.disabled = false;
+      }
+    });
+    // Back to an ordinary entry: the members keep their folder value and
+    // show under the bare id until they are moved or a folder is made again.
+    const toEntry = el('button', { class: 'ghost', text: '일반 항목으로' });
+    toEntry.addEventListener('click', async () => {
+      try {
+        await state.saveLore(e.id, { ...entry, mode: 'normal', comment: comment.value });
+        if (opts.scope === 'global') void state.refreshBotChanges();
+        await refreshNow();
+      } catch (err) {
+        notice('바꾸지 못했습니다: ' + msg(err), 'err');
+      }
+    });
+    const del = el('button', { class: 'ghost' });
+    armed(del, '삭제', members.length ? `항목 ${members.length}개는 남습니다. 폴더만 지울까요?` : '정말 지울까요?', async () => {
+      try {
+        await state.deleteLore(e.id);
+        if (opts.scope === 'global') void state.refreshBotChanges();
+        openId = '';
+        if (viewMount) clear(viewMount);
+        await refreshNow();
+      } catch (err) {
+        notice('삭제하지 못했습니다: ' + msg(err), 'err');
+      }
+    });
+    clear(viewMount);
+    viewMount.appendChild(el('div', { class: 'card' }, [
+      el('h2', {}, [el('span', { text: '폴더' })]),
+      el('label', { class: 'field' }, [el('span', { text: '이름 (comment)' }), comment]),
+      el('div', { class: 'hint', text: `폴더 id (key): ${key || '(저장하면 생깁니다)'} · 항목 ${members.length}개 · RisuAI 는 mode=folder 인 이 항목이 있어야 폴더로 보여 줍니다` }),
+      el('div', { class: 'row' }, [save, toEntry, del]),
+    ]));
   }
 
   /**
@@ -188,6 +264,7 @@ export function makeLoreTab(opts: LoreViewOptions): (mount: HTMLElement) => void
     const was = openId;
     openId = e.id;
     if (was !== e.id) drawTree();
+    if (isFolder(e)) { openFolder(e); return; }
 
     const entry = e.entry as Record<string, any>;
     const keys = el('input', { value: String(entry.key ?? entry.keys ?? '') }) as HTMLInputElement;
@@ -239,6 +316,20 @@ export function makeLoreTab(opts: LoreViewOptions): (mount: HTMLElement) => void
         return o;
       }),
     ]) as HTMLSelectElement;
+
+    // 폴더로 전환: the entry becomes a container (mode 'folder'); its key
+    // turns into the folder id, and what was its body is dropped.
+    const toFolder = el('button', { class: 'ghost', text: '폴더로 전환', title: '이 항목을 폴더 컨테이너(mode=folder)로 바꿉니다. 본문은 버려집니다.' });
+    toFolder.addEventListener('click', async () => {
+      try {
+        const key = String(entry.key ?? '').trim() || folderKey();
+        await state.saveLore(e.id, { ...entry, mode: 'folder', key, comment: comment.value, content: '', alwaysActive: false });
+        if (opts.scope === 'global') void state.refreshBotChanges();
+        await refreshNow();
+      } catch (err) {
+        notice('바꾸지 못했습니다: ' + msg(err), 'err');
+      }
+    });
 
     const save = el('button', { class: 'primary', text: '저장' });
     save.addEventListener('click', async () => {
@@ -322,8 +413,24 @@ export function makeLoreTab(opts: LoreViewOptions): (mount: HTMLElement) => void
       el('label', { class: 'field' }, [el('span', { text: '내용' }), content]),
       metaChanged.length ? el('div', { class: 'hint diffmeta', text: '기준선과 다른 항목 — ' + metaChanged.join(' · ') }) : null,
       diff,
-      el('div', { class: 'row' }, [save, del]),
+      el('div', { class: 'row' }, [save, del, el('span', { class: 'spacer' }), toFolder]),
     ]));
+  }
+
+  /** A new folder entry; `key`/`name` given when it is made for members that already name it. */
+  async function createFolder(key = '', name = ''): Promise<void> {
+    try {
+      const id = await state.addLore(
+        { mode: 'folder', key: key || folderKey(), comment: name || '새 폴더', content: '', alwaysActive: false, insertorder: 100 },
+        opts.scope,
+      );
+      if (opts.scope === 'global') void state.refreshBotChanges();
+      await refreshNow();
+      const made = entries.find((e) => e.id === id);
+      if (made) open(made);
+    } catch (e) {
+      notice('폴더를 만들지 못했습니다: ' + msg(e), 'err');
+    }
   }
 
   async function create(): Promise<void> {
@@ -397,6 +504,12 @@ function folderNames(all: LoreEntry[]): Map<string, string> {
     if (key) names.set(key, String(entry.comment || '').trim() || '이름 없는 폴더');
   }
   return names;
+}
+
+/** A fresh folder id - membership is string equality, so any unique string does. */
+function folderKey(): string {
+  const rnd = Math.random().toString(16).slice(2, 10) + Date.now().toString(16).slice(-4);
+  return 'folder-' + rnd;
 }
 
 function shortId(id: string): string {
