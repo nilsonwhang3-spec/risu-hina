@@ -698,6 +698,67 @@ def auto_clean() -> dict:
     return sweep_temp(float(cfg.get("scratchDays") or 0), float(cfg.get("scriptsDays") or 0))
 
 
+def cleanup_ai(plan: str = "") -> dict:
+    """Preview then quarantine known AI scratch/cache files inside space only."""
+    import json
+    import uuid
+    from . import session
+    if any(not event.is_set() for event in session._ACTIVE.values()):
+        raise FileError("AI 작업이 끝난 후 정리해 주세요. 실행 중인 임시 파일을 보호합니다.")
+    root = workspace.space_root().resolve()
+    base = root / "hina"
+    entries = []
+    for folder, dirs, names in os.walk(base, followlinks=False):
+        current = Path(folder)
+        if current.resolve() != current or not current.resolve().is_relative_to(root):
+            dirs[:] = []
+            continue
+        dirs[:] = sorted(d for d in dirs if d not in (".git", ".cleanup", "skills")
+                         and (current / d).resolve() == current / d)
+        for name in sorted(names):
+            if name.startswith(".") and not name.endswith((".tmp", ".temp", ".part")):
+                continue
+            if name in (".env", "config.json", "hosts.yml", "credentials.json", ".gitignore", ".gitmodules") or name.startswith(".env."):
+                continue
+            path = current / name
+            relative = path.relative_to(root)
+            parts = relative.parts[2:]
+            temporary = ("scratch" in parts[:-1] or ".scratch" in parts[:-1]
+                         or any(p in ("__pycache__", ".cache", ".pytest_cache") for p in parts[:-1])
+                         or name == "_agent_run.py" or name.endswith((".tmp", ".temp", ".part")))
+            if not temporary or path.resolve() != path or not path.is_file():
+                continue
+            stat = path.stat()
+            entries.append((relative.as_posix(), stat.st_size, stat.st_mtime_ns))
+    entries.sort()
+    fingerprint = hashlib.sha256(json.dumps(entries).encode()).hexdigest()
+    result = {"plan": fingerprint, "count": len(entries), "bytes": sum(e[1] for e in entries),
+              "paths": [e[0] for e in entries[:100]], "more": max(0, len(entries) - 100)}
+    if not plan:
+        return result
+    if plan != fingerprint:
+        raise FileError("정리 대상이 바뀌었습니다. 목록을 다시 확인해 주세요.")
+    archive = base / ".cleanup" / (time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:8])
+    if archive.resolve() != archive or not archive.resolve().is_relative_to(root):
+        raise FileError("정리 보관 경로가 작업 공간 밖을 가리킵니다.")
+    moved, failed = 0, []
+    for relative, size, mtime in entries:
+        source, target = root / relative, archive / relative
+        try:
+            if source.resolve() != source or not source.resolve().is_relative_to(root):
+                raise FileError("경로 변경")
+            stat = source.stat()
+            if (stat.st_size, stat.st_mtime_ns) != (size, mtime):
+                raise FileError("파일 변경")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            source.rename(target)
+            moved += 1
+        except (OSError, FileError) as error:
+            failed.append({"path": relative, "error": str(error)})
+    return {**result, "moved": moved, "failed": failed,
+            "archive": archive.relative_to(root).as_posix() if moved else ""}
+
+
 def clean_bot(char_key: str, areas: list[str] | None = None) -> dict:
     """정리, per bot, in the global space: this bot's hina/ scratch and
     scripts by default, out/ only on request (the user may not have taken the

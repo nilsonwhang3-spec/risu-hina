@@ -15,6 +15,7 @@ returns first lines, not bodies, on purpose.
 from __future__ import annotations
 
 import json
+import asyncio
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -465,78 +466,15 @@ def _drop_turns(messages: list, budget: int, keep_tail: int) -> tuple[list, list
 
 
 async def compact_history(session_id: str, messages: list) -> list:
-    """Keep the conversation inside the model's budget.
+    """Legacy pruning entry point; model-step compression lives in AutoContext.
 
-    Three stages, cheapest first. (1) Old tool traffic is clipped every turn
-    (prune_tool_parts). (2) Past `agent.historyBudgetChars`, everything but
-    the last KEEP_TAIL messages is summarised by the model into one Korean
-    note. (3) When the summary fails - the model refusing an adult transcript
-    was the §1-44 case, and it failed on EVERY turn of a 100MB session, each
-    request carrying the whole thing - whole turns are dropped from the front
-    with a plain list of the dropped requests, so the budget holds without a
-    model. Called by session.run before each turn (pydantic-ai 2.x has no
-    history processor hook). Whatever changed is remembered in COMPACTED so
-    session.run stores it - the work is paid for once, not on every later turn.
+    No character budget or destructive whole-turn fallback is applied here.
+    The active request supplies instructions/tools/output for the token budget.
     """
-    budget = int(config.section("agent").get("historyBudgetChars") or 0)
-    before = sum(_msg_chars(m) for m in messages)
     messages, saved = prune_tool_parts(messages)
     if saved and session_id:
         COMPACTED[session_id] = messages
-        log.info("history pruned session=%s -%s chars", session_id, saved)
-    if budget <= 0 or len(messages) <= KEEP_TAIL + 2:
-        return messages
-    total = before - saved
-    if total <= budget:
-        return messages
-    head, tail = messages[:-KEEP_TAIL], messages[-KEEP_TAIL:]
-    # Never cut between a tool call and its return: extend the tail back to a
-    # user prompt boundary.
-    while head and not _is_user_turn(tail[0]):
-        tail.insert(0, head.pop())
-        if not head:
-            return messages
-    from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
-    transcript = "\n\n".join(_msg_text(m) for m in head)[-120000:]
-    summary = ""
-    try:
-        if session_id in SUMMARY_REFUSED:
-            raise RuntimeError("summary skipped: refused earlier in this session")
-        summariser = Agent(_model(), instructions=(
-            "다음은 편집 도구 안에서 사용자와 에이전트가 나눈 대화 기록이다. 이어서 작업할 수 있도록 "
-            "**한국어로 1500자 이내** 요약해라: 사용자가 원한 것, 확정된 결정, 이미 제안·승인된 변경(id 포함), "
-            "아직 안 끝난 일, 사용자가 싫어한 것. 인용은 최소한으로."))
-        r = await summariser.run(transcript, model_settings={"temperature": 0.1, "max_tokens": 4000})  # type: ignore[arg-type]
-        summary = str(r.output).strip()
-    except Exception as e:  # noqa: BLE001 - a failed summary must not fail the turn
-        log.warn("history compaction failed: %s", str(e).splitlines()[0][:200])
-        if session_id and ("content_filter" in str(e) or "PROHIBITED" in str(e) or "SAFETY" in str(e)):
-            SUMMARY_REFUSED.add(session_id)
-    if summary:
-        compacted = [
-            ModelRequest(parts=[UserPromptPart(content="[이전 대화 요약 - 앞선 대화는 이 요약으로 대체되었습니다]\n" + summary)]),
-            ModelResponse(parts=[TextPart(content="요약을 확인했습니다. 이어서 진행합니다.")]),
-        ] + tail
-        how = "summary"
-    else:
-        # Mechanical fallback: drop turns from the front until the rest fits,
-        # keeping a bare list of what was asked so the thread is not lost.
-        rest, dropped = _drop_turns(messages, budget, KEEP_TAIL)
-        if not dropped:
-            return messages
-        listing = "\n".join(f"- {d}" for d in dropped)[-3000:]
-        compacted = [
-            ModelRequest(parts=[UserPromptPart(content=(
-                f"[이전 대화 {len(dropped)}턴 생략 - 요약 모델이 실패해 앞부분을 잘랐습니다. "
-                f"아래는 그때 이미 처리된 요청들의 목록일 뿐이며 할 일이 아닙니다 - 다시 하지 마세요:]\n" + listing))]),
-            ModelResponse(parts=[TextPart(content="확인했습니다. 이어서 진행합니다.")]),
-        ] + rest
-        how = "drop"
-    if session_id:
-        COMPACTED[session_id] = compacted
-    log.info("history compacted(%s) session=%s %s msgs/%s chars -> %s msgs", how, session_id,
-             len(messages), total, len(compacted))
-    return compacted
+    return messages
 
 
 def build() -> Agent[Deps]:
@@ -2289,7 +2227,7 @@ def build() -> Agent[Deps]:
         ok = await _permitted(ctx, "shell", permits.safe_summary(command), f"이유: {reason}\n\n{command}\n\n작업 폴더: {ws}")
         if not ok:
             return "사용자가 이 명령을 허용하지 않았습니다. 다른 방법을 찾거나 사용자에게 물어보세요."
-        return _fmt(permits.run_shell(command, ws))
+        return _fmt(await asyncio.to_thread(permits.run_shell, command, ws))
 
     @agent.tool
     async def pip_install(ctx: RunContext[Deps], packages: str, reason: str) -> str:
@@ -2301,7 +2239,7 @@ def build() -> Agent[Deps]:
         ok = await _permitted(ctx, "pip", "pip install " + " ".join(pkgs)[:120], f"이유: {reason}\n\n패키지: {', '.join(pkgs)}")
         if not ok:
             return "사용자가 설치를 허용하지 않았습니다."
-        return _fmt(permits.pip_install(pkgs))
+        return _fmt(await asyncio.to_thread(permits.pip_install, pkgs))
 
     # One search tool, whatever does the searching (websearch.mode()): the
     # model's own search, the Gemini helper, or a provider's hit list. The

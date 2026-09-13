@@ -1045,6 +1045,13 @@ def h_file_clean(arg: dict) -> dict:
     return files.clean_bot(_char(arg), areas)
 
 
+def h_file_cleanup_ai(arg: dict) -> dict:
+    try:
+        return files.cleanup_ai(str(arg.get("plan") or ""))
+    except files.FileError as e:
+        raise ApiError(409, str(e))
+
+
 # --- asset studio -------------------------------------------------------------
 #
 # The library's files ride the same /files/* routes with `studio: true`; these
@@ -2531,6 +2538,7 @@ ROUTES: dict[str, Handler] = {
     "POST /files/move": h_file_move,
     "POST /files/copy": h_file_copy,
     "POST /files/clean": h_file_clean,
+    "POST /files/cleanup-ai": h_file_cleanup_ai,
 
     "GET /workspace": h_workspace_list,
     "POST /workspace": h_workspace_create,

@@ -95,8 +95,8 @@ export function buildRunControls(): HTMLElement {
 
 /** The live-job heartbeat (from pollJob): patch, never rebuild. */
 export function singleTick(): void {
-  if (!previewBox?.isConnected) return;
   syncControls();
+  if (!previewBox?.isConnected) return;
   syncPreview();
 }
 

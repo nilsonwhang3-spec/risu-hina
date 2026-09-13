@@ -38,7 +38,7 @@ import { buildLeftPrompt, syncPromptBadges } from './left-prompt';
 import { buildLeftChars } from './left-chars';
 import { buildLeftOutput, openFolderPicker } from './left-output';
 import { drawFragments } from './center-frags';
-import { drawSingle, singleTick, syncControls } from './center-single';
+import { drawSingle, singleTick, syncControls, buildRunControls } from './center-single';
 import { drawBatch, batchTick } from './center-batch';
 import { buildStrip, stripTick, refreshStrip } from './strip';
 import { drawFolder } from './center-folder';
@@ -151,7 +151,9 @@ export function renderStudioTab(mount: HTMLElement): void {
     tabbar = el('div', { class: 'studiotabs tabstrip' });
     leftContent = el('div', { class: 'tree filetree' });
     S.leftMount = leftContent;
-    pane.left.append(tabbar, leftContent);
+    pane.left.append(tabbar, leftContent, el('div', {
+      class: 'studio-run-footer', style: { flexShrink: '0', padding: '8px', borderTop: '1px solid var(--border)' },
+    }, [buildRunControls()]));
 
     S.noticeMount = el('div');
     S.viewMount = el('div', { class: 'pad filepad' });

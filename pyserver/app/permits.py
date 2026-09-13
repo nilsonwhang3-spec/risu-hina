@@ -109,7 +109,8 @@ def _env() -> dict[str, str]:
     bundled interpreter first on PATH so `python` means ours."""
     env = {k: v for k, v in os.environ.items()
            if k.upper() in ("PATH", "SYSTEMROOT", "TEMP", "TMP", "HOME", "USERPROFILE", "LANG", "LC_ALL",
-                            "COMSPEC", "PATHEXT", "APPDATA", "LOCALAPPDATA", "PROGRAMDATA")}
+                            "COMSPEC", "PATHEXT", "APPDATA", "LOCALAPPDATA", "PROGRAMDATA",
+                            "GH_CONFIG_DIR", "GH_PROMPT_DISABLED", "GIT_CONFIG_GLOBAL", "GIT_TERMINAL_PROMPT")}
     env["PYTHONIOENCODING"] = "utf-8"
     env["PATH"] = str(Path(sys.executable).parent) + os.pathsep + env.get("PATH", "")
     return env

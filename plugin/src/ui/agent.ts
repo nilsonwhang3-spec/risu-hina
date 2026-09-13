@@ -847,7 +847,10 @@ export class AgentPanel {
               contextNotice.textContent = e.summaryFailed ? '요약 미완료 · 기존 맥락 보존' : '기존 맥락 보존';
             } else {
               contextCount += 1;
-              contextNotice.textContent = `맥락 압축 ${contextCount}회 · ${Number(e.beforeChars).toLocaleString()} → ${Number(e.afterChars).toLocaleString()}자`;
+              const size = e.beforeTokens != null && e.afterTokens != null
+                ? `${Number(e.beforeTokens).toLocaleString()} → ${Number(e.afterTokens).toLocaleString()}토큰 (추정)`
+                : `${Number(e.beforeChars).toLocaleString()} → ${Number(e.afterChars).toLocaleString()}자`;
+              contextNotice.textContent = `맥락 압축 ${contextCount}회 · ${size}`;
             }
             this.scroll();
             break;
