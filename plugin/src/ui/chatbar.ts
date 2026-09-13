@@ -25,6 +25,17 @@ let applyBadge: HTMLElement | null = null;
 let summaryEl: HTMLElement | null = null;
 let noticeMount: HTMLElement | null = null;
 
+export function applyHelp(): HTMLElement {
+  const help = el('button', { class: 'tool apply-help', text: 'ⓘ', title: '반영이란?', 'aria-label': '반영이란?' });
+  help.addEventListener('click', () => popover(help, el('div', { class: 'applypop' }, [
+    el('strong', { text: '작업본 저장과 RisuAI 반영은 다릅니다' }),
+    el('p', { text: 'AI의 편집·에셋 제안을 승인하면 Hina 작업본에 저장됩니다. 반영을 눌러야 이미지와 편집한 봇 또는 챗을 RisuAI에 저장하고 저장 결과를 확인합니다. AI의 작업 완료 메시지만으로 자동 반영되지는 않습니다.' }),
+    el('p', { text: '봇 반영: 메타·봇 로어북·Regex·트리거·에셋 이름 등의 카드 편집. 챗 반영: 대화·챗 로어북·장기기억·챗 변수 편집. 두 대상의 미반영 건수는 따로 표시합니다.' }),
+    el('p', { text: 'OUTPUT/워크스페이스 파일 생성·이동만으로 봇에 등록되지는 않습니다. 에셋 추가·교체 제안을 승인한 뒤 봇 반영을 누르면 PNG/WebP를 일괄 등록합니다. 변경 취소로 미반영 편집을 버릴 수 있으며 원본 파일은 유지됩니다.' }),
+  ])));
+  return help;
+}
+
 export function buildChatBar(notice: HTMLElement): HTMLElement {
   noticeMount = notice;
   applyBadge = el('span', { class: 'badge warn applybadge', style: { display: 'none' } });
@@ -88,7 +99,7 @@ export function buildChatBar(notice: HTMLElement): HTMLElement {
 
   summaryEl = el('span', { class: 'dim changesum', title: '이 챗에서 아직 RisuAI에 쓰지 않은 변경' });
 
-  bar = el('div', { class: 'toolrow chatbar' }, [applyBtn, snap, versions, discardBtn, summaryEl]);
+  bar = el('div', { class: 'toolrow chatbar' }, [applyBtn, applyHelp(), snap, versions, discardBtn, summaryEl]);
   refreshChatBar();
   return bar;
 }
@@ -157,10 +168,19 @@ function msg(e: unknown): string {
 
 // --- 반영 (popover) -----------------------------------------------------------
 
-function openApply(anchor: HTMLElement): void {
+async function openApply(anchor: HTMLElement): Promise<void> {
   const out = el('div', { class: 'hint' });
   const body = el('div', { class: 'applypop' });
   const close = popover(anchor, body);
+
+  body.appendChild(el('div', { class: 'hint', text: '미반영 변경을 확인하는 중…' }));
+  await state.refreshChanges();
+  if (!body.isConnected) return;
+  clear(body);
+  if (!state.changes) {
+    body.appendChild(el('div', { class: 'notice err', text: '변경 상태를 조회하지 못했습니다. 연결을 확인하고 다시 열어 주세요.' }));
+    return;
+  }
 
   const lines = describe(state.changes);
   body.appendChild(el('div', { class: 'hint', text: lines.length ? lines.join(' · ') : '반영할 변경이 없습니다.' }));

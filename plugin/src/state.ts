@@ -1899,7 +1899,7 @@ class AppState {
       // A lorebook or memory proposal just landed in the working copy; the
       // tabs caching those lists and the shared bar both have to hear it.
       this.bump();
-      void this.refreshChanges();
+      await Promise.all([this.refreshChanges(), this.refreshBotChanges()]);
       return String(r.result ?? '실행했습니다.');
     }
 
@@ -1927,10 +1927,9 @@ class AppState {
         this.emit();
         detail = '탭을 이동했습니다.';
       } else if (r.host.kind === 'host_asset_add' || r.host.kind === 'host_asset_replace') {
-        detail = await this.applyAssetActions(r.host.kind, [r.host.args ?? {}]);
+        throw new Error('에셋 승인 방식이 변경되었습니다. 백엔드를 갱신하고 제안을 다시 만들어 주세요. 에셋은 반영할 때 등록됩니다.');
       } else if (r.host.kind === 'host_asset_add_many') {
-        const items = Array.isArray(r.host.args?.items) ? (r.host.args.items as Record<string, unknown>[]) : [];
-        detail = await this.applyAssetActions('host_asset_add', items);
+        throw new Error('에셋 승인 방식이 변경되었습니다. 백엔드를 갱신하고 제안을 다시 만들어 주세요. 에셋은 반영할 때 등록됩니다.');
       } else {
         throw new Error('플러그인이 모르는 작업입니다: ' + r.host.kind);
       }
@@ -2076,7 +2075,7 @@ class AppState {
   }
 
   async cardPatch(): Promise<CardPatch> {
-    return await transport.get<CardPatch>('/card/patch', { charKey: this.botKey });
+    return await transport.get<CardPatch>('/card/patch', { charKey: this.botKey, stagedAssets: '1' });
   }
 
   async cardCommit(label: string): Promise<void> {
@@ -2161,7 +2160,7 @@ class AppState {
    * whole sequence lives here because two callers need it - the bot bar and
    * an approved host_card_writeback - and they must not drift apart.
    */
-  async cardWriteBack(): Promise<{ applied: number; mode: string; verified: boolean; drift?: string }> {
+  async cardWriteBack(progress: (text: string) => void = () => {}): Promise<{ applied: number; mode: string; verified: boolean; drift?: string }> {
     if (!this.isLiveBot) {
       throw new Error('반영은 RisuAI에서 이 봇이 선택되어 있어야 합니다. '
         + 'RisuAI에서 봇을 선택한 뒤 패널을 다시 열어 주세요');
@@ -2173,6 +2172,9 @@ class AppState {
     }
     const update = this.cardUpdateFrom(patch, false);
     if (!update) return { applied: 0, mode: 'noop', verified: true };
+    await this.resolveStagedAssets(update, progress);
+    const current = await host.currentSlot();
+    if (current.characterIndex !== slot.characterIndex) throw new Error('이미지 업로드 중 선택된 봇이 바뀌었습니다. 미반영 변경을 보존했습니다.');
     const r = await host.writeCharacter(slot.characterIndex, patch.chaId, update);
     if (!r.verified) {
       // No commit and no re-read: the re-read is what used to replace the
@@ -2237,113 +2239,29 @@ class AppState {
     this.emit();
   }
 
-  /**
-   * Approved asset proposals: bytes from the workspace -> RisuAI's asset
-   * store (saveAsset, which names the key) -> the live card's reference
-   * list -> the backend store under that key. Written to RisuAI at once,
-   * unlike text: binary material has no working copy to stage in, and the
-   * card re-upload afterwards makes the new reference the baseline.
-   *
-   * MANY items ride ONE host read, ONE card write and ONE re-upload: 37
-   * additions used to be 37 host round trips and 37 card uploads, each of
-   * which also restarted the asset sync - that is the "hangs at the 20s
-   * mark" the user saw, the sync being cancelled and restarted under load.
-   */
-  private async applyAssetActions(kind: string, list: Record<string, unknown>[]): Promise<string> {
-    if (!this.isLiveBot || !this.slot) {
-      throw new Error('에셋을 넣으려면 RisuAI에서 이 봇이 선택되어 있어야 합니다');
+  /** Resolve local asset snapshots only when the user writes the card. */
+  private async resolveStagedAssets(update: host.CardUpdate, progress: (text: string) => void): Promise<void> {
+    const pending = new Set<string>();
+    const collect = (value: unknown): void => {
+      if (typeof value === 'string' && value.startsWith('assets/hina-pending-')) pending.add(value);
+    };
+    for (const row of update.emotionImages ?? []) if (Array.isArray(row)) collect(row[1]);
+    for (const row of update.additionalAssets ?? []) if (Array.isArray(row)) collect(row[1]);
+    for (const row of update.ccAssets ?? []) if (row && typeof row === 'object') collect((row as { uri?: unknown }).uri);
+    const resolved = new Map<string, string>();
+    let done = 0;
+    for (const key of pending) {
+      progress(`RisuAI 이미지 등록 ${++done}/${pending.size} · 카드 저장 대기`);
+      const bytes = await transport.getBinary('/assets/blob', { key });
+      const realKey = await Risuai.saveAsset(bytes);
+      if (!realKey || typeof realKey !== 'string' || realKey.startsWith('assets/hina-pending-')) throw new Error('RisuAI가 에셋 저장 키를 반환하지 않았습니다. 미반영 변경은 보존됩니다.');
+      resolved.set(key, realKey);
+      await transport.post('/assets/adopt', { charKey: this.botKey, sourceKey: key, key: realKey });
     }
-    if (!list.length) throw new Error('넣을 에셋이 없습니다');
-    const t0 = Date.now();
-    // 1. Bytes in, keys out - one saveAsset per image (the host names keys).
-    const saved: { name: string; path: string; field: string; key: string }[] = [];
-    const failed: string[] = [];
-    for (const args of list) {
-      const name = String(args.name || '').trim();
-      const path = String(args.path || '');
-      const field = String(args.field || 'additional');
-      if (!name || !path) { failed.push(`${name || path}: 이름/경로 없음`); continue; }
-      try {
-        const bytes = await transport.getBinary('/files/download', { path });
-        if (!(bytes[0] === 0x89 && bytes[1] === 0x50)) throw new Error('PNG 파일만 에셋으로 넣을 수 있습니다');
-        const key = await Risuai.saveAsset(bytes);
-        if (!key || typeof key !== 'string') throw new Error('RisuAI 가 에셋 키를 돌려주지 않았습니다');
-        saved.push({ name, path, field, key });
-      } catch (e) {
-        failed.push(`${name}: ${e instanceof Error ? e.message : String(e)}`);
-        void clientLog('warn', 'asset save failed', { name, path, error: String(e) });
-      }
-    }
-    if (!saved.length) throw new Error('에셋을 하나도 저장하지 못했습니다: ' + failed.join('; '));
-
-    // 2. One card update carrying every reference.
-    const slot = await host.currentSlot();
-    const fresh = await host.readCharacter(slot.characterIndex);
-    const update: host.CardUpdate = {};
-    let placed = '';
-    if (kind === 'host_asset_add') {
-      const emo = Array.isArray(fresh['emotionImages']) ? [...(fresh['emotionImages'] as unknown[])] : [];
-      const add = Array.isArray(fresh['additionalAssets']) ? [...(fresh['additionalAssets'] as unknown[])] : [];
-      let nEmo = 0;
-      let nAdd = 0;
-      for (const s of saved) {
-        if (s.field === 'emotion') { emo.push([s.name, s.key]); nEmo += 1; }
-        else { add.push([s.name, s.key, 'png']); nAdd += 1; }
-      }
-      if (nEmo) update.emotionImages = emo;
-      if (nAdd) update.additionalAssets = add;
-      placed = [nEmo ? `감정 이미지 ${nEmo}` : '', nAdd ? `추가 에셋 ${nAdd}` : ''].filter(Boolean).join(' · ');
-    } else {
-      // Replace: same name, new key, wherever the name lives. CBS references
-      // the name, so nothing else in the card has to change.
-      const keyOf = new Map(saved.map((s) => [s.name, s.key]));
-      let hits = 0;
-      const swap = (arr: unknown, at: number): unknown[] | null => {
-        if (!Array.isArray(arr)) return null;
-        return arr.map((e) => {
-          if (Array.isArray(e) && keyOf.has(String(e[0]))) { hits += 1; const c = [...e]; c[at] = keyOf.get(String(e[0])); return c; }
-          return e;
-        });
-      };
-      const emo = swap(fresh['emotionImages'], 1);
-      const add = swap(fresh['additionalAssets'], 1);
-      const cc = Array.isArray(fresh['ccAssets'])
-        ? (fresh['ccAssets'] as { name?: unknown; uri?: unknown }[]).map((c) => {
-          if (c && typeof c === 'object' && keyOf.has(String(c.name))) { hits += 1; return { ...c, uri: keyOf.get(String(c.name)) }; }
-          return c;
-        })
-        : null;
-      if (!hits) throw new Error(`이름이 “${saved.map((s) => s.name).join(', ')}” 인 에셋이 카드에 없습니다`);
-      if (emo) update.emotionImages = emo;
-      if (add) update.additionalAssets = add;
-      if (cc) update.ccAssets = cc;
-      placed = `${hits}곳 교체`;
-    }
-    const w = await host.writeCharacter(slot.characterIndex, fresh.chaId, update);
-    // A resolved write is not a kept write (the save encoder may skip it).
-    // Unverified = the action fails, and nothing downstream pretends otherwise.
-    if (!w.verified) {
-      throw new Error('카드에 에셋이 반영되지 않았습니다: ' + (w.drift || '재확인 실패'));
-    }
-    // 3. The backend store learns the keys (one call per item is fine: these
-    // are small and the store is local).
-    for (const s of saved) {
-      try {
-        await transport.post('/assets/adopt', { charKey: this.activeCharKey, key: s.key, path: s.path, name: s.name, field: s.field });
-      } catch (e) {
-        void clientLog('warn', 'assets/adopt failed', { name: s.name, error: String(e) });
-      }
-    }
-    // 4. The card changed in RisuAI: re-read ONCE so the baseline (and the
-    // manifest) carry the new references, without disturbing the text
-    // working copy.
-    await this.readHost();
-    await this.upload();
-    void clientLog('info', 'assets applied', { kind, saved: saved.length, failed: failed.length, ms: Date.now() - t0 });
-    const head = saved.length === 1
-      ? `에셋 “${saved[0].name}” 을 RisuAI 에 저장하고 카드에 붙였습니다 (${placed}, ${saved[0].key}).`
-      : `에셋 ${saved.length}건을 RisuAI 에 저장하고 카드에 한 번에 붙였습니다 (${placed}).`;
-    return head + (failed.length ? ` 실패 ${failed.length}건: ${failed.slice(0, 5).join('; ')}` : '');
+    const replace = (value: unknown): unknown => typeof value === 'string' ? resolved.get(value) ?? value : value;
+    if (update.emotionImages) update.emotionImages = update.emotionImages.map(row => Array.isArray(row) ? [row[0], replace(row[1]), ...row.slice(2)] : row);
+    if (update.additionalAssets) update.additionalAssets = update.additionalAssets.map(row => Array.isArray(row) ? [row[0], replace(row[1]), ...row.slice(2)] : row);
+    if (update.ccAssets) update.ccAssets = update.ccAssets.map(row => row && typeof row === 'object' ? { ...row, uri: replace((row as { uri?: unknown }).uri) } : row);
   }
 
   /**
@@ -2382,6 +2300,7 @@ class AppState {
       throw new Error('구버전 업로드 상태의 카드라 복제할 수 없습니다. 패널을 닫았다 다시 열어 주세요');
     }
     const update = this.cardUpdateFrom(patch, true) ?? {};
+    await this.resolveStagedAssets(update, () => {});
     // The clone shares this bot's workspace: it carries the family key.
     const family = this.workspace?.familyKey || this.activeCharKey;
     const chaId = await host.cloneBot(this.slot.characterIndex, patch.chaId, name, update, family);

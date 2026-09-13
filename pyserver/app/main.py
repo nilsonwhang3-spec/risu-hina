@@ -690,6 +690,14 @@ def h_assets_adopt(arg: dict) -> dict:
     """The plugin saved a workspace file into RisuAI; record the key here."""
     ck = _char(arg)
     try:
+        if arg.get('sourceKey'):
+            source = str(arg['sourceKey'])
+            if not source.startswith(assets.PENDING_PREFIX):
+                raise assets.AssetError('미반영 에셋 키가 필요합니다')
+            stored = assets.read_bytes(source)
+            if stored is None:
+                raise assets.AssetError('미반영 이미지 사본을 찾지 못했습니다')
+            return assets.store_bytes(str(arg.get('key') or ''), stored[0])
         return assets.adopt(ck, str(arg.get("key") or ""), str(arg.get("path") or ""),
                             name=str(arg.get("name") or ""), field=str(arg.get("field") or "additional"))
     except (assets.AssetError, files.FileError) as e:
@@ -2186,7 +2194,12 @@ def h_card_script_move(arg: dict) -> dict:
 
 
 def h_card_patch(arg: dict) -> dict:
-    return cardmod.patch(_char(arg))
+    patch = cardmod.patch(_char(arg))
+    pending = any(str(row['entry'].get('key') or '').startswith(assets.PENDING_PREFIX)
+                  for row in cardmod.scripts(_char(arg), cardmod.ASSET_KIND))
+    if pending and str(arg.get('stagedAssets') or '') != '1':
+        raise ApiError(409, '미반영 에셋이 있습니다. 플러그인을 0.15.6 이상으로 갱신한 뒤 반영해 주세요.')
+    return patch
 
 
 def h_card_changes(arg: dict) -> dict:
@@ -2702,7 +2715,7 @@ async def dispatch(path: str, request: Request) -> Response:
             _log(request.method, pathname, 404, started, str(arg.get("path") or ""))
             return _json(404, {"error": "no such file", "path": arg.get("path")}, origin)
         try:
-            width = max(64, min(1024, int(arg.get("w") or 360)))
+            width = max(64, min(1536, int(arg.get("w") or 360)))
         except (TypeError, ValueError):
             width = 360
         data, mime = await run_in_threadpool(files.thumb_bytes, target, width)

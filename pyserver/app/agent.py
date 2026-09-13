@@ -26,7 +26,7 @@ from pydantic_ai.providers.openai import OpenAIProvider
 
 from . import (actions, assets, codexauth, config, files, log, permits, presets, providers, pyexec, skills, snapshots, textedit,
                staging, store, websearch, workspace)
-from . import agentnotes, assetrules, nai, studio, studiojob, toolsigs, vision
+from . import agentnotes, assetrules, batchreview, continuity, nai, studio, studiojob, toolsigs, vision
 from . import card as cardmod
 from . import memory as mem
 
@@ -35,6 +35,13 @@ You are a tool for editing RisuAI roleplay chat logs after the fact.
 **Answer in polite Korean (~합니다 / ~해 주세요).** Never use plain-declarative (~한다) or casual speech toward the user.
 
 Principles:
+- Before AI image batches, explain the exact user-requested styles, characters, emotion/scene preset,
+  scenes and total image count, references, resolution and output folder. Never substitute enabled
+  cards for a user-specified preset. Resolve the requested name with studio_library/read_file first.
+  Always pass explicit styles and characters (use [] only when intentionally absent).
+  studio_generate requires a fresh settings confirmation for every multi-image execution; a prior
+  "continue" or another batch's approval does not authorize new settings. Respect user adoption
+  decisions when selecting missing scenes; do not regenerate completed slots without asking.
 - **Never try to read a whole conversation.** 400-turn chats are common. Skim with list_turns,
   narrow with search_turns, and read only the range you need with read_turns.
 - **You cannot edit anything yourself.** Transcript edits go through stage_edit / stage_bulk /
@@ -138,10 +145,12 @@ Workspace rules (mandatory - every bot shares ONE global space):
   again. Keep long documents as files too (write_file) and say where.
 - Other bots' folders are visible. Reading is fine; **never modify another bot's folder unasked.**
 - **You handle assets (images) too.** list_assets for the list, fetch_assets to pull them into
-  scratch/, run_python (PIL) to process, then propose the resulting PNG with propose_asset_add /
-  propose_asset_replace. On approval the plugin saves it into RisuAI and attaches it to the card -
-  the ONE card change written to RisuAI immediately, without waiting for 반영 (binary, no working
-  copy). PNG only.
+  scratch/, run_python (PIL) to process, then propose the resulting PNG/WebP with propose_asset_add /
+  propose_asset_replace. Approval snapshots the image bytes in Hina and stages card references.
+  The user must then use 봇 반영 to upload the images and write the card to RisuAI, just like Regex edits.
+  PNG and WebP are supported without conversion. The host's .png storage-key suffix
+  does not identify the bytes' format. For large existing folders use propose_assets_from_folder;
+  do not tell the user to manually register WebP images. Explain destination, count and name rules.
   An asset's **name and deletion** are card material: see the rows with list_scripts("assetref")
   and fix them with the propose_regex_edit grammar (propose_script_delete / entry replacement) -
   written together at 반영.
@@ -172,6 +181,7 @@ class Deps:
     # screen, not a half - adopting an image into the card is its own verb.
     mode: str = ""
     force_compact: bool = False
+    continuity_parts: list[str] | None = None
 
 
 # Proposal kinds by the half of the panel they belong to (see Deps.mode).
@@ -179,13 +189,13 @@ CHAT_KINDS = frozenset({"memory_edit", "memory_delete", "checkpoint_restore", "c
                         "host_writeback", "host_save_copy"})
 BOT_KINDS = frozenset({"card_edit", "card_greeting_add", "card_greeting_delete", "script_edit",
                        "script_add", "script_delete", "card_checkpoint_create", "card_checkpoint_restore",
-                       "host_card_writeback", "host_clone_bot", "host_asset_add", "host_asset_replace"})
+                       "host_card_writeback", "host_clone_bot", "host_asset_add", "host_asset_add_many", "host_asset_replace"})
 _MODE_TAB = {"chat": ("챗 편집", "editor"), "bot": ("봇 편집", "meta")}
 _SCREEN_LABEL = {"chat": "챗 편집", "bot": "봇 편집", "studio": "에셋 스튜디오"}
 
 # The studio's own verbs: adopting an image into the card is what the studio
 # is for, so these pass the screen gate there (the approval queue still runs).
-_STUDIO_KINDS = frozenset({"host_asset_add", "host_asset_replace"})
+_STUDIO_KINDS = frozenset({"host_asset_add", "host_asset_add_many", "host_asset_replace"})
 
 # Batches whose saved images were already shown as a strip: a job is polled
 # many times, and the pictures should appear once.
@@ -542,7 +552,35 @@ def build() -> Agent[Deps]:
 
     @agent.instructions
     def _assistant_notes(ctx: RunContext[Deps]) -> str:
-        return agentnotes.prompt(ctx.deps.char_key)
+        # The actual notes are appended in the new request. Editing a note
+        # must not rewrite the instruction prefix of every subsequent call.
+        return ("Session handoff and project notes accompany the current user request as recorded data. "
+                "Current user corrections take precedence. Use recall_work to recover earlier user directives "
+                "and save_work_state to record the goal, completed reports, pending work and next step. "
+                "Do not infer completion from old assistant prose; verify jobs, files and user adoption state. "
+                "Card/script read tools read the Hina WORKING COPY, not live RisuAI. Approval of text proposals "
+                "updates that working copy; the user must separately use 반영 to write it to RisuAI. "
+                "Never claim live RisuAI verification from read_card/read_script alone. Distinguish proposed, "
+                "working-copy saved, and host-write verified. Asset approval also stages the working copy; "
+                "only a subsequent 반영 registers images in RisuAI. Workspace file creation alone does not register assets.")
+
+    @agent.tool
+    def recall_work(ctx: RunContext[Deps], query: str = "", offset: int = 0, count: int = 8, text_offset: int = 0) -> str:
+        """Search THIS assistant session's durable user/assistant/work-state journal, including before compaction.
+        Unlike list_turns, this reads the assistant work conversation, not a RisuAI roleplay chat.
+        Use nextOffset for more records, or count=1 and nextTextOffset to continue a long record.
+        """
+        return json.dumps(continuity.recall(ctx.deps.session_id or "", query, offset, count, text_offset), ensure_ascii=False)
+
+    @agent.tool
+    def save_work_state(ctx: RunContext[Deps], goal: str, completed: list[str], pending: list[str], next_step: str, evidence: str) -> str:
+        """Record task state before yielding or long work. Include evidence; completed is your report, not proof.
+        The next turn also receives actual JOB states and original user corrections automatically.
+        """
+        try:
+            return json.dumps(continuity.save(ctx.deps.session_id or "", goal, completed, pending, next_step, evidence), ensure_ascii=False)
+        except ValueError as e:
+            return str(e)
 
     @agent.tool
     def recall_notes(ctx: RunContext[Deps], query: str = "", offset: int = 0) -> str:
@@ -1278,12 +1316,12 @@ def build() -> Agent[Deps]:
     @agent.tool
     def propose_asset_add(ctx: RunContext[Deps], name: str, path: str, reason: str,
                           field: str = "additional") -> str:
-        """Propose adding a PNG from the workspace as one of this bot's assets.
+        """Propose adding a PNG or WebP from the workspace as one of this bot's assets.
 
-        path: a space path (studio/..., projects/<bot>/..., hina/<bot>/scratch/...), PNG only.
+        path: a space path (studio/..., projects/<bot>/..., hina/<bot>/scratch/...), PNG or WebP.
         field: additional (extra asset, default) | emotion (emotion image).
-        On approval the plugin saves it into RisuAI and attaches it to the card - written
-        immediately, independent of 반영.
+        Approval stores a local image snapshot and stages the card. The user then uses 봇 반영
+        to register it in RisuAI. Never describe proposal approval as live registration.
         """
         if field not in ("additional", "emotion"):
             return "field 는 additional 또는 emotion 이어야 합니다"
@@ -1293,16 +1331,16 @@ def build() -> Agent[Deps]:
             return str(e)
         return _propose(ctx, "host_asset_add",
                         f"에셋 추가 “{name}” ({field}, {info['size'] // 1024}KB) — {reason}",
-                        {"name": name, "path": info["path"], "field": field, "ext": "png"})
+                        {"name": name, "path": info["path"], "field": field, "ext": info["ext"]})
 
     @agent.tool
     def propose_assets_add(ctx: RunContext[Deps], items_json: str, reason: str,
                            field: str = "additional") -> str:
-        """Propose adding SEVERAL PNGs as this bot's assets at once (one proposal card).
+        """Propose adding SEVERAL PNG/WebP images as this bot's assets at once (one proposal card).
 
         items_json: `[{"name": "...", "path": "..."}, ...]` - for two or more, always use this.
         (propose_asset_add per image stacks up one card each and makes approval that much slower.)
-        field: additional | emotion. On approval the plugin saves them all and attaches them to the card in one go.
+        field: additional | emotion. Approval stages the whole batch locally; 봇 반영 uploads and registers it.
         """
         if field not in ("additional", "emotion"):
             return "field 는 additional 또는 emotion 이어야 합니다"
@@ -1324,7 +1362,7 @@ def build() -> Agent[Deps]:
             except (assets.AssetError, files.FileError) as e:
                 bad.append(f"{path}: {e}")
                 continue
-            items.append({"name": name, "path": info["path"], "field": field, "ext": "png"})
+            items.append({"name": name, "path": info["path"], "field": field, "ext": info["ext"]})
         if not items:
             return "추가할 수 있는 항목이 없습니다: " + "; ".join(bad[:5])
         out = _propose(ctx, "host_asset_add_many",
@@ -1333,6 +1371,28 @@ def build() -> Agent[Deps]:
         if bad:
             out += f" 제외 {len(bad)}건: " + "; ".join(bad[:5])
         return out
+
+    @agent.tool
+    def propose_assets_from_folder(ctx: RunContext[Deps], folder: str, reason: str,
+                                   field: str = "additional", recursive: bool = True,
+                                   strip_variant_numbers: bool = True) -> str:
+        """Propose bulk PNG/WebP registration from a workspace folder, including subfolders.
+        Names are filename stems; strip_variant_numbers removes trailing .2/.3/etc so variants
+        share an asset name. Keep all character/emotion/clothing tokens intact. Maximum 5000 images.
+        Approval saves original bytes locally and stages references. 봇 반영 then registers the whole batch.
+        Explain the selected bot, folder, count, field, naming and separate write-back before approval.
+        """
+        if field not in ("additional", "emotion"):
+            return "field 는 additional 또는 emotion 이어야 합니다"
+        try:
+            plan = assets.stage_folder(folder, recursive, strip_variant_numbers)
+        except (assets.AssetError, files.FileError) as e:
+            return str(e)
+        items = [{**item, 'field': field} for item in plan['items']]
+        naming = '확장자·변형번호(.2/.3) 제외' if strip_variant_numbers else '확장자만 제외'
+        return _propose(ctx, 'host_asset_add_many',
+                        f"에셋 {len(items)}건 작업본 추가 → 봇 반영 시 등록 ({field}) · {folder} · 이름: {naming} · 제외 {len(plan['skipped'])}건 — {reason}",
+                        {'items': items, 'field': field})
 
     # --- 에셋 스튜디오 --------------------------------------------------------
     #
@@ -1410,14 +1470,19 @@ def build() -> Agent[Deps]:
             # the concatenation, one run after another (§1-39).
             specs = parsed if isinstance(parsed, list) else [parsed]
             items = []
+            settings = []
             for spec in specs:
                 spec.setdefault("charKey", ctx.deps.char_key)
+                resolved = studio.normalize_spec(spec)
+                settings.append({"styles": resolved["styles"], "characters": resolved["characters"],
+                                 "scenePreset": resolved.get("scenePreset") or "inline/default"})
                 items.extend(studio.plan(spec))
             spec = specs[0] if specs else {}
         except Exception as e:  # noqa: BLE001
             return f"계획을 세우지 못했습니다: {e}"
         est = studio.estimate(spec, len(items))
         lines = [(f"{len(specs)}개 사양, " if len(specs) > 1 else "") + f"{len(items)}장 · {est['note']}"]
+        lines.append("실행 설정: " + json.dumps(settings, ensure_ascii=False))
         for i in items[:40]:
             lines.append(f"  {i['folder']}/{i['name']}  seed={i['seed']}  {i['prompt'][:70]}")
         if len(items) > 40:
@@ -1425,7 +1490,7 @@ def build() -> Agent[Deps]:
         return "\n".join(lines)
 
     @agent.tool
-    def studio_generate(ctx: RunContext[Deps], spec_json: str, wait: bool = True) -> str:
+    async def studio_generate(ctx: RunContext[Deps], spec_json: str, wait: bool = True) -> str:
         """Run a batch (the same spec as studio_plan; an empty model means the default).
 
         The default (wait=true) WAITS until the end and pushes each finished image into the chat as
@@ -1441,6 +1506,8 @@ def build() -> Agent[Deps]:
         `studio/config/.studio/adhoc/` via write_file, not to studio/config/scenes/.
         The spec is ONE object OR AN ARRAY of objects - an array runs one job per element, in order
         (a batch file holding several specs is passed as it is).
+        Explicit styles and characters are required. For 2+ images the exact expanded settings
+        are shown to the user; this tool waits for one-time confirmation before creating any JOB.
         """
         try:
             parsed = json.loads(spec_json)
@@ -1450,24 +1517,27 @@ def build() -> Agent[Deps]:
             for spec in specs:
                 spec.setdefault("charKey", ctx.deps.char_key)
                 spec["folder"] = studio.output_folder(spec)
+            import asyncio
+            prepared, detail, total = await asyncio.to_thread(batchreview.prepare, specs)
         except Exception as e:  # noqa: BLE001
             return f"시작하지 못했습니다: {e}"
-        if len(specs) == 1:
-            return _studio_generate_one(ctx, specs[0], wait)
+        if total >= 2:
+            if not await _permitted(ctx, "studio_batch", f"{len(prepared)}개 배치 · 총 {total}장", detail):
+                return "배치 실행이 확인되지 않았습니다 (취소·거부·시간 초과). JOB과 이미지는 생성하지 않았습니다."
         # Several specs: one job each, in order (the runner serialises them
         # anyway); each one's result is a paragraph of the answer (§1-39).
         outs = []
-        for i, spec in enumerate(specs, 1):
-            outs.append(f"[배치 {i}/{len(specs)}] " + _studio_generate_one(ctx, spec, wait))
+        for i, (spec, items) in enumerate(prepared, 1):
             from . import session as session_mod
             if session_mod.stopped(ctx.deps.session_id):
                 break
+            outs.append(f"[배치 {i}/{len(prepared)}] " + await asyncio.to_thread(_studio_generate_one, ctx, spec, wait, items))
         return "\n\n".join(outs)
 
-    def _studio_generate_one(ctx: RunContext[Deps], spec: dict, wait: bool) -> str:
+    def _studio_generate_one(ctx: RunContext[Deps], spec: dict, wait: bool, items: list[dict]) -> str:
         spec = {**spec, "origin": "AI", "sessionId": ctx.deps.session_id}
         try:
-            r = studiojob.start(spec)
+            r = studiojob.start(spec, planned_items=items)
         except Exception as e:  # noqa: BLE001
             return f"시작하지 못했습니다: {e}"
         job_id = r["jobId"]
@@ -1724,7 +1794,7 @@ def build() -> Agent[Deps]:
         paths/names are comma-separated and equal in count (paths[i] becomes names[i]).
         field: emotion (emotion image) | additional (extra asset).
         The images are COPIED from the library into the bot workspace and then ride the ordinary
-        asset-add path - written to RisuAI on approval. A bot must be selected.
+        asset-add path - staged on approval, registered in RisuAI by 봇 반영. A bot must be selected.
         """
         ck = ctx.deps.char_key
         if not ck:
@@ -1879,14 +1949,14 @@ def build() -> Agent[Deps]:
 
     @agent.tool
     def propose_asset_replace(ctx: RunContext[Deps], name: str, path: str, reason: str) -> str:
-        """Propose replacing only the picture of an asset, name unchanged (PNG). CBS references are unaffected."""
+        """Propose replacing only the picture of an asset, name unchanged (PNG/WebP). CBS references are unaffected."""
         try:
             info = assets.stage_file(path)
         except (assets.AssetError, files.FileError) as e:
             return str(e)
         return _propose(ctx, "host_asset_replace",
                         f"에셋 교체 “{name}” ({info['size'] // 1024}KB) — {reason}",
-                        {"name": name, "path": info["path"], "ext": "png"})
+                        {"name": name, "path": info["path"], "ext": info["ext"]})
 
     @agent.tool
     def propose_clone_bot(ctx: RunContext[Deps], name: str, reason: str) -> str:

@@ -421,7 +421,7 @@ export async function writeCharacter(
     return String(fresh[field] ?? '');
   };
   for (const e of update.fields ?? []) {
-    if (liveValue(e.field) !== e.before) {
+    if (liveValue(e.field) !== e.before && liveValue(e.field) !== e.after) {
       throw new HostError('changed', `RisuAI 쪽에서 카드가 바뀌었습니다 (${e.field}). 다시 불러와 주세요`);
     }
   }
@@ -429,7 +429,7 @@ export async function writeCharacter(
   for (const [key, label] of Object.entries(LIST_LABEL)) {
     const wanted = (update as Record<string, unknown>)[key];
     const before = update.before?.[key as keyof NonNullable<CardUpdate['before']>];
-    if (wanted && before !== undefined) checkList(label, fresh[key], before);
+    if (wanted && before !== undefined && canon(fresh[key] ?? []) !== canon(wanted)) checkList(label, fresh[key], before);
   }
   for (const e of update.fields ?? []) {
     if (e.field === 'characterVersion') {

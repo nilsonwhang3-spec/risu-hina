@@ -161,7 +161,7 @@ def _update(job_id: str, **fields: Any) -> None:
     db.execute(f"UPDATE jobs SET {', '.join(sets)}, updated_at = ? WHERE id = ?", params)
 
 
-def start(spec: dict) -> dict:
+def start(spec: dict, *, planned_items: list[dict] | None = None) -> dict:
     """Expand the batch, record it, and run it in the background.
 
     References follow the CARDS now: each item rides the vibe/charref presets
@@ -178,7 +178,9 @@ def start(spec: dict) -> dict:
     spec["model"] = str(spec.get("model") or "").strip() or nai.DEFAULT_MODEL
     if spec["model"] not in nai.KNOWN_MODELS and not nai.exists(spec["model"]):
         raise studio.StudioError(f"그런 모델이 없습니다: {spec['model']} (기본은 {nai.DEFAULT_MODEL})")
-    items = studio.plan(spec)
+    # AI approval holds this concrete expansion; do not resolve active cards,
+    # random fragments or scene files a second time after the user approves.
+    items = studio.plan(spec) if planned_items is None else planned_items
     if not items:
         raise studio.StudioError("만들 이미지가 없습니다")
 
@@ -304,7 +306,11 @@ def _run_locked(job_id: str) -> None:
         chars = item.get("characters")
         if chars is None:  # a legacy expansion: every item shares the spec's cast
             chars = [str(c) for c in spec.get("characters") or []]
-        vibe_specs, charref_specs = studio.refs_for_characters(chars)
+        if "referenceSpecs" in item:
+            vibe_specs = item["referenceSpecs"]["vibes"]
+            charref_specs = item["referenceSpecs"]["charrefs"]
+        else:
+            vibe_specs, charref_specs = studio.refs_for_characters(chars)
         if explicit_vibes:
             vibe_specs = explicit_vibes
         if explicit_charrefs:

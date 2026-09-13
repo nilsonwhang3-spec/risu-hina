@@ -485,7 +485,7 @@ def add_script(ck: str, kind: str, entry: dict) -> str:
     row = db.one(
         "SELECT COALESCE(MAX(seq), -1) AS m FROM card_scripts WHERE char_key = ? AND kind = ?",
         (ck, kind))
-    seq = int((row["m"] if row else -1) or -1) + 1
+    seq = int(row["m"] if row else -1) + 1
     sid = uuid.uuid4().hex
     db.execute(
         "INSERT INTO card_scripts(id, char_key, kind, seq, entry_json, origin, created_at) "

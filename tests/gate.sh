@@ -39,6 +39,9 @@ run "studio scope isolation" "$PY" tests/test_studio.py
 run "asset naming and alternatives" "$PY" tests/test_assetrules.py
 run "studio learning and recovery" "$PY" tests/test_studio_improvements.py
 run "assistant memory, context and jobs" "$PY" tests/test_agent_memory_context_jobs.py
+run "durable work continuity and cache prefix" "$PY" tests/test_continuity.py
+run "staged PNG/WebP asset writeback" "$PY" tests/test_staged_assets.py
+run "AI batch settings confirmation" "$PY" tests/test_batch_review.py
 # The global space: upload targets, per-bot cleanup, and searches that must
 # state what they clipped.
 run "global file space" "$PY" tests/test_files.py

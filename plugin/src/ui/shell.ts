@@ -204,11 +204,15 @@ export function setToolbarSearch(value: string, onInput: (v: string) => void, pl
 
 function syncToolslot(): void {
   if (!toolbarSlot || !chatBarEl || !botBarEl || !tabSlot) return;
-  // The two bars are mutually exclusive by construction: CHAT_TABS and
-  // BOT_TABS do not overlap. Selection tabs (챗 선택 · 봇 선택) and files show
-  // neither - nothing is being edited there.
-  const showChat = !!state.activeChatKey && CHAT_TABS.has(active);
-  const showBot = !!state.botKey && BOT_TABS.has(active);
+  // Pending work remains reachable from studio/files and other tabs too.
+  const chatPending = !!(state.changes?.total || state.changes?.actions || state.changes?.staged || state.changes?.conflicts);
+  const botPending = !!(state.botChanges?.total || state.botChanges?.actions || state.botChanges?.conflicts);
+  const showChat = !!state.activeChatKey && (CHAT_TABS.has(active) || chatPending);
+  const showBot = !!state.botKey && (BOT_TABS.has(active) || botPending);
+  const chatLabel = chatBarEl.querySelector('[data-tool="apply"] .tool-label');
+  const botLabel = botBarEl.querySelector('[data-tool="card-apply"] .tool-label');
+  if (chatLabel) chatLabel.textContent = CHAT_TABS.has(active) && !showBot ? '반영' : '챗 반영';
+  if (botLabel) botLabel.textContent = BOT_TABS.has(active) && !showChat ? '반영' : '봇 반영';
   chatBarEl.style.display = showChat ? '' : 'none';
   botBarEl.style.display = showBot ? '' : 'none';
   const showTab = tabSlot.childElementCount > 0;

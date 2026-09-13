@@ -1993,7 +1993,15 @@ console.log('\ntest_agent_panel');
 console.log('\ntest_agent_interleaved_text');
 {
   const originalFetch = globalThis.fetch;
+  let finishMockChat = null;
   globalThis.fetch = async (url, options) => {
+    if (String(url).includes('/permits/decide')) {
+      finishMockChat?.(); finishMockChat = null;
+      return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } });
+    }
+    if (String(url).includes('/permits')) {
+      return new Response(JSON.stringify({ pending: finishMockChat ? [{ id: 'batch-confirm', kind: 'studio_batch', summary: '25장', detail: '스타일: Test Style\n캐릭터: Test Character\n감정: happy, sad' }] : [] }), { headers: { 'Content-Type': 'application/json' } });
+    }
     if (String(url).endsWith('/chat')) {
       const events = [
         { type: 'text', text: '첫' }, { type: 'text', text: ' 문단 전체입니다.' },
@@ -2001,10 +2009,14 @@ console.log('\ntest_agent_interleaved_text');
         { type: 'tool', name: 'list_files' }, { type: 'toolResult', result: 'ok' },
         { type: 'text', text: '둘' }, { type: 'text', text: '째 문단 전체입니다.' },
         { type: 'context', beforeChars: 14000, afterChars: 7920 },
+        { type: 'context', method: 'preserved', summaryFailed: true, beforeChars: 7920, afterChars: 7920 },
         { type: 'tool', name: 'read_file' }, { type: 'toolResult', result: 'ok' },
         { type: 'text', text: '마지막 문단 전체입니다.' }, { type: 'done', usage: {}, staged: 0 },
       ];
-      return new Response(events.map(e => JSON.stringify(e)).join('\n') + '\n', { headers: { 'Content-Type': 'application/x-ndjson' } });
+      return new Response(new ReadableStream({ start(controller) {
+        controller.enqueue(new TextEncoder().encode(events.filter(e => e.type !== 'done').map(e => JSON.stringify(e)).join('\n') + '\n'));
+        finishMockChat = () => { controller.enqueue(new TextEncoder().encode('{"type":"done","usage":{},"staged":0}\n')); controller.close(); };
+      } }), { headers: { 'Content-Type': 'application/x-ndjson' } });
     }
     return originalFetch(url, options);
   };
@@ -2015,7 +2027,12 @@ console.log('\ntest_agent_interleaved_text');
     const send = document.querySelector('.sendbtn');
     send.disabled = false;
     send.dispatchEvent(new window.Event('click', { bubbles: true }));
-    await settle(1000);
+    await settle(1800);
+    const batchPermit = document.querySelector('.bubble.assistant .permit');
+    check('batch confirmation identifies its settings', batchPermit?.textContent.includes('Test Style'));
+    check('batch confirmation has no always-allow option', !!batchPermit && !batchPermit.textContent.includes('이번 턴 항상 허용'));
+    clickButton(batchPermit, '취소');
+    await settle(300);
     const prose = [...document.querySelectorAll('.bubble.assistant .bubble-body')].map(n => n.textContent);
     check('first prose survives later tools and tokens', prose.includes('첫 문단 전체입니다.'), JSON.stringify(prose));
     check('second prose survives another tool', prose.includes('둘째 문단 전체입니다.'), JSON.stringify(prose));
@@ -2023,12 +2040,12 @@ console.log('\ntest_agent_interleaved_text');
     const contextNotices = [...document.querySelectorAll('.context-notice')];
     check('compression notices share one line inside the assistant answer',
       contextNotices.length === 1 && !!contextNotices[0].closest('.bubble.assistant'));
-    check('the compression line updates to the latest count and size',
-      contextNotices[0]?.textContent.includes('2회') && contextNotices[0]?.textContent.includes('7,920'));
+    check('failed summary is shown as preserved, not successful compression',
+      contextNotices[0]?.textContent.includes('요약 미완료') && contextNotices[0]?.textContent.includes('기존 맥락 보존') && !contextNotices[0]?.textContent.includes('3회'));
     // Clear the mock conversation so the welcome-state test still begins empty.
     clickButton(document.querySelector('.agenthead'), '새 대화');
     await settle(400);
-  } finally { globalThis.fetch = originalFetch; }
+  } finally { finishMockChat?.(); globalThis.fetch = originalFetch; }
 }
 
 console.log('\ntest_agent_welcome');
@@ -2757,66 +2774,10 @@ console.log('\ntest_studio_screen_mode');
         JSON.stringify(chatBody));
 }
 
-console.log('\ntest_asset_write_verified');
+console.log('\ntest_staged_asset_writeback');
 {
-  // An adopted asset is a card write like any other: when the save encoder
-  // quietly drops it, the action must complete as failed, not as success.
-  // The whole flow is faked at the fetch seam; only the plugin code runs.
-  const origFetch = globalThis.fetch;
-  const origSet = host.api.setCharacterToIndex;
-  host.api.setCharacterToIndex = async (i, char) => {
-    const kept = structuredClone(char);
-    kept.emotionImages = structuredClone(host.liveChar.emotionImages ?? []);
-    return origSet(i, kept);
-  };
-  let completed = null;
-  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
-  const json = (obj) => new Response(JSON.stringify(obj), {
-    status: 200, headers: { 'Content-Type': 'application/json' },
-  });
-  globalThis.fetch = async (url, opts) => {
-    const u = String(url);
-    if (u.endsWith('/session') && opts?.body) return json({ sessionId: 'smoke-verify' });
-    if (u.endsWith('/chat') && opts?.body) {
-      return new Response('{"type":"done"}\n', {
-        status: 200, headers: { 'Content-Type': 'application/x-ndjson' },
-      });
-    }
-    if (u.includes('/actions?')) {
-      return json({ actions: [{ id: 'smoke-asset-1', kind: 'host_asset_add',
-                                summary: '스모크 감정 에셋', args: {}, byHost: true, createdAt: Date.now() }] });
-    }
-    if (u.endsWith('/actions/decide')) {
-      return json({ approved: true, host: { kind: 'host_asset_add',
-                    args: { name: '스모크감정', path: 'images/스모크.png', field: 'emotion' } } });
-    }
-    if (u.endsWith('/actions/complete')) {
-      completed = JSON.parse(opts.body);
-      return json({ ok: true });
-    }
-    if (u.includes('/files/download')) {
-      return new Response(png, { status: 200, headers: { 'Content-Type': 'application/octet-stream' } });
-    }
-    return origFetch(url, opts);
-  };
-  try {
-    const input = document.querySelector('.panel.active .agentinput');
-    input.value = '검증 트리거';
-    document.querySelector('.panel.active .sendbtn')
-      ?.dispatchEvent(new window.Event('click', { bubbles: true }));
-    await settle(600);
-    const row = document.querySelector('.panel.active .stagedrow');
-    check('the faked pending action rendered', !!row);
-    row?.querySelector('button.primary')?.dispatchEvent(new window.Event('click', { bubbles: true }));
-    await settle(900);
-  } finally {
-    globalThis.fetch = origFetch;
-    host.api.setCharacterToIndex = origSet;
-  }
-  check('a dropped asset write completes the action as failed', completed?.ok === false,
-        JSON.stringify(completed));
-  check('and the reason names the unkept write', /반영되지 않았습니다/.test(completed?.detail || ''),
-        completed?.detail);
+  const { stagedAssetSmoke } = await import('./staged_assets_smoke.mjs');
+  await stagedAssetSmoke({ backend, host, document, window, settle, clickButton, check, root: ROOT });
 }
 
 console.log('\ntest_markdown_workspace_images');
@@ -2927,6 +2888,14 @@ console.log('\ntest_artifact_and_images_events');
 
 console.log('\ntest_studio_selector');
 {
+  const reviewFetch = globalThis.fetch;
+  const reviewDpr = window.devicePixelRatio;
+  const reviewWidths = [];
+  window.devicePixelRatio = 3;
+  globalThis.fetch = async (url, opts) => {
+    if (String(url).includes('/files/thumb') && opts?.body) reviewWidths.push(JSON.parse(opts.body).w);
+    return reviewFetch(url, opts);
+  };
   // Put candidates in the library through the backend, then drive the
   // selector the way a person does: look at a group, pick one, check the
   // unreadable names are shown rather than hidden.
@@ -2965,6 +2934,9 @@ console.log('\ntest_studio_selector');
   }
   openFolder('고르기')?.dispatchEvent(new window.Event('click', { bubbles: true }));
   await settle(1500);
+  check('high-density review requests sharp thumbnails instead of 360px', reviewWidths.some(w => w >= 1024 && w <= 1536), JSON.stringify(reviewWidths));
+  globalThis.fetch = reviewFetch;
+  window.devicePixelRatio = reviewDpr;
 
   const text = () => document.querySelector('.panel.active')?.textContent || '';
   // A folder click lands on the 검수 tab (the selector); the tidy-up grid is
