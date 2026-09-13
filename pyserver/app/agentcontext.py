@@ -6,6 +6,7 @@ import dataclasses
 import json
 
 from pydantic_ai import Agent, capture_run_messages
+from pydantic_ai._instrumentation import get_instructions
 from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
 
@@ -34,7 +35,9 @@ def safe_cuts(messages: list) -> list[int]:
 
 
 def message_tokens(message) -> int:
-    total = estimate_tokens(str(getattr(message, "instructions", "") or "")) + 32
+    # History stores instructions on many requests, but the provider sends
+    # only the current instruction block once. Count it separately below.
+    total = 32
     for part in message.parts:
         content = getattr(part, "content", "")
         if isinstance(content, str):
@@ -135,7 +138,7 @@ class AutoContext(AbstractCapability):
             return request_context
         window = max(8000, _int_cfg("contextWindowTokens", 128000))
         params = request_context.model_request_parameters
-        fixed = str(getattr(params, "instructions", "") or "") + str(getattr(params, "function_tools", ""))
+        fixed = (get_instructions(request_context.messages, params) or "") + str(getattr(params, "function_tools", ""))
         output = int((request_context.model_settings or {}).get("max_tokens") or cfg.get("maxTokens") or 32000)
         available_tokens = max(2000, int(window * .8) - estimate_tokens(fixed) - output)
         estimated = sum(message_tokens(m) for m in request_context.messages)
@@ -148,7 +151,7 @@ class AutoContext(AbstractCapability):
         request_context.messages = messages
         if info and ctx.deps.session_id:
             usage = info.pop("usage", None)
-            info["estimatedInputTokensBefore"] = estimated
+            info["estimatedInputTokensBefore"] = estimated + estimate_tokens(fixed)
             session._save_message(ctx.deps.session_id, "context", info)
             session.push_stream_event(ctx.deps.session_id, {"type": "context", **{k: v for k, v in info.items() if k != "summary"}})
             if usage:

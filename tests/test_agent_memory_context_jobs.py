@@ -13,7 +13,7 @@ DATA = tempfile.TemporaryDirectory(prefix="hina-memory-", ignore_cleanup_errors=
 os.environ["RISUHINA_DATA_DIR"] = DATA.name
 sys.stdout.reconfigure(encoding="utf-8")
 
-from app import agent, agentcontext, agentnotes, config, db, main, session, studiojob
+from app import agent, agentcontext, agentnotes, config, db, main, session, studiojob, updater
 from pydantic_ai import Agent, capture_run_messages
 from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, ToolCallPart, ToolReturnPart, UserPromptPart
 from pydantic_ai.models.function import FunctionModel
@@ -24,6 +24,37 @@ db.connect()
 
 
 class Features(unittest.TestCase):
+    def test_repeated_instructions_do_not_trigger_early_compression(self):
+        def model(messages, info):
+            return ModelResponse(parts=[TextPart(content="Verified result")])
+        ag = Agent(FunctionModel(model), instructions="Project policy. " * 1500,
+                   deps_type=agent.Deps, capabilities=[agentcontext.AutoContext()])
+        sid = "no-early-compact"
+        db.execute("INSERT INTO sessions(id,chat_key,title,created_at,updated_at) VALUES(?,?,?,?,?)", (sid,"chat","",db.now(),db.now()))
+        settings = {"autoCompact": True, "historyBudgetChars": 120000, "contextWindowTokens": 128000, "maxTokens": 32000}
+        async def turns():
+            history = []
+            for i in range(10):
+                result = await ag.run("User task " + "x" * 2700, message_history=history,
+                                      deps=agent.Deps("chat", "A", sid, Path(DATA.name)))
+                history = result.all_messages()
+            return history
+        with patch.object(config, "section", side_effect=lambda name: settings if name == "agent" else {}):
+            history = asyncio.run(turns())
+        self.assertGreater(sum(agent._msg_chars(m) for m in history), 26000)
+        self.assertFalse(db.one("SELECT seq FROM agent_messages WHERE session_id=? AND role='context'", (sid,)))
+
+    def test_update_distinguishes_ahead_from_current_release(self):
+        with patch.object(updater, "repo", return_value="owner/repo"), \
+             patch.object(updater, "_http_json", return_value={"tag_name": "v0.14.8", "assets": []}):
+            info = updater.check()
+            self.assertTrue(info["ahead"])
+            self.assertFalse(info["newer"])
+            self.assertIn("스테이징", updater.apply()["reason"])
+        with patch.object(updater, "repo", return_value="owner/repo"), \
+             patch.object(updater, "_http_json", return_value={"tag_name": "v" + config.VERSION, "assets": []}):
+            self.assertFalse(updater.check()["ahead"])
+
     def test_notes_persist_and_isolate_projects(self):
         with patch("app.workspace.bot_folder", side_effect=lambda key: key):
             a, b = agentnotes.scope("A"), agentnotes.scope("B")

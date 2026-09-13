@@ -697,6 +697,8 @@ export class AgentPanel {
     // model having done its reading before it spoke when it had not.
     const bubble = el('div', { class: 'bubble assistant' });
     this.log.appendChild(bubble);
+    let contextNotice: HTMLElement | null = null;
+    let contextCount = 0;
     // A running clock, not just a spinner.
     //
     // An agent turn here is minutes, not seconds - it reads dozens of turns and
@@ -836,7 +838,12 @@ export class AgentPanel {
         if (e.type !== 'text') flushText();
         switch (e.type) {
           case 'context': {
-            this.log.appendChild(el('div', { class: 'hint', text: `컨텍스트 자동 압축 · ${Number(e.beforeChars).toLocaleString()} → ${Number(e.afterChars).toLocaleString()}자` }));
+            if (!contextNotice) {
+              contextNotice = el('div', { class: 'hint context-notice' });
+              bubble.insertBefore(contextNotice, thinking);
+            }
+            contextCount += 1;
+            contextNotice.textContent = `맥락 압축 ${contextCount}회 · ${Number(e.beforeChars).toLocaleString()} → ${Number(e.afterChars).toLocaleString()}자`;
             this.scroll();
             break;
           }

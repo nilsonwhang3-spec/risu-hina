@@ -149,6 +149,7 @@ def check() -> dict:
         "current": config.VERSION,
         "latest": tag,
         "newer": newer,
+        "ahead": _ver_tuple(config.VERSION) > _ver_tuple(tag),
         "notes": str(rel.get("body") or "")[:4000],
         "publishedAt": rel.get("published_at"),
         "asset": archive,
@@ -206,7 +207,7 @@ def apply() -> dict:
     if not info.get("ok"):
         raise UpdateError(info.get("error") or "업데이트를 확인하지 못했습니다")
     if not info.get("newer"):
-        return {"updated": False, "reason": "이미 최신입니다", **info}
+        return {**info, "updated": False, "reason": "공개 릴리스보다 앞선 개발/스테이징 버전입니다" if info.get("ahead") else "공개 릴리스와 같은 버전입니다"}
     if not info.get("installable"):
         raise UpdateError(info.get("reason") or "설치할 수 없는 릴리스입니다")
 

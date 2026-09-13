@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.15.2
+//@display-name Risu Hina v0.15.3
 //@api 3.0
-//@version 0.15.2
+//@version 0.15.3
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -104,7 +104,7 @@
       this.tokenSafe = true;
       this.lastHealth = body;
       this.probeInfo = "";
-      this.gate = versionGate("0.15.2", String(body.version || ""));
+      this.gate = versionGate("0.15.3", String(body.version || ""));
       return body;
     }
     /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -7543,6 +7543,8 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       this.addBubble("user", prompt);
       const bubble = el("div", { class: "bubble assistant" });
       this.log.appendChild(bubble);
+      let contextNotice = null;
+      let contextCount = 0;
       const elapsed = el("span", { class: "elapsed", text: "0m 0s" });
       const thinkingText = el("span", { class: "thinkingtext", text: "\uC0DD\uAC01\uD558\uB294 \uC911\uC785\uB2C8\uB2E4\u2026" });
       const abort = new AbortController();
@@ -7667,7 +7669,12 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           if (e.type !== "text") flushText();
           switch (e.type) {
             case "context": {
-              this.log.appendChild(el("div", { class: "hint", text: `\uCEE8\uD14D\uC2A4\uD2B8 \uC790\uB3D9 \uC555\uCD95 \xB7 ${Number(e.beforeChars).toLocaleString()} \u2192 ${Number(e.afterChars).toLocaleString()}\uC790` }));
+              if (!contextNotice) {
+                contextNotice = el("div", { class: "hint context-notice" });
+                bubble.insertBefore(contextNotice, thinking);
+              }
+              contextCount += 1;
+              contextNotice.textContent = `\uB9E5\uB77D \uC555\uCD95 ${contextCount}\uD68C \xB7 ${Number(e.beforeChars).toLocaleString()} \u2192 ${Number(e.afterChars).toLocaleString()}\uC790`;
               this.scroll();
               break;
             }
@@ -13009,6 +13016,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     const checkBtn = el("button", { class: "ghost", text: "\uC5C5\uB370\uC774\uD2B8 \uD655\uC778" });
     checkBtn.addEventListener("click", async () => {
       checkBtn.disabled = true;
+      applyBtn3.disabled = true;
       say("\uD655\uC778\uD558\uB294 \uC911\uC785\uB2C8\uB2E4\u2026");
       try {
         const r = await state.updateCheck();
@@ -13028,7 +13036,12 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           return;
         }
         if (!r.newer) {
-          say(`\uC774\uBBF8 \uCD5C\uC2E0\uC785\uB2C8\uB2E4 (v${r.current}).`, "ok");
+          const mismatch = r.current !== "0.15.3";
+          const ahead = r.ahead ?? (!!r.latest && r.latest !== r.current);
+          say(
+            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.3"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
+            mismatch || ahead ? "" : "ok"
+          );
           return;
         }
         applyBtn3.disabled = !r.installable;
@@ -13117,7 +13130,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.15.2",
+            version: "0.15.3",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -13768,7 +13781,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.2"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.3"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -20712,7 +20725,7 @@ ${negative.value.trim()}
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.2"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.3"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
@@ -20808,7 +20821,7 @@ ${negative.value.trim()}
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.15.2" }),
+        el("span", { class: "dim", text: "v0.15.3" }),
         healthEl,
         el("span", { class: "spacer" }),
         reload,
@@ -21125,6 +21138,6 @@ ${negative.value.trim()}
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.15.2"} loaded`);
+    console.log(`[risu-hina] v${"0.15.3"} loaded`);
   })();
 })();

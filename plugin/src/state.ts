@@ -1493,7 +1493,7 @@ class AppState {
 
   async updateCheck(): Promise<{
     ok: boolean; configured: boolean; current: string; latest?: string;
-    newer?: boolean; notes?: string; installable?: boolean; reason?: string | null;
+    newer?: boolean; ahead?: boolean; notes?: string; installable?: boolean; reason?: string | null;
     error?: string;
   }> {
     return await transport.post('/update/check', {}, 45_000);

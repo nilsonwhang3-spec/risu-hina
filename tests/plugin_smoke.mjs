@@ -1997,8 +1997,10 @@ console.log('\ntest_agent_interleaved_text');
     if (String(url).endsWith('/chat')) {
       const events = [
         { type: 'text', text: '첫' }, { type: 'text', text: ' 문단 전체입니다.' },
+        { type: 'context', beforeChars: 26000, afterChars: 11000 },
         { type: 'tool', name: 'list_files' }, { type: 'toolResult', result: 'ok' },
         { type: 'text', text: '둘' }, { type: 'text', text: '째 문단 전체입니다.' },
+        { type: 'context', beforeChars: 14000, afterChars: 7920 },
         { type: 'tool', name: 'read_file' }, { type: 'toolResult', result: 'ok' },
         { type: 'text', text: '마지막 문단 전체입니다.' }, { type: 'done', usage: {}, staged: 0 },
       ];
@@ -2018,6 +2020,11 @@ console.log('\ntest_agent_interleaved_text');
     check('first prose survives later tools and tokens', prose.includes('첫 문단 전체입니다.'), JSON.stringify(prose));
     check('second prose survives another tool', prose.includes('둘째 문단 전체입니다.'), JSON.stringify(prose));
     check('final prose remains complete', prose.includes('마지막 문단 전체입니다.'), JSON.stringify(prose));
+    const contextNotices = [...document.querySelectorAll('.context-notice')];
+    check('compression notices share one line inside the assistant answer',
+      contextNotices.length === 1 && !!contextNotices[0].closest('.bubble.assistant'));
+    check('the compression line updates to the latest count and size',
+      contextNotices[0]?.textContent.includes('2회') && contextNotices[0]?.textContent.includes('7,920'));
     // Clear the mock conversation so the welcome-state test still begins empty.
     clickButton(document.querySelector('.agenthead'), '새 대화');
     await settle(400);
