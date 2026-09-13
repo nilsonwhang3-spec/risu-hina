@@ -43,6 +43,7 @@ export function buildUpdateCard(): HTMLElement {
   const checkBtn = el('button', { class: 'ghost', text: '업데이트 확인' });
   checkBtn.addEventListener('click', async () => {
     checkBtn.disabled = true;
+    applyBtn.disabled = true;
     say('확인하는 중입니다…');
     try {
       const r = await state.updateCheck();
@@ -62,7 +63,12 @@ export function buildUpdateCard(): HTMLElement {
         return;
       }
       if (!r.newer) {
-        say(`이미 최신입니다 (v${r.current}).`, 'ok');
+        const mismatch = r.current !== __PLUGIN_VERSION__;
+        const ahead = r.ahead ?? (!!r.latest && r.latest !== r.current);
+        say(`백엔드 v${r.current} · 플러그인 v${__PLUGIN_VERSION__} · 공개 릴리스 v${r.latest}. `
+          + (ahead ? '백엔드는 공개 릴리스보다 앞선 개발/스테이징 버전입니다.' : '백엔드는 공개 릴리스와 같은 버전입니다.')
+          + (mismatch ? ' 플러그인과 백엔드 버전이 다릅니다. 대응 릴리스 게시 여부를 확인해 주세요.' : ''),
+          mismatch || ahead ? '' : 'ok');
         return;
       }
       applyBtn.disabled = !r.installable;
