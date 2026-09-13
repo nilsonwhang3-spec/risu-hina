@@ -208,8 +208,8 @@ function syncToolslot(): void {
   // Pending work remains reachable from studio/files and other tabs too.
   const chatPending = !!(state.changes?.total || state.changes?.actions || state.changes?.staged || state.changes?.conflicts);
   const botPending = !!(state.botChanges?.total || state.botChanges?.actions || state.botChanges?.conflicts);
-  const showChat = !!state.activeChatKey && (CHAT_TABS.has(active) || chatPending);
-  const showBot = !!state.botKey && (BOT_TABS.has(active) || botPending);
+  const showChat = mode === 'chat' && !!state.activeChatKey && (CHAT_TABS.has(active) || chatPending);
+  const showBot = (mode === 'bot' || active === 'studio') && !!state.botKey && (BOT_TABS.has(active) || botPending);
   const chatLabel = chatBarEl.querySelector('[data-tool="apply"] .tool-label');
   const botLabel = botBarEl.querySelector('[data-tool="card-apply"] .tool-label');
   if (chatLabel) chatLabel.textContent = CHAT_TABS.has(active) && !showBot ? '반영' : '챗 반영';

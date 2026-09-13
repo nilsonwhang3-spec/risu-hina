@@ -176,7 +176,7 @@ function foldableCard(id: string, title: string, body: (HTMLElement | null)[]): 
 interface AdvField { key: string; label: string; def: number; unit: string; help: string; zeroMeansOff?: boolean }
 
 const ADV_FIELDS: AdvField[] = [
-  { key: 'historyBudgetChars', label: '히스토리 예산', def: 120000, unit: '자',
+  { key: 'historyBudgetChars', label: '히스토리 예산', def: 220000, unit: '자',
     help: '자동 압축이 켜져 있으면 이 글자 수와 컨텍스트 토큰 추정치 중 먼저 도달한 기준으로 압축합니다. 한 턴의 도구 실행 중에도 검사하며 최신 사용자 지시는 유지합니다.' },
   { key: 'pruneKeepTurns', label: '툴 결과 그대로 두는 턴 수', def: 2, unit: '턴',
     help: '최근 이 턴 수 안의 툴 결과(스크립트 출력·읽은 파일·생성 스펙)는 그대로 두고, 더 오래된 것은 아래 글자 수로 자릅니다. 자른 결과가 필요하면 히나가 툴을 다시 부릅니다.' },
@@ -184,7 +184,7 @@ const ADV_FIELDS: AdvField[] = [
     help: '오래된 툴 결과 하나를 남길 길이. 100 아래로는 내려가지 않습니다.' },
   { key: 'maxRequestsPerTurn', label: '턴당 최대 모델 요청', def: 40, unit: '회', zeroMeansOff: true,
     help: '한 번의 대화 턴에서 모델을 부르는 횟수 상한. 툴을 한 번 쓸 때마다 한 번 더 부르고, 매번 기록 전체를 다시 보냅니다. 넘으면 턴이 멈추고 이유를 말합니다. 0 = 제한 없음.' },
-  { key: 'maxToolCallsPerTurn', label: '턴당 최대 툴 호출', def: 30, unit: '회', zeroMeansOff: true,
+  { key: 'maxToolCallsPerTurn', label: '턴당 최대 툴 호출', def: 60, unit: '회', zeroMeansOff: true,
     help: '한 턴에서 툴(스크립트·파일·생성·비전)을 부르는 횟수 상한. 0 = 제한 없음.' },
   { key: 'maxInputTokensPerTurn', label: '턴당 입력 토큰 상한', def: 0, unit: '토큰', zeroMeansOff: true,
     help: '한 턴에 보낸 입력 토큰의 합계가 이 값을 넘으면 멈춥니다. 비용을 직접 막는 안전장치. 0 = 제한 없음 (권장: 예상 최대치의 1.5배, 예 800000).' },

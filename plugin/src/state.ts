@@ -1441,7 +1441,7 @@ class AppState {
 
   async approveStaged(approve: boolean): Promise<{ decided: number; applied: number }> {
     const r = await transport.post<{ decided: number; applied: number }>(
-      '/approve', { chatKey: this.activeChatKey, all: true, approve });
+      '/approve', { chatKey: this.activeChatKey, all: true, approve, mode: this.activeTab === 'studio' ? 'studio' : this.editMode });
     void this.refreshChanges();
     return r;
   }
@@ -1906,7 +1906,7 @@ class AppState {
    */
   async decideAction(id: string, approve: boolean, chatKey = ''): Promise<string> {
     const r = await transport.post('/actions/decide', {
-      chatKey: chatKey || this.activeChatKey, id, approve,
+      chatKey: chatKey || this.activeChatKey, id, approve, mode: this.activeTab === 'studio' ? 'studio' : this.editMode,
     }) as { approved: boolean; result?: string; host?: { kind: string; args: Record<string, any> } };
 
     if (!r.approved) return '거절했습니다.';

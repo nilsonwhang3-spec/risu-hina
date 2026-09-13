@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.15.7
+//@display-name Risu Hina v0.15.8
 //@api 3.0
-//@version 0.15.7
+//@version 0.15.8
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -104,7 +104,7 @@
       this.tokenSafe = true;
       this.lastHealth = body;
       this.probeInfo = "";
-      this.gate = versionGate("0.15.7", String(body.version || ""));
+      this.gate = versionGate("0.15.8", String(body.version || ""));
       return body;
     }
     /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -1758,7 +1758,7 @@
     async approveStaged(approve) {
       const r = await transport.post(
         "/approve",
-        { chatKey: this.activeChatKey, all: true, approve }
+        { chatKey: this.activeChatKey, all: true, approve, mode: this.activeTab === "studio" ? "studio" : this.editMode }
       );
       void this.refreshChanges();
       return r;
@@ -2119,7 +2119,8 @@
       const r = await transport.post("/actions/decide", {
         chatKey: chatKey || this.activeChatKey,
         id,
-        approve
+        approve,
+        mode: this.activeTab === "studio" ? "studio" : this.editMode
       });
       if (!r.approved) return "\uAC70\uC808\uD588\uC2B5\uB2C8\uB2E4.";
       if (!r.host) {
@@ -3772,8 +3773,50 @@
   var overlay = null;
   var label = null;
   var previousFocus = null;
+  var unlock = () => {
+  };
+  function lockBackground() {
+    const nodes2 = [...document.body.children].filter((node) => node !== overlay);
+    const changed = nodes2.filter((node) => !node.hasAttribute("inert"));
+    for (const node of changed) node.setAttribute("inert", "");
+    const roots = [document.documentElement, document.body];
+    const overflow = roots.map((node) => node.style.overflow);
+    for (const node of roots) node.style.overflow = "hidden";
+    const stop = (event) => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    };
+    const events = [
+      "click",
+      "dblclick",
+      "pointerdown",
+      "pointerup",
+      "mousedown",
+      "mouseup",
+      "touchstart",
+      "touchmove",
+      "wheel",
+      "keydown",
+      "keyup",
+      "keypress",
+      "contextmenu",
+      "dragstart",
+      "drop"
+    ];
+    for (const type of events) document.addEventListener(type, stop, { capture: true, passive: false });
+    return () => {
+      for (const type of events) document.removeEventListener(type, stop, true);
+      for (const node of changed) node.removeAttribute("inert");
+      roots.forEach((node, i) => {
+        node.style.overflow = overflow[i];
+      });
+    };
+  }
   onWriteProgress((message) => {
     if (message === null) {
+      unlock();
+      unlock = () => {
+      };
       overlay?.remove();
       overlay = null;
       label = null;
@@ -3799,6 +3842,7 @@
         }
       });
       document.body.appendChild(overlay);
+      unlock = lockBackground();
       overlay.focus();
     }
     label.textContent = message;
@@ -11671,7 +11715,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     {
       key: "historyBudgetChars",
       label: "\uD788\uC2A4\uD1A0\uB9AC \uC608\uC0B0",
-      def: 12e4,
+      def: 22e4,
       unit: "\uC790",
       help: "\uC790\uB3D9 \uC555\uCD95\uC774 \uCF1C\uC838 \uC788\uC73C\uBA74 \uC774 \uAE00\uC790 \uC218\uC640 \uCEE8\uD14D\uC2A4\uD2B8 \uD1A0\uD070 \uCD94\uC815\uCE58 \uC911 \uBA3C\uC800 \uB3C4\uB2EC\uD55C \uAE30\uC900\uC73C\uB85C \uC555\uCD95\uD569\uB2C8\uB2E4. \uD55C \uD134\uC758 \uB3C4\uAD6C \uC2E4\uD589 \uC911\uC5D0\uB3C4 \uAC80\uC0AC\uD558\uBA70 \uCD5C\uC2E0 \uC0AC\uC6A9\uC790 \uC9C0\uC2DC\uB294 \uC720\uC9C0\uD569\uB2C8\uB2E4."
     },
@@ -11700,7 +11744,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     {
       key: "maxToolCallsPerTurn",
       label: "\uD134\uB2F9 \uCD5C\uB300 \uD234 \uD638\uCD9C",
-      def: 30,
+      def: 60,
       unit: "\uD68C",
       zeroMeansOff: true,
       help: "\uD55C \uD134\uC5D0\uC11C \uD234(\uC2A4\uD06C\uB9BD\uD2B8\xB7\uD30C\uC77C\xB7\uC0DD\uC131\xB7\uBE44\uC804)\uC744 \uBD80\uB974\uB294 \uD69F\uC218 \uC0C1\uD55C. 0 = \uC81C\uD55C \uC5C6\uC74C."
@@ -13094,10 +13138,10 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           return;
         }
         if (!r.newer) {
-          const mismatch = r.current !== "0.15.7";
+          const mismatch = r.current !== "0.15.8";
           const ahead = r.ahead ?? (!!r.latest && r.latest !== r.current);
           say(
-            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.7"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
+            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.8"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
             mismatch || ahead ? "" : "ok"
           );
           return;
@@ -13188,7 +13232,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.15.7",
+            version: "0.15.8",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -13839,7 +13883,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.7"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.8"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -20696,8 +20740,8 @@ ${negative.value.trim()}
     if (!toolbarSlot || !chatBarEl || !botBarEl || !tabSlot) return;
     const chatPending = !!(state.changes?.total || state.changes?.actions || state.changes?.staged || state.changes?.conflicts);
     const botPending = !!(state.botChanges?.total || state.botChanges?.actions || state.botChanges?.conflicts);
-    const showChat = !!state.activeChatKey && (CHAT_TABS.has(active2) || chatPending);
-    const showBot = !!state.botKey && (BOT_TABS.has(active2) || botPending);
+    const showChat = mode === "chat" && !!state.activeChatKey && (CHAT_TABS.has(active2) || chatPending);
+    const showBot = (mode === "bot" || active2 === "studio") && !!state.botKey && (BOT_TABS.has(active2) || botPending);
     const chatLabel = chatBarEl.querySelector('[data-tool="apply"] .tool-label');
     const botLabel = botBarEl.querySelector('[data-tool="card-apply"] .tool-label');
     if (chatLabel) chatLabel.textContent = CHAT_TABS.has(active2) && !showBot ? "\uBC18\uC601" : "\uCC57 \uBC18\uC601";
@@ -20801,7 +20845,7 @@ ${negative.value.trim()}
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.7"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.8"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
@@ -20897,7 +20941,7 @@ ${negative.value.trim()}
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.15.7" }),
+        el("span", { class: "dim", text: "v0.15.8" }),
         healthEl,
         el("span", { class: "spacer" }),
         reload,
@@ -21214,6 +21258,6 @@ ${negative.value.trim()}
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.15.7"} loaded`);
+    console.log(`[risu-hina] v${"0.15.8"} loaded`);
   })();
 })();

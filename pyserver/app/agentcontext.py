@@ -191,7 +191,7 @@ class AutoContext(AbstractCapability):
         available_tokens = max(2000, int(window * .8) - estimate_tokens(fixed) - output)
         estimated = sum(message_tokens(m) for m in request_context.messages)
         chars = sum(_msg_chars(m) for m in request_context.messages)
-        char_budget = max(4000, _int_cfg("historyBudgetChars", 120000))
+        char_budget = max(4000, _int_cfg("historyBudgetChars", 220000))
         # Either threshold triggers; the token estimate adapts to CJK/tool JSON.
         budget = min(char_budget, max(4000, int(chars * available_tokens / max(1, estimated))))
         messages, info = await compress(request_context.messages, budget, request_context.model,

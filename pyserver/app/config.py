@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any
 
 APP_NAME = "risu-hina"
-VERSION = "0.15.7"
+VERSION = "0.15.8"
 
 # Renamed from REALOOC_* to RISUHINA_*. The old names are still honoured, and
 # not as politeness: the launcher, the control script and any service wrapper
@@ -192,10 +192,8 @@ DEFAULTS: dict[str, Any] = {
         # When the stored conversation grows past this many characters
         # (~1/3 as many tokens), the older part is summarised by the model
         # once and replaced (agent._compact_history). 0 turns it off.
-        # 120K chars ≈ 50-70K tokens of history per request on top of the
-        # ~15K fixed prompt. It was 240K: with 7-14 requests a turn that made
-        # 500K+ input turns even after pruning (§1-46 measurement).
-        "historyBudgetChars": 120000,
+        # Distribution default. The model token window remains a separate guard.
+        "historyBudgetChars": 220000,
         "autoCompact": True,
         "contextWindowTokens": 128000,
         "memoryEnabled": True,
@@ -205,7 +203,7 @@ DEFAULTS: dict[str, Any] = {
         "pruneKeepTurns": 2,
         "pruneClipChars": 600,
         "maxRequestsPerTurn": 40,
-        "maxToolCallsPerTurn": 30,
+        "maxToolCallsPerTurn": 60,
         "maxInputTokensPerTurn": 0,
     },
     # The search agent: a second, smaller model the general agent hands a
