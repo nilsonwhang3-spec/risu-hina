@@ -17,13 +17,14 @@
  * CLICK the token that is the group key (the chips show the actual first
  * filename split apart). A raw named-group regex stays behind 고급.
  */
-import { el, segCtl, colPicker, clear, popover } from '../dom';
+import { el, segCtl, colPicker, clear, popover, modal } from '../dom';
 import { showArtifact } from '../artifact';
 import { blobUrl, smallScreen, watchImage, unloadByDefault } from '../blobimg';
 import { state, type GroupItem, type SelectionMap, type SelectionState,
          type StudioGroups, type WorkspaceFile } from '../../state';
 import { S, hub, gen, msg, adjustReserve, countFiles, type Folder, persistSelCols } from './store';
 import { scenesOf } from './center-batch';
+import { openAssetRules, openAssetBinding, openCoverage } from './asset-rules';
 
 let groups: StudioGroups | null = null;
 let selection: SelectionMap = {};
@@ -219,7 +220,8 @@ export function invalidateGroups(): void {
  * changes it. */
 function groupSig(g: typeof groups): string {
   if (!g) return '';
-  return [...g.groups.flatMap((x) => x.items), ...g.unmatched].map((i) => `${i.filename}:${i.modified ?? 0}`).sort().join('|');
+  return [...g.groups.flatMap((x) => x.items.map(i => `${x.key}:${i.filename}:${i.modified ?? 0}`)),
+    ...g.unmatched.map(i => `?:${i.filename}:${i.modified ?? 0}`)].sort().join('|');
 }
 
 /** Re-read the folder while the user is looking at it (§1-48): a file the
@@ -319,12 +321,6 @@ function suggestCount(): number {
   return Object.values(selection).filter((s) => !!s.suggest).length;
 }
 
-/** Bulk actions: apply, then refresh every registered cell/card in place. */
-function syncAllCells(): void {
-  for (const s of cellSyncs.values()) s();
-  missingSync?.();
-}
-
 export function drawSelector(node: Folder): void {
   if (!S.viewMount || !groups) return;
   const viewMount = S.viewMount;
@@ -369,12 +365,10 @@ export function drawSelector(node: Folder): void {
     state.requestPrompt(`"${node.path}" 폴더를 재검수해 줘. review_folder 로 보고 suggest_selection 으로 제안을 새로 적어 줘 (기존 제안은 갱신). 표시(채택·버림·수정)는 바꾸지 말고, 다 적으면 검수 탭을 열어 줘.`);
   });
   bar.appendChild(rereview);
-  const none = el('button', { class: 'ghost tiny', text: '선택 해제' });
-  none.addEventListener('click', () => {
-    for (const k of Object.keys(selection)) selection[k] = { ...selection[k], use: false, rep: false };
-    syncAllCells();
-    void state.studio.saveSelection(S.selected, selection);
-  });
+  const rules = el('button', { class: 'ghost tiny', text: '에셋 규칙' });
+  rules.addEventListener('click', () => void openAssetRules());
+  const coverage = el('button', { class: 'ghost tiny', text: '캐릭터 부족분' });
+  coverage.addEventListener('click', () => openCoverage(node.path));
   // 봇에 반영 belongs to the selected/ folder an export made - the folder
   // one adopts FROM - not to the pool of candidates (user).
   // AI suggestions, in bulk (§1-42): apply them all, or clear them all.
@@ -393,7 +387,7 @@ export function drawSelector(node: Folder): void {
     });
     bar.append(applyAll, clearAll);
   }
-  bar.append(none, exportButton(node));
+  bar.append(rules, coverage, exportButton(node));
   if (/\/selected$/.test(node.path)) bar.appendChild(adoptButton());
   viewMount.appendChild(bar);
 
@@ -420,7 +414,7 @@ export function drawSelector(node: Folder): void {
     clear(missingBox);
     const missing = g.groups
       .filter((grp) => !grp.items.some((i) => selection[i.filename]?.use))
-      .map((grp) => grp.key);
+      .map((grp) => grp.label || grp.key);
     if (!missing.length) return;
     const fill = el('button', { class: 'ghost tiny', text: '부족분 다시 생성 예약',
       title: '채택이 없는 그룹을 배치 예약에 1장씩 넣습니다 (현재 씬 프리셋에 같은 이름의 씬이 있는 것만)' }) as HTMLButtonElement;
@@ -461,7 +455,7 @@ export function drawSelector(node: Folder): void {
     prev.addEventListener('click', () => go(at - 1));
     next.addEventListener('click', () => go(at + 1));
     up.addEventListener('click', () => { drill = ''; viewMode = 'group'; hub.drawCentre(); });
-    nav.append(up, prev, next, el('span', { class: 'sectiontitle', text: `${drill} · ${grp?.items.length ?? 0}장` }));
+    nav.append(up, prev, next, el('span', { class: 'sectiontitle', text: `${grp?.label || drill} · ${grp?.items.length ?? 0}장` }));
     viewMount.appendChild(nav);
     viewMount.appendChild(candidateGrid(grp?.items ?? [], grp?.items));
   } else if (viewMode === 'group') {
@@ -495,7 +489,7 @@ export function drawSelector(node: Folder): void {
 
 /** 그룹별: one representative card per group - the first image, the count,
  * and where the choice stands. Click to unfold the group (15). */
-function groupCard(grp: { key: string; items: GroupItem[] }): HTMLElement {
+function groupCard(grp: { key: string; label?: string; items: GroupItem[] }): HTMLElement {
   // The face prefers the flagged 대표, then any chosen image, then the first.
   const face = grp.items.find((i) => selection[i.filename]?.rep)
     ?? grp.items.find((i) => selection[i.filename]?.use)
@@ -505,10 +499,10 @@ function groupCard(grp: { key: string; items: GroupItem[] }): HTMLElement {
   const chosenBadge = el('span', { class: 'badge' });
   const fixBadge = el('span', { class: 'badge' });
   const sugBadge = el('span', { class: 'badge sug', title: 'AI 제안이 있는 후보' });
-  const cell = el('div', { class: 'fcell groupcard', title: `${grp.key} — 눌러서 후보를 펼칩니다` }, [
+  const cell = el('div', { class: 'fcell groupcard', title: `${grp.label || grp.key} — 눌러서 후보를 펼칩니다` }, [
     pic,
     el('div', { class: 'fname row' }, [
-      el('span', { class: 'grow', text: grp.key }),
+      el('span', { class: 'grow', text: grp.label || grp.key }),
       el('span', { class: 'badge', text: `${grp.items.length}장` }),
       chosenBadge, fixBadge, sugBadge,
     ]),
@@ -552,13 +546,15 @@ function candidate(it: GroupItem, groupItems?: GroupItem[]): HTMLElement {
     mk('inpaint', '수정', '먼저 고쳐야 합니다'),
     mk('delete', '버림', '지울 후보입니다'),
   );
+  const binding = el('button', { class: 'ghost tiny', text: '규칙', title: '이 이미지의 에셋 세트·슬롯 지정' });
+  binding.addEventListener('click', ev => { ev.stopPropagation(); openAssetBinding(it); });
   // (the 대표 button is retired, §1-39; groupItems is kept for callers)
   void groupItems;
   // The AI's suggestion (§1-42): a line under the flags with the verdict and
   // its reason, 적용 to make it the decision, × to dismiss it.
   const sug = el('div', { class: 'sugline', style: { display: 'none' } });
   const cell2 = el('div', { class: 'fcell selcell', title: it.filename }, [
-    pic, el('div', { class: 'fname', text: it.filename }), flags, sug,
+    pic, el('div', { class: 'fname row' }, [el('span', { class: 'grow', text: it.filename }), binding]), flags, sug,
   ]);
   const sync = (): void => {
     const s = selection[it.filename] || { use: false, inpaint: false, delete: false };
@@ -797,6 +793,26 @@ function exportButton(node: Folder): HTMLElement {
       // No character prefix: the filenames in the folder already carry the
       // card name, and the export's canonical names key on the group.
       const eff = effective(prefsFor(node.path));
+      await state.studio.saveSelection(node.path, selection);
+      const preview = await state.studio.exportSelected(node.path, '', eff.pattern, eff.groupBy, true);
+      if (preview.problems?.length) throw new Error(preview.problems.join('\n'));
+      if (preview.managed) {
+        const body = el('div', {}, [el('div', { class: 'hint', text: '복수 채택은 .2, .3 번호로 저장하며, 봇에서는 같은 이름의 랜덤 후보로 사용합니다.' })]);
+        for (const row of preview.mapping || []) body.appendChild(el('div', { text: row.source.split('/').pop() + ' → ' + row.target }));
+        const run = el('button', { class: 'primary', text: '내보내기' }) as HTMLButtonElement;
+        const output = el('div', { class: 'notice' });
+        run.addEventListener('click', async () => {
+          run.disabled = true;
+          try {
+            const result = await state.studio.exportSelected(node.path, '', eff.pattern, eff.groupBy);
+            output.textContent = `${result.folder} · 채택 ${result.used}장 내보냈습니다.`;
+            await hub.refresh();
+          } catch (e) { output.textContent = msg(e); }
+          finally { run.disabled = false; }
+        });
+        body.append(run, output); modal('내보낼 파일명', body, { sticky: true });
+        return;
+      }
       const r = await state.studio.exportSelected(node.path, '', eff.pattern, eff.groupBy);
       hub.notice(`${r.folder} — 채택 ${r.used}, 수정 ${r.inpaint}, 빈 슬롯 ${r.empty} · selected 폴더를 열면 봇에 반영할 수 있습니다`, 'ok');
       hub.touchQuiet();

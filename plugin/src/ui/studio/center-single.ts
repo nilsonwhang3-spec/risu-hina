@@ -9,7 +9,8 @@
  */
 import { el } from '../dom';
 import { blobUrl, safeWorkspacePath } from '../blobimg';
-import { S, hub, gen, persistGen, persistCentreTab, stateLabel } from './store';
+import { S, gen, persistGen, stateLabel } from './store';
+import { showArtifact } from '../artifact';
 import { statusRow, tokenNotice, startRun, cancelRun, pendingCount,
          livePreview, releasePreview } from './gen';
 
@@ -31,6 +32,8 @@ export function drawSingle(mount: HTMLElement): void {
   // One persistent <img>: frames and finished files swap its src, so a
   // completed image replaces the held stream frame without a blank flash.
   imgEl = el('img', { alt: '', style: { display: 'none' } }) as HTMLImageElement;
+  imgEl.style.cursor = 'zoom-in';
+  imgEl.addEventListener('click', () => { if (shownKey && shownKey !== 'live') openImage(shownKey, S.viewList); });
   captionEl = el('div', { class: 'hint previewname' });
   emptyEl = el('div', { class: 'empty' });
   previewBox = el('div', { class: 'bigpreview' }, [imgEl, captionEl, emptyEl]);
@@ -186,10 +189,5 @@ function walk(dir: 1 | -1): void {
 /** Open one image big in the 1장 tab, ←/→ walking `list` (4.4a). The pin
  * keeps a mid-run click from being overwritten by the stream. */
 export function openImage(path: string, list: string[]): void {
-  S.viewPath = path;
-  S.viewList = [...list];
-  S.centreTab = 'single';
-  S.centreMode = 'tab';
-  persistCentreTab();
-  hub.drawCentre();
+  showArtifact({ path, title: path.split('/').pop() || path, kind: 'image', images: list });
 }

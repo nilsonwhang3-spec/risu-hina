@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.14.8
+//@display-name Risu Hina v0.15.2
 //@api 3.0
-//@version 0.14.8
+//@version 0.15.2
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -104,7 +104,7 @@
       this.tokenSafe = true;
       this.lastHealth = body;
       this.probeInfo = "";
-      this.gate = versionGate("0.14.8", String(body.version || ""));
+      this.gate = versionGate("0.15.2", String(body.version || ""));
       return body;
     }
     /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -548,13 +548,13 @@
     const next = { ...fresh };
     const parts = [];
     let applied = 0;
-    const liveValue = (field) => {
-      if (field === "characterVersion") {
+    const liveValue = (field2) => {
+      if (field2 === "characterVersion") {
         const add = fresh["additionalData"];
         const v = add && typeof add === "object" ? add["character_version"] : void 0;
         return String(v ?? fresh["characterVersion"] ?? "");
       }
-      return String(fresh[field] ?? "");
+      return String(fresh[field2] ?? "");
     };
     for (const e of update.fields ?? []) {
       if (liveValue(e.field) !== e.before) {
@@ -746,11 +746,11 @@
   function extractAssetRefs(char) {
     const out = [];
     const seen = /* @__PURE__ */ new Set();
-    const push = (field, name, key) => {
+    const push = (field2, name, key) => {
       if (typeof key !== "string" || !key.startsWith("assets/")) return;
       if (seen.has(key)) return;
       seen.add(key);
-      out.push({ field, name, key });
+      out.push({ field: field2, name, key });
     };
     push("image", "\uD504\uB85C\uD544", char.image);
     for (const e of asArray(char["emotionImages"])) {
@@ -1051,8 +1051,23 @@
     async renamePlan(folder, rename) {
       return await transport.post("/studio/rename", { folder, rename });
     }
-    async exportSelected(folder, character, pattern = "", groupBy = "emotion") {
-      return await transport.post("/studio/export", { folder, character, pattern, groupBy });
+    async exportSelected(folder, character, pattern = "", groupBy = "emotion", preview2 = false) {
+      return await transport.post("/studio/export", { folder, character, pattern, groupBy, preview: preview2 });
+    }
+    async assetRules(project = "") {
+      return await transport.get("/studio/asset-rules", { project, charKey: state.activeCharKey });
+    }
+    async saveAssetRules(document2) {
+      return await transport.post("/studio/asset-rules", { project: document2.project, document: document2 });
+    }
+    async assetMatch(project, path) {
+      return await transport.post("/studio/asset-match", { project, path });
+    }
+    async assetBind(path, asset) {
+      return await transport.post("/studio/asset-bind", { path, asset });
+    }
+    async assetCoverage(project, character, folder) {
+      return await transport.post("/studio/asset-coverage", { project, character, folder });
     }
     /** Check library images for adoption (PNG-ness, size). Nothing is copied:
      *  the library and the workspace are one space now. */
@@ -2379,7 +2394,7 @@
       for (const args of list2) {
         const name = String(args.name || "").trim();
         const path = String(args.path || "");
-        const field = String(args.field || "additional");
+        const field2 = String(args.field || "additional");
         if (!name || !path) {
           failed.push(`${name || path}: \uC774\uB984/\uACBD\uB85C \uC5C6\uC74C`);
           continue;
@@ -2389,7 +2404,7 @@
           if (!(bytes[0] === 137 && bytes[1] === 80)) throw new Error("PNG \uD30C\uC77C\uB9CC \uC5D0\uC14B\uC73C\uB85C \uB123\uC744 \uC218 \uC788\uC2B5\uB2C8\uB2E4");
           const key = await Risuai.saveAsset(bytes);
           if (!key || typeof key !== "string") throw new Error("RisuAI \uAC00 \uC5D0\uC14B \uD0A4\uB97C \uB3CC\uB824\uC8FC\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4");
-          saved.push({ name, path, field, key });
+          saved.push({ name, path, field: field2, key });
         } catch (e) {
           failed.push(`${name}: ${e instanceof Error ? e.message : String(e)}`);
           void clientLog("warn", "asset save failed", { name, path, error: String(e) });
@@ -3021,16 +3036,16 @@
     return node;
   }
   function searchBox(value, onInput, placeholder = "\uCC3E\uAE30") {
-    const input = el("input", { class: "searchinput", placeholder, value });
-    input.addEventListener("input", () => onInput(input.value));
-    return el("div", { class: "searchbox" }, [input]);
+    const input2 = el("input", { class: "searchinput", placeholder, value });
+    input2.addEventListener("input", () => onInput(input2.value));
+    return el("div", { class: "searchbox" }, [input2]);
   }
   function refocusSearch(root2) {
-    const input = root2?.querySelector(".searchbox input") ?? document.querySelector(".tabslot .searchbox input");
-    if (!input) return;
-    input.focus();
+    const input2 = root2?.querySelector(".searchbox input") ?? document.querySelector(".tabslot .searchbox input");
+    if (!input2) return;
+    input2.focus();
     try {
-      input.setSelectionRange(input.value.length, input.value.length);
+      input2.setSelectionRange(input2.value.length, input2.value.length);
     } catch {
     }
   }
@@ -3104,28 +3119,28 @@
       ...btns2
     ]);
   }
-  function armed(button, label, confirmLabel, run) {
+  function armed(button2, label, confirmLabel, run) {
     let armedNow = false;
     let timer;
     const disarm = () => {
       if (timer) clearTimeout(timer);
       armedNow = false;
-      button.textContent = label;
-      button.classList.remove("danger");
+      button2.textContent = label;
+      button2.classList.remove("danger");
     };
     const arm = () => {
       if (timer) clearTimeout(timer);
       armedNow = true;
-      button.textContent = confirmLabel;
-      button.classList.add("danger");
+      button2.textContent = confirmLabel;
+      button2.classList.add("danger");
       timer = setTimeout(disarm, 4e3);
     };
     const fire = () => {
       disarm();
       run();
     };
-    button.textContent = label;
-    button.addEventListener("click", () => {
+    button2.textContent = label;
+    button2.addEventListener("click", () => {
       if (!armedNow) arm();
       else fire();
     });
@@ -4411,6 +4426,8 @@ button.iconbtn.danger { background: #b91c1c; border-color: #b91c1c; color: #fff;
 .artifactmodal .modalbody { overflow: auto; min-height: 0; }
 .artifactmodal .artifactview img { max-width: 100%; max-height: 72vh; width: auto; display: block; margin: 0 auto; }
 .artifactmodal .artifactbody { overflow: auto; }
+.artifactmodal .artifactbody.original-size img { max-width: none; max-height: none; width: auto; touch-action: pan-x pan-y pinch-zoom; }
+.artifactmodal .artifactbody.original-size .wsimg { display: block; max-width: none; }
 .artifactmodal .artifacthead { margin-bottom: 6px; }
 .quickreply { gap: 6px; margin-top: 6px; }
 .agentloading { padding: 12px; }
@@ -5613,7 +5630,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     try {
       if (kind === "image") {
         clear(body);
-        body.appendChild(workspaceImage(spec3.path, spec3.title));
+        body.appendChild(workspaceImage(spec3.path, spec3.title, { thumb: false, lazy: false, unload: false }));
         return;
       }
       const r = await state.readFile(spec3.path);
@@ -5634,6 +5651,25 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     current = spec3;
     const body = el("div", { class: "artifactbody" });
     const head = el("div", { class: "artifacthead row" });
+    if (spec3.kind === "image") {
+      const zoom = el("button", { class: "ghost tiny", text: "\uC6D0\uBCF8 \uD06C\uAE30\uB85C \uD655\uB300" });
+      zoom.addEventListener("click", () => {
+        const expanded2 = body.classList.toggle("original-size");
+        zoom.textContent = expanded2 ? "\uD654\uBA74\uC5D0 \uB9DE\uCD94\uAE30" : "\uC6D0\uBCF8 \uD06C\uAE30\uB85C \uD655\uB300";
+      });
+      head.appendChild(zoom);
+      if (spec3.images && spec3.images.length > 1) {
+        const index = spec3.images.indexOf(spec3.path);
+        for (const [delta, text2] of [[-1, "\u25C0"], [1, "\u25B6"]]) {
+          const walk2 = el("button", { class: "ghost tiny", text: text2 });
+          walk2.addEventListener("click", () => {
+            const path = spec3.images[(index + delta + spec3.images.length) % spec3.images.length];
+            showArtifact({ ...spec3, path, title: path.split("/").pop() || path });
+          });
+          head.appendChild(walk2);
+        }
+      }
+    }
     if (spec3.path && !spec3.node) {
       const openFile = el("button", { class: "ghost tiny", text: "\uD30C\uC77C \uD0ED\uC5D0\uC11C \uC5F4\uAE30" });
       openFile.addEventListener("click", () => {
@@ -6209,19 +6245,19 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     return wrap;
   }
   function openSnapshotName(anchor, initial, save) {
-    const input = el("input", { value: initial, placeholder: "\uC2A4\uB0C5\uC0F7 \uC774\uB984 (\uC608: 3\uC7A5 \uC2DC\uC791 \uC804)" });
+    const input2 = el("input", { value: initial, placeholder: "\uC2A4\uB0C5\uC0F7 \uC774\uB984 (\uC608: 3\uC7A5 \uC2DC\uC791 \uC804)" });
     const ok = el("button", { class: "primary tiny", text: "\uC800\uC7A5" });
     const cancel = el("button", { class: "ghost tiny", text: "\uCDE8\uC18C" });
     const out = el("div", { class: "hint" });
     const body = el("div", { class: "verlist" }, [
-      el("label", { class: "field" }, [el("span", { text: "\uC2A4\uB0C5\uC0F7 \uC774\uB984" }), input]),
+      el("label", { class: "field" }, [el("span", { text: "\uC2A4\uB0C5\uC0F7 \uC774\uB984" }), input2]),
       el("div", { class: "row" }, [ok, cancel]),
       out
     ]);
     const close = popover(anchor, body);
     cancel.addEventListener("click", close);
     const submit = async () => {
-      const label = input.value.trim();
+      const label = input2.value.trim();
       if (!label) {
         out.textContent = "\uC774\uB984\uC744 \uC785\uB825\uD574 \uC8FC\uC138\uC694.";
         return;
@@ -6236,15 +6272,15 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       }
     };
     ok.addEventListener("click", () => void submit());
-    input.addEventListener("keydown", (e) => {
+    input2.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
         e.preventDefault();
         void submit();
       }
     });
     setTimeout(() => {
-      input.focus();
-      input.select();
+      input2.focus();
+      input2.select();
     }, 0);
   }
 
@@ -6979,12 +7015,12 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         void this.attachAll(Array.from(this.picker.files ?? []));
         this.picker.value = "";
       });
-      const clip2 = el("button", {
+      const clip = el("button", {
         class: "ghost attachbtn",
         title: "\uD30C\uC77C \uCCA8\uBD80 \u2014 \uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4\uC5D0 \uC62C\uB77C\uAC11\uB2C8\uB2E4",
         html: ICON.clip
       });
-      clip2.addEventListener("click", () => this.picker.click());
+      clip.addEventListener("click", () => this.picker.click());
       this.input.addEventListener("paste", (e) => {
         const files = Array.from(e.clipboardData?.files ?? []);
         if (!files.length) return;
@@ -7000,7 +7036,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         // The two buttons stack beside the box, attach above send: the box is
         // two lines tall anyway, and a clip on the far left read as a third
         // control competing with the text rather than an option on sending.
-        el("div", { class: "agentcompose" }, [this.input, el("div", { class: "agentbtns" }, [clip2, this.send]), this.picker])
+        el("div", { class: "agentcompose" }, [this.input, el("div", { class: "agentbtns" }, [clip, this.send]), this.picker])
       ]);
       installDrop(this.root, {
         into: () => "",
@@ -7607,13 +7643,14 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       }, 1500);
       let textTimer = null;
       let textTarget = null;
+      const segmentText = /* @__PURE__ */ new WeakMap();
       const flushText = () => {
         if (textTimer !== null) {
           clearTimeout(textTimer);
           textTimer = null;
         }
         if (textTarget) {
-          setMarkdown(textTarget, textAcc);
+          setMarkdown(textTarget, segmentText.get(textTarget) ?? "");
           this.scroll();
         }
       };
@@ -7629,9 +7666,19 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           const e = ev;
           if (e.type !== "text") flushText();
           switch (e.type) {
+            case "context": {
+              this.log.appendChild(el("div", { class: "hint", text: `\uCEE8\uD14D\uC2A4\uD2B8 \uC790\uB3D9 \uC555\uCD95 \xB7 ${Number(e.beforeChars).toLocaleString()} \u2192 ${Number(e.afterChars).toLocaleString()}\uC790` }));
+              this.scroll();
+              break;
+            }
+            case "job": {
+              state.touchFiles();
+              break;
+            }
             case "text": {
               const node = proseSegment();
               textAcc += String(e.text ?? "");
+              segmentText.set(node, textAcc);
               setThinking(false);
               scheduleText(node);
               break;
@@ -8479,39 +8526,39 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
   function namePopover(anchor, opts) {
     const body = el("div", { class: "applypop" });
     const close = popover(anchor, body);
-    const input = el("input", { placeholder: opts.placeholder ?? "", value: opts.value ?? "" });
+    const input2 = el("input", { placeholder: opts.placeholder ?? "", value: opts.value ?? "" });
     const okBtn = el("button", { class: "primary tiny", text: opts.ok ?? "\uD655\uC778" });
     okBtn.addEventListener("click", () => {
-      const v = input.value.trim();
+      const v = input2.value.trim();
       if (!v) return;
       close();
       void opts.onSubmit(v);
     });
-    input.addEventListener("keydown", (e) => {
+    input2.addEventListener("keydown", (e) => {
       if (e.key === "Enter") okBtn.click();
     });
     body.appendChild(el("div", { class: "hint", text: opts.label }));
-    body.appendChild(el("div", { class: "row" }, [input, okBtn]));
-    setTimeout(() => input.focus(), 0);
+    body.appendChild(el("div", { class: "row" }, [input2, okBtn]));
+    setTimeout(() => input2.focus(), 0);
   }
   function askName(title, opts) {
-    const input = el("input", { placeholder: opts.placeholder ?? "", value: opts.value ?? "" });
+    const input2 = el("input", { placeholder: opts.placeholder ?? "", value: opts.value ?? "" });
     const okBtn = el("button", { class: "primary tiny", text: opts.ok ?? "\uB9CC\uB4E4\uAE30" });
     const body = el("div", {}, [
       opts.label ? el("div", { class: "hint", style: { marginBottom: "6px" }, text: opts.label }) : null,
-      el("div", { class: "row" }, [input, okBtn])
+      el("div", { class: "row" }, [input2, okBtn])
     ]);
     const close = modal(title, body);
     okBtn.addEventListener("click", () => {
-      const v = input.value.trim();
+      const v = input2.value.trim();
       if (!v) return;
       close();
       void opts.onSubmit(v);
     });
-    input.addEventListener("keydown", (e) => {
+    input2.addEventListener("keydown", (e) => {
       if (e.key === "Enter") okBtn.click();
     });
-    setTimeout(() => input.focus(), 0);
+    setTimeout(() => input2.focus(), 0);
   }
 
   // src/ui/tab-editor.ts
@@ -8735,7 +8782,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     }
   }
   function buildViewOptions() {
-    const modes = [
+    const modes2 = [
       ["rendered", "\uB80C\uB354\uB9C1\uD574\uC11C \uBCF4\uAE30", "\uCE74\uB4DC\uC758 editdisplay \uC815\uADDC\uC2DD\uACFC backgroundHTML CSS\uAE4C\uC9C0 \uC801\uC6A9\uD569\uB2C8\uB2E4"],
       ["clean", "\uC815\uB9AC\uD574\uC11C \uBCF4\uAE30", "\uC0AC\uACE0\uC0AC\uC2AC\xB7\uD0DC\uADF8 \uAC19\uC740 \uB178\uC774\uC988\uB9CC \uAC77\uC5B4\uB0C5\uB2C8\uB2E4. RisuAI \uC7AC\uD604\uC740 \uC544\uB2D9\uB2C8\uB2E4"],
       ["raw", "\uC6D0\uBB38 \uBCF4\uAE30", "\uC800\uC7A5\uB41C \uADF8\uB300\uB85C\uC785\uB2C8\uB2E4. \uD3B8\uC9D1\uC740 \uC5B8\uC81C\uB098 \uC774 \uD14D\uC2A4\uD2B8\uB97C \uACE0\uCE69\uB2C8\uB2E4"]
@@ -8752,7 +8799,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       optsBox.style.display = m === "clean" ? "block" : "none";
       refreshList();
     };
-    const rows = modes.map(([m, label, why]) => {
+    const rows = modes2.map(([m, label, why]) => {
       const b = el("button", { class: "modebtn", dataset: { mode: m } }, [
         el("div", { text: label + (m === "rendered" ? "   (\uCD94\uD6C4 \uAD6C\uD604)" : "") }),
         el("div", { class: "hint", text: why })
@@ -8813,8 +8860,8 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       hint.textContent = range ? `${range.from}\u2013${range.to}\uBC88\uB9CC \uBCF4\uC774\uB294 \uC911\uC785\uB2C8\uB2E4. \uCC3E\uAE30\xB7\uC0AD\uC81C\uB294 \uAC01\uC790 \uBC94\uC704\uB97C \uB530\uB85C \uBC1B\uC73C\uB2C8 \uC774 \uD544\uD130\uC5D0 \uC601\uD5A5\uBC1B\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4.` : `\uC804\uCCB4 ${state.totalTurns}\uD134\uC744 \uBCF4\uACE0 \uC788\uC2B5\uB2C8\uB2E4. \uBE44\uC6CC \uB450\uC2DC\uBA74 \uCC98\uC74C(${first})\uACFC \uB05D(${last})\uC73C\uB85C \uC7A1\uC2B5\uB2C8\uB2E4.`;
     };
     syncHint();
-    const parse = (input, fallback) => {
-      const raw = input.value.trim();
+    const parse = (input2, fallback) => {
+      const raw = input2.value.trim();
       if (!raw) return fallback;
       const n = Number(raw);
       return Number.isFinite(n) ? Math.trunc(n) : null;
@@ -8854,8 +8901,8 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       setRange(null);
       syncHint();
     });
-    for (const input of [from, to]) {
-      input.addEventListener("keydown", (e) => {
+    for (const input2 of [from, to]) {
+      input2.addEventListener("keydown", (e) => {
         if (e.key === "Enter") apply();
       });
     }
@@ -9029,6 +9076,32 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     ]);
   }
 
+  // src/ui/file-clipboard.ts
+  var fileClipboard = null;
+  var pasting = false;
+  function setFileClipboard(value) {
+    fileClipboard = value ? { op: value.op, paths: [...new Set(value.paths)] } : null;
+  }
+  async function pasteFiles(target) {
+    const clip = fileClipboard;
+    if (!clip || pasting) return null;
+    const paths = clip.paths.filter((p) => p !== target && !target.startsWith(p + "/"));
+    if (!paths.length) return null;
+    pasting = true;
+    try {
+      const result = clip.op === "copy" ? await state.copyFiles(paths, target) : await state.moveFiles(paths, target);
+      if (clip.op === "cut" && fileClipboard === clip) {
+        const failed = new Set(result.failed.map((f) => f.path));
+        const remaining = clip.paths.filter((p) => !paths.includes(p) || failed.has(p));
+        setFileClipboard(remaining.length ? { op: "cut", paths: remaining } : null);
+      }
+      state.touchFiles();
+      return { ...result, op: clip.op };
+    } finally {
+      pasting = false;
+    }
+  }
+
   // src/ui/tab-files.ts
   var AREA_LABEL = {
     projects: ["\uD504\uB85C\uC81D\uD2B8", "\uC9C1\uC811 \uAD00\uB9AC\uD558\uC2DC\uB294 \uCC38\uACE0 \uC790\uB8CC\xB7\uD504\uB85C\uC81D\uD2B8 \uD3F4\uB354\uC785\uB2C8\uB2E4. \uBD07 \uC774\uB984 \uD3F4\uB354\uB85C \uB098\uB269\uB2C8\uB2E4."],
@@ -9053,7 +9126,6 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     folderUp: svg('<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><path d="M12 17v-7"/><path d="m9 13 3-3 3 3"/>', 15),
     newFolder: svg('<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><path d="M12 10v6"/><path d="M9 13h6"/>', 15)
   };
-  var clipboard = null;
   var treeSel = /* @__PURE__ */ new Set();
   var treeAnchor = "";
   var treeMount = null;
@@ -9097,14 +9169,14 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         const e = ev;
         const paths = [...treeSel].filter((q) => q !== DOCS_NODE && q.includes("/"));
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c" && paths.length) {
-          clipboard = { op: "copy", paths };
+          setFileClipboard({ op: "copy", paths });
           notice2(`${paths.length}\uAC1C\uB97C \uBCF5\uC0AC\uD588\uC2B5\uB2C8\uB2E4 \u2014 \uBD99\uC5EC\uB123\uC744 \uD3F4\uB354\uC5D0\uC11C Ctrl+V.`);
           drawTree();
         } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "x" && paths.length) {
-          clipboard = { op: "cut", paths };
+          setFileClipboard({ op: "cut", paths });
           notice2(`${paths.length}\uAC1C\uB97C \uC798\uB77C\uB0C8\uC2B5\uB2C8\uB2E4 \u2014 \uBD99\uC5EC\uB123\uC744 \uD3F4\uB354\uC5D0\uC11C Ctrl+V.`);
           drawTree();
-        } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v" && clipboard) {
+        } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v" && fileClipboard) {
           void pasteInto(uploadTarget());
         } else if ((e.key === "Delete" || e.key === "Backspace") && paths.length) {
           e.preventDefault();
@@ -9353,7 +9425,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       // The clipboard is visible on the rows themselves (§1-34): a cut folder
       // dims, a copied one gets a dashed edge - Ctrl+C used to change nothing
       // on screen.
-      cls: clipboard?.paths.includes(n.path) ? clipboard.op === "cut" ? "clipcut" : "clipcopy" : void 0,
+      cls: fileClipboard?.paths.includes(n.path) ? fileClipboard.op === "cut" ? "clipcut" : "clipcopy" : void 0,
       dot: !n.virtual && state.hasUnseenUnder(n.path),
       // A folder in the tree is a drop target of its own.
       droppable: !n.virtual && USER_AREAS.has(n.area.area)
@@ -9580,14 +9652,14 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         selectAll(n);
         drawCentre();
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c" && selection.size) {
-        clipboard = { op: "copy", paths: [...selection] };
-        notice2(`${clipboard.paths.length}\uAC1C\uB97C \uBCF5\uC0AC\uD588\uC2B5\uB2C8\uB2E4 \u2014 \uBD99\uC5EC\uB123\uC744 \uD3F4\uB354\uC5D0\uC11C \uC6B0\uD074\uB9AD\uD558\uAC70\uB098 Ctrl+V.`);
+        setFileClipboard({ op: "copy", paths: [...selection] });
+        notice2(`${selection.size}\uAC1C\uB97C \uBCF5\uC0AC\uD588\uC2B5\uB2C8\uB2E4 \u2014 \uBD99\uC5EC\uB123\uC744 \uD3F4\uB354\uC5D0\uC11C \uC6B0\uD074\uB9AD\uD558\uAC70\uB098 Ctrl+V.`);
         drawCentre();
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "x" && selection.size && deletable) {
-        clipboard = { op: "cut", paths: [...selection] };
-        notice2(`${clipboard.paths.length}\uAC1C\uB97C \uC798\uB77C\uB0C8\uC2B5\uB2C8\uB2E4 \u2014 \uBD99\uC5EC\uB123\uC744 \uD3F4\uB354\uC5D0\uC11C \uC6B0\uD074\uB9AD\uD558\uAC70\uB098 Ctrl+V.`);
+        setFileClipboard({ op: "cut", paths: [...selection] });
+        notice2(`${selection.size}\uAC1C\uB97C \uC798\uB77C\uB0C8\uC2B5\uB2C8\uB2E4 \u2014 \uBD99\uC5EC\uB123\uC744 \uD3F4\uB354\uC5D0\uC11C \uC6B0\uD074\uB9AD\uD558\uAC70\uB098 Ctrl+V.`);
         drawCentre();
-      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v" && clipboard && writable) {
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v" && fileClipboard && writable) {
         void pasteInto(uploadTarget());
       }
     });
@@ -9596,8 +9668,8 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       ev.preventDefault();
       menuAt(ev.clientX, ev.clientY, [
         {
-          label: clipboard ? `\uBD99\uC5EC\uB123\uAE30 (${clipboard.paths.length})` : "\uBD99\uC5EC\uB123\uAE30",
-          disabled: !clipboard || !writable,
+          label: fileClipboard ? `\uBD99\uC5EC\uB123\uAE30 (${fileClipboard.paths.length})` : "\uBD99\uC5EC\uB123\uAE30",
+          disabled: !fileClipboard || !writable,
           onClick: () => void pasteInto(uploadTarget())
         },
         { label: "\uC804\uCCB4 \uC120\uD0DD", onClick: () => {
@@ -9776,7 +9848,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       {
         label: many ? `\uBCF5\uC0AC (${paths.length})` : "\uBCF5\uC0AC",
         onClick: () => {
-          clipboard = { op: "copy", paths };
+          setFileClipboard({ op: "copy", paths });
           notice2(`${paths.length}\uAC1C\uB97C \uBCF5\uC0AC\uD588\uC2B5\uB2C8\uB2E4 \u2014 \uBD99\uC5EC\uB123\uC744 \uD3F4\uB354\uC5D0\uC11C \uC6B0\uD074\uB9AD\uD558\uC138\uC694.`);
         }
       },
@@ -9784,13 +9856,13 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         label: many ? `\uC798\uB77C\uB0B4\uAE30 (${paths.length})` : "\uC798\uB77C\uB0B4\uAE30",
         disabled: !can,
         onClick: () => {
-          clipboard = { op: "cut", paths };
+          setFileClipboard({ op: "cut", paths });
           notice2(`${paths.length}\uAC1C\uB97C \uC798\uB77C\uB0C8\uC2B5\uB2C8\uB2E4 \u2014 \uBD99\uC5EC\uB123\uC744 \uD3F4\uB354\uC5D0\uC11C \uC6B0\uD074\uB9AD\uD558\uC138\uC694.`);
         }
       },
       {
-        label: clipboard ? `\uBD99\uC5EC\uB123\uAE30 (${clipboard.paths.length})` : "\uBD99\uC5EC\uB123\uAE30",
-        disabled: !clipboard,
+        label: fileClipboard ? `\uBD99\uC5EC\uB123\uAE30 (${fileClipboard.paths.length})` : "\uBD99\uC5EC\uB123\uAE30",
+        disabled: !fileClipboard,
         onClick: () => void pasteInto(pasteTarget)
       },
       null,
@@ -9850,7 +9922,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         label: many ? `\uBCF5\uC0AC (${paths.length})` : "\uBCF5\uC0AC",
         disabled: !can,
         onClick: () => {
-          clipboard = { op: "copy", paths };
+          setFileClipboard({ op: "copy", paths });
           notice2(`${paths.length}\uAC1C\uB97C \uBCF5\uC0AC\uD588\uC2B5\uB2C8\uB2E4 \u2014 \uBD99\uC5EC\uB123\uC744 \uD3F4\uB354\uC5D0\uC11C \uC6B0\uD074\uB9AD\uD558\uAC70\uB098 Ctrl+V.`);
         }
       },
@@ -9858,13 +9930,13 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         label: many ? `\uC798\uB77C\uB0B4\uAE30 (${paths.length})` : "\uC798\uB77C\uB0B4\uAE30",
         disabled: !can,
         onClick: () => {
-          clipboard = { op: "cut", paths };
+          setFileClipboard({ op: "cut", paths });
           notice2(`${paths.length}\uAC1C\uB97C \uC798\uB77C\uB0C8\uC2B5\uB2C8\uB2E4 \u2014 \uBD99\uC5EC\uB123\uC744 \uD3F4\uB354\uC5D0\uC11C \uC6B0\uD074\uB9AD\uD558\uAC70\uB098 Ctrl+V.`);
         }
       },
       {
-        label: clipboard ? `\uBD99\uC5EC\uB123\uAE30 (${clipboard.paths.length})` : "\uBD99\uC5EC\uB123\uAE30",
-        disabled: !clipboard || !hereOk,
+        label: fileClipboard ? `\uBD99\uC5EC\uB123\uAE30 (${fileClipboard.paths.length})` : "\uBD99\uC5EC\uB123\uAE30",
+        disabled: !fileClipboard || !hereOk,
         onClick: () => void pasteInto(node.path)
       },
       null,
@@ -9965,18 +10037,18 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     return `${head} ${r.failed.length}\uAC1C\uB294 \uAC74\uB108\uB700 (${names}${r.failed.length > 3 ? " \uC678" : ""}) \u2014 ${r.failed[0].error}`;
   }
   async function pasteInto(target) {
-    const clip2 = clipboard;
-    if (!clip2) return;
-    const list2 = clip2.paths.filter((p) => p !== target && !target.startsWith(p + "/"));
+    const clip = fileClipboard;
+    if (!clip) return;
+    const list2 = clip.paths.filter((p) => p !== target && !target.startsWith(p + "/"));
     if (!list2.length) return;
     try {
-      const r = clip2.op === "copy" ? await state.copyFiles(list2, target) : await state.moveFiles(list2, target);
-      notice2(batchText(r, target, clip2.op === "copy" ? "\uBCF5\uC0AC" : "\uC774\uB3D9"), r.failed.length ? "err" : "ok");
+      const r = await pasteFiles(target);
+      if (!r) return;
+      notice2(batchText(r, target, clip.op === "copy" ? "\uBCF5\uC0AC" : "\uC774\uB3D9"), r.failed.length ? "err" : "ok");
     } catch (e) {
       notice2("\uCC98\uB9AC\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg5(e), "err");
     }
-    if (clip2.op === "cut") {
-      clipboard = null;
+    if (clip.op === "cut") {
       selection.clear();
     }
     state.touchFiles();
@@ -9996,28 +10068,28 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     state.touchFiles();
     await refresh();
   }
-  function armedIcon(button, iconHtml, confirmLabel, run) {
+  function armedIcon(button2, iconHtml, confirmLabel, run) {
     let armedNow = false;
     let timer;
     const disarm = () => {
       if (timer) clearTimeout(timer);
       armedNow = false;
-      button.innerHTML = iconHtml;
-      button.classList.remove("danger");
+      button2.innerHTML = iconHtml;
+      button2.classList.remove("danger");
     };
     const arm = () => {
       if (timer) clearTimeout(timer);
       armedNow = true;
-      button.textContent = confirmLabel;
-      button.classList.add("danger");
+      button2.textContent = confirmLabel;
+      button2.classList.add("danger");
       timer = setTimeout(disarm, 4e3);
     };
     const fire = () => {
       disarm();
       run();
     };
-    button.innerHTML = iconHtml;
-    button.addEventListener("click", () => {
+    button2.innerHTML = iconHtml;
+    button2.addEventListener("click", () => {
       if (!armedNow) arm();
       else fire();
     });
@@ -10071,8 +10143,8 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     return e.node ? state.hasUnseenUnder(e.path) : state.unseenOutputs.includes(e.path);
   }
   function clipClass(path) {
-    if (!clipboard || !clipboard.paths.includes(path)) return "";
-    return clipboard.op === "cut" ? " clipcut" : " clipcopy";
+    if (!fileClipboard || !fileClipboard.paths.includes(path)) return "";
+    return fileClipboard.op === "cut" ? " clipcut" : " clipcopy";
   }
   function copyPathButton(path) {
     const b = el("button", { class: "ghost tiny", text: "\u{1F4CB}", title: "\uACBD\uB85C \uBCF5\uC0AC" });
@@ -10145,13 +10217,17 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       body.appendChild(el("div", { class: "hint", text: "\uBD88\uB7EC\uC624\uB294 \uC911\uC785\uB2C8\uB2E4\u2026" }));
       try {
         const url = await blobUrl(f.path, String(f.modified), { thumb: true, w: 1024 });
+        const detail = el("button", { class: "ghost tiny", text: "\uC790\uC138\uD788 \uBCF4\uAE30 (\uC6D0\uBCF8)" });
+        detail.addEventListener("click", () => showArtifact({ path: f.path, title: f.name, kind: "image" }));
         clear(body);
         const img = el("img", { src: url, alt: f.name });
         img.addEventListener("error", () => {
           clear(body);
           body.appendChild(el("div", { class: "hint", text: "\uC774 \uD638\uC2A4\uD2B8\uC5D0\uC11C\uB294 \uADF8\uB9BC\uC744 \uD45C\uC2DC\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4. \uB0B4 PC\uC5D0 \uC800\uC7A5\uD574\uC11C \uBCF4\uC138\uC694." }));
         });
-        body.appendChild(img);
+        img.style.cursor = "zoom-in";
+        img.addEventListener("click", () => detail.click());
+        body.append(detail, img);
       } catch (e) {
         clear(body);
         body.appendChild(el("div", { class: "notice err", text: msg5(e) }));
@@ -11366,9 +11442,9 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         ]),
         entry.hint ? el("div", { class: "hint", text: entry.hint }) : null
       ]);
-      const select = el("button", { class: "primary tiny", text: entry.selected ? selectedLabel : "\uC120\uD0DD" });
-      select.disabled = !!entry.selected;
-      select.addEventListener("click", async () => {
+      const select2 = el("button", { class: "primary tiny", text: entry.selected ? selectedLabel : "\uC120\uD0DD" });
+      select2.disabled = !!entry.selected;
+      select2.addEventListener("click", async () => {
         try {
           await spec3.onSelect(entry);
           close();
@@ -11376,7 +11452,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           complain(e);
         }
       });
-      const cells2 = [pickArea, select];
+      const cells2 = [pickArea, select2];
       if (spec3.onEdit) {
         const edit = el("button", { class: "ghost tiny", text: "\uC218\uC815" });
         edit.addEventListener("click", () => {
@@ -11419,7 +11495,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
   };
   var CODEX_KEY = "__codex__";
   function codexOffered() {
-    return transport.health?.codexEnabled === true;
+    return true;
   }
   function buildPresetsCard(opts) {
     const generalMount = el("div");
@@ -11532,7 +11608,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       label: "\uD788\uC2A4\uD1A0\uB9AC \uC608\uC0B0",
       def: 12e4,
       unit: "\uC790",
-      help: "\uB300\uD654 \uAE30\uB85D\uC774 \uC774 \uAE00\uC790 \uC218\uB97C \uB118\uC73C\uBA74 \uC55E\uBD80\uBD84\uC744 \uC694\uC57D\uD558\uAC70\uB098(\uC694\uC57D \uBAA8\uB378\uC774 \uAC70\uC808\uD558\uBA74 \uD1B5\uC9F8\uB85C) \uC798\uB77C\uB0C5\uB2C8\uB2E4. \uC694\uCCAD\uB9C8\uB2E4 \uB2E4\uC2DC \uBCF4\uB0B4\uB294 \uAE30\uB85D\uC758 \uC0C1\uD55C\uC774\uB77C, \uC694\uCCAD\uB2F9 \uD1A0\uD070\uC744 \uC9C1\uC811 \uC815\uD569\uB2C8\uB2E4. 12\uB9CC \uC790 \u2248 5~7\uB9CC \uD1A0\uD070."
+      help: "\uC790\uB3D9 \uC555\uCD95\uC774 \uCF1C\uC838 \uC788\uC73C\uBA74 \uC774 \uAE00\uC790 \uC218\uC640 \uCEE8\uD14D\uC2A4\uD2B8 \uD1A0\uD070 \uCD94\uC815\uCE58 \uC911 \uBA3C\uC800 \uB3C4\uB2EC\uD55C \uAE30\uC900\uC73C\uB85C \uC555\uCD95\uD569\uB2C8\uB2E4. \uD55C \uD134\uC758 \uB3C4\uAD6C \uC2E4\uD589 \uC911\uC5D0\uB3C4 \uAC80\uC0AC\uD558\uBA70 \uCD5C\uC2E0 \uC0AC\uC6A9\uC790 \uC9C0\uC2DC\uB294 \uC720\uC9C0\uD569\uB2C8\uB2E4."
     },
     {
       key: "pruneKeepTurns",
@@ -11618,11 +11694,11 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       measured.textContent = `\uC2E4\uCE21 (\uCD5C\uADFC ${usage.turns}\uD134, ${since.getMonth() + 1}/${since.getDate()} ${String(since.getHours()).padStart(2, "0")}:${String(since.getMinutes()).padStart(2, "0")} \uC774\uD6C4): \uD134\uB2F9 \uC785\uB825 \uD3C9\uADE0 ${fmtN(usage.avgInput)} \xB7 \uCD5C\uB300 ${fmtN(usage.maxInput)} \xB7 \uC694\uCCAD \uD3C9\uADE0 ${usage.avgRequests}\uD68C(\uCD5C\uB300 ${usage.maxRequests}) \xB7 \uC694\uCCAD\uB2F9 ${fmtN(usage.avgPerRequest)} \uD1A0\uD070 \xB7 \uD234 \uD638\uCD9C \uD3C9\uADE0 ${usage.avgToolCalls}\uD68C \xB7 \uCE90\uC2DC ${Math.round((usage.cacheShare || 0) * 100)}%`;
     };
     const rows = ADV_FIELDS.map((f) => {
-      const input = el("input", { type: "number", min: "0", placeholder: `${f.def.toLocaleString()} (\uAD8C\uC7A5)` });
-      input.addEventListener("input", drawSim);
-      inputs.set(f.key, input);
+      const input2 = el("input", { type: "number", min: "0", placeholder: `${f.def.toLocaleString()} (\uAD8C\uC7A5)` });
+      input2.addEventListener("input", drawSim);
+      inputs.set(f.key, input2);
       return el("div", { class: "advfield" }, [
-        el("label", { class: "field" }, [el("span", { text: `${f.label} (${f.unit})` }), input]),
+        el("label", { class: "field" }, [el("span", { text: `${f.label} (${f.unit})` }), input2]),
         el("div", { class: "hint", text: f.help + (f.zeroMeansOff ? "" : " \uBE44\uC6B0\uBA74 \uAD8C\uC7A5\uAC12\uC744 \uC501\uB2C8\uB2E4.") })
       ]);
     });
@@ -12437,13 +12513,13 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     return { root: root2, refresh: refresh3 };
   }
   function openCatalogPicker(anchor, onPick) {
-    const input = el("input", { placeholder: "\uD504\uB85C\uBC14\uC774\uB354\uB098 \uBAA8\uB378 \uC774\uB984 (\uC608: gemini, anthropic, gpt-5)" });
+    const input2 = el("input", { placeholder: "\uD504\uB85C\uBC14\uC774\uB354\uB098 \uBAA8\uB378 \uC774\uB984 (\uC608: gemini, anthropic, gpt-5)" });
     const list2 = el("div", { class: "cataloglist" });
-    const body = el("div", { class: "applypop catalogpop" }, [el("div", { class: "row" }, [input]), list2]);
+    const body = el("div", { class: "applypop catalogpop" }, [el("div", { class: "row" }, [input2]), list2]);
     const close = popover(anchor, body);
     let timer = null;
     const run = async () => {
-      const q = input.value.trim();
+      const q = input2.value.trim();
       clear(list2);
       if (q.length < 2) {
         list2.appendChild(el("div", { class: "hint", text: "\uB450 \uAE00\uC790 \uC774\uC0C1 \uC785\uB825\uD558\uC138\uC694." }));
@@ -12472,11 +12548,11 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         list2.appendChild(el("div", { class: "notice err", text: msg10(e) }));
       }
     };
-    input.addEventListener("input", () => {
+    input2.addEventListener("input", () => {
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => void run(), 300);
     });
-    setTimeout(() => input.focus(), 0);
+    setTimeout(() => input2.focus(), 0);
   }
   function reasoningSelect() {
     const sel = el("select");
@@ -12650,7 +12726,44 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       el("label", { class: "checkrow" }, [always, el("span", { text: "\uD56D\uC0C1 \uC801\uC6A9 \u2014 \uBCF8\uBB38\uC744 \uB9E4 \uC694\uCCAD\uC5D0 \uD568\uAED8 \uBCF4\uB0C5\uB2C8\uB2E4 (\uBAA8\uB4E0 \uB300\uD654\uC5D0 \uC801\uC6A9\uB420 \uADDC\uCE59\uC5D0\uB9CC)" })]),
       el("label", { class: "field" }, [el("span", { text: "\uBCF8\uBB38 \u2014 \uC808\uCC28" }), body, bodyCount])
     ]);
-    if (skill) form.appendChild(buildFiles(skill, say));
+    if (skill) {
+      form.appendChild(buildFiles(skill, say));
+      const history = el("button", { class: "ghost", text: "\uBCC0\uACBD \uAE30\uB85D / \uB418\uB3CC\uB9AC\uAE30" });
+      const versions = el("div");
+      history.addEventListener("click", async () => {
+        try {
+          const data = await transport.get(
+            "/skills/revisions",
+            { id: skill.id }
+          );
+          clear(versions);
+          for (const rev of data.revisions) {
+            const restore = el("button", { class: "ghost", text: "\uC774 \uBC84\uC804\uC73C\uB85C \uB418\uB3CC\uB9AC\uAE30" });
+            restore.addEventListener("click", async () => {
+              restore.disabled = true;
+              try {
+                await transport.post("/skills/restore", { id: skill.id, revision: rev.revision });
+                close();
+                await refresh3();
+                say("\uC774\uC804 \uBC84\uC804\uC73C\uB85C \uB418\uB3CC\uB838\uC2B5\uB2C8\uB2E4.", "ok");
+              } catch (e) {
+                out.textContent = msg11(e);
+                restore.disabled = false;
+              }
+            });
+            versions.appendChild(el("details", {}, [
+              el("summary", { text: new Date(rev.updatedAt * 1e3).toLocaleString() + " \xB7 " + (rev.meta?.learned_evidence || "\uC774\uC804 \uBCF8\uBB38") }),
+              el("pre", { text: rev.body, style: { whiteSpace: "pre-wrap" } }),
+              restore
+            ]));
+          }
+          if (!data.revisions.length) versions.textContent = "\uC544\uC9C1 \uBCC0\uACBD \uAE30\uB85D\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.";
+        } catch (e) {
+          out.textContent = msg11(e);
+        }
+      });
+      form.appendChild(el("div", {}, [history, versions]));
+    }
     form.appendChild(out);
     form.appendChild(el("div", { class: "row" }, [save, cancel]));
     const close = modal(skill ? `\uC2A4\uD0AC \uC218\uC815 \xB7 skills/${skill.id}` : "\uC0C8 \uC2A4\uD0AC", form, { wide: true });
@@ -12743,6 +12856,121 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
   }
   function msg11(e) {
     return e instanceof Error ? e.message : String(e);
+  }
+
+  // src/ui/agent-notes.ts
+  function buildAgentNotesCard(onMount) {
+    const list2 = el("div");
+    const status = el("div", { class: "hint" });
+    const shared = el("select", {}, [el("option", { value: "project", text: "\uD604\uC7AC \uD504\uB85C\uC81D\uD2B8" }), el("option", { value: "global", text: "\uC804\uC5ED \uACF5\uD1B5" })]);
+    setSelected(shared, state.activeCharKey ? "project" : "global");
+    const enabled = el("input", { type: "checkbox", checked: true });
+    const auto = el("input", { type: "checkbox", checked: true });
+    const windowSize = el("input", { type: "number", min: 8e3, step: 1e3, value: "128000" });
+    const settings = el("button", { class: "ghost", text: "\uC124\uC815 \uC800\uC7A5" });
+    const refresh3 = async () => {
+      try {
+        const cfg = await transport.get("/config");
+        const agent = cfg.config?.agent ?? {};
+        enabled.checked = agent.memoryEnabled !== false;
+        auto.checked = agent.autoCompact !== false;
+        windowSize.value = String(agent.contextWindowTokens ?? 128e3);
+        await reload();
+      } catch (e) {
+        status.textContent = String(e);
+      }
+    };
+    const scope = () => ({ charKey: state.activeCharKey, shared: selectedValue(shared) === "global" });
+    const edit = (note) => {
+      const boundScope = scope();
+      const title = el("input", { value: note?.title ?? "", placeholder: "\uAE30\uC5B5\uD560 \uC0AC\uD56D\uC758 \uC81C\uBAA9" });
+      const body = el("textarea", { value: note?.body ?? "", placeholder: "\uC120\uD638\xB7\uADDC\uCE59\xB7\uACB0\uC815\xB7\uB0A8\uC740 \uC791\uC5C5", style: { minHeight: "140px" } });
+      const evidence = el("textarea", { value: note?.evidence ?? "\uC0AC\uC6A9\uC790\uAC00 \uC9C1\uC811 \uC791\uC131", placeholder: "\uD655\uC778 \uADFC\uAC70" });
+      const save = el("button", { class: "primary", text: "\uC800\uC7A5" });
+      const error = el("div", { class: "hint" });
+      const close = modal("AI \uBA54\uBAA8", el("div", {}, [title, body, evidence, save, error]));
+      save.addEventListener("click", async () => {
+        save.disabled = true;
+        try {
+          await transport.post("/agent/notes/save", { ...boundScope, id: note?.id, revision: note?.revision, title: title.value, body: body.value, evidence: evidence.value });
+          close();
+          await reload();
+        } catch (e) {
+          error.textContent = String(e);
+          save.disabled = false;
+        }
+      });
+    };
+    const reload = async () => {
+      try {
+        const query = scope();
+        const response = await transport.get("/agent/notes", { charKey: query.charKey, shared: String(query.shared) });
+        clear(list2);
+        for (const note of response.notes) {
+          const change = el("button", { class: "ghost tiny", text: "\uC218\uC815" });
+          change.addEventListener("click", () => edit(note));
+          const remove = el("button", { class: "ghost tiny", text: "\uC0AD\uC81C" });
+          remove.addEventListener("click", async () => {
+            remove.disabled = true;
+            try {
+              await transport.post("/agent/notes/delete", { ...query, id: note.id, revision: note.revision });
+              await reload();
+            } catch (e) {
+              status.textContent = String(e);
+              remove.disabled = false;
+            }
+          });
+          list2.appendChild(el("details", {}, [
+            el("summary", { text: note.title }),
+            el("pre", { text: note.body, style: { whiteSpace: "pre-wrap" } }),
+            el("div", { class: "hint", text: `\uADFC\uAC70: ${note.evidence}` }),
+            el("div", { class: "row" }, [change, remove])
+          ]));
+        }
+        status.textContent = `${response.notes.length}\uAC1C \uBA54\uBAA8 \xB7 AI\uAC00 \uD544\uC694\uD55C \uC8FC\uC694 \uC0AC\uD56D\uC744 \uC9C1\uC811 \uAE30\uB85D\uD558\uACE0 \uB2E4\uC74C \uB300\uD654\uC5D0 \uBD88\uB7EC\uC635\uB2C8\uB2E4.`;
+      } catch (e) {
+        status.textContent = String(e);
+      }
+    };
+    settings.addEventListener("click", async () => {
+      try {
+        const tokens = Number(windowSize.value);
+        if (!Number.isInteger(tokens) || tokens < 8e3) throw new Error("\uCEE8\uD14D\uC2A4\uD2B8 \uD06C\uAE30\uB294 8000 \uC774\uC0C1 \uC815\uC218\uB85C \uC785\uB825\uD558\uC138\uC694.");
+        await transport.post("/config", { config: { agent: { memoryEnabled: enabled.checked, autoCompact: auto.checked, contextWindowTokens: tokens } } });
+        status.textContent = "\uC124\uC815\uC744 \uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4.";
+      } catch (e) {
+        status.textContent = String(e);
+      }
+    });
+    shared.addEventListener("change", () => void reload());
+    const add = el("button", { class: "ghost", text: "\uBA54\uBAA8 \uCD94\uAC00" });
+    add.addEventListener("click", () => edit());
+    const reloadBtn = el("button", { class: "ghost", text: "\uC0C8\uB85C\uACE0\uCE68" });
+    reloadBtn.addEventListener("click", () => void refresh3());
+    const history = el("button", { class: "ghost", text: "\uCD5C\uADFC \uC555\uCD95 \uAE30\uB85D" });
+    history.addEventListener("click", async () => {
+      try {
+        const data = await transport.get("/agent/context");
+        modal("\uCEE8\uD14D\uC2A4\uD2B8 \uC555\uCD95 \uAE30\uB85D", el("div", {}, data.events.length ? data.events.map((e) => el("p", {
+          text: `${new Date(e.at * 1e3).toLocaleString()} \xB7 ${e.beforeChars.toLocaleString()} \u2192 ${e.afterChars.toLocaleString()}\uC790 (${e.method})`
+        })) : [el("p", { text: "\uC544\uC9C1 \uC555\uCD95 \uAE30\uB85D\uC774 \uC5C6\uC2B5\uB2C8\uB2E4." })]));
+      } catch (e) {
+        status.textContent = String(e);
+      }
+    });
+    onMount(refresh3);
+    void refresh3();
+    return el("div", { class: "card" }, [
+      el("h3", { text: "AI \uBA54\uBAA8\uB9AC \xB7 \uC790\uB3D9 \uCEE8\uD14D\uC2A4\uD2B8 \uC555\uCD95" }),
+      el("label", {}, [enabled, el("span", { text: " AI \uBA54\uBAA8\uB9AC \uC0AC\uC6A9" })]),
+      el("label", {}, [auto, el("span", { text: " \uC694\uCCAD\uB9C8\uB2E4 \uCEE8\uD14D\uC2A4\uD2B8\uB97C \uD655\uC778\uD558\uACE0 \uC790\uB3D9 \uC555\uCD95" })]),
+      el("label", { class: "field" }, [el("span", { text: "\uC0AC\uC6A9 \uBAA8\uB378\uC758 \uCEE8\uD14D\uC2A4\uD2B8 \uD06C\uAE30 (\uD1A0\uD070)" }), windowSize]),
+      el("p", { class: "hint", text: "\uCD9C\uB825 \uACF5\uAC04\uACFC \uB3C4\uAD6C\xB7\uC9C0\uCE68 \uD06C\uAE30\uB97C \uACE0\uB824\uD574 \uC5EC\uC720\uB97C \uB450\uACE0 \uC555\uCD95\uD569\uB2C8\uB2E4. \uD1A0\uD070 \uC218\uB294 \uCD94\uC815\uCE58\uC785\uB2C8\uB2E4. \uCD5C\uC2E0 \uC0AC\uC6A9\uC790 \uC9C0\uC2DC\uC640 \uBBF8\uC644\uB8CC \uC791\uC5C5\uC744 \uB0A8\uAE30\uBA70, \uC694\uC57D\uC5D0\uB294 \uC124\uC815\uD55C \uBAA8\uB378\uC744 \uC0AC\uC6A9\uD569\uB2C8\uB2E4." }),
+      el("div", { class: "row" }, [settings, history]),
+      el("div", { class: "row" }, [shared, add, reloadBtn]),
+      list2,
+      status
+    ]);
   }
 
   // src/ui/mem.ts
@@ -12889,7 +13117,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.14.8",
+            version: "0.15.2",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -13011,7 +13239,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           await state.connect();
           agentPanel().invalidate();
         }
-      }), buildAdvancedCard()]],
+      }), buildAgentNotesCard((refresh3) => refreshers.push(refresh3)), buildAdvancedCard()]],
       ["\uC2A4\uD0AC", [buildSkillsCard({ onMount: (refresh3) => {
         refreshers.push(refresh3);
       } })]],
@@ -13243,7 +13471,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
   }
   function buildNaiCard() {
     const meters = el("div", { class: "row", style: { gap: "8px", marginBottom: "8px" } });
-    const input = el("input", { type: "password", placeholder: "NovelAI \uD37C\uC2DC\uC2A4\uD134\uD2B8 \uD1A0\uD070" });
+    const input2 = el("input", { type: "password", placeholder: "NovelAI \uD37C\uC2DC\uC2A4\uD134\uD2B8 \uD1A0\uD070" });
     const out = el("div", { class: "outbox" });
     const save = el("button", { class: "primary tiny", text: "\uC800\uC7A5" });
     const test = el("button", { class: "ghost tiny", text: "\uC5F0\uACB0 \uD655\uC778" });
@@ -13274,12 +13502,12 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         const { keys } = await state.apiKeys();
         const hit = keys.find((k) => (k.provider || "").toLowerCase() === "novelai");
         existingId = hit?.id ?? "";
-        input.placeholder = hit?.apiKey?.set ? `\uC124\uC815\uB428 (${hit.apiKey.length}\uC790) \u2014 \uBC14\uAFC0 \uB54C\uB9CC \uC785\uB825` : "NovelAI \uD37C\uC2DC\uC2A4\uD134\uD2B8 \uD1A0\uD070";
+        input2.placeholder = hit?.apiKey?.set ? `\uC124\uC815\uB428 (${hit.apiKey.length}\uC790) \u2014 \uBC14\uAFC0 \uB54C\uB9CC \uC785\uB825` : "NovelAI \uD37C\uC2DC\uC2A4\uD134\uD2B8 \uD1A0\uD070";
       } catch {
       }
     };
     save.addEventListener("click", async () => {
-      const v = input.value.trim();
+      const v = input2.value.trim();
       if (!v) {
         out.textContent = "\uD1A0\uD070\uC744 \uC785\uB825\uD574 \uC8FC\uC138\uC694.";
         return;
@@ -13291,7 +13519,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           { name: "NovelAI", provider: "novelai", apiKey: v, baseUrl: "", note: "" },
           existingId || void 0
         );
-        input.value = "";
+        input2.value = "";
         await refresh3();
         out.textContent = "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4.";
       } catch (e) {
@@ -13316,7 +13544,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       el("h2", { text: "NovelAI" }),
       el("div", { class: "hint", style: { marginBottom: "8px" }, text: "\uC5D0\uC14B \uC2A4\uD29C\uB514\uC624\uAC00 \uC774\uBBF8\uC9C0\uB97C \uC0DD\uC131\uD560 \uB54C \uC501\uB2C8\uB2E4. NovelAI \uACC4\uC815 \uC124\uC815\uC758 \uD37C\uC2DC\uC2A4\uD134\uD2B8 \uD1A0\uD070\uC744 \uB123\uC73C\uC138\uC694. \uD1A0\uD070 \uC5C6\uC774\uB3C4 \uC2A4\uD29C\uB514\uC624\uC5D0\uC11C \uC774\uBBF8\uC9C0\uB97C \uB123\uACE0, \uACE0\uB974\uACE0, \uBD07\uC5D0 \uBC18\uC601\uD558\uB294 \uAC83\uC740 \uB429\uB2C8\uB2E4." }),
       meters,
-      el("label", { class: "field" }, [el("span", { text: "\uD37C\uC2DC\uC2A4\uD134\uD2B8 \uD1A0\uD070" }), input]),
+      el("label", { class: "field" }, [el("span", { text: "\uD37C\uC2DC\uC2A4\uD134\uD2B8 \uD1A0\uD070" }), input2]),
       el("div", { class: "row" }, [save, test]),
       out
     ]);
@@ -13455,7 +13683,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     });
     refreshers.push(draw2);
     void draw2();
-    const offered = transport.health?.codexEnabled === true;
+    const offered = true;
     const nai = buildNaiCard();
     refreshers.push(nai.refresh);
     void nai.refresh();
@@ -13480,12 +13708,12 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     ]);
   }
   function buildCatalogCard() {
-    const input = el("input", { placeholder: "\uD504\uB85C\uBC14\uC774\uB354\uB098 \uBAA8\uB378 \uC774\uB984 (\uC608: gemini, anthropic, deepseek)" });
+    const input2 = el("input", { placeholder: "\uD504\uB85C\uBC14\uC774\uB354\uB098 \uBAA8\uB378 \uC774\uB984 (\uC608: gemini, anthropic, deepseek)" });
     const out = el("div", { class: "outbox" });
     const meta = el("div", { class: "hint" });
     let timer = null;
     const run = async (refresh3 = false) => {
-      const q = input.value.trim();
+      const q = input2.value.trim();
       clear(out);
       if (q.length < 2 && !refresh3) {
         meta.textContent = "";
@@ -13519,7 +13747,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         out.appendChild(el("div", { class: "notice err", text: e instanceof Error ? e.message : String(e) }));
       }
     };
-    input.addEventListener("input", () => {
+    input2.addEventListener("input", () => {
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => void run(), 300);
     });
@@ -13528,7 +13756,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     return el("div", { class: "card" }, [
       el("h2", { text: "\uBAA8\uB378 \uCE74\uD0C8\uB85C\uADF8" }),
       el("div", { class: "hint", style: { marginBottom: "8px" }, text: "\uC8FC\uC694 \uD504\uB85C\uBC14\uC774\uB354\uC758 API \uC8FC\uC18C\uC640 \uBAA8\uB378 \uC774\uB984\xB7\uCEE8\uD14D\uC2A4\uD2B8\xB7\uAC00\uACA9\uC744 models.dev \uC5D0\uC11C \uCC3E\uC2B5\uB2C8\uB2E4(\uBC31\uC5D4\uB4DC\uAC00 \uD558\uB8E8 \uD55C \uBC88 \uBC1B\uC544 \uB460). \uD504\uB9AC\uC14B \uD3B8\uC9D1\uAE30\uC758 \u201C\uCE74\uD0C8\uB85C\uADF8\uC5D0\uC11C \uCC3E\uAE30\u201D\uB3C4 \uAC19\uC740 \uC790\uB8CC\uC785\uB2C8\uB2E4." }),
-      el("div", { class: "row" }, [input, refreshBtn]),
+      el("div", { class: "row" }, [input2, refreshBtn]),
       meta,
       out
     ]);
@@ -13540,7 +13768,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.14.8"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.2"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -14837,11 +15065,11 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
   function beginRename(c, nameEl) {
     if (!c.row) return;
     const row = c.row;
-    const input = el("input", { value: c.name, class: "assetrename" });
+    const input2 = el("input", { value: c.name, class: "assetrename" });
     const done = async (commit) => {
-      const v = input.value.trim();
+      const v = input2.value.trim();
       if (!commit || !v || v === c.name) {
-        input.replaceWith(nameEl);
+        input2.replaceWith(nameEl);
         return;
       }
       try {
@@ -14850,18 +15078,18 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         await refreshNow6();
       } catch (e) {
         notice8("\uC774\uB984\uC744 \uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + (e instanceof Error ? e.message : String(e)), "err");
-        input.replaceWith(nameEl);
+        input2.replaceWith(nameEl);
       }
     };
-    input.addEventListener("keydown", (ev) => {
+    input2.addEventListener("keydown", (ev) => {
       if (ev.key === "Enter") void done(true);
       else if (ev.key === "Escape") void done(false);
     });
-    input.addEventListener("blur", () => void done(true));
-    nameEl.replaceWith(input);
-    input.focus();
+    input2.addEventListener("blur", () => void done(true));
+    nameEl.replaceWith(input2);
+    input2.focus();
     try {
-      input.select();
+      input2.select();
     } catch {
     }
   }
@@ -15068,6 +15296,10 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     quality: false,
     ucPreset: 0,
     folder: OUTPUT_ROOT,
+    assetProject: "",
+    assetSet: "",
+    assetSlot: "",
+    assetCharacter: "",
     // The selector's regex. Empty means the backend's default; it is edited on
     // screen because it is the thing most likely to need adjusting.
     pattern: ""
@@ -15089,6 +15321,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
   }
   function spec() {
     const out = {
+      charKey: state.activeCharKey,
       model: gen.model,
       styles: activeOf("styles"),
       characters: activeOf("characters"),
@@ -15107,6 +15340,12 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       }
     };
     if (gen.scenePreset) out.scenePreset = gen.scenePreset;
+    if (gen.assetSet) out.asset = {
+      project: gen.assetProject,
+      setId: gen.assetSet,
+      slotId: gen.assetSlot,
+      fields: gen.assetCharacter ? { character: gen.assetCharacter } : {}
+    };
     if (gen.seed.trim()) out.seed = Number(gen.seed.trim());
     return out;
   }
@@ -15371,6 +15610,348 @@ name: ${nm}
     return e instanceof Error ? e.message : String(e);
   }
 
+  // src/ui/studio/asset-rules.ts
+  var modes = [["required", "\uD544\uC218"], ["optional", "\uC120\uD0DD"], ["excluded", "\uC81C\uC678"]];
+  var uid = () => "r_" + Math.random().toString(36).slice(2, 12);
+  var fields2 = (template) => [...template.matchAll(/\{([A-Za-z][A-Za-z0-9_]*)\}/g)].map((m) => m[1]);
+  var field = (name, input2) => el("label", { class: "field" }, [el("span", { text: name }), input2]);
+  function input(value, change) {
+    const node = el("input", { value });
+    node.addEventListener("input", () => change(node.value));
+    return node;
+  }
+  function select(values, value, change) {
+    const node = el("select");
+    for (const [id, name] of values) node.appendChild(el("option", { value: id, text: name }));
+    setSelected(node, value);
+    node.addEventListener("change", () => change(selectedValue(node)));
+    return node;
+  }
+  function button(text2, action) {
+    const b = el("button", { class: "ghost tiny", text: text2 });
+    b.addEventListener("click", action);
+    return b;
+  }
+  function projectHint() {
+    return /^(?:studio\/output|projects)\/([^/]+)/.exec(S.selected)?.[1] || gen.assetProject;
+  }
+  function assetChoice(initial, change) {
+    let value = { ...initial, fields: { ...initial.fields } };
+    const root2 = el("div", { class: "card" });
+    const choices = el("div");
+    const notice10 = el("div", { class: "hint" });
+    let revision = 0;
+    const project = input(value.project, (v) => {
+      value.project = v;
+    });
+    const publish = () => change({ ...value, fields: { ...value.fields } });
+    const load = async () => {
+      const rev = ++revision;
+      try {
+        const doc = await state.studio.assetRules(project.value.trim());
+        if (rev !== revision) return;
+        project.value = value.project = doc.project;
+        if (!doc.sets.some((s) => s.id === value.setId)) value.setId = "";
+        clear(choices);
+        const slots2 = el("div");
+        const drawSlots = () => {
+          clear(slots2);
+          const aset = doc.sets.find((s) => s.id === value.setId);
+          if (!aset) {
+            value.slotId = "";
+            publish();
+            return;
+          }
+          if (!aset.slots.some((s) => s.id === value.slotId)) value.slotId = "";
+          slots2.appendChild(field("\uC2AC\uB86F", select([["", "\uC52C \uC774\uB984\uC73C\uB85C \uACB0\uC815"], ...aset.slots.map((s) => [s.id, Object.values(s.fields).join(" \xB7 ") + " (" + s.id + ")"])], value.slotId || "", (v) => {
+            value.slotId = v;
+            value.fields = value.fields.character ? { character: value.fields.character } : {};
+            publish();
+          })));
+          publish();
+        };
+        choices.append(field("\uC5D0\uC14B \uC138\uD2B8", select([["", "\uAE30\uC874 \uD30C\uC77C\uBA85 \uBC29\uC2DD"], ...doc.sets.map((s) => [s.id, s.name])], value.setId, (v) => {
+          value.setId = v;
+          value.slotId = "";
+          value.fields = value.fields.character ? { character: value.fields.character } : {};
+          drawSlots();
+        })), slots2, field("\uCE90\uB9AD\uD130\uBA85 (\uBE44\uC6B0\uBA74 \uD65C\uC131 \uCE74\uB4DC)", input(value.fields.character || "", (v) => {
+          value.fields = v ? { character: v } : {};
+          publish();
+        })));
+        drawSlots();
+        notice10.textContent = doc.sets.length ? "\uC138\uD2B8 \uADDC\uCE59\uC73C\uB85C \uC774\uB984\uC744 \uB9CC\uB4E4\uACE0, \uC778\uD398\uC778\uD2B8\uC5D0\uB3C4 \uAC19\uC740 \uADDC\uCE59\uC744 \uC720\uC9C0\uD569\uB2C8\uB2E4." : "\uC544\uC9C1 \uC138\uD2B8\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4. \uC5D0\uC14B \uADDC\uCE59\uC5D0\uC11C \uBA3C\uC800 \uC800\uC7A5\uD558\uC138\uC694.";
+      } catch (e) {
+        notice10.textContent = msg18(e);
+      }
+    };
+    root2.append(
+      field("\uD504\uB85C\uC81D\uD2B8 \uD3F4\uB354\uBA85", project),
+      button("\uD504\uB85C\uC81D\uD2B8 \uBD88\uB7EC\uC624\uAE30", () => void load()),
+      button("\uC5D0\uC14B \uADDC\uCE59 \uD3B8\uC9D1", () => void openAssetRules(project.value)),
+      choices,
+      notice10
+    );
+    void load();
+    return root2;
+  }
+  async function openAssetRules(initialProject = projectHint()) {
+    const root2 = el("div", { style: { minWidth: "280px" } });
+    const editor = el("div");
+    const notice10 = el("div", { class: "notice" });
+    const project = input(initialProject, () => {
+    });
+    let doc;
+    let ruleId = "", setId = "";
+    const draw2 = () => {
+      clear(editor);
+      const rules = el("details", { open: true });
+      rules.appendChild(el("summary", { text: "\uBA85\uBA85 \uADDC\uCE59" }));
+      const rulePicker = select(doc.rules.map((r) => [r.id, r.name]), ruleId, (v) => {
+        ruleId = v;
+        draw2();
+      });
+      rules.append(rulePicker, button("\uADDC\uCE59 \uCD94\uAC00", () => {
+        ruleId = uid();
+        doc.rules.push({ id: ruleId, name: "\uC0C8 \uADDC\uCE59", template: "{character}-{emotion}", extension: "webp", allowed: {}, empty: {} });
+        draw2();
+      }));
+      const rule = doc.rules.find((r) => r.id === ruleId);
+      if (rule) {
+        const template = input(rule.template, (v) => {
+          rule.template = v;
+        });
+        template.addEventListener("change", draw2);
+        rules.append(
+          field("\uC774\uB984", input(rule.name, (v) => {
+            rule.name = v;
+          })),
+          field("\uD30C\uC77C\uBA85 \uD15C\uD50C\uB9BF", template),
+          el("div", { class: "hint", text: "\uC608: {character}-{emotion}-{outfit}. \uD655\uC7A5\uC790\uB294 \uC544\uB798\uC5D0\uC11C \uC120\uD0DD\uD569\uB2C8\uB2E4. \uD544\uB4DC \uC21C\uC11C\uC640 \uAD6C\uBD84\uC790\uB97C \uC790\uC720\uB86D\uAC8C \uC9C0\uC815\uD558\uC138\uC694." }),
+          field("\uD655\uC7A5\uC790", select([["webp", "webp"], ["png", "png"], ["jpg", "jpg"]], rule.extension, (v) => {
+            rule.extension = v;
+          })),
+          button("\uC774 \uADDC\uCE59 \uC0AD\uC81C", () => {
+            doc.rules = doc.rules.filter((r) => r.id !== rule.id);
+            ruleId = doc.rules[0]?.id || "";
+            draw2();
+          })
+        );
+        for (const key of fields2(rule.template)) {
+          rules.append(el("div", { class: "row" }, [
+            field(key + " \uD5C8\uC6A9\uAC12 (\uC27C\uD45C \uAD6C\uBD84, \uBE44\uC6B0\uBA74 \uC790\uC720)", input((rule.allowed?.[key] || []).join(", "), (v) => {
+              (rule.allowed ??= {})[key] = v.split(",").map((x) => x.trim()).filter(Boolean);
+            })),
+            field("\uBE48 \uAC12 \uB300\uCCB4\uC5B4", input(rule.empty?.[key] || "", (v) => {
+              (rule.empty ??= {})[key] = v;
+            }))
+          ]));
+        }
+        if (rule.regex) rules.append(field(
+          "\uC800\uC7A5\uB41C regex \xB7 \uCEA1\uCC98 \uC21C\uC11C: " + fields2(rule.template).join(", "),
+          el("code", { text: rule.regex, style: { whiteSpace: "pre-wrap", overflowWrap: "anywhere" } })
+        ));
+      }
+      const sets = el("details", { open: true });
+      sets.appendChild(el("summary", { text: "\uC5D0\uC14B \uC138\uD2B8\uC640 \uCE90\uB9AD\uD130 \uC608\uC678" }));
+      sets.append(
+        select(doc.sets.map((s) => [s.id, s.name]), setId, (v) => {
+          setId = v;
+          draw2();
+        }),
+        button("\uC138\uD2B8 \uCD94\uAC00", () => {
+          if (!doc.rules.length) {
+            notice10.textContent = "\uBA85\uBA85 \uADDC\uCE59\uC744 \uBA3C\uC800 \uCD94\uAC00\uD558\uC138\uC694.";
+            return;
+          }
+          setId = uid();
+          doc.sets.push({ id: setId, name: "\uC0C8 \uC138\uD2B8", ruleId: ruleId || doc.rules[0].id, characters: [], slots: [], overrides: {} });
+          draw2();
+        })
+      );
+      const aset = doc.sets.find((s) => s.id === setId);
+      if (aset) {
+        sets.append(
+          field("\uC138\uD2B8 \uC774\uB984", input(aset.name, (v) => {
+            aset.name = v;
+          })),
+          field("\uBA85\uBA85 \uADDC\uCE59", select(doc.rules.map((r) => [r.id, r.name]), aset.ruleId, (v) => {
+            aset.ruleId = v;
+            draw2();
+          })),
+          field("\uC801\uC6A9 \uCE90\uB9AD\uD130 (\uC27C\uD45C \uAD6C\uBD84, \uBE44\uC6B0\uBA74 \uC804\uCCB4)", input(aset.characters.join(", "), (v) => {
+            aset.characters = v.split(",").map((x) => x.trim()).filter(Boolean);
+          })),
+          el("div", { class: "hint", text: "\uD544\uC218: \uC5C6\uC73C\uBA74 \uBD80\uC871\uBD84 \xB7 \uC120\uD0DD: \uC5C6\uC5B4\uB3C4 \uC644\uC131 \xB7 \uC81C\uC678: \uC0DD\uC131\xB7\uB0B4\uBCF4\uB0B4\uAE30 \uB300\uC0C1 \uC544\uB2D8" })
+        );
+        const names = fields2(doc.rules.find((r) => r.id === aset.ruleId)?.template || "").filter((k) => k !== "character");
+        for (const slot of aset.slots) {
+          const row = el("div", { class: "card" });
+          row.appendChild(field("\uC2AC\uB86F ID", input(slot.id, (v) => {
+            slot.id = v;
+          })));
+          for (const key of names) row.appendChild(field(key, input(slot.fields[key] || "", (v) => {
+            slot.fields[key] = v;
+          })));
+          row.append(
+            select(modes, slot.status, (v) => {
+              slot.status = v;
+            }),
+            button("\uC2AC\uB86F \uC0AD\uC81C", () => {
+              aset.slots = aset.slots.filter((s) => s !== slot);
+              draw2();
+            })
+          );
+          sets.appendChild(row);
+        }
+        sets.appendChild(button("\uC2AC\uB86F \uCD94\uAC00", () => {
+          aset.slots.push({ id: uid(), fields: {}, status: "required" });
+          draw2();
+        }));
+        const exceptions = el("details");
+        exceptions.appendChild(el("summary", { text: "\uCE90\uB9AD\uD130\uBCC4 \uC608\uC678" }));
+        for (const [character, statuses] of Object.entries(aset.overrides || {})) {
+          for (const [sid, mode2] of Object.entries(statuses)) {
+            exceptions.appendChild(el("div", { class: "row" }, [
+              el("span", { text: character + " \xB7 " + sid }),
+              select(modes, mode2, (v) => {
+                statuses[sid] = v;
+              }),
+              button("\uC608\uC678 \uC0AD\uC81C", () => {
+                delete statuses[sid];
+                draw2();
+              })
+            ]));
+          }
+        }
+        let who = "", which = aset.slots[0]?.id || "", how = "excluded";
+        exceptions.append(
+          field("\uCE90\uB9AD\uD130\uBA85", input("", (v) => {
+            who = v;
+          })),
+          field("\uB300\uC0C1 \uC2AC\uB86F", select(aset.slots.map((s) => [s.id, s.id]), which, (v) => {
+            which = v;
+          })),
+          select(modes, how, (v) => {
+            how = v;
+          }),
+          button("\uC608\uC678 \uCD94\uAC00", () => {
+            if (!who.trim() || !which) {
+              notice10.textContent = "\uCE90\uB9AD\uD130\uBA85\uACFC \uC2AC\uB86F\uC744 \uC9C0\uC815\uD558\uC138\uC694.";
+              return;
+            }
+            ((aset.overrides ??= {})[who.trim()] ??= {})[which] = how;
+            draw2();
+          })
+        );
+        sets.append(exceptions, button("\uC774 \uC138\uD2B8 \uC0AD\uC81C", () => {
+          doc.sets = doc.sets.filter((s) => s !== aset);
+          setId = doc.sets[0]?.id || "";
+          draw2();
+        }));
+      }
+      const save = button("\uADDC\uCE59\xB7\uC138\uD2B8 \uC800\uC7A5", () => void (async () => {
+        try {
+          doc = await state.studio.saveAssetRules(doc);
+          notice10.textContent = "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4. \uAE30\uC874 \uC774\uBBF8\uC9C0\uB294 \uC801\uC6A9 \uB2F9\uC2DC\uC758 \uBA85\uBA85 \uADDC\uCE59\uC744 \uC720\uC9C0\uD569\uB2C8\uB2E4.";
+          draw2();
+        } catch (e) {
+          notice10.textContent = msg18(e);
+        }
+      })());
+      editor.append(rules, sets, save);
+    };
+    const load = async () => {
+      try {
+        doc = await state.studio.assetRules(project.value.trim());
+        project.value = doc.project;
+        if (!doc.project) {
+          notice10.textContent = "\uD504\uB85C\uC81D\uD2B8 \uD3F4\uB354\uBA85\uC744 \uC785\uB825\uD558\uC138\uC694.";
+          return;
+        }
+        ruleId = doc.rules[0]?.id || "";
+        setId = doc.sets[0]?.id || "";
+        notice10.textContent = "";
+        draw2();
+      } catch (e) {
+        notice10.textContent = msg18(e);
+      }
+    };
+    root2.append(field("\uD504\uB85C\uC81D\uD2B8 \uD3F4\uB354\uBA85", project), button("\uBD88\uB7EC\uC624\uAE30", () => void load()), editor, notice10);
+    modal("\uD504\uB85C\uC81D\uD2B8 \uC5D0\uC14B \uADDC\uCE59", root2, { sticky: true });
+    await load();
+  }
+  function openAssetBinding(item) {
+    let binding = item.asset ? { project: item.asset.project, setId: item.asset.setId, slotId: item.asset.slotId, fields: item.asset.fields } : { project: projectHint(), setId: "", fields: {} };
+    const body = el("div");
+    const choice = el("div");
+    const notice10 = el("div", { class: "notice" });
+    const draw2 = () => {
+      clear(choice);
+      choice.appendChild(assetChoice(binding, (v) => {
+        binding = v;
+      }));
+    };
+    body.append(
+      el("div", { text: item.exportName || item.filename }),
+      choice,
+      button("\uD30C\uC77C\uBA85\uC5D0\uC11C \uADDC\uCE59 \uCC3E\uAE30", () => void (async () => {
+        try {
+          const r = await state.studio.assetMatch(binding.project, item.path);
+          clear(notice10);
+          if (!r.matches.length) {
+            notice10.textContent = "\uC77C\uCE58\uD558\uB294 \uC138\uD2B8\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4. \uC138\uD2B8\xB7\uC2AC\uB86F\xB7\uCE90\uB9AD\uD130\uB97C \uC9C1\uC811 \uC120\uD0DD\uD558\uC138\uC694.";
+            return;
+          }
+          notice10.appendChild(el("div", { text: "\uC801\uC6A9\uD560 \uC138\uD2B8\uB97C \uC120\uD0DD\uD558\uC138\uC694." }));
+          for (const m of r.matches) notice10.appendChild(button(m.setId + " \xB7 " + m.exportName, () => {
+            binding = { project: m.project, setId: m.setId, slotId: m.slotId, fields: m.fields };
+            draw2();
+          }));
+        } catch (e) {
+          notice10.textContent = msg18(e);
+        }
+      })()),
+      button("\uC774 \uC774\uBBF8\uC9C0\uC5D0 \uC801\uC6A9", () => void (async () => {
+        try {
+          const result = await state.studio.assetBind(item.path, binding);
+          notice10.textContent = "\uC801\uC6A9\uD588\uC2B5\uB2C8\uB2E4: " + result.exportName;
+          await hub.refresh();
+        } catch (e) {
+          notice10.textContent = msg18(e);
+        }
+      })()),
+      notice10
+    );
+    draw2();
+    modal("\uC774\uBBF8\uC9C0 \uC5D0\uC14B \uADDC\uCE59", body, { sticky: true });
+  }
+  function openCoverage(folder) {
+    let project = projectHint(), character = "";
+    const result = el("div", { class: "notice" });
+    const body = el("div", {}, [
+      field("\uD504\uB85C\uC81D\uD2B8", input(project, (v) => {
+        project = v;
+      })),
+      field("\uCE90\uB9AD\uD130\uBA85", input(character, (v) => {
+        character = v;
+      })),
+      el("div", { class: "hint", text: folder + " \uBC0F \uD558\uC704 \uD3F4\uB354\uC758 \uD604\uC7AC \uCC44\uD0DD \uC0C1\uD0DC\uB97C \uC9D1\uACC4\uD569\uB2C8\uB2E4." }),
+      button("\uBD80\uC871\uBD84 \uD655\uC778", () => void (async () => {
+        try {
+          const r = await state.studio.assetCoverage(project, character, folder);
+          clear(result);
+          result.appendChild(el("div", { text: r.complete ? "\uD544\uC218 \uC2AC\uB86F\uC744 \uBAA8\uB450 \uCC44\uD0DD\uD588\uC2B5\uB2C8\uB2E4." : `\uD544\uC218 \uC2AC\uB86F ${r.missing.length}\uAC1C\uAC00 \uBD80\uC871\uD569\uB2C8\uB2E4.` }));
+          for (const slot of r.slots) result.appendChild(el("div", { text: `${slot.setId} / ${slot.slotId} \xB7 ${modes.find((m) => m[0] === slot.status)?.[1]} \xB7 ${slot.present ? "\uCC44\uD0DD\uB428" : "\uC5C6\uC74C"}` }));
+        } catch (e) {
+          result.textContent = msg18(e);
+        }
+      })()),
+      result
+    ]);
+    modal("\uCE90\uB9AD\uD130\uBCC4 \uBD80\uC871\uBD84", body, { sticky: true });
+  }
+
   // src/ui/studio/gen.ts
   var jobTimer = null;
   var jobsStale = true;
@@ -15496,7 +16077,7 @@ name: ${nm}
     ]);
   }
   function openParamsDialog() {
-    const field = (label, node) => el("label", { class: "field" }, [el("span", { text: label }), node]);
+    const field2 = (label, node) => el("label", { class: "field" }, [el("span", { text: label }), node]);
     const two = (a, b) => el("div", { class: "row" }, [a, b]);
     const out = el("div", {});
     const modelInput = el("input", { value: gen.model, placeholder: "nai-diffusion-4-5-full" });
@@ -15521,7 +16102,7 @@ name: ${nm}
     const planBtn = el("button", { class: "ghost tiny", text: "\uACC4\uD68D \uBCF4\uAE30", title: "\uBB34\uC5C7\uC774 \uBA87 \uC7A5 \uC0DD\uC131\uB420\uC9C0 \uBBF8\uB9AC \uBD05\uB2C8\uB2E4 (\uBB34\uB8CC)" });
     planBtn.addEventListener("click", () => void showPlan(out));
     const body = el("div", { class: "genform" }, [
-      field("\uBAA8\uB378", modelInput),
+      field2("\uBAA8\uB378", modelInput),
       el("div", { class: "row" }, [checkBtn, checkOut]),
       // References follow the cards (refMode + per-image enabled) - no switch.
       refNote(),
@@ -15548,6 +16129,18 @@ name: ${nm}
       qualityToggle(),
       textField("\uC2DC\uB4DC", "seed", "\uBE44\uC6B0\uBA74 \uB79C\uB364"),
       textField("\uC800\uC7A5 \uD3F4\uB354", "folder", "studio/output/\u2026"),
+      assetChoice({
+        project: gen.assetProject,
+        setId: gen.assetSet,
+        slotId: gen.assetSlot,
+        fields: gen.assetCharacter ? { character: gen.assetCharacter } : {}
+      }, (value) => {
+        gen.assetProject = value.project;
+        gen.assetSet = value.setId;
+        gen.assetSlot = value.slotId || "";
+        gen.assetCharacter = value.fields.character || "";
+        persistGen();
+      }),
       el("div", { class: "row", style: { marginTop: "8px" } }, [planBtn]),
       out
     ]);
@@ -15623,7 +16216,7 @@ name: ${nm}
         ]));
       }
       for (const i of r.items.slice(0, 12)) {
-        out.appendChild(el("div", { class: "hint", text: `${i.name}  seed=${i.seed ?? "\uB79C\uB364"}` }));
+        out.appendChild(el("div", { class: "hint", text: `${i.exportName || i.name}  seed=${i.seed ?? "\uB79C\uB364"}` }));
       }
       if (r.items.length > 12) out.appendChild(el("div", { class: "hint", text: `\u2026 \uC774\uD558 ${r.items.length - 12}\uAC1C \uC0DD\uB7B5` }));
     } catch (e) {
@@ -15711,10 +16304,10 @@ name: ${nm}
       hub.notice("\uC2DC\uC791\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
     }
   }
-  async function cancelRun() {
-    if (!S.jobId) return;
+  async function cancelRun(jobId = S.jobId) {
+    if (!jobId) return;
     try {
-      await state.studio.cancelJob(S.jobId);
+      await state.studio.cancelJob(jobId);
     } catch (e) {
       hub.notice("\uCDE8\uC18C \uC694\uCCAD\uC774 \uB2FF\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
     }
@@ -15736,13 +16329,10 @@ name: ${nm}
     hub.jobTick();
     hub.drawCentre();
   }
-  function jobPollAlive() {
-    return jobTimer !== null;
-  }
   function pendingCount() {
     const p = S.queueJob?.payload;
     if (!p) return 0;
-    return Math.max(0, p.total - p.done - (p.failed?.length ?? 0));
+    return Math.max(0, p.total - p.done);
   }
   async function loadJobs(force = false) {
     if (!force && !jobsStale && S.jobs.length) return S.jobs;
@@ -15757,10 +16347,13 @@ name: ${nm}
           void pollJob();
         }
       } else {
-        const mine = S.jobs.find((j) => j.id === S.jobId);
+        const mine = S.jobs.find((j) => j.id === S.jobId) ?? await state.studio.job(S.jobId);
         if (!mine) forgetJob("\uD654\uBA74\uC758 \uBC30\uCE58\uAC00 \uC11C\uBC84\uC5D0 \uC5C6\uC5B4 \uC9C0\uC6E0\uC2B5\uB2C8\uB2E4 (\uC7AC\uC2DC\uC791\uB418\uC5C8\uAC70\uB098 \uB05D\uB0AC\uC2B5\uB2C8\uB2E4).");
         else if (["done", "partial", "error", "cancelled"].includes(mine.state)) await finishJob(mine);
-        else if (!jobTimer) void pollJob();
+        else {
+          S.queueJob = mine;
+          if (!jobTimer) void pollJob();
+        }
       }
     } catch {
     }
@@ -16542,20 +17135,20 @@ ${negative.value.trim()}
         out.textContent = msg18(e);
       }
     });
-    const field = (label, node, hint = "") => el("label", { class: "field" }, [
+    const field2 = (label, node, hint = "") => el("label", { class: "field" }, [
       el("span", { text: label }),
       node,
       hint ? el("div", { class: "hint", text: hint }) : null
     ]);
     let section = "prompt";
     const promptPane = el("div", {}, [
-      field("\uC774\uB984", name),
+      field2("\uC774\uB984", name),
       el("div", { class: "row", style: { marginBottom: "8px" } }, [
         el("label", { class: "row" }, [enabledBox, el("span", { text: "\uD65C\uC131 (\uC0DD\uC131\uC5D0 \uC2E4\uB9BC)" })]),
         el("label", { class: "field", style: { width: "110px", marginBottom: "0" } }, [el("span", { text: "\uC21C\uC11C" }), order])
       ]),
-      field("\uD504\uB86C\uD504\uD2B8", caption),
-      field("\uB124\uAC70\uD2F0\uBE0C", negative),
+      field2("\uD504\uB86C\uD504\uD2B8", caption),
+      field2("\uB124\uAC70\uD2F0\uBE0C", negative),
       el("details", { class: "advbox" }, [
         el("summary", { text: "\uACE0\uAE09 (\uC704\uCE58)" }),
         el("div", { class: "row", style: { marginBottom: "8px" } }, [
@@ -16706,6 +17299,10 @@ ${negative.value.trim()}
     const notice10 = tokenNotice();
     if (notice10) mount.appendChild(notice10);
     imgEl = el("img", { alt: "", style: { display: "none" } });
+    imgEl.style.cursor = "zoom-in";
+    imgEl.addEventListener("click", () => {
+      if (shownKey && shownKey !== "live") openImage(shownKey, S.viewList);
+    });
     captionEl = el("div", { class: "hint previewname" });
     emptyEl = el("div", { class: "empty" });
     previewBox = el("div", { class: "bigpreview" }, [imgEl, captionEl, emptyEl]);
@@ -16838,12 +17435,7 @@ ${negative.value.trim()}
     syncPreview();
   }
   function openImage(path, list2) {
-    S.viewPath = path;
-    S.viewList = [...list2];
-    S.centreTab = "single";
-    S.centreMode = "tab";
-    persistCentreTab();
-    hub.drawCentre();
+    showArtifact({ path, title: path.split("/").pop() || path, kind: "image", images: list2 });
   }
 
   // src/ui/studio/left-prompt.ts
@@ -17299,20 +17891,19 @@ ${negative.value.trim()}
   }
 
   // src/ui/studio/left-output.ts
-  var clip = null;
   function setClip(op, paths) {
-    clip = paths.length ? { op, paths } : null;
-    if (clip) {
+    setFileClipboard(paths.length ? { op, paths } : null);
+    if (fileClipboard) {
       hub.notice(`${paths.length}\uAC1C\uB97C ${op === "copy" ? "\uBCF5\uC0AC" : "\uC798\uB77C\uB0B4\uAE30"}\uD588\uC2B5\uB2C8\uB2E4 \u2014 \uBD99\uC5EC\uB123\uC744 \uD3F4\uB354\uC5D0\uC11C Ctrl+V \uB610\uB294 \uC6B0\uD074\uB9AD.`);
     }
     hub.drawLeft();
   }
   function hasClip() {
-    return !!clip;
+    return !!fileClipboard;
   }
   function clipClass2(path) {
-    if (!clip || !clip.paths.includes(path)) return "";
-    return clip.op === "cut" ? " clipcut" : " clipcopy";
+    if (!fileClipboard || !fileClipboard.paths.includes(path)) return "";
+    return fileClipboard.op === "cut" ? " clipcut" : " clipcopy";
   }
   function toTreeNode2(n) {
     return {
@@ -17339,7 +17930,7 @@ ${negative.value.trim()}
     if (ctrl && (k === "c" || k === "x") && many.length) {
       ev.preventDefault();
       setClip(k === "c" ? "copy" : "cut", many);
-    } else if (ctrl && k === "v" && clip && sel) {
+    } else if (ctrl && k === "v" && fileClipboard && sel) {
       ev.preventDefault();
       void pasteIn(sel);
     } else if ((ev.key === "Delete" || ev.key === "Backspace") && many.length) {
@@ -17457,8 +18048,8 @@ ${negative.value.trim()}
         onClick: () => setClip("cut", paths)
       },
       {
-        label: clip ? `\uBD99\uC5EC\uB123\uAE30 (${clip.paths.length})` : "\uBD99\uC5EC\uB123\uAE30",
-        disabled: !clip || many,
+        label: fileClipboard ? `\uBD99\uC5EC\uB123\uAE30 (${fileClipboard.paths.length})` : "\uBD99\uC5EC\uB123\uAE30",
+        disabled: !fileClipboard || many,
         onClick: () => void pasteIn(node.path)
       },
       null,
@@ -17522,12 +18113,13 @@ ${negative.value.trim()}
     });
   }
   async function pasteIn(target) {
-    const c = clip;
+    const c = fileClipboard;
     if (!c) return;
     const list2 = c.paths.filter((q) => q !== target && !target.startsWith(q + "/"));
     if (!list2.length) return;
     try {
-      const r = c.op === "copy" ? await state.copyFiles(list2, target) : await state.moveFiles(list2, target);
+      const r = await pasteFiles(target);
+      if (!r) return;
       hub.notice(
         r.failed.length ? `${r.done}\uAC1C \uCC98\uB9AC, ${r.failed.length}\uAC1C\uB294 \uAC74\uB108\uB700 \u2014 ${r.failed[0].error}` : `${r.done}\uAC1C\uB97C ${target}/ \uC5D0 ${c.op === "copy" ? "\uBCF5\uC0AC" : "\uC774\uB3D9"}\uD588\uC2B5\uB2C8\uB2E4.`,
         r.failed.length ? "err" : "ok"
@@ -17535,7 +18127,6 @@ ${negative.value.trim()}
     } catch (e) {
       hub.notice("\uCC98\uB9AC\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
     }
-    if (c.op === "cut") clip = null;
     hub.touchQuiet();
     await hub.refresh();
   }
@@ -17930,6 +18521,8 @@ ${negative.value.trim()}
   // src/ui/studio/center-batch.ts
   var runBtn2 = null;
   var progressLine2 = null;
+  var jobsBox = null;
+  var jobsKey = "";
   var summaryBox = null;
   var cardRegs = /* @__PURE__ */ new Map();
   var batchBar = null;
@@ -17950,6 +18543,10 @@ ${negative.value.trim()}
     }
   }
   function drawBatch(mount) {
+    jobsBox = el("div", { class: "studio-job-list" });
+    jobsKey = "";
+    mount.appendChild(jobsBox);
+    void loadJobs(true).then(() => batchTick());
     const notice10 = tokenNotice();
     if (notice10) mount.appendChild(notice10);
     const cols = colPicker({ values: [2, 3, 4], get: () => S.cols, set: (n) => {
@@ -17992,6 +18589,26 @@ ${negative.value.trim()}
     syncRunBtn();
   }
   function batchTick() {
+    if (jobsBox?.isConnected) {
+      const jobs = S.jobs.filter((j) => ["running", "pending"].includes(j.state));
+      const key = JSON.stringify(jobs.map((j) => [j.id, j.state, j.payload?.done, j.cancelRequested]));
+      if (key !== jobsKey) {
+        jobsKey = key;
+        clear(jobsBox);
+        jobsBox.appendChild(el("div", { class: "sectiontitle", text: `\uC11C\uBC84 JOB \xB7 \uC2E4\uD589/\uB300\uAE30 ${jobs.length}\uAC1C` }));
+        for (const job of jobs) {
+          const cancel = el("button", { class: "ghost tiny", text: job.cancelRequested ? "\uCDE8\uC18C \uC694\uCCAD\uB428" : "\uCDE8\uC18C", disabled: !!job.cancelRequested });
+          cancel.addEventListener("click", () => {
+            cancel.disabled = true;
+            void cancelRun(job.id).then(() => batchTick());
+          });
+          jobsBox.appendChild(el("div", { class: "row" }, [
+            el("span", { class: "grow", text: `${job.id} \xB7 ${stateLabel(job.state)} \xB7 ${job.payload?.done ?? 0}/${job.payload?.total ?? 0}` }),
+            cancel
+          ]));
+        }
+      }
+    }
     syncRunBtn();
     syncSceneProgress();
     syncBatchBar();
@@ -18074,7 +18691,7 @@ ${negative.value.trim()}
     }
     if (barEta) {
       const per = stepMsEma();
-      const remain = Math.max(0, p.total - p.done - failedN);
+      const remain = Math.max(0, p.total - p.done);
       if (per && livePreview.total && remain) {
         const secs = Math.round((livePreview.total - livePreview.step + Math.max(0, remain - 1) * livePreview.total) * per / 1e3);
         barEta.textContent = `\uB0A8\uC740 ${remain}\uC7A5 \xB7 \uC57D ${secs >= 60 ? Math.round(secs / 60) + "\uBD84" : secs + "\uCD08"}`;
@@ -18569,7 +19186,10 @@ ${negative.value.trim()}
   }
   function groupSig(g) {
     if (!g) return "";
-    return [...g.groups.flatMap((x) => x.items), ...g.unmatched].map((i) => `${i.filename}:${i.modified ?? 0}`).sort().join("|");
+    return [
+      ...g.groups.flatMap((x) => x.items.map((i) => `${x.key}:${i.filename}:${i.modified ?? 0}`)),
+      ...g.unmatched.map((i) => `?:${i.filename}:${i.modified ?? 0}`)
+    ].sort().join("|");
   }
   async function pollGroups() {
     if (!groups || !S.selected || groups.folder !== S.selected) return;
@@ -18658,10 +19278,6 @@ ${negative.value.trim()}
   function suggestCount() {
     return Object.values(selection2).filter((s) => !!s.suggest).length;
   }
-  function syncAllCells() {
-    for (const s of cellSyncs.values()) s();
-    missingSync?.();
-  }
   function drawSelector(node) {
     if (!S.viewMount || !groups) return;
     const viewMount6 = S.viewMount;
@@ -18713,12 +19329,10 @@ ${negative.value.trim()}
       state.requestPrompt(`"${node.path}" \uD3F4\uB354\uB97C \uC7AC\uAC80\uC218\uD574 \uC918. review_folder \uB85C \uBCF4\uACE0 suggest_selection \uC73C\uB85C \uC81C\uC548\uC744 \uC0C8\uB85C \uC801\uC5B4 \uC918 (\uAE30\uC874 \uC81C\uC548\uC740 \uAC31\uC2E0). \uD45C\uC2DC(\uCC44\uD0DD\xB7\uBC84\uB9BC\xB7\uC218\uC815)\uB294 \uBC14\uAFB8\uC9C0 \uB9D0\uACE0, \uB2E4 \uC801\uC73C\uBA74 \uAC80\uC218 \uD0ED\uC744 \uC5F4\uC5B4 \uC918.`);
     });
     bar3.appendChild(rereview);
-    const none = el("button", { class: "ghost tiny", text: "\uC120\uD0DD \uD574\uC81C" });
-    none.addEventListener("click", () => {
-      for (const k of Object.keys(selection2)) selection2[k] = { ...selection2[k], use: false, rep: false };
-      syncAllCells();
-      void state.studio.saveSelection(S.selected, selection2);
-    });
+    const rules = el("button", { class: "ghost tiny", text: "\uC5D0\uC14B \uADDC\uCE59" });
+    rules.addEventListener("click", () => void openAssetRules());
+    const coverage = el("button", { class: "ghost tiny", text: "\uCE90\uB9AD\uD130 \uBD80\uC871\uBD84" });
+    coverage.addEventListener("click", () => openCoverage(node.path));
     const nSug = suggestCount();
     if (nSug) {
       const applyAll = el("button", {
@@ -18738,7 +19352,7 @@ ${negative.value.trim()}
       });
       bar3.append(applyAll, clearAll);
     }
-    bar3.append(none, exportButton(node));
+    bar3.append(rules, coverage, exportButton(node));
     if (/\/selected$/.test(node.path)) bar3.appendChild(adoptButton());
     viewMount6.appendChild(bar3);
     const ruleBtn = el("button", {
@@ -18761,7 +19375,7 @@ ${negative.value.trim()}
     viewMount6.appendChild(missingBox);
     const renderMissing = () => {
       clear(missingBox);
-      const missing = g.groups.filter((grp) => !grp.items.some((i) => selection2[i.filename]?.use)).map((grp) => grp.key);
+      const missing = g.groups.filter((grp) => !grp.items.some((i) => selection2[i.filename]?.use)).map((grp) => grp.label || grp.key);
       if (!missing.length) return;
       const fill2 = el("button", {
         class: "ghost tiny",
@@ -18812,7 +19426,7 @@ ${negative.value.trim()}
         viewMode2 = "group";
         hub.drawCentre();
       });
-      nav.append(up, prev, next, el("span", { class: "sectiontitle", text: `${drill} \xB7 ${grp?.items.length ?? 0}\uC7A5` }));
+      nav.append(up, prev, next, el("span", { class: "sectiontitle", text: `${grp?.label || drill} \xB7 ${grp?.items.length ?? 0}\uC7A5` }));
       viewMount6.appendChild(nav);
       viewMount6.appendChild(candidateGrid(grp?.items ?? [], grp?.items));
     } else if (viewMode2 === "group") {
@@ -18851,10 +19465,10 @@ ${negative.value.trim()}
     const chosenBadge = el("span", { class: "badge" });
     const fixBadge = el("span", { class: "badge" });
     const sugBadge = el("span", { class: "badge sug", title: "AI \uC81C\uC548\uC774 \uC788\uB294 \uD6C4\uBCF4" });
-    const cell2 = el("div", { class: "fcell groupcard", title: `${grp.key} \u2014 \uB20C\uB7EC\uC11C \uD6C4\uBCF4\uB97C \uD3BC\uCE69\uB2C8\uB2E4` }, [
+    const cell2 = el("div", { class: "fcell groupcard", title: `${grp.label || grp.key} \u2014 \uB20C\uB7EC\uC11C \uD6C4\uBCF4\uB97C \uD3BC\uCE69\uB2C8\uB2E4` }, [
       pic,
       el("div", { class: "fname row" }, [
-        el("span", { class: "grow", text: grp.key }),
+        el("span", { class: "grow", text: grp.label || grp.key }),
         el("span", { class: "badge", text: `${grp.items.length}\uC7A5` }),
         chosenBadge,
         fixBadge,
@@ -18904,10 +19518,15 @@ ${negative.value.trim()}
       mk("inpaint", "\uC218\uC815", "\uBA3C\uC800 \uACE0\uCCD0\uC57C \uD569\uB2C8\uB2E4"),
       mk("delete", "\uBC84\uB9BC", "\uC9C0\uC6B8 \uD6C4\uBCF4\uC785\uB2C8\uB2E4")
     );
+    const binding = el("button", { class: "ghost tiny", text: "\uADDC\uCE59", title: "\uC774 \uC774\uBBF8\uC9C0\uC758 \uC5D0\uC14B \uC138\uD2B8\xB7\uC2AC\uB86F \uC9C0\uC815" });
+    binding.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      openAssetBinding(it);
+    });
     const sug = el("div", { class: "sugline", style: { display: "none" } });
     const cell2 = el("div", { class: "fcell selcell", title: it.filename }, [
       pic,
-      el("div", { class: "fname", text: it.filename }),
+      el("div", { class: "fname row" }, [el("span", { class: "grow", text: it.filename }), binding]),
       flags,
       sug
     ]);
@@ -19114,8 +19733,8 @@ ${negative.value.trim()}
       }, 800);
     });
     const by = el("select", { title: "\uC5B4\uB290 \uD544\uB4DC\uB85C \uBB36\uC5B4 \uBCFC\uC9C0" });
-    const fields2 = [.../* @__PURE__ */ new Set([g?.groupBy ?? "", ...g?.fields ?? []])].filter(Boolean);
-    for (const f of fields2) {
+    const fields3 = [.../* @__PURE__ */ new Set([g?.groupBy ?? "", ...g?.fields ?? []])].filter(Boolean);
+    for (const f of fields3) {
       const o = el("option", { value: f, text: f });
       if (f === g?.groupBy) o.setAttribute("selected", "selected");
       by.appendChild(o);
@@ -19164,6 +19783,30 @@ ${negative.value.trim()}
       b.disabled = true;
       try {
         const eff = effective(prefsFor(node.path));
+        await state.studio.saveSelection(node.path, selection2);
+        const preview2 = await state.studio.exportSelected(node.path, "", eff.pattern, eff.groupBy, true);
+        if (preview2.problems?.length) throw new Error(preview2.problems.join("\n"));
+        if (preview2.managed) {
+          const body = el("div", {}, [el("div", { class: "hint", text: "\uBCF5\uC218 \uCC44\uD0DD\uC740 .2, .3 \uBC88\uD638\uB85C \uC800\uC7A5\uD558\uBA70, \uBD07\uC5D0\uC11C\uB294 \uAC19\uC740 \uC774\uB984\uC758 \uB79C\uB364 \uD6C4\uBCF4\uB85C \uC0AC\uC6A9\uD569\uB2C8\uB2E4." })]);
+          for (const row of preview2.mapping || []) body.appendChild(el("div", { text: row.source.split("/").pop() + " \u2192 " + row.target }));
+          const run = el("button", { class: "primary", text: "\uB0B4\uBCF4\uB0B4\uAE30" });
+          const output = el("div", { class: "notice" });
+          run.addEventListener("click", async () => {
+            run.disabled = true;
+            try {
+              const result = await state.studio.exportSelected(node.path, "", eff.pattern, eff.groupBy);
+              output.textContent = `${result.folder} \xB7 \uCC44\uD0DD ${result.used}\uC7A5 \uB0B4\uBCF4\uB0C8\uC2B5\uB2C8\uB2E4.`;
+              await hub.refresh();
+            } catch (e) {
+              output.textContent = msg18(e);
+            } finally {
+              run.disabled = false;
+            }
+          });
+          body.append(run, output);
+          modal("\uB0B4\uBCF4\uB0BC \uD30C\uC77C\uBA85", body, { sticky: true });
+          return;
+        }
         const r = await state.studio.exportSelected(node.path, "", eff.pattern, eff.groupBy);
         hub.notice(`${r.folder} \u2014 \uCC44\uD0DD ${r.used}, \uC218\uC815 ${r.inpaint}, \uBE48 \uC2AC\uB86F ${r.empty} \xB7 selected \uD3F4\uB354\uB97C \uC5F4\uBA74 \uBD07\uC5D0 \uBC18\uC601\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4`, "ok");
         hub.touchQuiet();
@@ -19306,7 +19949,7 @@ ${negative.value.trim()}
     viewMount6.appendChild(el("div", {
       class: "hint",
       style: { marginBottom: "8px" },
-      text: `\uD30C\uC77C ${node.files.length} \xB7 \uD558\uC704 \uD3F4\uB354 ${node.children.length} \u2014 \uD074\uB9AD\uC73C\uB85C \uC120\uD0DD\uD558\uBA74 \uC704\uC5D0 \uD06C\uAC8C \uBCF4\uC785\uB2C8\uB2E4 (Shift \uBC94\uC704) \xB7 \uB450 \uBC88 \uD074\uB9AD\uC73C\uB85C 1\uC7A5 \uD0ED\uC5D0 \xB7 \uB04C\uC5B4\uC11C \uD3F4\uB354/\uC67C\uCABD \uD2B8\uB9AC\uB85C \uC774\uB3D9`
+      text: `\uD30C\uC77C ${node.files.length} \xB7 \uD558\uC704 \uD3F4\uB354 ${node.children.length} \u2014 \uD074\uB9AD\uC73C\uB85C \uC120\uD0DD (Shift \uBC94\uC704) \xB7 \uB450 \uBC88 \uD074\uB9AD\uC73C\uB85C \uC6D0\uBCF8 \uC790\uC138\uD788 \uBCF4\uAE30 \xB7 Ctrl+C/X \uD6C4 \uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4\uC5D0\uC11C Ctrl+V \uAC00\uB2A5`
     }));
     const bigPick = el("div", { class: "bigpick", style: { display: "none" } });
     const bigImg = el("img", { alt: "" });
@@ -19565,7 +20208,6 @@ ${negative.value.trim()}
           void refresh2();
           return;
         }
-        if (S.jobId && jobPollAlive()) return;
         void loadJobs(true).then(() => hub.jobTick());
       }, 5e3, () => wasStudioActive);
     } else if (entering || renderedRev !== state.filesRev || state.openStudioRequest) {
@@ -20070,7 +20712,7 @@ ${negative.value.trim()}
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.14.8"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.2"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
@@ -20166,7 +20808,7 @@ ${negative.value.trim()}
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.14.8" }),
+        el("span", { class: "dim", text: "v0.15.2" }),
         healthEl,
         el("span", { class: "spacer" }),
         reload,
@@ -20483,6 +21125,6 @@ ${negative.value.trim()}
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.14.8"} loaded`);
+    console.log(`[risu-hina] v${"0.15.2"} loaded`);
   })();
 })();

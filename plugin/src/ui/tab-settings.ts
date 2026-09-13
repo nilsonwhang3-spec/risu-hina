@@ -11,6 +11,7 @@ import { el, clear, armed, modal } from './dom';
 import { state, type ApiKeyEntry, type ProviderProfile } from '../state';
 import { buildPresetsCard, buildCodexBox, buildAdvancedCard } from './presets';
 import { buildSkillsCard } from './skills';
+import { buildAgentNotesCard } from './agent-notes';
 import { agentPanel } from './agentpane';
 import { buildDebugCard, buildUpdateCard } from './debugpanel';
 import { transport } from '../transport';
@@ -78,7 +79,7 @@ export function renderSettingsTab(mount: HTMLElement): void {
         // credentials here leaves it still saying they are not set.
         agentPanel().invalidate();
       },
-    }), buildAdvancedCard()]],
+    }), buildAgentNotesCard(refresh => refreshers.push(refresh)), buildAdvancedCard()]],
     ['스킬', [buildSkillsCard({ onMount: (refresh) => { refreshers.push(refresh); } })]],
     ['정보 · 로그', [buildCatalogCard(), buildDebugCard(), aboutMount]],
   ];
@@ -566,7 +567,7 @@ function buildKeysCard(): HTMLElement {
   // The OpenAI subscription is a credential too, so its login lives here;
   // a preset then picks it the way it picks a key. Present only when the
   // backend offers that path at all (its operator turns it on).
-  const offered = transport.health?.codexEnabled === true;
+  const offered = true;
   const nai = buildNaiCard();
   refreshers.push(nai.refresh);
   void nai.refresh();

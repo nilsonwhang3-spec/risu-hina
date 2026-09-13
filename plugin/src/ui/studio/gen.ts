@@ -13,6 +13,7 @@ import { state, type StudioJob } from '../../state';
 import { BackendError } from '../../transport';
 import { pickerRow, openListPicker, type PickerEntry } from '../pickers';
 import { S, hub, gen, persistGen, activeOf, spec, checkUnresolved, newCard, msg } from './store';
+import { assetChoice } from './asset-rules';
 
 let jobTimer: (() => void) | null = null;
 let jobsStale = true;
@@ -202,6 +203,11 @@ export function openParamsDialog(): void {
     qualityToggle(),
     textField('시드', 'seed', '비우면 랜덤'),
     textField('저장 폴더', 'folder', 'studio/output/…'),
+    assetChoice({ project: gen.assetProject, setId: gen.assetSet, slotId: gen.assetSlot,
+      fields: gen.assetCharacter ? { character: gen.assetCharacter } : {} }, value => {
+      gen.assetProject = value.project; gen.assetSet = value.setId; gen.assetSlot = value.slotId || '';
+      gen.assetCharacter = value.fields.character || ''; persistGen();
+    }),
     el('div', { class: 'row', style: { marginTop: '8px' } }, [planBtn]),
     out,
   ]);
@@ -285,7 +291,7 @@ async function showPlan(out: HTMLElement): Promise<void> {
       ]));
     }
     for (const i of r.items.slice(0, 12)) {
-      out.appendChild(el('div', { class: 'hint', text: `${i.name}  seed=${i.seed ?? '랜덤'}` }));
+      out.appendChild(el('div', { class: 'hint', text: `${i.exportName || i.name}  seed=${i.seed ?? '랜덤'}` }));
     }
     if (r.items.length > 12) out.appendChild(el('div', { class: 'hint', text: `… 이하 ${r.items.length - 12}개 생략` }));
   } catch (e) {
@@ -374,10 +380,10 @@ export async function startRun(overrides: Record<string, unknown> = {}): Promise
   }
 }
 
-export async function cancelRun(): Promise<void> {
-  if (!S.jobId) return;
+export async function cancelRun(jobId = S.jobId): Promise<void> {
+  if (!jobId) return;
   try {
-    await state.studio.cancelJob(S.jobId);
+    await state.studio.cancelJob(jobId);
   } catch (e) {
     hub.notice('취소 요청이 닿지 않았습니다: ' + msg(e), 'err');
   }
@@ -411,7 +417,7 @@ export function jobPollAlive(): boolean {
 export function pendingCount(): number {
   const p = S.queueJob?.payload;
   if (!p) return 0;
-  return Math.max(0, p.total - p.done - (p.failed?.length ?? 0));
+  return Math.max(0, p.total - p.done);
 }
 
 /** Recent jobs for the batch/history tabs, cached until a run finishes. */
@@ -434,10 +440,10 @@ export async function loadJobs(force = false): Promise<StudioJob[]> {
       // The job on screen against the server's list (§1-58): after a
       // network error the poll used to die and the batch tab kept showing a
       // job that had long finished - or that a restart had forgotten.
-      const mine = S.jobs.find((j) => j.id === S.jobId);
+      const mine = S.jobs.find((j) => j.id === S.jobId) ?? await state.studio.job(S.jobId);
       if (!mine) forgetJob('화면의 배치가 서버에 없어 지웠습니다 (재시작되었거나 끝났습니다).');
       else if (['done', 'partial', 'error', 'cancelled'].includes(mine.state)) await finishJob(mine);
-      else if (!jobTimer) void pollJob();
+      else { S.queueJob = mine; if (!jobTimer) void pollJob(); }
     }
   } catch { /* keep what we have */ }
   return S.jobs;

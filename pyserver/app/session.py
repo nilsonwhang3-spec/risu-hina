@@ -16,6 +16,7 @@ import asyncio
 import json
 import threading
 import uuid
+from contextlib import ExitStack
 from typing import Any, AsyncGenerator
 
 from pydantic_ai.messages import (
@@ -28,7 +29,10 @@ from pydantic_ai.messages import (
     TextPartDelta,
     ThinkingPart,
     UserPromptPart,
+    ToolCallPart,
+    ToolReturnPart,
 )
+from pydantic_ai import capture_run_messages
 
 from . import agent as agent_mod
 from . import providers
@@ -172,15 +176,20 @@ def _next_seq(session_id: str) -> int:
     return (int(row["m"]) + 1) if row else 0
 
 
+_MESSAGE_LOCK = threading.RLock()
+
+
 def _save_message(session_id: str, role: str, content: Any,
                   usage: dict | None = None, cost: float | None = None) -> None:
-    db.execute(
-        "INSERT INTO agent_messages(session_id, seq, role, content_json, usage_json, cost_usd, ts) "
-        "VALUES(?,?,?,?,?,?,?)",
-        (session_id, _next_seq(session_id), role, db.js(content),
-         db.js(usage) if usage else None, cost, db.now()),
-    )
-    db.execute("UPDATE sessions SET updated_at = ? WHERE id = ?", (db.now(), session_id))
+    # Tool workers and streamed checkpoints can arrive together.
+    with _MESSAGE_LOCK:
+        db.execute(
+            "INSERT INTO agent_messages(session_id, seq, role, content_json, usage_json, cost_usd, ts) "
+            "VALUES(?,?,?,?,?,?,?)",
+            (session_id, _next_seq(session_id), role, db.js(content),
+             db.js(usage) if usage else None, cost, db.now()),
+        )
+        db.execute("UPDATE sessions SET updated_at = ? WHERE id = ?", (db.now(), session_id))
 
 
 def _history(session_id: str) -> list:
@@ -380,6 +389,26 @@ def _last_history_seq(session_id: str) -> int:
 def note_job(session_id: str | None, job_id: str) -> None:
     if session_id and job_id:
         _JOBS.setdefault(session_id, set()).add(job_id)
+        if db.one("SELECT id FROM sessions WHERE id = ?", (session_id,)):
+            _save_message(session_id, "checkpoint", {"kind": "job", "jobId": job_id})
+
+
+def work_log(session_id: str) -> list[dict]:
+    rows = db.query("SELECT content_json, ts FROM agent_messages WHERE session_id = ? "
+                    "AND role = 'checkpoint' ORDER BY seq DESC LIMIT 30", (session_id,))
+    return [{"at": r["ts"], **json.loads(r["content_json"])} for r in reversed(rows)]
+
+
+def _checkpoint(session_id: str, event: Any) -> None:
+    kind = type(event).__name__
+    if kind not in ("FunctionToolCallEvent", "FunctionToolResultEvent"):
+        return
+    part = getattr(event, "part", None) if kind == "FunctionToolCallEvent" else getattr(event, "result", None)
+    _save_message(session_id, "checkpoint", {
+        "kind": "started" if kind == "FunctionToolCallEvent" else "returned",
+        "tool": getattr(part, "tool_name", ""), "callId": getattr(part, "tool_call_id", ""),
+        "result": _short(getattr(part, "content", None), 6000) if kind == "FunctionToolResultEvent" else "",
+    })
 
 
 def stop(session_id: str) -> dict:
@@ -458,12 +487,15 @@ async def run(session_id: str, prompt: str, mode: str = "") -> AsyncGenerator[st
 
     model_name = (config.section("agent").get("model") or "")
     text_acc: list[str] = []
+    captured: list = []
+    capture_stack = ExitStack()
 
     try:
         ag = get_agent()
         # Older turns are summarised once the history is past its budget.
-        history = await agent_mod.compact_history(session_id, _history(session_id))
+        history = _history(session_id)
         history = neutralise_thinking(history, ag.model)
+        captured = capture_stack.enter_context(capture_run_messages())
         async with ag.run_stream_events(
             prompt, deps=deps, message_history=history, usage_limits=agent_mod.turn_limits(),
         ) as events:
@@ -491,6 +523,7 @@ async def run(session_id: str, prompt: str, mode: str = "") -> AsyncGenerator[st
                 except StopAsyncIteration:
                     break
                 pending = asyncio.ensure_future(it.__anext__())
+                _checkpoint(session_id, ev)
                 for line in _translate(ev, text_acc):
                     yield line
                 # Side events land right after the event whose tool pushed
@@ -512,8 +545,8 @@ async def run(session_id: str, prompt: str, mode: str = "") -> AsyncGenerator[st
         # If the history processor compacted the conversation this turn, the
         # compacted form is what gets stored - otherwise every later turn would
         # pay to summarise the same old messages again.
-        compacted = agent_mod.COMPACTED.pop(session_id, None)
-        stored = (compacted + list(result.new_messages())) if compacted is not None else result.all_messages()
+        agent_mod.COMPACTED.pop(session_id, None)
+        stored = result.all_messages()
         # Pictures the vision tools attached stay in THIS turn only: the stored
         # history carries a placeholder, not 100KB of base64 per image (§1-42).
         stored = vision.scrub_history(stored)
@@ -551,7 +584,8 @@ async def run(session_id: str, prompt: str, mode: str = "") -> AsyncGenerator[st
         # from the last SUCCESSFUL one, so after one error the agent had never
         # heard the prompts in between and lost the thread.
         _save_partial_history(session_id, prompt, "".join(text_acc),
-                              _explain(e) if isinstance(e, Exception) else "중단됨", since=hist0)
+                              _explain(e) if isinstance(e, Exception) else "중단됨", since=hist0,
+                              captured=captured)
         if not isinstance(e, Exception):
             # A dropped connection (cancel / GeneratorExit) used to leave no
             # line at all - the one case that matters most to read back.
@@ -563,6 +597,7 @@ async def run(session_id: str, prompt: str, mode: str = "") -> AsyncGenerator[st
             log.exception(f"agent run failed session={session_id}")
         yield _line({"type": "error", "error": _explain(e)})
     finally:
+        capture_stack.close()
         # "이번 턴 항상 허용" and any unanswered prompt end with the turn.
         permits.end_turn(session_id)
         vision.reset_turn(session_id)
@@ -574,7 +609,7 @@ async def run(session_id: str, prompt: str, mode: str = "") -> AsyncGenerator[st
 
 
 def _save_partial_history(session_id: str, prompt: str, partial: str, why: str,
-                          since: int | None = None) -> None:
+                          since: int | None = None, captured: list | None = None) -> None:
     try:
         # The pruned/compacted form this turn started from is the one to keep:
         # re-reading the stored row would throw the pruning away, and the next
@@ -586,9 +621,27 @@ def _save_partial_history(session_id: str, prompt: str, partial: str, why: str,
         if since is not None and _last_history_seq(session_id) != since:
             log.warn("partial history skipped session=%s: a newer turn wrote history first", session_id)
             return
-        history = list(compacted) if compacted is not None else list(_history(session_id))
-        history.append(ModelRequest(parts=[UserPromptPart(content=prompt)]))
-        note = (partial + "\n\n" if partial else "") + f"(이 턴은 완료되지 못했습니다: {why})"
+        history = list(captured) if captured else (
+            list(compacted) if compacted is not None else list(_history(session_id)))
+        if captured:
+            # A provider needs a result for each call. Preserve completed results
+            # and explicitly mark interrupted calls as UNKNOWN, never as failed
+            # or safe to repeat (a background job may still have saved images).
+            outstanding = {}
+            for message in history:
+                for part in message.parts:
+                    if isinstance(part, ToolCallPart):
+                        outstanding[part.tool_call_id] = part
+                    elif getattr(part, "part_kind", "") in ("tool-return", "retry-prompt"):
+                        outstanding.pop(getattr(part, "tool_call_id", ""), None)
+            if outstanding:
+                history.append(ModelRequest(parts=[ToolReturnPart(
+                    tool_name=p.tool_name, tool_call_id=p.tool_call_id,
+                    content="INTERRUPTED: outcome unknown. Inspect existing files/jobs before retrying; do not assume no side effects.",
+                ) for p in outstanding.values()]))
+        else:
+            history.append(ModelRequest(parts=[UserPromptPart(content=prompt)]))
+        note = (partial + "\n\n" if partial and not captured else "") + f"(이 턴은 완료되지 못했습니다: {why})"
         history.append(ModelResponse(parts=[TextPart(content=note)]))
         history = vision.scrub_history(history)
         _save_message(session_id, "history",

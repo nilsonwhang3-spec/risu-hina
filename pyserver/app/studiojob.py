@@ -108,17 +108,47 @@ def _row(job_id: str) -> dict | None:
 
 
 def get(job_id: str) -> dict | None:
-    return _row(job_id)
+    job = _row(job_id)
+    if job:
+        with _lock:
+            job["cancelRequested"] = job_id in _cancel
+    return job
 
 
 def recent(limit: int = 10) -> list[dict]:
-    rows = db.query("SELECT id FROM jobs ORDER BY created_at DESC LIMIT ?", (limit,))
-    return [j for j in (_row(r["id"]) for r in rows) if j]
+    # Active jobs must not disappear when newer completed jobs fill the page.
+    active = db.query("SELECT id FROM jobs WHERE kind = 'studio_generate' AND state IN ('running','pending') "
+                      "ORDER BY CASE state WHEN 'running' THEN 0 ELSE 1 END, created_at")
+    recent_rows = db.query("SELECT id FROM jobs WHERE kind = 'studio_generate' "
+                           "AND state NOT IN ('running','pending') ORDER BY created_at DESC LIMIT ?", (limit,))
+    return [j for j in (get(r["id"]) for r in [*active, *recent_rows]) if j]
+
+
+def recover_interrupted() -> int:
+    """At process startup no worker from the previous process can be alive."""
+    rows = db.query("SELECT id FROM jobs WHERE kind = 'studio_generate' AND state IN ('pending', 'running')")
+    for row in rows:
+        job = _row(row["id"])
+        payload = job.get("payload") or {}
+        payload.pop("current", None)
+        payload["note"] = "서버 재시작으로 중단된 작업입니다. 저장된 이미지를 확인한 뒤 남은 항목만 생성하세요."
+        _update(row["id"], state="cancelled", payload_json=payload,
+                result_json={"saved": len(payload.get("saved") or []),
+                             "failed": len(payload.get("failed") or []), "anlasSpent": None,
+                             "interrupted": True})
+    return len(rows)
 
 
 def cancel(job_id: str) -> bool:
     with _lock:
+        job = _row(job_id)
+        if not job:
+            return False
+        if job["state"] not in ("pending", "running"):
+            return True
         _cancel.add(job_id)
+        if job["state"] == "pending":
+            _update(job_id, state="cancelled", result_json={"saved": 0, "failed": 0, "anlasSpent": 0})
     return True
 
 
@@ -140,6 +170,7 @@ def start(spec: dict) -> dict:
     still honored, and the legacy `useReference` key is accepted and ignored.
     """
     spec = studio.normalize_spec(spec)
+    spec["folder"] = studio.output_folder(spec)
     spec.pop("useReference", None)
     # A missing model is the default, not an empty string sent to NovelAI;
     # an unfamiliar id is asked about (free, ~330ms) so a typo fails the
@@ -193,8 +224,26 @@ def _run(job_id: str) -> None:
                 _update(job_id, state="cancelled")
                 return
     try:
+        with _lock:
+            if job_id in _cancel:
+                _cancel.discard(job_id)
+                _update(job_id, state="cancelled")
+                return
         _run_locked(job_id)
+    except Exception as e:  # preflight/account failures must also end the job
+        log.exception(f"studio worker failed job={job_id}")
+        job = _row(job_id) or {}
+        payload = job.get("payload") or {}
+        payload["note"] = f"작업 중단: {type(e).__name__}: {e}"
+        payload.pop("current", None)
+        _update(job_id, state="error", payload_json=payload,
+                result_json={"saved": len(payload.get("saved") or []),
+                             "failed": len(payload.get("failed") or []), "anlasSpent": None})
     finally:
+        with _lock:
+            _cancel.discard(job_id)
+        with _preview_lock:
+            _preview.pop(job_id, None)
         _GEN_GATE.release()
 
 
@@ -306,12 +355,9 @@ def _run_locked(job_id: str) -> None:
     for item in items:
         with _lock:
             if job_id in _cancel:
-                _cancel.discard(job_id)
-                with _preview_lock:
-                    _preview.pop(job_id, None)
-                payload["anlasAfter"] = nai.anlas()
-                _update(job_id, state="cancelled", payload_json=payload)
-                return
+                # Finalize below so a partial cancellation keeps saved counts
+                # and account usage, just like a completed batch.
+                break
         # Which image is being drawn RIGHT NOW - the queue view's one fact
         # that done/total cannot give. Written before the generation so a
         # poll during the 4-8s wait sees it.
@@ -341,7 +387,8 @@ def _run_locked(job_id: str) -> None:
             if notes:
                 payload["note"] = " ".join(notes)
             png = generate_one(item, p, vibes, charrefs)
-            saved = studio.save_image(folder, item["name"], png, {
+            saved = studio.save_image(item.get("folder") or folder, item["name"], png, {
+                **({"asset": item["asset"]} if item.get("asset") else {}),
                 "scene": item.get("scene"), "prompt": item["prompt"],
                 "negative": item["negative"], "model": model, "seed": item.get("seed"),
                 "styles": spec.get("styles"),
@@ -365,15 +412,16 @@ def _run_locked(job_id: str) -> None:
     spent = (before - after) if (before or 0) >= 0 and (after or 0) >= 0 else None
     result = {"saved": len(payload["saved"]), "failed": len(payload["failed"]),
               "anlasSpent": spent}
-    _update(job_id, state="done" if not payload["failed"] else "partial",
-            payload_json=payload, result_json=result)
+    with _lock:
+        state = "cancelled" if job_id in _cancel else ("done" if not payload["failed"] else "partial")
+        _update(job_id, state=state, payload_json=payload, result_json=result)
     log.info("studio batch %s: %d saved, %d failed, %s Anlas",
              job_id, result["saved"], result["failed"], spent)
 
 
 def cleanup(keep: int = 40) -> int:
     """Old job rows are a log, not state. Keep the recent ones."""
-    rows = db.query("SELECT id FROM jobs ORDER BY created_at DESC LIMIT -1 OFFSET ?", (keep,))
+    rows = db.query("SELECT id FROM jobs WHERE kind='studio_generate' AND state NOT IN ('pending','running') ORDER BY created_at DESC LIMIT -1 OFFSET ?", (keep,))
     for r in rows:
         db.execute("DELETE FROM jobs WHERE id = ?", (r["id"],))
     return len(rows)

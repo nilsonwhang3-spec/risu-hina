@@ -20,6 +20,8 @@ import { scenePicker, tokenNotice, startRun, cancelRun, pendingCount, loadJobs,
 
 let runBtn: HTMLButtonElement | null = null;
 let progressLine: HTMLElement | null = null;
+let jobsBox: HTMLElement | null = null;
+let jobsKey = '';
 /** The queue summary, rebuilt alone when a reservation moves. */
 let summaryBox: HTMLElement | null = null;
 /** Per-scene card registry: the working ring and its mini step bar. */
@@ -48,6 +50,10 @@ export async function scenesOf(preset: string): Promise<{ name: string; prompt: 
 }
 
 export function drawBatch(mount: HTMLElement): void {
+  jobsBox = el('div', { class: 'studio-job-list' });
+  jobsKey = '';
+  mount.appendChild(jobsBox);
+  void loadJobs(true).then(() => batchTick());
   const notice = tokenNotice();
   if (notice) mount.appendChild(notice);
 
@@ -96,6 +102,22 @@ export function drawBatch(mount: HTMLElement): void {
  * job's section (streaming frame on the cell being drawn). Finished results
  * belong to the bottom strip and 검수. */
 export function batchTick(): void {
+  if (jobsBox?.isConnected) {
+    const jobs = S.jobs.filter(j => ['running', 'pending'].includes(j.state));
+    const key = JSON.stringify(jobs.map(j => [j.id, j.state, j.payload?.done, j.cancelRequested]));
+    if (key !== jobsKey) {
+      jobsKey = key;
+      clear(jobsBox);
+      jobsBox.appendChild(el('div', { class: 'sectiontitle', text: `서버 JOB · 실행/대기 ${jobs.length}개` }));
+      for (const job of jobs) {
+        const cancel = el('button', { class: 'ghost tiny', text: job.cancelRequested ? '취소 요청됨' : '취소', disabled: !!job.cancelRequested });
+        cancel.addEventListener('click', () => { cancel.disabled = true; void cancelRun(job.id).then(() => batchTick()); });
+        jobsBox.appendChild(el('div', { class: 'row' }, [
+          el('span', { class: 'grow', text: `${job.id} · ${stateLabel(job.state)} · ${job.payload?.done ?? 0}/${job.payload?.total ?? 0}` }), cancel,
+        ]));
+      }
+    }
+  }
   syncRunBtn();
   syncSceneProgress();
   syncBatchBar();
@@ -189,7 +211,7 @@ function syncBatchBar(): void {
   }
   if (barEta) {
     const per = stepMsEma();
-    const remain = Math.max(0, p.total - p.done - failedN);
+    const remain = Math.max(0, p.total - p.done);
     if (per && livePreview.total && remain) {
       const secs = Math.round(((livePreview.total - livePreview.step)
         + Math.max(0, remain - 1) * livePreview.total) * per / 1000);

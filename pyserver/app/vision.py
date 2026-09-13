@@ -132,6 +132,30 @@ def max_calls() -> int:
         return 12
 
 
+def budget(session_id: str | None) -> dict:
+    with _CALLS_LOCK:
+        used = _CALLS.get(session_id, 0)
+    return {"used": used, "limit": max_calls(), "remaining": max(0, max_calls() - used)}
+
+
+def parse_verdicts(text: str, count: int) -> list[dict]:
+    """Validate an entire helper batch; never silently accept omitted images."""
+    raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip(), flags=re.S)
+    arr = json.loads(raw)
+    if not isinstance(arr, list) or len(arr) != count:
+        raise VisionError("검수 결과 수가 이미지 수와 다릅니다")
+    numbers = []
+    for item in arr:
+        if (not isinstance(item, dict) or type(item.get("n")) is not int
+                or item.get("verdict") not in ("use", "delete", "inpaint")
+                or not isinstance(item.get("reason"), str) or not item["reason"].strip()):
+            raise VisionError("검수 결과 형식이 올바르지 않습니다")
+        numbers.append(item["n"])
+    if sorted(numbers) != list(range(1, count + 1)):
+        raise VisionError("검수 번호가 중복되거나 빠졌습니다")
+    return sorted(arr, key=lambda x: x["n"])
+
+
 def timeout_s() -> float:
     try:
         return max(5.0, float(_cfg().get("timeoutSeconds") or 60))

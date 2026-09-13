@@ -36,6 +36,9 @@ run "workspace confinement" "$PY" tests/test_sandbox.py
 # The studio is a second file scope on the same code path; the wall between it
 # and a bot workspace is the thing worth re-checking on every change.
 run "studio scope isolation" "$PY" tests/test_studio.py
+run "asset naming and alternatives" "$PY" tests/test_assetrules.py
+run "studio learning and recovery" "$PY" tests/test_studio_improvements.py
+run "assistant memory, context and jobs" "$PY" tests/test_agent_memory_context_jobs.py
 # The global space: upload targets, per-bot cleanup, and searches that must
 # state what they clipped.
 run "global file space" "$PY" tests/test_files.py
@@ -52,6 +55,7 @@ run "agent end-to-end (real model)" "$PY" tests/test_agent.py
 
 if [ -d plugin/node_modules ]; then
   run "plugin typecheck" node plugin/node_modules/typescript/bin/tsc -p plugin/tsconfig.json --noEmit
+  run "cross-view file clipboard" node tests/test_file_clipboard.mjs
   run "plugin build"     node plugin/build.config.mjs
   run "plugin smoke (real DOM + real backend)" node tests/plugin_smoke.mjs
 else

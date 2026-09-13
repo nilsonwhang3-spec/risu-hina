@@ -72,7 +72,7 @@ const FICON = {
 
 /** The internal clipboard for the context menu's 복사/잘라내기 → 붙여넣기.
  * Paths only - the bytes stay on the backend (files/copy · files/move). */
-let clipboard: { op: 'copy' | 'cut'; paths: string[] } | null = null;
+import { fileClipboard as clipboard, setFileClipboard, pasteFiles } from './file-clipboard';
 /** Tree multi-select (Ctrl/Shift), separate from the centre's file selection. */
 let treeSel = new Set<string>();
 let treeAnchor = '';
@@ -131,11 +131,11 @@ const kitRender = makeTab({
       const e = ev as KeyboardEvent;
       const paths = [...treeSel].filter((q) => q !== DOCS_NODE && q.includes('/'));
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c' && paths.length) {
-        clipboard = { op: 'copy', paths };
+        setFileClipboard({ op: 'copy', paths });
         notice(`${paths.length}개를 복사했습니다 — 붙여넣을 폴더에서 Ctrl+V.`);
         drawTree(); // the rows show the clipboard state
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'x' && paths.length) {
-        clipboard = { op: 'cut', paths };
+        setFileClipboard({ op: 'cut', paths });
         notice(`${paths.length}개를 잘라냈습니다 — 붙여넣을 폴더에서 Ctrl+V.`);
         drawTree();
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v' && clipboard) {
@@ -655,12 +655,12 @@ function drawCentre(): void {
       selectAll(n);
       drawCentre();
     } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c' && selection.size) {
-      clipboard = { op: 'copy', paths: [...selection] };
-      notice(`${clipboard.paths.length}개를 복사했습니다 — 붙여넣을 폴더에서 우클릭하거나 Ctrl+V.`);
+      setFileClipboard({ op: 'copy', paths: [...selection] });
+      notice(`${selection.size}개를 복사했습니다 — 붙여넣을 폴더에서 우클릭하거나 Ctrl+V.`);
       drawCentre(); // rows show the clipboard
     } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'x' && selection.size && deletable) {
-      clipboard = { op: 'cut', paths: [...selection] };
-      notice(`${clipboard.paths.length}개를 잘라냈습니다 — 붙여넣을 폴더에서 우클릭하거나 Ctrl+V.`);
+      setFileClipboard({ op: 'cut', paths: [...selection] });
+      notice(`${selection.size}개를 잘라냈습니다 — 붙여넣을 폴더에서 우클릭하거나 Ctrl+V.`);
       drawCentre();
     } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v' && clipboard && writable) {
       void pasteInto(uploadTarget());
@@ -854,9 +854,9 @@ function openRowMenu(ev: MouseEvent, e: { path: string; name: string; file?: Wor
     { label: '이름 바꾸기', disabled: many || !can, onClick: () => renameEntry(e) },
     null,
     { label: many ? `복사 (${paths.length})` : '복사',
-      onClick: () => { clipboard = { op: 'copy', paths }; notice(`${paths.length}개를 복사했습니다 — 붙여넣을 폴더에서 우클릭하세요.`); } },
+      onClick: () => { setFileClipboard({ op: 'copy', paths }); notice(`${paths.length}개를 복사했습니다 — 붙여넣을 폴더에서 우클릭하세요.`); } },
     { label: many ? `잘라내기 (${paths.length})` : '잘라내기', disabled: !can,
-      onClick: () => { clipboard = { op: 'cut', paths }; notice(`${paths.length}개를 잘라냈습니다 — 붙여넣을 폴더에서 우클릭하세요.`); } },
+      onClick: () => { setFileClipboard({ op: 'cut', paths }); notice(`${paths.length}개를 잘라냈습니다 — 붙여넣을 폴더에서 우클릭하세요.`); } },
     { label: clipboard ? `붙여넣기 (${clipboard.paths.length})` : '붙여넣기', disabled: !clipboard,
       onClick: () => void pasteInto(pasteTarget) },
     null,
@@ -904,9 +904,9 @@ function openTreeMenu(node: TreeNode, ev: MouseEvent): void {
     { label: '이름 바꾸기', disabled: many || !can, onClick: () => renameEntry({ path: node.path, name: node.name }) },
     null,
     { label: many ? `복사 (${paths.length})` : '복사', disabled: !can,
-      onClick: () => { clipboard = { op: 'copy', paths }; notice(`${paths.length}개를 복사했습니다 — 붙여넣을 폴더에서 우클릭하거나 Ctrl+V.`); } },
+      onClick: () => { setFileClipboard({ op: 'copy', paths }); notice(`${paths.length}개를 복사했습니다 — 붙여넣을 폴더에서 우클릭하거나 Ctrl+V.`); } },
     { label: many ? `잘라내기 (${paths.length})` : '잘라내기', disabled: !can,
-      onClick: () => { clipboard = { op: 'cut', paths }; notice(`${paths.length}개를 잘라냈습니다 — 붙여넣을 폴더에서 우클릭하거나 Ctrl+V.`); } },
+      onClick: () => { setFileClipboard({ op: 'cut', paths }); notice(`${paths.length}개를 잘라냈습니다 — 붙여넣을 폴더에서 우클릭하거나 Ctrl+V.`); } },
     { label: clipboard ? `붙여넣기 (${clipboard.paths.length})` : '붙여넣기',
       disabled: !clipboard || !hereOk,
       onClick: () => void pasteInto(node.path) },
@@ -1012,14 +1012,14 @@ async function pasteInto(target: string): Promise<void> {
   const list = clip.paths.filter((p) => p !== target && !target.startsWith(p + '/'));
   if (!list.length) return;
   try {
-    const r = clip.op === 'copy' ? await state.copyFiles(list, target) : await state.moveFiles(list, target);
+    const r = await pasteFiles(target);
+    if (!r) return;
     notice(batchText(r, target, clip.op === 'copy' ? '복사' : '이동'), r.failed.length ? 'err' : 'ok');
   } catch (e) {
     notice('처리하지 못했습니다: ' + msg(e), 'err');
   }
   // A cut is spent by its paste; a copy can paste again elsewhere.
   if (clip.op === 'cut') {
-    clipboard = null;
     selection.clear();
   }
   state.touchFiles();
@@ -1200,10 +1200,14 @@ async function drawPreview(f: WorkspaceFile, n: Folder): Promise<void> {
     try {
       // A 1024px thumbnail, not the multi-MB original: the preview used to sit on a spinner past the 45s image timeout for big PNGs (§1-39).
       const url = await blobUrl(f.path, String(f.modified), { thumb: true, w: 1024 });
+      const detail = el('button', { class: 'ghost tiny', text: '자세히 보기 (원본)' });
+      detail.addEventListener('click', () => showArtifact({ path: f.path, title: f.name, kind: 'image' }));
       clear(body);
       const img = el('img', { src: url, alt: f.name });
       img.addEventListener('error', () => { clear(body); body.appendChild(el('div', { class: 'hint', text: '이 호스트에서는 그림을 표시할 수 없습니다. 내 PC에 저장해서 보세요.' })); });
-      body.appendChild(img);
+      img.style.cursor = 'zoom-in';
+      img.addEventListener('click', () => detail.click());
+      body.append(detail, img);
     } catch (e) {
       clear(body);
       body.appendChild(el('div', { class: 'notice err', text: msg(e) }));

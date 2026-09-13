@@ -32,6 +32,10 @@ every run rather than opening a hole to a shared directory. The agent reads
 from __future__ import annotations
 
 import io
+import hashlib
+import json
+import threading
+from functools import wraps
 import re
 import shutil
 import uuid
@@ -42,6 +46,15 @@ from typing import Any
 from . import config, db, log
 
 SKILL_FILE = "SKILL.md"
+_EDIT_LOCK = threading.RLock()
+
+
+def _locked(fn):
+    @wraps(fn)
+    def call(*args, **kwargs):
+        with _EDIT_LOCK:
+            return fn(*args, **kwargs)
+    return call
 MAX_BODY = 40_000          # loaded on demand, so it may be long - but not a book
 MAX_DESCRIPTION = 400      # the catalog line; this one is paid for every turn
 MAX_FILE = 2_000_000
@@ -216,6 +229,7 @@ def _read(slug: str, d: Path) -> dict | None:
     st = _state(slug)
     return {
         "id": slug,
+        "revision": hashlib.sha256(text.encode("utf-8")).hexdigest(),
         "slug": slug,
         "name": str(meta.get("name") or slug).strip(),
         "description": str(meta.get("description") or "").strip(),
@@ -284,6 +298,7 @@ def listing() -> dict:
 
 # --- editing -----------------------------------------------------------------------
 
+@_locked
 def save(name: str, description: str, body: str, *, slug: str | None = None,
          always: bool = False, enabled: bool | None = None,
          sort_order: int | None = None, extra_meta: dict | None = None) -> dict:
@@ -318,11 +333,63 @@ def save(name: str, description: str, body: str, *, slug: str | None = None,
 
     meta = dict(extra_meta if extra_meta is not None else previous.get("meta") or {})
     meta.update({"name": label, "description": desc, "always": bool(always)})
+    if previous:
+        _archive(previous)
     (d / SKILL_FILE).write_text(render(meta, text), encoding="utf-8")
     _set_state(slug, enabled=enabled if enabled is not None else previous.get("enabled", True),
                sort_order=sort_order)
     log.info("skill saved slug=%s name=%s always=%s chars=%s", slug, label, bool(always), len(text))
     return get(slug) or {}
+
+
+def _archive(skill: dict) -> None:
+    directory = config.DATA_DIR / "skill-history" / skill["id"]
+    directory.mkdir(parents=True, exist_ok=True)
+    target = directory / (skill["revision"] + ".json")
+    if not target.exists():
+        target.write_text(json.dumps(skill, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def revisions(slug: str) -> list[dict]:
+    _dir(slug)  # validate before resolving history
+    directory = config.DATA_DIR / "skill-history" / slug
+    if not directory.is_dir():
+        return []
+    return sorted([json.loads(p.read_text(encoding="utf-8")) for p in directory.glob("*.json")],
+                  key=lambda s: s.get("updatedAt", 0), reverse=True)
+
+
+def restore(slug: str, revision: str) -> dict:
+    with _EDIT_LOCK:
+        current = get(slug)
+        if not current:
+            raise SkillError("없는 스킬입니다")
+        old = next((s for s in revisions(slug) if s["revision"] == revision), None)
+        if not old:
+            raise SkillError("없는 변경 기록입니다")
+        return save(old["name"], old["description"], old["body"], slug=slug,
+                    always=current["always"], extra_meta=old.get("meta"))
+
+
+def improve(name: str, description: str, body: str, evidence: str, *,
+            slug: str = "", revision: str = "", session_id: str = "", project: str = "") -> dict:
+    """Record a verified lesson without changing user enable/always choices."""
+    if not evidence.strip() or len(evidence) > 4000:
+        raise SkillError("검증한 결과나 사용자 수정 근거를 1~4000자로 기록해 주세요")
+    with _EDIT_LOCK:
+        previous = get(slug) if slug else next((s for s in list_all(with_body=True)
+                                               if s["name"] == name.strip()), None)
+        if slug and not previous:
+            raise SkillError("없는 스킬입니다")
+        if previous and revision != previous["revision"]:
+            raise SkillError("스킬을 다시 읽고 현재 revision으로 개선해 주세요 (동시 수정 보호)")
+        meta = dict(previous.get("meta") or {}) if previous else {}
+        meta.update({"learned_evidence": " ".join(evidence.split()),
+                     "learned_session": session_id, "learned_project": project})
+        result = save(name, description, body, slug=previous["id"] if previous else None,
+                      always=bool(previous and previous["always"]), extra_meta=meta)
+        _archive(result)
+        return result
 
 
 def _unique_slug(label: str) -> str:
@@ -553,7 +620,8 @@ def load(name_or_slug: str) -> str:
     if not sk["enabled"]:
         return (f"스킬 “{sk['name']}” 은 사용자가 꺼 두었습니다 — 부르지 말고, 그 스킬 없이 진행하세요. "
                 "(꺼진 스킬은 카탈로그에도 없습니다; 다시 시도하지 마세요.)")
-    lines = [f"# 스킬: {sk['name']}", f"_{sk['description']}_", "", sk["body"] or "(본문 없음)"]
+    lines = [f"# 스킬: {sk['name']}", f"id={sk['id']} revision={sk['revision']}",
+             f"_{sk['description']}_", "", sk["body"] or "(본문 없음)"]
     if sk["files"]:
         lines.append("")
         lines.append(f"## 이 스킬의 파일 (워크스페이스 `skills/{sk['slug']}/` 아래)")

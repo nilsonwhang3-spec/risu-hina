@@ -15,10 +15,10 @@ import { S, hub, countFiles, fmtSize, msg, persistCentreTab, persistLeftTab,
 
 /** The studio's clipboard (paths only; bytes stay on the backend) - shared
  * by the OUTPUT tree and the 정리 grid (§1-35). */
-let clip: { op: 'copy' | 'cut'; paths: string[] } | null = null;
+import { fileClipboard as clip, setFileClipboard, pasteFiles } from '../file-clipboard';
 
 export function setClip(op: 'copy' | 'cut', paths: string[]): void {
-  clip = paths.length ? { op, paths } : null;
+  setFileClipboard(paths.length ? { op, paths } : null);
   if (clip) {
     hub.notice(`${paths.length}개를 ${op === 'copy' ? '복사' : '잘라내기'}했습니다 — 붙여넣을 폴더에서 Ctrl+V 또는 우클릭.`);
   }
@@ -248,7 +248,8 @@ export async function pasteIn(target: string): Promise<void> {
   const list = c.paths.filter((q) => q !== target && !target.startsWith(q + '/'));
   if (!list.length) return;
   try {
-    const r = c.op === 'copy' ? await state.copyFiles(list, target) : await state.moveFiles(list, target);
+    const r = await pasteFiles(target);
+    if (!r) return;
     hub.notice(r.failed.length
       ? `${r.done}개 처리, ${r.failed.length}개는 건너뜀 — ${r.failed[0].error}`
       : `${r.done}개를 ${target}/ 에 ${c.op === 'copy' ? '복사' : '이동'}했습니다.`,
@@ -256,7 +257,6 @@ export async function pasteIn(target: string): Promise<void> {
   } catch (e) {
     hub.notice('처리하지 못했습니다: ' + msg(e), 'err');
   }
-  if (c.op === 'cut') clip = null;
   hub.touchQuiet();
   await hub.refresh();
 }

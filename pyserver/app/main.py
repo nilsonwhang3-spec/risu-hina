@@ -36,7 +36,7 @@ from starlette.concurrency import run_in_threadpool
 from . import (chatfmt, config, db, files, log, nai, presets, session, skills, staging,
                store, websearch, workspace)
 from . import actions, assets, catalog, charx, codexauth, conflicts, keys, permits, providers, snapshots, updater, vision
-from . import studio, studiojob
+from . import agentnotes, assetrules, studio, studiojob
 from . import card as cardmod
 from . import memory as mem
 
@@ -1120,7 +1120,7 @@ def h_studio_plan(arg: dict) -> dict:
     """What a batch would produce, before anything is spent."""
     try:
         items = studio.plan(arg)
-    except studio.StudioError as e:
+    except (studio.StudioError, assetrules.RuleError) as e:
         raise ApiError(400, str(e))
     return {"items": items, "estimate": studio.estimate(arg, len(items))}
 
@@ -1131,7 +1131,7 @@ def h_studio_generate(arg: dict) -> dict:
     try:
         # An empty model falls back to the default inside start().
         return studiojob.start(arg)
-    except studio.StudioError as e:
+    except (studio.StudioError, assetrules.RuleError) as e:
         raise ApiError(400, str(e))
 
 
@@ -1181,6 +1181,35 @@ def h_agent_usage(arg: dict) -> dict:
     }
 
 
+def h_agent_notes(arg: dict) -> dict:
+    try:
+        return agentnotes.listing(agentnotes.scope(str(arg.get("charKey") or ""), bool(arg.get("shared") in (True, "true", "1"))))
+    except agentnotes.NoteError as e:
+        raise ApiError(400, str(e))
+
+
+def h_agent_note_save(arg: dict) -> dict:
+    try:
+        return {"note": agentnotes.save(agentnotes.scope(str(arg.get("charKey") or ""), bool(arg.get("shared"))),
+                    str(arg.get("title") or ""), str(arg.get("body") or ""), str(arg.get("evidence") or "사용자가 직접 수정"),
+                    note_id=str(arg.get("id") or ""), revision=arg.get("revision"))}
+    except agentnotes.NoteError as e:
+        raise ApiError(400, str(e))
+
+
+def h_agent_note_delete(arg: dict) -> dict:
+    try:
+        return agentnotes.delete(agentnotes.scope(str(arg.get("charKey") or ""), bool(arg.get("shared"))),
+                                 str(arg.get("id") or ""), arg.get("revision"))
+    except agentnotes.NoteError as e:
+        raise ApiError(400, str(e))
+
+
+def h_agent_context(arg: dict) -> dict:
+    rows = db.query("SELECT content_json,ts FROM agent_messages WHERE role='context' ORDER BY ts DESC LIMIT 10")
+    return {"events": [{"at": r["ts"], **{k: v for k, v in json.loads(r["content_json"]).items() if k != "summary"}} for r in rows]}
+
+
 def h_agent_stop(arg: dict) -> dict:
     sid = str(arg.get("sessionId") or "")
     if not sid:
@@ -1189,7 +1218,10 @@ def h_agent_stop(arg: dict) -> dict:
 
 
 def h_studio_job_cancel(arg: dict) -> dict:
-    return {"ok": studiojob.cancel(str(arg.get("id") or ""))}
+    job_id = str(arg.get("id") or "")
+    if not studiojob.cancel(job_id):
+        raise ApiError(404, "없는 JOB입니다")
+    return {"ok": True, "job": studiojob.get(job_id)}
 
 
 def h_studio_job_preview(arg: dict) -> dict:
@@ -1287,6 +1319,49 @@ def h_studio_group(arg: dict) -> dict:
         raise ApiError(400, str(e))
 
 
+def h_studio_asset_rules(arg: dict) -> dict:
+    try:
+        project = str(arg.get("project") or "")
+        if not project and arg.get("charKey"):
+            project = workspace.bot_folder(str(arg["charKey"]))
+        projects_root = workspace.space_root() / "projects"
+        projects = sorted(p.name for p in projects_root.iterdir() if p.is_dir()) if projects_root.is_dir() else []
+        if not project:
+            return {"project": "", "revision": 0, "rules": [], "sets": [], "projects": projects}
+        if "document" in arg:
+            return assetrules.save(project, arg["document"])
+        return {**assetrules.read(project), "projects": projects}
+    except (assetrules.RuleError, files.FileError) as e:
+        raise ApiError(400, str(e))
+
+
+def h_studio_asset_match(arg: dict) -> dict:
+    try:
+        path = str(arg.get("path") or "")
+        p = files._resolve(files.SPACE, path)
+        return {"path": path, "asset": assetrules.metadata(p),
+                "matches": assetrules.classify(str(arg.get("project") or ""), p.name)}
+    except (assetrules.RuleError, files.FileError, OSError) as e:
+        raise ApiError(400, str(e))
+
+
+def h_studio_asset_bind(arg: dict) -> dict:
+    try:
+        return assetrules.bind(str(arg.get("path") or ""), arg.get("asset") or {})
+    except (assetrules.RuleError, files.FileError) as e:
+        raise ApiError(400, str(e))
+
+
+def h_studio_asset_coverage(arg: dict) -> dict:
+    try:
+        project = assetrules.project_name(str(arg.get("project") or ""))
+        folder = str(arg.get("folder") or f"studio/output/{project}")
+        return {"folder": folder, **assetrules.coverage(project, str(arg.get("character") or ""),
+                                                     assetrules.selected_assets(folder))}
+    except (assetrules.RuleError, files.FileError) as e:
+        raise ApiError(400, str(e))
+
+
 def h_studio_selection(arg: dict) -> dict:
     folder = str(arg.get("folder") or "")
     if not folder:
@@ -1322,8 +1397,8 @@ def h_studio_export(arg: dict) -> dict:
             pattern=str(arg.get("pattern") or ""),
             group_by=str(arg.get("groupBy") or "emotion"),
             character=str(arg.get("character") or ""),
-            delimiter=str(arg.get("delimiter") or "-"))
-    except (studio.StudioError, files.FileError) as e:
+            delimiter=str(arg.get("delimiter") or "-"), preview=bool(arg.get("preview")))
+    except (assetrules.RuleError, studio.StudioError, files.FileError) as e:
         raise ApiError(400, str(e))
 
 
@@ -1338,8 +1413,8 @@ def h_studio_stage(arg: dict) -> dict:
     out, failed = [], []
     for p in paths:
         try:
-            out.append(assets.stage_file(studio._rel(str(p))))
-        except (assets.AssetError, files.FileError) as e:
+            out.append(assetrules.adoption(studio._rel(str(p))))
+        except (assets.AssetError, assetrules.RuleError, files.FileError, OSError) as e:
             failed.append({"path": p, "error": str(e)})
     return {"charKey": ck, "staged": out, "failed": failed}
 
@@ -1519,6 +1594,20 @@ def h_skill_save(arg: dict) -> dict:
             enabled=(None if arg.get("enabled") is None else bool(arg.get("enabled"))),
             sort_order=arg.get("sortOrder") if isinstance(arg.get("sortOrder"), int) else None,
         )}
+    except skills.SkillError as e:
+        raise ApiError(400, str(e))
+
+
+def h_skill_revisions(arg: dict) -> dict:
+    try:
+        return {"revisions": skills.revisions(str(arg.get("id") or ""))}
+    except skills.SkillError as e:
+        raise ApiError(400, str(e))
+
+
+def h_skill_restore(arg: dict) -> dict:
+    try:
+        return {"skill": skills.restore(str(arg.get("id") or ""), str(arg.get("revision") or ""))}
     except skills.SkillError as e:
         raise ApiError(400, str(e))
 
@@ -2327,6 +2416,10 @@ ROUTES: dict[str, Handler] = {
     "POST /studio/job/cancel": h_studio_job_cancel,
     "POST /agent/stop": h_agent_stop,
     "GET /agent/usage": h_agent_usage,
+    "GET /agent/notes": h_agent_notes,
+    "POST /agent/notes/save": h_agent_note_save,
+    "POST /agent/notes/delete": h_agent_note_delete,
+    "GET /agent/context": h_agent_context,
     "POST /studio/recipe": h_studio_recipe,
     "POST /studio/parse": h_studio_parse,
     "GET /studio/naming": h_studio_naming,
@@ -2334,6 +2427,11 @@ ROUTES: dict[str, Handler] = {
     "POST /studio/duplicates": h_studio_duplicates,
     "GET /studio/emotion-check": h_studio_emotion_check,
     "POST /studio/group": h_studio_group,
+    "GET /studio/asset-rules": h_studio_asset_rules,
+    "POST /studio/asset-rules": h_studio_asset_rules,
+    "POST /studio/asset-match": h_studio_asset_match,
+    "POST /studio/asset-bind": h_studio_asset_bind,
+    "POST /studio/asset-coverage": h_studio_asset_coverage,
     "GET /studio/selection": h_studio_selection,
     "POST /studio/selection": h_studio_selection,
     "POST /studio/rename": h_studio_rename,
@@ -2393,6 +2491,8 @@ ROUTES: dict[str, Handler] = {
     "GET /skills/get": h_skill_get,
     "GET /skills/preview": h_skill_preview,
     "POST /skills/save": h_skill_save,
+    "GET /skills/revisions": h_skill_revisions,
+    "POST /skills/restore": h_skill_restore,
     "POST /skills/upload": h_skill_upload,
     "POST /skills/toggle": h_skill_toggle,
     "POST /skills/delete": h_skill_delete,
@@ -2543,11 +2643,6 @@ async def dispatch(path: str, request: Request) -> Response:
     pathname = "/" + path
     key = f"{request.method} {pathname}"
     handler = ROUTES.get(key)
-
-    # The subscription routes exist only when the operator turned them on
-    # (config.codex_enabled). 404, the same as any route that is not there.
-    if handler is not None and pathname.startswith("/codex/") and not config.codex_enabled():
-        handler = None
 
     # 404 before auth: otherwise an unauthenticated caller could map the API by
     # watching 401 vs 404.
@@ -2871,6 +2966,7 @@ async def _startup() -> None:
     config.load()
     config.ensure_token()
     await run_in_threadpool(db.connect)
+    await run_in_threadpool(studiojob.recover_interrupted)
     await run_in_threadpool(config.migrate_once, db.has_migration, db.mark_migration)
     # Rows first, then seeds: an old install's rows become folders, and the
     # seed step (already marked there) leaves them alone.
@@ -2885,6 +2981,8 @@ async def _startup() -> None:
     await run_in_threadpool(workspace.migrate_to_space)
     # The studio's flat layout folds into config/ + output/ once (studio_v2).
     await run_in_threadpool(workspace.migrate_studio_v2)
+    from . import studiodefaults
+    await run_in_threadpool(studiodefaults.install)
     # Deliverables leave the (now hidden) hina/ area for projects/<봇>/out once.
     await run_in_threadpool(workspace.migrate_out_v3)
     # There is always a selected preset; on an existing install it is seeded

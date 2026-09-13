@@ -536,6 +536,32 @@ export interface GroupItem {
   selection: SelectionState;
   /** mtime (ms) - the thumbnail cache stamp, so a rewritten file shows anew. */
   modified?: number;
+  asset?: AssetIdentity;
+  exportName?: string;
+}
+
+export type AssetStatus = 'required' | 'optional' | 'excluded';
+export interface AssetRule {
+  id: string; name: string; template: string; extension: string;
+  allowed?: Record<string, string[]>; empty?: Record<string, string>;
+  version?: string; regex?: string;
+}
+export interface AssetSlot { id: string; fields: Record<string, string>; status: AssetStatus }
+export interface AssetSet {
+  id: string; name: string; ruleId: string; characters: string[]; slots: AssetSlot[];
+  overrides: Record<string, Record<string, AssetStatus>>;
+}
+export interface AssetRules {
+  project: string; revision: number; rules: AssetRule[]; sets: AssetSet[]; projects?: string[];
+}
+export interface AssetBinding { project: string; setId: string; slotId?: string; fields: Record<string, string> }
+export interface AssetIdentity extends AssetBinding {
+  rule: AssetRule; exportName: string; imageId: string; parentId: string;
+}
+export interface AssetCoverage {
+  complete: boolean;
+  slots: { setId: string; slotId: string; status: AssetStatus; present: boolean }[];
+  missing: { setId: string; slotId: string }[];
 }
 
 export interface StudioGroups {
@@ -543,7 +569,7 @@ export interface StudioGroups {
   pattern: string;
   groupBy: string;
   fields: string[];
-  groups: { key: string; items: GroupItem[] }[];
+  groups: { key: string; label?: string; items: GroupItem[] }[];
   /** Files the regex could not read. Shown, never dropped. */
   unmatched: GroupItem[];
   total: number;
@@ -565,6 +591,7 @@ export interface PlannedImage {
   size?: { width: number; height: number };
   /** `<collection.key>` references no fragment provides. Reported, not dropped. */
   unresolved?: string[];
+  exportName?: string;
 }
 
 export interface BatchEstimate {
@@ -572,6 +599,7 @@ export interface BatchEstimate {
 }
 
 export interface StudioJob {
+  cancelRequested?: boolean;
   id: string; kind: string; state: string; error?: string | null;
   created_at?: number; updated_at?: number;
   payload: {
@@ -678,11 +706,28 @@ class StudioFiles {
     return await transport.post('/studio/rename', { folder, rename });
   }
 
-  async exportSelected(folder: string, character: string, pattern = '', groupBy = 'emotion'): Promise<{
+  async exportSelected(folder: string, character: string, pattern = '', groupBy = 'emotion', preview = false): Promise<{
     folder: string; used: number; inpaint: number; empty: number;
     groups: number; unmatched: number;
+    managed?: boolean; mapping?: { source: string; target: string }[]; problems?: string[];
   }> {
-    return await transport.post('/studio/export', { folder, character, pattern, groupBy });
+    return await transport.post('/studio/export', { folder, character, pattern, groupBy, preview });
+  }
+
+  async assetRules(project = ''): Promise<AssetRules> {
+    return await transport.get('/studio/asset-rules', { project, charKey: state.activeCharKey });
+  }
+  async saveAssetRules(document: AssetRules): Promise<AssetRules> {
+    return await transport.post('/studio/asset-rules', { project: document.project, document });
+  }
+  async assetMatch(project: string, path: string): Promise<{ matches: AssetIdentity[]; asset?: AssetIdentity }> {
+    return await transport.post('/studio/asset-match', { project, path });
+  }
+  async assetBind(path: string, asset: AssetBinding): Promise<AssetIdentity> {
+    return await transport.post('/studio/asset-bind', { path, asset });
+  }
+  async assetCoverage(project: string, character: string, folder: string): Promise<AssetCoverage> {
+    return await transport.post('/studio/asset-coverage', { project, character, folder });
   }
 
   /** Check library images for adoption (PNG-ness, size). Nothing is copied:
