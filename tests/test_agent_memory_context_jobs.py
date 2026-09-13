@@ -24,6 +24,49 @@ db.connect()
 
 
 class Features(unittest.TestCase):
+    def test_legacy_character_budget_cannot_trigger_compression(self):
+        def respond(messages, info):
+            return ModelResponse(parts=[TextPart(content="done")])
+        ag = Agent(FunctionModel(respond), deps_type=agent.Deps, capabilities=[agentcontext.AutoContext()])
+        settings = {"autoCompact": True, "historyBudgetChars": 1,
+                    "contextWindowTokens": 220000, "maxTokens": 32000}
+        prompt = "x" * 130000
+        with patch.object(config, "section", return_value=settings):
+            result = asyncio.run(ag.run(prompt, deps=agent.Deps("chat", "A", "", Path(DATA.name))))
+        self.assertEqual(result.all_messages()[0].parts[0].content, prompt)
+        self.assertEqual(len(result.all_messages()), 2)
+
+    def test_equal_character_counts_use_token_budget(self):
+        def fail(*args): raise AssertionError("A single message should only be clipped")
+        ascii_messages = [ModelRequest(parts=[ToolReturnPart("read", "x" * 3000, "c")])]
+        cjk_messages = [ModelRequest(parts=[ToolReturnPart("read", "가" * 3000, "c")])]
+        unchanged, info = asyncio.run(agentcontext.compress(ascii_messages, 2000, FunctionModel(fail)))
+        self.assertIs(unchanged, ascii_messages)
+        self.assertIsNone(info)
+        clipped, info = asyncio.run(agentcontext.compress(cjk_messages, 2000, FunctionModel(fail)))
+        self.assertEqual(info["method"], "clip")
+        self.assertGreater(info["beforeTokens"], 2000)
+        self.assertLessEqual(info["afterTokens"], 2000)
+        self.assertEqual(info["budgetTokens"], 2000)
+        self.assertTrue(info["tokenCountEstimated"])
+        self.assertEqual(cjk_messages[0].parts[0].content, "가" * 3000)
+
+    def test_budget_reserves_instructions_tools_and_output(self):
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock
+        settings = {"autoCompact": True, "contextWindowTokens": 220000, "maxTokens": 32000}
+        request = SimpleNamespace(messages=[ModelRequest(parts=[UserPromptPart("hello")])],
+                                  model_request_parameters=SimpleNamespace(function_tools="tool schema"),
+                                  model_settings={"max_tokens": 16000}, model=None)
+        ctx = SimpleNamespace(deps=agent.Deps("chat", "A", "", Path(DATA.name)))
+        compressed = AsyncMock(return_value=(request.messages, None))
+        with patch.object(config, "section", return_value=settings), \
+             patch.object(agentcontext, "get_instructions", return_value="instructions"), \
+             patch.object(agentcontext, "compress", compressed):
+            asyncio.run(agentcontext.AutoContext().before_model_request(ctx, request))
+        self.assertEqual(compressed.call_args.args[1],
+                         176000 - agentcontext.estimate_tokens("instructionstool schema") - 16000)
+
     def test_repeated_instructions_do_not_trigger_early_compression(self):
         def model(messages, info):
             return ModelResponse(parts=[TextPart(content="Verified result")])
@@ -100,7 +143,7 @@ class Features(unittest.TestCase):
             return "Start: saved path A. " + "x" * 15000 + " End: remaining path B."
         sid = "compact-live"
         db.execute("INSERT INTO sessions(id,chat_key,title,created_at,updated_at) VALUES(?,?,?,?,?)", (sid,"chat","",db.now(),db.now()))
-        settings = {"autoCompact": True, "historyBudgetChars": 5000, "contextWindowTokens": 128000, "maxTokens": 1000}
+        settings = {"autoCompact": True, "historyBudgetChars": 5000, "contextWindowTokens": 12000, "maxTokens": 1000}
         deps = agent.Deps("chat", "A", sid, Path(DATA.name))
         with patch.object(config, "section", side_effect=lambda name: settings if name == "agent" else {}):
             with capture_run_messages() as captured:

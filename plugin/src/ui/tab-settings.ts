@@ -79,7 +79,7 @@ export function renderSettingsTab(mount: HTMLElement): void {
         // credentials here leaves it still saying they are not set.
         agentPanel().invalidate();
       },
-    }), buildAgentNotesCard(refresh => refreshers.push(refresh)), buildAdvancedCard()]],
+    }), buildAdvancedCard(buildAgentNotesCard(refresh => refreshers.push(refresh)))]],
     ['스킬', [buildSkillsCard({ onMount: (refresh) => { refreshers.push(refresh); } })]],
     ['정보 · 로그', [buildCatalogCard(), buildDebugCard(), aboutMount]],
   ];

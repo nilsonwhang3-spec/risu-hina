@@ -25,7 +25,7 @@
  * backend (POST /files/zip); a dropped folder goes up file by file into the
  * matching subfolders; a dropped .zip is offered to be unpacked on arrival.
  */
-import { el, clear, armed, menuAt, popover, svg, ICON, iconBtn, type ArmedControl } from './dom';
+import { el, clear, armed, modal, menuAt, popover, svg, ICON, iconBtn, type ArmedControl } from './dom';
 import { treeRow, installDrop, installDrag, type TreeNode, type TreeSpec, type Incoming } from './tree';
 import { state, type FileArea, type FileListing, type WorkspaceFile } from '../state';
 import { makeTab, namePopover, askName, type NoticeKind, type TabUi } from './kit';
@@ -33,7 +33,7 @@ import { blobUrl, workspaceImage, watchImage, unloadByDefault } from './blobimg'
 import { renderMarkdown } from './markdown';
 import { showArtifact } from './artifact';
 import { copyToClipboard } from '../host';
-import { clientLog } from '../transport';
+import { clientLog, transport } from '../transport';
 
 const AREA_LABEL: Record<string, [string, string]> = {
   projects: ['프로젝트', '직접 관리하시는 참고 자료·프로젝트 폴더입니다. 봇 이름 폴더로 나뉩니다.'],
@@ -407,12 +407,43 @@ function drawTree(): void {
     }
   });
   treeMount.appendChild(el('div', { class: 'treefoot' }, [
-    mineBtn, toggle, cleanBtn, el('div', { class: 'hint', text: `전체 ${fmtSize(data.totalSize)}` }),
+    mineBtn, toggle, buildCleanupButton(), cleanBtn, el('div', { class: 'hint', text: `전체 ${fmtSize(data.totalSize)}` }),
   ]));
   if (hadFocus) {
     const row = treeMount.querySelector<HTMLElement>('.treebranch.on') ?? treeMount;
     try { row.focus({ preventScroll: true }); } catch { /* no focus() in the test DOM */ }
   }
+}
+
+function buildCleanupButton(): HTMLElement {
+  const button = el('button', { class: 'ghost tiny', text: 'AI temp/숨김 정리' });
+  button.addEventListener('click', async () => {
+    button.disabled = true;
+    try {
+      const plan = await transport.post<{ plan: string; count: number; bytes: number; paths: string[]; more: number }>('/files/cleanup-ai', {});
+      const apply = el('button', { class: 'primary', text: '보관 폴더로 정리', disabled: !plan.count });
+      const status = el('div', { class: 'hint' });
+      const close = modal('AI 임시·숨김 파일 정리', el('div', {}, [
+        el('p', { text: `AI 작업 영역의 임시 파일·캐시 ${plan.count}개 (${fmtSize(plan.bytes)})를 자동으로 찾았습니다. 프로젝트·이미지·스킬·Git·설정 파일은 정리 대상에서 제외합니다.` }),
+        el('p', { text: '영구 삭제하지 않고 hina/.cleanup 아래에 원래 경로대로 보관합니다. 숨김 파일 보기에서 확인하고 필요한 파일을 원래 위치로 옮길 수 있습니다. 디스크 공간은 줄어들지 않습니다.' }),
+        el('pre', { text: plan.paths.join('\n') + (plan.more ? `\n외 ${plan.more}개` : ''), style: { maxHeight: '220px', overflow: 'auto', whiteSpace: 'pre-wrap' } }),
+        apply, status,
+      ]));
+      apply.addEventListener('click', async () => {
+        apply.disabled = true;
+        status.textContent = '정리 중…';
+        try {
+          const result = await transport.post<{ moved: number; failed: unknown[]; archive: string }>('/files/cleanup-ai', { plan: plan.plan });
+          close();
+          state.touchFiles();
+          await refresh();
+          notice(`${result.moved}개 보관 · 실패 ${result.failed.length}개${result.archive ? ` · ${result.archive}` : ''}`, result.failed.length ? 'err' : 'ok');
+        } catch (e) { status.textContent = msg(e); apply.disabled = false; }
+      });
+    } catch (e) { notice('정리 대상을 확인하지 못했습니다: ' + msg(e), 'err'); }
+    finally { button.disabled = false; }
+  });
+  return button;
 }
 
 function toTreeNode(n: Folder, depth: number): TreeNode {
@@ -496,6 +527,25 @@ function countFiles(n: Folder): number {
 
 // --- the centre: list · grid · preview -----------------------------------------
 
+function folderNavigation(n: Folder): HTMLElement {
+  const writable = !n.virtual && USER_AREAS.has(n.area.area);
+  const parent = n.path.includes('/') ? n.path.slice(0, n.path.lastIndexOf('/')) : '';
+  const up = el('button', { class: 'ghost tiny', text: '↑ 상위 폴더', title: '한 단계 위 폴더로 이동',
+    disabled: !!n.virtual || !nodes.has(parent) });
+  up.addEventListener('click', () => selectTreeFolder(parent));
+  const create = el('button', { class: 'ghost tiny', text: '새 폴더', disabled: !writable });
+  create.addEventListener('click', () => treeNewFolder(n.path));
+  const picker = el('input', { type: 'file', multiple: true, style: { display: 'none' } });
+  picker.addEventListener('change', () => {
+    const chosen = Array.from(picker.files ?? []).map(file => ({ file, rel: '' }));
+    picker.value = '';
+    void uploadMany(chosen, n.path);
+  });
+  const upload = el('button', { class: 'ghost tiny', text: '파일 업로드', disabled: !writable });
+  upload.addEventListener('click', () => picker.click());
+  return el('div', { class: 'row folder-navigation', style: { flexWrap: 'wrap', padding: '6px 0' } }, [up, create, upload, picker]);
+}
+
 function drawCentre(): void {
   if (!viewMount) return;
   const hadFocus = viewMount.contains(document.activeElement);
@@ -512,6 +562,7 @@ function drawCentre(): void {
   }
 
   const writable = !n.virtual && USER_AREAS.has(n.area.area);
+  viewMount.appendChild(folderNavigation(n));
   const deletable = n.area.deletable;
   const hasImages = hasImagesDeep(n);
   const [, why] = AREA_LABEL[n.area.area] ?? ['', ''];
@@ -1167,6 +1218,7 @@ function loadThumb(f: WorkspaceFile, mount: HTMLElement): void {
 async function drawPreview(f: WorkspaceFile, n: Folder): Promise<void> {
   if (!viewMount) return;
   clear(viewMount);
+  viewMount.appendChild(folderNavigation(n));
   const back = el('button', { class: 'ghost tiny', text: '‹ 목록으로' });
   back.addEventListener('click', () => { previewPath = ''; drawCentre(); focusList(); });
   const save = el('button', { class: 'primary tiny', text: '내 PC에 저장' }) as HTMLButtonElement;

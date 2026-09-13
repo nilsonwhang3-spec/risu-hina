@@ -19,7 +19,6 @@ import { state, type StudioItem } from '../../state';
 import { pickerRow, openListPicker, type PickerEntry } from '../pickers';
 import { S, hub, activeOf, checkUnresolved, newCard, msg, fragKeys } from './store';
 import { openParamsDialog } from './gen';
-import { buildRunControls } from './center-single';
 import { parseStyleDoc, buildStyleDoc, type StyleDoc } from './stylefile';
 
 /** Unsaved inline edits, kept across a column rebuild so a redraw (a toggle,
@@ -108,10 +107,6 @@ export function buildLeftPrompt(mount: HTMLElement): void {
   paramsBtn.addEventListener('click', () => openParamsDialog());
   mount.appendChild(el('div', { class: 'toolbtns' }, [charBtn, fragBtn, paramsBtn]));
 
-  // The 1장 run controls live here now (§1-39, user): the count and 생성
-  // 시작 sat under the big preview in the centre, below the fold on a laptop.
-  mount.appendChild(el('div', { class: 'sectiontitle', style: { padding: '10px 8px 0' }, text: '생성' }));
-  mount.appendChild(el('div', { style: { padding: '4px 8px 8px' } }, [buildRunControls()]));
 }
 
 /** Patch the counts without rebuilding the column (typing-safe). */

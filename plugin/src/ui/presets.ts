@@ -176,8 +176,6 @@ function foldableCard(id: string, title: string, body: (HTMLElement | null)[]): 
 interface AdvField { key: string; label: string; def: number; unit: string; help: string; zeroMeansOff?: boolean }
 
 const ADV_FIELDS: AdvField[] = [
-  { key: 'historyBudgetChars', label: '히스토리 예산', def: 220000, unit: '자',
-    help: '자동 압축이 켜져 있으면 이 글자 수와 컨텍스트 토큰 추정치 중 먼저 도달한 기준으로 압축합니다. 한 턴의 도구 실행 중에도 검사하며 최신 사용자 지시는 유지합니다.' },
   { key: 'pruneKeepTurns', label: '툴 결과 그대로 두는 턴 수', def: 2, unit: '턴',
     help: '최근 이 턴 수 안의 툴 결과(스크립트 출력·읽은 파일·생성 스펙)는 그대로 두고, 더 오래된 것은 아래 글자 수로 자릅니다. 자른 결과가 필요하면 히나가 툴을 다시 부릅니다.' },
   { key: 'pruneClipChars', label: '오래된 툴 결과 자르기', def: 600, unit: '자',
@@ -199,12 +197,14 @@ function fmtN(n: number): string { return Math.round(n).toLocaleString(); }
  * them shown live and the last turns' real numbers beside it. Folded by
  * default - the presets above are the everyday part.
  */
-export function buildAdvancedCard(): HTMLElement {
+export function buildAdvancedCard(memorySection?: HTMLElement): HTMLElement {
   const inputs = new Map<string, HTMLInputElement>();
   const status = el('div', { class: 'hint' });
   const sim = el('div', { class: 'advsim' });
   const measured = el('div', { class: 'hint', style: { marginTop: '6px' } });
   let usage: Record<string, number> | null = null;
+  let contextWindow = 220000;
+  let outputTokens = 32000;
 
   const val = (f: AdvField): number => {
     const raw = (inputs.get(f.key)?.value ?? '').trim();
@@ -214,11 +214,11 @@ export function buildAdvancedCard(): HTMLElement {
   };
 
   const drawSim = () => {
-    const budget = val(ADV_FIELDS[0]);
-    const req = val(ADV_FIELDS[3]);
-    const calls = val(ADV_FIELDS[4]);
-    const capTok = val(ADV_FIELDS[5]);
-    const histTok = budget / 2;
+    const field = (key: string) => val(ADV_FIELDS.find(f => f.key === key)!);
+    const req = field('maxRequestsPerTurn');
+    const calls = field('maxToolCallsPerTurn');
+    const capTok = field('maxInputTokensPerTurn');
+    const histTok = Math.max(2000, Math.floor(contextWindow * .8) - FIXED_PROMPT_TOKENS - outputTokens);
     const perReq = FIXED_PROMPT_TOKENS + histTok;
     const reqUsed = req > 0 ? req : 50;
     const worst = perReq * reqUsed;
@@ -232,7 +232,7 @@ export function buildAdvancedCard(): HTMLElement {
       el('div', { text: capTok > 0
         ? (capTok < typical ? `⚠ 입력 상한 ${fmtN(capTok)} 이 보통 턴보다 작습니다 - 대부분의 턴이 중간에 멈춥니다.` : `입력 상한 ${fmtN(capTok)}: 최악 턴의 ${fmtN(capTok / worst * 100)}% 지점에서 멈춥니다.`)
         : '입력 상한 없음: 최악 턴까지 허용합니다.' }),
-      el('div', { class: 'hint', text: '기록은 글자 2자 ≈ 1토큰으로, 고정 프롬프트(지침+툴 스키마)는 약 1.5만 토큰으로 잡았습니다. 캐시 히트는 할인되지만 여기엔 반영하지 않았습니다.' }),
+      el('div', { class: 'hint', text: `기록은 컨텍스트 ${fmtN(contextWindow)}토큰의 80%에서 최대 출력 ${fmtN(outputTokens)}토큰과 고정 프롬프트 약 1.5만 토큰을 뺀 예산으로 계산합니다. 실제 요청의 지침·도구 크기에 따라 달라지며, 캐시 할인은 반영하지 않았습니다.` }),
     );
   };
 
@@ -261,6 +261,8 @@ export function buildAdvancedCard(): HTMLElement {
         transport.get<Record<string, number>>('/agent/usage', { turns: '30' }).catch(() => null),
       ]);
       const a = (config.agent ?? {}) as Record<string, unknown>;
+      contextWindow = Math.max(8000, Number(a.contextWindowTokens) || 220000);
+      outputTokens = Math.max(1, Number(a.maxTokens) || 32000);
       for (const f of ADV_FIELDS) {
         const v = a[f.key];
         const inp = inputs.get(f.key)!;
@@ -293,6 +295,7 @@ export function buildAdvancedCard(): HTMLElement {
   reset.addEventListener('click', () => { for (const inp of inputs.values()) inp.value = ''; drawSim(); });
 
   void load();
+  memorySection?.addEventListener('contextsettingschange', () => void load());
   return foldableCard('agent-advanced-card', '고급 설정 (공통)', [
     el('div', { class: 'hint', style: { marginBottom: '8px' },
       text: '모든 프리셋에 공통인 턴당 비용 조절입니다. 한 턴 = 사용자의 말 한 번에 히나가 툴을 오가며 답을 끝내는 것. 툴을 부를 때마다 모델을 다시 부르고 기록 전체를 다시 보내므로, 턴 비용 = 요청 수 × (고정 프롬프트 + 기록)입니다.' }),
@@ -300,6 +303,7 @@ export function buildAdvancedCard(): HTMLElement {
     sim,
     measured,
     el('div', { class: 'row', style: { marginTop: '8px' } }, [save, reset, status]),
+    memorySection ?? null,
   ]);
 }
 

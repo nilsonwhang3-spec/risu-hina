@@ -45,6 +45,7 @@ run "AI batch settings confirmation" "$PY" tests/test_batch_review.py
 # The global space: upload targets, per-bot cleanup, and searches that must
 # state what they clipped.
 run "global file space" "$PY" tests/test_files.py
+run "reversible AI temp cleanup" "$PY" tests/test_ai_cleanup.py
 # Side events (artifact / images) and the artifact writer's file rules.
 run "stream side events" "$PY" tests/test_stream_events.py
 # Gemini thought signatures round-trip through the OpenAI-compatible client.
@@ -58,6 +59,7 @@ run "agent end-to-end (real model)" "$PY" tests/test_agent.py
 
 if [ -d plugin/node_modules ]; then
   run "asset rename and mode approval" "$PY" tests/test_asset_rename.py
+  run "shell server responsiveness" "$PY" tests/test_shell_responsiveness.py
   run "plugin typecheck" node plugin/node_modules/typescript/bin/tsc -p plugin/tsconfig.json --noEmit
   run "cross-view file clipboard" node tests/test_file_clipboard.mjs
   run "asset upload concurrency" node tests/asset_concurrency.mjs

@@ -1009,6 +1009,7 @@ console.log('\ntest_workspace_files');
   await settle(1100);
   check('the file view has its own three panes', !!document.querySelector('.panel.active .split'));
   check('the left pane is a folder tree', !!document.querySelector('.panel.active .tree.filetree'));
+  check('workspace offers AI temp cleanup', document.querySelector('.panel.active .tree.filetree')?.textContent.includes('AI temp/숨김 정리'));
   check('the agent came along', !!document.querySelector('.panel.active .agentpanel'));
 
   const tree = document.querySelector('.panel.active .tree');
@@ -1050,6 +1051,14 @@ console.log('\ntest_workspace_files');
         /draft-summary\.md/.test(centre()?.textContent || '') && /numbers\.txt/.test(centre()?.textContent || ''),
         (centre()?.textContent || '').slice(0, 300));
   check('the script stays out of it', !/helper\.py/.test(centre()?.textContent || ''));
+  const navigation = () => document.querySelector('.panel.active .folder-navigation');
+  check('central panel offers folder creation and upload', !!findButton(navigation(), '새 폴더') && !!findButton(navigation(), '파일 업로드'));
+  clickButton(navigation(), '상위 폴더');
+  await settle(200);
+  check('up navigates to the actual parent folder', document.querySelector('.panel.active .filecrumb')?.textContent === 'projects/Parma Knights/');
+  const backToOut = [...document.querySelectorAll('.panel.active .filelist .frow:not(.head)')].find(r => /out/.test(r.textContent || ''));
+  backToOut?.dispatchEvent(new window.Event('dblclick', { bubbles: true }));
+  await settle(200);
   check('rows carry a checkbox for multi-select',
         document.querySelectorAll('.panel.active .filelist .frow input[type=checkbox]').length >= 2);
   check('the files tab button carries a badge slot', !!document.querySelector('#tab-files .tabbadge'));
@@ -1660,8 +1669,9 @@ check('agent credential card present', !!findButton(document, '연결 테스트'
   // §1-47: 고급 설정 (공통) at the bottom of the 에이전트 pane, folded, with the six knobs and the simulation.
   await settle(600);
   const adv = document.getElementById('agent-advanced-card');
+  check('memory settings live inside advanced settings', !!adv?.textContent.includes('AI 메모리 · 자동 컨텍스트 압축'));
   check('the 고급 설정 card exists and starts folded', !!adv && adv.classList.contains('folded'));
-  check('six advanced fields with recommended placeholders', (adv?.querySelectorAll('.advfield input').length || 0) === 6
+  check('five advanced fields with recommended placeholders', (adv?.querySelectorAll('.advfield input').length || 0) === 5
         && [...(adv?.querySelectorAll('.advfield input') || [])].every((i) => /권장/.test(i.placeholder)));
   check('the simulation names a per-request estimate', /요청 1회/.test(adv?.querySelector('.advsim')?.textContent || ''));
   adv?.querySelector('.foldhead')?.dispatchEvent(new window.Event('click', { bubbles: true }));
@@ -2182,6 +2192,8 @@ console.log('\ntest_studio_tab');
   // The generated side is the OUTPUT tab, drawn by the SAME tree component as
   // the file tab (the two trees used to be different shapes with different CSS).
   clickButton(tabsBar(), 'OUTPUT');
+  const fixedRunControls = document.querySelector('.panel.active .studio-run-footer');
+  check('generation controls remain outside switched left content', !!fixedRunControls && !fixedRunControls.closest('.filetree'));
   await settle(300);
   check('the output tree is behind the OUTPUT tab',
         [...document.querySelectorAll('.panel.active .explorer .treebranch')]

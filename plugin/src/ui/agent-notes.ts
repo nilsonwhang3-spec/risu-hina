@@ -11,7 +11,7 @@ export function buildAgentNotesCard(onMount: (refresh: () => Promise<void>) => v
   setSelected(shared, state.activeCharKey ? 'project' : 'global');
   const enabled = el('input', { type: 'checkbox', checked: true });
   const auto = el('input', { type: 'checkbox', checked: true });
-  const windowSize = el('input', { type: 'number', min: 8000, step: 1000, value: '128000' });
+  const windowSize = el('input', { type: 'number', min: 8000, step: 1000, value: '220000' });
   const settings = el('button', { class: 'ghost', text: '설정 저장' });
   const refresh = async () => {
     try {
@@ -19,7 +19,7 @@ export function buildAgentNotesCard(onMount: (refresh: () => Promise<void>) => v
       const agent = cfg.config?.agent ?? {};
       enabled.checked = agent.memoryEnabled !== false;
       auto.checked = agent.autoCompact !== false;
-      windowSize.value = String(agent.contextWindowTokens ?? 128000);
+      windowSize.value = String(agent.contextWindowTokens ?? 220000);
       await reload();
     } catch (e) { status.textContent = String(e); }
   };
@@ -65,6 +65,7 @@ export function buildAgentNotesCard(onMount: (refresh: () => Promise<void>) => v
       if (!Number.isInteger(tokens) || tokens < 8000) throw new Error('컨텍스트 크기는 8000 이상 정수로 입력하세요.');
       await transport.post('/config', { config: { agent: { memoryEnabled: enabled.checked, autoCompact: auto.checked, contextWindowTokens: tokens } } });
       status.textContent = '설정을 저장했습니다.';
+      settings.dispatchEvent(new Event('contextsettingschange', { bubbles: true }));
     } catch (e) { status.textContent = String(e); }
   });
   shared.addEventListener('change', () => void reload());
@@ -75,9 +76,11 @@ export function buildAgentNotesCard(onMount: (refresh: () => Promise<void>) => v
   const history = el('button', { class: 'ghost', text: '최근 압축 기록' });
   history.addEventListener('click', async () => {
     try {
-      const data = await transport.get<{ events: { at: number; beforeChars: number; afterChars: number; method: string }[] }>('/agent/context');
+      const data = await transport.get<{ events: { at: number; beforeChars: number; afterChars: number; beforeTokens?: number; afterTokens?: number; method: string }[] }>('/agent/context');
       modal('컨텍스트 압축 기록', el('div', {}, data.events.length ? data.events.map(e => el('p', {
-        text: `${new Date(e.at * 1000).toLocaleString()} · ${e.beforeChars.toLocaleString()} → ${e.afterChars.toLocaleString()}자 (${e.method})`,
+        text: `${new Date(e.at * 1000).toLocaleString()} · ${e.beforeTokens != null && e.afterTokens != null
+          ? `${e.beforeTokens.toLocaleString()} → ${e.afterTokens.toLocaleString()}토큰 (추정)`
+          : `${e.beforeChars.toLocaleString()} → ${e.afterChars.toLocaleString()}자 (이전 기록)`} (${e.method})`,
       })) : [el('p', { text: '아직 압축 기록이 없습니다.' })]));
     } catch (e) { status.textContent = String(e); }
   });
@@ -88,7 +91,7 @@ export function buildAgentNotesCard(onMount: (refresh: () => Promise<void>) => v
     el('label', {}, [enabled, el('span', { text: ' AI 메모리 사용' })]),
     el('label', {}, [auto, el('span', { text: ' 요청마다 컨텍스트를 확인하고 자동 압축' })]),
     el('label', { class: 'field' }, [el('span', { text: '사용 모델의 컨텍스트 크기 (토큰)' }), windowSize]),
-    el('p', { class: 'hint', text: '출력 공간과 도구·지침 크기를 고려해 여유를 두고 압축합니다. 토큰 수는 추정치입니다. 최신 사용자 지시와 미완료 작업을 남기며, 요약에는 설정한 모델을 사용합니다.' }),
+    el('p', { class: 'hint', text: '대화 예산은 컨텍스트의 80%에서 지침·도구 정의·최대 답변 토큰을 뺀 만큼 자동 계산합니다. 나머지 20%는 안전 여유이며, 별도의 글자 수 제한은 없습니다. 토큰 수는 추정치입니다. 사용자 지시와 미완료 작업을 보존하며, 요약에는 설정한 모델을 사용합니다.' }),
     el('div', { class: 'row' }, [settings, history]),
     el('div', { class: 'row' }, [shared, add, reloadBtn]), list, status,
   ]);

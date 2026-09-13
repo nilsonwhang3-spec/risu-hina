@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any
 
 APP_NAME = "risu-hina"
-VERSION = "0.15.8"
+VERSION = "0.15.10"
 
 # Renamed from REALOOC_* to RISUHINA_*. The old names are still honoured, and
 # not as politeness: the launcher, the control script and any service wrapper
@@ -189,13 +189,11 @@ DEFAULTS: dict[str, Any] = {
         # '' = baseUrl + apiKey above. 'codex' = the OpenAI subscription via
         # codexauth (login instead of a key; baseUrl/apiKey ignored).
         "provider": "",
-        # When the stored conversation grows past this many characters
-        # (~1/3 as many tokens), the older part is summarised by the model
-        # once and replaced (agent._compact_history). 0 turns it off.
-        # Distribution default. The model token window remains a separate guard.
-        "historyBudgetChars": 220000,
+        # AutoContext derives the history token budget from this window,
+        # reserving instructions, tools, output and a 20% safety margin.
+        # Legacy historyBudgetChars values are retained on disk but ignored.
         "autoCompact": True,
-        "contextWindowTokens": 128000,
+        "contextWindowTokens": 220000,
         "memoryEnabled": True,
         # 고급 설정 (§1-47): the per-turn limits the settings card exposes.
         # 0 = no limit. Tool traffic older than pruneKeepTurns user turns is
@@ -377,7 +375,6 @@ def codex_enabled() -> bool:
 
 OLD_MAX_TOKENS_DEFAULT = 8000
 MIGRATION_KEY = "cfg_maxtokens_32k"
-OLD_HISTORY_BUDGET = 240000
 HISTORY_MIGRATION_KEY = "cfg_history_120k"
 
 
@@ -388,14 +385,8 @@ def migrate_once(has_run, mark) -> None:
     first-run template, and it makes the agent fail before it says anything.
     Guarded by a marker so a user who later chooses 8000 deliberately keeps it.
     """
-    # The same for the history budget (§1-46): 240K was the template's number,
-    # and it made 500K-token turns even with pruning.
+    # Retire the old character-budget migration without rewriting user data.
     if not has_run(HISTORY_MIGRATION_KEY):
-        cur = load().get("agent") or {}
-        if int(cur.get("historyBudgetChars") or 0) == OLD_HISTORY_BUDGET:
-            update({"agent": {"historyBudgetChars": DEFAULTS["agent"]["historyBudgetChars"]}})
-            print(f"[{APP_NAME}] agent.historyBudgetChars {OLD_HISTORY_BUDGET} -> "
-                  f"{DEFAULTS['agent']['historyBudgetChars']} (old default lowered)", flush=True)
         mark(HISTORY_MIGRATION_KEY)
     if has_run(MIGRATION_KEY):
         return

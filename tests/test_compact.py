@@ -1,6 +1,4 @@
-"""agent.compact_history (§1-44): old tool traffic is clipped every turn, and
-when the summary model fails (it refused an adult transcript on every turn of
-a 100MB session) whole turns are dropped mechanically so the budget holds."""
+"""Legacy tool pruning, snapshot persistence and session cancellation."""
 from __future__ import annotations
 
 import asyncio
@@ -67,36 +65,12 @@ def main() -> int:
     small, s0 = agent_mod.prune_tool_parts([m for i in range(2) for m in turn(i)])
     check("two turns or fewer: nothing to prune", s0 == 0)
 
-    print("compact_history fallback")
-    saved_cfg = dict(config.section("agent"))
-    config.update({"agent": {"historyBudgetChars": 12000}})
-
-    class Boom:
-        def __init__(self, *a, **k):
-            pass
-
-        async def run(self, *a, **k):
-            raise RuntimeError("content_filter: PROHIBITED_CONTENT")
-
-    real_agent, real_model = agent_mod.Agent, agent_mod._model
-    agent_mod.Agent = Boom  # type: ignore[assignment]
-    agent_mod._model = lambda: None  # type: ignore[assignment]
-    try:
-        agent_mod.COMPACTED.clear()
-        out = asyncio.run(agent_mod.compact_history("s1", msgs))
-        check("fits the budget without a model", chars(out) <= 12000, f"chars={chars(out)}")
-        check("starts with the drop note listing the dropped requests",
-              isinstance(out[0], ModelRequest) and "생략" in out[0].parts[0].content and "요청 0" in out[0].parts[0].content)
-        check("the newest turn survives whole", any("답 5" in getattr(p, "content", "") for m in out for p in m.parts))
-        check("never cuts between a call and its return",
-              all(not (isinstance(m, ModelRequest) and m.parts[0].part_kind == "tool-return") for m in out[:3]))
-        check("remembered for session.run to store", agent_mod.COMPACTED.get("s1") is out)
-        agent_mod.COMPACTED.clear()
-        out2 = asyncio.run(agent_mod.compact_history("s2", [m for i in range(2) for m in turn(i, 100)]))
-        check("a small history passes through untouched", "s2" not in agent_mod.COMPACTED and len(out2) == 8)
-    finally:
-        agent_mod.Agent, agent_mod._model = real_agent, real_model  # type: ignore[assignment]
-        config.update({"agent": {"historyBudgetChars": saved_cfg.get("historyBudgetChars")}})
+    print("legacy pruning does not impose a character budget")
+    config.update({"agent": {"historyBudgetChars": 1}})
+    out = asyncio.run(agent_mod.compact_history("s1", msgs))
+    check("all turns retained despite a legacy character limit", len(out) == len(msgs))
+    check("user instructions retained", all(out[i].parts == msgs[i].parts for i in range(0, len(msgs), 4)))
+    check("pruned snapshot retained", "s1" in agent_mod.COMPACTED)
 
     print("session messages and history pruning (§1-55)")
     from app import db

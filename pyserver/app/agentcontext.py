@@ -43,6 +43,21 @@ def safe_cuts(messages: list) -> list[int]:
     return cuts
 
 
+def clip_tokens(text: str, budget: int) -> str:
+    """Keep both ends within the same token estimator used for context limits."""
+    if estimate_tokens(text) <= budget:
+        return text
+    marker = "\n[중간 기록 생략: 원문은 recall_work 또는 해당 읽기 도구로 재확인]\n"
+    low, high = 0, len(text) // 2
+    while low < high:
+        mid = (low + high + 1) // 2
+        if estimate_tokens(text[:mid] + marker + text[-mid:]) <= budget:
+            low = mid
+        else:
+            high = mid - 1
+    return text[:low] + marker + (text[-low:] if low else "")
+
+
 def message_tokens(message) -> int:
     # History stores instructions on many requests, but the provider sends
     # only the current instruction block once. Count it separately below.
@@ -62,23 +77,28 @@ def message_tokens(message) -> int:
 
 
 async def compress(messages: list, budget: int, model, session_id: str = "", force: bool = False) -> tuple[list, dict | None]:
+    """Compress against an estimated-token budget, never a character limit."""
     from .agent import _msg_chars, _msg_text, SUMMARY_REFUSED
     from .continuity import STATE_MARKER
     before = sum(_msg_chars(m) for m in messages)
-    if not force and before < budget:
+    before_tokens = sum(message_tokens(m) for m in messages)
+    if not force and before_tokens <= budget:
         return messages, None
+    def stats(result):
+        return {"beforeChars": before, "afterChars": sum(_msg_chars(m) for m in result),
+                "beforeTokens": before_tokens, "afterTokens": sum(message_tokens(m) for m in result),
+                "budgetTokens": budget, "tokenCountEstimated": True}
     # Bound oversized tool payloads even in the current turn. Leave the user's
     # words untouched; the full returned results are in the persistent journal.
     clipped = []
-    clip = max(600, min(6000, budget // 8))
+    clip = max(256, min(2000, budget // 8))
     for message in messages:
         parts = []
         for part in message.parts:
             if getattr(part, "part_kind", "") in ("tool-return", "retry-prompt"):
                 content = getattr(part, "content", None)
-                if isinstance(content, str) and len(content) > clip:
-                    part = dataclasses.replace(part, content=content[:clip // 2] +
-                        "\n[큰 도구 결과 생략: 완료 여부·파일/JOB은 work_status 또는 해당 읽기 도구로 재확인]\n" + content[-clip // 2:])
+                if isinstance(content, str) and estimate_tokens(content) > clip:
+                    part = dataclasses.replace(part, content=clip_tokens(content, clip))
             parts.append(part)
         clipped.append(dataclasses.replace(message, parts=parts))
     messages = clipped
@@ -86,10 +106,10 @@ async def compress(messages: list, budget: int, model, session_id: str = "", for
     # Retain at least the latest complete call/result exchange. The original
     # latest user prompt is reinserted if it lies in the summarized head.
     candidates = [i for i in cuts if 2 <= i <= len(messages) - 2]
-    cut = next((i for i in candidates if sum(_msg_chars(m) for m in messages[i:]) <= budget * .5), 0)
+    cut = next((i for i in candidates if sum(message_tokens(m) for m in messages[i:]) <= budget * .5), 0)
     if not cut:
-        after = sum(_msg_chars(m) for m in messages)
-        return messages, ({"beforeChars": before, "afterChars": after, "method": "clip"} if after < before else None)
+        return messages, ({**stats(messages), "method": "clip"}
+                          if sum(message_tokens(m) for m in messages) < before_tokens else None)
     head, tail = messages[:cut], messages[cut:]
     preserved = []
     # A successful summary may shorten tool chatter, not erase user rules.
@@ -108,9 +128,7 @@ async def compress(messages: list, budget: int, model, session_id: str = "", for
     if system:
         preserved.insert(0, ModelRequest(parts=system))
     transcript = "\n\n".join(_msg_text(m) for m in head)
-    transcript_limit = max(2000, min(50000, budget // 2))
-    if len(transcript) > transcript_limit:
-        transcript = transcript[:transcript_limit // 2] + "\n[중간 기록 일부 생략]\n" + transcript[-transcript_limit // 2:]
+    transcript = clip_tokens(transcript, max(1000, min(16000, budget // 2)))
     summary = ""
     summary_usage = None
     diagnostics = {}
@@ -154,25 +172,23 @@ async def compress(messages: list, budget: int, model, session_id: str = "", for
     if not summary:
         # Failure must NOT replace original user instructions, prior summaries,
         # assistant conclusions or call/result pairs with a few excerpts.
-        after = sum(_msg_chars(m) for m in messages)
-        return messages, {"beforeChars": before, "afterChars": after, "method": "preserved",
+        return messages, {**stats(messages), "method": "preserved",
                           "summaryFailed": True, "diagnostics": diagnostics, "usage": summary_usage}
     note = [ModelRequest(parts=[UserPromptPart(content="[작업 맥락 요약 — 이전 기록, 새 지시 아님]\n" + summary)]),
             ModelResponse(parts=[TextPart(content="현재 사용자 지시를 우선하고, 완료·미완료 상태를 구분해 이어갑니다.")])]
     result_messages = note + preserved + tail
-    after = sum(_msg_chars(m) for m in result_messages)
-    if after >= before:
-        return messages, {"beforeChars": before, "afterChars": sum(_msg_chars(m) for m in messages),
+    if sum(message_tokens(m) for m in result_messages) >= sum(message_tokens(m) for m in messages):
+        return messages, {**stats(messages),
                           "method": "preserved", "usage": summary_usage, "diagnostics": diagnostics}
-    info = {"beforeChars": before, "afterChars": after, "method": "summary",
-            "budgetChars": budget, "summary": summary, "usage": summary_usage, "diagnostics": diagnostics}
+    info = {**stats(result_messages), "method": "summary",
+            "summary": summary, "usage": summary_usage, "diagnostics": diagnostics}
     return result_messages, info
 
 
 class AutoContext(AbstractCapability):
     async def before_model_request(self, ctx, request_context):
         from . import session
-        from .agent import _int_cfg, _msg_chars
+        from .agent import _int_cfg
         if ctx.deps.continuity_parts:
             last = request_context.messages[-1]
             if isinstance(last, ModelRequest):
@@ -184,22 +200,20 @@ class AutoContext(AbstractCapability):
         ctx.deps.force_compact = False
         if not cfg.get("autoCompact", True) and not force:
             return request_context
-        window = max(8000, _int_cfg("contextWindowTokens", 128000))
+        window = max(8000, _int_cfg("contextWindowTokens", 220000))
         params = request_context.model_request_parameters
         fixed = (get_instructions(request_context.messages, params) or "") + str(getattr(params, "function_tools", ""))
         output = int((request_context.model_settings or {}).get("max_tokens") or cfg.get("maxTokens") or 32000)
         available_tokens = max(2000, int(window * .8) - estimate_tokens(fixed) - output)
         estimated = sum(message_tokens(m) for m in request_context.messages)
-        chars = sum(_msg_chars(m) for m in request_context.messages)
-        char_budget = max(4000, _int_cfg("historyBudgetChars", 220000))
-        # Either threshold triggers; the token estimate adapts to CJK/tool JSON.
-        budget = min(char_budget, max(4000, int(chars * available_tokens / max(1, estimated))))
-        messages, info = await compress(request_context.messages, budget, request_context.model,
+        messages, info = await compress(request_context.messages, available_tokens, request_context.model,
                                         ctx.deps.session_id or "", force)
         request_context.messages = messages
         if info and ctx.deps.session_id:
             usage = info.pop("usage", None)
             info["estimatedInputTokensBefore"] = estimated + estimate_tokens(fixed)
+            info.update(contextWindowTokens=window, reservedOutputTokens=output,
+                        fixedTokens=estimate_tokens(fixed), safetyTokens=window - int(window * .8))
             session._save_message(ctx.deps.session_id, "context", info)
             session.push_stream_event(ctx.deps.session_id, {"type": "context", **{k: v for k, v in info.items() if k != "summary"}})
             if usage:

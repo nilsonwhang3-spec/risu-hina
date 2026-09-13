@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.15.8
+//@display-name Risu Hina v0.15.10
 //@api 3.0
-//@version 0.15.8
+//@version 0.15.10
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -104,7 +104,7 @@
       this.tokenSafe = true;
       this.lastHealth = body;
       this.probeInfo = "";
-      this.gate = versionGate("0.15.8", String(body.version || ""));
+      this.gate = versionGate("0.15.10", String(body.version || ""));
       return body;
     }
     /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -7774,7 +7774,8 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
                 contextNotice.textContent = e.summaryFailed ? "\uC694\uC57D \uBBF8\uC644\uB8CC \xB7 \uAE30\uC874 \uB9E5\uB77D \uBCF4\uC874" : "\uAE30\uC874 \uB9E5\uB77D \uBCF4\uC874";
               } else {
                 contextCount += 1;
-                contextNotice.textContent = `\uB9E5\uB77D \uC555\uCD95 ${contextCount}\uD68C \xB7 ${Number(e.beforeChars).toLocaleString()} \u2192 ${Number(e.afterChars).toLocaleString()}\uC790`;
+                const size = e.beforeTokens != null && e.afterTokens != null ? `${Number(e.beforeTokens).toLocaleString()} \u2192 ${Number(e.afterTokens).toLocaleString()}\uD1A0\uD070 (\uCD94\uC815)` : `${Number(e.beforeChars).toLocaleString()} \u2192 ${Number(e.afterChars).toLocaleString()}\uC790`;
+                contextNotice.textContent = `\uB9E5\uB77D \uC555\uCD95 ${contextCount}\uD68C \xB7 ${size}`;
               }
               this.scroll();
               break;
@@ -9511,6 +9512,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     treeMount.appendChild(el("div", { class: "treefoot" }, [
       mineBtn,
       toggle,
+      buildCleanupButton(),
       cleanBtn,
       el("div", { class: "hint", text: `\uC804\uCCB4 ${fmtSize2(data.totalSize)}` })
     ]));
@@ -9521,6 +9523,44 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       } catch {
       }
     }
+  }
+  function buildCleanupButton() {
+    const button2 = el("button", { class: "ghost tiny", text: "AI temp/\uC228\uAE40 \uC815\uB9AC" });
+    button2.addEventListener("click", async () => {
+      button2.disabled = true;
+      try {
+        const plan = await transport.post("/files/cleanup-ai", {});
+        const apply = el("button", { class: "primary", text: "\uBCF4\uAD00 \uD3F4\uB354\uB85C \uC815\uB9AC", disabled: !plan.count });
+        const status = el("div", { class: "hint" });
+        const close = modal("AI \uC784\uC2DC\xB7\uC228\uAE40 \uD30C\uC77C \uC815\uB9AC", el("div", {}, [
+          el("p", { text: `AI \uC791\uC5C5 \uC601\uC5ED\uC758 \uC784\uC2DC \uD30C\uC77C\xB7\uCE90\uC2DC ${plan.count}\uAC1C (${fmtSize2(plan.bytes)})\uB97C \uC790\uB3D9\uC73C\uB85C \uCC3E\uC558\uC2B5\uB2C8\uB2E4. \uD504\uB85C\uC81D\uD2B8\xB7\uC774\uBBF8\uC9C0\xB7\uC2A4\uD0AC\xB7Git\xB7\uC124\uC815 \uD30C\uC77C\uC740 \uC815\uB9AC \uB300\uC0C1\uC5D0\uC11C \uC81C\uC678\uD569\uB2C8\uB2E4.` }),
+          el("p", { text: "\uC601\uAD6C \uC0AD\uC81C\uD558\uC9C0 \uC54A\uACE0 hina/.cleanup \uC544\uB798\uC5D0 \uC6D0\uB798 \uACBD\uB85C\uB300\uB85C \uBCF4\uAD00\uD569\uB2C8\uB2E4. \uC228\uAE40 \uD30C\uC77C \uBCF4\uAE30\uC5D0\uC11C \uD655\uC778\uD558\uACE0 \uD544\uC694\uD55C \uD30C\uC77C\uC744 \uC6D0\uB798 \uC704\uCE58\uB85C \uC62E\uAE38 \uC218 \uC788\uC2B5\uB2C8\uB2E4. \uB514\uC2A4\uD06C \uACF5\uAC04\uC740 \uC904\uC5B4\uB4E4\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4." }),
+          el("pre", { text: plan.paths.join("\n") + (plan.more ? `
+\uC678 ${plan.more}\uAC1C` : ""), style: { maxHeight: "220px", overflow: "auto", whiteSpace: "pre-wrap" } }),
+          apply,
+          status
+        ]));
+        apply.addEventListener("click", async () => {
+          apply.disabled = true;
+          status.textContent = "\uC815\uB9AC \uC911\u2026";
+          try {
+            const result = await transport.post("/files/cleanup-ai", { plan: plan.plan });
+            close();
+            state.touchFiles();
+            await refresh();
+            notice2(`${result.moved}\uAC1C \uBCF4\uAD00 \xB7 \uC2E4\uD328 ${result.failed.length}\uAC1C${result.archive ? ` \xB7 ${result.archive}` : ""}`, result.failed.length ? "err" : "ok");
+          } catch (e) {
+            status.textContent = msg5(e);
+            apply.disabled = false;
+          }
+        });
+      } catch (e) {
+        notice2("\uC815\uB9AC \uB300\uC0C1\uC744 \uD655\uC778\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg5(e), "err");
+      } finally {
+        button2.disabled = false;
+      }
+    });
+    return button2;
   }
   function toTreeNode(n, depth) {
     const [, why] = AREA_LABEL[n.area.area] ?? ["", ""];
@@ -9594,6 +9634,28 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
   function countFiles(n) {
     return n.files.length + n.kids.reduce((s, k) => s + countFiles(k), 0);
   }
+  function folderNavigation(n) {
+    const writable = !n.virtual && USER_AREAS.has(n.area.area);
+    const parent = n.path.includes("/") ? n.path.slice(0, n.path.lastIndexOf("/")) : "";
+    const up = el("button", {
+      class: "ghost tiny",
+      text: "\u2191 \uC0C1\uC704 \uD3F4\uB354",
+      title: "\uD55C \uB2E8\uACC4 \uC704 \uD3F4\uB354\uB85C \uC774\uB3D9",
+      disabled: !!n.virtual || !nodes.has(parent)
+    });
+    up.addEventListener("click", () => selectTreeFolder(parent));
+    const create2 = el("button", { class: "ghost tiny", text: "\uC0C8 \uD3F4\uB354", disabled: !writable });
+    create2.addEventListener("click", () => treeNewFolder(n.path));
+    const picker = el("input", { type: "file", multiple: true, style: { display: "none" } });
+    picker.addEventListener("change", () => {
+      const chosen = Array.from(picker.files ?? []).map((file) => ({ file, rel: "" }));
+      picker.value = "";
+      void uploadMany(chosen, n.path);
+    });
+    const upload = el("button", { class: "ghost tiny", text: "\uD30C\uC77C \uC5C5\uB85C\uB4DC", disabled: !writable });
+    upload.addEventListener("click", () => picker.click());
+    return el("div", { class: "row folder-navigation", style: { flexWrap: "wrap", padding: "6px 0" } }, [up, create2, upload, picker]);
+  }
   function drawCentre() {
     if (!viewMount) return;
     const hadFocus = viewMount.contains(document.activeElement);
@@ -9612,6 +9674,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       previewPath = "";
     }
     const writable = !n.virtual && USER_AREAS.has(n.area.area);
+    viewMount.appendChild(folderNavigation(n));
     const deletable = n.area.deletable;
     const hasImages = hasImagesDeep(n);
     const [, why] = AREA_LABEL[n.area.area] ?? ["", ""];
@@ -10290,6 +10353,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
   async function drawPreview(f, n) {
     if (!viewMount) return;
     clear(viewMount);
+    viewMount.appendChild(folderNavigation(n));
     const back = el("button", { class: "ghost tiny", text: "\u2039 \uBAA9\uB85D\uC73C\uB85C" });
     back.addEventListener("click", () => {
       previewPath = "";
@@ -11713,13 +11777,6 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
   }
   var ADV_FIELDS = [
     {
-      key: "historyBudgetChars",
-      label: "\uD788\uC2A4\uD1A0\uB9AC \uC608\uC0B0",
-      def: 22e4,
-      unit: "\uC790",
-      help: "\uC790\uB3D9 \uC555\uCD95\uC774 \uCF1C\uC838 \uC788\uC73C\uBA74 \uC774 \uAE00\uC790 \uC218\uC640 \uCEE8\uD14D\uC2A4\uD2B8 \uD1A0\uD070 \uCD94\uC815\uCE58 \uC911 \uBA3C\uC800 \uB3C4\uB2EC\uD55C \uAE30\uC900\uC73C\uB85C \uC555\uCD95\uD569\uB2C8\uB2E4. \uD55C \uD134\uC758 \uB3C4\uAD6C \uC2E4\uD589 \uC911\uC5D0\uB3C4 \uAC80\uC0AC\uD558\uBA70 \uCD5C\uC2E0 \uC0AC\uC6A9\uC790 \uC9C0\uC2DC\uB294 \uC720\uC9C0\uD569\uB2C8\uB2E4."
-    },
-    {
       key: "pruneKeepTurns",
       label: "\uD234 \uACB0\uACFC \uADF8\uB300\uB85C \uB450\uB294 \uD134 \uC218",
       def: 2,
@@ -11762,12 +11819,14 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
   function fmtN(n) {
     return Math.round(n).toLocaleString();
   }
-  function buildAdvancedCard() {
+  function buildAdvancedCard(memorySection) {
     const inputs = /* @__PURE__ */ new Map();
     const status = el("div", { class: "hint" });
     const sim = el("div", { class: "advsim" });
     const measured = el("div", { class: "hint", style: { marginTop: "6px" } });
     let usage = null;
+    let contextWindow = 22e4;
+    let outputTokens = 32e3;
     const val = (f) => {
       const raw = (inputs.get(f.key)?.value ?? "").trim();
       if (raw === "") return f.def;
@@ -11775,11 +11834,11 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       return Number.isFinite(n) && n >= 0 ? Math.floor(n) : f.def;
     };
     const drawSim = () => {
-      const budget = val(ADV_FIELDS[0]);
-      const req = val(ADV_FIELDS[3]);
-      const calls = val(ADV_FIELDS[4]);
-      const capTok = val(ADV_FIELDS[5]);
-      const histTok = budget / 2;
+      const field2 = (key) => val(ADV_FIELDS.find((f) => f.key === key));
+      const req = field2("maxRequestsPerTurn");
+      const calls = field2("maxToolCallsPerTurn");
+      const capTok = field2("maxInputTokensPerTurn");
+      const histTok = Math.max(2e3, Math.floor(contextWindow * 0.8) - FIXED_PROMPT_TOKENS - outputTokens);
       const perReq = FIXED_PROMPT_TOKENS + histTok;
       const reqUsed = req > 0 ? req : 50;
       const worst = perReq * reqUsed;
@@ -11791,7 +11850,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         el("div", { text: `\uBCF4\uD1B5 \uD134 (\uC694\uCCAD ${fmtN(Math.min(reqUsed, usage?.avgRequests || 8))}\uD68C) \u2248 ${fmtN(typical)} \uD1A0\uD070` }),
         el("div", { text: `\uCD5C\uC545 \uD134 (\uC694\uCCAD ${req > 0 ? fmtN(req) : "50(\uB77C\uC774\uBE0C\uB7EC\uB9AC \uAE30\uBCF8)"}\uD68C) \u2248 ${fmtN(worst)} \uD1A0\uD070` + (calls > 0 ? ` \xB7 \uD234 \uD638\uCD9C ${fmtN(calls)}\uD68C\uC5D0\uC11C\uB3C4 \uBA48\uCDA4` : "") }),
         el("div", { text: capTok > 0 ? capTok < typical ? `\u26A0 \uC785\uB825 \uC0C1\uD55C ${fmtN(capTok)} \uC774 \uBCF4\uD1B5 \uD134\uBCF4\uB2E4 \uC791\uC2B5\uB2C8\uB2E4 - \uB300\uBD80\uBD84\uC758 \uD134\uC774 \uC911\uAC04\uC5D0 \uBA48\uCDA5\uB2C8\uB2E4.` : `\uC785\uB825 \uC0C1\uD55C ${fmtN(capTok)}: \uCD5C\uC545 \uD134\uC758 ${fmtN(capTok / worst * 100)}% \uC9C0\uC810\uC5D0\uC11C \uBA48\uCDA5\uB2C8\uB2E4.` : "\uC785\uB825 \uC0C1\uD55C \uC5C6\uC74C: \uCD5C\uC545 \uD134\uAE4C\uC9C0 \uD5C8\uC6A9\uD569\uB2C8\uB2E4." }),
-        el("div", { class: "hint", text: "\uAE30\uB85D\uC740 \uAE00\uC790 2\uC790 \u2248 1\uD1A0\uD070\uC73C\uB85C, \uACE0\uC815 \uD504\uB86C\uD504\uD2B8(\uC9C0\uCE68+\uD234 \uC2A4\uD0A4\uB9C8)\uB294 \uC57D 1.5\uB9CC \uD1A0\uD070\uC73C\uB85C \uC7A1\uC558\uC2B5\uB2C8\uB2E4. \uCE90\uC2DC \uD788\uD2B8\uB294 \uD560\uC778\uB418\uC9C0\uB9CC \uC5EC\uAE30\uC5D4 \uBC18\uC601\uD558\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4." })
+        el("div", { class: "hint", text: `\uAE30\uB85D\uC740 \uCEE8\uD14D\uC2A4\uD2B8 ${fmtN(contextWindow)}\uD1A0\uD070\uC758 80%\uC5D0\uC11C \uCD5C\uB300 \uCD9C\uB825 ${fmtN(outputTokens)}\uD1A0\uD070\uACFC \uACE0\uC815 \uD504\uB86C\uD504\uD2B8 \uC57D 1.5\uB9CC \uD1A0\uD070\uC744 \uBE80 \uC608\uC0B0\uC73C\uB85C \uACC4\uC0B0\uD569\uB2C8\uB2E4. \uC2E4\uC81C \uC694\uCCAD\uC758 \uC9C0\uCE68\xB7\uB3C4\uAD6C \uD06C\uAE30\uC5D0 \uB530\uB77C \uB2EC\uB77C\uC9C0\uBA70, \uCE90\uC2DC \uD560\uC778\uC740 \uBC18\uC601\uD558\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4.` })
       );
     };
     const drawMeasured = () => {
@@ -11818,6 +11877,8 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           transport.get("/agent/usage", { turns: "30" }).catch(() => null)
         ]);
         const a = config.agent ?? {};
+        contextWindow = Math.max(8e3, Number(a.contextWindowTokens) || 22e4);
+        outputTokens = Math.max(1, Number(a.maxTokens) || 32e3);
         for (const f of ADV_FIELDS) {
           const v = a[f.key];
           const inp = inputs.get(f.key);
@@ -11851,6 +11912,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       drawSim();
     });
     void load();
+    memorySection?.addEventListener("contextsettingschange", () => void load());
     return foldableCard("agent-advanced-card", "\uACE0\uAE09 \uC124\uC815 (\uACF5\uD1B5)", [
       el("div", {
         class: "hint",
@@ -11860,7 +11922,8 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       ...rows,
       sim,
       measured,
-      el("div", { class: "row", style: { marginTop: "8px" } }, [save, reset, status])
+      el("div", { class: "row", style: { marginTop: "8px" } }, [save, reset, status]),
+      memorySection ?? null
     ]);
   }
   function buildVisionCard() {
@@ -12975,7 +13038,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     setSelected(shared, state.activeCharKey ? "project" : "global");
     const enabled = el("input", { type: "checkbox", checked: true });
     const auto = el("input", { type: "checkbox", checked: true });
-    const windowSize = el("input", { type: "number", min: 8e3, step: 1e3, value: "128000" });
+    const windowSize = el("input", { type: "number", min: 8e3, step: 1e3, value: "220000" });
     const settings = el("button", { class: "ghost", text: "\uC124\uC815 \uC800\uC7A5" });
     const refresh3 = async () => {
       try {
@@ -12983,7 +13046,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         const agent = cfg.config?.agent ?? {};
         enabled.checked = agent.memoryEnabled !== false;
         auto.checked = agent.autoCompact !== false;
-        windowSize.value = String(agent.contextWindowTokens ?? 128e3);
+        windowSize.value = String(agent.contextWindowTokens ?? 22e4);
         await reload();
       } catch (e) {
         status.textContent = String(e);
@@ -13047,6 +13110,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         if (!Number.isInteger(tokens) || tokens < 8e3) throw new Error("\uCEE8\uD14D\uC2A4\uD2B8 \uD06C\uAE30\uB294 8000 \uC774\uC0C1 \uC815\uC218\uB85C \uC785\uB825\uD558\uC138\uC694.");
         await transport.post("/config", { config: { agent: { memoryEnabled: enabled.checked, autoCompact: auto.checked, contextWindowTokens: tokens } } });
         status.textContent = "\uC124\uC815\uC744 \uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4.";
+        settings.dispatchEvent(new Event("contextsettingschange", { bubbles: true }));
       } catch (e) {
         status.textContent = String(e);
       }
@@ -13061,7 +13125,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       try {
         const data = await transport.get("/agent/context");
         modal("\uCEE8\uD14D\uC2A4\uD2B8 \uC555\uCD95 \uAE30\uB85D", el("div", {}, data.events.length ? data.events.map((e) => el("p", {
-          text: `${new Date(e.at * 1e3).toLocaleString()} \xB7 ${e.beforeChars.toLocaleString()} \u2192 ${e.afterChars.toLocaleString()}\uC790 (${e.method})`
+          text: `${new Date(e.at * 1e3).toLocaleString()} \xB7 ${e.beforeTokens != null && e.afterTokens != null ? `${e.beforeTokens.toLocaleString()} \u2192 ${e.afterTokens.toLocaleString()}\uD1A0\uD070 (\uCD94\uC815)` : `${e.beforeChars.toLocaleString()} \u2192 ${e.afterChars.toLocaleString()}\uC790 (\uC774\uC804 \uAE30\uB85D)`} (${e.method})`
         })) : [el("p", { text: "\uC544\uC9C1 \uC555\uCD95 \uAE30\uB85D\uC774 \uC5C6\uC2B5\uB2C8\uB2E4." })]));
       } catch (e) {
         status.textContent = String(e);
@@ -13074,7 +13138,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       el("label", {}, [enabled, el("span", { text: " AI \uBA54\uBAA8\uB9AC \uC0AC\uC6A9" })]),
       el("label", {}, [auto, el("span", { text: " \uC694\uCCAD\uB9C8\uB2E4 \uCEE8\uD14D\uC2A4\uD2B8\uB97C \uD655\uC778\uD558\uACE0 \uC790\uB3D9 \uC555\uCD95" })]),
       el("label", { class: "field" }, [el("span", { text: "\uC0AC\uC6A9 \uBAA8\uB378\uC758 \uCEE8\uD14D\uC2A4\uD2B8 \uD06C\uAE30 (\uD1A0\uD070)" }), windowSize]),
-      el("p", { class: "hint", text: "\uCD9C\uB825 \uACF5\uAC04\uACFC \uB3C4\uAD6C\xB7\uC9C0\uCE68 \uD06C\uAE30\uB97C \uACE0\uB824\uD574 \uC5EC\uC720\uB97C \uB450\uACE0 \uC555\uCD95\uD569\uB2C8\uB2E4. \uD1A0\uD070 \uC218\uB294 \uCD94\uC815\uCE58\uC785\uB2C8\uB2E4. \uCD5C\uC2E0 \uC0AC\uC6A9\uC790 \uC9C0\uC2DC\uC640 \uBBF8\uC644\uB8CC \uC791\uC5C5\uC744 \uB0A8\uAE30\uBA70, \uC694\uC57D\uC5D0\uB294 \uC124\uC815\uD55C \uBAA8\uB378\uC744 \uC0AC\uC6A9\uD569\uB2C8\uB2E4." }),
+      el("p", { class: "hint", text: "\uB300\uD654 \uC608\uC0B0\uC740 \uCEE8\uD14D\uC2A4\uD2B8\uC758 80%\uC5D0\uC11C \uC9C0\uCE68\xB7\uB3C4\uAD6C \uC815\uC758\xB7\uCD5C\uB300 \uB2F5\uBCC0 \uD1A0\uD070\uC744 \uBE80 \uB9CC\uD07C \uC790\uB3D9 \uACC4\uC0B0\uD569\uB2C8\uB2E4. \uB098\uBA38\uC9C0 20%\uB294 \uC548\uC804 \uC5EC\uC720\uC774\uBA70, \uBCC4\uB3C4\uC758 \uAE00\uC790 \uC218 \uC81C\uD55C\uC740 \uC5C6\uC2B5\uB2C8\uB2E4. \uD1A0\uD070 \uC218\uB294 \uCD94\uC815\uCE58\uC785\uB2C8\uB2E4. \uC0AC\uC6A9\uC790 \uC9C0\uC2DC\uC640 \uBBF8\uC644\uB8CC \uC791\uC5C5\uC744 \uBCF4\uC874\uD558\uBA70, \uC694\uC57D\uC5D0\uB294 \uC124\uC815\uD55C \uBAA8\uB378\uC744 \uC0AC\uC6A9\uD569\uB2C8\uB2E4." }),
       el("div", { class: "row" }, [settings, history]),
       el("div", { class: "row" }, [shared, add, reloadBtn]),
       list2,
@@ -13138,10 +13202,10 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           return;
         }
         if (!r.newer) {
-          const mismatch = r.current !== "0.15.8";
+          const mismatch = r.current !== "0.15.10";
           const ahead = r.ahead ?? (!!r.latest && r.latest !== r.current);
           say(
-            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.8"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
+            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.10"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
             mismatch || ahead ? "" : "ok"
           );
           return;
@@ -13232,7 +13296,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.15.8",
+            version: "0.15.10",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -13354,7 +13418,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           await state.connect();
           agentPanel().invalidate();
         }
-      }), buildAgentNotesCard((refresh3) => refreshers.push(refresh3)), buildAdvancedCard()]],
+      }), buildAdvancedCard(buildAgentNotesCard((refresh3) => refreshers.push(refresh3)))]],
       ["\uC2A4\uD0AC", [buildSkillsCard({ onMount: (refresh3) => {
         refreshers.push(refresh3);
       } })]],
@@ -13883,7 +13947,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.8"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.10"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -17410,159 +17474,6 @@ ${negative.value.trim()}
     return rootEl;
   }
 
-  // src/ui/studio/center-single.ts
-  var previewBox = null;
-  var imgEl = null;
-  var captionEl = null;
-  var emptyEl = null;
-  var progressLine = null;
-  var runBtn = null;
-  var shownKey = "";
-  function drawSingle(mount) {
-    shownKey = "";
-    mount.appendChild(statusRow());
-    const notice10 = tokenNotice();
-    if (notice10) mount.appendChild(notice10);
-    imgEl = el("img", { alt: "", style: { display: "none" } });
-    imgEl.style.cursor = "zoom-in";
-    imgEl.addEventListener("click", () => {
-      if (shownKey && shownKey !== "live") openImage(shownKey, S.viewList);
-    });
-    captionEl = el("div", { class: "hint previewname" });
-    emptyEl = el("div", { class: "empty" });
-    previewBox = el("div", { class: "bigpreview" }, [imgEl, captionEl, emptyEl]);
-    mount.appendChild(previewBox);
-    const prev = el("button", { class: "ghost tiny", text: "\u25C0", title: "\uAC19\uC740 \uBC30\uCE58\uC758 \uC774\uC804 \uC7A5" });
-    const next = el("button", { class: "ghost tiny", text: "\u25B6", title: "\uAC19\uC740 \uBC30\uCE58\uC758 \uB2E4\uC74C \uC7A5" });
-    const live = el("button", { class: "ghost tiny", text: "\uB77C\uC774\uBE0C", title: "\uACE0\uC815\uC744 \uD480\uACE0 \uC9C4\uD589 \uC911\uC778 \uC0DD\uC131\uC744 \uB530\uB77C\uAC11\uB2C8\uB2E4" });
-    prev.addEventListener("click", () => walk(-1));
-    next.addEventListener("click", () => walk(1));
-    live.addEventListener("click", () => {
-      S.viewPath = "";
-      syncPreview();
-    });
-    progressLine = el("span", { class: "hint" });
-    mount.appendChild(el("div", { class: "row", style: { margin: "8px 0", flexWrap: "wrap" } }, [
-      prev,
-      live,
-      next,
-      el("span", { class: "grow" }),
-      progressLine
-    ]));
-    syncControls();
-    syncPreview();
-  }
-  function buildRunControls() {
-    const minus = el("button", { class: "ghost tiny", text: "\u2212" });
-    const plus = el("button", { class: "ghost tiny", text: "\uFF0B" });
-    const count = el("input", {
-      type: "number",
-      value: String(gen.count),
-      min: "1",
-      max: "99",
-      class: "countbox",
-      title: "\uC7A5\uC218"
-    });
-    const setCount = (n) => {
-      gen.count = Math.min(99, Math.max(1, Math.trunc(n) || 1));
-      count.value = String(gen.count);
-      persistGen();
-    };
-    minus.addEventListener("click", () => setCount(gen.count - 1));
-    plus.addEventListener("click", () => setCount(gen.count + 1));
-    count.addEventListener("change", () => setCount(Number(count.value)));
-    runBtn = el("button", { class: "primary tiny" });
-    runBtn.addEventListener("click", () => {
-      if (S.jobId) void cancelRun();
-      else void startRun({ scenePreset: "", count: gen.count });
-    });
-    const row = el("div", { class: "row", style: { gap: "6px" } }, [
-      el("span", { class: "hint", text: "\uC7A5\uC218" }),
-      el("div", { class: "row", style: { gap: "2px" } }, [minus, count, plus]),
-      el("span", { class: "grow" }),
-      runBtn
-    ]);
-    syncControls();
-    return row;
-  }
-  function singleTick() {
-    if (!previewBox?.isConnected) return;
-    syncControls();
-    syncPreview();
-  }
-  function syncControls() {
-    const running = !!S.jobId;
-    if (runBtn) {
-      runBtn.style.display = S.status && !S.status.configured && !running ? "none" : "";
-      runBtn.textContent = running ? `\uCDE8\uC18C (${pendingCount()})` : "\uC0DD\uC131 \uC2DC\uC791";
-      runBtn.classList.toggle("danger", running);
-    }
-    if (progressLine?.isConnected) {
-      const p = S.queueJob?.payload;
-      progressLine.textContent = running && p ? `${stateLabel(S.queueJob.state)} \xB7 ${p.done}/${p.total}${p.current ? " \xB7 " + p.current : ""}` : "";
-    }
-  }
-  function syncPreview() {
-    const img = imgEl;
-    if (!img || !previewBox?.isConnected || !captionEl || !emptyEl) return;
-    const running = !!S.jobId;
-    const saved = S.queueJob?.payload?.saved ?? [];
-    const pinned = S.viewPath;
-    const showEmpty = (text2) => {
-      if (shownKey) return;
-      emptyEl.textContent = text2;
-      emptyEl.style.display = "";
-      img.style.display = "none";
-      captionEl.style.display = "none";
-    };
-    const showImg = (key, src, caption) => {
-      shownKey = key;
-      img.src = src;
-      img.style.display = "";
-      emptyEl.style.display = "none";
-      captionEl.textContent = caption;
-      captionEl.style.display = "";
-    };
-    if (!pinned && running && livePreview.url) {
-      showImg(
-        "live",
-        livePreview.url,
-        `\uC0DD\uC131 \uC911 ${livePreview.step}/${livePreview.total}${livePreview.current ? " \xB7 " + livePreview.current : ""}`
-      );
-      return;
-    }
-    const path = pinned || saved[saved.length - 1] || "";
-    if (!path) {
-      showEmpty(running ? "\uC0DD\uC131 \uC911\uC785\uB2C8\uB2E4\u2026 \uCCAB \uD504\uB808\uC784\uC774 \uC624\uBA74 \uC5EC\uAE30 \uB098\uD0C0\uB0A9\uB2C8\uB2E4." : "\uC0DD\uC131 \uC2DC\uC791\uC744 \uB204\uB974\uAC70\uB098, \uC544\uB798 \uACB0\uACFC\uC5D0\uC11C \uD55C \uC7A5\uC744 \uACE0\uB974\uC138\uC694.");
-      return;
-    }
-    if (path === shownKey || !safeWorkspacePath(path)) return;
-    const want = path;
-    void blobUrl(want).then((url) => {
-      if (!img.isConnected) return;
-      const nowPath = S.viewPath || (S.queueJob?.payload?.saved ?? []).slice(-1)[0] || "";
-      if ((S.viewPath || !(S.jobId && livePreview.url)) && nowPath === want) {
-        showImg(want, url, want);
-        if (!S.jobId) releasePreview();
-      }
-    }).catch(() => {
-      if (shownKey === "") showEmpty("\uC774\uBBF8\uC9C0\uB97C \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + want);
-    });
-  }
-  function walk(dir) {
-    const list2 = S.viewList.length ? S.viewList : S.queueJob?.payload?.saved ?? [];
-    if (!list2.length) return;
-    const cur = S.viewPath || shownKey;
-    const at = Math.max(0, list2.indexOf(cur));
-    const to = Math.min(list2.length - 1, Math.max(0, at + dir));
-    S.viewPath = list2[to];
-    if (!S.viewList.length) S.viewList = [...list2];
-    syncPreview();
-  }
-  function openImage(path, list2) {
-    showArtifact({ path, title: path.split("/").pop() || path, kind: "image", images: list2 });
-  }
-
   // src/ui/studio/left-prompt.ts
   var pending = null;
   var loadedDoc = null;
@@ -17650,8 +17561,6 @@ ${negative.value.trim()}
     );
     paramsBtn.addEventListener("click", () => openParamsDialog());
     mount.appendChild(el("div", { class: "toolbtns" }, [charBtn, fragBtn, paramsBtn]));
-    mount.appendChild(el("div", { class: "sectiontitle", style: { padding: "10px 8px 0" }, text: "\uC0DD\uC131" }));
-    mount.appendChild(el("div", { style: { padding: "4px 8px 8px" } }, [buildRunControls()]));
   }
   function syncPromptBadges() {
     if (charBadge?.isConnected) {
@@ -18641,6 +18550,159 @@ ${negative.value.trim()}
         hub.drawCentre();
       }
     });
+  }
+
+  // src/ui/studio/center-single.ts
+  var previewBox = null;
+  var imgEl = null;
+  var captionEl = null;
+  var emptyEl = null;
+  var progressLine = null;
+  var runBtn = null;
+  var shownKey = "";
+  function drawSingle(mount) {
+    shownKey = "";
+    mount.appendChild(statusRow());
+    const notice10 = tokenNotice();
+    if (notice10) mount.appendChild(notice10);
+    imgEl = el("img", { alt: "", style: { display: "none" } });
+    imgEl.style.cursor = "zoom-in";
+    imgEl.addEventListener("click", () => {
+      if (shownKey && shownKey !== "live") openImage(shownKey, S.viewList);
+    });
+    captionEl = el("div", { class: "hint previewname" });
+    emptyEl = el("div", { class: "empty" });
+    previewBox = el("div", { class: "bigpreview" }, [imgEl, captionEl, emptyEl]);
+    mount.appendChild(previewBox);
+    const prev = el("button", { class: "ghost tiny", text: "\u25C0", title: "\uAC19\uC740 \uBC30\uCE58\uC758 \uC774\uC804 \uC7A5" });
+    const next = el("button", { class: "ghost tiny", text: "\u25B6", title: "\uAC19\uC740 \uBC30\uCE58\uC758 \uB2E4\uC74C \uC7A5" });
+    const live = el("button", { class: "ghost tiny", text: "\uB77C\uC774\uBE0C", title: "\uACE0\uC815\uC744 \uD480\uACE0 \uC9C4\uD589 \uC911\uC778 \uC0DD\uC131\uC744 \uB530\uB77C\uAC11\uB2C8\uB2E4" });
+    prev.addEventListener("click", () => walk(-1));
+    next.addEventListener("click", () => walk(1));
+    live.addEventListener("click", () => {
+      S.viewPath = "";
+      syncPreview();
+    });
+    progressLine = el("span", { class: "hint" });
+    mount.appendChild(el("div", { class: "row", style: { margin: "8px 0", flexWrap: "wrap" } }, [
+      prev,
+      live,
+      next,
+      el("span", { class: "grow" }),
+      progressLine
+    ]));
+    syncControls();
+    syncPreview();
+  }
+  function buildRunControls() {
+    const minus = el("button", { class: "ghost tiny", text: "\u2212" });
+    const plus = el("button", { class: "ghost tiny", text: "\uFF0B" });
+    const count = el("input", {
+      type: "number",
+      value: String(gen.count),
+      min: "1",
+      max: "99",
+      class: "countbox",
+      title: "\uC7A5\uC218"
+    });
+    const setCount = (n) => {
+      gen.count = Math.min(99, Math.max(1, Math.trunc(n) || 1));
+      count.value = String(gen.count);
+      persistGen();
+    };
+    minus.addEventListener("click", () => setCount(gen.count - 1));
+    plus.addEventListener("click", () => setCount(gen.count + 1));
+    count.addEventListener("change", () => setCount(Number(count.value)));
+    runBtn = el("button", { class: "primary tiny" });
+    runBtn.addEventListener("click", () => {
+      if (S.jobId) void cancelRun();
+      else void startRun({ scenePreset: "", count: gen.count });
+    });
+    const row = el("div", { class: "row", style: { gap: "6px" } }, [
+      el("span", { class: "hint", text: "\uC7A5\uC218" }),
+      el("div", { class: "row", style: { gap: "2px" } }, [minus, count, plus]),
+      el("span", { class: "grow" }),
+      runBtn
+    ]);
+    syncControls();
+    return row;
+  }
+  function singleTick() {
+    syncControls();
+    if (!previewBox?.isConnected) return;
+    syncPreview();
+  }
+  function syncControls() {
+    const running = !!S.jobId;
+    if (runBtn) {
+      runBtn.style.display = S.status && !S.status.configured && !running ? "none" : "";
+      runBtn.textContent = running ? `\uCDE8\uC18C (${pendingCount()})` : "\uC0DD\uC131 \uC2DC\uC791";
+      runBtn.classList.toggle("danger", running);
+    }
+    if (progressLine?.isConnected) {
+      const p = S.queueJob?.payload;
+      progressLine.textContent = running && p ? `${stateLabel(S.queueJob.state)} \xB7 ${p.done}/${p.total}${p.current ? " \xB7 " + p.current : ""}` : "";
+    }
+  }
+  function syncPreview() {
+    const img = imgEl;
+    if (!img || !previewBox?.isConnected || !captionEl || !emptyEl) return;
+    const running = !!S.jobId;
+    const saved = S.queueJob?.payload?.saved ?? [];
+    const pinned = S.viewPath;
+    const showEmpty = (text2) => {
+      if (shownKey) return;
+      emptyEl.textContent = text2;
+      emptyEl.style.display = "";
+      img.style.display = "none";
+      captionEl.style.display = "none";
+    };
+    const showImg = (key, src, caption) => {
+      shownKey = key;
+      img.src = src;
+      img.style.display = "";
+      emptyEl.style.display = "none";
+      captionEl.textContent = caption;
+      captionEl.style.display = "";
+    };
+    if (!pinned && running && livePreview.url) {
+      showImg(
+        "live",
+        livePreview.url,
+        `\uC0DD\uC131 \uC911 ${livePreview.step}/${livePreview.total}${livePreview.current ? " \xB7 " + livePreview.current : ""}`
+      );
+      return;
+    }
+    const path = pinned || saved[saved.length - 1] || "";
+    if (!path) {
+      showEmpty(running ? "\uC0DD\uC131 \uC911\uC785\uB2C8\uB2E4\u2026 \uCCAB \uD504\uB808\uC784\uC774 \uC624\uBA74 \uC5EC\uAE30 \uB098\uD0C0\uB0A9\uB2C8\uB2E4." : "\uC0DD\uC131 \uC2DC\uC791\uC744 \uB204\uB974\uAC70\uB098, \uC544\uB798 \uACB0\uACFC\uC5D0\uC11C \uD55C \uC7A5\uC744 \uACE0\uB974\uC138\uC694.");
+      return;
+    }
+    if (path === shownKey || !safeWorkspacePath(path)) return;
+    const want = path;
+    void blobUrl(want).then((url) => {
+      if (!img.isConnected) return;
+      const nowPath = S.viewPath || (S.queueJob?.payload?.saved ?? []).slice(-1)[0] || "";
+      if ((S.viewPath || !(S.jobId && livePreview.url)) && nowPath === want) {
+        showImg(want, url, want);
+        if (!S.jobId) releasePreview();
+      }
+    }).catch(() => {
+      if (shownKey === "") showEmpty("\uC774\uBBF8\uC9C0\uB97C \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + want);
+    });
+  }
+  function walk(dir) {
+    const list2 = S.viewList.length ? S.viewList : S.queueJob?.payload?.saved ?? [];
+    if (!list2.length) return;
+    const cur = S.viewPath || shownKey;
+    const at = Math.max(0, list2.indexOf(cur));
+    const to = Math.min(list2.length - 1, Math.max(0, at + dir));
+    S.viewPath = list2[to];
+    if (!S.viewList.length) S.viewList = [...list2];
+    syncPreview();
+  }
+  function openImage(path, list2) {
+    showArtifact({ path, title: path.split("/").pop() || path, kind: "image", images: list2 });
   }
 
   // src/ui/studio/center-batch.ts
@@ -20319,7 +20381,10 @@ ${negative.value.trim()}
       tabbar = el("div", { class: "studiotabs tabstrip" });
       leftContent = el("div", { class: "tree filetree" });
       S.leftMount = leftContent;
-      pane.left.append(tabbar, leftContent);
+      pane.left.append(tabbar, leftContent, el("div", {
+        class: "studio-run-footer",
+        style: { flexShrink: "0", padding: "8px", borderTop: "1px solid var(--border)" }
+      }, [buildRunControls()]));
       S.noticeMount = el("div");
       S.viewMount = el("div", { class: "pad filepad" });
       pane.centre.append(S.noticeMount, S.viewMount);
@@ -20845,7 +20910,7 @@ ${negative.value.trim()}
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.8"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.10"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
@@ -20941,7 +21006,7 @@ ${negative.value.trim()}
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.15.8" }),
+        el("span", { class: "dim", text: "v0.15.10" }),
         healthEl,
         el("span", { class: "spacer" }),
         reload,
@@ -21258,6 +21323,6 @@ ${negative.value.trim()}
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.15.8"} loaded`);
+    console.log(`[risu-hina] v${"0.15.10"} loaded`);
   })();
 })();
