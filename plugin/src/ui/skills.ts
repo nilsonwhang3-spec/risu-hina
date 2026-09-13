@@ -15,6 +15,7 @@
  */
 import { el, clear, armed, modal } from './dom';
 import { state, type Skill } from '../state';
+import { transport } from '../transport';
 
 export function buildSkillsCard(opts: { onMount?: (refresh: () => Promise<void>) => void } = {}): HTMLElement {
   const listMount = el('div');
@@ -202,7 +203,34 @@ async function openEditor(
     el('label', { class: 'checkrow' }, [always, el('span', { text: '항상 적용 — 본문을 매 요청에 함께 보냅니다 (모든 대화에 적용될 규칙에만)' })]),
     el('label', { class: 'field' }, [el('span', { text: '본문 — 절차' }), body, bodyCount]),
   ]);
-  if (skill) form.appendChild(buildFiles(skill, say));
+  if (skill) {
+    form.appendChild(buildFiles(skill, say));
+    const history = el('button', { class: 'ghost', text: '변경 기록 / 되돌리기' });
+    const versions = el('div');
+    history.addEventListener('click', async () => {
+      try {
+        const data = await transport.get<{ revisions: { revision: string; body: string; updatedAt: number; meta?: Record<string, string> }[] }>(
+          '/skills/revisions', { id: skill!.id });
+        clear(versions);
+        for (const rev of data.revisions) {
+          const restore = el('button', { class: 'ghost', text: '이 버전으로 되돌리기' });
+          restore.addEventListener('click', async () => {
+            restore.disabled = true;
+            try {
+              await transport.post('/skills/restore', { id: skill!.id, revision: rev.revision });
+              close(); await refresh(); say('이전 버전으로 되돌렸습니다.', 'ok');
+            } catch (e) { out.textContent = msg(e); restore.disabled = false; }
+          });
+          versions.appendChild(el('details', {}, [
+            el('summary', { text: new Date(rev.updatedAt * 1000).toLocaleString() + ' · ' + (rev.meta?.learned_evidence || '이전 본문') }),
+            el('pre', { text: rev.body, style: { whiteSpace: 'pre-wrap' } }), restore,
+          ]));
+        }
+        if (!data.revisions.length) versions.textContent = '아직 변경 기록이 없습니다.';
+      } catch (e) { out.textContent = msg(e); }
+    });
+    form.appendChild(el('div', {}, [history, versions]));
+  }
   form.appendChild(out);
   form.appendChild(el('div', { class: 'row' }, [save, cancel]));
 

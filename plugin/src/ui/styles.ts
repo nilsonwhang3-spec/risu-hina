@@ -447,6 +447,8 @@ button.iconbtn.danger { background: #b91c1c; border-color: #b91c1c; color: #fff;
 .artifactmodal .modalbody { overflow: auto; min-height: 0; }
 .artifactmodal .artifactview img { max-width: 100%; max-height: 72vh; width: auto; display: block; margin: 0 auto; }
 .artifactmodal .artifactbody { overflow: auto; }
+.artifactmodal .artifactbody.original-size img { max-width: none; max-height: none; width: auto; touch-action: pan-x pan-y pinch-zoom; }
+.artifactmodal .artifactbody.original-size .wsimg { display: block; max-width: none; }
 .artifactmodal .artifacthead { margin-bottom: 6px; }
 .quickreply { gap: 6px; margin-top: 6px; }
 .agentloading { padding: 12px; }

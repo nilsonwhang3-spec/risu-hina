@@ -2250,28 +2250,22 @@ def test_keys_and_agent_kinds(s: Server) -> None:
 
 
 def test_codex_is_off_unless_enabled() -> None:
-    """The shipped default: the subscription path is not offered at all.
-
-    Its own server, seeded with the hand edit `"OPENAI_CODEX": 0`. The key
-    ships in the config template at 1 (asserted on the shared server below),
-    and nothing but a hand-edited config.json can turn it off - a settings
-    patch cannot flip it either way, since `config.update` only walks sections.
-    """
-    print("test_codex_off_by_hand_edit")
+    """Legacy OPENAI_CODEX=0 must not hide the subscription option."""
+    print("test_codex_always_offered")
     s = Server(codex=False)
     try:
         if not s.wait_ready():
             check("server started", False, s.drain()[-400:])
             return
         st, h = s.get("/health", token=None)
-        check("health says it is not offered", h.get("codexEnabled") is False, str(h)[:200])
+        check("health offers it despite legacy flag", h.get("codexEnabled") is True, str(h)[:200])
         st, _ = s.get("/codex/status")
-        check("its routes are not there at all", st == 404, str(st))
+        check("subscription status is available", st == 200, str(st))
         st, body = s.post("/presets/save", {"name": "구독", "values": {"provider": "codex", "model": "m"}})
-        check("and a preset cannot select it", st == 400, f"{st} {str(body)[:100]}")
+        check("a preset can select it", st == 200, f"{st} {str(body)[:100]}")
         st, body = s.post("/config", {"config": {"OPENAI_CODEX": 1}})
         st, h = s.get("/health", token=None)
-        check("and a settings patch cannot turn it back on", h.get("codexEnabled") is False, str(h)[:200])
+        check("settings keep it available", h.get("codexEnabled") is True, str(h)[:200])
     finally:
         s.stop()
 

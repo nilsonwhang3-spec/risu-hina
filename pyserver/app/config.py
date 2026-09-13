@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any
 
 APP_NAME = "risu-hina"
-VERSION = "0.14.8"
+VERSION = "0.15.2"
 
 # Renamed from REALOOC_* to RISUHINA_*. The old names are still honoured, and
 # not as politeness: the launcher, the control script and any service wrapper
@@ -196,6 +196,9 @@ DEFAULTS: dict[str, Any] = {
         # ~15K fixed prompt. It was 240K: with 7-14 requests a turn that made
         # 500K+ input turns even after pruning (§1-46 measurement).
         "historyBudgetChars": 120000,
+        "autoCompact": True,
+        "contextWindowTokens": 128000,
+        "memoryEnabled": True,
         # 고급 설정 (§1-47): the per-turn limits the settings card exposes.
         # 0 = no limit. Tool traffic older than pruneKeepTurns user turns is
         # clipped to pruneClipChars every turn.
@@ -364,16 +367,14 @@ def section(name: str) -> dict:
     return dict(load().get(name) or {})
 
 
-# The OpenAI subscription path. Ships as 1 in the config template; an
-# operator who wants it gone sets `"OPENAI_CODEX": 0` in config.json by hand -
-# `update()` skips top-level non-section keys, so no settings patch from the
-# panel can flip it either way. With it off the routes are not there, a
-# preset cannot select it, and the settings page does not offer it.
+# Retained for older configuration files; subscription login is always offered.
 CODEX_FLAG = "OPENAI_CODEX"
 
 
 def codex_enabled() -> bool:
-    return str(load().get(CODEX_FLAG, 1)).strip().lower() in ("1", "true", "yes", "on")
+    # Kept as a compatibility query; login is always offered, independently
+    # of the legacy OPENAI_CODEX setting. Authentication still gates use.
+    return True
 
 
 OLD_MAX_TOKENS_DEFAULT = 8000

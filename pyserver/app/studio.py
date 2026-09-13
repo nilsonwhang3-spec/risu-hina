@@ -39,7 +39,7 @@ import zlib
 from pathlib import Path
 from typing import Any
 
-from . import files, log, nai, workspace
+from . import assetrules, files, log, nai, workspace
 
 # The studio lives inside the ONE global space, as its studio/ folder. Wire
 # paths are space-rooted ("studio/images/…"); the studio's own scope is gone.
@@ -731,6 +731,9 @@ def build_name(template: str, *, character: str = "", outfit: str = "",
     # `outfit` stays accepted for custom templates that still say {outfit};
     # the default template no longer has the field.
     t = template or DEFAULT_TEMPLATE
+    unknown = set(re.findall(r"\{([^{}]+)\}", t)) - {"character", "outfit", "emotion", "stamp", "n"}
+    if unknown:
+        raise StudioError("지원하지 않는 파일명 변수: " + ", ".join(sorted(unknown)))
     stamp = stamp or time.strftime("%Y%m%d-%H%M%S")
     name = (t.replace("{character}", safe_part(character))
              .replace("{outfit}", safe_part(outfit))
@@ -874,7 +877,18 @@ def png_embed(png: bytes, payload: dict, keyword: str = PARAMS_KEYWORD) -> bytes
     return png[:ihdr_end] + chunk + png[ihdr_end:]
 
 
+_SAVE_LOCK = threading.RLock()
+
+
 def save_image(folder: str, name: str, png: bytes, sidecar: dict) -> dict:
+    # On Windows resolving a path while another thread creates its missing
+    # ancestors can yield a different canonical prefix. Serialize the complete
+    # reserve/write operation; exclusive creation still protects other processes.
+    with _SAVE_LOCK:
+        return _save_image(folder, name, png, sidecar)
+
+
+def _save_image(folder: str, name: str, png: bytes, sidecar: dict) -> dict:
     """The PNG, carrying its own record.
 
     What we asked for and which library files it came from is embedded as a
@@ -893,15 +907,18 @@ def save_image(folder: str, name: str, png: bytes, sidecar: dict) -> dict:
     dest.parent.mkdir(parents=True, exist_ok=True)
     # Never overwrite (§1-39): a template without {stamp}, or two batches in
     # the same second, produced the same name and the newer image silently
-    # replaced the older. A taken name counts up: 이름 (2).png, (3)…
-    if dest.exists():
-        stem, suf, k = dest.stem, dest.suffix, 2
-        while dest.exists():
-            dest = dest.with_name(f"{stem} ({k}){suf}")
+    # replaced the older. A taken name counts up: 이름.2.png, .3…
+    stem, suf, k = dest.stem, dest.suffix, 1
+    while True:
+        body = png_embed(png, {**sidecar, "file": dest.name, "createdAt": time.time()})
+        try:
+            # Exclusive creation also protects concurrent batch/inpaint saves.
+            with dest.open("xb") as output:
+                output.write(body)
+            break
+        except FileExistsError:
             k += 1
-        name = dest.name
-    body = png_embed(png, {**sidecar, "file": name, "createdAt": time.time()})
-    dest.write_bytes(body)
+            dest = dest.with_name(f"{stem}.{k}{suf}")
     rel = dest.relative_to(files._root(SCOPE)).as_posix()
     log.info("studio image %s (%d bytes)", rel, len(body))
     return {"path": rel, "size": len(body)}
@@ -1025,7 +1042,7 @@ def _plan_entries(spec: dict) -> list[dict]:
     return out
 
 
-def plan(spec: dict) -> list[dict]:
+def _legacy_plan(spec: dict) -> list[dict]:
     """A batch, expanded into the images it will make.
 
     One entry per (emotion x count) - or, with `entries`, exactly the list
@@ -1086,6 +1103,56 @@ def plan(spec: dict) -> list[dict]:
                 entry["unresolved"] = sorted(set(missing + missing2))
             out.append(entry)
     return out
+
+
+def output_folder(spec: dict) -> str:
+    """Resolve new output beneath the pinned project name, preserving subfolders."""
+    from . import workspace
+    folder = str(spec.get("folder") or "").replace("\\", "/").strip("/")
+    project = str((spec.get("asset") or {}).get("project") or spec.get("project") or "")
+    if not project and spec.get("charKey"):
+        project = workspace.bot_folder(str(spec["charKey"]))
+    if not project and folder.startswith("projects/"):
+        project = folder.split("/")[1]
+    if not project:
+        # Explicit existing output folders already identify their project.
+        if folder.startswith("studio/output/"):
+            return _rel(folder)
+        project = "_unassigned"
+    if project in (".", "..") or _UNSAFE.search(project):
+        raise StudioError("안전한 프로젝트 폴더명을 지정해 주세요")
+    base = f"studio/output/{project}"
+    if folder == base or folder.startswith(base + "/"):
+        return _rel(folder)
+    if folder.startswith(f"projects/{project}/"):
+        return _rel(base + folder[len(f"projects/{project}"):])
+    if folder and folder != "studio/output":
+        # A caller-specified subfolder remains useful, but cannot escape the project.
+        suffix = folder.removeprefix("studio/output/")
+        return _rel(f"{base}/{suffix}")
+    return _rel(base)
+
+
+def plan(spec: dict) -> list[dict]:
+    items = _legacy_plan(spec)
+    for item in items:
+        entry = (spec.get("entries") or [])[item["entryIx"]] if "entryIx" in item else {}
+        item["folder"] = output_folder({**spec, **entry})
+        binding = entry.get("asset", spec.get("asset"))
+        if not binding:
+            continue
+        character = str(entry.get("cast") or spec.get("characterName") or "")
+        chars = item.get("characters") or spec.get("characters") or active("characters")
+        if not character and chars and isinstance(chars[0], str):
+            character = read_character(_by_name("characters", chars[0]))["name"]
+        asset = assetrules.candidate(assetrules.resolve(binding, character=character, scene=item.get("scene", "")))
+        item["asset"] = asset
+        item["exportName"] = asset["exportName"]
+        # PNG working candidates share a stem and use .2/.3 on collision.
+        # The image ID and semantic fields remain independent of that suffix.
+        item["name"] = Path(asset["exportName"]).stem + ".png"
+        item["folder"] = output_folder({**spec, **entry, "asset": asset})
+    return items
 
 
 # --- inpainting ---------------------------------------------------------------
@@ -1407,7 +1474,13 @@ def inpaint(rel: str, boxes: list[dict], prompt: str, *, model: str,
     src = Path(rel)
     name = f"{src.stem}{suffix}.png"
     folder = str(src.parent).replace("\\", "/")
+    original_asset = assetrules.metadata(files._resolve(SCOPE, rel))
+    asset = assetrules.candidate(original_asset, original_asset.get("imageId", "")) if original_asset else None
+    if asset:
+        name = Path(asset["exportName"]).stem + ".png"
+    folder = output_folder({"folder": folder, "asset": asset or {}})
     saved = save_image(folder, name, out, {
+        **({"asset": asset} if asset else {}),
         "inpaintOf": rel, "boxes": boxes, "prompt": prompt, "negative": negative,
         "model": nai.inpaint_model(model), "composite": mode, "maskSnap": MASK_SNAP,
         "strength": strength, "inherited": base_prompt is not None,
@@ -1571,7 +1644,9 @@ def group(folder: str, pattern: str = "", group_by: str = "emotion") -> dict:
         raise StudioError(f"폴더가 없습니다: {folder}")
     names = sorted(p.name for p in base.iterdir()
                    if p.is_file() and p.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp"))
-    parsed = parse_names(names, pattern)
+    identities = {name: assetrules.metadata(base / name) for name in names}
+    legacy_names = [name for name in names if not identities[name]]
+    parsed = parse_names(legacy_names, pattern) if legacy_names else {"matched": [], "unmatched": [], "fields": [], "pattern": pattern}
     sel = read_selection(folder)
 
     def _mtime(name: str) -> int:
@@ -1583,6 +1658,18 @@ def group(folder: str, pattern: str = "", group_by: str = "emotion") -> dict:
             return 0
 
     groups: dict[str, list[dict]] = {}
+    labels: dict[str, str] = {}
+    for name, asset in identities.items():
+        if not asset:
+            continue
+        key = "asset:" + assetrules.group_key(asset)
+        labels[key] = f"{asset['setId']} · {asset['exportName']}"
+        groups.setdefault(key, []).append({
+            "filename": name, "path": f"{folder}/{name}", "fields": asset["fields"],
+            "asset": asset, "exportName": asset["exportName"],
+            "selection": sel.get(name, {"use": False, "inpaint": False, "delete": False}),
+            "modified": _mtime(name),
+        })
     for m in parsed["matched"]:
         key = _group_key(m, group_by)
         groups.setdefault(key, []).append({
@@ -1596,8 +1683,8 @@ def group(folder: str, pattern: str = "", group_by: str = "emotion") -> dict:
         "folder": folder,
         "pattern": parsed["pattern"],
         "groupBy": group_by,
-        "fields": parsed["fields"],
-        "groups": [{"key": k, "items": v} for k, v in sorted(groups.items())],
+        "fields": sorted(set(parsed["fields"]) | {k for a in identities.values() if a for k in a["fields"]}),
+        "groups": [{"key": k, "label": labels.get(k, k), "items": v} for k, v in sorted(groups.items())],
         # Shown as its own group so it cannot be missed.
         "unmatched": [{"filename": n, "path": f"{folder.strip('/')}/{n}",
                        "selection": sel.get(n, {"use": False, "inpaint": False, "delete": False}),
@@ -1648,21 +1735,28 @@ def rename_apply(folder: str, pairs: list[dict]) -> dict:
         raise StudioError(f"{len(plan['problems'])}건에 문제가 있어 아무것도 바꾸지 않았습니다")
     base = files._resolve(SCOPE, folder)
     done = 0
+    selection = read_selection(folder)
     for pair in plan["rename"]:
         src, dst = base / pair["from"], base / pair["to"]
         if src == dst:
             continue
+        asset = assetrules.metadata(src)
         src.rename(dst)
+        if asset:
+            assetrules.remember(dst, asset)
+        if pair["from"] in selection:
+            selection[pair["to"]] = selection.pop(pair["from"])
         side = src.with_suffix(".json")
         if side.is_file():
             side.rename(dst.with_suffix(".json"))
         done += 1
+    write_selection(folder, selection)
     log.info("studio rename %s: %d files", folder, done)
     return {"folder": folder, "renamed": done}
 
 
 def export_selected(folder: str, *, pattern: str = "", group_by: str = "emotion",
-                    character: str = "", delimiter: str = "-") -> dict:
+                    character: str = "", delimiter: str = "-", preview: bool = False) -> dict:
     """Write the chosen images into `selected/` under canonical names.
 
     Mirrors `image-selector`'s export, which the user already works with:
@@ -1677,6 +1771,10 @@ def export_selected(folder: str, *, pattern: str = "", group_by: str = "emotion"
     """
     folder = _rel(folder)
     g = group(folder, pattern, group_by)
+    if any(i.get("asset") for grp in g["groups"] for i in grp["items"]):
+        return assetrules.export(g, preview=preview)
+    if preview:
+        return {"managed": False, "mapping": [], "problems": [], "folder": folder + "/selected"}
     base = files._resolve(SCOPE, folder)
     out = base / "selected"
     if out.exists():

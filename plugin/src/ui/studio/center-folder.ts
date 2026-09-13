@@ -90,7 +90,7 @@ export function drawFolder(node: Folder): void {
     selInfo, selAll, selNone, del, mkdir, cols, pick,
   ]));
   viewMount.appendChild(el('div', { class: 'hint', style: { marginBottom: '8px' },
-    text: `파일 ${node.files.length} · 하위 폴더 ${node.children.length} — 클릭으로 선택하면 위에 크게 보입니다 (Shift 범위) · 두 번 클릭으로 1장 탭에 · 끌어서 폴더/왼쪽 트리로 이동` }));
+    text: `파일 ${node.files.length} · 하위 폴더 ${node.children.length} — 클릭으로 선택 (Shift 범위) · 두 번 클릭으로 원본 자세히 보기 · Ctrl+C/X 후 워크스페이스에서 Ctrl+V 가능` }));
   // The picked image, large, above the grid (§1-40: "그림 누르면 선택된 그림
   // 보여주기"). Patched on click, never rebuilt.
   const bigPick = el('div', { class: 'bigpick', style: { display: 'none' } });

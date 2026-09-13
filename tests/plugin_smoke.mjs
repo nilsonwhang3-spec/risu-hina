@@ -1990,6 +1990,40 @@ console.log('\ntest_agent_panel');
         turnsAfter.turns[1].body === target.body);
 }
 
+console.log('\ntest_agent_interleaved_text');
+{
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, options) => {
+    if (String(url).endsWith('/chat')) {
+      const events = [
+        { type: 'text', text: '첫' }, { type: 'text', text: ' 문단 전체입니다.' },
+        { type: 'tool', name: 'list_files' }, { type: 'toolResult', result: 'ok' },
+        { type: 'text', text: '둘' }, { type: 'text', text: '째 문단 전체입니다.' },
+        { type: 'tool', name: 'read_file' }, { type: 'toolResult', result: 'ok' },
+        { type: 'text', text: '마지막 문단 전체입니다.' }, { type: 'done', usage: {}, staged: 0 },
+      ];
+      return new Response(events.map(e => JSON.stringify(e)).join('\n') + '\n', { headers: { 'Content-Type': 'application/x-ndjson' } });
+    }
+    return originalFetch(url, options);
+  };
+  try {
+    const input = document.querySelector('.agentinput');
+    input.value = '문단 보존 테스트';
+    input.dispatchEvent(new window.Event('input', { bubbles: true }));
+    const send = document.querySelector('.sendbtn');
+    send.disabled = false;
+    send.dispatchEvent(new window.Event('click', { bubbles: true }));
+    await settle(1000);
+    const prose = [...document.querySelectorAll('.bubble.assistant .bubble-body')].map(n => n.textContent);
+    check('first prose survives later tools and tokens', prose.includes('첫 문단 전체입니다.'), JSON.stringify(prose));
+    check('second prose survives another tool', prose.includes('둘째 문단 전체입니다.'), JSON.stringify(prose));
+    check('final prose remains complete', prose.includes('마지막 문단 전체입니다.'), JSON.stringify(prose));
+    // Clear the mock conversation so the welcome-state test still begins empty.
+    clickButton(document.querySelector('.agenthead'), '새 대화');
+    await settle(400);
+  } finally { globalThis.fetch = originalFetch; }
+}
+
 console.log('\ntest_agent_welcome');
 {
   // Configure the agent through the preset editor, which is the real path, and
@@ -2492,13 +2526,23 @@ console.log('\ntest_studio_bottom_strip');
     },
     result: { saved: 1, failed: 1, anlasSpent: 0 },
   };
+  let mockJobs = [job];
+  let cancelledId = '';
   clickById(document, 'tab-files');
   await settle(400);
   const orig = globalThis.fetch;
   globalThis.fetch = async (url, opts) => {
     const u = String(url);
     if (u.includes('/studio/job')) {
-      return new Response(JSON.stringify({ jobs: [job] }), {
+      const id = new URL(u).searchParams.get('id');
+      let body = id ? mockJobs.find(j => j.id === id) : { jobs: mockJobs };
+      if (u.includes('/cancel')) {
+        cancelledId = JSON.parse(opts.body).id;
+        const target = mockJobs.find(j => j.id === cancelledId);
+        if (target) target.state = 'cancelled';
+        body = { ok: true, job: target };
+      } else if (u.includes('/preview')) body = {};
+      return new Response(JSON.stringify(body), {
         status: 200, headers: { 'Content-Type': 'application/json' },
       });
     }
@@ -2519,16 +2563,36 @@ console.log('\ntest_studio_bottom_strip');
           (strip?.textContent || '').slice(0, 120));
     strip?.querySelector('.stripcell')?.dispatchEvent(new window.Event('click', { bubbles: true }));
     await settle(400);
-    check('a strip cell opens in the 1장 tab',
-          [...document.querySelectorAll('.panel.active .centretabs .tab')]
-            .some((b) => b.classList.contains('on') && /1장/.test(b.textContent || ''))
-          && !!document.querySelector('.panel.active .bigpreview'),
-          (document.querySelector('.panel.active .centretabs')?.textContent || ''));
+    check('a strip cell opens in the shared original-image modal', !!document.querySelector('.artifactmodal'));
+    check('original-size zoom is offered', !!findButton(document.querySelector('.artifactmodal'), '원본 크기로 확대'));
+    clickButton(document.querySelector('.artifactmodal'), '원본 크기로 확대');
+    check('zoom uses natural image dimensions', !!document.querySelector('.artifactbody.original-size'));
+    pressEscape(document);
     // The batch tab shows the queue only - results moved out.
     clickButton(document.querySelector('.panel.active .centretabs'), '배치');
     await settle(500);
     check('the batch tab carries no result sections', !centre()?.querySelector('.jobsec'),
           (centre()?.textContent || '').slice(0, 160));
+    mockJobs = [
+      { ...job, id: 'job_ai_first', state: 'running', result: null },
+      { ...job, id: 'job_ai_second', state: 'pending', result: null },
+    ];
+    clickById(document, 'tab-files');
+    await settle(100);
+    clickById(document, 'tab-studio');
+    await settle(900);
+    const jobRows = [...document.querySelectorAll('.studio-job-list .row')];
+    check('all active AI jobs appear together in the batch view', jobRows.length === 2);
+    const secondRow = jobRows.find(row => row.textContent.includes('job_ai_second'));
+    secondRow?.querySelector('button')?.click();
+    await settle(500);
+    check('a job row cancels its own job, not the selected first job', cancelledId === 'job_ai_second');
+    check('the remaining running job stays visible',
+      document.querySelector('.studio-job-list')?.textContent.includes('job_ai_first') &&
+      !document.querySelector('.studio-job-list')?.textContent.includes('job_ai_second'));
+    mockJobs[0].state = 'done';
+    mockJobs[0].result = job.result;
+    await settle(1800);
   } finally { globalThis.fetch = orig; }
   clickButton(document.querySelector('.panel.active .centretabs'), '1장');
   await settle(300);
@@ -2918,6 +2982,29 @@ console.log('\ntest_studio_selector');
         text().slice(0, 200));
   check('the selector opens on the group cards',
         !!document.querySelector('.panel.active .groupcard'), text().slice(0, 160));
+  check('selection reset is gone and project asset rules are reachable',
+        !findButton(document.querySelector('.panel.active .seltools'), '선택 해제')
+        && !!findButton(document.querySelector('.panel.active .seltools'), '에셋 규칙'));
+  clickButton(document.querySelector('.panel.active .seltools'), '에셋 규칙');
+  await settle(400);
+  {
+    const dialog = document.querySelector('.modalback');
+    check('project rule editor loads', /명명 규칙/.test(dialog?.textContent || ''));
+    clickButton(dialog, '규칙 추가');
+    clickButton(dialog, '세트 추가');
+    clickButton(dialog, '슬롯 추가');
+    const emotion = [...(dialog?.querySelectorAll('label.field') || [])]
+      .find(l => l.querySelector('span')?.textContent === 'emotion')?.querySelector('input');
+    if (emotion) { emotion.value = 'happy'; emotion.dispatchEvent(new window.Event('input', { bubbles: true })); }
+    clickButton(dialog, '규칙·세트 저장');
+    await settle(400);
+    const contract = await (await fetch(backend.url + '/studio/asset-rules?project=' + encodeURIComponent('고르기'), { headers: auth })).json();
+    check('rule and set editor saves a validated contract through HTTP',
+          contract.revision === 1 && contract.sets?.[0]?.slots?.[0]?.fields?.emotion === 'happy',
+          (dialog?.textContent || '').slice(-300));
+    dialog?.querySelector('.modalhead .iconbtn')?.dispatchEvent(new window.Event('click', { bubbles: true }));
+    await settle(100);
+  }
   // 그룹별: one representative card per group, its count on it.
   const card = (key) => [...document.querySelectorAll('.panel.active .groupcard')]
     .find((c) => (c.textContent || '').includes(key));

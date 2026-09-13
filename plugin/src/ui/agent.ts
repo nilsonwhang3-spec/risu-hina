@@ -820,9 +820,10 @@ export class AgentPanel {
     // (§1-55). Any other event flushes first so order is kept.
     let textTimer: ReturnType<typeof setTimeout> | null = null;
     let textTarget: HTMLElement | null = null;
+    const segmentText = new WeakMap<HTMLElement, string>();
     const flushText = (): void => {
       if (textTimer !== null) { clearTimeout(textTimer); textTimer = null; }
-      if (textTarget) { setMarkdown(textTarget, textAcc); this.scroll(); }
+      if (textTarget) { setMarkdown(textTarget, segmentText.get(textTarget) ?? ''); this.scroll(); }
     };
     const scheduleText = (node: HTMLElement): void => {
       if (textTarget !== node) { flushText(); textTarget = node; }
@@ -834,9 +835,19 @@ export class AgentPanel {
         const e = ev as Record<string, unknown>;
         if (e.type !== 'text') flushText();
         switch (e.type) {
+          case 'context': {
+            this.log.appendChild(el('div', { class: 'hint', text: `컨텍스트 자동 압축 · ${Number(e.beforeChars).toLocaleString()} → ${Number(e.afterChars).toLocaleString()}자` }));
+            this.scroll();
+            break;
+          }
+          case 'job': {
+            state.touchFiles();
+            break;
+          }
           case 'text': {
             const node = proseSegment();
             textAcc += String(e.text ?? '');
+            segmentText.set(node, textAcc);
             // Text is arriving, so the indicator would only repeat "alive";
             // it comes back the moment the model turns to a tool again.
             setThinking(false);

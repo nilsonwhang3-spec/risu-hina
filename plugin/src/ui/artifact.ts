@@ -27,6 +27,7 @@ export interface ArtifactSpec {
   /** A ready <img>/element to show instead of loading `path` (assets whose
    * bytes are not a space path). */
   node?: HTMLElement;
+  images?: string[];
 }
 
 let current: ArtifactSpec | null = null;
@@ -45,7 +46,7 @@ async function fill(body: HTMLElement, spec: ArtifactSpec): Promise<void> {
   try {
     if (kind === 'image') {
       clear(body);
-      body.appendChild(workspaceImage(spec.path, spec.title));
+      body.appendChild(workspaceImage(spec.path, spec.title, { thumb: false, lazy: false, unload: false }));
       return;
     }
     const r = await state.readFile(spec.path);
@@ -67,6 +68,25 @@ export function showArtifact(spec: ArtifactSpec, _opts: { flipMobile?: boolean }
   current = spec;
   const body = el('div', { class: 'artifactbody' });
   const head = el('div', { class: 'artifacthead row' });
+  if (spec.kind === 'image') {
+    const zoom = el('button', { class: 'ghost tiny', text: '원본 크기로 확대' });
+    zoom.addEventListener('click', () => {
+      const expanded = body.classList.toggle('original-size');
+      zoom.textContent = expanded ? '화면에 맞추기' : '원본 크기로 확대';
+    });
+    head.appendChild(zoom);
+    if (spec.images && spec.images.length > 1) {
+      const index = spec.images.indexOf(spec.path);
+      for (const [delta, text] of [[-1, '◀'], [1, '▶']] as const) {
+        const walk = el('button', { class: 'ghost tiny', text });
+        walk.addEventListener('click', () => {
+          const path = spec.images![(index + delta + spec.images!.length) % spec.images!.length];
+          showArtifact({ ...spec, path, title: path.split('/').pop() || path });
+        });
+        head.appendChild(walk);
+      }
+    }
+  }
   if (spec.path && !spec.node) {
     const openFile = el('button', { class: 'ghost tiny', text: '파일 탭에서 열기' });
     openFile.addEventListener('click', () => { closeArtifact(); state.requestOpenFile(spec.path); });

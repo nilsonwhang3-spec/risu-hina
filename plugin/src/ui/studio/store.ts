@@ -166,6 +166,7 @@ export const gen = {
   width: 832, height: 1216, count: 1, seed: '',
   quality: false, ucPreset: 0,
   folder: OUTPUT_ROOT,
+  assetProject: '', assetSet: '', assetSlot: '', assetCharacter: '',
   // The selector's regex. Empty means the backend's default; it is edited on
   // screen because it is the thing most likely to need adjusting.
   pattern: '',
@@ -192,6 +193,7 @@ export function spec(): Record<string, unknown> {
   // What you see is what is sent: the panel names the active cards explicitly
   // rather than leaning on the backend default, so the request is inspectable.
   const out: Record<string, unknown> = {
+    charKey: state.activeCharKey,
     model: gen.model,
     styles: activeOf('styles'),
     characters: activeOf('characters'),
@@ -202,6 +204,8 @@ export function spec(): Record<string, unknown> {
               qualityToggle: gen.quality, ucPreset: gen.ucPreset },
   };
   if (gen.scenePreset) out.scenePreset = gen.scenePreset;
+  if (gen.assetSet) out.asset = { project: gen.assetProject, setId: gen.assetSet, slotId: gen.assetSlot,
+    fields: gen.assetCharacter ? { character: gen.assetCharacter } : {} };
   if (gen.seed.trim()) out.seed = Number(gen.seed.trim());
   return out;
 }
