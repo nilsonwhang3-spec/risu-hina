@@ -39,13 +39,7 @@ FAILED = "failed"
 # host_open_tab is a UI move, not a write - it rides the same queue because
 # the queue is exactly the "~하시겠습니까? [승인]" interaction the ask needs.
 HOST_KINDS = ("host_writeback", "host_save_copy",
-              "host_card_writeback", "host_clone_bot", "host_open_tab",
-              # Binary card material: the plugin saves the bytes into RisuAI
-              # (saveAsset) and attaches the key to the live card at once.
-              "host_asset_add", "host_asset_replace",
-              # Many at once: one card, one card write on the plugin side.
-              # 37 single adds were 37 host reads and 37 card uploads.
-              "host_asset_add_many")
+              "host_card_writeback", "host_clone_bot", "host_open_tab")
 
 
 class ActionError(ValueError):
@@ -115,7 +109,7 @@ def scope_of(action: dict) -> str:
         return "chat"
     if kind in ("card_edit", "card_greeting_add", "card_greeting_delete",
                 "script_edit", "script_add", "script_delete", "script_delete_many",
-                "card_checkpoint_restore"):
+                "card_checkpoint_restore", "host_asset_add", "host_asset_replace", "host_asset_add_many"):
         return "card"
     if kind == "lore_add":
         return "card" if (action["args"].get("scope") or "local") == "global" else "chat"
@@ -316,7 +310,17 @@ def _card_checkpoint_restore(a: dict) -> str:
     return f"봇 스냅샷으로 되돌렸습니다 (필드 {out['fields']}, 스크립트 {out['scripts']})"
 
 
+def _asset_stage(a: dict) -> str:
+    from . import assets
+    items = a['args'].get('items') if a['kind'] == 'host_asset_add_many' else [a['args']]
+    result = assets.stage_changes(a['charKey'], a['kind'], items)
+    return f"에셋 {result['changed']}건을 Hina 작업본에 저장했습니다. 아직 RisuAI에는 등록하지 않았습니다. 봇 반영을 눌러 등록해 주세요."
+
+
 EXECUTORS: dict[str, Callable[[dict], str]] = {
+    'host_asset_add': _asset_stage,
+    'host_asset_add_many': _asset_stage,
+    'host_asset_replace': _asset_stage,
     "memory_edit": _memory_edit,
     "memory_delete": _memory_delete,
     "lore_edit": _lore_edit,

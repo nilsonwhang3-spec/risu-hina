@@ -127,8 +127,10 @@ class Features(unittest.TestCase):
                          ModelRequest(parts=[ToolReturnPart("work", "Outcome UNKNOWN. " + "x" * 4000, str(i))])]
         def fail(*args): raise RuntimeError("unavailable")
         compacted, info = asyncio.run(agentcontext.compress(messages, 5000, FunctionModel(fail)))
-        self.assertEqual(info["method"], "fallback")
-        self.assertIn("완료를 뜻하지", info["summary"])
+        self.assertEqual(info["method"], "preserved")
+        self.assertTrue(info["summaryFailed"])
+        self.assertEqual(len(compacted), len(messages))
+        self.assertEqual(info['diagnostics']['errorType'], 'RuntimeError')
         self.assertTrue(any("preserve my instruction" in str(getattr(p,"content","")) for m in compacted for p in m.parts))
 
     def test_all_active_jobs_visible_and_cancelled_before_generation(self):
@@ -175,7 +177,7 @@ class Features(unittest.TestCase):
         with patch.object(agent, "_model", return_value=TestModel()):
             ag = agent.build()
         names = set(ag._function_toolset.tools)
-        self.assertTrue({"remember_note", "recall_notes", "forget_note", "compact_context", "studio_cancel"} <= names)
+        self.assertTrue({"remember_note", "recall_notes", "forget_note", "compact_context", "studio_cancel", "recall_work", "save_work_state"} <= names)
 
 
 if __name__ == "__main__": unittest.main()

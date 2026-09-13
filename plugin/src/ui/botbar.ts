@@ -15,7 +15,7 @@
  */
 import { el, clear, armed, popover, TOOL, fmtTime } from './dom';
 import { state, type CardChanges } from '../state';
-import { shellNotice, openSnapshotName, snapshotCleanup } from './chatbar';
+import { shellNotice, openSnapshotName, snapshotCleanup, applyHelp } from './chatbar';
 import { clientLog } from '../transport';
 import { openConflicts } from './conflicts';
 import { syncPendingChip } from './pendingpop';
@@ -102,7 +102,7 @@ export function buildBotBar(): HTMLElement {
 
   summaryEl = el('span', { class: 'dim changesum', title: '이 봇의 카드에서 아직 RisuAI에 쓰지 않은 변경' });
 
-  bar = el('div', { class: 'toolrow botbar' }, [applyBtn, snap, versions, discardBtn, charxBtn, summaryEl]);
+  bar = el('div', { class: 'toolrow botbar' }, [applyBtn, applyHelp(), snap, versions, discardBtn, charxBtn, summaryEl]);
   refreshBotBar();
   return bar;
 }
@@ -219,10 +219,19 @@ function msg(e: unknown): string {
 
 // --- 반영 (popover) -----------------------------------------------------------
 
-function openApply(anchor: HTMLElement): void {
+async function openApply(anchor: HTMLElement): Promise<void> {
   const out = el('div', { class: 'hint' });
   const body = el('div', { class: 'applypop' });
   const close = popover(anchor, body);
+
+  body.appendChild(el('div', { class: 'hint', text: '미반영 변경을 확인하는 중…' }));
+  await state.refreshBotChanges();
+  if (!body.isConnected) return;
+  clear(body);
+  if (!state.botChanges) {
+    body.appendChild(el('div', { class: 'notice err', text: '변경 상태를 조회하지 못했습니다. 연결을 확인하고 다시 열어 주세요.' }));
+    return;
+  }
 
   const lines = describe(state.botChanges);
   body.appendChild(el('div', { class: 'hint', text: lines.length ? lines.join(' · ') : '반영할 변경이 없습니다.' }));
@@ -249,7 +258,7 @@ function openApply(anchor: HTMLElement): void {
   apply.addEventListener('click', async () => {
     apply.disabled = true;
     try {
-      const r = await state.cardWriteBack();
+      const r = await state.cardWriteBack(text => { out.textContent = text; });
       if (r.mode === 'noop') {
         out.textContent = '반영할 변경이 없습니다.';
       } else if (!r.verified) {

@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.15.3
+//@display-name Risu Hina v0.15.6
 //@api 3.0
-//@version 0.15.3
+//@version 0.15.6
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -104,7 +104,7 @@
       this.tokenSafe = true;
       this.lastHealth = body;
       this.probeInfo = "";
-      this.gate = versionGate("0.15.3", String(body.version || ""));
+      this.gate = versionGate("0.15.6", String(body.version || ""));
       return body;
     }
     /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -557,14 +557,14 @@
       return String(fresh[field2] ?? "");
     };
     for (const e of update.fields ?? []) {
-      if (liveValue(e.field) !== e.before) {
+      if (liveValue(e.field) !== e.before && liveValue(e.field) !== e.after) {
         throw new HostError("changed", `RisuAI \uCABD\uC5D0\uC11C \uCE74\uB4DC\uAC00 \uBC14\uB00C\uC5C8\uC2B5\uB2C8\uB2E4 (${e.field}). \uB2E4\uC2DC \uBD88\uB7EC\uC640 \uC8FC\uC138\uC694`);
       }
     }
     for (const [key, label] of Object.entries(LIST_LABEL)) {
       const wanted = update[key];
       const before = update.before?.[key];
-      if (wanted && before !== void 0) checkList(label, fresh[key], before);
+      if (wanted && before !== void 0 && canon(fresh[key] ?? []) !== canon(wanted)) checkList(label, fresh[key], before);
     }
     for (const e of update.fields ?? []) {
       if (e.field === "characterVersion") {
@@ -2072,7 +2072,7 @@
       if (!r.approved) return "\uAC70\uC808\uD588\uC2B5\uB2C8\uB2E4.";
       if (!r.host) {
         this.bump();
-        void this.refreshChanges();
+        await Promise.all([this.refreshChanges(), this.refreshBotChanges()]);
         return String(r.result ?? "\uC2E4\uD589\uD588\uC2B5\uB2C8\uB2E4.");
       }
       try {
@@ -2097,10 +2097,9 @@
           this.emit();
           detail = "\uD0ED\uC744 \uC774\uB3D9\uD588\uC2B5\uB2C8\uB2E4.";
         } else if (r.host.kind === "host_asset_add" || r.host.kind === "host_asset_replace") {
-          detail = await this.applyAssetActions(r.host.kind, [r.host.args ?? {}]);
+          throw new Error("\uC5D0\uC14B \uC2B9\uC778 \uBC29\uC2DD\uC774 \uBCC0\uACBD\uB418\uC5C8\uC2B5\uB2C8\uB2E4. \uBC31\uC5D4\uB4DC\uB97C \uAC31\uC2E0\uD558\uACE0 \uC81C\uC548\uC744 \uB2E4\uC2DC \uB9CC\uB4E4\uC5B4 \uC8FC\uC138\uC694. \uC5D0\uC14B\uC740 \uBC18\uC601\uD560 \uB54C \uB4F1\uB85D\uB429\uB2C8\uB2E4.");
         } else if (r.host.kind === "host_asset_add_many") {
-          const items5 = Array.isArray(r.host.args?.items) ? r.host.args.items : [];
-          detail = await this.applyAssetActions("host_asset_add", items5);
+          throw new Error("\uC5D0\uC14B \uC2B9\uC778 \uBC29\uC2DD\uC774 \uBCC0\uACBD\uB418\uC5C8\uC2B5\uB2C8\uB2E4. \uBC31\uC5D4\uB4DC\uB97C \uAC31\uC2E0\uD558\uACE0 \uC81C\uC548\uC744 \uB2E4\uC2DC \uB9CC\uB4E4\uC5B4 \uC8FC\uC138\uC694. \uC5D0\uC14B\uC740 \uBC18\uC601\uD560 \uB54C \uB4F1\uB85D\uB429\uB2C8\uB2E4.");
         } else {
           throw new Error("\uD50C\uB7EC\uADF8\uC778\uC774 \uBAA8\uB974\uB294 \uC791\uC5C5\uC785\uB2C8\uB2E4: " + r.host.kind);
         }
@@ -2236,7 +2235,7 @@
       await transport.post("/card/script/move", { charKey: this.botKey, id, toSeq });
     }
     async cardPatch() {
-      return await transport.get("/card/patch", { charKey: this.botKey });
+      return await transport.get("/card/patch", { charKey: this.botKey, stagedAssets: "1" });
     }
     async cardCommit(label) {
       await transport.post("/card/commit", { charKey: this.botKey, label });
@@ -2306,7 +2305,8 @@
      * whole sequence lives here because two callers need it - the bot bar and
      * an approved host_card_writeback - and they must not drift apart.
      */
-    async cardWriteBack() {
+    async cardWriteBack(progress = () => {
+    }) {
       if (!this.isLiveBot) {
         throw new Error("\uBC18\uC601\uC740 RisuAI\uC5D0\uC11C \uC774 \uBD07\uC774 \uC120\uD0DD\uB418\uC5B4 \uC788\uC5B4\uC57C \uD569\uB2C8\uB2E4. RisuAI\uC5D0\uC11C \uBD07\uC744 \uC120\uD0DD\uD55C \uB4A4 \uD328\uB110\uC744 \uB2E4\uC2DC \uC5F4\uC5B4 \uC8FC\uC138\uC694");
       }
@@ -2317,6 +2317,9 @@
       }
       const update = this.cardUpdateFrom(patch, false);
       if (!update) return { applied: 0, mode: "noop", verified: true };
+      await this.resolveStagedAssets(update, progress);
+      const current2 = await currentSlot();
+      if (current2.characterIndex !== slot.characterIndex) throw new Error("\uC774\uBBF8\uC9C0 \uC5C5\uB85C\uB4DC \uC911 \uC120\uD0DD\uB41C \uBD07\uC774 \uBC14\uB00C\uC5C8\uC2B5\uB2C8\uB2E4. \uBBF8\uBC18\uC601 \uBCC0\uACBD\uC744 \uBCF4\uC874\uD588\uC2B5\uB2C8\uB2E4.");
       const r = await writeCharacter(slot.characterIndex, patch.chaId, update);
       if (!r.verified) {
         return { applied: r.applied, mode: r.mode, verified: false, ...r.drift ? { drift: r.drift } : {} };
@@ -2371,113 +2374,29 @@
       this.epoch += 1;
       this.emit();
     }
-    /**
-     * Approved asset proposals: bytes from the workspace -> RisuAI's asset
-     * store (saveAsset, which names the key) -> the live card's reference
-     * list -> the backend store under that key. Written to RisuAI at once,
-     * unlike text: binary material has no working copy to stage in, and the
-     * card re-upload afterwards makes the new reference the baseline.
-     *
-     * MANY items ride ONE host read, ONE card write and ONE re-upload: 37
-     * additions used to be 37 host round trips and 37 card uploads, each of
-     * which also restarted the asset sync - that is the "hangs at the 20s
-     * mark" the user saw, the sync being cancelled and restarted under load.
-     */
-    async applyAssetActions(kind, list2) {
-      if (!this.isLiveBot || !this.slot) {
-        throw new Error("\uC5D0\uC14B\uC744 \uB123\uC73C\uB824\uBA74 RisuAI\uC5D0\uC11C \uC774 \uBD07\uC774 \uC120\uD0DD\uB418\uC5B4 \uC788\uC5B4\uC57C \uD569\uB2C8\uB2E4");
+    /** Resolve local asset snapshots only when the user writes the card. */
+    async resolveStagedAssets(update, progress) {
+      const pending2 = /* @__PURE__ */ new Set();
+      const collect2 = (value) => {
+        if (typeof value === "string" && value.startsWith("assets/hina-pending-")) pending2.add(value);
+      };
+      for (const row of update.emotionImages ?? []) if (Array.isArray(row)) collect2(row[1]);
+      for (const row of update.additionalAssets ?? []) if (Array.isArray(row)) collect2(row[1]);
+      for (const row of update.ccAssets ?? []) if (row && typeof row === "object") collect2(row.uri);
+      const resolved = /* @__PURE__ */ new Map();
+      let done = 0;
+      for (const key of pending2) {
+        progress(`RisuAI \uC774\uBBF8\uC9C0 \uB4F1\uB85D ${++done}/${pending2.size} \xB7 \uCE74\uB4DC \uC800\uC7A5 \uB300\uAE30`);
+        const bytes = await transport.getBinary("/assets/blob", { key });
+        const realKey = await Risuai.saveAsset(bytes);
+        if (!realKey || typeof realKey !== "string" || realKey.startsWith("assets/hina-pending-")) throw new Error("RisuAI\uAC00 \uC5D0\uC14B \uC800\uC7A5 \uD0A4\uB97C \uBC18\uD658\uD558\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4. \uBBF8\uBC18\uC601 \uBCC0\uACBD\uC740 \uBCF4\uC874\uB429\uB2C8\uB2E4.");
+        resolved.set(key, realKey);
+        await transport.post("/assets/adopt", { charKey: this.botKey, sourceKey: key, key: realKey });
       }
-      if (!list2.length) throw new Error("\uB123\uC744 \uC5D0\uC14B\uC774 \uC5C6\uC2B5\uB2C8\uB2E4");
-      const t0 = Date.now();
-      const saved = [];
-      const failed = [];
-      for (const args of list2) {
-        const name = String(args.name || "").trim();
-        const path = String(args.path || "");
-        const field2 = String(args.field || "additional");
-        if (!name || !path) {
-          failed.push(`${name || path}: \uC774\uB984/\uACBD\uB85C \uC5C6\uC74C`);
-          continue;
-        }
-        try {
-          const bytes = await transport.getBinary("/files/download", { path });
-          if (!(bytes[0] === 137 && bytes[1] === 80)) throw new Error("PNG \uD30C\uC77C\uB9CC \uC5D0\uC14B\uC73C\uB85C \uB123\uC744 \uC218 \uC788\uC2B5\uB2C8\uB2E4");
-          const key = await Risuai.saveAsset(bytes);
-          if (!key || typeof key !== "string") throw new Error("RisuAI \uAC00 \uC5D0\uC14B \uD0A4\uB97C \uB3CC\uB824\uC8FC\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4");
-          saved.push({ name, path, field: field2, key });
-        } catch (e) {
-          failed.push(`${name}: ${e instanceof Error ? e.message : String(e)}`);
-          void clientLog("warn", "asset save failed", { name, path, error: String(e) });
-        }
-      }
-      if (!saved.length) throw new Error("\uC5D0\uC14B\uC744 \uD558\uB098\uB3C4 \uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + failed.join("; "));
-      const slot = await currentSlot();
-      const fresh = await readCharacter(slot.characterIndex);
-      const update = {};
-      let placed = "";
-      if (kind === "host_asset_add") {
-        const emo = Array.isArray(fresh["emotionImages"]) ? [...fresh["emotionImages"]] : [];
-        const add = Array.isArray(fresh["additionalAssets"]) ? [...fresh["additionalAssets"]] : [];
-        let nEmo = 0;
-        let nAdd = 0;
-        for (const s of saved) {
-          if (s.field === "emotion") {
-            emo.push([s.name, s.key]);
-            nEmo += 1;
-          } else {
-            add.push([s.name, s.key, "png"]);
-            nAdd += 1;
-          }
-        }
-        if (nEmo) update.emotionImages = emo;
-        if (nAdd) update.additionalAssets = add;
-        placed = [nEmo ? `\uAC10\uC815 \uC774\uBBF8\uC9C0 ${nEmo}` : "", nAdd ? `\uCD94\uAC00 \uC5D0\uC14B ${nAdd}` : ""].filter(Boolean).join(" \xB7 ");
-      } else {
-        const keyOf = new Map(saved.map((s) => [s.name, s.key]));
-        let hits = 0;
-        const swap = (arr, at) => {
-          if (!Array.isArray(arr)) return null;
-          return arr.map((e) => {
-            if (Array.isArray(e) && keyOf.has(String(e[0]))) {
-              hits += 1;
-              const c = [...e];
-              c[at] = keyOf.get(String(e[0]));
-              return c;
-            }
-            return e;
-          });
-        };
-        const emo = swap(fresh["emotionImages"], 1);
-        const add = swap(fresh["additionalAssets"], 1);
-        const cc = Array.isArray(fresh["ccAssets"]) ? fresh["ccAssets"].map((c) => {
-          if (c && typeof c === "object" && keyOf.has(String(c.name))) {
-            hits += 1;
-            return { ...c, uri: keyOf.get(String(c.name)) };
-          }
-          return c;
-        }) : null;
-        if (!hits) throw new Error(`\uC774\uB984\uC774 \u201C${saved.map((s) => s.name).join(", ")}\u201D \uC778 \uC5D0\uC14B\uC774 \uCE74\uB4DC\uC5D0 \uC5C6\uC2B5\uB2C8\uB2E4`);
-        if (emo) update.emotionImages = emo;
-        if (add) update.additionalAssets = add;
-        if (cc) update.ccAssets = cc;
-        placed = `${hits}\uACF3 \uAD50\uCCB4`;
-      }
-      const w = await writeCharacter(slot.characterIndex, fresh.chaId, update);
-      if (!w.verified) {
-        throw new Error("\uCE74\uB4DC\uC5D0 \uC5D0\uC14B\uC774 \uBC18\uC601\uB418\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4: " + (w.drift || "\uC7AC\uD655\uC778 \uC2E4\uD328"));
-      }
-      for (const s of saved) {
-        try {
-          await transport.post("/assets/adopt", { charKey: this.activeCharKey, key: s.key, path: s.path, name: s.name, field: s.field });
-        } catch (e) {
-          void clientLog("warn", "assets/adopt failed", { name: s.name, error: String(e) });
-        }
-      }
-      await this.readHost();
-      await this.upload();
-      void clientLog("info", "assets applied", { kind, saved: saved.length, failed: failed.length, ms: Date.now() - t0 });
-      const head = saved.length === 1 ? `\uC5D0\uC14B \u201C${saved[0].name}\u201D \uC744 RisuAI \uC5D0 \uC800\uC7A5\uD558\uACE0 \uCE74\uB4DC\uC5D0 \uBD99\uC600\uC2B5\uB2C8\uB2E4 (${placed}, ${saved[0].key}).` : `\uC5D0\uC14B ${saved.length}\uAC74\uC744 RisuAI \uC5D0 \uC800\uC7A5\uD558\uACE0 \uCE74\uB4DC\uC5D0 \uD55C \uBC88\uC5D0 \uBD99\uC600\uC2B5\uB2C8\uB2E4 (${placed}).`;
-      return head + (failed.length ? ` \uC2E4\uD328 ${failed.length}\uAC74: ${failed.slice(0, 5).join("; ")}` : "");
+      const replace = (value) => typeof value === "string" ? resolved.get(value) ?? value : value;
+      if (update.emotionImages) update.emotionImages = update.emotionImages.map((row) => Array.isArray(row) ? [row[0], replace(row[1]), ...row.slice(2)] : row);
+      if (update.additionalAssets) update.additionalAssets = update.additionalAssets.map((row) => Array.isArray(row) ? [row[0], replace(row[1]), ...row.slice(2)] : row);
+      if (update.ccAssets) update.ccAssets = update.ccAssets.map((row) => row && typeof row === "object" ? { ...row, uri: replace(row.uri) } : row);
     }
     /**
      * 새 봇으로 저장: keep editing this bot, and keep what it was.
@@ -2511,6 +2430,8 @@
         throw new Error("\uAD6C\uBC84\uC804 \uC5C5\uB85C\uB4DC \uC0C1\uD0DC\uC758 \uCE74\uB4DC\uB77C \uBCF5\uC81C\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4. \uD328\uB110\uC744 \uB2EB\uC558\uB2E4 \uB2E4\uC2DC \uC5F4\uC5B4 \uC8FC\uC138\uC694");
       }
       const update = this.cardUpdateFrom(patch, true) ?? {};
+      await this.resolveStagedAssets(update, () => {
+      });
       const family = this.workspace?.familyKey || this.activeCharKey;
       const chaId = await cloneBot(this.slot.characterIndex, patch.chaId, name, update, family);
       await this.cardCommit("\uBCF5\uC81C \uC9C1\uC804");
@@ -5919,6 +5840,16 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
   var applyBadge = null;
   var summaryEl = null;
   var noticeMount = null;
+  function applyHelp() {
+    const help = el("button", { class: "tool apply-help", text: "\u24D8", title: "\uBC18\uC601\uC774\uB780?", "aria-label": "\uBC18\uC601\uC774\uB780?" });
+    help.addEventListener("click", () => popover(help, el("div", { class: "applypop" }, [
+      el("strong", { text: "\uC791\uC5C5\uBCF8 \uC800\uC7A5\uACFC RisuAI \uBC18\uC601\uC740 \uB2E4\uB985\uB2C8\uB2E4" }),
+      el("p", { text: "AI\uC758 \uD3B8\uC9D1\xB7\uC5D0\uC14B \uC81C\uC548\uC744 \uC2B9\uC778\uD558\uBA74 Hina \uC791\uC5C5\uBCF8\uC5D0 \uC800\uC7A5\uB429\uB2C8\uB2E4. \uBC18\uC601\uC744 \uB20C\uB7EC\uC57C \uC774\uBBF8\uC9C0\uC640 \uD3B8\uC9D1\uD55C \uBD07 \uB610\uB294 \uCC57\uC744 RisuAI\uC5D0 \uC800\uC7A5\uD558\uACE0 \uC800\uC7A5 \uACB0\uACFC\uB97C \uD655\uC778\uD569\uB2C8\uB2E4. AI\uC758 \uC791\uC5C5 \uC644\uB8CC \uBA54\uC2DC\uC9C0\uB9CC\uC73C\uB85C \uC790\uB3D9 \uBC18\uC601\uB418\uC9C0\uB294 \uC54A\uC2B5\uB2C8\uB2E4." }),
+      el("p", { text: "\uBD07 \uBC18\uC601: \uBA54\uD0C0\xB7\uBD07 \uB85C\uC5B4\uBD81\xB7Regex\xB7\uD2B8\uB9AC\uAC70\xB7\uC5D0\uC14B \uC774\uB984 \uB4F1\uC758 \uCE74\uB4DC \uD3B8\uC9D1. \uCC57 \uBC18\uC601: \uB300\uD654\xB7\uCC57 \uB85C\uC5B4\uBD81\xB7\uC7A5\uAE30\uAE30\uC5B5\xB7\uCC57 \uBCC0\uC218 \uD3B8\uC9D1. \uB450 \uB300\uC0C1\uC758 \uBBF8\uBC18\uC601 \uAC74\uC218\uB294 \uB530\uB85C \uD45C\uC2DC\uD569\uB2C8\uB2E4." }),
+      el("p", { text: "OUTPUT/\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 \uD30C\uC77C \uC0DD\uC131\xB7\uC774\uB3D9\uB9CC\uC73C\uB85C \uBD07\uC5D0 \uB4F1\uB85D\uB418\uC9C0\uB294 \uC54A\uC2B5\uB2C8\uB2E4. \uC5D0\uC14B \uCD94\uAC00\xB7\uAD50\uCCB4 \uC81C\uC548\uC744 \uC2B9\uC778\uD55C \uB4A4 \uBD07 \uBC18\uC601\uC744 \uB204\uB974\uBA74 PNG/WebP\uB97C \uC77C\uAD04 \uB4F1\uB85D\uD569\uB2C8\uB2E4. \uBCC0\uACBD \uCDE8\uC18C\uB85C \uBBF8\uBC18\uC601 \uD3B8\uC9D1\uC744 \uBC84\uB9B4 \uC218 \uC788\uC73C\uBA70 \uC6D0\uBCF8 \uD30C\uC77C\uC740 \uC720\uC9C0\uB429\uB2C8\uB2E4." })
+    ])));
+    return help;
+  }
   function buildChatBar(notice10) {
     noticeMount = notice10;
     applyBadge = el("span", { class: "badge warn applybadge", style: { display: "none" } });
@@ -5976,7 +5907,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       }
     });
     summaryEl = el("span", { class: "dim changesum", title: "\uC774 \uCC57\uC5D0\uC11C \uC544\uC9C1 RisuAI\uC5D0 \uC4F0\uC9C0 \uC54A\uC740 \uBCC0\uACBD" });
-    bar = el("div", { class: "toolrow chatbar" }, [applyBtn, snap, versions, discardBtn, summaryEl]);
+    bar = el("div", { class: "toolrow chatbar" }, [applyBtn, applyHelp(), snap, versions, discardBtn, summaryEl]);
     refreshChatBar();
     return bar;
   }
@@ -6031,10 +5962,18 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
   function msg(e) {
     return e instanceof Error ? e.message : String(e);
   }
-  function openApply(anchor) {
+  async function openApply(anchor) {
     const out = el("div", { class: "hint" });
     const body = el("div", { class: "applypop" });
     const close = popover(anchor, body);
+    body.appendChild(el("div", { class: "hint", text: "\uBBF8\uBC18\uC601 \uBCC0\uACBD\uC744 \uD655\uC778\uD558\uB294 \uC911\u2026" }));
+    await state.refreshChanges();
+    if (!body.isConnected) return;
+    clear(body);
+    if (!state.changes) {
+      body.appendChild(el("div", { class: "notice err", text: "\uBCC0\uACBD \uC0C1\uD0DC\uB97C \uC870\uD68C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4. \uC5F0\uACB0\uC744 \uD655\uC778\uD558\uACE0 \uB2E4\uC2DC \uC5F4\uC5B4 \uC8FC\uC138\uC694." }));
+      return;
+    }
     const lines = describe(state.changes);
     body.appendChild(el("div", { class: "hint", text: lines.length ? lines.join(" \xB7 ") : "\uBC18\uC601\uD560 \uBCC0\uACBD\uC774 \uC5C6\uC2B5\uB2C8\uB2E4." }));
     if (state.changes?.warnings?.length) {
@@ -7258,7 +7197,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         el("div", { class: "welcome-title", text: bot ? "\uBD07(\uCE74\uB4DC)\uC5D0\uC11C \uC870\uC815\uD560 \uD56D\uBAA9\uC744 \uC0C1\uB2F4\uD558\uC138\uC694" : "\uC870\uC815\uD574\uC57C \uD560 \uD56D\uBAA9\uC744 \uC0C1\uB2F4\uD558\uC138\uC694" }),
         el("div", {
           class: "hint",
-          text: "\uACE0\uCE60 \uACF3\uC744 \uB9D0\uC500\uD558\uC2DC\uBA74 \uD6D1\uC5B4\uBCF4\uACE0 \uC81C\uC548\uC744 \uB9CC\uB4E4\uC5B4 \uC635\uB2C8\uB2E4. \uBC18\uC601\uC740 \uC2B9\uC778\uD558\uC2E0 \uB4A4\uC5D0 \uC774\uB8E8\uC5B4\uC9D1\uB2C8\uB2E4."
+          text: "\uACE0\uCE60 \uACF3\uC744 \uB9D0\uC500\uD558\uC2DC\uBA74 \uC81C\uC548\uC744 \uB9CC\uB4ED\uB2C8\uB2E4. \uD3B8\uC9D1\xB7\uC5D0\uC14B \uC81C\uC548\uC744 \uC2B9\uC778\uD558\uBA74 \uC791\uC5C5\uBCF8\uC5D0 \uC800\uC7A5\uB429\uB2C8\uB2E4. RisuAI\uC5D0 \uC800\uC7A5\xB7\uB4F1\uB85D\uD558\uB824\uBA74 \uBCC4\uB3C4\uB85C \uBC18\uC601\uC744 \uB20C\uB7EC \uC8FC\uC138\uC694."
         }),
         el("div", {
           class: "hint",
@@ -7385,7 +7324,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         return el("div", { class: "stagedrow" }, [
           // Host actions touch the live RisuAI chat rather than our working copy,
           // which is a different kind of consequence and says so.
-          a.byHost ? el("span", { class: "badge err", text: "RisuAI" }) : null,
+          a.byHost ? el("span", { class: "badge err", text: "RisuAI" }) : el("span", { class: "badge", text: "\uC791\uC5C5\uBCF8" }),
           el("span", { class: "grow", text: a.summary }),
           busy,
           yes,
@@ -7623,9 +7562,13 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         allow.addEventListener("click", () => void decide(true, false));
         deny.addEventListener("click", () => void decide(false, false));
         always.addEventListener("click", () => void decide(true, true));
-        card.appendChild(el("div", { class: "permit-title", text: (p.kind === "pip" ? "\uD328\uD0A4\uC9C0 \uC124\uCE58 \uD5C8\uC6A9?" : "\uC178 \uBA85\uB839 \uC2E4\uD589 \uD5C8\uC6A9?") + " " + p.summary }));
+        card.appendChild(el("div", { class: "permit-title", text: (p.kind === "studio_batch" ? "\uC774 \uC124\uC815\uC73C\uB85C \uBC30\uCE58\uB97C \uC2E4\uD589\uD560\uAE4C\uC694?" : p.kind === "pip" ? "\uD328\uD0A4\uC9C0 \uC124\uCE58 \uD5C8\uC6A9?" : "\uC178 \uBA85\uB839 \uC2E4\uD589 \uD5C8\uC6A9?") + " " + p.summary }));
         card.appendChild(el("pre", { class: "mono", text: p.detail }));
-        card.appendChild(el("div", { class: "row" }, [allow, deny, always]));
+        if (p.kind === "studio_batch") {
+          allow.textContent = "\uC774 \uC124\uC815\uC73C\uB85C \uC2E4\uD589";
+          deny.textContent = "\uCDE8\uC18C";
+        }
+        card.appendChild(el("div", { class: "row" }, p.kind === "studio_batch" ? [allow, deny] : [allow, deny, always]));
         bubble.insertBefore(card, thinking);
         textNode = null;
         tracker = null;
@@ -7673,8 +7616,12 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
                 contextNotice = el("div", { class: "hint context-notice" });
                 bubble.insertBefore(contextNotice, thinking);
               }
-              contextCount += 1;
-              contextNotice.textContent = `\uB9E5\uB77D \uC555\uCD95 ${contextCount}\uD68C \xB7 ${Number(e.beforeChars).toLocaleString()} \u2192 ${Number(e.afterChars).toLocaleString()}\uC790`;
+              if (e.method === "preserved") {
+                contextNotice.textContent = e.summaryFailed ? "\uC694\uC57D \uBBF8\uC644\uB8CC \xB7 \uAE30\uC874 \uB9E5\uB77D \uBCF4\uC874" : "\uAE30\uC874 \uB9E5\uB77D \uBCF4\uC874";
+              } else {
+                contextCount += 1;
+                contextNotice.textContent = `\uB9E5\uB77D \uC555\uCD95 ${contextCount}\uD68C \xB7 ${Number(e.beforeChars).toLocaleString()} \u2192 ${Number(e.afterChars).toLocaleString()}\uC790`;
+              }
               this.scroll();
               break;
             }
@@ -7873,6 +7820,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       fold2.textContent = `\uC774\uC804 \uD56D\uBAA9 ${n}\uAC1C\uB97C \uC811\uC5C8\uC2B5\uB2C8\uB2E4 (\uBA54\uBAA8\uB9AC) \u2014 \uB300\uD654 \uBAA9\uB85D\uC5D0\uC11C \uC5F4\uBA74 \uB2E4\uC2DC \uBCFC \uC218 \uC788\uC2B5\uB2C8\uB2E4`;
     }
     async refreshStaged() {
+      await Promise.all([state.refreshChanges(), state.refreshBotChanges()]);
       try {
         this.setStaged(await state.stagedEdits());
         await this.refreshActions();
@@ -13036,10 +12984,10 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           return;
         }
         if (!r.newer) {
-          const mismatch = r.current !== "0.15.3";
+          const mismatch = r.current !== "0.15.6";
           const ahead = r.ahead ?? (!!r.latest && r.latest !== r.current);
           say(
-            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.3"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
+            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.6"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
             mismatch || ahead ? "" : "ok"
           );
           return;
@@ -13130,7 +13078,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.15.3",
+            version: "0.15.6",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -13781,7 +13729,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.3"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.6"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -14544,7 +14492,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       }
     });
     summaryEl2 = el("span", { class: "dim changesum", title: "\uC774 \uBD07\uC758 \uCE74\uB4DC\uC5D0\uC11C \uC544\uC9C1 RisuAI\uC5D0 \uC4F0\uC9C0 \uC54A\uC740 \uBCC0\uACBD" });
-    bar2 = el("div", { class: "toolrow botbar" }, [applyBtn2, snap, versions, discardBtn2, charxBtn, summaryEl2]);
+    bar2 = el("div", { class: "toolrow botbar" }, [applyBtn2, applyHelp(), snap, versions, discardBtn2, charxBtn, summaryEl2]);
     refreshBotBar();
     return bar2;
   }
@@ -14643,10 +14591,18 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
   function msg17(e) {
     return e instanceof Error ? e.message : String(e);
   }
-  function openApply2(anchor) {
+  async function openApply2(anchor) {
     const out = el("div", { class: "hint" });
     const body = el("div", { class: "applypop" });
     const close = popover(anchor, body);
+    body.appendChild(el("div", { class: "hint", text: "\uBBF8\uBC18\uC601 \uBCC0\uACBD\uC744 \uD655\uC778\uD558\uB294 \uC911\u2026" }));
+    await state.refreshBotChanges();
+    if (!body.isConnected) return;
+    clear(body);
+    if (!state.botChanges) {
+      body.appendChild(el("div", { class: "notice err", text: "\uBCC0\uACBD \uC0C1\uD0DC\uB97C \uC870\uD68C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4. \uC5F0\uACB0\uC744 \uD655\uC778\uD558\uACE0 \uB2E4\uC2DC \uC5F4\uC5B4 \uC8FC\uC138\uC694." }));
+      return;
+    }
     const lines = describe2(state.botChanges);
     body.appendChild(el("div", { class: "hint", text: lines.length ? lines.join(" \xB7 ") : "\uBC18\uC601\uD560 \uBCC0\uACBD\uC774 \uC5C6\uC2B5\uB2C8\uB2E4." }));
     const blocked = applyBlockReason();
@@ -14670,7 +14626,9 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     apply.addEventListener("click", async () => {
       apply.disabled = true;
       try {
-        const r = await state.cardWriteBack();
+        const r = await state.cardWriteBack((text2) => {
+          out.textContent = text2;
+        });
         if (r.mode === "noop") {
           out.textContent = "\uBC18\uC601\uD560 \uBCC0\uACBD\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.";
         } else if (!r.verified) {
@@ -19861,7 +19819,9 @@ ${negative.value.trim()}
       const my = ++gen2;
       void (async () => {
         try {
-          const url = await blobUrl(f.path, f.modified ? String(f.modified) : "", { thumb: true, w: smallScreen() ? 360 : 720 });
+          const displayWidth = mount.getBoundingClientRect().width || 360;
+          const width = Math.min(1536, Math.max(768, Math.ceil(displayWidth * (window.devicePixelRatio || 1) / 128) * 128));
+          const url = await blobUrl(f.path, f.modified ? String(f.modified) : "", { thumb: true, w: width });
           if (!mount.isConnected || my !== gen2) return;
           clear(mount);
           const img = el("img", { class: "assetimg", src: url, alt: "" });
@@ -20624,8 +20584,14 @@ ${negative.value.trim()}
   }
   function syncToolslot() {
     if (!toolbarSlot || !chatBarEl || !botBarEl || !tabSlot) return;
-    const showChat = !!state.activeChatKey && CHAT_TABS.has(active2);
-    const showBot = !!state.botKey && BOT_TABS.has(active2);
+    const chatPending = !!(state.changes?.total || state.changes?.actions || state.changes?.staged || state.changes?.conflicts);
+    const botPending = !!(state.botChanges?.total || state.botChanges?.actions || state.botChanges?.conflicts);
+    const showChat = !!state.activeChatKey && (CHAT_TABS.has(active2) || chatPending);
+    const showBot = !!state.botKey && (BOT_TABS.has(active2) || botPending);
+    const chatLabel = chatBarEl.querySelector('[data-tool="apply"] .tool-label');
+    const botLabel = botBarEl.querySelector('[data-tool="card-apply"] .tool-label');
+    if (chatLabel) chatLabel.textContent = CHAT_TABS.has(active2) && !showBot ? "\uBC18\uC601" : "\uCC57 \uBC18\uC601";
+    if (botLabel) botLabel.textContent = BOT_TABS.has(active2) && !showChat ? "\uBC18\uC601" : "\uBD07 \uBC18\uC601";
     chatBarEl.style.display = showChat ? "" : "none";
     botBarEl.style.display = showBot ? "" : "none";
     const showTab2 = tabSlot.childElementCount > 0;
@@ -20725,7 +20691,7 @@ ${negative.value.trim()}
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.3"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.6"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
@@ -20821,7 +20787,7 @@ ${negative.value.trim()}
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.15.3" }),
+        el("span", { class: "dim", text: "v0.15.6" }),
         healthEl,
         el("span", { class: "spacer" }),
         reload,
@@ -21138,6 +21104,6 @@ ${negative.value.trim()}
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.15.3"} loaded`);
+    console.log(`[risu-hina] v${"0.15.6"} loaded`);
   })();
 })();

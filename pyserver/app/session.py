@@ -403,7 +403,7 @@ def _checkpoint(session_id: str, event: Any) -> None:
     kind = type(event).__name__
     if kind not in ("FunctionToolCallEvent", "FunctionToolResultEvent"):
         return
-    part = getattr(event, "part", None) if kind == "FunctionToolCallEvent" else getattr(event, "result", None)
+    part = getattr(event, "part", None)
     _save_message(session_id, "checkpoint", {
         "kind": "started" if kind == "FunctionToolCallEvent" else "returned",
         "tool": getattr(part, "tool_name", ""), "callId": getattr(part, "tool_call_id", ""),
@@ -495,6 +495,8 @@ async def run(session_id: str, prompt: str, mode: str = "") -> AsyncGenerator[st
         # Older turns are summarised once the history is past its budget.
         history = _history(session_id)
         history = neutralise_thinking(history, ag.model)
+        from . import continuity
+        deps.continuity_parts = continuity.build(session_id, crow["char_key"], history)
         captured = capture_stack.enter_context(capture_run_messages())
         async with ag.run_stream_events(
             prompt, deps=deps, message_history=history, usage_limits=agent_mod.turn_limits(),
@@ -729,7 +731,7 @@ def _translate(ev: Any, acc: list[str]) -> list[str]:
                 "args": _short(getattr(part, "args", None)),
             }))
         elif name == "FunctionToolResultEvent":
-            content = getattr(getattr(ev, "result", None), "content", None)
+            content = getattr(getattr(ev, "part", None), "content", None)
             out.append(_line({"type": "toolResult", "result": _short(content)}))
     return out
 

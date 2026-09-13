@@ -40,6 +40,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import io
+import re
 import shutil
 import subprocess
 import sys
@@ -311,6 +312,18 @@ def main() -> int:
     ap.add_argument("--target", choices=["win", "linux", "all"], default="all")
     args = ap.parse_args()
     targets = ["win", "linux"] if args.target == "all" else [args.target]
+
+    # requirements.in is the runtime contract; a stale lock must not silently
+    # omit a direct dependency (Pillow was absent from both platform locks).
+    def pins(path: Path) -> dict[str, str]:
+        found = re.findall(r'^([\w.-]+)(?:\[[^\]]+\])?==([^\s;]+)', path.read_text(encoding='utf-8'), re.M)
+        return {name.lower().replace('_', '-'): version for name, version in found}
+    required = pins(SERVER / 'requirements.in')
+    for target in targets:
+        locked = pins(SERVER / TARGETS[target]['lock'])
+        missing = [f'{name}=={version}' for name, version in required.items() if locked.get(name) != version]
+        if missing:
+            raise RuntimeError(f'{target} lock is missing runtime requirements: {missing}')
 
     if OUT.exists():
         shutil.rmtree(OUT)

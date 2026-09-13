@@ -97,6 +97,10 @@ def store_bytes(key: str, data: bytes) -> dict:
         raise AssetError(f"asset larger than {limit} bytes: {key}")
     h = hashlib.sha256(data).hexdigest()
     ext = ext_of(key)
+    # One blob per content hash, even when the host gives WebP bytes a .png key.
+    existing = db.one('SELECT ext FROM asset_blobs WHERE content_hash=?', (h,))
+    if existing:
+        ext = existing['ext']
     # RisuAI names every asset by SHA-256 of its bytes (parser.svelte.ts
     # `hasher`), so a key and its content vouch for each other - which is what
     # lets bytes come from anywhere (this plugin, the hub, a PocketRisu
@@ -297,7 +301,20 @@ def listing(ck: str) -> dict:
             "ext": r["ext"] or ext_of(r["risu_key"]), "state": r["state"],
             "error": r["error"], "size": r["size"], "hash": r["content_hash"],
         })
-    return {"charKey": ck, "items": items, **status(ck)}
+    known = {item['key'] for item in items}
+    pending = db.query("SELECT s.seq,s.entry_json,k.state,k.error,k.content_hash,b.size FROM card_scripts s "
+                       "JOIN asset_keys k ON k.risu_key=json_extract(s.entry_json,'$.key') "
+                       "LEFT JOIN asset_blobs b ON b.content_hash=k.content_hash "
+                       "WHERE s.char_key=? AND s.kind='assetref' AND s.origin<>'deleted' "
+                       "AND k.risu_key LIKE 'assets/hina-pending-%'", (ck,))
+    for row in pending:
+        entry = db.unjs(row['entry_json'], {})
+        if entry['key'] in known:
+            continue
+        known.add(entry['key'])
+        items.append({**entry, 'seq': row['seq'], 'state': row['state'], 'error': row['error'],
+                      'size': row['size'], 'hash': row['content_hash'], 'pending': True})
+    return {"charKey": ck, **status(ck), "items": items}
 
 
 def store_stats() -> dict:
@@ -341,21 +358,89 @@ def fetch_to_scratch(ck: str, wanted: list[str]) -> dict:
 
 
 def stage_file(rel: str) -> dict:
-    """Validate a global-space file the agent wants to turn into an asset: it
-    must exist inside the space and be a PNG (saveAsset names every key
-    `.png`, so anything else would be mislabelled). A studio image is adopted
-    by its own path now - the copy hop between two roots is gone."""
+    """Validate PNG/WebP bytes independently of the host's storage-key suffix."""
     from . import files
     p = files._resolve(files.SPACE, rel)
     if not p.is_file():
         raise AssetError(f"파일이 없습니다: {rel}")
-    head = p.read_bytes()[:8] if p.stat().st_size >= 8 else b""
-    if not head.startswith(b"\x89PNG"):
-        raise AssetError("PNG 만 에셋으로 넣을 수 있습니다 (saveAsset 이 .png 키를 만듭니다): " + rel)
+    with p.open('rb') as stream:
+        head = stream.read(12)
+    ext = 'png' if head.startswith(b'\x89PNG') else (
+        'webp' if head[:4] == b'RIFF' and head[8:12] == b'WEBP' else '')
+    if not ext:
+        raise AssetError("PNG 또는 WebP 이미지가 필요합니다: " + rel)
     limit = int(settings().get("maxItemBytes") or 0)
     if limit and p.stat().st_size > limit:
         raise AssetError(f"{limit} 바이트를 넘습니다: {rel}")
-    return {"path": p.relative_to(files._root(files.SPACE)).as_posix(), "size": p.stat().st_size}
+    return {"path": p.relative_to(files._root(files.SPACE)).as_posix(), "size": p.stat().st_size, "ext": ext}
+
+
+def stage_folder(rel: str, recursive: bool = True, strip_variant_numbers: bool = True) -> dict:
+    """One bounded manifest for bulk registration; no image transformation."""
+    from . import files
+    import re
+    root = files._root(files.SPACE)
+    folder = files._resolve(files.SPACE, rel)
+    if not folder.is_dir():
+        raise AssetError('이미지 폴더가 없습니다: ' + rel)
+    items, skipped = [], []
+    for p in sorted(folder.rglob('*') if recursive else folder.iterdir()):
+        if not p.is_file() or p.suffix.lower() not in ('.png', '.webp'):
+            continue
+        path = p.relative_to(root).as_posix()
+        try:
+            info = stage_file(path)
+        except (AssetError, files.FileError) as e:
+            skipped.append(str(e)); continue
+        name = re.sub(r'\.(?:[2-9]|[1-9][0-9]+)$', '', p.stem) if strip_variant_numbers else p.stem
+        items.append({**info, 'name': name})
+        if len(items) > 5000:
+            raise AssetError('한 제안은 5000장 이하로 폴더를 나눠 주세요')
+    if not items:
+        raise AssetError('등록 가능한 PNG/WebP 이미지가 없습니다')
+    return {'items': items, 'skipped': skipped}
+
+
+PENDING_PREFIX = 'assets/hina-pending-'
+
+
+def stage_changes(ck: str, kind: str, items: list[dict]) -> dict:
+    """Snapshot image bytes locally and edit card rows. Never writes to RisuAI."""
+    from . import card, files
+    if not card.is_full(ck):
+        raise AssetError('봇 작업본을 먼저 불러와 주세요')
+    if not items or len(items) > 5000:
+        raise AssetError('에셋은 1~5000개씩 승인해 주세요')
+    prepared = []
+    for item in items:
+        name = str(item.get('name') or '').strip()
+        field = str(item.get('field') or 'additional')
+        if not name or field not in ('additional', 'emotion'):
+            raise AssetError('에셋 이름과 additional/emotion 대상이 필요합니다')
+        info = stage_file(str(item.get('path') or ''))
+        data = files._resolve(files.SPACE, info['path']).read_bytes()
+        key = PENDING_PREFIX + hashlib.sha256(data).hexdigest() + '.' + info['ext']
+        store_bytes(key, data)
+        prepared.append({'field': field, 'name': name, 'key': key, 'ext': info['ext']})
+    changed = 0
+    with db.transaction():
+        rows = card.scripts(ck, card.ASSET_KIND)
+        known = {(r['entry'].get('field'), r['entry'].get('name'), r['entry'].get('key')) for r in rows}
+        for entry in prepared:
+            if kind == 'host_asset_replace':
+                hits = [r for r in rows if r['entry'].get('name') == entry['name']]
+                if not hits:
+                    raise AssetError('교체할 에셋이 없습니다: ' + entry['name'])
+                for row in hits:
+                    card.update_script(row['id'], {**row['entry'], 'key': entry['key'], 'ext': entry['ext']})
+                    changed += 1
+            else:
+                identity = (entry['field'], entry['name'], entry['key'])
+                if identity in known:
+                    continue
+                card.add_script(ck, card.ASSET_KIND, entry)
+                known.add(identity); changed += 1
+    return {'changed': changed, 'pending': True}
 
 
 def adopt(ck: str, key: str, rel: str, *, name: str = "", field: str = "additional") -> dict:
@@ -421,7 +506,9 @@ def gc(days: float | None = None) -> dict:
     cutoff = db.now() - days * 86400
     # Keys nobody references and blobs no key points at.
     orphan_keys = db.execute(
-        "DELETE FROM asset_keys WHERE risu_key NOT IN (SELECT risu_key FROM char_assets)"
+        "DELETE FROM asset_keys WHERE risu_key NOT IN (SELECT risu_key FROM char_assets) "
+        "AND risu_key NOT IN (SELECT json_extract(entry_json,'$.key') FROM card_scripts "
+        "WHERE kind='assetref' AND origin<>'deleted' AND json_extract(entry_json,'$.key') IS NOT NULL)"
     ).rowcount
     victims = db.query(
         "SELECT content_hash, ext, size FROM asset_blobs WHERE created_at < ? AND content_hash "

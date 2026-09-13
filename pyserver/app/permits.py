@@ -28,7 +28,7 @@ from typing import Any
 
 from . import config, log
 
-KINDS = ("shell", "pip")
+KINDS = ("shell", "pip", "studio_batch")
 WAIT_S = 600
 MAX_OUTPUT = 60_000
 
@@ -47,10 +47,10 @@ def request(session_id: str, kind: str, summary: str, detail: str) -> dict:
         raise ValueError(f"unknown permit kind: {kind}")
     rid = uuid.uuid4().hex
     with _lock:
-        auto = kind in _always.get(session_id, set())
+        auto = kind != "studio_batch" and kind in _always.get(session_id, set())
         req = {
             "id": rid, "sessionId": session_id, "kind": kind, "summary": summary,
-            "detail": detail[:4000], "createdAt": _now(),
+            "detail": detail if kind == "studio_batch" else detail[:4000], "createdAt": _now(),
             "decided": auto, "allow": auto, "always": False, "auto": auto,
         }
         _pending[rid] = req
@@ -70,7 +70,7 @@ def decide(rid: str, allow: bool, always: bool = False) -> dict:
             raise LookupError("없는 요청입니다 (이미 끝났거나 시간이 지났습니다)")
         r["decided"] = True
         r["allow"] = bool(allow)
-        r["always"] = bool(always and allow)
+        r["always"] = bool(always and allow and r["kind"] != "studio_batch")
         if r["always"]:
             _always.setdefault(r["sessionId"], set()).add(r["kind"])
         return dict(r)

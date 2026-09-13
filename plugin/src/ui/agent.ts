@@ -354,7 +354,7 @@ export class AgentPanel {
       el('div', { class: 'welcome-title', text: bot ? '봇(카드)에서 조정할 항목을 상담하세요' : '조정해야 할 항목을 상담하세요' }),
       el('div', {
         class: 'hint',
-        text: '고칠 곳을 말씀하시면 훑어보고 제안을 만들어 옵니다. 반영은 승인하신 뒤에 이루어집니다.',
+        text: '고칠 곳을 말씀하시면 제안을 만듭니다. 편집·에셋 제안을 승인하면 작업본에 저장됩니다. RisuAI에 저장·등록하려면 별도로 반영을 눌러 주세요.',
       }),
       el('div', {
         class: 'hint',
@@ -502,7 +502,7 @@ export class AgentPanel {
       return el('div', { class: 'stagedrow' }, [
         // Host actions touch the live RisuAI chat rather than our working copy,
         // which is a different kind of consequence and says so.
-        a.byHost ? el('span', { class: 'badge err', text: 'RisuAI' }) : null,
+        a.byHost ? el('span', { class: 'badge err', text: 'RisuAI' }) : el('span', { class: 'badge', text: '작업본' }),
         el('span', { class: 'grow', text: a.summary }),
         busy, yes, no,
       ]);
@@ -796,9 +796,10 @@ export class AgentPanel {
       allow.addEventListener('click', () => void decide(true, false));
       deny.addEventListener('click', () => void decide(false, false));
       always.addEventListener('click', () => void decide(true, true));
-      card.appendChild(el('div', { class: 'permit-title', text: (p.kind === 'pip' ? '패키지 설치 허용?' : '셸 명령 실행 허용?') + ' ' + p.summary }));
+      card.appendChild(el('div', { class: 'permit-title', text: (p.kind === 'studio_batch' ? '이 설정으로 배치를 실행할까요?' : p.kind === 'pip' ? '패키지 설치 허용?' : '셸 명령 실행 허용?') + ' ' + p.summary }));
       card.appendChild(el('pre', { class: 'mono', text: p.detail }));
-      card.appendChild(el('div', { class: 'row' }, [allow, deny, always]));
+      if (p.kind === 'studio_batch') { allow.textContent = '이 설정으로 실행'; deny.textContent = '취소'; }
+      card.appendChild(el('div', { class: 'row' }, p.kind === 'studio_batch' ? [allow, deny] : [allow, deny, always]));
       bubble.insertBefore(card, thinking);
       // A new prose block after the card, not the one before it.
       textNode = null;
@@ -842,8 +843,12 @@ export class AgentPanel {
               contextNotice = el('div', { class: 'hint context-notice' });
               bubble.insertBefore(contextNotice, thinking);
             }
-            contextCount += 1;
-            contextNotice.textContent = `맥락 압축 ${contextCount}회 · ${Number(e.beforeChars).toLocaleString()} → ${Number(e.afterChars).toLocaleString()}자`;
+            if (e.method === 'preserved') {
+              contextNotice.textContent = e.summaryFailed ? '요약 미완료 · 기존 맥락 보존' : '기존 맥락 보존';
+            } else {
+              contextCount += 1;
+              contextNotice.textContent = `맥락 압축 ${contextCount}회 · ${Number(e.beforeChars).toLocaleString()} → ${Number(e.afterChars).toLocaleString()}자`;
+            }
             this.scroll();
             break;
           }
@@ -1077,6 +1082,7 @@ export class AgentPanel {
   }
 
   private async refreshStaged(): Promise<void> {
+    await Promise.all([state.refreshChanges(), state.refreshBotChanges()]);
     try {
       this.setStaged(await state.stagedEdits());
       await this.refreshActions();
