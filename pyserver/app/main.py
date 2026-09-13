@@ -900,6 +900,8 @@ def h_staged(arg: dict) -> dict:
 def h_approve(arg: dict) -> dict:
     tk = _chat(arg)
     approve = arg.get("approve") is not False
+    if approve and arg.get('mode') in ('bot', 'studio'):
+        raise ApiError(400, '챗 수정 승인은 챗 편집 모드에서만 가능합니다.')
     if arg.get("batchId"):
         n = staging.decide_batch(str(arg["batchId"]), approve)
     elif isinstance(arg.get("ids"), list):
@@ -2366,9 +2368,17 @@ def h_actions(arg: dict) -> dict:
 
 
 def h_action_decide(arg: dict) -> dict:
-    _chat(arg)
+    tk = _chat(arg)
+    if arg.get('approve') is not False:
+        action = actions.get(str(arg.get('id') or ''))
+        if action:
+            current = db.one('SELECT char_key FROM chats WHERE chat_key=?', (tk,))
+            if current and action['charKey'] != current['char_key']:
+                raise ApiError(400, '현재 봇의 제안만 승인할 수 있습니다.')
+            if (actions.scope_of(action) == 'chat' or action['kind'] in ('host_writeback', 'host_save_copy')) and action['chatKey'] != tk:
+                raise ApiError(400, '선택한 챗의 제안만 승인할 수 있습니다.')
     try:
-        return actions.decide(str(arg.get("id") or ""), arg.get("approve") is not False)
+        return actions.decide(str(arg.get("id") or ""), arg.get("approve") is not False, str(arg.get('mode') or ''))
     except actions.ActionError as e:
         raise ApiError(400, str(e))
 

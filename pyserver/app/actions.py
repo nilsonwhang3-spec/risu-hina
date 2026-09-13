@@ -108,7 +108,7 @@ def scope_of(action: dict) -> str:
     if kind in ("memory_edit", "memory_delete", "checkpoint_restore"):
         return "chat"
     if kind in ("card_edit", "card_greeting_add", "card_greeting_delete",
-                "script_edit", "script_add", "script_delete", "script_delete_many",
+                "script_edit", "script_add", "script_delete", "script_delete_many", "asset_rename",
                 "card_checkpoint_restore", "host_asset_add", "host_asset_replace", "host_asset_add_many"):
         return "card"
     if kind == "lore_add":
@@ -122,7 +122,7 @@ def scope_of(action: dict) -> str:
     return ""
 
 
-def decide(action_id: str, approve: bool) -> dict:
+def decide(action_id: str, approve: bool, mode: str = '') -> dict:
     """Approve and run, or reject. The only place an action actually happens."""
     act = get(action_id)
     if act is None:
@@ -135,6 +135,15 @@ def decide(action_id: str, approve: bool) -> dict:
     if not approve:
         _finish(action_id, REJECTED, "")
         return {"id": action_id, "approved": False, "kind": act["kind"]}
+
+    if mode:
+        from . import agent
+        wrong = agent.screen_gate(mode, act['kind'])
+        scope = scope_of(act)
+        if scope and not (mode == 'studio' and act['kind'] in agent._STUDIO_KINDS):
+            wrong = wrong or agent._screen_refusal(mode, 'bot' if scope == 'card' else 'chat')
+        if wrong:
+            raise ActionError(wrong)
 
     # One dirty thing at a time. An approval that writes a working copy is
     # refused while the *other* scope (or another chat) holds unapplied work -
@@ -317,7 +326,14 @@ def _asset_stage(a: dict) -> str:
     return f"에셋 {result['changed']}건을 Hina 작업본에 저장했습니다. 아직 RisuAI에는 등록하지 않았습니다. 봇 반영을 눌러 등록해 주세요."
 
 
+def _asset_rename(a: dict) -> str:
+    from . import assetrename
+    count = assetrename.apply(a['charKey'], a['args']['items'], a['args'].get('revision', ''))
+    return f'에셋 이름 {count}개를 작업본에서 변경했습니다. 이미지 재등록 없이 봇 반영으로 적용하세요.'
+
+
 EXECUTORS: dict[str, Callable[[dict], str]] = {
+    'asset_rename': _asset_rename,
     'host_asset_add': _asset_stage,
     'host_asset_add_many': _asset_stage,
     'host_asset_replace': _asset_stage,

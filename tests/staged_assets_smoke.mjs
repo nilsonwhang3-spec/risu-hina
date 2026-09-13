@@ -11,6 +11,12 @@ export async function stagedAssetSmoke({ backend, host, document, window, settle
     if (!response.ok) throw new Error(path + ': ' + JSON.stringify(result));
     return result;
   };
+  document.getElementById('tab-chats')?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(350);
+  clickButton(document.querySelector('.panel.active'), '봇 편집');
+  await settle(350);
+  document.getElementById('tab-studio')?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(250);
   const workspaces = (await get('/workspace')).workspaces;
   const workspace = workspaces.find(w => w.chaId === host.liveChar.chaId) ?? workspaces[0];
   const ck = workspace.charKey, chatKey = workspace.chats[0].chatKey;
@@ -36,11 +42,17 @@ export async function stagedAssetSmoke({ backend, host, document, window, settle
     document.querySelector('.panel.active .sendbtn')?.dispatchEvent(new window.Event('click', { bubbles: true }));
     await settle(700);
     for (const label of ['Neutral WebP staged asset', 'Neutral regex staged edit']) {
+      if (label.includes('regex')) {
+        document.getElementById('tab-meta')?.dispatchEvent(new window.Event('click', { bubbles: true }));
+        await settle(200);
+      }
       const row = [...document.querySelectorAll('.panel.active .stagedrow')].find(r => r.textContent.includes(label));
       check('proposal is shown as working-copy edit: ' + label, row?.textContent.includes('작업본'));
       row?.querySelector('button.primary')?.dispatchEvent(new window.Event('click', { bubbles: true }));
       await settle(500);
     }
+    document.getElementById('tab-studio')?.dispatchEvent(new window.Event('click', { bubbles: true }));
+    await settle(200);
     check('approval never invokes saveAsset', uploads.length === 0);
     check('approval leaves live asset references untouched', JSON.stringify(host.liveChar.additionalAssets ?? []) === JSON.stringify(beforeAssets));
     const changes = await get('/card/changes?charKey=' + encodeURIComponent(ck));
@@ -70,11 +82,16 @@ export async function stagedAssetSmoke({ backend, host, document, window, settle
     clickButton(pop, 'RisuAI에 반영');
     await settle(150);
     check('foreground write shows spinner and completed image count', !!document.querySelector('.write-spinner') && document.querySelector('.write-progress')?.textContent.includes('0/1'));
+    check('write freezes the whole Hina screen', document.querySelector('.wrap')?.hasAttribute('inert') && document.body.style.overflow === 'hidden');
+    const wheel = new window.Event('wheel', { bubbles: true, cancelable: true });
+    document.body.dispatchEvent(wheel);
+    check('write blocks background scroll input', wheel.defaultPrevented);
     releaseSave();
     await settle(1000);
     check('writeback uploads original WebP bytes', uploads.length === 1 && uploads[0].equals(webp), JSON.stringify({ uploads: uploads.length, popup: pop?.textContent, calls: host.calls.slice(-8) }));
     check('failed host verification preserves pending assets', (await get('/card/changes?charKey=' + encodeURIComponent(ck))).assetref.added >= 1);
     check('failed write removes spinner so the user can retry', !document.querySelector('.write-progress'));
+    check('failed write unlocks the Hina screen', !document.querySelector('.wrap')?.hasAttribute('inert') && document.body.style.overflow !== 'hidden');
     host.api.setCharacterToIndex = originalSet;
     clickButton(pop, 'RisuAI에 반영');
     await settle(1200);

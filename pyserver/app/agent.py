@@ -151,9 +151,14 @@ Workspace rules (mandatory - every bot shares ONE global space):
   PNG and WebP are supported without conversion. The host's .png storage-key suffix
   does not identify the bytes' format. For large existing folders use propose_assets_from_folder;
   do not tell the user to manually register WebP images. Explain destination, count and name rules.
-  An asset's **name and deletion** are card material: see the rows with list_scripts("assetref")
-  and fix them with the propose_regex_edit grammar (propose_script_delete / entry replacement) -
-  written together at 반영.
+  Asset names are card material. Use rename_assets(preview=True) to inspect a bulk literal/regex
+  rename, then explain its count/examples and use preview=False for ONE approval proposal.
+  For '__' -> '-' use find='__', replace='-'; use name_filter for only the requested characters
+  or SFW/NSFW subset. It preserves original image keys and variant rows; no reupload is needed.
+  studio_naming governs future output filenames, NOT registered card asset names. Do not inspect
+  server source/SQL/private HTTP or generate thousands of per-entry edits for bulk naming.
+  Review Regex/global-note references separately when the user also asks to update their use.
+  After approval, names remain in Hina's working copy until 봇 반영.
   **Several at once = one proposal**: additions via propose_assets_add(list), deletions via
   propose_scripts_delete(ids) - one card per item makes approval as slow as the count and buries
   the screen in cards.
@@ -188,14 +193,14 @@ class Deps:
 CHAT_KINDS = frozenset({"memory_edit", "memory_delete", "checkpoint_restore", "checkpoint_create",
                         "host_writeback", "host_save_copy"})
 BOT_KINDS = frozenset({"card_edit", "card_greeting_add", "card_greeting_delete", "script_edit",
-                       "script_add", "script_delete", "card_checkpoint_create", "card_checkpoint_restore",
-                       "host_card_writeback", "host_clone_bot", "host_asset_add", "host_asset_add_many", "host_asset_replace"})
+                       "script_add", "script_delete", "script_delete_many", "card_checkpoint_create", "card_checkpoint_restore",
+                       "host_card_writeback", "host_clone_bot", "host_asset_add", "host_asset_add_many", "host_asset_replace", "asset_rename"})
 _MODE_TAB = {"chat": ("챗 편집", "editor"), "bot": ("봇 편집", "meta")}
 _SCREEN_LABEL = {"chat": "챗 편집", "bot": "봇 편집", "studio": "에셋 스튜디오"}
 
 # The studio's own verbs: adopting an image into the card is what the studio
 # is for, so these pass the screen gate there (the approval queue still runs).
-_STUDIO_KINDS = frozenset({"host_asset_add", "host_asset_add_many", "host_asset_replace"})
+_STUDIO_KINDS = frozenset({"host_asset_add", "host_asset_add_many", "host_asset_replace", "asset_rename"})
 
 # Batches whose saved images were already shown as a strip: a job is polled
 # many times, and the pictures should appear once.
@@ -391,7 +396,7 @@ def turn_limits() -> Any:
     (0 = unlimited)."""
     from pydantic_ai import UsageLimits
     req = _int_cfg("maxRequestsPerTurn", 40)
-    calls = _int_cfg("maxToolCallsPerTurn", 30)
+    calls = _int_cfg("maxToolCallsPerTurn", 60)
     tokens = _int_cfg("maxInputTokensPerTurn", 0)
     return UsageLimits(
         request_limit=req if req > 0 else None,
@@ -740,7 +745,7 @@ def build() -> Agent[Deps]:
             e = i["entry"] or {}
             size = len(json.dumps(e, ensure_ascii=False))
             mark = "" if i["origin"] == "original" else f" *{i['origin']}*"
-            out.append(f"#{i['seq']} id={i['id']}{mark} “{e.get('comment') or '(설명 없음)'}”"
+            out.append(f"#{i['seq']} id={i['id']}{mark} “{e.get('name') or e.get('comment') or '(설명 없음)'}”"
                        f" type={e.get('type') or ''} ({size}자)")
         return "\n".join(out)
 
@@ -846,6 +851,9 @@ def build() -> Agent[Deps]:
 
     def _propose(ctx: RunContext[Deps], kind: str, summary: str, args: dict) -> str:
         wrong = screen_gate(ctx.deps.mode, kind)
+        scope = actions.scope_of({'kind': kind, 'args': args})
+        if scope and not (ctx.deps.mode == 'studio' and kind in _STUDIO_KINDS):
+            wrong = wrong or _wrong_half(ctx, 'bot' if scope == 'card' else 'chat')
         if wrong:
             return wrong
         try:
@@ -1393,6 +1401,34 @@ def build() -> Agent[Deps]:
         return _propose(ctx, 'host_asset_add_many',
                         f"에셋 {len(items)}건 작업본 추가 → 봇 반영 시 등록 ({field}) · {folder} · 이름: {naming} · 제외 {len(plan['skipped'])}건 — {reason}",
                         {'items': items, 'field': field})
+
+    @agent.tool
+    def rename_assets(ctx: RunContext[Deps], find: str, replace: str, reason: str,
+                      preview: bool = True, regex: bool = False, name_filter: str = '',
+                      field: str = 'additional', allow_merge: bool = False) -> str:
+        r"""Bulk rename REGISTERED CARD asset names. First preview=True; explain count/examples,
+        then preview=False creates ONE approval proposal. Approval stages names; 봇 반영 writes them.
+        For '__' -> '-' use find='__', replace='-' (literal default). name_filter is a Python
+        regex selecting a subset (e.g. SFW/NSFW/character); field: additional/emotion/cc/all.
+        regex=True uses Python re.sub (replacement backrefs: \\1 or \\g<name>, NOT $1).
+        Same-name variants remain separate rows; never append/remove .2/.3 implicitly.
+        New name collisions require explicit allow_merge=True only for intended random variants.
+        Changes names ONLY; preserves keys, bytes, extension, order. No image reupload, no filesystem
+        rename, no Regex/global-note rewrite. Check those references separately. Do not use
+        run_python/SQL/internal HTTP/source-code searches for this task. Maximum 5000 changes.
+        """
+        from . import assetrename
+        try:
+            plan = assetrename.plan(ctx.deps.char_key, find, replace, regex=regex,
+                                    name_filter=name_filter, field=field, allow_merge=allow_merge)
+        except (ValueError, LookupError) as e:
+            return str(e)
+        summary = {k: v for k, v in plan.items() if k != 'items'}
+        if preview or plan['blocked'] or not plan['changed']:
+            return json.dumps(summary, ensure_ascii=False)
+        return _propose(ctx, 'asset_rename',
+                        f"에셋 이름 {plan['changed']}개 변경 · {find} → {replace} · {field} · 필터 {name_filter or '전체'} — {reason}",
+                        {'items': plan['items'], 'revision': plan['revision']})
 
     # --- 에셋 스튜디오 --------------------------------------------------------
     #
@@ -2104,7 +2140,7 @@ def build() -> Agent[Deps]:
         규칙적인 치환이나 통계는 이쪽이 정확하다.
         """ + "\n\n" + pyexec.describe_helper()
         r = pyexec.run(code, workspace.root(ctx.deps.char_key), ctx.deps.chat_key,
-                       ctx.deps.char_key, session_id=ctx.deps.session_id)
+                       ctx.deps.char_key, session_id=ctx.deps.session_id, mode=ctx.deps.mode)
         parts = []
         if r.get("staged"):
             parts.append(f"{r['staged']}건을 제안으로 등록했습니다. 승인하셔야 반영됩니다.")

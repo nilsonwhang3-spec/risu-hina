@@ -57,6 +57,7 @@ run "history pruning & stop" "$PY" tests/test_compact.py
 run "agent end-to-end (real model)" "$PY" tests/test_agent.py
 
 if [ -d plugin/node_modules ]; then
+  run "asset rename and mode approval" "$PY" tests/test_asset_rename.py
   run "plugin typecheck" node plugin/node_modules/typescript/bin/tsc -p plugin/tsconfig.json --noEmit
   run "cross-view file clipboard" node tests/test_file_clipboard.mjs
   run "asset upload concurrency" node tests/asset_concurrency.mjs

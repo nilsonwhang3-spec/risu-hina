@@ -231,6 +231,7 @@ def run(
     session_id: str | None = None,
     timeout_s: int | None = None,
     max_output: int | None = None,
+    mode: str = '',
 ) -> dict:
     cfg = config.section("python")
     timeout = int(timeout_s or cfg.get("timeoutSeconds") or 120)
@@ -318,7 +319,14 @@ def run(
         from . import session as session_mod  # lazy: session imports this module
         aborted = session_mod.stopped(session_id)
 
-    staged = harvest(workspace_dir, chat_key, session_id)
+    if mode in ('bot', 'studio'):
+        pending = workspace_dir / '.scratch' / 'staged.jsonl'
+        if pending.exists():
+            pending.unlink()
+            out += '\n챗 수정 제안은 챗 편집 모드에서만 가능합니다. 이번 실행에서는 등록하지 않았습니다.'
+        staged = 0
+    else:
+        staged = harvest(workspace_dir, chat_key, session_id)
 
     result = {
         "ok": rc == 0 and not timed_out,
