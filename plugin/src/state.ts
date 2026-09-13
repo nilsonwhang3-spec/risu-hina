@@ -1,6 +1,7 @@
 /** App state and every backend call the UI makes. */
 import { transport, BackendError, clientLog, type HealthInfo } from './transport';
 import * as host from './host';
+import { boundedAssets, foregroundWrite } from './operation';
 import { syncAssets, syncBusy, describeSync, type SyncProgress, type SyncController } from './assets';
 import type { RisuChat, RisuCharacter, RisuMessage } from './risuai';
 
@@ -1187,6 +1188,13 @@ class AppState {
    * holds. See `rereadCard` for why the working copy is not kept.
    */
   async commit(label: string): Promise<{ shipped: number }> {
+    return foregroundWrite(report => {
+      report('RisuAI 반영 확인 완료 · 대화 작업본을 동기화하는 중…');
+      return this.performCommit(label);
+    });
+  }
+
+  private async performCommit(label: string): Promise<{ shipped: number }> {
     const r = await transport.post<{ shipped: number }>(
       '/commit', { chatKey: this.activeChatKey, label });
     await this.rereadChat();
@@ -1263,6 +1271,13 @@ class AppState {
    * differs from the baseline; the host write replaces the field either way.
    */
   async writeBack(): Promise<WriteBackResult> {
+    return foregroundWrite(report => {
+      report('대화 저장 및 반영 결과 확인 중…');
+      return this.performWriteBack();
+    });
+  }
+
+  private async performWriteBack(): Promise<WriteBackResult> {
     if (!this.slot) throw new Error('호스트 상태를 먼저 읽어야 합니다');
     const patch = await this.patch();
     const update = this.updateFrom(patch, false);
@@ -2161,6 +2176,10 @@ class AppState {
    * an approved host_card_writeback - and they must not drift apart.
    */
   async cardWriteBack(progress: (text: string) => void = () => {}): Promise<{ applied: number; mode: string; verified: boolean; drift?: string }> {
+    return foregroundWrite(report => this.performCardWriteBack(text => { report(text); progress(text); }));
+  }
+
+  private async performCardWriteBack(progress: (text: string) => void): Promise<{ applied: number; mode: string; verified: boolean; drift?: string }> {
     if (!this.isLiveBot) {
       throw new Error('반영은 RisuAI에서 이 봇이 선택되어 있어야 합니다. '
         + 'RisuAI에서 봇을 선택한 뒤 패널을 다시 열어 주세요');
@@ -2175,12 +2194,14 @@ class AppState {
     await this.resolveStagedAssets(update, progress);
     const current = await host.currentSlot();
     if (current.characterIndex !== slot.characterIndex) throw new Error('이미지 업로드 중 선택된 봇이 바뀌었습니다. 미반영 변경을 보존했습니다.');
+    progress('이미지 준비 완료 · 카드 저장 및 반영 결과 확인 중…');
     const r = await host.writeCharacter(slot.characterIndex, patch.chaId, update);
     if (!r.verified) {
       // No commit and no re-read: the re-read is what used to replace the
       // working copy with the text the write had just failed to change.
       return { applied: r.applied, mode: r.mode, verified: false, ...(r.drift ? { drift: r.drift } : {}) };
     }
+    progress('RisuAI 반영 확인 완료 · 작업본을 동기화하는 중…');
     await this.cardCommit('반영 직전');
     await this.rereadCard();
     return { applied: r.applied, mode: r.mode, verified: true };
@@ -2250,14 +2271,16 @@ class AppState {
     for (const row of update.ccAssets ?? []) if (row && typeof row === 'object') collect((row as { uri?: unknown }).uri);
     const resolved = new Map<string, string>();
     let done = 0;
-    for (const key of pending) {
-      progress(`RisuAI 이미지 등록 ${++done}/${pending.size} · 카드 저장 대기`);
+    if (pending.size) progress(`RisuAI 이미지 등록 0/${pending.size} · 카드 저장 대기`);
+    const charKey = this.botKey;
+    await boundedAssets([...pending], async key => {
       const bytes = await transport.getBinary('/assets/blob', { key });
       const realKey = await Risuai.saveAsset(bytes);
       if (!realKey || typeof realKey !== 'string' || realKey.startsWith('assets/hina-pending-')) throw new Error('RisuAI가 에셋 저장 키를 반환하지 않았습니다. 미반영 변경은 보존됩니다.');
       resolved.set(key, realKey);
-      await transport.post('/assets/adopt', { charKey: this.botKey, sourceKey: key, key: realKey });
-    }
+      await transport.post('/assets/adopt', { charKey, sourceKey: key, key: realKey });
+      progress(`RisuAI 이미지 등록 ${++done}/${pending.size} · 카드 저장 대기`);
+    });
     const replace = (value: unknown): unknown => typeof value === 'string' ? resolved.get(value) ?? value : value;
     if (update.emotionImages) update.emotionImages = update.emotionImages.map(row => Array.isArray(row) ? [row[0], replace(row[1]), ...row.slice(2)] : row);
     if (update.additionalAssets) update.additionalAssets = update.additionalAssets.map(row => Array.isArray(row) ? [row[0], replace(row[1]), ...row.slice(2)] : row);
@@ -2275,6 +2298,10 @@ class AppState {
    * new bot with an empty workspace and the old one still pending.
    */
   async saveAsNewBot(backupName: string): Promise<{ backupChaId: string; applied: number; mode: string }> {
+    return foregroundWrite(report => this.performSaveAsNewBot(backupName, report));
+  }
+
+  private async performSaveAsNewBot(backupName: string, progress: (text: string) => void): Promise<{ backupChaId: string; applied: number; mode: string }> {
     if (!this.slot) throw new Error('호스트 상태를 먼저 읽어야 합니다');
     const patch = await this.cardPatch();
     if (!patch.full) {
@@ -2282,8 +2309,9 @@ class AppState {
     }
     // No card update: the backup is the live card as it is.
     const family = this.workspace?.familyKey || this.activeCharKey;
+    progress('기존 봇의 백업을 저장하는 중…');
     const backupChaId = await host.cloneBot(this.slot.characterIndex, patch.chaId, backupName, {}, family);
-    const r = await this.cardWriteBack();
+    const r = await this.performCardWriteBack(progress);
     if (!r.verified) {
       throw new Error('RisuAI 가 카드 쓰기를 받지 않았습니다'
         + (r.drift ? ` (${r.drift})` : '')
@@ -2294,13 +2322,18 @@ class AppState {
 
   /** Create a clone bot in RisuAI carrying the working card. */
   async cloneBot(name: string): Promise<string> {
+    return foregroundWrite(report => this.performCloneBot(name, report));
+  }
+
+  private async performCloneBot(name: string, progress: (text: string) => void): Promise<string> {
     if (!this.slot) throw new Error('호스트 상태를 먼저 읽어야 합니다');
     const patch = await this.cardPatch();
     if (!patch.full) {
       throw new Error('구버전 업로드 상태의 카드라 복제할 수 없습니다. 패널을 닫았다 다시 열어 주세요');
     }
     const update = this.cardUpdateFrom(patch, true) ?? {};
-    await this.resolveStagedAssets(update, () => {});
+    await this.resolveStagedAssets(update, progress);
+    progress('이미지 준비 완료 · 복제 봇 저장 중…');
     // The clone shares this bot's workspace: it carries the family key.
     const family = this.workspace?.familyKey || this.activeCharKey;
     const chaId = await host.cloneBot(this.slot.characterIndex, patch.chaId, name, update, family);
