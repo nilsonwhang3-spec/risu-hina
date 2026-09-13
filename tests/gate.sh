@@ -59,6 +59,7 @@ run "agent end-to-end (real model)" "$PY" tests/test_agent.py
 if [ -d plugin/node_modules ]; then
   run "plugin typecheck" node plugin/node_modules/typescript/bin/tsc -p plugin/tsconfig.json --noEmit
   run "cross-view file clipboard" node tests/test_file_clipboard.mjs
+  run "asset upload concurrency" node tests/asset_concurrency.mjs
   run "plugin build"     node plugin/build.config.mjs
   run "plugin smoke (real DOM + real backend)" node tests/plugin_smoke.mjs
 else

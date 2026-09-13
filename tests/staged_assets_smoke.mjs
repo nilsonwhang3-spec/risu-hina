@@ -63,16 +63,25 @@ export async function stagedAssetSmoke({ backend, host, document, window, settle
     await settle(250);
     const pop = [...document.querySelectorAll('.applypop')].find(p => p.textContent.includes('RisuAI에 반영'));
     check('apply popover refreshes stale counts', !!pop && !pop.textContent.includes('반영할 변경이 없습니다'));
+    let releaseSave;
+    const saveGate = new Promise(resolve => { releaseSave = resolve; });
+    const recordingSave = host.api.saveAsset;
+    host.api.saveAsset = async bytes => { await saveGate; return recordingSave(bytes); };
     clickButton(pop, 'RisuAI에 반영');
+    await settle(150);
+    check('foreground write shows spinner and completed image count', !!document.querySelector('.write-spinner') && document.querySelector('.write-progress')?.textContent.includes('0/1'));
+    releaseSave();
     await settle(1000);
     check('writeback uploads original WebP bytes', uploads.length === 1 && uploads[0].equals(webp), JSON.stringify({ uploads: uploads.length, popup: pop?.textContent, calls: host.calls.slice(-8) }));
     check('failed host verification preserves pending assets', (await get('/card/changes?charKey=' + encodeURIComponent(ck))).assetref.added >= 1);
+    check('failed write removes spinner so the user can retry', !document.querySelector('.write-progress'));
     host.api.setCharacterToIndex = originalSet;
     clickButton(pop, 'RisuAI에 반영');
     await settle(1200);
     const saved = (host.liveChar.additionalAssets ?? []).find(r => r[0] === 'hero-happy');
     check('successful writeback registers WebP with actual extension metadata', saved?.[2] === 'webp' && !saved?.[1].includes('hina-pending-'));
     check('successful writeback clears pending card changes', (await get('/card/changes?charKey=' + encodeURIComponent(ck))).total === 0);
+    check('successful write removes spinner after synchronization', !document.querySelector('.write-progress'));
     check('regex is written with the assets', (host.liveChar.customscript ?? []).some(r => r.comment === 'Neutral staged regex'));
   } finally {
     host.api.saveAsset = originalSave; host.api.setCharacterToIndex = originalSet; globalThis.fetch = originalFetch;

@@ -5,6 +5,7 @@
  * so switching tabs does not lose scroll position or an in-progress edit.
  */
 import { installFoldControls } from './panes';
+import './write-progress';
 import { reclamp } from './splitter';
 import { el, clear, ICON, searchBox } from './dom';
 import { smallScreen } from './blobimg';

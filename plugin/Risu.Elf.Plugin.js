@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.15.6
+//@display-name Risu Hina v0.15.7
 //@api 3.0
-//@version 0.15.6
+//@version 0.15.7
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -104,7 +104,7 @@
       this.tokenSafe = true;
       this.lastHealth = body;
       this.probeInfo = "";
-      this.gate = versionGate("0.15.6", String(body.version || ""));
+      this.gate = versionGate("0.15.7", String(body.version || ""));
       return body;
     }
     /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -561,10 +561,10 @@
         throw new HostError("changed", `RisuAI \uCABD\uC5D0\uC11C \uCE74\uB4DC\uAC00 \uBC14\uB00C\uC5C8\uC2B5\uB2C8\uB2E4 (${e.field}). \uB2E4\uC2DC \uBD88\uB7EC\uC640 \uC8FC\uC138\uC694`);
       }
     }
-    for (const [key, label] of Object.entries(LIST_LABEL)) {
+    for (const [key, label2] of Object.entries(LIST_LABEL)) {
       const wanted = update[key];
       const before = update.before?.[key];
-      if (wanted && before !== void 0 && canon(fresh[key] ?? []) !== canon(wanted)) checkList(label, fresh[key], before);
+      if (wanted && before !== void 0 && canon(fresh[key] ?? []) !== canon(wanted)) checkList(label2, fresh[key], before);
     }
     for (const e of update.fields ?? []) {
       if (e.field === "characterVersion") {
@@ -740,6 +740,46 @@
     }
     ta.remove();
     return ok;
+  }
+
+  // src/operation.ts
+  var listeners = /* @__PURE__ */ new Set();
+  var current = null;
+  function onWriteProgress(listener) {
+    listeners.add(listener);
+    listener(current);
+  }
+  async function foregroundWrite(work) {
+    if (current !== null) throw new Error("\uBC18\uC601\uC774 \uC9C4\uD589 \uC911\uC785\uB2C8\uB2E4. \uC644\uB8CC\uB420 \uB54C\uAE4C\uC9C0 \uAE30\uB2E4\uB824 \uC8FC\uC138\uC694.");
+    const report = (message) => {
+      current = message;
+      for (const listener of listeners) listener(message);
+    };
+    report("\uBC18\uC601\uD560 \uBCC0\uACBD\uC744 \uC900\uBE44\uD558\uB294 \uC911\u2026");
+    try {
+      return await work((message) => report(message));
+    } finally {
+      report(null);
+    }
+  }
+  async function boundedAssets(items5, save) {
+    if (!items5.length) return;
+    await save(items5[0]);
+    let next = 1, failed = false;
+    let error;
+    const worker = async () => {
+      while (!failed && next < items5.length) {
+        const item = items5[next++];
+        try {
+          await save(item);
+        } catch (e) {
+          if (!failed) error = e;
+          failed = true;
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(4, items5.length - 1) }, worker));
+    if (failed) throw error;
   }
 
   // src/assets.ts
@@ -1485,10 +1525,16 @@
      * The chat landed in RisuAI: snapshot it, then re-read what RisuAI now
      * holds. See `rereadCard` for why the working copy is not kept.
      */
-    async commit(label) {
+    async commit(label2) {
+      return foregroundWrite((report) => {
+        report("RisuAI \uBC18\uC601 \uD655\uC778 \uC644\uB8CC \xB7 \uB300\uD654 \uC791\uC5C5\uBCF8\uC744 \uB3D9\uAE30\uD654\uD558\uB294 \uC911\u2026");
+        return this.performCommit(label2);
+      });
+    }
+    async performCommit(label2) {
       const r = await transport.post(
         "/commit",
-        { chatKey: this.activeChatKey, label }
+        { chatKey: this.activeChatKey, label: label2 }
       );
       await this.rereadChat();
       this.bump();
@@ -1508,8 +1554,8 @@
     }
     /** `auto` marks the plugin's own protective snapshots (before a bulk
      * replace or a range delete): internal backups, not the version list. */
-    async checkpoint(label, auto = false) {
-      await transport.post("/checkpoint", { chatKey: this.activeChatKey, label, ...auto ? { auto } : {} });
+    async checkpoint(label2, auto = false) {
+      await transport.post("/checkpoint", { chatKey: this.activeChatKey, label: label2, ...auto ? { auto } : {} });
     }
     /** Pending state across the whole bot - the leave guard's one call. */
     async dirtySummary() {
@@ -1524,8 +1570,8 @@
       const res = await transport.get("/checkpoints", { chatKey: this.activeChatKey });
       return res.checkpoints ?? [];
     }
-    async renameCheckpoint(id, label) {
-      await transport.post("/checkpoint/rename", { chatKey: this.activeChatKey, id, label });
+    async renameCheckpoint(id, label2) {
+      await transport.post("/checkpoint/rename", { chatKey: this.activeChatKey, id, label: label2 });
     }
     async deleteCheckpoint(id) {
       await transport.post("/checkpoint/delete", { chatKey: this.activeChatKey, id });
@@ -1556,6 +1602,12 @@
      * differs from the baseline; the host write replaces the field either way.
      */
     async writeBack() {
+      return foregroundWrite((report) => {
+        report("\uB300\uD654 \uC800\uC7A5 \uBC0F \uBC18\uC601 \uACB0\uACFC \uD655\uC778 \uC911\u2026");
+        return this.performWriteBack();
+      });
+    }
+    async performWriteBack() {
       if (!this.slot) throw new Error("\uD638\uC2A4\uD2B8 \uC0C1\uD0DC\uB97C \uBA3C\uC800 \uC77D\uC5B4\uC57C \uD569\uB2C8\uB2E4");
       const patch = await this.patch();
       const update = this.updateFrom(patch, false);
@@ -2237,8 +2289,8 @@
     async cardPatch() {
       return await transport.get("/card/patch", { charKey: this.botKey, stagedAssets: "1" });
     }
-    async cardCommit(label) {
-      await transport.post("/card/commit", { charKey: this.botKey, label });
+    async cardCommit(label2) {
+      await transport.post("/card/commit", { charKey: this.botKey, label: label2 });
       this.bump();
       void this.refreshBotChanges();
     }
@@ -2250,15 +2302,15 @@
       void this.refreshBotChanges();
       return r.discarded ?? 0;
     }
-    async cardCheckpoint(label) {
-      await transport.post("/card/checkpoint", { charKey: this.botKey, label });
+    async cardCheckpoint(label2) {
+      await transport.post("/card/checkpoint", { charKey: this.botKey, label: label2 });
     }
     async cardCheckpoints() {
       const r = await transport.get("/card/checkpoints", { charKey: this.botKey });
       return r.checkpoints ?? [];
     }
-    async renameCardCheckpoint(id, label) {
-      await transport.post("/card/checkpoint/rename", { charKey: this.botKey, id, label });
+    async renameCardCheckpoint(id, label2) {
+      await transport.post("/card/checkpoint/rename", { charKey: this.botKey, id, label: label2 });
     }
     async deleteCardCheckpoint(id) {
       await transport.post("/card/checkpoint/delete", { charKey: this.botKey, id });
@@ -2307,6 +2359,12 @@
      */
     async cardWriteBack(progress = () => {
     }) {
+      return foregroundWrite((report) => this.performCardWriteBack((text2) => {
+        report(text2);
+        progress(text2);
+      }));
+    }
+    async performCardWriteBack(progress) {
       if (!this.isLiveBot) {
         throw new Error("\uBC18\uC601\uC740 RisuAI\uC5D0\uC11C \uC774 \uBD07\uC774 \uC120\uD0DD\uB418\uC5B4 \uC788\uC5B4\uC57C \uD569\uB2C8\uB2E4. RisuAI\uC5D0\uC11C \uBD07\uC744 \uC120\uD0DD\uD55C \uB4A4 \uD328\uB110\uC744 \uB2E4\uC2DC \uC5F4\uC5B4 \uC8FC\uC138\uC694");
       }
@@ -2318,12 +2376,14 @@
       const update = this.cardUpdateFrom(patch, false);
       if (!update) return { applied: 0, mode: "noop", verified: true };
       await this.resolveStagedAssets(update, progress);
-      const current2 = await currentSlot();
-      if (current2.characterIndex !== slot.characterIndex) throw new Error("\uC774\uBBF8\uC9C0 \uC5C5\uB85C\uB4DC \uC911 \uC120\uD0DD\uB41C \uBD07\uC774 \uBC14\uB00C\uC5C8\uC2B5\uB2C8\uB2E4. \uBBF8\uBC18\uC601 \uBCC0\uACBD\uC744 \uBCF4\uC874\uD588\uC2B5\uB2C8\uB2E4.");
+      const current3 = await currentSlot();
+      if (current3.characterIndex !== slot.characterIndex) throw new Error("\uC774\uBBF8\uC9C0 \uC5C5\uB85C\uB4DC \uC911 \uC120\uD0DD\uB41C \uBD07\uC774 \uBC14\uB00C\uC5C8\uC2B5\uB2C8\uB2E4. \uBBF8\uBC18\uC601 \uBCC0\uACBD\uC744 \uBCF4\uC874\uD588\uC2B5\uB2C8\uB2E4.");
+      progress("\uC774\uBBF8\uC9C0 \uC900\uBE44 \uC644\uB8CC \xB7 \uCE74\uB4DC \uC800\uC7A5 \uBC0F \uBC18\uC601 \uACB0\uACFC \uD655\uC778 \uC911\u2026");
       const r = await writeCharacter(slot.characterIndex, patch.chaId, update);
       if (!r.verified) {
         return { applied: r.applied, mode: r.mode, verified: false, ...r.drift ? { drift: r.drift } : {} };
       }
+      progress("RisuAI \uBC18\uC601 \uD655\uC778 \uC644\uB8CC \xB7 \uC791\uC5C5\uBCF8\uC744 \uB3D9\uAE30\uD654\uD558\uB294 \uC911\u2026");
       await this.cardCommit("\uBC18\uC601 \uC9C1\uC804");
       await this.rereadCard();
       return { applied: r.applied, mode: r.mode, verified: true };
@@ -2385,14 +2445,16 @@
       for (const row of update.ccAssets ?? []) if (row && typeof row === "object") collect2(row.uri);
       const resolved = /* @__PURE__ */ new Map();
       let done = 0;
-      for (const key of pending2) {
-        progress(`RisuAI \uC774\uBBF8\uC9C0 \uB4F1\uB85D ${++done}/${pending2.size} \xB7 \uCE74\uB4DC \uC800\uC7A5 \uB300\uAE30`);
+      if (pending2.size) progress(`RisuAI \uC774\uBBF8\uC9C0 \uB4F1\uB85D 0/${pending2.size} \xB7 \uCE74\uB4DC \uC800\uC7A5 \uB300\uAE30`);
+      const charKey = this.botKey;
+      await boundedAssets([...pending2], async (key) => {
         const bytes = await transport.getBinary("/assets/blob", { key });
         const realKey = await Risuai.saveAsset(bytes);
         if (!realKey || typeof realKey !== "string" || realKey.startsWith("assets/hina-pending-")) throw new Error("RisuAI\uAC00 \uC5D0\uC14B \uC800\uC7A5 \uD0A4\uB97C \uBC18\uD658\uD558\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4. \uBBF8\uBC18\uC601 \uBCC0\uACBD\uC740 \uBCF4\uC874\uB429\uB2C8\uB2E4.");
         resolved.set(key, realKey);
-        await transport.post("/assets/adopt", { charKey: this.botKey, sourceKey: key, key: realKey });
-      }
+        await transport.post("/assets/adopt", { charKey, sourceKey: key, key: realKey });
+        progress(`RisuAI \uC774\uBBF8\uC9C0 \uB4F1\uB85D ${++done}/${pending2.size} \xB7 \uCE74\uB4DC \uC800\uC7A5 \uB300\uAE30`);
+      });
       const replace = (value) => typeof value === "string" ? resolved.get(value) ?? value : value;
       if (update.emotionImages) update.emotionImages = update.emotionImages.map((row) => Array.isArray(row) ? [row[0], replace(row[1]), ...row.slice(2)] : row);
       if (update.additionalAssets) update.additionalAssets = update.additionalAssets.map((row) => Array.isArray(row) ? [row[0], replace(row[1]), ...row.slice(2)] : row);
@@ -2409,14 +2471,18 @@
      * new bot with an empty workspace and the old one still pending.
      */
     async saveAsNewBot(backupName) {
+      return foregroundWrite((report) => this.performSaveAsNewBot(backupName, report));
+    }
+    async performSaveAsNewBot(backupName, progress) {
       if (!this.slot) throw new Error("\uD638\uC2A4\uD2B8 \uC0C1\uD0DC\uB97C \uBA3C\uC800 \uC77D\uC5B4\uC57C \uD569\uB2C8\uB2E4");
       const patch = await this.cardPatch();
       if (!patch.full) {
         throw new Error("\uAD6C\uBC84\uC804 \uC5C5\uB85C\uB4DC \uC0C1\uD0DC\uC758 \uCE74\uB4DC\uB77C \uC800\uC7A5\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4. \uD328\uB110\uC744 \uB2EB\uC558\uB2E4 \uB2E4\uC2DC \uC5F4\uC5B4 \uC8FC\uC138\uC694");
       }
       const family = this.workspace?.familyKey || this.activeCharKey;
+      progress("\uAE30\uC874 \uBD07\uC758 \uBC31\uC5C5\uC744 \uC800\uC7A5\uD558\uB294 \uC911\u2026");
       const backupChaId = await cloneBot(this.slot.characterIndex, patch.chaId, backupName, {}, family);
-      const r = await this.cardWriteBack();
+      const r = await this.performCardWriteBack(progress);
       if (!r.verified) {
         throw new Error("RisuAI \uAC00 \uCE74\uB4DC \uC4F0\uAE30\uB97C \uBC1B\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4" + (r.drift ? ` (${r.drift})` : "") + ". \uBC31\uC5C5 \uBD07\uC740 \uB9CC\uB4E4\uC5B4\uC84C\uC9C0\uB9CC \uC774 \uBD07\uC5D0\uB294 \uBC18\uC601\uB418\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4 - \uD3B8\uC9D1 \uB0B4\uC6A9\uC740 \uADF8\uB300\uB85C \uC788\uC2B5\uB2C8\uB2E4.");
       }
@@ -2424,14 +2490,17 @@
     }
     /** Create a clone bot in RisuAI carrying the working card. */
     async cloneBot(name) {
+      return foregroundWrite((report) => this.performCloneBot(name, report));
+    }
+    async performCloneBot(name, progress) {
       if (!this.slot) throw new Error("\uD638\uC2A4\uD2B8 \uC0C1\uD0DC\uB97C \uBA3C\uC800 \uC77D\uC5B4\uC57C \uD569\uB2C8\uB2E4");
       const patch = await this.cardPatch();
       if (!patch.full) {
         throw new Error("\uAD6C\uBC84\uC804 \uC5C5\uB85C\uB4DC \uC0C1\uD0DC\uC758 \uCE74\uB4DC\uB77C \uBCF5\uC81C\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4. \uD328\uB110\uC744 \uB2EB\uC558\uB2E4 \uB2E4\uC2DC \uC5F4\uC5B4 \uC8FC\uC138\uC694");
       }
       const update = this.cardUpdateFrom(patch, true) ?? {};
-      await this.resolveStagedAssets(update, () => {
-      });
+      await this.resolveStagedAssets(update, progress);
+      progress("\uC774\uBBF8\uC9C0 \uC900\uBE44 \uC644\uB8CC \xB7 \uBCF5\uC81C \uBD07 \uC800\uC7A5 \uC911\u2026");
       const family = this.workspace?.familyKey || this.activeCharKey;
       const chaId = await cloneBot(this.slot.characterIndex, patch.chaId, name, update, family);
       await this.cardCommit("\uBCF5\uC81C \uC9C1\uC804");
@@ -3023,8 +3092,8 @@
   }
   function colPicker(opts) {
     const btns2 = opts.values.map((n) => {
-      const label = opts.labels?.[n] ?? String(n);
-      const b = el("button", { text: label, title: opts.labels?.[n] ? `${label} \u2014 \uD3ED\uC5D0 \uB9DE\uCDB0 \uC5F4 \uC218\uB97C \uC815\uD569\uB2C8\uB2E4` : `${n}\uC5F4\uB85C \uBCF4\uAE30` });
+      const label2 = opts.labels?.[n] ?? String(n);
+      const b = el("button", { text: label2, title: opts.labels?.[n] ? `${label2} \u2014 \uD3ED\uC5D0 \uB9DE\uCDB0 \uC5F4 \uC218\uB97C \uC815\uD569\uB2C8\uB2E4` : `${n}\uC5F4\uB85C \uBCF4\uAE30` });
       b.addEventListener("click", () => {
         opts.set(n);
         sync();
@@ -3040,13 +3109,13 @@
       ...btns2
     ]);
   }
-  function armed(button2, label, confirmLabel, run) {
+  function armed(button2, label2, confirmLabel, run) {
     let armedNow = false;
     let timer;
     const disarm = () => {
       if (timer) clearTimeout(timer);
       armedNow = false;
-      button2.textContent = label;
+      button2.textContent = label2;
       button2.classList.remove("danger");
     };
     const arm = () => {
@@ -3060,7 +3129,7 @@
       disarm();
       run();
     };
-    button2.textContent = label;
+    button2.textContent = label2;
     button2.addEventListener("click", () => {
       if (!armedNow) arm();
       else fire();
@@ -3699,6 +3768,42 @@
     return bar3;
   }
 
+  // src/ui/write-progress.ts
+  var overlay = null;
+  var label = null;
+  var previousFocus = null;
+  onWriteProgress((message) => {
+    if (message === null) {
+      overlay?.remove();
+      overlay = null;
+      label = null;
+      if (previousFocus?.isConnected) previousFocus.focus();
+      previousFocus = null;
+      return;
+    }
+    if (!overlay) {
+      previousFocus = document.activeElement;
+      label = el("div", { role: "status", "aria-live": "polite" });
+      overlay = el("div", { class: "write-progress", role: "dialog", "aria-modal": "true", "aria-label": "RisuAI\uC5D0 \uBC18\uC601 \uC911", tabindex: "-1" }, [
+        el("div", { class: "write-progress-card" }, [
+          el("span", { class: "write-spinner", "aria-hidden": "true" }),
+          el("strong", { text: "RisuAI\uC5D0 \uBC18\uC601 \uC911" }),
+          label,
+          el("div", { class: "hint", text: "\uC644\uB8CC\uB420 \uB54C\uAE4C\uC9C0 \uCC3D\uC744 \uB2EB\uAC70\uB098 \uBD07\uC744 \uBCC0\uACBD\uD558\uC9C0 \uB9C8\uC138\uC694." })
+        ])
+      ]);
+      overlay.addEventListener("keydown", (e) => {
+        if (e.key === "Tab" || e.key === "Escape") {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+      });
+      document.body.appendChild(overlay);
+      overlay.focus();
+    }
+    label.textContent = message;
+  });
+
   // src/ui/blobimg.ts
   var PARALLEL = 6;
   var active = 0;
@@ -3911,6 +4016,11 @@
 
   // src/ui/styles.ts
   var CSS = `
+.write-progress { position: fixed; inset: 0; z-index: 2147483647; display: grid; place-items: center; padding: 16px; background: #0009; }
+.write-progress-card { width: min(100%, 420px); display: grid; justify-items: center; gap: 12px; padding: 24px; border-radius: 12px; text-align: center; background: var(--bgcolor, #12141a); color: var(--textcolor, #d8dce4); border: 1px solid var(--borderc, #2b323f); }
+.write-spinner { width: 32px; height: 32px; border: 3px solid #8885; border-top-color: #60a5fa; border-radius: 50%; animation: write-spin 1s linear infinite; }
+@keyframes write-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .write-spinner { animation-duration: 3s; } }
 :host, * { box-sizing: border-box; }
 body {
   margin: 0;
@@ -5538,7 +5648,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
   }
 
   // src/ui/artifact.ts
-  var current = null;
+  var current2 = null;
   var closeCurrent = null;
   async function fill(body, spec3) {
     clear(body);
@@ -5569,7 +5679,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
   }
   function showArtifact(spec3, _opts = {}) {
     closeArtifact();
-    current = spec3;
+    current2 = spec3;
     const body = el("div", { class: "artifactbody" });
     const head = el("div", { class: "artifacthead row" });
     if (spec3.kind === "image") {
@@ -5605,7 +5715,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     head.appendChild(closeBtn);
     const view2 = el("div", { class: "artifactview" }, [head, body]);
     closeCurrent = modal(spec3.title || spec3.path, view2, { wide: true, cls: "artifactmodal", onClose: () => {
-      current = null;
+      current2 = null;
       closeCurrent = null;
     } });
     void fill(body, spec3);
@@ -5613,7 +5723,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
   function closeArtifact() {
     const c = closeCurrent;
     closeCurrent = null;
-    current = null;
+    current2 = null;
     c?.();
   }
   function remountArtifact() {
@@ -5874,8 +5984,8 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       el("span", { class: "tool-label", text: "\uC2A4\uB0C5\uC0F7" })
     ]);
     snap.addEventListener("click", () => {
-      openSnapshotName(snap, "\uC218\uB3D9", async (label) => {
-        await state.checkpoint(label);
+      openSnapshotName(snap, "\uC218\uB3D9", async (label2) => {
+        await state.checkpoint(label2);
         shellNotice("\uC2A4\uB0C5\uC0F7\uC744 \uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4. \u{1F558} \uBC84\uC804\uC5D0\uC11C \uC774\uB984\uC744 \uBC14\uAFB8\uAC70\uB098 \uB418\uB3CC\uB9B4 \uC218 \uC788\uC2B5\uB2C8\uB2E4.", "ok");
       });
     });
@@ -6095,9 +6205,9 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         ]);
         const ren = opts.auto ? null : el("button", { class: "ghost tiny", text: "\u270E", title: "\uC774\uB984 \uBC14\uAFB8\uAE30" });
         ren?.addEventListener("click", () => {
-          openSnapshotName(ren, c.label || "", async (label) => {
-            await state.renameCheckpoint(c.id, label);
-            title.firstChild.textContent = label;
+          openSnapshotName(ren, c.label || "", async (label2) => {
+            await state.renameCheckpoint(c.id, label2);
+            title.firstChild.textContent = label2;
           });
         });
         const row = el("div", { class: "verrow" });
@@ -6196,14 +6306,14 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     const close = popover(anchor, body);
     cancel.addEventListener("click", close);
     const submit = async () => {
-      const label = input2.value.trim();
-      if (!label) {
+      const label2 = input2.value.trim();
+      if (!label2) {
         out.textContent = "\uC774\uB984\uC744 \uC785\uB825\uD574 \uC8FC\uC138\uC694.";
         return;
       }
       ok.disabled = true;
       try {
-        await save(label);
+        await save(label2);
         close();
       } catch (e) {
         out.textContent = msg(e);
@@ -7508,17 +7618,17 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       };
       this.clearTimer();
       this.timer = setInterval(tick, 1e3);
-      const setThinking = (on, label) => {
+      const setThinking = (on, label2) => {
         thinking.style.display = on ? "flex" : "none";
-        if (label) thinkingText.textContent = label;
+        if (label2) thinkingText.textContent = label2;
       };
-      const finish = (label) => {
+      const finish = (label2) => {
         stopBtn.style.display = "none";
         this.clearTimer();
         tick();
         elapsed.classList.add("done");
         thinking.style.display = "flex";
-        thinkingText.textContent = label;
+        thinkingText.textContent = label2;
         thinking.querySelector(".dots")?.classList.add("stopped");
       };
       let textNode = null;
@@ -7832,12 +7942,12 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       clear(this.stagedBox);
       this.hooks.onStagedChanged(items5);
       if (!items5.length) return;
-      const label = (op) => op === "edit" ? "\uC218\uC815" : op === "delete" ? "\uC0AD\uC81C" : "\uC0BD\uC785";
+      const label2 = (op) => op === "edit" ? "\uC218\uC815" : op === "delete" ? "\uC0AD\uC81C" : "\uC0BD\uC785";
       const byOp = items5.reduce((a, i) => {
         a[i.op] = (a[i.op] ?? 0) + 1;
         return a;
       }, {});
-      const summary = Object.entries(byOp).map(([op, n]) => `${label(op)} ${n}`).join(" \xB7 ");
+      const summary = Object.entries(byOp).map(([op, n]) => `${label2(op)} ${n}`).join(" \xB7 ");
       const approve = el("button", { class: "primary", text: "\uC804\uCCB4 \uC2B9\uC778\uD558\uACE0 \uC801\uC6A9" });
       approve.addEventListener("click", async () => {
         approve.disabled = true;
@@ -7875,7 +7985,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         el("h2", { text: `\uC2B9\uC778 \uB300\uAE30 ${items5.length}\uAC74` }),
         el("div", { class: "hint", text: summary + " \u2014 \uC67C\uCABD \uD328\uB110\uC5D0 \uBBF8\uB9AC\uBCF4\uAE30\uB85C \uD45C\uC2DC\uD588\uC2B5\uB2C8\uB2E4." }),
         ...items5.slice(0, 8).map((i) => el("div", { class: "stagedrow" }, [
-          el("span", { class: "badge warn", text: label(i.op) }),
+          el("span", { class: "badge warn", text: label2(i.op) }),
           el("span", { class: "grow hint", text: `#${i.seq ?? "?"} ${i.reason || ""}` })
         ])),
         items5.length > 8 ? el("div", { class: "hint", text: `\uADF8 \uC678 ${items5.length - 8}\uAC74` }) : null,
@@ -7901,10 +8011,10 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         else this.chip.appendChild(el("span", { class: "tx", text: `\xD7${this.count}` }));
         return;
       }
-      const [glyph, label] = TOOL_GLYPH[name] ?? ["\u{1F527}", name];
+      const [glyph, label2] = TOOL_GLYPH[name] ?? ["\u{1F527}", name];
       this.chip = el("span", { class: "tchip" + (detail ? " skill" : ""), title: name + (detail ? ` ${detail}` : "") }, [
         el("span", { text: glyph }),
-        el("span", { text: detail ? `${label}: ${detail}` : label })
+        el("span", { text: detail ? `${label2}: ${detail}` : label2 })
       ]);
       this.mount.appendChild(this.chip);
       this.lastName = name;
@@ -8585,10 +8695,10 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     if (toolbarEl) setToolbar(toolbarEl);
     refreshList();
   }
-  function toolButton(id, glyph, label, title) {
+  function toolButton(id, glyph, label2, title) {
     const b = el("button", { class: "tool", dataset: { tool: id }, title }, [
       el("span", { class: "glyph", text: glyph }),
-      el("span", { class: "tool-label", text: label })
+      el("span", { class: "tool-label", text: label2 })
     ]);
     b.addEventListener("click", () => selectTool(id));
     return b;
@@ -8754,9 +8864,9 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       optsBox.style.display = m === "clean" ? "block" : "none";
       refreshList();
     };
-    const rows = modes2.map(([m, label, why]) => {
+    const rows = modes2.map(([m, label2, why]) => {
       const b = el("button", { class: "modebtn", dataset: { mode: m } }, [
-        el("div", { text: label + (m === "rendered" ? "   (\uCD94\uD6C4 \uAD6C\uD604)" : "") }),
+        el("div", { text: label2 + (m === "rendered" ? "   (\uCD94\uD6C4 \uAD6C\uD604)" : "") }),
         el("div", { class: "hint", text: why })
       ]);
       if (m === "rendered") b.classList.add("todo");
@@ -8764,13 +8874,13 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       buttons.push(b);
       return b;
     });
-    const toggle = (label, key, title) => {
+    const toggle = (label2, key, title) => {
       const box = el("input", { type: "checkbox", checked: renderOpts[key] });
       box.addEventListener("change", () => {
         renderOpts[key] = box.checked;
         refreshList();
       });
-      return el("label", { class: "checkrow", title }, [box, el("span", { text: label })]);
+      return el("label", { class: "checkrow", title }, [box, el("span", { text: label2 })]);
     };
     optsBox.appendChild(el("div", { class: "card" }, [
       el("h2", { text: "\uC815\uB9AC \uC635\uC158" }),
@@ -8952,11 +9062,11 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       if (!Number.isInteger(a) || !Number.isInteger(b) || a < 0 || b < a) return null;
       return [a, b];
     };
-    const setPreview = (ids, label = "") => {
+    const setPreview = (ids, label2 = "") => {
       deleting = ids;
       applyBtn3.disabled = !ids || ids.size === 0;
       clearBtn.disabled = !ids;
-      summary.textContent = label;
+      summary.textContent = label2;
       refreshList();
       refreshToolbar();
     };
@@ -10286,14 +10396,14 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     upPanel?.remove();
     const closeBtn = el("button", { class: "iconbtn", text: "\u2715", title: "\uB2EB\uAE30" });
     const ask = el("div");
-    const label = el("span", { class: "grow", text: title });
+    const label2 = el("span", { class: "grow", text: title });
     const num = el("span");
     const fill2 = el("div", { class: "assetfill" });
     const errs = el("div", { class: "uperr", style: { display: "none" } });
     const panel2 = el("div", { class: "uploadpanel" }, [
       el("div", { class: "uphead" }, [el("span", { text: "\uC62C\uB9AC\uAE30" }), closeBtn]),
       ask,
-      el("div", { class: "upline" }, [label, num]),
+      el("div", { class: "upline" }, [label2, num]),
       el("div", { class: "assetbar" }, [fill2]),
       errs
     ]);
@@ -10583,12 +10693,12 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       for (const [folder, group] of byFolder) {
         if (folder && named.length) {
           const folderEntry = entries.find((x) => isFolder(x) && String(x.entry.key ?? "").trim() === folder);
-          const label = names.get(folder) || shortId(folder);
+          const label2 = names.get(folder) || shortId(folder);
           const isOpen = !!needle || openFolders3.has(folder);
           const caret = el("span", { text: isOpen ? "\u25BE" : "\u25B8" });
           const head = el("button", { class: "treebranch", title: folder }, [
             caret,
-            el("span", { class: "grow", text: label }),
+            el("span", { class: "grow", text: label2 }),
             el("span", { class: "hint", text: String(group.length) })
           ]);
           const edit = el("button", {
@@ -10599,7 +10709,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           edit.addEventListener("click", (ev) => {
             ev.stopPropagation();
             if (folderEntry) open4(folderEntry);
-            else void createFolder(folder, label);
+            else void createFolder(folder, label2);
           });
           const kids = el("div", { class: "treekids" }, group.map((e) => entryRow(e, items5)));
           kids.style.display = isOpen ? "block" : "none";
@@ -11335,10 +11445,10 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
   }
 
   // src/ui/pickers.ts
-  function pickerRow(current2, opts) {
+  function pickerRow(current3, opts) {
     const open4 = el("button", { class: "ghost chev", text: "\u203A", title: opts.title });
     open4.addEventListener("click", () => opts.onOpen());
-    if (!current2) {
+    if (!current3) {
       return el("div", { class: "presetnow" }, [
         el("div", { class: "grow" }, [el("div", { class: "hint", text: opts.emptyHint })]),
         open4
@@ -11347,10 +11457,10 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     return el("div", { class: "presetnow" }, [
       el("div", { class: "grow" }, [
         el("div", { class: "presetnow-name" }, [
-          el("span", { text: current2.name }),
-          ...(current2.badges ?? []).map((b) => el("span", { class: "badge " + (b.cls ?? ""), style: { marginLeft: "6px" }, text: b.text }))
+          el("span", { text: current3.name }),
+          ...(current3.badges ?? []).map((b) => el("span", { class: "badge " + (b.cls ?? ""), style: { marginLeft: "6px" }, text: b.text }))
         ]),
-        current2.hint ? el("div", { class: "hint", text: current2.hint }) : null
+        current3.hint ? el("div", { class: "hint", text: current3.hint }) : null
       ]),
       open4
     ]);
@@ -12511,8 +12621,8 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
   }
   function reasoningSelect() {
     const sel = el("select");
-    for (const [value, label] of Object.entries(REASONING_LABEL)) {
-      sel.appendChild(el("option", { value, text: label }));
+    for (const [value, label2] of Object.entries(REASONING_LABEL)) {
+      sel.appendChild(el("option", { value, text: label2 }));
     }
     return sel;
   }
@@ -12984,10 +13094,10 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           return;
         }
         if (!r.newer) {
-          const mismatch = r.current !== "0.15.6";
+          const mismatch = r.current !== "0.15.7";
           const ahead = r.ahead ?? (!!r.latest && r.latest !== r.current);
           say(
-            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.6"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
+            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.7"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
             mismatch || ahead ? "" : "ok"
           );
           return;
@@ -13039,13 +13149,13 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
   function buildDebugCard() {
     const out = el("div", { class: "outbox" });
     const levelSel = el("select");
-    for (const [value, label] of [
+    for (const [value, label2] of [
       ["", "\uC804\uCCB4"],
       ["info", "info \uC774\uC0C1"],
       ["warn", "warn \uC774\uC0C1"],
       ["error", "error\uB9CC"]
     ]) {
-      levelSel.appendChild(el("option", { value, text: label }));
+      levelSel.appendChild(el("option", { value, text: label2 }));
     }
     const say = (text2, kind = "") => {
       clear(out);
@@ -13078,7 +13188,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.15.6",
+            version: "0.15.7",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -13208,9 +13318,9 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     ];
     const bar3 = el("div", { class: "subtabs" });
     const body = el("div", { class: "pad" });
-    const panes = sections.map(([label, cards], i) => {
+    const panes = sections.map(([label2, cards], i) => {
       const pane = el("div", { class: "subpane" + (i === 0 ? " active" : "") }, cards);
-      const btn = el("button", { class: "subtab" + (i === 0 ? " active" : ""), text: label });
+      const btn = el("button", { class: "subtab" + (i === 0 ? " active" : ""), text: label2 });
       btn.addEventListener("click", () => {
         for (const [j, other] of panes.entries()) {
           other.pane.classList.toggle("active", j === i);
@@ -13729,7 +13839,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.6"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.7"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -14286,10 +14396,10 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     if (!sideMount) return;
     clear(sideMount);
     const mode2 = modeOf();
-    const btn = (label, on, run) => {
-      const b = el("button", { class: "modebtn" + (on ? " on" : ""), text: label });
+    const btn = (label2, on, run) => {
+      const b = el("button", { class: "modebtn" + (on ? " on" : ""), text: label2 });
       if (on) return b;
-      if (items4.length) armed(b, label, "\uC815\uB9D0 \uBC14\uAFC0\uAE4C\uC694? (\uC9C0\uAE08 \uD2B8\uB9AC\uAC70\uAC00 \uC9C0\uC6CC\uC9D1\uB2C8\uB2E4)", run);
+      if (items4.length) armed(b, label2, "\uC815\uB9D0 \uBC14\uAFC0\uAE4C\uC694? (\uC9C0\uAE08 \uD2B8\uB9AC\uAC70\uAC00 \uC9C0\uC6CC\uC9D1\uB2C8\uB2E4)", run);
       else b.addEventListener("click", run);
       return b;
     };
@@ -14452,8 +14562,8 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       el("span", { class: "tool-label", text: "\uC2A4\uB0C5\uC0F7" })
     ]);
     snap.addEventListener("click", () => {
-      openSnapshotName(snap, "\uC218\uB3D9", async (label) => {
-        await state.cardCheckpoint(label);
+      openSnapshotName(snap, "\uC218\uB3D9", async (label2) => {
+        await state.cardCheckpoint(label2);
         shellNotice("\uBD07 \uC2A4\uB0C5\uC0F7\uC744 \uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4. \u{1F558} \uBC84\uC804\uC5D0\uC11C \uC774\uB984\uC744 \uBC14\uAFB8\uAC70\uB098 \uB418\uB3CC\uB9B4 \uC218 \uC788\uC2B5\uB2C8\uB2E4.", "ok");
       });
     });
@@ -14727,9 +14837,9 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         ]);
         const ren = opts.auto ? null : el("button", { class: "ghost tiny", text: "\u270E", title: "\uC774\uB984 \uBC14\uAFB8\uAE30" });
         ren?.addEventListener("click", () => {
-          openSnapshotName(ren, c.label || "", async (label) => {
-            await state.renameCardCheckpoint(c.id, label);
-            title.firstChild.textContent = label;
+          openSnapshotName(ren, c.label || "", async (label2) => {
+            await state.renameCardCheckpoint(c.id, label2);
+            title.firstChild.textContent = label2;
           });
         });
         const row = el("div", { class: "verrow" });
@@ -16048,7 +16158,7 @@ name: ${nm}
     ]);
   }
   function openParamsDialog() {
-    const field2 = (label, node) => el("label", { class: "field" }, [el("span", { text: label }), node]);
+    const field2 = (label2, node) => el("label", { class: "field" }, [el("span", { text: label2 }), node]);
     const two = (a, b) => el("div", { class: "row" }, [a, b]);
     const out = el("div", {});
     const modelInput = el("input", { value: gen.model, placeholder: "nai-diffusion-4-5-full" });
@@ -16125,7 +16235,7 @@ name: ${nm}
     const text2 = v5 && charrefN + vibeN ? "\uB808\uD37C\uB7F0\uC2A4\uB294 \uCE74\uB4DC\uB300\uB85C \uC2E4\uB9AC\uC9C0\uB9CC, v5 \uBAA8\uB378\uC740 \uC9C0\uC6D0\uD558\uC9C0 \uC54A\uC544 \uAC74\uB108\uB701\uB2C8\uB2E4 \u2014 4.5 \uB97C \uACE0\uB974\uC138\uC694." : charrefN + vibeN ? `\uB808\uD37C\uB7F0\uC2A4\uB294 \uCE74\uB4DC\uB300\uB85C \uC2E4\uB9BD\uB2C8\uB2E4 \u2014 \uCE90\uB9AD\uD130 ${charrefN}\uC7A5 (\uC7A5\uB2F9 5 Anlas) \xB7 \uBC14\uC774\uBE0C ${vibeN}\uC7A5 (\uC778\uCF54\uB529 2 Anlas, \uCE90\uC2DC \uC2DC 0)` : "\uD65C\uC131 \uCE90\uB9AD\uD130 \uCE74\uB4DC\uC5D0 \uB808\uD37C\uB7F0\uC2A4\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4 \u2014 \uCE74\uB4DC\uB97C \uC5F4\uC5B4 \uC774\uBBF8\uC9C0\uB97C \uC62C\uB824 \uB450\uBA74 \uADF8\uB300\uB85C \uC2E4\uB9BD\uB2C8\uB2E4.";
     return el("div", { class: "hint", style: { marginBottom: "6px" }, text: text2 });
   }
-  function numField(label, key) {
+  function numField(label2, key) {
     const i = el("input", {
       value: String(gen[key]),
       type: "number",
@@ -16136,17 +16246,17 @@ name: ${nm}
       if (!Number.isNaN(n)) gen[key] = n;
       persistGen();
     });
-    return el("label", { class: "field grow" }, [el("span", { text: label }), i]);
+    return el("label", { class: "field grow" }, [el("span", { text: label2 }), i]);
   }
-  function textField(label, key, placeholder = "") {
+  function textField(label2, key, placeholder = "") {
     const i = el("input", { value: gen[key], placeholder });
     i.addEventListener("change", () => {
       gen[key] = i.value;
       persistGen();
     });
-    return el("label", { class: "field grow" }, [el("span", { text: label }), i]);
+    return el("label", { class: "field grow" }, [el("span", { text: label2 }), i]);
   }
-  function selField(label, key, values, options) {
+  function selField(label2, key, values, options) {
     const sel = el("select");
     for (const o of options ?? values.map((v) => ({ value: v, label: v }))) {
       const opt = el("option", { value: String(o.value), text: String(o.label) });
@@ -16158,7 +16268,7 @@ name: ${nm}
       else gen[key] = sel.value;
       persistGen();
     });
-    return el("label", { class: "field grow" }, [el("span", { text: label }), sel]);
+    return el("label", { class: "field grow" }, [el("span", { text: label2 }), sel]);
   }
   function qualityToggle() {
     const box = el("input", { type: "checkbox" });
@@ -16197,8 +16307,8 @@ name: ${nm}
   function scenePicker() {
     const items5 = S.cards.scenes ?? [];
     const cur = items5.find((i) => i.path === gen.scenePreset) ?? null;
-    const label = (i) => i.name + (i.count ? ` (\uC52C ${i.count})` : "");
-    const row = pickerRow(cur ? { name: label(cur) } : null, {
+    const label2 = (i) => i.name + (i.count ? ` (\uC52C ${i.count})` : "");
+    const row = pickerRow(cur ? { name: label2(cur) } : null, {
       title: items5.length ? `\uC800\uC7A5\uB41C \uD504\uB9AC\uC14B ${items5.length}\uAC1C \u2014 \uC120\uD0DD \xB7 \uC218\uC815 \xB7 \uC0AD\uC81C \xB7 \uCD94\uAC00` : "\uD504\uB9AC\uC14B \uCD94\uAC00",
       emptyHint: items5.length ? "\uC120\uD0DD\uB41C \uC52C \uD504\uB9AC\uC14B \uC5C6\uC74C \u2014 \u203A \uC5D0\uC11C \uACE0\uB974\uC138\uC694" : "\uC52C \uD504\uB9AC\uC14B\uC774 \uC5C6\uC2B5\uB2C8\uB2E4. \u203A \uC5D0\uC11C \uD558\uB098 \uB9CC\uB4E4\uC5B4 \uC8FC\uC138\uC694.",
       onOpen: () => openListPicker({
@@ -16208,7 +16318,7 @@ name: ${nm}
           { id: "", name: "(\uC5C6\uC74C)", hint: "\uC694\uCCAD \uC124\uC815 \uD55C \uC7A5 \uAD6C\uC131", selected: !gen.scenePreset, noDelete: true },
           ...items5.map((i) => ({
             id: i.path,
-            name: label(i),
+            name: label2(i),
             selected: gen.scenePreset === i.path
           }))
         ],
@@ -16825,7 +16935,7 @@ ${doc.negative.trim()}
         return false;
       }
     };
-    const slider = (label, value, onChange) => {
+    const slider = (label2, value, onChange) => {
       const i = el("input", { type: "range", min: "0", max: "1", step: "0.05", value: String(value) });
       const v = el("span", { class: "hint refval", text: value.toFixed(2) });
       i.addEventListener("input", () => {
@@ -16833,7 +16943,7 @@ ${doc.negative.trim()}
         v.textContent = n.toFixed(2);
         onChange(n);
       });
-      return el("div", { class: "refslider" }, [el("span", { class: "hint", text: label }), i, v]);
+      return el("div", { class: "refslider" }, [el("span", { class: "hint", text: label2 }), i, v]);
     };
     const refCard = (file, enabled, bad, onToggle, onRemove, onFix, controls) => {
       const pic = el("div", { class: "refpic" });
@@ -17106,8 +17216,8 @@ ${negative.value.trim()}
         out.textContent = msg18(e);
       }
     });
-    const field2 = (label, node, hint = "") => el("label", { class: "field" }, [
-      el("span", { text: label }),
+    const field2 = (label2, node, hint = "") => el("label", { class: "field" }, [
+      el("span", { text: label2 }),
       node,
       hint ? el("div", { class: "hint", text: hint }) : null
     ]);
@@ -19057,14 +19167,14 @@ ${negative.value.trim()}
     viewMode2 = v;
     drill = "";
   }
-  function viewSwitch(current2) {
+  function viewSwitch(current3) {
     return segCtl([
       {
         label: "\uAC80\uC218",
-        on: current2 === "inspect",
+        on: current3 === "inspect",
         title: "\uADF8\uB8F9\uC73C\uB85C \uBE44\uAD50\uD558\uACE0 \uCC44\uD0DD\xB7\uC218\uC815\xB7\uBC84\uB9BC\uC744 \uD45C\uC2DC\uD569\uB2C8\uB2E4",
         pick: () => {
-          if (current2 !== "inspect") {
+          if (current3 !== "inspect") {
             S.centreMode = "tab";
             S.centreTab = "inspect";
             hub.drawCentre();
@@ -19073,10 +19183,10 @@ ${negative.value.trim()}
       },
       {
         label: "\uC378\uB124\uC77C",
-        on: current2 === "grid",
+        on: current3 === "grid",
         title: "\uD3F4\uB354\uC758 \uADF8\uB9BC\uC744 \uADF8\uB300\uB85C \uBCF4\uACE0 \uACE0\uB974\uACE0\xB7\uC62E\uAE30\uACE0\xB7\uC9C0\uC6C1\uB2C8\uB2E4",
         pick: () => {
-          if (current2 !== "grid") {
+          if (current3 !== "grid") {
             S.centreMode = "folder";
             hub.drawCentre();
           }
@@ -19272,8 +19382,8 @@ ${negative.value.trim()}
     );
     viewMount6.appendChild(head);
     const bar3 = el("div", { class: "row seltools", style: { marginBottom: "8px" } });
-    const mkView = (v, label) => ({
-      label,
+    const mkView = (v, label2) => ({
+      label: label2,
       on: viewMode2 === v,
       pick: () => {
         viewMode2 = v;
@@ -19475,8 +19585,8 @@ ${negative.value.trim()}
     const pic = el("div", { class: "assetpic" });
     const btns2 = /* @__PURE__ */ new Map();
     const flags = el("div", { class: "row selflags" });
-    const mk = (key, label, title) => {
-      const b = el("button", { class: "ghost tiny", text: label, title });
+    const mk = (key, label2, title) => {
+      const b = el("button", { class: "ghost tiny", text: label2, title });
       b.addEventListener("click", (ev) => {
         ev.stopPropagation();
         flag(it.filename, key);
@@ -19588,8 +19698,8 @@ ${negative.value.trim()}
       }, 350);
     };
     const dsel = el("select", { title: "\uD30C\uC77C\uBA85\uC744 \uB098\uB204\uB294 \uBB38\uC790" });
-    for (const [v, label] of [["-", "- (\uD558\uC774\uD508)"], ["_", "_ (\uBC11\uC904)"], [".", ". (\uC810)"], [" ", "\uACF5\uBC31"]]) {
-      const o = el("option", { value: v, text: label });
+    for (const [v, label2] of [["-", "- (\uD558\uC774\uD508)"], ["_", "_ (\uBC11\uC904)"], [".", ". (\uC810)"], [" ", "\uACF5\uBC31"]]) {
+      const o = el("option", { value: v, text: label2 });
       if (stagedDelim === v) o.setAttribute("selected", "selected");
       dsel.appendChild(o);
     }
@@ -19660,8 +19770,8 @@ ${negative.value.trim()}
       const cur = prefsFor(node.path);
       if (mode2 === "default") {
         const by2 = cur.groupBy || "emotion";
-        const mk = (v, label) => ({
-          label,
+        const mk = (v, label2) => ({
+          label: label2,
           on: by2 === v,
           pick: () => {
             setPrefs(node.path, { mode: "default", groupBy: v });
@@ -19856,8 +19966,8 @@ ${negative.value.trim()}
     for (let i = 1; i < parts.length; i++) {
       const path = parts.slice(0, i + 1).join("/");
       if (!path.startsWith(OUTPUT_ROOT)) continue;
-      const label = path === OUTPUT_ROOT ? "output" : parts[i];
-      const b = el("button", { class: "ghost tiny", text: label });
+      const label2 = path === OUTPUT_ROOT ? "output" : parts[i];
+      const b = el("button", { class: "ghost tiny", text: label2 });
       b.addEventListener("click", () => {
         S.selected = path;
         selection3.clear();
@@ -20353,8 +20463,8 @@ ${negative.value.trim()}
       return;
     }
     clear(tabbar);
-    const mk = (tab, label) => {
-      const b = el("button", { class: "tab" + (S.leftTab === tab ? " on" : ""), text: label });
+    const mk = (tab, label2) => {
+      const b = el("button", { class: "tab" + (S.leftTab === tab ? " on" : ""), text: label2 });
       b.addEventListener("click", () => {
         if (S.leftTab === tab) return;
         S.leftTab = tab;
@@ -20419,8 +20529,8 @@ ${negative.value.trim()}
         return;
       }
     }
-    const mk = (tab, label) => {
-      const b = el("button", { class: "tab" + (S.centreTab === tab ? " on" : ""), text: label });
+    const mk = (tab, label2) => {
+      const b = el("button", { class: "tab" + (S.centreTab === tab ? " on" : ""), text: label2 });
       b.addEventListener("click", () => {
         if (S.centreTab === tab) return;
         S.centreTab = tab;
@@ -20526,10 +20636,10 @@ ${negative.value.trim()}
   }
   var modeChip = el("span", { class: "badge modechip modetab" });
   function syncBackTab() {
-    const label = document.querySelector("#tab-chats .tablabel");
+    const label2 = document.querySelector("#tab-chats .tablabel");
     const btn = document.getElementById("tab-chats");
     const inEdit = active2 !== "chats";
-    if (label) label.textContent = inEdit ? "\u2039 \uB4A4\uB85C" : "\uC120\uD0DD";
+    if (label2) label2.textContent = inEdit ? "\u2039 \uB4A4\uB85C" : "\uC120\uD0DD";
     if (btn) btn.title = inEdit ? "\uC120\uD0DD \uD654\uBA74\uC73C\uB85C \uB3CC\uC544\uAC11\uB2C8\uB2E4 (\uBD07\xB7\uCC57 \uB2E4\uC2DC \uACE0\uB974\uAE30)" : "\uBD07\uACFC \uCC57\uC744 \uACE0\uB974\uB294 \uD654\uBA74\uC785\uB2C8\uB2E4";
     modeChip.textContent = mode === "chat" ? "\uCC57 \uD3B8\uC9D1" : "\uBD07 \uD3B8\uC9D1";
     modeChip.title = mode === "chat" ? "\uC774 \uCC57\uC758 \uC7AC\uB8CC(\uD134\xB7\uCC57 \uB85C\uC5B4\uBD81\xB7\uC7A5\uAE30\uAE30\uC5B5\xB7\uCC57 \uBCC0\uC218)\uB97C \uACE0\uCE58\uB294 \uD654\uBA74\uC785\uB2C8\uB2E4" : "\uBD07 \uCE74\uB4DC\uC758 \uC7AC\uB8CC(\uBA54\uD0C0\xB7\uC778\uC0AC\uB9D0\xB7\uBD07 \uB85C\uC5B4\uBD81\xB7Regex\xB7\uD2B8\uB9AC\uAC70\xB7\uC5D0\uC14B)\uB97C \uACE0\uCE58\uB294 \uD654\uBA74\uC785\uB2C8\uB2E4";
@@ -20691,7 +20801,7 @@ ${negative.value.trim()}
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.6"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.7"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
@@ -20725,9 +20835,9 @@ ${negative.value.trim()}
     installDropGuard(document);
     clear(document.body);
     healthEl = el("div", { class: "status" });
-    const tabButton = (id, label) => {
+    const tabButton = (id, label2) => {
       const b = el("button", { class: "tab", id: "tab-" + id }, [
-        el("span", { class: "tablabel", text: label }),
+        el("span", { class: "tablabel", text: label2 }),
         // Only the files tab ever fills this: the count of agent outputs the
         // user has not looked at. Cleared by opening the tab.
         el("span", { class: "badge warn tabbadge", style: { display: "none" } })
@@ -20787,7 +20897,7 @@ ${negative.value.trim()}
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.15.6" }),
+        el("span", { class: "dim", text: "v0.15.7" }),
         healthEl,
         el("span", { class: "spacer" }),
         reload,
@@ -20799,7 +20909,7 @@ ${negative.value.trim()}
       // margin-left:auto, which pushed 워크스페이스 파일 to the opposite edge
       // of the bar from the tab it belongs beside.
       el("div", { class: "tabs" }, [
-        ...CONTENT_TABS.flatMap(([id, label]) => id === "files" ? [el("span", { class: "tabsep", title: "\uC5EC\uAE30\uBD80\uD130\uB294 \uD3B8\uC9D1 \uB300\uC0C1\uC774 \uC544\uB2C8\uB77C \uC791\uC5C5 \uACF5\uAC04\uC785\uB2C8\uB2E4 \u2014 \uBD07\uC758 \uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4\uC640, \uBD07\uACFC \uBB34\uAD00\uD55C \uC5D0\uC14B \uC2A4\uD29C\uB514\uC624" }), tabButton(id, label)] : id === "chats" ? [tabButton(id, label), modeChip] : [tabButton(id, label)]),
+        ...CONTENT_TABS.flatMap(([id, label2]) => id === "files" ? [el("span", { class: "tabsep", title: "\uC5EC\uAE30\uBD80\uD130\uB294 \uD3B8\uC9D1 \uB300\uC0C1\uC774 \uC544\uB2C8\uB77C \uC791\uC5C5 \uACF5\uAC04\uC785\uB2C8\uB2E4 \u2014 \uBD07\uC758 \uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4\uC640, \uBD07\uACFC \uBB34\uAD00\uD55C \uC5D0\uC14B \uC2A4\uD29C\uB514\uC624" }), tabButton(id, label2)] : id === "chats" ? [tabButton(id, label2), modeChip] : [tabButton(id, label2)]),
         layoutSlot,
         syncBadge
       ]),
@@ -21104,6 +21214,6 @@ ${negative.value.trim()}
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.15.6"} loaded`);
+    console.log(`[risu-hina] v${"0.15.7"} loaded`);
   })();
 })();

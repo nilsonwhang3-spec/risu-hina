@@ -11,6 +11,11 @@
  * and every <img> the panel draws degrades to text when a host refuses it.
  */
 export const CSS = `
+.write-progress { position: fixed; inset: 0; z-index: 2147483647; display: grid; place-items: center; padding: 16px; background: #0009; }
+.write-progress-card { width: min(100%, 420px); display: grid; justify-items: center; gap: 12px; padding: 24px; border-radius: 12px; text-align: center; background: var(--bgcolor, #12141a); color: var(--textcolor, #d8dce4); border: 1px solid var(--borderc, #2b323f); }
+.write-spinner { width: 32px; height: 32px; border: 3px solid #8885; border-top-color: #60a5fa; border-radius: 50%; animation: write-spin 1s linear infinite; }
+@keyframes write-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .write-spinner { animation-duration: 3s; } }
 :host, * { box-sizing: border-box; }
 body {
   margin: 0;
