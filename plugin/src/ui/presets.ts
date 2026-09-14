@@ -1002,8 +1002,8 @@ export function buildCodexBox(modelInput: HTMLInputElement | null, withLogin: bo
   const out = el('div', { class: 'outbox' });
   const login = el('button', { class: 'primary tiny', text: 'OpenAI 로그인' }) as HTMLButtonElement;
   const logout = el('button', { class: 'ghost tiny', text: '로그아웃' }) as HTMLButtonElement;
-  const paste = el('input', { placeholder: '로그인 뒤 이동한 주소를 여기에 붙여넣기 (http://localhost:1455/auth/callback?code=…)' }) as HTMLInputElement;
-  const finish = el('button', { class: 'ghost tiny', text: '붙여넣은 주소로 완료' }) as HTMLButtonElement;
+  const paste = el('input', { placeholder: '콜백 URL 전체 또는 code 값만 붙여넣기', autocomplete: 'off', spellcheck: 'false' }) as HTMLInputElement;
+  const finish = el('button', { class: 'ghost tiny', text: '붙여넣은 URL·코드로 완료' }) as HTMLButtonElement;
   const pasteRow = el('div', { class: 'row' }, [paste, finish]);
   pasteRow.style.display = 'none';
   const models = el('div', { class: 'row' });

@@ -51,7 +51,7 @@ const DEFAULT_AREAS = new Set(['projects', 'studio']);
 /** Folders whose second segment is the bot: what "이 봇만" filters on. */
 const PER_BOT_AREAS = new Set(['projects', 'hina']);
 const IMAGE_RE = /\.(png|jpe?g|gif|webp|avif|bmp)$/i;
-const TEXT_UPLOAD_RE = /\.(md|txt|json|jsonl|csv|py|html?|css|js|ya?ml|xml|log|sql)$/i;
+const TEXT_UPLOAD_RE = /\.(md|txt|json|jsonl|csv|py|lua|html?|css|js|ya?ml|xml|log|sql)$/i;
 /** The virtual folder of surfaced documents. */
 const DOCS_NODE = '@docs';
 
@@ -1321,6 +1321,36 @@ async function drawPreview(f: WorkspaceFile, n: Folder): Promise<void> {
   try {
     const r = await state.readFile(f.path);
     clear(body);
+    if (/\.(lua|txt)$/i.test(f.name)) {
+      const edit = el('button', { class: 'primary tiny', text: '텍스트 편집' });
+      edit.addEventListener('click', async () => {
+        edit.disabled = true;
+        try {
+          const full = await transport.post<{ content: string; revision: string }>('/files/text', { path: f.path });
+          const input = el('textarea', { class: 'mono', 'aria-label': f.name + ' 편집',
+            style: { width: '100%', minHeight: '55vh', tabSize: '4' }, spellcheck: 'false' }) as HTMLTextAreaElement;
+          input.value = full.content;
+          let revision = full.revision;
+          const status = el('div', { class: 'hint', text: '파일 원문을 편집합니다. 봇 DB에는 자동 반영되지 않습니다.' });
+          const save = el('button', { class: 'primary', text: '파일 저장' });
+          save.addEventListener('click', async () => {
+            save.disabled = true;
+            try {
+              const result = await transport.post<{ revision: string }>('/files/text', { path: f.path, content: input.value, revision });
+              revision = result.revision;
+              status.textContent = '저장했습니다.';
+            } catch (error) { status.textContent = msg(error); }
+            finally { save.disabled = false; }
+          });
+          const done = el('button', { class: 'ghost', text: '닫기' });
+          const close = modal(f.name + ' — 텍스트 편집', el('div', {}, [input, status, el('div', { class: 'row' }, [save, done])]),
+            { wide: true, sticky: true, onClose: () => state.touchFiles() });
+          done.addEventListener('click', close);
+        } catch (error) { notice(msg(error), 'err'); }
+        finally { edit.disabled = false; }
+      });
+      body.appendChild(edit);
+    }
     if (r.truncated) body.appendChild(el('div', { class: 'hint', text: '앞부분만 표시합니다.' }));
     if (/\.(md|markdown)$/i.test(f.name)) {
       // The same body the artifact viewer shows - rendered, with a way to

@@ -271,7 +271,13 @@ def _card_greeting_delete(a: dict) -> str:
 
 def _script_edit(a: dict) -> str:
     from . import card
-    card.update_script(a["args"]["id"], a["args"]["entry"])
+    from . import scripttext
+    with db.transaction():
+        if a["args"].get("baseHash"):
+            current = scripttext.current(a["charKey"], a["args"]["id"])
+            if scripttext.digest(current) != a["args"]["baseHash"]:
+                raise ActionError("제안 후 스크립트가 변경됐습니다. 최신 원문으로 다시 제안하세요")
+        card.update_script(a["args"]["id"], a["args"]["entry"])
     return "스크립트 항목을 고쳤습니다"
 
 
