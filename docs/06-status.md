@@ -1,4 +1,13 @@
-# 06. Implementation status — as of 2026-09-14 (v0.15.11, Risu Hina)
+# 06. Implementation status — as of 2026-09-15 (v0.15.12, Risu Hina)
+
+## 0.15.12 field fixes
+
+User requested staging and release of the bot/chat lorebook distinction,
+full Lua/TXT file editor, raw DB script search/patch/export/import tools,
+and OAuth callback URL/code input handling. See `docs/16-script-text-editing.md`.
+Validation includes the 15 discovery/review regression tests, Lua editor UI test,
+TypeScript checks and real-backend plugin smoke test. OAuth exchange is mocked
+in tests; actual user credentials are not used for release verification.
 
 ## 0.15.11 field fixes
 

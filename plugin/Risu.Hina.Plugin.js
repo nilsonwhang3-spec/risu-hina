@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.15.11
+//@display-name Risu Hina v0.15.12
 //@api 3.0
-//@version 0.15.11
+//@version 0.15.12
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -104,7 +104,7 @@
       this.tokenSafe = true;
       this.lastHealth = body;
       this.probeInfo = "";
-      this.gate = versionGate("0.15.11", String(body.version || ""));
+      this.gate = versionGate("0.15.12", String(body.version || ""));
       return body;
     }
     /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -9295,7 +9295,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
   var DEFAULT_AREAS = /* @__PURE__ */ new Set(["projects", "studio"]);
   var PER_BOT_AREAS = /* @__PURE__ */ new Set(["projects", "hina"]);
   var IMAGE_RE = /\.(png|jpe?g|gif|webp|avif|bmp)$/i;
-  var TEXT_UPLOAD_RE = /\.(md|txt|json|jsonl|csv|py|html?|css|js|ya?ml|xml|log|sql)$/i;
+  var TEXT_UPLOAD_RE = /\.(md|txt|json|jsonl|csv|py|lua|html?|css|js|ya?ml|xml|log|sql)$/i;
   var DOCS_NODE = "@docs";
   var FICON = {
     selectAll: svg('<path d="m2 13 4 4L14 7"/><path d="m10 15 3 3 9-11"/>', 15),
@@ -10528,6 +10528,49 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     try {
       const r = await state.readFile(f.path);
       clear(body);
+      if (/\.(lua|txt)$/i.test(f.name)) {
+        const edit = el("button", { class: "primary tiny", text: "\uD14D\uC2A4\uD2B8 \uD3B8\uC9D1" });
+        edit.addEventListener("click", async () => {
+          edit.disabled = true;
+          try {
+            const full2 = await transport.post("/files/text", { path: f.path });
+            const input2 = el("textarea", {
+              class: "mono",
+              "aria-label": f.name + " \uD3B8\uC9D1",
+              style: { width: "100%", minHeight: "55vh", tabSize: "4" },
+              spellcheck: "false"
+            });
+            input2.value = full2.content;
+            let revision = full2.revision;
+            const status = el("div", { class: "hint", text: "\uD30C\uC77C \uC6D0\uBB38\uC744 \uD3B8\uC9D1\uD569\uB2C8\uB2E4. \uBD07 DB\uC5D0\uB294 \uC790\uB3D9 \uBC18\uC601\uB418\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4." });
+            const save2 = el("button", { class: "primary", text: "\uD30C\uC77C \uC800\uC7A5" });
+            save2.addEventListener("click", async () => {
+              save2.disabled = true;
+              try {
+                const result = await transport.post("/files/text", { path: f.path, content: input2.value, revision });
+                revision = result.revision;
+                status.textContent = "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4.";
+              } catch (error) {
+                status.textContent = msg5(error);
+              } finally {
+                save2.disabled = false;
+              }
+            });
+            const done = el("button", { class: "ghost", text: "\uB2EB\uAE30" });
+            const close = modal(
+              f.name + " \u2014 \uD14D\uC2A4\uD2B8 \uD3B8\uC9D1",
+              el("div", {}, [input2, status, el("div", { class: "row" }, [save2, done])]),
+              { wide: true, sticky: true, onClose: () => state.touchFiles() }
+            );
+            done.addEventListener("click", close);
+          } catch (error) {
+            notice2(msg5(error), "err");
+          } finally {
+            edit.disabled = false;
+          }
+        });
+        body.appendChild(edit);
+      }
       if (r.truncated) body.appendChild(el("div", { class: "hint", text: "\uC55E\uBD80\uBD84\uB9CC \uD45C\uC2DC\uD569\uB2C8\uB2E4." }));
       if (/\.(md|markdown)$/i.test(f.name)) {
         const big = el("button", { class: "ghost tiny", text: "\uCE74\uB4DC\uB85C \uD06C\uAC8C \uBCF4\uAE30", title: "\uC911\uC559 \uD328\uB110 \uCE74\uB4DC\uB85C \uC5FD\uB2C8\uB2E4" });
@@ -12648,8 +12691,8 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     const out = el("div", { class: "outbox" });
     const login = el("button", { class: "primary tiny", text: "OpenAI \uB85C\uADF8\uC778" });
     const logout = el("button", { class: "ghost tiny", text: "\uB85C\uADF8\uC544\uC6C3" });
-    const paste = el("input", { placeholder: "\uB85C\uADF8\uC778 \uB4A4 \uC774\uB3D9\uD55C \uC8FC\uC18C\uB97C \uC5EC\uAE30\uC5D0 \uBD99\uC5EC\uB123\uAE30 (http://localhost:1455/auth/callback?code=\u2026)" });
-    const finish = el("button", { class: "ghost tiny", text: "\uBD99\uC5EC\uB123\uC740 \uC8FC\uC18C\uB85C \uC644\uB8CC" });
+    const paste = el("input", { placeholder: "\uCF5C\uBC31 URL \uC804\uCCB4 \uB610\uB294 code \uAC12\uB9CC \uBD99\uC5EC\uB123\uAE30", autocomplete: "off", spellcheck: "false" });
+    const finish = el("button", { class: "ghost tiny", text: "\uBD99\uC5EC\uB123\uC740 URL\xB7\uCF54\uB4DC\uB85C \uC644\uB8CC" });
     const pasteRow = el("div", { class: "row" }, [paste, finish]);
     pasteRow.style.display = "none";
     const models = el("div", { class: "row" });
@@ -13312,10 +13355,10 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           return;
         }
         if (!r.newer) {
-          const mismatch = r.current !== "0.15.11";
+          const mismatch = r.current !== "0.15.12";
           const ahead = r.ahead ?? (!!r.latest && r.latest !== r.current);
           say(
-            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.11"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
+            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.12"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
             mismatch || ahead ? "" : "ok"
           );
           return;
@@ -13406,7 +13449,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.15.11",
+            version: "0.15.12",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -14057,7 +14100,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.11"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.12"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -21075,7 +21118,7 @@ ${negative.value.trim()}
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.11"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.12"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
@@ -21171,7 +21214,7 @@ ${negative.value.trim()}
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.15.11" }),
+        el("span", { class: "dim", text: "v0.15.12" }),
         healthEl,
         el("span", { class: "spacer" }),
         reload,
@@ -21488,6 +21531,6 @@ ${negative.value.trim()}
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.15.11"} loaded`);
+    console.log(`[risu-hina] v${"0.15.12"} loaded`);
   })();
 })();
