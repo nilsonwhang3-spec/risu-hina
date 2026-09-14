@@ -14,7 +14,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "pyserver"))
 DATA = tempfile.TemporaryDirectory(prefix="hina-discovery-", ignore_cleanup_errors=True)
 os.environ["RISUHINA_DATA_DIR"] = DATA.name
-from app import actions, agent, agentcontext, assets, botsearch, card, config, db, files, hostwriteback, main, session, skills, store, studio, tooloutput
+from app import actions, agent, agentcontext, assets, botsearch, card, codexauth, config, db, files, hostwriteback, main, scripttext, session, skills, store, studio, tooloutput
 from pydantic_ai.messages import ModelRequest, ToolReturnPart
 from pydantic_ai.models.test import TestModel
 from PIL import Image
@@ -44,6 +44,69 @@ class DiscoveryTests(unittest.TestCase):
         description = self.built._function_toolset.tools["run_python"].description
         for text in ("import risuhina", "import realooc", "PYTHONPATH", "risuhina.conn()", "assetref"):
             self.assertIn(text, description)
+
+    def test_large_script_raw_search_patch_file_import_and_stale_approval(self):
+        self.ctx.deps.mode = "bot"
+        original = '-- 한글 \\n "quoted"\r\n' * 9000 + 'local tail = "old"\n'
+        entry = {"comment": "large Lua", "effect": [{"type": "triggerlua", "code": original}], "unknown": {"keep": True}}
+        sid = card.add_script(self.ck, "triggerscript", entry)
+        info = json.loads(self.tool("read_script_text", script_id=sid))
+        self.assertIn("일치 횟수", self.tool("propose_script_text_replace", script_id=sid, field="/effect/0/code",
+                       revision=info["revision"], find="quoted", replace="ambiguous", reason="test"))
+        self.assertIn("/effect/0/code", [r["field"] for r in info["fields"]])
+        self.assertIn('local tail = "old"', self.tool("read_script_text", script_id=sid, field="/effect/0/code", query="local tail"))
+        self.assertIn('local tail = \\"old\\"', self.tool("read_script", script_id=sid))
+        proposed = self.tool("propose_script_text_replace", script_id=sid, field="/effect/0/code", revision=info["revision"],
+                             find='local tail = "old"', replace='local tail = "new"', reason="fix")
+        aid = re.search(r"id=([a-f0-9]+)", proposed).group(1)
+        self.assertEqual(card.script_entry(sid)["entry"], entry)
+        actions.decide(aid, True, "bot")
+        changed = card.script_entry(sid)["entry"]
+        self.assertEqual(changed["effect"][0]["code"], original.replace('"old"', '"new"'))
+        self.assertEqual(changed["unknown"], entry["unknown"])
+        export = json.loads(self.tool("export_script_text", script_id=sid, field="/effect/0/code", path="projects/code-test/full.lua"))
+        path = files._resolve(files.SPACE, export["path"])
+        self.assertEqual(path.read_bytes().decode(), changed["effect"][0]["code"])
+        path.write_bytes((original + '-- imported\n').encode())
+        proposed = self.tool("propose_script_text_from_file", script_id=sid, field="/effect/0/code", revision=export["revision"], path=export["path"], reason="file edit")
+        aid = re.search(r"id=([a-f0-9]+)", proposed).group(1)
+        path.write_text("later file edit must not change approval snapshot", encoding="utf-8")
+        actions.decide(aid, True, "bot")
+        self.assertEqual(card.script_entry(sid)["entry"]["effect"][0]["code"], original + '-- imported\n')
+        revision = scripttext.digest(card.script_entry(sid)["entry"])
+        args = scripttext.replacement(self.ck, sid, "/effect/0/code", revision, find="imported", replace="stale")
+        pending = actions.propose("script_edit", chat_key="", char_key=self.ck, summary="stale", args=args)
+        card.update_script(sid, {**card.script_entry(sid)["entry"], "comment": "concurrent edit"})
+        with self.assertRaises(actions.ActionError): actions.decide(pending["id"], True, "bot")
+        self.assertEqual(card.script_entry(sid)["entry"]["comment"], "concurrent edit")
+        with self.assertRaises(ValueError): scripttext.current("another-bot", sid)
+
+    def test_lua_full_file_editor_roundtrip_and_stale_save(self):
+        content = '-- 한글 \\n\n' * 30000
+        result = files.upload(files.SPACE, "editor.LUA", text=content, into="projects/code-editor")
+        self.assertTrue(files.read(files.SPACE, result["path"])["textual"])
+        loaded = main.h_file_text({"path": result["path"]})
+        self.assertEqual(loaded["content"], content)
+        main.h_file_text({"path": result["path"], "content": content + "-- edited", "revision": loaded["revision"]})
+        with self.assertRaises(main.ApiError):
+            main.h_file_text({"path": result["path"], "content": "stale", "revision": loaded["revision"]})
+        self.assertTrue(files.edit_text(files.SPACE, result["path"])["content"].endswith("-- edited"))
+        with self.assertRaises(files.FileError): files.edit_text(files.SPACE, "../outside.lua")
+
+    def test_oauth_url_and_exact_code_inputs(self):
+        for value in ('http://localhost:1455/auth/callback?code=abc%2Bdef&state=test',
+                      'localhost:1455/auth/callback?code=abc%2Bdef&state=test',
+                      '127.0.0.1:1455/auth/callback?code=abc%2Bdef&amp;state=test',
+                      '?state=test&code=abc%2Bdef', 'abc+def'):
+            self.assertEqual(codexauth.parse_login_input(value, 'test'), ('abc+def', 'test'))
+        self.assertEqual(codexauth.parse_login_input('exact%2Fcode', 'test')[0], 'exact%2Fcode')
+        for value in ('http://localhost:1455/auth/callback?state=test',
+                      '?code=abc&state=other', '?code=a&code=b', '?error=access_denied'):
+            with self.assertRaises(codexauth.CodexError): codexauth.parse_login_input(value, 'test')
+        with patch.dict(codexauth._pending, {'test': {'verifier': 'fake'}}, clear=True), \
+             patch.object(codexauth, '_exchange') as exchange, patch.object(codexauth, 'status', return_value={}):
+            codexauth.complete_login('abc+def')
+            exchange.assert_called_once_with('abc+def', 'fake', 'test')
 
     def test_lore_scope_defaults_follow_editor_and_explicit_scope_is_preserved(self):
         for editor, expected in (("bot", "global"), ("chat", "local")):

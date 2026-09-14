@@ -965,6 +965,17 @@ def h_file_read(arg: dict) -> dict:
         raise ApiError(400, str(e))
 
 
+def h_file_text(arg: dict) -> dict:
+    try:
+        content = arg.get("content")
+        if "content" in arg and not isinstance(content, str):
+            raise files.FileError("content는 텍스트여야 합니다")
+        scope = _write_scope(arg) if content is not None else _scope(arg)
+        return files.edit_text(scope, str(arg.get("path") or ""), content, str(arg.get("revision") or ""))
+    except files.FileError as e:
+        raise ApiError(400, str(e))
+
+
 def _write_scope(arg: dict) -> str:
     """The scope a write may address: the SYSTEM view is read-only here."""
     scope = _scope(arg)
@@ -2536,6 +2547,7 @@ ROUTES: dict[str, Handler] = {
 
     "GET /files": h_files,
     "GET /files/read": h_file_read,
+    "POST /files/text": h_file_text,
     "POST /files/upload": h_file_upload,
     "POST /files/delete": h_file_delete,
     "POST /files/mkdir": h_file_mkdir,

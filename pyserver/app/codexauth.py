@@ -195,23 +195,45 @@ def login_status(state: str) -> dict:
                 "loggedIn": logged_in()}
 
 
-def complete_login(pasted: str, state_hint: str = "") -> dict:
-    """The paste fallback: the redirected URL, or a bare code (+ state)."""
-    text = (pasted or "").strip()
+def parse_login_input(pasted: str, state_hint: str = "") -> tuple[str, str]:
+    """Accept a callback URL (including schemeless localhost), query, or exact code."""
+    text = (pasted or "").strip().strip('\"\'')
     if not text:
-        raise CodexError("리다이렉트된 주소를 붙여넣어 주세요")
+        raise CodexError("콜백 URL 전체 또는 code 값을 입력해 주세요")
     code, state = "", state_hint.strip()
-    if "code=" in text:
-        parsed = urllib.parse.urlparse(text if "://" in text else "http://x/?" + text.lstrip("?"))
-        qs = urllib.parse.parse_qs(parsed.query)
+    is_url = "://" in text or text.startswith(("localhost", "127.0.0.1", "[::1]", "/auth/callback"))
+    if is_url or text.startswith(("?", "code=", "state=", "error=")):
+        if is_url:
+            parsed = urllib.parse.urlsplit(text if "://" in text or text.startswith("/") else "//" + text)
+            query = parsed.query
+        else:
+            query = text.lstrip("?")
+        qs = urllib.parse.parse_qs(query.replace("&amp;", "&"), keep_blank_values=True)
+        if "error" in qs:
+            raise CodexError("로그인이 취소되었거나 인증 오류가 반환됐습니다. 다시 로그인해 주세요")
+        if any(len(qs.get(key, [])) > 1 for key in ("code", "state")):
+            raise CodexError("code/state 값이 중복된 주소입니다")
         code = (qs.get("code") or [""])[0]
-        state = (qs.get("state") or [state])[0]
+        url_state = (qs.get("state") or [""])[0]
+        if state and url_state and state != url_state:
+            raise CodexError("다른 로그인 요청의 URL입니다 (state). 현재 요청의 URL을 입력해 주세요")
+        state = url_state or state
     else:
         code = text
     if not code:
         raise CodexError("주소에 code 가 없습니다")
+    if any(ch.isspace() for ch in code):
+        raise CodexError("code 값에 공백이 있습니다. URL 전체 또는 원래 code 값을 입력해 주세요")
+    return code, state
+
+
+def complete_login(pasted: str, state_hint: str = "") -> dict:
+    """The paste fallback: the redirected URL, or a bare code (+ state)."""
+    code, state = parse_login_input(pasted, state_hint)
     with _lock:
-        p = _pending.get(state) if state else (next(iter(_pending.values()), None) if len(_pending) == 1 else None)
+        if not state and len(_pending) == 1:
+            state = next(iter(_pending))
+        p = _pending.get(state)
     if p is None:
         raise CodexError("진행 중인 로그인과 맞지 않습니다 (state). 로그인을 다시 시작해 주세요")
     _exchange(code, p["verifier"], state)

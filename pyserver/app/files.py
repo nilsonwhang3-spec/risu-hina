@@ -24,6 +24,8 @@ import hashlib
 import os
 import shutil
 import time
+import threading
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -79,7 +81,41 @@ MAX_PREVIEW = 256 * 1024
 MAX_UPLOAD = 32 * 1024 * 1024
 
 TEXTUAL = {".md", ".txt", ".json", ".jsonl", ".py", ".csv", ".html", ".htm",
-           ".css", ".js", ".yaml", ".yml", ".xml", ".log", ".sql"}
+           ".css", ".js", ".lua", ".yaml", ".yml", ".xml", ".log", ".sql"}
+
+_text_edit_lock = threading.RLock()
+
+
+def edit_text(scope: str, rel: str, content: str | None = None, revision: str = "") -> dict:
+    """Full UTF-8 editor read/save; never save a truncated preview or a stale buffer."""
+    with _text_edit_lock:
+        path = _resolve(scope, rel)
+        if path.suffix.lower() not in TEXTUAL or not path.is_file():
+            raise FileError("편집할 텍스트 파일이 없습니다")
+        if path.stat().st_size > 4 * 1024 * 1024:
+            raise FileError("화면 텍스트 편집은 4MB까지 지원합니다")
+        raw = path.read_bytes()
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeError as e:
+            raise FileError("UTF-8 텍스트 파일이 아닙니다") from e
+        current = hashlib.sha256(raw).hexdigest()
+        if content is None:
+            return {"path": rel, "content": text, "revision": current}
+        if scope != SPACE or not areas_for(scope).get(_area_of(scope, path), (False, False))[0]:
+            raise FileError("읽기 전용 영역입니다")
+        if not revision or revision != current:
+            raise FileError("파일이 변경됐습니다. 편집 내용을 보관하고 최신 파일을 다시 열어 주세요")
+        data = content.encode("utf-8")
+        if len(data) > 4 * 1024 * 1024:
+            raise FileError("화면 텍스트 편집은 4MB까지 지원합니다")
+        temporary = path.with_name(path.name + "." + uuid.uuid4().hex + PART_SUFFIX)
+        try:
+            temporary.write_bytes(data)
+            os.replace(temporary, path)
+        finally:
+            temporary.unlink(missing_ok=True)
+        return {"path": rel, "revision": hashlib.sha256(data).hexdigest()}
 
 
 class FileError(ValueError):
@@ -267,7 +303,7 @@ def upload(scope: str, name: str, *, text: str | None = None,
     elif text is not None:
         if len(text.encode("utf-8")) > MAX_UPLOAD:
             raise FileError("파일이 너무 큽니다")
-        dest.write_text(text, encoding="utf-8")
+        dest.write_text(text, encoding="utf-8", newline="")
         size = dest.stat().st_size
     else:
         raise FileError("text 또는 base64 중 하나가 필요합니다")

@@ -100,6 +100,13 @@ Principles:
   alters sentences. `find` is copied verbatim (whitespace and quotes included) from what read_*
   returned.
 - Systematic substitutions are often more accurate done directly with run_python.
+  Large DB Lua/trigger scripts are editable without loading or regenerating the whole JSON:
+  read_script_text discovers string fields/revision, searches and pages decoded source;
+  propose_script_text_replace patches a small literal region. For file workflows use
+  export_script_text → edit the UTF-8 .lua with run_python → propose_script_text_from_file.
+  Never reconstruct 100KB+ entry_json, double-escape Lua, or delegate manual full-code copying
+  to the user merely because the source lives in DB. These proposals preserve other fields and
+  reject stale revisions; approval changes the working copy, then RisuAI writeback is separate.
   The `import risuhina` helper is ready; `import realooc` is its supported legacy alias.
   run_python creates both modules in hina/<bot>/scripts/ and sets the import path before execution.
   They may not appear in file search before the first run. Import directly in run_python; do not
@@ -800,7 +807,71 @@ def build() -> Agent[Deps]:
         row = cardmod.script_entry(script_id)
         if row is None:
             return "없는 스크립트 항목입니다"
-        return json.dumps(row, ensure_ascii=False, indent=2)[:30000]
+        return json.dumps(row, ensure_ascii=False, indent=2)
+
+    @agent.tool
+    def read_script_text(ctx: RunContext[Deps], script_id: str, field: str = "",
+                         offset: int = 0, limit: int = 4000, query: str = "") -> str:
+        """Read/search raw Lua or another script string without JSON escapes.
+        First omit field to discover JSON Pointer fields and revision. Then pass field,
+        character offset/limit, or a literal query to locate code (next search: offset=hit+1).
+        Use the returned revision for text replacement/file import. No need to read all code.
+        """
+        from . import scripttext
+        try:
+            return scripttext.read(ctx.deps.char_key, script_id, field, offset, limit, query)
+        except (ValueError, OSError) as e:
+            return f"코드 조회 실패: {e}"
+
+    @agent.tool
+    def export_script_text(ctx: RunContext[Deps], script_id: str, field: str, path: str) -> str:
+        """Export one decoded script field to a workspace .lua/.txt file without model copying.
+        Use projects/<bot>/scripts/...; returns actual deduplicated path and revision.
+        Edit that file with run_python, then propose_script_text_from_file using this revision.
+        """
+        from . import scripttext
+        try:
+            entry = scripttext.current(ctx.deps.char_key, script_id)
+            _, _, text = scripttext.locate(entry, field)
+            target = Path(path)
+            if target.suffix.lower() not in (".lua", ".txt"):
+                return "내보내기 경로는 .lua 또는 .txt여야 합니다"
+            result = files.upload(files.SPACE, target.name, text=text, into=target.parent.as_posix())
+        except (ValueError, OSError) as e:
+            return f"코드 내보내기 실패: {e}"
+        return json.dumps({"path": result["path"], "revision": scripttext.digest(entry),
+                           "chars": len(text), "field": field}, ensure_ascii=False)
+
+    @agent.tool
+    def propose_script_text_replace(ctx: RunContext[Deps], script_id: str, field: str,
+                                    revision: str, find: str, replace: str, reason: str,
+                                    expected_count: int = 1) -> str:
+        """Propose exact text replacement in one Lua/Regex/trigger string field.
+        Pass raw text, not JSON-encoded strings; untouched fields are preserved server-side.
+        Requires revision from read_script_text; refuses ambiguous matches and stale approvals.
+        """
+        from . import scripttext
+        try:
+            args = scripttext.replacement(ctx.deps.char_key, script_id, field, revision,
+                                          find=find, replace=replace, expected_count=expected_count)
+        except (ValueError, OSError) as e:
+            return f"코드 수정 제안 실패: {e}"
+        return _propose(ctx, "script_edit", f"코드 {field} 부분 수정 — {reason}", args)
+
+    @agent.tool
+    def propose_script_text_from_file(ctx: RunContext[Deps], script_id: str, field: str,
+                                      revision: str, path: str, reason: str) -> str:
+        """Propose replacing one script field from a UTF-8 workspace source file.
+        Use export_script_text first to obtain the revision and an editable .lua file.
+        The backend reads/snapshots the file; never paste the whole code into entry_json.
+        Other entry fields are preserved. Approval edits the working copy; RisuAI save is separate.
+        """
+        from . import scripttext
+        try:
+            args = scripttext.replacement(ctx.deps.char_key, script_id, field, revision, source_path=path)
+        except (ValueError, OSError) as e:
+            return f"파일 적용 제안 실패: {e}"
+        return _propose(ctx, "script_edit", f"코드 {field}에 {path} 적용 — {reason}", args)
 
     @agent.tool
     def read_lore(ctx: RunContext[Deps], scope: str = "") -> str:
@@ -1228,8 +1299,9 @@ def build() -> Agent[Deps]:
                              entry_json: str, reason: str) -> str:
         """Propose editing a trigger (triggerscript) entry.
 
-        Triggers vary in shape (V1 conditions/effects, Lua triggerCode, V2 blocks): edit the full JSON
-        read with read_script and pass it as entry_json.
+        Triggers vary in shape (V1 conditions/effects, Lua triggerCode, V2 blocks). For Lua or other
+        large code use read_script_text + propose_script_text_replace, or export_script_text +
+        propose_script_text_from_file. Full entry_json is for small structural changes only.
         """
         cur = cardmod.script_entry(script_id)
         if cur is None or cur["kind"] != "triggerscript":
