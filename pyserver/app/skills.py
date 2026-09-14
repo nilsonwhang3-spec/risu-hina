@@ -739,7 +739,7 @@ SEED_FILES: dict[str, tuple[str, str, bool]] = {
     "risuai-lorebook-style.md": ("RisuAI 로어북 작성 규칙",
                                  "로어북 항목을 새로 쓰거나 고칠 때 반드시. ### 제목·#### 소제목·불릿 형식, 우선순위 숫자 표(300~2000), 영/한/일 키워드, 폴더, 상시 항목 규칙. 실리태번식 @@ 헤더 금지.", True),
     "risuai-lorebook.md": ("RisuAI 로어북 구조",
-                           "챗 로어북 항목을 만들거나 고칠 때, 특히 발동 조건(key·데코레이터·삽입 위치)을 정할 때.", True),
+                           "봇 로어북(global, 봇에 영구 저장·여러 챗에서 재사용)과 챗 로어북(local, 특정 챗 전용)의 구조·발동 조건(key·데코레이터·삽입 위치)을 정할 때.", True),
     "risuai-hooks.md": ("RisuAI 처리 순서 (정규식·Lua 훅)",
                         "Regex(editinput/editoutput/editprocess/editdisplay)·Lua listenEdit(editRequest 등)·트리거가 한 턴에서 언제 어떤 순서로 돌고 무엇이 저장되는지. 정규식·트리거·배경 HTML 을 만들거나 고칠 때, 태그가 요청/화면/저장본 어디에 남는지 설명할 때.", True),
     "risuai-lua.md": ("RisuAI Lua 트리거",
@@ -818,6 +818,32 @@ def defaults_once() -> None:
 # Rotating the key re-copies the seed into existing installs on next boot -
 # _v2 added the batch-spec section (inline scenes, name addressing, adhoc dir).
 STUDIO_OPS_KEY = "skills_studio_ops_space_v3"
+
+LORE_SCOPE_KEY = "skills_lore_scope_v1"
+LORE_SCOPE_NOTE = """<!-- risuhina-lore-scope-v1 -->
+봇 로어북은 scope="global", botlore 탭이며 이 봇에 영구 저장되어 여러 챗에서 재사용된다.
+챗 로어북은 scope="local", lore 탭이며 특정 채팅의 진행 상황에만 적용된다.
+global은 모든 봇 공용이라는 뜻이 아니다. 영구 보관과 alwaysActive 발동 조건도 별개다.
+사용자가 지정한 범위가 우선이다. 범위를 생략하면 봇 편집에서는 봇 로어북, 챗 편집에서는
+현재 챗 로어북을 대상으로 한다. 봇 로어북 작성 요청을 챗 로어북 화면 이동으로 바꾸지 마라.
+아래 자료의 '챗 로어북'이라는 일반 설명은 봇 로어북도 사용하는 공통 스키마를 한정하지 않는다.
+"""
+
+
+def refresh_lore_scope_once() -> None:
+    """Add scope guidance to installed skills, preserving custom text and state."""
+    if db.has_migration(LORE_SCOPE_KEY):
+        return
+    for skill in list_all():
+        if skill["name"].strip() not in ("RisuAI 로어북 구조", "RisuAI 로어북 작성 규칙"):
+            continue
+        current = get(skill["slug"])
+        if not current or "<!-- risuhina-lore-scope-v1 -->" in current["body"]:
+            continue
+        description = current["description"].replace("챗 로어북 항목을", "봇·챗 로어북 항목을")
+        save(current["name"], description, LORE_SCOPE_NOTE + "\n" + current["body"],
+             slug=current["slug"], always=current.get("always", False))
+    db.mark_migration(LORE_SCOPE_KEY)
 
 
 def refresh_studio_ops_once() -> None:

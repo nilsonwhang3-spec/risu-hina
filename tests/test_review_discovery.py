@@ -14,7 +14,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "pyserver"))
 DATA = tempfile.TemporaryDirectory(prefix="hina-discovery-", ignore_cleanup_errors=True)
 os.environ["RISUHINA_DATA_DIR"] = DATA.name
-from app import actions, agent, agentcontext, assets, botsearch, card, config, db, files, hostwriteback, main, session, store, studio, tooloutput
+from app import actions, agent, agentcontext, assets, botsearch, card, config, db, files, hostwriteback, main, session, skills, store, studio, tooloutput
 from pydantic_ai.messages import ModelRequest, ToolReturnPart
 from pydantic_ai.models.test import TestModel
 from PIL import Image
@@ -44,6 +44,46 @@ class DiscoveryTests(unittest.TestCase):
         description = self.built._function_toolset.tools["run_python"].description
         for text in ("import risuhina", "import realooc", "PYTHONPATH", "risuhina.conn()", "assetref"):
             self.assertIn(text, description)
+
+    def test_lore_scope_defaults_follow_editor_and_explicit_scope_is_preserved(self):
+        for editor, expected in (("bot", "global"), ("chat", "local")):
+            self.ctx.deps.mode = editor
+            result = self.tool("propose_lore_add", comment="canon", keys="key", content="### Canon", reason="requested")
+            self.assertIn("제안했습니다", result)
+            action_id = re.search(r"id=([a-f0-9]+)", result).group(1)
+            self.assertEqual(actions.get(action_id)["args"]["scope"], expected)
+        self.ctx.deps.mode = "bot"
+        result = self.tool("propose_lore_add", comment="chat event", keys="event", content="event",
+                           reason="explicit chat request", scope="local")
+        self.assertNotIn("제안했습니다", result)  # scope gate, never silently changed to bot lore
+        self.ctx.deps.mode = "studio"
+        self.assertIn("scope", self.tool("propose_lore_add", comment="ambiguous", keys="", content="text", reason="request"))
+
+    def test_lore_read_defaults_and_current_chat_isolation(self):
+        store.add_lore(self.ck, {"comment": "bot-canon"}, "global")
+        store.add_lore(self.ck, {"comment": "current-event"}, "local", "")
+        store.add_lore(self.ck, {"comment": "other-event"}, "local", "other-chat")
+        self.ctx.deps.mode = "bot"
+        self.assertIn("bot-canon", self.tool("read_lore"))
+        self.assertNotIn("current-event", self.tool("read_lore"))
+        self.ctx.deps.mode = "chat"
+        self.assertIn("current-event", self.tool("list_lore"))
+        self.assertNotIn("other-event", self.tool("list_lore"))
+        self.assertNotIn("bot-canon", self.tool("list_lore"))
+        self.assertIn("bot-canon", self.tool("list_lore", scope="global"))
+
+    def test_installed_lore_skill_scope_refresh_preserves_custom_body_and_state(self):
+        created = skills.save("RisuAI 로어북 구조", "챗 로어북 항목을 만들 때", "사용자 수정 본문",
+                              always=True, enabled=False, sort_order=37)
+        skills.refresh_lore_scope_once()
+        updated = skills.get(created["slug"])
+        self.assertIn("사용자 수정 본문", updated["body"])
+        self.assertIn('scope="global"', updated["body"])
+        self.assertIn('scope="local"', updated["body"])
+        self.assertFalse(updated["enabled"])
+        self.assertTrue(updated["always"])
+        skills.refresh_lore_scope_once()
+        self.assertEqual(updated["body"], skills.get(created["slug"])["body"])
 
     def test_explicit_card_save_works_from_any_screen_and_waits_for_result(self):
         sid = "save-" + self._testMethodName

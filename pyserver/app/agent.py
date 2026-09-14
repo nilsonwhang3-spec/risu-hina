@@ -105,6 +105,16 @@ Principles:
   They may not appear in file search before the first run. Import directly in run_python; do not
   look for a root-level realooc.py, install a package, or infer a missing helper from file search.
   For its actual location use `import risuhina; print(risuhina.__file__)` inside run_python.
+- **Lorebook scope is the user's intended lifetime, not the word 'lorebook' alone.**
+  Bot lorebook = scope="global", tab="botlore": persisted on this bot's card and reused across
+  its chats. Global here means this bot, NOT all bots. Chat lorebook = scope="local", tab="lore":
+  applies only to the particular chat, e.g. its events, progress and temporary setting.
+  For bot/world/character canon or an explicit bot-lorebook request, use global; never turn it
+  into local or suggest the chat-lorebook screen merely because the tool supports local.
+  On the bot editor an unspecified lorebook means bot lorebook; on the chat editor it means
+  this chat's lorebook. Explicit user scope overrides that default. If still ambiguous, clarify
+  the scope before proposing a write. Existing entries keep their recorded scope when edited.
+  Scope is separate from alwaysActive: a permanent bot entry may still activate by keywords.
 - **Before writing lorebook text, load the skill "RisuAI 로어북 작성 규칙" with load_skill.** The body
   is markdown starting with `### 제목` (#### subheadings + bullets), priority is the insertorder
   number (same tier as its neighbours), keywords are English/Korean/Japanese aliases. Do not put
@@ -793,9 +803,11 @@ def build() -> Agent[Deps]:
         return json.dumps(row, ensure_ascii=False, indent=2)[:30000]
 
     @agent.tool
-    def read_lore(ctx: RunContext[Deps]) -> str:
-        """The whole lorebook list (same as list_lore). Read a body with read_lore_entry."""
-        return list_lore(ctx)
+    def read_lore(ctx: RunContext[Deps], scope: str = "") -> str:
+        """List lorebooks: global=permanent bot lore; local=current chat only.
+        Omitted scope follows the bot/chat editor. Read bodies with read_lore_entry.
+        """
+        return list_lore(ctx, scope)
 
     @agent.tool
     def read_lore_entry(ctx: RunContext[Deps], lore_id: str) -> str:
@@ -942,7 +954,8 @@ def build() -> Agent[Deps]:
 
     @agent.tool
     def list_lore(ctx: RunContext[Deps], scope: str = "") -> str:
-        """The lorebook entries. scope is global or local.
+        """The lorebook entries. global=bot card, reused across this bot's chats;
+        local=only the current chat. Omitted scope follows the bot/chat editor.
 
         The structure comes with it: `#n` is the array order (adjust with propose_lore_move),
         `folder=` is the containing folder, and a `[folder]` row is the folder itself (a container,
@@ -951,7 +964,11 @@ def build() -> Agent[Deps]:
         (its key is the folder id members use), turn an entry into one with
         propose_lore_edit(mode="folder"), and reorganise by changing members' folder values.
         """
-        entries = store.lore(ctx.deps.char_key, scope or None)
+        scope = scope or ("global" if ctx.deps.mode == "bot" else "local" if ctx.deps.mode == "chat" else "")
+        if scope not in ("", "global", "local"):
+            return "scope 는 global(봇 로어북) 또는 local(현재 챗 로어북) 입니다"
+        entries = [e for e in store.lore(ctx.deps.char_key, scope or None)
+                   if e["scope"] == "global" or e["chatKey"] == ctx.deps.chat_key]
         if not entries:
             return "로어북 항목이 없습니다"
         # Folder key -> display name, RisuAI's own membership rule.
@@ -1061,7 +1078,7 @@ def build() -> Agent[Deps]:
 
     @agent.tool
     def propose_lore_add(ctx: RunContext[Deps], comment: str, keys: str,
-                         content: str, reason: str, scope: str = "local",
+                         content: str, reason: str, scope: str = "",
                          always_active: bool = False, insert_order: int = 100,
                          folder: str = "", mode: str = "normal") -> str:
         """Propose adding a lorebook entry. Read the skill "RisuAI 로어북 작성 규칙" first.
@@ -1070,8 +1087,10 @@ def build() -> Agent[Deps]:
         the priority number (higher survives the budget and lands earlier in the prompt) - ALWAYS set
         it to the same tier as its neighbours (leads 1000, supporting 800-900, world 700, places 600,
         monsters 500, extras 300, the always-on canon list 2000). folder is the key of the folder entry.
-        The default scope is this chat's lorebook (local). scope="global" is the bot-wide lorebook and
-        affects EVERY chat of this bot - use it only when the user explicitly says the bot lorebook.
+        scope="global" is the persistent bot-card lorebook, reused across this bot's chats (botlore
+        tab); scope="local" applies only to the current chat (lore tab). Explicit user scope wins.
+        Omitted scope defaults to global in the bot editor and local in the chat editor; other
+        screens require an explicit scope. A bot-lorebook request must not become a chat entry.
         always_active=True means always inserted without keywords - leave keys empty then.
 
         mode is RisuAI's entry kind: normal (default) | constant | multiple | child | folder.
@@ -1080,6 +1099,7 @@ def build() -> Agent[Deps]:
         ONLY for an entry with this mode; members then carry that id in `folder`. Make the folder
         first, then add or edit the members with folder=<that id>.
         """
+        scope = scope or ("global" if ctx.deps.mode == "bot" else "local" if ctx.deps.mode == "chat" else "")
         if scope not in ("local", "global"):
             return "scope 는 local 또는 global 입니다"
         if mode not in store.LORE_MODES:
