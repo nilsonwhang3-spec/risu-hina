@@ -17,7 +17,7 @@ import { askName } from '../kit';
 import { attachHilite } from '../hilite';
 import { state, type StudioItem } from '../../state';
 import { pickerRow, openListPicker, type PickerEntry } from '../pickers';
-import { S, hub, activeOf, checkUnresolved, newCard, msg, fragKeys } from './store';
+import { S, hub, activeOf, checkUnresolved, newCard, msg, fragKeys, temporaryPrompt } from './store';
 import { openParamsDialog } from './gen';
 import { parseStyleDoc, buildStyleDoc, type StyleDoc } from './stylefile';
 
@@ -76,6 +76,8 @@ export function buildLeftPrompt(mount: HTMLElement): void {
     try { localStorage.setItem('hina.studioStyleOpen', fold.open ? '1' : '0'); } catch { /* fine */ }
   });
   mount.appendChild(fold);
+  buildTemporaryPrompt(mount);
+  buildTemporaryPrompt(mount, true);
 
   // --- the tool buttons ----------------------------------------------------------
   const nChars = activeOf('characters').length;
@@ -107,6 +109,35 @@ export function buildLeftPrompt(mount: HTMLElement): void {
   paramsBtn.addEventListener('click', () => openParamsDialog());
   mount.appendChild(el('div', { class: 'toolbtns' }, [charBtn, fragBtn, paramsBtn]));
 
+}
+
+function buildTemporaryPrompt(mount: HTMLElement, negative = false): void {
+  const label = negative ? '임시 네거티브 프롬프트' : '임시 프롬프트';
+  const textKey = negative ? 'negativeText' : 'text';
+  const expandedKey = negative ? 'negativeExpanded' : 'expanded';
+  const toggle = el('button', { class: 'ghost tiny', title: label + ' 펼치기' }) as HTMLButtonElement;
+  const status = el('span', { class: 'hint' });
+  const input = el('textarea', { rows: '4', class: 'promptedit', placeholder: negative ? '이번 작업에서 제외할 태그' : '이번 작업에 추가할 태그',
+    'aria-label': label + ' (저장되지 않음)' }) as HTMLTextAreaElement;
+  input.value = temporaryPrompt[textKey];
+  const reset = el('button', { class: 'ghost tiny', text: '비우기' });
+  const body = el('div', {}, [input,
+    el('div', { class: 'row' }, [el('span', { class: 'hint grow', text: '저장되지 않음 · 새로고침하면 초기화됩니다' }), reset])]);
+  const sync = (): void => {
+    toggle.textContent = temporaryPrompt[expandedKey] ? '−' : '+';
+    toggle.setAttribute('aria-expanded', String(temporaryPrompt[expandedKey]));
+    toggle.title = label + (temporaryPrompt[expandedKey] ? ' 접기' : ' 펼치기');
+    body.style.display = temporaryPrompt[expandedKey] ? '' : 'none';
+    status.textContent = temporaryPrompt[textKey].trim() ? '생성에 적용 중 · 저장되지 않음' : '저장되지 않음';
+  };
+  toggle.addEventListener('click', () => { temporaryPrompt[expandedKey] = !temporaryPrompt[expandedKey]; sync(); });
+  input.addEventListener('input', () => { temporaryPrompt[textKey] = input.value; sync(); checkUnresolved(); });
+  reset.addEventListener('click', () => { temporaryPrompt[textKey] = ''; input.value = ''; sync(); checkUnresolved(); });
+  mount.appendChild(el('div', { class: 'styleedit' }, [
+    el('div', { class: 'row' }, [toggle, el('span', { text: label }), status]), body,
+  ]));
+  attachHilite(input, { mode: 'nai', fragments: () => fragKeys() });
+  sync();
 }
 
 /** Patch the counts without rebuilding the column (typing-safe). */

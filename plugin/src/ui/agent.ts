@@ -838,6 +838,16 @@ export class AgentPanel {
         const e = ev as Record<string, unknown>;
         if (e.type !== 'text') flushText();
         switch (e.type) {
+          case 'card-writeback': {
+            const status = el('div', { class: 'notice', text: '요청하신 변경을 RisuAI에 저장하는 중입니다…' });
+            bubble.insertBefore(status, thinking);
+            // Keep consuming the stream while the plugin uploads/verifies.
+            // The backend tool awaits the recorded result, not this UI callback.
+            void state.requestedCardWriteback(String(e.id || ''), String(e.charKey || ''), String(e.chatKey || ''))
+              .then(detail => { status.className = 'notice ok'; status.textContent = detail; })
+              .catch(error => { status.className = 'notice err'; status.textContent = String(error); });
+            break;
+          }
           case 'context': {
             if (!contextNotice) {
               contextNotice = el('div', { class: 'hint context-notice' });

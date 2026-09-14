@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.15.10
+//@display-name Risu Hina v0.15.11
 //@api 3.0
-//@version 0.15.10
+//@version 0.15.11
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -104,7 +104,7 @@
       this.tokenSafe = true;
       this.lastHealth = body;
       this.probeInfo = "";
-      this.gate = versionGate("0.15.10", String(body.version || ""));
+      this.gate = versionGate("0.15.11", String(body.version || ""));
       return body;
     }
     /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -1085,6 +1085,9 @@
     async group(folder, pattern = "", groupBy = "emotion") {
       return await transport.post("/studio/group", { folder, pattern, groupBy });
     }
+    async groupProfile(folder) {
+      return await transport.post("/studio/group", { folder, operation: "profile" });
+    }
     async saveSelection(folder, selections) {
       await transport.post("/studio/selection", { folder, selections });
     }
@@ -1868,7 +1871,16 @@
       if (prefix) q.push("prefix=" + encodeURIComponent(prefix));
       if (hidden) q.push("hidden=1");
       if (bot) q.push("bot=" + encodeURIComponent(bot));
-      const r = await transport.get("/files" + (q.length ? "?" + q.join("&") : ""));
+      let r = null;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          r = await transport.get("/files" + (q.length ? "?" + q.join("&") : ""));
+          break;
+        } catch (error) {
+          if (!(error instanceof BackendError) || ![0, 502, 503, 504].includes(error.status) || attempt === 2) throw error;
+          await new Promise((resolve) => setTimeout(resolve, 300 * (attempt + 1)));
+        }
+      }
       if (!r || !Array.isArray(r.areas)) {
         throw new Error("\uD30C\uC77C \uBAA9\uB85D\uC744 \uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4 (\uBC31\uC5D4\uB4DC\uAC00 \uC7AC\uC2DC\uC791 \uC911\uC774\uAC70\uB098 \uC751\uB2F5\uC774 \uBE44\uC5B4 \uC788\uC74C) \u2014 \uC7A0\uC2DC \uB4A4 \uC0C8\uB85C\uACE0\uCE68\uD558\uC138\uC694.");
       }
@@ -2139,6 +2151,7 @@
           detail = `\u201C${name}\u201D \uC73C\uB85C \uBCF5\uC0AC\uBCF8\uC744 \uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4.`;
         } else if (r.host.kind === "host_card_writeback") {
           const out = await this.cardWriteBack();
+          if (!out.verified) throw new Error(out.drift || "RisuAI \uC800\uC7A5 \uACB0\uACFC\uB97C \uD655\uC778\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4. \uBBF8\uBC18\uC601 \uBCC0\uACBD\uC744 \uBCF4\uC874\uD588\uC2B5\uB2C8\uB2E4.");
           detail = out.mode === "noop" ? "\uCE74\uB4DC\uC5D0 \uBC18\uC601\uD560 \uBCC0\uACBD\uC774 \uC5C6\uC5C8\uC2B5\uB2C8\uB2E4." : `\uCE74\uB4DC \uBCC0\uACBD ${out.applied}\uAC74\uC744 RisuAI\uC5D0 \uBC18\uC601\uD588\uC2B5\uB2C8\uB2E4.`;
         } else if (r.host.kind === "host_clone_bot") {
           const name = String(r.host.args?.name || "") || "\uBCF5\uC81C \uBD07";
@@ -2156,12 +2169,12 @@
         } else {
           throw new Error("\uD50C\uB7EC\uADF8\uC778\uC774 \uBAA8\uB974\uB294 \uC791\uC5C5\uC785\uB2C8\uB2E4: " + r.host.kind);
         }
-        await transport.post("/actions/complete", { chatKey: this.activeChatKey, id, ok: true, detail });
+        await transport.post("/actions/complete", { chatKey: chatKey || this.activeChatKey, id, ok: true, detail });
         return detail;
       } catch (e) {
         const why = e instanceof Error ? e.message : String(e);
         await transport.post("/actions/complete", {
-          chatKey: this.activeChatKey,
+          chatKey: chatKey || this.activeChatKey,
           id,
           ok: false,
           detail: why
@@ -2170,6 +2183,22 @@
       }
     }
     // --- lorebook -------------------------------------------------------------
+    /** The agent's save tool runs only for an explicit user writeback request. */
+    async requestedCardWriteback(id, charKey, chatKey) {
+      if (!id || !charKey) throw new Error("\uC798\uBABB\uB41C \uBD07 \uC800\uC7A5 \uC694\uCCAD\uC785\uB2C8\uB2E4.");
+      if (this.botKey !== charKey) {
+        const detail = "\uC694\uCCAD\uD55C \uBD07\uACFC \uD604\uC7AC \uBD07\uC774 \uB2EC\uB77C \uC800\uC7A5\uD558\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4.";
+        await transport.post("/actions/complete", { chatKey, id, ok: false, detail });
+        throw new Error(detail);
+      }
+      try {
+        return await this.decideAction(id, true, chatKey);
+      } catch (error) {
+        await transport.post("/actions/complete", { chatKey, id, ok: false, detail: String(error) }).catch(() => {
+        });
+        throw error;
+      }
+    }
     async lore(scope) {
       const q = "/lore?charKey=" + encodeURIComponent(this.activeCharKey) + (scope ? "&scope=" + scope : "");
       const r = await transport.get(q);
@@ -3768,6 +3797,15 @@
     setTimeout(sync, 0);
     return bar3;
   }
+  function showMobileCentre() {
+    if (mobileView === "centre") return;
+    mobileView = "centre";
+    try {
+      localStorage.setItem(VIEW_KEY, mobileView);
+    } catch {
+    }
+    syncAll();
+  }
 
   // src/ui/write-progress.ts
   var overlay = null;
@@ -4491,6 +4529,8 @@ button.iconbtn.danger { background: #b91c1c; border-color: #b91c1c; color: #fff;
   margin-bottom: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
 }
 .selhead, .seltools { flex-wrap: wrap; }
+.review-nav { position: sticky; top: 0; z-index: 5; padding: 6px 0; margin-bottom: 8px; background: var(--bgcolor, #141923); flex-wrap: wrap; }
+.review-nav .review-back { min-height: 40px; font-weight: 700; flex-shrink: 0; }
 .seltools .spacer { flex: 1 1 0; }
 .selhead .badge.warn { cursor: pointer; }
 .extrahead { padding: 10px 8px 4px; }
@@ -5128,6 +5168,9 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
 .mtoggle { display: none; }
 @media (max-width: 760px) {
   .split { flex-direction: column; position: relative; }
+  .toolslot .searchbox { display: none !important; }
+  .toolslot .tabslot:has(> .searchbox:only-child) { display: none !important; }
+  .toolslot .toolrow .spacer { display: none; }
 
   /* One view at a time (panes.ts): the agent, or the explorer + editor.
      Drags set flex-basis inline, so the shown side must win with !important. */
@@ -5135,6 +5178,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
   .split.m-agent > .explorer, .split.m-agent > .left { display: none; }
   .split.m-centre > .right { display: none; }
   .split.m-agent > .right { flex: 1 1 auto !important; min-height: 0; }
+  .split.m-agent.rcollapse > .right { display: flex !important; }
   /* The agent pane must never be wider than the phone (\xA71-54: "\uC624\uB978\uCABD\uC774 \uD654\uBA74
      \uBC16\uC73C\uB85C \uB098\uAC04\uB2E4, \uCD95\uC18C\uD574\uB3C4 \uC548 \uC904\uC5B4\uB4E6"): a code block, a long path, a tool
      card or a wide table used to push the pane past the viewport, and the
@@ -6949,6 +6993,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       n.count == null ? null : el("span", { class: "n", text: String(n.count) })
     ]);
     branch.addEventListener("click", (e) => spec3.onOpen(n, e));
+    if (n.draggable && spec3.dragPaths) installDrag(branch, () => spec3.dragPaths(n));
     if (spec3.onContext) {
       branch.addEventListener("contextmenu", (e) => {
         e.preventDefault();
@@ -7017,8 +7062,14 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         return;
       }
       if (!spec3.onFiles) return;
-      const files = await collectDrop(dt);
-      if (files.length) spec3.onFiles(spec3.into(), files);
+      const into = spec3.into();
+      try {
+        const files = await collectDrop(dt);
+        if (files.length) spec3.onFiles(into, files);
+      } catch (error) {
+        if (spec3.onError) spec3.onError(error);
+        else target.dispatchEvent(new CustomEvent("file-drop-error", { bubbles: true, detail: error }));
+      }
     });
   }
   function installDrag(target, paths) {
@@ -7032,12 +7083,17 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
   }
   async function collectDrop(dt) {
     const out = [];
+    const direct = Array.from(dt.files ?? []);
     const items5 = Array.from(dt.items ?? []);
-    const entries = items5.map((it) => it.webkitGetAsEntry?.() ?? null).filter((x) => !!x);
-    if (!entries.length) {
-      for (const file of Array.from(dt.files)) out.push({ file, rel: "" });
-      return out;
-    }
+    const captured = items5.filter((it) => it.kind === "file").map((it) => {
+      let entry = null;
+      try {
+        entry = it.webkitGetAsEntry?.() ?? null;
+      } catch {
+      }
+      return { entry, file: it.getAsFile() };
+    });
+    if (!captured.length) return direct.map((file) => ({ file, rel: "" }));
     const walk2 = async (entry, rel) => {
       if (entry.isFile) {
         const file = await new Promise((res, rej) => entry.file(res, rej));
@@ -7052,7 +7108,11 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         }
       }
     };
-    for (const entry of entries) await walk2(entry, "");
+    for (const { entry, file } of captured) {
+      if (entry?.isDirectory) await walk2(entry, "");
+      else if (file) out.push({ file, rel: "" });
+      else if (entry) await walk2(entry, "");
+    }
     return out;
   }
   var guardInstalled = false;
@@ -7765,6 +7825,18 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           const e = ev;
           if (e.type !== "text") flushText();
           switch (e.type) {
+            case "card-writeback": {
+              const status = el("div", { class: "notice", text: "\uC694\uCCAD\uD558\uC2E0 \uBCC0\uACBD\uC744 RisuAI\uC5D0 \uC800\uC7A5\uD558\uB294 \uC911\uC785\uB2C8\uB2E4\u2026" });
+              bubble.insertBefore(status, thinking);
+              void state.requestedCardWriteback(String(e.id || ""), String(e.charKey || ""), String(e.chatKey || "")).then((detail) => {
+                status.className = "notice ok";
+                status.textContent = detail;
+              }).catch((error) => {
+                status.className = "notice err";
+                status.textContent = String(error);
+              });
+              break;
+            }
             case "context": {
               if (!contextNotice) {
                 contextNotice = el("div", { class: "hint context-notice" });
@@ -9301,7 +9373,10 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       installDrop(pane.left, { into: () => uploadTarget(), onFiles: (path, files) => void uploadMany(files, path), onMove: (path, sources) => void moveSelected(sources, path) });
       viewMount = el("div", { class: "pad filepad" });
       pane.centre.appendChild(viewMount);
-      installDrop(viewMount, { into: () => uploadTarget(), onFiles: (path, files) => void uploadMany(files, path) });
+      installDrop(pane.centre, { into: () => uploadTarget(), onFiles: (path, files) => void uploadMany(files, path), onMove: (path, sources) => void moveSelected(sources, path) });
+      for (const target of [pane.left, pane.centre]) target.addEventListener("file-drop-error", (ev) => {
+        notice2("\uB4DC\uB86D\uD55C \uD30C\uC77C\uC744 \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg5(ev.detail) + " \xB7 \uD30C\uC77C \uC62C\uB9AC\uAE30 \uBC84\uD2BC\uC73C\uB85C \uB2E4\uC2DC \uC120\uD0DD\uD574 \uC8FC\uC138\uC694.", "err");
+      });
     },
     async refresh() {
       await refresh();
@@ -9310,10 +9385,23 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
   function renderFilesTab(mount) {
     kitRender(mount);
   }
-  async function refresh() {
+  var pendingRefreshes = /* @__PURE__ */ new Map();
+  function refreshKey() {
+    return JSON.stringify([state.filesRev, showInternal, onlyMine, state.activeCharKey, state.openFileRequest]);
+  }
+  function refresh() {
+    const key = refreshKey();
+    const pending2 = pendingRefreshes.get(key);
+    if (pending2) return pending2;
+    const request = refreshOnce(key).finally(() => pendingRefreshes.delete(key));
+    pendingRefreshes.set(key, request);
+    return request;
+  }
+  async function refreshOnce(key) {
     if (!treeMount) return;
     try {
       const data = await state.files("", showInternal, state.activeCharKey);
+      if (key !== refreshKey()) return;
       lastListing = data;
       buildNodes(data);
       if (!nodes.has(selectedDir)) selectedDir = nodes.has("projects") ? "projects" : nodes.keys().next().value ?? "";
@@ -9334,12 +9422,29 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       drawTree();
       drawCentre();
     } catch (e) {
-      clear(treeMount);
-      treeMount.appendChild(el("div", { class: "notice err", text: msg5(e) }));
+      if (key !== refreshKey()) return;
+      if (!lastListing) {
+        clear(treeMount);
+        treeMount.appendChild(el("div", { class: "notice err", text: msg5(e) }));
+      } else notice2("\uBAA9\uB85D \uAC31\uC2E0 \uC2E4\uD328 \u2014 \uB9C8\uC9C0\uB9C9\uC73C\uB85C \uBC1B\uC740 \uBAA9\uB85D\uC785\uB2C8\uB2E4: " + msg5(e), "err");
       void clientLog("error", "files tab refresh failed", {
         error: msg5(e),
         stack: e instanceof Error ? String(e.stack).slice(0, 1500) : ""
       });
+    }
+  }
+  var fileOperations = 0;
+  async function fileOperation(text2, run) {
+    fileOperations += 1;
+    notice2(text2);
+    treeMount?.setAttribute("aria-busy", "true");
+    viewMount?.setAttribute("aria-busy", "true");
+    try {
+      return await run();
+    } finally {
+      fileOperations -= 1;
+      treeMount?.setAttribute("aria-busy", String(fileOperations > 0));
+      viewMount?.setAttribute("aria-busy", String(fileOperations > 0));
     }
   }
   function buildNodes(data) {
@@ -9577,7 +9682,8 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       cls: fileClipboard?.paths.includes(n.path) ? fileClipboard.op === "cut" ? "clipcut" : "clipcopy" : void 0,
       dot: !n.virtual && state.hasUnseenUnder(n.path),
       // A folder in the tree is a drop target of its own.
-      droppable: !n.virtual && USER_AREAS.has(n.area.area)
+      droppable: !n.virtual && USER_AREAS.has(n.area.area),
+      draggable: !n.virtual && n.path.includes("/") && USER_AREAS.has(n.area.area)
     };
   }
   function selectTreeFolder(path) {
@@ -9596,6 +9702,11 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     return {
       expanded,
       selected: treeSel.size ? treeSel : /* @__PURE__ */ new Set([selectedDir]),
+      dragPaths(node) {
+        const paths = treeSel.has(node.path) ? [...treeSel] : [node.path];
+        const movable = paths.filter((p) => p.includes("/") && !nodes.get(p)?.virtual && USER_AREAS.has(p.split("/")[0]));
+        return movable.filter((p) => !movable.some((parent) => parent !== p && p.startsWith(parent + "/")));
+      },
       onOpen(node, ev) {
         if (ev.ctrlKey || ev.metaKey) {
           if (!treeSel.size) treeSel.add(selectedDir);
@@ -10141,7 +10252,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
   }
   async function treeDelete(paths) {
     try {
-      const r = await state.deleteFiles(paths);
+      const r = await fileOperation(`${paths.length}\uAC1C \uC0AD\uC81C \uC911\u2026`, () => state.deleteFiles(paths));
       notice2(r.failed.length ? `${r.done}\uAC1C\uB97C \uC9C0\uC6E0\uC2B5\uB2C8\uB2E4. ${r.failed.length}\uAC1C \uC2E4\uD328 \u2014 ${r.failed[0].error}` : `${r.done}\uAC1C\uB97C \uC9C0\uC6E0\uC2B5\uB2C8\uB2E4.`, r.failed.length ? "err" : "ok");
     } catch (e) {
       notice2("\uC9C0\uC6B0\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg5(e), "err");
@@ -10190,7 +10301,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         if (!nm || nm === e.name) return;
         const dir = e.path.includes("/") ? e.path.slice(0, e.path.lastIndexOf("/")) : "";
         try {
-          const r = await state.moveFile(e.path, (dir ? dir + "/" : "") + nm);
+          const r = await fileOperation("\uC774\uB984 \uBCC0\uACBD \uC911\u2026", () => state.moveFile(e.path, (dir ? dir + "/" : "") + nm));
           if (previewPath === e.path) previewPath = r.to;
           selection = /* @__PURE__ */ new Set([r.to]);
           notice2("\uC774\uB984\uC744 \uBC14\uAFE8\uC2B5\uB2C8\uB2E4.", "ok");
@@ -10214,23 +10325,22 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     const list2 = clip.paths.filter((p) => p !== target && !target.startsWith(p + "/"));
     if (!list2.length) return;
     try {
-      const r = await pasteFiles(target);
+      const r = await fileOperation(`${list2.length}\uAC1C ${clip.op === "copy" ? "\uBCF5\uC0AC" : "\uC774\uB3D9"} \uC911\u2026`, () => pasteFiles(target));
       if (!r) return;
       notice2(batchText(r, target, clip.op === "copy" ? "\uBCF5\uC0AC" : "\uC774\uB3D9"), r.failed.length ? "err" : "ok");
     } catch (e) {
-      notice2("\uCC98\uB9AC\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg5(e), "err");
+      notice2("\uCC98\uB9AC \uACB0\uACFC\uB97C \uD655\uC778\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg5(e) + " \xB7 \uD604\uC7AC \uBAA9\uB85D\uC744 \uB2E4\uC2DC \uD655\uC778\uD569\uB2C8\uB2E4.", "err");
     }
     if (clip.op === "cut") {
       selection.clear();
     }
-    state.touchFiles();
     await refresh();
   }
   async function moveSelected(sources, target) {
     const list2 = sources.filter((p) => p !== target && !target.startsWith(p + "/"));
     if (!list2.length) return;
     try {
-      const r = await state.moveFiles(list2, target);
+      const r = await fileOperation(`${list2.length}\uAC1C \uC774\uB3D9 \uC911\u2026`, () => state.moveFiles(list2, target));
       notice2(batchText(r, target, "\uC774\uB3D9"), r.failed.length ? "err" : "ok");
     } catch (e) {
       notice2("\uC62E\uAE30\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg5(e), "err");
@@ -10440,7 +10550,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     const paths = [...selection];
     if (!paths.length) return;
     try {
-      const r = await state.deleteFiles(paths);
+      const r = await fileOperation(`${paths.length}\uAC1C \uC0AD\uC81C \uC911\u2026`, () => state.deleteFiles(paths));
       if (paths.includes(previewPath)) previewPath = "";
       notice2(r.failed.length ? `${r.done}\uAC1C\uB97C \uC9C0\uC6E0\uC2B5\uB2C8\uB2E4. ${r.failed.length}\uAC1C \uC2E4\uD328 \u2014 ${r.failed[0].error}` : `${r.done}\uAC1C\uB97C \uC9C0\uC6E0\uC2B5\uB2C8\uB2E4.`, r.failed.length ? "err" : "ok");
     } catch (e) {
@@ -10463,7 +10573,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       b.addEventListener("click", async () => {
         close();
         try {
-          const r = await state.moveFiles(paths, target);
+          const r = await fileOperation(`${paths.length}\uAC1C \uC774\uB3D9 \uC911\u2026`, () => state.moveFiles(paths, target));
           notice2(batchText(r, target, "\uC774\uB3D9"), r.failed.length ? "err" : "ok");
         } catch (e) {
           notice2("\uC62E\uAE30\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg5(e), "err");
@@ -13202,10 +13312,10 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           return;
         }
         if (!r.newer) {
-          const mismatch = r.current !== "0.15.10";
+          const mismatch = r.current !== "0.15.11";
           const ahead = r.ahead ?? (!!r.latest && r.latest !== r.current);
           say(
-            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.10"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
+            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.11"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
             mismatch || ahead ? "" : "ok"
           );
           return;
@@ -13296,7 +13406,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.15.10",
+            version: "0.15.11",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -13947,7 +14057,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.10"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.11"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -15470,6 +15580,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     }
   };
   var GEN_KEY = "hina.studioGen";
+  var temporaryPrompt = { text: "", expanded: false, negativeText: "", negativeExpanded: false };
   var gen = {
     model: "nai-diffusion-4-5-full",
     scenePreset: "",
@@ -15536,6 +15647,8 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       fields: gen.assetCharacter ? { character: gen.assetCharacter } : {}
     };
     if (gen.seed.trim()) out.seed = Number(gen.seed.trim());
+    if (temporaryPrompt.text.trim()) out.extra = temporaryPrompt.text.trim();
+    if (temporaryPrompt.negativeText.trim()) out.negativeExtra = temporaryPrompt.negativeText.trim();
     return out;
   }
   var RESERVE_KEY = "hina.studioReserve";
@@ -16691,12 +16804,7 @@ ${doc.negative.trim()}
     const name = el("input", { placeholder: "(\uD30C\uC77C \uC774\uB984)" });
     const desc = el("input", { placeholder: "\uD55C \uC904 \uC124\uBA85" });
     const enabledBox = el("input", { type: "checkbox" });
-    const order = el("input", {
-      type: "number",
-      value: "100",
-      step: "10",
-      title: "\uC791\uC744\uC218\uB85D \uC55E\uC5D0 \uC774\uC5B4\uC9D1\uB2C8\uB2E4"
-    });
+    let originalOrder = "";
     const body = el("textarea", {
       rows: "18",
       class: "promptedit",
@@ -16724,7 +16832,7 @@ ${doc.negative.trim()}
         if (desc.value.trim()) meta.set("description", desc.value.trim());
         if (isStyle) {
           meta.set("enabled", enabledBox.checked ? "true" : "false");
-          if (order.value.trim() && order.value.trim() !== "100") meta.set("order", String(Math.trunc(Number(order.value)) || 100));
+          if (originalOrder) meta.set("order", originalOrder);
         }
         const dir = path.slice(0, path.lastIndexOf("/"));
         const fname = path.slice(path.lastIndexOf("/") + 1);
@@ -16755,8 +16863,7 @@ ${doc.negative.trim()}
       el("label", { class: "field" }, [el("span", { text: "\uC774\uB984" }), name]),
       el("label", { class: "field" }, [el("span", { text: "\uC124\uBA85" }), desc]),
       isStyle ? el("div", { class: "row", style: { marginBottom: "8px" } }, [
-        el("label", { class: "row" }, [enabledBox, el("span", { text: "\uD65C\uC131 (\uC0DD\uC131\uC5D0 \uC2E4\uB9BC)" })]),
-        el("label", { class: "field", style: { width: "130px", marginBottom: "0" } }, [el("span", { text: "\uC21C\uC11C" }), order])
+        el("label", { class: "row" }, [enabledBox, el("span", { text: "\uD65C\uC131 (\uC0DD\uC131\uC5D0 \uC2E4\uB9BC)" })])
       ]) : null,
       el("label", { class: "field" }, [el("span", { text: isStyle ? "\uBCF8\uBB38 (## positive / ## negative)" : "\uBCF8\uBB38" }), body]),
       out
@@ -16766,7 +16873,7 @@ ${doc.negative.trim()}
       name.value = meta.get("name") ?? "";
       desc.value = meta.get("description") ?? "";
       enabledBox.checked = (meta.get("enabled") ?? "").toLowerCase() === "true";
-      order.value = meta.get("order") ?? "100";
+      originalOrder = meta.get("order") ?? "";
       body.value = b;
     }).catch((e) => {
       out.textContent = msg18(e);
@@ -17022,7 +17129,7 @@ ${doc.negative.trim()}
       attachHilite(negative, { mode: "nai", fragments: fragNames2 });
     }, 0);
     const enabledBox = el("input", { type: "checkbox" });
-    const order = el("input", { type: "number", value: "100", step: "10" });
+    let originalOrder = "";
     const posX = el("input", { type: "number", step: "0.1", placeholder: "x 0~1" });
     const posY = el("input", { type: "number", step: "0.1", placeholder: "y 0~1" });
     let vibes = [];
@@ -17274,7 +17381,7 @@ ${doc.negative.trim()}
         for (const v of vibes) if (v.bad) await repng(v);
         const meta = /* @__PURE__ */ new Map([["name", nm]]);
         meta.set("enabled", enabledBox.checked ? "true" : "false");
-        if (order.value.trim() && order.value.trim() !== "100") meta.set("order", String(Math.trunc(Number(order.value)) || 100));
+        if (originalOrder) meta.set("order", originalOrder);
         let body = `## \uD504\uB86C\uD504\uD2B8
 ${caption.value.trim()}
 `;
@@ -17333,8 +17440,7 @@ ${negative.value.trim()}
     const promptPane = el("div", {}, [
       field2("\uC774\uB984", name),
       el("div", { class: "row", style: { marginBottom: "8px" } }, [
-        el("label", { class: "row" }, [enabledBox, el("span", { text: "\uD65C\uC131 (\uC0DD\uC131\uC5D0 \uC2E4\uB9BC)" })]),
-        el("label", { class: "field", style: { width: "110px", marginBottom: "0" } }, [el("span", { text: "\uC21C\uC11C" }), order])
+        el("label", { class: "row" }, [enabledBox, el("span", { text: "\uD65C\uC131 (\uC0DD\uC131\uC5D0 \uC2E4\uB9BC)" })])
       ]),
       field2("\uD504\uB86C\uD504\uD2B8", caption),
       field2("\uB124\uAC70\uD2F0\uBE0C", negative),
@@ -17425,7 +17531,7 @@ ${negative.value.trim()}
         const { meta, body } = splitFront(r.content);
         name.value = meta.get("name") ?? dir.split("/").pop() ?? "";
         enabledBox.checked = (meta.get("enabled") ?? "").toLowerCase() === "true";
-        order.value = meta.get("order") ?? "100";
+        originalOrder = meta.get("order") ?? "";
         const secs = body.split(/^##+\s*(프롬프트|네거티브|positive|negative)\s*$/im);
         if (secs.length === 1) {
           caption.value = body.trim();
@@ -17525,6 +17631,8 @@ ${negative.value.trim()}
       }
     });
     mount.appendChild(fold2);
+    buildTemporaryPrompt(mount);
+    buildTemporaryPrompt(mount, true);
     const nChars = activeOf("characters").length;
     charBadge = el("span", { class: "badge" + (nChars ? " ok" : ""), text: String(nChars) });
     const charBtn = el(
@@ -17561,6 +17669,53 @@ ${negative.value.trim()}
     );
     paramsBtn.addEventListener("click", () => openParamsDialog());
     mount.appendChild(el("div", { class: "toolbtns" }, [charBtn, fragBtn, paramsBtn]));
+  }
+  function buildTemporaryPrompt(mount, negative = false) {
+    const label2 = negative ? "\uC784\uC2DC \uB124\uAC70\uD2F0\uBE0C \uD504\uB86C\uD504\uD2B8" : "\uC784\uC2DC \uD504\uB86C\uD504\uD2B8";
+    const textKey = negative ? "negativeText" : "text";
+    const expandedKey = negative ? "negativeExpanded" : "expanded";
+    const toggle = el("button", { class: "ghost tiny", title: label2 + " \uD3BC\uCE58\uAE30" });
+    const status = el("span", { class: "hint" });
+    const input2 = el("textarea", {
+      rows: "4",
+      class: "promptedit",
+      placeholder: negative ? "\uC774\uBC88 \uC791\uC5C5\uC5D0\uC11C \uC81C\uC678\uD560 \uD0DC\uADF8" : "\uC774\uBC88 \uC791\uC5C5\uC5D0 \uCD94\uAC00\uD560 \uD0DC\uADF8",
+      "aria-label": label2 + " (\uC800\uC7A5\uB418\uC9C0 \uC54A\uC74C)"
+    });
+    input2.value = temporaryPrompt[textKey];
+    const reset = el("button", { class: "ghost tiny", text: "\uBE44\uC6B0\uAE30" });
+    const body = el("div", {}, [
+      input2,
+      el("div", { class: "row" }, [el("span", { class: "hint grow", text: "\uC800\uC7A5\uB418\uC9C0 \uC54A\uC74C \xB7 \uC0C8\uB85C\uACE0\uCE68\uD558\uBA74 \uCD08\uAE30\uD654\uB429\uB2C8\uB2E4" }), reset])
+    ]);
+    const sync = () => {
+      toggle.textContent = temporaryPrompt[expandedKey] ? "\u2212" : "+";
+      toggle.setAttribute("aria-expanded", String(temporaryPrompt[expandedKey]));
+      toggle.title = label2 + (temporaryPrompt[expandedKey] ? " \uC811\uAE30" : " \uD3BC\uCE58\uAE30");
+      body.style.display = temporaryPrompt[expandedKey] ? "" : "none";
+      status.textContent = temporaryPrompt[textKey].trim() ? "\uC0DD\uC131\uC5D0 \uC801\uC6A9 \uC911 \xB7 \uC800\uC7A5\uB418\uC9C0 \uC54A\uC74C" : "\uC800\uC7A5\uB418\uC9C0 \uC54A\uC74C";
+    };
+    toggle.addEventListener("click", () => {
+      temporaryPrompt[expandedKey] = !temporaryPrompt[expandedKey];
+      sync();
+    });
+    input2.addEventListener("input", () => {
+      temporaryPrompt[textKey] = input2.value;
+      sync();
+      checkUnresolved();
+    });
+    reset.addEventListener("click", () => {
+      temporaryPrompt[textKey] = "";
+      input2.value = "";
+      sync();
+      checkUnresolved();
+    });
+    mount.appendChild(el("div", { class: "styleedit" }, [
+      el("div", { class: "row" }, [toggle, el("span", { text: label2 }), status]),
+      body
+    ]));
+    attachHilite(input2, { mode: "nai", fragments: () => fragKeys() });
+    sync();
   }
   function syncPromptBadges() {
     if (charBadge?.isConnected) {
@@ -19209,7 +19364,7 @@ ${negative.value.trim()}
   var viewMode2 = "group";
   var cellSyncs = /* @__PURE__ */ new Map();
   var missingSync = null;
-  var saveTimer2 = null;
+  var saveQueue = Promise.resolve();
   var patternTimer = null;
   var DEF = { mode: "default", delimiter: "-", tokens: [2], pattern: "", groupBy: "emotion" };
   var PREFS_KEY = "hina.studioGroupBy";
@@ -19374,6 +19529,8 @@ ${negative.value.trim()}
   function groupSig(g) {
     if (!g) return "";
     return [
+      g.pattern,
+      g.groupBy,
       ...g.groups.flatMap((x) => x.items.map((i) => `${x.key}:${i.filename}:${i.modified ?? 0}`)),
       ...g.unmatched.map((i) => `?:${i.filename}:${i.modified ?? 0}`)
     ].sort().join("|");
@@ -19382,6 +19539,7 @@ ${negative.value.trim()}
     if (!groups || !S.selected || groups.folder !== S.selected) return;
     const folder = groups.folder;
     try {
+      await syncProfile(folder);
       const eff = effective(prefsFor(folder));
       const fresh = await state.studio.group(folder, eff.pattern, eff.groupBy);
       if (!groups || groups.folder !== folder) return;
@@ -19397,8 +19555,16 @@ ${negative.value.trim()}
     } catch {
     }
   }
-  async function loadGroups(folder) {
+  async function syncProfile(folder) {
+    const profile = await state.studio.groupProfile(folder);
+    const local = effective(prefsFor(folder));
+    if (profile.exists && (local.pattern !== profile.pattern || local.groupBy !== profile.groupBy)) {
+      setPrefs(folder, { mode: profile.pattern ? "regex" : "default", pattern: profile.pattern, groupBy: profile.groupBy });
+    }
+  }
+  async function loadGroups(folder, editedRule = false) {
     try {
+      if (!editedRule) await syncProfile(folder);
       const eff = effective(prefsFor(folder));
       groupsRev = state.filesRev;
       groups = await state.studio.group(folder, eff.pattern, eff.groupBy);
@@ -19413,21 +19579,22 @@ ${negative.value.trim()}
     hub.drawCentre();
   }
   function queueSave() {
-    if (saveTimer2) clearTimeout(saveTimer2);
-    saveTimer2 = setTimeout(() => {
-      void state.studio.saveSelection(S.selected, selection2).catch(() => {
-      });
-    }, 500);
+    const folder = groups?.folder;
+    const snapshot = structuredClone(selection2);
+    if (folder) saveQueue = saveQueue.then(() => state.studio.saveSelection(folder, snapshot)).catch((e) => {
+      hub.notice("\uAC80\uC218 \uC0C1\uD0DC \uC800\uC7A5 \uC2E4\uD328: " + msg18(e), "err");
+    });
   }
   var SUG_LABEL = { use: "\uCC44\uD0DD", delete: "\uBC84\uB9BC", inpaint: "\uC218\uC815" };
   function flag(filename, key) {
     const cur = selection2[filename] || { use: false, inpaint: false, delete: false };
     const next = { ...cur, [key]: !cur[key] };
-    if (key === "use" && next.use) next.delete = false;
-    if (key === "delete" && next.delete) {
-      next.use = false;
-      next.rep = false;
+    if (next[key] && (key === "use" || key === "inpaint" || key === "delete")) {
+      next.use = key === "use";
+      next.inpaint = key === "inpaint";
+      next.delete = key === "delete";
     }
+    if (!next.use) next.rep = false;
     if (next.suggest && next.suggest.verdict === key && next[key]) delete next.suggest;
     selection2[filename] = next;
     cellSyncs.get(filename)?.();
@@ -19440,14 +19607,10 @@ ${negative.value.trim()}
     if (!cur || !g) return;
     const next = { ...cur };
     delete next.suggest;
-    if (g.verdict === "use") {
-      next.use = true;
-      next.delete = false;
-    } else if (g.verdict === "delete") {
-      next.delete = true;
-      next.use = false;
-      next.rep = false;
-    } else if (g.verdict === "inpaint") next.inpaint = true;
+    next.use = g.verdict === "use";
+    next.delete = g.verdict === "delete";
+    next.inpaint = g.verdict === "inpaint";
+    if (!next.use) next.rep = false;
     selection2[filename] = next;
     cellSyncs.get(filename)?.();
     missingSync?.();
@@ -19596,13 +19759,13 @@ ${negative.value.trim()}
     if (drill) {
       const grp = g.groups.find((x) => x.key === drill);
       const at = g.groups.findIndex((x) => x.key === drill);
-      const nav = el("div", { class: "row", style: { marginBottom: "8px" } });
+      const nav = el("div", { class: "row review-nav" });
       const go = (to) => {
         drill = g.groups[to]?.key ?? drill;
         hub.drawCentre();
       };
       const prev = el("button", { class: "ghost tiny", text: "\u2190 \uC774\uC804" });
-      const up = el("button", { class: "ghost tiny", text: "\u2190 \uADF8\uB8F9", title: "\uADF8\uB8F9 \uCE74\uB4DC\uB85C \uB3CC\uC544\uAC11\uB2C8\uB2E4" });
+      const up = el("button", { class: "primary review-back", text: "\u2190 \uC804\uCCB4 \uADF8\uB8F9", title: "\uC804\uCCB4 \uADF8\uB8F9 \uBAA9\uB85D\uC73C\uB85C \uB3CC\uC544\uAC11\uB2C8\uB2E4" });
       const next = el("button", { class: "ghost tiny", text: "\uB2E4\uC74C \u2192" });
       prev.disabled = at <= 0;
       next.disabled = at < 0 || at >= g.groups.length - 1;
@@ -19614,7 +19777,7 @@ ${negative.value.trim()}
         hub.drawCentre();
       });
       nav.append(up, prev, next, el("span", { class: "sectiontitle", text: `${grp?.label || drill} \xB7 ${grp?.items.length ?? 0}\uC7A5` }));
-      viewMount6.appendChild(nav);
+      viewMount6.prepend(nav);
       viewMount6.appendChild(candidateGrid(grp?.items ?? [], grp?.items));
     } else if (viewMode2 === "group") {
       const grid = el("div", { class: "agrid selgrid", style: { gridTemplateColumns: gridCols() } });
@@ -19789,7 +19952,7 @@ ${negative.value.trim()}
     };
     const reload = () => {
       drill = "";
-      void loadGroups(node.path).then(() => {
+      void loadGroups(node.path, true).then(() => {
         syncResult();
         syncModeRow();
       });
@@ -19970,6 +20133,7 @@ ${negative.value.trim()}
       b.disabled = true;
       try {
         const eff = effective(prefsFor(node.path));
+        await saveQueue;
         await state.studio.saveSelection(node.path, selection2);
         const preview2 = await state.studio.exportSelected(node.path, "", eff.pattern, eff.groupBy, true);
         if (preview2.problems?.length) throw new Error(preview2.problems.join("\n"));
@@ -20371,6 +20535,7 @@ ${negative.value.trim()}
     applyPanels();
   }
   function renderStudioTab(mount) {
+    if (state.openStudioRequest) showMobileCentre();
     const entering = !wasStudioActive;
     wasStudioActive = true;
     ensureLayoutControls();
@@ -20433,7 +20598,7 @@ ${negative.value.trim()}
   var refreshPending = false;
   async function refresh2() {
     const ae = document.activeElement;
-    if (ae && splitRoot && splitRoot.contains(ae) && /^(TEXTAREA|INPUT|SELECT)$/.test(ae.tagName)) {
+    if (!state.openStudioRequest && ae && splitRoot && splitRoot.contains(ae) && /^(TEXTAREA|INPUT|SELECT)$/.test(ae.tagName)) {
       if (!refreshPending) {
         refreshPending = true;
         ae.addEventListener("blur", () => {
@@ -20910,7 +21075,7 @@ ${negative.value.trim()}
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.10"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.11"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
@@ -21006,7 +21171,7 @@ ${negative.value.trim()}
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.15.10" }),
+        el("span", { class: "dim", text: "v0.15.11" }),
         healthEl,
         el("span", { class: "spacer" }),
         reload,
@@ -21323,6 +21488,6 @@ ${negative.value.trim()}
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.15.10"} loaded`);
+    console.log(`[risu-hina] v${"0.15.11"} loaded`);
   })();
 })();

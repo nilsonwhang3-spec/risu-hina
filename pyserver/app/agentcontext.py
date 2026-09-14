@@ -80,6 +80,7 @@ async def compress(messages: list, budget: int, model, session_id: str = "", for
     """Compress against an estimated-token budget, never a character limit."""
     from .agent import _msg_chars, _msg_text, SUMMARY_REFUSED
     from .continuity import STATE_MARKER
+    from . import tooloutput
     before = sum(_msg_chars(m) for m in messages)
     before_tokens = sum(message_tokens(m) for m in messages)
     if not force and before_tokens <= budget:
@@ -97,7 +98,12 @@ async def compress(messages: list, budget: int, model, session_id: str = "", for
         for part in message.parts:
             if getattr(part, "part_kind", "") in ("tool-return", "retry-prompt"):
                 content = getattr(part, "content", None)
-                if isinstance(content, str) and estimate_tokens(content) > clip:
+                if (isinstance(content, str) and estimate_tokens(content) > clip
+                        and getattr(part, "tool_name", "") != "read_tool_result"):
+                    # Persist BEFORE replacing content, including the current turn.
+                    # recall_work does not contain in-flight tool results.
+                    if not content.startswith("[Full tool result:"):
+                        content = tooloutput.preview(session_id, content, min(1000, len(content)))
                     part = dataclasses.replace(part, content=clip_tokens(content, clip))
             parts.append(part)
         clipped.append(dataclasses.replace(message, parts=parts))
@@ -187,8 +193,18 @@ async def compress(messages: list, budget: int, model, session_id: str = "", for
 
 class AutoContext(AbstractCapability):
     async def before_model_request(self, ctx, request_context):
-        from . import session
+        from . import session, tooloutput
         from .agent import _int_cfg
+        for ix, message in enumerate(request_context.messages):
+            parts = []
+            for part in message.parts:
+                content = getattr(part, "content", None)
+                if (getattr(part, "part_kind", "") == "tool-return" and isinstance(content, str)
+                        and len(content) > 8000 and getattr(part, "tool_name", "") != "read_tool_result"
+                        and not content.startswith("[Full tool result:")):
+                    part = dataclasses.replace(part, content=tooloutput.preview(ctx.deps.session_id or "", content))
+                parts.append(part)
+            request_context.messages[ix] = dataclasses.replace(message, parts=parts)
         if ctx.deps.continuity_parts:
             last = request_context.messages[-1]
             if isinstance(last, ModelRequest):

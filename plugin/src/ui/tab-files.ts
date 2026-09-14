@@ -153,7 +153,10 @@ const kitRender = makeTab({
     installDrop(pane.left, { into: () => uploadTarget(), onFiles: (path, files) => void uploadMany(files, path), onMove: (path, sources) => void moveSelected(sources, path) });
     viewMount = el('div', { class: 'pad filepad' });
     pane.centre.appendChild(viewMount);
-    installDrop(viewMount, { into: () => uploadTarget(), onFiles: (path, files) => void uploadMany(files, path) });
+    installDrop(pane.centre, { into: () => uploadTarget(), onFiles: (path, files) => void uploadMany(files, path), onMove: (path, sources) => void moveSelected(sources, path) });
+    for (const target of [pane.left, pane.centre]) target.addEventListener('file-drop-error', (ev) => {
+      notice('드롭한 파일을 읽지 못했습니다: ' + msg((ev as CustomEvent).detail) + ' · 파일 올리기 버튼으로 다시 선택해 주세요.', 'err');
+    });
   },
   async refresh() {
     await refresh();
@@ -168,10 +171,27 @@ export function renderFilesTab(mount: HTMLElement): void {
   // question the bare badge left open.
 }
 
-async function refresh(): Promise<void> {
+const pendingRefreshes = new Map<string, Promise<void>>();
+function refreshKey(): string {
+  return JSON.stringify([state.filesRev, showInternal, onlyMine, state.activeCharKey, state.openFileRequest]);
+}
+
+function refresh(): Promise<void> {
+  const key = refreshKey();
+  const pending = pendingRefreshes.get(key);
+  if (pending) return pending;
+  // touchFiles() triggers the tab subscription, while callers also await
+  // refresh(). Share that request rather than scanning/transferring twice.
+  const request = refreshOnce(key).finally(() => pendingRefreshes.delete(key));
+  pendingRefreshes.set(key, request);
+  return request;
+}
+
+async function refreshOnce(key: string): Promise<void> {
   if (!treeMount) return;
   try {
     const data = await state.files('', showInternal, state.activeCharKey);
+    if (key !== refreshKey()) return; // a pre-operation response must not restore old files
     lastListing = data;
     buildNodes(data);
     if (!nodes.has(selectedDir)) selectedDir = nodes.has('projects') ? 'projects' : (nodes.keys().next().value ?? '');
@@ -192,13 +212,31 @@ async function refresh(): Promise<void> {
     drawTree();
     drawCentre();
   } catch (e) {
-    clear(treeMount);
-    treeMount.appendChild(el('div', { class: 'notice err', text: msg(e) }));
+    if (key !== refreshKey()) return;
+    if (!lastListing) {
+      clear(treeMount);
+      treeMount.appendChild(el('div', { class: 'notice err', text: msg(e) }));
+    } else notice('목록 갱신 실패 — 마지막으로 받은 목록입니다: ' + msg(e), 'err');
     // With the stack: the one report of this was a bare "reading 'filter'",
     // which named the symptom (a non-JSON body) and not the cause.
     void clientLog('error', 'files tab refresh failed', {
       error: msg(e), stack: e instanceof Error ? String(e.stack).slice(0, 1500) : '',
     });
+  }
+}
+
+let fileOperations = 0;
+async function fileOperation<T>(text: string, run: () => Promise<T>): Promise<T> {
+  fileOperations += 1;
+  notice(text);
+  treeMount?.setAttribute('aria-busy', 'true');
+  viewMount?.setAttribute('aria-busy', 'true');
+  try {
+    return await run();
+  } finally {
+    fileOperations -= 1;
+    treeMount?.setAttribute('aria-busy', String(fileOperations > 0));
+    viewMount?.setAttribute('aria-busy', String(fileOperations > 0));
   }
 }
 
@@ -462,6 +500,7 @@ function toTreeNode(n: Folder, depth: number): TreeNode {
     dot: !n.virtual && state.hasUnseenUnder(n.path),
     // A folder in the tree is a drop target of its own.
     droppable: !n.virtual && USER_AREAS.has(n.area.area),
+    draggable: !n.virtual && n.path.includes('/') && USER_AREAS.has(n.area.area),
   };
 }
 
@@ -484,6 +523,11 @@ function treeSpec(): TreeSpec {
   return {
     expanded,
     selected: treeSel.size ? treeSel : new Set([selectedDir]),
+    dragPaths(node) {
+      const paths = treeSel.has(node.path) ? [...treeSel] : [node.path];
+      const movable = paths.filter(p => p.includes('/') && !nodes.get(p)?.virtual && USER_AREAS.has(p.split('/')[0]));
+      return movable.filter(p => !movable.some(parent => parent !== p && p.startsWith(parent + '/')));
+    },
     onOpen(node, ev) {
       // The centre's pick() grammar on folders: Ctrl toggles membership,
       // Shift ranges over the rows as drawn, plain selects the one.
@@ -982,7 +1026,7 @@ function treeDeleteConfirm(paths: string[], ev: { clientX: number; clientY: numb
 
 async function treeDelete(paths: string[]): Promise<void> {
   try {
-    const r = await state.deleteFiles(paths);
+    const r = await fileOperation(`${paths.length}개 삭제 중…`, () => state.deleteFiles(paths));
     notice(r.failed.length
       ? `${r.done}개를 지웠습니다. ${r.failed.length}개 실패 — ${r.failed[0].error}`
       : `${r.done}개를 지웠습니다.`, r.failed.length ? 'err' : 'ok');
@@ -1036,7 +1080,7 @@ function renameEntry(e: { path: string; name: string }): void {
       if (!nm || nm === e.name) return;
       const dir = e.path.includes('/') ? e.path.slice(0, e.path.lastIndexOf('/')) : '';
       try {
-        const r = await state.moveFile(e.path, (dir ? dir + '/' : '') + nm);
+        const r = await fileOperation('이름 변경 중…', () => state.moveFile(e.path, (dir ? dir + '/' : '') + nm));
         if (previewPath === e.path) previewPath = r.to;
         selection = new Set([r.to]);
         notice('이름을 바꿨습니다.', 'ok');
@@ -1063,17 +1107,17 @@ async function pasteInto(target: string): Promise<void> {
   const list = clip.paths.filter((p) => p !== target && !target.startsWith(p + '/'));
   if (!list.length) return;
   try {
-    const r = await pasteFiles(target);
+    const r = await fileOperation(`${list.length}개 ${clip.op === 'copy' ? '복사' : '이동'} 중…`, () => pasteFiles(target));
     if (!r) return;
     notice(batchText(r, target, clip.op === 'copy' ? '복사' : '이동'), r.failed.length ? 'err' : 'ok');
   } catch (e) {
-    notice('처리하지 못했습니다: ' + msg(e), 'err');
+    notice('처리 결과를 확인하지 못했습니다: ' + msg(e) + ' · 현재 목록을 다시 확인합니다.', 'err');
   }
   // A cut is spent by its paste; a copy can paste again elsewhere.
   if (clip.op === 'cut') {
     selection.clear();
   }
-  state.touchFiles();
+  // pasteFiles already notified the shared file state.
   await refresh();
 }
 
@@ -1082,7 +1126,7 @@ async function moveSelected(sources: string[], target: string): Promise<void> {
   const list = sources.filter((p) => p !== target && !target.startsWith(p + '/'));
   if (!list.length) return;
   try {
-    const r = await state.moveFiles(list, target);
+    const r = await fileOperation(`${list.length}개 이동 중…`, () => state.moveFiles(list, target));
     notice(batchText(r, target, '이동'), r.failed.length ? 'err' : 'ok');
   } catch (e) {
     notice('옮기지 못했습니다: ' + msg(e), 'err');
@@ -1302,7 +1346,7 @@ async function runDelete(n: Folder): Promise<void> {
   const paths = [...selection];
   if (!paths.length) return;
   try {
-    const r = await state.deleteFiles(paths);
+    const r = await fileOperation(`${paths.length}개 삭제 중…`, () => state.deleteFiles(paths));
     if (paths.includes(previewPath)) previewPath = '';
     notice(r.failed.length
       ? `${r.done}개를 지웠습니다. ${r.failed.length}개 실패 — ${r.failed[0].error}`
@@ -1328,7 +1372,7 @@ function openMove(anchor: HTMLElement): void {
     b.addEventListener('click', async () => {
       close();
       try {
-        const r = await state.moveFiles(paths, target);
+        const r = await fileOperation(`${paths.length}개 이동 중…`, () => state.moveFiles(paths, target));
         notice(batchText(r, target, '이동'), r.failed.length ? 'err' : 'ok');
       } catch (e) {
         notice('옮기지 못했습니다: ' + msg(e), 'err');

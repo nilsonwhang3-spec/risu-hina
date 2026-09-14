@@ -158,6 +158,8 @@ export const hub = {
  * References follow the CARDS now (no switch), and the filename's
  * {character} comes from the cast/card - the 캐릭터명 form is gone. */
 const GEN_KEY = 'hina.studioGen';
+/** Session-only tags: never included in localStorage or saved style documents. */
+export const temporaryPrompt = { text: '', expanded: false, negativeText: '', negativeExpanded: false };
 export const gen = {
   model: 'nai-diffusion-4-5-full',
   scenePreset: '',
@@ -207,6 +209,8 @@ export function spec(): Record<string, unknown> {
   if (gen.assetSet) out.asset = { project: gen.assetProject, setId: gen.assetSet, slotId: gen.assetSlot,
     fields: gen.assetCharacter ? { character: gen.assetCharacter } : {} };
   if (gen.seed.trim()) out.seed = Number(gen.seed.trim());
+  if (temporaryPrompt.text.trim()) out.extra = temporaryPrompt.text.trim();
+  if (temporaryPrompt.negativeText.trim()) out.negativeExtra = temporaryPrompt.negativeText.trim();
   return out;
 }
 

@@ -817,7 +817,7 @@ def defaults_once() -> None:
 
 # Rotating the key re-copies the seed into existing installs on next boot -
 # _v2 added the batch-spec section (inline scenes, name addressing, adhoc dir).
-STUDIO_OPS_KEY = "skills_studio_ops_space_v2"
+STUDIO_OPS_KEY = "skills_studio_ops_space_v3"
 
 
 def refresh_studio_ops_once() -> None:

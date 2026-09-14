@@ -442,6 +442,8 @@ button.iconbtn.danger { background: #b91c1c; border-color: #b91c1c; color: #fff;
   margin-bottom: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
 }
 .selhead, .seltools { flex-wrap: wrap; }
+.review-nav { position: sticky; top: 0; z-index: 5; padding: 6px 0; margin-bottom: 8px; background: var(--bgcolor, #141923); flex-wrap: wrap; }
+.review-nav .review-back { min-height: 40px; font-weight: 700; flex-shrink: 0; }
 .seltools .spacer { flex: 1 1 0; }
 .selhead .badge.warn { cursor: pointer; }
 .extrahead { padding: 10px 8px 4px; }
@@ -1079,6 +1081,9 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
 .mtoggle { display: none; }
 @media (max-width: 760px) {
   .split { flex-direction: column; position: relative; }
+  .toolslot .searchbox { display: none !important; }
+  .toolslot .tabslot:has(> .searchbox:only-child) { display: none !important; }
+  .toolslot .toolrow .spacer { display: none; }
 
   /* One view at a time (panes.ts): the agent, or the explorer + editor.
      Drags set flex-basis inline, so the shown side must win with !important. */
@@ -1086,6 +1091,7 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
   .split.m-agent > .explorer, .split.m-agent > .left { display: none; }
   .split.m-centre > .right { display: none; }
   .split.m-agent > .right { flex: 1 1 auto !important; min-height: 0; }
+  .split.m-agent.rcollapse > .right { display: flex !important; }
   /* The agent pane must never be wider than the phone (§1-54: "오른쪽이 화면
      밖으로 나간다, 축소해도 안 줄어듦"): a code block, a long path, a tool
      card or a wide table used to push the pane past the viewport, and the

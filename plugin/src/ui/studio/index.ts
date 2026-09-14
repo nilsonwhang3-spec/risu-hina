@@ -26,7 +26,7 @@
 import { el, clear, ICON, iconBtn, pollWhileVisible } from './../dom';
 import { evictBlob } from '../blobimg';
 import { state, type StudioItem } from '../../state';
-import { threePane } from '../panes';
+import { threePane, showMobileCentre } from '../panes';
 import { bindAgent, mountAgent } from '../agentpane';
 import { CARD_AREAS, OUTPUT_ROOT, S, hub, areaOfPath, canonPath, checkUnresolved,
          persistLeftTab, persistCentreTab, buildOutput, buildExtras, extraPaths, addExtra,
@@ -138,6 +138,7 @@ function ensureLayoutControls(): void {
 }
 
 export function renderStudioTab(mount: HTMLElement): void {
+  if (state.openStudioRequest) showMobileCentre();
   const entering = !wasStudioActive;
   wasStudioActive = true;
   ensureLayoutControls();
@@ -232,7 +233,7 @@ async function refresh(): Promise<void> {
   // the prompt being typed lost focus and caret every few seconds. The
   // refresh waits for blur.
   const ae = document.activeElement as HTMLElement | null;
-  if (ae && splitRoot && splitRoot.contains(ae) && /^(TEXTAREA|INPUT|SELECT)$/.test(ae.tagName)) {
+  if (!state.openStudioRequest && ae && splitRoot && splitRoot.contains(ae) && /^(TEXTAREA|INPUT|SELECT)$/.test(ae.tagName)) {
     if (!refreshPending) {
       refreshPending = true;
       ae.addEventListener('blur', () => { refreshPending = false; void refresh(); }, { once: true });

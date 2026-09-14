@@ -35,6 +35,7 @@ import re
 import shutil
 import threading
 import time
+import uuid
 import zlib
 from pathlib import Path
 from typing import Any
@@ -910,7 +911,7 @@ def _save_image(folder: str, name: str, png: bytes, sidecar: dict) -> dict:
     # replaced the older. A taken name counts up: 이름.2.png, .3…
     stem, suf, k = dest.stem, dest.suffix, 1
     while True:
-        body = png_embed(png, {**sidecar, "file": dest.name, "createdAt": time.time()})
+        body = png_embed(png, {**sidecar, "candidateName": name, "file": dest.name, "createdAt": time.time()})
         try:
             # Exclusive creation also protects concurrent batch/inpaint saves.
             with dest.open("xb") as output:
@@ -1015,7 +1016,7 @@ def _plan_entries(spec: dict) -> list[dict]:
         for i in range(count):
             one = {**spec, "characters": chars,
                    "emotion": scene.get("prompt") or "",
-                   "negativeExtra": scene.get("negativePrompt") or ""}
+                   "negativeExtra": ", ".join(str(v) for v in (scene.get("negativePrompt"), spec.get("negativeExtra")) if v)}
             pos, neg, captions = compose(one)
             pos, missing = resolve_refs(pos, table)
             neg, missing2 = resolve_refs(neg, table)
@@ -1077,7 +1078,7 @@ def _legacy_plan(spec: dict) -> list[dict]:
     for scene in scenes:
         for i in range(count):
             one = {**spec, "emotion": scene.get("prompt") or "",
-                   "negativeExtra": scene.get("negativePrompt") or ""}
+                   "negativeExtra": ", ".join(str(v) for v in (scene.get("negativePrompt"), spec.get("negativeExtra")) if v)}
             pos, neg, captions = compose(one)
             # References are spliced after composing, so a fragment may be
             # named from a style or a character as well as from a scene.
@@ -1431,7 +1432,7 @@ def inpaint(rel: str, boxes: list[dict], prompt: str, *, model: str,
     """Repaint part of a library image and save the result beside it.
 
     Under the SOURCE name: save_image never overwrites, so the result lands
-    as `이름 (2).png` in the same folder and the 검수 grid reads it into the
+    as `이름.2.png` in the same folder and the 검수 grid reads it into the
     same group (the old "-fix" suffix made a name the token rule could not
     read, so the result never showed - §1-51).
 
@@ -1472,13 +1473,29 @@ def inpaint(rel: str, boxes: list[dict], prompt: str, *, model: str,
         mask = make_mask(w, h, boxes)
         out = nai.infill(model, png, mask, prompt, negative, params, strength=strength)
     src = Path(rel)
-    name = f"{src.stem}{suffix}.png"
+    candidate_stem = src.stem
+    for keyword, text in nai.png_text_chunks(png):
+        if keyword != PARAMS_KEYWORD:
+            continue
+        try:
+            record = json.loads(base64.b64decode(text))
+            previous = record.get("candidateName") or ""
+            # New images record the name before collision numbering. This
+            # avoids stacking .2.2 on repeated inpainting, without guessing
+            # whether a number in an imported filename is a semantic field.
+            if previous and Path(previous).name == previous:
+                candidate_stem = Path(previous).stem
+                break
+        except (ValueError, TypeError, AttributeError):
+            pass
+    name = f"{candidate_stem}{suffix}.png"
     folder = str(src.parent).replace("\\", "/")
     original_asset = assetrules.metadata(files._resolve(SCOPE, rel))
     asset = assetrules.candidate(original_asset, original_asset.get("imageId", "")) if original_asset else None
     if asset:
         name = Path(asset["exportName"]).stem + ".png"
-    folder = output_folder({"folder": folder, "asset": asset or {}})
+    # This edits an existing candidate, so its review folder is authoritative.
+    # New-project routing can otherwise move imported/bound sources elsewhere.
     saved = save_image(folder, name, out, {
         **({"asset": asset} if asset else {}),
         "inpaintOf": rel, "boxes": boxes, "prompt": prompt, "negative": negative,
@@ -1494,11 +1511,7 @@ def inpaint(rel: str, boxes: list[dict], prompt: str, *, model: str,
 
 # --- choosing between candidates ----------------------------------------------
 #
-# The model is `C:\code\image-selector`, which the user built and uses: three
-# independent flags per file rather than one "representative" radio, kept per
-# folder. `use` is what goes to the bot, `inpaint` is what needs fixing first,
-# `delete` is what to throw away - a file can legitimately be none of them,
-# which is why one radio would not do.
+# Each file has one review decision (or none); AI suggestions are separate.
 
 SELECTION_DIR = "config/.studio/selection"
 GROUP_DIR = "config/.studio/groups"
@@ -1521,6 +1534,16 @@ def _side(kind: str, folder: str) -> Path:
     return root() / kind / f"{_slug(folder)}.json"
 
 
+def _write_review_json(path: Path, value: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + "." + uuid.uuid4().hex + ".tmp")
+    try:
+        temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 def read_selection(folder: str) -> dict:
     p = _side(SELECTION_DIR, folder)
     if not p.is_file():
@@ -1530,9 +1553,20 @@ def read_selection(folder: str) -> dict:
         if not p.is_file():
             return {}
     try:
-        return json.loads(p.read_text(encoding="utf-8"))
+        data = json.loads(p.read_text(encoding="utf-8"))
+        return {k: normalize_selection(v) for k, v in data.items() if isinstance(v, dict)}
     except ValueError:
         return {}
+
+
+def normalize_selection(value: dict) -> dict:
+    # Legacy conflicting decisions: discard wins, then needs repair, then keep.
+    # Never export an image that was also marked for repair/discard.
+    decision = next((k for k in ("delete", "inpaint", "use") if value.get(k)), None)
+    clean = {**value, **{k: k == decision for k in ("use", "inpaint", "delete")}}
+    if decision != "use":
+        clean.pop("rep", None)
+    return clean
 
 
 def write_selection(folder: str, selections: dict) -> dict:
@@ -1547,7 +1581,8 @@ def write_selection(folder: str, selections: dict) -> dict:
                       # only when present so older files keep their exact shape.
                       **({"suggest": _clean_suggest(v["suggest"])} if _valid_suggest(v.get("suggest")) else {})}
              for k, v in (selections or {}).items() if isinstance(v, dict)}
-    p.write_text(json.dumps(clean, ensure_ascii=False, indent=2), encoding="utf-8")
+    clean = {k: normalize_selection(v) for k, v in clean.items()}
+    _write_review_json(p, clean)
     return {"folder": folder, "count": len(clean)}
 
 
@@ -1610,6 +1645,21 @@ def naming_profile(char_key: str) -> dict:
         return json.loads(p.read_text(encoding="utf-8"))
     except ValueError:
         return {}
+
+
+def group_profile(folder: str) -> dict:
+    p = _side(GROUP_DIR, folder)
+    return json.loads(p.read_text(encoding="utf-8")) if p.is_file() else {"pattern": "", "groupBy": "emotion"}
+
+
+def save_group_profile(folder: str, pattern: str, group_by: str) -> dict:
+    if pattern:
+        re.compile(pattern)
+    profile = {"pattern": pattern, "groupBy": group_by}
+    p = _side(GROUP_DIR, folder)
+    if not p.is_file() or group_profile(folder) != profile:
+        _write_review_json(p, profile)
+    return profile
 
 
 def save_naming_profile(char_key: str, profile: dict) -> dict:
@@ -1692,6 +1742,27 @@ def group(folder: str, pattern: str = "", group_by: str = "emotion") -> dict:
                       for n in parsed["unmatched"]],
         "total": len(names),
     }
+
+
+def review_page(grouped: dict, offset: int = 0, limit: int = 50, status: str = "") -> dict:
+    counts = {k: 0 for k in ("use", "inpaint", "delete", "unreviewed")}
+    if status and status not in counts:
+        raise StudioError("status: use, inpaint, delete, unreviewed")
+    rows = []
+    for grp in [*grouped["groups"], {"key": None, "items": grouped["unmatched"]}]:
+        for item in grp["items"]:
+            selection = normalize_selection(item["selection"])
+            decision = next((k for k in ("use", "inpaint", "delete") if selection.get(k)), "unreviewed")
+            counts[decision] += 1
+            if not status or decision == status:
+                rows.append({**item, "group": grp["key"], "status": decision, "selection": selection})
+    offset, limit = max(0, offset), max(1, min(200, limit))
+    page = rows[offset:offset + limit]
+    return {"folder": grouped["folder"], "pattern": grouped["pattern"], "groupBy": grouped["groupBy"],
+            "fields": grouped["fields"], "counts": counts, "totalFiles": grouped["total"],
+            "totalGroups": len(grouped["groups"]), "unmatched": len(grouped["unmatched"]),
+            "totalMatches": len(rows), "items": page,
+            "nextOffset": offset + len(page) if offset + len(page) < len(rows) else None}
 
 
 def rename_plan(folder: str, pairs: list[dict]) -> dict:

@@ -104,7 +104,7 @@ export function characterEditor(dir: string, opts: CharEditorOpts = {}): HTMLEle
     attachHilite(negative, { mode: 'nai', fragments: fragNames });
   }, 0);
   const enabledBox = el('input', { type: 'checkbox' }) as HTMLInputElement;
-  const order = el('input', { type: 'number', value: '100', step: '10' }) as HTMLInputElement;
+  let originalOrder = '';
   const posX = el('input', { type: 'number', step: '0.1', placeholder: 'x 0~1' }) as HTMLInputElement;
   const posY = el('input', { type: 'number', step: '0.1', placeholder: 'y 0~1' }) as HTMLInputElement;
 
@@ -310,7 +310,7 @@ export function characterEditor(dir: string, opts: CharEditorOpts = {}): HTMLEle
       for (const v of vibes) if (v.bad) await repng(v);
       const meta = new Map<string, string>([['name', nm]]);
       meta.set('enabled', enabledBox.checked ? 'true' : 'false');
-      if (order.value.trim() && order.value.trim() !== '100') meta.set('order', String(Math.trunc(Number(order.value)) || 100));
+      if (originalOrder) meta.set('order', originalOrder);
       let body = `## 프롬프트\n${caption.value.trim()}\n`;
       if (negative.value.trim()) body += `\n## 네거티브\n${negative.value.trim()}\n`;
       await state.uploadFile('prompt.md', joinFront(meta, body), false, target);
@@ -355,7 +355,6 @@ export function characterEditor(dir: string, opts: CharEditorOpts = {}): HTMLEle
     field('이름', name),
     el('div', { class: 'row', style: { marginBottom: '8px' } }, [
       el('label', { class: 'row' }, [enabledBox, el('span', { text: '활성 (생성에 실림)' })]),
-      el('label', { class: 'field', style: { width: '110px', marginBottom: '0' } }, [el('span', { text: '순서' }), order]),
     ]),
     field('프롬프트', caption),
     field('네거티브', negative),
@@ -435,7 +434,7 @@ export function characterEditor(dir: string, opts: CharEditorOpts = {}): HTMLEle
       const { meta, body } = splitFront(r.content);
       name.value = meta.get('name') ?? dir.split('/').pop() ?? '';
       enabledBox.checked = (meta.get('enabled') ?? '').toLowerCase() === 'true';
-      order.value = meta.get('order') ?? '100';
+      originalOrder = meta.get('order') ?? '';
       const secs = body.split(/^##+\s*(프롬프트|네거티브|positive|negative)\s*$/im);
       if (secs.length === 1) {
         caption.value = body.trim();

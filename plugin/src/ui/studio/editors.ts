@@ -44,8 +44,7 @@ export function cardEditor(path: string, opts: CardEditorOpts = {}): HTMLElement
   const name = el('input', { placeholder: '(파일 이름)' }) as HTMLInputElement;
   const desc = el('input', { placeholder: '한 줄 설명' }) as HTMLInputElement;
   const enabledBox = el('input', { type: 'checkbox' }) as HTMLInputElement;
-  const order = el('input', { type: 'number', value: '100', step: '10',
-                              title: '작을수록 앞에 이어집니다' }) as HTMLInputElement;
+  let originalOrder = '';
   const body = el('textarea', { rows: '18', class: 'promptedit',
     placeholder: isStyle ? '## positive\n…\n\n## negative\n…'
       : '조각 본문 — <이름> 으로 참조됩니다. 여러 줄이면 장마다 1줄이 랜덤으로 실립니다 (#줄·빈 줄 제외)',
@@ -72,7 +71,7 @@ export function cardEditor(path: string, opts: CardEditorOpts = {}): HTMLElement
       if (desc.value.trim()) meta.set('description', desc.value.trim());
       if (isStyle) {
         meta.set('enabled', enabledBox.checked ? 'true' : 'false');
-        if (order.value.trim() && order.value.trim() !== '100') meta.set('order', String(Math.trunc(Number(order.value)) || 100));
+        if (originalOrder) meta.set('order', originalOrder);
       }
       const dir = path.slice(0, path.lastIndexOf('/'));
       const fname = path.slice(path.lastIndexOf('/') + 1);
@@ -106,7 +105,6 @@ export function cardEditor(path: string, opts: CardEditorOpts = {}): HTMLElement
     el('label', { class: 'field' }, [el('span', { text: '설명' }), desc]),
     isStyle ? el('div', { class: 'row', style: { marginBottom: '8px' } }, [
       el('label', { class: 'row' }, [enabledBox, el('span', { text: '활성 (생성에 실림)' })]),
-      el('label', { class: 'field', style: { width: '130px', marginBottom: '0' } }, [el('span', { text: '순서' }), order]),
     ]) : null,
     el('label', { class: 'field' }, [el('span', { text: isStyle ? '본문 (## positive / ## negative)' : '본문' }), body]),
     out,
@@ -117,7 +115,7 @@ export function cardEditor(path: string, opts: CardEditorOpts = {}): HTMLElement
     name.value = meta.get('name') ?? '';
     desc.value = meta.get('description') ?? '';
     enabledBox.checked = (meta.get('enabled') ?? '').toLowerCase() === 'true';
-    order.value = meta.get('order') ?? '100';
+    originalOrder = meta.get('order') ?? '';
     body.value = b;
   }).catch((e) => { out.textContent = msg(e); });
   return rootEl;
