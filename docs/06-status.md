@@ -1,4 +1,12 @@
-# 06. Implementation status — as of 2026-09-06 (v0.14.6 BETA, Risu Hina)
+# 06. Implementation status — as of 2026-09-14 (v0.15.11, Risu Hina)
+
+## 0.15.11 field fixes
+
+User requested staging on zikmunt-pc and a public release. See
+`docs/15-agent-discovery-and-review.md` for tool-result recovery, bot discovery,
+live exclusive review decisions, naming/inpaint preservation, temporary prompts,
+mobile navigation, explicit AI writeback, and workspace transfer fixes.
+The remainder below retains the previous implementation history.
 
 One page for whoever picks this up next session (= me). What exists, what changed, how far it is deployed,
 and what is left. The *why* of the design is `docs/04` (assets and charx are in Appendix E), the storage layout is `docs/02`, the deployment environment is `docs/00`.

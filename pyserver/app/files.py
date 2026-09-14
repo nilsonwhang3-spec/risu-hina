@@ -156,33 +156,44 @@ def listing(scope: str, prefix: str = "", include_hidden: bool = False) -> dict:
             continue
         d = root / prefix if prefix else root / name
         files = []
+        dirs = []
         size = 0
         hidden_n = 0
         if d.is_dir():
-            for f in sorted(d.rglob("*")):
-                if not f.is_file() or f.name.endswith(PART_SUFFIX):
-                    continue  # an upload still arriving in chunks
+            # DirEntry reuses Windows directory-enumeration metadata. Two
+            # rglob walks plus Path.is_file/stat used to cost seconds for an
+            # otherwise idle workspace after every delete/move/paste.
+            pending = [(str(d), d.relative_to(root).as_posix())]
+            while pending:
+                parent, parent_rel = pending.pop()
                 try:
-                    st = f.stat()
+                    with os.scandir(parent) as entries:
+                        for entry in entries:
+                            rel_p = parent_rel + "/" + entry.name
+                            try:
+                                if entry.is_dir():
+                                    if include_hidden or not _listing_hidden(rel_p):
+                                        dirs.append(rel_p)
+                                    if not entry.is_symlink():
+                                        pending.append((entry.path, rel_p))
+                                    continue
+                                if not entry.is_file() or entry.name.endswith(PART_SUFFIX):
+                                    continue
+                                st = entry.stat()
+                            except OSError:
+                                continue  # another operation removed it mid-scan
+                            size += st.st_size
+                            if not include_hidden and _listing_hidden(rel_p):
+                                hidden_n += 1
+                                continue
+                            files.append({"path": rel_p, "name": entry.name,
+                                          "size": st.st_size, "modified": st.st_mtime,
+                                          "textual": os.path.splitext(entry.name)[1].lower() in TEXTUAL})
                 except OSError:
                     continue
-                size += st.st_size
-                rel_p = f.relative_to(root).as_posix()
-                if not include_hidden and _listing_hidden(rel_p):
-                    hidden_n += 1
-                    continue
-                files.append({
-                    "path": rel_p,
-                    "name": f.name,
-                    "size": st.st_size,
-                    "modified": st.st_mtime,
-                    "textual": f.suffix.lower() in TEXTUAL,
-                })
+            files.sort(key=lambda f: f["path"].casefold() if os.name == "nt" else f["path"])
+            dirs.sort()
         total += size
-        dirs = sorted(
-            q.relative_to(root).as_posix() for q in (d.rglob("*") if d.is_dir() else [])
-            if q.is_dir() and (include_hidden or not _listing_hidden(q.relative_to(root).as_posix()))
-        ) if d.is_dir() else []
         areas.append({
             "area": name,
             "deletable": deletable,
@@ -583,7 +594,7 @@ def _many(rels: list[str], fn) -> dict:
     for rel in rels:
         try:
             results.append(fn(rel))
-        except FileError as e:
+        except (FileError, OSError) as e:
             failed.append({"path": rel, "error": str(e)})
     return {"done": len(results), "results": results, "failed": failed}
 

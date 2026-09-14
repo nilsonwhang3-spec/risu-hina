@@ -1330,8 +1330,12 @@ def h_studio_group(arg: dict) -> dict:
     files the regex could not read are shown rather than dropped.
     """
     try:
-        return studio.group(str(arg.get("folder") or ""), str(arg.get("pattern") or ""),
-                            str(arg.get("groupBy") or "emotion"))
+        folder, pattern, by = str(arg.get("folder") or ""), str(arg.get("pattern") or ""), str(arg.get("groupBy") or "emotion")
+        if arg.get("operation") == "profile":
+            return {"exists": studio._side(studio.GROUP_DIR, folder).is_file(), **studio.group_profile(folder)}
+        result = studio.group(folder, pattern, by)
+        studio.save_group_profile(folder, pattern, by)
+        return result
     except (studio.StudioError, files.FileError) as e:
         raise ApiError(400, str(e))
 

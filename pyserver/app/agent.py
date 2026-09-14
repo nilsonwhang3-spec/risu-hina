@@ -36,6 +36,34 @@ You are a tool for editing RisuAI roleplay chat logs after the fact.
 **Answer in polite Korean (~합니다 / ~해 주세요).** Never use plain-declarative (~한다) or casual speech toward the user.
 
 Principles:
+- Before adding/replacing bot assets, preserve the original PNG/WebP bytes systematically in
+  the existing project folder structure, with source/slot/candidate mapping so they can be found
+  again. Keep review candidates in place; copy originals into the project's existing archive
+  area when needed, never move them out of the review folder or overwrite originals.
+  Ask the user whether to convert to WebP and which quality/compression percentage to use BEFORE
+  converting or submitting the add/replace proposal. Explain quality as 0-100 (higher = better
+  quality/larger files), not a guaranteed size-reduction percentage. If already specified in the
+  current task, follow that choice without asking again. Preserve originals separately from the
+  derived delivery files and show their paths/mapping when submitting the proposal.
+- RisuAI natively chooses randomly among assets with the SAME registered asset name. Multiple
+  selections in one emotion group are intentional random alternatives, not duplicate mistakes.
+  Physical filenames may use .1/.2 or _1/_2 to avoid collisions; these candidate numbers must not
+  change the registered name or semantic grouping. Infer legacy suffix rules from the project;
+  do not strip meaningful trailing numbers blindly. New files use the server's .2/.3 convention.
+- In CBS {{when}} / {{:else}} / {{/when}} blocks, put {{:else}} ALONE on its own line. Inline else
+  does not parse correctly. Preserve this newline when editing HTML, Regex replacement or scripts.
+- RisuAI stores asset keys with .png filenames even when the actual bytes are WebP. Both PNG and
+  WebP content are supported. Detect format from bytes; do not force PNG conversion based on the key.
+- Use bot_structure first when bot storage or save state is unclear. Search via search_bot,
+  list_scripts(kind='assetref', query=...) and list_assets(query=...) before considering SQL.
+  A clipped result's read_tool_result reference works immediately, even in the current turn.
+  Follow nextOffset; recall_work is for conversation history, not live tool output.
+- Before adding/reworking assets, read studio_group for the CURRENT review decisions and stored
+  grouping rule, studio_asset_rules, and the bot's assetref/Regex/Lua naming commands. Preserve the
+  existing candidate folder, delimiter, field order and slot identity. Do not add a subfolder or
+  append -1/_1 to a semantic field. Repeated candidates use server .2/.3 suffixes and the same
+  asset identity. Inpaint preserves the source identity; new candidates start unreviewed.
+  Review flags are exclusive and immediately saved; exporting selected/ is not required to read them.
 - Before AI image batches, explain the exact user-requested styles, characters, emotion/scene preset,
   scenes and total image count, references, resolution and output folder. Never substitute enabled
   cards for a user-specified preset. Resolve the requested name with studio_library/read_file first.
@@ -45,10 +73,13 @@ Principles:
   decisions when selecting missing scenes; do not regenerate completed slots without asking.
 - **Never try to read a whole conversation.** 400-turn chats are common. Skim with list_turns,
   narrow with search_turns, and read only the range you need with read_turns.
-- **You cannot edit anything yourself.** Transcript edits go through stage_edit / stage_bulk /
+- **Changes normally require review.** Transcript edits go through stage_edit / stage_bulk /
   stage_delete; every other change (lorebook, long-term memory, snapshots, writing to RisuAI,
   saving a copy) is a propose_* tool - the user reviews and approves before anything runs.
-  After proposing, say exactly "제안했습니다, 승인이 필요합니다". Never say "고쳤습니다".
+  After proposing, say exactly "제안했습니다, 승인이 필요합니다". Do not claim a proposal is applied.
+  Exception: an explicit request to save the accepted working copy to RisuAI authorizes
+  write_card_to_risu immediately from any tab. It waits for the plugin's verified result;
+  report that result without asking for another agreement or panel click.
 - For transcript edits (stage_*) **the proposal itself is the confirmation step.** If the user
   asked for the fix, propose it right away instead of asking again - but always explain what
   changes and why.
@@ -57,7 +88,8 @@ Principles:
   user's agreement BEFORE proposing.** The approve button is a confirmation, not the explanation.
   When asking for agreement in chat, **do not use the word "승인"** - that is the panel's button,
   and there is no button until something has been proposed. Ask "이대로 진행할까요?" instead.
-- **Approval happens in the panel and you cannot see the result in this turn.** Do not stop with
+- **Ordinary proposal approval happens in the panel, outside this turn.** This does not apply
+  to write_card_to_risu, whose result is available in this turn. Do not stop with
   "승인해 주시면 이어서 제안하겠습니다" - pressing the button does not wake you. Proposals that
   belong together (e.g. a lorebook addition and the deletion of those turns) go out **in one turn**,
   and you end with "패널에서 승인·거절하신 뒤 이어서 말씀해 주세요". Next turn, check what landed
@@ -68,7 +100,11 @@ Principles:
   alters sentences. `find` is copied verbatim (whitespace and quotes included) from what read_*
   returned.
 - Systematic substitutions are often more accurate done directly with run_python.
-  The `import risuhina` helper is ready.
+  The `import risuhina` helper is ready; `import realooc` is its supported legacy alias.
+  run_python creates both modules in hina/<bot>/scripts/ and sets the import path before execution.
+  They may not appear in file search before the first run. Import directly in run_python; do not
+  look for a root-level realooc.py, install a package, or infer a missing helper from file search.
+  For its actual location use `import risuhina; print(risuhina.__file__)` inside run_python.
 - **Before writing lorebook text, load the skill "RisuAI 로어북 작성 규칙" with load_skill.** The body
   is markdown starting with `### 제목` (#### subheadings + bullets), priority is the insertorder
   number (same tier as its neighbours), keywords are English/Korean/Japanese aliases. Do not put
@@ -110,6 +146,11 @@ Principles:
   **every chat** of this bot - never fix one chat's problem in the card. Writing to RisuAI
   (propose_card_writeback) and cloning a bot (propose_clone_bot) touch the RisuAI original:
   get agreement first.
+- If the user explicitly says to save/apply all the way to RisuAI, call write_card_to_risu for
+  already accepted card changes. Their request is authorization; do not demand another click or
+  a move to the meta tab. It awaits the plugin's verified result in this turn. Pending unapproved
+  edit proposals are separate and are not implicitly accepted by this save tool. Without an
+  explicit RisuAI-save request, continue to use propose_card_writeback for approval.
 - **You know which of the panel's screens (chat edit / bot edit) is open.** On the chat screen you
   may change chat material only (turns, long-term memory, chat lorebook, chat snapshots, chat
   write-back); on the bot screen card material only (meta, greetings, bot lorebook, Regex,
@@ -226,6 +267,10 @@ def screen_gate(mode: str, kind: str) -> str | None:
     not a property of the request - keeping it here means the tests state the
     rule instead of replaying a conversation.
     """
+    # Saving already accepted card changes resolves pending work; it does
+    # not require switching the editor to a particular material/tab.
+    if kind == "host_card_writeback":
+        return None
     if mode == "studio" and kind in _STUDIO_KINDS:
         return None
     need = "chat" if kind in CHAT_KINDS else ("bot" if kind in BOT_KINDS else "")
@@ -508,6 +553,18 @@ def build() -> Agent[Deps]:
                 "only a subsequent 반영 registers images in RisuAI. Workspace file creation alone does not register assets.")
 
     @agent.tool
+    def read_tool_result(ctx: RunContext[Deps], ref: str, offset: int = 0, limit: int = 1000) -> str:
+        """Read the complete saved output of a tool, including THIS turn, without rerunning it.
+        Use the ref in the result notice; follow nextOffset until null. Offsets count characters.
+        This is a historical result; rerun a read tool when current state is needed.
+        """
+        from . import tooloutput
+        try:
+            return json.dumps(tooloutput.read(ctx.deps.session_id or "", ref, offset, limit), ensure_ascii=False)
+        except (ValueError, OSError):
+            return "이 대화에서 해당 도구 원문을 찾을 수 없습니다. ref를 확인하세요."
+
+    @agent.tool
     def recall_work(ctx: RunContext[Deps], query: str = "", offset: int = 0, count: int = 8, text_offset: int = 0) -> str:
         """Search THIS assistant session's durable user/assistant/work-state journal, including before compaction.
         Unlike list_turns, this reads the assistant work conversation, not a RisuAI roleplay chat.
@@ -641,6 +698,42 @@ def build() -> Agent[Deps]:
         )
 
     @agent.tool
+    def bot_structure(ctx: RunContext[Deps]) -> str:
+        """Explain this bot's storage, available read/search tools and current pending save state.
+        Reads Hina's last-synced original and working copy; does not inspect live RisuAI.
+        """
+        ck = ctx.deps.char_key
+        if not ck:
+            return "봇이 선택되지 않았습니다. 스튜디오 파일은 find_files/search_files/studio_group으로 조회하세요."
+        data = cardmod.listing(ck)
+        return json.dumps({"charKey": ck, "chatKey": ctx.deps.chat_key,
+            "fullCardSynced": data["full"], "saveState": workspace.dirty_summary(ck),
+            "pendingApproval": {
+                "text": [{k: r.get(k) for k in ("id", "op", "status", "reason")} for r in staging.pending(ctx.deps.chat_key)],
+                "actions": [{k: r.get(k) for k in ("id", "kind", "status", "summary")} for r in actions.pending(ctx.deps.chat_key)]},
+            "storage": {
+                "characters/chats": "동기화된 봇/채팅 메타데이터와 원본 카드. 실시간 RisuAI 조회가 아님",
+                "card_fields": "카드 본문과 인사말의 원본/작업본; read_card → read_card_field(id)",
+                "card_scripts": "Regex(customscript), Lua/트리거(triggerscript), 에셋 참조(assetref); list_scripts(query=...) → read_script(id)",
+                "lore_entries": "봇/채팅 로어북; read_lore → read_lore_entry(id)",
+                "turns/turns_original": "현재 채팅 작업본/원본; search_turns → read_turns",
+                "char_assets/asset_keys/asset_blobs": "동기화된 참조/저장 키/실제 바이트. list_assets → fetch_assets. 작업 중인 참조 변경은 card_scripts의 assetref",
+                "staged_edits/pending_actions": "승인을 기다리는 제안. 승인 후 작업본 변경과 RisuAI 반영은 별도 단계",
+                "sessions/agent_messages": "히나 AI 작업 대화; recall_work. 봇의 롤플레이 turns와 다름",
+                "studio": "전역 파일 studio/output + 이미지 메타데이터 + 폴더별 검수 상태; studio_group은 채택 내보내기 전에도 조회 가능"},
+            "lifecycle": "RisuAI에서 동기화 → 원본/작업본 → 제안 승인 → 작업본 변경 → 반영 성공 시 RisuAI 저장. dirty=false만으로 미동기화된 외부 변경까지 없다고 단정하지 말 것",
+            "search": "search_bot(query)는 카드/Regex/트리거/에셋 참조/로어북의 작업본을 검색. 파일은 search_files, 채팅은 search_turns. CHARX 압축 해제본은 정적 원본이며 승인 대기·검수 상태를 포함하지 않음"}, ensure_ascii=False)
+
+    @agent.tool
+    def search_bot(ctx: RunContext[Deps], query: str, offset: int = 0, limit: int = 30) -> str:
+        """Search current working card fields, Regex/Lua/assetref JSON, and bot/chat lore contents.
+        Returns IDs and snippets, including matches deep inside scripts. Read full entries with
+        read_card_field/read_script/read_lore_entry. Use search_turns for roleplay dialogue.
+        """
+        from . import botsearch
+        return json.dumps(botsearch.search(ctx.deps.char_key, ctx.deps.chat_key, query, offset, limit), ensure_ascii=False)
+
+    @agent.tool
     def read_card(ctx: RunContext[Deps]) -> str:
         """Skim the bot card row by row. These rows are the edit targets - aim propose_card_edit at them.
 
@@ -655,7 +748,7 @@ def build() -> Agent[Deps]:
             head = (f["body"] or "").split("\n", 1)[0][:100]
             tag = f["field"] + (f"[{f['seq']}]" if f["field"] == "alternateGreetings" else "")
             out.append(f"--- [{tag}] id={f['id']}{mark} ({len(f['body'])}자) {head}")
-        return "\n".join(out)[:20000]
+        return "\n".join(out)
 
     @agent.tool
     def read_card_field(ctx: RunContext[Deps], field_id: str) -> str:
@@ -663,11 +756,14 @@ def build() -> Agent[Deps]:
         cur = cardmod.get_field(field_id)
         if cur is None:
             return "없는 카드 필드입니다"
-        return f"[{cur['field']}#{cur['seq']}]\n{cur['body']}"[:30000]
+        return f"[{cur['field']}#{cur['seq']}]\n{cur['body']}"
 
     @agent.tool
-    def list_scripts(ctx: RunContext[Deps], kind: str = "customscript") -> str:
-        """The Regex (customscript) or trigger (triggerscript) list, summaries only.
+    def list_scripts(ctx: RunContext[Deps], kind: str = "customscript", query: str = "",
+                     offset: int = 0, limit: int = 50) -> str:
+        """Search the working-copy Regex (customscript), triggerscript, or assetref entries.
+        query searches full entry JSON, including names and command bodies. Returns editable IDs.
+        Use offset/limit for remaining matches; assetref includes additionalAssets and emotionImages.
 
         Read a body (replacement, HTML, trigger definition) with read_script(id) - a background
         HTML entry can be tens of thousands of characters, so the list does not carry it.
@@ -676,10 +772,11 @@ def build() -> Agent[Deps]:
             items = cardmod.scripts(ctx.deps.char_key, kind)
         except ValueError as e:
             return str(e)
-        if not items:
-            return f"{kind} 항목이 없습니다"
-        out = []
-        for i in items:
+        items = [i for i in items if query.casefold() in json.dumps(i['entry'], ensure_ascii=False).casefold()]
+        offset, limit = max(0, offset), max(1, min(200, limit))
+        page = items[offset:offset + limit]
+        out = [f"total={len(items)} offset={offset} nextOffset={offset + len(page) if offset + len(page) < len(items) else None}"]
+        for i in page:
             e = i["entry"] or {}
             size = len(json.dumps(e, ensure_ascii=False))
             mark = "" if i["origin"] == "original" else f" *{i['origin']}*"
@@ -710,7 +807,7 @@ def build() -> Agent[Deps]:
         content = str(entry.pop("content", "") or "")
         head = json.dumps({"id": cur.get("id"), "scope": cur.get("scope"), "seq": cur.get("seq"), **entry},
                           ensure_ascii=False)
-        return f"{head}\n--- content ({len(content)}자) ---\n{content[:60000]}"
+        return f"{head}\n--- content ({len(content)}자) ---\n{content}"
 
     @agent.tool
     def list_skills(ctx: RunContext[Deps]) -> str:
@@ -1223,27 +1320,49 @@ def build() -> Agent[Deps]:
     def propose_card_writeback(ctx: RunContext[Deps], reason: str) -> str:
         """Propose actually writing the card edits (meta, greetings, bot lorebook, Regex, triggers) to RisuAI.
 
+        Available from any tab, including studio; never ask to move to meta just to save.
         The write needs this bot selected in RisuAI. On approval the plugin performs it.
+        If the user explicitly asked to save to RisuAI, use write_card_to_risu instead.
         """
         return _propose(ctx, "host_card_writeback", f"카드를 RisuAI에 반영 — {reason}", {})
+
+    @agent.tool
+    async def write_card_to_risu(ctx: RunContext[Deps], reason: str) -> str:
+        """Save accepted working-copy card changes to live RisuAI and await the verified result.
+        ONLY when the user explicitly requested RisuAI save/writeback in this task (e.g.
+        'RisuAI에 반영까지 해줘'). That request authorizes this save without another UI click.
+        Do not use for an editing-only request. Does not approve pending edit proposals.
+        Works from any tab. The plugin must be connected with the same bot selected.
+        Never report success unless the result says done. For approved/in-progress status,
+        use list_proposals to check the recorded outcome instead of starting another write.
+        """
+        from . import hostwriteback
+        return json.dumps(await hostwriteback.save_card(ctx.deps.session_id or "", ctx.deps.char_key,
+                                                      ctx.deps.chat_key, reason), ensure_ascii=False)
 
     # --- assets ---------------------------------------------------------------
 
     @agent.tool
-    def list_assets(ctx: RunContext[Deps]) -> str:
+    def list_assets(ctx: RunContext[Deps], query: str = "", offset: int = 0, limit: int = 50) -> str:
         """The assets (images etc.) this bot references: field, name, format, size, store status.
 
+        Search names with query; paginate with offset/limit until nextOffset=None.
+        This is the synced reference/blob inventory; use list_scripts(kind='assetref', query=...)
+        for editable working-copy IDs and pending accepted card edits.
         Only status `present` can be fetched with fetch_assets; `missing` is not synced yet.
         """
         data = assets.listing(ctx.deps.char_key)
-        items = data["items"]
+        items = [i for i in data["items"] if query.casefold() in str(i.get("name", "")).casefold()]
+        offset, limit = max(0, offset), max(1, min(200, limit))
+        page = items[offset:offset + limit]
         out = [f"에셋 {len(items)}개 · 스토어에 {data['present']}개"
                + (f" · 없음 {data['missing']}" if data["missing"] else "")
                + (f" · 읽기 실패 {data['failed']}" if data["failed"] else "")]
-        for it in items:
+        out.append(f"offset={offset} nextOffset={offset + len(page) if offset + len(page) < len(items) else None}")
+        for it in page:
             size = f"{it['size'] // 1024}KB" if it.get("size") else "-"
             out.append(f"--- [{it['field']}] {it['name']!r} .{it['ext']} {size} {it['state']}")
-        return "\n".join(out)[:20000]
+        return "\n".join(out)
 
     @agent.tool
     def fetch_assets(ctx: RunContext[Deps], names: str) -> str:
@@ -1683,22 +1802,24 @@ def build() -> Agent[Deps]:
 
     @agent.tool
     def studio_group(ctx: RunContext[Deps], folder: str, pattern: str = "",
-                     group_by: str = "emotion") -> str:
-        """Gather output images into groups (what the comparison selector shows).
-
-        Files that did not match are reported first - they are what studio_rename fixes.
+                     group_by: str = "", offset: int = 0, limit: int = 50,
+                     status: str = "", save_rule: bool = False) -> str:
+        """Read LIVE file-level review decisions before export/adoption, using the UI's saved rule.
+        Returns use/inpaint/delete/unreviewed, separate AI suggestions, totals, grouping and paths.
+        status optionally filters one decision; follow nextOffset. pattern/group_by override the
+        stored rule; save_rule=True persists a validated rule for later AI reads.
+        New/reworked candidates must remain in this folder and match these semantic group fields.
         """
         try:
-            g = studio.group(folder, pattern, group_by)
+            profile = studio.group_profile(folder)
+            by = group_by or ("emotion" if pattern else profile["groupBy"])
+            pat = pattern if pattern or group_by else profile["pattern"]
+            g = studio.group(folder, pat, by)
+            if save_rule:
+                studio.save_group_profile(folder, pat, by)
+            return json.dumps(studio.review_page(g, offset, limit, status), ensure_ascii=False)
         except Exception as e:  # noqa: BLE001
             return str(e)
-        out = [f"{g['total']}개 · 그룹 {len(g['groups'])} · 안 맞는 파일 {len(g['unmatched'])} · 필드 {g['fields']}"]
-        for grp in g["groups"][:25]:
-            chosen = sum(1 for i in grp["items"] if i["selection"].get("use"))
-            out.append(f"  {grp.get('label') or grp['key']}: {len(grp['items'])}장" + (f" (선택 {chosen})" if chosen else ""))
-        for u in g["unmatched"][:20]:
-            out.append(f"  ✕ {u['filename']}")
-        return "\n".join(out)
 
     @agent.tool
     def studio_export(ctx: RunContext[Deps], folder: str, character: str = "",
@@ -2071,12 +2192,11 @@ def build() -> Agent[Deps]:
 
     # --- scripting ----------------------------------------------------------
 
-    @agent.tool
     def run_python(ctx: RunContext[Deps], code: str) -> str:
         """워크스페이스에서 파이썬을 실행한다. stdout/stderr 를 돌려준다.
 
         규칙적인 치환이나 통계는 이쪽이 정확하다.
-        """ + "\n\n" + pyexec.describe_helper()
+        """
         r = pyexec.run(code, workspace.root(ctx.deps.char_key), ctx.deps.chat_key,
                        ctx.deps.char_key, session_id=ctx.deps.session_id, mode=ctx.deps.mode)
         parts = []
@@ -2089,8 +2209,13 @@ def build() -> Agent[Deps]:
         if r.get("error"):
             parts.append("error: " + r["error"])
         if r.get("truncated"):
-            parts.append("(출력이 잘렸다)")
+            parts.insert(0, f"전체 출력: read_tool_result(ref='{r.get('fullOutputRef')}', offset=0)")
         return "\n\n".join(parts) or f"(출력 없음, exit={r.get('exitCode')})"
+
+    # A concatenation expression in the function body is NOT a Python docstring.
+    # Attach the runtime/helper reference before constructing the tool schema.
+    run_python.__doc__ = (run_python.__doc__ or "") + "\n\n" + pyexec.describe_helper()
+    agent.tool(run_python)
 
     # The one virtual prefix over the space: `system/…` reads this bot's own
     # SYSTEM directory (frozen originals, card.md) - read-only machinery that
@@ -2213,7 +2338,7 @@ def build() -> Agent[Deps]:
             out += r["stdout"]
         if r.get("stderr"):
             out += ("\n--- stderr ---\n" if r.get("stdout") else "") + r["stderr"]
-        return out[:20000]
+        return out
 
     @agent.tool
     async def run_shell(ctx: RunContext[Deps], command: str, reason: str) -> str:

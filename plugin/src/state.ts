@@ -696,6 +696,10 @@ class StudioFiles {
     return await transport.post<StudioGroups>('/studio/group', { folder, pattern, groupBy });
   }
 
+  async groupProfile(folder: string): Promise<{ exists: boolean; pattern: string; groupBy: string }> {
+    return await transport.post('/studio/group', { folder, operation: 'profile' });
+  }
+
   async saveSelection(folder: string, selections: SelectionMap): Promise<void> {
     await transport.post('/studio/selection', { folder, selections });
   }
@@ -1578,7 +1582,18 @@ class AppState {
     if (hidden) q.push('hidden=1');
     // The listing names this bot's folder back (`botFolder`) for "이 봇만".
     if (bot) q.push('bot=' + encodeURIComponent(bot));
-    const r = await transport.get<FileListing | null>('/files' + (q.length ? '?' + q.join('&') : ''));
+    let r: FileListing | null = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        r = await transport.get<FileListing | null>('/files' + (q.length ? '?' + q.join('&') : ''));
+        break;
+      } catch (error) {
+        // Only repeat the read. A lost response to a move/copy may follow a
+        // successful mutation, so those operations must not be replayed.
+        if (!(error instanceof BackendError) || ![0, 502, 503, 504].includes(error.status) || attempt === 2) throw error;
+        await new Promise(resolve => setTimeout(resolve, 300 * (attempt + 1)));
+      }
+    }
     // A reply without `areas` (an empty body while the backend restarts, a
     // proxy's placeholder) used to surface as "Cannot read properties of
     // null (reading 'areas')" in the files tab (§1-39). Name the condition.
@@ -1929,6 +1944,7 @@ class AppState {
         detail = `“${name}” 으로 복사본을 저장했습니다.`;
       } else if (r.host.kind === 'host_card_writeback') {
         const out = await this.cardWriteBack();
+        if (!out.verified) throw new Error(out.drift || 'RisuAI 저장 결과를 확인하지 못했습니다. 미반영 변경을 보존했습니다.');
         detail = out.mode === 'noop'
           ? '카드에 반영할 변경이 없었습니다.'
           : `카드 변경 ${out.applied}건을 RisuAI에 반영했습니다.`;
@@ -1948,18 +1964,36 @@ class AppState {
       } else {
         throw new Error('플러그인이 모르는 작업입니다: ' + r.host.kind);
       }
-      await transport.post('/actions/complete', { chatKey: this.activeChatKey, id, ok: true, detail });
+      await transport.post('/actions/complete', { chatKey: chatKey || this.activeChatKey, id, ok: true, detail });
       return detail;
     } catch (e) {
       const why = e instanceof Error ? e.message : String(e);
       await transport.post('/actions/complete', {
-        chatKey: this.activeChatKey, id, ok: false, detail: why,
+        chatKey: chatKey || this.activeChatKey, id, ok: false, detail: why,
       });
       throw e;
     }
   }
 
   // --- lorebook -------------------------------------------------------------
+
+  /** The agent's save tool runs only for an explicit user writeback request. */
+  async requestedCardWriteback(id: string, charKey: string, chatKey: string): Promise<string> {
+    if (!id || !charKey) throw new Error('잘못된 봇 저장 요청입니다.');
+    if (this.botKey !== charKey) {
+      const detail = '요청한 봇과 현재 봇이 달라 저장하지 않았습니다.';
+      await transport.post('/actions/complete', { chatKey, id, ok: false, detail });
+      throw new Error(detail);
+    }
+    try {
+      return await this.decideAction(id, true, chatKey);
+    } catch (error) {
+      // Also report failures before the host block (e.g. a stale action), so
+      // the waiting tool need not wait for its timeout to learn the outcome.
+      await transport.post('/actions/complete', { chatKey, id, ok: false, detail: String(error) }).catch(() => {});
+      throw error;
+    }
+  }
 
   async lore(scope?: 'global' | 'local'): Promise<LoreEntry[]> {
     const q = '/lore?charKey=' + encodeURIComponent(this.activeCharKey)

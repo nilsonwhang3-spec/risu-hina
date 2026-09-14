@@ -30,6 +30,7 @@ export interface TreeNode {
   title?: string;
   /** Whether this folder accepts drops (uploads and internal moves). */
   droppable?: boolean;
+  draggable?: boolean;
   /** Extra class on the branch button (clipboard state, §1-34). */
   cls?: string;
   /** A red dot: something new (unseen) is in here (§1-36). */
@@ -49,6 +50,7 @@ export interface TreeSpec {
   onDropFiles?(path: string, files: Incoming[]): void;
   /** Internal rows dropped on a droppable folder row. */
   onDropMove?(path: string, sources: string[]): void;
+  dragPaths?(node: TreeNode): string[];
 }
 
 /** One folder row plus its (possibly hidden) children, recursively. */
@@ -65,6 +67,7 @@ export function treeRow(n: TreeNode, depth: number, spec: TreeSpec): HTMLElement
     n.count == null ? null : el('span', { class: 'n', text: String(n.count) }),
   ]);
   branch.addEventListener('click', (e) => spec.onOpen(n, e as MouseEvent));
+  if (n.draggable && spec.dragPaths) installDrag(branch, () => spec.dragPaths!(n));
   if (spec.onContext) {
     branch.addEventListener('contextmenu', (e) => {
       e.preventDefault();
@@ -91,6 +94,7 @@ export interface DropSpec {
   /** Read at drop time, so a target that means "the current folder" stays current. */
   into(): string;
   onFiles?(path: string, files: Incoming[]): void;
+  onError?(error: unknown): void;
   onMove?(path: string, sources: string[]): void;
   /** Card-asset names (DRAG_ASSETS) - the chat's reference chips. */
   onAssets?(names: string[]): void;
@@ -144,8 +148,14 @@ export function installDrop(target: HTMLElement, spec: DropSpec): void {
       return;
     }
     if (!spec.onFiles) return;
-    const files = await collectDrop(dt);
-    if (files.length) spec.onFiles(spec.into(), files);
+    const into = spec.into();
+    try {
+      const files = await collectDrop(dt);
+      if (files.length) spec.onFiles(into, files);
+    } catch (error) {
+      if (spec.onError) spec.onError(error);
+      else target.dispatchEvent(new CustomEvent('file-drop-error', { bubbles: true, detail: error }));
+    }
   });
 }
 
@@ -165,14 +175,16 @@ export function installDrag(target: HTMLElement, paths: () => string[]): void {
 /** Files from a drop, folders walked so their structure comes along. */
 export async function collectDrop(dt: DataTransfer): Promise<Incoming[]> {
   const out: Incoming[] = [];
+  // Snapshot while the drop event owns access to the data store. Some Risu
+  // webviews expose broken filesystem URLs even though File objects work.
+  const direct = Array.from(dt.files ?? []);
   const items = Array.from(dt.items ?? []);
-  const entries = items
-    .map((it) => (it as DataTransferItem & { webkitGetAsEntry?: () => FileSystemEntry | null }).webkitGetAsEntry?.() ?? null)
-    .filter((x): x is FileSystemEntry => !!x);
-  if (!entries.length) {
-    for (const file of Array.from(dt.files)) out.push({ file, rel: '' });
-    return out;
-  }
+  const captured = items.filter(it => it.kind === 'file').map(it => {
+    let entry: FileSystemEntry | null = null;
+    try { entry = (it as DataTransferItem & { webkitGetAsEntry?: () => FileSystemEntry | null }).webkitGetAsEntry?.() ?? null; } catch { /* use File */ }
+    return { entry, file: it.getAsFile() };
+  });
+  if (!captured.length) return direct.map(file => ({ file, rel: '' }));
   const walk = async (entry: FileSystemEntry, rel: string): Promise<void> => {
     if (entry.isFile) {
       const file = await new Promise<File>((res, rej) => (entry as FileSystemFileEntry).file(res, rej));
@@ -187,7 +199,11 @@ export async function collectDrop(dt: DataTransfer): Promise<Incoming[]> {
       }
     }
   };
-  for (const entry of entries) await walk(entry, '');
+  for (const { entry, file } of captured) {
+    if (entry?.isDirectory) await walk(entry, '');
+    else if (file) out.push({ file, rel: '' });
+    else if (entry) await walk(entry, '');
+  }
   return out;
 }
 

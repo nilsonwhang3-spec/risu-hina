@@ -2286,14 +2286,22 @@ console.log('\ntest_studio_cards');
   // The picked style is edited in place - 긍정/부정 split, debounced save.
   const pos = explorer()?.querySelector('.styleedit textarea');
   check('the picked style unfolds 긍정/부정 in the column',
-        explorer()?.querySelectorAll('.styleedit textarea').length === 2,
+        explorer()?.querySelectorAll('.stylefold .styleedit textarea').length === 2,
         (explorer()?.textContent || '').slice(0, 200));
+  const temporary = explorer()?.querySelectorAll('textarea[aria-label$="(저장되지 않음)"]');
+  check('temporary positive and negative prompts have separate unsaved fields', temporary?.length === 2);
+  if (temporary?.length === 2) {
+    temporary[0].value = 'temporary-positive-test';
+    temporary[1].value = 'temporary-negative-test';
+    for (const input of temporary) input.dispatchEvent(new window.Event('input', { bubbles: true }));
+  }
   if (pos) {
     pos.value = '스모크, 최고 화질';
     pos.dispatchEvent(new window.Event('input', { bubbles: true }));
     await settle(1700);
     const saved = await (await fetch(backend.url
       + '/files/read?path=' + encodeURIComponent('studio/styles/스모크스타일.md'), { headers: auth })).json();
+    check('temporary prompts do not enter the saved style', !/temporary-(positive|negative)-test/.test(saved.content || ''));
     check('typing saves the style body (## positive)',
           /## positive[\s\S]*스모크, 최고 화질/.test(saved.content || ''),
           (saved.content || '').slice(0, 160));
@@ -3045,7 +3053,7 @@ console.log('\ntest_studio_selector');
   useBtn?.dispatchEvent(new window.Event('click', { bubbles: true }));
   await settle(400);
   check('choosing one marks it', !!document.querySelector('.panel.active .selcell.picked'));
-  clickButton(document.querySelector('.panel.active .left'), '← 그룹');
+  clickButton(document.querySelector('.panel.active .left'), '← 전체 그룹');
   await settle(300);
   check('back on the cards, the chosen group reads 선택 1',
         /선택 1/.test(card('happy')?.textContent || ''), (card('happy')?.textContent || ''));

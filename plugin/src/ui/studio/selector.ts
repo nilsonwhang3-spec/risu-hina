@@ -4,9 +4,7 @@
  * The model is the standalone image-selector tool, reimplemented in the
  * panel's idiom. Carried over unchanged because they are the design:
  *
- *   - three flags per file (use / inpaint / delete), not one radio. A
- *     candidate can be none of them, and "this one needs fixing first" is a
- *     different answer from "this one is the keeper".
+ *   - one exclusive decision per file (use / inpaint / delete), or none.
  *   - the files the rule could NOT read are a group of their own. Names are
  *     not deterministic - that is why this screen exists - so hiding the
  *     unreadable ones would hide exactly the work.
@@ -34,7 +32,7 @@ let viewMode: 'all' | 'group' | 'rep' = 'group';
  * full drawCentre re-fetched every thumbnail (the dominant review lag). */
 const cellSyncs = new Map<string, () => void>();
 let missingSync: (() => void) | null = null;
-let saveTimer: ReturnType<typeof setTimeout> | null = null;
+let saveQueue: Promise<unknown> = Promise.resolve();
 let patternTimer: ReturnType<typeof setTimeout> | null = null;
 
 // --- the grouping rule, remembered PER FOLDER (4.14) -------------------------------
@@ -220,7 +218,7 @@ export function invalidateGroups(): void {
  * changes it. */
 function groupSig(g: typeof groups): string {
   if (!g) return '';
-  return [...g.groups.flatMap((x) => x.items.map(i => `${x.key}:${i.filename}:${i.modified ?? 0}`)),
+  return [g.pattern, g.groupBy, ...g.groups.flatMap((x) => x.items.map(i => `${x.key}:${i.filename}:${i.modified ?? 0}`)),
     ...g.unmatched.map(i => `?:${i.filename}:${i.modified ?? 0}`)].sort().join('|');
 }
 
@@ -233,6 +231,7 @@ export async function pollGroups(): Promise<void> {
   if (!groups || !S.selected || groups.folder !== S.selected) return;
   const folder = groups.folder;
   try {
+    await syncProfile(folder);
     const eff = effective(prefsFor(folder));
     const fresh = await state.studio.group(folder, eff.pattern, eff.groupBy);
     if (!groups || groups.folder !== folder) return;
@@ -250,8 +249,17 @@ export async function pollGroups(): Promise<void> {
   } catch { /* the next tick tries again */ }
 }
 
-export async function loadGroups(folder: string): Promise<void> {
+async function syncProfile(folder: string): Promise<void> {
+  const profile = await state.studio.groupProfile(folder);
+  const local = effective(prefsFor(folder));
+  if (profile.exists && (local.pattern !== profile.pattern || local.groupBy !== profile.groupBy)) {
+    setPrefs(folder, { mode: profile.pattern ? 'regex' : 'default', pattern: profile.pattern, groupBy: profile.groupBy });
+  }
+}
+
+export async function loadGroups(folder: string, editedRule = false): Promise<void> {
   try {
+    if (!editedRule) await syncProfile(folder);
     const eff = effective(prefsFor(folder));
     groupsRev = state.filesRev;
     groups = await state.studio.group(folder, eff.pattern, eff.groupBy);
@@ -266,12 +274,13 @@ export async function loadGroups(folder: string): Promise<void> {
   hub.drawCentre();
 }
 
-/** Debounced, like image-selector: a click should not wait on a round trip. */
+/** Save each decision immediately, in order, bound to the originating folder. */
 function queueSave(): void {
-  if (saveTimer) clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => {
-    void state.studio.saveSelection(S.selected, selection).catch(() => { /* retried on the next click */ });
-  }, 500);
+  const folder = groups?.folder;
+  const snapshot = structuredClone(selection);
+  if (folder) saveQueue = saveQueue.then(() => state.studio.saveSelection(folder, snapshot)).catch((e) => {
+      hub.notice('검수 상태 저장 실패: ' + msg(e), 'err');
+  });
 }
 
 const SUG_LABEL: Record<string, string> = { use: '채택', delete: '버림', inpaint: '수정' };
@@ -279,10 +288,10 @@ const SUG_LABEL: Record<string, string> = { use: '채택', delete: '버림', inp
 function flag(filename: string, key: keyof SelectionState): void {
   const cur = selection[filename] || { use: false, inpaint: false, delete: false };
   const next: SelectionState = { ...cur, [key]: !cur[key] };
-  // 채택 and 버림 are answers to the same question (§1-39): turning one on
-  // turns the other off. 수정 ("fix first") stays independent.
-  if (key === 'use' && next.use) next.delete = false;
-  if (key === 'delete' && next.delete) { next.use = false; next.rep = false; }
+  if (next[key] && (key === 'use' || key === 'inpaint' || key === 'delete')) {
+    next.use = key === 'use'; next.inpaint = key === 'inpaint'; next.delete = key === 'delete';
+  }
+  if (!next.use) next.rep = false;
   // A manual flag that matches the AI's suggestion makes it a decision.
   if (next.suggest && next.suggest.verdict === key && next[key]) delete next.suggest;
   selection[filename] = next;
@@ -298,9 +307,8 @@ function applySuggest(filename: string): void {
   if (!cur || !g) return;
   const next: SelectionState = { ...cur };
   delete next.suggest;
-  if (g.verdict === 'use') { next.use = true; next.delete = false; }
-  else if (g.verdict === 'delete') { next.delete = true; next.use = false; next.rep = false; }
-  else if (g.verdict === 'inpaint') next.inpaint = true;
+  next.use = g.verdict === 'use'; next.delete = g.verdict === 'delete'; next.inpaint = g.verdict === 'inpaint';
+  if (!next.use) next.rep = false;
   selection[filename] = next;
   cellSyncs.get(filename)?.();
   missingSync?.();
@@ -445,10 +453,10 @@ export function drawSelector(node: Folder): void {
   if (drill) {
     const grp = g.groups.find((x) => x.key === drill);
     const at = g.groups.findIndex((x) => x.key === drill);
-    const nav = el('div', { class: 'row', style: { marginBottom: '8px' } });
+    const nav = el('div', { class: 'row review-nav' });
     const go = (to: number) => { drill = g.groups[to]?.key ?? drill; hub.drawCentre(); };
     const prev = el('button', { class: 'ghost tiny', text: '← 이전' }) as HTMLButtonElement;
-    const up = el('button', { class: 'ghost tiny', text: '← 그룹', title: '그룹 카드로 돌아갑니다' });
+    const up = el('button', { class: 'primary review-back', text: '← 전체 그룹', title: '전체 그룹 목록으로 돌아갑니다' });
     const next = el('button', { class: 'ghost tiny', text: '다음 →' }) as HTMLButtonElement;
     prev.disabled = at <= 0;
     next.disabled = at < 0 || at >= g.groups.length - 1;
@@ -456,7 +464,7 @@ export function drawSelector(node: Folder): void {
     next.addEventListener('click', () => go(at + 1));
     up.addEventListener('click', () => { drill = ''; viewMode = 'group'; hub.drawCentre(); });
     nav.append(up, prev, next, el('span', { class: 'sectiontitle', text: `${grp?.label || drill} · ${grp?.items.length ?? 0}장` }));
-    viewMount.appendChild(nav);
+    viewMount.prepend(nav);
     viewMount.appendChild(candidateGrid(grp?.items ?? [], grp?.items));
   } else if (viewMode === 'group') {
     const grid = el('div', { class: 'agrid selgrid', style: { gridTemplateColumns: gridCols() } });
@@ -625,7 +633,7 @@ function openRulePopover(anchor: HTMLElement, node: Folder): void {
   };
   const reload = (): void => {
     drill = '';
-    void loadGroups(node.path).then(() => { syncResult(); syncModeRow(); });
+    void loadGroups(node.path, true).then(() => { syncResult(); syncModeRow(); });
   };
   const applyDelim = (): void => {
     if (!staged.size) return;
@@ -793,6 +801,7 @@ function exportButton(node: Folder): HTMLElement {
       // No character prefix: the filenames in the folder already carry the
       // card name, and the export's canonical names key on the group.
       const eff = effective(prefsFor(node.path));
+      await saveQueue;
       await state.studio.saveSelection(node.path, selection);
       const preview = await state.studio.exportSelected(node.path, '', eff.pattern, eff.groupBy, true);
       if (preview.problems?.length) throw new Error(preview.problems.join('\n'));

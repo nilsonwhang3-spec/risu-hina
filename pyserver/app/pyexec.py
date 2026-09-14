@@ -338,6 +338,9 @@ def run(
         "truncated": len(out or "") > cap or len(err or "") > cap,
         "staged": staged,
     }
+    if result["truncated"]:
+        from . import tooloutput
+        result["fullOutputRef"] = tooloutput.save(session_id or "", "stdout:\n" + (out or "") + "\nstderr:\n" + (err or ""))
     if timed_out:
         result["error"] = f"{timeout}초 안에 끝나지 않아서 중단했습니다"
     elif aborted:
@@ -351,6 +354,10 @@ def describe_helper() -> str:
     """The helper API and the file conventions, for the tool description."""
     return textwrap.dedent("""
         `import risuhina` is available (workspace-scoped, this bot only):
+        run_python automatically creates hina/<bot>/scripts/risuhina.py and realooc.py
+        before running code and configures PYTHONPATH. Import directly; no pip install,
+        root-level helper file, or manual sys.path edit is needed. Before the first run
+        these generated files may not exist yet. `print(risuhina.__file__)` shows the path.
           risuhina.turns(start, end, role, chat_key)  ordered turns
           risuhina.turn(msg_id) / risuhina.search(needle, limit)
           risuhina.chats()      every chat of this bot
@@ -369,7 +376,7 @@ def describe_helper() -> str:
                        origin, original_json)  - 폴더는 mode='folder' 항목,
                        소속은 멤버.folder == 폴더.key
           card_fields(field, seq, body, original)  카드 프로즈 행
-          card_scripts(kind customscript|triggerscript, seq, entry_json,
+          card_scripts(kind customscript|triggerscript|assetref, seq, entry_json,
                        original_json, origin)  - Lua 코드는
                        entry_json.effect[0].code
           char_assets(seq, field image|emotion|additional|cc|vits, name, ext,
