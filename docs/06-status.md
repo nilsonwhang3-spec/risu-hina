@@ -1,4 +1,14 @@
-# 06. Implementation status — as of 2026-09-15 (v0.15.12, Risu Hina)
+# 06. Implementation status — as of 2026-09-16 (v0.15.13, Risu Hina)
+
+## 0.15.13 field fix
+
+Multiple pending AI proposal cards can now safely edit different parts of the
+same lorebook entry. Partial replacements are rebased onto the latest approved
+working copy instead of replacing it with a stale whole-entry snapshot, and a
+pending lore edit/delete/move keeps a semantic target locator so it survives a
+clean workspace reload that regenerates the private database row id. Ambiguous
+targets are refused. Regression coverage exercises two pending replacements,
+an intervening id change, and sequential approval.
 
 ## 0.15.12 field fixes
 
