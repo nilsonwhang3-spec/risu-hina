@@ -122,6 +122,26 @@ class DiscoveryTests(unittest.TestCase):
         self.ctx.deps.mode = "studio"
         self.assertIn("scope", self.tool("propose_lore_add", comment="ambiguous", keys="", content="text", reason="request"))
 
+    def test_multiple_lore_replace_cards_rebase_and_survive_row_id_change(self):
+        self.ctx.deps.mode = "bot"
+        entry = {"key": "hero", "comment": "Hero", "content": "Name: Old\nAge: 20"}
+        old_id = store.add_lore(self.ck, entry, "global")
+        cards = []
+        for find, replace in (("Old", "New"), ("20", "21")):
+            result = self.tool("propose_lore_replace", lore_id=old_id, find=find,
+                               replace=replace, reason="independent fix")
+            cards.append(re.search(r"id=([a-f0-9]+)", result).group(1))
+
+        # A clean upload rebuilds rows with new private ids while cards remain.
+        store.ingest_lore(self.ck, [entry], {}, global_reset=True)
+        new_id = store.lore(self.ck, "global")[0]["id"]
+        self.assertNotEqual(old_id, new_id)
+
+        actions.decide(cards[0], True, "bot")
+        actions.decide(cards[1], True, "bot")
+        self.assertEqual(store.lore_entry(new_id)["entry"]["content"],
+                         "Name: New\nAge: 21")
+
     def test_lore_read_defaults_and_current_chat_isolation(self):
         store.add_lore(self.ck, {"comment": "bot-canon"}, "global")
         store.add_lore(self.ck, {"comment": "current-event"}, "local", "")

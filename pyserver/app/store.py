@@ -906,6 +906,44 @@ def lore_entry(lore_id: str) -> dict | None:
     }
 
 
+def resolve_lore_id(char_key_: str, lore_id: str, target: dict | None = None) -> str:
+    """Find a pending proposal's entry after a clean reload changed row ids."""
+    current = db.one("SELECT 1 FROM lore_entries WHERE id = ? AND char_key = ? AND origin <> 'deleted'",
+                     (lore_id, char_key_))
+    if current is not None:
+        return lore_id
+    if not target:
+        raise LookupError("없는 로어북 항목입니다")
+    scope = str(target.get("scope") or "")
+    sql = ("SELECT id, seq, entry_json FROM lore_entries WHERE char_key = ? AND scope = ? "
+           "AND origin <> 'deleted'")
+    params: list[Any] = [char_key_, scope]
+    if scope == "global":
+        sql += " AND chat_key IS NULL"
+    else:
+        sql += " AND chat_key = ?"
+        params.append(target.get("chatKey"))
+    rows = [db.row_to_dict(r) for r in db.query(sql, params)]
+    wanted = target.get("entry") or {}
+    exact = [r for r in rows if db.unjs(r.get("entry_json"), {}) == wanted]
+    if len(exact) == 1:
+        return str(exact[0]["id"])
+    key = str(wanted.get("key") or "")
+    comment = str(wanted.get("comment") or "")
+    semantic = []
+    for row in rows:
+        entry = db.unjs(row.get("entry_json"), {})
+        if ((not key or str(entry.get("key") or "") == key) and
+                (not comment or str(entry.get("comment") or "") == comment)):
+            semantic.append(row)
+    if len(semantic) > 1:
+        semantic = [r for r in semantic
+                    if int(r.get("seq") or 0) == int(target.get("seq") or 0)]
+    if len(semantic) != 1:
+        raise LookupError("승인 대기 중 로어북 항목이 바뀌어 대상을 찾을 수 없습니다")
+    return str(semantic[0]["id"])
+
+
 def delete_lore(lore_id: str) -> int:
     """Delete from the working copy.
 

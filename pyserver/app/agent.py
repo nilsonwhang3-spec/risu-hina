@@ -1108,7 +1108,9 @@ def build() -> Agent[Deps]:
         entry["content"] = content
         label = entry.get("comment") or entry.get("key") or lore_id
         return _propose(ctx, "lore_edit", f"로어북 “{label}” 부분 수정({n}곳) — {reason}",
-                        {"id": lore_id, "entry": entry})
+                        {"id": lore_id, "entry": entry,
+                         "contentReplace": {"find": find, "replace": replace,
+                                            "replaceAll": bool(replace_all)}})
 
     @agent.tool
     def propose_lore_edit(ctx: RunContext[Deps], lore_id: str, content: str,
