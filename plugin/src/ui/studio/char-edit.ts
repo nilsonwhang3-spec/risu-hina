@@ -11,7 +11,7 @@
  * file picker's `accept` is a hint, not a guarantee, and a WebP saved under
  * a .png name read as 0x0 on the backend and failed every generation that
  * carried it. Character references are additionally letterboxed into the
- * 1024x1536 / 1536x1024 buckets the encoder accepts. An entry that is on
+ * 1024x1536 / 1536x1024 / 1472x1472 buckets used by NAIS. An entry that is on
  * disk in the wrong shape is flagged and refitted on save.
  */
 import { el, clear, armed } from '../dom';
@@ -44,7 +44,15 @@ interface RefEntry { file: string; strength: number; informationExtracted: numbe
 interface CharRefEntry { file: string; strength: number; fidelity: number;
                          mode: 'character' | 'character&style'; enabled: boolean; bad?: string }
 
-const BUCKETS = [[1024, 1536], [1536, 1024]] as const;
+const BUCKETS = [[1024, 1536], [1536, 1024], [1472, 1472]] as const;
+
+/** NAIS 1.0.25 processCharRefImage: choose by aspect ratio, then contain on black. */
+function charrefBucket(img: HTMLImageElement): { w: number; h: number } {
+  const ratio = img.width / img.height;
+  if (ratio > 1.2) return { w: 1536, h: 1024 };
+  if (ratio < 1 / 1.2) return { w: 1024, h: 1536 };
+  return { w: 1472, h: 1472 };
+}
 
 /** Decode any picked/stored image into an <img>. */
 async function decode(src: string): Promise<HTMLImageElement> {
@@ -59,9 +67,8 @@ async function decode(src: string): Promise<HTMLImageElement> {
 
 /** Re-encode as PNG, optionally letterboxed (black, contain) into a bucket. */
 function toPng(img: HTMLImageElement, bucket: boolean): string {
-  const portrait = img.height >= img.width;
-  const w = bucket ? (portrait ? 1024 : 1536) : img.width;
-  const h = bucket ? (portrait ? 1536 : 1024) : img.height;
+  const size = bucket ? charrefBucket(img) : { w: img.width, h: img.height };
+  const { w, h } = size;
   const canvas = document.createElement('canvas');
   canvas.width = w;
   canvas.height = h;
@@ -144,7 +151,7 @@ export function characterEditor(dir: string, opts: CharEditorOpts = {}): HTMLEle
                    onToggle: (v: boolean) => void, onRemove: () => void, onFix: (() => Promise<void>) | null,
                    controls: HTMLElement[]): HTMLElement => {
     const pic = el('div', { class: 'refpic' });
-    // A 720px thumbnail of the 1024x1536 reference, not the original (§1-55).
+    // A 720px thumbnail of the prepared reference, not the original (§1-55).
     void blobUrl(`${dir}/${file}`, '', { thumb: true, w: 720 }).then((url) => {
       if (!pic.isConnected) return;
       pic.appendChild(el('img', { src: url, alt: file }));
@@ -216,8 +223,8 @@ export function characterEditor(dir: string, opts: CharEditorOpts = {}): HTMLEle
     try {
       const img = await decode(await blobUrl(`${dir}/${v.file}`));
       const b64 = toPng(img, true);
-      const portrait = img.height >= img.width;
-      const fname = pngName(v.file, true, portrait ? 1024 : 1536, portrait ? 1536 : 1024);
+      const size = charrefBucket(img);
+      const fname = pngName(v.file, true, size.w, size.h);
       if (await uploadNow(fname, b64)) { v.file = fname; delete v.bad; }
     } catch (e) { out.textContent = msg(e); }
   };
@@ -238,7 +245,7 @@ export function characterEditor(dir: string, opts: CharEditorOpts = {}): HTMLEle
         const s = await state.fileStat(`${dir}/${v.file}`);
         const isPng = s.format === 'png';
         const ok = isPng && BUCKETS.some(([bw, bh]) => bw === s.width && bh === s.height);
-        v.bad = ok ? undefined : (isPng ? `${s.width}x${s.height} — 1024x1536 / 1536x1024 이어야 합니다` : 'PNG 가 아닙니다');
+        v.bad = ok ? undefined : (isPng ? `${s.width}x${s.height} — 1024x1536 / 1536x1024 / 1472x1472 중 하나여야 합니다` : 'PNG 가 아닙니다');
       } catch { /* a missing file shows as 읽지 못함 */ }
     }
     for (const v of vibes) {
@@ -260,8 +267,8 @@ export function characterEditor(dir: string, opts: CharEditorOpts = {}): HTMLEle
         const img = await decode(url);
         URL.revokeObjectURL(url);
         const b64 = toPng(img, true);
-        const portrait = img.height >= img.width;
-        const fname = pngName(f.name, true, portrait ? 1024 : 1536, portrait ? 1536 : 1024);
+        const size = charrefBucket(img);
+        const fname = pngName(f.name, true, size.w, size.h);
         if (!(await uploadNow(fname, b64))) continue;
         charrefs.push({ file: fname, strength: 0.6, fidelity: 0.6, mode: 'character', enabled: true });
       } catch (e) { out.textContent = `${f.name}: ${msg(e)}`; }
@@ -284,7 +291,7 @@ export function characterEditor(dir: string, opts: CharEditorOpts = {}): HTMLEle
     pickRef.value = '';
     drawRefs();
   });
-  const addCharref = el('button', { class: 'ghost tiny', text: '＋ 이미지', title: '세로 1024x1536 / 가로 1536x1024 PNG 로 맞춰 올립니다' });
+  const addCharref = el('button', { class: 'ghost tiny', text: '＋ 이미지', title: 'NAIS 규격 세로 1024x1536 / 가로 1536x1024 / 정사각 1472x1472 PNG로 맞춰 올립니다' });
   addCharref.addEventListener('click', () => pickCharref.click());
   const addVibe = el('button', { class: 'ghost tiny', text: '＋ 이미지', title: 'PNG 로 변환해 올립니다' });
   addVibe.addEventListener('click', () => pickRef.click());

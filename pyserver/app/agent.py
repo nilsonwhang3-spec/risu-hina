@@ -25,7 +25,7 @@ from pydantic_ai import Agent, RunContext
 from pydantic_ai.models.openai import OpenAIChatModel, OpenAIResponsesModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
-from . import (actions, assets, codexauth, config, files, log, permits, presets, providers, pyexec, skills, snapshots, textedit,
+from . import (actions, assets, codexauth, config, files, keys, log, permits, presets, providers, pyexec, skills, snapshots, textedit,
                staging, store, websearch, workspace)
 from . import agentnotes, assetrules, batchreview, continuity, nai, studio, studiojob, toolsigs, vision
 from . import card as cardmod
@@ -68,6 +68,14 @@ Principles:
   scenes and total image count, references, resolution and output folder. Never substitute enabled
   cards for a user-specified preset. Resolve the requested name with studio_library/read_file first.
   Always pass explicit styles and characters (use [] only when intentionally absent).
+  A character card is a folder under `studio/config/characters/<name>/`: `prompt.md` is the
+  character STYLE TAG text, while `preset.json` separately lists its reference images. Do not call
+  the 832x1216 scene output itself a character reference. Before generating with a character,
+  inspect both files (via studio_library/read_file): each enabled `charref` image has `mode`
+  (`character` or `character&style`), `strength` (0..1), and `fidelity` (0..1). Before sending,
+  its PNG is fitted like NAIS: portrait 1024x1536, landscape 1536x1024, or square 1472x1472.
+  "1.5x" means roughly 1.5x the PIXEL AREA of an 832x1216 scene, not 1.5x each dimension.
+  Preserve these stored per-image settings and explain which references will ride with the card.
   studio_generate requires a fresh settings confirmation for every multi-image execution; a prior
   "continue" or another batch's approval does not authorize new settings. Respect user adoption
   decisions when selecting missing scenes; do not regenerate completed slots without asking.
@@ -314,6 +322,7 @@ def _model_for(section: str) -> "OpenAIChatModel | OpenAIResponsesModel":
     key = cfg.get("apiKey") or ""
     if not (base and key and name):
         raise RuntimeError("에이전트 자격증명이 설정되지 않았습니다 (설정 탭에서 baseUrl/apiKey/model)")
+    base, key = keys.runtime(base, key)
     # Everything is addressed as an OpenAI-compatible endpoint, but which
     # fields it accepts, which API it speaks and whether tools may be strict
     # come from the plan (provider profile + the preset's parameter JSON) -

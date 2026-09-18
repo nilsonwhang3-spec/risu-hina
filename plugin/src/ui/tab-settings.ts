@@ -470,8 +470,12 @@ function buildKeysCard(): HTMLElement {
       const want = provider.value.trim().toLowerCase();
       const p = want ? profiles.find((x) => x.id === want || x.name.toLowerCase() === want
         || x.hosts.some((h) => want.includes(h))) : null;
+      const vertex = p?.id === 'vertex' || ['vertex', 'vertex ai', 'vertexai'].includes(want);
       clear(provNote);
       provNote.style.display = p ? '' : 'none';
+      vertexRow.style.display = vertex ? '' : 'none';
+      vertexPicker.style.display = vertex ? '' : 'none';
+      if (vertex) syncVertexUrl();
       if (!p) return;
       provNote.appendChild(el('div', {}, [el('b', { text: p.name })]));
       provNote.appendChild(el('div', { class: 'hint', text: p.api ? 'API 주소: ' + p.api : 'API 주소: 프로젝트마다 다릅니다 — 아래 Base URL 직접 지정' }));
@@ -492,6 +496,31 @@ function buildKeysCard(): HTMLElement {
     const note = el('input', { value: existing?.note ?? '', placeholder: '메모 (선택)' }) as HTMLInputElement;
     const baseUrl = el('input', { value: existing?.baseUrl ?? '', placeholder: 'Base URL (프로바이더 이름으로 못 찾을 때만 · 예: https://generativelanguage.googleapis.com/v1beta/openai)' }) as HTMLInputElement;
     const urlRow = el('label', { class: 'field', style: { display: existing?.baseUrl ? '' : 'none' } }, [el('span', { text: 'Base URL 직접 지정' }), baseUrl]);
+    const oldRegion = existing?.baseUrl?.match(/locations\/([^/]+)/)?.[1] ?? 'global';
+    const region = el('input', { value: oldRegion, placeholder: 'global' }) as HTMLInputElement;
+    const vertexFile = el('input', { type: 'file', accept: '.json,application/json', style: { display: 'none' } }) as HTMLInputElement;
+    const vertexPicker = el('button', { class: 'ghost tiny', text: '서비스 계정 JSON 선택', style: { display: 'none' } });
+    const vertexRow = el('label', { class: 'field', style: { display: 'none' } }, [el('span', { text: 'Vertex 리전' }), region]);
+    const syncVertexUrl = () => {
+      try {
+        const data = JSON.parse(apiKey.value || '{}') as { project_id?: string };
+        const project = String(data.project_id ?? '').trim();
+        const location = region.value.trim().toLowerCase() || 'global';
+        if (!project) return;
+        const host = location === 'global' ? 'aiplatform.googleapis.com' : `${location}-aiplatform.googleapis.com`;
+        baseUrl.value = `https://${host}/v1/projects/${project}/locations/${location}/endpoints/openapi`;
+        urlRow.style.display = '';
+      } catch { /* the backend supplies the authoritative JSON validation */ }
+    };
+    vertexPicker.addEventListener('click', () => vertexFile.click());
+    vertexFile.addEventListener('change', async () => {
+      const file = vertexFile.files?.[0];
+      if (!file) return;
+      apiKey.value = await file.text();
+      if (!name.value.trim()) name.value = 'Google Vertex AI';
+      syncVertexUrl();
+    });
+    region.addEventListener('input', syncVertexUrl);
     const urlToggle = el('button', { class: 'ghost tiny', text: 'Base URL 직접 지정' });
     urlToggle.addEventListener('click', () => { urlRow.style.display = urlRow.style.display === 'none' ? '' : 'none'; });
     const save = el('button', { class: 'primary tiny', text: existing ? '저장' : '추가' }) as HTMLButtonElement;
@@ -502,6 +531,7 @@ function buildKeysCard(): HTMLElement {
       el('div', { class: 'hint', style: { marginTop: '-4px', marginBottom: '10px' }, text: '이름을 고르면 주소를 압니다. 주소가 따로 있으면 아래 직접 지정.' }),
       provNote,
       el('label', { class: 'field' }, [el('span', { text: 'API 키' }), apiKey]),
+      vertexPicker, vertexFile, vertexRow,
       el('label', { class: 'field' }, [el('span', { text: '메모' }), note]),
       urlRow,
       el('div', { class: 'row' }, [save, cancel, urlToggle]),
@@ -512,6 +542,7 @@ function buildKeysCard(): HTMLElement {
       try {
         await state.saveApiKey({
           name: name.value, provider: provider.value, baseUrl: baseUrl.value, note: note.value,
+          region: region.value || 'global',
           apiKey: apiKey.value ? apiKey.value : (existing ? keepSentinel : ''),
         }, existing?.id);
         say(existing ? '키를 저장했습니다. 이 키를 쓰는 프리셋에 바로 적용됩니다.' : '키를 추가했습니다. 에이전트 탭의 프리셋에서 고를 수 있습니다.', 'ok');

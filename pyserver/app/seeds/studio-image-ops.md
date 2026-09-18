@@ -65,6 +65,39 @@ cwd 는 `hina/<봇이름>/` 이니 라이브러리는 `../../studio/output/…` 
 올라가거나, `find_files("*.png", base="studio/output")` 로 찾은 전역 경로를
 `os.environ["RISUHINA_WORKSPACE"]` 에 이어 붙여 절대 경로로 연다.
 
+## 캐릭터 스타일 카드와 캐릭터 레퍼런스
+
+둘은 같은 것이 아니다. `studio/config/characters/<캐릭터>/prompt.md`에는 생성 프롬프트에
+합성할 **캐릭터 스타일 태그**가 저장된다. 같은 폴더의 `preset.json`에는 별도로 레퍼런스
+이미지 목록과 이미지별 설정이 저장된다.
+
+```json
+{
+  "refMode": "charref",
+  "charref": [{
+    "file": "reference-1024x1536.png",
+    "mode": "character",
+    "strength": 0.6,
+    "fidelity": 0.6,
+    "enabled": true
+  }]
+}
+```
+
+- `mode`: `character`(캐릭터만) 또는 `character&style`(캐릭터와 화풍)
+- `strength`: 레퍼런스 영향 강도, 0~1
+- `fidelity`: 원본 캐릭터를 따르는 충실도, 0~1
+- `refMode`: `charref`와 `vibe` 중 실제로 실을 한 종류. 두 목록은 함께 전송되지 않는다.
+- 캐릭터 레퍼런스 PNG는 일반 세로 생성물 `832x1216`을 그대로 보내지 않는다. NAIS 1.0.25의
+  `processCharRefImage`와 같이 원본 비율이 `1.2`보다 크면 **가로 `1536x1024`**, `1/1.2`보다
+  작으면 **세로 `1024x1536`**, 그 사이면 **정사각 `1472x1472`**로 맞춘다. 비율을 유지한
+  검정 contain/letterbox 방식이다. 여기서 “약 1.5배”는 `832x1216` 대비 총 픽셀 면적을
+  뜻하며 가로·세로를 각각 1.5배 한다는 뜻이 아니다.
+
+캐릭터를 사용하는 배치를 계획할 때 `studio_library`로 표시 이름을 찾는 데 그치지 말고
+`read_file`로 그 카드의 `prompt.md`와 `preset.json`을 함께 확인한다. 스타일 태그와 활성
+레퍼런스, 각 이미지의 mode/strength/fidelity를 구분해 설명하고 저장값을 임의로 바꾸지 않는다.
+
 ## 배치 스펙 — 임시 프리셋은 프리셋 목록에 만들지 않는다
 
 `studio_plan`/`studio_generate` 의 spec 은 카드를 **표시 이름**으로 받고

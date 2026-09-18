@@ -228,6 +228,10 @@ def h_config_test(arg: dict) -> dict:
     if not (base and key and model):
         return {"ok": False, "stage": "config", "error": "baseUrl · apiKey · model 이 모두 필요합니다"}
 
+    try:
+        base, key = keys.runtime(base, key)
+    except ValueError as e:
+        return {"ok": False, "stage": "auth", "error": str(e)}
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {key}"}
     # The same request the agent will make: the plan decides the API
     # (chat/completions or responses), the cap field, and what not to send.

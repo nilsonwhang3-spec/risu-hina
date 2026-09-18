@@ -77,6 +77,11 @@ def save(values: dict, key_id: str | None = None) -> dict:
         api_key = str(raw).strip()
     provider = str(values.get("provider") or "").strip()
     base_url = str(values.get("baseUrl") or "").strip().rstrip("/")
+    if provider.lower() in ("vertex", "vertex ai", "vertexai"):
+        from . import vertexauth
+        info = vertexauth.service_account_info(api_key)
+        region = str(values.get("region") or "global").strip() or "global"
+        base_url = vertexauth.base_url(str(info["project_id"]), region)
     if not base_url and provider:
         # The provider names the endpoint: models.dev knows the OpenAI-
         # compatible base for most, so the page asks for a provider, not a URL.
@@ -116,3 +121,11 @@ def resolve(base_url: str, api_key: str, key_ref: str) -> tuple[str, str]:
     if k is None:
         return base_url, api_key
     return (base_url or k["baseUrl"]), (k["apiKey"] or api_key)
+
+
+def runtime(base_url: str, api_key: str) -> tuple[str, str]:
+    """Exchange stored Vertex JSON for a renewable request-time OAuth token."""
+    if "aiplatform.googleapis.com" in (base_url or "").lower() and (api_key or "").lstrip().startswith("{"):
+        from . import vertexauth
+        return base_url, vertexauth.access_token(api_key)
+    return base_url, api_key

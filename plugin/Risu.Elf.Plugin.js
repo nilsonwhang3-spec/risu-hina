@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.15.13
+//@display-name Risu Hina v0.15.14
 //@api 3.0
-//@version 0.15.13
+//@version 0.15.14
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -104,7 +104,7 @@
       this.tokenSafe = true;
       this.lastHealth = body;
       this.probeInfo = "";
-      this.gate = versionGate("0.15.13", String(body.version || ""));
+      this.gate = versionGate("0.15.14", String(body.version || ""));
       return body;
     }
     /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -10290,9 +10290,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     });
   }
   function renameEntry(e) {
-    const anchor = viewMount?.querySelector(".filebar") ?? viewMount;
-    if (!anchor) return;
-    namePopover(anchor, {
+    askName("\uC774\uB984 \uBC14\uAFB8\uAE30", {
       label: `${e.name} \u2192 \uC0C8 \uC774\uB984`,
       value: e.name,
       ok: "\uBC14\uAFB8\uAE30",
@@ -13355,10 +13353,10 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           return;
         }
         if (!r.newer) {
-          const mismatch = r.current !== "0.15.13";
+          const mismatch = r.current !== "0.15.14";
           const ahead = r.ahead ?? (!!r.latest && r.latest !== r.current);
           say(
-            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.13"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
+            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.14"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
             mismatch || ahead ? "" : "ok"
           );
           return;
@@ -13449,7 +13447,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.15.13",
+            version: "0.15.14",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -13905,8 +13903,12 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       const syncProv = () => {
         const want = provider.value.trim().toLowerCase();
         const p = want ? profiles.find((x) => x.id === want || x.name.toLowerCase() === want || x.hosts.some((h) => want.includes(h))) : null;
+        const vertex = p?.id === "vertex" || ["vertex", "vertex ai", "vertexai"].includes(want);
         clear(provNote);
         provNote.style.display = p ? "" : "none";
+        vertexRow.style.display = vertex ? "" : "none";
+        vertexPicker.style.display = vertex ? "" : "none";
+        if (vertex) syncVertexUrl();
         if (!p) return;
         provNote.appendChild(el("div", {}, [el("b", { text: p.name })]));
         provNote.appendChild(el("div", { class: "hint", text: p.api ? "API \uC8FC\uC18C: " + p.api : "API \uC8FC\uC18C: \uD504\uB85C\uC81D\uD2B8\uB9C8\uB2E4 \uB2E4\uB985\uB2C8\uB2E4 \u2014 \uC544\uB798 Base URL \uC9C1\uC811 \uC9C0\uC815" }));
@@ -13928,6 +13930,32 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       const note = el("input", { value: existing?.note ?? "", placeholder: "\uBA54\uBAA8 (\uC120\uD0DD)" });
       const baseUrl = el("input", { value: existing?.baseUrl ?? "", placeholder: "Base URL (\uD504\uB85C\uBC14\uC774\uB354 \uC774\uB984\uC73C\uB85C \uBABB \uCC3E\uC744 \uB54C\uB9CC \xB7 \uC608: https://generativelanguage.googleapis.com/v1beta/openai)" });
       const urlRow = el("label", { class: "field", style: { display: existing?.baseUrl ? "" : "none" } }, [el("span", { text: "Base URL \uC9C1\uC811 \uC9C0\uC815" }), baseUrl]);
+      const oldRegion = existing?.baseUrl?.match(/locations\/([^/]+)/)?.[1] ?? "global";
+      const region = el("input", { value: oldRegion, placeholder: "global" });
+      const vertexFile = el("input", { type: "file", accept: ".json,application/json", style: { display: "none" } });
+      const vertexPicker = el("button", { class: "ghost tiny", text: "\uC11C\uBE44\uC2A4 \uACC4\uC815 JSON \uC120\uD0DD", style: { display: "none" } });
+      const vertexRow = el("label", { class: "field", style: { display: "none" } }, [el("span", { text: "Vertex \uB9AC\uC804" }), region]);
+      const syncVertexUrl = () => {
+        try {
+          const data = JSON.parse(apiKey.value || "{}");
+          const project = String(data.project_id ?? "").trim();
+          const location = region.value.trim().toLowerCase() || "global";
+          if (!project) return;
+          const host = location === "global" ? "aiplatform.googleapis.com" : `${location}-aiplatform.googleapis.com`;
+          baseUrl.value = `https://${host}/v1/projects/${project}/locations/${location}/endpoints/openapi`;
+          urlRow.style.display = "";
+        } catch {
+        }
+      };
+      vertexPicker.addEventListener("click", () => vertexFile.click());
+      vertexFile.addEventListener("change", async () => {
+        const file = vertexFile.files?.[0];
+        if (!file) return;
+        apiKey.value = await file.text();
+        if (!name.value.trim()) name.value = "Google Vertex AI";
+        syncVertexUrl();
+      });
+      region.addEventListener("input", syncVertexUrl);
       const urlToggle = el("button", { class: "ghost tiny", text: "Base URL \uC9C1\uC811 \uC9C0\uC815" });
       urlToggle.addEventListener("click", () => {
         urlRow.style.display = urlRow.style.display === "none" ? "" : "none";
@@ -13940,6 +13968,9 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         el("div", { class: "hint", style: { marginTop: "-4px", marginBottom: "10px" }, text: "\uC774\uB984\uC744 \uACE0\uB974\uBA74 \uC8FC\uC18C\uB97C \uC555\uB2C8\uB2E4. \uC8FC\uC18C\uAC00 \uB530\uB85C \uC788\uC73C\uBA74 \uC544\uB798 \uC9C1\uC811 \uC9C0\uC815." }),
         provNote,
         el("label", { class: "field" }, [el("span", { text: "API \uD0A4" }), apiKey]),
+        vertexPicker,
+        vertexFile,
+        vertexRow,
         el("label", { class: "field" }, [el("span", { text: "\uBA54\uBAA8" }), note]),
         urlRow,
         el("div", { class: "row" }, [save, cancel, urlToggle])
@@ -13955,6 +13986,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
             provider: provider.value,
             baseUrl: baseUrl.value,
             note: note.value,
+            region: region.value || "global",
             apiKey: apiKey.value ? apiKey.value : existing ? keepSentinel : ""
           }, existing?.id);
           say(existing ? "\uD0A4\uB97C \uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4. \uC774 \uD0A4\uB97C \uC4F0\uB294 \uD504\uB9AC\uC14B\uC5D0 \uBC14\uB85C \uC801\uC6A9\uB429\uB2C8\uB2E4." : "\uD0A4\uB97C \uCD94\uAC00\uD588\uC2B5\uB2C8\uB2E4. \uC5D0\uC774\uC804\uD2B8 \uD0ED\uC758 \uD504\uB9AC\uC14B\uC5D0\uC11C \uACE0\uB97C \uC218 \uC788\uC2B5\uB2C8\uB2E4.", "ok");
@@ -14100,7 +14132,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.13"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.14"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -17115,7 +17147,13 @@ ${doc.negative.trim()}
     clear(S.viewMount);
     S.viewMount.appendChild(characterEditor(dir, { chrome: "centre" }));
   }
-  var BUCKETS = [[1024, 1536], [1536, 1024]];
+  var BUCKETS = [[1024, 1536], [1536, 1024], [1472, 1472]];
+  function charrefBucket(img) {
+    const ratio = img.width / img.height;
+    if (ratio > 1.2) return { w: 1536, h: 1024 };
+    if (ratio < 1 / 1.2) return { w: 1024, h: 1536 };
+    return { w: 1472, h: 1472 };
+  }
   async function decode(src) {
     const img = new Image();
     await new Promise((res, rej) => {
@@ -17126,9 +17164,8 @@ ${doc.negative.trim()}
     return img;
   }
   function toPng(img, bucket) {
-    const portrait = img.height >= img.width;
-    const w = bucket ? portrait ? 1024 : 1536 : img.width;
-    const h = bucket ? portrait ? 1536 : 1024 : img.height;
+    const size = bucket ? charrefBucket(img) : { w: img.width, h: img.height };
+    const { w, h } = size;
     const canvas = document.createElement("canvas");
     canvas.width = w;
     canvas.height = h;
@@ -17319,8 +17356,8 @@ ${doc.negative.trim()}
       try {
         const img = await decode(await blobUrl(`${dir}/${v.file}`));
         const b64 = toPng(img, true);
-        const portrait = img.height >= img.width;
-        const fname = pngName(v.file, true, portrait ? 1024 : 1536, portrait ? 1536 : 1024);
+        const size = charrefBucket(img);
+        const fname = pngName(v.file, true, size.w, size.h);
         if (await uploadNow(fname, b64)) {
           v.file = fname;
           delete v.bad;
@@ -17347,7 +17384,7 @@ ${doc.negative.trim()}
           const s = await state.fileStat(`${dir}/${v.file}`);
           const isPng = s.format === "png";
           const ok = isPng && BUCKETS.some(([bw, bh]) => bw === s.width && bh === s.height);
-          v.bad = ok ? void 0 : isPng ? `${s.width}x${s.height} \u2014 1024x1536 / 1536x1024 \uC774\uC5B4\uC57C \uD569\uB2C8\uB2E4` : "PNG \uAC00 \uC544\uB2D9\uB2C8\uB2E4";
+          v.bad = ok ? void 0 : isPng ? `${s.width}x${s.height} \u2014 1024x1536 / 1536x1024 / 1472x1472 \uC911 \uD558\uB098\uC5EC\uC57C \uD569\uB2C8\uB2E4` : "PNG \uAC00 \uC544\uB2D9\uB2C8\uB2E4";
         } catch {
         }
       }
@@ -17369,8 +17406,8 @@ ${doc.negative.trim()}
           const img = await decode(url);
           URL.revokeObjectURL(url);
           const b64 = toPng(img, true);
-          const portrait = img.height >= img.width;
-          const fname = pngName(f.name, true, portrait ? 1024 : 1536, portrait ? 1536 : 1024);
+          const size = charrefBucket(img);
+          const fname = pngName(f.name, true, size.w, size.h);
           if (!await uploadNow(fname, b64)) continue;
           charrefs.push({ file: fname, strength: 0.6, fidelity: 0.6, mode: "character", enabled: true });
         } catch (e) {
@@ -17397,7 +17434,7 @@ ${doc.negative.trim()}
       pickRef.value = "";
       drawRefs();
     });
-    const addCharref = el("button", { class: "ghost tiny", text: "\uFF0B \uC774\uBBF8\uC9C0", title: "\uC138\uB85C 1024x1536 / \uAC00\uB85C 1536x1024 PNG \uB85C \uB9DE\uCDB0 \uC62C\uB9BD\uB2C8\uB2E4" });
+    const addCharref = el("button", { class: "ghost tiny", text: "\uFF0B \uC774\uBBF8\uC9C0", title: "NAIS \uADDC\uACA9 \uC138\uB85C 1024x1536 / \uAC00\uB85C 1536x1024 / \uC815\uC0AC\uAC01 1472x1472 PNG\uB85C \uB9DE\uCDB0 \uC62C\uB9BD\uB2C8\uB2E4" });
     addCharref.addEventListener("click", () => pickCharref.click());
     const addVibe = el("button", { class: "ghost tiny", text: "\uFF0B \uC774\uBBF8\uC9C0", title: "PNG \uB85C \uBCC0\uD658\uD574 \uC62C\uB9BD\uB2C8\uB2E4" });
     addVibe.addEventListener("click", () => pickRef.click());
@@ -21118,7 +21155,7 @@ ${negative.value.trim()}
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.13"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.14"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
@@ -21214,7 +21251,7 @@ ${negative.value.trim()}
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.15.13" }),
+        el("span", { class: "dim", text: "v0.15.14" }),
         healthEl,
         el("span", { class: "spacer" }),
         reload,
@@ -21531,6 +21568,6 @@ ${negative.value.trim()}
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.15.13"} loaded`);
+    console.log(`[risu-hina] v${"0.15.14"} loaded`);
   })();
 })();

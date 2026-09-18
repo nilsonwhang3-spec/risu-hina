@@ -427,11 +427,18 @@ def _bare_model(model: str) -> str:
 def unsupported_for(profile: dict | None, model: str) -> tuple[list[str], list[str], str]:
     """Fields the profile says this endpoint+model rejects, the notes why, and
     the API ('chat' | 'responses') the profile picks for this model."""
+    # GitHub Copilot and compatible relays expose GPT-5.6 Sol through the
+    # Responses surface only. Their user-supplied base URL is not stable enough
+    # to identify by host, so recognise the model instead of silently falling
+    # back to our unknown-provider default (/chat/completions).
+    bare = _bare_model((model or "").strip().lower())
+    copilot_responses = (bare.startswith("gpt-5.6-") or bare.startswith("gpt-6-"))
+    model_endpoint = "responses" if copilot_responses else ""
     if not profile:
-        return [], [], "chat"
+        return [], ([f"{bare} 은 /responses 엔드포인트를 자동으로 사용합니다."] if model_endpoint else []), (model_endpoint or "chat")
     fields = list(profile.get("unsupported") or [])
     notes: list[str] = []
-    endpoint = str(profile.get("endpoint") or "chat")
+    endpoint = model_endpoint or str(profile.get("endpoint") or "chat")
     name = (model or "").strip().lower()
     for rule in profile.get("modelRules") or []:
         hit = any(name.startswith(pfx) or _bare_model(name).startswith(pfx) for pfx in rule.get("prefix", []))
@@ -661,7 +668,9 @@ def hint(text: str, section_label: str = "에이전트") -> str:
     not one. The JSON is exactly what the preset editor takes."""
     low = (text or "").lower()
     where = f"설정 → {section_label} → 프리셋 수정 → 파라미터 JSON"
-    if "function tools with reasoning_effort are not supported" in low or "use /v1/responses" in low:
+    if ("function tools with reasoning_effort are not supported" in low or "use /v1/responses" in low
+            or "unsupported_api_for_model" in low
+            or "is not accessible via the /chat/completions endpoint" in low):
         return (f"이 모델은 Chat Completions 에서 툴 호출을 거부합니다. {where} 에 "
                 '{"api": "responses"} 를 넣어 Responses API 로 보내세요 (또는 {"reasoning_effort": "none"}).')
     name = rejected_field(text)

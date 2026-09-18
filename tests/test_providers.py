@@ -47,6 +47,13 @@ check("unknown gateway: chat API", pl.api == "chat")
 check("unknown gateway: max_completion_tokens", pl.cap_field == "max_completion_tokens")
 check("temperature None is not sent", "temperature" not in pl.settings)
 check("output cap is sent", pl.settings.get("max_tokens") == 32000)
+pl = P.plan_for(cfg(model="gpt-5.6-sol"))
+check("Copilot gpt-5.6-sol: responses API even on a custom endpoint", pl.api == "responses", pl.api)
+pl = P.plan_for(cfg(model="openai/gpt-5.6-sol"))
+check("Copilot namespaced gpt-5.6-sol: responses API", pl.api == "responses", pl.api)
+for copilot_model in ("gpt-5.6-luna", "gpt-5.6-terra", "gpt-6-astra"):
+    pl = P.plan_for(cfg(model=copilot_model))
+    check(f"Copilot {copilot_model}: responses API", pl.api == "responses", pl.api)
 pl = P.plan_for(cfg(temperature=0.3, reasoning="high", flex=True, cache=True))
 check("numbers become settings", pl.settings.get("temperature") == 0.3
       and pl.settings.get("openai_reasoning_effort") == "high"
@@ -119,6 +126,8 @@ check("openai unsupported parameter quoted", '{"store": null}' in H("Unsupported
 check("gemini unknown name", '{"user": null}' in H('Invalid JSON payload received. Unknown name "user": Cannot find field.'))
 check("tools + reasoning on chat completions", '"api": "responses"' in H(
     "Function tools with reasoning_effort are not supported for gpt-5.6-sol in /v1/chat/completions."))
+check("unsupported API error points to responses", '"api": "responses"' in H(
+    "model gpt-5.6-sol is not accessible via the /chat/completions endpoint; unsupported_api_for_model"))
 check("max_output_tokens", '{"max_tokens": null}' in H("body: {'detail': 'Unsupported parameter: max_output_tokens'}"))
 check("strict", '{"strict": false}' in H("unknown field \"strict\" in tools[0].function"))
 check("unrelated errors get no hint", H("Internal server error") == "" and H("401 unauthorized") == "")
