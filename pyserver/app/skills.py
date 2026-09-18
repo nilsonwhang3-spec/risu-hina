@@ -67,7 +67,8 @@ TEXT_EXT = {".md", ".txt", ".py", ".json", ".yaml", ".yml", ".csv", ".html", ".j
 # key re-runs seed_once, which dedupes by name, so existing installs gain
 # only the new skill.
 # v7 added "보고 조정하기" (the vision loop, §1-42).
-SEED_KEY = "skills_seeded_v7"
+# v8 adds simulation-bot structure and state-management guidance.
+SEED_KEY = "skills_seeded_v8"
 FOLDER_KEY = "skills_folders_v1"
 SEED_DIR = Path(__file__).resolve().parent / "seeds"
 
@@ -737,9 +738,11 @@ SEED_FILES: dict[str, tuple[str, str, bool]] = {
     "risuai-cbs.md": ("RisuAI CBS 문법",
                       "봇 카드·로어북·정규식·프롬프트의 `{{tag}}` (CBS) 문법을 읽거나 써야 할 때. {{getvar}}·{{random}} 같은 태그의 뜻이 필요할 때.", True),
     "risuai-lorebook-style.md": ("RisuAI 로어북 작성 규칙",
-                                 "로어북 항목을 새로 쓰거나 고칠 때 반드시. ### 제목·#### 소제목·불릿 형식, 우선순위 숫자 표(300~2000), 영/한/일 키워드, 폴더, 상시 항목 규칙. 실리태번식 @@ 헤더 금지.", True),
+                                 "로어북 항목을 새로 쓰거나 고칠 때 반드시. ### 이하·[] 제목 위계, 낮은 우선순위부터 배치·예산 절단, 총합·개별 로어북 구성, @@ 지정 위치, 유사 의미의 우선순위 대역과 전체 순서 검토.", True),
     "risuai-lorebook.md": ("RisuAI 로어북 구조",
                            "봇 로어북(global, 봇에 영구 저장·여러 챗에서 재사용)과 챗 로어북(local, 특정 챗 전용)의 구조·발동 조건(key·데코레이터·삽입 위치)을 정할 때.", True),
+    "risuai-simbot.md": ("RisuAI 시뮬봇 구조와 제작",
+                          "여러 캐릭터가 등장하는 시뮬봇을 설계·제작하거나 구조를 점검할 때. 세계관·주요 캐릭터·NPC·장소·배경·사건 구성, 총합/개별 로어북, 공개/내부 상태, Tag Output·Regex·Lua·CBS 연계, 선택적 ID별 저장·리롤/삭제 복원.", True),
     "risuai-hooks.md": ("RisuAI 처리 순서 (정규식·Lua 훅)",
                         "Regex(editinput/editoutput/editprocess/editdisplay)·Lua listenEdit(editRequest 등)·트리거가 한 턴에서 언제 어떤 순서로 돌고 무엇이 저장되는지. 정규식·트리거·배경 HTML 을 만들거나 고칠 때, 태그가 요청/화면/저장본 어디에 남는지 설명할 때.", True),
     "risuai-lua.md": ("RisuAI Lua 트리거",
@@ -844,6 +847,52 @@ def refresh_lore_scope_once() -> None:
         save(current["name"], description, LORE_SCOPE_NOTE + "\n" + current["body"],
              slug=current["slug"], always=current.get("always", False))
     db.mark_migration(LORE_SCOPE_KEY)
+
+
+LORE_AUTHORING_KEY = "skills_lore_authoring_v1"
+LORE_AUTHORING_MARKER = "<!-- risuhina-lore-authoring-v1 -->"
+LORE_AUTHORING_NOTES = {
+    "RisuAI 로어북 작성 규칙": ("risuai-lorebook-style.md", """로어북 작성·수정 시 아래 최신 지침을 따른다. 아래의 기존 자료와 충돌하면 이 지침이 우선이다.
+- 내용 헤딩은 ###, ####, [] 등으로 쓴다. ##는 상위 프롬프트용이므로 로어북에는 H3 이하를 쓴다.
+- 낮은 우선순위부터 위에서 아래로 배치되고 예산 부족 시 낮은 우선순위부터 잘린다.
+  덩어리 일부가 길이 예산 때문에 잘리는 것은 불가피한 경우 허용한다.
+- 전체 지도인 총합 로어북(예: NPC LIST)과 활성화 시 주입할 개별 상세 로어북을 나눈다.
+- @@position·@@depth·@@end 등 중요 항목의 지정 위치(예: 끝부분)는 일반 배열과 별도로 보존한다.
+  모든 @@ 데코레이터가 위치를 지정하는 것은 아니다.
+- 캐릭터·월드 이벤트·세계 설정·개인 성격 등 유사 의미가 가까운 우선순위에 모였는지,
+  그룹·개별 항목의 ###/####/[] 제목 위계가 맞는지, 전체 순서에서 바로잡을 부분이 있는지 검토한다.
+- 여러 캐릭터가 등장하는 시뮬봇의 전체 구성은 'RisuAI 시뮬봇 구조와 제작' 스킬을 참고한다.
+"""),
+    "RisuAI 로어북 구조": ("risuai-lorebook.md", """우선순위·배치의 최신 지침: 일반 로어북은 낮은 우선순위부터 위에서 아래로 배치된다.
+길이 예산 부족 시 낮은 우선순위부터 잘리며, 불가피한 덩어리 일부 절단은 허용한다.
+@@position·@@depth·@@end 등으로 위치를 정한 중요 항목은 해당 지정 위치에 들어간다.
+아래 기존 자료에 높은 insertorder가 먼저 배치된다는 설명이 있으면 이 지침을 우선한다.
+"""),
+    "RisuAI CBS 문법": ("risuai-cbs.md", """CBS 비교식에서 ::=::는 동작하지 않는다. {{#when::A::=::B}}처럼 쓰지 않는다.
+문자열 동등 비교는 {{#when::A::is::B}} 또는 {{#when::{{equal::A::B}}}}를 쓴다.
+"""),
+}
+
+
+def refresh_lore_authoring_once() -> None:
+    """Update older skill guidance without replacing user-edited references/state."""
+    if db.has_migration(LORE_AUTHORING_KEY):
+        return
+    for skill in list_all():
+        note = LORE_AUTHORING_NOTES.get(skill["name"].strip())
+        if note is None:
+            continue
+        current = get(skill["slug"])
+        if not current or LORE_AUTHORING_MARKER in current["body"]:
+            continue
+        filename, guidance = note
+        reference = _dir(skill["slug"]) / "references" / filename
+        if reference.is_file() and reference.read_bytes() == (SEED_DIR / filename).read_bytes():
+            continue  # Fresh/current references already contain this guidance.
+        save(current["name"], current["description"],
+             LORE_AUTHORING_MARKER + "\n" + guidance + "\n" + current["body"],
+             slug=current["slug"], always=current.get("always", False))
+    db.mark_migration(LORE_AUTHORING_KEY)
 
 
 def refresh_studio_ops_once() -> None:

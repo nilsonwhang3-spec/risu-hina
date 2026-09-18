@@ -1,4 +1,18 @@
-# 06. Implementation status — as of 2026-09-16 (v0.15.13, Risu Hina)
+# 06. Implementation status — as of 2026-09-19 (v0.15.15, Risu Hina)
+
+## 0.15.15 skill guidance
+
+Adds simulation-bot authoring guidance grounded in three local reference cards:
+world/cast/NPC/place/background/event structure, overview and detail lorebooks,
+public versus internal state, Tag Output/Regex/Lua/CBS integration, and optional
+response-ID snapshots for reroll/deletion recovery. Lorebook heading, priority,
+budget and ordering guidance is corrected, and CBS documents that `::=::` does
+not work as a comparison. Existing installations gain the new skill; older
+lorebook/CBS skills receive a one-time guidance preface while custom reference
+files, descriptions, enabled flags and ordering remain intact.
+Validation: full release gate (including the real-model agent and plugin smoke),
+17 discovery regressions, 3 skill upgrade regressions, and both archive content/CRC/checksum checks passed.
+
 
 ## 0.15.13 field fix
 
