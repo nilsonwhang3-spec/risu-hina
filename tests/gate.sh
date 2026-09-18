@@ -24,6 +24,7 @@ run() {
 }
 
 run "chatfmt round-trip"      "$PY" tests/test_roundtrip.py
+run "skill guidance upgrades" "$PY" tests/test_skill_guidance.py
 run "provider plan & hints"   "$PY" tests/test_providers.py
 run "history thinking ids"    "$PY" tests/test_history.py
 run "partial replace"         "$PY" tests/test_textedit.py
