@@ -28,7 +28,7 @@
 import { el, clear, armed, modal, menuAt, popover, svg, ICON, iconBtn, type ArmedControl } from './dom';
 import { treeRow, installDrop, installDrag, type TreeNode, type TreeSpec, type Incoming } from './tree';
 import { state, type FileArea, type FileListing, type WorkspaceFile } from '../state';
-import { makeTab, namePopover, askName, type NoticeKind, type TabUi } from './kit';
+import { makeTab, askName, type NoticeKind, type TabUi } from './kit';
 import { blobUrl, workspaceImage, watchImage, unloadByDefault } from './blobimg';
 import { renderMarkdown } from './markdown';
 import { showArtifact } from './artifact';
@@ -1069,9 +1069,13 @@ function treeNewFolder(where: string): void {
 }
 
 function renameEntry(e: { path: string; name: string }): void {
-  const anchor = (viewMount?.querySelector('.filebar') as HTMLElement | null) ?? viewMount;
-  if (!anchor) return;
-  namePopover(anchor, {
+  // This used to be an anchored namePopover on the whole filebar. Besides
+  // being far from the row the user clicked, that popover was mounted and
+  // measured while its body was still empty; in the real iframe the input
+  // could collapse/land outside it and leave only the submit button visible.
+  // A rename is a focused edit, so use the same stable name modal as the
+  // studio file tree and preselect the current name there.
+  askName('이름 바꾸기', {
     label: `${e.name} → 새 이름`,
     value: e.name,
     ok: '바꾸기',

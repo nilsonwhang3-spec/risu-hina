@@ -45,6 +45,16 @@ class DiscoveryTests(unittest.TestCase):
         for text in ("import risuhina", "import realooc", "PYTHONPATH", "risuhina.conn()", "assetref"):
             self.assertIn(text, description)
 
+    def test_character_reference_guidance_distinguishes_card_text_and_images(self):
+        for text in ("prompt.md", "preset.json", "character&style", "strength",
+                     "fidelity", "1024x1536", "1472x1472", "832x1216"):
+            self.assertIn(text, agent.INSTRUCTIONS)
+        guide = (Path(__file__).resolve().parents[1] / "pyserver" / "app" / "seeds" /
+                 "studio-image-ops.md").read_text(encoding="utf-8")
+        for text in ("캐릭터 스타일 태그", '"mode": "character"', '"strength": 0.6',
+                     '"fidelity": 0.6', "1024x1536", "1536x1024", "1472x1472"):
+            self.assertIn(text, guide)
+
     def test_large_script_raw_search_patch_file_import_and_stale_approval(self):
         self.ctx.deps.mode = "bot"
         original = '-- 한글 \\n "quoted"\r\n' * 9000 + 'local tail = "old"\n'

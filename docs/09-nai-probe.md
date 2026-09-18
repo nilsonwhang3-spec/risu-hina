@@ -361,7 +361,7 @@ The accepted request, in full (only the director_* keys differ from §3's set):
 
 ```json
 "parameters": { …the usual v4 set…,
-  "director_reference_images": ["<base64 PNG at 1024x1536 or 1536x1024>"],
+  "director_reference_images": ["<base64 PNG at 1024x1536, 1536x1024, or 1472x1472>"],
   "director_reference_descriptions": [{"caption": {"base_caption": "", "char_captions": []}, "legacy_uc": false}],
   "director_reference_information_extracted": [1.0],
   "director_reference_strength_values": [0.6]

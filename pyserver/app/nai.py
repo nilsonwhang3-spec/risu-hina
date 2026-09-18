@@ -291,7 +291,7 @@ def _unzip(raw: bytes, what: str) -> bytes:
 # The only sizes the internal /encode-director service accepts (docs/09 §7d);
 # anything else is an opaque 400 from inside NovelAI, so the check lives here
 # where the refusal can name the buckets.
-CHARREF_BUCKETS = ((1024, 1536), (1536, 1024))
+CHARREF_BUCKETS = ((1024, 1536), (1536, 1024), (1472, 1472))
 # 5 Anlas per accepted generation carrying a director reference - measured
 # four runs in a row at tier 3, no cache (docs/09 §7d). A CERTAIN cost.
 CHARREF_ANLAS = 5
@@ -373,7 +373,8 @@ def check_charref_png(png: bytes, name: str = "") -> None:
     w, h = png_size(png)
     if (w, h) not in CHARREF_BUCKETS:
         raise NaiError(
-            f"캐릭터 레퍼런스는 1024x1536(세로) 또는 1536x1024(가로) PNG 여야 합니다"
+            f"캐릭터 레퍼런스는 1024x1536(세로), 1536x1024(가로), "
+            f"1472x1472(정사각) PNG 중 하나여야 합니다"
             f"{f': {name}' if name else ''} (지금 {w}x{h}) — 패널이 올릴 때 맞춰 줍니다")
 
 

@@ -749,7 +749,7 @@ SEED_FILES: dict[str, tuple[str, str, bool]] = {
     "charx_unpack.py": ("charx 풀기",
                         "사용자가 올린 .charx 카드를 읽기 좋은 폴더로 풀어 조사해야 할 때.", True),
     "studio-image-ops.md": ("에셋 스튜디오 이미지 가공",
-                            "에셋 스튜디오의 이미지를 크기 조절·자르기·포맷 변환·메타데이터 제거해야 할 때. Pillow 는 배포 번들에 없어 run_python 에서 설치해 쓴다.", True),
+                            "에셋 스튜디오 이미지 가공과 캐릭터 스타일 카드·캐릭터 레퍼런스를 다룰 때. prompt.md 스타일 태그, preset.json의 mode·강도·충실도, NAIS 레퍼런스 버킷 규칙. Pillow는 run_python에서 설치한다.", True),
     "vision-loop.md": ("보고 조정하기 (이미지 생성 루프)",
                        "생성한 이미지를 직접 보고(view_image) 프롬프트·파라미터를 하나씩 고쳐 다시 생성할 때, 폴더의 후보를 검수해 채택/버림 제안을 적을 때. \"보고 고쳐\", \"맞는지 확인해\", \"검수해\" 같은 요청.", True),
     "arca-html.md": ("아카라이브 HTML 작성",
@@ -817,7 +817,7 @@ def defaults_once() -> None:
 
 # Rotating the key re-copies the seed into existing installs on next boot -
 # _v2 added the batch-spec section (inline scenes, name addressing, adhoc dir).
-STUDIO_OPS_KEY = "skills_studio_ops_space_v3"
+STUDIO_OPS_KEY = "skills_studio_ops_charref_v4"
 
 LORE_SCOPE_KEY = "skills_lore_scope_v1"
 LORE_SCOPE_NOTE = """<!-- risuhina-lore-scope-v1 -->

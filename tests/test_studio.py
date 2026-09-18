@@ -710,9 +710,11 @@ from app import nai  # noqa: E402
 check("charref is v4.5 only", nai.supports_charref("nai-diffusion-4-5-full")
       and not nai.supports_charref("nai-diffusion-5-full"))
 bucket = studio.make_mask(1024, 1536, [])
+square_bucket = studio.make_mask(1472, 1472, [])
 wrong = studio.make_mask(1024, 1024, [])
 try:
     nai.check_charref_png(bucket)
+    nai.check_charref_png(square_bucket)
     print("  ok   a bucket-sized PNG passes the check")
 except nai.NaiError as e:
     check("a bucket-sized PNG passes the check", False, str(e))
@@ -721,7 +723,7 @@ try:
     check("an off-bucket PNG is refused with the buckets named", False)
 except nai.NaiError as e:
     check("an off-bucket PNG is refused with the buckets named",
-          "1024x1536" in str(e) and "x.png" in str(e), str(e))
+          "1024x1536" in str(e) and "1472x1472" in str(e) and "x.png" in str(e), str(e))
 
 p = nai.build_parameters("1girl", "blurry", {}, None,
                          [{"image": "AAAA", "mode": "character&style", "strength": 0.8, "fidelity": 0.25}])
