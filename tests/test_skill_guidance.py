@@ -59,6 +59,26 @@ class SkillGuidanceTests(unittest.TestCase):
         skills.seed_once()
         self.assertEqual(before, {x["slug"]: x["revision"] for x in skills.list_all()})
 
+    def test_preset_guidance_upgrade_preserves_custom_content_and_state(self):
+        name = "RisuAI 시뮬봇 구조와 제작"
+        old = "모든 인물을 매 장면에 등장시킬 필요는 없으며 유저의 선택을 대신 확정하지 않는다."
+        created = skills.save(name, "custom", "custom body", enabled=False, always=True, sort_order=37)
+        skills.put_file(created['slug'], 'references/risuai-simbot.md', ('custom reference\n' + old).encode('utf-8'))
+        skills.refresh_preset_scope_once()
+        updated = skills.get(created['slug'])
+        self.assertIn(skills.PRESET_SCOPE_NOTE, updated['body'])
+        self.assertIn('custom body', updated['body'])
+        self.assertFalse(updated['enabled'])
+        self.assertTrue(updated['always'])
+        self.assertEqual(updated['sortOrder'], 37)
+        ref = (skills.root()/created['slug']/'references/risuai-simbot.md').read_text(encoding='utf-8')
+        self.assertIn('custom reference', ref)
+        self.assertIn(skills.PRESET_SCOPE_NOTE, ref)
+        self.assertNotIn(old, ref)
+        revision = updated['revision']
+        skills.refresh_preset_scope_once()
+        self.assertEqual(skills.get(created['slug'])['revision'], revision)
+
     def test_current_reference_does_not_get_duplicate_guidance(self):
         name = "RisuAI CBS 문법"
         filename = "risuai-cbs.md"

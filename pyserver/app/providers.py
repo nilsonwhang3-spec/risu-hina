@@ -152,7 +152,7 @@ PROFILES: list[dict[str, Any]] = [
         "name": "Google Vertex AI",
         "api": "",
         "hosts": ["aiplatform.googleapis.com"],
-        "auth": "Authorization: Bearer <OAuth 액세스 토큰> (gcloud auth application-default print-access-token, 약 1시간 만료) — API 키·express mode 불가",
+        "auth": "서비스 계정 JSON 키 파일 — Hina가 OAuth 액세스 토큰을 자동 발급·갱신합니다. 수동 Bearer 토큰 입력은 필요하지 않습니다.",
         "modelExample": "google/gemini-2.5-flash",
         "endpoint": "chat",
         "capField": "max_tokens",
@@ -160,8 +160,9 @@ PROFILES: list[dict[str, Any]] = [
         "unsupported": [],
         "modelRules": [],
         "template": {"reasoning_effort": "low"},
-        "note": "Base URL: https://<리전>-aiplatform.googleapis.com/v1/projects/<프로젝트>/locations/<리전>/endpoints/openapi . "
-                "지원하지 않는 파라미터는 무시합니다. 토큰이 1시간마다 만료돼 상시 사용에는 AI Studio 키를 권합니다.",
+        "note": "JSON의 프로젝트 ID와 선택한 리전으로 API 주소를 구성합니다. "
+                "액세스 토큰은 보통 1시간 뒤 만료되지만, 요청 시 자동 갱신하므로 JSON 키와 권한이 유효하면 1시간 이후에도 계속 사용할 수 있습니다. "
+                "Express mode는 별도의 API 키·엔드포인트를 사용하며 현재 Hina의 Vertex 연결에서는 지원하지 않습니다. JSON 업로드로 Express mode가 활성화되지는 않습니다.",
         "docs": "https://docs.cloud.google.com/vertex-ai/generative-ai/docs/multimodal/call-vertex-using-openai-library",
     },
     {

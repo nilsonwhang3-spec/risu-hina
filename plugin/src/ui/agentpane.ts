@@ -15,6 +15,7 @@ import { AgentPanel, type AgentPanelHooks } from './agent';
 import { state, type StagedEdit } from '../state';
 
 let panel: AgentPanel | null = null;
+let panelContext = '';
 
 /** Whoever is currently interested in staged proposals and notices. */
 let hooks: AgentPanelHooks = {
@@ -24,6 +25,7 @@ let hooks: AgentPanelHooks = {
 };
 
 export function agentPanel(): AgentPanel {
+  syncAgentContext();
   if (!panel) {
     // The indirection matters: the panel captures this object once, and the
     // tabs swap what it points at.
@@ -51,6 +53,7 @@ export function bindAgent(next: Partial<AgentPanelHooks>): void {
  */
 // A prompt a screen asked for (검수's AI 재검수): typed into the one panel.
 state.onChange(() => {
+  syncAgentContext();
   const text = state.promptRequest;
   if (!text) return;
   state.promptRequest = null;
@@ -83,6 +86,14 @@ export function mountAgent(into: HTMLElement): void {
   }
   p.syncPlaceholder();
   void p.load();
+}
+
+function syncAgentContext(): void {
+  const key = JSON.stringify([state.contextRevision, state.activeCharKey, state.activeChatKey]);
+  if (key === panelContext) return;
+  panelContext = key;
+  resetAgentPane();
+  state.sessionId = '';
 }
 
 export function resetAgentPane(): void {

@@ -16,7 +16,7 @@
  * long run does not become a wall of identical chips.
  */
 import { el, clear, popover, TOOL_GLYPH, PAPER_PLANE, ICON, pollWhileVisible } from './dom';
-import { state, type StagedEdit, type AgentSessionInfo, type PendingAction } from '../state';
+import { state, type StagedEdit, type AgentSessionInfo, type PendingAction, type WorkPlan } from '../state';
 import { renderMarkdown } from './markdown';
 import { workspaceImage, evictBlob, smallScreen } from './blobimg';
 import { showArtifact } from './artifact';
@@ -43,12 +43,17 @@ export class AgentPanel {
   private historyBtn: HTMLButtonElement;
   private busy = false;
   private loaded = false;
+  private destroyed = false;
   private picker: HTMLInputElement;
   /** Workspace paths uploaded for the message being composed. */
   private attached: string[] = [];
   private attachBar = el('div', { class: 'attachbar', style: { display: 'none' } });
   private actionBox: HTMLElement;
   /** out/ paths already offered, so the card does not churn every refresh. */
+  private planBox = el('div', { class: 'agentplan' });
+  private modeButton = el('button', { class: 'ghost tiny', text: '실행 모드', title: '계획 모드에서는 조사와 계획 작성만 진행합니다' });
+  private planOpen = false;
+  private folds: Record<string, boolean> = {};
   private outSeen = '';
   private outPrimed = false;
 
@@ -57,6 +62,7 @@ export class AgentPanel {
     this.stagedBox = el('div', { class: 'stagedbox' });
     this.actionBox = el('div', { class: 'stagedbox' });
     this.status = el('div', { class: 'hint grow' });
+    this.modeButton.addEventListener('click', () => void this.switchMode());
 
     const fresh = el('button', {
       class: 'ghost tiny', title: '지금 대화를 접고 새 대화를 시작합니다', text: '새 대화',
@@ -117,7 +123,8 @@ export class AgentPanel {
     // (Drops target the whole panel now - installDrop below the root.)
 
     this.root = el('div', { class: 'agentpanel' }, [
-      el('div', { class: 'agenthead' }, [this.status, fresh, this.historyBtn]),
+      el('div', { class: 'agenthead' }, [this.status, this.modeButton, fresh, this.historyBtn]),
+      this.planBox,
       this.log,
       this.stagedBox,
       this.actionBox,
@@ -276,7 +283,9 @@ export class AgentPanel {
     this.log.appendChild(loading);
     try {
       const s = await state.agentSession(sessionId, limit);
+      if (this.destroyed) return;
       loading.remove();
+      this.setPlan(s.plan ?? { revision: 0, mode: 'execute', document: '', tasks: [] });
       if (!s.agentReady) {
         this.status.textContent = '';
         this.log.appendChild(el('div', { class: 'notice' }, [
@@ -392,6 +401,7 @@ export class AgentPanel {
   private async refreshOutputs(): Promise<void> {
     try {
       const listing = await state.files();
+      if (this.destroyed) return;
       // Deliverables live at projects/<봇>/out/ in the global space (§1-33;
       // the legacy hina/<봇>/out is still watched for an old backend). Every
       // bot's out is watched: only one agent runs here at a time, and a
@@ -456,6 +466,7 @@ export class AgentPanel {
   }
 
   private setActions(items: PendingAction[]): void {
+    if (this.destroyed) return;
     clear(this.actionBox);
     if (!items.length) return;
 
@@ -551,8 +562,7 @@ export class AgentPanel {
       unfold.textContent = open ? '접기' : `그 외 ${rest.length}건 보기`;
     });
 
-    this.actionBox.appendChild(el('div', { class: 'card staged' }, [
-      el('h2', { text: `승인 요청 ${items.length}건` }),
+    this.actionBox.appendChild(this.foldCard('actions', `승인 요청 ${items.length}건`, [
       el('div', { class: 'hint', text: '승인해야 실행됩니다. 전사 수정이 아닌 변경입니다.' }),
       items.length > 1 ? el('div', { class: 'row', style: { margin: '6px 0' } }, [allYes, allNo, progress]) : null,
       ...shown,
@@ -662,7 +672,7 @@ export class AgentPanel {
   private async submit(): Promise<void> {
     const typed = this.input.value.trim();
     // An attachment on its own is a complete message: "here, look at this".
-    if ((!typed && !this.attached.length && !this.attachedAssets.length) || this.busy) return;
+    if ((!typed && !this.attached.length && !this.attachedAssets.length) || this.busy || this.modeButton.disabled) return;
 
     // The paths go in the message rather than the file contents. The agent has
     // read_file, so it fetches what it needs and only what it needs - and a
@@ -683,6 +693,7 @@ export class AgentPanel {
       : typed;
 
     this.busy = true;
+    this.modeButton.disabled = true;
     this.input.value = '';
     this.clearAttachments();
     this.send.disabled = true;
@@ -835,9 +846,14 @@ export class AgentPanel {
 
     try {
       for await (const ev of state.agentChat(prompt, abort.signal)) {
+        if (this.destroyed) break;
         const e = ev as Record<string, unknown>;
         if (e.type !== 'text') flushText();
         switch (e.type) {
+          case 'plan': {
+            this.setPlan(e.plan as WorkPlan);
+            break;
+          }
           case 'card-writeback': {
             const status = el('div', { class: 'notice', text: '요청하신 변경을 RisuAI에 저장하는 중입니다…' });
             bubble.insertBefore(status, thinking);
@@ -1053,6 +1069,8 @@ export class AgentPanel {
       // a stream that closed without 'done') still gets its footer.
       if (this.timer !== null) finish('종료');
       this.busy = false;
+      this.modeButton.disabled = false;
+      if (!this.destroyed && state.sessionId) void state.workPlan().then((p) => this.setPlan(p)).catch(() => {});
       this.send.disabled = false;
       this.scroll();
     }
@@ -1063,6 +1081,7 @@ export class AgentPanel {
 
   /** Take the panel down for good: the running turn, its clock, its DOM. */
   destroy(): void {
+    this.destroyed = true;
     try { this.abortCtl?.abort(); } catch { /* not running */ }
     this.clearTimer();
     this.root.remove();
@@ -1095,6 +1114,7 @@ export class AgentPanel {
   }
 
   private async refreshStaged(): Promise<void> {
+    if (this.destroyed) return;
     await Promise.all([state.refreshChanges(), state.refreshBotChanges()]);
     try {
       this.setStaged(await state.stagedEdits());
@@ -1104,6 +1124,7 @@ export class AgentPanel {
   }
 
   private setStaged(items: StagedEdit[]): void {
+    if (this.destroyed) return;
     clear(this.stagedBox);
     this.hooks.onStagedChanged(items);
     if (!items.length) return;
@@ -1150,8 +1171,7 @@ export class AgentPanel {
       }
     });
 
-    this.stagedBox.appendChild(el('div', { class: 'card staged' }, [
-      el('h2', { text: `승인 대기 ${items.length}건` }),
+    this.stagedBox.appendChild(this.foldCard('staged', `승인 대기 ${items.length}건`, [
       el('div', { class: 'hint', text: summary + ' — 왼쪽 패널에 미리보기로 표시했습니다.' }),
       ...items.slice(0, 8).map((i) => el('div', { class: 'stagedrow' }, [
         el('span', { class: 'badge warn', text: label(i.op) }),
@@ -1160,6 +1180,54 @@ export class AgentPanel {
       items.length > 8 ? el('div', { class: 'hint', text: `그 외 ${items.length - 8}건` }) : null,
       el('div', { class: 'row', style: { marginTop: '8px' } }, [approve, reject]),
     ]));
+  }
+
+  private foldCard(key: string, title: string, children: (Node | null)[]): HTMLElement {
+    const card = el('details', { class: 'card staged proposal-fold' });
+    card.open = this.folds[key] ?? !smallScreen();
+    card.appendChild(el('summary', { text: title + ' · 펼치기/접기' }));
+    card.appendChild(el('div', { class: 'proposal-body' }, children));
+    card.addEventListener('toggle', () => { this.folds[key] = card.open; });
+    return card;
+  }
+
+  private setPlan(plan: WorkPlan): void {
+    if (this.destroyed) return;
+    this.modeButton.textContent = plan.mode === 'plan' ? '계획 모드' : '실행 모드';
+    clear(this.planBox);
+    if (!plan.document && !plan.tasks.length && plan.mode !== 'plan') return;
+    const done = plan.tasks.filter((t) => t.status === 'completed').length;
+    const current = plan.tasks.find((t) => t.status === 'in_progress');
+    const panel = el('details');
+    panel.open = this.planOpen;
+    panel.addEventListener('toggle', () => { this.planOpen = panel.open; });
+    panel.appendChild(el('summary', { text: `계획 · Todo ${done}/${plan.tasks.length}` + (current ? ` · ${current.title}` : '') }));
+    const body = el('div', { class: 'plan-body' });
+    body.appendChild(el('div', { class: 'hint', text: plan.mode === 'plan'
+      ? '조사와 계획 작성만 진행합니다. 검토 후 실행 모드로 전환하세요.'
+      : '계획을 참조해 하나씩 진행합니다. 개별 변경 제안은 별도 승인이 필요합니다.' }));
+    if (plan.document) body.appendChild(renderMarkdown(plan.document));
+    const labels = { pending: '대기', in_progress: '진행 중', blocked: '차단', completed: '완료' };
+    for (const task of plan.tasks) body.appendChild(el('div', { class: 'plan-task' }, [
+      el('span', { class: 'badge', text: labels[task.status] }),
+      el('span', { text: task.title }),
+      task.evidence ? el('div', { class: 'hint', text: task.evidence }) : null,
+    ]));
+    panel.appendChild(body);
+    this.planBox.appendChild(panel);
+  }
+
+  private async switchMode(): Promise<void> {
+    if (this.busy || this.modeButton.disabled) return;
+    this.modeButton.disabled = true;
+    const sendDisabled = this.send.disabled;
+    this.send.disabled = true;
+    try {
+      const latest = await state.workPlan();
+      if (this.destroyed) return;
+      this.setPlan(await state.workPlan(latest.mode === 'plan' ? 'execute' : 'plan', latest.revision));
+    } catch (e) { this.hooks.notice(msg(e), 'err'); }
+    finally { this.modeButton.disabled = false; this.send.disabled = sendDisabled; }
   }
 
   private scroll(): void {

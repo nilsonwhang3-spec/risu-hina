@@ -3147,6 +3147,50 @@ console.log('\ntest_files_copy_and_previews');
         (document.querySelector('.panel.active .filelist')?.textContent || '').slice(0, 160));
 }
 
+console.log('\ntest_bot_switch_resets_workspace_and_agent');
+{
+  // Earlier scenarios selected another chat in Hina; settle the host's live
+  // chat first so the repeat-open assertion compares the same bot AND chat.
+  await registered[0].cb();
+  await settle(700);
+  clickById(document, 'tab-files');
+  await settle(500);
+  const previousPanel = document.querySelector('.panel.active .agentpanel');
+  previousPanel.querySelector('.agentlog').textContent = 'PREVIOUS BOT AI CONVERSATION';
+  previousPanel.querySelector('.agentinput').value = 'previous bot unsent draft';
+  // Reopening the SAME bot keeps the active conversation and draft.
+  await registered[0].cb();
+  await settle(700);
+  check('same bot reopen retains the agent panel', document.querySelector('.panel.active .agentpanel') === previousPanel);
+  check('same bot reopen retains the draft', previousPanel.querySelector('.agentinput').value === 'previous bot unsent draft');
+
+  const project = 'New Switch Bot';
+  mkdirSync(join(backend.data, 'space', 'projects', project), { recursive: true });
+  writeFileSync(join(backend.data, 'space', 'projects', project, 'new-bot.md'), 'new bot project');
+  // The same host slot is reused, just like selecting a newly created card.
+  await host.api.setCharacterToIndex(0, { chaId: 'new-switch-bot', name: project, description: '',
+    chats: [makeChat('new-switch-chat', 'New chat', 0)], chatPage: 0 });
+  const sessionReads = [];
+  let switchedWorkspace;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, opts) => {
+    const parsed = new URL(String(url));
+    if (parsed.pathname === '/session' && (!opts?.method || opts.method === 'GET')) sessionReads.push(parsed.searchParams.get('chatKey'));
+    const response = await originalFetch(url, opts);
+    if (parsed.pathname === '/workspace' && opts?.method === 'POST') switchedWorkspace = (await response.clone().json()).workspace;
+    return response;
+  };
+  try { await registered[0].cb(); await settle(1300); }
+  finally { globalThis.fetch = originalFetch; }
+  const nextPanel = document.querySelector('.panel.active .agentpanel');
+  check('changing bots replaces the shared agent panel', !!nextPanel && nextPanel !== previousPanel);
+  check('previous bot AI messages are cleared', !nextPanel?.textContent.includes('PREVIOUS BOT AI CONVERSATION'));
+  check('previous bot draft is cleared', nextPanel?.querySelector('.agentinput')?.value === '');
+  check('new bot loads its own conversation context', sessionReads.length > 0 && sessionReads.every(key => key === switchedWorkspace?.chats[0]?.chatKey), JSON.stringify(sessionReads));
+  check('workspace selects the new bot project', /New Switch Bot/.test(document.querySelector('.panel.active .filepad')?.textContent || ''));
+  check('new bot project files are visible', /new-bot.md/.test(document.querySelector('.panel.active .filepad')?.textContent || ''));
+}
+
 console.log('\ntest_no_character_selected');
 host.selectNone();
 clickById(document, 'tab-chats');

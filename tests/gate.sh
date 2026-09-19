@@ -25,6 +25,8 @@ run() {
 
 run "chatfmt round-trip"      "$PY" tests/test_roundtrip.py
 run "skill guidance upgrades" "$PY" tests/test_skill_guidance.py
+run "durable plans and learning review" "$PY" tests/test_workplan.py
+run "Vertex token renewal"    "$PY" tests/test_vertexauth.py
 run "provider plan & hints"   "$PY" tests/test_providers.py
 run "history thinking ids"    "$PY" tests/test_history.py
 run "partial replace"         "$PY" tests/test_textedit.py
@@ -63,6 +65,8 @@ if [ -d plugin/node_modules ]; then
   run "shell server responsiveness" "$PY" tests/test_shell_responsiveness.py
   run "plugin typecheck" node plugin/node_modules/typescript/bin/tsc -p plugin/tsconfig.json --noEmit
   run "cross-view file clipboard" node tests/test_file_clipboard.mjs
+  run "planning and mobile proposal UI" node tests/agent_planning_ui.mjs
+  run "bot context switching" node tests/bot_context.mjs
   run "asset upload concurrency" node tests/asset_concurrency.mjs
   run "plugin build"     node plugin/build.config.mjs
   run "plugin smoke (real DOM + real backend)" node tests/plugin_smoke.mjs

@@ -881,15 +881,39 @@ def h_session_get(arg: dict) -> dict:
         "vision": vision.ready(),
     }
     if s is not None:
+        if s["chat_key"] != tk:
+            raise ApiError(404, "이 챗의 대화가 아닙니다")
         out["session"] = {"sessionId": s["id"], "chatKey": s["chat_key"], "title": s["title"]}
         out["messages"] = session.messages(s["id"], limit or None)
         out["messagesTotal"] = session.messages_total(s["id"])
+        from . import workplan
+        out["plan"] = workplan.get(s["id"])
     return out
 
 
 async def h_chat(arg: dict) -> Any:
     """Streaming is handled in the dispatcher; this only validates."""
     raise ApiError(500, "streaming route must be dispatched directly")
+
+
+def h_workplan_get(arg: dict) -> dict:
+    return h_workplan({k: v for k, v in arg.items() if k in ('sessionId', 'chatKey')})
+
+
+def h_workplan(arg: dict) -> dict:
+    from . import workplan
+    sid = str(arg.get("sessionId") or "")
+    found = session.load(sid)
+    if found is None or found['chatKey'] != _chat(arg):
+        raise ApiError(404, "이 챗의 대화가 아닙니다")
+    if "mode" in arg:
+        if sid in session._ACTIVE:
+            raise ApiError(409, "실행을 중단한 뒤 모드를 전환해 주세요")
+        try:
+            return workplan.save(sid, int(arg.get("revision", -1)), mode=arg['mode'])
+        except (ValueError, TypeError) as e:
+            raise ApiError(409, str(e))
+    return workplan.get(sid)
 
 
 def h_sessions(arg: dict) -> dict:
@@ -1211,6 +1235,11 @@ def h_agent_usage(arg: dict) -> dict:
         "cacheShare": round(sum(t["cacheRead"] for t in turns) / tot_in, 2) if tot_in else 0,
         "since": min(t["ts"] for t in turns),
     }
+
+
+def h_agent_learning(arg: dict) -> dict:
+    from . import learning
+    return {"reviews": learning.recent(str(arg.get("charKey") or ""))}
 
 
 def h_agent_notes(arg: dict) -> dict:
@@ -2466,6 +2495,7 @@ ROUTES: dict[str, Handler] = {
     "POST /agent/stop": h_agent_stop,
     "GET /agent/usage": h_agent_usage,
     "GET /agent/notes": h_agent_notes,
+    "GET /agent/learning": h_agent_learning,
     "POST /agent/notes/save": h_agent_note_save,
     "POST /agent/notes/delete": h_agent_note_delete,
     "GET /agent/context": h_agent_context,
@@ -2583,6 +2613,8 @@ ROUTES: dict[str, Handler] = {
     "POST /session": h_session_create,
     "GET /session": h_session_get,
     "GET /sessions": h_sessions,
+    "GET /agent/plan": h_workplan_get,
+    "POST /agent/plan": h_workplan,
     "GET /staged": h_staged,
     "POST /approve": h_approve,
     "POST /staged/clear": h_staged_clear,
@@ -3028,6 +3060,7 @@ async def _startup() -> None:
     await run_in_threadpool(skills.refresh_studio_ops_once)
     await run_in_threadpool(skills.refresh_lore_scope_once)
     await run_in_threadpool(skills.refresh_lore_authoring_once)
+    await run_in_threadpool(skills.refresh_preset_scope_once)
     # The per-bot user files and the old studio library move into the global
     # space once (space_v1). Move + manifest only; tools/rollback_space.py
     # replays the manifest in reverse.

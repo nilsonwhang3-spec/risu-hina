@@ -1,4 +1,68 @@
-# 06. Implementation status — as of 2026-09-19 (v0.15.15, Risu Hina)
+# 06. Implementation status — as of 2026-09-19 (v0.15.16, Risu Hina)
+
+## 0.15.16: preset ownership guidance
+
+Bot/lorebook authoring follows prompt-preset options for lorebook insertion,
+narrative viewpoint and user portrayal. The earlier fixed user-choice restriction
+is removed from the simulation-bot guide. Existing installs receive the same
+clarification once while preserving custom references and enabled/order settings.
+Validation: full release gate ALL GREEN, including the real-model agent and full
+plugin smoke; both archives passed CRC, checksums and equality checks for all 83
+application source files and the bundled plugin.
+
+## 0.15.16: plans, Todo tracking and learning
+
+The agent header switches between planning and execution per conversation.
+Planning permits an explicit list of research tools and plan/handoff recording;
+a server capability blocks every other tool, including scripts, proposals,
+generation and persistent memory/skill edits. Only the UI/API can change mode;
+mode changes refuse active runs and do not approve pending changes.
+
+`read_plan`/`update_plan` persist a Markdown document and stable-ID tasks in the
+session journal, with revision conflict detection, one active task, and evidence
+for completed/blocked tasks. Each model request receives the latest plan when
+it changes; compaction preserves the latest snapshot and a fresh conversation
+starts independently. The panel shows progress, current task, document and
+verification evidence. Users send their next instruction after switching to
+execution; switching itself does not start a paid model request.
+
+Both proposal card types now collapse to a count, default collapsed on mobile.
+Refreshes and incoming proposals preserve the user's fold choice. Opening or
+closing a card never approves anything.
+
+Learning instructions now explicitly distinguish assistant notes/skills from
+RisuAI memory edits requiring review. They are first-class agent instructions,
+not only prose inside a handoff-data block. Substantial tool work gets one final
+learning-review reminder if skipped; the agent saves verified memories/skills
+or records why no update is warranted. No lesson is fabricated automatically.
+The settings panel exposes recent reviews, including a missed review after the
+single reminder. Memory-disabled settings remain authoritative; plan mode defers
+learning writes. Skill improvement also works without a selected bot.
+
+The development data has no user conversation journal, so the user's historical
+cessation cannot be dated here. Conflicting approval wording and lack of an
+end-of-turn review checkpoint were confirmed in the source; persistence and
+model retry behavior are covered by offline regression tests.
+
+## 0.15.16: Vertex authentication guidance
+
+Vertex settings now describe service-account JSON upload and automatic OAuth
+renewal instead of manual one-hour Bearer tokens or an AI Studio workaround.
+The credential label and URL hint match the JSON flow. Express mode uses a
+separate API key and endpoint; this connector does not implement it, and JSON
+upload does not enable it. Token caching and renewal are verified offline with
+a simulated clock, including requests more than one hour after the first token.
+Sources: [OAuth and renewal](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/migrate/openai/auth-and-credentials),
+[Express mode](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/start/express-mode/overview).
+
+## 0.15.16: bot selection context
+
+Reopening the panel after selecting another RisuAI character clears the active
+workspace, chat/session pointers, pending navigation and cached agent panel.
+The files tab reloads on bot identity changes and selects that bot's project;
+stored projects and conversation history remain intact. Reopening the same bot
+and chat keeps its current panel and draft. Responses from the previous bot's workspace,
+turn, session and change-summary requests cannot restore the old selection.
 
 ## 0.15.15 skill guidance
 

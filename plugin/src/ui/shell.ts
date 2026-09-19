@@ -672,7 +672,7 @@ function setBootPhase(text: string): void {
  * manifest twice. The in-flight promise makes the second caller join the first
  * instead of starting another multi-megabyte upload.
  */
-let uploadInFlight: Promise<void> | null = null;
+let uploadInFlight: { revision: number; promise: Promise<void> } | null = null;
 /**
  * Say what the re-open merge did, once, in one line.
  *
@@ -697,11 +697,13 @@ function announceMerge(): void {
 }
 
 async function uploadAfterConnect(force = false): Promise<void> {
-  if (uploadInFlight) return uploadInFlight;
+  const revision = state.contextRevision;
+  if (uploadInFlight?.revision === revision) return uploadInFlight.promise;
   if (!state.slot || state.slotError) return;
-  uploadInFlight = (async () => {
+  const promise = (async () => {
     try {
       await state.upload({ force });
+      if (revision !== state.contextRevision) return;
       announceMerge();
       if (state.activeChatKey) await state.loadTurns();
     } catch (e) {
@@ -709,10 +711,12 @@ async function uploadAfterConnect(force = false): Promise<void> {
       state.emit();
     }
   })();
+  const pending = { revision, promise };
+  uploadInFlight = pending;
   try {
-    await uploadInFlight;
+    await promise;
   } finally {
-    uploadInFlight = null;
+    if (uploadInFlight === pending) uploadInFlight = null;
   }
 }
 

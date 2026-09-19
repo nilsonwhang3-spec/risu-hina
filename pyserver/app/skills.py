@@ -895,6 +895,46 @@ def refresh_lore_authoring_once() -> None:
     db.mark_migration(LORE_AUTHORING_KEY)
 
 
+PRESET_SCOPE_KEY = "skills_preset_scope_v1"
+PRESET_SCOPE_MARKER = "<!-- risuhina-preset-scope-v1 -->"
+PRESET_SCOPE_NOTE = '<!-- risuhina-preset-scope-v1 -->\nRisuAI는 별도의 프롬프트 제작자가 제공하는 프롬프트 프리셋에서 로어북 삽입 순서, 서술 시점, 대필 유무를 옵션으로 지정한다. 봇카드와 로어북에는 세계관·인물·사건·상태 및 봇 고유 시스템을 작성하고, 해당 서술 옵션은 프리셋 설정을 따른다. 프리셋의 제어 옵션은 제작 지식으로만 참고하고 봇카드·로어북 본문에 별도 규칙으로 기재하지 않는다.\n'
+PRESET_SCOPE_FILES = {
+    "RisuAI 시뮬봇 구조와 제작": "risuai-simbot.md",
+    "RisuAI 로어북 작성 규칙": "risuai-lorebook-style.md",
+    "RisuAI 로어북 구조": "risuai-lorebook.md",
+}
+
+
+def refresh_preset_scope_once() -> None:
+    """Add preset ownership guidance; preserve custom material and enable/order choices."""
+    if db.has_migration(PRESET_SCOPE_KEY):
+        return
+    old = '모든 인물을 매 장면에 등장시킬 필요는 없으며 유저의 선택을 대신 확정하지 않는다.'
+    replacement = '모든 인물을 매 장면에 등장시킬 필요는 없다.'
+    for skill in list_all():
+        filename = PRESET_SCOPE_FILES.get(skill['name'].strip())
+        if not filename:
+            continue
+        current = get(skill['slug'])
+        if not current:
+            continue
+        body = current['body'].replace(old, replacement)
+        if PRESET_SCOPE_MARKER not in body:
+            body = PRESET_SCOPE_NOTE + "\n" + body
+        if body != current['body']:
+            save(current['name'], current['description'], body, slug=current['slug'],
+                 always=current.get('always', False))
+        ref = _dir(current['slug']) / 'references' / filename
+        if ref.is_file():
+            content = ref.read_text(encoding='utf-8')
+            updated = content.replace(old, replacement)
+            if PRESET_SCOPE_MARKER not in updated:
+                updated = PRESET_SCOPE_NOTE + "\n" + updated
+            if content != updated:
+                put_file(current['slug'], 'references/' + filename, updated.encode('utf-8'))
+    db.mark_migration(PRESET_SCOPE_KEY)
+
+
 def refresh_studio_ops_once() -> None:
     """The seeded studio skill's reference drifts as the studio grows (the
     space move in 0.11.0, then the batch-spec rules). Replace that one

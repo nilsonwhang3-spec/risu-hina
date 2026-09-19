@@ -997,6 +997,14 @@ button.attachbtn { padding: 8px 9px; display: flex; align-items: center; flex-sh
 }
 .attachchip > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .attachchip.bad { background: rgba(239, 68, 68, .14); border-color: rgba(239, 68, 68, .35); }
+.proposal-fold > summary, .agentplan summary { cursor: pointer; padding: 7px 2px; font-weight: 600; overflow-wrap: anywhere; }
+.proposal-body { padding-top: 6px; }
+.agentplan { flex-shrink: 0; max-height: 30%; overflow-y: auto; }
+.agentplan:empty { display: none; }
+.plan-body { padding: 8px; }
+.plan-task { margin-top: 6px; overflow-wrap: anywhere; }
+.plan-task .badge { margin-right: 6px; }
+.agenthead { flex-wrap: wrap; }
 .stagedbox { flex-shrink: 0; max-height: 42%; overflow-y: auto; }
 .card.staged { border-color: rgba(245,158,11,.45); background: rgba(245,158,11,.06); }
 .stagedrow { display: flex; gap: 8px; align-items: center; padding: 3px 0; flex-wrap: wrap; }
