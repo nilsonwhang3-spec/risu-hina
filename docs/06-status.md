@@ -1,5 +1,26 @@
 # 06. Implementation status — as of 2026-09-19 (v0.15.16, Risu Hina)
 
+## Unreleased: update-check rendering hang
+
+Observed on zikmunt-pc with backend 0.15.15: `/update/check` returned HTTP 200 in
+426–442 ms and reported 0.15.16 installable. The published release notes carried
+12 CRLF line endings. The Markdown parser recognized a bullet prefix but its
+full-line match rejected the trailing CR, leaving the input index unchanged and
+blocking the UI thread indefinitely. Rendering the exact notes in an isolated
+worker reproduced the hang; LF-normalized notes completed on the old parser.
+
+The public 0.15.16 release body was corrected to LF without changing its content
+or assets. The staging endpoint now returns the corrected notes, so existing
+plugins recover after refreshing the frozen page and checking again.
+
+The next plugin build normalizes CRLF/CR and guarantees progress for malformed
+list/block prefixes. A separate transport defect was also reproduced: the JSON
+request deadline ended at response headers. It now covers success/error body
+consumption and attempts cancellation on expiry. No backend deployment or new
+release was performed for these source fixes. Validation: exact published-note
+reproduction, stalled success/error-body tests, malformed Markdown regression,
+and the full release gate (real model and plugin smoke included) all passed.
+
 ## 0.15.16: preset ownership guidance
 
 Bot/lorebook authoring follows prompt-preset options for lorebook insertion,

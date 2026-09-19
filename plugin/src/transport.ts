@@ -286,19 +286,22 @@ export class Transport {
   }
 
   private async json<T>(method: 'GET' | 'POST', path: string, payload?: unknown, timeoutMs?: number): Promise<T> {
-    const res = await this.raw(method, path, payload, { timeoutMs });
-    if (!res.ok) throw await toError(res);
-    const body = await readJson(res);
-    // A 200 that is not JSON is not ours: a tunnel's interstitial, a login
-    // page, a proxy's error in HTML. Letting `{_raw}` through as if it were
-    // the answer made callers fail one property deeper with a message
-    // ("reading 'filter'") that named nothing a person could act on.
-    if (isRaw(body)) {
-      throw new BackendError(res.status,
-        `백엔드 대신 다른 응답이 왔습니다 (JSON 이 아님): “${body._raw.replace(/\s+/g, ' ').trim().slice(0, 100)}” — `
-        + '터널·프록시가 대신 답했을 수 있습니다. 잠시 뒤 다시 시도해 주세요.');
-    }
-    return body as T;
+    const budget = timeoutMs === undefined ? DEFAULT_TIMEOUT_MS : timeoutMs;
+    const controller = new AbortController();
+    const request = async (): Promise<T> => {
+      // The deadline covers headers AND response/error body consumption.
+      // nativeFetch may settle at headers while text() waits on a stalled relay.
+      const res = await this.raw(method, path, payload, { timeoutMs: 0, signal: controller.signal });
+      if (!res.ok) throw await toError(res);
+      const body = await readJson(res);
+      if (isRaw(body)) {
+        throw new BackendError(res.status,
+          `백엔드 대신 다른 응답이 왔습니다 (JSON 이 아님): “${body._raw.replace(/\s+/g, ' ').trim().slice(0, 100)}” — `
+          + '터널·프록시가 대신 답했을 수 있습니다. 잠시 뒤 다시 시도해 주세요.');
+      }
+      return body as T;
+    };
+    return await withDeadline(request(), path, budget, () => controller.abort());
   }
 
   private async raw(
@@ -342,23 +345,27 @@ export class Transport {
     const call = Risuai.nativeFetch(url, init);
     if (!budget) return await call;
 
-    // nativeFetch may ignore AbortSignal depending on the host path, so the
-    // wall-clock bound is enforced here with a race rather than trusted to it.
-    call.catch(() => { /* consumed below; avoids an unhandled rejection */ });
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      return await Promise.race([
-        call,
-        new Promise<never>((_, reject) => {
-          timer = setTimeout(
-            () => reject(new BackendError(0, `${path} 응답이 ${Math.round(budget / 1000)}초 안에 오지 않았습니다`)),
-            budget,
-          );
-        }),
-      ]);
-    } finally {
-      if (timer) clearTimeout(timer);
-    }
+    return await withDeadline(call, path, budget);
+  }
+
+}
+
+/** AbortSignal is best effort in the host; the promise itself has a hard bound. */
+async function withDeadline<T>(call: Promise<T>, path: string, budget: number, cancel?: () => void): Promise<T> {
+  if (!budget) return await call;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      call,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new BackendError(0, `${path} 응답이 ${Math.round(budget / 1000)}초 안에 오지 않았습니다`));
+          cancel?.();
+        }, budget);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 

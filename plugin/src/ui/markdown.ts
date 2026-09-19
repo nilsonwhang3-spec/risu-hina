@@ -23,7 +23,9 @@ export interface MarkdownOptions {
 
 export function renderMarkdown(text: string, opts: MarkdownOptions = {}): DocumentFragment {
   const frag = document.createDocumentFragment();
-  const lines = text.split('\n');
+  // GitHub release bodies can retain CRLF. Block detection and consumption
+  // must see the same line boundaries or a list/header can make no progress.
+  const lines = text.replace(/\r\n?/g, '\n').split('\n');
   let i = 0;
 
   while (i < lines.length) {
@@ -105,6 +107,7 @@ export function renderMarkdown(text: string, opts: MarkdownOptions = {}): Docume
     if (bullet) {
       const ordered = /\d/.test(bullet[1]);
       const list = el(ordered ? 'ol' : 'ul', { class: 'md-list' });
+      const start = i;
       while (i < lines.length) {
         const m = lines[i].match(/^\s*(?:[-*+]|\d+\.)\s+(.*)$/);
         if (!m) break;
@@ -113,6 +116,8 @@ export function renderMarkdown(text: string, opts: MarkdownOptions = {}): Docume
         list.appendChild(li);
         i++;
       }
+      // A malformed list-like line is still content, never an endless loop.
+      if (i === start) list.appendChild(el('li', { text: lines[i++] }));
       frag.appendChild(list);
       continue;
     }
@@ -130,6 +135,9 @@ export function renderMarkdown(text: string, opts: MarkdownOptions = {}): Docume
       para.push(lines[i]);
       i++;
     }
+    // Unsupported block syntax (for example a fence language with punctuation)
+    // must consume a line even when isBlockStart recognizes its prefix.
+    if (!para.length) para.push(lines[i++]);
     const p = el('div', { class: 'md-p' });
     p.appendChild(inline(para.join('\n'), opts));
     frag.appendChild(p);
