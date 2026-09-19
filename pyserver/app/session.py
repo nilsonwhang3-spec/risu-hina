@@ -176,13 +176,12 @@ def _next_seq(session_id: str) -> int:
     return (int(row["m"]) + 1) if row else 0
 
 
-_MESSAGE_LOCK = threading.RLock()
-
-
 def _save_message(session_id: str, role: str, content: Any,
                   usage: dict | None = None, cost: float | None = None) -> None:
-    # Tool workers and streamed checkpoints can arrive together.
-    with _MESSAGE_LOCK:
+    # Use the same reentrant DB lock as plan transactions. A separate message
+    # lock inverts lock order when a tool saves a plan during a checkpoint.
+    # Keep sequence allocation and both writes atomic, including nested saves.
+    with db.transaction():
         db.execute(
             "INSERT INTO agent_messages(session_id, seq, role, content_json, usage_json, cost_usd, ts) "
             "VALUES(?,?,?,?,?,?,?)",

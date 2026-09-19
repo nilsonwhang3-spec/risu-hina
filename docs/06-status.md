@@ -1,6 +1,23 @@
-# 06. Implementation status — as of 2026-09-19 (v0.15.16, Risu Hina)
+# 06. Implementation status — as of 2026-09-19 (v0.15.17, Risu Hina)
 
-## Unreleased: update-check rendering hang
+## 0.15.17: concurrent plan/checkpoint deadlock
+
+After staging updated to 0.15.16, a plan tool and streamed checkpoint acquired
+DB/message locks in opposite order. A live thread dump showed the event loop
+holding the message lock while waiting for the DB lock, and the plan worker
+holding the DB lock while waiting for the message lock. Even /health stopped
+responding although the Windows service and TCP listener stayed alive.
+
+Message persistence now uses the existing reentrant DB transaction exclusively,
+keeping sequence allocation, message insertion and session timestamp atomic.
+A subprocess-bounded regression forces the observed interleaving and verifies
+both writes complete with distinct sequences and the plan revision persists.
+The staging service was recovered with this patch before the full release.
+Validation: the regression times out with the old lock and passes with the fix;
+the complete release gate passed (real model and browser smoke included). Both
+platform archives passed CRC, SHA256 and all 83 app-source/plugin equality checks.
+
+## 0.15.17: update-check rendering hang
 
 Observed on zikmunt-pc with backend 0.15.15: `/update/check` returned HTTP 200 in
 426–442 ms and reported 0.15.16 installable. The published release notes carried
@@ -13,11 +30,10 @@ The public 0.15.16 release body was corrected to LF without changing its content
 or assets. The staging endpoint now returns the corrected notes, so existing
 plugins recover after refreshing the frozen page and checking again.
 
-The next plugin build normalizes CRLF/CR and guarantees progress for malformed
+The plugin now normalizes CRLF/CR and guarantees progress for malformed
 list/block prefixes. A separate transport defect was also reproduced: the JSON
 request deadline ended at response headers. It now covers success/error body
-consumption and attempts cancellation on expiry. No backend deployment or new
-release was performed for these source fixes. Validation: exact published-note
+consumption and attempts cancellation on expiry. These fixes ship together with the backend deadlock repair in 0.15.17. Validation: exact published-note
 reproduction, stalled success/error-body tests, malformed Markdown regression,
 and the full release gate (real model and plugin smoke included) all passed.
 
