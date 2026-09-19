@@ -31,6 +31,49 @@ class Plans(unittest.TestCase):
         self.deps = agent.Deps('chat', '', self.sid, Path(DATA.name))
         self.todo = [{'id': 'a', 'title': 'Check behavior', 'status': 'pending', 'evidence': ''}]
 
+    def test_concurrent_plan_and_checkpoint_do_not_deadlock(self):
+        # Isolate the deliberate lock interleaving so regressions fail on timeout
+        # rather than hanging the entire test runner with a blocked DB lock.
+        import subprocess
+        script = r"""
+import threading
+import test_workplan as t
+case = t.Plans('test_persistent_revision_and_evidence')
+case.setUp()
+original = t.db.LOCK
+waiting = threading.Event()
+errors = []
+class ObservedLock:
+    def __enter__(self):
+        if threading.current_thread().name == 'checkpoint':
+            waiting.set()
+        original.acquire()
+        return self
+    def __exit__(self, *args):
+        original.release()
+t.db.LOCK = ObservedLock()
+def checkpoint():
+    try:
+        t.session._save_message(case.sid, 'history', {'checkpoint': True})
+    except BaseException as exc:
+        errors.append(exc)
+with t.db.transaction():
+    worker = threading.Thread(target=checkpoint, name='checkpoint', daemon=True)
+    worker.start()
+    assert waiting.wait(3), 'checkpoint did not reach DB lock'
+    t.workplan.save(case.sid, 0, document='Concurrent plan', tasks=case.todo)
+worker.join(3)
+assert not worker.is_alive(), 'checkpoint deadlocked'
+assert not errors, errors
+rows = t.db.query('SELECT seq, role FROM agent_messages WHERE session_id=? ORDER BY seq', (case.sid,))
+assert [(r['seq'], r['role']) for r in rows] == [(0, 'plan'), (1, 'history')]
+assert t.workplan.get(case.sid)['revision'] == 1
+t.db.close()
+"""
+        result = subprocess.run([sys.executable, '-c', script], cwd=Path(__file__).parent,
+                                capture_output=True, text=True, timeout=20)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_persistent_revision_and_evidence(self):
         workplan.save(self.sid, 0, document='# Plan\nKeep user constraint', tasks=self.todo, mode='plan')
         db.close(); db.connect()

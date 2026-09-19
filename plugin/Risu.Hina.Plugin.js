@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.15.16
+//@display-name Risu Hina v0.15.17
 //@api 3.0
-//@version 0.15.16
+//@version 0.15.17
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -104,7 +104,7 @@
       this.tokenSafe = true;
       this.lastHealth = body;
       this.probeInfo = "";
-      this.gate = versionGate("0.15.16", String(body.version || ""));
+      this.gate = versionGate("0.15.17", String(body.version || ""));
       return body;
     }
     /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -215,16 +215,21 @@
       }
     }
     async json(method, path, payload, timeoutMs) {
-      const res = await this.raw(method, path, payload, { timeoutMs });
-      if (!res.ok) throw await toError(res);
-      const body = await readJson(res);
-      if (isRaw(body)) {
-        throw new BackendError(
-          res.status,
-          `\uBC31\uC5D4\uB4DC \uB300\uC2E0 \uB2E4\uB978 \uC751\uB2F5\uC774 \uC654\uC2B5\uB2C8\uB2E4 (JSON \uC774 \uC544\uB2D8): \u201C${body._raw.replace(/\s+/g, " ").trim().slice(0, 100)}\u201D \u2014 \uD130\uB110\xB7\uD504\uB85D\uC2DC\uAC00 \uB300\uC2E0 \uB2F5\uD588\uC744 \uC218 \uC788\uC2B5\uB2C8\uB2E4. \uC7A0\uC2DC \uB4A4 \uB2E4\uC2DC \uC2DC\uB3C4\uD574 \uC8FC\uC138\uC694.`
-        );
-      }
-      return body;
+      const budget = timeoutMs === void 0 ? DEFAULT_TIMEOUT_MS : timeoutMs;
+      const controller = new AbortController();
+      const request = async () => {
+        const res = await this.raw(method, path, payload, { timeoutMs: 0, signal: controller.signal });
+        if (!res.ok) throw await toError(res);
+        const body = await readJson(res);
+        if (isRaw(body)) {
+          throw new BackendError(
+            res.status,
+            `\uBC31\uC5D4\uB4DC \uB300\uC2E0 \uB2E4\uB978 \uC751\uB2F5\uC774 \uC654\uC2B5\uB2C8\uB2E4 (JSON \uC774 \uC544\uB2D8): \u201C${body._raw.replace(/\s+/g, " ").trim().slice(0, 100)}\u201D \u2014 \uD130\uB110\xB7\uD504\uB85D\uC2DC\uAC00 \uB300\uC2E0 \uB2F5\uD588\uC744 \uC218 \uC788\uC2B5\uB2C8\uB2E4. \uC7A0\uC2DC \uB4A4 \uB2E4\uC2DC \uC2DC\uB3C4\uD574 \uC8FC\uC138\uC694.`
+          );
+        }
+        return body;
+      };
+      return await withDeadline(request(), path, budget, () => controller.abort());
     }
     async raw(method, path, payload, opts = {}) {
       if (!this.cfg.url) throw new BackendError(0, "\uBC31\uC5D4\uB4DC URL\uC774 \uC124\uC815\uB418\uC5B4 \uC788\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4");
@@ -256,24 +261,26 @@
       const budget = opts.timeoutMs === void 0 ? DEFAULT_TIMEOUT_MS : opts.timeoutMs;
       const call = Risuai.nativeFetch(url, init);
       if (!budget) return await call;
-      call.catch(() => {
-      });
-      let timer;
-      try {
-        return await Promise.race([
-          call,
-          new Promise((_, reject) => {
-            timer = setTimeout(
-              () => reject(new BackendError(0, `${path} \uC751\uB2F5\uC774 ${Math.round(budget / 1e3)}\uCD08 \uC548\uC5D0 \uC624\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4`)),
-              budget
-            );
-          })
-        ]);
-      } finally {
-        if (timer) clearTimeout(timer);
-      }
+      return await withDeadline(call, path, budget);
     }
   };
+  async function withDeadline(call, path, budget, cancel) {
+    if (!budget) return await call;
+    let timer;
+    try {
+      return await Promise.race([
+        call,
+        new Promise((_, reject) => {
+          timer = setTimeout(() => {
+            reject(new BackendError(0, `${path} \uC751\uB2F5\uC774 ${Math.round(budget / 1e3)}\uCD08 \uC548\uC5D0 \uC624\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4`));
+            cancel?.();
+          }, budget);
+        })
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
   function parseLine(line) {
     const s = line.trim();
     if (!s) return void 0;
@@ -5662,7 +5669,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
   // src/ui/markdown.ts
   function renderMarkdown(text2, opts = {}) {
     const frag = document.createDocumentFragment();
-    const lines = text2.split("\n");
+    const lines = text2.replace(/\r\n?/g, "\n").split("\n");
     let i = 0;
     while (i < lines.length) {
       const line = lines[i];
@@ -5733,6 +5740,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       if (bullet) {
         const ordered = /\d/.test(bullet[1]);
         const list2 = el(ordered ? "ol" : "ul", { class: "md-list" });
+        const start = i;
         while (i < lines.length) {
           const m = lines[i].match(/^\s*(?:[-*+]|\d+\.)\s+(.*)$/);
           if (!m) break;
@@ -5741,6 +5749,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           list2.appendChild(li);
           i++;
         }
+        if (i === start) list2.appendChild(el("li", { text: lines[i++] }));
         frag.appendChild(list2);
         continue;
       }
@@ -5753,6 +5762,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         para.push(lines[i]);
         i++;
       }
+      if (!para.length) para.push(lines[i++]);
       const p = el("div", { class: "md-p" });
       p.appendChild(inline(para.join("\n"), opts));
       frag.appendChild(p);
@@ -13552,10 +13562,10 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           return;
         }
         if (!r.newer) {
-          const mismatch = r.current !== "0.15.16";
+          const mismatch = r.current !== "0.15.17";
           const ahead = r.ahead ?? (!!r.latest && r.latest !== r.current);
           say(
-            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.16"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
+            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.17"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
             mismatch || ahead ? "" : "ok"
           );
           return;
@@ -13646,7 +13656,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.15.16",
+            version: "0.15.17",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -14334,7 +14344,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.16"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.17"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -21357,7 +21367,7 @@ ${negative.value.trim()}
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.16"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.17"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
@@ -21453,7 +21463,7 @@ ${negative.value.trim()}
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.15.16" }),
+        el("span", { class: "dim", text: "v0.15.17" }),
         healthEl,
         el("span", { class: "spacer" }),
         reload,
@@ -21774,6 +21784,6 @@ ${negative.value.trim()}
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.15.16"} loaded`);
+    console.log(`[risu-hina] v${"0.15.17"} loaded`);
   })();
 })();
