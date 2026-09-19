@@ -65,6 +65,8 @@ if [ -d plugin/node_modules ]; then
   run "shell server responsiveness" "$PY" tests/test_shell_responsiveness.py
   run "plugin typecheck" node plugin/node_modules/typescript/bin/tsc -p plugin/tsconfig.json --noEmit
   run "cross-view file clipboard" node tests/test_file_clipboard.mjs
+  run "complete JSON response deadline" node tests/transport_timeout.mjs
+  run "markdown progress and CRLF" node tests/markdown_progress.mjs
   run "planning and mobile proposal UI" node tests/agent_planning_ui.mjs
   run "bot context switching" node tests/bot_context.mjs
   run "asset upload concurrency" node tests/asset_concurrency.mjs
