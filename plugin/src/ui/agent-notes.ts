@@ -56,7 +56,7 @@ export function buildAgentNotesCard(onMount: (refresh: () => Promise<void>) => v
           el('pre', { text: note.body, style: { whiteSpace: 'pre-wrap' } }),
           el('div', { class: 'hint', text: `근거: ${note.evidence}` }), el('div', { class: 'row' }, [change, remove])]));
       }
-      status.textContent = `${response.notes.length}개 메모 · AI가 필요한 주요 사항을 직접 기록하고 다음 대화에 불러옵니다.`;
+      status.textContent = `${response.notes.length}개 메모 · ` + (enabled.checked ? 'AI가 확인된 주요 사항을 기록하고 다음 대화에 불러옵니다.' : 'AI 메모리가 꺼져 있어 자동 저장·회상을 하지 않습니다.');
     } catch (e) { status.textContent = String(e); }
   };
   settings.addEventListener('click', async () => {
@@ -84,6 +84,17 @@ export function buildAgentNotesCard(onMount: (refresh: () => Promise<void>) => v
       })) : [el('p', { text: '아직 압축 기록이 없습니다.' })]));
     } catch (e) { status.textContent = String(e); }
   });
+  const learning = el('button', { class: 'ghost', text: '최근 학습 검토' });
+  learning.addEventListener('click', async () => {
+    try {
+      const data = await transport.get<{ reviews: { at: number; summary: string; status?: string }[] }>('/agent/learning', {
+        charKey: selectedValue(shared) === 'global' ? '' : state.activeCharKey,
+      });
+      modal('메모 · Skill Self-Improvement 검토', el('div', {}, data.reviews.length
+        ? data.reviews.map((r) => el('p', { text: `${new Date(r.at * 1000).toLocaleString()} · ${r.summary}` }))
+        : [el('p', { text: '아직 학습 검토 기록이 없습니다. 실행 모드에서 여러 도구를 사용한 작업을 마치면 저장 결과 또는 생략 사유가 기록됩니다.' })]));
+    } catch (e) { status.textContent = String(e); }
+  });
   onMount(refresh);
   void refresh();
   return el('div', { class: 'card' }, [
@@ -92,7 +103,7 @@ export function buildAgentNotesCard(onMount: (refresh: () => Promise<void>) => v
     el('label', {}, [auto, el('span', { text: ' 요청마다 컨텍스트를 확인하고 자동 압축' })]),
     el('label', { class: 'field' }, [el('span', { text: '사용 모델의 컨텍스트 크기 (토큰)' }), windowSize]),
     el('p', { class: 'hint', text: '대화 예산은 컨텍스트의 80%에서 지침·도구 정의·최대 답변 토큰을 뺀 만큼 자동 계산합니다. 나머지 20%는 안전 여유이며, 별도의 글자 수 제한은 없습니다. 토큰 수는 추정치입니다. 사용자 지시와 미완료 작업을 보존하며, 요약에는 설정한 모델을 사용합니다.' }),
-    el('div', { class: 'row' }, [settings, history]),
+    el('div', { class: 'row' }, [settings, history, learning]),
     el('div', { class: 'row' }, [shared, add, reloadBtn]), list, status,
   ]);
 }

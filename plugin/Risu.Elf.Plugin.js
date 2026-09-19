@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.15.15
+//@display-name Risu Hina v0.15.16
 //@api 3.0
-//@version 0.15.15
+//@version 0.15.16
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -104,7 +104,7 @@
       this.tokenSafe = true;
       this.lastHealth = body;
       this.probeInfo = "";
-      this.gate = versionGate("0.15.15", String(body.version || ""));
+      this.gate = versionGate("0.15.16", String(body.version || ""));
       return body;
     }
     /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -1172,6 +1172,31 @@
      * that can change its data.
      */
     epoch = 0;
+    /** Invalidates asynchronous work belonging to a previously selected bot. */
+    contextRevision = 0;
+    hostReadSequence = 0;
+    resetBotContext() {
+      void this.stopAgent();
+      this.contextRevision += 1;
+      this.cancelAssetSync();
+      this.assetSync = null;
+      this.workspace = null;
+      this.lastMerge = null;
+      this.activeChatKey = "";
+      this.sessionId = "";
+      this.turns = [];
+      this.totalTurns = 0;
+      this.warnings = [];
+      this.changes = null;
+      this.botChanges = null;
+      this.unseenOutputs = [];
+      this.openFileRequest = null;
+      this.openTabRequest = null;
+      this.openStudioRequest = null;
+      this.promptRequest = null;
+      this.filesRev += 1;
+      this.epoch += 1;
+    }
     listeners = /* @__PURE__ */ new Set();
     onChange(fn) {
       this.listeners.add(fn);
@@ -1223,13 +1248,23 @@
     // --- host ---------------------------------------------------------------
     /** Read the selected character and its chats from RisuAI. */
     async readHost() {
+      const sequence = ++this.hostReadSequence;
       this.slotError = "";
       try {
-        this.slot = await currentSlot();
-        this.character = await readCharacter(this.slot.characterIndex);
-        this.liveChat = await readChat(this.slot);
+        const slot = await currentSlot();
+        const character = await readCharacter(slot.characterIndex);
+        const liveChat = await readChat(slot);
+        if (sequence !== this.hostReadSequence) return false;
+        const before = this.character?.chaId || this.workspace?.charId;
+        const changed = before && character.chaId ? before !== character.chaId : this.slot !== null && this.slot.characterIndex !== slot.characterIndex;
+        if (changed) this.resetBotContext();
+        this.slot = slot;
+        this.character = character;
+        this.liveChat = liveChat;
         return true;
       } catch (e) {
+        if (sequence !== this.hostReadSequence) return false;
+        this.resetBotContext();
         this.slot = null;
         this.character = null;
         this.liveChat = null;
@@ -1249,6 +1284,7 @@
      */
     async upload(opts = {}) {
       if (!this.slot || !this.character) throw new Error("\uD638\uC2A4\uD2B8 \uC0C1\uD0DC\uB97C \uBA3C\uC800 \uC77D\uC5B4\uC57C \uD569\uB2C8\uB2E4");
+      const revision = this.contextRevision;
       const chats = Array.isArray(this.character.chats) ? this.character.chats : [];
       const payload = {
         charId: this.character.chaId ?? "",
@@ -1274,6 +1310,7 @@
         payload.chats = [{ chat: this.liveChat, chatIndex: this.slot.chatIndex, live: true }];
       }
       const res = await transport.upload("/workspace", payload);
+      if (revision !== this.contextRevision) throw new Error("\uBD07 \uC120\uD0DD\uC774 \uBCC0\uACBD\uB418\uC5C8\uC2B5\uB2C8\uB2E4");
       this.workspace = res.workspace;
       this.lastMerge = res.workspace.merge ?? null;
       if (!this.activeChatKey || !this.workspace.chats.some((c) => c.chatKey === this.activeChatKey)) {
@@ -1365,10 +1402,12 @@
       if (this.assetSync && this.assetSync.charKey === ck && syncBusy(this.assetSync) && !force) return;
       this.cancelAssetSync();
       const web = transport.hostPlatform === "web";
+      const revision = this.contextRevision;
       this.assetSyncCtl = syncAssets(char, ck, {
         hubPull: web,
         concurrency: web ? 4 : 6
       }, (p) => {
+        if (revision !== this.contextRevision || ck !== this.activeCharKey) return;
         this.assetSync = p;
         const now = Date.now();
         const settled = !syncBusy(p);
@@ -1405,10 +1444,12 @@
     // --- turns --------------------------------------------------------------
     async loadTurns(chatKey = this.activeChatKey, start = 0, limit = 2e3) {
       if (!chatKey) return;
+      const revision = this.contextRevision;
       const res = await transport.get(
         "/turns",
         { chatKey, start, limit }
       );
+      if (revision !== this.contextRevision) return;
       this.activeChatKey = chatKey;
       this.turns = res.turns;
       this.totalTurns = res.total;
@@ -1428,9 +1469,14 @@
         this.emit();
         return null;
       }
+      const revision = this.contextRevision;
+      const key = this.activeChatKey;
       try {
-        this.changes = await transport.get("/changes", { chatKey: this.activeChatKey });
+        const result = await transport.get("/changes", { chatKey: key });
+        if (revision !== this.contextRevision || key !== this.activeChatKey) return null;
+        this.changes = result;
       } catch {
+        if (revision !== this.contextRevision || key !== this.activeChatKey) return null;
         this.changes = null;
       }
       this.emit();
@@ -1679,13 +1725,25 @@
      * whole afternoon (the 164MB /session of §1-55 was history rows, now
      * excluded server-side; the limit keeps the rest small too). */
     async agentSession(sessionId, limit = 0) {
+      const revision = this.contextRevision;
+      const chatKey = this.activeChatKey;
       const r = await transport.get("/session", {
-        chatKey: this.activeChatKey,
+        chatKey,
         sessionId: sessionId || void 0,
         limit: limit > 0 ? limit : void 0
       });
+      if (revision !== this.contextRevision || chatKey !== this.activeChatKey) throw new Error("\uBD07 \uB610\uB294 \uCC57 \uC120\uD0DD\uC774 \uBCC0\uACBD\uB418\uC5C8\uC2B5\uB2C8\uB2E4");
       this.sessionId = r.session?.sessionId ?? "";
       return r;
+    }
+    async workPlan(mode2, revision) {
+      if (!this.sessionId) await this.newAgentSession();
+      const sid = this.sessionId;
+      const context = this.contextRevision;
+      const args = { sessionId: sid, chatKey: this.activeChatKey, ...mode2 ? { mode: mode2, revision } : {} };
+      const result = mode2 ? await transport.post("/agent/plan", args) : await transport.get("/agent/plan", args);
+      if (sid !== this.sessionId || context !== this.contextRevision) throw new Error("\uB300\uD654\uAC00 \uBCC0\uACBD\uB418\uC5C8\uC2B5\uB2C8\uB2E4");
+      return result;
     }
     async agentSessions() {
       const r = await transport.get("/sessions", {
@@ -1695,7 +1753,10 @@
     }
     /** Start a fresh conversation; the previous one stays in the history list. */
     async newAgentSession() {
-      const r = await transport.post("/session", { chatKey: this.activeChatKey });
+      const revision = this.contextRevision;
+      const chatKey = this.activeChatKey;
+      const r = await transport.post("/session", { chatKey });
+      if (revision !== this.contextRevision || chatKey !== this.activeChatKey) throw new Error("\uBD07 \uB610\uB294 \uCC57 \uC120\uD0DD\uC774 \uBCC0\uACBD\uB418\uC5C8\uC2B5\uB2C8\uB2E4");
       this.sessionId = r.sessionId;
     }
     /**
@@ -1706,9 +1767,9 @@
      */
     async *agentChat(prompt, signal) {
       if (!this.sessionId) {
-        const r = await transport.post("/session", { chatKey: this.activeChatKey });
-        this.sessionId = r.sessionId;
+        await this.newAgentSession();
       }
+      if (signal?.aborted) return;
       yield* transport.stream("/chat", {
         sessionId: this.sessionId,
         prompt,
@@ -2267,9 +2328,14 @@
         this.emit();
         return null;
       }
+      const revision = this.contextRevision;
+      const key = this.botKey;
       try {
-        this.botChanges = await transport.get("/card/changes", { charKey: this.botKey });
+        const result = await transport.get("/card/changes", { charKey: key });
+        if (revision !== this.contextRevision || key !== this.botKey) return null;
+        this.botChanges = result;
       } catch {
+        if (revision !== this.contextRevision || key !== this.botKey) return null;
         this.botChanges = null;
       }
       this.emit();
@@ -5084,6 +5150,14 @@ button.attachbtn { padding: 8px 9px; display: flex; align-items: center; flex-sh
 }
 .attachchip > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .attachchip.bad { background: rgba(239, 68, 68, .14); border-color: rgba(239, 68, 68, .35); }
+.proposal-fold > summary, .agentplan summary { cursor: pointer; padding: 7px 2px; font-weight: 600; overflow-wrap: anywhere; }
+.proposal-body { padding-top: 6px; }
+.agentplan { flex-shrink: 0; max-height: 30%; overflow-y: auto; }
+.agentplan:empty { display: none; }
+.plan-body { padding: 8px; }
+.plan-task { margin-top: 6px; overflow-wrap: anywhere; }
+.plan-task .badge { margin-right: 6px; }
+.agenthead { flex-wrap: wrap; }
 .stagedbox { flex-shrink: 0; max-height: 42%; overflow-y: auto; }
 .card.staged { border-color: rgba(245,158,11,.45); background: rgba(245,158,11,.06); }
 .stagedrow { display: flex; gap: 8px; align-items: center; padding: 3px 0; flex-wrap: wrap; }
@@ -7135,6 +7209,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       this.stagedBox = el("div", { class: "stagedbox" });
       this.actionBox = el("div", { class: "stagedbox" });
       this.status = el("div", { class: "hint grow" });
+      this.modeButton.addEventListener("click", () => void this.switchMode());
       const fresh = el("button", {
         class: "ghost tiny",
         title: "\uC9C0\uAE08 \uB300\uD654\uB97C \uC811\uACE0 \uC0C8 \uB300\uD654\uB97C \uC2DC\uC791\uD569\uB2C8\uB2E4",
@@ -7181,7 +7256,8 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         void this.attachAll(files);
       });
       this.root = el("div", { class: "agentpanel" }, [
-        el("div", { class: "agenthead" }, [this.status, fresh, this.historyBtn]),
+        el("div", { class: "agenthead" }, [this.status, this.modeButton, fresh, this.historyBtn]),
+        this.planBox,
         this.log,
         this.stagedBox,
         this.actionBox,
@@ -7208,12 +7284,17 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     historyBtn;
     busy = false;
     loaded = false;
+    destroyed = false;
     picker;
     /** Workspace paths uploaded for the message being composed. */
     attached = [];
     attachBar = el("div", { class: "attachbar", style: { display: "none" } });
     actionBox;
     /** out/ paths already offered, so the card does not churn every refresh. */
+    planBox = el("div", { class: "agentplan" });
+    modeButton = el("button", { class: "ghost tiny", text: "\uC2E4\uD589 \uBAA8\uB4DC", title: "\uACC4\uD68D \uBAA8\uB4DC\uC5D0\uC11C\uB294 \uC870\uC0AC\uC640 \uACC4\uD68D \uC791\uC131\uB9CC \uC9C4\uD589\uD569\uB2C8\uB2E4" });
+    planOpen = false;
+    folds = {};
     outSeen = "";
     outPrimed = false;
     /**
@@ -7339,7 +7420,9 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       this.log.appendChild(loading);
       try {
         const s = await state.agentSession(sessionId, limit);
+        if (this.destroyed) return;
         loading.remove();
+        this.setPlan(s.plan ?? { revision: 0, mode: "execute", document: "", tasks: [] });
         if (!s.agentReady) {
           this.status.textContent = "";
           this.log.appendChild(el("div", { class: "notice" }, [
@@ -7448,6 +7531,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     async refreshOutputs() {
       try {
         const listing = await state.files();
+        if (this.destroyed) return;
         const files = listing.areas.filter((a) => a.area === "projects" || a.area === "hina").flatMap((a) => a.files).filter((f) => /^(projects|hina)\/[^/]+\/out\//.test(f.path));
         const stamp = files.map((f) => `${f.path}:${f.size}:${f.modified}`).join("|");
         if (!this.outPrimed) {
@@ -7498,6 +7582,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       }
     }
     setActions(items5) {
+      if (this.destroyed) return;
       clear(this.actionBox);
       if (!items5.length) return;
       const decideOne = async (a, approve, quiet = false) => {
@@ -7579,8 +7664,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         restBox.style.display = open4 ? "" : "none";
         unfold.textContent = open4 ? "\uC811\uAE30" : `\uADF8 \uC678 ${rest.length}\uAC74 \uBCF4\uAE30`;
       });
-      this.actionBox.appendChild(el("div", { class: "card staged" }, [
-        el("h2", { text: `\uC2B9\uC778 \uC694\uCCAD ${items5.length}\uAC74` }),
+      this.actionBox.appendChild(this.foldCard("actions", `\uC2B9\uC778 \uC694\uCCAD ${items5.length}\uAC74`, [
         el("div", { class: "hint", text: "\uC2B9\uC778\uD574\uC57C \uC2E4\uD589\uB429\uB2C8\uB2E4. \uC804\uC0AC \uC218\uC815\uC774 \uC544\uB2CC \uBCC0\uACBD\uC785\uB2C8\uB2E4." }),
         items5.length > 1 ? el("div", { class: "row", style: { margin: "6px 0" } }, [allYes, allNo, progress]) : null,
         ...shown,
@@ -7676,7 +7760,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     }
     async submit() {
       const typed = this.input.value.trim();
-      if (!typed && !this.attached.length && !this.attachedAssets.length || this.busy) return;
+      if (!typed && !this.attached.length && !this.attachedAssets.length || this.busy || this.modeButton.disabled) return;
       const files = this.attached.slice();
       const assets = this.attachedAssets.slice();
       const extras = [];
@@ -7688,6 +7772,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       }
       const prompt = extras.length ? (typed ? typed + "\n\n" : "") + extras.join("\n\n") : typed;
       this.busy = true;
+      this.modeButton.disabled = true;
       this.input.value = "";
       this.clearAttachments();
       this.send.disabled = true;
@@ -7822,9 +7907,14 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       };
       try {
         for await (const ev of state.agentChat(prompt, abort.signal)) {
+          if (this.destroyed) break;
           const e = ev;
           if (e.type !== "text") flushText();
           switch (e.type) {
+            case "plan": {
+              this.setPlan(e.plan);
+              break;
+            }
             case "card-writeback": {
               const status = el("div", { class: "notice", text: "\uC694\uCCAD\uD558\uC2E0 \uBCC0\uACBD\uC744 RisuAI\uC5D0 \uC800\uC7A5\uD558\uB294 \uC911\uC785\uB2C8\uB2E4\u2026" });
               bubble.insertBefore(status, thinking);
@@ -8005,6 +8095,9 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         this.abortCtl = null;
         if (this.timer !== null) finish("\uC885\uB8CC");
         this.busy = false;
+        this.modeButton.disabled = false;
+        if (!this.destroyed && state.sessionId) void state.workPlan().then((p) => this.setPlan(p)).catch(() => {
+        });
         this.send.disabled = false;
         this.scroll();
       }
@@ -8013,6 +8106,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     abortCtl = null;
     /** Take the panel down for good: the running turn, its clock, its DOM. */
     destroy() {
+      this.destroyed = true;
       try {
         this.abortCtl?.abort();
       } catch {
@@ -8047,6 +8141,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       fold2.textContent = `\uC774\uC804 \uD56D\uBAA9 ${n}\uAC1C\uB97C \uC811\uC5C8\uC2B5\uB2C8\uB2E4 (\uBA54\uBAA8\uB9AC) \u2014 \uB300\uD654 \uBAA9\uB85D\uC5D0\uC11C \uC5F4\uBA74 \uB2E4\uC2DC \uBCFC \uC218 \uC788\uC2B5\uB2C8\uB2E4`;
     }
     async refreshStaged() {
+      if (this.destroyed) return;
       await Promise.all([state.refreshChanges(), state.refreshBotChanges()]);
       try {
         this.setStaged(await state.stagedEdits());
@@ -8056,6 +8151,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       }
     }
     setStaged(items5) {
+      if (this.destroyed) return;
       clear(this.stagedBox);
       this.hooks.onStagedChanged(items5);
       if (!items5.length) return;
@@ -8098,8 +8194,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           reject.disabled = false;
         }
       });
-      this.stagedBox.appendChild(el("div", { class: "card staged" }, [
-        el("h2", { text: `\uC2B9\uC778 \uB300\uAE30 ${items5.length}\uAC74` }),
+      this.stagedBox.appendChild(this.foldCard("staged", `\uC2B9\uC778 \uB300\uAE30 ${items5.length}\uAC74`, [
         el("div", { class: "hint", text: summary + " \u2014 \uC67C\uCABD \uD328\uB110\uC5D0 \uBBF8\uB9AC\uBCF4\uAE30\uB85C \uD45C\uC2DC\uD588\uC2B5\uB2C8\uB2E4." }),
         ...items5.slice(0, 8).map((i) => el("div", { class: "stagedrow" }, [
           el("span", { class: "badge warn", text: label2(i.op) }),
@@ -8108,6 +8203,57 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         items5.length > 8 ? el("div", { class: "hint", text: `\uADF8 \uC678 ${items5.length - 8}\uAC74` }) : null,
         el("div", { class: "row", style: { marginTop: "8px" } }, [approve, reject])
       ]));
+    }
+    foldCard(key, title, children) {
+      const card = el("details", { class: "card staged proposal-fold" });
+      card.open = this.folds[key] ?? !smallScreen();
+      card.appendChild(el("summary", { text: title + " \xB7 \uD3BC\uCE58\uAE30/\uC811\uAE30" }));
+      card.appendChild(el("div", { class: "proposal-body" }, children));
+      card.addEventListener("toggle", () => {
+        this.folds[key] = card.open;
+      });
+      return card;
+    }
+    setPlan(plan) {
+      if (this.destroyed) return;
+      this.modeButton.textContent = plan.mode === "plan" ? "\uACC4\uD68D \uBAA8\uB4DC" : "\uC2E4\uD589 \uBAA8\uB4DC";
+      clear(this.planBox);
+      if (!plan.document && !plan.tasks.length && plan.mode !== "plan") return;
+      const done = plan.tasks.filter((t) => t.status === "completed").length;
+      const current3 = plan.tasks.find((t) => t.status === "in_progress");
+      const panel2 = el("details");
+      panel2.open = this.planOpen;
+      panel2.addEventListener("toggle", () => {
+        this.planOpen = panel2.open;
+      });
+      panel2.appendChild(el("summary", { text: `\uACC4\uD68D \xB7 Todo ${done}/${plan.tasks.length}` + (current3 ? ` \xB7 ${current3.title}` : "") }));
+      const body = el("div", { class: "plan-body" });
+      body.appendChild(el("div", { class: "hint", text: plan.mode === "plan" ? "\uC870\uC0AC\uC640 \uACC4\uD68D \uC791\uC131\uB9CC \uC9C4\uD589\uD569\uB2C8\uB2E4. \uAC80\uD1A0 \uD6C4 \uC2E4\uD589 \uBAA8\uB4DC\uB85C \uC804\uD658\uD558\uC138\uC694." : "\uACC4\uD68D\uC744 \uCC38\uC870\uD574 \uD558\uB098\uC529 \uC9C4\uD589\uD569\uB2C8\uB2E4. \uAC1C\uBCC4 \uBCC0\uACBD \uC81C\uC548\uC740 \uBCC4\uB3C4 \uC2B9\uC778\uC774 \uD544\uC694\uD569\uB2C8\uB2E4." }));
+      if (plan.document) body.appendChild(renderMarkdown(plan.document));
+      const labels = { pending: "\uB300\uAE30", in_progress: "\uC9C4\uD589 \uC911", blocked: "\uCC28\uB2E8", completed: "\uC644\uB8CC" };
+      for (const task of plan.tasks) body.appendChild(el("div", { class: "plan-task" }, [
+        el("span", { class: "badge", text: labels[task.status] }),
+        el("span", { text: task.title }),
+        task.evidence ? el("div", { class: "hint", text: task.evidence }) : null
+      ]));
+      panel2.appendChild(body);
+      this.planBox.appendChild(panel2);
+    }
+    async switchMode() {
+      if (this.busy || this.modeButton.disabled) return;
+      this.modeButton.disabled = true;
+      const sendDisabled = this.send.disabled;
+      this.send.disabled = true;
+      try {
+        const latest = await state.workPlan();
+        if (this.destroyed) return;
+        this.setPlan(await state.workPlan(latest.mode === "plan" ? "execute" : "plan", latest.revision));
+      } catch (e) {
+        this.hooks.notice(msg3(e), "err");
+      } finally {
+        this.modeButton.disabled = false;
+        this.send.disabled = sendDisabled;
+      }
     }
     scroll() {
       this.log.scrollTop = this.log.scrollHeight;
@@ -8170,6 +8316,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
 
   // src/ui/agentpane.ts
   var panel = null;
+  var panelContext = "";
   var hooks = {
     onStagedChanged: () => {
     },
@@ -8179,6 +8326,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     }
   };
   function agentPanel() {
+    syncAgentContext();
     if (!panel) {
       panel = new AgentPanel({
         onStagedChanged: (s) => hooks.onStagedChanged(s),
@@ -8192,6 +8340,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     hooks = { ...hooks, ...next };
   }
   state.onChange(() => {
+    syncAgentContext();
     const text2 = state.promptRequest;
     if (!text2) return;
     state.promptRequest = null;
@@ -8227,6 +8376,17 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     }
     p.syncPlaceholder();
     void p.load();
+  }
+  function syncAgentContext() {
+    const key = JSON.stringify([state.contextRevision, state.activeCharKey, state.activeChatKey]);
+    if (key === panelContext) return;
+    panelContext = key;
+    resetAgentPane();
+    state.sessionId = "";
+  }
+  function resetAgentPane() {
+    panel?.destroy();
+    panel = null;
   }
 
   // src/ui/render.ts
@@ -9338,7 +9498,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
   }
   var kitRender = makeTab({
     // A pending open-request is a staleness key: consuming it is refresh's job.
-    keys: () => [state.filesRev, state.openFileRequest],
+    keys: () => [state.contextRevision, state.activeCharKey, state.filesRev, state.openFileRequest],
     // Deliberately no menu-line search: the folder filter is a fold-out icon on
     // the filebar itself (the full-width box spent a whole row on a field that
     // is empty almost always - field report item 14).
@@ -9382,12 +9542,32 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       await refresh();
     }
   });
+  var filesContext = "";
+  var focusBotProject = false;
   function renderFilesTab(mount) {
+    const context = JSON.stringify([state.contextRevision, state.activeCharKey]);
+    if (context !== filesContext) {
+      filesContext = context;
+      lastListing = null;
+      nodes.clear();
+      selectedDir = "projects";
+      selection.clear();
+      treeSel.clear();
+      anchorPath = "";
+      previewPath = "";
+      filterText2 = "";
+      expanded.clear();
+      expanded.add("projects");
+      expanded.add("studio");
+      focusBotProject = true;
+      if (treeMount) clear(treeMount);
+      if (viewMount) clear(viewMount);
+    }
     kitRender(mount);
   }
   var pendingRefreshes = /* @__PURE__ */ new Map();
   function refreshKey() {
-    return JSON.stringify([state.filesRev, showInternal, onlyMine, state.activeCharKey, state.openFileRequest]);
+    return JSON.stringify([state.contextRevision, state.filesRev, showInternal, onlyMine, state.activeCharKey, state.openFileRequest]);
   }
   function refresh() {
     const key = refreshKey();
@@ -9404,6 +9584,14 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       if (key !== refreshKey()) return;
       lastListing = data;
       buildNodes(data);
+      if (focusBotProject && data.botFolder) {
+        const project = `projects/${data.botFolder}`;
+        if (nodes.has(project)) {
+          selectedDir = project;
+          expandTo(project);
+        }
+        focusBotProject = false;
+      }
       if (!nodes.has(selectedDir)) selectedDir = nodes.has("projects") ? "projects" : nodes.keys().next().value ?? "";
       treeSel = new Set([...treeSel].filter((q) => nodes.has(q)));
       const alive = new Set(allPaths());
@@ -13250,7 +13438,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
             el("div", { class: "row" }, [change, remove])
           ]));
         }
-        status.textContent = `${response.notes.length}\uAC1C \uBA54\uBAA8 \xB7 AI\uAC00 \uD544\uC694\uD55C \uC8FC\uC694 \uC0AC\uD56D\uC744 \uC9C1\uC811 \uAE30\uB85D\uD558\uACE0 \uB2E4\uC74C \uB300\uD654\uC5D0 \uBD88\uB7EC\uC635\uB2C8\uB2E4.`;
+        status.textContent = `${response.notes.length}\uAC1C \uBA54\uBAA8 \xB7 ` + (enabled.checked ? "AI\uAC00 \uD655\uC778\uB41C \uC8FC\uC694 \uC0AC\uD56D\uC744 \uAE30\uB85D\uD558\uACE0 \uB2E4\uC74C \uB300\uD654\uC5D0 \uBD88\uB7EC\uC635\uB2C8\uB2E4." : "AI \uBA54\uBAA8\uB9AC\uAC00 \uAEBC\uC838 \uC788\uC5B4 \uC790\uB3D9 \uC800\uC7A5\xB7\uD68C\uC0C1\uC744 \uD558\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4.");
       } catch (e) {
         status.textContent = String(e);
       }
@@ -13282,6 +13470,17 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         status.textContent = String(e);
       }
     });
+    const learning = el("button", { class: "ghost", text: "\uCD5C\uADFC \uD559\uC2B5 \uAC80\uD1A0" });
+    learning.addEventListener("click", async () => {
+      try {
+        const data = await transport.get("/agent/learning", {
+          charKey: selectedValue(shared) === "global" ? "" : state.activeCharKey
+        });
+        modal("\uBA54\uBAA8 \xB7 Skill Self-Improvement \uAC80\uD1A0", el("div", {}, data.reviews.length ? data.reviews.map((r) => el("p", { text: `${new Date(r.at * 1e3).toLocaleString()} \xB7 ${r.summary}` })) : [el("p", { text: "\uC544\uC9C1 \uD559\uC2B5 \uAC80\uD1A0 \uAE30\uB85D\uC774 \uC5C6\uC2B5\uB2C8\uB2E4. \uC2E4\uD589 \uBAA8\uB4DC\uC5D0\uC11C \uC5EC\uB7EC \uB3C4\uAD6C\uB97C \uC0AC\uC6A9\uD55C \uC791\uC5C5\uC744 \uB9C8\uCE58\uBA74 \uC800\uC7A5 \uACB0\uACFC \uB610\uB294 \uC0DD\uB7B5 \uC0AC\uC720\uAC00 \uAE30\uB85D\uB429\uB2C8\uB2E4." })]));
+      } catch (e) {
+        status.textContent = String(e);
+      }
+    });
     onMount(refresh3);
     void refresh3();
     return el("div", { class: "card" }, [
@@ -13290,7 +13489,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       el("label", {}, [auto, el("span", { text: " \uC694\uCCAD\uB9C8\uB2E4 \uCEE8\uD14D\uC2A4\uD2B8\uB97C \uD655\uC778\uD558\uACE0 \uC790\uB3D9 \uC555\uCD95" })]),
       el("label", { class: "field" }, [el("span", { text: "\uC0AC\uC6A9 \uBAA8\uB378\uC758 \uCEE8\uD14D\uC2A4\uD2B8 \uD06C\uAE30 (\uD1A0\uD070)" }), windowSize]),
       el("p", { class: "hint", text: "\uB300\uD654 \uC608\uC0B0\uC740 \uCEE8\uD14D\uC2A4\uD2B8\uC758 80%\uC5D0\uC11C \uC9C0\uCE68\xB7\uB3C4\uAD6C \uC815\uC758\xB7\uCD5C\uB300 \uB2F5\uBCC0 \uD1A0\uD070\uC744 \uBE80 \uB9CC\uD07C \uC790\uB3D9 \uACC4\uC0B0\uD569\uB2C8\uB2E4. \uB098\uBA38\uC9C0 20%\uB294 \uC548\uC804 \uC5EC\uC720\uC774\uBA70, \uBCC4\uB3C4\uC758 \uAE00\uC790 \uC218 \uC81C\uD55C\uC740 \uC5C6\uC2B5\uB2C8\uB2E4. \uD1A0\uD070 \uC218\uB294 \uCD94\uC815\uCE58\uC785\uB2C8\uB2E4. \uC0AC\uC6A9\uC790 \uC9C0\uC2DC\uC640 \uBBF8\uC644\uB8CC \uC791\uC5C5\uC744 \uBCF4\uC874\uD558\uBA70, \uC694\uC57D\uC5D0\uB294 \uC124\uC815\uD55C \uBAA8\uB378\uC744 \uC0AC\uC6A9\uD569\uB2C8\uB2E4." }),
-      el("div", { class: "row" }, [settings, history]),
+      el("div", { class: "row" }, [settings, history, learning]),
       el("div", { class: "row" }, [shared, add, reloadBtn]),
       list2,
       status
@@ -13353,10 +13552,10 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           return;
         }
         if (!r.newer) {
-          const mismatch = r.current !== "0.15.15";
+          const mismatch = r.current !== "0.15.16";
           const ahead = r.ahead ?? (!!r.latest && r.latest !== r.current);
           say(
-            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.15"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
+            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.16"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
             mismatch || ahead ? "" : "ok"
           );
           return;
@@ -13447,7 +13646,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.15.15",
+            version: "0.15.16",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -13908,10 +14107,12 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         provNote.style.display = p ? "" : "none";
         vertexRow.style.display = vertex ? "" : "none";
         vertexPicker.style.display = vertex ? "" : "none";
+        keyLabel.textContent = vertex ? "\uC11C\uBE44\uC2A4 \uACC4\uC815 JSON" : "API \uD0A4";
+        apiKey.placeholder = existing?.apiKey?.set ? `\uC124\uC815\uB428 (${existing.apiKey.length}\uC790) \u2014 \uBC14\uAFC0 \uB54C\uB9CC \uC785\uB825` : vertex ? "JSON \uD30C\uC77C\uC744 \uC120\uD0DD\uD558\uAC70\uB098 \uB0B4\uC6A9\uC744 \uBD99\uC5EC\uB123\uC73C\uC138\uC694" : "API \uD0A4";
         if (vertex) syncVertexUrl();
         if (!p) return;
         provNote.appendChild(el("div", {}, [el("b", { text: p.name })]));
-        provNote.appendChild(el("div", { class: "hint", text: p.api ? "API \uC8FC\uC18C: " + p.api : "API \uC8FC\uC18C: \uD504\uB85C\uC81D\uD2B8\uB9C8\uB2E4 \uB2E4\uB985\uB2C8\uB2E4 \u2014 \uC544\uB798 Base URL \uC9C1\uC811 \uC9C0\uC815" }));
+        provNote.appendChild(el("div", { class: "hint", text: p.api ? "API \uC8FC\uC18C: " + p.api : vertex ? "API \uC8FC\uC18C: JSON\uC758 \uD504\uB85C\uC81D\uD2B8 ID\uC640 \uB9AC\uC804\uC73C\uB85C \uC790\uB3D9 \uC124\uC815" : "API \uC8FC\uC18C: \uD504\uB85C\uC81D\uD2B8\uB9C8\uB2E4 \uB2E4\uB985\uB2C8\uB2E4 \u2014 \uC544\uB798 Base URL \uC9C1\uC811 \uC9C0\uC815" }));
         provNote.appendChild(el("div", { class: "hint", text: "\uC778\uC99D: " + p.auth }));
         if (p.modelExample) provNote.appendChild(el("div", { class: "hint", text: "\uBAA8\uB378 \uC774\uB984 \uC608: " + p.modelExample }));
         if (p.note) provNote.appendChild(el("div", { class: "hint", text: p.note }));
@@ -13927,6 +14128,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       }).catch(() => {
       });
       const apiKey = el("input", { type: "password", placeholder: existing?.apiKey?.set ? `\uC124\uC815\uB428 (${existing.apiKey.length}\uC790) \u2014 \uBC14\uAFC0 \uB54C\uB9CC \uC785\uB825` : "API \uD0A4" });
+      const keyLabel = el("span", { text: "API \uD0A4" });
       const note = el("input", { value: existing?.note ?? "", placeholder: "\uBA54\uBAA8 (\uC120\uD0DD)" });
       const baseUrl = el("input", { value: existing?.baseUrl ?? "", placeholder: "Base URL (\uD504\uB85C\uBC14\uC774\uB354 \uC774\uB984\uC73C\uB85C \uBABB \uCC3E\uC744 \uB54C\uB9CC \xB7 \uC608: https://generativelanguage.googleapis.com/v1beta/openai)" });
       const urlRow = el("label", { class: "field", style: { display: existing?.baseUrl ? "" : "none" } }, [el("span", { text: "Base URL \uC9C1\uC811 \uC9C0\uC815" }), baseUrl]);
@@ -13967,7 +14169,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         el("label", { class: "field" }, [el("span", { text: "\uD504\uB85C\uBC14\uC774\uB354" }), provider, providerList]),
         el("div", { class: "hint", style: { marginTop: "-4px", marginBottom: "10px" }, text: "\uC774\uB984\uC744 \uACE0\uB974\uBA74 \uC8FC\uC18C\uB97C \uC555\uB2C8\uB2E4. \uC8FC\uC18C\uAC00 \uB530\uB85C \uC788\uC73C\uBA74 \uC544\uB798 \uC9C1\uC811 \uC9C0\uC815." }),
         provNote,
-        el("label", { class: "field" }, [el("span", { text: "API \uD0A4" }), apiKey]),
+        el("label", { class: "field" }, [keyLabel, apiKey]),
         vertexPicker,
         vertexFile,
         vertexRow,
@@ -14132,7 +14334,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.15"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.16"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -21155,7 +21357,7 @@ ${negative.value.trim()}
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.15"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.16"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
@@ -21251,7 +21453,7 @@ ${negative.value.trim()}
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.15.15" }),
+        el("span", { class: "dim", text: "v0.15.16" }),
         healthEl,
         el("span", { class: "spacer" }),
         reload,
@@ -21395,11 +21597,13 @@ ${negative.value.trim()}
     shellNotice((head + tail).trim(), conflicts ? "err" : "ok");
   }
   async function uploadAfterConnect(force = false) {
-    if (uploadInFlight) return uploadInFlight;
+    const revision = state.contextRevision;
+    if (uploadInFlight?.revision === revision) return uploadInFlight.promise;
     if (!state.slot || state.slotError) return;
-    uploadInFlight = (async () => {
+    const promise = (async () => {
       try {
         await state.upload({ force });
+        if (revision !== state.contextRevision) return;
         announceMerge();
         if (state.activeChatKey) await state.loadTurns();
       } catch (e) {
@@ -21407,10 +21611,12 @@ ${negative.value.trim()}
         state.emit();
       }
     })();
+    const pending2 = { revision, promise };
+    uploadInFlight = pending2;
     try {
-      await uploadInFlight;
+      await promise;
     } finally {
-      uploadInFlight = null;
+      if (uploadInFlight === pending2) uploadInFlight = null;
     }
   }
   var reconnectTimer = null;
@@ -21568,6 +21774,6 @@ ${negative.value.trim()}
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.15.15"} loaded`);
+    console.log(`[risu-hina] v${"0.15.16"} loaded`);
   })();
 })();

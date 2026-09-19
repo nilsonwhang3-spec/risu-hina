@@ -149,7 +149,15 @@ export interface AgentSessionInfo {
   updatedAt: number;
 }
 
+export interface WorkPlan {
+  revision: number;
+  mode: 'plan' | 'execute';
+  document: string;
+  tasks: { id: string; title: string; status: 'pending' | 'in_progress' | 'blocked' | 'completed'; evidence: string }[];
+}
+
 export interface AgentSession {
+  plan?: WorkPlan;
   session: { sessionId: string; chatKey: string; title: string } | null;
   messages: { seq: number; role: string; content: unknown; cost: number | null;
               usage: Record<string, unknown> | null }[];
@@ -800,6 +808,32 @@ class AppState {
    * that can change its data.
    */
   epoch = 0;
+  /** Invalidates asynchronous work belonging to a previously selected bot. */
+  contextRevision = 0;
+  private hostReadSequence = 0;
+
+  private resetBotContext(): void {
+    void this.stopAgent();
+    this.contextRevision += 1;
+    this.cancelAssetSync();
+    this.assetSync = null;
+    this.workspace = null;
+    this.lastMerge = null;
+    this.activeChatKey = '';
+    this.sessionId = '';
+    this.turns = [];
+    this.totalTurns = 0;
+    this.warnings = [];
+    this.changes = null;
+    this.botChanges = null;
+    this.unseenOutputs = [];
+    this.openFileRequest = null;
+    this.openTabRequest = null;
+    this.openStudioRequest = null;
+    this.promptRequest = null;
+    this.filesRev += 1;
+    this.epoch += 1;
+  }
 
   listeners = new Set<() => void>();
 
@@ -858,13 +892,25 @@ class AppState {
 
   /** Read the selected character and its chats from RisuAI. */
   async readHost(): Promise<boolean> {
+    const sequence = ++this.hostReadSequence;
     this.slotError = '';
     try {
-      this.slot = await host.currentSlot();
-      this.character = await host.readCharacter(this.slot.characterIndex);
-      this.liveChat = await host.readChat(this.slot);
+      const slot = await host.currentSlot();
+      const character = await host.readCharacter(slot.characterIndex);
+      const liveChat = await host.readChat(slot);
+      if (sequence !== this.hostReadSequence) return false;
+      const before = this.character?.chaId || this.workspace?.charId;
+      const changed = before && character.chaId
+        ? before !== character.chaId
+        : this.slot !== null && this.slot.characterIndex !== slot.characterIndex;
+      if (changed) this.resetBotContext();
+      this.slot = slot;
+      this.character = character;
+      this.liveChat = liveChat;
       return true;
     } catch (e) {
+      if (sequence !== this.hostReadSequence) return false;
+      this.resetBotContext();
       this.slot = null;
       this.character = null;
       this.liveChat = null;
@@ -886,6 +932,7 @@ class AppState {
   async upload(opts: { allChats?: boolean; force?: boolean; cardReset?: boolean;
                        chatReset?: boolean; chatIndex?: number } = {}): Promise<WorkspaceInfo> {
     if (!this.slot || !this.character) throw new Error('호스트 상태를 먼저 읽어야 합니다');
+    const revision = this.contextRevision;
     const chats = Array.isArray(this.character.chats) ? this.character.chats : [];
     const payload: Record<string, unknown> = {
       charId: this.character.chaId ?? '',
@@ -915,6 +962,7 @@ class AppState {
       payload.chats = [{ chat: this.liveChat, chatIndex: this.slot.chatIndex, live: true }];
     }
     const res = await transport.upload<{ workspace: WorkspaceInfo }>('/workspace', payload);
+    if (revision !== this.contextRevision) throw new Error('봇 선택이 변경되었습니다');
     this.workspace = res.workspace;
     // Read once by the shell, which turns it into the one-line notice.
     this.lastMerge = res.workspace.merge ?? null;
@@ -1017,10 +1065,12 @@ class AppState {
     if (this.assetSync && this.assetSync.charKey === ck && syncBusy(this.assetSync) && !force) return;
     this.cancelAssetSync();
     const web = transport.hostPlatform === 'web';
+    const revision = this.contextRevision;
     this.assetSyncCtl = syncAssets(char, ck, {
       hubPull: web,
       concurrency: web ? 4 : 6,
     }, (p) => {
+      if (revision !== this.contextRevision || ck !== this.activeCharKey) return;
       this.assetSync = p;
       const now = Date.now();
       const settled = !syncBusy(p);
@@ -1057,9 +1107,11 @@ class AppState {
 
   async loadTurns(chatKey = this.activeChatKey, start = 0, limit = 2000): Promise<void> {
     if (!chatKey) return;
+    const revision = this.contextRevision;
     const res = await transport.get<{ total: number; turns: Turn[] }>(
       '/turns', { chatKey, start, limit },
     );
+    if (revision !== this.contextRevision) return;
     this.activeChatKey = chatKey;
     this.turns = res.turns;
     this.totalTurns = res.total;
@@ -1076,9 +1128,14 @@ class AppState {
    */
   async refreshChanges(): Promise<Changes | null> {
     if (!this.activeChatKey) { this.changes = null; this.emit(); return null; }
+    const revision = this.contextRevision;
+    const key = this.activeChatKey;
     try {
-      this.changes = await transport.get<Changes>('/changes', { chatKey: this.activeChatKey });
+      const result = await transport.get<Changes>('/changes', { chatKey: key });
+      if (revision !== this.contextRevision || key !== this.activeChatKey) return null;
+      this.changes = result;
     } catch {
+      if (revision !== this.contextRevision || key !== this.activeChatKey) return null;
       this.changes = null;
     }
     this.emit();
@@ -1358,13 +1415,27 @@ class AppState {
    * whole afternoon (the 164MB /session of §1-55 was history rows, now
    * excluded server-side; the limit keeps the rest small too). */
   async agentSession(sessionId?: string, limit = 0): Promise<AgentSession> {
+    const revision = this.contextRevision;
+    const chatKey = this.activeChatKey;
     const r = await transport.get<AgentSession>('/session', {
-      chatKey: this.activeChatKey,
+      chatKey,
       sessionId: sessionId || undefined,
       limit: limit > 0 ? limit : undefined,
     });
+    if (revision !== this.contextRevision || chatKey !== this.activeChatKey) throw new Error('봇 또는 챗 선택이 변경되었습니다');
     this.sessionId = r.session?.sessionId ?? '';
     return r;
+  }
+
+  async workPlan(mode?: WorkPlan['mode'], revision?: number): Promise<WorkPlan> {
+    if (!this.sessionId) await this.newAgentSession();
+    const sid = this.sessionId;
+    const context = this.contextRevision;
+    const args = { sessionId: sid, chatKey: this.activeChatKey, ...(mode ? { mode, revision } : {}) };
+    const result = mode ? await transport.post<WorkPlan>('/agent/plan', args)
+      : await transport.get<WorkPlan>('/agent/plan', args);
+    if (sid !== this.sessionId || context !== this.contextRevision) throw new Error('대화가 변경되었습니다');
+    return result;
   }
 
   async agentSessions(): Promise<AgentSessionInfo[]> {
@@ -1376,7 +1447,10 @@ class AppState {
 
   /** Start a fresh conversation; the previous one stays in the history list. */
   async newAgentSession(): Promise<void> {
-    const r = await transport.post<{ sessionId: string }>('/session', { chatKey: this.activeChatKey });
+    const revision = this.contextRevision;
+    const chatKey = this.activeChatKey;
+    const r = await transport.post<{ sessionId: string }>('/session', { chatKey });
+    if (revision !== this.contextRevision || chatKey !== this.activeChatKey) throw new Error('봇 또는 챗 선택이 변경되었습니다');
     this.sessionId = r.sessionId;
   }
 
@@ -1388,9 +1462,9 @@ class AppState {
    */
   async *agentChat(prompt: string, signal?: AbortSignal): AsyncGenerator<unknown> {
     if (!this.sessionId) {
-      const r = await transport.post<{ sessionId: string }>('/session', { chatKey: this.activeChatKey });
-      this.sessionId = r.sessionId;
+      await this.newAgentSession();
     }
+    if (signal?.aborted) return;
     yield* transport.stream('/chat', {
       sessionId: this.sessionId, prompt,
       mode: this.activeTab === 'studio' ? 'studio' : this.editMode,
@@ -2063,9 +2137,14 @@ class AppState {
   /** Same contract as refreshChanges, for the bot bar. */
   async refreshBotChanges(): Promise<CardChanges | null> {
     if (!this.botKey) { this.botChanges = null; this.emit(); return null; }
+    const revision = this.contextRevision;
+    const key = this.botKey;
     try {
-      this.botChanges = await transport.get<CardChanges>('/card/changes', { charKey: this.botKey });
+      const result = await transport.get<CardChanges>('/card/changes', { charKey: key });
+      if (revision !== this.contextRevision || key !== this.botKey) return null;
+      this.botChanges = result;
     } catch {
+      if (revision !== this.contextRevision || key !== this.botKey) return null;
       this.botChanges = null;
     }
     this.emit();

@@ -475,10 +475,13 @@ function buildKeysCard(): HTMLElement {
       provNote.style.display = p ? '' : 'none';
       vertexRow.style.display = vertex ? '' : 'none';
       vertexPicker.style.display = vertex ? '' : 'none';
+      keyLabel.textContent = vertex ? '서비스 계정 JSON' : 'API 키';
+      apiKey.placeholder = existing?.apiKey?.set ? `설정됨 (${existing.apiKey.length}자) — 바꿀 때만 입력`
+        : vertex ? 'JSON 파일을 선택하거나 내용을 붙여넣으세요' : 'API 키';
       if (vertex) syncVertexUrl();
       if (!p) return;
       provNote.appendChild(el('div', {}, [el('b', { text: p.name })]));
-      provNote.appendChild(el('div', { class: 'hint', text: p.api ? 'API 주소: ' + p.api : 'API 주소: 프로젝트마다 다릅니다 — 아래 Base URL 직접 지정' }));
+      provNote.appendChild(el('div', { class: 'hint', text: p.api ? 'API 주소: ' + p.api : vertex ? 'API 주소: JSON의 프로젝트 ID와 리전으로 자동 설정' : 'API 주소: 프로젝트마다 다릅니다 — 아래 Base URL 직접 지정' }));
       provNote.appendChild(el('div', { class: 'hint', text: '인증: ' + p.auth }));
       if (p.modelExample) provNote.appendChild(el('div', { class: 'hint', text: '모델 이름 예: ' + p.modelExample }));
       if (p.note) provNote.appendChild(el('div', { class: 'hint', text: p.note }));
@@ -493,6 +496,7 @@ function buildKeysCard(): HTMLElement {
       syncProv();
     }).catch(() => { /* the static list above stays */ });
     const apiKey = el('input', { type: 'password', placeholder: existing?.apiKey?.set ? `설정됨 (${existing.apiKey.length}자) — 바꿀 때만 입력` : 'API 키' }) as HTMLInputElement;
+    const keyLabel = el('span', { text: 'API 키' });
     const note = el('input', { value: existing?.note ?? '', placeholder: '메모 (선택)' }) as HTMLInputElement;
     const baseUrl = el('input', { value: existing?.baseUrl ?? '', placeholder: 'Base URL (프로바이더 이름으로 못 찾을 때만 · 예: https://generativelanguage.googleapis.com/v1beta/openai)' }) as HTMLInputElement;
     const urlRow = el('label', { class: 'field', style: { display: existing?.baseUrl ? '' : 'none' } }, [el('span', { text: 'Base URL 직접 지정' }), baseUrl]);
@@ -530,7 +534,7 @@ function buildKeysCard(): HTMLElement {
       el('label', { class: 'field' }, [el('span', { text: '프로바이더' }), provider, providerList]),
       el('div', { class: 'hint', style: { marginTop: '-4px', marginBottom: '10px' }, text: '이름을 고르면 주소를 압니다. 주소가 따로 있으면 아래 직접 지정.' }),
       provNote,
-      el('label', { class: 'field' }, [el('span', { text: 'API 키' }), apiKey]),
+      el('label', { class: 'field' }, [keyLabel, apiKey]),
       vertexPicker, vertexFile, vertexRow,
       el('label', { class: 'field' }, [el('span', { text: '메모' }), note]),
       urlRow,

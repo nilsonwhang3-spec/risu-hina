@@ -117,7 +117,7 @@ function notice(text: string, kind: NoticeKind = ''): void {
 
 const kitRender = makeTab({
   // A pending open-request is a staleness key: consuming it is refresh's job.
-  keys: () => [state.filesRev, state.openFileRequest],
+  keys: () => [state.contextRevision, state.activeCharKey, state.filesRev, state.openFileRequest],
   // Deliberately no menu-line search: the folder filter is a fold-out icon on
   // the filebar itself (the full-width box spent a whole row on a field that
   // is empty almost always - field report item 14).
@@ -163,7 +163,28 @@ const kitRender = makeTab({
   },
 });
 
+let filesContext = '';
+let focusBotProject = false;
+
 export function renderFilesTab(mount: HTMLElement): void {
+  const context = JSON.stringify([state.contextRevision, state.activeCharKey]);
+  if (context !== filesContext) {
+    filesContext = context;
+    lastListing = null;
+    nodes.clear();
+    selectedDir = 'projects';
+    selection.clear();
+    treeSel.clear();
+    anchorPath = '';
+    previewPath = '';
+    filterText = '';
+    expanded.clear();
+    expanded.add('projects');
+    expanded.add('studio');
+    focusBotProject = true;
+    if (treeMount) clear(treeMount);
+    if (viewMount) clear(viewMount);
+  }
   kitRender(mount);
   // Opening the tab no longer clears the badge (§1-36): a new file stays
   // marked - a dot on its folder in the tree and on its row - until that
@@ -173,7 +194,7 @@ export function renderFilesTab(mount: HTMLElement): void {
 
 const pendingRefreshes = new Map<string, Promise<void>>();
 function refreshKey(): string {
-  return JSON.stringify([state.filesRev, showInternal, onlyMine, state.activeCharKey, state.openFileRequest]);
+  return JSON.stringify([state.contextRevision, state.filesRev, showInternal, onlyMine, state.activeCharKey, state.openFileRequest]);
 }
 
 function refresh(): Promise<void> {
@@ -194,6 +215,11 @@ async function refreshOnce(key: string): Promise<void> {
     if (key !== refreshKey()) return; // a pre-operation response must not restore old files
     lastListing = data;
     buildNodes(data);
+    if (focusBotProject && data.botFolder) {
+      const project = `projects/${data.botFolder}`;
+      if (nodes.has(project)) { selectedDir = project; expandTo(project); }
+      focusBotProject = false;
+    }
     if (!nodes.has(selectedDir)) selectedDir = nodes.has('projects') ? 'projects' : (nodes.keys().next().value ?? '');
     treeSel = new Set([...treeSel].filter((q) => nodes.has(q)));
     // Selection survives a refresh only for paths that still exist.

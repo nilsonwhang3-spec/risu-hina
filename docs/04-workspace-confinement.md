@@ -734,8 +734,8 @@ allowed), and the gpt-5.6 series **rejects tool calls outright on Chat Completio
 Anthropic, Gemini (AI Studio) and Vertex **ignore** fields they do not know; Ollama knows only `max_tokens` and
 does not list `max_completion_tokens`; on OpenCode, GPT and Grok are `/responses`, DeepSeek, GLM and Kimi are
 `/chat/completions`, Claude and Qwen use the Anthropic format (not possible with our tooling), and Go is
-`opencode.ai/zen/go/v1`; Vertex takes only an OAuth access token and express-mode API keys do not exist on this
-endpoint. Meanwhile pydantic-ai 2.33 decides the profile from the model name alone, so it sends `temperature` to
+`opencode.ai/zen/go/v1`; Hina stores a Vertex service-account JSON key and automatically refreshes OAuth tokens at request time.
+Express mode uses a separate API-key endpoint and is not implemented by this connector. Meanwhile pydantic-ai 2.33 decides the profile from the model name alone, so it sends `temperature` to
 gpt-5 as well, puts `strict:true` on tool definitions, uses `max_completion_tokens` for the limit, and always attaches `stream_options` when streaming.
 
 Hardcode a parameter set and it will break somewhere, guaranteed. So it was moved into `providers.py`:

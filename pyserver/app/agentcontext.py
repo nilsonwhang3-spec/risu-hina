@@ -80,6 +80,7 @@ async def compress(messages: list, budget: int, model, session_id: str = "", for
     """Compress against an estimated-token budget, never a character limit."""
     from .agent import _msg_chars, _msg_text, SUMMARY_REFUSED
     from .continuity import STATE_MARKER
+    from .workplan import MARKER as PLAN_MARKER
     from . import tooloutput
     before = sum(_msg_chars(m) for m in messages)
     before_tokens = sum(message_tokens(m) for m in messages)
@@ -123,11 +124,15 @@ async def compress(messages: list, budget: int, model, session_id: str = "", for
     # machine handoffs and summaries may be replaced by the new summary.
     latest_state = next((p for m in reversed(messages) for p in reversed(m.parts)
                          if p.part_kind == "user-prompt" and isinstance(p.content, str) and p.content.startswith(STATE_MARKER)), None)
+    latest_plan = next((p for m in reversed(messages) for p in reversed(m.parts)
+                        if p.part_kind == "user-prompt" and isinstance(p.content, str) and p.content.startswith(PLAN_MARKER)), None)
     for message in head:
         parts = [p for p in message.parts if p.part_kind == "user-prompt" and
-                 (not isinstance(p.content, str) or not p.content.startswith((STATE_MARKER, SUMMARY_MARKER)))]
+                 (not isinstance(p.content, str) or not p.content.startswith((STATE_MARKER, SUMMARY_MARKER, PLAN_MARKER)))]
         if latest_state is not None and any(p is latest_state for p in message.parts):
             parts.insert(0, latest_state)
+        if latest_plan is not None and any(p is latest_plan for p in message.parts):
+            parts.insert(0, latest_plan)
         if parts:
             preserved.append(dataclasses.replace(message, parts=parts))
     system = [p for m in head for p in m.parts if p.part_kind == "system-prompt"]
@@ -211,6 +216,15 @@ class AutoContext(AbstractCapability):
                 request_context.messages[-1] = dataclasses.replace(last, parts=[
                     *[UserPromptPart(content=text) for text in ctx.deps.continuity_parts], *last.parts])
                 ctx.deps.continuity_parts = None
+        from . import workplan
+        if ctx.deps.session_id:
+            current_plan = workplan.prompt(ctx.deps.session_id)
+            previous_plan = next((p.content for m in reversed(request_context.messages) for p in reversed(m.parts)
+                                  if isinstance(getattr(p, 'content', None), str) and p.content.startswith(workplan.MARKER)), None)
+            if current_plan and current_plan != previous_plan:
+                last = request_context.messages[-1]
+                if isinstance(last, ModelRequest):
+                    request_context.messages[-1] = dataclasses.replace(last, parts=[*last.parts, UserPromptPart(content=current_plan)])
         cfg = config.section("agent")
         force = bool(ctx.deps.force_compact)
         ctx.deps.force_compact = False
