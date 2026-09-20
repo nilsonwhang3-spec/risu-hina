@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.15.18
+//@display-name Risu Hina v0.15.19
 //@api 3.0
-//@version 0.15.18
+//@version 0.15.19
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -182,7 +182,7 @@
           this.tokenSafe = true;
           this.lastHealth = body;
           this.probeInfo = "";
-          this.gate = versionGate("0.15.18", String(body.version || ""));
+          this.gate = versionGate("0.15.19", String(body.version || ""));
           return body;
         }
         /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -429,6 +429,7 @@
       const src = value;
       const out = {};
       for (const k of Object.keys(src).sort()) {
+        if (RUNTIME_ONLY.has(k)) continue;
         const v = strip(src[k]);
         if (v === null || v === void 0 || v === "") continue;
         if (Array.isArray(v) && !v.length) continue;
@@ -772,7 +773,7 @@
     ta.remove();
     return ok;
   }
-  var HostError, NO_SELECT_HINT, DEFAULT_FALSE, LIST_LABEL;
+  var HostError, NO_SELECT_HINT, DEFAULT_FALSE, RUNTIME_ONLY, LIST_LABEL;
   var init_host = __esm({
     "src/host.ts"() {
       "use strict";
@@ -795,6 +796,7 @@
         "folder",
         "activationPercent"
       ]);
+      RUNTIME_ONLY = /* @__PURE__ */ new Set(["lowLevelAccess"]);
       LIST_LABEL = {
         alternateGreetings: "\uB300\uCCB4 \uC778\uC0AC\uB9D0",
         globalLore: "\uBD07 \uB85C\uC5B4\uBD81",
@@ -5712,6 +5714,11 @@ button.sendbtn { padding: 9px 12px; display: flex; align-items: center; justify-
 .modalbox.focusmodal { max-width: none; width: calc(100vw - 48px); height: calc(100vh - 48px); }
 .modalbox.focusmodal .modalbody { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 .focusbody { display: flex; flex-direction: column; flex: 1; min-height: 0; gap: 8px; }
+/* Code mode wraps the box in .hlwrap for the syntax mirror; without these the
+   wrapper is a plain block and the textarea fell to two rows (\xA71-63: "\uC9D1\uC911
+   \uD3B8\uC9D1 \uCC3D\uC774 \uB108\uBB34 \uC791\uAC8C \uC811\uD600\uC11C"). */
+.focusbody > .hlwrap { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.focusbody > .hlwrap > textarea.focusarea { flex: 1; min-height: 0; height: auto; }
 textarea.focusarea { flex: 1; min-height: 0; resize: none; font-size: 14px; line-height: 1.7; }
 textarea.focusarea.codearea { font-size: 12.5px; line-height: 1.55; }
 .focusfoot { flex-shrink: 0; }
@@ -14388,10 +14395,10 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           return;
         }
         if (!r.newer) {
-          const mismatch = r.current !== "0.15.18";
+          const mismatch = r.current !== "0.15.19";
           const ahead = r.ahead ?? (!!r.latest && r.latest !== r.current);
           say(
-            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.18"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
+            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.19"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
             mismatch || ahead ? "" : "ok"
           );
           return;
@@ -14482,7 +14489,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.15.18",
+            version: "0.15.19",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -15172,7 +15179,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.18"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.19"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -21848,7 +21855,7 @@ ${negative.value.trim()}
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.18"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.19"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
@@ -21944,7 +21951,7 @@ ${negative.value.trim()}
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.15.18" }),
+        el("span", { class: "dim", text: "v0.15.19" }),
         healthEl,
         el("span", { class: "spacer" }),
         reload,
@@ -22267,6 +22274,6 @@ ${negative.value.trim()}
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.15.18"} loaded`);
+    console.log(`[risu-hina] v${"0.15.19"} loaded`);
   })();
 })();

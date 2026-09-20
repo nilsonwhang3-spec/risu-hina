@@ -48,6 +48,10 @@ DEFAULT_FALSE = (
     "alwaysActive", "selective", "useRegex", "enabled", "case_sensitive",
     "scanDepth", "loreCache", "folder", "activationPercent",
 )
+# Stamped by RisuAI at run time on every trigger entry (triggers.ts sets
+# `lowLevelAccess` on each object whenever triggers run); not an edit by
+# either side, so it must not pair two identical scripts as a conflict (§1-63).
+RUNTIME_ONLY = ("lowLevelAccess",)
 
 
 def _strip(value: Any) -> Any:
@@ -58,6 +62,8 @@ def _strip(value: Any) -> Any:
     if isinstance(value, dict):
         out = {}
         for k in sorted(value):
+            if k in RUNTIME_ONLY:
+                continue
             v = _strip(value[k])
             if v is None or v == "" or v == [] or v == {}:
                 continue

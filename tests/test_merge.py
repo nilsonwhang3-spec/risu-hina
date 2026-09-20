@@ -62,6 +62,9 @@ def test_canon() -> None:
     check("RisuAI's default flags are not an edit", merge.canon(a) == merge.canon(imported),
           merge.canon(imported))
     check("a real flag still counts", merge.canon(a) != merge.canon({**a, "alwaysActive": True}))
+    trig = {"comment": "t", "type": "start", "effect": [{"type": "triggerlua", "code": "print(1)"}]}
+    check("RisuAI's run-time lowLevelAccess stamp is not an edit (§1-63)",
+          merge.canon(trig) == merge.canon({**trig, "lowLevelAccess": False}) == merge.canon({**trig, "lowLevelAccess": True}))
     check("empty and missing are the same", merge.canon({**a, "note": ""}) == merge.canon(a))
 
 

@@ -858,6 +858,11 @@ button.sendbtn { padding: 9px 12px; display: flex; align-items: center; justify-
 .modalbox.focusmodal { max-width: none; width: calc(100vw - 48px); height: calc(100vh - 48px); }
 .modalbox.focusmodal .modalbody { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 .focusbody { display: flex; flex-direction: column; flex: 1; min-height: 0; gap: 8px; }
+/* Code mode wraps the box in .hlwrap for the syntax mirror; without these the
+   wrapper is a plain block and the textarea fell to two rows (§1-63: "집중
+   편집 창이 너무 작게 접혀서"). */
+.focusbody > .hlwrap { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.focusbody > .hlwrap > textarea.focusarea { flex: 1; min-height: 0; height: auto; }
 textarea.focusarea { flex: 1; min-height: 0; resize: none; font-size: 14px; line-height: 1.7; }
 textarea.focusarea.codearea { font-size: 12.5px; line-height: 1.55; }
 .focusfoot { flex-shrink: 0; }
