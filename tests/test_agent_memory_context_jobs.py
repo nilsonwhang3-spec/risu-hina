@@ -64,8 +64,10 @@ class Features(unittest.TestCase):
              patch.object(agentcontext, "get_instructions", return_value="instructions"), \
              patch.object(agentcontext, "compress", compressed):
             asyncio.run(agentcontext.AutoContext().before_model_request(ctx, request))
+        # §1-62: 90% of the window, less the fixed prefix and an output
+        # reservation capped at 12K (not the whole max_tokens).
         self.assertEqual(compressed.call_args.args[1],
-                         176000 - agentcontext.estimate_tokens("instructionstool schema") - 16000)
+                         198000 - agentcontext.estimate_tokens("instructionstool schema") - 12000)
 
     def test_repeated_instructions_do_not_trigger_early_compression(self):
         def model(messages, info):
@@ -116,6 +118,19 @@ class Features(unittest.TestCase):
             self.assertFalse(agentnotes.recall("A", "Naming"))
             agentnotes.delete("global", shared["id"], shared["revision"])
 
+    def test_stored_history_keeps_instructions_once(self):
+        # §1-62: 60 copies of a 25KB instructions block were 1.5MB of an
+        # 1.85MB history row. Only the last request keeps its copy.
+        msgs = [ModelRequest(parts=[UserPromptPart("a")], instructions="SYS"),
+                ModelResponse(parts=[ToolCallPart("read", {}, "1")]),
+                ModelRequest(parts=[ToolReturnPart("read", "x", "1")], instructions="SYS"),
+                ModelResponse(parts=[TextPart("done")]),
+                ModelRequest(parts=[UserPromptPart("b")], instructions="SYS2"),
+                ModelResponse(parts=[TextPart("ok")])]
+        out = session.dedupe_instructions(msgs)
+        self.assertEqual([getattr(m, "instructions", None) for m in out], [None, None, None, None, "SYS2", None])
+        self.assertEqual([getattr(m, "instructions", None) for m in msgs][0], "SYS", "the input is not mutated")
+
     def test_memory_disabled_not_injected(self):
         with patch.object(config, "section", return_value={"memoryEnabled": False}):
             self.assertIn("disabled", agentnotes.prompt("A"))
@@ -143,7 +158,8 @@ class Features(unittest.TestCase):
             return "Start: saved path A. " + "x" * 15000 + " End: remaining path B."
         sid = "compact-live"
         db.execute("INSERT INTO sessions(id,chat_key,title,created_at,updated_at) VALUES(?,?,?,?,?)", (sid,"chat","",db.now(),db.now()))
-        settings = {"autoCompact": True, "historyBudgetChars": 5000, "contextWindowTokens": 12000, "maxTokens": 1000}
+        # A window the six previewed returns (~1.35K tokens each) overrun.
+        settings = {"autoCompact": True, "historyBudgetChars": 5000, "contextWindowTokens": 10000, "maxTokens": 1000}
         deps = agent.Deps("chat", "A", sid, Path(DATA.name))
         with patch.object(config, "section", side_effect=lambda name: settings if name == "agent" else {}):
             with capture_run_messages() as captured:

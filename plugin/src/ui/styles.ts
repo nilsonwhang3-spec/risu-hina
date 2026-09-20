@@ -997,13 +997,28 @@ button.attachbtn { padding: 8px 9px; display: flex; align-items: center; flex-sh
 }
 .attachchip > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .attachchip.bad { background: rgba(239, 68, 68, .14); border-color: rgba(239, 68, 68, .35); }
-.proposal-fold > summary, .agentplan summary { cursor: pointer; padding: 7px 2px; font-weight: 600; overflow-wrap: anywhere; }
+.proposal-fold > summary { cursor: pointer; padding: 7px 2px; font-weight: 600; overflow-wrap: anywhere; }
 .proposal-body { padding-top: 6px; }
-.agentplan { flex-shrink: 0; max-height: 30%; overflow-y: auto; }
+/* The plan / Todo strip (§1-62, user: "폰트가 크고 투박하고 자리를 많이
+   차지함"): one 11.5px line when folded, a quiet 12px card when open. */
+.agentplan { flex-shrink: 0; max-height: 30%; overflow-y: auto; font-size: 12px; line-height: 1.5; }
 .agentplan:empty { display: none; }
-.plan-body { padding: 8px; }
-.plan-task { margin-top: 6px; overflow-wrap: anywhere; }
-.plan-task .badge { margin-right: 6px; }
+.agentplan summary {
+  cursor: pointer; padding: 2px 6px; font-size: 11.5px; font-weight: 500; overflow-wrap: anywhere;
+  color: var(--textcolor2, #79839a); border-radius: 4px; list-style-position: inside;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.agentplan summary:hover { background: rgba(128,128,128,.10); color: var(--textcolor, #d8dce4); }
+.agentplan details[open] > summary { white-space: normal; color: var(--textcolor, #d8dce4); }
+.agentplan summary::marker, .agentplan summary::-webkit-details-marker { font-size: 9px; }
+.plan-body { padding: 4px 8px 8px; }
+.plan-body > .hint { font-size: 11px; margin-bottom: 4px; }
+.plan-body h1, .plan-body h2, .plan-body h3, .plan-body h4 { font-size: 12px; font-weight: 700; margin: 6px 0 2px; }
+.plan-body p, .plan-body ul, .plan-body ol { margin: 2px 0; }
+.plan-body li { margin: 0; }
+.plan-task { margin-top: 3px; overflow-wrap: anywhere; display: flex; flex-wrap: wrap; gap: 0 6px; align-items: baseline; }
+.plan-task .badge { font-size: 10px; padding: 0 5px; }
+.plan-task > .hint { flex-basis: 100%; font-size: 11px; padding-left: 4px; }
 .agenthead { flex-wrap: wrap; }
 .stagedbox { flex-shrink: 0; max-height: 42%; overflow-y: auto; }
 .card.staged { border-color: rgba(245,158,11,.45); background: rgba(245,158,11,.06); }
@@ -1087,6 +1102,13 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
  * round. The same gutter still resizes, just vertically (see splitter.ts).
  */
 .mtoggle { display: none; }
+/* iOS Safari zooms the whole page into any focused field smaller than 16px,
+   and the send button leaves the screen (§1-62). 16px on a touch screen
+   keeps the page still; the zoom is not ours to undo from inside an iframe. */
+@media (max-width: 760px), (pointer: coarse) and (max-width: 1024px) {
+  textarea, select, input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]) { font-size: 16px; }
+  .agentinput { font-size: 16px; line-height: 1.45; min-height: 64px; }
+}
 @media (max-width: 760px) {
   .split { flex-direction: column; position: relative; }
   .toolslot .searchbox { display: none !important; }
@@ -1386,6 +1408,18 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
 /* The selector's rule chips and group cards. */
 .tokenchip { font-family: var(--mono, monospace); }
 .groupcard { cursor: pointer; }
+/* The images the chat's 검수 just brought here (§1-62). */
+.selcell.fresh, .groupcard.fresh { box-shadow: 0 0 0 2px rgba(125, 211, 252, .85); }
+.missinglist { display: inline-flex; flex-wrap: wrap; gap: 2px 4px; align-items: baseline; min-width: 0; }
+button.linkbtn {
+  padding: 0 3px; border: none; background: none; font-size: 12px; border-radius: 3px;
+  color: #7dd3fc; text-decoration: underline dotted; text-underline-offset: 2px; white-space: nowrap;
+}
+button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
+.missingrow { flex-wrap: wrap; }
+.applyadv { margin-top: 10px; font-size: 12px; }
+.applyadv > summary { cursor: pointer; color: var(--textcolor2, #79839a); font-size: 11.5px; }
+.applyadv button.tiny, .applyadv button { font-size: 12px; padding: 4px 10px; }
 .groupcard.picked { outline: 2px solid #2563eb; border-radius: 6px; }
 .groupcard .fname { display: flex; gap: 4px; align-items: center; }
 .groupcard .fname .grow { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1441,6 +1475,8 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
 .uploadpanel .assetbar { max-width: none; height: 6px; margin-top: 0; }
 .uploadpanel .uperr { color: #f87171; white-space: normal; }
 .uploadpanel.done { border-color: rgba(16,185,129,.55); }
+.dlpanel .assetbar { transition: none; }
+.dlpanel button.primary { width: 100%; justify-content: center; min-height: 40px; }
 .uploadpanel.failed { border-color: rgba(239,68,68,.6); }
 
 /* --- filebar: icon verbs and the fold-out search -------------------------------- */

@@ -1,4 +1,4 @@
-"""Cleanup is previewed, reversible and confined to disposable AI work files."""
+"""Cleanup is previewed, deletes for real, and is confined to disposable AI work files."""
 import asyncio
 import os
 from pathlib import Path
@@ -28,9 +28,10 @@ class Cleanup(unittest.TestCase):
         path.write_text(text)
         return path
 
-    def test_preview_and_reversible_cleanup_preserve_user_material(self):
+    def test_preview_then_delete_preserves_user_material(self):
         selected = ['hina/Bot/scratch/tmp.txt', 'hina/Bot/scripts/_agent_run.py',
-                    'hina/Bot/.cache/temp.bin', 'hina/Bot/scripts/__pycache__/a.pyc']
+                    'hina/Bot/.cache/temp.bin', 'hina/Bot/scripts/__pycache__/a.pyc',
+                    'hina/.cleanup/20260901-000000-abcd/hina/Bot/scratch/old.txt']
         protected = ['projects/Bot/.hidden', 'studio/output/picture.webp', '.hina/bots.json',
                      'hina/Bot/scripts/useful.py', 'hina/Bot/skills/demo/.cache/keep',
                      'hina/Bot/scratch/.git/config', 'hina/Bot/scratch/.env',
@@ -42,15 +43,20 @@ class Cleanup(unittest.TestCase):
         self.assertEqual(set(preview['paths']), set(selected))
         self.assertTrue(all((self.root / rel).exists() for rel in selected))
         result = files.cleanup_ai(preview['plan'])
-        self.assertEqual(result['moved'], len(selected))
+        self.assertEqual(result['removed'], len(selected))
+        self.assertEqual(result['freed'], sum(len(rel) for rel in selected))
         self.assertFalse(result['failed'])
         for rel in selected:
             self.assertFalse((self.root / rel).exists())
-            self.assertEqual((self.root / result['archive'] / rel).read_text(), rel)
+        self.assertFalse((self.root / 'hina' / '.cleanup').exists(), 'an old quarantine goes with the rest')
+        # The roots the runner writes into survive, emptied; deeper folders go.
+        self.assertTrue((self.root / 'hina/Bot/scratch').is_dir())
+        self.assertTrue((self.root / 'hina/Bot/scripts').is_dir())
+        self.assertFalse((self.root / 'hina/Bot/scripts/__pycache__').exists())
         self.assertTrue(all((self.root / rel).exists() for rel in protected))
         self.assertEqual(files.cleanup_ai()['count'], 0)
 
-    def test_changed_preview_does_not_move_any_files(self):
+    def test_changed_preview_does_not_delete_any_files(self):
         a = self.put('hina/Bot/scratch/a.txt')
         plan = files.cleanup_ai()['plan']
         self.put('hina/Bot/scratch/b.txt')

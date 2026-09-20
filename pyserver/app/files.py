@@ -746,9 +746,14 @@ def auto_clean() -> dict:
 
 
 def cleanup_ai(plan: str = "") -> dict:
-    """Preview then quarantine known AI scratch/cache files inside space only."""
+    """Preview, then DELETE known AI scratch/cache files inside space only.
+
+    The first version quarantined them under hina/.cleanup; the user asked
+    for a plain delete (§1-62: "백업하지 말고 그냥 삭제") - the point of the
+    button is disk space and a quieter tree. Anything an older run parked in
+    .cleanup/ is temporary by definition and goes with the rest.
+    """
     import json
-    import uuid
     from . import session
     if any(not event.is_set() for event in session._ACTIVE.values()):
         raise FileError("AI 작업이 끝난 후 정리해 주세요. 실행 중인 임시 파일을 보호합니다.")
@@ -760,7 +765,7 @@ def cleanup_ai(plan: str = "") -> dict:
         if current.resolve() != current or not current.resolve().is_relative_to(root):
             dirs[:] = []
             continue
-        dirs[:] = sorted(d for d in dirs if d not in (".git", ".cleanup", "skills")
+        dirs[:] = sorted(d for d in dirs if d not in (".git", "skills")
                          and (current / d).resolve() == current / d)
         for name in sorted(names):
             if name.startswith(".") and not name.endswith((".tmp", ".temp", ".part")):
@@ -771,6 +776,7 @@ def cleanup_ai(plan: str = "") -> dict:
             relative = path.relative_to(root)
             parts = relative.parts[2:]
             temporary = ("scratch" in parts[:-1] or ".scratch" in parts[:-1]
+                         or ".cleanup" in relative.parts[:-1]
                          or any(p in ("__pycache__", ".cache", ".pytest_cache") for p in parts[:-1])
                          or name == "_agent_run.py" or name.endswith((".tmp", ".temp", ".part")))
             if not temporary or path.resolve() != path or not path.is_file():
@@ -785,25 +791,41 @@ def cleanup_ai(plan: str = "") -> dict:
         return result
     if plan != fingerprint:
         raise FileError("정리 대상이 바뀌었습니다. 목록을 다시 확인해 주세요.")
-    archive = base / ".cleanup" / (time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:8])
-    if archive.resolve() != archive or not archive.resolve().is_relative_to(root):
-        raise FileError("정리 보관 경로가 작업 공간 밖을 가리킵니다.")
-    moved, failed = 0, []
+    removed, freed, failed = 0, 0, []
+    parents: set[Path] = set()
     for relative, size, mtime in entries:
-        source, target = root / relative, archive / relative
+        source = root / relative
         try:
             if source.resolve() != source or not source.resolve().is_relative_to(root):
                 raise FileError("경로 변경")
             stat = source.stat()
             if (stat.st_size, stat.st_mtime_ns) != (size, mtime):
                 raise FileError("파일 변경")
-            target.parent.mkdir(parents=True, exist_ok=True)
-            source.rename(target)
-            moved += 1
+            source.unlink()
+            removed += 1
+            freed += size
+            parents.add(source.parent)
         except (OSError, FileError) as error:
             failed.append({"path": relative, "error": str(error)})
-    return {**result, "moved": moved, "failed": failed,
-            "archive": archive.relative_to(root).as_posix() if moved else ""}
+    # Folders emptied by the delete go too (deepest first), but never the
+    # scratch/ and scripts/ roots the runner expects, nor anything above them.
+    def prunable(d: Path) -> bool:
+        if d == base or not d.is_relative_to(base):
+            return False
+        parts = d.relative_to(base).parts
+        # The old quarantine tree may go entirely, .cleanup itself included.
+        return len(parts) > 2 or parts[0] == ".cleanup"
+    for d in sorted(parents, key=lambda q: len(q.parts), reverse=True):
+        while prunable(d):
+            try:
+                if any(d.iterdir()):
+                    break
+                d.rmdir()
+            except OSError:
+                break
+            d = d.parent
+    log.info("cleanup-ai removed=%s freed=%s failed=%s", removed, freed, len(failed))
+    return {**result, "removed": removed, "freed": freed, "failed": failed}
 
 
 def clean_bot(char_key: str, areas: list[str] | None = None) -> dict:

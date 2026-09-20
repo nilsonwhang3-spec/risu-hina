@@ -239,6 +239,37 @@ export class Transport {
   }
 
   /**
+   * The same, reporting the bytes as they arrive (§1-62: a big download
+   * showed nothing for a long time). `total` is the Content-Length when the
+   * server sends one (a zip is streamed and has none), else 0. Hosts whose
+   * Response has no readable body fall back to one report at the end.
+   */
+  async postBinaryProgress(path: string, payload: unknown, onProgress: (p: { loaded: number; total: number }) => void,
+                           timeoutMs = UPLOAD_TIMEOUT_MS): Promise<Uint8Array> {
+    const res = await this.raw('POST', path, payload, { timeoutMs });
+    if (!res.ok) throw await toError(res);
+    const total = Number(res.headers?.get?.('content-length') || 0) || 0;
+    const body = res.body;
+    if (!body || typeof body.getReader !== 'function') {
+      const out = new Uint8Array(await res.arrayBuffer());
+      onProgress({ loaded: out.byteLength, total: out.byteLength });
+      return out;
+    }
+    const reader = body.getReader();
+    const chunks: Uint8Array[] = [];
+    let loaded = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) { chunks.push(value); loaded += value.byteLength; onProgress({ loaded, total }); }
+    }
+    const out = new Uint8Array(loaded);
+    let at = 0;
+    for (const c of chunks) { out.set(c, at); at += c.byteLength; }
+    return out;
+  }
+
+  /**
    * NDJSON stream. Yields one parsed object per line as it arrives.
    *
    * Phase 0 measured first-byte at ~289ms and lines arriving at the server's

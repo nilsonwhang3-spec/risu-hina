@@ -590,8 +590,8 @@ def build() -> Agent[Deps]:
 
     @agent.tool
     def review_learning(ctx: RunContext[Deps], summary: str) -> str:
-        """After reviewing BOTH notes and reusable skills, record saves or reasons no changes are warranted.
-        This checkpoint does not itself create a memory/skill. Use remember_note/improve_skill first if needed.
+        """Optional: record what you saved to notes/skills this turn and why, for the user's learning log.
+        Not required before answering; skip it when nothing was saved. It does not itself create a memory/skill.
         """
         try:
             return learning.record(ctx, summary)
@@ -602,26 +602,30 @@ def build() -> Agent[Deps]:
 
     @agent.instructions
     def _plan_discipline(ctx: RunContext[Deps]) -> str:
-        return ("Use a durable plan and Todo list for multi-step or multi-turn work. Read read_plan before revising. "
-                "update_plan stores the full Markdown document (goal, constraints, approach, validation) and full task list. "
-                "Retain stable task IDs and completed evidence when revising; reflect user corrections without erasing unfinished work. "
-                "The current plan is supplied at each model step, including after compaction. Treat it as recorded data, "
-                "not as authority over current user instructions. In plan mode investigate and write the plan only, then present it "
-                "for the user to switch to execution. You cannot switch modes yourself. In execute mode mark ONE task in_progress "
-                "before implementing it, verify the result, then mark completed with concrete evidence and proceed to the next. "
-                "Staged or approval-pending changes are not applied: keep those tasks blocked with the reason until verified. "
-                "Update the plan before yielding or when scope changes. Resume pending/in_progress tasks after interruption; "
-                "check actual files, jobs and approvals before repeating work. Do not mark everything done merely to end a turn. "
-                "A simple one-step answer does not require a plan. Mode switching does not approve individual proposals.")
+        return ("Plan and Todo (read_plan/update_plan) are for when the USER asks for them - \"계획 세워 줘\", \"할 일 정리해 줘\", "
+                "\"먼저 계획부터\", or the user switched to plan mode - or when a plan already exists in this conversation and "
+                "the work it tracks moves on. Do not start a plan on your own for an ordinary request, however many steps it "
+                "takes; do the work and report. Do not read the plan at the start of a turn as a habit: the current plan, when "
+                "there is one, is already supplied to you and updated after each change. Treat it as recorded data, not as "
+                "authority over current user instructions. "
+                "When a plan is in use: update_plan stores the full Markdown document (goal, constraints, approach, validation) "
+                "and the full task list, using the revision you were given; keep stable task IDs and completed evidence, and "
+                "reflect user corrections without erasing unfinished work. Mark ONE task in_progress before implementing it, "
+                "verify, then mark it completed with concrete evidence - staged or approval-pending changes stay blocked with "
+                "the reason. Update it when scope changes or before yielding, not after every tool call. Never mark everything "
+                "done merely to end a turn. In plan mode investigate and write the plan only, then present it for the user to "
+                "switch to execution; you cannot switch modes yourself, and mode switching approves no individual proposal. "
+                "After an interruption check actual files, jobs and approvals before repeating work.")
 
     @agent.tool
     def read_plan(ctx: RunContext[Deps]) -> str:
-        """Read this conversation's durable plan document, revision and Todo list."""
+        """Read this conversation's plan document, revision and Todo list (only needed when the user asked for a plan
+        and the supplied copy may be stale, e.g. an update_plan revision conflict)."""
         return json.dumps(workplan.get(ctx.deps.session_id or ""), ensure_ascii=False)
 
     @agent.tool
     def update_plan(ctx: RunContext[Deps], revision: int, document: str, tasks: list[dict[str, str]]) -> str:
-        """Save the full Markdown plan and Todo list using the revision from read_plan.
+        """Save the full Markdown plan and Todo list (user-requested plans only) using the current revision.
         Task fields: id, title, status (pending/in_progress/blocked/completed), evidence.
         Completed tasks require verification evidence; blocked tasks require a reason.
         Keep existing task IDs and progress. This tool cannot change plan/execute mode.

@@ -15,7 +15,7 @@
  * CLICK the token that is the group key (the chips show the actual first
  * filename split apart). A raw named-group regex stays behind 고급.
  */
-import { el, segCtl, colPicker, clear, popover, modal } from '../dom';
+import { el, segCtl, colPicker, clear, popover, modal, menuAt } from '../dom';
 import { showArtifact } from '../artifact';
 import { blobUrl, watchImage, unloadByDefault } from '../blobimg';
 import { state, type GroupItem, type SelectionMap, type SelectionState,
@@ -130,6 +130,27 @@ let groupsRev = -1;
 export function setViewMode(v: 'all' | 'group'): void {
   viewMode = v;
   drill = '';
+}
+
+/** The chat's 검수 on a batch's images (§1-62): once the groups are read,
+ * unfold the group the first of them is in and ring the fresh ones, so the
+ * decision is one tap away. Pending until the first draw with groups. */
+let pendingFocus: { folder: string; names: Set<string> } | null = null;
+let highlight = new Set<string>();
+export function setFocus(folder: string, paths: string[]): void {
+  const names = new Set(paths.map((p) => p.slice(p.lastIndexOf('/') + 1)).filter(Boolean));
+  pendingFocus = names.size ? { folder, names } : null;
+  highlight = new Set();
+}
+
+function applyFocus(node: Folder, g: StudioGroups): void {
+  if (!pendingFocus || pendingFocus.folder !== node.path) return;
+  const names = pendingFocus.names;
+  pendingFocus = null;
+  highlight = names;
+  const grp = g.groups.find((x) => x.items.some((i) => names.has(i.filename)));
+  if (grp) { viewMode = 'group'; drill = grp.key; }
+  else { viewMode = 'all'; drill = ''; }
 }
 
 /** The 검수 ⇄ 썸네일 switch on the head row of both views (§1-40). */
@@ -336,23 +357,21 @@ export function drawSelector(node: Folder): void {
   const p = prefsFor(node.path);
   cellSyncs.clear();
   missingSync = null;
+  applyFocus(node, g);
 
-  // --- top: TWO rows (§1-33). The one row of eleven controls overflowed a
-  // laptop and read as a wall. Row 1 = where you are + the rule; row 2 =
-  // how to look + what to do.
+  // --- top: ONE row of what is used all the time (§1-62, user: "탭이 여전히
+  // 좀 복잡하다"). Where you are · 그룹별/전체 · columns · 애셋 채택, and a ⋯
+  // menu for the rest (rule, AI 재검수, 에셋 규칙, 부족분, 제안 일괄, 정리).
   const head = el('div', { class: 'row selhead', style: { marginBottom: '6px' } });
-  const tidy = el('button', { class: 'ghost tiny', text: '정리', title: '폴더 정리 화면 (선택·이동·삭제·업로드)' });
-  tidy.addEventListener('click', () => { S.centreMode = 'folder'; hub.drawCentre(); });
   head.append(
     viewSwitch('inspect'),
     el('span', { class: 'sectiontitle path grow', title: node.path,
                  text: `${node.path} · ${g.total}장` }),
   );
-  void tidy;
   viewMount.appendChild(head);
   const bar = el('div', { class: 'row seltools', style: { marginBottom: '8px' } });
   const mkView = (v: 'all' | 'group' | 'rep', label: string) => ({
-    label, on: viewMode === v, pick: () => { viewMode = v; drill = ''; hub.drawCentre(); },
+    label, on: viewMode === v && !drill, pick: () => { viewMode = v; drill = ''; hub.drawCentre(); },
   });
   // 대표 (the per-group representative) is gone from the screen (§1-39: "왜?"
   // - one more flag nobody asked for); the export still takes the first
@@ -365,85 +384,88 @@ export function drawSelector(node: Folder): void {
     }
   } }));
   bar.appendChild(el('span', { class: 'spacer' }));
-  // AI 재검수 (§1-46): the same as typing "이 폴더 재검수 해줘" in the chat -
-  // review_folder → suggest_selection, suggestions refreshed, nothing flagged.
-  const rereview = el('button', { class: 'ghost tiny selicon', text: '🔍', 'aria-label': 'AI 재검수',
-    title: 'AI 재검수 - 히나에게 이 폴더를 다시 검수해 제안을 새로 적어 달라고 합니다 (표시는 바꾸지 않음)' });
-  rereview.addEventListener('click', () => {
-    state.requestPrompt(`"${node.path}" 폴더를 재검수해 줘. review_folder 로 보고 suggest_selection 으로 제안을 새로 적어 줘 (기존 제안은 갱신). 표시(채택·버림·수정)는 바꾸지 말고, 다 적으면 검수 탭을 열어 줘.`);
-  });
-  bar.appendChild(rereview);
-  const rules = el('button', { class: 'ghost tiny', text: '에셋 규칙' });
-  rules.addEventListener('click', () => void openAssetRules());
-  const coverage = el('button', { class: 'ghost tiny', text: '캐릭터 부족분' });
-  coverage.addEventListener('click', () => openCoverage(node.path));
-  // 봇에 반영 belongs to the selected/ folder an export made - the folder
-  // one adopts FROM - not to the pool of candidates (user).
-  // AI suggestions, in bulk (§1-42): apply them all, or clear them all.
   const nSug = suggestCount();
   if (nSug) {
-    const applyAll = el('button', { class: 'ghost tiny selicon', text: `✔ ${nSug}`, 'aria-label': `제안 ${nSug}건 모두 적용`,
-      title: `제안 ${nSug}건 모두 적용 - AI 제안(채택·버림·수정)을 전부 표시로 바꿉니다` });
+    const applyAll = el('button', { class: 'ghost tiny', text: `AI 제안 ${nSug}건 적용`,
+      title: 'AI 제안(채택·버림·수정)을 전부 표시로 바꿉니다' });
     applyAll.addEventListener('click', () => {
       for (const f of Object.keys(selection)) if (selection[f]?.suggest) applySuggest(f);
       hub.drawCentre();
     });
-    const clearAll = el('button', { class: 'ghost tiny selicon', text: '🧹', 'aria-label': '제안 지우기', title: '제안 지우기 - AI 제안을 모두 지웁니다 (표시는 그대로)' });
-    clearAll.addEventListener('click', () => {
-      for (const f of Object.keys(selection)) if (selection[f]?.suggest) dropSuggest(f);
-      hub.drawCentre();
-    });
-    bar.append(applyAll, clearAll);
+    bar.appendChild(applyAll);
   }
-  bar.append(rules, coverage, exportButton(node));
+  bar.appendChild(exportButton(node));
   if (/\/selected$/.test(node.path)) bar.appendChild(adoptButton());
+  // ⋯ the advanced verbs, in a menu (§1-62). 못 읽음 stays on the head: it
+  // is a problem, not an option.
+  const missingGroups = (): string[] => g.groups
+    .filter((grp) => !grp.items.some((i) => selection[i.filename]?.use))
+    .map((grp) => grp.label || grp.key);
+  const more = el('button', { class: 'ghost tiny selicon', text: '⋯', 'aria-label': '고급',
+    title: '고급 - 그룹 규칙 · AI 재검수 · 에셋 규칙 · 캐릭터 부족분 · 부족분 예약 · 폴더 정리' });
+  more.addEventListener('click', () => {
+    const r = more.getBoundingClientRect();
+    const missing = missingGroups();
+    menuAt(r.left, r.bottom + 2, [
+      { label: `그룹 규칙 바꾸기 (${ruleSummary(p, g).replace(/^규칙: /, '')})`, onClick: () => openRulePopover(more, node) },
+      { label: 'AI 재검수', onClick: () => {
+        state.requestPrompt(`"${node.path}" 폴더를 재검수해 줘. review_folder 로 보고 suggest_selection 으로 제안을 새로 적어 줘 (기존 제안은 갱신). 표시(채택·버림·수정)는 바꾸지 말고, 다 적으면 검수 탭을 열어 줘.`);
+      } },
+      nSug ? { label: `AI 제안 ${nSug}건 지우기 (표시는 그대로)`, onClick: () => {
+        for (const f of Object.keys(selection)) if (selection[f]?.suggest) dropSuggest(f);
+        hub.drawCentre();
+      } } : null,
+      null,
+      { label: missing.length ? `채택 없는 그룹 ${missing.length}개 다시 생성 예약` : '채택 없는 그룹 없음',
+        disabled: !missing.length, onClick: () => void reserveMissing(missing, more) },
+      { label: '에셋 규칙', onClick: () => void openAssetRules() },
+      { label: '캐릭터 부족분', onClick: () => openCoverage(node.path) },
+      null,
+      { label: '폴더 정리 (선택·이동·삭제·업로드)', onClick: () => { S.centreMode = 'folder'; hub.drawCentre(); } },
+    ]);
+  });
+  bar.appendChild(more);
   viewMount.appendChild(bar);
-
-  // --- the grouping rule: ONE compact control (§1-30), on the head row ----------
-  // The editor folds behind a summary button that also says what the rule
-  // produced. Tokens are MULTI-select.
-  const ruleBtn = el('button', { class: 'ghost tiny rulebtn', text: ruleSummary(p, g),
-    title: '파일 이름을 어떻게 나눠 그룹을 만들지 고칩니다 (토큰은 복수 선택 가능)' });
-  ruleBtn.addEventListener('click', () => openRulePopover(ruleBtn, node));
-  head.appendChild(ruleBtn);
   if (g.unmatched.length) {
     const badge = el('button', { class: 'ghost tiny badge warn', text: `못 읽음 ${g.unmatched.length}`,
       title: '이름 규칙이 못 읽은 파일 — 아래 별도 목록에 있습니다. 누르면 규칙 편집이 열립니다' });
-    badge.addEventListener('click', () => openRulePopover(ruleBtn, node));
+    badge.addEventListener('click', () => openRulePopover(badge, node));
     head.appendChild(badge);
   }
 
   // 부족분: a group that exists but has NO 채택 yet (§1-39, user: not a
   // comparison against the preset - a group with candidates and no pick).
-  // The button reserves a re-run for the ones the current preset can name.
+  // Each name is a link into that group (§1-62); the re-run reservation is
+  // in the ⋯ menu.
   const missingBox = el('div', {});
   viewMount.appendChild(missingBox);
   const renderMissing = (): void => {
     clear(missingBox);
-    const missing = g.groups
-      .filter((grp) => !grp.items.some((i) => selection[i.filename]?.use))
-      .map((grp) => grp.label || grp.key);
+    const missing = g.groups.filter((grp) => !grp.items.some((i) => selection[i.filename]?.use));
     if (!missing.length) return;
-    const fill = el('button', { class: 'ghost tiny', text: '부족분 다시 생성 예약',
-      title: '채택이 없는 그룹을 배치 예약에 1장씩 넣습니다 (현재 씬 프리셋에 같은 이름의 씬이 있는 것만)' }) as HTMLButtonElement;
-    fill.addEventListener('click', () => void reserveMissing(missing, fill));
     // The list folds (§1-41): forty group names took a third of the screen.
-    // Six show, the rest behind "외 N개 · 펼치기".
+    // Six show, the rest behind "외 N개".
     const FOLD = 6;
-    const names = el('span', { class: 'hint grow' });
+    const names = el('span', { class: 'missinglist grow' });
     let open = false;
-    const more = el('button', { class: 'ghost tiny' });
-    more.style.display = missing.length > FOLD ? '' : 'none';
+    const moreBtn = el('button', { class: 'ghost tiny' });
+    moreBtn.style.display = missing.length > FOLD ? '' : 'none';
     const syncNames = (): void => {
-      names.textContent = open || missing.length <= FOLD ? missing.join(', ') : missing.slice(0, FOLD).join(', ') + ' …';
-      more.textContent = missing.length > FOLD ? (open ? '접기' : `외 ${missing.length - FOLD}개 · 펼치기`) : '';
+      clear(names);
+      const shown = open || missing.length <= FOLD ? missing : missing.slice(0, FOLD);
+      for (const grp of shown) {
+        const link = el('button', { class: 'linkbtn', text: grp.label || grp.key, title: '이 그룹으로 이동합니다' });
+        link.addEventListener('click', () => { viewMode = 'group'; drill = grp.key; hub.drawCentre(); });
+        names.appendChild(link);
+      }
+      if (shown.length < missing.length) names.appendChild(el('span', { class: 'hint', text: '…' }));
+      moreBtn.textContent = missing.length > FOLD ? (open ? '접기' : `외 ${missing.length - FOLD}개`) : '';
     };
-    more.addEventListener('click', () => { open = !open; syncNames(); });
+    moreBtn.addEventListener('click', () => { open = !open; syncNames(); });
     syncNames();
-    missingBox.appendChild(el('div', { class: 'row', style: { marginBottom: '8px' } }, [
-      el('span', { class: 'badge warn', text: `채택 없는 그룹 ${missing.length}개`, title: '후보는 있는데 아직 채택한 장이 없는 그룹' }),
-      names, more,
-      fill,
+    missingBox.appendChild(el('div', { class: 'row missingrow', style: { marginBottom: '8px' } }, [
+      el('span', { class: 'badge warn', text: `채택 없는 그룹 ${missing.length}`, title: '후보는 있는데 아직 채택한 장이 없는 그룹 · 이름을 누르면 그 그룹으로 갑니다' }),
+      names, moreBtn,
     ]));
   };
   renderMissing();
@@ -463,7 +485,8 @@ export function drawSelector(node: Folder): void {
     prev.addEventListener('click', () => go(at - 1));
     next.addEventListener('click', () => go(at + 1));
     up.addEventListener('click', () => { drill = ''; viewMode = 'group'; hub.drawCentre(); });
-    nav.append(up, prev, next, el('span', { class: 'sectiontitle', text: `${grp?.label || drill} · ${grp?.items.length ?? 0}장` }));
+    nav.append(up, prev, next, el('span', { class: 'sectiontitle', text: `${grp?.label || drill} · ${grp?.items.length ?? 0}장`
+      + (at >= 0 ? ` · ${at + 1}/${g.groups.length}` : '') }));
     viewMount.prepend(nav);
     viewMount.appendChild(candidateGrid(grp?.items ?? [], grp?.items));
   } else if (viewMode === 'group') {
@@ -507,7 +530,8 @@ function groupCard(grp: { key: string; label?: string; items: GroupItem[] }): HT
   const chosenBadge = el('span', { class: 'badge' });
   const fixBadge = el('span', { class: 'badge' });
   const sugBadge = el('span', { class: 'badge sug', title: 'AI 제안이 있는 후보' });
-  const cell = el('div', { class: 'fcell groupcard', title: `${grp.label || grp.key} — 눌러서 후보를 펼칩니다` }, [
+  const fresh = grp.items.some((i) => highlight.has(i.filename));
+  const cell = el('div', { class: 'fcell groupcard' + (fresh ? ' fresh' : ''), title: `${grp.label || grp.key} — 눌러서 후보를 펼칩니다` }, [
     pic,
     el('div', { class: 'fname row' }, [
       el('span', { class: 'grow', text: grp.label || grp.key }),
@@ -561,7 +585,7 @@ function candidate(it: GroupItem, groupItems?: GroupItem[]): HTMLElement {
   // The AI's suggestion (§1-42): a line under the flags with the verdict and
   // its reason, 적용 to make it the decision, × to dismiss it.
   const sug = el('div', { class: 'sugline', style: { display: 'none' } });
-  const cell2 = el('div', { class: 'fcell selcell', title: it.filename }, [
+  const cell2 = el('div', { class: 'fcell selcell' + (highlight.has(it.filename) ? ' fresh' : ''), title: it.filename }, [
     pic, el('div', { class: 'fname row' }, [el('span', { class: 'grow', text: it.filename }), binding]), flags, sug,
   ]);
   const sync = (): void => {
@@ -774,12 +798,12 @@ function openRulePopover(anchor: HTMLElement, node: Folder): void {
 
 /** Missing slots become reservations: same-named scenes in the current
  * preset, one each. Names with no scene are reported. */
-async function reserveMissing(missing: string[], btn: HTMLButtonElement): Promise<void> {
+async function reserveMissing(missing: string[], btn: HTMLElement): Promise<void> {
   if (!gen.scenePreset) {
     hub.notice('씬 프리셋이 없습니다 — 배치 탭에서 프리셋을 먼저 고르세요.', 'err');
     return;
   }
-  btn.disabled = true;
+  (btn as HTMLButtonElement).disabled = true;
   try {
     const known = new Set((await scenesOf(gen.scenePreset)).map((s) => s.name));
     const found = missing.filter((k) => known.has(k));
@@ -789,7 +813,7 @@ async function reserveMissing(missing: string[], btn: HTMLButtonElement): Promis
       (found.length ? `${found.length}개를 배치 예약에 담았습니다 (1장씩). ` : '')
       + (lost.length ? `프리셋에 같은 이름의 씬이 없는 것: ${lost.join(', ')}` : ''),
       found.length ? 'ok' : 'err');
-  } finally { btn.disabled = false; }
+  } finally { (btn as HTMLButtonElement).disabled = false; }
 }
 
 function exportButton(node: Folder): HTMLElement {

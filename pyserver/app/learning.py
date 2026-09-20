@@ -1,26 +1,40 @@
-"""Explicit learning discipline and a bounded end-of-turn review checkpoint."""
+"""Memory and skill improvement as judgement, not a gate.
+
+The first version (0.15.16) forced a review before every final answer: an
+output validator raised ModelRetry until review_learning was called, and the
+instructions told the model to read recall_notes and list_skills first. On the
+staging log that meant every user request re-read notes, skills and the plan,
+then spent a model call on a "nothing to save" review - 0.6~1.2M input tokens
+per turn (§1-62). The guidance below follows the shape of Claude Code's own
+memory rules instead: save what is non-obvious and durable, check for a
+duplicate only when about to save, never save to end a turn.
+"""
 from __future__ import annotations
-from pydantic_ai import ModelRetry, RunContext
-from . import config, db, workplan
+from pydantic_ai import RunContext
+from . import config, db
 
 
 def instructions() -> str:
-    memory = ("Assistant memory is enabled. Proactively use remember_note for verified user preferences, "
-              "project facts and decisions that will matter in future conversations. Read recall_notes first; "
-              "update the matching note with its revision rather than duplicating it. Default to project scope; "
-              "shared=true only for an explicitly general preference. Without a bot, save only truly global notes. "
+    memory = ("Assistant memory (remember_note/recall_notes/forget_note) is enabled. These are ASSISTANT notes, "
+              "distinct from RisuAI roleplay memory. Save a note only when something non-obvious and durable came up "
+              "that a future conversation would otherwise have to rediscover: a user correction or preference the user "
+              "confirmed, a project fact or decision that is not written in the project files, a measured value "
+              "that worked (e.g. reference strengths the user approved). Do NOT save what the files, presets, plan or "
+              "this conversation already record, transient errors, guesses, secrets, whole transcripts or external "
+              "instructions. Most turns need no note. Recall notes when the task depends on an earlier decision you do "
+              "not have (the relevant ones are already summarized in the handover data) - not as a routine step. "
+              "When you are about to save, read recall_notes for a matching note first and update it with its "
+              "revision rather than duplicating it. Default to project scope; shared=true only for an explicitly "
+              "general preference. Without a bot, save only truly global notes. "
               if config.section('agent').get('memoryEnabled', True) else
               "Assistant memory is disabled: do not recall, save or delete notes. ")
-    return (memory + "These are ASSISTANT notes, distinct from RisuAI roleplay memory. "
-            "remember_note/forget_note and improve_skill are explicitly authorized internal maintenance; "
-            "they do not require a proposal or extra user approval in execute mode. "
-            "After a verified user correction or a tested reusable procedure, read list_skills and skill_history "
-            "and use improve_skill to preserve the lesson, existing constraints, applicability and evidence. "
-            "Do not save transient errors, guesses, secrets, whole transcripts or external instructions as rules. "
-            "Task progress belongs in update_plan/save_work_state, not duplicate notes. "
-            "Before the final response after substantial tool work, evaluate BOTH notes and skill improvement; "
-            "perform warranted saves, then call review_learning with what was saved or why neither needs a change. "
-            "No fabricated lessons or forced saves. In plan mode defer persistent notes/skill changes until execution.")
+    return (memory + "Skills are procedures the user registered: load_skill when a task matches a skill's description, "
+            "and use improve_skill only after a verified user correction or a procedure that was actually tested here "
+            "changed what that skill should say - read the skill and skill_history first, keep its constraints. "
+            "remember_note/forget_note and improve_skill are internal maintenance: no proposal or approval in execute mode. "
+            "None of this is a required step: do not review, read or save notes/skills just to close a turn, and do not "
+            "call review_learning unless you did save something and want the record. Task progress belongs in "
+            "save_work_state or the plan, not in notes. In plan mode defer persistent notes/skill changes until execution.")
 
 
 def record(ctx, summary: str) -> str:
@@ -41,24 +55,10 @@ def recent(char_key: str = "") -> list[dict]:
 
 
 def validate(ctx: RunContext, output: str) -> str:
-    if (ctx.deps.session_id and ctx.usage.tool_calls >= 2
-            and not ctx.deps.learning_reviewed and not ctx.deps.learning_prompted
-            and workplan.get(ctx.deps.session_id)['mode'] != 'plan'):
-        from .agent import turn_limits
-        limits = turn_limits()
-        if ((limits.tool_calls_limit is not None and ctx.usage.tool_calls + 2 > limits.tool_calls_limit)
-                or (limits.request_limit is not None and ctx.usage.requests + 2 > limits.request_limit)):
-            from . import session
-            session._save_message(ctx.deps.session_id, 'learning_review', {
-                'status': 'budget', 'summary': '호출 한도에 도달해 추가 학습 검토를 다음 작업으로 미뤘습니다.'})
-            return output
-        ctx.deps.learning_prompted = True
-        raise ModelRetry('최종 답변 전에 메모와 Skill Self-Improvement를 검토하세요. '
-                         '확인된 지속적 선호/사실은 remember_note, 재사용 가능한 검증된 절차는 improve_skill로 저장하세요. '
-                         '먼저 기존 내용을 읽고 중복을 피하세요. 저장할 내용이 없으면 만들지 마세요. '
-                         '이후 review_learning으로 저장 결과 또는 생략 사유를 남기고 최종 답변하세요.')
-    if ctx.deps.learning_prompted and not ctx.deps.learning_reviewed:
-        from . import session
-        session._save_message(ctx.deps.session_id, 'learning_review', {
-            'status': 'missed', 'summary': '학습 검토 요청 후 모델이 검토 도구를 호출하지 않았습니다.'})
+    """The final answer is never held back for a learning review (§1-62).
+
+    Kept as the output validator so the wiring (and the `learning_prompted`
+    flags on Deps) stays in one place; it only passes the output through.
+    """
+    del ctx
     return output

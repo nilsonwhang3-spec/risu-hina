@@ -76,12 +76,20 @@ def build(session_id: str, char_key: str, history: list) -> list[str]:
                      "saved": (payload.get('saved') or [])[-2:]})
     checkpoints = db.query("SELECT content_json FROM agent_messages WHERE session_id=? AND role='checkpoint' ORDER BY seq DESC LIMIT 8", (session_id,))
     events = [db.unjs(r['content_json'], {}) for r in reversed(checkpoints)]
+    # The notes block (up to 10K chars) rides every handover; when it is the
+    # same text as the previous handover still in the history, a pointer is
+    # enough (§1-62). A compaction drops the old handover, so the full block
+    # comes back after one.
+    notes = agentnotes.prompt(char_key)
+    previous = next((p for p in reversed(visible_parts) if p.startswith(STATE_MARKER)), None)
+    if previous and json.dumps(notes, ensure_ascii=False) in previous:
+        notes = "unchanged since the previous handover above (recall_notes for details)"
     snapshot = {
         "recordedWork": db.unjs(state_row['content_json'], None) if state_row else None,
         "previousAssistantReport": str(db.unjs(last_answer['content_json'], ''))[-3500:] if last_answer else None,
         "actualJobs": jobs,
         "recentToolEvents": [{k: (str(v)[:300] if k == 'result' else v) for k, v in e.items()} for e in events],
-        "notes": agentnotes.prompt(char_key),
+        "notes": notes,
     }
     text = (STATE_MARKER + '\n이전 답변/작업 메모는 모델의 보고이고 완료 증명이 아닙니다. '
             'actualJobs는 서버 상태입니다. 파일·채택 상태는 실제 프로젝트에서 확인하세요. '

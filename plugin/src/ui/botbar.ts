@@ -327,13 +327,19 @@ async function openApply(anchor: HTMLElement): Promise<void> {
   const clone = saveNew;
 
   body.appendChild(el('div', { class: 'row' }, [apply]));
-  body.appendChild(el('div', { class: 'row' }, [nameInput, clone]));
   body.appendChild(out);
   body.appendChild(el('div', {
     class: 'hint',
-    text: '반영: 메타·인사말·봇 로어북·Regex·트리거가 한 번에 쓰입니다. 챗은 절대 건드리지 않습니다. '
-      + '새 봇으로 저장: 기준선(편집 전 상태)을 백업 봇(챗 포함, 새 캐릭터)으로 남기고 편집본을 이 봇에 반영해 새 기준선으로 삼습니다. 처음 한 번 db 권한 허용이 필요합니다.',
+    text: '메타·인사말·봇 로어북·Regex·트리거가 한 번에 쓰입니다. 챗은 절대 건드리지 않습니다.',
   }));
+  // 새 봇으로 저장 is for the rare case (§1-62, user): folded small under
+  // 고급, not spread across the modal next to the one button people press.
+  body.appendChild(el('details', { class: 'advbox applyadv' }, [
+    el('summary', { text: '고급 · 새 봇으로 저장 (백업 봇을 남기고 반영)' }),
+    el('div', { class: 'hint', style: { margin: '4px 0 6px' },
+      text: '기준선(편집 전 상태)을 백업 봇(챗 포함, 새 캐릭터)으로 남기고 편집본을 이 봇에 반영해 새 기준선으로 삼습니다. 처음 한 번 db 권한 허용이 필요합니다.' }),
+    el('div', { class: 'row' }, [nameInput, clone]),
+  ]));
 }
 
 // --- 버전 (popover) -----------------------------------------------------------

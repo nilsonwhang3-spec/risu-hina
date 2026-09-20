@@ -42,7 +42,7 @@ import { drawSingle, singleTick, syncControls, buildRunControls } from './center
 import { drawBatch, batchTick } from './center-batch';
 import { buildStrip, stripTick, refreshStrip } from './strip';
 import { drawFolder } from './center-folder';
-import { hasGroups, loadGroups, drawSelector, setViewMode, drawSelectedGallery, invalidateGroups, pollGroups } from './selector';
+import { hasGroups, loadGroups, drawSelector, setViewMode, setFocus, drawSelectedGallery, invalidateGroups, pollGroups } from './selector';
 import { setLayoutControls } from '../shell';
 import { reclamp } from '../splitter';
 
@@ -277,6 +277,8 @@ async function refresh(): Promise<void> {
     if (find(folder)) {
       // The chat's 검수 asks for the flat view - every image with its flags.
       if (want.view) setViewMode(want.view);
+      // The batch's own images (§1-62): straight into their group.
+      if (want.focus?.length) setFocus(folder, want.focus);
       S.selected = folder;
       const parts = folder.split('/');
       for (let i = 2; i <= parts.length; i++) S.open.add(parts.slice(0, i).join('/'));

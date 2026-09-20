@@ -1755,7 +1755,17 @@ def review_page(grouped: dict, offset: int = 0, limit: int = 50, status: str = "
             decision = next((k for k in ("use", "inpaint", "delete") if selection.get(k)), "unreviewed")
             counts[decision] += 1
             if not status or decision == status:
-                rows.append({**item, "group": grp["key"], "status": decision, "selection": selection})
+                if status:
+                    # A filtered read is a checklist ("which are 채택?"), not a
+                    # review: filename, path, group and the AI verdict are what
+                    # the caller uses. The full item made a 100-row page 15KB,
+                    # which the preview clipped and the model then re-read in
+                    # three pages (§1-62).
+                    suggest = (selection.get("suggest") or {}).get("verdict") if isinstance(selection.get("suggest"), dict) else None
+                    rows.append({"filename": item.get("filename"), "path": item.get("path"), "group": grp["key"],
+                                 "status": decision, **({"suggest": suggest} if suggest else {})})
+                else:
+                    rows.append({**item, "group": grp["key"], "status": decision, "selection": selection})
     offset, limit = max(0, offset), max(1, min(200, limit))
     page = rows[offset:offset + limit]
     return {"folder": grouped["folder"], "pattern": grouped["pattern"], "groupBy": grouped["groupBy"],

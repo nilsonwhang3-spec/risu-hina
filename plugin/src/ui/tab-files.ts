@@ -25,7 +25,7 @@
  * backend (POST /files/zip); a dropped folder goes up file by file into the
  * matching subfolders; a dropped .zip is offered to be unpacked on arrival.
  */
-import { el, clear, armed, modal, menuAt, popover, svg, ICON, iconBtn, type ArmedControl } from './dom';
+import { el, clear, modal, menuAt, popover, svg, ICON, iconBtn, type ArmedControl } from './dom';
 import { treeRow, installDrop, installDrag, type TreeNode, type TreeSpec, type Incoming } from './tree';
 import { state, type FileArea, type FileListing, type WorkspaceFile } from '../state';
 import { makeTab, askName, type NoticeKind, type TabUi } from './kit';
@@ -432,9 +432,9 @@ function drawTree(): void {
   const hiddenN = data.areas.reduce((n, a) => n + (a.hidden ?? 0), 0)
     + data.areas.filter((a) => !DEFAULT_AREAS.has(a.area)).reduce((n, a) => n + a.count, 0);
   const toggle = el('button', {
-    class: 'ghost tiny',
+    class: 'ghost tiny' + (showInternal ? ' on' : ''),
     title: 'AI 내부 영역(hina/: 임시·스크립트), 점(.) 폴더, 매 실행 재생성되는 머시너리를 함께 보이거나 숨깁니다',
-    text: showInternal ? '숨김 파일 숨기기' : `숨김 파일 보기 (${hiddenN})`,
+    text: showInternal ? '숨김 파일 표시 중' : `숨김 파일 표시 (${hiddenN})`,
   });
   toggle.addEventListener('click', () => {
     showInternal = !showInternal;
@@ -455,23 +455,11 @@ function drawTree(): void {
     try { localStorage.setItem('hina.filesOnlyMine', onlyMine ? '1' : '0'); } catch { /* fine */ }
     void refresh();
   });
-  // 정리 is per bot: this bot's hina/ scratch+scripts and its system scratch.
-  const cleanBtn = el('button', { class: 'ghost tiny' }) as HTMLButtonElement;
-  cleanBtn.disabled = !state.activeCharKey;
-  cleanBtn.title = state.activeCharKey
-    ? '이 봇의 AI 작업 폴더(임시·스크립트)를 비웁니다. 산출물(out)은 남습니다.'
-    : '봇을 열어야 그 봇의 작업 폴더를 정리할 수 있습니다';
-  armed(cleanBtn, '이 봇 정리', '정말 정리할까요?', async () => {
-    try {
-      const r = await state.cleanFiles();
-      notice(`${r.removed}개를 지워 ${fmtSize(r.freed)}를 비웠습니다.`, 'ok');
-      await refresh();
-    } catch (e) {
-      notice('정리에 실패했습니다: ' + msg(e), 'err');
-    }
-  });
+  // Three verbs (§1-62, user: "전체 보기 · 숨김파일 표시 · 임시파일 정리 면
+  // 된다"): the per-bot 정리 and the AI temp quarantine were two buttons for
+  // one idea. 임시파일 정리 now finds every bot's temp files and DELETES them.
   treeMount.appendChild(el('div', { class: 'treefoot' }, [
-    mineBtn, toggle, buildCleanupButton(), cleanBtn, el('div', { class: 'hint', text: `전체 ${fmtSize(data.totalSize)}` }),
+    mineBtn, toggle, buildCleanupButton(), el('div', { class: 'hint', text: `전체 ${fmtSize(data.totalSize)}` }),
   ]));
   if (hadFocus) {
     const row = treeMount.querySelector<HTMLElement>('.treebranch.on') ?? treeMount;
@@ -480,29 +468,35 @@ function drawTree(): void {
 }
 
 function buildCleanupButton(): HTMLElement {
-  const button = el('button', { class: 'ghost tiny', text: 'AI temp/숨김 정리' });
+  const button = el('button', { class: 'ghost tiny', text: '임시파일 정리',
+    title: 'AI 작업 영역(hina/)의 임시 파일·캐시·실행 스크립트를 찾아 지웁니다. 프로젝트·이미지·스킬은 건드리지 않습니다.' });
   button.addEventListener('click', async () => {
     button.disabled = true;
     try {
       const plan = await transport.post<{ plan: string; count: number; bytes: number; paths: string[]; more: number }>('/files/cleanup-ai', {});
-      const apply = el('button', { class: 'primary', text: '보관 폴더로 정리', disabled: !plan.count });
+      if (!plan.count) { notice('지울 임시 파일이 없습니다.', 'ok'); return; }
+      const apply = el('button', { class: 'danger', text: `${plan.count}개 삭제` });
       const status = el('div', { class: 'hint' });
-      const close = modal('AI 임시·숨김 파일 정리', el('div', {}, [
-        el('p', { text: `AI 작업 영역의 임시 파일·캐시 ${plan.count}개 (${fmtSize(plan.bytes)})를 자동으로 찾았습니다. 프로젝트·이미지·스킬·Git·설정 파일은 정리 대상에서 제외합니다.` }),
-        el('p', { text: '영구 삭제하지 않고 hina/.cleanup 아래에 원래 경로대로 보관합니다. 숨김 파일 보기에서 확인하고 필요한 파일을 원래 위치로 옮길 수 있습니다. 디스크 공간은 줄어들지 않습니다.' }),
+      const list = el('details', {}, [
+        el('summary', { text: '목록 보기' }),
         el('pre', { text: plan.paths.join('\n') + (plan.more ? `\n외 ${plan.more}개` : ''), style: { maxHeight: '220px', overflow: 'auto', whiteSpace: 'pre-wrap' } }),
-        apply, status,
+      ]);
+      const close = modal('임시파일 정리', el('div', {}, [
+        el('p', { text: `임시 파일·캐시 ${plan.count}개 (${fmtSize(plan.bytes)})를 찾았습니다. 되돌릴 수 없이 삭제합니다.` }),
+        el('p', { class: 'hint', text: 'AI 작업 영역(hina/)의 scratch·캐시·실행 스크립트·.tmp 만 대상입니다. 프로젝트·이미지·스킬·Git·설정 파일은 제외합니다.' }),
+        list, apply, status,
       ]));
       apply.addEventListener('click', async () => {
-        apply.disabled = true;
-        status.textContent = '정리 중…';
+        (apply as HTMLButtonElement).disabled = true;
+        status.textContent = '지우는 중…';
         try {
-          const result = await transport.post<{ moved: number; failed: unknown[]; archive: string }>('/files/cleanup-ai', { plan: plan.plan });
+          const result = await transport.post<{ removed: number; freed: number; failed: unknown[] }>('/files/cleanup-ai', { plan: plan.plan });
           close();
           state.touchFiles();
           await refresh();
-          notice(`${result.moved}개 보관 · 실패 ${result.failed.length}개${result.archive ? ` · ${result.archive}` : ''}`, result.failed.length ? 'err' : 'ok');
-        } catch (e) { status.textContent = msg(e); apply.disabled = false; }
+          notice(`${result.removed}개를 지워 ${fmtSize(result.freed)}를 비웠습니다.` + (result.failed.length ? ` 실패 ${result.failed.length}개` : ''),
+                 result.failed.length ? 'err' : 'ok');
+        } catch (e) { status.textContent = msg(e); (apply as HTMLButtonElement).disabled = false; }
       });
     } catch (e) { notice('정리 대상을 확인하지 못했습니다: ' + msg(e), 'err'); }
     finally { button.disabled = false; }

@@ -74,7 +74,7 @@ def prompt(session_id: str) -> str:
     return MARKER + "\n" + json.dumps(plan, ensure_ascii=False) + (
         "\n계획 모드: 조사와 계획/Todo 기록만 가능. 실행은 사용자가 실행 모드로 전환한 뒤 진행하세요."
         if plan['mode'] == 'plan' else
-        "\n실행 모드: 최신 계획을 참조하여 미완료 Todo를 하나씩 진행하세요. 완료 보고는 실제 결과로 검증하세요.")
+        "\n실행 모드: 사용자가 요청한 계획의 기록입니다. 현재 사용자 지시가 우선하며, 진행 상황이 바뀌면 갱신하세요.")
 
 
 class PlanGuard(AbstractCapability):
