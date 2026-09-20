@@ -1423,7 +1423,9 @@ console.log('\ntest_bot_tabs');
   const tree = () => document.querySelector('.panel.active .tree');
   check('card fields listed as rows', /설명 \(desc\)/.test(tree()?.textContent || '')
         && /대체 인사말 #1/.test(tree()?.textContent || ''), tree()?.textContent?.slice(0, 200));
-  check('retired fields are gone', !/시나리오|성격|시스템 프롬프트/.test(tree()?.textContent || ''));
+  check('retired fields are gone', !/시나리오|성격/.test(tree()?.textContent || ''));
+  check('§1-66 rows shown', /시스템 프롬프트/.test(tree()?.textContent || '') && /로어북 설정/.test(tree()?.textContent || '')
+        && /저수준 접근/.test(tree()?.textContent || ''), tree()?.textContent?.slice(0, 300));
   check('greetings sit under the first message', (() => {
     const labels = [...tree()?.querySelectorAll('.treefile') ?? []].map((b) => b.textContent || '');
     const fm = labels.findIndex((t) => /퍼스트 메시지/.test(t));

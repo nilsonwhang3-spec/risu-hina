@@ -1,6 +1,8 @@
-# 06. Implementation status — as of 2026-09-20 (v0.15.19, Risu Hina)
+# 06. Implementation status — as of 2026-09-20 (v0.15.20, Risu Hina)
 
-## unreleased (2026-09-20): §1-66 the rest of the card is editable · regex flags actually apply
+## 0.15.20 (2026-09-20): §1-64~66 group row · 기본 변수 · the rest of the card editable · regex flags apply
+
+### §1-66 the rest of the card is editable · regex flags actually apply
 
 The audit against a real card (Parma Knights v2.0.5, decoded charx) and
 RisuAI's own CharConfig / LoreBookSetting found what the panel still could
@@ -53,7 +55,7 @@ nickname, license, tags, additionalText, depth_prompt, bias, utilityBot,
 largePortrait, hideChatIcon, escapeOutput, removedQuotes, inlayViewScreen,
 viewScreen, customModuleToggle, newGenData, virtualscript, supaMemory, TTS).
 
-## unreleased (2026-09-20): §1-65 기본 변수 on the meta tab and in the AI tools
+### §1-65 기본 변수 on the meta tab and in the AI tools
 
 - **The card's default variables could not be edited at all.** RisuAI's
   `defaultVariables` (기본 변수, one `key=value` per line, the value a chat's
@@ -69,7 +71,7 @@ viewScreen, customModuleToggle, newGenData, virtualscript, supaMemory, TTS).
   reset ingest without the field → refresh with it → `adopt: 1` → edit →
   patch entry). Server + plugin; needs a release and `+` to reach RisuAI.
 
-## unreleased (2026-09-20): §1-64 group row under the tabs · 애셋 채택 on it
+### §1-64 group row under the tabs · 애셋 채택 on it
 
 - **Group row above the 1장 · 배치 · 검수 strip.** `drawSelector` draws
   into the whole centre pane (the strip is already its first child) and
