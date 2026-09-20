@@ -1240,8 +1240,11 @@ def test_card_rows(s: Server) -> dict:
     check("greetings sit under firstMessage",
           fseq.index("alternateGreetings") == fseq.index("firstMessage") + 1, str(fseq))
     check("retired fields are not rows",
-          not any(f in fseq for f in ("personality", "scenario", "exampleMessage",
-                                      "systemPrompt", "postHistoryInstructions")), str(fseq))
+          not any(f in fseq for f in ("personality", "scenario", "postHistoryInstructions")), str(fseq))
+    # §1-66: systemPrompt/exampleMessage are back, plus the typed rows.
+    check("§1-66 rows present",
+          all(f in fseq for f in ("systemPrompt", "exampleMessage", "translatorNote",
+                                  "lowLevelAccess", "loreSettings", "image")), str(fseq))
     check("background fields are rows",
           "backgroundHTML" in fseq and "backgroundCSS" not in fseq and "characterVersion" in fseq, str(fseq))
 

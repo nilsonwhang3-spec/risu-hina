@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.15.19
+//@display-name Risu Hina v0.15.20
 //@api 3.0
-//@version 0.15.19
+//@version 0.15.20
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -182,7 +182,7 @@
           this.tokenSafe = true;
           this.lastHealth = body;
           this.probeInfo = "";
-          this.gate = versionGate("0.15.19", String(body.version || ""));
+          this.gate = versionGate("0.15.20", String(body.version || ""));
           return body;
         }
         /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -383,6 +383,75 @@
     }
   });
 
+  // src/cardfields.ts
+  function encodeLoreSettings(value) {
+    if (!value || typeof value !== "object") return "";
+    const v = value;
+    return LORE_KEYS.map(([key, kind]) => {
+      const raw = v[key] ?? LORE_SETTINGS_DEFAULTS[key];
+      if (kind === "bool") return `${key}=${raw ? "1" : "0"}`;
+      const n = Number(raw);
+      return `${key}=${Number.isFinite(n) ? Math.trunc(n) : LORE_SETTINGS_DEFAULTS[key]}`;
+    }).join("\n");
+  }
+  function decodeLoreSettings(text2) {
+    if (!text2.trim()) return null;
+    const got = /* @__PURE__ */ new Map();
+    for (const line of text2.split("\n")) {
+      const i = line.indexOf("=");
+      if (i > 0) got.set(line.slice(0, i).trim(), line.slice(i + 1).trim());
+    }
+    const out = { ...LORE_SETTINGS_DEFAULTS };
+    for (const [key, kind] of LORE_KEYS) {
+      const raw = got.get(key);
+      if (raw === void 0) continue;
+      if (kind === "bool") out[key] = !["0", "", "false", "False"].includes(raw);
+      else {
+        const n = parseInt(raw, 10);
+        if (Number.isFinite(n)) out[key] = n;
+      }
+    }
+    return out;
+  }
+  function encodeField(char, field2) {
+    if (BOOL_FIELDS.has(field2)) return char[field2] ? "1" : "0";
+    if (field2 === LORE_SETTINGS_FIELD) return encodeLoreSettings(char[field2]);
+    return String(char[field2] ?? "");
+  }
+  function applyField(next, field2, text2) {
+    if (BOOL_FIELDS.has(field2)) {
+      next[field2] = text2 === "1";
+      return;
+    }
+    if (field2 === LORE_SETTINGS_FIELD) {
+      const v = decodeLoreSettings(text2);
+      if (v === null) delete next[field2];
+      else next[field2] = v;
+      return;
+    }
+    next[field2] = text2;
+  }
+  var BOOL_FIELDS, LORE_SETTINGS_FIELD, LORE_SETTINGS_DEFAULTS, LORE_KEYS;
+  var init_cardfields = __esm({
+    "src/cardfields.ts"() {
+      "use strict";
+      BOOL_FIELDS = /* @__PURE__ */ new Set(["lowLevelAccess"]);
+      LORE_SETTINGS_FIELD = "loreSettings";
+      LORE_SETTINGS_DEFAULTS = {
+        recursiveScanning: false,
+        fullWordMatching: false,
+        scanDepth: 5,
+        tokenBudget: 800
+      };
+      LORE_KEYS = [
+        ["recursiveScanning", "bool"],
+        ["fullWordMatching", "bool"],
+        ["scanDepth", "int"],
+        ["tokenBudget", "int"]
+      ];
+    }
+  });
+
   // src/host.ts
   async function currentSlot() {
     let characterIndex;
@@ -580,13 +649,13 @@
     const next = { ...fresh };
     const parts = [];
     let applied = 0;
-    const liveValue = (field2) => {
+    const liveValue = (field2, char = fresh) => {
       if (field2 === "characterVersion") {
-        const add = fresh["additionalData"];
+        const add = char["additionalData"];
         const v = add && typeof add === "object" ? add["character_version"] : void 0;
-        return String(v ?? fresh["characterVersion"] ?? "");
+        return String(v ?? char["characterVersion"] ?? "");
       }
-      return String(fresh[field2] ?? "");
+      return encodeField(char, field2);
     };
     for (const e of update.fields ?? []) {
       if (liveValue(e.field) !== e.before && liveValue(e.field) !== e.after) {
@@ -604,7 +673,7 @@
         add["character_version"] = e.after;
         next["additionalData"] = add;
       }
-      next[e.field] = e.after;
+      applyField(next, e.field, e.after);
       applied += 1;
       parts.push(e.field);
     }
@@ -638,7 +707,7 @@
     let drift = "";
     try {
       const after = await readCharacter(characterIndex);
-      const missed = (update.fields ?? []).find((e) => String(after[e.field] ?? "") !== e.after);
+      const missed = (update.fields ?? []).find((e) => liveValue(e.field, after) !== e.after);
       if (missed) {
         verified = false;
         drift = `${missed.field} \uC774(\uAC00) \uC4F0\uAE30 \uC804 \uAC12 \uADF8\uB300\uB85C\uC785\uB2C8\uB2E4`;
@@ -777,6 +846,7 @@
   var init_host = __esm({
     "src/host.ts"() {
       "use strict";
+      init_cardfields();
       HostError = class extends Error {
         constructor(code, message) {
           super(message);
@@ -3242,6 +3312,12 @@ name: ${nm}
           const r = await transport.get("/card/scripts", { charKey: this.botKey, kind });
           return r.items ?? [];
         }
+        /** Stage a workspace image as the new profile picture (§1-66). */
+        async replacePortrait(path) {
+          await transport.post("/card/portrait", { charKey: this.botKey, path });
+          this.bump();
+          void this.refreshBotChanges();
+        }
         async saveCardField(id, body) {
           const r = await transport.post("/card/field", { charKey: this.botKey, id, body });
           void this.refreshBotChanges();
@@ -3429,6 +3505,7 @@ name: ${nm}
           for (const row of update.emotionImages ?? []) if (Array.isArray(row)) collect2(row[1]);
           for (const row of update.additionalAssets ?? []) if (Array.isArray(row)) collect2(row[1]);
           for (const row of update.ccAssets ?? []) if (row && typeof row === "object") collect2(row.uri);
+          for (const f of update.fields ?? []) if (f.field === "image") collect2(f.after);
           const resolved = /* @__PURE__ */ new Map();
           let done = 0;
           if (pending2.size) progress(`RisuAI \uC774\uBBF8\uC9C0 \uB4F1\uB85D 0/${pending2.size} \xB7 \uCE74\uB4DC \uC800\uC7A5 \uB300\uAE30`);
@@ -3442,6 +3519,7 @@ name: ${nm}
             progress(`RisuAI \uC774\uBBF8\uC9C0 \uB4F1\uB85D ${++done}/${pending2.size} \xB7 \uCE74\uB4DC \uC800\uC7A5 \uB300\uAE30`);
           });
           const replace = (value) => typeof value === "string" ? resolved.get(value) ?? value : value;
+          if (update.fields) update.fields = update.fields.map((f) => f.field === "image" ? { ...f, after: String(replace(f.after)) } : f);
           if (update.emotionImages) update.emotionImages = update.emotionImages.map((row) => Array.isArray(row) ? [row[0], replace(row[1]), ...row.slice(2)] : row);
           if (update.additionalAssets) update.additionalAssets = update.additionalAssets.map((row) => Array.isArray(row) ? [row[0], replace(row[1]), ...row.slice(2)] : row);
           if (update.ccAssets) update.ccAssets = update.ccAssets.map((row) => row && typeof row === "object" ? { ...row, uri: replace(row.uri) } : row);
@@ -5051,6 +5129,8 @@ main { flex: 1; min-height: 0; display: flex; }
 .grow { flex: 1; min-width: 0; }
 label.field { display: block; margin-bottom: 10px; }
 label.field > span { display: block; margin-bottom: 4px; color: var(--textcolor2, #79839a); font-size: 12px; }
+label.field.row { display: flex; align-items: center; gap: 6px; }
+label.field.row > span { display: inline; margin: 0; color: inherit; font-size: inherit; }
 
 .notice {
   padding: 8px 10px; border-radius: 5px; margin-bottom: 10px; font-size: 12px;
@@ -14395,10 +14475,10 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           return;
         }
         if (!r.newer) {
-          const mismatch = r.current !== "0.15.19";
+          const mismatch = r.current !== "0.15.20";
           const ahead = r.ahead ?? (!!r.latest && r.latest !== r.current);
           say(
-            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.19"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
+            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.20"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
             mismatch || ahead ? "" : "ok"
           );
           return;
@@ -14489,7 +14569,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.15.19",
+            version: "0.15.20",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -15179,7 +15259,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.19"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.20"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -15190,6 +15270,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
   // src/ui/tab-meta.ts
   init_dom();
   init_state();
+  init_cardfields();
   var LABELS = {
     name: "\uC774\uB984",
     desc: "\uC124\uBA85 (desc)",
@@ -15197,17 +15278,34 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     creatorNotes: "\uC81C\uC791\uC790 \uB178\uD2B8",
     characterVersion: "\uBD07 \uBC84\uC804",
     replaceGlobalNote: "\uAE00\uB85C\uBC8C \uB178\uD2B8 \uB36E\uC5B4\uC4F0\uAE30",
+    systemPrompt: "\uC2DC\uC2A4\uD15C \uD504\uB86C\uD504\uD2B8 (\uBA54\uC778 \uD504\uB86C\uD504\uD2B8 \uB300\uCCB4)",
+    exampleMessage: "\uC608\uC2DC \uB300\uD654",
+    defaultVariables: "\uAE30\uBCF8 \uBCC0\uC218",
+    translatorNote: "\uBC88\uC5ED\uAC00 \uB178\uD2B8",
+    lowLevelAccess: "\uC800\uC218\uC900 \uC811\uADFC (Lua)",
+    loreSettings: "\uB85C\uC5B4\uBD81 \uC124\uC815",
     alternateGreetings: "\uB300\uCCB4 \uC778\uC0AC\uB9D0"
   };
-  var NOT_HERE = /* @__PURE__ */ new Set(["backgroundHTML"]);
+  var HINTS = {
+    defaultVariables: "\uD55C \uC904\uC5D0 \uD558\uB098, \uC774\uB984=\uAC12. \uCC44\uD305 \uBCC0\uC218\uAC00 \uC5C6\uC744 \uB54C \uC4F0\uB294 \uAE30\uBCF8\uAC12\uC785\uB2C8\uB2E4 (RisuAI \uAE30\uBCF8 \uBCC0\uC218).",
+    systemPrompt: "\uBE44\uC5B4 \uC788\uC9C0 \uC54A\uC73C\uBA74 \uD504\uB9AC\uC14B\uC758 \uBA54\uC778 \uD504\uB86C\uD504\uD2B8\uB97C \uD1B5\uC9F8\uB85C \uB300\uCCB4\uD569\uB2C8\uB2E4. {{original}} \uC790\uB9AC\uC5D0 \uC6D0\uB798 \uBA54\uC778 \uD504\uB86C\uD504\uD2B8\uAC00 \uB4E4\uC5B4\uAC11\uB2C8\uB2E4.",
+    exampleMessage: "RisuAI \uC758 \uC608\uC2DC \uB300\uD654 \uCE78\uC785\uB2C8\uB2E4. <START> \uB85C \uC608\uC2DC\uB97C \uB098\uB215\uB2C8\uB2E4."
+  };
+  var NOT_HERE = /* @__PURE__ */ new Set(["backgroundHTML", "image"]);
   var FIELD_RANK = {
     name: 0,
     desc: 10,
     firstMessage: 20,
     alternateGreetings: 21,
+    exampleMessage: 22,
     replaceGlobalNote: 30,
+    systemPrompt: 31,
+    defaultVariables: 40,
     characterVersion: 100,
-    creatorNotes: 110
+    creatorNotes: 110,
+    translatorNote: 115,
+    lowLevelAccess: 120,
+    loreSettings: 121
   };
   var treeMount3 = null;
   var viewMount3 = null;
@@ -15300,9 +15398,10 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         ruled = true;
         treeMount3.appendChild(el("div", { class: "sectionline", style: { margin: "8px 6px" } }));
       }
+      const suffix = f.field === "lowLevelAccess" ? f.body === "1" ? " (\uCF2C)" : " (\uB054)" : f.field === LORE_SETTINGS_FIELD ? f.body ? " (\uBD07 \uC124\uC815)" : " (\uAE00\uB85C\uBC8C)" : f.body ? "" : " (\uBE44\uC5B4 \uC788\uC74C)";
       const name = el("button", {
         class: "treefile" + (f.id === openId2 ? " on" : ""),
-        text: labelOf(f) + (f.body ? "" : " (\uBE44\uC5B4 \uC788\uC74C)"),
+        text: labelOf(f) + suffix,
         title: f.id
       });
       name.addEventListener("click", () => open2(f));
@@ -15313,11 +15412,90 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       treeMount3.appendChild(row);
     }
   }
+  async function saveTyped(f, value, btn) {
+    btn.disabled = true;
+    try {
+      await state.saveCardField(f.id, value);
+      notice5(savedText("\uCE74\uB4DC \uD544\uB4DC\uB97C"), "ok");
+      await refreshNow3();
+    } catch (e) {
+      notice5("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg15(e), "err");
+    } finally {
+      btn.disabled = false;
+    }
+  }
+  function openBool(f) {
+    if (!viewMount3) return;
+    const box = el("input", { type: "checkbox" });
+    box.checked = f.body === "1";
+    const save = el("button", { class: "primary", text: "\uC800\uC7A5" });
+    save.addEventListener("click", () => void saveTyped(f, box.checked ? "1" : "0", save));
+    clear(viewMount3);
+    viewMount3.appendChild(el("div", { class: "card" }, [
+      el("h2", {}, [el("span", { text: labelOf(f) })]),
+      el("div", { class: "hint", text: "Lua \uD2B8\uB9AC\uAC70\uAC00 \uC800\uC218\uC900 API \uB97C \uC4F0\uB824\uBA74 \uCF1C\uC57C \uD569\uB2C8\uB2E4. RisuAI \uB294 \uCF1C\uC9C4 \uBD07\uC5D0 \uACBD\uACE0\uB97C \uB744\uC6C1\uB2C8\uB2E4." }),
+      el("label", { class: "field row" }, [box, el("span", { text: "\uC800\uC218\uC900 \uC811\uADFC \uD5C8\uC6A9" })]),
+      ...f.changed ? [el("div", { class: "hint diffmeta", text: `\uAE30\uC900\uC120: ${f.original === "1" ? "\uCF2C" : "\uB054"}` })] : [],
+      el("div", { class: "row" }, [save])
+    ]));
+  }
+  function openLoreSettings(f) {
+    if (!viewMount3) return;
+    const cur = decodeLoreSettings(f.body);
+    const useGlobal = el("input", { type: "checkbox" });
+    useGlobal.checked = cur === null;
+    const v = cur ?? { ...LORE_SETTINGS_DEFAULTS };
+    const recursive = el("input", { type: "checkbox" });
+    recursive.checked = v.recursiveScanning;
+    const fullWord = el("input", { type: "checkbox" });
+    fullWord.checked = v.fullWordMatching;
+    const depth = el("input", { type: "number", min: "0", max: "20", value: String(v.scanDepth) });
+    const budget = el("input", { type: "number", min: "0", max: "4096", value: String(v.tokenBudget) });
+    const own = el("div", { class: "card", style: { marginTop: "8px" } }, [
+      el("label", { class: "field row" }, [recursive, el("span", { text: "\uC7AC\uADC0 \uAC80\uC0C9 (recursiveScanning)" })]),
+      el("label", { class: "field row" }, [fullWord, el("span", { text: "\uC804\uCCB4 \uB2E8\uC5B4 \uC77C\uCE58 (fullWordMatching)" })]),
+      el("label", { class: "field" }, [el("span", { text: "\uC2A4\uCE94 \uAE4A\uC774 (scanDepth, 0\u201320)" }), depth]),
+      el("label", { class: "field" }, [el("span", { text: "\uD1A0\uD070 \uC608\uC0B0 (tokenBudget, 0\u20134096)" }), budget])
+    ]);
+    const sync = () => {
+      own.hidden = useGlobal.checked;
+    };
+    useGlobal.addEventListener("change", sync);
+    sync();
+    const clamp = (input2, lo, hi, fallback) => {
+      const n = parseInt(input2.value, 10);
+      return Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : fallback;
+    };
+    const save = el("button", { class: "primary", text: "\uC800\uC7A5" });
+    save.addEventListener("click", () => void saveTyped(f, useGlobal.checked ? "" : encodeLoreSettings({
+      recursiveScanning: recursive.checked,
+      fullWordMatching: fullWord.checked,
+      scanDepth: clamp(depth, 0, 20, LORE_SETTINGS_DEFAULTS.scanDepth),
+      tokenBudget: clamp(budget, 0, 4096, LORE_SETTINGS_DEFAULTS.tokenBudget)
+    }), save));
+    clear(viewMount3);
+    viewMount3.appendChild(el("div", { class: "card" }, [
+      el("h2", {}, [el("span", { text: labelOf(f) })]),
+      el("div", { class: "hint", text: "RisuAI \uB85C\uC5B4\uBD81 \uD0ED\uC758 \uC124\uC815 \uCE78\uC785\uB2C8\uB2E4. \uAE00\uB85C\uBC8C \uC124\uC815\uC744 \uB044\uBA74 \uC774 \uBD07\uB9CC\uC758 \uAC12\uC744 \uC501\uB2C8\uB2E4. \uBC30\uD3EC \uC804\uC5D0\uB294 \uBCF4\uD1B5 \uC7AC\uADC0 \uAC80\uC0C9\uC744 \uB055\uB2C8\uB2E4." }),
+      el("label", { class: "field row" }, [useGlobal, el("span", { text: "\uAE00\uB85C\uBC8C \uC124\uC815 \uC0AC\uC6A9" })]),
+      own,
+      ...f.changed ? [el("div", { class: "hint diffmeta", text: `\uAE30\uC900\uC120: ${f.original ? f.original.replace(/\n/g, " \xB7 ") : "\uAE00\uB85C\uBC8C \uC124\uC815 \uC0AC\uC6A9"}` })] : [],
+      el("div", { class: "row" }, [save])
+    ]));
+  }
   function open2(f) {
     if (!viewMount3) return;
     const was = openId2;
     openId2 = f.id;
     if (was !== f.id) drawTree3();
+    if (f.field === "lowLevelAccess") {
+      openBool(f);
+      return;
+    }
+    if (f.field === LORE_SETTINGS_FIELD) {
+      openLoreSettings(f);
+      return;
+    }
     const body = el("textarea", {
       value: f.body,
       style: { minHeight: f.field === "name" ? "48px" : "340px" }
@@ -15375,6 +15553,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         f.field === "name" ? null : focusButton(body, labelOf(f))
       ]),
       ...f.deleted ? [el("div", { class: "notice", text: "\uC0AD\uC81C \uC608\uC815\uC785\uB2C8\uB2E4. \uC800\uC7A5\uD558\uBA74 \uC0AD\uC81C\uAC00 \uCDE8\uC18C\uB429\uB2C8\uB2E4." })] : [],
+      ...HINTS[f.field] ? [el("div", { class: "hint", text: HINTS[f.field] })] : [],
       el("label", { class: "field" }, [body]),
       ...diff ? [diff] : [],
       el("div", { class: "row" }, buttons)
@@ -15618,6 +15797,11 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     });
     setTimeout(() => attachHilite(outText, { mode: "regex-out" }), 0);
     const flag2 = el("input", { value: String(e.flag ?? ""), placeholder: "\uC608: g" });
+    const ableFlag = el("input", { type: "checkbox" });
+    ableFlag.checked = Boolean(e.ableFlag);
+    flag2.addEventListener("input", () => {
+      if (flag2.value.trim()) ableFlag.checked = true;
+    });
     const save = el("button", { class: "primary", text: "\uC800\uC7A5" });
     save.addEventListener("click", async () => {
       save.disabled = true;
@@ -15628,7 +15812,8 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           type: type.value,
           in: inPat.value,
           out: outText.value,
-          ...flag2.value ? { flag: flag2.value } : {}
+          ...flag2.value ? { flag: flag2.value } : {},
+          ableFlag: ableFlag.checked
         });
         notice6(savedText("\uC2A4\uD06C\uB9BD\uD2B8\uB97C"), "ok");
         await refreshNow4();
@@ -15675,6 +15860,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         outText
       ]),
       el("label", { class: "field" }, [el("span", { text: "\uD50C\uB798\uADF8 (flag)" }), flag2]),
+      el("label", { class: "field row" }, [ableFlag, el("span", { text: "\uD50C\uB798\uADF8 \uC801\uC6A9 (ableFlag) \u2014 \uAEBC\uC838 \uC788\uC73C\uBA74 RisuAI \uB294 \uD50C\uB798\uADF8\uB97C \uBB34\uC2DC\uD558\uACE0 g \uB85C \uB3D9\uC791\uD569\uB2C8\uB2E4" })]),
       small.length ? el("div", { class: "hint diffmeta", text: "\uAE30\uC900\uC120\uACFC \uB2E4\uB978 \uD56D\uBAA9 \u2014 " + small.join(" \xB7 ") }) : null,
       diff,
       el("div", { class: "row" }, [save, del])
@@ -16308,10 +16494,12 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
   async function refreshNow6() {
     let rows = [];
     let store = [];
+    let imageRow = null;
     try {
-      [rows, store] = await Promise.all([
+      [rows, store, imageRow] = await Promise.all([
         state.cardScripts("assetref"),
-        state.assetList().then((r) => r.items).catch(() => [])
+        state.assetList().then((r) => r.items).catch(() => []),
+        state.cardFields().then((r) => r.fields.find((f) => f.field === "image") ?? null).catch(() => null)
       ]);
     } catch (e) {
       notice8("\uC5D0\uC14B \uBAA9\uB85D\uC744 \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + (e instanceof Error ? e.message : String(e)), "err");
@@ -16319,7 +16507,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     const byKey = new Map(store.map((i) => [i.key, i]));
     const out = [];
     const portrait = store.find((i) => i.field === "image") ?? null;
-    const image = String(state.character?.image ?? "");
+    const image = String(imageRow?.body || state.character?.image || "");
     if (image) {
       out.push({
         row: null,
@@ -16329,7 +16517,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         ext: image.split(".").pop() || "png",
         state: portrait?.state ?? "unknown",
         size: portrait?.size ?? null,
-        origin: "original"
+        origin: imageRow?.changed ? "edited" : "original"
       });
     }
     for (const r of rows) {
@@ -16490,6 +16678,38 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       c.origin === "edited" ? el("span", { class: "badge warn", text: "\uC218\uC815" }) : null,
       c.origin === "added" ? el("span", { class: "badge ok", text: "\uCD94\uAC00" }) : null
     ]);
+    if (c.field === "image" && editable()) {
+      const picker = el("input", { type: "file", accept: "image/png,image/webp", style: { display: "none" } });
+      const swap = el("button", { class: "ghost tiny", text: "\uAD50\uCCB4\u2026", title: "\uD504\uB85C\uD544 \uC774\uBBF8\uC9C0\uB97C \uBC14\uAFC9\uB2C8\uB2E4 (PNG/WebP)" });
+      swap.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        picker.click();
+      });
+      picker.addEventListener("change", async () => {
+        const file = picker.files?.[0];
+        picker.value = "";
+        if (!file) return;
+        swap.disabled = true;
+        try {
+          const b64 = await new Promise((resolve, reject) => {
+            const fr = new FileReader();
+            fr.onload = () => resolve(String(fr.result).split(",")[1] ?? "");
+            fr.onerror = () => reject(fr.error ?? new Error("read failed"));
+            fr.readAsDataURL(file);
+          });
+          const up = await state.uploadFile(file.name, b64, true, "uploads");
+          await state.replacePortrait(up.path);
+          notice8("\uD504\uB85C\uD544 \uC774\uBBF8\uC9C0\uB97C \uC791\uC5C5\uBCF8\uC5D0 \uC62C\uB838\uC2B5\uB2C8\uB2E4. \uBD07 \uBC18\uC601\uC744 \uB204\uB974\uBA74 RisuAI \uC5D0 \uB4F1\uB85D\uB429\uB2C8\uB2E4.", "ok");
+          await refreshNow6();
+        } catch (e) {
+          notice8("\uAD50\uCCB4\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + (e instanceof Error ? e.message : String(e)), "err");
+        } finally {
+          swap.disabled = false;
+        }
+      });
+      meta.appendChild(swap);
+      meta.appendChild(picker);
+    }
     if (c.row && editable()) {
       const del = el("button", { class: "ghost tiny", text: "\u2715", title: "\uCE74\uB4DC\uC5D0\uC11C \uC774 \uCC38\uC870\uB97C \uC9C0\uC6C1\uB2C8\uB2E4" });
       const row = c.row;
@@ -20447,7 +20667,7 @@ ${negative.value.trim()}
       });
       bar3.appendChild(applyAll);
     }
-    bar3.appendChild(exportButton(node));
+    if (!drill) bar3.appendChild(exportButton(node));
     if (/\/selected$/.test(node.path)) bar3.appendChild(adoptButton());
     const missingGroups = () => g.groups.filter((grp) => !grp.items.some((i) => selection2[i.filename]?.use)).map((grp) => grp.label || grp.key);
     const more = el("button", {
@@ -20553,8 +20773,10 @@ ${negative.value.trim()}
         viewMode2 = "group";
         hub.drawCentre();
       });
-      nav.append(up, prev, next, el("span", { class: "sectiontitle", text: `${grp?.label || drill} \xB7 ${grp?.items.length ?? 0}\uC7A5` + (at >= 0 ? ` \xB7 ${at + 1}/${g.groups.length}` : "") }));
-      viewMount6.prepend(nav);
+      nav.append(up, prev, next, el("span", { class: "sectiontitle grow", text: `${grp?.label || drill} \xB7 ${grp?.items.length ?? 0}\uC7A5` + (at >= 0 ? ` \xB7 ${at + 1}/${g.groups.length}` : "") }), exportButton(node));
+      const strip2 = viewMount6.querySelector(":scope > .centretabs");
+      if (strip2) strip2.after(nav);
+      else viewMount6.prepend(nav);
       viewMount6.appendChild(candidateGrid(grp?.items ?? [], grp?.items));
     } else if (viewMode2 === "group") {
       const grid = el("div", { class: "agrid selgrid", style: { gridTemplateColumns: gridCols() } });
@@ -21855,7 +22077,7 @@ ${negative.value.trim()}
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.19"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.20"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
@@ -21951,7 +22173,7 @@ ${negative.value.trim()}
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.15.19" }),
+        el("span", { class: "dim", text: "v0.15.20" }),
         healthEl,
         el("span", { class: "spacer" }),
         reload,
@@ -22274,6 +22496,6 @@ ${negative.value.trim()}
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.15.19"} loaded`);
+    console.log(`[risu-hina] v${"0.15.20"} loaded`);
   })();
 })();
