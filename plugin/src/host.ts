@@ -124,6 +124,13 @@ const DEFAULT_FALSE = new Set([
   'alwaysActive', 'selective', 'useRegex', 'enabled', 'case_sensitive',
   'scanDepth', 'loreCache', 'folder', 'activationPercent',
 ]);
+// Fields RisuAI itself stamps onto entries at RUN time, never edited by
+// anyone: `triggers.ts` does `v.lowLevelAccess = CharacterlowLevelAccess` on
+// every trigger object each time triggers run (display included), so the
+// object we just wrote differs from what we wrote within the same tick.
+// That read as "트리거가 쓰기 전 내용 그대로" right after a write and as
+// "RisuAI 쪽에서 트리거가 바뀌었습니다" on the retry (§1-63).
+const RUNTIME_ONLY = new Set(['lowLevelAccess']);
 
 function strip(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(strip);
@@ -131,6 +138,7 @@ function strip(value: unknown): unknown {
     const src = value as Record<string, unknown>;
     const out: Record<string, unknown> = {};
     for (const k of Object.keys(src).sort()) {
+      if (RUNTIME_ONLY.has(k)) continue;
       const v = strip(src[k]);
       if (v === null || v === undefined || v === '') continue;
       if (Array.isArray(v) && !v.length) continue;

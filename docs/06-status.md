@@ -1,4 +1,21 @@
-# 06. Implementation status — as of 2026-09-20 (v0.15.18, Risu Hina)
+# 06. Implementation status — as of 2026-09-20 (v0.15.19, Risu Hina)
+
+## 0.15.19 (2026-09-20): §1-63 trigger write-back rejected · focus editor collapsed
+
+Two staging reports right after 0.15.18.
+
+- **"RisuAI 쪽에서 트리거가 바뀌었습니다".** RisuAI's `triggers.ts` stamps
+  `lowLevelAccess` onto every trigger object each time triggers run; the
+  object we wrote is the one in its state, so the re-read after a write
+  already differed (logged as `cardWriteBack unverified … 트리거 … 쓰기 전
+  내용 그대로`) and the retry saw live ≠ baseline (`changed`). The write had
+  in fact landed. Fix: `host.canon` and `merge.canon` ignore run-time-only
+  fields (`lowLevelAccess`). Tests: `tests/host_canon.mjs` (gate),
+  `test_merge.py`.
+- **집중 편집 two rows tall in code mode.** The hilite mirror wraps the box in
+  `.hlwrap`, a plain block inside the flex column, so the big textarea got
+  its intrinsic height. Fix: `.focusbody > .hlwrap` carries the flex height.
+
 
 ## 0.15.18 (2026-09-20): §1-62 review tab simplification · plan strip · iPhone zoom · one cleanup · downloads · less ritual · context budget
 
