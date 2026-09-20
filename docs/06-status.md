@@ -1,5 +1,21 @@
 # 06. Implementation status — as of 2026-09-20 (v0.15.19, Risu Hina)
 
+## unreleased (2026-09-20): §1-65 기본 변수 on the meta tab and in the AI tools
+
+- **The card's default variables could not be edited at all.** RisuAI's
+  `defaultVariables` (기본 변수, one `key=value` per line, the value a chat's
+  scriptstate falls back to) was never in `card.SCALARS`, so neither the meta
+  tab nor `read_card` / `propose_card_edit` ever saw it - the agent, asked to
+  change an arc variable, had to admit it had no tool for it. Now it is a
+  scalar row like `replaceGlobalNote`: `card.py` lists it (rank 40 on the
+  meta tab, label 기본 변수, a one-line format hint above the editor),
+  `risuai.d.ts` declares it, and the tool docstrings name it. Nothing else
+  changes: the host overlay writes any listed scalar generically, `ingest`'s
+  merge path adopts the missing row on an existing DB at the next open, and
+  the patch carries before/after like every other field (checked by hand:
+  reset ingest without the field → refresh with it → `adopt: 1` → edit →
+  patch entry). Server + plugin; needs a release and `+` to reach RisuAI.
+
 ## unreleased (2026-09-20): §1-64 group row under the tabs · 애셋 채택 on it
 
 - **Group row above the 1장 · 배치 · 검수 strip.** `drawSelector` draws

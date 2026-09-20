@@ -33,8 +33,11 @@ from . import db, log, merge, store
 # 1714) but the panel edits them on the Regex tab, next to the scripts that
 # usually accompany them - the meta tab filters them out.
 # replaceGlobalNote = RisuAI's "글로벌 노트 덮어쓰기" (post_history_instructions in a card).
+# defaultVariables = RisuAI's "기본 변수" (one `key=value` per line; the fallback
+# a chat's scriptstate falls back to). Missing until §1-65: the agent then had
+# no way to change a card's default variables at all.
 SCALARS = ("name", "desc", "firstMessage", "creatorNotes", "characterVersion",
-           "replaceGlobalNote", "backgroundHTML")
+           "replaceGlobalNote", "defaultVariables", "backgroundHTML")
 # backgroundCSS: RisuAI's UI has no field for it, so neither has this panel.
 _RETIRED = ("personality", "scenario", "exampleMessage",
             "systemPrompt", "postHistoryInstructions", "backgroundCSS")
