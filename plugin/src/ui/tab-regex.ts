@@ -236,6 +236,11 @@ function open(s: CardScript): void {
   }) as HTMLTextAreaElement;
   setTimeout(() => attachHilite(outText, { mode: 'regex-out' }), 0);
   const flag = el('input', { value: String(e.flag ?? ''), placeholder: '예: g' }) as HTMLInputElement;
+  // RisuAI applies `flag` only while ableFlag is on; off means plain "g"
+  // whatever the box says (§1-66). Typing a flag turns it on.
+  const ableFlag = el('input', { type: 'checkbox' }) as HTMLInputElement;
+  ableFlag.checked = Boolean(e.ableFlag);
+  flag.addEventListener('input', () => { if (flag.value.trim()) ableFlag.checked = true; });
 
   const save = el('button', { class: 'primary', text: '저장' }) as HTMLButtonElement;
   save.addEventListener('click', async () => {
@@ -246,6 +251,7 @@ function open(s: CardScript): void {
         ...e, comment: comment.value, type: type.value,
         in: inPat.value, out: outText.value,
         ...(flag.value ? { flag: flag.value } : {}),
+        ableFlag: ableFlag.checked,
       });
       notice(savedText('스크립트를'), 'ok');
       await refreshNow();
@@ -293,6 +299,7 @@ function open(s: CardScript): void {
       el('span', { text: '바꾸기 (out) — background HTML도 여기에 들어갑니다' }), outText,
     ]),
     el('label', { class: 'field' }, [el('span', { text: '플래그 (flag)' }), flag]),
+    el('label', { class: 'field row' }, [ableFlag, el('span', { text: '플래그 적용 (ableFlag) — 꺼져 있으면 RisuAI 는 플래그를 무시하고 g 로 동작합니다' })]),
     small.length ? el('div', { class: 'hint diffmeta', text: '기준선과 다른 항목 — ' + small.join(' · ') }) : null,
     diff,
     el('div', { class: 'row' }, [save, del]),

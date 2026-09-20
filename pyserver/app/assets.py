@@ -415,7 +415,13 @@ def stage_changes(ck: str, kind: str, items: list[dict]) -> dict:
     for item in items:
         name = str(item.get('name') or '').strip()
         field = str(item.get('field') or 'additional')
-        if not name or field not in ('additional', 'emotion'):
+        if field == 'image':
+            # The profile picture (§1-66): not a list entry but the card's
+            # `image` key, so it lands on the card_fields row instead.
+            if kind != 'host_asset_replace':
+                raise AssetError('프로필 이미지는 교체만 됩니다')
+            name = name or '프로필'
+        elif not name or field not in ('additional', 'emotion'):
             raise AssetError('에셋 이름과 additional/emotion 대상이 필요합니다')
         info = stage_file(str(item.get('path') or ''))
         data = files._resolve(files.SPACE, info['path']).read_bytes()
@@ -427,7 +433,13 @@ def stage_changes(ck: str, kind: str, items: list[dict]) -> dict:
         rows = card.scripts(ck, card.ASSET_KIND)
         known = {(r['entry'].get('field'), r['entry'].get('name'), r['entry'].get('key')) for r in rows}
         for entry in prepared:
-            if kind == 'host_asset_replace':
+            if entry['field'] == 'image':
+                row = db.one("SELECT id FROM card_fields WHERE char_key = ? AND field = 'image' AND seq = 0", (ck,))
+                if row is None:
+                    raise AssetError('프로필 행이 없습니다. 봇 작업본을 다시 불러와 주세요')
+                card.update_field(row['id'], entry['key'])
+                changed += 1
+            elif kind == 'host_asset_replace':
                 hits = [r for r in rows if r['entry'].get('name') == entry['name']]
                 if not hits:
                     raise AssetError('교체할 에셋이 없습니다: ' + entry['name'])

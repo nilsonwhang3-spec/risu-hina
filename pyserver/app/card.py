@@ -36,11 +36,35 @@ from . import db, log, merge, store
 # defaultVariables = RisuAI's "기본 변수" (one `key=value` per line; the fallback
 # a chat's scriptstate falls back to). Missing until §1-65: the agent then had
 # no way to change a card's default variables at all.
+#
+# §1-66 (2026-09-20) brought back systemPrompt and exampleMessage - the 08-24
+# retirement assumed RisuAI's editor had dropped them, but CharConfig shows
+# both unconditionally and a non-empty systemPrompt REPLACES the main prompt
+# (process/index.svelte.ts:411), so a bot that carries one was uneditable
+# here. personality/scenario stay retired: RisuAI hides them behind the
+# "unrecommended" toggle unless they already hold text.
+#
+# Typed rows (§1-66). Every row is a string; these encode a non-string
+# character value and the plugin decodes it back (plugin/src/cardfields.ts
+# is the mirror - keep the two encoders identical):
+#   lowLevelAccess  bool     "1" / "0"
+#   loreSettings    object   "" = use the global lorebook settings (RisuAI
+#                            keeps the field undefined); else the four keys
+#                            as `key=value` lines in LORE_SETTINGS_KEYS order
+#   image           string   the profile picture's asset key; a replacement
+#                            is a pending key the write-back resolves
 SCALARS = ("name", "desc", "firstMessage", "creatorNotes", "characterVersion",
-           "replaceGlobalNote", "defaultVariables", "backgroundHTML")
+           "replaceGlobalNote", "systemPrompt", "exampleMessage", "defaultVariables",
+           "translatorNote", "lowLevelAccess", "loreSettings", "image", "backgroundHTML")
+BOOL_FIELDS = ("lowLevelAccess",)
+LORE_SETTINGS_FIELD = "loreSettings"
+# (key, kind) in encoding order. RisuAI's defaults are 5 / 800 / off / off.
+LORE_SETTINGS_KEYS = (("recursiveScanning", "bool"), ("fullWordMatching", "bool"),
+                      ("scanDepth", "int"), ("tokenBudget", "int"))
+LORE_SETTINGS_DEFAULTS = {"recursiveScanning": False, "fullWordMatching": False,
+                          "scanDepth": 5, "tokenBudget": 800}
 # backgroundCSS: RisuAI's UI has no field for it, so neither has this panel.
-_RETIRED = ("personality", "scenario", "exampleMessage",
-            "systemPrompt", "postHistoryInstructions", "backgroundCSS")
+_RETIRED = ("personality", "scenario", "postHistoryInstructions", "backgroundCSS")
 # characterVersion lives in two places on a RisuAI character: the UI edits
 # `additionalData.character_version` (CharConfig.svelte), the importer also
 # writes top-level `characterVersion`. Rows read the nested one; the write
@@ -59,8 +83,51 @@ ASSET_KIND = "assetref"
 SCRIPT_KINDS = ("customscript", "triggerscript", ASSET_KIND)
 
 
+def encode_lore_settings(value: Any) -> str:
+    """loreSettings object -> row text. Anything but a dict is "use global"."""
+    if not isinstance(value, dict):
+        return ""
+    lines = []
+    for key, kind in LORE_SETTINGS_KEYS:
+        v = value.get(key, LORE_SETTINGS_DEFAULTS[key])
+        if kind == "bool":
+            lines.append(f"{key}={'1' if v else '0'}")
+        else:
+            try:
+                lines.append(f"{key}={int(v)}")
+            except (TypeError, ValueError):
+                lines.append(f"{key}={LORE_SETTINGS_DEFAULTS[key]}")
+    return "\n".join(lines)
+
+
+def decode_lore_settings(text: str) -> dict | None:
+    """Row text -> loreSettings object; None means use the global settings."""
+    if not (text or "").strip():
+        return None
+    got: dict[str, str] = {}
+    for line in text.splitlines():
+        if "=" in line:
+            k, v = line.split("=", 1)
+            got[k.strip()] = v.strip()
+    out: dict[str, Any] = {}
+    for key, kind in LORE_SETTINGS_KEYS:
+        raw = got.get(key)
+        if kind == "bool":
+            out[key] = LORE_SETTINGS_DEFAULTS[key] if raw is None else raw not in ("0", "", "false", "False")
+        else:
+            try:
+                out[key] = int(raw) if raw is not None else LORE_SETTINGS_DEFAULTS[key]
+            except ValueError:
+                out[key] = LORE_SETTINGS_DEFAULTS[key]
+    return out
+
+
 def scalar_of(card: dict, field: str) -> str:
-    """A scalar's value on a character, nested ones included."""
+    """A scalar's value on a character, nested ones included; typed ones encoded."""
+    if field in BOOL_FIELDS:
+        return "1" if card.get(field) else "0"
+    if field == LORE_SETTINGS_FIELD:
+        return encode_lore_settings(card.get(field))
     if field in NESTED:
         top, inner = NESTED[field]
         holder = card.get(top)

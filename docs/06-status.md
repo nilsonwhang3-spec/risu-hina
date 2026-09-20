@@ -1,5 +1,58 @@
 # 06. Implementation status — as of 2026-09-20 (v0.15.19, Risu Hina)
 
+## unreleased (2026-09-20): §1-66 the rest of the card is editable · regex flags actually apply
+
+The audit against a real card (Parma Knights v2.0.5, decoded charx) and
+RisuAI's own CharConfig / LoreBookSetting found what the panel still could
+not touch. Done, in the order asked:
+
+- **systemPrompt and exampleMessage are back** as meta rows. The 08-24
+  retirement assumed RisuAI's editor had dropped them; CharConfig shows both
+  unconditionally, and a non-empty systemPrompt REPLACES the preset's main
+  prompt (`process/index.svelte.ts:411`) - this bot carries one, so it was
+  uneditable here. personality/scenario stay retired (RisuAI hides them
+  behind the "unrecommended" toggle). Hints above the editor say what each
+  does.
+- **Regex flags were silently ignored.** RisuAI applies `flag` only while
+  the entry's `ableFlag` is on (`scripts.ts:157`, else plain `g`); every
+  regex on this bot has it off and neither the tab nor the tools could turn
+  it on, so a `gi` set here changed nothing in RisuAI. Now the tab has a
+  플래그 적용 checkbox (typing a flag ticks it), `propose_regex_edit` turns it
+  on when a flag is given (`able_flag="on"|"off"` for just the switch), and
+  `propose_regex_add` applies a given flag.
+- **Lorebook settings** (the release ritual: 글로벌 설정 off, 재귀 검색 off):
+  a `loreSettings` row, "" = use the global settings (RisuAI keeps the field
+  undefined), else four `key=value` lines. Meta tab: 로어북 설정 with a
+  글로벌 설정 사용 checkbox and, when off, 재귀 검색 · 전체 단어 일치 · 깊이 · 토큰
+  예산. Tool `propose_lore_settings(use_global | recursive_scanning,
+  full_word_matching, scan_depth, token_budget)`.
+- **lowLevelAccess** (Lua low-level API): a "1"/"0" row, a checkbox on the
+  meta tab, `propose_low_level_access(enabled)`.
+- **translatorNote**: a plain meta row.
+- **The profile picture** (`image`): a row holding the asset key. The assets
+  tab's 프로필 cell gets 교체… (PNG/WebP → uploads/ → the row, via
+  `POST /card/portrait`); `propose_portrait_replace(path)` does the same for
+  the agent. The write-back resolves it like the list assets: the pending key
+  is registered with `Risuai.saveAsset`, the real key written to
+  `char.image`; the reset upload afterwards settles the row.
+
+Typed rows are the one new mechanism: every row is still a string, and
+`card.py` (BOOL_FIELDS, encode/decode_lore_settings) and
+`plugin/src/cardfields.ts` encode identically - the host overlay compares
+live values as encoded text (`liveValue`), writes through `applyField`, and
+verifies through the same encoder. The free-text card tools refuse typed rows
+and name the right tool. Checked by hand: both encoders on the same inputs
+(esbuild + node vs. python) produce identical text; ingest without the rows →
+refresh with them → `adopt`; a staged profile picture lands on the `image`
+row as a pending key with the bytes in the store; patch carries every typed
+before/after. Server + plugin; needs a release and `+`.
+
+Not done, on purpose: lorebook entry flags (secondkey/selective/useRegex,
+none used by this bot), and the remaining CharConfig metadata (creator,
+nickname, license, tags, additionalText, depth_prompt, bias, utilityBot,
+largePortrait, hideChatIcon, escapeOutput, removedQuotes, inlayViewScreen,
+viewScreen, customModuleToggle, newGenData, virtualscript, supaMemory, TTS).
+
 ## unreleased (2026-09-20): §1-65 기본 변수 on the meta tab and in the AI tools
 
 - **The card's default variables could not be edited at all.** RisuAI's

@@ -822,8 +822,12 @@ def build() -> Agent[Deps]:
 
         First line only, not the body. Read a long field in full with read_card_field(id).
         Rows: name, desc, firstMessage, alternateGreetings[n], creatorNotes, characterVersion,
-        replaceGlobalNote (global note override), defaultVariables (기본 변수, one key=value per
-        line - the chat variables' fallback), backgroundHTML.
+        replaceGlobalNote (global note override), systemPrompt (REPLACES the preset's main prompt
+        when non-empty), exampleMessage, defaultVariables (기본 변수, one key=value per line - the
+        chat variables' fallback), translatorNote, backgroundHTML. Typed rows have their own
+        tools, not propose_card_edit: lowLevelAccess ("1"/"0") -> propose_low_level_access,
+        loreSettings (empty = global settings) -> propose_lore_settings, image (profile picture
+        asset key) -> propose_portrait_replace.
         """
         data = cardmod.listing(ctx.deps.char_key)
         out = [f"카드 필드 {len(data['fields'])}개, 수정됨 {data['changed']}개"
@@ -1274,6 +1278,11 @@ def build() -> Agent[Deps]:
 
     # --- card (bot) editing --------------------------------------------------
 
+    # Typed rows (§1-66) have a tool of their own; the free-text tools refuse them.
+    _TYPED_TOOL = {"lowLevelAccess": "propose_low_level_access",
+                   cardmod.LORE_SETTINGS_FIELD: "propose_lore_settings",
+                   "image": "propose_portrait_replace"}
+
     @agent.tool
     def propose_card_replace(ctx: RunContext[Deps], field_id: str, find: str, replace: str,
                              reason: str, replace_all: bool = False) -> str:
@@ -1285,6 +1294,8 @@ def build() -> Agent[Deps]:
         cur = cardmod.get_field(field_id)
         if cur is None:
             return "없는 카드 필드입니다"
+        if cur["field"] in _TYPED_TOOL:
+            return f"{cur['field']} 은 {_TYPED_TOOL[cur['field']]} 로 바꿉니다"
         try:
             body, n = textedit.replace_once(str(cur.get("body") or ""), find, replace, replace_all=replace_all)
         except textedit.ReplaceError as e:
@@ -1305,9 +1316,76 @@ def build() -> Agent[Deps]:
         cur = cardmod.get_field(field_id)
         if cur is None:
             return "없는 카드 필드입니다"
+        if cur["field"] in _TYPED_TOOL:
+            return f"{cur['field']} 은 {_TYPED_TOOL[cur['field']]} 로 바꿉니다"
         return _propose(ctx, "card_edit",
                         f"카드 {cur['field']} 수정 — {reason}",
                         {"id": field_id, "body": new_body})
+
+    def _typed_row(ctx: RunContext[Deps], field: str) -> dict | None:
+        return next((f for f in cardmod.listing(ctx.deps.char_key)["fields"]
+                     if f["field"] == field and f["seq"] == 0), None)
+
+    @agent.tool
+    def propose_lore_settings(ctx: RunContext[Deps], reason: str, use_global: bool = False,
+                              recursive_scanning: bool = False, full_word_matching: bool = False,
+                              scan_depth: int = -1, token_budget: int = -1) -> str:
+        """Propose the bot's own lorebook settings (RisuAI 로어북 설정 탭).
+
+        use_global=True switches the bot back to the global settings (RisuAI's "글로벌 설정 사용";
+        the other arguments are then ignored). Otherwise the bot gets its own settings:
+        recursive_scanning (재귀 검색), full_word_matching (전체 단어 일치), scan_depth (0-20, -1 keeps
+        the current or RisuAI's default 5), token_budget (0-4096, -1 keeps the current or 800).
+        A typical release turns recursive scanning OFF and uses the bot's own settings.
+        """
+        row = _typed_row(ctx, cardmod.LORE_SETTINGS_FIELD)
+        if row is None:
+            return "로어북 설정 행이 없습니다. 봇 작업본을 다시 불러와 주세요"
+        if use_global:
+            body = ""
+            what = "글로벌 설정 사용"
+        else:
+            cur = cardmod.decode_lore_settings(row["body"]) or dict(cardmod.LORE_SETTINGS_DEFAULTS)
+            new = {"recursiveScanning": bool(recursive_scanning),
+                   "fullWordMatching": bool(full_word_matching),
+                   "scanDepth": cur["scanDepth"] if int(scan_depth) < 0 else max(0, min(20, int(scan_depth))),
+                   "tokenBudget": cur["tokenBudget"] if int(token_budget) < 0 else max(0, min(4096, int(token_budget)))}
+            body = cardmod.encode_lore_settings(new)
+            what = (f"봇 설정: 재귀 검색 {'켬' if new['recursiveScanning'] else '끔'} · "
+                    f"전체 단어 {'켬' if new['fullWordMatching'] else '끔'} · 깊이 {new['scanDepth']} · 토큰 {new['tokenBudget']}")
+        if body == row["body"]:
+            return "이미 그 설정입니다"
+        return _propose(ctx, "card_edit", f"로어북 설정 — {what} — {reason}",
+                        {"id": row["id"], "body": body})
+
+    @agent.tool
+    def propose_low_level_access(ctx: RunContext[Deps], enabled: bool, reason: str) -> str:
+        """Propose turning the bot's 저수준 접근 (lowLevelAccess) on or off.
+
+        Lua triggers that touch the low-level API need it on; RisuAI shows a warning when it is.
+        """
+        row = _typed_row(ctx, "lowLevelAccess")
+        if row is None:
+            return "저수준 접근 행이 없습니다. 봇 작업본을 다시 불러와 주세요"
+        body = "1" if enabled else "0"
+        if body == row["body"]:
+            return "이미 그 상태입니다"
+        return _propose(ctx, "card_edit", f"저수준 접근 {'켬' if enabled else '끔'} — {reason}",
+                        {"id": row["id"], "body": body})
+
+    @agent.tool
+    def propose_portrait_replace(ctx: RunContext[Deps], path: str, reason: str) -> str:
+        """Propose replacing the bot's profile picture (the card's `image`) with a workspace PNG/WebP.
+
+        Registered in RisuAI at the next card write-back, like any asset replacement.
+        """
+        try:
+            info = assets.stage_file(path)
+        except (assets.AssetError, files.FileError) as e:
+            return str(e)
+        return _propose(ctx, "host_asset_replace",
+                        f"프로필 이미지 교체 ({info['size'] // 1024}KB) — {reason}",
+                        {"name": "프로필", "field": "image", "path": info["path"], "ext": info["ext"]})
 
     @agent.tool
     def propose_greeting_add(ctx: RunContext[Deps], body: str, reason: str) -> str:
@@ -1328,8 +1406,11 @@ def build() -> Agent[Deps]:
     def propose_regex_edit(ctx: RunContext[Deps], script_id: str, reason: str,
                            in_pattern: str = "", out_text: str = "",
                            comment: str = "", flag: str = "",
-                           script_type: str = "") -> str:
+                           script_type: str = "", able_flag: str = "") -> str:
         """Propose editing a Regex (customscript) entry. Empty arguments leave the field as it is.
+
+        RisuAI applies `flag` only while the entry's ableFlag is on (off = plain "g"). Giving a
+        flag turns ableFlag on; able_flag="off" turns it off (flag ignored again), "on" turns it on.
 
         Fields not listed here are preserved as they were. Background HTML is replaced whole via
         out_text - read the current value with read_script first.
@@ -1346,6 +1427,11 @@ def build() -> Agent[Deps]:
             entry["comment"] = comment
         if flag:
             entry["flag"] = flag
+            entry["ableFlag"] = True
+        if able_flag in ("on", "off"):
+            entry["ableFlag"] = able_flag == "on"
+        elif able_flag:
+            return "able_flag 는 on 또는 off 입니다"
         if script_type:
             entry["type"] = script_type
         label = entry.get("comment") or script_id
@@ -1356,7 +1442,8 @@ def build() -> Agent[Deps]:
     def propose_regex_add(ctx: RunContext[Deps], comment: str, in_pattern: str,
                           out_text: str, script_type: str, reason: str,
                           flag: str = "") -> str:
-        """Propose adding a Regex (customscript) entry.
+        """Propose adding a Regex (customscript) entry. A flag given here is applied (ableFlag on);
+        without one RisuAI uses plain "g".
 
         script_type: editinput | editoutput | editdisplay | editprocess etc.
         """
@@ -1364,6 +1451,7 @@ def build() -> Agent[Deps]:
                                  "out": out_text, "type": script_type}
         if flag:
             entry["flag"] = flag
+            entry["ableFlag"] = True
         return _propose(ctx, "script_add", f"Regex “{comment}” 추가 — {reason}",
                         {"kind": "customscript", "entry": entry})
 
