@@ -58,6 +58,8 @@ export interface RisuCharacter {
   systemPrompt?: string;
   postHistoryInstructions?: string;
   creatorNotes?: string;
+  /** 기본 변수: one `key=value` per line, the scriptstate fallback. */
+  defaultVariables?: string;
   globalLore?: unknown[];
   [key: string]: unknown;
 }

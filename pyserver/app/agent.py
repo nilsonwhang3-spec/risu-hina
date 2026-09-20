@@ -821,6 +821,9 @@ def build() -> Agent[Deps]:
         """Skim the bot card row by row. These rows are the edit targets - aim propose_card_edit at them.
 
         First line only, not the body. Read a long field in full with read_card_field(id).
+        Rows: name, desc, firstMessage, alternateGreetings[n], creatorNotes, characterVersion,
+        replaceGlobalNote (global note override), defaultVariables (기본 변수, one key=value per
+        line - the chat variables' fallback), backgroundHTML.
         """
         data = cardmod.listing(ctx.deps.char_key)
         out = [f"카드 필드 {len(data['fields'])}개, 수정됨 {data['changed']}개"
@@ -1274,7 +1277,7 @@ def build() -> Agent[Deps]:
     @agent.tool
     def propose_card_replace(ctx: RunContext[Deps], field_id: str, find: str, replace: str,
                              reason: str, replace_all: bool = False) -> str:
-        """Propose changing only PART of a card field (description, first message, greetings, creator notes...).
+        """Propose changing only PART of a card field (description, first message, greetings, creator notes, default variables...).
 
         `find` is a string that occurs exactly once in the body, `replace` is what goes in its place.
         To change one sentence of a long description use this, not a full rewrite. id comes from read_card.
@@ -1293,9 +1296,10 @@ def build() -> Agent[Deps]:
     @agent.tool
     def propose_card_edit(ctx: RunContext[Deps], field_id: str, new_body: str,
                           reason: str) -> str:
-        """Propose rewriting one card field (description, personality, first message, greeting...) AS A WHOLE.
+        """Propose rewriting one card field (description, first message, greeting, default variables...) AS A WHOLE.
 
-        new_body is the complete new body. For one part, use propose_card_replace. The card affects
+        new_body is the complete new body. For defaultVariables (기본 변수) the body is one
+        key=value per line, the whole list. For one part, use propose_card_replace. The card affects
         every chat of this bot. id comes from read_card.
         """
         cur = cardmod.get_field(field_id)

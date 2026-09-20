@@ -19,6 +19,7 @@ const LABELS: Record<string, string> = {
   creatorNotes: '제작자 노트',
   characterVersion: '봇 버전',
   replaceGlobalNote: '글로벌 노트 덮어쓰기',
+  defaultVariables: '기본 변수',
   alternateGreetings: '대체 인사말',
 };
 
@@ -33,6 +34,7 @@ const FIELD_RANK: Record<string, number> = {
   firstMessage: 20,
   alternateGreetings: 21,
   replaceGlobalNote: 30,
+  defaultVariables: 40,
   characterVersion: 100,
   creatorNotes: 110,
 };
@@ -209,6 +211,9 @@ function open(f: CardField): void {
     el('h2', {}, [el('span', { text: labelOf(f) }), el('span', { class: 'spacer' }),
                   f.field === 'name' ? null : focusButton(body, labelOf(f))]),
     ...(f.deleted ? [el('div', { class: 'notice', text: '삭제 예정입니다. 저장하면 삭제가 취소됩니다.' })] : []),
+    ...(f.field === 'defaultVariables'
+      ? [el('div', { class: 'hint', text: '한 줄에 하나, 이름=값. 채팅 변수가 없을 때 쓰는 기본값입니다 (RisuAI 기본 변수).' })]
+      : []),
     el('label', { class: 'field' }, [body]),
     ...(diff ? [diff] : []),
     el('div', { class: 'row' }, buttons),
