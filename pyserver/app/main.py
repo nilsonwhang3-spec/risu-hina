@@ -2200,6 +2200,30 @@ def h_card_field(arg: dict) -> dict:
         raise ApiError(404, str(e))
 
 
+def h_card_portrait(arg: dict) -> dict:
+    """The assets tab picked a workspace image for the profile picture (§1-66):
+    stage it on the `image` row; the write-back registers it in RisuAI."""
+    ck = _char(arg)
+    try:
+        r = assets.stage_changes(ck, 'host_asset_replace',
+                                 [{'field': 'image', 'name': '프로필', 'path': str(arg.get('path') or '')}])
+    except (assets.AssetError, files.FileError) as e:
+        raise ApiError(400, str(e))
+    return {"ok": True, **r}
+
+
+def h_card_portrait(arg: dict) -> dict:
+    """The assets tab picked a workspace image for the profile picture (§1-66):
+    stage it on the `image` row; the write-back registers it in RisuAI."""
+    ck = _char(arg)
+    try:
+        r = assets.stage_changes(ck, 'host_asset_replace',
+                                 [{'field': 'image', 'name': '프로필', 'path': str(arg.get('path') or '')}])
+    except (assets.AssetError, files.FileError) as e:
+        raise ApiError(400, str(e))
+    return {"ok": True, **r}
+
+
 def h_card_greeting_add(arg: dict) -> dict:
     return {"ok": True, "item": cardmod.add_greeting(_char(arg), str(arg.get("body") or ""))}
 
@@ -2639,6 +2663,7 @@ ROUTES: dict[str, Handler] = {
     "GET /card": h_card,
     "GET /card/scripts": h_card_scripts,
     "POST /card/field": h_card_field,
+    "POST /card/portrait": h_card_portrait,
     "POST /card/greeting": h_card_greeting_add,
     "POST /card/greeting/delete": h_card_greeting_delete,
     "POST /card/script": h_card_script_update,

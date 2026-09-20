@@ -13,6 +13,7 @@
  *    verifies identity before committing.
  */
 import type { RisuChat, RisuCharacter, RisuMessage } from './risuai';
+import { encodeField, applyField } from './cardfields';
 
 export interface Slot {
   characterIndex: number;
@@ -419,14 +420,15 @@ export async function writeCharacter(
 
   // characterVersion is nested on a RisuAI character (additionalData.
   // character_version is what its UI edits; the importer also sets the
-  // top-level twin). Read the nested one, write both.
-  const liveValue = (field: string): string => {
+  // top-level twin). Read the nested one, write both. Typed rows
+  // (lowLevelAccess, loreSettings) compare as their encoded text (§1-66).
+  const liveValue = (field: string, char: RisuCharacter = fresh): string => {
     if (field === 'characterVersion') {
-      const add = fresh['additionalData'] as Record<string, unknown> | undefined;
+      const add = char['additionalData'] as Record<string, unknown> | undefined;
       const v = add && typeof add === 'object' ? add['character_version'] : undefined;
-      return String(v ?? fresh['characterVersion'] ?? '');
+      return String(v ?? char['characterVersion'] ?? '');
     }
-    return String(fresh[field] ?? '');
+    return encodeField(char, field);
   };
   for (const e of update.fields ?? []) {
     if (liveValue(e.field) !== e.before && liveValue(e.field) !== e.after) {
@@ -445,7 +447,7 @@ export async function writeCharacter(
       add['character_version'] = e.after;
       next['additionalData'] = add;
     }
-    next[e.field] = e.after;
+    applyField(next, e.field, e.after);
     applied += 1;
     parts.push(e.field);
   }
@@ -484,7 +486,7 @@ export async function writeCharacter(
   let drift = '';
   try {
     const after = await readCharacter(characterIndex);
-    const missed = (update.fields ?? []).find((e) => String(after[e.field] ?? '') !== e.after);
+    const missed = (update.fields ?? []).find((e) => liveValue(e.field, after) !== e.after);
     if (missed) {
       verified = false;
       drift = `${missed.field} 이(가) 쓰기 전 값 그대로입니다`;

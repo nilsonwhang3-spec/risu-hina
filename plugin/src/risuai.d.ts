@@ -60,6 +60,14 @@ export interface RisuCharacter {
   creatorNotes?: string;
   /** 기본 변수: one `key=value` per line, the scriptstate fallback. */
   defaultVariables?: string;
+  /** Replaces the preset's main prompt when non-empty. */
+  systemPrompt?: string;
+  exampleMessage?: string;
+  translatorNote?: string;
+  /** Lua low-level API access. */
+  lowLevelAccess?: boolean;
+  /** The bot's own lorebook settings; undefined = the global ones. */
+  loreSettings?: { tokenBudget: number; scanDepth: number; recursiveScanning: boolean; fullWordMatching?: boolean };
   globalLore?: unknown[];
   [key: string]: unknown;
 }

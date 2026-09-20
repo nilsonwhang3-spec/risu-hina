@@ -2169,6 +2169,13 @@ class AppState {
     return r.items ?? [];
   }
 
+  /** Stage a workspace image as the new profile picture (§1-66). */
+  async replacePortrait(path: string): Promise<void> {
+    await transport.post('/card/portrait', { charKey: this.botKey, path });
+    this.bump();
+    void this.refreshBotChanges();
+  }
+
   async saveCardField(id: string, body: string): Promise<CardField> {
     const r = await transport.post<{ item: CardField }>('/card/field', { charKey: this.botKey, id, body });
     void this.refreshBotChanges();
@@ -2386,6 +2393,8 @@ class AppState {
     for (const row of update.emotionImages ?? []) if (Array.isArray(row)) collect(row[1]);
     for (const row of update.additionalAssets ?? []) if (Array.isArray(row)) collect(row[1]);
     for (const row of update.ccAssets ?? []) if (row && typeof row === 'object') collect((row as { uri?: unknown }).uri);
+    // The profile picture (§1-66) is a scalar row whose text is the asset key.
+    for (const f of update.fields ?? []) if (f.field === 'image') collect(f.after);
     const resolved = new Map<string, string>();
     let done = 0;
     if (pending.size) progress(`RisuAI 이미지 등록 0/${pending.size} · 카드 저장 대기`);
@@ -2399,6 +2408,7 @@ class AppState {
       progress(`RisuAI 이미지 등록 ${++done}/${pending.size} · 카드 저장 대기`);
     });
     const replace = (value: unknown): unknown => typeof value === 'string' ? resolved.get(value) ?? value : value;
+    if (update.fields) update.fields = update.fields.map(f => f.field === 'image' ? { ...f, after: String(replace(f.after)) } : f);
     if (update.emotionImages) update.emotionImages = update.emotionImages.map(row => Array.isArray(row) ? [row[0], replace(row[1]), ...row.slice(2)] : row);
     if (update.additionalAssets) update.additionalAssets = update.additionalAssets.map(row => Array.isArray(row) ? [row[0], replace(row[1]), ...row.slice(2)] : row);
     if (update.ccAssets) update.ccAssets = update.ccAssets.map(row => row && typeof row === 'object' ? { ...row, uri: replace((row as { uri?: unknown }).uri) } : row);

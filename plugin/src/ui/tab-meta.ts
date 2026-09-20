@@ -9,9 +9,12 @@ import { el, clear, armed, refocusSearch, focusButton, diffCard } from './dom';
 import { state, type CardField } from '../state';
 import { conflictBox } from './conflicts';
 import { makeTab, savedText, type NoticeKind, type TabUi } from './kit';
+import { decodeLoreSettings, encodeLoreSettings, LORE_SETTINGS_DEFAULTS, LORE_SETTINGS_FIELD } from '../cardfields';
 
-// personality/scenario/exampleMessage/systemPrompt/PHI are retired fields
-// (import compatibility only) and the backend no longer sends rows for them.
+// personality/scenario/PHI are retired fields (import compatibility only)
+// and the backend no longer sends rows for them. systemPrompt and
+// exampleMessage came back in §1-66: RisuAI's editor shows both, and a
+// non-empty systemPrompt replaces the preset's main prompt.
 const LABELS: Record<string, string> = {
   name: '이름',
   desc: '설명 (desc)',
@@ -19,13 +22,26 @@ const LABELS: Record<string, string> = {
   creatorNotes: '제작자 노트',
   characterVersion: '봇 버전',
   replaceGlobalNote: '글로벌 노트 덮어쓰기',
+  systemPrompt: '시스템 프롬프트 (메인 프롬프트 대체)',
+  exampleMessage: '예시 대화',
   defaultVariables: '기본 변수',
+  translatorNote: '번역가 노트',
+  lowLevelAccess: '저수준 접근 (Lua)',
+  loreSettings: '로어북 설정',
   alternateGreetings: '대체 인사말',
 };
 
-// Card fields, but not meta: the Regex tab owns them (they live next to the
-// display scripts that usually come with them).
-const NOT_HERE = new Set(['backgroundHTML']);
+/** A one-line reminder of the format, above the editor. */
+const HINTS: Record<string, string> = {
+  defaultVariables: '한 줄에 하나, 이름=값. 채팅 변수가 없을 때 쓰는 기본값입니다 (RisuAI 기본 변수).',
+  systemPrompt: '비어 있지 않으면 프리셋의 메인 프롬프트를 통째로 대체합니다. {{original}} 자리에 원래 메인 프롬프트가 들어갑니다.',
+  exampleMessage: 'RisuAI 의 예시 대화 칸입니다. <START> 로 예시를 나눕니다.',
+};
+
+// Card fields, but not meta: the Regex tab owns backgroundHTML (it lives
+// next to the display scripts that usually come with it) and the assets tab
+// shows the profile picture (`image`, replaced from there).
+const NOT_HERE = new Set(['backgroundHTML', 'image']);
 
 /** Row order on the left; 100+ sits below the rule. */
 const FIELD_RANK: Record<string, number> = {
@@ -33,10 +49,15 @@ const FIELD_RANK: Record<string, number> = {
   desc: 10,
   firstMessage: 20,
   alternateGreetings: 21,
+  exampleMessage: 22,
   replaceGlobalNote: 30,
+  systemPrompt: 31,
   defaultVariables: 40,
   characterVersion: 100,
   creatorNotes: 110,
+  translatorNote: 115,
+  lowLevelAccess: 120,
+  loreSettings: 121,
 };
 
 let treeMount: HTMLElement | null = null;
@@ -136,9 +157,12 @@ function drawTree(): void {
       ruled = true;
       treeMount.appendChild(el('div', { class: 'sectionline', style: { margin: '8px 6px' } }));
     }
+    const suffix = f.field === 'lowLevelAccess' ? (f.body === '1' ? ' (켬)' : ' (끔)')
+      : f.field === LORE_SETTINGS_FIELD ? (f.body ? ' (봇 설정)' : ' (글로벌)')
+      : (f.body ? '' : ' (비어 있음)');
     const name = el('button', {
       class: 'treefile' + (f.id === openId ? ' on' : ''),
-      text: labelOf(f) + (f.body ? '' : ' (비어 있음)'),
+      text: labelOf(f) + suffix,
       title: f.id,
     });
     name.addEventListener('click', () => open(f));
@@ -150,11 +174,86 @@ function drawTree(): void {
   }
 }
 
+async function saveTyped(f: CardField, value: string, btn: HTMLButtonElement): Promise<void> {
+  btn.disabled = true;
+  try {
+    await state.saveCardField(f.id, value);
+    notice(savedText('카드 필드를'), 'ok');
+    await refreshNow();
+  } catch (e) {
+    notice('저장하지 못했습니다: ' + msg(e), 'err');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+/** lowLevelAccess: one checkbox. The row text is "1" / "0". */
+function openBool(f: CardField): void {
+  if (!viewMount) return;
+  const box = el('input', { type: 'checkbox' }) as HTMLInputElement;
+  box.checked = f.body === '1';
+  const save = el('button', { class: 'primary', text: '저장' }) as HTMLButtonElement;
+  save.addEventListener('click', () => void saveTyped(f, box.checked ? '1' : '0', save));
+  clear(viewMount);
+  viewMount.appendChild(el('div', { class: 'card' }, [
+    el('h2', {}, [el('span', { text: labelOf(f) })]),
+    el('div', { class: 'hint', text: 'Lua 트리거가 저수준 API 를 쓰려면 켜야 합니다. RisuAI 는 켜진 봇에 경고를 띄웁니다.' }),
+    el('label', { class: 'field row' }, [box, el('span', { text: '저수준 접근 허용' })]),
+    ...(f.changed ? [el('div', { class: 'hint diffmeta', text: `기준선: ${f.original === '1' ? '켬' : '끔'}` })] : []),
+    el('div', { class: 'row' }, [save]),
+  ]));
+}
+
+/** loreSettings: 글로벌 설정 사용, or the bot's own four values. */
+function openLoreSettings(f: CardField): void {
+  if (!viewMount) return;
+  const cur = decodeLoreSettings(f.body);
+  const useGlobal = el('input', { type: 'checkbox' }) as HTMLInputElement;
+  useGlobal.checked = cur === null;
+  const v = cur ?? { ...LORE_SETTINGS_DEFAULTS };
+  const recursive = el('input', { type: 'checkbox' }) as HTMLInputElement;
+  recursive.checked = v.recursiveScanning;
+  const fullWord = el('input', { type: 'checkbox' }) as HTMLInputElement;
+  fullWord.checked = v.fullWordMatching;
+  const depth = el('input', { type: 'number', min: '0', max: '20', value: String(v.scanDepth) }) as HTMLInputElement;
+  const budget = el('input', { type: 'number', min: '0', max: '4096', value: String(v.tokenBudget) }) as HTMLInputElement;
+  const own = el('div', { class: 'card', style: { marginTop: '8px' } }, [
+    el('label', { class: 'field row' }, [recursive, el('span', { text: '재귀 검색 (recursiveScanning)' })]),
+    el('label', { class: 'field row' }, [fullWord, el('span', { text: '전체 단어 일치 (fullWordMatching)' })]),
+    el('label', { class: 'field' }, [el('span', { text: '스캔 깊이 (scanDepth, 0–20)' }), depth]),
+    el('label', { class: 'field' }, [el('span', { text: '토큰 예산 (tokenBudget, 0–4096)' }), budget]),
+  ]);
+  const sync = (): void => { own.hidden = useGlobal.checked; };
+  useGlobal.addEventListener('change', sync);
+  sync();
+  const clamp = (input: HTMLInputElement, lo: number, hi: number, fallback: number): number => {
+    const n = parseInt(input.value, 10);
+    return Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : fallback;
+  };
+  const save = el('button', { class: 'primary', text: '저장' }) as HTMLButtonElement;
+  save.addEventListener('click', () => void saveTyped(f, useGlobal.checked ? '' : encodeLoreSettings({
+    recursiveScanning: recursive.checked, fullWordMatching: fullWord.checked,
+    scanDepth: clamp(depth, 0, 20, LORE_SETTINGS_DEFAULTS.scanDepth),
+    tokenBudget: clamp(budget, 0, 4096, LORE_SETTINGS_DEFAULTS.tokenBudget),
+  }), save));
+  clear(viewMount);
+  viewMount.appendChild(el('div', { class: 'card' }, [
+    el('h2', {}, [el('span', { text: labelOf(f) })]),
+    el('div', { class: 'hint', text: 'RisuAI 로어북 탭의 설정 칸입니다. 글로벌 설정을 끄면 이 봇만의 값을 씁니다. 배포 전에는 보통 재귀 검색을 끕니다.' }),
+    el('label', { class: 'field row' }, [useGlobal, el('span', { text: '글로벌 설정 사용' })]),
+    own,
+    ...(f.changed ? [el('div', { class: 'hint diffmeta', text: `기준선: ${f.original ? f.original.replace(/\n/g, ' · ') : '글로벌 설정 사용'}` })] : []),
+    el('div', { class: 'row' }, [save]),
+  ]));
+}
+
 function open(f: CardField): void {
   if (!viewMount) return;
   const was = openId;
   openId = f.id;
   if (was !== f.id) drawTree();
+  if (f.field === 'lowLevelAccess') { openBool(f); return; }
+  if (f.field === LORE_SETTINGS_FIELD) { openLoreSettings(f); return; }
 
   const body = el('textarea', {
     value: f.body,
@@ -211,9 +310,7 @@ function open(f: CardField): void {
     el('h2', {}, [el('span', { text: labelOf(f) }), el('span', { class: 'spacer' }),
                   f.field === 'name' ? null : focusButton(body, labelOf(f))]),
     ...(f.deleted ? [el('div', { class: 'notice', text: '삭제 예정입니다. 저장하면 삭제가 취소됩니다.' })] : []),
-    ...(f.field === 'defaultVariables'
-      ? [el('div', { class: 'hint', text: '한 줄에 하나, 이름=값. 채팅 변수가 없을 때 쓰는 기본값입니다 (RisuAI 기본 변수).' })]
-      : []),
+    ...(HINTS[f.field] ? [el('div', { class: 'hint', text: HINTS[f.field] })] : []),
     el('label', { class: 'field' }, [body]),
     ...(diff ? [diff] : []),
     el('div', { class: 'row' }, buttons),

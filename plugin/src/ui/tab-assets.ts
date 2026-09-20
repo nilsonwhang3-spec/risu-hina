@@ -79,10 +79,14 @@ export const renderAssetsTab = makeTab({
 async function refreshNow(): Promise<void> {
   let rows: CardScript[] = [];
   let store: AssetItem[] = [];
+  // The profile picture is the card's `image` row (§1-66): the working key
+  // may be a pending replacement, and the badge says so.
+  let imageRow: { body: string; changed: boolean } | null = null;
   try {
-    [rows, store] = await Promise.all([
+    [rows, store, imageRow] = await Promise.all([
       state.cardScripts('assetref'),
       state.assetList().then((r) => r.items).catch(() => [] as AssetItem[]),
+      state.cardFields().then((r) => r.fields.find((f) => f.field === 'image') ?? null).catch(() => null),
     ]);
   } catch (e) {
     notice('에셋 목록을 읽지 못했습니다: ' + (e instanceof Error ? e.message : String(e)), 'err');
@@ -90,11 +94,12 @@ async function refreshNow(): Promise<void> {
   const byKey = new Map(store.map((i) => [i.key, i]));
   const out: Cell[] = [];
   const portrait = store.find((i) => i.field === 'image') ?? null;
-  const image = String(state.character?.image ?? '');
+  const image = String(imageRow?.body || state.character?.image || '');
   if (image) {
     out.push({
       row: null, field: 'image', name: '프로필', key: image, ext: image.split('.').pop() || 'png',
-      state: portrait?.state ?? 'unknown', size: portrait?.size ?? null, origin: 'original',
+      state: portrait?.state ?? 'unknown', size: portrait?.size ?? null,
+      origin: imageRow?.changed ? 'edited' : 'original',
     });
   }
   for (const r of rows) {
@@ -264,6 +269,38 @@ function cell(c: Cell): HTMLElement {
     c.origin === 'edited' ? el('span', { class: 'badge warn', text: '수정' }) : null,
     c.origin === 'added' ? el('span', { class: 'badge ok', text: '추가' }) : null,
   ]);
+  if (c.field === 'image' && editable()) {
+    // The profile picture is replaced from here (§1-66): pick a PNG/WebP,
+    // it goes to the workspace's uploads/ and onto the card's `image` row;
+    // 반영 registers it in RisuAI.
+    const picker = el('input', { type: 'file', accept: 'image/png,image/webp', style: { display: 'none' } }) as HTMLInputElement;
+    const swap = el('button', { class: 'ghost tiny', text: '교체…', title: '프로필 이미지를 바꿉니다 (PNG/WebP)' }) as HTMLButtonElement;
+    swap.addEventListener('click', (ev) => { ev.stopPropagation(); picker.click(); });
+    picker.addEventListener('change', async () => {
+      const file = picker.files?.[0];
+      picker.value = '';
+      if (!file) return;
+      swap.disabled = true;
+      try {
+        const b64 = await new Promise<string>((resolve, reject) => {
+          const fr = new FileReader();
+          fr.onload = () => resolve(String(fr.result).split(',')[1] ?? '');
+          fr.onerror = () => reject(fr.error ?? new Error('read failed'));
+          fr.readAsDataURL(file);
+        });
+        const up = await state.uploadFile(file.name, b64, true, 'uploads');
+        await state.replacePortrait(up.path);
+        notice('프로필 이미지를 작업본에 올렸습니다. 봇 반영을 누르면 RisuAI 에 등록됩니다.', 'ok');
+        await refreshNow();
+      } catch (e) {
+        notice('교체하지 못했습니다: ' + (e instanceof Error ? e.message : String(e)), 'err');
+      } finally {
+        swap.disabled = false;
+      }
+    });
+    meta.appendChild(swap);
+    meta.appendChild(picker);
+  }
   if (c.row && editable()) {
     const del = el('button', { class: 'ghost tiny', text: '✕', title: '카드에서 이 참조를 지웁니다' }) as HTMLButtonElement;
     const row = c.row;

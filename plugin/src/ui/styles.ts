@@ -195,6 +195,8 @@ main { flex: 1; min-height: 0; display: flex; }
 .grow { flex: 1; min-width: 0; }
 label.field { display: block; margin-bottom: 10px; }
 label.field > span { display: block; margin-bottom: 4px; color: var(--textcolor2, #79839a); font-size: 12px; }
+label.field.row { display: flex; align-items: center; gap: 6px; }
+label.field.row > span { display: inline; margin: 0; color: inherit; font-size: inherit; }
 
 .notice {
   padding: 8px 10px; border-radius: 5px; margin-bottom: 10px; font-size: 12px;
