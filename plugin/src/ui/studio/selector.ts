@@ -394,7 +394,10 @@ export function drawSelector(node: Folder): void {
     });
     bar.appendChild(applyAll);
   }
-  bar.appendChild(exportButton(node));
+  // 애셋 채택 sits here on the overview; inside a group it moves to the
+  // sticky group row (user: the group row is always visible, the button was
+  // not).
+  if (!drill) bar.appendChild(exportButton(node));
   if (/\/selected$/.test(node.path)) bar.appendChild(adoptButton());
   // ⋯ the advanced verbs, in a menu (§1-62). 못 읽음 stays on the head: it
   // is a problem, not an option.
@@ -485,9 +488,13 @@ export function drawSelector(node: Folder): void {
     prev.addEventListener('click', () => go(at - 1));
     next.addEventListener('click', () => go(at + 1));
     up.addEventListener('click', () => { drill = ''; viewMode = 'group'; hub.drawCentre(); });
-    nav.append(up, prev, next, el('span', { class: 'sectiontitle', text: `${grp?.label || drill} · ${grp?.items.length ?? 0}장`
-      + (at >= 0 ? ` · ${at + 1}/${g.groups.length}` : '') }));
-    viewMount.prepend(nav);
+    nav.append(up, prev, next, el('span', { class: 'sectiontitle grow', text: `${grp?.label || drill} · ${grp?.items.length ?? 0}장`
+      + (at >= 0 ? ` · ${at + 1}/${g.groups.length}` : '') }), exportButton(node));
+    // Under the 1장 · 배치 · 검수 strip, not above it: the mount is the whole
+    // centre pane and the strip is already its first child (user: "탭 아래로
+    // 가야 논리적으로 맞다").
+    const strip = viewMount.querySelector(':scope > .centretabs');
+    if (strip) strip.after(nav); else viewMount.prepend(nav);
     viewMount.appendChild(candidateGrid(grp?.items ?? [], grp?.items));
   } else if (viewMode === 'group') {
     const grid = el('div', { class: 'agrid selgrid', style: { gridTemplateColumns: gridCols() } });

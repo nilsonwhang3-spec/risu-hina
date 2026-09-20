@@ -1,5 +1,15 @@
 # 06. Implementation status — as of 2026-09-20 (v0.15.19, Risu Hina)
 
+## unreleased (2026-09-20): §1-64 group row under the tabs · 애셋 채택 on it
+
+- **Group row above the 1장 · 배치 · 검수 strip.** `drawSelector` draws
+  into the whole centre pane (the strip is already its first child) and
+  prepended the sticky `.review-nav`, so it sat above the tabs. Now it is
+  inserted right after `.centretabs`.
+- **애셋 채택 hard to find inside a group.** It lived on the `seltools` bar,
+  which scrolls away. Inside a group the button moves to the sticky group
+  row (right end); the overview keeps it on the bar.
+
 ## 0.15.19 (2026-09-20): §1-63 trigger write-back rejected · focus editor collapsed
 
 Two staging reports right after 0.15.18.
