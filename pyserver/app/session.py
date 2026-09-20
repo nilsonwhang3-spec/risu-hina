@@ -12,6 +12,8 @@ multi-minute run to finish.
 """
 from __future__ import annotations
 
+import dataclasses
+
 import asyncio
 import json
 import threading
@@ -156,6 +158,25 @@ def messages_total(session_id: str) -> int:
 # the second survives a crash between the INSERT of a new one and the DELETE
 # of the old ones.
 HISTORY_KEEP = 2
+
+
+def dedupe_instructions(messages: list) -> list:
+    """Keep the instructions block on the LAST request that carries one and
+    blank the earlier copies before storing (§1-62).
+
+    pydantic-ai stamps the full instructions on every ModelRequest; on the
+    staging DB that was 1.5MB of an 1.85MB history row (60 copies of 25KB),
+    written twice per turn and parsed on every resume. The provider only ever
+    sends the latest block, and a resumed run recomputes it from the agent,
+    so the older copies carry nothing.
+    """
+    out = list(messages)
+    last = next((i for i in range(len(out) - 1, -1, -1)
+                 if isinstance(out[i], ModelRequest) and getattr(out[i], "instructions", None)), None)
+    for i, m in enumerate(out):
+        if i != last and isinstance(m, ModelRequest) and getattr(m, "instructions", None):
+            out[i] = dataclasses.replace(m, instructions=None)
+    return out
 
 
 def prune_history(session_id: str, keep: int = HISTORY_KEEP) -> int:
@@ -497,8 +518,12 @@ async def run(session_id: str, prompt: str, mode: str = "") -> AsyncGenerator[st
         from . import continuity
         deps.continuity_parts = continuity.build(session_id, crow["char_key"], history)
         captured = capture_stack.enter_context(capture_run_messages())
+        # Prompt-cache routing key = this session (§1-62). Merged over the
+        # agent's settings; providers whose plan forbids the field drop it in
+        # the client wrapper, and the Codex wrapper keeps it (codexauth).
         async with ag.run_stream_events(
             prompt, deps=deps, message_history=history, usage_limits=agent_mod.turn_limits(),
+            model_settings={"openai_prompt_cache_key": f"risu-hina-{session_id}"},
         ) as events:
             # Side events are flushed between model events AND while a tool is
             # still running: a batch that waits minutes inside one tool call
@@ -550,7 +575,7 @@ async def run(session_id: str, prompt: str, mode: str = "") -> AsyncGenerator[st
         stored = result.all_messages()
         # Pictures the vision tools attached stay in THIS turn only: the stored
         # history carries a placeholder, not 100KB of base64 per image (§1-42).
-        stored = vision.scrub_history(stored)
+        stored = dedupe_instructions(vision.scrub_history(stored))
         _save_message(session_id, "history",
                       json.loads(ModelMessagesTypeAdapter.dump_json(stored)))
         prune_history(session_id)
@@ -644,7 +669,7 @@ def _save_partial_history(session_id: str, prompt: str, partial: str, why: str,
             history.append(ModelRequest(parts=[UserPromptPart(content=prompt)]))
         note = (partial + "\n\n" if partial and not captured else "") + f"(이 턴은 완료되지 못했습니다: {why})"
         history.append(ModelResponse(parts=[TextPart(content=note)]))
-        history = vision.scrub_history(history)
+        history = dedupe_instructions(vision.scrub_history(history))
         _save_message(session_id, "history",
                       json.loads(ModelMessagesTypeAdapter.dump_json(history)))
         prune_history(session_id)

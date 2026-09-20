@@ -1,4 +1,90 @@
-# 06. Implementation status — as of 2026-09-19 (v0.15.17, Risu Hina)
+# 06. Implementation status — as of 2026-09-20 (v0.15.18, Risu Hina)
+
+## 0.15.18 (2026-09-20): §1-62 review tab simplification · plan strip · iPhone zoom · one cleanup · downloads · less ritual · context budget
+
+Five items of feedback on 0.15.17 plus the staging context audit. Released as v0.15.18 (plugin and backend together; both sides must move). Note: 0.15.17 was committed but never published as a GitHub release, so v0.15.18 follows v0.15.16 publicly.
+
+- **검수 tab, two rows.** Row 1: 검수⇄썸네일 · path · 못 읽음 badge. Row 2:
+  그룹별/전체 · columns · (AI 제안 N건 적용 when there are any) · 애셋 채택 ·
+  **⋯** menu. The menu holds what used to be seven buttons: 그룹 규칙 바꾸기
+  (with the rule summary), AI 재검수, 제안 지우기, 채택 없는 그룹 다시 생성
+  예약, 에셋 규칙, 캐릭터 부족분, 폴더 정리. The 채택 없는 그룹 line shows six
+  names as links (click = drill into that group), the rest behind 외 N개.
+  The drill nav shows the position (3/40).
+- **Chat 검수 → the group.** The strip's 검수 button passes the batch's paths
+  (`requestOpenStudio(folder, 'group', paths)`); the selector unfolds the group
+  the first of them is in and rings the fresh ones (`.fresh`), so 채택/수정/
+  버림 is one tap away and 이전/다음 walks the rest. Images no rule can place
+  fall back to the flat view. `tests/review_decisions.mjs` covers the routing.
+- **Plan / Todo strip.** 11.5px one-line summary when folded (ellipsised),
+  12px quiet card when open; markdown headings inside capped at 12px.
+- **iPhone zoom on focus.** iOS zooms the page into any focused field under
+  16px, which pushed the send button off screen. On touch/narrow screens
+  every text field is 16px (the agent box 16px/1.45, min 64px).
+- **One cleanup.** Tree foot = 전체 보기/이 봇만 · 숨김 파일 표시 · 임시파일 정리.
+  `/files/cleanup-ai` now DELETES (no `hina/.cleanup` quarantine; old
+  quarantines are swept too; emptied folders pruned, scratch/scripts roots
+  kept). Response: `removed`/`freed`/`failed`. `tests/test_ai_cleanup.py`
+  updated; docs/15 updated. The per-bot 이 봇 정리 button is gone (its
+  endpoint stays).
+- **Downloads.** New `ui/download.ts` (`saveToDevice`): a corner card shows
+  bytes arriving (`transport.postBinaryProgress`, Content-Length when sent),
+  then on a desktop the download starts as before; on a phone the card ends
+  in a 내 기기에 저장 button whose tap (a fresh user gesture) calls
+  `navigator.share` with the file (iOS: 파일에 저장), falling back to the
+  anchor. `state.downloadFile`/`downloadZip` route through it, so every
+  내려받기/폴더 zip/내 PC에 저장 button gets both. Not yet measured on a real
+  iPhone.
+
+- **Save-as-new-bot folded.** The RisuAI 반영 modal shows the one button and a
+  short hint; the backup-name field and 새 봇으로 저장 sit under a closed
+  `고급 · 새 봇으로 저장` details at the bottom (user: rare use).
+- **Less ritual per turn (backend).** The staging log showed every user
+  request re-reading read_plan · prompt.md/preset.json · asset rules ·
+  recall_notes · list_skills, then an update_plan, a re-injected plan turn
+  and a forced review_learning: 0.6~1.2M input tokens per request.
+  - `learning.py`: the output validator no longer raises ModelRetry; the
+    instructions follow Claude Code's memory rules (save what is non-obvious
+    and durable, check for a duplicate only when about to save, most turns
+    need no note, review_learning optional).
+  - `agent.py` plan discipline: plan/Todo only when the user asks (계획 세워
+    줘 · 할 일 정리 · plan mode) or a plan already exists; no habitual
+    read_plan; update when scope changes, not per tool call.
+  - `agentcontext.py`: the plan is handed over once per run (user turn or
+    post-compaction), not re-sent after every update_plan inside the run.
+  - `tests/test_workplan.py` rewritten for the new contract (13 pass).
+
+- **Context budget, compaction, cache (backend, from the staging audit).**
+  Measured on staging: a request = instructions ~10K + tool schema ~21K
+  (105 tools) + history 60~110K tokens; compaction fired at an estimated
+  135K (54% of a 250K window), 10 times in a 3-hour session; 66
+  `context summary failed` lines, mostly TimeoutError at 60s; cache hits
+  10~60% although the instructions were byte-identical across 60 requests.
+  - `agentcontext.py`: soft budget = 90% of the window − fixed − min(max_tokens,
+    12K) (`compactReserveTokens`); a summary keeps 35% instead of 50%; the
+    summariser gets 180s (`compactSummaryTimeout`) and low reasoning effort;
+    retry cooldown 60s → 600s; tool-return preview threshold 8K → 12K chars.
+  - `codexauth.py`: `prompt_cache_key` is no longer stripped for the Codex
+    backend (the Codex CLI sends it); refused once → dropped for the process.
+    `session.py` sets the key to `risu-hina-<session id>` per run (providers
+    that forbid it drop it in the client wrapper).
+  - `session.py dedupe_instructions`: stored history keeps the instructions
+    block on the last request only (1.5MB of the 1.85MB row was copies).
+  - `studio.review_page`: a `status`-filtered page returns compact rows
+    (filename, path, group, status, suggest) - the 15KB page the model then
+    re-read in three `read_tool_result` calls is gone.
+  - `continuity.build`: the notes block is replaced by a pointer when it is
+    identical to the previous handover still in the history.
+  - Tests: test_agent_memory_context_jobs (budget formula, dedupe),
+    test_continuity (notes pointer), test_review_discovery, test_compact,
+    test_workplan, test_providers, test_studio, test_http pass.
+  - Not measured yet: the actual cache-hit change on Codex needs a staging
+    turn (`agent turn … cacheRead=` in the log).
+
+Gate: tsc, build, review_decisions, agent_planning_ui, file_clipboard,
+transport_timeout, test_ai_cleanup, test_files pass. plugin_smoke / test_http
+not run in this pass.
+
 
 ## 0.15.17: concurrent plan/checkpoint deadlock
 

@@ -1009,13 +1009,14 @@ console.log('\ntest_workspace_files');
   await settle(1100);
   check('the file view has its own three panes', !!document.querySelector('.panel.active .split'));
   check('the left pane is a folder tree', !!document.querySelector('.panel.active .tree.filetree'));
-  check('workspace offers AI temp cleanup', document.querySelector('.panel.active .tree.filetree')?.textContent.includes('AI temp/숨김 정리'));
+  check('workspace offers 임시파일 정리 (§1-62: one cleanup verb)', document.querySelector('.panel.active .tree.filetree')?.textContent.includes('임시파일 정리'));
   check('the agent came along', !!document.querySelector('.panel.active .agentpanel'));
 
   const tree = document.querySelector('.panel.active .tree');
   check('upload is offered', !!findByTitle(tree, '올리기'));
   check('a whole folder can be uploaded', !!findByTitle(tree, '폴더 올리기'));
-  check('per-bot cleaning is offered', !!findButton(tree, '이 봇 정리'));
+  check('the per-bot 이 봇 정리 and the quarantine button are gone (§1-62)',
+        !findButton(tree, '이 봇 정리') && !findButton(tree, 'AI temp/숨김 정리') && !!findButton(tree, '임시파일 정리'));
 
   // The space's three areas are the tree roots; the machine area (.hina)
   // stays behind the toggle.
@@ -1031,7 +1032,7 @@ console.log('\ntest_workspace_files');
         !branches().some((b) => (b.title || '').startsWith('.hina') || /^📁?내부/.test(b.textContent || '')),
         (tree?.textContent || '').slice(0, 200));
   check('and the toggle says how many are hidden',
-        /숨김 파일 보기 [(]\d+[)]/.test(tree?.textContent || ''),
+        /숨김 파일 표시 [(]\d+[)]/.test(tree?.textContent || ''),
         (tree?.textContent || '').slice(-120));
   // Deliverables live in the bot's project folder: projects/<봇>/out. The
   // old 임시 문서 virtual folder is gone with hina/ hidden.
@@ -1138,12 +1139,12 @@ console.log('\ntest_workspace_files');
   await settle(200);
   check('and the list comes back', !!document.querySelector('.panel.active .filelist'));
 
-  clickButton(tree, '숨김 파일 보기');
+  clickButton(tree, '숨김 파일 표시');
   await settle(900);
   check('revealing shows the machine area',
         branches().some((b) => /내부/.test(b.textContent || '')),
         (document.querySelector('.panel.active .tree')?.textContent || '').slice(0, 200));
-  clickButton(document.querySelector('.panel.active .tree'), '숨김 파일 숨기기');
+  clickButton(document.querySelector('.panel.active .tree'), '숨김 파일 표시 중');
   await settle(600);
 
   // Tree context menu + Ctrl multi-select (usability items 14-15).
@@ -2981,10 +2982,19 @@ console.log('\ntest_studio_selector');
         text().slice(0, 200));
   check('the selector opens on the group cards',
         !!document.querySelector('.panel.active .groupcard'), text().slice(0, 160));
-  check('selection reset is gone and project asset rules are reachable',
-        !findButton(document.querySelector('.panel.active .seltools'), '선택 해제')
-        && !!findButton(document.querySelector('.panel.active .seltools'), '에셋 규칙'));
-  clickButton(document.querySelector('.panel.active .seltools'), '에셋 규칙');
+  // §1-62: the advanced verbs sit behind the ⋯ menu on the tools row.
+  const seltools = document.querySelector('.panel.active .seltools');
+  check('selection reset is gone and the ⋯ menu holds the advanced verbs',
+        !!seltools && !findButton(seltools, '선택 해제') && !findButton(seltools, '에셋 규칙')
+        && !!seltools.querySelector('button[aria-label="고급"]'),
+        (seltools?.textContent || text()).slice(0, 200));
+  seltools?.querySelector('button[aria-label="고급"]')?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(200);
+  check('the ⋯ menu lists rule · AI 재검수 · 에셋 규칙 · 부족분 · 폴더 정리',
+        ['그룹 규칙 바꾸기', 'AI 재검수', '에셋 규칙', '캐릭터 부족분', '폴더 정리']
+          .every((label) => !!findButton(document.querySelector('.ctxmenu') || document.body, label)),
+        document.querySelector('.ctxmenu')?.textContent || '(no menu)');
+  clickButton(document.querySelector('.ctxmenu') || document.body, '에셋 규칙');
   await settle(400);
   {
     const dialog = document.querySelector('.modalback');
@@ -3036,8 +3046,15 @@ console.log('\ntest_studio_selector');
     card('happy')?.dispatchEvent(new window.Event('click', { bubbles: true }));
     await settle(400);
     const sug = document.querySelector('.panel.active .selcell .sugline.sug-inpaint');
-    check('the 검수 tools row offers AI 재검수 (§1-46)',
-          [...document.querySelectorAll('.panel.active .seltools button')].some((b) => b.getAttribute('aria-label') === 'AI 재검수'));
+    // §1-62: AI 재검수 moved into the ⋯ menu on the tools row.
+    document.querySelector('.panel.active .seltools button[aria-label="고급"]')?.dispatchEvent(new window.Event('click', { bubbles: true }));
+    await settle(150);
+    check('the 검수 ⋯ menu offers AI 재검수 (§1-46, §1-62)',
+          !!findButton(document.querySelector('.ctxmenu') || document.body, 'AI 재검수'),
+          document.querySelector('.ctxmenu')?.textContent || '(no menu)');
+    document.body.dispatchEvent(new window.Event('mousedown', { bubbles: true }));
+    document.body.dispatchEvent(new window.Event('click', { bubbles: true }));
+    await settle(150);
     check('a seeded AI suggestion shows on the candidate', !!sug && /AI 제안: 수정/.test(sug.textContent || ''),
           (document.querySelector('.panel.active .left')?.textContent || '').slice(0, 200));
     clickButton(sug, '적용');
@@ -3070,14 +3087,20 @@ console.log('\ntest_studio_selector');
   // Groups with nothing chosen surface as 부족분 - the export placeholders,
   // shown before the export, with a button that reserves them for the next
   // batch (the 분류 → 부족분 → 다음 배치 cycle).
-  check('groups with no 채택 surface as 채택 없는 그룹 (§1-39)',
-        /채택 없는 그룹/.test(text()) && !!findButton(document.querySelector('.panel.active .left'), '부족분 다시 생성 예약'),
+  // §1-62: the names are links into their group; the reservation is in ⋯.
+  check('groups with no 채택 surface as 채택 없는 그룹 with name links (§1-39, §1-62)',
+        /채택 없는 그룹/.test(text()) && document.querySelectorAll('.panel.active .missinglist .linkbtn').length >= 1,
         text().slice(0, 300));
 
-  // §1-30: the rule folds behind one compact button; tokens MULTI-select.
-  const ruleBtn = [...document.querySelectorAll('.panel.active .rulebtn')].pop();
-  check('the rule is one compact button', !!ruleBtn,
-        document.querySelector('.panel.active .left')?.textContent?.slice(0, 160) || '');
+  // §1-30/§1-62: the rule editor opens from the ⋯ menu; tokens MULTI-select.
+  const openRuleMenu = async () => {
+    document.querySelector('.panel.active .seltools button[aria-label="고급"]')?.dispatchEvent(new window.Event('click', { bubbles: true }));
+    await settle(150);
+    return findButton(document.querySelector('.ctxmenu') || document.body, '그룹 규칙 바꾸기');
+  };
+  const ruleBtn = await openRuleMenu();
+  check('the rule editor is one menu entry that says what the rule produced', !!ruleBtn && /그룹 \d+/.test(ruleBtn.textContent || ''),
+        document.querySelector('.ctxmenu')?.textContent || document.querySelector('.panel.active .left')?.textContent?.slice(0, 160) || '');
   ruleBtn?.dispatchEvent(new window.Event('click', { bubbles: true }));
   await settle(300);
   const rulePop = () => [...document.querySelectorAll('.popover')].pop();

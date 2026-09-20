@@ -418,6 +418,10 @@ def _stop_listener() -> None:
 
 # --- the client the agent uses ------------------------------------------------------
 
+# Set once the backend has refused prompt_cache_key (see create() below).
+_NO_CACHE_KEY: list[str] = []
+
+
 def client() -> Any:
     """An AsyncOpenAI for the codex backend: bearer refreshed per call,
     streaming forced, store off, non-stream calls folded from the stream."""
@@ -442,13 +446,28 @@ def client() -> Any:
         wanted_stream = bool(kw.get("stream"))
         kw["stream"] = True
         kw["store"] = False
-        # Not accepted by this backend: no tiers or caches to pick, and (seen in
-        # the wild, 400 "Unsupported parameter: max_output_tokens") no output
-        # cap either - the subscription decides.
-        for k in ("service_tier", "prompt_cache_key", "prompt_cache_retention", "prompt_cache_options", "user",
+        # Not accepted by this backend: no tiers to pick, and (seen in the
+        # wild, 400 "Unsupported parameter: max_output_tokens") no output cap
+        # either - the subscription decides. `prompt_cache_key` is KEPT
+        # (§1-62): the Codex CLI sends it per conversation, and without it
+        # consecutive requests of one tool loop landed on different servers
+        # (30% cache hits on a stable prefix). Should the backend ever refuse
+        # it, the retry below drops it and remembers.
+        for k in ("service_tier", "prompt_cache_retention", "prompt_cache_options", "user",
                   "max_output_tokens", "top_p"):
             kw.pop(k, None)
-        stream = await orig(**kw)
+        if _NO_CACHE_KEY:
+            kw.pop("prompt_cache_key", None)
+        try:
+            stream = await orig(**kw)
+        except Exception as e:  # noqa: BLE001 - one field, one retry
+            if "prompt_cache_key" in kw and "prompt_cache_key" in str(e).lower():
+                _NO_CACHE_KEY.append(str(e)[:200])
+                log.warn("codex backend refused prompt_cache_key; dropped for this process: %s", str(e)[:200])
+                kw.pop("prompt_cache_key", None)
+                stream = await orig(**kw)
+            else:
+                raise
         if wanted_stream:
             return stream
         final = None

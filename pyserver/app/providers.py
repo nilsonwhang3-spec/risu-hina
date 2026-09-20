@@ -559,6 +559,8 @@ def plan_for(cfg: dict) -> Plan:
         if cfg.get("flex"):
             s["openai_service_tier"] = "flex"
         if cfg.get("cache"):
+            # The key itself is per session (session.run overrides it): one
+            # constant key routed every conversation to the same shard.
             s["openai_prompt_cache_key"] = "risu-hina"
             s["openai_prompt_cache_retention"] = "24h"
     if plan.profile:

@@ -92,7 +92,15 @@ class Continuity(unittest.TestCase):
             self.assertEqual(snapshot['actualJobs'][0]['state'], 'cancelled')
             self.assertEqual(snapshot['recordedWork']['pending'], ['verify file'])
             self.assertIn('unverified report', snapshot['previousAssistantReport'])
-            self.assertEqual(len(continuity.build(self.sid, 'A', [user(p) for p in parts])), 1)
+            again = continuity.build(self.sid, 'A', [user(p) for p in parts])
+            self.assertEqual(len(again), 1)
+            # §1-62: the notes block is the same text as in the handover still
+            # in the history, so this one carries a pointer, not the block.
+            self.assertEqual(json.loads(again[0][again[0].index('{'):])['notes'],
+                             'unchanged since the previous handover above (recall_notes for details)')
+        with patch.object(continuity.agentnotes, 'prompt', return_value='project note v2'):
+            changed = continuity.build(self.sid, 'A', [user(p) for p in parts])
+            self.assertEqual(json.loads(changed[-1][changed[-1].index('{'):])['notes'], 'project note v2')
             self.assertNotIn(directive, '\n'.join(continuity.build('another-session', 'A', [])))
         page = continuity.recall(self.sid, count=2)
         self.assertEqual(page['nextOffset'], 2)

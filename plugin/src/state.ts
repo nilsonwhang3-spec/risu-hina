@@ -1170,9 +1170,11 @@ class AppState {
 
   /** The agent (or a strip in the chat) asked for the studio's 검수 tab on
    * a folder: the shell switches tabs, the studio consumes the folder. */
-  openStudioRequest: { folder: string; view?: 'all' | 'group' } | null = null;
-  requestOpenStudio(folder: string, view?: 'all' | 'group'): void {
-    this.openStudioRequest = { folder, view };
+  openStudioRequest: { folder: string; view?: 'all' | 'group'; focus?: string[] } | null = null;
+  /** `focus`: the images just made (the chat's 검수 strip, §1-62) - the
+   * selector unfolds their group and rings them. */
+  requestOpenStudio(folder: string, view?: 'all' | 'group', focus?: string[]): void {
+    this.openStudioRequest = { folder, view, focus };
     this.emit();
   }
 
@@ -1627,12 +1629,13 @@ class AppState {
   // charKey: the scope is the space itself. The per-bot SYSTEM view (frozen
   // originals, machinery) is read-only and reached with `system: 1`.
 
-  /** Save a space file to the user's disk through the browser. */
+  /** Save a space file to the user's disk through the browser - with the
+   * wait shown and a phone-safe save (ui/download, §1-62). */
   async downloadFile(path: string): Promise<number> {
-    const bytes = await transport.postBinary('/files/download', { path });
     const name = path.split('/').pop() || 'file';
-    host.downloadBytes(name, bytes, name.endsWith('.charx') ? 'application/zip' : 'application/octet-stream');
-    return bytes.byteLength;
+    const { saveToDevice } = await import('./ui/download');
+    return await saveToDevice(name, (onProgress) => transport.postBinaryProgress('/files/download', { path }, onProgress),
+      name.endsWith('.charx') ? 'application/zip' : 'application/octet-stream');
   }
 
   // --- charx ------------------------------------------------------------------
@@ -1735,9 +1738,10 @@ class AppState {
 
   /** Several files or a folder as one zip, handed to the browser to save. */
   async downloadZip(paths: string[], name: string): Promise<number> {
-    const bytes = await transport.postBinary('/files/zip', { paths, name });
-    host.downloadBytes(name.endsWith('.zip') ? name : name + '.zip', bytes, 'application/zip');
-    return bytes.byteLength;
+    const file = name.endsWith('.zip') ? name : name + '.zip';
+    const { saveToDevice } = await import('./ui/download');
+    return await saveToDevice(file, (onProgress) => transport.postBinaryProgress('/files/zip', { paths, name }, onProgress),
+      'application/zip');
   }
 
   /** Size and pixel dimensions of a space file without its bytes (§1-55). */

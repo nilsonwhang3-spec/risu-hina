@@ -1,269 +1,23 @@
 //@name risu-hina
-//@display-name Risu Hina v0.15.17
+//@display-name Risu Hina v0.15.18
 //@api 3.0
-//@version 0.15.17
+//@version 0.15.18
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
 "use strict";
 (() => {
+  var __defProp = Object.defineProperty;
+  var __getOwnPropNames = Object.getOwnPropertyNames;
+  var __esm = (fn, res) => function __init() {
+    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+  };
+  var __export = (target, all) => {
+    for (var name in all)
+      __defProp(target, name, { get: all[name], enumerable: true });
+  };
+
   // src/transport.ts
-  var BackendError = class extends Error {
-    constructor(status, message, body) {
-      super(message);
-      this.status = status;
-      this.body = body;
-      this.name = "BackendError";
-    }
-  };
-  var SIGNATURE = "risu-hina";
-  var LEGACY_SIGNATURES = /* @__PURE__ */ new Set(["risu-elf", "real-ooc"]);
-  var DEFAULT_TIMEOUT_MS = 2e4;
-  var UPLOAD_TIMEOUT_MS = 18e4;
-  var Transport = class {
-    cfg = { url: "", token: "" };
-    platform = "unknown";
-    route = "unknown";
-    lastHealth = null;
-    tokenSafe = false;
-    configure(cfg) {
-      const url = (cfg.url || "").trim().replace(/\/+$/, "");
-      if (url !== this.cfg.url) {
-        this.tokenSafe = false;
-        this.route = "unknown";
-        this.lastHealth = null;
-      }
-      this.cfg = { url, token: (cfg.token || "").trim() };
-    }
-    get config() {
-      return { ...this.cfg };
-    }
-    get health() {
-      return this.lastHealth;
-    }
-    get routeKind() {
-      return this.route;
-    }
-    get hostPlatform() {
-      return this.platform;
-    }
-    get tokenAttached() {
-      return this.tokenSafe;
-    }
-    async detectPlatform() {
-      try {
-        const info = await Risuai.getRuntimeInfo();
-        this.platform = info?.platform ?? "unknown";
-      } catch {
-        this.platform = "unknown";
-      }
-    }
-    /**
-     * Confirm we are talking to our own backend directly, then allow the token.
-     *
-     * `/health` is auth-exempt on purpose so this probe needs no credential. A
-     * hub relay cannot reach a private address, so a correct signature coming
-     * back is what proves the path is direct.
-     */
-    async connect() {
-      if (!this.cfg.url) throw new BackendError(0, "\uBC31\uC5D4\uB4DC URL\uC774 \uC124\uC815\uB418\uC5B4 \uC788\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4");
-      if (this.platform === "unknown") await this.detectPlatform();
-      let res;
-      try {
-        res = await this.probe();
-      } catch (e) {
-        if (e instanceof BackendError) throw e;
-        this.route = "blocked";
-        this.tokenSafe = false;
-        throw new BackendError(
-          0,
-          `\uBC31\uC5D4\uB4DC\uC5D0 \uB2FF\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4 (${e instanceof Error ? e.message : String(e)}). URL \uC774 \uB9DE\uB294\uC9C0, \uD130\uB110\xB7VPN \uC774 \uC5F4\uB824 \uC788\uB294\uC9C0 \uD655\uC778\uD574 \uC8FC\uC138\uC694. \uC7A0\uC2DC \uB4A4 \uC790\uB3D9\uC73C\uB85C \uB2E4\uC2DC \uC2DC\uB3C4\uD569\uB2C8\uB2E4.`
-        );
-      }
-      const body = await readJson(res);
-      if (!body || body.service !== SIGNATURE && !LEGACY_SIGNATURES.has(String(body.service))) {
-        this.route = "blocked";
-        this.tokenSafe = false;
-        const what = res.status ? `HTTP ${res.status}` : "\uBE48 \uC751\uB2F5";
-        const raw = body && typeof body === "object" && "_raw" in body ? String(body._raw).replace(/\s+/g, " ").trim().slice(0, 80) : body ? JSON.stringify(body).slice(0, 80) : "";
-        this.probeInfo = [
-          `HTTP ${res.status}`,
-          `type=${res.headers.get("content-type") || "?"}`,
-          `cache=${res.headers.get("cache-control") || "-"}`,
-          res.headers.get("age") ? `age=${res.headers.get("age")}` : "",
-          res.headers.get("expires") ? `expires=${res.headers.get("expires")}` : "",
-          `body=${raw}`
-        ].filter(Boolean).join(" \xB7 ");
-        throw new BackendError(
-          res.status,
-          `\uBC31\uC5D4\uB4DC\uC5D0\uC11C Risu Hina \uC751\uB2F5\uC744 \uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4 (${what}${raw ? " \xB7 " + raw : ""}). \uC8FC\uC18C\uAC00 \uB2E4\uB978 \uC11C\uBC84\uB97C \uAC00\uB9AC\uD0A4\uAC70\uB098 \uD130\uB110\uC774 \uC544\uC9C1 \uC548 \uC5F4\uB838\uC744 \uC218 \uC788\uC2B5\uB2C8\uB2E4. \uC7A0\uC2DC \uB4A4 \uC790\uB3D9\uC73C\uB85C \uB2E4\uC2DC \uC2DC\uB3C4\uD569\uB2C8\uB2E4.`,
-          body
-        );
-      }
-      this.route = "direct";
-      this.tokenSafe = true;
-      this.lastHealth = body;
-      this.probeInfo = "";
-      this.gate = versionGate("0.15.17", String(body.version || ""));
-      return body;
-    }
-    /** Why ordinary calls are refused right now (version mismatch), or ''. */
-    get versionGate() {
-      return this.gate;
-    }
-    gate = "";
-    /** What answered the last failed probe (status, type, cache headers), or ''. */
-    probeInfo = "";
-    /**
-     * The connect probe: POST first, GET as the fallback.
-     *
-     * There is a caching CDN in front of at least one real deployment. When its
-     * cache holds an error page for `GET /health`, the panel cannot connect
-     * until that entry expires - measured at 49s and 79s in the server log,
-     * with **no request reaching the backend** in either window, and the first
-     * one that did arrive succeeding immediately. Cache-busting the URL does not
-     * work: that edge ignores query strings (0.7.2 caught it serving one asset
-     * blob for every key). A POST is never served from a cache, so the probe is
-     * a POST; GET remains for backends older than 0.8.4, which have no route
-     * for it.
-     */
-    async probe() {
-      const post = await this.raw("POST", "/health", {}, { withToken: false });
-      if (post.status !== 404 && post.status !== 405) return post;
-      return await this.raw("GET", "/health", void 0, { withToken: false });
-    }
-    async get(path, query, timeoutMs) {
-      const qs = query ? "?" + Object.entries(query).filter(([, v]) => v !== void 0 && v !== "").map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`).join("&") : "";
-      return this.json("GET", path + qs, void 0, timeoutMs);
-    }
-    async post(path, payload, timeoutMs) {
-      return this.json("POST", path, payload, timeoutMs);
-    }
-    /** POST of something transcript-sized; longer timeout, same path otherwise. */
-    async upload(path, payload) {
-      return this.json("POST", path, payload, UPLOAD_TIMEOUT_MS);
-    }
-    /** GET that answers bytes, not JSON - a charx, an image out of the store. */
-    async getBinary(path, query) {
-      const qs = query ? "?" + Object.entries(query).filter(([, v]) => v !== void 0 && v !== "").map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`).join("&") : "";
-      const res = await this.raw("GET", path + qs, void 0, { timeoutMs: UPLOAD_TIMEOUT_MS });
-      if (!res.ok) throw await toError(res);
-      return new Uint8Array(await res.arrayBuffer());
-    }
-    /** POST of raw bytes (application/octet-stream) - the batch upload. */
-    async postBytes(path, bytes) {
-      const res = await this.raw("POST", path, void 0, { timeoutMs: UPLOAD_TIMEOUT_MS, bytes });
-      if (!res.ok) throw await toError(res);
-      const body = await readJson(res);
-      if (isRaw(body)) throw new BackendError(res.status, "\uBC31\uC5D4\uB4DC \uB300\uC2E0 \uB2E4\uB978 \uC751\uB2F5\uC774 \uC654\uC2B5\uB2C8\uB2E4 (JSON \uC774 \uC544\uB2D8)");
-      return body;
-    }
-    /** POST that answers bytes - a zip of workspace files, an image, a thumb.
-     * The default timeout stays generous (a charx download runs minutes);
-     * image callers pass a short one so a hung fetch frees its semaphore slot
-     * in seconds instead of holding it for three minutes. */
-    async postBinary(path, payload, timeoutMs = UPLOAD_TIMEOUT_MS) {
-      const res = await this.raw("POST", path, payload, { timeoutMs });
-      if (!res.ok) throw await toError(res);
-      return new Uint8Array(await res.arrayBuffer());
-    }
-    /**
-     * NDJSON stream. Yields one parsed object per line as it arrives.
-     *
-     * Phase 0 measured first-byte at ~289ms and lines arriving at the server's
-     * own cadence over this path, so the agent panel can render progressively.
-     */
-    async *stream(path, payload, signal) {
-      const res = await this.raw("POST", path, payload, { timeoutMs: 0, signal });
-      if (!res.ok) throw await toError(res);
-      const body = res.body;
-      if (!body || typeof body.getReader !== "function") {
-        const text2 = await res.text();
-        for (const line of text2.split("\n")) {
-          const v = parseLine(line);
-          if (v !== void 0) yield v;
-        }
-        return;
-      }
-      const reader = body.getReader();
-      const dec = new TextDecoder();
-      let buf = "";
-      const onAbort = () => {
-        void reader.cancel().catch(() => {
-        });
-      };
-      signal?.addEventListener("abort", onAbort);
-      try {
-        for (; ; ) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buf += dec.decode(value, { stream: true });
-          let nl;
-          while ((nl = buf.indexOf("\n")) >= 0) {
-            const line = buf.slice(0, nl);
-            buf = buf.slice(nl + 1);
-            const v = parseLine(line);
-            if (v !== void 0) yield v;
-          }
-        }
-        const tail = parseLine(buf);
-        if (tail !== void 0) yield tail;
-      } finally {
-        signal?.removeEventListener("abort", onAbort);
-        void reader.cancel().catch(() => {
-        });
-      }
-    }
-    async json(method, path, payload, timeoutMs) {
-      const budget = timeoutMs === void 0 ? DEFAULT_TIMEOUT_MS : timeoutMs;
-      const controller = new AbortController();
-      const request = async () => {
-        const res = await this.raw(method, path, payload, { timeoutMs: 0, signal: controller.signal });
-        if (!res.ok) throw await toError(res);
-        const body = await readJson(res);
-        if (isRaw(body)) {
-          throw new BackendError(
-            res.status,
-            `\uBC31\uC5D4\uB4DC \uB300\uC2E0 \uB2E4\uB978 \uC751\uB2F5\uC774 \uC654\uC2B5\uB2C8\uB2E4 (JSON \uC774 \uC544\uB2D8): \u201C${body._raw.replace(/\s+/g, " ").trim().slice(0, 100)}\u201D \u2014 \uD130\uB110\xB7\uD504\uB85D\uC2DC\uAC00 \uB300\uC2E0 \uB2F5\uD588\uC744 \uC218 \uC788\uC2B5\uB2C8\uB2E4. \uC7A0\uC2DC \uB4A4 \uB2E4\uC2DC \uC2DC\uB3C4\uD574 \uC8FC\uC138\uC694.`
-          );
-        }
-        return body;
-      };
-      return await withDeadline(request(), path, budget, () => controller.abort());
-    }
-    async raw(method, path, payload, opts = {}) {
-      if (!this.cfg.url) throw new BackendError(0, "\uBC31\uC5D4\uB4DC URL\uC774 \uC124\uC815\uB418\uC5B4 \uC788\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4");
-      if (this.gate && !GATE_EXEMPT.has(path.split("?")[0])) {
-        throw new BackendError(0, this.gate);
-      }
-      const headers = {};
-      const wantToken = opts.withToken !== false;
-      if (wantToken && this.cfg.token) {
-        if (!this.tokenSafe && this.platform === "web") {
-          throw new BackendError(0, "\uC9C1\uC811 \uC5F0\uACB0\uC774 \uD655\uC778\uB418\uC9C0 \uC54A\uC544 \uD1A0\uD070\uC744 \uBCF4\uB0B4\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4. \uC5F0\uACB0 \uC9C4\uB2E8\uC744 \uBA3C\uC800 \uC2E4\uD589\uD574 \uC8FC\uC138\uC694");
-        }
-        headers["Authorization"] = "Bearer " + this.cfg.token;
-      }
-      const init = {
-        method,
-        headers,
-        networkRoute: "local_network"
-      };
-      if (opts.bytes) {
-        headers["Content-Type"] = "application/octet-stream";
-        init.body = opts.bytes;
-      } else if (method === "POST") {
-        headers["Content-Type"] = "application/json";
-        init.body = JSON.stringify(payload ?? {});
-      }
-      if (opts.signal) init.signal = opts.signal;
-      const url = this.cfg.url + path;
-      const budget = opts.timeoutMs === void 0 ? DEFAULT_TIMEOUT_MS : opts.timeoutMs;
-      const call = Risuai.nativeFetch(url, init);
-      if (!budget) return await call;
-      return await withDeadline(call, path, budget);
-    }
-  };
   async function withDeadline(call, path, budget, cancel) {
     if (!budget) return await call;
     let timer;
@@ -306,7 +60,6 @@
   function isRaw(v) {
     return !!v && typeof v === "object" && "_raw" in v && Object.keys(v).length === 1;
   }
-  var GATE_EXEMPT = /* @__PURE__ */ new Set(["/health", "/update/check", "/update/apply", "/plugin", "/logs", "/diag", "/config"]);
   function versionGate(plugin, backend) {
     const mm = (v) => v.split(".").slice(0, 2).map((x) => parseInt(x, 10) || 0);
     if (!backend) return "";
@@ -326,20 +79,311 @@
     }
     return new BackendError(res.status, msg19, body);
   }
-  var transport = new Transport();
   function clientLog(level, event, detail) {
     return transport.post("/clientlog", { level, event, detail }).then(() => void 0).catch(() => void 0);
   }
+  var BackendError, SIGNATURE, LEGACY_SIGNATURES, DEFAULT_TIMEOUT_MS, UPLOAD_TIMEOUT_MS, Transport, GATE_EXEMPT, transport;
+  var init_transport = __esm({
+    "src/transport.ts"() {
+      "use strict";
+      BackendError = class extends Error {
+        constructor(status, message, body) {
+          super(message);
+          this.status = status;
+          this.body = body;
+          this.name = "BackendError";
+        }
+      };
+      SIGNATURE = "risu-hina";
+      LEGACY_SIGNATURES = /* @__PURE__ */ new Set(["risu-elf", "real-ooc"]);
+      DEFAULT_TIMEOUT_MS = 2e4;
+      UPLOAD_TIMEOUT_MS = 18e4;
+      Transport = class {
+        cfg = { url: "", token: "" };
+        platform = "unknown";
+        route = "unknown";
+        lastHealth = null;
+        tokenSafe = false;
+        configure(cfg) {
+          const url = (cfg.url || "").trim().replace(/\/+$/, "");
+          if (url !== this.cfg.url) {
+            this.tokenSafe = false;
+            this.route = "unknown";
+            this.lastHealth = null;
+          }
+          this.cfg = { url, token: (cfg.token || "").trim() };
+        }
+        get config() {
+          return { ...this.cfg };
+        }
+        get health() {
+          return this.lastHealth;
+        }
+        get routeKind() {
+          return this.route;
+        }
+        get hostPlatform() {
+          return this.platform;
+        }
+        get tokenAttached() {
+          return this.tokenSafe;
+        }
+        async detectPlatform() {
+          try {
+            const info = await Risuai.getRuntimeInfo();
+            this.platform = info?.platform ?? "unknown";
+          } catch {
+            this.platform = "unknown";
+          }
+        }
+        /**
+         * Confirm we are talking to our own backend directly, then allow the token.
+         *
+         * `/health` is auth-exempt on purpose so this probe needs no credential. A
+         * hub relay cannot reach a private address, so a correct signature coming
+         * back is what proves the path is direct.
+         */
+        async connect() {
+          if (!this.cfg.url) throw new BackendError(0, "\uBC31\uC5D4\uB4DC URL\uC774 \uC124\uC815\uB418\uC5B4 \uC788\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4");
+          if (this.platform === "unknown") await this.detectPlatform();
+          let res;
+          try {
+            res = await this.probe();
+          } catch (e) {
+            if (e instanceof BackendError) throw e;
+            this.route = "blocked";
+            this.tokenSafe = false;
+            throw new BackendError(
+              0,
+              `\uBC31\uC5D4\uB4DC\uC5D0 \uB2FF\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4 (${e instanceof Error ? e.message : String(e)}). URL \uC774 \uB9DE\uB294\uC9C0, \uD130\uB110\xB7VPN \uC774 \uC5F4\uB824 \uC788\uB294\uC9C0 \uD655\uC778\uD574 \uC8FC\uC138\uC694. \uC7A0\uC2DC \uB4A4 \uC790\uB3D9\uC73C\uB85C \uB2E4\uC2DC \uC2DC\uB3C4\uD569\uB2C8\uB2E4.`
+            );
+          }
+          const body = await readJson(res);
+          if (!body || body.service !== SIGNATURE && !LEGACY_SIGNATURES.has(String(body.service))) {
+            this.route = "blocked";
+            this.tokenSafe = false;
+            const what = res.status ? `HTTP ${res.status}` : "\uBE48 \uC751\uB2F5";
+            const raw = body && typeof body === "object" && "_raw" in body ? String(body._raw).replace(/\s+/g, " ").trim().slice(0, 80) : body ? JSON.stringify(body).slice(0, 80) : "";
+            this.probeInfo = [
+              `HTTP ${res.status}`,
+              `type=${res.headers.get("content-type") || "?"}`,
+              `cache=${res.headers.get("cache-control") || "-"}`,
+              res.headers.get("age") ? `age=${res.headers.get("age")}` : "",
+              res.headers.get("expires") ? `expires=${res.headers.get("expires")}` : "",
+              `body=${raw}`
+            ].filter(Boolean).join(" \xB7 ");
+            throw new BackendError(
+              res.status,
+              `\uBC31\uC5D4\uB4DC\uC5D0\uC11C Risu Hina \uC751\uB2F5\uC744 \uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4 (${what}${raw ? " \xB7 " + raw : ""}). \uC8FC\uC18C\uAC00 \uB2E4\uB978 \uC11C\uBC84\uB97C \uAC00\uB9AC\uD0A4\uAC70\uB098 \uD130\uB110\uC774 \uC544\uC9C1 \uC548 \uC5F4\uB838\uC744 \uC218 \uC788\uC2B5\uB2C8\uB2E4. \uC7A0\uC2DC \uB4A4 \uC790\uB3D9\uC73C\uB85C \uB2E4\uC2DC \uC2DC\uB3C4\uD569\uB2C8\uB2E4.`,
+              body
+            );
+          }
+          this.route = "direct";
+          this.tokenSafe = true;
+          this.lastHealth = body;
+          this.probeInfo = "";
+          this.gate = versionGate("0.15.18", String(body.version || ""));
+          return body;
+        }
+        /** Why ordinary calls are refused right now (version mismatch), or ''. */
+        get versionGate() {
+          return this.gate;
+        }
+        gate = "";
+        /** What answered the last failed probe (status, type, cache headers), or ''. */
+        probeInfo = "";
+        /**
+         * The connect probe: POST first, GET as the fallback.
+         *
+         * There is a caching CDN in front of at least one real deployment. When its
+         * cache holds an error page for `GET /health`, the panel cannot connect
+         * until that entry expires - measured at 49s and 79s in the server log,
+         * with **no request reaching the backend** in either window, and the first
+         * one that did arrive succeeding immediately. Cache-busting the URL does not
+         * work: that edge ignores query strings (0.7.2 caught it serving one asset
+         * blob for every key). A POST is never served from a cache, so the probe is
+         * a POST; GET remains for backends older than 0.8.4, which have no route
+         * for it.
+         */
+        async probe() {
+          const post = await this.raw("POST", "/health", {}, { withToken: false });
+          if (post.status !== 404 && post.status !== 405) return post;
+          return await this.raw("GET", "/health", void 0, { withToken: false });
+        }
+        async get(path, query, timeoutMs) {
+          const qs = query ? "?" + Object.entries(query).filter(([, v]) => v !== void 0 && v !== "").map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`).join("&") : "";
+          return this.json("GET", path + qs, void 0, timeoutMs);
+        }
+        async post(path, payload, timeoutMs) {
+          return this.json("POST", path, payload, timeoutMs);
+        }
+        /** POST of something transcript-sized; longer timeout, same path otherwise. */
+        async upload(path, payload) {
+          return this.json("POST", path, payload, UPLOAD_TIMEOUT_MS);
+        }
+        /** GET that answers bytes, not JSON - a charx, an image out of the store. */
+        async getBinary(path, query) {
+          const qs = query ? "?" + Object.entries(query).filter(([, v]) => v !== void 0 && v !== "").map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`).join("&") : "";
+          const res = await this.raw("GET", path + qs, void 0, { timeoutMs: UPLOAD_TIMEOUT_MS });
+          if (!res.ok) throw await toError(res);
+          return new Uint8Array(await res.arrayBuffer());
+        }
+        /** POST of raw bytes (application/octet-stream) - the batch upload. */
+        async postBytes(path, bytes) {
+          const res = await this.raw("POST", path, void 0, { timeoutMs: UPLOAD_TIMEOUT_MS, bytes });
+          if (!res.ok) throw await toError(res);
+          const body = await readJson(res);
+          if (isRaw(body)) throw new BackendError(res.status, "\uBC31\uC5D4\uB4DC \uB300\uC2E0 \uB2E4\uB978 \uC751\uB2F5\uC774 \uC654\uC2B5\uB2C8\uB2E4 (JSON \uC774 \uC544\uB2D8)");
+          return body;
+        }
+        /** POST that answers bytes - a zip of workspace files, an image, a thumb.
+         * The default timeout stays generous (a charx download runs minutes);
+         * image callers pass a short one so a hung fetch frees its semaphore slot
+         * in seconds instead of holding it for three minutes. */
+        async postBinary(path, payload, timeoutMs = UPLOAD_TIMEOUT_MS) {
+          const res = await this.raw("POST", path, payload, { timeoutMs });
+          if (!res.ok) throw await toError(res);
+          return new Uint8Array(await res.arrayBuffer());
+        }
+        /**
+         * The same, reporting the bytes as they arrive (§1-62: a big download
+         * showed nothing for a long time). `total` is the Content-Length when the
+         * server sends one (a zip is streamed and has none), else 0. Hosts whose
+         * Response has no readable body fall back to one report at the end.
+         */
+        async postBinaryProgress(path, payload, onProgress, timeoutMs = UPLOAD_TIMEOUT_MS) {
+          const res = await this.raw("POST", path, payload, { timeoutMs });
+          if (!res.ok) throw await toError(res);
+          const total = Number(res.headers?.get?.("content-length") || 0) || 0;
+          const body = res.body;
+          if (!body || typeof body.getReader !== "function") {
+            const out2 = new Uint8Array(await res.arrayBuffer());
+            onProgress({ loaded: out2.byteLength, total: out2.byteLength });
+            return out2;
+          }
+          const reader = body.getReader();
+          const chunks = [];
+          let loaded = 0;
+          for (; ; ) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (value) {
+              chunks.push(value);
+              loaded += value.byteLength;
+              onProgress({ loaded, total });
+            }
+          }
+          const out = new Uint8Array(loaded);
+          let at = 0;
+          for (const c of chunks) {
+            out.set(c, at);
+            at += c.byteLength;
+          }
+          return out;
+        }
+        /**
+         * NDJSON stream. Yields one parsed object per line as it arrives.
+         *
+         * Phase 0 measured first-byte at ~289ms and lines arriving at the server's
+         * own cadence over this path, so the agent panel can render progressively.
+         */
+        async *stream(path, payload, signal) {
+          const res = await this.raw("POST", path, payload, { timeoutMs: 0, signal });
+          if (!res.ok) throw await toError(res);
+          const body = res.body;
+          if (!body || typeof body.getReader !== "function") {
+            const text2 = await res.text();
+            for (const line of text2.split("\n")) {
+              const v = parseLine(line);
+              if (v !== void 0) yield v;
+            }
+            return;
+          }
+          const reader = body.getReader();
+          const dec = new TextDecoder();
+          let buf = "";
+          const onAbort = () => {
+            void reader.cancel().catch(() => {
+            });
+          };
+          signal?.addEventListener("abort", onAbort);
+          try {
+            for (; ; ) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              buf += dec.decode(value, { stream: true });
+              let nl;
+              while ((nl = buf.indexOf("\n")) >= 0) {
+                const line = buf.slice(0, nl);
+                buf = buf.slice(nl + 1);
+                const v = parseLine(line);
+                if (v !== void 0) yield v;
+              }
+            }
+            const tail = parseLine(buf);
+            if (tail !== void 0) yield tail;
+          } finally {
+            signal?.removeEventListener("abort", onAbort);
+            void reader.cancel().catch(() => {
+            });
+          }
+        }
+        async json(method, path, payload, timeoutMs) {
+          const budget = timeoutMs === void 0 ? DEFAULT_TIMEOUT_MS : timeoutMs;
+          const controller = new AbortController();
+          const request = async () => {
+            const res = await this.raw(method, path, payload, { timeoutMs: 0, signal: controller.signal });
+            if (!res.ok) throw await toError(res);
+            const body = await readJson(res);
+            if (isRaw(body)) {
+              throw new BackendError(
+                res.status,
+                `\uBC31\uC5D4\uB4DC \uB300\uC2E0 \uB2E4\uB978 \uC751\uB2F5\uC774 \uC654\uC2B5\uB2C8\uB2E4 (JSON \uC774 \uC544\uB2D8): \u201C${body._raw.replace(/\s+/g, " ").trim().slice(0, 100)}\u201D \u2014 \uD130\uB110\xB7\uD504\uB85D\uC2DC\uAC00 \uB300\uC2E0 \uB2F5\uD588\uC744 \uC218 \uC788\uC2B5\uB2C8\uB2E4. \uC7A0\uC2DC \uB4A4 \uB2E4\uC2DC \uC2DC\uB3C4\uD574 \uC8FC\uC138\uC694.`
+              );
+            }
+            return body;
+          };
+          return await withDeadline(request(), path, budget, () => controller.abort());
+        }
+        async raw(method, path, payload, opts = {}) {
+          if (!this.cfg.url) throw new BackendError(0, "\uBC31\uC5D4\uB4DC URL\uC774 \uC124\uC815\uB418\uC5B4 \uC788\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4");
+          if (this.gate && !GATE_EXEMPT.has(path.split("?")[0])) {
+            throw new BackendError(0, this.gate);
+          }
+          const headers = {};
+          const wantToken = opts.withToken !== false;
+          if (wantToken && this.cfg.token) {
+            if (!this.tokenSafe && this.platform === "web") {
+              throw new BackendError(0, "\uC9C1\uC811 \uC5F0\uACB0\uC774 \uD655\uC778\uB418\uC9C0 \uC54A\uC544 \uD1A0\uD070\uC744 \uBCF4\uB0B4\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4. \uC5F0\uACB0 \uC9C4\uB2E8\uC744 \uBA3C\uC800 \uC2E4\uD589\uD574 \uC8FC\uC138\uC694");
+            }
+            headers["Authorization"] = "Bearer " + this.cfg.token;
+          }
+          const init = {
+            method,
+            headers,
+            networkRoute: "local_network"
+          };
+          if (opts.bytes) {
+            headers["Content-Type"] = "application/octet-stream";
+            init.body = opts.bytes;
+          } else if (method === "POST") {
+            headers["Content-Type"] = "application/json";
+            init.body = JSON.stringify(payload ?? {});
+          }
+          if (opts.signal) init.signal = opts.signal;
+          const url = this.cfg.url + path;
+          const budget = opts.timeoutMs === void 0 ? DEFAULT_TIMEOUT_MS : opts.timeoutMs;
+          const call = Risuai.nativeFetch(url, init);
+          if (!budget) return await call;
+          return await withDeadline(call, path, budget);
+        }
+      };
+      GATE_EXEMPT = /* @__PURE__ */ new Set(["/health", "/update/check", "/update/apply", "/plugin", "/logs", "/diag", "/config"]);
+      transport = new Transport();
+    }
+  });
 
   // src/host.ts
-  var HostError = class extends Error {
-    constructor(code, message) {
-      super(message);
-      this.code = code;
-      this.name = "HostError";
-    }
-  };
-  var NO_SELECT_HINT = "RisuAI\uC5D0\uC11C \uBD07\uC744 \uC5F4\uC5B4 \uCC44\uD305 \uD654\uBA74\uC5D0 \uB4E4\uC5B4\uAC04 \uB2E4\uC74C \uB2E4\uC2DC \uC2DC\uB3C4\uD574 \uC8FC\uC138\uC694";
   async function currentSlot() {
     let characterIndex;
     try {
@@ -379,17 +423,6 @@
     }
     return out;
   }
-  var DEFAULT_FALSE = /* @__PURE__ */ new Set([
-    "alwaysActive",
-    "selective",
-    "useRegex",
-    "enabled",
-    "case_sensitive",
-    "scanDepth",
-    "loreCache",
-    "folder",
-    "activationPercent"
-  ]);
   function strip(value) {
     if (Array.isArray(value)) return value.map(strip);
     if (value && typeof value === "object") {
@@ -535,15 +568,6 @@
     await Risuai.setCharacterToIndex(slot.characterIndex, { ...char, chats });
     return 0;
   }
-  var LIST_LABEL = {
-    alternateGreetings: "\uB300\uCCB4 \uC778\uC0AC\uB9D0",
-    globalLore: "\uBD07 \uB85C\uC5B4\uBD81",
-    customscript: "Regex",
-    triggerscript: "\uD2B8\uB9AC\uAC70",
-    additionalAssets: "\uC5D0\uC14B",
-    emotionImages: "\uAC10\uC815 \uC774\uBBF8\uC9C0",
-    ccAssets: "\uC5D0\uC14B"
-  };
   async function writeCharacter(characterIndex, seenChaId, update) {
     if ("chats" in update || "chatPage" in update) {
       throw new HostError("failed", "\uCE74\uB4DC \uBC18\uC601\uC774 chats \uB97C \uAC74\uB4DC\uB9AC\uB824 \uD588\uC2B5\uB2C8\uB2E4 - \uBC84\uADF8\uC785\uB2C8\uB2E4");
@@ -748,10 +772,42 @@
     ta.remove();
     return ok;
   }
+  var HostError, NO_SELECT_HINT, DEFAULT_FALSE, LIST_LABEL;
+  var init_host = __esm({
+    "src/host.ts"() {
+      "use strict";
+      HostError = class extends Error {
+        constructor(code, message) {
+          super(message);
+          this.code = code;
+          this.name = "HostError";
+        }
+      };
+      NO_SELECT_HINT = "RisuAI\uC5D0\uC11C \uBD07\uC744 \uC5F4\uC5B4 \uCC44\uD305 \uD654\uBA74\uC5D0 \uB4E4\uC5B4\uAC04 \uB2E4\uC74C \uB2E4\uC2DC \uC2DC\uB3C4\uD574 \uC8FC\uC138\uC694";
+      DEFAULT_FALSE = /* @__PURE__ */ new Set([
+        "alwaysActive",
+        "selective",
+        "useRegex",
+        "enabled",
+        "case_sensitive",
+        "scanDepth",
+        "loreCache",
+        "folder",
+        "activationPercent"
+      ]);
+      LIST_LABEL = {
+        alternateGreetings: "\uB300\uCCB4 \uC778\uC0AC\uB9D0",
+        globalLore: "\uBD07 \uB85C\uC5B4\uBD81",
+        customscript: "Regex",
+        triggerscript: "\uD2B8\uB9AC\uAC70",
+        additionalAssets: "\uC5D0\uC14B",
+        emotionImages: "\uAC10\uC815 \uC774\uBBF8\uC9C0",
+        ccAssets: "\uC5D0\uC14B"
+      };
+    }
+  });
 
   // src/operation.ts
-  var listeners = /* @__PURE__ */ new Set();
-  var current = null;
   function onWriteProgress(listener) {
     listeners.add(listener);
     listener(current);
@@ -788,6 +844,14 @@
     await Promise.all(Array.from({ length: Math.min(4, items5.length - 1) }, worker));
     if (failed) throw error;
   }
+  var listeners, current;
+  var init_operation = __esm({
+    "src/operation.ts"() {
+      "use strict";
+      listeners = /* @__PURE__ */ new Set();
+      current = null;
+    }
+  });
 
   // src/assets.ts
   function extractAssetRefs(char) {
@@ -830,8 +894,6 @@
     }
     return btoa(bin);
   }
-  var BATCH_BYTES = 8 * 1024 * 1024;
-  var BATCH_ITEMS = 50;
   function syncAssets(char, charKey, opts, onProgress) {
     let cancelled = false;
     const p = {
@@ -1036,1580 +1098,801 @@
   function syncBusy(p) {
     return !!p && (p.phase === "manifest" || p.phase === "pulling" || p.phase === "pushing");
   }
+  var BATCH_BYTES, BATCH_ITEMS;
+  var init_assets = __esm({
+    "src/assets.ts"() {
+      "use strict";
+      init_transport();
+      BATCH_BYTES = 8 * 1024 * 1024;
+      BATCH_ITEMS = 50;
+    }
+  });
 
-  // src/state.ts
-  var StudioFiles = class {
-    // --- NovelAI ---------------------------------------------------------------
-    /** Two meters and the library path. Anlas and the v5 quota are separate. */
-    async status() {
-      return await transport.get("/studio/status");
+  // src/ui/blobimg.ts
+  function normalizeWorkspacePath(path) {
+    let p = (path || "").trim().replace(/\\/g, "/");
+    if (SCHEME_RE.test(p)) return p;
+    const m = p.match(/(?:^|\/)(?:data\/)?space\/(.+)$/);
+    if (m) p = m[1];
+    p = p.replace(/^\.?\/+/, "");
+    return p;
+  }
+  function safeWorkspacePath(path) {
+    if (!path || SCHEME_RE.test(path) || path.startsWith("/") || path.startsWith("\\")) return false;
+    return !path.split(/[\\/]/).some((p) => p === "..");
+  }
+  function smallScreen() {
+    try {
+      return window.matchMedia("(max-width: 760px), (pointer: coarse) and (max-width: 1024px)").matches;
+    } catch {
+      return false;
     }
-    /** Does this model id exist? Free — the service is the list (docs/09 §5). */
-    async modelCheck(model) {
-      return await transport.post("/studio/model-check", { model });
+  }
+  function cacheCap() {
+    return smallScreen() ? 90 : 600;
+  }
+  function byteCap() {
+    return smallScreen() ? 24 * 1024 * 1024 : 256 * 1024 * 1024;
+  }
+  function blobStats() {
+    return { count: cache.size, bytes: cacheBytes, inflight: inflight.size, deferredRevokes, countCap: cacheCap(), byteCap: byteCap() };
+  }
+  function release(url) {
+    let shown = false;
+    try {
+      const img = document.querySelector(`img[src="${url}"]`);
+      shown = !!img && img.isConnected;
+    } catch {
+      shown = true;
     }
-    /** Danbooru-tag autocomplete, proxied from NovelAI's suggest endpoint.
-     * Empty when no token is configured - the editor types fine without it. */
-    async suggestTags(q, model = "") {
-      return await transport.get("/studio/tag-suggest", { q, model });
+    if (!shown) {
+      URL.revokeObjectURL(url);
+      return;
     }
-    async items(area) {
-      return await transport.get("/studio/list", { area });
+    deferredRevokes += 1;
+    setTimeout(() => {
+      deferredRevokes -= 1;
+      URL.revokeObjectURL(url);
+    }, 3e4);
+  }
+  function drop(key, e) {
+    cache.delete(key);
+    cacheBytes -= e.bytes;
+    release(e.url);
+  }
+  function makeRoom(incoming) {
+    while (cache.size && (cache.size >= cacheCap() || cacheBytes + incoming > byteCap())) {
+      const first = cache.entries().next().value;
+      drop(first[0], first[1]);
     }
-    /** One card's front matter: the enable toggle, the order, name, description. */
-    async setMeta(path, set) {
-      return await transport.post("/studio/meta", { path, set });
+  }
+  function evictBlob(paths) {
+    const doomed = [];
+    for (const k of cache.keys()) {
+      const bare = k.replace(/^t\d*:/, "");
+      const p = bare.includes(":") ? bare.slice(0, bare.lastIndexOf(":")) : bare;
+      if (!paths || paths.includes(p) || paths.includes(bare)) doomed.push(k);
     }
-    /** What a batch would produce, before anything is spent. */
-    async plan(spec3) {
-      return await transport.post("/studio/plan", spec3);
+    for (const k of doomed) {
+      const e = cache.get(k);
+      if (e) drop(k, e);
     }
-    async generate(spec3) {
-      return await transport.post("/studio/generate", spec3);
+  }
+  async function blobUrl(path, stamp = "", opts = {}) {
+    const key = (opts.thumb ? `t${opts.w || 360}:` : "") + (stamp ? `${path}:${stamp}` : path);
+    return blobFrom(key, () => opts.thumb ? state.fileThumb(path, opts.w || 360) : state.fileBytes(path, IMAGE_TIMEOUT_MS));
+  }
+  async function blobFrom(key, fetch) {
+    const hit = cache.get(key);
+    if (hit) {
+      cache.delete(key);
+      cache.set(key, hit);
+      return hit.url;
     }
-    async job(id) {
-      return await transport.get("/studio/job", { id });
+    const running = inflight.get(key);
+    if (running) return running;
+    const job = fetchBlob(key, fetch);
+    inflight.set(key, job);
+    try {
+      return await job;
+    } finally {
+      inflight.delete(key);
     }
-    /** The last few batches, newest first - the queue view's 최근 작업 list. */
-    async jobs() {
-      return await transport.get("/studio/job");
-    }
-    async cancelJob(id) {
-      await transport.post("/studio/job/cancel", { id });
-    }
-    /** The running job's newest intermediate frame (streaming generation).
-     * `{}` when there is none; `{rev}` alone when `since` already has it. */
-    /** `w` > 0 asks for a frame scaled to that width as WebP (`img`/`mime`)
-     * instead of the full PNG (§1-55). */
-    async jobPreview(id, since, w = 0) {
-      return await transport.get("/studio/job/preview", { id, since: String(since), w: w > 0 ? String(w) : void 0 });
-    }
-    /** Split filenames into fields, and say which ones did not match. */
-    async parseNames(names, pattern = "") {
-      return await transport.post("/studio/parse", { names, pattern });
-    }
-    /** One folder's images, gathered into groups to choose between. */
-    async group(folder, pattern = "", groupBy = "emotion") {
-      return await transport.post("/studio/group", { folder, pattern, groupBy });
-    }
-    async groupProfile(folder) {
-      return await transport.post("/studio/group", { folder, operation: "profile" });
-    }
-    async saveSelection(folder, selections) {
-      await transport.post("/studio/selection", { folder, selections });
-    }
-    async renamePlan(folder, rename) {
-      return await transport.post("/studio/rename", { folder, rename });
-    }
-    async exportSelected(folder, character, pattern = "", groupBy = "emotion", preview2 = false) {
-      return await transport.post("/studio/export", { folder, character, pattern, groupBy, preview: preview2 });
-    }
-    async assetRules(project = "") {
-      return await transport.get("/studio/asset-rules", { project, charKey: state.activeCharKey });
-    }
-    async saveAssetRules(document2) {
-      return await transport.post("/studio/asset-rules", { project: document2.project, document: document2 });
-    }
-    async assetMatch(project, path) {
-      return await transport.post("/studio/asset-match", { project, path });
-    }
-    async assetBind(path, asset) {
-      return await transport.post("/studio/asset-bind", { path, asset });
-    }
-    async assetCoverage(project, character, folder) {
-      return await transport.post("/studio/asset-coverage", { project, character, folder });
-    }
-    /** Check library images for adoption (PNG-ness, size). Nothing is copied:
-     *  the library and the workspace are one space now. */
-    async stage(charKey, paths) {
-      return await transport.post("/studio/stage", { charKey, paths });
-    }
-  };
-  var AppState = class {
-    health = null;
-    connectError = "";
-    slot = null;
-    slotError = "";
-    character = null;
-    liveChat = null;
-    workspace = null;
-    /** What the last upload's merge did, until the shell has announced it. */
-    lastMerge = null;
-    /** Which half of the panel is open ('chat' | 'bot'); the shell keeps it current, the agent is told. */
-    editMode = "bot";
-    /** The active tab id, verbatim from the shell. The studio is a third screen
-     * (neither half), and the agent has to be told the truth about it. */
-    activeTab = "";
-    activeChatKey = "";
-    botChanges = null;
-    /**
-     * The background asset importer's progress for the live bot, or null before
-     * it has started. The bot bar's 반영 gate and the picker's bot card both
-     * read it; `syncAssets` drives it.
-     */
-    assetSync = null;
-    assetSyncCtl = null;
-    assetSyncEmitAt = 0;
-    /** Why the current emit fired, for listeners that want to do less than a
-     *  full render: 'assetSync' = a progress tick of a RUNNING sync (the picker
-     *  used to rebuild its whole page - portrait reload included - every 400ms,
-     *  which read as flicker). Settled syncs emit with no reason. Set only for
-     *  the synchronous span of emit(). */
-    emitReason = "";
-    turns = [];
-    totalTurns = 0;
-    warnings = [];
-    changes = null;
-    /**
-     * out/ files the agent made that the files tab has not shown yet. The tab
-     * button wears the count as a badge; opening the tab clears it.
-     */
-    unseenOutputs = [];
-    /** A file the user asked to see (from an agent log line); the files tab opens it. */
-    openFileRequest = null;
-    /** A tab an approved agent proposal asked for; the shell moves there. */
-    openTabRequest = null;
-    /** Bumped when the workspace listing changed; the files tab reloads when it moved. */
-    filesRev = 0;
-    /**
-     * Bumped whenever the working state changed underneath the tabs - a
-     * restore, a reset, a commit, an approved proposal. Tabs that cache what
-     * they show (lorebook, memory) compare it to the value they last rendered
-     * and reload when it moved, instead of each tab having to know every path
-     * that can change its data.
-     */
-    epoch = 0;
-    /** Invalidates asynchronous work belonging to a previously selected bot. */
-    contextRevision = 0;
-    hostReadSequence = 0;
-    resetBotContext() {
-      void this.stopAgent();
-      this.contextRevision += 1;
-      this.cancelAssetSync();
-      this.assetSync = null;
-      this.workspace = null;
-      this.lastMerge = null;
-      this.activeChatKey = "";
-      this.sessionId = "";
-      this.turns = [];
-      this.totalTurns = 0;
-      this.warnings = [];
-      this.changes = null;
-      this.botChanges = null;
-      this.unseenOutputs = [];
-      this.openFileRequest = null;
-      this.openTabRequest = null;
-      this.openStudioRequest = null;
-      this.promptRequest = null;
-      this.filesRev += 1;
-      this.epoch += 1;
-    }
-    listeners = /* @__PURE__ */ new Set();
-    onChange(fn) {
-      this.listeners.add(fn);
-      return () => this.listeners.delete(fn);
-    }
-    emit() {
-      for (const fn of [...this.listeners]) {
-        try {
-          fn();
-        } catch (e) {
-          console.log("[risu-hina] listener failed", e);
-        }
-      }
-    }
-    get activeChat() {
-      return this.workspace?.chats.find((c) => c.chatKey === this.activeChatKey) ?? null;
-    }
-    /** The workspace is per bot, so file and upload calls address the character. */
-    get activeCharKey() {
-      return this.workspace?.charKey ?? "";
-    }
-    /**
-     * What the bot tabs address. Always the live workspace: the panel's
-     * standing premise is "select the bot in RisuAI, then open the plugin" -
-     * other bots are not writable anyway (mainline silently drops writes to a
-     * non-selected character), so there is no browsing of other workspaces.
-     */
-    get botKey() {
-      return this.activeCharKey;
-    }
-    /** Whether a live, writable bot is behind the bot tabs right now. */
-    get isLiveBot() {
-      return !!this.activeCharKey && !!this.character;
-    }
-    // --- connection ---------------------------------------------------------
-    async connect() {
-      this.connectError = "";
-      try {
-        this.health = await transport.connect();
-        return true;
-      } catch (e) {
-        this.health = null;
-        this.connectError = e instanceof Error ? e.message : String(e);
-        return false;
-      } finally {
-        this.emit();
-      }
-    }
-    // --- host ---------------------------------------------------------------
-    /** Read the selected character and its chats from RisuAI. */
-    async readHost() {
-      const sequence = ++this.hostReadSequence;
-      this.slotError = "";
-      try {
-        const slot = await currentSlot();
-        const character = await readCharacter(slot.characterIndex);
-        const liveChat = await readChat(slot);
-        if (sequence !== this.hostReadSequence) return false;
-        const before = this.character?.chaId || this.workspace?.charId;
-        const changed = before && character.chaId ? before !== character.chaId : this.slot !== null && this.slot.characterIndex !== slot.characterIndex;
-        if (changed) this.resetBotContext();
-        this.slot = slot;
-        this.character = character;
-        this.liveChat = liveChat;
-        return true;
-      } catch (e) {
-        if (sequence !== this.hostReadSequence) return false;
-        this.resetBotContext();
-        this.slot = null;
-        this.character = null;
-        this.liveChat = null;
-        this.slotError = e instanceof Error ? e.message : String(e);
-        return false;
-      } finally {
-        this.emit();
-      }
-    }
-    /**
-     * Upload the character's chats to the backend.
-     *
-     * Only the currently open chat is sent by default. A 394-turn chat is several
-     * megabytes, and sending every chat of a character on every panel open would
-     * make the common case pay for the rare one. `chatIndex` sends one other
-     * chat of the same bot instead - what clicking a row in the picker does.
-     */
-    async upload(opts = {}) {
-      if (!this.slot || !this.character) throw new Error("\uD638\uC2A4\uD2B8 \uC0C1\uD0DC\uB97C \uBA3C\uC800 \uC77D\uC5B4\uC57C \uD569\uB2C8\uB2E4");
-      const revision = this.contextRevision;
-      const chats = Array.isArray(this.character.chats) ? this.character.chats : [];
-      const payload = {
-        charId: this.character.chaId ?? "",
-        characterIndex: this.slot.characterIndex,
-        card: cardOf(this.character),
-        // The card is the full character now (minus chats); the backend records
-        // this and refuses card write-backs built on whitelist-era uploads.
-        cardFull: true,
-        force: Boolean(opts.force),
-        // Scoped re-reads after a write-back: the card half or the chat half,
-        // never both, so writing one does not discard edits pending in the other.
-        cardReset: Boolean(opts.cardReset),
-        chatReset: Boolean(opts.chatReset)
+  }
+  async function fetchBlob(key, fetch) {
+    await new Promise((resolve) => {
+      const go = () => {
+        active += 1;
+        resolve();
       };
-      const liveId = String(this.liveChat?.id ?? "");
-      const isLive = (c) => !!liveId && String(c?.id ?? "") === liveId;
-      if (opts.allChats) {
-        payload.chats = chats.map((c, i) => ({ chat: c, chatIndex: i, live: isLive(c) }));
-      } else if (opts.chatIndex !== void 0 && opts.chatIndex !== this.slot.chatIndex) {
-        const chat = await this.chatAt(opts.chatIndex);
-        payload.chats = [{ chat, chatIndex: opts.chatIndex, live: isLive(chat) }];
-      } else {
-        payload.chats = [{ chat: this.liveChat, chatIndex: this.slot.chatIndex, live: true }];
-      }
-      const res = await transport.upload("/workspace", payload);
-      if (revision !== this.contextRevision) throw new Error("\uBD07 \uC120\uD0DD\uC774 \uBCC0\uACBD\uB418\uC5C8\uC2B5\uB2C8\uB2E4");
-      this.workspace = res.workspace;
-      this.lastMerge = res.workspace.merge ?? null;
-      if (!this.activeChatKey || !this.workspace.chats.some((c) => c.chatKey === this.activeChatKey)) {
-        this.activeChatKey = this.workspace.chats[0]?.chatKey ?? "";
-      }
-      this.emit();
-      void this.refreshBotChanges();
-      void this.syncAssets();
-      return res.workspace;
+      if (active < PARALLEL) go();
+      else queue.push(go);
+    });
+    try {
+      const again = cache.get(key);
+      if (again) return again.url;
+      const bytes = await fetch();
+      if (!bytes || !bytes.byteLength) throw new Error("no bytes");
+      const url = URL.createObjectURL(new Blob([bytes]));
+      makeRoom(bytes.byteLength);
+      cache.set(key, { url, bytes: bytes.byteLength });
+      cacheBytes += bytes.byteLength;
+      return url;
+    } finally {
+      active -= 1;
+      queue.shift()?.();
     }
-    /**
-     * One of the bot's chats, read fresh from RisuAI.
-     *
-     * `getChatFromIndex` is asked first and the character object we already hold
-     * is only the fallback: PocketRisu hands `readCharacter` **stubs** for chats
-     * it has not loaded yet (see host.cloneBot), and a stub has no `message`
-     * list at all - uploading one would look like a chat that lost every turn.
-     * A stub from both sources throws, and the picker says what to do about it.
-     */
-    async chatAt(chatIndex) {
-      const characterIndex = this.slot.characterIndex;
-      try {
-        return await readChat({ characterIndex, chatIndex });
-      } catch (e) {
-        const fallback = (this.character?.chats ?? [])[chatIndex];
-        if (fallback && Array.isArray(fallback.message)) return fallback;
-        throw e;
-      }
+  }
+  function watchImage(elm, load, unload) {
+    if (!io) {
+      setTimeout(load, 0);
+      return;
     }
-    /**
-     * Open one of the bot's chats for editing, loading it if it is not in the
-     * workspace yet.
-     *
-     * The panel used to refuse any chat but the one RisuAI had open ("open that
-     * chat in RisuAI and press 🔄"), while 이 봇의 모든 챗 불러오기 right below
-     * loaded all of them and let you edit exactly those chats - so the refusal
-     * was a detour, not a constraint. RisuAI hands us every chat of the selected
-     * character, and the write-back addresses the chat by its own id and index
-     * (see `chatSlot`), so a chat that is not on screen in RisuAI is as editable
-     * as the one that is.
-     */
-    async openChat(chatIndex) {
-      const ws = await this.upload({ chatIndex });
-      const info = ws.chats[0];
-      if (info?.skipped) {
-        throw new Error(info.skipped);
-      }
-      const key = info?.chatKey ?? "";
-      if (key) this.activeChatKey = key;
-      await this.loadTurns();
+    slots.set(elm, { load, unload, loaded: false });
+    io.observe(elm);
+  }
+  function unloadByDefault() {
+    return smallScreen();
+  }
+  function workspaceImage(path, alt, opts = {}) {
+    path = normalizeWorkspacePath(path);
+    const wrap = el("span", { class: "wsimg" + (opts.thumb ? " thumb" : "") + (opts.aspect ? " phbox" : "") });
+    if (opts.aspect) wrap.style.aspectRatio = opts.aspect;
+    const fallback = () => {
+      clear(wrap);
+      wrap.appendChild(el("span", { class: "hint", text: `[\uC774\uBBF8\uC9C0: ${alt || path}]` }));
+    };
+    if (!safeWorkspacePath(path) || typeof URL === "undefined" || typeof URL.createObjectURL !== "function") {
+      fallback();
+      return wrap;
     }
-    /**
-     * Which chat of the live bot a write-back addresses.
-     *
-     * Not necessarily the one RisuAI has open: the picker loads any chat of the
-     * bot. The index recorded at upload time is only a hint - chats get
-     * reordered, deleted and copied in RisuAI while the panel is open - so the
-     * chat **id** is what is trusted and the index is re-derived from a fresh
-     * read. `writeChat` then re-reads at that index and refuses the write if the
-     * id moved again between here and there.
-     */
-    async chatSlot() {
-      if (!this.slot) throw new Error("\uD638\uC2A4\uD2B8 \uC0C1\uD0DC\uB97C \uBA3C\uC800 \uC77D\uC5B4\uC57C \uD569\uB2C8\uB2E4");
-      const wanted = this.activeChat?.chatId ?? "";
-      if (!wanted || wanted === (this.liveChat?.id ?? "")) return this.slot;
-      const characterIndex = this.slot.characterIndex;
-      const char = await readCharacter(characterIndex);
-      const chats = Array.isArray(char.chats) ? char.chats : [];
-      const chatIndex = chats.findIndex((c) => String(c?.id ?? "") === wanted);
-      if (chatIndex < 0) {
-        throw new HostError(
-          "missing",
-          "RisuAI\uC5D0\uC11C \uC774 \uCC57\uC744 \uCC3E\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4 (\uC9C0\uC6CC\uC84C\uC744 \uC218 \uC788\uC2B5\uB2C8\uB2E4). \u{1F504} \uB85C \uB2E4\uC2DC \uC77D\uC5B4 \uC8FC\uC138\uC694"
-        );
-      }
-      return { characterIndex, chatIndex };
-    }
-    // --- assets (background importer) ----------------------------------------
-    /**
-     * Start (or restart) the asset sync for the live bot. A run already going
-     * for the same bot is left alone unless `force`; a run for another bot is
-     * cancelled first. Progress lands in `assetSync` and is emitted at most a
-     * few times a second - the picker re-renders on every emit.
-     */
-    syncAssets(force = false) {
-      const ck = this.activeCharKey;
-      const char = this.character;
-      if (!ck || !char) return;
-      if (this.assetSync && this.assetSync.charKey === ck && syncBusy(this.assetSync) && !force) return;
-      this.cancelAssetSync();
-      const web = transport.hostPlatform === "web";
-      const revision = this.contextRevision;
-      this.assetSyncCtl = syncAssets(char, ck, {
-        hubPull: web,
-        concurrency: web ? 4 : 6
-      }, (p) => {
-        if (revision !== this.contextRevision || ck !== this.activeCharKey) return;
-        this.assetSync = p;
-        const now = Date.now();
-        const settled = !syncBusy(p);
-        if (settled || now - this.assetSyncEmitAt > 400) {
-          this.assetSyncEmitAt = now;
-          this.emitReason = settled ? "" : "assetSync";
-          try {
-            this.emit();
-          } finally {
-            this.emitReason = "";
-          }
+    const lazy = opts.lazy ?? !!opts.thumb;
+    const unload = opts.unload ?? (!!opts.thumb && unloadByDefault());
+    let gen2 = 0;
+    let held = false;
+    const start = () => {
+      const my = ++gen2;
+      void blobUrl(path, opts.stamp, { thumb: opts.thumb }).then((url) => {
+        if (my !== gen2) return;
+        const img = el("img", { src: url, alt: alt || path, loading: "lazy" });
+        img.addEventListener("error", fallback);
+        clear(wrap);
+        wrap.appendChild(img);
+        if (held) {
+          held = false;
+          wrap.style.width = "";
+          wrap.style.height = "";
+          wrap.style.display = "";
         }
-      });
-      this.assetSync = null;
-      void this.assetSyncCtl.done.then((p) => {
-        if (p.phase === "error") void clientLog("warn", "asset sync failed", { error: p.error, charKey: ck });
-      });
-    }
-    cancelAssetSync() {
-      if (this.assetSyncCtl) {
-        this.assetSyncCtl.cancel();
-        this.assetSyncCtl = null;
+      }).catch(fallback);
+    };
+    const stop = () => {
+      gen2 += 1;
+      if (!opts.aspect && wrap.offsetWidth && wrap.offsetHeight) {
+        wrap.style.width = wrap.offsetWidth + "px";
+        wrap.style.height = wrap.offsetHeight + "px";
+        wrap.style.display = "inline-block";
+        held = true;
+      }
+      clear(wrap);
+    };
+    if (lazy || unload) watchImage(wrap, start, unload ? stop : void 0);
+    else start();
+    return wrap;
+  }
+  var PARALLEL, active, queue, cache, cacheBytes, inflight, IMAGE_TIMEOUT_MS, deferredRevokes, SCHEME_RE, slots, io;
+  var init_blobimg = __esm({
+    "src/ui/blobimg.ts"() {
+      "use strict";
+      init_dom();
+      init_state();
+      PARALLEL = 6;
+      active = 0;
+      queue = [];
+      cache = /* @__PURE__ */ new Map();
+      cacheBytes = 0;
+      inflight = /* @__PURE__ */ new Map();
+      IMAGE_TIMEOUT_MS = 45e3;
+      deferredRevokes = 0;
+      SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i;
+      slots = /* @__PURE__ */ new WeakMap();
+      io = null;
+      try {
+        io = new IntersectionObserver((entries) => {
+          for (const e of entries) {
+            const slot = slots.get(e.target);
+            if (!slot) {
+              io?.unobserve(e.target);
+              continue;
+            }
+            if (e.isIntersecting) {
+              if (!slot.loaded) {
+                slot.loaded = true;
+                slot.load();
+              }
+              if (!slot.unload) {
+                io?.unobserve(e.target);
+                slots.delete(e.target);
+              }
+            } else if (slot.loaded && slot.unload) {
+              slot.loaded = false;
+              slot.unload();
+            }
+          }
+        }, { rootMargin: "600px" });
+      } catch {
+        io = null;
       }
     }
-    /** Why 반영 has to wait for the assets, or null when it need not. */
-    get assetGateReason() {
-      const p = this.assetSync;
-      if (!p || p.charKey !== this.activeCharKey) return null;
-      if (syncBusy(p)) return describeSync(p) + " \u2014 \uB05D\uB098\uBA74 \uBC18\uC601\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4";
-      if (p.phase === "error") return describeSync(p) + " \u2014 \uBD07 \uCE74\uB4DC\uC5D0\uC11C \uB2E4\uC2DC \uB3D9\uAE30\uD654\uD574 \uC8FC\uC138\uC694";
-      if (p.phase === "cancelled") return "\uC5D0\uC14B \uC784\uD3EC\uD2B8\uAC00 \uC911\uB2E8\uB418\uC5C8\uC2B5\uB2C8\uB2E4 \u2014 \uBD07 \uCE74\uB4DC\uC5D0\uC11C \uB2E4\uC2DC \uB3D9\uAE30\uD654\uD574 \uC8FC\uC138\uC694";
+  });
+
+  // src/ui/studio/store.ts
+  function canonPath(p) {
+    const r = (p || "").replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+    const m = /^studio\/(styles|characters|fragments|scenes|\.studio)(\/.*)?$/.exec(r);
+    if (m) return `studio/config/${m[1]}${m[2] ?? ""}`;
+    const im = /^studio\/images(\/.*)?$/.exec(r);
+    if (im) return `studio/output${im[1] ?? ""}`;
+    return r;
+  }
+  function areaOfPath(path) {
+    const m = /^studio\/config\/([^/]+)/.exec(canonPath(path));
+    return m ? m[1] : "";
+  }
+  function persistLeftTab() {
+    try {
+      localStorage.setItem("hina.studioLeftTab", S.leftTab);
+    } catch {
+    }
+  }
+  function persistCentreTab() {
+    try {
+      localStorage.setItem("hina.studioTab", S.centreTab);
+    } catch {
+    }
+  }
+  function persistCols() {
+    try {
+      localStorage.setItem("hina.studioCols", String(S.cols));
+    } catch {
+    }
+  }
+  function persistSelCols() {
+    try {
+      localStorage.setItem("hina.studioSelCols", String(S.selCols));
+    } catch {
+    }
+  }
+  function persistGen() {
+    try {
+      localStorage.setItem(GEN_KEY, JSON.stringify(gen));
+    } catch {
+    }
+  }
+  function activeOf(area) {
+    return (S.cards[area] ?? []).filter((i) => i.enabled).sort((a, b) => (a.order ?? 100) - (b.order ?? 100) || a.path.localeCompare(b.path)).map((i) => i.path);
+  }
+  function spec() {
+    const out = {
+      charKey: state.activeCharKey,
+      model: gen.model,
+      styles: activeOf("styles"),
+      characters: activeOf("characters"),
+      count: gen.count,
+      folder: gen.folder,
+      params: {
+        steps: gen.steps,
+        scale: gen.scale,
+        cfg_rescale: gen.rescale,
+        sampler: gen.sampler,
+        noise_schedule: gen.schedule,
+        width: gen.width,
+        height: gen.height,
+        qualityToggle: gen.quality,
+        ucPreset: gen.ucPreset
+      }
+    };
+    if (gen.scenePreset) out.scenePreset = gen.scenePreset;
+    if (gen.assetSet) out.asset = {
+      project: gen.assetProject,
+      setId: gen.assetSet,
+      slotId: gen.assetSlot,
+      fields: gen.assetCharacter ? { character: gen.assetCharacter } : {}
+    };
+    if (gen.seed.trim()) out.seed = Number(gen.seed.trim());
+    if (temporaryPrompt.text.trim()) out.extra = temporaryPrompt.text.trim();
+    if (temporaryPrompt.negativeText.trim()) out.negativeExtra = temporaryPrompt.negativeText.trim();
+    return out;
+  }
+  function persistReserves() {
+    try {
+      localStorage.setItem(RESERVE_KEY, JSON.stringify(reserves));
+    } catch {
+    }
+  }
+  function adjustReserve(preset, scene, delta) {
+    const p = reserves[preset] ??= {};
+    const next = Math.max(0, (p[scene] ?? 0) + delta);
+    if (next) p[scene] = next;
+    else delete p[scene];
+    if (!Object.keys(p).length) delete reserves[preset];
+    persistReserves();
+  }
+  function setReserve(preset, scene, count) {
+    adjustReserve(preset, scene, count - reserveOf(preset, scene));
+  }
+  function reserveOf(preset, scene) {
+    return reserves[preset]?.[scene] ?? 0;
+  }
+  function reserveTotal() {
+    let n = 0;
+    for (const p of Object.values(reserves)) for (const c of Object.values(p)) n += c;
+    return n;
+  }
+  function clearReserves(preset) {
+    if (preset) delete reserves[preset];
+    else reserves = {};
+    persistReserves();
+  }
+  function checkUnresolved() {
+    if (unresolvedTimer) clearTimeout(unresolvedTimer);
+    unresolvedTimer = setTimeout(async () => {
+      try {
+        const r = await state.studio.plan({ ...spec(), count: 1 });
+        S.unresolvedRefs = [...new Set(r.items.flatMap((i) => i.unresolved ?? []))];
+      } catch {
+        S.unresolvedRefs = [];
+      }
+      hub.syncBadges();
+    }, 800);
+  }
+  function fragKeys() {
+    return (S.cards.fragments ?? []).map((it) => {
+      const f = it.folder && it.folder !== "." ? it.folder : "";
+      return f ? `${f}/${it.name}` : it.name;
+    });
+  }
+  function cardStem(name) {
+    return name.replace(/[<>:"/\\|?*]/g, "").trim();
+  }
+  function freeCardPath(area, stem, suffix, folder = "") {
+    const taken = new Set((S.cards[area] ?? []).map((i) => i.path));
+    const base = `${CONFIG_ROOT}/${area}` + (folder ? `/${folder}` : "");
+    for (let n = 1; ; n++) {
+      const p = `${base}/${stem}${n > 1 ? `-${n}` : ""}${suffix}`;
+      if (!taken.has(p)) return p;
+    }
+  }
+  async function newCard(area, folder, nm) {
+    nm = (nm || "").trim();
+    if (!nm) return "";
+    const stem = cardStem(nm);
+    if (!stem) {
+      hub.notice("\uADF8 \uC774\uB984\uC73C\uB85C\uB294 \uD30C\uC77C\uC744 \uB9CC\uB4E4 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4.", "err");
+      return "";
+    }
+    try {
+      let path;
+      if (area === "characters") {
+        path = freeCardPath(area, stem, "", folder);
+        await state.uploadFile(
+          "prompt.md",
+          `---
+name: ${nm}
+enabled: false
+---
+## \uD504\uB86C\uD504\uD2B8
+`,
+          false,
+          path
+        );
+      } else if (area === "scenes") {
+        path = freeCardPath(area, stem, ".json", folder);
+        await state.uploadFile(path.split("/").pop(), JSON.stringify(
+          { version: 1, name: nm, scenes: [{ name: "happy", prompt: "", negativePrompt: "", width: 0, height: 0 }] },
+          null,
+          2
+        ), false, path.slice(0, path.lastIndexOf("/")));
+      } else {
+        path = freeCardPath(area, stem, ".md", folder);
+        const front = area === "styles" ? `---
+name: ${nm}
+enabled: false
+---
+` : `---
+name: ${nm}
+---
+`;
+        await state.uploadFile(path.split("/").pop(), front, false, path.slice(0, path.lastIndexOf("/")));
+      }
+      await hub.refreshArea(area);
+      return path;
+    } catch (e) {
+      hub.notice("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg(e), "err");
+      return "";
+    }
+  }
+  async function renameCardFile(path, newName) {
+    const stem = cardStem(newName);
+    if (!stem) return path;
+    const isDir = !/\.[a-z0-9]+$/i.test(path);
+    const dir = path.slice(0, path.lastIndexOf("/"));
+    const old = path.slice(path.lastIndexOf("/") + 1);
+    const suffix = isDir ? "" : old.slice(old.lastIndexOf("."));
+    if (old === stem + suffix) return path;
+    const to = `${dir}/${stem}${suffix}`;
+    const r = await state.moveFile(path, to);
+    return r.to;
+  }
+  function buildOutput() {
+    S.outputRoot = { path: OUTPUT_ROOT, name: "output", children: [], files: [] };
+    if (!S.listing) return;
+    const lib = S.listing.areas.find((a) => a.area === "studio");
+    if (!lib) return;
+    const byPath = /* @__PURE__ */ new Map([[OUTPUT_ROOT, S.outputRoot]]);
+    const folder = (path) => {
+      const hit = byPath.get(path);
+      if (hit) return hit;
+      if (!path.startsWith(OUTPUT_ROOT + "/")) return null;
+      const cut = path.lastIndexOf("/");
+      const parent = folder(path.slice(0, cut));
+      if (!parent) return null;
+      const node = { path, name: path.slice(cut + 1), children: [], files: [] };
+      byPath.set(path, node);
+      parent.children.push(node);
+      return node;
+    };
+    for (const d of lib.dirs ?? []) folder(d);
+    for (const f of lib.files) {
+      if (!f.path.startsWith(OUTPUT_ROOT + "/")) continue;
+      const cut = f.path.lastIndexOf("/");
+      folder(f.path.slice(0, cut))?.files.push(f);
+    }
+  }
+  function persistExtras() {
+    try {
+      localStorage.setItem(EXTRA_KEY, JSON.stringify(extraPaths));
+    } catch {
+    }
+  }
+  function isOutputPath(path) {
+    return path === OUTPUT_ROOT || path.startsWith(OUTPUT_ROOT + "/");
+  }
+  function addExtra(path) {
+    const p = canonPath(path);
+    if (!p || isOutputPath(p) || extraPaths.includes(p)) return false;
+    if (extraPaths.some((q) => p.startsWith(q + "/"))) return false;
+    extraPaths = [...extraPaths, p];
+    persistExtras();
+    return true;
+  }
+  function removeExtra(path) {
+    extraPaths = extraPaths.filter((q) => q !== path);
+    S.extraRoots = S.extraRoots.filter((r) => r.path !== path);
+    persistExtras();
+  }
+  function buildExtras(listings) {
+    S.extraRoots = extraPaths.map((p) => {
+      const root2 = { path: p, name: p.split("/").pop() || p, children: [], files: [] };
+      const l = listings[p];
+      if (!l) return root2;
+      const byPath = /* @__PURE__ */ new Map([[p, root2]]);
+      const folder = (path) => {
+        const hit = byPath.get(path);
+        if (hit) return hit;
+        if (!path.startsWith(p + "/")) return null;
+        const cut = path.lastIndexOf("/");
+        const parent = folder(path.slice(0, cut));
+        if (!parent) return null;
+        const node = { path, name: path.slice(cut + 1), children: [], files: [] };
+        byPath.set(path, node);
+        parent.children.push(node);
+        return node;
+      };
+      for (const a of l.areas) {
+        for (const d of a.dirs ?? []) folder(d);
+        for (const f of a.files) {
+          if (f.path !== p && !f.path.startsWith(p + "/")) continue;
+          const cut = f.path.lastIndexOf("/");
+          folder(f.path.slice(0, cut))?.files.push(f);
+        }
+      }
+      return root2;
+    });
+  }
+  function find(path, node) {
+    if (node === void 0) {
+      const hit = findIn(path, S.outputRoot);
+      if (hit) return hit;
+      for (const r of S.extraRoots) {
+        const h = findIn(path, r);
+        if (h) return h;
+      }
       return null;
     }
-    // --- turns --------------------------------------------------------------
-    async loadTurns(chatKey = this.activeChatKey, start = 0, limit = 2e3) {
-      if (!chatKey) return;
-      const revision = this.contextRevision;
-      const res = await transport.get(
-        "/turns",
-        { chatKey, start, limit }
-      );
-      if (revision !== this.contextRevision) return;
-      this.activeChatKey = chatKey;
-      this.turns = res.turns;
-      this.totalTurns = res.total;
-      this.emit();
-      void this.refreshChanges();
+    return findIn(path, node);
+  }
+  function findIn(path, node) {
+    if (!node) return null;
+    if (node.path === path) return node;
+    for (const c of node.children) {
+      const hit = findIn(path, c);
+      if (hit) return hit;
     }
-    /**
-     * Refresh the pending-change summary for the active chat.
-     *
-     * Cheap on the server (counts only) and called after anything that can
-     * change it, so the shared bar never shows a count that is one save behind.
-     * A failure here is not worth surfacing - the next call fixes it.
-     */
-    async refreshChanges() {
-      if (!this.activeChatKey) {
-        this.changes = null;
-        this.emit();
-        return null;
-      }
-      const revision = this.contextRevision;
-      const key = this.activeChatKey;
-      try {
-        const result = await transport.get("/changes", { chatKey: key });
-        if (revision !== this.contextRevision || key !== this.activeChatKey) return null;
-        this.changes = result;
-      } catch {
-        if (revision !== this.contextRevision || key !== this.activeChatKey) return null;
-        this.changes = null;
-      }
-      this.emit();
-      return this.changes;
-    }
-    /** The working state changed underneath the tabs; tell them to reload. */
-    bump() {
-      this.epoch += 1;
-      this.emit();
-    }
-    /** The workspace listing changed (a file was made, uploaded or deleted). */
-    touchFiles(newOutputs = []) {
-      for (const p of newOutputs) if (!this.unseenOutputs.includes(p)) this.unseenOutputs.push(p);
-      this.filesRev += 1;
-      this.emit();
-    }
-    /** A screen asked the agent something on the user's behalf (검수's AI 재검수,
-     * §1-46): the agent panel sends it as if typed. */
-    promptRequest = null;
-    requestPrompt(text2) {
-      this.promptRequest = text2;
-      this.emit();
-    }
-    requestOpenFile(path) {
-      this.openFileRequest = path;
-      this.emit();
-    }
-    /** The agent (or a strip in the chat) asked for the studio's 검수 tab on
-     * a folder: the shell switches tabs, the studio consumes the folder. */
-    openStudioRequest = null;
-    requestOpenStudio(folder, view2) {
-      this.openStudioRequest = { folder, view: view2 };
-      this.emit();
-    }
-    /** Everything unseen has been seen (a reset; the files tab no longer
-     * calls this on open - a folder is seen when it is LOOKED AT, §1-36). */
-    markOutputsSeen() {
-      if (!this.unseenOutputs.length) return;
-      this.unseenOutputs = [];
-      this.emit();
-    }
-    /** The files directly in `dir` have been looked at: their dots go, the
-     * tab badge shrinks by that many. Files deeper down stay unseen. */
-    markOutputsSeenIn(dir) {
-      const before = this.unseenOutputs.length;
-      this.unseenOutputs = this.unseenOutputs.filter((p) => {
-        const cut = p.lastIndexOf("/");
-        return (cut < 0 ? "" : p.slice(0, cut)) !== dir;
-      });
-      if (this.unseenOutputs.length !== before) this.emit();
-    }
-    /** Whether an unseen file sits in `dir` or anywhere below it. */
-    hasUnseenUnder(dir) {
-      return this.unseenOutputs.some((p) => p.startsWith(dir + "/"));
-    }
-    /**
-     * Edit one turn and patch it locally instead of reloading everything.
-     *
-     * A 394-turn chat's /turns response was measured at 3.4MB. Refetching it
-     * after every single-turn save made each keystroke-to-saved round trip cost
-     * megabytes, which is most of why the editor felt sluggish. The server
-     * already told us the write succeeded and we know both sides of the text, so
-     * the one row that changed is updated in place.
-     */
-    async editTurn(msgId, before, after) {
-      await transport.post("/turn", { chatKey: this.activeChatKey, msgId, before, after });
-      const t = this.turns.find((x) => x.msgId === msgId);
-      if (t) {
-        if (t.original === null || t.original === void 0) t.original = before;
-        t.body = after;
-        t.changed = !t.isNew && t.original !== after;
-        this.emit();
-        void this.refreshChanges();
-      } else {
-        await this.loadTurns();
-      }
-    }
-    async bulk(params) {
-      return await transport.post("/turn/bulk", { chatKey: this.activeChatKey, ...params });
-    }
-    async deleteRange(fromSeq, toSeq) {
-      await transport.post("/turn/delete", { chatKey: this.activeChatKey, fromSeq, toSeq });
-      await this.loadTurns();
-    }
-    async patch() {
-      return await transport.get("/patch", { chatKey: this.activeChatKey });
-    }
-    /**
-     * Make the current state the new baseline, after RisuAI confirmed the write.
-     *
-     * Called only on success, so a failed write-back leaves the diff intact and
-     * the retry meaningful.
-     */
-    /**
-     * The chat landed in RisuAI: snapshot it, then re-read what RisuAI now
-     * holds. See `rereadCard` for why the working copy is not kept.
-     */
-    async commit(label2) {
-      return foregroundWrite((report) => {
-        report("RisuAI \uBC18\uC601 \uD655\uC778 \uC644\uB8CC \xB7 \uB300\uD654 \uC791\uC5C5\uBCF8\uC744 \uB3D9\uAE30\uD654\uD558\uB294 \uC911\u2026");
-        return this.performCommit(label2);
-      });
-    }
-    async performCommit(label2) {
-      const r = await transport.post(
-        "/commit",
-        { chatKey: this.activeChatKey, label: label2 }
-      );
-      await this.rereadChat();
-      this.bump();
-      return r;
-    }
-    /** Discard the chat's working copy - turns, local lorebook and memory as
-     * one unit. Returns what went, for the confirmation line. */
-    async reset() {
-      const r = await transport.post(
-        "/reset",
-        { chatKey: this.activeChatKey }
-      );
-      await this.loadTurns();
-      this.bump();
-      void this.refreshChanges();
-      return r.discarded ?? { turns: 0, lore: 0, memory: 0, total: 0 };
-    }
-    /** `auto` marks the plugin's own protective snapshots (before a bulk
-     * replace or a range delete): internal backups, not the version list. */
-    async checkpoint(label2, auto = false) {
-      await transport.post("/checkpoint", { chatKey: this.activeChatKey, label: label2, ...auto ? { auto } : {} });
-    }
-    /** Pending state across the whole bot - the leave guard's one call. */
-    async dirtySummary() {
-      if (!this.activeCharKey) return null;
-      try {
-        return await transport.get("/workspace/dirty", { charKey: this.activeCharKey });
-      } catch {
-        return null;
-      }
-    }
-    async checkpoints() {
-      const res = await transport.get("/checkpoints", { chatKey: this.activeChatKey });
-      return res.checkpoints ?? [];
-    }
-    async renameCheckpoint(id, label2) {
-      await transport.post("/checkpoint/rename", { chatKey: this.activeChatKey, id, label: label2 });
-    }
-    async deleteCheckpoint(id) {
-      await transport.post("/checkpoint/delete", { chatKey: this.activeChatKey, id });
-    }
-    /** Delete this chat's snapshots, keeping the `keep` newest. */
-    async clearCheckpoints(keep = 0) {
-      const r = await transport.post("/checkpoint/clear", { chatKey: this.activeChatKey, keep });
-      return r.deleted;
-    }
-    async restore(id) {
-      const r = await transport.post(
-        "/checkpoint/restore",
-        { chatKey: this.activeChatKey, id }
-      );
-      await this.loadTurns();
-      this.bump();
-      return r;
-    }
-    // --- write back ---------------------------------------------------------
-    /**
-     * Push the working state into RisuAI - turns, this chat's lorebook and its
-     * memory - in one host write.
-     *
-     * Which path the turns take is decided by the backend's `structural` flag,
-     * not by inspecting the lists: once turns were inserted, deleted or
-     * reordered, a per-turn patch cannot express the result and the whole array
-     * has to go. Lorebook and memory are sent whole whenever anything in them
-     * differs from the baseline; the host write replaces the field either way.
-     */
-    async writeBack() {
-      return foregroundWrite((report) => {
-        report("\uB300\uD654 \uC800\uC7A5 \uBC0F \uBC18\uC601 \uACB0\uACFC \uD655\uC778 \uC911\u2026");
-        return this.performWriteBack();
-      });
-    }
-    async performWriteBack() {
-      if (!this.slot) throw new Error("\uD638\uC2A4\uD2B8 \uC0C1\uD0DC\uB97C \uBA3C\uC800 \uC77D\uC5B4\uC57C \uD569\uB2C8\uB2E4");
-      const patch = await this.patch();
-      const update = this.updateFrom(patch, false);
-      if (!update) {
-        return { mode: "noop", applied: 0, lore: 0, memory: 0, warnings: patch.warnings, verified: true };
-      }
-      const slot = await this.chatSlot();
-      const r = await writeChat(slot, this.activeChat?.chatId || this.liveChat?.id, update);
-      return {
-        mode: r.mode,
-        applied: r.applied,
-        lore: patch.lore?.changed ?? 0,
-        memory: patch.memory?.changed ?? 0,
-        warnings: patch.warnings,
-        verified: r.verified,
-        ...r.drift ? { drift: r.drift } : {}
+    return null;
+  }
+  function countFiles(n) {
+    return n.files.length + n.children.reduce((sum, c) => sum + countFiles(c), 0);
+  }
+  function stateLabel(s) {
+    return {
+      pending: "\uB300\uAE30",
+      running: "\uC9C4\uD589 \uC911",
+      done: "\uC644\uB8CC",
+      partial: "\uC77C\uBD80 \uC2E4\uD328",
+      error: "\uC624\uB958",
+      cancelled: "\uC911\uB2E8\uB428"
+    }[s] ?? s;
+  }
+  function fmtSize(n) {
+    if (n < 1024) return `${n}B`;
+    if (n < 1024 * 1024) return `${Math.round(n / 1024)}KB`;
+    return `${(n / 1024 / 1024).toFixed(1)}MB`;
+  }
+  function msg(e) {
+    return e instanceof Error ? e.message : String(e);
+  }
+  var CARD_AREAS, OUTPUT_ROOT, CONFIG_ROOT, IMAGE_RE, S, hub, GEN_KEY, temporaryPrompt, gen, RESERVE_KEY, reserves, unresolvedTimer, EXTRA_KEY, extraPaths;
+  var init_store = __esm({
+    "src/ui/studio/store.ts"() {
+      "use strict";
+      init_state();
+      CARD_AREAS = [
+        { area: "styles", label: "\uC2A4\uD0C0\uC77C \uD504\uB86C\uD504\uD2B8", toggle: true },
+        { area: "characters", label: "\uCE90\uB9AD\uD130 \uD504\uB86C\uD504\uD2B8", toggle: true },
+        { area: "scenes", label: "SD\uC2A4\uD29C\uB514\uC624 \uD504\uB9AC\uC14B", toggle: false },
+        { area: "fragments", label: "\uC870\uAC01 \uD504\uB86C\uD504\uD2B8", toggle: false }
+      ];
+      OUTPUT_ROOT = "studio/output";
+      CONFIG_ROOT = "studio/config";
+      IMAGE_RE = /\.(png|jpe?g|gif|webp|avif|bmp)$/i;
+      S = {
+        /** Mount points, owned by index.ts and set once per build. */
+        leftMount: null,
+        viewMount: null,
+        noticeMount: null,
+        listing: null,
+        outputRoot: null,
+        /** Folders outside studio/output pinned for 검수 (§1-33): a project's
+         * image folder, an agent's scratch batch - anywhere in the space. */
+        extraRoots: [],
+        /** The card lists, one per area. */
+        cards: {},
+        selected: OUTPUT_ROOT,
+        /** A card picked in the list; the centre shows its editor instead of a folder. */
+        selectedFile: "",
+        open: /* @__PURE__ */ new Set([OUTPUT_ROOT]),
+        /** Fragment references no fragment provides, from the last dry plan. */
+        unresolvedRefs: [],
+        /** The left column's tab (프롬프트 · OUTPUT) and, inside 프롬프트, whether
+         * the character view has taken over the column. */
+        leftTab: "prompt",
+        leftView: "main",
+        /** The character card expanded in the left character view. */
+        charOpen: "",
+        /** The centre's tab (persisted), and the mode that can override it:
+         * the fragment organizer, a folder grid, or the comparison selector
+         * (both bound to S.selected). A picked file (S.selectedFile) overrides
+         * everything - an editor is always reachable. */
+        centreTab: "single",
+        /** 'folder' is the tidy-up grid, a sub-view of the 검수 tab; 'selector'
+         * is legacy - the 검수 tab draws the selector itself. */
+        centreMode: "tab",
+        /** Batch/folder column count (2·3·4). */
+        cols: 3,
+        /** 검수 selector column count (2..6), 0 = 자동 (auto-fill by width). */
+        selCols: 0,
+        /** The single tab's pinned image ('' = follow the live run), and the list
+         * ←/→ walks (the job the image came from). */
+        viewPath: "",
+        viewList: [],
+        /** Recent jobs, cached for the batch/history tabs. */
+        jobs: [],
+        status: null,
+        jobId: "",
+        queueJob: null
       };
-    }
-    /**
-     * The host update a patch calls for, or null when nothing differs.
-     *
-     * `whole` asks for every part regardless of whether it changed - a copy has
-     * to carry the working state in full, not only the parts that moved.
-     */
-    updateFrom(patch, whole) {
-      const update = {};
-      if (patch.structural) {
-        if (!patch.messages) throw new Error("\uAD6C\uC870 \uBCC0\uACBD\uC778\uB370 \uBC31\uC5D4\uB4DC\uAC00 \uBA54\uC2DC\uC9C0 \uBC30\uC5F4\uC744 \uC8FC\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4");
-        update.messages = patch.messages;
-      } else if (patch.edits.length) {
-        update.edits = patch.edits;
-      }
-      if (patch.lore && (whole || patch.lore.changed)) update.localLore = patch.lore.localLore;
-      if (patch.memory && (whole || patch.memory.changed)) update.memory = patch.memory.data;
-      if (!whole) {
-        if (update.messages) update.beforeTurns = patch.beforeTurns;
-        if (update.localLore) update.loreBefore = patch.lore?.before;
-      }
-      return Object.keys(update).length ? update : null;
-    }
-    async saveCopy(name) {
-      if (!this.slot) throw new Error("\uD638\uC2A4\uD2B8 \uC0C1\uD0DC\uB97C \uBA3C\uC800 \uC77D\uC5B4\uC57C \uD569\uB2C8\uB2E4");
-      const patch = await this.patch();
-      const update = this.updateFrom(patch, true) ?? {};
-      if (!update.messages) update.messages = await this.messagesFromExport() ?? void 0;
-      delete update.edits;
-      await saveAsCopy(await this.chatSlot(), update, name);
-    }
-    async messagesFromExport() {
-      const res = await transport.get(
-        "/export/risuchat",
-        { chatKey: this.activeChatKey }
-      );
-      return res.envelope?.data?.message ?? null;
-    }
-    // --- exports ------------------------------------------------------------
-    async exportMarkdown() {
-      return await transport.get("/export/md", { chatKey: this.activeChatKey });
-    }
-    async exportRisuchat() {
-      return await transport.get("/export/risuchat", { chatKey: this.activeChatKey });
-    }
-    // --- agent --------------------------------------------------------------
-    sessionId = "";
-    /** `limit` = only the last n shown messages: a phone parses 40, not a
-     * whole afternoon (the 164MB /session of §1-55 was history rows, now
-     * excluded server-side; the limit keeps the rest small too). */
-    async agentSession(sessionId, limit = 0) {
-      const revision = this.contextRevision;
-      const chatKey = this.activeChatKey;
-      const r = await transport.get("/session", {
-        chatKey,
-        sessionId: sessionId || void 0,
-        limit: limit > 0 ? limit : void 0
-      });
-      if (revision !== this.contextRevision || chatKey !== this.activeChatKey) throw new Error("\uBD07 \uB610\uB294 \uCC57 \uC120\uD0DD\uC774 \uBCC0\uACBD\uB418\uC5C8\uC2B5\uB2C8\uB2E4");
-      this.sessionId = r.session?.sessionId ?? "";
-      return r;
-    }
-    async workPlan(mode2, revision) {
-      if (!this.sessionId) await this.newAgentSession();
-      const sid = this.sessionId;
-      const context = this.contextRevision;
-      const args = { sessionId: sid, chatKey: this.activeChatKey, ...mode2 ? { mode: mode2, revision } : {} };
-      const result = mode2 ? await transport.post("/agent/plan", args) : await transport.get("/agent/plan", args);
-      if (sid !== this.sessionId || context !== this.contextRevision) throw new Error("\uB300\uD654\uAC00 \uBCC0\uACBD\uB418\uC5C8\uC2B5\uB2C8\uB2E4");
-      return result;
-    }
-    async agentSessions() {
-      const r = await transport.get("/sessions", {
-        chatKey: this.activeChatKey
-      });
-      return r.sessions ?? [];
-    }
-    /** Start a fresh conversation; the previous one stays in the history list. */
-    async newAgentSession() {
-      const revision = this.contextRevision;
-      const chatKey = this.activeChatKey;
-      const r = await transport.post("/session", { chatKey });
-      if (revision !== this.contextRevision || chatKey !== this.activeChatKey) throw new Error("\uBD07 \uB610\uB294 \uCC57 \uC120\uD0DD\uC774 \uBCC0\uACBD\uB418\uC5C8\uC2B5\uB2C8\uB2E4");
-      this.sessionId = r.sessionId;
-    }
-    /**
-     * Send one instruction, yielding NDJSON events as they arrive.
-     *
-     * A session is created lazily so opening the tab costs nothing; only actually
-     * talking to the agent creates one.
-     */
-    async *agentChat(prompt, signal) {
-      if (!this.sessionId) {
-        await this.newAgentSession();
-      }
-      if (signal?.aborted) return;
-      yield* transport.stream("/chat", {
-        sessionId: this.sessionId,
-        prompt,
-        mode: this.activeTab === "studio" ? "studio" : this.editMode
-      }, signal);
-    }
-    /** 중단 as a request the backend hears at once (§1-44): the aborted fetch
-     * alone reaches it only at the turn's next write when a proxy sits between. */
-    async stopAgent() {
-      if (!this.sessionId) return;
       try {
-        await transport.post("/agent/stop", { sessionId: this.sessionId });
+        const t = localStorage.getItem("hina.studioLeftTab");
+        if (t === "output") S.leftTab = "output";
+        const c = localStorage.getItem("hina.studioTab");
+        if (c === "single" || c === "batch" || c === "inspect") S.centreTab = c;
+        const n = Number(localStorage.getItem("hina.studioCols"));
+        if (n === 2 || n === 3 || n === 4) S.cols = n;
+        const sc = Number(localStorage.getItem("hina.studioSelCols"));
+        if (sc === 0 || sc >= 2 && sc <= 6) S.selCols = sc;
+      } catch {
+      }
+      hub = {
+        drawLeft: () => {
+        },
+        drawCentre: () => {
+        },
+        /** A live-job heartbeat: the visible tab patches its progress in place
+         * (never a full centre rebuild - inputs keep their focus). */
+        jobTick: () => {
+        },
+        /** Whether the studio is the tab on screen - polls that only feed its
+         * pictures skip their ticks otherwise (§1-55). */
+        studioShowing: () => true,
+        /** Patch count badges (활성 캐릭터, 미해결 조각) in place - called from
+         * debounced checks so a keystroke in an editor never rebuilds the column
+         * under the caret. */
+        syncBadges: () => {
+        },
+        notice: (_text, _kind = "") => {
+        },
+        refresh: async () => {
+        },
+        refreshArea: async (_area) => {
+        },
+        loadStatus: async () => {
+        },
+        touchQuiet: (_paths = []) => {
+        }
+      };
+      GEN_KEY = "hina.studioGen";
+      temporaryPrompt = { text: "", expanded: false, negativeText: "", negativeExpanded: false };
+      gen = {
+        model: "nai-diffusion-4-5-full",
+        scenePreset: "",
+        steps: 28,
+        scale: 5,
+        rescale: 0.4,
+        sampler: "k_euler_ancestral",
+        schedule: "karras",
+        width: 832,
+        height: 1216,
+        count: 1,
+        seed: "",
+        quality: false,
+        ucPreset: 0,
+        folder: OUTPUT_ROOT,
+        assetProject: "",
+        assetSet: "",
+        assetSlot: "",
+        assetCharacter: "",
+        // The selector's regex. Empty means the backend's default; it is edited on
+        // screen because it is the thing most likely to need adjusting.
+        pattern: ""
+      };
+      try {
+        const savedGen = JSON.parse(localStorage.getItem(GEN_KEY) || "null");
+        if (savedGen && typeof savedGen === "object") Object.assign(gen, savedGen);
+        gen.folder = canonPath(gen.folder) || OUTPUT_ROOT;
+      } catch {
+      }
+      RESERVE_KEY = "hina.studioReserve";
+      reserves = {};
+      try {
+        const saved = JSON.parse(localStorage.getItem(RESERVE_KEY) || "null");
+        if (saved && typeof saved === "object") {
+          for (const [preset, scenes] of Object.entries(saved)) {
+            for (const [scene, v] of Object.entries(scenes || {})) {
+              const n = typeof v === "number" ? v : Object.values(v || {}).reduce((a, b) => a + (Number(b) || 0), 0);
+              if (n > 0) (reserves[canonPath(preset)] ??= {})[scene] = n;
+            }
+          }
+        }
+      } catch {
+      }
+      unresolvedTimer = null;
+      EXTRA_KEY = "hina.studioExtraFolders";
+      extraPaths = [];
+      try {
+        const saved = JSON.parse(localStorage.getItem(EXTRA_KEY) || "[]");
+        if (Array.isArray(saved)) extraPaths = saved.filter((x) => typeof x === "string" && !!x);
       } catch {
       }
     }
-    // --- merge conflicts ------------------------------------------------------
-    /** Rows where our copy and RisuAI's both moved since the last open. */
-    async conflicts(scope = "both") {
-      const q = {};
-      if (scope !== "card" && this.activeChatKey) q.chatKey = this.activeChatKey;
-      if (scope !== "chat" && this.activeCharKey) q.charKey = this.activeCharKey;
-      if (!Object.keys(q).length) return [];
-      const r = await transport.get("/conflicts", q);
-      return r.conflicts ?? [];
+  });
+
+  // src/ui/download.ts
+  var download_exports = {};
+  __export(download_exports, {
+    saveToDevice: () => saveToDevice
+  });
+  function mount() {
+    if (card && card.isConnected) return card;
+    card = el("div", { class: "uploadpanel dlpanel" });
+    document.body.appendChild(card);
+    return card;
+  }
+  function dismiss(after = 0) {
+    if (hideTimer) clearTimeout(hideTimer);
+    hideTimer = setTimeout(() => {
+      card?.remove();
+      card = null;
+    }, after);
+  }
+  async function saveToDevice(name, fetch, mime = "application/octet-stream") {
+    const box = mount();
+    if (hideTimer) {
+      clearTimeout(hideTimer);
+      hideTimer = null;
     }
-    async resolveConflict(kind, id, choice) {
-      await transport.post("/conflict/resolve", { kind, id, choice });
-      await this.afterResolve();
-    }
-    async resolveAllConflicts(choice, scope) {
-      const r = await transport.post("/conflict/resolve", {
-        all: true,
-        choice,
-        ...scope === "chat" ? { chatKey: this.activeChatKey } : { charKey: this.activeCharKey }
+    box.className = "uploadpanel dlpanel";
+    clear(box);
+    const close = el("button", { class: "iconbtn", html: ICON.close, title: "\uB2EB\uAE30" });
+    close.addEventListener("click", () => dismiss(0));
+    const head = el("div", { class: "uphead" }, [el("span", { class: "grow", text: `\uBC1B\uB294 \uC911 \xB7 ${name}` }), close]);
+    const line = el("div", { class: "upline" }, [el("span", { class: "grow", text: "\uC11C\uBC84\uAC00 \uD30C\uC77C\uC744 \uC900\uBE44\uD558\uB294 \uC911\uC785\uB2C8\uB2E4\u2026" })]);
+    const bar3 = el("div", { class: "assetbar" }, [el("div", { class: "assetfill", style: { width: "0%" } })]);
+    const fill2 = bar3.firstElementChild;
+    box.append(head, line, bar3);
+    let bytes;
+    try {
+      bytes = await fetch((p) => {
+        const pct = p.total > 0 ? Math.min(100, Math.round(p.loaded * 100 / p.total)) : 0;
+        fill2.style.width = p.total > 0 ? pct + "%" : "100%";
+        bar3.classList.toggle("indeterminate", !(p.total > 0));
+        line.firstElementChild.textContent = p.total > 0 ? `${fmtSize(p.loaded)} / ${fmtSize(p.total)} (${pct}%)` : `${fmtSize(p.loaded)} \uBC1B\uC558\uC2B5\uB2C8\uB2E4\u2026`;
       });
-      await this.afterResolve();
-      return r.resolved ?? 0;
+    } catch (e) {
+      box.classList.add("failed");
+      head.firstElementChild.textContent = `\uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4 \xB7 ${name}`;
+      line.firstElementChild.textContent = e instanceof Error ? e.message : String(e);
+      bar3.remove();
+      dismiss(8e3);
+      throw e;
     }
-    async afterResolve() {
-      if (this.activeChatKey) await this.loadTurns();
-      await this.refreshChanges();
-      await this.refreshBotChanges();
-      this.epoch += 1;
-      this.emit();
+    fill2.style.width = "100%";
+    box.classList.add("done");
+    head.firstElementChild.textContent = `\uBC1B\uC558\uC2B5\uB2C8\uB2E4 \xB7 ${name}`;
+    line.firstElementChild.textContent = fmtSize(bytes.byteLength);
+    if (!smallScreen()) {
+      downloadBytes(name, bytes, mime);
+      dismiss(3500);
+      return bytes.byteLength;
     }
-    async stagedEdits() {
-      const r = await transport.get("/staged", { chatKey: this.activeChatKey });
-      return r.staged ?? [];
-    }
-    async approveStaged(approve) {
-      const r = await transport.post(
-        "/approve",
-        { chatKey: this.activeChatKey, all: true, approve, mode: this.activeTab === "studio" ? "studio" : this.editMode }
-      );
-      void this.refreshChanges();
-      return r;
-    }
-    // --- settings -----------------------------------------------------------
-    async getConfig() {
-      return await transport.get("/config");
-    }
-    async setConfig(patch) {
-      await transport.post("/config", { config: patch });
-    }
-    async testAgent(kind = "general") {
-      return await transport.post("/config/test", { section: kind === "search" ? "agent_search" : "agent" }, 24e4);
-    }
-    // --- web search provider (what the search agent searches with) ------------
-    async websearch() {
-      return await transport.get("/websearch");
-    }
-    async saveWebsearch(patch) {
-      await transport.post("/config", { config: { websearch: patch } });
-    }
-    /** One real search in the configured mode. Native mode probes several
-     *  shapes at up to a minute each, so the wait is generous. */
-    async testWebsearch(query) {
-      return await transport.post("/websearch/test", { query }, 33e4);
-    }
-    // --- the vision tool (§1-42) ---------------------------------------------
-    async vision() {
-      return await transport.get("/vision");
-    }
-    async saveVision(patch) {
-      await transport.post("/config", { config: { vision: patch } });
-    }
-    /** One real look in the configured mode (the native probe goes through
-     * the agent model, which can take a while). */
-    async testVision(path = "", question = "") {
-      return await transport.post("/vision/test", { path, question }, 18e4);
-    }
-    // --- diagnostics ----------------------------------------------------------
-    async logs(limit = 300, level = "") {
-      return await transport.get(
-        `/logs?limit=${limit}` + (level ? "&level=" + encodeURIComponent(level) : "")
-      );
-    }
-    async diagnostics() {
-      return await transport.get("/diag");
-    }
-    // --- backend update -------------------------------------------------------
-    async updateCheck() {
-      return await transport.post("/update/check", {}, 45e3);
-    }
-    /**
-     * Install and restart.
-     *
-     * The backend replies and then exits on a timer, so the connection this
-     * request rode in on is the last one that version answers. Polling /health
-     * afterwards is how the panel finds out it came back - and finding out is
-     * the point, because a restart that fails looks exactly like a slow one.
-     */
-    async updateApply() {
-      return await transport.post("/update/apply", {}, 3e5);
-    }
-    async waitForBackend(seconds = 60) {
-      const deadline = Date.now() + seconds * 1e3;
-      let lastError = "";
-      while (Date.now() < deadline) {
-        await new Promise((r) => setTimeout(r, 2e3));
+    const save = el("button", { class: "primary", text: "\uB0B4 \uAE30\uAE30\uC5D0 \uC800\uC7A5" });
+    const hint = el("div", { class: "hint", text: "\uACF5\uC720 \uCC3D\uC774 \uC5F4\uB9AC\uBA74 \u201C\uD30C\uC77C\uC5D0 \uC800\uC7A5\u201D \uC744 \uACE0\uB974\uC138\uC694." });
+    save.addEventListener("click", () => {
+      void (async () => {
+        const buf = new Uint8Array(bytes.byteLength);
+        buf.set(bytes);
+        const nav = navigator;
         try {
-          const h = await transport.connect();
-          this.health = h;
-          this.emit();
-          return h.version;
+          const file = new File([buf], name, { type: mime });
+          if (typeof nav.share === "function" && (!nav.canShare || nav.canShare({ files: [file] }))) {
+            await nav.share({ files: [file], title: name });
+            dismiss(1500);
+            return;
+          }
         } catch (e) {
-          lastError = e instanceof Error ? e.message : String(e);
+          if (e?.name === "AbortError") return;
         }
-      }
-      throw new Error("\uBC31\uC5D4\uB4DC\uAC00 \uB2E4\uC2DC \uC62C\uB77C\uC624\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4: " + lastError);
-    }
-    // --- the global file space --------------------------------------------------
-    //
-    // ONE tree every bot shares (projects/ · studio/ · hina/<봇이름>/). No
-    // charKey: the scope is the space itself. The per-bot SYSTEM view (frozen
-    // originals, machinery) is read-only and reached with `system: 1`.
-    /** Save a space file to the user's disk through the browser. */
-    async downloadFile(path) {
-      const bytes = await transport.postBinary("/files/download", { path });
-      const name = path.split("/").pop() || "file";
-      downloadBytes(name, bytes, name.endsWith(".charx") ? "application/zip" : "application/octet-stream");
-      return bytes.byteLength;
-    }
-    // --- charx ------------------------------------------------------------------
-    async charxPreview() {
-      return await transport.get("/charx/preview", { charKey: this.botKey });
-    }
-    /** Build out/<name>.charx on the backend from the working card + store. */
-    async charxBuild(opts = {}) {
-      const r = await transport.post("/charx/build", {
-        charKey: this.botKey,
-        allowMissing: !!opts.allowMissing,
-        name: opts.name || ""
-      }, 6e5);
-      this.touchFiles([r.path]);
-      return r;
-    }
-    async files(prefix = "", hidden = false, bot = "") {
-      const q = [];
-      if (prefix) q.push("prefix=" + encodeURIComponent(prefix));
-      if (hidden) q.push("hidden=1");
-      if (bot) q.push("bot=" + encodeURIComponent(bot));
-      let r = null;
-      for (let attempt = 0; attempt < 3; attempt++) {
-        try {
-          r = await transport.get("/files" + (q.length ? "?" + q.join("&") : ""));
-          break;
-        } catch (error) {
-          if (!(error instanceof BackendError) || ![0, 502, 503, 504].includes(error.status) || attempt === 2) throw error;
-          await new Promise((resolve) => setTimeout(resolve, 300 * (attempt + 1)));
-        }
-      }
-      if (!r || !Array.isArray(r.areas)) {
-        throw new Error("\uD30C\uC77C \uBAA9\uB85D\uC744 \uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4 (\uBC31\uC5D4\uB4DC\uAC00 \uC7AC\uC2DC\uC791 \uC911\uC774\uAC70\uB098 \uC751\uB2F5\uC774 \uBE44\uC5B4 \uC788\uC74C) \u2014 \uC7A0\uC2DC \uB4A4 \uC0C8\uB85C\uACE0\uCE68\uD558\uC138\uC694.");
-      }
-      return r;
-    }
-    /** This bot's SYSTEM directory: frozen originals and machinery, read-only. */
-    async systemFiles() {
-      return await transport.get("/files?system=1&charKey=" + encodeURIComponent(this.activeCharKey));
-    }
-    async readFile(path) {
-      return await transport.get("/files/read?path=" + encodeURIComponent(path));
-    }
-    async uploadFile(name, content, base64 = false, dir = "", extract = false) {
-      return await transport.upload("/files/upload", base64 ? { name, base64: content, dir, extract } : { name, text: content, dir });
-    }
-    /**
-     * A batch of files as one binary body: [u32 header length][JSON header][bytes…].
-     * `entries[i].bytes` go in order; the header carries name, rel (subfolder
-     * under `dir`) and size for each.
-     */
-    async uploadBatch(dir, entries, extract = false) {
-      const header = new TextEncoder().encode(JSON.stringify({
-        dir,
-        extract,
-        files: entries.map((e) => ({ name: e.name, rel: e.rel, size: e.bytes.byteLength }))
-      }));
-      const total = 4 + header.byteLength + entries.reduce((n, e) => n + e.bytes.byteLength, 0);
-      const body = new Uint8Array(total);
-      new DataView(body.buffer).setUint32(0, header.byteLength);
-      body.set(header, 4);
-      let at = 4 + header.byteLength;
-      for (const e of entries) {
-        body.set(e.bytes, at);
-        at += e.bytes.byteLength;
-      }
-      return await transport.postBytes("/files/upload-many", body);
-    }
-    /**
-     * One piece of a file too large to send in a single body.
-     *
-     * A character's .charx runs to 140-180MB, and every single-shot path caps
-     * far below that: the backend's body limit, and a relay in front of it.
-     * Pieces are appended server-side at the offset they claim, and the file
-     * only appears in the workspace once the last one lands.
-     */
-    async uploadChunk(dir, part, bytes) {
-      const header = new TextEncoder().encode(JSON.stringify({ dir, ...part }));
-      const body = new Uint8Array(4 + header.byteLength + bytes.byteLength);
-      new DataView(body.buffer).setUint32(0, header.byteLength);
-      body.set(header, 4);
-      body.set(bytes, 4 + header.byteLength);
-      return await transport.postBytes("/files/upload-chunk", body);
-    }
-    /** Several files or a folder as one zip, handed to the browser to save. */
-    async downloadZip(paths, name) {
-      const bytes = await transport.postBinary("/files/zip", { paths, name });
-      downloadBytes(name.endsWith(".zip") ? name : name + ".zip", bytes, "application/zip");
-      return bytes.byteLength;
-    }
-    /** Size and pixel dimensions of a space file without its bytes (§1-55). */
-    async fileStat(path) {
-      return await transport.post("/files/stat", { path });
-    }
-    /** Raw bytes of a space file (an image preview, a thumbnail). POST: see tab-assets. */
-    async fileBytes(path, timeoutMs) {
-      return await transport.postBinary("/files/download", { path }, timeoutMs);
-    }
-    /** A small server-side WebP preview (Pillow); the server streams the
-     * original bytes instead when it cannot thumb, so callers need no fallback. */
-    async fileThumb(path, w = 360) {
-      return await transport.postBinary("/files/thumb", { path, w }, 25e3);
-    }
-    async mkdirFile(path) {
-      await transport.post("/files/mkdir", { path });
-    }
-    async moveFile(from, to) {
-      return await transport.post("/files/move", { from, to });
-    }
-    /** Server-side copy (the context menu's 복사/붙여넣기). A taken name counts
-     * up to `이름 (2)` on the backend rather than refusing. */
-    async copyFile(from, to) {
-      return await transport.post("/files/copy", { from, to });
-    }
-    async deleteFile(path) {
-      await transport.post("/files/delete", { path });
-    }
-    // Batched verbs: ONE round trip for N paths; a name clash or a missing
-    // file lands in `failed` while the rest of the batch proceeds.
-    async moveFiles(paths, to) {
-      return await transport.post("/files/move", { paths, to });
-    }
-    async copyFiles(paths, to) {
-      return await transport.post("/files/copy", { paths, to });
-    }
-    async deleteFiles(paths) {
-      return await transport.post("/files/delete", { paths });
-    }
-    async cleanFiles(areas) {
-      return await transport.post("/files/clean", { charKey: this.activeCharKey, areas });
-    }
-    /** The asset studio's domain calls (files go through the shared methods). */
-    studio = new StudioFiles();
-    // --- agent presets --------------------------------------------------------
-    async presets() {
-      return await transport.get("/presets");
-    }
-    providerCache = null;
-    /** Provider profiles (cached for the panel's lifetime - they are code, not data). */
-    async providers() {
-      if (this.providerCache) return this.providerCache;
-      const r = await transport.get("/catalog/providers");
-      this.providerCache = r.providers ?? [];
-      return this.providerCache;
-    }
-    /** Make a preset the one the agent runs. Writes through to the live config. */
-    async selectPreset(id) {
-      const r = await transport.post("/presets/select", { id });
-      return r.selected;
-    }
-    async savePreset(name, values, id) {
-      const r = await transport.post("/presets/save", { name, values, id });
-      return r.preset;
-    }
-    async capturePreset(name) {
-      const r = await transport.post("/presets/capture", { name });
-      return r.preset;
-    }
-    async applyPreset(id) {
-      const r = await transport.post("/presets/apply", { id });
-      return r.applied;
-    }
-    async deletePreset(id) {
-      await transport.post("/presets/delete", { id });
-    }
-    /** Only the search agent may run without a preset. */
-    async deselectPreset(kind) {
-      await transport.post("/presets/deselect", { kind });
-    }
-    // --- API keys ---------------------------------------------------------------
-    async apiKeys() {
-      return await transport.get("/keys");
-    }
-    async saveApiKey(values, id) {
-      const r = await transport.post("/keys/save", { values, id });
-      return r.key;
-    }
-    async deleteApiKey(id) {
-      await transport.post("/keys/delete", { id });
-    }
-    /** models.dev, through the backend's daily cache. */
-    async modelCatalog(q, provider = "", refresh3 = false) {
-      return await transport.get("/models/catalog", { q, provider, refresh: refresh3 ? "1" : "" });
-    }
-    // --- OpenAI subscription (codex) login -----------------------------------------
-    async codexStatus() {
-      return await transport.get("/codex/status");
-    }
-    async codexLoginStart() {
-      return await transport.post("/codex/login/start", {});
-    }
-    async codexLoginStatus(state2) {
-      return await transport.get("/codex/login/status", { state: state2 });
-    }
-    async codexLoginComplete(redirect, state2 = "") {
-      return await transport.post("/codex/login/complete", { redirect, state: state2 });
-    }
-    async codexLogout() {
-      await transport.post("/codex/logout", {});
-    }
-    // --- permission prompts (shell / pip while a turn runs) --------------------------
-    async permits() {
-      if (!this.sessionId) return [];
-      const r = await transport.get("/permits", { sessionId: this.sessionId });
-      return r.pending ?? [];
-    }
-    async decidePermit(id, allow, always = false) {
-      await transport.post("/permits/decide", { id, allow, always });
-    }
-    // --- skills ---------------------------------------------------------------
-    async skills() {
-      return await transport.get("/skills");
-    }
-    async skill(id) {
-      const r = await transport.get("/skills/get", { id });
-      return r.skill;
-    }
-    async saveSkill(v) {
-      const r = await transport.post("/skills/save", v);
-      return r.skill;
-    }
-    /** A file inside a skill folder. Binary-safe: everything goes as base64. */
-    async putSkillFile(id, path, file) {
-      const body = await fileBase64(file);
-      return await transport.post("/skills/file", { id, path, body, base64: true });
-    }
-    async deleteSkillFile(id, path) {
-      await transport.post("/skills/file/delete", { id, path });
-    }
-    /** Register a file as a skill. The extension decides whether it is a script. */
-    /** Import a skill from a file: .md/.py become a skill of their own, .zip is a whole folder. */
-    async uploadSkill(file) {
-      const zip = /\.zip$/i.test(file.name);
-      const payload = zip ? { filename: file.name, body: await fileBase64(file), base64: true } : { filename: file.name, body: await file.text() };
-      const r = await transport.post("/skills/upload", payload);
-      return r.skill;
-    }
-    async toggleSkill(id, enabled) {
-      await transport.post("/skills/toggle", { id, enabled });
-    }
-    async deleteSkill(id) {
-      await transport.post("/skills/delete", { id });
-    }
-    async skillPrompt() {
-      return await transport.get("/skills/preview");
-    }
-    // --- the approval queue ----------------------------------------------------
-    async actions() {
-      const r = await transport.get(
-        "/actions?chatKey=" + encodeURIComponent(this.activeChatKey)
-      );
-      return r.actions;
-    }
-    /** Every pending proposal of the open bot, whichever chat it rode on. */
-    async actionsForBot() {
-      if (!this.activeCharKey) return [];
-      const r = await transport.get(
-        "/actions?charKey=" + encodeURIComponent(this.activeCharKey)
-      );
-      return r.actions;
-    }
-    /** Reject every pending proposal of the open bot. */
-    async clearBotActions() {
-      const r = await transport.post("/actions/clear", { charKey: this.activeCharKey });
-      this.bump();
-      void this.refreshChanges();
-      void this.refreshBotChanges();
-      return r.cleared;
-    }
-    /**
-     * Approve or reject one proposal, and carry it out if it is ours to do.
-     *
-     * The backend runs what it can and hands back a `host` block for what it
-     * cannot - writing to the live chat and saving a copy both need APIs that
-     * only exist inside this iframe. The result is reported back either way, so
-     * a failure here does not leave a queue entry claiming success.
-     */
-    async decideAction(id, approve, chatKey = "") {
-      const r = await transport.post("/actions/decide", {
-        chatKey: chatKey || this.activeChatKey,
-        id,
-        approve,
-        mode: this.activeTab === "studio" ? "studio" : this.editMode
-      });
-      if (!r.approved) return "\uAC70\uC808\uD588\uC2B5\uB2C8\uB2E4.";
-      if (!r.host) {
-        this.bump();
-        await Promise.all([this.refreshChanges(), this.refreshBotChanges()]);
-        return String(r.result ?? "\uC2E4\uD589\uD588\uC2B5\uB2C8\uB2E4.");
-      }
-      try {
-        let detail = "";
-        if (r.host.kind === "host_writeback") {
-          const out = await this.writeBack();
-          detail = `${out.applied}\uAC74\uC744 RisuAI\uC5D0 \uBC18\uC601\uD588\uC2B5\uB2C8\uB2E4.`;
-        } else if (r.host.kind === "host_save_copy") {
-          const name = String(r.host.args?.name || "") || "\uC0AC\uBCF8";
-          await this.saveCopy(name);
-          detail = `\u201C${name}\u201D \uC73C\uB85C \uBCF5\uC0AC\uBCF8\uC744 \uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4.`;
-        } else if (r.host.kind === "host_card_writeback") {
-          const out = await this.cardWriteBack();
-          if (!out.verified) throw new Error(out.drift || "RisuAI \uC800\uC7A5 \uACB0\uACFC\uB97C \uD655\uC778\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4. \uBBF8\uBC18\uC601 \uBCC0\uACBD\uC744 \uBCF4\uC874\uD588\uC2B5\uB2C8\uB2E4.");
-          detail = out.mode === "noop" ? "\uCE74\uB4DC\uC5D0 \uBC18\uC601\uD560 \uBCC0\uACBD\uC774 \uC5C6\uC5C8\uC2B5\uB2C8\uB2E4." : `\uCE74\uB4DC \uBCC0\uACBD ${out.applied}\uAC74\uC744 RisuAI\uC5D0 \uBC18\uC601\uD588\uC2B5\uB2C8\uB2E4.`;
-        } else if (r.host.kind === "host_clone_bot") {
-          const name = String(r.host.args?.name || "") || "\uBCF5\uC81C \uBD07";
-          await this.cloneBot(name);
-          detail = `\uBCF5\uC81C \uBD07 \u201C${name}\u201D \uC744 \uB9CC\uB4E4\uC5C8\uC2B5\uB2C8\uB2E4. RisuAI \uBAA9\uB85D\uC5D0\uC11C \uD655\uC778\uD574 \uC8FC\uC138\uC694.`;
-        } else if (r.host.kind === "host_open_tab") {
-          const tab = String(r.host.args?.tab || "");
-          this.openTabRequest = tab;
-          this.emit();
-          detail = "\uD0ED\uC744 \uC774\uB3D9\uD588\uC2B5\uB2C8\uB2E4.";
-        } else if (r.host.kind === "host_asset_add" || r.host.kind === "host_asset_replace") {
-          throw new Error("\uC5D0\uC14B \uC2B9\uC778 \uBC29\uC2DD\uC774 \uBCC0\uACBD\uB418\uC5C8\uC2B5\uB2C8\uB2E4. \uBC31\uC5D4\uB4DC\uB97C \uAC31\uC2E0\uD558\uACE0 \uC81C\uC548\uC744 \uB2E4\uC2DC \uB9CC\uB4E4\uC5B4 \uC8FC\uC138\uC694. \uC5D0\uC14B\uC740 \uBC18\uC601\uD560 \uB54C \uB4F1\uB85D\uB429\uB2C8\uB2E4.");
-        } else if (r.host.kind === "host_asset_add_many") {
-          throw new Error("\uC5D0\uC14B \uC2B9\uC778 \uBC29\uC2DD\uC774 \uBCC0\uACBD\uB418\uC5C8\uC2B5\uB2C8\uB2E4. \uBC31\uC5D4\uB4DC\uB97C \uAC31\uC2E0\uD558\uACE0 \uC81C\uC548\uC744 \uB2E4\uC2DC \uB9CC\uB4E4\uC5B4 \uC8FC\uC138\uC694. \uC5D0\uC14B\uC740 \uBC18\uC601\uD560 \uB54C \uB4F1\uB85D\uB429\uB2C8\uB2E4.");
-        } else {
-          throw new Error("\uD50C\uB7EC\uADF8\uC778\uC774 \uBAA8\uB974\uB294 \uC791\uC5C5\uC785\uB2C8\uB2E4: " + r.host.kind);
-        }
-        await transport.post("/actions/complete", { chatKey: chatKey || this.activeChatKey, id, ok: true, detail });
-        return detail;
-      } catch (e) {
-        const why = e instanceof Error ? e.message : String(e);
-        await transport.post("/actions/complete", {
-          chatKey: chatKey || this.activeChatKey,
-          id,
-          ok: false,
-          detail: why
-        });
-        throw e;
-      }
-    }
-    // --- lorebook -------------------------------------------------------------
-    /** The agent's save tool runs only for an explicit user writeback request. */
-    async requestedCardWriteback(id, charKey, chatKey) {
-      if (!id || !charKey) throw new Error("\uC798\uBABB\uB41C \uBD07 \uC800\uC7A5 \uC694\uCCAD\uC785\uB2C8\uB2E4.");
-      if (this.botKey !== charKey) {
-        const detail = "\uC694\uCCAD\uD55C \uBD07\uACFC \uD604\uC7AC \uBD07\uC774 \uB2EC\uB77C \uC800\uC7A5\uD558\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4.";
-        await transport.post("/actions/complete", { chatKey, id, ok: false, detail });
-        throw new Error(detail);
-      }
-      try {
-        return await this.decideAction(id, true, chatKey);
-      } catch (error) {
-        await transport.post("/actions/complete", { chatKey, id, ok: false, detail: String(error) }).catch(() => {
-        });
-        throw error;
-      }
-    }
-    async lore(scope) {
-      const q = "/lore?charKey=" + encodeURIComponent(this.activeCharKey) + (scope ? "&scope=" + scope : "");
-      const r = await transport.get(q);
-      return r.lore;
-    }
-    async saveLore(id, entry) {
-      await transport.post("/lore/update", { charKey: this.activeCharKey, id, entry });
-      void this.refreshChanges();
-    }
-    async addLore(entry, scope) {
-      const r = await transport.post("/lore", {
-        charKey: this.activeCharKey,
-        entry,
-        scope,
-        chatKey: scope === "local" ? this.activeChatKey : void 0
-      });
-      void this.refreshChanges();
-      return r.id;
-    }
-    async deleteLore(id) {
-      await transport.post("/lore/delete", { charKey: this.activeCharKey, id });
-      void this.refreshChanges();
-    }
-    async moveLore(id, toSeq) {
-      await transport.post("/lore/move", { charKey: this.activeCharKey, id, toSeq });
-      void this.refreshChanges();
-      void this.refreshBotChanges();
-    }
-    // --- long-term memory -----------------------------------------------------
-    async memory() {
-      return await transport.get("/memory?chatKey=" + encodeURIComponent(this.activeChatKey));
-    }
-    async saveMemory(id, body, title) {
-      const r = await transport.post("/memory/update", {
-        chatKey: this.activeChatKey,
-        id,
-        body,
-        title
-      });
-      void this.refreshChanges();
-      return r.item;
-    }
-    async addMemory(kind, body, title = "") {
-      const r = await transport.post("/memory/add", {
-        chatKey: this.activeChatKey,
-        kind,
-        body,
-        title
-      });
-      void this.refreshChanges();
-      return r.item;
-    }
-    async deleteMemory(id) {
-      await transport.post("/memory/delete", { chatKey: this.activeChatKey, id });
-      void this.refreshChanges();
-    }
-    // --- the card (bot editing) -----------------------------------------------
-    //
-    // The char-key twins of the chat calls above, addressed by `botKey`. Editing
-    // works on any workspace the backend knows; only 반영/복제 touch RisuAI and
-    // carry the isLiveBot gate.
-    /** Same contract as refreshChanges, for the bot bar. */
-    async refreshBotChanges() {
-      if (!this.botKey) {
-        this.botChanges = null;
-        this.emit();
-        return null;
-      }
-      const revision = this.contextRevision;
-      const key = this.botKey;
-      try {
-        const result = await transport.get("/card/changes", { charKey: key });
-        if (revision !== this.contextRevision || key !== this.botKey) return null;
-        this.botChanges = result;
-      } catch {
-        if (revision !== this.contextRevision || key !== this.botKey) return null;
-        this.botChanges = null;
-      }
-      this.emit();
-      return this.botChanges;
-    }
-    /** The store's view of the bot's assets: the manifest with state and size. */
-    async assetList() {
-      return await transport.get("/assets/list", { charKey: this.botKey });
-    }
-    async cardFields() {
-      return await transport.get("/card", { charKey: this.botKey });
-    }
-    async cardScripts(kind) {
-      const r = await transport.get("/card/scripts", { charKey: this.botKey, kind });
-      return r.items ?? [];
-    }
-    async saveCardField(id, body) {
-      const r = await transport.post("/card/field", { charKey: this.botKey, id, body });
-      void this.refreshBotChanges();
-      return r.item;
-    }
-    async addGreeting(body) {
-      const r = await transport.post("/card/greeting", { charKey: this.botKey, body });
-      void this.refreshBotChanges();
-      return r.item;
-    }
-    async deleteGreeting(id) {
-      await transport.post("/card/greeting/delete", { charKey: this.botKey, id });
-      void this.refreshBotChanges();
-    }
-    async saveScript(id, entry) {
-      await transport.post("/card/script", { charKey: this.botKey, id, entry });
-      void this.refreshBotChanges();
-    }
-    async addScript(kind, entry) {
-      const r = await transport.post("/card/script/add", { charKey: this.botKey, kind, entry });
-      void this.refreshBotChanges();
-      return r.id;
-    }
-    async deleteScript(id) {
-      await transport.post("/card/script/delete", { charKey: this.botKey, id });
-      void this.refreshBotChanges();
-    }
-    async moveScript(id, toSeq) {
-      await transport.post("/card/script/move", { charKey: this.botKey, id, toSeq });
-    }
-    async cardPatch() {
-      return await transport.get("/card/patch", { charKey: this.botKey, stagedAssets: "1" });
-    }
-    async cardCommit(label2) {
-      await transport.post("/card/commit", { charKey: this.botKey, label: label2 });
-      this.bump();
-      void this.refreshBotChanges();
-    }
-    /** Discard the card's working copy, global lorebook included. Returns how
-     * many pending changes went, for the confirmation line. */
-    async cardReset() {
-      const r = await transport.post("/card/reset", { charKey: this.botKey });
-      this.bump();
-      void this.refreshBotChanges();
-      return r.discarded ?? 0;
-    }
-    async cardCheckpoint(label2) {
-      await transport.post("/card/checkpoint", { charKey: this.botKey, label: label2 });
-    }
-    async cardCheckpoints() {
-      const r = await transport.get("/card/checkpoints", { charKey: this.botKey });
-      return r.checkpoints ?? [];
-    }
-    async renameCardCheckpoint(id, label2) {
-      await transport.post("/card/checkpoint/rename", { charKey: this.botKey, id, label: label2 });
-    }
-    async deleteCardCheckpoint(id) {
-      await transport.post("/card/checkpoint/delete", { charKey: this.botKey, id });
-    }
-    async clearCardCheckpoints(keep = 0) {
-      const r = await transport.post("/card/checkpoint/clear", { charKey: this.botKey, keep });
-      return r.deleted;
-    }
-    async cardRestore(id) {
-      await transport.post("/card/checkpoint/restore", { charKey: this.botKey, id });
-      this.bump();
-      void this.refreshBotChanges();
-    }
-    /** The host update a card patch calls for, or null when nothing differs. */
-    cardUpdateFrom(patch, whole) {
-      const update = {};
-      if (patch.fields.length) update.fields = patch.fields;
-      if (whole || patch.alternateGreetings.changed) update.alternateGreetings = patch.alternateGreetings.list;
-      if (whole || patch.globalLore.changed) update.globalLore = patch.globalLore.list;
-      if (whole || patch.customscript.changed) update.customscript = patch.customscript.list;
-      if (whole || patch.triggerscript.changed) update.triggerscript = patch.triggerscript.list;
-      if (patch.assets && (whole || patch.assets.changed)) {
-        update.emotionImages = patch.assets.emotionImages;
-        update.additionalAssets = patch.assets.additionalAssets;
-        update.ccAssets = patch.assets.ccAssets;
-      }
-      if (!whole) {
-        update.before = {
-          alternateGreetings: patch.alternateGreetings.before,
-          globalLore: patch.globalLore.before,
-          customscript: patch.customscript.before,
-          triggerscript: patch.triggerscript.before,
-          emotionImages: patch.assets?.before?.emotionImages,
-          additionalAssets: patch.assets?.before?.additionalAssets,
-          ccAssets: patch.assets?.before?.ccAssets
-        };
-      }
-      return Object.keys(update).length ? update : null;
-    }
-    /**
-     * Push the working card into RisuAI and, on success, move the baseline.
-     *
-     * Unlike the chat flow (where the bar orchestrates write → commit), the
-     * whole sequence lives here because two callers need it - the bot bar and
-     * an approved host_card_writeback - and they must not drift apart.
-     */
-    async cardWriteBack(progress = () => {
-    }) {
-      return foregroundWrite((report) => this.performCardWriteBack((text2) => {
-        report(text2);
-        progress(text2);
-      }));
-    }
-    async performCardWriteBack(progress) {
-      if (!this.isLiveBot) {
-        throw new Error("\uBC18\uC601\uC740 RisuAI\uC5D0\uC11C \uC774 \uBD07\uC774 \uC120\uD0DD\uB418\uC5B4 \uC788\uC5B4\uC57C \uD569\uB2C8\uB2E4. RisuAI\uC5D0\uC11C \uBD07\uC744 \uC120\uD0DD\uD55C \uB4A4 \uD328\uB110\uC744 \uB2E4\uC2DC \uC5F4\uC5B4 \uC8FC\uC138\uC694");
-      }
-      const slot = await currentSlot();
-      const patch = await this.cardPatch();
-      if (!patch.full) {
-        throw new Error("\uAD6C\uBC84\uC804 \uC5C5\uB85C\uB4DC \uC0C1\uD0DC\uC758 \uCE74\uB4DC\uB77C \uBC18\uC601\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4. \uD328\uB110\uC744 \uB2EB\uC558\uB2E4 \uB2E4\uC2DC \uC5F4\uC5B4 \uC8FC\uC138\uC694");
-      }
-      const update = this.cardUpdateFrom(patch, false);
-      if (!update) return { applied: 0, mode: "noop", verified: true };
-      await this.resolveStagedAssets(update, progress);
-      const current3 = await currentSlot();
-      if (current3.characterIndex !== slot.characterIndex) throw new Error("\uC774\uBBF8\uC9C0 \uC5C5\uB85C\uB4DC \uC911 \uC120\uD0DD\uB41C \uBD07\uC774 \uBC14\uB00C\uC5C8\uC2B5\uB2C8\uB2E4. \uBBF8\uBC18\uC601 \uBCC0\uACBD\uC744 \uBCF4\uC874\uD588\uC2B5\uB2C8\uB2E4.");
-      progress("\uC774\uBBF8\uC9C0 \uC900\uBE44 \uC644\uB8CC \xB7 \uCE74\uB4DC \uC800\uC7A5 \uBC0F \uBC18\uC601 \uACB0\uACFC \uD655\uC778 \uC911\u2026");
-      const r = await writeCharacter(slot.characterIndex, patch.chaId, update);
-      if (!r.verified) {
-        return { applied: r.applied, mode: r.mode, verified: false, ...r.drift ? { drift: r.drift } : {} };
-      }
-      progress("RisuAI \uBC18\uC601 \uD655\uC778 \uC644\uB8CC \xB7 \uC791\uC5C5\uBCF8\uC744 \uB3D9\uAE30\uD654\uD558\uB294 \uC911\u2026");
-      await this.cardCommit("\uBC18\uC601 \uC9C1\uC804");
-      await this.rereadCard();
-      return { applied: r.applied, mode: r.mode, verified: true };
-    }
-    /**
-     * The card landed in RisuAI, so stop holding a copy of it.
-     *
-     * The old flow moved the baseline onto the working copy and kept both. The
-     * diff went to zero and our copy stayed behind, and from that moment it
-     * drifted from RisuAI again - which is what made a later re-open show
-     * untouched rows as edits. Re-reading is the whole fix: after this the
-     * working copy IS RisuAI's current card, with no history to go stale.
-     *
-     * Scoped to the card: a chat's pending edits are none of this write's
-     * business and must not be discarded with it.
-     */
-    async rereadCard() {
-      const wanted = this.activeChat?.chatId ?? "";
-      const key = this.activeChatKey;
-      await this.readHost();
-      if (this.slot && this.character) {
-        const chats = Array.isArray(this.character.chats) ? this.character.chats : [];
-        const at = wanted ? chats.findIndex((c) => String(c?.id ?? "") === wanted) : -1;
-        await this.upload(at < 0 ? { cardReset: true } : { cardReset: true, chatIndex: at });
-        if (key && this.workspace?.chats.some((c) => c.chatKey === key)) this.activeChatKey = key;
-      }
-      this.epoch += 1;
-      this.emit();
-    }
-    /**
-     * The chat twin of rereadCard.
-     *
-     * It has to re-read the chat that was written, not whichever one RisuAI has
-     * open: taking the live chat here would ingest a chat nobody edited and
-     * leave the edited one holding a baseline one write behind.
-     */
-    async rereadChat() {
-      const wanted = this.activeChat?.chatId ?? "";
-      const key = this.activeChatKey;
-      await this.readHost();
-      if (this.slot && this.character) {
-        const chats = Array.isArray(this.character.chats) ? this.character.chats : [];
-        const at = wanted ? chats.findIndex((c) => String(c?.id ?? "") === wanted) : -1;
-        await this.upload(at < 0 ? { chatReset: true } : { chatReset: true, chatIndex: at });
-        if (key && this.workspace?.chats.some((c) => c.chatKey === key)) this.activeChatKey = key;
-      }
-      if (this.activeChatKey) await this.loadTurns();
-      this.epoch += 1;
-      this.emit();
-    }
-    /** Resolve local asset snapshots only when the user writes the card. */
-    async resolveStagedAssets(update, progress) {
-      const pending2 = /* @__PURE__ */ new Set();
-      const collect2 = (value) => {
-        if (typeof value === "string" && value.startsWith("assets/hina-pending-")) pending2.add(value);
-      };
-      for (const row of update.emotionImages ?? []) if (Array.isArray(row)) collect2(row[1]);
-      for (const row of update.additionalAssets ?? []) if (Array.isArray(row)) collect2(row[1]);
-      for (const row of update.ccAssets ?? []) if (row && typeof row === "object") collect2(row.uri);
-      const resolved = /* @__PURE__ */ new Map();
-      let done = 0;
-      if (pending2.size) progress(`RisuAI \uC774\uBBF8\uC9C0 \uB4F1\uB85D 0/${pending2.size} \xB7 \uCE74\uB4DC \uC800\uC7A5 \uB300\uAE30`);
-      const charKey = this.botKey;
-      await boundedAssets([...pending2], async (key) => {
-        const bytes = await transport.getBinary("/assets/blob", { key });
-        const realKey = await Risuai.saveAsset(bytes);
-        if (!realKey || typeof realKey !== "string" || realKey.startsWith("assets/hina-pending-")) throw new Error("RisuAI\uAC00 \uC5D0\uC14B \uC800\uC7A5 \uD0A4\uB97C \uBC18\uD658\uD558\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4. \uBBF8\uBC18\uC601 \uBCC0\uACBD\uC740 \uBCF4\uC874\uB429\uB2C8\uB2E4.");
-        resolved.set(key, realKey);
-        await transport.post("/assets/adopt", { charKey, sourceKey: key, key: realKey });
-        progress(`RisuAI \uC774\uBBF8\uC9C0 \uB4F1\uB85D ${++done}/${pending2.size} \xB7 \uCE74\uB4DC \uC800\uC7A5 \uB300\uAE30`);
-      });
-      const replace = (value) => typeof value === "string" ? resolved.get(value) ?? value : value;
-      if (update.emotionImages) update.emotionImages = update.emotionImages.map((row) => Array.isArray(row) ? [row[0], replace(row[1]), ...row.slice(2)] : row);
-      if (update.additionalAssets) update.additionalAssets = update.additionalAssets.map((row) => Array.isArray(row) ? [row[0], replace(row[1]), ...row.slice(2)] : row);
-      if (update.ccAssets) update.ccAssets = update.ccAssets.map((row) => row && typeof row === "object" ? { ...row, uri: replace(row.uri) } : row);
-    }
-    /**
-     * 새 봇으로 저장: keep editing this bot, and keep what it was.
-     *
-     * The bot as RisuAI holds it now - the baseline, untouched by the working
-     * copy - is cloned first as "<name> (백업)", chats included. Then the
-     * working copy is written into the live bot and becomes its baseline, so
-     * the workspace, snapshots and conversation carry on where they are. The
-     * opposite (clone the edited card, leave the original) put the user in a
-     * new bot with an empty workspace and the old one still pending.
-     */
-    async saveAsNewBot(backupName) {
-      return foregroundWrite((report) => this.performSaveAsNewBot(backupName, report));
-    }
-    async performSaveAsNewBot(backupName, progress) {
-      if (!this.slot) throw new Error("\uD638\uC2A4\uD2B8 \uC0C1\uD0DC\uB97C \uBA3C\uC800 \uC77D\uC5B4\uC57C \uD569\uB2C8\uB2E4");
-      const patch = await this.cardPatch();
-      if (!patch.full) {
-        throw new Error("\uAD6C\uBC84\uC804 \uC5C5\uB85C\uB4DC \uC0C1\uD0DC\uC758 \uCE74\uB4DC\uB77C \uC800\uC7A5\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4. \uD328\uB110\uC744 \uB2EB\uC558\uB2E4 \uB2E4\uC2DC \uC5F4\uC5B4 \uC8FC\uC138\uC694");
-      }
-      const family = this.workspace?.familyKey || this.activeCharKey;
-      progress("\uAE30\uC874 \uBD07\uC758 \uBC31\uC5C5\uC744 \uC800\uC7A5\uD558\uB294 \uC911\u2026");
-      const backupChaId = await cloneBot(this.slot.characterIndex, patch.chaId, backupName, {}, family);
-      const r = await this.performCardWriteBack(progress);
-      if (!r.verified) {
-        throw new Error("RisuAI \uAC00 \uCE74\uB4DC \uC4F0\uAE30\uB97C \uBC1B\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4" + (r.drift ? ` (${r.drift})` : "") + ". \uBC31\uC5C5 \uBD07\uC740 \uB9CC\uB4E4\uC5B4\uC84C\uC9C0\uB9CC \uC774 \uBD07\uC5D0\uB294 \uBC18\uC601\uB418\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4 - \uD3B8\uC9D1 \uB0B4\uC6A9\uC740 \uADF8\uB300\uB85C \uC788\uC2B5\uB2C8\uB2E4.");
-      }
-      return { backupChaId, applied: r.applied, mode: r.mode };
-    }
-    /** Create a clone bot in RisuAI carrying the working card. */
-    async cloneBot(name) {
-      return foregroundWrite((report) => this.performCloneBot(name, report));
-    }
-    async performCloneBot(name, progress) {
-      if (!this.slot) throw new Error("\uD638\uC2A4\uD2B8 \uC0C1\uD0DC\uB97C \uBA3C\uC800 \uC77D\uC5B4\uC57C \uD569\uB2C8\uB2E4");
-      const patch = await this.cardPatch();
-      if (!patch.full) {
-        throw new Error("\uAD6C\uBC84\uC804 \uC5C5\uB85C\uB4DC \uC0C1\uD0DC\uC758 \uCE74\uB4DC\uB77C \uBCF5\uC81C\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4. \uD328\uB110\uC744 \uB2EB\uC558\uB2E4 \uB2E4\uC2DC \uC5F4\uC5B4 \uC8FC\uC138\uC694");
-      }
-      const update = this.cardUpdateFrom(patch, true) ?? {};
-      await this.resolveStagedAssets(update, progress);
-      progress("\uC774\uBBF8\uC9C0 \uC900\uBE44 \uC644\uB8CC \xB7 \uBCF5\uC81C \uBD07 \uC800\uC7A5 \uC911\u2026");
-      const family = this.workspace?.familyKey || this.activeCharKey;
-      const chaId = await cloneBot(this.slot.characterIndex, patch.chaId, name, update, family);
-      await this.cardCommit("\uBCF5\uC81C \uC9C1\uC804");
-      return chaId;
-    }
-  };
+        downloadBytes(name, bytes, mime);
+        hint.textContent = "\uB2E4\uC6B4\uB85C\uB4DC\uAC00 \uC2DC\uC791\uB418\uC9C0 \uC54A\uC73C\uBA74 \uBE0C\uB77C\uC6B0\uC800\uC758 \uB2E4\uC6B4\uB85C\uB4DC \uBAA9\uB85D\uC744 \uD655\uC778\uD558\uC138\uC694.";
+      })();
+    });
+    box.append(el("div", { class: "row", style: { marginTop: "4px" } }, [save]), hint);
+    return bytes.byteLength;
+  }
+  var card, hideTimer;
+  var init_download = __esm({
+    "src/ui/download.ts"() {
+      "use strict";
+      init_dom();
+      init_host();
+      init_blobimg();
+      init_store();
+      card = null;
+      hideTimer = null;
+    }
+  });
+
+  // src/state.ts
   async function fileBase64(file) {
     const buf = new Uint8Array(await file.arrayBuffer());
     let bin = "";
@@ -2618,11 +1901,1601 @@
     }
     return btoa(bin);
   }
-  var state = new AppState();
+  var StudioFiles, AppState, state;
+  var init_state = __esm({
+    "src/state.ts"() {
+      "use strict";
+      init_transport();
+      init_host();
+      init_operation();
+      init_assets();
+      StudioFiles = class {
+        // --- NovelAI ---------------------------------------------------------------
+        /** Two meters and the library path. Anlas and the v5 quota are separate. */
+        async status() {
+          return await transport.get("/studio/status");
+        }
+        /** Does this model id exist? Free — the service is the list (docs/09 §5). */
+        async modelCheck(model) {
+          return await transport.post("/studio/model-check", { model });
+        }
+        /** Danbooru-tag autocomplete, proxied from NovelAI's suggest endpoint.
+         * Empty when no token is configured - the editor types fine without it. */
+        async suggestTags(q, model = "") {
+          return await transport.get("/studio/tag-suggest", { q, model });
+        }
+        async items(area) {
+          return await transport.get("/studio/list", { area });
+        }
+        /** One card's front matter: the enable toggle, the order, name, description. */
+        async setMeta(path, set) {
+          return await transport.post("/studio/meta", { path, set });
+        }
+        /** What a batch would produce, before anything is spent. */
+        async plan(spec3) {
+          return await transport.post("/studio/plan", spec3);
+        }
+        async generate(spec3) {
+          return await transport.post("/studio/generate", spec3);
+        }
+        async job(id) {
+          return await transport.get("/studio/job", { id });
+        }
+        /** The last few batches, newest first - the queue view's 최근 작업 list. */
+        async jobs() {
+          return await transport.get("/studio/job");
+        }
+        async cancelJob(id) {
+          await transport.post("/studio/job/cancel", { id });
+        }
+        /** The running job's newest intermediate frame (streaming generation).
+         * `{}` when there is none; `{rev}` alone when `since` already has it. */
+        /** `w` > 0 asks for a frame scaled to that width as WebP (`img`/`mime`)
+         * instead of the full PNG (§1-55). */
+        async jobPreview(id, since, w = 0) {
+          return await transport.get("/studio/job/preview", { id, since: String(since), w: w > 0 ? String(w) : void 0 });
+        }
+        /** Split filenames into fields, and say which ones did not match. */
+        async parseNames(names, pattern = "") {
+          return await transport.post("/studio/parse", { names, pattern });
+        }
+        /** One folder's images, gathered into groups to choose between. */
+        async group(folder, pattern = "", groupBy = "emotion") {
+          return await transport.post("/studio/group", { folder, pattern, groupBy });
+        }
+        async groupProfile(folder) {
+          return await transport.post("/studio/group", { folder, operation: "profile" });
+        }
+        async saveSelection(folder, selections) {
+          await transport.post("/studio/selection", { folder, selections });
+        }
+        async renamePlan(folder, rename) {
+          return await transport.post("/studio/rename", { folder, rename });
+        }
+        async exportSelected(folder, character, pattern = "", groupBy = "emotion", preview2 = false) {
+          return await transport.post("/studio/export", { folder, character, pattern, groupBy, preview: preview2 });
+        }
+        async assetRules(project = "") {
+          return await transport.get("/studio/asset-rules", { project, charKey: state.activeCharKey });
+        }
+        async saveAssetRules(document2) {
+          return await transport.post("/studio/asset-rules", { project: document2.project, document: document2 });
+        }
+        async assetMatch(project, path) {
+          return await transport.post("/studio/asset-match", { project, path });
+        }
+        async assetBind(path, asset) {
+          return await transport.post("/studio/asset-bind", { path, asset });
+        }
+        async assetCoverage(project, character, folder) {
+          return await transport.post("/studio/asset-coverage", { project, character, folder });
+        }
+        /** Check library images for adoption (PNG-ness, size). Nothing is copied:
+         *  the library and the workspace are one space now. */
+        async stage(charKey, paths) {
+          return await transport.post("/studio/stage", { charKey, paths });
+        }
+      };
+      AppState = class {
+        health = null;
+        connectError = "";
+        slot = null;
+        slotError = "";
+        character = null;
+        liveChat = null;
+        workspace = null;
+        /** What the last upload's merge did, until the shell has announced it. */
+        lastMerge = null;
+        /** Which half of the panel is open ('chat' | 'bot'); the shell keeps it current, the agent is told. */
+        editMode = "bot";
+        /** The active tab id, verbatim from the shell. The studio is a third screen
+         * (neither half), and the agent has to be told the truth about it. */
+        activeTab = "";
+        activeChatKey = "";
+        botChanges = null;
+        /**
+         * The background asset importer's progress for the live bot, or null before
+         * it has started. The bot bar's 반영 gate and the picker's bot card both
+         * read it; `syncAssets` drives it.
+         */
+        assetSync = null;
+        assetSyncCtl = null;
+        assetSyncEmitAt = 0;
+        /** Why the current emit fired, for listeners that want to do less than a
+         *  full render: 'assetSync' = a progress tick of a RUNNING sync (the picker
+         *  used to rebuild its whole page - portrait reload included - every 400ms,
+         *  which read as flicker). Settled syncs emit with no reason. Set only for
+         *  the synchronous span of emit(). */
+        emitReason = "";
+        turns = [];
+        totalTurns = 0;
+        warnings = [];
+        changes = null;
+        /**
+         * out/ files the agent made that the files tab has not shown yet. The tab
+         * button wears the count as a badge; opening the tab clears it.
+         */
+        unseenOutputs = [];
+        /** A file the user asked to see (from an agent log line); the files tab opens it. */
+        openFileRequest = null;
+        /** A tab an approved agent proposal asked for; the shell moves there. */
+        openTabRequest = null;
+        /** Bumped when the workspace listing changed; the files tab reloads when it moved. */
+        filesRev = 0;
+        /**
+         * Bumped whenever the working state changed underneath the tabs - a
+         * restore, a reset, a commit, an approved proposal. Tabs that cache what
+         * they show (lorebook, memory) compare it to the value they last rendered
+         * and reload when it moved, instead of each tab having to know every path
+         * that can change its data.
+         */
+        epoch = 0;
+        /** Invalidates asynchronous work belonging to a previously selected bot. */
+        contextRevision = 0;
+        hostReadSequence = 0;
+        resetBotContext() {
+          void this.stopAgent();
+          this.contextRevision += 1;
+          this.cancelAssetSync();
+          this.assetSync = null;
+          this.workspace = null;
+          this.lastMerge = null;
+          this.activeChatKey = "";
+          this.sessionId = "";
+          this.turns = [];
+          this.totalTurns = 0;
+          this.warnings = [];
+          this.changes = null;
+          this.botChanges = null;
+          this.unseenOutputs = [];
+          this.openFileRequest = null;
+          this.openTabRequest = null;
+          this.openStudioRequest = null;
+          this.promptRequest = null;
+          this.filesRev += 1;
+          this.epoch += 1;
+        }
+        listeners = /* @__PURE__ */ new Set();
+        onChange(fn) {
+          this.listeners.add(fn);
+          return () => this.listeners.delete(fn);
+        }
+        emit() {
+          for (const fn of [...this.listeners]) {
+            try {
+              fn();
+            } catch (e) {
+              console.log("[risu-hina] listener failed", e);
+            }
+          }
+        }
+        get activeChat() {
+          return this.workspace?.chats.find((c) => c.chatKey === this.activeChatKey) ?? null;
+        }
+        /** The workspace is per bot, so file and upload calls address the character. */
+        get activeCharKey() {
+          return this.workspace?.charKey ?? "";
+        }
+        /**
+         * What the bot tabs address. Always the live workspace: the panel's
+         * standing premise is "select the bot in RisuAI, then open the plugin" -
+         * other bots are not writable anyway (mainline silently drops writes to a
+         * non-selected character), so there is no browsing of other workspaces.
+         */
+        get botKey() {
+          return this.activeCharKey;
+        }
+        /** Whether a live, writable bot is behind the bot tabs right now. */
+        get isLiveBot() {
+          return !!this.activeCharKey && !!this.character;
+        }
+        // --- connection ---------------------------------------------------------
+        async connect() {
+          this.connectError = "";
+          try {
+            this.health = await transport.connect();
+            return true;
+          } catch (e) {
+            this.health = null;
+            this.connectError = e instanceof Error ? e.message : String(e);
+            return false;
+          } finally {
+            this.emit();
+          }
+        }
+        // --- host ---------------------------------------------------------------
+        /** Read the selected character and its chats from RisuAI. */
+        async readHost() {
+          const sequence = ++this.hostReadSequence;
+          this.slotError = "";
+          try {
+            const slot = await currentSlot();
+            const character = await readCharacter(slot.characterIndex);
+            const liveChat = await readChat(slot);
+            if (sequence !== this.hostReadSequence) return false;
+            const before = this.character?.chaId || this.workspace?.charId;
+            const changed = before && character.chaId ? before !== character.chaId : this.slot !== null && this.slot.characterIndex !== slot.characterIndex;
+            if (changed) this.resetBotContext();
+            this.slot = slot;
+            this.character = character;
+            this.liveChat = liveChat;
+            return true;
+          } catch (e) {
+            if (sequence !== this.hostReadSequence) return false;
+            this.resetBotContext();
+            this.slot = null;
+            this.character = null;
+            this.liveChat = null;
+            this.slotError = e instanceof Error ? e.message : String(e);
+            return false;
+          } finally {
+            this.emit();
+          }
+        }
+        /**
+         * Upload the character's chats to the backend.
+         *
+         * Only the currently open chat is sent by default. A 394-turn chat is several
+         * megabytes, and sending every chat of a character on every panel open would
+         * make the common case pay for the rare one. `chatIndex` sends one other
+         * chat of the same bot instead - what clicking a row in the picker does.
+         */
+        async upload(opts = {}) {
+          if (!this.slot || !this.character) throw new Error("\uD638\uC2A4\uD2B8 \uC0C1\uD0DC\uB97C \uBA3C\uC800 \uC77D\uC5B4\uC57C \uD569\uB2C8\uB2E4");
+          const revision = this.contextRevision;
+          const chats = Array.isArray(this.character.chats) ? this.character.chats : [];
+          const payload = {
+            charId: this.character.chaId ?? "",
+            characterIndex: this.slot.characterIndex,
+            card: cardOf(this.character),
+            // The card is the full character now (minus chats); the backend records
+            // this and refuses card write-backs built on whitelist-era uploads.
+            cardFull: true,
+            force: Boolean(opts.force),
+            // Scoped re-reads after a write-back: the card half or the chat half,
+            // never both, so writing one does not discard edits pending in the other.
+            cardReset: Boolean(opts.cardReset),
+            chatReset: Boolean(opts.chatReset)
+          };
+          const liveId = String(this.liveChat?.id ?? "");
+          const isLive = (c) => !!liveId && String(c?.id ?? "") === liveId;
+          if (opts.allChats) {
+            payload.chats = chats.map((c, i) => ({ chat: c, chatIndex: i, live: isLive(c) }));
+          } else if (opts.chatIndex !== void 0 && opts.chatIndex !== this.slot.chatIndex) {
+            const chat = await this.chatAt(opts.chatIndex);
+            payload.chats = [{ chat, chatIndex: opts.chatIndex, live: isLive(chat) }];
+          } else {
+            payload.chats = [{ chat: this.liveChat, chatIndex: this.slot.chatIndex, live: true }];
+          }
+          const res = await transport.upload("/workspace", payload);
+          if (revision !== this.contextRevision) throw new Error("\uBD07 \uC120\uD0DD\uC774 \uBCC0\uACBD\uB418\uC5C8\uC2B5\uB2C8\uB2E4");
+          this.workspace = res.workspace;
+          this.lastMerge = res.workspace.merge ?? null;
+          if (!this.activeChatKey || !this.workspace.chats.some((c) => c.chatKey === this.activeChatKey)) {
+            this.activeChatKey = this.workspace.chats[0]?.chatKey ?? "";
+          }
+          this.emit();
+          void this.refreshBotChanges();
+          void this.syncAssets();
+          return res.workspace;
+        }
+        /**
+         * One of the bot's chats, read fresh from RisuAI.
+         *
+         * `getChatFromIndex` is asked first and the character object we already hold
+         * is only the fallback: PocketRisu hands `readCharacter` **stubs** for chats
+         * it has not loaded yet (see host.cloneBot), and a stub has no `message`
+         * list at all - uploading one would look like a chat that lost every turn.
+         * A stub from both sources throws, and the picker says what to do about it.
+         */
+        async chatAt(chatIndex) {
+          const characterIndex = this.slot.characterIndex;
+          try {
+            return await readChat({ characterIndex, chatIndex });
+          } catch (e) {
+            const fallback = (this.character?.chats ?? [])[chatIndex];
+            if (fallback && Array.isArray(fallback.message)) return fallback;
+            throw e;
+          }
+        }
+        /**
+         * Open one of the bot's chats for editing, loading it if it is not in the
+         * workspace yet.
+         *
+         * The panel used to refuse any chat but the one RisuAI had open ("open that
+         * chat in RisuAI and press 🔄"), while 이 봇의 모든 챗 불러오기 right below
+         * loaded all of them and let you edit exactly those chats - so the refusal
+         * was a detour, not a constraint. RisuAI hands us every chat of the selected
+         * character, and the write-back addresses the chat by its own id and index
+         * (see `chatSlot`), so a chat that is not on screen in RisuAI is as editable
+         * as the one that is.
+         */
+        async openChat(chatIndex) {
+          const ws = await this.upload({ chatIndex });
+          const info = ws.chats[0];
+          if (info?.skipped) {
+            throw new Error(info.skipped);
+          }
+          const key = info?.chatKey ?? "";
+          if (key) this.activeChatKey = key;
+          await this.loadTurns();
+        }
+        /**
+         * Which chat of the live bot a write-back addresses.
+         *
+         * Not necessarily the one RisuAI has open: the picker loads any chat of the
+         * bot. The index recorded at upload time is only a hint - chats get
+         * reordered, deleted and copied in RisuAI while the panel is open - so the
+         * chat **id** is what is trusted and the index is re-derived from a fresh
+         * read. `writeChat` then re-reads at that index and refuses the write if the
+         * id moved again between here and there.
+         */
+        async chatSlot() {
+          if (!this.slot) throw new Error("\uD638\uC2A4\uD2B8 \uC0C1\uD0DC\uB97C \uBA3C\uC800 \uC77D\uC5B4\uC57C \uD569\uB2C8\uB2E4");
+          const wanted = this.activeChat?.chatId ?? "";
+          if (!wanted || wanted === (this.liveChat?.id ?? "")) return this.slot;
+          const characterIndex = this.slot.characterIndex;
+          const char = await readCharacter(characterIndex);
+          const chats = Array.isArray(char.chats) ? char.chats : [];
+          const chatIndex = chats.findIndex((c) => String(c?.id ?? "") === wanted);
+          if (chatIndex < 0) {
+            throw new HostError(
+              "missing",
+              "RisuAI\uC5D0\uC11C \uC774 \uCC57\uC744 \uCC3E\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4 (\uC9C0\uC6CC\uC84C\uC744 \uC218 \uC788\uC2B5\uB2C8\uB2E4). \u{1F504} \uB85C \uB2E4\uC2DC \uC77D\uC5B4 \uC8FC\uC138\uC694"
+            );
+          }
+          return { characterIndex, chatIndex };
+        }
+        // --- assets (background importer) ----------------------------------------
+        /**
+         * Start (or restart) the asset sync for the live bot. A run already going
+         * for the same bot is left alone unless `force`; a run for another bot is
+         * cancelled first. Progress lands in `assetSync` and is emitted at most a
+         * few times a second - the picker re-renders on every emit.
+         */
+        syncAssets(force = false) {
+          const ck = this.activeCharKey;
+          const char = this.character;
+          if (!ck || !char) return;
+          if (this.assetSync && this.assetSync.charKey === ck && syncBusy(this.assetSync) && !force) return;
+          this.cancelAssetSync();
+          const web = transport.hostPlatform === "web";
+          const revision = this.contextRevision;
+          this.assetSyncCtl = syncAssets(char, ck, {
+            hubPull: web,
+            concurrency: web ? 4 : 6
+          }, (p) => {
+            if (revision !== this.contextRevision || ck !== this.activeCharKey) return;
+            this.assetSync = p;
+            const now = Date.now();
+            const settled = !syncBusy(p);
+            if (settled || now - this.assetSyncEmitAt > 400) {
+              this.assetSyncEmitAt = now;
+              this.emitReason = settled ? "" : "assetSync";
+              try {
+                this.emit();
+              } finally {
+                this.emitReason = "";
+              }
+            }
+          });
+          this.assetSync = null;
+          void this.assetSyncCtl.done.then((p) => {
+            if (p.phase === "error") void clientLog("warn", "asset sync failed", { error: p.error, charKey: ck });
+          });
+        }
+        cancelAssetSync() {
+          if (this.assetSyncCtl) {
+            this.assetSyncCtl.cancel();
+            this.assetSyncCtl = null;
+          }
+        }
+        /** Why 반영 has to wait for the assets, or null when it need not. */
+        get assetGateReason() {
+          const p = this.assetSync;
+          if (!p || p.charKey !== this.activeCharKey) return null;
+          if (syncBusy(p)) return describeSync(p) + " \u2014 \uB05D\uB098\uBA74 \uBC18\uC601\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4";
+          if (p.phase === "error") return describeSync(p) + " \u2014 \uBD07 \uCE74\uB4DC\uC5D0\uC11C \uB2E4\uC2DC \uB3D9\uAE30\uD654\uD574 \uC8FC\uC138\uC694";
+          if (p.phase === "cancelled") return "\uC5D0\uC14B \uC784\uD3EC\uD2B8\uAC00 \uC911\uB2E8\uB418\uC5C8\uC2B5\uB2C8\uB2E4 \u2014 \uBD07 \uCE74\uB4DC\uC5D0\uC11C \uB2E4\uC2DC \uB3D9\uAE30\uD654\uD574 \uC8FC\uC138\uC694";
+          return null;
+        }
+        // --- turns --------------------------------------------------------------
+        async loadTurns(chatKey = this.activeChatKey, start = 0, limit = 2e3) {
+          if (!chatKey) return;
+          const revision = this.contextRevision;
+          const res = await transport.get(
+            "/turns",
+            { chatKey, start, limit }
+          );
+          if (revision !== this.contextRevision) return;
+          this.activeChatKey = chatKey;
+          this.turns = res.turns;
+          this.totalTurns = res.total;
+          this.emit();
+          void this.refreshChanges();
+        }
+        /**
+         * Refresh the pending-change summary for the active chat.
+         *
+         * Cheap on the server (counts only) and called after anything that can
+         * change it, so the shared bar never shows a count that is one save behind.
+         * A failure here is not worth surfacing - the next call fixes it.
+         */
+        async refreshChanges() {
+          if (!this.activeChatKey) {
+            this.changes = null;
+            this.emit();
+            return null;
+          }
+          const revision = this.contextRevision;
+          const key = this.activeChatKey;
+          try {
+            const result = await transport.get("/changes", { chatKey: key });
+            if (revision !== this.contextRevision || key !== this.activeChatKey) return null;
+            this.changes = result;
+          } catch {
+            if (revision !== this.contextRevision || key !== this.activeChatKey) return null;
+            this.changes = null;
+          }
+          this.emit();
+          return this.changes;
+        }
+        /** The working state changed underneath the tabs; tell them to reload. */
+        bump() {
+          this.epoch += 1;
+          this.emit();
+        }
+        /** The workspace listing changed (a file was made, uploaded or deleted). */
+        touchFiles(newOutputs = []) {
+          for (const p of newOutputs) if (!this.unseenOutputs.includes(p)) this.unseenOutputs.push(p);
+          this.filesRev += 1;
+          this.emit();
+        }
+        /** A screen asked the agent something on the user's behalf (검수's AI 재검수,
+         * §1-46): the agent panel sends it as if typed. */
+        promptRequest = null;
+        requestPrompt(text2) {
+          this.promptRequest = text2;
+          this.emit();
+        }
+        requestOpenFile(path) {
+          this.openFileRequest = path;
+          this.emit();
+        }
+        /** The agent (or a strip in the chat) asked for the studio's 검수 tab on
+         * a folder: the shell switches tabs, the studio consumes the folder. */
+        openStudioRequest = null;
+        /** `focus`: the images just made (the chat's 검수 strip, §1-62) - the
+         * selector unfolds their group and rings them. */
+        requestOpenStudio(folder, view2, focus) {
+          this.openStudioRequest = { folder, view: view2, focus };
+          this.emit();
+        }
+        /** Everything unseen has been seen (a reset; the files tab no longer
+         * calls this on open - a folder is seen when it is LOOKED AT, §1-36). */
+        markOutputsSeen() {
+          if (!this.unseenOutputs.length) return;
+          this.unseenOutputs = [];
+          this.emit();
+        }
+        /** The files directly in `dir` have been looked at: their dots go, the
+         * tab badge shrinks by that many. Files deeper down stay unseen. */
+        markOutputsSeenIn(dir) {
+          const before = this.unseenOutputs.length;
+          this.unseenOutputs = this.unseenOutputs.filter((p) => {
+            const cut = p.lastIndexOf("/");
+            return (cut < 0 ? "" : p.slice(0, cut)) !== dir;
+          });
+          if (this.unseenOutputs.length !== before) this.emit();
+        }
+        /** Whether an unseen file sits in `dir` or anywhere below it. */
+        hasUnseenUnder(dir) {
+          return this.unseenOutputs.some((p) => p.startsWith(dir + "/"));
+        }
+        /**
+         * Edit one turn and patch it locally instead of reloading everything.
+         *
+         * A 394-turn chat's /turns response was measured at 3.4MB. Refetching it
+         * after every single-turn save made each keystroke-to-saved round trip cost
+         * megabytes, which is most of why the editor felt sluggish. The server
+         * already told us the write succeeded and we know both sides of the text, so
+         * the one row that changed is updated in place.
+         */
+        async editTurn(msgId, before, after) {
+          await transport.post("/turn", { chatKey: this.activeChatKey, msgId, before, after });
+          const t = this.turns.find((x) => x.msgId === msgId);
+          if (t) {
+            if (t.original === null || t.original === void 0) t.original = before;
+            t.body = after;
+            t.changed = !t.isNew && t.original !== after;
+            this.emit();
+            void this.refreshChanges();
+          } else {
+            await this.loadTurns();
+          }
+        }
+        async bulk(params) {
+          return await transport.post("/turn/bulk", { chatKey: this.activeChatKey, ...params });
+        }
+        async deleteRange(fromSeq, toSeq) {
+          await transport.post("/turn/delete", { chatKey: this.activeChatKey, fromSeq, toSeq });
+          await this.loadTurns();
+        }
+        async patch() {
+          return await transport.get("/patch", { chatKey: this.activeChatKey });
+        }
+        /**
+         * Make the current state the new baseline, after RisuAI confirmed the write.
+         *
+         * Called only on success, so a failed write-back leaves the diff intact and
+         * the retry meaningful.
+         */
+        /**
+         * The chat landed in RisuAI: snapshot it, then re-read what RisuAI now
+         * holds. See `rereadCard` for why the working copy is not kept.
+         */
+        async commit(label2) {
+          return foregroundWrite((report) => {
+            report("RisuAI \uBC18\uC601 \uD655\uC778 \uC644\uB8CC \xB7 \uB300\uD654 \uC791\uC5C5\uBCF8\uC744 \uB3D9\uAE30\uD654\uD558\uB294 \uC911\u2026");
+            return this.performCommit(label2);
+          });
+        }
+        async performCommit(label2) {
+          const r = await transport.post(
+            "/commit",
+            { chatKey: this.activeChatKey, label: label2 }
+          );
+          await this.rereadChat();
+          this.bump();
+          return r;
+        }
+        /** Discard the chat's working copy - turns, local lorebook and memory as
+         * one unit. Returns what went, for the confirmation line. */
+        async reset() {
+          const r = await transport.post(
+            "/reset",
+            { chatKey: this.activeChatKey }
+          );
+          await this.loadTurns();
+          this.bump();
+          void this.refreshChanges();
+          return r.discarded ?? { turns: 0, lore: 0, memory: 0, total: 0 };
+        }
+        /** `auto` marks the plugin's own protective snapshots (before a bulk
+         * replace or a range delete): internal backups, not the version list. */
+        async checkpoint(label2, auto = false) {
+          await transport.post("/checkpoint", { chatKey: this.activeChatKey, label: label2, ...auto ? { auto } : {} });
+        }
+        /** Pending state across the whole bot - the leave guard's one call. */
+        async dirtySummary() {
+          if (!this.activeCharKey) return null;
+          try {
+            return await transport.get("/workspace/dirty", { charKey: this.activeCharKey });
+          } catch {
+            return null;
+          }
+        }
+        async checkpoints() {
+          const res = await transport.get("/checkpoints", { chatKey: this.activeChatKey });
+          return res.checkpoints ?? [];
+        }
+        async renameCheckpoint(id, label2) {
+          await transport.post("/checkpoint/rename", { chatKey: this.activeChatKey, id, label: label2 });
+        }
+        async deleteCheckpoint(id) {
+          await transport.post("/checkpoint/delete", { chatKey: this.activeChatKey, id });
+        }
+        /** Delete this chat's snapshots, keeping the `keep` newest. */
+        async clearCheckpoints(keep = 0) {
+          const r = await transport.post("/checkpoint/clear", { chatKey: this.activeChatKey, keep });
+          return r.deleted;
+        }
+        async restore(id) {
+          const r = await transport.post(
+            "/checkpoint/restore",
+            { chatKey: this.activeChatKey, id }
+          );
+          await this.loadTurns();
+          this.bump();
+          return r;
+        }
+        // --- write back ---------------------------------------------------------
+        /**
+         * Push the working state into RisuAI - turns, this chat's lorebook and its
+         * memory - in one host write.
+         *
+         * Which path the turns take is decided by the backend's `structural` flag,
+         * not by inspecting the lists: once turns were inserted, deleted or
+         * reordered, a per-turn patch cannot express the result and the whole array
+         * has to go. Lorebook and memory are sent whole whenever anything in them
+         * differs from the baseline; the host write replaces the field either way.
+         */
+        async writeBack() {
+          return foregroundWrite((report) => {
+            report("\uB300\uD654 \uC800\uC7A5 \uBC0F \uBC18\uC601 \uACB0\uACFC \uD655\uC778 \uC911\u2026");
+            return this.performWriteBack();
+          });
+        }
+        async performWriteBack() {
+          if (!this.slot) throw new Error("\uD638\uC2A4\uD2B8 \uC0C1\uD0DC\uB97C \uBA3C\uC800 \uC77D\uC5B4\uC57C \uD569\uB2C8\uB2E4");
+          const patch = await this.patch();
+          const update = this.updateFrom(patch, false);
+          if (!update) {
+            return { mode: "noop", applied: 0, lore: 0, memory: 0, warnings: patch.warnings, verified: true };
+          }
+          const slot = await this.chatSlot();
+          const r = await writeChat(slot, this.activeChat?.chatId || this.liveChat?.id, update);
+          return {
+            mode: r.mode,
+            applied: r.applied,
+            lore: patch.lore?.changed ?? 0,
+            memory: patch.memory?.changed ?? 0,
+            warnings: patch.warnings,
+            verified: r.verified,
+            ...r.drift ? { drift: r.drift } : {}
+          };
+        }
+        /**
+         * The host update a patch calls for, or null when nothing differs.
+         *
+         * `whole` asks for every part regardless of whether it changed - a copy has
+         * to carry the working state in full, not only the parts that moved.
+         */
+        updateFrom(patch, whole) {
+          const update = {};
+          if (patch.structural) {
+            if (!patch.messages) throw new Error("\uAD6C\uC870 \uBCC0\uACBD\uC778\uB370 \uBC31\uC5D4\uB4DC\uAC00 \uBA54\uC2DC\uC9C0 \uBC30\uC5F4\uC744 \uC8FC\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4");
+            update.messages = patch.messages;
+          } else if (patch.edits.length) {
+            update.edits = patch.edits;
+          }
+          if (patch.lore && (whole || patch.lore.changed)) update.localLore = patch.lore.localLore;
+          if (patch.memory && (whole || patch.memory.changed)) update.memory = patch.memory.data;
+          if (!whole) {
+            if (update.messages) update.beforeTurns = patch.beforeTurns;
+            if (update.localLore) update.loreBefore = patch.lore?.before;
+          }
+          return Object.keys(update).length ? update : null;
+        }
+        async saveCopy(name) {
+          if (!this.slot) throw new Error("\uD638\uC2A4\uD2B8 \uC0C1\uD0DC\uB97C \uBA3C\uC800 \uC77D\uC5B4\uC57C \uD569\uB2C8\uB2E4");
+          const patch = await this.patch();
+          const update = this.updateFrom(patch, true) ?? {};
+          if (!update.messages) update.messages = await this.messagesFromExport() ?? void 0;
+          delete update.edits;
+          await saveAsCopy(await this.chatSlot(), update, name);
+        }
+        async messagesFromExport() {
+          const res = await transport.get(
+            "/export/risuchat",
+            { chatKey: this.activeChatKey }
+          );
+          return res.envelope?.data?.message ?? null;
+        }
+        // --- exports ------------------------------------------------------------
+        async exportMarkdown() {
+          return await transport.get("/export/md", { chatKey: this.activeChatKey });
+        }
+        async exportRisuchat() {
+          return await transport.get("/export/risuchat", { chatKey: this.activeChatKey });
+        }
+        // --- agent --------------------------------------------------------------
+        sessionId = "";
+        /** `limit` = only the last n shown messages: a phone parses 40, not a
+         * whole afternoon (the 164MB /session of §1-55 was history rows, now
+         * excluded server-side; the limit keeps the rest small too). */
+        async agentSession(sessionId, limit = 0) {
+          const revision = this.contextRevision;
+          const chatKey = this.activeChatKey;
+          const r = await transport.get("/session", {
+            chatKey,
+            sessionId: sessionId || void 0,
+            limit: limit > 0 ? limit : void 0
+          });
+          if (revision !== this.contextRevision || chatKey !== this.activeChatKey) throw new Error("\uBD07 \uB610\uB294 \uCC57 \uC120\uD0DD\uC774 \uBCC0\uACBD\uB418\uC5C8\uC2B5\uB2C8\uB2E4");
+          this.sessionId = r.session?.sessionId ?? "";
+          return r;
+        }
+        async workPlan(mode2, revision) {
+          if (!this.sessionId) await this.newAgentSession();
+          const sid = this.sessionId;
+          const context = this.contextRevision;
+          const args = { sessionId: sid, chatKey: this.activeChatKey, ...mode2 ? { mode: mode2, revision } : {} };
+          const result = mode2 ? await transport.post("/agent/plan", args) : await transport.get("/agent/plan", args);
+          if (sid !== this.sessionId || context !== this.contextRevision) throw new Error("\uB300\uD654\uAC00 \uBCC0\uACBD\uB418\uC5C8\uC2B5\uB2C8\uB2E4");
+          return result;
+        }
+        async agentSessions() {
+          const r = await transport.get("/sessions", {
+            chatKey: this.activeChatKey
+          });
+          return r.sessions ?? [];
+        }
+        /** Start a fresh conversation; the previous one stays in the history list. */
+        async newAgentSession() {
+          const revision = this.contextRevision;
+          const chatKey = this.activeChatKey;
+          const r = await transport.post("/session", { chatKey });
+          if (revision !== this.contextRevision || chatKey !== this.activeChatKey) throw new Error("\uBD07 \uB610\uB294 \uCC57 \uC120\uD0DD\uC774 \uBCC0\uACBD\uB418\uC5C8\uC2B5\uB2C8\uB2E4");
+          this.sessionId = r.sessionId;
+        }
+        /**
+         * Send one instruction, yielding NDJSON events as they arrive.
+         *
+         * A session is created lazily so opening the tab costs nothing; only actually
+         * talking to the agent creates one.
+         */
+        async *agentChat(prompt, signal) {
+          if (!this.sessionId) {
+            await this.newAgentSession();
+          }
+          if (signal?.aborted) return;
+          yield* transport.stream("/chat", {
+            sessionId: this.sessionId,
+            prompt,
+            mode: this.activeTab === "studio" ? "studio" : this.editMode
+          }, signal);
+        }
+        /** 중단 as a request the backend hears at once (§1-44): the aborted fetch
+         * alone reaches it only at the turn's next write when a proxy sits between. */
+        async stopAgent() {
+          if (!this.sessionId) return;
+          try {
+            await transport.post("/agent/stop", { sessionId: this.sessionId });
+          } catch {
+          }
+        }
+        // --- merge conflicts ------------------------------------------------------
+        /** Rows where our copy and RisuAI's both moved since the last open. */
+        async conflicts(scope = "both") {
+          const q = {};
+          if (scope !== "card" && this.activeChatKey) q.chatKey = this.activeChatKey;
+          if (scope !== "chat" && this.activeCharKey) q.charKey = this.activeCharKey;
+          if (!Object.keys(q).length) return [];
+          const r = await transport.get("/conflicts", q);
+          return r.conflicts ?? [];
+        }
+        async resolveConflict(kind, id, choice) {
+          await transport.post("/conflict/resolve", { kind, id, choice });
+          await this.afterResolve();
+        }
+        async resolveAllConflicts(choice, scope) {
+          const r = await transport.post("/conflict/resolve", {
+            all: true,
+            choice,
+            ...scope === "chat" ? { chatKey: this.activeChatKey } : { charKey: this.activeCharKey }
+          });
+          await this.afterResolve();
+          return r.resolved ?? 0;
+        }
+        async afterResolve() {
+          if (this.activeChatKey) await this.loadTurns();
+          await this.refreshChanges();
+          await this.refreshBotChanges();
+          this.epoch += 1;
+          this.emit();
+        }
+        async stagedEdits() {
+          const r = await transport.get("/staged", { chatKey: this.activeChatKey });
+          return r.staged ?? [];
+        }
+        async approveStaged(approve) {
+          const r = await transport.post(
+            "/approve",
+            { chatKey: this.activeChatKey, all: true, approve, mode: this.activeTab === "studio" ? "studio" : this.editMode }
+          );
+          void this.refreshChanges();
+          return r;
+        }
+        // --- settings -----------------------------------------------------------
+        async getConfig() {
+          return await transport.get("/config");
+        }
+        async setConfig(patch) {
+          await transport.post("/config", { config: patch });
+        }
+        async testAgent(kind = "general") {
+          return await transport.post("/config/test", { section: kind === "search" ? "agent_search" : "agent" }, 24e4);
+        }
+        // --- web search provider (what the search agent searches with) ------------
+        async websearch() {
+          return await transport.get("/websearch");
+        }
+        async saveWebsearch(patch) {
+          await transport.post("/config", { config: { websearch: patch } });
+        }
+        /** One real search in the configured mode. Native mode probes several
+         *  shapes at up to a minute each, so the wait is generous. */
+        async testWebsearch(query) {
+          return await transport.post("/websearch/test", { query }, 33e4);
+        }
+        // --- the vision tool (§1-42) ---------------------------------------------
+        async vision() {
+          return await transport.get("/vision");
+        }
+        async saveVision(patch) {
+          await transport.post("/config", { config: { vision: patch } });
+        }
+        /** One real look in the configured mode (the native probe goes through
+         * the agent model, which can take a while). */
+        async testVision(path = "", question = "") {
+          return await transport.post("/vision/test", { path, question }, 18e4);
+        }
+        // --- diagnostics ----------------------------------------------------------
+        async logs(limit = 300, level = "") {
+          return await transport.get(
+            `/logs?limit=${limit}` + (level ? "&level=" + encodeURIComponent(level) : "")
+          );
+        }
+        async diagnostics() {
+          return await transport.get("/diag");
+        }
+        // --- backend update -------------------------------------------------------
+        async updateCheck() {
+          return await transport.post("/update/check", {}, 45e3);
+        }
+        /**
+         * Install and restart.
+         *
+         * The backend replies and then exits on a timer, so the connection this
+         * request rode in on is the last one that version answers. Polling /health
+         * afterwards is how the panel finds out it came back - and finding out is
+         * the point, because a restart that fails looks exactly like a slow one.
+         */
+        async updateApply() {
+          return await transport.post("/update/apply", {}, 3e5);
+        }
+        async waitForBackend(seconds = 60) {
+          const deadline = Date.now() + seconds * 1e3;
+          let lastError = "";
+          while (Date.now() < deadline) {
+            await new Promise((r) => setTimeout(r, 2e3));
+            try {
+              const h = await transport.connect();
+              this.health = h;
+              this.emit();
+              return h.version;
+            } catch (e) {
+              lastError = e instanceof Error ? e.message : String(e);
+            }
+          }
+          throw new Error("\uBC31\uC5D4\uB4DC\uAC00 \uB2E4\uC2DC \uC62C\uB77C\uC624\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4: " + lastError);
+        }
+        // --- the global file space --------------------------------------------------
+        //
+        // ONE tree every bot shares (projects/ · studio/ · hina/<봇이름>/). No
+        // charKey: the scope is the space itself. The per-bot SYSTEM view (frozen
+        // originals, machinery) is read-only and reached with `system: 1`.
+        /** Save a space file to the user's disk through the browser - with the
+         * wait shown and a phone-safe save (ui/download, §1-62). */
+        async downloadFile(path) {
+          const name = path.split("/").pop() || "file";
+          const { saveToDevice: saveToDevice2 } = await Promise.resolve().then(() => (init_download(), download_exports));
+          return await saveToDevice2(
+            name,
+            (onProgress) => transport.postBinaryProgress("/files/download", { path }, onProgress),
+            name.endsWith(".charx") ? "application/zip" : "application/octet-stream"
+          );
+        }
+        // --- charx ------------------------------------------------------------------
+        async charxPreview() {
+          return await transport.get("/charx/preview", { charKey: this.botKey });
+        }
+        /** Build out/<name>.charx on the backend from the working card + store. */
+        async charxBuild(opts = {}) {
+          const r = await transport.post("/charx/build", {
+            charKey: this.botKey,
+            allowMissing: !!opts.allowMissing,
+            name: opts.name || ""
+          }, 6e5);
+          this.touchFiles([r.path]);
+          return r;
+        }
+        async files(prefix = "", hidden = false, bot = "") {
+          const q = [];
+          if (prefix) q.push("prefix=" + encodeURIComponent(prefix));
+          if (hidden) q.push("hidden=1");
+          if (bot) q.push("bot=" + encodeURIComponent(bot));
+          let r = null;
+          for (let attempt = 0; attempt < 3; attempt++) {
+            try {
+              r = await transport.get("/files" + (q.length ? "?" + q.join("&") : ""));
+              break;
+            } catch (error) {
+              if (!(error instanceof BackendError) || ![0, 502, 503, 504].includes(error.status) || attempt === 2) throw error;
+              await new Promise((resolve) => setTimeout(resolve, 300 * (attempt + 1)));
+            }
+          }
+          if (!r || !Array.isArray(r.areas)) {
+            throw new Error("\uD30C\uC77C \uBAA9\uB85D\uC744 \uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4 (\uBC31\uC5D4\uB4DC\uAC00 \uC7AC\uC2DC\uC791 \uC911\uC774\uAC70\uB098 \uC751\uB2F5\uC774 \uBE44\uC5B4 \uC788\uC74C) \u2014 \uC7A0\uC2DC \uB4A4 \uC0C8\uB85C\uACE0\uCE68\uD558\uC138\uC694.");
+          }
+          return r;
+        }
+        /** This bot's SYSTEM directory: frozen originals and machinery, read-only. */
+        async systemFiles() {
+          return await transport.get("/files?system=1&charKey=" + encodeURIComponent(this.activeCharKey));
+        }
+        async readFile(path) {
+          return await transport.get("/files/read?path=" + encodeURIComponent(path));
+        }
+        async uploadFile(name, content, base64 = false, dir = "", extract = false) {
+          return await transport.upload("/files/upload", base64 ? { name, base64: content, dir, extract } : { name, text: content, dir });
+        }
+        /**
+         * A batch of files as one binary body: [u32 header length][JSON header][bytes…].
+         * `entries[i].bytes` go in order; the header carries name, rel (subfolder
+         * under `dir`) and size for each.
+         */
+        async uploadBatch(dir, entries, extract = false) {
+          const header = new TextEncoder().encode(JSON.stringify({
+            dir,
+            extract,
+            files: entries.map((e) => ({ name: e.name, rel: e.rel, size: e.bytes.byteLength }))
+          }));
+          const total = 4 + header.byteLength + entries.reduce((n, e) => n + e.bytes.byteLength, 0);
+          const body = new Uint8Array(total);
+          new DataView(body.buffer).setUint32(0, header.byteLength);
+          body.set(header, 4);
+          let at = 4 + header.byteLength;
+          for (const e of entries) {
+            body.set(e.bytes, at);
+            at += e.bytes.byteLength;
+          }
+          return await transport.postBytes("/files/upload-many", body);
+        }
+        /**
+         * One piece of a file too large to send in a single body.
+         *
+         * A character's .charx runs to 140-180MB, and every single-shot path caps
+         * far below that: the backend's body limit, and a relay in front of it.
+         * Pieces are appended server-side at the offset they claim, and the file
+         * only appears in the workspace once the last one lands.
+         */
+        async uploadChunk(dir, part, bytes) {
+          const header = new TextEncoder().encode(JSON.stringify({ dir, ...part }));
+          const body = new Uint8Array(4 + header.byteLength + bytes.byteLength);
+          new DataView(body.buffer).setUint32(0, header.byteLength);
+          body.set(header, 4);
+          body.set(bytes, 4 + header.byteLength);
+          return await transport.postBytes("/files/upload-chunk", body);
+        }
+        /** Several files or a folder as one zip, handed to the browser to save. */
+        async downloadZip(paths, name) {
+          const file = name.endsWith(".zip") ? name : name + ".zip";
+          const { saveToDevice: saveToDevice2 } = await Promise.resolve().then(() => (init_download(), download_exports));
+          return await saveToDevice2(
+            file,
+            (onProgress) => transport.postBinaryProgress("/files/zip", { paths, name }, onProgress),
+            "application/zip"
+          );
+        }
+        /** Size and pixel dimensions of a space file without its bytes (§1-55). */
+        async fileStat(path) {
+          return await transport.post("/files/stat", { path });
+        }
+        /** Raw bytes of a space file (an image preview, a thumbnail). POST: see tab-assets. */
+        async fileBytes(path, timeoutMs) {
+          return await transport.postBinary("/files/download", { path }, timeoutMs);
+        }
+        /** A small server-side WebP preview (Pillow); the server streams the
+         * original bytes instead when it cannot thumb, so callers need no fallback. */
+        async fileThumb(path, w = 360) {
+          return await transport.postBinary("/files/thumb", { path, w }, 25e3);
+        }
+        async mkdirFile(path) {
+          await transport.post("/files/mkdir", { path });
+        }
+        async moveFile(from, to) {
+          return await transport.post("/files/move", { from, to });
+        }
+        /** Server-side copy (the context menu's 복사/붙여넣기). A taken name counts
+         * up to `이름 (2)` on the backend rather than refusing. */
+        async copyFile(from, to) {
+          return await transport.post("/files/copy", { from, to });
+        }
+        async deleteFile(path) {
+          await transport.post("/files/delete", { path });
+        }
+        // Batched verbs: ONE round trip for N paths; a name clash or a missing
+        // file lands in `failed` while the rest of the batch proceeds.
+        async moveFiles(paths, to) {
+          return await transport.post("/files/move", { paths, to });
+        }
+        async copyFiles(paths, to) {
+          return await transport.post("/files/copy", { paths, to });
+        }
+        async deleteFiles(paths) {
+          return await transport.post("/files/delete", { paths });
+        }
+        async cleanFiles(areas) {
+          return await transport.post("/files/clean", { charKey: this.activeCharKey, areas });
+        }
+        /** The asset studio's domain calls (files go through the shared methods). */
+        studio = new StudioFiles();
+        // --- agent presets --------------------------------------------------------
+        async presets() {
+          return await transport.get("/presets");
+        }
+        providerCache = null;
+        /** Provider profiles (cached for the panel's lifetime - they are code, not data). */
+        async providers() {
+          if (this.providerCache) return this.providerCache;
+          const r = await transport.get("/catalog/providers");
+          this.providerCache = r.providers ?? [];
+          return this.providerCache;
+        }
+        /** Make a preset the one the agent runs. Writes through to the live config. */
+        async selectPreset(id) {
+          const r = await transport.post("/presets/select", { id });
+          return r.selected;
+        }
+        async savePreset(name, values, id) {
+          const r = await transport.post("/presets/save", { name, values, id });
+          return r.preset;
+        }
+        async capturePreset(name) {
+          const r = await transport.post("/presets/capture", { name });
+          return r.preset;
+        }
+        async applyPreset(id) {
+          const r = await transport.post("/presets/apply", { id });
+          return r.applied;
+        }
+        async deletePreset(id) {
+          await transport.post("/presets/delete", { id });
+        }
+        /** Only the search agent may run without a preset. */
+        async deselectPreset(kind) {
+          await transport.post("/presets/deselect", { kind });
+        }
+        // --- API keys ---------------------------------------------------------------
+        async apiKeys() {
+          return await transport.get("/keys");
+        }
+        async saveApiKey(values, id) {
+          const r = await transport.post("/keys/save", { values, id });
+          return r.key;
+        }
+        async deleteApiKey(id) {
+          await transport.post("/keys/delete", { id });
+        }
+        /** models.dev, through the backend's daily cache. */
+        async modelCatalog(q, provider = "", refresh3 = false) {
+          return await transport.get("/models/catalog", { q, provider, refresh: refresh3 ? "1" : "" });
+        }
+        // --- OpenAI subscription (codex) login -----------------------------------------
+        async codexStatus() {
+          return await transport.get("/codex/status");
+        }
+        async codexLoginStart() {
+          return await transport.post("/codex/login/start", {});
+        }
+        async codexLoginStatus(state2) {
+          return await transport.get("/codex/login/status", { state: state2 });
+        }
+        async codexLoginComplete(redirect, state2 = "") {
+          return await transport.post("/codex/login/complete", { redirect, state: state2 });
+        }
+        async codexLogout() {
+          await transport.post("/codex/logout", {});
+        }
+        // --- permission prompts (shell / pip while a turn runs) --------------------------
+        async permits() {
+          if (!this.sessionId) return [];
+          const r = await transport.get("/permits", { sessionId: this.sessionId });
+          return r.pending ?? [];
+        }
+        async decidePermit(id, allow, always = false) {
+          await transport.post("/permits/decide", { id, allow, always });
+        }
+        // --- skills ---------------------------------------------------------------
+        async skills() {
+          return await transport.get("/skills");
+        }
+        async skill(id) {
+          const r = await transport.get("/skills/get", { id });
+          return r.skill;
+        }
+        async saveSkill(v) {
+          const r = await transport.post("/skills/save", v);
+          return r.skill;
+        }
+        /** A file inside a skill folder. Binary-safe: everything goes as base64. */
+        async putSkillFile(id, path, file) {
+          const body = await fileBase64(file);
+          return await transport.post("/skills/file", { id, path, body, base64: true });
+        }
+        async deleteSkillFile(id, path) {
+          await transport.post("/skills/file/delete", { id, path });
+        }
+        /** Register a file as a skill. The extension decides whether it is a script. */
+        /** Import a skill from a file: .md/.py become a skill of their own, .zip is a whole folder. */
+        async uploadSkill(file) {
+          const zip = /\.zip$/i.test(file.name);
+          const payload = zip ? { filename: file.name, body: await fileBase64(file), base64: true } : { filename: file.name, body: await file.text() };
+          const r = await transport.post("/skills/upload", payload);
+          return r.skill;
+        }
+        async toggleSkill(id, enabled) {
+          await transport.post("/skills/toggle", { id, enabled });
+        }
+        async deleteSkill(id) {
+          await transport.post("/skills/delete", { id });
+        }
+        async skillPrompt() {
+          return await transport.get("/skills/preview");
+        }
+        // --- the approval queue ----------------------------------------------------
+        async actions() {
+          const r = await transport.get(
+            "/actions?chatKey=" + encodeURIComponent(this.activeChatKey)
+          );
+          return r.actions;
+        }
+        /** Every pending proposal of the open bot, whichever chat it rode on. */
+        async actionsForBot() {
+          if (!this.activeCharKey) return [];
+          const r = await transport.get(
+            "/actions?charKey=" + encodeURIComponent(this.activeCharKey)
+          );
+          return r.actions;
+        }
+        /** Reject every pending proposal of the open bot. */
+        async clearBotActions() {
+          const r = await transport.post("/actions/clear", { charKey: this.activeCharKey });
+          this.bump();
+          void this.refreshChanges();
+          void this.refreshBotChanges();
+          return r.cleared;
+        }
+        /**
+         * Approve or reject one proposal, and carry it out if it is ours to do.
+         *
+         * The backend runs what it can and hands back a `host` block for what it
+         * cannot - writing to the live chat and saving a copy both need APIs that
+         * only exist inside this iframe. The result is reported back either way, so
+         * a failure here does not leave a queue entry claiming success.
+         */
+        async decideAction(id, approve, chatKey = "") {
+          const r = await transport.post("/actions/decide", {
+            chatKey: chatKey || this.activeChatKey,
+            id,
+            approve,
+            mode: this.activeTab === "studio" ? "studio" : this.editMode
+          });
+          if (!r.approved) return "\uAC70\uC808\uD588\uC2B5\uB2C8\uB2E4.";
+          if (!r.host) {
+            this.bump();
+            await Promise.all([this.refreshChanges(), this.refreshBotChanges()]);
+            return String(r.result ?? "\uC2E4\uD589\uD588\uC2B5\uB2C8\uB2E4.");
+          }
+          try {
+            let detail = "";
+            if (r.host.kind === "host_writeback") {
+              const out = await this.writeBack();
+              detail = `${out.applied}\uAC74\uC744 RisuAI\uC5D0 \uBC18\uC601\uD588\uC2B5\uB2C8\uB2E4.`;
+            } else if (r.host.kind === "host_save_copy") {
+              const name = String(r.host.args?.name || "") || "\uC0AC\uBCF8";
+              await this.saveCopy(name);
+              detail = `\u201C${name}\u201D \uC73C\uB85C \uBCF5\uC0AC\uBCF8\uC744 \uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4.`;
+            } else if (r.host.kind === "host_card_writeback") {
+              const out = await this.cardWriteBack();
+              if (!out.verified) throw new Error(out.drift || "RisuAI \uC800\uC7A5 \uACB0\uACFC\uB97C \uD655\uC778\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4. \uBBF8\uBC18\uC601 \uBCC0\uACBD\uC744 \uBCF4\uC874\uD588\uC2B5\uB2C8\uB2E4.");
+              detail = out.mode === "noop" ? "\uCE74\uB4DC\uC5D0 \uBC18\uC601\uD560 \uBCC0\uACBD\uC774 \uC5C6\uC5C8\uC2B5\uB2C8\uB2E4." : `\uCE74\uB4DC \uBCC0\uACBD ${out.applied}\uAC74\uC744 RisuAI\uC5D0 \uBC18\uC601\uD588\uC2B5\uB2C8\uB2E4.`;
+            } else if (r.host.kind === "host_clone_bot") {
+              const name = String(r.host.args?.name || "") || "\uBCF5\uC81C \uBD07";
+              await this.cloneBot(name);
+              detail = `\uBCF5\uC81C \uBD07 \u201C${name}\u201D \uC744 \uB9CC\uB4E4\uC5C8\uC2B5\uB2C8\uB2E4. RisuAI \uBAA9\uB85D\uC5D0\uC11C \uD655\uC778\uD574 \uC8FC\uC138\uC694.`;
+            } else if (r.host.kind === "host_open_tab") {
+              const tab = String(r.host.args?.tab || "");
+              this.openTabRequest = tab;
+              this.emit();
+              detail = "\uD0ED\uC744 \uC774\uB3D9\uD588\uC2B5\uB2C8\uB2E4.";
+            } else if (r.host.kind === "host_asset_add" || r.host.kind === "host_asset_replace") {
+              throw new Error("\uC5D0\uC14B \uC2B9\uC778 \uBC29\uC2DD\uC774 \uBCC0\uACBD\uB418\uC5C8\uC2B5\uB2C8\uB2E4. \uBC31\uC5D4\uB4DC\uB97C \uAC31\uC2E0\uD558\uACE0 \uC81C\uC548\uC744 \uB2E4\uC2DC \uB9CC\uB4E4\uC5B4 \uC8FC\uC138\uC694. \uC5D0\uC14B\uC740 \uBC18\uC601\uD560 \uB54C \uB4F1\uB85D\uB429\uB2C8\uB2E4.");
+            } else if (r.host.kind === "host_asset_add_many") {
+              throw new Error("\uC5D0\uC14B \uC2B9\uC778 \uBC29\uC2DD\uC774 \uBCC0\uACBD\uB418\uC5C8\uC2B5\uB2C8\uB2E4. \uBC31\uC5D4\uB4DC\uB97C \uAC31\uC2E0\uD558\uACE0 \uC81C\uC548\uC744 \uB2E4\uC2DC \uB9CC\uB4E4\uC5B4 \uC8FC\uC138\uC694. \uC5D0\uC14B\uC740 \uBC18\uC601\uD560 \uB54C \uB4F1\uB85D\uB429\uB2C8\uB2E4.");
+            } else {
+              throw new Error("\uD50C\uB7EC\uADF8\uC778\uC774 \uBAA8\uB974\uB294 \uC791\uC5C5\uC785\uB2C8\uB2E4: " + r.host.kind);
+            }
+            await transport.post("/actions/complete", { chatKey: chatKey || this.activeChatKey, id, ok: true, detail });
+            return detail;
+          } catch (e) {
+            const why = e instanceof Error ? e.message : String(e);
+            await transport.post("/actions/complete", {
+              chatKey: chatKey || this.activeChatKey,
+              id,
+              ok: false,
+              detail: why
+            });
+            throw e;
+          }
+        }
+        // --- lorebook -------------------------------------------------------------
+        /** The agent's save tool runs only for an explicit user writeback request. */
+        async requestedCardWriteback(id, charKey, chatKey) {
+          if (!id || !charKey) throw new Error("\uC798\uBABB\uB41C \uBD07 \uC800\uC7A5 \uC694\uCCAD\uC785\uB2C8\uB2E4.");
+          if (this.botKey !== charKey) {
+            const detail = "\uC694\uCCAD\uD55C \uBD07\uACFC \uD604\uC7AC \uBD07\uC774 \uB2EC\uB77C \uC800\uC7A5\uD558\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4.";
+            await transport.post("/actions/complete", { chatKey, id, ok: false, detail });
+            throw new Error(detail);
+          }
+          try {
+            return await this.decideAction(id, true, chatKey);
+          } catch (error) {
+            await transport.post("/actions/complete", { chatKey, id, ok: false, detail: String(error) }).catch(() => {
+            });
+            throw error;
+          }
+        }
+        async lore(scope) {
+          const q = "/lore?charKey=" + encodeURIComponent(this.activeCharKey) + (scope ? "&scope=" + scope : "");
+          const r = await transport.get(q);
+          return r.lore;
+        }
+        async saveLore(id, entry) {
+          await transport.post("/lore/update", { charKey: this.activeCharKey, id, entry });
+          void this.refreshChanges();
+        }
+        async addLore(entry, scope) {
+          const r = await transport.post("/lore", {
+            charKey: this.activeCharKey,
+            entry,
+            scope,
+            chatKey: scope === "local" ? this.activeChatKey : void 0
+          });
+          void this.refreshChanges();
+          return r.id;
+        }
+        async deleteLore(id) {
+          await transport.post("/lore/delete", { charKey: this.activeCharKey, id });
+          void this.refreshChanges();
+        }
+        async moveLore(id, toSeq) {
+          await transport.post("/lore/move", { charKey: this.activeCharKey, id, toSeq });
+          void this.refreshChanges();
+          void this.refreshBotChanges();
+        }
+        // --- long-term memory -----------------------------------------------------
+        async memory() {
+          return await transport.get("/memory?chatKey=" + encodeURIComponent(this.activeChatKey));
+        }
+        async saveMemory(id, body, title) {
+          const r = await transport.post("/memory/update", {
+            chatKey: this.activeChatKey,
+            id,
+            body,
+            title
+          });
+          void this.refreshChanges();
+          return r.item;
+        }
+        async addMemory(kind, body, title = "") {
+          const r = await transport.post("/memory/add", {
+            chatKey: this.activeChatKey,
+            kind,
+            body,
+            title
+          });
+          void this.refreshChanges();
+          return r.item;
+        }
+        async deleteMemory(id) {
+          await transport.post("/memory/delete", { chatKey: this.activeChatKey, id });
+          void this.refreshChanges();
+        }
+        // --- the card (bot editing) -----------------------------------------------
+        //
+        // The char-key twins of the chat calls above, addressed by `botKey`. Editing
+        // works on any workspace the backend knows; only 반영/복제 touch RisuAI and
+        // carry the isLiveBot gate.
+        /** Same contract as refreshChanges, for the bot bar. */
+        async refreshBotChanges() {
+          if (!this.botKey) {
+            this.botChanges = null;
+            this.emit();
+            return null;
+          }
+          const revision = this.contextRevision;
+          const key = this.botKey;
+          try {
+            const result = await transport.get("/card/changes", { charKey: key });
+            if (revision !== this.contextRevision || key !== this.botKey) return null;
+            this.botChanges = result;
+          } catch {
+            if (revision !== this.contextRevision || key !== this.botKey) return null;
+            this.botChanges = null;
+          }
+          this.emit();
+          return this.botChanges;
+        }
+        /** The store's view of the bot's assets: the manifest with state and size. */
+        async assetList() {
+          return await transport.get("/assets/list", { charKey: this.botKey });
+        }
+        async cardFields() {
+          return await transport.get("/card", { charKey: this.botKey });
+        }
+        async cardScripts(kind) {
+          const r = await transport.get("/card/scripts", { charKey: this.botKey, kind });
+          return r.items ?? [];
+        }
+        async saveCardField(id, body) {
+          const r = await transport.post("/card/field", { charKey: this.botKey, id, body });
+          void this.refreshBotChanges();
+          return r.item;
+        }
+        async addGreeting(body) {
+          const r = await transport.post("/card/greeting", { charKey: this.botKey, body });
+          void this.refreshBotChanges();
+          return r.item;
+        }
+        async deleteGreeting(id) {
+          await transport.post("/card/greeting/delete", { charKey: this.botKey, id });
+          void this.refreshBotChanges();
+        }
+        async saveScript(id, entry) {
+          await transport.post("/card/script", { charKey: this.botKey, id, entry });
+          void this.refreshBotChanges();
+        }
+        async addScript(kind, entry) {
+          const r = await transport.post("/card/script/add", { charKey: this.botKey, kind, entry });
+          void this.refreshBotChanges();
+          return r.id;
+        }
+        async deleteScript(id) {
+          await transport.post("/card/script/delete", { charKey: this.botKey, id });
+          void this.refreshBotChanges();
+        }
+        async moveScript(id, toSeq) {
+          await transport.post("/card/script/move", { charKey: this.botKey, id, toSeq });
+        }
+        async cardPatch() {
+          return await transport.get("/card/patch", { charKey: this.botKey, stagedAssets: "1" });
+        }
+        async cardCommit(label2) {
+          await transport.post("/card/commit", { charKey: this.botKey, label: label2 });
+          this.bump();
+          void this.refreshBotChanges();
+        }
+        /** Discard the card's working copy, global lorebook included. Returns how
+         * many pending changes went, for the confirmation line. */
+        async cardReset() {
+          const r = await transport.post("/card/reset", { charKey: this.botKey });
+          this.bump();
+          void this.refreshBotChanges();
+          return r.discarded ?? 0;
+        }
+        async cardCheckpoint(label2) {
+          await transport.post("/card/checkpoint", { charKey: this.botKey, label: label2 });
+        }
+        async cardCheckpoints() {
+          const r = await transport.get("/card/checkpoints", { charKey: this.botKey });
+          return r.checkpoints ?? [];
+        }
+        async renameCardCheckpoint(id, label2) {
+          await transport.post("/card/checkpoint/rename", { charKey: this.botKey, id, label: label2 });
+        }
+        async deleteCardCheckpoint(id) {
+          await transport.post("/card/checkpoint/delete", { charKey: this.botKey, id });
+        }
+        async clearCardCheckpoints(keep = 0) {
+          const r = await transport.post("/card/checkpoint/clear", { charKey: this.botKey, keep });
+          return r.deleted;
+        }
+        async cardRestore(id) {
+          await transport.post("/card/checkpoint/restore", { charKey: this.botKey, id });
+          this.bump();
+          void this.refreshBotChanges();
+        }
+        /** The host update a card patch calls for, or null when nothing differs. */
+        cardUpdateFrom(patch, whole) {
+          const update = {};
+          if (patch.fields.length) update.fields = patch.fields;
+          if (whole || patch.alternateGreetings.changed) update.alternateGreetings = patch.alternateGreetings.list;
+          if (whole || patch.globalLore.changed) update.globalLore = patch.globalLore.list;
+          if (whole || patch.customscript.changed) update.customscript = patch.customscript.list;
+          if (whole || patch.triggerscript.changed) update.triggerscript = patch.triggerscript.list;
+          if (patch.assets && (whole || patch.assets.changed)) {
+            update.emotionImages = patch.assets.emotionImages;
+            update.additionalAssets = patch.assets.additionalAssets;
+            update.ccAssets = patch.assets.ccAssets;
+          }
+          if (!whole) {
+            update.before = {
+              alternateGreetings: patch.alternateGreetings.before,
+              globalLore: patch.globalLore.before,
+              customscript: patch.customscript.before,
+              triggerscript: patch.triggerscript.before,
+              emotionImages: patch.assets?.before?.emotionImages,
+              additionalAssets: patch.assets?.before?.additionalAssets,
+              ccAssets: patch.assets?.before?.ccAssets
+            };
+          }
+          return Object.keys(update).length ? update : null;
+        }
+        /**
+         * Push the working card into RisuAI and, on success, move the baseline.
+         *
+         * Unlike the chat flow (where the bar orchestrates write → commit), the
+         * whole sequence lives here because two callers need it - the bot bar and
+         * an approved host_card_writeback - and they must not drift apart.
+         */
+        async cardWriteBack(progress = () => {
+        }) {
+          return foregroundWrite((report) => this.performCardWriteBack((text2) => {
+            report(text2);
+            progress(text2);
+          }));
+        }
+        async performCardWriteBack(progress) {
+          if (!this.isLiveBot) {
+            throw new Error("\uBC18\uC601\uC740 RisuAI\uC5D0\uC11C \uC774 \uBD07\uC774 \uC120\uD0DD\uB418\uC5B4 \uC788\uC5B4\uC57C \uD569\uB2C8\uB2E4. RisuAI\uC5D0\uC11C \uBD07\uC744 \uC120\uD0DD\uD55C \uB4A4 \uD328\uB110\uC744 \uB2E4\uC2DC \uC5F4\uC5B4 \uC8FC\uC138\uC694");
+          }
+          const slot = await currentSlot();
+          const patch = await this.cardPatch();
+          if (!patch.full) {
+            throw new Error("\uAD6C\uBC84\uC804 \uC5C5\uB85C\uB4DC \uC0C1\uD0DC\uC758 \uCE74\uB4DC\uB77C \uBC18\uC601\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4. \uD328\uB110\uC744 \uB2EB\uC558\uB2E4 \uB2E4\uC2DC \uC5F4\uC5B4 \uC8FC\uC138\uC694");
+          }
+          const update = this.cardUpdateFrom(patch, false);
+          if (!update) return { applied: 0, mode: "noop", verified: true };
+          await this.resolveStagedAssets(update, progress);
+          const current3 = await currentSlot();
+          if (current3.characterIndex !== slot.characterIndex) throw new Error("\uC774\uBBF8\uC9C0 \uC5C5\uB85C\uB4DC \uC911 \uC120\uD0DD\uB41C \uBD07\uC774 \uBC14\uB00C\uC5C8\uC2B5\uB2C8\uB2E4. \uBBF8\uBC18\uC601 \uBCC0\uACBD\uC744 \uBCF4\uC874\uD588\uC2B5\uB2C8\uB2E4.");
+          progress("\uC774\uBBF8\uC9C0 \uC900\uBE44 \uC644\uB8CC \xB7 \uCE74\uB4DC \uC800\uC7A5 \uBC0F \uBC18\uC601 \uACB0\uACFC \uD655\uC778 \uC911\u2026");
+          const r = await writeCharacter(slot.characterIndex, patch.chaId, update);
+          if (!r.verified) {
+            return { applied: r.applied, mode: r.mode, verified: false, ...r.drift ? { drift: r.drift } : {} };
+          }
+          progress("RisuAI \uBC18\uC601 \uD655\uC778 \uC644\uB8CC \xB7 \uC791\uC5C5\uBCF8\uC744 \uB3D9\uAE30\uD654\uD558\uB294 \uC911\u2026");
+          await this.cardCommit("\uBC18\uC601 \uC9C1\uC804");
+          await this.rereadCard();
+          return { applied: r.applied, mode: r.mode, verified: true };
+        }
+        /**
+         * The card landed in RisuAI, so stop holding a copy of it.
+         *
+         * The old flow moved the baseline onto the working copy and kept both. The
+         * diff went to zero and our copy stayed behind, and from that moment it
+         * drifted from RisuAI again - which is what made a later re-open show
+         * untouched rows as edits. Re-reading is the whole fix: after this the
+         * working copy IS RisuAI's current card, with no history to go stale.
+         *
+         * Scoped to the card: a chat's pending edits are none of this write's
+         * business and must not be discarded with it.
+         */
+        async rereadCard() {
+          const wanted = this.activeChat?.chatId ?? "";
+          const key = this.activeChatKey;
+          await this.readHost();
+          if (this.slot && this.character) {
+            const chats = Array.isArray(this.character.chats) ? this.character.chats : [];
+            const at = wanted ? chats.findIndex((c) => String(c?.id ?? "") === wanted) : -1;
+            await this.upload(at < 0 ? { cardReset: true } : { cardReset: true, chatIndex: at });
+            if (key && this.workspace?.chats.some((c) => c.chatKey === key)) this.activeChatKey = key;
+          }
+          this.epoch += 1;
+          this.emit();
+        }
+        /**
+         * The chat twin of rereadCard.
+         *
+         * It has to re-read the chat that was written, not whichever one RisuAI has
+         * open: taking the live chat here would ingest a chat nobody edited and
+         * leave the edited one holding a baseline one write behind.
+         */
+        async rereadChat() {
+          const wanted = this.activeChat?.chatId ?? "";
+          const key = this.activeChatKey;
+          await this.readHost();
+          if (this.slot && this.character) {
+            const chats = Array.isArray(this.character.chats) ? this.character.chats : [];
+            const at = wanted ? chats.findIndex((c) => String(c?.id ?? "") === wanted) : -1;
+            await this.upload(at < 0 ? { chatReset: true } : { chatReset: true, chatIndex: at });
+            if (key && this.workspace?.chats.some((c) => c.chatKey === key)) this.activeChatKey = key;
+          }
+          if (this.activeChatKey) await this.loadTurns();
+          this.epoch += 1;
+          this.emit();
+        }
+        /** Resolve local asset snapshots only when the user writes the card. */
+        async resolveStagedAssets(update, progress) {
+          const pending2 = /* @__PURE__ */ new Set();
+          const collect2 = (value) => {
+            if (typeof value === "string" && value.startsWith("assets/hina-pending-")) pending2.add(value);
+          };
+          for (const row of update.emotionImages ?? []) if (Array.isArray(row)) collect2(row[1]);
+          for (const row of update.additionalAssets ?? []) if (Array.isArray(row)) collect2(row[1]);
+          for (const row of update.ccAssets ?? []) if (row && typeof row === "object") collect2(row.uri);
+          const resolved = /* @__PURE__ */ new Map();
+          let done = 0;
+          if (pending2.size) progress(`RisuAI \uC774\uBBF8\uC9C0 \uB4F1\uB85D 0/${pending2.size} \xB7 \uCE74\uB4DC \uC800\uC7A5 \uB300\uAE30`);
+          const charKey = this.botKey;
+          await boundedAssets([...pending2], async (key) => {
+            const bytes = await transport.getBinary("/assets/blob", { key });
+            const realKey = await Risuai.saveAsset(bytes);
+            if (!realKey || typeof realKey !== "string" || realKey.startsWith("assets/hina-pending-")) throw new Error("RisuAI\uAC00 \uC5D0\uC14B \uC800\uC7A5 \uD0A4\uB97C \uBC18\uD658\uD558\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4. \uBBF8\uBC18\uC601 \uBCC0\uACBD\uC740 \uBCF4\uC874\uB429\uB2C8\uB2E4.");
+            resolved.set(key, realKey);
+            await transport.post("/assets/adopt", { charKey, sourceKey: key, key: realKey });
+            progress(`RisuAI \uC774\uBBF8\uC9C0 \uB4F1\uB85D ${++done}/${pending2.size} \xB7 \uCE74\uB4DC \uC800\uC7A5 \uB300\uAE30`);
+          });
+          const replace = (value) => typeof value === "string" ? resolved.get(value) ?? value : value;
+          if (update.emotionImages) update.emotionImages = update.emotionImages.map((row) => Array.isArray(row) ? [row[0], replace(row[1]), ...row.slice(2)] : row);
+          if (update.additionalAssets) update.additionalAssets = update.additionalAssets.map((row) => Array.isArray(row) ? [row[0], replace(row[1]), ...row.slice(2)] : row);
+          if (update.ccAssets) update.ccAssets = update.ccAssets.map((row) => row && typeof row === "object" ? { ...row, uri: replace(row.uri) } : row);
+        }
+        /**
+         * 새 봇으로 저장: keep editing this bot, and keep what it was.
+         *
+         * The bot as RisuAI holds it now - the baseline, untouched by the working
+         * copy - is cloned first as "<name> (백업)", chats included. Then the
+         * working copy is written into the live bot and becomes its baseline, so
+         * the workspace, snapshots and conversation carry on where they are. The
+         * opposite (clone the edited card, leave the original) put the user in a
+         * new bot with an empty workspace and the old one still pending.
+         */
+        async saveAsNewBot(backupName) {
+          return foregroundWrite((report) => this.performSaveAsNewBot(backupName, report));
+        }
+        async performSaveAsNewBot(backupName, progress) {
+          if (!this.slot) throw new Error("\uD638\uC2A4\uD2B8 \uC0C1\uD0DC\uB97C \uBA3C\uC800 \uC77D\uC5B4\uC57C \uD569\uB2C8\uB2E4");
+          const patch = await this.cardPatch();
+          if (!patch.full) {
+            throw new Error("\uAD6C\uBC84\uC804 \uC5C5\uB85C\uB4DC \uC0C1\uD0DC\uC758 \uCE74\uB4DC\uB77C \uC800\uC7A5\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4. \uD328\uB110\uC744 \uB2EB\uC558\uB2E4 \uB2E4\uC2DC \uC5F4\uC5B4 \uC8FC\uC138\uC694");
+          }
+          const family = this.workspace?.familyKey || this.activeCharKey;
+          progress("\uAE30\uC874 \uBD07\uC758 \uBC31\uC5C5\uC744 \uC800\uC7A5\uD558\uB294 \uC911\u2026");
+          const backupChaId = await cloneBot(this.slot.characterIndex, patch.chaId, backupName, {}, family);
+          const r = await this.performCardWriteBack(progress);
+          if (!r.verified) {
+            throw new Error("RisuAI \uAC00 \uCE74\uB4DC \uC4F0\uAE30\uB97C \uBC1B\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4" + (r.drift ? ` (${r.drift})` : "") + ". \uBC31\uC5C5 \uBD07\uC740 \uB9CC\uB4E4\uC5B4\uC84C\uC9C0\uB9CC \uC774 \uBD07\uC5D0\uB294 \uBC18\uC601\uB418\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4 - \uD3B8\uC9D1 \uB0B4\uC6A9\uC740 \uADF8\uB300\uB85C \uC788\uC2B5\uB2C8\uB2E4.");
+          }
+          return { backupChaId, applied: r.applied, mode: r.mode };
+        }
+        /** Create a clone bot in RisuAI carrying the working card. */
+        async cloneBot(name) {
+          return foregroundWrite((report) => this.performCloneBot(name, report));
+        }
+        async performCloneBot(name, progress) {
+          if (!this.slot) throw new Error("\uD638\uC2A4\uD2B8 \uC0C1\uD0DC\uB97C \uBA3C\uC800 \uC77D\uC5B4\uC57C \uD569\uB2C8\uB2E4");
+          const patch = await this.cardPatch();
+          if (!patch.full) {
+            throw new Error("\uAD6C\uBC84\uC804 \uC5C5\uB85C\uB4DC \uC0C1\uD0DC\uC758 \uCE74\uB4DC\uB77C \uBCF5\uC81C\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4. \uD328\uB110\uC744 \uB2EB\uC558\uB2E4 \uB2E4\uC2DC \uC5F4\uC5B4 \uC8FC\uC138\uC694");
+          }
+          const update = this.cardUpdateFrom(patch, true) ?? {};
+          await this.resolveStagedAssets(update, progress);
+          progress("\uC774\uBBF8\uC9C0 \uC900\uBE44 \uC644\uB8CC \xB7 \uBCF5\uC81C \uBD07 \uC800\uC7A5 \uC911\u2026");
+          const family = this.workspace?.familyKey || this.activeCharKey;
+          const chaId = await cloneBot(this.slot.characterIndex, patch.chaId, name, update, family);
+          await this.cardCommit("\uBCF5\uC81C \uC9C1\uC804");
+          return chaId;
+        }
+      };
+      state = new AppState();
+    }
+  });
 
   // src/ui/hilite.ts
-  var STEP = 1.05;
-  var NUMERIC_OPEN = /^(-?\d+(?:\.\d+)?)::/;
   function parseWeights(text2) {
     const segments = [];
     let braces = 0;
@@ -2683,12 +3556,6 @@
     const alpha = Math.min(0.1 + steps * 0.09, 0.48);
     return weight > 1 ? `rgba(233, 94, 80, ${alpha.toFixed(3)})` : `rgba(96, 145, 235, ${alpha.toFixed(3)})`;
   }
-  var FRAGMENT_BG = "rgba(92, 190, 125, 0.3)";
-  var COMMENT_BG = "rgba(128, 128, 136, 0.28)";
-  var STRING_BG = "rgba(92, 190, 125, 0.22)";
-  var KEYWORD_BG = "rgba(96, 145, 235, 0.18)";
-  var META_BG = "rgba(233, 94, 80, 0.18)";
-  var CBS_BG = "rgba(124, 92, 255, 0.24)";
   function flatten(text2, spans, weights = []) {
     const bounds = /* @__PURE__ */ new Set([0, text2.length]);
     for (const s of spans) {
@@ -2813,7 +3680,6 @@
     }
     return out;
   }
-  var LUA_KEYWORDS = /\b(?:and|break|do|elseif|else|end|false|for|function|goto|if|in|local|nil|not|or|repeat|return|then|true|until|while|onStart|onOutput|onInput|onButtonClick|listenEdit|getChatVar|setChatVar)\b/g;
   function luaRanges(text2) {
     const spans = [
       ...luaIslands(text2),
@@ -2821,30 +3687,6 @@
     ];
     return flatten(text2, spans);
   }
-  var COPY_PROPS = [
-    "fontFamily",
-    "fontSize",
-    "fontWeight",
-    "fontStyle",
-    "letterSpacing",
-    "lineHeight",
-    "textTransform",
-    "wordSpacing",
-    "textIndent",
-    "whiteSpace",
-    "wordBreak",
-    "overflowWrap",
-    "tabSize",
-    "boxSizing",
-    "paddingTop",
-    "paddingRight",
-    "paddingBottom",
-    "paddingLeft",
-    "borderTopWidth",
-    "borderRightWidth",
-    "borderBottomWidth",
-    "borderLeftWidth"
-  ];
   function copyTypography(from, to) {
     try {
       const cs = getComputedStyle(from);
@@ -2877,19 +3719,11 @@
     div.remove();
     return coords;
   }
-  var TAG_TOKEN_SEPARATORS = /[,\n{}[\]|<>:/]/;
   function fmtCount(count) {
     if (count >= 1e6) return `${(count / 1e6).toFixed(1)}M`;
     if (count >= 1e3) return `${Math.round(count / 1e3)}k`;
     return count > 0 ? String(count) : "";
   }
-  var RANGES = {
-    nai: naiRanges,
-    md: mdRanges,
-    regex: regexRanges,
-    "regex-out": regexOutRanges,
-    lua: luaRanges
-  };
   function attachHilite(ta, opts) {
     if (!ta.parentNode || ta.parentElement && ta.parentElement.classList.contains("hlwrap")) return;
     const wrap = el("div", { class: "hlwrap" });
@@ -3096,6 +3930,55 @@
       setTimeout(close, 150);
     });
   }
+  var STEP, NUMERIC_OPEN, FRAGMENT_BG, COMMENT_BG, STRING_BG, KEYWORD_BG, META_BG, CBS_BG, LUA_KEYWORDS, COPY_PROPS, TAG_TOKEN_SEPARATORS, RANGES;
+  var init_hilite = __esm({
+    "src/ui/hilite.ts"() {
+      "use strict";
+      init_dom();
+      init_state();
+      STEP = 1.05;
+      NUMERIC_OPEN = /^(-?\d+(?:\.\d+)?)::/;
+      FRAGMENT_BG = "rgba(92, 190, 125, 0.3)";
+      COMMENT_BG = "rgba(128, 128, 136, 0.28)";
+      STRING_BG = "rgba(92, 190, 125, 0.22)";
+      KEYWORD_BG = "rgba(96, 145, 235, 0.18)";
+      META_BG = "rgba(233, 94, 80, 0.18)";
+      CBS_BG = "rgba(124, 92, 255, 0.24)";
+      LUA_KEYWORDS = /\b(?:and|break|do|elseif|else|end|false|for|function|goto|if|in|local|nil|not|or|repeat|return|then|true|until|while|onStart|onOutput|onInput|onButtonClick|listenEdit|getChatVar|setChatVar)\b/g;
+      COPY_PROPS = [
+        "fontFamily",
+        "fontSize",
+        "fontWeight",
+        "fontStyle",
+        "letterSpacing",
+        "lineHeight",
+        "textTransform",
+        "wordSpacing",
+        "textIndent",
+        "whiteSpace",
+        "wordBreak",
+        "overflowWrap",
+        "tabSize",
+        "boxSizing",
+        "paddingTop",
+        "paddingRight",
+        "paddingBottom",
+        "paddingLeft",
+        "borderTopWidth",
+        "borderRightWidth",
+        "borderBottomWidth",
+        "borderLeftWidth"
+      ];
+      TAG_TOKEN_SEPARATORS = /[,\n{}[\]|<>:/]/;
+      RANGES = {
+        nai: naiRanges,
+        md: mdRanges,
+        regex: regexRanges,
+        "regex-out": regexOutRanges,
+        lua: luaRanges
+      };
+    }
+  });
 
   // src/ui/dom.ts
   function el(tag, attrs = {}, children = []) {
@@ -3167,22 +4050,6 @@
   function svg(path, size = 20) {
     return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${path}</svg>`;
   }
-  var ICON = {
-    app: svg('<path d="M4 4h16v12H8l-4 4z"/><path d="M8 9h8"/><path d="M8 12h5"/>'),
-    close: svg('<path d="M18 6 6 18M6 6l12 12"/>', 18),
-    // A drawn arrow rather than the 🔄 emoji: the emoji renders at a different
-    // weight and baseline from every other control in the header.
-    reload: svg('<path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/>', 17),
-    check: svg('<path d="m5 13 4 4L19 7"/>', 16),
-    clip: svg('<path d="M21.4 11.1 12.3 20.2a5 5 0 0 1-7.1-7.1l9.2-9.2a3.3 3.3 0 1 1 4.7 4.7l-9.2 9.2a1.7 1.7 0 0 1-2.4-2.4l8.5-8.5"/>', 17),
-    pencil: svg('<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/>', 15),
-    gear: svg('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.14.6.66 1.03 1.28 1.05H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>', 17),
-    warn: svg('<path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>', 16),
-    // VS Code-style layout toggles: the frame, the divider, and tick marks on
-    // the side the button controls (studio panel fold/unfold, §1-30).
-    layoutL: svg('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M9 5v14"/><path d="M5.5 8.5h1.5M5.5 11h1.5M5.5 13.5h1.5"/>', 16),
-    layoutR: svg('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M15 5v14"/><path d="M17 8.5h1.5M17 11h1.5M17 13.5h1.5"/>', 16)
-  };
   function iconBtn(html, title) {
     return el("button", { class: "iconbtn", html, title });
   }
@@ -3266,49 +4133,6 @@
       return "";
     }
   }
-  var TOOL = {
-    snapshot: "\u{1F516}",
-    discard: "\u21A9",
-    versions: "\u{1F558}",
-    apply: "\u{1F4BE}",
-    export: "\u2B07",
-    find: "\u{1F50D}",
-    cut: "\u2702",
-    view: "\u{1F441}",
-    reload: "\u{1F504}",
-    newChat: "\u2795",
-    history: "\u{1F5C2}",
-    info: "\u24D8"
-  };
-  var TOOL_GLYPH = {
-    list_turns: ["\u{1F4CB}", "\uD6D1\uAE30"],
-    read_turns: ["\u{1F4D6}", "\uC77D\uAE30"],
-    search_turns: ["\u{1F50D}", "\uAC80\uC0C9"],
-    read_card: ["\u{1FAAA}", "\uCE74\uB4DC"],
-    read_lore: ["\u{1F4DA}", "\uB85C\uC5B4"],
-    read_memory: ["\u{1F9E0}", "\uC694\uC57D"],
-    list_skills: ["\u{1F9E9}", "\uC2A4\uD0AC \uBAA9\uB85D"],
-    load_skill: ["\u{1F9E9}", "\uC2A4\uD0AC"],
-    stage_edit: ["\u270F\uFE0F", "\uC218\uC815 \uC81C\uC548"],
-    stage_bulk: ["\u270F\uFE0F", "\uC77C\uAD04 \uC81C\uC548"],
-    stage_delete: ["\u2702\uFE0F", "\uC0AD\uC81C \uC81C\uC548"],
-    list_staged: ["\u{1F4CC}", "\uC81C\uC548 \uD655\uC778"],
-    run_python: ["\u{1F40D}", "\uC2A4\uD06C\uB9BD\uD2B8"],
-    write_file: ["\u{1F4BE}", "\uD30C\uC77C \uC4F0\uAE30"],
-    list_files: ["\u{1F4C1}", "\uD30C\uC77C \uBAA9\uB85D"],
-    read_file: ["\u{1F4C4}", "\uD30C\uC77C \uC77D\uAE30"],
-    web_search: ["\u{1F310}", "\uC6F9 \uAC80\uC0C9"],
-    show_artifact: ["\u{1F4CA}", "\uC544\uD2F0\uD329\uD2B8"],
-    find_files: ["\u{1F50D}", "\uD30C\uC77C \uCC3E\uAE30"],
-    search_files: ["\u{1F50D}", "\uB0B4\uC6A9 \uAC80\uC0C9"],
-    studio_meta: ["\u{1F39B}", "\uCE74\uB4DC"],
-    view_image: ["\u{1F441}", "\uC774\uBBF8\uC9C0 \uBCF4\uAE30"],
-    compare_images: ["\u{1F441}", "\uC774\uBBF8\uC9C0 \uBE44\uAD50"],
-    image_metrics: ["\u{1F4D0}", "\uC774\uBBF8\uC9C0 \uC218\uCE58"],
-    review_folder: ["\u{1F50E}", "\uD3F4\uB354 \uAC80\uC218"],
-    suggest_selection: ["\u{1F3F7}", "\uAC80\uC218 \uC81C\uC548"]
-  };
-  var PAPER_PLANE = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4z"/></svg>';
   function modal(title, body, opts = {}) {
     const closeBtn = el("button", { class: "iconbtn", html: ICON.close, title: "\uB2EB\uAE30" });
     const box = el("div", { class: "modalbox" + (opts.wide ? " wide" : "") + (opts.cls ? " " + opts.cls : "") }, [
@@ -3550,7 +4374,6 @@
     }, 0);
     return close;
   }
-  var polls = /* @__PURE__ */ new Set();
   function pollWhileVisible(fn, ms, wanted = () => true) {
     let timer = null;
     const token2 = {};
@@ -3599,8 +4422,82 @@
   function activePolls() {
     return polls.size;
   }
+  var ICON, TOOL, TOOL_GLYPH, PAPER_PLANE, polls;
+  var init_dom = __esm({
+    "src/ui/dom.ts"() {
+      "use strict";
+      init_hilite();
+      ICON = {
+        app: svg('<path d="M4 4h16v12H8l-4 4z"/><path d="M8 9h8"/><path d="M8 12h5"/>'),
+        close: svg('<path d="M18 6 6 18M6 6l12 12"/>', 18),
+        // A drawn arrow rather than the 🔄 emoji: the emoji renders at a different
+        // weight and baseline from every other control in the header.
+        reload: svg('<path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/>', 17),
+        check: svg('<path d="m5 13 4 4L19 7"/>', 16),
+        clip: svg('<path d="M21.4 11.1 12.3 20.2a5 5 0 0 1-7.1-7.1l9.2-9.2a3.3 3.3 0 1 1 4.7 4.7l-9.2 9.2a1.7 1.7 0 0 1-2.4-2.4l8.5-8.5"/>', 17),
+        pencil: svg('<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/>', 15),
+        gear: svg('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.14.6.66 1.03 1.28 1.05H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>', 17),
+        warn: svg('<path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>', 16),
+        // VS Code-style layout toggles: the frame, the divider, and tick marks on
+        // the side the button controls (studio panel fold/unfold, §1-30).
+        layoutL: svg('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M9 5v14"/><path d="M5.5 8.5h1.5M5.5 11h1.5M5.5 13.5h1.5"/>', 16),
+        layoutR: svg('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M15 5v14"/><path d="M17 8.5h1.5M17 11h1.5M17 13.5h1.5"/>', 16)
+      };
+      TOOL = {
+        snapshot: "\u{1F516}",
+        discard: "\u21A9",
+        versions: "\u{1F558}",
+        apply: "\u{1F4BE}",
+        export: "\u2B07",
+        find: "\u{1F50D}",
+        cut: "\u2702",
+        view: "\u{1F441}",
+        reload: "\u{1F504}",
+        newChat: "\u2795",
+        history: "\u{1F5C2}",
+        info: "\u24D8"
+      };
+      TOOL_GLYPH = {
+        list_turns: ["\u{1F4CB}", "\uD6D1\uAE30"],
+        read_turns: ["\u{1F4D6}", "\uC77D\uAE30"],
+        search_turns: ["\u{1F50D}", "\uAC80\uC0C9"],
+        read_card: ["\u{1FAAA}", "\uCE74\uB4DC"],
+        read_lore: ["\u{1F4DA}", "\uB85C\uC5B4"],
+        read_memory: ["\u{1F9E0}", "\uC694\uC57D"],
+        list_skills: ["\u{1F9E9}", "\uC2A4\uD0AC \uBAA9\uB85D"],
+        load_skill: ["\u{1F9E9}", "\uC2A4\uD0AC"],
+        stage_edit: ["\u270F\uFE0F", "\uC218\uC815 \uC81C\uC548"],
+        stage_bulk: ["\u270F\uFE0F", "\uC77C\uAD04 \uC81C\uC548"],
+        stage_delete: ["\u2702\uFE0F", "\uC0AD\uC81C \uC81C\uC548"],
+        list_staged: ["\u{1F4CC}", "\uC81C\uC548 \uD655\uC778"],
+        run_python: ["\u{1F40D}", "\uC2A4\uD06C\uB9BD\uD2B8"],
+        write_file: ["\u{1F4BE}", "\uD30C\uC77C \uC4F0\uAE30"],
+        list_files: ["\u{1F4C1}", "\uD30C\uC77C \uBAA9\uB85D"],
+        read_file: ["\u{1F4C4}", "\uD30C\uC77C \uC77D\uAE30"],
+        web_search: ["\u{1F310}", "\uC6F9 \uAC80\uC0C9"],
+        show_artifact: ["\u{1F4CA}", "\uC544\uD2F0\uD329\uD2B8"],
+        find_files: ["\u{1F50D}", "\uD30C\uC77C \uCC3E\uAE30"],
+        search_files: ["\u{1F50D}", "\uB0B4\uC6A9 \uAC80\uC0C9"],
+        studio_meta: ["\u{1F39B}", "\uCE74\uB4DC"],
+        view_image: ["\u{1F441}", "\uC774\uBBF8\uC9C0 \uBCF4\uAE30"],
+        compare_images: ["\u{1F441}", "\uC774\uBBF8\uC9C0 \uBE44\uAD50"],
+        image_metrics: ["\u{1F4D0}", "\uC774\uBBF8\uC9C0 \uC218\uCE58"],
+        review_folder: ["\u{1F50E}", "\uD3F4\uB354 \uAC80\uC218"],
+        suggest_selection: ["\u{1F3F7}", "\uAC80\uC218 \uC81C\uC548"]
+      };
+      PAPER_PLANE = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4z"/></svg>';
+      polls = /* @__PURE__ */ new Set();
+    }
+  });
+
+  // src/index.ts
+  init_transport();
+
+  // src/ui/panes.ts
+  init_dom();
 
   // src/ui/splitter.ts
+  init_dom();
   var registry = /* @__PURE__ */ new WeakMap();
   function reclamp(container) {
     for (const fn of registry.get(container) ?? []) fn();
@@ -3881,6 +4778,8 @@
   }
 
   // src/ui/write-progress.ts
+  init_operation();
+  init_dom();
   var overlay = null;
   var label = null;
   var previousFocus = null;
@@ -3959,215 +4858,10 @@
     label.textContent = message;
   });
 
-  // src/ui/blobimg.ts
-  var PARALLEL = 6;
-  var active = 0;
-  var queue = [];
-  var cache = /* @__PURE__ */ new Map();
-  var cacheBytes = 0;
-  var inflight = /* @__PURE__ */ new Map();
-  var IMAGE_TIMEOUT_MS = 45e3;
-  var deferredRevokes = 0;
-  var SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i;
-  function normalizeWorkspacePath(path) {
-    let p = (path || "").trim().replace(/\\/g, "/");
-    if (SCHEME_RE.test(p)) return p;
-    const m = p.match(/(?:^|\/)(?:data\/)?space\/(.+)$/);
-    if (m) p = m[1];
-    p = p.replace(/^\.?\/+/, "");
-    return p;
-  }
-  function safeWorkspacePath(path) {
-    if (!path || SCHEME_RE.test(path) || path.startsWith("/") || path.startsWith("\\")) return false;
-    return !path.split(/[\\/]/).some((p) => p === "..");
-  }
-  function smallScreen() {
-    try {
-      return window.matchMedia("(max-width: 760px), (pointer: coarse) and (max-width: 1024px)").matches;
-    } catch {
-      return false;
-    }
-  }
-  function cacheCap() {
-    return smallScreen() ? 90 : 600;
-  }
-  function byteCap() {
-    return smallScreen() ? 24 * 1024 * 1024 : 256 * 1024 * 1024;
-  }
-  function blobStats() {
-    return { count: cache.size, bytes: cacheBytes, inflight: inflight.size, deferredRevokes, countCap: cacheCap(), byteCap: byteCap() };
-  }
-  function release(url) {
-    let shown = false;
-    try {
-      const img = document.querySelector(`img[src="${url}"]`);
-      shown = !!img && img.isConnected;
-    } catch {
-      shown = true;
-    }
-    if (!shown) {
-      URL.revokeObjectURL(url);
-      return;
-    }
-    deferredRevokes += 1;
-    setTimeout(() => {
-      deferredRevokes -= 1;
-      URL.revokeObjectURL(url);
-    }, 3e4);
-  }
-  function drop(key, e) {
-    cache.delete(key);
-    cacheBytes -= e.bytes;
-    release(e.url);
-  }
-  function makeRoom(incoming) {
-    while (cache.size && (cache.size >= cacheCap() || cacheBytes + incoming > byteCap())) {
-      const first = cache.entries().next().value;
-      drop(first[0], first[1]);
-    }
-  }
-  function evictBlob(paths) {
-    const doomed = [];
-    for (const k of cache.keys()) {
-      const bare = k.replace(/^t\d*:/, "");
-      const p = bare.includes(":") ? bare.slice(0, bare.lastIndexOf(":")) : bare;
-      if (!paths || paths.includes(p) || paths.includes(bare)) doomed.push(k);
-    }
-    for (const k of doomed) {
-      const e = cache.get(k);
-      if (e) drop(k, e);
-    }
-  }
-  async function blobUrl(path, stamp = "", opts = {}) {
-    const key = (opts.thumb ? `t${opts.w || 360}:` : "") + (stamp ? `${path}:${stamp}` : path);
-    return blobFrom(key, () => opts.thumb ? state.fileThumb(path, opts.w || 360) : state.fileBytes(path, IMAGE_TIMEOUT_MS));
-  }
-  async function blobFrom(key, fetch) {
-    const hit = cache.get(key);
-    if (hit) {
-      cache.delete(key);
-      cache.set(key, hit);
-      return hit.url;
-    }
-    const running = inflight.get(key);
-    if (running) return running;
-    const job = fetchBlob(key, fetch);
-    inflight.set(key, job);
-    try {
-      return await job;
-    } finally {
-      inflight.delete(key);
-    }
-  }
-  async function fetchBlob(key, fetch) {
-    await new Promise((resolve) => {
-      const go = () => {
-        active += 1;
-        resolve();
-      };
-      if (active < PARALLEL) go();
-      else queue.push(go);
-    });
-    try {
-      const again = cache.get(key);
-      if (again) return again.url;
-      const bytes = await fetch();
-      if (!bytes || !bytes.byteLength) throw new Error("no bytes");
-      const url = URL.createObjectURL(new Blob([bytes]));
-      makeRoom(bytes.byteLength);
-      cache.set(key, { url, bytes: bytes.byteLength });
-      cacheBytes += bytes.byteLength;
-      return url;
-    } finally {
-      active -= 1;
-      queue.shift()?.();
-    }
-  }
-  var slots = /* @__PURE__ */ new WeakMap();
-  var io = null;
-  try {
-    io = new IntersectionObserver((entries) => {
-      for (const e of entries) {
-        const slot = slots.get(e.target);
-        if (!slot) {
-          io?.unobserve(e.target);
-          continue;
-        }
-        if (e.isIntersecting) {
-          if (!slot.loaded) {
-            slot.loaded = true;
-            slot.load();
-          }
-          if (!slot.unload) {
-            io?.unobserve(e.target);
-            slots.delete(e.target);
-          }
-        } else if (slot.loaded && slot.unload) {
-          slot.loaded = false;
-          slot.unload();
-        }
-      }
-    }, { rootMargin: "600px" });
-  } catch {
-    io = null;
-  }
-  function watchImage(elm, load, unload) {
-    if (!io) {
-      setTimeout(load, 0);
-      return;
-    }
-    slots.set(elm, { load, unload, loaded: false });
-    io.observe(elm);
-  }
-  function unloadByDefault() {
-    return smallScreen();
-  }
-  function workspaceImage(path, alt, opts = {}) {
-    path = normalizeWorkspacePath(path);
-    const wrap = el("span", { class: "wsimg" + (opts.thumb ? " thumb" : "") + (opts.aspect ? " phbox" : "") });
-    if (opts.aspect) wrap.style.aspectRatio = opts.aspect;
-    const fallback = () => {
-      clear(wrap);
-      wrap.appendChild(el("span", { class: "hint", text: `[\uC774\uBBF8\uC9C0: ${alt || path}]` }));
-    };
-    if (!safeWorkspacePath(path) || typeof URL === "undefined" || typeof URL.createObjectURL !== "function") {
-      fallback();
-      return wrap;
-    }
-    const lazy = opts.lazy ?? !!opts.thumb;
-    const unload = opts.unload ?? (!!opts.thumb && unloadByDefault());
-    let gen2 = 0;
-    let held = false;
-    const start = () => {
-      const my = ++gen2;
-      void blobUrl(path, opts.stamp, { thumb: opts.thumb }).then((url) => {
-        if (my !== gen2) return;
-        const img = el("img", { src: url, alt: alt || path, loading: "lazy" });
-        img.addEventListener("error", fallback);
-        clear(wrap);
-        wrap.appendChild(img);
-        if (held) {
-          held = false;
-          wrap.style.width = "";
-          wrap.style.height = "";
-          wrap.style.display = "";
-        }
-      }).catch(fallback);
-    };
-    const stop = () => {
-      gen2 += 1;
-      if (!opts.aspect && wrap.offsetWidth && wrap.offsetHeight) {
-        wrap.style.width = wrap.offsetWidth + "px";
-        wrap.style.height = wrap.offsetHeight + "px";
-        wrap.style.display = "inline-block";
-        held = true;
-      }
-      clear(wrap);
-    };
-    if (lazy || unload) watchImage(wrap, start, unload ? stop : void 0);
-    else start();
-    return wrap;
-  }
+  // src/ui/shell.ts
+  init_dom();
+  init_blobimg();
+  init_assets();
 
   // src/ui/styles.ts
   var CSS = `
@@ -5157,13 +5851,28 @@ button.attachbtn { padding: 8px 9px; display: flex; align-items: center; flex-sh
 }
 .attachchip > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .attachchip.bad { background: rgba(239, 68, 68, .14); border-color: rgba(239, 68, 68, .35); }
-.proposal-fold > summary, .agentplan summary { cursor: pointer; padding: 7px 2px; font-weight: 600; overflow-wrap: anywhere; }
+.proposal-fold > summary { cursor: pointer; padding: 7px 2px; font-weight: 600; overflow-wrap: anywhere; }
 .proposal-body { padding-top: 6px; }
-.agentplan { flex-shrink: 0; max-height: 30%; overflow-y: auto; }
+/* The plan / Todo strip (\xA71-62, user: "\uD3F0\uD2B8\uAC00 \uD06C\uACE0 \uD22C\uBC15\uD558\uACE0 \uC790\uB9AC\uB97C \uB9CE\uC774
+   \uCC28\uC9C0\uD568"): one 11.5px line when folded, a quiet 12px card when open. */
+.agentplan { flex-shrink: 0; max-height: 30%; overflow-y: auto; font-size: 12px; line-height: 1.5; }
 .agentplan:empty { display: none; }
-.plan-body { padding: 8px; }
-.plan-task { margin-top: 6px; overflow-wrap: anywhere; }
-.plan-task .badge { margin-right: 6px; }
+.agentplan summary {
+  cursor: pointer; padding: 2px 6px; font-size: 11.5px; font-weight: 500; overflow-wrap: anywhere;
+  color: var(--textcolor2, #79839a); border-radius: 4px; list-style-position: inside;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.agentplan summary:hover { background: rgba(128,128,128,.10); color: var(--textcolor, #d8dce4); }
+.agentplan details[open] > summary { white-space: normal; color: var(--textcolor, #d8dce4); }
+.agentplan summary::marker, .agentplan summary::-webkit-details-marker { font-size: 9px; }
+.plan-body { padding: 4px 8px 8px; }
+.plan-body > .hint { font-size: 11px; margin-bottom: 4px; }
+.plan-body h1, .plan-body h2, .plan-body h3, .plan-body h4 { font-size: 12px; font-weight: 700; margin: 6px 0 2px; }
+.plan-body p, .plan-body ul, .plan-body ol { margin: 2px 0; }
+.plan-body li { margin: 0; }
+.plan-task { margin-top: 3px; overflow-wrap: anywhere; display: flex; flex-wrap: wrap; gap: 0 6px; align-items: baseline; }
+.plan-task .badge { font-size: 10px; padding: 0 5px; }
+.plan-task > .hint { flex-basis: 100%; font-size: 11px; padding-left: 4px; }
 .agenthead { flex-wrap: wrap; }
 .stagedbox { flex-shrink: 0; max-height: 42%; overflow-y: auto; }
 .card.staged { border-color: rgba(245,158,11,.45); background: rgba(245,158,11,.06); }
@@ -5247,6 +5956,13 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
  * round. The same gutter still resizes, just vertically (see splitter.ts).
  */
 .mtoggle { display: none; }
+/* iOS Safari zooms the whole page into any focused field smaller than 16px,
+   and the send button leaves the screen (\xA71-62). 16px on a touch screen
+   keeps the page still; the zoom is not ours to undo from inside an iframe. */
+@media (max-width: 760px), (pointer: coarse) and (max-width: 1024px) {
+  textarea, select, input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]) { font-size: 16px; }
+  .agentinput { font-size: 16px; line-height: 1.45; min-height: 64px; }
+}
 @media (max-width: 760px) {
   .split { flex-direction: column; position: relative; }
   .toolslot .searchbox { display: none !important; }
@@ -5546,6 +6262,18 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
 /* The selector's rule chips and group cards. */
 .tokenchip { font-family: var(--mono, monospace); }
 .groupcard { cursor: pointer; }
+/* The images the chat's \uAC80\uC218 just brought here (\xA71-62). */
+.selcell.fresh, .groupcard.fresh { box-shadow: 0 0 0 2px rgba(125, 211, 252, .85); }
+.missinglist { display: inline-flex; flex-wrap: wrap; gap: 2px 4px; align-items: baseline; min-width: 0; }
+button.linkbtn {
+  padding: 0 3px; border: none; background: none; font-size: 12px; border-radius: 3px;
+  color: #7dd3fc; text-decoration: underline dotted; text-underline-offset: 2px; white-space: nowrap;
+}
+button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
+.missingrow { flex-wrap: wrap; }
+.applyadv { margin-top: 10px; font-size: 12px; }
+.applyadv > summary { cursor: pointer; color: var(--textcolor2, #79839a); font-size: 11.5px; }
+.applyadv button.tiny, .applyadv button { font-size: 12px; padding: 4px 10px; }
 .groupcard.picked { outline: 2px solid #2563eb; border-radius: 6px; }
 .groupcard .fname { display: flex; gap: 4px; align-items: center; }
 .groupcard .fname .grow { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -5601,6 +6329,8 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
 .uploadpanel .assetbar { max-width: none; height: 6px; margin-top: 0; }
 .uploadpanel .uperr { color: #f87171; white-space: normal; }
 .uploadpanel.done { border-color: rgba(16,185,129,.55); }
+.dlpanel .assetbar { transition: none; }
+.dlpanel button.primary { width: 100%; justify-content: center; min-height: 40px; }
 .uploadpanel.failed { border-color: rgba(239,68,68,.6); }
 
 /* --- filebar: icon verbs and the fold-out search -------------------------------- */
@@ -5666,7 +6396,16 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     (document.head || document.documentElement).appendChild(style);
   }
 
+  // src/ui/shell.ts
+  init_state();
+  init_transport();
+
+  // src/ui/artifact.ts
+  init_dom();
+  init_state();
+
   // src/ui/markdown.ts
+  init_dom();
   function renderMarkdown(text2, opts = {}) {
     const frag = document.createDocumentFragment();
     const lines = text2.replace(/\r\n?/g, "\n").split("\n");
@@ -5820,6 +6559,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
   }
 
   // src/ui/artifact.ts
+  init_blobimg();
   var current2 = null;
   var closeCurrent = null;
   async function fill(body, spec3) {
@@ -5901,7 +6641,24 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
   function remountArtifact() {
   }
 
+  // src/ui/tab-chats.ts
+  init_dom();
+  init_state();
+
+  // src/ui/leaveguard.ts
+  init_dom();
+  init_state();
+  init_transport();
+
+  // src/ui/chatbar.ts
+  init_dom();
+  init_state();
+  init_host();
+  init_transport();
+
   // src/ui/conflicts.ts
+  init_dom();
+  init_state();
   var REASON = {
     "both-moved": "\uC591\uCABD\uC5D0\uC11C \uC218\uC815\uB428",
     "deleted-upstream": "RisuAI\uC5D0\uC11C \uC0AD\uC81C\uB428",
@@ -6021,6 +6778,8 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
   }
 
   // src/ui/pendingpop.ts
+  init_dom();
+  init_state();
   var btns = /* @__PURE__ */ new WeakMap();
   function syncPendingChip(anchor, count) {
     let b = btns.get(anchor);
@@ -6185,7 +6944,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         if (d.memory) bits.push(`\uC7A5\uAE30\uAE30\uC5B5 ${d.memory}\uAC74`);
         shellNotice("\uBBF8\uBC18\uC601 \uBCC0\uACBD\uC744 \uBC84\uB838\uC2B5\uB2C8\uB2E4" + (bits.length ? ` (${bits.join(" \xB7 ")})` : "") + ". \uC791\uC5C5\uBCF8\uC774 \uAE30\uC900\uC120(RisuAI \uC0C1\uD0DC)\uC73C\uB85C \uB3CC\uC544\uAC14\uC2B5\uB2C8\uB2E4.", "ok");
       } catch (e) {
-        shellNotice("\uBCC0\uACBD \uCDE8\uC18C\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg(e), "err");
+        shellNotice("\uBCC0\uACBD \uCDE8\uC18C\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg2(e), "err");
       }
     });
     summaryEl = el("span", { class: "dim changesum", title: "\uC774 \uCC57\uC5D0\uC11C \uC544\uC9C1 RisuAI\uC5D0 \uC4F0\uC9C0 \uC54A\uC740 \uBCC0\uACBD" });
@@ -6241,7 +7000,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       if (noticeMount) clear(noticeMount);
     }, 9e3);
   }
-  function msg(e) {
+  function msg2(e) {
     return e instanceof Error ? e.message : String(e);
   }
   async function openApply(anchor) {
@@ -6300,7 +7059,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         }
         for (const w of r.warnings) shellNotice(w);
       } catch (e) {
-        const m = msg(e);
+        const m = msg2(e);
         out.textContent = m;
         void clientLog("error", "writeBack failed", { error: m });
         shellNotice(
@@ -6321,8 +7080,8 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         shellNotice(`\uBCF5\uC0AC\uBCF8 "${name}" \uC744 \uB9CC\uB4E4\uC5C8\uC2B5\uB2C8\uB2E4. \uB85C\uC5B4\uBD81\uACFC \uC7A5\uAE30\uAE30\uC5B5\uB3C4 \uD568\uAED8 \uB2F4\uACBC\uC2B5\uB2C8\uB2E4. \uC774 \uCC57\uC758 \uC218\uC815\uC740 \uC544\uC9C1 \uBC18\uC601 \uC804 \uC0C1\uD0DC\uB85C \uB0A8\uC544 \uC788\uC2B5\uB2C8\uB2E4.`, "ok");
         close();
       } catch (e) {
-        void clientLog("error", "saveCopy failed", { error: msg(e) });
-        shellNotice("\uBCF5\uC0AC\uBCF8 \uC800\uC7A5\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg(e), "err");
+        void clientLog("error", "saveCopy failed", { error: msg2(e) });
+        shellNotice("\uBCF5\uC0AC\uBCF8 \uC800\uC7A5\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg2(e), "err");
       } finally {
         copy.disabled = false;
       }
@@ -6368,7 +7127,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
               "ok"
             );
           } catch (e) {
-            shellNotice("\uBCF5\uC6D0\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg(e), "err");
+            shellNotice("\uBCF5\uC6D0\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg2(e), "err");
           }
         });
         const title = el("div", {}, [
@@ -6393,7 +7152,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           } catch (e) {
             row.classList.remove("deleting");
             del.disabled = false;
-            shellNotice("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg(e), "err");
+            shellNotice("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg2(e), "err");
           }
         });
         row.append(
@@ -6437,7 +7196,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       }));
     } catch (e) {
       clear(body);
-      body.appendChild(el("div", { class: "hint", text: msg(e) }));
+      body.appendChild(el("div", { class: "hint", text: msg2(e) }));
     }
   }
   function snapshotCleanup(total, run) {
@@ -6453,14 +7212,14 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       try {
         await run(5);
       } catch (e) {
-        shellNotice("\uC815\uB9AC\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg(e), "err");
+        shellNotice("\uC815\uB9AC\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg2(e), "err");
       }
     });
     armed(all, "\uC804\uBD80 \uC0AD\uC81C", "\uC815\uB9D0 \uC804\uBD80?", async () => {
       try {
         await run(0);
       } catch (e) {
-        shellNotice("\uC815\uB9AC\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg(e), "err");
+        shellNotice("\uC815\uB9AC\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg2(e), "err");
       }
     });
     return wrap;
@@ -6488,7 +7247,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         await save(label2);
         close();
       } catch (e) {
-        out.textContent = msg(e);
+        out.textContent = msg2(e);
         ok.disabled = false;
       }
     };
@@ -6549,7 +7308,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     }
     return out;
   }
-  function msg2(e) {
+  function msg3(e) {
     return e instanceof Error ? e.message : String(e);
   }
   async function applyOne(d) {
@@ -6617,8 +7376,8 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           shellNotice(`${d.label}\uC758 \uBCC0\uACBD\uC744 RisuAI\uC5D0 \uBC18\uC601\uD588\uC2B5\uB2C8\uB2E4.`, "ok");
           done(true);
         } catch (e) {
-          void clientLog("error", "leaveguard apply failed", { error: msg2(e) });
-          say(msg2(e));
+          void clientLog("error", "leaveguard apply failed", { error: msg3(e) });
+          say(msg3(e));
           apply.disabled = d.conflicts > 0;
         }
       });
@@ -6630,8 +7389,8 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           shellNotice(`${d.label}\uC758 \uBBF8\uBC18\uC601 \uBCC0\uACBD\uC744 \uBC84\uB838\uC2B5\uB2C8\uB2E4${what ? ` (${what})` : ""}.`, "ok");
           done(true);
         } catch (e) {
-          void clientLog("error", "leaveguard discard failed", { error: msg2(e) });
-          say(msg2(e));
+          void clientLog("error", "leaveguard discard failed", { error: msg3(e) });
+          say(msg3(e));
           discard.disabled = false;
         }
       });
@@ -6667,6 +7426,9 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
   }
 
   // src/ui/tab-chats.ts
+  init_host();
+  init_assets();
+  init_transport();
   function botSnapshots(editBot) {
     const wrap = el("div");
     if (!state.activeCharKey) return wrap;
@@ -6767,8 +7529,8 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     }
     return wrap;
   }
-  function refreshAssetSyncLine(mount) {
-    const old = mount.querySelector(".assetsync");
+  function refreshAssetSyncLine(mount2) {
+    const old = mount2.querySelector(".assetsync");
     if (!old) return false;
     old.replaceWith(assetSyncLine());
     return true;
@@ -6777,10 +7539,10 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
   var portraitImg = null;
   var portraitPath = "";
   var filterText = "";
-  function renderChatsTab(mount) {
-    clear(mount);
+  function renderChatsTab(mount2) {
+    clear(mount2);
     const pad = el("div", { class: "pad" });
-    mount.appendChild(pad);
+    mount2.appendChild(pad);
     if (state.connectError) {
       const go = el("button", { class: "primary tiny", text: "\uC124\uC815\uC73C\uB85C \uC774\uB3D9" });
       go.addEventListener("click", () => setTab("settings"));
@@ -6843,7 +7605,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     if (liveChats.length > 6) {
       setToolbarSearch(filterText, (v) => {
         filterText = v;
-        renderChatsTab(mount);
+        renderChatsTab(mount2);
         refocusSearch(null);
       }, "\uCC57 \uCC3E\uAE30");
     }
@@ -6955,10 +7717,10 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     if (!t) return "?";
     return /[가-힣]/.test(t[0]) ? t.slice(0, 1) : t.slice(0, 2).toUpperCase();
   }
-  async function loadPortrait(path, mount) {
+  async function loadPortrait(path, mount2) {
     if (!path) return;
     if (portraitPath === path && portraitImg) {
-      mount.replaceWith(portraitImg);
+      mount2.replaceWith(portraitImg);
       return;
     }
     try {
@@ -6971,13 +7733,13 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       portraitUrl = URL.createObjectURL(new Blob([buf]));
       const img = el("img", { class: "botportrait", src: portraitUrl, alt: "" });
       img.addEventListener("error", () => {
-        img.replaceWith(mount);
+        img.replaceWith(mount2);
         portraitImg = null;
         portraitPath = "";
       });
       portraitImg = img;
       portraitPath = path;
-      if (mount.isConnected) mount.replaceWith(img);
+      if (mount2.isConnected) mount2.replaceWith(img);
     } catch {
     }
   }
@@ -7004,7 +7766,12 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     setTimeout(() => n.remove(), 5e3);
   }
 
+  // src/ui/tab-editor.ts
+  init_dom();
+  init_state();
+
   // src/ui/explorer.ts
+  init_dom();
   var GROUP = 50;
   var Explorer = class {
     constructor(opts) {
@@ -7061,7 +7828,14 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     }
   };
 
+  // src/ui/agent.ts
+  init_dom();
+  init_state();
+  init_blobimg();
+  init_transport();
+
   // src/ui/tree.ts
+  init_dom();
   var DRAG_PATHS = "text/x-hina-paths";
   var DRAG_ASSETS = "text/x-hina-assets";
   function treeRow(n, depth, spec3) {
@@ -7346,7 +8120,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         } catch (e) {
           clear(chip);
           chip.classList.add("bad");
-          chip.appendChild(el("span", { text: `${file.name} \u2014 ${msg3(e)}` }));
+          chip.appendChild(el("span", { text: `${file.name} \u2014 ${msg4(e)}` }));
         }
       }
     }
@@ -7560,7 +8334,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         for (const f of plain) {
           const line = el("button", { class: "outline", title: "\uD30C\uC77C \uD0ED\uC5D0\uC11C \uC5FD\uB2C8\uB2E4" }, [
             el("span", { class: "glyph", text: "\u{1F4C4}" }),
-            el("span", { class: "grow", text: `${f.name} \xB7 ${fmtSize(f.size)} \u2014 out/ \uC5D0 \uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4. \uD30C\uC77C \uD0ED\uC5D0\uC11C \uC5F4\uAE30 \u2192` })
+            el("span", { class: "grow", text: `${f.name} \xB7 ${fmtSize2(f.size)} \u2014 out/ \uC5D0 \uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4. \uD30C\uC77C \uD0ED\uC5D0\uC11C \uC5F4\uAE30 \u2192` })
           ]);
           line.addEventListener("click", () => state.requestOpenFile(f.path));
           this.log.appendChild(line);
@@ -7605,8 +8379,8 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           );
           return true;
         } catch (e) {
-          if (!quiet) this.hooks.notice("\uC2E4\uD589\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg3(e), "err");
-          this.note("\u2716 \uC2E4\uD589 \uC2E4\uD328: " + a.summary + " \u2014 " + msg3(e), "err");
+          if (!quiet) this.hooks.notice("\uC2E4\uD589\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg4(e), "err");
+          this.note("\u2716 \uC2E4\uD589 \uC2E4\uD328: " + a.summary + " \u2014 " + msg4(e), "err");
           return false;
         }
       };
@@ -7689,7 +8463,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         await this.render();
         this.hooks.notice("\uC0C8 \uB300\uD654\uB97C \uC2DC\uC791\uD588\uC2B5\uB2C8\uB2E4.", "ok");
       } catch (e) {
-        this.hooks.notice("\uC0C8 \uB300\uD654\uB97C \uC2DC\uC791\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg3(e), "err");
+        this.hooks.notice("\uC0C8 \uB300\uD654\uB97C \uC2DC\uC791\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg4(e), "err");
       }
     }
     async openHistory() {
@@ -7720,7 +8494,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         }
       } catch (e) {
         clear(body);
-        body.appendChild(el("div", { class: "hint", text: msg3(e) }));
+        body.appendChild(el("div", { class: "hint", text: msg4(e) }));
       }
     }
     /** Interval id for the elapsed clock, so a teardown can stop it. */
@@ -7854,15 +8628,15 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       this.scroll();
       const shown = /* @__PURE__ */ new Set();
       const askPermit = (p) => {
-        const card = el("div", { class: "permit" });
+        const card2 = el("div", { class: "permit" });
         const decide = async (allow2, always2) => {
-          for (const b of Array.from(card.querySelectorAll("button"))) b.disabled = true;
+          for (const b of Array.from(card2.querySelectorAll("button"))) b.disabled = true;
           try {
             await state.decidePermit(p.id, allow2, always2);
-            card.classList.add(allow2 ? "allowed" : "denied");
-            card.appendChild(el("div", { class: "hint", text: allow2 ? always2 ? "\uD5C8\uC6A9 (\uC774\uBC88 \uD134 \uB3D9\uC548 \uACC4\uC18D \uD5C8\uC6A9)" : "\uD5C8\uC6A9" : "\uAC70\uBD80" }));
+            card2.classList.add(allow2 ? "allowed" : "denied");
+            card2.appendChild(el("div", { class: "hint", text: allow2 ? always2 ? "\uD5C8\uC6A9 (\uC774\uBC88 \uD134 \uB3D9\uC548 \uACC4\uC18D \uD5C8\uC6A9)" : "\uD5C8\uC6A9" : "\uAC70\uBD80" }));
           } catch (e) {
-            card.appendChild(el("div", { class: "notice err", text: msg3(e) }));
+            card2.appendChild(el("div", { class: "notice err", text: msg4(e) }));
           }
         };
         const allow = el("button", { class: "primary tiny", text: "\uD5C8\uC6A9" });
@@ -7871,14 +8645,14 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         allow.addEventListener("click", () => void decide(true, false));
         deny.addEventListener("click", () => void decide(false, false));
         always.addEventListener("click", () => void decide(true, true));
-        card.appendChild(el("div", { class: "permit-title", text: (p.kind === "studio_batch" ? "\uC774 \uC124\uC815\uC73C\uB85C \uBC30\uCE58\uB97C \uC2E4\uD589\uD560\uAE4C\uC694?" : p.kind === "pip" ? "\uD328\uD0A4\uC9C0 \uC124\uCE58 \uD5C8\uC6A9?" : "\uC178 \uBA85\uB839 \uC2E4\uD589 \uD5C8\uC6A9?") + " " + p.summary }));
-        card.appendChild(el("pre", { class: "mono", text: p.detail }));
+        card2.appendChild(el("div", { class: "permit-title", text: (p.kind === "studio_batch" ? "\uC774 \uC124\uC815\uC73C\uB85C \uBC30\uCE58\uB97C \uC2E4\uD589\uD560\uAE4C\uC694?" : p.kind === "pip" ? "\uD328\uD0A4\uC9C0 \uC124\uCE58 \uD5C8\uC6A9?" : "\uC178 \uBA85\uB839 \uC2E4\uD589 \uD5C8\uC6A9?") + " " + p.summary }));
+        card2.appendChild(el("pre", { class: "mono", text: p.detail }));
         if (p.kind === "studio_batch") {
           allow.textContent = "\uC774 \uC124\uC815\uC73C\uB85C \uC2E4\uD589";
           deny.textContent = "\uCDE8\uC18C";
         }
-        card.appendChild(el("div", { class: "row" }, p.kind === "studio_batch" ? [allow, deny] : [allow, deny, always]));
-        bubble.insertBefore(card, thinking);
+        card2.appendChild(el("div", { class: "row" }, p.kind === "studio_batch" ? [allow, deny] : [allow, deny, always]));
+        bubble.insertBefore(card2, thinking);
         textNode = null;
         tracker = null;
         this.scroll();
@@ -8008,7 +8782,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
                 text: paths.length > 8 ? `\uC678 ${paths.length - 8}\uC7A5 \xB7 \uAC80\uC218` : "\uAC80\uC218",
                 title: "\uC5D0\uC14B \uC2A4\uD29C\uB514\uC624 \uAC80\uC218 \uD0ED\uC5D0\uC11C \uC774 \uD3F4\uB354\uB97C \uC5FD\uB2C8\uB2E4"
               });
-              inspect.addEventListener("click", () => state.requestOpenStudio(folder, "all"));
+              inspect.addEventListener("click", () => state.requestOpenStudio(folder, "group", paths));
               strip2.appendChild(inspect);
               if (e.label) strip2.appendChild(el("div", { class: "hint", text: String(e.label) }));
               bubble.insertBefore(strip2, thinking);
@@ -8094,7 +8868,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         }
       } catch (e) {
         finish("\uC911\uB2E8\uB428");
-        bubble.appendChild(el("div", { class: "notice err", text: msg3(e) }));
+        bubble.appendChild(el("div", { class: "notice err", text: msg4(e) }));
         if (!abort.signal.aborted) {
           bubble.appendChild(el("div", { class: "hint", text: "\uC5F0\uACB0\uC774 \uB04A\uACBC\uC2B5\uB2C8\uB2E4. \uBC31\uC5D4\uB4DC\uC5D0\uC11C\uB294 \uC774 \uC694\uCCAD\uC774 \uACC4\uC18D \uC9C4\uD589 \uC911\uC77C \uC218 \uC788\uC2B5\uB2C8\uB2E4 \u2014 \uB2E4\uC74C \uBA54\uC2DC\uC9C0\uB97C \uBCF4\uB0B4\uBA74 \uADF8 \uD134\uC744 \uBA48\uCD94\uACE0, \uB04A\uAE34 \uC694\uCCAD\uAE4C\uC9C0 \uB300\uD654\uC5D0 \uB0A8\uAE34 \uCC44 \uC774\uC5B4\uAC11\uB2C8\uB2E4." }));
         }
@@ -8184,8 +8958,8 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           await this.refreshStaged();
           await this.hooks.onApplied();
         } catch (e) {
-          this.hooks.notice("\uC801\uC6A9\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg3(e), "err");
-          this.note("\u2716 \uC801\uC6A9 \uC2E4\uD328: " + msg3(e), "err");
+          this.hooks.notice("\uC801\uC6A9\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg4(e), "err");
+          this.note("\u2716 \uC801\uC6A9 \uC2E4\uD328: " + msg4(e), "err");
         } finally {
           approve.disabled = false;
           approve.textContent = was;
@@ -8199,7 +8973,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           this.hooks.notice("\uC81C\uC548\uC744 \uAC70\uBD80\uD588\uC2B5\uB2C8\uB2E4.", "ok");
           await this.refreshStaged();
         } catch (e) {
-          this.hooks.notice("\uAC70\uBD80\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg3(e), "err");
+          this.hooks.notice("\uAC70\uBD80\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg4(e), "err");
         } finally {
           reject.disabled = false;
         }
@@ -8215,14 +8989,14 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       ]));
     }
     foldCard(key, title, children) {
-      const card = el("details", { class: "card staged proposal-fold" });
-      card.open = this.folds[key] ?? !smallScreen();
-      card.appendChild(el("summary", { text: title + " \xB7 \uD3BC\uCE58\uAE30/\uC811\uAE30" }));
-      card.appendChild(el("div", { class: "proposal-body" }, children));
-      card.addEventListener("toggle", () => {
-        this.folds[key] = card.open;
+      const card2 = el("details", { class: "card staged proposal-fold" });
+      card2.open = this.folds[key] ?? !smallScreen();
+      card2.appendChild(el("summary", { text: title + " \xB7 \uD3BC\uCE58\uAE30/\uC811\uAE30" }));
+      card2.appendChild(el("div", { class: "proposal-body" }, children));
+      card2.addEventListener("toggle", () => {
+        this.folds[key] = card2.open;
       });
-      return card;
+      return card2;
     }
     setPlan(plan) {
       if (this.destroyed) return;
@@ -8259,7 +9033,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         if (this.destroyed) return;
         this.setPlan(await state.workPlan(latest.mode === "plan" ? "execute" : "plan", latest.revision));
       } catch (e) {
-        this.hooks.notice(msg3(e), "err");
+        this.hooks.notice(msg4(e), "err");
       } finally {
         this.modeButton.disabled = false;
         this.send.disabled = sendDisabled;
@@ -8270,8 +9044,8 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     }
   };
   var TraceTracker = class {
-    constructor(mount) {
-      this.mount = mount;
+    constructor(mount2) {
+      this.mount = mount2;
     }
     lastName = "";
     count = 0;
@@ -8309,13 +9083,13 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     clear(node);
     node.appendChild(renderMarkdown(text2, { image: (p, a) => workspaceImage(p, a, { thumb: true }) }));
   }
-  function fmtSize(n) {
+  function fmtSize2(n) {
     if (!n) return "0B";
     if (n < 1024) return `${n}B`;
     if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)}KB`;
     return `${(n / 1024 / 1024).toFixed(1)}MB`;
   }
-  function msg3(e) {
+  function msg4(e) {
     return e instanceof Error ? e.message : String(e);
   }
   function fmtTok(v) {
@@ -8325,6 +9099,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
   }
 
   // src/ui/agentpane.ts
+  init_state();
   var panel = null;
   var panelContext = "";
   var hooks = {
@@ -8399,7 +9174,11 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     panel = null;
   }
 
+  // src/ui/turnlist.ts
+  init_dom();
+
   // src/ui/render.ts
+  init_dom();
   var THINK_TAGS = ["thoughts", "think", "thinking", "reasoning", "scratchpad", "plan"];
   var THINK_RE = new RegExp(
     `<(${THINK_TAGS.join("|")})\\b[^>]*>[\\s\\S]*?(?:<\\/\\1\\s*>|$)`,
@@ -8739,17 +9518,22 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     return box;
   }
 
+  // src/ui/tab-editor.ts
+  init_host();
+
   // src/ui/kit.ts
+  init_dom();
+  init_state();
   function makeNotice(margin = "10px 14px 0") {
-    const mount = el("div");
+    const mount2 = el("div");
     let timer = null;
     return {
-      mount,
+      mount: mount2,
       show(text2, kind = "") {
-        clear(mount);
-        mount.appendChild(el("div", { class: "notice " + kind, style: { margin }, text: text2 }));
+        clear(mount2);
+        mount2.appendChild(el("div", { class: "notice " + kind, style: { margin }, text: text2 }));
         if (timer) clearTimeout(timer);
-        timer = setTimeout(() => clear(mount), 9e3);
+        timer = setTimeout(() => clear(mount2), 9e3);
       }
     };
   }
@@ -8764,25 +9548,25 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     let built2 = false;
     let seen = "";
     const n = makeNotice();
-    return (mount) => {
+    return (mount2) => {
       const gate = spec3.gate ?? "none";
       const pass = gate === "none" || (gate === "chat" ? !!state.activeChatKey : !!state.activeCharKey);
       if (!pass) {
-        clear(mount);
+        clear(mount2);
         built2 = false;
-        mount.appendChild(el("div", { class: "pad" }, [
+        mount2.appendChild(el("div", { class: "pad" }, [
           el("div", { class: "empty", text: GATE_COPY[gate] })
         ]));
         return;
       }
       const key = JSON.stringify(spec3.keys());
-      if (!built2 || !mount.querySelector(".split")) {
-        clear(mount);
+      if (!built2 || !mount2.querySelector(".split")) {
+        clear(mount2);
         const pane = threePane();
         if (spec3.noLeft) pane.left.style.display = "none";
         pane.centre.appendChild(n.mount);
         spec3.build(pane, { notice: n.show });
-        mount.appendChild(pane.root);
+        mount2.appendChild(pane.root);
         built2 = true;
         seen = key;
         void spec3.refresh();
@@ -8792,7 +9576,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       }
       setToolbar(spec3.toolbar?.() ?? (spec3.search ? searchBox(spec3.search.get(), (v) => spec3.search.set(v), spec3.search.placeholder ?? "\uCC3E\uAE30") : null));
       bindAgent({ notice: n.show });
-      const inner = mount.querySelector(".right-inner");
+      const inner = mount2.querySelector(".right-inner");
       if (inner) mountAgent(inner);
     };
   }
@@ -8914,6 +9698,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
   }
 
   // src/ui/tab-editor.ts
+  init_transport();
   var list = null;
   var rightMount = null;
   var optionMount = null;
@@ -8932,17 +9717,17 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
   var preview = null;
   var deleting = null;
   var explorer = null;
-  function renderEditorTab(mount) {
+  function renderEditorTab(mount2) {
     if (!state.activeChatKey) {
-      clear(mount);
+      clear(mount2);
       setToolbar(null);
-      mount.appendChild(el("div", { class: "pad" }, [
+      mount2.appendChild(el("div", { class: "pad" }, [
         el("div", { class: "empty", text: GATE_COPY.chat })
       ]));
       return;
     }
-    if (!list || !mount.querySelector(".split")) {
-      clear(mount);
+    if (!list || !mount2.querySelector(".split")) {
+      clear(mount2);
       list?.destroy();
       list = new TurnList({
         showOriginal: () => showOriginal,
@@ -8954,8 +9739,8 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           try {
             await state.editTurn(t.msgId, t.body, next);
           } catch (e) {
-            notice("\uC218\uC815\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg4(e), "err");
-            void clientLog("error", "turn edit failed", { msgId: t.msgId, error: msg4(e) });
+            notice("\uC218\uC815\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg5(e), "err");
+            void clientLog("error", "turn edit failed", { msgId: t.msgId, error: msg5(e) });
           }
         }
       });
@@ -8974,7 +9759,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       pane.centre.appendChild(noticeMount2);
       pane.centre.appendChild(list.root);
       rightMount = pane.right.querySelector(".right-inner");
-      mount.appendChild(pane.root);
+      mount2.appendChild(pane.root);
       buildRight();
     }
     bindAgent({ onStagedChanged, onApplied, notice });
@@ -9034,7 +9819,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       if (noticeMount2) clear(noticeMount2);
     }, 9e3);
   }
-  function msg4(e) {
+  function msg5(e) {
     return e instanceof Error ? e.message : String(e);
   }
   function visibleTurns() {
@@ -9305,7 +10090,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       try {
         setPreview(await state.bulk(params()));
       } catch (e) {
-        summary.textContent = msg4(e);
+        summary.textContent = msg5(e);
         setPreview(null);
       } finally {
         previewBtn.disabled = false;
@@ -9320,8 +10105,8 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         await state.loadTurns();
         notice(`${r.applied}\uAC1C \uD134\uC744 \uBC14\uAFE8\uC2B5\uB2C8\uB2E4. \uB418\uB3CC\uB9AC\uC2DC\uB824\uBA74 \u{1F558} \uBC84\uC804\uC758 \uC2A4\uB0C5\uC0F7\uC744 \uC4F0\uC2DC\uBA74 \uB429\uB2C8\uB2E4.`, "ok");
       } catch (e) {
-        void clientLog("error", "find/replace apply failed", { error: msg4(e) });
-        notice("\uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg4(e), "err");
+        void clientLog("error", "find/replace apply failed", { error: msg5(e) });
+        notice("\uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg5(e), "err");
       }
     });
     clearBtn.addEventListener("click", () => setPreview(null));
@@ -9377,8 +10162,8 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         setPreview(null);
         notice(`\uD134 ${r[0]}~${r[1]} \uC744 \uC9C0\uC6E0\uC2B5\uB2C8\uB2E4. \uD558\uC774\uD30C \uC694\uC57D\uC774 \uC9C0\uC6CC\uC9C4 \uD134\uC744 \uC778\uC6A9\uD558\uACE0 \uC788\uC73C\uBA74 \uBC18\uC601\uD560 \uB54C \uC54C\uB824 \uB4DC\uB9BD\uB2C8\uB2E4.`, "ok");
       } catch (e) {
-        void clientLog("error", "deleteRange failed", { range: r, error: msg4(e) });
-        notice("\uC0AD\uC81C\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg4(e), "err");
+        void clientLog("error", "deleteRange failed", { range: r, error: msg5(e) });
+        notice("\uC0AD\uC81C\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg5(e), "err");
       }
     });
     clearBtn.addEventListener("click", () => setPreview(null));
@@ -9397,7 +10182,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         const r = await state.exportMarkdown();
         download(r.filename, r.markdown, "text/markdown;charset=utf-8");
       } catch (e) {
-        notice("\uB0B4\uBCF4\uB0B4\uAE30\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg4(e), "err");
+        notice("\uB0B4\uBCF4\uB0B4\uAE30\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg5(e), "err");
       }
     });
     const rc = el("button", { text: "risuChat \uB0B4\uB824\uBC1B\uAE30" });
@@ -9406,7 +10191,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         const r = await state.exportRisuchat();
         download(r.filename, JSON.stringify(r.envelope), "application/json");
       } catch (e) {
-        notice("\uB0B4\uBCF4\uB0B4\uAE30\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg4(e), "err");
+        notice("\uB0B4\uBCF4\uB0B4\uAE30\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg5(e), "err");
       }
     });
     const cb = el("button", { class: "ghost", text: "md \uD074\uB9BD\uBCF4\uB4DC \uBCF5\uC0AC" });
@@ -9416,7 +10201,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         const ok = copyToClipboard(r.markdown);
         notice(ok ? "\uD074\uB9BD\uBCF4\uB4DC\uC5D0 \uBCF5\uC0AC\uD588\uC2B5\uB2C8\uB2E4." : "\uBCF5\uC0AC\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4.", ok ? "ok" : "err");
       } catch (e) {
-        notice("\uBCF5\uC0AC\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg4(e), "err");
+        notice("\uBCF5\uC0AC\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg5(e), "err");
       }
     });
     return el("div", { class: "card" }, [
@@ -9428,7 +10213,15 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     ]);
   }
 
+  // src/ui/tab-files.ts
+  init_dom();
+  init_state();
+  init_blobimg();
+  init_host();
+  init_transport();
+
   // src/ui/file-clipboard.ts
+  init_state();
   var fileClipboard = null;
   var pasting = false;
   function setFileClipboard(value) {
@@ -9464,7 +10257,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
   var USER_AREAS = /* @__PURE__ */ new Set(["projects", "studio", "hina"]);
   var DEFAULT_AREAS = /* @__PURE__ */ new Set(["projects", "studio"]);
   var PER_BOT_AREAS = /* @__PURE__ */ new Set(["projects", "hina"]);
-  var IMAGE_RE = /\.(png|jpe?g|gif|webp|avif|bmp)$/i;
+  var IMAGE_RE2 = /\.(png|jpe?g|gif|webp|avif|bmp)$/i;
   var TEXT_UPLOAD_RE = /\.(md|txt|json|jsonl|csv|py|lua|html?|css|js|ya?ml|xml|log|sql)$/i;
   var DOCS_NODE = "@docs";
   var FICON = {
@@ -9545,7 +10338,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       pane.centre.appendChild(viewMount);
       installDrop(pane.centre, { into: () => uploadTarget(), onFiles: (path, files) => void uploadMany(files, path), onMove: (path, sources) => void moveSelected(sources, path) });
       for (const target of [pane.left, pane.centre]) target.addEventListener("file-drop-error", (ev) => {
-        notice2("\uB4DC\uB86D\uD55C \uD30C\uC77C\uC744 \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg5(ev.detail) + " \xB7 \uD30C\uC77C \uC62C\uB9AC\uAE30 \uBC84\uD2BC\uC73C\uB85C \uB2E4\uC2DC \uC120\uD0DD\uD574 \uC8FC\uC138\uC694.", "err");
+        notice2("\uB4DC\uB86D\uD55C \uD30C\uC77C\uC744 \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg6(ev.detail) + " \xB7 \uD30C\uC77C \uC62C\uB9AC\uAE30 \uBC84\uD2BC\uC73C\uB85C \uB2E4\uC2DC \uC120\uD0DD\uD574 \uC8FC\uC138\uC694.", "err");
       });
     },
     async refresh() {
@@ -9554,7 +10347,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
   });
   var filesContext = "";
   var focusBotProject = false;
-  function renderFilesTab(mount) {
+  function renderFilesTab(mount2) {
     const context = JSON.stringify([state.contextRevision, state.activeCharKey]);
     if (context !== filesContext) {
       filesContext = context;
@@ -9573,7 +10366,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       if (treeMount) clear(treeMount);
       if (viewMount) clear(viewMount);
     }
-    kitRender(mount);
+    kitRender(mount2);
   }
   var pendingRefreshes = /* @__PURE__ */ new Map();
   function refreshKey() {
@@ -9623,10 +10416,10 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       if (key !== refreshKey()) return;
       if (!lastListing) {
         clear(treeMount);
-        treeMount.appendChild(el("div", { class: "notice err", text: msg5(e) }));
-      } else notice2("\uBAA9\uB85D \uAC31\uC2E0 \uC2E4\uD328 \u2014 \uB9C8\uC9C0\uB9C9\uC73C\uB85C \uBC1B\uC740 \uBAA9\uB85D\uC785\uB2C8\uB2E4: " + msg5(e), "err");
+        treeMount.appendChild(el("div", { class: "notice err", text: msg6(e) }));
+      } else notice2("\uBAA9\uB85D \uAC31\uC2E0 \uC2E4\uD328 \u2014 \uB9C8\uC9C0\uB9C9\uC73C\uB85C \uBC1B\uC740 \uBAA9\uB85D\uC785\uB2C8\uB2E4: " + msg6(e), "err");
       void clientLog("error", "files tab refresh failed", {
-        error: msg5(e),
+        error: msg6(e),
         stack: e instanceof Error ? String(e.stack).slice(0, 1500) : ""
       });
     }
@@ -9757,7 +10550,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           expandTo(where + "/" + n);
           await refresh();
         } catch (e) {
-          notice2("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg5(e), "err");
+          notice2("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg6(e), "err");
         }
       });
       name.addEventListener("keydown", (e) => {
@@ -9780,9 +10573,9 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     if (docs) treeMount.appendChild(treeRow(toTreeNode(docs, 0), 0, spec3));
     const hiddenN = data.areas.reduce((n, a) => n + (a.hidden ?? 0), 0) + data.areas.filter((a) => !DEFAULT_AREAS.has(a.area)).reduce((n, a) => n + a.count, 0);
     const toggle = el("button", {
-      class: "ghost tiny",
+      class: "ghost tiny" + (showInternal ? " on" : ""),
       title: "AI \uB0B4\uBD80 \uC601\uC5ED(hina/: \uC784\uC2DC\xB7\uC2A4\uD06C\uB9BD\uD2B8), \uC810(.) \uD3F4\uB354, \uB9E4 \uC2E4\uD589 \uC7AC\uC0DD\uC131\uB418\uB294 \uBA38\uC2DC\uB108\uB9AC\uB97C \uD568\uAED8 \uBCF4\uC774\uAC70\uB098 \uC228\uAE41\uB2C8\uB2E4",
-      text: showInternal ? "\uC228\uAE40 \uD30C\uC77C \uC228\uAE30\uAE30" : `\uC228\uAE40 \uD30C\uC77C \uBCF4\uAE30 (${hiddenN})`
+      text: showInternal ? "\uC228\uAE40 \uD30C\uC77C \uD45C\uC2DC \uC911" : `\uC228\uAE40 \uD30C\uC77C \uD45C\uC2DC (${hiddenN})`
     });
     toggle.addEventListener("click", () => {
       showInternal = !showInternal;
@@ -9800,24 +10593,11 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       }
       void refresh();
     });
-    const cleanBtn = el("button", { class: "ghost tiny" });
-    cleanBtn.disabled = !state.activeCharKey;
-    cleanBtn.title = state.activeCharKey ? "\uC774 \uBD07\uC758 AI \uC791\uC5C5 \uD3F4\uB354(\uC784\uC2DC\xB7\uC2A4\uD06C\uB9BD\uD2B8)\uB97C \uBE44\uC6C1\uB2C8\uB2E4. \uC0B0\uCD9C\uBB3C(out)\uC740 \uB0A8\uC2B5\uB2C8\uB2E4." : "\uBD07\uC744 \uC5F4\uC5B4\uC57C \uADF8 \uBD07\uC758 \uC791\uC5C5 \uD3F4\uB354\uB97C \uC815\uB9AC\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4";
-    armed(cleanBtn, "\uC774 \uBD07 \uC815\uB9AC", "\uC815\uB9D0 \uC815\uB9AC\uD560\uAE4C\uC694?", async () => {
-      try {
-        const r = await state.cleanFiles();
-        notice2(`${r.removed}\uAC1C\uB97C \uC9C0\uC6CC ${fmtSize2(r.freed)}\uB97C \uBE44\uC6E0\uC2B5\uB2C8\uB2E4.`, "ok");
-        await refresh();
-      } catch (e) {
-        notice2("\uC815\uB9AC\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg5(e), "err");
-      }
-    });
     treeMount.appendChild(el("div", { class: "treefoot" }, [
       mineBtn,
       toggle,
       buildCleanupButton(),
-      cleanBtn,
-      el("div", { class: "hint", text: `\uC804\uCCB4 ${fmtSize2(data.totalSize)}` })
+      el("div", { class: "hint", text: `\uC804\uCCB4 ${fmtSize3(data.totalSize)}` })
     ]));
     if (hadFocus) {
       const row = treeMount.querySelector(".treebranch.on") ?? treeMount;
@@ -9828,37 +10608,52 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     }
   }
   function buildCleanupButton() {
-    const button2 = el("button", { class: "ghost tiny", text: "AI temp/\uC228\uAE40 \uC815\uB9AC" });
+    const button2 = el("button", {
+      class: "ghost tiny",
+      text: "\uC784\uC2DC\uD30C\uC77C \uC815\uB9AC",
+      title: "AI \uC791\uC5C5 \uC601\uC5ED(hina/)\uC758 \uC784\uC2DC \uD30C\uC77C\xB7\uCE90\uC2DC\xB7\uC2E4\uD589 \uC2A4\uD06C\uB9BD\uD2B8\uB97C \uCC3E\uC544 \uC9C0\uC6C1\uB2C8\uB2E4. \uD504\uB85C\uC81D\uD2B8\xB7\uC774\uBBF8\uC9C0\xB7\uC2A4\uD0AC\uC740 \uAC74\uB4DC\uB9AC\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4."
+    });
     button2.addEventListener("click", async () => {
       button2.disabled = true;
       try {
         const plan = await transport.post("/files/cleanup-ai", {});
-        const apply = el("button", { class: "primary", text: "\uBCF4\uAD00 \uD3F4\uB354\uB85C \uC815\uB9AC", disabled: !plan.count });
+        if (!plan.count) {
+          notice2("\uC9C0\uC6B8 \uC784\uC2DC \uD30C\uC77C\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.", "ok");
+          return;
+        }
+        const apply = el("button", { class: "danger", text: `${plan.count}\uAC1C \uC0AD\uC81C` });
         const status = el("div", { class: "hint" });
-        const close = modal("AI \uC784\uC2DC\xB7\uC228\uAE40 \uD30C\uC77C \uC815\uB9AC", el("div", {}, [
-          el("p", { text: `AI \uC791\uC5C5 \uC601\uC5ED\uC758 \uC784\uC2DC \uD30C\uC77C\xB7\uCE90\uC2DC ${plan.count}\uAC1C (${fmtSize2(plan.bytes)})\uB97C \uC790\uB3D9\uC73C\uB85C \uCC3E\uC558\uC2B5\uB2C8\uB2E4. \uD504\uB85C\uC81D\uD2B8\xB7\uC774\uBBF8\uC9C0\xB7\uC2A4\uD0AC\xB7Git\xB7\uC124\uC815 \uD30C\uC77C\uC740 \uC815\uB9AC \uB300\uC0C1\uC5D0\uC11C \uC81C\uC678\uD569\uB2C8\uB2E4.` }),
-          el("p", { text: "\uC601\uAD6C \uC0AD\uC81C\uD558\uC9C0 \uC54A\uACE0 hina/.cleanup \uC544\uB798\uC5D0 \uC6D0\uB798 \uACBD\uB85C\uB300\uB85C \uBCF4\uAD00\uD569\uB2C8\uB2E4. \uC228\uAE40 \uD30C\uC77C \uBCF4\uAE30\uC5D0\uC11C \uD655\uC778\uD558\uACE0 \uD544\uC694\uD55C \uD30C\uC77C\uC744 \uC6D0\uB798 \uC704\uCE58\uB85C \uC62E\uAE38 \uC218 \uC788\uC2B5\uB2C8\uB2E4. \uB514\uC2A4\uD06C \uACF5\uAC04\uC740 \uC904\uC5B4\uB4E4\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4." }),
+        const list2 = el("details", {}, [
+          el("summary", { text: "\uBAA9\uB85D \uBCF4\uAE30" }),
           el("pre", { text: plan.paths.join("\n") + (plan.more ? `
-\uC678 ${plan.more}\uAC1C` : ""), style: { maxHeight: "220px", overflow: "auto", whiteSpace: "pre-wrap" } }),
+\uC678 ${plan.more}\uAC1C` : ""), style: { maxHeight: "220px", overflow: "auto", whiteSpace: "pre-wrap" } })
+        ]);
+        const close = modal("\uC784\uC2DC\uD30C\uC77C \uC815\uB9AC", el("div", {}, [
+          el("p", { text: `\uC784\uC2DC \uD30C\uC77C\xB7\uCE90\uC2DC ${plan.count}\uAC1C (${fmtSize3(plan.bytes)})\uB97C \uCC3E\uC558\uC2B5\uB2C8\uB2E4. \uB418\uB3CC\uB9B4 \uC218 \uC5C6\uC774 \uC0AD\uC81C\uD569\uB2C8\uB2E4.` }),
+          el("p", { class: "hint", text: "AI \uC791\uC5C5 \uC601\uC5ED(hina/)\uC758 scratch\xB7\uCE90\uC2DC\xB7\uC2E4\uD589 \uC2A4\uD06C\uB9BD\uD2B8\xB7.tmp \uB9CC \uB300\uC0C1\uC785\uB2C8\uB2E4. \uD504\uB85C\uC81D\uD2B8\xB7\uC774\uBBF8\uC9C0\xB7\uC2A4\uD0AC\xB7Git\xB7\uC124\uC815 \uD30C\uC77C\uC740 \uC81C\uC678\uD569\uB2C8\uB2E4." }),
+          list2,
           apply,
           status
         ]));
         apply.addEventListener("click", async () => {
           apply.disabled = true;
-          status.textContent = "\uC815\uB9AC \uC911\u2026";
+          status.textContent = "\uC9C0\uC6B0\uB294 \uC911\u2026";
           try {
             const result = await transport.post("/files/cleanup-ai", { plan: plan.plan });
             close();
             state.touchFiles();
             await refresh();
-            notice2(`${result.moved}\uAC1C \uBCF4\uAD00 \xB7 \uC2E4\uD328 ${result.failed.length}\uAC1C${result.archive ? ` \xB7 ${result.archive}` : ""}`, result.failed.length ? "err" : "ok");
+            notice2(
+              `${result.removed}\uAC1C\uB97C \uC9C0\uC6CC ${fmtSize3(result.freed)}\uB97C \uBE44\uC6E0\uC2B5\uB2C8\uB2E4.` + (result.failed.length ? ` \uC2E4\uD328 ${result.failed.length}\uAC1C` : ""),
+              result.failed.length ? "err" : "ok"
+            );
           } catch (e) {
-            status.textContent = msg5(e);
+            status.textContent = msg6(e);
             apply.disabled = false;
           }
         });
       } catch (e) {
-        notice2("\uC815\uB9AC \uB300\uC0C1\uC744 \uD655\uC778\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg5(e), "err");
+        notice2("\uC815\uB9AC \uB300\uC0C1\uC744 \uD655\uC778\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg6(e), "err");
       } finally {
         button2.disabled = false;
       }
@@ -9871,7 +10666,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       path: n.path,
       name: n.name,
       kids: n.kids.map((k) => toTreeNode(k, depth + 1)),
-      count: countFiles(n),
+      count: countFiles2(n),
       glyph: n.virtual ? "\u{1F4C4}" : void 0,
       title: n.virtual ? "AI \uC791\uC5C5 \uD3F4\uB354(\uC784\uC2DC\xB7\uC2A4\uD06C\uB9BD\uD2B8)\uC5D0 \uC788\uB294 \uBB38\uC11C\uC785\uB2C8\uB2E4. \uC5EC\uAE30\uC11C \uBC14\uB85C \uBCFC \uC218 \uC788\uC2B5\uB2C8\uB2E4." : depth ? n.path : why,
       // The clipboard is visible on the rows themselves (§1-34): a cut folder
@@ -9940,8 +10735,8 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       onDropMove: (path, sources) => void moveSelected(sources, path)
     };
   }
-  function countFiles(n) {
-    return n.files.length + n.kids.reduce((s, k) => s + countFiles(k), 0);
+  function countFiles2(n) {
+    return n.files.length + n.kids.reduce((s, k) => s + countFiles2(k), 0);
   }
   function folderNavigation(n) {
     const writable = !n.virtual && USER_AREAS.has(n.area.area);
@@ -10024,9 +10819,9 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       zipAll.disabled = true;
       try {
         const bytes = await state.downloadZip([n.path], n.name);
-        notice2(`${fmtSize2(bytes)} zip \uC744 \uBE0C\uB77C\uC6B0\uC800 \uB2E4\uC6B4\uB85C\uB4DC\uB85C \uB118\uACBC\uC2B5\uB2C8\uB2E4.`, "ok");
+        notice2(`${fmtSize3(bytes)} zip \uC744 \uBE0C\uB77C\uC6B0\uC800 \uB2E4\uC6B4\uB85C\uB4DC\uB85C \uB118\uACBC\uC2B5\uB2C8\uB2E4.`, "ok");
       } catch (e) {
-        notice2("\uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg5(e), "err");
+        notice2("\uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg6(e), "err");
       } finally {
         zipAll.disabled = false;
       }
@@ -10061,7 +10856,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       if (!searchInput.value) searchWrap.classList.remove("open");
     });
     searchWrap.append(searchBtn, searchInput);
-    const ownPics = !n.virtual && n.path.includes("/") && n.files.some((f) => IMAGE_RE.test(f.name));
+    const ownPics = !n.virtual && n.path.includes("/") && n.files.some((f) => IMAGE_RE2.test(f.name));
     const inspectBtn = el("button", {
       class: "primary tiny",
       text: "\uAC80\uC218",
@@ -10279,7 +11074,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         el("span", { text: e.name }),
         isNew(e) ? el("span", { class: "newdot", title: "\uC0C8 \uD30C\uC77C" }) : null
       ]),
-      el("span", { class: "fsize", text: e.file ? fmtSize2(e.file.size) : `${countFiles(e.node)}\uAC1C` }),
+      el("span", { class: "fsize", text: e.file ? fmtSize3(e.file.size) : `${countFiles2(e.node)}\uAC1C` }),
       el("span", { class: "ftime", text: e.file ? fmtWhen(e.file.modified) : "" })
     ]);
     box.addEventListener("click", (ev) => {
@@ -10383,7 +11178,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     const can = paths.every((q) => q.includes("/") && writableAt(q));
     const hereOk = !many && writableAt(node.path);
     const here = nodes.get(node.path);
-    const pictures = !!here && !here.virtual && node.path.includes("/") && here.files.some((f) => IMAGE_RE.test(f.name));
+    const pictures = !!here && !here.virtual && node.path.includes("/") && here.files.some((f) => IMAGE_RE2.test(f.name));
     menuAt(ev.clientX, ev.clientY, [
       { label: "\uC5F4\uAE30", disabled: many, onClick: () => selectTreeFolder(node.path) },
       // Any folder of pictures can be reviewed: 검수 is not tied to
@@ -10453,7 +11248,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       const r = await fileOperation(`${paths.length}\uAC1C \uC0AD\uC81C \uC911\u2026`, () => state.deleteFiles(paths));
       notice2(r.failed.length ? `${r.done}\uAC1C\uB97C \uC9C0\uC6E0\uC2B5\uB2C8\uB2E4. ${r.failed.length}\uAC1C \uC2E4\uD328 \u2014 ${r.failed[0].error}` : `${r.done}\uAC1C\uB97C \uC9C0\uC6E0\uC2B5\uB2C8\uB2E4.`, r.failed.length ? "err" : "ok");
     } catch (e) {
-      notice2("\uC9C0\uC6B0\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg5(e), "err");
+      notice2("\uC9C0\uC6B0\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg6(e), "err");
     }
     treeSel.clear();
     state.touchFiles();
@@ -10463,9 +11258,9 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     const name = paths.length === 1 ? paths[0].split("/").pop() ?? "files" : "files";
     try {
       const bytes = await state.downloadZip(paths, name);
-      notice2(`${fmtSize2(bytes)} zip \uC744 \uBE0C\uB77C\uC6B0\uC800 \uB2E4\uC6B4\uB85C\uB4DC\uB85C \uB118\uACBC\uC2B5\uB2C8\uB2E4.`, "ok");
+      notice2(`${fmtSize3(bytes)} zip \uC744 \uBE0C\uB77C\uC6B0\uC800 \uB2E4\uC6B4\uB85C\uB4DC\uB85C \uB118\uACBC\uC2B5\uB2C8\uB2E4.`, "ok");
     } catch (e) {
-      notice2("\uB0B4\uB824\uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg5(e), "err");
+      notice2("\uB0B4\uB824\uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg6(e), "err");
     }
   }
   function treeNewFolder(where) {
@@ -10482,7 +11277,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           state.touchFiles();
           await refresh();
         } catch (e) {
-          notice2("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg5(e), "err");
+          notice2("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg6(e), "err");
         }
       }
     });
@@ -10504,7 +11299,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           state.touchFiles();
           await refresh();
         } catch (err) {
-          notice2("\uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg5(err), "err");
+          notice2("\uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg6(err), "err");
         }
       }
     });
@@ -10525,7 +11320,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       if (!r) return;
       notice2(batchText(r, target, clip.op === "copy" ? "\uBCF5\uC0AC" : "\uC774\uB3D9"), r.failed.length ? "err" : "ok");
     } catch (e) {
-      notice2("\uCC98\uB9AC \uACB0\uACFC\uB97C \uD655\uC778\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg5(e) + " \xB7 \uD604\uC7AC \uBAA9\uB85D\uC744 \uB2E4\uC2DC \uD655\uC778\uD569\uB2C8\uB2E4.", "err");
+      notice2("\uCC98\uB9AC \uACB0\uACFC\uB97C \uD655\uC778\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg6(e) + " \xB7 \uD604\uC7AC \uBAA9\uB85D\uC744 \uB2E4\uC2DC \uD655\uC778\uD569\uB2C8\uB2E4.", "err");
     }
     if (clip.op === "cut") {
       selection.clear();
@@ -10539,7 +11334,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       const r = await fileOperation(`${list2.length}\uAC1C \uC774\uB3D9 \uC911\u2026`, () => state.moveFiles(list2, target));
       notice2(batchText(r, target, "\uC774\uB3D9"), r.failed.length ? "err" : "ok");
     } catch (e) {
-      notice2("\uC62E\uAE30\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg5(e), "err");
+      notice2("\uC62E\uAE30\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg6(e), "err");
     }
     selection.clear();
     previewPath = "";
@@ -10576,11 +11371,11 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     } };
   }
   function hasImagesDeep(node) {
-    if (node.files.some((f) => IMAGE_RE.test(f.name))) return true;
+    if (node.files.some((f) => IMAGE_RE2.test(f.name))) return true;
     return node.kids.some(hasImagesDeep);
   }
   function firstImage(node) {
-    const own = node.files.find((f) => IMAGE_RE.test(f.name));
+    const own = node.files.find((f) => IMAGE_RE2.test(f.name));
     if (own) return own;
     for (const k of node.kids) {
       const hit = firstImage(k);
@@ -10593,13 +11388,13 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     const cell2 = el("div", { class: "fcell" + (selection.has(e.path) ? " sel" : "") + clipClass(e.path), title: e.path }, [
       pic,
       el("div", { class: "fname" }, [el("span", { text: e.name }), isNew(e) ? el("span", { class: "newdot", title: "\uC0C8 \uD30C\uC77C" }) : null]),
-      el("div", { class: "fsize", text: e.file ? fmtSize2(e.file.size) : `\uD3F4\uB354 \xB7 ${countFiles(e.node)}\uAC1C` })
+      el("div", { class: "fsize", text: e.file ? fmtSize3(e.file.size) : `\uD3F4\uB354 \xB7 ${countFiles2(e.node)}\uAC1C` })
     ]);
     if (e.node) {
       const peek = firstImage(e.node);
       if (peek) void loadThumb(peek, pic);
       pic.appendChild(el("div", { class: peek ? "foldertag" : "assettype", text: "\u{1F4C1}" }));
-    } else if (e.file && IMAGE_RE.test(e.name)) void loadThumb(e.file, pic);
+    } else if (e.file && IMAGE_RE2.test(e.name)) void loadThumb(e.file, pic);
     else pic.appendChild(el("div", { class: "assettype", text: (e.name.split(".").pop() || "?").toUpperCase().slice(0, 5) }));
     cell2.addEventListener("click", (ev) => {
       pick(e.path, ev, order);
@@ -10635,25 +11430,25 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     });
     return b;
   }
-  function loadThumb(f, mount) {
+  function loadThumb(f, mount2) {
     let gen2 = 0;
-    watchImage(mount, () => {
+    watchImage(mount2, () => {
       const my = ++gen2;
       void (async () => {
         try {
-          if (!mount.isConnected) return;
+          if (!mount2.isConnected) return;
           const url = await blobUrl(f.path, String(f.modified), { thumb: true });
-          if (!mount.isConnected || my !== gen2) return;
+          if (!mount2.isConnected || my !== gen2) return;
           const img = el("img", { src: url, alt: f.name, loading: "lazy" });
           img.addEventListener("error", () => img.replaceWith(el("div", { class: "assettype", text: "IMG" })));
-          mount.appendChild(img);
+          mount2.appendChild(img);
         } catch {
-          if (my === gen2) mount.appendChild(el("div", { class: "assettype", text: "?" }));
+          if (my === gen2) mount2.appendChild(el("div", { class: "assettype", text: "?" }));
         }
       })();
     }, unloadByDefault() ? () => {
       gen2 += 1;
-      for (const i of Array.from(mount.querySelectorAll("img"))) i.remove();
+      for (const i of Array.from(mount2.querySelectorAll("img"))) i.remove();
     } : void 0);
   }
   async function drawPreview(f, n) {
@@ -10673,9 +11468,9 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       out.textContent = "\uBC1B\uB294 \uC911\uC785\uB2C8\uB2E4\u2026";
       try {
         const bytes = await state.downloadFile(f.path);
-        out.textContent = `${fmtSize2(bytes)} \uB97C \uBE0C\uB77C\uC6B0\uC800 \uB2E4\uC6B4\uB85C\uB4DC\uB85C \uB118\uACBC\uC2B5\uB2C8\uB2E4.`;
+        out.textContent = `${fmtSize3(bytes)} \uB97C \uBE0C\uB77C\uC6B0\uC800 \uB2E4\uC6B4\uB85C\uB4DC\uB85C \uB118\uACBC\uC2B5\uB2C8\uB2E4.`;
       } catch (e) {
-        out.textContent = "\uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg5(e);
+        out.textContent = "\uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg6(e);
       } finally {
         save.disabled = false;
       }
@@ -10684,7 +11479,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       back,
       el("span", { class: "filecrumb", text: f.path }),
       copyPathButton(f.path),
-      el("span", { class: "hint", text: `${fmtSize2(f.size)} \xB7 ${fmtWhen(f.modified)} \xB7 ${AREA_LABEL[n.area.area]?.[0] ?? n.area.area}` }),
+      el("span", { class: "hint", text: `${fmtSize3(f.size)} \xB7 ${fmtWhen(f.modified)} \xB7 ${AREA_LABEL[n.area.area]?.[0] ?? n.area.area}` }),
       el("span", { class: "spacer" }),
       save,
       out
@@ -10692,7 +11487,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     viewMount.appendChild(head);
     const body = el("div", { class: "card fpreview" });
     viewMount.appendChild(body);
-    if (IMAGE_RE.test(f.name)) {
+    if (IMAGE_RE2.test(f.name)) {
       body.appendChild(el("div", { class: "hint", text: "\uBD88\uB7EC\uC624\uB294 \uC911\uC785\uB2C8\uB2E4\u2026" }));
       try {
         const url = await blobUrl(f.path, String(f.modified), { thumb: true, w: 1024 });
@@ -10709,7 +11504,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         body.append(detail, img);
       } catch (e) {
         clear(body);
-        body.appendChild(el("div", { class: "notice err", text: msg5(e) }));
+        body.appendChild(el("div", { class: "notice err", text: msg6(e) }));
       }
       return;
     }
@@ -10747,7 +11542,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
                 revision = result.revision;
                 status.textContent = "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4.";
               } catch (error) {
-                status.textContent = msg5(error);
+                status.textContent = msg6(error);
               } finally {
                 save2.disabled = false;
               }
@@ -10760,7 +11555,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
             );
             done.addEventListener("click", close);
           } catch (error) {
-            notice2(msg5(error), "err");
+            notice2(msg6(error), "err");
           } finally {
             edit.disabled = false;
           }
@@ -10782,7 +11577,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       }
     } catch (e) {
       clear(body);
-      body.appendChild(el("div", { class: "notice err", text: msg5(e) }));
+      body.appendChild(el("div", { class: "notice err", text: msg6(e) }));
     }
   }
   async function runDelete(n) {
@@ -10793,7 +11588,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       if (paths.includes(previewPath)) previewPath = "";
       notice2(r.failed.length ? `${r.done}\uAC1C\uB97C \uC9C0\uC6E0\uC2B5\uB2C8\uB2E4. ${r.failed.length}\uAC1C \uC2E4\uD328 \u2014 ${r.failed[0].error}` : `${r.done}\uAC1C\uB97C \uC9C0\uC6E0\uC2B5\uB2C8\uB2E4.`, r.failed.length ? "err" : "ok");
     } catch (e) {
-      notice2("\uC9C0\uC6B0\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg5(e), "err");
+      notice2("\uC9C0\uC6B0\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg6(e), "err");
     }
     selection.clear();
     state.touchFiles();
@@ -10815,7 +11610,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           const r = await fileOperation(`${paths.length}\uAC1C \uC774\uB3D9 \uC911\u2026`, () => state.moveFiles(paths, target));
           notice2(batchText(r, target, "\uC774\uB3D9"), r.failed.length ? "err" : "ok");
         } catch (e) {
-          notice2("\uC62E\uAE30\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg5(e), "err");
+          notice2("\uC62E\uAE30\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg6(e), "err");
         }
         selection.clear();
         previewPath = "";
@@ -10832,15 +11627,15 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     try {
       if (single) {
         const bytes2 = await state.downloadFile(single.path);
-        notice2(`${single.name} \xB7 ${fmtSize2(bytes2)} \uB97C \uBE0C\uB77C\uC6B0\uC800 \uB2E4\uC6B4\uB85C\uB4DC\uB85C \uB118\uACBC\uC2B5\uB2C8\uB2E4.`, "ok");
+        notice2(`${single.name} \xB7 ${fmtSize3(bytes2)} \uB97C \uBE0C\uB77C\uC6B0\uC800 \uB2E4\uC6B4\uB85C\uB4DC\uB85C \uB118\uACBC\uC2B5\uB2C8\uB2E4.`, "ok");
         return;
       }
       const name = paths.length === 1 ? paths[0].slice(paths[0].lastIndexOf("/") + 1) : `${state.workspace?.characterName || "files"}-${n.name}`;
       notice2("zip \uC744 \uB9CC\uB4DC\uB294 \uC911\uC785\uB2C8\uB2E4\u2026");
       const bytes = await state.downloadZip(paths, name);
-      notice2(`${paths.length}\uAC1C \xB7 ${fmtSize2(bytes)} zip \uC744 \uBE0C\uB77C\uC6B0\uC800 \uB2E4\uC6B4\uB85C\uB4DC\uB85C \uB118\uACBC\uC2B5\uB2C8\uB2E4.`, "ok");
+      notice2(`${paths.length}\uAC1C \xB7 ${fmtSize3(bytes)} zip \uC744 \uBE0C\uB77C\uC6B0\uC800 \uB2E4\uC6B4\uB85C\uB4DC\uB85C \uB118\uACBC\uC2B5\uB2C8\uB2E4.`, "ok");
     } catch (e) {
-      notice2("\uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg5(e), "err");
+      notice2("\uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg6(e), "err");
     }
   }
   var upPanel = null;
@@ -10943,7 +11738,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       ui8.set(
         sentBytes,
         totalBytes,
-        extraNote || `${done + failed}/${todo.length} \xB7 ${fmtSize2(sentBytes)}/${fmtSize2(totalBytes)} \xB7 ${secs}\uCD08`
+        extraNote || `${done + failed}/${todo.length} \xB7 ${fmtSize3(sentBytes)}/${fmtSize3(totalBytes)} \xB7 ${secs}\uCD08`
       );
     };
     paint();
@@ -10989,7 +11784,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       } catch (e) {
         failed += 1;
         sentBytes = before + file.size;
-        ui8.error(`${name}: ` + msg5(e));
+        ui8.error(`${name}: ` + msg6(e));
       }
       paint();
     };
@@ -11013,7 +11808,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
             if (r.extracted) extracted += r.extracted;
           } catch (e2) {
             failed += 1;
-            ui8.error(`${file.name}: ` + msg5(e2));
+            ui8.error(`${file.name}: ` + msg6(e2));
           }
           sentBytes += file.size;
         }
@@ -11053,7 +11848,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     if (i <= 0 || i === name.length - 1) return "\u2014";
     return name.slice(i + 1).toLowerCase().slice(0, 5);
   }
-  function fmtSize2(n) {
+  function fmtSize3(n) {
     if (!n) return "0B";
     if (n < 1024) return `${n}B`;
     if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)}KB`;
@@ -11070,11 +11865,14 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       return "";
     }
   }
-  function msg5(e) {
+  function msg6(e) {
     return e instanceof Error ? e.message : String(e);
   }
 
   // src/ui/lore-view.ts
+  init_dom();
+  init_hilite();
+  init_state();
   function makeLoreTab(opts) {
     let treeMount5 = null;
     let viewMount6 = null;
@@ -11097,7 +11895,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         }
       } catch (e) {
         clear(treeMount5);
-        treeMount5.appendChild(el("div", { class: "notice err", text: msg6(e) }));
+        treeMount5.appendChild(el("div", { class: "notice err", text: msg7(e) }));
         return;
       }
       drawTree5();
@@ -11198,7 +11996,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           notice10(savedText("\uD3F4\uB354\uB97C"), "ok");
           await refreshNow7();
         } catch (err) {
-          notice10("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg6(err), "err");
+          notice10("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg7(err), "err");
         } finally {
           save.disabled = false;
         }
@@ -11210,7 +12008,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           if (opts.scope === "global") void state.refreshBotChanges();
           await refreshNow7();
         } catch (err) {
-          notice10("\uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg6(err), "err");
+          notice10("\uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg7(err), "err");
         }
       });
       const del = el("button", { class: "ghost" });
@@ -11222,7 +12020,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           if (viewMount6) clear(viewMount6);
           await refreshNow7();
         } catch (err) {
-          notice10("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg6(err), "err");
+          notice10("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg7(err), "err");
         }
       });
       clear(viewMount6);
@@ -11241,7 +12039,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           await state.moveLore(e.id, all.findIndex((x) => x.id === neighbor.id));
           await refreshNow7();
         } catch (err) {
-          notice10("\uC21C\uC11C\uB97C \uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg6(err), "err");
+          notice10("\uC21C\uC11C\uB97C \uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg7(err), "err");
         }
       };
       const row = listRow({
@@ -11333,7 +12131,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           if (opts.scope === "global") void state.refreshBotChanges();
           await refreshNow7();
         } catch (err) {
-          notice10("\uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg6(err), "err");
+          notice10("\uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg7(err), "err");
         }
       });
       const save = el("button", { class: "primary", text: "\uC800\uC7A5" });
@@ -11355,7 +12153,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           notice10(savedText("\uB85C\uC5B4\uBD81 \uD56D\uBAA9\uC744"), "ok");
           await refreshNow7();
         } catch (err) {
-          notice10("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg6(err), "err");
+          notice10("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg7(err), "err");
         } finally {
           save.disabled = false;
         }
@@ -11369,7 +12167,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           if (viewMount6) clear(viewMount6);
           await refreshNow7();
         } catch (err) {
-          notice10("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg6(err), "err");
+          notice10("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg7(err), "err");
         }
       });
       const orig = e.origin === "edited" && e.original ? e.original : null;
@@ -11430,7 +12228,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         const made = entries.find((e) => e.id === id);
         if (made) open4(made);
       } catch (e) {
-        notice10("\uD3F4\uB354\uB97C \uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg6(e), "err");
+        notice10("\uD3F4\uB354\uB97C \uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg7(e), "err");
       }
     }
     async function create2() {
@@ -11444,7 +12242,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         const made = entries.find((e) => e.id === id);
         if (made) open4(made);
       } catch (e) {
-        notice10("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg6(e), "err");
+        notice10("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg7(e), "err");
       }
     }
     return makeTab({
@@ -11502,7 +12300,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
   function shortId(id) {
     return id.length > 10 ? `\uD3F4\uB354 ${id.slice(0, 6)}\u2026` : `\uD3F4\uB354 ${id}`;
   }
-  function msg6(e) {
+  function msg7(e) {
     return e instanceof Error ? e.message : String(e);
   }
 
@@ -11518,6 +12316,8 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
   });
 
   // src/ui/tab-memory.ts
+  init_dom();
+  init_state();
   var KIND_LABEL = {
     hypaV3Data: "HypaV3",
     hypaV2Data: "HypaV2",
@@ -11582,7 +12382,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       drawTree2();
     } catch (e) {
       clear(treeMount2);
-      treeMount2.appendChild(el("div", { class: "notice err", text: msg7(e) }));
+      treeMount2.appendChild(el("div", { class: "notice err", text: msg8(e) }));
     }
   }
   function syncCount() {
@@ -11662,7 +12462,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         const fresh = items.find((i) => i.id === item.id);
         if (fresh) open(fresh);
       } catch (e) {
-        notice3("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg7(e), "err");
+        notice3("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg8(e), "err");
       } finally {
         save.disabled = false;
       }
@@ -11681,7 +12481,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         if (viewMount2) clear(viewMount2);
         await refreshNow();
       } catch (e) {
-        notice3("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg7(e), "err");
+        notice3("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg8(e), "err");
       }
     });
     clear(viewMount2);
@@ -11712,14 +12512,16 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       await refreshNow();
       open(made);
     } catch (e) {
-      notice3("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg7(e), "err");
+      notice3("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg8(e), "err");
     }
   }
-  function msg7(e) {
+  function msg8(e) {
     return e instanceof Error ? e.message : String(e);
   }
 
   // src/ui/tab-vars.ts
+  init_dom();
+  init_state();
   var KIND2 = "scriptstate";
   var listMount = null;
   var items2 = [];
@@ -11757,7 +12559,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         draw();
       } catch (e) {
         clear(listMount);
-        listMount.appendChild(el("div", { class: "notice err", text: msg8(e) }));
+        listMount.appendChild(el("div", { class: "notice err", text: msg9(e) }));
       }
     }
   });
@@ -11766,7 +12568,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       const r = await state.memory();
       items2 = r.items.filter((i) => i.kind === KIND2);
     } catch (e) {
-      notice4(msg8(e), "err");
+      notice4(msg9(e), "err");
     }
     draw();
   }
@@ -11786,7 +12588,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     ]);
     const reloadBtn = el("button", { class: "ghost tiny", text: "\uC0C8\uB85C\uACE0\uCE68" });
     reloadBtn.addEventListener("click", () => void refreshNow2());
-    const card = el("div", { class: "card" }, [
+    const card2 = el("div", { class: "card" }, [
       el("div", { class: "row" }, [head, el("span", { class: "spacer" }), reloadBtn]),
       el("div", {
         class: "hint",
@@ -11795,16 +12597,16 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       })
     ]);
     if (!items2.length) {
-      card.appendChild(el("div", { class: "hint", text: "\uC774 \uCC57\uC5D0\uB294 \uBCC0\uC218\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4. \uBD07\uC774 {{setvar}}\uB97C \uC4F0\uC9C0 \uC54A\uC73C\uBA74 \uBE44\uC5B4 \uC788\uB294 \uAC83\uC774 \uC815\uC0C1\uC785\uB2C8\uB2E4." }));
+      card2.appendChild(el("div", { class: "hint", text: "\uC774 \uCC57\uC5D0\uB294 \uBCC0\uC218\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4. \uBD07\uC774 {{setvar}}\uB97C \uC4F0\uC9C0 \uC54A\uC73C\uBA74 \uBE44\uC5B4 \uC788\uB294 \uAC83\uC774 \uC815\uC0C1\uC785\uB2C8\uB2E4." }));
     } else if (!shown.length) {
-      card.appendChild(el("div", { class: "hint", text: `\u201C${filter2}\u201D \uC5D0 \uB9DE\uB294 \uBCC0\uC218\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4.` }));
+      card2.appendChild(el("div", { class: "hint", text: `\u201C${filter2}\u201D \uC5D0 \uB9DE\uB294 \uBCC0\uC218\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4.` }));
     } else {
       const table = el("div", { class: "vartable" });
       for (const item of shown) table.appendChild(varRow(item));
-      card.appendChild(table);
+      card2.appendChild(table);
     }
-    card.appendChild(buildAdd());
-    listMount.appendChild(card);
+    card2.appendChild(buildAdd());
+    listMount.appendChild(card2);
   }
   function typeLabel(t) {
     switch (t) {
@@ -11835,7 +12637,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         notice4(savedText(`${item.title} \uC744(\uB97C)`), "ok");
         await refreshNow2();
       } catch (e) {
-        notice4("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg8(e), "err");
+        notice4("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg9(e), "err");
         save.disabled = false;
       }
     };
@@ -11851,7 +12653,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         await state.saveMemory(item.id, item.original);
         await refreshNow2();
       } catch (e) {
-        notice4("\uB418\uB3CC\uB9AC\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg8(e), "err");
+        notice4("\uB418\uB3CC\uB9AC\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg9(e), "err");
       }
     });
     const del = el("button", { class: "ghost tiny" });
@@ -11861,7 +12663,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         notice4(`${item.title} \uC744(\uB97C) \uC9C0\uC6E0\uC2B5\uB2C8\uB2E4. \uBC18\uC601\uD558\uBA74 RisuAI\uC5D0\uC11C\uB3C4 \uC0AC\uB77C\uC9D1\uB2C8\uB2E4.`, "ok");
         await refreshNow2();
       } catch (e) {
-        notice4("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg8(e), "err");
+        notice4("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg9(e), "err");
       }
     });
     const badge = item.isNew ? el("span", { class: "badge ok", text: "\uCD94\uAC00" }) : item.changed ? el("span", { class: "badge warn", text: "\uC218\uC815" }) : el("span");
@@ -11890,18 +12692,26 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         notice4(`${k} \uC744(\uB97C) \uCD94\uAC00\uD588\uC2B5\uB2C8\uB2E4.`, "ok");
         await refreshNow2();
       } catch (e) {
-        notice4("\uCD94\uAC00\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg8(e), "err");
+        notice4("\uCD94\uAC00\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg9(e), "err");
       } finally {
         add.disabled = false;
       }
     });
     return el("div", { class: "varadd row", style: { marginTop: "10px" } }, [key, value, add]);
   }
-  function msg8(e) {
+  function msg9(e) {
     return e instanceof Error ? e.message : String(e);
   }
 
+  // src/ui/tab-settings.ts
+  init_dom();
+  init_state();
+
+  // src/ui/presets.ts
+  init_dom();
+
   // src/ui/pickers.ts
+  init_dom();
   function pickerRow(current3, opts) {
     const open4 = el("button", { class: "ghost chev", text: "\u203A", title: opts.title });
     open4.addEventListener("click", () => opts.onOpen());
@@ -11947,12 +12757,12 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         }
       } catch (e) {
         clear(listMount2);
-        listMount2.appendChild(el("div", { class: "notice err", text: msg9(e) }));
+        listMount2.appendChild(el("div", { class: "notice err", text: msg10(e) }));
       }
     };
     const complain = (e) => {
       clear(listMount2);
-      listMount2.appendChild(el("div", { class: "notice err", text: msg9(e) }));
+      listMount2.appendChild(el("div", { class: "notice err", text: msg10(e) }));
       setTimeout(() => void draw2(), 2500);
     };
     const row = (entry) => {
@@ -11999,11 +12809,13 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     };
     void draw2();
   }
-  function msg9(e) {
+  function msg10(e) {
     return e instanceof Error ? e.message : String(e);
   }
 
   // src/ui/presets.ts
+  init_state();
+  init_transport();
   var KIND_LABEL2 = { general: "\uC77C\uBC18 \uC5D0\uC774\uC804\uD2B8", search: "\uAC80\uC0C9 \uC5D0\uC774\uC804\uD2B8" };
   var REASONING_LABEL = {
     "": "\uBCF4\uB0B4\uC9C0 \uC54A\uC74C",
@@ -12036,7 +12848,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         generalMount.appendChild(currentRow("general", r.selected, general.length));
       } catch (e) {
         clear(generalMount);
-        generalMount.appendChild(el("div", { class: "notice err", text: msg10(e) }));
+        generalMount.appendChild(el("div", { class: "notice err", text: msg11(e) }));
       }
       await opts.onChanged();
     };
@@ -12078,7 +12890,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           }
         } catch (e) {
           clear(box);
-          box.appendChild(el("div", { class: "notice err", text: msg10(e) }));
+          box.appendChild(el("div", { class: "notice err", text: msg11(e) }));
         } finally {
           testBtn.disabled = false;
         }
@@ -12369,7 +13181,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         status.textContent = (r.ready ? `\uC9C0\uAE08: ${r.modes.find((m) => m.id === r.mode)?.name ?? r.mode} \u2014 \uC0AC\uC6A9 \uAC00\uB2A5` : `\uC0AC\uC6A9 \uBD88\uAC00: ${r.whyNot}`) + (r.pillow ? "" : " \xB7 Pillow \uC5C6\uC74C: \uC218\uCE58 \uBD84\uC11D\uC774 \uC81C\uD55C\uB429\uB2C8\uB2E4");
         status.className = "hint " + (r.ready ? "" : "diff-del-n");
       } catch (e) {
-        status.textContent = msg10(e);
+        status.textContent = msg11(e);
       }
     };
     const patch = () => {
@@ -12400,7 +13212,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         out.appendChild(el("div", { class: "notice ok", text: "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4." }));
       } catch (e) {
         clear(out);
-        out.appendChild(el("div", { class: "notice err", text: msg10(e) }));
+        out.appendChild(el("div", { class: "notice err", text: msg11(e) }));
       } finally {
         save.disabled = false;
       }
@@ -12425,7 +13237,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         ]));
       } catch (e) {
         clear(out);
-        out.appendChild(el("div", { class: "notice err", text: msg10(e) }));
+        out.appendChild(el("div", { class: "notice err", text: msg11(e) }));
       } finally {
         test.disabled = false;
       }
@@ -12536,7 +13348,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         status.textContent = r.ready ? `\uC9C0\uAE08: ${r.modes.find((m) => m.id === r.mode)?.name ?? r.mode} \u2014 \uAC80\uC0C9 \uAC00\uB2A5` : `\uAC80\uC0C9 \uBD88\uAC00: ${r.whyNot}`;
         status.className = "hint " + (r.ready ? "" : "diff-del-n");
       } catch (e) {
-        status.textContent = msg10(e);
+        status.textContent = msg11(e);
       }
     };
     const patch = () => {
@@ -12567,7 +13379,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         out.appendChild(el("div", { class: "notice ok", text: "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4." }));
       } catch (e) {
         clear(out);
-        out.appendChild(el("div", { class: "notice err", text: msg10(e) }));
+        out.appendChild(el("div", { class: "notice err", text: msg11(e) }));
       } finally {
         save.disabled = false;
       }
@@ -12591,7 +13403,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         ]));
       } catch (e) {
         clear(out);
-        out.appendChild(el("div", { class: "notice err", text: msg10(e) }));
+        out.appendChild(el("div", { class: "notice err", text: msg11(e) }));
       } finally {
         test.disabled = false;
       }
@@ -12791,7 +13603,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         syncProvider();
         keyNote.textContent = p.apiKey?.set ? `\uC124\uC815\uB428 (${p.apiKey.length}\uC790) \u2014 \uBC14\uAFB8\uB824\uBA74 \uC0C8\uB85C \uC785\uB825` : "\uC124\uC815\uB418\uC9C0 \uC54A\uC74C";
       } catch (e) {
-        keyNote.textContent = msg10(e);
+        keyNote.textContent = msg11(e);
       }
     };
     const save = el("button", { class: "primary", text: "\uC800\uC7A5" });
@@ -12875,7 +13687,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         openPicker(kind, refresh3, say);
       } catch (e) {
         clear(out);
-        out.appendChild(el("div", { class: "notice err", text: msg10(e) }));
+        out.appendChild(el("div", { class: "notice err", text: msg11(e) }));
       } finally {
         save.disabled = false;
       }
@@ -12921,7 +13733,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           }
         }
       } catch (e) {
-        line.textContent = msg10(e);
+        line.textContent = msg11(e);
       }
     };
     login.addEventListener("click", async () => {
@@ -12984,7 +13796,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           })();
         }, 2e3);
       } catch (e) {
-        out.appendChild(el("div", { class: "notice err", text: msg10(e) }));
+        out.appendChild(el("div", { class: "notice err", text: msg11(e) }));
       } finally {
         login.disabled = false;
       }
@@ -12998,7 +13810,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         await refresh3();
       } catch (e) {
         clear(out);
-        out.appendChild(el("div", { class: "notice err", text: msg10(e) }));
+        out.appendChild(el("div", { class: "notice err", text: msg11(e) }));
       } finally {
         finish.disabled = false;
       }
@@ -13008,7 +13820,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         await state.codexLogout();
         await refresh3();
       } catch (e) {
-        out.appendChild(el("div", { class: "notice err", text: msg10(e) }));
+        out.appendChild(el("div", { class: "notice err", text: msg11(e) }));
       }
     });
     const root2 = withLogin ? el("div", { class: "card codexbox" }, [
@@ -13066,7 +13878,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         if (r.truncated) list2.appendChild(el("div", { class: "hint", text: "\uB354 \uC788\uC2B5\uB2C8\uB2E4 \u2014 \uAC80\uC0C9\uC5B4\uB97C \uC881\uD600 \uC8FC\uC138\uC694." }));
       } catch (e) {
         clear(list2);
-        list2.appendChild(el("div", { class: "notice err", text: msg10(e) }));
+        list2.appendChild(el("div", { class: "notice err", text: msg11(e) }));
       }
     };
     input2.addEventListener("input", () => {
@@ -13082,11 +13894,14 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     }
     return sel;
   }
-  function msg10(e) {
+  function msg11(e) {
     return e instanceof Error ? e.message : String(e);
   }
 
   // src/ui/skills.ts
+  init_dom();
+  init_state();
+  init_transport();
   function buildSkillsCard(opts = {}) {
     const listMount2 = el("div");
     const out = el("div", { class: "outbox" });
@@ -13113,7 +13928,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         for (const s of r.skills) listMount2.appendChild(row(s));
       } catch (e) {
         clear(listMount2);
-        listMount2.appendChild(el("div", { class: "notice err", text: msg11(e) }));
+        listMount2.appendChild(el("div", { class: "notice err", text: msg12(e) }));
       }
     };
     const row = (s) => {
@@ -13124,7 +13939,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           await refresh3();
         } catch (e) {
           toggle.checked = !toggle.checked;
-          say(msg11(e), "err");
+          say(msg12(e), "err");
         }
       });
       const editBtn = el("button", { class: "ghost tiny", text: "\uC218\uC815" });
@@ -13135,7 +13950,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           await state.deleteSkill(s.id);
           await refresh3();
         } catch (e) {
-          say(msg11(e), "err");
+          say(msg12(e), "err");
         }
       });
       const files = s.files?.length ? ` \xB7 \uD30C\uC77C ${s.files.length}` : "";
@@ -13166,7 +13981,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         await refresh3();
         say(`\u201C${skill.name}\u201D \uC2A4\uD0AC\uC744 \uB9CC\uB4E4\uC5C8\uC2B5\uB2C8\uB2E4 (skills/${skill.id}). \uC124\uBA85\uC744 \uB2E4\uB4EC\uC5B4 \uB450\uBA74 \uC5D0\uC774\uC804\uD2B8\uAC00 \uB354 \uC815\uD655\uD788 \uACE0\uB985\uB2C8\uB2E4.`, "ok");
       } catch (e) {
-        say("\uC5C5\uB85C\uB4DC\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg11(e), "err");
+        say("\uC5C5\uB85C\uB4DC\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg12(e), "err");
       } finally {
         picker.value = "";
       }
@@ -13187,7 +14002,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           el("pre", { class: "mono filepreview", text: r.prompt || "(\uCF1C \uB454 \uC2A4\uD0AC\uC774 \uC5C6\uC2B5\uB2C8\uB2E4)" })
         ]), { wide: true });
       } catch (e) {
-        say(msg11(e), "err");
+        say(msg12(e), "err");
       } finally {
         previewBtn.disabled = false;
       }
@@ -13212,7 +14027,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       try {
         skill = await state.skill(id);
       } catch (e) {
-        say(msg11(e), "err");
+        say(msg12(e), "err");
         return;
       }
     }
@@ -13268,7 +14083,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
                 await refresh3();
                 say("\uC774\uC804 \uBC84\uC804\uC73C\uB85C \uB418\uB3CC\uB838\uC2B5\uB2C8\uB2E4.", "ok");
               } catch (e) {
-                out.textContent = msg11(e);
+                out.textContent = msg12(e);
                 restore.disabled = false;
               }
             });
@@ -13280,7 +14095,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           }
           if (!data.revisions.length) versions.textContent = "\uC544\uC9C1 \uBCC0\uACBD \uAE30\uB85D\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.";
         } catch (e) {
-          out.textContent = msg11(e);
+          out.textContent = msg12(e);
         }
       });
       form.appendChild(el("div", {}, [history, versions]));
@@ -13304,7 +14119,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         say("\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4.", "ok");
       } catch (e) {
         clear(out);
-        out.appendChild(el("div", { class: "notice err", text: msg11(e) }));
+        out.appendChild(el("div", { class: "notice err", text: msg12(e) }));
       } finally {
         save.disabled = false;
       }
@@ -13329,12 +14144,12 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
             draw2();
           } catch (e) {
             clear(out);
-            out.appendChild(el("div", { class: "notice err", text: msg11(e) }));
+            out.appendChild(el("div", { class: "notice err", text: msg12(e) }));
           }
         });
         list2.appendChild(el("div", { class: "pickrow" }, [
           el("span", { class: "mono grow", text: `skills/${skill.id}/${f.path}` }),
-          el("span", { class: "hint", text: fmtSize3(f.size) }),
+          el("span", { class: "hint", text: fmtSize4(f.size) }),
           del
         ]));
       }
@@ -13356,7 +14171,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         say(`${r.path} \uC744(\uB97C) \uB123\uC5C8\uC2B5\uB2C8\uB2E4. \uBCF8\uBB38\uC5D0\uC11C skills/${skill.id}/${r.path} \uB85C \uAC00\uB9AC\uCF1C \uC8FC\uC138\uC694.`, "ok");
       } catch (e) {
         clear(out);
-        out.appendChild(el("div", { class: "notice err", text: msg11(e) }));
+        out.appendChild(el("div", { class: "notice err", text: msg12(e) }));
       } finally {
         picker.value = "";
       }
@@ -13370,16 +14185,19 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       out
     ]);
   }
-  function fmtSize3(n) {
+  function fmtSize4(n) {
     if (n < 1024) return `${n}B`;
     if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)}KB`;
     return `${(n / 1024 / 1024).toFixed(1)}MB`;
   }
-  function msg11(e) {
+  function msg12(e) {
     return e instanceof Error ? e.message : String(e);
   }
 
   // src/ui/agent-notes.ts
+  init_dom();
+  init_state();
+  init_transport();
   function buildAgentNotesCard(onMount) {
     const list2 = el("div");
     const status = el("div", { class: "hint" });
@@ -13506,7 +14324,15 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     ]);
   }
 
+  // src/ui/debugpanel.ts
+  init_dom();
+  init_state();
+  init_transport();
+  init_host();
+
   // src/ui/mem.ts
+  init_blobimg();
+  init_dom();
   function memSnapshot() {
     const b = blobStats();
     const perf = performance.memory;
@@ -13562,10 +14388,10 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           return;
         }
         if (!r.newer) {
-          const mismatch = r.current !== "0.15.17";
+          const mismatch = r.current !== "0.15.18";
           const ahead = r.ahead ?? (!!r.latest && r.latest !== r.current);
           say(
-            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.17"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
+            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.18"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
             mismatch || ahead ? "" : "ok"
           );
           return;
@@ -13581,7 +14407,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           out.appendChild(notes);
         }
       } catch (e) {
-        say(msg12(e), "err");
+        say(msg13(e), "err");
       } finally {
         checkBtn.disabled = false;
       }
@@ -13600,7 +14426,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         const version = await state.waitForBackend(90);
         say(`\uBC31\uC5D4\uB4DC\uAC00 v${version} \uC73C\uB85C \uB2E4\uC2DC \uC2DC\uC791\uD588\uC2B5\uB2C8\uB2E4.`, "ok");
       } catch (e) {
-        say("\uC124\uCE58 \uB610\uB294 \uC7AC\uC2DC\uC791\uC744 \uD655\uC778\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg12(e) + " \u2014 \uC7A0\uC2DC \uD6C4 \uC0C8\uB85C\uACE0\uCE68\uD574\uC11C \uBC84\uC804\uC744 \uD655\uC778\uD574 \uC8FC\uC138\uC694.", "err");
+        say("\uC124\uCE58 \uB610\uB294 \uC7AC\uC2DC\uC791\uC744 \uD655\uC778\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg13(e) + " \u2014 \uC7A0\uC2DC \uD6C4 \uC0C8\uB85C\uACE0\uCE68\uD574\uC11C \uBC84\uC804\uC744 \uD655\uC778\uD574 \uC8FC\uC138\uC694.", "err");
       } finally {
         checkBtn.disabled = false;
       }
@@ -13656,7 +14482,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.15.17",
+            version: "0.15.18",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -13679,7 +14505,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         };
         show("\uC9C4\uB2E8 \uC815\uBCF4", JSON.stringify(report, null, 2));
       } catch (e) {
-        say("\uC9C4\uB2E8 \uC815\uBCF4\uB97C \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg12(e), "err");
+        say("\uC9C4\uB2E8 \uC815\uBCF4\uB97C \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg13(e), "err");
       } finally {
         diagBtn.disabled = false;
       }
@@ -13691,7 +14517,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         const r = await state.logs(400, selectedLevel(levelSel));
         show("\uC11C\uBC84 \uB85C\uADF8", r.lines.join("\n") || "(\uBE44\uC5B4 \uC788\uC2B5\uB2C8\uB2E4)");
       } catch (e) {
-        say("\uB85C\uADF8\uB97C \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg12(e), "err");
+        say("\uB85C\uADF8\uB97C \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg13(e), "err");
       } finally {
         logBtn.disabled = false;
       }
@@ -13729,11 +14555,13 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1e4);
   }
-  function msg12(e) {
+  function msg13(e) {
     return e instanceof Error ? e.message : String(e);
   }
 
   // src/ui/tab-settings.ts
+  init_transport();
+  init_host();
   var aboutMount = null;
   var refreshers = [];
   var watchedHealth = null;
@@ -13754,12 +14582,12 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     if (ok && !watchedHealth) refreshSettingsCards();
     watchedHealth = ok;
   });
-  function renderSettingsTab(mount) {
-    if (mount.querySelector(".pad")) {
+  function renderSettingsTab(mount2) {
+    if (mount2.querySelector(".pad")) {
       refreshAbout();
       return;
     }
-    clear(mount);
+    clear(mount2);
     refreshers.length = 0;
     watchedHealth = !!state.health;
     aboutMount = el("div");
@@ -13806,7 +14634,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     bar3.appendChild(el("span", { class: "spacer" }));
     bar3.appendChild(closeBtn);
     settingsBar = bar3;
-    mount.appendChild(el("div", { class: "settingswrap" }, [body]));
+    mount2.appendChild(el("div", { class: "settingswrap" }, [body]));
   }
   var settingsBar = null;
   function getSettingsBar() {
@@ -13869,7 +14697,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         await transport.post("/config", { config: { workspace: { globalPath: path.value.trim() } } });
         out.textContent = "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4. \uD30C\uC77C\uC740 \uC790\uB3D9\uC73C\uB85C \uC62E\uACA8\uC9C0\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4 \u2014 \uACBD\uB85C\uB97C \uBC14\uAFE8\uB2E4\uBA74 \uAE30\uC874 \uD3F4\uB354\uB97C \uC9C1\uC811 \uC62E\uACA8 \uC8FC\uC138\uC694.";
       } catch (e) {
-        out.textContent = "\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg13(e);
+        out.textContent = "\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg14(e);
       } finally {
         save.disabled = false;
       }
@@ -14005,7 +14833,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       ])
     ]);
   }
-  function msg13(e) {
+  function msg14(e) {
     return e instanceof Error ? e.message : String(e);
   }
   function buildNaiCard() {
@@ -14021,7 +14849,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       try {
         st = await state.studio.status();
       } catch (e) {
-        meters.appendChild(el("span", { class: "hint err", text: msg13(e) }));
+        meters.appendChild(el("span", { class: "hint err", text: msg14(e) }));
         return;
       }
       if (!st.configured) {
@@ -14062,7 +14890,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         await refresh3();
         out.textContent = "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4.";
       } catch (e) {
-        out.textContent = msg13(e);
+        out.textContent = msg14(e);
       } finally {
         save.disabled = false;
       }
@@ -14074,7 +14902,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         const st = await state.studio.status();
         out.textContent = st.configured && st.account ? `\uC5F0\uACB0\uB428 \u2014 Anlas ${st.account.anlas}, tier ${st.account.tier}` : st.error || st.note || "\uD1A0\uD070\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.";
       } catch (e) {
-        out.textContent = msg13(e);
+        out.textContent = msg14(e);
       } finally {
         test.disabled = false;
       }
@@ -14344,7 +15172,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.17"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.18"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -14353,6 +15181,8 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
   }
 
   // src/ui/tab-meta.ts
+  init_dom();
+  init_state();
   var LABELS = {
     name: "\uC774\uB984",
     desc: "\uC124\uBA85 (desc)",
@@ -14415,7 +15245,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       full = r.full;
     } catch (e) {
       clear(treeMount3);
-      treeMount3.appendChild(el("div", { class: "notice err", text: msg14(e) }));
+      treeMount3.appendChild(el("div", { class: "notice err", text: msg15(e) }));
       return;
     }
     drawTree3();
@@ -14441,7 +15271,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         const fresh = fields.find((f) => f.id === made.id);
         if (fresh) open2(fresh);
       } catch (e) {
-        notice5("\uCD94\uAC00\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg14(e), "err");
+        notice5("\uCD94\uAC00\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg15(e), "err");
       }
     });
     const reloadBtn = el("button", { class: "ghost tiny", text: "\uC0C8\uB85C\uACE0\uCE68" });
@@ -14493,7 +15323,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         notice5(f.deleted ? "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4. \uC0AD\uC81C \uD45C\uC2DC\uB294 \uD574\uC81C\uB418\uC5C8\uC2B5\uB2C8\uB2E4." : savedText("\uCE74\uB4DC \uD544\uB4DC\uB97C"), "ok");
         await refreshNow3();
       } catch (e) {
-        notice5("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg14(e), "err");
+        notice5("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg15(e), "err");
       } finally {
         save.disabled = false;
       }
@@ -14508,7 +15338,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           if (viewMount3) clear(viewMount3);
           await refreshNow3();
         } catch (e) {
-          notice5("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg14(e), "err");
+          notice5("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg15(e), "err");
         }
       });
       buttons.push(del);
@@ -14543,7 +15373,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       el("div", { class: "row" }, buttons)
     ]));
   }
-  function msg14(e) {
+  function msg15(e) {
     return e instanceof Error ? e.message : String(e);
   }
 
@@ -14559,6 +15389,9 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
   });
 
   // src/ui/tab-regex.ts
+  init_dom();
+  init_state();
+  init_hilite();
   var TYPES = ["editinput", "editoutput", "editprocess", "editdisplay"];
   var TYPE_LABEL = {
     editinput: "editinput \u2014 \uC785\uB825 \uC218\uC815",
@@ -14612,7 +15445,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       bgFields = r.fields.filter((f) => f.field in BG_LABEL);
     } catch (e) {
       clear(treeMount4);
-      treeMount4.appendChild(el("div", { class: "notice err", text: msg15(e) }));
+      treeMount4.appendChild(el("div", { class: "notice err", text: msg16(e) }));
       return;
     }
     drawTree4();
@@ -14643,7 +15476,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         const made = items3.find((s) => s.id === id);
         if (made) open3(made);
       } catch (e) {
-        notice6("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg15(e), "err");
+        notice6("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg16(e), "err");
       }
     });
     const reloadBtn = el("button", { class: "ghost tiny", text: "\uC0C8\uB85C\uACE0\uCE68" });
@@ -14690,7 +15523,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           await state.moveScript(s.id, to);
           await refreshNow4();
         } catch (err) {
-          notice6("\uC21C\uC11C\uB97C \uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg15(err), "err");
+          notice6("\uC21C\uC11C\uB97C \uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg16(err), "err");
         }
       };
       const size = String(e.out ?? "").length;
@@ -14733,7 +15566,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         notice6(savedText(BG_LABEL[f.field] + " \uC744(\uB97C)"), "ok");
         await refreshNow4();
       } catch (err) {
-        notice6("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg15(err), "err");
+        notice6("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg16(err), "err");
       } finally {
         save.disabled = false;
       }
@@ -14793,7 +15626,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         notice6(savedText("\uC2A4\uD06C\uB9BD\uD2B8\uB97C"), "ok");
         await refreshNow4();
       } catch (err) {
-        notice6("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg15(err), "err");
+        notice6("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg16(err), "err");
       } finally {
         save.disabled = false;
       }
@@ -14806,7 +15639,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         if (viewMount4) clear(viewMount4);
         await refreshNow4();
       } catch (err) {
-        notice6("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg15(err), "err");
+        notice6("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg16(err), "err");
       }
     });
     const orig = s.origin === "edited" && s.original ? s.original : null;
@@ -14840,11 +15673,14 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       el("div", { class: "row" }, [save, del])
     ]));
   }
-  function msg15(e) {
+  function msg16(e) {
     return e instanceof Error ? e.message : String(e);
   }
 
   // src/ui/tab-trigger.ts
+  init_dom();
+  init_state();
+  init_hilite();
   var sideMount = null;
   var viewMount5 = null;
   var items4 = [];
@@ -14880,7 +15716,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       items4 = await state.cardScripts("triggerscript");
     } catch (e) {
       items4 = [];
-      notice7("\uD2B8\uB9AC\uAC70\uB97C \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg16(e), "err");
+      notice7("\uD2B8\uB9AC\uAC70\uB97C \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg17(e), "err");
     }
     drawSide();
     drawView();
@@ -14945,7 +15781,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       await refreshNow5();
       notice7("\uBAA8\uB4DC\uB97C \uBC14\uAFE8\uC2B5\uB2C8\uB2E4. " + savedText("\uD2B8\uB9AC\uAC70\uB97C"), "ok");
     } catch (e) {
-      notice7("\uBAA8\uB4DC\uB97C \uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg16(e), "err");
+      notice7("\uBAA8\uB4DC\uB97C \uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg17(e), "err");
     }
   }
   function drawView() {
@@ -14977,7 +15813,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           notice7(savedText("Lua \uD2B8\uB9AC\uAC70\uB97C"), "ok");
           await refreshNow5();
         } catch (err) {
-          notice7("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg16(err), "err");
+          notice7("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg17(err), "err");
         } finally {
           save.disabled = false;
         }
@@ -15008,7 +15844,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           await state.deleteScript(s.id);
           await refreshNow5();
         } catch (err) {
-          notice7(msg16(err), "err");
+          notice7(msg17(err), "err");
         }
       });
       return el("div", { class: "verrow" }, [
@@ -15025,11 +15861,14 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       ...rows.length ? rows : [el("div", { class: "hint", text: "\uC774\uBCA4\uD2B8\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4." })]
     ]));
   }
-  function msg16(e) {
+  function msg17(e) {
     return e instanceof Error ? e.message : String(e);
   }
 
   // src/ui/botbar.ts
+  init_dom();
+  init_state();
+  init_transport();
   var bar2 = null;
   var applyBtn2 = null;
   var discardBtn2 = null;
@@ -15103,7 +15942,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         const n = await state.cardReset();
         shellNotice("\uCE74\uB4DC\uC758 \uBBF8\uBC18\uC601 \uBCC0\uACBD\uC744 \uBC84\uB838\uC2B5\uB2C8\uB2E4" + (n ? ` (${n}\uAC74)` : "") + ". \uC791\uC5C5\uBCF8\uC774 \uAE30\uC900\uC120(RisuAI \uC0C1\uD0DC)\uC73C\uB85C \uB3CC\uC544\uAC14\uC2B5\uB2C8\uB2E4.", "ok");
       } catch (e) {
-        shellNotice("\uBCC0\uACBD \uCDE8\uC18C\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg17(e), "err");
+        shellNotice("\uBCC0\uACBD \uCDE8\uC18C\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
       }
     });
     summaryEl2 = el("span", { class: "dim changesum", title: "\uC774 \uBD07\uC758 \uCE74\uB4DC\uC5D0\uC11C \uC544\uC9C1 RisuAI\uC5D0 \uC4F0\uC9C0 \uC54A\uC740 \uBCC0\uACBD" });
@@ -15145,7 +15984,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           out.appendChild(el("div", { class: "notice err", text: `\uC5D0\uC14B ${missing.length}\uAC1C\uAC00 \uC2A4\uD1A0\uC5B4\uC5D0 \uC5C6\uC5B4 \uB9CC\uB4E4\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4: ` + missing.slice(0, 6).map((m) => m.name || m.type).join(", ") + (missing.length > 6 ? " \u2026" : "") }));
           buildAnyway.style.display = "";
         } else {
-          out.appendChild(el("div", { class: "notice err", text: "charx \uB97C \uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg17(e) }));
+          out.appendChild(el("div", { class: "notice err", text: "charx \uB97C \uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e) }));
         }
       } finally {
         build.disabled = !!charxBlockReason();
@@ -15203,7 +16042,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     if (x.deleted) bits.push(`\u2212${x.deleted}`);
     return bits.join(" ");
   }
-  function msg17(e) {
+  function msg18(e) {
     return e instanceof Error ? e.message : String(e);
   }
   async function openApply2(anchor) {
@@ -15256,7 +16095,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           close();
         }
       } catch (e) {
-        const m = msg17(e);
+        const m = msg18(e);
         out.textContent = m;
         void clientLog("error", "cardWriteBack failed", { error: m });
         shellNotice("\uCE74\uB4DC \uBC18\uC601\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + m, "err");
@@ -15287,21 +16126,29 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
         body.appendChild(el("div", { class: "hint", text: "\uBC31\uC5C5 \uBD07\uC740 RisuAI \uBD07 \uBAA9\uB85D\uC5D0 \uC0C8 \uCE90\uB9AD\uD130\uB85C \uC788\uC2B5\uB2C8\uB2E4. \uCC57\uB3C4 \uD568\uAED8 \uBCF5\uC0AC\uB418\uC5C8\uACE0 \uC5D0\uC14B\uC740 \uACF5\uC720\uD569\uB2C8\uB2E4." }));
         body.appendChild(el("div", { class: "row", style: { marginTop: "8px" } }, [ok]));
       } catch (e) {
-        void clientLog("error", "saveAsNewBot failed", { error: msg17(e) });
-        shellNotice("\uC0C8 \uBD07\uC73C\uB85C \uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg17(e), "err");
-        out.textContent = "\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg17(e);
+        void clientLog("error", "saveAsNewBot failed", { error: msg18(e) });
+        shellNotice("\uC0C8 \uBD07\uC73C\uB85C \uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+        out.textContent = "\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e);
         saveNew.disabled = !!applyBlockReason();
         saveNew.textContent = was;
       }
     });
     const clone = saveNew;
     body.appendChild(el("div", { class: "row" }, [apply]));
-    body.appendChild(el("div", { class: "row" }, [nameInput, clone]));
     body.appendChild(out);
     body.appendChild(el("div", {
       class: "hint",
-      text: "\uBC18\uC601: \uBA54\uD0C0\xB7\uC778\uC0AC\uB9D0\xB7\uBD07 \uB85C\uC5B4\uBD81\xB7Regex\xB7\uD2B8\uB9AC\uAC70\uAC00 \uD55C \uBC88\uC5D0 \uC4F0\uC785\uB2C8\uB2E4. \uCC57\uC740 \uC808\uB300 \uAC74\uB4DC\uB9AC\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4. \uC0C8 \uBD07\uC73C\uB85C \uC800\uC7A5: \uAE30\uC900\uC120(\uD3B8\uC9D1 \uC804 \uC0C1\uD0DC)\uC744 \uBC31\uC5C5 \uBD07(\uCC57 \uD3EC\uD568, \uC0C8 \uCE90\uB9AD\uD130)\uC73C\uB85C \uB0A8\uAE30\uACE0 \uD3B8\uC9D1\uBCF8\uC744 \uC774 \uBD07\uC5D0 \uBC18\uC601\uD574 \uC0C8 \uAE30\uC900\uC120\uC73C\uB85C \uC0BC\uC2B5\uB2C8\uB2E4. \uCC98\uC74C \uD55C \uBC88 db \uAD8C\uD55C \uD5C8\uC6A9\uC774 \uD544\uC694\uD569\uB2C8\uB2E4."
+      text: "\uBA54\uD0C0\xB7\uC778\uC0AC\uB9D0\xB7\uBD07 \uB85C\uC5B4\uBD81\xB7Regex\xB7\uD2B8\uB9AC\uAC70\uAC00 \uD55C \uBC88\uC5D0 \uC4F0\uC785\uB2C8\uB2E4. \uCC57\uC740 \uC808\uB300 \uAC74\uB4DC\uB9AC\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4."
     }));
+    body.appendChild(el("details", { class: "advbox applyadv" }, [
+      el("summary", { text: "\uACE0\uAE09 \xB7 \uC0C8 \uBD07\uC73C\uB85C \uC800\uC7A5 (\uBC31\uC5C5 \uBD07\uC744 \uB0A8\uAE30\uACE0 \uBC18\uC601)" }),
+      el("div", {
+        class: "hint",
+        style: { margin: "4px 0 6px" },
+        text: "\uAE30\uC900\uC120(\uD3B8\uC9D1 \uC804 \uC0C1\uD0DC)\uC744 \uBC31\uC5C5 \uBD07(\uCC57 \uD3EC\uD568, \uC0C8 \uCE90\uB9AD\uD130)\uC73C\uB85C \uB0A8\uAE30\uACE0 \uD3B8\uC9D1\uBCF8\uC744 \uC774 \uBD07\uC5D0 \uBC18\uC601\uD574 \uC0C8 \uAE30\uC900\uC120\uC73C\uB85C \uC0BC\uC2B5\uB2C8\uB2E4. \uCC98\uC74C \uD55C \uBC88 db \uAD8C\uD55C \uD5C8\uC6A9\uC774 \uD544\uC694\uD569\uB2C8\uB2E4."
+      }),
+      el("div", { class: "row" }, [nameInput, clone])
+    ]));
   }
   async function openVersions2(anchor) {
     const body = el("div", { class: "verlist" }, [el("div", { class: "hint", text: "\uBD88\uB7EC\uC624\uB294 \uC911\uC785\uB2C8\uB2E4\u2026" })]);
@@ -15333,7 +16180,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
             close();
             shellNotice("\uCE74\uB4DC\xB7\uBD07 \uB85C\uC5B4\uBD81\xB7\uC2A4\uD06C\uB9BD\uD2B8\uB97C \uB418\uB3CC\uB838\uC2B5\uB2C8\uB2E4. \uB418\uB3CC\uB9AC\uAE30 \uC9C1\uC804 \uC0C1\uD0DC\uB3C4 \uC2A4\uB0C5\uC0F7\uC73C\uB85C \uB0A8\uACA8 \uB450\uC5C8\uC2B5\uB2C8\uB2E4.", "ok");
           } catch (e) {
-            shellNotice("\uBCF5\uC6D0\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg17(e), "err");
+            shellNotice("\uBCF5\uC6D0\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
           }
         });
         const title = el("div", {}, [
@@ -15358,7 +16205,7 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
           } catch (e) {
             row.classList.remove("deleting");
             del.disabled = false;
-            shellNotice("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg17(e), "err");
+            shellNotice("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
           }
         });
         row.append(
@@ -15402,11 +16249,16 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
       }));
     } catch (e) {
       clear(body);
-      body.appendChild(el("div", { class: "hint", text: msg17(e) }));
+      body.appendChild(el("div", { class: "hint", text: msg18(e) }));
     }
   }
 
   // src/ui/tab-assets.ts
+  init_dom();
+  init_state();
+  init_transport();
+  init_assets();
+  init_blobimg();
   var FIELD_LABEL = {
     image: "\uD504\uB85C\uD544",
     emotion: "\uAC10\uC815 \uC774\uBBF8\uC9C0",
@@ -15704,502 +16556,54 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
     const node = url ? el("img", { src: url, alt: c.name || c.key }) : el("div", { class: "hint", text: "\uC774\uBBF8\uC9C0\uB97C \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4 (\uB3D9\uAE30\uD654 \uC804\uC774\uAC70\uB098 \uC2E4\uD328)." });
     showArtifact({ path: "", title: `${c.name || c.key}${c.size ? " \xB7 " + mb(c.size) : ""}`, kind: "image", node });
   }
-  function loadThumb2(c, mount) {
+  function loadThumb2(c, mount2) {
     const isImage = /^(png|jpe?g|gif|webp|avif|bmp)$/i.test(c.ext);
     if (!isImage) {
-      mount.appendChild(el("div", { class: "assettype", text: c.ext.toUpperCase() }));
+      mount2.appendChild(el("div", { class: "assettype", text: c.ext.toUpperCase() }));
       return;
     }
     let gen2 = 0;
-    watchImage(mount, () => {
+    watchImage(mount2, () => {
       const my = ++gen2;
       void (async () => {
         let url = "";
         try {
-          if (!mount.isConnected) return;
+          if (!mount2.isConnected) return;
           url = await blobFrom(assetKey(c), () => thumbBytes(c));
         } catch {
         }
-        if (!mount.isConnected || my !== gen2) return;
+        if (!mount2.isConnected || my !== gen2) return;
         if (!url) {
-          mount.appendChild(el("div", { class: "assettype", text: c.state === "missing" ? "\uC5C6\uC74C" : c.ext.toUpperCase() }));
+          mount2.appendChild(el("div", { class: "assettype", text: c.state === "missing" ? "\uC5C6\uC74C" : c.ext.toUpperCase() }));
           return;
         }
         const img = el("img", { src: url, alt: c.name, loading: "lazy" });
         img.addEventListener("error", () => img.replaceWith(el("div", { class: "assettype", text: c.ext.toUpperCase() })));
-        mount.appendChild(img);
+        mount2.appendChild(img);
       })();
     }, unloadByDefault() ? () => {
       gen2 += 1;
-      for (const i of Array.from(mount.querySelectorAll("img"))) i.remove();
+      for (const i of Array.from(mount2.querySelectorAll("img"))) i.remove();
     } : void 0);
   }
 
-  // src/ui/studio/store.ts
-  var CARD_AREAS = [
-    { area: "styles", label: "\uC2A4\uD0C0\uC77C \uD504\uB86C\uD504\uD2B8", toggle: true },
-    { area: "characters", label: "\uCE90\uB9AD\uD130 \uD504\uB86C\uD504\uD2B8", toggle: true },
-    { area: "scenes", label: "SD\uC2A4\uD29C\uB514\uC624 \uD504\uB9AC\uC14B", toggle: false },
-    { area: "fragments", label: "\uC870\uAC01 \uD504\uB86C\uD504\uD2B8", toggle: false }
-  ];
-  var OUTPUT_ROOT = "studio/output";
-  var CONFIG_ROOT = "studio/config";
-  var IMAGE_RE2 = /\.(png|jpe?g|gif|webp|avif|bmp)$/i;
-  function canonPath(p) {
-    const r = (p || "").replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
-    const m = /^studio\/(styles|characters|fragments|scenes|\.studio)(\/.*)?$/.exec(r);
-    if (m) return `studio/config/${m[1]}${m[2] ?? ""}`;
-    const im = /^studio\/images(\/.*)?$/.exec(r);
-    if (im) return `studio/output${im[1] ?? ""}`;
-    return r;
-  }
-  function areaOfPath(path) {
-    const m = /^studio\/config\/([^/]+)/.exec(canonPath(path));
-    return m ? m[1] : "";
-  }
-  var S = {
-    /** Mount points, owned by index.ts and set once per build. */
-    leftMount: null,
-    viewMount: null,
-    noticeMount: null,
-    listing: null,
-    outputRoot: null,
-    /** Folders outside studio/output pinned for 검수 (§1-33): a project's
-     * image folder, an agent's scratch batch - anywhere in the space. */
-    extraRoots: [],
-    /** The card lists, one per area. */
-    cards: {},
-    selected: OUTPUT_ROOT,
-    /** A card picked in the list; the centre shows its editor instead of a folder. */
-    selectedFile: "",
-    open: /* @__PURE__ */ new Set([OUTPUT_ROOT]),
-    /** Fragment references no fragment provides, from the last dry plan. */
-    unresolvedRefs: [],
-    /** The left column's tab (프롬프트 · OUTPUT) and, inside 프롬프트, whether
-     * the character view has taken over the column. */
-    leftTab: "prompt",
-    leftView: "main",
-    /** The character card expanded in the left character view. */
-    charOpen: "",
-    /** The centre's tab (persisted), and the mode that can override it:
-     * the fragment organizer, a folder grid, or the comparison selector
-     * (both bound to S.selected). A picked file (S.selectedFile) overrides
-     * everything - an editor is always reachable. */
-    centreTab: "single",
-    /** 'folder' is the tidy-up grid, a sub-view of the 검수 tab; 'selector'
-     * is legacy - the 검수 tab draws the selector itself. */
-    centreMode: "tab",
-    /** Batch/folder column count (2·3·4). */
-    cols: 3,
-    /** 검수 selector column count (2..6), 0 = 자동 (auto-fill by width). */
-    selCols: 0,
-    /** The single tab's pinned image ('' = follow the live run), and the list
-     * ←/→ walks (the job the image came from). */
-    viewPath: "",
-    viewList: [],
-    /** Recent jobs, cached for the batch/history tabs. */
-    jobs: [],
-    status: null,
-    jobId: "",
-    queueJob: null
-  };
-  try {
-    const t = localStorage.getItem("hina.studioLeftTab");
-    if (t === "output") S.leftTab = "output";
-    const c = localStorage.getItem("hina.studioTab");
-    if (c === "single" || c === "batch" || c === "inspect") S.centreTab = c;
-    const n = Number(localStorage.getItem("hina.studioCols"));
-    if (n === 2 || n === 3 || n === 4) S.cols = n;
-    const sc = Number(localStorage.getItem("hina.studioSelCols"));
-    if (sc === 0 || sc >= 2 && sc <= 6) S.selCols = sc;
-  } catch {
-  }
-  function persistLeftTab() {
-    try {
-      localStorage.setItem("hina.studioLeftTab", S.leftTab);
-    } catch {
-    }
-  }
-  function persistCentreTab() {
-    try {
-      localStorage.setItem("hina.studioTab", S.centreTab);
-    } catch {
-    }
-  }
-  function persistCols() {
-    try {
-      localStorage.setItem("hina.studioCols", String(S.cols));
-    } catch {
-    }
-  }
-  function persistSelCols() {
-    try {
-      localStorage.setItem("hina.studioSelCols", String(S.selCols));
-    } catch {
-    }
-  }
-  var hub = {
-    drawLeft: () => {
-    },
-    drawCentre: () => {
-    },
-    /** A live-job heartbeat: the visible tab patches its progress in place
-     * (never a full centre rebuild - inputs keep their focus). */
-    jobTick: () => {
-    },
-    /** Whether the studio is the tab on screen - polls that only feed its
-     * pictures skip their ticks otherwise (§1-55). */
-    studioShowing: () => true,
-    /** Patch count badges (활성 캐릭터, 미해결 조각) in place - called from
-     * debounced checks so a keystroke in an editor never rebuilds the column
-     * under the caret. */
-    syncBadges: () => {
-    },
-    notice: (_text, _kind = "") => {
-    },
-    refresh: async () => {
-    },
-    refreshArea: async (_area) => {
-    },
-    loadStatus: async () => {
-    },
-    touchQuiet: (_paths = []) => {
-    }
-  };
-  var GEN_KEY = "hina.studioGen";
-  var temporaryPrompt = { text: "", expanded: false, negativeText: "", negativeExpanded: false };
-  var gen = {
-    model: "nai-diffusion-4-5-full",
-    scenePreset: "",
-    steps: 28,
-    scale: 5,
-    rescale: 0.4,
-    sampler: "k_euler_ancestral",
-    schedule: "karras",
-    width: 832,
-    height: 1216,
-    count: 1,
-    seed: "",
-    quality: false,
-    ucPreset: 0,
-    folder: OUTPUT_ROOT,
-    assetProject: "",
-    assetSet: "",
-    assetSlot: "",
-    assetCharacter: "",
-    // The selector's regex. Empty means the backend's default; it is edited on
-    // screen because it is the thing most likely to need adjusting.
-    pattern: ""
-  };
-  try {
-    const savedGen = JSON.parse(localStorage.getItem(GEN_KEY) || "null");
-    if (savedGen && typeof savedGen === "object") Object.assign(gen, savedGen);
-    gen.folder = canonPath(gen.folder) || OUTPUT_ROOT;
-  } catch {
-  }
-  function persistGen() {
-    try {
-      localStorage.setItem(GEN_KEY, JSON.stringify(gen));
-    } catch {
-    }
-  }
-  function activeOf(area) {
-    return (S.cards[area] ?? []).filter((i) => i.enabled).sort((a, b) => (a.order ?? 100) - (b.order ?? 100) || a.path.localeCompare(b.path)).map((i) => i.path);
-  }
-  function spec() {
-    const out = {
-      charKey: state.activeCharKey,
-      model: gen.model,
-      styles: activeOf("styles"),
-      characters: activeOf("characters"),
-      count: gen.count,
-      folder: gen.folder,
-      params: {
-        steps: gen.steps,
-        scale: gen.scale,
-        cfg_rescale: gen.rescale,
-        sampler: gen.sampler,
-        noise_schedule: gen.schedule,
-        width: gen.width,
-        height: gen.height,
-        qualityToggle: gen.quality,
-        ucPreset: gen.ucPreset
-      }
-    };
-    if (gen.scenePreset) out.scenePreset = gen.scenePreset;
-    if (gen.assetSet) out.asset = {
-      project: gen.assetProject,
-      setId: gen.assetSet,
-      slotId: gen.assetSlot,
-      fields: gen.assetCharacter ? { character: gen.assetCharacter } : {}
-    };
-    if (gen.seed.trim()) out.seed = Number(gen.seed.trim());
-    if (temporaryPrompt.text.trim()) out.extra = temporaryPrompt.text.trim();
-    if (temporaryPrompt.negativeText.trim()) out.negativeExtra = temporaryPrompt.negativeText.trim();
-    return out;
-  }
-  var RESERVE_KEY = "hina.studioReserve";
-  var reserves = {};
-  try {
-    const saved = JSON.parse(localStorage.getItem(RESERVE_KEY) || "null");
-    if (saved && typeof saved === "object") {
-      for (const [preset, scenes] of Object.entries(saved)) {
-        for (const [scene, v] of Object.entries(scenes || {})) {
-          const n = typeof v === "number" ? v : Object.values(v || {}).reduce((a, b) => a + (Number(b) || 0), 0);
-          if (n > 0) (reserves[canonPath(preset)] ??= {})[scene] = n;
-        }
-      }
-    }
-  } catch {
-  }
-  function persistReserves() {
-    try {
-      localStorage.setItem(RESERVE_KEY, JSON.stringify(reserves));
-    } catch {
-    }
-  }
-  function adjustReserve(preset, scene, delta) {
-    const p = reserves[preset] ??= {};
-    const next = Math.max(0, (p[scene] ?? 0) + delta);
-    if (next) p[scene] = next;
-    else delete p[scene];
-    if (!Object.keys(p).length) delete reserves[preset];
-    persistReserves();
-  }
-  function setReserve(preset, scene, count) {
-    adjustReserve(preset, scene, count - reserveOf(preset, scene));
-  }
-  function reserveOf(preset, scene) {
-    return reserves[preset]?.[scene] ?? 0;
-  }
-  function reserveTotal() {
-    let n = 0;
-    for (const p of Object.values(reserves)) for (const c of Object.values(p)) n += c;
-    return n;
-  }
-  function clearReserves(preset) {
-    if (preset) delete reserves[preset];
-    else reserves = {};
-    persistReserves();
-  }
-  var unresolvedTimer = null;
-  function checkUnresolved() {
-    if (unresolvedTimer) clearTimeout(unresolvedTimer);
-    unresolvedTimer = setTimeout(async () => {
-      try {
-        const r = await state.studio.plan({ ...spec(), count: 1 });
-        S.unresolvedRefs = [...new Set(r.items.flatMap((i) => i.unresolved ?? []))];
-      } catch {
-        S.unresolvedRefs = [];
-      }
-      hub.syncBadges();
-    }, 800);
-  }
-  function fragKeys() {
-    return (S.cards.fragments ?? []).map((it) => {
-      const f = it.folder && it.folder !== "." ? it.folder : "";
-      return f ? `${f}/${it.name}` : it.name;
-    });
-  }
-  function cardStem(name) {
-    return name.replace(/[<>:"/\\|?*]/g, "").trim();
-  }
-  function freeCardPath(area, stem, suffix, folder = "") {
-    const taken = new Set((S.cards[area] ?? []).map((i) => i.path));
-    const base = `${CONFIG_ROOT}/${area}` + (folder ? `/${folder}` : "");
-    for (let n = 1; ; n++) {
-      const p = `${base}/${stem}${n > 1 ? `-${n}` : ""}${suffix}`;
-      if (!taken.has(p)) return p;
-    }
-  }
-  async function newCard(area, folder, nm) {
-    nm = (nm || "").trim();
-    if (!nm) return "";
-    const stem = cardStem(nm);
-    if (!stem) {
-      hub.notice("\uADF8 \uC774\uB984\uC73C\uB85C\uB294 \uD30C\uC77C\uC744 \uB9CC\uB4E4 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4.", "err");
-      return "";
-    }
-    try {
-      let path;
-      if (area === "characters") {
-        path = freeCardPath(area, stem, "", folder);
-        await state.uploadFile(
-          "prompt.md",
-          `---
-name: ${nm}
-enabled: false
----
-## \uD504\uB86C\uD504\uD2B8
-`,
-          false,
-          path
-        );
-      } else if (area === "scenes") {
-        path = freeCardPath(area, stem, ".json", folder);
-        await state.uploadFile(path.split("/").pop(), JSON.stringify(
-          { version: 1, name: nm, scenes: [{ name: "happy", prompt: "", negativePrompt: "", width: 0, height: 0 }] },
-          null,
-          2
-        ), false, path.slice(0, path.lastIndexOf("/")));
-      } else {
-        path = freeCardPath(area, stem, ".md", folder);
-        const front = area === "styles" ? `---
-name: ${nm}
-enabled: false
----
-` : `---
-name: ${nm}
----
-`;
-        await state.uploadFile(path.split("/").pop(), front, false, path.slice(0, path.lastIndexOf("/")));
-      }
-      await hub.refreshArea(area);
-      return path;
-    } catch (e) {
-      hub.notice("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
-      return "";
-    }
-  }
-  async function renameCardFile(path, newName) {
-    const stem = cardStem(newName);
-    if (!stem) return path;
-    const isDir = !/\.[a-z0-9]+$/i.test(path);
-    const dir = path.slice(0, path.lastIndexOf("/"));
-    const old = path.slice(path.lastIndexOf("/") + 1);
-    const suffix = isDir ? "" : old.slice(old.lastIndexOf("."));
-    if (old === stem + suffix) return path;
-    const to = `${dir}/${stem}${suffix}`;
-    const r = await state.moveFile(path, to);
-    return r.to;
-  }
-  function buildOutput() {
-    S.outputRoot = { path: OUTPUT_ROOT, name: "output", children: [], files: [] };
-    if (!S.listing) return;
-    const lib = S.listing.areas.find((a) => a.area === "studio");
-    if (!lib) return;
-    const byPath = /* @__PURE__ */ new Map([[OUTPUT_ROOT, S.outputRoot]]);
-    const folder = (path) => {
-      const hit = byPath.get(path);
-      if (hit) return hit;
-      if (!path.startsWith(OUTPUT_ROOT + "/")) return null;
-      const cut = path.lastIndexOf("/");
-      const parent = folder(path.slice(0, cut));
-      if (!parent) return null;
-      const node = { path, name: path.slice(cut + 1), children: [], files: [] };
-      byPath.set(path, node);
-      parent.children.push(node);
-      return node;
-    };
-    for (const d of lib.dirs ?? []) folder(d);
-    for (const f of lib.files) {
-      if (!f.path.startsWith(OUTPUT_ROOT + "/")) continue;
-      const cut = f.path.lastIndexOf("/");
-      folder(f.path.slice(0, cut))?.files.push(f);
-    }
-  }
-  var EXTRA_KEY = "hina.studioExtraFolders";
-  var extraPaths = [];
-  try {
-    const saved = JSON.parse(localStorage.getItem(EXTRA_KEY) || "[]");
-    if (Array.isArray(saved)) extraPaths = saved.filter((x) => typeof x === "string" && !!x);
-  } catch {
-  }
-  function persistExtras() {
-    try {
-      localStorage.setItem(EXTRA_KEY, JSON.stringify(extraPaths));
-    } catch {
-    }
-  }
-  function isOutputPath(path) {
-    return path === OUTPUT_ROOT || path.startsWith(OUTPUT_ROOT + "/");
-  }
-  function addExtra(path) {
-    const p = canonPath(path);
-    if (!p || isOutputPath(p) || extraPaths.includes(p)) return false;
-    if (extraPaths.some((q) => p.startsWith(q + "/"))) return false;
-    extraPaths = [...extraPaths, p];
-    persistExtras();
-    return true;
-  }
-  function removeExtra(path) {
-    extraPaths = extraPaths.filter((q) => q !== path);
-    S.extraRoots = S.extraRoots.filter((r) => r.path !== path);
-    persistExtras();
-  }
-  function buildExtras(listings) {
-    S.extraRoots = extraPaths.map((p) => {
-      const root2 = { path: p, name: p.split("/").pop() || p, children: [], files: [] };
-      const l = listings[p];
-      if (!l) return root2;
-      const byPath = /* @__PURE__ */ new Map([[p, root2]]);
-      const folder = (path) => {
-        const hit = byPath.get(path);
-        if (hit) return hit;
-        if (!path.startsWith(p + "/")) return null;
-        const cut = path.lastIndexOf("/");
-        const parent = folder(path.slice(0, cut));
-        if (!parent) return null;
-        const node = { path, name: path.slice(cut + 1), children: [], files: [] };
-        byPath.set(path, node);
-        parent.children.push(node);
-        return node;
-      };
-      for (const a of l.areas) {
-        for (const d of a.dirs ?? []) folder(d);
-        for (const f of a.files) {
-          if (f.path !== p && !f.path.startsWith(p + "/")) continue;
-          const cut = f.path.lastIndexOf("/");
-          folder(f.path.slice(0, cut))?.files.push(f);
-        }
-      }
-      return root2;
-    });
-  }
-  function find(path, node) {
-    if (node === void 0) {
-      const hit = findIn(path, S.outputRoot);
-      if (hit) return hit;
-      for (const r of S.extraRoots) {
-        const h = findIn(path, r);
-        if (h) return h;
-      }
-      return null;
-    }
-    return findIn(path, node);
-  }
-  function findIn(path, node) {
-    if (!node) return null;
-    if (node.path === path) return node;
-    for (const c of node.children) {
-      const hit = findIn(path, c);
-      if (hit) return hit;
-    }
-    return null;
-  }
-  function countFiles2(n) {
-    return n.files.length + n.children.reduce((sum, c) => sum + countFiles2(c), 0);
-  }
-  function stateLabel(s) {
-    return {
-      pending: "\uB300\uAE30",
-      running: "\uC9C4\uD589 \uC911",
-      done: "\uC644\uB8CC",
-      partial: "\uC77C\uBD80 \uC2E4\uD328",
-      error: "\uC624\uB958",
-      cancelled: "\uC911\uB2E8\uB428"
-    }[s] ?? s;
-  }
-  function fmtSize4(n) {
-    if (n < 1024) return `${n}B`;
-    if (n < 1024 * 1024) return `${Math.round(n / 1024)}KB`;
-    return `${(n / 1024 / 1024).toFixed(1)}MB`;
-  }
-  function msg18(e) {
-    return e instanceof Error ? e.message : String(e);
-  }
+  // src/ui/studio/index.ts
+  init_dom();
+  init_blobimg();
+  init_state();
+  init_store();
+
+  // src/ui/studio/gen.ts
+  init_dom();
+  init_blobimg();
+  init_state();
+  init_transport();
+  init_store();
 
   // src/ui/studio/asset-rules.ts
+  init_dom();
+  init_state();
+  init_store();
   var modes = [["required", "\uD544\uC218"], ["optional", "\uC120\uD0DD"], ["excluded", "\uC81C\uC678"]];
   var uid = () => "r_" + Math.random().toString(36).slice(2, 12);
   var fields2 = (template) => [...template.matchAll(/\{([A-Za-z][A-Za-z0-9_]*)\}/g)].map((m) => m[1]);
@@ -16271,7 +16675,7 @@ name: ${nm}
         drawSlots();
         notice10.textContent = doc.sets.length ? "\uC138\uD2B8 \uADDC\uCE59\uC73C\uB85C \uC774\uB984\uC744 \uB9CC\uB4E4\uACE0, \uC778\uD398\uC778\uD2B8\uC5D0\uB3C4 \uAC19\uC740 \uADDC\uCE59\uC744 \uC720\uC9C0\uD569\uB2C8\uB2E4." : "\uC544\uC9C1 \uC138\uD2B8\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4. \uC5D0\uC14B \uADDC\uCE59\uC5D0\uC11C \uBA3C\uC800 \uC800\uC7A5\uD558\uC138\uC694.";
       } catch (e) {
-        notice10.textContent = msg18(e);
+        notice10.textContent = msg(e);
       }
     };
     root2.append(
@@ -16445,7 +16849,7 @@ name: ${nm}
           notice10.textContent = "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4. \uAE30\uC874 \uC774\uBBF8\uC9C0\uB294 \uC801\uC6A9 \uB2F9\uC2DC\uC758 \uBA85\uBA85 \uADDC\uCE59\uC744 \uC720\uC9C0\uD569\uB2C8\uB2E4.";
           draw2();
         } catch (e) {
-          notice10.textContent = msg18(e);
+          notice10.textContent = msg(e);
         }
       })());
       editor.append(rules, sets, save);
@@ -16463,7 +16867,7 @@ name: ${nm}
         notice10.textContent = "";
         draw2();
       } catch (e) {
-        notice10.textContent = msg18(e);
+        notice10.textContent = msg(e);
       }
     };
     root2.append(field("\uD504\uB85C\uC81D\uD2B8 \uD3F4\uB354\uBA85", project), button("\uBD88\uB7EC\uC624\uAE30", () => void load()), editor, notice10);
@@ -16498,7 +16902,7 @@ name: ${nm}
             draw2();
           }));
         } catch (e) {
-          notice10.textContent = msg18(e);
+          notice10.textContent = msg(e);
         }
       })()),
       button("\uC774 \uC774\uBBF8\uC9C0\uC5D0 \uC801\uC6A9", () => void (async () => {
@@ -16507,7 +16911,7 @@ name: ${nm}
           notice10.textContent = "\uC801\uC6A9\uD588\uC2B5\uB2C8\uB2E4: " + result.exportName;
           await hub.refresh();
         } catch (e) {
-          notice10.textContent = msg18(e);
+          notice10.textContent = msg(e);
         }
       })()),
       notice10
@@ -16533,7 +16937,7 @@ name: ${nm}
           result.appendChild(el("div", { text: r.complete ? "\uD544\uC218 \uC2AC\uB86F\uC744 \uBAA8\uB450 \uCC44\uD0DD\uD588\uC2B5\uB2C8\uB2E4." : `\uD544\uC218 \uC2AC\uB86F ${r.missing.length}\uAC1C\uAC00 \uBD80\uC871\uD569\uB2C8\uB2E4.` }));
           for (const slot of r.slots) result.appendChild(el("div", { text: `${slot.setId} / ${slot.slotId} \xB7 ${modes.find((m) => m[0] === slot.status)?.[1]} \xB7 ${slot.present ? "\uCC44\uD0DD\uB428" : "\uC5C6\uC74C"}` }));
         } catch (e) {
-          result.textContent = msg18(e);
+          result.textContent = msg(e);
         }
       })()),
       result
@@ -16683,7 +17087,7 @@ name: ${nm}
         const r = await state.studio.modelCheck(modelInput.value.trim());
         checkOut.textContent = r.exists ? r.supportsVibe ? "\uC788\uC74C \xB7 \uB808\uD37C\uB7F0\uC2A4 \uAC00\uB2A5" : "\uC788\uC74C \xB7 \uB808\uD37C\uB7F0\uC2A4 \uBD88\uAC00(v5)" : "\uADF8\uB7F0 \uBAA8\uB378\uC774 \uC5C6\uC2B5\uB2C8\uB2E4";
       } catch (e) {
-        checkOut.textContent = msg18(e);
+        checkOut.textContent = msg(e);
       } finally {
         checkBtn.disabled = false;
       }
@@ -16809,7 +17213,7 @@ name: ${nm}
       }
       if (r.items.length > 12) out.appendChild(el("div", { class: "hint", text: `\u2026 \uC774\uD558 ${r.items.length - 12}\uAC1C \uC0DD\uB7B5` }));
     } catch (e) {
-      out.appendChild(el("div", { class: "hint err", text: msg18(e) }));
+      out.appendChild(el("div", { class: "hint err", text: msg(e) }));
     }
   }
   function scenePicker() {
@@ -16890,7 +17294,7 @@ name: ${nm}
       void pollJob();
       pollPreview();
     } catch (e) {
-      hub.notice("\uC2DC\uC791\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+      hub.notice("\uC2DC\uC791\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg(e), "err");
     }
   }
   async function cancelRun(jobId = S.jobId) {
@@ -16898,7 +17302,7 @@ name: ${nm}
     try {
       await state.studio.cancelJob(jobId);
     } catch (e) {
-      hub.notice("\uCDE8\uC18C \uC694\uCCAD\uC774 \uB2FF\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+      hub.notice("\uCDE8\uC18C \uC694\uCCAD\uC774 \uB2FF\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4: " + msg(e), "err");
     }
     await loadJobs(true);
     if (S.jobId && !jobTimer) void pollJob();
@@ -17013,6 +17417,12 @@ name: ${nm}
     await tick();
   }
 
+  // src/ui/studio/editors.ts
+  init_dom();
+  init_hilite();
+  init_state();
+  init_store();
+
   // src/ui/studio/stylefile.ts
   var FRONT_RE = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*\r?\n?/;
   function splitFront(text2) {
@@ -17107,7 +17517,7 @@ ${doc.negative.trim()}
         else S.selectedFile = "";
         await hub.refreshArea(areaOfPath(path));
       } catch (e) {
-        out.textContent = msg18(e);
+        out.textContent = msg(e);
       }
     });
     save.addEventListener("click", async () => {
@@ -17133,13 +17543,13 @@ ${doc.negative.trim()}
               path = moved;
             }
           } catch (e) {
-            out.textContent = "\uC774\uB984\uC740 \uC800\uC7A5\uB410\uC9C0\uB9CC \uD30C\uC77C\uBA85 \uBCC0\uACBD\uC740 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e);
+            out.textContent = "\uC774\uB984\uC740 \uC800\uC7A5\uB410\uC9C0\uB9CC \uD30C\uC77C\uBA85 \uBCC0\uACBD\uC740 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg(e);
           }
         }
         if (!out.textContent) out.textContent = "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4.";
         await hub.refreshArea(isStyle ? "styles" : "fragments");
       } catch (e) {
-        out.textContent = msg18(e);
+        out.textContent = msg(e);
       } finally {
         save.disabled = false;
       }
@@ -17163,7 +17573,7 @@ ${doc.negative.trim()}
       originalOrder = meta.get("order") ?? "";
       body.value = b;
     }).catch((e) => {
-      out.textContent = msg18(e);
+      out.textContent = msg(e);
     });
     return rootEl;
   }
@@ -17236,7 +17646,7 @@ ${doc.negative.trim()}
         S.selectedFile = "";
         await hub.refreshArea(areaOfPath(path));
       } catch (e) {
-        out.textContent = msg18(e);
+        out.textContent = msg(e);
       }
     });
     save.addEventListener("click", async () => {
@@ -17265,13 +17675,13 @@ ${doc.negative.trim()}
               S.selectedFile = moved;
             }
           } catch (e) {
-            out.textContent = "\uC774\uB984\uC740 \uC800\uC7A5\uB410\uC9C0\uB9CC \uD30C\uC77C\uBA85 \uBCC0\uACBD\uC740 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e);
+            out.textContent = "\uC774\uB984\uC740 \uC800\uC7A5\uB410\uC9C0\uB9CC \uD30C\uC77C\uBA85 \uBCC0\uACBD\uC740 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg(e);
           }
         }
         if (!out.textContent) out.textContent = "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4.";
         await hub.refreshArea("scenes");
       } catch (e) {
-        out.textContent = msg18(e);
+        out.textContent = msg(e);
       } finally {
         save.disabled = false;
       }
@@ -17300,10 +17710,10 @@ ${doc.negative.trim()}
         }));
         drawRows();
       } catch (e) {
-        out.textContent = "JSON \uC744 \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4 \u2014 \uC6D0\uBCF8 JSON \uC73C\uB85C \uC5EC\uC138\uC694: " + msg18(e);
+        out.textContent = "JSON \uC744 \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4 \u2014 \uC6D0\uBCF8 JSON \uC73C\uB85C \uC5EC\uC138\uC694: " + msg(e);
       }
     }).catch((e) => {
-      out.textContent = msg18(e);
+      out.textContent = msg(e);
     });
     drawRows();
   }
@@ -17319,7 +17729,7 @@ ${doc.negative.trim()}
         S.selectedFile = "";
         await hub.refreshArea(areaOfPath(path));
       } catch (e) {
-        out.textContent = msg18(e);
+        out.textContent = msg(e);
       }
     });
     let form = null;
@@ -17340,7 +17750,7 @@ ${doc.negative.trim()}
         out.textContent = "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4.";
         await hub.refreshArea(areaOfPath(path));
       } catch (e) {
-        out.textContent = msg18(e);
+        out.textContent = msg(e);
       } finally {
         save.disabled = false;
       }
@@ -17349,11 +17759,16 @@ ${doc.negative.trim()}
       box.value = r.content;
       if (!r.textual) out.textContent = r.note || "\uD14D\uC2A4\uD2B8 \uD30C\uC77C\uC774 \uC544\uB2D9\uB2C8\uB2E4.";
     }).catch((e) => {
-      out.textContent = msg18(e);
+      out.textContent = msg(e);
     });
   }
 
   // src/ui/studio/char-edit.ts
+  init_dom();
+  init_hilite();
+  init_state();
+  init_blobimg();
+  init_store();
   function drawCharacterEditor(dir) {
     if (!S.viewMount) return;
     clear(S.viewMount);
@@ -17438,7 +17853,7 @@ ${doc.negative.trim()}
         await state.uploadFile(fname, b64, true, dir);
         return true;
       } catch (e) {
-        out.textContent = `${fname}: \uC62C\uB9AC\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4 \u2014 ${msg18(e)}`;
+        out.textContent = `${fname}: \uC62C\uB9AC\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4 \u2014 ${msg(e)}`;
         return false;
       }
     };
@@ -17469,7 +17884,7 @@ ${doc.negative.trim()}
       const on = el("input", { type: "checkbox", title: "\uC774 \uB808\uD37C\uB7F0\uC2A4\uB97C \uC2E4\uC744\uC9C0" });
       on.checked = enabled;
       on.addEventListener("change", () => onToggle(on.checked));
-      const card = el("div", { class: "refcard" + (enabled ? "" : " off") + (bad ? " bad" : "") }, [
+      const card2 = el("div", { class: "refcard" + (enabled ? "" : " off") + (bad ? " bad" : "") }, [
         pic,
         el("label", { class: "row", style: { gap: "4px" } }, [on, el("span", { class: "hint", text: "\uC0AC\uC6A9" })]),
         ...controls
@@ -17485,12 +17900,12 @@ ${doc.negative.trim()}
             fix.disabled = false;
           }
         });
-        card.appendChild(el("div", { class: "row", style: { gap: "4px" } }, [
+        card2.appendChild(el("div", { class: "row", style: { gap: "4px" } }, [
           el("span", { class: "badge err", text: "\uD615\uC2DD \uBD88\uC77C\uCE58" }),
           fix
         ]));
       }
-      return card;
+      return card2;
     };
     const drawCharrefs = () => {
       clear(charrefList);
@@ -17575,7 +17990,7 @@ ${doc.negative.trim()}
           delete v.bad;
         }
       } catch (e) {
-        out.textContent = msg18(e);
+        out.textContent = msg(e);
       }
     };
     const repng = async (v) => {
@@ -17587,7 +18002,7 @@ ${doc.negative.trim()}
           delete v.bad;
         }
       } catch (e) {
-        out.textContent = msg18(e);
+        out.textContent = msg(e);
       }
     };
     const audit = async () => {
@@ -17623,7 +18038,7 @@ ${doc.negative.trim()}
           if (!await uploadNow(fname, b64)) continue;
           charrefs.push({ file: fname, strength: 0.6, fidelity: 0.6, mode: "character", enabled: true });
         } catch (e) {
-          out.textContent = `${f.name}: ${msg18(e)}`;
+          out.textContent = `${f.name}: ${msg(e)}`;
         }
       }
       pickCharref.value = "";
@@ -17640,7 +18055,7 @@ ${doc.negative.trim()}
           if (!await uploadNow(fname, toPng(img, false))) continue;
           vibes.push({ file: fname, strength: 0.6, informationExtracted: 1, enabled: true });
         } catch (e) {
-          out.textContent = `${f.name}: ${msg18(e)}`;
+          out.textContent = `${f.name}: ${msg(e)}`;
         }
       }
       pickRef.value = "";
@@ -17664,7 +18079,7 @@ ${doc.negative.trim()}
             const moved = await renameCardFile(dir, nm);
             if (moved !== dir) dir = moved;
           } catch (e) {
-            out.textContent = "\uD30C\uC77C\uBA85 \uBCC0\uACBD \uC2E4\uD328 (\uC774\uB984\uB9CC \uC800\uC7A5\uB429\uB2C8\uB2E4): " + msg18(e);
+            out.textContent = "\uD30C\uC77C\uBA85 \uBCC0\uACBD \uC2E4\uD328 (\uC774\uB984\uB9CC \uC800\uC7A5\uB429\uB2C8\uB2E4): " + msg(e);
           }
         }
         const stem = cardStem(nm);
@@ -17706,7 +18121,7 @@ ${negative.value.trim()}
         else S.selectedFile = target;
         await hub.refreshArea("characters");
       } catch (e) {
-        out.textContent = msg18(e);
+        out.textContent = msg(e);
       } finally {
         save.disabled = false;
       }
@@ -17720,7 +18135,7 @@ ${negative.value.trim()}
         else S.selectedFile = "";
         await hub.refreshArea("characters");
       } catch (e) {
-        out.textContent = msg18(e);
+        out.textContent = msg(e);
       }
     });
     const field2 = (label2, node, hint = "") => el("label", { class: "field" }, [
@@ -17835,7 +18250,7 @@ ${negative.value.trim()}
           }
         }
       }).catch((e) => {
-        out.textContent = msg18(e);
+        out.textContent = msg(e);
       });
       void state.readFile(`${dir}/preset.json`).then((r) => {
         try {
@@ -17873,6 +18288,10 @@ ${negative.value.trim()}
   }
 
   // src/ui/studio/left-prompt.ts
+  init_dom();
+  init_hilite();
+  init_state();
+  init_store();
   var pending = null;
   var loadedDoc = null;
   var saveTimer = null;
@@ -17893,12 +18312,12 @@ ${negative.value.trim()}
     const path = activeOf("styles")[0];
     return (S.cards.styles ?? []).find((i) => i.path === path) ?? null;
   }
-  function buildLeftPrompt(mount) {
+  function buildLeftPrompt(mount2) {
     const cur = currentStyle();
     const items5 = styleItems();
     const pickTitle = items5.length ? `\uC800\uC7A5\uB41C \uC2A4\uD0C0\uC77C ${items5.length}\uAC1C \u2014 \uC120\uD0DD \xB7 \uC218\uC815 \xB7 \uC0AD\uC81C \xB7 \uCD94\uAC00` : "\uC2A4\uD0C0\uC77C \uCD94\uAC00";
-    mount.appendChild(el("div", { class: "sectiontitle", style: { padding: "6px 8px 0" }, text: "\uC2A4\uD0C0\uC77C \uD504\uB86C\uD504\uD2B8" }));
-    mount.appendChild(el("div", { style: { padding: "4px 8px 0" } }, [
+    mount2.appendChild(el("div", { class: "sectiontitle", style: { padding: "6px 8px 0" }, text: "\uC2A4\uD0C0\uC77C \uD504\uB86C\uD504\uD2B8" }));
+    mount2.appendChild(el("div", { style: { padding: "4px 8px 0" } }, [
       pickerRow(cur ? { name: cur.name, hint: cur.description || void 0 } : null, {
         title: pickTitle,
         emptyHint: items5.length ? "\uC120\uD0DD\uB41C \uC2A4\uD0C0\uC77C \uC5C6\uC74C \u2014 \u203A \uC5D0\uC11C \uACE0\uB974\uC138\uC694" : "\uC2A4\uD0C0\uC77C\uC774 \uC5C6\uC2B5\uB2C8\uB2E4. \u203A \uC5D0\uC11C \uD558\uB098 \uB9CC\uB4E4\uC5B4 \uC8FC\uC138\uC694.",
@@ -17922,9 +18341,9 @@ ${negative.value.trim()}
       } catch {
       }
     });
-    mount.appendChild(fold2);
-    buildTemporaryPrompt(mount);
-    buildTemporaryPrompt(mount, true);
+    mount2.appendChild(fold2);
+    buildTemporaryPrompt(mount2);
+    buildTemporaryPrompt(mount2, true);
     const nChars = activeOf("characters").length;
     charBadge = el("span", { class: "badge" + (nChars ? " ok" : ""), text: String(nChars) });
     const charBtn = el(
@@ -17960,9 +18379,9 @@ ${negative.value.trim()}
       [el("span", { text: "\u2699 \uC694\uCCAD \uC124\uC815" })]
     );
     paramsBtn.addEventListener("click", () => openParamsDialog());
-    mount.appendChild(el("div", { class: "toolbtns" }, [charBtn, fragBtn, paramsBtn]));
+    mount2.appendChild(el("div", { class: "toolbtns" }, [charBtn, fragBtn, paramsBtn]));
   }
-  function buildTemporaryPrompt(mount, negative = false) {
+  function buildTemporaryPrompt(mount2, negative = false) {
     const label2 = negative ? "\uC784\uC2DC \uB124\uAC70\uD2F0\uBE0C \uD504\uB86C\uD504\uD2B8" : "\uC784\uC2DC \uD504\uB86C\uD504\uD2B8";
     const textKey = negative ? "negativeText" : "text";
     const expandedKey = negative ? "negativeExpanded" : "expanded";
@@ -18002,7 +18421,7 @@ ${negative.value.trim()}
       sync();
       checkUnresolved();
     });
-    mount.appendChild(el("div", { class: "styleedit" }, [
+    mount2.appendChild(el("div", { class: "styleedit" }, [
       el("div", { class: "row" }, [toggle, el("span", { text: label2 }), status]),
       body
     ]));
@@ -18111,7 +18530,7 @@ ${negative.value.trim()}
         }
         status.textContent = "";
       }).catch((e) => {
-        status.textContent = msg18(e);
+        status.textContent = msg(e);
       });
     }
     const onEdit = () => {
@@ -18146,7 +18565,7 @@ ${negative.value.trim()}
       try {
         meta = parseStyleDoc((await state.readFile(p.path)).content).meta;
       } catch (e) {
-        hub.notice("\uC2A4\uD0C0\uC77C\uC744 \uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+        hub.notice("\uC2A4\uD0C0\uC77C\uC744 \uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg(e), "err");
         return false;
       }
     }
@@ -18161,12 +18580,15 @@ ${negative.value.trim()}
       checkUnresolved();
       return true;
     } catch (e) {
-      hub.notice("\uC2A4\uD0C0\uC77C\uC744 \uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+      hub.notice("\uC2A4\uD0C0\uC77C\uC744 \uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg(e), "err");
       return false;
     }
   }
 
   // src/ui/studio/left-chars.ts
+  init_dom();
+  init_state();
+  init_store();
   var openFolders = /* @__PURE__ */ new Set([""]);
   var extraFolders = /* @__PURE__ */ new Set();
   var filter4 = "";
@@ -18197,10 +18619,10 @@ ${negative.value.trim()}
       if (folder) openFolders.add(folder);
       await hub.refreshArea("characters");
     } catch (e) {
-      hub.notice("\uC62E\uAE30\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+      hub.notice("\uC62E\uAE30\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg(e), "err");
     }
   }
-  function buildLeftChars(mount) {
+  function buildLeftChars(mount2) {
     if (S.charOpen) {
       const it = (S.cards.characters ?? []).find((c) => c.path === S.charOpen);
       const backList = el("button", { class: "ghost tiny", text: "\u2190 \uBAA9\uB85D" });
@@ -18208,11 +18630,11 @@ ${negative.value.trim()}
         S.charOpen = "";
         hub.drawLeft();
       });
-      mount.appendChild(el("div", { class: "row", style: { padding: "6px 6px 4px", gap: "6px" } }, [
+      mount2.appendChild(el("div", { class: "row", style: { padding: "6px 6px 4px", gap: "6px" } }, [
         backList,
         el("span", { class: "sectiontitle grow", text: it?.name ?? S.charOpen.split("/").pop() ?? "" })
       ]));
-      mount.appendChild(el("div", { class: "charinline" }, [
+      mount2.appendChild(el("div", { class: "charinline" }, [
         characterEditor(S.charOpen, {
           chrome: "inline",
           onSaved: (d) => {
@@ -18235,7 +18657,7 @@ ${negative.value.trim()}
       text: "\uCE90\uB9AD\uD130",
       title: "\uCE74\uB4DC\uB97C \uD3F4\uB354 \uC81C\uBAA9\uC73C\uB85C \uB04C\uC5B4\uB2E4 \uB193\uC73C\uBA74 \uADF8 \uD3F4\uB354\uB85C \uC62E\uACA8\uC9D1\uB2C8\uB2E4"
     });
-    mount.appendChild(el("div", { class: "row", style: { padding: "6px 6px 0", gap: "6px" } }, [
+    mount2.appendChild(el("div", { class: "row", style: { padding: "6px 6px 0", gap: "6px" } }, [
       back,
       title
     ]));
@@ -18259,21 +18681,21 @@ ${negative.value.trim()}
             hub.touchQuiet();
             hub.drawLeft();
           } catch (e) {
-            hub.notice("\uD3F4\uB354\uB97C \uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+            hub.notice("\uD3F4\uB354\uB97C \uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg(e), "err");
           }
         }
       });
     });
     const add = el("button", { class: "primary tiny", text: "\uFF0B \uCE90\uB9AD\uD130" });
     add.addEventListener("click", () => addCharacter(add, ""));
-    mount.appendChild(el("div", { class: "row", style: { padding: "4px 6px 6px", gap: "4px" } }, [
+    mount2.appendChild(el("div", { class: "row", style: { padding: "4px 6px 6px", gap: "4px" } }, [
       search,
       addFolder,
       add
     ]));
     const groups2 = grouped();
     if (![...groups2.values()].some((v) => v.length) && !extraFolders.size) {
-      mount.appendChild(el("div", {
+      mount2.appendChild(el("div", {
         class: "hint",
         style: { padding: "4px 10px" },
         text: filter4 ? "\uAC80\uC0C9 \uACB0\uACFC\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4." : "\uCE90\uB9AD\uD130\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4. \uFF0B \uCE90\uB9AD\uD130 \uB85C \uB9CC\uB4E4\uC5B4 \uC8FC\uC138\uC694."
@@ -18304,17 +18726,17 @@ ${negative.value.trim()}
         });
         head.appendChild(addHere);
       }
-      mount.appendChild(head);
+      mount2.appendChild(head);
       if (!isOpen) continue;
       if (!items5.length) {
-        mount.appendChild(el("div", {
+        mount2.appendChild(el("div", {
           class: "hint",
           style: { padding: "0 10px 4px" },
           text: folder ? "(\uBE44\uC5B4 \uC788\uC74C \u2014 \uCE74\uB4DC\uB97C \uB04C\uC5B4\uB2E4 \uB193\uC73C\uC138\uC694)" : "(\uC5C6\uC74C)"
         }));
         continue;
       }
-      for (const it of items5) mount.appendChild(charRow(it));
+      for (const it of items5) mount2.appendChild(charRow(it));
     }
   }
   function charRow(it) {
@@ -18338,7 +18760,7 @@ ${negative.value.trim()}
           try {
             await state.studio.setMeta(it.path, { enabled: v });
           } catch (e) {
-            hub.notice("\uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+            hub.notice("\uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg(e), "err");
             throw e;
           }
           it.enabled = v;
@@ -18372,6 +18794,10 @@ ${negative.value.trim()}
   }
 
   // src/ui/studio/left-output.ts
+  init_state();
+  init_dom();
+  init_host();
+  init_store();
   function setClip(op, paths) {
     setFileClipboard(paths.length ? { op, paths } : null);
     if (fileClipboard) {
@@ -18391,7 +18817,7 @@ ${negative.value.trim()}
       path: n.path,
       name: n.name,
       kids: n.children.map(toTreeNode2),
-      count: countFiles2(n),
+      count: countFiles(n),
       title: n.path,
       droppable: true,
       cls: clipClass2(n.path).trim() || void 0
@@ -18493,7 +18919,7 @@ ${negative.value.trim()}
             hub.touchQuiet();
             await hub.refresh();
           } catch (e) {
-            hub.notice("\uC62E\uAE30\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+            hub.notice("\uC62E\uAE30\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg(e), "err");
           }
         })();
       }
@@ -18568,7 +18994,7 @@ ${negative.value.trim()}
           hub.touchQuiet();
           await hub.refresh();
         } catch (e) {
-          hub.notice("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+          hub.notice("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg(e), "err");
         }
       }
     });
@@ -18588,7 +19014,7 @@ ${negative.value.trim()}
           hub.touchQuiet();
           await hub.refresh();
         } catch (e) {
-          hub.notice("\uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+          hub.notice("\uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg(e), "err");
         }
       }
     });
@@ -18606,7 +19032,7 @@ ${negative.value.trim()}
         r.failed.length ? "err" : "ok"
       );
     } catch (e) {
-      hub.notice("\uCC98\uB9AC\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+      hub.notice("\uCC98\uB9AC\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg(e), "err");
     }
     hub.touchQuiet();
     await hub.refresh();
@@ -18618,9 +19044,9 @@ ${negative.value.trim()}
     try {
       const name = paths.length === 1 ? paths[0].split("/").pop() ?? "output" : "output";
       const bytes = await state.downloadZip(paths, name);
-      hub.notice(`${fmtSize4(bytes)} zip \uC744 \uBE0C\uB77C\uC6B0\uC800 \uB2E4\uC6B4\uB85C\uB4DC\uB85C \uB118\uACBC\uC2B5\uB2C8\uB2E4.`, "ok");
+      hub.notice(`${fmtSize(bytes)} zip \uC744 \uBE0C\uB77C\uC6B0\uC800 \uB2E4\uC6B4\uB85C\uB4DC\uB85C \uB118\uACBC\uC2B5\uB2C8\uB2E4.`, "ok");
     } catch (e) {
-      hub.notice("\uB0B4\uB824\uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+      hub.notice("\uB0B4\uB824\uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg(e), "err");
     }
   }
   function confirmDelete(paths, ev) {
@@ -18633,30 +19059,30 @@ ${negative.value.trim()}
       const r = await state.deleteFiles(paths);
       hub.notice(r.failed.length ? `${r.done}\uAC1C\uB97C \uC9C0\uC6E0\uC2B5\uB2C8\uB2E4. ${r.failed.length}\uAC1C \uC2E4\uD328 \u2014 ${r.failed[0].error}` : `${r.done}\uAC1C\uB97C \uC9C0\uC6E0\uC2B5\uB2C8\uB2E4.`, r.failed.length ? "err" : "ok");
     } catch (e) {
-      hub.notice("\uC9C0\uC6B0\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+      hub.notice("\uC9C0\uC6B0\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg(e), "err");
     }
     if (paths.some((p) => S.selected === p || S.selected.startsWith(p + "/"))) S.selected = S.outputRoot?.path ?? "studio/output";
     treeSel2 = /* @__PURE__ */ new Set([S.selected]);
     hub.touchQuiet();
     await hub.refresh();
   }
-  function buildLeftOutput(mount) {
+  function buildLeftOutput(mount2) {
     if (!S.outputRoot) return;
-    mount.tabIndex = 0;
-    mount.onkeydown = onTreeKey;
-    mount.appendChild(treeRow(toTreeNode2(S.outputRoot), 0, spec2()));
+    mount2.tabIndex = 0;
+    mount2.onkeydown = onTreeKey;
+    mount2.appendChild(treeRow(toTreeNode2(S.outputRoot), 0, spec2()));
     const pick2 = el("button", {
       class: "ghost tiny",
       text: "\uD3F4\uB354 \uC5F4\uAE30\u2026",
       title: "OUTPUT \uBC16\uC758 \uD3F4\uB354\uB97C \uAC80\uC218 \uBAA9\uB85D\uC5D0 \uB123\uC2B5\uB2C8\uB2E4 (\uD504\uB85C\uC81D\uD2B8\xB7AI \uB0B4\uBD80 \uB4F1)"
     });
     pick2.addEventListener("click", () => openFolderPicker());
-    mount.appendChild(el("div", { class: "row extrahead" }, [
+    mount2.appendChild(el("div", { class: "row extrahead" }, [
       el("span", { class: "sectiontitle grow", style: { marginBottom: "0" }, text: "\uB2E4\uB978 \uD3F4\uB354" }),
       pick2
     ]));
     if (!S.extraRoots.length) {
-      mount.appendChild(el("div", {
+      mount2.appendChild(el("div", {
         class: "hint",
         style: { padding: "2px 8px 6px" },
         text: "\uD30C\uC77C \uD0ED\uC5D0\uC11C \uD3F4\uB354\uB97C \uC6B0\uD074\uB9AD\uD574 \u201C\uAC80\uC218 \uC5F4\uAE30\u201D\uB97C \uB20C\uB7EC\uB3C4 \uC5EC\uAE30 \uB4E4\uC5B4\uC635\uB2C8\uB2E4."
@@ -18665,7 +19091,7 @@ ${negative.value.trim()}
     const extraSpec = { ...spec2(), onContext(node, ev) {
       openExtraMenu(node, ev);
     } };
-    for (const r of S.extraRoots) mount.appendChild(treeRow(toTreeNode2(r), 0, extraSpec));
+    for (const r of S.extraRoots) mount2.appendChild(treeRow(toTreeNode2(r), 0, extraSpec));
   }
   function openExtraMenu(node, ev) {
     const isPin = S.extraRoots.some((r) => r.path === node.path);
@@ -18795,7 +19221,7 @@ ${negative.value.trim()}
         const paths = [];
         for (const a of listing.areas) {
           for (const f of a.files) {
-            if (!IMAGE_RE2.test(f.name) || !f.path.includes("/")) continue;
+            if (!IMAGE_RE.test(f.name) || !f.path.includes("/")) continue;
             const dir = f.path.slice(0, f.path.lastIndexOf("/"));
             if (dir === "studio/output" || dir.startsWith("studio/output/")) continue;
             if (dir.startsWith("studio/config/")) continue;
@@ -18810,12 +19236,15 @@ ${negative.value.trim()}
         draw2();
       } catch (e) {
         clear(listMount2);
-        listMount2.appendChild(el("div", { class: "notice err", text: "\uD3F4\uB354 \uBAA9\uB85D\uC744 \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e) }));
+        listMount2.appendChild(el("div", { class: "notice err", text: "\uD3F4\uB354 \uBAA9\uB85D\uC744 \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg(e) }));
       }
     })();
   }
 
   // src/ui/studio/center-frags.ts
+  init_dom();
+  init_state();
+  init_store();
   var selFrag = "";
   var openFolders2 = /* @__PURE__ */ new Set([""]);
   var extraFolders2 = /* @__PURE__ */ new Set();
@@ -18859,7 +19288,7 @@ ${negative.value.trim()}
             hub.touchQuiet();
             hub.drawCentre();
           } catch (e) {
-            hub.notice("\uD3F4\uB354\uB97C \uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+            hub.notice("\uD3F4\uB354\uB97C \uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg(e), "err");
           }
         }
       });
@@ -18965,7 +19394,7 @@ ${negative.value.trim()}
             selFrag = r.to;
             await hub.refreshArea("fragments");
           } catch (e) {
-            hub.notice("\uC62E\uAE30\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+            hub.notice("\uC62E\uAE30\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg(e), "err");
           }
         });
         body.appendChild(b);
@@ -19000,6 +19429,9 @@ ${negative.value.trim()}
   }
 
   // src/ui/studio/center-single.ts
+  init_dom();
+  init_blobimg();
+  init_store();
   var previewBox = null;
   var imgEl = null;
   var captionEl = null;
@@ -19007,11 +19439,11 @@ ${negative.value.trim()}
   var progressLine = null;
   var runBtn = null;
   var shownKey = "";
-  function drawSingle(mount) {
+  function drawSingle(mount2) {
     shownKey = "";
-    mount.appendChild(statusRow());
+    mount2.appendChild(statusRow());
     const notice10 = tokenNotice();
-    if (notice10) mount.appendChild(notice10);
+    if (notice10) mount2.appendChild(notice10);
     imgEl = el("img", { alt: "", style: { display: "none" } });
     imgEl.style.cursor = "zoom-in";
     imgEl.addEventListener("click", () => {
@@ -19020,7 +19452,7 @@ ${negative.value.trim()}
     captionEl = el("div", { class: "hint previewname" });
     emptyEl = el("div", { class: "empty" });
     previewBox = el("div", { class: "bigpreview" }, [imgEl, captionEl, emptyEl]);
-    mount.appendChild(previewBox);
+    mount2.appendChild(previewBox);
     const prev = el("button", { class: "ghost tiny", text: "\u25C0", title: "\uAC19\uC740 \uBC30\uCE58\uC758 \uC774\uC804 \uC7A5" });
     const next = el("button", { class: "ghost tiny", text: "\u25B6", title: "\uAC19\uC740 \uBC30\uCE58\uC758 \uB2E4\uC74C \uC7A5" });
     const live = el("button", { class: "ghost tiny", text: "\uB77C\uC774\uBE0C", title: "\uACE0\uC815\uC744 \uD480\uACE0 \uC9C4\uD589 \uC911\uC778 \uC0DD\uC131\uC744 \uB530\uB77C\uAC11\uB2C8\uB2E4" });
@@ -19031,7 +19463,7 @@ ${negative.value.trim()}
       syncPreview();
     });
     progressLine = el("span", { class: "hint" });
-    mount.appendChild(el("div", { class: "row", style: { margin: "8px 0", flexWrap: "wrap" } }, [
+    mount2.appendChild(el("div", { class: "row", style: { margin: "8px 0", flexWrap: "wrap" } }, [
       prev,
       live,
       next,
@@ -19153,6 +19585,10 @@ ${negative.value.trim()}
   }
 
   // src/ui/studio/center-batch.ts
+  init_dom();
+  init_state();
+  init_blobimg();
+  init_store();
   var runBtn2 = null;
   var progressLine2 = null;
   var jobsBox = null;
@@ -19176,13 +19612,13 @@ ${negative.value.trim()}
       return [];
     }
   }
-  function drawBatch(mount) {
+  function drawBatch(mount2) {
     jobsBox = el("div", { class: "studio-job-list" });
     jobsKey = "";
-    mount.appendChild(jobsBox);
+    mount2.appendChild(jobsBox);
     void loadJobs(true).then(() => batchTick());
     const notice10 = tokenNotice();
-    if (notice10) mount.appendChild(notice10);
+    if (notice10) mount2.appendChild(notice10);
     const cols = colPicker({ values: [2, 3, 4], get: () => S.cols, set: (n) => {
       S.cols = n;
       persistCols();
@@ -19190,32 +19626,32 @@ ${negative.value.trim()}
         gEl.style.gridTemplateColumns = `repeat(${S.cols}, minmax(0, 1fr))`;
       }
     } });
-    mount.appendChild(el("div", { class: "row", style: { marginBottom: "6px", flexWrap: "wrap" } }, [
+    mount2.appendChild(el("div", { class: "row", style: { marginBottom: "6px", flexWrap: "wrap" } }, [
       scenePicker(),
       cols
     ]));
     const nChars = activeOf("characters").length;
-    mount.appendChild(el("div", {
+    mount2.appendChild(el("div", {
       class: "hint",
       style: { marginBottom: "6px" },
       text: `\uCE90\uB9AD\uD130\uB294 \uC88C\uCE21\uC5D0\uC11C \uCF20 \uCE74\uB4DC\uAC00 \uC2E4\uB9BD\uB2C8\uB2E4 (\uC9C0\uAE08 ${nChars}\uAC1C) \xB7 \uC52C \uCE74\uB4DC\uC758 \uFF0B \uB85C \uD544\uC694\uD55C \uC52C\uB9CC \uC608\uC57D\uC5D0 \uB2F4\uC2B5\uB2C8\uB2E4`
     }));
     const cardsBox = el("div", {});
-    mount.appendChild(cardsBox);
+    mount2.appendChild(cardsBox);
     void drawSceneCards(cardsBox);
     const summary = el("div", {});
-    mount.appendChild(summary);
+    mount2.appendChild(summary);
     summaryBox = summary;
     drawSummary(summary);
     batchBar = el("div", { class: "batchbar", style: { display: "none" } });
-    mount.appendChild(batchBar);
+    mount2.appendChild(batchBar);
     runBtn2 = el("button", { class: "primary tiny" });
     runBtn2.addEventListener("click", () => {
       if (S.jobId) void cancelRun();
       else void submitReserved();
     });
     progressLine2 = el("span", { class: "hint" });
-    mount.appendChild(el("div", { class: "row", style: { margin: "8px 0", flexWrap: "wrap" } }, [
+    mount2.appendChild(el("div", { class: "row", style: { margin: "8px 0", flexWrap: "wrap" } }, [
       progressLine2,
       el("span", { class: "grow" }),
       runBtn2
@@ -19439,7 +19875,7 @@ ${negative.value.trim()}
       el("div", { class: "sceneprog-track" }, [fill2]),
       plabel
     ]);
-    const card = el("div", { class: "scenecard" + (mine ? " reserved" : ""), title: scene.prompt || scene.name }, [
+    const card2 = el("div", { class: "scenecard" + (mine ? " reserved" : ""), title: scene.prompt || scene.name }, [
       face,
       prog,
       el("div", { class: "row", style: { marginTop: "4px" } }, [
@@ -19452,13 +19888,13 @@ ${negative.value.trim()}
     const sync = () => {
       const m = reserveOf(preset, scene.name);
       num.textContent = String(m);
-      card.classList.toggle("reserved", m > 0);
+      card2.classList.toggle("reserved", m > 0);
       syncRunBtn();
       syncSummary();
     };
     cardSyncs.set(scene.name, sync);
-    cardRegs.set(scene.name, { card, prog, fill: fill2, label: plabel });
-    return card;
+    cardRegs.set(scene.name, { card: card2, prog, fill: fill2, label: plabel });
+    return card2;
   }
   function syncSummary() {
     if (!summaryBox?.isConnected) return;
@@ -19540,6 +19976,9 @@ ${negative.value.trim()}
   }
 
   // src/ui/studio/strip.ts
+  init_dom();
+  init_blobimg();
+  init_store();
   var FOLD_KEY2 = "hina.studioStrip";
   var CAP = 20;
   var folded = false;
@@ -19649,7 +20088,17 @@ ${negative.value.trim()}
     }
   }
 
+  // src/ui/studio/center-folder.ts
+  init_dom();
+  init_state();
+  init_blobimg();
+  init_store();
+
   // src/ui/studio/selector.ts
+  init_dom();
+  init_blobimg();
+  init_state();
+  init_store();
   var groups = null;
   var selection2 = {};
   var drill = "";
@@ -19720,6 +20169,27 @@ ${negative.value.trim()}
     viewMode2 = v;
     drill = "";
   }
+  var pendingFocus = null;
+  var highlight = /* @__PURE__ */ new Set();
+  function setFocus(folder, paths) {
+    const names = new Set(paths.map((p) => p.slice(p.lastIndexOf("/") + 1)).filter(Boolean));
+    pendingFocus = names.size ? { folder, names } : null;
+    highlight = /* @__PURE__ */ new Set();
+  }
+  function applyFocus(node, g) {
+    if (!pendingFocus || pendingFocus.folder !== node.path) return;
+    const names = pendingFocus.names;
+    pendingFocus = null;
+    highlight = names;
+    const grp = g.groups.find((x) => x.items.some((i) => names.has(i.filename)));
+    if (grp) {
+      viewMode2 = "group";
+      drill = grp.key;
+    } else {
+      viewMode2 = "all";
+      drill = "";
+    }
+  }
   function viewSwitch(current3) {
     return segCtl([
       {
@@ -19779,7 +20249,7 @@ ${negative.value.trim()}
         const r = await state.studio.stage(state.activeCharKey, pics.map((f) => f.path));
         hub.notice(`${r.staged.length}\uC7A5\uC744 \uD655\uC778\uD588\uC2B5\uB2C8\uB2E4. \uD788\uB098\uC5D0\uAC8C "\uCC44\uD0DD\uD55C \uC774\uBBF8\uC9C0\uB4E4\uC744 \uAC10\uC815 \uC774\uBBF8\uC9C0\uB85C \uB123\uC5B4 \uC918" \uB77C\uACE0 \uD558\uBA74 \uC2B9\uC778 \uD6C4 \uCE74\uB4DC\uC5D0 \uBD99\uC2B5\uB2C8\uB2E4.` + (r.failed.length ? ` (${r.failed.length}\uC7A5 \uD655\uC778 \uC2E4\uD328)` : ""), "ok");
       } catch (e) {
-        hub.notice("\uC62E\uAE30\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+        hub.notice("\uC62E\uAE30\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg(e), "err");
       } finally {
         adopt.disabled = !state.activeCharKey;
       }
@@ -19802,7 +20272,7 @@ ${negative.value.trim()}
     viewMount6.appendChild(grid);
     if (!pics.length) viewMount6.appendChild(el("div", { class: "empty", text: "\uCC44\uD0DD\uB41C \uADF8\uB9BC\uC774 \uC5C6\uC2B5\uB2C8\uB2E4." }));
     if (inpaint) {
-      const open4 = el("button", { class: "ghost tiny", text: `inpaint/ (\uC218\uC815 \uD544\uC694 ${countFiles2(inpaint)}\uC7A5) \uC5F4\uAE30` });
+      const open4 = el("button", { class: "ghost tiny", text: `inpaint/ (\uC218\uC815 \uD544\uC694 ${countFiles(inpaint)}\uC7A5) \uC5F4\uAE30` });
       open4.addEventListener("click", () => {
         S.selected = inpaint.path;
         S.open.add(node.path);
@@ -19866,7 +20336,7 @@ ${negative.value.trim()}
       }
     } catch (e) {
       groups = null;
-      hub.notice("\uADF8\uB8F9\uC744 \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+      hub.notice("\uADF8\uB8F9\uC744 \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg(e), "err");
     }
     hub.drawCentre();
   }
@@ -19874,7 +20344,7 @@ ${negative.value.trim()}
     const folder = groups?.folder;
     const snapshot = structuredClone(selection2);
     if (folder) saveQueue = saveQueue.then(() => state.studio.saveSelection(folder, snapshot)).catch((e) => {
-      hub.notice("\uAC80\uC218 \uC0C1\uD0DC \uC800\uC7A5 \uC2E4\uD328: " + msg18(e), "err");
+      hub.notice("\uAC80\uC218 \uC0C1\uD0DC \uC800\uC7A5 \uC2E4\uD328: " + msg(e), "err");
     });
   }
   var SUG_LABEL = { use: "\uCC44\uD0DD", delete: "\uBC84\uB9BC", inpaint: "\uC218\uC815" };
@@ -19927,12 +20397,8 @@ ${negative.value.trim()}
     const p = prefsFor(node.path);
     cellSyncs.clear();
     missingSync = null;
+    applyFocus(node, g);
     const head = el("div", { class: "row selhead", style: { marginBottom: "6px" } });
-    const tidy = el("button", { class: "ghost tiny", text: "\uC815\uB9AC", title: "\uD3F4\uB354 \uC815\uB9AC \uD654\uBA74 (\uC120\uD0DD\xB7\uC774\uB3D9\xB7\uC0AD\uC81C\xB7\uC5C5\uB85C\uB4DC)" });
-    tidy.addEventListener("click", () => {
-      S.centreMode = "folder";
-      hub.drawCentre();
-    });
     head.append(
       viewSwitch("inspect"),
       el("span", {
@@ -19945,7 +20411,7 @@ ${negative.value.trim()}
     const bar3 = el("div", { class: "row seltools", style: { marginBottom: "8px" } });
     const mkView = (v, label2) => ({
       label: label2,
-      on: viewMode2 === v,
+      on: viewMode2 === v && !drill,
       pick: () => {
         viewMode2 = v;
         drill = "";
@@ -19961,89 +20427,101 @@ ${negative.value.trim()}
       }
     } }));
     bar3.appendChild(el("span", { class: "spacer" }));
-    const rereview = el("button", {
-      class: "ghost tiny selicon",
-      text: "\u{1F50D}",
-      "aria-label": "AI \uC7AC\uAC80\uC218",
-      title: "AI \uC7AC\uAC80\uC218 - \uD788\uB098\uC5D0\uAC8C \uC774 \uD3F4\uB354\uB97C \uB2E4\uC2DC \uAC80\uC218\uD574 \uC81C\uC548\uC744 \uC0C8\uB85C \uC801\uC5B4 \uB2EC\uB77C\uACE0 \uD569\uB2C8\uB2E4 (\uD45C\uC2DC\uB294 \uBC14\uAFB8\uC9C0 \uC54A\uC74C)"
-    });
-    rereview.addEventListener("click", () => {
-      state.requestPrompt(`"${node.path}" \uD3F4\uB354\uB97C \uC7AC\uAC80\uC218\uD574 \uC918. review_folder \uB85C \uBCF4\uACE0 suggest_selection \uC73C\uB85C \uC81C\uC548\uC744 \uC0C8\uB85C \uC801\uC5B4 \uC918 (\uAE30\uC874 \uC81C\uC548\uC740 \uAC31\uC2E0). \uD45C\uC2DC(\uCC44\uD0DD\xB7\uBC84\uB9BC\xB7\uC218\uC815)\uB294 \uBC14\uAFB8\uC9C0 \uB9D0\uACE0, \uB2E4 \uC801\uC73C\uBA74 \uAC80\uC218 \uD0ED\uC744 \uC5F4\uC5B4 \uC918.`);
-    });
-    bar3.appendChild(rereview);
-    const rules = el("button", { class: "ghost tiny", text: "\uC5D0\uC14B \uADDC\uCE59" });
-    rules.addEventListener("click", () => void openAssetRules());
-    const coverage = el("button", { class: "ghost tiny", text: "\uCE90\uB9AD\uD130 \uBD80\uC871\uBD84" });
-    coverage.addEventListener("click", () => openCoverage(node.path));
     const nSug = suggestCount();
     if (nSug) {
       const applyAll = el("button", {
-        class: "ghost tiny selicon",
-        text: `\u2714 ${nSug}`,
-        "aria-label": `\uC81C\uC548 ${nSug}\uAC74 \uBAA8\uB450 \uC801\uC6A9`,
-        title: `\uC81C\uC548 ${nSug}\uAC74 \uBAA8\uB450 \uC801\uC6A9 - AI \uC81C\uC548(\uCC44\uD0DD\xB7\uBC84\uB9BC\xB7\uC218\uC815)\uC744 \uC804\uBD80 \uD45C\uC2DC\uB85C \uBC14\uAFC9\uB2C8\uB2E4`
+        class: "ghost tiny",
+        text: `AI \uC81C\uC548 ${nSug}\uAC74 \uC801\uC6A9`,
+        title: "AI \uC81C\uC548(\uCC44\uD0DD\xB7\uBC84\uB9BC\xB7\uC218\uC815)\uC744 \uC804\uBD80 \uD45C\uC2DC\uB85C \uBC14\uAFC9\uB2C8\uB2E4"
       });
       applyAll.addEventListener("click", () => {
         for (const f of Object.keys(selection2)) if (selection2[f]?.suggest) applySuggest(f);
         hub.drawCentre();
       });
-      const clearAll = el("button", { class: "ghost tiny selicon", text: "\u{1F9F9}", "aria-label": "\uC81C\uC548 \uC9C0\uC6B0\uAE30", title: "\uC81C\uC548 \uC9C0\uC6B0\uAE30 - AI \uC81C\uC548\uC744 \uBAA8\uB450 \uC9C0\uC6C1\uB2C8\uB2E4 (\uD45C\uC2DC\uB294 \uADF8\uB300\uB85C)" });
-      clearAll.addEventListener("click", () => {
-        for (const f of Object.keys(selection2)) if (selection2[f]?.suggest) dropSuggest(f);
-        hub.drawCentre();
-      });
-      bar3.append(applyAll, clearAll);
+      bar3.appendChild(applyAll);
     }
-    bar3.append(rules, coverage, exportButton(node));
+    bar3.appendChild(exportButton(node));
     if (/\/selected$/.test(node.path)) bar3.appendChild(adoptButton());
-    viewMount6.appendChild(bar3);
-    const ruleBtn = el("button", {
-      class: "ghost tiny rulebtn",
-      text: ruleSummary(p, g),
-      title: "\uD30C\uC77C \uC774\uB984\uC744 \uC5B4\uB5BB\uAC8C \uB098\uB220 \uADF8\uB8F9\uC744 \uB9CC\uB4E4\uC9C0 \uACE0\uCE69\uB2C8\uB2E4 (\uD1A0\uD070\uC740 \uBCF5\uC218 \uC120\uD0DD \uAC00\uB2A5)"
+    const missingGroups = () => g.groups.filter((grp) => !grp.items.some((i) => selection2[i.filename]?.use)).map((grp) => grp.label || grp.key);
+    const more = el("button", {
+      class: "ghost tiny selicon",
+      text: "\u22EF",
+      "aria-label": "\uACE0\uAE09",
+      title: "\uACE0\uAE09 - \uADF8\uB8F9 \uADDC\uCE59 \xB7 AI \uC7AC\uAC80\uC218 \xB7 \uC5D0\uC14B \uADDC\uCE59 \xB7 \uCE90\uB9AD\uD130 \uBD80\uC871\uBD84 \xB7 \uBD80\uC871\uBD84 \uC608\uC57D \xB7 \uD3F4\uB354 \uC815\uB9AC"
     });
-    ruleBtn.addEventListener("click", () => openRulePopover(ruleBtn, node));
-    head.appendChild(ruleBtn);
+    more.addEventListener("click", () => {
+      const r = more.getBoundingClientRect();
+      const missing = missingGroups();
+      menuAt(r.left, r.bottom + 2, [
+        { label: `\uADF8\uB8F9 \uADDC\uCE59 \uBC14\uAFB8\uAE30 (${ruleSummary(p, g).replace(/^규칙: /, "")})`, onClick: () => openRulePopover(more, node) },
+        { label: "AI \uC7AC\uAC80\uC218", onClick: () => {
+          state.requestPrompt(`"${node.path}" \uD3F4\uB354\uB97C \uC7AC\uAC80\uC218\uD574 \uC918. review_folder \uB85C \uBCF4\uACE0 suggest_selection \uC73C\uB85C \uC81C\uC548\uC744 \uC0C8\uB85C \uC801\uC5B4 \uC918 (\uAE30\uC874 \uC81C\uC548\uC740 \uAC31\uC2E0). \uD45C\uC2DC(\uCC44\uD0DD\xB7\uBC84\uB9BC\xB7\uC218\uC815)\uB294 \uBC14\uAFB8\uC9C0 \uB9D0\uACE0, \uB2E4 \uC801\uC73C\uBA74 \uAC80\uC218 \uD0ED\uC744 \uC5F4\uC5B4 \uC918.`);
+        } },
+        nSug ? { label: `AI \uC81C\uC548 ${nSug}\uAC74 \uC9C0\uC6B0\uAE30 (\uD45C\uC2DC\uB294 \uADF8\uB300\uB85C)`, onClick: () => {
+          for (const f of Object.keys(selection2)) if (selection2[f]?.suggest) dropSuggest(f);
+          hub.drawCentre();
+        } } : null,
+        null,
+        {
+          label: missing.length ? `\uCC44\uD0DD \uC5C6\uB294 \uADF8\uB8F9 ${missing.length}\uAC1C \uB2E4\uC2DC \uC0DD\uC131 \uC608\uC57D` : "\uCC44\uD0DD \uC5C6\uB294 \uADF8\uB8F9 \uC5C6\uC74C",
+          disabled: !missing.length,
+          onClick: () => void reserveMissing(missing, more)
+        },
+        { label: "\uC5D0\uC14B \uADDC\uCE59", onClick: () => void openAssetRules() },
+        { label: "\uCE90\uB9AD\uD130 \uBD80\uC871\uBD84", onClick: () => openCoverage(node.path) },
+        null,
+        { label: "\uD3F4\uB354 \uC815\uB9AC (\uC120\uD0DD\xB7\uC774\uB3D9\xB7\uC0AD\uC81C\xB7\uC5C5\uB85C\uB4DC)", onClick: () => {
+          S.centreMode = "folder";
+          hub.drawCentre();
+        } }
+      ]);
+    });
+    bar3.appendChild(more);
+    viewMount6.appendChild(bar3);
     if (g.unmatched.length) {
       const badge = el("button", {
         class: "ghost tiny badge warn",
         text: `\uBABB \uC77D\uC74C ${g.unmatched.length}`,
         title: "\uC774\uB984 \uADDC\uCE59\uC774 \uBABB \uC77D\uC740 \uD30C\uC77C \u2014 \uC544\uB798 \uBCC4\uB3C4 \uBAA9\uB85D\uC5D0 \uC788\uC2B5\uB2C8\uB2E4. \uB204\uB974\uBA74 \uADDC\uCE59 \uD3B8\uC9D1\uC774 \uC5F4\uB9BD\uB2C8\uB2E4"
       });
-      badge.addEventListener("click", () => openRulePopover(ruleBtn, node));
+      badge.addEventListener("click", () => openRulePopover(badge, node));
       head.appendChild(badge);
     }
     const missingBox = el("div", {});
     viewMount6.appendChild(missingBox);
     const renderMissing = () => {
       clear(missingBox);
-      const missing = g.groups.filter((grp) => !grp.items.some((i) => selection2[i.filename]?.use)).map((grp) => grp.label || grp.key);
+      const missing = g.groups.filter((grp) => !grp.items.some((i) => selection2[i.filename]?.use));
       if (!missing.length) return;
-      const fill2 = el("button", {
-        class: "ghost tiny",
-        text: "\uBD80\uC871\uBD84 \uB2E4\uC2DC \uC0DD\uC131 \uC608\uC57D",
-        title: "\uCC44\uD0DD\uC774 \uC5C6\uB294 \uADF8\uB8F9\uC744 \uBC30\uCE58 \uC608\uC57D\uC5D0 1\uC7A5\uC529 \uB123\uC2B5\uB2C8\uB2E4 (\uD604\uC7AC \uC52C \uD504\uB9AC\uC14B\uC5D0 \uAC19\uC740 \uC774\uB984\uC758 \uC52C\uC774 \uC788\uB294 \uAC83\uB9CC)"
-      });
-      fill2.addEventListener("click", () => void reserveMissing(missing, fill2));
       const FOLD = 6;
-      const names = el("span", { class: "hint grow" });
+      const names = el("span", { class: "missinglist grow" });
       let open4 = false;
-      const more = el("button", { class: "ghost tiny" });
-      more.style.display = missing.length > FOLD ? "" : "none";
+      const moreBtn = el("button", { class: "ghost tiny" });
+      moreBtn.style.display = missing.length > FOLD ? "" : "none";
       const syncNames = () => {
-        names.textContent = open4 || missing.length <= FOLD ? missing.join(", ") : missing.slice(0, FOLD).join(", ") + " \u2026";
-        more.textContent = missing.length > FOLD ? open4 ? "\uC811\uAE30" : `\uC678 ${missing.length - FOLD}\uAC1C \xB7 \uD3BC\uCE58\uAE30` : "";
+        clear(names);
+        const shown = open4 || missing.length <= FOLD ? missing : missing.slice(0, FOLD);
+        for (const grp of shown) {
+          const link = el("button", { class: "linkbtn", text: grp.label || grp.key, title: "\uC774 \uADF8\uB8F9\uC73C\uB85C \uC774\uB3D9\uD569\uB2C8\uB2E4" });
+          link.addEventListener("click", () => {
+            viewMode2 = "group";
+            drill = grp.key;
+            hub.drawCentre();
+          });
+          names.appendChild(link);
+        }
+        if (shown.length < missing.length) names.appendChild(el("span", { class: "hint", text: "\u2026" }));
+        moreBtn.textContent = missing.length > FOLD ? open4 ? "\uC811\uAE30" : `\uC678 ${missing.length - FOLD}\uAC1C` : "";
       };
-      more.addEventListener("click", () => {
+      moreBtn.addEventListener("click", () => {
         open4 = !open4;
         syncNames();
       });
       syncNames();
-      missingBox.appendChild(el("div", { class: "row", style: { marginBottom: "8px" } }, [
-        el("span", { class: "badge warn", text: `\uCC44\uD0DD \uC5C6\uB294 \uADF8\uB8F9 ${missing.length}\uAC1C`, title: "\uD6C4\uBCF4\uB294 \uC788\uB294\uB370 \uC544\uC9C1 \uCC44\uD0DD\uD55C \uC7A5\uC774 \uC5C6\uB294 \uADF8\uB8F9" }),
+      missingBox.appendChild(el("div", { class: "row missingrow", style: { marginBottom: "8px" } }, [
+        el("span", { class: "badge warn", text: `\uCC44\uD0DD \uC5C6\uB294 \uADF8\uB8F9 ${missing.length}`, title: "\uD6C4\uBCF4\uB294 \uC788\uB294\uB370 \uC544\uC9C1 \uCC44\uD0DD\uD55C \uC7A5\uC774 \uC5C6\uB294 \uADF8\uB8F9 \xB7 \uC774\uB984\uC744 \uB204\uB974\uBA74 \uADF8 \uADF8\uB8F9\uC73C\uB85C \uAC11\uB2C8\uB2E4" }),
         names,
-        more,
-        fill2
+        moreBtn
       ]));
     };
     renderMissing();
@@ -20068,7 +20546,7 @@ ${negative.value.trim()}
         viewMode2 = "group";
         hub.drawCentre();
       });
-      nav.append(up, prev, next, el("span", { class: "sectiontitle", text: `${grp?.label || drill} \xB7 ${grp?.items.length ?? 0}\uC7A5` }));
+      nav.append(up, prev, next, el("span", { class: "sectiontitle", text: `${grp?.label || drill} \xB7 ${grp?.items.length ?? 0}\uC7A5` + (at >= 0 ? ` \xB7 ${at + 1}/${g.groups.length}` : "") }));
       viewMount6.prepend(nav);
       viewMount6.appendChild(candidateGrid(grp?.items ?? [], grp?.items));
     } else if (viewMode2 === "group") {
@@ -20107,7 +20585,8 @@ ${negative.value.trim()}
     const chosenBadge = el("span", { class: "badge" });
     const fixBadge = el("span", { class: "badge" });
     const sugBadge = el("span", { class: "badge sug", title: "AI \uC81C\uC548\uC774 \uC788\uB294 \uD6C4\uBCF4" });
-    const cell2 = el("div", { class: "fcell groupcard", title: `${grp.label || grp.key} \u2014 \uB20C\uB7EC\uC11C \uD6C4\uBCF4\uB97C \uD3BC\uCE69\uB2C8\uB2E4` }, [
+    const fresh = grp.items.some((i) => highlight.has(i.filename));
+    const cell2 = el("div", { class: "fcell groupcard" + (fresh ? " fresh" : ""), title: `${grp.label || grp.key} \u2014 \uB20C\uB7EC\uC11C \uD6C4\uBCF4\uB97C \uD3BC\uCE69\uB2C8\uB2E4` }, [
       pic,
       el("div", { class: "fname row" }, [
         el("span", { class: "grow", text: grp.label || grp.key }),
@@ -20166,7 +20645,7 @@ ${negative.value.trim()}
       openAssetBinding(it);
     });
     const sug = el("div", { class: "sugline", style: { display: "none" } });
-    const cell2 = el("div", { class: "fcell selcell", title: it.filename }, [
+    const cell2 = el("div", { class: "fcell selcell" + (highlight.has(it.filename) ? " fresh" : ""), title: it.filename }, [
       pic,
       el("div", { class: "fname row" }, [el("span", { class: "grow", text: it.filename }), binding]),
       flags,
@@ -20441,7 +20920,7 @@ ${negative.value.trim()}
               output.textContent = `${result.folder} \xB7 \uCC44\uD0DD ${result.used}\uC7A5 \uB0B4\uBCF4\uB0C8\uC2B5\uB2C8\uB2E4.`;
               await hub.refresh();
             } catch (e) {
-              output.textContent = msg18(e);
+              output.textContent = msg(e);
             } finally {
               run.disabled = false;
             }
@@ -20455,7 +20934,7 @@ ${negative.value.trim()}
         hub.touchQuiet();
         await hub.refresh();
       } catch (e) {
-        hub.notice("\uB0B4\uBCF4\uB0B4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+        hub.notice("\uB0B4\uBCF4\uB0B4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg(e), "err");
       } finally {
         b.disabled = false;
       }
@@ -20478,45 +20957,46 @@ ${negative.value.trim()}
         const r = await state.studio.stage(state.activeCharKey, paths);
         hub.notice(`${r.staged.length}\uC7A5\uC744 \uD655\uC778\uD588\uC2B5\uB2C8\uB2E4. \uD788\uB098\uC5D0\uAC8C "\uCC44\uD0DD\uD55C \uC774\uBBF8\uC9C0\uB4E4\uC744 \uAC10\uC815 \uC774\uBBF8\uC9C0\uB85C \uB123\uC5B4 \uC918" \uB77C\uACE0 \uD558\uBA74 \uC2B9\uC778 \uD6C4 \uCE74\uB4DC\uC5D0 \uBD99\uC2B5\uB2C8\uB2E4.` + (r.failed.length ? ` (${r.failed.length}\uC7A5 \uD655\uC778 \uC2E4\uD328)` : ""), "ok");
       } catch (e) {
-        hub.notice("\uC62E\uAE30\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+        hub.notice("\uC62E\uAE30\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg(e), "err");
       } finally {
         b.disabled = !state.activeCharKey;
       }
     });
     return b;
   }
-  function loadThumb3(f, mount) {
+  function loadThumb3(f, mount2) {
     let gen2 = 0;
-    watchImage(mount, () => {
+    watchImage(mount2, () => {
       const my = ++gen2;
       void (async () => {
         try {
-          const displayWidth = mount.getBoundingClientRect().width || 360;
+          const displayWidth = mount2.getBoundingClientRect().width || 360;
           const width = Math.min(1536, Math.max(768, Math.ceil(displayWidth * (window.devicePixelRatio || 1) / 128) * 128));
           const url = await blobUrl(f.path, f.modified ? String(f.modified) : "", { thumb: true, w: width });
-          if (!mount.isConnected || my !== gen2) return;
-          clear(mount);
+          if (!mount2.isConnected || my !== gen2) return;
+          clear(mount2);
           const img = el("img", { class: "assetimg", src: url, alt: "" });
           img.addEventListener("error", () => {
-            clear(mount);
-            mount.appendChild(el("div", { class: "assettype", text: "?" }));
+            clear(mount2);
+            mount2.appendChild(el("div", { class: "assettype", text: "?" }));
           });
           img.addEventListener("load", () => {
-            if (img.naturalWidth > 0 && img.naturalHeight > 0) mount.style.aspectRatio = `${img.naturalWidth} / ${img.naturalHeight}`;
+            if (img.naturalWidth > 0 && img.naturalHeight > 0) mount2.style.aspectRatio = `${img.naturalWidth} / ${img.naturalHeight}`;
           });
-          mount.appendChild(img);
+          mount2.appendChild(img);
         } catch {
-          if (mount.isConnected && my === gen2) mount.appendChild(el("div", { class: "assettype", text: "?" }));
+          if (mount2.isConnected && my === gen2) mount2.appendChild(el("div", { class: "assettype", text: "?" }));
         }
       })();
     }, unloadByDefault() ? () => {
       gen2 += 1;
-      if (!mount.style.aspectRatio && mount.offsetWidth && mount.offsetHeight) mount.style.aspectRatio = `${mount.offsetWidth} / ${mount.offsetHeight}`;
-      clear(mount);
+      if (!mount2.style.aspectRatio && mount2.offsetWidth && mount2.offsetHeight) mount2.style.aspectRatio = `${mount2.offsetWidth} / ${mount2.offsetHeight}`;
+      clear(mount2);
     } : void 0);
   }
 
   // src/ui/studio/center-folder.ts
+  init_blobimg();
   var selection3 = /* @__PURE__ */ new Set();
   var anchorPath2 = "";
   function drawFolder(node) {
@@ -20553,7 +21033,7 @@ ${negative.value.trim()}
             hub.touchQuiet();
             await hub.refresh();
           } catch (e) {
-            hub.notice("\uD3F4\uB354\uB97C \uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+            hub.notice("\uD3F4\uB354\uB97C \uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg(e), "err");
           }
         }
       });
@@ -20574,7 +21054,7 @@ ${negative.value.trim()}
         hub.touchQuiet();
         await hub.refresh();
       } catch (e) {
-        hub.notice("\uC9C0\uC6B0\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+        hub.notice("\uC9C0\uC6B0\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg(e), "err");
       }
     });
     const selAll = el("button", { class: "ghost tiny", text: "\uC804\uCCB4 \uC120\uD0DD" });
@@ -20644,7 +21124,7 @@ ${negative.value.trim()}
         el("div", { class: "foldface", text: "\u{1F4C1}" }),
         el("div", { class: "fname" }, [
           el("span", { text: child.name }),
-          el("span", { class: "n", text: String(countFiles2(child)) })
+          el("span", { class: "n", text: String(countFiles(child)) })
         ])
       ]);
       cell2.addEventListener("click", () => {
@@ -20661,8 +21141,8 @@ ${negative.value.trim()}
       });
       grid.appendChild(cell2);
     }
-    const images = node.files.filter((f) => IMAGE_RE2.test(f.name));
-    const others = node.files.filter((f) => !IMAGE_RE2.test(f.name));
+    const images = node.files.filter((f) => IMAGE_RE.test(f.name));
+    const others = node.files.filter((f) => !IMAGE_RE.test(f.name));
     const imagePaths = images.map((f) => f.path);
     const syncPicked = () => {
       for (const c of grid.querySelectorAll(".imgcell")) {
@@ -20708,7 +21188,7 @@ ${negative.value.trim()}
       for (const f of others) {
         list2.appendChild(el("div", { class: "chatitem" }, [
           el("span", { class: "grow", text: f.name }),
-          el("span", { class: "n", text: fmtSize4(f.size) })
+          el("span", { class: "n", text: fmtSize(f.size) })
         ]));
       }
       viewMount6.appendChild(list2);
@@ -20731,7 +21211,7 @@ ${negative.value.trim()}
       hub.touchQuiet();
       await hub.refresh();
     } catch (e) {
-      hub.notice("\uC62E\uAE30\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+      hub.notice("\uC62E\uAE30\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg(e), "err");
     }
   }
   async function uploadInto(dir, files) {
@@ -20752,7 +21232,7 @@ ${negative.value.trim()}
       hub.touchQuiet();
       await hub.refresh();
     } catch (e) {
-      hub.notice("\uC62C\uB9AC\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+      hub.notice("\uC62C\uB9AC\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg(e), "err");
     }
   }
 
@@ -20826,13 +21306,13 @@ ${negative.value.trim()}
     setLayoutControls(el("span", { class: "row", style: { gap: "6px" } }, [anlasBadge, layBtnL, layBtnR]));
     applyPanels();
   }
-  function renderStudioTab(mount) {
+  function renderStudioTab(mount2) {
     if (state.openStudioRequest) showMobileCentre();
     const entering = !wasStudioActive;
     wasStudioActive = true;
     ensureLayoutControls();
-    if (!built || !mount.querySelector(".split")) {
-      clear(mount);
+    if (!built || !mount2.querySelector(".split")) {
+      clear(mount2);
       const pane = threePane(void 0, { controls: false });
       splitRoot = pane.root;
       tabbar = el("div", { class: "studiotabs tabstrip" });
@@ -20847,7 +21327,7 @@ ${negative.value.trim()}
       pane.centre.append(S.noticeMount, S.viewMount);
       pane.centre.appendChild(buildStrip());
       applyPanels();
-      mount.appendChild(pane.root);
+      mount2.appendChild(pane.root);
       built = true;
       void refresh2();
       void loadStatus();
@@ -20863,14 +21343,14 @@ ${negative.value.trim()}
       void refresh2();
     }
     bindAgent({ notice: notice9 });
-    const inner = mount.querySelector(".right-inner");
+    const inner = mount2.querySelector(".right-inner");
     if (inner) mountAgent(inner);
   }
   async function loadStatus() {
     try {
       S.status = await state.studio.status();
     } catch (e) {
-      S.status = { configured: false, library: "", error: msg18(e) };
+      S.status = { configured: false, library: "", error: msg(e) };
     }
     drawAnlas();
     if (S.centreMode === "tab" && !S.selectedFile) drawCentre2();
@@ -20934,6 +21414,7 @@ ${negative.value.trim()}
       const folder = wantFolder;
       if (find(folder)) {
         if (want.view) setViewMode(want.view);
+        if (want.focus?.length) setFocus(folder, want.focus);
         S.selected = folder;
         const parts = folder.split("/");
         for (let i = 2; i <= parts.length; i++) S.open.add(parts.slice(0, i).join("/"));
@@ -21367,7 +21848,7 @@ ${negative.value.trim()}
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.17"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.18"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
@@ -21463,7 +21944,7 @@ ${negative.value.trim()}
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.15.17" }),
+        el("span", { class: "dim", text: "v0.15.18" }),
         healthEl,
         el("span", { class: "spacer" }),
         reload,
@@ -21679,6 +22160,8 @@ ${negative.value.trim()}
   });
 
   // src/index.ts
+  init_dom();
+  init_blobimg();
   var HIDE_KEY = "risuhina.pagehide";
   function lastHide() {
     try {
@@ -21784,6 +22267,6 @@ ${negative.value.trim()}
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.15.17"} loaded`);
+    console.log(`[risu-hina] v${"0.15.18"} loaded`);
   })();
 })();

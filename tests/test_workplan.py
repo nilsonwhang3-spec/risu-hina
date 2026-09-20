@@ -137,39 +137,60 @@ t.db.close()
         result = asyncio.run(ag.run('continue', message_history=result.all_messages(), deps=self.deps))
         self.assertIn('UPDATED user constraint', str(result.new_messages()))
 
-    def test_learning_checkpoint_retries_once_and_records(self):
+    def test_learning_review_is_optional_and_never_blocks_the_answer(self):
+        # §1-62: the forced end-of-turn review is gone. A final answer after
+        # tool work passes through; review_learning still records when called.
         before = agentnotes.recall('')
-        ctx = SimpleNamespace(deps=self.deps, usage=RunUsage(tool_calls=2))
-        from pydantic_ai import ModelRetry
-        with self.assertRaises(ModelRetry): learning.validate(ctx, 'premature final')
-        learning.record(ctx, 'No durable preference or reusable procedure in this lookup.')
-        self.assertEqual(learning.validate(ctx, 'done'), 'done')
+        ctx = SimpleNamespace(deps=self.deps, usage=RunUsage(tool_calls=5))
+        self.assertEqual(learning.validate(ctx, 'final answer'), 'final answer')
+        self.assertFalse(db.one("SELECT seq FROM agent_messages WHERE session_id=? AND role='learning_review'", (self.sid,)))
+        learning.record(ctx, 'Saved the approved reference strengths as a project note.')
         self.assertTrue(db.one("SELECT seq FROM agent_messages WHERE session_id=? AND role='learning_review'", (self.sid,)))
         self.assertEqual(agentnotes.recall(''), before)
 
-    def test_learning_review_does_not_exhaust_turn_budget(self):
-        ctx = SimpleNamespace(deps=self.deps, usage=RunUsage(tool_calls=2))
-        with patch.object(agent, 'turn_limits', return_value=SimpleNamespace(tool_calls_limit=2, request_limit=None)):
-            self.assertEqual(learning.validate(ctx, 'verified result'), 'verified result')
-        row = db.one("SELECT content_json FROM agent_messages WHERE session_id=? AND role='learning_review'", (self.sid,))
-        self.assertEqual(db.unjs(row['content_json'])['status'], 'budget')
-
-    def test_learning_validator_real_model_retry_flow(self):
+    def test_real_model_answers_without_a_learning_review(self):
         count = 0
         def model(messages, info):
             nonlocal count
             count += 1
             if count == 1:
                 return ModelResponse(parts=[ToolCallPart('read_plan', {}, '1'), ToolCallPart('read_plan', {}, '2')])
-            if count == 2: return ModelResponse(parts=[TextPart('premature')])
-            if count == 3: return ModelResponse(parts=[ToolCallPart('review_learning', {'summary': 'No reusable lesson.'}, '3')])
             return ModelResponse(parts=[TextPart('done')])
         with patch.object(agent, '_model', return_value=FunctionModel(model)):
             ag = agent.build()
         result = asyncio.run(ag.run('Inspect plan', deps=self.deps))
         self.assertEqual(result.output, 'done')
-        self.assertTrue(self.deps.learning_reviewed)
-        self.assertEqual(count, 4)
+        self.assertEqual(count, 2, 'no retry, no extra model call for a review')
+
+    def test_instructions_make_plans_and_notes_on_request_only(self):
+        with patch.object(agent, '_model', return_value=TestModel()): ag = agent.build()
+        text = ' '.join(f(SimpleNamespace(deps=self.deps)) if callable(f) else str(f)
+                        for f in getattr(ag, '_instructions_functions', []))
+        if not text:
+            text = str(getattr(ag, '_instructions', '')) + ' ' + str(learning.instructions())
+        self.assertNotIn('Read recall_notes first', text + learning.instructions())
+        self.assertIn('Most turns need no note', learning.instructions())
+        self.assertNotIn('then call review_learning', learning.instructions())
+
+    def test_plan_is_handed_over_once_per_run_not_after_each_update(self):
+        workplan.save(self.sid, 0, document='Plan v1', tasks=self.todo)
+        seen = []
+        def model(messages, info):
+            seen.append(sum(1 for m in messages for p in m.parts
+                            if isinstance(getattr(p, 'content', None), str) and p.content.startswith(workplan.MARKER)))
+            if len(messages) == 1:
+                return ModelResponse(parts=[ToolCallPart('bump', {}, 'b')])
+            return ModelResponse(parts=[TextPart('done')])
+        ag = Agent(FunctionModel(model), deps_type=agent.Deps, capabilities=[agentcontext.AutoContext()])
+        @ag.tool_plain
+        def bump():
+            workplan.save(self.sid, 1, document='Plan v2')
+            return 'bumped'
+        result = asyncio.run(ag.run('go', deps=self.deps))
+        self.assertEqual(seen, [1, 1], 'the plan rides on the user turn; the tool step does not re-send it')
+        self.assertNotIn('Plan v2', str(result.all_messages()).replace('bumped', ''))
+        result = asyncio.run(ag.run('again', message_history=result.all_messages(), deps=self.deps))
+        self.assertIn('Plan v2', str(result.new_messages()), 'the next user turn carries the revised plan')
 
     def test_learning_review_is_visible_and_project_scoped(self):
         ctx = SimpleNamespace(deps=self.deps)
