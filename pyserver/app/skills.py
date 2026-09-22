@@ -68,7 +68,9 @@ TEXT_EXT = {".md", ".txt", ".py", ".json", ".yaml", ".yml", ".csv", ".html", ".j
 # only the new skill.
 # v7 added "보고 조정하기" (the vision loop, §1-42).
 # v8 adds simulation-bot structure and state-management guidance.
-SEED_KEY = "skills_seeded_v8"
+# v9 adds the three bot-UI guides drawn from the vepo bots (option panel,
+# asset output, status panel; §1-67).
+SEED_KEY = "skills_seeded_v9"
 FOLDER_KEY = "skills_folders_v1"
 SEED_DIR = Path(__file__).resolve().parent / "seeds"
 
@@ -757,6 +759,12 @@ SEED_FILES: dict[str, tuple[str, str, bool]] = {
                        "생성한 이미지를 직접 보고(view_image) 프롬프트·파라미터를 하나씩 고쳐 다시 생성할 때, 폴더의 후보를 검수해 채택/버림 제안을 적을 때. \"보고 고쳐\", \"맞는지 확인해\", \"검수해\" 같은 요청.", True),
     "arca-html.md": ("아카라이브 HTML 작성",
                      "아카라이브(arca.live)에 붙여넣을 HTML(챗로그·소개글·요약)을 만들 때의 제약.", True),
+    "risuai-option-panel.md": ("RisuAI 옵션 패널 (슬라이딩 드로어)",
+                               "봇에 설정 버튼(⚙)으로 여는 슬라이딩 옵션 패널·드로어를 만들거나 고칠 때. risu-btn 버튼과 onButtonClick, Lua editDisplay 로 팁 메시지에만 패널 HTML 삽입, CSS 체크박스로 열고 닫기·탭, reloadDisplay 를 피하는 재렌더 규칙, 열림 플래그 리셋, markdown 형제 관계 함정.", True),
+    "risuai-asset-output.md": ("RisuAI 에셋 출력식",
+                               "모델이 봇 에셋 목록에 맞는 이미지 태그를 내게 하는 지시문을 글로벌 노트 덮어쓰기(post_history_instructions)에 쓰거나 고칠 때. {{assetlist}} 대조·베이스 폴백 정규식, 에셋 구성별 캐릭터 계층, SFW/NSFW 키워드 설계와 규칙, 보조모델(axLLM) 위임·메인 억제·재생성 버튼.", True),
+    "risuai-status-panel.md": ("RisuAI 상태창",
+                               "매 응답 끝에 상태창 태그 블록(TAG OUTPUT)을 내게 하는 로어북 지시문, {{position::PI}}+@@position pt_PI 위치 지정, 정규식 변환(지우개→래퍼→필드·리퀘 제거), backgroundHTML CSS, 선택적 Lua 파싱·리롤 안전 스냅샷·워치독을 만들거나 고칠 때.", True),
 }
 
 
