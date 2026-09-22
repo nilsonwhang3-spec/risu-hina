@@ -59,6 +59,23 @@ class SkillGuidanceTests(unittest.TestCase):
         skills.seed_once()
         self.assertEqual(before, {x["slug"]: x["revision"] for x in skills.list_all()})
 
+    def test_seed_v9_installs_bot_ui_guides_once(self):
+        db.mark_migration("skills_seeded_v8")
+        skills.seed_once()
+        for name, filename in (("RisuAI 옵션 패널 (슬라이딩 드로어)", "risuai-option-panel.md"),
+                               ("RisuAI 에셋 출력식", "risuai-asset-output.md"),
+                               ("RisuAI 상태창", "risuai-status-panel.md")):
+            fresh = skills.find(name)
+            self.assertIsNotNone(fresh, name)
+            self.assertTrue(fresh["enabled"])
+            self.assertIn(fresh["name"], skills.prompt())
+            self.assertLessEqual(len(fresh["description"]), skills.MAX_DESCRIPTION)
+            self.assertEqual((skills.root()/fresh["slug"]/"references"/filename).read_bytes(),
+                             (skills.SEED_DIR/filename).read_bytes())
+        before = {x["slug"]: x["revision"] for x in skills.list_all()}
+        skills.seed_once()
+        self.assertEqual(before, {x["slug"]: x["revision"] for x in skills.list_all()})
+
     def test_preset_guidance_upgrade_preserves_custom_content_and_state(self):
         name = "RisuAI 시뮬봇 구조와 제작"
         old = "모든 인물을 매 장면에 등장시킬 필요는 없으며 유저의 선택을 대신 확정하지 않는다."

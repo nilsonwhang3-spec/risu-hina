@@ -1,4 +1,49 @@
-# 06. Implementation status — as of 2026-09-20 (v0.15.20, Risu Hina)
+# 06. Implementation status — as of 2026-09-22 (v0.15.21, Risu Hina)
+
+## 0.15.21 (2026-09-22): §1-67 three bot-UI skills (옵션 패널 · 에셋 출력식 · 상태창)
+
+### §1-67 seeded skills, generalized (seed v9)
+
+Three new seeded skills, each a `references/*.md`. They were distilled from
+four decoded bots in `vepo-bot/` (and `aux_asset_guide v2.1.md`), then
+generalized on the user's review: bot-specific naming (the `-`/`_`
+separators, one bot's NSFW composite tokens, its tag names such as the
+status-panel root tag, its variable names, one bot's misspelled asset
+keyword) is out; placeholders (`bot-`, `asset_aux`, `<bot-panel>`) stand in,
+and each file says up front that names and structure vary per bot and must
+be read from the bot being edited. No bot names or vepo file paths remain.
+`SEED_KEY` rotated to `skills_seeded_v9`, so existing installs gain exactly
+these three on next boot (`seed_once` dedupes by name). Test:
+`test_seed_v9_installs_bot_ui_guides_once`.
+
+- **RisuAI 옵션 패널 (슬라이딩 드로어)** (`risuai-option-panel.md`). Caching
+  the panel HTML in a chat variable is not needed; the cost is CBS re-parsed
+  on every message and whole-GUI `reloadDisplay`. Pattern: Lua builders
+  assemble the drawer from chatvars, `listenEdit('editDisplay')` inserts it
+  before an anchor tag in the TIP message only (`meta.index` early return +
+  CBS tip gate); open/close/tab are pure CSS (hidden checkbox + `<label
+  for>` + `:checked ~`); option buttons are `<label for="busy"
+  risu-btn="…">` whose `onButtonClick` only sets chatvars - the host
+  re-renders that one message. Default-closed policy, markdown-it sibling
+  trap, transition vs animation, CSS combinatorial explosion, migration
+  checklist.
+- **RisuAI 에셋 출력식** (`risuai-asset-output.md`). Instruction in
+  `post_history_instructions` behind a mode-variable gate with
+  `{{position::PI}}`; validation/fallback in the editdisplay regex
+  (`{{contains::{{assetlist}}::full}}` → base → nothing) with the capture
+  adapted to the bot's separator; character tiers by asset set; NSFW as a
+  design choice (single-act vs composite keywords) plus the rules every
+  design needs; hidden variant sets chosen by regex; aux-model (axLLM) flow,
+  triple main-model suppression, retag button; naming principles.
+- **RisuAI 상태창** (`risuai-status-panel.md`). TAG OUTPUT lorebook entry
+  (constant, high insertion_order, `@@position pt_PI`) and its components;
+  tag-grammar trade-offs; how `{{position::PI}}` + `@@position pt_PI`
+  moves the entry to the prompt tail and `@@depth 0` as the
+  preset-independent alternative; regex order eraser → wrapper → field with
+  the `{{? {{lastmessageid}}-2}}` eraser; when not to strip in editprocess;
+  Lua watchdog; CSS; optional Lua tier; pitfalls.
+
+Backend-only (seeds + skills.py); the plugin bundle changes only by version.
 
 ## 0.15.20 (2026-09-20): §1-64~66 group row · 기본 변수 · the rest of the card editable · regex flags apply
 
