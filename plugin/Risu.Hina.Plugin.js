@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.15.24
+//@display-name Risu Hina v0.15.25
 //@api 3.0
-//@version 0.15.24
+//@version 0.15.25
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -181,7 +181,7 @@
           this.tokenSafe = true;
           this.lastHealth = body;
           this.probeInfo = "";
-          this.gate = versionGate("0.15.24", String(body.version || ""));
+          this.gate = versionGate("0.15.25", String(body.version || ""));
           return body;
         }
         /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -3080,6 +3080,9 @@ name: ${nm}
           await transport.post("/permits/decide", { id, allow, always });
         }
         // --- skills ---------------------------------------------------------------
+        async syncSkills() {
+          return await transport.post("/skills/sync", { confirmOverwrite: true });
+        }
         async skills() {
           return await transport.get("/skills");
         }
@@ -14093,6 +14096,28 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         previewBtn.disabled = false;
       }
     });
+    const syncBtn = el("button", { class: "ghost", text: "\uC11C\uBC84 \uAE30\uBCF8 \uC2A4\uD0AC\uACFC \uB3D9\uAE30\uD654" });
+    armed(syncBtn, "\uC11C\uBC84 \uAE30\uBCF8 \uC2A4\uD0AC\uACFC \uB3D9\uAE30\uD654", "\uD3B8\uC9D1 \uB0B4\uC6A9\uC744 \uB36E\uC5B4\uC4F0\uACE0 \uB3D9\uAE30\uD654", async () => {
+      if (syncBtn.disabled) return;
+      syncBtn.disabled = true;
+      syncBtn.textContent = "\uB3D9\uAE30\uD654 \uC911\u2026";
+      try {
+        const result = await state.syncSkills();
+        await refresh3();
+        say(`\uC2A4\uD0AC \uB3D9\uAE30\uD654 \uC644\uB8CC: ${result.updated}\uAC1C \uAC31\uC2E0, ${result.created}\uAC1C \uCD94\uAC00. \uB2E4\uC74C \uC5D0\uC774\uC804\uD2B8 \uC2E4\uD589\uBD80\uD130 \uC801\uC6A9\uB429\uB2C8\uB2E4.`, "ok");
+      } catch (e) {
+        say("\uC2A4\uD0AC \uB3D9\uAE30\uD654\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg12(e), "err");
+      } finally {
+        syncBtn.disabled = false;
+        syncBtn.textContent = "\uC11C\uBC84 \uAE30\uBCF8 \uC2A4\uD0AC\uACFC \uB3D9\uAE30\uD654";
+      }
+    });
+    const advanced = el("details", { style: { marginTop: "12px" } }, [
+      el("summary", { text: "\uACE0\uAE09 \xB7 \uC2A4\uD0AC \uB3D9\uAE30\uD654" }),
+      el("p", { class: "hint", text: "\uC5F0\uACB0\uB41C \uC11C\uBC84\uC5D0 \uD3EC\uD568\uB41C \uAE30\uBCF8 \uC2A4\uD0AC\uB9CC \uB2E4\uC2DC \uBC1B\uC544 \uC801\uC6A9\uD569\uB2C8\uB2E4. \uC11C\uBC84 \uD504\uB85C\uADF8\uB7A8\uC744 \uC5C5\uB370\uC774\uD2B8\uD558\uB294 \uAE30\uB2A5\uC740 \uC544\uB2D9\uB2C8\uB2E4." }),
+      el("p", { class: "notice warn", text: "\uC8FC\uC758: \uAE30\uBCF8 \uC2A4\uD0AC\uC5D0 \uC9C1\uC811 \uD3B8\uC9D1\uD55C \uBCF8\uBB38\xB7\uC124\uBA85\xB7\uAE30\uBCF8 \uCC38\uC870 \uD30C\uC77C\xB7\uC2A4\uD06C\uB9BD\uD2B8\uB294 \uC11C\uBC84 \uBC30\uD3EC\uBCF8\uC73C\uB85C \uB36E\uC5B4\uC368\uC838 \uC0AC\uB77C\uC9D1\uB2C8\uB2E4. \uD544\uC694\uD55C \uB0B4\uC6A9\uC740 \uBA3C\uC800 \uB530\uB85C \uBCF4\uAD00\uD574 \uC8FC\uC138\uC694. \uC9C1\uC811 \uCD94\uAC00\uD55C \uBCC4\uB3C4 \uC2A4\uD0AC\uACFC \uD65C\uC131\uD654\xB7\uC0C1\uC2DC \uC801\uC6A9\xB7\uC815\uB82C \uC124\uC815\uC740 \uC720\uC9C0\uD569\uB2C8\uB2E4." }),
+      syncBtn
+    ]);
     void refresh3();
     opts.onMount?.(refresh3);
     return el("div", { class: "card" }, [
@@ -14104,6 +14129,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       el("div", { class: "row", style: { marginTop: "10px" } }, [addBtn, uploadBtn, previewBtn]),
       picker,
       budget,
+      advanced,
       out
     ]);
   }
@@ -14474,10 +14500,10 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           return;
         }
         if (!r.newer) {
-          const mismatch = r.current !== "0.15.24";
+          const mismatch = r.current !== "0.15.25";
           const ahead = r.ahead ?? (!!r.latest && r.latest !== r.current);
           say(
-            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.24"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
+            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.25"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
             mismatch || ahead ? "" : "ok"
           );
           return;
@@ -14568,7 +14594,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.15.24",
+            version: "0.15.25",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -15258,7 +15284,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.24"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.25"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -22076,7 +22102,7 @@ ${negative.value.trim()}
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.24"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.25"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
@@ -22172,7 +22198,7 @@ ${negative.value.trim()}
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.15.24" }),
+        el("span", { class: "dim", text: "v0.15.25" }),
         healthEl,
         el("span", { class: "spacer" }),
         reload,
@@ -22495,6 +22521,6 @@ ${negative.value.trim()}
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.15.24"} loaded`);
+    console.log(`[risu-hina] v${"0.15.25"} loaded`);
   })();
 })();

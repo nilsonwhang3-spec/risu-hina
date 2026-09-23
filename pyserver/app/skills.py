@@ -993,7 +993,8 @@ def refresh_studio_ops_once() -> None:
         log.warn("could not refresh the studio image-ops reference: %s", e)
 
 
-METHOD_KEY = "skills_method_en_v1"
+# User-authorized refresh: overwrite installed methodology guidance after the host-source audit.
+METHOD_KEY = "skills_method_source_audit_v2"
 
 
 def _method_body(slug: str, filename: str) -> str:
@@ -1033,12 +1034,15 @@ def refresh_method_skills_once() -> None:
     db.mark_migration(METHOD_KEY)
 
 
-def _seed_file_skill(label: str, desc: str, filename: str, data: bytes, enabled: bool, order: int) -> dict:
+def _seed_file_skill(label: str, desc: str, filename: str, data: bytes, enabled: bool, order: int,
+                     target: dict | None = None) -> dict:
     script = filename.endswith(".py")
     sub = "scripts" if script else "references"
-    slug = _unique_slug(label)
+    slug = target["slug"] if target else _unique_slug(label)
+    always = target.get("always", False) if target else False
     if filename in METHOD_FILES:
-        sk = save(label, desc, _method_body(slug, filename), enabled=enabled, sort_order=order)
+        sk = save(label, desc, _method_body(slug, filename), slug=slug if target else None, always=always,
+                  enabled=enabled, sort_order=order)
         put_file(sk["slug"], f"{sub}/{filename}", data)
         for script in SEED_SCRIPTS.get(filename, ()):
             put_file(sk["slug"], f"scripts/{script}", (SEED_DIR / script).read_bytes())
@@ -1048,9 +1052,38 @@ def _seed_file_skill(label: str, desc: str, filename: str, data: bytes, enabled:
                "먼저 read_file 로 읽어 인자와 동작을 확인해라."
                if script else
                f"필요한 절을 read_file 로 `skills/{slug}/{sub}/{filename}` 에서 읽어라. 통째로 외우려 하지 마라."))
-    sk = save(label, desc, body, enabled=enabled, sort_order=order)
+    sk = save(label, desc, body, slug=slug if target else None, always=always, enabled=enabled, sort_order=order)
     put_file(sk["slug"], f"{sub}/{filename}", data)
     return get(sk["slug"]) or {}
+
+
+@_locked
+def sync_bundled() -> dict:
+    """Explicitly replace bundled guidance with this server's version, every call.
+
+    User-created skills and enable/order choices survive. This does not fetch
+    or update server code and does not depend on one-time migration markers.
+    """
+    # Check the complete bundle before overwriting any installed content.
+    payloads = {filename: (SEED_DIR / filename).read_bytes() for filename in SEED_FILES}
+    for scripts in SEED_SCRIPTS.values():
+        for script in scripts:
+            (SEED_DIR / script).read_bytes()
+    created = updated = 0
+    for name, desc, body in SEEDS:
+        target = find(name)
+        save(name, desc, body, slug=target["slug"] if target else None,
+             always=target.get("always", False) if target else False)
+        updated += int(target is not None)
+        created += int(target is None)
+    for filename, (label, desc, enabled) in SEED_FILES.items():
+        target = find(label)
+        _seed_file_skill(label, desc, filename, payloads[filename],
+                         target["enabled"] if target else enabled,
+                         target["sortOrder"] if target else len(list_all()), target=target)
+        updated += int(target is not None)
+        created += int(target is None)
+    return {"updated": updated, "created": created}
 
 
 def migrate_rows_once() -> None:

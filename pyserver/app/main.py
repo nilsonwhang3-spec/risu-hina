@@ -1644,6 +1644,15 @@ def h_skills(arg: dict) -> dict:
     return skills.listing()
 
 
+def h_skill_sync(arg: dict) -> dict:
+    if arg.get("confirmOverwrite") is not True:
+        raise ApiError(400, "기본 스킬의 사용자 편집 내용을 덮어쓰는 데 동의해 주세요")
+    try:
+        return skills.sync_bundled()
+    except (skills.SkillError, OSError) as e:
+        raise ApiError(400, f"스킬 동기화에 실패했습니다. 일부 스킬은 이미 갱신되었을 수 있습니다: {e}")
+
+
 def h_skill_get(arg: dict) -> dict:
     sk = skills.get(str(arg.get("id") or arg.get("slug") or ""))
     if sk is None:
@@ -2598,6 +2607,7 @@ ROUTES: dict[str, Handler] = {
     "GET /skills/get": h_skill_get,
     "GET /skills/preview": h_skill_preview,
     "POST /skills/save": h_skill_save,
+    "POST /skills/sync": h_skill_sync,
     "GET /skills/revisions": h_skill_revisions,
     "POST /skills/restore": h_skill_restore,
     "POST /skills/upload": h_skill_upload,

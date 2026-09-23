@@ -1,6 +1,8 @@
 <!-- risuhina-preset-scope-v1 -->
 In RisuAI the prompt preset, supplied by a separate preset author, sets the lorebook insertion order, the narrative point of view, and whether the model may write the user's part. Bot cards and lorebooks hold the world, characters, events, state, and the bot's own systems; those narration options follow the preset. Treat the preset's controls as production knowledge only and do not restate them as rules in the card or lorebook.
 
+> Host-source audit: RisuAI `25001174`, PocketRisu `a14c911f` (2026-09-23). Runtime claims refer to these snapshots; authoring conventions are recommendations.
+
 Reference for a RisuAI bot's **option panel (sliding drawer)** and other in-chat settings UI: a settings button (⚙) that slides a drawer in, a start or setup screen on the greeting, option buttons for asset mode and feature toggles, and how those options reach the prompt. Read this when you build or fix such UI.
 Related skills: 'RisuAI 정규식 작성법' (sentinel and anchored-panel regex recipes), 'RisuAI 처리 순서 (정규식·Lua 훅)' (when buttons and hooks run), 'RisuAI Lua 트리거' (API), 'RisuAI 상태창' (the status panel the drawer often anchors to).
 
@@ -80,7 +82,7 @@ The chat screen catches clicks on the nearest element with `risu-trigger` or `ri
 
 | Style | Calls | Payload | Typical use |
 |---|---|---|---|
-| `risu-trigger="name"` on any element | the manual trigger `name`: in a Lua script the **global function `name(triggerId)`** (legacy bots: a deprecated V1/V2 trigger named `name`; port it to Lua, do not add new ones) | none | simple one-line setters |
+| `risu-trigger="name"` on any element | the manual trigger `name`: in a Lua script the **global function `name(triggerId)`** (legacy bots: a V1/V2 trigger named `name`; V1 is deprecated, V2 is supported) | none | simple one-line setters |
 | `{{button::label::name}}` (CBS) | the same; it renders `<button class="button-default" risu-trigger="name">label</button>` | none | quick buttons in regex or greeting HTML |
 | `risu-btn="payload"` on any element | `onButtonClick(triggerId, payload)` | the string | parameterized actions, option panels |
 
@@ -152,7 +154,7 @@ Prefer `risu-btn` with a payload when you control the HTML.
 ### 2.4 The open flag and the "closed by default" policy
 Variables such as `drawer_open`/`drawer_tab` are not "the truth about whether the drawer is open". When the user closes it with ✕ or the backdrop, only CSS changes and the variable stays as it was. These variables are **short-lived flags that decide which checkbox is redrawn as `checked` in the single re-render right after an option click**. Reset them to closed, unconditionally, in four places:
 1. On entry to `onButtonClick`.
-2. In `onStart`, so every send (including reroll and continue) starts closed. No hook runs when a chat is merely reopened; that is why the default must also be closed in `defaultVariables`.
+2. In `onStart`, so every send (including reroll and continue) starts closed. A closed defaultVariables value covers unset flags only. A saved open=1 survives reopening; these send-time resets do not guarantee closed-on-reopen. If that behavior is required, implement an explicit lifecycle reset or a consumed one-shot restore flag.
 3. In `listenEdit('editInput')`, so every new generation starts closed.
 4. In `listenEdit('editOutput')`, because a reroll, a continue or an empty-input send skips editInput (chat vars are never rolled back on reroll, so a stale open value survives otherwise).
 
@@ -261,14 +263,14 @@ listenEdit('editDisplay', function(id, text, meta)
 end)
 ```
 - Three layers of defense: no anchor means no build; `meta.index` returns early for old messages; the CBS tip gate inside the block is the final authority. If `meta` has an unexpected shape, nothing is drawn wrongly; one build is wasted.
-- Use a tag the AI writes every turn (the status panel and so on) as the anchor. If there is none, append an empty anchor tag at the end of the text in Lua editDisplay and use that.
+- Use a tag the AI writes every turn as the anchor. If adding an anchor in Lua, first prove this is a message render: background and greeting both have meta.index=-1, so unconditional appending can inject the panel into background HTML. Put a distinct marker in the greeting and use nonnegative indices for stored messages.
 - Inserting **before** the anchor keeps the drawer from being swallowed by the regex that later wraps the anchor block (`<bot-panel>([\s\S]*?)</bot-panel>`).
 - Lua editDisplay runs before the regex scripts, and its output is CBS-parsed, so `{{raw::}}` and `{{#when}}` (or legacy `{{#if}}`) inside Lua strings work. Setters (`{{setvar}}`) there do not run and would print as text.
 - editDisplay listeners run in registration order. Register other listeners that scan the text (CoT escaping and so on) first, so they do not scan the injected block.
 - Inside editDisplay only `setChatVar` (and `setState`) works; alerts, `setChat` and `reloadDisplay` are silently ignored. The builder only reads (`getChatVar`, `getChatLength`).
 
 ### 3.4 When a regex+CBS panel must stay
-The older structure without Lua (`{{#when::panel_open::vis::1}}…{{/when}}` in a regex `out:` plus `reloadDisplay` on every open and close) cannot animate closing and re-parses CBS in every message. RisuAI's script cache key does not include chat vars either, so an old screen can remain when only a variable changed. For such panels, append a cache-buster comment such as `text .. "<!--bot:" .. getChatVar(id,"X") .. "-->"` at the end of Lua editDisplay. The Lua builder does not need it, because variable values are baked into the HTML and change the output string.
+The older structure without Lua (`{{#when::panel_open::vis::1}}…{{/when}}` in a regex `out:` plus `reloadDisplay` on every open and close) cannot animate closing and re-parses CBS in every message. The script cache omits chat vars. reloadDisplay clears it in both hosts; clicked-message refresh / reloadChat do not, so narrower refreshes can retain old regex OUT. For such panels, append a cache-buster comment such as `text .. "<!--bot:" .. getChatVar(id,"X") .. "-->"` at the end of Lua editDisplay. The Lua builder does not need it, because variable values are baked into the HTML and change the output string.
 
 ---
 
@@ -379,7 +381,7 @@ bot_show_label=1
 ```
 In current RisuAI these are **read-time fallbacks**: `getChatVar`/`{{getvar}}` return the default whenever the chat has no
 value for the key, in old and new chats alike (they are not copied into the chat). Explicit backfill is only needed when a
-key was added after chats already stored another value, or for hosts that behave differently:
+stored value is an unset sentinel, or for hosts that behave differently. A valid stored value wins over defaults; changing an existing value needs an explicit migration, not this unset-only backfill:
 ```lua
 local function unset(v) return v == nil or v == "" or v == "null" end
 function onStart(id)

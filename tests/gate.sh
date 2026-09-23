@@ -25,6 +25,7 @@ run() {
 
 run "chatfmt round-trip"      "$PY" tests/test_roundtrip.py
 run "skill guidance upgrades" "$PY" tests/test_skill_guidance.py
+run "manual skill sync HTTP" "$PY" tests/test_skill_sync_http.py
 run "durable plans and learning review" "$PY" tests/test_workplan.py
 run "Vertex token renewal"    "$PY" tests/test_vertexauth.py
 run "provider plan & hints"   "$PY" tests/test_providers.py
@@ -69,6 +70,7 @@ if [ -d plugin/node_modules ]; then
   run "complete JSON response deadline" node tests/transport_timeout.mjs
   run "markdown progress and CRLF" node tests/markdown_progress.mjs
   run "planning and mobile proposal UI" node tests/agent_planning_ui.mjs
+  run "manual skill sync UI" node tests/skills_sync_ui.mjs
   run "bot context switching" node tests/bot_context.mjs
   run "asset upload concurrency" node tests/asset_concurrency.mjs
   run "plugin build"     node plugin/build.config.mjs

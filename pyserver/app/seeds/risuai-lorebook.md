@@ -1,6 +1,8 @@
 <!-- risuhina-preset-scope-v1 -->
 In RisuAI the prompt preset, supplied by a separate preset author, sets the lorebook insertion order, the narrative point of view, and whether the model may write the user's part. Bot cards and lorebooks hold the world, characters, events, state, and the bot's own systems; those narration options follow the preset. Treat the preset's controls as production knowledge only and do not restate them as rules in the card or lorebook.
 
+> Host-source audit: RisuAI `25001174`, PocketRisu `a14c911f` (2026-09-23). Runtime claims refer to these snapshots; authoring conventions are recommendations.
+
 RisuAI lorebook structure and decorator reference. Read it when you create or change bot-lorebook or chat-lorebook entries, and especially when you decide how an entry activates (keys, decorators) and where it lands in the prompt (position, depth, budget).
 Writing conventions (headings, priority bands, roster vs detail) are in 'RisuAI 로어북 작성 규칙'. Whole-bot layouts are in 'RisuAI 시뮬봇 구조와 제작' and 'RisuAI 일인봇 구조와 제작'.
 Entry names, folder names, variable names and tags differ from bot to bot. Read the target bot's actual entries (list_lore, read_lore_entry) before you assume any name used here.
@@ -117,7 +119,7 @@ Write `@@decorator` lines at the **very top of content**, one per line, before a
 | `@@probability N` | Active with N% probability (0-100), rolled per request |
 | `@@activate_only_after N` | Only when chat length ≥ N |
 | `@@activate_only_every N` | Only when chat length % N == 0 |
-| `@@is_greeting N` | Only when the chat started from greeting N |
+| `@@is_greeting N` | Match fmIndex + 1: 0 = default greeting, 1 = first alternate (unlike CBS firstmsgindex, where -1 = default) |
 
 ### Matching
 
@@ -153,8 +155,10 @@ Write `@@decorator` lines at the **very top of content**, one per line, before a
 |---|---|
 | `@@inject_lore TARGET` | Append this content to the target entry (by name) |
 | `@@inject_at TARGET` | Insert at the target location |
-| `@@inject_prepend TARGET PARAM` | Insert before the target |
-| `@@inject_replace TARGET PARAM` | Replace text inside the target |
+| `@@inject_prepend` | Prepend to the target selected by inject_lore or inject_at |
+| `@@inject_replace TEXT` | Replace the first literal TEXT in the selected target |
+
+Example: `@@inject_lore Character sheet` then `@@inject_replace OLD TEXT`, followed by replacement body. The operation decorator does not select a target. The target lore must survive activation/budget selection. inject_at selects a prompt-template slot handled by positionParser, not an arbitrary text anchor.
 
 ### Recursion and other
 
@@ -179,7 +183,7 @@ Verified in the host source (`process/lorebook.svelte.ts`, `process/index.svelte
 
 1. Every activated entry gets a **priority** = its `insertorder`, unless `@@priority N` (or `@@ignore_on_max_context` = -1000) overrides it.
 2. Entries are sorted by priority, highest first, and admitted while they fit in the token budget. **When the budget is short, the lowest priorities are cut first.** An entry that does not fit is skipped; a smaller entry further down may still fit.
-3. The admitted entries are re-sorted by `insertorder` and **placed top to bottom from the lowest priority**: the highest `insertorder` ends up last, closest to the chat. `@@priority` changes only who survives the budget, not where the entry is placed.
+3. The admitted entries are re-sorted by `insertorder` and **placed top to bottom from the lowest insertorder**: the highest `insertorder` ends up last, closest to the chat. `@@priority` changes only who survives the budget, not where the entry is placed.
 4. **Positioned entries go to their position**, not into the ordinary block:
    - no position → the ordinary lorebook block, whose place in the prompt is set by the preset;
    - `@@depth 0` / `@@end` → after everything (the end of the prompt);
@@ -205,7 +209,7 @@ Authoring consequences:
 {{position::NAME}}     — anchor for @@position pt_NAME entries
 ```
 
-CBS inside entry content is evaluated when the entry is injected, so entries can branch on chat variables (`{{getvar::x}}`, `{{#when}}`, legacy `{{#if}}`, `{{#func}}`/`{{call::}}`). Setters (`{{setvar}}`, `{{setdefaultvar}}`) do **not** run in entries; they stay in the prompt as literal text. Syntax: 'RisuAI CBS 문법'.
+CBS inside entry content is evaluated for token counting and again for injection (the parsed budget text is not reused), so entries can branch on chat variables (`{{getvar::x}}`, `{{#when}}`, legacy `{{#if}}`, `{{#func}}`/`{{call::}}`). Setters (`{{setvar}}`, `{{setdefaultvar}}`) do **not** run in entries; they stay in the prompt as literal text. Syntax: 'RisuAI CBS 문법'. Random gates can differ between budget counting and injection; use a previously stored Lua roll for stable events. Ordinary and depth-0 text is parsed before onStart; positive-depth and reverse-depth text is parsed later. Set depth-0 state earlier (previous onOutput, onInput or a button), or inject new onStart state through editRequest.
 
 ### Lua
 
@@ -225,7 +229,7 @@ upsertLocalLoreBook(id, "name", "content", {
 
 That is the whole Lua lorebook API. There is no Lua call to list, edit or delete bot/module entries by index. The
 `v2GetAllLorebooks` / `v2CreateLorebook` / `v2ModifyLorebookByIndex` / `v2SetLorebookAlwaysActive` names seen in older notes
-are effects of the deprecated V2 block triggers, not Lua functions; do not use or recommend them.
+are V2 block-trigger effects, not Lua functions. V2 itself is supported; do not call those names from Lua.
 
 Popular bots almost never create or edit entries from Lua. They keep entries constant and gate their bodies with CBS on chat variables that Lua or buttons set. Prefer that: it is visible in the editor and survives rerolls. Details: 'RisuAI Lua 트리거'.
 

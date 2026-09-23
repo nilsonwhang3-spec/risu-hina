@@ -1915,6 +1915,10 @@ class AppState {
 
   // --- skills ---------------------------------------------------------------
 
+  async syncSkills(): Promise<{ updated: number; created: number }> {
+    return await transport.post('/skills/sync', { confirmOverwrite: true });
+  }
+
   async skills(): Promise<SkillListing> {
     return await transport.get('/skills');
   }
