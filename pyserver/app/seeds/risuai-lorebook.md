@@ -200,36 +200,32 @@ Authoring consequences:
 ### CBS
 
 ```
-{{lorebook}}           — the active lorebook as a JSON array
+{{lorebook}}           — all lorebook entries (character, chat, module; activated or not) as a JSON array
 {{hiddenkey::value}}   — a key the model never sees; it can still trigger entries
 {{position::NAME}}     — anchor for @@position pt_NAME entries
 ```
 
-CBS inside entry content is evaluated when the entry is injected, so entries can branch on chat variables (`{{getvar::x}}`, `{{#when}}`, `{{#if}}`, `{{#func}}`/`{{call::}}`). Syntax: 'RisuAI CBS 문법'.
+CBS inside entry content is evaluated when the entry is injected, so entries can branch on chat variables (`{{getvar::x}}`, `{{#when}}`, legacy `{{#if}}`, `{{#func}}`/`{{call::}}`). Setters (`{{setvar}}`, `{{setdefaultvar}}`) do **not** run in entries; they stay in the prompt as literal text. Syntax: 'RisuAI CBS 문법'.
 
 ### Lua
 
 ```lua
--- search
-getLoreBooks(id, "search")          -- local lorebook entries by name
-loadLoreBooks(id)                   -- active entries (async)
+-- read: entries whose name (comment) equals the string exactly, from the chat, bot and module lorebooks;
+-- full entry tables, content CBS-parsed; synchronous
+local hits = getLoreBooks(id, "entry name")
+-- active entries for the current context as { data, role } (lowLevelAccess; call inside an async hook)
+local active = loadLoreBooks(id)
 
--- CRUD (v2 API)
-v2GetAllLorebooks(id)
-v2GetLorebookByName(id, "name")
-v2GetLorebookByIndex(id, 0)
-v2GetLorebookCountNew(id)
-v2CreateLorebook(id, name, key, content, insertOrder)
-v2ModifyLorebookByIndex(id, idx, name, key, content, insertOrder)
-v2DeleteLorebookByIndex(id, idx)
-v2SetLorebookAlwaysActive(id, idx, true)
-
--- upsert (simple API)
+-- write: create or replace a CHAT-local entry by name (the options table is required)
 upsertLocalLoreBook(id, "name", "content", {
     alwaysActive = true, insertOrder = 100,
     key = "key1, key2", secondKey = "secondary", regex = false
 })
 ```
+
+That is the whole Lua lorebook API. There is no Lua call to list, edit or delete bot/module entries by index. The
+`v2GetAllLorebooks` / `v2CreateLorebook` / `v2ModifyLorebookByIndex` / `v2SetLorebookAlwaysActive` names seen in older notes
+are effects of the deprecated V2 block triggers, not Lua functions; do not use or recommend them.
 
 Popular bots almost never create or edit entries from Lua. They keep entries constant and gate their bodies with CBS on chat variables that Lua or buttons set. Prefer that: it is visible in the editor and survives rerolls. Details: 'RisuAI Lua 트리거'.
 
@@ -326,30 +322,31 @@ Put empty anchors such as `{{position::bot_ext1}}` in the global note. An add-on
 ### K. Feature-flag gating (common)
 A constant entry whose whole body, or one clause, is wrapped in a chat-variable condition set by an option button:
 ```
-{{#if {{equal::{{getvar::bot_economy}}::1}}}}
+{{#when::bot_economy::vis::1}}
 ### Prices
 - ...
-{{/if}}
+{{/when}}
 ```
-Options reach the prompt only through such conditions. Treat unset variables as "off" or give them defaults (card `defaultVariables`, or Lua).
+Older bots write `{{#if {{equal::{{getvar::bot_economy}}::1}}}}…{{/if}}`; it still works but is deprecated. Options reach the prompt only through such conditions. Treat unset variables (they read as `"null"`) as "off" or give them defaults (card `defaultVariables`, or Lua).
 
 ### L. Roll-gated random events (common in sim bots)
 ```
 @@depth 0
-{{#if {{? {{roll::500}}<=6}}}}
+{{#when::{{roll::500}}::<=::6}}
 ### Event: unexpected visitor
 - Introduce one fitting NPC at a natural pause.
 - Do not trigger while {{user}} is in a private or intimate scene.
-{{/if}}
+{{/when}}
 ```
-Each constant entry rolls on every request. Rerolls roll again (harmless, not reproducible). Seeded buckets are an alternative (see 'RisuAI 시뮬봇 구조와 제작').
+Older bots write `{{#if {{? {{roll::500}}<=6}}}}…{{/if}}` (still works). Each constant entry rolls on every request. Rerolls roll again (harmless, not reproducible). Seeded buckets are an alternative (see 'RisuAI 시뮬봇 구조와 제작').
 
 ### M. Score → band text with `{{#func}}` (some bots)
 Define the band once in a constant entry and call it for every character, so the model reads behavior text, not a bare number:
 ```
-{{#func bot_band}}{{#if {{? {{arg::0}}<100}}}}Stage 1: polite distance{{/if}}{{#if {{? {{arg::0}}>=100}}}}Stage 2: relaxed, teasing{{/if}}{{/func}}
+{{#func bot_band}}{{#when::{{arg::1}}::<::100}}Stage 1: polite distance{{:else}}Stage 2: relaxed, teasing{{/when}}{{/func}}
 - Name A: {{call::bot_band::{{getvar::bot_name_a_aff}}}}
 ```
+`{{arg::1}}` is the first argument after the function name (`{{arg::0}}` is the name itself; older examples that use `arg::0` for the value are broken). Give the score a default: an unset value reads `"null"` and makes every numeric comparison false (here: Stage 2).
 
 ### N. Keyword mode entry with a lifecycle (solo bots)
 A non-constant entry keyed on a trigger word describes activation, behavior while active, the **end condition** and the **aftermath**, so the mode ends by itself and leaves consequences.

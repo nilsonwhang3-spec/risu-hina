@@ -1,6 +1,6 @@
-# 06. Implementation status — as of 2026-09-23 (v0.15.22, Risu Hina)
+# 06. Implementation status — as of 2026-09-23 (v0.15.23, Risu Hina)
 
-## Unreleased (2026-09-23): §1-69 methodology skills rewritten from 14 reference bots · read_file pages
+## 0.15.23 (2026-09-23): §1-69~70 methodology skills rewritten from 14 reference bots and verified against current RisuAI · read_file pages
 
 ### §1-69 the bot-making skills, in English, from a reference-bot study (seed v10)
 
@@ -44,6 +44,41 @@ All 14 were decoded with the vepo `charx` skill (the PNG card by hand from its
   ones. The migration notes (`PRESET_SCOPE_NOTE`, `LORE_SCOPE_NOTE`,
   `LORE_AUTHORING_NOTES`) are English now, same markers. The non-method seeds
   (charx, studio, vision loop, arca HTML) are untouched.
+
+### §1-70 CBS, Lua and trigger claims re-verified against current RisuAI
+
+The user: CBS changed recently, old bots may use outdated forms, and trigger
+V1/V2 are deprecated in favour of Lua. The local `vepo-bot/RisuAI` checkout
+was 17 commits behind and `PocketRisu` 194, so both `origin/main` trees were
+extracted with `git archive` (working trees untouched) and every CBS, Lua and
+hook claim in the eleven methodology seeds was checked against them
+(mainline canonical, PocketRisu differences labelled). Main corrections:
+
+- **Setters** (`setvar`/`addvar`/`setdefaultvar`) run only in the variable
+  pass over stored messages (request start, and right after a reply is
+  finalized, before `onOutput`); in lorebook, description, global note,
+  greetings, background HTML, editdisplay/editprocess OUT and Lua `cbs()` they
+  stay literal text. The `setdefaultvar`-in-an-always-on-entry pattern is
+  replaced by `defaultVariables`.
+- `#func` arguments start at `{{arg::1}}` (`arg::0` is the name; two seed
+  examples were broken). `#if`/`#if_pure`/`#pure` are the deprecated blocks;
+  examples now use `#when`, with the differences stated (both `#when` branches
+  are parsed; operators evaluate right to left). Unset variables read
+  `"null"`. `{{roll}}` without argument is 1; `pick`/`rollp` are seeded per
+  chat and message count. `{{lorebook}}` lists all entries. Asset names
+  resolve case-insensitively with a fuzzy fallback; only `{{assetlist}}`
+  checks are exact. `{{// }}` has no handler since the 2025-07 refactor.
+- **Lua**: `onInput` runs before the message is appended; `onStart` runs after
+  lorebook matching, on reroll and continue too; stopping a send works only
+  from `onStart` (the slash-command recipe moved there); listenEdit
+  callbacks must not be `async`; editRequest `meta` is `{}`; alerts do not work
+  in editDisplay; no rollback of chat vars on reroll/edit/delete;
+  `defaultVariables` are read-time fallbacks for every chat; editOutput re-runs
+  per streamed chunk; LLM/axLLM requests skip editRequest; the engine cache is
+  per mode, so card + module scripts reset globals.
+- **Triggers**: V1 and V2 are marked deprecated (V1 warned by the editor, V2's
+  deprecated effects hidden behind `showDeprecatedTriggerV2`); the Lua skill
+  gained a porting table and no skill recommends block triggers any more.
 
 ### read_file pages by offset
 

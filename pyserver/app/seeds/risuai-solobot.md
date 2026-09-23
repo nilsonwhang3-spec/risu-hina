@@ -65,7 +65,7 @@ Solo-bot lorebooks are small (2-11 entries). Typical contents:
 - **Persona compatibility guide** (§8), usually inactive or in a documentation folder.
 - **Disabled storage entries**: keyless, non-constant entries that never fire, holding creator notes, image-generation tags per outfit, translation notes (name tables, tone rules). Put them in a clearly named folder ("Read me / storage").
 - **User-toggled entries**: shipped inactive; the user switches them to always-on (a language instruction, an optional asset list). The creator notes say which. A no-code option panel.
-- **Option toggles as canon switches**: an option adds or removes a clause in the sheet or a world rule, or swaps the whole sheet (`{{#if {{equal::{{getvar::bot_variant}}::1}}}}…{{/if}}` around each version). One variable keeps every section consistent. When a variant makes some greetings invalid, the start UI must refuse those combinations and say which toggle to flip.
+- **Option toggles as canon switches**: an option adds or removes a clause in the sheet or a world rule, or swaps the whole sheet (`{{#when::bot_variant::vis::1}}…{{/when}}` around each version; older bots write `{{#if {{equal::{{getvar::bot_variant}}::1}}}}…{{/if}}`). One variable keeps every section consistent. When a variant makes some greetings invalid, the start UI must refuse those combinations and say which toggle to flip.
 - **Lore as in-character commentary**: for a list of facts about her (abilities, modifications, possessions), follow each item with her own one-line reaction in her voice. The model learns fact and attitude together.
 
 Decorators stay few: `@@depth 0` for the status/asset protocol or stage text, nothing else in most bots. Set `insertorder` deliberately even with few entries (protocol highest, sheet high, realism module low).
@@ -239,9 +239,9 @@ Only one of the studied solo bots used numbers; use them when the concept needs 
 IN:  \[bot-delta\|trust:([+-]?\d)\|comfort:([+-]?\d)\|tension:([+-]?\d)\]
 OUT: {{setvar::bot_trust::{{min::200::{{max::0::{{? {{getvar::bot_trust}}+$1*{{getvar::bot_mag}}}}}}}}}}...
 ```
-(repeat per axis; keep the raw line for the display regex to hide, or drop it.)
+(repeat per axis; keep the raw line for the display regex to hide, or drop it.) The `{{getvar}}`/`{{? }}` parts resolve when the regex runs; the `{{setvar}}` itself is stored in the reply as text and executes once the reply is finished (before the `output` trigger), then disappears from the stored message.
 
-4. Stage text by band: one always-on `@@depth 0` entry, per axis ten (or five) blocks like `{{#if {{? ({{getvar::bot_trust}}>20)&({{getvar::bot_trust}}<41)}}}}[Trust 2 — ...]{{/if}}`, so only the current stage paragraph per axis is injected. Stage text is **behavioral and concrete** ("she now leaves her phone face-up when {{user}} might call"), progressing through habits, not adjectives. Add a blend rule: "when stages conflict (high attraction, low comfort), show the tension through shame, suppression or contradiction."
+4. Stage text by band: one always-on `@@depth 0` entry, per axis ten (or five) blocks like `{{#when::{{? ({{getvar::bot_trust}}>20)&({{getvar::bot_trust}}<41)}}}}[Trust 2 — ...]{{/when}}` (older bots use `{{#if …}}…{{/if}}`; keep the parentheses, `{{? }}` gives comparisons and `&` equal precedence), so only the current stage paragraph per axis is injected. Stage text is **behavioral and concrete** ("she now leaves her phone face-up when {{user}} might call"), progressing through habits, not adjectives. Add a blend rule: "when stages conflict (high attraction, low comfort), show the tension through shame, suppression or contradiction."
 
 **Reroll warning**: deltas applied in editoutput are re-applied on every reroll or edit, so values drift upward. For anything that matters, apply deltas in Lua from a stored base snapshot keyed to the message (see 'RisuAI 시뮬봇 구조와 제작' §10 and 'RisuAI Lua 트리거'), or offer a visible reset/adjust control.
 
