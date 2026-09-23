@@ -80,8 +80,11 @@ def upload_targets(scope: str) -> tuple[tuple[str, ...], str]:
 MAX_PREVIEW = 256 * 1024
 MAX_UPLOAD = 32 * 1024 * 1024
 
+# .ts/.svelte/.mjs: the RisuAI source a verification skill fetches into
+# hina/.sources/ has to be readable with read_file (§1-71).
 TEXTUAL = {".md", ".txt", ".json", ".jsonl", ".py", ".csv", ".html", ".htm",
-           ".css", ".js", ".lua", ".yaml", ".yml", ".xml", ".log", ".sql"}
+           ".css", ".js", ".lua", ".yaml", ".yml", ".xml", ".log", ".sql",
+           ".ts", ".tsx", ".svelte", ".mjs", ".cjs"}
 
 _text_edit_lock = threading.RLock()
 
@@ -146,10 +149,10 @@ def _resolve(scope: str, rel: str) -> Path:
     return candidate
 
 
-# The three helper files pyexec.layout()/run_python rewrite on EVERY run -
+# The helper files pyexec.layout()/run_python rewrite on EVERY run -
 # hidden by exact name, so agent-authored scripts stay visible (and the @docs
 # surfacing keeps seeing them). See pyserver/app/pyexec.py.
-_MACHINERY_SCRIPTS = {"risuhina.py", "realooc.py", "_agent_run.py"}
+_MACHINERY_SCRIPTS = {"risuhina.py", "_agent_run.py"}
 
 
 def _machinery(rel: str) -> bool:

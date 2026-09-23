@@ -1,5 +1,34 @@
 # 06. Implementation status — as of 2026-09-23 (v0.15.23, Risu Hina)
 
+## Unreleased (2026-09-23): §1-71 source-check skill · old names removed · README rewritten
+
+- **`RisuAI 소스 대조 검증`** (`risuai-source-check.md` + `scripts/risu_sources.py`,
+  seed v11). For verification only: `fetch_sources('risuai'|'pocketrisu')`
+  downloads the upstream zip (~40 MB, ~10 s) and keeps `src/`, `docs/` and a
+  few top-level files in `hina/.sources/<repo>/` (hidden, shared by all bots;
+  `SOURCE.json` records the commit, a matching copy is reused);
+  `grep_source` / `show_source` / `key_files` search and read it. The
+  reference maps questions to files, gives the compare procedure and a table
+  of outdated patterns to check first (§1-70's findings). Seeding learned to
+  carry scripts next to a methodology reference (`SEED_SCRIPTS`). Verified
+  through the real sandbox runner (network, writes, rename inside the space).
+  `.ts/.tsx/.svelte/.mjs/.cjs` joined `files.TEXTUAL` so read_file can open
+  the fetched source.
+- **Old names removed** (the user's call, after being told what they did):
+  `REALOOC_`/`RISUELF_` env prefixes, the `risuelf.db`/`realooc.db`
+  adoption, the `import realooc` helper shim, the plugin's acceptance of the
+  `risu-elf`/`real-ooc` handshake, `plugin/Risu.Elf.Plugin.js` (old-name
+  installs no longer receive updates; reinstall the plugin) and the
+  `real-ooc-plugin` package-lock name. Upgrading straight from Risu Elf
+  ≤0.4: rename `data/risuelf.db` to `data/risuhina.db` by hand.
+- **README rewritten** around the current product: an integrated bot
+  making and editing plugin with chat editing (bot making, card editing,
+  asset studio, chat editing, the agent); the bundled `INSTALL.md` intro and
+  `docs/05` install paths follow.
+- `vepo-bot/referece-bots/공통구조-분석.md` gained [소스] notes and a
+  "소스 기준 정정" table: where the reference bots' practice is outdated
+  against current RisuAI.
+
 ## 0.15.23 (2026-09-23): §1-69~70 methodology skills rewritten from 14 reference bots and verified against current RisuAI · read_file pages
 
 ### §1-69 the bot-making skills, in English, from a reference-bot study (seed v10)

@@ -118,10 +118,10 @@ Principles:
   Never reconstruct 100KB+ entry_json, double-escape Lua, or delegate manual full-code copying
   to the user merely because the source lives in DB. These proposals preserve other fields and
   reject stale revisions; approval changes the working copy, then RisuAI writeback is separate.
-  The `import risuhina` helper is ready; `import realooc` is its supported legacy alias.
-  run_python creates both modules in hina/<bot>/scripts/ and sets the import path before execution.
-  They may not appear in file search before the first run. Import directly in run_python; do not
-  look for a root-level realooc.py, install a package, or infer a missing helper from file search.
+  The `import risuhina` helper is ready. run_python creates it in hina/<bot>/scripts/ and sets
+  the import path before execution. It may not appear in file search before the first run. Import
+  directly in run_python; do not look for a root-level helper file, install a package, or infer a
+  missing helper from file search.
   For its actual location use `import risuhina; print(risuhina.__file__)` inside run_python.
 - **Lorebook scope is the user's intended lifetime, not the word 'lorebook' alone.**
   Bot lorebook = scope="global", tab="botlore": persisted on this bot's card and reused across

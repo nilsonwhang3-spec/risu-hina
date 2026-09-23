@@ -34,7 +34,6 @@ def connect() -> sqlite3.Connection:
         if _conn is not None:
             return _conn
         config.DATA_DIR.mkdir(parents=True, exist_ok=True)
-        _adopt_legacy_db()
         _wal_report()
         conn = sqlite3.connect(str(config.DB_PATH), check_same_thread=False)
         conn.row_factory = sqlite3.Row
@@ -134,26 +133,6 @@ def _wal_report() -> None:
               f"foreign salt ({k[0]:#x},{k[1]:#x}) - written through a stale wal-index, unreachable "
               f"now. Copy kept at {keep}. Usually data/ was copied from another install with its "
               f"-wal/-shm; stop the server before copying.", flush=True)
-
-
-def _adopt_legacy_db() -> None:
-    """Move a pre-rename database to the new name, sidecars included.
-
-    Renaming the project must not orphan someone's chats. This runs before the
-    connection is opened, so the WAL and shm files can move with it - renaming
-    a database out from under an open connection is how a WAL gets separated
-    from the file it belongs to.
-    """
-    if config.DB_PATH.exists():
-        return
-    old = next((p for p in getattr(config, "LEGACY_DB_PATHS", ()) if p.exists()), None)
-    if old is None:
-        return
-    for suffix in ("", "-wal", "-shm"):
-        src = old.with_name(old.name + suffix)
-        if src.exists():
-            src.replace(config.DB_PATH.with_name(config.DB_PATH.name + suffix))
-    print(f"[{config.APP_NAME}] adopted {old.name} -> {config.DB_PATH.name}", flush=True)
 
 
 DDL = [

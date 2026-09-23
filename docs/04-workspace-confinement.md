@@ -427,6 +427,8 @@ key in the first place. Tests check each of those two.
 
 # Appendix C — Renaming `Real-ooc` → `risu-hina` (2026-08-23, round 4)
 
+> **Removed in §1-71 (2026-09-23):** every compatibility hook described below (old env prefixes, DB adoption, the `realooc` helper shim, the old handshake names, `plugin/Risu.Elf.Plugin.js`) is gone. Kept as history.
+
 The repo is `nilsonwhang3-spec/risu-hina`. Four spellings were substituted in order of length (so the short
 one does not eat the long one):
 
@@ -656,6 +658,8 @@ visible at the end of the tab row (`syncbadge`), the asset tab is read-only whil
 # Appendix G — Round 3 and the rename (2026-08-26, v0.5.0)
 
 ## G.1 Risu Elf → Risu Hina
+
+> **Removed in §1-71 (2026-09-23):** every compatibility hook described below (old env prefixes, DB adoption, the `realooc` helper shim, the old handshake names, `plugin/Risu.Elf.Plugin.js`) is gone. Kept as history.
 
 It had never actually been deployed, so the name was changed without leaving a history trail (`rename_hina.py`, once).
 Three things were kept: the GitHub repository path (`nilsonwhang3-spec/risu-hina`, kept because it is a URL), the

@@ -30,25 +30,9 @@ from typing import Any
 APP_NAME = "risu-hina"
 VERSION = "0.15.23"
 
-# Renamed from REALOOC_* to RISUHINA_*. The old names are still honoured, and
-# not as politeness: the launcher, the control script and any service wrapper
-# already on a machine were written with the old prefix, and a rename that
-# silently ignores REALOOC_PORT looks like the server binding the wrong port
-# for no reason.
-_OLD_PREFIXES = ("RISUELF_", "REALOOC_")
-_NEW_PREFIX = "RISUHINA_"
-
-
 def _ENV(name: str, default: Any = None) -> Any:
     value = os.environ.get(name)
-    if value is not None:
-        return value
-    if name.startswith(_NEW_PREFIX):
-        for old in _OLD_PREFIXES:
-            legacy = os.environ.get(old + name[len(_NEW_PREFIX):])
-            if legacy is not None:
-                return legacy
-    return default
+    return default if value is None else value
 
 
 def _env_flag(name: str, default: bool = False) -> bool:
@@ -127,9 +111,6 @@ def _default_data_dir() -> Path:
 DATA_DIR = _default_data_dir()
 WORKSPACE_DIR = DATA_DIR / "workspace"
 DB_PATH = DATA_DIR / "risuhina.db"
-# What the database was called before the renames (newest first).
-LEGACY_DB_PATHS = (DATA_DIR / "risuelf.db", DATA_DIR / "realooc.db")
-LEGACY_DB_PATH = LEGACY_DB_PATHS[0]
 CONFIG_PATH = DATA_DIR / "config.json"
 TOKEN_PATH = DATA_DIR / "token.txt"
 
