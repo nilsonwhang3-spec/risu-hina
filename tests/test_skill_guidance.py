@@ -1,5 +1,6 @@
 """Skill upgrade preserves custom references and state and discovers the new guide."""
 import os
+import re
 from pathlib import Path
 import sys
 import tempfile
@@ -75,6 +76,72 @@ class SkillGuidanceTests(unittest.TestCase):
         before = {x["slug"]: x["revision"] for x in skills.list_all()}
         skills.seed_once()
         self.assertEqual(before, {x["slug"]: x["revision"] for x in skills.list_all()})
+
+    def test_seed_v10_installs_solo_and_regex_guides_once(self):
+        db.mark_migration("skills_seeded_v9")
+        skills.seed_once()
+        for name, filename in (("RisuAI 일인봇 구조와 제작", "risuai-solobot.md"),
+                               ("RisuAI 정규식 작성법", "risuai-regex.md")):
+            fresh = skills.find(name)
+            self.assertIsNotNone(fresh, name)
+            self.assertTrue(fresh["enabled"])
+            self.assertIn(fresh["name"], skills.prompt())
+            self.assertIn(f"references/{filename}", fresh["body"])
+            self.assertEqual((skills.root()/fresh["slug"]/"references"/filename).read_bytes(),
+                             (skills.SEED_DIR/filename).read_bytes())
+        before = {x["slug"]: x["revision"] for x in skills.list_all()}
+        skills.seed_once()
+        self.assertEqual(before, {x["slug"]: x["revision"] for x in skills.list_all()})
+
+    def test_method_refresh_replaces_references_and_keeps_state(self):
+        for filename in skills.METHOD_FILES:
+            label = skills.SEED_FILES[filename][0]
+            created = skills.save(label, "옛 설명", "사용자 편집 본문", enabled=False, sort_order=37)
+            skills.put_file(created["slug"], "references/" + filename, b"custom reference")
+        skills.refresh_method_skills_once()
+        for filename in skills.METHOD_FILES:
+            label, desc, _ = skills.SEED_FILES[filename]
+            updated = skills.find(label)
+            self.assertEqual(updated["description"], desc)
+            self.assertNotIn("사용자 편집 본문", updated["body"])
+            self.assertIn(f"references/{filename}", updated["body"])
+            self.assertFalse(updated["enabled"])
+            self.assertEqual(updated["sortOrder"], 37)
+            self.assertEqual((skills.root()/updated["slug"]/"references"/filename).read_bytes(),
+                             (skills.SEED_DIR/filename).read_bytes())
+        before = {x["slug"]: x["revision"] for x in skills.list_all()}
+        skills.refresh_method_skills_once()
+        self.assertEqual(before, {x["slug"]: x["revision"] for x in skills.list_all()})
+
+    def test_method_seeds_are_english_with_catalog_room(self):
+        hangul = re.compile(r"[가-힣]")
+        for filename in skills.METHOD_FILES:
+            label, desc, _ = skills.SEED_FILES[filename]
+            self.assertLessEqual(len(desc), skills.MAX_DESCRIPTION, filename)
+            self.assertIsNone(hangul.search(desc), filename)
+            text = (skills.SEED_DIR/filename).read_text(encoding="utf-8")
+            if filename in skills.PRESET_SCOPE_FILES.values():
+                self.assertIn(skills.PRESET_SCOPE_MARKER, text, filename)
+            # read_file pages by offset, but one file should stay a few windows at most.
+            self.assertLessEqual(len(text), 60_000, filename)
+            ratio = len(hangul.findall(text)) / max(1, len(text))
+            self.assertLess(ratio, 0.01, filename)
+        lines = [f"- **{label}** — {desc}" for label, desc, _ in skills.SEED_FILES.values()]
+        self.assertLess(len("\n".join(lines)) + 400, skills.CATALOG_LIMIT)
+
+    def test_agent_read_pages_by_offset(self):
+        from app import files
+        target = Path(DATA.name)/"long.md"
+        target.write_text("a" * 50 + "b" * 30, encoding="utf-8")
+        with patch.object(files, "_resolve", return_value=target):
+            first = files.agent_read("space", "long.md", limit=50)
+            self.assertTrue(first.startswith("a" * 50))
+            self.assertIn("offset=50", first)
+            rest = files.agent_read("space", "long.md", offset=50, limit=50)
+            self.assertTrue(rest.startswith("b" * 30))
+            self.assertNotIn("offset=80", rest)
+            self.assertEqual(files.agent_read("space", "long.md"), "a" * 50 + "b" * 30)
+            self.assertIn("offset=999", files.agent_read("space", "long.md", offset=999))
 
     def test_preset_guidance_upgrade_preserves_custom_content_and_state(self):
         name = "RisuAI 시뮬봇 구조와 제작"

@@ -70,7 +70,8 @@ TEXT_EXT = {".md", ".txt", ".py", ".json", ".yaml", ".yml", ".csv", ".html", ".j
 # v8 adds simulation-bot structure and state-management guidance.
 # v9 adds the three bot-UI guides drawn from the vepo bots (option panel,
 # asset output, status panel; §1-67).
-SEED_KEY = "skills_seeded_v9"
+# v10 adds the solo-bot and regex guides (§1-69).
+SEED_KEY = "skills_seeded_v10"
 FOLDER_KEY = "skills_folders_v1"
 SEED_DIR = Path(__file__).resolve().parent / "seeds"
 
@@ -738,17 +739,21 @@ def retire_once() -> None:
 # a disabled reference is one the user has to know exists to switch on.
 SEED_FILES: dict[str, tuple[str, str, bool]] = {
     "risuai-cbs.md": ("RisuAI CBS 문법",
-                      "봇 카드·로어북·정규식·프롬프트의 `{{tag}}` (CBS) 문법을 읽거나 써야 할 때. {{getvar}}·{{random}} 같은 태그의 뜻이 필요할 때.", True),
+                      "Reading or writing RisuAI CBS `{{tag}}` syntax in cards, lorebooks, regex, and prompts: what tags such as {{getvar}}, {{random}}, {{#when}} mean, comparison operators, and how they behave per context.", True),
     "risuai-lorebook-style.md": ("RisuAI 로어북 작성 규칙",
-                                 "로어북 항목을 새로 쓰거나 고칠 때 반드시. ### 이하·[] 제목 위계, 낮은 우선순위부터 배치·예산 절단, 총합·개별 로어북 구성, @@ 지정 위치, 유사 의미의 우선순위 대역과 전체 순서 검토.", True),
+                                 "Always before writing or editing lorebook entries: ### and [] heading hierarchy, priority bands placed low-to-high with budget cutoff, roster vs detail entries, @@ positions, sim-bot vs solo-bot layouts, and a whole-order review.", True),
     "risuai-lorebook.md": ("RisuAI 로어북 구조",
-                           "봇 로어북(global, 봇에 영구 저장·여러 챗에서 재사용)과 챗 로어북(local, 특정 챗 전용)의 구조·발동 조건(key·데코레이터·삽입 위치)을 정할 때.", True),
+                           "Deciding lorebook structure and activation: bot lorebook (global, stored in the card, reused across chats) vs chat lorebook (local), entry schema, key matching, @@decorators, insertion position and depth, token budget, CBS/Lua control.", True),
     "risuai-simbot.md": ("RisuAI 시뮬봇 구조와 제작",
-                          "여러 캐릭터가 등장하는 시뮬봇을 설계·제작하거나 구조를 점검할 때. 세계관·주요 캐릭터·NPC·장소·배경·사건 구성, 총합/개별 로어북, 공개/내부 상태, Tag Output·Regex·Lua·CBS 연계, 선택적 ID별 저장·리롤/삭제 복원.", True),
+                          "Designing, building, or reviewing a multi-character simulation bot: world/cast/NPC/location/event lorebook layout, roster vs detail entries, public vs hidden state, narrative pacing and event mechanisms (clock, phases, triggers), status tags wired to regex/Lua/CBS.", True),
+    "risuai-solobot.md": ("RisuAI 일인봇 구조와 제작",
+                          "Designing, building, or reviewing a single-character bot: character sheet in description vs lorebook, relationship stages, secrets and scenario hooks, keeping the character consistent and charming (voice, contrasts, agency, anti-repetition), intimacy pacing, greetings.", True),
+    "risuai-regex.md": ("RisuAI 정규식 작성법",
+                        "Writing or fixing RisuAI regex scripts: choosing editinput/editoutput/editprocess/editdisplay, order, flags, CBS in replacements, erase/hide/wrap recipes for status tags, images, and HTML, and debugging rules that do not match.", True),
     "risuai-hooks.md": ("RisuAI 처리 순서 (정규식·Lua 훅)",
-                        "Regex(editinput/editoutput/editprocess/editdisplay)·Lua listenEdit(editRequest 등)·트리거가 한 턴에서 언제 어떤 순서로 돌고 무엇이 저장되는지. 정규식·트리거·배경 HTML 을 만들거나 고칠 때, 태그가 요청/화면/저장본 어디에 남는지 설명할 때.", True),
+                        "When regex (editinput/editoutput/editprocess/editdisplay), Lua listenEdit hooks, and triggers run in one turn, in what order, and what gets saved. Use when building regex, triggers, or background HTML, or explaining where a tag survives.", True),
     "risuai-lua.md": ("RisuAI Lua 트리거",
-                      "봇 카드의 Lua 트리거 스크립트를 읽거나 이해해야 할 때.", True),
+                      "Reading or writing a card's Lua trigger script: API, hooks, variables, lorebook and LLM calls, plus advanced patterns (state machines, reroll-safe snapshots, dynamic lore activation, clocks, stats, aux-model calls).", True),
     "charx-cards.md": ("charx 카드 구조",
                        "사용자가 .charx 카드 파일을 올렸고 그 내부 구조(설정·에셋·로어북)를 알아야 할 때.", True),
     "charx_unpack.py": ("charx 풀기",
@@ -760,12 +765,23 @@ SEED_FILES: dict[str, tuple[str, str, bool]] = {
     "arca-html.md": ("아카라이브 HTML 작성",
                      "아카라이브(arca.live)에 붙여넣을 HTML(챗로그·소개글·요약)을 만들 때의 제약.", True),
     "risuai-option-panel.md": ("RisuAI 옵션 패널 (슬라이딩 드로어)",
-                               "봇에 설정 버튼(⚙)으로 여는 슬라이딩 옵션 패널·드로어를 만들거나 고칠 때. risu-btn 버튼과 onButtonClick, Lua editDisplay 로 팁 메시지에만 패널 HTML 삽입, CSS 체크박스로 열고 닫기·탭, reloadDisplay 를 피하는 재렌더 규칙, 열림 플래그 리셋, markdown 형제 관계 함정.", True),
+                               "Building or fixing a settings (⚙) sliding option drawer: risu-btn buttons and onButtonClick, panel HTML injected by Lua editDisplay into the tip message only, CSS checkbox open/close and tabs, avoiding reloadDisplay, open-flag reset, options feeding prompts.", True),
     "risuai-asset-output.md": ("RisuAI 에셋 출력식",
-                               "모델이 봇 에셋 목록에 맞는 이미지 태그를 내게 하는 지시문을 글로벌 노트 덮어쓰기(post_history_instructions)에 쓰거나 고칠 때. {{assetlist}} 대조·베이스 폴백 정규식, 에셋 구성별 캐릭터 계층, SFW/NSFW 키워드 설계와 규칙, 보조모델(axLLM) 위임·메인 억제·재생성 버튼.", True),
+                               "Writing the instruction that makes the model emit image tags matching the bot's asset list (usually in the global note override): {{assetlist}} check and base-fallback regex, per-character tiers, SFW/NSFW keyword design, aux-model (axLLM) delegation.", True),
     "risuai-status-panel.md": ("RisuAI 상태창",
-                               "매 응답 끝에 상태창 태그 블록(TAG OUTPUT)을 내게 하는 로어북 지시문, {{position::PI}}+@@position pt_PI 위치 지정, 정규식 변환(지우개→래퍼→필드·리퀘 제거), backgroundHTML CSS, 선택적 Lua 파싱·리롤 안전 스냅샷·워치독을 만들거나 고칠 때.", True),
+                               "Building or fixing the status block the model emits at the end of each reply: TAG OUTPUT lorebook instruction, {{position::PI}} + @@position pt_PI placement, regex conversion (eraser, wrapper, fields), backgroundHTML CSS, optional Lua parsing, reroll-safe snapshots.", True),
 }
+
+# The bot-making methodology references (§1-69): rewritten in English from the
+# reference-bot study. Their skill names stay Korean; descriptions, bodies and
+# references are English, and refresh_method_skills_once replaces them on
+# existing installs.
+METHOD_FILES = (
+    "risuai-cbs.md", "risuai-lorebook-style.md", "risuai-lorebook.md",
+    "risuai-simbot.md", "risuai-solobot.md", "risuai-regex.md",
+    "risuai-hooks.md", "risuai-lua.md", "risuai-option-panel.md",
+    "risuai-asset-output.md", "risuai-status-panel.md",
+)
 
 
 def seed_once() -> None:
@@ -832,12 +848,12 @@ STUDIO_OPS_KEY = "skills_studio_ops_charref_v4"
 
 LORE_SCOPE_KEY = "skills_lore_scope_v1"
 LORE_SCOPE_NOTE = """<!-- risuhina-lore-scope-v1 -->
-봇 로어북은 scope="global", botlore 탭이며 이 봇에 영구 저장되어 여러 챗에서 재사용된다.
-챗 로어북은 scope="local", lore 탭이며 특정 채팅의 진행 상황에만 적용된다.
-global은 모든 봇 공용이라는 뜻이 아니다. 영구 보관과 alwaysActive 발동 조건도 별개다.
-사용자가 지정한 범위가 우선이다. 범위를 생략하면 봇 편집에서는 봇 로어북, 챗 편집에서는
-현재 챗 로어북을 대상으로 한다. 봇 로어북 작성 요청을 챗 로어북 화면 이동으로 바꾸지 마라.
-아래 자료의 '챗 로어북'이라는 일반 설명은 봇 로어북도 사용하는 공통 스키마를 한정하지 않는다.
+The bot lorebook is scope="global" (the botlore tab): stored in this bot's card and reused across chats.
+The chat lorebook is scope="local" (the lore tab): it applies only to one chat's progress.
+"global" does not mean shared by every bot, and permanent storage is separate from the alwaysActive trigger.
+The scope the user names wins. When none is named, a bot edit targets the bot lorebook and a chat edit
+targets the current chat lorebook. Never turn a request to write the bot lorebook into a move to the chat
+lorebook screen. General wording about "the chat lorebook" below does not limit the schema both share.
 """
 
 
@@ -860,24 +876,24 @@ def refresh_lore_scope_once() -> None:
 LORE_AUTHORING_KEY = "skills_lore_authoring_v1"
 LORE_AUTHORING_MARKER = "<!-- risuhina-lore-authoring-v1 -->"
 LORE_AUTHORING_NOTES = {
-    "RisuAI 로어북 작성 규칙": ("risuai-lorebook-style.md", """로어북 작성·수정 시 아래 최신 지침을 따른다. 아래의 기존 자료와 충돌하면 이 지침이 우선이다.
-- 내용 헤딩은 ###, ####, [] 등으로 쓴다. ##는 상위 프롬프트용이므로 로어북에는 H3 이하를 쓴다.
-- 낮은 우선순위부터 위에서 아래로 배치되고 예산 부족 시 낮은 우선순위부터 잘린다.
-  덩어리 일부가 길이 예산 때문에 잘리는 것은 불가피한 경우 허용한다.
-- 전체 지도인 총합 로어북(예: NPC LIST)과 활성화 시 주입할 개별 상세 로어북을 나눈다.
-- @@position·@@depth·@@end 등 중요 항목의 지정 위치(예: 끝부분)는 일반 배열과 별도로 보존한다.
-  모든 @@ 데코레이터가 위치를 지정하는 것은 아니다.
-- 캐릭터·월드 이벤트·세계 설정·개인 성격 등 유사 의미가 가까운 우선순위에 모였는지,
-  그룹·개별 항목의 ###/####/[] 제목 위계가 맞는지, 전체 순서에서 바로잡을 부분이 있는지 검토한다.
-- 여러 캐릭터가 등장하는 시뮬봇의 전체 구성은 'RisuAI 시뮬봇 구조와 제작' 스킬을 참고한다.
+    "RisuAI 로어북 작성 규칙": ("risuai-lorebook-style.md", """Follow this current guidance when writing or editing lorebook entries; it wins over older material below.
+- Write content headings as ###, ####, or []. ## belongs to the outer prompt, so lorebooks use H3 and below.
+- Entries are placed top to bottom from the lowest priority, and a short budget cuts the lowest priority first.
+  Losing part of a block to the length budget is acceptable when unavoidable.
+- Split a roster entry that maps the whole cast (e.g. an NPC list) from detail entries injected on activation.
+- Keep entries pinned with @@position, @@depth, @@end, etc. at their positions, apart from the general order.
+  Not every @@ decorator sets a position.
+- Review that related meanings (characters, world events, world setting, personalities) sit in nearby
+  priority bands, that ###/####/[] headings nest correctly, and whether the overall order needs fixing.
+- For the overall layout of a multi-character bot, see the skill 'RisuAI 시뮬봇 구조와 제작'.
 """),
-    "RisuAI 로어북 구조": ("risuai-lorebook.md", """우선순위·배치의 최신 지침: 일반 로어북은 낮은 우선순위부터 위에서 아래로 배치된다.
-길이 예산 부족 시 낮은 우선순위부터 잘리며, 불가피한 덩어리 일부 절단은 허용한다.
-@@position·@@depth·@@end 등으로 위치를 정한 중요 항목은 해당 지정 위치에 들어간다.
-아래 기존 자료에 높은 insertorder가 먼저 배치된다는 설명이 있으면 이 지침을 우선한다.
+    "RisuAI 로어북 구조": ("risuai-lorebook.md", """Current placement guidance: ordinary entries are placed top to bottom from the lowest priority.
+A short budget cuts the lowest priority first; losing part of a block is acceptable when unavoidable.
+Entries positioned with @@position, @@depth, @@end, etc. go to that position.
+Where older material below says a higher insertorder is placed first, this guidance wins.
 """),
-    "RisuAI CBS 문법": ("risuai-cbs.md", """CBS 비교식에서 ::=::는 동작하지 않는다. {{#when::A::=::B}}처럼 쓰지 않는다.
-문자열 동등 비교는 {{#when::A::is::B}} 또는 {{#when::{{equal::A::B}}}}를 쓴다.
+    "RisuAI CBS 문법": ("risuai-cbs.md", """In CBS conditions ::=:: does not work; never write {{#when::A::=::B}}.
+For string equality use {{#when::A::is::B}} or {{#when::{{equal::A::B}}}}.
 """),
 }
 
@@ -905,7 +921,14 @@ def refresh_lore_authoring_once() -> None:
 
 PRESET_SCOPE_KEY = "skills_preset_scope_v1"
 PRESET_SCOPE_MARKER = "<!-- risuhina-preset-scope-v1 -->"
-PRESET_SCOPE_NOTE = '<!-- risuhina-preset-scope-v1 -->\nRisuAI는 별도의 프롬프트 제작자가 제공하는 프롬프트 프리셋에서 로어북 삽입 순서, 서술 시점, 대필 유무를 옵션으로 지정한다. 봇카드와 로어북에는 세계관·인물·사건·상태 및 봇 고유 시스템을 작성하고, 해당 서술 옵션은 프리셋 설정을 따른다. 프리셋의 제어 옵션은 제작 지식으로만 참고하고 봇카드·로어북 본문에 별도 규칙으로 기재하지 않는다.\n'
+PRESET_SCOPE_NOTE = (
+    "<!-- risuhina-preset-scope-v1 -->\n"
+    "In RisuAI the prompt preset, supplied by a separate preset author, sets the lorebook insertion order, "
+    "the narrative point of view, and whether the model may write the user's part. Bot cards and lorebooks "
+    "hold the world, characters, events, state, and the bot's own systems; those narration options follow "
+    "the preset. Treat the preset's controls as production knowledge only and do not restate them as rules "
+    "in the card or lorebook.\n"
+)
 PRESET_SCOPE_FILES = {
     "RisuAI 시뮬봇 구조와 제작": "risuai-simbot.md",
     "RisuAI 로어북 작성 규칙": "risuai-lorebook-style.md",
@@ -962,10 +985,48 @@ def refresh_studio_ops_once() -> None:
         log.warn("could not refresh the studio image-ops reference: %s", e)
 
 
+METHOD_KEY = "skills_method_en_v1"
+
+
+def _method_body(slug: str, filename: str) -> str:
+    """The English SKILL.md body of a methodology reference: a pointer, with
+    the preset note in front where the preset migration puts it."""
+    body = (f"This skill's material is in `references/{filename}`. Read the sections you need with "
+            f"read_file from `skills/{slug}/references/{filename}` (the table of contents is at the top; "
+            f"a long file ends with the offset to continue from). Do not try to memorize it whole.")
+    if filename in PRESET_SCOPE_FILES.values():
+        body = PRESET_SCOPE_NOTE + "\n" + body
+    return body
+
+
+def refresh_method_skills_once() -> None:
+    """§1-69: the methodology references were rewritten in English from the
+    reference-bot study. Replace reference, body and description on existing
+    installs unconditionally (the user's call); keep enabled and order."""
+    if db.has_migration(METHOD_KEY):
+        return
+    for filename in METHOD_FILES:
+        label, desc, _enabled = SEED_FILES[filename]
+        target = find(label)
+        if not target:
+            continue  # seed_once installs it
+        try:
+            put_file(target["slug"], f"references/{filename}", (SEED_DIR / filename).read_bytes())
+            save(target["name"], desc, _method_body(target["slug"], filename),
+                 slug=target["slug"], always=target.get("always", False))
+        except (OSError, SkillError) as e:
+            log.warn("could not refresh %s: %s", filename, e)
+    db.mark_migration(METHOD_KEY)
+
+
 def _seed_file_skill(label: str, desc: str, filename: str, data: bytes, enabled: bool, order: int) -> dict:
     script = filename.endswith(".py")
     sub = "scripts" if script else "references"
     slug = _unique_slug(label)
+    if filename in METHOD_FILES:
+        sk = save(label, desc, _method_body(slug, filename), enabled=enabled, sort_order=order)
+        put_file(sk["slug"], f"{sub}/{filename}", data)
+        return get(sk["slug"]) or {}
     body = (f"이 스킬의 {'스크립트' if script else '자료'}는 `{sub}/{filename}` 에 있다. "
             + (f"run_python 안에서 `exec(open('skills/{slug}/scripts/{filename}', encoding='utf-8').read())` 로 실행한다. "
                "먼저 read_file 로 읽어 인자와 동작을 확인해라."

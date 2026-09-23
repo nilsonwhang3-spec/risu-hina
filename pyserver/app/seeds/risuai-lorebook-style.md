@@ -1,105 +1,191 @@
-RisuAI 로어북 **작성 규칙** — 항목을 새로 쓰거나 고칠 때(propose_lore_add / propose_lore_edit / propose_lore_replace) 반드시 먼저 읽어라. 구조·필드·데코레이터의 *사양*은 스킬 "RisuAI 로어북 구조"에 있고, 이 스킬은 실제 봇(Parma Knights, 81항목)이 쓰는 **형식과 관례**다. 실리태번(SillyTavern) 식으로 쓰지 마라.
-
 <!-- risuhina-preset-scope-v1 -->
-RisuAI는 별도의 프롬프트 제작자가 제공하는 프롬프트 프리셋에서 로어북 삽입 순서, 서술 시점, 대필 유무를 옵션으로 지정한다. 봇카드와 로어북에는 세계관·인물·사건·상태 및 봇 고유 시스템을 작성하고, 해당 서술 옵션은 프리셋 설정을 따른다. 프리셋의 제어 옵션은 제작 지식으로만 참고하고 봇카드·로어북 본문에 별도 규칙으로 기재하지 않는다.
+In RisuAI the prompt preset, supplied by a separate preset author, sets the lorebook insertion order, the narrative point of view, and whether the model may write the user's part. Bot cards and lorebooks hold the world, characters, events, state, and the bot's own systems; those narration options follow the preset. Treat the preset's controls as production knowledge only and do not restate them as rules in the card or lorebook.
+
+RisuAI lorebook **authoring rules**. Read this before you write or change any entry (propose_lore_add / propose_lore_edit / propose_lore_replace). The field, decorator and placement *specification* is in 'RisuAI 로어북 구조'; this file is the **form and conventions** that work in practice. Do not write SillyTavern-style entries.
+Names, folders, tags and variables vary per bot. Read the target bot's own entries first and match them; the examples here are placeholders.
+
+Contents
+1. Scope first
+2. Shape of one entry
+3. Headings
+4. insertorder: priority bands and placement
+5. Roster entries vs detail entries
+6. Positioned entries (@@)
+7. Keys
+8. Folders and dividers
+9. Progressive reveal (spoiler stages)
+10. Sim-bot vs solo-bot layouts
+11. Do not
+12. Procedure for a new entry
+13. Structure and order review (checklist)
 
 ---
 
-## 적용 범위를 먼저 구분
+## 1. Scope first
 
-- **봇 로어북**: `scope="global"`, `botlore` 탭. 이 봇에 영구 저장되어 여러 챗에서 활용할 설정.
-- **챗 로어북**: `scope="local"`, `lore` 탭. 특정 챗의 진행 상황·사건·임시 설정에만 적용.
-- 사용자 지정 범위가 우선이다. 범위 생략 시 봇 편집에서는 봇 로어북, 챗 편집에서는 현재 챗
-  로어북을 기본으로 한다. 봇 로어북 요청 때문에 챗 로어북 화면 이동을 제안하지 않는다.
-- 기존 항목 수정은 그 항목의 범위를 유지한다. 영구 저장과 상시 발동(`alwaysActive`)을 혼동하지 않는다.
+- **Bot lorebook**: `scope="global"`, `botlore` tab. Stored in this bot's card and used in every chat with it.
+- **Chat lorebook**: `scope="local"`, `lore` tab. Only one chat's progress, events and temporary settings.
+- The user's stated scope wins. If none is stated: bot lorebook while editing the bot, the current chat's lorebook while editing a chat. Never redirect a bot-lorebook request to the chat-lorebook screen.
+- Editing an existing entry keeps its scope. Permanent storage (scope) and always-on activation (`alwaysActive`) are different things.
 
-# 1. 한 항목의 모양
+## 2. Shape of one entry
 
 ```
-comment(이름):   Clarea                                  ← 목록에 보이는 이름. 본문 제목과 같게
-key(키워드):     Clarea, 클레리아, クレリア               ← 쉼표 구분, 영/한/일 별칭을 모두
-insertorder:     1000                                   ← 우선순위 숫자 (아래 표). 반드시 정한다
-alwaysActive:    false                                  ← 상시 항목만 true (그때 key 는 비움)
-folder:          (폴더 키)                               ← 있으면 소속 폴더
-content(본문):
-### Clarea
+comment (name):  Name Surname                      ← list name; same as the body title
+key (keywords):  Name Surname, Name, Surname, <native-script name>, <title>
+insertorder:     780                               ← priority number (§4); always set it
+alwaysActive:    false                             ← true only for always-on entries (then key is empty)
+folder:          (folder key)                      ← owning folder, if any
+content:
+### Name Surname
 #### Identity
-- Clarea. Knight-Captain of the Parma Knights. Title: Shield of the Kingdom.
-- Temple Knight. 27 years old. Commoner origin.
+- Name Surname. Deputy harbor-master, 31, raised in the dockside quarter.
 #### Appearance
-- Long black hair in a braided low ponytail, side-swept bangs. Purple eyes.
+- Short copper hair, green eyes, ink-stained fingers.
 #### Speech
-- Refined speech learned at the academy. Sparing with words.
-  - Under pressure: colder, shorter.
+- Brisk and practical; swears quietly when numbers do not add up.
+  - Under pressure: very polite, which is a warning sign.
+#### Relationships
+- {{user}}: new clerk in her office; tests before trusting.
 ```
 
-규칙:
-- **로어북 내용의 제목은 `###`, `####`, `[구획 이름]` 등으로 쓴다.** `##`는 상위 프롬프트 구조에서 쓰므로 로어북 본문에는 H3 이하(`###` 이상 개수의 `#`)만 쓴다. 독립 항목은 보통 `### 제목`으로 시작하고 제목은 comment와 맞춘다. 그룹 아래에 이어지는 개별 항목은 실제 주입 구조에 맞춰 `####` 등으로 낮춘다. 위치 지정 데코레이터가 있으면 제목보다 앞에 둔다.
-- 그 아래는 **`#### 소제목` + 불릿(`- `)**. 문단 산문이 아니라 사실 단위 불릿. 인물 시트는 `#### Identity / Appearance / Speech / Behavior / Combat / Relationships / Secrets / Arc …` 처럼 소제목 10~17개짜리 긴 시트가 보통(7~13k자).
-- 세계 설정 항목은 `### 제목` 아래 `[구획 이름]` 대괄호 소구획 + 불릿 도 쓴다.
-- 언어: 봇의 본문 언어를 따른다(위 봇은 영어 본문 + 한국어 병기). 키워드는 언어를 섞어 넣는다.
-- **실리태번 헤더 금지**: `@@position personality`, `@@role system`, `@@scan_depth 12`, `@@priority 700` 같은 줄을 본문 위에 늘어놓지 마라. RisuAI 에도 `@@` 데코레이터가 있지만(사양 스킬 참고) 실제 봇은 **시스템 항목의 `@@position pt_XXX` 하나 외에는 쓰지 않는다**. 우선순위는 데코레이터가 아니라 **insertorder 필드**다.
+- Body = **fact-level bullets** under `####` subheadings, not paragraphs of prose.
+- Character sheets are often long (10-17 subheadings: Identity, Appearance, Wardrobe, Background, Personality, Speech with sample lines, Behavior, Preferences, Abilities, Relationships, Secrets, Arc). Keep **one fixed skeleton** for every sheet in a bot; the section list is in 'RisuAI 시뮬봇 구조와 제작' / 'RisuAI 일인봇 구조와 제작'.
+- World entries may use `[Bracket section]` labels with bullets under a `###` title.
+- Language: follow the bot's body language. Keys mix every language users might type. Many bots write bodies in English and add native-language terms in parentheses.
+- **No SillyTavern header block**: no `@@position personality`, `@@role system`, `@@scan_depth 12`, `@@priority 700` stacked above the body out of habit. RisuAI has `@@` decorators, but popular bots use very few: `@@depth 0` for per-turn directives and sometimes one `@@position pt_<name>`. Priority is the **insertorder field**, not a decorator.
 
-# 2. insertorder (우선순위) 표 — 반드시 숫자를 정해서 넣는다
+## 3. Headings
 
-로어북은 **우선순위가 낮은 것부터 위에서 아래로 표시·배치**되고, 길이(토큰) 예산이 부족하면 **낮은 우선순위부터 잘린다**. `insertorder`가 클수록 높은 우선순위다. 예산 때문에 덩어리의 일부가 잘리는 것은 불가피한 경우 허용하며, 모든 항목이 통째로 보존된다고 가정하지 않는다. 아래 숫자는 실제 봇의 예시이며, 작업 중인 봇의 유사 항목과 우선순위 대역을 먼저 맞춘다:
+- Use `###`, `####` and `[Section]` inside lorebook content. **`##` is reserved for the outer prompt** (the preset and card use it), so lorebook bodies use H3 and below.
+- A standalone entry starts with `### Title`, and the title matches `comment`.
+- When entries are injected together as a group and its members, lower the members' level to fit the actual injected text (`###` group → `####` member → `[sub-section]`).
+- Folders are **not** injected as headings. Do not rely on a folder name to give an entry context; each entry must name its own subject.
+- If a positioning decorator is present, it goes on the first line, before the heading.
 
-| insertorder | 무엇 | 예 |
-|---|---|---|
-| 10000 | 출력 형식 지시 (상시, `@@position pt_…`) | Tag Output |
-| 2000 | **상시 정본 목록** — 예산 내 우선 보존할 전체 지도 | NPC LIST(외형 정본), Quest State |
-| 1000 | 주요 인물 시트 · 상시 시스템(스탯·호감도) | Clarea, Sanseverina … / Stat System |
-| 980 | 아크(장) 진행 단계표 (상시) | Politics Stages, War Stages |
-| 900 | 왕족·중요 조연 | King Alfonso, Carlo |
-| 800 | 2군 인물 · 비밀 조직 | Seven Apostles, Costanza, Federico |
-| 700 | 세계관 핵심 (국가·신앙·경제·풍습·구역) | Parma Kingdom, Faith, Economy, Districts |
-| 600 | 장소 · 일과 | Knight House, Library, Cathedral, Routine |
-| 500 | 몬스터 · 보스 · 이벤트 | Bestiary, Boss …, Event System |
-| 400 | 부차 종족 | Demihumans |
-| 300 | 엑스트라 · 악역 잡졸 | Extra …, Villain … |
+## 4. insertorder: priority bands and placement
 
-새 항목은 이 표에서 **같은 종류의 이웃과 같은 값**을 준다. 인물이면 1000(주연)/900/800/300(엑스트라), 세계면 700, 장소면 600.
+How the host uses it (verified; details in 'RisuAI 로어북 구조' §6):
+- Ordinary entries are **placed top to bottom from the lowest priority**. The highest `insertorder` lands last, nearest the chat, where the model attends most.
+- When the token budget is short, **the lowest priorities are cut first**. A cut that leaves part of a block missing is acceptable when unavoidable; do not assume every entry survives whole.
+- Positioned entries (`@@depth`, `@@end`, `@@position`) go to their own position instead (§6).
 
-## 총합 로어북과 개별 로어북
+So `insertorder` is both "how important" and "how late". Popular bots use **category bands**. A typical shape, high to low:
 
-- 통상 토큰 예산이 있으므로 **전체 지도가 되는 총합 로어북 + 활성화될 때 주입되는 개별 로어북**으로 구성한다.
-- 예: `NPC LIST`에는 전체 인물의 이름·역할·핵심 관계를 간결하게 두고, 특정 NPC의 상세 성격·행동·설정은 해당 NPC의 개별 로어북에 둔다. 총합 항목에 모든 상세 내용을 중복하지 않는다.
-- `@@`가 붙은 중요 로어북은 이 봇에서 끝부분 등 지정 위치에 들어가는 구조다. 특히 `@@position`, `@@depth`, `@@end` 등 기존 위치 지정을 보존하고, 일반 우선순위 배열과 별도로 실제 삽입 위치를 확인한다. 모든 `@@`가 위치 지정을 뜻하는 것은 아니므로 구체적인 의미는 구조 스킬을 따른다.
+| Band (example numbers) | What goes there |
+|---|---|
+| highest (e.g. 900-1000+) | Output contracts, system rules, live state readouts, stage tables |
+| high (e.g. 800-900) | Always-on rosters (character list, faction list), core world rules, relationship matrix |
+| upper-middle (e.g. 700-800) | Main character sheets |
+| middle (e.g. 500-700) | Important supporting cast, factions, regions, places, routines |
+| low (e.g. 300-500) | Items, bestiary, events flavor, minor NPCs |
+| lowest (e.g. 50-300) | Extras, glossary flavor, background texture that may be cut |
 
-# 3. 키워드 (key)
+- The numbers are an example, not a standard. **Match the bands already used in the target bot**: find the neighbors of the same kind and use the same or a nearby value.
+- A new entry gets **the same value as its closest same-kind neighbor** unless it is clearly more or less important.
+- Some bots invert the logic for a few items (a world primer placed low so it reads first). That is fine if deliberate; keep it consistent.
 
-- 쉼표 구분. **영어 원어 + 한국어 + 일본어(있으면)** 별칭, 호칭·직함·별명까지: `Vittoria, 비토리아, 제1왕녀, 제1황녀, First Princess, ヴィットリア`.
-- 일반명사 항목은 동의어를 넉넉히: `money, gold, ducato, soldo, price, 돈, 금화, 물가`.
-- 부분 문자열 매칭이 기본이라 너무 짧은 키(한 글자, `왕` 단독)는 오발동한다 — 두 글자 이상 또는 문맥 단어와 함께.
-- **상시(alwaysActive) 항목은 key 를 비운다.** 상시는 정본 목록·시스템·진행 단계표에만 — 인물 시트는 상시로 두지 않는다(이름이 나올 때만).
+## 5. Roster entries vs detail entries
 
-# 4. 폴더
+- Budgets are finite, so split into **an always-on roster that maps everything** and **detail entries injected when active**.
+- Example: an always-on `NPC List` with one line per character (name, age/role, look, personality keywords, affiliation, relation), while each character's full sheet is its own keyword entry. The roster never copies whole sheets.
+- The same split works for factions (overview → group list → unit detail), places (area map → place detail) and events (calendar/arc summary → event detail).
+- The roster's core facts (role, look, affiliation) and the sheet are one canon: they must not disagree. If the roster reflects a reference date, say so and say where later changes are recorded.
+- Some bots hide a roster line while that character's full sheet is active (a variable set by Lua when the name appears recently) so a character never appears twice. Optional.
 
-- 폴더도 로어북 항목이다(`mode: "folder"`, 내용 없음). 소속은 항목의 `folder` = 폴더 항목의 `key`.
-- 실제 봇의 폴더: World Setting / Main Characters / Extra Characters / Villain Characters / Places / Story Arcs & Events / System. 새 항목은 맞는 폴더에 넣고, 없으면 폴더 추가를 먼저 제안한다.
+Roster entry example (always-on, high band, empty key):
 
-# 5. 진행형 설정 (스포일러 단계)
+```
+### Character List
+Format: - Name (age/gender, role): look; personality keywords; affiliation; relation to {{user}}
+#### Main
+- Name A (24/F, archivist): short copper hair, round glasses; dry, curious, stubborn; City Archive; {{user}}'s neighbor
+- Name B (31/M, courier): tall, scarred knuckles; cheerful, reckless; Night Couriers; owes {{user}} a favor
+#### Supporting
+- Name C (50s/F, landlady): ...
+```
 
-- 이야기 진행에 따라 드러나는 사실은 **CBS 조건**으로 감싼다: `{{#when::{{greater::{{getvar::pk_shadow}}::2}}}} … {{/when}}`. 조건은 본문 안에, 데코레이터가 아니다.
-- 아크마다 "Revelation Layers" 상시 항목(980)에 단계별로 무엇이 밝혀지는지 표를 두고, 인물 시트의 비밀 절은 그 변수로 잠근다.
+Organization chain example:
 
-# 6. 하지 말 것
+```
+### Factions (always-on, high band)          → one line per faction: goal, territory, stance
+### Faction X — Member Houses (always-on)     → one line per house
+### House Y (keyed: House Y, Y family, ...)   → detail: leaders, resources, secrets
+```
 
-- 본문 없이 이름만 있는 항목, 제목 없이 산문으로 시작하는 항목.
-- 우선순위를 비워 두기(=100). 같은 종류의 항목과 다른 값 주기.
-- 한 항목에 여러 인물/여러 주제 섞기 — 한 항목 = 한 대상. 목록은 "NPC LIST" 같은 별도 상시 항목으로.
-- 기존 항목을 통째로 다시 쓰기 — 한 줄 고칠 땐 propose_lore_replace.
-- 실리태번 데코레이터·`[System: …]` 프리픽스·JSON 덩어리.
+## 6. Positioned entries (@@)
 
-# 7. 새 항목 제안 절차
+- Important entries pinned with `@@position`, `@@depth` or `@@end` are placed at the end of the prompt or at a preset/global-note anchor, not in the ordinary order. **Preserve existing positioning** when you edit such an entry.
+- Review them apart from the general order: what sits at depth 0, what sits at each `{{position::NAME}}` anchor, and whether each `pt_NAME` still has its anchor.
+- Not every `@@` sets a position (`@@probability`, `@@activate`, `@@exclude_keys` do not). Check the meaning in 'RisuAI 로어북 구조'.
+- Keep depth 0 for short per-turn directives (output contract, current-stage text, event rolls). Long knowledge at depth 0 dilutes them.
 
-1. `list_lore` 로 폴더와 이웃 항목의 insertorder·키워드 스타일을 본다. 비슷한 항목 하나를 `read_lore_entry` 로 읽어 형식을 맞춘다.
-2. 총합·개별 로어북 중 역할을 정하고 comment(본문 제목), key(별칭 전부), insertorder(유사 항목의 대역), folder, alwaysActive 를 정한다.
-3. 본문은 그룹·개별 항목의 제목 위계에 맞춰 `###`, `####`, `[구획 이름]`과 불릿으로 쓴다. 아는 사실만 쓰고 빈 소제목은 만들지 않는다. 아래 검토 기준으로 전체 구조와 순서를 확인한다.
-4. `propose_lore_add(comment, keys, content, reason, scope, always_active, insert_order, folder)` 로 제안하고 "제안했습니다" 라고만 말한다.
+## 7. Keys
 
-# 8. 작성·수정 시 구조와 순서 검토
+- Comma-separated. **Every alias a user or the model might write**: romanized full name, given name, surname, native-script forms, titles, nicknames, transformation or code names.
+- Generic-noun entries get generous synonyms: `money, cash, price, wage, debt, bill`.
+- Matching is substring by default: one-syllable or two-letter keys misfire. Use two or more characters or a distinctive word.
+- **Always-on entries have empty keys.** Reserve always-on for rosters, core rules, current-state and stage tables, output contracts. Character sheets are keyed (they load when the name appears).
+- A parent-group key on member entries (the group name on every member) loads all members when the group is mentioned. Use only when that is wanted.
 
-1. **유사 의미의 우선순위 대역**: 캐릭터, 월드 이벤트, 월드 세팅, 개인 성격 등 의미가 유사한 항목들이 같은 값 또는 가까운 우선순위에 모여 있는지 확인한다. 중요도에 따른 차이는 유지하되, 이유 없이 떨어져 있는 항목은 조정한다.
-2. **그룹·개별 로어북의 제목 위계**: 실제로 함께 주입되는 본문을 기준으로 `###`, `####`, `[]`가 그룹·개별 항목·소구획 관계를 올바르게 나타내는지 확인한다. 폴더 자체는 본문 헤딩으로 주입되지 않는다. 총합 로어북이 전체 지도라는 이유만으로 모든 개별 항목을 그 제목 아래에 종속시키지 말고, 독립 활성화될 때도 제목과 대상이 분명한지 살핀다.
-3. **전체 순서**: 낮은 우선순위부터 높은 우선순위로 이어지는 배열, 총합·개별 항목의 관계, `@@` 중요 항목의 지정 위치를 함께 보고 바로잡을 부분을 확인한다. 일부 항목의 비활성화나 예산 절단으로 생략이 생겨도 남은 내용의 의미·소속이 최대한 분명하도록 작성한다. 예산 때문에 덩어리 일부가 잘리는 것 자체를 오류로 취급하지 않는다.
+## 8. Folders and dividers
+
+- A folder is an entry too (`mode: "folder"`, no content). Members set `folder` to the folder entry's `key`.
+- Typical folders: World, Main Characters, Supporting Characters, Antagonists, Places, Arcs & Events, System. Some bots add Custom (empty slots for the user) and Storage (inactive notes).
+- Put new entries in the matching folder. If none fits, propose the folder first.
+- Empty divider entries (`---- Section ----`) also appear in bots; they never fire. Prefer folders for new work, but keep an existing bot's convention.
+
+## 9. Progressive reveal (spoiler stages)
+
+- Facts revealed by progress are wrapped in **CBS conditions inside the body**, not decorators:
+  `{{#when::{{getvar::bot_arc_stage}}::>=::2}} ... {{/when}}`
+- A per-arc stage table (always-on, high band) lists what becomes knowable at each stage; secret sections in sheets are locked by the same variable.
+
+```
+### Reveal Layers: <arc name>
+| Stage | May be revealed | Must not leak yet | Moves on when |
+|---|---|---|---|
+| 0 | the missing shipment exists | who ordered it | {{user}} finds the ledger |
+| 1 | the order came from inside the company | the name | a named witness talks in a scene |
+| 2 | the name | — | — |
+Current stage: {{getvar::bot_arc_stage}}
+```
+
+In the sheet of the character who holds the secret:
+
+```
+#### Secrets
+{{#when::{{getvar::bot_arc_stage}}::>=::2}}- She signed the order herself, to protect her brother.{{/when}}
+```
+- Revealed does not mean everyone knows. If a secret should spread only to some characters, say who knows.
+- CBS comparison syntax is in 'RisuAI CBS 문법' (`::=::` is not a comparison).
+
+## 10. Sim-bot vs solo-bot layouts
+
+- **Sim bot** (many characters, the card is a narrator/GM): description = GM contract; lorebook = world, roster + keyword sheets, places, factions, events, system rules, state readouts; many folders and clear bands. See 'RisuAI 시뮬봇 구조와 제작'.
+- **Solo bot** (one main character): the sheet is usually in the description (or in one always-on entry when the description holds only directives); the lorebook is small: side cast with their relation to the main character, stage texts, keyword modes, a realism module, persona guide, storage. See 'RisuAI 일인봇 구조와 제작'.
+
+## 11. Do not
+
+- Entries with only a name and no body; bodies that start with prose and no heading.
+- Leaving priority unset (=100), or giving a different value than same-kind entries without a reason.
+- Mixing several characters or subjects in one entry. One entry = one subject; lists go in a separate roster entry.
+- Rewriting a whole entry to change one line. Use propose_lore_replace.
+- SillyTavern decorator stacks, `[System: …]` prefixes, JSON blobs as bodies.
+- Copying another bot's names, variables, tags or numeric bands into this bot.
+
+## 12. Procedure for a new entry
+
+1. `list_lore` to see folders and neighbors' insertorder and key style. Read one similar entry with `read_lore_entry` and match its form.
+2. Decide its role (roster or detail), then `comment` (= body title), `key` (all aliases), `insertorder` (the neighbors' band), `folder`, `alwaysActive`.
+3. Write the body with `###` / `####` / `[Section]` and bullets that fit the group/member hierarchy. Write only known facts; no empty subheadings. Check the whole structure with §13.
+4. Propose with `propose_lore_add(comment, keys, content, reason, scope, always_active, insert_order, folder)` and say only that you proposed it. For a change use `propose_lore_edit` (whole entry fields) or `propose_lore_replace` (one passage).
+
+## 13. Structure and order review (checklist)
+
+1. **Related meanings in nearby bands**: characters, personal traits, world settings, world events, system rules each sit at the same or nearby priorities. Keep deliberate importance gaps; move entries that drifted away for no reason.
+2. **Heading hierarchy**: judged on the text actually injected together, `###` / `####` / `[]` show group → entry → sub-section correctly. Folders do not inject headings. A roster being "the map" does not mean every detail entry should sit under its heading; each detail entry must stand on its own when activated alone.
+3. **Whole order**: read the full sequence from lowest to highest priority, the roster/detail relationship, and the positioned entries' actual slots. Fix what is out of place.
+4. **Cut tolerance**: if some entries are inactive or cut by the budget, the remaining text still states its subject and belongs clearly. A block partly cut by the budget is not in itself an error.
+5. **Consistency**: rosters, sheets, greetings and initial variables agree (names, looks, relations, start date).
+6. **Positioning**: every `pt_NAME` has an anchor; depth 0 holds only short per-turn directives.

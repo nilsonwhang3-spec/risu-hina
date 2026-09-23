@@ -2530,11 +2530,15 @@ def build() -> Agent[Deps]:
             return str(e)
 
     @agent.tool
-    def read_file(ctx: RunContext[Deps], path: str) -> str:
-        """Read a file from the global space (or system/). Reference material is usually under projects/<bot>/."""
+    def read_file(ctx: RunContext[Deps], path: str, offset: int = 0, limit: int = 40000) -> str:
+        """Read a file from the global space (or system/). Reference material is usually under projects/<bot>/.
+
+        Returns up to `limit` characters (max 40000) from character `offset`. A longer file ends
+        with the offset to continue from - read on when the part you need is further down.
+        """
         try:
             scope, rel = _fs(ctx, path)
-            return files.agent_read(scope, rel)
+            return files.agent_read(scope, rel, offset, limit)
         except files.FileError as e:
             return str(e)
 
