@@ -1,6 +1,6 @@
-# 06. Implementation status — as of 2026-09-23 (v0.15.23, Risu Hina)
+# 06. Implementation status — as of 2026-09-23 (v0.15.24, Risu Hina)
 
-## Unreleased (2026-09-23): §1-71 source-check skill · old names removed · README rewritten
+## 0.15.24 (2026-09-23): §1-71 source-check skill · old names removed · README rewritten
 
 - **`RisuAI 소스 대조 검증`** (`risuai-source-check.md` + `scripts/risu_sources.py`,
   seed v11). For verification only: `fetch_sources('risuai'|'pocketrisu')`
