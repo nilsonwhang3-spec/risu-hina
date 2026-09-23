@@ -167,14 +167,14 @@ Regex mechanics (flags, `ableFlag`, ordering, CBS in OUT) are in 'RisuAI 정규�
 
 ### 4.1 The eraser expression
 ```
-{{#if {{greater_equal::{{chat_index}}::{{? {{lastmessageid}}-2}}}}}}$&{{/if}}
+{{#when::{{greater_equal::{{chat_index}}::{{? {{lastmessageid}}-2}}}}}}$&{{/when}}
 ```
 - `{{chat_index}}` is the index of the message being processed; `{{lastmessageid}}` is the last message's index. `{{? expr}}` takes a **space**, not `::`.
 - Meaning: the block survives only in the last 3 messages; older ones become empty. Adjust with `-2`.
   - In editdisplay, old panels disappear from the screen.
   - In editprocess, old panels leave the request, while the latest 1-2 turns stay so the model can read and update them.
 - To keep only the last one, use `{{equal::{{chat_index}}::{{lastmessageid}}}}`.
-- `{{#if}}` is deprecated but works; `{{#when::{{greater_equal::…}}}}$&{{/when}}` also works. Do not put an expression into the first argument of `vis`.
+- Older bots write `{{#if {{greater_equal::…}}}}$&{{/if}}`; it still works but is deprecated and strips each line's indentation. Do not put an expression into the first argument of `vis`.
 
 ### 4.2 Order: eraser → wrapper → container → fields → sub-items
 ```
@@ -200,7 +200,7 @@ editprocess runs **before** Lua `editRequest`. If Lua must read panels in histor
 **Partial blanking** is the middle way: keep the continuity fields of every old panel and blank the rest:
 ```
 in:  (\[Date: [^|]*\| Time: [^|]*\| Location: [^|]*)([^\]]*)(\])
-out: $1{{#if {{greater_equal::{{chat_index}}::{{? {{lastmessageid}}-5}}}}}}$2{{/if}}$3
+out: $1{{#when::{{greater_equal::{{chat_index}}::{{? {{lastmessageid}}-5}}}}}}$2{{/when}}$3
 ```
 The chronology stays readable while inventory and stat bulk leave the request.
 
@@ -209,7 +209,7 @@ RisuAI swallows Lua editOutput errors silently and saves the original text. If L
 ```
 === backend watchdog ===   editdisplay
 in:  </bot-panel>(?![\s\S]*<bot-uid>)
-out: </bot-panel>{{#if {{greater_equal::{{chat_index}}::1}}}}{{#if {{equal::{{chat_index}}::{{lastmessageid}}}}}}<div class="bot-dead-warn">⚠ System script not running: this turn's state changes were not recorded. Restart RisuAI and it will recover next turn.</div>{{/if}}{{/if}}
+out: </bot-panel>{{#when::{{chat_index}}::>=::1}}{{#when::{{chat_index}}::is::{{lastmessageid}}}}<div class="bot-dead-warn">⚠ System script not running: this turn's state changes were not recorded. Restart RisuAI and it will recover next turn.</div>{{/when}}{{/when}}
 ```
 Hide the marker with a separate rule. On the next turn, backfill the values of turns without a marker. This catches **Lua failure**, not **the model omitting the block**; for that, rely on the instruction (§2) and placement (§3).
 
@@ -237,12 +237,12 @@ Hide the marker with a separate rule. On the next turn, backfill the values of t
 ## 5. Producers, Lua and derived state
 
 ### 5.1 Optional Lua jobs
-1. **Parse into variables**: in `editOutput` (or `onOutput`), read the tags, store chat vars, and feed them back next turn with `{{getvar::}}` or an editRequest insertion.
+1. **Parse into variables**: preferably in `onOutput` (runs once per reply, after saving); `editOutput` also works but re-runs on every streamed chunk, so it must only set absolute values, never add deltas. Read the tags, store chat vars, and feed them back next turn with `{{getvar::}}` or an editRequest insertion.
    - To avoid catching tags mentioned inside CoT/thinking: exclude thought ranges, take only the **last valid block**, and skip content that is too short (just a mention).
    - Replacing `<`, `>`, `[`, `]` inside thoughts with HTML entities in editDisplay stops the following **regexes** from catching tags there too. Lua edit hooks run before the same stage's regexes. The regex alternative is a lookahead strip in editoutput ('RisuAI 정규식 작성법' §5.3).
    - Accept notation variants (case, spaces).
 2. **Correct values the model wrote**: values computed from others (level, EXP needed, max HP) are recomputed by Lua and overwritten. Tell the model "do not calculate; copy the previous value; the system fixes it". A header whitelist (split on `|`, map each key to a canonical key, drop unknown and duplicate keys, keep the original if nothing survives) protects against invented fields. Protect commas that carry meaning (inside lists) with a placeholder before collapsing digit grouping, then restore them.
-3. **Reroll- and delete-safe storage**: cumulative variables drift because a reroll rolls chat vars back. Put a marker (`<bot-uid>N</bot-uid>`) into the saved message and keep absolute values in per-uid snapshots (`backup[uid]`). When a reroll changes the body, that uid's snapshot is naturally discarded. After delete-then-reroll, the counter goes back and editOutput runs on a body that already has a uid, so remove the old uid first and attach a new one. Wrap the whole editOutput in `pcall` and report failures with `alertError`. Other schemes are in 'RisuAI Lua 트리거'.
+3. **Reroll- and delete-safe storage**: cumulative variables drift because chat vars are **not** rolled back on reroll, edit or delete, so each reroll applies its deltas again. Put a marker (`<bot-uid>N</bot-uid>`) into the saved message and keep absolute values in per-uid snapshots (`backup[uid]`). When a reroll changes the body, that uid's snapshot is naturally discarded. After delete-then-reroll, the counter goes back and editOutput runs on a body that already has a uid, so remove the old uid first and attach a new one. Wrap the whole editOutput in `pcall` and report failures with `alertError`. Other schemes are in 'RisuAI Lua 트리거'.
 4. **editdisplay cache**: RisuAI's script cache key does not include chat vars. If display `out` uses `{{getvar}}` or `{{#when::var}}`, a change in the variable alone may not update the screen. Append a `<!--bot:value-->` comment at the end of Lua editDisplay to bust the cache.
 
 ### 5.2 The two-producer switch
@@ -251,7 +251,7 @@ The panel can come from the main model or from a second LLM call. Several bots l
 - **Aux extraction**: the instruction entry is gated off, and the opposite line "Do not output the status panel" is gated on. Lua `onOutput` builds a strict "data extraction bot; output ONLY this line" prompt with the format, the current values and the last N messages within a token budget. It calls `axLLM` (or `LLM` for main-model mode), cleans the reply (code fences, `<think>` blocks, repeated characters), validates it, and appends it to the saved message with `setChat`. The display regexes work unchanged.
 - **Cleanup flipped by the same variable**: an editoutput rule deletes any block the main model writes anyway, active only in aux mode. Gate its IN with CBS and the `<cbs>` flag:
   ```
-  in:   {{#if {{equal::{{getvar::bot_status_producer}}::aux}}}}<bot-panel>[\s\S]*?<\/bot-panel>{{/if}}
+  in:   {{#when::bot_status_producer::vis::aux}}<bot-panel>[\s\S]*?<\/bot-panel>{{/when}}
   out:  (empty)
   flag: g<cbs>          ableFlag: true
   ```
@@ -269,7 +269,7 @@ in:  <bot-outfit>(uniform|casual|sleepwear)<\/bot-outfit>
 out: {{setvar::bot_outfit::$1}}         (plus an editdisplay rule that hides the tag)
 display: <img="Name_(.*?)"> → {{raw::{{getvar::bot_outfit}}_$1.webp}}
 ```
-There are fewer tokens and fewer naming mistakes. Set a default in `defaultVariables`. See 'RisuAI 에셋 출력식'.
+There are fewer tokens and fewer naming mistakes. Set a default in `defaultVariables`. The stored `{{setvar}}` runs once the reply is finished and is then removed from the saved text, so the tag is gone from history; because the display rule reads the variable, old messages also show the *current* outfit (fill the outfit in editoutput instead if old images must stay). See 'RisuAI 에셋 출력식'.
 
 ### 5.5 A separate affinity-delta line
 Relationship changes are better as their own line than as a panel field:

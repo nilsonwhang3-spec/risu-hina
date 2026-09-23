@@ -80,7 +80,7 @@ The chat screen catches clicks on the nearest element with `risu-trigger` or `ri
 
 | Style | Calls | Payload | Typical use |
 |---|---|---|---|
-| `risu-trigger="name"` on any element | the manual trigger `name`: a V2/block trigger named `name`, or for a Lua script the **global function `name(triggerId)`** | none | simple one-line setters, V2-trigger bots |
+| `risu-trigger="name"` on any element | the manual trigger `name`: in a Lua script the **global function `name(triggerId)`** (legacy bots: a deprecated V1/V2 trigger named `name`; port it to Lua, do not add new ones) | none | simple one-line setters |
 | `{{button::label::name}}` (CBS) | the same; it renders `<button class="button-default" risu-trigger="name">label</button>` | none | quick buttons in regex or greeting HTML |
 | `risu-btn="payload"` on any element | `onButtonClick(triggerId, payload)` | the string | parameterized actions, option panels |
 
@@ -152,9 +152,9 @@ Prefer `risu-btn` with a payload when you control the HTML.
 ### 2.4 The open flag and the "closed by default" policy
 Variables such as `drawer_open`/`drawer_tab` are not "the truth about whether the drawer is open". When the user closes it with ✕ or the backdrop, only CSS changes and the variable stays as it was. These variables are **short-lived flags that decide which checkbox is redrawn as `checked` in the single re-render right after an option click**. Reset them to closed, unconditionally, in four places:
 1. On entry to `onButtonClick`.
-2. In `onStart`, so a reopened session does not show the drawer open.
+2. In `onStart`, so every send (including reroll and continue) starts closed. No hook runs when a chat is merely reopened; that is why the default must also be closed in `defaultVariables`.
 3. In `listenEdit('editInput')`, so every new generation starts closed.
-4. In `listenEdit('editOutput')`, because on reroll RisuAI's chat-var rollback restores an old snapshot's open value, and an empty-input send skips editInput.
+4. In `listenEdit('editOutput')`, because a reroll, a continue or an empty-input send skips editInput (chat vars are never rolled back on reroll, so a stale open value survives otherwise).
 
 Without these resets you get a "ghost-open drawer": an open value left by an option handler opens the drawer on its own during any later programmatic reload (an async aux-model pass and so on).
 
@@ -213,7 +213,7 @@ local function build_drawer_html(gv)
     b[#b + 1] = '<input type="checkbox" id="bot-tab-x" style="display:none"'
         .. (gv("drawer_tab") == "2" and " checked>\n" or ">\n")
     b[#b + 1] = '<input type="checkbox" id="bot-busy" style="display:none">\n'
-    -- launcher. Wrap buttons to hide on the greeting in {{#if {{greater_equal::{{lastmessageid}}::1}}}}
+    -- launcher. Wrap buttons to hide on the greeting in {{#when::{{lastmessageid}}::>=::1}}…{{/when}}
     b[#b + 1] = '<div class="bot-gear-bar"><label class="bot-gear-btn" for="bot-drawer-x">⚙</label></div>\n'
     -- drawer body: backdrop, close and tabs are all <label for> (no risu-btn = no Lua call)
     b[#b + 1] = '<div class="bot-drawer">\n<label class="bot-drawer-backdrop" for="bot-drawer-x"></label>\n<div class="bot-drawer-panel">'
@@ -236,9 +236,9 @@ end
 
 local function build_ui_html(id)
     local gv = ui_reader(id)
-    return "\n{{#if {{equal::{{chat_index}}::{{lastmessageid}}}}}}\n"   -- tip-only gate (final authority)
+    return "\n{{#when::{{chat_index}}::is::{{lastmessageid}}}}\n"   -- tip-only gate (final authority; older bots: {{#if {{equal::…}}}}…{{/if}})
         .. build_drawer_html(gv)
-        .. "\n{{/if}}"
+        .. "\n{{/when}}"
 end
 ```
 Each option row usually has the same shape: a title (icon, label, current value), a one-line description, and two or three buttons, with the active one marked. Keep that shape in one helper.
@@ -263,9 +263,9 @@ end)
 - Three layers of defense: no anchor means no build; `meta.index` returns early for old messages; the CBS tip gate inside the block is the final authority. If `meta` has an unexpected shape, nothing is drawn wrongly; one build is wasted.
 - Use a tag the AI writes every turn (the status panel and so on) as the anchor. If there is none, append an empty anchor tag at the end of the text in Lua editDisplay and use that.
 - Inserting **before** the anchor keeps the drawer from being swallowed by the regex that later wraps the anchor block (`<bot-panel>([\s\S]*?)</bot-panel>`).
-- Lua editDisplay runs before the regex scripts, and its output is CBS-parsed, so `{{raw::}}` and `{{#if}}` inside Lua strings work.
+- Lua editDisplay runs before the regex scripts, and its output is CBS-parsed, so `{{raw::}}` and `{{#when}}` (or legacy `{{#if}}`) inside Lua strings work. Setters (`{{setvar}}`) there do not run and would print as text.
 - editDisplay listeners run in registration order. Register other listeners that scan the text (CoT escaping and so on) first, so they do not scan the injected block.
-- Inside editDisplay only `setChatVar` and alerts work; `setChat`/`reloadDisplay` are silently ignored. The builder only reads (`getChatVar`, `getChatLength`).
+- Inside editDisplay only `setChatVar` (and `setState`) works; alerts, `setChat` and `reloadDisplay` are silently ignored. The builder only reads (`getChatVar`, `getChatLength`).
 
 ### 3.4 When a regex+CBS panel must stay
 The older structure without Lua (`{{#when::panel_open::vis::1}}…{{/when}}` in a regex `out:` plus `reloadDisplay` on every open and close) cannot animate closing and re-parses CBS in every message. RisuAI's script cache key does not include chat vars either, so an old screen can remain when only a variable changed. For such panels, append a cache-buster comment such as `text .. "<!--bot:" .. getChatVar(id,"X") .. "-->"` at the end of Lua editDisplay. The Lua builder does not need it, because variable values are baked into the HTML and change the output string.
@@ -377,23 +377,26 @@ drawer_tab=1
 bot_asset_aux=0
 bot_show_label=1
 ```
-RisuAI applies these **only to new chats**. Backfill existing chats in `onStart`:
+In current RisuAI these are **read-time fallbacks**: `getChatVar`/`{{getvar}}` return the default whenever the chat has no
+value for the key, in old and new chats alike (they are not copied into the chat). Explicit backfill is only needed when a
+key was added after chats already stored another value, or for hosts that behave differently:
 ```lua
+local function unset(v) return v == nil or v == "" or v == "null" end
 function onStart(id)
     setChatVar(id, "drawer_open", "0"); setChatVar(id, "drawer_tab", "1")
-    if not getChatVar(id, "bot_asset_aux") then setChatVar(id, "bot_asset_aux", "0") end
-    if not getChatVar(id, "bot_show_label") then setChatVar(id, "bot_show_label", "1") end
+    if unset(getChatVar(id, "bot_asset_aux")) then setChatVar(id, "bot_asset_aux", "0") end
+    if unset(getChatVar(id, "bot_show_label")) then setChatVar(id, "bot_show_label", "1") end
 end
 ```
-Alternatives: `{{setdefaultvar::name::value}}` in an always-active entry (declarative), or Lua creating values lazily. With **empty** defaults, every reader must treat "unset" as the default, and rendering code must never initialize a variable (it would overwrite a user's choice).
+Alternatives: the card's `defaultVariables`, or Lua creating values lazily. (Older bots put `{{setdefaultvar::name::value}}` in an always-active lorebook entry; setters never run in lorebook text, so that tag only reaches the model as literal text. Do not copy it.) With **empty** defaults, every reader must treat "unset" as the default, and rendering code must never initialize a variable (it would overwrite a user's choice).
 
 Naming conventions:
 - **UI open flags**: lowercase, `"0"/"1"` strings; tabs `"1"/"2"`.
 - **User options**: the bot prefix, or a name shared across bots when the meaning is the same.
-- **Derived, display-only variables**: `_ui`/`_html` suffixes. Lua computes them; regex and CBS only read them with `{{getvar::}}`. Prebuilt HTML in a chat var (a calendar grid, a roster) is printed by a thin regex, and `{{button}}` inside it stays live.
+- **Derived, display-only variables**: `_ui`/`_html` suffixes. Lua computes them; regex and CBS only read them with `{{getvar::}}`. Prebuilt HTML in a chat var (a calendar grid, a roster) is printed by a thin regex, and raw `risu-btn`/`risu-trigger` buttons inside it stay live. Store rendered `<button risu-trigger="…">` HTML rather than a `{{button}}` tag: a value printed by `{{getvar}}` is not re-parsed in the same CBS pass.
 - **Inverted flags**: name them negatively so the default is 0 (`feature_off=0` means on). They stay safe if defaultVariables is missing.
 
-Value conventions: every chat var is a string. An unset value may come back as `nil`, `""` or `"null"` depending on the host version, so test emptiness with `v == nil or v == ""` and numbers with `tonumber(v) or 0`. The first argument of CBS `vis`/`visnot` is a variable **name**: `{{#when::bot_asset_aux::vis::1}}` is right and `{{#when::{{getvar::bot_asset_aux}}::vis::1}}` is wrong. Only write a variable when it changed (`if getChatVar(id,k) ~= v then setChatVar(id,k,v) end`) to avoid needless re-renders.
+Value conventions: every chat var is a string. An unset value without a default comes back as the string `"null"` from `getChatVar` (older notes also saw `nil` or `""`), so test emptiness with `v == nil or v == "" or v == "null"` and numbers with `tonumber(v) or 0`. The first argument of CBS `vis`/`visnot` is a variable **name**: `{{#when::bot_asset_aux::vis::1}}` is right and `{{#when::{{getvar::bot_asset_aux}}::vis::1}}` is wrong. Only write a variable when it changed (`if getChatVar(id,k) ~= v then setChatVar(id,k,v) end`) to avoid needless re-renders.
 
 ### 5.3 Invalid combinations: explain which toggle to flip
 When a choice needs an option that is off (an expansion scenario while the expansion flag is 0, an NSFW-only scenario while NSFW is off), route the button to an error handler instead of starting:
@@ -435,7 +438,7 @@ There is no round-trip per toggle, and the radios need no persistence because th
 ### 6.3 Manual values, backup and restore
 - `alertInput(id, msg):await()`, `alertSelect(id, {…}):await()` and `alertConfirm(id, msg):await()` set values by hand: an affinity score, a start date (validate with a pattern such as `^%d%d%d%d%.%d%d%.%d%d$`), a date jump, a custom quest. They require `async` handlers. Clamp and validate before writing.
 - **Backup/restore**: `bot_backup` JSON-encodes all option and state variables and shows them in `alertNormal` for copy-paste. `bot_restore` reads them with `alertInput`, then `json.decode` in `pcall`, then `alertConfirm`, then writes the variables and rebuilds any cached HTML.
-- Slash commands for power users: `listenEdit('editInput')` parses `/setaff name +5`, applies it, calls `stopChat`, and returns `""` so nothing is sent.
+- Slash commands for power users: `onStart` reads the last user message, parses `/setaff name +5`, applies it, removes that message with `removeChat(id, -1)` and returns `false` so nothing is sent (only `onStart` can cancel a send; editInput cannot). Avoid names of RisuAI's built-in commands. Details: 'RisuAI Lua 트리거' §14.
 
 ### 6.4 i18n
 Keep UI strings in a Lua table and one lookup function, so every label, alert and prebuilt HTML follows one variable:
@@ -470,7 +473,7 @@ In regex or greeting HTML, use `{{#when::bot_ui_lang::vis::ko}}…{{:else}}…{{
 
 ### 8.1 Migrating a regex-based panel to the Lua builder
 1. Move the drawer HTML from the regex `out:` into Lua `build_drawer_html(gv)`. `{{#when::X::vis::1}}…{{/when}}` becomes `if gv("X")=="1" then … end`. Only `{{raw::}}` stays as CBS.
-2. In `listenEdit('editDisplay', function(id, text, meta) … end)`, find the anchor and insert with `text:sub`. Return early for old messages via `meta.index`/`getChatLength`, and wrap the block in `{{#if {{equal::{{chat_index}}::{{lastmessageid}}}}}}`.
+2. In `listenEdit('editDisplay', function(id, text, meta) … end)`, find the anchor and insert with `text:sub`. Return early for old messages via `meta.index`/`getChatLength`, and wrap the block in `{{#when::{{chat_index}}::is::{{lastmessageid}}}}…{{/when}}` (older bots: `{{#if {{equal::…}}}}…{{/if}}`).
 3. Replace open/close/tabs with hidden checkboxes + `<label for>`, and rewrite the CSS as `#id:checked ~ .panel .x`. The checkboxes are **preceding siblings** of the panel container, one element **per line**.
 4. Remove the open/close branches from `onButtonClick`. Option branches only do `setChatVar` + `restore_drawer(id)`, without `reloadDisplay`, except for variables read by old messages' regexes.
 5. Reset the open flags on `onButtonClick` entry, `onStart`, `editInput` and `editOutput`.

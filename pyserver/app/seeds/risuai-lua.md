@@ -7,7 +7,9 @@ bot scripts, which the user runs in RisuAI.
 > is a placeholder. Read the target bot's actual script and names first and follow them.
 
 Contents
-- Part A: API reference (verified against RisuAI source `src/ts/process/scriptings.ts`, 2026-08)
+- Part A: API reference (verified against RisuAI origin/main `src/ts/process/scriptings.ts`, `triggers.ts`,
+  `index.svelte.ts`, `DefaultChatScreen.svelte`, `Chat.svelte`, 2026-09)
+  0. Lua only: V1/V2 triggers are deprecated
   1. Delivery and engine
   2. Hooks, timing and return values
   3. Access tiers
@@ -41,33 +43,70 @@ Related skills: 'RisuAI 처리 순서 (정규식·Lua 훅)' (exact order of rege
 
 # Part A: API reference
 
+## 0. Lua only: V1/V2 triggers are deprecated
+
+The trigger editor offers three kinds: **V1** (condition/effect list; the editor shows "Trigger V1 is deprecated. It might
+be removed in the future."), **V2** (visual block editor, `effect[0].type == "v2Header"`; its "Deprecated" effect category
+is hidden unless `showDeprecatedTriggerV2` is on) and **Lua** (`effect[0].type == "triggerlua"`). Treat V1 and V2 as
+deprecated: **write new logic only in Lua**, and never recommend adding V1/V2 triggers. Switching kinds in the editor
+replaces the whole trigger list (it asks first).
+
+**Reading and porting legacy triggers.** Old bots may carry a V1/V2 list in `triggerscript` (each item `{comment, type,
+conditions, effect[]}`; `type` is `start`/`input`/`output`/`display`/`request`/`manual`; `comment` is the name that
+`risu-trigger`/`{{button}}` calls). Port item by item:
+| Legacy | Lua |
+|---|---|
+| `type: start` / `input` / `output` item | body of `onStart` / `onInput` / `onOutput` (see §2 for exact timing) |
+| `type: manual`, comment `name` | global `function name(id) … end` (same name, so existing `risu-trigger` buttons keep working) |
+| `type: display` / `request` item (`v2GetDisplayState`, `v2SetRequestState` …) | `listenEdit('editDisplay', …)` / `listenEdit('editRequest', …)` |
+| `v2SetVar` (`=`, `+=`, `-=` …), `setvar` | `setChatVar(id, k, tostring((tonumber(getChatVar(id, k)) or 0) + n))` |
+| `v2If` / `v2IfAdvanced` / `v2Else` / `v2EndIndent`, loops | plain Lua `if`/`for`; indent-scoped local vars become `local` |
+| `v2ExtractRegex`, `v2RegexTest` | `string.match` / `gsub` (Lua patterns, not JS regex: port the pattern) |
+| `v2GetLastMessage`, `v2GetMessageAtIndex`, `v2ModifyChat`, `v2CutChat` … | `getChat` / `setChat` / `cutChat` |
+| `v2RunLLM` / `runLLM` | `LLM` (main) or `axLLM` (aux model) inside an `async` hook |
+| `v2*Lorebook*` effects | `getLoreBooks` / `upsertLocalLoreBook`, or better CBS-gated constant entries (§21) |
+| `v2UpdateGUI`, `v2RunTrigger` | `reloadDisplay(id)`; call the Lua function directly |
+| `v2StopTrigger` | `return` |
+| `v2StopPromptSending` / `stop` | `stopChat(id)` or `return false` (only effective in `onStart`, §2) |
+| `v2SystemPrompt`, `v2SetAuthorNote`, `v2SetReplaceGlobalNote`, `v2SendAIprompt`, `v2Impersonate` | no Lua function: inject text with `listenEdit('editRequest')` or a chat var printed by a lorebook entry |
+Keep variable names identical so CBS, regex and panels still work, remove the old list in the same edit (a card holds one
+kind), and re-test every button.
+
 ## 1. Delivery and engine
 
-- RisuAI runs Lua 5.4 in a wasmoon VM. Code lives in the card's trigger script (`triggerlua` effect) or in a module.
+- RisuAI runs Lua 5.4 in a wasmoon VM. Structure: `triggerscript = [{ comment = "", type = "start", conditions = {},
+  effect = {{ type = "triggerlua", code = "<Lua source>" }} }]` (one item; what the editor's Lua button creates). A
+  `triggerlua` item runs in **every** mode regardless of its `type`. Modules carry their own trigger list the same way;
+  card and module Lua scripts all run, card first.
 - **Packaging**: in .charx packaging, Lua triggers and regex scripts go into `module.risum`. On charx import,
   `module.risum` overwrites card.json's `triggerscript`/`customScripts`, so edit the module copy (a charx encode step
   builds it from `triggers.lua` and `regex.json`).
-- **One engine per mode.** Engines are cached per mode key (`start`, `output`, `input`, `editDisplay`, `editOutput`,
-  `editInput`, `editRequest`, `onButtonClick`, and each manual trigger name). Globals persist between calls *of the same
-  mode* until the source changes, but are **not shared between modes**. Share data through chat vars / state, never through
-  Lua globals. Calls of the same mode are serialized.
+- **One engine per mode.** Engines are cached per mode key only (`start`, `output`, `input`, `editDisplay`, `editOutput`,
+  `editInput`, `editRequest`, `onButtonClick`, and each manual trigger name). An engine is rebuilt (top-level code runs
+  again, globals reset) whenever the code it last ran differs. So globals persist between calls *of the same mode* only
+  while one Lua script is in play: with a card script **and** a module script (or two modules), they alternate in the same
+  engine and it is rebuilt on every call. Globals are **never shared between modes**. Share data through chat vars / state,
+  never through Lua globals. Calls of the same mode are serialized. (A per-script engine cache was added in 2026-05 and
+  reverted on 2026-07-30; do not rely on either behavior.)
 - A wrapper (~150 lines) is prepended: `json` (global), `getChat`, `getFullChat`, `getRecentChats`, `setFullChat`, `log`,
   `getLoreBooks`, `loadLoreBooks`, `LLM`, `axLLM`, `getCharacterImage`, `getPersonaImage`, `listenEdit`, `getState`,
   `setState`, `setStateChanged`, `async`, `callListenMain`. Do not redefine these names. Traceback line numbers are offset.
-- **Errors are silent.** Edit hooks return the original content on error; nothing shows in the chat. Use `log(value)`
-  (browser console, JSON-encoded) while developing, and store errors in a chat var in production (§7).
-- No `os`, `io`, `package`. The host functions below are the only I/O.
+- **Errors are silent.** Hook errors go to the browser console only; edit hooks then return the original content; nothing
+  shows in the chat. Use `log(value)` (console, JSON-encoded) while developing, and store errors in a chat var in
+  production (§7).
+- wasmoon opens the standard libraries (`string`, `table`, `math`, `utf8`, `coroutine`, `os.time`/`os.date`); `require`
+  and `io` only reach the VM's in-memory files (the bundled `json.lua`). The host functions below are the only real I/O.
 
 ## 2. Hooks, timing and return values
 
 | Mode / trigger | Lua entry point | When |
 |---|---|---|
-| `start` | `onStart(id)` | at the start of **every send** (before the prompt is built), not once per chat, and not when a chat is merely opened |
-| `input` | `onInput(id)` | after the user message is appended, before the model call |
-| `output` | `onOutput(id)` | after the reply is appended and saved |
-| button `risu-btn="data"` | `onButtonClick(id, data)` | on click |
-| manual trigger / `risu-trigger="name"` / `{{button::Label::name}}` | global function `name(id)` | on click |
-| `display`, `request` | V2 trigger modes (triggerMode list: start, input, output, display, request, manual) | |
+| `start` | `onStart(id)` | on **every send** (new message, reroll, continue, auto-continue), not once per chat and not when a chat is opened. It runs **after** the description, persona, author's note and main prompt were CBS-parsed and the lorebook was matched (non-depth entries parsed too), and before the history is processed (editprocess), depth-inserted entries are parsed, and editRequest. A var set here affects those later parts this send; the earlier ones only from the next send |
+| `input` | `onInput(id)` | when the user sends non-empty text (single-character chats only), **before** the user message is appended: `getChat(id, -1)` is still the previous message. Then editInput runs on the text. Not run on reroll, continue or an empty send |
+| `output` | `onOutput(id)` | after the reply is saved (after editoutput and the CBS variable pass over the chat), before the send finishes. Also after rerolls |
+| button `risu-btn="data"` | `onButtonClick(id, data)` | on click (not in group chats) |
+| manual trigger / `risu-trigger="name"` / `{{button::Label::name}}` / slash command `/trigger name` | global function `name(id)` | on click / command; each name gets its own engine |
+| `display`, `request` | none: V2-only trigger modes; Lua does not run there. Use `listenEdit('editDisplay' / 'editRequest')` | |
 | edit hooks | `listenEdit(type, fn)` callbacks | see below |
 
 ```lua
@@ -77,14 +116,20 @@ listenEdit('editDisplay', function(id, text, meta) return text end)      -- ever
 listenEdit('editRequest', function(id, messages, meta) return messages end) -- outgoing {role, content}[]; not saved
 ```
 
-- Every callback receives `(id, value, meta)`. For editInput/editOutput/editDisplay, `meta` is `{ index = message index }`.
-  For editRequest `meta` is nil. Older notes said "editOutput takes 2 params; a third causes silent failure": the real
-  cause is indexing a nil `meta`. Declaring the parameter is harmless; guard `meta and meta.index`.
+- Every callback receives `(id, value, meta)`. For editOutput/editDisplay, `meta` is `{ index = message index }`; for
+  editInput the index is `-1` (the message does not exist yet); for editDisplay of the background HTML it is `-1`. For
+  editRequest `meta` is an empty table, so `meta.index` is nil. Older notes said "editOutput takes 2 params; a third
+  causes silent failure": that is false. Declaring the parameter is harmless; guard `meta and meta.index`.
 - Callbacks of one type run in registration order; each receives the previous return value. **Always return the value**
   (a nil return breaks the chain).
-- Wrap a callback in `async(...)` if it calls `:await()`.
-- `onInput`/`onOutput`/`onStart`: return literal `false` to stop sending; other return values are ignored. They cannot
-  replace text by returning it; use `setChat`.
+- **Do not wrap listenEdit callbacks in `async(...)`**: `callListenMain` already runs them inside a coroutine, so
+  `:await()` works in a plain callback, while an `async` callback returns a Promise that breaks the chain. Wrap the
+  `onStart`/`onInput`/`onOutput`/`onButtonClick`/manual functions in `async(...)` when they `:await()` (they are called
+  directly, outside any coroutine).
+- editOutput can run many times per reply: on every streamed chunk (unless the user's streaming performance mode defers
+  post-processing to the end), and again for continue. Keep it idempotent; count or add things in `onOutput`.
+- Stopping the send: `return false` or `stopChat(id)` works **only in `onStart`** (checked right after it). In `onInput`,
+  `onOutput`, buttons and edit hooks both are ignored. Return values of the plain hooks cannot replace text; use `setChat`.
 - Lua edit hooks run before the regex scripts of the same stage; editprocess has no Lua hook (editRequest is the closest).
   Full order: 'RisuAI 처리 순서 (정규식·Lua 훅)'.
 - `onStart` is optional. If defaults matter before the first send (greeting render, option panel), put them in the card's
@@ -95,10 +140,10 @@ listenEdit('editRequest', function(id, messages, meta) return messages end) -- o
 
 | Tier | Granted | Unlocks |
 |---|---|---|
-| Open | always | reads: chat, vars, names, persona, first message, images, `cbs`, `hash`, `log` |
-| Safe | every mode except editDisplay | writes: `setChat`, `addChat`, `insertChat`, `removeChat`, `cutChat`, `setChatRole`, `setFullChat`, `setChatVar`, `stopChat`, `setName`, `setDescription`, `setCharacterFirstMessage`, `setBackgroundEmbedding`, `upsertLocalLoreBook`, `getLoreBooks`, `reloadDisplay`, `reloadChat`, alerts, `getTokens`, `sleep` |
-| EditDisplay | editDisplay only | `setChatVar` and alerts; other writes no-op |
-| LowLevel | card `lowLevelAccess: true` (user confirms on import) | `LLM`, `axLLM`, `simpleLLM`, `request`, `similarity`, `generateImage`, `loadLoreBooks` |
+| Open | always | reads: `getChat*`, `getChatLength`, `getRecentChats`, `getFullChat`, `getChatVar`, `getState`, `getGlobalVar`, `getName`, `getCharacterFirstMessage`, `getPersonaName`/`Description`, `getAuthorsNote`, `getLoreBooks`, `getCharacterImage`/`getPersonaImage`, `getCharacterLastMessage`, `getUserLastMessage`, `cbs`, `hash`, `log` |
+| Safe | every mode except editDisplay | writes: `setChat`, `addChat`, `insertChat`, `removeChat`, `cutChat`, `setChatRole`, `setFullChat`, `setChatVar`, `setChatVarChanged`, `setState`, `stopChat`, `setName`, `setDescription`, `setCharacterFirstMessage`, `setBackgroundEmbedding`, `upsertLocalLoreBook`, `reloadDisplay`, `reloadChat`; also `getDescription`, `getBackgroundEmbedding`, all alerts, `getTokens`, `sleep` |
+| EditDisplay | editDisplay only | only `setChatVar`/`setChatVarChanged`/`setState(Changed)` (they write the real, saved chat var); alerts and every other Safe call return nil |
+| LowLevel | card `lowLevelAccess: true` (user confirms on import); a module has its own `lowLevelAccess` flag | `LLM`, `axLLM`, `simpleLLM`, `request`, `similarity`, `generateImage`, `loadLoreBooks`. Granted only in `onStart`/`onInput`/`onOutput`/`onButtonClick`/manual functions, **never in listenEdit hooks** (edit hooks always run with it off) |
 
 Denials are silent: the call returns nil. Test each function in the mode where it will run.
 
@@ -114,40 +159,42 @@ Denials are silent: the call returns nil. Test each function in the mode where i
 | `getChatData(id, i)` / `getChatRole(id, i)` | just the text / role (`""` if missing) |
 | `getChatLength(id)` | message count (greeting excluded; index 0 is the first message after it) |
 | `getRecentChats(id, n)` | last n messages as a table; cheaper than `getFullChat` |
-| `getFullChat(id)` / `setFullChat(id, t)` | whole array; heavy on long chats |
-| `setChat(id, i, text)` / `setChatRole(id, i, role)` | replace text / role |
-| `addChat(id, role, text)` / `insertChat(id, i, role, text)` | role `"user"` or `"char"` |
-| `removeChat(id, i)` / `cutChat(id, start, end_)` | delete one / keep a slice |
+| `getFullChat(id)` / `setFullChat(id, t)` | whole array; heavy on long chats. `setFullChat` rebuilds every message from `role` and `data` only, dropping `time`, message ids, generation info and speaker; prefer `setChat`/`addChat`/`removeChat`. (PocketRisu keeps the other fields by index.) |
+| `setChat(id, i, text)` / `setChatRole(id, i, role)` | replace text / role; negative `i` counts from the end; out of range does nothing |
+| `addChat(id, role, text)` / `insertChat(id, i, role, text)` | role `"user"`; anything else becomes `"char"` |
+| `removeChat(id, i)` / `cutChat(id, start, end_)` | delete one / keep a slice (JS `slice` semantics, 0-based, end exclusive) |
 | `getCharacterLastMessage(id)` / `getUserLastMessage(id)` | last char text (falls back to the greeting) / last user text |
 
 **Variables and state**
 | Call | Notes |
 |---|---|
-| `getChatVar(id, k)` | string; unset -> the card's `defaultVariables` value, else the string `"null"` |
-| `setChatVar(id, k, v)` | stored as `scriptstate['$'..k]`; visible in RisuAI's variable panel and to CBS `{{getvar::k}}` |
-| `setChatVarChanged(id, k, v)` | writes and returns true only if the value changed |
+| `getChatVar(id, k)` | string; unset -> the card's `defaultVariables` value (then the template default variables), else the string `"null"` |
+| `setChatVar(id, k, v)` | stored as `scriptstate['$'..k]`; visible in RisuAI's variable panel and to CBS `{{getvar::k}}`. Pass strings (`tostring(n)`) |
+| `setChatVarChanged(id, k, v)` | writes; returns `true` if the value changed, otherwise **nil** (not `false`, since 2026-08; nil also when denied). Test with `if setChatVarChanged(...) then` |
 | `getState(id, n)` / `setState(id, n, v)` | JSON-encoded under chat var `__n`; tables allowed; unset -> nil |
-| `setStateChanged(id, n, v)` | write-if-changed version |
+| `setStateChanged(id, n, v)` | write-if-changed version (compares the JSON text; same true/nil return) |
 | `getGlobalVar(id, k)` | read-only global (cross-chat) var; toggles are `toggle_<name>` |
 
 **Character, persona, notes**
-`getName`/`setName`, `getDescription`/`setDescription` (throw in group chats; wrap in `pcall`),
-`getCharacterFirstMessage`/`setCharacterFirstMessage`, `getPersonaName`, `getPersonaDescription`, `getAuthorsNote`,
-`getBackgroundEmbedding`/`setBackgroundEmbedding` (backgroundHTML), `getCharacterImage`/`getPersonaImage` (inlay markup).
+`getName`/`setName`, `getDescription`/`setDescription` (Safe tier; throw in group chats; wrap in `pcall`),
+`getCharacterFirstMessage`/`setCharacterFirstMessage` (returns true/false), `getPersonaName`, `getPersonaDescription`
+(CBS-parsed), `getAuthorsNote` (read-only; no setter), `getBackgroundEmbedding`/`setBackgroundEmbedding` (backgroundHTML,
+Safe tier), `getCharacterImage`/`getPersonaImage` (`{{inlayed::…}}` markup, `""` on failure; need an `async` hook).
+These edit the character card itself (all chats), not the current chat.
 
 **Lorebook**
 | Call | Notes |
 |---|---|
-| `getLoreBooks(id, name)` | entries whose name (comment) equals `name`, from chat, character and module lorebooks; content CBS-parsed. The raw `getLoreBooksMain` returns a JSON string; if a result ever arrives as userdata, `:await()` it before decoding |
-| `upsertLocalLoreBook(id, name, content, {alwaysActive, insertOrder, key, secondKey, regex})` | create or replace a **chat-local** entry by name |
-| `loadLoreBooks(id)` [low] | currently active entries `{data, role}` within the context budget; raw `loadLoreBooksMain(id, reserve)` takes a reserve |
+| `getLoreBooks(id, name)` | synchronous; entries whose name (comment) equals `name` exactly, from the chat, character and module lorebooks, as full entry tables with `content` CBS-parsed. Errors in group chats |
+| `upsertLocalLoreBook(id, name, content, {alwaysActive, insertOrder, key, secondKey, regex})` | Safe tier; create or replace a **chat-local** entry by name (`mode` normal, `selective` when `secondKey` is set). Always pass the options table (`{}` at least): omitting it throws. From `onStart`/`onInput`/`onOutput`/manual functions the host hands Lua a cloned character, so the write may be discarded; it sticks from `onButtonClick` and edit hooks (source reading, verify in the app) |
+| `loadLoreBooks(id)` [low] | currently active entries `{data, role}` (CBS-parsed, empty ones skipped). The wrapper passes no reserve, so no budget cut applies; raw `loadLoreBooksMain(id, reserve):await()` cuts at max context minus `reserve` tokens |
 
 **LLM and images** (LowLevel)
 | Call | Notes |
 |---|---|
-| `LLM(id, msgs, useMultimodal?, {streaming=true}?)` | main model; `msgs` = `{ {role="system", content=…}, {role="user", content=…} }`; returns `{success, result}` |
-| `axLLM(id, msgs, …)` | same, routed to the auxiliary model |
-| `simpleLLM(id, prompt)` [a] | one user string |
+| `LLM(id, msgs, useMultimodal?, {streaming=true}?)` | main model; `msgs` = `{ {role="system", content=…}, {role="user", content=…} }`; roles `system`/`sys`, `user`, `assistant`/`bot`/`char` (anything else becomes assistant); returns `{success, result}`, failure text starts with `"Error: "`. `useMultimodal=true` sends `{{inlay::…}}`/`{{inlayed::…}}` images in the content. `streaming=true` streams internally and returns the final text |
+| `axLLM(id, msgs, …)` | same, routed to the auxiliary model setting (`otherAx`) |
+| `simpleLLM(id, prompt)` [a] | one user string to the main model; `{success, result}` |
 | `generateImage(id, prompt, neg)` [a] | `"{{inlay::…}}"` or `"Error: …"`; needs an image backend configured |
 
 **Utility and UI**
@@ -156,17 +203,17 @@ Denials are silent: the call returns nil. Test each function in the mode where i
 | `getTokens(id, s)` [a] | token count with the active tokenizer |
 | `hash(id, s)` [a] | hex digest |
 | `sleep(id, ms)` [a] | delay |
-| `cbs(s)` | run the CBS parser (expands `{{user}}`, `{{getvar::…}}` …) |
+| `cbs(s)` | run the CBS parser (expands `{{user}}`, `{{getvar::…}}` …; `{{chat_index}}` is -1, and `{{setvar}}`-type setters do not run but stay as literal text) |
 | `similarity(id, source, list)` [a][low] | semantic search over `list` |
-| `request(id, url)` [a][low] | HTTPS GET only, URL ≤ 120 chars, 5 per minute; JSON `{status, data}` |
-| `alertError`/`alertNormal(id, msg)` | modal |
-| `alertInput(id, msg)` [a] / `alertSelect(id, {…})` [a] / `alertConfirm(id, msg)` [a] | string / choice / boolean |
+| `request(id, url)` [a][low] | HTTPS GET only, URL ≤ 120 chars, about 5 per minute, risuai.net domains blocked; returns a JSON string `{status, data}` (decode it) |
+| `alertError`/`alertNormal(id, msg)` | modal; Safe tier (not in editDisplay) |
+| `alertInput(id, msg)` [a] / `alertSelect(id, {…})` [a] / `alertConfirm(id, msg)` [a] | typed string / the chosen **0-based index as a string** / boolean |
 | `reloadDisplay(id)` / `reloadChat(id, i)` | re-render all / one message |
-| `stopChat(id)` | cancel the pending send (same as returning false) |
+| `stopChat(id)` | cancel the pending send; effective only in `onStart` (same as returning false there) |
 
-**Not found in the Lua API of the checked source**: `setAuthorNote`, `getReplaceGlobalNote`, `setReplaceGlobalNote`,
-`setGlobalVar`, and the `v2GetAllLorebooks` / `v2CreateLorebook` / `v2ModifyLorebookByIndex` family (those are V2 block-trigger
-effects, not Lua functions). Treat older notes that list them as unverified; check the user's RisuAI version before use.
+**Not in the Lua API** (current source): `setAuthorNote`, `getReplaceGlobalNote`, `setReplaceGlobalNote`, `setGlobalVar`,
+and the `v2GetAllLorebooks` / `v2CreateLorebook` / `v2ModifyLorebookByIndex` family (those are deprecated V2 block-trigger
+effects, not Lua functions; see §0). Older notes that list them as Lua calls are wrong.
 
 ## 5. Regex scripts next to Lua
 
@@ -401,7 +448,9 @@ setChatVar(id, "bot_cal_len", tostring(#html))
 editdisplay out: {{#when::{{getvar::bot_cal_len}}::>::0}}{{getvar::bot_cal_html}}{{:else}}(fallback text){{/when}}
 ```
 - Buttons inside the cached HTML stay live: raw `<button risu-btn="cal:prev">` / `risu-trigger="bot_cal_prev"` attributes,
-  or `{{button::◀::bot_cal_prev}}` CBS (reported working when printed through `{{getvar}}`).
+  or `{{button::◀::bot_cal_prev}}` CBS (reported working when printed through `{{getvar}}`; note that a tag's result is
+  not re-parsed in the same CBS pass, so a `{{button}}` stored in a variable renders only if a later pass parses the
+  text again; raw `risu-trigger`/`risu-btn` attributes need no parsing and are the safer choice).
 - Escape user-provided text (`&`, `<`, `>`, `"`) before putting it into HTML.
 - Logic in Lua, layout in regex and backgroundHTML CSS. Rebuild only when the inputs change.
 
@@ -451,17 +500,25 @@ single card serves several languages. A separate UI-language variable is optiona
   only for the newest message (`meta and meta.index == getChatLength(id) - 1`); older copies render as plain text. Also
   hides markers. Display runs on every render: keep it cheap, no LLM calls, no writes (only `setChatVar` works there).
 - **editRequest: scrub.** Remove image tags, old status blocks, UI glyphs and control markers from `messages[i].content`
-  before sending. Aux calls may pass through the same hook; recognize them by a fixed phrase and skip.
-- **editInput: slash commands.** `/reset`, `/set name 50`:
+  before sending. Only the chat request built by sendChat passes through it; Lua `LLM`/`axLLM` calls do not, so an aux
+  prompt needs no skip logic here.
+- **Slash commands** (`/reset`, `/set name 50`). RisuAI first tries its own commands (`/echo`, `/input`, `/send`,
+  `/cut`, `/del`, `/setvar`, `/addvar`, `/getvar`, `/trigger` …); a known name is consumed and never sent, an unknown one
+  continues as a normal message. Do not stop it in editInput: `stopChat` and `return false` are ignored there, and a `""`
+  return still sends an empty user turn. Handle it in `onStart`, the only hook that can cancel the send:
   ```lua
-  listenEdit('editInput', function(id, text, meta)
-      local cmd, arg = text:match("^/(%w+)%s*(.*)$")
-      if cmd and COMMANDS[cmd] then COMMANDS[cmd](id, arg); stopChat(id); return "" end
-      return text
+  onStart = async(function(id)
+      local last = getChat(id, -1)
+      local cmd, arg = last and last.role == "user" and last.data:match("^/(%w+)%s*(.*)$")
+      if cmd and COMMANDS[cmd] then
+          COMMANDS[cmd](id, arg)            -- may :await() alerts
+          removeChat(id, -1)                -- drop the command message
+          return false                      -- cancel this send
+      end
   end)
   ```
-  Alternatively an editprocess regex expands a short command into a hidden instruction while the visible message stays
-  short.
+  A plain button action can also be reached as `/trigger bot_reset` (runs the global `bot_reset(id)`). Alternatively an
+  editprocess regex expands a short command into a hidden instruction while the visible message stays short.
 - **editOutput: completion tokens.** The model emits an exact token (`<bot-done:quest_key>`); editOutput sets the flag and may
   strip or keep the token. Also a good place to normalize tag mistakes before they are saved.
 
@@ -491,6 +548,11 @@ end)
 - **One dispatcher with a payload** (`risu-btn`) scales better than one global per button. Option panels:
   'RisuAI 옵션 패널 (슬라이딩 드로어)'.
 - For `risu-trigger` names, generate globals in a loop: `for _, k in ipairs(KEYS) do _G["bot_set_" .. k] = function(id) … end end`.
+  Cost note: every distinct manual name gets its own engine, so the first click on each name loads and runs the whole
+  script once more, and each manual run deep-clones the character and chat. Many unique names = slower first clicks and
+  more memory; `risu-btn` payloads share one `onButtonClick` engine.
+- After either kind of click the host applies the returned chat and re-renders **only the clicked message**; call
+  `reloadDisplay(id)` when other messages or the background depend on what changed. Both are ignored in group chats.
 - **Metatable `__index` on `_G`** resolves parameterized names without predeclaring them:
   ```lua
   setmetatable(_G, { __index = function(_, name)
@@ -542,7 +604,8 @@ end
 - Put the result line into the user message (`setChat`) or a new user message so the model narrates the outcome.
 - Tokens / perks that reroll or modify edit the **existing** result line, then `reloadChat(id, i)`; commit consumption
   later from the text so rerolls do not double-spend.
-- Pure-CBS alternative for random events: `{{#if {{? {{roll::500}}<=N}}}}` gates in constant entries (see 'RisuAI CBS 문법').
+- Pure-CBS alternative for random events: `{{#when::{{roll::500}}::<=::N}}` gates in constant entries (older bots:
+  `{{#if {{? {{roll::500}}<=N}}}}`; see 'RisuAI CBS 문법').
 
 ## 20. Self-tests, backup and restore
 
@@ -566,11 +629,16 @@ inside constant entries: `{{#when::bot_stage::vis::2}}…{{/when}}`, `{{#func}}`
 ## 22. Pitfalls
 
 1. Silent errors and silent permission denials: wrap jobs in `pcall`, log to a chat var, test in the real mode.
-2. Lua globals are per mode: a flag set in `onOutput` is not visible in `onButtonClick`. Use chat vars / state.
-3. `onStart` runs on every send, not on chat open; defaults for the greeting belong in `defaultVariables`.
-4. Returning nil from a `listenEdit` callback breaks the chain; indexing a nil `meta` (editRequest) throws.
-5. Writes from editDisplay no-op (except `setChatVar`); `setChat` there does nothing.
-6. `LLM`/`axLLM` without `lowLevelAccess` return nil; outside an `async` hook they cannot await.
+2. Lua globals are per mode (a flag set in `onOutput` is not visible in `onButtonClick`) and are reset whenever a card
+   script and a module script share a mode. Use chat vars / state.
+3. `onStart` runs on every send (also reroll/continue), not on chat open, and after the description and lorebook were
+   already built; defaults for the greeting belong in `defaultVariables`.
+4. Returning nil from a `listenEdit` callback breaks the chain; so does wrapping the callback in `async`.
+5. Writes from editDisplay no-op (except `setChatVar`/`setState`); `setChat` and alerts there do nothing.
+6. `LLM`/`axLLM` without `lowLevelAccess`, or inside any listenEdit hook, return nil; outside an `async` hook they cannot
+   await.
+6a. `onInput` runs before the user's message is in the chat, and `stopChat`/`return false` only work in `onStart`.
+6b. `setFullChat` strips message metadata (ids, times, generation info); edit single messages instead.
 7. Parsing `getFullChat` on every turn or render in a long chat freezes phones; prefer `getChat(id, -1)` / `getRecentChats`.
 8. Reroll double-counting: any "add delta from the last reply" needs a §9 scheme.
 9. Async race: re-read the message after every await before `setChat`.
@@ -583,12 +651,13 @@ inside constant entries: `{{#when::bot_stage::vis::2}}…{{/when}}`, `{{#func}}`
 
 ## 23. Build / review checklist
 
-- [ ] `lowLevelAccess` set only if LLM/axLLM/request/generateImage are used
+- [ ] all logic in the Lua trigger (no V1/V2 items added; legacy items ported per §0)
+- [ ] `lowLevelAccess` set only if LLM/axLLM/request/generateImage are used, and those calls sit outside listenEdit hooks
 - [ ] every hook's early exits and `pcall`s in place; `bot_lua_error` (or similar) visible somewhere
 - [ ] authoritative state in `setState`; display copies via write-if-changed
 - [ ] a reroll/edit/delete scheme chosen and tested by rerolling, editing and deleting a reply
 - [ ] every await followed by a re-read before writing
-- [ ] editDisplay callbacks cheap and write-free; editRequest skips aux calls
+- [ ] editDisplay callbacks cheap and write-free; editOutput idempotent (it reruns per streamed chunk)
 - [ ] all listenEdit callbacks return the value; `meta` nil-guarded
 - [ ] defaults in `defaultVariables`; names in Lua, CBS, regex and options panel identical
 - [ ] prompt-relevant state (events, summaries, clock) reaches the model through a lorebook entry or instruction

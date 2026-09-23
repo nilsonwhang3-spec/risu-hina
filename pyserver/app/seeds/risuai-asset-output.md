@@ -51,8 +51,11 @@ Core facts:
 1. **Write the instruction in the global note override (`post_history_instructions`).** Presets place it after the chat
    history, closest to the model, which suits a rule that must hold every turn. `system_prompt` replaces the preset's main
    prompt, so do not put asset rules there. (Some bots use a constant `@@depth 0` lorebook entry instead; same effect.)
-2. **The existence check and fallback happen in the display regex, with CBS on `{{assetlist}}`.** There is no normalization
-   (spaces vs separators, case): the name in the instruction must match the asset name character for character. Lua can
+2. **The existence check and fallback happen in the display regex, with CBS on `{{assetlist}}`.** The check is exact and
+   case-sensitive, so the name in the instruction must match the asset name character for character. The renderer
+   itself is looser: `{{raw::}}`/`{{img::}}` match names case-insensitively and, when a name does not exist, silently use
+   the closest card asset within edit distance 4 (so `Name_A_smile` can show `Name_B_smile`). Without the check a wrong
+   tag shows the wrong picture instead of nothing. Lua can
    also validate against its own table (§5.4), but Lua has no asset-list API; `{{assetlist}}` is CBS only (you can read it
    from Lua with `cbs("{{assetlist}}")`).
 3. **SFW and NSFW are just different keywords at render time.** The display regex does not distinguish them, and a missing
@@ -68,7 +71,7 @@ Core facts:
 | Option | Model writes | Rendered by | Trade-off |
 |---|---|---|---|
 | Compact custom tag (most common) | `<img src="Name-smile">`, `<asset:Name\|casual\|smile>` | editdisplay regex -> `{{raw::…}}` inside a styled div | inert without the regex; regex can validate, fall back, fold, window |
-| CBS directly | `{{image::Name-smile}}` | RisuAI itself | no regex needed, but the model must emit exact CBS syntax, no fallback, no window control |
+| CBS directly | `{{image::Name-smile}}` | RisuAI itself | no regex needed, but the model must emit exact CBS syntax, no controlled fallback (a near-miss name shows the closest asset), no window control |
 
 Prefer the custom tag. Render with `{{raw::name}}` as a CSS `background-image` div (easier to size and crop than `<img>`).
 
@@ -87,7 +90,8 @@ bg_place_day / bg_place_night   optional backgrounds
 - Tag `<asset:Name|casual|smile>` + regex `<asset:([^|>]+)\|([^|>]+)\|([^>]+)>` -> `{{raw::$1_$2_$3}}`. The naming scheme *is*
   the tag grammar, so there is nothing to map.
 - Spaces inside a field are allowed if the bot is consistent (`happy tears`); keep one word separator everywhere.
-- Include the extension in the asset name only if the card's asset names include it; `{{raw::}}` needs the exact name.
+- Include the extension in the asset name only if the card's asset names include it. `{{raw::}}` ignores case and falls
+  back to the closest similar name, but `{{assetlist}}` checks need the exact name.
 
 ### 2.3 Vocabulary
 
@@ -112,8 +116,8 @@ bg_place_day / bg_place_night   optional backgrounds
   there. Rules that must hold every turn (status panel output, aux suppression) can share this last slot. Put
   `{{position::PI}}` before the asset block for "lorebook rules first, asset rules last", after it for the reverse; decide
   by what the model should read last.
-- Display-only CBS (`{{asset::X}}`, `{{emotion::X}}`) is never sent to the model, so the model writes the tag literally
-  and the display regex renders it.
+- Asset CBS (`{{asset::X}}`, `{{emotion::X}}`) is resolved only on display; in prompt text it stays a literal string, so
+  the model can write the tag literally and the display regex (or RisuAI) renders it.
 - The mode variable (e.g. `asset_aux`) normally has two states: `0` = main model tags, `1` = aux model post-processes.
   Give it a default in `defaultVariables` and backfill unset values in Lua.
 - **Option gating by omission**: wrap optional lists in CBS (`casual, {{#when::bot_nsfw::vis::1}}nude, {{/when}}…`). When an
@@ -122,8 +126,8 @@ bg_place_day / bg_place_night   optional backgrounds
   list line `{{position::ext_chars}}` and after the keyword lists `{{position::ext_keywords}}`. An add-on module (extra
   characters, an NSFW keyword pack, more outfits) ships lorebook entries with `@@position pt_ext_chars` etc. plus its own
   assets, so the base card stays unchanged. Module assets are listed by `{{moduleassetlist::namespace}}`; include that list
-  in the existence check (§5). Whether `{{raw::}}` resolves module assets was reported to work in a reference bot but is not
-  verified here; test it.
+  in the existence check (§5). `{{raw::}}` and the other asset tags do resolve assets of enabled modules (checked in the
+  parser source: the display asset table merges card and module assets; the closest-name fallback covers card assets only).
 
 ---
 
@@ -257,9 +261,9 @@ ableFlag: false
 
 | Method | Where | Notes |
 |---|---|---|
-| `{{contains::{{assetlist}}::$1}}` | editdisplay | one line; substring check (§5.5) |
+| `{{contains::{{assetlist}}::$1}}` | editdisplay | one line; substring check (§5.6) |
 | `{{contains::{{assetlist}}::"$1"}}` | editdisplay | quotes make it an exact element match, because the list is a JSON array of quoted strings |
-| `{{#each {{assetlist}} as a}}{{#when::{{equal::{{slot::a}}::$1}}}}…{{/when}}{{/each}}` | editdisplay or editoutput | exact, but long and slower; older bots set a temp flag inside the loop |
+| `{{#each {{assetlist}} as a}}{{#when::{{equal::{{slot::a}}::$1}}}}…{{/when}}{{/each}}` | editdisplay or editoutput | exact, but long and slower; older bots set a temp flag inside the loop (that only works with legacy `{{#if}}`: a false `#when` body is still parsed, so `settempvar` would fire for every item) |
 | same with `{{moduleassetlist::ns}}` | either | for assets shipped in a module |
 | Lua whitelist table | onOutput / editOutput / aux pass | full control: per-character outfits, exclusions ("this outfit has no action set") |
 | editoutput whitelist regex | editoutput | an alternation of all valid name/emotion pairs; invalid tags are deleted **before they are saved** |
@@ -298,8 +302,8 @@ Instead of repeating the outfit in every tag, let the model state it once (in th
 
 Fill the outfit in **editoutput** so the full name is stored in the message; filling it in editdisplay with `{{getvar}}`
 would redraw old messages in the *current* outfit. Timing caveat (checked in RisuAI source, 2026-08): regex output is
-parsed without variable permission, so a `{{setvar}}` written by a regex stays in the stored text (hidden on display)
-and executes when the chat is parsed for the **next** send. The fill therefore sees the previous outfit; a change stated
+parsed without variable permission, so a `{{setvar}}` written by a regex is saved as text and only executes in the
+variable pass that runs over the chat after the reply is saved (just before `onOutput`). The fill therefore sees the previous outfit; a change stated
 in the same reply shows up one turn late. For immediate effect, capture and fill in a Lua `listenEdit('editOutput')`
 callback instead (`setChatVar` then rewrite the tags). Fewer tokens and fewer naming mistakes either way; the sheet
 should define when each outfit is worn.
@@ -311,13 +315,18 @@ Adding a variant set then touches only the regex and the asset names.
 
 ```
 {{#when::outfit_var::vis::1}}
-  {{#when::{{contains::{{assetlist}}::$2_alt}}}}                     <- does this character have the variant set?
-    {{#when::{{contains::{{assetlist}}::$2_alt$3}}}} render variant+keyword {{:else}}
-    {{#when::{{contains::{{assetlist}}::$1}}}} render base+keyword {{:else}} render variant base {{/when}}{{/when}}
-  {{:else}} (default chain) {{/when}}
-{{:else}} (default chain) {{/when}}
+{{#when::{{contains::{{assetlist}}::$2_alt}}}}
+{{#when::{{contains::{{assetlist}}::$2_alt$3}}}}(render variant+keyword){{:else}}{{#when::{{contains::{{assetlist}}::$1}}}}(render base+keyword){{:else}}(render variant base){{/when}}{{/when}}
+{{:else}}
+(default chain)
+{{/when}}
+{{:else}}
+(default chain)
+{{/when}}
 ```
-`_alt` is a placeholder; use the bot's own variant notation.
+Line 2 asks "does this character have the variant set?"; line 3 is the one-line inner chain. `_alt` is a placeholder; use
+the bot's own variant notation. In multi-line blocks every `{{:else}}` must be alone on its line (an `{{:else}}` that
+shares a line is not recognized and prints as text); one-line blocks may use it inline, as line 3 does.
 
 ### 5.6 Limits of `contains`
 
@@ -328,7 +337,8 @@ Adding a variant set then touches only the regex and the asset names.
 
 ### 5.7 Group chat
 
-In group chats `{{assetlist}}` is an empty string, so every image disappears.
+In group chats `{{assetlist}}` is an empty string, so every image behind an existence check disappears (PocketRisu fork:
+the list is not emptied there).
 
 ---
 
@@ -339,7 +349,7 @@ In group chats `{{assetlist}}` is an empty string, so every image disappears.
 ```
 === asset line break ===   editdisplay  in: \s*(<img src="[^"]*">)\s*   out: (newline)$1(newline)
 === asset eraser ===       editdisplay  in: <img src="(.+?)">
-   out: {{#if {{greater_equal::{{chat_index}}::{{? {{lastmessageid}}-2}}}}}}<img src="$1">{{/if}}   <- last 3 messages only
+   out: {{#when::{{greater_equal::{{chat_index}}::{{? {{lastmessageid}}-2}}}}}}<img src="$1">{{/when}}   <- last 3 messages only
 === asset render ===       editdisplay  §5.1
 === asset strip ===        editprocess  in: \s*<img src="[^"]*">\s*   out: {{#when::asset_aux::visnot::1}}$&{{/when}}
 ```
@@ -417,8 +427,8 @@ end)
   single-syllable ones misses the most common forms.
 - Keep the character table as an inline Lua table (`{ base, aliases, single_image, form_gate, note }`) or a lorebook JSON
   entry with empty `keys` (so it never activates) read with `getLoreBooks(id, "entry name")` (exact name match on the
-  entry's comment; the wrapper decodes the JSON; if you call the raw `getLoreBooksMain`, decode it yourself, and handle a
-  userdata result with `:await()` defensively). Lorebook reads need `id`, so do them inside hooks, not at the top level.
+  entry's comment; synchronous; the wrapper decodes the JSON; if you call the raw `getLoreBooksMain`, decode it yourself).
+  Lorebook reads need `id`, so do them inside hooks, not at the top level.
 - Do not expose the whole list when one character appears; send only the characters present.
 
 ### 7.3 Aux prompt
@@ -494,8 +504,8 @@ Use all three in aux mode; missing one lets tags leak.
    {{/when}}
    ```
 3. Zero tags in the history sent to the model: the editprocess strip (§6.1) or a Lua `listenEdit('editRequest')` that
-   strips tags from every outgoing message. If you strip in editRequest, skip the aux request itself (recognize it by a
-   fixed phrase in its prompt) because aux calls can pass through the same hook.
+   strips tags from every outgoing message. Lua's own `axLLM`/`LLM` requests do not pass through editRequest (only the
+   main chat request does), so the aux prompt needs no skip logic there.
 
 ### 7.6 Manual retag button
 

@@ -32,7 +32,7 @@ Most popular sim bots divide the card like this:
 | post_history_instructions (global note) | The **output contract that must be most recent**: image-tag rules, status format, a short pre-output checklist, or `{{position::...}}` anchors for pinned lorebook blocks. Some bots gate whole rule sections by option variables here. |
 | lorebook | Everything else: world, roster, sheets, places, factions, events, system rules, live readouts. |
 | greetings | Scenario starts that also demonstrate the output format (§4). |
-| defaultVariables | Feature flags, language, per-character scores. Alternatives: Lua fills missing values on start; some bots declare defaults with `{{setdefaultvar}}` in an always-on entry, but it writes only in run-var contexts ('RisuAI CBS 문법'), so back it with Lua or defaultVariables. |
+| defaultVariables | Feature flags, language, per-character scores. Alternative: Lua fills missing values on start. Some older bots declare defaults with `{{setdefaultvar}}` in an always-on entry; it never runs in a lorebook entry and is sent to the model as literal text ('RisuAI CBS 문법'), so replace it with defaultVariables or Lua. |
 
 A useful description skeleton:
 
@@ -130,25 +130,26 @@ Optional gated sections unlock deeper text by score or date (§5.2). A "mandator
 
 ### 3.6 CBS in entries
 
-- **Feature flags** gate whole entries or single clauses: `{{#if {{equal::{{getvar::bot_economy}}::1}}}}…{{/if}}` or `{{#when::{{getvar::bot_events}}::is::1}}…{{/when}}`. Typical flags: language, economy subsystem, stats mode, events on/off, images on/off, expansion content, scenario mode. Options reach the prompt only through such conditions ('RisuAI 옵션 패널 (슬라이딩 드로어)').
+- **Feature flags** gate whole entries or single clauses: `{{#when::bot_economy::vis::1}}…{{/when}}` or `{{#when::{{getvar::bot_events}}::is::1}}…{{/when}}` (older bots: `{{#if {{equal::{{getvar::bot_economy}}::1}}}}…{{/if}}`, deprecated but still parsed). Typical flags: language, economy subsystem, stats mode, events on/off, images on/off, expansion content, scenario mode. Options reach the prompt only through such conditions ('RisuAI 옵션 패널 (슬라이딩 드로어)').
 - **Bilingual text via one variable**: headings and glosses inside entries switch on `bot_lang`.
 - **Score → band via a function**, defined once and called per character, so the model reads a behavior band, not a raw number:
 
 ```
 @@depth 0
 ### Relationship Readout
-{{#func bot_band}}{{#if {{? {{arg::0}}<=100}}}}Stage 1 — polite distance; small talk only{{/if}}{{#if {{? ({{arg::0}}>100)&({{arg::0}}<=200)}}}}Stage 2 — relaxed; teases, seeks {{user}} out{{/if}}{{#if {{? {{arg::0}}>200}}}}Stage 3 — trusts {{user}} with private matters{{/if}}{{/func}}
+{{#func bot_band}}{{#when::{{arg::1}}::<=::100}}Stage 1 — polite distance; small talk only{{:else}}{{#when::{{arg::1}}::<=::200}}Stage 2 — relaxed; teases, seeks {{user}} out{{:else}}Stage 3 — trusts {{user}} with private matters{{/when}}{{/when}}{{/func}}
 Review this before writing any listed character.
 - Name A: {{getvar::bot_aff_a}}/300 — {{call::bot_band::{{getvar::bot_aff_a}}}}
 - Name B: {{getvar::bot_aff_b}}/300 — {{call::bot_band::{{getvar::bot_aff_b}}}}
 ```
+`{{arg::1}}` is the value passed to `call` (`{{arg::0}}` is the function name; older examples that read `arg::0` are broken). Keep the whole `#func` on one line so the inline `{{:else}}` works, and give each score a default in `defaultVariables` (an unset `"null"` fails every comparison). Older bots write the bands as `{{#if {{? ({{arg::1}}>100)&({{arg::1}}<=200)}}}}`; in `{{? }}` each comparison must be parenthesized.
 
 ## 4. Greetings and starts
 
 - **Scenario starts + one free start** (common): each greeting is a different hook into the world (a place, a faction, a featured character, a crisis) and ends at a decision point. One greeting is only the start marker: a free start that still gets the setup UI.
 - **Single greeting switched by variables** (alternative): a setup panel sets `bot_start`, `bot_role`, `bot_lang`; the greeting is a CBS switch over them and re-renders (Lua `reloadChat` or the variables alone). No alternate greetings needed; costs a large first message.
 - **Role selector**: buttons set `bot_role`; the greeting, description lines and small always-on "user role" entries branch on it, so one card supports several user roles.
-- **Bilingual via one variable**: each greeting holds one block per language under `{{#if {{equal::{{getvar::bot_lang}}::0}}}}`. Keep narrative language and UI language as separate variables if the UI is multilingual. Handle the unset value (neither branch matches).
+- **Bilingual via one variable**: each greeting holds one block per language under `{{#when::bot_lang::vis::0}}` (older bots: `{{#if {{equal::{{getvar::bot_lang}}::0}}}}`). Keep narrative language and UI language as separate variables if the UI is multilingual. Handle the unset value (neither branch matches).
 - **The greeting is a few-shot example**: it shows the prose style, image tags where the model should place them, the status line or tag lines at the end, filled with the start date and place. Some bots also show a sample quest board or system message.
 - **Sentinel glyph**: a glyph of your choice on line 1 (e.g. `☆`) is turned into the setup screen or panel by a display regex and stripped from the prompt by an editprocess regex ('RisuAI 정규식 작성법').
 - Greeting facts (date, relations, looks) must match sheets and initial variables.
@@ -176,7 +177,7 @@ Event conditions, the tag values the model emits, the transitions Lua allows, an
 
 ### 6.1 Random events
 
-- **Roll gates in CBS** (simplest): constant `@@depth 0` entries, each `{{#if {{? {{roll::500}}<=N}}}}…{{/if}}` with its own rarity (0.4-2% per request), gated by an events flag. Or one entry: `{{roll::100}}<=4` plus `{{random::event A::event B}}`. Rerolls roll again.
+- **Roll gates in CBS** (simplest): constant `@@depth 0` entries, each `{{#when::{{roll::500}}::<=::N}}…{{/when}}` (older bots: `{{#if {{? {{roll::500}}<=N}}}}…{{/if}}`) with its own rarity (0.4-2% per request), gated by an events flag. Or one entry: `{{roll::100}}` ≤ 4 plus `{{random::event A::event B}}`. Rerolls roll again. Use `roll`, not `rollp`, for independent gates: every `rollp` with the same argument returns the same number within a request.
 - **Seeded buckets**: Lua rolls a 1-100 seed per turn or per in-world day into a chat variable; one constant entry picks exactly one variant by range. Near-zero token cost, stable within the seed's period.
 
 ```

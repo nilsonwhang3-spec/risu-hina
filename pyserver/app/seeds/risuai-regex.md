@@ -40,7 +40,7 @@ flag: g<move_top>
 | `comment` | Display name only. It is used for grouping and for search. |
 | `type` | `editinput`, `editoutput`, `editprocess`, `editdisplay`, `edittrans`, or `disabled`. A script runs only in the stage whose name equals its type, so `disabled` (the editor's off switch) never runs. |
 | `in` | JavaScript `new RegExp(in, flag)`. Lookbehind works. `\p{…}` needs the `u` flag. An **empty `in` is skipped**. |
-| `out` | The replacement. `$1`…`$9`, `$&` and `$<name>` are capture references, and `{{data}}` means `$&`. **A literal `$n` becomes a newline**, so never write `$n` to mean "capture n". If `out` ends with `>`, a newline is appended (turn that off with `<no_end_nl>`). After the replacement the **whole text is CBS-parsed again**. |
+| `out` | The replacement. `$1`…`$9`, `$&` and `$<name>` are capture references, and `{{data}}` means `$&`. **A literal `$n` becomes a newline**, so never write `$n` to mean "capture n". If `out` ends with `>`, a newline is appended (turn that off with `<no_end_nl>`). After the replacement the **whole text is CBS-parsed again** (without variable permission, so `{{setvar}}` stays literal; §2). |
 | `flag` | It is used **only when `ableFlag` is true**. Otherwise the flag is `g`. Characters outside `dgimsuvy` are removed, as are duplicates, and an empty result becomes `u`. For first-match-only behavior, set `ableFlag: true` and write `u` or `i` without `g`. |
 | `ableFlag` | true means "use my `flag` string". false does **not** disable the script; it means "ignore `flag` and use `g`". |
 
@@ -76,7 +76,7 @@ flag: g<move_top>
 Rules of thumb:
 - **Everything you render in `editdisplay` needs a matching `editprocess` decision**: either strip it, window it, or leave it on purpose (for example, the last status block, so the model can update it). HTML left in history costs tokens and teaches the model to write HTML.
 - Prefer `editoutput` for **repair** and `editdisplay` for **presentation**. Repairing only in display leaves broken text in history, and the model imitates it.
-- Do not put state-changing CBS (`{{setvar}}`, `{{addvar}}`) in `editdisplay`. It runs at every render. See 'RisuAI 처리 순서 (정규식·Lua 훅)' for how often each stage runs.
+- Do not put state-changing CBS (`{{setvar}}`, `{{addvar}}`) in `editdisplay` or `editprocess` OUT. Regex output is parsed without variable permission, so there the setter never runs and its literal text shows on screen (editdisplay) or reaches the model (editprocess). Only in `editinput`/`editoutput` is the literal tag saved into the message and executed when that message is finalized. See 'RisuAI 처리 순서 (정규식·Lua 훅)' for how often each stage runs.
 
 ---
 
@@ -105,21 +105,22 @@ Rules of thumb:
 ### 4.2 CBS in OUT
 After the replacement the text is CBS-parsed, so OUT can compute:
 ```
-{{#if {{greater_equal::{{chat_index}}::{{? {{lastmessageid}}-2}}}}}}$&{{/if}}      (window guard)
+{{#when::{{greater_equal::{{chat_index}}::{{? {{lastmessageid}}-2}}}}}}$&{{/when}}  (window guard)
 <img src="{{raw::$1_$2.webp}}">                                                    (asset URL from captures)
 <div class="bot-gauge" style="width:calc($3/$4*100%)"></div>                        (gauge from captured numbers)
 {{#when::bot_show_names::vis::1}}<span>$1</span>{{/when}}                           (option-gated display)
 ```
 - **Capture-built CBS lets one rule cover every character.** `{{getvar::bot_$1_aff}}` reads a per-character variable named after the captured name. `{{raw::$1_$2.webp}}` builds the asset name. `{{button::+::bot_cheat_$1}}` builds a per-character button name. This needs a closed, predictable naming scheme.
 - A capture that contains `::`, `{{` or `}}` breaks the CBS around it. Restrict such captures with a class such as `([A-Za-z0-9_ -]+)`.
-- `{{#if}}` still works but is deprecated. `{{#when::…}}` is preferred; see 'RisuAI CBS 문법'. `{{? expr}}` takes a **space**, not `::`.
-- `{{random::a::b}}` in an `editdisplay` OUT re-rolls on every render. Use it in `editoutput`, where it is resolved once and saved, or use `{{pick::a::b}}`, which is stable per message.
+- `{{#if}}` still works but is deprecated (it also strips the leading whitespace of every line it wraps). `{{#when::…}}` is preferred; see 'RisuAI CBS 문법'. Older recipes below that still show `{{#if X}}…{{/if}}` convert to `{{#when::X}}…{{/when}}`, except where noted. `{{? expr}}` takes a **space**, not `::`.
+- `{{random::a::b}}` in an `editdisplay` OUT re-rolls on every render. Use it in `editoutput`, where it is resolved once and saved. `{{pick::a::b}}` is **not** per message: it is seeded by the chat and the current message count, so every message on screen gets the same pick and all of them change when a new message arrives.
+- Asset tags in OUT (`{{raw::…}}`, `{{img::…}}`) are resolved after the regex pass, case-insensitively and with a closest-name fallback (edit distance ≤ 4 by default), so a wrong name can show a similar asset instead of nothing. Check existence with `{{assetlist}}` when that matters ('RisuAI 에셋 출력식').
 - The **variable cache**: the display cache key contains the text, the scripts and the message index, but **not chat variables**. An OUT that reads `{{getvar}}` may keep showing the old value until something else changes the text. See 'RisuAI 상태창' §5 for the comment cache-buster.
 
 ### 4.3 CBS in IN (`<cbs>`)
 With `ableFlag: true` and `<cbs>` in the flag, `in` is CBS-parsed before it is compiled. The pattern itself can then depend on variables or on the message position:
 ```
-in:   {{#if {{equal::{{getvar::bot_status_mode}}::aux}}}}<bot-panel>[\s\S]*?<\/bot-panel>{{/if}}
+in:   {{#when::bot_status_mode::vis::aux}}<bot-panel>[\s\S]*?<\/bot-panel>{{/when}}
 flag: g<cbs>
 ```
 When the condition is false, `in` is empty and the script is skipped, so a variable turns the rule on or off. §5.2 uses the same mechanism to anchor a panel. Escape regex metacharacters that come out of CBS (a variable value containing `(` or `|` changes the pattern).
@@ -130,8 +131,9 @@ When the condition is false, `in` is empty and the script is skipped, so a varia
 
 ### 5.1 The sliding-window guard (three planes)
 ```
-out: {{#if {{greater_equal::{{chat_index}}::{{? {{lastmessageid}}-N}}}}}}$&{{/if}}
+out: {{#when::{{greater_equal::{{chat_index}}::{{? {{lastmessageid}}-N}}}}}}$&{{/when}}
 ```
+(Older bots: `{{#if {{greater_equal::…}}}}$&{{/if}}`, same result except that `#if` strips each line's indentation.)
 `chat_index` is the index of the message being processed, and `lastmessageid` is the index of the last message. The block survives only in the last N+1 messages. The same guard serves three purposes:
 
 | Plane | Type | Purpose | Typical N (options, not a standard) |
@@ -144,9 +146,9 @@ out: {{#if {{greater_equal::{{chat_index}}::{{? {{lastmessageid}}-N}}}}}}$&{{/if
 - **Partial blanking** keeps the chronology and drops the bulk. Capture the fields that give continuity and window only the rest:
   ```
   in:  (\[Date: [^|]*\| Time: [^|]*\| Location: [^|]*)([^\]]*)(\])
-  out: $1{{#if {{greater_equal::{{chat_index}}::{{? {{lastmessageid}}-5}}}}}}$2{{/if}}$3
+  out: $1{{#when::{{greater_equal::{{chat_index}}::{{? {{lastmessageid}}-5}}}}}}$2{{/when}}$3
   ```
-- **Tiered display**: full UI when `chat_index == lastmessageid`, a reduced card for the last few messages, nothing older. Write two ordered rules, or `{{#if}}` branches inside one OUT.
+- **Tiered display**: full UI when `chat_index == lastmessageid`, a reduced card for the last few messages, nothing older. Write two ordered rules, or `{{#when}}…{{:else}}…{{/when}}` branches inside one OUT.
 - Changing a prompt-side window changes old messages' request text, which breaks provider prompt caching from that point. Prefer windows that move by whole turns, and do not window data that Lua `editRequest` must read (editprocess runs first).
 - The background HTML also passes through `editdisplay` scripts with `chat_index` = -1. A window guard is always false there, so never window a rule meant for the background (§6.4).
 
@@ -155,8 +157,8 @@ The goal is a floating app, HUD or settings button that always sits under the ne
 ```
 === Floating panel ===
 type: editdisplay
-in:   {{#if {{not_equal::{{lastmessageid}}::-1}}}}${{/if}}{{#if {{equal::{{lastmessageid}}::-1}}}}☆{{/if}}
-out:  {{#if {{equal::{{chat_index}}::{{lastmessageid}}}}}}<div class="bot-float">…</div>{{/if}}
+in:   {{#when::{{lastmessageid}}::is::-1}}☆{{:else}}${{/when}}
+out:  {{#when::{{chat_index}}::is::{{lastmessageid}}}}<div class="bot-float">…</div>{{/when}}
 flag: gu<cbs>
 ```
 - When a reply exists, IN becomes `$` and matches the end of **every** message, and the OUT guard keeps the output only on the newest message. When only the greeting exists (`lastmessageid` = -1), IN becomes the sentinel, which the greeting carries on its first or last line.
@@ -166,7 +168,7 @@ flag: gu<cbs>
 ### 5.3 Sentinel glyph → UI, stripped from the prompt
 A sentinel is a short string the model will never write by accident (a glyph pair of your choice, or `###BOT_PANEL###`). Put it in the greeting, or add it with Lua (`addChat(id, "system", "☆")`) to open a panel on demand. Three rules go with it:
 ```
-=== ☆ window ===   editdisplay  in: ☆        out: {{#if {{greater_equal::{{chat_index}}::{{? {{lastmessageid}}-1}}}}}}$&{{/if}}
+=== ☆ window ===   editdisplay  in: ☆        out: {{#when::{{greater_equal::{{chat_index}}::{{? {{lastmessageid}}-1}}}}}}$&{{/when}}
 === ☆ render ===   editdisplay  in: ☆        out: <div class="bot-start">…buttons…</div>
 === ☆ strip ===    editprocess  in: ☆        out: (empty)
 ```
@@ -210,7 +212,7 @@ Common model slips are fixed before storage, so they do not compound in history:
   ```
   out: {{settempvar::ok::}}{{#each {{assetlist}} as a}}{{#if {{equal::{{lower::{{slot::a}}}}::{{lower::$1_$2}}}}}}{{settempvar::ok::1}}{{/if}}{{/each}}{{#if {{gettempvar::ok}}}}$&{{/if}}
   ```
-  `#each` needs the `as` keyword. Check whether the bot's asset names carry extensions and compare accordingly (`{{startswith::…}}` accepts a name plus any extension). Use `{{module_assetlist::namespace}}` for assets that ship in a module. A whitelist alternation (`<img="(?:Name1|Name2) (?:happy|sad|…)">`) also works, but it must be kept in sync by hand. The full recipe is in 'RisuAI 에셋 출력식'.
+  Keep the legacy `{{#if}}` inside the loop here: a false `#if` skips its body, while a false `#when` still parses it, so `{{settempvar::ok::1}}` inside a `#when` would run for every asset and always pass. A shorter exact check without the flag: `{{#when::{{contains::{{assetlist}}::"$1_$2"}}}}$&{{/when}}` (case-sensitive). `#each` needs the `as` keyword. Check whether the bot's asset names carry extensions and compare accordingly (`{{startswith::…}}` accepts a name plus any extension). Use `{{module_assetlist::namespace}}` for assets that ship in a module. A whitelist alternation (`<img="(?:Name1|Name2) (?:happy|sad|…)">`) also works, but it must be kept in sync by hand. The full recipe is in 'RisuAI 에셋 출력식'.
 - **Prompt-side hygiene** (`editprocess`): keep only valid, recent image tags in the request, so the model does not copy broken ones from history.
 
 ### 6.2 Term normalization and anti-repetition (`editoutput`)
@@ -235,7 +237,7 @@ flag: g   (with ableFlag true add m if the command can sit on any line)
 ```
 - Pair every `editprocess` macro with an `editdisplay` rule that shows a short notice instead of the raw command, if the raw command would look odd.
 - Emphasis macros (`editinput`): wrap the user's trigger word in `*…*` so a keyword lorebook entry and the model both react to it.
-- A command handled by Lua (`listenEdit('editInput')`, `stopChat`, returning `""`) is the alternative for commands that change variables. See 'RisuAI Lua 트리거'.
+- A command handled by Lua is the alternative for commands that change variables: `onStart` detects `/cmd …` in the last user message, applies it, removes that message and returns `false` (only `onStart` can cancel a send; `stopChat` or a `""` return in editInput does not). Names of RisuAI's own slash commands (`/send`, `/setvar`, `/trigger` …) are consumed before any script sees them. See 'RisuAI Lua 트리거' §14.
 
 ### 6.4 Theme tokens in the background HTML
 The background HTML is CBS-parsed and then passes through the same `editdisplay` scripts (with `chat_index` = -1). Placeholders in the CSS can therefore be replaced by tiny regexes. Users retheme from the regex list without touching the CSS:
@@ -289,12 +291,12 @@ Work through this list in order:
 6. One rule for a whole multi-field block fails whenever a field is missing or reordered, and raw tags show. Either enforce the order in the instruction or use per-field rules plus a fallback box.
 7. Rendering without an `editprocess` counterpart leaves HTML or glyphs in the prompt. The model then copies them.
 8. A window guard on a background-theme rule is always false there.
-9. `{{random}}` in `editdisplay` flickers between renders; `{{setvar}}` in `editdisplay` runs at every render. Stat math done in `editoutput` CBS is re-applied on reroll and is not reroll-safe. Do accumulation in Lua with snapshots ('RisuAI Lua 트리거').
+9. `{{random}}` in `editdisplay` flickers between renders; `{{setvar}}` in `editdisplay` never runs and prints as literal text. Stat math done in `editoutput` CBS is re-applied on reroll and is not reroll-safe. Do accumulation in Lua with snapshots ('RisuAI Lua 트리거').
 10. The display cache ignores variables.
 11. A broad `editdisplay` pattern also edits the background CSS.
 12. Checkbox ids repeated across several rendered messages make `<label for>` toggle the wrong one. Put the message index into the id (`bot-fold-{{chat_index}}`), or use `<details>`.
 13. A gate variable spelled differently in two places (`bot_lang` vs `botLang`) fails silently. Grep the card for every variable a rule reads.
-14. A case-insensitive match on case-sensitive asset names renders broken images.
+14. Asset tags resolve names case-insensitively (with a closest-name fallback), but `{{assetlist}}` existence checks are case-sensitive. A case-insensitive capture can pass the render and fail the check; compare with `{{lower::…}}` on both sides or keep names case-exact.
 
 ---
 
