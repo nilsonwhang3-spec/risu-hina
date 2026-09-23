@@ -73,12 +73,6 @@ def main() -> int:
     ck, tk, ws, beta = setup()
     home = workspace.hina_dir(ck)
 
-    print("test_legacy_helper_import")
-    legacy = run("import risuhina, realooc\nassert realooc.conn is risuhina.conn\n"
-                 "assert realooc.turns() == risuhina.turns()\nprint('legacy helper ready')", ck, tk, ws)
-    check("legacy and current imports use the same helper", legacy["ok"] and "legacy helper ready" in legacy["stdout"],
-          legacy.get("stderr", "")[:300])
-
     print("test_normal_work_still_works")
     r = run(
         "import risuhina\n"

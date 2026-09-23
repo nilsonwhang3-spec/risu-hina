@@ -71,7 +71,8 @@ TEXT_EXT = {".md", ".txt", ".py", ".json", ".yaml", ".yml", ".csv", ".html", ".j
 # v9 adds the three bot-UI guides drawn from the vepo bots (option panel,
 # asset output, status panel; §1-67).
 # v10 adds the solo-bot and regex guides (§1-69).
-SEED_KEY = "skills_seeded_v10"
+# v11 adds the source-verification skill and its fetch script (§1-71).
+SEED_KEY = "skills_seeded_v11"
 FOLDER_KEY = "skills_folders_v1"
 SEED_DIR = Path(__file__).resolve().parent / "seeds"
 
@@ -745,9 +746,9 @@ SEED_FILES: dict[str, tuple[str, str, bool]] = {
     "risuai-lorebook.md": ("RisuAI 로어북 구조",
                            "Deciding lorebook structure and activation: bot lorebook (global, stored in the card, reused across chats) vs chat lorebook (local), entry schema, key matching, @@decorators, insertion position and depth, token budget, CBS/Lua control.", True),
     "risuai-simbot.md": ("RisuAI 시뮬봇 구조와 제작",
-                          "Designing, building, or reviewing a multi-character simulation bot: world/cast/NPC/location/event lorebook layout, roster vs detail entries, public vs hidden state, narrative pacing and event mechanisms (clock, phases, triggers), status tags wired to regex/Lua/CBS.", True),
+                          "Designing, building, or reviewing a multi-character simulation bot: world/cast/NPC/place/event lorebook layout, roster vs detail entries, public vs hidden state, pacing and event mechanisms (clock, phases, triggers).", True),
     "risuai-solobot.md": ("RisuAI 일인봇 구조와 제작",
-                          "Designing, building, or reviewing a single-character bot: character sheet in description vs lorebook, relationship stages, secrets and scenario hooks, keeping the character consistent and charming (voice, contrasts, agency, anti-repetition), intimacy pacing, greetings.", True),
+                          "Designing, building, or reviewing a single-character bot: sheet in description vs lorebook, relationship stages, secrets and hooks, keeping the character consistent and charming (voice, contrasts, agency, no repetition), greetings.", True),
     "risuai-regex.md": ("RisuAI 정규식 작성법",
                         "Writing or fixing RisuAI regex scripts: choosing editinput/editoutput/editprocess/editdisplay, order, flags, CBS in replacements, erase/hide/wrap recipes for status tags, images, and HTML, and debugging rules that do not match.", True),
     "risuai-hooks.md": ("RisuAI 처리 순서 (정규식·Lua 훅)",
@@ -765,11 +766,18 @@ SEED_FILES: dict[str, tuple[str, str, bool]] = {
     "arca-html.md": ("아카라이브 HTML 작성",
                      "아카라이브(arca.live)에 붙여넣을 HTML(챗로그·소개글·요약)을 만들 때의 제약.", True),
     "risuai-option-panel.md": ("RisuAI 옵션 패널 (슬라이딩 드로어)",
-                               "Building or fixing a settings (⚙) sliding option drawer: risu-btn buttons and onButtonClick, panel HTML injected by Lua editDisplay into the tip message only, CSS checkbox open/close and tabs, avoiding reloadDisplay, open-flag reset, options feeding prompts.", True),
+                               "Building or fixing a settings (⚙) sliding option drawer: risu-btn buttons and onButtonClick, panel HTML injected by Lua editDisplay into the tip message, CSS checkbox open/close and tabs, options feeding prompts.", True),
     "risuai-asset-output.md": ("RisuAI 에셋 출력식",
                                "Writing the instruction that makes the model emit image tags matching the bot's asset list (usually in the global note override): {{assetlist}} check and base-fallback regex, per-character tiers, SFW/NSFW keyword design, aux-model (axLLM) delegation.", True),
     "risuai-status-panel.md": ("RisuAI 상태창",
-                               "Building or fixing the status block the model emits at the end of each reply: TAG OUTPUT lorebook instruction, {{position::PI}} + @@position pt_PI placement, regex conversion (eraser, wrapper, fields), backgroundHTML CSS, optional Lua parsing, reroll-safe snapshots.", True),
+                               "Building or fixing the status block the model emits at the end of each reply: TAG OUTPUT instruction, {{position::PI}} + @@position pt_PI placement, regex conversion, backgroundHTML CSS, optional Lua parsing.", True),
+    "risuai-source-check.md": ("RisuAI 소스 대조 검증",
+                               "Only when verification is needed: fetch the latest RisuAI/PocketRisu source and check a bot or a doubtful host-behavior claim against it, with file:line evidence.", True),
+}
+
+# Scripts a methodology skill carries next to its reference (scripts/<name>).
+SEED_SCRIPTS: dict[str, tuple[str, ...]] = {
+    "risuai-source-check.md": ("risu_sources.py",),
 }
 
 # The bot-making methodology references (§1-69): rewritten in English from the
@@ -780,7 +788,7 @@ METHOD_FILES = (
     "risuai-cbs.md", "risuai-lorebook-style.md", "risuai-lorebook.md",
     "risuai-simbot.md", "risuai-solobot.md", "risuai-regex.md",
     "risuai-hooks.md", "risuai-lua.md", "risuai-option-panel.md",
-    "risuai-asset-output.md", "risuai-status-panel.md",
+    "risuai-asset-output.md", "risuai-status-panel.md", "risuai-source-check.md",
 )
 
 
@@ -994,6 +1002,10 @@ def _method_body(slug: str, filename: str) -> str:
     body = (f"This skill's material is in `references/{filename}`. Read the sections you need with "
             f"read_file from `skills/{slug}/references/{filename}` (the table of contents is at the top; "
             f"a long file ends with the offset to continue from). Do not try to memorize it whole.")
+    for script in SEED_SCRIPTS.get(filename, ()):
+        body += (f" Its script is `skills/{slug}/scripts/{script}`: in run_python, "
+                 f"`exec(open('skills/{slug}/scripts/{script}', encoding='utf-8').read())`, "
+                 f"then call the functions the reference names.")
     if filename in PRESET_SCOPE_FILES.values():
         body = PRESET_SCOPE_NOTE + "\n" + body
     return body
@@ -1012,6 +1024,8 @@ def refresh_method_skills_once() -> None:
             continue  # seed_once installs it
         try:
             put_file(target["slug"], f"references/{filename}", (SEED_DIR / filename).read_bytes())
+            for script in SEED_SCRIPTS.get(filename, ()):
+                put_file(target["slug"], f"scripts/{script}", (SEED_DIR / script).read_bytes())
             save(target["name"], desc, _method_body(target["slug"], filename),
                  slug=target["slug"], always=target.get("always", False))
         except (OSError, SkillError) as e:
@@ -1026,6 +1040,8 @@ def _seed_file_skill(label: str, desc: str, filename: str, data: bytes, enabled:
     if filename in METHOD_FILES:
         sk = save(label, desc, _method_body(slug, filename), enabled=enabled, sort_order=order)
         put_file(sk["slug"], f"{sub}/{filename}", data)
+        for script in SEED_SCRIPTS.get(filename, ()):
+            put_file(sk["slug"], f"scripts/{script}", (SEED_DIR / script).read_bytes())
         return get(sk["slug"]) or {}
     body = (f"이 스킬의 {'스크립트' if script else '자료'}는 `{sub}/{filename}` 에 있다. "
             + (f"run_python 안에서 `exec(open('skills/{slug}/scripts/{filename}', encoding='utf-8').read())` 로 실행한다. "

@@ -117,16 +117,6 @@ sys.argv = [_target]
 exec(compile(_code, _target, "exec"), {"__name__": "__main__", "__file__": _target})
 '''
 
-LEGACY_HELPER = '''"""Old name for the risuhina helper. Kept so existing scripts run.
-
-The module was called `realooc` before the project was renamed. Re-exporting
-costs three lines and saves every script skill written before the rename.
-"""
-from risuhina import *  # noqa: F401,F403
-from risuhina import conn, turns, turn, search, chats, lore, card, stage  # noqa: F401
-from risuhina import stage_many, scratch, out, uploads, read_upload  # noqa: F401
-'''
-
 HELPER = '''"""Helpers for Risu Hina agent scripts. Import as `import risuhina`.
 
 Reads come from a scoped snapshot containing only this bot's data - other

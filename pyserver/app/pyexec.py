@@ -96,10 +96,6 @@ def layout(home: Path, system: Path) -> None:
     for name in ("scratch", "out", "scripts"):
         (home / name).mkdir(parents=True, exist_ok=True)
     (home / "scripts" / "risuhina.py").write_text(sandbox.HELPER, encoding="utf-8")
-    # The helper used to be called `realooc`. Any script skill the user already
-    # wrote still says `import realooc`, and a rename that breaks those scripts
-    # at the moment they are finally needed is not worth the tidiness.
-    (home / "scripts" / "realooc.py").write_text(sandbox.LEGACY_HELPER, encoding="utf-8")
     (system / ".scratch").mkdir(parents=True, exist_ok=True)
     (system / ".scratch" / "_bootstrap.py").write_text(sandbox.BOOTSTRAP, encoding="utf-8")
 
@@ -354,10 +350,10 @@ def describe_helper() -> str:
     """The helper API and the file conventions, for the tool description."""
     return textwrap.dedent("""
         `import risuhina` is available (workspace-scoped, this bot only):
-        run_python automatically creates hina/<bot>/scripts/risuhina.py and realooc.py
+        run_python automatically creates hina/<bot>/scripts/risuhina.py
         before running code and configures PYTHONPATH. Import directly; no pip install,
         root-level helper file, or manual sys.path edit is needed. Before the first run
-        these generated files may not exist yet. `print(risuhina.__file__)` shows the path.
+        this generated file may not exist yet. `print(risuhina.__file__)` shows the path.
           risuhina.turns(start, end, role, chat_key)  ordered turns
           risuhina.turn(msg_id) / risuhina.search(needle, limit)
           risuhina.chats()      every chat of this bot
@@ -398,8 +394,6 @@ def describe_helper() -> str:
         card.md, original/) but not write it, cannot reach other bots' DB rows,
         and cannot start another process. Everything else works normally.
 
-        `import realooc` 은 같은 헬퍼의 옛 이름이며 계속 동작한다 (스크립트
-        스킬이 그렇게 말해도 경로를 바꿀 필요 없다). 임시 파일·스크립트는
-        반드시 hina/<봇>/ 안(scratch/·scripts/)에 만든다 — projects/ 는
+        임시 파일·스크립트는 반드시 hina/<봇>/ 안(scratch/·scripts/)에 만든다 — projects/ 는
         사용자의 영역이라 임시 파일을 두지 않는다.
     """).strip()

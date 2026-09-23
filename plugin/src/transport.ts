@@ -50,11 +50,6 @@ export class BackendError extends Error {
 }
 
 const SIGNATURE = 'risu-hina';
-// What the backend called itself before the rename. Accepted on the client
-// because the plugin updates first: for one session a new plugin talks to an
-// old backend, and refusing the handshake there would look like the backend
-// being down rather than merely older.
-const LEGACY_SIGNATURES = new Set(['risu-elf', 'real-ooc']);
 const DEFAULT_TIMEOUT_MS = 20_000;
 /** Uploading a whole transcript is slow; a 394-turn chat is several MB. */
 const UPLOAD_TIMEOUT_MS = 180_000;
@@ -118,7 +113,7 @@ export class Transport {
         'URL 이 맞는지, 터널·VPN 이 열려 있는지 확인해 주세요. 잠시 뒤 자동으로 다시 시도합니다.');
     }
     const body = (await readJson(res)) as HealthInfo | null;
-    if (!body || (body.service !== SIGNATURE && !LEGACY_SIGNATURES.has(String(body.service)))) {
+    if (!body || (body.service !== SIGNATURE)) {
       this.route = 'blocked';
       this.tokenSafe = false;
       // What actually came back is the diagnostic: a relay's error page, a

@@ -52,7 +52,7 @@ Expand-Archive Risu.Hina.0.6.0.Auto.Install.Package.zip -DestinationPath D:\code
 ```
 
 ```
-D:\code\risu-elf\
+D:\code\risu-hina\
   pyserver\              code + launcher. An update swaps this wholesale
   plugin\                the plugin to install into RisuAI
   data\                  yours. An update does not touch it
@@ -72,7 +72,7 @@ Keeping it outside the directory an update touches removes that possibility enti
 ### 1-3. Install
 
 ```powershell
-D:\code\risu-elf\setup.bat
+D:\code\risu-hina\setup.bat
 ```
 
 ```
@@ -80,7 +80,7 @@ setup: using C:\Program Files\Python311\python.exe
 setup: creating venv
 setup: installing dependencies
 setup: fastapi 0.115.6 uvicorn 0.34.0
-setup: data dir D:\code\risu-elf\data
+setup: data dir D:\code\risu-hina\data
 ```
 
 It creates a dedicated venv and installs `requirements.in` (pinned versions). The system Python is left alone.
@@ -88,12 +88,12 @@ It creates a dedicated venv and installs `requirements.in` (pinned versions). Th
 ### 1-4. Start
 
 ```powershell
-D:\code\risu-elf\setup.bat        REM setup starts it right away
+D:\code\risu-hina\setup.bat        REM setup starts it right away
 ```
 
 ```
-install    D:\code\risu-elf
-data       D:\code\risu-elf\data
+install    D:\code\risu-hina
+data       D:\code\risu-hina\data
 processes  2 (venv launcher + server, normal)
            pid 21404
            pid 20596
@@ -116,7 +116,7 @@ Keeping it resident is scripted in §2, under **Running it as a service**.
 ### 1-5. Token
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File D:\code\risu-elf\pyserver\manage.ps1 -Action token
+powershell -ExecutionPolicy Bypass -File D:\code\risu-hina\pyserver\manage.ps1 -Action token
 ```
 
 ```

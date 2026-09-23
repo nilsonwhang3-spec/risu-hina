@@ -144,9 +144,6 @@ def build_plugin() -> Path:
     # on it (see plugin/build.config.mjs). This file is committed with the
     # release; the release commit is what makes the new version visible.
     shutil.copy2(built, ROOT / "plugin" / PLUGIN_ASSET)
-    # Installs from before the rename check the old file name; they get the
-    # renamed bundle from it once, and follow the new name from then on.
-    shutil.copy2(built, ROOT / "plugin" / "Risu.Elf.Plugin.js")
     return dest
 
 

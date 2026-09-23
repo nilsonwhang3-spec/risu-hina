@@ -42,7 +42,7 @@ class DiscoveryTests(unittest.TestCase):
 
     def test_python_tool_exposes_runtime_helper_description(self):
         description = self.built._function_toolset.tools["run_python"].description
-        for text in ("import risuhina", "import realooc", "PYTHONPATH", "risuhina.conn()", "assetref"):
+        for text in ("import risuhina", "PYTHONPATH", "risuhina.conn()", "assetref"):
             self.assertIn(text, description)
 
     def test_character_reference_guidance_distinguishes_card_text_and_images(self):

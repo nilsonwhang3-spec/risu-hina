@@ -93,6 +93,43 @@ class SkillGuidanceTests(unittest.TestCase):
         skills.seed_once()
         self.assertEqual(before, {x["slug"]: x["revision"] for x in skills.list_all()})
 
+    def test_seed_v11_installs_source_check_with_script_once(self):
+        db.mark_migration("skills_seeded_v10")
+        skills.seed_once()
+        fresh = skills.find("RisuAI 소스 대조 검증")
+        self.assertIsNotNone(fresh)
+        self.assertTrue(fresh["enabled"])
+        self.assertIn("scripts/risu_sources.py", fresh["body"])
+        self.assertEqual((skills.root()/fresh["slug"]/"scripts/risu_sources.py").read_bytes(),
+                         (skills.SEED_DIR/"risu_sources.py").read_bytes())
+        self.assertEqual((skills.root()/fresh["slug"]/"references/risuai-source-check.md").read_bytes(),
+                         (skills.SEED_DIR/"risuai-source-check.md").read_bytes())
+        before = {x["slug"]: x["revision"] for x in skills.list_all()}
+        skills.seed_once()
+        self.assertEqual(before, {x["slug"]: x["revision"] for x in skills.list_all()})
+
+    def test_source_script_keeps_only_source_paths(self):
+        import io, zipfile
+        ns: dict = {}
+        exec((skills.SEED_DIR/"risu_sources.py").read_text(encoding="utf-8"), ns)
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z:
+            z.writestr("RisuAI-abc/src/ts/cbs.ts", "registerFunction({ name: 'getvar' })\n")
+            z.writestr("RisuAI-abc/README.md", "readme")
+            z.writestr("RisuAI-abc/resources/big.png", "x")
+            z.writestr("RisuAI-abc/src-tauri/main.rs", "fn main(){}")
+            z.writestr("RisuAI-abc/../evil.ts", "no")
+        base = Path(DATA.name)/"srccheck"
+        zpath = base/"a.zip"
+        base.mkdir(parents=True, exist_ok=True)
+        zpath.write_bytes(buf.getvalue())
+        count = ns["_extract"](str(zpath), str(base/"risuai"))
+        self.assertEqual(count, 2)
+        self.assertTrue((base/"risuai/src/ts/cbs.ts").is_file())
+        self.assertFalse((base/"risuai/resources").exists())
+        self.assertFalse((base/"risuai/src-tauri").exists())
+        self.assertEqual(ns["grep_source"]("getvar", "risuai", dest=str(base)), 1)
+
     def test_method_refresh_replaces_references_and_keeps_state(self):
         for filename in skills.METHOD_FILES:
             label = skills.SEED_FILES[filename][0]
