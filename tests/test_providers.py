@@ -130,6 +130,27 @@ check("unsupported API error points to responses", '"api": "responses"' in H(
     "model gpt-5.6-sol is not accessible via the /chat/completions endpoint; unsupported_api_for_model"))
 check("max_output_tokens", '{"max_tokens": null}' in H("body: {'detail': 'Unsupported parameter: max_output_tokens'}"))
 check("strict", '{"strict": false}' in H("unknown field \"strict\" in tools[0].function"))
+# --- Vertex: the endpoint wants <publisher>/<model> -------------------------------
+VERTEX = "https://asia-northeast3-aiplatform.googleapis.com/v1/projects/p/locations/asia-northeast3/endpoints/openapi"
+check("bare gemini gets the google publisher", P.model_for(VERTEX, "gemini-3.8-flash") == "google/gemini-3.8-flash",
+      P.model_for(VERTEX, "gemini-3.8-flash"))
+check("already qualified is left alone", P.model_for(VERTEX, "google/gemini-2.5-flash") == "google/gemini-2.5-flash")
+check("partner families keep their own publisher",
+      P.model_for(VERTEX, "llama-3.3-70b-instruct-maas").startswith("meta/")
+      and P.model_for(VERTEX, "claude-sonnet-4.5").startswith("anthropic/"))
+check("an unknown family falls back to google", P.model_for(VERTEX, "some-new-model") == "google/some-new-model")
+check("other providers are untouched", P.model_for("https://api.openai.com/v1", " gpt-5.1 ") == "gpt-5.1")
+check("blank model stays blank", P.model_for(VERTEX, "") == "")
+# The 400 body reaches the hint as raw text: the angle brackets are still JSON
+# unicode escapes, so the hint has to match on the words, not on the brackets.
+ESC = chr(92) + 'u003c'
+MALFORMED = (
+    'HTTP 400: [{ "error": { "code": 400, "message": "Malformed publisher model (`model`: '
+    "'gemini-3.8-flash') for the 'openapi' request endpoint ID; expected "
+    + ESC + "publisher" + chr(92) + "u003e/" + ESC + "model" + chr(92) + "u003e'.\" }}]"
+)
+check("malformed publisher model names the fix", "google/gemini" in H(MALFORMED), H(MALFORMED))
+
 check("unrelated errors get no hint", H("Internal server error") == "" and H("401 unauthorized") == "")
 check("random words are not fields", H("unknown field \"banana\"") == "")
 

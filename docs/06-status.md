@@ -1,4 +1,38 @@
-# 06. Implementation status — as of 2026-09-22 (v0.15.21, Risu Hina)
+# 06. Implementation status — as of 2026-09-23 (v0.15.21 + unreleased §1-68, Risu Hina)
+
+## Unreleased (2026-09-23): §1-68 Vertex — publisher-qualified model, google-auth repair
+
+Two field reports from a Vertex setup, both of them things the panel could not
+have been talked through.
+
+- **`HTTP 400 Malformed publisher model (…expected '<publisher>/<model>')`.**
+  Vertex's OpenAI-compatible surface (`…/endpoints/openapi`) addresses a model
+  as `<publisher>/<model>`; a bare `gemini-3.8-flash` is refused by the
+  endpoint before the model is ever consulted. The provider profile already
+  said so in its `modelExample`, which is not where anyone reads it. Now
+  `providers.model_for(base_url, model)` qualifies a bare name for Vertex
+  (family table: gemini/gemma/imagen → `google`, llama → `meta`, mistral →
+  `mistralai`, claude → `anthropic`, …, unknown → `google`), and both request
+  paths pass through it - `agent._model_for` and the connection test in
+  `main.py`, so the test measures the request the agent will make. An
+  already-qualified name and every other provider are untouched.
+  `providers.hint` also answers this error in words, and the Vertex profile
+  note now states the format.
+- **`Vertex JSON 인증에 필요한 google-auth가 설치되지 않았습니다` on an updated
+  install.** google-auth has been a pinned dependency since 0.15.14 and every
+  release bundle carries it, but `updater.py` cannot replace the interpreter it
+  is running on: it stages the new one as `python.new` for the launcher to swap
+  in. An install started another way (run.py directly, or a source `.venv`)
+  therefore gains new code on old packages, and the person configuring Vertex
+  has no way to fix that from the panel. `vertexauth._google_auth()` now
+  repairs it once per process with the bundled pip, on the pin read from the
+  shipped `requirements.in`, logging what it does; if that fails too, the error
+  names the cause (staged `python.new`, a `.venv` install, or an old install)
+  and gives the exact `-m pip install` command with this interpreter's path.
+
+Gate ALL GREEN. Tests: the qualification table, the hint and the repair
+(failure path, one attempt per process, success path) in `test_providers.py`
+and `test_vertexauth.py`.
 
 ## 0.15.21 (2026-09-22): §1-67 three bot-UI skills (옵션 패널 · 에셋 출력식 · 상태창)
 

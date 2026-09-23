@@ -232,6 +232,10 @@ def h_config_test(arg: dict) -> dict:
         base, key = keys.runtime(base, key)
     except ValueError as e:
         return {"ok": False, "stage": "auth", "error": str(e)}
+    # Vertex addresses a model as <publisher>/<model>; a bare name is a 400
+    # from the endpoint, not from the model. Qualify it the same way the agent
+    # does so the test measures the request the agent will make.
+    model = providers.model_for(base, model)
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {key}"}
     # The same request the agent will make: the plan decides the API
     # (chat/completions or responses), the cap field, and what not to send.

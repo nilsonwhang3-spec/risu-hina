@@ -328,6 +328,9 @@ def _model_for(section: str) -> "OpenAIChatModel | OpenAIResponsesModel":
     if not (base and key and name):
         raise RuntimeError("에이전트 자격증명이 설정되지 않았습니다 (설정 탭에서 baseUrl/apiKey/model)")
     base, key = keys.runtime(base, key)
+    # Vertex's OpenAI-compatible endpoint takes <publisher>/<model>; a bare
+    # name is rejected by the endpoint before the model is ever consulted.
+    name = providers.model_for(base, name)
     # Everything is addressed as an OpenAI-compatible endpoint, but which
     # fields it accepts, which API it speaks and whether tools may be strict
     # come from the plan (provider profile + the preset's parameter JSON) -

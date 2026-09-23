@@ -160,7 +160,8 @@ PROFILES: list[dict[str, Any]] = [
         "unsupported": [],
         "modelRules": [],
         "template": {"reasoning_effort": "low"},
-        "note": "JSON의 프로젝트 ID와 선택한 리전으로 API 주소를 구성합니다. "
+        "note": "모델 이름은 <publisher>/<model> 형식입니다(예: google/gemini-2.5-flash). publisher 를 빼고 적으면 요청할 때 자동으로 붙입니다. "
+                "JSON의 프로젝트 ID와 선택한 리전으로 API 주소를 구성합니다. "
                 "액세스 토큰은 보통 1시간 뒤 만료되지만, 요청 시 자동 갱신하므로 JSON 키와 권한이 유효하면 1시간 이후에도 계속 사용할 수 있습니다. "
                 "Express mode는 별도의 API 키·엔드포인트를 사용하며 현재 Hina의 Vertex 연결에서는 지원하지 않습니다. JSON 업로드로 Express mode가 활성화되지는 않습니다.",
         "docs": "https://docs.cloud.google.com/vertex-ai/generative-ai/docs/multimodal/call-vertex-using-openai-library",
@@ -425,6 +426,45 @@ def _bare_model(model: str) -> str:
     return model.split("/", 1)[1] if "/" in model else model
 
 
+# Vertex's OpenAI-compatible surface (…/endpoints/openapi) addresses a model as
+# `<publisher>/<model>`; a bare name comes back as HTTP 400 "Malformed publisher
+# model … expected '<publisher>/<model>'". The publisher is not something the
+# user can be expected to know per model family, so a bare name is qualified
+# here, at the one place both request paths pass through.
+VERTEX_PUBLISHERS: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("gemini", "gemma", "medgemma", "medlm", "imagen", "veo", "text-embedding", "text-multilingual"), "google"),
+    (("llama",), "meta"),
+    (("mistral", "ministral", "codestral"), "mistralai"),
+    (("claude",), "anthropic"),
+    (("qwen",), "qwen"),
+    (("deepseek",), "deepseek-ai"),
+    (("jamba",), "ai21"),
+)
+
+
+def vertex_model(model: str) -> str:
+    """A bare model name qualified with its Vertex publisher; anything already
+    qualified (or unrecognised) is returned unchanged."""
+    name = (model or "").strip()
+    if not name or "/" in name:
+        return name
+    low = name.lower()
+    for prefixes, publisher in VERTEX_PUBLISHERS:
+        if low.startswith(prefixes):
+            return f"{publisher}/{name}"
+    # An unknown family: Google's own models are the common case on this
+    # endpoint, and a wrong publisher fails with a message that names itself.
+    return f"google/{name}"
+
+
+def model_for(base_url: str, model: str) -> str:
+    """The model name this endpoint expects, given what the user typed."""
+    profile = for_url(base_url)
+    if profile and profile.get("id") == "vertex":
+        return vertex_model(model)
+    return (model or "").strip()
+
+
 def unsupported_for(profile: dict | None, model: str) -> tuple[list[str], list[str], str]:
     """Fields the profile says this endpoint+model rejects, the notes why, and
     the API ('chat' | 'responses') the profile picks for this model."""
@@ -676,6 +716,9 @@ def hint(text: str, section_label: str = "에이전트") -> str:
             or "is not accessible via the /chat/completions endpoint" in low):
         return (f"이 모델은 Chat Completions 에서 툴 호출을 거부합니다. {where} 에 "
                 '{"api": "responses"} 를 넣어 Responses API 로 보내세요 (또는 {"reasoning_effort": "none"}).')
+    if "malformed publisher model" in low or "expected '<publisher>/<model>'" in low:
+        return ("Vertex 는 모델을 '<publisher>/<model>' 로 받습니다 (예: google/gemini-2.5-flash). "
+                f"설정 → {section_label} → 프리셋 수정 → 모델 이름 앞에 publisher 를 붙여 주세요.")
     name = rejected_field(text)
     if not name:
         return ""
