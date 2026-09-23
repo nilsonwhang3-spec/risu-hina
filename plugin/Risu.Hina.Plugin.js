@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.15.23
+//@display-name Risu Hina v0.15.24
 //@api 3.0
-//@version 0.15.23
+//@version 0.15.24
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -82,7 +82,7 @@
   function clientLog(level, event, detail) {
     return transport.post("/clientlog", { level, event, detail }).then(() => void 0).catch(() => void 0);
   }
-  var BackendError, SIGNATURE, LEGACY_SIGNATURES, DEFAULT_TIMEOUT_MS, UPLOAD_TIMEOUT_MS, Transport, GATE_EXEMPT, transport;
+  var BackendError, SIGNATURE, DEFAULT_TIMEOUT_MS, UPLOAD_TIMEOUT_MS, Transport, GATE_EXEMPT, transport;
   var init_transport = __esm({
     "src/transport.ts"() {
       "use strict";
@@ -95,7 +95,6 @@
         }
       };
       SIGNATURE = "risu-hina";
-      LEGACY_SIGNATURES = /* @__PURE__ */ new Set(["risu-elf", "real-ooc"]);
       DEFAULT_TIMEOUT_MS = 2e4;
       UPLOAD_TIMEOUT_MS = 18e4;
       Transport = class {
@@ -159,7 +158,7 @@
             );
           }
           const body = await readJson(res);
-          if (!body || body.service !== SIGNATURE && !LEGACY_SIGNATURES.has(String(body.service))) {
+          if (!body || body.service !== SIGNATURE) {
             this.route = "blocked";
             this.tokenSafe = false;
             const what = res.status ? `HTTP ${res.status}` : "\uBE48 \uC751\uB2F5";
@@ -182,7 +181,7 @@
           this.tokenSafe = true;
           this.lastHealth = body;
           this.probeInfo = "";
-          this.gate = versionGate("0.15.23", String(body.version || ""));
+          this.gate = versionGate("0.15.24", String(body.version || ""));
           return body;
         }
         /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -14475,10 +14474,10 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           return;
         }
         if (!r.newer) {
-          const mismatch = r.current !== "0.15.23";
+          const mismatch = r.current !== "0.15.24";
           const ahead = r.ahead ?? (!!r.latest && r.latest !== r.current);
           say(
-            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.23"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
+            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.24"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
             mismatch || ahead ? "" : "ok"
           );
           return;
@@ -14569,7 +14568,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.15.23",
+            version: "0.15.24",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -15259,7 +15258,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.23"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.24"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -22077,7 +22076,7 @@ ${negative.value.trim()}
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.23"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.24"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
@@ -22173,7 +22172,7 @@ ${negative.value.trim()}
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.15.23" }),
+        el("span", { class: "dim", text: "v0.15.24" }),
         healthEl,
         el("span", { class: "spacer" }),
         reload,
@@ -22496,6 +22495,6 @@ ${negative.value.trim()}
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.15.23"} loaded`);
+    console.log(`[risu-hina] v${"0.15.24"} loaded`);
   })();
 })();
