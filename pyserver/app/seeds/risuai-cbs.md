@@ -1,375 +1,509 @@
-RisuAI CBS `{{tag}}` 문법 레퍼런스. 봇 카드·로어북·정규식·시스템 프롬프트의
-텍스트 필드에서 동작하는 템플릿 문법이다. 전사에서 CBS 태그를 보거나 써야 할 때 읽어라.
+Read this when you read or write RisuAI CBS `{{tag}}` syntax in a card, lorebook, regex, background HTML or prompt field:
+what each tag does, how `#when` conditions and operators work, what runs in which context, and common patterns
+(score bands, defaults, sliding windows, dice gates, responsive CSS, asset existence checks).
+
+> Tags below were checked against the CBS reference derived from RisuAI source (`src/ts/cbs.ts`,
+> `src/ts/parser/parser.svelte.ts`, 2026-08). The tag set is closed: an unknown `{{…}}` stays as literal text, so never
+> invent tags. Variable names in examples (`bot_*`) are placeholders; use the target bot's real names.
+
+Contents
+1. Core syntax
+2. Character / user tags
+3. System / prompt tags
+4. Chat history tags
+5. Date / time
+6. Model / state tags
+7. Asset / media tags (display only)
+8. Variables
+9. Conditions: `#when`
+10. Loops: `#each`
+11. Functions: `#func` and `call`
+12. String functions
+13. Math
+14. Random
+15. Arrays / objects / aggregates
+16. Comparison functions
+17. Escapes / special tags
+18. Text formatting
+19. Encoding / encryption
+20. Buttons and modules
+21. Behavior by context
+22. Patterns
+23. Pitfalls
+24. Review checklist
+
+Related skills: 'RisuAI 로어북 구조' (decorators such as `@@depth`, `@@position`), 'RisuAI 정규식 작성법' (CBS inside
+regex output, `<cbs>` flag), 'RisuAI Lua 트리거' (`cbs()` from Lua), 'RisuAI 에셋 출력식' (asset tags and
+`{{assetlist}}` checks), 'RisuAI 상태창'.
 
 ---
 
-# RisuAI CBS (Character Bot Script) 문법 레퍼런스
+## 1. Core syntax
 
-CBS는 `{{tag}}` 형식의 템플릿 언어로, description · first_mes · lorebook content · regex · system prompt 등 거의 모든 텍스트 필드에서 동작한다.
+- CBS works in almost every text field: description, first message, lorebook content, regex in/out, global note, system
+  prompt, author's note, persona, background HTML, trigger scripts.
+- `::` separates arguments. For a literal colon inside an argument use `{{:}}`.
+- Parsing is recursive and inside-out: `{{upper::{{user}}}}` resolves `{{user}}` first.
+- Everything is a string. Booleans are `"1"` / `"0"`. Arrays and objects are JSON strings.
+- Whitespace inside blocks is trimmed by default; the `keep` operator preserves it.
+- `{{? expr}}` uses a **space**, not `::`.
 
----
+## 2. Character / user tags
 
-## 1. 캐릭터 / 유저 태그
+| Tag | Meaning |
+|---|---|
+| `{{char}}` / `{{bot}}` | character name |
+| `{{user}}` | user name |
+| `{{persona}}` / `{{userpersona}}` | user persona description |
+| `{{description}}` / `{{chardesc}}` | character description field (re-parsed, so CBS inside it runs) |
+| `{{personality}}` / `{{charpersona}}` | personality field |
+| `{{scenario}}` | scenario field |
+| `{{exampledialogue}}` | example dialogue field |
 
-| 태그 | 설명 |
-|------|------|
-| `{{char}}` / `{{bot}}` | 캐릭터 이름 |
-| `{{user}}` | 유저 이름 |
-| `{{persona}}` / `{{userpersona}}` | 유저 페르소나 설명 |
-| `{{description}}` / `{{chardesc}}` | 캐릭터 description 필드 |
-| `{{personality}}` / `{{charpersona}}` | 캐릭터 personality 필드 |
-| `{{scenario}}` | 캐릭터 scenario 필드 |
-| `{{exampledialogue}}` | 예시 대화 필드 |
+## 3. System / prompt tags
 
-## 2. 시스템 / 프롬프트 태그
+| Tag | Meaning |
+|---|---|
+| `{{mainprompt}}` / `{{systemprompt}}` | main system prompt |
+| `{{jb}}` / `{{jailbreak}}` | jailbreak prompt |
+| `{{globalnote}}` / `{{ujb}}` | global note |
+| `{{authornote}}` | author's note |
+| `{{lorebook}}` / `{{worldinfo}}` | active lorebook entries as a JSON array |
 
-| 태그 | 설명 |
-|------|------|
-| `{{mainprompt}}` / `{{systemprompt}}` | 메인 시스템 프롬프트 |
-| `{{jb}}` / `{{jailbreak}}` | 제일브레이크 프롬프트 |
-| `{{globalnote}}` / `{{ujb}}` | 글로벌 노트 |
-| `{{authornote}}` | 저자 노트 |
-| `{{lorebook}}` / `{{worldinfo}}` | 활성 로어북 JSON 배열 |
+## 4. Chat history tags
 
-## 3. 채팅 히스토리 태그
+| Tag | Meaning |
+|---|---|
+| `{{previouscharchat}}` / `{{lastcharmessage}}` | last character message |
+| `{{previoususerchat}}` / `{{lastusermessage}}` | last user message |
+| `{{lastmessage}}` | last message (any role) |
+| `{{lastmessageid}}` | index of the last message |
+| `{{history}}` / `{{history::role}}` | whole chat as JSON (with `role`, entries become `"role: text"`) |
+| `{{previouschatlog::INDEX}}` | message at an index (`"Out of range"` if invalid) |
+| `{{userhistory}}` | user messages as a JSON array |
+| `{{charhistory}}` | character messages as a JSON array |
+| `{{chatindex}}` / `{{chat_index}}` | index of the message being processed; `-1` without message context |
 
-| 태그 | 설명 |
-|------|------|
-| `{{previouscharchat}}` / `{{lastcharmessage}}` | 마지막 캐릭터 메시지 |
-| `{{previoususerchat}}` / `{{lastusermessage}}` | 마지막 유저 메시지 |
-| `{{lastmessage}}` | 마지막 메시지 (역할 무관) |
-| `{{lastmessageid}}` | 마지막 메시지 인덱스 |
-| `{{history}}` / `{{history::role}}` | 전체 채팅 히스토리 (role 접두어 선택) |
-| `{{previouschatlog::INDEX}}` | 특정 인덱스 메시지 |
-| `{{userhistory}}` | 유저 메시지 JSON 배열 |
-| `{{charhistory}}` | 캐릭터 메시지 JSON 배열 |
+## 5. Date / time
 
-## 4. 날짜 / 시간
+| Tag | Meaning |
+|---|---|
+| `{{time}}` | current local time (h:m:s) |
+| `{{date}}` | current date |
+| `{{date::FORMAT}}` | formatted (YYYY, MM, DD, HH, mm, ss, dddd …) |
+| `{{date::FORMAT::timestamp}}` | format a given timestamp |
+| `{{isotime}}` / `{{isodate}}` | UTC time / date |
+| `{{unixtime}}` | Unix timestamp (seconds) |
+| `{{messagetime}}` / `{{messagedate}}` | send time / date of the current message |
+| `{{idleduration}}` | time since the last message |
+| `{{messageidleduration}}` | gap between the current and previous user message |
 
-| 태그 | 설명 |
-|------|------|
-| `{{time}}` | 현재 로컬 시간 (h:m:s) |
-| `{{date}}` | 현재 날짜 |
-| `{{date::FORMAT}}` | 포맷 지정 (YYYY, MM, DD, HH, mm, ss, dddd 등) |
-| `{{date::FORMAT::timestamp}}` | 특정 타임스탬프 포맷 |
-| `{{isotime}}` / `{{isodate}}` | UTC 시간/날짜 |
-| `{{unixtime}}` | 유닉스 타임스탬프 (초) |
-| `{{messagetime}}` | 현재 메시지 전송 시각 |
-| `{{messagedate}}` | 현재 메시지 전송 날짜 |
-| `{{idleduration}}` | 마지막 메시지 이후 경과 시간 |
-| `{{messageidleduration}}` | 현재-이전 유저 메시지 간격 |
+During token counting the time tags return placeholders (`00:00:00`); do not build logic that needs them there.
 
-## 5. 모델 / 상태 태그
+## 6. Model / state tags
 
-| 태그 | 설명 |
-|------|------|
-| `{{model}}` | 현재 AI 모델 ID |
-| `{{axmodel}}` | 보조 모델 ID |
-| `{{role}}` | 현재 메시지 역할 (user/char/system) |
-| `{{chatindex}}` | 현재 메시지 인덱스 |
-| `{{isfirstmsg}}` | 첫 메시지 여부 ("1"/"0") |
-| `{{maxcontext}}` | 최대 컨텍스트 길이 |
-| `{{jbtoggled}}` | JB 활성화 여부 ("1"/"0") |
-| `{{metadata::KEY}}` | 시스템 메타데이터 |
+| Tag | Meaning |
+|---|---|
+| `{{model}}` | current model ID |
+| `{{axmodel}}` | auxiliary model ID |
+| `{{role}}` | role of the current message (user / char / system) |
+| `{{isfirstmsg}}` | `"1"` when rendering the first message |
+| `{{maxcontext}}` | configured max context |
+| `{{jbtoggled}}` | `"1"` if the jailbreak prompt is on |
+| `{{metadata::KEY}}` | system metadata |
 
-**metadata 키**: `mobile`, `local`, `version`, `majorversion`, `language`, `browserlanguage`, `modelshortname`, `modelname`, `modelformat`, `modelprovider`, `modeltokenizer`, `maxcontext`
+**metadata keys**: `mobile`, `local`, `node`, `risutype`, `version`, `majorversion`, `language`, `browserlanguage`,
+`modelshortname`, `modelname`, `modelinternalid`, `modelformat`, `modelprovider`, `modeltokenizer`, `maxcontext`.
+An unknown key returns an `Error:` string.
 
-## 6. 에셋 / 미디어 태그
+## 7. Asset / media tags (display only)
 
-| 태그 | 설명 |
-|------|------|
-| `{{img::이름}}` / `{{image::이름}}` | 이미지 표시 |
-| `{{emotion::이름}}` | 감정 이미지 표시 |
-| `{{asset::이름}}` | 자동 감지 (이미지/비디오) |
-| `{{video::이름}}` | 비디오 (컨트롤 포함) |
-| `{{video-img::이름}}` | 비디오 (자동재생, 음소거, 루프) |
-| `{{audio::이름}}` | 오디오 (컨트롤 포함) |
-| `{{bgm::이름}}` | 배경음악 |
-| `{{bg::이름}}` | 배경 이미지 (전체화면) |
-| `{{raw::이름}}` / `{{path::이름}}` | 에셋 파일 경로 반환 |
-| `{{source::user}}` / `{{source::char}}` | 프로필 이미지 경로 |
-| `{{inlay::이름}}` | 인레이 (모델 미전송) |
-| `{{assetlist}}` | 에셋 이름 JSON 배열 |
-| `{{emotionlist}}` | 감정 이름 JSON 배열 |
+Rendered when the chat is displayed; **never sent to the model**. Do not use them in prompt-shaping fields.
 
----
-
-## 7. 변수 조작
-
-### 읽기
-| 태그 | 설명 |
-|------|------|
-| `{{getvar::변수명}}` | 채팅 변수 읽기 (영구) |
-| `{{getglobalvar::변수명}}` | 글로벌 변수 읽기 |
-| `{{tempvar::변수명}}` / `{{gettempvar::변수명}}` | 임시 변수 읽기 (세션 한정) |
-
-### 쓰기 (runVar=true 컨텍스트에서만 실행)
-| 태그 | 설명 |
-|------|------|
-| `{{setvar::변수명::값}}` | 채팅 변수 설정 |
-| `{{addvar::변수명::숫자}}` | 변수에 숫자 더하기 |
-| `{{setdefaultvar::변수명::기본값}}` | 비어있을 때만 설정 |
-| `{{settempvar::변수명::값}}` | 임시 변수 설정 |
-
-> **주의**: setvar, addvar, setdefaultvar는 `runVar=true` 컨텍스트(트리거, 스크립트 실행 시)에서만 동작. 일반 description 렌더링 중에는 무시됨.
+| Tag | Meaning |
+|---|---|
+| `{{img::name}}` / `{{image::name}}` | image (unstyled / styled) |
+| `{{emotion::name}}` | emotion image |
+| `{{asset::name}}` | auto-detects image or video |
+| `{{video::name}}` | video with controls |
+| `{{video-img::name}}` | video as image (autoplay, muted, loop) |
+| `{{audio::name}}` | audio with controls |
+| `{{bgm::name}}` | background music |
+| `{{bg::name}}` | full-screen background image |
+| `{{raw::name}}` / `{{path::name}}` | asset file path (use inside `url('…')` or `src`) |
+| `{{source::user}}` / `{{source::char}}` | profile image path |
+| `{{inlay::name}}` / `{{inlayed::name}}` | inlay (not sent to the model) |
+| `{{inlayeddata::name}}` | inlay that **is** sent to the model |
+| `{{assetlist}}` | JSON array of the card's additional asset names (`""` in group chats) |
+| `{{emotionlist}}` | JSON array of emotion names |
+| `{{chardisplayasset}}` | JSON array of prebuilt display assets |
+| `{{position::name}}` | declares an insertion point used by lorebook `@@position pt_name` |
 
 ---
 
-## 8. 조건문 (#when)
+## 8. Variables
 
-### 기본 구문
+### Read
+| Tag | Meaning |
+|---|---|
+| `{{getvar::name}}` | chat variable (persistent, saved with the chat) |
+| `{{getglobalvar::name}}` | global variable (read-only here) |
+| `{{tempvar::name}}` / `{{gettempvar::name}}` | temporary variable (current parse only) |
+
+### Write
+| Tag | Meaning |
+|---|---|
+| `{{setvar::name::value}}` | set chat variable |
+| `{{addvar::name::number}}` | add a number |
+| `{{setdefaultvar::name::default}}` | set only when empty |
+| `{{settempvar::name::value}}` | set temporary variable (always works) |
+
+> **Caution**: `setvar`, `addvar` and `setdefaultvar` run only where the parser has variable permission. In the checked
+> source, chat messages are re-parsed with that permission when a send is prepared, so a `{{setvar}}` left in a stored
+> message (for example written by an editoutput regex) executes on the **next** send, not immediately; on display the
+> tag is removed silently. Description, lorebook token counting and previews do not execute setters. For immediate or
+> guaranteed writes use Lua (`setChatVar`) or the card's `defaultVariables`.
+
+---
+
+## 9. Conditions: `#when`
+
+### Basic form
 ```
-{{#when::조건}}
-  내용
+{{#when::condition}}
+  content
 {{/when}}
 ```
+Truthy values are exactly `"1"` and `"true"`; everything else is false. A space form also exists: `{{#when condition}}`.
 
-### else 절
-`{{:else}}`는 다른 내용 없이 **단독 줄**에 둔다. 인라인이면 정상 파싱되지 않는다.
-HTML·Regex 치환문에서 줄바꿈을 정리할 때도 이 줄바꿈은 보존한다.
+### else
+Put `{{:else}}` **on its own line** with nothing else in multi-line blocks; inline it does not parse correctly there.
+Keep that line break when you compact HTML or regex output. (Single-line blocks may use an inline `{{:else}}`; the own-line
+form is the safe habit.)
 
 ```
-{{#when::조건}}
-  참일 때
+{{#when::condition}}
+  when true
 {{:else}}
-  거짓일 때
+  when false
 {{/when}}
 ```
 
-### 비교 연산자
+### Comparison operators
 
-**주의: `::=::`는 CBS 비교식으로 동작하지 않는다.** `{{#when::A::=::B}}`처럼 쓰지 마라. 문자열 동등 비교에는 `{{#when::A::is::B}}`를 쓰거나, 비교 함수로 `{{#when::{{equal::A::B}}}}`를 사용한다.
+**`::=::` does not work as a comparison in CBS conditions. Never write `{{#when::A::=::B}}`.** For string equality use
+`{{#when::A::is::B}}`, or the comparison function `{{#when::{{equal::A::B}}}}`.
 
 ```
-{{#when::A::>::B}}       숫자 크다
-{{#when::A::<::B}}       숫자 작다
-{{#when::A::>=::B}}      크거나 같다
-{{#when::A::<=::B}}      작거나 같다
-{{#when::A::is::B}}      문자열 같다
-{{#when::A::isnot::B}}   문자열 다르다
+{{#when::A::>::B}}       number greater
+{{#when::A::<::B}}       number less
+{{#when::A::>=::B}}      greater or equal
+{{#when::A::<=::B}}      less or equal
+{{#when::A::is::B}}      string equal
+{{#when::A::isnot::B}}   string not equal
 ```
+For numeric comparisons the operands are values: `{{#when::{{getvar::bot_score}}::>=::50}}`.
 
-### 논리 연산자
+### Logical operators
 ```
-{{#when::A::and::B}}     둘 다 참
-{{#when::A::or::B}}      하나라도 참
-{{#when::not::A}}        부정
-```
-
-### 변수 연산자
-```
-{{#when::var::변수명}}           변수가 truthy
-{{#when::A::vis::B}}             변수 A == 리터럴 B
-{{#when::A::visnot::B}}          변수 A != 리터럴 B
-{{#when::toggle::이름}}          토글 활성화 여부
-{{#when::A::tis::B}}             토글 A == B
+{{#when::A::and::B}}     both true
+{{#when::A::or::B}}      either true
+{{#when::not::A}}        negation
 ```
 
-### 공백 제어
+### Variable operators
 ```
-{{#when::keep::조건}}    공백 보존
-{{#when::legacy::조건}}  레거시 트리밍 (구 #if 방식)
+{{#when::var::name}}             chat variable is truthy
+{{#when::name::vis::B}}          variable `name` == literal B
+{{#when::name::visnot::B}}       variable `name` != literal B
+{{#when::toggle::name}}          global toggle (toggle_name) is on
+{{#when::name::tis::B}}          toggle `name` == B
+{{#when::name::tisnot::B}}       toggle `name` != B
+```
+The first argument of `vis`/`visnot`/`var` is the variable **name**, never `{{getvar::name}}` (that resolves to a value,
+which is then looked up as a name and fails silently).
+
+### Whitespace control
+```
+{{#when::keep::condition}}    keep whitespace
+{{#when::legacy::condition}}  legacy trimming (old #if); :else disabled
 ```
 
-> 연산 순서: **오른쪽→왼쪽** 평가. 중첩 가능.
+> Evaluation order: operators are consumed **right to left**; blocks can be nested. `{{#when::keep::not::A}}` = keep
+> whitespace, NOT A.
+
+`{{#if cond}}…{{/if}}` and `{{#if_pure}}` are deprecated but still work in older bots; write `#when` in new text.
 
 ---
 
-## 9. 반복문 (#each)
+## 10. Loops: `#each`
 
 ```
 {{#each [1,2,3] as item}}
   {{slot::item}}
 {{/each}}
-```
 
-```
-{{#each {{getvar::배열}} as item}}
+{{#each {{getvar::bot_list}} as item}}
   - {{slot::item}}
 {{/each}}
 ```
+- `{{#each::keep ARR as V}}` preserves whitespace.
+- JSON arrays (also 2D); nesting works; an empty array outputs nothing.
+- Older bots omit `as` (`{{#each {{assetlist}} a}}`): the parser still accepts it (last word = slot name), but write `as`.
 
-- `{{#each::keep ...}}` — 공백 보존
-- JSON 배열, 2D 배열 지원
-- 중첩 가능
-- 빈 배열이면 출력 없음
-
----
-
-## 10. 함수 정의 및 호출
+## 11. Functions: `#func` and `call`
 
 ```
-{{#func 함수이름 arg0 arg1}}
-  본문 — {{arg::0}}, {{arg::1}} 으로 인자 접근
-{{/func}}
-
-{{call::함수이름::인자0::인자1}}
+{{#func band}}…{{arg::1}}…{{/func}}
+{{call::band::{{getvar::bot_score}}}}
 ```
+- In `{{call::name::x::y}}`, `{{arg::1}}` is the first argument `x`, `{{arg::2}}` is `y`; `{{arg::0}}` is the function
+  name itself (checked in the parser source; older notes that said "arg 0 = first argument" are wrong).
+- Define the function in the same text (same field or lorebook entry) before calling it; nesting depth is limited.
+- `{{return::value}}` ends execution early.
+- The CBS reference also documents named parameters (`{{#func greet name}}` + `{{tempvar::name}}`) and calling by name
+  (`{{greet::Alice}}`); not verified here, so prefer `call`/`arg`.
 
----
+## 12. String functions
 
-## 11. 문자열 조작
+| Function | Syntax | Result |
+|---|---|---|
+| `replace` | `{{replace::text::find::repl}}` | replace all |
+| `split` | `{{split::text::sep}}` | JSON array |
+| `join` | `{{join::array::sep}}` | string |
+| `trim` | `{{trim::text}}` | strip surrounding whitespace |
+| `length` | `{{length::text}}` | character count |
+| `contains` | `{{contains::text::part}}` | "1"/"0" (substring) |
+| `startswith` | `{{startswith::text::prefix}}` | "1"/"0" |
+| `endswith` | `{{endswith::text::suffix}}` | "1"/"0" |
+| `lower` / `upper` | `{{lower::text}}` | case |
+| `capitalize` | `{{capitalize::text}}` | first letter upper |
+| `reverse` | `{{reverse::text}}` | reversed |
+| `tonumber` | `{{tonumber::text}}` | keeps only digits and `.` |
 
-| 함수 | 문법 | 결과 |
-|------|------|------|
-| `replace` | `{{replace::텍스트::찾기::바꿈}}` | 전체 치환 |
-| `split` | `{{split::텍스트::구분자}}` | JSON 배열 |
-| `join` | `{{join::배열::구분자}}` | 문자열 결합 |
-| `trim` | `{{trim::텍스트}}` | 앞뒤 공백 제거 |
-| `length` | `{{length::텍스트}}` | 글자 수 |
-| `contains` | `{{contains::텍스트::부분}}` | "1"/"0" |
-| `startswith` | `{{startswith::텍스트::접두}}` | "1"/"0" |
-| `endswith` | `{{endswith::텍스트::접미}}` | "1"/"0" |
-| `lower` | `{{lower::텍스트}}` | 소문자 |
-| `upper` | `{{upper::텍스트}}` | 대문자 |
-| `capitalize` | `{{capitalize::텍스트}}` | 첫 글자 대문자 |
-| `reverse` | `{{reverse::텍스트}}` | 문자열 뒤집기 |
-| `tonumber` | `{{tonumber::텍스트}}` | 숫자만 추출 |
+## 13. Math
 
-## 12. 수학 연산
+| Function | Syntax | Result |
+|---|---|---|
+| `calc` | `{{calc::2+3*4}}` | 14 |
+| `?` | `{{? 1+2}}` | expression shorthand (space, not `::`) |
+| `round` / `floor` / `ceil` | `{{round::3.7}}` | 4 / … |
+| `abs` | `{{abs::-5}}` | 5 |
+| `remaind` | `{{remaind::10::3}}` | 1 |
+| `pow` | `{{pow::2::3}}` | 8 |
+| `fixnum` | `{{fixnum::3.14159::2}}` | 3.14 |
 
-| 함수 | 문법 | 결과 |
-|------|------|------|
-| `calc` | `{{calc::2+3*4}}` | 수식 평가 (14) |
-| `?` | `{{? 1+2}}` | 수식 단축 |
-| `round` | `{{round::3.7}}` | 반올림 (4) |
-| `floor` | `{{floor::3.9}}` | 내림 (3) |
-| `ceil` | `{{ceil::3.1}}` | 올림 (4) |
-| `abs` | `{{abs::-5}}` | 절대값 (5) |
-| `remaind` | `{{remaind::10::3}}` | 나머지 (1) |
-| `pow` | `{{pow::2::3}}` | 거듭제곱 (8) |
-| `fixnum` | `{{fixnum::3.14159::2}}` | 소수점 N자리 (3.14) |
+## 14. Random
 
-## 13. 랜덤
+| Function | Syntax | Meaning |
+|---|---|---|
+| `random` | `{{random}}` | float 0-1 |
+| `random` | `{{random::a,b,c}}` / `{{random::a::b::c}}` | random pick (changes on every parse) |
+| `pick` | `{{pick::a,b,c}}` | hash-based, stable for the same chat slot |
+| `randint` | `{{randint::1::10}}` | integer, inclusive |
+| `dice` / `roll` | `{{dice::2d6}}`, `{{roll::20}}` | dice sum; `roll::N` = 1dN, default 1d6 |
+| `rollp` | `{{rollp::1d20}}` | deterministic dice per chat slot |
+| `hash` | `{{hash::input}}` | deterministic 7-digit hash |
 
-| 함수 | 문법 | 설명 |
-|------|------|------|
-| `random` | `{{random}}` | 0~1 랜덤 |
-| `random` | `{{random::a,b,c}}` | 목록에서 랜덤 선택 |
-| `pick` | `{{pick::a,b,c}}` | 해시 기반 (채팅별 고정) |
-| `randint` | `{{randint::1::10}}` | 정수 랜덤 (양끝 포함) |
-| `dice` / `roll` | `{{dice::2d6}}` | 주사위 (2d6, 3d20 등) |
-| `hash` | `{{hash::입력}}` | 결정론적 7자리 해시 |
+## 15. Arrays / objects / aggregates
 
----
+### Arrays
+| Function | Syntax |
+|---|---|
+| `makearray` / `a` | `{{makearray::a::b::c}}` -> `["a","b","c"]` |
+| `arraylength` | `{{arraylength::array}}` |
+| `arrayelement` | `{{arrayelement::array::index}}` |
+| `arraypush` | `{{arraypush::array::item}}` |
+| `arraypop` | `{{arraypop::array}}` |
+| `arrayshift` | `{{arrayshift::array}}` |
+| `arraysplice` | `{{arraysplice::array::start::deleteCount::newItem}}` |
+| `filter` | `{{filter::array::mode}}`, mode all / nonempty / unique |
+| `range` | `{{range::[5]}}` -> [0,1,2,3,4]; also `[start,end]`, `[start,end,step]` |
 
-## 14. 배열 / 객체 조작
-
-### 배열
-| 함수 | 문법 |
-|------|------|
-| `makearray` / `a` | `{{makearray::a::b::c}}` → `["a","b","c"]` |
-| `arraylength` | `{{arraylength::배열}}` |
-| `arrayelement` | `{{arrayelement::배열::인덱스}}` |
-| `arraypush` | `{{arraypush::배열::항목}}` |
-| `arraypop` | `{{arraypop::배열}}` |
-| `arrayshift` | `{{arrayshift::배열}}` |
-| `arraysplice` | `{{arraysplice::배열::시작::삭제수::새항목}}` |
-| `filter` | `{{filter::배열::타입}}` — all/nonempty/unique |
-| `range` | `{{range::[5]}}` → [0,1,2,3,4] |
-
-### 객체
-| 함수 | 문법 |
-|------|------|
+### Objects
+| Function | Syntax |
+|---|---|
 | `makedict` / `d` / `o` | `{{makedict::key=value::k2=v2}}` |
-| `dictelement` | `{{dictelement::객체::키}}` |
-| `element` / `ele` | `{{element::JSON::키1::키2}}` — 중첩 접근 |
+| `dictelement` | `{{dictelement::object::key}}` |
+| `element` / `ele` | `{{element::JSON::key1::key2}}` nested access (`"null"` on a miss) |
 
-### 집계
-| 함수 | 문법 |
-|------|------|
-| `min` / `max` / `sum` / `average` | `{{sum::1::2::3}}` → 6 |
-| `all` | `{{all::1::1::0}}` → "0" |
-| `any` | `{{any::0::1::0}}` → "1" |
+### Aggregates
+| Function | Syntax |
+|---|---|
+| `min` / `max` / `sum` / `average` | `{{sum::1::2::3}}` -> 6 |
+| `all` | `{{all::1::1::0}}` -> "0" |
+| `any` | `{{any::0::1::0}}` -> "1" |
 
----
+## 16. Comparison functions
 
-## 15. 비교 함수
-
-| 함수 | 문법 | 반환 |
-|------|------|------|
-| `equal` | `{{equal::a::b}}` | "1"/"0" |
+| Function | Syntax | Returns |
+|---|---|---|
+| `equal` | `{{equal::a::b}}` | "1"/"0" (case-sensitive) |
 | `notequal` | `{{notequal::a::b}}` | "1"/"0" |
-| `greater` | `{{greater::10::5}}` | "1"/"0" |
-| `less` | `{{less::5::10}}` | "1"/"0" |
-| `and` | `{{and::1::1}}` | "1"/"0" |
-| `or` | `{{or::1::0}}` | "1"/"0" |
+| `greater` / `less` | `{{greater::10::5}}` | "1"/"0" |
+| `greater_equal` / `less_equal` | `{{greater_equal::a::b}}` (also `greaterequal`) | "1"/"0" |
+| `and` / `or` | `{{and::1::1}}` | "1"/"0" |
 | `not` | `{{not::1}}` | "0" |
+| `iserror` | `{{iserror::s}}` | "1" if s starts with `error:` |
 
----
+## 17. Escapes / special tags
 
-## 16. 이스케이프 / 특수 태그
-
-| 태그 | 출력 |
-|------|------|
-| `{{bo}}` | `{{` |
-| `{{bc}}` | `}}` |
-| `{{decbo}}` | `{` |
-| `{{decbc}}` | `}` |
+| Tag | Output |
+|---|---|
+| `{{bo}}` / `{{bc}}` | `{{` / `}}` (not parsed) |
+| `{{decbo}}` / `{{decbc}}` | `{` / `}` |
 | `{{dec}}` / `{{:}}` | `:` |
-| `{{br}}` / `{{newline}}` | 줄바꿈 |
-| `{{cbr}}` / `{{cbr::N}}` | 이스케이프된 줄바꿈 (\\n) × N |
-| `{{blank}}` / `{{none}}` | 빈 문자열 |
-| `{{//  주석}}` | 숨김 (출력 안 됨) |
-| `{{comment::텍스트}}` | 표시되는 주석 |
-| `{{hiddenkey::값}}` | 로어 활성화용 숨김 키 (모델 미전송) |
-| `{{return::값}}` | 스크립트 종료 + 값 반환 |
+| `{{br}}` / `{{newline}}` | line break |
+| `{{cbr}}` / `{{cbr::N}}` | escaped newline (`\n`) × N |
+| `{{blank}}` / `{{none}}` | empty string |
+| `{{// comment}}` | hidden, outputs nothing |
+| `{{comment::text}}` | visible comment on display only |
+| `{{hiddenkey::value}}` | lorebook activation key that is not sent to the model |
+| `{{return::value}}` | end execution and return a value |
 
-### 이스케이프 블록
+### Escape blocks
 ```
 {{#puredisplay}}
-  {{이 안의 CBS}}는 파싱되지 않음
+  {{CBS in here}} is shown, not parsed
 {{/puredisplay}}
 
 {{#escape}}
-  {중괄호}와 (괄호)가 이스케이프됨
+  {braces} and (parentheses) are escaped
 {{/escape}}
 
 {{#escape::keep}}
-  공백 보존 모드
+  keep-whitespace mode
 {{/escape}}
 ```
 
-## 17. 텍스트 포맷팅
+## 18. Text formatting
 
-| 태그 | 설명 |
-|------|------|
-| `{{tex::E=mc^2}}` | LaTeX/KaTeX 수식 렌더링 |
-| `{{ruby::漢字::かんじ}}` | 후리가나 |
-| `{{codeblock::코드}}` | 코드 블록 |
-| `{{codeblock::언어::코드}}` | 언어 지정 코드 블록 |
-| `{{bkspc}}` | 마지막 단어 삭제 |
-| `{{erase}}` | 마지막 문장 삭제 |
+| Tag | Meaning |
+|---|---|
+| `{{tex::E=mc^2}}` | LaTeX/KaTeX |
+| `{{ruby::base::reading}}` | ruby annotation (furigana) |
+| `{{codeblock::code}}` / `{{codeblock::lang::code}}` | code block |
+| `{{bkspc}}` | delete the last word of the output so far |
+| `{{erase}}` | delete the last sentence of the output so far |
 
-## 18. 인코딩 / 암호화
+## 19. Encoding / encryption
 
-| 태그 | 설명 |
-|------|------|
-| `{{unicodeencode::A}}` | 유니코드 코드포인트 |
-| `{{unicodedecode::65}}` | 코드포인트→문자 |
-| `{{fromhex::FF}}` | 16진수→10진수 |
-| `{{tohex::255}}` | 10진수→16진수 |
-| `{{xor::텍스트}}` | XOR 암호화+base64 |
-| `{{xordecrypt::base64}}` | XOR 복호화 |
-| `{{crypt::텍스트::시프트}}` | 시저 암호 (기본 시프트: 32768) |
+| Tag | Meaning |
+|---|---|
+| `{{unicodeencode::A}}` / `{{unicodedecode::65}}` | code point <-> character |
+| `{{fromhex::FF}}` / `{{tohex::255}}` | hex <-> decimal |
+| `{{xor::text}}` / `{{xordecrypt::base64}}` | XOR + base64 / decrypt |
+| `{{crypt::text::shift}}` | Caesar shift (default 32768, its own inverse) |
 
-## 19. 버튼
+## 20. Buttons and modules
 
 ```
-{{button::버튼텍스트::트리거이름}}
+{{button::Label::TriggerName}}
 ```
-- 클릭 시 해당 이름의 manual 트리거 실행
-- `{{trigger_id}}` 로 트리거된 요소의 risu-id 접근 가능
+- Clicking runs the manual trigger (or the Lua global function) with that name. Raw HTML alternatives:
+  `risu-trigger="TriggerName"` (same) and `risu-btn="payload"` (calls Lua `onButtonClick(id, payload)`).
+- `{{trigger_id}}` returns the `risu-id` attribute of the element that fired the trigger (`"null"` if none).
+- `{{screen_width}}` / `{{screenwidth}}`, `{{screen_height}}`: viewport size in px.
+- `{{moduleenabled::namespace}}`: `"1"` if a module with that namespace is loaded.
+- `{{moduleassetlist::namespace}}` / `{{module_assetlist::…}}`: JSON array of that module's asset names.
 
 ---
 
-## 컨텍스트별 동작 차이
+## 21. Behavior by context
 
-| 컨텍스트 | runVar | 특이사항 |
-|----------|--------|---------|
-| description / personality / scenario | false | setvar 등 무시됨 |
-| first_mes / alternate_greetings | false | `{{isfirstmsg}}` = "1" |
-| lorebook content | false | 표시 전용 |
-| regex replacement | true | 변수 조작 가능 |
-| trigger script (CBS) | true | 변수 조작 가능 |
-| display 렌더링 | false | HTML 변환 활성 (img, button 등) |
+| Context | Setters run | Notes |
+|---|---|---|
+| description / personality / scenario | no | re-parsed when inserted; conditions work |
+| first message / alternate greetings | no | `{{isfirstmsg}}` = "1" |
+| lorebook content | no (token counting) | conditions decide what reaches the prompt |
+| stored chat messages at send time | **yes** | leftover `{{setvar}}` in messages executes here |
+| regex out (editoutput / editinput) | no at regex time | setters stay in the stored text and run on the next send |
+| display rendering | removed | HTML, images, buttons render; setters are stripped |
+| Lua `cbs()` | per call | runs in the current character's context |
+
+Temp vars (`settempvar`) work in any context but vanish after the parse.
+
+---
+
+## 22. Patterns
+
+**Score -> band label with `#func`** (one definition serves every character; the model reads a label, not a raw number):
+```
+{{#func band}}{{#when::{{arg::1}}::>=::80}}close{{:else}}{{#when::{{arg::1}}::>=::40}}friendly{{:else}}distant{{/when}}{{/when}}{{/func}}
+- Name A: {{getvar::bot_aff_a}} ({{call::band::{{getvar::bot_aff_a}}}})
+- Name B: {{getvar::bot_aff_b}} ({{call::band::{{getvar::bot_aff_b}}}})
+```
+Thresholds are examples; the bot defines its own bands. For long per-band behavior text, one `#when` block per band
+inside a constant entry lets only the active paragraph reach the prompt.
+
+**Declarative defaults in an always-on entry**:
+```
+{{setdefaultvar::bot_stage::0}}{{setdefaultvar::bot_lang::en}}
+```
+Readable list of defaults, but setters do not run at lorebook evaluation time (§8, §21). Bots that use it also backfill
+from Lua; the reliable source of defaults is the card's `defaultVariables`.
+
+**Sliding window** (display old UI once, trim tokens, keep only recent examples). As a regex `out` that wraps the match:
+```
+{{#if {{greater_equal::{{chat_index}}::{{? {{lastmessageid}}-N}}}}}}$&{{/if}}
+{{#when::{{greater_equal::{{chat_index}}::{{? {{lastmessageid}}-N}}}}}}$&{{/when}}     (same, non-deprecated)
+```
+Use it in editdisplay (render images or panels only for the last N+1 messages), in editprocess (keep format examples only
+in recent history), and with `N = 0` to show a floating panel only under the newest message.
+
+**Dice gates for random events** (constant entries, usually `@@depth 0`):
+```
+{{#when::{{roll::500}}::<=::4}}
+### Unexpected visitor
+- (2-4 bullets of event guidance)
+- Do not trigger during private or intimate scenes.
+{{/when}}
+```
+Older bots write `{{#if {{? {{roll::500}}<=4}}}}`. `roll` changes on every parse (reroll re-rolls; harmless); use `rollp`
+for a stable result per chat slot. Give each event its own rarity and a safety clause. A Lua-rolled seed stored in a chat
+var plus range buckets (`{{#when::{{getvar::bot_seed}}::<=::20}}`) picks exactly one variant per day or turn.
+
+**CBS inside background HTML CSS** (responsive layout and option-driven styles):
+```
+<style>
+.bot-panel { width: {{#when::{{screen_width}}::<::600}}96vw{{:else}}560px{{/when}}; }
+{{#when::bot_asset_fold::vis::1}}.bot-asset { aspect-ratio: 1 / 1; }{{/when}}
+</style>
+```
+
+**Asset existence check before rendering**:
+```
+{{#each {{assetlist}} as a}}{{#when::{{equal::{{slot::a}}::$1}}}}<div class="bot-asset" style="background-image:url('{{raw::$1}}')"></div>{{/when}}{{/each}}
+{{#when::{{contains::{{assetlist}}::"$1"}}}}…{{/when}}     (shorter: quotes make it an exact match on the JSON array)
+```
+Use `{{moduleassetlist::namespace}}` for module assets. Missing names can render nothing or a small fallback note. Details:
+'RisuAI 에셋 출력식'.
+
+**Gating by omission**: wrap optional prompt lists in `{{#when::bot_opt::vis::1}}…{{/when}}` so the model is never told
+about disabled content, instead of writing "do not use X".
+
+---
+
+## 23. Pitfalls
+
+1. `{{#when::A::=::B}}` never works. Use `is` or `{{equal}}`.
+2. `vis`/`visnot`/`var` take the variable name; `{{getvar}}` there fails silently.
+3. A multi-line `{{:else}}` that shares its line with other text breaks the block.
+4. `{{?::1+2}}` does not work; `{{? 1+2}}` does.
+5. Setters in regex output or lorebook text do not run immediately (§8).
+6. Display-only tags (`image`, `asset`, `button`, `comment`, `inlay`) never reach the model.
+7. `{{random}}` and `{{roll}}` change on every parse; use `pick` / `rollp` when a stable choice is needed.
+8. `contains` is a substring check: `Ann` matches `Anna`.
+9. Group chats return `""` for `description`, `personality`, `scenario`, `exampledialogue`, `assetlist`.
+10. To print `{{…}}` literally use `{{bo}}`/`{{bc}}` or `#puredisplay`; otherwise `{{user}}` in output is substituted.
+11. `{{persona}}` is the user's persona; the character's is `{{personality}}`.
+12. A literal `::` inside an argument splits it; use `{{:}}`.
+
+## 24. Review checklist
+
+- [ ] no `::=::`; equality uses `is` or `{{equal}}`
+- [ ] every `vis`/`visnot` first argument is a bare variable name that exists (in `defaultVariables` or set somewhere)
+- [ ] every multi-line `{{:else}}` on its own line
+- [ ] no display-only tag in prompt-shaping text; no setter relied on in a context where it does not run
+- [ ] numeric comparisons use values (`{{getvar::…}}`), string ones use `is`
+- [ ] sliding windows and dice gates tested on a chat longer than N messages

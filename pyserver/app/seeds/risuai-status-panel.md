@@ -1,60 +1,88 @@
 <!-- risuhina-preset-scope-v1 -->
-RisuAI는 별도의 프롬프트 제작자가 제공하는 프롬프트 프리셋에서 로어북 삽입 순서, 서술 시점, 대필 유무를 옵션으로 지정한다. 봇카드와 로어북에는 세계관·인물·사건·상태 및 봇 고유 시스템을 작성하고, 해당 서술 옵션은 프리셋 설정을 따른다. 프리셋의 제어 옵션은 제작 지식으로만 참고하고 봇카드·로어북 본문에 별도 규칙으로 기재하지 않는다.
+In RisuAI the prompt preset, supplied by a separate preset author, sets the lorebook insertion order, the narrative point of view, and whether the model may write the user's part. Bot cards and lorebooks hold the world, characters, events, state, and the bot's own systems; those narration options follow the preset. Treat the preset's controls as production knowledge only and do not restate them as rules in the card or lorebook.
 
-RisuAI 봇의 **상태창** 레퍼런스. 모델이 매 응답 끝에 태그 블록(TAG OUTPUT)을 내고, 정규식이 HTML 로 바꾸고,
-backgroundHTML 의 CSS 로 꾸미며, `{{position::PI}}` + `@@position pt_PI` 로 출력 지시가 무시되지 않게 하는 구조를
-만들거나 고칠 때 읽어라. 데코레이터 일반론은 'RisuAI 로어북 구조', 훅 실행 순서는 'RisuAI 처리 순서' 스킬을 함께 본다.
+Reference for a RisuAI bot's **status panel**. The model ends each reply with a tagged block (TAG OUTPUT), regexes turn it into HTML, backgroundHTML CSS styles it, and `{{position::PI}}` + `@@position pt_PI` keep the output instruction from being ignored. Read this when you design, build or fix that system.
+Related skills: 'RisuAI 정규식 작성법' (regex mechanics and recipes), 'RisuAI 처리 순서 (정규식·Lua 훅)' (hook timing), 'RisuAI 로어북 구조' (decorators in general), 'RisuAI Lua 트리거' (Lua API and reroll-safe state), 'RisuAI 에셋 출력식' (image tags).
 
-> **태그 이름과 필드 구성은 봇마다 다르다.** 아래의 `<bot-panel>`, `<bot-scene>`, `.bot-` 클래스, 필드(시각·장소·등장인물·소지금 등)는
-> 설명용 자리표시자다. 봇마다 고유 접두사와 필드를 정해 지시문·정규식·CSS 에서 일관되게 쓴다.
+> **Tag names and fields differ per bot.** `<bot-panel>`, `<bot-scene>`, the `.bot-` classes, `bot_*` variables and fields such as time, place, cast and money are placeholders. Read the target bot's real tags, fields and variables first; for a new bot, choose one prefix and use it consistently in the instruction, the regexes and the CSS.
 
----
-
-# RisuAI 상태창 작성법
-
-## 0. 구조
-
-```
-[로어북 항목, constant]  "매 응답 끝에 <태그 블록> 출력" 지시   ── @@position pt_PI ──▶ 프롬프트 최말단(글로벌 노트 자리)
-[모델 출력]              본문 + <태그 블록>
-[정규식 editdisplay]     지우개(옛 턴 숨김) → 래퍼 → 컨테이너 → 필드별 변환
-[정규식 editprocess]     옛 턴의 블록을 요청에서 제거(리퀘 제거). 최근 몇 턴은 남겨 "이전 값 읽고 갱신"
-[backgroundHTML]         <style> 안의 .접두사-* 클래스
-[Lua (선택)]             editOutput 에서 태그 파싱 → 변수·스냅샷, editDisplay 에서 CoT 방어·앵커 채우기
-```
-
-순수 정규식만으로도 상태창은 완성된다. Lua 는 값을 파싱해 다음 턴에 되먹이거나, 모델이 쓴 값을 교정하거나,
-리롤에 안전한 상태 저장이 필요할 때만 더한다(§5).
+Contents
+0. Structure
+1. Designing the block: format and fields
+2. The instruction (TAG OUTPUT)
+3. Placement: `{{position::PI}}` + `@@position pt_PI`
+4. Regex pipeline
+5. Producers, Lua and derived state
+6. CSS
+7. Applying it to a new bot
+8. Pitfalls
+9. Build/review checklist
 
 ---
 
-## 1. 지시문 (TAG OUTPUT)
+## 0. Structure
 
-### 1.1 골격
+```
+[lorebook entry, constant]  "End every reply with <tag block>"  ── @@position pt_PI ──▶ end of the prompt (global-note slot)
+[model output]              narrative + <tag block>
+[regex editdisplay]         eraser (hides old turns) → wrapper → container → per-field conversion
+[regex editprocess]         removes old turns' blocks from the request; keeps the last few so the model reads and updates them
+[backgroundHTML]            .prefix-* classes inside <style>
+[Lua (optional)]            parses tags in editOutput/onOutput → variables and snapshots; CoT defense and anchors in editDisplay
+```
 
-로어북 항목 하나를 `constant: true` 로 두고, insertion_order 를 같은 슬롯의 다른 규칙보다 높게 잡는다.
+Regex alone completes a status panel. Add Lua only to parse values and feed them back next turn, to correct values the model wrote, to produce the block with a second model, or to store state safely across rerolls (§5).
 
+---
+
+## 1. Designing the block: format and fields
+
+### 1.1 One line or a block
+| Format | Example | Strengths | Weaknesses |
+|---|---|---|---|
+| **One delimited line** (most common) | `[Date: … \| Time: … \| Place: … \| Thought: …]`, `<bot-line>date \| time \| place</bot-line>`, or one bracket per field `[date][time][place]` | Cheap, and one capture regex renders it; the model rarely breaks a line | Values cannot contain the delimiter; a missing field breaks a whole-line regex |
+| **Nested tags** (block) | `<bot-panel><bot-scene>…</bot-scene>…</bot-panel>` | Per-field regexes tolerate order changes and missing fields; values may be long | More tokens; needs strict "each on its own line" rules |
+| **JSON object** | `<bot-status>{"date":"…","note":"…"}</bot-status>` | Easy for Lua to parse; a strict schema | A regex must assume key order; quotes and newlines in values break it ("no literal line breaks, all values strings") |
+| **Two lines** | the status line plus a separate delta or attire line | Keeps changing data (affinity deltas) apart from the always-present status | Two formats to render and to strip |
+
+For solo bots, date, time, place and an inner-voice field are usually enough. Simulation bots add cast, money, goals and RPG stats.
+
+### 1.2 Field menu
+- **Date, time, place, weather**: the backbone of continuity. Give a fixed grammar (`YYYY-MM-DD (Day)`, a closed set of day parts or `AM/PM HH:MM`, an icon plus °C) and continuity rules: keep the place unless the scene moves; advance the date only past midnight; a minimum time step per turn ("never freeze time"); weather follows the season.
+- **Inner thought, memo or diary**: one sentence in the character's voice, which shows the gap between mask and self every turn. See §2.5 for the inner-voice channel.
+- **Outfit or attire**: the field that **drives the next image**. The asset tag's outfit axis reads it, and the character sheet defines when each outfit is worn. A closed set (`uniform|casual|sleepwear|…`) that matches the asset names is required. See 'RisuAI 에셋 출력식'.
+- **Mode or identity label**: a cheap state machine that lives in the output ("current mode: X") and can pick the panel's skin (§4.6).
+- **Situation keyword**: a hidden field from a closed list (rest, study, date, combat…) that Lua maps to achievements or events.
+- **RPG fields**: level, EXP cur/req, HP/MP cur/max, stats, class, equipment, items, skills, quests, currency. Give formulas (a maximum derived from a stat, EXP needed derived from level) but let Lua recompute them (§5.1). Put secondary fields in a fold.
+- **Cast present, money, goals, task list**: simulation-bot fields that each need an update rule ("read the previous value, apply this turn's changes").
+
+---
+
+## 2. The instruction (TAG OUTPUT)
+
+### 2.1 Skeleton
+One lorebook entry with `constant: true` and an insertion_order above the other rules in the same slot:
 ```
 @@position pt_PI
 ### OUTPUT FORMAT
 Every response MUST end with the status panel. Never skip. Never omit any field.
-Language: Korean. Tag names stay as written; only values follow the output language.
+Tag names stay exactly as written; only values follow the output language.
 
 <bot-panel>
-<bot-scene>{YYYY-MM-DD} {요일} {시간대} | {location}</bot-scene>
+<bot-scene>{YYYY-MM-DD} {weekday} {day part} | {location}</bot-scene>
 <bot-present>{characters in the scene}</bot-present>
 <bot-money>{amount}</bot-money>
 <bot-goal>{current objective}</bot-goal>
 <bot-list>
-[항목 | 현재 상황 | NEW or ONGOING or HOLD]
+[item | current state | NEW or ONGOING or HOLD]
 </bot-list>
 </bot-panel>
 
 == RULES ==
 - ALL fields are MANDATORY, each on its own line. If unknown, use "-" as the value.
-- <bot-scene>: 요일 = 월~일. 시간대 = 새벽 | 오전 | 오후 | 저녁 | 밤. Time advances realistically.
+- <bot-scene>: weekday = Mon..Sun. Day part = dawn | morning | afternoon | evening | night. Time advances realistically.
   The date MUST advance when the scene moves to the next day.
-- <bot-money>: read the previous panel's value and apply this turn's transactions.
+- <bot-money>: read the previous panel's value and apply this turn's transactions. Digits only, no thousands separators.
 - <bot-list>: exactly ONE `|` between fields. The last field is exactly one of NEW ONGOING HOLD. Max 8 entries. Remove finished items silently.
 - The panel is a meta-UI element, invisible to in-world characters. Characters never mention its values.
 
@@ -64,135 +92,201 @@ Language: Korean. Tag names stay as written; only values follow the output langu
 <bot-panel> … </bot-panel>
 
 == EXAMPLES ==
-(상황별 정답 예시 1~4개)
+(1-4 correct examples for different situations)
 ```
 
-### 1.2 구성 요소와 이유
+### 2.2 Components and why
+- **Say "mandatory" several times**: "MUST end with", "Never skip / Never omit", MANDATORY per field. With only one such line, the block gets dropped after a few turns.
+- **An empty-value rule**: a placeholder value such as `-`, `None` or `NA`. Without it, the model drops unknown fields entirely. If the bot initializes on the first reply, put `?` in the greeting's panel with the rule "set it on the first reply, concrete values afterwards".
+- **Closed vocabularies**: weekdays, day parts, progress states. Regex captures and CSS classes (`bot-item-$3`) then line up.
+- **An update rule**: "read the previous panel and update it". That is why the request keeps the latest panel (§4.3).
+- **OUTPUT ORDER and correct examples.** Also put a **filled status line in the greeting**: it teaches the format from turn one and sets the starting time and place. Every alternate greeting needs its own.
+- **Section headers as `== SECTION ==`.** Angle-bracket headers such as `<SECTION>` inside the instruction get imitated. Use angle brackets only for the tags to output.
+- **Wrong examples**: keep them short or skip them, because the model sometimes copies the wrong format. If you use them, put one or two after the correct examples.
+- **A hiding rule**: the panel is meta UI, so characters never say its numbers aloud. Diegetic panels (§6.5) are the exception; the fiction then defines who can see them.
+- **Never translate tag names.** Only values follow the output language, so a language switch does not break the regexes. State it: "labels in English, values in the scenario language".
+- **The number rule**: "numbers without thousands separators" whenever a regex uses `\d+` or `calc()` (§4.5).
+- **"Single line, no paragraphs"** for one-line formats. If a field needs a break, use `<br>` inside the value.
 
-- **필수성 문구를 여러 번**: "MUST end with", "Never skip / Never omit", 필드별 MANDATORY. 하나만 쓰면 몇 턴 뒤 생략된다.
-- **빈 값 규칙**: `-` 같은 자리표시 값. 없으면 모델이 모르는 필드를 통째로 뺀다. 첫 응답에서 초기화하는 봇이면 인사말 패널에 `?` 를 두고 "첫 응답에서 설정하고 이후엔 구체 값" 규칙을 준다.
-- **값 어휘를 닫힌 집합으로**: 요일, 시간대, 진행 상태 등. 정규식 캡처와 CSS 클래스(`bot-item-$3`)가 그대로 맞물린다.
-- **갱신 규칙**: "이전 패널 값을 읽고 갱신". 리퀘 제거에서 최근 턴의 패널을 남기는 이유다(§3.3).
-- **OUTPUT ORDER 와 정답 예시**. 인사말(퍼스트 메시지)에도 실제 패널을 넣어 형식 앵커로 삼는다.
-- **섹션 헤더는 `== SECTION ==`** 로 쓴다. 지시문 안에 `<SECTION>` 같은 꺾쇠 헤더를 쓰면 모델이 그 형식을 흉내 낸다. 꺾쇠는 출력할 태그 예시에만 쓴다.
-- **오답 예시**는 짧게 두거나 쓰지 않는다. 모델이 오답 형식을 복사하는 경우가 있다. 쓰려면 정답 예시 뒤에 한두 개만.
-- **은닉 규칙**: 상태창은 메타 UI 이므로 캐릭터가 그 수치를 대사로 말하지 않게 한다.
-- **태그 이름은 번역하지 않는다**: 값만 출력 언어를 따르게 하면 언어를 바꿔도 정규식이 깨지지 않는다.
+### 2.3 Common extensions
+- **Mode branches**: inside one entry, `{{#when::bot_mode::visnot::X}}…{{/when}}` swaps the format per mode. When another producer owns the panel (§5.2), `{{#when::bot_status_producer::vis::aux}}Do not output the status panel.{{/when}}` switches on the opposite instruction.
+- **Separate screen anchors from data tags.** When Lua fills an empty anchor (`<bot-anchor name="X"></bot-anchor>`) and parses a data tag (`[Data: …]`), mark as CRITICAL: "leave anchors empty; data goes on a separate line outside the panel". If the model writes data into the anchor, parsing breaks.
+- **System-only blocks**: an internal memo the user should not see goes in its own tag (`<bot-secret>`) that Lua editOutput deletes before saving, or that display hides.
+- **Conditional tags**: values that appear only when they change (affinity deltas) go **outside** the panel in their own tag line, as signed deltas or phrases (§5.5). State "only characters affected in this scene; never list everyone". Lua keeps the absolute value and returns it to the prompt with `{{getvar::…}}`.
 
-### 1.3 자주 쓰는 확장
+### 2.4 Anti-repetition rules for status fields
+Free-text fields (memo, diary, thought) loop quickly. Write the rule into the spec:
+- "Memo must never repeat the previous response's memo verbatim." "Never repeat the same sentiment two entries in a row."
+- "At least one of fields A/B/C must change every turn."
+- "Memo references concrete upcoming tasks; it never overlaps with the diary."
+- Give each field a distinct job, so two fields do not say the same thing.
 
-- **모드 분기**: 한 항목 안에서 `{{#when::mode_var::visnot::X}}…{{/when}}` 로 모드별 형식을 바꾸거나, 보조모델이 상태창을 맡는 모드에서는
-  `{{#when::status_aux::vis::1}} 상태창을 출력하지 마라 {{/when}}` 로 정반대 지시를 켠다.
-- **화면 앵커와 데이터 태그 분리**: Lua 가 내용을 채울 빈 앵커(`<bot-anchor name="X"></bot-anchor>`)와 Lua 가 파싱할 데이터 태그(`[Data: …]`)를
-  나누는 경우, "앵커는 비워 둔다, 데이터는 패널 밖 별도 줄" 을 CRITICAL 로 명시한다. 모델이 앵커 안에 데이터를 넣으면 파싱이 깨진다.
-- **시스템만 읽는 블록**: 사용자에게 보이지 않을 내부 메모는 별도 태그(`<bot-secret>`)로 두고 Lua editOutput 에서 저장 전에 지운다.
-- **조건부 태그**: 매 턴이 아니라 변화가 있을 때만 내는 값(호감도 증감 등)은 패널 **밖**의 별도 태그로, 부호가 붙은 델타로 받는다.
-  "이번 장면에 영향받은 캐릭터만, 전체 목록 나열 금지" 를 명시한다. 절대값은 Lua 가 유지하고 `{{getvar::…}}` 로 프롬프트에 되돌려 준다.
+### 2.5 The inner-voice channel
+A thought, diary, memo or even a list of file names lets the character's private reaction show every turn without breaking the prose. Define its voice ("deadpan observation with emotional weight underneath", "a short, ugly burst of feeling") and its fallback ("if the character is absent, `none`"). Solo bots in particular gain charm here. Some bots render it large, others keep it tiny or behind a click.
 
-### 1.4 태그 문법 선택
-
-| 문법 | 예 | 값 제약 | 정규식 |
+### 2.6 Tag grammar choice
+| Grammar | Example | Value constraint | Regex |
 |---|---|---|---|
-| XML 중첩 (권장) | `<bot-panel><bot-scene>…</bot-scene></bot-panel>` | 값에 `<` 만 금지 | 필드별 독립 정규식. 순서·누락에 관대 |
-| XML + 파이프 | `<bot-stats>HP: 45/50 \| MP: 10/10</bot-stats>` | 값에 `\|` 금지 | 한 정규식이 여러 필드. 순서 고정 |
-| `[Key: value]` 줄 | `[Date: 2004-04-09 (금, 오후)]` | 값에 `]` 금지 | `[^\]]+` 캡처 |
-| 파이프 행 + 닫는 마커 | `[Row\|…]` … `[/Rows]` | `\|[]` 금지, 마커 필수 | 마커가 div 를 열고 닫는다(취약) |
+| Nested XML | `<bot-panel><bot-scene>…</bot-scene></bot-panel>` | no `<` in values | independent per-field rules; tolerant of order and gaps |
+| XML + pipes | `<bot-stats>HP: 45/50 \| MP: 10/10</bot-stats>` | no `\|` in values | one rule, several fields; fixed order |
+| `[Key: value]` lines | `[Date: 2004-04-09 (Fri, afternoon)]` | no `]` in values | `[^\]]+` captures |
+| Pipe rows + closing marker | `[Row\|…]` … `[/Rows]` | no `\|[]`; the marker is required | a marker opens and closes the div (fragile) |
 
-XML 중첩 + 필드별 정규식이 가장 견고하다. 파이프·대괄호 문법을 쓰면 "값에 `|`, `[`, `]` 금지, 구분자는 정확히 하나" 규칙을 지시문 맨 위에 둔다.
+Nested XML with per-field rules is the most robust. With pipe or bracket grammars, put "no `|`, `[`, `]` inside values; exactly one delimiter" at the top of the instruction.
 
 ---
 
-## 2. 위치 지정: `{{position::PI}}` + `@@position pt_PI`
+## 3. Placement: `{{position::PI}}` + `@@position pt_PI`
 
-**원리**
-1. 카드의 `post_history_instructions`(글로벌 노트 덮어쓰기)는 프리셋의 글로벌 노트 슬롯에 들어간다. 대부분의 프리셋에서 그 슬롯은 채팅 히스토리 뒤, 마지막 유저 메시지 근처다.
-2. 그 본문에 `{{position::PI}}` 를 쓰면 그 자리에 `PI` 라는 위치 슬롯이 정의된다. 이름은 봇이 정한다.
-3. 로어북 항목 본문 **첫 줄**에 `@@position pt_PI`(`pt_` + 슬롯 이름)를 쓰면, 그 항목은 일반 로어북 배치(설명 부근)에서 빠져 그 슬롯으로 간다.
-   `@@position` 의 유효 인자는 `after_desc | before_desc | personality | scenario | pt_이름` 뿐이다.
-4. 결과: 상태창 지시가 프롬프트 최말단에 놓여 무시되기 어렵다. 동시에 로어북 항목이므로 `{{#when}}` 게이트·insertion_order·constant 를 그대로 쓴다.
-   글로벌 노트에 지시를 통째로 쓰는 것과 달리, 여러 항목으로 쪼개고 변수로 켜고 끌 수 있다.
-5. 같은 슬롯 안의 순서는 insertion_order 로 정한다. 규칙 항목 < 상태창 출력 형식 < 모드별 지시처럼 층을 나누면 관리가 쉽다.
+**How it works**
+1. The card's `post_history_instructions` (global note override) goes into the preset's global-note slot. In most presets that slot is after the chat history, near the last user message.
+2. Writing `{{position::PI}}` in that text defines a position slot named `PI` at that point. The bot chooses the name.
+3. An entry whose body starts with `@@position pt_PI` (`pt_` + slot name) on its **first line** leaves the normal lorebook placement and goes to that slot. Valid `@@position` arguments are only `after_desc | before_desc | personality | scenario | pt_name`.
+4. Result: the status instruction sits at the very end of the prompt, where it is hard to ignore. Because it is still a lorebook entry, `{{#when}}` gates, insertion_order and constant all work. Unlike writing the whole instruction into the global note, it can be split into several entries and switched with variables.
+5. Order inside the slot follows insertion_order. Layers such as rules < status format < mode-specific instructions are easy to manage.
 
-**글로벌 노트 덮어쓰기 예**
+**Global note override example**
 ```
-{{#when::asset_aux::visnot::1}}
+{{#when::bot_image_producer::visnot::aux}}
 ### Image Commands
 …
 {{/when}}
 {{position::PI}}
 ```
-`{{position::PI}}` 를 뒤에 두면 에셋 지시 → 로어북 규칙(상태창) 순이 되고, 앞에 두면 그 반대가 된다.
-모델에 가장 가까운 마지막 문단이 무엇이어야 하는지로 정한다. 상태창 형식을 맨 마지막에 두려면 뒤에 둔다.
+With `{{position::PI}}` after the image block, the order is image instructions → lorebook rules (status). Before it, the order is reversed. Decide by what the last paragraph closest to the model should be. To make the status format last, put the slot after.
 
-**`@@depth 0` 과의 차이**: `@@depth 0` 은 히스토리의 마지막 메시지 직후에 꽂힌다(프리셋 구조와 무관). `pt_PI` 는 프리셋이 글로벌 노트를
-어디에 두느냐를 따른다. 글로벌 노트가 히스토리 뒤에 있는 프리셋이면 거의 같은 자리다. 프리셋과 무관하게 확실히 끝에 두려면 `@@depth 0`,
-프리셋의 구조를 존중하려면 `pt_PI` 를 쓴다.
+**Difference from `@@depth 0`**: `@@depth 0` inserts right after the last history message, whatever the preset's structure. `pt_PI` follows wherever the preset puts the global note. With presets that put the global note after the history, the two are almost the same place. Use `@@depth 0` to be at the end regardless of the preset, and `pt_PI` to respect the preset's structure. Some bots let a variable choose between the two placements.
 
-**위치 이중화**: 핵심 필드 규칙을 다른 항목(`@@depth 0`, `@@role system`)이나 카드 설명의 한 줄 재언급으로 한 번 더 반복하면 누락이 줄어든다.
+**Redundant placement**: repeating the key field rules once more (a `@@depth 0` or `@@role system` entry, or a one-line mention in the description) reduces omissions.
 
 ---
 
-## 3. 정규식 파이프라인
+## 4. Regex pipeline
 
-### 3.1 지우개 수식
+Regex mechanics (flags, `ableFlag`, ordering, CBS in OUT) are in 'RisuAI 정규식 작성법'. This section covers the status-specific pieces.
 
+### 4.1 The eraser expression
 ```
 {{#if {{greater_equal::{{chat_index}}::{{? {{lastmessageid}}-2}}}}}}$&{{/if}}
 ```
-- `{{chat_index}}` = 지금 처리 중인 메시지 인덱스, `{{lastmessageid}}` = 마지막 메시지 인덱스.
-- `{{? 식}}` 은 **공백** 문법의 수식 평가기다(`::` 아님).
-- 의미: 마지막 3개 메시지에서만 블록을 남기고 그 앞은 빈 문자열로 만든다. 남길 개수는 `-2` 로 조절한다.
-  - editdisplay 에 넣으면 화면에서 옛 패널이 사라진다.
-  - editprocess 에 넣으면 요청에서 옛 패널이 빠진다. 최근 1~2턴은 남아 모델이 "이전 값을 읽고 갱신" 할 수 있다.
-- 마지막 1개만 남기려면 `{{equal::{{chat_index}}::{{lastmessageid}}}}`.
-- `{{#if}}` 는 deprecated 지만 동작한다. `{{#when::{{greater_equal::…}}}}$&{{/when}}` 도 된다. `vis` 의 첫 인자에 식을 넣는 형태는 쓰지 않는다.
+- `{{chat_index}}` is the index of the message being processed; `{{lastmessageid}}` is the last message's index. `{{? expr}}` takes a **space**, not `::`.
+- Meaning: the block survives only in the last 3 messages; older ones become empty. Adjust with `-2`.
+  - In editdisplay, old panels disappear from the screen.
+  - In editprocess, old panels leave the request, while the latest 1-2 turns stay so the model can read and update them.
+- To keep only the last one, use `{{equal::{{chat_index}}::{{lastmessageid}}}}`.
+- `{{#if}}` is deprecated but works; `{{#when::{{greater_equal::…}}}}$&{{/when}}` also works. Do not put an expression into the first argument of `vis`.
 
-### 3.2 순서: 지우개 → 래퍼 → 컨테이너 → 필드 → 하위 항목
-
+### 4.2 Order: eraser → wrapper → container → fields → sub-items
 ```
-=== 패널 지우개 ===      editdisplay  in: <bot-panel>([\s\S]*?)<\/bot-panel>   out: (지우개 수식 $&)
-=== 패널 래퍼 ===        editdisplay  in: 동일                                 out: <div class="bot-panel">$1</div>
-=== 장면 필드 ===        editdisplay  in: <bot-scene>([\s\S]*?)<\/bot-scene>   out: <div class="bot-row"><span class="bot-label">🕐 장면</span><span class="bot-val">$1</span></div>
-=== 소지금 필드 ===      editdisplay  in: <bot-money>([\s\S]*?)<\/bot-money>   out: <div class="bot-row"><span class="bot-label">💰 소지금</span><span class="bot-val bot-money">$1</span></div>
-=== 목록 블록 ===        editdisplay  in: <bot-list>([\s\S]*?)<\/bot-list>     out: <details class="bot-fold"><summary class="bot-fold-sum">📌 목록</summary><div class="bot-fold-body">$1</div></details>
-=== 목록 항목 ===        editdisplay  in: \[([^|\]]+)\|\s*([^|\]]+)\|\s*([A-Z]+)\]   out: <div class="bot-item bot-item-$3"><b>$1</b> $2 <span class="bot-badge">$3</span></div>
-=== 패널 리퀘 제거 ===   editprocess  in: <bot-panel>([\s\S]*?)<\/bot-panel>   out: (지우개 수식 $&)
-ableFlag: false (전부)
+=== panel eraser ===        editdisplay  in: <bot-panel>([\s\S]*?)<\/bot-panel>   out: (eraser expression around $&)
+=== panel wrapper ===       editdisplay  in: same                                  out: <div class="bot-panel">$1</div>
+=== scene field ===         editdisplay  in: <bot-scene>([\s\S]*?)<\/bot-scene>   out: <div class="bot-row"><span class="bot-label">🕐 Scene</span><span class="bot-val">$1</span></div>
+=== money field ===         editdisplay  in: <bot-money>([\s\S]*?)<\/bot-money>   out: <div class="bot-row"><span class="bot-label">💰 Money</span><span class="bot-val bot-money">$1</span></div>
+=== list block ===          editdisplay  in: <bot-list>([\s\S]*?)<\/bot-list>     out: <details class="bot-fold"><summary class="bot-fold-sum">📌 List</summary><div class="bot-fold-body">$1</div></details>
+=== list item ===           editdisplay  in: \[([^|\]]+)\|\s*([^|\]]+)\|\s*([A-Z]+)\]   out: <div class="bot-item bot-item-$3"><b>$1</b> $2 <span class="bot-badge">$3</span></div>
+=== panel request window === editprocess in: <bot-panel>([\s\S]*?)<\/bot-panel>   out: (eraser expression around $&)
+ableFlag: false (all; default g)
 ```
+- Scripts apply top to bottom. The eraser runs first so later conversions do not waste work on old turns. Convert the outer tag to a div first; the next scripts catch the inner tags.
+- Always capture blocks lazily with `[\s\S]*?`. Greedy capture merges several turns' panels on screen. Capture one-line tags with `[^<]*` so they cannot swallow other tags.
+- Put a special form with attributes (`<bot-sys by="…">`) **before** the general form (`<bot-sys>`), which would otherwise swallow it.
+- Passing a state value as a class (`bot-item-$3`) or `data-st="$3"` lets CSS alone choose colors.
+- **Avoid split wrapping.** When one rule opens a div and another (the next field or a closing marker) closes it, a missing tag leaves the HTML unclosed and the rest of the message ends up inside the panel. Write self-contained rules per field.
+- **One regex for the whole block** fails whenever the field order differs or a field is missing, and the raw tags stay visible. If you do it (common for one-line formats), enforce the order in OUTPUT ORDER and add a fallback box (§4.7).
 
-- 정규식은 위에서 아래로 차례로 적용된다. 지우개가 먼저 돌아 옛 턴에서 블록을 없애야 뒤의 변환이 헛돌지 않는다. 바깥 태그를 먼저 div 로 바꾸고 안쪽은 다음 스크립트가 잡는다.
-- 블록 캡처는 항상 lazy `[\s\S]*?` 로 한다. greedy 면 화면에 남은 여러 턴의 패널이 하나로 합쳐진다. 한 줄 태그는 `[^<]*` 로 잡아 다른 태그를 삼키지 않게 한다.
-- 속성이 붙은 특수형(`<bot-sys by="…">`)은 일반형(`<bot-sys>`)보다 **먼저** 둔다. 일반형이 먼저면 특수형을 삼킨다.
-- 상태값을 클래스명(`bot-item-$3`)이나 `data-st="$3"` 속성으로 넘기면 CSS 만으로 색을 정할 수 있다.
-- `ableFlag: false` = "flag 옵션 미사용(기본 g)". 비활성이 아니다.
-- `out` 안의 CBS 는 다시 파싱된다(지우개가 되는 이유). `$n` 은 줄바꿈으로 치환되므로 캡처 번호로 쓰지 않는다.
-- **분할 래핑을 피한다**: 한 정규식이 div 를 열고 다른 정규식(다음 필드나 닫는 마커)이 닫는 구조는, 태그 하나가 빠지면 HTML 이 안 닫혀 이후 본문까지 패널 안으로 들어간다. 필드마다 자기완결 정규식으로 쓴다.
-- **블록 전체를 한 정규식으로** 잡으면 필드 순서가 다르거나 하나라도 빠질 때 매치에 실패해 원문 태그가 화면에 그대로 보인다. 그렇게 하려면 지시문의 OUTPUT ORDER 로 순서를 강제해야 한다.
+### 4.3 When NOT to strip in editprocess
+editprocess runs **before** Lua `editRequest`. If Lua must read panels in history (for example, to group messages by date for summaries), do not remove them with editprocess; do display cleanup only in editdisplay. Many bots also deliberately keep the latest status in the request so the model sees the previous date and time.
 
-### 3.3 리퀘 제거(editprocess)를 두지 말아야 할 때
-
-editprocess 는 Lua `editRequest` 보다 **먼저** 돈다. Lua 가 히스토리 속 상태창을 읽어야 하면(예: 메시지를 날짜별로 묶어 요약하는 경우)
-editprocess 로 지우면 안 된다. 화면 정리는 editdisplay 로만 한다.
-
-### 3.4 Lua 미작동 워치독
-
-RisuAI 는 Lua editOutput 의 오류를 조용히 삼키고 원문을 그대로 저장한다. Lua 가 상태를 관리하는 봇이면, editOutput 이 성공할 때
-저장본 끝에 표식 태그(`<bot-uid>N</bot-uid>`)를 붙이고, 마지막 메시지에 그 표식이 없으면 경고를 띄운다.
-
+**Partial blanking** is the middle way: keep the continuity fields of every old panel and blank the rest:
 ```
-=== 백엔드 워치독 ===   editdisplay
+in:  (\[Date: [^|]*\| Time: [^|]*\| Location: [^|]*)([^\]]*)(\])
+out: $1{{#if {{greater_equal::{{chat_index}}::{{? {{lastmessageid}}-5}}}}}}$2{{/if}}$3
+```
+The chronology stays readable while inventory and stat bulk leave the request.
+
+### 4.4 Lua watchdog
+RisuAI swallows Lua editOutput errors silently and saves the original text. If Lua manages state, append a marker tag (`<bot-uid>N</bot-uid>`) when editOutput succeeds, and warn when the last message lacks it:
+```
+=== backend watchdog ===   editdisplay
 in:  </bot-panel>(?![\s\S]*<bot-uid>)
-out: </bot-panel>{{#if {{greater_equal::{{chat_index}}::1}}}}{{#if {{equal::{{chat_index}}::{{lastmessageid}}}}}}<div class="bot-dead-warn">⚠ 시스템 스크립트 미작동 — 이 턴의 상태 변경이 기록되지 않았습니다. RisuAI 를 다시 시작하면 다음 턴에 복구됩니다.</div>{{/if}}{{/if}}
+out: </bot-panel>{{#if {{greater_equal::{{chat_index}}::1}}}}{{#if {{equal::{{chat_index}}::{{lastmessageid}}}}}}<div class="bot-dead-warn">⚠ System script not running: this turn's state changes were not recorded. Restart RisuAI and it will recover next turn.</div>{{/if}}{{/if}}
 ```
-표식 태그는 별도 정규식으로 화면에서 숨긴다. 다음 턴에는 표식 없는 턴의 값을 거슬러 반영(backfill)한다.
-이 장치는 Lua 미작동을 잡는 것이지 **모델의 출력 누락**을 잡는 것이 아니다. 모델 누락 대책은 §1 의 지시 강화와 §2 의 위치다.
+Hide the marker with a separate rule. On the next turn, backfill the values of turns without a marker. This catches **Lua failure**, not **the model omitting the block**; for that, rely on the instruction (§2) and placement (§3).
+
+### 4.5 Gauges and numbers
+- From captured numbers: `<div class="bot-bar"><div class="bot-fill" style="width:calc($6/$7*100%)"></div></div>`. It works for EXP, HP and MP with no Lua.
+- From variables: `style="width:{{calc::{{getvar::bot_exp}}/{{getvar::bot_exp_next}}*100}}%"`.
+- A CSS custom property and `counter-reset` can also print the value: `style="--val:{{getvar::bot_stat}}"`.
+- **No-comma rule**: `1,000` breaks `\d+` captures and `calc()`. State "digits only, no thousands separators" in the instruction, and add an editoutput fixer, for example `(?<=(?:EXP|HP|MP)\s*:[^|]*?\d),(?=\d)` → empty. Also strip parenthetical notes after numbers.
+- Clamp values that can exceed the maximum in Lua or CBS, so a bar never runs past 100%.
+
+### 4.6 Display tricks
+- **Move to top while written last**: the model writes the status at the end (better generation, since it summarizes the reply), and `@@move_top` in `out` or `<move_top>` in the flag (with `ableFlag: true`) shows the card at the top of the message. It moves only the first match.
+- **Mode skins**: several ordered regexes match the same format, each keyed on a word in one field (the mode, a location type). Specific skins go first and the generic skin last; the first match consumes the text, so nothing double-renders. The panel's look then signals the current mode.
+- **Display tiers**: full panel on the newest message, a reduced card on the last few, nothing older (§4.1 with two guards).
+- **Random portrait**: Lua `onOutput` sets `bot_portrait` to one of several assets, and the card shows `{{raw::{{getvar::bot_portrait}}}}`. Visual variety at no prompt cost.
+- **Buttons inside the card** (reroll a field, open a panel): `{{button::🔧::bot_reroll_status}}` or `risu-btn`; see 'RisuAI 옵션 패널 (슬라이딩 드로어)'.
+
+### 4.7 Sliding windows and the fallback box
+- Window display **and** prompt independently. Display: 2-6 messages for a status card. Prompt: keep the latest 1-3 panels (the model needs the previous values), strip or partially blank the rest. These numbers are options.
+- **A visible fallback box on a malformed status**: after the renderers, a last rule matches any block still in raw form (`<bot-status>[\s\S]*?<\/bot-status>`) and shows "⚠ Status format error" instead of raw text. The user sees the problem, and the chat stays readable.
+- Hide control tags that ride along (a delta line, a marker) with editdisplay; window them in editprocess.
 
 ---
 
-## 4. CSS (backgroundHTML `<style>` 안)
+## 5. Producers, Lua and derived state
 
-### 4.1 최소 구성
+### 5.1 Optional Lua jobs
+1. **Parse into variables**: in `editOutput` (or `onOutput`), read the tags, store chat vars, and feed them back next turn with `{{getvar::}}` or an editRequest insertion.
+   - To avoid catching tags mentioned inside CoT/thinking: exclude thought ranges, take only the **last valid block**, and skip content that is too short (just a mention).
+   - Replacing `<`, `>`, `[`, `]` inside thoughts with HTML entities in editDisplay stops the following **regexes** from catching tags there too. Lua edit hooks run before the same stage's regexes. The regex alternative is a lookahead strip in editoutput ('RisuAI 정규식 작성법' §5.3).
+   - Accept notation variants (case, spaces).
+2. **Correct values the model wrote**: values computed from others (level, EXP needed, max HP) are recomputed by Lua and overwritten. Tell the model "do not calculate; copy the previous value; the system fixes it". A header whitelist (split on `|`, map each key to a canonical key, drop unknown and duplicate keys, keep the original if nothing survives) protects against invented fields. Protect commas that carry meaning (inside lists) with a placeholder before collapsing digit grouping, then restore them.
+3. **Reroll- and delete-safe storage**: cumulative variables drift because a reroll rolls chat vars back. Put a marker (`<bot-uid>N</bot-uid>`) into the saved message and keep absolute values in per-uid snapshots (`backup[uid]`). When a reroll changes the body, that uid's snapshot is naturally discarded. After delete-then-reroll, the counter goes back and editOutput runs on a body that already has a uid, so remove the old uid first and attach a new one. Wrap the whole editOutput in `pcall` and report failures with `alertError`. Other schemes are in 'RisuAI Lua 트리거'.
+4. **editdisplay cache**: RisuAI's script cache key does not include chat vars. If display `out` uses `{{getvar}}` or `{{#when::var}}`, a change in the variable alone may not update the screen. Append a `<!--bot:value-->` comment at the end of Lua editDisplay to bust the cache.
 
+### 5.2 The two-producer switch
+The panel can come from the main model or from a second LLM call. Several bots let one variable (`bot_status_producer` = main | aux | off) choose:
+- **Main model**: the TAG OUTPUT entry is active. It is reliable and in the same voice as the reply, but costs output tokens and attention.
+- **Aux extraction**: the instruction entry is gated off, and the opposite line "Do not output the status panel" is gated on. Lua `onOutput` builds a strict "data extraction bot; output ONLY this line" prompt with the format, the current values and the last N messages within a token budget. It calls `axLLM` (or `LLM` for main-model mode), cleans the reply (code fences, `<think>` blocks, repeated characters), validates it, and appends it to the saved message with `setChat`. The display regexes work unchanged.
+- **Cleanup flipped by the same variable**: an editoutput rule deletes any block the main model writes anyway, active only in aux mode. Gate its IN with CBS and the `<cbs>` flag:
+  ```
+  in:   {{#if {{equal::{{getvar::bot_status_producer}}::aux}}}}<bot-panel>[\s\S]*?<\/bot-panel>{{/if}}
+  out:  (empty)
+  flag: g<cbs>          ableFlag: true
+  ```
+- Aux-call guards: exit early if the mode is off, if the last message is not the character's, or if it already has a block (no double pay on re-triggers). Strip an old block before appending, so the call is idempotent. After the `await`, re-read the chat and abort if the last message changed (a reroll or edit during the call). Use a full example on the first generation and a compact one afterwards. If the budget cuts off the previous block, grow the context window until one previous block is inside. Details: 'RisuAI Lua 트리거'.
+
+### 5.3 Reverse parsing and a single time source
+- Lua can parse the status line back into state: date → calendar and scheduled events; location or situation keyword → achievements or event triggers; thought → a variable for a side panel.
+- **Make the status line the single source of world time.** Two time sources (hidden time directives plus input-length time estimation plus the status date) caused time resets and double advances. Parse the date from the latest status and derive everything else from it.
+- If a calendar or event table is kept in Lua, remember that display-only calendars never reach the narrator. Inject today's events into the prompt ('RisuAI Lua 트리거', 'RisuAI 시뮬봇 구조와 제작').
+
+### 5.4 Outfit field → image variable
+An editoutput rule can read the model's outfit field and set a variable. The image tag then only needs the emotion:
+```
+in:  <bot-outfit>(uniform|casual|sleepwear)<\/bot-outfit>
+out: {{setvar::bot_outfit::$1}}         (plus an editdisplay rule that hides the tag)
+display: <img="Name_(.*?)"> → {{raw::{{getvar::bot_outfit}}_$1.webp}}
+```
+There are fewer tokens and fewer naming mistakes. Set a default in `defaultVariables`. See 'RisuAI 에셋 출력식'.
+
+### 5.5 A separate affinity-delta line
+Relationship changes are better as their own line than as a panel field:
+```
+[Name: Like it][Name2: Slightly dislike it]                  (phrase form)
+[[bot-aff:name_code:+small]]                                 (coded form)
+```
+- The model **judges direction and size**; code does the math. A fixed map translates phrases to numbers (a strong phrase is a large step, a "slight" phrase a small one). Give per-level event rubrics ("remembers a small detail she mentioned once" = small increase), including negative ones.
+- Hide the line in display (editdisplay → empty, or Lua editDisplay only, so saved data keeps it for the parser). Window it in the prompt (keep 2-3 recent examples). Add an editoutput fixer that splits merged tags (`][` → `]$n[`).
+- Apply deltas in Lua with reroll-safe snapshots. Deltas applied by editoutput CBS (`{{setvar::x::{{? {{getvar::x}}+2}}}}`) are re-applied on every reroll.
+- The absolute score reaches the prompt as a band, not a raw number ('RisuAI 시뮬봇 구조와 제작').
+
+---
+
+## 6. CSS (inside backgroundHTML `<style>`)
+
+### 6.1 Minimum
 ```css
 .bot-panel { margin: 20px auto; max-width: 480px; display: flex; flex-direction: column; border-radius: 12px; overflow: hidden;
   border: 1px solid #2a3a4a; background: linear-gradient(145deg, #0f1923 0%, #151e2c 100%);
@@ -204,87 +298,93 @@ out: </bot-panel>{{#if {{greater_equal::{{chat_index}}::1}}}}{{#if {{equal::{{ch
 @media (max-width: 600px) {
   .bot-panel { margin: 12px 0; border-radius: 8px; padding-left: 14px; padding-right: 14px; }
   .bot-label { min-width: 90px; }
-  .bot-row { flex-direction: column; gap: 2px; }   /* 좁은 화면에서는 라벨/값을 세로로 */
+  .bot-row { flex-direction: column; gap: 2px; }   /* narrow screens: label above value */
 }
 ```
 
-### 4.2 접기: `<details>`
-
+### 6.2 Folding with `<details>`
 ```css
 .bot-fold-sum { padding: 10px 0; cursor: pointer; user-select: none; list-style: none; display: flex; align-items: center; gap: 8px; }
 .bot-fold-sum::-webkit-details-marker { display: none; }
 .bot-fold-sum::before { content: '▶'; font-size: 9px; transition: transform .25s ease; display: inline-block; }
 .bot-fold[open] > .bot-fold-sum::before { transform: rotate(90deg); }
 ```
-체크박스 + `<label for>` 로 접기를 만들면, 화면에 여러 턴의 패널이 남아 있을 때 같은 id 가 여러 개 생겨 토글이 엉뚱한 항목을 연다.
-`<details>` 는 id 가 필요 없어 안전하다.
+A fold built from a checkbox and `<label for>` creates duplicate ids when several turns' panels are on screen, so the toggle opens the wrong one. `<details>` needs no id and is safe. If you need a checkbox, include `{{chat_index}}` in the id.
 
-### 4.3 스탯 그리드
-
+### 6.3 Stat grid and warning
 ```css
 .bot-sec { padding: 10px 0; border-bottom: 1px solid rgba(196,160,96,.1); }  .bot-sec:last-child { border-bottom: none; }
 .bot-sec-title { color: #6b7d8e; font-size: 10px; font-weight: 700; letter-spacing: .08em; }
 .bot-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 16px; }
 .bot-stat { display: flex; justify-content: space-between; align-items: baseline; padding: 2px 4px; }
 .bot-stat-l { color: #6b7d8e; font-size: 11px; font-weight: 600; }  .bot-stat-v { color: #cfd8dc; text-align: right; }
+.bot-bar { height: 6px; background: rgba(255,255,255,.08); border-radius: 3px; overflow: hidden; }
+.bot-fill { height: 100%; background: #66bb6a; }
 .bot-dead-warn { margin: 8px 0; padding: 8px 12px; border: 1px solid rgba(224,90,70,.45); border-radius: 6px;
   background: rgba(224,90,70,.12); color: #e05a46; font-size: 11px; font-weight: 600; }
 ```
 
-### 4.4 관례
-- 클래스에 봇 고유 접두사를 붙인다. `all: initial` 리셋은 버튼형 독립 UI 에만 쓰고, 정보 패널은 채팅 스타일을 상속하게 둔다.
-- 폰트를 명시해 테마 폰트 상속을 피한다.
-- `max-width: 480px; margin: auto` 면 모바일 규칙이 거의 필요 없다. 라벨/값 2열만 좁은 화면에서 세로로 바꾼다.
-- CSS 는 `</style>` 안에 둔다. 밖에 두면 적용되지 않는다.
+### 6.4 Conventions
+- Prefix every class with the bot's prefix. Use `all: initial` resets only for button-like standalone UI; let information panels inherit the chat style.
+- Set fonts explicitly to avoid inheriting the theme font.
+- With `max-width: 480px; margin: auto`, few mobile rules are needed; only switch label/value columns to vertical on narrow screens.
+- CSS goes inside `</style>`. Outside it, it is not applied.
+- Theme values can be tokens replaced by regex (`{bot_border}`), or blocks switched by CBS in the CSS ('RisuAI 정규식 작성법' §6.4).
+
+### 6.5 Diegetic status UIs
+The panel can be an object of the fiction that matches the setting: a period desktop with a notepad window for a diary field and a folder icon that opens a list of file names; a terminal with ASCII bars; a phone lock screen with the time, place and weather; a game console window for an RPG. Choose the object from the world's era and genre. Map each field to a natural part of it (the clock shows the time field, the notepad shows the memo). Keep the underlying tag format plain, so only the regex and CSS carry the skin.
 
 ---
 
-## 5. Lua (선택)
+## 7. Applying it to a new bot
 
-1. **파싱해서 변수로**: `editOutput` 에서 태그를 읽어 chatvar 에 저장하고, 다음 턴 프롬프트에 `{{getvar::}}` 나 editRequest 삽입으로 되먹인다.
-   - CoT/thinking 안에서 태그를 언급한 것을 잡지 않도록: thought 범위를 제외하고, **마지막 유효 블록**만 취하고, 내용이 너무 짧으면(언급일 뿐) 건너뛴다.
-   - editDisplay 에서 thought 내부의 `<`, `>`, `[`, `]` 를 HTML 엔티티로 바꾸면 뒤이어 도는 **정규식**도 그 안의 태그를 잡지 못한다. Lua 편집 훅이 같은 단계 정규식보다 먼저 돈다.
-   - 표기 변형(대소문자·공백)을 너그럽게 받는다.
-2. **모델이 쓴 값 교정**: 다른 값에서 계산되는 값(레벨 등)은 Lua 가 다시 계산해 덮어쓴다. 지시문에는 "계산하지 말고 이전 값을 그대로 옮겨 적어라, 시스템이 고친다" 고 쓴다.
-3. **리롤·삭제에 안전한 상태 저장**: 누적 변수는 리롤 때 chatvar 롤백으로 어긋난다. 저장 메시지 본문에 표식(`<bot-uid>N</bot-uid>`)을 박고,
-   uid 별 스냅샷(`backup[uid]`)에 절대값을 둔다. 리롤로 본문이 바뀌면 그 uid 의 스냅샷은 자연히 버려진다.
-   삭제 후 리롤하면 카운터가 되돌아가 이미 uid 가 붙은 본문에 editOutput 이 다시 도므로, 기존 uid 를 먼저 지우고 새로 붙인다.
-   - editOutput 전체를 `pcall` 로 감싸고 실패 시 `alertError` 로 알린다.
-4. **보조모델이 상태창을 만들 때**: 메인 지시문을 "출력하지 마라" 로 뒤집고, `onOutput` 에서 보조모델이 만든 블록을 `setChat` 으로 저장 메시지에 덧붙인다. 화면 정규식은 그대로 동작한다.
-5. **editdisplay 캐시**: RisuAI 스크립트 캐시 키에 chatvar 값이 들어가지 않는다. 표시 정규식 `out` 에서 `{{getvar}}`/`{{#when::var}}` 를 쓰면
-   변수만 바뀌었을 때 화면이 안 바뀔 수 있다. Lua editDisplay 끝에 `<!--bot:변수값-->` 주석을 붙여 캐시를 깬다.
-
----
-
-## 6. 새 봇에 적용하는 순서
-
-1. 필드 목록과 각 필드의 값 어휘를 표로 정하고, 봇 고유 태그 접두사를 정한다. 문법은 XML 중첩을 기본으로 한다(§1.4).
-2. 로어북 항목 1개: `@@position pt_PI`, `constant: true`, 높은 insertion_order, §1.1 골격. 인사말에 초기 패널을 넣는다.
-3. 글로벌 노트 덮어쓰기에 `{{position::PI}}` 를 넣는다. 다른 지시(에셋 등)와의 앞뒤를 정한다(§2).
-4. 정규식: 지우개 → 래퍼 → 필드별 → 하위 항목 → 리퀘 제거(editprocess). 전부 lazy 캡처.
-5. backgroundHTML 에 §4 CSS. 접기는 `<details>`.
-6. 필요하면 Lua(§5)와 워치독(§3.4).
-7. 확인한다.
-   - 옛 턴에서 패널이 사라지는지, 최근 턴의 요청에는 패널이 남는지.
-   - 필드 하나가 빠졌을 때 HTML 이 깨지지 않는지.
-   - thinking 안에 적힌 태그가 파싱되거나 렌더되지 않는지.
+1. Decide the fields and each field's vocabulary in a table, pick the bot prefix and the format (§1). Nested XML is the default for large panels; a one-line format for small ones.
+2. One lorebook entry: `@@position pt_PI`, `constant: true`, high insertion_order, the §2.1 skeleton, anti-repetition rules for free-text fields. Put a filled panel into every greeting.
+3. Put `{{position::PI}}` into the global note override and decide its order relative to other instructions (§3).
+4. Regex: eraser → wrapper → per-field → sub-items → fallback box → request window (editprocess, or partial blanking). All lazy captures. Add output fixers for numbers and merged tags.
+5. §6 CSS in backgroundHTML; fold with `<details>`.
+6. If needed: Lua (§5.1), the producer switch (§5.2), reverse parsing (§5.3), a delta line (§5.5), the watchdog (§4.4).
+7. Verify:
+   - Old panels disappear on screen, and the latest panel stays in the request.
+   - HTML does not break when a field is missing, and a malformed block shows the fallback box.
+   - Tags written inside thinking are neither parsed nor rendered.
+   - Switching the producer variable flips the instruction, the cleanup regex and the Lua together.
 
 ---
 
-## 7. 함정
+## 8. Pitfalls
 
-1. 모델이 **앵커 안에 데이터**를 넣는다 → 앵커/데이터 분리 규칙을 CRITICAL 로.
-2. 지시문의 **꺾쇠 섹션 헤더**를 모델이 흉내 낸다 → `== SECTION ==`.
-3. **오답 예시**를 모델이 복사한다 → 짧게, 정답 뒤에만, 또는 생략.
-4. **CoT 안의 태그**가 파싱·렌더된다 → thought 범위 제외 + 마지막 블록 + 엔티티 이스케이프.
-5. **editdisplay 캐시**가 변수 변화를 모른다 → 캐시 버스터 주석.
-6. **Lua editOutput 실패가 조용하다** → 표식 + 워치독 + backfill + `pcall`/`alertError`.
-7. **editprocess 가 editRequest 보다 먼저 돈다** → Lua 가 히스토리를 읽으면 리퀘 제거 금지.
-8. **리롤 시 chatvar 롤백** → 메시지 본문 표식을 키로 한 스냅샷.
-9. **greedy 캡처** → 여러 턴의 패널이 합쳐진다. lazy + `[^<]*`.
-10. **파이프·대괄호 값 제약**을 지시문에 명시한다.
-11. **닫는 마커·분할 래핑 의존** → 필드별 자기완결 정규식.
-12. **체크박스 id 충돌** → `<details>`.
-13. `{{#if}}` 는 deprecated, `{{? }}` 는 공백 문법, `vis` 첫 인자는 변수 이름.
-14. 태그 이름은 고정, 값만 출력 언어를 따른다.
-15. `@@position` 데코레이터는 로어북 본문 **맨 위** 한 줄에 둔다. 본문 텍스트 뒤에 있으면 무시된다.
+1. The model puts **data inside an anchor** → make the anchor/data separation CRITICAL.
+2. The model imitates **angle-bracket section headers** in the instruction → use `== SECTION ==`.
+3. The model copies **wrong examples** → keep them short, after the correct ones, or omit them.
+4. **Tags inside CoT** get parsed or rendered → exclude thought ranges, take the last block, escape entities, or lookahead-strip in editoutput.
+5. The **editdisplay cache** ignores variable changes → comment cache-buster.
+6. **Lua editOutput failures are silent** → marker, watchdog, backfill, `pcall`/`alertError`.
+7. **editprocess runs before editRequest** → do not strip in editprocess what Lua must read from history.
+8. **Chat vars roll back on reroll** → snapshots keyed by a marker in the message body.
+9. **Greedy captures** merge several turns' panels → lazy captures and `[^<]*`.
+10. **Pipe and bracket value constraints** must be stated in the instruction.
+11. **Closing markers and split wrapping** → self-contained per-field rules.
+12. **Checkbox id collisions** → `<details>` or ids containing `{{chat_index}}`.
+13. `{{#if}}` is deprecated, `{{? }}` takes a space, and the first argument of `vis` is a variable name.
+14. Tag names are fixed; only values follow the output language.
+15. The `@@position` decorator goes on the **first line** of the entry body; after other text it is ignored.
+16. **Thousands separators** break `\d+` captures and gauges.
+17. **Two time sources** advance the clock twice → one source, the status line.
+18. **Editprocess rules left on an old status format** match nothing, and the full history of panels stays in the request unnoticed. Update every plane when the format changes.
+19. **`<move_top>` in the flag with `ableFlag: false`** is ignored; `@@move_top` in `out` works either way.
+20. A panel produced by an aux model while the main-model instruction is still active gives two panels → gate both sides on the same variable.
+
+---
+
+## 9. Build/review checklist
+
+- [ ] Fields have closed vocabularies where regex, CSS or Lua depend on them; free-text fields have anti-repetition rules.
+- [ ] The instruction says mandatory, gives empty-value, update, no-comma and hiding rules, and has correct examples; every greeting ends with a filled panel.
+- [ ] Placement: `@@position pt_PI` on line 1 plus `{{position::PI}}` in the global note (or `@@depth 0` by choice).
+- [ ] Display: eraser/window first, lazy self-contained rules, specific skins before generic, fallback box last.
+- [ ] Prompt: the latest panel kept, older ones stripped or partially blanked; delta and marker lines windowed.
+- [ ] Output fixers for number formatting, merged tags and stray headings.
+- [ ] If there are two producers: the instruction, the opposite instruction, the cleanup regex and the Lua all switch on one variable.
+- [ ] If Lua parses the panel: last valid block only, thought ranges excluded, reroll-safe storage, watchdog.
+- [ ] CSS is prefixed, inside `<style>`, readable at phone width.

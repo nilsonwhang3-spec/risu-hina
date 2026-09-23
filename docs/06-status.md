@@ -1,5 +1,63 @@
 # 06. Implementation status — as of 2026-09-23 (v0.15.22, Risu Hina)
 
+## Unreleased (2026-09-23): §1-69 methodology skills rewritten from 14 reference bots · read_file pages
+
+### §1-69 the bot-making skills, in English, from a reference-bot study (seed v10)
+
+The user put 7 popular multi-character sim bots and 7 solo bots in
+`vepo-bot/referece-bots/` and asked for their common structure and for the
+shipped methodology skills to be updated along nine topics (sim-bot lorebook,
+solo-bot lorebook, status panel, regex, option panel, asset output, Lua and
+advanced mechanisms, sim-bot narrative/events, solo-bot narrative/charm).
+All 14 were decoded with the vepo `charx` skill (the PNG card by hand from its
+`ccv3` chunk); the Korean summary is `vepo-bot/referece-bots/공통구조-분석.md`.
+
+- **Rewritten in English, titles kept Korean** (the user's rule): CBS 문법,
+  로어북 작성 규칙, 로어북 구조, 시뮬봇 구조와 제작, 처리 순서, Lua 트리거, 옵션 패널,
+  에셋 출력식, 상태창. Existing content kept and translated, duplicates
+  dropped, and generalized as §1-67 was: no reference bot,
+  character, tag, variable, CSS prefix or bug is named (grep-checked against
+  the identifier lists of the study). The old seeds' own leftovers (a
+  reference-card table, one bot's character in the style example) are gone.
+- **Two new skills**: `RisuAI 일인봇 구조와 제작` (`risuai-solobot.md`: sheet
+  layouts, lorebook contents, a copyable sheet template, charm techniques such
+  as wound→behavior chains, mask/leak table, truth budget, stage machine with
+  regression, optional numeric model with the reroll warning, greetings,
+  persona compatibility) and `RisuAI 정규식 작성법` (`risuai-regex.md`: fields
+  and flag metas, type by purpose, ordering, CBS in OUT/IN, sliding-window,
+  anchored-panel, sentinel, chain, repair, macro and theme recipes, debugging).
+- **Facts corrected against the RisuAI source** while rewriting: admitted
+  lorebook entries are placed lowest insertorder first (the old seed said the
+  reverse); a `pt_` entry without its `{{position::}}` anchor is dropped;
+  `@@move_top` is a regex output prefix, not a decorator; flag metas
+  (`<move_top>`, `<order>`, `<cbs>`) need `ableFlag`; listenEdit callbacks get
+  `(id, value, meta)` with `meta` nil for editRequest; onStart runs on every
+  send; `{{arg::1}}` is the first `call` argument; CBS setters do not run in
+  regex/lorebook text; `risu-trigger`/`{{button}}` call a global Lua
+  function. Lua names the old seed listed but the checked source lacks are
+  marked as such.
+- **Existing installs are replaced unconditionally** (the user's call):
+  `refresh_method_skills_once` (`skills_method_en_v1`) writes each
+  methodology reference, an English pointer body and the English description
+  over the installed skill, keeping enabled and order (SKILL.md history is
+  archived by `save`). `SEED_KEY` → `skills_seeded_v10` installs the two new
+  ones. The migration notes (`PRESET_SCOPE_NOTE`, `LORE_SCOPE_NOTE`,
+  `LORE_AUTHORING_NOTES`) are English now, same markers. The non-method seeds
+  (charx, studio, vision loop, arca HTML) are untouched.
+
+### read_file pages by offset
+
+`files.agent_read` returned the first 40,000 characters and said so, with no
+way to reach the rest - a long reference, report or log was cut for good.
+`read_file(path, offset=0, limit=40000)` now returns a window and, when more
+follows, ends with `이어 읽기: offset=N`. Skill pointer bodies mention it.
+
+Gate ALL GREEN. Tests (`test_skill_guidance.py`): v10 installs the two new
+guides once; the method refresh replaces reference/body/description and keeps
+state, idempotently; method seeds are English (<1% Hangul, ≤60k characters,
+preset marker where required) and the catalog fits `CATALOG_LIMIT`;
+`agent_read` paging. Backend-only.
+
 ## 0.15.22 (2026-09-23): §1-68 Vertex — publisher-qualified model, google-auth repair
 
 Two field reports from a Vertex setup, both of them things the panel could not

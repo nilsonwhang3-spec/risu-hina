@@ -960,16 +960,26 @@ def agent_list(scope: str, rel: str = "") -> str:
     return "\n".join(rows) or "(비어 있습니다)"
 
 
-def agent_read(scope: str, rel: str, limit: int = 40000) -> str:
+def agent_read(scope: str, rel: str, offset: int = 0, limit: int = 40000) -> str:
+    """A text file for the agent, one window at a time. A cut window ends
+    with the offset to continue from, so nothing past 40k is out of reach."""
     path = _resolve(scope, rel)
     if not path.is_file():
         raise FileError(f"파일이 없습니다: {rel}")
     if path.suffix.lower() not in TEXTUAL:
         return f"({path.name} 은 텍스트 파일이 아닙니다)"
     text = path.read_text(encoding="utf-8", errors="replace")
-    if len(text) > limit:
-        return text[:limit] + f"\n… ({len(text)}자 중 {limit}자만 표시)"
-    return text
+    offset = max(0, int(offset or 0))
+    limit = max(1, min(40000, int(limit or 40000)))
+    if text and offset >= len(text):
+        return f"(파일 끝을 지났습니다: 전체 {len(text)}자, offset={offset})"
+    end = offset + limit
+    chunk = text[offset:end]
+    if end < len(text):
+        return chunk + f"\n… ({len(text)}자 중 {offset}~{end}자 표시 — 이어 읽기: offset={end})"
+    if offset:
+        return chunk + f"\n… ({len(text)}자 중 {offset}~{len(text)}자, 끝)"
+    return chunk
 
 
 def stats(scope: str) -> dict[str, Any]:

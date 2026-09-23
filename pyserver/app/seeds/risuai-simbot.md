@@ -1,116 +1,311 @@
-RisuAI 시뮬봇 구조와 제작 지침. **여러 캐릭터가 등장하는 봇카드를 시뮬봇이라 부른다.** 시뮬봇을 새로 설계하거나 기존 카드의 로어북·진행·상태 관리 구조를 점검할 때 읽는다.
-
 <!-- risuhina-preset-scope-v1 -->
-RisuAI는 별도의 프롬프트 제작자가 제공하는 프롬프트 프리셋에서 로어북 삽입 순서, 서술 시점, 대필 유무를 옵션으로 지정한다. 봇카드와 로어북에는 세계관·인물·사건·상태 및 봇 고유 시스템을 작성하고, 해당 서술 옵션은 프리셋 설정을 따른다. 프리셋의 제어 옵션은 제작 지식으로만 참고하고 봇카드·로어북 본문에 별도 규칙으로 기재하지 않는다.
+In RisuAI the prompt preset, supplied by a separate preset author, sets the lorebook insertion order, the narrative point of view, and whether the model may write the user's part. Bot cards and lorebooks hold the world, characters, events, state, and the bot's own systems; those narration options follow the preset. Treat the preset's controls as production knowledge only and do not restate them as rules in the card or lorebook.
 
-세 참고 봇의 공통점을 제작 기준으로 정리한 문서다. 여섯 구성 영역은 빠짐없이 검토하되, 봇 규모에 따라 합치거나 나눈다. 참고 봇의 고유 인물·사건·태그 이름·수치·우선순위를 새 봇에 그대로 복사하지 않는다. 복잡한 RPG 시스템이나 Lua 상태 복원은 시뮬봇의 필수 조건이 아니다.
+How to design, build or review a **sim bot**: a card where many characters appear and the card itself acts as narrator/GM. Read it when you plan a new multi-character bot or audit an existing one's lorebook, progression, events and state handling.
+Names, tags, variables and numbers below are placeholders (`bot_*`, `<bot-panel>`, `Name`). Every bot uses its own; read the target bot's real names first and keep them.
+This is a synthesis of common practice in popular sim bots, not a copy of any of them. Review all six content areas, merging or splitting by the bot's size. A complex RPG system or Lua state restore is **not** required for a sim bot.
 
-## 1. 참고 카드에서 확인한 구조
+Contents
+1. Prompt-slot roles
+2. Six content areas + system
+3. Lorebook structure
+4. Greetings and starts
+5. Progression and information reveal
+6. Event mechanisms
+7. Pacing and a living world
+8. Who needs to know each piece of state
+9. Contract: tag output → Lua → CBS → status display
+10. Optional: per-response state save and restore
+11. Pitfalls
+12. Build and review order
 
-분석 기준은 vepo-bot에 있는 다음 CHARX의 `card.json`이다. 오래된 압축 해제 폴더와 버전을 혼동하지 않는다. 아래 항목 수는 폴더·보조 로어북을 포함한 전체 entries 수이며 목표 분량이 아니다.
+---
 
-| 참고 카드 | 실제 구성과 대표 항목 | 제작에 활용할 패턴 |
+## 1. Prompt-slot roles
+
+Most popular sim bots divide the card like this:
+
+| Slot | Content |
+|---|---|
+| description | **A GM/narrator contract, not a character.** `{{char}}` is the simulation or narrator. Genres (optionally one directive line per genre), the AI's responsibilities (NPC authenticity, organic storytelling, user agency, continuity), the premise, the user's starting role and scope of action, core world facts, the information-disclosure principle. No character sheets. |
+| personality, scenario, system_prompt, mes_example | **Empty** in almost all of them. Content lives in the description, the lorebook and the global note. |
+| post_history_instructions (global note) | The **output contract that must be most recent**: image-tag rules, status format, a short pre-output checklist, or `{{position::...}}` anchors for pinned lorebook blocks. Some bots gate whole rule sections by option variables here. |
+| lorebook | Everything else: world, roster, sheets, places, factions, events, system rules, live readouts. |
+| greetings | Scenario starts that also demonstrate the output format (§4). |
+| defaultVariables | Feature flags, language, per-character scores. Alternatives: Lua fills missing values on start; some bots declare defaults with `{{setdefaultvar}}` in an always-on entry, but it writes only in run-var contexts ('RisuAI CBS 문법'), so back it with Lua or defaultVariables. |
+
+A useful description skeleton:
+
+```
+## Simulation: <genre list>
+### AI Responsibilities
+- Portray every NPC from their sheet; they have their own goals, schedules and knowledge limits.
+- Advance the world organically; offer opportunities without railroading.
+- Never decide {{user}}'s actions or feelings for them.   (omit if the preset owns this)
+- Keep time, place, injuries, money and relationships continuous.
+### Scenario
+- Premise / current conflict / how {{user}} got involved / start date and position.
+### Objectives for {{user}}
+### World Building (rules and limits of technology/magic, society, factions)
+```
+
+Keep narration options (point of view, whether the model may write the user's part, lorebook order) out of the card: the preset owns them.
+
+## 2. Six content areas + system
+
+| Area | Contents | Roster / detail layout |
 |---|---|---|
-| `00 Magic High School/The Irregular at Magic High School v1.8.1.charx` (138항목) | World Info, 사건연표, NPC Info, 세력 및 단체, 선택 설정, SYSTEM. `NPC LIST`, `단체 LIST`, `사건연표 요약`과 개별 인물·조직·시기별 사건 | 큰 인물군은 목록과 상세로 분리. 기준 시점의 명단과 이후 변화를 구분. 날짜 변수 `mhs_date`·`mhs_ym`으로 현재 시기의 사건과 소속 변화를 CBS에 반영 |
-| `02 counselling office/Office Counseling_v2.4.3.charx` (242항목) | Main/Sub Characters, Extra NPC Pool, 정치·기업 NPC, 층별 장소, 회사 문화·연간 일정, 프로젝트, Sub Events, Story Background, System Rules, Tag Output, `ALL NPC LIST` | 인물·장소·사건마다 전체 안내와 상세를 분리. 공개 배경과 미공개 진실을 단계로 구분. 모드·유저 역할에 따라 같은 세계의 관계와 사건 후보를 변경 |
-| `04 Lovely Knights/Parma Knights_v2.0.6.charx` (81항목) | World Setting, Main/Extra/Villain Characters, Places, Story Arcs & Events, System. `NPC LIST`, `Quest State`, 각 `Stages`, Tag Output, Stat/Affection/Event/Squadra/Location System | 생활·관계·세계 갈등과 퀘스트를 연결. 완료 이력에서 진행 단계를 계산. 호감도·동료·위치의 상태를 별도로 관리하고 응답 ID별로 복원 |
+| 0. World setting | Era, region, genre; rules and limits of technology/magic/power; institutions, economy, culture, factions; the user's powers and limits | Short world overview + detail per nation/organization/institution/power system |
+| 1. Main characters | Role, affiliation, looks; speech and behavior; wants, motives, contradictions, limits; relations to the user and to each other; daily movements; conditional changes and secrets | Main entries in the roster + one sheet each, written so personality is visible as behavior and lines |
+| 2. NPCs | Supporting, extras, antagonists, faction heads; where and why they appear; links to mains and factions; the information, jobs or conflict they bring | Roster/NPC pool + detail for recurring or important NPCs; minor roles can stay one-liners |
+| 3. Places | Layout, travel time, access rules; mood, facilities, activities; who is usually there; changes by time of day | Area guide/map + per-place detail. Keep places distinct from background image assets, linked if needed |
+| 4. Background | History, relations and events before the start; causes of the current conflict; how the user got involved; start date, position, what the user knows | Background/history summary + deeper related entries. Separate public facts, hidden causes and future possibilities |
+| 5. Events | Daily events, fixed schedule, personal episodes, main arcs; triggers, people, places; choices and outcomes; completion/failure/pending/repeat rules | Event list, calendar or arc summary + detail entries that activate when their conditions hold |
+| System & state | GM rules, current time/place/progress, tag output format, the roles of variables/CBS/regex/Lua, modes and initialization | System rules, output contract, current-state summary; split number, relationship, location or restore systems when they grow |
 
-세 봇의 공통점은 **세계의 규칙 → 인물과 관계 → 활동 공간 → 배경 갈등 → 진행 가능한 사건 → 현재 상태의 재주입**이다. 여섯 영역이 모두 독립 폴더로 존재하는 것은 아니다. Magic High School의 학교 정보는 세계 설정 안에 있고, Lovely Knights의 배경 갈등은 카드 본문과 세계·인물·아크에 나뉘어 있다. 분류를 기계적으로 맞추기보다 필요한 내용이 어디에 있는지 명확히 한다.
+**World setting** is how the world works; **background** is how this story started and why it is in conflict. Do not repeat the same fact in several entries (contradictions follow). Background images or CSS are not the setting's background.
 
-## 2. 기본 구성: 여섯 영역 + 시스템
+The card keeps only the GM role, genre and narration direction, the user's start role and scope, core premise and the disclosure principle. Greetings, the start screen, and the lorebook's initial values must agree on date, position, relations and mode.
 
-| 영역 | 들어갈 내용 | 총합·개별 로어북 구성 |
+Mains and NPCs relate to each other and act on their own goals and schedules. Give each a distinct speech, conflict response and knowledge range so they do not all react to the user the same way. Not every character appears in every scene.
+
+## 3. Lorebook structure
+
+### 3.1 Roster + keyword detail (all sim bots)
+
+- **An always-on roster is the map; keyword entries are the detail at the moment it is needed.** One line per character: `- Name (age/role): look; personality keywords; affiliation; relation`. Declare the line format at the top of the roster so additions stay uniform.
+- Sheets are keyword-triggered with **multi-alias keys**: romanized full name, given name, native-script full and given names, title, nickname, alternate forms.
+- The same split applies to factions, places and events. Roster and sheet share one canon (role, look, affiliation). A roster frozen at a reference date says so and points to where later changes live.
+- Optional: hide a roster line while that character's sheet is active (Lua sets `bot_present_<name>` when the name appears in the last N messages; the roster wraps each line in a condition), so each character appears once, as a line or as a sheet.
+- Check recursive-scan settings so the roster's names do not chain-activate every sheet. Do not assume an entry keyed on a code the model prints becomes active in the same response; it applies from the next request. Plan when a detail must arrive.
+
+### 3.2 Folders, dividers, bands
+
+- Group entries by category folders (World, Roster & Characters, Antagonists, Places, Factions, Items, Events, System, Custom). Empty divider entries are an older alternative. Some bots ship empty "custom" entries in their own folder for users to fill.
+- `insertorder` works as **category bands**: rules, output contracts and live readouts highest (latest, nearest the chat), then rosters and world, then sheets, then flavor, items and bestiary lowest. Budget cuts hit the lowest band first. Match the bot's existing bands; do not import another bot's numbers. Rules: 'RisuAI 로어북 작성 규칙'.
+- `@@depth 0` is reserved for **per-turn directives**: output contract, score readout, random-event rolls, event or quest director. Optionally one big rules block goes to a global-note anchor with `@@position pt_<name>` + `{{position::<name>}}`.
+- Headings: `###`/`####`/`[Section]`, never `##` (reserved for the outer prompt). Folders are not injected as headings.
+
+### 3.3 Fixed sheet skeleton
+
+Every sheet in one bot follows one skeleton, so the model finds the same kind of fact in the same place:
+
+```
+### Name Surname
+#### Basic Information
+- Name / alias / age / gender / role / affiliation / birthday
+#### Appearance and Wardrobe
+- Build, hair, eyes, signature item, scent
+- <outfit_key>: items — when worn   (keys match the asset attire tokens, if any)
+#### Background
+- Past as a chain: event → consequence → current state
+#### Core Identity
+- Values, wound, belief, goal, flaw
+- Visible side: routine, skills, habits
+- Hidden side: fear, secret, conflict   (lock with CBS if it is a spoiler)
+#### Behavior and Speech
+- Register by audience; 2-3 sample lines with a stage direction
+#### Preferences
+- Likes / dislikes / hobbies (small, concrete)
+#### Abilities
+#### Relationships
+- {{user}}: starting stance and what could change it
+- Other characters: one line each
+#### Extra Details
+```
+
+Optional gated sections unlock deeper text by score or date (§5.2). A "mandatory guidelines" first section is useful only for tricky characters (amnesia, hidden identity, information they must not reveal).
+
+### 3.4 Always-on relational context
+
+- **Relationship matrix / social graph**: pairwise lines (`#### A & B`), including user-facing seeds (`#### A & {{user}}: dislikes {{user}} at first; can improve`).
+- **Who-knows-what table**: per group or character, what they know and believe about the others. It drives dramatic irony and stops secrets leaking to everyone.
+- **Speech and address table** where hierarchy matters (first person, how each addresses others, honorifics, exceptions).
+- **Glossary** of in-world terms, with an instruction to use them.
+
+### 3.5 Organizations and power
+
+- **Summary chains** for organizations: overview (always-on, high band) → group list (always-on) → unit detail (keyed, lower band). Mentioning a unit loads its detail; the overview keeps the map visible.
+- **Power tiers with perception lines**: for each tier, add how ordinary people and same-tier people perceive a feat at that level. This calibrates NPC reactions without numeric stats. Put the tier value in both roster and sheet.
+
+### 3.6 CBS in entries
+
+- **Feature flags** gate whole entries or single clauses: `{{#if {{equal::{{getvar::bot_economy}}::1}}}}…{{/if}}` or `{{#when::{{getvar::bot_events}}::is::1}}…{{/when}}`. Typical flags: language, economy subsystem, stats mode, events on/off, images on/off, expansion content, scenario mode. Options reach the prompt only through such conditions ('RisuAI 옵션 패널 (슬라이딩 드로어)').
+- **Bilingual text via one variable**: headings and glosses inside entries switch on `bot_lang`.
+- **Score → band via a function**, defined once and called per character, so the model reads a behavior band, not a raw number:
+
+```
+@@depth 0
+### Relationship Readout
+{{#func bot_band}}{{#if {{? {{arg::0}}<=100}}}}Stage 1 — polite distance; small talk only{{/if}}{{#if {{? ({{arg::0}}>100)&({{arg::0}}<=200)}}}}Stage 2 — relaxed; teases, seeks {{user}} out{{/if}}{{#if {{? {{arg::0}}>200}}}}Stage 3 — trusts {{user}} with private matters{{/if}}{{/func}}
+Review this before writing any listed character.
+- Name A: {{getvar::bot_aff_a}}/300 — {{call::bot_band::{{getvar::bot_aff_a}}}}
+- Name B: {{getvar::bot_aff_b}}/300 — {{call::bot_band::{{getvar::bot_aff_b}}}}
+```
+
+## 4. Greetings and starts
+
+- **Scenario starts + one free start** (common): each greeting is a different hook into the world (a place, a faction, a featured character, a crisis) and ends at a decision point. One greeting is only the start marker: a free start that still gets the setup UI.
+- **Single greeting switched by variables** (alternative): a setup panel sets `bot_start`, `bot_role`, `bot_lang`; the greeting is a CBS switch over them and re-renders (Lua `reloadChat` or the variables alone). No alternate greetings needed; costs a large first message.
+- **Role selector**: buttons set `bot_role`; the greeting, description lines and small always-on "user role" entries branch on it, so one card supports several user roles.
+- **Bilingual via one variable**: each greeting holds one block per language under `{{#if {{equal::{{getvar::bot_lang}}::0}}}}`. Keep narrative language and UI language as separate variables if the UI is multilingual. Handle the unset value (neither branch matches).
+- **The greeting is a few-shot example**: it shows the prose style, image tags where the model should place them, the status line or tag lines at the end, filled with the start date and place. Some bots also show a sample quest board or system message.
+- **Sentinel glyph**: a glyph of your choice on line 1 (e.g. `☆`) is turned into the setup screen or panel by a display regex and stripped from the prompt by an editprocess regex ('RisuAI 정규식 작성법').
+- Greeting facts (date, relations, looks) must match sheets and initial variables.
+
+## 5. Progression and information reveal
+
+For each event, decide as needed: a stable ID, start conditions (date, place, participants, stage), the entry scene, choices and branches, **the concrete scene that counts as completion**, failure/pending conditions, state changes, follow-ups, repeatability and interval. Completion is a condition met in an actual scene, not a mention or a suspicion.
+
+### 5.1 Progression styles (choose or combine)
+
+- **Date / timeline**: the current date divides past, present and future; only the current period's events are injected in detail. Flashbacks do not rewind the date. Future developments are never stated as past facts. Decide in advance what wins when play diverges from the canonical timeline.
+- **Secret-reveal stages**: public background vs character and story secrets. Per stage: what may be revealed, what must not leak, the transition condition, locked with CBS. An unlocked secret is not automatically known by every NPC.
+- **Quest completion log**: fixed quest IDs and completion conditions; arc and character stages are computed from the set of completed IDs. The model may not invent IDs or advance stages without a scene.
+- **Daily life / free play**: event candidates fit place, relations and schedule, offered at natural moments without cutting into the user's action or an emotional scene. Relationships progress even without a main event.
+
+Event conditions, the tag values the model emits, the transitions Lua allows, and the text CBS unlocks must all describe the same rule. Do not copy broken examples from existing cards; in particular **`::=::` is not a CBS comparison**: use `::is::`, `::vis::` or `{{equal::A::B}}` ('RisuAI CBS 문법').
+
+### 5.2 Relationship bands and unlocked depth
+
+- **Affection bands → behavior text** (most bots): the model sees score → band → behavior guideline (§3.6). Five stages, or hostile-to-devoted phases, are typical. Scores should come from a structured signal (a delta tag or a separate classifier pass), not from prose.
+- **Threshold-unlocked sheet sections**: a sheet reveals a "closer bond" section (hidden traits, private habits) at score ≥ X and a "full trust" section (inner monologue, growth) at ≥ Y: `{{#when::{{getvar::bot_aff_a}}::>=::101}}…{{/when}}`. Saves tokens early and paces depth.
+- **Stage-banded story guidance**: a world stat band can change a "current target / story guideline" line.
+
+## 6. Event mechanisms
+
+### 6.1 Random events
+
+- **Roll gates in CBS** (simplest): constant `@@depth 0` entries, each `{{#if {{? {{roll::500}}<=N}}}}…{{/if}}` with its own rarity (0.4-2% per request), gated by an events flag. Or one entry: `{{roll::100}}<=4` plus `{{random::event A::event B}}`. Rerolls roll again.
+- **Seeded buckets**: Lua rolls a 1-100 seed per turn or per in-world day into a chat variable; one constant entry picks exactly one variant by range. Near-zero token cost, stable within the seed's period.
+
+```
+{{#when::{{getvar::bot_events}}::is::1}}{{#when::{{getvar::bot_event_seed}}::>::0}}
+### Event Feed (introduce only if cast and place fit; otherwise let it pass)
+{{#when::{{getvar::bot_event_seed}}::<=::15}}- A rival group posts a challenge notice.{{/when}}
+{{#when::{{getvar::bot_event_seed}}::>::15}}{{#when::{{getvar::bot_event_seed}}::<=::30}}- A lost item surfaces with a clue.{{/when}}{{/when}}
+{{/when}}{{/when}}
+```
+
+```lua
+function onOutput(id)
+  local ok, err = pcall(function()
+    local turn = getChatLength(id)
+    local until_turn = tonumber(getChatVar(id, "bot_event_cooldown_until")) or 0
+    if getChatVar(id, "bot_scene_protected") == "1" or turn < until_turn then
+      setChatVar(id, "bot_event_seed", "0")          -- suppressed
+    else
+      setChatVar(id, "bot_event_seed", tostring(math.random(1, 100)))
+    end
+  end)
+  if not ok then setChatVar(id, "bot_lua_error", tostring(err)) end
+end
+```
+
+- **Scene protection**: every event text says "do not trigger while {{user}} is in a private, intimate or tense one-on-one scene". Stronger: the model emits a hidden marker when such a scene starts and ends (e.g. `[[bot-private-scene:on]]` / `[[bot-private-scene:off]]`, hidden by display regex) that Lua reads to suppress events; add a cooldown after a foreground event and a "used today" flag.
+- **Two-step introductions**: a new-NPC event first queues the name (profile-on-demand line, §7), and the NPC appears the next turn after the sheet has loaded.
+
+### 6.2 Scheduled events and the calendar
+
+- A calendar table (fixed dates, annual events, birthdays, user-added events, period overrides such as vacations or trips that suspend normal routines) with prelude and aftermath windows.
+- **Priority director**: override > scheduled event due > promoted random event > prelude/aftermath traces > none. Lua computes the current mode into variables; a depth-0 entry shows the due event's block: core beats `a → b → c`, hooks (who is involved), and whether it is mandatory now or at the next natural transition.
+- **Pitfall — display-only calendar**: a calendar rendered only in the UI is invisible to the narrator; it will not know about the exam tomorrow. Inject the next due event (or the next few) into the prompt.
+- Time needs one source of truth. Parse the date from the status line (or keep it in Lua) but not both independently; two sources double-advance time.
+
+### 6.3 Stat-threshold arcs and completion tokens
+
+- Arc N unlocks when a world stat reaches a threshold and arc N-1 is complete. A constant `@@depth 0` entry injects the active arc brief: title, giver, background, goal, notes, and top priority.
+- The brief tells the model to emit an **exact completion token** when the goal is achieved in a scene, e.g. `[[bot-arc:ARC_ID:completed]]`. Lua (or an editoutput regex) catches it, records completion once, and a display regex hides it. Guard against double rewards (ignore a token already seen in the last few messages).
+- Quest loops: the model offers a board of 3-4 in-world jobs; progress is tracked by the model or an aux call; success tags apply rewards in Lua.
+
+## 7. Pacing and a living world
+
+- **Pacing directives** (all sim bots): characters follow their own schedules and not all are present; offer opportunities without railroading; travel takes time and does not complete in one response; do not freeze time; clear outcomes in conflicts (win, loss, retreat) with consequences; avoid repetitive questioning of the user; anti-cliché rules where the genre invites them.
+- **NPC schedules**: a weekly schedule with time blocks and day modifiers that mark characters unavailable.
+- **Rumor tiers**: who saw it → do they talk → how fast; broker characters by tier (instant, selective, silent) and distortion per retelling.
+- **Profile-on-demand**: the model ends each reply with a request line such as `[bot-next-cast: Name A, Name B | none]`. The names match sheet keys, so the sheets load next turn; the rule says only characters whose profiles are loaded may be portrayed in detail. Keep the line in the prompt for a few messages, hidden in display.
+- **Off-screen NPC tracker**: every N turns an aux call writes one line per absent NPC (doing now / purpose / next), re-injected at depth 0; a longer "developments" summary every M turns.
+- **Endings are a summary, not a lock**: late in the timeline, gated guidance lists ending candidates (characters past a threshold) and the ending type; play may continue after it.
+- Anti-verbatim: sheet text is reference material, not dialogue to recite; do not quote sheet lines.
+
+## 8. Who needs to know each piece of state
+
+For every item decide separately: shown to the user? kept in front of the model? stored in a variable? These overlap. Money or time that is public but used in event conditions still belongs in a variable.
+
+| Purpose | Output and display | Storage and next-turn delivery |
 |---|---|---|
-| 0. 월드 세팅(세계관) | 시대·지역·장르, 기술/마법의 규칙과 한계, 사회 제도·경제·문화·세력, 유저의 권한과 제약 | 짧은 세계 개요 + 국가·조직·제도·능력 체계별 상세 |
-| 1. 주요 캐릭터 | 역할·소속·외형, 말투와 행동, 욕구·동기·모순·한계, 유저 및 다른 인물과의 관계, 일상 동선, 조건에 따른 변화·비밀 | 전체 인물 지도 안의 주연 목록 + 인물별 시트. 성격을 행동·대사로 구분할 수 있게 작성 |
-| 2. NPC | 조연·엑스트라·적대자·조직 대표, 등장할 장소와 이유, 주연·세력과의 연결, 제공할 정보·업무·갈등 | `NPC LIST`/NPC Pool + 반복 등장하거나 중요한 NPC의 개별 상세. 역할이 작은 인물은 간결한 묶음 목록으로 충분 |
-| 3. 장소 | 공간 관계·이동 시간·출입 조건, 분위기·시설·가능한 활동, 자주 있는 인물, 시간대별 변화 | 지역/층별 안내·지도 + 장소별 상세. 장소와 배경 이미지 에셋은 구분하되 필요하면 연결 |
-| 4. 배경 | 시작 전의 역사·관계·사건, 현재 갈등의 원인, 유저가 참여하게 된 계기, 시작 날짜·지위·알고 있는 사실 | Story Background/역사 요약 + 관련 사건·세력·인물의 심화. 공개 사실·숨겨진 원인·미래의 가능성을 분리 |
-| 5. 사건과 이벤트 | 일상 사건·정기 일정·개인 에피소드·메인 아크, 발동 조건·관계자·장소, 선택과 결과, 완료·실패·보류·재발동 조건 | 사건 목록/연표/아크 요약 + 조건 충족 시 활성화되는 개별 사건·단계 |
-| 시스템·상태 관리 | GM의 진행 원칙, 현재 시간·위치·진행 상태, Tag Output 규격, 변수·CBS·Regex·Lua의 역할, 선택 모드와 초기화 | System Rules, Tag Output, 현재 상태/진행 요약. 수치·관계·위치·복원 시스템은 필요할 때 분리 |
+| User and model must both keep knowing it | Tag output (date, place, companions, money, equipment, current goal), styled by regex into a status panel | The raw tag stays in the message as context. If it needs persistent state, Lua stores it and the latest state is re-injected |
+| Hidden from the user, tracked by the model | Internal tag output hidden by an `editdisplay` regex or parsed by Lua | Keep the raw text in the model's context, or summarize stored state back through CBS/request hooks. Hiding on screen is not removing it from the request |
+| Drives events, behavior or branches | Fixed tags/IDs/values, validated and parsed by Lua | Chat variables/state; CBS reflects current values and active bands. Show only what the UI needs |
 
-여기서 **세계관은 세계가 작동하는 규칙**, **배경은 지금의 이야기가 시작된 경위와 갈등**이다. 같은 사실을 여러 항목에 중복해 모순을 만들지 않는다. 배경 이미지나 CSS를 설정상의 배경 대신으로 취급하지 않는다.
+**The status panel is a display; choose storage separately.** HTML made by `editdisplay` does not change the stored message, and hiding a tag on screen does not delete it from the chat. Design the regex rendering, the raw record and the Lua variables each on purpose.
 
-카드 본문에는 봇의 역할(GM/다중 인물 연기), 장르와 서술 방향, 유저의 시작 역할·행동 가능 범위, 핵심 전제, 정보 공개 원칙을 짧게 둔다. 개별 캐릭터의 모든 정보를 본문에 몰아넣지 않는다. 첫 메시지·선택 화면의 날짜·직책·관계·모드와 로어북의 초기값을 일치시킨다.
+A value in the raw text or a variable is unknown to the model unless it is in the next request. When `editprocess` removes old tags to save tokens, re-supply what is needed through the latest panel or a CBS state summary. Secrets not yet revealable never go in a public panel.
 
-주연과 NPC는 서로 관계를 맺고 각자의 목표와 일정에 따라 움직인다. 유저만을 중심으로 같은 반응을 반복하지 않도록 말투·갈등 대응·지식 범위를 구분한다. 모든 인물을 매 장면에 등장시킬 필요는 없다.
+Common channel options (mix as needed):
+- One time/place tag on the last line; the lorebook reads the date variable parsed from it to pick the current period.
+- A public panel tag (`<bot-panel>…</bot-panel>`) for visible state and agenda.
+- An empty display placeholder (`<bot-chart name="…"/>`) that a regex fills from stored data, separate from a data tag (`[bot-chart: …]`) that Lua saves; an `editRequest` hook re-sends the stored records. Never nest the placeholder and the data tag.
+- A signed delta tag for relationships (`<bot-aff>Name A +2</bot-aff>`), a location tag, a completion log (`<bot-done>ARC_ID</bot-done>`). After parsing, some raw tags are removed and the stored values are re-provided with `getvar` in the lorebook.
+- Management tags (`<bot-uid>`, `<bot-stage>`) are attached by Lua, never generated by the model.
 
-## 3. 총합 목록, 활성화, 제목과 예산
+## 9. Contract: tag output → Lua → CBS → status display
 
-- **총합 로어북은 전체 지도, 개별 로어북은 필요한 순간의 상세**다. 총합에는 이름·역할·관계·발동 단서와 현재 상태의 핵심을 담고 긴 시트나 사건 본문을 복제하지 않는다. 인물뿐 아니라 세력·장소·사건에도 적용한다.
-- 전체 인물 목록에는 주연도 포함할 수 있다. 목록의 핵심 역할·외형·소속과 개별 시트의 정본이 충돌하지 않게 한다. 기준 시점의 목록이라면 기준 날짜와 이후 변화가 반영되는 위치를 밝힌다.
-- 상시 항목은 세계의 핵심 전제·총합 지도·현재 상태·출력 규칙처럼 지속적으로 필요한 것에 제한한다. 상세는 인물/장소 키워드, 시기, 모드, 진행 변수에 따라 발동한다. 상시 발동하면서 내부 CBS로 현재 구간만 남기는 방식도 가능하다.
-- 목록의 이름이 개별 항목을 모두 연쇄 발동시키지 않는지 재귀 검색 설정을 확인한다. 사건 코드를 출력한 같은 응답에서 새 로어북이 즉시 읽힌다고 가정하지 않는다. 상세가 다음 요청부터 필요한 경우 그 주입 시점을 설계한다.
-- 내용 헤딩은 `###`, `####`, `[구획]` 등으로 쓰고 상위 프롬프트의 `##`는 사용하지 않는다. 그룹→개별→소구획의 위계는 실제 주입된 텍스트 기준으로 확인한다. 폴더는 내용 헤딩으로 주입되지 않는다.
-- 일반 로어북은 낮은 우선순위부터 위에서 아래로 배치되고 예산이 부족하면 낮은 우선순위부터 잘린다. 덩어리 일부의 절단은 불가피한 경우 허용한다. 핵심 상태가 다른 상세 항목의 보존에만 의존하지 않게 한다.
-- 캐릭터·개인 성격·세계 설정·월드 이벤트 등 유사 의미끼리 가까운 우선순위에 모으고, 전체 순서와 제목 위계를 함께 검토한다. 세 참고 봇은 서로 다른 숫자 대역을 쓰므로 특정 봇의 수치를 강제하지 않는다.
-- `@@position`·`@@depth`·`@@end` 등으로 끝부분/프리셋 지정 위치에 들어가는 중요 항목은 일반 배열과 별도로 확인한다. `@@`에는 위치 외의 기능도 있으므로 이름만 보고 위치를 판단하지 않는다.
+Before building, write a small state table. Per row: **tag/field, meaning, type and allowed values, initial value, absolute or delta, when emitted, where stored, who updates it, visibility, next-turn injection path** (and whether restore covers it).
 
-로어북을 실제 작성·수정할 때는 스킬 **RisuAI 로어북 작성 규칙**, 필드·발동·데코레이터 확인에는 **RisuAI 로어북 구조**를 읽는다.
+- Set frequency: required state every response; deltas only when something changed. Specify delimiters, line breaks, keys, IDs and what happens when a field is missing. Never parse free prose where a number or ID is needed.
+- Separate display names from internal keys with one consistent mapping. Define handling for unknown names/IDs, bad numbers or tags, and out-of-range values. Do not overwrite a missing value with 0 or an empty list.
+- Absolute values replace; deltas apply once to a confirmed base. Do not let the model and Lua both add the same change. Validate change size, min/max and stage transitions in Lua. A robust option: the model reports a **categorical change** ("slight increase", "big decrease") and a fixed map turns it into numbers.
+- Align the output rule, parser, CBS variable names and display regex. If public state and internal stage disagree, decide which stored value is canonical; derive computable levels from it.
+- Initialize only when a value is missing. A start hook that runs every turn must not reset progress. Say whether a mode change keeps the record or starts over.
+- `editOutput` changes the saved reply and can run repeatedly; `editDisplay` runs on every redraw, so display must never advance scores or events. `editprocess` is the request-side regex; Lua's final request edit is `editRequest`. Hook order and arguments: 'RisuAI 처리 순서 (정규식·Lua 훅)' and 'RisuAI Lua 트리거'. Status panel build: 'RisuAI 상태창'. Image tags: 'RisuAI 에셋 출력식'.
+- Producer switch (optional): the main model writes the status block, or Lua `onOutput` asks an aux model to extract it from the last N messages and appends it. When the Lua producer is on, strip any block the main model wrote anyway.
 
-## 4. 사건과 정보 공개를 설계하는 방법
+## 10. Optional: per-response state save and restore
 
-사건마다 필요한 수준으로 다음을 정한다: 안정적인 ID, 시작 조건(날짜·장소·참여자·단계), 진입 장면, 가능한 선택·분기, 완료를 인정할 구체적인 사건, 실패/보류 조건, 상태 변화, 후속 사건, 반복 여부·간격. 완료는 단순 언급이나 의심이 아니라 실제 장면에서 충족된 조건으로 판정한다.
+Use when progress, affection, companions or location are complex, or continuity after reroll/delete matters. Do not force it on a bot that needs only a simple panel. The design below does not mean every card field is restored automatically.
 
-진행 방식은 봇에 맞게 선택하거나 조합한다.
+1. **Pick the restore unit.** A narrative scene name and a storage ID are different things. Lua attaches an ID (`<bot-uid>`) to each confirmed reply; rerolls of the same scene are different outputs. The model never issues IDs.
+2. **Restore from the surviving conversation.** Read messages from the end to find the latest valid ID with a backup. The largest counter or newest backup is not necessarily the end of the current branch; never pull state from a deleted future reply.
+3. **New state = base state + this reply's changes.** Compute stages from the de-duplicated completion log; apply this reply's deltas to the base snapshot only. Never add a new delta on top of the final value saved before the reroll.
+4. **Store linked state under one ID**: completion log, absolute scores, companions, location (e.g. `bot_backup_done`, `bot_backup_aff`, `bot_backup_party`, `bot_backup_loc`). Then sync the CBS variables, keep one ID per message, and hide management tags in display.
+5. **Cover every path**: normal input, reroll, empty input, delete then regenerate. Do not assume the input hook always runs; verify the state is applied before the request is assembled.
+6. **Define exceptions and cost**: old messages without backups, a first message without tags, imported saves, going back past the retention limit. Do not describe limited restore as unlimited. Decide whether UI changes between turns (e.g. party edits) are kept or rolled back.
+7. **Optional recovery**: re-collect unprocessed completion/delta tags after the base point, or import a save as a base state, both with boundaries against double application. If an aux-model result arrives late, compare the ID at request time with the current chat end and do not apply it to another branch.
 
-- **날짜·연표형**: Magic High School처럼 현재 날짜로 과거/현재/미래를 구분하고 현재 시기의 사건만 자세히 주입한다. 회상 때문에 현재 날짜를 되돌리지 않는다. 미래 전개는 이미 일어난 사실로 말하지 않으며, 실제 플레이가 분기한 내용이 원작 연표와 충돌할 때 무엇을 우선할지 정한다.
-- **비밀 공개 단계형**: counselling office처럼 공개 배경과 인물/전체 이야기의 비밀을 분리한다. 단계마다 공개 가능한 사실·금지할 누설·전환 조건을 정하고 CBS로 잠근다. 해제된 정보라도 모든 NPC가 자동으로 안다고 가정하지 않는다.
-- **퀘스트 완료 이력형**: Lovely Knights처럼 정해진 퀘스트 ID와 완료 조건을 두고, 완료 ID 집합에서 아크·캐릭터 단계를 계산한다. LLM이 임의의 ID를 만들거나 장면 없이 단계를 올리지 않게 한다.
-- **일상·자유 진행형**: 장소·관계·일정에 맞는 사건 후보를 제공한다. 유저의 진행 중 행동이나 중요한 감정 장면을 끊지 않고 자연스러운 시점에 제안한다. 메인 사건이 없어도 일상과 관계가 진행될 수 있게 한다.
+Other reroll-safe schemes seen: a snapshot + pending changes + processed-turn index (reroll recomputes from the snapshot); a cursor + per-message signature + stored deltas (only the diff is applied); a hidden per-message snapshot comment whose ID keys the stored state, with orphan cleanup; or recompute everything from the full chat each time (event sourcing), which is safe by construction. Pick one.
 
-사건 상세의 조건, Tag Output이 내보내는 값, Lua가 허용하는 전환, CBS가 여는 내용은 같은 규칙을 가리켜야 한다. 기존 카드에 잘못된 예시가 있더라도 복사하지 않는다. 특히 **`::=::`는 CBS 비교식으로 동작하지 않는다**. 문자열 비교는 `::is::`, 변수 비교는 `::vis::`, 또는 `equal` 함수를 쓰고 정확한 문법은 **RisuAI CBS 문법**을 확인한다.
+Test: two normal turns; repeated processing of the same reply; reroll; deleting the last and several messages then regenerating; missing or malformed tags; missing old backups; UI changes; a late async response. **Progress, rewards and affection must not double, and linked state under one ID must restore together.** A reference card's implementation is not a test result for new code.
 
-## 5. 상태는 누가 알아야 하는가
+## 11. Pitfalls
 
-항목별로 유저 표시 여부, LLM에 계속 전달할 여부, 실제 변수 저장 필요 여부를 따로 결정한다. 아래 세 경우는 겹칠 수 있다. 공개되는 돈·시간도 이벤트 조건에 쓰인다면 변수로 관리한다.
+- Character data in the description of a many-character bot: it is always sent and crowds the budget.
+- Roster and sheet disagree (looks, affiliation), or greetings disagree with sheets and initial variables.
+- Every entry at the default priority; or long knowledge at depth 0 diluting the directives.
+- Option variables with a typo or a different prefix in one gate; unset variables matching no branch (e.g. language unset shows no greeting text).
+- Request-side regexes left on an old tag format so they never match; tags stripped from display but still piling up in the prompt (or the reverse).
+- A calendar or quest log that only the UI sees.
+- Random events that fire into intimate or climactic scenes; events with no cooldown.
+- Model-invented IDs, names or asset tags accepted without a whitelist.
+- Stat deltas applied in `editOutput` or display without reroll protection; two time sources.
+- Entries or instructions that reference a file, list or asset that does not exist in this bot.
+- Copying another bot's names, variables, tags or numeric bands.
 
-| 목적 | 출력·표시 | 보존·다음 턴 전달 |
-|---|---|---|
-| 유저와 LLM이 지속적으로 알아야 하는 사항 | Tag Output으로 날짜·장소·동석자·돈·장비·현재 목표 등을 출력하고 Regex로 꾸며 상태창에 표시 | 원문 태그를 메시지에 남겨 이후 문맥으로 전달. 별도 영속 상태가 필요하면 Lua로 저장하고 최신 상태를 재주입 |
-| 유저에게는 안 보이지만 LLM이 지속 추적할 사항 | 내부 Tag Output을 내보내고 `editdisplay` Regex로 숨기거나 Lua로 파싱 | 원문을 LLM 문맥에 남기거나, 저장한 상태를 요약하여 CBS/요청 훅으로 재주입. 화면 숨김과 LLM 요청 제거를 혼동하지 않는다 |
-| 이벤트·캐릭터 행동·조건 분기의 기준이 되는 주요 변수 | 정해진 태그·ID·값을 출력하고 Lua로 검증·파싱 | 채팅 변수/상태에 저장하고 CBS로 현재 수치와 활성 구간을 반영. 필요한 값만 공개 UI에 표시 |
+## 12. Build and review order
 
-**상태창은 표시 수단이고 저장소는 별도로 정한다.** `editdisplay`가 만든 HTML은 저장본을 바꾸지 않는다. 화면만 숨긴다고 내부 정보가 챗 원문에서 삭제되는 것도 아니다. Regex를 통한 표현, 메시지 원문의 기록, Lua 변수 저장을 각각 설계한다.
+1. Decide the user's role, start point, genre, scope of action and the core of the six areas. Do not invent undecided facts as canon.
+2. Build the maps (roster, factions, places, events) and link the needed details. Check that characters have independent goals, relations and reasons to act that can create scenes.
+3. Separate public background, secrets and future possibilities; define event triggers, completion, failure and reveal conditions.
+4. Use the state table to split public UI, hidden tracking and condition variables; choose the needed level of tag output, regex, Lua and CBS, and optional restore.
+5. Review heading hierarchy, bands of related entries, the whole injection order and the token budget together. Check which rosters and details actually activate in representative scenes.
+6. Test within the implemented scope: first turn, time/place change, event completion, before/after a secret unlock, the request and the status panel. For every added feature, verify its parse, storage, re-injection and restore paths.
 
-원문/변수에 값이 있어도 다음 LLM 요청에 포함되지 않으면 모델은 그 값을 알 수 없다. `editprocess`로 이전 태그를 제거해 예산을 줄일 때에는 최신 패널 또는 CBS 상태 요약 등으로 필요한 값을 다시 제공한다. 아직 공개하면 안 되는 비밀은 공개 상태창에 넣지 않는다.
-
-실제 참고 패턴:
-
-- Magic High School: 마지막 줄의 `<mhs-time>` 하나에 현재 날짜·장소를 출력하고 로어북은 날짜 변수로 현재 시기를 참조한다.
-- counselling office: `<kiri_panel>`은 공개 상태/아젠다, 빈 `<kiri_chart name="...">`는 화면 표시용 자리다. 별도 `[Chart: ...]`는 Lua가 `Charts` 상태에 저장하는 데이터 태그이고, `editRequest`가 상담 기록을 다시 전달한다. `[Secret: ...]`·`[Story→...]` 등은 단계 변수의 입력이다. 화면 자리와 저장 태그를 중첩하지 않는다.
-- Lovely Knights: `<pk-panel>`은 공개 상태, `<pk-aff>`는 변한 인물의 부호 있는 증감값, `<pk-loc>`는 위치 입력, 퀘스트의 `done: [ID]`는 진행 근거다. 파싱 후 일부 원문 태그는 제거하고 저장된 값을 로어북의 `getvar`로 다시 제공한다. `<pk-uid>`와 `<pk-stage>`는 Lua가 붙이는 관리 태그로, LLM에게 ID 생성을 맡기지 않는다.
-
-## 6. Tag Output → Lua → CBS → 상태창 계약
-
-제작 전에 간단한 상태 표를 만든다. 각 행에 **태그/필드, 의미, 타입·허용값, 초기값, 절대값/증감값, 출력 시점, 저장 위치, 갱신 주체, 공개 여부, 다음 턴 주입 경로**를 적는다. 복원을 쓰면 복원 대상 여부도 적는다.
-
-- 필수 상태는 매 응답, 변화량은 실제 변화가 있을 때만 출력하는 등 빈도를 정한다. 구분자·줄바꿈·키·ID·누락 시 동작을 명시한다. 자유로운 서술문을 수치나 ID 대신 파싱하지 않는다.
-- 표시 이름과 내부 키를 분리하되 매핑은 일관되게 유지한다. 허용하지 않은 이름·ID, 잘못된 숫자·태그, 범위 밖 값의 처리 방식을 정한다. 누락을 무조건 0이나 빈 목록으로 덮지 않는다.
-- 절대값은 현재값을 교체하고, 증감값은 확정된 기준 상태에 한 번만 적용한다. 호감도·돈 등을 LLM과 Lua가 각각 더해 이중 반영하지 않는다. 변경 폭·최댓값·최솟값과 진행 단계 전환은 Lua에서 검증한다.
-- Tag Output 규칙과 파서, CBS 변수명, 표시 Regex를 함께 맞춘다. 공개 상태와 내부 단계가 달라지면 어느 저장값을 정본으로 삼을지 정한다. 계산 가능한 레벨·단계는 정본에서 파생한다.
-- 초기화는 값이 없을 때만 한다. 매 턴 불리는 시작 훅이 진행을 리셋하지 않게 하고, 모드 변경이 기존 기록을 유지하는지 새로 시작하는지 명시한다.
-- `editOutput`은 저장될 응답을 바꾸며 반복 호출될 수 있다. `editDisplay`는 다시 그릴 때마다 호출될 수 있으므로 표시만으로 호감도나 사건을 진전시키지 않는다. `editprocess`는 요청용 Regex, Lua의 최종 요청 조정은 `editRequest`다. 훅 순서·메타 인자는 **RisuAI 처리 순서 (정규식·Lua 훅)**과 **RisuAI Lua 트리거**에서 확인한다.
-
-## 7. 선택 기능: 장면/응답 ID별 상태 저장과 복원
-
-진행·호감도·동료·위치 등이 복잡하거나 리롤/삭제 후 연속성이 중요한 봇에서 선택한다. 단순한 상태 패널만 필요한 봇에 강제하지 않는다. 아래는 Lovely Knights의 방식에서 추출한 설계이며, 이 방식이 카드의 모든 필드를 자동 복원한다는 뜻은 아니다.
-
-1. **복원 단위를 정한다.** 서사상의 장면 이름과 저장 ID를 구분한다. Lovely Knights는 확정 응답마다 Lua가 `<pk-uid>`를 부여한다. 같은 장면의 리롤도 서로 다른 출력일 수 있으며, 모델이 ID를 발급하지 않는다.
-2. **남아 있는 대화를 기준으로 복원한다.** 메시지를 뒤에서부터 읽어 유효한 ID와 대응 백업을 찾는다. 가장 큰 카운터나 가장 최근 생성된 백업이 반드시 현재 분기의 끝은 아니다. 삭제된 미래 응답의 상태를 가져오지 않는다.
-3. **기준 상태 + 이번 응답의 변화로 새 상태를 계산한다.** 완료 ID를 중복 제거한 이력에서 단계를 계산하고, 호감도는 기준 스냅샷에 이번 증감만 적용한다. 리롤 전에 저장된 최종값에 새 증감을 다시 더하지 않는다.
-4. **연결된 상태를 같은 ID 아래 저장한다.** Lovely Knights는 `pk_backup`(완료 이력), `pk_aff_backup`(호감도 절대값), `pk_squad_backup`(동료), `pk_loc_backup`(위치)를 같은 ID로 묶는다. 저장 후 CBS용 변수를 동기화하고 메시지의 ID는 하나만 남긴다. 관리용 태그는 표시 Regex로 숨긴다.
-5. **복원 경로를 빠뜨리지 않는다.** 일반 입력뿐 아니라 리롤·빈 입력·삭제 후 재생성에서도 기준 상태를 확인한다. 입력 훅이 항상 실행된다고 가정하지 않는다. 구현할 때는 요청 조립 전에 필요한 상태가 반영되는지 실제 훅 경로를 검증한다.
-6. **예외와 비용을 정한다.** 백업이 없는 오래된 메시지, 태그가 없는 첫 메시지, 가져온 세이브, 백업 보관 한도 밖으로 돌아간 경우의 fallback을 정한다. 복원 불가 범위를 무제한 복원처럼 설명하지 않는다. UI에서 턴 사이에 바꾼 동료 설정을 유지할지 되돌릴지도 정한다.
-7. **선택적인 복구·내보내기를 더한다.** Lovely Knights에는 처리되지 않고 남은 완료/증감 태그를 기준점 뒤에서 재수집하는 보완과 세이브 가져오기 기준 상태가 있다. 이런 기능은 중복 적용을 막는 경계가 필요하다. 보조 모델 결과가 늦게 도착하면 계산 당시 ID와 현재 대화 끝을 비교해 다른 분기에 적용하지 않는다.
-
-위 기능을 실제 구현할 때 확인할 동작: 정상 2턴 진행, 같은 응답의 반복 처리, 리롤, 마지막/여러 메시지 삭제 후 재생성, 누락·잘못된 태그, 오래된 백업 부재, 동료 UI 변경, 늦은 비동기 응답. **진행·보상·호감도가 이중 증가하지 않고, 같은 ID의 관련 상태가 함께 복원되는지**를 검증한다. 참고 카드의 구현 자체를 새 코드의 검증 결과로 대신하지 않는다.
-
-## 8. 제작·검토 순서
-
-1. 유저 역할·시작 시점·장르·활동 범위와 여섯 구성 영역의 핵심 내용을 정한다. 미정인 사실은 지어내 정본으로 고정하지 않는다.
-2. 인물·장소·세력·사건의 총합 지도를 만든 뒤 필요한 개별 상세와 연결한다. 인물의 독립적인 목표, 관계, 활동 이유가 장면을 만들 수 있는지 확인한다.
-3. 공개 배경/비밀/미래 가능성을 분리하고, 사건의 발동·완료·실패 및 정보 해제 조건을 정한다.
-4. 상태 표로 공개 UI·내부 추적·조건 변수를 구분하고, 필요한 수준의 Tag Output/Regex/Lua/CBS 및 선택적 복원 방식을 정한다.
-5. 제목 위계·유사 의미의 우선순위·전체 주입 순서·토큰 예산을 함께 검토한다. 대표 장면에서 어떤 목록과 상세가 실제 활성화될지 확인한다.
-6. 실제 구현 범위에 맞춰 첫 턴, 시간/장소 변경, 사건 완료, 비밀 해제 전후의 요청과 상태창을 확인한다. 기능을 추가했다면 해당 파싱·저장·재주입·복원 경로까지 검증한다.
+Checklist
+- [ ] Description is a GM contract; unused slots empty; global note holds the recency-critical output contract.
+- [ ] Roster + keyword sheets with one skeleton and multi-alias keys; bands match the bot.
+- [ ] Relationship matrix / who-knows-what / address table where needed.
+- [ ] Every option variable is read somewhere in the prompt, and unset values behave.
+- [ ] Events: gated, scene-protected, cooled down; scheduled events visible to the narrator.
+- [ ] Completion tokens are exact, hidden, and applied once.
+- [ ] Greetings: scenario starts + free start; format demonstrated; facts match initial values.
+- [ ] State table complete; reroll behavior tested for every counter.
