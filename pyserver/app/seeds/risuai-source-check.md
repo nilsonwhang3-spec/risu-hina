@@ -1,4 +1,6 @@
-Read this only when a bot must be **verified against the actual RisuAI source**: a host behavior is in doubt, a bot feature misbehaves and the other skills do not explain why, a skill marks something "unverified" and the answer matters, or the user asks to check a bot (or a claim) against the latest RisuAI / PocketRisu. Do **not** use it for ordinary authoring: the other RisuAI skills were already checked against the source (RisuAI `669b12ce`, PocketRisu `a14c911f`, 2026-09-23); read them first.
+> Host-source audit: RisuAI `25001174`, PocketRisu `a14c911f` (2026-09-23). Runtime claims refer to these snapshots; authoring conventions are recommendations.
+
+Read this only when a bot must be **verified against the actual RisuAI source**: a host behavior is in doubt, a bot feature misbehaves and the other skills do not explain why, a skill marks something "unverified" and the answer matters, or the user asks to check a bot (or a claim) against the latest RisuAI / PocketRisu. Do **not** use it for ordinary authoring: the other RisuAI skills were already checked against the source (RisuAI `25001174`, PocketRisu `a14c911f`, 2026-09-23); read them first.
 
 Contents
 1. When to use, when not
@@ -58,7 +60,7 @@ key_files('risuai')                                             # the map below,
 | Unset variables, `defaultVariables` | `ts/parser/chatVar.svelte.ts` |
 | `{{? }}` math operators and precedence | `ts/process/infunctions.ts` |
 | Lua functions, access tiers, `listenEdit` arguments, engine cache | `ts/process/scriptings.ts` |
-| Triggers: V1/V2 (legacy), `triggerlua`, modes | `ts/process/triggers.ts` |
+| Triggers: V1 (deprecated), V2, triggerlua, modes | `ts/process/triggers.ts` |
 | Order of a send: onStart, lorebook, editprocess, editRequest, onOutput, CBS variable pass | `ts/process/index.svelte.ts` (`sendChat`) |
 | Regex types, flag metas (`<cbs>`, `<move_top>`, `<order>`), `ableFlag` | `ts/process/scripts.ts` |
 | Lorebook matching, decorators, budget, placement | `ts/process/lorebook.svelte.ts` |
@@ -96,7 +98,10 @@ Each was confirmed in the source on 2026-09-23. Re-check in the current snapshot
 | `{{:else}}` inline inside a multi-line block | Prints literally / false branch empty | Put `{{:else}}` on its own line |
 | Numeric `#when` on a possibly unset variable | Unset reads `"null"`; every numeric comparison is false | Give a default |
 | `{{// note}}` comments | No handler in current CBS; printed as text | `{{blank::note}}` or remove |
-| V1 or V2 (block) triggers | Deprecated (V1 warned in the editor; V2 deprecated effects hidden behind `showDeprecatedTriggerV2`) | Port to Lua ('RisuAI Lua 트리거' §0) |
+| V1 / V2 block triggers | V1 is deprecated; V2 is supported with selected old effects hidden by showDeprecatedTriggerV2 | Do not migrate working V2 solely because that setting exists |
+| False `<cbs>` IN becomes empty | Empty check runs before CBS; expanded empty regex matches empty positions | Return `(?!)` when inactive |
+| onStart writes a variable used at depth 0 | Depth-0 text was already parsed | Set earlier or inject via editRequest |
+| OUT depends on vars / lastmessageid | Cache omits vars and message count | Include dependencies in IN/pre-regex text, or use reloadDisplay |
 | `stopChat` / `return false` in onInput, onOutput, buttons, edit hooks | Only honored in `onStart` | Move the stop to `onStart` |
 | `async` listenEdit callback | Callback already runs in a coroutine; an async one returns a Promise and breaks the chain | Plain function |
 | Stat deltas in editoutput or onOutput with no snapshot | No rollback of chat vars on reroll, edit or delete; editOutput also re-runs per streamed chunk | Snapshot keyed to the message ('RisuAI Lua 트리거' advanced part) |
@@ -110,9 +115,9 @@ Each was confirmed in the source on 2026-09-23. Re-check in the current snapshot
 
 Answer in the user's language. For each finding: the bot item (name/id and the exact text), the classification, the source evidence (`src/…:line`, repo, commit short sha), and the proposed fix. Close with the commit(s) checked and anything left unverified. Example line:
 
-`[broken] Lorebook "Stage table" uses {{arg::0}} as the score - RisuAI 669b12ce src/ts/parser/parser.svelte.ts:1780 (argData[0] is the function name) - propose arg::1.`
+`[broken] Lorebook "Stage table" uses {{arg::0}} as the score - RisuAI 25001174 src/ts/parser/parser.svelte.ts:1780 (argData[0] is the function name) - propose arg::1.`
 
-If a finding contradicts one of the RisuAI skills, say which skill and section, so the skill can be corrected (`improve_skill` when the user agrees).
+If a finding contradicts a skill, identify the section and correct it when the user has authorized skill editing; otherwise report it for follow-up.
 
 ## 7. Rules
 
@@ -121,3 +126,22 @@ If a finding contradicts one of the RisuAI skills, say which skill and section, 
 - Never modify the fetched sources and never run them. They are for reading.
 - Do not paste large source blocks into the chat; quote the few lines that decide the question.
 - If the fetch fails (offline, rate limit), say so and fall back to the skills, marking the answer "not re-verified".
+
+
+### Evidence for the 2026-09-23 corrections
+
+Paths are relative to each host repository, at the commits named above. Read implementations rather than only API descriptions.
+
+| Claim | Source to inspect |
+|---|---|
+| Empty expanded IN matches; cache omits vars/message count | `src/ts/process/scripts.ts`: executeScript checks script.in before parsing; generateScriptCacheKey |
+| Full reload clears cache; one-message reload does not | `src/ts/stores.svelte.ts`: ReloadGUIPointer subscription; `src/ts/process/scriptings.ts`: reloadDisplay / reloadChat |
+| PocketRisu alone re-parses moved regex output | Compare move_top/move_bottom branches in `src/ts/process/scripts.ts` |
+| Depth 0 precedes onStart; positive/reverse depth follows | `src/ts/process/index.svelte.ts`: postEverythingLorebooks, runTrigger(start), depthPrompts |
+| V2 remains supported; only selected effects deprecated | `src/lib/SideBars/Scripts/TriggerList.svelte` and TriggerV2List.svelte: effectCategories.Deprecated |
+| Injection selector vs operation; greeting offset; budget parses twice | `src/ts/process/lorebook.svelte.ts`: decorator switch, tokens, inject operations; index.svelte.ts injection parse |
+| Lua LLM streaming opt-in; lore budget already applied | `src/ts/process/scriptings.ts`: options.streaming === true, loadLoreBooksMain |
+| Translation replacements have separate semantics | `src/ts/translator/translator.ts`: applyEdittransRegex |
+| PocketRisu asset lists require manifest cache | `src/ts/parser/assetListHydration.ts`, `src/ts/cbs.ts`: assetlist / moduleassetlist; scriptings.ts cbs |
+
+Verification: source inspection of both snapshots plus 11 assertions per host against the extracted regex/cache implementation with CBS and host services stubbed. This is not a browser or full Lua end-to-end test.

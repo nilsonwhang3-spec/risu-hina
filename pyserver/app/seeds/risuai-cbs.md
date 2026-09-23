@@ -1,3 +1,5 @@
+> Host-source audit: RisuAI `25001174`, PocketRisu `a14c911f` (2026-09-23). Runtime claims refer to these snapshots; authoring conventions are recommendations.
+
 Read this when you read or write RisuAI CBS `{{tag}}` syntax in a card, lorebook, regex, background HTML or prompt field:
 what each tag does, how `#when` conditions and operators work, what runs in which context, and common patterns
 (score bands, defaults, sliding windows, dice gates, responsive CSS, asset existence checks).
@@ -74,7 +76,7 @@ regex output, `<cbs>` flag), 'RisuAI Lua 트리거' (`cbs()` from Lua), 'RisuAI 
 | `{{exampledialogue}}` / `{{examplemessage}}` | example dialogue field |
 
 In group chats `char` returns the group name and `description`, `personality`, `scenario`, `exampledialogue` return `""`
-(PocketRisu fork only: they return the current character's fields instead).
+(PocketRisu removed group chats; its character-only lookup is not group-chat support).
 
 ## 3. System / prompt tags
 
@@ -163,12 +165,14 @@ name can therefore show a *different* similar asset. Several assets with the sam
 | `{{source::user}}` / `{{source::char}}` | profile image path |
 | `{{inlay::name}}` / `{{inlayed::name}}` | inlay (not sent to the model) |
 | `{{inlayeddata::name}}` | inlay that **is** sent to the model |
-| `{{assetlist}}` | JSON array of the card's additional asset names, exact spelling and case (`""` in group chats; PocketRisu fork: not emptied) |
+| `{{assetlist}}` | JSON array of the card's additional asset names, exact spelling and case (`""` in mainline group context; PocketRisu has no group chats) |
 | `{{emotionlist}}` | JSON array of emotion names |
 | `{{chardisplayasset}}` | JSON array of prebuilt display assets (`[]` unless the card uses the prebuilt asset command) |
 | `{{position::name}}` | insertion point for lorebook `@@position pt_name`; resolved textually before CBS, and only in lorebook entries, prompt-template items and the global note |
 
 ---
+
+PocketRisu can store assets in external manifests. Regex passes preload list-tag manifests; direct synchronous Lua cbs() does not. If a manifest is not cached, an asset-list tag can remain unexpanded. Check the result before decoding it as JSON; see the asset-output skill.
 
 ## 8. Variables
 
@@ -525,8 +529,7 @@ run there and sends the literal tag to the model every turn (§8, §21). Remove 
 {{#if {{greater_equal::{{chat_index}}::{{? {{lastmessageid}}-N}}}}}}$&{{/if}}          (older bots; deprecated)
 ```
 The legacy `#if` form also strips the leading whitespace of every line of `$&`; `#when` keeps it.
-Use it in editdisplay (render images or panels only for the last N+1 messages), in editprocess (keep format examples only
-in recent history), and with `N = 0` to show a floating panel only under the newest message.
+Use it in editdisplay (last N+1 messages) or editprocess (recent format examples). Both stages cache results without message count: OUT-only guards can stay stale. Include the dependency in literal `<cbs>` IN or pre-regex text. Background and greeting share index -1, so short-chat windows can include background HTML.
 
 **Dice gates for random events** (constant entries, usually `@@depth 0`):
 ```
@@ -537,7 +540,7 @@ in recent history), and with `N = 0` to show a floating panel only under the new
 {{/when}}
 ```
 Older bots write `{{#if {{? {{roll::500}}<=4}}}}` (still works). `roll` changes on every parse (reroll re-rolls;
-harmless). `rollp` is stable until the message count changes, but every `rollp` with the same argument in that request
+but token counting and injection parse separately, so the budget estimate can use another branch). `rollp` is stable until the message count changes, but every `rollp` with the same argument in that request
 returns the **same** number, so several gates on `rollp::500` are correlated (useful for exclusive buckets, wrong for
 independent events). Give each event its own rarity and a safety clause. A Lua-rolled seed stored in a chat var plus
 range buckets (`{{#when::{{getvar::bot_seed}}::<=::20}}`) picks exactly one variant per day or turn.

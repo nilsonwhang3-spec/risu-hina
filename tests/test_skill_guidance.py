@@ -131,16 +131,23 @@ class SkillGuidanceTests(unittest.TestCase):
         self.assertEqual(ns["grep_source"]("getvar", "risuai", dest=str(base)), 1)
 
     def test_method_refresh_replaces_references_and_keeps_state(self):
+        db.mark_migration("skills_method_en_v1")  # Existing install before the source audit.
         for filename in skills.METHOD_FILES:
             label = skills.SEED_FILES[filename][0]
-            created = skills.save(label, "옛 설명", "사용자 편집 본문", enabled=False, sort_order=37)
+            created = skills.save(label, "옛 설명", "사용자 편집 본문", always=True, enabled=False, sort_order=37)
             skills.put_file(created["slug"], "references/" + filename, b"custom reference")
+            for script in skills.SEED_SCRIPTS.get(filename, ()):
+                skills.put_file(created["slug"], "scripts/" + script, b"custom script")
         skills.refresh_method_skills_once()
         for filename in skills.METHOD_FILES:
             label, desc, _ = skills.SEED_FILES[filename]
             updated = skills.find(label)
             self.assertEqual(updated["description"], desc)
             self.assertNotIn("사용자 편집 본문", updated["body"])
+            self.assertTrue(updated["always"])
+            for script in skills.SEED_SCRIPTS.get(filename, ()):
+                self.assertEqual((skills.root()/updated["slug"]/"scripts"/script).read_bytes(),
+                                 (skills.SEED_DIR/script).read_bytes())
             self.assertIn(f"references/{filename}", updated["body"])
             self.assertFalse(updated["enabled"])
             self.assertEqual(updated["sortOrder"], 37)
@@ -149,6 +156,44 @@ class SkillGuidanceTests(unittest.TestCase):
         before = {x["slug"]: x["revision"] for x in skills.list_all()}
         skills.refresh_method_skills_once()
         self.assertEqual(before, {x["slug"]: x["revision"] for x in skills.list_all()})
+
+    def test_manual_sync_overwrites_bundle_preserves_custom_and_state(self):
+        skills.seed_once()
+        label = skills.SEED_FILES["risuai-cbs.md"][0]
+        original = skills.find(label)
+        skills.save(label, "edited", "edited body", slug=original["slug"],
+                    enabled=False, always=True, sort_order=37)
+        skills.put_file(original["slug"], "references/risuai-cbs.md", b"edited reference")
+        custom = skills.save("My custom skill", "custom", "keep this")
+        skills.put_file(custom["slug"], "scripts/custom.py", b"keep this file")
+        custom_before = skills.get(custom["slug"])
+        removed_name = skills.SEED_FILES["charx-cards.md"][0]
+        skills.delete(skills.find(removed_name)["slug"])
+        db.mark_migration(skills.METHOD_KEY)
+        result = skills.sync_bundled()
+        self.assertEqual(result["created"], 1)
+        self.assertEqual(result["updated"], len(skills.SEEDS) + len(skills.SEED_FILES) - 1)
+        current = skills.find(label)
+        self.assertNotEqual(current["body"], "edited body")
+        self.assertFalse(current["enabled"])
+        self.assertTrue(current["always"])
+        self.assertEqual(current["sortOrder"], 37)
+        self.assertEqual((skills.root()/current["slug"]/"references/risuai-cbs.md").read_bytes(),
+                         (skills.SEED_DIR/"risuai-cbs.md").read_bytes())
+        self.assertEqual(skills.get(custom["slug"]), custom_before)
+        self.assertEqual((skills.root()/custom["slug"]/"scripts/custom.py").read_bytes(), b"keep this file")
+        skills.save(label, "edited again", "changed again", slug=current["slug"])
+        again = skills.sync_bundled()
+        self.assertEqual(again["created"], 0)
+        self.assertNotEqual(skills.find(label)["body"], "changed again")
+
+    def test_manual_sync_preflights_missing_bundle(self):
+        skills.seed_once()
+        before = {s["slug"]: skills.get(s["slug"])["revision"] for s in skills.list_all()}
+        with patch.object(skills, "SEED_DIR", Path(DATA.name)/"missing-bundle"):
+            with self.assertRaises(FileNotFoundError):
+                skills.sync_bundled()
+        self.assertEqual(before, {s["slug"]: skills.get(s["slug"])["revision"] for s in skills.list_all()})
 
     def test_method_seeds_are_english_with_catalog_room(self):
         hangul = re.compile(r"[가-힣]")

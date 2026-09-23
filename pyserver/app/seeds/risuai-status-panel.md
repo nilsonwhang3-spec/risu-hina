@@ -1,6 +1,8 @@
 <!-- risuhina-preset-scope-v1 -->
 In RisuAI the prompt preset, supplied by a separate preset author, sets the lorebook insertion order, the narrative point of view, and whether the model may write the user's part. Bot cards and lorebooks hold the world, characters, events, state, and the bot's own systems; those narration options follow the preset. Treat the preset's controls as production knowledge only and do not restate them as rules in the card or lorebook.
 
+> Host-source audit: RisuAI `25001174`, PocketRisu `a14c911f` (2026-09-23). Runtime claims refer to these snapshots; authoring conventions are recommendations.
+
 Reference for a RisuAI bot's **status panel**. The model ends each reply with a tagged block (TAG OUTPUT), regexes turn it into HTML, backgroundHTML CSS styles it, and `{{position::PI}}` + `@@position pt_PI` keep the output instruction from being ignored. Read this when you design, build or fix that system.
 Related skills: 'RisuAI 정규식 작성법' (regex mechanics and recipes), 'RisuAI 처리 순서 (정규식·Lua 훅)' (hook timing), 'RisuAI 로어북 구조' (decorators in general), 'RisuAI Lua 트리거' (Lua API and reroll-safe state), 'RisuAI 에셋 출력식' (image tags).
 
@@ -155,7 +157,7 @@ Nested XML with per-field rules is the most robust. With pipe or bracket grammar
 ```
 With `{{position::PI}}` after the image block, the order is image instructions → lorebook rules (status). Before it, the order is reversed. Decide by what the last paragraph closest to the model should be. To make the status format last, put the slot after.
 
-**Difference from `@@depth 0`**: `@@depth 0` inserts right after the last history message, whatever the preset's structure. `pt_PI` follows wherever the preset puts the global note. With presets that put the global note after the history, the two are almost the same place. Use `@@depth 0` to be at the end regardless of the preset, and `pt_PI` to respect the preset's structure. Some bots let a variable choose between the two placements.
+**Difference from `@@depth 0`**: `@@depth 0` goes into postEverything after prompt-template assembly, rather than directly after the last history message. `pt_PI` follows wherever the preset puts the global note. With presets that put the global note after the history, the two are almost the same place. Use `@@depth 0` to be at the end regardless of the preset, and `pt_PI` to respect the preset's structure. Some bots let a variable choose between the two placements.
 
 **Redundant placement**: repeating the key field rules once more (a `@@depth 0` or `@@role system` entry, or a one-line mention in the description) reduces omissions.
 
@@ -173,7 +175,7 @@ Regex mechanics (flags, `ableFlag`, ordering, CBS in OUT) are in 'RisuAI 정규�
 - Meaning: the block survives only in the last 3 messages; older ones become empty. Adjust with `-2`.
   - In editdisplay, old panels disappear from the screen.
   - In editprocess, old panels leave the request, while the latest 1-2 turns stay so the model can read and update them.
-- To keep only the last one, use `{{equal::{{chat_index}}::{{lastmessageid}}}}`.
+- To keep only the last one, use `{{equal::{{chat_index}}::{{lastmessageid}}}}`. OUT guards need message-count cache invalidation: add `|(?!){{lastmessageid}}` to a grouped original IN with literal `<cbs>`, preserving the old-block match so OUT can erase it (regex skill §4.2), or include getChatLength(id) in a Lua editDisplay cache-buster.
 - Older bots write `{{#if {{greater_equal::…}}}}$&{{/if}}`; it still works but is deprecated and strips each line's indentation. Do not put an expression into the first argument of `vis`.
 
 ### 4.2 Order: eraser → wrapper → container → fields → sub-items
@@ -243,7 +245,7 @@ Hide the marker with a separate rule. On the next turn, backfill the values of t
    - Accept notation variants (case, spaces).
 2. **Correct values the model wrote**: values computed from others (level, EXP needed, max HP) are recomputed by Lua and overwritten. Tell the model "do not calculate; copy the previous value; the system fixes it". A header whitelist (split on `|`, map each key to a canonical key, drop unknown and duplicate keys, keep the original if nothing survives) protects against invented fields. Protect commas that carry meaning (inside lists) with a placeholder before collapsing digit grouping, then restore them.
 3. **Reroll- and delete-safe storage**: cumulative variables drift because chat vars are **not** rolled back on reroll, edit or delete, so each reroll applies its deltas again. Put a marker (`<bot-uid>N</bot-uid>`) into the saved message and keep absolute values in per-uid snapshots (`backup[uid]`). When a reroll changes the body, that uid's snapshot is naturally discarded. After delete-then-reroll, the counter goes back and editOutput runs on a body that already has a uid, so remove the old uid first and attach a new one. Wrap the whole editOutput in `pcall` and report failures with `alertError`. Other schemes are in 'RisuAI Lua 트리거'.
-4. **editdisplay cache**: RisuAI's script cache key does not include chat vars. If display `out` uses `{{getvar}}` or `{{#when::var}}`, a change in the variable alone may not update the screen. Append a `<!--bot:value-->` comment at the end of Lua editDisplay to bust the cache.
+4. **editdisplay cache**: RisuAI's script cache key does not include chat vars. If display `out` uses `{{getvar}}` or `{{#when::var}}`, a change in the variable alone may not update the screen. reloadDisplay clears the cache in both hosts. For clicked-message refresh / reloadChat, append a `<!--bot:value-->` comment in Lua editDisplay to change the key. The cache also omits message count, so sliding-window OUT needs that dependency too.
 
 ### 5.2 The two-producer switch
 The panel can come from the main model or from a second LLM call. Several bots let one variable (`bot_status_producer` = main | aux | off) choose:

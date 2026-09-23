@@ -1,6 +1,8 @@
 <!-- risuhina-preset-scope-v1 -->
 In RisuAI the prompt preset, supplied by a separate preset author, sets the lorebook insertion order, the narrative point of view, and whether the model may write the user's part. Bot cards and lorebooks hold the world, characters, events, state, and the bot's own systems; those narration options follow the preset. Treat the preset's controls as production knowledge only and do not restate them as rules in the card or lorebook.
 
+> Host-source audit: RisuAI `25001174`, PocketRisu `a14c911f` (2026-09-23). Runtime claims refer to these snapshots; authoring conventions are recommendations.
+
 How to design, build or review a **sim bot**: a card where many characters appear and the card itself acts as narrator/GM. Read it when you plan a new multi-character bot or audit an existing one's lorebook, progression, events and state handling.
 Names, tags, variables and numbers below are placeholders (`bot_*`, `<bot-panel>`, `Name`). Every bot uses its own; read the target bot's real names first and keep them.
 This is a synthesis of common practice in popular sim bots, not a copy of any of them. Review all six content areas, merging or splitting by the bot's size. A complex RPG system or Lua state restore is **not** required for a sim bot.
@@ -209,7 +211,7 @@ end
 ### 6.2 Scheduled events and the calendar
 
 - A calendar table (fixed dates, annual events, birthdays, user-added events, period overrides such as vacations or trips that suspend normal routines) with prelude and aftermath windows.
-- **Priority director**: override > scheduled event due > promoted random event > prelude/aftermath traces > none. Lua computes the current mode into variables; a depth-0 entry shows the due event's block: core beats `a → b → c`, hooks (who is involved), and whether it is mandatory now or at the next natural transition.
+- **Priority director**: override > scheduled event due > promoted random event > prelude/aftermath traces > none. Lua computes the mode before the next send (e.g. onOutput or a button); a depth-0 entry, parsed before onStart, shows the due event's block: core beats `a → b → c`, hooks (who is involved), and whether it is mandatory now or at the next natural transition.
 - **Pitfall — display-only calendar**: a calendar rendered only in the UI is invisible to the narrator; it will not know about the exam tomorrow. Inject the next due event (or the next few) into the prompt.
 - Time needs one source of truth. Parse the date from the status line (or keep it in Lua) but not both independently; two sources double-advance time.
 

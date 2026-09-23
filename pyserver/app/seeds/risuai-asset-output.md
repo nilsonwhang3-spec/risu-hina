@@ -1,6 +1,8 @@
 <!-- risuhina-preset-scope-v1 -->
 In RisuAI the prompt preset, supplied by a separate preset author, sets the lorebook insertion order, the narrative point of view, and whether the model may write the user's part. Bot cards and lorebooks hold the world, characters, events, state, and the bot's own systems; those narration options follow the preset. Treat the preset's controls as production knowledge only and do not restate them as rules in the card or lorebook.
 
+> Host-source audit: RisuAI `25001174`, PocketRisu `a14c911f` (2026-09-23). Runtime claims refer to these snapshots; authoring conventions are recommendations.
+
 Read this when you write or fix a bot's **asset output**: the instruction that makes the model emit image tags matching
 the bot's asset list, the display regex that checks each tag against that list and falls back, SFW/NSFW keyword design,
 placement and lag control, and delegating tag insertion to the auxiliary model (axLLM).
@@ -236,19 +238,21 @@ Always place one blank line before and after each image tag.
 
 ## 5. Display regex: existence check and fallback chain
 
+**PocketRisu manifests:** assetlist/moduleassetlist can read a cached external manifest instead of inline asset arrays. The regex pipeline preloads manifests when its text or IN/OUT mentions these tags (`parser/assetListHydration.ts`). A direct synchronous Lua cbs call does not perform that preload; on a cold/missing cache a token can remain literal. Do not interpret a failed JSON decode as proof that an asset is absent; guard it with pcall and inspect the returned text.
+
 ### 5.1 Basic form (separator `-`)
 
 ```
 === asset render ===
 type: editdisplay
 in:  <img src="(([^"\-]+)(-[^"]*)?)"?>
-out: {{#when::{{contains::{{assetlist}}::$1}}}}<div class="bot-asset" style="background-image:url('{{raw::$1}}');" tabindex="0"></div>{{/when}}{{#when::not::{{contains::{{assetlist}}::$1}}}}{{#when::{{contains::{{assetlist}}::$2}}}}<div class="bot-asset" style="background-image:url('{{raw::$2}}');" tabindex="0"></div>{{/when}}{{/when}}
+out: {{#when::{{contains::{{assetlist}}::"$1"}}}}<div class="bot-asset" style="background-image:url('{{raw::$1}}');" tabindex="0"></div>{{/when}}{{#when::not::{{contains::{{assetlist}}::"$1"}}}}{{#when::{{contains::{{assetlist}}::"$2"}}}}<div class="bot-asset" style="background-image:url('{{raw::$2}}');" tabindex="0"></div>{{/when}}{{/when}}
 ableFlag: false
 ```
 
 - Captures: `$1` = full name, `$2` = base (before the first separator), `$3` = separator plus keyword. **Adapt the pattern to
   the bot's separator.** The base name must not contain the separator (the regex cuts at the first one).
-- Chain: exact full name -> base -> neither: output nothing (the tag disappears).
+- Chain: exact full name -> exact base -> neither: output nothing. Quoted JSON membership assumes names contain no quotes, backslashes or CBS delimiters; for arbitrary names, decode the array in Lua and compare strings.
 - `{{assetlist}}` = JSON array of the card's additional asset names. `{{raw::name}}` returns the asset path.
 - Optional caption: `{{#when::show_asset_label::visnot::0}}<span class="bot-asset-name">$2</span>{{/when}}`. Old
   messages' regexes read this variable too, so toggling it needs `reloadDisplay`.
@@ -337,8 +341,7 @@ shares a line is not recognized and prints as text); one-line blocks may use it 
 
 ### 5.7 Group chat
 
-In group chats `{{assetlist}}` is an empty string, so every image behind an existence check disappears (PocketRisu fork:
-the list is not emptied there).
+In mainline group-chat parsing, `{{assetlist}}` is empty, so images behind an existence check disappear. PocketRisu removed group chats; its character-context lookup does not imply group-chat support.
 
 ---
 

@@ -1,3 +1,5 @@
+> Host-source audit: RisuAI `25001174`, PocketRisu `a14c911f` (2026-09-23). Runtime claims refer to these snapshots; authoring conventions are recommendations.
+
 # RisuAI regex scripts: writing and debugging
 
 Read this before you write or fix any regex script (the card's Regex tab, `customscript`). It covers choosing the type, ordering, flags, captures, CBS in OUT and IN, the standard recipes (sliding window, sentinel UI, newest-message panel, output repair, macros, theme tokens) and debugging.
@@ -21,6 +23,8 @@ Contents
 
 ## 1. The script entry
 
+The replacement details below describe processScriptFull (editinput/output/process/display). edittrans has a separate implementation: it does not CBS-parse OUT, expand {{data}}, add trailing HTML newlines or execute @@ prefixes/inject/repeat_back. See the processing-order skill.
+
 ```json
 { "comment": "Status panel render", "type": "editdisplay",
   "in": "<bot-panel>([\\s\\S]*?)<\\/bot-panel>", "out": "<div class=\"bot-panel\">$1</div>",
@@ -41,7 +45,7 @@ flag: g<move_top>
 | `type` | `editinput`, `editoutput`, `editprocess`, `editdisplay`, `edittrans`, or `disabled`. A script runs only in the stage whose name equals its type, so `disabled` (the editor's off switch) never runs. |
 | `in` | JavaScript `new RegExp(in, flag)`. Lookbehind works. `\p{…}` needs the `u` flag. An **empty `in` is skipped**. |
 | `out` | The replacement. `$1`…`$9`, `$&` and `$<name>` are capture references, and `{{data}}` means `$&`. **A literal `$n` becomes a newline**, so never write `$n` to mean "capture n". If `out` ends with `>`, a newline is appended (turn that off with `<no_end_nl>`). After the replacement the **whole text is CBS-parsed again** (without variable permission, so `{{setvar}}` stays literal; §2). |
-| `flag` | It is used **only when `ableFlag` is true**. Otherwise the flag is `g`. Characters outside `dgimsuvy` are removed, as are duplicates, and an empty result becomes `u`. For first-match-only behavior, set `ableFlag: true` and write `u` or `i` without `g`. |
+| `flag` | It is used **only when `ableFlag` is true**. Otherwise the flag is `g`; an empty or missing flag also defaults to `g` even with ableFlag true. Characters outside `dgimsuvy` are removed, as are duplicates, and an empty result becomes `u`. For first-match-only behavior, set `ableFlag: true` and write `u` or `i` without `g`. |
 | `ableFlag` | true means "use my `flag` string". false does **not** disable the script; it means "ignore `flag` and use `g`". |
 
 **Meta commands in `flag`** use angle brackets. You can write several brackets or comma-separate them: `g<move_top><order -1>` or `g<move_top, order -1>`. **They are parsed only when `ableFlag` is true.** An entry with `flag: g<move_top>` and `ableFlag: false` silently runs as a plain `g` replace.
@@ -57,7 +61,7 @@ flag: g<move_top>
 
 **`@@` prefixes in `out`** do the same jobs without `ableFlag`:
 - `@@emo name` shows the character's emotion image `name` when the pattern matches. No text is replaced.
-- `@@move_top <out>` / `@@move_bottom <out>`: `g` is stripped for these, so **only the first match** is moved, and later matches stay where they are. `$1` and `$&` are substituted (named `$<name>` does not resolve in this branch, per the source). From reading the source: the moved text is not CBS-parsed by that script itself. The next ordinary script of the same type re-parses the whole text, so keep at least one ordinary script after it, or check the result on screen.
+- `@@move_top <out>` / `@@move_bottom <out>`: `g` is stripped for these, so **only the first match** is moved, and later matches stay where they are. `$1` and `$&` are substituted (named `$<name>` does not resolve in this branch, per the source). **Host difference:** mainline does not CBS-parse the moved result in this branch; a later ordinary rule can parse it. PocketRisu explicitly CBS-parses the full text immediately after moving it. A panel relying on that extra pass can work in PocketRisu but leave raw CBS in mainline; add an ordinary parsing pass for portability.
 - `@@inject` writes the current text (still containing the match) into the stored message and removes the match from this stage's output. It works only in stages that know the message index. It is rarely needed.
 - `@@repeat_back end|start|end_nl|start_nl`: when this message has **no** match, the script copies the match from the previous message of the same role (or from the greeting) and appends or prepends it. It keeps a block visible when the model forgets it.
 
@@ -113,17 +117,26 @@ After the replacement the text is CBS-parsed, so OUT can compute:
 - **Capture-built CBS lets one rule cover every character.** `{{getvar::bot_$1_aff}}` reads a per-character variable named after the captured name. `{{raw::$1_$2.webp}}` builds the asset name. `{{button::+::bot_cheat_$1}}` builds a per-character button name. This needs a closed, predictable naming scheme.
 - A capture that contains `::`, `{{` or `}}` breaks the CBS around it. Restrict such captures with a class such as `([A-Za-z0-9_ -]+)`.
 - `{{#if}}` still works but is deprecated (it also strips the leading whitespace of every line it wraps). `{{#when::…}}` is preferred; see 'RisuAI CBS 문법'. Older recipes below that still show `{{#if X}}…{{/if}}` convert to `{{#when::X}}…{{/when}}`, except where noted. `{{? expr}}` takes a **space**, not `::`.
-- `{{random::a::b}}` in an `editdisplay` OUT re-rolls on every render. Use it in `editoutput`, where it is resolved once and saved. `{{pick::a::b}}` is **not** per message: it is seeded by the chat and the current message count, so every message on screen gets the same pick and all of them change when a new message arrives.
+- Random in OUT re-rolls when the regex pass executes; cache hits reuse the result. Streaming editoutput can re-roll on successive chunks; the final result is saved. `pick` is seeded by chat and message count, not message index; cached OUT can retain an earlier pick.
 - Asset tags in OUT (`{{raw::…}}`, `{{img::…}}`) are resolved after the regex pass, case-insensitively and with a closest-name fallback (edit distance ≤ 4 by default), so a wrong name can show a similar asset instead of nothing. Check existence with `{{assetlist}}` when that matters ('RisuAI 에셋 출력식').
-- The **variable cache**: the display cache key contains the text, the scripts and the message index, but **not chat variables**. An OUT that reads `{{getvar}}` may keep showing the old value until something else changes the text. See 'RisuAI 상태창' §5 for the comment cache-buster.
+- **Regex result cache**: the key contains text, scripts and message index, but not chat variables or message count. This applies to editinput/editoutput/editprocess too. OUT reading getvar or lastmessageid can stay stale. reloadDisplay clears the cache in both hosts; reloadChat and clicked-message refresh do not. For targeted refresh, change pre-regex text in Lua editDisplay, or use literal `<cbs>` with an IN whose parsed text includes the dependency.
+
+For an OUT-only sliding window, keep matching old blocks so OUT can remove them. Include the message-count dependency in a never-matching alternative, without adding captures:
+```
+in:   (?:<bot-panel>[\s\S]*?<\/bot-panel>)|(?!){{lastmessageid}}
+out:  {{#when::{{chat_index}}::>=::{{? {{lastmessageid}}-2}}}}$&{{/when}}
+flag: g<cbs>
+ableFlag: true
+```
+The first branch still matches every block; the second never matches but changes the cache key. Replacing the entire old-message IN with (?!) would leave the raw block untouched, so use that approach only with a separate cleanup rule.
 
 ### 4.3 CBS in IN (`<cbs>`)
 With `ableFlag: true` and `<cbs>` in the flag, `in` is CBS-parsed before it is compiled. The pattern itself can then depend on variables or on the message position:
 ```
-in:   {{#when::bot_status_mode::vis::aux}}<bot-panel>[\s\S]*?<\/bot-panel>{{/when}}
+in:   {{#when::bot_status_mode::vis::aux}}<bot-panel>[\s\S]*?<\/bot-panel>{{:else}}(?!){{/when}}
 flag: g<cbs>
 ```
-When the condition is false, `in` is empty and the script is skipped, so a variable turns the rule on or off. §5.2 uses the same mechanism to anchor a panel. Escape regex metacharacters that come out of CBS (a variable value containing `(` or `|` changes the pattern).
+When false, return `(?!)` (never matches). **Do not return an empty pattern:** only original IN is checked for emptiness, before CBS expansion. An empty expanded pattern matches empty positions and inserts OUT at every position with `g`. §5.2 uses the same mechanism to anchor a panel. Escape regex metacharacters that come out of CBS (a variable value containing `(` or `|` changes the pattern).
 
 ---
 
@@ -142,7 +155,7 @@ out: {{#when::{{greater_equal::{{chat_index}}::{{? {{lastmessageid}}-N}}}}}}$&{{
 | Prompt | `editprocess` | Saves tokens while keeping recent examples of the format, so the model keeps producing it | 2-5 for status, affinity tags and image tags; 3-4 for OOC comments |
 | Sentinels | both | Only one copy of a fixed-position panel exists, and the glyph never reaches the model | 0-1 |
 
-- For the newest message only, use `{{equal::{{chat_index}}::{{lastmessageid}}}}`.
+- For the newest message only, use `{{equal::{{chat_index}}::{{lastmessageid}}}}`. OUT-only guards need message-count cache invalidation, or old display/request results can survive a new message.
 - **Partial blanking** keeps the chronology and drops the bulk. Capture the fields that give continuity and window only the rest:
   ```
   in:  (\[Date: [^|]*\| Time: [^|]*\| Location: [^|]*)([^\]]*)(\])
@@ -150,23 +163,23 @@ out: {{#when::{{greater_equal::{{chat_index}}::{{? {{lastmessageid}}-N}}}}}}$&{{
   ```
 - **Tiered display**: full UI when `chat_index == lastmessageid`, a reduced card for the last few messages, nothing older. Write two ordered rules, or `{{#when}}…{{:else}}…{{/when}}` branches inside one OUT.
 - Changing a prompt-side window changes old messages' request text, which breaks provider prompt caching from that point. Prefer windows that move by whole turns, and do not window data that Lua `editRequest` must read (editprocess runs first).
-- The background HTML also passes through `editdisplay` scripts with `chat_index` = -1. A window guard is always false there, so never window a rule meant for the background (§6.4).
+- Background HTML also passes through editdisplay with index -1, just like the greeting. A window can include it in a short chat (`-1 >= lastmessageid-N`); newest-only equality is true in a greeting-only chat. An index guard cannot distinguish the two: use a message-specific marker and separate background-theme rules.
 
 ### 5.2 A panel anchored to the newest message (greeting sentinel fallback)
 The goal is a floating app, HUD or settings button that always sits under the newest message, and already exists when only the greeting is present.
 ```
 === Floating panel ===
 type: editdisplay
-in:   {{#when::{{lastmessageid}}::is::-1}}☆{{:else}}${{/when}}
+in:   {{#when::{{chat_index}}::is::{{lastmessageid}}}}{{#when::{{lastmessageid}}::is::-1}}☆{{:else}}${{/when}}{{:else}}(?!){{/when}}
 out:  {{#when::{{chat_index}}::is::{{lastmessageid}}}}<div class="bot-float">…</div>{{/when}}
 flag: gu<cbs>
 ```
-- When a reply exists, IN becomes `$` and matches the end of **every** message, and the OUT guard keeps the output only on the newest message. When only the greeting exists (`lastmessageid` = -1), IN becomes the sentinel, which the greeting carries on its first or last line.
+- With stored messages, IN becomes `$` only for the newest message and `(?!)` for older messages. This condition in IN with literal `<cbs>` also changes the cache key when a message stops being newest. When only the greeting exists (`lastmessageid` = -1), IN becomes the sentinel, which the greeting carries on its first or last line.
 - Add a cleanup rule that erases the sentinel wherever it was not consumed (`in: ☆`, `out:` empty, `editdisplay`), and an `editprocess` rule that removes it from the request.
 - When the panel HTML is large, build it in Lua and inject it into the newest message only. That is cheaper than a regex, which re-parses CBS for every message. See 'RisuAI 옵션 패널 (슬라이딩 드로어)'.
 
 ### 5.3 Sentinel glyph → UI, stripped from the prompt
-A sentinel is a short string the model will never write by accident (a glyph pair of your choice, or `###BOT_PANEL###`). Put it in the greeting, or add it with Lua (`addChat(id, "system", "☆")`) to open a panel on demand. Three rules go with it:
+A sentinel is a short string the model will never write by accident (a glyph pair of your choice, or `###BOT_PANEL###`). Put it in the greeting, or add it with Lua (`addChat(id, "char", "☆")`) to open a panel on demand. Three rules go with it:
 ```
 === ☆ window ===   editdisplay  in: ☆        out: {{#when::{{greater_equal::{{chat_index}}::{{? {{lastmessageid}}-1}}}}}}$&{{/when}}
 === ☆ render ===   editdisplay  in: ☆        out: <div class="bot-start">…buttons…</div>
@@ -218,7 +231,7 @@ Common model slips are fixed before storage, so they do not compound in history:
 ### 6.2 Term normalization and anti-repetition (`editoutput`)
 - Canon terms: `(?:variant A|variant B|variant C)` → `canon term`. Fix romanization drift of names in the same way. Keep a parallel rule per output language if the bot is multilingual.
 - Period or setting accuracy: `(?:anachronism A|anachronism B)` → a setting-appropriate term.
-- **Anti-repetition with `{{random}}`**: rewriting an overused choice as `{{random::a::b::c}}` spreads the variety. For example `_happy` → `{{random::_smile::_happy::_laughing}}` inside image tags, as long as every result exists as an asset. Because this is `editoutput`, the choice is made once and saved.
+- **Anti-repetition with `{{random}}`**: rewriting an overused choice as `{{random::a::b::c}}` spreads the variety. For example `_happy` → `{{random::_smile::_happy::_laughing}}` inside image tags, as long as every result exists as an asset. The final editoutput result is saved, but the choice can change during streaming.
 - Normalize a system-message style: `\*\*?-?\s*(?:System|Notice)\s*:\s*(.+?)\*?\*?$` → `- System: $1` (flag `gm`), then render one canonical form in display.
 
 ### 6.3 Slash-command macros
@@ -248,7 +261,7 @@ backgroundHTML:  .bot-card { border: 2px solid {bot_border}; max-width: {bot_wid
 === theme: font ===    editdisplay  in: <<bot_font>>      out: 15
 ```
 - Escape braces in `in`. Pick tokens that cannot occur in chat text.
-- Do not window these rules, because the guard is always false for the background.
+- Do not window these rules: that makes background styling depend on chat length.
 - The alternative is CBS directly in the CSS (`{{#when::bot_fold::vis::1}}…{{/when}}`, `{{screen_width}}`), which lets options switch CSS blocks.
 - Conversely, **every `editdisplay` rule also sees the background HTML**. A broad pattern (`\[(.*?)\]`, `\{([^}]*)\}`) can mangle the CSS. Anchor patterns on the bot's own tag grammar.
 
@@ -290,8 +303,8 @@ Work through this list in order:
 5. Split wrapping, where one rule opens a `<div>` and a later rule or closing marker closes it, breaks the whole message when one tag is missing. Write self-contained rules.
 6. One rule for a whole multi-field block fails whenever a field is missing or reordered, and raw tags show. Either enforce the order in the instruction or use per-field rules plus a fallback box.
 7. Rendering without an `editprocess` counterpart leaves HTML or glyphs in the prompt. The model then copies them.
-8. A window guard on a background-theme rule is always false there.
-9. `{{random}}` in `editdisplay` flickers between renders; `{{setvar}}` in `editdisplay` never runs and prints as literal text. Stat math done in `editoutput` CBS is re-applied on reroll and is not reroll-safe. Do accumulation in Lua with snapshots ('RisuAI Lua 트리거').
+8. Background and greeting share index -1; an index window is not a reliable background filter.
+9. `{{random}}` in editdisplay can change on cache misses; `{{setvar}}` in `editdisplay` never runs and prints as literal text. Stat math done in `editoutput` CBS is re-applied on reroll and is not reroll-safe. Do accumulation in Lua with snapshots ('RisuAI Lua 트리거').
 10. The display cache ignores variables.
 11. A broad `editdisplay` pattern also edits the background CSS.
 12. Checkbox ids repeated across several rendered messages make `<label for>` toggle the wrong one. Put the message index into the id (`bot-fold-{{chat_index}}`), or use `<details>`.

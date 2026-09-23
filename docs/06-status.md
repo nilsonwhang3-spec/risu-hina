@@ -1,4 +1,20 @@
-# 06. Implementation status — as of 2026-09-23 (v0.15.24, Risu Hina)
+# 06. Implementation status — as of 2026-09-23 (v0.15.25, Risu Hina)
+
+## 0.15.25 (2026-09-23): source-audited skills and manual skill synchronization
+
+- Twelve methodology references corrected against RisuAI 25001174 and PocketRisu a14c911f:
+  empty CBS regex patterns, cache invalidation, depth-0 timing, V2 support, Lua defaults,
+  lorebook injection syntax, asset matching, and fork-specific behavior.
+- Settings > Skills > Advanced now synchronizes bundled skills from the connected server.
+  A visible overwrite warning and two-click confirmation precede the authenticated
+  POST /skills/sync request. It restores missing bundled skills and preserves custom
+  standalone skills, enabled/always flags and ordering. This does not update server code.
+- User-authorized skills_method_source_audit_v2 startup migration replaces existing
+  methodology skill edits. Manual synchronization remains available after migration.
+- Regression coverage includes replacement/preservation, repeated synchronization,
+  missing-bundle preflight, HTTP authentication/confirmation and UI busy/error states.
+- Validation: full tests/gate.sh ALL GREEN, including the real-model agent and
+  plugin DOM/backend smoke tests; manual sync HTTP/UI coverage is part of the gate.
 
 ## 0.15.24 (2026-09-23): §1-71 source-check skill · old names removed · README rewritten
 

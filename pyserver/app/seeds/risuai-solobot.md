@@ -1,6 +1,8 @@
 <!-- risuhina-preset-scope-v1 -->
 In RisuAI the prompt preset, supplied by a separate preset author, sets the lorebook insertion order, the narrative point of view, and whether the model may write the user's part. Bot cards and lorebooks hold the world, characters, events, state, and the bot's own systems; those narration options follow the preset. Treat the preset's controls as production knowledge only and do not restate them as rules in the card or lorebook.
 
+> Host-source audit: RisuAI `25001174`, PocketRisu `a14c911f` (2026-09-23). Runtime claims refer to these snapshots; authoring conventions are recommendations.
+
 How to design, build or review a **solo bot**: a card built around one main character (side characters may orbit, but one person is the center). Read it when you write or audit a character sheet, the small lorebook around it, relationship progression, greetings, or when a character feels flat, repetitive or inconsistent.
 Names, tags and variables below are placeholders (`Name`, `bot_*`, `<bot-panel>`). Every bot has its own; read the target bot's actual names first and keep them.
 This is a synthesis of common practice in popular solo bots. Multi-character layouts are in 'RisuAI 시뮬봇 구조와 제작'; entry form and priority bands in 'RisuAI 로어북 작성 규칙'.
@@ -247,7 +249,7 @@ OUT: {{setvar::bot_trust::{{min::200::{{max::0::{{? {{getvar::bot_trust}}+$1*{{g
 
 **Stat-gated event buttons with character veto**: the status panel shows event buttons in tiers unlocked by a stat sum (`<details>` blocks, locked tiers labelled). A button sends a hidden OOC request ("She performs the following situation based on her current stats. Depending on them, she may refuse or not go through with it.") that a display regex hides, optionally showing an event illustration. The user gets an event deck; the character keeps her veto. UI details: 'RisuAI 옵션 패널 (슬라이딩 드로어)'.
 
-A user steering channel (a few free-text "standing directions" set through an input dialog and injected at depth 0) is another optional control.
+A user steering channel (a few free-text "standing directions" set through an input dialog and injected at depth 0) is another optional control. Set these before sending: depth-0 text is parsed before onStart, so a value first set in onStart reaches it on the next request.
 
 ## 7. Greetings and starts
 

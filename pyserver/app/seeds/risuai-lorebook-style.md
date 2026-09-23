@@ -1,6 +1,8 @@
 <!-- risuhina-preset-scope-v1 -->
 In RisuAI the prompt preset, supplied by a separate preset author, sets the lorebook insertion order, the narrative point of view, and whether the model may write the user's part. Bot cards and lorebooks hold the world, characters, events, state, and the bot's own systems; those narration options follow the preset. Treat the preset's controls as production knowledge only and do not restate them as rules in the card or lorebook.
 
+> Host-source audit: RisuAI `25001174`, PocketRisu `a14c911f` (2026-09-23). Runtime claims refer to these snapshots; authoring conventions are recommendations.
+
 RisuAI lorebook **authoring rules**. Read this before you write or change any entry (propose_lore_add / propose_lore_edit / propose_lore_replace). The field, decorator and placement *specification* is in 'RisuAI 로어북 구조'; this file is the **form and conventions** that work in practice. Do not write SillyTavern-style entries.
 Names, folders, tags and variables vary per bot. Read the target bot's own entries first and match them; the examples here are placeholders.
 
@@ -53,7 +55,7 @@ content:
 - Character sheets are often long (10-17 subheadings: Identity, Appearance, Wardrobe, Background, Personality, Speech with sample lines, Behavior, Preferences, Abilities, Relationships, Secrets, Arc). Keep **one fixed skeleton** for every sheet in a bot; the section list is in 'RisuAI 시뮬봇 구조와 제작' / 'RisuAI 일인봇 구조와 제작'.
 - World entries may use `[Bracket section]` labels with bullets under a `###` title.
 - Language: follow the bot's body language. Keys mix every language users might type. Many bots write bodies in English and add native-language terms in parentheses.
-- **No SillyTavern header block**: no `@@position personality`, `@@role system`, `@@scan_depth 12`, `@@priority 700` stacked above the body out of habit. RisuAI has `@@` decorators, but popular bots use very few: `@@depth 0` for per-turn directives and sometimes one `@@position pt_<name>`. Priority is the **insertorder field**, not a decorator.
+- **No SillyTavern header block**: no `@@position personality`, `@@role system`, `@@scan_depth 12`, `@@priority 700` stacked above the body out of habit. RisuAI has `@@` decorators, but popular bots use very few: `@@depth 0` for per-turn directives and sometimes one `@@position pt_<name>`. Use insertorder for normal priority and placement. @@priority is supported, but overrides budget priority only; it does not change placement.
 
 ## 3. Headings
 
@@ -66,7 +68,7 @@ content:
 ## 4. insertorder: priority bands and placement
 
 How the host uses it (verified; details in 'RisuAI 로어북 구조' §6):
-- Ordinary entries are **placed top to bottom from the lowest priority**. The highest `insertorder` lands last, nearest the chat, where the model attends most.
+- Ordinary entries are placed top to bottom from the lowest insertorder; @@priority may separately override budget priority. The highest `insertorder` lands last, nearest the chat, where the model attends most.
 - When the token budget is short, **the lowest priorities are cut first**. A cut that leaves part of a block missing is acceptable when unavoidable; do not assume every entry survives whole.
 - Positioned entries (`@@depth`, `@@end`, `@@position`) go to their own position instead (§6).
 

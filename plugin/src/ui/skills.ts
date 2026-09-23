@@ -131,6 +131,29 @@ export function buildSkillsCard(opts: { onMount?: (refresh: () => Promise<void>)
     }
   });
 
+  const syncBtn = el('button', { class: 'ghost', text: '서버 기본 스킬과 동기화' });
+  armed(syncBtn, '서버 기본 스킬과 동기화', '편집 내용을 덮어쓰고 동기화', async () => {
+    if (syncBtn.disabled) return;
+    syncBtn.disabled = true;
+    syncBtn.textContent = '동기화 중…';
+    try {
+      const result = await state.syncSkills();
+      await refresh();
+      say(`스킬 동기화 완료: ${result.updated}개 갱신, ${result.created}개 추가. 다음 에이전트 실행부터 적용됩니다.`, 'ok');
+    } catch (e) {
+      say('스킬 동기화에 실패했습니다: ' + msg(e), 'err');
+    } finally {
+      syncBtn.disabled = false;
+      syncBtn.textContent = '서버 기본 스킬과 동기화';
+    }
+  });
+  const advanced = el('details', { style: { marginTop: '12px' } }, [
+    el('summary', { text: '고급 · 스킬 동기화' }),
+    el('p', { class: 'hint', text: '연결된 서버에 포함된 기본 스킬만 다시 받아 적용합니다. 서버 프로그램을 업데이트하는 기능은 아닙니다.' }),
+    el('p', { class: 'notice warn', text: '주의: 기본 스킬에 직접 편집한 본문·설명·기본 참조 파일·스크립트는 서버 배포본으로 덮어써져 사라집니다. 필요한 내용은 먼저 따로 보관해 주세요. 직접 추가한 별도 스킬과 활성화·상시 적용·정렬 설정은 유지합니다.' }),
+    syncBtn,
+  ]);
+
   void refresh();
   // Re-read once the connection is proven direct: opened before the probe
   // finished, the list held the transport's "token not sent" refusal under a
@@ -147,6 +170,7 @@ export function buildSkillsCard(opts: { onMount?: (refresh: () => Promise<void>)
     el('div', { class: 'row', style: { marginTop: '10px' } }, [addBtn, uploadBtn, previewBtn]),
     picker,
     budget,
+    advanced,
     out,
   ]);
 }

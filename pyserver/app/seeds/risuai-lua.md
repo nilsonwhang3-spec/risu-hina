@@ -1,3 +1,5 @@
+> Host-source audit: RisuAI `25001174`, PocketRisu `a14c911f` (2026-09-23). Runtime claims refer to these snapshots; authoring conventions are recommendations.
+
 Read this when you read, write or review a bot's Lua trigger script (triggerscript / module.risum): the verified API
 surface, hook timing, and advanced mechanisms seen in well-regarded bots (reroll-safe state, aux-model extraction, cached
 HTML, calendars, button families). Risu Hina's agent does not execute Lua; this is a reference for reading and writing
@@ -9,7 +11,7 @@ bot scripts, which the user runs in RisuAI.
 Contents
 - Part A: API reference (verified against RisuAI origin/main `src/ts/process/scriptings.ts`, `triggers.ts`,
   `index.svelte.ts`, `DefaultChatScreen.svelte`, `Chat.svelte`, 2026-09)
-  0. Lua only: V1/V2 triggers are deprecated
+  0. Trigger kinds: V1 is deprecated; V2 and Lua are supported
   1. Delivery and engine
   2. Hooks, timing and return values
   3. Access tiers
@@ -43,12 +45,11 @@ Related skills: 'RisuAI 처리 순서 (정규식·Lua 훅)' (exact order of rege
 
 # Part A: API reference
 
-## 0. Lua only: V1/V2 triggers are deprecated
+## 0. Trigger kinds: V1 is deprecated; V2 and Lua are supported
 
 The trigger editor offers three kinds: **V1** (condition/effect list; the editor shows "Trigger V1 is deprecated. It might
 be removed in the future."), **V2** (visual block editor, `effect[0].type == "v2Header"`; its "Deprecated" effect category
-is hidden unless `showDeprecatedTriggerV2` is on) and **Lua** (`effect[0].type == "triggerlua"`). Treat V1 and V2 as
-deprecated: **write new logic only in Lua**, and never recommend adding V1/V2 triggers. Switching kinds in the editor
+is hidden unless `showDeprecatedTriggerV2` is on) and **Lua** (`effect[0].type == "triggerlua"`). **V2 itself is not deprecated**: that category contains only selected old effects such as v2If and old lorebook operations. Prefer Lua for these recipes; keep functioning V2 unless migration is requested or needed. Switching kinds in the editor
 replaces the whole trigger list (it asks first).
 
 **Reading and porting legacy triggers.** Old bots may carry a V1/V2 list in `triggerscript` (each item `{comment, type,
@@ -101,7 +102,7 @@ kind), and re-test every button.
 
 | Mode / trigger | Lua entry point | When |
 |---|---|---|
-| `start` | `onStart(id)` | on **every send** (new message, reroll, continue, auto-continue), not once per chat and not when a chat is opened. It runs **after** the description, persona, author's note and main prompt were CBS-parsed and the lorebook was matched (non-depth entries parsed too), and before the history is processed (editprocess), depth-inserted entries are parsed, and editRequest. A var set here affects those later parts this send; the earlier ones only from the next send |
+| `start` | `onStart(id)` | on **every send** (new message, reroll, continue, auto-continue), not once per chat and not when a chat is opened. It runs **after** the description, persona, author's note and main prompt were CBS-parsed and the lorebook was matched (ordinary and depth-0 entries parsed too), and before the history is processed (editprocess), positive-depth / reverse-depth entries are parsed, and editRequest. Depth-0 text does not see variables first set by this onStart. A var set here affects those later parts this send; the earlier ones only from the next send |
 | `input` | `onInput(id)` | when the user sends non-empty text (single-character chats only), **before** the user message is appended: `getChat(id, -1)` is still the previous message. Then editInput runs on the text. Not run on reroll, continue or an empty send |
 | `output` | `onOutput(id)` | after the reply is saved (after editoutput and the CBS variable pass over the chat), before the send finishes. Also after rerolls |
 | button `risu-btn="data"` | `onButtonClick(id, data)` | on click (not in group chats) |
@@ -187,13 +188,13 @@ These edit the character card itself (all chats), not the current chat.
 |---|---|
 | `getLoreBooks(id, name)` | synchronous; entries whose name (comment) equals `name` exactly, from the chat, character and module lorebooks, as full entry tables with `content` CBS-parsed. Errors in group chats |
 | `upsertLocalLoreBook(id, name, content, {alwaysActive, insertOrder, key, secondKey, regex})` | Safe tier; create or replace a **chat-local** entry by name (`mode` normal, `selective` when `secondKey` is set). Always pass the options table (`{}` at least): omitting it throws. From `onStart`/`onInput`/`onOutput`/manual functions the host hands Lua a cloned character, so the write may be discarded; it sticks from `onButtonClick` and edit hooks (source reading, verify in the app) |
-| `loadLoreBooks(id)` [low] | currently active entries `{data, role}` (CBS-parsed, empty ones skipped). The wrapper passes no reserve, so no budget cut applies; raw `loadLoreBooksMain(id, reserve):await()` cuts at max context minus `reserve` tokens |
+| `loadLoreBooks(id)` [low] | currently active entries `{data, role}` (CBS-parsed, empty ones skipped). The lorebook budget has already filtered entries; the wrapper passes no reserve, so no additional max-context cut applies; raw `loadLoreBooksMain(id, reserve):await()` cuts at max context minus `reserve` tokens |
 
 **LLM and images** (LowLevel)
 | Call | Notes |
 |---|---|
-| `LLM(id, msgs, useMultimodal?, {streaming=true}?)` | main model; `msgs` = `{ {role="system", content=…}, {role="user", content=…} }`; roles `system`/`sys`, `user`, `assistant`/`bot`/`char` (anything else becomes assistant); returns `{success, result}`, failure text starts with `"Error: "`. `useMultimodal=true` sends `{{inlay::…}}`/`{{inlayed::…}}` images in the content. `streaming=true` streams internally and returns the final text |
-| `axLLM(id, msgs, …)` | same, routed to the auxiliary model setting (`otherAx`) |
+| `LLM(id, msgs, useMultimodal?, {streaming=false}?)` | main model; `msgs` = `{ {role="system", content=…}, {role="user", content=…} }`; roles `system`/`sys`, `user`, `assistant`/`bot`/`char` (anything else becomes assistant); returns `{success, result}`, failure text starts with `"Error: "`. `useMultimodal=true` sends `{{inlay::…}}`/`{{inlayed::…}}` images in the content. streaming is off unless explicitly true; streaming=true streams internally and returns the final text |
+| `axLLM(id, msgs, …)` | same, routed to the auxiliary model setting (`otherAx`). PocketRisu additionally passes the calling module ID for per-module model bindings; mainline does not |
 | `simpleLLM(id, prompt)` [a] | one user string to the main model; `{success, result}` |
 | `generateImage(id, prompt, neg)` [a] | `"{{inlay::…}}"` or `"Error: …"`; needs an image backend configured |
 
@@ -208,11 +209,11 @@ These edit the character card itself (all chats), not the current chat.
 | `request(id, url)` [a][low] | HTTPS GET only, URL ≤ 120 chars, about 5 per minute, risuai.net domains blocked; returns a JSON string `{status, data}` (decode it) |
 | `alertError`/`alertNormal(id, msg)` | modal; Safe tier (not in editDisplay) |
 | `alertInput(id, msg)` [a] / `alertSelect(id, {…})` [a] / `alertConfirm(id, msg)` [a] | typed string / the chosen **0-based index as a string** / boolean |
-| `reloadDisplay(id)` / `reloadChat(id, i)` | re-render all / one message |
+| `reloadDisplay(id)` / `reloadChat(id, i)` | re-render all / one message. Only reloadDisplay also clears the regex result cache; reloadChat can reuse stale OUT |
 | `stopChat(id)` | cancel the pending send; effective only in `onStart` (same as returning false there) |
 
 **Not in the Lua API** (current source): `setAuthorNote`, `getReplaceGlobalNote`, `setReplaceGlobalNote`, `setGlobalVar`,
-and the `v2GetAllLorebooks` / `v2CreateLorebook` / `v2ModifyLorebookByIndex` family (those are deprecated V2 block-trigger
+and the `v2GetAllLorebooks` / `v2CreateLorebook` / `v2ModifyLorebookByIndex` family (those are V2 block-trigger
 effects, not Lua functions; see §0). Older notes that list them as Lua calls are wrong.
 
 ## 5. Regex scripts next to Lua
@@ -335,9 +336,9 @@ local function apply_diff(id)
     setState(id, "bot_cursor", { idx = idx, sig = sig, delta = new })
 end
 ```
-Also scans forward from the cursor if several messages arrived. Works for edits too.
+This snippet processes only the current last message. To handle several new messages, explicitly iterate from the cursor; older edits/deletions require rollback or a full replay. A clamped add_score is not generally reversible: use snapshot recomputation if saturation matters. onOutput does not automatically run on a manual edit/delete, so reconciliation must also run before the next request or through an explicit rebuild action.
 
-**(c) Per-message seed snapshot in a hidden comment, with GC** (full rollback on swipe or delete)
+**(c) Per-message seed snapshot in a hidden comment, with GC** (rollback when the reconciliation pipeline runs)
 
 ```lua
 local function save_seed(id, idx, text)
@@ -357,8 +358,7 @@ local function restore_latest(id)                       -- at the start of the n
 end
 -- every N turns: delete seeds that no message references
 ```
-Changes made by buttons between turns need a separate pending-delta record applied after restore. Strip the comment from
-requests with editprocess.
+The loop starts at length-2 because it assumes the last message is the new reply being recomputed. For a rebuild after deletion with no pending reply, include the last surviving message instead. Hook reconciliation explicitly; deletion itself does not call onOutput. Changes made by buttons between turns need a separate pending-delta record applied after restore. Strip the comment from requests with editprocess.
 
 **(d) Event sourcing: rebuild from the whole chat** (correct by construction)
 
@@ -375,8 +375,7 @@ end
 ```
 Every output (and display, if needed) recomputes the state from `[bot:…]` event lines. Reroll, edit and delete are safe
 with no bookkeeping. UI actions append an event line to the last message (`setChat(id, i, text .. "\n" .. line)`) so the
-model also sees them. Cost grows with chat length: cache by (length, last signature), avoid running it on every
-editDisplay, and watch memory on phones.
+model also sees them. Cost grows with chat length. A cache keyed only by (length, last signature) misses edits to older messages: invalidate on any history mutation or hash the full relevant history. Avoid replay on every editDisplay; reconcile before the next request or with an explicit rebuild action, and watch memory on phones.
 
 ## 10. Aux-LLM structured extraction recipe
 
