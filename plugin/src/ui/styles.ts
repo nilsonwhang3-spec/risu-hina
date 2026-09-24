@@ -1379,6 +1379,15 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
    chain, and the centre could not be dragged below that. The centre's floor
    is its min-width (260px) and nothing else; its content clips/scrolls. */
 .split > .left { contain: inline-size; }
+/* §1-72: the agent column needs the same. Its basis is 50%, and a
+   percentage basis means nothing while the page works out how wide the tab
+   is - so the agent's content counted at its max-content, one long reply
+   laid out on a single line. One bot's conversation made the tab ~3000px
+   wide: the agent started off the right edge (iPad, and a 1920px desktop
+   too) and folding it brought the centre back. The panel is also allowed
+   to be narrower than its content, so nothing else can do the same. */
+.split > .right { contain: inline-size; }
+.panel { min-width: 0; }
 /* Tree rows on the clipboard: cut rows dim, copied rows carry a dashed edge. */
 /* New (unseen) files and the folders holding them (§1-36). */
 .newdot {
