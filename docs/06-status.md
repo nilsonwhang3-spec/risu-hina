@@ -1,6 +1,6 @@
-# 06. Implementation status — as of 2026-09-23 (v0.15.25, Risu Hina)
+# 06. Implementation status — as of 2026-09-24 (v0.15.26, Risu Hina)
 
-## unreleased (2026-09-24): §1-72 the AI chat no longer vanishes when proposals arrive (phone · iPad)
+## 0.15.26 (2026-09-24): §1-72 the AI chat no longer vanishes when proposals arrive (phone · iPad)
 
 - **Field report:** on an iPad in landscape the chat disappeared the moment a
   proposal card came in and came back only when the window was shrunk to

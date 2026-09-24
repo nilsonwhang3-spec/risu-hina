@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.15.25
+//@display-name Risu Hina v0.15.26
 //@api 3.0
-//@version 0.15.25
+//@version 0.15.26
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -181,7 +181,7 @@
           this.tokenSafe = true;
           this.lastHealth = body;
           this.probeInfo = "";
-          this.gate = versionGate("0.15.25", String(body.version || ""));
+          this.gate = versionGate("0.15.26", String(body.version || ""));
           return body;
         }
         /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -4815,11 +4815,18 @@ name: ${nm}
     }
   }
   var mobileList = false;
+  var TOP_KEY = "hina.topFold";
+  var topFold = false;
+  try {
+    topFold = localStorage.getItem(TOP_KEY) === "1";
+  } catch {
+  }
   function mobileBar(root2) {
     const editBtn = el("button", { text: "\u{1F4C4} \uD3B8\uC9D1", title: "\uD3B8\uC9D1 \uD654\uBA74 (\uBAA8\uBC14\uC77C)" });
     const agentBtn = el("button", { text: "\u{1F4AC} AI \uCC57", title: "AI \uCC57 (\uBAA8\uBC14\uC77C)" });
     const listBtn = el("button", { class: "ghost tiny mlist", title: "\uC67C\uCABD \uBAA9\uB85D\uC744 \uD3BC\uCE58\uAC70\uB098 \uC811\uC2B5\uB2C8\uB2E4" });
-    const bar3 = el("div", { class: "mbar" }, [el("div", { class: "mseg" }, [editBtn, agentBtn]), listBtn]);
+    const topBtn = el("button", { class: "ghost tiny mtop" });
+    const bar3 = el("div", { class: "mbar" }, [el("div", { class: "mseg" }, [editBtn, agentBtn]), el("span", { class: "mspacer" }), listBtn, topBtn]);
     const sync = () => {
       root2.classList.toggle("m-agent", mobileView === "agent");
       root2.classList.toggle("m-centre", mobileView === "centre");
@@ -4827,6 +4834,9 @@ name: ${nm}
       editBtn.classList.toggle("on", mobileView === "centre");
       agentBtn.classList.toggle("on", mobileView === "agent");
       listBtn.textContent = mobileList ? "\u2630 \uBAA9\uB85D \uC811\uAE30" : "\u2630 \uBAA9\uB85D \uD3BC\uCE58\uAE30";
+      topBtn.textContent = topFold ? "\u2304 \uC704 \uD3BC\uCE58\uAE30" : "\u2303 \uC704 \uC811\uAE30";
+      topBtn.title = topFold ? "\uD5E4\uB354\xB7\uD0ED\xB7\uB3C4\uAD6C \uC904\uC744 \uB2E4\uC2DC \uBCF4\uC785\uB2C8\uB2E4" : "\uD5E4\uB354\xB7\uD0ED\xB7\uB3C4\uAD6C \uC904\uC744 \uC811\uC5B4 \uD654\uBA74\uC744 \uB113\uD799\uB2C8\uB2E4";
+      document.querySelector(".wrap")?.classList.toggle("topfold", topFold);
       listBtn.style.display = root2.querySelector(".explorer .tree") ? "" : "none";
     };
     const pick2 = (v) => {
@@ -4842,6 +4852,14 @@ name: ${nm}
     agentBtn.addEventListener("click", () => pick2("agent"));
     listBtn.addEventListener("click", () => {
       mobileList = !mobileList;
+      syncAll();
+    });
+    topBtn.addEventListener("click", () => {
+      topFold = !topFold;
+      try {
+        localStorage.setItem(TOP_KEY, topFold ? "1" : "0");
+      } catch {
+      }
       syncAll();
     });
     toggles.set(root2, sync);
@@ -5740,6 +5758,9 @@ label.checkrow input { width: auto; }
 .right { background: var(--darkbg, rgba(255, 255, 255, .022)); }
 .agenthead { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 .agentlog { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 9px; }
+/* The log is the one thing that must never be squeezed out: the plan and the
+   proposal tray above and below it shrink and scroll first. */
+.agentlog { min-height: min(120px, 30%); }
 .bubble { border-radius: 6px; padding: 7px 10px; }
 .bubble.user { background: rgba(37, 99, 235, .12); }
 .bubble.assistant { background: rgba(255, 255, 255, .05); }
@@ -5944,7 +5965,7 @@ button.attachbtn { padding: 8px 9px; display: flex; align-items: center; flex-sh
 .proposal-body { padding-top: 6px; }
 /* The plan / Todo strip (\xA71-62, user: "\uD3F0\uD2B8\uAC00 \uD06C\uACE0 \uD22C\uBC15\uD558\uACE0 \uC790\uB9AC\uB97C \uB9CE\uC774
    \uCC28\uC9C0\uD568"): one 11.5px line when folded, a quiet 12px card when open. */
-.agentplan { flex-shrink: 0; max-height: 30%; overflow-y: auto; font-size: 12px; line-height: 1.5; }
+.agentplan { flex: 0 1 auto; min-height: 20px; max-height: 30%; overflow-y: auto; font-size: 12px; line-height: 1.5; }
 .agentplan:empty { display: none; }
 .agentplan summary {
   cursor: pointer; padding: 2px 6px; font-size: 11.5px; font-weight: 500; overflow-wrap: anywhere;
@@ -5963,7 +5984,31 @@ button.attachbtn { padding: 8px 9px; display: flex; align-items: center; flex-sh
 .plan-task .badge { font-size: 10px; padding: 0 5px; }
 .plan-task > .hint { flex-basis: 100%; font-size: 11px; padding-left: 4px; }
 .agenthead { flex-wrap: wrap; }
-.stagedbox { flex-shrink: 0; max-height: 42%; overflow-y: auto; }
+.stagedbox { flex-shrink: 0; }
+/* Both proposal cards in one tray that scrolls as a whole (agent.ts
+   proposalTray). Each card used to hold 42% and refuse to shrink, and two
+   open ones left the log at 0px - the chat vanished on an iPad. The tray
+   shrinks before the log does, down to about one summary line; the grip
+   above it drags its limit (inline max-height) and a tap folds the cards. */
+.agenttray {
+  flex: 0 1 auto; max-height: 45%; min-height: 0; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 7px;
+}
+.agenttray:has(.proposal-fold) { min-height: min(46px, 100%); }
+.agenttray:not(:has(.proposal-fold)) { display: none; }
+.traygrip {
+  display: none; flex: 0 0 12px; margin: -4px 0; cursor: row-resize; touch-action: none;
+  background-image: linear-gradient(to right, transparent 40%,
+    rgba(190,200,215,.35) 40%, rgba(190,200,215,.35) 60%, transparent 60%);
+  background-size: 100% 3px; background-position: center; background-repeat: no-repeat;
+  border-radius: 3px;
+}
+.agentpanel:has(.agenttray .proposal-fold) > .traygrip { display: block; }
+.traygrip:hover, .traygrip.dragging {
+  background-image: linear-gradient(to right, transparent 30%, #2563eb 30%, #2563eb 70%, transparent 70%);
+}
+/* A finger needs a taller target than a mouse. */
+@media (pointer: coarse) { .traygrip { flex-basis: 22px; margin: -8px 0; } }
 .card.staged { border-color: rgba(245,158,11,.45); background: rgba(245,158,11,.06); }
 .stagedrow { display: flex; gap: 8px; align-items: center; padding: 3px 0; flex-wrap: wrap; }
 .stagedrow .grow { flex: 1; min-width: 120px; }
@@ -6095,6 +6140,12 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
   .mbar .mseg button.on { background: rgba(37, 99, 235, .28); color: var(--textcolor, #d8dce4); font-weight: 700; }
   .mbar .mlist { margin-left: auto; font-size: 12px; padding: 4px 10px; }
   .split.m-agent .mbar .mlist { display: none; }
+  .mbar .mspacer { flex: 1 1 auto; }
+  .mbar .mtop { font-size: 12px; padding: 4px 10px; flex-shrink: 0; }
+  /* \uC704 \uC811\uAE30 (panes.ts): only while the active tab has the bar that undoes it. */
+  .wrap.topfold:has(> main > .panel.active .mbar) > header,
+  .wrap.topfold:has(> main > .panel.active .mbar) > .tabs,
+  .wrap.topfold:has(> main > .panel.active .mbar) > .toolslot { display: none; }
 
   /* The explorer becomes a scrolling strip of jump targets across the top
      rather than a column eating a third of a 390px screen. */
@@ -8075,6 +8126,13 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
 
   // src/ui/agent.ts
   var IMG_RE = /\.(png|jpe?g|gif|webp|avif|bmp)$/i;
+  function touchInput() {
+    try {
+      return smallScreen() || window.matchMedia("(pointer: coarse)").matches;
+    } catch {
+      return false;
+    }
+  }
   var AgentPanel = class _AgentPanel {
     constructor(hooks2) {
       this.hooks = hooks2;
@@ -8099,12 +8157,12 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       this.syncPlaceholder();
       this.input.addEventListener("keydown", (e) => {
         const ev = e;
-        if (ev.key === "Enter" && !ev.shiftKey) {
+        if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing && !touchInput()) {
           ev.preventDefault();
           void this.submit();
         }
       });
-      this.send = el("button", { class: "primary sendbtn", title: "\uBCF4\uB0B4\uAE30 (Enter)", html: PAPER_PLANE });
+      this.send = el("button", { class: "primary sendbtn", title: touchInput() ? "\uBCF4\uB0B4\uAE30" : "\uBCF4\uB0B4\uAE30 (Enter)", html: PAPER_PLANE });
       this.send.addEventListener("click", () => void this.submit());
       this.send.addEventListener("mousedown", (e) => e.preventDefault());
       this.send.addEventListener("touchend", (e) => {
@@ -8132,8 +8190,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         el("div", { class: "agenthead" }, [this.status, this.modeButton, fresh, this.historyBtn]),
         this.planBox,
         this.log,
-        this.stagedBox,
-        this.actionBox,
+        ...this.proposalTray(),
         this.attachBar,
         // The two buttons stack beside the box, attach above send: the box is
         // two lines tall anyway, and a clip on the far left read as a third
@@ -9076,6 +9133,80 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         items5.length > 8 ? el("div", { class: "hint", text: `\uADF8 \uC678 ${items5.length - 8}\uAC74` }) : null,
         el("div", { class: "row", style: { marginTop: "8px" } }, [approve, reject])
       ]));
+    }
+    /**
+     * The two proposal cards share one tray between the log and the input, and
+     * the tray - not the log - is what scrolls when they are long.
+     *
+     * Each card used to take up to 42% on its own and refuse to shrink, so two
+     * open cards plus the plan and the input left the log 0px tall and pushed
+     * the input below the screen: on an iPad in landscape (cards arrive open
+     * there) the conversation vanished the moment a proposal came in. The grip
+     * above the tray drags its height and a tap on it folds or opens every card.
+     */
+    proposalTray() {
+      const tray = el("div", { class: "agenttray" }, [this.stagedBox, this.actionBox]);
+      const grip = el("div", {
+        class: "traygrip",
+        role: "separator",
+        title: "\uB04C\uC5B4\uC11C \uC81C\uC548 \uC601\uC5ED \uD06C\uAE30 \uC870\uC808 \xB7 \uD0ED\uD558\uBA74 \uBAA8\uB450 \uC811\uAE30/\uD3BC\uCE58\uAE30"
+      });
+      const KEY = "hina.trayMax";
+      const apply = (px) => {
+        tray.style.maxHeight = px ? `${px}px` : "";
+      };
+      try {
+        const v = Number(localStorage.getItem(KEY));
+        if (v > 0) apply(v);
+      } catch {
+      }
+      let startY = 0;
+      let startH = 0;
+      let moved = false;
+      grip.addEventListener("pointerdown", (e) => {
+        const ev = e;
+        startY = ev.clientY;
+        startH = tray.getBoundingClientRect().height;
+        moved = false;
+        grip.setPointerCapture(ev.pointerId);
+        grip.classList.add("dragging");
+      });
+      grip.addEventListener("pointermove", (e) => {
+        const ev = e;
+        if (!grip.hasPointerCapture(ev.pointerId)) return;
+        const dy = startY - ev.clientY;
+        if (!moved && Math.abs(dy) < 6) return;
+        moved = true;
+        const max = Math.max(60, this.root.clientHeight * 0.8);
+        apply(Math.round(Math.min(max, Math.max(40, startH + dy))));
+      });
+      const end = (e) => {
+        const ev = e;
+        if (!grip.hasPointerCapture(ev.pointerId)) return;
+        grip.releasePointerCapture(ev.pointerId);
+        grip.classList.remove("dragging");
+        if (moved) {
+          try {
+            localStorage.setItem(KEY, String(parseInt(tray.style.maxHeight, 10) || 0));
+          } catch {
+          }
+          return;
+        }
+        if (ev.type === "pointercancel") return;
+        const cards = Array.from(tray.querySelectorAll("details.proposal-fold"));
+        const open4 = !cards.some((c) => c.open);
+        for (const c of cards) c.open = open4;
+      };
+      grip.addEventListener("pointerup", end);
+      grip.addEventListener("pointercancel", end);
+      grip.addEventListener("dblclick", () => {
+        apply(null);
+        try {
+          localStorage.removeItem(KEY);
+        } catch {
+        }
+      });
+      return [grip, tray];
     }
     foldCard(key, title, children) {
       const card2 = el("details", { class: "card staged proposal-fold" });
@@ -14500,10 +14631,10 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           return;
         }
         if (!r.newer) {
-          const mismatch = r.current !== "0.15.25";
+          const mismatch = r.current !== "0.15.26";
           const ahead = r.ahead ?? (!!r.latest && r.latest !== r.current);
           say(
-            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.25"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
+            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.26"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
             mismatch || ahead ? "" : "ok"
           );
           return;
@@ -14594,7 +14725,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.15.25",
+            version: "0.15.26",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -15284,7 +15415,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.25"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.26"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -22102,7 +22233,7 @@ ${negative.value.trim()}
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.25"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.26"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
@@ -22198,7 +22329,7 @@ ${negative.value.trim()}
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.15.25" }),
+        el("span", { class: "dim", text: "v0.15.26" }),
         healthEl,
         el("span", { class: "spacer" }),
         reload,
@@ -22521,6 +22652,6 @@ ${negative.value.trim()}
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.15.25"} loaded`);
+    console.log(`[risu-hina] v${"0.15.26"} loaded`);
   })();
 })();
