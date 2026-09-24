@@ -1,5 +1,27 @@
 # 06. Implementation status — as of 2026-09-24 (v0.15.26, Risu Hina)
 
+## unreleased (2026-09-24): §1-73 one bot's AI conversation pushed the agent off the screen
+
+- **Field report (after 0.15.26):** on the iPad in landscape the AI chat was
+  gone for *The Irregular at Magic High School* but not for Parma; folding the
+  agent brought back the right part of the centre, unfolding pushed it off.
+- **Reproduced** with that bot's card and its latest agent session (read-only
+  from zikmunt-pc: `characters.card_json`, `GET /session` over loopback)
+  injected into the harness: the tab laid out ~3000px wide, the agent starting
+  at x=1511 of 1180 - and at 1920px on a desktop too. **Not a 0.15.26
+  regression:** the released 0.15.25 bundle does the same with that session;
+  the session (long replies from 12:57 that day) is what exposed it.
+- **Cause:** `.right` is `flex: 0 0 50%`, and a percentage basis is
+  indefinite while the tab's intrinsic width is computed, so the agent pane
+  contributed its max-content - every reply on one line. `.split > .left`
+  already had `contain: inline-size` for the same reason (§1-35); the right
+  pane never did.
+- **Fix:** `.split > .right { contain: inline-size }` and `.panel
+  { min-width: 0 }`. After: 1180×820 agent at x=590 w=590, 1024×768 and
+  1920×1000 halves, phone unchanged, same result in WebKit, gutter drag still
+  resizes. `tools/harness.mjs` takes `RISUHINA_HARNESS_CARD=<card.json>` to
+  load a real bot in place of the fixture.
+
 ## 0.15.26 (2026-09-24): §1-72 the AI chat no longer vanishes when proposals arrive (phone · iPad)
 
 - **Field report:** on an iPad in landscape the chat disappeared the moment a

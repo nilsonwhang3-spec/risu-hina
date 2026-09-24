@@ -117,6 +117,15 @@ const fixture = (() => {
   };
 })();
 
+// RISUHINA_HARNESS_CARD=<card.json>: a real character in place of the
+// fixture, for layout bugs that only one bot's content triggers (a long
+// lorebook title, a wide script). Its chats are replaced by the fixture's.
+if (process.env.RISUHINA_HARNESS_CARD) {
+  const card = JSON.parse(readFileSync(process.env.RISUHINA_HARNESS_CARD, 'utf8'));
+  for (const k of Object.keys(fixture)) if (k !== 'chats' && k !== 'chatPage') delete fixture[k];
+  Object.assign(fixture, card, { chats: fixture.chats, chatPage: 0 });
+}
+
 const pageHtml = (backendUrl) => `<!doctype html>
 <html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
