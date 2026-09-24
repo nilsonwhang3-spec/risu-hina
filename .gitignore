@@ -29,3 +29,6 @@ pyserver/datadir.txt
 # bundle.py: downloaded interpreters and the staging tree
 .cache/
 .build/
+
+# Local-only notes and assets: NAI key, NAIS3 archive, showcase HTML and screenshots.
+_docs/
