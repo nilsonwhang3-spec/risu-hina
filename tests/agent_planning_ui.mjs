@@ -40,6 +40,12 @@ let fold = panel.root.querySelector('.proposal-fold');
 assert.equal(fold.open, false, 'mobile starts collapsed');
 assert.match(fold.querySelector('summary').textContent, /1건/);
 assert.equal(writes, 0, 'folding never accepts a proposal');
+// Both proposal cards live in one scrolling tray with a grip above it, so
+// open cards cannot squeeze the log to 0px (iPad landscape).
+const tray = panel.root.querySelector('.agenttray');
+assert.ok(tray && tray.contains(fold), 'proposals sit in the shared tray');
+assert.equal(tray.querySelectorAll(':scope > .stagedbox').length, 2, 'staged and action boxes both in the tray');
+assert.equal(tray.previousElementSibling?.className, 'traygrip', 'the resize grip sits above the tray');
 fold.open = true;
 fold.dispatchEvent(new window.Event('toggle'));
 panel.setStaged(proposals);

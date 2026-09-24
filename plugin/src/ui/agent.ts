@@ -126,8 +126,7 @@ export class AgentPanel {
       el('div', { class: 'agenthead' }, [this.status, this.modeButton, fresh, this.historyBtn]),
       this.planBox,
       this.log,
-      this.stagedBox,
-      this.actionBox,
+      ...this.proposalTray(),
       this.attachBar,
       // The two buttons stack beside the box, attach above send: the box is
       // two lines tall anyway, and a clip on the far left read as a third
@@ -1182,6 +1181,72 @@ export class AgentPanel {
       items.length > 8 ? el('div', { class: 'hint', text: `그 외 ${items.length - 8}건` }) : null,
       el('div', { class: 'row', style: { marginTop: '8px' } }, [approve, reject]),
     ]));
+  }
+
+  /**
+   * The two proposal cards share one tray between the log and the input, and
+   * the tray - not the log - is what scrolls when they are long.
+   *
+   * Each card used to take up to 42% on its own and refuse to shrink, so two
+   * open cards plus the plan and the input left the log 0px tall and pushed
+   * the input below the screen: on an iPad in landscape (cards arrive open
+   * there) the conversation vanished the moment a proposal came in. The grip
+   * above the tray drags its height and a tap on it folds or opens every card.
+   */
+  private proposalTray(): HTMLElement[] {
+    const tray = el('div', { class: 'agenttray' }, [this.stagedBox, this.actionBox]);
+    const grip = el('div', {
+      class: 'traygrip', role: 'separator',
+      title: '끌어서 제안 영역 크기 조절 · 탭하면 모두 접기/펼치기',
+    });
+    const KEY = 'hina.trayMax';
+    const apply = (px: number | null) => { tray.style.maxHeight = px ? `${px}px` : ''; };
+    try { const v = Number(localStorage.getItem(KEY)); if (v > 0) apply(v); } catch { /* fine */ }
+
+    let startY = 0;
+    let startH = 0;
+    let moved = false;
+    grip.addEventListener('pointerdown', (e) => {
+      const ev = e as PointerEvent;
+      startY = ev.clientY;
+      startH = tray.getBoundingClientRect().height;
+      moved = false;
+      grip.setPointerCapture(ev.pointerId);
+      grip.classList.add('dragging');
+    });
+    grip.addEventListener('pointermove', (e) => {
+      const ev = e as PointerEvent;
+      if (!grip.hasPointerCapture(ev.pointerId)) return;
+      const dy = startY - ev.clientY;
+      if (!moved && Math.abs(dy) < 6) return;
+      moved = true;
+      // Up to most of the panel; the log keeps its own floor in CSS.
+      const max = Math.max(60, this.root.clientHeight * 0.8);
+      apply(Math.round(Math.min(max, Math.max(40, startH + dy))));
+    });
+    const end = (e: Event) => {
+      const ev = e as PointerEvent;
+      if (!grip.hasPointerCapture(ev.pointerId)) return;
+      grip.releasePointerCapture(ev.pointerId);
+      grip.classList.remove('dragging');
+      if (moved) {
+        try { localStorage.setItem(KEY, String(parseInt(tray.style.maxHeight, 10) || 0)); } catch { /* fine */ }
+        return;
+      }
+      if (ev.type === 'pointercancel') return;
+      // A tap: fold everything if anything is open, otherwise open them all.
+      const cards = Array.from(tray.querySelectorAll<HTMLDetailsElement>('details.proposal-fold'));
+      const open = !cards.some((c) => c.open);
+      for (const c of cards) c.open = open;
+    };
+    grip.addEventListener('pointerup', end);
+    grip.addEventListener('pointercancel', end);
+    // A double tap puts the tray back to its default size.
+    grip.addEventListener('dblclick', () => {
+      apply(null);
+      try { localStorage.removeItem(KEY); } catch { /* fine */ }
+    });
+    return [grip, tray];
   }
 
   private foldCard(key: string, title: string, children: (Node | null)[]): HTMLElement {

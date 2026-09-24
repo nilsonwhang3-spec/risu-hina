@@ -804,6 +804,9 @@ label.checkrow input { width: auto; }
 .right { background: var(--darkbg, rgba(255, 255, 255, .022)); }
 .agenthead { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 .agentlog { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 9px; }
+/* The log is the one thing that must never be squeezed out: the plan and the
+   proposal tray above and below it shrink and scroll first. */
+.agentlog { min-height: min(120px, 30%); }
 .bubble { border-radius: 6px; padding: 7px 10px; }
 .bubble.user { background: rgba(37, 99, 235, .12); }
 .bubble.assistant { background: rgba(255, 255, 255, .05); }
@@ -1008,7 +1011,7 @@ button.attachbtn { padding: 8px 9px; display: flex; align-items: center; flex-sh
 .proposal-body { padding-top: 6px; }
 /* The plan / Todo strip (§1-62, user: "폰트가 크고 투박하고 자리를 많이
    차지함"): one 11.5px line when folded, a quiet 12px card when open. */
-.agentplan { flex-shrink: 0; max-height: 30%; overflow-y: auto; font-size: 12px; line-height: 1.5; }
+.agentplan { flex: 0 1 auto; min-height: 20px; max-height: 30%; overflow-y: auto; font-size: 12px; line-height: 1.5; }
 .agentplan:empty { display: none; }
 .agentplan summary {
   cursor: pointer; padding: 2px 6px; font-size: 11.5px; font-weight: 500; overflow-wrap: anywhere;
@@ -1027,7 +1030,31 @@ button.attachbtn { padding: 8px 9px; display: flex; align-items: center; flex-sh
 .plan-task .badge { font-size: 10px; padding: 0 5px; }
 .plan-task > .hint { flex-basis: 100%; font-size: 11px; padding-left: 4px; }
 .agenthead { flex-wrap: wrap; }
-.stagedbox { flex-shrink: 0; max-height: 42%; overflow-y: auto; }
+.stagedbox { flex-shrink: 0; }
+/* Both proposal cards in one tray that scrolls as a whole (agent.ts
+   proposalTray). Each card used to hold 42% and refuse to shrink, and two
+   open ones left the log at 0px - the chat vanished on an iPad. The tray
+   shrinks before the log does, down to about one summary line; the grip
+   above it drags its limit (inline max-height) and a tap folds the cards. */
+.agenttray {
+  flex: 0 1 auto; max-height: 45%; min-height: 0; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 7px;
+}
+.agenttray:has(.proposal-fold) { min-height: min(46px, 100%); }
+.agenttray:not(:has(.proposal-fold)) { display: none; }
+.traygrip {
+  display: none; flex: 0 0 12px; margin: -4px 0; cursor: row-resize; touch-action: none;
+  background-image: linear-gradient(to right, transparent 40%,
+    rgba(190,200,215,.35) 40%, rgba(190,200,215,.35) 60%, transparent 60%);
+  background-size: 100% 3px; background-position: center; background-repeat: no-repeat;
+  border-radius: 3px;
+}
+.agentpanel:has(.agenttray .proposal-fold) > .traygrip { display: block; }
+.traygrip:hover, .traygrip.dragging {
+  background-image: linear-gradient(to right, transparent 30%, #2563eb 30%, #2563eb 70%, transparent 70%);
+}
+/* A finger needs a taller target than a mouse. */
+@media (pointer: coarse) { .traygrip { flex-basis: 22px; margin: -8px 0; } }
 .card.staged { border-color: rgba(245,158,11,.45); background: rgba(245,158,11,.06); }
 .stagedrow { display: flex; gap: 8px; align-items: center; padding: 3px 0; flex-wrap: wrap; }
 .stagedrow .grow { flex: 1; min-width: 120px; }

@@ -1,5 +1,27 @@
 # 06. Implementation status — as of 2026-09-23 (v0.15.25, Risu Hina)
 
+## unreleased (2026-09-24): §1-72 the AI chat no longer vanishes when proposals arrive (phone · iPad)
+
+- **Field report:** on an iPad in landscape the chat disappeared the moment a
+  proposal card came in and came back only when the window was shrunk to
+  phone width; the right-panel fold did nothing for it. On a phone the log and
+  the proposals split the pane awkwardly with no way to adjust it.
+- **Cause (measured in the harness over CDP):** `승인 대기` and `승인 요청`
+  were two `.stagedbox`es, each `max-height: 42%` and `flex-shrink: 0`; with
+  the plan box (30%), the head and the input none of them could shrink, so
+  the log - the only shrinkable child - went to **0px** and the input was
+  pushed below the screen (1180×820: log 0, input bottom 832 > 820; 390×760
+  with both cards opened: the same). At phone width the cards are drawn
+  folded (`smallScreen()`), which is why shrinking the iPad window "fixed" it;
+  above 1024px they arrive open.
+- **Fix:** both boxes sit in one `.agenttray` (max 45%, shrinks first, scrolls
+  as a whole, keeps about a summary line); `.agentlog` has a floor of
+  `min(120px, 30%)`; the plan box may shrink too. A `.traygrip` above the tray
+  drags its limit (saved as `hina.trayMax`), a tap folds/opens every card,
+  a double tap resets. After: iPad landscape log 229px, phone with both cards
+  open 181px, dragging the grip down took the log to 377px, input on screen
+  in every case. `tests/agent_planning_ui.mjs` checks the tray structure.
+
 ## 0.15.25 (2026-09-23): source-audited skills and manual skill synchronization
 
 - Twelve methodology references corrected against RisuAI 25001174 and PocketRisu a14c911f:
