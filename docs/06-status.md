@@ -21,6 +21,10 @@
   a double tap resets. After: iPad landscape log 229px, phone with both cards
   open 181px, dragging the grip down took the log to 377px, input on screen
   in every case. `tests/agent_planning_ui.mjs` checks the tray structure.
+- **Enter on a phone/tablet is a newline** (user request, same day): the AI
+  chat input sends on Enter only with a fine pointer; on a touch device
+  (`smallScreen()` or `pointer: coarse`, so an iPad in landscape too) only the
+  send button sends. IME composition never sends. Tested in the same file.
 
 ## 0.15.25 (2026-09-23): source-audited skills and manual skill synchronization
 
