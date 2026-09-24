@@ -129,11 +129,21 @@ function syncAll(): void {
 // phone. Off by default: the list is short and the entry gets the screen.
 let mobileList = false;
 
+// Whether the page header, tab row and tool row are folded away on a phone,
+// leaving this bar as the top of the screen (§1-72: "화면도 좁다" - the three
+// rows above the chat took ~180px of a 760px screen). Remembered; the CSS
+// applies it only while the active tab has this bar, so a tab without one can
+// never strand the user without a header.
+const TOP_KEY = 'hina.topFold';
+let topFold = false;
+try { topFold = localStorage.getItem(TOP_KEY) === '1'; } catch { /* storage may be unavailable */ }
+
 function mobileBar(root: HTMLElement): HTMLElement {
   const editBtn = el('button', { text: '📄 편집', title: '편집 화면 (모바일)' });
   const agentBtn = el('button', { text: '💬 AI 챗', title: 'AI 챗 (모바일)' });
   const listBtn = el('button', { class: 'ghost tiny mlist', title: '왼쪽 목록을 펼치거나 접습니다' });
-  const bar = el('div', { class: 'mbar' }, [el('div', { class: 'mseg' }, [editBtn, agentBtn]), listBtn]);
+  const topBtn = el('button', { class: 'ghost tiny mtop' });
+  const bar = el('div', { class: 'mbar' }, [el('div', { class: 'mseg' }, [editBtn, agentBtn]), el('span', { class: 'mspacer' }), listBtn, topBtn]);
   const sync = () => {
     root.classList.toggle('m-agent', mobileView === 'agent');
     root.classList.toggle('m-centre', mobileView === 'centre');
@@ -141,6 +151,9 @@ function mobileBar(root: HTMLElement): HTMLElement {
     editBtn.classList.toggle('on', mobileView === 'centre');
     agentBtn.classList.toggle('on', mobileView === 'agent');
     listBtn.textContent = mobileList ? '☰ 목록 접기' : '☰ 목록 펼치기';
+    topBtn.textContent = topFold ? '⌄ 위 펼치기' : '⌃ 위 접기';
+    topBtn.title = topFold ? '헤더·탭·도구 줄을 다시 보입니다' : '헤더·탭·도구 줄을 접어 화면을 넓힙니다';
+    document.querySelector('.wrap')?.classList.toggle('topfold', topFold);
     // Only trees fold; a strip of jump targets has nothing to open.
     listBtn.style.display = root.querySelector('.explorer .tree') ? '' : 'none';
   };
@@ -153,6 +166,11 @@ function mobileBar(root: HTMLElement): HTMLElement {
   editBtn.addEventListener('click', () => pick('centre'));
   agentBtn.addEventListener('click', () => pick('agent'));
   listBtn.addEventListener('click', () => { mobileList = !mobileList; syncAll(); });
+  topBtn.addEventListener('click', () => {
+    topFold = !topFold;
+    try { localStorage.setItem(TOP_KEY, topFold ? '1' : '0'); } catch { /* fine */ }
+    syncAll();
+  });
   toggles.set(root, sync);
   sync();
   // The tree mounts after the split is built; re-check once it is there.

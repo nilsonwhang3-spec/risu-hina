@@ -1186,6 +1186,12 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
   .mbar .mseg button.on { background: rgba(37, 99, 235, .28); color: var(--textcolor, #d8dce4); font-weight: 700; }
   .mbar .mlist { margin-left: auto; font-size: 12px; padding: 4px 10px; }
   .split.m-agent .mbar .mlist { display: none; }
+  .mbar .mspacer { flex: 1 1 auto; }
+  .mbar .mtop { font-size: 12px; padding: 4px 10px; flex-shrink: 0; }
+  /* 위 접기 (panes.ts): only while the active tab has the bar that undoes it. */
+  .wrap.topfold:has(> main > .panel.active .mbar) > header,
+  .wrap.topfold:has(> main > .panel.active .mbar) > .tabs,
+  .wrap.topfold:has(> main > .panel.active .mbar) > .toolslot { display: none; }
 
   /* The explorer becomes a scrolling strip of jump targets across the top
      rather than a column eating a third of a 390px screen. */
