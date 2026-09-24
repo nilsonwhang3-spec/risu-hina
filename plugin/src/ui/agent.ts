@@ -26,6 +26,12 @@ import { installDrop } from './tree';
 
 const IMG_RE = /\.(png|jpe?g|gif|webp|avif|bmp)$/i;
 
+/** A phone or tablet: the primary pointer is a finger (iPad in landscape is
+ * wider than smallScreen's breakpoint but still types on a screen keyboard). */
+function touchInput(): boolean {
+  try { return smallScreen() || window.matchMedia('(pointer: coarse)').matches; } catch { return false; }
+}
+
 export interface AgentPanelHooks {
   /** Show staged proposals as previews in the turn list. */
   onStagedChanged: (staged: StagedEdit[]) => void;
@@ -80,13 +86,16 @@ export class AgentPanel {
       const ev = e as KeyboardEvent;
       // Enter sends, Shift+Enter newlines - the chat convention. Multi-line
       // instructions are common enough that the escape hatch has to exist.
-      if (ev.key === 'Enter' && !ev.shiftKey) {
+      // On a touch device (phone, iPad) Enter is a newline and only the send
+      // button sends: an on-screen keyboard has no Shift+Enter to reach for,
+      // and a stray return sent half-written instructions.
+      if (ev.key === 'Enter' && !ev.shiftKey && !ev.isComposing && !touchInput()) {
         ev.preventDefault();
         void this.submit();
       }
     });
 
-    this.send = el('button', { class: 'primary sendbtn', title: '보내기 (Enter)', html: PAPER_PLANE });
+    this.send = el('button', { class: 'primary sendbtn', title: touchInput() ? '보내기' : '보내기 (Enter)', html: PAPER_PLANE });
     this.send.addEventListener('click', () => void this.submit());
     // iPhone (§1-53): a tap on the button blurred the textarea, the keyboard
     // closed, the layout shifted, and the click landed nowhere. Keeping focus

@@ -79,5 +79,14 @@ globalThis.__mobile = false;
 const desktop = new AgentPanel({ onStagedChanged() {}, onApplied() {}, notice() {} });
 desktop.setStaged(proposals);
 assert.equal(desktop.root.querySelector('.proposal-fold').open, true, 'desktop remains expanded by default');
+// Enter on a phone/tablet is a newline; only the button sends. On a desktop
+// Enter still sends (the default is prevented).
+const enter = () => { const e = new window.Event('keydown', { cancelable: true }); e.key = 'Enter'; return e; };
+globalThis.__mobile = true;
+const mobileEnter = enter(); panel.root.querySelector('.agentinput').dispatchEvent(mobileEnter);
+assert.equal(mobileEnter.defaultPrevented, false, 'mobile Enter types a newline');
+globalThis.__mobile = false;
+const deskEnter = enter(); desktop.root.querySelector('.agentinput').dispatchEvent(deskEnter);
+assert.equal(deskEnter.defaultPrevented, true, 'desktop Enter sends');
 panel.destroy(); desktop.destroy();
 console.log('PASS - planning mode, Todo progress and persistent mobile proposal folding');
