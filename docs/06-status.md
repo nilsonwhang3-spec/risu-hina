@@ -1,6 +1,6 @@
-# 06. Implementation status — as of 2026-09-24 (v0.15.26, Risu Hina)
+# 06. Implementation status — as of 2026-09-24 (v0.15.27, Risu Hina)
 
-## unreleased (2026-09-24): §1-73 one bot's AI conversation pushed the agent off the screen
+## 0.15.27 (2026-09-24): §1-73 one bot's AI conversation pushed the agent off the screen
 
 - **Field report (after 0.15.26):** on the iPad in landscape the AI chat was
   gone for *The Irregular at Magic High School* but not for Parma; folding the
