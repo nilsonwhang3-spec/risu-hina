@@ -25,6 +25,13 @@
   chat input sends on Enter only with a fine pointer; on a touch device
   (`smallScreen()` or `pointer: coarse`, so an iPad in landscape too) only the
   send button sends. IME composition never sends. Tested in the same file.
+- **위 접기 on a phone** (user request): a button on the phone view bar
+  (`📄 편집 / 💬 AI 챗`) folds the header, tab row and tool row away
+  (`.wrap.topfold`, remembered as `hina.topFold`), leaving the bar as the top
+  of the screen - the AI chat log went 456px → 591px at 390×760. The CSS only
+  applies it while the active panel has that bar (`:has(.mbar)`), so the
+  선택/files/studio tabs, which have no bar, always show the header and no tab
+  can strand the user without a way back. 360px wide still fits one row.
 
 ## 0.15.25 (2026-09-23): source-audited skills and manual skill synchronization
 
