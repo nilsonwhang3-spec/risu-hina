@@ -3243,20 +3243,32 @@ console.log('\ntest_mcp_switch');
   await settle(600);
   if (!backend.mcpSeeded) {
     console.log('  (no cached add-on - run tests/test_mcp.py once to cover the switch)');
-    check('no MCP switch without the add-on', !findButton(document, 'MCP 활성화'));
+    const hidden = document.querySelector('header .mcpswitch');
+    check('no visible MCP switch without the add-on', !!hidden && hidden.style.display === 'none');
     await openAdvanced();
     check('advanced tab offers the install', !!findButton(document, 'MCP 설치'));
     await closeSettings();
   } else {
-    const sw = findButton(document, 'MCP 활성화');
-    check('MCP switch sits on the picker', !!sw && !!sw.closest('.botcard'));
+    const sw = document.querySelector('header .mcpswitch');
+    const reloadBtn = sw?.nextElementSibling;
+    check('MCP switch sits in the title row, left of reload',
+          !!sw && sw.style.display !== 'none' && /MCP 연결/.test(sw.textContent || '')
+          && !!reloadBtn && /다시 읽어/.test(reloadBtn.title || ''),
+          (sw?.outerHTML || '(none)').slice(0, 160));
+    check('no MCP switch left on the picker', !document.querySelector('.botcard .mcpswitch'));
     sw?.dispatchEvent(new window.Event('click', { bubbles: true }));
     await settle(900);
     let st = await mcpStatus();
     check('the switch activates the bridge with this chat',
           st.bridge?.active === true && !!st.bridge?.context?.chatKey && st.bridge?.polling === true,
           JSON.stringify(st.bridge).slice(0, 300));
-    check('the switch says it is on', !!findButton(document, 'MCP 켜짐'));
+    check('the switch shows on (sparkle class) while connected',
+          sw?.classList.contains('on') === true && /MCP 연결됨/.test(sw?.textContent || ''),
+          (sw?.className || '') + ' ' + (sw?.textContent || ''));
+    // Visible from every tab, not just the picker.
+    await openAdvanced();
+    check('the on-switch stays visible on other tabs', sw?.isConnected && sw.style.display !== 'none');
+    await closeSettings();
     await openAdvanced();
     check('advanced tab shows the claude mcp add command',
           /claude mcp add -s user --transport http risu-hina .*\/mcp/.test(document.body.textContent || ''),
@@ -3274,10 +3286,11 @@ console.log('\ntest_mcp_switch');
     await closeSettings();
     clickById(document, 'tab-chats');
     await settle(400);
-    findButton(document, 'MCP 켜짐')?.dispatchEvent(new window.Event('click', { bubbles: true }));
+    sw?.dispatchEvent(new window.Event('click', { bubbles: true }));
     await settle(800);
     st = await mcpStatus();
     check('switching off ends the lease', st.bridge?.active === false, JSON.stringify(st.bridge).slice(0, 200));
+    check('the switch drops its sparkle when off', sw?.classList.contains('on') === false && /MCP 연결$/.test((sw?.textContent || '').trim()));
   }
 }
 

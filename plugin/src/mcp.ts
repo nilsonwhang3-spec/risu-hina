@@ -2,8 +2,8 @@
  * The panel's half of MCP (backend: mcpbridge.py / mcpserver.py).
  *
  * An MCP client (Claude Code) talks to the backend's `/mcp` directly, but the
- * backend only lets it act while a panel holds the door open: 'MCP 활성화' on
- * the picker starts a long poll that tells the backend which bot and chat are
+ * backend only lets it act while a panel holds the door open: 'MCP 연결' in
+ * the title row starts a long poll that tells the backend which bot and chat are
  * open here, and carries back the one thing only this iframe can do - the
  * requested card save to RisuAI.
  *

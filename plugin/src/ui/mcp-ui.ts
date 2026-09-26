@@ -218,7 +218,7 @@ export function buildMcpCard(onMount?: (refresh: () => void) => void): HTMLEleme
     detail.appendChild(codexCmd);
     detail.appendChild(el('div', { class: 'row' }, [copyCodex, copyToken]));
     detail.appendChild(el('div', { class: 'hint', style: { marginTop: '8px' } }, [
-      '사용: 봇·챗 선택 화면(첫 화면)의 ‘MCP 활성화’를 누르고 이 화면을 열어 둔 채로 Claude Code 에서 부르세요. ',
+      '사용: 패널 상단(🔄 왼쪽)의 ‘MCP 연결’을 누르고 패널을 열어 둔 채로 Claude Code 에서 부르세요. ',
       'MCP 는 패널에 열린 봇·챗에서만 동작합니다. 수정은 제안으로 들어오고, 이 패널이나 Claude Code 쪽(approve_proposals · approve_staged)에서 승인합니다. ',
       'RisuAI 반영도 Claude Code 에서 승인하면 이 패널이 실행합니다. ',
       '토큰은 이 백엔드에서 파이썬 실행(run_python)까지 할 수 있는 권한입니다 — 공유하지 마세요.',
@@ -233,26 +233,33 @@ export function buildMcpCard(onMount?: (refresh: () => void) => void): HTMLEleme
   ]);
 }
 
-// --- the picker's switch --------------------------------------------------------
+// --- the title-row switch (left of 🔄) ----------------------------------------------
 
-/** The 'MCP 활성화' switch for the picker, or null when the add-on is absent. */
-export function mcpSwitch(): HTMLElement | null {
-  if (!mcp.available && !mcp.on) return null;
-  const btn = el('button') as HTMLButtonElement;
-  const line = el('span', { class: 'hint mcpline' });
-  const syncLine = () => {
-    btn.className = (mcp.on ? 'primary' : 'ghost') + ' tiny mcpswitch';
-    btn.textContent = mcp.on ? 'MCP 켜짐 · 끄기' : 'MCP 활성화';
-    btn.title = mcp.on
-      ? 'MCP 클라이언트가 이 봇·챗에서 작업할 수 있습니다. 이 화면을 열어 두세요.'
-      : 'Claude Code 등 MCP 클라이언트가 지금 열린 봇·챗을 다룰 수 있게 합니다.';
-    if (!mcp.on) { line.textContent = mcp.error; return; }
-    if (mcp.error) { line.textContent = '연결 재시도 중: ' + mcp.error; return; }
-    line.textContent = mcp.lastCall
-      ? `호출 ${mcp.calls}회 · 마지막 ${mcp.lastCall.tool} ${ago(mcp.lastCall.at)}`
-      : '대기 중 — 화면을 열어 두세요';
+/**
+ * The 'MCP 연결' switch, built ONCE into the title row and updated in place.
+ *
+ * It lives in the header rather than on the picker so it is visible from every
+ * tab - a panel granting a remote client access should never be out of sight -
+ * and so it appears the moment the add-on is installed: it listens to state
+ * changes (the MCP card refreshes /health after an install) instead of waiting
+ * for a screen to be rebuilt.
+ */
+export function mcpHeaderSwitch(): HTMLElement {
+  const dot = el('span', { class: 'mcpdot' });
+  const label = el('span', { class: 'mcplabel' });
+  const btn = el('button', { class: 'ghost mcpswitch', style: { display: 'none' } }, [dot, label]) as HTMLButtonElement;
+  const sync = () => {
+    btn.style.display = mcp.available || mcp.on ? '' : 'none';
+    btn.classList.toggle('on', mcp.on);
+    btn.classList.toggle('err', mcp.on && !!mcp.error);
+    label.textContent = !mcp.on ? 'MCP 연결' : mcp.error ? 'MCP 재연결 중' : 'MCP 연결됨';
+    const bot = mcp.context().botName;
+    btn.title = !mcp.on
+      ? 'Claude Code·Codex 등 MCP 클라이언트가 지금 열린 봇·챗을 다룰 수 있게 합니다. 켠 동안 이 패널을 열어 두세요.'
+      : (mcp.error ? '연결 재시도 중: ' + mcp.error + '\n' : '')
+        + `MCP 연결됨${bot ? ' · ' + bot : ''} — 누르면 끕니다.\n`
+        + (mcp.lastCall ? `호출 ${mcp.calls}회 · 마지막 ${mcp.lastCall.tool} ${ago(mcp.lastCall.at)}` : '아직 호출 없음');
   };
-  syncLine();
   btn.addEventListener('click', async () => {
     btn.disabled = true;
     try {
@@ -262,12 +269,10 @@ export function mcpSwitch(): HTMLElement | null {
       mcpToast('MCP 를 켜지 못했습니다: ' + msg(e), 'err');
     }
     btn.disabled = false;
-    syncLine();
+    sync();
   });
-  // The line updates in place; a full picker render per poll would flicker.
-  const off = mcp.subscribe(() => {
-    if (!btn.isConnected) { off(); return; }
-    syncLine();
-  });
-  return el('span', { class: 'mcpswitchwrap' }, [btn, line]);
+  mcp.subscribe(sync);
+  state.onChange(sync);
+  sync();
+  return btn;
 }

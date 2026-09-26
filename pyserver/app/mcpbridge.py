@@ -3,7 +3,7 @@
 An MCP client reaches the backend directly, but two things only the plugin
 has: **which bot and chat the user has open** (the host cannot be told to
 select another one - docs/08 §1), and the host APIs that write to RisuAI.
-So MCP works only while a panel has pressed 'MCP 활성화' and keeps polling:
+So MCP works only while a panel has pressed 'MCP 연결' and keeps polling:
 
 - `poll()` is a long poll. The panel sends its current context (bot, chat,
   screen) and the backend holds the request until a host job arrives or ~20s

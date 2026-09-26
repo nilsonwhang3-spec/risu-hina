@@ -1582,6 +1582,25 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
 
 /* File rows and grid cells as drop targets for internal drags. */
 .frow.dropping, .fcell.dropping { outline: 2px dashed #7dd3fc; outline-offset: -2px; }
+
+/* --- MCP switch in the title row (left of 🔄) -------------------------------------
+   Off: a quiet ghost button. On: filled, a live dot, and a light sweep every few
+   seconds - a panel granting a remote client access should be hard to miss. */
+.mcpswitch { position: relative; overflow: hidden; display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 10px; font-size: 12px; white-space: nowrap; border-radius: 999px; }
+.mcpswitch .mcpdot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; opacity: .45; flex: none; }
+.mcpswitch.on { background: linear-gradient(135deg, #7c5cff, #22d3ee); border-color: transparent; color: #fff;
+  font-weight: 700; box-shadow: 0 0 0 1px #7c5cff66, 0 0 12px #22d3ee55; animation: mcp-glow 2.4s ease-in-out infinite; }
+.mcpswitch.on .mcpdot { opacity: 1; background: #fff; box-shadow: 0 0 6px #fff; animation: mcp-dot 1.2s ease-in-out infinite; }
+.mcpswitch.on::after { content: ''; position: absolute; top: 0; bottom: 0; left: -60%; width: 45%;
+  background: linear-gradient(100deg, transparent, #ffffffb0, transparent); transform: skewX(-20deg);
+  animation: mcp-sweep 3.6s ease-in-out infinite; pointer-events: none; }
+.mcpswitch.on.err { background: linear-gradient(135deg, #b45309, #f59e0b); }
+@keyframes mcp-glow { 0%, 100% { box-shadow: 0 0 0 1px #7c5cff66, 0 0 8px #22d3ee44; } 50% { box-shadow: 0 0 0 1px #7c5cffaa, 0 0 18px #22d3eeaa; } }
+@keyframes mcp-dot { 0%, 100% { transform: scale(.8); } 50% { transform: scale(1.25); } }
+@keyframes mcp-sweep { 0%, 70% { left: -60%; } 100% { left: 130%; } }
+@media (prefers-reduced-motion: reduce) { .mcpswitch.on, .mcpswitch.on .mcpdot, .mcpswitch.on::after { animation: none; } }
+@media (max-width: 640px) { .mcpswitch .mcplabel { display: none; } .mcpswitch { padding: 5px 8px; } }
 `;
 
 export function injectStyles(): void {
