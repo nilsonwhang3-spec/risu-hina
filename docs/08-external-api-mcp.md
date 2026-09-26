@@ -61,6 +61,16 @@ switch on. The poll returns early when (a) a host job is queued — today `write
 existing `requestedCardWriteback` — or (b) the pending-proposal fingerprint changed, so the agent pane and the
 bars refresh their counts. Not persisted: a plugin reload leaves the switch off.
 
+**Through the tunnel (2026-09-27).** zikmunt-pc's locally-managed tunnel `comfyui`
+(`C:/Users/bacon/.cloudflared/config.yml`, service `CloudflaredComfyUI`) now routes **`hina.francis.kr` ->
+`http://127.0.0.1:6020`**; the old `elf.francis.kr` rule was removed (backup `config.yml.bak-20260927`), and a
+wildcard `*.francis.kr` record answers 530 for unrouted names. No Cloudflare Access on hina (comfy has one).
+uvicorn takes `X-Forwarded-For` from the loopback proxy, so tunnel traffic is NOT loopback: `/health` says
+`tokenRequired:true`, REST and `/mcp` answer 401 without their tokens. SSE comes through (`text/event-stream`,
+initialize/tools/list/hina_status measured, and a real `claude -p` against `https://hina.francis.kr/mcp`).
+Trap: the zone's Browser Integrity Check answers **403 error 1010 to the `Python-urllib` user agent** - curl,
+node and Claude Code pass; a Python probe must set its own User-Agent.
+
 **Tests.** `tests/test_mcp.py` (gate) speaks raw JSON-RPC; `plugin_smoke` `test_mcp_switch`; one run with real
 Claude Code (docs/06 §1-75). Open: the tunnel path (Cache Bypass for `/mcp` per the risk below), the 3.11 bundle.
 
