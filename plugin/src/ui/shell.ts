@@ -4,6 +4,7 @@
  * Sections stay in the DOM and are toggled with CSS rather than being rebuilt,
  * so switching tabs does not lose scroll position or an in-progress edit.
  */
+import { mcpHeaderSwitch } from './mcp-ui';
 import { installFoldControls } from './panes';
 import './write-progress';
 import { reclamp } from './splitter';
@@ -490,6 +491,8 @@ export function buildShell(): void {
       el('span', { class: 'dim', text: 'v' + __PLUGIN_VERSION__ }),
       healthEl,
       el('span', { class: 'spacer' }),
+      // Visible from every tab once the add-on is installed (설정 → 고급 기능).
+      mcpHeaderSwitch(),
       reload,
       settingsBtn,
       close,

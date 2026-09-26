@@ -5,7 +5,7 @@ has (agent.build), called with the same `Deps`, so every write is still a
 proposal in the approval queue and the user still approves it in the panel -
 nothing here is a second, looser path into the store. What differs:
 
-- The bot and chat come from the panel that pressed 'MCP 활성화'
+- The bot and chat come from the panel that pressed 'MCP 연결'
   (mcpbridge.context), not from a session the panel opened.
 - `Deps.mode` is '' - no screen gate. The MCP client is not looking at a
   screen, and the panel shows proposals of both halves anyway.
@@ -45,7 +45,7 @@ Risu Hina: post-hoc editing of RisuAI bots (character cards) and their chats, th
 
 How it works:
 - Every tool acts on the bot and chat that are currently open in the Risu Hina panel inside RisuAI,
-  where the user pressed 'MCP 활성화'. Call hina_status first to see which bot/chat that is. To work
+  where the user pressed 'MCP 연결' (title row). Call hina_status first to see which bot/chat that is. To work
   on another bot, ask the user to open it in the panel.
 - Tools read and edit the Hina WORKING COPY, not live RisuAI. Writes are PROPOSALS (propose_*, stage_*).
   They are applied when approved - in the panel, or here with approve_proposals (list_proposals ids) and
@@ -150,7 +150,7 @@ def _hina_status() -> str:
     st = mcpbridge.status()
     ctx = st.get("context") or {}
     lines = [f"Risu Hina 백엔드 v{config.VERSION}",
-             f"패널 연결: {'활성' if st['active'] else '비활성 (패널에서 MCP 활성화를 켜 주세요)'}"]
+             f"패널 연결: {'활성' if st['active'] else '비활성 (패널 상단의 MCP 연결을 켜 주세요)'}"]
     if not st["active"]:
         # With the switch off the token opens nothing - including what the
         # panel was last looking at.
@@ -369,8 +369,8 @@ async def _call_tool(ctx: Any, params: Any) -> Any:
         mcpbridge.note_call(name, False)
         return types.CallToolResult(content=[types.TextContent(type="text", text=text)], is_error=True)
 
-    off = ("Risu Hina 패널의 MCP 가 꺼져 있습니다. RisuAI 에서 Risu Hina 를 열고 첫 화면의 "
-           "'MCP 활성화' 를 켠 뒤, 그 화면을 연 채로 두세요.")
+    off = ("Risu Hina 패널의 MCP 가 꺼져 있습니다. RisuAI 에서 Risu Hina 를 열고 상단의 "
+           "'MCP 연결' 을 켠 뒤, 패널을 연 채로 두세요.")
     if name in _OWN_TOOLS:
         _, _, fn, needs_panel = _OWN_TOOLS[name]
         if needs_panel and not mcpbridge.active():

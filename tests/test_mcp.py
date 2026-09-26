@@ -173,7 +173,7 @@ def main() -> int:
         res = r.get("result") or {}
         m.pv = res.get("protocolVersion") or ""
         check("initialize answers", bool(m.pv) and (res.get("serverInfo") or {}).get("name") == "risu-hina", str(r)[:300])
-        check("instructions sent", "MCP 활성화" in (res.get("instructions") or ""), "")
+        check("instructions sent", "MCP 연결" in (res.get("instructions") or ""), "")
         m.notify("notifications/initialized")
         r = m.call("tools/list")
         names = {t["name"] for t in (r.get("result") or {}).get("tools") or []}
@@ -186,11 +186,11 @@ def main() -> int:
         check("input schema carried", "comment" in (schema.get("properties") or {}), str(schema)[:200])
 
         err, text = m.tool("list_turns")
-        check("refused while the panel switch is off", err and "MCP 활성화" in text, text[:200])
+        check("refused while the panel switch is off", err and "MCP 연결" in text, text[:200])
         err, text = m.tool("hina_status")
         check("hina_status works without the panel", not err and "비활성" in text, text[:200])
         err, text = m.tool("hina_guide")
-        check("hina_guide needs the panel switch", err and "MCP 활성화" in text, text[:200])
+        check("hina_guide needs the panel switch", err and "MCP 연결" in text, text[:200])
 
         print("test_mcp_bridge")
         st, body = s.post("/workspace", payload([make_chat("mcpA", "MCP 챗", 6)]))
@@ -300,9 +300,9 @@ def main() -> int:
         st, body = s.post("/mcp/bridge/deactivate")
         check("deactivate", st == 200 and body.get("active") is False, str(body)[:200])
         err, text = m.tool("read_card")
-        check("refused again after deactivate", err and "MCP 활성화" in text, text[:200])
+        check("refused again after deactivate", err and "MCP 연결" in text, text[:200])
         err, text = m.tool("approve_proposals")
-        check("approvals need the panel switch too", err and "MCP 활성화" in text, text[:200])
+        check("approvals need the panel switch too", err and "MCP 연결" in text, text[:200])
         err, text = m.tool("hina_status")
         check("switched off, hina_status names no bot or chat",
               not err and tk not in text and "테스트 봇" not in text and "MCP 챗" not in text, text[:300])

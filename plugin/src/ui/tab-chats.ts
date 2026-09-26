@@ -17,7 +17,6 @@ import type { RisuChat } from '../risuai';
 import { HostError } from '../host';
 import { describeSync, syncBusy } from '../assets';
 import { transport } from '../transport';
-import { mcpSwitch } from './mcp-ui';
 
 /**
  * One line under the bot's name: what the background asset importer is up
@@ -223,8 +222,7 @@ export function renderChatsTab(mount: HTMLElement): void {
       el('div', { class: 'botname', text: String(char.name || '(이름 없음)') }),
       el('div', { class: 'hint', text: `챗 ${liveChats.length}개` + (folders.length ? ` · 폴더 ${folders.length}개` : '') }),
       assetSyncLine(),
-      // 'MCP 활성화' sits beside 봇 편집 once the add-on is installed (설정 → 고급 기능).
-      el('div', { class: 'row', style: { marginTop: '8px' } }, [editBot, mcpSwitch()]),
+      el('div', { class: 'row', style: { marginTop: '8px' } }, [editBot]),
       el('div', { class: 'hint', style: { marginTop: '6px' } }, [
         '다른 봇을 편집하시려면 RisuAI에서 그 봇을 열고 🔄 를 눌러 주세요.',
       ]),
