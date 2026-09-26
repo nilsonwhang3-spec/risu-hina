@@ -1,6 +1,6 @@
-# 06. Implementation status — as of 2026-09-27 (v0.15.28, Risu Hina)
+# 06. Implementation status — as of 2026-09-27 (v0.15.29, Risu Hina)
 
-## unreleased (2026-09-27): §1-75 MCP — Claude Code drives the panel's bot
+## 0.15.29 (2026-09-27): §1-75 MCP — Claude Code drives the panel's bot
 
 - **Ask (user):** install Risu Hina on a remote PC behind a domain, open the
   panel in local RisuAI, press 'MCP 활성화' and keep the screen open, then call
