@@ -32,7 +32,7 @@ from typing import Any, Awaitable, Callable
 
 import httpx
 
-from . import codexauth, config, keys, log
+from . import codexauth, config, keys, log, providers
 
 TIMEOUT = 25
 MAX_RESULTS = 8
@@ -229,13 +229,20 @@ async def _gemini_search(model: str, key: str, instructions: str, question: str)
     if not key:
         raise RuntimeError("Google AI Studio API 키가 없습니다")
     url = f"{GEMINI_BASE}/models/{model}:generateContent"
+    return await _grounded(url, {"x-goog-api-key": key}, instructions, question)
+
+
+async def _grounded(url: str, auth: dict, instructions: str, question: str) -> str:
+    """generateContent with Google Search grounding - AI Studio and Vertex
+    take the same body and answer in the same shape; only the URL and the
+    credential differ."""
     body = {
         "system_instruction": {"parts": [{"text": instructions}]},
         "contents": [{"role": "user", "parts": [{"text": question}]}],
         "tools": [{"google_search": {}}],
     }
     async with httpx.AsyncClient(timeout=NATIVE_TIMEOUT) as c:
-        r = await c.post(url, headers={"x-goog-api-key": key, "Content-Type": "application/json"}, json=body)
+        r = await c.post(url, headers={**auth, "Content-Type": "application/json"}, json=body)
     if r.status_code >= 400:
         raise RuntimeError(f"HTTP {r.status_code}: {r.text[:300]}")
     data = r.json()
@@ -263,6 +270,7 @@ _SHAPE_LABELS = {
     "ollama": "Ollama 클라우드 web_search API",
     "anthropic": "Anthropic web_search",
     "gemini": "Gemini Google 검색 grounding",
+    "vertex": "Vertex AI Google 검색 grounding",
     "responses": "Responses API web_search",
     "vercel": "Vercel 게이트웨이 exa_search",
     "chat_options": "chat completions web_search_options",
@@ -275,9 +283,33 @@ _NATIVE_INSTRUCTIONS = (
 )
 
 
+def _runtime_agent(a: dict) -> dict:
+    """The agent config as the agent itself sends it: a Vertex service-account
+    JSON becomes an OAuth access token and a bare model name gets its
+    publisher (agent.py does the same). Without this the JSON went out as the
+    bearer and every shape came back 401 "Expected OAuth 2 access token"."""
+    if (a.get("provider") or "") == "codex":
+        return a
+    base, key = keys.runtime(str(a.get("baseUrl") or "").rstrip("/"), str(a.get("apiKey") or ""))
+    return {**a, "baseUrl": base, "apiKey": key, "model": providers.model_for(base, str(a.get("model") or ""))}
+
+
+def _vertex_generate_url(base: str, model: str) -> str:
+    """…/projects/P/locations/L/endpoints/openapi + 'google/gemini-x' ->
+    …/projects/P/locations/L/publishers/google/models/gemini-x:generateContent"""
+    root = base.rstrip("/")
+    if root.endswith("/endpoints/openapi"):
+        root = root[: -len("/endpoints/openapi")]
+    publisher, _, name = model.partition("/")
+    if not name:
+        publisher, name = "google", model
+    return f"{root}/publishers/{publisher}/models/{name}:generateContent"
+
+
 def _shape_candidates(a: dict) -> list[tuple[str, Callable[[str], Awaitable[str]]]]:
     """Ordered attempts for this endpoint. Host-specific first (they are
-    certain), then the OpenAI-compatible guesses on any host."""
+    certain), then the OpenAI-compatible guesses on any host. `a` is the
+    runtime config (see _runtime_agent)."""
     base = str(a.get("baseUrl") or "")
     host = _host(base)
     key = str(a.get("apiKey") or "")
@@ -285,6 +317,14 @@ def _shape_candidates(a: dict) -> list[tuple[str, Callable[[str], Awaitable[str]
     out: list[tuple[str, Callable[[str], Awaitable[str]]]] = []
     if (a.get("provider") or "") == "codex":
         out.append(("codex", lambda q: _codex_search(model, q, str(a.get("reasoning") or "low"))))
+        return out
+    if host.endswith("aiplatform.googleapis.com"):
+        # Only Google's own models ground on Google Search; Vertex's OpenAI
+        # surface has none of the guesses below, so this is the one shape.
+        if model.startswith("google/"):
+            url = _vertex_generate_url(base, model)
+            out.append(("vertex", lambda q: _grounded(url, {"Authorization": f"Bearer {key}"},
+                                                      _NATIVE_INSTRUCTIONS, q)))
         return out
     if host.endswith("ollama.com"):
         out.append(("ollama", lambda q: _ollama_search(key, q)))
@@ -301,8 +341,11 @@ def _shape_candidates(a: dict) -> list[tuple[str, Callable[[str], Awaitable[str]
 
 async def _native_probe(query: str, force: bool = False) -> tuple[str, str]:
     """Try the remembered shape, then the rest; store what worked."""
-    a = _agent_cfg()
+    a = await asyncio.to_thread(_runtime_agent, _agent_cfg())
     cands = _shape_candidates(a)
+    if not cands:
+        raise RuntimeError(f"Vertex 의 {a.get('model')} 에는 내장 검색이 없습니다 — Google(Gemini) 모델만 "
+                           "Google 검색을 씁니다. 웹 검색 툴을 'Gemini 보조 에이전트'나 '외부 검색 제공자'로 바꿔 주세요")
     remembered = str(_cfg().get("nativeShape") or "")
     order = cands
     if remembered and not force:

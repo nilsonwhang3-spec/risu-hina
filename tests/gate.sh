@@ -28,6 +28,7 @@ run "skill guidance upgrades" "$PY" tests/test_skill_guidance.py
 run "manual skill sync HTTP" "$PY" tests/test_skill_sync_http.py
 run "durable plans and learning review" "$PY" tests/test_workplan.py
 run "Vertex token renewal"    "$PY" tests/test_vertexauth.py
+run "Vertex web search/vision auth" "$PY" tests/test_websearch_vertex.py
 run "provider plan & hints"   "$PY" tests/test_providers.py
 run "history thinking ids"    "$PY" tests/test_history.py
 run "partial replace"         "$PY" tests/test_textedit.py
