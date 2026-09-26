@@ -71,6 +71,18 @@ initialize/tools/list/hina_status measured, and a real `claude -p` against `http
 Trap: the zone's Browser Integrity Check answers **403 error 1010 to the `Python-urllib` user agent** - curl,
 node and Claude Code pass; a Python probe must set its own User-Agent.
 
+**Ending with the panel (2026-09-27).** The switch sits in the title row left of the reload button (built once,
+updated from state, so it appears right after an install). X and the plugin unloading call deactivate. Closing
+the RisuAI window cannot send anything, so the backend ends it: the held poll gets the request's
+`is_disconnected` and ends the lease the moment the client drops (measured through the tunnel: under 1 s), the
+lease after a finished poll is 15 s, and a lapsed lease forgets the context. `pagehide` tries a deactivate too.
+
+**Review over MCP.** Decisions (채택/버림/대표) stay the user's, in the 검수 tab; over MCP the client reads them
+(`studio_group`), looks (`view_image` / `compare_images`), and writes AI suggestions (`suggest_selection`).
+For an `__mcp__` session `vision.view` always returns the pictures (the client's model sees them; our vision mode
+and native probe are about our agent) and skips the per-turn budget, which never reset without a panel turn.
+`studio_open` rides the poll as an `open` job and the plugin opens 검수 at that folder.
+
 **Tests.** `tests/test_mcp.py` (gate) speaks raw JSON-RPC; `plugin_smoke` `test_mcp_switch`; one run with real
 Claude Code (docs/06 §1-75). Open: the tunnel path (Cache Bypass for `/mcp` per the risk below), the 3.11 bundle.
 
