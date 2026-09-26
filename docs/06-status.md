@@ -1,6 +1,6 @@
-# 06. Implementation status — as of 2026-09-24 (v0.15.27, Risu Hina)
+# 06. Implementation status — as of 2026-09-27 (v0.15.28, Risu Hina)
 
-## unreleased (2026-09-27): §1-74 web search and vision helper on a Vertex key
+## 0.15.28 (2026-09-27): §1-74 web search and vision helper on a Vertex key
 
 - **Field report:** native web search on a Vertex agent failed every shape
   with `401 ... Expected OAuth 2 access token` (Responses `web_search`,
