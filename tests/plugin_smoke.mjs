@@ -14,7 +14,8 @@
  *   node tests/plugin_smoke.mjs
  */
 import { readFileSync, existsSync, mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { cpSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -50,6 +51,13 @@ async function startBackend() {
   const data = mkdtempSync(join(tmpdir(), 'risuhina-plugin-'));
   let py = resolve(ROOT, 'pyserver/.venv/Scripts/python.exe');
   if (!existsSync(py)) py = 'python';
+  // The MCP add-on, when tests/test_mcp.py has cached an install: seeded so
+  // the picker's switch exists. Without it the smoke checks its absence.
+  const tag = spawnSync(py, ['-c', "import sys;print(f'py{sys.version_info.major}{sys.version_info.minor}')"],
+    { encoding: 'utf8' }).stdout.trim();
+  const mcpCache = resolve(ROOT, '.cache/mcp-addon', tag);
+  const mcpSeeded = !!tag && existsSync(mcpCache);
+  if (mcpSeeded) cpSync(mcpCache, join(data, 'addons', 'mcp', tag), { recursive: true });
   const proc = spawn(py, [resolve(ROOT, 'pyserver/run.py')], {
     cwd: resolve(ROOT, 'pyserver'),
     env: {
@@ -73,7 +81,7 @@ async function startBackend() {
     try {
       const r = await fetch(url + '/health');
       const j = await r.json();
-      if (j.service === 'risu-hina') return { url, port, data, proc, token: 'plugin-smoke-token', log: () => log };
+      if (j.service === 'risu-hina') return { url, port, data, proc, token: 'plugin-smoke-token', log: () => log, mcpSeeded };
     } catch { await new Promise((r) => setTimeout(r, 200)); }
   }
   throw new Error('backend did not start:\n' + log);
@@ -1640,7 +1648,7 @@ document.getElementById('open-settings')
   ?.dispatchEvent(new window.Event('click', { bubbles: true }));
 await settle(900);
 check('the gear shows as pressed', document.getElementById('open-settings')?.classList.contains('on'));
-check('settings is split into sub-tabs', document.querySelectorAll('.subtab').length === 5,
+check('settings is split into sub-tabs', document.querySelectorAll('.subtab').length === 6,
       [...document.querySelectorAll('.subtab')].map((t) => t.textContent).join(','));
 check('connection card present', !!findButton(document, '저장하고 연결'));
 check('diagnostic present', !!findButton(document, '연결 진단'));
@@ -3214,6 +3222,54 @@ console.log('\ntest_bot_switch_resets_workspace_and_agent');
   check('new bot loads its own conversation context', sessionReads.length > 0 && sessionReads.every(key => key === switchedWorkspace?.chats[0]?.chatKey), JSON.stringify(sessionReads));
   check('workspace selects the new bot project', /New Switch Bot/.test(document.querySelector('.panel.active .filepad')?.textContent || ''));
   check('new bot project files are visible', /new-bot.md/.test(document.querySelector('.panel.active .filepad')?.textContent || ''));
+}
+
+console.log('\ntest_mcp_switch');
+{
+  const mcpStatus = async () => (await fetch(backend.url + '/mcp/status', {
+    method: 'POST', headers: { Authorization: 'Bearer ' + backend.token, 'Content-Type': 'application/json' }, body: '{}',
+  })).json();
+  const openAdvanced = async () => {
+    document.getElementById('open-settings')?.dispatchEvent(new window.Event('click', { bubbles: true }));
+    await settle(300);
+    clickButton(document, '고급 기능');
+    await settle(1500);
+  };
+  const closeSettings = async () => {
+    document.getElementById('open-settings')?.dispatchEvent(new window.Event('click', { bubbles: true }));
+    await settle(300);
+  };
+  clickById(document, 'tab-chats');
+  await settle(600);
+  if (!backend.mcpSeeded) {
+    console.log('  (no cached add-on - run tests/test_mcp.py once to cover the switch)');
+    check('no MCP switch without the add-on', !findButton(document, 'MCP 활성화'));
+    await openAdvanced();
+    check('advanced tab offers the install', !!findButton(document, 'MCP 설치'));
+    await closeSettings();
+  } else {
+    const sw = findButton(document, 'MCP 활성화');
+    check('MCP switch sits on the picker', !!sw && !!sw.closest('.botcard'));
+    sw?.dispatchEvent(new window.Event('click', { bubbles: true }));
+    await settle(900);
+    let st = await mcpStatus();
+    check('the switch activates the bridge with this chat',
+          st.bridge?.active === true && !!st.bridge?.context?.chatKey && st.bridge?.polling === true,
+          JSON.stringify(st.bridge).slice(0, 300));
+    check('the switch says it is on', !!findButton(document, 'MCP 켜짐'));
+    await openAdvanced();
+    check('advanced tab shows the claude mcp add command',
+          /claude mcp add --transport http risu-hina .*\/mcp/.test(document.body.textContent || ''),
+          (document.querySelector('.mcpcmd')?.textContent || '(no command box)').slice(0, 160));
+    check('the command hides the token until copied', !/hmcp_/.test(document.querySelector('.mcpcmd')?.textContent || 'x'));
+    await closeSettings();
+    clickById(document, 'tab-chats');
+    await settle(400);
+    findButton(document, 'MCP 켜짐')?.dispatchEvent(new window.Event('click', { bubbles: true }));
+    await settle(800);
+    st = await mcpStatus();
+    check('switching off ends the lease', st.bridge?.active === false, JSON.stringify(st.bridge).slice(0, 200));
+  }
 }
 
 console.log('\ntest_no_character_selected');

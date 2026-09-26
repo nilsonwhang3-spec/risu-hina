@@ -1,7 +1,53 @@
-# 08. Reaching the backend from outside RisuAI — an MCP surface (future, not started)
+# 08. Reaching the backend from outside RisuAI — an MCP surface
 
-2026-08-29. A design discussion, written down so the next session does not re-derive it. **Nothing here is built**,
-and the conclusion of the first half is "do not build it". The second half is the one worth picking up.
+**2026-09-27: built (§1-75, unreleased). §0 is what exists; §1-4 are the 2026-08-29 design discussion it came
+from, kept because §1's host constraints still decide everything.**
+
+## 0. As built
+
+**User flow.** Remote PC runs the backend (behind a domain / tunnel) → in local RisuAI, 설정 → 고급 기능 →
+**MCP 설치** (once) → copy the `claude mcp add --transport http risu-hina <url>/mcp --header "Authorization: Bearer
+hmcp_…"` line into Claude Code (once) → on the picker (봇/챗 첫 화면) press **MCP 활성화** beside 봇 편집 and leave
+the panel open → Claude Code calls the tools. The first-half conclusion below ("a relay needs a RisuAI tab open,
+so do not build a second UI") is answered by not building a second UI: the panel stays the place where proposals
+are approved and 반영 happens; MCP only adds a caller.
+
+**The add-on (`mcpaddon.py`).** Not in the release zips. `pip install --only-binary=:all: --target
+<data>/addons/mcp/py3XX.new -c constraints.txt mcp==2.2.0`, where the constraints pin every distribution the running
+interpreter has (so pip cannot pick a starlette FastAPI refuses); on success the folder is swapped in, copies of
+packages the bundle already has at the same version are deleted, and `site.addsitedir` loads it (runs pywin32's
+`.pth`, appends - bundle packages win). Measured: 38 s, ~30 packages. It lives under `data/`, so an update that
+replaces `python/` does not lose it; a new Python minor shows 재설치 필요 (the folder name is the ABI tag). Removal
+while loaded writes `REMOVE_ON_START` (Windows locks loaded `.pyd`s) and startup sweeps it.
+
+**The route (`mcpserver.py`).** One exact `Route("/mcp")` inserted ahead of the catch-all dispatcher, so every
+`/mcp/...` REST route is still an ordinary dispatcher route behind the backend token. Behind it: a bearer gate
+with **its own token** (`data/mcp_token.txt`, `hmcp_…`, rotate = cut off every client), **required on loopback
+too** — a same-host tunnel makes every request loopback, and the backend token is exempt there. Then the SDK's
+lowlevel `Server` + a stateless `StreamableHTTPSessionManager` with SSE responses (sse-starlette pings every 15 s,
+which is what keeps a tunnel's ~100 s idle limit away from a long `studio_generate`).
+
+Tools = the in-panel agent's toolset (`agent.build(model=TestModel())`, so no agent preset is needed and our
+model is never called), invoked through the pydantic-ai toolset with a real `RunContext(deps=Deps(...))` — same
+validation, same approval queue, same `ModelRetry` text. Left out: `review_learning read_plan update_plan
+recall_work save_work_state compact_context` (the panel conversation's own bookkeeping), `propose_open_tab`
+(a UI move), `run_shell pip_install` (their permit prompt only shows in a panel conversation). Added:
+`hina_status` (which bot/chat, switch state, queue counts — works with the switch off) and `hina_guide` (the
+agent's INSTRUCTIONS + preset + skills text). `Deps.mode = ''`: no screen gate. `Deps.session_id` is a hidden
+per-chat session titled `__mcp__` (`session.latest` / `list_all` skip it) so proposals, clipped outputs and jobs
+have a session to hang off.
+
+**The bridge (`mcpbridge.py`, plugin `mcp.ts`).** The switch starts a long poll (`POST /mcp/bridge/poll`, held
+≤ 20 s, re-issued immediately — no timer, so a hidden tab's throttling does not drop it). It carries the panel's
+context (charKey, chatKey, names, screen); a context change is also pushed at once through `/mcp/bridge/activate`.
+Lease = a poll in flight or ended < 45 s ago; tool calls outside it return an error telling the client to turn the
+switch on. The poll returns early when (a) a host job is queued — today `write_card_to_risu`'s card save
+(`session.push_stream_event` diverts `card-writeback` for `__mcp__` sessions), which the plugin runs with the
+existing `requestedCardWriteback` — or (b) the pending-proposal fingerprint changed, so the agent pane and the
+bars refresh their counts. Not persisted: a plugin reload leaves the switch off.
+
+**Tests.** `tests/test_mcp.py` (gate) speaks raw JSON-RPC; `plugin_smoke` `test_mcp_switch`; one run with real
+Claude Code (docs/06 §1-75). Open: the tunnel path (Cache Bypass for `/mcp` per the risk below), the 3.11 bundle.
 
 The question that started it: the plugin reads RisuAI and pushes to the backend, and the backend pushes back the
 same way. Could the plugin instead become an **API relay**, so that a browser or an IDE talks to

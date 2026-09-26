@@ -38,6 +38,8 @@ export interface HealthInfo {
   workspaces?: number;
   /** The global file space's root path. */
   space?: string;
+  /** The optional MCP add-on (docs/08): loaded, /mcp mounted, a panel holding the switch. */
+  mcp?: { loaded: boolean; mounted: boolean; active: boolean };
 }
 
 export type RouteKind = 'unknown' | 'direct' | 'blocked';

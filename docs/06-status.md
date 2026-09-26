@@ -1,5 +1,35 @@
 # 06. Implementation status — as of 2026-09-27 (v0.15.28, Risu Hina)
 
+## unreleased (2026-09-27): §1-75 MCP — Claude Code drives the panel's bot
+
+- **Ask (user):** install Risu Hina on a remote PC behind a domain, open the
+  panel in local RisuAI, press 'MCP 활성화' and keep the screen open, then call
+  it from a local Claude Code. `mcp` must NOT go into the release bundle: an
+  opt-in 설정 → 고급 기능 → MCP 설치 installs it into the backend install, and
+  the switch appears on the 봇/챗 first screen only after that.
+- **Built (design and wire details in `docs/08`):** `mcpaddon.py` (pip
+  `--target <data>/addons/mcp/<pytag>` with every bundled package pinned as a
+  constraint, pinned `mcp==2.2.0`, duplicates pruned, `site.addsitedir` at
+  startup, survives interpreter swaps, removal-on-restart when loaded),
+  `mcpserver.py` (exact route `/mcp`, stateless Streamable HTTP with SSE, the
+  in-panel agent's toolset minus 9 panel-only tools + `hina_status` /
+  `hina_guide`, stand-in model so no agent preset is needed, its own bearer
+  token that is required even on loopback), `mcpbridge.py` (the panel's long
+  poll = lease + current bot/chat + host jobs; a requested card save reaches
+  the plugin through it). Plugin: `mcp.ts`, `ui/mcp-ui.ts` (the 고급 기능
+  sub-tab card: install/remove, external URL, token, `claude mcp add …` copy;
+  the picker switch beside 봇 편집), agent pane refreshes its proposal list
+  when the poll says the queue moved. Hidden `__mcp__` session per chat keeps
+  MCP work out of the panel's conversation list.
+- **Verified:** `tests/test_mcp.py` (in the gate: real pip install first run,
+  then cached in `.cache/mcp-addon/`; 31 checks incl. 401s, tool list, a
+  proposal landing in the queue, the card-save relay), plugin smoke
+  `test_mcp_switch` (6 checks), and once with a **real Claude Code**
+  (`claude -p --mcp-config`, client `claude-code`): hina_status → list_turns →
+  propose_lore_add, answered correctly and reported the proposal as awaiting
+  approval. Not yet tried through the Cloudflare tunnel or on the bundled
+  3.11 interpreter (its install goes to `addons/mcp/py311`).
+
 ## 0.15.28 (2026-09-27): §1-74 web search and vision helper on a Vertex key
 
 - **Field report:** native web search on a Vertex agent failed every shape
