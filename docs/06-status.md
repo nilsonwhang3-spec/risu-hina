@@ -1,5 +1,25 @@
 # 06. Implementation status — as of 2026-09-24 (v0.15.27, Risu Hina)
 
+## unreleased (2026-09-27): §1-74 web search and vision helper on a Vertex key
+
+- **Field report:** native web search on a Vertex agent failed every shape
+  with `401 ... Expected OAuth 2 access token` (Responses `web_search`,
+  Vercel `exa_search`, `web_search_options`).
+- **Cause:** §1-68 taught the agent to exchange the stored service-account
+  JSON for an OAuth token (`keys.runtime`) and to qualify the model
+  (`providers.model_for`), but `websearch._shape_candidates` read
+  `agent.apiKey` raw - the JSON itself went out as the bearer. The vision
+  helper (`vision.describe_with_helper`) had the same gap.
+- **Fix:** `websearch._runtime_agent` resolves token and model the way
+  agent.py does. A Vertex host gets its own shape, `vertex`:
+  `…/publishers/google/models/<m>:generateContent` with Google Search
+  grounding (the AI Studio body, shared through `_grounded`). The OpenAI
+  guesses are not tried on Vertex - its OpenAI surface has none of them - and
+  a non-Google model there gets one sentence pointing at the Gemini helper or
+  a search provider. The vision helper exchanges the key too.
+  `tests/test_websearch_vertex.py` (in the gate) pins both, no network.
+  Not yet checked against a live Vertex project.
+
 ## 0.15.27 (2026-09-24): §1-73 one bot's AI conversation pushed the agent off the screen
 
 - **Field report (after 0.15.26):** on the iPad in landscape the AI chat was

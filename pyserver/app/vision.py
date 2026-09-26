@@ -30,6 +30,7 @@ Two things this module is careful about, both learned from the design pass:
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import io
@@ -43,7 +44,7 @@ import zlib
 from pathlib import Path
 from typing import Any
 
-from . import config, files, keys, log
+from . import config, files, keys, log, providers
 
 try:  # Pillow is optional at runtime (files.thumb_bytes has the same stance)
     from PIL import Image, ImageFilter, ImageStat  # type: ignore
@@ -621,6 +622,10 @@ async def describe_with_helper(images: list[Loaded], question: str, instructions
     base, key, model = _helper()
     if not base:
         raise RuntimeError("helper base URL not set")
+    # A Vertex key is service-account JSON: exchange it and qualify the model,
+    # as the agent does, or the JSON goes out as the bearer (401).
+    base, key = await asyncio.to_thread(keys.runtime, base, key)
+    model = providers.model_for(base, model)
     parts: list[dict] = [{"type": "text", "text": question}]
     for i, img in enumerate(images, 1):
         if len(images) > 1:
