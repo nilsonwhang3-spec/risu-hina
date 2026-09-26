@@ -37,6 +37,13 @@ async function savedUrl(): Promise<string> {
   return (transport.config.url || '').replace(/\/+$/, '') + '/mcp';
 }
 
+/** Codex reads the bearer token from an environment variable, never inline. */
+const CODEX_ENV = 'RISUHINA_MCP_TOKEN';
+
+function codexCommand(url: string): string {
+  return `codex mcp add risu-hina --url ${url} --bearer-token-env-var ${CODEX_ENV}`;
+}
+
 function command(url: string, token: string): string {
   return `claude mcp add --transport http risu-hina ${url} --header "Authorization: Bearer ${token}"`;
 }
@@ -135,7 +142,11 @@ export function buildMcpCard(onMount?: (refresh: () => void) => void): HTMLEleme
     const tokenBox = el('input', { type: 'password', readonly: 'readonly' }) as HTMLInputElement;
     const cmd = el('pre', { class: 'mcpcmd', style: { whiteSpace: 'pre-wrap', wordBreak: 'break-all', userSelect: 'all' } });
     let token = '';
-    const sync = () => { cmd.textContent = command(url.value.trim(), token ? '••••••' : '<토큰>'); };
+    const codexCmd = el('pre', { class: 'mcpcmd mcpcodex', style: { whiteSpace: 'pre-wrap', wordBreak: 'break-all', userSelect: 'all' } });
+    const sync = () => {
+      cmd.textContent = command(url.value.trim(), token ? '••••••' : '<토큰>');
+      codexCmd.textContent = codexCommand(url.value.trim());
+    };
     try { token = await mcp.token(); tokenBox.value = token; } catch (e) { tokenBox.value = ''; statusLine.textContent += ' · 토큰을 읽지 못했습니다: ' + msg(e); }
     sync();
     url.addEventListener('change', async () => {
@@ -161,9 +172,25 @@ export function buildMcpCard(onMount?: (refresh: () => void) => void): HTMLEleme
     detail.appendChild(el('label', { class: 'field' }, [el('span', { text: 'MCP 주소 (MCP 클라이언트가 접속할 외부 주소)' }), url]));
     detail.appendChild(el('label', { class: 'field' }, [el('span', { text: 'MCP 토큰 (백엔드 토큰과 별개, 루프백에서도 항상 필요)' }), tokenBox]));
     detail.appendChild(el('div', { class: 'row' }, [show, rotate]));
+    const copyCodex = el('button', { class: 'primary tiny', text: 'Codex 명령 복사' });
+    copyCodex.addEventListener('click', () => {
+      copyCodex.textContent = copyToClipboard(codexCommand(url.value.trim())) ? '복사됨' : '복사 실패';
+      setTimeout(() => { copyCodex.textContent = 'Codex 명령 복사'; }, 1500);
+    });
+    const copyToken = el('button', { class: 'ghost tiny', text: '토큰 복사' });
+    copyToken.addEventListener('click', () => {
+      copyToken.textContent = token && copyToClipboard(token) ? '복사됨' : '복사 실패';
+      setTimeout(() => { copyToken.textContent = '토큰 복사'; }, 1500);
+    });
     detail.appendChild(el('div', { class: 'hint', style: { marginTop: '8px' }, text: 'Claude Code 에서 한 번 실행하세요:' }));
     detail.appendChild(cmd);
     detail.appendChild(el('div', { class: 'row' }, [copyCmd]));
+    detail.appendChild(el('div', { class: 'hint', style: { marginTop: '8px' } }, [
+      `Codex 는 토큰을 환경변수 ${CODEX_ENV} 로 읽습니다. 그 변수를 먼저 만들고(Windows: setx ${CODEX_ENV} "<토큰>" 뒤 새 터미널, `,
+      `macOS/Linux: 셸 설정에 export ${CODEX_ENV}="<토큰>") 한 번 실행하세요:`,
+    ]));
+    detail.appendChild(codexCmd);
+    detail.appendChild(el('div', { class: 'row' }, [copyCodex, copyToken]));
     detail.appendChild(el('div', { class: 'hint', style: { marginTop: '8px' } }, [
       '사용: 봇·챗 선택 화면(첫 화면)의 ‘MCP 활성화’를 누르고 이 화면을 열어 둔 채로 Claude Code 에서 부르세요. ',
       'MCP 는 패널에 열린 봇·챗에서만 동작합니다. 수정은 제안으로 들어오고, 이 패널이나 Claude Code 쪽(approve_proposals · approve_staged)에서 승인합니다. ',

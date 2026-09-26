@@ -12,6 +12,11 @@ the panel open → Claude Code calls the tools. The first-half conclusion below 
 so do not build a second UI") is answered by not building a second UI: the panel stays the place where proposals
 are approved and 반영 happens; MCP only adds a caller.
 
+**Codex.** Same server, measured 2026-09-27 with codex-cli 0.156.1 (`codex exec` with `-c mcp_servers.risu-hina.*`
+overrides): hina_status → hina_guide → load_skill → propose_lore_add → approve_proposals, entry in the working
+copy. Codex takes the bearer from an environment variable, so the card offers `codex mcp add risu-hina --url
+<url>/mcp --bearer-token-env-var RISUHINA_MCP_TOKEN` plus a 토큰 복사 button, and says to set the variable first.
+
 **The add-on (`mcpaddon.py`).** Not in the release zips. `pip install --only-binary=:all: --target
 <data>/addons/mcp/py3XX.new -c constraints.txt mcp==2.2.0`, where the constraints pin every distribution the running
 interpreter has (so pip cannot pick a starlette FastAPI refuses); on success the folder is swapped in, copies of
