@@ -3291,6 +3291,20 @@ console.log('\ntest_mcp_switch');
     st = await mcpStatus();
     check('switching off ends the lease', st.bridge?.active === false, JSON.stringify(st.bridge).slice(0, 200));
     check('the switch drops its sparkle when off', sw?.classList.contains('on') === false && /MCP 연결$/.test((sw?.textContent || '').trim()));
+    // X hides the iframe but the script keeps running: closing must switch MCP off.
+    sw?.dispatchEvent(new window.Event('click', { bubbles: true }));
+    await settle(900);
+    st = await mcpStatus();
+    check('switched on again before closing', st.bridge?.active === true, JSON.stringify(st.bridge).slice(0, 160));
+    const hideCalls = host.calls.filter((c) => c === 'hideContainer').length;
+    [...document.querySelectorAll('header button')].find((b) => b.title === '닫기')
+      ?.dispatchEvent(new window.Event('click', { bubbles: true }));
+    await settle(1200);
+    st = await mcpStatus();
+    check('X (닫기) switches MCP off', st.bridge?.active === false && sw?.classList.contains('on') === false,
+          JSON.stringify(st.bridge).slice(0, 160));
+    check('and still closes the panel', host.calls.filter((c) => c === 'hideContainer').length > hideCalls,
+          host.calls.slice(-5).join(','));
   }
 }
 

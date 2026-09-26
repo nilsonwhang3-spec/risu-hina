@@ -704,6 +704,13 @@ async def view(session_id: str | None, rels: list[str], question: str, *, label:
         return "No image path given."
     if len(rels) > max_images():
         return f"At most {max_images()} images per call (got {len(rels)}). Split the call."
+    from . import mcpbridge
+    if mcpbridge.is_mcp_session(session_id):
+        # An MCP client's model sees the pictures itself (Claude Code, Codex),
+        # so it always gets them - the vision mode and the native probe are
+        # about OUR agent model. And there is no turn to reset a per-turn
+        # budget, which used to refuse every call after the twelfth.
+        return await _view_for_mcp(rels, question)
     n = _take_call(session_id)
     if n is None:
         return (f"Vision budget for this turn is used up ({max_calls()} calls). Say so to the user and continue "
@@ -762,6 +769,34 @@ async def view(session_id: str | None, rels: list[str], question: str, *, label:
     return ToolReturn(
         return_value=(f"Image{'s' if len(loaded) > 1 else ''} attached below (call {n}/{max_calls()}). "
                       f"Question: {q}\n\n{numbers}"),
+        content=_image_content(loaded),
+    )
+
+
+async def _view_for_mcp(rels: list[str], question: str) -> Any:
+    from pydantic_ai.messages import ToolReturn
+    loaded: list[Loaded] = []
+    blocks: list[str] = []
+    for r in rels:
+        try:
+            img = load_image(r)
+        except VisionError as e:
+            blocks.append(f"{r}: cannot view — {e}")
+            continue
+        loaded.append(img)
+        try:
+            m = metrics(r)
+            d = near_duplicates(r) if len(rels) == 1 else []
+            blocks.append(fmt_metrics(m, d) + (f"\n({img.note})" if img.note else ""))
+        except Exception as e:  # noqa: BLE001
+            blocks.append(f"{r}: metrics failed — {type(e).__name__}: {str(e)[:120]}")
+    numbers = "\n\n".join(blocks)
+    if not loaded:
+        return numbers or "Nothing could be loaded."
+    q = question.strip()
+    return ToolReturn(
+        return_value=(f"Image{'s' if len(loaded) > 1 else ''} attached below."
+                      + (f" Question: {q}" if q else "") + f"\n\n{numbers}"),
         content=_image_content(loaded),
     )
 

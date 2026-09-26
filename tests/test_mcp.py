@@ -297,6 +297,73 @@ def main() -> int:
         err, text = res.get("r") or (True, "no result")
         check("the approval reports the panel's result", not err and "완료" in text and "RisuAI에 반영" in text, text[:300])
 
+        print("test_mcp_review")
+        import base64
+        import io
+        try:
+            from PIL import Image
+            buf = io.BytesIO()
+            Image.new("RGB", (64, 96), (200, 120, 90)).save(buf, "PNG")
+            png = buf.getvalue()
+        except ImportError:
+            png = b""
+        if png:
+            st, up = s.post("/files/upload", {"name": "a.png", "base64": base64.b64encode(png).decode(),
+                                              "dir": "studio/output/mcptest"})
+            check("test image uploaded", st == 200, f"{st} {str(up)[:200]}")
+            # The client's model sees the picture itself, whatever our vision
+            # mode is (off in this test backend), and past the per-turn cap.
+            kinds, last_err = set(), ""
+            for _ in range(14):
+                msg = m.call("tools/call", {"name": "view_image", "arguments": {"path": "studio/output/mcptest/a.png"}})
+                res = msg.get("result") or {}
+                kinds = {c.get("type") for c in res.get("content") or []}
+                if res.get("isError") or "image" not in kinds:
+                    last_err = json.dumps(res, ensure_ascii=False)[:300]
+                    break
+            check("view_image hands the picture to the client, 14 times in a row",
+                  "image" in kinds and not last_err, last_err or str(kinds))
+        else:
+            print("  (Pillow missing in the test runner - image checks skipped)")
+
+        # studio_open reaches the panel through the long poll.
+        out2: dict = {}
+        th_open = threading.Thread(target=lambda: out2.update(r=m.tool("studio_open", {"folder": "studio/output/mcptest"})))
+        th_open.start()
+        th_open.join(timeout=30)
+        st, body = s.post("/mcp/bridge/poll", {"context": ctx})
+        jobs = body.get("jobs") or []
+        check("studio_open is handed to the panel",
+              any(j.get("type") == "open" and j.get("screen") == "inspect" and j.get("folder") == "studio/output/mcptest"
+                  for j in jobs), str(body)[:300])
+
+        print("test_mcp_window_closed")
+        # A closing RisuAI window cannot say goodbye; it just drops the held
+        # poll. The backend must notice that, not wait out the lease.
+        import socket
+        s.post("/mcp/bridge/activate", {"context": ctx})
+        raw = json.dumps({"context": ctx}).encode()
+        sock = socket.create_connection(("127.0.0.1", s.port), timeout=10)
+        sock.sendall((f"POST /mcp/bridge/poll HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {s.token}\r\n"
+                      f"Content-Type: application/json\r\nContent-Length: {len(raw)}\r\n\r\n").encode() + raw)
+        time.sleep(1.0)
+        _, st1 = s.get("/mcp/status")
+        check("a held poll keeps the lease", (st1.get("bridge") or {}).get("active") is True, str(st1.get("bridge"))[:200])
+        sock.close()
+        t0 = time.time()
+        active = True
+        while time.time() - t0 < 8:
+            time.sleep(0.5)
+            _, st2 = s.get("/mcp/status")
+            active = (st2.get("bridge") or {}).get("active")
+            if active is False:
+                break
+        check("the dropped poll ends the lease within seconds", active is False, f"{time.time() - t0:.1f}s")
+        err, text = m.tool("read_card")
+        check("tools refuse once the window is gone", err and "MCP 연결" in text, text[:200])
+        err, text = m.tool("hina_status")
+        check("and hina_status names no bot then", not err and tk not in text, text[:200])
+
         st, body = s.post("/mcp/bridge/deactivate")
         check("deactivate", st == 200 and body.get("active") is False, str(body)[:200])
         err, text = m.tool("read_card")

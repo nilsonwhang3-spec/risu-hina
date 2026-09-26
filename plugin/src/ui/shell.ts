@@ -5,6 +5,7 @@
  * so switching tabs does not lose scroll position or an in-progress edit.
  */
 import { mcpHeaderSwitch } from './mcp-ui';
+import { mcp } from '../mcp';
 import { installFoldControls } from './panes';
 import './write-progress';
 import { reclamp } from './splitter';
@@ -440,6 +441,9 @@ export function buildShell(): void {
     // it (the browser closing is the one exit that cannot ask; the reopen
     // merge covers that one).
     if (!(await ensureResolved('닫기'))) return;
+    // Closing the panel ends MCP access: X hides the iframe but the script
+    // (and its long poll) would keep running, leaving access open unseen.
+    if (mcp.on) await mcp.deactivate();
     // A closed panel shows nothing: the studio's polls stop asking (§1-55).
     noteStudioLeft();
     try { await Risuai.hideContainer(); } catch { /* already hidden */ }

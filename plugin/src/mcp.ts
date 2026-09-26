@@ -42,7 +42,7 @@ export interface McpBridgeStatus {
 
 interface PollReply {
   enabled: boolean;
-  jobs: { type: string; id: string; charKey: string; chatKey: string; kind?: string }[];
+  jobs: { type: string; id: string; charKey: string; chatKey: string; kind?: string; screen?: string; folder?: string }[];
   pending?: { actions: number; staged: number; rev: string };
   lastCall?: McpBridgeStatus['lastCall'];
   calls?: number;
@@ -161,6 +161,11 @@ class McpBridge {
 
   private async run(job: PollReply['jobs'][number]): Promise<void> {
     if (job.type === 'host-action') return this.runHostAction(job);
+    // studio_open: the client asked for the 검수 tab at a folder.
+    if (job.type === 'open') {
+      if (job.screen === 'inspect' && job.folder) state.requestOpenStudio(String(job.folder));
+      return;
+    }
     if (job.type !== 'card-writeback') return;
     try {
       const said = await state.requestedCardWriteback(job.id, job.charKey, job.chatKey);
@@ -209,3 +214,12 @@ state.onChange(() => {
   sentContext = key;
   void transport.post('/mcp/bridge/activate', { context: ctx }).catch(() => { sentContext = ''; });
 });
+
+// Best effort when the RisuAI window itself closes: the request may not make
+// it out of a page that is going away. The backend does not rely on it - the
+// held poll's disconnect, or the 15s lease running out, switches MCP off.
+try {
+  window.addEventListener('pagehide', () => {
+    if (mcp.on) void transport.post('/mcp/bridge/deactivate', {}).catch(() => { /* page is gone */ });
+  });
+} catch { /* no window (tests) */ }

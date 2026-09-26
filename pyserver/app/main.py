@@ -2534,7 +2534,7 @@ def h_mcp_deactivate(arg: dict) -> dict:
 
 
 async def h_mcp_poll(arg: dict) -> dict:
-    return await mcpbridge.poll(arg.get("context") or {})
+    return await mcpbridge.poll(arg.get("context") or {}, arg.get("_disconnected"))
 
 
 ROUTES: dict[str, Handler] = {
@@ -3103,6 +3103,10 @@ async def dispatch(path: str, request: Request) -> Response:
             arg.update(parsed)
             log.debug("%s body %s", key, log.shape(parsed))
 
+    if key == "POST /mcp/bridge/poll":
+        # The long poll ends the MCP lease the moment its client goes away
+        # (the RisuAI window closed), instead of waiting it out.
+        arg["_disconnected"] = request.is_disconnected
     try:
         if inspect.iscoroutinefunction(handler):
             out = await handler(arg)
