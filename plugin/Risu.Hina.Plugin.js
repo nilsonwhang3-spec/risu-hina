@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.15.28
+//@display-name Risu Hina v0.15.29
 //@api 3.0
-//@version 0.15.28
+//@version 0.15.29
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -71,13 +71,13 @@
   }
   async function toError(res) {
     const body = await readJson(res);
-    let msg19 = body && typeof body === "object" && "error" in body ? String(body.error) : `HTTP ${res.status}`;
+    let msg20 = body && typeof body === "object" && "error" in body ? String(body.error) : `HTTP ${res.status}`;
     if (res.status === 401) {
-      msg19 = '\uD1A0\uD070\uC774 \uB9DE\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4. \uBC31\uC5D4\uB4DC PC \uC758 data/token.txt \uB0B4\uC6A9\uC744 \u2699 \u2192 \uC5F0\uACB0 \u2192 \uD1A0\uD070\uC5D0 \uB123\uACE0 "\uC800\uC7A5\uD558\uACE0 \uC5F0\uACB0"\uC744 \uB20C\uB7EC \uC8FC\uC138\uC694 (127.0.0.1 \uB85C \uC811\uC18D\uD560 \uB54C\uB294 \uBE44\uC6CC\uB3C4 \uB429\uB2C8\uB2E4).';
+      msg20 = '\uD1A0\uD070\uC774 \uB9DE\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4. \uBC31\uC5D4\uB4DC PC \uC758 data/token.txt \uB0B4\uC6A9\uC744 \u2699 \u2192 \uC5F0\uACB0 \u2192 \uD1A0\uD070\uC5D0 \uB123\uACE0 "\uC800\uC7A5\uD558\uACE0 \uC5F0\uACB0"\uC744 \uB20C\uB7EC \uC8FC\uC138\uC694 (127.0.0.1 \uB85C \uC811\uC18D\uD560 \uB54C\uB294 \uBE44\uC6CC\uB3C4 \uB429\uB2C8\uB2E4).';
     } else if (res.status === 429) {
-      msg19 = "\uD2C0\uB9B0 \uD1A0\uD070\uC774 \uC5EC\uB7EC \uBC88 \uAC70\uBD80\uB418\uC5B4 \uC7A0\uC2DC \uB9C9\uD614\uC2B5\uB2C8\uB2E4. 1\uBD84 \uB4A4 \uB2E4\uC2DC \uC2DC\uB3C4\uD574 \uC8FC\uC138\uC694.";
+      msg20 = "\uD2C0\uB9B0 \uD1A0\uD070\uC774 \uC5EC\uB7EC \uBC88 \uAC70\uBD80\uB418\uC5B4 \uC7A0\uC2DC \uB9C9\uD614\uC2B5\uB2C8\uB2E4. 1\uBD84 \uB4A4 \uB2E4\uC2DC \uC2DC\uB3C4\uD574 \uC8FC\uC138\uC694.";
     }
-    return new BackendError(res.status, msg19, body);
+    return new BackendError(res.status, msg20, body);
   }
   function clientLog(level, event, detail) {
     return transport.post("/clientlog", { level, event, detail }).then(() => void 0).catch(() => void 0);
@@ -181,7 +181,7 @@
           this.tokenSafe = true;
           this.lastHealth = body;
           this.probeInfo = "";
-          this.gate = versionGate("0.15.28", String(body.version || ""));
+          this.gate = versionGate("0.15.29", String(body.version || ""));
           return body;
         }
         /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -3150,12 +3150,12 @@ name: ${nm}
          * only exist inside this iframe. The result is reported back either way, so
          * a failure here does not leave a queue entry claiming success.
          */
-        async decideAction(id, approve, chatKey = "") {
+        async decideAction(id, approve, chatKey = "", mode2) {
           const r = await transport.post("/actions/decide", {
             chatKey: chatKey || this.activeChatKey,
             id,
             approve,
-            mode: this.activeTab === "studio" ? "studio" : this.editMode
+            mode: mode2 ?? (this.activeTab === "studio" ? "studio" : this.editMode)
           });
           if (!r.approved) return "\uAC70\uC808\uD588\uC2B5\uB2C8\uB2E4.";
           if (!r.host) {
@@ -7578,6 +7578,441 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
   init_host();
   init_assets();
   init_transport();
+
+  // src/ui/mcp-ui.ts
+  init_dom();
+  init_state();
+  init_transport();
+  init_host();
+
+  // src/mcp.ts
+  init_transport();
+  init_state();
+  var POLL_TIMEOUT_MS = 4e4;
+  var RETRY_MS = 3e3;
+  var McpBridge = class {
+    on = false;
+    error = "";
+    calls = 0;
+    lastCall = null;
+    pendingRev = "";
+    loopId = 0;
+    listeners = /* @__PURE__ */ new Set();
+    /** Called when a poll reports that the proposal queue changed. */
+    onPendingChanged = () => {
+    };
+    /** Where a finished host job is announced (a toast, set by the shell). */
+    onNotice = () => {
+    };
+    subscribe(fn) {
+      this.listeners.add(fn);
+      return () => this.listeners.delete(fn);
+    }
+    changed() {
+      for (const fn of this.listeners) {
+        try {
+          fn();
+        } catch {
+        }
+      }
+    }
+    /** Whether the backend has the add-on loaded and /mcp mounted. */
+    get available() {
+      return !!state.health?.mcp?.mounted;
+    }
+    async status() {
+      return await transport.post("/mcp/status", {});
+    }
+    async install() {
+      return await transport.post("/mcp/install", {});
+    }
+    async uninstall() {
+      if (this.on) await this.deactivate();
+      return await transport.post("/mcp/uninstall", {});
+    }
+    async token(rotate = false) {
+      const r = await transport.post("/mcp/token", rotate ? { rotate: true } : {});
+      return r.token;
+    }
+    context() {
+      const chat = state.workspace?.chats.find((c) => c.chatKey === state.activeChatKey);
+      return {
+        charKey: state.activeCharKey || "",
+        chatKey: state.activeChatKey || "",
+        botName: state.workspace?.characterName || String(state.character?.name || ""),
+        chatName: chat?.name || "",
+        mode: state.activeTab === "chats" ? "" : state.activeTab === "studio" ? "studio" : state.editMode
+      };
+    }
+    async activate() {
+      this.error = "";
+      await transport.post("/mcp/bridge/activate", { context: this.context() });
+      this.on = true;
+      this.changed();
+      void this.loop(++this.loopId);
+    }
+    async deactivate() {
+      this.on = false;
+      this.loopId++;
+      this.changed();
+      try {
+        await transport.post("/mcp/bridge/deactivate", {});
+      } catch {
+      }
+    }
+    async loop(id) {
+      while (this.on && id === this.loopId) {
+        try {
+          const r = await transport.post(
+            "/mcp/bridge/poll",
+            { context: { ...this.context(), pendingRev: this.pendingRev } },
+            POLL_TIMEOUT_MS
+          );
+          if (id !== this.loopId) return;
+          if (!r.enabled) {
+            this.on = false;
+            this.error = "\uBC31\uC5D4\uB4DC\uC5D0\uC11C MCP \uAC00 \uAEBC\uC84C\uC2B5\uB2C8\uB2E4. \uB2E4\uC2DC \uCF1C \uC8FC\uC138\uC694.";
+            this.changed();
+            return;
+          }
+          const hadError = !!this.error;
+          this.error = "";
+          const callsMoved = (r.calls ?? 0) !== this.calls;
+          this.calls = r.calls ?? this.calls;
+          this.lastCall = r.lastCall ?? this.lastCall;
+          const rev = r.pending?.rev ?? "";
+          if (rev !== this.pendingRev) {
+            const first = this.pendingRev === "";
+            this.pendingRev = rev;
+            if (!first) this.onPendingChanged();
+          }
+          for (const job of r.jobs || []) await this.run(job);
+          if (hadError || callsMoved) this.changed();
+        } catch (e) {
+          if (id !== this.loopId) return;
+          this.error = e instanceof Error ? e.message : String(e);
+          this.changed();
+          await new Promise((res) => setTimeout(res, RETRY_MS));
+        }
+      }
+    }
+    async run(job) {
+      if (job.type === "host-action") return this.runHostAction(job);
+      if (job.type !== "card-writeback") return;
+      try {
+        const said = await state.requestedCardWriteback(job.id, job.charKey, job.chatKey);
+        this.onNotice("MCP \uC694\uCCAD\uC73C\uB85C \uBC18\uC601: " + said, "ok");
+        this.onPendingChanged();
+      } catch (e) {
+        this.onNotice("MCP \uC694\uCCAD \uBC18\uC601 \uC2E4\uD328: " + (e instanceof Error ? e.message : String(e)), "err");
+      }
+    }
+    /**
+     * An approval from the MCP client of something only this iframe can do
+     * (반영, 사본 저장, 복제 봇): the same decideAction as the 승인·실행 button.
+     * A job for a bot or chat that is not open here is left pending - the
+     * backend tool times out and says so, and the proposal is not lost.
+     */
+    async runHostAction(job) {
+      if (job.charKey !== state.botKey || CHAT_HOST_KINDS.has(job.kind || "") && job.chatKey !== state.activeChatKey) {
+        this.onNotice("MCP \uC2B9\uC778 \uC694\uCCAD\uC744 \uAC74\uB108\uB6F0\uC5C8\uC2B5\uB2C8\uB2E4: \uC774 \uD328\uB110\uC5D0 \uC5F4\uB9B0 \uBD07\xB7\uCC57\uC758 \uC791\uC5C5\uC774 \uC544\uB2D9\uB2C8\uB2E4.", "err");
+        return;
+      }
+      try {
+        const said = await state.decideAction(job.id, true, job.chatKey, "");
+        this.onNotice("MCP \uC2B9\uC778\xB7\uC2E4\uD589: " + said, "ok");
+      } catch (e) {
+        this.onNotice("MCP \uC2B9\uC778 \uC2E4\uD589 \uC2E4\uD328: " + (e instanceof Error ? e.message : String(e)), "err");
+      }
+      this.onPendingChanged();
+    }
+  };
+  var CHAT_HOST_KINDS = /* @__PURE__ */ new Set(["host_writeback", "host_save_copy"]);
+  var mcp = new McpBridge();
+  var sentContext = "";
+  state.onChange(() => {
+    if (!mcp.on) {
+      sentContext = "";
+      return;
+    }
+    const ctx = mcp.context();
+    const key = JSON.stringify(ctx);
+    if (key === sentContext) return;
+    sentContext = key;
+    void transport.post("/mcp/bridge/activate", { context: ctx }).catch(() => {
+      sentContext = "";
+    });
+  });
+
+  // src/ui/mcp-ui.ts
+  var URL_KEY = "mcpUrl";
+  function msg4(e) {
+    return e instanceof Error ? e.message : String(e);
+  }
+  function mcpToast(text2, kind = "") {
+    let wrap = document.querySelector(".toastwrap");
+    if (!wrap) {
+      wrap = document.createElement("div");
+      wrap.className = "toastwrap";
+      document.body.appendChild(wrap);
+    }
+    const t = document.createElement("div");
+    t.className = "toast" + (kind ? " " + kind : "");
+    t.textContent = text2;
+    wrap.appendChild(t);
+    setTimeout(() => t.remove(), 4e3);
+  }
+  mcp.onNotice = mcpToast;
+  async function savedUrl() {
+    try {
+      const v = await Risuai.pluginStorage.getItem(URL_KEY);
+      if (typeof v === "string" && v.trim()) return v.trim();
+    } catch {
+    }
+    return (transport.config.url || "").replace(/\/+$/, "") + "/mcp";
+  }
+  var CODEX_ENV = "RISUHINA_MCP_TOKEN";
+  function codexCommand(url) {
+    return `codex mcp add risu-hina --url ${url} --bearer-token-env-var ${CODEX_ENV}`;
+  }
+  function command(url, token2) {
+    return `claude mcp add --transport http risu-hina ${url} --header "Authorization: Bearer ${token2}"`;
+  }
+  function ago(at) {
+    const s = Math.max(0, Math.round(Date.now() / 1e3 - at));
+    if (s < 60) return `${s}\uCD08 \uC804`;
+    if (s < 3600) return `${Math.round(s / 60)}\uBD84 \uC804`;
+    return `${Math.round(s / 3600)}\uC2DC\uAC04 \uC804`;
+  }
+  function buildMcpCard(onMount) {
+    const statusLine = el("div", { class: "hint" });
+    const actions = el("div", { class: "row" });
+    const detail = el("div");
+    const out = el("pre", { class: "hint mcpout", style: { display: "none", maxHeight: "200px", overflow: "auto", whiteSpace: "pre-wrap" } });
+    let timer = null;
+    const render = async () => {
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      clear(actions);
+      clear(detail);
+      if (!state.health) {
+        statusLine.textContent = "\uBC31\uC5D4\uB4DC\uC5D0 \uC5F0\uACB0\uB418\uBA74 \uD655\uC778\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4.";
+        return;
+      }
+      let st;
+      try {
+        st = await mcp.status();
+      } catch (e) {
+        statusLine.textContent = "\uC774 \uBC31\uC5D4\uB4DC\uB294 MCP \uB97C \uC9C0\uC6D0\uD558\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4 (\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8 \uD544\uC694): " + msg4(e);
+        return;
+      }
+      const a = st.addon;
+      if (st.bridge.mounted !== mcp.available) void state.connect();
+      if (a.job.running) {
+        statusLine.textContent = `\uC124\uCE58 \uC911\uC785\uB2C8\uB2E4\u2026 (${Math.round(Date.now() / 1e3 - a.job.startedAt)}\uCD08) \u2014 \uBCF4\uD1B5 1\uBD84 \uC548\uCABD\uC785\uB2C8\uB2E4.`;
+        timer = setTimeout(() => void render(), 2e3);
+        return;
+      }
+      if (a.job.ok === false) {
+        out.style.display = "";
+        out.textContent = (a.job.error || "") + "\n\n" + (a.job.output || "");
+      }
+      if (a.removalPending) {
+        statusLine.textContent = "\uC81C\uAC70 \uC608\uC57D\uB428 \u2014 \uBC31\uC5D4\uB4DC\uB97C \uB2E4\uC2DC \uC2DC\uC791\uD558\uBA74 \uC9C0\uC6CC\uC9D1\uB2C8\uB2E4.";
+        return;
+      }
+      const install = el("button", { class: "primary tiny", text: a.reinstallNeeded ? "MCP \uC7AC\uC124\uCE58" : "MCP \uC124\uCE58" });
+      install.addEventListener("click", async () => {
+        install.disabled = true;
+        out.style.display = "none";
+        try {
+          const r = await mcp.install();
+          if (!r.started) statusLine.textContent = r.reason || "\uC2DC\uC791\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4.";
+        } catch (e) {
+          statusLine.textContent = "\uC124\uCE58\uB97C \uC2DC\uC791\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg4(e);
+        }
+        await render();
+      });
+      if (!a.installed) {
+        statusLine.textContent = a.reinstallNeeded ? "\uBC31\uC5D4\uB4DC\uC758 \uD30C\uC774\uC36C\uC774 \uBC14\uB00C\uC5B4 \uB2E4\uC2DC \uC124\uCE58\uD574\uC57C \uD569\uB2C8\uB2E4." : "\uC124\uCE58\uB418\uC5B4 \uC788\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4. \uBC31\uC5D4\uB4DC \uC124\uCE58\uBCF8\uC5D0 mcp \uD328\uD0A4\uC9C0(\uC57D 30MB)\uB97C \uB0B4\uB824\uBC1B\uC544 \uC124\uCE58\uD569\uB2C8\uB2E4. \uB9B4\uB9AC\uC2A4 \uBC88\uB4E4\uC5D0\uB294 \uB4E4\uC5B4 \uC788\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4.";
+        actions.appendChild(install);
+        return;
+      }
+      if (!a.loaded) {
+        statusLine.textContent = `\uC124\uCE58\uB428 v${a.version} \u2014 \uBD88\uB7EC\uC624\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: ${a.loadError || "\uBC31\uC5D4\uB4DC\uB97C \uB2E4\uC2DC \uC2DC\uC791\uD574 \uC8FC\uC138\uC694."}`;
+      } else {
+        statusLine.textContent = `\uC124\uCE58\uB428 v${a.version} \xB7 /mcp \uB3D9\uC791 \uC911` + (st.bridge.active ? " \xB7 \uD328\uB110 \uD65C\uC131" : " \xB7 \uD328\uB110 \uAEBC\uC9D0");
+      }
+      const remove = el("button", { class: "ghost tiny", text: "\uC81C\uAC70" });
+      let armedRemove = false;
+      remove.addEventListener("click", async () => {
+        if (!armedRemove) {
+          armedRemove = true;
+          remove.textContent = "\uC815\uB9D0 \uC81C\uAC70";
+          setTimeout(() => {
+            armedRemove = false;
+            remove.textContent = "\uC81C\uAC70";
+          }, 3e3);
+          return;
+        }
+        remove.disabled = true;
+        try {
+          const r = await mcp.uninstall();
+          statusLine.textContent = r.restartNeeded ? "\uC81C\uAC70 \uC608\uC57D\uB428 \u2014 \uBC31\uC5D4\uB4DC\uB97C \uB2E4\uC2DC \uC2DC\uC791\uD558\uBA74 \uC9C0\uC6CC\uC9D1\uB2C8\uB2E4." : "\uC81C\uAC70\uD588\uC2B5\uB2C8\uB2E4.";
+          await state.connect();
+        } catch (e) {
+          statusLine.textContent = "\uC81C\uAC70\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg4(e);
+        }
+        await render();
+      });
+      actions.appendChild(remove);
+      if (!a.loaded) return;
+      const url = el("input", { value: await savedUrl(), placeholder: "https://risuhina.example.com/mcp" });
+      const tokenBox = el("input", { type: "password", readonly: "readonly" });
+      const cmd = el("pre", { class: "mcpcmd", style: { whiteSpace: "pre-wrap", wordBreak: "break-all", userSelect: "all" } });
+      let token2 = "";
+      const codexCmd = el("pre", { class: "mcpcmd mcpcodex", style: { whiteSpace: "pre-wrap", wordBreak: "break-all", userSelect: "all" } });
+      const sync = () => {
+        cmd.textContent = command(url.value.trim(), token2 ? "\u2022\u2022\u2022\u2022\u2022\u2022" : "<\uD1A0\uD070>");
+        codexCmd.textContent = codexCommand(url.value.trim());
+      };
+      try {
+        token2 = await mcp.token();
+        tokenBox.value = token2;
+      } catch (e) {
+        tokenBox.value = "";
+        statusLine.textContent += " \xB7 \uD1A0\uD070\uC744 \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg4(e);
+      }
+      sync();
+      url.addEventListener("change", async () => {
+        try {
+          await Risuai.pluginStorage.setItem(URL_KEY, url.value.trim());
+        } catch {
+        }
+        sync();
+      });
+      url.addEventListener("input", sync);
+      const show = el("button", { class: "ghost tiny", text: "\uBCF4\uAE30" });
+      show.addEventListener("click", () => {
+        tokenBox.type = tokenBox.type === "password" ? "text" : "password";
+        show.textContent = tokenBox.type === "password" ? "\uBCF4\uAE30" : "\uC228\uAE30\uAE30";
+      });
+      const copyCmd = el("button", { class: "primary tiny", text: "\uBA85\uB839 \uBCF5\uC0AC" });
+      copyCmd.addEventListener("click", () => {
+        copyCmd.textContent = copyToClipboard(command(url.value.trim(), token2)) ? "\uBCF5\uC0AC\uB428" : "\uBCF5\uC0AC \uC2E4\uD328";
+        setTimeout(() => {
+          copyCmd.textContent = "\uBA85\uB839 \uBCF5\uC0AC";
+        }, 1500);
+      });
+      const rotate = el("button", { class: "ghost tiny", text: "\uD1A0\uD070 \uC7AC\uBC1C\uAE09" });
+      let armedRotate = false;
+      rotate.addEventListener("click", async () => {
+        if (!armedRotate) {
+          armedRotate = true;
+          rotate.textContent = "\uC7AC\uBC1C\uAE09 (\uAE30\uC874 \uC5F0\uACB0 \uB04A\uAE40)";
+          setTimeout(() => {
+            armedRotate = false;
+            rotate.textContent = "\uD1A0\uD070 \uC7AC\uBC1C\uAE09";
+          }, 3e3);
+          return;
+        }
+        try {
+          token2 = await mcp.token(true);
+          tokenBox.value = token2;
+          sync();
+          mcpToast("\uD1A0\uD070\uC744 \uC7AC\uBC1C\uAE09\uD588\uC2B5\uB2C8\uB2E4. MCP \uD074\uB77C\uC774\uC5B8\uD2B8\uC5D0 \uC0C8 \uBA85\uB839\uC744 \uB2E4\uC2DC \uB4F1\uB85D\uD574 \uC8FC\uC138\uC694.", "ok");
+        } catch (e) {
+          mcpToast("\uC7AC\uBC1C\uAE09 \uC2E4\uD328: " + msg4(e), "err");
+        }
+        armedRotate = false;
+        rotate.textContent = "\uD1A0\uD070 \uC7AC\uBC1C\uAE09";
+      });
+      detail.appendChild(el("label", { class: "field" }, [el("span", { text: "MCP \uC8FC\uC18C (MCP \uD074\uB77C\uC774\uC5B8\uD2B8\uAC00 \uC811\uC18D\uD560 \uC678\uBD80 \uC8FC\uC18C)" }), url]));
+      detail.appendChild(el("label", { class: "field" }, [el("span", { text: "MCP \uD1A0\uD070 (\uBC31\uC5D4\uB4DC \uD1A0\uD070\uACFC \uBCC4\uAC1C, \uB8E8\uD504\uBC31\uC5D0\uC11C\uB3C4 \uD56D\uC0C1 \uD544\uC694)" }), tokenBox]));
+      detail.appendChild(el("div", { class: "row" }, [show, rotate]));
+      const copyCodex = el("button", { class: "primary tiny", text: "Codex \uBA85\uB839 \uBCF5\uC0AC" });
+      copyCodex.addEventListener("click", () => {
+        copyCodex.textContent = copyToClipboard(codexCommand(url.value.trim())) ? "\uBCF5\uC0AC\uB428" : "\uBCF5\uC0AC \uC2E4\uD328";
+        setTimeout(() => {
+          copyCodex.textContent = "Codex \uBA85\uB839 \uBCF5\uC0AC";
+        }, 1500);
+      });
+      const copyToken = el("button", { class: "ghost tiny", text: "\uD1A0\uD070 \uBCF5\uC0AC" });
+      copyToken.addEventListener("click", () => {
+        copyToken.textContent = token2 && copyToClipboard(token2) ? "\uBCF5\uC0AC\uB428" : "\uBCF5\uC0AC \uC2E4\uD328";
+        setTimeout(() => {
+          copyToken.textContent = "\uD1A0\uD070 \uBCF5\uC0AC";
+        }, 1500);
+      });
+      detail.appendChild(el("div", { class: "hint", style: { marginTop: "8px" }, text: "Claude Code \uC5D0\uC11C \uD55C \uBC88 \uC2E4\uD589\uD558\uC138\uC694:" }));
+      detail.appendChild(cmd);
+      detail.appendChild(el("div", { class: "row" }, [copyCmd]));
+      detail.appendChild(el("div", { class: "hint", style: { marginTop: "8px" } }, [
+        `Codex \uB294 \uD1A0\uD070\uC744 \uD658\uACBD\uBCC0\uC218 ${CODEX_ENV} \uB85C \uC77D\uC2B5\uB2C8\uB2E4. \uADF8 \uBCC0\uC218\uB97C \uBA3C\uC800 \uB9CC\uB4E4\uACE0(Windows: setx ${CODEX_ENV} "<\uD1A0\uD070>" \uB4A4 \uC0C8 \uD130\uBBF8\uB110, `,
+        `macOS/Linux: \uC178 \uC124\uC815\uC5D0 export ${CODEX_ENV}="<\uD1A0\uD070>") \uD55C \uBC88 \uC2E4\uD589\uD558\uC138\uC694:`
+      ]));
+      detail.appendChild(codexCmd);
+      detail.appendChild(el("div", { class: "row" }, [copyCodex, copyToken]));
+      detail.appendChild(el("div", { class: "hint", style: { marginTop: "8px" } }, [
+        "\uC0AC\uC6A9: \uBD07\xB7\uCC57 \uC120\uD0DD \uD654\uBA74(\uCCAB \uD654\uBA74)\uC758 \u2018MCP \uD65C\uC131\uD654\u2019\uB97C \uB204\uB974\uACE0 \uC774 \uD654\uBA74\uC744 \uC5F4\uC5B4 \uB454 \uCC44\uB85C Claude Code \uC5D0\uC11C \uBD80\uB974\uC138\uC694. ",
+        "MCP \uB294 \uD328\uB110\uC5D0 \uC5F4\uB9B0 \uBD07\xB7\uCC57\uC5D0\uC11C\uB9CC \uB3D9\uC791\uD569\uB2C8\uB2E4. \uC218\uC815\uC740 \uC81C\uC548\uC73C\uB85C \uB4E4\uC5B4\uC624\uACE0, \uC774 \uD328\uB110\uC774\uB098 Claude Code \uCABD(approve_proposals \xB7 approve_staged)\uC5D0\uC11C \uC2B9\uC778\uD569\uB2C8\uB2E4. ",
+        "RisuAI \uBC18\uC601\uB3C4 Claude Code \uC5D0\uC11C \uC2B9\uC778\uD558\uBA74 \uC774 \uD328\uB110\uC774 \uC2E4\uD589\uD569\uB2C8\uB2E4. ",
+        "\uD1A0\uD070\uC740 \uC774 \uBC31\uC5D4\uB4DC\uC5D0\uC11C \uD30C\uC774\uC36C \uC2E4\uD589(run_python)\uAE4C\uC9C0 \uD560 \uC218 \uC788\uB294 \uAD8C\uD55C\uC785\uB2C8\uB2E4 \u2014 \uACF5\uC720\uD558\uC9C0 \uB9C8\uC138\uC694."
+      ]));
+    };
+    onMount?.(() => void render());
+    void render();
+    return el("div", { class: "card" }, [
+      el("h2", { text: "MCP (Claude Code \uB4F1\uC5D0\uC11C \uBD80\uB974\uAE30)" }),
+      statusLine,
+      actions,
+      out,
+      detail
+    ]);
+  }
+  function mcpSwitch() {
+    if (!mcp.available && !mcp.on) return null;
+    const btn = el("button");
+    const line = el("span", { class: "hint mcpline" });
+    const syncLine = () => {
+      btn.className = (mcp.on ? "primary" : "ghost") + " tiny mcpswitch";
+      btn.textContent = mcp.on ? "MCP \uCF1C\uC9D0 \xB7 \uB044\uAE30" : "MCP \uD65C\uC131\uD654";
+      btn.title = mcp.on ? "MCP \uD074\uB77C\uC774\uC5B8\uD2B8\uAC00 \uC774 \uBD07\xB7\uCC57\uC5D0\uC11C \uC791\uC5C5\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4. \uC774 \uD654\uBA74\uC744 \uC5F4\uC5B4 \uB450\uC138\uC694." : "Claude Code \uB4F1 MCP \uD074\uB77C\uC774\uC5B8\uD2B8\uAC00 \uC9C0\uAE08 \uC5F4\uB9B0 \uBD07\xB7\uCC57\uC744 \uB2E4\uB8F0 \uC218 \uC788\uAC8C \uD569\uB2C8\uB2E4.";
+      if (!mcp.on) {
+        line.textContent = mcp.error;
+        return;
+      }
+      if (mcp.error) {
+        line.textContent = "\uC5F0\uACB0 \uC7AC\uC2DC\uB3C4 \uC911: " + mcp.error;
+        return;
+      }
+      line.textContent = mcp.lastCall ? `\uD638\uCD9C ${mcp.calls}\uD68C \xB7 \uB9C8\uC9C0\uB9C9 ${mcp.lastCall.tool} ${ago(mcp.lastCall.at)}` : "\uB300\uAE30 \uC911 \u2014 \uD654\uBA74\uC744 \uC5F4\uC5B4 \uB450\uC138\uC694";
+    };
+    syncLine();
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      try {
+        if (mcp.on) await mcp.deactivate();
+        else await mcp.activate();
+      } catch (e) {
+        mcpToast("MCP \uB97C \uCF1C\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg4(e), "err");
+      }
+      btn.disabled = false;
+      syncLine();
+    });
+    const off = mcp.subscribe(() => {
+      if (!btn.isConnected) {
+        off();
+        return;
+      }
+      syncLine();
+    });
+    return el("span", { class: "mcpswitchwrap" }, [btn, line]);
+  }
+
+  // src/ui/tab-chats.ts
   function botSnapshots(editBot) {
     const wrap = el("div");
     if (!state.activeCharKey) return wrap;
@@ -7739,7 +8174,8 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         el("div", { class: "botname", text: String(char.name || "(\uC774\uB984 \uC5C6\uC74C)") }),
         el("div", { class: "hint", text: `\uCC57 ${liveChats.length}\uAC1C` + (folders.length ? ` \xB7 \uD3F4\uB354 ${folders.length}\uAC1C` : "") }),
         assetSyncLine(),
-        el("div", { class: "row", style: { marginTop: "8px" } }, [editBot]),
+        // 'MCP 활성화' sits beside 봇 편집 once the add-on is installed (설정 → 고급 기능).
+        el("div", { class: "row", style: { marginTop: "8px" } }, [editBot, mcpSwitch()]),
         el("div", { class: "hint", style: { marginTop: "6px" } }, [
           "\uB2E4\uB978 \uBD07\uC744 \uD3B8\uC9D1\uD558\uC2DC\uB824\uBA74 RisuAI\uC5D0\uC11C \uADF8 \uBD07\uC744 \uC5F4\uACE0 \u{1F504} \uB97C \uB20C\uB7EC \uC8FC\uC138\uC694."
         ])
@@ -8275,7 +8711,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         } catch (e) {
           clear(chip);
           chip.classList.add("bad");
-          chip.appendChild(el("span", { text: `${file.name} \u2014 ${msg4(e)}` }));
+          chip.appendChild(el("span", { text: `${file.name} \u2014 ${msg5(e)}` }));
         }
       }
     }
@@ -8534,8 +8970,8 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           );
           return true;
         } catch (e) {
-          if (!quiet) this.hooks.notice("\uC2E4\uD589\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg4(e), "err");
-          this.note("\u2716 \uC2E4\uD589 \uC2E4\uD328: " + a.summary + " \u2014 " + msg4(e), "err");
+          if (!quiet) this.hooks.notice("\uC2E4\uD589\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg5(e), "err");
+          this.note("\u2716 \uC2E4\uD589 \uC2E4\uD328: " + a.summary + " \u2014 " + msg5(e), "err");
           return false;
         }
       };
@@ -8618,7 +9054,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         await this.render();
         this.hooks.notice("\uC0C8 \uB300\uD654\uB97C \uC2DC\uC791\uD588\uC2B5\uB2C8\uB2E4.", "ok");
       } catch (e) {
-        this.hooks.notice("\uC0C8 \uB300\uD654\uB97C \uC2DC\uC791\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg4(e), "err");
+        this.hooks.notice("\uC0C8 \uB300\uD654\uB97C \uC2DC\uC791\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg5(e), "err");
       }
     }
     async openHistory() {
@@ -8649,7 +9085,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         }
       } catch (e) {
         clear(body);
-        body.appendChild(el("div", { class: "hint", text: msg4(e) }));
+        body.appendChild(el("div", { class: "hint", text: msg5(e) }));
       }
     }
     /** Interval id for the elapsed clock, so a teardown can stop it. */
@@ -8791,7 +9227,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
             card2.classList.add(allow2 ? "allowed" : "denied");
             card2.appendChild(el("div", { class: "hint", text: allow2 ? always2 ? "\uD5C8\uC6A9 (\uC774\uBC88 \uD134 \uB3D9\uC548 \uACC4\uC18D \uD5C8\uC6A9)" : "\uD5C8\uC6A9" : "\uAC70\uBD80" }));
           } catch (e) {
-            card2.appendChild(el("div", { class: "notice err", text: msg4(e) }));
+            card2.appendChild(el("div", { class: "notice err", text: msg5(e) }));
           }
         };
         const allow = el("button", { class: "primary tiny", text: "\uD5C8\uC6A9" });
@@ -9023,7 +9459,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         }
       } catch (e) {
         finish("\uC911\uB2E8\uB428");
-        bubble.appendChild(el("div", { class: "notice err", text: msg4(e) }));
+        bubble.appendChild(el("div", { class: "notice err", text: msg5(e) }));
         if (!abort.signal.aborted) {
           bubble.appendChild(el("div", { class: "hint", text: "\uC5F0\uACB0\uC774 \uB04A\uACBC\uC2B5\uB2C8\uB2E4. \uBC31\uC5D4\uB4DC\uC5D0\uC11C\uB294 \uC774 \uC694\uCCAD\uC774 \uACC4\uC18D \uC9C4\uD589 \uC911\uC77C \uC218 \uC788\uC2B5\uB2C8\uB2E4 \u2014 \uB2E4\uC74C \uBA54\uC2DC\uC9C0\uB97C \uBCF4\uB0B4\uBA74 \uADF8 \uD134\uC744 \uBA48\uCD94\uACE0, \uB04A\uAE34 \uC694\uCCAD\uAE4C\uC9C0 \uB300\uD654\uC5D0 \uB0A8\uAE34 \uCC44 \uC774\uC5B4\uAC11\uB2C8\uB2E4." }));
         }
@@ -9079,6 +9515,10 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       fold2.dataset.n = String(n);
       fold2.textContent = `\uC774\uC804 \uD56D\uBAA9 ${n}\uAC1C\uB97C \uC811\uC5C8\uC2B5\uB2C8\uB2E4 (\uBA54\uBAA8\uB9AC) \u2014 \uB300\uD654 \uBAA9\uB85D\uC5D0\uC11C \uC5F4\uBA74 \uB2E4\uC2DC \uBCFC \uC218 \uC788\uC2B5\uB2C8\uB2E4`;
     }
+    /** Re-read the proposal queues (an MCP client added to them). */
+    refreshPending() {
+      void this.refreshStaged();
+    }
     async refreshStaged() {
       if (this.destroyed) return;
       await Promise.all([state.refreshChanges(), state.refreshBotChanges()]);
@@ -9113,8 +9553,8 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           await this.refreshStaged();
           await this.hooks.onApplied();
         } catch (e) {
-          this.hooks.notice("\uC801\uC6A9\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg4(e), "err");
-          this.note("\u2716 \uC801\uC6A9 \uC2E4\uD328: " + msg4(e), "err");
+          this.hooks.notice("\uC801\uC6A9\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg5(e), "err");
+          this.note("\u2716 \uC801\uC6A9 \uC2E4\uD328: " + msg5(e), "err");
         } finally {
           approve.disabled = false;
           approve.textContent = was;
@@ -9128,7 +9568,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           this.hooks.notice("\uC81C\uC548\uC744 \uAC70\uBD80\uD588\uC2B5\uB2C8\uB2E4.", "ok");
           await this.refreshStaged();
         } catch (e) {
-          this.hooks.notice("\uAC70\uBD80\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg4(e), "err");
+          this.hooks.notice("\uAC70\uBD80\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg5(e), "err");
         } finally {
           reject.disabled = false;
         }
@@ -9262,7 +9702,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         if (this.destroyed) return;
         this.setPlan(await state.workPlan(latest.mode === "plan" ? "execute" : "plan", latest.revision));
       } catch (e) {
-        this.hooks.notice(msg4(e), "err");
+        this.hooks.notice(msg5(e), "err");
       } finally {
         this.modeButton.disabled = false;
         this.send.disabled = sendDisabled;
@@ -9318,7 +9758,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)}KB`;
     return `${(n / 1024 / 1024).toFixed(1)}MB`;
   }
-  function msg4(e) {
+  function msg5(e) {
     return e instanceof Error ? e.message : String(e);
   }
   function fmtTok(v) {
@@ -9360,6 +9800,10 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     state.promptRequest = null;
     if (!agentPanel().sendText(text2)) toastBusy();
   });
+  mcp.onPendingChanged = () => {
+    panel?.refreshPending();
+    state.bump();
+  };
   function toastBusy() {
     let wrap = document.querySelector(".toastwrap");
     if (!wrap) {
@@ -9968,8 +10412,8 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           try {
             await state.editTurn(t.msgId, t.body, next);
           } catch (e) {
-            notice("\uC218\uC815\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg5(e), "err");
-            void clientLog("error", "turn edit failed", { msgId: t.msgId, error: msg5(e) });
+            notice("\uC218\uC815\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg6(e), "err");
+            void clientLog("error", "turn edit failed", { msgId: t.msgId, error: msg6(e) });
           }
         }
       });
@@ -10048,7 +10492,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       if (noticeMount2) clear(noticeMount2);
     }, 9e3);
   }
-  function msg5(e) {
+  function msg6(e) {
     return e instanceof Error ? e.message : String(e);
   }
   function visibleTurns() {
@@ -10319,7 +10763,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       try {
         setPreview(await state.bulk(params()));
       } catch (e) {
-        summary.textContent = msg5(e);
+        summary.textContent = msg6(e);
         setPreview(null);
       } finally {
         previewBtn.disabled = false;
@@ -10334,8 +10778,8 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         await state.loadTurns();
         notice(`${r.applied}\uAC1C \uD134\uC744 \uBC14\uAFE8\uC2B5\uB2C8\uB2E4. \uB418\uB3CC\uB9AC\uC2DC\uB824\uBA74 \u{1F558} \uBC84\uC804\uC758 \uC2A4\uB0C5\uC0F7\uC744 \uC4F0\uC2DC\uBA74 \uB429\uB2C8\uB2E4.`, "ok");
       } catch (e) {
-        void clientLog("error", "find/replace apply failed", { error: msg5(e) });
-        notice("\uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg5(e), "err");
+        void clientLog("error", "find/replace apply failed", { error: msg6(e) });
+        notice("\uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg6(e), "err");
       }
     });
     clearBtn.addEventListener("click", () => setPreview(null));
@@ -10391,8 +10835,8 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         setPreview(null);
         notice(`\uD134 ${r[0]}~${r[1]} \uC744 \uC9C0\uC6E0\uC2B5\uB2C8\uB2E4. \uD558\uC774\uD30C \uC694\uC57D\uC774 \uC9C0\uC6CC\uC9C4 \uD134\uC744 \uC778\uC6A9\uD558\uACE0 \uC788\uC73C\uBA74 \uBC18\uC601\uD560 \uB54C \uC54C\uB824 \uB4DC\uB9BD\uB2C8\uB2E4.`, "ok");
       } catch (e) {
-        void clientLog("error", "deleteRange failed", { range: r, error: msg5(e) });
-        notice("\uC0AD\uC81C\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg5(e), "err");
+        void clientLog("error", "deleteRange failed", { range: r, error: msg6(e) });
+        notice("\uC0AD\uC81C\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg6(e), "err");
       }
     });
     clearBtn.addEventListener("click", () => setPreview(null));
@@ -10411,7 +10855,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const r = await state.exportMarkdown();
         download(r.filename, r.markdown, "text/markdown;charset=utf-8");
       } catch (e) {
-        notice("\uB0B4\uBCF4\uB0B4\uAE30\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg5(e), "err");
+        notice("\uB0B4\uBCF4\uB0B4\uAE30\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg6(e), "err");
       }
     });
     const rc = el("button", { text: "risuChat \uB0B4\uB824\uBC1B\uAE30" });
@@ -10420,7 +10864,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const r = await state.exportRisuchat();
         download(r.filename, JSON.stringify(r.envelope), "application/json");
       } catch (e) {
-        notice("\uB0B4\uBCF4\uB0B4\uAE30\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg5(e), "err");
+        notice("\uB0B4\uBCF4\uB0B4\uAE30\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg6(e), "err");
       }
     });
     const cb = el("button", { class: "ghost", text: "md \uD074\uB9BD\uBCF4\uB4DC \uBCF5\uC0AC" });
@@ -10430,7 +10874,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const ok = copyToClipboard(r.markdown);
         notice(ok ? "\uD074\uB9BD\uBCF4\uB4DC\uC5D0 \uBCF5\uC0AC\uD588\uC2B5\uB2C8\uB2E4." : "\uBCF5\uC0AC\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4.", ok ? "ok" : "err");
       } catch (e) {
-        notice("\uBCF5\uC0AC\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg5(e), "err");
+        notice("\uBCF5\uC0AC\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg6(e), "err");
       }
     });
     return el("div", { class: "card" }, [
@@ -10567,7 +11011,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       pane.centre.appendChild(viewMount);
       installDrop(pane.centre, { into: () => uploadTarget(), onFiles: (path, files) => void uploadMany(files, path), onMove: (path, sources) => void moveSelected(sources, path) });
       for (const target of [pane.left, pane.centre]) target.addEventListener("file-drop-error", (ev) => {
-        notice2("\uB4DC\uB86D\uD55C \uD30C\uC77C\uC744 \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg6(ev.detail) + " \xB7 \uD30C\uC77C \uC62C\uB9AC\uAE30 \uBC84\uD2BC\uC73C\uB85C \uB2E4\uC2DC \uC120\uD0DD\uD574 \uC8FC\uC138\uC694.", "err");
+        notice2("\uB4DC\uB86D\uD55C \uD30C\uC77C\uC744 \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg7(ev.detail) + " \xB7 \uD30C\uC77C \uC62C\uB9AC\uAE30 \uBC84\uD2BC\uC73C\uB85C \uB2E4\uC2DC \uC120\uD0DD\uD574 \uC8FC\uC138\uC694.", "err");
       });
     },
     async refresh() {
@@ -10645,10 +11089,10 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       if (key !== refreshKey()) return;
       if (!lastListing) {
         clear(treeMount);
-        treeMount.appendChild(el("div", { class: "notice err", text: msg6(e) }));
-      } else notice2("\uBAA9\uB85D \uAC31\uC2E0 \uC2E4\uD328 \u2014 \uB9C8\uC9C0\uB9C9\uC73C\uB85C \uBC1B\uC740 \uBAA9\uB85D\uC785\uB2C8\uB2E4: " + msg6(e), "err");
+        treeMount.appendChild(el("div", { class: "notice err", text: msg7(e) }));
+      } else notice2("\uBAA9\uB85D \uAC31\uC2E0 \uC2E4\uD328 \u2014 \uB9C8\uC9C0\uB9C9\uC73C\uB85C \uBC1B\uC740 \uBAA9\uB85D\uC785\uB2C8\uB2E4: " + msg7(e), "err");
       void clientLog("error", "files tab refresh failed", {
-        error: msg6(e),
+        error: msg7(e),
         stack: e instanceof Error ? String(e.stack).slice(0, 1500) : ""
       });
     }
@@ -10779,7 +11223,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           expandTo(where + "/" + n);
           await refresh();
         } catch (e) {
-          notice2("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg6(e), "err");
+          notice2("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg7(e), "err");
         }
       });
       name.addEventListener("keydown", (e) => {
@@ -10877,12 +11321,12 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
               result.failed.length ? "err" : "ok"
             );
           } catch (e) {
-            status.textContent = msg6(e);
+            status.textContent = msg7(e);
             apply.disabled = false;
           }
         });
       } catch (e) {
-        notice2("\uC815\uB9AC \uB300\uC0C1\uC744 \uD655\uC778\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg6(e), "err");
+        notice2("\uC815\uB9AC \uB300\uC0C1\uC744 \uD655\uC778\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg7(e), "err");
       } finally {
         button2.disabled = false;
       }
@@ -11050,7 +11494,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const bytes = await state.downloadZip([n.path], n.name);
         notice2(`${fmtSize3(bytes)} zip \uC744 \uBE0C\uB77C\uC6B0\uC800 \uB2E4\uC6B4\uB85C\uB4DC\uB85C \uB118\uACBC\uC2B5\uB2C8\uB2E4.`, "ok");
       } catch (e) {
-        notice2("\uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg6(e), "err");
+        notice2("\uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg7(e), "err");
       } finally {
         zipAll.disabled = false;
       }
@@ -11477,7 +11921,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       const r = await fileOperation(`${paths.length}\uAC1C \uC0AD\uC81C \uC911\u2026`, () => state.deleteFiles(paths));
       notice2(r.failed.length ? `${r.done}\uAC1C\uB97C \uC9C0\uC6E0\uC2B5\uB2C8\uB2E4. ${r.failed.length}\uAC1C \uC2E4\uD328 \u2014 ${r.failed[0].error}` : `${r.done}\uAC1C\uB97C \uC9C0\uC6E0\uC2B5\uB2C8\uB2E4.`, r.failed.length ? "err" : "ok");
     } catch (e) {
-      notice2("\uC9C0\uC6B0\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg6(e), "err");
+      notice2("\uC9C0\uC6B0\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg7(e), "err");
     }
     treeSel.clear();
     state.touchFiles();
@@ -11489,7 +11933,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       const bytes = await state.downloadZip(paths, name);
       notice2(`${fmtSize3(bytes)} zip \uC744 \uBE0C\uB77C\uC6B0\uC800 \uB2E4\uC6B4\uB85C\uB4DC\uB85C \uB118\uACBC\uC2B5\uB2C8\uB2E4.`, "ok");
     } catch (e) {
-      notice2("\uB0B4\uB824\uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg6(e), "err");
+      notice2("\uB0B4\uB824\uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg7(e), "err");
     }
   }
   function treeNewFolder(where) {
@@ -11506,7 +11950,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           state.touchFiles();
           await refresh();
         } catch (e) {
-          notice2("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg6(e), "err");
+          notice2("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg7(e), "err");
         }
       }
     });
@@ -11528,7 +11972,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           state.touchFiles();
           await refresh();
         } catch (err) {
-          notice2("\uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg6(err), "err");
+          notice2("\uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg7(err), "err");
         }
       }
     });
@@ -11549,7 +11993,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       if (!r) return;
       notice2(batchText(r, target, clip.op === "copy" ? "\uBCF5\uC0AC" : "\uC774\uB3D9"), r.failed.length ? "err" : "ok");
     } catch (e) {
-      notice2("\uCC98\uB9AC \uACB0\uACFC\uB97C \uD655\uC778\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg6(e) + " \xB7 \uD604\uC7AC \uBAA9\uB85D\uC744 \uB2E4\uC2DC \uD655\uC778\uD569\uB2C8\uB2E4.", "err");
+      notice2("\uCC98\uB9AC \uACB0\uACFC\uB97C \uD655\uC778\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg7(e) + " \xB7 \uD604\uC7AC \uBAA9\uB85D\uC744 \uB2E4\uC2DC \uD655\uC778\uD569\uB2C8\uB2E4.", "err");
     }
     if (clip.op === "cut") {
       selection.clear();
@@ -11563,7 +12007,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       const r = await fileOperation(`${list2.length}\uAC1C \uC774\uB3D9 \uC911\u2026`, () => state.moveFiles(list2, target));
       notice2(batchText(r, target, "\uC774\uB3D9"), r.failed.length ? "err" : "ok");
     } catch (e) {
-      notice2("\uC62E\uAE30\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg6(e), "err");
+      notice2("\uC62E\uAE30\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg7(e), "err");
     }
     selection.clear();
     previewPath = "";
@@ -11699,7 +12143,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const bytes = await state.downloadFile(f.path);
         out.textContent = `${fmtSize3(bytes)} \uB97C \uBE0C\uB77C\uC6B0\uC800 \uB2E4\uC6B4\uB85C\uB4DC\uB85C \uB118\uACBC\uC2B5\uB2C8\uB2E4.`;
       } catch (e) {
-        out.textContent = "\uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg6(e);
+        out.textContent = "\uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg7(e);
       } finally {
         save.disabled = false;
       }
@@ -11733,7 +12177,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         body.append(detail, img);
       } catch (e) {
         clear(body);
-        body.appendChild(el("div", { class: "notice err", text: msg6(e) }));
+        body.appendChild(el("div", { class: "notice err", text: msg7(e) }));
       }
       return;
     }
@@ -11771,7 +12215,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
                 revision = result.revision;
                 status.textContent = "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4.";
               } catch (error) {
-                status.textContent = msg6(error);
+                status.textContent = msg7(error);
               } finally {
                 save2.disabled = false;
               }
@@ -11784,7 +12228,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
             );
             done.addEventListener("click", close);
           } catch (error) {
-            notice2(msg6(error), "err");
+            notice2(msg7(error), "err");
           } finally {
             edit.disabled = false;
           }
@@ -11806,7 +12250,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       }
     } catch (e) {
       clear(body);
-      body.appendChild(el("div", { class: "notice err", text: msg6(e) }));
+      body.appendChild(el("div", { class: "notice err", text: msg7(e) }));
     }
   }
   async function runDelete(n) {
@@ -11817,7 +12261,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       if (paths.includes(previewPath)) previewPath = "";
       notice2(r.failed.length ? `${r.done}\uAC1C\uB97C \uC9C0\uC6E0\uC2B5\uB2C8\uB2E4. ${r.failed.length}\uAC1C \uC2E4\uD328 \u2014 ${r.failed[0].error}` : `${r.done}\uAC1C\uB97C \uC9C0\uC6E0\uC2B5\uB2C8\uB2E4.`, r.failed.length ? "err" : "ok");
     } catch (e) {
-      notice2("\uC9C0\uC6B0\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg6(e), "err");
+      notice2("\uC9C0\uC6B0\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg7(e), "err");
     }
     selection.clear();
     state.touchFiles();
@@ -11839,7 +12283,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           const r = await fileOperation(`${paths.length}\uAC1C \uC774\uB3D9 \uC911\u2026`, () => state.moveFiles(paths, target));
           notice2(batchText(r, target, "\uC774\uB3D9"), r.failed.length ? "err" : "ok");
         } catch (e) {
-          notice2("\uC62E\uAE30\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg6(e), "err");
+          notice2("\uC62E\uAE30\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg7(e), "err");
         }
         selection.clear();
         previewPath = "";
@@ -11864,7 +12308,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       const bytes = await state.downloadZip(paths, name);
       notice2(`${paths.length}\uAC1C \xB7 ${fmtSize3(bytes)} zip \uC744 \uBE0C\uB77C\uC6B0\uC800 \uB2E4\uC6B4\uB85C\uB4DC\uB85C \uB118\uACBC\uC2B5\uB2C8\uB2E4.`, "ok");
     } catch (e) {
-      notice2("\uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg6(e), "err");
+      notice2("\uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg7(e), "err");
     }
   }
   var upPanel = null;
@@ -12013,7 +12457,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       } catch (e) {
         failed += 1;
         sentBytes = before + file.size;
-        ui8.error(`${name}: ` + msg6(e));
+        ui8.error(`${name}: ` + msg7(e));
       }
       paint();
     };
@@ -12037,7 +12481,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
             if (r.extracted) extracted += r.extracted;
           } catch (e2) {
             failed += 1;
-            ui8.error(`${file.name}: ` + msg6(e2));
+            ui8.error(`${file.name}: ` + msg7(e2));
           }
           sentBytes += file.size;
         }
@@ -12094,7 +12538,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       return "";
     }
   }
-  function msg6(e) {
+  function msg7(e) {
     return e instanceof Error ? e.message : String(e);
   }
 
@@ -12124,7 +12568,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         }
       } catch (e) {
         clear(treeMount5);
-        treeMount5.appendChild(el("div", { class: "notice err", text: msg7(e) }));
+        treeMount5.appendChild(el("div", { class: "notice err", text: msg8(e) }));
         return;
       }
       drawTree5();
@@ -12225,7 +12669,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           notice10(savedText("\uD3F4\uB354\uB97C"), "ok");
           await refreshNow7();
         } catch (err) {
-          notice10("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg7(err), "err");
+          notice10("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg8(err), "err");
         } finally {
           save.disabled = false;
         }
@@ -12237,7 +12681,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           if (opts.scope === "global") void state.refreshBotChanges();
           await refreshNow7();
         } catch (err) {
-          notice10("\uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg7(err), "err");
+          notice10("\uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg8(err), "err");
         }
       });
       const del = el("button", { class: "ghost" });
@@ -12249,7 +12693,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           if (viewMount6) clear(viewMount6);
           await refreshNow7();
         } catch (err) {
-          notice10("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg7(err), "err");
+          notice10("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg8(err), "err");
         }
       });
       clear(viewMount6);
@@ -12268,7 +12712,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           await state.moveLore(e.id, all.findIndex((x) => x.id === neighbor.id));
           await refreshNow7();
         } catch (err) {
-          notice10("\uC21C\uC11C\uB97C \uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg7(err), "err");
+          notice10("\uC21C\uC11C\uB97C \uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg8(err), "err");
         }
       };
       const row = listRow({
@@ -12360,7 +12804,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           if (opts.scope === "global") void state.refreshBotChanges();
           await refreshNow7();
         } catch (err) {
-          notice10("\uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg7(err), "err");
+          notice10("\uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg8(err), "err");
         }
       });
       const save = el("button", { class: "primary", text: "\uC800\uC7A5" });
@@ -12382,7 +12826,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           notice10(savedText("\uB85C\uC5B4\uBD81 \uD56D\uBAA9\uC744"), "ok");
           await refreshNow7();
         } catch (err) {
-          notice10("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg7(err), "err");
+          notice10("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg8(err), "err");
         } finally {
           save.disabled = false;
         }
@@ -12396,7 +12840,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           if (viewMount6) clear(viewMount6);
           await refreshNow7();
         } catch (err) {
-          notice10("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg7(err), "err");
+          notice10("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg8(err), "err");
         }
       });
       const orig = e.origin === "edited" && e.original ? e.original : null;
@@ -12457,7 +12901,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const made = entries.find((e) => e.id === id);
         if (made) open4(made);
       } catch (e) {
-        notice10("\uD3F4\uB354\uB97C \uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg7(e), "err");
+        notice10("\uD3F4\uB354\uB97C \uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg8(e), "err");
       }
     }
     async function create2() {
@@ -12471,7 +12915,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const made = entries.find((e) => e.id === id);
         if (made) open4(made);
       } catch (e) {
-        notice10("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg7(e), "err");
+        notice10("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg8(e), "err");
       }
     }
     return makeTab({
@@ -12529,7 +12973,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
   function shortId(id) {
     return id.length > 10 ? `\uD3F4\uB354 ${id.slice(0, 6)}\u2026` : `\uD3F4\uB354 ${id}`;
   }
-  function msg7(e) {
+  function msg8(e) {
     return e instanceof Error ? e.message : String(e);
   }
 
@@ -12611,7 +13055,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       drawTree2();
     } catch (e) {
       clear(treeMount2);
-      treeMount2.appendChild(el("div", { class: "notice err", text: msg8(e) }));
+      treeMount2.appendChild(el("div", { class: "notice err", text: msg9(e) }));
     }
   }
   function syncCount() {
@@ -12691,7 +13135,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const fresh = items.find((i) => i.id === item.id);
         if (fresh) open(fresh);
       } catch (e) {
-        notice3("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg8(e), "err");
+        notice3("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg9(e), "err");
       } finally {
         save.disabled = false;
       }
@@ -12710,7 +13154,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         if (viewMount2) clear(viewMount2);
         await refreshNow();
       } catch (e) {
-        notice3("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg8(e), "err");
+        notice3("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg9(e), "err");
       }
     });
     clear(viewMount2);
@@ -12741,10 +13185,10 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       await refreshNow();
       open(made);
     } catch (e) {
-      notice3("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg8(e), "err");
+      notice3("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg9(e), "err");
     }
   }
-  function msg8(e) {
+  function msg9(e) {
     return e instanceof Error ? e.message : String(e);
   }
 
@@ -12788,7 +13232,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         draw();
       } catch (e) {
         clear(listMount);
-        listMount.appendChild(el("div", { class: "notice err", text: msg9(e) }));
+        listMount.appendChild(el("div", { class: "notice err", text: msg10(e) }));
       }
     }
   });
@@ -12797,7 +13241,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       const r = await state.memory();
       items2 = r.items.filter((i) => i.kind === KIND2);
     } catch (e) {
-      notice4(msg9(e), "err");
+      notice4(msg10(e), "err");
     }
     draw();
   }
@@ -12866,7 +13310,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         notice4(savedText(`${item.title} \uC744(\uB97C)`), "ok");
         await refreshNow2();
       } catch (e) {
-        notice4("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg9(e), "err");
+        notice4("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg10(e), "err");
         save.disabled = false;
       }
     };
@@ -12882,7 +13326,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         await state.saveMemory(item.id, item.original);
         await refreshNow2();
       } catch (e) {
-        notice4("\uB418\uB3CC\uB9AC\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg9(e), "err");
+        notice4("\uB418\uB3CC\uB9AC\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg10(e), "err");
       }
     });
     const del = el("button", { class: "ghost tiny" });
@@ -12892,7 +13336,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         notice4(`${item.title} \uC744(\uB97C) \uC9C0\uC6E0\uC2B5\uB2C8\uB2E4. \uBC18\uC601\uD558\uBA74 RisuAI\uC5D0\uC11C\uB3C4 \uC0AC\uB77C\uC9D1\uB2C8\uB2E4.`, "ok");
         await refreshNow2();
       } catch (e) {
-        notice4("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg9(e), "err");
+        notice4("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg10(e), "err");
       }
     });
     const badge = item.isNew ? el("span", { class: "badge ok", text: "\uCD94\uAC00" }) : item.changed ? el("span", { class: "badge warn", text: "\uC218\uC815" }) : el("span");
@@ -12921,14 +13365,14 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         notice4(`${k} \uC744(\uB97C) \uCD94\uAC00\uD588\uC2B5\uB2C8\uB2E4.`, "ok");
         await refreshNow2();
       } catch (e) {
-        notice4("\uCD94\uAC00\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg9(e), "err");
+        notice4("\uCD94\uAC00\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg10(e), "err");
       } finally {
         add.disabled = false;
       }
     });
     return el("div", { class: "varadd row", style: { marginTop: "10px" } }, [key, value, add]);
   }
-  function msg9(e) {
+  function msg10(e) {
     return e instanceof Error ? e.message : String(e);
   }
 
@@ -12986,12 +13430,12 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         }
       } catch (e) {
         clear(listMount2);
-        listMount2.appendChild(el("div", { class: "notice err", text: msg10(e) }));
+        listMount2.appendChild(el("div", { class: "notice err", text: msg11(e) }));
       }
     };
     const complain = (e) => {
       clear(listMount2);
-      listMount2.appendChild(el("div", { class: "notice err", text: msg10(e) }));
+      listMount2.appendChild(el("div", { class: "notice err", text: msg11(e) }));
       setTimeout(() => void draw2(), 2500);
     };
     const row = (entry) => {
@@ -13038,7 +13482,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     };
     void draw2();
   }
-  function msg10(e) {
+  function msg11(e) {
     return e instanceof Error ? e.message : String(e);
   }
 
@@ -13077,7 +13521,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         generalMount.appendChild(currentRow("general", r.selected, general.length));
       } catch (e) {
         clear(generalMount);
-        generalMount.appendChild(el("div", { class: "notice err", text: msg11(e) }));
+        generalMount.appendChild(el("div", { class: "notice err", text: msg12(e) }));
       }
       await opts.onChanged();
     };
@@ -13119,7 +13563,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           }
         } catch (e) {
           clear(box);
-          box.appendChild(el("div", { class: "notice err", text: msg11(e) }));
+          box.appendChild(el("div", { class: "notice err", text: msg12(e) }));
         } finally {
           testBtn.disabled = false;
         }
@@ -13410,7 +13854,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         status.textContent = (r.ready ? `\uC9C0\uAE08: ${r.modes.find((m) => m.id === r.mode)?.name ?? r.mode} \u2014 \uC0AC\uC6A9 \uAC00\uB2A5` : `\uC0AC\uC6A9 \uBD88\uAC00: ${r.whyNot}`) + (r.pillow ? "" : " \xB7 Pillow \uC5C6\uC74C: \uC218\uCE58 \uBD84\uC11D\uC774 \uC81C\uD55C\uB429\uB2C8\uB2E4");
         status.className = "hint " + (r.ready ? "" : "diff-del-n");
       } catch (e) {
-        status.textContent = msg11(e);
+        status.textContent = msg12(e);
       }
     };
     const patch = () => {
@@ -13441,7 +13885,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         out.appendChild(el("div", { class: "notice ok", text: "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4." }));
       } catch (e) {
         clear(out);
-        out.appendChild(el("div", { class: "notice err", text: msg11(e) }));
+        out.appendChild(el("div", { class: "notice err", text: msg12(e) }));
       } finally {
         save.disabled = false;
       }
@@ -13466,7 +13910,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         ]));
       } catch (e) {
         clear(out);
-        out.appendChild(el("div", { class: "notice err", text: msg11(e) }));
+        out.appendChild(el("div", { class: "notice err", text: msg12(e) }));
       } finally {
         test.disabled = false;
       }
@@ -13577,7 +14021,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         status.textContent = r.ready ? `\uC9C0\uAE08: ${r.modes.find((m) => m.id === r.mode)?.name ?? r.mode} \u2014 \uAC80\uC0C9 \uAC00\uB2A5` : `\uAC80\uC0C9 \uBD88\uAC00: ${r.whyNot}`;
         status.className = "hint " + (r.ready ? "" : "diff-del-n");
       } catch (e) {
-        status.textContent = msg11(e);
+        status.textContent = msg12(e);
       }
     };
     const patch = () => {
@@ -13608,7 +14052,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         out.appendChild(el("div", { class: "notice ok", text: "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4." }));
       } catch (e) {
         clear(out);
-        out.appendChild(el("div", { class: "notice err", text: msg11(e) }));
+        out.appendChild(el("div", { class: "notice err", text: msg12(e) }));
       } finally {
         save.disabled = false;
       }
@@ -13632,7 +14076,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         ]));
       } catch (e) {
         clear(out);
-        out.appendChild(el("div", { class: "notice err", text: msg11(e) }));
+        out.appendChild(el("div", { class: "notice err", text: msg12(e) }));
       } finally {
         test.disabled = false;
       }
@@ -13832,7 +14276,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         syncProvider();
         keyNote.textContent = p.apiKey?.set ? `\uC124\uC815\uB428 (${p.apiKey.length}\uC790) \u2014 \uBC14\uAFB8\uB824\uBA74 \uC0C8\uB85C \uC785\uB825` : "\uC124\uC815\uB418\uC9C0 \uC54A\uC74C";
       } catch (e) {
-        keyNote.textContent = msg11(e);
+        keyNote.textContent = msg12(e);
       }
     };
     const save = el("button", { class: "primary", text: "\uC800\uC7A5" });
@@ -13916,7 +14360,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         openPicker(kind, refresh3, say);
       } catch (e) {
         clear(out);
-        out.appendChild(el("div", { class: "notice err", text: msg11(e) }));
+        out.appendChild(el("div", { class: "notice err", text: msg12(e) }));
       } finally {
         save.disabled = false;
       }
@@ -13962,7 +14406,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           }
         }
       } catch (e) {
-        line.textContent = msg11(e);
+        line.textContent = msg12(e);
       }
     };
     login.addEventListener("click", async () => {
@@ -14025,7 +14469,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           })();
         }, 2e3);
       } catch (e) {
-        out.appendChild(el("div", { class: "notice err", text: msg11(e) }));
+        out.appendChild(el("div", { class: "notice err", text: msg12(e) }));
       } finally {
         login.disabled = false;
       }
@@ -14039,7 +14483,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         await refresh3();
       } catch (e) {
         clear(out);
-        out.appendChild(el("div", { class: "notice err", text: msg11(e) }));
+        out.appendChild(el("div", { class: "notice err", text: msg12(e) }));
       } finally {
         finish.disabled = false;
       }
@@ -14049,7 +14493,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         await state.codexLogout();
         await refresh3();
       } catch (e) {
-        out.appendChild(el("div", { class: "notice err", text: msg11(e) }));
+        out.appendChild(el("div", { class: "notice err", text: msg12(e) }));
       }
     });
     const root2 = withLogin ? el("div", { class: "card codexbox" }, [
@@ -14107,7 +14551,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         if (r.truncated) list2.appendChild(el("div", { class: "hint", text: "\uB354 \uC788\uC2B5\uB2C8\uB2E4 \u2014 \uAC80\uC0C9\uC5B4\uB97C \uC881\uD600 \uC8FC\uC138\uC694." }));
       } catch (e) {
         clear(list2);
-        list2.appendChild(el("div", { class: "notice err", text: msg11(e) }));
+        list2.appendChild(el("div", { class: "notice err", text: msg12(e) }));
       }
     };
     input2.addEventListener("input", () => {
@@ -14123,7 +14567,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     }
     return sel;
   }
-  function msg11(e) {
+  function msg12(e) {
     return e instanceof Error ? e.message : String(e);
   }
 
@@ -14157,7 +14601,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         for (const s of r.skills) listMount2.appendChild(row(s));
       } catch (e) {
         clear(listMount2);
-        listMount2.appendChild(el("div", { class: "notice err", text: msg12(e) }));
+        listMount2.appendChild(el("div", { class: "notice err", text: msg13(e) }));
       }
     };
     const row = (s) => {
@@ -14168,7 +14612,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           await refresh3();
         } catch (e) {
           toggle.checked = !toggle.checked;
-          say(msg12(e), "err");
+          say(msg13(e), "err");
         }
       });
       const editBtn = el("button", { class: "ghost tiny", text: "\uC218\uC815" });
@@ -14179,7 +14623,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           await state.deleteSkill(s.id);
           await refresh3();
         } catch (e) {
-          say(msg12(e), "err");
+          say(msg13(e), "err");
         }
       });
       const files = s.files?.length ? ` \xB7 \uD30C\uC77C ${s.files.length}` : "";
@@ -14210,7 +14654,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         await refresh3();
         say(`\u201C${skill.name}\u201D \uC2A4\uD0AC\uC744 \uB9CC\uB4E4\uC5C8\uC2B5\uB2C8\uB2E4 (skills/${skill.id}). \uC124\uBA85\uC744 \uB2E4\uB4EC\uC5B4 \uB450\uBA74 \uC5D0\uC774\uC804\uD2B8\uAC00 \uB354 \uC815\uD655\uD788 \uACE0\uB985\uB2C8\uB2E4.`, "ok");
       } catch (e) {
-        say("\uC5C5\uB85C\uB4DC\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg12(e), "err");
+        say("\uC5C5\uB85C\uB4DC\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg13(e), "err");
       } finally {
         picker.value = "";
       }
@@ -14231,7 +14675,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           el("pre", { class: "mono filepreview", text: r.prompt || "(\uCF1C \uB454 \uC2A4\uD0AC\uC774 \uC5C6\uC2B5\uB2C8\uB2E4)" })
         ]), { wide: true });
       } catch (e) {
-        say(msg12(e), "err");
+        say(msg13(e), "err");
       } finally {
         previewBtn.disabled = false;
       }
@@ -14246,7 +14690,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         await refresh3();
         say(`\uC2A4\uD0AC \uB3D9\uAE30\uD654 \uC644\uB8CC: ${result.updated}\uAC1C \uAC31\uC2E0, ${result.created}\uAC1C \uCD94\uAC00. \uB2E4\uC74C \uC5D0\uC774\uC804\uD2B8 \uC2E4\uD589\uBD80\uD130 \uC801\uC6A9\uB429\uB2C8\uB2E4.`, "ok");
       } catch (e) {
-        say("\uC2A4\uD0AC \uB3D9\uAE30\uD654\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg12(e), "err");
+        say("\uC2A4\uD0AC \uB3D9\uAE30\uD654\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg13(e), "err");
       } finally {
         syncBtn.disabled = false;
         syncBtn.textContent = "\uC11C\uBC84 \uAE30\uBCF8 \uC2A4\uD0AC\uACFC \uB3D9\uAE30\uD654";
@@ -14279,7 +14723,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       try {
         skill = await state.skill(id);
       } catch (e) {
-        say(msg12(e), "err");
+        say(msg13(e), "err");
         return;
       }
     }
@@ -14335,7 +14779,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
                 await refresh3();
                 say("\uC774\uC804 \uBC84\uC804\uC73C\uB85C \uB418\uB3CC\uB838\uC2B5\uB2C8\uB2E4.", "ok");
               } catch (e) {
-                out.textContent = msg12(e);
+                out.textContent = msg13(e);
                 restore.disabled = false;
               }
             });
@@ -14347,7 +14791,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           }
           if (!data.revisions.length) versions.textContent = "\uC544\uC9C1 \uBCC0\uACBD \uAE30\uB85D\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.";
         } catch (e) {
-          out.textContent = msg12(e);
+          out.textContent = msg13(e);
         }
       });
       form.appendChild(el("div", {}, [history, versions]));
@@ -14371,7 +14815,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         say("\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4.", "ok");
       } catch (e) {
         clear(out);
-        out.appendChild(el("div", { class: "notice err", text: msg12(e) }));
+        out.appendChild(el("div", { class: "notice err", text: msg13(e) }));
       } finally {
         save.disabled = false;
       }
@@ -14396,7 +14840,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
             draw2();
           } catch (e) {
             clear(out);
-            out.appendChild(el("div", { class: "notice err", text: msg12(e) }));
+            out.appendChild(el("div", { class: "notice err", text: msg13(e) }));
           }
         });
         list2.appendChild(el("div", { class: "pickrow" }, [
@@ -14423,7 +14867,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         say(`${r.path} \uC744(\uB97C) \uB123\uC5C8\uC2B5\uB2C8\uB2E4. \uBCF8\uBB38\uC5D0\uC11C skills/${skill.id}/${r.path} \uB85C \uAC00\uB9AC\uCF1C \uC8FC\uC138\uC694.`, "ok");
       } catch (e) {
         clear(out);
-        out.appendChild(el("div", { class: "notice err", text: msg12(e) }));
+        out.appendChild(el("div", { class: "notice err", text: msg13(e) }));
       } finally {
         picker.value = "";
       }
@@ -14442,7 +14886,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)}KB`;
     return `${(n / 1024 / 1024).toFixed(1)}MB`;
   }
-  function msg12(e) {
+  function msg13(e) {
     return e instanceof Error ? e.message : String(e);
   }
 
@@ -14640,10 +15084,10 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           return;
         }
         if (!r.newer) {
-          const mismatch = r.current !== "0.15.28";
+          const mismatch = r.current !== "0.15.29";
           const ahead = r.ahead ?? (!!r.latest && r.latest !== r.current);
           say(
-            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.28"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
+            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.29"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
             mismatch || ahead ? "" : "ok"
           );
           return;
@@ -14659,7 +15103,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           out.appendChild(notes);
         }
       } catch (e) {
-        say(msg13(e), "err");
+        say(msg14(e), "err");
       } finally {
         checkBtn.disabled = false;
       }
@@ -14678,7 +15122,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const version = await state.waitForBackend(90);
         say(`\uBC31\uC5D4\uB4DC\uAC00 v${version} \uC73C\uB85C \uB2E4\uC2DC \uC2DC\uC791\uD588\uC2B5\uB2C8\uB2E4.`, "ok");
       } catch (e) {
-        say("\uC124\uCE58 \uB610\uB294 \uC7AC\uC2DC\uC791\uC744 \uD655\uC778\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg13(e) + " \u2014 \uC7A0\uC2DC \uD6C4 \uC0C8\uB85C\uACE0\uCE68\uD574\uC11C \uBC84\uC804\uC744 \uD655\uC778\uD574 \uC8FC\uC138\uC694.", "err");
+        say("\uC124\uCE58 \uB610\uB294 \uC7AC\uC2DC\uC791\uC744 \uD655\uC778\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg14(e) + " \u2014 \uC7A0\uC2DC \uD6C4 \uC0C8\uB85C\uACE0\uCE68\uD574\uC11C \uBC84\uC804\uC744 \uD655\uC778\uD574 \uC8FC\uC138\uC694.", "err");
       } finally {
         checkBtn.disabled = false;
       }
@@ -14734,7 +15178,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.15.28",
+            version: "0.15.29",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -14757,7 +15201,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         };
         show("\uC9C4\uB2E8 \uC815\uBCF4", JSON.stringify(report, null, 2));
       } catch (e) {
-        say("\uC9C4\uB2E8 \uC815\uBCF4\uB97C \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg13(e), "err");
+        say("\uC9C4\uB2E8 \uC815\uBCF4\uB97C \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg14(e), "err");
       } finally {
         diagBtn.disabled = false;
       }
@@ -14769,7 +15213,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const r = await state.logs(400, selectedLevel(levelSel));
         show("\uC11C\uBC84 \uB85C\uADF8", r.lines.join("\n") || "(\uBE44\uC5B4 \uC788\uC2B5\uB2C8\uB2E4)");
       } catch (e) {
-        say("\uB85C\uADF8\uB97C \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg13(e), "err");
+        say("\uB85C\uADF8\uB97C \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg14(e), "err");
       } finally {
         logBtn.disabled = false;
       }
@@ -14807,7 +15251,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1e4);
   }
-  function msg13(e) {
+  function msg14(e) {
     return e instanceof Error ? e.message : String(e);
   }
 
@@ -14862,6 +15306,10 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       ["\uC2A4\uD0AC", [buildSkillsCard({ onMount: (refresh3) => {
         refreshers.push(refresh3);
       } })]],
+      // Opt-in extras that are not part of the release bundle.
+      ["\uACE0\uAE09 \uAE30\uB2A5", [buildMcpCard((refresh3) => {
+        refreshers.push(refresh3);
+      })]],
       ["\uC815\uBCF4 \xB7 \uB85C\uADF8", [buildCatalogCard(), buildDebugCard(), aboutMount]]
     ];
     const bar3 = el("div", { class: "subtabs" });
@@ -14949,7 +15397,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         await transport.post("/config", { config: { workspace: { globalPath: path.value.trim() } } });
         out.textContent = "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4. \uD30C\uC77C\uC740 \uC790\uB3D9\uC73C\uB85C \uC62E\uACA8\uC9C0\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4 \u2014 \uACBD\uB85C\uB97C \uBC14\uAFE8\uB2E4\uBA74 \uAE30\uC874 \uD3F4\uB354\uB97C \uC9C1\uC811 \uC62E\uACA8 \uC8FC\uC138\uC694.";
       } catch (e) {
-        out.textContent = "\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg14(e);
+        out.textContent = "\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg15(e);
       } finally {
         save.disabled = false;
       }
@@ -15085,7 +15533,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       ])
     ]);
   }
-  function msg14(e) {
+  function msg15(e) {
     return e instanceof Error ? e.message : String(e);
   }
   function buildNaiCard() {
@@ -15101,7 +15549,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       try {
         st = await state.studio.status();
       } catch (e) {
-        meters.appendChild(el("span", { class: "hint err", text: msg14(e) }));
+        meters.appendChild(el("span", { class: "hint err", text: msg15(e) }));
         return;
       }
       if (!st.configured) {
@@ -15142,7 +15590,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         await refresh3();
         out.textContent = "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4.";
       } catch (e) {
-        out.textContent = msg14(e);
+        out.textContent = msg15(e);
       } finally {
         save.disabled = false;
       }
@@ -15154,7 +15602,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const st = await state.studio.status();
         out.textContent = st.configured && st.account ? `\uC5F0\uACB0\uB428 \u2014 Anlas ${st.account.anlas}, tier ${st.account.tier}` : st.error || st.note || "\uD1A0\uD070\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.";
       } catch (e) {
-        out.textContent = msg14(e);
+        out.textContent = msg15(e);
       } finally {
         test.disabled = false;
       }
@@ -15424,7 +15872,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.28"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.29"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -15515,7 +15963,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       full = r.full;
     } catch (e) {
       clear(treeMount3);
-      treeMount3.appendChild(el("div", { class: "notice err", text: msg15(e) }));
+      treeMount3.appendChild(el("div", { class: "notice err", text: msg16(e) }));
       return;
     }
     drawTree3();
@@ -15541,7 +15989,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const fresh = fields.find((f) => f.id === made.id);
         if (fresh) open2(fresh);
       } catch (e) {
-        notice5("\uCD94\uAC00\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg15(e), "err");
+        notice5("\uCD94\uAC00\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg16(e), "err");
       }
     });
     const reloadBtn = el("button", { class: "ghost tiny", text: "\uC0C8\uB85C\uACE0\uCE68" });
@@ -15584,7 +16032,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       notice5(savedText("\uCE74\uB4DC \uD544\uB4DC\uB97C"), "ok");
       await refreshNow3();
     } catch (e) {
-      notice5("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg15(e), "err");
+      notice5("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg16(e), "err");
     } finally {
       btn.disabled = false;
     }
@@ -15673,7 +16121,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         notice5(f.deleted ? "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4. \uC0AD\uC81C \uD45C\uC2DC\uB294 \uD574\uC81C\uB418\uC5C8\uC2B5\uB2C8\uB2E4." : savedText("\uCE74\uB4DC \uD544\uB4DC\uB97C"), "ok");
         await refreshNow3();
       } catch (e) {
-        notice5("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg15(e), "err");
+        notice5("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg16(e), "err");
       } finally {
         save.disabled = false;
       }
@@ -15688,7 +16136,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           if (viewMount3) clear(viewMount3);
           await refreshNow3();
         } catch (e) {
-          notice5("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg15(e), "err");
+          notice5("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg16(e), "err");
         }
       });
       buttons.push(del);
@@ -15724,7 +16172,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       el("div", { class: "row" }, buttons)
     ]));
   }
-  function msg15(e) {
+  function msg16(e) {
     return e instanceof Error ? e.message : String(e);
   }
 
@@ -15796,7 +16244,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       bgFields = r.fields.filter((f) => f.field in BG_LABEL);
     } catch (e) {
       clear(treeMount4);
-      treeMount4.appendChild(el("div", { class: "notice err", text: msg16(e) }));
+      treeMount4.appendChild(el("div", { class: "notice err", text: msg17(e) }));
       return;
     }
     drawTree4();
@@ -15827,7 +16275,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const made = items3.find((s) => s.id === id);
         if (made) open3(made);
       } catch (e) {
-        notice6("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg16(e), "err");
+        notice6("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg17(e), "err");
       }
     });
     const reloadBtn = el("button", { class: "ghost tiny", text: "\uC0C8\uB85C\uACE0\uCE68" });
@@ -15874,7 +16322,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           await state.moveScript(s.id, to);
           await refreshNow4();
         } catch (err) {
-          notice6("\uC21C\uC11C\uB97C \uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg16(err), "err");
+          notice6("\uC21C\uC11C\uB97C \uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg17(err), "err");
         }
       };
       const size = String(e.out ?? "").length;
@@ -15917,7 +16365,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         notice6(savedText(BG_LABEL[f.field] + " \uC744(\uB97C)"), "ok");
         await refreshNow4();
       } catch (err) {
-        notice6("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg16(err), "err");
+        notice6("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg17(err), "err");
       } finally {
         save.disabled = false;
       }
@@ -15983,7 +16431,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         notice6(savedText("\uC2A4\uD06C\uB9BD\uD2B8\uB97C"), "ok");
         await refreshNow4();
       } catch (err) {
-        notice6("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg16(err), "err");
+        notice6("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg17(err), "err");
       } finally {
         save.disabled = false;
       }
@@ -15996,7 +16444,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         if (viewMount4) clear(viewMount4);
         await refreshNow4();
       } catch (err) {
-        notice6("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg16(err), "err");
+        notice6("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg17(err), "err");
       }
     });
     const orig = s.origin === "edited" && s.original ? s.original : null;
@@ -16031,7 +16479,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       el("div", { class: "row" }, [save, del])
     ]));
   }
-  function msg16(e) {
+  function msg17(e) {
     return e instanceof Error ? e.message : String(e);
   }
 
@@ -16074,7 +16522,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       items4 = await state.cardScripts("triggerscript");
     } catch (e) {
       items4 = [];
-      notice7("\uD2B8\uB9AC\uAC70\uB97C \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg17(e), "err");
+      notice7("\uD2B8\uB9AC\uAC70\uB97C \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
     }
     drawSide();
     drawView();
@@ -16139,7 +16587,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       await refreshNow5();
       notice7("\uBAA8\uB4DC\uB97C \uBC14\uAFE8\uC2B5\uB2C8\uB2E4. " + savedText("\uD2B8\uB9AC\uAC70\uB97C"), "ok");
     } catch (e) {
-      notice7("\uBAA8\uB4DC\uB97C \uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg17(e), "err");
+      notice7("\uBAA8\uB4DC\uB97C \uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
     }
   }
   function drawView() {
@@ -16171,7 +16619,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           notice7(savedText("Lua \uD2B8\uB9AC\uAC70\uB97C"), "ok");
           await refreshNow5();
         } catch (err) {
-          notice7("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg17(err), "err");
+          notice7("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(err), "err");
         } finally {
           save.disabled = false;
         }
@@ -16202,7 +16650,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           await state.deleteScript(s.id);
           await refreshNow5();
         } catch (err) {
-          notice7(msg17(err), "err");
+          notice7(msg18(err), "err");
         }
       });
       return el("div", { class: "verrow" }, [
@@ -16219,7 +16667,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       ...rows.length ? rows : [el("div", { class: "hint", text: "\uC774\uBCA4\uD2B8\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4." })]
     ]));
   }
-  function msg17(e) {
+  function msg18(e) {
     return e instanceof Error ? e.message : String(e);
   }
 
@@ -16300,7 +16748,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const n = await state.cardReset();
         shellNotice("\uCE74\uB4DC\uC758 \uBBF8\uBC18\uC601 \uBCC0\uACBD\uC744 \uBC84\uB838\uC2B5\uB2C8\uB2E4" + (n ? ` (${n}\uAC74)` : "") + ". \uC791\uC5C5\uBCF8\uC774 \uAE30\uC900\uC120(RisuAI \uC0C1\uD0DC)\uC73C\uB85C \uB3CC\uC544\uAC14\uC2B5\uB2C8\uB2E4.", "ok");
       } catch (e) {
-        shellNotice("\uBCC0\uACBD \uCDE8\uC18C\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+        shellNotice("\uBCC0\uACBD \uCDE8\uC18C\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg19(e), "err");
       }
     });
     summaryEl2 = el("span", { class: "dim changesum", title: "\uC774 \uBD07\uC758 \uCE74\uB4DC\uC5D0\uC11C \uC544\uC9C1 RisuAI\uC5D0 \uC4F0\uC9C0 \uC54A\uC740 \uBCC0\uACBD" });
@@ -16342,7 +16790,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           out.appendChild(el("div", { class: "notice err", text: `\uC5D0\uC14B ${missing.length}\uAC1C\uAC00 \uC2A4\uD1A0\uC5B4\uC5D0 \uC5C6\uC5B4 \uB9CC\uB4E4\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4: ` + missing.slice(0, 6).map((m) => m.name || m.type).join(", ") + (missing.length > 6 ? " \u2026" : "") }));
           buildAnyway.style.display = "";
         } else {
-          out.appendChild(el("div", { class: "notice err", text: "charx \uB97C \uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e) }));
+          out.appendChild(el("div", { class: "notice err", text: "charx \uB97C \uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg19(e) }));
         }
       } finally {
         build.disabled = !!charxBlockReason();
@@ -16400,7 +16848,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     if (x.deleted) bits.push(`\u2212${x.deleted}`);
     return bits.join(" ");
   }
-  function msg18(e) {
+  function msg19(e) {
     return e instanceof Error ? e.message : String(e);
   }
   async function openApply2(anchor) {
@@ -16453,7 +16901,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           close();
         }
       } catch (e) {
-        const m = msg18(e);
+        const m = msg19(e);
         out.textContent = m;
         void clientLog("error", "cardWriteBack failed", { error: m });
         shellNotice("\uCE74\uB4DC \uBC18\uC601\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + m, "err");
@@ -16484,9 +16932,9 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         body.appendChild(el("div", { class: "hint", text: "\uBC31\uC5C5 \uBD07\uC740 RisuAI \uBD07 \uBAA9\uB85D\uC5D0 \uC0C8 \uCE90\uB9AD\uD130\uB85C \uC788\uC2B5\uB2C8\uB2E4. \uCC57\uB3C4 \uD568\uAED8 \uBCF5\uC0AC\uB418\uC5C8\uACE0 \uC5D0\uC14B\uC740 \uACF5\uC720\uD569\uB2C8\uB2E4." }));
         body.appendChild(el("div", { class: "row", style: { marginTop: "8px" } }, [ok]));
       } catch (e) {
-        void clientLog("error", "saveAsNewBot failed", { error: msg18(e) });
-        shellNotice("\uC0C8 \uBD07\uC73C\uB85C \uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
-        out.textContent = "\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e);
+        void clientLog("error", "saveAsNewBot failed", { error: msg19(e) });
+        shellNotice("\uC0C8 \uBD07\uC73C\uB85C \uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg19(e), "err");
+        out.textContent = "\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg19(e);
         saveNew.disabled = !!applyBlockReason();
         saveNew.textContent = was;
       }
@@ -16538,7 +16986,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
             close();
             shellNotice("\uCE74\uB4DC\xB7\uBD07 \uB85C\uC5B4\uBD81\xB7\uC2A4\uD06C\uB9BD\uD2B8\uB97C \uB418\uB3CC\uB838\uC2B5\uB2C8\uB2E4. \uB418\uB3CC\uB9AC\uAE30 \uC9C1\uC804 \uC0C1\uD0DC\uB3C4 \uC2A4\uB0C5\uC0F7\uC73C\uB85C \uB0A8\uACA8 \uB450\uC5C8\uC2B5\uB2C8\uB2E4.", "ok");
           } catch (e) {
-            shellNotice("\uBCF5\uC6D0\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+            shellNotice("\uBCF5\uC6D0\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg19(e), "err");
           }
         });
         const title = el("div", {}, [
@@ -16563,7 +17011,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           } catch (e) {
             row.classList.remove("deleting");
             del.disabled = false;
-            shellNotice("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+            shellNotice("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg19(e), "err");
           }
         });
         row.append(
@@ -16607,7 +17055,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       }));
     } catch (e) {
       clear(body);
-      body.appendChild(el("div", { class: "hint", text: msg18(e) }));
+      body.appendChild(el("div", { class: "hint", text: msg19(e) }));
     }
   }
 
@@ -22242,7 +22690,7 @@ ${negative.value.trim()}
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.28"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.29"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
@@ -22338,7 +22786,7 @@ ${negative.value.trim()}
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.15.28" }),
+        el("span", { class: "dim", text: "v0.15.29" }),
         healthEl,
         el("span", { class: "spacer" }),
         reload,
@@ -22661,6 +23109,6 @@ ${negative.value.trim()}
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.15.28"} loaded`);
+    console.log(`[risu-hina] v${"0.15.29"} loaded`);
   })();
 })();
