@@ -166,7 +166,8 @@ export function buildMcpCard(onMount?: (refresh: () => void) => void): HTMLEleme
     detail.appendChild(el('div', { class: 'row' }, [copyCmd]));
     detail.appendChild(el('div', { class: 'hint', style: { marginTop: '8px' } }, [
       '사용: 봇·챗 선택 화면(첫 화면)의 ‘MCP 활성화’를 누르고 이 화면을 열어 둔 채로 Claude Code 에서 부르세요. ',
-      'MCP 는 패널에 열린 봇·챗에서만 동작하고, 수정은 모두 이 패널의 승인 대기로 들어옵니다. ',
+      'MCP 는 패널에 열린 봇·챗에서만 동작합니다. 수정은 제안으로 들어오고, 이 패널이나 Claude Code 쪽(approve_proposals · approve_staged)에서 승인합니다. ',
+      'RisuAI 반영도 Claude Code 에서 승인하면 이 패널이 실행합니다. ',
       '토큰은 이 백엔드에서 파이썬 실행(run_python)까지 할 수 있는 권한입니다 — 공유하지 마세요.',
     ]));
   };

@@ -21,6 +21,8 @@
   the picker switch beside 봇 편집), agent pane refreshes its proposal list
   when the poll says the queue moved. Hidden `__mcp__` session per chat keeps
   MCP work out of the panel's conversation list.
+- **Follow-up (same day):** approvals from the client - `approve_proposals` / `approve_staged` (the panel's
+  승인 handlers as tools; host actions such as 반영 relayed to the panel and awaited). docs/08 §0.
 - **Verified:** `tests/test_mcp.py` (in the gate: real pip install first run,
   then cached in `.cache/mcp-addon/`; 31 checks incl. 401s, tool list, a
   proposal landing in the queue, the card-save relay), plugin smoke

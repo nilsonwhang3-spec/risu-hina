@@ -2001,9 +2001,11 @@ class AppState {
    * only exist inside this iframe. The result is reported back either way, so
    * a failure here does not leave a queue entry claiming success.
    */
-  async decideAction(id: string, approve: boolean, chatKey = ''): Promise<string> {
+  async decideAction(id: string, approve: boolean, chatKey = '', mode?: string): Promise<string> {
+    // `mode` = the screen gate's input; an MCP-relayed approval passes '' (no screen).
     const r = await transport.post('/actions/decide', {
-      chatKey: chatKey || this.activeChatKey, id, approve, mode: this.activeTab === 'studio' ? 'studio' : this.editMode,
+      chatKey: chatKey || this.activeChatKey, id, approve,
+      mode: mode ?? (this.activeTab === 'studio' ? 'studio' : this.editMode),
     }) as { approved: boolean; result?: string; host?: { kind: string; args: Record<string, any> } };
 
     if (!r.approved) return '거절했습니다.';
