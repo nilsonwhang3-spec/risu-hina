@@ -13,6 +13,7 @@
  */
 import { AgentPanel, type AgentPanelHooks } from './agent';
 import { state, type StagedEdit } from '../state';
+import { mcp } from '../mcp';
 
 let panel: AgentPanel | null = null;
 let panelContext = '';
@@ -59,6 +60,13 @@ state.onChange(() => {
   state.promptRequest = null;
   if (!agentPanel().sendText(text)) toastBusy();
 });
+
+// An MCP client's proposals arrive without a turn stream; the MCP long poll
+// says when the queue moved, and the panel and the bars' counts refresh.
+mcp.onPendingChanged = () => {
+  panel?.refreshPending();
+  state.bump();
+};
 
 function toastBusy(): void {
   let wrap = document.querySelector<HTMLElement>('.toastwrap');

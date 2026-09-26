@@ -41,6 +41,8 @@ from . import providers
 from . import config, db, log, permits, presets, pyexec, skills, staging, store, vision, workspace
 
 _agent_cache: dict[str, Any] = {}
+# mcpbridge.MCP_SESSION_TITLE, repeated so this module need not import it.
+MCP_SESSION_TITLE = "__mcp__"
 
 
 def get_agent():
@@ -75,7 +77,10 @@ def create(chat_key: str, title: str = "") -> dict:
 
 def latest(chat_key: str) -> dict | None:
     row = db.one(
-        "SELECT * FROM sessions WHERE chat_key = ? ORDER BY updated_at DESC LIMIT 1", (chat_key,)
+        # The hidden MCP session (mcpserver._session_for) is not a panel
+        # conversation and must never become the one the panel reopens.
+        "SELECT * FROM sessions WHERE chat_key = ? AND COALESCE(title, '') != ? "
+        "ORDER BY updated_at DESC LIMIT 1", (chat_key, MCP_SESSION_TITLE)
     )
     return db.row_to_dict(row)
 
@@ -93,8 +98,8 @@ def list_all(chat_key: str) -> list[dict]:
         "  (SELECT content_json FROM agent_messages m WHERE m.session_id = s.id AND m.role = 'user' "
         "     ORDER BY m.seq LIMIT 1) AS first_user, "
         "  (SELECT SUM(cost_usd) FROM cost_ledger c WHERE c.session_id = s.id) AS cost "
-        "FROM sessions s WHERE s.chat_key = ? ORDER BY s.updated_at DESC",
-        (chat_key,),
+        "FROM sessions s WHERE s.chat_key = ? AND COALESCE(s.title, '') != ? ORDER BY s.updated_at DESC",
+        (chat_key, MCP_SESSION_TITLE),
     )
     out = []
     for r in rows:
@@ -454,6 +459,13 @@ def push_stream_event(session_id: str | None, obj: dict) -> None:
     the tool's text return still says what happened."""
     if not session_id:
         return
+    # An MCP call has no turn stream; the panel's MCP long poll carries the
+    # one side event that needs the plugin to act (a requested card save).
+    if obj.get("type") == "card-writeback":
+        from . import mcpbridge
+        if mcpbridge.is_mcp_session(session_id):
+            mcpbridge.push_job(obj)
+            return
     with _EXTRA_LOCK:
         _EXTRA.setdefault(session_id, []).append(obj)
 

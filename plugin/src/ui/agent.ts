@@ -1123,6 +1123,11 @@ export class AgentPanel {
     fold.textContent = `이전 항목 ${n}개를 접었습니다 (메모리) — 대화 목록에서 열면 다시 볼 수 있습니다`;
   }
 
+  /** Re-read the proposal queues (an MCP client added to them). */
+  refreshPending(): void {
+    void this.refreshStaged();
+  }
+
   private async refreshStaged(): Promise<void> {
     if (this.destroyed) return;
     await Promise.all([state.refreshChanges(), state.refreshBotChanges()]);

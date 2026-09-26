@@ -36,7 +36,7 @@ from starlette.concurrency import run_in_threadpool
 from . import (chatfmt, config, db, files, log, nai, presets, session, skills, staging,
                store, websearch, workspace)
 from . import actions, assets, catalog, charx, codexauth, conflicts, keys, permits, providers, snapshots, updater, vision
-from . import agentnotes, assetrules, studio, studiojob
+from . import agentnotes, assetrules, mcpaddon, mcpbridge, mcpserver, studio, studiojob
 from . import card as cardmod
 from . import memory as mem
 
@@ -166,6 +166,8 @@ def h_health(arg: dict) -> dict:
         "codexEnabled": config.codex_enabled(),
         "workspaces": len(workspace.list_all()),
         "space": str(workspace.space_root()),
+        # Cheap flags only: /health is polled. /mcp/status has the detail.
+        "mcp": {"loaded": mcpaddon.loaded(), "mounted": mcpserver.mounted(), "active": mcpbridge.active()},
     }
 
 
@@ -2501,6 +2503,40 @@ def h_actions_clear(arg: dict) -> dict:
     return {"cleared": actions.clear(_chat(arg))}
 
 
+# --- MCP (optional add-on, docs/08) -------------------------------------------
+
+def h_mcp_status(arg: dict) -> dict:
+    return {"addon": mcpaddon.status(), "bridge": mcpbridge.status()}
+
+
+def h_mcp_install(arg: dict) -> dict:
+    return mcpaddon.install()
+
+
+def h_mcp_uninstall(arg: dict) -> dict:
+    return mcpaddon.uninstall()
+
+
+def h_mcp_token(arg: dict) -> dict:
+    """The MCP bearer token, for the panel to show and copy. Behind the
+    backend token like every other route; `rotate` cuts off old clients."""
+    return {"token": mcpbridge.token(rotate=bool(arg.get("rotate")))}
+
+
+def h_mcp_activate(arg: dict) -> dict:
+    if not mcpserver.mounted():
+        raise ApiError(409, "MCP 가 설치되지 않았거나 불러오지 못했습니다. 설정 → 고급 기능에서 확인해 주세요.")
+    return mcpbridge.set_enabled(True, arg.get("context") or {})
+
+
+def h_mcp_deactivate(arg: dict) -> dict:
+    return mcpbridge.set_enabled(False)
+
+
+async def h_mcp_poll(arg: dict) -> dict:
+    return await mcpbridge.poll(arg.get("context") or {})
+
+
 ROUTES: dict[str, Handler] = {
     "GET /health": h_health,
     # The same health check as a POST, because a POST is the one thing a CDN
@@ -2708,6 +2744,15 @@ ROUTES: dict[str, Handler] = {
     "POST /checkpoint/clear": h_checkpoint_clear,
     "POST /checkpoint/restore": h_checkpoint_restore,
 
+    "GET /mcp/status": h_mcp_status,
+    "POST /mcp/status": h_mcp_status,
+    "POST /mcp/install": h_mcp_install,
+    "POST /mcp/uninstall": h_mcp_uninstall,
+    "POST /mcp/token": h_mcp_token,
+    "POST /mcp/bridge/activate": h_mcp_activate,
+    "POST /mcp/bridge/deactivate": h_mcp_deactivate,
+    "POST /mcp/bridge/poll": h_mcp_poll,
+
     "GET /actions": h_actions,
     "POST /actions/decide": h_action_decide,
     "POST /actions/complete": h_action_complete,
@@ -2748,7 +2793,7 @@ def _log(method: str, path: str, status: int, started: float, note: str = "") ->
 
 _CHATTY = {"/assets/blob", "/files/download", "/workspace/dirty", "/studio/job",
            "/studio/job/preview", "/health", "/actions", "/staged", "/permits",
-           "/files/stat", "/clientlog"}
+           "/files/stat", "/clientlog", "/mcp/bridge/poll", "/mcp/status"}
 
 
 @app.api_route("/{path:path}", methods=["GET", "POST", "OPTIONS"])
@@ -3117,6 +3162,15 @@ async def _startup() -> None:
     # The agent's temp files (hina/<봇>/scratch·scripts, .part fragments) are
     # swept by age at boot and on a timer (§1-34, config workspace.autoClean).
     asyncio.get_running_loop().create_task(_auto_clean_loop())
+    # The MCP add-on, when installed (mcpaddon): a removal requested while it
+    # was loaded happens now, before anything imports it.
+    mcpserver.init(asyncio.get_running_loop())
+    await run_in_threadpool(mcpaddon.sweep_pending_removal)
+    if await run_in_threadpool(mcpaddon.load):
+        try:
+            await mcpserver._enable_async()
+        except Exception as e:  # noqa: BLE001 - an add-on must never stop the backend
+            log.warn("mcp enable failed: %s", e)
     log.info("ready port=%s agent=%s", config.PORT, "on" if agent_ready() else "off")
 
 

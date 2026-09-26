@@ -16,6 +16,7 @@ import { agentPanel } from './agentpane';
 import { buildDebugCard, buildUpdateCard } from './debugpanel';
 import { transport } from '../transport';
 import { copyToClipboard } from '../host';
+import { buildMcpCard } from './mcp-ui';
 
 let aboutMount: HTMLElement | null = null;
 
@@ -81,6 +82,8 @@ export function renderSettingsTab(mount: HTMLElement): void {
       },
     }), buildAdvancedCard(buildAgentNotesCard(refresh => refreshers.push(refresh)))]],
     ['스킬', [buildSkillsCard({ onMount: (refresh) => { refreshers.push(refresh); } })]],
+    // Opt-in extras that are not part of the release bundle.
+    ['고급 기능', [buildMcpCard((refresh) => { refreshers.push(refresh); })]],
     ['정보 · 로그', [buildCatalogCard(), buildDebugCard(), aboutMount]],
   ];
 

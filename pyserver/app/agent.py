@@ -556,14 +556,16 @@ async def compact_history(session_id: str, messages: list) -> list:
     return messages
 
 
-def build() -> Agent[Deps]:
+def build(model: Any = None) -> Agent[Deps]:
+    """`model` stands in for the configured one when only the tools are
+    wanted (mcpserver: the MCP client is the model, ours is never called)."""
     from .agentcontext import AutoContext
     from . import workplan, learning
     # The user's own procedures are appended rather than mixed in, so the rules
     # above them stay the rules: a skill describes how to do a job, it does not
     # get to revoke "never write to the transcript".
     agent = Agent(
-        _model(),
+        model if model is not None else _model(),
         deps_type=Deps,
         # Order is the point: built-in rules, then the user's base instructions,
         # then the skills. Later text can shape how the work is done; it never

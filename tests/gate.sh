@@ -35,6 +35,9 @@ run "partial replace"         "$PY" tests/test_textedit.py
 run "three-way merge"         "$PY" tests/test_merge.py
 run "edit-session lifecycle"  "$PY" tests/test_lifecycle.py
 run "backend HTTP (black-box)" "$PY" tests/test_http.py
+# The optional MCP add-on: install (cached in .cache/mcp-addon after the first
+# run), the always-tokened /mcp route, and the panel bridge.
+run "MCP add-on and bridge" "$PY" tests/test_mcp.py
 # Runs real Python through the real runner: the confinement claims in
 # sandbox.py are only worth stating if something checks them each time.
 run "workspace confinement" "$PY" tests/test_sandbox.py
