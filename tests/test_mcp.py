@@ -189,6 +189,8 @@ def main() -> int:
         check("refused while the panel switch is off", err and "MCP 활성화" in text, text[:200])
         err, text = m.tool("hina_status")
         check("hina_status works without the panel", not err and "비활성" in text, text[:200])
+        err, text = m.tool("hina_guide")
+        check("hina_guide needs the panel switch", err and "MCP 활성화" in text, text[:200])
 
         print("test_mcp_bridge")
         st, body = s.post("/workspace", payload([make_chat("mcpA", "MCP 챗", 6)]))
@@ -301,6 +303,12 @@ def main() -> int:
         check("refused again after deactivate", err and "MCP 활성화" in text, text[:200])
         err, text = m.tool("approve_proposals")
         check("approvals need the panel switch too", err and "MCP 활성화" in text, text[:200])
+        err, text = m.tool("hina_status")
+        check("switched off, hina_status names no bot or chat",
+              not err and tk not in text and "테스트 봇" not in text and "MCP 챗" not in text, text[:300])
+        _, st_off = s.get("/mcp/status")
+        check("switching off forgets the context", not (st_off.get("bridge") or {}).get("context"),
+              str(st_off.get("bridge"))[:200])
 
         st, tok2 = s.post("/mcp/token", {"rotate": True})
         st, _, _ = m.raw({"jsonrpc": "2.0", "id": 99, "method": "tools/list"})

@@ -45,7 +45,8 @@ function codexCommand(url: string): string {
 }
 
 function command(url: string, token: string): string {
-  return `claude mcp add --transport http risu-hina ${url} --header "Authorization: Bearer ${token}"`;
+  // -s user: every folder, not just the one the terminal happened to be in.
+  return `claude mcp add -s user --transport http risu-hina ${url} --header "Authorization: Bearer ${token}"`;
 }
 
 function ago(at: number): string {
@@ -205,7 +206,9 @@ export function buildMcpCard(onMount?: (refresh: () => void) => void): HTMLEleme
       copyToken.textContent = token && copyToClipboard(token) ? '복사됨' : '복사 실패';
       setTimeout(() => { copyToken.textContent = '토큰 복사'; }, 1500);
     });
-    detail.appendChild(el('div', { class: 'hint', style: { marginTop: '8px' }, text: 'Claude Code 에서 한 번 실행하세요:' }));
+    detail.appendChild(el('div', { class: 'hint', style: { marginTop: '8px' }, text:
+      '터미널(PowerShell·cmd·bash)에서 한 번 실행하세요. Claude Code 대화창에 붙여 넣지 마세요 - 토큰이 대화 기록에 남습니다. '
+      + '(-s user = 모든 폴더에서 사용, 빼면 실행한 폴더에서만)' }));
     detail.appendChild(cmd);
     detail.appendChild(el('div', { class: 'row' }, [copyCmd]));
     detail.appendChild(el('div', { class: 'hint', style: { marginTop: '8px' } }, [

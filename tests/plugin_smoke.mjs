@@ -3259,7 +3259,7 @@ console.log('\ntest_mcp_switch');
     check('the switch says it is on', !!findButton(document, 'MCP 켜짐'));
     await openAdvanced();
     check('advanced tab shows the claude mcp add command',
-          /claude mcp add --transport http risu-hina .*\/mcp/.test(document.body.textContent || ''),
+          /claude mcp add -s user --transport http risu-hina .*\/mcp/.test(document.body.textContent || ''),
           (document.querySelector('.mcpcmd')?.textContent || '(no command box)').slice(0, 160));
     check('advanced tab shows the codex mcp add command (token by env var)',
           /codex mcp add risu-hina --url .*\/mcp --bearer-token-env-var RISUHINA_MCP_TOKEN/.test(
