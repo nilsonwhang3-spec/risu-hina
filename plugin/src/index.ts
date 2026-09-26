@@ -6,6 +6,7 @@
  * on load slows down every RisuAI start whether or not it is used.
  */
 import { transport, clientLog } from './transport';
+import { mcp } from './mcp';
 import { bootstrap } from './ui/shell';
 import { ICON, pollWhileVisible } from './ui/dom';
 import { smallScreen } from './ui/blobimg';
@@ -130,6 +131,9 @@ async function resolveConfig(): Promise<{ url: string; token: string }> {
       void clientLog('info', 'unloaded by host (plugin reload or disable)', {
         platform: transport.hostPlatform, connected: !!transport.health,
       });
+      // The panel that granted MCP access is going away: take it back now
+      // rather than letting the lease run out.
+      if (mcp.on) { try { await mcp.deactivate(); } catch { /* the lease expires anyway */ } }
       for (const p of parts) {
         if (p?.id) {
           try { await Risuai.unregisterUIPart(p.id); } catch { /* already gone */ }

@@ -30,7 +30,12 @@ from typing import Any
 
 from . import config, db, log
 
-LEASE_S = 45.0
+# How long after the last poll ended the lease still holds. The panel re-polls
+# at once, so the normal gap is one round trip; this only has to cover a retry
+# after a network error. Short, because closing the RisuAI window cannot send
+# anything - the lease running out (or the held poll's disconnect) is what
+# switches MCP off then.
+LEASE_S = 15.0
 HOLD_S = 20.0
 TOKEN_FILE = "mcp_token.txt"
 MCP_SESSION_TITLE = "__mcp__"
@@ -84,7 +89,12 @@ def active() -> bool:
     with _lock:
         if not _state["enabled"]:
             return False
-        return _state["inFlight"] > 0 or (time.time() - _state["pollAt"]) < LEASE_S
+        alive = _state["inFlight"] > 0 or (time.time() - _state["pollAt"]) < LEASE_S
+        if not alive and _state["context"]:
+            # The panel is gone (window closed): forget what it had open. A
+            # returning poll sets it again.
+            _state["context"] = {}
+        return alive
 
 
 def context() -> dict:
@@ -174,8 +184,10 @@ def _pending_actions(chat_key: str, char_key: str) -> dict:
     return {"actions": na, "staged": ns, "rev": f"{na}:{ma}:{ns}:{ms}"}
 
 
-async def poll(ctx: dict) -> dict:
-    """One long poll from the panel. Returns early when a job arrives."""
+async def poll(ctx: dict, disconnected: Any = None) -> dict:
+    """One long poll from the panel. Returns early when a job arrives.
+    `disconnected` is the request's is_disconnected: a client that went away
+    (window closed) ends the lease at once instead of after LEASE_S."""
     global _wake, _loop
     loop = asyncio.get_running_loop()
     if _wake is None or _loop is not loop:
@@ -186,6 +198,7 @@ async def poll(ctx: dict) -> dict:
         _state["context"] = _clean_ctx(ctx)
         _state["pollAt"] = time.time()
         _state["inFlight"] += 1
+    gone = False
     try:
         deadline = time.time() + HOLD_S
         while True:
@@ -200,6 +213,13 @@ async def poll(ctx: dict) -> dict:
                 await asyncio.wait_for(_wake.wait(), timeout=min(left, 2.0))
             except asyncio.TimeoutError:
                 pass
+            if disconnected is not None:
+                try:
+                    gone = bool(await disconnected())
+                except Exception:  # noqa: BLE001 - no probe, no early end
+                    gone = False
+                if gone:
+                    break
             # Proposal counts are sampled every couple of seconds so a new
             # proposal reaches the panel without a job being queued.
             if time.time() - (deadline - HOLD_S) >= 2.0:
@@ -210,9 +230,18 @@ async def poll(ctx: dict) -> dict:
     finally:
         with _lock:
             _state["inFlight"] -= 1
-            _state["pollAt"] = time.time()
-            jobs = list(_jobs)
-            _jobs.clear()
+            if gone:
+                # Undelivered jobs stay queued; a lapsed lease is what makes
+                # tool calls refuse from here on.
+                _state["pollAt"] = 0.0
+                if _state["inFlight"] == 0:
+                    _state["context"] = {}
+                log.info("mcp bridge: panel poll disconnected - lease ended")
+            else:
+                _state["pollAt"] = time.time()
+            jobs = [] if gone else list(_jobs)
+            if not gone:
+                _jobs.clear()
             enabled = _state["enabled"]
             last = _state["lastCall"]
             calls = _state["calls"]

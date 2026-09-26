@@ -460,8 +460,9 @@ def push_stream_event(session_id: str | None, obj: dict) -> None:
     if not session_id:
         return
     # An MCP call has no turn stream; the panel's MCP long poll carries the
-    # one side event that needs the plugin to act (a requested card save).
-    if obj.get("type") == "card-writeback":
+    # side events that need the plugin to act: a requested card save, and
+    # studio_open's jump to the 검수 tab.
+    if obj.get("type") in ("card-writeback", "open"):
         from . import mcpbridge
         if mcpbridge.is_mcp_session(session_id):
             mcpbridge.push_job(obj)
