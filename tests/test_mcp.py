@@ -326,6 +326,68 @@ def main() -> int:
         else:
             print("  (Pillow missing in the test runner - image checks skipped)")
 
+        print("test_mcp_file_transfer")
+        import re as _re
+        import zipfile
+
+        def url_of(text: str) -> str:
+            mm = _re.search(r"(http://\S+/mcp/file/[\w-]+)", text)
+            return mm.group(1) if mm else ""
+
+        def fetch(url: str, method: str = "GET", data: bytes | None = None) -> tuple[int, bytes]:
+            req = urllib.request.Request(url, data=data, method=method)
+            try:
+                with urllib.request.urlopen(req, timeout=30) as r:
+                    return r.status, r.read()
+            except urllib.error.HTTPError as e:
+                return e.code, e.read()
+
+        if png:
+            err, text = m.tool("download_file", {"path": "studio/output/mcptest/a.png"})
+            url = url_of(text)
+            check("download_file hands out a one-time URL and a curl line",
+                  not err and url and "curl -fsS -o" in text and "sha256" in text, text[:300])
+            st, got = fetch(url)
+            check("the URL serves the exact bytes, no token needed", st == 200 and got == png, f"{st} {len(got)}")
+            st, _ = fetch(url)
+            check("and only once", st == 404, str(st))
+            err, text = m.tool("download_file", {"path": "studio/output/mcptest"})
+            st, got = fetch(url_of(text))
+            names = zipfile.ZipFile(io.BytesIO(got)).namelist() if st == 200 else []
+            check("a folder comes down as a zip", "zip" in text and any(n.endswith("a.png") for n in names), str(names)[:200])
+
+        payload_bytes = "로컬에서 올린 파일\n".encode("utf-8") * 50
+        err, text = m.tool("upload_file", {"path": "studio/output/mcptest/up.txt"})
+        url = url_of(text)
+        check("upload_file hands out a one-time URL and a curl -T line", not err and url and "curl -fsS -T" in text, text[:300])
+        st, body_up = fetch(url, "PUT", payload_bytes)
+        resp = json.loads(body_up or b"{}")
+        check("the upload lands with size and sha256", st == 200 and resp.get("size") == len(payload_bytes)
+              and resp.get("path") == "studio/output/mcptest/up.txt", body_up[:200])
+        err, text = m.tool("download_file", {"path": "studio/output/mcptest/up.txt"})
+        st, got = fetch(url_of(text))
+        check("and comes back byte for byte", st == 200 and got == payload_bytes, f"{st} {len(got)}")
+        err, text = m.tool("upload_file", {"path": "studio/output/mcptest/up.txt"})
+        check("no silent overwrite", err and "overwrite" in text, text[:200])
+        err, text = m.tool("upload_file", {"path": "projects/다른봇/x.txt"})
+        check("other bots' project folders are refused", err and "다른 봇" in text, text[:200])
+        err, text = m.tool("upload_file", {"path": "system/card.md"})
+        check("system/ is read-only", err and "읽기 전용" in text, text[:200])
+
+        zbuf = io.BytesIO()
+        with zipfile.ZipFile(zbuf, "w") as zf:
+            zf.writestr("inner.txt", "zip 안의 파일")
+            zf.writestr("sub/deep.txt", "더 깊이")
+        err, text = m.tool("upload_file", {"path": "studio/output/mcptest/unz", "extract": True})
+        st, body_up = fetch(url_of(text), "PUT", zbuf.getvalue())
+        err2, text2 = m.tool("download_file", {"path": "studio/output/mcptest/unz/sub/deep.txt"})
+        st2, got = fetch(url_of(text2))
+        check("extract=true unpacks the zip into that folder", st == 200 and st2 == 200 and got == "더 깊이".encode(),
+              f"{st} {body_up[:160]} / {st2} {got[:60]}")
+
+        err, text = m.tool("download_file", {"path": "studio/output/mcptest/up.txt"})
+        pending_url = url_of(text)
+
         # studio_open reaches the panel through the long poll.
         out2: dict = {}
         th_open = threading.Thread(target=lambda: out2.update(r=m.tool("studio_open", {"folder": "studio/output/mcptest"})))
@@ -366,6 +428,8 @@ def main() -> int:
 
         st, body = s.post("/mcp/bridge/deactivate")
         check("deactivate", st == 200 and body.get("active") is False, str(body)[:200])
+        st, _ = fetch(pending_url)
+        check("an unused file URL dies when MCP goes off", st == 404, str(st))
         err, text = m.tool("read_card")
         check("refused again after deactivate", err and "MCP 연결" in text, text[:200])
         err, text = m.tool("approve_proposals")
