@@ -179,7 +179,7 @@ def main() -> int:
         names = {t["name"] for t in (r.get("result") or {}).get("tools") or []}
         check("agent tools listed", {"read_card", "list_turns", "propose_lore_add", "run_python"} <= names,
               str(sorted(names))[:300])
-        check("own tools listed", {"hina_status", "hina_guide"} <= names, "")
+        check("own tools listed", {"hina_status", "hina_guide", "approve_proposals", "approve_staged"} <= names, "")
         check("panel-only tools left out", not ({"run_shell", "pip_install", "propose_open_tab", "update_plan"} & names),
               str(sorted(names & {"run_shell", "pip_install", "propose_open_tab", "update_plan"})))
         schema = next(t for t in r["result"]["tools"] if t["name"] == "propose_lore_add").get("inputSchema") or {}
@@ -246,10 +246,61 @@ def main() -> int:
         err, text = out.get("r") or (True, "no result")
         check("the tool sees the panel's result", not err and "done" in text, text[:300])
 
+        print("test_mcp_approvals")
+        # Rejecting from the client: the proposal is closed, not applied.
+        _, body = s.get(q("/actions", charKey=ck))
+        gid = next((a["id"] for a in body.get("actions") or [] if "MCP 항목" in (a.get("summary") or "")), "")
+        err, text = m.tool("approve_proposals", {"ids": gid, "approve": False})
+        check("reject by id", not err and "거절" in text and gid in text, text[:300])
+        _, body = s.get(q("/actions", charKey=ck))
+        check("rejected proposal left the queue", not any(a["id"] == gid for a in body.get("actions") or []),
+              str(body)[:200])
+
+        # Approving from the client applies to the working copy.
+        m.tool("propose_lore_add", {"comment": "MCP 챗 항목", "keys": "mcpc", "content": "### C\n- 챗 로어",
+                                    "reason": "테스트", "scope": "local"})
+        err, text = m.tool("approve_proposals")
+        check("approve all applies", not err and "적용" in text, text[:300])
+        _, body = s.get(q("/lore", charKey=ck, chatKey=tk))
+        check("the lorebook entry is in the working copy", "MCP 챗 항목" in json.dumps(body, ensure_ascii=False),
+              str(body)[:300])
+
+        err, text = m.tool("stage_edit", {"msg_id": "mcpA-m1", "new_body": "턴 1: MCP 가 고친 턴.", "reason": "테스트"})
+        check("turn edit staged", not err, text[:200])
+        err, text = m.tool("approve_staged")
+        check("approve_staged applies", not err and "1건을 작업본에 적용" in text, text[:300])
+        _, body = s.get(q("/turns", chatKey=tk))
+        t1 = next((t for t in body.get("turns") or [] if t.get("msgId") == "mcpA-m1"), {})
+        check("the turn changed in the working copy", t1.get("body") == "턴 1: MCP 가 고친 턴." and t1.get("changed"),
+              str(t1)[:200])
+
+        # 반영 is a host action: the panel carries it out via the long poll.
+        err, text = m.tool("propose_writeback", {"reason": "테스트 반영"})
+        check("writeback proposed", not err, text[:200])
+        res: dict = {}
+        th_ap = threading.Thread(target=lambda: res.update(r=m.tool("approve_proposals")))
+        th_ap.start()
+        st, body = s.post("/mcp/bridge/poll", {"context": ctx})
+        jobs = body.get("jobs") or []
+        job = jobs[0] if jobs else {}
+        check("host approval handed to the panel", job.get("type") == "host-action" and job.get("kind") == "host_writeback"
+              and job.get("chatKey") == tk, str(body)[:300])
+        if job:
+            # What the plugin's decideAction does, with the MCP's empty mode.
+            st, dec = s.post("/actions/decide", {"chatKey": tk, "id": job["id"], "approve": True, "mode": ""})
+            check("decide hands back the host block", st == 200 and (dec.get("host") or {}).get("kind") == "host_writeback",
+                  f"{st} {str(dec)[:200]}")
+            s.post("/actions/complete", {"chatKey": tk, "id": job["id"], "ok": True, "detail": "3건을 RisuAI에 반영했습니다."})
+        th_ap.join(timeout=60)
+        err, text = res.get("r") or (True, "no result")
+        check("the approval reports the panel's result", not err and "완료" in text and "RisuAI에 반영" in text, text[:300])
+
         st, body = s.post("/mcp/bridge/deactivate")
         check("deactivate", st == 200 and body.get("active") is False, str(body)[:200])
         err, text = m.tool("read_card")
         check("refused again after deactivate", err and "MCP 활성화" in text, text[:200])
+        err, text = m.tool("approve_proposals")
+        check("approvals need the panel switch too", err and "MCP 활성화" in text, text[:200])
 
         st, tok2 = s.post("/mcp/token", {"rotate": True})
         st, _, _ = m.raw({"jsonrpc": "2.0", "id": 99, "method": "tools/list"})

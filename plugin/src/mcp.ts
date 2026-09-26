@@ -42,7 +42,7 @@ export interface McpBridgeStatus {
 
 interface PollReply {
   enabled: boolean;
-  jobs: { type: string; id: string; charKey: string; chatKey: string }[];
+  jobs: { type: string; id: string; charKey: string; chatKey: string; kind?: string }[];
   pending?: { actions: number; staged: number; rev: string };
   lastCall?: McpBridgeStatus['lastCall'];
   calls?: number;
@@ -160,6 +160,7 @@ class McpBridge {
   }
 
   private async run(job: PollReply['jobs'][number]): Promise<void> {
+    if (job.type === 'host-action') return this.runHostAction(job);
     if (job.type !== 'card-writeback') return;
     try {
       const said = await state.requestedCardWriteback(job.id, job.charKey, job.chatKey);
@@ -169,7 +170,30 @@ class McpBridge {
       this.onNotice('MCP 요청 반영 실패: ' + (e instanceof Error ? e.message : String(e)), 'err');
     }
   }
+
+  /**
+   * An approval from the MCP client of something only this iframe can do
+   * (반영, 사본 저장, 복제 봇): the same decideAction as the 승인·실행 button.
+   * A job for a bot or chat that is not open here is left pending - the
+   * backend tool times out and says so, and the proposal is not lost.
+   */
+  private async runHostAction(job: PollReply['jobs'][number]): Promise<void> {
+    if (job.charKey !== state.botKey || (CHAT_HOST_KINDS.has(job.kind || '') && job.chatKey !== state.activeChatKey)) {
+      this.onNotice('MCP 승인 요청을 건너뛰었습니다: 이 패널에 열린 봇·챗의 작업이 아닙니다.', 'err');
+      return;
+    }
+    try {
+      const said = await state.decideAction(job.id, true, job.chatKey, '');
+      this.onNotice('MCP 승인·실행: ' + said, 'ok');
+    } catch (e) {
+      this.onNotice('MCP 승인 실행 실패: ' + (e instanceof Error ? e.message : String(e)), 'err');
+    }
+    this.onPendingChanged();
+  }
 }
+
+/** Kinds that act on the chat open in this panel (writeBack / saveCopy). */
+const CHAT_HOST_KINDS = new Set(['host_writeback', 'host_save_copy']);
 
 export const mcp = new McpBridge();
 

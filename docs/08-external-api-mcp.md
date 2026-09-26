@@ -37,6 +37,16 @@ agent's INSTRUCTIONS + preset + skills text). `Deps.mode = ''`: no screen gate. 
 per-chat session titled `__mcp__` (`session.latest` / `list_all` skip it) so proposals, clipped outputs and jobs
 have a session to hang off.
 
+**Approving from the client (2026-09-27, the user's follow-up: "going back and forth to the panel is a chore;
+use auto mode").** `approve_proposals(ids='all', approve=True)` and `approve_staged(...)` are the panel's 승인
+buttons as tools: they call `main.h_action_decide` / `main.h_approve`, so the one-dirty-scope rule, the auto
+checkpoint before turn edits and the conflict check all hold. They are separate from the propose_* tools so the
+client's permission rules can treat "propose" and "apply" differently (Claude Code allow lists / auto mode).
+Host kinds (반영 · 사본 저장 · 복제 봇) are relayed: a `host-action` job on the long poll, the plugin runs
+`decideAction(id, true, chatKey, '')` (= 승인·실행, empty mode = no screen gate) only if that bot/chat is open
+in the panel, reports through `/actions/complete`, and the tool waits (15 s to start, 300 s to finish). Stops at
+the first failure. The panel still shows the queue and can decide there too.
+
 **The bridge (`mcpbridge.py`, plugin `mcp.ts`).** The switch starts a long poll (`POST /mcp/bridge/poll`, held
 ≤ 20 s, re-issued immediately — no timer, so a hidden tab's throttling does not drop it). It carries the panel's
 context (charKey, chatKey, names, screen); a context change is also pushed at once through `/mcp/bridge/activate`.
