@@ -53,6 +53,9 @@ How it works:
 - Approved changes land in the working copy; they reach RisuAI only on 반영 (write-back): approve a
   propose_writeback (chat) or call write_card_to_risu (card) when the user wants it saved to RisuAI.
   Both are carried out by the open panel, and the tool reports the verified result.
+- Files live on the backend PC, not on this machine. For bulk work, run_python processes them there
+  (only printed output comes back). To use your own local tools on a file, download_file (curl -o),
+  edit locally, then upload_file (curl -T, overwrite=true) - the bytes never pass through your context.
 - Tool results and the user are Korean-speaking; answer the user in Korean.
 - hina_guide returns the full editing rules the in-panel AI follows (CBS, assets, lorebook, scripts).
   Read it before non-trivial edits. list_skills / load_skill hold the method guides.
@@ -303,6 +306,213 @@ def _chat_row(chat_key: str) -> Any:
     return store.chat_row(chat_key) if chat_key else None
 
 
+# --- moving files between the client's PC and the space ---------------------------
+#
+# The MCP server runs on the backend PC and cannot touch the client's disk, and
+# a file's bytes returned as a tool result would land in the model's context.
+# So the tools hand out a one-time URL and the client moves the bytes itself
+# with its own shell (`curl -o` / `curl -T`): nothing goes through the context.
+#
+# A ticket is one path, one direction, one use, TICKET_TTL seconds, and only
+# while the panel's MCP lease holds - closing the panel kills every URL.
+# The URL itself is the credential (random, unguessable), so /mcp/file/<id>
+# needs no header - `curl` in any shell works without the token.
+
+import contextvars
+import hashlib
+import os
+import secrets
+import threading
+from pathlib import Path
+
+TICKET_TTL = 600.0
+MAX_UPLOAD = 512 * 1024 * 1024
+_TICKETS: dict[str, dict] = {}
+_TICKETS_LOCK = threading.Lock()
+_BASE_URL: contextvars.ContextVar[str] = contextvars.ContextVar("mcp_base_url", default="")
+
+
+def clear_tickets() -> None:
+    with _TICKETS_LOCK:
+        gone = list(_TICKETS.values())
+        _TICKETS.clear()
+    for t in gone:
+        if t.get("cleanup"):
+            Path(t["path"]).unlink(missing_ok=True)
+
+
+def _issue(**ticket: Any) -> str:
+    tid = secrets.token_urlsafe(24)
+    now = time.time()
+    with _TICKETS_LOCK:
+        for k, t in list(_TICKETS.items()):
+            if t["exp"] < now:
+                _TICKETS.pop(k, None)
+                if t.get("cleanup"):
+                    Path(t["path"]).unlink(missing_ok=True)
+        _TICKETS[tid] = dict(ticket, exp=now + TICKET_TTL)
+    return tid
+
+
+def _take(tid: str, mode: str) -> dict | None:
+    with _TICKETS_LOCK:
+        t = _TICKETS.get(tid)
+        if t is None or t["mode"] != mode or t["exp"] < time.time():
+            return None
+        return _TICKETS.pop(tid)
+
+
+def _base_url_from(request: Any) -> str:
+    """The address the client used to reach /mcp, so the URL we hand back is
+    one it can reach too (https://hina.example.com, not 127.0.0.1)."""
+    h = getattr(request, "headers", None)
+    if h is None:
+        return f"http://127.0.0.1:{config.PORT}"
+    host = h.get("x-forwarded-host") or h.get("host") or f"127.0.0.1:{config.PORT}"
+    proto = h.get("x-forwarded-proto") or ("https" if h.get("cf-visitor", "").find("https") >= 0 else "http")
+    return f"{proto}://{host}"
+
+
+def _space_path(char_key: str, path: str) -> tuple[str, str, bool]:
+    """(scope, rel, read_only) the way the agent's file tools read a path:
+    `system/...` is this bot's read-only SYSTEM view, `skills/...` its skill
+    copies (regenerated every run, so read-only here), anything else the space."""
+    from . import files, workspace
+    p = (path or "").replace("\\", "/").strip("/")
+    if p == "system" or p.startswith("system/"):
+        return char_key, p[6:].lstrip("/"), True
+    if p == "skills" or p.startswith("skills/"):
+        return files.SPACE, f"hina/{workspace.bot_folder(char_key)}/{p}", True
+    return files.SPACE, p, False
+
+
+def _writable(char_key: str, rel: str) -> str | None:
+    """write_file's rule: this bot's own project folder, studio/, hina/."""
+    from . import workspace
+    area = rel.split("/", 1)[0]
+    own = f"projects/{workspace.bot_folder(char_key)}"
+    if "/" not in rel or area not in ("studio", "hina", "projects"):
+        return "올릴 수 있는 곳: projects/<이 봇>/…, studio/…, hina/… (파일 이름까지 포함한 경로)"
+    if area == "projects" and not (rel == own or rel.startswith(own + "/")):
+        return f"다른 봇의 프로젝트 폴더에는 올릴 수 없습니다. 이 봇의 폴더: {own}/…"
+    return None
+
+
+def _sha256(p: Path) -> str:
+    h = hashlib.sha256()
+    with p.open("rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+async def _download_file(args: dict) -> str:
+    from . import files
+    deps = await asyncio.to_thread(_deps)
+    scope, rel, _ = _space_path(deps.char_key, str(args.get("path") or ""))
+    try:
+        target = files._resolve(scope, rel)
+    except files.FileError as e:
+        raise _Refusal(str(e))
+    if not rel or not target.exists():
+        raise _Refusal(f"없습니다: {args.get('path')}")
+    if target.is_dir():
+        tmp, count = await asyncio.to_thread(files.zip_paths, scope, [rel])
+        name, path, cleanup, what = target.name + ".zip", tmp, True, f"폴더 zip (파일 {count}개)"
+    else:
+        name, path, cleanup, what = target.name, target, False, "파일"
+    size = path.stat().st_size
+    digest = await asyncio.to_thread(_sha256, path)
+    tid = _issue(mode="get", path=str(path), name=name, cleanup=cleanup)
+    url = f"{_BASE_URL.get() or _base_url_from(None)}/mcp/file/{tid}"
+    return (f"{what} 다운로드 주소 (1회용, {int(TICKET_TTL // 60)}분, MCP 가 켜져 있는 동안만):\n{url}\n"
+            f"크기 {size} bytes · sha256 {digest}\n"
+            f"받기 (Bash/PowerShell 모두): curl -fsS -o \"{name}\" \"{url}\"\n"
+            "주소 자체가 권한이므로 토큰 헤더는 필요 없습니다. 내용은 컨텍스트를 거치지 않습니다.")
+
+
+async def _upload_file(args: dict) -> str:
+    from . import files
+    deps = await asyncio.to_thread(_deps)
+    scope, rel, read_only = _space_path(deps.char_key, str(args.get("path") or ""))
+    if read_only:
+        raise _Refusal("system/ · skills/ 는 읽기 전용입니다.")
+    bad = _writable(deps.char_key, rel)
+    if bad:
+        raise _Refusal(bad)
+    try:
+        dest = files._resolve(scope, rel)
+    except files.FileError as e:
+        raise _Refusal(str(e))
+    overwrite = bool(args.get("overwrite"))
+    extract = bool(args.get("extract"))
+    if dest.is_dir() and not extract:
+        raise _Refusal("폴더 경로입니다. 파일 이름까지 적어 주세요 (zip 을 풀려면 extract=true).")
+    if dest.exists() and not overwrite and not extract:
+        raise _Refusal(f"이미 있습니다: {rel} (덮어쓰려면 overwrite=true)")
+    tid = _issue(mode="put", scope=scope, rel=rel, path=str(dest), overwrite=overwrite, extract=extract)
+    url = f"{_BASE_URL.get() or _base_url_from(None)}/mcp/file/{tid}"
+    return (f"업로드 주소 (1회용, {int(TICKET_TTL // 60)}분, 최대 {MAX_UPLOAD // (1024 * 1024)}MB, MCP 가 켜져 있는 동안만):\n{url}\n"
+            f"올리기: curl -fsS -T \"<로컬 파일>\" \"{url}\"\n"
+            f"대상: {rel}" + (" (zip 을 이 폴더에 풉니다)" if extract else "") +
+            "\n응답은 저장된 경로·크기·sha256 JSON 입니다. 내용은 컨텍스트를 거치지 않습니다.")
+
+
+async def _file_endpoint(request: Any) -> Any:
+    """GET = a download ticket, PUT/POST = an upload ticket. 404 for anything
+    unknown, expired, used, or while the panel's MCP is off - never why."""
+    from starlette.background import BackgroundTask
+    from starlette.responses import FileResponse, JSONResponse
+    from . import files
+    tid = request.path_params.get("ticket", "")
+    nostore = {"Cache-Control": "no-store"}
+    mode = "get" if request.method == "GET" else "put"
+    t = _take(tid, mode) if mcpbridge.active() else None
+    if t is None:
+        return JSONResponse({"error": "not found"}, status_code=404, headers=nostore)
+    if mode == "get":
+        p = Path(t["path"])
+        if not p.is_file():
+            return JSONResponse({"error": "not found"}, status_code=404, headers=nostore)
+        log.info("mcp file download %s (%s bytes)", t["name"], p.stat().st_size)
+        cleanup = BackgroundTask(p.unlink, missing_ok=True) if t.get("cleanup") else None
+        return FileResponse(str(p), filename=t["name"], headers=nostore, background=cleanup)
+    dest = Path(t["path"])
+    part = dest.with_name(dest.name + f".{tid[:8]}.part")
+    size = 0
+    h = hashlib.sha256()
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        with part.open("wb") as f:
+            async for chunk in request.stream():
+                size += len(chunk)
+                if size > MAX_UPLOAD:
+                    raise ValueError(f"too large (> {MAX_UPLOAD} bytes)")
+                h.update(chunk)
+                f.write(chunk)
+        if t.get("extract"):
+            import base64 as b64
+            data = await asyncio.to_thread(part.read_bytes)
+            # extract: `rel` is the folder the archive unpacks into.
+            # files.upload unpacks into <into>/<zip stem>/, so the archive is
+            # named after that folder and sent to its parent.
+            parent, _, leaf = t["rel"].rpartition("/")
+            out = await asyncio.to_thread(files.upload, t["scope"], leaf + ".zip",
+                                          base64_data=b64.b64encode(data).decode("ascii"),
+                                          into=parent, extract=True)
+            part.unlink(missing_ok=True)
+            log.info("mcp file upload+extract %s (%s bytes)", t["rel"], size)
+            return JSONResponse({"ok": True, "extracted": out, "size": size, "sha256": h.hexdigest()}, headers=nostore)
+        if dest.exists() and not t.get("overwrite"):
+            raise ValueError(f"already exists: {t['rel']}")
+        os.replace(part, dest)
+    except Exception as e:  # noqa: BLE001 - the client gets the reason, the part file goes
+        part.unlink(missing_ok=True)
+        return JSONResponse({"error": str(e)}, status_code=400, headers=nostore)
+    log.info("mcp file upload %s (%s bytes)", t["rel"], size)
+    return JSONResponse({"ok": True, "path": t["rel"], "size": size, "sha256": h.hexdigest()}, headers=nostore)
+
+
 _IDS_SCHEMA = {
     "type": "object",
     "properties": {
@@ -337,6 +547,23 @@ _OWN_TOOLS: dict[str, tuple[str, dict, Any, bool]] = {
         "Approve (or reject) pending turn edits of the open chat (stage_edit / stage_bulk / stage_delete; "
         "see list_staged). Approval applies them to the working copy after an automatic checkpoint.",
         _IDS_SCHEMA, _approve_staged, True),
+    "download_file": (
+        "Get a one-time URL to download a space file (or a folder, zipped) to the CLIENT'S machine with "
+        "curl - the bytes never enter your context. Use it to edit a file locally with your own tools, "
+        "or to keep a copy. path: a space path (projects/..., studio/..., hina/..., system/...).",
+        {"type": "object", "properties": {"path": {"type": "string", "description": "Space path of a file or folder."}},
+         "required": ["path"]},
+        _download_file, True),
+    "upload_file": (
+        "Get a one-time URL to upload a file FROM the client's machine into the space with curl -T - the "
+        "bytes never enter your context. Writable like write_file: projects/<this bot>/..., studio/..., "
+        "hina/.... extract=true takes a .zip and unpacks it into `path` as a folder.",
+        {"type": "object", "properties": {
+            "path": {"type": "string", "description": "Destination space path including the file name (or the folder, with extract)."},
+            "overwrite": {"type": "boolean", "default": False},
+            "extract": {"type": "boolean", "default": False}},
+         "required": ["path"]},
+        _upload_file, True),
 }
 
 
@@ -375,6 +602,7 @@ async def _call_tool(ctx: Any, params: Any) -> Any:
         _, _, fn, needs_panel = _OWN_TOOLS[name]
         if needs_panel and not mcpbridge.active():
             return err(off)
+        token = _BASE_URL.set(_base_url_from(getattr(ctx, "request", None)))
         try:
             out = await fn(args)
         except _Refusal as e:
@@ -382,6 +610,8 @@ async def _call_tool(ctx: Any, params: Any) -> Any:
         except Exception as e:  # noqa: BLE001
             log.warn("mcp tool %s failed: %s: %s", name, type(e).__name__, e)
             return err(f"{type(e).__name__}: {e}")
+        finally:
+            _BASE_URL.reset(token)
         mcpbridge.note_call(name, True)
         return types.CallToolResult(content=_content(out))
     if not mcpbridge.active():
@@ -468,8 +698,12 @@ async def _enable_async() -> None:
     # Give run() a moment to open its task group before the first request.
     await asyncio.sleep(0)
     route = Route("/mcp", endpoint=_Gate(manager.handle_request), methods=["GET", "POST", "DELETE"])
+    # One-time file URLs (download_file / upload_file). Exact prefix, so the
+    # dispatcher's /mcp/status etc. are untouched.
+    file_route = Route("/mcp/file/{ticket}", endpoint=_file_endpoint, methods=["GET", "PUT", "POST"])
     app.router.routes.insert(0, route)
-    _state.update(server=server, manager=manager, stop=stop, task=task, route=route)
+    app.router.routes.insert(0, file_route)
+    _state.update(server=server, manager=manager, stop=stop, task=task, route=route, file_route=file_route)
     mcpbridge.token()
     log.info("mcp route mounted at /mcp")
 
@@ -493,15 +727,17 @@ def enable() -> None:
 
 def disable() -> None:
     from .main import app
-    route = _state.get("route")
-    if route is not None:
-        try:
-            app.router.routes.remove(route)
-        except ValueError:
-            pass
+    for key in ("route", "file_route"):
+        r = _state.get(key)
+        if r is not None:
+            try:
+                app.router.routes.remove(r)
+            except ValueError:
+                pass
+    clear_tickets()
     stop = _state.get("stop")
     if stop is not None and _loop is not None:
         _loop.call_soon_threadsafe(stop.set)
-    _state.update(server=None, manager=None, stop=None, task=None, route=None)
+    _state.update(server=None, manager=None, stop=None, task=None, route=None, file_route=None)
     mcpbridge.set_enabled(False)
     log.info("mcp route removed")
