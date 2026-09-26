@@ -100,6 +100,9 @@ def set_enabled(on: bool, ctx: dict | None = None) -> dict:
             _state["context"] = _clean_ctx(ctx)
         if not on:
             _jobs.clear()
+            # Off means a token holder learns nothing: not even which bot and
+            # chat were open last (hina_status would have said).
+            _state["context"] = {}
     log.info("mcp bridge %s", "enabled" if on else "disabled")
     _notify()
     return status()

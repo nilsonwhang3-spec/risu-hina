@@ -151,6 +151,10 @@ def _hina_status() -> str:
     ctx = st.get("context") or {}
     lines = [f"Risu Hina 백엔드 v{config.VERSION}",
              f"패널 연결: {'활성' if st['active'] else '비활성 (패널에서 MCP 활성화를 켜 주세요)'}"]
+    if not st["active"]:
+        # With the switch off the token opens nothing - including what the
+        # panel was last looking at.
+        return "\n".join(lines)
     if ctx.get("chatKey"):
         crow = store.chat_row(ctx["chatKey"])
         lines.append(f"열린 봇: {ctx.get('botName') or '?'} (charKey {crow['char_key'] if crow else '?'})")
@@ -317,11 +321,11 @@ async def _plain(fn: Any) -> Any:
 # name -> (description, input schema, async fn(args), needs the panel switch)
 _OWN_TOOLS: dict[str, tuple[str, dict, Any, bool]] = {
     "hina_status": ("Which bot and chat the Risu Hina panel has open, whether the panel's MCP switch is on, "
-                    "and how many proposals await approval. Call this first.",
+                    "and how many proposals await approval. Call this first. With the switch off it only says so.",
                     _NO_ARGS, lambda a: _plain(_hina_status), False),
     "hina_guide": ("The full editing rules and skill index the in-panel AI follows (Korean/English). "
                    "Read once before editing cards, lorebooks, scripts or assets.",
-                   _NO_ARGS, lambda a: _plain(_hina_guide), False),
+                   _NO_ARGS, lambda a: _plain(_hina_guide), True),
     "approve_proposals": (
         "Approve (or reject) pending proposals of the open bot - the panel's 승인 button. Covers lorebook, "
         "card, script, memory, asset, snapshot proposals (see list_proposals for ids) and host actions: an "
