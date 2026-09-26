@@ -3265,6 +3265,11 @@ console.log('\ntest_mcp_switch');
           /codex mcp add risu-hina --url .*\/mcp --bearer-token-env-var RISUHINA_MCP_TOKEN/.test(
             document.querySelector('.mcpcodex')?.textContent || ''),
           (document.querySelector('.mcpcodex')?.textContent || '(no codex box)').slice(0, 160));
+    check('the card says a loopback address only works on the backend PC',
+          /같은 PC에서만/.test(document.body.textContent || '') && /cloudflared/.test(document.body.textContent || ''));
+    check('the smoke backend URL (127.0.0.1) is flagged as local',
+          /PC 자신입니다/.test(document.querySelector('.hint.warn')?.textContent || ''),
+          (document.querySelector('.hint.warn')?.textContent || '(no warning)').slice(0, 120));
     check('the command hides the token until copied', !/hmcp_/.test(document.querySelector('.mcpcmd')?.textContent || 'x'));
     await closeSettings();
     clickById(document, 'tab-chats');

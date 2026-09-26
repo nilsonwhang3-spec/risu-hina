@@ -77,6 +77,9 @@ export function buildMcpCard(onMount?: (refresh: () => void) => void): HTMLEleme
       st = await mcp.status();
     } catch (e) {
       statusLine.textContent = '이 백엔드는 MCP 를 지원하지 않습니다 (백엔드 업데이트 필요): ' + msg(e);
+      const again = el('button', { class: 'ghost tiny', text: '다시 확인' });
+      again.addEventListener('click', () => void render());
+      actions.appendChild(again);
       return;
     }
     const a = st.addon;
@@ -154,6 +157,20 @@ export function buildMcpCard(onMount?: (refresh: () => void) => void): HTMLEleme
       sync();
     });
     url.addEventListener('input', sync);
+    // 127.0.0.1 / localhost is the backend PC itself: an MCP client on another
+    // PC cannot reach it. Said up front and again when the field holds one.
+    const urlWarn = el('div', { class: 'hint warn', style: { display: 'none' } });
+    const checkUrl = () => {
+      let host = '';
+      try { host = new URL(url.value.trim()).hostname; } catch { /* not a URL yet */ }
+      const local = /^(127\.|localhost$|\[?::1\]?$|0\.0\.0\.0$)/.test(host);
+      urlWarn.style.display = local ? '' : 'none';
+      urlWarn.textContent = local
+        ? `${host} 는 백엔드가 설치된 PC 자신입니다. MCP 클라이언트(Claude Code·Codex)가 같은 PC에 있을 때만 접속됩니다.`
+        : '';
+    };
+    url.addEventListener('input', checkUrl);
+    checkUrl();
     const show = el('button', { class: 'ghost tiny', text: '보기' });
     show.addEventListener('click', () => { tokenBox.type = tokenBox.type === 'password' ? 'text' : 'password'; show.textContent = tokenBox.type === 'password' ? '보기' : '숨기기'; });
     const copyCmd = el('button', { class: 'primary tiny', text: '명령 복사' });
@@ -170,6 +187,12 @@ export function buildMcpCard(onMount?: (refresh: () => void) => void): HTMLEleme
     });
 
     detail.appendChild(el('label', { class: 'field' }, [el('span', { text: 'MCP 주소 (MCP 클라이언트가 접속할 외부 주소)' }), url]));
+    detail.appendChild(urlWarn);
+    detail.appendChild(el('div', { class: 'hint' }, [
+      '127.0.0.1:6020 같은 로컬 주소는 백엔드와 같은 PC에서만 됩니다. 다른 PC(원격 서버)의 백엔드에 붙이려면 ',
+      'Tailscale(예: http://100.x.x.x:6020/mcp — 백엔드를 그 주소에 바인딩해야 함) 또는 ',
+      'cloudflared 터널(예: https://내도메인/mcp)이 필요합니다.',
+    ]));
     detail.appendChild(el('label', { class: 'field' }, [el('span', { text: 'MCP 토큰 (백엔드 토큰과 별개, 루프백에서도 항상 필요)' }), tokenBox]));
     detail.appendChild(el('div', { class: 'row' }, [show, rotate]));
     const copyCodex = el('button', { class: 'primary tiny', text: 'Codex 명령 복사' });

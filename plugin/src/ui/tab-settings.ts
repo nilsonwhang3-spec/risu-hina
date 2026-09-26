@@ -38,6 +38,7 @@ let aboutMount: HTMLElement | null = null;
  */
 const refreshers: (() => void | Promise<void>)[] = [];
 let watchedHealth: boolean | null = null;
+let watchedVersion = '';
 
 export function refreshSettingsCards(): void {
   for (const fn of refreshers) { try { void fn(); } catch { /* one card must not stop the rest */ } }
@@ -45,9 +46,15 @@ export function refreshSettingsCards(): void {
 
 state.onChange(() => {
   const ok = !!state.health;
-  if (watchedHealth === null) { watchedHealth = ok; return; }
-  if (ok && !watchedHealth) refreshSettingsCards();
+  const version = state.health?.version ?? '';
+  if (watchedHealth === null) { watchedHealth = ok; watchedVersion = version; return; }
+  // A backend update is not always seen as disconnect -> connect: the panel
+  // can go straight from the old health to the new one. The cards then kept
+  // the old backend's answers (the MCP card said "not supported" until a
+  // reload), so a changed version refreshes them too.
+  if ((ok && !watchedHealth) || (ok && version && version !== watchedVersion)) refreshSettingsCards();
   watchedHealth = ok;
+  if (version) watchedVersion = version;
 });
 
 export function renderSettingsTab(mount: HTMLElement): void {
