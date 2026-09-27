@@ -1,5 +1,27 @@
 # 06. Implementation status — as of 2026-09-27 (v0.15.30, Risu Hina)
 
+## unreleased (2026-09-27): §1-78 studio saves stop reloading everything
+
+- **Report (user):** editing and saving a style prompt or a character prompt re-rendered the DOM often and
+  stuttered, the save took very long to show, and sometimes a list vanished and did not come back.
+- **Measured on zikmunt-pc (281 character cards):** `/studio/list?area=characters` 0.84 s, `/files?prefix=
+  studio/output` 0.6 s, `/studio/plan` (the unresolved-reference check after every save) 0.66 s. A character
+  save did: rename check, two uploads, the whole list re-read, **the open editor rebuilt** (re-reading
+  prompt.md, preset.json and stat-ing its reference images), a plan, and a panel-wide emit that set off the
+  title-row counters' three requests (§1-76).
+- **Backend:** the listing's time was path resolution, not reading - `files._root` realpath'd the space root
+  on every `_resolve` (844 calls) and each card file was resolved again. `_root` is cached (keyed by the
+  unresolved path); the listing walk passes each card folder to `read_character(at=)`, which reads its two
+  files directly (symlinked folders/files skipped). 0.56-0.89 s → ~0.2 s, output identical (sha256 of the
+  listing JSON, real data).
+- **Panel:** a card save no longer emits (`state.touchFilesQuiet`; the files tab still re-reads when shown;
+  new batch outputs still emit for their badge). `refreshArea(area, { keepEditor })` refreshes the list data
+  and redraws everything except the editor that just saved (unless the card was renamed and moved). A full
+  refresh whose area read fails keeps that area's previous list instead of replacing it with `[]` - the
+  "list flew away" symptom.
+- Verified: plugin smoke (the editor element survives a save; one `/studio/list`; no `/workspace/dirty` or
+  `/actions`) - both key checks fail on the previous code; test_studio / test_files / studio_improvements.
+
 ## unreleased (2026-09-27): §1-77 a style carries its generation settings
 
 - **Ask (user):** saving a style prompt should be able to save the generation settings too (model, steps,

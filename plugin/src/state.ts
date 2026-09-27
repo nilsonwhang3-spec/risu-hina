@@ -1155,6 +1155,14 @@ class AppState {
     this.emit();
   }
 
+  /** The same rev bump without telling every listener (§1-78): a studio card
+   * save only needs the files tab to re-read when it is next shown, and the
+   * emit made each keystroke-save re-run the whole panel's listeners (the
+   * title-row counters alone sent three requests). */
+  touchFilesQuiet(): void {
+    this.filesRev += 1;
+  }
+
   /** A screen asked the agent something on the user's behalf (검수's AI 재검수,
    * §1-46): the agent panel sends it as if typed. */
   promptRequest: string | null = null;

@@ -331,9 +331,13 @@ export function characterEditor(dir: string, opts: CharEditorOpts = {}): HTMLEle
                                         fidelity: v.fidelity, mode: v.mode, enabled: v.enabled })),
       }, null, 2), false, target);
       hub.notice(`캐릭터 “${nm}” 를 저장했습니다.`, 'ok');
+      const renamed = (opts.chrome === 'inline' ? S.charOpen : S.selectedFile) !== target;
       if (opts.onSaved) opts.onSaved(target);
       else S.selectedFile = target;
-      await hub.refreshArea('characters');
+      // The editor already shows what was saved: refresh the list data, not
+      // the editor (§1-78) - unless the card moved, which the editor has to
+      // follow.
+      await hub.refreshArea('characters', { keepEditor: !renamed });
     } catch (e) {
       out.textContent = msg(e);
     } finally { save.disabled = false; }

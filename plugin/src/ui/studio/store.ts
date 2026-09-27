@@ -147,7 +147,7 @@ export const hub = {
   syncBadges: () => { /* registered by the left prompt view */ },
   notice: (_text: string, _kind: 'ok' | 'err' | '' = '') => { /* registered by index */ },
   refresh: async () => { /* registered by index */ },
-  refreshArea: async (_area: string) => { /* registered by index */ },
+  refreshArea: async (_area: string, _opts: { keepEditor?: boolean } = {}) => { /* registered by index */ },
   loadStatus: async () => { /* registered by index */ },
   touchQuiet: (_paths: string[] = []) => { /* registered by index */ },
 };

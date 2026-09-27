@@ -25,7 +25,7 @@
  */
 import { el, clear, ICON, iconBtn, pollWhileVisible } from './../dom';
 import { evictBlob } from '../blobimg';
-import { state, type StudioItem } from '../../state';
+import { state } from '../../state';
 import { threePane, showMobileCentre } from '../panes';
 import { bindAgent, mountAgent } from '../agentpane';
 import { CARD_AREAS, OUTPUT_ROOT, S, hub, areaOfPath, canonPath, checkUnresolved,
@@ -245,10 +245,12 @@ async function refresh(): Promise<void> {
     const [l, ...areas] = await Promise.all([
       // Only the output slice: the studio never reads the rest of the space.
       state.files(OUTPUT_ROOT),
-      ...CARD_AREAS.map((a) => state.studio.items(a.area).then((r) => r.items).catch(() => [] as StudioItem[])),
+      // A failed area read keeps the list it had (§1-78): replacing it with
+      // [] is what made a list "fly away" under a slow or timed-out request.
+      ...CARD_AREAS.map((a) => state.studio.items(a.area).then((r) => r.items).catch(() => null)),
     ]);
     S.listing = l;
-    S.cards = Object.fromEntries(CARD_AREAS.map((a, i) => [a.area, areas[i]]));
+    S.cards = Object.fromEntries(CARD_AREAS.map((a, i) => [a.area, areas[i] ?? S.cards[a.area] ?? []]));
   } catch (e) {
     S.listing = null;
     drawLeft();
@@ -339,18 +341,30 @@ function touchQuiet(paths: string[] = []): void {
   renderedRev = state.filesRev + 1;
   // A batch that rewrote files under existing names must not keep showing
   // the old thumbnails (§1-42).
-  if (paths.length) evictBlob(paths);
-  state.touchFiles(paths);
+  if (paths.length) {
+    evictBlob(paths);
+    state.touchFiles(paths);   // new outputs badge the files tab: that needs the emit
+  } else {
+    state.touchFilesQuiet();   // a card save: no panel-wide emit (§1-78)
+  }
 }
 
 /** Re-read ONE card area after a save - a card edit cannot change the output
- * tree or the other areas, so one listing call replaces the old five. */
-async function refreshArea(area: string): Promise<void> {
+ * tree or the other areas, so one listing call replaces the old five.
+ *
+ * `keepEditor` (§1-78): the save came from an open card editor, which already
+ * shows what was saved. Rebuilding it re-read the card and its reference
+ * images, and the column jumped - so the list data refreshes, and only the
+ * views that are NOT that editor redraw. */
+async function refreshArea(area: string, opts: { keepEditor?: boolean } = {}): Promise<void> {
   try {
     S.cards[area] = (await state.studio.items(area)).items;
   } catch { /* keep what we have; the next full refresh corrects it */ }
-  drawLeft();
-  drawCentre();
+  const editorLeft = area === 'characters' && S.leftView === 'characters' && !!S.charOpen && S.leftTab !== 'output';
+  const editorCentre = !!S.selectedFile && areaOfPath(S.selectedFile) === area;
+  if (!(opts.keepEditor && editorLeft)) drawLeft();
+  if (!(opts.keepEditor && editorCentre)) drawCentre();
+  else syncPromptBadges();
   checkUnresolved();
   touchQuiet();
 }
