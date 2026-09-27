@@ -217,7 +217,10 @@ def read_style(rel: str) -> dict:
     pasting a prompt into a new file should get something that works, not a
     parse error about a heading they have never seen.
     """
-    text = _read_text(rel)
+    return _parse_style(_read_text(rel), rel)
+
+
+def _parse_style(text: str, rel: str) -> dict:
     meta, body = _front_matter(text)
     parts = SECTION.split(body)
     positive, negative = "", ""
@@ -319,7 +322,16 @@ def set_meta(rel: str, changes: dict) -> dict:
             "name": meta.get("name", ""), "description": meta.get("description", "")}
 
 
-def read_character(rel: str) -> dict:
+def _read_direct(p: Path) -> str | None:
+    """A card file read from a folder the listing walk already holds. A
+    symlink is refused here (the walk skips linked folders too), so nothing
+    outside the space is read without _resolve's check."""
+    if p.is_symlink() or not p.is_file():
+        return None
+    return p.read_text(encoding="utf-8", errors="replace")
+
+
+def read_character(rel: str, *, at: Path | None = None) -> dict:
     """A character card.
 
     The folder form is the card: `characters/<이름>/` holding `prompt.md`
@@ -328,15 +340,31 @@ def read_character(rel: str) -> dict:
     specs and sidecars keep resolving; `migrate_characters` folds them away.
     """
     r = _rel(rel)
-    p = files._resolve(SCOPE, r)
+    # `at`: the listing's walk passes the card folder it is standing in, so
+    # the two files are read straight from it instead of each path being
+    # resolved again (the listing's cost was path resolution, not reading).
+    p = at if at is not None else files._resolve(SCOPE, r)
     if p.is_dir() or not r.lower().endswith(".json"):
         base = r
-        s = read_style(base + "/prompt.md")
-        preset: dict = {}
-        try:
-            preset = read_json(base + "/preset.json")
-        except StudioError:
-            pass
+        if at is not None:
+            text = _read_direct(at / "prompt.md")
+            if text is None:
+                raise StudioError(f"파일이 없습니다: {base}/prompt.md")
+            s = _parse_style(text, base + "/prompt.md")
+            preset: dict = {}
+            raw = _read_direct(at / "preset.json")
+            if raw is not None:
+                try:
+                    preset = json.loads(raw)
+                except ValueError:
+                    preset = {}
+        else:
+            s = read_style(base + "/prompt.md")
+            preset = {}
+            try:
+                preset = read_json(base + "/preset.json")
+            except StudioError:
+                pass
         vibe = [v for v in (preset.get("vibe") or [])
                 if isinstance(v, dict) and v.get("enabled", True)]
         charref = [v for v in (preset.get("charref") or [])
@@ -448,14 +476,14 @@ def _character_listing() -> list[dict]:
     # path ('' at the top), which is what the panel groups the list by.
     def walk(d, folder: str) -> None:
         for p in sorted(d.iterdir()):
-            if p.name.startswith(".") or not p.is_dir():
+            if p.name.startswith(".") or not p.is_dir() or p.is_symlink():
                 continue  # loose files (a stray png, an unmigratable json) are not cards
             rel = p.relative_to(sproot).as_posix()
             if not (p / "prompt.md").is_file():
                 walk(p, (folder + "/" + p.name).lstrip("/"))
                 continue
             try:
-                c = read_character(rel)
+                c = read_character(rel, at=p)
             except StudioError:
                 continue
             out.append({

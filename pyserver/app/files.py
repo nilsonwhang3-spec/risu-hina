@@ -125,10 +125,21 @@ class FileError(ValueError):
     pass
 
 
+# Resolving a root is a realpath() on Windows (_getfinalpathname), and every
+# _resolve paid it: the studio's character listing (281 cards) spent a third
+# of its 0.84 s re-resolving the same root. Keyed by the unresolved path, so
+# a changed space setting resolves anew.
+_ROOT_CACHE: dict[str, Path] = {}
+
+
 def _root(scope: str) -> Path:
-    if scope == SPACE:
-        return workspace.space_root().resolve()
-    return workspace.root(scope).resolve()
+    base = workspace.space_root() if scope == SPACE else workspace.root(scope)
+    key = str(base)
+    hit = _ROOT_CACHE.get(key)
+    if hit is None:
+        hit = base.resolve()
+        _ROOT_CACHE[key] = hit
+    return hit
 
 
 def _resolve(scope: str, rel: str) -> Path:

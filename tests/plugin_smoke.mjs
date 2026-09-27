@@ -2612,8 +2612,23 @@ console.log('\ntest_studio_reference_tabs');
   clickButton(inline, '프롬프트');
   await settle(100);
   check('position folds under 고급', /고급/.test(inline?.textContent || ''));
-  clickButton(inline, '저장');
-  await settle(1300);
+  // §1-78: saving keeps the open editor (no rebuild, no re-read of its
+  // images), refreshes only the character list data, and sends no
+  // panel-wide change (the title-row counters stay quiet).
+  const editorBefore = explorer()?.querySelector('.charinline');
+  const seen = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, opts) => { seen.push(new URL(String(url)).pathname); return realFetch(url, opts); };
+  try {
+    clickButton(inline, '저장');
+    await settle(2200);
+  } finally { globalThis.fetch = realFetch; }
+  check('saving a character keeps the same editor on screen',
+        !!editorBefore && explorer()?.querySelector('.charinline') === editorBefore);
+  check('and re-reads only the character list', seen.filter((p) => p === '/studio/list').length === 1,
+        seen.join(' '));
+  check('without setting off the title-row counters',
+        !seen.includes('/workspace/dirty') && !seen.includes('/actions'), seen.join(' '));
   const preset = await (await fetch(backend.url + '/files/read?path='
     + encodeURIComponent('studio/characters/스모크캐릭터/preset.json'), { headers: auth })).json();
   check('preset.json records refMode', /"refMode":\s*"vibe"/.test(preset.content || ''),
