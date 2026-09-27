@@ -1521,7 +1521,7 @@ class AppState {
 
   async approveStaged(approve: boolean): Promise<{ decided: number; applied: number }> {
     const r = await transport.post<{ decided: number; applied: number }>(
-      '/approve', { chatKey: this.activeChatKey, all: true, approve, mode: this.activeTab === 'studio' ? 'studio' : this.editMode });
+      '/approve', { chatKey: this.activeChatKey, all: true, approve });
     void this.refreshChanges();
     return r;
   }
@@ -2002,10 +2002,12 @@ class AppState {
    * a failure here does not leave a queue entry claiming success.
    */
   async decideAction(id: string, approve: boolean, chatKey = '', mode?: string): Promise<string> {
-    // `mode` = the screen gate's input; an MCP-relayed approval passes '' (no screen).
+    // No screen gate on a decision (§1-76): a proposal is approved from
+    // wherever the user is - the title-row 승인, the agent pane, 검수 - not
+    // only from the half of the panel it belongs to. `mode` stays for callers
+    // that want the gate explicitly.
     const r = await transport.post('/actions/decide', {
-      chatKey: chatKey || this.activeChatKey, id, approve,
-      mode: mode ?? (this.activeTab === 'studio' ? 'studio' : this.editMode),
+      chatKey: chatKey || this.activeChatKey, id, approve, mode: mode ?? '',
     }) as { approved: boolean; result?: string; host?: { kind: string; args: Record<string, any> } };
 
     if (!r.approved) return '거절했습니다.';

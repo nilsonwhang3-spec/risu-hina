@@ -1,18 +1,18 @@
 /**
- * The "제안 N 대기" chip, opened (§1-38).
+ * Everything that waits for the user's approval, in one popover (§1-38,
+ * widened in §1-76).
  *
- * The bars counted every pending proposal of the bot, but the agent panel's
- * approval card only ever listed the ACTIVE chat's - proposals made in other
- * chats, or in a session that ended before the card was looked at, piled up
- * behind a number nobody could act on ("제안 10 대기 … 이거 어케 함").
+ * Two queues feed it: proposals (lorebook, card, scripts, memory, assets,
+ * snapshots, host actions like 반영) for the whole bot, each with the chat it
+ * rode on, and the open chat's staged turn edits. Both are decided here from
+ * any screen - there is no "go to 챗 편집 first" any more. A host action for
+ * a chat that is not the open one (its 반영 writes that chat) opens that chat
+ * first, the same way the leave guard's 반영 does.
  *
- * One popover lists them all with the chat each rode on. Reject works
- * anywhere; approve only where the proposal's chat is the open one (the
- * approval may need that chat's working copy and, for host actions, the
- * plugin's write path into it) - elsewhere the row says to open that chat.
+ * The title row's 승인 button and the bars' "제안 N 대기" chip both open it.
  */
 import { el, clear, popover } from './dom';
-import { state, type PendingAction } from '../state';
+import { state, type PendingAction, type StagedEdit } from '../state';
 
 let btns = new WeakMap<HTMLElement, HTMLElement>();
 
@@ -29,79 +29,156 @@ export function syncPendingChip(anchor: HTMLElement, count: number): void {
   b.style.display = count > 0 ? '' : 'none';
 }
 
+function msg(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
+
+const HOST_OPENS_CHAT = new Set(['host_writeback', 'host_save_copy']);
+
+/** Decide one proposal from anywhere. */
+async function decideAnywhere(a: PendingAction, approve: boolean): Promise<string> {
+  // A chat's 반영 / 사본 저장 act on the chat the panel has open.
+  if (approve && a.byHost && HOST_OPENS_CHAT.has(a.kind) && a.chatKey && a.chatKey !== state.activeChatKey) {
+    await state.loadTurns(a.chatKey);
+  }
+  return await state.decideAction(a.id, approve, a.chatKey || '');
+}
+
+function opLabel(s: StagedEdit): string {
+  const where = s.seq !== null && s.seq !== undefined ? `#${s.seq}` : '';
+  const what = s.op === 'delete' ? '삭제' : s.op === 'insert' ? '삽입' : '수정';
+  return `턴 ${where} ${what}`.replace(/\s+/g, ' ').trim();
+}
+
+/** Called after anything was decided, so bars, tabs and counters follow. */
+let onDecided: () => void = () => { /* set by the title row */ };
+export function setOnDecided(fn: () => void): void { onDecided = fn; }
+
 export function openPendingPopover(anchor: HTMLElement): void {
   const body = el('div', { class: 'applypop pendingpop' });
   const close = popover(anchor, body);
-  const list = el('div', {});
   const head = el('div', { class: 'row', style: { marginBottom: '6px' } });
-  body.append(head, list);
+  const note = el('div');
+  const list = el('div', {});
+  body.append(head, note, list);
+
+  const say = (text: string, kind: '' | 'err' = '') => {
+    note.appendChild(el('div', { class: kind === 'err' ? 'notice err' : 'hint', text }));
+  };
 
   const draw = async (): Promise<void> => {
     clear(head);
     clear(list);
     list.appendChild(el('div', { class: 'hint', text: '읽는 중입니다…' }));
     let items: PendingAction[] = [];
+    let staged: StagedEdit[] = [];
     try {
-      items = await state.actionsForBot();
+      [items, staged] = await Promise.all([
+        state.actionsForBot(),
+        state.activeChatKey ? state.stagedEdits() : Promise.resolve([] as StagedEdit[]),
+      ]);
     } catch (e) {
       clear(list);
-      list.appendChild(el('div', { class: 'notice err', text: e instanceof Error ? e.message : String(e) }));
+      list.appendChild(el('div', { class: 'notice err', text: msg(e) }));
       return;
     }
     clear(list);
+    const total = items.length + staged.length;
     head.appendChild(el('span', { class: 'sectiontitle grow', style: { marginBottom: '0' },
-      text: `대기 중인 제안 ${items.length}건` }));
-    if (!items.length) {
-      list.appendChild(el('div', { class: 'hint', text: '대기 중인 제안이 없습니다.' }));
+      text: `승인 대기 ${total}건` }));
+    if (!total) {
+      list.appendChild(el('div', { class: 'hint', text: '승인을 기다리는 제안이 없습니다.' }));
       return;
     }
-    const rejectAll = el('button', { class: 'ghost tiny', text: '전체 거절' }) as HTMLButtonElement;
-    rejectAll.addEventListener('click', async () => {
-      rejectAll.disabled = true;
+
+    const allYes = el('button', { class: 'primary tiny', text: `전체 승인 (${total})` }) as HTMLButtonElement;
+    const allNo = el('button', { class: 'ghost tiny', text: '전체 거절' }) as HTMLButtonElement;
+    const runAll = async (approve: boolean) => {
+      allYes.disabled = allNo.disabled = true;
+      clear(note);
+      let done = 0;
       try {
-        const n = await state.clearBotActions();
-        list.appendChild(el('div', { class: 'hint', text: `${n}건을 거절했습니다.` }));
+        for (const a of items) {
+          await decideAnywhere(a, approve);
+          done += 1;
+        }
+        if (staged.length) {
+          await state.approveStaged(approve);
+          done += staged.length;
+        }
+        say(`${done}건을 ${approve ? '승인' : '거절'}했습니다.`);
       } catch (e) {
-        list.appendChild(el('div', { class: 'notice err', text: e instanceof Error ? e.message : String(e) }));
+        // Stop at the first failure: the rest stays pending, visible below.
+        say(`${done}건 처리 후 멈췄습니다: ${msg(e)}`, 'err');
       }
+      onDecided();
       await draw();
-    });
-    head.appendChild(rejectAll);
+    };
+    allYes.addEventListener('click', () => void runAll(true));
+    allNo.addEventListener('click', () => void runAll(false));
+    head.append(allYes, allNo);
 
     for (const a of items) {
-      const mine = !a.chatKey || a.chatKey === state.activeChatKey;
       const yes = el('button', { class: 'primary tiny', text: a.byHost ? '승인·실행' : '승인' }) as HTMLButtonElement;
       const no = el('button', { class: 'ghost tiny', text: '거절' }) as HTMLButtonElement;
       const busy = el('span', { class: 'hint' });
-      yes.disabled = !mine;
-      yes.title = mine ? '' : '이 제안이 올라온 챗을 열어야 승인할 수 있습니다';
+      const other = !!a.chatKey && a.chatKey !== state.activeChatKey;
+      const row = el('div', { class: 'stagedrow' }, [
+        a.byHost ? el('span', { class: 'badge err', text: 'RisuAI' }) : el('span', { class: 'badge', text: '작업본' }),
+        el('div', { class: 'grow' }, [
+          el('div', { text: a.summary }),
+          el('div', { class: 'hint', text: (a.chatName ? `챗: ${a.chatName}` : '이 봇')
+            + (other && a.byHost && HOST_OPENS_CHAT.has(a.kind) ? ' · 승인하면 그 챗을 엽니다' : '') }),
+        ]),
+        busy, yes, no,
+      ]);
       const decide = async (approve: boolean) => {
         yes.disabled = no.disabled = true;
         busy.textContent = approve ? '실행 중…' : '거절 중…';
         try {
-          await state.decideAction(a.id, approve, a.chatKey || '');
-          void state.refreshChanges();
-          void state.refreshBotChanges();
+          await decideAnywhere(a, approve);
         } catch (e) {
           busy.textContent = '';
-          list.insertBefore(el('div', { class: 'notice err', text: e instanceof Error ? e.message : String(e) }), row);
-          yes.disabled = !mine;
-          no.disabled = false;
+          list.insertBefore(el('div', { class: 'notice err', text: msg(e) }), row);
+          yes.disabled = no.disabled = false;
           return;
         }
+        onDecided();
         await draw();
       };
       yes.addEventListener('click', () => void decide(true));
       no.addEventListener('click', () => void decide(false));
-      const row = el('div', { class: 'stagedrow' }, [
-        a.byHost ? el('span', { class: 'badge err', text: 'RisuAI' }) : null,
-        el('div', { class: 'grow' }, [
-          el('div', { text: a.summary }),
-          el('div', { class: 'hint', text: (a.chatName ? `챗: ${a.chatName}` : '이 봇') + (mine ? '' : ' · 다른 챗') }),
-        ]),
-        busy, yes, no,
-      ]);
       list.appendChild(row);
+    }
+
+    if (staged.length) {
+      const yes = el('button', { class: 'primary tiny', text: `턴 수정 ${staged.length}건 승인` }) as HTMLButtonElement;
+      const no = el('button', { class: 'ghost tiny', text: '거절' }) as HTMLButtonElement;
+      const decideStaged = async (approve: boolean) => {
+        yes.disabled = no.disabled = true;
+        try {
+          await state.approveStaged(approve);
+        } catch (e) {
+          list.appendChild(el('div', { class: 'notice err', text: msg(e) }));
+          yes.disabled = no.disabled = false;
+          return;
+        }
+        onDecided();
+        await draw();
+      };
+      yes.addEventListener('click', () => void decideStaged(true));
+      no.addEventListener('click', () => void decideStaged(false));
+      const chatName = state.workspace?.chats.find((c) => c.chatKey === state.activeChatKey)?.name || '열린 챗';
+      const preview = staged.slice(0, 5).map((s) => `${opLabel(s)}${s.reason ? ' — ' + s.reason : ''}`);
+      list.appendChild(el('div', { class: 'stagedrow' }, [
+        el('span', { class: 'badge', text: '턴' }),
+        el('div', { class: 'grow' }, [
+          el('div', { text: `턴 수정 ${staged.length}건 (챗: ${chatName})` }),
+          ...preview.map((t) => el('div', { class: 'hint', text: t })),
+          staged.length > 5 ? el('div', { class: 'hint', text: `… 외 ${staged.length - 5}건 (챗 에딧에서 턴별로 볼 수 있습니다)` }) : null,
+        ]),
+        yes, no,
+      ]));
     }
   };
   void draw();

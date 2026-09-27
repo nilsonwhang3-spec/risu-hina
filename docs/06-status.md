@@ -1,5 +1,34 @@
 # 06. Implementation status — as of 2026-09-27 (v0.15.30, Risu Hina)
 
+## unreleased (2026-09-27): §1-76 approve and write back from anywhere
+
+- **Ask (user, field use of MCP and the panel):** 반영 should write the chat and the card together;
+  approvals should not need a trip to 챗 편집 / 봇 편집; the asset studio should approve and 반영 in place;
+  the 반영 button and the approval list must always be on screen (phone included, folded panes included);
+  pending approvals should stand out outside the chat log too.
+- **Reverses §1-16's one-dirty-thing-at-a-time rule, knowingly.** That rule (and the rejection of
+  writeBackAll) answered "saving the bot quietly re-saved the chat". The answer now is that nothing is
+  written quietly: one 반영 lists every scope it writes, by name, before and after. `workspace.
+  cross_scope_blocker` and its two call sites (`actions.decide`, `h_approve`) are gone; the card and any
+  number of chats may hold unapplied work together. test_lifecycle pins the new behaviour.
+- **No screen gate on decisions:** the plugin sends `mode: ''` for `/actions/decide` and none for
+  `/approve` (the backend still honours a mode if a caller sends one; the in-panel agent's own proposal
+  tools keep their screen gate).
+- **Title row (ui/commitbar.ts):** `승인 N` (every proposal of the bot + the open chat's turn edits; amber
+  and pulsing while anything waits) and `반영 N` (card + every dirty chat from `/workspace/dirty`; blue while
+  dirty). Counts follow state changes (debounced) and an 8 s visible-only poll. On a phone the labels fold to
+  ✓ / ⇪ with the count.
+- **승인 popover (ui/pendingpop.ts, rewritten):** both queues, per-row and 전체 승인 / 전체 거절, from any
+  tab. A host action for a chat that is not open (반영 / 사본 저장 write the open chat) opens that chat
+  first. Stops at the first failure.
+- **반영 popover:** each dirty scope with its count, `모두 반영` (the leave guard's `applyOne` per scope, so
+  the verification rules are the same) or one at a time; scopes with conflicts are held back with a 해결
+  button. The user is returned to the chat they were on.
+- **Leave guard narrowed:** moving between the picker, 봇 편집, 챗 열기, a snapshot restore and the agent's
+  open-tab no longer prompts. 닫기 (X) and 🔄 still do - those are the exits that lose or re-read work.
+- Verified: gate; plugin smoke `test_leave_guard_resolves_on_every_exit` rewritten (picker / 봇 편집 do not
+  ask, the title-row 반영 writes a dirty chat from the bot screen and says what it wrote, 승인 opens there).
+
 ## 0.15.30 (2026-09-27): §1-75 MCP, after the first field use
 
 The user installed 0.15.29 on test-server and used it through `hina.example.com` (cloudflared, docs/08 §0).
