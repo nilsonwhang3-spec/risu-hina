@@ -12,7 +12,7 @@ import { askName } from '../kit';
 import { state, type StudioJob } from '../../state';
 import { BackendError } from '../../transport';
 import { pickerRow, openListPicker, type PickerEntry } from '../pickers';
-import { S, hub, gen, persistGen, activeOf, spec, checkUnresolved, newCard, msg } from './store';
+import { S, hub, gen, persistGen, activeOf, spec, checkUnresolved, newCard, msg, styleSync } from './store';
 import { assetChoice } from './asset-rules';
 
 let jobTimer: (() => void) | null = null;
@@ -163,6 +163,7 @@ export function openParamsDialog(): void {
   modelInput.addEventListener('change', () => {
     gen.model = modelInput.value.trim();
     persistGen();
+    styleSync.edited();
   });
   const checkBtn = el('button', { class: 'ghost tiny', text: '확인' }) as HTMLButtonElement;
   const checkOut = el('span', { class: 'hint' });
@@ -186,7 +187,12 @@ export function openParamsDialog(): void {
   const planBtn = el('button', { class: 'ghost tiny', text: '계획 보기', title: '무엇이 몇 장 생성될지 미리 봅니다 (무료)' });
   planBtn.addEventListener('click', () => void showPlan(out));
 
+  const bound = styleSync.boundName();
+  const bindNote = el('div', { class: bound ? 'notice ok genbind' : 'hint genbind', text: bound
+    ? `이 설정은 스타일 ‘${bound}’ 에 함께 저장됩니다 — 스타일을 고르면 그 스타일의 설정으로 바뀝니다. (시드 · 저장 폴더 · 에셋은 이번 작업용이라 저장하지 않습니다)`
+    : '선택된 스타일이 없어 이 설정은 이 브라우저에만 저장됩니다.' });
   const body = el('div', { class: 'genform' }, [
+    bindNote,
     field('모델', modelInput),
     el('div', { class: 'row' }, [checkBtn, checkOut]),
     // References follow the cards (refMode + per-image enabled) - no switch.
@@ -200,6 +206,8 @@ export function openParamsDialog(): void {
           { value: 0, label: 'Heavy' }, { value: 1, label: 'Light' },
           { value: 3, label: 'Human Focus' }, { value: 4, label: '없음' }])),
     two(numField('가로', 'width'), numField('세로', 'height')),
+    two(triField('Euler 버그 재현', 'eulerBug', 'deliberate_euler_ancestral_bug'),
+        triField('Brownian 노이즈', 'brownian', 'prefer_brownian')),
     qualityToggle(),
     textField('시드', 'seed', '비우면 랜덤'),
     textField('저장 폴더', 'folder', 'studio/output/…'),
@@ -240,6 +248,7 @@ function numField(label: string, key: 'steps' | 'scale' | 'rescale' | 'width' | 
     const n = Number(i.value);
     if (!Number.isNaN(n)) gen[key] = n;
     persistGen();
+    styleSync.edited();
   });
   return el('label', { class: 'field grow' }, [el('span', { text: label }), i]);
 }
@@ -263,6 +272,23 @@ function selField(label: string, key: 'sampler' | 'schedule' | 'ucPreset', value
     if (key === 'ucPreset') gen.ucPreset = Number(sel.value) || 0;
     else gen[key] = sel.value;
     persistGen();
+    styleSync.edited();
+  });
+  return el('label', { class: 'field grow' }, [el('span', { text: label }), sel]);
+}
+
+/** A sampler flag the web client sets: 기본 (not sent) / 켬 / 끔. */
+function triField(label: string, key: 'eulerBug' | 'brownian', wire: string): HTMLElement {
+  const sel = el('select', { title: wire }) as HTMLSelectElement;
+  for (const [value, text] of [['', '기본 (보내지 않음)'], ['true', '켬'], ['false', '끔']]) {
+    const opt = el('option', { value, text });
+    if ((gen[key] === null ? '' : String(gen[key])) === value) opt.setAttribute('selected', 'selected');
+    sel.appendChild(opt);
+  }
+  sel.addEventListener('change', () => {
+    gen[key] = sel.value === '' ? null : sel.value === 'true';
+    persistGen();
+    styleSync.edited();
   });
   return el('label', { class: 'field grow' }, [el('span', { text: label }), sel]);
 }
@@ -270,7 +296,7 @@ function selField(label: string, key: 'sampler' | 'schedule' | 'ucPreset', value
 function qualityToggle(): HTMLElement {
   const box = el('input', { type: 'checkbox' }) as HTMLInputElement;
   box.checked = gen.quality;
-  box.addEventListener('change', () => { gen.quality = box.checked; persistGen(); });
+  box.addEventListener('change', () => { gen.quality = box.checked; persistGen(); styleSync.edited(); });
   return el('label', { class: 'row', title: '켜면 very aesthetic, masterpiece, no text 가 뒤에 붙습니다' },
             [box, el('span', { text: '퀄리티 태그' })]);
 }

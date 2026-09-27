@@ -2329,72 +2329,93 @@ console.log('\ntest_studio_cards');
     check('and keeps the front matter', /name: 스모크스타일/.test(saved.content || ''),
           (saved.content || '').slice(0, 160));
 
-    // §1-77: the generation settings can be saved with the style, and a
-    // style that carries them brings them along when it is picked.
-    const genLine = () => explorer()?.querySelector('.stylegen')?.textContent || '';
-    check('a style without settings says so', /저장 안 됨/.test(genLine()), genLine());
-    clickButton(explorer(), '현재 제작 설정 저장');
-    await settle(1200);
-    const withGen = await (await fetch(backend.url
-      + '/files/read?path=' + encodeURIComponent('studio/styles/스모크스타일.md'), { headers: auth })).json();
-    check('현재 제작 설정 저장 writes model/steps/sampler into the front matter',
-          /model: nai-diffusion/.test(withGen.content || '') && /steps: \d+/.test(withGen.content || '')
-          && /sampler: /.test(withGen.content || '') && /width: \d+/.test(withGen.content || ''),
-          (withGen.content || '').slice(0, 300));
-    check('without losing the prompt or the name',
-          /스모크, 최고 화질/.test(withGen.content || '') && /name: 스모크스타일/.test(withGen.content || ''));
-    check('the editor shows what is saved', /저장된 제작 설정: .*steps/.test(genLine()), genLine());
+    // §1-77 (user): a style's 요청 설정 behave like its prompt - loaded with
+    // the style, saved back on edit - and there is no separate row for them.
+    check('no separate 제작 설정 row under the prompts', !explorer()?.querySelector('.stylegen, .stylegenrow'));
+    const readStyle = async (name) => (await (await fetch(backend.url
+      + '/files/read?path=' + encodeURIComponent('studio/styles/' + name), { headers: auth })).json()).content || '';
+    const openParams = async () => {
+      pressEscape(document);
+      await settle(200);
+      clickButton(explorer(), '⚙ 요청 설정');
+      await settle(500);
+      return [...document.querySelectorAll('.modalbox')].find((m) => m.querySelector('.genform')) || null;
+    };
+    let dlg = await openParams();
+    check('요청 설정 names the style it saves into', /스모크스타일/.test(dlg?.querySelector('.genbind')?.textContent || ''),
+          (dlg?.querySelector('.genbind')?.textContent || '(no note)').slice(0, 160));
+    const stepsInput = [...(dlg?.querySelectorAll('label.field') ?? [])]
+      .find((l) => (l.querySelector('span')?.textContent || '') === '스텝')?.querySelector('input');
+    if (stepsInput) {
+      stepsInput.value = '33';
+      stepsInput.dispatchEvent(new window.Event('change', { bubbles: true }));
+    }
+    const brownian = [...(dlg?.querySelectorAll('label.field') ?? [])]
+      .find((l) => /Brownian/.test(l.querySelector('span')?.textContent || ''))?.querySelector('select');
+    // linkedom's <select> has no settable .value: stamp the option instead.
+    const chooseOpt = (sel, v) => {
+      for (const o of sel.options) o.removeAttribute('selected');
+      [...sel.options].find((o) => o.value === v)?.setAttribute('selected', '');
+      sel.dispatchEvent(new window.Event('change', { bubbles: true }));
+    };
+    if (brownian) chooseOpt(brownian, 'true');
+    await settle(1600);
+    let content = await readStyle('스모크스타일.md');
+    check('an edit in 요청 설정 is saved into the style', /steps: 33/.test(content) && /model: nai-diffusion/.test(content)
+          && /sampler: /.test(content) && /prefer_brownian: true/.test(content), content.slice(0, 300));
+    check('without touching the prompt or the name',
+          /스모크, 최고 화질/.test(content) && /name: 스모크스타일/.test(content));
+    if (brownian) chooseOpt(brownian, '');
+    await settle(1600);
+    content = await readStyle('스모크스타일.md');
+    check('기본 (보내지 않음) removes the flag from the style', !/prefer_brownian/.test(content), content.slice(0, 300));
+    pressEscape(document);
+    await settle(200);
 
-    // Hand-edit the file to 40 steps, pick the style again: the card follows.
-    await fetch(backend.url + '/files/upload', {
-      method: 'POST', headers: auth,
-      body: JSON.stringify({ name: '스모크스타일.md', dir: 'studio/styles',
-        text: String(withGen.content || '').replace(/steps: \d+/, 'steps: 40') }),
-    });
-    // 불러오기 reads the file now, so the hand edit is what lands on the card.
-    clickButton(explorer(), '불러오기');
-    await settle(1200);
-    const cardGen = JSON.parse(localStorage.getItem('hina.studioGen') || '{}');
-    check('불러오기 applies the style\'s current settings to the generation card', cardGen.steps === 40,
-          JSON.stringify(cardGen).slice(0, 200));
-
-    // Switching to another style that carries settings applies them.
+    // Switching to another style loads ITS settings over whatever the dialog held.
     await fetch(backend.url + '/files/upload', {
       method: 'POST', headers: auth,
       body: JSON.stringify({ name: '스모크둘.md', dir: 'studio/styles',
         text: '---' + String.fromCharCode(10) + 'name: 스모크둘' + String.fromCharCode(10) + 'steps: 17'
           + String.fromCharCode(10) + 'sampler: k_dpmpp_2m' + String.fromCharCode(10) + '---' + String.fromCharCode(10) + '둘' }),
     });
-    // The studio learns about a file made behind its back on re-entry.
     clickById(document, 'tab-files');
     await settle(200);
     clickById(document, 'tab-studio');
     await settle(1100);
-    explorer()?.querySelector('.presetnow .chev')?.dispatchEvent(new window.Event('click', { bubbles: true }));
-    await settle(800);
-    [...([...document.querySelectorAll('.modalback .pickrow')].find((r) => /스모크둘/.test(r.textContent || ''))
-      ?.querySelectorAll('button') ?? [])].find((b) => (b.textContent || '') === '선택')
-      ?.dispatchEvent(new window.Event('click', { bubbles: true }));
-    await settle(1800);
-    const cardGen2 = JSON.parse(localStorage.getItem('hina.studioGen') || '{}');
-    check('picking a style that carries settings puts them on the card',
-          cardGen2.steps === 17 && cardGen2.sampler === 'k_dpmpp_2m', JSON.stringify(cardGen2).slice(0, 200));
+    const pick = async (re) => {
+      explorer()?.querySelector('.presetnow .chev')?.dispatchEvent(new window.Event('click', { bubbles: true }));
+      await settle(800);
+      [...([...document.querySelectorAll('.modalback .pickrow')].find((r) => re.test(r.textContent || ''))
+        ?.querySelectorAll('button') ?? [])].find((b) => (b.textContent || '') === '선택')
+        ?.dispatchEvent(new window.Event('click', { bubbles: true }));
+      await settle(1800);
+      pressEscape(document);
+      await settle(200);
+    };
+    await pick(/스모크둘/);
+    let cardGen = JSON.parse(localStorage.getItem('hina.studioGen') || '{}');
+    check('picking a style loads its settings into 요청 설정',
+          cardGen.steps === 17 && cardGen.sampler === 'k_dpmpp_2m', JSON.stringify(cardGen).slice(0, 200));
+    dlg = await openParams();
+    check('and the dialog now saves into that style', /스모크둘/.test(dlg?.querySelector('.genbind')?.textContent || ''));
     pressEscape(document);
     await settle(200);
-    // Leave 스모크스타일 selected for the checks below, with the card back on
-    // the defaults they expect (its saved values ARE the defaults but steps).
+
+    // Back to 스모크스타일: its saved 33 steps replace the 17 on the card -
+    // the manual value no longer overrides the style. Then leave it on the
+    // defaults the later checks expect (its other saved values ARE defaults).
+    await pick(/스모크스타일/);
+    cardGen = JSON.parse(localStorage.getItem('hina.studioGen') || '{}');
+    check('coming back loads the style\'s own settings over the card', cardGen.steps === 33 && cardGen.sampler === 'k_euler_ancestral',
+          JSON.stringify(cardGen).slice(0, 200));
     await fetch(backend.url + '/files/upload', {
       method: 'POST', headers: auth,
       body: JSON.stringify({ name: '스모크스타일.md', dir: 'studio/styles',
-        text: String(withGen.content || '').replace(/steps: \d+/, 'steps: 28') }),
+        text: (await readStyle('스모크스타일.md')).replace(/steps: \d+/, 'steps: 28') }),
     });
-    explorer()?.querySelector('.presetnow .chev')?.dispatchEvent(new window.Event('click', { bubbles: true }));
-    await settle(800);
-    [...(modalRow()?.querySelectorAll('button') ?? [])].find((b) => (b.textContent || '') === '선택')
-      ?.dispatchEvent(new window.Event('click', { bubbles: true }));
-    await settle(1500);
-    pressEscape(document);
-    await settle(200);
+    await pick(/스모크둘/);
+    await pick(/스모크스타일/);
   }
 
   // 수정 behind the chevron opens the full centre editor.

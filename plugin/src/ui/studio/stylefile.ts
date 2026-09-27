@@ -77,11 +77,17 @@ const GEN_META: [string, string][] = [
   ['model', 'model'], ['steps', 'steps'], ['scale', 'scale'], ['rescale', 'cfg_rescale'],
   ['sampler', 'sampler'], ['schedule', 'noise_schedule'], ['width', 'width'], ['height', 'height'],
   ['quality', 'qualityToggle'], ['ucPreset', 'ucPreset'],
+  // The two web-client sampler flags: null on the card = not sent (the
+  // service's own default), so they are only written when set.
+  ['eulerBug', 'deliberate_euler_ancestral_bug'], ['brownian', 'prefer_brownian'],
 ];
+
+const GEN_BOOL = new Set(['quality', 'eulerBug', 'brownian']);
 
 export type GenSettings = Partial<{
   model: string; steps: number; scale: number; rescale: number; sampler: string; schedule: string;
   width: number; height: number; quality: boolean; ucPreset: number;
+  eulerBug: boolean; brownian: boolean;
 }>;
 
 /** The settings a style's front matter carries (empty object = none). */
@@ -91,7 +97,7 @@ export function genFromMeta(meta: Map<string, string>): GenSettings {
     const v = (meta.get(m) ?? '').trim();
     if (!v) continue;
     if (g === 'model' || g === 'sampler' || g === 'schedule') out[g] = v;
-    else if (g === 'quality') out[g] = /^(true|1|yes|on)$/i.test(v);
+    else if (GEN_BOOL.has(g)) out[g] = /^(true|1|yes|on)$/i.test(v);
     else if (Number.isFinite(Number(v))) out[g] = Number(v);
   }
   return out as GenSettings;
@@ -106,23 +112,8 @@ export function writeGenMeta(meta: Map<string, string>, gen: Record<string, unkn
   }
 }
 
-/** Sampler flags a style may carry that the generation card has no control
- * for (the backend applies them at generation; studio.STYLE_GEN_BOOL). */
-const STYLE_ONLY_FLAGS: [string, string][] = [
-  ['deliberate_euler_ancestral_bug', 'euler 버그 재현'], ['prefer_brownian', 'brownian'],
-];
-
 export function clearGenMeta(meta: Map<string, string>): void {
   for (const [, m] of GEN_META) meta.delete(m);
-  for (const [k] of STYLE_ONLY_FLAGS) meta.delete(k);
-}
-
-/** The style-only flags, for the editor's summary ('' = none). */
-export function describeStyleFlags(meta: Map<string, string>): string {
-  return STYLE_ONLY_FLAGS
-    .filter(([k]) => (meta.get(k) ?? '').trim())
-    .map(([k, label]) => `${label} ${/^(true|1|yes|on)$/i.test((meta.get(k) ?? '').trim()) ? 'ON' : 'OFF'}`)
-    .join(' · ');
 }
 
 export function describeGen(g: GenSettings): string {
@@ -136,5 +127,7 @@ export function describeGen(g: GenSettings): string {
   if (g.width && g.height) bits.push(`${g.width}×${g.height}`);
   if (g.quality !== undefined) bits.push(g.quality ? '퀄리티 태그 ON' : '퀄리티 태그 OFF');
   if (g.ucPreset !== undefined) bits.push(`UC ${g.ucPreset}`);
+  if (g.eulerBug !== undefined) bits.push(`euler 버그 ${g.eulerBug ? 'ON' : 'OFF'}`);
+  if (g.brownian !== undefined) bits.push(`brownian ${g.brownian ? 'ON' : 'OFF'}`);
   return bits.join(' · ');
 }
