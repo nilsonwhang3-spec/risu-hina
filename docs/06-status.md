@@ -1,4 +1,25 @@
-# 06. Implementation status — as of 2026-09-27 (v0.15.29, Risu Hina)
+# 06. Implementation status — as of 2026-09-27 (v0.15.30, Risu Hina)
+
+## 0.15.30 (2026-09-27): §1-75 MCP, after the first field use
+
+The user installed 0.15.29 on test-server and used it through `hina.example.com` (cloudflared, docs/08 §0).
+What came out of that, all in docs/08 §0:
+
+- **Settings cards follow a backend update** - the panel goes straight from the old health to the new one,
+  so the MCP card said "not supported" until a reload; a changed version now refreshes the cards.
+- **The MCP card explains addresses** - 127.0.0.1 only works on the backend PC; Tailscale / cloudflared for
+  a remote one; a loopback URL in the field is flagged. The command carries `-s user` and says to run it in
+  a terminal (pasting it into a chat leaves the token in the transcript).
+- **Off means off** - switching off (or the lease lapsing) forgets the context; `hina_status` names no bot
+  while off; `hina_guide` needs the switch like every tool.
+- **The switch moved to the title row** (left of reload), built once and updated in place so it appears
+  right after an install, and sparkles while on.
+- **MCP ends with the panel** - X and unload deactivate; a closed RisuAI window is caught by the held
+  poll's disconnect (measured through the tunnel: under 1 s), lease 15 s after a poll.
+- **Review over MCP** - `view_image` / `compare_images` always hand the pictures to the client and are not
+  cut off after 12 calls; `studio_open` reaches the panel. Decisions stay in the 검수 tab.
+- **`download_file` / `upload_file`** - one-time curl URLs, nothing passes through the model's context.
+- **A backend restart no longer drops MCP** - the panel re-activates by itself.
 
 ## 0.15.29 (2026-09-27): §1-75 MCP — Claude Code drives the panel's bot
 

@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.15.29
+//@display-name Risu Hina v0.15.30
 //@api 3.0
-//@version 0.15.29
+//@version 0.15.30
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -181,7 +181,7 @@
           this.tokenSafe = true;
           this.lastHealth = body;
           this.probeInfo = "";
-          this.gate = versionGate("0.15.29", String(body.version || ""));
+          this.gate = versionGate("0.15.30", String(body.version || ""));
           return body;
         }
         /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -1176,6 +1176,1001 @@
       init_transport();
       BATCH_BYTES = 8 * 1024 * 1024;
       BATCH_ITEMS = 50;
+    }
+  });
+
+  // src/ui/hilite.ts
+  function parseWeights(text2) {
+    const segments = [];
+    let braces = 0;
+    let brackets = 0;
+    const numeric = [];
+    const effective2 = () => {
+      const base = numeric.length > 0 ? numeric[numeric.length - 1] : 1;
+      return base * Math.pow(STEP, braces) * Math.pow(STEP, -brackets);
+    };
+    let segStart = 0;
+    let segWeight = effective2();
+    const boundary = (pos) => {
+      const w = effective2();
+      if (w === segWeight) return;
+      if (pos > segStart) segments.push({ start: segStart, end: pos, weight: segWeight });
+      segStart = pos;
+      segWeight = w;
+    };
+    let i = 0;
+    while (i < text2.length) {
+      const ch = text2[i];
+      if (ch === "{") {
+        braces++;
+        boundary(i);
+        i++;
+      } else if (ch === "}") {
+        if (braces > 0) braces--;
+        boundary(i + 1);
+        i++;
+      } else if (ch === "[") {
+        brackets++;
+        boundary(i);
+        i++;
+      } else if (ch === "]") {
+        if (brackets > 0) brackets--;
+        boundary(i + 1);
+        i++;
+      } else if (text2.startsWith("::", i) && numeric.length > 0) {
+        numeric.pop();
+        boundary(i + 2);
+        i += 2;
+      } else {
+        const m = NUMERIC_OPEN.exec(text2.slice(i));
+        if (m) {
+          numeric.push(Number(m[1]));
+          boundary(i);
+          i += m[0].length;
+        } else i++;
+      }
+    }
+    if (text2.length > segStart) segments.push({ start: segStart, end: text2.length, weight: segWeight });
+    return segments;
+  }
+  function weightBackground(weight) {
+    if (weight === 1) return null;
+    if (weight <= 0) return "rgba(96, 145, 235, 0.45)";
+    const steps = Math.abs(Math.log(weight) / Math.log(STEP));
+    const alpha = Math.min(0.1 + steps * 0.09, 0.48);
+    return weight > 1 ? `rgba(233, 94, 80, ${alpha.toFixed(3)})` : `rgba(96, 145, 235, ${alpha.toFixed(3)})`;
+  }
+  function flatten(text2, spans, weights = []) {
+    const bounds = /* @__PURE__ */ new Set([0, text2.length]);
+    for (const s of spans) {
+      bounds.add(s.start);
+      bounds.add(s.end);
+    }
+    for (const s of weights) {
+      bounds.add(s.start);
+      bounds.add(s.end);
+    }
+    const sorted = [...bounds].filter((n) => n >= 0 && n <= text2.length).sort((a, b) => a - b);
+    const ranges = [];
+    for (let i = 0; i < sorted.length - 1; i++) {
+      const start = sorted[i];
+      const end = sorted[i + 1];
+      let best = null;
+      for (const s of spans) {
+        if (s.start <= start && start < s.end && (!best || s.prio > best.prio)) best = s;
+      }
+      const bg = best ? best.bg : weightBackground(weights.find((s) => s.start <= start && start < s.end)?.weight ?? 1);
+      const prev = ranges[ranges.length - 1];
+      if (prev && prev.bg === bg) prev.end = end;
+      else ranges.push({ start, end, bg });
+    }
+    return ranges;
+  }
+  function lineSpans(text2, test, bg, prio) {
+    const out = [];
+    let offset = 0;
+    for (const line of text2.split("\n")) {
+      if (test(line)) out.push({ start: offset, end: offset + line.length, bg, prio });
+      offset += line.length + 1;
+    }
+    return out;
+  }
+  function regexSpans(text2, re, bg, prio) {
+    const out = [];
+    for (const m of text2.matchAll(re)) {
+      if (m.index !== void 0 && m[0]) out.push({ start: m.index, end: m.index + m[0].length, bg, prio });
+    }
+    return out;
+  }
+  function naiRanges(text2) {
+    const spans = [
+      ...regexSpans(text2, /<[^<>\n]+>/g, FRAGMENT_BG, 2),
+      ...lineSpans(text2, (l) => l.trimStart().startsWith("#"), COMMENT_BG, 3)
+    ];
+    return flatten(text2, spans, parseWeights(text2));
+  }
+  function mdRanges(text2) {
+    const spans = [
+      ...lineSpans(text2, (l) => /^#{1,6}\s/.test(l), "rgba(125, 211, 252, 0.16)", 1),
+      ...lineSpans(text2, (l) => /^\s*>/.test(l), "rgba(128, 128, 136, 0.18)", 1),
+      ...regexSpans(text2, /\*\*[^*\n]+\*\*/g, "rgba(233, 94, 80, 0.18)", 2),
+      ...regexSpans(text2, /`[^`\n]+`/g, "rgba(128, 128, 136, 0.3)", 3),
+      ...regexSpans(text2, /\[[^\]\n]+\]\([^)\n]+\)/g, "rgba(92, 190, 125, 0.22)", 2),
+      // RisuAI CBS calls ride lorebook text; seeing their extent is the point.
+      ...regexSpans(text2, /\{\{[^{}\n]+\}\}/g, CBS_BG, 4)
+    ];
+    return flatten(text2, spans);
+  }
+  function regexRanges(text2) {
+    const spans = [
+      ...regexSpans(text2, /\[(?:\\.|[^\]\\])*\]/g, STRING_BG, 3),
+      ...regexSpans(text2, /\\u[0-9a-fA-F]{4}|\\x[0-9a-fA-F]{2}|\\./g, META_BG, 4),
+      ...regexSpans(text2, /[*+?|]|\{\d+(?:,\d*)?\}|\((?:\?[:=!<]*)?|\)/g, KEYWORD_BG, 2)
+    ];
+    return flatten(text2, spans);
+  }
+  function regexOutRanges(text2) {
+    const spans = [
+      ...regexSpans(text2, /\{\{[^{}\n]+\}\}/g, CBS_BG, 4),
+      ...regexSpans(text2, /\$(?:\d{1,2}|&|<[^>\n]+>)/g, KEYWORD_BG, 3),
+      ...regexSpans(text2, /<!--[\s\S]*?-->/g, COMMENT_BG, 2)
+    ];
+    return flatten(text2, spans);
+  }
+  function luaIslands(text2) {
+    const out = [];
+    const n = text2.length;
+    const longOpen = (at) => {
+      if (text2[at] !== "[") return null;
+      let j = at + 1;
+      while (text2[j] === "=") j++;
+      return text2[j] === "[" ? j - at - 1 : null;
+    };
+    const longClose = (from, eq) => {
+      const close = "]" + "=".repeat(eq) + "]";
+      const at = text2.indexOf(close, from);
+      return at === -1 ? n : at + close.length;
+    };
+    let i = 0;
+    while (i < n) {
+      const c = text2[i];
+      if (c === "-" && text2[i + 1] === "-") {
+        const eq = longOpen(i + 2);
+        let end;
+        if (eq !== null) end = longClose(i + 4 + eq, eq);
+        else {
+          const nl = text2.indexOf("\n", i);
+          end = nl === -1 ? n : nl;
+        }
+        out.push({ start: i, end, bg: COMMENT_BG, prio: 5 });
+        i = end;
+      } else if (c === '"' || c === "'") {
+        let j = i + 1;
+        while (j < n && text2[j] !== c && text2[j] !== "\n") {
+          if (text2[j] === "\\") j++;
+          j++;
+        }
+        const end = j < n && text2[j] === c ? j + 1 : j;
+        out.push({ start: i, end, bg: STRING_BG, prio: 4 });
+        i = Math.max(end, i + 1);
+      } else {
+        const eq = longOpen(i);
+        if (eq !== null) {
+          const end = longClose(i + 2 + eq, eq);
+          out.push({ start: i, end, bg: STRING_BG, prio: 4 });
+          i = end;
+        } else i++;
+      }
+    }
+    return out;
+  }
+  function luaRanges(text2) {
+    const spans = [
+      ...luaIslands(text2),
+      ...regexSpans(text2, LUA_KEYWORDS, KEYWORD_BG, 1)
+    ];
+    return flatten(text2, spans);
+  }
+  function copyTypography(from, to) {
+    try {
+      const cs = getComputedStyle(from);
+      for (const p of COPY_PROPS) {
+        to.style[p] = cs[p];
+      }
+      to.style.borderStyle = "solid";
+      to.style.borderColor = "transparent";
+    } catch {
+    }
+  }
+  function caretCoords(ta, position) {
+    const div = document.createElement("div");
+    try {
+      copyTypography(ta, div);
+    } catch {
+    }
+    div.style.position = "absolute";
+    div.style.visibility = "hidden";
+    div.style.left = "-9999px";
+    div.style.top = "0";
+    div.style.width = `${ta.clientWidth || 300}px`;
+    div.style.whiteSpace = "pre-wrap";
+    div.textContent = ta.value.slice(0, position);
+    const marker = document.createElement("span");
+    marker.textContent = ta.value.slice(position, position + 1) || "\u200B";
+    div.appendChild(marker);
+    document.body.appendChild(div);
+    const coords = { left: marker.offsetLeft, top: marker.offsetTop, height: marker.offsetHeight || 18 };
+    div.remove();
+    return coords;
+  }
+  function fmtCount(count) {
+    if (count >= 1e6) return `${(count / 1e6).toFixed(1)}M`;
+    if (count >= 1e3) return `${Math.round(count / 1e3)}k`;
+    return count > 0 ? String(count) : "";
+  }
+  function attachHilite(ta, opts) {
+    if (!ta.parentNode || ta.parentElement && ta.parentElement.classList.contains("hlwrap")) return;
+    const wrap = el("div", { class: "hlwrap" });
+    const mirror = el("div", { class: "hlmirror", "aria-hidden": "true" });
+    ta.parentNode.insertBefore(wrap, ta);
+    wrap.appendChild(mirror);
+    wrap.appendChild(ta);
+    try {
+      const bg = getComputedStyle(ta).backgroundColor;
+      if (bg && bg !== "transparent" && bg !== "rgba(0, 0, 0, 0)") mirror.style.backgroundColor = bg;
+    } catch {
+    }
+    ta.classList.add("hl-on");
+    const render = () => {
+      copyTypography(ta, mirror);
+      try {
+        if (ta.offsetWidth > 0) {
+          const cs = getComputedStyle(ta);
+          const bl = parseFloat(cs.borderLeftWidth) || 0;
+          const br = parseFloat(cs.borderRightWidth) || 0;
+          const sbw = Math.max(0, ta.offsetWidth - ta.clientWidth - bl - br);
+          mirror.style.paddingRight = `${(parseFloat(cs.paddingRight) || 0) + sbw}px`;
+          mirror.style.width = `${ta.offsetWidth}px`;
+        }
+      } catch {
+      }
+      const text2 = ta.value;
+      const ranges = RANGES[opts.mode](text2);
+      while (mirror.firstChild) mirror.removeChild(mirror.firstChild);
+      for (const r of ranges) {
+        const piece = text2.slice(r.start, r.end);
+        if (!piece) continue;
+        const span = document.createElement("span");
+        span.textContent = piece;
+        if (r.bg) span.style.background = r.bg;
+        mirror.appendChild(span);
+      }
+      if (text2.endsWith("\n")) mirror.appendChild(document.createTextNode("\u200B"));
+      mirror.scrollTop = ta.scrollTop;
+      mirror.scrollLeft = ta.scrollLeft;
+    };
+    const syncScroll = () => {
+      mirror.scrollTop = ta.scrollTop;
+      mirror.scrollLeft = ta.scrollLeft;
+    };
+    ta.addEventListener("input", render);
+    ta.addEventListener("scroll", syncScroll);
+    try {
+      const slot = ta;
+      slot.__hinaRo?.disconnect();
+      const ro = new ResizeObserver(() => {
+        if (ta.isConnected) slot.__hinaMounted = true;
+        else if (slot.__hinaMounted) {
+          ro.disconnect();
+          return;
+        }
+        render();
+      });
+      slot.__hinaRo = ro;
+      ro.observe(ta);
+    } catch {
+    }
+    render();
+    if (opts.mode === "nai" && !opts.noSuggest) attachSuggest(ta, opts);
+  }
+  function attachSuggest(ta, opts) {
+    let pop = null;
+    let items5 = [];
+    let selected = 0;
+    let tokenStart = -1;
+    let seq = 0;
+    let timer = null;
+    const close = () => {
+      pop?.remove();
+      pop = null;
+      items5 = [];
+    };
+    const draw2 = () => {
+      if (!items5.length) {
+        close();
+        return;
+      }
+      if (!pop) {
+        pop = el("div", { class: "suggestpop" });
+        document.body.appendChild(pop);
+      }
+      while (pop.firstChild) pop.removeChild(pop.firstChild);
+      items5.slice(0, 8).forEach((s, i) => {
+        const b = el("button", { class: i === selected ? "on" : "" });
+        if (s.kind === "frag") {
+          const cut = s.name.lastIndexOf("/");
+          if (cut > 0) {
+            b.appendChild(el("span", { class: "fold", text: "<" + s.name.slice(0, cut + 1) }));
+            b.appendChild(el("span", { class: "frag", text: s.name.slice(cut + 1) + ">" }));
+          } else {
+            b.appendChild(el("span", { class: "frag", text: `<${s.name}>` }));
+          }
+        } else {
+          b.appendChild(el("span", { text: s.tag }));
+          const c = fmtCount(s.count);
+          if (c) b.appendChild(el("span", { class: "cnt", text: c }));
+        }
+        b.addEventListener("mousedown", (e) => {
+          e.preventDefault();
+          complete(items5[i]);
+        });
+        pop.appendChild(b);
+      });
+      try {
+        const caret = caretCoords(ta, ta.selectionStart);
+        const rect = ta.getBoundingClientRect();
+        const vh = window.innerHeight || 768;
+        const est = Math.min(items5.length, 8) * 26 + 8;
+        let left = rect.left + caret.left - ta.scrollLeft;
+        let top = rect.top + caret.top - ta.scrollTop + caret.height + 4;
+        left = Math.max(8, Math.min(left, (window.innerWidth || 1024) - 280));
+        if (top + est > vh - 8) top = rect.top + caret.top - ta.scrollTop - est - 4;
+        pop.style.left = left + "px";
+        pop.style.top = Math.max(8, top) + "px";
+      } catch {
+      }
+    };
+    const refresh3 = () => {
+      if (timer) clearTimeout(timer);
+      const mySeq = ++seq;
+      const cursor = ta.selectionStart;
+      const before = ta.value.slice(0, cursor);
+      const lineStart = before.lastIndexOf("\n") + 1;
+      if (before.slice(lineStart).trimStart().startsWith("#")) {
+        close();
+        return;
+      }
+      const frag = /<([^<>|]*)$/.exec(before);
+      if (frag && opts.fragments) {
+        const q = frag[1].toLowerCase();
+        const names = opts.fragments().filter((n) => n.toLowerCase().includes(q)).slice(0, 8);
+        tokenStart = cursor - frag[1].length;
+        items5 = names.map((name) => ({ kind: "frag", name }));
+        selected = 0;
+        draw2();
+        return;
+      }
+      let sepIx = -1;
+      for (let i = before.length - 1; i >= 0; i--) {
+        if (TAG_TOKEN_SEPARATORS.test(before[i])) {
+          sepIx = i;
+          break;
+        }
+      }
+      const rawToken = before.slice(sepIx + 1);
+      const token2 = rawToken.trimStart();
+      if (token2.trim().length < 2) {
+        close();
+        return;
+      }
+      tokenStart = sepIx + 1 + (rawToken.length - token2.length);
+      timer = setTimeout(() => {
+        void state.studio.suggestTags(token2.trim()).then((r) => {
+          if (seq !== mySeq) return;
+          items5 = (r.tags ?? []).map((t) => ({ kind: "tag", tag: t.tag, count: t.count ?? 0 }));
+          selected = 0;
+          draw2();
+        }).catch(() => {
+        });
+      }, 160);
+    };
+    const complete = (s) => {
+      if (tokenStart < 0) return;
+      const cursor = ta.selectionStart;
+      let insert = s.kind === "frag" ? s.name + ">" : s.tag;
+      if (!ta.value.slice(cursor).trimStart().startsWith(",")) insert += ", ";
+      ta.value = ta.value.slice(0, tokenStart) + insert + ta.value.slice(cursor);
+      close();
+      const pos = tokenStart + insert.length;
+      try {
+        ta.setSelectionRange(pos, pos);
+      } catch {
+      }
+      ta.focus();
+      ta.dispatchEvent(new Event("input", { bubbles: true }));
+    };
+    ta.addEventListener("input", refresh3);
+    ta.addEventListener("keydown", (ev) => {
+      const e = ev;
+      if (!items5.length) return;
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        selected = (selected + 1) % Math.min(items5.length, 8);
+        draw2();
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        selected = (selected - 1 + Math.min(items5.length, 8)) % Math.min(items5.length, 8);
+        draw2();
+      } else if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault();
+        complete(items5[selected]);
+      } else if (e.key === "Escape") {
+        close();
+      }
+    });
+    ta.addEventListener("blur", () => {
+      if (timer) clearTimeout(timer);
+      seq++;
+      setTimeout(close, 150);
+    });
+  }
+  var STEP, NUMERIC_OPEN, FRAGMENT_BG, COMMENT_BG, STRING_BG, KEYWORD_BG, META_BG, CBS_BG, LUA_KEYWORDS, COPY_PROPS, TAG_TOKEN_SEPARATORS, RANGES;
+  var init_hilite = __esm({
+    "src/ui/hilite.ts"() {
+      "use strict";
+      init_dom();
+      init_state();
+      STEP = 1.05;
+      NUMERIC_OPEN = /^(-?\d+(?:\.\d+)?)::/;
+      FRAGMENT_BG = "rgba(92, 190, 125, 0.3)";
+      COMMENT_BG = "rgba(128, 128, 136, 0.28)";
+      STRING_BG = "rgba(92, 190, 125, 0.22)";
+      KEYWORD_BG = "rgba(96, 145, 235, 0.18)";
+      META_BG = "rgba(233, 94, 80, 0.18)";
+      CBS_BG = "rgba(124, 92, 255, 0.24)";
+      LUA_KEYWORDS = /\b(?:and|break|do|elseif|else|end|false|for|function|goto|if|in|local|nil|not|or|repeat|return|then|true|until|while|onStart|onOutput|onInput|onButtonClick|listenEdit|getChatVar|setChatVar)\b/g;
+      COPY_PROPS = [
+        "fontFamily",
+        "fontSize",
+        "fontWeight",
+        "fontStyle",
+        "letterSpacing",
+        "lineHeight",
+        "textTransform",
+        "wordSpacing",
+        "textIndent",
+        "whiteSpace",
+        "wordBreak",
+        "overflowWrap",
+        "tabSize",
+        "boxSizing",
+        "paddingTop",
+        "paddingRight",
+        "paddingBottom",
+        "paddingLeft",
+        "borderTopWidth",
+        "borderRightWidth",
+        "borderBottomWidth",
+        "borderLeftWidth"
+      ];
+      TAG_TOKEN_SEPARATORS = /[,\n{}[\]|<>:/]/;
+      RANGES = {
+        nai: naiRanges,
+        md: mdRanges,
+        regex: regexRanges,
+        "regex-out": regexOutRanges,
+        lua: luaRanges
+      };
+    }
+  });
+
+  // src/ui/dom.ts
+  function el(tag, attrs = {}, children = []) {
+    const node = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs)) {
+      if (v === null || v === void 0 || v === false) continue;
+      if (k === "class") node.className = String(v);
+      else if (k === "text") node.textContent = String(v);
+      else if (k === "html") node.innerHTML = String(v);
+      else if (k === "style" && typeof v === "object") Object.assign(node.style, v);
+      else if (k === "dataset" && typeof v === "object") Object.assign(node.dataset, v);
+      else if (k.startsWith("on") && typeof v === "function") {
+        node.addEventListener(k.slice(2).toLowerCase(), v);
+      } else if (k === "value" && node instanceof HTMLTextAreaElement) {
+        node.value = String(v);
+      } else if (k === "value" && node instanceof HTMLInputElement) {
+        node.value = String(v);
+      } else if (k === "checked" && node instanceof HTMLInputElement) {
+        node.checked = Boolean(v);
+      } else if (v === true) {
+        node.setAttribute(k, "");
+      } else {
+        node.setAttribute(k, String(v));
+      }
+    }
+    const list2 = Array.isArray(children) ? children : [children];
+    for (const c of list2) {
+      if (c === null || c === void 0 || c === false) continue;
+      node.appendChild(typeof c === "string" ? document.createTextNode(c) : c);
+    }
+    return node;
+  }
+  function searchBox(value, onInput, placeholder = "\uCC3E\uAE30") {
+    const input2 = el("input", { class: "searchinput", placeholder, value });
+    input2.addEventListener("input", () => onInput(input2.value));
+    return el("div", { class: "searchbox" }, [input2]);
+  }
+  function refocusSearch(root2) {
+    const input2 = root2?.querySelector(".searchbox input") ?? document.querySelector(".tabslot .searchbox input");
+    if (!input2) return;
+    input2.focus();
+    try {
+      input2.setSelectionRange(input2.value.length, input2.value.length);
+    } catch {
+    }
+  }
+  function setSelected(sel, value) {
+    for (const opt of Array.from(sel.querySelectorAll("option"))) {
+      const on = opt.value === value;
+      opt.selected = on;
+      if (on) opt.setAttribute("selected", "");
+      else opt.removeAttribute("selected");
+    }
+    try {
+      sel.value = value;
+    } catch {
+    }
+  }
+  function selectedValue(sel) {
+    const options = Array.from(sel.querySelectorAll("option"));
+    const live = options.find((o) => o.selected === true && o.hasAttribute("selected") === false) ?? (typeof sel.value === "string" && sel.value !== "" && options.find((o) => o.value === sel.value)) ?? options.find((o) => o.selected === true);
+    if (live) return live.value;
+    const stamped = sel.querySelector("option[selected]");
+    return stamped?.value ?? sel.value ?? options[0]?.value ?? "";
+  }
+  function clear(node) {
+    while (node.firstChild) node.removeChild(node.firstChild);
+  }
+  function svg(path, size = 20) {
+    return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${path}</svg>`;
+  }
+  function iconBtn(html, title) {
+    return el("button", { class: "iconbtn", html, title });
+  }
+  function segCtl(items5) {
+    return el("div", { class: "segctl" }, items5.map((it) => {
+      const b = el("button", { class: it.on ? "on" : "", text: it.label, title: it.title ?? "" });
+      b.addEventListener("click", it.pick);
+      return b;
+    }));
+  }
+  function colPicker(opts) {
+    const btns2 = opts.values.map((n) => {
+      const label2 = opts.labels?.[n] ?? String(n);
+      const b = el("button", { text: label2, title: opts.labels?.[n] ? `${label2} \u2014 \uD3ED\uC5D0 \uB9DE\uCDB0 \uC5F4 \uC218\uB97C \uC815\uD569\uB2C8\uB2E4` : `${n}\uC5F4\uB85C \uBCF4\uAE30` });
+      b.addEventListener("click", () => {
+        opts.set(n);
+        sync();
+      });
+      return b;
+    });
+    const sync = () => {
+      btns2.forEach((b, i) => b.classList.toggle("on", opts.values[i] === opts.get()));
+    };
+    sync();
+    return el("div", { class: "segctl colpick", title: "\uC5F4 \uC218" }, [
+      el("span", { class: "seglabel", text: "\u25A6" }),
+      ...btns2
+    ]);
+  }
+  function armed(button2, label2, confirmLabel, run) {
+    let armedNow = false;
+    let timer;
+    const disarm = () => {
+      if (timer) clearTimeout(timer);
+      armedNow = false;
+      button2.textContent = label2;
+      button2.classList.remove("danger");
+    };
+    const arm = () => {
+      if (timer) clearTimeout(timer);
+      armedNow = true;
+      button2.textContent = confirmLabel;
+      button2.classList.add("danger");
+      timer = setTimeout(disarm, 4e3);
+    };
+    const fire = () => {
+      disarm();
+      run();
+    };
+    button2.textContent = label2;
+    button2.addEventListener("click", () => {
+      if (!armedNow) arm();
+      else fire();
+    });
+    return { arm, fire, disarm, get armed() {
+      return armedNow;
+    } };
+  }
+  function diffFragments(before, after) {
+    let head = 0;
+    const max = Math.min(before.length, after.length);
+    while (head < max && before[head] === after[head]) head++;
+    let tail = 0;
+    while (tail < max - head && before[before.length - 1 - tail] === after[after.length - 1 - tail]) tail++;
+    const mk = (text2, cls) => {
+      const frag = document.createDocumentFragment();
+      frag.appendChild(document.createTextNode(text2.slice(0, head)));
+      const mid = text2.slice(head, text2.length - tail);
+      if (mid) frag.appendChild(el("span", { class: cls, text: mid }));
+      frag.appendChild(document.createTextNode(text2.slice(text2.length - tail)));
+      return frag;
+    };
+    return { before: mk(before, "diff-del"), after: mk(after, "diff-ins") };
+  }
+  function fmtTime(ms) {
+    const n = Number(ms);
+    if (!Number.isFinite(n) || n <= 0) return "";
+    try {
+      return new Date(n).toISOString().slice(0, 16).replace("T", " ");
+    } catch {
+      return "";
+    }
+  }
+  function modal(title, body, opts = {}) {
+    const closeBtn = el("button", { class: "iconbtn", html: ICON.close, title: "\uB2EB\uAE30" });
+    const box = el("div", { class: "modalbox" + (opts.wide ? " wide" : "") + (opts.cls ? " " + opts.cls : "") }, [
+      el("div", { class: "modalhead" }, [
+        el("h2", { text: title }),
+        el("span", { class: "spacer" }),
+        closeBtn
+      ]),
+      el("div", { class: "modalbody" }, [body])
+    ]);
+    const back = el("div", { class: "modalback" }, [box]);
+    document.body.appendChild(back);
+    let closed = false;
+    const close = () => {
+      if (closed) return;
+      closed = true;
+      back.remove();
+      document.removeEventListener("keydown", esc, true);
+      opts.onClose?.();
+    };
+    const esc = (e) => {
+      if (e.key === "Escape") close();
+    };
+    closeBtn.addEventListener("click", close);
+    back.addEventListener("click", (e) => {
+      if (e.target === back && !opts.sticky) close();
+    });
+    document.addEventListener("keydown", esc, true);
+    setTimeout(() => box.querySelector("input, textarea, select, button")?.focus(), 0);
+    return close;
+  }
+  function focusEdit(source, title, opts = {}) {
+    const big = el("textarea", {
+      class: "focusarea" + (opts.code ? " codearea" : ""),
+      spellcheck: opts.code ? "false" : "true"
+    });
+    big.value = source.value;
+    const count = el("span", { class: "hint", text: `${big.value.length}\uC790` });
+    const sync = () => {
+      source.value = big.value;
+      count.textContent = `${big.value.length}\uC790`;
+      source.dispatchEvent(new Event("input", { bubbles: true }));
+    };
+    big.addEventListener("input", sync);
+    const done = el("button", { class: "primary", text: "\uC644\uB8CC" });
+    const body = el("div", { class: "focusbody" }, [
+      big,
+      el("div", { class: "row focusfoot" }, [
+        count,
+        el("span", { class: "hint grow", text: "\uC785\uB825\uC740 \uBC14\uB85C \uC6D0\uB798 \uC0C1\uC790\uC5D0 \uBC18\uC601\uB429\uB2C8\uB2E4. \uC800\uC7A5\uC740 \uC6D0\uB798 \uD654\uBA74\uC758 \uC800\uC7A5 \uBC84\uD2BC\uC73C\uB85C \uD569\uB2C8\uB2E4." }),
+        done
+      ])
+    ]);
+    const close = modal(title, body, { cls: "focusmodal", sticky: true });
+    if (opts.hilite) attachHilite(big, opts.hilite);
+    done.addEventListener("click", close);
+    setTimeout(() => {
+      big.focus();
+      try {
+        big.setSelectionRange(source.selectionStart, source.selectionEnd);
+      } catch {
+      }
+    }, 0);
+  }
+  function focusButton(source, title, opts = {}) {
+    const b = el("button", { class: "ghost tiny focusbtn", text: "\u2922 \uC9D1\uC911 \uD3B8\uC9D1", title: "\uD654\uBA74 \uC804\uCCB4\uB85C \uD06C\uAC8C \uD3B8\uC9D1\uD569\uB2C8\uB2E4" });
+    b.addEventListener("click", () => focusEdit(source, title, opts));
+    return b;
+  }
+  function lineDiff(before, after) {
+    const a = before.split("\n");
+    const b = after.split("\n");
+    let head = 0;
+    while (head < a.length && head < b.length && a[head] === b[head]) head++;
+    let tail = 0;
+    while (tail < a.length - head && tail < b.length - head && a[a.length - 1 - tail] === b[b.length - 1 - tail]) tail++;
+    const out = [];
+    for (let i = 0; i < head; i++) out.push({ kind: "same", text: a[i] });
+    const am = a.slice(head, a.length - tail);
+    const bm = b.slice(head, b.length - tail);
+    if (am.length && bm.length && am.length * bm.length <= 4e6) {
+      const n = am.length, m = bm.length;
+      const dp = [];
+      for (let i2 = 0; i2 <= n; i2++) dp.push(new Uint32Array(m + 1));
+      for (let i2 = n - 1; i2 >= 0; i2--) {
+        for (let j2 = m - 1; j2 >= 0; j2--) {
+          dp[i2][j2] = am[i2] === bm[j2] ? dp[i2 + 1][j2 + 1] + 1 : Math.max(dp[i2 + 1][j2], dp[i2][j2 + 1]);
+        }
+      }
+      let i = 0, j = 0;
+      while (i < n && j < m) {
+        if (am[i] === bm[j]) {
+          out.push({ kind: "same", text: am[i] });
+          i++;
+          j++;
+        } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+          out.push({ kind: "del", text: am[i] });
+          i++;
+        } else {
+          out.push({ kind: "ins", text: bm[j] });
+          j++;
+        }
+      }
+      while (i < n) out.push({ kind: "del", text: am[i++] });
+      while (j < m) out.push({ kind: "ins", text: bm[j++] });
+    } else {
+      for (const t of am) out.push({ kind: "del", text: t });
+      for (const t of bm) out.push({ kind: "ins", text: t });
+    }
+    for (let i = a.length - tail; i < a.length; i++) out.push({ kind: "same", text: a[i] });
+    return out;
+  }
+  function diffView(before, after, opts = {}) {
+    const lines = lineDiff(before, after);
+    const ctx = opts.context ?? 2;
+    const dels = lines.filter((l) => l.kind === "del").length;
+    const ins = lines.filter((l) => l.kind === "ins").length;
+    const root2 = el("div", { class: "diffview" + (opts.code ? " code" : "") });
+    root2.appendChild(el("div", { class: "diffsum" }, [
+      el("span", { class: "diff-ins-n", text: `+${ins}` }),
+      el("span", { class: "diff-del-n", text: `\u2212${dels}` }),
+      el("span", { class: "hint", text: dels || ins ? " \uC904 (\uAE30\uC900\uC120 \u2192 \uC9C0\uAE08)" : " \uC904 \u2014 \uB0B4\uC6A9\uC774 \uAC19\uC2B5\uB2C8\uB2E4" })
+    ]));
+    const show = new Array(lines.length).fill(false);
+    lines.forEach((l, i) => {
+      if (l.kind === "same") return;
+      for (let k = Math.max(0, i - ctx); k <= Math.min(lines.length - 1, i + ctx); k++) show[k] = true;
+    });
+    let hidden = 0;
+    const flush = () => {
+      if (hidden) root2.appendChild(el("div", { class: "diffskip", text: `\u2026 ${hidden}\uC904 \uAC19\uC74C \u2026` }));
+      hidden = 0;
+    };
+    lines.forEach((l, i) => {
+      if (!show[i]) {
+        hidden++;
+        return;
+      }
+      flush();
+      root2.appendChild(el("div", { class: "diffline " + l.kind }, [
+        el("span", { class: "diffmark", text: l.kind === "del" ? "\u2212" : l.kind === "ins" ? "+" : " " }),
+        el("span", { class: "difftext", text: l.text || " " })
+      ]));
+    });
+    flush();
+    return root2;
+  }
+  function diffCard(before, after, opts = {}) {
+    if (before === null || before === after) return null;
+    const lines = lineDiff(before, after);
+    const n = lines.filter((l) => l.kind !== "same").length;
+    const body = el("div", { class: "diffbody", style: { display: opts.open ? "" : "none" } });
+    const toggle = el("button", { class: "ghost tiny", text: opts.open ? "\uBCC0\uACBD \uB0B4\uC6A9 \uC811\uAE30" : `\uBCC0\uACBD \uB0B4\uC6A9 \uBCF4\uAE30 (${n}\uC904)` });
+    toggle.addEventListener("click", () => {
+      const open4 = body.style.display === "none";
+      if (open4 && !body.childElementCount) body.appendChild(diffView(before, after, { code: opts.code }));
+      body.style.display = open4 ? "" : "none";
+      toggle.textContent = open4 ? "\uBCC0\uACBD \uB0B4\uC6A9 \uC811\uAE30" : `\uBCC0\uACBD \uB0B4\uC6A9 \uBCF4\uAE30 (${n}\uC904)`;
+    });
+    if (opts.open) body.appendChild(diffView(before, after, { code: opts.code }));
+    return el("div", { class: "diffcard" }, [
+      el("div", { class: "row" }, [
+        el("span", { class: "hint grow", text: `\uAE30\uC900\uC120\uACFC \uB2E4\uB985\uB2C8\uB2E4 (${before.length}\uC790 \u2192 ${after.length}\uC790).` }),
+        toggle
+      ]),
+      body
+    ]);
+  }
+  function menuAt(x, y, items5) {
+    const menu = el("div", { class: "ctxmenu" });
+    for (const item of items5) {
+      if (item === null) {
+        menu.appendChild(el("div", { class: "ctxsep" }));
+        continue;
+      }
+      const b = el("button", { class: item.danger ? "danger" : "", text: item.label });
+      b.disabled = !!item.disabled;
+      b.addEventListener("click", () => {
+        close();
+        item.onClick();
+      });
+      menu.appendChild(b);
+    }
+    document.body.appendChild(menu);
+    const vw = window.innerWidth || 1024;
+    const vh = window.innerHeight || 768;
+    const mw = menu.offsetWidth || 180;
+    const mh = menu.offsetHeight || 200;
+    menu.style.left = Math.max(4, Math.min(x, vw - mw - 4)) + "px";
+    menu.style.top = Math.max(4, Math.min(y, vh - mh - 4)) + "px";
+    const close = () => {
+      menu.remove();
+      document.removeEventListener("click", away, true);
+      document.removeEventListener("contextmenu", away, true);
+      document.removeEventListener("keydown", esc, true);
+    };
+    const away = (e) => {
+      if (!menu.contains(e.target)) close();
+    };
+    const esc = (e) => {
+      if (e.key === "Escape") close();
+    };
+    setTimeout(() => {
+      document.addEventListener("click", away, true);
+      document.addEventListener("contextmenu", away, true);
+      document.addEventListener("keydown", esc, true);
+    }, 0);
+    return close;
+  }
+  function popover(anchor, content) {
+    const pop = el("div", { class: "popover" }, [content]);
+    document.body.appendChild(pop);
+    const rect = anchor.getBoundingClientRect();
+    const vw = window.innerWidth || 1024;
+    const vh = window.innerHeight || 768;
+    pop.style.maxWidth = Math.max(200, vw - 16) + "px";
+    const pw = pop.offsetWidth || 300;
+    const ph = pop.offsetHeight || 200;
+    const left = Math.max(8, Math.min(rect.left, vw - pw - 8));
+    const below = rect.bottom + 4;
+    const top = below + ph > vh - 8 ? Math.max(8, rect.top - ph - 4) : below;
+    pop.style.left = left + "px";
+    pop.style.top = top + "px";
+    const close = () => {
+      pop.remove();
+      document.removeEventListener("click", away, true);
+      document.removeEventListener("keydown", esc, true);
+    };
+    const away = (e) => {
+      const t = e.target;
+      if (!pop.contains(t) && !anchor.contains(t)) close();
+    };
+    const esc = (e) => {
+      if (e.key === "Escape") close();
+    };
+    setTimeout(() => {
+      document.addEventListener("click", away, true);
+      document.addEventListener("keydown", esc, true);
+    }, 0);
+    return close;
+  }
+  function pollWhileVisible(fn, ms, wanted = () => true) {
+    let timer = null;
+    const token2 = {};
+    const hidden = () => {
+      try {
+        return document.visibilityState === "hidden";
+      } catch {
+        return false;
+      }
+    };
+    const tick = () => {
+      if (hidden() || !wanted()) return;
+      fn();
+    };
+    const start = () => {
+      if (timer !== null) return;
+      timer = setInterval(tick, ms);
+      polls.add(token2);
+    };
+    const stop = () => {
+      if (timer === null) return;
+      clearInterval(timer);
+      timer = null;
+      polls.delete(token2);
+    };
+    const onVis = () => {
+      if (hidden()) stop();
+      else {
+        start();
+        tick();
+      }
+    };
+    try {
+      document.addEventListener("visibilitychange", onVis);
+    } catch {
+    }
+    if (!hidden()) start();
+    return () => {
+      stop();
+      try {
+        document.removeEventListener("visibilitychange", onVis);
+      } catch {
+      }
+    };
+  }
+  function activePolls() {
+    return polls.size;
+  }
+  var ICON, TOOL, TOOL_GLYPH, PAPER_PLANE, polls;
+  var init_dom = __esm({
+    "src/ui/dom.ts"() {
+      "use strict";
+      init_hilite();
+      ICON = {
+        app: svg('<path d="M4 4h16v12H8l-4 4z"/><path d="M8 9h8"/><path d="M8 12h5"/>'),
+        close: svg('<path d="M18 6 6 18M6 6l12 12"/>', 18),
+        // A drawn arrow rather than the 🔄 emoji: the emoji renders at a different
+        // weight and baseline from every other control in the header.
+        reload: svg('<path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/>', 17),
+        check: svg('<path d="m5 13 4 4L19 7"/>', 16),
+        clip: svg('<path d="M21.4 11.1 12.3 20.2a5 5 0 0 1-7.1-7.1l9.2-9.2a3.3 3.3 0 1 1 4.7 4.7l-9.2 9.2a1.7 1.7 0 0 1-2.4-2.4l8.5-8.5"/>', 17),
+        pencil: svg('<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/>', 15),
+        gear: svg('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.14.6.66 1.03 1.28 1.05H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>', 17),
+        warn: svg('<path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>', 16),
+        // VS Code-style layout toggles: the frame, the divider, and tick marks on
+        // the side the button controls (studio panel fold/unfold, §1-30).
+        layoutL: svg('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M9 5v14"/><path d="M5.5 8.5h1.5M5.5 11h1.5M5.5 13.5h1.5"/>', 16),
+        layoutR: svg('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M15 5v14"/><path d="M17 8.5h1.5M17 11h1.5M17 13.5h1.5"/>', 16)
+      };
+      TOOL = {
+        snapshot: "\u{1F516}",
+        discard: "\u21A9",
+        versions: "\u{1F558}",
+        apply: "\u{1F4BE}",
+        export: "\u2B07",
+        find: "\u{1F50D}",
+        cut: "\u2702",
+        view: "\u{1F441}",
+        reload: "\u{1F504}",
+        newChat: "\u2795",
+        history: "\u{1F5C2}",
+        info: "\u24D8"
+      };
+      TOOL_GLYPH = {
+        list_turns: ["\u{1F4CB}", "\uD6D1\uAE30"],
+        read_turns: ["\u{1F4D6}", "\uC77D\uAE30"],
+        search_turns: ["\u{1F50D}", "\uAC80\uC0C9"],
+        read_card: ["\u{1FAAA}", "\uCE74\uB4DC"],
+        read_lore: ["\u{1F4DA}", "\uB85C\uC5B4"],
+        read_memory: ["\u{1F9E0}", "\uC694\uC57D"],
+        list_skills: ["\u{1F9E9}", "\uC2A4\uD0AC \uBAA9\uB85D"],
+        load_skill: ["\u{1F9E9}", "\uC2A4\uD0AC"],
+        stage_edit: ["\u270F\uFE0F", "\uC218\uC815 \uC81C\uC548"],
+        stage_bulk: ["\u270F\uFE0F", "\uC77C\uAD04 \uC81C\uC548"],
+        stage_delete: ["\u2702\uFE0F", "\uC0AD\uC81C \uC81C\uC548"],
+        list_staged: ["\u{1F4CC}", "\uC81C\uC548 \uD655\uC778"],
+        run_python: ["\u{1F40D}", "\uC2A4\uD06C\uB9BD\uD2B8"],
+        write_file: ["\u{1F4BE}", "\uD30C\uC77C \uC4F0\uAE30"],
+        list_files: ["\u{1F4C1}", "\uD30C\uC77C \uBAA9\uB85D"],
+        read_file: ["\u{1F4C4}", "\uD30C\uC77C \uC77D\uAE30"],
+        web_search: ["\u{1F310}", "\uC6F9 \uAC80\uC0C9"],
+        show_artifact: ["\u{1F4CA}", "\uC544\uD2F0\uD329\uD2B8"],
+        find_files: ["\u{1F50D}", "\uD30C\uC77C \uCC3E\uAE30"],
+        search_files: ["\u{1F50D}", "\uB0B4\uC6A9 \uAC80\uC0C9"],
+        studio_meta: ["\u{1F39B}", "\uCE74\uB4DC"],
+        view_image: ["\u{1F441}", "\uC774\uBBF8\uC9C0 \uBCF4\uAE30"],
+        compare_images: ["\u{1F441}", "\uC774\uBBF8\uC9C0 \uBE44\uAD50"],
+        image_metrics: ["\u{1F4D0}", "\uC774\uBBF8\uC9C0 \uC218\uCE58"],
+        review_folder: ["\u{1F50E}", "\uD3F4\uB354 \uAC80\uC218"],
+        suggest_selection: ["\u{1F3F7}", "\uAC80\uC218 \uC81C\uC548"]
+      };
+      PAPER_PLANE = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4z"/></svg>';
+      polls = /* @__PURE__ */ new Set();
     }
   });
 
@@ -3577,1003 +4572,468 @@ name: ${nm}
     }
   });
 
-  // src/ui/hilite.ts
-  function parseWeights(text2) {
-    const segments = [];
-    let braces = 0;
-    let brackets = 0;
-    const numeric = [];
-    const effective2 = () => {
-      const base = numeric.length > 0 ? numeric[numeric.length - 1] : 1;
-      return base * Math.pow(STEP, braces) * Math.pow(STEP, -brackets);
-    };
-    let segStart = 0;
-    let segWeight = effective2();
-    const boundary = (pos) => {
-      const w = effective2();
-      if (w === segWeight) return;
-      if (pos > segStart) segments.push({ start: segStart, end: pos, weight: segWeight });
-      segStart = pos;
-      segWeight = w;
-    };
-    let i = 0;
-    while (i < text2.length) {
-      const ch = text2[i];
-      if (ch === "{") {
-        braces++;
-        boundary(i);
-        i++;
-      } else if (ch === "}") {
-        if (braces > 0) braces--;
-        boundary(i + 1);
-        i++;
-      } else if (ch === "[") {
-        brackets++;
-        boundary(i);
-        i++;
-      } else if (ch === "]") {
-        if (brackets > 0) brackets--;
-        boundary(i + 1);
-        i++;
-      } else if (text2.startsWith("::", i) && numeric.length > 0) {
-        numeric.pop();
-        boundary(i + 2);
-        i += 2;
-      } else {
-        const m = NUMERIC_OPEN.exec(text2.slice(i));
-        if (m) {
-          numeric.push(Number(m[1]));
-          boundary(i);
-          i += m[0].length;
-        } else i++;
-      }
-    }
-    if (text2.length > segStart) segments.push({ start: segStart, end: text2.length, weight: segWeight });
-    return segments;
-  }
-  function weightBackground(weight) {
-    if (weight === 1) return null;
-    if (weight <= 0) return "rgba(96, 145, 235, 0.45)";
-    const steps = Math.abs(Math.log(weight) / Math.log(STEP));
-    const alpha = Math.min(0.1 + steps * 0.09, 0.48);
-    return weight > 1 ? `rgba(233, 94, 80, ${alpha.toFixed(3)})` : `rgba(96, 145, 235, ${alpha.toFixed(3)})`;
-  }
-  function flatten(text2, spans, weights = []) {
-    const bounds = /* @__PURE__ */ new Set([0, text2.length]);
-    for (const s of spans) {
-      bounds.add(s.start);
-      bounds.add(s.end);
-    }
-    for (const s of weights) {
-      bounds.add(s.start);
-      bounds.add(s.end);
-    }
-    const sorted = [...bounds].filter((n) => n >= 0 && n <= text2.length).sort((a, b) => a - b);
-    const ranges = [];
-    for (let i = 0; i < sorted.length - 1; i++) {
-      const start = sorted[i];
-      const end = sorted[i + 1];
-      let best = null;
-      for (const s of spans) {
-        if (s.start <= start && start < s.end && (!best || s.prio > best.prio)) best = s;
-      }
-      const bg = best ? best.bg : weightBackground(weights.find((s) => s.start <= start && start < s.end)?.weight ?? 1);
-      const prev = ranges[ranges.length - 1];
-      if (prev && prev.bg === bg) prev.end = end;
-      else ranges.push({ start, end, bg });
-    }
-    return ranges;
-  }
-  function lineSpans(text2, test, bg, prio) {
-    const out = [];
-    let offset = 0;
-    for (const line of text2.split("\n")) {
-      if (test(line)) out.push({ start: offset, end: offset + line.length, bg, prio });
-      offset += line.length + 1;
-    }
-    return out;
-  }
-  function regexSpans(text2, re, bg, prio) {
-    const out = [];
-    for (const m of text2.matchAll(re)) {
-      if (m.index !== void 0 && m[0]) out.push({ start: m.index, end: m.index + m[0].length, bg, prio });
-    }
-    return out;
-  }
-  function naiRanges(text2) {
-    const spans = [
-      ...regexSpans(text2, /<[^<>\n]+>/g, FRAGMENT_BG, 2),
-      ...lineSpans(text2, (l) => l.trimStart().startsWith("#"), COMMENT_BG, 3)
-    ];
-    return flatten(text2, spans, parseWeights(text2));
-  }
-  function mdRanges(text2) {
-    const spans = [
-      ...lineSpans(text2, (l) => /^#{1,6}\s/.test(l), "rgba(125, 211, 252, 0.16)", 1),
-      ...lineSpans(text2, (l) => /^\s*>/.test(l), "rgba(128, 128, 136, 0.18)", 1),
-      ...regexSpans(text2, /\*\*[^*\n]+\*\*/g, "rgba(233, 94, 80, 0.18)", 2),
-      ...regexSpans(text2, /`[^`\n]+`/g, "rgba(128, 128, 136, 0.3)", 3),
-      ...regexSpans(text2, /\[[^\]\n]+\]\([^)\n]+\)/g, "rgba(92, 190, 125, 0.22)", 2),
-      // RisuAI CBS calls ride lorebook text; seeing their extent is the point.
-      ...regexSpans(text2, /\{\{[^{}\n]+\}\}/g, CBS_BG, 4)
-    ];
-    return flatten(text2, spans);
-  }
-  function regexRanges(text2) {
-    const spans = [
-      ...regexSpans(text2, /\[(?:\\.|[^\]\\])*\]/g, STRING_BG, 3),
-      ...regexSpans(text2, /\\u[0-9a-fA-F]{4}|\\x[0-9a-fA-F]{2}|\\./g, META_BG, 4),
-      ...regexSpans(text2, /[*+?|]|\{\d+(?:,\d*)?\}|\((?:\?[:=!<]*)?|\)/g, KEYWORD_BG, 2)
-    ];
-    return flatten(text2, spans);
-  }
-  function regexOutRanges(text2) {
-    const spans = [
-      ...regexSpans(text2, /\{\{[^{}\n]+\}\}/g, CBS_BG, 4),
-      ...regexSpans(text2, /\$(?:\d{1,2}|&|<[^>\n]+>)/g, KEYWORD_BG, 3),
-      ...regexSpans(text2, /<!--[\s\S]*?-->/g, COMMENT_BG, 2)
-    ];
-    return flatten(text2, spans);
-  }
-  function luaIslands(text2) {
-    const out = [];
-    const n = text2.length;
-    const longOpen = (at) => {
-      if (text2[at] !== "[") return null;
-      let j = at + 1;
-      while (text2[j] === "=") j++;
-      return text2[j] === "[" ? j - at - 1 : null;
-    };
-    const longClose = (from, eq) => {
-      const close = "]" + "=".repeat(eq) + "]";
-      const at = text2.indexOf(close, from);
-      return at === -1 ? n : at + close.length;
-    };
-    let i = 0;
-    while (i < n) {
-      const c = text2[i];
-      if (c === "-" && text2[i + 1] === "-") {
-        const eq = longOpen(i + 2);
-        let end;
-        if (eq !== null) end = longClose(i + 4 + eq, eq);
-        else {
-          const nl = text2.indexOf("\n", i);
-          end = nl === -1 ? n : nl;
-        }
-        out.push({ start: i, end, bg: COMMENT_BG, prio: 5 });
-        i = end;
-      } else if (c === '"' || c === "'") {
-        let j = i + 1;
-        while (j < n && text2[j] !== c && text2[j] !== "\n") {
-          if (text2[j] === "\\") j++;
-          j++;
-        }
-        const end = j < n && text2[j] === c ? j + 1 : j;
-        out.push({ start: i, end, bg: STRING_BG, prio: 4 });
-        i = Math.max(end, i + 1);
-      } else {
-        const eq = longOpen(i);
-        if (eq !== null) {
-          const end = longClose(i + 2 + eq, eq);
-          out.push({ start: i, end, bg: STRING_BG, prio: 4 });
-          i = end;
-        } else i++;
-      }
-    }
-    return out;
-  }
-  function luaRanges(text2) {
-    const spans = [
-      ...luaIslands(text2),
-      ...regexSpans(text2, LUA_KEYWORDS, KEYWORD_BG, 1)
-    ];
-    return flatten(text2, spans);
-  }
-  function copyTypography(from, to) {
-    try {
-      const cs = getComputedStyle(from);
-      for (const p of COPY_PROPS) {
-        to.style[p] = cs[p];
-      }
-      to.style.borderStyle = "solid";
-      to.style.borderColor = "transparent";
-    } catch {
-    }
-  }
-  function caretCoords(ta, position) {
-    const div = document.createElement("div");
-    try {
-      copyTypography(ta, div);
-    } catch {
-    }
-    div.style.position = "absolute";
-    div.style.visibility = "hidden";
-    div.style.left = "-9999px";
-    div.style.top = "0";
-    div.style.width = `${ta.clientWidth || 300}px`;
-    div.style.whiteSpace = "pre-wrap";
-    div.textContent = ta.value.slice(0, position);
-    const marker = document.createElement("span");
-    marker.textContent = ta.value.slice(position, position + 1) || "\u200B";
-    div.appendChild(marker);
-    document.body.appendChild(div);
-    const coords = { left: marker.offsetLeft, top: marker.offsetTop, height: marker.offsetHeight || 18 };
-    div.remove();
-    return coords;
-  }
-  function fmtCount(count) {
-    if (count >= 1e6) return `${(count / 1e6).toFixed(1)}M`;
-    if (count >= 1e3) return `${Math.round(count / 1e3)}k`;
-    return count > 0 ? String(count) : "";
-  }
-  function attachHilite(ta, opts) {
-    if (!ta.parentNode || ta.parentElement && ta.parentElement.classList.contains("hlwrap")) return;
-    const wrap = el("div", { class: "hlwrap" });
-    const mirror = el("div", { class: "hlmirror", "aria-hidden": "true" });
-    ta.parentNode.insertBefore(wrap, ta);
-    wrap.appendChild(mirror);
-    wrap.appendChild(ta);
-    try {
-      const bg = getComputedStyle(ta).backgroundColor;
-      if (bg && bg !== "transparent" && bg !== "rgba(0, 0, 0, 0)") mirror.style.backgroundColor = bg;
-    } catch {
-    }
-    ta.classList.add("hl-on");
-    const render = () => {
-      copyTypography(ta, mirror);
-      try {
-        if (ta.offsetWidth > 0) {
-          const cs = getComputedStyle(ta);
-          const bl = parseFloat(cs.borderLeftWidth) || 0;
-          const br = parseFloat(cs.borderRightWidth) || 0;
-          const sbw = Math.max(0, ta.offsetWidth - ta.clientWidth - bl - br);
-          mirror.style.paddingRight = `${(parseFloat(cs.paddingRight) || 0) + sbw}px`;
-          mirror.style.width = `${ta.offsetWidth}px`;
-        }
-      } catch {
-      }
-      const text2 = ta.value;
-      const ranges = RANGES[opts.mode](text2);
-      while (mirror.firstChild) mirror.removeChild(mirror.firstChild);
-      for (const r of ranges) {
-        const piece = text2.slice(r.start, r.end);
-        if (!piece) continue;
-        const span = document.createElement("span");
-        span.textContent = piece;
-        if (r.bg) span.style.background = r.bg;
-        mirror.appendChild(span);
-      }
-      if (text2.endsWith("\n")) mirror.appendChild(document.createTextNode("\u200B"));
-      mirror.scrollTop = ta.scrollTop;
-      mirror.scrollLeft = ta.scrollLeft;
-    };
-    const syncScroll = () => {
-      mirror.scrollTop = ta.scrollTop;
-      mirror.scrollLeft = ta.scrollLeft;
-    };
-    ta.addEventListener("input", render);
-    ta.addEventListener("scroll", syncScroll);
-    try {
-      const slot = ta;
-      slot.__hinaRo?.disconnect();
-      const ro = new ResizeObserver(() => {
-        if (ta.isConnected) slot.__hinaMounted = true;
-        else if (slot.__hinaMounted) {
-          ro.disconnect();
-          return;
-        }
-        render();
-      });
-      slot.__hinaRo = ro;
-      ro.observe(ta);
-    } catch {
-    }
-    render();
-    if (opts.mode === "nai" && !opts.noSuggest) attachSuggest(ta, opts);
-  }
-  function attachSuggest(ta, opts) {
-    let pop = null;
-    let items5 = [];
-    let selected = 0;
-    let tokenStart = -1;
-    let seq = 0;
-    let timer = null;
-    const close = () => {
-      pop?.remove();
-      pop = null;
-      items5 = [];
-    };
-    const draw2 = () => {
-      if (!items5.length) {
-        close();
-        return;
-      }
-      if (!pop) {
-        pop = el("div", { class: "suggestpop" });
-        document.body.appendChild(pop);
-      }
-      while (pop.firstChild) pop.removeChild(pop.firstChild);
-      items5.slice(0, 8).forEach((s, i) => {
-        const b = el("button", { class: i === selected ? "on" : "" });
-        if (s.kind === "frag") {
-          const cut = s.name.lastIndexOf("/");
-          if (cut > 0) {
-            b.appendChild(el("span", { class: "fold", text: "<" + s.name.slice(0, cut + 1) }));
-            b.appendChild(el("span", { class: "frag", text: s.name.slice(cut + 1) + ">" }));
-          } else {
-            b.appendChild(el("span", { class: "frag", text: `<${s.name}>` }));
-          }
-        } else {
-          b.appendChild(el("span", { text: s.tag }));
-          const c = fmtCount(s.count);
-          if (c) b.appendChild(el("span", { class: "cnt", text: c }));
-        }
-        b.addEventListener("mousedown", (e) => {
-          e.preventDefault();
-          complete(items5[i]);
-        });
-        pop.appendChild(b);
-      });
-      try {
-        const caret = caretCoords(ta, ta.selectionStart);
-        const rect = ta.getBoundingClientRect();
-        const vh = window.innerHeight || 768;
-        const est = Math.min(items5.length, 8) * 26 + 8;
-        let left = rect.left + caret.left - ta.scrollLeft;
-        let top = rect.top + caret.top - ta.scrollTop + caret.height + 4;
-        left = Math.max(8, Math.min(left, (window.innerWidth || 1024) - 280));
-        if (top + est > vh - 8) top = rect.top + caret.top - ta.scrollTop - est - 4;
-        pop.style.left = left + "px";
-        pop.style.top = Math.max(8, top) + "px";
-      } catch {
-      }
-    };
-    const refresh3 = () => {
-      if (timer) clearTimeout(timer);
-      const mySeq = ++seq;
-      const cursor = ta.selectionStart;
-      const before = ta.value.slice(0, cursor);
-      const lineStart = before.lastIndexOf("\n") + 1;
-      if (before.slice(lineStart).trimStart().startsWith("#")) {
-        close();
-        return;
-      }
-      const frag = /<([^<>|]*)$/.exec(before);
-      if (frag && opts.fragments) {
-        const q = frag[1].toLowerCase();
-        const names = opts.fragments().filter((n) => n.toLowerCase().includes(q)).slice(0, 8);
-        tokenStart = cursor - frag[1].length;
-        items5 = names.map((name) => ({ kind: "frag", name }));
-        selected = 0;
-        draw2();
-        return;
-      }
-      let sepIx = -1;
-      for (let i = before.length - 1; i >= 0; i--) {
-        if (TAG_TOKEN_SEPARATORS.test(before[i])) {
-          sepIx = i;
-          break;
-        }
-      }
-      const rawToken = before.slice(sepIx + 1);
-      const token2 = rawToken.trimStart();
-      if (token2.trim().length < 2) {
-        close();
-        return;
-      }
-      tokenStart = sepIx + 1 + (rawToken.length - token2.length);
-      timer = setTimeout(() => {
-        void state.studio.suggestTags(token2.trim()).then((r) => {
-          if (seq !== mySeq) return;
-          items5 = (r.tags ?? []).map((t) => ({ kind: "tag", tag: t.tag, count: t.count ?? 0 }));
-          selected = 0;
-          draw2();
-        }).catch(() => {
-        });
-      }, 160);
-    };
-    const complete = (s) => {
-      if (tokenStart < 0) return;
-      const cursor = ta.selectionStart;
-      let insert = s.kind === "frag" ? s.name + ">" : s.tag;
-      if (!ta.value.slice(cursor).trimStart().startsWith(",")) insert += ", ";
-      ta.value = ta.value.slice(0, tokenStart) + insert + ta.value.slice(cursor);
-      close();
-      const pos = tokenStart + insert.length;
-      try {
-        ta.setSelectionRange(pos, pos);
-      } catch {
-      }
-      ta.focus();
-      ta.dispatchEvent(new Event("input", { bubbles: true }));
-    };
-    ta.addEventListener("input", refresh3);
-    ta.addEventListener("keydown", (ev) => {
-      const e = ev;
-      if (!items5.length) return;
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        selected = (selected + 1) % Math.min(items5.length, 8);
-        draw2();
-      } else if (e.key === "ArrowUp") {
-        e.preventDefault();
-        selected = (selected - 1 + Math.min(items5.length, 8)) % Math.min(items5.length, 8);
-        draw2();
-      } else if (e.key === "Enter" || e.key === "Tab") {
-        e.preventDefault();
-        complete(items5[selected]);
-      } else if (e.key === "Escape") {
-        close();
-      }
-    });
-    ta.addEventListener("blur", () => {
-      if (timer) clearTimeout(timer);
-      seq++;
-      setTimeout(close, 150);
-    });
-  }
-  var STEP, NUMERIC_OPEN, FRAGMENT_BG, COMMENT_BG, STRING_BG, KEYWORD_BG, META_BG, CBS_BG, LUA_KEYWORDS, COPY_PROPS, TAG_TOKEN_SEPARATORS, RANGES;
-  var init_hilite = __esm({
-    "src/ui/hilite.ts"() {
-      "use strict";
-      init_dom();
-      init_state();
-      STEP = 1.05;
-      NUMERIC_OPEN = /^(-?\d+(?:\.\d+)?)::/;
-      FRAGMENT_BG = "rgba(92, 190, 125, 0.3)";
-      COMMENT_BG = "rgba(128, 128, 136, 0.28)";
-      STRING_BG = "rgba(92, 190, 125, 0.22)";
-      KEYWORD_BG = "rgba(96, 145, 235, 0.18)";
-      META_BG = "rgba(233, 94, 80, 0.18)";
-      CBS_BG = "rgba(124, 92, 255, 0.24)";
-      LUA_KEYWORDS = /\b(?:and|break|do|elseif|else|end|false|for|function|goto|if|in|local|nil|not|or|repeat|return|then|true|until|while|onStart|onOutput|onInput|onButtonClick|listenEdit|getChatVar|setChatVar)\b/g;
-      COPY_PROPS = [
-        "fontFamily",
-        "fontSize",
-        "fontWeight",
-        "fontStyle",
-        "letterSpacing",
-        "lineHeight",
-        "textTransform",
-        "wordSpacing",
-        "textIndent",
-        "whiteSpace",
-        "wordBreak",
-        "overflowWrap",
-        "tabSize",
-        "boxSizing",
-        "paddingTop",
-        "paddingRight",
-        "paddingBottom",
-        "paddingLeft",
-        "borderTopWidth",
-        "borderRightWidth",
-        "borderBottomWidth",
-        "borderLeftWidth"
-      ];
-      TAG_TOKEN_SEPARATORS = /[,\n{}[\]|<>:/]/;
-      RANGES = {
-        nai: naiRanges,
-        md: mdRanges,
-        regex: regexRanges,
-        "regex-out": regexOutRanges,
-        lua: luaRanges
-      };
-    }
-  });
-
-  // src/ui/dom.ts
-  function el(tag, attrs = {}, children = []) {
-    const node = document.createElement(tag);
-    for (const [k, v] of Object.entries(attrs)) {
-      if (v === null || v === void 0 || v === false) continue;
-      if (k === "class") node.className = String(v);
-      else if (k === "text") node.textContent = String(v);
-      else if (k === "html") node.innerHTML = String(v);
-      else if (k === "style" && typeof v === "object") Object.assign(node.style, v);
-      else if (k === "dataset" && typeof v === "object") Object.assign(node.dataset, v);
-      else if (k.startsWith("on") && typeof v === "function") {
-        node.addEventListener(k.slice(2).toLowerCase(), v);
-      } else if (k === "value" && node instanceof HTMLTextAreaElement) {
-        node.value = String(v);
-      } else if (k === "value" && node instanceof HTMLInputElement) {
-        node.value = String(v);
-      } else if (k === "checked" && node instanceof HTMLInputElement) {
-        node.checked = Boolean(v);
-      } else if (v === true) {
-        node.setAttribute(k, "");
-      } else {
-        node.setAttribute(k, String(v));
-      }
-    }
-    const list2 = Array.isArray(children) ? children : [children];
-    for (const c of list2) {
-      if (c === null || c === void 0 || c === false) continue;
-      node.appendChild(typeof c === "string" ? document.createTextNode(c) : c);
-    }
-    return node;
-  }
-  function searchBox(value, onInput, placeholder = "\uCC3E\uAE30") {
-    const input2 = el("input", { class: "searchinput", placeholder, value });
-    input2.addEventListener("input", () => onInput(input2.value));
-    return el("div", { class: "searchbox" }, [input2]);
-  }
-  function refocusSearch(root2) {
-    const input2 = root2?.querySelector(".searchbox input") ?? document.querySelector(".tabslot .searchbox input");
-    if (!input2) return;
-    input2.focus();
-    try {
-      input2.setSelectionRange(input2.value.length, input2.value.length);
-    } catch {
-    }
-  }
-  function setSelected(sel, value) {
-    for (const opt of Array.from(sel.querySelectorAll("option"))) {
-      const on = opt.value === value;
-      opt.selected = on;
-      if (on) opt.setAttribute("selected", "");
-      else opt.removeAttribute("selected");
-    }
-    try {
-      sel.value = value;
-    } catch {
-    }
-  }
-  function selectedValue(sel) {
-    const options = Array.from(sel.querySelectorAll("option"));
-    const live = options.find((o) => o.selected === true && o.hasAttribute("selected") === false) ?? (typeof sel.value === "string" && sel.value !== "" && options.find((o) => o.value === sel.value)) ?? options.find((o) => o.selected === true);
-    if (live) return live.value;
-    const stamped = sel.querySelector("option[selected]");
-    return stamped?.value ?? sel.value ?? options[0]?.value ?? "";
-  }
-  function clear(node) {
-    while (node.firstChild) node.removeChild(node.firstChild);
-  }
-  function svg(path, size = 20) {
-    return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${path}</svg>`;
-  }
-  function iconBtn(html, title) {
-    return el("button", { class: "iconbtn", html, title });
-  }
-  function segCtl(items5) {
-    return el("div", { class: "segctl" }, items5.map((it) => {
-      const b = el("button", { class: it.on ? "on" : "", text: it.label, title: it.title ?? "" });
-      b.addEventListener("click", it.pick);
-      return b;
-    }));
-  }
-  function colPicker(opts) {
-    const btns2 = opts.values.map((n) => {
-      const label2 = opts.labels?.[n] ?? String(n);
-      const b = el("button", { text: label2, title: opts.labels?.[n] ? `${label2} \u2014 \uD3ED\uC5D0 \uB9DE\uCDB0 \uC5F4 \uC218\uB97C \uC815\uD569\uB2C8\uB2E4` : `${n}\uC5F4\uB85C \uBCF4\uAE30` });
-      b.addEventListener("click", () => {
-        opts.set(n);
-        sync();
-      });
-      return b;
-    });
-    const sync = () => {
-      btns2.forEach((b, i) => b.classList.toggle("on", opts.values[i] === opts.get()));
-    };
-    sync();
-    return el("div", { class: "segctl colpick", title: "\uC5F4 \uC218" }, [
-      el("span", { class: "seglabel", text: "\u25A6" }),
-      ...btns2
-    ]);
-  }
-  function armed(button2, label2, confirmLabel, run) {
-    let armedNow = false;
-    let timer;
-    const disarm = () => {
-      if (timer) clearTimeout(timer);
-      armedNow = false;
-      button2.textContent = label2;
-      button2.classList.remove("danger");
-    };
-    const arm = () => {
-      if (timer) clearTimeout(timer);
-      armedNow = true;
-      button2.textContent = confirmLabel;
-      button2.classList.add("danger");
-      timer = setTimeout(disarm, 4e3);
-    };
-    const fire = () => {
-      disarm();
-      run();
-    };
-    button2.textContent = label2;
-    button2.addEventListener("click", () => {
-      if (!armedNow) arm();
-      else fire();
-    });
-    return { arm, fire, disarm, get armed() {
-      return armedNow;
-    } };
-  }
-  function diffFragments(before, after) {
-    let head = 0;
-    const max = Math.min(before.length, after.length);
-    while (head < max && before[head] === after[head]) head++;
-    let tail = 0;
-    while (tail < max - head && before[before.length - 1 - tail] === after[after.length - 1 - tail]) tail++;
-    const mk = (text2, cls) => {
-      const frag = document.createDocumentFragment();
-      frag.appendChild(document.createTextNode(text2.slice(0, head)));
-      const mid = text2.slice(head, text2.length - tail);
-      if (mid) frag.appendChild(el("span", { class: cls, text: mid }));
-      frag.appendChild(document.createTextNode(text2.slice(text2.length - tail)));
-      return frag;
-    };
-    return { before: mk(before, "diff-del"), after: mk(after, "diff-ins") };
-  }
-  function fmtTime(ms) {
-    const n = Number(ms);
-    if (!Number.isFinite(n) || n <= 0) return "";
-    try {
-      return new Date(n).toISOString().slice(0, 16).replace("T", " ");
-    } catch {
-      return "";
-    }
-  }
-  function modal(title, body, opts = {}) {
-    const closeBtn = el("button", { class: "iconbtn", html: ICON.close, title: "\uB2EB\uAE30" });
-    const box = el("div", { class: "modalbox" + (opts.wide ? " wide" : "") + (opts.cls ? " " + opts.cls : "") }, [
-      el("div", { class: "modalhead" }, [
-        el("h2", { text: title }),
-        el("span", { class: "spacer" }),
-        closeBtn
-      ]),
-      el("div", { class: "modalbody" }, [body])
-    ]);
-    const back = el("div", { class: "modalback" }, [box]);
-    document.body.appendChild(back);
-    let closed = false;
-    const close = () => {
-      if (closed) return;
-      closed = true;
-      back.remove();
-      document.removeEventListener("keydown", esc, true);
-      opts.onClose?.();
-    };
-    const esc = (e) => {
-      if (e.key === "Escape") close();
-    };
-    closeBtn.addEventListener("click", close);
-    back.addEventListener("click", (e) => {
-      if (e.target === back && !opts.sticky) close();
-    });
-    document.addEventListener("keydown", esc, true);
-    setTimeout(() => box.querySelector("input, textarea, select, button")?.focus(), 0);
-    return close;
-  }
-  function focusEdit(source, title, opts = {}) {
-    const big = el("textarea", {
-      class: "focusarea" + (opts.code ? " codearea" : ""),
-      spellcheck: opts.code ? "false" : "true"
-    });
-    big.value = source.value;
-    const count = el("span", { class: "hint", text: `${big.value.length}\uC790` });
-    const sync = () => {
-      source.value = big.value;
-      count.textContent = `${big.value.length}\uC790`;
-      source.dispatchEvent(new Event("input", { bubbles: true }));
-    };
-    big.addEventListener("input", sync);
-    const done = el("button", { class: "primary", text: "\uC644\uB8CC" });
-    const body = el("div", { class: "focusbody" }, [
-      big,
-      el("div", { class: "row focusfoot" }, [
-        count,
-        el("span", { class: "hint grow", text: "\uC785\uB825\uC740 \uBC14\uB85C \uC6D0\uB798 \uC0C1\uC790\uC5D0 \uBC18\uC601\uB429\uB2C8\uB2E4. \uC800\uC7A5\uC740 \uC6D0\uB798 \uD654\uBA74\uC758 \uC800\uC7A5 \uBC84\uD2BC\uC73C\uB85C \uD569\uB2C8\uB2E4." }),
-        done
-      ])
-    ]);
-    const close = modal(title, body, { cls: "focusmodal", sticky: true });
-    if (opts.hilite) attachHilite(big, opts.hilite);
-    done.addEventListener("click", close);
-    setTimeout(() => {
-      big.focus();
-      try {
-        big.setSelectionRange(source.selectionStart, source.selectionEnd);
-      } catch {
-      }
-    }, 0);
-  }
-  function focusButton(source, title, opts = {}) {
-    const b = el("button", { class: "ghost tiny focusbtn", text: "\u2922 \uC9D1\uC911 \uD3B8\uC9D1", title: "\uD654\uBA74 \uC804\uCCB4\uB85C \uD06C\uAC8C \uD3B8\uC9D1\uD569\uB2C8\uB2E4" });
-    b.addEventListener("click", () => focusEdit(source, title, opts));
-    return b;
-  }
-  function lineDiff(before, after) {
-    const a = before.split("\n");
-    const b = after.split("\n");
-    let head = 0;
-    while (head < a.length && head < b.length && a[head] === b[head]) head++;
-    let tail = 0;
-    while (tail < a.length - head && tail < b.length - head && a[a.length - 1 - tail] === b[b.length - 1 - tail]) tail++;
-    const out = [];
-    for (let i = 0; i < head; i++) out.push({ kind: "same", text: a[i] });
-    const am = a.slice(head, a.length - tail);
-    const bm = b.slice(head, b.length - tail);
-    if (am.length && bm.length && am.length * bm.length <= 4e6) {
-      const n = am.length, m = bm.length;
-      const dp = [];
-      for (let i2 = 0; i2 <= n; i2++) dp.push(new Uint32Array(m + 1));
-      for (let i2 = n - 1; i2 >= 0; i2--) {
-        for (let j2 = m - 1; j2 >= 0; j2--) {
-          dp[i2][j2] = am[i2] === bm[j2] ? dp[i2 + 1][j2 + 1] + 1 : Math.max(dp[i2 + 1][j2], dp[i2][j2 + 1]);
-        }
-      }
-      let i = 0, j = 0;
-      while (i < n && j < m) {
-        if (am[i] === bm[j]) {
-          out.push({ kind: "same", text: am[i] });
-          i++;
-          j++;
-        } else if (dp[i + 1][j] >= dp[i][j + 1]) {
-          out.push({ kind: "del", text: am[i] });
-          i++;
-        } else {
-          out.push({ kind: "ins", text: bm[j] });
-          j++;
-        }
-      }
-      while (i < n) out.push({ kind: "del", text: am[i++] });
-      while (j < m) out.push({ kind: "ins", text: bm[j++] });
-    } else {
-      for (const t of am) out.push({ kind: "del", text: t });
-      for (const t of bm) out.push({ kind: "ins", text: t });
-    }
-    for (let i = a.length - tail; i < a.length; i++) out.push({ kind: "same", text: a[i] });
-    return out;
-  }
-  function diffView(before, after, opts = {}) {
-    const lines = lineDiff(before, after);
-    const ctx = opts.context ?? 2;
-    const dels = lines.filter((l) => l.kind === "del").length;
-    const ins = lines.filter((l) => l.kind === "ins").length;
-    const root2 = el("div", { class: "diffview" + (opts.code ? " code" : "") });
-    root2.appendChild(el("div", { class: "diffsum" }, [
-      el("span", { class: "diff-ins-n", text: `+${ins}` }),
-      el("span", { class: "diff-del-n", text: `\u2212${dels}` }),
-      el("span", { class: "hint", text: dels || ins ? " \uC904 (\uAE30\uC900\uC120 \u2192 \uC9C0\uAE08)" : " \uC904 \u2014 \uB0B4\uC6A9\uC774 \uAC19\uC2B5\uB2C8\uB2E4" })
-    ]));
-    const show = new Array(lines.length).fill(false);
-    lines.forEach((l, i) => {
-      if (l.kind === "same") return;
-      for (let k = Math.max(0, i - ctx); k <= Math.min(lines.length - 1, i + ctx); k++) show[k] = true;
-    });
-    let hidden = 0;
-    const flush = () => {
-      if (hidden) root2.appendChild(el("div", { class: "diffskip", text: `\u2026 ${hidden}\uC904 \uAC19\uC74C \u2026` }));
-      hidden = 0;
-    };
-    lines.forEach((l, i) => {
-      if (!show[i]) {
-        hidden++;
-        return;
-      }
-      flush();
-      root2.appendChild(el("div", { class: "diffline " + l.kind }, [
-        el("span", { class: "diffmark", text: l.kind === "del" ? "\u2212" : l.kind === "ins" ? "+" : " " }),
-        el("span", { class: "difftext", text: l.text || " " })
-      ]));
-    });
-    flush();
-    return root2;
-  }
-  function diffCard(before, after, opts = {}) {
-    if (before === null || before === after) return null;
-    const lines = lineDiff(before, after);
-    const n = lines.filter((l) => l.kind !== "same").length;
-    const body = el("div", { class: "diffbody", style: { display: opts.open ? "" : "none" } });
-    const toggle = el("button", { class: "ghost tiny", text: opts.open ? "\uBCC0\uACBD \uB0B4\uC6A9 \uC811\uAE30" : `\uBCC0\uACBD \uB0B4\uC6A9 \uBCF4\uAE30 (${n}\uC904)` });
-    toggle.addEventListener("click", () => {
-      const open4 = body.style.display === "none";
-      if (open4 && !body.childElementCount) body.appendChild(diffView(before, after, { code: opts.code }));
-      body.style.display = open4 ? "" : "none";
-      toggle.textContent = open4 ? "\uBCC0\uACBD \uB0B4\uC6A9 \uC811\uAE30" : `\uBCC0\uACBD \uB0B4\uC6A9 \uBCF4\uAE30 (${n}\uC904)`;
-    });
-    if (opts.open) body.appendChild(diffView(before, after, { code: opts.code }));
-    return el("div", { class: "diffcard" }, [
-      el("div", { class: "row" }, [
-        el("span", { class: "hint grow", text: `\uAE30\uC900\uC120\uACFC \uB2E4\uB985\uB2C8\uB2E4 (${before.length}\uC790 \u2192 ${after.length}\uC790).` }),
-        toggle
-      ]),
-      body
-    ]);
-  }
-  function menuAt(x, y, items5) {
-    const menu = el("div", { class: "ctxmenu" });
-    for (const item of items5) {
-      if (item === null) {
-        menu.appendChild(el("div", { class: "ctxsep" }));
-        continue;
-      }
-      const b = el("button", { class: item.danger ? "danger" : "", text: item.label });
-      b.disabled = !!item.disabled;
-      b.addEventListener("click", () => {
-        close();
-        item.onClick();
-      });
-      menu.appendChild(b);
-    }
-    document.body.appendChild(menu);
-    const vw = window.innerWidth || 1024;
-    const vh = window.innerHeight || 768;
-    const mw = menu.offsetWidth || 180;
-    const mh = menu.offsetHeight || 200;
-    menu.style.left = Math.max(4, Math.min(x, vw - mw - 4)) + "px";
-    menu.style.top = Math.max(4, Math.min(y, vh - mh - 4)) + "px";
-    const close = () => {
-      menu.remove();
-      document.removeEventListener("click", away, true);
-      document.removeEventListener("contextmenu", away, true);
-      document.removeEventListener("keydown", esc, true);
-    };
-    const away = (e) => {
-      if (!menu.contains(e.target)) close();
-    };
-    const esc = (e) => {
-      if (e.key === "Escape") close();
-    };
-    setTimeout(() => {
-      document.addEventListener("click", away, true);
-      document.addEventListener("contextmenu", away, true);
-      document.addEventListener("keydown", esc, true);
-    }, 0);
-    return close;
-  }
-  function popover(anchor, content) {
-    const pop = el("div", { class: "popover" }, [content]);
-    document.body.appendChild(pop);
-    const rect = anchor.getBoundingClientRect();
-    const vw = window.innerWidth || 1024;
-    const vh = window.innerHeight || 768;
-    pop.style.maxWidth = Math.max(200, vw - 16) + "px";
-    const pw = pop.offsetWidth || 300;
-    const ph = pop.offsetHeight || 200;
-    const left = Math.max(8, Math.min(rect.left, vw - pw - 8));
-    const below = rect.bottom + 4;
-    const top = below + ph > vh - 8 ? Math.max(8, rect.top - ph - 4) : below;
-    pop.style.left = left + "px";
-    pop.style.top = top + "px";
-    const close = () => {
-      pop.remove();
-      document.removeEventListener("click", away, true);
-      document.removeEventListener("keydown", esc, true);
-    };
-    const away = (e) => {
-      const t = e.target;
-      if (!pop.contains(t) && !anchor.contains(t)) close();
-    };
-    const esc = (e) => {
-      if (e.key === "Escape") close();
-    };
-    setTimeout(() => {
-      document.addEventListener("click", away, true);
-      document.addEventListener("keydown", esc, true);
-    }, 0);
-    return close;
-  }
-  function pollWhileVisible(fn, ms, wanted = () => true) {
-    let timer = null;
-    const token2 = {};
-    const hidden = () => {
-      try {
-        return document.visibilityState === "hidden";
-      } catch {
-        return false;
-      }
-    };
-    const tick = () => {
-      if (hidden() || !wanted()) return;
-      fn();
-    };
-    const start = () => {
-      if (timer !== null) return;
-      timer = setInterval(tick, ms);
-      polls.add(token2);
-    };
-    const stop = () => {
-      if (timer === null) return;
-      clearInterval(timer);
-      timer = null;
-      polls.delete(token2);
-    };
-    const onVis = () => {
-      if (hidden()) stop();
-      else {
-        start();
-        tick();
-      }
-    };
-    try {
-      document.addEventListener("visibilitychange", onVis);
-    } catch {
-    }
-    if (!hidden()) start();
-    return () => {
-      stop();
-      try {
-        document.removeEventListener("visibilitychange", onVis);
-      } catch {
-      }
-    };
-  }
-  function activePolls() {
-    return polls.size;
-  }
-  var ICON, TOOL, TOOL_GLYPH, PAPER_PLANE, polls;
-  var init_dom = __esm({
-    "src/ui/dom.ts"() {
-      "use strict";
-      init_hilite();
-      ICON = {
-        app: svg('<path d="M4 4h16v12H8l-4 4z"/><path d="M8 9h8"/><path d="M8 12h5"/>'),
-        close: svg('<path d="M18 6 6 18M6 6l12 12"/>', 18),
-        // A drawn arrow rather than the 🔄 emoji: the emoji renders at a different
-        // weight and baseline from every other control in the header.
-        reload: svg('<path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/>', 17),
-        check: svg('<path d="m5 13 4 4L19 7"/>', 16),
-        clip: svg('<path d="M21.4 11.1 12.3 20.2a5 5 0 0 1-7.1-7.1l9.2-9.2a3.3 3.3 0 1 1 4.7 4.7l-9.2 9.2a1.7 1.7 0 0 1-2.4-2.4l8.5-8.5"/>', 17),
-        pencil: svg('<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/>', 15),
-        gear: svg('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.14.6.66 1.03 1.28 1.05H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>', 17),
-        warn: svg('<path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>', 16),
-        // VS Code-style layout toggles: the frame, the divider, and tick marks on
-        // the side the button controls (studio panel fold/unfold, §1-30).
-        layoutL: svg('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M9 5v14"/><path d="M5.5 8.5h1.5M5.5 11h1.5M5.5 13.5h1.5"/>', 16),
-        layoutR: svg('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M15 5v14"/><path d="M17 8.5h1.5M17 11h1.5M17 13.5h1.5"/>', 16)
-      };
-      TOOL = {
-        snapshot: "\u{1F516}",
-        discard: "\u21A9",
-        versions: "\u{1F558}",
-        apply: "\u{1F4BE}",
-        export: "\u2B07",
-        find: "\u{1F50D}",
-        cut: "\u2702",
-        view: "\u{1F441}",
-        reload: "\u{1F504}",
-        newChat: "\u2795",
-        history: "\u{1F5C2}",
-        info: "\u24D8"
-      };
-      TOOL_GLYPH = {
-        list_turns: ["\u{1F4CB}", "\uD6D1\uAE30"],
-        read_turns: ["\u{1F4D6}", "\uC77D\uAE30"],
-        search_turns: ["\u{1F50D}", "\uAC80\uC0C9"],
-        read_card: ["\u{1FAAA}", "\uCE74\uB4DC"],
-        read_lore: ["\u{1F4DA}", "\uB85C\uC5B4"],
-        read_memory: ["\u{1F9E0}", "\uC694\uC57D"],
-        list_skills: ["\u{1F9E9}", "\uC2A4\uD0AC \uBAA9\uB85D"],
-        load_skill: ["\u{1F9E9}", "\uC2A4\uD0AC"],
-        stage_edit: ["\u270F\uFE0F", "\uC218\uC815 \uC81C\uC548"],
-        stage_bulk: ["\u270F\uFE0F", "\uC77C\uAD04 \uC81C\uC548"],
-        stage_delete: ["\u2702\uFE0F", "\uC0AD\uC81C \uC81C\uC548"],
-        list_staged: ["\u{1F4CC}", "\uC81C\uC548 \uD655\uC778"],
-        run_python: ["\u{1F40D}", "\uC2A4\uD06C\uB9BD\uD2B8"],
-        write_file: ["\u{1F4BE}", "\uD30C\uC77C \uC4F0\uAE30"],
-        list_files: ["\u{1F4C1}", "\uD30C\uC77C \uBAA9\uB85D"],
-        read_file: ["\u{1F4C4}", "\uD30C\uC77C \uC77D\uAE30"],
-        web_search: ["\u{1F310}", "\uC6F9 \uAC80\uC0C9"],
-        show_artifact: ["\u{1F4CA}", "\uC544\uD2F0\uD329\uD2B8"],
-        find_files: ["\u{1F50D}", "\uD30C\uC77C \uCC3E\uAE30"],
-        search_files: ["\u{1F50D}", "\uB0B4\uC6A9 \uAC80\uC0C9"],
-        studio_meta: ["\u{1F39B}", "\uCE74\uB4DC"],
-        view_image: ["\u{1F441}", "\uC774\uBBF8\uC9C0 \uBCF4\uAE30"],
-        compare_images: ["\u{1F441}", "\uC774\uBBF8\uC9C0 \uBE44\uAD50"],
-        image_metrics: ["\u{1F4D0}", "\uC774\uBBF8\uC9C0 \uC218\uCE58"],
-        review_folder: ["\u{1F50E}", "\uD3F4\uB354 \uAC80\uC218"],
-        suggest_selection: ["\u{1F3F7}", "\uAC80\uC218 \uC81C\uC548"]
-      };
-      PAPER_PLANE = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4z"/></svg>';
-      polls = /* @__PURE__ */ new Set();
-    }
-  });
-
   // src/index.ts
   init_transport();
+
+  // src/mcp.ts
+  init_transport();
+  init_state();
+  var POLL_TIMEOUT_MS = 4e4;
+  var RETRY_MS = 3e3;
+  var McpBridge = class {
+    on = false;
+    error = "";
+    calls = 0;
+    lastCall = null;
+    pendingRev = "";
+    loopId = 0;
+    listeners = /* @__PURE__ */ new Set();
+    /** Called when a poll reports that the proposal queue changed. */
+    onPendingChanged = () => {
+    };
+    /** Where a finished host job is announced (a toast, set by the shell). */
+    onNotice = () => {
+    };
+    subscribe(fn) {
+      this.listeners.add(fn);
+      return () => this.listeners.delete(fn);
+    }
+    changed() {
+      for (const fn of this.listeners) {
+        try {
+          fn();
+        } catch {
+        }
+      }
+    }
+    /** Whether the backend has the add-on loaded and /mcp mounted. */
+    get available() {
+      return !!state.health?.mcp?.mounted;
+    }
+    async status() {
+      return await transport.post("/mcp/status", {});
+    }
+    async install() {
+      return await transport.post("/mcp/install", {});
+    }
+    async uninstall() {
+      if (this.on) await this.deactivate();
+      return await transport.post("/mcp/uninstall", {});
+    }
+    async token(rotate = false) {
+      const r = await transport.post("/mcp/token", rotate ? { rotate: true } : {});
+      return r.token;
+    }
+    context() {
+      const chat = state.workspace?.chats.find((c) => c.chatKey === state.activeChatKey);
+      return {
+        charKey: state.activeCharKey || "",
+        chatKey: state.activeChatKey || "",
+        botName: state.workspace?.characterName || String(state.character?.name || ""),
+        chatName: chat?.name || "",
+        mode: state.activeTab === "chats" ? "" : state.activeTab === "studio" ? "studio" : state.editMode
+      };
+    }
+    async activate() {
+      this.error = "";
+      await transport.post("/mcp/bridge/activate", { context: this.context() });
+      this.on = true;
+      this.changed();
+      void this.loop(++this.loopId);
+    }
+    async deactivate() {
+      this.on = false;
+      this.loopId++;
+      this.changed();
+      try {
+        await transport.post("/mcp/bridge/deactivate", {});
+      } catch {
+      }
+    }
+    async loop(id) {
+      while (this.on && id === this.loopId) {
+        try {
+          const r = await transport.post(
+            "/mcp/bridge/poll",
+            { context: { ...this.context(), pendingRev: this.pendingRev } },
+            POLL_TIMEOUT_MS
+          );
+          if (id !== this.loopId) return;
+          if (!r.enabled) {
+            try {
+              await transport.post("/mcp/bridge/activate", { context: this.context() });
+              if (id !== this.loopId) return;
+              continue;
+            } catch {
+              this.on = false;
+              this.error = "\uBC31\uC5D4\uB4DC\uC5D0\uC11C MCP \uAC00 \uAEBC\uC84C\uC2B5\uB2C8\uB2E4. \uB2E4\uC2DC \uCF1C \uC8FC\uC138\uC694.";
+              this.changed();
+              return;
+            }
+          }
+          const hadError = !!this.error;
+          this.error = "";
+          const callsMoved = (r.calls ?? 0) !== this.calls;
+          this.calls = r.calls ?? this.calls;
+          this.lastCall = r.lastCall ?? this.lastCall;
+          const rev = r.pending?.rev ?? "";
+          if (rev !== this.pendingRev) {
+            const first = this.pendingRev === "";
+            this.pendingRev = rev;
+            if (!first) this.onPendingChanged();
+          }
+          for (const job of r.jobs || []) await this.run(job);
+          if (hadError || callsMoved) this.changed();
+        } catch (e) {
+          if (id !== this.loopId) return;
+          this.error = e instanceof Error ? e.message : String(e);
+          this.changed();
+          await new Promise((res) => setTimeout(res, RETRY_MS));
+        }
+      }
+    }
+    async run(job) {
+      if (job.type === "host-action") return this.runHostAction(job);
+      if (job.type === "open") {
+        if (job.screen === "inspect" && job.folder) state.requestOpenStudio(String(job.folder));
+        return;
+      }
+      if (job.type !== "card-writeback") return;
+      try {
+        const said = await state.requestedCardWriteback(job.id, job.charKey, job.chatKey);
+        this.onNotice("MCP \uC694\uCCAD\uC73C\uB85C \uBC18\uC601: " + said, "ok");
+        this.onPendingChanged();
+      } catch (e) {
+        this.onNotice("MCP \uC694\uCCAD \uBC18\uC601 \uC2E4\uD328: " + (e instanceof Error ? e.message : String(e)), "err");
+      }
+    }
+    /**
+     * An approval from the MCP client of something only this iframe can do
+     * (반영, 사본 저장, 복제 봇): the same decideAction as the 승인·실행 button.
+     * A job for a bot or chat that is not open here is left pending - the
+     * backend tool times out and says so, and the proposal is not lost.
+     */
+    async runHostAction(job) {
+      if (job.charKey !== state.botKey || CHAT_HOST_KINDS.has(job.kind || "") && job.chatKey !== state.activeChatKey) {
+        this.onNotice("MCP \uC2B9\uC778 \uC694\uCCAD\uC744 \uAC74\uB108\uB6F0\uC5C8\uC2B5\uB2C8\uB2E4: \uC774 \uD328\uB110\uC5D0 \uC5F4\uB9B0 \uBD07\xB7\uCC57\uC758 \uC791\uC5C5\uC774 \uC544\uB2D9\uB2C8\uB2E4.", "err");
+        return;
+      }
+      try {
+        const said = await state.decideAction(job.id, true, job.chatKey, "");
+        this.onNotice("MCP \uC2B9\uC778\xB7\uC2E4\uD589: " + said, "ok");
+      } catch (e) {
+        this.onNotice("MCP \uC2B9\uC778 \uC2E4\uD589 \uC2E4\uD328: " + (e instanceof Error ? e.message : String(e)), "err");
+      }
+      this.onPendingChanged();
+    }
+  };
+  var CHAT_HOST_KINDS = /* @__PURE__ */ new Set(["host_writeback", "host_save_copy"]);
+  var mcp = new McpBridge();
+  var sentContext = "";
+  state.onChange(() => {
+    if (!mcp.on) {
+      sentContext = "";
+      return;
+    }
+    const ctx = mcp.context();
+    const key = JSON.stringify(ctx);
+    if (key === sentContext) return;
+    sentContext = key;
+    void transport.post("/mcp/bridge/activate", { context: ctx }).catch(() => {
+      sentContext = "";
+    });
+  });
+  try {
+    window.addEventListener("pagehide", () => {
+      if (mcp.on) void transport.post("/mcp/bridge/deactivate", {}).catch(() => {
+      });
+    });
+  } catch {
+  }
+
+  // src/ui/mcp-ui.ts
+  init_dom();
+  init_state();
+  init_transport();
+  init_host();
+  var URL_KEY = "mcpUrl";
+  function msg2(e) {
+    return e instanceof Error ? e.message : String(e);
+  }
+  function mcpToast(text2, kind = "") {
+    let wrap = document.querySelector(".toastwrap");
+    if (!wrap) {
+      wrap = document.createElement("div");
+      wrap.className = "toastwrap";
+      document.body.appendChild(wrap);
+    }
+    const t = document.createElement("div");
+    t.className = "toast" + (kind ? " " + kind : "");
+    t.textContent = text2;
+    wrap.appendChild(t);
+    setTimeout(() => t.remove(), 4e3);
+  }
+  mcp.onNotice = mcpToast;
+  async function savedUrl() {
+    try {
+      const v = await Risuai.pluginStorage.getItem(URL_KEY);
+      if (typeof v === "string" && v.trim()) return v.trim();
+    } catch {
+    }
+    return (transport.config.url || "").replace(/\/+$/, "") + "/mcp";
+  }
+  var CODEX_ENV = "RISUHINA_MCP_TOKEN";
+  function codexCommand(url) {
+    return `codex mcp add risu-hina --url ${url} --bearer-token-env-var ${CODEX_ENV}`;
+  }
+  function command(url, token2) {
+    return `claude mcp add -s user --transport http risu-hina ${url} --header "Authorization: Bearer ${token2}"`;
+  }
+  function ago(at) {
+    const s = Math.max(0, Math.round(Date.now() / 1e3 - at));
+    if (s < 60) return `${s}\uCD08 \uC804`;
+    if (s < 3600) return `${Math.round(s / 60)}\uBD84 \uC804`;
+    return `${Math.round(s / 3600)}\uC2DC\uAC04 \uC804`;
+  }
+  function buildMcpCard(onMount) {
+    const statusLine = el("div", { class: "hint" });
+    const actions = el("div", { class: "row" });
+    const detail = el("div");
+    const out = el("pre", { class: "hint mcpout", style: { display: "none", maxHeight: "200px", overflow: "auto", whiteSpace: "pre-wrap" } });
+    let timer = null;
+    const render = async () => {
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      clear(actions);
+      clear(detail);
+      if (!state.health) {
+        statusLine.textContent = "\uBC31\uC5D4\uB4DC\uC5D0 \uC5F0\uACB0\uB418\uBA74 \uD655\uC778\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4.";
+        return;
+      }
+      let st;
+      try {
+        st = await mcp.status();
+      } catch (e) {
+        statusLine.textContent = "\uC774 \uBC31\uC5D4\uB4DC\uB294 MCP \uB97C \uC9C0\uC6D0\uD558\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4 (\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8 \uD544\uC694): " + msg2(e);
+        const again = el("button", { class: "ghost tiny", text: "\uB2E4\uC2DC \uD655\uC778" });
+        again.addEventListener("click", () => void render());
+        actions.appendChild(again);
+        return;
+      }
+      const a = st.addon;
+      if (st.bridge.mounted !== mcp.available) void state.connect();
+      if (a.job.running) {
+        statusLine.textContent = `\uC124\uCE58 \uC911\uC785\uB2C8\uB2E4\u2026 (${Math.round(Date.now() / 1e3 - a.job.startedAt)}\uCD08) \u2014 \uBCF4\uD1B5 1\uBD84 \uC548\uCABD\uC785\uB2C8\uB2E4.`;
+        timer = setTimeout(() => void render(), 2e3);
+        return;
+      }
+      if (a.job.ok === false) {
+        out.style.display = "";
+        out.textContent = (a.job.error || "") + "\n\n" + (a.job.output || "");
+      }
+      if (a.removalPending) {
+        statusLine.textContent = "\uC81C\uAC70 \uC608\uC57D\uB428 \u2014 \uBC31\uC5D4\uB4DC\uB97C \uB2E4\uC2DC \uC2DC\uC791\uD558\uBA74 \uC9C0\uC6CC\uC9D1\uB2C8\uB2E4.";
+        return;
+      }
+      const install = el("button", { class: "primary tiny", text: a.reinstallNeeded ? "MCP \uC7AC\uC124\uCE58" : "MCP \uC124\uCE58" });
+      install.addEventListener("click", async () => {
+        install.disabled = true;
+        out.style.display = "none";
+        try {
+          const r = await mcp.install();
+          if (!r.started) statusLine.textContent = r.reason || "\uC2DC\uC791\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4.";
+        } catch (e) {
+          statusLine.textContent = "\uC124\uCE58\uB97C \uC2DC\uC791\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg2(e);
+        }
+        await render();
+      });
+      if (!a.installed) {
+        statusLine.textContent = a.reinstallNeeded ? "\uBC31\uC5D4\uB4DC\uC758 \uD30C\uC774\uC36C\uC774 \uBC14\uB00C\uC5B4 \uB2E4\uC2DC \uC124\uCE58\uD574\uC57C \uD569\uB2C8\uB2E4." : "\uC124\uCE58\uB418\uC5B4 \uC788\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4. \uBC31\uC5D4\uB4DC \uC124\uCE58\uBCF8\uC5D0 mcp \uD328\uD0A4\uC9C0(\uC57D 30MB)\uB97C \uB0B4\uB824\uBC1B\uC544 \uC124\uCE58\uD569\uB2C8\uB2E4. \uB9B4\uB9AC\uC2A4 \uBC88\uB4E4\uC5D0\uB294 \uB4E4\uC5B4 \uC788\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4.";
+        actions.appendChild(install);
+        return;
+      }
+      if (!a.loaded) {
+        statusLine.textContent = `\uC124\uCE58\uB428 v${a.version} \u2014 \uBD88\uB7EC\uC624\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: ${a.loadError || "\uBC31\uC5D4\uB4DC\uB97C \uB2E4\uC2DC \uC2DC\uC791\uD574 \uC8FC\uC138\uC694."}`;
+      } else {
+        statusLine.textContent = `\uC124\uCE58\uB428 v${a.version} \xB7 /mcp \uB3D9\uC791 \uC911` + (st.bridge.active ? " \xB7 \uD328\uB110 \uD65C\uC131" : " \xB7 \uD328\uB110 \uAEBC\uC9D0");
+      }
+      const remove = el("button", { class: "ghost tiny", text: "\uC81C\uAC70" });
+      let armedRemove = false;
+      remove.addEventListener("click", async () => {
+        if (!armedRemove) {
+          armedRemove = true;
+          remove.textContent = "\uC815\uB9D0 \uC81C\uAC70";
+          setTimeout(() => {
+            armedRemove = false;
+            remove.textContent = "\uC81C\uAC70";
+          }, 3e3);
+          return;
+        }
+        remove.disabled = true;
+        try {
+          const r = await mcp.uninstall();
+          statusLine.textContent = r.restartNeeded ? "\uC81C\uAC70 \uC608\uC57D\uB428 \u2014 \uBC31\uC5D4\uB4DC\uB97C \uB2E4\uC2DC \uC2DC\uC791\uD558\uBA74 \uC9C0\uC6CC\uC9D1\uB2C8\uB2E4." : "\uC81C\uAC70\uD588\uC2B5\uB2C8\uB2E4.";
+          await state.connect();
+        } catch (e) {
+          statusLine.textContent = "\uC81C\uAC70\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg2(e);
+        }
+        await render();
+      });
+      actions.appendChild(remove);
+      if (!a.loaded) return;
+      const url = el("input", { value: await savedUrl(), placeholder: "https://risuhina.example.com/mcp" });
+      const tokenBox = el("input", { type: "password", readonly: "readonly" });
+      const cmd = el("pre", { class: "mcpcmd", style: { whiteSpace: "pre-wrap", wordBreak: "break-all", userSelect: "all" } });
+      let token2 = "";
+      const codexCmd = el("pre", { class: "mcpcmd mcpcodex", style: { whiteSpace: "pre-wrap", wordBreak: "break-all", userSelect: "all" } });
+      const sync = () => {
+        cmd.textContent = command(url.value.trim(), token2 ? "\u2022\u2022\u2022\u2022\u2022\u2022" : "<\uD1A0\uD070>");
+        codexCmd.textContent = codexCommand(url.value.trim());
+      };
+      try {
+        token2 = await mcp.token();
+        tokenBox.value = token2;
+      } catch (e) {
+        tokenBox.value = "";
+        statusLine.textContent += " \xB7 \uD1A0\uD070\uC744 \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg2(e);
+      }
+      sync();
+      url.addEventListener("change", async () => {
+        try {
+          await Risuai.pluginStorage.setItem(URL_KEY, url.value.trim());
+        } catch {
+        }
+        sync();
+      });
+      url.addEventListener("input", sync);
+      const urlWarn = el("div", { class: "hint warn", style: { display: "none" } });
+      const checkUrl = () => {
+        let host = "";
+        try {
+          host = new URL(url.value.trim()).hostname;
+        } catch {
+        }
+        const local = /^(127\.|localhost$|\[?::1\]?$|0\.0\.0\.0$)/.test(host);
+        urlWarn.style.display = local ? "" : "none";
+        urlWarn.textContent = local ? `${host} \uB294 \uBC31\uC5D4\uB4DC\uAC00 \uC124\uCE58\uB41C PC \uC790\uC2E0\uC785\uB2C8\uB2E4. MCP \uD074\uB77C\uC774\uC5B8\uD2B8(Claude Code\xB7Codex)\uAC00 \uAC19\uC740 PC\uC5D0 \uC788\uC744 \uB54C\uB9CC \uC811\uC18D\uB429\uB2C8\uB2E4.` : "";
+      };
+      url.addEventListener("input", checkUrl);
+      checkUrl();
+      const show = el("button", { class: "ghost tiny", text: "\uBCF4\uAE30" });
+      show.addEventListener("click", () => {
+        tokenBox.type = tokenBox.type === "password" ? "text" : "password";
+        show.textContent = tokenBox.type === "password" ? "\uBCF4\uAE30" : "\uC228\uAE30\uAE30";
+      });
+      const copyCmd = el("button", { class: "primary tiny", text: "\uBA85\uB839 \uBCF5\uC0AC" });
+      copyCmd.addEventListener("click", () => {
+        copyCmd.textContent = copyToClipboard(command(url.value.trim(), token2)) ? "\uBCF5\uC0AC\uB428" : "\uBCF5\uC0AC \uC2E4\uD328";
+        setTimeout(() => {
+          copyCmd.textContent = "\uBA85\uB839 \uBCF5\uC0AC";
+        }, 1500);
+      });
+      const rotate = el("button", { class: "ghost tiny", text: "\uD1A0\uD070 \uC7AC\uBC1C\uAE09" });
+      let armedRotate = false;
+      rotate.addEventListener("click", async () => {
+        if (!armedRotate) {
+          armedRotate = true;
+          rotate.textContent = "\uC7AC\uBC1C\uAE09 (\uAE30\uC874 \uC5F0\uACB0 \uB04A\uAE40)";
+          setTimeout(() => {
+            armedRotate = false;
+            rotate.textContent = "\uD1A0\uD070 \uC7AC\uBC1C\uAE09";
+          }, 3e3);
+          return;
+        }
+        try {
+          token2 = await mcp.token(true);
+          tokenBox.value = token2;
+          sync();
+          mcpToast("\uD1A0\uD070\uC744 \uC7AC\uBC1C\uAE09\uD588\uC2B5\uB2C8\uB2E4. MCP \uD074\uB77C\uC774\uC5B8\uD2B8\uC5D0 \uC0C8 \uBA85\uB839\uC744 \uB2E4\uC2DC \uB4F1\uB85D\uD574 \uC8FC\uC138\uC694.", "ok");
+        } catch (e) {
+          mcpToast("\uC7AC\uBC1C\uAE09 \uC2E4\uD328: " + msg2(e), "err");
+        }
+        armedRotate = false;
+        rotate.textContent = "\uD1A0\uD070 \uC7AC\uBC1C\uAE09";
+      });
+      detail.appendChild(el("label", { class: "field" }, [el("span", { text: "MCP \uC8FC\uC18C (MCP \uD074\uB77C\uC774\uC5B8\uD2B8\uAC00 \uC811\uC18D\uD560 \uC678\uBD80 \uC8FC\uC18C)" }), url]));
+      detail.appendChild(urlWarn);
+      detail.appendChild(el("div", { class: "hint" }, [
+        "127.0.0.1:6020 \uAC19\uC740 \uB85C\uCEEC \uC8FC\uC18C\uB294 \uBC31\uC5D4\uB4DC\uC640 \uAC19\uC740 PC\uC5D0\uC11C\uB9CC \uB429\uB2C8\uB2E4. \uB2E4\uB978 PC(\uC6D0\uACA9 \uC11C\uBC84)\uC758 \uBC31\uC5D4\uB4DC\uC5D0 \uBD99\uC774\uB824\uBA74 ",
+        "Tailscale(\uC608: http://100.x.x.x:6020/mcp \u2014 \uBC31\uC5D4\uB4DC\uB97C \uADF8 \uC8FC\uC18C\uC5D0 \uBC14\uC778\uB529\uD574\uC57C \uD568) \uB610\uB294 ",
+        "cloudflared \uD130\uB110(\uC608: https://\uB0B4\uB3C4\uBA54\uC778/mcp)\uC774 \uD544\uC694\uD569\uB2C8\uB2E4."
+      ]));
+      detail.appendChild(el("label", { class: "field" }, [el("span", { text: "MCP \uD1A0\uD070 (\uBC31\uC5D4\uB4DC \uD1A0\uD070\uACFC \uBCC4\uAC1C, \uB8E8\uD504\uBC31\uC5D0\uC11C\uB3C4 \uD56D\uC0C1 \uD544\uC694)" }), tokenBox]));
+      detail.appendChild(el("div", { class: "row" }, [show, rotate]));
+      const copyCodex = el("button", { class: "primary tiny", text: "Codex \uBA85\uB839 \uBCF5\uC0AC" });
+      copyCodex.addEventListener("click", () => {
+        copyCodex.textContent = copyToClipboard(codexCommand(url.value.trim())) ? "\uBCF5\uC0AC\uB428" : "\uBCF5\uC0AC \uC2E4\uD328";
+        setTimeout(() => {
+          copyCodex.textContent = "Codex \uBA85\uB839 \uBCF5\uC0AC";
+        }, 1500);
+      });
+      const copyToken = el("button", { class: "ghost tiny", text: "\uD1A0\uD070 \uBCF5\uC0AC" });
+      copyToken.addEventListener("click", () => {
+        copyToken.textContent = token2 && copyToClipboard(token2) ? "\uBCF5\uC0AC\uB428" : "\uBCF5\uC0AC \uC2E4\uD328";
+        setTimeout(() => {
+          copyToken.textContent = "\uD1A0\uD070 \uBCF5\uC0AC";
+        }, 1500);
+      });
+      detail.appendChild(el("div", { class: "hint", style: { marginTop: "8px" }, text: "\uD130\uBBF8\uB110(PowerShell\xB7cmd\xB7bash)\uC5D0\uC11C \uD55C \uBC88 \uC2E4\uD589\uD558\uC138\uC694. Claude Code \uB300\uD654\uCC3D\uC5D0 \uBD99\uC5EC \uB123\uC9C0 \uB9C8\uC138\uC694 - \uD1A0\uD070\uC774 \uB300\uD654 \uAE30\uB85D\uC5D0 \uB0A8\uC2B5\uB2C8\uB2E4. (-s user = \uBAA8\uB4E0 \uD3F4\uB354\uC5D0\uC11C \uC0AC\uC6A9, \uBE7C\uBA74 \uC2E4\uD589\uD55C \uD3F4\uB354\uC5D0\uC11C\uB9CC)" }));
+      detail.appendChild(cmd);
+      detail.appendChild(el("div", { class: "row" }, [copyCmd]));
+      detail.appendChild(el("div", { class: "hint", style: { marginTop: "8px" } }, [
+        `Codex \uB294 \uD1A0\uD070\uC744 \uD658\uACBD\uBCC0\uC218 ${CODEX_ENV} \uB85C \uC77D\uC2B5\uB2C8\uB2E4. \uADF8 \uBCC0\uC218\uB97C \uBA3C\uC800 \uB9CC\uB4E4\uACE0(Windows: setx ${CODEX_ENV} "<\uD1A0\uD070>" \uB4A4 \uC0C8 \uD130\uBBF8\uB110, `,
+        `macOS/Linux: \uC178 \uC124\uC815\uC5D0 export ${CODEX_ENV}="<\uD1A0\uD070>") \uD55C \uBC88 \uC2E4\uD589\uD558\uC138\uC694:`
+      ]));
+      detail.appendChild(codexCmd);
+      detail.appendChild(el("div", { class: "row" }, [copyCodex, copyToken]));
+      detail.appendChild(el("div", { class: "hint", style: { marginTop: "8px" } }, [
+        "\uC0AC\uC6A9: \uD328\uB110 \uC0C1\uB2E8(\u{1F504} \uC67C\uCABD)\uC758 \u2018MCP \uC5F0\uACB0\u2019\uC744 \uB204\uB974\uACE0 \uD328\uB110\uC744 \uC5F4\uC5B4 \uB454 \uCC44\uB85C Claude Code \uC5D0\uC11C \uBD80\uB974\uC138\uC694. ",
+        "MCP \uB294 \uD328\uB110\uC5D0 \uC5F4\uB9B0 \uBD07\xB7\uCC57\uC5D0\uC11C\uB9CC \uB3D9\uC791\uD569\uB2C8\uB2E4. \uC218\uC815\uC740 \uC81C\uC548\uC73C\uB85C \uB4E4\uC5B4\uC624\uACE0, \uC774 \uD328\uB110\uC774\uB098 Claude Code \uCABD(approve_proposals \xB7 approve_staged)\uC5D0\uC11C \uC2B9\uC778\uD569\uB2C8\uB2E4. ",
+        "RisuAI \uBC18\uC601\uB3C4 Claude Code \uC5D0\uC11C \uC2B9\uC778\uD558\uBA74 \uC774 \uD328\uB110\uC774 \uC2E4\uD589\uD569\uB2C8\uB2E4. ",
+        "\uD1A0\uD070\uC740 \uC774 \uBC31\uC5D4\uB4DC\uC5D0\uC11C \uD30C\uC774\uC36C \uC2E4\uD589(run_python)\uAE4C\uC9C0 \uD560 \uC218 \uC788\uB294 \uAD8C\uD55C\uC785\uB2C8\uB2E4 \u2014 \uACF5\uC720\uD558\uC9C0 \uB9C8\uC138\uC694."
+      ]));
+    };
+    onMount?.(() => void render());
+    void render();
+    return el("div", { class: "card" }, [
+      el("h2", { text: "MCP (Claude Code \uB4F1\uC5D0\uC11C \uBD80\uB974\uAE30)" }),
+      statusLine,
+      actions,
+      out,
+      detail
+    ]);
+  }
+  function mcpHeaderSwitch() {
+    const dot = el("span", { class: "mcpdot" });
+    const label2 = el("span", { class: "mcplabel" });
+    const btn = el("button", { class: "ghost mcpswitch", style: { display: "none" } }, [dot, label2]);
+    const sync = () => {
+      btn.style.display = mcp.available || mcp.on ? "" : "none";
+      btn.classList.toggle("on", mcp.on);
+      btn.classList.toggle("err", mcp.on && !!mcp.error);
+      label2.textContent = !mcp.on ? "MCP \uC5F0\uACB0" : mcp.error ? "MCP \uC7AC\uC5F0\uACB0 \uC911" : "MCP \uC5F0\uACB0\uB428";
+      const bot = mcp.context().botName;
+      btn.title = !mcp.on ? "Claude Code\xB7Codex \uB4F1 MCP \uD074\uB77C\uC774\uC5B8\uD2B8\uAC00 \uC9C0\uAE08 \uC5F4\uB9B0 \uBD07\xB7\uCC57\uC744 \uB2E4\uB8F0 \uC218 \uC788\uAC8C \uD569\uB2C8\uB2E4. \uCF20 \uB3D9\uC548 \uC774 \uD328\uB110\uC744 \uC5F4\uC5B4 \uB450\uC138\uC694." : (mcp.error ? "\uC5F0\uACB0 \uC7AC\uC2DC\uB3C4 \uC911: " + mcp.error + "\n" : "") + `MCP \uC5F0\uACB0\uB428${bot ? " \xB7 " + bot : ""} \u2014 \uB204\uB974\uBA74 \uB055\uB2C8\uB2E4.
+` + (mcp.lastCall ? `\uD638\uCD9C ${mcp.calls}\uD68C \xB7 \uB9C8\uC9C0\uB9C9 ${mcp.lastCall.tool} ${ago(mcp.lastCall.at)}` : "\uC544\uC9C1 \uD638\uCD9C \uC5C6\uC74C");
+    };
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      try {
+        if (mcp.on) await mcp.deactivate();
+        else await mcp.activate();
+      } catch (e) {
+        mcpToast("MCP \uB97C \uCF1C\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg2(e), "err");
+      }
+      btn.disabled = false;
+      sync();
+    });
+    mcp.subscribe(sync);
+    state.onChange(sync);
+    sync();
+    return btn;
+  }
 
   // src/ui/panes.ts
   init_dom();
@@ -6536,6 +6996,25 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
 
 /* File rows and grid cells as drop targets for internal drags. */
 .frow.dropping, .fcell.dropping { outline: 2px dashed #7dd3fc; outline-offset: -2px; }
+
+/* --- MCP switch in the title row (left of \u{1F504}) -------------------------------------
+   Off: a quiet ghost button. On: filled, a live dot, and a light sweep every few
+   seconds - a panel granting a remote client access should be hard to miss. */
+.mcpswitch { position: relative; overflow: hidden; display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 10px; font-size: 12px; white-space: nowrap; border-radius: 999px; }
+.mcpswitch .mcpdot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; opacity: .45; flex: none; }
+.mcpswitch.on { background: linear-gradient(135deg, #7c5cff, #22d3ee); border-color: transparent; color: #fff;
+  font-weight: 700; box-shadow: 0 0 0 1px #7c5cff66, 0 0 12px #22d3ee55; animation: mcp-glow 2.4s ease-in-out infinite; }
+.mcpswitch.on .mcpdot { opacity: 1; background: #fff; box-shadow: 0 0 6px #fff; animation: mcp-dot 1.2s ease-in-out infinite; }
+.mcpswitch.on::after { content: ''; position: absolute; top: 0; bottom: 0; left: -60%; width: 45%;
+  background: linear-gradient(100deg, transparent, #ffffffb0, transparent); transform: skewX(-20deg);
+  animation: mcp-sweep 3.6s ease-in-out infinite; pointer-events: none; }
+.mcpswitch.on.err { background: linear-gradient(135deg, #b45309, #f59e0b); }
+@keyframes mcp-glow { 0%, 100% { box-shadow: 0 0 0 1px #7c5cff66, 0 0 8px #22d3ee44; } 50% { box-shadow: 0 0 0 1px #7c5cffaa, 0 0 18px #22d3eeaa; } }
+@keyframes mcp-dot { 0%, 100% { transform: scale(.8); } 50% { transform: scale(1.25); } }
+@keyframes mcp-sweep { 0%, 70% { left: -60%; } 100% { left: 130%; } }
+@media (prefers-reduced-motion: reduce) { .mcpswitch.on, .mcpswitch.on .mcpdot, .mcpswitch.on::after { animation: none; } }
+@media (max-width: 640px) { .mcpswitch .mcplabel { display: none; } .mcpswitch { padding: 5px 8px; } }
 `;
   function injectStyles() {
     if (document.getElementById("risu-hina-style")) return;
@@ -7093,7 +7572,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         if (d.memory) bits.push(`\uC7A5\uAE30\uAE30\uC5B5 ${d.memory}\uAC74`);
         shellNotice("\uBBF8\uBC18\uC601 \uBCC0\uACBD\uC744 \uBC84\uB838\uC2B5\uB2C8\uB2E4" + (bits.length ? ` (${bits.join(" \xB7 ")})` : "") + ". \uC791\uC5C5\uBCF8\uC774 \uAE30\uC900\uC120(RisuAI \uC0C1\uD0DC)\uC73C\uB85C \uB3CC\uC544\uAC14\uC2B5\uB2C8\uB2E4.", "ok");
       } catch (e) {
-        shellNotice("\uBCC0\uACBD \uCDE8\uC18C\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg2(e), "err");
+        shellNotice("\uBCC0\uACBD \uCDE8\uC18C\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg3(e), "err");
       }
     });
     summaryEl = el("span", { class: "dim changesum", title: "\uC774 \uCC57\uC5D0\uC11C \uC544\uC9C1 RisuAI\uC5D0 \uC4F0\uC9C0 \uC54A\uC740 \uBCC0\uACBD" });
@@ -7149,7 +7628,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       if (noticeMount) clear(noticeMount);
     }, 9e3);
   }
-  function msg2(e) {
+  function msg3(e) {
     return e instanceof Error ? e.message : String(e);
   }
   async function openApply(anchor) {
@@ -7208,7 +7687,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         }
         for (const w of r.warnings) shellNotice(w);
       } catch (e) {
-        const m = msg2(e);
+        const m = msg3(e);
         out.textContent = m;
         void clientLog("error", "writeBack failed", { error: m });
         shellNotice(
@@ -7229,8 +7708,8 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         shellNotice(`\uBCF5\uC0AC\uBCF8 "${name}" \uC744 \uB9CC\uB4E4\uC5C8\uC2B5\uB2C8\uB2E4. \uB85C\uC5B4\uBD81\uACFC \uC7A5\uAE30\uAE30\uC5B5\uB3C4 \uD568\uAED8 \uB2F4\uACBC\uC2B5\uB2C8\uB2E4. \uC774 \uCC57\uC758 \uC218\uC815\uC740 \uC544\uC9C1 \uBC18\uC601 \uC804 \uC0C1\uD0DC\uB85C \uB0A8\uC544 \uC788\uC2B5\uB2C8\uB2E4.`, "ok");
         close();
       } catch (e) {
-        void clientLog("error", "saveCopy failed", { error: msg2(e) });
-        shellNotice("\uBCF5\uC0AC\uBCF8 \uC800\uC7A5\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg2(e), "err");
+        void clientLog("error", "saveCopy failed", { error: msg3(e) });
+        shellNotice("\uBCF5\uC0AC\uBCF8 \uC800\uC7A5\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg3(e), "err");
       } finally {
         copy.disabled = false;
       }
@@ -7276,7 +7755,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
               "ok"
             );
           } catch (e) {
-            shellNotice("\uBCF5\uC6D0\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg2(e), "err");
+            shellNotice("\uBCF5\uC6D0\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg3(e), "err");
           }
         });
         const title = el("div", {}, [
@@ -7301,7 +7780,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           } catch (e) {
             row.classList.remove("deleting");
             del.disabled = false;
-            shellNotice("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg2(e), "err");
+            shellNotice("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg3(e), "err");
           }
         });
         row.append(
@@ -7345,7 +7824,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       }));
     } catch (e) {
       clear(body);
-      body.appendChild(el("div", { class: "hint", text: msg2(e) }));
+      body.appendChild(el("div", { class: "hint", text: msg3(e) }));
     }
   }
   function snapshotCleanup(total, run) {
@@ -7361,14 +7840,14 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       try {
         await run(5);
       } catch (e) {
-        shellNotice("\uC815\uB9AC\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg2(e), "err");
+        shellNotice("\uC815\uB9AC\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg3(e), "err");
       }
     });
     armed(all, "\uC804\uBD80 \uC0AD\uC81C", "\uC815\uB9D0 \uC804\uBD80?", async () => {
       try {
         await run(0);
       } catch (e) {
-        shellNotice("\uC815\uB9AC\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg2(e), "err");
+        shellNotice("\uC815\uB9AC\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg3(e), "err");
       }
     });
     return wrap;
@@ -7396,7 +7875,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         await save(label2);
         close();
       } catch (e) {
-        out.textContent = msg2(e);
+        out.textContent = msg3(e);
         ok.disabled = false;
       }
     };
@@ -7457,7 +7936,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     }
     return out;
   }
-  function msg3(e) {
+  function msg4(e) {
     return e instanceof Error ? e.message : String(e);
   }
   async function applyOne(d) {
@@ -7525,8 +8004,8 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           shellNotice(`${d.label}\uC758 \uBCC0\uACBD\uC744 RisuAI\uC5D0 \uBC18\uC601\uD588\uC2B5\uB2C8\uB2E4.`, "ok");
           done(true);
         } catch (e) {
-          void clientLog("error", "leaveguard apply failed", { error: msg3(e) });
-          say(msg3(e));
+          void clientLog("error", "leaveguard apply failed", { error: msg4(e) });
+          say(msg4(e));
           apply.disabled = d.conflicts > 0;
         }
       });
@@ -7538,8 +8017,8 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           shellNotice(`${d.label}\uC758 \uBBF8\uBC18\uC601 \uBCC0\uACBD\uC744 \uBC84\uB838\uC2B5\uB2C8\uB2E4${what ? ` (${what})` : ""}.`, "ok");
           done(true);
         } catch (e) {
-          void clientLog("error", "leaveguard discard failed", { error: msg3(e) });
-          say(msg3(e));
+          void clientLog("error", "leaveguard discard failed", { error: msg4(e) });
+          say(msg4(e));
           discard.disabled = false;
         }
       });
@@ -7578,441 +8057,6 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
   init_host();
   init_assets();
   init_transport();
-
-  // src/ui/mcp-ui.ts
-  init_dom();
-  init_state();
-  init_transport();
-  init_host();
-
-  // src/mcp.ts
-  init_transport();
-  init_state();
-  var POLL_TIMEOUT_MS = 4e4;
-  var RETRY_MS = 3e3;
-  var McpBridge = class {
-    on = false;
-    error = "";
-    calls = 0;
-    lastCall = null;
-    pendingRev = "";
-    loopId = 0;
-    listeners = /* @__PURE__ */ new Set();
-    /** Called when a poll reports that the proposal queue changed. */
-    onPendingChanged = () => {
-    };
-    /** Where a finished host job is announced (a toast, set by the shell). */
-    onNotice = () => {
-    };
-    subscribe(fn) {
-      this.listeners.add(fn);
-      return () => this.listeners.delete(fn);
-    }
-    changed() {
-      for (const fn of this.listeners) {
-        try {
-          fn();
-        } catch {
-        }
-      }
-    }
-    /** Whether the backend has the add-on loaded and /mcp mounted. */
-    get available() {
-      return !!state.health?.mcp?.mounted;
-    }
-    async status() {
-      return await transport.post("/mcp/status", {});
-    }
-    async install() {
-      return await transport.post("/mcp/install", {});
-    }
-    async uninstall() {
-      if (this.on) await this.deactivate();
-      return await transport.post("/mcp/uninstall", {});
-    }
-    async token(rotate = false) {
-      const r = await transport.post("/mcp/token", rotate ? { rotate: true } : {});
-      return r.token;
-    }
-    context() {
-      const chat = state.workspace?.chats.find((c) => c.chatKey === state.activeChatKey);
-      return {
-        charKey: state.activeCharKey || "",
-        chatKey: state.activeChatKey || "",
-        botName: state.workspace?.characterName || String(state.character?.name || ""),
-        chatName: chat?.name || "",
-        mode: state.activeTab === "chats" ? "" : state.activeTab === "studio" ? "studio" : state.editMode
-      };
-    }
-    async activate() {
-      this.error = "";
-      await transport.post("/mcp/bridge/activate", { context: this.context() });
-      this.on = true;
-      this.changed();
-      void this.loop(++this.loopId);
-    }
-    async deactivate() {
-      this.on = false;
-      this.loopId++;
-      this.changed();
-      try {
-        await transport.post("/mcp/bridge/deactivate", {});
-      } catch {
-      }
-    }
-    async loop(id) {
-      while (this.on && id === this.loopId) {
-        try {
-          const r = await transport.post(
-            "/mcp/bridge/poll",
-            { context: { ...this.context(), pendingRev: this.pendingRev } },
-            POLL_TIMEOUT_MS
-          );
-          if (id !== this.loopId) return;
-          if (!r.enabled) {
-            this.on = false;
-            this.error = "\uBC31\uC5D4\uB4DC\uC5D0\uC11C MCP \uAC00 \uAEBC\uC84C\uC2B5\uB2C8\uB2E4. \uB2E4\uC2DC \uCF1C \uC8FC\uC138\uC694.";
-            this.changed();
-            return;
-          }
-          const hadError = !!this.error;
-          this.error = "";
-          const callsMoved = (r.calls ?? 0) !== this.calls;
-          this.calls = r.calls ?? this.calls;
-          this.lastCall = r.lastCall ?? this.lastCall;
-          const rev = r.pending?.rev ?? "";
-          if (rev !== this.pendingRev) {
-            const first = this.pendingRev === "";
-            this.pendingRev = rev;
-            if (!first) this.onPendingChanged();
-          }
-          for (const job of r.jobs || []) await this.run(job);
-          if (hadError || callsMoved) this.changed();
-        } catch (e) {
-          if (id !== this.loopId) return;
-          this.error = e instanceof Error ? e.message : String(e);
-          this.changed();
-          await new Promise((res) => setTimeout(res, RETRY_MS));
-        }
-      }
-    }
-    async run(job) {
-      if (job.type === "host-action") return this.runHostAction(job);
-      if (job.type !== "card-writeback") return;
-      try {
-        const said = await state.requestedCardWriteback(job.id, job.charKey, job.chatKey);
-        this.onNotice("MCP \uC694\uCCAD\uC73C\uB85C \uBC18\uC601: " + said, "ok");
-        this.onPendingChanged();
-      } catch (e) {
-        this.onNotice("MCP \uC694\uCCAD \uBC18\uC601 \uC2E4\uD328: " + (e instanceof Error ? e.message : String(e)), "err");
-      }
-    }
-    /**
-     * An approval from the MCP client of something only this iframe can do
-     * (반영, 사본 저장, 복제 봇): the same decideAction as the 승인·실행 button.
-     * A job for a bot or chat that is not open here is left pending - the
-     * backend tool times out and says so, and the proposal is not lost.
-     */
-    async runHostAction(job) {
-      if (job.charKey !== state.botKey || CHAT_HOST_KINDS.has(job.kind || "") && job.chatKey !== state.activeChatKey) {
-        this.onNotice("MCP \uC2B9\uC778 \uC694\uCCAD\uC744 \uAC74\uB108\uB6F0\uC5C8\uC2B5\uB2C8\uB2E4: \uC774 \uD328\uB110\uC5D0 \uC5F4\uB9B0 \uBD07\xB7\uCC57\uC758 \uC791\uC5C5\uC774 \uC544\uB2D9\uB2C8\uB2E4.", "err");
-        return;
-      }
-      try {
-        const said = await state.decideAction(job.id, true, job.chatKey, "");
-        this.onNotice("MCP \uC2B9\uC778\xB7\uC2E4\uD589: " + said, "ok");
-      } catch (e) {
-        this.onNotice("MCP \uC2B9\uC778 \uC2E4\uD589 \uC2E4\uD328: " + (e instanceof Error ? e.message : String(e)), "err");
-      }
-      this.onPendingChanged();
-    }
-  };
-  var CHAT_HOST_KINDS = /* @__PURE__ */ new Set(["host_writeback", "host_save_copy"]);
-  var mcp = new McpBridge();
-  var sentContext = "";
-  state.onChange(() => {
-    if (!mcp.on) {
-      sentContext = "";
-      return;
-    }
-    const ctx = mcp.context();
-    const key = JSON.stringify(ctx);
-    if (key === sentContext) return;
-    sentContext = key;
-    void transport.post("/mcp/bridge/activate", { context: ctx }).catch(() => {
-      sentContext = "";
-    });
-  });
-
-  // src/ui/mcp-ui.ts
-  var URL_KEY = "mcpUrl";
-  function msg4(e) {
-    return e instanceof Error ? e.message : String(e);
-  }
-  function mcpToast(text2, kind = "") {
-    let wrap = document.querySelector(".toastwrap");
-    if (!wrap) {
-      wrap = document.createElement("div");
-      wrap.className = "toastwrap";
-      document.body.appendChild(wrap);
-    }
-    const t = document.createElement("div");
-    t.className = "toast" + (kind ? " " + kind : "");
-    t.textContent = text2;
-    wrap.appendChild(t);
-    setTimeout(() => t.remove(), 4e3);
-  }
-  mcp.onNotice = mcpToast;
-  async function savedUrl() {
-    try {
-      const v = await Risuai.pluginStorage.getItem(URL_KEY);
-      if (typeof v === "string" && v.trim()) return v.trim();
-    } catch {
-    }
-    return (transport.config.url || "").replace(/\/+$/, "") + "/mcp";
-  }
-  var CODEX_ENV = "RISUHINA_MCP_TOKEN";
-  function codexCommand(url) {
-    return `codex mcp add risu-hina --url ${url} --bearer-token-env-var ${CODEX_ENV}`;
-  }
-  function command(url, token2) {
-    return `claude mcp add --transport http risu-hina ${url} --header "Authorization: Bearer ${token2}"`;
-  }
-  function ago(at) {
-    const s = Math.max(0, Math.round(Date.now() / 1e3 - at));
-    if (s < 60) return `${s}\uCD08 \uC804`;
-    if (s < 3600) return `${Math.round(s / 60)}\uBD84 \uC804`;
-    return `${Math.round(s / 3600)}\uC2DC\uAC04 \uC804`;
-  }
-  function buildMcpCard(onMount) {
-    const statusLine = el("div", { class: "hint" });
-    const actions = el("div", { class: "row" });
-    const detail = el("div");
-    const out = el("pre", { class: "hint mcpout", style: { display: "none", maxHeight: "200px", overflow: "auto", whiteSpace: "pre-wrap" } });
-    let timer = null;
-    const render = async () => {
-      if (timer) {
-        clearTimeout(timer);
-        timer = null;
-      }
-      clear(actions);
-      clear(detail);
-      if (!state.health) {
-        statusLine.textContent = "\uBC31\uC5D4\uB4DC\uC5D0 \uC5F0\uACB0\uB418\uBA74 \uD655\uC778\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4.";
-        return;
-      }
-      let st;
-      try {
-        st = await mcp.status();
-      } catch (e) {
-        statusLine.textContent = "\uC774 \uBC31\uC5D4\uB4DC\uB294 MCP \uB97C \uC9C0\uC6D0\uD558\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4 (\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8 \uD544\uC694): " + msg4(e);
-        return;
-      }
-      const a = st.addon;
-      if (st.bridge.mounted !== mcp.available) void state.connect();
-      if (a.job.running) {
-        statusLine.textContent = `\uC124\uCE58 \uC911\uC785\uB2C8\uB2E4\u2026 (${Math.round(Date.now() / 1e3 - a.job.startedAt)}\uCD08) \u2014 \uBCF4\uD1B5 1\uBD84 \uC548\uCABD\uC785\uB2C8\uB2E4.`;
-        timer = setTimeout(() => void render(), 2e3);
-        return;
-      }
-      if (a.job.ok === false) {
-        out.style.display = "";
-        out.textContent = (a.job.error || "") + "\n\n" + (a.job.output || "");
-      }
-      if (a.removalPending) {
-        statusLine.textContent = "\uC81C\uAC70 \uC608\uC57D\uB428 \u2014 \uBC31\uC5D4\uB4DC\uB97C \uB2E4\uC2DC \uC2DC\uC791\uD558\uBA74 \uC9C0\uC6CC\uC9D1\uB2C8\uB2E4.";
-        return;
-      }
-      const install = el("button", { class: "primary tiny", text: a.reinstallNeeded ? "MCP \uC7AC\uC124\uCE58" : "MCP \uC124\uCE58" });
-      install.addEventListener("click", async () => {
-        install.disabled = true;
-        out.style.display = "none";
-        try {
-          const r = await mcp.install();
-          if (!r.started) statusLine.textContent = r.reason || "\uC2DC\uC791\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4.";
-        } catch (e) {
-          statusLine.textContent = "\uC124\uCE58\uB97C \uC2DC\uC791\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg4(e);
-        }
-        await render();
-      });
-      if (!a.installed) {
-        statusLine.textContent = a.reinstallNeeded ? "\uBC31\uC5D4\uB4DC\uC758 \uD30C\uC774\uC36C\uC774 \uBC14\uB00C\uC5B4 \uB2E4\uC2DC \uC124\uCE58\uD574\uC57C \uD569\uB2C8\uB2E4." : "\uC124\uCE58\uB418\uC5B4 \uC788\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4. \uBC31\uC5D4\uB4DC \uC124\uCE58\uBCF8\uC5D0 mcp \uD328\uD0A4\uC9C0(\uC57D 30MB)\uB97C \uB0B4\uB824\uBC1B\uC544 \uC124\uCE58\uD569\uB2C8\uB2E4. \uB9B4\uB9AC\uC2A4 \uBC88\uB4E4\uC5D0\uB294 \uB4E4\uC5B4 \uC788\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4.";
-        actions.appendChild(install);
-        return;
-      }
-      if (!a.loaded) {
-        statusLine.textContent = `\uC124\uCE58\uB428 v${a.version} \u2014 \uBD88\uB7EC\uC624\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: ${a.loadError || "\uBC31\uC5D4\uB4DC\uB97C \uB2E4\uC2DC \uC2DC\uC791\uD574 \uC8FC\uC138\uC694."}`;
-      } else {
-        statusLine.textContent = `\uC124\uCE58\uB428 v${a.version} \xB7 /mcp \uB3D9\uC791 \uC911` + (st.bridge.active ? " \xB7 \uD328\uB110 \uD65C\uC131" : " \xB7 \uD328\uB110 \uAEBC\uC9D0");
-      }
-      const remove = el("button", { class: "ghost tiny", text: "\uC81C\uAC70" });
-      let armedRemove = false;
-      remove.addEventListener("click", async () => {
-        if (!armedRemove) {
-          armedRemove = true;
-          remove.textContent = "\uC815\uB9D0 \uC81C\uAC70";
-          setTimeout(() => {
-            armedRemove = false;
-            remove.textContent = "\uC81C\uAC70";
-          }, 3e3);
-          return;
-        }
-        remove.disabled = true;
-        try {
-          const r = await mcp.uninstall();
-          statusLine.textContent = r.restartNeeded ? "\uC81C\uAC70 \uC608\uC57D\uB428 \u2014 \uBC31\uC5D4\uB4DC\uB97C \uB2E4\uC2DC \uC2DC\uC791\uD558\uBA74 \uC9C0\uC6CC\uC9D1\uB2C8\uB2E4." : "\uC81C\uAC70\uD588\uC2B5\uB2C8\uB2E4.";
-          await state.connect();
-        } catch (e) {
-          statusLine.textContent = "\uC81C\uAC70\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg4(e);
-        }
-        await render();
-      });
-      actions.appendChild(remove);
-      if (!a.loaded) return;
-      const url = el("input", { value: await savedUrl(), placeholder: "https://risuhina.example.com/mcp" });
-      const tokenBox = el("input", { type: "password", readonly: "readonly" });
-      const cmd = el("pre", { class: "mcpcmd", style: { whiteSpace: "pre-wrap", wordBreak: "break-all", userSelect: "all" } });
-      let token2 = "";
-      const codexCmd = el("pre", { class: "mcpcmd mcpcodex", style: { whiteSpace: "pre-wrap", wordBreak: "break-all", userSelect: "all" } });
-      const sync = () => {
-        cmd.textContent = command(url.value.trim(), token2 ? "\u2022\u2022\u2022\u2022\u2022\u2022" : "<\uD1A0\uD070>");
-        codexCmd.textContent = codexCommand(url.value.trim());
-      };
-      try {
-        token2 = await mcp.token();
-        tokenBox.value = token2;
-      } catch (e) {
-        tokenBox.value = "";
-        statusLine.textContent += " \xB7 \uD1A0\uD070\uC744 \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg4(e);
-      }
-      sync();
-      url.addEventListener("change", async () => {
-        try {
-          await Risuai.pluginStorage.setItem(URL_KEY, url.value.trim());
-        } catch {
-        }
-        sync();
-      });
-      url.addEventListener("input", sync);
-      const show = el("button", { class: "ghost tiny", text: "\uBCF4\uAE30" });
-      show.addEventListener("click", () => {
-        tokenBox.type = tokenBox.type === "password" ? "text" : "password";
-        show.textContent = tokenBox.type === "password" ? "\uBCF4\uAE30" : "\uC228\uAE30\uAE30";
-      });
-      const copyCmd = el("button", { class: "primary tiny", text: "\uBA85\uB839 \uBCF5\uC0AC" });
-      copyCmd.addEventListener("click", () => {
-        copyCmd.textContent = copyToClipboard(command(url.value.trim(), token2)) ? "\uBCF5\uC0AC\uB428" : "\uBCF5\uC0AC \uC2E4\uD328";
-        setTimeout(() => {
-          copyCmd.textContent = "\uBA85\uB839 \uBCF5\uC0AC";
-        }, 1500);
-      });
-      const rotate = el("button", { class: "ghost tiny", text: "\uD1A0\uD070 \uC7AC\uBC1C\uAE09" });
-      let armedRotate = false;
-      rotate.addEventListener("click", async () => {
-        if (!armedRotate) {
-          armedRotate = true;
-          rotate.textContent = "\uC7AC\uBC1C\uAE09 (\uAE30\uC874 \uC5F0\uACB0 \uB04A\uAE40)";
-          setTimeout(() => {
-            armedRotate = false;
-            rotate.textContent = "\uD1A0\uD070 \uC7AC\uBC1C\uAE09";
-          }, 3e3);
-          return;
-        }
-        try {
-          token2 = await mcp.token(true);
-          tokenBox.value = token2;
-          sync();
-          mcpToast("\uD1A0\uD070\uC744 \uC7AC\uBC1C\uAE09\uD588\uC2B5\uB2C8\uB2E4. MCP \uD074\uB77C\uC774\uC5B8\uD2B8\uC5D0 \uC0C8 \uBA85\uB839\uC744 \uB2E4\uC2DC \uB4F1\uB85D\uD574 \uC8FC\uC138\uC694.", "ok");
-        } catch (e) {
-          mcpToast("\uC7AC\uBC1C\uAE09 \uC2E4\uD328: " + msg4(e), "err");
-        }
-        armedRotate = false;
-        rotate.textContent = "\uD1A0\uD070 \uC7AC\uBC1C\uAE09";
-      });
-      detail.appendChild(el("label", { class: "field" }, [el("span", { text: "MCP \uC8FC\uC18C (MCP \uD074\uB77C\uC774\uC5B8\uD2B8\uAC00 \uC811\uC18D\uD560 \uC678\uBD80 \uC8FC\uC18C)" }), url]));
-      detail.appendChild(el("label", { class: "field" }, [el("span", { text: "MCP \uD1A0\uD070 (\uBC31\uC5D4\uB4DC \uD1A0\uD070\uACFC \uBCC4\uAC1C, \uB8E8\uD504\uBC31\uC5D0\uC11C\uB3C4 \uD56D\uC0C1 \uD544\uC694)" }), tokenBox]));
-      detail.appendChild(el("div", { class: "row" }, [show, rotate]));
-      const copyCodex = el("button", { class: "primary tiny", text: "Codex \uBA85\uB839 \uBCF5\uC0AC" });
-      copyCodex.addEventListener("click", () => {
-        copyCodex.textContent = copyToClipboard(codexCommand(url.value.trim())) ? "\uBCF5\uC0AC\uB428" : "\uBCF5\uC0AC \uC2E4\uD328";
-        setTimeout(() => {
-          copyCodex.textContent = "Codex \uBA85\uB839 \uBCF5\uC0AC";
-        }, 1500);
-      });
-      const copyToken = el("button", { class: "ghost tiny", text: "\uD1A0\uD070 \uBCF5\uC0AC" });
-      copyToken.addEventListener("click", () => {
-        copyToken.textContent = token2 && copyToClipboard(token2) ? "\uBCF5\uC0AC\uB428" : "\uBCF5\uC0AC \uC2E4\uD328";
-        setTimeout(() => {
-          copyToken.textContent = "\uD1A0\uD070 \uBCF5\uC0AC";
-        }, 1500);
-      });
-      detail.appendChild(el("div", { class: "hint", style: { marginTop: "8px" }, text: "Claude Code \uC5D0\uC11C \uD55C \uBC88 \uC2E4\uD589\uD558\uC138\uC694:" }));
-      detail.appendChild(cmd);
-      detail.appendChild(el("div", { class: "row" }, [copyCmd]));
-      detail.appendChild(el("div", { class: "hint", style: { marginTop: "8px" } }, [
-        `Codex \uB294 \uD1A0\uD070\uC744 \uD658\uACBD\uBCC0\uC218 ${CODEX_ENV} \uB85C \uC77D\uC2B5\uB2C8\uB2E4. \uADF8 \uBCC0\uC218\uB97C \uBA3C\uC800 \uB9CC\uB4E4\uACE0(Windows: setx ${CODEX_ENV} "<\uD1A0\uD070>" \uB4A4 \uC0C8 \uD130\uBBF8\uB110, `,
-        `macOS/Linux: \uC178 \uC124\uC815\uC5D0 export ${CODEX_ENV}="<\uD1A0\uD070>") \uD55C \uBC88 \uC2E4\uD589\uD558\uC138\uC694:`
-      ]));
-      detail.appendChild(codexCmd);
-      detail.appendChild(el("div", { class: "row" }, [copyCodex, copyToken]));
-      detail.appendChild(el("div", { class: "hint", style: { marginTop: "8px" } }, [
-        "\uC0AC\uC6A9: \uBD07\xB7\uCC57 \uC120\uD0DD \uD654\uBA74(\uCCAB \uD654\uBA74)\uC758 \u2018MCP \uD65C\uC131\uD654\u2019\uB97C \uB204\uB974\uACE0 \uC774 \uD654\uBA74\uC744 \uC5F4\uC5B4 \uB454 \uCC44\uB85C Claude Code \uC5D0\uC11C \uBD80\uB974\uC138\uC694. ",
-        "MCP \uB294 \uD328\uB110\uC5D0 \uC5F4\uB9B0 \uBD07\xB7\uCC57\uC5D0\uC11C\uB9CC \uB3D9\uC791\uD569\uB2C8\uB2E4. \uC218\uC815\uC740 \uC81C\uC548\uC73C\uB85C \uB4E4\uC5B4\uC624\uACE0, \uC774 \uD328\uB110\uC774\uB098 Claude Code \uCABD(approve_proposals \xB7 approve_staged)\uC5D0\uC11C \uC2B9\uC778\uD569\uB2C8\uB2E4. ",
-        "RisuAI \uBC18\uC601\uB3C4 Claude Code \uC5D0\uC11C \uC2B9\uC778\uD558\uBA74 \uC774 \uD328\uB110\uC774 \uC2E4\uD589\uD569\uB2C8\uB2E4. ",
-        "\uD1A0\uD070\uC740 \uC774 \uBC31\uC5D4\uB4DC\uC5D0\uC11C \uD30C\uC774\uC36C \uC2E4\uD589(run_python)\uAE4C\uC9C0 \uD560 \uC218 \uC788\uB294 \uAD8C\uD55C\uC785\uB2C8\uB2E4 \u2014 \uACF5\uC720\uD558\uC9C0 \uB9C8\uC138\uC694."
-      ]));
-    };
-    onMount?.(() => void render());
-    void render();
-    return el("div", { class: "card" }, [
-      el("h2", { text: "MCP (Claude Code \uB4F1\uC5D0\uC11C \uBD80\uB974\uAE30)" }),
-      statusLine,
-      actions,
-      out,
-      detail
-    ]);
-  }
-  function mcpSwitch() {
-    if (!mcp.available && !mcp.on) return null;
-    const btn = el("button");
-    const line = el("span", { class: "hint mcpline" });
-    const syncLine = () => {
-      btn.className = (mcp.on ? "primary" : "ghost") + " tiny mcpswitch";
-      btn.textContent = mcp.on ? "MCP \uCF1C\uC9D0 \xB7 \uB044\uAE30" : "MCP \uD65C\uC131\uD654";
-      btn.title = mcp.on ? "MCP \uD074\uB77C\uC774\uC5B8\uD2B8\uAC00 \uC774 \uBD07\xB7\uCC57\uC5D0\uC11C \uC791\uC5C5\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4. \uC774 \uD654\uBA74\uC744 \uC5F4\uC5B4 \uB450\uC138\uC694." : "Claude Code \uB4F1 MCP \uD074\uB77C\uC774\uC5B8\uD2B8\uAC00 \uC9C0\uAE08 \uC5F4\uB9B0 \uBD07\xB7\uCC57\uC744 \uB2E4\uB8F0 \uC218 \uC788\uAC8C \uD569\uB2C8\uB2E4.";
-      if (!mcp.on) {
-        line.textContent = mcp.error;
-        return;
-      }
-      if (mcp.error) {
-        line.textContent = "\uC5F0\uACB0 \uC7AC\uC2DC\uB3C4 \uC911: " + mcp.error;
-        return;
-      }
-      line.textContent = mcp.lastCall ? `\uD638\uCD9C ${mcp.calls}\uD68C \xB7 \uB9C8\uC9C0\uB9C9 ${mcp.lastCall.tool} ${ago(mcp.lastCall.at)}` : "\uB300\uAE30 \uC911 \u2014 \uD654\uBA74\uC744 \uC5F4\uC5B4 \uB450\uC138\uC694";
-    };
-    syncLine();
-    btn.addEventListener("click", async () => {
-      btn.disabled = true;
-      try {
-        if (mcp.on) await mcp.deactivate();
-        else await mcp.activate();
-      } catch (e) {
-        mcpToast("MCP \uB97C \uCF1C\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg4(e), "err");
-      }
-      btn.disabled = false;
-      syncLine();
-    });
-    const off = mcp.subscribe(() => {
-      if (!btn.isConnected) {
-        off();
-        return;
-      }
-      syncLine();
-    });
-    return el("span", { class: "mcpswitchwrap" }, [btn, line]);
-  }
-
-  // src/ui/tab-chats.ts
   function botSnapshots(editBot) {
     const wrap = el("div");
     if (!state.activeCharKey) return wrap;
@@ -8174,8 +8218,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         el("div", { class: "botname", text: String(char.name || "(\uC774\uB984 \uC5C6\uC74C)") }),
         el("div", { class: "hint", text: `\uCC57 ${liveChats.length}\uAC1C` + (folders.length ? ` \xB7 \uD3F4\uB354 ${folders.length}\uAC1C` : "") }),
         assetSyncLine(),
-        // 'MCP 활성화' sits beside 봇 편집 once the add-on is installed (설정 → 고급 기능).
-        el("div", { class: "row", style: { marginTop: "8px" } }, [editBot, mcpSwitch()]),
+        el("div", { class: "row", style: { marginTop: "8px" } }, [editBot]),
         el("div", { class: "hint", style: { marginTop: "6px" } }, [
           "\uB2E4\uB978 \uBD07\uC744 \uD3B8\uC9D1\uD558\uC2DC\uB824\uBA74 RisuAI\uC5D0\uC11C \uADF8 \uBD07\uC744 \uC5F4\uACE0 \u{1F504} \uB97C \uB20C\uB7EC \uC8FC\uC138\uC694."
         ])
@@ -15084,10 +15127,10 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           return;
         }
         if (!r.newer) {
-          const mismatch = r.current !== "0.15.29";
+          const mismatch = r.current !== "0.15.30";
           const ahead = r.ahead ?? (!!r.latest && r.latest !== r.current);
           say(
-            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.29"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
+            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.30"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
             mismatch || ahead ? "" : "ok"
           );
           return;
@@ -15178,7 +15221,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.15.29",
+            version: "0.15.30",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -15261,6 +15304,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
   var aboutMount = null;
   var refreshers = [];
   var watchedHealth = null;
+  var watchedVersion = "";
   function refreshSettingsCards() {
     for (const fn of refreshers) {
       try {
@@ -15271,12 +15315,15 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
   }
   state.onChange(() => {
     const ok = !!state.health;
+    const version = state.health?.version ?? "";
     if (watchedHealth === null) {
       watchedHealth = ok;
+      watchedVersion = version;
       return;
     }
-    if (ok && !watchedHealth) refreshSettingsCards();
+    if (ok && !watchedHealth || ok && version && version !== watchedVersion) refreshSettingsCards();
     watchedHealth = ok;
+    if (version) watchedVersion = version;
   });
   function renderSettingsTab(mount2) {
     if (mount2.querySelector(".pad")) {
@@ -15872,7 +15919,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.29"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.30"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -22690,7 +22737,7 @@ ${negative.value.trim()}
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.29"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.30"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
@@ -22745,6 +22792,7 @@ ${negative.value.trim()}
     const close = el("button", { class: "ghost", html: ICON.close, title: "\uB2EB\uAE30" });
     close.addEventListener("click", async () => {
       if (!await ensureResolved("\uB2EB\uAE30")) return;
+      if (mcp.on) await mcp.deactivate();
       noteStudioLeft();
       try {
         await Risuai.hideContainer();
@@ -22786,9 +22834,11 @@ ${negative.value.trim()}
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.15.29" }),
+        el("span", { class: "dim", text: "v0.15.30" }),
         healthEl,
         el("span", { class: "spacer" }),
+        // Visible from every tab once the add-on is installed (설정 → 고급 기능).
+        mcpHeaderSwitch(),
         reload,
         settingsBtn,
         close
@@ -23098,6 +23148,12 @@ ${negative.value.trim()}
           platform: transport.hostPlatform,
           connected: !!transport.health
         });
+        if (mcp.on) {
+          try {
+            await mcp.deactivate();
+          } catch {
+          }
+        }
         for (const p of parts) {
           if (p?.id) {
             try {
@@ -23109,6 +23165,6 @@ ${negative.value.trim()}
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.15.29"} loaded`);
+    console.log(`[risu-hina] v${"0.15.30"} loaded`);
   })();
 })();
