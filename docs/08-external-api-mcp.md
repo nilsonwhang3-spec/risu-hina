@@ -77,6 +77,14 @@ the RisuAI window cannot send anything, so the backend ends it: the held poll ge
 `is_disconnected` and ends the lease the moment the client drops (measured through the tunnel: under 1 s), the
 lease after a finished poll is 15 s, and a lapsed lease forgets the context. `pagehide` tries a deactivate too.
 
+**Moving files (download_file / upload_file).** The server cannot write the client's disk and a returned file
+would land in context, so both tools hand out a one-time URL `/mcp/file/<ticket>` (one path, one direction, one
+use, 10 min, only while the lease holds; switching off drops all tickets). The client runs `curl -o` / `curl -T`.
+The URL is the credential, so no header; its base comes from the MCP request's Host / X-Forwarded-Proto
+(measured: `https://hina.example.com/...` through the tunnel, 200 then 404 on reuse). Folders come down zipped;
+uploads follow write_file's areas, refuse overwrite unless asked, `extract=true` unpacks a zip into `path`.
+Also: a backend restart forgets the switch, and a panel that still has it on re-activates by itself.
+
 **Review over MCP.** Decisions (채택/버림/대표) stay the user's, in the 검수 tab; over MCP the client reads them
 (`studio_group`), looks (`view_image` / `compare_images`), and writes AI suggestions (`suggest_selection`).
 For an `__mcp__` session `vision.view` always returns the pictures (the client's model sees them; our vision mode
