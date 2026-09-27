@@ -131,11 +131,20 @@ class McpBridge {
           { context: { ...this.context(), pendingRev: this.pendingRev } }, POLL_TIMEOUT_MS) as PollReply;
         if (id !== this.loopId) return;
         if (!r.enabled) {
-          // The backend restarted or someone else switched it off.
-          this.on = false;
-          this.error = '백엔드에서 MCP 가 꺼졌습니다. 다시 켜 주세요.';
-          this.changed();
-          return;
+          // Usually the backend restarted (update, service restart) and lost
+          // the switch while this panel - which the user left on - is still
+          // here: switch it back on. If that is refused (add-on removed, route
+          // gone), give up and say so.
+          try {
+            await transport.post('/mcp/bridge/activate', { context: this.context() });
+            if (id !== this.loopId) return;
+            continue;
+          } catch {
+            this.on = false;
+            this.error = '백엔드에서 MCP 가 꺼졌습니다. 다시 켜 주세요.';
+            this.changed();
+            return;
+          }
         }
         const hadError = !!this.error;
         this.error = '';

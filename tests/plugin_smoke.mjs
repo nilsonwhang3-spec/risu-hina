@@ -3265,6 +3265,15 @@ console.log('\ntest_mcp_switch');
     check('the switch shows on (sparkle class) while connected',
           sw?.classList.contains('on') === true && /MCP 연결됨/.test(sw?.textContent || ''),
           (sw?.className || '') + ' ' + (sw?.textContent || ''));
+    // A backend restart loses the switch; the panel that still has it on
+    // switches it back on by itself instead of silently dropping out.
+    await fetch(backend.url + '/mcp/bridge/deactivate', {
+      method: 'POST', headers: { Authorization: 'Bearer ' + backend.token, 'Content-Type': 'application/json' }, body: '{}',
+    });
+    await settle(2500);
+    st = await mcpStatus();
+    check('after the backend loses the switch, the open panel turns it back on',
+          st.bridge?.active === true && sw?.classList.contains('on') === true, JSON.stringify(st.bridge).slice(0, 200));
     // Visible from every tab, not just the picker.
     await openAdvanced();
     check('the on-switch stays visible on other tabs', sw?.isConnected && sw.style.display !== 'none');
