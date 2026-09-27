@@ -1583,6 +1583,10 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
 /* File rows and grid cells as drop targets for internal drags. */
 .frow.dropping, .fcell.dropping { outline: 2px dashed #7dd3fc; outline-offset: -2px; }
 
+/* Style-saved generation settings (§1-77). */
+.stylegenrow { gap: 6px; flex-wrap: wrap; margin-top: 6px; align-items: center; }
+.stylegenrow .stylegen { flex: 1 1 220px; min-width: 0; }
+
 /* --- 승인 / 반영 in the title row (§1-76) ---------------------------------------
    Always on screen; quiet when there is nothing, loud when there is. */
 .commitctl { display: inline-flex; gap: 6px; align-items: center; }

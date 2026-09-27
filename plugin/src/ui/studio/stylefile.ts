@@ -65,3 +65,61 @@ export function buildStyleDoc(doc: StyleDoc): string {
   if (doc.negative.trim()) body += `\n## negative\n${doc.negative.trim()}\n`;
   return joinFront(doc.meta, body);
 }
+
+// --- generation settings carried by a style (§1-77) --------------------------------
+//
+// Front-matter keys use the job spec's own names (the backend's
+// studio.style_gen reads the same ones and fills a spec's gaps with them);
+// the panel's generation card uses its own short names.
+
+/** [generation-card key, front-matter key] */
+const GEN_META: [string, string][] = [
+  ['model', 'model'], ['steps', 'steps'], ['scale', 'scale'], ['rescale', 'cfg_rescale'],
+  ['sampler', 'sampler'], ['schedule', 'noise_schedule'], ['width', 'width'], ['height', 'height'],
+  ['quality', 'qualityToggle'], ['ucPreset', 'ucPreset'],
+];
+
+export type GenSettings = Partial<{
+  model: string; steps: number; scale: number; rescale: number; sampler: string; schedule: string;
+  width: number; height: number; quality: boolean; ucPreset: number;
+}>;
+
+/** The settings a style's front matter carries (empty object = none). */
+export function genFromMeta(meta: Map<string, string>): GenSettings {
+  const out: Record<string, unknown> = {};
+  for (const [g, m] of GEN_META) {
+    const v = (meta.get(m) ?? '').trim();
+    if (!v) continue;
+    if (g === 'model' || g === 'sampler' || g === 'schedule') out[g] = v;
+    else if (g === 'quality') out[g] = /^(true|1|yes|on)$/i.test(v);
+    else if (Number.isFinite(Number(v))) out[g] = Number(v);
+  }
+  return out as GenSettings;
+}
+
+/** Write `gen`'s settings into the front matter (replacing any earlier ones). */
+export function writeGenMeta(meta: Map<string, string>, gen: Record<string, unknown>): void {
+  for (const [g, m] of GEN_META) {
+    const v = gen[g];
+    if (v === undefined || v === null || v === '') meta.delete(m);
+    else meta.set(m, String(v));
+  }
+}
+
+export function clearGenMeta(meta: Map<string, string>): void {
+  for (const [, m] of GEN_META) meta.delete(m);
+}
+
+export function describeGen(g: GenSettings): string {
+  const bits: string[] = [];
+  if (g.model) bits.push(g.model.replace(/^nai-diffusion-/, 'v'));
+  if (g.steps !== undefined) bits.push(`${g.steps} steps`);
+  if (g.scale !== undefined) bits.push(`CFG ${g.scale}`);
+  if (g.rescale !== undefined) bits.push(`rescale ${g.rescale}`);
+  if (g.sampler) bits.push(g.sampler);
+  if (g.schedule) bits.push(g.schedule);
+  if (g.width && g.height) bits.push(`${g.width}×${g.height}`);
+  if (g.quality !== undefined) bits.push(g.quality ? '퀄리티 태그 ON' : '퀄리티 태그 OFF');
+  if (g.ucPreset !== undefined) bits.push(`UC ${g.ucPreset}`);
+  return bits.join(' · ');
+}

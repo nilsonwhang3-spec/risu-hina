@@ -1804,7 +1804,10 @@ def build(model: Any = None) -> Agent[Deps]:
                          "qualityToggle","ucPreset", ...} - unknown keys pass through as they are
 
         Library files are read and written with the ordinary file tools (read_file / write_file).
-        A style .md is front matter + `## positive` / `## negative`. SD-studio presets
+        A style .md is front matter + `## positive` / `## negative`. Its front matter may also carry
+        generation settings under the spec's own names (model, steps, scale, cfg_rescale, sampler,
+        noise_schedule, width, height, qualityToggle, ucPreset); the enabled styles fill whatever
+        your spec leaves unsaid, and a value you pass always wins. SD-studio presets
         (studio/config/scenes/) are the scene-preset format; one scene is one image of the batch.
         An EXPRESSION SET is drawn one image per scene with ordinary generation (not the director
         emotion tool: ten times the cost and no control).
@@ -1822,13 +1825,20 @@ def build(model: Any = None) -> Agent[Deps]:
             specs = parsed if isinstance(parsed, list) else [parsed]
             items = []
             settings = []
+            resolved_specs = []
             for spec in specs:
                 spec.setdefault("charKey", ctx.deps.char_key)
-                resolved = studio.normalize_spec(spec)
+                # Style-saved generation settings fill the gaps (§1-77), so the
+                # plan and its price are what the run will actually use.
+                resolved = studio.apply_style_gen(spec)
+                resolved_specs.append(resolved)
                 settings.append({"styles": resolved["styles"], "characters": resolved["characters"],
-                                 "scenePreset": resolved.get("scenePreset") or "inline/default"})
-                items.extend(studio.plan(spec))
-            spec = specs[0] if specs else {}
+                                 "scenePreset": resolved.get("scenePreset") or "inline/default",
+                                 **({"model": resolved.get("model")} if resolved.get("model") else {}),
+                                 **({"params": resolved.get("params")} if resolved.get("params") else {}),
+                                 **({"fromStyle": resolved["styleGen"]} if resolved.get("styleGen") else {})})
+                items.extend(studio.plan(resolved))
+            spec = resolved_specs[0] if resolved_specs else {}
         except Exception as e:  # noqa: BLE001
             return f"계획을 세우지 못했습니다: {e}"
         est = studio.estimate(spec, len(items))
