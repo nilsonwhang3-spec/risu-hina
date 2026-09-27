@@ -521,7 +521,8 @@ export class AgentPanel {
       return el('div', { class: 'stagedrow' }, [
         // Host actions touch the live RisuAI chat rather than our working copy,
         // which is a different kind of consequence and says so.
-        a.byHost ? el('span', { class: 'badge err', text: 'RisuAI' }) : el('span', { class: 'badge', text: '작업본' }),
+        a.kind === 'studio_batch' ? el('span', { class: 'badge warn', text: '생성' })
+          : a.byHost ? el('span', { class: 'badge err', text: 'RisuAI' }) : el('span', { class: 'badge', text: '작업본' }),
         el('span', { class: 'grow', text: a.summary }),
         busy, yes, no,
       ]);

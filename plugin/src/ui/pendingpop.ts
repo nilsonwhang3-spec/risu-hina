@@ -123,10 +123,15 @@ export function openPendingPopover(anchor: HTMLElement): void {
       const no = el('button', { class: 'ghost tiny', text: '거절' }) as HTMLButtonElement;
       const busy = el('span', { class: 'hint' });
       const other = !!a.chatKey && a.chatKey !== state.activeChatKey;
+      // An MCP batch (§1-79) carries its per-batch lines: model, styles,
+      // characters, size, cost - what the in-panel confirmation used to show.
+      const lines = Array.isArray(a.args?.lines) ? (a.args.lines as unknown[]).map(String).slice(0, 6) : [];
       const row = el('div', { class: 'stagedrow' }, [
-        a.byHost ? el('span', { class: 'badge err', text: 'RisuAI' }) : el('span', { class: 'badge', text: '작업본' }),
+        a.kind === 'studio_batch' ? el('span', { class: 'badge warn', text: '생성' })
+          : a.byHost ? el('span', { class: 'badge err', text: 'RisuAI' }) : el('span', { class: 'badge', text: '작업본' }),
         el('div', { class: 'grow' }, [
           el('div', { text: a.summary }),
+          ...lines.map((t) => el('div', { class: 'hint', text: t })),
           el('div', { class: 'hint', text: (a.chatName ? `챗: ${a.chatName}` : '이 봇')
             + (other && a.byHost && HOST_OPENS_CHAT.has(a.kind) ? ' · 승인하면 그 챗을 엽니다' : '') }),
         ]),
