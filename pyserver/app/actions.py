@@ -87,6 +87,7 @@ def _row(r: Any) -> dict:
         "byHost": d.get("kind") in HOST_KINDS,
         "result": d.get("result") or "",
         "createdAt": d.get("created_at"),
+        "sessionId": d.get("session_id"),
     }
 
 
@@ -362,7 +363,23 @@ def _asset_rename(a: dict) -> str:
     return f'에셋 이름 {count}개를 작업본에서 변경했습니다. 이미지 재등록 없이 봇 반영으로 적용하세요.'
 
 
+def _studio_batch(a: dict) -> str:
+    """An MCP batch approved from the queue: run the plan that was shown."""
+    from . import batchreview, nai, studiojob
+    if not nai.configured():
+        raise ActionError("NovelAI 토큰이 없습니다 — 설정 → API 키에 추가한 뒤 다시 승인해 주세요.")
+    prepared = batchreview.take(a["id"])
+    if prepared is None:
+        raise ActionError("이 배치의 계획이 백엔드에 남아 있지 않습니다 (재시작 등). 생성을 다시 요청해 주세요.")
+    started = []
+    for spec, items in prepared:
+        r = studiojob.start({**spec, "origin": "AI", "sessionId": a.get("sessionId")}, planned_items=items)
+        started.append(f"{r['jobId']} ({r['total']}장)")
+    return "배치를 시작했습니다: " + ", ".join(started) + " - studio_job 으로 진행을 확인하세요."
+
+
 EXECUTORS: dict[str, Callable[[dict], str]] = {
+    "studio_batch": _studio_batch,
     'asset_rename': _asset_rename,
     'host_asset_add': _asset_stage,
     'host_asset_add_many': _asset_stage,

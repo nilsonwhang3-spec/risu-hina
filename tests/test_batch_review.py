@@ -60,6 +60,28 @@ class BatchReview(unittest.TestCase):
         self.assertEqual(payload['model'], 'nai-diffusion-4-5-curated')
         self.assertEqual(payload['params']['steps'], 40)
 
+    def test_held_mcp_batch_runs_the_plan_that_was_shown(self):
+        # §1-79: an MCP batch is a studio_batch proposal; approving it starts
+        # exactly the held expansion (no replanning), once.
+        from app import actions, nai
+        prepared, detail, total = batchreview.prepare([{'styles': [], 'characters': [], 'count': 2}])
+        act = actions.propose('studio_batch', chat_key='', char_key='', summary=f'총 {total}장',
+                              args={'lines': batchreview.summary_lines(detail)})
+        batchreview.hold(act['id'], prepared)
+        self.assertTrue(batchreview.summary_lines(detail)[0].startswith('배치 1: 2장'))
+        seen = []
+
+        def fake_start(spec, planned_items=None):
+            seen.append(planned_items)
+            return {'jobId': 'job_test', 'total': len(planned_items)}
+        with patch.object(nai, 'configured', return_value=True), \
+             patch.object(studio, 'plan', side_effect=AssertionError('replanned')), \
+             patch.object(studiojob, 'start', side_effect=fake_start):
+            out = actions.decide(act['id'], True)
+        self.assertEqual(seen, [prepared[0][1]])
+        self.assertIn('job_test', out['result'])
+        self.assertIsNone(batchreview.take(act['id']))   # the plan is used once
+
     def test_job_uses_approved_items_without_replanning(self):
         prepared, _, _ = batchreview.prepare([{'styles': [], 'characters': [], 'count': 2}])
         spec, items = prepared[0]

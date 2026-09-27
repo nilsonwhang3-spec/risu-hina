@@ -297,6 +297,26 @@ def main() -> int:
         err, text = res.get("r") or (True, "no result")
         check("the approval reports the panel's result", not err and "완료" in text and "RisuAI에 반영" in text, text[:300])
 
+        print("test_mcp_batch_needs_approval")
+        # §1-79: the in-panel permit prompt is invisible to an MCP client and
+        # it cannot call a second tool while one blocks - a 2+ image batch
+        # becomes a proposal and the tool returns at once.
+        t0 = time.time()
+        err, text = m.tool("studio_generate", {"spec_json": json.dumps(
+            {"styles": [], "characters": [], "scenes": [{"name": "a"}, {"name": "b"}], "count": 1})})
+        check("a 2-image MCP batch returns at once, asking for approval",
+              not err and "승인이 필요합니다" in text and time.time() - t0 < 20, f"{time.time() - t0:.1f}s {text[:200]}")
+        _, body = s.get(q("/actions", charKey=ck))
+        batch = next((a for a in body.get("actions") or [] if a.get("kind") == "studio_batch"), None)
+        check("and it waits in the approval queue with its summary lines",
+              batch is not None and "총 2장" in (batch.get("summary") or "") and (batch.get("args") or {}).get("lines"),
+              str(batch)[:300])
+        if batch:
+            err, text = m.tool("approve_proposals", {"ids": batch["id"]})
+            # This test backend has no NovelAI key: the executor must say so
+            # (not hang, not claim a start).
+            check("approving it from MCP reaches the executor", "NovelAI" in text and "시작했습니다" not in text, text[:300])
+
         print("test_mcp_review")
         import base64
         import io

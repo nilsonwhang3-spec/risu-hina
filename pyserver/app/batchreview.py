@@ -71,3 +71,55 @@ def prepare(specs: list[dict]) -> tuple[list[tuple[dict, list[dict]]], str, int]
     if len(detail) > 60000:
         raise studio.StudioError("확인할 설정이 너무 많습니다. 배치를 나눠 계획해 주세요.")
     return prepared, detail, total
+
+
+# --- a plan held for approval (§1-79) -------------------------------------------------
+#
+# An MCP client's batch cannot wait on the in-panel permit prompt: that prompt
+# is shown only in the panel's own agent conversation, the MCP session has none,
+# and the client cannot call another tool while this one blocks. So an MCP batch
+# becomes an ordinary proposal (kind `studio_batch`) - it shows in the title-row
+# 승인 and in approve_proposals - and the EXACT expansion the user saw is held
+# here until someone decides. Memory only: a restarted backend forgets the plan
+# and the approval says so, rather than re-planning something nobody looked at.
+
+import time as _time
+import threading as _threading
+
+_HELD: dict[str, tuple[float, list[tuple[dict, list[dict]]]]] = {}
+_HELD_LOCK = _threading.Lock()
+HELD_TTL = 24 * 3600
+
+
+def hold(action_id: str, prepared: list[tuple[dict, list[dict]]]) -> None:
+    now = _time.time()
+    with _HELD_LOCK:
+        for k, (at, _) in list(_HELD.items()):
+            if now - at > HELD_TTL:
+                _HELD.pop(k, None)
+        _HELD[action_id] = (now, prepared)
+
+
+def take(action_id: str) -> list[tuple[dict, list[dict]]] | None:
+    with _HELD_LOCK:
+        got = _HELD.pop(action_id, None)
+    return got[1] if got else None
+
+
+def summary_lines(detail: str) -> list[str]:
+    """Short lines for the approval popover, from prepare()'s review JSON."""
+    try:
+        reviews = json.loads(detail)
+    except ValueError:
+        return []
+    out = []
+    for r in reviews:
+        groups = r.get("설정") or []
+        styles = sorted({str(s).rsplit("/", 1)[-1].removesuffix(".md") for g in groups for s in (g.get("스타일") or [])})
+        chars = sorted({str(c).rsplit("/", 1)[-1] for g in groups for c in (g.get("캐릭터") or []) if isinstance(c, str)})
+        sizes = sorted({s for g in groups for s in (g.get("해상도") or [])})
+        out.append(f"배치 {r.get('배치')}: {r.get('총 이미지')}장 · {r.get('모델')} · 스타일 {', '.join(styles) or '없음'}"
+                   + (f" · 캐릭터 {', '.join(chars)}" if chars else "")
+                   + (f" · {', '.join(sizes)}" if sizes else "")
+                   + f" · {r.get('예상 비용')}")
+    return out

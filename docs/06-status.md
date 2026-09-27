@@ -1,5 +1,20 @@
 # 06. Implementation status — as of 2026-09-27 (v0.15.30, Risu Hina)
 
+## unreleased (2026-09-27): §1-79 an MCP batch is approved from the queue
+
+- **Report (user):** a batch started over MCP showed no approval prompt, and could not be approved over MCP.
+- **Cause:** `studio_generate` confirms 2+ image batches with a permit (`agent._permitted`), and the permit
+  prompt is drawn only in the panel's own agent conversation - the hidden `__mcp__` session has none. The tool
+  blocked until the permit timed out, and the MCP client cannot call another tool while one blocks.
+- **Now:** for an `__mcp__` session a 2+ image batch becomes a proposal, kind `studio_batch`, and the tool
+  returns at once with its id and per-batch lines (model, styles, characters, size, cost). It shows in the
+  title-row 승인 (badge 생성, with the lines) and `approve_proposals` takes it. The EXACT expansion that was
+  shown is held in `batchreview.hold` (memory, 24 h); the executor starts it via `studiojob.start(planned_
+  items=)` and never replans - a restarted backend makes the approval fail with a sentence, not re-plan. No
+  NovelAI key fails the approval with a sentence too. The in-panel agent keeps its permit flow.
+- Verified: test_mcp `test_mcp_batch_needs_approval` (returns at once, queued with lines, MCP approval reaches
+  the executor); test_batch_review `test_held_mcp_batch_runs_the_plan_that_was_shown` (no replan, once).
+
 ## unreleased (2026-09-27): §1-78 studio saves stop reloading everything
 
 - **Report (user):** editing and saving a style prompt or a character prompt re-rendered the DOM often and

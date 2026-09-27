@@ -1882,6 +1882,20 @@ def build(model: Any = None) -> Agent[Deps]:
             prepared, detail, total = await asyncio.to_thread(batchreview.prepare, specs)
         except Exception as e:  # noqa: BLE001
             return f"시작하지 못했습니다: {e}"
+        from . import mcpbridge
+        if total >= 2 and mcpbridge.is_mcp_session(ctx.deps.session_id):
+            # §1-79: an MCP client cannot see the in-panel permit prompt nor
+            # call another tool while this one waits - the batch becomes a
+            # proposal in the approval queue, holding exactly this plan.
+            lines = batchreview.summary_lines(detail)
+            act = actions.propose("studio_batch", chat_key=ctx.deps.chat_key, char_key=ctx.deps.char_key,
+                                  summary=f"스튜디오 배치 {len(prepared)}개 · 총 {total}장 생성",
+                                  args={"lines": lines, "total": total}, session_id=ctx.deps.session_id)
+            batchreview.hold(act["id"], prepared)
+            return (f"배치 생성은 승인이 필요합니다 (제안 id={act['id']}, {len(prepared)}개 배치 · 총 {total}장).\n"
+                    + "\n".join(lines) + "\n"
+                    "사용자가 패널 상단의 [승인] 에서 승인하거나, 사용자가 승인하라고 하면 approve_proposals(ids=\""
+                    + act["id"] + "\") 로 시작하세요. 시작 뒤 studio_job 으로 진행을 확인합니다.")
         if total >= 2:
             if not await _permitted(ctx, "studio_batch", f"{len(prepared)}개 배치 · 총 {total}장", detail):
                 return "배치 실행이 확인되지 않았습니다 (취소·거부·시간 초과). JOB과 이미지는 생성하지 않았습니다."

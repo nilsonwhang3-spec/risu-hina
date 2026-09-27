@@ -53,6 +53,9 @@ How it works:
 - Approved changes land in the working copy; they reach RisuAI only on 반영 (write-back): approve a
   propose_writeback (chat) or call write_card_to_risu (card) when the user wants it saved to RisuAI.
   Both are carried out by the open panel, and the tool reports the verified result.
+- studio_generate with 2+ images does not run at once: it returns a proposal id and waits in the approval
+  queue (the user approves it in the panel's title-row [승인], or you call approve_proposals when the user
+  says so). Then follow it with studio_job.
 - Files live on the backend PC, not on this machine. For bulk work, run_python processes them there
   (only printed output comes back). To use your own local tools on a file, download_file (curl -o),
   edit locally, then upload_file (curl -T, overwrite=true) - the bytes never pass through your context.
