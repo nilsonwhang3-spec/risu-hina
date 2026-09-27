@@ -7,7 +7,9 @@
   the two prompts; the generation card lived only in the browser's localStorage (`hina.studioGen`), per
   device, unconnected to any style, and invisible to the agent's runs.
 - **Format:** the style's front matter takes the job spec's own names - `model`, `steps`, `scale`,
-  `cfg_rescale`, `sampler`, `noise_schedule`, `width`, `height`, `qualityToggle`, `ucPreset` - readable and
+  `cfg_rescale`, `sampler`, `noise_schedule`, `width`, `height`, `qualityToggle`, `ucPreset`, and the two
+  web-client sampler flags `deliberate_euler_ancestral_bug` / `prefer_brownian` (no card control; V5 presets differ on
+  them - added after the MCP session asked, `919d26f`) - readable and
   editable by hand or by the agent (the studio_plan docstring says so).
 - **Backend:** `studio.style_gen` parses them (typed) into `read_style()["gen"]`; `studio.apply_style_gen`
   fills whatever a spec leaves unsaid from its active styles (explicit value always wins; the first style in
