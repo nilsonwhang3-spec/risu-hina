@@ -17,9 +17,9 @@ import { askName } from '../kit';
 import { attachHilite } from '../hilite';
 import { state, type StudioItem } from '../../state';
 import { pickerRow, openListPicker, type PickerEntry } from '../pickers';
-import { S, hub, activeOf, checkUnresolved, newCard, msg, fragKeys, temporaryPrompt } from './store';
+import { S, hub, activeOf, checkUnresolved, newCard, msg, fragKeys, temporaryPrompt, gen, persistGen } from './store';
 import { openParamsDialog } from './gen';
-import { parseStyleDoc, buildStyleDoc, type StyleDoc } from './stylefile';
+import { parseStyleDoc, buildStyleDoc, type StyleDoc, genFromMeta, writeGenMeta, clearGenMeta, describeGen, type GenSettings } from './stylefile';
 
 /** Unsaved inline edits, kept across a column rebuild so a redraw (a toggle,
  * a refresh) cannot eat what was just typed. */
@@ -214,10 +214,26 @@ async function selectStyle(path: string): Promise<void> {
   }
   pending = null;
   loadedDoc = null;
+  // A style that carries generation settings (§1-77) brings them along: the
+  // card below shows what the next run will use, and the user sees why.
+  try {
+    const doc = parseStyleDoc((await state.readFile(path)).content);
+    loadedDoc = { path, doc };
+    const g = genFromMeta(doc.meta);
+    if (applyGen(g)) hub.notice('스타일의 제작 설정을 적용했습니다: ' + describeGen(g), 'ok');
+  } catch { /* the style still switched; settings are optional */ }
   hub.drawLeft();
   hub.drawCentre();
   checkUnresolved();
   hub.touchQuiet();
+}
+
+/** Put a style's saved settings on the generation card. False = none saved. */
+function applyGen(g: GenSettings): boolean {
+  if (!Object.keys(g).length) return false;
+  Object.assign(gen, g);
+  persistGen();
+  return true;
 }
 
 // --- the inline editor -----------------------------------------------------------
@@ -227,11 +243,83 @@ function buildStyleEditor(mountEl: HTMLElement, path: string): void {
   const neg = el('textarea', { rows: '4', class: 'promptedit', placeholder: '부정 프롬프트' }) as HTMLTextAreaElement;
   const status = el('div', { class: 'hint', style: { minHeight: '14px' } });
 
+  // Generation settings saved with the style (§1-77): what it carries, and
+  // save / load / clear. The prompt text autosaves; the settings are saved
+  // on purpose, because the card's values change all the time.
+  const genLine = el('div', { class: 'hint stylegen' });
+  const saveGen = el('button', { class: 'ghost tiny', text: '현재 제작 설정 저장',
+    title: '지금 생성 카드의 모델 · Step · CFG · Sampler · 크기 등을 이 스타일에 저장합니다' }) as HTMLButtonElement;
+  const loadGen = el('button', { class: 'ghost tiny', text: '불러오기',
+    title: '이 스타일에 저장된 제작 설정을 생성 카드에 적용합니다' }) as HTMLButtonElement;
+  const clearGen = el('button', { class: 'ghost tiny', text: '지우기',
+    title: '이 스타일에서 제작 설정을 뺍니다 (프롬프트는 그대로)' }) as HTMLButtonElement;
+  const paintGen = (meta: Map<string, string> | null) => {
+    const g = meta ? genFromMeta(meta) : {};
+    const has = Object.keys(g).length > 0;
+    genLine.textContent = has ? '저장된 제작 설정: ' + describeGen(g) : '제작 설정: 저장 안 됨 (켜도 생성 카드의 현재 값을 씁니다)';
+    loadGen.style.display = clearGen.style.display = has ? '' : 'none';
+  };
+  const writeMeta = async (change: (meta: Map<string, string>) => void, said: string) => {
+    await flushSave();
+    let doc: StyleDoc;
+    try {
+      doc = loadedDoc && loadedDoc.path === path ? loadedDoc.doc : parseStyleDoc((await state.readFile(path)).content);
+    } catch (e) {
+      hub.notice('스타일을 읽지 못했습니다: ' + msg(e), 'err');
+      return;
+    }
+    const meta = new Map(doc.meta);
+    change(meta);
+    const next: StyleDoc = { meta, positive: doc.positive, negative: doc.negative };
+    try {
+      const dir = path.slice(0, path.lastIndexOf('/'));
+      const fname = path.slice(path.lastIndexOf('/') + 1);
+      await state.uploadFile(fname, buildStyleDoc(next), false, dir);
+      loadedDoc = { path, doc: next };
+      paintGen(meta);
+      hub.notice(said, 'ok');
+      hub.touchQuiet();
+    } catch (e) {
+      hub.notice('스타일을 저장하지 못했습니다: ' + msg(e), 'err');
+    }
+  };
+  saveGen.addEventListener('click', () => {
+    // Read the card at click time, not when the editor was built.
+    const now = new Map<string, string>();
+    writeGenMeta(now, gen as unknown as Record<string, unknown>);
+    void writeMeta((m) => writeGenMeta(m, gen as unknown as Record<string, unknown>),
+      '이 스타일에 제작 설정을 저장했습니다: ' + describeGen(genFromMeta(now)));
+  });
+  loadGen.addEventListener('click', async () => {
+    // Read the file now: the agent or a hand edit may have changed the
+    // settings since this editor loaded it.
+    let meta: Map<string, string>;
+    try {
+      const doc = parseStyleDoc((await state.readFile(path)).content);
+      if (!pending || pending.path !== path) loadedDoc = { path, doc };
+      meta = doc.meta;
+    } catch (e) {
+      hub.notice('스타일을 읽지 못했습니다: ' + msg(e), 'err');
+      return;
+    }
+    paintGen(meta);
+    const g = genFromMeta(meta);
+    if (applyGen(g)) {
+      hub.notice('제작 설정을 불러왔습니다: ' + describeGen(g), 'ok');
+      hub.drawCentre();
+    } else {
+      hub.notice('이 스타일에는 저장된 제작 설정이 없습니다.', '');
+    }
+  });
+  clearGen.addEventListener('click', () => void writeMeta(clearGenMeta, '이 스타일에서 제작 설정을 뺐습니다.'));
+
   mountEl.append(
     el('label', { class: 'field' }, [el('span', { text: '긍정 프롬프트' }), pos]),
     el('label', { class: 'field' }, [el('span', { text: '부정 프롬프트' }), neg]),
     status,
+    el('div', { class: 'row stylegenrow' }, [genLine, el('span', { class: 'spacer' }), saveGen, loadGen, clearGen]),
   );
+  paintGen(loadedDoc && loadedDoc.path === path ? loadedDoc.doc.meta : null);
   // NAI syntax tints ({} · [] · N::…:: · <조각> · #주석) plus tag/fragment
   // autocomplete, reference-tool-style (item 9-10 of the field report).
   const fragNames = () => fragKeys();
@@ -257,6 +345,7 @@ function buildStyleEditor(mountEl: HTMLElement, path: string): void {
       if (!pending || pending.path !== path) {
         if (pos.isConnected) fill(doc.positive, doc.negative);
       }
+      if (genLine.isConnected) paintGen(doc.meta);
       status.textContent = '';
     }).catch((e) => { status.textContent = msg(e); });
   }

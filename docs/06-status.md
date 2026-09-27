@@ -1,5 +1,27 @@
 # 06. Implementation status — as of 2026-09-27 (v0.15.30, Risu Hina)
 
+## unreleased (2026-09-27): §1-77 a style carries its generation settings
+
+- **Ask (user):** saving a style prompt should be able to save the generation settings too (model, steps,
+  sampler ...). **Checked first: it could not.** A style file held name / description / enabled / order and
+  the two prompts; the generation card lived only in the browser's localStorage (`hina.studioGen`), per
+  device, unconnected to any style, and invisible to the agent's runs.
+- **Format:** the style's front matter takes the job spec's own names - `model`, `steps`, `scale`,
+  `cfg_rescale`, `sampler`, `noise_schedule`, `width`, `height`, `qualityToggle`, `ucPreset` - readable and
+  editable by hand or by the agent (the studio_plan docstring says so).
+- **Backend:** `studio.style_gen` parses them (typed) into `read_style()["gen"]`; `studio.apply_style_gen`
+  fills whatever a spec leaves unsaid from its active styles (explicit value always wins; the first style in
+  the list wins a key both set; `styleGen` records the source of each filled value). Called by
+  `studiojob.start`, `POST /studio/plan` (so the estimate prices what will run) and the agent's
+  `studio_plan`, whose result now shows the resolved model/params and `fromStyle`.
+- **Panel:** the style editor gets a 제작 설정 row - what the style carries, `현재 제작 설정 저장` (the
+  card's values into the front matter; the prompts keep autosaving, the settings are saved on purpose),
+  `불러오기` (re-reads the file, so an agent/hand edit applies) and `지우기`. Picking a style that carries
+  settings puts them on the generation card with a notice.
+- Verified: test_studio `test_style_carries_generation_settings` (types, fill, precedence, source);
+  plugin smoke (save writes the keys without losing prompt/name; 불러오기 applies a hand edit; picking a
+  second style applies its settings; the later full-parameter check still sees the defaults).
+
 ## unreleased (2026-09-27): §1-76 approve and write back from anywhere
 
 - **Ask (user, field use of MCP and the panel):** 반영 should write the chat and the card together;

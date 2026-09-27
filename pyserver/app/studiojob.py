@@ -169,7 +169,9 @@ def start(spec: dict, *, planned_items: list[dict] | None = None) -> dict:
     resolved at run time. Explicit `vibes`/`charrefs` lists on the spec are
     still honored, and the legacy `useReference` key is accepted and ignored.
     """
-    spec = studio.normalize_spec(spec)
+    # Active styles may carry generation settings (§1-77); they fill only
+    # what the spec leaves unsaid - an explicit value always wins.
+    spec = studio.apply_style_gen(spec)
     spec["folder"] = studio.output_folder(spec)
     spec.pop("useReference", None)
     # A missing model is the default, not an empty string sent to NovelAI;

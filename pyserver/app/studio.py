@@ -143,6 +143,70 @@ def _order(meta: dict, default: int = 100) -> int:
         return default
 
 
+# Generation settings a style may carry in its front matter (§1-77), under
+# the same names the job spec uses: `model` at the top level, the rest as
+# params. Written by the panel's style editor ("제작 설정도 저장"), readable
+# and editable by hand or by the agent.
+STYLE_GEN_INT = ("steps", "width", "height", "ucPreset")
+STYLE_GEN_FLOAT = ("scale", "cfg_rescale")
+STYLE_GEN_STR = ("sampler", "noise_schedule")
+STYLE_GEN_BOOL = ("qualityToggle",)
+
+
+def style_gen(meta: dict) -> dict:
+    """{"model"?: str, "params": {...}} from a style's front matter; keys
+    that are absent or unreadable are simply not there."""
+    params: dict[str, Any] = {}
+    for k in STYLE_GEN_INT:
+        try:
+            if str(meta.get(k, "")).strip():
+                params[k] = int(float(str(meta[k]).strip()))
+        except ValueError:
+            pass
+    for k in STYLE_GEN_FLOAT:
+        try:
+            if str(meta.get(k, "")).strip():
+                params[k] = float(str(meta[k]).strip())
+        except ValueError:
+            pass
+    for k in STYLE_GEN_STR:
+        if str(meta.get(k, "")).strip():
+            params[k] = str(meta[k]).strip()
+    for k in STYLE_GEN_BOOL:
+        if str(meta.get(k, "")).strip():
+            params[k] = _bool(meta, k)
+    out: dict[str, Any] = {"params": params}
+    if str(meta.get("model", "")).strip():
+        out["model"] = str(meta["model"]).strip()
+    return out
+
+
+def apply_style_gen(spec: dict) -> dict:
+    """Fill what the spec leaves unsaid from its active styles' saved
+    generation settings. An explicit spec value always wins; between styles
+    the first in card order that sets a key wins. Returns a new spec with
+    `styleGen` naming where each filled value came from."""
+    out = normalize_spec(spec)
+    params = dict(out.get("params") or {})
+    filled: dict[str, str] = {}
+    for rel in out.get("styles") or []:
+        try:
+            g = read_style(str(rel)).get("gen") or {}
+        except StudioError:
+            continue
+        if g.get("model") and not str(out.get("model") or "").strip():
+            out["model"] = g["model"]
+            filled["model"] = str(rel)
+        for k, v in (g.get("params") or {}).items():
+            if k not in params:
+                params[k] = v
+                filled[k] = str(rel)
+    out["params"] = params
+    if filled:
+        out["styleGen"] = filled
+    return out
+
+
 def read_style(rel: str) -> dict:
     """A style file: front matter, then `## positive` / `## negative`.
 
@@ -174,6 +238,7 @@ def read_style(rel: str) -> dict:
             # gets sent without anyone choosing it.
             "enabled": _bool(meta, "enabled"),
             "order": _order(meta),
+            "gen": style_gen(meta),
             "positive": positive, "negative": negative}
 
 

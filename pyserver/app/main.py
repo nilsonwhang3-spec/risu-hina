@@ -1175,10 +1175,13 @@ def h_studio_meta(arg: dict) -> dict:
 def h_studio_plan(arg: dict) -> dict:
     """What a batch would produce, before anything is spent."""
     try:
-        items = studio.plan(arg)
+        # The estimate must price what the run will use, style settings included.
+        spec = studio.apply_style_gen(arg)
+        items = studio.plan(spec)
     except (studio.StudioError, assetrules.RuleError) as e:
         raise ApiError(400, str(e))
-    return {"items": items, "estimate": studio.estimate(arg, len(items))}
+    return {"items": items, "estimate": studio.estimate(spec, len(items)),
+            **({"styleGen": spec["styleGen"]} if spec.get("styleGen") else {})}
 
 
 def h_studio_generate(arg: dict) -> dict:

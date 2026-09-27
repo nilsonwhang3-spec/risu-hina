@@ -964,4 +964,38 @@ try:
 except ImportError:
     print("  (no Pillow: feather check skipped)")
 
+print("\ntest_style_carries_generation_settings")
+# §1-77: a style's front matter may carry the job spec's own settings; the
+# enabled styles fill what a spec leaves unsaid, an explicit value wins, and
+# between styles the first in the list wins.
+_sa = "studio/config/styles/gen-a.md"
+_sb = "studio/config/styles/gen-b.md"
+_pa = files._resolve(files.SPACE, _sa)
+_pa.parent.mkdir(parents=True, exist_ok=True)
+_pa.write_text("---\nname: gen-a\nmodel: nai-diffusion-4-5-curated\nsteps: 40\nscale: 6.5\nsampler: k_dpmpp_2m\n"
+               "width: 1024\nheight: 1024\nqualityToggle: true\n---\n## positive\nwatercolor\n", encoding="utf-8")
+files._resolve(files.SPACE, _sb).write_text("---\nname: gen-b\nsteps: 12\nnoise_schedule: exponential\n---\n## positive\nink\n",
+                                            encoding="utf-8")
+_g = studio.read_style(_sa)["gen"]
+check("read_style parses the settings with their types",
+      _g.get("model") == "nai-diffusion-4-5-curated" and _g["params"].get("steps") == 40
+      and _g["params"].get("scale") == 6.5 and _g["params"].get("qualityToggle") is True, str(_g))
+check("a style without settings has none", studio.read_style(_sb)["gen"]["params"].get("sampler") is None)
+_s = studio.apply_style_gen({"styles": [_sa, _sb], "characters": [], "params": {"scale": 9}})
+_pp = _s.get("params") or {}
+check("missing values fill from the styles", _s.get("model") == "nai-diffusion-4-5-curated"
+      and _pp.get("sampler") == "k_dpmpp_2m" and _pp.get("width") == 1024, str(_s)[:300])
+check("an explicit value wins", _pp.get("scale") == 9, str(_pp))
+check("the first style in the list wins a key both set", _pp.get("steps") == 40, str(_pp))
+check("a key only the second style sets still fills", _pp.get("noise_schedule") == "exponential", str(_pp))
+check("and the spec says where each came from", (_s.get("styleGen") or {}).get("model") == _sa
+      and (_s.get("styleGen") or {}).get("noise_schedule") == _sb, str(_s.get("styleGen")))
+_s2 = studio.apply_style_gen({"styles": [_sa], "characters": [], "model": "nai-diffusion-4-5-full"})
+check("an explicit model is never replaced", _s2.get("model") == "nai-diffusion-4-5-full")
+_s3 = studio.apply_style_gen({"styles": [_sb], "characters": []})
+check("no style model = no model filled (the default applies later)", not _s3.get("model"))
+
+if FAILURES:
+    print(f"FAIL - {len(FAILURES)} check(s): " + ", ".join(FAILURES))
+    sys.exit(1)
 print("PASS - the studio is a folder of the one space, and the SYSTEM wall holds")
