@@ -229,7 +229,27 @@ def main() -> int:
               st == 200 and all(x.get("title") != "__mcp__" for x in body.get("sessions") or []), str(body)[:200])
 
         # A requested card save rides the long poll to the panel and waits
-        # for its report, like the in-panel agent's save.
+        # for its report, like the in-panel agent's save. §1-80: with a
+        # RisuAI save folder the tool also says whether RisuAI's own save
+        # reached its server - here a fake folder whose stamp moves after the
+        # plugin takes the job up.
+        import sqlite3
+        import tempfile as _tf
+        fake_save = Path(_tf.mkdtemp(prefix="risu-save-"))
+
+        def risu_stamp(t: float) -> None:
+            con = sqlite3.connect(fake_save / "risuai.db")
+            con.execute("CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value BLOB, updated_at INTEGER)")
+            con.execute("INSERT INTO kv(key, value, updated_at) VALUES('database/database.bin', x'00', ?) "
+                        "ON CONFLICT(key) DO UPDATE SET updated_at = excluded.updated_at", (int(t * 1000),))
+            con.commit()
+            con.close()
+
+        risu_stamp(time.time() - 3600)
+        s.post("/config", {"config": {"pocketrisu": {"savePath": str(fake_save)}}})
+        st_saved, before = s.get("/risu/saved")
+        check("/risu/saved reads RisuAI's last server save", st_saved == 200 and before.get("available") is True,
+              str(before)[:200])
         out: dict = {}
 
         def save() -> None:
@@ -243,10 +263,44 @@ def main() -> int:
               and jobs[0].get("charKey") == ck, str(body)[:300])
         if jobs:
             st, _ = s.post("/actions/decide", {"chatKey": tk, "id": jobs[0]["id"], "approve": True})
+            time.sleep(1.0)
+            risu_stamp(time.time())   # RisuAI's save reaches its server after the write
             st, body = s.post("/actions/complete", {"chatKey": tk, "id": jobs[0]["id"], "ok": True, "detail": "테스트 반영"})
-        th_save.join(timeout=60)
+        th_save.join(timeout=90)
         err, text = out.get("r") or (True, "no result")
         check("the tool sees the panel's result", not err and "done" in text, text[:300])
+        check("and says RisuAI's own server save was confirmed", "서버 저장 확인됨" in text, text[:300])
+        s.post("/config", {"config": {"pocketrisu": {"savePath": ""}}})
+
+        print("test_mcp_partial_edits_of_one_field")
+        # §1-80 field bug: four partial edits of the first message approved
+        # together left only the last - each carried a body precomputed from
+        # the original. Now each re-applies its edit to the current text.
+        _, cardv = s.get(q("/card", charKey=ck))
+        fm = next((f for f in cardv.get("fields") or [] if f.get("field") == "firstMessage"), None)
+        check("the test card has a first message", fm is not None and "첫 인사" in (fm.get("body") or ""), str(fm)[:200])
+        if fm:
+            m.tool("propose_card_replace", {"field_id": fm["id"], "find": "첫", "replace": "[A]첫", "reason": "t1"})
+            m.tool("propose_card_replace", {"field_id": fm["id"], "find": "인사", "replace": "인사[B]", "reason": "t2"})
+            _, acts = s.get(q("/actions", charKey=ck))
+            mine = ",".join(a["id"] for a in acts.get("actions") or [] if a.get("kind") == "card_edit")
+            err, text = m.tool("approve_proposals", {"ids": mine})
+            _, cardv = s.get(q("/card", charKey=ck))
+            body = next(f for f in cardv["fields"] if f["id"] == fm["id"])["body"]
+            check("two partial edits of one field approved together both land",
+                  "[A]첫" in body and "인사[B]" in body, body[:120] + " / " + text[:200])
+            # A full rewrite made against an older text must not undo them.
+            m.tool("propose_card_edit", {"field_id": fm["id"], "new_body": "완전히 새 인사", "reason": "full"})
+            m.tool("propose_card_replace", {"field_id": fm["id"], "find": "[A]", "replace": "[A2]", "reason": "t3"})
+            _, acts = s.get(q("/actions", charKey=ck))
+            ids = [a["id"] for a in acts.get("actions") or [] if a.get("kind") == "card_edit"]
+            err2, text2 = m.tool("approve_proposals", {"ids": ids[1]})
+            err3, text3 = m.tool("approve_proposals", {"ids": ids[0]})
+            _, cardv = s.get(q("/card", charKey=ck))
+            body = next(f for f in cardv["fields"] if f["id"] == fm["id"])["body"]
+            check("a full rewrite written before another edit is refused, not applied over it",
+                  "[A2]첫" in body and "완전히 새 인사" not in body and "먼저 바뀌었습니다" in text3, body[:120] + " / " + text3[:200])
+            m.tool("approve_proposals", {"ids": ids[0], "approve": False})
 
         print("test_mcp_approvals")
         # Rejecting from the client: the proposal is closed, not applied.

@@ -1,4 +1,5 @@
 /** App state and every backend call the UI makes. */
+import { persistBaseline, watchPersist } from './persistwatch';
 import { transport, BackendError, clientLog, type HealthInfo } from './transport';
 import * as host from './host';
 import { boundedAssets, foregroundWrite } from './operation';
@@ -1342,10 +1343,15 @@ class AppState {
    * differs from the baseline; the host write replaces the field either way.
    */
   async writeBack(): Promise<WriteBackResult> {
-    return foregroundWrite(report => {
+    // RisuAI's own server save is watched after the write (§1-80): "verified"
+    // reads the tab's memory, which is not the same as kept.
+    const since = await persistBaseline();
+    const r = await foregroundWrite(report => {
       report('대화 저장 및 반영 결과 확인 중…');
       return this.performWriteBack();
     });
+    if (r.verified && r.mode !== 'noop') watchPersist(since);
+    return r;
   }
 
   private async performWriteBack(): Promise<WriteBackResult> {
@@ -2326,7 +2332,10 @@ class AppState {
    * an approved host_card_writeback - and they must not drift apart.
    */
   async cardWriteBack(progress: (text: string) => void = () => {}): Promise<{ applied: number; mode: string; verified: boolean; drift?: string; parts?: string[] }> {
-    return foregroundWrite(report => this.performCardWriteBack(text => { report(text); progress(text); }));
+    const since = await persistBaseline();
+    const r = await foregroundWrite(report => this.performCardWriteBack(text => { report(text); progress(text); }));
+    if (r.verified && r.mode !== 'noop') watchPersist(since);
+    return r;
   }
 
   private async performCardWriteBack(progress: (text: string) => void): Promise<{ applied: number; mode: string; verified: boolean; drift?: string; parts?: string[] }> {

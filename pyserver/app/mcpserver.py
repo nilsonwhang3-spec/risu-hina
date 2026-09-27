@@ -208,20 +208,25 @@ def _ids(raw: Any) -> list[str] | None:
     return None if not vals or vals == ["all"] else vals
 
 
-async def _await_host(action_id: str) -> tuple[str, str]:
+async def _await_host(action_id: str) -> tuple[str, str, float | None]:
+    """(status, detail, approved_at): approved_at is when the plugin took the
+    action up - the reference for RisuAI's own server save (§1-80)."""
     from . import actions
     t0 = time.monotonic()
+    approved_at: float | None = None
     while True:
         cur = actions.get(action_id)
         if cur is None:
-            return "failed", "작업을 찾을 수 없습니다."
+            return "failed", "작업을 찾을 수 없습니다.", approved_at
+        if cur["status"] == actions.APPROVED and approved_at is None:
+            approved_at = time.time() - 0.5
         if cur["status"] in (actions.DONE, actions.FAILED, actions.REJECTED):
-            return cur["status"], str(cur.get("result") or "")
+            return cur["status"], str(cur.get("result") or ""), approved_at
         waited = time.monotonic() - t0
         if cur["status"] == actions.PENDING and waited > HOST_START_S:
-            return "pending", "패널이 작업을 시작하지 않았습니다 (MCP 화면이 열려 있는지 확인). 제안은 그대로 남아 있습니다."
+            return "pending", "패널이 작업을 시작하지 않았습니다 (MCP 화면이 열려 있는지 확인). 제안은 그대로 남아 있습니다.", approved_at
         if waited > HOST_DONE_S:
-            return cur["status"], "패널 작업 완료 확인 대기를 마쳤습니다. list_proposals 로 결과를 확인하세요."
+            return cur["status"], "패널 작업 완료 확인 대기를 마쳤습니다. list_proposals 로 결과를 확인하세요.", approved_at
         await asyncio.sleep(0.25)
 
 
@@ -256,7 +261,13 @@ async def _approve_proposals(args: dict) -> str:
                     continue
                 mcpbridge.push_job({"type": "host-action", "id": a["id"], "kind": a["kind"],
                                     "charKey": char_key, "chatKey": a["chatKey"]})
-                status, detail = await _await_host(a["id"])
+                status, detail, approved_at = await _await_host(a["id"])
+                if status == "done" and a["kind"] in ("host_writeback", "host_card_writeback", "host_save_copy"):
+                    from . import risupersist
+                    since = approved_at if approved_at is not None else time.time() - 5
+                    note = risupersist.describe(await risupersist.wait_saved(since))
+                    if note:
+                        detail = (detail + " " + note).strip()
                 out.append(f"{'완료' if status == 'done' else status} {a['id']} {label}" + (f" - {detail}" if detail else ""))
                 if status != "done":
                     break

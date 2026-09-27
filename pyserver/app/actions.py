@@ -210,7 +210,9 @@ def _finish(action_id: str, status: str, result: str) -> None:
 
 def _memory_edit(a: dict) -> str:
     from . import memory as mem
-    got = mem.update(a["args"]["id"], a["args"]["body"])
+    cur = mem.get(a["args"]["id"])
+    body = _rebased_body(str((cur or {}).get("body") or ""), a["args"], "장기기억") if cur else a["args"]["body"]
+    got = mem.update(a["args"]["id"], body)
     return f"[{got['kind']} #{got['seq']}] 을(를) 고쳤습니다"
 
 
@@ -276,9 +278,37 @@ def _checkpoint_create(a: dict) -> str:
     return f"스냅샷을 저장했습니다 (id={cid})"
 
 
+def _rebased_body(current: str, args: dict, what: str) -> str:
+    """The body an approval writes, against the text as it is NOW (§1-80).
+
+    A partial replace carries its edit and is re-applied to the current text,
+    so several of them on one field all land. A full rewrite carries the text
+    it was written against and is refused if that text has since changed,
+    rather than silently undoing the other edit. Proposals from before this
+    carry neither and keep their old behaviour.
+    """
+    from . import textedit
+    rep = args.get("replace")
+    if isinstance(rep, dict) and rep.get("find") is not None:
+        try:
+            body, _ = textedit.replace_once(current, str(rep.get("find") or ""), str(rep.get("replace") or ""),
+                                            replace_all=bool(rep.get("replaceAll")))
+        except textedit.ReplaceError as e:
+            raise ActionError(f"{what}이(가) 이 제안 뒤에 바뀌어 고칠 부분을 찾지 못했습니다: {e} - 다시 제안해 주세요") from e
+        return body
+    base = args.get("base")
+    if base is not None and current != base:
+        raise ActionError(f"이 제안 뒤에 {what}이(가) 먼저 바뀌었습니다. 전체를 덮어쓰면 그 수정이 사라지니, 최신 내용으로 다시 제안해 주세요")
+    return str(args["body"])
+
+
 def _card_edit(a: dict) -> str:
     from . import card
-    got = card.update_field(a["args"]["id"], a["args"]["body"])
+    cur = card.get_field(a["args"]["id"])
+    if cur is None:
+        raise ActionError("없는 카드 필드입니다")
+    body = _rebased_body(str(cur.get("body") or ""), a["args"], f"카드 {cur['field']}")
+    got = card.update_field(a["args"]["id"], body)
     return f"카드 필드 {got['field']} 을(를) 고쳤습니다"
 
 

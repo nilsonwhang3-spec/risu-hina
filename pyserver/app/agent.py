@@ -1090,7 +1090,8 @@ def build(model: Any = None) -> Agent[Deps]:
             return str(e)
         return _propose(ctx, "memory_edit",
                         f"장기기억 [{cur['kind']} #{cur['seq']}] 부분 수정({n}곳) — {reason}",
-                        {"id": memory_id, "body": body})
+                        {"id": memory_id, "body": body,
+                         "replace": {"find": find, "replace": replace, "replaceAll": replace_all}})
 
     @agent.tool
     def propose_memory_delete(ctx: RunContext[Deps], memory_id: str, reason: str) -> str:
@@ -1288,6 +1289,11 @@ def build(model: Any = None) -> Agent[Deps]:
                    cardmod.LORE_SETTINGS_FIELD: "propose_lore_settings",
                    "image": "propose_portrait_replace"}
 
+    def _field_base(field_id: str) -> str | None:
+        """The body a full rewrite was written against (§1-80)."""
+        cur = cardmod.get_field(field_id)
+        return str(cur.get("body") or "") if cur is not None else None
+
     @agent.tool
     def propose_card_replace(ctx: RunContext[Deps], field_id: str, find: str, replace: str,
                              reason: str, replace_all: bool = False) -> str:
@@ -1305,9 +1311,14 @@ def build(model: Any = None) -> Agent[Deps]:
             body, n = textedit.replace_once(str(cur.get("body") or ""), find, replace, replace_all=replace_all)
         except textedit.ReplaceError as e:
             return str(e)
+        # The edit itself rides along (§1-80): approval re-applies it to the
+        # field as it is THEN, so several partial edits of one field approved
+        # together all land - storing only the precomputed body made the last
+        # approval overwrite the others.
         return _propose(ctx, "card_edit",
                         f"카드 {cur['field']} 부분 수정({n}곳) — {reason}",
-                        {"id": field_id, "body": body})
+                        {"id": field_id, "body": body,
+                         "replace": {"find": find, "replace": replace, "replaceAll": replace_all}})
 
     @agent.tool
     def propose_card_edit(ctx: RunContext[Deps], field_id: str, new_body: str,
@@ -1325,7 +1336,7 @@ def build(model: Any = None) -> Agent[Deps]:
             return f"{cur['field']} 은 {_TYPED_TOOL[cur['field']]} 로 바꿉니다"
         return _propose(ctx, "card_edit",
                         f"카드 {cur['field']} 수정 — {reason}",
-                        {"id": field_id, "body": new_body})
+                        {"id": field_id, "body": new_body, "base": _field_base(field_id)})
 
     def _typed_row(ctx: RunContext[Deps], field: str) -> dict | None:
         return next((f for f in cardmod.listing(ctx.deps.char_key)["fields"]
