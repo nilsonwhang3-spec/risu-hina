@@ -106,8 +106,23 @@ export function writeGenMeta(meta: Map<string, string>, gen: Record<string, unkn
   }
 }
 
+/** Sampler flags a style may carry that the generation card has no control
+ * for (the backend applies them at generation; studio.STYLE_GEN_BOOL). */
+const STYLE_ONLY_FLAGS: [string, string][] = [
+  ['deliberate_euler_ancestral_bug', 'euler 버그 재현'], ['prefer_brownian', 'brownian'],
+];
+
 export function clearGenMeta(meta: Map<string, string>): void {
   for (const [, m] of GEN_META) meta.delete(m);
+  for (const [k] of STYLE_ONLY_FLAGS) meta.delete(k);
+}
+
+/** The style-only flags, for the editor's summary ('' = none). */
+export function describeStyleFlags(meta: Map<string, string>): string {
+  return STYLE_ONLY_FLAGS
+    .filter(([k]) => (meta.get(k) ?? '').trim())
+    .map(([k, label]) => `${label} ${/^(true|1|yes|on)$/i.test((meta.get(k) ?? '').trim()) ? 'ON' : 'OFF'}`)
+    .join(' · ');
 }
 
 export function describeGen(g: GenSettings): string {

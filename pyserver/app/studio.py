@@ -150,7 +150,10 @@ def _order(meta: dict, default: int = 100) -> int:
 STYLE_GEN_INT = ("steps", "width", "height", "ucPreset")
 STYLE_GEN_FLOAT = ("scale", "cfg_rescale")
 STYLE_GEN_STR = ("sampler", "noise_schedule")
-STYLE_GEN_BOOL = ("qualityToggle",)
+# The two sampler flags the NovelAI web client sets (V4.5/V5 presets differ
+# on them). Not on the panel's generation card: a style carries them, and a
+# spec without them leaves NovelAI's own default in place.
+STYLE_GEN_BOOL = ("qualityToggle", "deliberate_euler_ancestral_bug", "prefer_brownian")
 
 
 def style_gen(meta: dict) -> dict:
