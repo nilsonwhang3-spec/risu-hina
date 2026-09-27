@@ -1586,6 +1586,14 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
 /* 요청 설정 names the style it saves into (§1-77). */
 .genbind { margin-bottom: 8px; }
 
+/* RisuAI did not save to its server after a write-back (§1-80): pinned, loud. */
+.persistwarn { position: fixed; left: 50%; top: 8px; transform: translateX(-50%); z-index: 2147483600;
+  width: min(92vw, 640px); display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px;
+  border-radius: 8px; background: #7f1d1d; color: #fff; border: 1px solid #f87171;
+  box-shadow: 0 6px 24px #0008; font-size: 13px; line-height: 1.5; }
+.persistwarn > div { flex: 1; }
+.persistwarn.ok { background: #14532d; border-color: #4ade80; }
+
 /* --- 승인 / 반영 in the title row (§1-76) ---------------------------------------
    Always on screen; quiet when there is nothing, loud when there is. */
 .commitctl { display: inline-flex; gap: 6px; align-items: center; }

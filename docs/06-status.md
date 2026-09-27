@@ -1,5 +1,31 @@
 # 06. Implementation status — as of 2026-09-27 (v0.15.30, Risu Hina)
 
+## unreleased (2026-09-27): §1-80 did RisuAI keep it? · partial edits of one field
+
+- **Incident (user, reconstructed from both servers' logs):** MCP work from 18:21 to 20:14 (assets, Regex,
+  background HTML, global note, first message) vanished after a RisuAI reload, with 241 conflicts. Cause: at
+  16:46 the RisuAI (NodeOnly) tab's save to its server failed with a Cloudflare 524 while test-server was
+  thrashing (my 6.8 GB data backup was running at the same time); the full-write fallback failed too, and the
+  tab then saved NOTHING to its server for 3.5 hours, with only a console error. Every Risu Hina write-back in
+  that window "verified" - by reading the tab's memory. The 20:15 reload fetched the server's old database.
+  Recovered from Hina's working copy (conflicts kept as "mine", written back 20:31; RisuAI's server save
+  confirmed 20:32). Diagnosis: RisuAI `save/logs.db` (524, `setItem failed`) and `save/risuai.db` kv
+  `database/database.bin` updated_at.
+- **Built:** `risupersist.py` reads that stamp read-only through the same `pocketrisu.savePath` the asset fast
+  path uses (`GET /risu/saved`). `write_card_to_risu` and MCP-relayed host approvals wait up to 45 s for a save
+  newer than the moment the plugin took the job up and append "RisuAI 서버 저장 확인됨" or a warning not to
+  reload. The panel's two write-back wrappers take the server clock before writing and watch afterwards
+  (`persistwatch.ts`): a minute without a save pins a red banner (do not reload / close; nudge RisuAI to save or
+  export first), cleared with a green note when the save lands. Silent on setups where it cannot tell.
+- **Field bug 2:** four partial edits of the first message approved together left only the last - each
+  `card_edit` carried a body precomputed from the original. `propose_card_replace` / `propose_memory_replace`
+  now also carry the edit, and approval re-applies it to the CURRENT text (`actions._rebased_body`); a full
+  rewrite carries its base and is refused if the text changed since, instead of undoing the other edit.
+  Lorebook replaces already did this (`contentReplace`); scripts refuse stale edits by hash. Old pending
+  proposals keep the old behaviour.
+- Verified: test_risupersist (new, in the gate); test_mcp (the fake save folder: tool result says confirmed;
+  two partial edits both land; a stale full rewrite is refused) - the partial-edit check fails on the old code.
+
 ## unreleased (2026-09-27): §1-79 an MCP batch is approved from the queue
 
 - **Report (user):** a batch started over MCP showed no approval prompt, and could not be approved over MCP.

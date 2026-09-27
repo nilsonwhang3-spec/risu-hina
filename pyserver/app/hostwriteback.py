@@ -19,13 +19,27 @@ async def save_card(session_id: str, char_key: str, chat_key: str, reason: str,
                              args={"userRequested": True})
     session.push_stream_event(session_id, {"type": "card-writeback", "id": action["id"],
                                           "charKey": char_key, "chatKey": chat_key})
+    # The write starts after the plugin approves the action; a RisuAI save
+    # before that moment says nothing about this write (§1-80).
+    approved_at: float | None = None
     deadline = time.monotonic() + timeout
     start_deadline = min(deadline, time.monotonic() + 15)
     while True:
         current = actions.get(action["id"])
         if not current or current["status"] in (actions.DONE, actions.FAILED, actions.REJECTED):
-            return {"id": action["id"], "status": current["status"] if current else "failed",
-                    "result": current["result"] if current else "작업을 찾을 수 없습니다."}
+            out = {"id": action["id"], "status": current["status"] if current else "failed",
+                   "result": current["result"] if current else "작업을 찾을 수 없습니다."}
+            if current and current["status"] == actions.DONE:
+                # "Verified" reads the RisuAI tab's memory; whether the tab's
+                # save reached its server is a separate question (§1-80).
+                from . import risupersist
+                st = await risupersist.wait_saved(approved_at if approved_at is not None else time.time() - 5)
+                note = risupersist.describe(st)
+                if note:
+                    out["risuServerSave"] = note
+            return out
+        if current["status"] == actions.APPROVED and approved_at is None:
+            approved_at = time.time() - 0.5
         expired = time.monotonic() >= (start_deadline if current["status"] == actions.PENDING else deadline)
         if session.stopped(session_id) or expired:
             if current["status"] == actions.PENDING:

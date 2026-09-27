@@ -2530,6 +2530,13 @@ def h_mcp_deactivate(arg: dict) -> dict:
     return mcpbridge.set_enabled(False)
 
 
+def h_risu_saved(arg: dict) -> dict:
+    """When RisuAI's own save last reached its server (§1-80), for the panel's
+    watch after a write-back. `available: false` = cannot tell on this setup."""
+    from . import risupersist
+    return risupersist.status()
+
+
 async def h_mcp_poll(arg: dict) -> dict:
     return await mcpbridge.poll(arg.get("context") or {}, arg.get("_disconnected"))
 
@@ -2741,6 +2748,8 @@ ROUTES: dict[str, Handler] = {
     "POST /checkpoint/clear": h_checkpoint_clear,
     "POST /checkpoint/restore": h_checkpoint_restore,
 
+    "GET /risu/saved": h_risu_saved,
+    "POST /risu/saved": h_risu_saved,
     "GET /mcp/status": h_mcp_status,
     "POST /mcp/status": h_mcp_status,
     "POST /mcp/install": h_mcp_install,
