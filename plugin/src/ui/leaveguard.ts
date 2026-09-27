@@ -4,11 +4,14 @@
  * The backend keeps a working copy of whatever is being edited, and before
  * this guard existed that copy simply stayed behind on every exit - close the
  * panel, switch 봇 편집 ↔ 챗 편집, open another chat - and surfaced days
- * later as a merge nobody remembered asking for. The rule now is one dirty
- * thing at a time, resolved at the door: leaving prompts 반영 / 버리기 /
- * 계속 편집. The one exit that cannot prompt is the browser closing; that
- * path is what the reopen merge (Risu as the source of truth, conflicts
- * decided in the UI) remains for.
+ * later as a merge nobody remembered asking for. Leaving prompts 반영 /
+ * 버리기 / 계속 편집. Since §1-76 only the exits that lose or re-read work
+ * ask (닫기, 🔄): moving between the picker, 봇 편집 and chats does not - the
+ * card and several chats may be pending together, and the title-row 반영
+ * (ui/commitbar.ts, reusing `collect` / `applyOne` below) names and writes
+ * them. The one exit that cannot prompt is the browser closing; that path is
+ * what the reopen merge (Risu as the source of truth, conflicts decided in
+ * the UI) remains for.
  *
  * Every guarded action funnels through `ensureResolved`, which reads the
  * bot-wide summary from `GET /workspace/dirty` - the active scope's counts
@@ -21,7 +24,7 @@ import { clientLog } from '../transport';
 import { shellNotice } from './chatbar';
 import { openConflicts } from './conflicts';
 
-interface DirtyItem {
+export interface DirtyItem {
   scope: 'card' | 'chat';
   /** chatKey for a chat; '' for the card. */
   key: string;
@@ -68,7 +71,7 @@ async function resolveAll(action: string, except?: LeaveExempt): Promise<boolean
   return true;
 }
 
-function collect(summary: DirtySummary, except?: LeaveExempt): DirtyItem[] {
+export function collect(summary: DirtySummary, except?: LeaveExempt): DirtyItem[] {
   const out: DirtyItem[] = [];
   if (summary.card.dirty && except?.scope !== 'card') {
     out.push({
@@ -92,7 +95,7 @@ function msg(e: unknown): string {
 }
 
 /** 반영 for one dirty item; throws with the reason when it did not land. */
-async function applyOne(d: DirtyItem): Promise<void> {
+export async function applyOne(d: DirtyItem): Promise<void> {
   if (d.scope === 'card') {
     const r = await state.cardWriteBack();
     if (!r.verified) {

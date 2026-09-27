@@ -948,12 +948,6 @@ def h_approve(arg: dict) -> dict:
     if not approve:
         return {"decided": n, "approved": False}
 
-    # One dirty thing at a time: staged edits write this chat, so nothing
-    # else may be holding unapplied work when they land.
-    blocker = workspace.cross_scope_blocker(_char_of_chat(tk), "chat", tk)
-    if blocker:
-        raise ApiError(409, blocker)
-
     # Approval and application are one user action, so applying here keeps the
     # client from having to sequence two calls and handle a half-done state.
     _checkpoint(tk, "에이전트 제안 적용 직전", kind="auto")

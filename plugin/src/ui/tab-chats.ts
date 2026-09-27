@@ -12,7 +12,6 @@
 import { el, clear, refocusSearch, fmtTime, armed } from './dom';
 import { state } from '../state';
 import { setEditMode, setToolbarSearch, setTab } from './shell';
-import { ensureResolved } from './leaveguard';
 import type { RisuChat } from '../risuai';
 import { HostError } from '../host';
 import { describeSync, syncBusy } from '../assets';
@@ -54,13 +53,8 @@ function botSnapshots(editBot: HTMLElement): HTMLElement {
       edit.addEventListener('click', async () => {
         edit.disabled = true;
         try {
-          // The restore writes the card's working copy, so it is a card edit:
-          // a dirty chat has to be resolved first, a dirty card may proceed
-          // (the restore is about to replace it anyway, with a snapshot kept).
-          if (!(await ensureResolved('스냅샷 복원', { scope: 'card' }))) {
-            edit.disabled = false;
-            return;
-          }
+          // The restore writes the card's working copy only; chats with
+          // pending work are untouched and stay listed under 반영 (§1-76).
           await state.cardRestore(c.id);
           setEditMode('bot', 'meta');
         } catch (e) {
@@ -205,11 +199,9 @@ export function renderChatsTab(mount: HTMLElement): void {
       flash(pad, '백엔드에 봇이 아직 올라가지 않았습니다. 연결을 확인해 주세요.');
       return;
     }
-    // 봇 편집 is at home in the card - a dirty card passes, a dirty chat has
-    // to be resolved first (one dirty thing at a time).
-    void (async () => {
-      if (await ensureResolved('봇 편집으로 이동', { scope: 'card' })) setEditMode('bot', 'meta');
-    })();
+    // No resolve-first prompt (§1-76): a dirty chat stays dirty and the
+    // title-row 반영 lists it next to the card.
+    setEditMode('bot', 'meta');
   });
 
   // Only 봇 편집 here. "카드만 다시 읽기" was a second, differently-scoped
@@ -278,9 +270,7 @@ export function renderChatsTab(mount: HTMLElement): void {
     let busy = false;
     const enter = async () => {
       if (busy) return;
-      // Opening a chat is at home in that chat; anything else dirty (the
-      // card, another chat) is resolved at this door.
-      if (!(await ensureResolved('챗 열기', { scope: 'chat', key: loaded?.chatKey ?? '' }))) return;
+      // Opening a chat no longer resolves anything first (§1-76).
       if (loaded) {
         await state.loadTurns(loaded.chatKey);
         setEditMode('chat', 'editor');

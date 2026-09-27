@@ -1583,6 +1583,25 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
 /* File rows and grid cells as drop targets for internal drags. */
 .frow.dropping, .fcell.dropping { outline: 2px dashed #7dd3fc; outline-offset: -2px; }
 
+/* --- 승인 / 반영 in the title row (§1-76) ---------------------------------------
+   Always on screen; quiet when there is nothing, loud when there is. */
+.commitctl { display: inline-flex; gap: 6px; align-items: center; }
+.commitchip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; font-size: 12px;
+  white-space: nowrap; border-radius: 999px; opacity: .7; }
+.commitchip .commitn { min-width: 16px; padding: 0 5px; border-radius: 999px; background: #8883; font-weight: 700;
+  font-size: 11px; line-height: 16px; text-align: center; }
+.commitchip.hot { opacity: 1; font-weight: 700; }
+.commitchip.approve.hot { background: #f59e0b; border-color: #f59e0b; color: #1a1300;
+  animation: commit-pulse 2.2s ease-in-out infinite; }
+.commitchip.approve.hot .commitn { background: #1a130033; }
+.commitchip.apply.hot { background: #2563eb; border-color: #2563eb; color: #fff; }
+.commitchip.apply.hot .commitn { background: #ffffff33; }
+@keyframes commit-pulse { 0%, 100% { box-shadow: 0 0 0 0 #f59e0b00; } 50% { box-shadow: 0 0 0 5px #f59e0b55; } }
+@media (prefers-reduced-motion: reduce) { .commitchip.approve.hot { animation: none; } }
+@media (max-width: 640px) { .commitchip .commitlabel { display: none; } .commitchip { padding: 5px 8px; }
+  .commitchip.approve::before { content: '✓'; } .commitchip.apply::before { content: '⇪'; } }
+.commitpop { min-width: 280px; max-width: min(92vw, 460px); }
+
 /* --- MCP switch in the title row (left of 🔄) -------------------------------------
    Off: a quiet ghost button. On: filled, a live dot, and a light sweep every few
    seconds - a panel granting a remote client access should be hard to miss. */

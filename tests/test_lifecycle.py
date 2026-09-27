@@ -285,9 +285,11 @@ row = db.one("SELECT kind FROM checkpoints WHERE id = ?", (old,))
 check("a pre-13 auto-labelled row is filed as a backup",
       row is not None and row["kind"] == "auto", str(dict(row) if row else None))
 
-print("\ntest_one_dirty_thing_at_a_time")
-# The global single-edit rule: the bot-wide summary the leave guard reads,
-# and the refusal that keeps an approval from opening a second dirty front.
+print("\ntest_card_and_chats_dirty_together")
+# §1-76: the one-dirty-thing-at-a-time refusal is gone. The card and any
+# number of chats may hold unapplied work together; the bot-wide summary
+# (what the title-row 반영 lists and writes) must see all of it, and an
+# approval is never refused because the OTHER scope is dirty.
 from app import actions  # noqa: E402
 
 s = workspace.dirty_summary(rk)
@@ -298,34 +300,30 @@ store.set_body(RTK, "r1", "다시 고침")  # the chat goes dirty
 s = workspace.dirty_summary(rk)
 check("the summary sees the dirty chat",
       any(c["dirty"] and c["chatKey"] == RTK for c in s["chats"]), str(s))
-check("editing the dirty chat itself is allowed",
-      workspace.cross_scope_blocker(rk, "chat", RTK) == "")
-check("writing the card is refused while the chat is dirty",
-      "미반영" in workspace.cross_scope_blocker(rk, "card"),
-      workspace.cross_scope_blocker(rk, "card"))
+check("the old cross-scope refusal is gone", not hasattr(workspace, "cross_scope_blocker"))
+
+# Card material (a global lorebook row) approved while the chat is dirty.
+aid = actions.propose("lore_add", chat_key=RTK, char_key=rk, summary="t",
+                      args={"entry": {"key": "k", "comment": "카드 쪽", "content": "x"}, "scope": "global"})["id"]
+try:
+    out = actions.decide(aid, True)
+    ok = bool(out.get("approved"))
+except actions.ActionError as e:
+    ok, out = False, str(e)
+check("a card approval lands while a chat is dirty", ok, str(out))
+act = actions.get(aid)
+check("and it is done, not left pending", act is not None and act["status"] == "done", str(act and act["status"]))
+
 RT2 = store.ingest_chat(CHA2, {"id": "chat-r2", "name": "r2", "message": [
     {"role": "user", "data": "x", "chatId": "q1"}]}, 1)["chatKey"]
-check("a second chat is refused while the first is dirty",
-      "미반영" in workspace.cross_scope_blocker(rk, "chat", RT2),
-      workspace.cross_scope_blocker(rk, "chat", RT2))
-
-# An agent action is refused at the same door, and stays pending - the user
-# resolves the other edit and approves again, nothing is lost.
-aid = actions.propose("card_edit", chat_key=RTK, char_key=rk, summary="t",
-                      args={"id": "nope", "body": "x"})["id"]
-try:
-    actions.decide(aid, True)
-    check("approving a card action while the chat is dirty is refused", False)
-except actions.ActionError as e:
-    check("approving a card action while the chat is dirty is refused",
-          "미반영" in str(e), str(e))
-act = actions.get(aid)
-check("the refused action is still pending, not failed",
-      act is not None and act["status"] == "pending", str(act and act["status"]))
+store.set_body(RT2, "q1", "두 번째 챗도 고침")
+s = workspace.dirty_summary(rk)
+dirty_chats = {c["chatKey"] for c in s["chats"] if c["dirty"]}
+check("two chats and the card can be dirty at once, all in the summary",
+      {RTK, RT2} <= dirty_chats and s["card"]["dirty"], str(s))
 
 store.reset_working(RTK)
-left_over = workspace.cross_scope_blocker(rk, "card")
-check("and allowed again once the chat is clean", left_over == "", left_over)
+store.reset_working(RT2)
 
 print()
 if FAILURES:

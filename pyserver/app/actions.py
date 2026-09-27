@@ -159,15 +159,11 @@ def decide(action_id: str, approve: bool, mode: str = '') -> dict:
         if wrong:
             raise ActionError(wrong)
 
-    # One dirty thing at a time. An approval that writes a working copy is
-    # refused while the *other* scope (or another chat) holds unapplied work -
-    # it would open a second dirty front behind the user's back.
-    scope = scope_of(act)
-    if scope:
-        from . import workspace
-        blocker = workspace.cross_scope_blocker(act["charKey"], scope, act["chatKey"] or "")
-        if blocker:
-            raise ActionError(blocker)
+    # (The one-dirty-thing-at-a-time refusal that stood here is gone, §1-76:
+    # the card and any number of chats may hold unapplied work together, and
+    # the panel's title-row 반영 names and writes all of it at once. The old
+    # rule existed so that nothing was saved *quietly*; one explicit 반영 that
+    # lists what it writes answers that without forcing screen changes.)
 
     if act["kind"] in HOST_KINDS:
         # Approved, but the plugin has to do it and report back. Leaving it

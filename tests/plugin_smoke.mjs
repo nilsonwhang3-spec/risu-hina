@@ -876,42 +876,52 @@ console.log('\ntest_leave_guard_resolves_on_every_exit');
   await settle(300);
   check('staying closes the prompt and keeps the panel', !document.querySelector('.modalback'));
 
-  // Returning to the picker asks too; 버리기 is two-click and then proceeds.
+  // §1-76: moving around no longer asks - the chat stays dirty, and the
+  // title-row 반영 names it and writes it from any tab.
   document.getElementById('tab-chats')
     .dispatchEvent(new window.Event('click', { bubbles: true }));
   await settle(800);
-  check('picker return asks', /미반영 변경/.test(document.querySelector('.modalback')?.textContent || ''));
-  clickButton(document.querySelector('.modalbox'), '변경사항 버리고 계속');
-  await settle(200);
-  check('discard arms first', /정말 버릴까요/.test(document.querySelector('.modalbox')?.textContent || ''));
-  clickButton(document.querySelector('.modalbox'), '정말 버릴까요?');
-  await settle(1500);
-  check('discard-and-go lands on the picker',
-        document.getElementById('tab-chats')?.classList.contains('active'));
-  check('and the prompt is gone', !document.querySelector('.modalback'));
-
-  // Back into the chat (clean, so the guard passes without a prompt).
-  (document.querySelector('.chatitem.current') || document.querySelector('.chatlist .chatitem'))
-    .dispatchEvent(new window.Event('click', { bubbles: true }));
+  check('returning to the picker no longer asks', !document.querySelector('.modalback'));
+  check('and lands on the picker', document.getElementById('tab-chats')?.classList.contains('active'));
+  clickButton(document, '봇 편집');
   await settle(900);
-  check('a clean chat opens without a prompt', !document.querySelector('.modalback'));
-  check('the editor is active', document.getElementById('tab-editor')?.classList.contains('active'));
+  check('봇 편집 with a dirty chat does not ask either', !document.querySelector('.modalback'));
+  check('and the bot tabs open', document.getElementById('tab-meta')?.classList.contains('active'));
 
-  // Dirty again; this time 반영하고 계속 writes to the host and then moves.
-  await dirtyIt('페데리코', '페데리꼬');
+  await settle(1200);
+  const applyChip = document.querySelector('header .commitchip.apply');
+  check('the title-row 반영 lights up for the dirty chat',
+        !!applyChip && applyChip.classList.contains('hot') && Number(applyChip.querySelector('.commitn')?.textContent) > 0,
+        applyChip?.outerHTML?.slice(0, 200));
+  applyChip?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(900);
+  check('its popover names the chat to write', /챗 — 변경 \d+건/.test(document.querySelector('.commitpop')?.textContent || ''),
+        (document.querySelector('.commitpop')?.textContent || '(no popover)').slice(0, 160));
+  clickButton(document.querySelector('.commitpop'), '모두 반영');
+  await settle(2500);
+  check('모두 반영 wrote the chat to the host from the bot screen',
+        host.liveChar.chats[0].message.some((m) => m.data.includes('페데리꼬')));
+  check('and says what it wrote', /반영하고 저장을 확인했습니다/.test(document.querySelector('.commitpop')?.textContent || ''),
+        (document.querySelector('.commitpop')?.textContent || '').slice(0, 200));
+  await settle(1200);
+  check('the 반영 chip goes quiet afterwards', !document.querySelector('header .commitchip.apply')?.classList.contains('hot'));
+  check('and the bot screen is still where the user is', document.getElementById('tab-meta')?.classList.contains('active'));
+  pressEscape(document);
+  await settle(200);
+  const approveChip = document.querySelector('header .commitchip.approve');
+  check('the title-row 승인 sits next to it', !!approveChip && approveChip.nextElementSibling === applyChip);
+  approveChip?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(900);
+  check('승인 opens from the bot screen and reads both queues',
+        /승인을 기다리는 제안이 없습니다|승인 대기 \d+건/.test(document.querySelector('.pendingpop')?.textContent || ''),
+        (document.querySelector('.pendingpop')?.textContent || '(no popover)').slice(0, 160));
+  pressEscape(document);
+  await settle(200);
+
+  // Back to the picker for the chat row below.
   document.getElementById('tab-chats')
     .dispatchEvent(new window.Event('click', { bubbles: true }));
   await settle(800);
-  check('the guard is back for the new edit', /미반영 변경/.test(document.querySelector('.modalback')?.textContent || ''));
-  clickButton(document.querySelector('.modalbox'), 'RisuAI에 반영하고 계속');
-  await settle(2000);
-  check('apply-and-go wrote to the host',
-        host.liveChar.chats[0].message.some((m) => m.data.includes('페데리꼬')));
-  check('apply-and-go lands on the picker',
-        document.getElementById('tab-chats')?.classList.contains('active'));
-  check('nothing is pending after apply-and-go',
-        /변경 없음/.test(document.querySelector('.chatbar .changesum')?.textContent || ''),
-        document.querySelector('.chatbar .changesum')?.textContent);
 
   // Leave the suite where the next scenario expects it: in the editor.
   (document.querySelector('.chatitem.current') || document.querySelector('.chatlist .chatitem'))

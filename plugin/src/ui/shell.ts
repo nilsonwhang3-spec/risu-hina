@@ -5,6 +5,7 @@
  * so switching tabs does not lose scroll position or an in-progress edit.
  */
 import { mcpHeaderSwitch } from './mcp-ui';
+import { commitControls } from './commitbar';
 import { mcp } from '../mcp';
 import { installFoldControls } from './panes';
 import './write-progress';
@@ -422,14 +423,9 @@ export function buildShell(): void {
       el('span', { class: 'badge warn tabbadge', style: { display: 'none' } }),
     ]);
     b.addEventListener('click', () => {
-      // Going back to the picker is leaving the edit; the guard asks first.
-      // Moving between tabs of the same scope is not (same working copy).
-      if (id === 'chats' && active !== 'chats') {
-        void (async () => {
-          if (await ensureResolved('선택 화면으로 이동')) setTab(id);
-        })();
-        return;
-      }
+      // Moving around the panel never asks any more (§1-76): pending work
+      // stays pending and the title-row 반영 shows and writes it. Only the
+      // exits that would lose it (닫기, 🔄) still ask.
       setTab(id);
     });
     return b;
@@ -495,6 +491,8 @@ export function buildShell(): void {
       el('span', { class: 'dim', text: 'v' + __PLUGIN_VERSION__ }),
       healthEl,
       el('span', { class: 'spacer' }),
+      // 승인 / 반영 for the whole bot, from every tab (§1-76).
+      commitControls(),
       // Visible from every tab once the add-on is installed (설정 → 고급 기능).
       mcpHeaderSwitch(),
       reload,
@@ -573,14 +571,9 @@ state.onChange(() => {
     state.openTabRequest = null;
     const want: EditMode | null = CHAT_TABS.has(tab) ? 'chat' : BOT_TABS.has(tab) ? 'bot' : null;
     if (want && want !== mode) {
-      // The agent asked for the other half: that is a mode switch like any
-      // other, and the guard asks the same question first.
-      void (async () => {
-        const except = want === 'bot'
-          ? { scope: 'card' as const }
-          : { scope: 'chat' as const, key: state.activeChatKey };
-        if (await ensureResolved('탭 이동', except)) setEditMode(want, tab);
-      })();
+      // The agent asked for the other half: a plain mode switch (§1-76 -
+      // the card and chats may both hold pending work now).
+      setEditMode(want, tab);
     } else if (want) {
       setEditMode(want, tab);
     } else if (tab === 'files' || tab === 'chats' || tab === 'studio') setTab(tab);
