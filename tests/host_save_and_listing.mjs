@@ -36,6 +36,40 @@ state.cardWriteBack = async () => ({ verified: false, drift: 'host ignored write
 await assert.rejects(state.requestedCardWriteback('save2', 'bot', 'requested-chat'), /host ignored write/);
 assert.equal(completions.at(-1).ok, false);
 await assert.rejects(state.requestedCardWriteback('save3', 'other-bot', ''), /현재 봇/);
+
+// A Lua-only card write is a real write: it must not read "0건" (the agent
+// then invented an explanation) and it must say what went in.
+const hostSource = readFileSync(new URL('../plugin/src/host.ts', import.meta.url), 'utf8');
+const from = hostSource.indexOf('const LIST_LABEL');
+const fnAt = hostSource.indexOf('export function describeCardParts');
+const endMatch = /\r?\n\}\r?\n/.exec(hostSource.slice(fnAt));
+const to = endMatch ? fnAt + endMatch.index + endMatch[0].length : -1;
+assert.ok(from >= 0 && to > from);
+vm.runInContext(transformSync(hostSource.slice(from, to).replace('export function', 'function')
+  + '\nglobalThis.host = { describeCardParts };', { loader: 'ts' }).code, context);
+state.cardWriteBack = async () => ({ verified: true, applied: 1, mode: 'edits', parts: ['triggerscript'] });
+const luaSaid = await state.requestedCardWriteback('save4', 'bot', 'requested-chat');
+assert.doesNotMatch(luaSaid, /0건/);
+assert.match(luaSaid, /1건\(트리거\(Lua\)\)/);
+state.cardWriteBack = async () => ({ verified: true, applied: 2, mode: 'edits', parts: ['desc', 'customscript'] });
+assert.match(await state.requestedCardWriteback('save5', 'bot', 'requested-chat'), /설명 · Regex/);
+
+// The chat twin: a lorebook-only write used to say "0건을 반영".
+transport.post = async (path, payload) => {
+  if (path === '/actions/decide') return { approved: true, host: { kind: 'host_writeback' } };
+  if (path === '/actions/complete') completions.push(payload);
+};
+state.writeBack = async () => ({ verified: true, mode: 'edits', applied: 0, lore: 2, memory: 0, warnings: [] });
+const loreSaid = await state.decideAction('wb1', true, 'active');
+assert.doesNotMatch(loreSaid, /0건/);
+assert.match(loreSaid, /챗 로어북 2건/);
+state.writeBack = async () => ({ verified: false, mode: 'edits', applied: 3, lore: 0, memory: 0, warnings: [], drift: 'kept old text' });
+await assert.rejects(state.decideAction('wb2', true, 'active'), /kept old text/);
+assert.equal(completions.at(-1).ok, false);
+transport.post = async (path, payload) => {
+  if (path === '/actions/decide') return { approved: true, host: { kind: 'host_card_writeback' } };
+  if (path === '/actions/complete') completions.push(payload);
+};
 await state.files();
 assert.equal(reads, 3);
 reads = 0; transport.get = async () => { reads++; throw new BackendError(401); };

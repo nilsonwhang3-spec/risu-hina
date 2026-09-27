@@ -2021,7 +2021,17 @@ class AppState {
       let detail = '';
       if (r.host.kind === 'host_writeback') {
         const out = await this.writeBack();
-        detail = `${out.applied}건을 RisuAI에 반영했습니다.`;
+        if (!out.verified) throw new Error(out.drift || 'RisuAI 저장 결과를 확인하지 못했습니다. 미반영 변경을 보존했습니다.');
+        // Name what went in: a lorebook- or memory-only write used to read
+        // "0건을 반영" (only turns were counted) and looked like a no-op.
+        const bits = [
+          out.applied ? `턴 ${out.applied}건` : '',
+          out.lore ? `챗 로어북 ${out.lore}건` : '',
+          out.memory ? `장기기억 ${out.memory}건` : '',
+        ].filter(Boolean);
+        detail = out.mode === 'noop'
+          ? '챗에 반영할 변경이 없었습니다.'
+          : `${bits.length ? bits.join(' · ') : '챗 변경'}을 RisuAI에 반영하고 저장을 확인했습니다.`;
       } else if (r.host.kind === 'host_save_copy') {
         const name = String(r.host.args?.name || '') || '사본';
         await this.saveCopy(name);
@@ -2031,7 +2041,7 @@ class AppState {
         if (!out.verified) throw new Error(out.drift || 'RisuAI 저장 결과를 확인하지 못했습니다. 미반영 변경을 보존했습니다.');
         detail = out.mode === 'noop'
           ? '카드에 반영할 변경이 없었습니다.'
-          : `카드 변경 ${out.applied}건을 RisuAI에 반영했습니다.`;
+          : `카드 변경 ${out.applied}건${out.parts?.length ? `(${host.describeCardParts(out.parts)})` : ""}을 RisuAI에 반영하고 저장을 확인했습니다.`;
       } else if (r.host.kind === 'host_clone_bot') {
         const name = String(r.host.args?.name || '') || '복제 봇';
         await this.cloneBot(name);
@@ -2305,11 +2315,11 @@ class AppState {
    * whole sequence lives here because two callers need it - the bot bar and
    * an approved host_card_writeback - and they must not drift apart.
    */
-  async cardWriteBack(progress: (text: string) => void = () => {}): Promise<{ applied: number; mode: string; verified: boolean; drift?: string }> {
+  async cardWriteBack(progress: (text: string) => void = () => {}): Promise<{ applied: number; mode: string; verified: boolean; drift?: string; parts?: string[] }> {
     return foregroundWrite(report => this.performCardWriteBack(text => { report(text); progress(text); }));
   }
 
-  private async performCardWriteBack(progress: (text: string) => void): Promise<{ applied: number; mode: string; verified: boolean; drift?: string }> {
+  private async performCardWriteBack(progress: (text: string) => void): Promise<{ applied: number; mode: string; verified: boolean; drift?: string; parts?: string[] }> {
     if (!this.isLiveBot) {
       throw new Error('반영은 RisuAI에서 이 봇이 선택되어 있어야 합니다. '
         + 'RisuAI에서 봇을 선택한 뒤 패널을 다시 열어 주세요');
@@ -2329,12 +2339,12 @@ class AppState {
     if (!r.verified) {
       // No commit and no re-read: the re-read is what used to replace the
       // working copy with the text the write had just failed to change.
-      return { applied: r.applied, mode: r.mode, verified: false, ...(r.drift ? { drift: r.drift } : {}) };
+      return { applied: r.applied, mode: r.mode, verified: false, parts: r.parts, ...(r.drift ? { drift: r.drift } : {}) };
     }
     progress('RisuAI 반영 확인 완료 · 작업본을 동기화하는 중…');
     await this.cardCommit('반영 직전');
     await this.rereadCard();
-    return { applied: r.applied, mode: r.mode, verified: true };
+    return { applied: r.applied, mode: r.mode, verified: true, parts: r.parts };
   }
 
   /**

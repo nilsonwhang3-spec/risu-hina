@@ -389,6 +389,27 @@ const LIST_LABEL: Record<string, string> = {
   additionalAssets: '에셋', emotionImages: '감정 이미지', ccAssets: '에셋',
 };
 
+const FIELD_LABEL: Record<string, string> = {
+  name: '이름', desc: '설명', firstMessage: '퍼스트 메시지', creatorNotes: '제작자 노트',
+  characterVersion: '봇 버전', replaceGlobalNote: '글로벌 노트', systemPrompt: '시스템 프롬프트',
+  exampleMessage: '예시 대화', defaultVariables: '기본 변수', translatorNote: '번역가 노트',
+  lowLevelAccess: '저수준 접근', loreSettings: '로어북 설정', backgroundHTML: '배경 HTML', image: '프로필 이미지',
+};
+
+/**
+ * What a card write touched, in words ("트리거(Lua) · 설명").
+ *
+ * The write result used to be reported as a bare count of scalar fields, so a
+ * write that only changed the Lua triggers - verified and kept - came back as
+ * "카드 변경 0건", and the agent reading it went looking for an explanation
+ * and invented one ("the panel had already saved it"). Naming the parts makes
+ * the result say what actually happened.
+ */
+export function describeCardParts(parts: string[]): string {
+  const names = parts.map((p) => (p === 'triggerscript' ? '트리거(Lua)' : LIST_LABEL[p] ?? FIELD_LABEL[p] ?? p));
+  return [...new Set(names)].join(' · ');
+}
+
 /**
  * Write a card update to the live character, in one `setCharacterToIndex`.
  *
@@ -451,26 +472,33 @@ export async function writeCharacter(
     applied += 1;
     parts.push(e.field);
   }
+  // Each list written counts as one change: they used to add nothing to
+  // `applied`, so a Lua-only write reported "0건" (see describeCardParts).
   if (update.alternateGreetings) {
     next.alternateGreetings = update.alternateGreetings;
     parts.push('alternateGreetings');
+    applied += 1;
   }
   if (update.globalLore) {
     next.globalLore = update.globalLore;
     parts.push('globalLore');
+    applied += 1;
   }
   if (update.customscript) {
     next['customscript'] = update.customscript;
     parts.push('customscript');
+    applied += 1;
   }
   if (update.triggerscript) {
     next['triggerscript'] = update.triggerscript;
     parts.push('triggerscript');
+    applied += 1;
   }
   for (const k of ['additionalAssets', 'emotionImages', 'ccAssets'] as const) {
     if (update[k]) {
       next[k] = update[k];
       parts.push(k);
+      applied += 1;
     }
   }
 
