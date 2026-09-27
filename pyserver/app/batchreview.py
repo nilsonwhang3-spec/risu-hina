@@ -14,7 +14,12 @@ def prepare(specs: list[dict]) -> tuple[list[tuple[dict, list[dict]]], str, int]
     for raw in specs:
         if not ("styles" in raw or raw.get("style")) or "characters" not in raw:
             raise studio.StudioError("AI 생성은 styles와 characters를 명시해야 합니다. 사용자 지정 카드를 확인하세요. 생략해 현재 활성 카드를 대신 사용하지 마세요. 사용하지 않으면 []를 명시하세요.")
-        spec = studio.normalize_spec(copy.deepcopy(raw))
+        # Style-saved generation settings first, THEN the defaults (§1-77).
+        # The defaults used to be merged here, before the job's own
+        # apply_style_gen ran - which then found every key already set and
+        # filled nothing, so an AI/MCP batch silently ignored the style's
+        # model and settings (and showed the defaults in the confirmation).
+        spec = studio.apply_style_gen(copy.deepcopy(raw))
         for entry in spec.get("entries") or []:
             if any(k in entry for k in ("styles", "style", "model", "params")):
                 raise studio.StudioError("entries 안의 스타일·모델·파라미터 변경은 지원하지 않습니다. 해당 설정을 가진 별도 배치로 나눠 주세요.")
