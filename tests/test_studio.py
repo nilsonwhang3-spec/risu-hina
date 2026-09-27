@@ -995,6 +995,21 @@ check("an explicit model is never replaced", _s2.get("model") == "nai-diffusion-
 _s3 = studio.apply_style_gen({"styles": [_sb], "characters": []})
 check("no style model = no model filled (the default applies later)", not _s3.get("model"))
 
+# The two web-client sampler flags ride with a style too (V5 presets differ
+# on them); a spec without them and a style without them leave them unset.
+_sc = "studio/config/styles/gen-c.md"
+files._resolve(files.SPACE, _sc).write_text(
+    "---\nname: gen-c\nmodel: nai-diffusion-5-full\ndeliberate_euler_ancestral_bug: true\nprefer_brownian: true\n---\nx\n",
+    encoding="utf-8")
+_s4 = studio.apply_style_gen({"styles": [_sc], "characters": []})
+_p4 = _s4.get("params") or {}
+check("a style carries deliberate_euler_ancestral_bug and prefer_brownian",
+      _p4.get("deliberate_euler_ancestral_bug") is True and _p4.get("prefer_brownian") is True, str(_p4))
+_s5 = studio.apply_style_gen({"styles": [_sc], "characters": [], "params": {"deliberate_euler_ancestral_bug": False}})
+check("an explicit flag still wins", (_s5.get("params") or {}).get("deliberate_euler_ancestral_bug") is False)
+check("a style without the flags leaves them unset",
+      "prefer_brownian" not in (studio.apply_style_gen({"styles": [_sa], "characters": []}).get("params") or {}))
+
 if FAILURES:
     print(f"FAIL - {len(FAILURES)} check(s): " + ", ".join(FAILURES))
     sys.exit(1)

@@ -19,7 +19,7 @@ import { state, type StudioItem } from '../../state';
 import { pickerRow, openListPicker, type PickerEntry } from '../pickers';
 import { S, hub, activeOf, checkUnresolved, newCard, msg, fragKeys, temporaryPrompt, gen, persistGen } from './store';
 import { openParamsDialog } from './gen';
-import { parseStyleDoc, buildStyleDoc, type StyleDoc, genFromMeta, writeGenMeta, clearGenMeta, describeGen, type GenSettings } from './stylefile';
+import { parseStyleDoc, buildStyleDoc, type StyleDoc, genFromMeta, writeGenMeta, clearGenMeta, describeGen, describeStyleFlags, type GenSettings } from './stylefile';
 
 /** Unsaved inline edits, kept across a column rebuild so a redraw (a toggle,
  * a refresh) cannot eat what was just typed. */
@@ -255,8 +255,10 @@ function buildStyleEditor(mountEl: HTMLElement, path: string): void {
     title: '이 스타일에서 제작 설정을 뺍니다 (프롬프트는 그대로)' }) as HTMLButtonElement;
   const paintGen = (meta: Map<string, string> | null) => {
     const g = meta ? genFromMeta(meta) : {};
-    const has = Object.keys(g).length > 0;
-    genLine.textContent = has ? '저장된 제작 설정: ' + describeGen(g) : '제작 설정: 저장 안 됨 (켜도 생성 카드의 현재 값을 씁니다)';
+    const flags = meta ? describeStyleFlags(meta) : '';
+    const has = Object.keys(g).length > 0 || !!flags;
+    const text = [describeGen(g), flags].filter(Boolean).join(' · ');
+    genLine.textContent = has ? '저장된 제작 설정: ' + text : '제작 설정: 저장 안 됨 (켜도 생성 카드의 현재 값을 씁니다)';
     loadGen.style.display = clearGen.style.display = has ? '' : 'none';
   };
   const writeMeta = async (change: (meta: Map<string, string>) => void, said: string) => {
