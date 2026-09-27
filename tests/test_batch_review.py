@@ -31,6 +31,35 @@ class BatchReview(unittest.TestCase):
         self.assertIn('referenceSpecs', prepared[0][1][0])
         self.assertIn('width', prepared[0][0]['params'])
 
+    def test_style_settings_survive_the_ai_batch_path(self):
+        # §1-77 field bug: prepare() merged the defaults before the style's
+        # settings, so an AI/MCP batch ran (and showed) the defaults. The
+        # style must win over the defaults, an explicit value over the style.
+        from app import files
+        rel = 'studio/config/styles/review-gen.md'
+        p = files._resolve(files.SPACE, rel)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text('---\nname: review-gen\nmodel: nai-diffusion-4-5-curated\nsteps: 40\nsampler: k_dpmpp_2m\n'
+                     'width: 1024\nheight: 1024\nprefer_brownian: true\n---\n## positive\nink\n', encoding='utf-8')
+        prepared, detail, _ = batchreview.prepare([{'styles': [rel], 'characters': [], 'count': 1,
+                                                     'params': {'scale': 7}}])
+        spec, items = prepared[0]
+        self.assertEqual(spec['model'], 'nai-diffusion-4-5-curated')
+        self.assertEqual(spec['params']['steps'], 40)
+        self.assertEqual(spec['params']['sampler'], 'k_dpmpp_2m')
+        self.assertEqual(spec['params']['width'], 1024)
+        self.assertIs(spec['params']['prefer_brownian'], True)
+        self.assertEqual(spec['params']['scale'], 7)            # explicit wins
+        self.assertIn('cfg_rescale', spec['params'])             # defaults still fill the rest
+        self.assertIn('nai-diffusion-4-5-curated', detail)       # the confirmation shows it
+        self.assertIn('1024×1024', detail)
+        # And the job that runs the approved items keeps them.
+        with patch('threading.Thread.start'):
+            job = studiojob.start(spec, planned_items=items)
+        payload = studiojob.get(job['jobId'])['payload']['spec']
+        self.assertEqual(payload['model'], 'nai-diffusion-4-5-curated')
+        self.assertEqual(payload['params']['steps'], 40)
+
     def test_job_uses_approved_items_without_replanning(self):
         prepared, _, _ = batchreview.prepare([{'styles': [], 'characters': [], 'count': 2}])
         spec, items = prepared[0]
