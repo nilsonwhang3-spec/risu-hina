@@ -167,6 +167,8 @@ export const gen = {
   sampler: 'k_euler_ancestral', schedule: 'karras',
   width: 832, height: 1216, count: 1, seed: '',
   quality: false, ucPreset: 0,
+  // null = not sent: NovelAI's own default applies (§1-77).
+  eulerBug: null as boolean | null, brownian: null as boolean | null,
   folder: OUTPUT_ROOT,
   assetProject: '', assetSet: '', assetSlot: '', assetCharacter: '',
   // The selector's regex. Empty means the backend's default; it is edited on
@@ -182,6 +184,19 @@ try {
 export function persistGen(): void {
   try { localStorage.setItem(GEN_KEY, JSON.stringify(gen)); } catch { /* fine */ }
 }
+
+/**
+ * The request settings belong to the active style (§1-77, user): the style is
+ * loaded into them like its prompt is loaded into the prompt fields, and an
+ * edit in 요청 설정 is saved back into it like a prompt edit. left-prompt
+ * registers the two hooks; gen.ts calls `edited()` on every style-bound field.
+ */
+export const styleSync = {
+  /** A style-bound field changed: save it into the active style (debounced). */
+  edited: () => { /* registered by left-prompt */ },
+  /** The style the settings are saved into ('' = none selected). */
+  boundName: (): string => '',
+};
 
 /** The active cards of one area, in (order, path) order - what a run sends. */
 export function activeOf(area: string): string[] {
@@ -203,7 +218,9 @@ export function spec(): Record<string, unknown> {
     params: { steps: gen.steps, scale: gen.scale, cfg_rescale: gen.rescale,
               sampler: gen.sampler, noise_schedule: gen.schedule,
               width: gen.width, height: gen.height,
-              qualityToggle: gen.quality, ucPreset: gen.ucPreset },
+              qualityToggle: gen.quality, ucPreset: gen.ucPreset,
+              ...(gen.eulerBug !== null ? { deliberate_euler_ancestral_bug: gen.eulerBug } : {}),
+              ...(gen.brownian !== null ? { prefer_brownian: gen.brownian } : {}) },
   };
   if (gen.scenePreset) out.scenePreset = gen.scenePreset;
   if (gen.assetSet) out.asset = { project: gen.assetProject, setId: gen.assetSet, slotId: gen.assetSlot,

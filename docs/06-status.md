@@ -20,6 +20,14 @@
   card's values into the front matter; the prompts keep autosaving, the settings are saved on purpose),
   `불러오기` (re-reads the file, so an agent/hand edit applies) and `지우기`. Picking a style that carries
   settings puts them on the generation card with a notice.
+- **Revised same day (user):** the manual 요청 설정 overrode the style (the panel sends them explicitly; the
+  backend only fills gaps), and the separate 제작 설정 row under the prompts was one place too many. Now a
+  style and 요청 설정 are one thing, like the prompt: picking or opening a style loads its settings into
+  요청 설정, and an edit there is written back into the active style (debounced; `styleSync` in store.ts,
+  registered by left-prompt.ts). The dialog names the style it saves into; seed / folder / asset stay per run.
+  The row and its buttons are gone. The two sampler flags are ordinary settings now, tri-state in the
+  dialog (기본 = not sent, 켬, 끔). And `batchreview.prepare` applies the style before the defaults
+  (`c9dc4b3`): AI/MCP batches had run the defaults - field evidence, a V5 style job on 4-5-full / 28 steps.
 - Verified: test_studio `test_style_carries_generation_settings` (types, fill, precedence, source);
   plugin smoke (save writes the keys without losing prompt/name; 불러오기 applies a hand edit; picking a
   second style applies its settings; the later full-parameter check still sees the defaults).
