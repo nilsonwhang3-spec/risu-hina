@@ -358,9 +358,21 @@ export interface PermitRequest {
   id: string; sessionId: string; kind: 'shell' | 'pip'; summary: string; detail: string; createdAt: number;
 }
 
+/** The ChatGPT plan login (Sign in with ChatGPT; provider id `codex`). */
 export interface CodexStatus {
-  loggedIn: boolean; email: string; accountId: string; plan: string; expiresAt: number;
-  pending: boolean; listening: boolean; models: string[]; base: string; redirectUri: string;
+  /** Signed in AND plan usage granted: the agent can run on it. */
+  loggedIn: boolean;
+  /** This account has a registration (issued client id) to sign in with again. */
+  registered: boolean; signedIn: boolean; planEnabled: boolean;
+  email: string; expiresAt: number;
+  accounts: { clientId: string; email: string; active: boolean; signedIn: boolean }[];
+  /** A pre-2026-09 Codex CLI login that no longer works. */
+  legacy: boolean;
+  /** Show the first-sign-in notice once. */
+  welcome: boolean;
+  pending: boolean; listening: boolean;
+  models: string[]; modelNames: Record<string, string>; modelsError: string;
+  base: string; usageUrl: string; redirectUri: string;
 }
 
 export interface CatalogResult {
@@ -1893,14 +1905,16 @@ class AppState {
     return await transport.get('/models/catalog', { q, provider, refresh: refresh ? '1' : '' });
   }
 
-  // --- OpenAI subscription (codex) login -----------------------------------------
+  // --- ChatGPT plan login (provider id codex) -----------------------------------------
 
   async codexStatus(): Promise<CodexStatus> {
     return await transport.get('/codex/status');
   }
 
-  async codexLoginStart(): Promise<{ url: string; state: string; listening: boolean; redirectUri: string }> {
-    return await transport.post('/codex/login/start', {});
+  /** `account`: '' = the active registration (or a new one), 'new' = add an
+   * account, or a saved client id. `consent` asks again for plan usage. */
+  async codexLoginStart(account = '', consent = false): Promise<{ url: string; state: string; listening: boolean; redirectUri: string; newAccount: boolean }> {
+    return await transport.post('/codex/login/start', { account, consent });
   }
 
   async codexLoginStatus(state: string): Promise<{ known: boolean; done: boolean; error: string; loggedIn?: boolean }> {
@@ -1911,8 +1925,12 @@ class AppState {
     return await transport.post('/codex/login/complete', { redirect, state });
   }
 
-  async codexLogout(): Promise<void> {
-    await transport.post('/codex/logout', {});
+  async codexLogout(): Promise<{ loggedIn: boolean; revoked: boolean }> {
+    return await transport.post('/codex/logout', {});
+  }
+
+  async codexWelcomeSeen(): Promise<CodexStatus> {
+    return await transport.post('/codex/welcome', {});
   }
 
   // --- permission prompts (shell / pip while a turn runs) --------------------------

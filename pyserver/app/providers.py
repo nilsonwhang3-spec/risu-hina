@@ -592,8 +592,8 @@ def plan_for(cfg: dict) -> Plan:
     if level:
         s["openai_reasoning_effort"] = level
     if codex:
-        # The subscription backend refuses stored responses and has no tiers
-        # or caches to pick; codexauth.client strips the rest.
+        # The ChatGPT-plan route refuses stored responses, tiers and a list of
+        # fields (temperature, max_output_tokens, ...); codexauth.client strips them.
         s["openai_store"] = False
     else:
         if cfg.get("flex"):

@@ -164,6 +164,9 @@ def h_health(arg: dict) -> dict:
         "loopback": config.is_loopback(arg.get("_addr") or ""),
         "tokenRequired": config.token_required_for(arg.get("_addr") or ""),
         "codexEnabled": config.codex_enabled(),
+        # The agent runs on the user's ChatGPT plan: the panel says so by the
+        # composer, with the usage link (SIWC UI guidelines).
+        "chatgptPlan": (config.section("agent").get("provider") or "") == "codex",
         "workspaces": len(workspace.list_all()),
         "space": str(workspace.space_root()),
         # Cheap flags only: /health is polled. /mcp/status has the detail.
@@ -388,16 +391,16 @@ def _config_test_codex(agent: dict) -> dict:
 
     model = agent.get("model") or ""
     if not model:
-        return {"ok": False, "stage": "config", "error": "코덱스 프리셋에 모델 이름이 필요합니다 (예: gpt-5.1-codex)"}
+        return {"ok": False, "stage": "config", "error": "ChatGPT 요금제 프리셋에 모델 이름이 필요합니다 (프리셋 편집에서 모델 목록을 눌러 고르세요)"}
     if not codexauth.logged_in():
         return {"ok": False, "stage": "config",
-                "error": "OpenAI 구독 로그인이 필요합니다 (⚙ → API 키 → OpenAI 구독 로그인)"}
+                "error": "ChatGPT 로그인이 필요합니다 (⚙ → API 키 → ChatGPT 요금제)"}
 
     fn = {"type": "function", "name": "read_turns", "description": "Read chat turns by index range.",
           "parameters": {"type": "object",
                          "properties": {"start": {"type": "integer"}, "end": {"type": "integer"}},
                          "required": ["start", "end"]}}
-    # The codex backend insists on `instructions`; Codex CLI always sends one.
+    # Instructions, not a system message: the ChatGPT-plan route refuses those.
     instructions = "You are a helpful assistant. Follow the user's instruction exactly."
 
     async def run() -> dict:
@@ -425,14 +428,16 @@ def _config_test_codex(agent: dict) -> dict:
                     raise
                 calls, answer = await tool_round("auto")
         except Exception as e:  # noqa: BLE001 - reported, not raised
-            return {"ok": False, "stage": stage, "error": f"{type(e).__name__}: {e}"[:400],
-                    "api": "responses", "note": "OpenAI 구독 (codex)"}
+            said = codexauth.explain(str(e))
+            return {"ok": False, "stage": stage,
+                    "error": (said or f"{type(e).__name__}: {e}")[:600],
+                    "api": "responses", "note": "ChatGPT 요금제"}
         return {
             "ok": bool(calls),
             "stage": "done",
             "model": model,
             "api": "responses",
-            "note": "OpenAI 구독 (codex)",
+            "note": "ChatGPT 요금제",
             "toolCalls": len(calls),
             "usage": {"in": getattr(usage, "input_tokens", None), "out": getattr(usage, "output_tokens", None)},
             "error": None if calls else _no_calls(answer),
@@ -1597,14 +1602,17 @@ def h_models_catalog(arg: dict) -> dict:
                           refresh=str(arg.get("refresh") or "") in ("1", "true"))
 
 
-# --- OpenAI subscription (codex) login ----------------------------------------------
+# --- ChatGPT plan (Sign in with ChatGPT; provider id "codex") login ----------------------------------------------
 
 def h_codex_status(arg: dict) -> dict:
     return codexauth.status()
 
 
 def h_codex_login_start(arg: dict) -> dict:
-    return codexauth.start_login()
+    try:
+        return codexauth.start_login(str(arg.get("account") or ""), bool(arg.get("consent")))
+    except codexauth.CodexError as e:
+        raise ApiError(400, str(e))
 
 
 def h_codex_login_status(arg: dict) -> dict:
@@ -1621,6 +1629,10 @@ def h_codex_login_complete(arg: dict) -> dict:
 
 def h_codex_logout(arg: dict) -> dict:
     return codexauth.logout()
+
+
+def h_codex_welcome(arg: dict) -> dict:
+    return codexauth.acknowledge_welcome()
 
 
 # --- permission prompts (shell / pip while a turn runs) --------------------------------
@@ -2638,6 +2650,7 @@ ROUTES: dict[str, Handler] = {
     "GET /codex/login/status": h_codex_login_status,
     "POST /codex/login/complete": h_codex_login_complete,
     "POST /codex/logout": h_codex_logout,
+    "POST /codex/welcome": h_codex_welcome,
     "GET /permits": h_permits,
     "POST /permits/decide": h_permit_decide,
     "POST /presets/select": h_preset_select,

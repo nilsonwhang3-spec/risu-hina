@@ -2279,21 +2279,22 @@ def test_codex_subscription_preset(s: Server) -> None:
     (not ready) until someone actually logs in."""
     print("test_codex_subscription_preset")
     st, body = s.get("/codex/status")
-    check("logged out at first", st == 200 and body.get("loggedIn") is False and body.get("models"), str(body)[:160])
+    check("logged out at first", st == 200 and body.get("loggedIn") is False and body.get("registered") is False, str(body)[:160])
 
     st, body = s.post("/codex/login/start", {})
     url = body.get("url") or ""
-    check("login start hands out an authorization URL", st == 200 and url.startswith("https://auth.openai.com/oauth/authorize?"), url[:80])
+    check("login start hands out an authorization URL", st == 200 and url.startswith("https://auth.openai.com/api/accounts/authorize?"), url[:80])
     qs = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
-    check("with PKCE, the codex client id and the codex redirect",
-          qs.get("code_challenge_method") == ["S256"] and qs.get("client_id") == ["app_EMoamEEZ73f0CkXaXp7hrann"]
-          and qs.get("redirect_uri") == ["http://localhost:1455/auth/callback"] and bool(qs.get("state")), str(qs)[:200])
-    check("and it presents itself as risu-hina, not another program", qs.get("originator") == ["risu-hina"], str(qs.get("originator")))
+    check("Sign in with ChatGPT: dynamic registration, PKCE, 127.0.0.1 redirect",
+          qs.get("code_challenge_method") == ["S256"] and qs.get("client_id") == ["dynamic_agent_client"]
+          and (qs.get("redirect_uri") or [""])[0].startswith("http://127.0.0.1:") and bool(qs.get("state")), str(qs)[:200])
+    check("and it registers as Risu Hina on this host", qs.get("agent_name_hint") == ["Risu Hina"]
+          and (qs.get("ext_agent_host_id") or [""])[0].startswith("urn:uuid:"), str(qs.get("agent_name_hint")))
     tmpl = json.loads((s.data / "config.json").read_text(encoding="utf-8"))
     check("the config template ships the flag at 1", tmpl.get("OPENAI_CODEX") == 1, str(tmpl.get("OPENAI_CODEX")))
     state = qs["state"][0]
     check("the pending attempt is known", s.get(q("/codex/login/status", state=state))[1].get("known") is True)
-    st, body = s.post("/codex/login/complete", {"redirect": "http://localhost:1455/auth/callback?code=abc&state=WRONG"})
+    st, body = s.post("/codex/login/complete", {"redirect": "http://127.0.0.1:1455/auth/callback?code=abc&state=WRONG"})
     check("a redirect with the wrong state is refused", st == 400 and "state" in body.get("error", ""), str(body)[:120])
     st, body = s.post("/codex/login/complete", {"redirect": "garbage"})
     check("garbage is refused", st == 400, str(st))

@@ -314,14 +314,14 @@ def _wrong_half(ctx: "RunContext[Deps]", need: str) -> str | None:
 
 def _model_for(section: str) -> "OpenAIChatModel | OpenAIResponsesModel":
     """The model a config section describes: an OpenAI-compatible endpoint,
-    or the OpenAI subscription through codexauth (Responses API, streaming)."""
+    or the user's ChatGPT plan through codexauth (Responses API, streaming)."""
     cfg = config.section(section)
     name = cfg.get("model") or ""
     if (cfg.get("provider") or "") == "codex":
         if not name:
-            raise RuntimeError("코덱스 프리셋에 모델 이름이 없습니다 (예: gpt-5.1-codex)")
+            raise RuntimeError("ChatGPT 요금제 프리셋에 모델 이름이 없습니다 (프리셋 편집에서 모델 목록을 눌러 고르세요)")
         if not codexauth.logged_in():
-            raise RuntimeError("OpenAI 구독 로그인이 필요합니다 (설정 → 에이전트 → 프리셋 수정 → 로그인)")
+            raise RuntimeError("ChatGPT 로그인이 필요합니다 (⚙ → API 키 → ChatGPT 요금제)")
         return OpenAIResponsesModel(name, provider=OpenAIProvider(openai_client=codexauth.client()))
     base = (cfg.get("baseUrl") or "").rstrip("/")
     key = cfg.get("apiKey") or ""

@@ -720,6 +720,11 @@ def _explain(e: Exception) -> str:
             "설정 탭 → AI 에이전트에서 '최대 출력 토큰'을 32000 이상으로 올려 주세요."
         )
     low = text.lower()
+    if (config.section("agent").get("provider") or "") == "codex":
+        from . import codexauth
+        said = codexauth.explain(text)
+        if said:
+            return said
     if "401" in text or "unauthorized" in low or "api key" in low:
         return "모델 API 인증에 실패했습니다. 설정 탭에서 API Key를 확인해 주세요."
     if "429" in text or "rate limit" in low:

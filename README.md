@@ -40,7 +40,7 @@
 
 - 멀티턴 에이전트. 계획을 세우고 할 일을 추적하며, 스킬(작업 절차)을 필요할 때 불러 쓴다. 스킬은 직접 추가·수정할 수 있다.
 - 파이썬 샌드박스(현재 봇 데이터만 접근), 파일 공간(`projects/` 참고 자료 · `studio/` 이미지 · `hina/` 작업 폴더), 웹 검색, 이미지 보기.
-- 모델: OpenAI 호환이면 무엇이든 된다. OpenAI, Anthropic, Google Gemini, Vertex AI, Ollama Cloud, OpenRouter, DeepSeek, xAI, Mistral, Groq 등 프로필이 들어 있고, ChatGPT(Codex) 로그인도 된다.
+- 모델: OpenAI 호환이면 무엇이든 된다. OpenAI, Anthropic, Google Gemini, Vertex AI, Ollama Cloud, OpenRouter, DeepSeek, xAI, Mistral, Groq 등 프로필이 들어 있고, ChatGPT 요금제(OpenAI 공식 Sign in with ChatGPT) 로그인도 된다.
 
 > 멀티턴 에이전트는 호출이 많습니다. 비용 부담이 적은 모델을 권합니다.
 

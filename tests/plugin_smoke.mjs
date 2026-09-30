@@ -1724,16 +1724,18 @@ check('agent credential card present', !!findButton(document, '연결 테스트'
   check('with an 편집 and an AI 챗 segment', bars.every((b) => /편집/.test(b.textContent) && /AI 챗/.test(b.textContent)));
 }
 {
-  // §1-31: the subscription path ships ON (an operator turns it off by hand),
-  // so the key page offers the login - under the caveat, whose parenthesis is
-  // the emphasised part.
-  const codexCard = [...document.querySelectorAll('.card')].find((c) => /OpenAI 구독/.test(c.textContent || ''));
-  check('the key page offers the subscription login by default',
-        !!codexCard && !!findButton(codexCard, 'OpenAI 로그인'), (codexCard?.textContent || '').slice(0, 120));
-  check('under the responsibility caveat', /개인의 책임하에/.test(codexCard?.textContent || ''));
-  check('whose parenthesis is emphasised', /챗챈/.test(codexCard?.querySelector('strong')?.textContent || ''),
-        codexCard?.querySelector('strong')?.textContent);
-  check('and it says the requests carry the risu-hina name', /risu-hina/.test(codexCard?.textContent || ''));
+  // §1-82: the ChatGPT plan through OpenAI's official Sign in with ChatGPT.
+  // The key page offers it with the approved label; the old "not explicitly
+  // allowed" caveat is gone, and the usage link is there.
+  const codexCard = [...document.querySelectorAll('.card')].find((c) => /ChatGPT 요금제/.test(c.querySelector('h2')?.textContent || ''));
+  check('the key page offers the ChatGPT plan login by default',
+        !!codexCard && !!findButton(codexCard, 'Continue with ChatGPT'), (codexCard?.textContent || '').slice(0, 120));
+  check('without the old unofficial-use caveat',
+        !/개인의 책임하에|명시적으로 허용되지|챗챈/.test(codexCard?.textContent || ''));
+  check('with the logging/training policy caveat',
+        /로깅 및 학습에 관한 공개된 정책이 없습니다/.test(codexCard?.querySelector('.notice.warn')?.textContent || ''));
+  check('with a link to ChatGPT usage settings',
+        !![...(codexCard?.querySelectorAll('a') || [])].find((a) => /chatgpt\.com\/settings\/usage/.test(a.getAttribute('href') || '')));
   const pw = [...document.querySelectorAll('input')].filter((i) => i.getAttribute('type') === 'password');
   check('api key field is a password input', pw.length >= 1, String(pw.length));
   const body = document.body.innerHTML;
@@ -1776,8 +1778,8 @@ console.log('\ntest_agent_presets_ui');
   const credSel = selects.find((s) => /직접 입력/.test(s.textContent || ''));
   check('the API key can be borrowed from the key page', !!credSel);
   // The subscription is among them by default (§1-31; off only by a hand edit).
-  check('and the subscription is offered by default',
-        /OpenAI 구독/.test(credSel?.textContent || ''), credSel?.textContent?.slice(0, 80));
+  check('and the ChatGPT plan is offered by default',
+        /ChatGPT 요금제/.test(credSel?.textContent || ''), credSel?.textContent?.slice(0, 80));
   const reasoningSel = selects.find((s) => /high/.test(s.textContent || ''));
   check('reasoning level is settable', !!reasoningSel);
   const opts = [...(reasoningSel?.querySelectorAll('option') || [])]

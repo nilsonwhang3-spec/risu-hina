@@ -54,6 +54,11 @@ export class AgentPanel {
   /** Workspace paths uploaded for the message being composed. */
   private attached: string[] = [];
   private attachBar = el('div', { class: 'attachbar', style: { display: 'none' } });
+  /** "Using ChatGPT plan" by the composer while the preset runs on it (SIWC UI guidelines). */
+  private planLine = el('div', { class: 'chatgptplan', style: { display: 'none' } }, [
+    el('span', { text: 'ChatGPT 요금제 사용 중' }),
+    el('a', { href: 'https://chatgpt.com/settings/usage', target: '_blank', rel: 'noopener', text: '사용량 관리' }),
+  ]);
   private actionBox: HTMLElement;
   /** out/ paths already offered, so the card does not churn every refresh. */
   private planBox = el('div', { class: 'agentplan' });
@@ -137,6 +142,7 @@ export class AgentPanel {
       this.log,
       ...this.proposalTray(),
       this.attachBar,
+      this.planLine,
       // The two buttons stack beside the box, attach above send: the box is
       // two lines tall anyway, and a clip on the far left read as a third
       // control competing with the text rather than an option on sending.
@@ -338,6 +344,7 @@ export class AgentPanel {
   syncPlaceholder(): void {
     const where = activeHalf() === 'bot' ? '봇' : '챗';
     this.input.placeholder = `${where}에서 수정이나 조정이 필요한 부분을 말씀하세요. 궁금한 점이 있다면 무엇이든 물어보세요.`;
+    this.planLine.style.display = state.health?.chatgptPlan ? '' : 'none';
     // The welcome's examples follow the half as well.
     const w = this.log.querySelector('.welcome');
     if (w) w.replaceWith(this.welcome());

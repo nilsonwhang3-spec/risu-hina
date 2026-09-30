@@ -33,8 +33,10 @@ export interface HealthInfo {
   clientIp?: string;
   loopback?: boolean;
   tokenRequired?: boolean;
-  /** Whether this backend offers the OpenAI subscription path at all. */
+  /** Whether this backend offers the ChatGPT plan path at all. */
   codexEnabled?: boolean;
+  /** The agent's preset runs on the user's ChatGPT plan. */
+  chatgptPlan?: boolean;
   workspaces?: number;
   /** The global file space's root path. */
   space?: string;
