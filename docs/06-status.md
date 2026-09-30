@@ -1,4 +1,12 @@
-# 06. Implementation status — as of 2026-09-27 (v0.15.30, Risu Hina)
+# 06. Implementation status — as of 2026-09-30 (v0.15.31, Risu Hina)
+
+## 0.15.31 (2026-09-30): §1-76 ~ §1-82 released
+
+Everything below that was marked "unreleased" ships in this version: title-row 승인 / 반영 from anywhere
+(§1-76), a style carries its generation settings (§1-77), studio saves stop reloading everything (§1-78), an
+MCP batch waits in the approval queue (§1-79), RisuAI's own server save is watched and partial edits of one
+field all land (§1-80), Vertex tokens renew on a cached agent (§1-81), and the ChatGPT plan through the
+official Sign in with ChatGPT (§1-82; a real sign-in was checked on zikmunt-pc staging before release).
 
 ## unreleased (2026-09-30): §1-82 the ChatGPT plan through the official Sign in with ChatGPT
 
