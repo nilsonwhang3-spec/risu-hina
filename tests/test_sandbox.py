@@ -87,6 +87,26 @@ def main() -> int:
     check("it can write to scratch/", "wrote 작업 중" in r["stdout"], r["stdout"][:200])
     check("scratch file exists in the bot's hina home", (home / "scratch" / "note.txt").is_file())
 
+    print("\ntest_helper_imports_on_an_isolated_interpreter")
+    # The Windows install's embeddable Python runs isolated (python311._pth):
+    # PYTHONPATH and PYTHONIOENCODING are ignored. `-I` is the same mode on any
+    # interpreter; `import risuhina` failed there while passing from a checkout.
+    real_popen = pyexec.subprocess.Popen
+
+    def isolated_popen(args, *a, **kw):
+        return real_popen([args[0], "-I", *args[1:]], *a, **kw)
+
+    pyexec.subprocess.Popen = isolated_popen
+    try:
+        r = run("import sys, risuhina\nprint('isolated', sys.flags.isolated, len(risuhina.turns()))\n"
+                "print('한글 출력')\n", ck, tk, ws)
+    finally:
+        pyexec.subprocess.Popen = real_popen
+    check("import risuhina works when PYTHONPATH is ignored", "isolated 1 6" in r["stdout"],
+          (r.get("stderr") or r["stdout"])[-300:])
+    check("and Korean output survives without PYTHONIOENCODING", "한글 출력" in r["stdout"], r["stdout"][-200:])
+    check("no bytecode is left beside the helper", not (home / "scripts" / "__pycache__").exists())
+
     print("\ntest_abort_kills_a_running_script")
     # The user's 중단 must end the PROCESS, not just the narration: the tool
     # thread used to block in subprocess.run until the script finished on its
