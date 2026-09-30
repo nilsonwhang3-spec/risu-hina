@@ -114,4 +114,34 @@ with patch.object(V, "_pkg_dir", return_value=Path(__file__).resolve().parent):
     finally:
         staged.rmdir()
 
-print("PASS - Vertex service-account credentials, token renewal and the google-auth repair")
+# --- the cached agent asks for a token on every request -----------------------------
+# session.get_agent keeps one agent until the preset changes. When the token was
+# exchanged once at build time, the agent sent it unchanged after it expired
+# (401 an hour in) until switching model or reasoning level rebuilt it.
+import asyncio  # noqa: E402
+import httpx2  # noqa: E402
+from app import agent as A, config  # noqa: E402
+
+VERTEX_BASE = V.base_url("my-project-123")
+tokens = iter(["tok-build", "tok-1", "tok-2"])
+seen: list[str] = []
+
+
+def handler(request):
+    seen.append(request.headers.get("authorization", ""))
+    return httpx2.Response(200, json={"object": "list", "data": []})
+
+
+with patch.object(config, "section", return_value={"baseUrl": VERTEX_BASE, "apiKey": raw, "model": "gemini-3.8-pro"}),      patch.object(V, "access_token", side_effect=lambda r: next(tokens)):
+    model = A._model_for("agent")
+    client = model.client
+    client._client = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
+
+    async def two_requests():
+        await client.models.list()
+        await client.models.list()
+    asyncio.run(two_requests())
+assert model.model_name == "google/gemini-3.8-pro", model.model_name
+assert seen == ["Bearer tok-1", "Bearer tok-2"], seen
+
+print("PASS - Vertex service-account credentials, token renewal (also on a cached agent) and the google-auth repair")
