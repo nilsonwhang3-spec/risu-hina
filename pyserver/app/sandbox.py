@@ -38,6 +38,24 @@ BOOTSTRAP = '''"""Installed before agent code runs. Confines it to the space + i
 import os
 import sys
 
+# The Windows install runs the embeddable Python, whose python311._pth puts it
+# in isolated mode: PYTHONPATH, PYTHONIOENCODING and PYTHONDONTWRITEBYTECODE
+# are all ignored and the script's folder is not on sys.path. `import
+# risuhina` (and the old `realooc` alias beside it) failed on every such
+# install while working from a source checkout. Set here what the environment
+# was supposed to set.
+_SCRIPTS = os.path.join(os.environ["RISUHINA_HOME"], "scripts")
+for _p in [_SCRIPTS] + [p for p in os.environ.get("PYTHONPATH", "").split(os.pathsep) if p]:
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+sys.dont_write_bytecode = True
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        if (_stream.encoding or "").lower().replace("-", "") != "utf8":
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
 _ROOT = os.path.realpath(os.environ["RISUHINA_WORKSPACE"])   # the global space
 _SYS = os.path.realpath(os.environ["RISUHINA_SYSTEM"])       # this bot's SYSTEM dir
 _SYS_SCRATCH = os.path.join(_SYS, ".scratch")                # the one writable SYSTEM spot

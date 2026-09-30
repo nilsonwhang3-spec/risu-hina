@@ -1,5 +1,20 @@
 # 06. Implementation status — as of 2026-09-30 (v0.15.31, Risu Hina)
 
+## unreleased (2026-09-30): §1-83 `import risuhina` on the Windows install
+
+- **Field reports:** agent reports said "risuhina/realooc import가 모두 실패" (Parma Knights lorebook audit,
+  twice) and fell back to reading entries one tool call at a time.
+- **Cause (measured on test-server):** the Windows bundle's embeddable Python has `python311._pth`, which runs
+  it isolated - `sys.flags.isolated=1, ignore_environment=1, safe_path=True`. run_python handed the helper's
+  folder over only as `PYTHONPATH`, so the import failed on every Windows install and worked from a checkout
+  (`.venv`) - hence "sometimes". `realooc` is the pre-§1-71 alias the agent tried next; it lives in the same
+  folder and failed the same way. The alias stays removed.
+- **Fix:** the bootstrap puts `hina/<bot>/scripts` (and any PYTHONPATH entries) on `sys.path` itself, sets
+  `sys.dont_write_bytecode`, and reconfigures stdout/stderr to UTF-8 when they are not - the three things the
+  ignored environment was meant to do.
+- Verified: test_sandbox runs a script under `-I` (the same mode on any interpreter): the helper imports and
+  Korean output survives; the check fails on the previous bootstrap.
+
 ## 0.15.31 (2026-09-30): §1-76 ~ §1-82 released
 
 Everything below that was marked "unreleased" ships in this version: title-row 승인 / 반영 from anywhere
