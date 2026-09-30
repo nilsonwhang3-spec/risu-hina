@@ -38,10 +38,10 @@ export interface PresetsCardOptions {
   onMount?: (refresh: () => Promise<void>) => void;
 }
 
-/** The key-select value that means "the OpenAI subscription" (provider codex). */
+/** The key-select value that means "the user's ChatGPT plan" (provider codex). */
 const CODEX_KEY = '__codex__';
 
-/** Subscription login is a standard provider, independent of legacy config. */
+/** ChatGPT-plan login is a standard provider, independent of legacy config. */
 function codexOffered(): boolean {
   return true;
 }
@@ -684,7 +684,7 @@ function buildWebsearchCard(): HTMLElement {
 
 function summarise(p: AgentPreset): string {
   const bits = [p.model || '모델 미설정'];
-  if (p.provider === 'codex') bits.push('OpenAI 구독');
+  if (p.provider === 'codex') bits.push('ChatGPT 요금제');
   else if (p.keyRef) bits.push('API 키 탭의 키');
   if (p.reasoning) bits.push('reasoning ' + p.reasoning);
   if (p.cache) bits.push('캐시');
@@ -866,7 +866,7 @@ function openEditor(
       keySel.appendChild(el('option', { value: '', text: '직접 입력' }));
       for (const k of keys) keySel.appendChild(el('option', { value: k.id, text: `${k.name}${k.provider ? ' · ' + k.provider : ''}` }));
       if (codexOffered()) {
-        keySel.appendChild(el('option', { value: CODEX_KEY, text: 'OpenAI 구독 (ChatGPT Plus/Pro · Codex)' }));
+        keySel.appendChild(el('option', { value: CODEX_KEY, text: 'ChatGPT 요금제 (Sign in with ChatGPT)' }));
       }
       const p = id ? r.presets.find((x) => x.id === id) : null;
       if (!p) {
@@ -991,19 +991,27 @@ function openEditor(
 }
 
 /**
- * The OpenAI-subscription block of the editor: login state, the login
- * link, the paste fallback for a browser that is not on the backend's
- * machine (the redirect lands on localhost:1455 there and shows as an
- * unreachable page - its address is what gets pasted), and the model list
- * the codex backend is known to serve.
+ * The ChatGPT-plan block (Sign in with ChatGPT; provider id `codex`): login
+ * state, the login link, the paste fallback for a browser that is not on the
+ * backend's machine (the redirect lands on 127.0.0.1 there and shows as an
+ * unreachable page - its address is what gets pasted), and the account's
+ * model catalog. Wording and actions follow OpenAI's SIWC UI guidelines:
+ * "Continue with ChatGPT", a one-time "using your ChatGPT plan" notice, and
+ * "사용량 관리" linking to ChatGPT's usage settings.
  */
 export function buildCodexBox(modelInput: HTMLInputElement | null, withLogin: boolean): { root: HTMLElement; refresh: () => Promise<void> } {
   const line = el('div', { class: 'hint' });
+  const notes = el('div');
   const out = el('div', { class: 'outbox' });
-  const login = el('button', { class: 'primary tiny', text: 'OpenAI 로그인' }) as HTMLButtonElement;
+  const login = el('button', { class: 'primary tiny', text: 'Continue with ChatGPT' }) as HTMLButtonElement;
   const logout = el('button', { class: 'ghost tiny', text: '로그아웃' }) as HTMLButtonElement;
-  const paste = el('input', { placeholder: '콜백 URL 전체 또는 code 값만 붙여넣기', autocomplete: 'off', spellcheck: 'false' }) as HTMLInputElement;
-  const finish = el('button', { class: 'ghost tiny', text: '붙여넣은 URL·코드로 완료' }) as HTMLButtonElement;
+  const addAccount = el('button', { class: 'ghost tiny', text: '다른 계정 추가' }) as HTMLButtonElement;
+  const accountSel = el('select', { class: 'tiny' }) as HTMLSelectElement;
+  const switchBtn = el('button', { class: 'ghost tiny', text: '이 계정으로 로그인' }) as HTMLButtonElement;
+  const switchRow = el('div', { class: 'row', style: { marginTop: '6px' } }, [accountSel, switchBtn]);
+  const usage = el('a', { href: 'https://chatgpt.com/settings/usage', target: '_blank', rel: 'noopener', text: '사용량 관리' });
+  const paste = el('input', { placeholder: '콜백 주소 전체를 붙여넣기 (127.0.0.1:…/auth/callback?code=…)', autocomplete: 'off', spellcheck: 'false' }) as HTMLInputElement;
+  const finish = el('button', { class: 'ghost tiny', text: '붙여넣은 주소로 완료' }) as HTMLButtonElement;
   const pasteRow = el('div', { class: 'row' }, [paste, finish]);
   pasteRow.style.display = 'none';
   const models = el('div', { class: 'row' });
@@ -1014,16 +1022,48 @@ export function buildCodexBox(modelInput: HTMLInputElement | null, withLogin: bo
   const refresh = async (): Promise<void> => {
     try {
       const s = await state.codexStatus();
+      if (s.usageUrl) usage.setAttribute('href', s.usageUrl);
+      const who = s.email || '계정';
       line.textContent = s.loggedIn
-        ? `로그인됨 · ${s.email || s.accountId.slice(0, 8)}${s.plan ? ' · ' + s.plan : ''}`
-        : '로그인되지 않았습니다. ChatGPT Plus/Pro 계정으로 로그인하면 구독으로 에이전트를 돌립니다.';
-      login.style.display = s.loggedIn ? 'none' : '';
-      logout.style.display = s.loggedIn ? '' : 'none';
+        ? `ChatGPT 요금제 사용 중 · ${who}`
+        : s.signedIn && !s.planEnabled
+          ? `로그인됨 · ${who} · 요금제 사용이 허용되지 않았습니다`
+          : '로그인되지 않았습니다. ChatGPT 계정으로 계속하면 에이전트가 ChatGPT 요금제로 동작합니다.';
+      clear(notes);
+      if (s.legacy && !s.registered) {
+        notes.appendChild(el('div', { class: 'notice warn', style: { marginBottom: '6px' },
+          text: '예전 방식(Codex CLI 로그인)은 더 이상 쓰지 않습니다. OpenAI 공식 방식으로 한 번 다시 로그인해 주세요.' }));
+      }
+      if (s.signedIn && !s.planEnabled && withLogin) {
+        const allow = el('button', { class: 'primary tiny', text: '요금제 사용 허용' });
+        allow.addEventListener('click', () => void begin('', true));
+        notes.appendChild(el('div', { class: 'notice warn', style: { marginBottom: '6px' } }, [
+          el('div', { text: '로그인에 ChatGPT 요금제 사용 권한이 없습니다. 허용하거나, API 키 탭에서 다른 키를 쓰세요.' }),
+          el('div', { style: { marginTop: '4px' } }, [allow]),
+        ]));
+      }
+      if (s.welcome && withLogin) {
+        const ok = el('button', { class: 'primary tiny', text: '확인' });
+        ok.addEventListener('click', () => { void state.codexWelcomeSeen().then(refresh, () => undefined); });
+        notes.appendChild(el('div', { class: 'notice', style: { marginBottom: '6px' } }, [
+          el('strong', { text: 'ChatGPT 요금제를 사용 중입니다' }),
+          el('div', { text: 'Risu Hina 에이전트의 요청은 이제 ChatGPT 요금제 사용량으로 처리됩니다. 사용량과 이 앱의 한도는 ChatGPT 설정에서 관리할 수 있습니다.' }),
+          el('div', { class: 'row', style: { marginTop: '4px' } }, [ok]),
+        ]));
+      }
+      login.style.display = s.loggedIn || (s.signedIn && !s.planEnabled) ? 'none' : '';
+      logout.style.display = s.signedIn ? '' : 'none';
+      addAccount.style.display = s.registered ? '' : 'none';
+      const others = s.accounts.filter((a) => !a.active);
+      switchRow.style.display = others.length ? '' : 'none';
+      clear(accountSel);
+      for (const a of others) accountSel.appendChild(el('option', { value: a.clientId, text: a.email || a.clientId.slice(0, 16) }));
       if (s.loggedIn) { pasteRow.style.display = 'none'; stopPoll(); }
       clear(models);
       if (modelInput) {
+        if (s.modelsError) models.appendChild(el('span', { class: 'hint', text: '모델 목록을 못 가져왔습니다: ' + s.modelsError }));
         for (const m of s.models) {
-          const b = el('button', { class: 'ghost tiny', text: m });
+          const b = el('button', { class: 'ghost tiny', text: s.modelNames?.[m] || m, title: m });
           b.addEventListener('click', () => { modelInput.value = m; });
           models.appendChild(b);
         }
@@ -1033,13 +1073,13 @@ export function buildCodexBox(modelInput: HTMLInputElement | null, withLogin: bo
     }
   };
 
-  login.addEventListener('click', async () => {
+  const begin = async (account: string, consent = false): Promise<void> => {
     login.disabled = true;
     clear(out);
     try {
-      const r = await state.codexLoginStart();
+      const r = await state.codexLoginStart(account, consent);
       pendingState = r.state;
-      const a = el('a', { href: r.url, target: '_blank', rel: 'noopener', text: '브라우저에서 OpenAI 로그인 열기' });
+      const a = el('a', { href: r.url, target: '_blank', rel: 'noopener', text: '브라우저에서 ChatGPT 로그인 열기' });
       // The raw address too: this page usually runs on a phone or a browser
       // that is not the backend's, so the link gets copied, not clicked.
       const urlBox = el('input', { value: r.url, readonly: 'readonly', class: 'mono' }) as HTMLInputElement;
@@ -1048,15 +1088,18 @@ export function buildCodexBox(modelInput: HTMLInputElement | null, withLogin: bo
       copy.addEventListener('click', () => {
         try { urlBox.select(); document.execCommand('copy'); copy.textContent = '복사됨'; } catch { copy.textContent = '길게 눌러 복사'; }
       });
+      const where = r.redirectUri.replace(/^https?:\/\//, '').replace(/\/auth\/callback$/, '');
       out.appendChild(el('div', { class: 'notice' }, [
         el('div', {}, [a]),
         el('div', { class: 'row', style: { marginTop: '6px' } }, [urlBox, copy]),
         el('ol', { class: 'hint steps' }, [
-          el('li', { text: '위 주소를 열어 ChatGPT 계정으로 로그인합니다 (다른 기기여도 됩니다).' }),
+          el('li', { text: r.newAccount
+            ? '위 주소를 열어 ChatGPT 계정으로 로그인하고, Risu Hina 를 에이전트로 등록·요금제 사용을 허용합니다 (다른 기기여도 됩니다).'
+            : '위 주소를 열어 ChatGPT 계정으로 로그인합니다 (다른 기기여도 됩니다).' }),
           el('li', { text: r.listening
             ? '백엔드와 같은 PC 의 브라우저면 자동으로 완료됩니다.'
-            : '(포트 1455 가 사용 중이라 자동 완료는 안 됩니다.)' }),
-          el('li', { text: '다른 기기면 마지막에 "연결할 수 없음" 페이지(localhost:1455/…)가 뜹니다 — 정상. 그 주소 전체를 아래에 붙여넣고 완료.' }),
+            : '(콜백 포트를 열지 못해 자동 완료는 안 됩니다.)' }),
+          el('li', { text: `다른 기기면 마지막에 "연결할 수 없음" 페이지(${where}/…)가 뜹니다 — 정상. 그 주소 전체를 아래에 붙여넣고 완료.` }),
         ]),
       ]));
       pasteRow.style.display = '';
@@ -1080,7 +1123,11 @@ export function buildCodexBox(modelInput: HTMLInputElement | null, withLogin: bo
     } finally {
       login.disabled = false;
     }
-  });
+  };
+
+  login.addEventListener('click', () => void begin(''));
+  addAccount.addEventListener('click', () => void begin('new'));
+  switchBtn.addEventListener('click', () => { const id = selectedValue(accountSel); if (id) void begin(id); });
   finish.addEventListener('click', async () => {
     finish.disabled = true;
     try {
@@ -1096,31 +1143,46 @@ export function buildCodexBox(modelInput: HTMLInputElement | null, withLogin: bo
     }
   });
   logout.addEventListener('click', async () => {
-    try { await state.codexLogout(); await refresh(); } catch (e) { out.appendChild(el('div', { class: 'notice err', text: msg(e) })); }
+    try {
+      const r = await state.codexLogout();
+      await refresh();
+      if (!r.revoked) {
+        out.appendChild(el('div', { class: 'notice warn', text:
+          '이 기기에서는 로그아웃했지만 OpenAI 쪽 세션 해지는 확인하지 못했습니다. 필요하면 ChatGPT 설정에서 이 앱의 연결을 끊어 주세요.' }));
+      }
+    } catch (e) { out.appendChild(el('div', { class: 'notice err', text: msg(e) })); }
   });
 
   // On the API 키 page: the full card with login. In the preset editor:
   // the state line and the model buttons, with a pointer to that page.
   const root = withLogin
     ? el('div', { class: 'card codexbox' }, [
-      el('h2', { text: 'OpenAI 구독 (Codex)' }),
-      el('div', { class: 'hint', style: { marginBottom: '6px' }, text:
-        'Codex OAuth 로 ChatGPT Plus/Pro 계정에 로그인해 chatgpt.com 의 codex 백엔드를 씁니다. 요청에는 risu-hina 이름으로 접속합니다. 로그인해 두면 에이전트 프리셋의 API 키 선택에서 "OpenAI 구독" 을 고를 수 있습니다. 공식 API 가 아니라 OpenAI 쪽 변경에 깨질 수 있고, 그때는 오류를 그대로 보여 줍니다.' }),
-      el('div', { class: 'notice warn', style: { marginBottom: '6px' } }, [
-        el('span', { text: '오픈소스 에이전트 프로그램에서 Codex 구독 사용은 명시적으로 허용되지 않았습니다. 개인의 책임하에 사용해 주세요. ' }),
-        el('strong', { text: '(특히 챗챈에서 언급은 자제하여 주십시오.)' }),
+      el('h2', { text: 'ChatGPT 요금제' }),
+      el('div', { class: 'hint', style: { marginBottom: '6px' } }, [
+        el('span', { text:
+          'ChatGPT 계정으로 로그인해 Risu Hina 를 에이전트로 등록하면, 에이전트 요청이 API 키 대신 ChatGPT 요금제(또는 크레딧) 사용량으로 처리됩니다. OpenAI 공식 "Sign in with ChatGPT" 방식입니다. 로그인해 두면 에이전트 프리셋의 API 키 선택에서 "ChatGPT 요금제" 를 고를 수 있습니다. ' }),
+        usage,
       ]),
+      // OpenAI's SIWC docs state no logging/training policy for this path
+      // (checked 2026-09-30); the user asked for this caveat.
+      el('div', { class: 'notice warn', style: { marginBottom: '6px' },
+        text: 'Sign in with ChatGPT는 로깅 및 학습에 관한 공개된 정책이 없습니다. 자신의 책임 하에 사용해 주세요.' }),
+      notes,
       line,
-      el('div', { class: 'row', style: { marginTop: '6px' } }, [login, logout]),
+      el('div', { class: 'row', style: { marginTop: '6px' } }, [login, logout, addAccount]),
+      switchRow,
       pasteRow,
       out,
     ])
     : el('div', { class: 'codexbox', style: { marginBottom: '10px' } }, [
       el('div', { class: 'notice' }, [
         line,
-        el('div', { class: 'hint', style: { marginTop: '4px' }, text: 'Base URL·API 키는 쓰지 않습니다. 로그인·로그아웃은 API 키 탭에서 합니다.' }),
+        el('div', { class: 'hint', style: { marginTop: '4px' } }, [
+          el('span', { text: 'Base URL·API 키는 쓰지 않습니다. 로그인·로그아웃은 API 키 탭에서 합니다. ' }),
+          usage,
+        ]),
       ]),
-      el('div', { class: 'hint', text: '이 백엔드가 받는 모델 (누르면 채워집니다):' }),
+      el('div', { class: 'hint', text: '이 계정에서 쓸 수 있는 모델 (누르면 채워집니다):' }),
       models,
     ]);
   root.style.display = 'none';

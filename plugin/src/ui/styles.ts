@@ -1000,6 +1000,7 @@ textarea.focusarea.codearea { font-size: 12.5px; line-height: 1.55; }
 button.attachbtn { padding: 8px 9px; display: flex; align-items: center; flex-shrink: 0; }
 
 .attachbar { display: flex; flex-wrap: wrap; gap: 5px; flex-shrink: 0; }
+.chatgptplan { display: flex; gap: 8px; align-items: center; flex-shrink: 0; font-size: 11px; opacity: .8; }
 .attachchip {
   display: inline-flex; align-items: center; gap: 5px; max-width: 100%;
   padding: 2px 4px 2px 8px; border-radius: 5px; font-size: 11.5px;

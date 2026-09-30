@@ -1,5 +1,48 @@
 # 06. Implementation status — as of 2026-09-27 (v0.15.30, Risu Hina)
 
+## unreleased (2026-09-30): §1-82 the ChatGPT plan through the official Sign in with ChatGPT
+
+- **Why:** OpenAI now documents ChatGPT plan usage for open-source, locally hosted apps
+  (developers.openai.com/siwc/token-sharing-open-source; help article 20001410). The old login copied
+  Codex CLI's private flow (its client id, chatgpt.com/backend-api/codex, `chatgpt-account-id`), which the
+  card warned was not explicitly allowed. That warning and the 챗챈 line are gone. In their place, at the
+  user's request: "Sign in with ChatGPT는 로깅 및 학습에 관한 공개된 정책이 없습니다. 자신의 책임 하에 사용해
+  주세요." (the SIWC developer docs state none; checked 2026-09-30).
+- **What changed (codexauth.py rewritten; provider id stays `codex` so presets keep working):** authorize at
+  `auth.openai.com/api/accounts/authorize` with `client_id=dynamic_agent_client` + `agent_name_hint=Risu Hina`
+  on first sign-in, the issued `oaiapp_…` client id (+ `id_token_hint`/`login_hint`) after; a stable
+  `ext_agent_host_id` (urn:uuid, data/codex-host.json); `nonce`; scopes `openid profile email offline_access
+  resource.invoke chatgpt.tokens.use.direct` with `resource=https://api.openai.com/v1`; redirect on
+  `127.0.0.1` (1455, or any free port - only the port may vary). The callback's issued client id is required
+  for a new registration (so the paste fallback wants the whole address, not the bare code) and must match on
+  reauth. The ID token is verified: RS256 against OpenAI's JWKS (with `rsa`, already shipped via google-auth),
+  issuer, audience, expiry, nonce, and the same `sub` on reauth. Plan usage counts only when the granted
+  scopes carry `chatgpt.tokens.use.direct`; otherwise the card offers "요금제 사용 허용" (prompt=consent).
+- Inference goes to the public `https://api.openai.com/v1/responses` with the OAuth token as the bearer
+  (a callable key, fresh per request), stream on / store off, and the refused fields dropped (temperature,
+  max_output_tokens, top_p, metadata, user, previous_response_id, service tier, ...); `system` input items go
+  as `developer`. Models come from `GET /v1/models` (`visibility: list`). Refresh: form-encoded, issued client
+  id + resource, no scope, rotating refresh token saved together; the documented dead-token codes clear the
+  tokens but keep the registration, network/5xx keep everything. Sign-out revokes the refresh token at the
+  discovery document's revocation endpoint and keeps the registration and host id. Several accounts can be
+  registered (다른 계정 추가 / 이 계정으로 로그인). Errors `subscription_sharing_*` / `chatpass_v2_*` are
+  explained in the panel (usage limit links to chatgpt.com/settings/usage); a 401 on this path no longer says
+  "API Key 를 확인".
+- UI per the SIWC UI guidelines: "Continue with ChatGPT", a one-time "ChatGPT 요금제를 사용 중입니다" notice,
+  "사용량 관리" links, and "ChatGPT 요금제 사용 중" by the composer (`/health.chatgptPlan`).
+- **Existing logins:** a Codex CLI record reads as `legacy` - one new sign-in is needed.
+- **Unverified against the live service** (no account here): the whole flow runs against faked endpoints with
+  really signed tokens (tests/test_codexauth.py, in the gate). One guess is hedged: the preview-limitations page
+  says to group function tools in namespaces; plain top-level tools are sent first, and a refusal naming that
+  switches the process to one `risu_hina` namespace.
+
+## unreleased (2026-09-30): §1-81 Vertex tokens renew on a cached agent
+
+- **Field report:** "모델 API 인증에 실패했습니다" about an hour into a Vertex session, cured by switching the
+  model or reasoning level. The token was exchanged once when the agent was built and the agent is cached until
+  its preset changes. `keys.client_key` now hands the OpenAI client a callable that asks `vertexauth` per
+  request (cached, renewed 5 minutes before expiry). test_vertexauth reproduces the stale bearer on the old code.
+
 ## unreleased (2026-09-27): §1-80 did RisuAI keep it? · partial edits of one field
 
 - **Incident (user, reconstructed from both servers' logs):** MCP work from 18:21 to 20:14 (assets, Regex,

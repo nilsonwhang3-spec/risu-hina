@@ -108,15 +108,20 @@ class DiscoveryTests(unittest.TestCase):
                       'localhost:1455/auth/callback?code=abc%2Bdef&state=test',
                       '127.0.0.1:1455/auth/callback?code=abc%2Bdef&amp;state=test',
                       '?state=test&code=abc%2Bdef', 'abc+def'):
-            self.assertEqual(codexauth.parse_login_input(value, 'test'), ('abc+def', 'test'))
-        self.assertEqual(codexauth.parse_login_input('exact%2Fcode', 'test')[0], 'exact%2Fcode')
-        for value in ('http://localhost:1455/auth/callback?state=test',
-                      '?code=abc&state=other', '?code=a&code=b', '?error=access_denied'):
+            got = codexauth.parse_login_input(value, 'test')
+            self.assertEqual((got['code'], got['state']), ('abc+def', 'test'))
+        self.assertEqual(codexauth.parse_login_input('exact%2Fcode', 'test')['code'], 'exact%2Fcode')
+        self.assertEqual(codexauth.parse_login_input('?code=a&state=test&client_id=oaiapp_x', 'test')['client_id'], 'oaiapp_x')
+        # An OAuth error is returned (after the state check) for the caller to stop on.
+        self.assertEqual(codexauth.parse_login_input('?error=access_denied&state=test', 'test')['error'], 'access_denied')
+        for value in ('http://127.0.0.1:1455/auth/callback?state=test',
+                      '?code=abc&state=other', '?code=a&code=b', '?error=access_denied&state=other'):
             with self.assertRaises(codexauth.CodexError): codexauth.parse_login_input(value, 'test')
         with patch.dict(codexauth._pending, {'test': {'verifier': 'fake'}}, clear=True), \
-             patch.object(codexauth, '_exchange') as exchange, patch.object(codexauth, 'status', return_value={}):
+             patch.object(codexauth, '_finish') as finish, patch.object(codexauth, 'status', return_value={}):
             codexauth.complete_login('abc+def')
-            exchange.assert_called_once_with('abc+def', 'fake', 'test')
+            finish.assert_called_once()
+            self.assertEqual(finish.call_args[0][1]['code'], 'abc+def')
 
     def test_lore_scope_defaults_follow_editor_and_explicit_scope_is_preserved(self):
         for editor, expected in (("bot", "global"), ("chat", "local")):
