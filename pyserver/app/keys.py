@@ -10,6 +10,7 @@ as before, so agent._model() did not have to learn anything.
 """
 from __future__ import annotations
 
+import asyncio
 import uuid
 from typing import Any
 
@@ -129,3 +130,23 @@ def runtime(base_url: str, api_key: str) -> tuple[str, str]:
         from . import vertexauth
         return base_url, vertexauth.access_token(api_key)
     return base_url, api_key
+
+
+def client_key(base_url: str, api_key: str) -> Any:
+    """The api_key for a long-lived AsyncOpenAI: a plain key as is, but for
+    Vertex JSON a callable the client awaits before every request.
+
+    The agent is cached until its preset changes (session.get_agent), so a
+    token exchanged once at build time went out unchanged after it expired an
+    hour later - 401, "모델 API 인증에 실패했습니다", until switching the
+    model or reasoning level rebuilt the agent. access_token caches and renews
+    5 minutes before expiry, so asking it per request costs nothing. The first
+    exchange still happens here so a bad JSON fails at build, as before."""
+    base_url, token = runtime(base_url, api_key)
+    if token == api_key:
+        return api_key
+    from . import vertexauth
+
+    async def fresh() -> str:
+        return await asyncio.to_thread(vertexauth.access_token, api_key)
+    return fresh

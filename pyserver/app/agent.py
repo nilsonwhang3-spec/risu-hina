@@ -327,7 +327,7 @@ def _model_for(section: str) -> "OpenAIChatModel | OpenAIResponsesModel":
     key = cfg.get("apiKey") or ""
     if not (base and key and name):
         raise RuntimeError("에이전트 자격증명이 설정되지 않았습니다 (설정 탭에서 baseUrl/apiKey/model)")
-    base, key = keys.runtime(base, key)
+    key = keys.client_key(base, key)
     # Vertex's OpenAI-compatible endpoint takes <publisher>/<model>; a bare
     # name is rejected by the endpoint before the model is ever consulted.
     name = providers.model_for(base, name)
@@ -345,7 +345,7 @@ def _model_for(section: str) -> "OpenAIChatModel | OpenAIResponsesModel":
     return OpenAIChatModel(name, provider=provider, profile=profile)
 
 
-def _client(base: str, key: str, drop: set[str], timeout: float) -> Any:
+def _client(base: str, key: Any, drop: set[str], timeout: float) -> Any:
     """An AsyncOpenAI for an OpenAI-compatible endpoint that drops the request
     fields the plan forbids. Wrapping `create` is the only place where
     stream_options / parallel_tool_calls / tool_choice can be removed - no
