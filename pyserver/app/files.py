@@ -1031,7 +1031,11 @@ def thumb_bytes(target: Path, width: int = 360) -> tuple[bytes, str | None]:
         return target.read_bytes(), None
     try:
         st = target.stat()
-        key = hashlib.sha1(f"{target}|{st.st_mtime_ns}|{width}".encode()).hexdigest()
+        # Grid thumbs stay small; the 검수 size is looked at closely, and
+        # quality 82 smeared line art (hair, lashes, collar edges) into
+        # "low resolution" on a PC screen (§1-85). "q2" retires the old cache.
+        quality = 95 if width >= 720 else 82
+        key = hashlib.sha1(f"{target}|{st.st_mtime_ns}|{width}|q2".encode()).hexdigest()
         cdir = _thumb_dir()
         cp = cdir / f"{key}.webp"
         if cp.is_file():
@@ -1042,7 +1046,7 @@ def thumb_bytes(target: Path, width: int = 360) -> tuple[bytes, str | None]:
             im.thumbnail((width, width * 2))
             cdir.mkdir(parents=True, exist_ok=True)
             tmp = cp.with_name(cp.name + ".tmp")
-            im.save(tmp, "WEBP", quality=82)
+            im.save(tmp, "WEBP", quality=quality)
             tmp.replace(cp)
         _prune_thumbs(cdir)
         return cp.read_bytes(), "image/webp"
