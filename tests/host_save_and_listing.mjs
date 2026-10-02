@@ -59,13 +59,26 @@ transport.post = async (path, payload) => {
   if (path === '/actions/decide') return { approved: true, host: { kind: 'host_writeback' } };
   if (path === '/actions/complete') completions.push(payload);
 };
+const commits = [];
+state.commit = async label => { commits.push(label); return { shipped: 1 }; };
 state.writeBack = async () => ({ verified: true, mode: 'edits', applied: 0, lore: 2, memory: 0, warnings: [] });
 const loreSaid = await state.decideAction('wb1', true, 'active');
 assert.doesNotMatch(loreSaid, /0건/);
 assert.match(loreSaid, /챗 로어북 2건/);
+// An approved 반영 that landed becomes the baseline (§1-84), like the bar's
+// 반영: without it the shipped turns stayed "pending" and the next 반영 was
+// refused as "RisuAI 쪽에서 챗이 바뀌었습니다".
+assert.equal(commits.length, 1);
+state.writeBack = async () => ({ verified: true, mode: 'replace', applied: 45, lore: 0, memory: 0, warnings: [] });
+assert.match(await state.decideAction('wb0', true, 'active'), /턴 45건/);
+assert.equal(commits.length, 2);
+state.writeBack = async () => ({ verified: true, mode: 'noop', applied: 0, lore: 0, memory: 0, warnings: [] });
+assert.match(await state.decideAction('wbn', true, 'active'), /없었습니다/);
+assert.equal(commits.length, 2);
 state.writeBack = async () => ({ verified: false, mode: 'edits', applied: 3, lore: 0, memory: 0, warnings: [], drift: 'kept old text' });
 await assert.rejects(state.decideAction('wb2', true, 'active'), /kept old text/);
 assert.equal(completions.at(-1).ok, false);
+assert.equal(commits.length, 2, 'an unverified write must not become the baseline');
 transport.post = async (path, payload) => {
   if (path === '/actions/decide') return { approved: true, host: { kind: 'host_card_writeback' } };
   if (path === '/actions/complete') completions.push(payload);

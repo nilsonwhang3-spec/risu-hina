@@ -2056,6 +2056,12 @@ class AppState {
       if (r.host.kind === 'host_writeback') {
         const out = await this.writeBack();
         if (!out.verified) throw new Error(out.drift || 'RisuAI 저장 결과를 확인하지 못했습니다. 미반영 변경을 보존했습니다.');
+        const shipped = out.mode !== 'noop' || out.lore > 0 || out.memory > 0;
+        // The write landed: make it the baseline, as the bar's 반영 and the
+        // leave guard do (§1-84). Skipping this left the shipped edits counted
+        // as pending, and the next 반영 compared RisuAI's chat - which now
+        // holds them - against the old turns and refused it as "changed".
+        if (shipped) await this.commit('반영 직전');
         // Name what went in: a lorebook- or memory-only write used to read
         // "0건을 반영" (only turns were counted) and looked like a no-op.
         const bits = [
@@ -2063,7 +2069,7 @@ class AppState {
           out.lore ? `챗 로어북 ${out.lore}건` : '',
           out.memory ? `장기기억 ${out.memory}건` : '',
         ].filter(Boolean);
-        detail = out.mode === 'noop'
+        detail = !shipped
           ? '챗에 반영할 변경이 없었습니다.'
           : `${bits.length ? bits.join(' · ') : '챗 변경'}을 RisuAI에 반영하고 저장을 확인했습니다.`;
       } else if (r.host.kind === 'host_save_copy') {
