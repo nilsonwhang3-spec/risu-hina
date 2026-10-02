@@ -370,6 +370,20 @@ export function attachHilite(ta: HTMLTextAreaElement, opts: HiliteOpts): void {
   };
   ta.addEventListener('input', render);
   ta.addEventListener('scroll', syncScroll);
+  // A script setting `.value` fires no input event, and the textarea's own
+  // text is transparent here - the mirror is the only thing drawn. An editor
+  // that fills itself after a fetch (조각·스타일 카드) showed an empty box
+  // (§1-86). Every assignment re-renders; re-decorating replaces the hook.
+  try {
+    const native = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value');
+    if (native?.get && native.set) {
+      Object.defineProperty(ta, 'value', {
+        configurable: true,
+        get: () => native.get!.call(ta),
+        set: (v: string) => { native.set!.call(ta, v); render(); },
+      });
+    }
+  } catch { /* no HTMLTextAreaElement in the test DOM */ }
   try {
     // The drag-resize handle changes the box without an input event. One
     // observer per textarea: decorating it again replaces the old one, and
