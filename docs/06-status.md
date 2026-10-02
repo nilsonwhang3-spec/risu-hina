@@ -1,5 +1,16 @@
 # 06. Implementation status — as of 2026-09-30 (v0.15.31, Risu Hina)
 
+## unreleased (2026-10-03): §1-86 a picked fragment shows its text
+
+- **Field report:** "조각 프롬프트에서 프롬프트를 골라도 오른쪽에 조각 프롬 내용이 안 보인다".
+- **Cause:** the card editor (fragments, style cards) decorates its body with the NAI hilite first and fills it
+  after `readFile` resolves, by assigning `.value`. A hilite'd textarea draws transparent text under a mirror,
+  and the mirror re-rendered only on input and resize events - an assignment fires neither, so the fetched
+  text was there but invisible. Other editors fill before decorating, which is why only these showed it.
+- **Fix:** attachHilite hooks the textarea's own `value` setter, so every assignment re-renders the mirror.
+- Verified: tests/hilite_value.mjs (in the gate) assigns a value after decorating and reads the mirror; it fails
+  on the previous hilite.
+
 ## unreleased (2026-10-03): §1-85 asset studio 검수 and 자세히 보기 at PC quality
 
 - **Field report:** "에셋 검수 및 자세히보기 모달에서 이미지 해상도가 너무 떨어진다 - PC에서 봤을 때도 괜찮게".
