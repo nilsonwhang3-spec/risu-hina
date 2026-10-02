@@ -17,7 +17,7 @@
  */
 import { el, segCtl, colPicker, clear, popover, modal, menuAt } from '../dom';
 import { showArtifact } from '../artifact';
-import { blobUrl, watchImage, unloadByDefault } from '../blobimg';
+import { blobUrl, watchImage, unloadByDefault, smallScreen } from '../blobimg';
 import { state, type GroupItem, type SelectionMap, type SelectionState,
          type StudioGroups, type WorkspaceFile } from '../../state';
 import { S, hub, gen, msg, adjustReserve, countFiles, type Folder, persistSelCols } from './store';
@@ -915,7 +915,10 @@ export function loadThumb(f: WorkspaceFile, mount: HTMLElement): void {
         // Review uses physical display pixels: 360 CSS pixels on a DPR=3
         // phone need ~1080 image pixels, not the old fixed 360px thumbnail.
         const displayWidth = mount.getBoundingClientRect().width || 360;
-        const width = Math.min(1536, Math.max(768, Math.ceil(displayWidth * (window.devicePixelRatio || 1) / 128) * 128));
+        // A desktop asks for at least 1024: the studio's 832px pictures then
+        // come back at their own size instead of a downscale (§1-85).
+        const floor = smallScreen() ? 768 : 1024;
+        const width = Math.min(1536, Math.max(floor, Math.ceil(displayWidth * (window.devicePixelRatio || 1) / 128) * 128));
         // The mtime stamps the cache key so a rewritten file is fetched anew.
         const url = await blobUrl(f.path, f.modified ? String(f.modified) : '', { thumb: true, w: width });
         if (!mount.isConnected || my !== gen) return;

@@ -1,5 +1,32 @@
 # 06. Implementation status — as of 2026-09-30 (v0.15.31, Risu Hina)
 
+## unreleased (2026-10-03): §1-85 asset studio 검수 and 자세히 보기 at PC quality
+
+- **Field report:** "에셋 검수 및 자세히보기 모달에서 이미지 해상도가 너무 떨어진다 - PC에서 봤을 때도 괜찮게".
+- **Cause (measured on a real 832x1216 studio picture from test-server):** the size was not the problem - the
+  검수 cell already asked for >=768px. The WebP thumbnail was encoded at quality 82, which smears line art
+  (hair strands, lashes, collar edges) even at the picture's own size. q95 is indistinguishable from the PNG
+  at ~130KB (the PNG is ~1.2MB). The 자세히 보기 modal showed the original but capped at 72vh, ~700px on a
+  1080p screen.
+- **Fix:** thumbnails of 720px and up encode at quality 95 (grid thumbs stay q82); the cache key carries "q2"
+  so old q82 files are not served. On a desktop 검수 asks for at least 1024px, so 832px pictures come back at
+  their own size. The modal grows to 94vw/94vh and the picture fills its height.
+
+## unreleased (2026-10-03): §1-84 an approved chat 반영 becomes the baseline (issue #1)
+
+- **Field report (GitHub #1):** MCP `stage_delete` 7 turns -> `approve_staged` -> approved `propose_writeback`
+  said "턴 45건을 RisuAI에 반영하고 저장을 확인했습니다", yet the chat still counted 7 pending; a second 반영 was
+  refused as "RisuAI 쪽에서 챗이 바뀌었습니다", and leaving the panel forced 반영사항 버림 (RisuAI already had the
+  deletes, so nothing was lost - but the user could not tell).
+- **Cause:** the chat write leaves the commit to its caller. The bar's 반영 and the leave guard commit after a
+  verified write; `decideAction` (the approval queue - MCP, the title-row 승인, the agent pane) did not. The
+  baseline stayed at the old 52 turns, so the diff stayed and `beforeTurns` no longer matched the live chat.
+  Card write-back commits inside `cardWriteBack`, which is why only the chat path had it.
+- **Fix:** `decideAction` commits after a verified host_writeback that shipped anything (turns, lorebook or
+  memory); a lorebook/memory-only write no longer reads "반영할 변경이 없었습니다" either.
+- Verified: host_save_and_listing.mjs asserts one commit per landed write and none on noop/unverified; it
+  fails on the previous decideAction.
+
 ## unreleased (2026-09-30): §1-83 `import risuhina` on the Windows install
 
 - **Field reports:** agent reports said "risuhina/realooc import가 모두 실패" (Parma Knights lorebook audit,

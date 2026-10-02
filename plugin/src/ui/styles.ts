@@ -452,9 +452,11 @@ button.iconbtn.danger { background: #b91c1c; border-color: #b91c1c; color: #fff;
 /* The 썸네일 view's big pick: the clicked image above the grid (§1-40). */
 /* The artifact viewer is a modal (§1-43): wide, the picture as large as the
    screen allows, text scrolls inside. */
-.modalbox.artifactmodal { max-width: min(88vw, 1200px); width: auto; max-height: 90vh; display: flex; flex-direction: column; }
+.modalbox.artifactmodal { max-width: min(94vw, 1600px); width: auto; max-height: 94vh; display: flex; flex-direction: column; }
 .artifactmodal .modalbody { overflow: auto; min-height: 0; }
-.artifactmodal .artifactview img { max-width: 100%; max-height: 72vh; width: auto; display: block; margin: 0 auto; }
+/* The picture fills the height the modal has (§1-85): 72vh showed a 1216px
+ * portrait at ~700px on a 1080p PC, which read as low resolution. */
+.artifactmodal .artifactview img { max-width: 100%; max-height: calc(94vh - 120px); width: auto; display: block; margin: 0 auto; }
 .artifactmodal .artifactbody { overflow: auto; }
 .artifactmodal .artifactbody.original-size img { max-width: none; max-height: none; width: auto; touch-action: pan-x pan-y pinch-zoom; }
 .artifactmodal .artifactbody.original-size .wsimg { display: block; max-width: none; }
