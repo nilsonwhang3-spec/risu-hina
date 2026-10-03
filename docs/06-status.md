@@ -1,4 +1,42 @@
-# 06. Implementation status — as of 2026-10-03 (v0.15.32, Risu Hina)
+# 06. Implementation status — as of 2026-10-04 (v0.15.32, Risu Hina)
+
+## unreleased (2026-10-04): §1-89 three-mode first screen · persona editing · project folder rename · no-blink open · title-row 반영 in step
+
+- **Field report (7 items):** a landing that separates 봇 / 챗 / 페르소나 편집; 봇 unfolds current-or-snapshot,
+  챗 unfolds the chat list, 페르소나 unfolds the personas; personas get `projects/페르소나/<이름>` projects; "can I
+  rename the `c…` folder of a blank bot, and could Hina offer the bot's name once it has one"; the open blinks
+  through 봇 → 업로드 → 에셋 → 스냅샷; the title-row 반영 lagged far behind the bot bar's.
+- **First screen (tab-chats.ts rewritten):** three mode cards, one unfolds at a time (remembered across 뒤로).
+  봇: 현재 작업본 row first, then saved snapshots, then the automatic ones folded. The mode chip is hidden on the
+  first screen (no mode chosen yet).
+- **No blink:** the screen re-rendered on every emit, rebuilt its scroller (jump to top), refetched snapshots and
+  the dirty summary (lists vanished and came back) and closed every folder. Now the `.pad` scroller is kept, the
+  fetched lists are cached per bot+epoch and drawn synchronously (a refetch keeps showing the previous value), a
+  first load holds its place with a spinner row, and open folders are remembered. While the FIRST open of a bot
+  is still uploading, the cards are shut and the steps (연결 · 봇 읽기 · 작업본 올리기) tick in place; a re-open
+  of a bot already on the backend shows only a slim spinner line. Assets keep syncing in the background.
+- **Personas (persona.ts, tab-persona.ts):** `personas` / `selectedPersona` are on RisuAI's plugin DB allow-list;
+  `username / userIcon / personaPrompt` (the selected persona's live copy) are not - a write there lands in
+  pluginCustomStorage. So the SELECTED persona is refused (in the list and again at write time): an edit would
+  show nowhere and be overwritten from the stale live copy on the next switch. Others: name, description,
+  picture (upload, or pick from the persona's project folder; saved with `saveAsset`), 반영 = setDatabase +
+  read-back. Unsent edits stay as a draft, marked 미반영 on the first screen. The 'db' permission dialog draws
+  under the panel: the read gets 900ms, then the panel steps aside for it. The agent is told the screen
+  (`mode=persona`); it has no persona-writing tool.
+- **Project folder rename (backend):** the folder is pinned in `.hina/bots.json`, and notes, asset rules, studio
+  output/sidecars and learned skills are keyed by its name - a files-tab rename broke all of that and the pin
+  regrew an empty old folder. `workspace.rename_bot_folder` moves projects/ hina/ studio/output and re-keys the
+  rest (`GET /workspace/folder`, `POST /workspace/folder/rename`); `/files/move` of a pinned `projects/<x>` to
+  `projects/<y>` goes through it, other moves of pinned roots are refused. `페르소나` is reserved. The panel offers
+  the rename (sticky notice) when the folder is key-named and the bot has a name - after an open and whenever
+  the re-read workspace carries a new name (a card 반영); "그대로 두기" is remembered per bot+name.
+- **Title-row 반영 in step (commitbar.ts):** the asset sync's 400ms progress emits kept restarting the 700ms
+  debounce, and each 8s poll threw away the previous answer (a backend slower than 8s painted nothing). Progress
+  ticks are ignored, one request at a time and every answer painted, and the card/open-chat counts are painted
+  at once from `botChanges` / `changes` - the numbers the bars show.
+- Verified: plugin_smoke (landing, scroller kept, folder survives a re-render, persona list/lock/write/refusal,
+  title-row count drops with the chat bar; the 2.2s counters check now holds the 8s poll off - it lined up with
+  the window after the new tests shifted timing), tests/test_project_folder.py (new, in the gate).
 
 ## unreleased (2026-10-03): §1-88 style folders · each style prompt folds
 

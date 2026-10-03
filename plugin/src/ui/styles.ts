@@ -347,6 +347,69 @@ pre.mono {
 .chatitem.presetnow, .chatitem.current { background: rgba(37,99,235,.10); }
 .chatitem .n { color: var(--textcolor2, #79839a); font-size: 11px; min-width: 40px; text-align: right; }
 
+/* --- the first screen (§1-89): three modes, one unfolds ------------------ */
+.landing { max-width: 760px; }
+.landingfoot { margin-top: 12px; }
+.spin {
+  display: inline-block; width: 12px; height: 12px; flex-shrink: 0; vertical-align: -2px;
+  border: 2px solid #8886; border-top-color: #60a5fa; border-radius: 50%;
+  animation: write-spin .9s linear infinite;
+}
+.spin.big { width: 26px; height: 26px; border-width: 3px; }
+@media (prefers-reduced-motion: reduce) { .spin { animation-duration: 3s; } }
+.bootbox {
+  display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; margin-bottom: 12px;
+  border: 1px solid var(--borderc, #2b323f); border-radius: 8px; background: rgba(96,165,250,.06);
+}
+.bootbox.slim { flex-direction: row; align-items: center; gap: 8px; padding: 6px 10px; background: transparent; }
+.boothead { display: flex; gap: 12px; align-items: center; margin-bottom: 4px; }
+.bootstep { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--textcolor2, #79839a); }
+.bootstep.run, .bootstep.done { color: inherit; }
+.bootstep.err { color: #f87171; }
+.bootmark { width: 12px; text-align: center; font-weight: 700; }
+.bootstep.done .bootmark { color: #34d399; }
+.modecards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+@media (max-width: 620px) { .modecards { grid-template-columns: 1fr; } }
+.modecard {
+  display: flex; align-items: flex-start; gap: 10px; text-align: left; padding: 12px;
+  border: 1px solid var(--borderc, #2b323f); border-radius: 8px; background: rgba(128,128,128,.05);
+  color: inherit; cursor: pointer; min-width: 0;
+}
+.modecard:hover:not(:disabled) { background: rgba(128,128,128,.12); }
+.modecard.open { border-color: #2563eb; background: rgba(37,99,235,.10); }
+.modecard:disabled { opacity: .5; cursor: default; }
+.modeicon { font-size: 22px; line-height: 1; }
+.modetext { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
+.modetitle { font-weight: 700; font-size: 14px; }
+.modesub { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.modecaret { color: var(--textcolor2, #79839a); }
+.modebody { margin-top: 14px; }
+.loadingrow { cursor: default; }
+.foldrow { cursor: pointer; }
+.chatitem.busy { opacity: .6; }
+.chatitem.locked { cursor: default; opacity: .7; }
+.clip1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 460px; }
+.personaavatar {
+  width: 32px; height: 32px; border-radius: 6px; flex-shrink: 0; object-fit: cover;
+  background: rgba(128,128,128,.12);
+}
+.personaavatar.initials, .personabig.initials {
+  display: flex; align-items: center; justify-content: center; font-weight: 700;
+  color: var(--textcolor2, #79839a);
+}
+/* --- persona editor ---------------------------------------------------- */
+.personagrid { display: flex; gap: 18px; align-items: flex-start; flex-wrap: wrap; max-width: 980px; }
+.personaleft { width: 220px; flex-shrink: 0; }
+.personaright { flex: 1; min-width: 260px; display: flex; flex-direction: column; }
+.personabig {
+  width: 220px; height: 220px; border-radius: 10px; object-fit: cover; display: block;
+  background: rgba(128,128,128,.12); font-size: 48px;
+}
+.personaprompt { width: 100%; min-height: 220px; resize: vertical; }
+.personapick { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; max-height: 200px; overflow: auto; }
+.shellprompt .row { flex-wrap: wrap; }
+@media (max-width: 620px) { .personaleft { width: 100%; } .personabig { width: 160px; height: 160px; } }
+
 /* --- editor: explorer | turns | tools ------------------------------------ */
 
 .split { display: flex; flex: 1; min-height: 0; min-width: 0; width: 100%; }

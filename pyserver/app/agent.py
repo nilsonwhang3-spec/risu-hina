@@ -268,7 +268,7 @@ BOT_KINDS = frozenset({"card_edit", "card_greeting_add", "card_greeting_delete",
                        "script_add", "script_delete", "script_delete_many", "card_checkpoint_create", "card_checkpoint_restore",
                        "host_card_writeback", "host_clone_bot", "host_asset_add", "host_asset_add_many", "host_asset_replace", "asset_rename"})
 _MODE_TAB = {"chat": ("챗 편집", "editor"), "bot": ("봇 편집", "meta")}
-_SCREEN_LABEL = {"chat": "챗 편집", "bot": "봇 편집", "studio": "에셋 스튜디오"}
+_SCREEN_LABEL = {"chat": "챗 편집", "bot": "봇 편집", "studio": "에셋 스튜디오", "persona": "페르소나 편집"}
 
 # The studio's own verbs: adopting an image into the card is what the studio
 # is for, so these pass the screen gate there (the approval queue still runs).
@@ -740,6 +740,11 @@ def build(model: Any = None) -> Agent[Deps]:
             return "지금 열려 있는 화면: 봇 편집 (카드 재료 - 메타·인사말·봇 로어북·Regex·트리거·에셋)."
         if ctx.deps.mode == "chat":
             return "지금 열려 있는 화면: 챗 편집 (이 챗의 재료 - 턴·챗 로어북·장기기억·챗 변수)."
+        if ctx.deps.mode == "persona":
+            return ("지금 열려 있는 화면: 페르소나 편집 (RisuAI 사용자 페르소나 하나의 이름·설명·프로필 사진; "
+                    "페르소나 자체는 사용자가 이 화면에서 직접 고치고 반영합니다 - 그것을 고치는 툴은 없습니다. "
+                    "설명 초안을 써 달라고 하면 답변으로 주고, 사진은 에셋 스튜디오로 만들 수 있습니다. "
+                    "봇·챗 재료를 고치는 제안은 그 화면으로 이동한 뒤에만 됩니다).")
         if ctx.deps.mode == "studio":
             return ("지금 열려 있는 화면: 에셋 스튜디오 (봇과 무관한 전역 이미지 라이브러리 - "
                     "프롬프트 카드·생성·선별. 카드로의 에셋 반영 제안은 여기서도 됩니다).")

@@ -43,7 +43,6 @@ export function commitControls(): HTMLElement {
   let pending = 0;
   let dirty = 0;
   let summary: DirtySummary | null = null;
-  let seq = 0;
 
   const paint = () => {
     wrap.style.display = state.activeCharKey && state.health ? '' : 'none';
@@ -55,31 +54,67 @@ export function commitControls(): HTMLElement {
     applyBtn.title = dirty ? `RisuAI 에 아직 반영하지 않은 변경 ${dirty}건 — 눌러서 한 번에 반영` : 'RisuAI 에 반영할 변경이 없습니다';
   };
 
+  /**
+   * The counts the panel already holds, painted at once (§1-89): the card's
+   * from state.botChanges - the very number the bot bar shows - and the open
+   * chat's from state.changes; other chats keep the last summary's. The bot
+   * bar used to read 0 the moment a 반영 landed while this chip kept saying
+   * 반영 N until its own round trip came back, which under an asset sync
+   * could be a long while.
+   */
+  const local = (): number | null => {
+    if (!summary) return null;
+    const card = state.botChanges ? state.botChanges.total : (summary.card.dirty ? summary.card.total : 0);
+    let n = card;
+    for (const c of summary.chats) {
+      if (c.chatKey === state.activeChatKey && state.changes) n += state.changes.total;
+      else n += c.dirty ? c.total : 0;
+    }
+    return n;
+  };
+
+  // One request at a time, and every answer is painted: the old rule (drop
+  // any answer a newer request had overtaken) painted nothing at all once the
+  // backend was slower than the 8s poll, e.g. during an asset upload.
+  let inFlight = false;
+  let again = false;
   const refresh = async (): Promise<void> => {
     if (!state.activeCharKey || !state.health) { paint(); return; }
-    const mine = ++seq;
+    if (inFlight) { again = true; return; }
+    inFlight = true;
+    const charKey = state.activeCharKey;
     try {
       const [acts, staged, sum] = await Promise.all([
         state.actionsForBot().catch(() => []),
         state.activeChatKey ? state.stagedEdits().catch(() => []) : Promise.resolve([]),
         state.dirtySummary(),
       ]);
-      if (mine !== seq) return;
-      pending = acts.length + staged.length;
-      summary = sum;
-      dirty = sum ? (sum.card.dirty ? sum.card.total : 0) + sum.chats.reduce((n, c) => n + (c.dirty ? c.total : 0), 0) : 0;
+      if (charKey === state.activeCharKey) {
+        pending = acts.length + staged.length;
+        summary = sum;
+        dirty = sum ? (sum.card.dirty ? sum.card.total : 0) + sum.chats.reduce((n, c) => n + (c.dirty ? c.total : 0), 0) : 0;
+      }
     } catch { /* keep the last numbers; the next tick tries again */ }
+    finally { inFlight = false; }
     paint();
+    if (again) { again = false; void refresh(); }
   };
 
   let timer: ReturnType<typeof setTimeout> | null = null;
   const soon = () => {
     if (timer) clearTimeout(timer);
-    timer = setTimeout(() => { timer = null; void refresh(); }, 700);
+    timer = setTimeout(() => { timer = null; void refresh(); }, 300);
   };
   // Refresh on any state change - but refresh itself never emits, so this
-  // cannot loop.
-  state.onChange(soon);
+  // cannot loop. A running asset sync's progress ticks are not changes to
+  // anything counted here; they used to restart the debounce every 400ms and
+  // hold the refresh off for as long as the sync ran.
+  state.onChange(() => {
+    if (state.emitReason === 'assetSync') return;
+    const n = local();
+    if (n !== null && n !== dirty) { dirty = n; paint(); }
+    soon();
+  });
   pollWhileVisible(() => void refresh(), POLL_MS, () => !!state.activeCharKey);
   setOnDecided(() => { state.bump(); soon(); });
 

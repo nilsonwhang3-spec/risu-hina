@@ -55,6 +55,9 @@ run "AI batch settings confirmation" "$PY" tests/test_batch_review.py
 # The global space: upload targets, per-bot cleanup, and searches that must
 # state what they clipped.
 run "global file space" "$PY" tests/test_files.py
+# A bot's project folder renames as a project (bots.json, notes, asset rules,
+# studio output and sidecars follow); persona folders under projects/페르소나.
+run "project folder rename" "$PY" tests/test_project_folder.py
 run "reversible AI temp cleanup" "$PY" tests/test_ai_cleanup.py
 # Side events (artifact / images) and the artifact writer's file rules.
 run "stream side events" "$PY" tests/test_stream_events.py

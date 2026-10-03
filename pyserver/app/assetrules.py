@@ -498,3 +498,88 @@ def adoption(path: str) -> dict:
         remember(target, asset)
         path = target.relative_to(workspace.space_root()).as_posix()
     return {**assets.stage_file(path), "name": bot_name(asset)}
+
+
+def rekey_project(old: str, new: str, moved: list[tuple[str, Path]]) -> dict:
+    """Follow a renamed bot folder: the project's rule file, every saved
+    binding naming the old project, and the per-path assignments of the
+    images that moved (`moved` = (old resolved path, new path), recorded
+    before the move). An image whose binding was only embedded in the PNG
+    gets an assignment at its new path, so the new project name wins over
+    the old one baked into the file (the bytes are not rewritten).
+    The caller refuses a rule file on both names before anything moves."""
+    counts = {"rules": 0, "identities": 0, "assignments": 0}
+
+    def fix(asset: object) -> object:
+        if isinstance(asset, dict) and asset.get("project") == old:
+            return {**asset, "project": new}
+        return asset
+
+    with LOCK:
+        base = _root()
+        src = base / "projects" / (_hash(old) + ".json")
+        if src.is_file():
+            doc = json.loads(src.read_text(encoding="utf-8"))
+            dst = base / "projects" / (_hash(new) + ".json")
+            if dst.is_file():
+                cur = json.loads(dst.read_text(encoding="utf-8"))
+                if cur.get("rules") or cur.get("sets"):
+                    raise RuleError(f"'{new}' 에 이미 에셋 규칙이 있어 합칠 수 없습니다")
+                doc["revision"] = max(int(doc.get("revision") or 0), int(cur.get("revision") or 0))
+            doc["project"] = new
+            _write(dst, doc)
+            src.unlink()
+            counts["rules"] = 1
+        ident = base / "identities"
+        if ident.is_dir():
+            for f in ident.glob("*.json"):
+                try:
+                    saved = json.loads(f.read_text(encoding="utf-8"))
+                except ValueError:
+                    continue
+                if isinstance(saved, dict) and fix(saved.get("asset")) is not saved.get("asset"):
+                    _write(f, {**saved, "asset": fix(saved["asset"])})
+                    counts["identities"] += 1
+        assign = base / "assignments"
+        for old_path, new_path in moved:
+            a_old = assign / (_hash(old_path) + ".json")
+            saved = None
+            if a_old.is_file():
+                try:
+                    saved = json.loads(a_old.read_text(encoding="utf-8"))
+                except ValueError:
+                    saved = None
+                a_old.unlink(missing_ok=True)
+            if not new_path.is_file():
+                continue
+            body = new_path.read_bytes()
+            digest = hashlib.sha256(body).hexdigest()
+            asset = saved.get("asset") if isinstance(saved, dict) and saved.get("digest") == digest else None
+            if asset is None and saved is None:
+                id_file = ident / (digest + ".json")
+                if id_file.is_file():
+                    continue  # the identity (rewritten above) still resolves it
+                try:
+                    embedded = nai.recipe(body).get("hina", {}).get("asset")
+                except Exception:  # noqa: BLE001 - not a readable PNG recipe
+                    embedded = None
+                if not (isinstance(embedded, dict) and embedded.get("project") == old):
+                    continue
+                asset = embedded
+            if asset is None:
+                continue
+            _write(assign / (_hash(str(new_path.resolve())) + ".json"), {"digest": digest, "asset": fix(asset)})
+            counts["assignments"] += 1
+        if assign.is_dir():
+            # Bindings of files that did not move (adoption copies, exports
+            # outside the folder) still name the project.
+            for f in assign.glob("*.json"):
+                try:
+                    saved = json.loads(f.read_text(encoding="utf-8"))
+                except ValueError:
+                    continue
+                if isinstance(saved, dict) and fix(saved.get("asset")) is not saved.get("asset"):
+                    _write(f, {**saved, "asset": fix(saved["asset"])})
+                    counts["assignments"] += 1
+        _metadata.cache_clear()
+    return counts

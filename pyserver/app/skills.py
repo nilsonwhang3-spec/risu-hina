@@ -1124,3 +1124,28 @@ def migrate_rows_once() -> None:
     db.mark_migration(FOLDER_KEY)
     if moved:
         log.info("migrated %s skill rows into folders under %s", moved, root())
+
+
+def rename_learned_project(old: str, new: str) -> int:
+    """Follow a renamed bot folder in the `learned_project` provenance of
+    improved skills. Rewrites the front matter only (no revision archived:
+    the body and the user's choices are untouched). Returns the count."""
+    if not old or old == new:
+        return 0
+    n = 0
+    with _EDIT_LOCK:
+        base = root()
+        if not base.is_dir():
+            return 0
+        for d in sorted(p for p in base.iterdir() if p.is_dir()):
+            md = d / SKILL_FILE
+            if not md.is_file():
+                continue
+            text = md.read_text(encoding="utf-8", errors="replace")
+            meta, body = parse(text)
+            if str(meta.get("learned_project") or "") != old:
+                continue
+            meta["learned_project"] = new
+            md.write_text(render(meta, body), encoding="utf-8")
+            n += 1
+    return n

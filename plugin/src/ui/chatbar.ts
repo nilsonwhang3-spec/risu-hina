@@ -162,6 +162,27 @@ export function shellNotice(text: string, kind: 'ok' | 'err' | '' = ''): void {
   setTimeout(() => { if (noticeMount) clear(noticeMount); }, 9000);
 }
 
+/**
+ * A notice that asks something: it stays until one of its buttons is pressed
+ * (each button's action decides what follows), and a plain shellNotice
+ * replaces it. Used where the panel suggests a step rather than reports one.
+ */
+export function shellPrompt(text: string, actions: { label: string; primary?: boolean; run: () => void | Promise<void> }[]): void {
+  if (!noticeMount) return;
+  clear(noticeMount);
+  const row = el('div', { class: 'row', style: { marginTop: '6px', gap: '6px' } });
+  const box = el('div', { class: 'notice shellprompt' }, [el('div', { text }), row]);
+  for (const a of actions) {
+    const b = el('button', { class: (a.primary ? 'primary' : 'ghost') + ' tiny', text: a.label }) as HTMLButtonElement;
+    b.addEventListener('click', async () => {
+      for (const x of Array.from(row.querySelectorAll('button'))) (x as HTMLButtonElement).disabled = true;
+      try { await a.run(); } finally { if (box.isConnected) box.remove(); }
+    });
+    row.appendChild(b);
+  }
+  noticeMount.appendChild(box);
+}
+
 function msg(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }

@@ -13,7 +13,11 @@ export async function stagedAssetSmoke({ backend, host, document, window, settle
   };
   document.getElementById('tab-chats')?.dispatchEvent(new window.Event('click', { bubbles: true }));
   await settle(350);
-  clickButton(document.querySelector('.panel.active'), '봇 편집');
+  // §1-89: 봇 편집 unfolds; 현재 작업본's 편집 enters.
+  const botCard = document.querySelector('.modecard[data-mode="bot"]');
+  if (botCard && !botCard.classList.contains('open')) botCard.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(350);
+  document.querySelector('.snaplist .chatitem.current button')?.dispatchEvent(new window.Event('click', { bubbles: true }));
   await settle(350);
   document.getElementById('tab-studio')?.dispatchEvent(new window.Event('click', { bubbles: true }));
   await settle(250);

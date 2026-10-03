@@ -1955,6 +1955,45 @@ def h_workspace_dirty(arg: dict) -> dict:
     return workspace.dirty_summary(_char(arg))
 
 
+def h_workspace_folder(arg: dict) -> dict:
+    """The bot's pinned folder name, whether it is still the bare key, and a
+    rename suggestion (the bot's name, when that name is free)."""
+    try:
+        return workspace.folder_info(_char(arg))
+    except workspace.WorkspaceError as e:
+        raise ApiError(400, str(e))
+
+
+def _folder_error(e: workspace.WorkspaceError) -> ApiError:
+    return ApiError(409 if isinstance(e, workspace.FolderConflict) else 400, str(e))
+
+
+def h_workspace_folder_rename(arg: dict) -> dict:
+    """Rename the bot's project folder (projects/, hina/, studio/output/) and
+    re-key everything that names it. 409 = the name is taken."""
+    try:
+        return workspace.rename_bot_folder(_char(arg), str(arg.get("folder") or ""))
+    except workspace.WorkspaceError as e:
+        raise _folder_error(e)
+
+
+def h_persona_folder(arg: dict) -> dict:
+    """A RisuAI persona's project folder, projects/페르소나/<이름> (created)."""
+    try:
+        path = workspace.persona_folder(str(arg.get("id") or ""), str(arg.get("name") or ""))
+    except workspace.WorkspaceError as e:
+        raise _folder_error(e)
+    return {"path": path, "folder": path.rsplit("/", 1)[-1]}
+
+
+def h_persona_folder_rename(arg: dict) -> dict:
+    try:
+        return workspace.rename_persona_folder(str(arg.get("id") or ""), str(arg.get("name") or ""),
+                                               str(arg.get("folder") or ""))
+    except workspace.WorkspaceError as e:
+        raise _folder_error(e)
+
+
 def h_changes(arg: dict) -> dict:
     """What is pending on this chat, as counts - the shared bar's one line."""
     tk = _chat(arg)
@@ -2685,6 +2724,10 @@ ROUTES: dict[str, Handler] = {
     "POST /workspace": h_workspace_create,
     "GET /workspace/get": h_workspace_get,
     "GET /workspace/dirty": h_workspace_dirty,
+    "GET /workspace/folder": h_workspace_folder,
+    "POST /workspace/folder/rename": h_workspace_folder_rename,
+    "POST /persona/folder": h_persona_folder,
+    "POST /persona/folder/rename": h_persona_folder_rename,
 
     "GET /turns": h_turns,
     "POST /turn": h_turn_edit,

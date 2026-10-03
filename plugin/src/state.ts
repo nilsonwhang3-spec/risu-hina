@@ -2,6 +2,8 @@
 import { persistBaseline, watchPersist } from './persistwatch';
 import { transport, BackendError, clientLog, type HealthInfo } from './transport';
 import * as host from './host';
+import * as personaHost from './persona';
+import type { Persona } from './persona';
 import { boundedAssets, foregroundWrite } from './operation';
 import { syncAssets, syncBusy, describeSync, type SyncProgress, type SyncController } from './assets';
 import type { RisuChat, RisuCharacter, RisuMessage } from './risuai';
@@ -778,7 +780,7 @@ class AppState {
   /** What the last upload's merge did, until the shell has announced it. */
   lastMerge: WorkspaceInfo['merge'] | null = null;
   /** Which half of the panel is open ('chat' | 'bot'); the shell keeps it current, the agent is told. */
-  editMode: 'chat' | 'bot' = 'bot';
+  editMode: 'chat' | 'bot' | 'persona' = 'bot';
   /** The active tab id, verbatim from the shell. The studio is a third screen
    * (neither half), and the agent has to be told the truth about it. */
   activeTab = '';
@@ -1022,6 +1024,91 @@ class AppState {
    * (see `chatSlot`), so a chat that is not on screen in RisuAI is as editable
    * as the one that is.
    */
+  // --- personas (§1-89) ----------------------------------------------------
+
+  /** RisuAI's personas as last read; null before the first read. */
+  personas: Persona[] | null = null;
+  personaError = '';
+  personaLoading = false;
+  /** The persona open in the persona tab, as it was read when opened. */
+  persona: Persona | null = null;
+  /** Unsaved edits per persona (id, or `#index`), kept across back-and-forth. */
+  personaDrafts = new Map<string, { name: string; prompt: string; image: Uint8Array | null; imageName: string }>();
+  /** projects/페르소나/<name>: the persona's project folder in the file space. */
+  personaFolder = '';
+
+  personaKey(p: Persona): string {
+    return p.id || '#' + p.index;
+  }
+
+  async loadPersonas(): Promise<Persona[]> {
+    this.personaLoading = true;
+    this.personaError = '';
+    this.emit();
+    try {
+      const r = await personaHost.readPersonas();
+      this.personas = r.personas;
+      if (this.persona) {
+        const now = r.personas.find((p) => (this.persona!.id ? p.id === this.persona!.id : p.index === this.persona!.index));
+        if (now) this.persona = now;
+      }
+      return r.personas;
+    } catch (e) {
+      this.personaError = e instanceof Error ? e.message : String(e);
+      throw e;
+    } finally {
+      this.personaLoading = false;
+      this.emit();
+    }
+  }
+
+  /** The bot's project folder under projects/, and the name it could take (§1-89). */
+  async botFolderInfo(): Promise<{ folder: string; key: string; hashLike: boolean; name: string; suggested: string } | null> {
+    if (!this.activeCharKey) return null;
+    return await transport.get('/workspace/folder', { charKey: this.activeCharKey });
+  }
+
+  /** Rename the project folder with everything keyed by it (notes, rules, studio output). */
+  async renameBotFolder(folder: string): Promise<{ old: string; folder: string }> {
+    const r = await transport.post<{ old: string; folder: string }>('/workspace/folder/rename', { charKey: this.activeCharKey, folder });
+    this.touchFiles();
+    return r;
+  }
+
+  /** Open one persona for editing: its project folder is made (or found) first. */
+  async openPersona(p: Persona): Promise<void> {
+    const r = await transport.post<{ path: string; folder: string }>('/persona/folder', { id: p.id, name: p.name });
+    this.persona = p;
+    this.personaFolder = r.path;
+    this.touchFiles();
+  }
+
+  /** Write the open persona's draft to RisuAI; the draft goes on success. */
+  async savePersona(): Promise<Persona> {
+    const p = this.persona;
+    if (!p) throw new Error('편집 중인 페르소나가 없습니다');
+    const key = this.personaKey(p);
+    const d = this.personaDrafts.get(key);
+    if (!d) return p;
+    const saved = await personaHost.writePersona(p, { name: d.name, prompt: d.prompt }, d.image);
+    if (saved.name !== p.name) {
+      // The project folder follows the name; a refusal there (a taken name)
+      // leaves the old folder, which is harmless.
+      try {
+        const r = await transport.post<{ path: string }>('/persona/folder/rename', { id: p.id, name: p.name, folder: saved.name });
+        this.personaFolder = r.path;
+        this.touchFiles();
+      } catch (e) {
+        void clientLog('warn', 'persona folder rename', { error: String(e).slice(0, 200) });
+      }
+    }
+    this.personaDrafts.delete(key);
+    this.persona = saved;
+    if (this.personas) this.personas = this.personas.map((x) => (x.index === saved.index ? saved : x));
+    this.emit();
+    return saved;
+  }
+
   async openChat(chatIndex: number): Promise<void> {
     const ws = await this.upload({ chatIndex });
     // A single-chat upload answers with just that chat, so it is the one to

@@ -110,3 +110,25 @@ def prompt(char_key: str) -> str:
         budget -= len(line)
     lines.append(f"Stored notes: {len(notes)}. Only a bounded selection is included; search with recall_notes when needed.")
     return "\n".join(lines)
+
+
+def rekey(old_scope: str, new_scope: str) -> int:
+    """Carry one scope's notes to another (a renamed bot folder). The target
+    must hold no notes of its own - the caller refuses that case first.
+    Returns how many notes moved."""
+    with LOCK:
+        src = _path(old_scope)
+        if not src.exists():
+            return 0
+        doc = listing(old_scope)
+        if not doc["notes"]:
+            src.unlink(missing_ok=True)
+            return 0
+        target = listing(new_scope)
+        if target["notes"]:
+            raise NoteError("대상 프로젝트에 이미 메모가 있어 합칠 수 없습니다")
+        doc["scope"] = new_scope
+        doc["revision"] = max(int(doc.get("revision") or 0), int(target.get("revision") or 0)) + 1
+        _write(doc)
+        src.unlink(missing_ok=True)
+        return len(doc["notes"])

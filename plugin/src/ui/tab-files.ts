@@ -232,8 +232,12 @@ async function refreshOnce(key: string): Promise<void> {
       state.openFileRequest = null;
       const dir = want.includes('/') ? want.slice(0, want.lastIndexOf('/')) : want;
       if (nodes.has(dir)) { selectedDir = dir; expandTo(dir); }
-      previewPath = want;
-      selection = new Set([want]);
+      // A trailing slash asks for the folder itself (the persona tab's
+      // project folder, §1-89): select it, preview nothing.
+      if (!want.endsWith('/')) {
+        previewPath = want;
+        selection = new Set([want]);
+      }
     }
     drawTree();
     drawCentre();

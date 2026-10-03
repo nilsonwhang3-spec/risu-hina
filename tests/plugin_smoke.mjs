@@ -136,6 +136,12 @@ function makeHost(backendUrl, token) {
   storage.set('backend', { url: backendUrl, token });
   const dbWrites = [];
   let selectedChar = 0;
+  // RisuAI's user personas (§1-89): the first is the selected one.
+  const personas = [
+    { name: '기본 유저', personaPrompt: '선택된 페르소나', icon: 'assets/me.png', id: 'p-me' },
+    { name: '탐정', personaPrompt: '사립 탐정이다.', icon: '', id: 'p-det' },
+  ];
+  let selectedPersona = 0;
 
   return {
     liveChar,
@@ -189,9 +195,17 @@ function makeHost(backendUrl, token) {
       },
       async getDatabase(keys) {
         calls.push('getDatabase');
-        return { characters: [structuredClone(liveChar)] };
+        const out = {};
+        if (!keys || keys === 'all' || keys.includes('characters')) out.characters = [structuredClone(liveChar)];
+        if (!keys || keys === 'all' || keys.includes('personas')) out.personas = structuredClone(personas);
+        if (!keys || keys === 'all' || keys.includes('selectedPersona')) out.selectedPersona = selectedPersona;
+        return out;
       },
-      async setDatabase(patch) { calls.push('setDatabase'); dbWrites.push(structuredClone(patch)); },
+      async setDatabase(patch) {
+        calls.push('setDatabase');
+        dbWrites.push(structuredClone(patch));
+        if (patch.personas) personas.splice(0, personas.length, ...structuredClone(patch.personas));
+      },
       async checkCharOrder() { calls.push('checkCharOrder'); },
       async getChatFromIndex(ci, chi) { calls.push('getChatFromIndex'); return structuredClone(liveChar.chats[chi] ?? null); },
       async setChatToIndex(ci, chi, chat) {
@@ -225,6 +239,8 @@ function makeHost(backendUrl, token) {
       async alert() {}, async alertError() {},
     },
     selectNone() { selectedChar = -1; },
+    personas,
+    selectPersona(i) { selectedPersona = i; },
   };
 }
 
@@ -297,6 +313,26 @@ const clickButton = (document, text) => {
 
 const settle = (ms = 400) => new Promise((r) => setTimeout(r, ms));
 
+// The first screen (§1-89): three mode cards, one unfolds. These go to it
+// and unfold a card (left open if it already is).
+const openLanding = async (document, mode) => {
+  clickById(document, 'tab-chats');
+  await settle(300);
+  const card = document.querySelector(`.modecard[data-mode="${mode}"]`);
+  if (card && !card.classList.contains('open')) {
+    card.dispatchEvent(new window.Event('click', { bubbles: true }));
+    await settle(300);
+  }
+  return card;
+};
+// 봇 편집 → 현재 작업본 → 편집.
+const enterBot = async (document) => {
+  await openLanding(document, 'bot');
+  const b = document.querySelector('.snaplist .chatitem.current button');
+  b?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  return !!b;
+};
+
 // linkedom has no KeyboardEvent constructor, so the key rides on a plain Event.
 // The handler only reads `.key`, which is the part worth exercising anyway.
 const pressEscape = (document) => {
@@ -354,7 +390,7 @@ check('shell rendered', !!document.querySelector('.wrap'));
 // Content views in the tab bar; settings is a header verb, not a view. The
 // middle of the bar is modal: chat tabs and bot tabs share the slot and only
 // one set is visible at a time.
-check('twelve content tabs present', document.querySelectorAll('.tab').length === 12,
+check('thirteen content tabs present', document.querySelectorAll('.tab').length === 13,
       [...document.querySelectorAll('.tab')].map((t) => t.textContent).join(','));
 check('the workspace files tab is set apart', !!document.querySelector('.tabs .tabsep')
       && document.querySelector('.tabs .tabsep')?.nextElementSibling?.id === 'tab-files');
@@ -381,15 +417,37 @@ check('backend reached', host.calls.filter((c) => c === 'nativeFetch').length > 
 check('the health probe is a POST, uncacheable by any relay',
       host.calls.includes('health:POST') && !host.calls.includes('health:GET'),
       host.calls.filter((c) => c.startsWith('health:')).join(','));
-check('chat list rendered', !!document.querySelector('.chatitem'));
+
+console.log('\ntest_landing');
+{
+  // §1-89: the first screen is three modes; nothing is unfolded until one
+  // is pressed, and the open's steps are gone once the bot is up.
+  clickById(document, 'tab-chats');
+  await settle(400);
+  const cards = [...document.querySelectorAll('.modecard')].map((c) => c.getAttribute('data-mode'));
+  check('three mode cards', cards.join(',') === 'bot,chat,persona', cards.join(','));
+  check('none unfolded at first', !document.querySelector('.modecard.open') && !document.querySelector('.modebody'));
+  check('the open has finished: no blocking boot box', !document.querySelector('.bootbox:not(.slim)'));
+  check('the mode cards are usable', [...document.querySelectorAll('.modecard')].every((c) => !c.disabled));
+  check('no mode chip on the first screen', document.querySelector('.tabs .modechip')?.style.display === 'none');
+  // The scroller survives re-renders (it used to be rebuilt, jumping to the top).
+  const pad = document.querySelector('.panel.active .pad');
+  await openLanding(document, 'chat');
+  check('the scroller is kept across re-renders', !!pad && document.querySelector('.panel.active .pad') === pad);
+  check('chat list rendered', !!document.querySelector('.chatitem'));
+  await openLanding(document, 'bot');
+  check('one card unfolds at a time', document.querySelectorAll('.modecard.open').length === 1
+        && document.querySelector('.modecard.open')?.getAttribute('data-mode') === 'bot');
+  check('bot unfolds the current working copy first',
+        /현재 작업본/.test(document.querySelector('.snaplist .chatitem.current')?.textContent || ''));
+}
 
 console.log('\ntest_chat_selection_layout');
 {
-  clickById(document, 'tab-chats');
-  await settle(600);
+  await openLanding(document, 'bot');
   check('bot section rendered', !!document.querySelector('.botcard'));
   check('portrait attempted', host.calls.includes('readImage'));
-  check('bot and chat sections are divided', !!document.querySelector('.sectionline'));
+  await openLanding(document, 'chat');
   check('loose chat listed', document.querySelectorAll('.chatlist .chatitem').length >= 1,
         String(document.querySelectorAll('.chatitem').length));
   check('folder rendered', !!document.querySelector('.folder'));
@@ -400,6 +458,11 @@ console.log('\ntest_chat_selection_layout');
   fh?.dispatchEvent(new window.Event('click', { bubbles: true }));
   await settle(200);
   check('folder expands on click', !!document.querySelector('.folderbody.open'));
+  // An unfolded folder stays unfolded through the screen's re-renders.
+  clickById(document, 'tab-chats');
+  await settle(300);
+  check('an open folder survives a re-render', !!document.querySelector('.folderbody.open'));
+  await openLanding(document, 'bot');
   // The bot-switching note is an aside under the bot, not a warning banner.
   check('bot-switch note lives in the bot section',
         /다른 봇을 편집하시려면/.test(document.querySelector('.botcard').textContent || ''));
@@ -422,8 +485,8 @@ console.log('\ntest_asset_sync');
   check('the store holds the portrait', status?.present === 1 && status?.total === 1, JSON.stringify(status).slice(0, 200));
   check('and reports the bot complete', status?.complete === true);
   check('readImage was used for the missing key', host.calls.filter((c) => c === 'readImage').length >= 1);
-  clickById(document, 'tab-chats');
-  await settle(600);
+  await openLanding(document, 'bot');
+  await settle(300);
   const line = document.querySelector('.botcard .assetsync');
   check('the bot card shows the sync result', /에셋 1\/1개/.test(line?.textContent || ''), line?.textContent);
   // A finished, complete sync offers no button: the picker's job is "pick
@@ -726,6 +789,13 @@ console.log('\ntest_write_back_to_host');
   check('generationInfo preserved',
         after[1]?.generationInfo?.inputTokens === 10, JSON.stringify(after[1] ?? {}));
   check('message count unchanged', after.length === 10, String(after.length));
+  // §1-89: the title-row 반영 count drops with the bar's, not a round trip
+  // (or an 8s poll) later.
+  for (let t = 0; t < 3000 && document.querySelector('.chatbar .applybadge')?.style.display !== 'none'; t += 50) await settle(50);
+  await settle(80);
+  check('the title-row 반영 count drops with the chat bar',
+        document.querySelector('header .commitchip.apply .commitn')?.textContent === '0',
+        document.querySelector('header .commitchip.apply')?.textContent);
 }
 
 console.log('\ntest_commit_rebases_the_baseline');
@@ -883,7 +953,7 @@ console.log('\ntest_leave_guard_resolves_on_every_exit');
   await settle(800);
   check('returning to the picker no longer asks', !document.querySelector('.modalback'));
   check('and lands on the picker', document.getElementById('tab-chats')?.classList.contains('active'));
-  clickButton(document, '봇 편집');
+  await enterBot(document);
   await settle(900);
   check('봇 편집 with a dirty chat does not ask either', !document.querySelector('.modalback'));
   check('and the bot tabs open', document.getElementById('tab-meta')?.classList.contains('active'));
@@ -924,6 +994,7 @@ console.log('\ntest_leave_guard_resolves_on_every_exit');
   await settle(800);
 
   // Leave the suite where the next scenario expects it: in the editor.
+  await openLanding(document, 'chat');
   (document.querySelector('.chatitem.current') || document.querySelector('.chatlist .chatitem'))
     .dispatchEvent(new window.Event('click', { bubbles: true }));
   await settle(900);
@@ -1422,9 +1493,7 @@ console.log('\ntest_bot_tabs');
 {
   // One picker, two modes: 봇 편집 on the picker swaps the bar's middle to
   // the bot tabs and lands on 메타.
-  clickById(document, 'tab-chats');
-  await settle(600);
-  clickButton(document.querySelector('.panel.active'), '봇 편집');
+  await enterBot(document);
   await settle(900);
   check('봇 편집 swaps to bot mode', document.getElementById('tab-meta')?.style.display !== 'none'
         && document.getElementById('tab-editor')?.style.display === 'none');
@@ -2148,10 +2217,12 @@ console.log('\ntest_open_a_chat_risuai_does_not_have_open');
   // below loaded and edited exactly those chats. So the refusal was a detour.
   // Clicking loads the chat now - and the write-back has to land on THAT chat,
   // not on the one RisuAI has open (chatPage = 0, i.e. chatA, throughout).
-  clickById(document, 'tab-chats');
-  await settle(700);
-  document.querySelector('.folderhead')?.dispatchEvent(new window.Event('click', { bubbles: true }));
-  await settle(250);
+  await openLanding(document, 'chat');
+  await settle(300);
+  if (!document.querySelector('.folderbody.open')) {
+    document.querySelector('.folderhead')?.dispatchEvent(new window.Event('click', { bubbles: true }));
+    await settle(250);
+  }
   const row = document.querySelector('.folderbody.open .chatitem');
   check('the folder lists the chat RisuAI does not have open', !!row);
   const liveBefore = JSON.stringify(host.liveChar.chats[0].message);
@@ -2653,10 +2724,17 @@ console.log('\ntest_studio_reference_tabs');
   const seen = [];
   const realFetch = globalThis.fetch;
   globalThis.fetch = async (url, opts) => { seen.push(new URL(String(url)).pathname); return realFetch(url, opts); };
+  // The title row's 8s poll skips hidden pages; holding it off keeps a poll
+  // that happens to land in this window from reading as an emit (an emit's
+  // refresh ignores visibility, so it would still show here).
+  Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
   try {
     clickButton(inline, '저장');
     await settle(2200);
-  } finally { globalThis.fetch = realFetch; }
+  } finally {
+    globalThis.fetch = realFetch;
+    delete document.visibilityState;
+  }
   check('saving a character keeps the same editor on screen',
         !!editorBefore && explorer()?.querySelector('.charinline') === editorBefore);
   check('and re-reads only the character list', seen.filter((p) => p === '/studio/list').length === 1,
@@ -3464,6 +3542,58 @@ console.log('\ntest_mcp_switch');
   }
 }
 
+console.log('\ntest_persona_edit');
+{
+  // §1-89: 페르소나 편집 lists RisuAI's personas; the selected one cannot be
+  // edited (RisuAI keeps a live copy the plugin cannot write), another can,
+  // gets a projects/페르소나/<이름> folder, and 반영 writes it back.
+  await openLanding(document, 'persona');
+  await settle(600);
+  const rows = [...document.querySelectorAll('.personalist .chatitem')];
+  check('the personas are listed', rows.length === 2, String(rows.length));
+  const meBtn = rows[0]?.querySelector('button');
+  check('the selected persona is locked', !!meBtn?.disabled && /선택됨/.test(rows[0]?.textContent || ''), rows[0]?.textContent);
+  const detBtn = rows[1]?.querySelector('button');
+  detBtn?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(900);
+  check('another persona opens the persona tab', document.getElementById('tab-persona')?.classList.contains('active'));
+  check('only the persona tab is in the bar', document.getElementById('tab-persona')?.style.display !== 'none'
+        && document.getElementById('tab-meta')?.style.display === 'none' && document.getElementById('tab-editor')?.style.display === 'none');
+  const auth = { Authorization: 'Bearer plugin-smoke-token' };
+  const listing = await (await fetch(backend.url + '/files?prefix=' + encodeURIComponent('projects/페르소나'), { headers: auth })).json();
+  const dirs = (listing.areas || []).flatMap((a) => a.dirs || []);
+  check('its project folder is made under projects/페르소나', dirs.some((d) => /projects\/페르소나\/탐정$/.test(d)), dirs.join(','));
+  const ta = document.querySelector('.personaedit textarea.personaprompt');
+  check('the description is in the editor', ta?.value === '사립 탐정이다.', ta?.value);
+  ta.value = '사립 탐정이다. 비 오는 밤을 좋아한다.';
+  ta.dispatchEvent(new window.Event('input', { bubbles: true }));
+  await settle(100);
+  const writesBefore = host.dbWrites.length;
+  clickButton(document.querySelector('.personaedit'), 'RisuAI에 반영');
+  await settle(900);
+  check('반영 wrote the persona to RisuAI', host.dbWrites.length === writesBefore + 1
+        && host.personas[1].personaPrompt === '사립 탐정이다. 비 오는 밤을 좋아한다.', JSON.stringify(host.personas[1]));
+  check('and left the selected one alone', host.personas[0].personaPrompt === '선택된 페르소나');
+  // The selected persona is refused at write time too, not only in the list.
+  host.selectPersona(1);
+  ta.value = '또 고침';
+  const ta2 = document.querySelector('.personaedit textarea.personaprompt');
+  ta2.value = '또 고침';
+  ta2.dispatchEvent(new window.Event('input', { bubbles: true }));
+  await settle(100);
+  clickButton(document.querySelector('.personaedit'), 'RisuAI에 반영');
+  await settle(900);
+  check('a persona that became selected meanwhile is refused', host.personas[1].personaPrompt !== '또 고침'
+        && /선택된 페르소나/.test(document.querySelector('.personaedit')?.textContent || ''));
+  host.selectPersona(0);
+  await openLanding(document, 'persona');
+  await settle(300);
+  check('the unsent edit is marked on the first screen', /미반영/.test(document.querySelectorAll('.personalist .chatitem')[1]?.textContent || ''));
+  // Leave the next scenario a plain first screen.
+  document.querySelector('.modecard[data-mode="persona"]')?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(200);
+}
+
 console.log('\ntest_no_character_selected');
 host.selectNone();
 clickById(document, 'tab-chats');
@@ -3476,6 +3606,9 @@ try {
 await settle(1200);
 check('no-selection is reported, not thrown',
       /캐릭터가 선택되어 있지 않습니다/.test(document.body.innerHTML));
+check('with no bot, persona editing stays available',
+      document.querySelector('.modecard[data-mode="persona"]')?.disabled === false
+      && document.querySelector('.modecard[data-mode="bot"]')?.disabled === true);
 {
   // The studio is not about a bot, so it must still work with none selected -
   // that is the state a person is in when they open RisuAI to sort images.

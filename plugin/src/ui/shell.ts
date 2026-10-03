@@ -17,7 +17,7 @@ import { injectStyles } from './styles';
 import { state } from '../state';
 import { transport, clientLog } from '../transport';
 import { remountArtifact } from './artifact';
-import { renderChatsTab, refreshAssetSyncLine } from './tab-chats';
+import { renderChatsTab, refreshAssetSyncLine, refreshBootBox } from './tab-chats';
 import { renderEditorTab } from './tab-editor';
 import { renderFilesTab } from './tab-files';
 import { renderLoreTab } from './tab-lore';
@@ -32,6 +32,8 @@ import { buildChatBar, refreshChatBar, shellNotice } from './chatbar';
 import { ensureResolved } from './leaveguard';
 import { buildBotBar, refreshBotBar } from './botbar';
 import { renderAssetsTab } from './tab-assets';
+import { renderPersonaTab } from './tab-persona';
+import { suggestFolderRename } from './folder-suggest';
 import { noteStudioLeft, renderStudioTab } from './tab-studio';
 import { getSettingsBar } from './tab-settings';
 import { installDropGuard } from './tree';
@@ -45,7 +47,7 @@ import { installDropGuard } from './tree';
  * the other verbs.
  */
 export type TabId = 'chats' | 'editor' | 'lore' | 'memory' | 'vars'
-  | 'meta' | 'botlore' | 'regex' | 'trigger' | 'assets' | 'files' | 'studio' | 'settings';
+  | 'meta' | 'botlore' | 'regex' | 'trigger' | 'assets' | 'persona' | 'files' | 'studio' | 'settings';
 
 /**
  * What the middle of the tab bar edits: one chat, or the bot's card.
@@ -56,7 +58,7 @@ export type TabId = 'chats' | 'editor' | 'lore' | 'memory' | 'vars'
  * 선택 | 메타 · 봇 로어북 · Regex · 트리거 ┃ 워크스페이스 파일          (bot)
  * Clicking a chat on the picker enters chat mode; "봇 편집" enters bot mode.
  */
-export type EditMode = 'chat' | 'bot';
+export type EditMode = 'chat' | 'bot' | 'persona';
 // The bot half opens first: a session usually starts by looking at the card,
 // and the chat tabs are one click away on the picker either way.
 let mode: EditMode = 'bot';
@@ -72,6 +74,9 @@ const CONTENT_TABS: [TabId, string][] = [
   ['regex', 'Regex'],
   ['trigger', '트리거'],
   ['assets', '에셋'],
+  // The third mode (§1-89): RisuAI's user personas - a name, a description
+  // and a picture. One tab is all it needs.
+  ['persona', '페르소나'],
   ['files', '워크스페이스 파일'],
   // Not this bot's, and not any bot's: the studio library outlives them.
   ['studio', '에셋 스튜디오'],
@@ -83,13 +88,25 @@ const CHAT_TABS = new Set<TabId>(['editor', 'lore', 'memory', 'vars']);
 /** Tabs that show the bot's card - where the bot bar belongs. */
 const BOT_TABS = new Set<TabId>(['meta', 'botlore', 'regex', 'trigger', 'assets']);
 
+/** The persona mode's one tab. */
+const PERSONA_TABS = new Set<TabId>(['persona']);
+
+const MODE_TABS: Record<EditMode, Set<TabId>> = { chat: CHAT_TABS, bot: BOT_TABS, persona: PERSONA_TABS };
+
+const MODE_LABEL: Record<EditMode, string> = { chat: '챗 편집', bot: '봇 편집', persona: '페르소나 편집' };
+const MODE_TITLE: Record<EditMode, string> = {
+  chat: '이 챗의 재료(턴·챗 로어북·장기기억·챗 변수)를 고치는 화면입니다',
+  bot: '봇 카드의 재료(메타·인사말·봇 로어북·Regex·트리거·에셋)를 고치는 화면입니다',
+  persona: 'RisuAI 사용자 페르소나(이름·설명·프로필 사진)를 고치는 화면입니다',
+};
+
 export function setEditMode(m: EditMode, tab?: TabId): void {
   mode = m;
   // The agent is told which half is open with every prompt (Deps.mode).
   state.editMode = m;
   syncModeTabs();
   if (tab) setTab(tab);
-  else if ((m === 'chat' ? BOT_TABS : CHAT_TABS).has(active)) setTab('chats');
+  else if (!MODE_TABS[m].has(active) && (CHAT_TABS.has(active) || BOT_TABS.has(active) || PERSONA_TABS.has(active))) setTab('chats');
 }
 
 export function currentMode(): EditMode {
@@ -101,17 +118,16 @@ export function currentMode(): EditMode {
 export function activeHalf(): EditMode {
   if (BOT_TABS.has(active)) return 'bot';
   if (CHAT_TABS.has(active)) return 'chat';
+  if (PERSONA_TABS.has(active)) return 'persona';
   return mode;
 }
 
 function syncModeTabs(): void {
-  for (const id of CHAT_TABS) {
-    const b = document.getElementById('tab-' + id);
-    if (b) b.style.display = mode === 'chat' ? '' : 'none';
-  }
-  for (const id of BOT_TABS) {
-    const b = document.getElementById('tab-' + id);
-    if (b) b.style.display = mode === 'bot' ? '' : 'none';
+  for (const m of Object.keys(MODE_TABS) as EditMode[]) {
+    for (const id of MODE_TABS[m]) {
+      const b = document.getElementById('tab-' + id);
+      if (b) b.style.display = mode === m ? '' : 'none';
+    }
   }
   syncBackTab();
 }
@@ -130,11 +146,12 @@ function syncBackTab(): void {
   const btn = document.getElementById('tab-chats');
   const inEdit = active !== 'chats';
   if (label) label.textContent = inEdit ? '‹ 뒤로' : '선택';
-  if (btn) btn.title = inEdit ? '선택 화면으로 돌아갑니다 (봇·챗 다시 고르기)' : '봇과 챗을 고르는 화면입니다';
-  modeChip.textContent = mode === 'chat' ? '챗 편집' : '봇 편집';
-  modeChip.title = mode === 'chat'
-    ? '이 챗의 재료(턴·챗 로어북·장기기억·챗 변수)를 고치는 화면입니다'
-    : '봇 카드의 재료(메타·인사말·봇 로어북·Regex·트리거·에셋)를 고치는 화면입니다';
+  if (btn) btn.title = inEdit ? '첫 화면으로 돌아갑니다 (봇·챗·페르소나 다시 고르기)' : '무엇을 편집할지 고르는 첫 화면입니다';
+  modeChip.textContent = MODE_LABEL[mode];
+  modeChip.title = MODE_TITLE[mode];
+  // On the first screen no mode has been chosen yet: the chip would name a
+  // half the user has not entered.
+  modeChip.style.display = inEdit && active !== 'settings' && active !== 'files' && active !== 'studio' ? '' : 'none';
 }
 
 const ALL_TABS: TabId[] = [...CONTENT_TABS.map(([id]) => id), 'settings'];
@@ -321,6 +338,7 @@ function renderActive(): void {
   else if (active === 'regex') renderRegexTab(node);
   else if (active === 'trigger') renderTriggerTab(node);
   else if (active === 'assets') renderAssetsTab(node);
+  else if (active === 'persona') renderPersonaTab(node);
   else if (active === 'files') renderFilesTab(node);
   else if (active === 'studio') renderStudioTab(node);
   else renderSettingsTab(node);
@@ -385,14 +403,12 @@ export function refreshStatus(): void {
   // Which half is being edited, in the same words Hina is told. Shown only
   // while an edit tab is open - on the picker the question is not answered
   // yet, and in settings or files it is not being asked.
-  if (CHAT_TABS.has(active) || BOT_TABS.has(active)) {
-    healthEl.appendChild(el('span', {
-      class: 'badge modechip',
-      text: mode === 'chat' ? '챗 편집' : '봇 편집',
-      title: mode === 'chat'
-        ? '이 챗의 재료(턴·챗 로어북·장기기억·챗 변수)를 고치는 화면입니다'
-        : '봇 카드의 재료(메타·인사말·봇 로어북·Regex·트리거·에셋)를 고치는 화면입니다',
-    }));
+  if (CHAT_TABS.has(active) || BOT_TABS.has(active) || PERSONA_TABS.has(active)) {
+    healthEl.appendChild(el('span', { class: 'badge modechip', text: MODE_LABEL[mode], title: MODE_TITLE[mode] }));
+  }
+  if (PERSONA_TABS.has(active) && state.persona) {
+    healthEl.appendChild(el('span', { class: 'hint botname', text: `· ${state.persona.name || '(이름 없음)'}` }));
+    return;
   }
 
   // The bot first, then the chat: the bot is what the panel was opened on
@@ -569,7 +585,7 @@ state.onChange(() => {
   if (state.openTabRequest) {
     const tab = state.openTabRequest as TabId;
     state.openTabRequest = null;
-    const want: EditMode | null = CHAT_TABS.has(tab) ? 'chat' : BOT_TABS.has(tab) ? 'bot' : null;
+    const want: EditMode | null = CHAT_TABS.has(tab) ? 'chat' : BOT_TABS.has(tab) ? 'bot' : PERSONA_TABS.has(tab) ? 'persona' : null;
     if (want && want !== mode) {
       // The agent asked for the other half: a plain mode switch (§1-76 -
       // the card and chats may both hold pending work now).
@@ -625,17 +641,24 @@ export async function bootstrap(force = false): Promise<void> {
   // panel had no way to say so; the status light said "connected" and the
   // user read the empty panel as "not connected".
   const t0 = Date.now();
+  booting = true;
+  bootSteps = { connect: 'run', host: 'wait', upload: 'wait' };
   setBootPhase('백엔드에 연결하는 중…');
   await transport.detectPlatform();
   const connected = await state.connect();
+  bootSteps.connect = connected ? 'done' : 'err';
   const t1 = Date.now();
+  bootSteps.host = 'run';
   setBootPhase('RisuAI에서 봇을 읽는 중…');
-  await state.readHost();
+  const hostOk = await state.readHost();
+  bootSteps.host = hostOk ? 'done' : 'err';
   const t2 = Date.now();
 
   if (connected) {
-    setBootPhase('백엔드에 올리는 중…');
+    bootSteps.upload = hostOk ? 'run' : 'skip';
+    setBootPhase('작업본을 백엔드에 올리는 중…');
     await uploadAfterConnect(force);
+    bootSteps.upload = !hostOk ? 'skip' : state.workspace ? 'done' : 'err';
   } else {
     // The backend was not reachable at open (a tunnel warming up, plain
     // fetch not yet in effect, a laptop waking). Keep trying for a while;
@@ -643,9 +666,12 @@ export async function bootstrap(force = false): Promise<void> {
     startReconnect(force);
   }
   const t3 = Date.now();
+  booting = false;
   setBootPhase('');
   refreshStatus();
   renderActive();
+  // A placeholder project folder gets its rename offered once the bot is up.
+  if (state.workspace) void suggestFolderRename();
   const hostMs = t2 - t1;
   if (connected) {
     void clientLog(hostMs > 5000 ? 'warn' : 'info', 'boot', {
@@ -657,9 +683,25 @@ export async function bootstrap(force = false): Promise<void> {
 
 /** What the open is doing right now; '' once it is done. Shown in the title row. */
 let bootPhase = '';
+/** True from the start of an open until its upload has settled. */
+let booting = false;
+export type BootStep = 'wait' | 'run' | 'done' | 'err' | 'skip';
+let bootSteps: { connect: BootStep; host: BootStep; upload: BootStep } = { connect: 'wait', host: 'wait', upload: 'wait' };
+
+/**
+ * The open's progress, for the first screen (§1-89): while it runs the screen
+ * shows these steps and keeps its choices shut - the bot and chat cannot be
+ * edited before the working copy is on the backend - and it changes in place
+ * as they tick, instead of the whole screen being rebuilt at each step.
+ */
+export function bootState(): { booting: boolean; phase: string; steps: typeof bootSteps } {
+  return { booting, phase: bootPhase, steps: bootSteps };
+}
+
 function setBootPhase(text: string): void {
   bootPhase = text;
   refreshStatus();
+  if (active === 'chats' && mounts.chats) refreshBootBox(mounts.chats);
 }
 
 /**

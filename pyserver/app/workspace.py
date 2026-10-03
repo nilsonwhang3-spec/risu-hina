@@ -22,8 +22,10 @@ early turns into lore the whole character shares.
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -42,6 +44,16 @@ class WorkspaceError(ValueError):
 # Windows-forbidden filename characters plus control bytes. Korean stays: the
 # bot's own name is the folder name, that is the point of the hina/ area.
 _FOLDER_BAD = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
+
+# projects/페르소나/<persona>/: RisuAI user personas' project folders. Reserved
+# so no bot is ever given (or renamed to) this name.
+PERSONA_TOP = "페르소나"
+
+# A folder that is still the bot's key (it had no name on first call).
+_HASH_FOLDER = re.compile(r"^c[0-9a-f]{16}(~\d+)?$")
+
+# bots.json / personas.json are read-modify-write; one lock for both.
+_FOLDER_LOCK = threading.RLock()
 
 
 def space_root() -> Path:
@@ -90,28 +102,44 @@ def bot_folder(char_key: str) -> str:
     folder by the family key, the same sharing rule root() applies. A name
     collision takes `이름~2` rather than merging two bots' work.
     """
+    key = _bot_key(char_key)
+    with _FOLDER_LOCK:
+        mapping = _bots_map()
+        hit = mapping.get(key)
+        if isinstance(hit, dict) and str(hit.get("folder") or ""):
+            return str(hit["folder"])
+        folder = clean_folder_name(_char_name(key)) or key
+        # PERSONA_TOP is the personas' own top folder under projects/: a bot
+        # literally named 페르소나 counts up like any other collision.
+        taken = {str(v.get("folder") or "") for v in mapping.values() if isinstance(v, dict)}
+        taken.add(PERSONA_TOP)
+        base, n = folder, 2
+        while folder in taken:
+            folder = f"{base}~{n}"
+            n += 1
+        mapping[key] = {"folder": folder, "createdAt": time.time()}
+        _save_bots_map(mapping)
+        return folder
+
+
+def _bot_key(char_key: str) -> str:
     key = family_of(char_key) or char_key
     if not key or SAFE.sub("", key) != key:
         raise WorkspaceError(f"unsafe workspace key: {char_key!r}")
-    mapping = _bots_map()
-    hit = mapping.get(key)
-    if isinstance(hit, dict) and str(hit.get("folder") or ""):
-        return str(hit["folder"])
-    name = ""
+    return key
+
+
+def _char_name(char_key: str) -> str:
     try:
-        row = db.one("SELECT name FROM characters WHERE char_key = ?", (key,))
-        name = str(row["name"] if row else "") or ""
+        row = db.one("SELECT name FROM characters WHERE char_key = ?", (char_key,))
+        return str(row["name"] if row else "") or ""
     except Exception:  # noqa: BLE001 - before the table exists (first boot)
-        name = ""
-    folder = _FOLDER_BAD.sub("", name).strip().strip(".") or key
-    taken = {str(v.get("folder") or "") for v in mapping.values() if isinstance(v, dict)}
-    base, n = folder, 2
-    while folder in taken:
-        folder = f"{base}~{n}"
-        n += 1
-    mapping[key] = {"folder": folder, "createdAt": time.time()}
-    _save_bots_map(mapping)
-    return folder
+        return ""
+
+
+def clean_folder_name(name: str) -> str:
+    """A name as a folder: what bot_folder has always done to a bot's name."""
+    return _FOLDER_BAD.sub("", str(name or "")).strip().strip(".")
 
 
 def hina_dir(char_key: str) -> Path:
@@ -143,6 +171,331 @@ def out_dir(char_key: str) -> Path:
 def out_rel(char_key: str) -> str:
     """`out_dir` as a space-relative path (what the tools say out loud)."""
     return f"projects/{bot_folder(char_key)}/out"
+
+
+# --- renaming a bot's folder ----------------------------------------------------
+#
+# The folder name is pinned in bots.json and several stores are keyed by it
+# (agent notes scope, asset rules, studio output and review sidecars, skills'
+# learned_project). A plain folder move left all of them on the old name and
+# the next out_dir() grew an empty folder under it, so a rename goes through
+# here and carries every one of them along.
+
+class FolderConflict(WorkspaceError):
+    """The name belongs to another bot or to a folder already there (409)."""
+
+
+_DEVICE_NAMES = {"CON", "PRN", "AUX", "NUL",
+                 *[f"COM{i}" for i in range(1, 10)], *[f"LPT{i}" for i in range(1, 10)]}
+
+
+def _check_name(raw: str) -> str:
+    name = clean_folder_name(raw)
+    if not name:
+        raise WorkspaceError("폴더 이름이 비어 있습니다")
+    if len(name) > 120:
+        raise WorkspaceError("폴더 이름이 너무 깁니다 (120자까지)")
+    if name.split(".")[0].upper() in _DEVICE_NAMES:
+        raise WorkspaceError(f"폴더 이름으로 쓸 수 없습니다: {name}")
+    if name == PERSONA_TOP:
+        raise FolderConflict(f"'{PERSONA_TOP}' 는 페르소나 전용 폴더라 봇 폴더 이름으로 쓸 수 없습니다")
+    return name
+
+
+def _same_dir(a: Path, b: Path) -> bool:
+    try:
+        return a.exists() and b.exists() and os.path.samefile(a, b)
+    except OSError:
+        return False
+
+
+def _occupied(dst: Path, own: Path) -> bool:
+    """Something already at dst that is not our own folder (a case-only rename
+    on Windows sees itself). An empty directory does not count."""
+    if not dst.exists() or _same_dir(dst, own):
+        return False
+    return not (dst.is_dir() and not any(dst.iterdir()))
+
+
+def _bot_areas(old: str, new: str) -> list[tuple[Path, Path]]:
+    sp = space_root()
+    return [(sp / "projects" / old, sp / "projects" / new),
+            (sp / "hina" / old, sp / "hina" / new),
+            (sp / "studio" / "output" / old, sp / "studio" / "output" / new)]
+
+
+def bot_key_for_folder(folder: str) -> str:
+    """The bots.json key pinned to this folder name ('' = no bot's)."""
+    for k, v in _bots_map().items():
+        if isinstance(v, dict) and str(v.get("folder") or "") == folder:
+            return str(k)
+    return ""
+
+
+def _check_free(key: str, old: str, new: str) -> None:
+    for k, v in _bots_map().items():
+        if (k != key and isinstance(v, dict)
+                and str(v.get("folder") or "").casefold() == new.casefold()):
+            raise FolderConflict(f"다른 봇이 이미 쓰는 폴더 이름입니다: {new}")
+    for src, dst in _bot_areas(old, new):
+        if _occupied(dst, src):
+            raise FolderConflict(
+                f"같은 이름의 폴더가 이미 있습니다: {dst.relative_to(space_root()).as_posix()}"
+                " (합치거나 덮어쓰지 않습니다)")
+
+
+def folder_info(char_key: str) -> dict:
+    """The bot's pinned folder, whether it is still the bare key, and the
+    bot's current name as a rename suggestion when that name is free."""
+    key = _bot_key(char_key)
+    folder = bot_folder(char_key)
+    name = _char_name(char_key) or _char_name(key)
+    suggested = ""
+    cand = clean_folder_name(name)
+    if cand and cand != folder:
+        try:
+            _check_free(key, folder, _check_name(cand))
+            suggested = cand
+        except WorkspaceError:
+            suggested = ""
+    return {"folder": folder, "key": key,
+            "hashLike": folder == key or bool(_HASH_FOLDER.match(folder)),
+            "name": name, "suggested": suggested}
+
+
+def rename_bot_folder(char_key: str, new_name: str) -> dict:
+    """Rename one bot's folder everywhere it is used. See rename_folder_by_key."""
+    key = _bot_key(char_key)
+    bot_folder(char_key)  # pin it first: a never-used bot has nothing to rename yet
+    return rename_folder_by_key(key, new_name)
+
+
+def _write_manifest(name: str, entry: dict) -> None:
+    p = space_root() / ".hina" / name
+    try:
+        doc = json.loads(p.read_text(encoding="utf-8"))
+        if not isinstance(doc, dict) or not isinstance(doc.get("renames"), list):
+            doc = {"version": 1, "renames": []}
+    except (OSError, ValueError):
+        doc = {"version": 1, "renames": []}
+    doc["renames"].append(entry)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(doc, ensure_ascii=False, indent=1), encoding="utf-8")
+
+
+def _move_dir(src: Path, dst: Path) -> None:
+    """One directory to a free name. An empty placeholder at dst is removed
+    (an out_dir() call may have grown it); _occupied refused anything else."""
+    if dst.exists() and not _same_dir(dst, src):
+        dst.rmdir()
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    os.rename(src, dst)
+
+
+def rename_folder_by_key(key: str, new_name: str) -> dict:
+    """Rename a pinned bot folder: projects/, hina/ and studio/output/ move,
+    bots.json follows, and every store keyed by the folder name is re-keyed.
+
+    Never a merge and never an overwrite: a name another bot holds, a folder
+    already there, or notes / asset rules on both names are refused before
+    anything moves. A directory move that fails puts the earlier ones back.
+    Recorded in `.hina/folder-renames.json`. Returns {old, folder, moved}.
+    """
+    from . import agentnotes, assetrules, skills, studio
+    with _FOLDER_LOCK:
+        mapping = _bots_map()
+        hit = mapping.get(key)
+        if not isinstance(hit, dict) or not str(hit.get("folder") or ""):
+            raise WorkspaceError("이 봇의 폴더가 아직 정해지지 않았습니다")
+        old = str(hit["folder"])
+        new = _check_name(new_name)
+        if new == old:
+            return {"old": old, "folder": old, "moved": []}
+        try:
+            assetrules.project_name(new)
+        except assetrules.RuleError as e:
+            raise WorkspaceError(str(e)) from e
+        _check_free(key, old, new)
+        old_scope, new_scope = "project:" + old, "project:" + new
+        if agentnotes.listing(old_scope)["notes"] and agentnotes.listing(new_scope)["notes"]:
+            raise FolderConflict(f"'{new}' 에 이미 메모가 있어 합칠 수 없습니다")
+        r_old, r_new = assetrules.read(old), assetrules.read(new)
+        if (r_old.get("rules") or r_old.get("sets")) and (r_new.get("rules") or r_new.get("sets")):
+            raise FolderConflict(f"'{new}' 에 이미 에셋 규칙이 있어 합칠 수 없습니다")
+
+        sp = space_root()
+        areas = [(s, d) for s, d in _bot_areas(old, new) if s.is_dir()]
+        # What has to follow the files, read while they are still in place:
+        # review sidecars by folder path, asset bindings by file path.
+        dir_pairs: list[tuple[str, str]] = []
+        images: list[tuple[str, Path]] = []
+        for src, dst in areas:
+            for d in [src, *sorted(p for p in src.rglob("*") if p.is_dir())]:
+                rel = d.relative_to(src)
+                dir_pairs.append((d.relative_to(sp).as_posix(), (dst / rel).relative_to(sp).as_posix()))
+            for f in src.rglob("*"):
+                if f.is_file() and f.suffix.lower() in (".png", ".webp", ".jpg", ".jpeg"):
+                    images.append((str(f.resolve()), dst / f.relative_to(src)))
+
+        moved: list[dict] = []
+        done: list[tuple[Path, Path]] = []
+        try:
+            for src, dst in areas:
+                _move_dir(src, dst)
+                done.append((src, dst))
+                moved.append({"from": src.relative_to(sp).as_posix(), "to": dst.relative_to(sp).as_posix()})
+        except OSError as e:
+            for src, dst in reversed(done):
+                try:
+                    os.rename(dst, src)
+                except OSError:
+                    log.warn("folder rename rollback failed: %s -> %s", dst, src)
+            raise WorkspaceError(f"폴더를 옮기지 못했습니다: {e}") from e
+
+        mapping = _bots_map()
+        entry = dict(mapping.get(key) or {})
+        entry.update({"folder": new, "renamedFrom": old, "renamedAt": time.time()})
+        entry.setdefault("createdAt", time.time())
+        mapping[key] = entry
+        _save_bots_map(mapping)
+
+        rekeyed: dict[str, Any] = {}
+        warnings: list[str] = []
+        for label, fn in (
+            ("notes", lambda: agentnotes.rekey(old_scope, new_scope)),
+            ("assetRules", lambda: assetrules.rekey_project(old, new, images)),
+            ("sidecars", lambda: studio.rekey_sidecars(dir_pairs)),
+            ("skills", lambda: skills.rename_learned_project(old, new)),
+        ):
+            try:
+                rekeyed[label] = fn()
+            except Exception as e:  # noqa: BLE001 - the folders already moved; report, don't unwind
+                log.warn("folder rename %s -> %s: %s re-key failed: %s", old, new, label, e)
+                warnings.append(f"{label}: {e}")
+        _write_manifest("folder-renames.json", {
+            "at": time.time(), "key": key, "old": old, "new": new,
+            "moves": moved, "rekeyed": rekeyed, "warnings": warnings})
+        log.info("bot folder renamed key=%s %s -> %s moved=%d", key, old, new, len(moved))
+        out = {"old": old, "folder": new, "moved": moved, "rekeyed": rekeyed}
+        if warnings:
+            out["warnings"] = warnings
+        return out
+
+
+# --- persona folders ------------------------------------------------------------
+#
+# A RisuAI user persona (name, description, icon) lives in RisuAI; the backend
+# only gives each one a project folder, projects/페르소나/<이름>/, pinned in
+# .hina/personas.json by persona id the way bots.json pins bots.
+
+def _personas_path() -> Path:
+    return space_root() / ".hina" / "personas.json"
+
+
+def _personas() -> dict:
+    try:
+        m = json.loads(_personas_path().read_text(encoding="utf-8"))
+        return m if isinstance(m, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_personas(mapping: dict) -> None:
+    p = _personas_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(mapping, ensure_ascii=False, indent=1), encoding="utf-8")
+
+
+def _persona_key(persona_id: str, name: str) -> str:
+    pid = str(persona_id or "").strip()
+    if pid:
+        if len(pid) > 200 or re.search(r"[\x00-\x1f]", pid):
+            raise WorkspaceError("페르소나 id 가 올바르지 않습니다")
+        return pid
+    return "name:" + clean_folder_name(name)
+
+
+def persona_root() -> Path:
+    return space_root() / "projects" / PERSONA_TOP
+
+
+def _persona_taken(mapping: dict, key: str, folder: str) -> bool:
+    if any(k != key and isinstance(v, dict) and str(v.get("folder") or "").casefold() == folder.casefold()
+           for k, v in mapping.items()):
+        return True
+    return (persona_root() / folder).exists()
+
+
+def persona_folder(persona_id: str, name: str) -> str:
+    """The persona's project folder (created), as `projects/페르소나/<폴더>`."""
+    key = _persona_key(persona_id, name)
+    with _FOLDER_LOCK:
+        mapping = _personas()
+        hit = mapping.get(key)
+        if isinstance(hit, dict) and str(hit.get("folder") or ""):
+            folder = str(hit["folder"])
+        else:
+            base = clean_folder_name(name) or "persona"
+            folder, n = base, 2
+            while _persona_taken(mapping, key, folder):
+                folder = f"{base}~{n}"
+                n += 1
+            mapping[key] = {"folder": folder, "name": str(name or ""), "createdAt": time.time()}
+            _save_personas(mapping)
+        (persona_root() / folder).mkdir(parents=True, exist_ok=True)
+        return f"projects/{PERSONA_TOP}/{folder}"
+
+
+def rename_persona_folder(persona_id: str, name: str, new: str) -> dict:
+    """Follow a persona rename: move its folder and re-pin it. `name` is the
+    name the folder was made under (the key when there is no id).
+    Returns {path, folder, old}."""
+    folder_new = clean_folder_name(new)
+    if not folder_new:
+        raise WorkspaceError("폴더 이름이 비어 있습니다")
+    if folder_new.split(".")[0].upper() in _DEVICE_NAMES or len(folder_new) > 120:
+        raise WorkspaceError(f"폴더 이름으로 쓸 수 없습니다: {folder_new}")
+    key = _persona_key(persona_id, name)
+    with _FOLDER_LOCK:
+        mapping = _personas()
+        hit = mapping.get(key)
+        if not isinstance(hit, dict) or not str(hit.get("folder") or ""):
+            path = persona_folder(persona_id, new)
+            return {"path": path, "folder": path.rsplit("/", 1)[-1], "old": ""}
+        old = str(hit["folder"])
+        new_key = key if str(persona_id or "").strip() else "name:" + folder_new
+        if folder_new == old:
+            return {"path": f"projects/{PERSONA_TOP}/{old}", "folder": old, "old": old}
+        src, dst = persona_root() / old, persona_root() / folder_new
+        others = {k: v for k, v in mapping.items() if k != key}
+        if (any(isinstance(v, dict) and str(v.get("folder") or "").casefold() == folder_new.casefold()
+                for v in others.values()) or (new_key != key and new_key in mapping)):
+            raise FolderConflict(f"다른 페르소나가 이미 쓰는 폴더 이름입니다: {folder_new}")
+        if _occupied(dst, src):
+            raise FolderConflict(f"같은 이름의 폴더가 이미 있습니다: projects/{PERSONA_TOP}/{folder_new}")
+        if src.is_dir():
+            try:
+                _move_dir(src, dst)
+            except OSError as e:
+                raise WorkspaceError(f"폴더를 옮기지 못했습니다: {e}") from e
+        else:
+            dst.mkdir(parents=True, exist_ok=True)
+        entry = {**hit, "folder": folder_new, "name": str(new or ""), "renamedFrom": old,
+                 "renamedAt": time.time()}
+        mapping.pop(key, None)
+        mapping[new_key] = entry
+        _save_personas(mapping)
+        _write_manifest("folder-renames.json", {
+            "at": time.time(), "persona": key, "old": old, "new": folder_new,
+            "moves": [{"from": f"projects/{PERSONA_TOP}/{old}", "to": f"projects/{PERSONA_TOP}/{folder_new}"}]})
+        return {"path": f"projects/{PERSONA_TOP}/{folder_new}", "folder": folder_new, "old": old}
+
+
+def persona_key_for_folder(folder: str) -> str:
+    for k, v in _personas().items():
+        if isinstance(v, dict) and str(v.get("folder") or "") == folder:
+            return str(k)
+    return ""
 
 
 # The studio's own areas. Owned here rather than in files.py because they are

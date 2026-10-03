@@ -570,6 +570,10 @@ def move(scope: str, src_rel: str, dst_rel: str) -> dict:
         area = _area_of(scope, p)
         if not areas_for(scope).get(area, (False, False))[0]:
             raise FileError(f"{area}/ 는 옮길 수 없는 영역입니다")
+    if scope == SPACE:
+        routed = _pinned_root_move(src, dst)
+        if routed is not None:
+            return routed
     if dst.exists():
         raise FileError(f"같은 이름이 이미 있습니다: {dst.relative_to(_root(scope)).as_posix()}")
     if src.is_dir() and (dst == src or src in dst.parents):
@@ -579,6 +583,46 @@ def move(scope: str, src_rel: str, dst_rel: str) -> dict:
     out = dst.relative_to(_root(scope)).as_posix()
     log.info("move scope=%s %s -> %s", scope, src_rel, out)
     return {"from": src_rel, "to": out}
+
+
+def _pinned_root_move(src: Path, dst: Path) -> dict | None:
+    """A move of a folder the backend pins by name (bots.json, personas.json).
+
+    projects/<봇폴더> renamed in place (projects/<새이름>) is a project rename:
+    notes, asset rules, studio output and review sidecars follow it. Moving it
+    anywhere else, moving hina/<봇폴더>, or touching projects/페르소나 and a
+    persona's folder is refused - the mapping would silently break and the
+    next out_dir() would grow an empty folder under the old name.
+    None = an ordinary move, carry on.
+    """
+    root = _root(SPACE)
+    try:
+        sp = src.relative_to(root).parts
+        dp = dst.relative_to(root).parts
+    except ValueError:
+        return None
+    top = workspace.PERSONA_TOP
+    if len(sp) == 2 and sp[0] == "projects" and sp[1] == top:
+        raise FileError(f"projects/{top} 는 페르소나 폴더 묶음이라 옮기거나 이름을 바꿀 수 없습니다")
+    if len(sp) == 3 and sp[:2] == ("projects", top) and workspace.persona_key_for_folder(sp[2]):
+        raise FileError("페르소나 폴더는 RisuAI 에서 페르소나 이름을 바꾸면 따라 바뀝니다 (직접 옮길 수 없습니다)")
+    if len(sp) != 2 or sp[0] not in ("projects", "hina"):
+        return None
+    key = workspace.bot_key_for_folder(sp[1])
+    if not key:
+        return None
+    if sp[0] == "hina":
+        raise FileError(f"hina/{sp[1]} 는 봇 작업 폴더라 직접 옮길 수 없습니다 - projects/{sp[1]} 의 이름을 바꾸면 함께 바뀝니다")
+    if dst == src:
+        return None  # the ordinary "already there" refusal
+    if len(dp) != 2 or dp[0] != "projects":
+        raise FileError(f"projects/{sp[1]} 는 봇 프로젝트 폴더라 다른 폴더 안으로 옮길 수 없습니다 (이름 바꾸기만 됩니다)")
+    try:
+        r = workspace.rename_folder_by_key(key, dp[1])
+    except workspace.WorkspaceError as e:
+        raise FileError(str(e)) from e
+    log.info("move of a pinned project root became a rename: %s -> %s", r["old"], r["folder"])
+    return {"from": f"projects/{r['old']}", "to": f"projects/{r['folder']}", "project": r}
 
 
 def copy(scope: str, src_rel: str, dst_rel: str) -> dict:

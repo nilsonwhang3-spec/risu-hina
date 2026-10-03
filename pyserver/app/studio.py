@@ -1638,6 +1638,29 @@ def _side(kind: str, folder: str) -> Path:
     return root() / kind / f"{_slug(folder)}.json"
 
 
+def rekey_sidecars(pairs: list[tuple[str, str]]) -> int:
+    """Carry review sidecars (selection, groups) from moved folders to their
+    new paths: they are keyed by a slug of the folder path, so a moved folder
+    otherwise loses every decision made in it. A target that already has its
+    own file is left alone. `pairs` = (old folder, new folder), space-relative.
+    Returns how many files moved."""
+    n = 0
+    for old, new in pairs:
+        for kind in (SELECTION_DIR, GROUP_DIR):
+            dst = _side(kind, new)
+            if dst.is_file():
+                continue
+            # Only the current slug: the legacy ASCII slug is shared by many
+            # Korean folders, so carrying it could take another folder's file.
+            src = _side(kind, old)
+            if not src.is_file() or src == dst:
+                continue
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            src.replace(dst)
+            n += 1
+    return n
+
+
 def _write_review_json(path: Path, value: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + "." + uuid.uuid4().hex + ".tmp")
