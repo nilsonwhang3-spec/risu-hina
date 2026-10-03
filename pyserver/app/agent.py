@@ -1813,6 +1813,11 @@ def build(model: Any = None) -> Agent[Deps]:
           extra / negativeExtra   appended to the prompt / negative
           params         {"steps","scale","cfg_rescale","sampler","noise_schedule","width","height",
                          "qualityToggle","ucPreset", ...} - unknown keys pass through as they are
+          ucPreset       the negative block NovelAI prepends: 0 Heavy · 1 Light · 2 None (default) ·
+                         3 Human Focus (= Heavy + more). Heavy, Light and Human Focus all contain
+                         `nsfw`; for explicit images use 2. The names "none"/"heavy"/"light" also work.
+                         The whole negative is the styles' + characters' + scenes' negatives +
+                         negativeExtra - there is no field that replaces it.
 
         Library files are read and written with the ordinary file tools (read_file / write_file).
         A style .md is front matter + `## positive` / `## negative`. Its front matter may also carry

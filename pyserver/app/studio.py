@@ -752,6 +752,14 @@ def normalize_spec(spec: dict) -> dict:
                          for c in (out.get("characters") or [])]
     if isinstance(out.get("scenePreset"), str) and out["scenePreset"]:
         out["scenePreset"] = _by_name("scenes", str(out["scenePreset"]))
+    # "None" / "heavy" become their numbers; an unreadable value is refused
+    # here instead of reaching NovelAI as a string (HTTP 500, §1-87).
+    params = out.get("params")
+    if isinstance(params, dict) and params.get("ucPreset") not in (None, ""):
+        try:
+            out["params"] = {**params, "ucPreset": nai.uc_preset_index(params["ucPreset"])}
+        except ValueError as e:
+            raise StudioError(str(e)) from None
     return out
 
 

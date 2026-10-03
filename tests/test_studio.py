@@ -173,6 +173,11 @@ check("a style name resolves to its path", n["styles"] == ["studio/config/styles
       str(n["styles"]))
 raises("an unknown name is refused", studio.normalize_spec,
        {"styles": ["없는스타일"], "characters": []})
+n = studio.normalize_spec({"styles": [], "characters": [], "params": {"ucPreset": "None"}})
+check("a spec's ucPreset name becomes its number before the job (§1-87)",
+      n["params"]["ucPreset"] == 2, repr(n["params"]))
+raises("a spec's unreadable ucPreset is refused before the job", studio.normalize_spec,
+       {"styles": [], "characters": [], "params": {"ucPreset": "nope"}})
 files.upload(files.SPACE, "dup1.md", text="---\nname: 중복이름\n---\nA", into="studio/styles")
 files.upload(files.SPACE, "dup2.md", text="---\nname: 중복이름\n---\nB", into="studio/styles")
 try:
@@ -748,7 +753,7 @@ print("\ntest_quality_and_uc_merge")
 # The flags are metadata; the text is what acts (the reference tool web captures). Quality
 # tags append to the prompt, the UC preset text prefixes the negative, and
 # v4_prompt / v4_negative_prompt carry the merged text so `input` can mirror it.
-pq = nai.build_parameters("1girl", "bad hands", {"qualityToggle": True})
+pq = nai.build_parameters("1girl", "bad hands", {"qualityToggle": True, "ucPreset": 0})
 check("quality tags ride the prompt text",
       pq["v4_prompt"]["caption"]["base_caption"] == "1girl" + nai.QUALITY_SUFFIX,
       pq["v4_prompt"]["caption"]["base_caption"])
@@ -770,6 +775,18 @@ check("ucPreset 2 is None too, explicitly",
       2 in nai.UC_PRESETS and nai.build_parameters("x", "y", {"ucPreset": 2})["negative_prompt"] == "y")
 check("ucPreset 3 is Human Focus, NOT None",
       nai.build_parameters("x", "y", {"ucPreset": 3})["negative_prompt"].startswith("nsfw"))
+# §1-87: unset used to mean Heavy, which put `nsfw` in every negative; an
+# agent's "None" string reached NovelAI as-is and came back HTTP 500.
+check("the default UC preset is None - no nsfw block unless asked for",
+      pd["negative_prompt"] == "y" and pd["ucPreset"] == 2, pd["negative_prompt"][:60])
+for name, want in (("None", 2), ("none", 2), ("Heavy", 0), ("light", 1), ("Human Focus", 3), ("2", 2)):
+    got = nai.build_parameters("x", "y", {"ucPreset": name})
+    check(f"ucPreset {name!r} is sent as the number {want}", got["ucPreset"] == want, repr(got["ucPreset"]))
+try:
+    nai.build_parameters("x", "y", {"ucPreset": "nope"})
+    check("an unknown ucPreset is refused before the request", False)
+except ValueError as e:
+    check("an unknown ucPreset is refused before the request", "Heavy" in str(e), str(e))
 
 print("\ntest_reference_mode")
 # 바이브와 캐릭터 레퍼런스는 함께 실리지 않는다: refMode 가 고른다.

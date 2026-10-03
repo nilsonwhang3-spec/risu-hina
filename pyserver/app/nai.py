@@ -68,7 +68,9 @@ DEFAULTS: dict[str, Any] = {
     "sampler": "k_euler_ancestral",
     "steps": 28,
     "n_samples": 1,
-    "ucPreset": 0,
+    # None (§1-87): Heavy/Light/Human Focus all put `nsfw` and their quality
+    # block in the negative, which nobody chose when they left it unset.
+    "ucPreset": 2,
     "qualityToggle": False,
     "cfg_rescale": 0.4,
     "noise_schedule": "karras",
@@ -97,6 +99,28 @@ UC_PRESETS: dict[int, str] = {
     3: _UC_HEAVY + ", @_@, mismatched pupils, glowing eyes, bad anatomy",
     4: "",
 }
+# Names an agent (or a hand-written spec) reaches for. A string used to be
+# forwarded to NovelAI as-is and came back as HTTP 500, which an agent then
+# read as "the studio forces the Heavy block" (§1-87).
+_UC_NAMES = {"heavy": 0, "light": 1, "none": 2, "없음": 2, "humanfocus": 3, "human": 3}
+
+
+def uc_preset_index(value: Any) -> int:
+    """`ucPreset` as the integer NovelAI takes: 0 Heavy · 1 Light · 2/4 None ·
+    3 Human Focus. Accepts those names too; anything else is refused here,
+    before it can cost a request."""
+    if value is None or value == "":
+        return int(DEFAULTS["ucPreset"])
+    if isinstance(value, bool):
+        raise ValueError(f"ucPreset 값을 읽을 수 없습니다: {value!r}")
+    if isinstance(value, (int, float)) and int(value) in UC_PRESETS:
+        return int(value)
+    key = str(value).strip().lower().replace(" ", "").replace("_", "")
+    if key.lstrip("-").isdigit() and int(key) in UC_PRESETS:
+        return int(key)
+    if key in _UC_NAMES:
+        return _UC_NAMES[key]
+    raise ValueError(f"ucPreset 은 0 Heavy · 1 Light · 2 None · 3 Human Focus 중 하나입니다 (받은 값: {value!r})")
 
 # `req_type` values the service recognises. An unknown one is refused by name,
 # which is how this list was found; the control is in docs/09 §7b. These are
@@ -330,10 +354,8 @@ def build_parameters(prompt: str, negative: str, params: dict | None = None,
     p = {**DEFAULTS, **(params or {})}
     if p.get("qualityToggle"):
         prompt = f"{prompt}{QUALITY_SUFFIX}" if prompt.strip() else QUALITY_SUFFIX.strip(", ")
-    try:
-        uc = UC_PRESETS.get(int(p.get("ucPreset") or 0), "")
-    except (TypeError, ValueError):
-        uc = ""
+    p["ucPreset"] = uc_preset_index(p.get("ucPreset"))
+    uc = UC_PRESETS[p["ucPreset"]]
     if uc:
         negative = f"{uc}, {negative}" if negative.strip() else uc
     p["negative_prompt"] = negative

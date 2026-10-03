@@ -1,5 +1,22 @@
 # 06. Implementation status — as of 2026-09-30 (v0.15.31, Risu Hina)
 
+## unreleased (2026-10-03): §1-87 UC preset: default None, names accepted, the numbers documented
+
+- **Field report:** the agent tried to drop `nsfw` from the negative and concluded "the studio core assembles
+  the Heavy block itself; no spec field can remove it", then worked around it with `2::nsfw::` in the prompt.
+- **What actually happened (job rows on zikmunt-pc):** it sent `ucPreset: "None"` and `"none"` (forwarded to
+  NovelAI as strings -> HTTP 500) and `3` (Human Focus, which *is* Heavy plus more). It never sent `2`, which
+  removes the block - the tool text listed `ucPreset` without saying what the numbers mean. The style in use
+  carried no ucPreset; the Heavy came from the default (0) filling the unset key. Explicit values were never
+  overridden.
+- **Fix:** the default is 2 (None) in the backend and the panel; a panel card saved under the old default
+  migrates once (0 -> 2, flag `ucDefault2`), and 4 (the web client's None) shows as 없음. `nai.uc_preset_index`
+  accepts the names (none/heavy/light/human focus/없음) and refuses anything else - in `normalize_spec`,
+  before a job exists, and in `build_parameters`. The tool text spells out 0/1/2/3 and that Heavy, Light and
+  Human Focus all contain `nsfw`.
+- Verified: test_studio (default None, names -> numbers, unknown refused in build and in normalize_spec),
+  plugin_smoke (the panel sends 2).
+
 ## unreleased (2026-10-03): §1-86 a picked fragment shows its text
 
 - **Field report:** "조각 프롬프트에서 프롬프트를 골라도 오른쪽에 조각 프롬 내용이 안 보인다".
