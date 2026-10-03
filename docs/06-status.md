@@ -1,4 +1,11 @@
-# 06. Implementation status — as of 2026-09-30 (v0.15.31, Risu Hina)
+# 06. Implementation status — as of 2026-10-03 (v0.15.32, Risu Hina)
+
+## 0.15.32 (2026-10-03): §1-83 ~ §1-87 released
+
+Everything below down to 0.15.31 ships in this version: `import risuhina` on the Windows install (§1-83, GitHub
+#2), an approved chat 반영 becomes the baseline (§1-84, #1), studio 검수 and 자세히 보기 at PC quality (§1-85), a
+picked fragment shows its text (§1-86) and the UC preset defaulting to None with its numbers documented
+(§1-87). §1-83 ~ §1-86 ran on test-server staging before release; §1-87 did not (a batch was running).
 
 ## unreleased (2026-10-03): §1-87 UC preset: default None, names accepted, the numbers documented
 
