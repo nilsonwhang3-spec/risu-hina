@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.15.31
+//@display-name Risu Hina v0.15.32
 //@api 3.0
-//@version 0.15.31
+//@version 0.15.32
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -181,7 +181,7 @@
           this.tokenSafe = true;
           this.lastHealth = body;
           this.probeInfo = "";
-          this.gate = versionGate("0.15.31", String(body.version || ""));
+          this.gate = versionGate("0.15.32", String(body.version || ""));
           return body;
         }
         /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -1576,6 +1576,20 @@
     ta.addEventListener("input", render);
     ta.addEventListener("scroll", syncScroll);
     try {
+      const native = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value");
+      if (native?.get && native.set) {
+        Object.defineProperty(ta, "value", {
+          configurable: true,
+          get: () => native.get.call(ta),
+          set: (v) => {
+            native.set.call(ta, v);
+            render();
+          }
+        });
+      }
+    } catch {
+    }
+    try {
       const slot = ta;
       slot.__hinaRo?.disconnect();
       const ro = new ResizeObserver(() => {
@@ -2943,8 +2957,10 @@ name: ${nm}
         height: 1216,
         count: 1,
         seed: "",
+        // 2 = None: the default no longer slips `nsfw` and the Heavy block into
+        // every negative (§1-87). 4 is NovelAI's web index for the same None.
         quality: false,
-        ucPreset: 0,
+        ucPreset: 2,
         // null = not sent: NovelAI's own default applies (§1-77).
         eulerBug: null,
         brownian: null,
@@ -2960,6 +2976,12 @@ name: ${nm}
       try {
         const savedGen = JSON.parse(localStorage.getItem(GEN_KEY) || "null");
         if (savedGen && typeof savedGen === "object") Object.assign(gen, savedGen);
+        const g = gen;
+        if (!g.ucDefault2) {
+          if (gen.ucPreset === 0) gen.ucPreset = 2;
+          g.ucDefault2 = true;
+        }
+        if (gen.ucPreset === 4) gen.ucPreset = 2;
         gen.folder = canonPath(gen.folder) || OUTPUT_ROOT;
       } catch {
       }
@@ -4311,12 +4333,14 @@ name: ${nm}
             if (r.host.kind === "host_writeback") {
               const out = await this.writeBack();
               if (!out.verified) throw new Error(out.drift || "RisuAI \uC800\uC7A5 \uACB0\uACFC\uB97C \uD655\uC778\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4. \uBBF8\uBC18\uC601 \uBCC0\uACBD\uC744 \uBCF4\uC874\uD588\uC2B5\uB2C8\uB2E4.");
+              const shipped = out.mode !== "noop" || out.lore > 0 || out.memory > 0;
+              if (shipped) await this.commit("\uBC18\uC601 \uC9C1\uC804");
               const bits = [
                 out.applied ? `\uD134 ${out.applied}\uAC74` : "",
                 out.lore ? `\uCC57 \uB85C\uC5B4\uBD81 ${out.lore}\uAC74` : "",
                 out.memory ? `\uC7A5\uAE30\uAE30\uC5B5 ${out.memory}\uAC74` : ""
               ].filter(Boolean);
-              detail = out.mode === "noop" ? "\uCC57\uC5D0 \uBC18\uC601\uD560 \uBCC0\uACBD\uC774 \uC5C6\uC5C8\uC2B5\uB2C8\uB2E4." : `${bits.length ? bits.join(" \xB7 ") : "\uCC57 \uBCC0\uACBD"}\uC744 RisuAI\uC5D0 \uBC18\uC601\uD558\uACE0 \uC800\uC7A5\uC744 \uD655\uC778\uD588\uC2B5\uB2C8\uB2E4.`;
+              detail = !shipped ? "\uCC57\uC5D0 \uBC18\uC601\uD560 \uBCC0\uACBD\uC774 \uC5C6\uC5C8\uC2B5\uB2C8\uB2E4." : `${bits.length ? bits.join(" \xB7 ") : "\uCC57 \uBCC0\uACBD"}\uC744 RisuAI\uC5D0 \uBC18\uC601\uD558\uACE0 \uC800\uC7A5\uC744 \uD655\uC778\uD588\uC2B5\uB2C8\uB2E4.`;
             } else if (r.host.kind === "host_save_copy") {
               const name = String(r.host.args?.name || "") || "\uC0AC\uBCF8";
               await this.saveCopy(name);
@@ -7032,9 +7056,11 @@ button.iconbtn.danger { background: #b91c1c; border-color: #b91c1c; color: #fff;
 /* The \uC378\uB124\uC77C view's big pick: the clicked image above the grid (\xA71-40). */
 /* The artifact viewer is a modal (\xA71-43): wide, the picture as large as the
    screen allows, text scrolls inside. */
-.modalbox.artifactmodal { max-width: min(88vw, 1200px); width: auto; max-height: 90vh; display: flex; flex-direction: column; }
+.modalbox.artifactmodal { max-width: min(94vw, 1600px); width: auto; max-height: 94vh; display: flex; flex-direction: column; }
 .artifactmodal .modalbody { overflow: auto; min-height: 0; }
-.artifactmodal .artifactview img { max-width: 100%; max-height: 72vh; width: auto; display: block; margin: 0 auto; }
+/* The picture fills the height the modal has (\xA71-85): 72vh showed a 1216px
+ * portrait at ~700px on a 1080p PC, which read as low resolution. */
+.artifactmodal .artifactview img { max-width: 100%; max-height: calc(94vh - 120px); width: auto; display: block; margin: 0 auto; }
 .artifactmodal .artifactbody { overflow: auto; }
 .artifactmodal .artifactbody.original-size img { max-width: none; max-height: none; width: auto; touch-action: pan-x pan-y pinch-zoom; }
 .artifactmodal .artifactbody.original-size .wsimg { display: block; max-width: none; }
@@ -15604,10 +15630,10 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           return;
         }
         if (!r.newer) {
-          const mismatch = r.current !== "0.15.31";
+          const mismatch = r.current !== "0.15.32";
           const ahead = r.ahead ?? (!!r.latest && r.latest !== r.current);
           say(
-            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.31"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
+            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.32"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
             mismatch || ahead ? "" : "ok"
           );
           return;
@@ -15698,7 +15724,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.15.31",
+            version: "0.15.32",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -16396,7 +16422,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.31"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.32"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -18483,7 +18509,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           { value: 0, label: "Heavy" },
           { value: 1, label: "Light" },
           { value: 3, label: "Human Focus" },
-          { value: 4, label: "\uC5C6\uC74C" }
+          { value: 2, label: "\uC5C6\uC74C" }
         ])
       ),
       two(numField("\uAC00\uB85C", "width"), numField("\uC138\uB85C", "height")),
@@ -18545,11 +18571,12 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     const sel = el("select");
     for (const o of options ?? values.map((v) => ({ value: v, label: v }))) {
       const opt = el("option", { value: String(o.value), text: String(o.label) });
-      if (String(gen[key]) === String(o.value)) opt.setAttribute("selected", "selected");
+      const cur = key === "ucPreset" && gen.ucPreset === 4 ? 2 : gen[key];
+      if (String(cur) === String(o.value)) opt.setAttribute("selected", "selected");
       sel.appendChild(opt);
     }
     sel.addEventListener("change", () => {
-      if (key === "ucPreset") gen.ucPreset = Number(sel.value) || 0;
+      if (key === "ucPreset") gen.ucPreset = Number(sel.value);
       else gen[key] = sel.value;
       persistGen();
       styleSync.edited();
@@ -22467,7 +22494,8 @@ ${negative.value.trim()}
       void (async () => {
         try {
           const displayWidth = mount2.getBoundingClientRect().width || 360;
-          const width = Math.min(1536, Math.max(768, Math.ceil(displayWidth * (window.devicePixelRatio || 1) / 128) * 128));
+          const floor = smallScreen() ? 768 : 1024;
+          const width = Math.min(1536, Math.max(floor, Math.ceil(displayWidth * (window.devicePixelRatio || 1) / 128) * 128));
           const url = await blobUrl(f.path, f.modified ? String(f.modified) : "", { thumb: true, w: width });
           if (!mount2.isConnected || my !== gen2) return;
           clear(mount2);
@@ -23353,7 +23381,7 @@ ${negative.value.trim()}
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.31"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.32"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
@@ -23444,7 +23472,7 @@ ${negative.value.trim()}
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.15.31" }),
+        el("span", { class: "dim", text: "v0.15.32" }),
         healthEl,
         el("span", { class: "spacer" }),
         // 승인 / 반영 for the whole bot, from every tab (§1-76).
@@ -23774,6 +23802,6 @@ ${negative.value.trim()}
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.15.31"} loaded`);
+    console.log(`[risu-hina] v${"0.15.32"} loaded`);
   })();
 })();
