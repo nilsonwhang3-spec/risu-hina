@@ -2670,7 +2670,7 @@ console.log('\ntest_studio_request_settings');
         && planBody?.params?.sampler === 'k_euler_ancestral'
         && planBody?.params?.noise_schedule === 'karras'
         && planBody?.params?.qualityToggle === false
-        && planBody?.params?.ucPreset === 0
+        && planBody?.params?.ucPreset === 2
         && planBody?.params?.steps === 28,
         JSON.stringify(planBody?.params));
   pressEscape(document);

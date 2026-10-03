@@ -204,7 +204,7 @@ export function openParamsDialog(): void {
     two(selField('스케줄', 'schedule', ['karras', 'native', 'exponential', 'polyexponential']),
         selField('UC 프리셋', 'ucPreset', [], [
           { value: 0, label: 'Heavy' }, { value: 1, label: 'Light' },
-          { value: 3, label: 'Human Focus' }, { value: 4, label: '없음' }])),
+          { value: 3, label: 'Human Focus' }, { value: 2, label: '없음' }])),
     two(numField('가로', 'width'), numField('세로', 'height')),
     two(triField('Euler 버그 재현', 'eulerBug', 'deliberate_euler_ancestral_bug'),
         triField('Brownian 노이즈', 'brownian', 'prefer_brownian')),
@@ -265,11 +265,13 @@ function selField(label: string, key: 'sampler' | 'schedule' | 'ucPreset', value
   const sel = el('select') as HTMLSelectElement;
   for (const o of options ?? values.map((v) => ({ value: v as string | number, label: v }))) {
     const opt = el('option', { value: String(o.value), text: String(o.label) });
-    if (String(gen[key]) === String(o.value)) opt.setAttribute('selected', 'selected');
+    // A style saved with 4 (the web client's None) shows as 없음.
+    const cur = key === 'ucPreset' && gen.ucPreset === 4 ? 2 : gen[key];
+    if (String(cur) === String(o.value)) opt.setAttribute('selected', 'selected');
     sel.appendChild(opt);
   }
   sel.addEventListener('change', () => {
-    if (key === 'ucPreset') gen.ucPreset = Number(sel.value) || 0;
+    if (key === 'ucPreset') gen.ucPreset = Number(sel.value);
     else gen[key] = sel.value;
     persistGen();
     styleSync.edited();

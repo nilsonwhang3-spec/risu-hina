@@ -166,7 +166,9 @@ export const gen = {
   steps: 28, scale: 5, rescale: 0.4,
   sampler: 'k_euler_ancestral', schedule: 'karras',
   width: 832, height: 1216, count: 1, seed: '',
-  quality: false, ucPreset: 0,
+  // 2 = None: the default no longer slips `nsfw` and the Heavy block into
+  // every negative (§1-87). 4 is NovelAI's web index for the same None.
+  quality: false, ucPreset: 2,
   // null = not sent: NovelAI's own default applies (§1-77).
   eulerBug: null as boolean | null, brownian: null as boolean | null,
   folder: OUTPUT_ROOT,
@@ -178,6 +180,11 @@ export const gen = {
 try {
   const savedGen = JSON.parse(localStorage.getItem(GEN_KEY) || 'null') as Partial<typeof gen> | null;
   if (savedGen && typeof savedGen === 'object') Object.assign(gen, savedGen);
+  // Once: a card saved while Heavy was the default carries that default,
+  // not a choice. 4 is the same None under the web client's index.
+  const g = gen as typeof gen & { ucDefault2?: boolean };
+  if (!g.ucDefault2) { if (gen.ucPreset === 0) gen.ucPreset = 2; g.ucDefault2 = true; }
+  if (gen.ucPreset === 4) gen.ucPreset = 2;
   // A folder saved before the config/output split still points at images/.
   gen.folder = canonPath(gen.folder) || OUTPUT_ROOT;
 } catch { /* storage may be unavailable in the iframe */ }
