@@ -2279,6 +2279,13 @@ console.log('\ntest_studio_cards');
       text: '---' + String.fromCharCode(10) + 'name: 스모크스타일' + String.fromCharCode(10)
         + '---' + String.fromCharCode(10) + '스타일본문' }),
   });
+  // A style in a subfolder: the picker groups it under that folder.
+  await fetch(backend.url + '/files/upload', {
+    method: 'POST', headers: auth,
+    body: JSON.stringify({ name: '폴더스타일.md', dir: 'studio/styles/스모크폴더',
+      text: '---' + String.fromCharCode(10) + 'name: 폴더스타일' + String.fromCharCode(10)
+        + '---' + String.fromCharCode(10) + '폴더본문' }),
+  });
   clickById(document, 'tab-files');
   await settle(200);
   clickById(document, 'tab-studio');
@@ -2294,6 +2301,18 @@ console.log('\ntest_studio_cards');
     .find((r) => /스모크스타일/.test(r.textContent || ''));
   check('the list opens in a modal with the style', !!modalRow(),
         (document.querySelector('.modalback')?.textContent || '').slice(0, 200));
+  {
+    const kids = [...document.querySelectorAll('.modalback .pickfolder, .modalback .pickrow')];
+    const head = kids.findIndex((n) => n.classList.contains('pickfolder') && /스모크폴더/.test(n.textContent || ''));
+    const inFolder = kids.findIndex((n) => n.classList.contains('pickrow') && /폴더스타일/.test(n.textContent || ''));
+    const top = kids.findIndex((n) => n.classList.contains('pickrow') && /스모크스타일/.test(n.textContent || ''));
+    check('styles group by folder in the picker: top level first, then the folder and its style',
+          head >= 0 && inFolder > head && top >= 0 && top < head, `${top} ${head} ${inFolder}`);
+    check('each style row can move between folders',
+          [...(modalRow()?.querySelectorAll('button') ?? [])].some((b) => b.textContent === '이동'));
+    check('the picker offers ＋ 폴더',
+          [...document.querySelectorAll('.modalback button')].some((b) => b.textContent === '＋ 폴더'));
+  }
   const sel = [...(modalRow()?.querySelectorAll('button') ?? [])]
     .find((b) => (b.textContent || '') === '선택');
   sel?.dispatchEvent(new window.Event('click', { bubbles: true }));
@@ -2309,8 +2328,21 @@ console.log('\ntest_studio_cards');
   // The picked style is edited in place - 긍정/부정 split, debounced save.
   const pos = explorer()?.querySelector('.styleedit textarea');
   check('the picked style unfolds 긍정/부정 in the column',
-        explorer()?.querySelectorAll('.stylefold .styleedit textarea').length === 2,
+        explorer()?.querySelectorAll('.styleedit .promptfold textarea').length === 2,
         (explorer()?.textContent || '').slice(0, 200));
+  // Each prompt folds on its own and leaves its first line as a preview.
+  const posFold = explorer()?.querySelector('.styleedit .promptfold');
+  const foldBtn = posFold?.querySelector('.promptfoldhead button');
+  foldBtn?.click();
+  const posBody = posFold?.children[1];
+  const peek = posFold?.querySelector('.promptpeek');
+  check('긍정 프롬프트 folds alone, showing its first line',
+        posBody?.style.display === 'none' && peek?.style.display !== 'none'
+        && (peek?.textContent || '').includes('스타일본문')
+        && explorer()?.querySelectorAll('.promptfold')[1]?.children[1]?.style.display !== 'none',
+        `${posBody?.style.display} | ${peek?.textContent}`);
+  foldBtn?.click();
+  check('and unfolds again', posBody?.style.display === '');
   const temporary = explorer()?.querySelectorAll('textarea[aria-label$="(저장되지 않음)"]');
   check('temporary positive and negative prompts have separate unsaved fields', temporary?.length === 2);
   if (temporary?.length === 2) {

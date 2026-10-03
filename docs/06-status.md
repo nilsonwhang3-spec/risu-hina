@@ -1,5 +1,20 @@
 # 06. Implementation status — as of 2026-10-03 (v0.15.32, Risu Hina)
 
+## unreleased (2026-10-03): §1-88 style folders · each style prompt folds
+
+- **Field report:** "에셋스튜디오 스타일 프리셋도 폴더 만들어줘 / 왼쪽 패널에서 프롬프트 접을 수 있게".
+- **Style folders:** the backend already listed every area recursively with a `folder` per item, and active
+  styles / name lookup already worked in subfolders - only the picker was flat. `openListPicker` takes an
+  opt-in `folders` (list / create / move / createIn): top-level rows first, then one foldable section per
+  folder with ＋ (new style there), 이동 on each row, ＋ 폴더 under the list. The other pickers are unchanged.
+  The current-style row shows the folder as a badge.
+- **Prompt folds:** the single faint "프롬프트 수정" fold is gone; 긍정 and 부정 each fold with a −/+ header
+  like the temporary prompts, keep their first line as a preview when folded, and remember their state
+  (`hina.studioPromptOpen.pos/neg`, seeded from the old `hina.studioStyleOpen`).
+- Verified: plugin_smoke (grouping order, 이동, ＋ 폴더, one prompt folds alone and unfolds). Two gate runs
+  each had one unrelated timing failure (a 2.2s request window; a 120s MCP wait) that passed in the other run
+  and alone - the machine was slow that day.
+
 ## 0.15.32 (2026-10-03): §1-83 ~ §1-87 released
 
 Everything below down to 0.15.31 ships in this version: `import risuhina` on the Windows install (§1-83, GitHub

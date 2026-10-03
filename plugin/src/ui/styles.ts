@@ -1315,6 +1315,10 @@ label.row { align-items: center; gap: 6px; }
 .styleedit textarea { width: 100%; box-sizing: border-box; resize: vertical; }
 .styleedit .field { display: block; margin-bottom: 6px; }
 .styleedit .field > span { display: block; font-size: 11px; opacity: .7; margin-bottom: 2px; }
+/* Each style prompt folds on its own; folded, its first line stays as a preview. */
+.promptfoldhead { gap: 6px; align-items: center; margin-bottom: 2px; cursor: default; min-width: 0; }
+.promptfoldhead .promptfoldlabel { font-size: 11px; opacity: .7; white-space: nowrap; }
+.promptfoldhead .promptpeek { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
 div.field > span:first-child { display: block; font-size: 11px; opacity: .7; margin-bottom: 2px; }
 div.field { min-width: 0; }
 
@@ -1338,7 +1342,6 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
 .refslider input[type=range] { flex: 1; min-width: 0; margin: 0; }
 .refslider .hint { flex: 0 0 auto; }
 .refval { min-width: 30px; text-align: right; font-family: var(--mono, monospace); }
-.stylefold summary { font-size: 12px; }
 
 /* Notices are toasts in the corner - never a bar that shoves the centre. */
 .toastwrap { position: fixed; top: 12px; right: 12px; z-index: 60; display: flex; flex-direction: column; gap: 6px; max-width: min(420px, 80vw); pointer-events: none; }

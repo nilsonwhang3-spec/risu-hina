@@ -3,8 +3,9 @@
  *
  *   1. the style dropdown - one style is selected, the way an agent preset
  *      is: a compact current row, and 선택 · 수정 · 삭제 · 추가 behind the ›.
- *   2. the selected style's 긍정 / 부정 prompts, always unfolded and saved as
- *      you type (debounced) - the edit-then-generate-one loop lives here.
+ *   2. the selected style's 긍정 / 부정 prompts, each foldable on its own (a
+ *      one-line preview stays when folded) and saved as you type (debounced) -
+ *      the edit-then-generate-one loop lives here.
  *   3. the tool buttons: 캐릭터 swaps this column to the character view,
  *      조각 opens the fragment organizer in the centre.
  *
@@ -13,11 +14,11 @@
  * place (hub.syncBadges) instead of redrawing.
  */
 import { el } from '../dom';
-import { askName } from '../kit';
+import { askName, namePopover } from '../kit';
 import { attachHilite } from '../hilite';
 import { state, type StudioItem } from '../../state';
 import { pickerRow, openListPicker, type PickerEntry } from '../pickers';
-import { S, hub, activeOf, checkUnresolved, newCard, msg, fragKeys, temporaryPrompt, gen, persistGen, styleSync } from './store';
+import { S, hub, activeOf, checkUnresolved, newCard, msg, fragKeys, temporaryPrompt, gen, persistGen, styleSync, cardStem } from './store';
 import { openParamsDialog } from './gen';
 import { parseStyleDoc, buildStyleDoc, type StyleDoc, genFromMeta, writeGenMeta, describeGen, type GenSettings } from './stylefile';
 
@@ -32,8 +33,28 @@ let charBadge: HTMLElement | null = null;
 let fragBadge: HTMLElement | null = null;
 let fragErrBadge: HTMLElement | null = null;
 
-function styleOpen(): boolean {
-  try { return localStorage.getItem('hina.studioStyleOpen') !== '0'; } catch { return true; }
+const STYLES_DIR = 'studio/config/styles';
+/** Folders made this session that hold no style yet (the listing cannot see
+ * an empty directory). */
+const extraStyleFolders = new Set<string>();
+
+function styleFolder(i: StudioItem): string {
+  const f = String(i.folder ?? '');
+  return f === '.' ? '' : f;
+}
+
+/** Each prompt folds on its own (user: "왼쪽 패널에서 프롬프트 접을 수
+ * 있게"). The old single fold of both, `hina.studioStyleOpen`, seeds them. */
+function promptOpen(which: 'pos' | 'neg'): boolean {
+  try {
+    const v = localStorage.getItem('hina.studioPromptOpen.' + which);
+    if (v !== null) return v !== '0';
+    return localStorage.getItem('hina.studioStyleOpen') !== '0';
+  } catch { return true; }
+}
+
+function setPromptOpen(which: 'pos' | 'neg', open: boolean): void {
+  try { localStorage.setItem('hina.studioPromptOpen.' + which, open ? '1' : '0'); } catch { /* fine */ }
 }
 
 function styleItems(): StudioItem[] {
@@ -56,26 +77,20 @@ export function buildLeftPrompt(mount: HTMLElement): void {
     : '스타일 추가';
   mount.appendChild(el('div', { class: 'sectiontitle', style: { padding: '6px 8px 0' }, text: '스타일 프롬프트' }));
   mount.appendChild(el('div', { style: { padding: '4px 8px 0' } }, [
-    pickerRow(cur ? { name: cur.name, hint: cur.description || undefined } : null, {
+    pickerRow(cur ? { name: cur.name, hint: cur.description || undefined,
+      badges: styleFolder(cur) ? [{ text: styleFolder(cur) }] : undefined } : null, {
       title: pickTitle,
       emptyHint: items.length ? '선택된 스타일 없음 — › 에서 고르세요' : '스타일이 없습니다. › 에서 하나 만들어 주세요.',
       onOpen: openStylePicker,
     }),
   ]));
 
-  // --- the selected style, edited in place - foldable, remembered ------------------
+  // --- the selected style, edited in place - each prompt folds, remembered ----------
   const editBox = el('div', { class: 'styleedit' });
   if (cur) buildStyleEditor(editBox, cur.path);
   else editBox.appendChild(el('div', { class: 'hint', style: { padding: '6px 0' },
     text: '스타일을 선택하면 긍정/부정 프롬프트를 여기서 바로 수정합니다.' }));
-  const fold = el('details', { class: 'advbox stylefold', ...(styleOpen() ? { open: true } : {}) }, [
-    el('summary', { text: '프롬프트 수정' }),
-    editBox,
-  ]) as HTMLDetailsElement;
-  fold.addEventListener('toggle', () => {
-    try { localStorage.setItem('hina.studioStyleOpen', fold.open ? '1' : '0'); } catch { /* fine */ }
-  });
-  mount.appendChild(fold);
+  mount.appendChild(editBox);
   buildTemporaryPrompt(mount);
   buildTemporaryPrompt(mount, true);
 
@@ -167,7 +182,33 @@ function openStylePicker(): void {
       name: i.name,
       hint: i.description || undefined,
       selected: !!i.enabled,
+      group: styleFolder(i),
     })),
+    // Styles in folders, like fragments (user: "스타일 프리셋도 폴더").
+    folders: {
+      list: () => [...new Set([...extraStyleFolders, ...styleItems().map(styleFolder)])].filter(Boolean),
+      create: (anchor) => new Promise<string>((resolve) => {
+        namePopover(anchor, {
+          label: '새 폴더 이름', ok: '만들기',
+          onSubmit: async (raw) => {
+            const nm = cardStem(raw);
+            if (!nm) return;
+            await state.mkdirFile(`${STYLES_DIR}/${nm}`);
+            extraStyleFolders.add(nm);
+            resolve(nm);
+          },
+        });
+      }),
+      move: async (e, folder) => {
+        // A pending prompt edit is saved under the old path first.
+        await flushSave();
+        const r = await state.moveFile(e.id, STYLES_DIR + (folder ? '/' + folder : ''));
+        if (loadedDoc?.path === e.id) loadedDoc = { ...loadedDoc, path: r.to };
+        await hub.refreshArea('styles');
+        hub.drawLeft();
+      },
+      createIn: (folder) => createStyle(folder),
+    },
     onSelect: (e) => selectStyle(e.id),
     // No 수정 here (§1-39): a style is edited in place in this column; the
     // centre card editor for the same file confused more than it helped.
@@ -181,19 +222,22 @@ function openStylePicker(): void {
       hub.drawLeft();
       hub.touchQuiet();
     },
-    onCreate: () => {
-      askName('새 스타일', {
-        label: '이름이 곧 파일명입니다.',
-        placeholder: '예: 수채화',
-        onSubmit: async (nm) => {
-          const path = await newCard('styles', '', nm);
-          if (!path) return;
-          // A fresh style becomes the selection: the very next 생성 uses it.
-          void selectStyle(path);
-        },
-      });
-    },
+    onCreate: () => createStyle(''),
     createLabel: '새 스타일 추가',
+  });
+}
+
+function createStyle(folder: string): void {
+  askName(folder ? `새 스타일 — ${folder}/` : '새 스타일', {
+    label: '이름이 곧 파일명입니다.',
+    placeholder: '예: 수채화',
+    onSubmit: async (nm) => {
+      const path = await newCard('styles', folder, nm);
+      if (!path) return;
+      if (folder) extraStyleFolders.delete(folder);
+      // A fresh style becomes the selection: the very next 생성 uses it.
+      void selectStyle(path);
+    },
   });
 }
 
@@ -294,11 +338,9 @@ function buildStyleEditor(mountEl: HTMLElement, path: string): void {
   const neg = el('textarea', { rows: '4', class: 'promptedit', placeholder: '부정 프롬프트' }) as HTMLTextAreaElement;
   const status = el('div', { class: 'hint', style: { minHeight: '14px' } });
 
-  mountEl.append(
-    el('label', { class: 'field' }, [el('span', { text: '긍정 프롬프트' }), pos]),
-    el('label', { class: 'field' }, [el('span', { text: '부정 프롬프트' }), neg]),
-    status,
-  );
+  const posFold = promptFold('pos', '긍정 프롬프트', pos);
+  const negFold = promptFold('neg', '부정 프롬프트', neg);
+  mountEl.append(posFold.node, negFold.node, status);
   // NAI syntax tints ({} · [] · N::…:: · <조각> · #주석) plus tag/fragment
   // autocomplete, reference-tool-style (item 9-10 of the field report).
   const fragNames = () => fragKeys();
@@ -308,6 +350,8 @@ function buildStyleEditor(mountEl: HTMLElement, path: string): void {
   const fill = (positive: string, negative: string) => {
     pos.value = positive;
     neg.value = negative;
+    posFold.preview();
+    negFold.preview();
   };
 
   // Unsaved edits win over the file: a rebuild mid-typing must not eat them.
@@ -331,11 +375,42 @@ function buildStyleEditor(mountEl: HTMLElement, path: string): void {
   }
 
   const onEdit = () => {
+    posFold.preview();
+    negFold.preview();
     pending = { path, positive: pos.value, negative: neg.value };
     schedule(path, status);
   };
   pos.addEventListener('input', onEdit);
   neg.addEventListener('input', onEdit);
+}
+
+/** One prompt with a −/+ header; folded, it shows its first line instead. */
+function promptFold(which: 'pos' | 'neg', label: string, input: HTMLTextAreaElement):
+    { node: HTMLElement; preview(): void } {
+  let open = promptOpen(which);
+  const toggle = el('button', { class: 'ghost tiny' }) as HTMLButtonElement;
+  const peek = el('span', { class: 'hint grow promptpeek' });
+  // The hilite wraps the textarea later; folding hides this box, wrapper and all.
+  const body = el('div', {}, [input]);
+  const sync = (): void => {
+    toggle.textContent = open ? '−' : '+';
+    toggle.title = label + (open ? ' 접기' : ' 펼치기');
+    toggle.setAttribute('aria-expanded', String(open));
+    body.style.display = open ? '' : 'none';
+    peek.style.display = open ? 'none' : '';
+  };
+  const preview = (): void => {
+    const first = input.value.split('\n').map((l) => l.trim()).find(Boolean) ?? '';
+    peek.textContent = first || '(비어 있음)';
+    peek.title = first;
+  };
+  toggle.addEventListener('click', () => { open = !open; setPromptOpen(which, open); sync(); });
+  // A folded row opens from anywhere on it, not only the small button.
+  const head = el('div', { class: 'row promptfoldhead' }, [toggle, el('span', { class: 'promptfoldlabel', text: label }), peek]);
+  head.addEventListener('click', (ev) => { if (ev.target !== toggle && !open) toggle.click(); });
+  sync();
+  preview();
+  return { node: el('div', { class: 'field promptfold' }, [head, body]), preview };
 }
 
 function schedule(path: string, status: HTMLElement): void {
