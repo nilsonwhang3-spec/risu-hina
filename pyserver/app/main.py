@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import os
 import inspect
 import json
 import pathlib
@@ -153,7 +154,22 @@ def agent_ready() -> bool:
                 and (a.get("model") or "").strip())
 
 
+def _install_kind() -> str:
+    """How this backend is updated: 'docker' when the image owns the code
+    (RISUHINA_DISABLE_SELF_UPDATE, set by the Dockerfile), else 'standard'
+    (the in-app updater). The panel words its "backend is behind" hint by it."""
+    v = os.environ.get("RISUHINA_DISABLE_SELF_UPDATE", "").strip().lower()
+    return "docker" if v in ("1", "true", "yes", "on") else "standard"
+
+
 def h_health(arg: dict) -> dict:
+    if db.REFUSED:
+        # The signature stays, so the panel attaches and shows the reason.
+        return {"service": "risu-hina", "version": config.VERSION, "ok": False,
+                "error": db.REFUSED, "installKind": _install_kind(),
+                "clientIp": arg.get("_addr"),
+                "loopback": config.is_loopback(arg.get("_addr") or ""),
+                "tokenRequired": config.token_required_for(arg.get("_addr") or "")}
     return {
         # The signature the plugin checks before it is willing to attach a
         # bearer token (plan 7.1). Must stay stable.
@@ -172,6 +188,7 @@ def h_health(arg: dict) -> dict:
         "space": str(workspace.space_root()),
         # Cheap flags only: /health is polled. /mcp/status has the detail.
         "mcp": {"loaded": mcpaddon.loaded(), "mounted": mcpserver.mounted(), "active": mcpbridge.active()},
+        "installKind": _install_kind(),
     }
 
 
@@ -3010,6 +3027,12 @@ async def dispatch(path: str, request: Request) -> Response:
     arg: dict[str, Any] = {"_addr": addr}
     arg.update(dict(request.query_params))
 
+    # A database from a newer version (db.REFUSED): only the probe and the
+    # plugin file answer; everything else would touch the DB.
+    if db.REFUSED and key not in ("GET /health", "POST /health", "GET /plugin.js"):
+        _log(request.method, pathname, 503, started, "schema too new")
+        return _json(503, {"error": db.REFUSED}, origin)
+
     if key == "GET /plugin.js":
         f = _plugin_file()
         if f is None:
@@ -3315,7 +3338,12 @@ async def dispatch(path: str, request: Request) -> Response:
 async def _startup() -> None:
     config.load()
     config.ensure_token()
-    await run_in_threadpool(db.connect)
+    try:
+        await run_in_threadpool(db.connect)
+    except db.SchemaTooNew as e:
+        # Up, but only to explain: everything else on startup touches the DB.
+        log.error("refusing to run: %s", e)
+        return
     await run_in_threadpool(studiojob.recover_interrupted)
     await run_in_threadpool(config.migrate_once, db.has_migration, db.mark_migration)
     # Rows first, then seeds: an old install's rows become folders, and the

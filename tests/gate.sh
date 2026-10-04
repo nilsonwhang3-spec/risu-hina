@@ -36,6 +36,7 @@ run "partial replace"         "$PY" tests/test_textedit.py
 run "three-way merge"         "$PY" tests/test_merge.py
 run "edit-session lifecycle"  "$PY" tests/test_lifecycle.py
 run "backend HTTP (black-box)" "$PY" tests/test_http.py
+run "newer database refused, not migrated down" "$PY" tests/test_schema_guard.py
 # The optional MCP add-on: install (cached in .cache/mcp-addon after the first
 # run), the always-tokened /mcp route, and the panel bridge.
 run "MCP add-on and bridge" "$PY" tests/test_mcp.py
@@ -80,6 +81,7 @@ if [ -d plugin/node_modules ]; then
   run "host canon vs RisuAI run-time stamps" node tests/host_canon.mjs
   run "host save result names what was written" node tests/host_save_and_listing.mjs
   run "hilite mirror follows a set value" node tests/hilite_value.mjs
+  run "backend-behind hints and the version gate" node tests/version_hints.mjs
   run "complete JSON response deadline" node tests/transport_timeout.mjs
   run "markdown progress and CRLF" node tests/markdown_progress.mjs
   run "planning and mobile proposal UI" node tests/agent_planning_ui.mjs

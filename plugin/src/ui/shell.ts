@@ -15,7 +15,7 @@ import { smallScreen } from './blobimg';
 import { describeSync, syncBusy } from '../assets';
 import { injectStyles } from './styles';
 import { state } from '../state';
-import { transport, clientLog } from '../transport';
+import { transport, clientLog, backendBehind } from '../transport';
 import { remountArtifact } from './artifact';
 import { renderChatsTab, refreshAssetSyncLine, refreshBootBox, foldLanding } from './tab-chats';
 import { renderEditorTab } from './tab-editor';
@@ -390,6 +390,16 @@ export function refreshStatus(): void {
     healthEl.title = transport.versionGate;
   } else {
     healthEl.appendChild(el('span', { class: 'hint', text: `백엔드 v${h.version}` }));
+    // An older patch than the plugin: still connected, but say so (§1-91).
+    const behind = backendBehind(__PLUGIN_VERSION__, h.version, h.installKind);
+    if (behind) {
+      const b = el('button', { class: 'ghost tiny behindchip', text: '백엔드 업데이트 필요', title: behind });
+      b.addEventListener('click', () => {
+        shellNotice(behind, 'err');
+        if (h.installKind !== 'docker') setTab('settings');
+      });
+      healthEl.appendChild(b);
+    }
     if (!h.agentReady) {
       healthEl.appendChild(el('span', { class: 'hint', text: '· AI 미설정' }));
     }

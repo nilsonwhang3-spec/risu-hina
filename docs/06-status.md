@@ -1,5 +1,26 @@
 # 06. Implementation status — as of 2026-10-04 (v0.15.33, Risu Hina)
 
+## unreleased (2026-10-04): §1-91 versions out of step: the backend behind the plugin, a database from a newer backend
+
+- **Context:** reviewing PR #4 (Docker Compose, AMD64/ARM64). The plugin updates itself from `master` the moment a
+  release lands; a backend waits for its owner - longest in Docker, where the image owns the code. Two gaps
+  were not Docker's alone, so they are fixed here for every install.
+- **Backend behind the plugin (patch level):** the version gate lets the same major.minor through, but a patch
+  can add routes the plugin then calls (0.15.33's personas on 0.15.32). `transport.backendBehind` names it; the
+  title row shows "백엔드 업데이트 필요" with the way to update: the in-app updater (⚙ → 정보 · 로그), or for a
+  Docker install, rebuild/pull the image and recreate the container. `/health` now says `installKind`
+  (`docker` when `RISUHINA_DISABLE_SELF_UPDATE` is set, else `standard`).
+- **A database from a newer backend:** an older backend over newer data (a rolled-back image, an old release
+  unpacked over new data) used to run its migrations and stamp its lower schema number into `meta`, so the
+  next upgrade would replay one-time migrations. `db.connect` now refuses (`SchemaTooNew`): the server stays up
+  only to say why - `/health` answers `ok: false` + the reason (the panel shows it as the connection error),
+  every other route is 503 - and the database is left as it was.
+- Verified: tests/test_schema_guard.py (refused, 503 elsewhere, schema number untouched; installKind standard /
+  docker), tests/version_hints.mjs (backendBehind wording per install kind, the gate unchanged). Both in the gate.
+- PR #4 review asks the contributor to keep `check()` querying releases in Docker (newer/latest reported,
+  `installable: false` with the rebuild path), a test that keeps the two Linux locks' `package==version` sets
+  equal, and a free docs number.
+
 ## 0.15.33 (2026-10-04): §1-88 ~ §1-90 released
 
 Everything below down to 0.15.32 ships in this version: style folders and folding prompts in the studio (§1-88),

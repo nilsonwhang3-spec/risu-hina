@@ -30,6 +30,11 @@ export interface HealthInfo {
   service: string;
   version: string;
   agentReady: boolean;
+  /** false: the backend is up only to say why it refuses (e.g. a DB from a newer version). */
+  ok?: boolean;
+  error?: string;
+  /** How the backend is updated: 'docker' (rebuild/pull the image) or 'standard' (in-app). */
+  installKind?: string;
   clientIp?: string;
   loopback?: boolean;
   tokenRequired?: boolean;
@@ -147,6 +152,13 @@ export class Transport {
         '주소가 다른 서버를 가리키거나 터널이 아직 안 열렸을 수 있습니다. 잠시 뒤 자동으로 다시 시도합니다.',
         body,
       );
+    }
+    // Ours, but refusing to work (a database written by a newer version):
+    // its reason is the connection error the panel shows.
+    if (body.ok === false && body.error) {
+      this.route = 'direct';
+      this.tokenSafe = true;
+      throw new BackendError(503, String(body.error), body);
     }
     this.route = 'direct';
     this.tokenSafe = true;
@@ -431,6 +443,25 @@ const GATE_EXEMPT = new Set(['/health', '/update/check', '/update/apply', '/plug
  * Newer plugin -> update the backend (from 설정 → 연결); newer backend ->
  * update the plugin (RisuAI's +). Patch versions are compatible by contract.
  */
+/**
+ * The backend is an older PATCH of the plugin's version (§1-91). The gate
+ * above lets that through - same major.minor speaks the same API - but a
+ * patch can add routes the plugin then calls (0.15.33's personas on a 0.15.32
+ * backend). The plugin updates itself from master; the backend waits for its
+ * owner, longest in Docker. Returns the advice, or '' when nothing is behind.
+ */
+export function backendBehind(plugin: string, backend: string, installKind = ''): string {
+  const v = (s: string) => s.split('.').map((x) => parseInt(x, 10) || 0);
+  if (!backend) return '';
+  const [pa, pb, pc] = v(plugin);
+  const [ba, bb, bc] = v(backend);
+  if (pa !== ba || pb !== bb || !((pc ?? 0) > (bc ?? 0))) return '';
+  const how = installKind === 'docker'
+    ? '이 백엔드는 Docker 설치입니다 - 이미지를 새 버전으로 다시 받거나 빌드한 뒤 컨테이너를 다시 만들어 주세요.'
+    : '⚙ → 정보 · 로그 → 백엔드 업데이트를 눌러 주세요.';
+  return `백엔드 v${backend} 가 플러그인 v${plugin} 보다 오래됐습니다. 새 기능 일부가 동작하지 않을 수 있습니다. ${how}`;
+}
+
 export function versionGate(plugin: string, backend: string): string {
   const mm = (v: string) => v.split('.').slice(0, 2).map((x) => parseInt(x, 10) || 0);
   if (!backend) return '';

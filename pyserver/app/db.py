@@ -27,6 +27,26 @@ SCHEMA_VERSION = 15
 LOCK = threading.RLock()
 _conn: sqlite3.Connection | None = None
 
+# Set when the database was written by a NEWER backend than this one (a
+# rollback: an older image or release over a newer data dir). The server then
+# stays up only to say so - /health carries it, every other route refuses -
+# because migrating would stamp the older schema number over the newer one,
+# and the next upgrade would replay one-time migrations on data that already
+# had them.
+REFUSED = ""
+
+
+class SchemaTooNew(RuntimeError):
+    pass
+
+
+def _stored_schema(conn: sqlite3.Connection) -> int:
+    try:
+        row = conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()
+        return int(row[0]) if row else 0
+    except (sqlite3.Error, TypeError, ValueError):
+        return 0   # a fresh database has no meta table yet
+
 
 def connect() -> sqlite3.Connection:
     global _conn
@@ -40,6 +60,14 @@ def connect() -> sqlite3.Connection:
         conn.execute("PRAGMA journal_mode = WAL")
         conn.execute("PRAGMA busy_timeout = 5000")
         conn.execute("PRAGMA foreign_keys = ON")
+        stored = _stored_schema(conn)
+        if stored > SCHEMA_VERSION:
+            conn.close()
+            global REFUSED
+            REFUSED = (f"이 데이터는 더 새 버전의 Risu Hina 가 만든 것입니다 (DB 스키마 {stored}, 이 백엔드는 "
+                       f"{SCHEMA_VERSION} 까지). 옛 버전으로 열면 데이터가 꼬일 수 있어 멈췄습니다 - 백엔드를 "
+                       f"최신 버전으로 업데이트하거나, 이 버전 때 만든 data 백업을 복원해 주세요.")
+            raise SchemaTooNew(REFUSED)
         _conn = conn
         _migrate(conn)
         # Fold the WAL into the main file on every boot. Between runs the
