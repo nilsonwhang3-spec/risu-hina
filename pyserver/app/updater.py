@@ -113,6 +113,10 @@ def _ver_tuple(v: str) -> tuple:
 
 
 def check() -> dict:
+    # Container code is replaced by rebuilding the image, never in-place.
+    if os.environ.get("RISUHINA_DISABLE_SELF_UPDATE", "").strip().lower() in ("1", "true", "yes", "on"):
+        return {"ok": False, "configured": True, "current": config.VERSION,
+                "error": "이 설치에서는 자체 업데이트를 사용할 수 없습니다. Docker 이미지를 다시 빌드하고 컨테이너를 재생성해 주세요."}
     name = repo()
     if not name:
         return {"ok": False, "configured": False,

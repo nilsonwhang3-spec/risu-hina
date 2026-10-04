@@ -1,0 +1,15 @@
+services:
+  risu-hina:
+    build: .
+    image: risu-hina:local
+    platform: linux/amd64
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+    ports:
+      - "127.0.0.1:6020:6020"
+    volumes:
+      - risu-hina-data:/data
+
+volumes:
+  risu-hina-data:
