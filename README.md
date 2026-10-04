@@ -59,7 +59,12 @@
 
 ## 설치
 
-Docker 로 운영하려면 [Docker 설치 안내](docs/17-docker.md)를 따른다. 데이터는 볼륨에 보관하고, 백엔드는 이미지 재빌드로 업데이트한다.
+두 가지 방법 중 하나로 백엔드를 설치한다.
+
+- **설치 패키지 (Windows · Linux x64)** — 아래 순서대로. 업데이트는 설정 화면에서 한 번에 된다.
+- **Docker (AMD64 · ARM64)** — 릴리스마다 공식 이미지 `ghcr.io/nilsonwhang3-spec/risu-hina` 를 배포한다.
+  `compose.yaml` 하나로 설치하고 `docker compose pull && docker compose up -d` 로 업데이트한다.
+  라즈베리파이·ARM 서버·Apple Silicon 은 이쪽을 쓴다 → [Docker 설치 안내](docs/17-docker.md)
 
 [릴리스](../../releases/latest)에서 `Risu.Hina.<버전>.<OS>.x64.Auto.Install.Package.zip` 을 받아 원하는 폴더에 푼다. 파이썬을 따로 깔 필요는 없다.
 

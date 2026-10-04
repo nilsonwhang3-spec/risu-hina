@@ -127,9 +127,10 @@ def check() -> dict:
     if image_managed() and info.get("ok"):
         target = f"v{info['latest']}" if info.get("newer") and info.get("latest") else "새 릴리스"
         info = {**info, "installable": False,
-                "reason": (f"Docker 설치는 앱 안에서 업데이트하지 않습니다. 체크아웃을 {target} 태그로 바꾸고 "
-                           "`docker compose build --pull && docker compose up -d --force-recreate` 로 이미지를 "
-                           "다시 빌드해 주세요 (docs/17-docker.md).")}
+                "reason": (f"Docker 설치는 앱 안에서 업데이트하지 않습니다. compose.yaml 이 있는 폴더에서 "
+                           f"`docker compose pull && docker compose up -d` 로 {target} 이미지를 받아 주세요. "
+                           "버전을 고정했다면 .env 의 RISUHINA_IMAGE 태그를, 소스로 빌드했다면 체크아웃 태그를 "
+                           "바꾼 뒤 다시 실행합니다 (docs/17-docker.md).")}
     return info
 
 

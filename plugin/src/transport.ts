@@ -457,7 +457,7 @@ export function backendBehind(plugin: string, backend: string, installKind = '')
   const [ba, bb, bc] = v(backend);
   if (pa !== ba || pb !== bb || !((pc ?? 0) > (bc ?? 0))) return '';
   const how = installKind === 'docker'
-    ? '이 백엔드는 Docker 설치입니다 - 이미지를 새 버전으로 다시 받거나 빌드한 뒤 컨테이너를 다시 만들어 주세요.'
+    ? '이 백엔드는 Docker 설치입니다 - compose.yaml 이 있는 폴더에서 docker compose pull && docker compose up -d 를 실행해 주세요.'
     : '⚙ → 정보 · 로그 → 백엔드 업데이트를 눌러 주세요.';
   return `백엔드 v${backend} 가 플러그인 v${plugin} 보다 오래됐습니다. 새 기능 일부가 동작하지 않을 수 있습니다. ${how}`;
 }

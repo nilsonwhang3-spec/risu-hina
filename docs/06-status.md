@@ -1,5 +1,26 @@
 # 06. Implementation status — as of 2026-10-04 (v0.15.34, Risu Hina)
 
+## unreleased (2026-10-04): §1-92 the Docker image is an official release artifact (GHCR)
+
+- **What:** every published GitHub release now also ships `ghcr.io/nilsonwhang3-spec/risu-hina` for linux/amd64
+  and linux/arm64, tagged `X.Y.Z`, `X.Y` and (full releases) `latest`.
+  `.github/workflows/release-image.yml`:
+  - builds each architecture on its native runner, runs tests/test_docker.py on that image, and only then pushes
+    by digest; the publish job joins the digests into one manifest list;
+  - refuses a tag that differs from `config.VERSION`; `workflow_dispatch` rebuilds an existing tag (a failed
+    run, a refreshed base image).
+- **compose.yaml** now pulls the image (`${RISUHINA_IMAGE:-…:latest}`). `latest` because the plugin updates
+  itself to the latest release: a `0.15` pin would leave the backend behind at the next minor and trip the
+  gate. Pinning goes through `.env`. Building from source is `compose.build.yaml` (`build: .`,
+  `pull_policy: build`).
+- **Update wording:** the in-app check's Docker `reason` and the panel's "백엔드 업데이트 필요" hint name
+  `docker compose pull && docker compose up -d`.
+- **Docs:** docs/17-docker.md is rewritten (image first: tags, pinning, update, backup and rollback with the
+  newer-DB guard, source build as an option, and the release/rebuild workflow for maintainers); the README's
+  install section offers the two ways.
+- **Release procedure:** after `gh release create`, watch the "Release image" run (about 10 min). The GHCR
+  package must be public (set once in the package settings; a new package starts private).
+
 ## 0.15.34 (2026-10-04): GitHub #3, §1-91, Docker (PR #4) released
 
 The 반영 lock now goes up before the save-clock read (GitHub #3); the panel says when the backend is an older

@@ -1,7 +1,10 @@
 services:
   risu-hina:
-    build: .
-    image: risu-hina:local
+    # The released image (multi-arch: amd64 / arm64). `latest` follows the
+    # releases, as the plugin does; pin a version with RISUHINA_IMAGE in .env,
+    # e.g. RISUHINA_IMAGE=ghcr.io/nilsonwhang3-spec/risu-hina:0.15.34
+    # To build from this checkout instead: compose.build.yaml (docs/17-docker.md).
+    image: ${RISUHINA_IMAGE:-ghcr.io/nilsonwhang3-spec/risu-hina:latest}
     init: true
     restart: unless-stopped
     stop_grace_period: 30s

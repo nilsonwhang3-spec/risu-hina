@@ -1,0 +1,7 @@
+# Build the image from this checkout instead of pulling the released one:
+#   docker compose -f compose.yaml -f compose.build.yaml up -d --build
+services:
+  risu-hina:
+    build: .
+    image: risu-hina:local
+    pull_policy: build
