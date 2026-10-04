@@ -1,0 +1,49 @@
+name: Docker
+
+on:
+  push:
+    paths:
+      - 'Dockerfile'
+      - '.dockerignore'
+      - 'compose.yaml'
+      - 'pyserver/**'
+      - 'plugin/Risu.Hina.Plugin.js'
+      - 'tests/test_docker.py'
+      - 'tests/test_updater.py'
+      - 'tests/test_http.py'
+      - '.github/workflows/docker.yml'
+  pull_request:
+    paths:
+      - 'Dockerfile'
+      - '.dockerignore'
+      - 'compose.yaml'
+      - 'pyserver/**'
+      - 'plugin/Risu.Hina.Plugin.js'
+      - 'tests/test_docker.py'
+      - 'tests/test_updater.py'
+      - 'tests/test_http.py'
+      - '.github/workflows/docker.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Compose and updater behavior
+        run: |
+          docker compose config --quiet
+          python3 tests/test_updater.py
+      - name: Build image
+        run: docker build --platform linux/amd64 --tag risu-hina:ci .
+      - name: Verify container and persistent data
+        run: python3 tests/test_docker.py --image risu-hina:ci
+      - name: Run existing HTTP regression suite with the image runtime
+        run: >-
+          docker run --rm --entrypoint python
+          --mount type=bind,source="$PWD/tests",target=/app/tests,readonly
+          risu-hina:ci /app/tests/test_http.py

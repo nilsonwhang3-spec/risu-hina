@@ -1,0 +1,13 @@
+# Only runtime source, the pinned Linux lock, and the built plugin enter the context.
+**
+!Dockerfile
+!pyserver/
+!pyserver/app/
+!pyserver/app/**
+!pyserver/run.py
+!pyserver/locks/
+!pyserver/locks/linux-x86_64-cp311.txt
+!plugin/
+!plugin/Risu.Hina.Plugin.js
+**/__pycache__/
+**/*.pyc

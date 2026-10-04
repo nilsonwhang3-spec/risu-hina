@@ -59,6 +59,8 @@
 
 ## 설치
 
+Docker 로 운영하려면 [Docker 설치 안내](docs/07-docker.md)를 따른다. 데이터는 볼륨에 보관하고, 백엔드는 이미지 재빌드로 업데이트한다.
+
 [릴리스](../../releases/latest)에서 `Risu.Hina.<버전>.<OS>.x64.Auto.Install.Package.zip` 을 받아 원하는 폴더에 푼다. 파이썬을 따로 깔 필요는 없다.
 
 ```
