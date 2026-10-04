@@ -61,7 +61,7 @@ switch on. The poll returns early when (a) a host job is queued — today `write
 existing `requestedCardWriteback` — or (b) the pending-proposal fingerprint changed, so the agent pane and the
 bars refresh their counts. Not persisted: a plugin reload leaves the switch off.
 
-**Through the tunnel (2026-09-27).** test-server's locally-managed tunnel `comfyui`
+**Through the tunnel (2026-09-27).** the test server's locally-managed tunnel `comfyui`
 (`C:/Users/<user>/.cloudflared/config.yml`, service `CloudflaredComfyUI`) now routes **`hina.example.com` ->
 `http://127.0.0.1:6020`**; the old `elf.example.com` rule was removed (backup `config.yml.bak-20260927`), and a
 wildcard `*.example.com` record answers 530 for unrouted names. No Cloudflare Access on hina (comfy has one).
@@ -149,7 +149,7 @@ Which the 3-way merge already models: edits sit in the working copy until someon
 - **The backend is FastAPI + uvicorn** (`pyserver/app/main.py`, `run.py`), so an MCP ASGI app can be mounted.
 - **Auth exists and is not the hole it looked like.** `config.token_required_for()`: non-loopback **always**
   requires the bearer token; loopback is exempt unless `RISUHINA_REQUIRE_TOKEN=1`. The `tokenRequired:false` seen
-  on test-server's `/health` was a loopback call over ssh, not public exposure.
+  on the test server's `/health` was a loopback call over ssh, not public exposure.
 
 ### stdio wrapper vs HTTP — the difference is not local vs remote
 
@@ -168,15 +168,15 @@ the same standing the plugin has.
 | Backend change | none — it calls the existing REST | `mcp` dependency + mount |
 | Release bundle | unaffected | dependency added to the 22/33 MB zips (hash-pinned, wheels-only — a rebuild) |
 
-### Routes from the dev machine to test-server
+### Routes from the dev machine to the test server
 
 The backend there listens on `127.0.0.1:6020`, **IPv4 loopback only** (`config.HOST` default; confirmed with
 `netstat` 2026-08-29), with a **Cloudflare Tunnel** in front of it as `elf.example.com`.
 
 1. The tunnel address plus the token — works today, no setup.
-2. `ssh -L 6020:127.0.0.1:6020 test-server` — straight to loopback with nothing exposed.
-3. **stdio over ssh**: make the MCP server command itself `ssh test-server <remote python> mcp_server.py`. The
-   wrapper runs on test-server against real loopback and its pipes ride the ssh connection. No new port, no new
+2. `ssh -L 6020:127.0.0.1:6020 the test server` — straight to loopback with nothing exposed.
+3. **stdio over ssh**: make the MCP server command itself `ssh <server> <remote python> mcp_server.py`. The
+   wrapper runs on the test server against real loopback and its pipes ride the ssh connection. No new port, no new
    surface. This is the recommended way to prototype.
 
 ### Two risks specific to this deployment

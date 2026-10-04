@@ -1,6 +1,6 @@
 # 01. Phase 0 measurement results (complete)
 
-Probe v0.2.0, 2026-08-23, PocketRisu (test-server 0.0.0.0:6001) + browser on a separate PC.
+Probe v0.2.0, 2026-08-23, PocketRisu (the test server 0.0.0.0:6001) + browser on a separate PC.
 Backend `127.0.0.1:6020`. Run against a real chat (394 turns).
 
 **Conclusion: the constraint table in plan §1 is confirmed in full, and streaming works. No architectural change.**

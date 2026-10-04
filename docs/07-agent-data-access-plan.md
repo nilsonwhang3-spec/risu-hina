@@ -85,5 +85,5 @@ Recommendation: aim for **B**, but do A's stamp strengthening first, immediately
 - Whether to state "툴이 잘리면 `risuhina.conn()` 으로 SQL" ("if a tool truncates, fall back to SQL") in the agent instructions (right now it is only in the helper description).
 
 ## 6. Current status (2026-08-27)
-- Release **v0.6.2** Latest. On test-server the user upgrades via plugin `+` → backend update.
+- Release **v0.6.2** Latest. On the test server the user upgrades via plugin `+` → backend update.
 - No decision has been made in this document yet. First task of the next session: decide §4 A/B → plan → implement.

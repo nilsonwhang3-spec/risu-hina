@@ -1,6 +1,6 @@
 # 05. First-time install
 
-This is the procedure written after actually running it from scratch on test-server. The commands and output are what was run.
+This is the procedure written after actually running it from scratch on the test server. The commands and output are what was run.
 
 **Two pieces, installed separately.** The backend goes on the server (the machine PocketRisu runs on),
 the plugin goes into RisuAI. The backend comes first — the plugin connects to the backend the first time it opens.

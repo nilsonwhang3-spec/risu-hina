@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.15.32
+//@display-name Risu Hina v0.15.33
 //@api 3.0
-//@version 0.15.32
+//@version 0.15.33
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -71,13 +71,13 @@
   }
   async function toError(res) {
     const body = await readJson(res);
-    let msg22 = body && typeof body === "object" && "error" in body ? String(body.error) : `HTTP ${res.status}`;
+    let msg24 = body && typeof body === "object" && "error" in body ? String(body.error) : `HTTP ${res.status}`;
     if (res.status === 401) {
-      msg22 = '\uD1A0\uD070\uC774 \uB9DE\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4. \uBC31\uC5D4\uB4DC PC \uC758 data/token.txt \uB0B4\uC6A9\uC744 \u2699 \u2192 \uC5F0\uACB0 \u2192 \uD1A0\uD070\uC5D0 \uB123\uACE0 "\uC800\uC7A5\uD558\uACE0 \uC5F0\uACB0"\uC744 \uB20C\uB7EC \uC8FC\uC138\uC694 (127.0.0.1 \uB85C \uC811\uC18D\uD560 \uB54C\uB294 \uBE44\uC6CC\uB3C4 \uB429\uB2C8\uB2E4).';
+      msg24 = '\uD1A0\uD070\uC774 \uB9DE\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4. \uBC31\uC5D4\uB4DC PC \uC758 data/token.txt \uB0B4\uC6A9\uC744 \u2699 \u2192 \uC5F0\uACB0 \u2192 \uD1A0\uD070\uC5D0 \uB123\uACE0 "\uC800\uC7A5\uD558\uACE0 \uC5F0\uACB0"\uC744 \uB20C\uB7EC \uC8FC\uC138\uC694 (127.0.0.1 \uB85C \uC811\uC18D\uD560 \uB54C\uB294 \uBE44\uC6CC\uB3C4 \uB429\uB2C8\uB2E4).';
     } else if (res.status === 429) {
-      msg22 = "\uD2C0\uB9B0 \uD1A0\uD070\uC774 \uC5EC\uB7EC \uBC88 \uAC70\uBD80\uB418\uC5B4 \uC7A0\uC2DC \uB9C9\uD614\uC2B5\uB2C8\uB2E4. 1\uBD84 \uB4A4 \uB2E4\uC2DC \uC2DC\uB3C4\uD574 \uC8FC\uC138\uC694.";
+      msg24 = "\uD2C0\uB9B0 \uD1A0\uD070\uC774 \uC5EC\uB7EC \uBC88 \uAC70\uBD80\uB418\uC5B4 \uC7A0\uC2DC \uB9C9\uD614\uC2B5\uB2C8\uB2E4. 1\uBD84 \uB4A4 \uB2E4\uC2DC \uC2DC\uB3C4\uD574 \uC8FC\uC138\uC694.";
     }
-    return new BackendError(res.status, msg22, body);
+    return new BackendError(res.status, msg24, body);
   }
   function clientLog(level, event, detail) {
     return transport.post("/clientlog", { level, event, detail }).then(() => void 0).catch(() => void 0);
@@ -181,7 +181,7 @@
           this.tokenSafe = true;
           this.lastHealth = body;
           this.probeInfo = "";
-          this.gate = versionGate("0.15.32", String(body.version || ""));
+          this.gate = versionGate("0.15.33", String(body.version || ""));
           return body;
         }
         /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -995,6 +995,144 @@
         backgroundHTML: "\uBC30\uACBD HTML",
         image: "\uD504\uB85C\uD544 \uC774\uBBF8\uC9C0"
       };
+    }
+  });
+
+  // src/persona.ts
+  async function readSlice() {
+    const read = Risuai.getDatabase(["personas", "selectedPersona"]);
+    let slice;
+    const quick = await Promise.race([
+      read.then((v) => ({ v })),
+      new Promise((r) => setTimeout(() => r(null), 900))
+    ]).catch((e) => {
+      throw new HostError("failed", "\uD398\uB974\uC18C\uB098 \uBAA9\uB85D\uC744 \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + String(e));
+    });
+    if (quick) slice = quick.v;
+    else {
+      try {
+        await Risuai.hideContainer();
+      } catch {
+      }
+      try {
+        slice = await read;
+      } catch (e) {
+        throw new HostError("failed", "\uD398\uB974\uC18C\uB098 \uBAA9\uB85D\uC744 \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + String(e));
+      } finally {
+        try {
+          await Risuai.showContainer("fullscreen");
+        } catch {
+        }
+      }
+    }
+    if (!slice || !Array.isArray(slice["personas"])) {
+      throw new HostError(
+        "failed",
+        "\uD398\uB974\uC18C\uB098\uB97C \uC77D\uC73C\uB824\uBA74 'db' \uAD8C\uD55C\uC774 \uD544\uC694\uD569\uB2C8\uB2E4. RisuAI\uAC00 \uB744\uC6B4 \uAD8C\uD55C \uC694\uCCAD\uC744 \uD5C8\uC6A9\uD558\uACE0 \uB2E4\uC2DC \uC2DC\uB3C4\uD574 \uC8FC\uC138\uC694"
+      );
+    }
+    return slice;
+  }
+  function toPersona(raw, index, selected) {
+    return {
+      index,
+      id: String(raw["id"] ?? ""),
+      name: String(raw["name"] ?? ""),
+      prompt: String(raw["personaPrompt"] ?? ""),
+      icon: String(raw["icon"] ?? ""),
+      selected: index === selected
+    };
+  }
+  async function readPersonas() {
+    const slice = await readSlice();
+    const raw = slice["personas"];
+    const selected = Number(slice["selectedPersona"] ?? 0) || 0;
+    return {
+      personas: raw.map((p, i) => toPersona(p ?? {}, i, selected)),
+      selected
+    };
+  }
+  function locate(raw, p) {
+    if (p.id) return raw.findIndex((x) => String(x?.["id"] ?? "") === p.id);
+    const at = raw[p.index];
+    return at && String(at["name"] ?? "") === p.name && !at["id"] ? p.index : -1;
+  }
+  async function writePersona(before, next, imageBytes) {
+    const slice = await readSlice();
+    const raw = slice["personas"].slice();
+    const selected = Number(slice["selectedPersona"] ?? 0) || 0;
+    const at = locate(raw, before);
+    if (at < 0) throw new HostError("missing", "RisuAI\uC5D0\uC11C \uC774 \uD398\uB974\uC18C\uB098\uB97C \uCC3E\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4 (\uC9C0\uC6CC\uC84C\uC744 \uC218 \uC788\uC2B5\uB2C8\uB2E4). \uBAA9\uB85D\uC744 \uB2E4\uC2DC \uC77D\uC5B4 \uC8FC\uC138\uC694");
+    if (at === selected) throw new HostError("changed", SELECTED_REFUSAL);
+    const live = toPersona(raw[at] ?? {}, at, selected);
+    if (live.name !== before.name || live.prompt !== before.prompt || live.icon !== before.icon) {
+      throw new HostError("changed", "RisuAI \uCABD\uC5D0\uC11C \uC774 \uD398\uB974\uC18C\uB098\uAC00 \uBC14\uB00C\uC5C8\uC2B5\uB2C8\uB2E4. \uBAA9\uB85D\uC73C\uB85C \uB3CC\uC544\uAC00 \uB2E4\uC2DC \uC5F4\uC5B4 \uC8FC\uC138\uC694 (\uD3B8\uC9D1 \uB0B4\uC6A9\uC740 \uB0A8\uACA8 \uB450\uC5C8\uC2B5\uB2C8\uB2E4)");
+    }
+    let icon = next.icon ?? live.icon;
+    if (imageBytes && imageBytes.byteLength) {
+      try {
+        icon = await Risuai.saveAsset(imageBytes);
+      } catch (e) {
+        throw new HostError("failed", "\uD504\uB85C\uD544 \uC774\uBBF8\uC9C0\uB97C RisuAI\uC5D0 \uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + String(e));
+      }
+    }
+    raw[at] = { ...raw[at] ?? {}, name: next.name, personaPrompt: next.prompt, icon };
+    await Risuai.setDatabase({ personas: raw });
+    const check = await readSlice();
+    const after = check["personas"];
+    const got = after[at] ? toPersona(after[at], at, Number(check["selectedPersona"] ?? 0) || 0) : null;
+    if (!got || got.name !== next.name || got.prompt !== next.prompt || got.icon !== icon) {
+      throw new HostError("failed", "RisuAI\uAC00 \uD398\uB974\uC18C\uB098 \uC4F0\uAE30\uB97C \uBC1B\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4. RisuAI\uAC00 \uB2E4\uB978 \uCC3D\uC774\uB098 \uAE30\uAE30\uC5D0 \uC5F4\uB824 \uC788\uC9C0 \uC54A\uC740\uC9C0 \uD655\uC778\uD574 \uC8FC\uC138\uC694");
+    }
+    return got;
+  }
+  async function personaImage(icon) {
+    if (!icon) return null;
+    try {
+      const b = await Risuai.readImage(icon);
+      return b && b.byteLength ? b : null;
+    } catch {
+      return null;
+    }
+  }
+  function newPersonaId() {
+    try {
+      return crypto.randomUUID();
+    } catch {
+    }
+    return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+      const r = Math.random() * 16 | 0;
+      return (c === "x" ? r : r & 3 | 8).toString(16);
+    });
+  }
+  async function createPersona(next, imageBytes) {
+    const slice = await readSlice();
+    const raw = slice["personas"].slice();
+    let icon = "";
+    if (imageBytes && imageBytes.byteLength) {
+      try {
+        icon = await Risuai.saveAsset(imageBytes);
+      } catch (e) {
+        throw new HostError("failed", "\uD504\uB85C\uD544 \uC774\uBBF8\uC9C0\uB97C RisuAI\uC5D0 \uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + String(e));
+      }
+    }
+    const id = newPersonaId();
+    raw.push({ name: next.name, personaPrompt: next.prompt, icon, id, note: "", largePortrait: false });
+    await Risuai.setDatabase({ personas: raw });
+    const check = await readSlice();
+    const after = check["personas"];
+    const at = after.findIndex((x) => String(x?.["id"] ?? "") === id);
+    if (at < 0) {
+      throw new HostError("failed", "RisuAI\uAC00 \uC0C8 \uD398\uB974\uC18C\uB098\uB97C \uBC1B\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4. RisuAI\uAC00 \uB2E4\uB978 \uCC3D\uC774\uB098 \uAE30\uAE30\uC5D0 \uC5F4\uB824 \uC788\uC9C0 \uC54A\uC740\uC9C0 \uD655\uC778\uD574 \uC8FC\uC138\uC694");
+    }
+    return toPersona(after[at], at, Number(check["selectedPersona"] ?? 0) || 0);
+  }
+  var SELECTED_REFUSAL;
+  var init_persona = __esm({
+    "src/persona.ts"() {
+      "use strict";
+      init_host();
+      SELECTED_REFUSAL = "RisuAI\uC5D0\uC11C \uC9C0\uAE08 \uC120\uD0DD\uB41C \uD398\uB974\uC18C\uB098\uB294 \uC5EC\uAE30\uC11C \uACE0\uCE60 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4 \u2014 RisuAI\uAC00 \uC120\uD0DD\uB41C \uD398\uB974\uC18C\uB098\uB97C \uB530\uB85C \uBCF5\uC0AC\uD574 \uB450\uACE0 \uC4F0\uAE30 \uB54C\uBB38\uC5D0, \uACE0\uCCD0\uB3C4 \uD654\uBA74\uC5D0 \uC548 \uBCF4\uC774\uACE0 \uB2E4\uC74C\uC5D0 \uD398\uB974\uC18C\uB098\uB97C \uBC14\uAFC0 \uB54C \uC61B \uB0B4\uC6A9\uC73C\uB85C \uB36E\uC5B4\uC368\uC9D1\uB2C8\uB2E4. RisuAI\uC5D0\uC11C \uB2E4\uB978 \uD398\uB974\uC18C\uB098\uB97C \uC7A0\uAE50 \uC120\uD0DD\uD55C \uB4A4 \uB2E4\uC2DC \uC2DC\uB3C4\uD574 \uC8FC\uC138\uC694.";
     }
   });
 
@@ -2569,6 +2707,21 @@
     } catch {
     }
   }
+  async function fetchLibrary() {
+    try {
+      return await transport.get("/studio/library");
+    } catch (e) {
+      if (!(e instanceof BackendError) || e.status !== 404) throw e;
+    }
+    const lists = await Promise.all(CARD_AREAS.map((a) => state.studio.items(a.area).then((r) => r.items).catch(() => null)));
+    const areas = {};
+    CARD_AREAS.forEach((a, i) => {
+      const l = lists[i];
+      if (l) areas[a.area] = l;
+    });
+    if (!Object.keys(areas).length) throw new Error("\uC2A4\uD29C\uB514\uC624 \uCE74\uB4DC \uBAA9\uB85D\uC744 \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4.");
+    return { areas, activeStyle: null };
+  }
   function activeOf(area) {
     return (S.cards[area] ?? []).filter((i) => i.enabled).sort((a, b) => (a.order ?? 100) - (b.order ?? 100) || a.path.localeCompare(b.path)).map((i) => i.path);
   }
@@ -2849,6 +3002,7 @@ name: ${nm}
     "src/ui/studio/store.ts"() {
       "use strict";
       init_state();
+      init_transport();
       CARD_AREAS = [
         { area: "styles", label: "\uC2A4\uD0C0\uC77C \uD504\uB86C\uD504\uD2B8", toggle: true },
         { area: "characters", label: "\uCE90\uB9AD\uD130 \uD504\uB86C\uD504\uD2B8", toggle: true },
@@ -2870,6 +3024,12 @@ name: ${nm}
         extraRoots: [],
         /** The card lists, one per area. */
         cards: {},
+        /** Whether the card lists / the OUTPUT listing have arrived at least once
+         * (until then the left column draws its skeleton, not an empty list). */
+        libraryLoaded: false,
+        outputLoaded: false,
+        /** Why the very first library read failed ('' = it did not). */
+        libraryError: "",
         selected: OUTPUT_ROOT,
         /** A card picked in the list; the centre shows its editor instead of a folder. */
         selectedFile: "",
@@ -2986,11 +3146,20 @@ name: ${nm}
       } catch {
       }
       styleSync = {
-        /** A style-bound field changed: save it into the active style (debounced). */
+        /** A style-bound field changed: the style block shows 미저장 (§1-90 - no
+         * autosave; the block's 저장 writes prompts and settings together). */
         edited: () => {
         },
         /** The style the settings are saved into ('' = none selected). */
-        boundName: () => ""
+        boundName: () => "",
+        /** The library read brought the active style's text: take it as the saved
+         * version unless edits are pending. True = the editor should redraw. */
+        prime: (_s) => false,
+        /** Unsaved edits in the style block (prompts or settings). */
+        dirty: () => false,
+        /** Before a run: unsaved PROMPT edits are not what the backend reads, so
+         * ask. Resolves false to cancel the run. */
+        beforeRun: async () => true
       };
       RESERVE_KEY = "hina.studioReserve";
       reserves = {};
@@ -3113,6 +3282,11 @@ name: ${nm}
   });
 
   // src/state.ts
+  function toBase64(bytes) {
+    let s = "";
+    for (let i = 0; i < bytes.length; i += 32768) s += String.fromCharCode(...bytes.subarray(i, i + 32768));
+    return btoa(s);
+  }
   async function fileBase64(file) {
     const buf = new Uint8Array(await file.arrayBuffer());
     let bin = "";
@@ -3128,6 +3302,7 @@ name: ${nm}
       init_persistwatch();
       init_transport();
       init_host();
+      init_persona();
       init_operation();
       init_assets();
       StudioFiles = class {
@@ -3451,6 +3626,215 @@ name: ${nm}
          * (see `chatSlot`), so a chat that is not on screen in RisuAI is as editable
          * as the one that is.
          */
+        // --- personas (§1-89) ----------------------------------------------------
+        //
+        // Same shape as the card: RisuAI holds the persona, the backend holds a
+        // working copy (base = what RisuAI had at the last read, work = the edits),
+        // snapshots of it, and AI proposals land in it on approval. 반영 is the one
+        // write to RisuAI, carried out here because only the plugin can reach it.
+        /** Every persona the backend knows, as of the last read of RisuAI; null before it. */
+        personas = null;
+        personaError = "";
+        personaLoading = false;
+        /** The persona open in the persona tab (its backend row). */
+        persona = null;
+        /** projects/페르소나/<name>: the open persona's project folder. */
+        get personaFolder() {
+          return this.persona?.folder ?? "";
+        }
+        /**
+         * Read RisuAI's personas and hand them to the backend, which keeps their
+         * working copies; the pictures it has not cached yet follow in the
+         * background (the AI looks at them as files).
+         */
+        async loadPersonas() {
+          this.personaLoading = true;
+          this.personaError = "";
+          this.emit();
+          try {
+            const r = await readPersonas();
+            const res = await transport.post("/persona/sync", {
+              personas: r.personas.map((p) => ({ id: p.id, index: p.index, name: p.name, prompt: p.prompt, icon: p.icon, selected: p.selected }))
+            });
+            this.personas = res.personas;
+            if (this.persona) this.persona = res.personas.find((p) => p.key === this.persona.key) ?? this.persona;
+            void this.cachePersonaIcons(res.personas.filter((p) => p.needIcon), r.personas);
+            return res.personas;
+          } catch (e) {
+            this.personaError = e instanceof Error ? e.message : String(e);
+            throw e;
+          } finally {
+            this.personaLoading = false;
+            this.emit();
+          }
+        }
+        async cachePersonaIcons(rows, live) {
+          for (const row of rows) {
+            const p = live.find((x) => row.id ? x.id === row.id : x.index === row.index);
+            if (!p?.icon) continue;
+            const bytes = await personaImage(p.icon);
+            if (!bytes) continue;
+            try {
+              const saved2 = await transport.post("/persona/icon", { key: row.key, iconKey: p.icon, base64: toBase64(bytes) });
+              this.patchPersona(saved2);
+            } catch (e) {
+              void clientLog("warn", "persona icon cache", { error: String(e).slice(0, 200) });
+            }
+          }
+        }
+        /** One row changed: the list and the open persona follow, one emit. */
+        patchPersona(row) {
+          if (this.personas) this.personas = this.personas.map((x) => x.key === row.key ? { ...x, ...row } : x);
+          if (this.persona?.key === row.key) this.persona = { ...this.persona, ...row };
+          this.emit();
+          return row;
+        }
+        /** Open one persona for editing (its project folder exists from the sync). */
+        async openPersona(key) {
+          const row = await transport.get("/persona", { key });
+          this.persona = row;
+          this.touchFiles();
+          return row;
+        }
+        /** The backend's rows again, without reading RisuAI (an approved AI edit). */
+        async refreshPersonaList() {
+          if (this.personas === null && !this.persona) return;
+          try {
+            const r = await transport.get("/personas");
+            this.personas = r.personas;
+            if (this.persona) this.persona = r.personas.find((p) => p.key === this.persona.key) ?? this.persona;
+            this.emit();
+          } catch {
+          }
+        }
+        async refreshPersona() {
+          if (!this.persona) return;
+          try {
+            this.patchPersona(await transport.get("/persona", { key: this.persona.key }));
+          } catch {
+          }
+        }
+        /** Edit the working copy: only the given fields; image '' drops a pending new picture. */
+        async editPersona(fields3, key = this.persona?.key ?? "") {
+          return this.patchPersona(await transport.post("/persona/edit", { key, ...fields3 }));
+        }
+        async personaReset(key = this.persona?.key ?? "") {
+          const r = await transport.post("/persona/reset", { key });
+          if (r.deleted) {
+            if (this.personas) this.personas = this.personas.filter((x) => x.key !== key);
+            if (this.persona?.key === key) this.persona = null;
+            this.emit();
+            return 1;
+          }
+          this.patchPersona(r);
+          return r.discarded ?? 0;
+        }
+        /** A NEW persona in the working copy; RisuAI gets it on 반영. */
+        async createPersona(name, prompt = "") {
+          const row = await transport.post("/persona/create", { name, prompt });
+          this.personas = [...this.personas ?? [], row];
+          this.persona = row;
+          this.touchFiles();
+          return row;
+        }
+        async personaCheckpoints(key = this.persona?.key ?? "") {
+          const r = await transport.get("/persona/checkpoints", { key });
+          return r.checkpoints ?? [];
+        }
+        async personaCheckpoint(label2, key = this.persona?.key ?? "") {
+          await transport.post("/persona/checkpoint", { key, label: label2 });
+          await this.refreshPersona();
+        }
+        async personaRestore(id, key = this.persona?.key ?? "") {
+          const r = await transport.post("/persona/checkpoint/restore", { key, id });
+          if (r && r.key) this.patchPersona(r);
+          else await this.refreshPersona();
+        }
+        async deletePersonaCheckpoint(id, key = this.persona?.key ?? "") {
+          await transport.post("/persona/checkpoint/delete", { key, id });
+        }
+        async renamePersonaCheckpoint(id, label2, key = this.persona?.key ?? "") {
+          await transport.post("/persona/checkpoint/rename", { key, id, label: label2 });
+        }
+        /** Personas holding unapplied work - the title-row 반영 lists them too. */
+        async personaDirty() {
+          try {
+            const r = await transport.get("/persona/dirty");
+            return r.personas ?? [];
+          } catch {
+            return [];
+          }
+        }
+        /**
+         * 반영 for one persona: write its working copy into RisuAI, read it back,
+         * and move the backend baseline. Refused while RisuAI has it selected (see
+         * persona.ts) and when RisuAI's copy moved since the last read.
+         */
+        async personaWriteBack(key = this.persona?.key ?? "") {
+          const row = await transport.get("/persona", { key });
+          if (!row.dirty) return { written: false, name: row.work.name };
+          if (row.isNew) {
+            const bytes2 = row.work.image ? await this.fileBytes(row.work.image) : null;
+            const made = await createPersona({ name: row.work.name, prompt: row.work.prompt }, bytes2);
+            const after2 = await transport.post("/persona/commit", {
+              key,
+              id: made.id,
+              index: made.index,
+              name: made.name,
+              prompt: made.prompt,
+              iconKey: made.icon
+            });
+            if (this.persona?.key === key) this.persona = after2;
+            if (this.personas) this.personas = this.personas.map((x) => x.key === key ? after2 : x);
+            this.patchPersona(after2);
+            this.touchFiles();
+            void this.loadPersonas().catch(() => void 0);
+            return { written: true, name: made.name };
+          }
+          const live = (await readPersonas()).personas;
+          const p = live.find((x) => row.id ? x.id === row.id : x.index === row.index && x.name === row.base.name);
+          if (!p) throw new Error("RisuAI\uC5D0\uC11C \uC774 \uD398\uB974\uC18C\uB098\uB97C \uCC3E\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4 (\uC9C0\uC6CC\uC84C\uC744 \uC218 \uC788\uC2B5\uB2C8\uB2E4). \uCCAB \uD654\uBA74\uC5D0\uC11C \uB2E4\uC2DC \uC77D\uC5B4 \uC8FC\uC138\uC694");
+          if (p.selected) throw new Error(SELECTED_REFUSAL);
+          if (p.name !== row.base.name || p.prompt !== row.base.prompt || p.icon !== row.iconKey) {
+            throw new Error("RisuAI \uCABD\uC5D0\uC11C \uC774 \uD398\uB974\uC18C\uB098\uAC00 \uBC14\uB00C\uC5C8\uC2B5\uB2C8\uB2E4. \uCCAB \uD654\uBA74\uC5D0\uC11C \uD398\uB974\uC18C\uB098\uB97C \uB2E4\uC2DC \uC77D\uC5B4 \uC8FC\uC138\uC694 (\uD3B8\uC9D1 \uB0B4\uC6A9\uC740 \uC791\uC5C5\uBCF8\uC5D0 \uB0A8\uC544 \uC788\uC2B5\uB2C8\uB2E4)");
+          }
+          const bytes = row.work.image ? await this.fileBytes(row.work.image) : null;
+          const saved2 = await writePersona(p, { name: row.work.name, prompt: row.work.prompt }, bytes);
+          const after = await transport.post("/persona/commit", {
+            key,
+            name: saved2.name,
+            prompt: saved2.prompt,
+            iconKey: saved2.icon
+          });
+          if (after.key !== key) {
+            if (this.persona?.key === key) this.persona = after;
+            if (this.personas) this.personas = this.personas.map((x) => x.key === key ? after : x);
+          }
+          this.patchPersona(after);
+          this.touchFiles();
+          void this.loadPersonas().catch(() => void 0);
+          return { written: true, name: saved2.name };
+        }
+        /** The bot's project folder under projects/, and the name it could take (§1-89). */
+        async botFolderInfo() {
+          if (!this.activeCharKey) return null;
+          return await transport.get("/workspace/folder", { charKey: this.activeCharKey });
+        }
+        /** Rename the project folder with everything keyed by it (notes, rules, studio output). */
+        async renameBotFolder(folder) {
+          const ck = this.activeCharKey;
+          try {
+            const r = await transport.post("/workspace/folder/rename", { charKey: ck, folder }, 18e4);
+            this.touchFiles();
+            return r;
+          } catch (e) {
+            if (e instanceof BackendError && e.status >= 400 && e.status < 500) throw e;
+            const info = await transport.get("/workspace/folder", { charKey: ck }).catch(() => null);
+            this.touchFiles();
+            if (info && info.folder !== "" && info.folder === folder.trim()) return { old: "", folder: info.folder };
+            throw e;
+          }
+        }
         async openChat(chatIndex) {
           const ws = await this.upload({ chatIndex });
           const info = ws.chats[0];
@@ -3716,9 +4100,17 @@ name: ${nm}
         }
         /** Pending state across the whole bot - the leave guard's one call. */
         async dirtySummary() {
-          if (!this.activeCharKey) return null;
+          const personas = this.health ? this.personaDirty() : Promise.resolve([]);
+          if (!this.activeCharKey) {
+            const ps = await personas;
+            return ps.length ? { charKey: "", card: { dirty: false, total: 0, conflicts: 0 }, chats: [], personas: ps } : null;
+          }
           try {
-            return await transport.get("/workspace/dirty", { charKey: this.activeCharKey });
+            const [s, ps] = await Promise.all([
+              transport.get("/workspace/dirty", { charKey: this.activeCharKey }),
+              personas
+            ]);
+            return { ...s, personas: ps };
           } catch {
             return null;
           }
@@ -3884,7 +4276,9 @@ name: ${nm}
           yield* transport.stream("/chat", {
             sessionId: this.sessionId,
             prompt,
-            mode: this.activeTab === "studio" ? "studio" : this.editMode
+            mode: this.activeTab === "studio" ? "studio" : this.editMode,
+            // Which persona the persona tab has open (§1-89); the agent is told.
+            persona: this.editMode === "persona" ? this.persona?.key ?? "" : ""
           }, signal);
         }
         /** 중단 as a request the backend hears at once (§1-44): the aborted fetch
@@ -4325,7 +4719,7 @@ name: ${nm}
           if (!r.approved) return "\uAC70\uC808\uD588\uC2B5\uB2C8\uB2E4.";
           if (!r.host) {
             this.bump();
-            await Promise.all([this.refreshChanges(), this.refreshBotChanges()]);
+            await Promise.all([this.refreshChanges(), this.refreshBotChanges(), this.refreshPersonaList()]);
             return String(r.result ?? "\uC2E4\uD589\uD588\uC2B5\uB2C8\uB2E4.");
           }
           try {
@@ -4353,6 +4747,9 @@ name: ${nm}
               const name = String(r.host.args?.name || "") || "\uBCF5\uC81C \uBD07";
               await this.cloneBot(name);
               detail = `\uBCF5\uC81C \uBD07 \u201C${name}\u201D \uC744 \uB9CC\uB4E4\uC5C8\uC2B5\uB2C8\uB2E4. RisuAI \uBAA9\uB85D\uC5D0\uC11C \uD655\uC778\uD574 \uC8FC\uC138\uC694.`;
+            } else if (r.host.kind === "host_persona_writeback") {
+              const out = await this.personaWriteBack(String(r.host.args?.key || ""));
+              detail = out.written ? `\uD398\uB974\uC18C\uB098 '${out.name}' \uC744(\uB97C) RisuAI\uC5D0 \uBC18\uC601\uD558\uACE0 \uC800\uC7A5\uC744 \uD655\uC778\uD588\uC2B5\uB2C8\uB2E4.` : "\uD398\uB974\uC18C\uB098\uC5D0 \uBC18\uC601\uD560 \uBCC0\uACBD\uC774 \uC5C6\uC5C8\uC2B5\uB2C8\uB2E4.";
             } else if (r.host.kind === "host_open_tab") {
               const tab = String(r.host.args?.tab || "");
               this.openTabRequest = tab;
@@ -4812,7 +5209,8 @@ name: ${nm}
         chatKey: state.activeChatKey || "",
         botName: state.workspace?.characterName || String(state.character?.name || ""),
         chatName: chat?.name || "",
-        mode: state.activeTab === "chats" ? "" : state.activeTab === "studio" ? "studio" : state.editMode
+        mode: state.activeTab === "chats" ? "" : state.activeTab === "studio" ? "studio" : state.editMode,
+        persona: state.editMode === "persona" ? state.persona?.key ?? "" : ""
       };
     }
     async activate() {
@@ -5645,6 +6043,25 @@ name: ${nm}
       if (noticeMount) clear(noticeMount);
     }, 9e3);
   }
+  function shellPrompt(text2, actions) {
+    if (!noticeMount) return;
+    clear(noticeMount);
+    const row = el("div", { class: "row", style: { marginTop: "6px", gap: "6px" } });
+    const box = el("div", { class: "notice shellprompt" }, [el("div", { text: text2 }), row]);
+    for (const a of actions) {
+      const b = el("button", { class: (a.primary ? "primary" : "ghost") + " tiny", text: a.label });
+      b.addEventListener("click", async () => {
+        for (const x of Array.from(row.querySelectorAll("button"))) x.disabled = true;
+        try {
+          await a.run();
+        } finally {
+          if (box.isConnected) box.remove();
+        }
+      });
+      row.appendChild(b);
+    }
+    noticeMount.appendChild(box);
+  }
   function msg4(e) {
     return e instanceof Error ? e.message : String(e);
   }
@@ -5923,8 +6340,8 @@ name: ${nm}
     if (!state.health || !state.activeCharKey) return true;
     const summary = await state.dirtySummary();
     if (!summary) return true;
-    const dirty = collect(summary, except);
-    for (const d of dirty) {
+    const dirty2 = collect(summary, except);
+    for (const d of dirty2) {
       if (!await promptOne(action, d)) return false;
     }
     return true;
@@ -5951,12 +6368,19 @@ name: ${nm}
         conflicts: c.conflicts
       });
     }
+    for (const p of summary.personas ?? []) {
+      out.push({ scope: "persona", key: p.key, label: `'${p.name || "\uC774\uB984 \uC5C6\uB294"}' \uD398\uB974\uC18C\uB098`, total: p.total, conflicts: 0 });
+    }
     return out;
   }
   function msg5(e) {
     return e instanceof Error ? e.message : String(e);
   }
   async function applyOne(d) {
+    if (d.scope === "persona") {
+      await state.personaWriteBack(d.key);
+      return;
+    }
     if (d.scope === "card") {
       const r2 = await state.cardWriteBack();
       if (!r2.verified) {
@@ -5973,6 +6397,10 @@ name: ${nm}
     await state.commit("\uBC18\uC601 \uC9C1\uC804");
   }
   async function discardOne(d) {
+    if (d.scope === "persona") {
+      const n = await state.personaReset(d.key);
+      return n ? `${n}\uAC74` : "";
+    }
     if (d.scope === "card") {
       const n = await state.cardReset();
       return n ? `${n}\uAC74` : "";
@@ -6090,37 +6518,62 @@ name: ${nm}
     );
     const wrap = el("span", { class: "commitctl", style: { display: "none" } }, [approveBtn, applyBtn3]);
     let pending3 = 0;
-    let dirty = 0;
+    let dirty2 = 0;
     let summary = null;
-    let seq = 0;
-    const paint = () => {
-      wrap.style.display = state.activeCharKey && state.health ? "" : "none";
+    const paint2 = () => {
+      wrap.style.display = state.health && (state.activeCharKey || dirty2 > 0) ? "" : "none";
       approveCount.textContent = String(pending3);
-      applyCount.textContent = String(dirty);
+      applyCount.textContent = String(dirty2);
       approveBtn.classList.toggle("hot", pending3 > 0);
-      applyBtn3.classList.toggle("hot", dirty > 0);
+      applyBtn3.classList.toggle("hot", dirty2 > 0);
       approveBtn.title = pending3 ? `\uC2B9\uC778\uC744 \uAE30\uB2E4\uB9AC\uB294 \uC81C\uC548 ${pending3}\uAC74 \u2014 \uB20C\uB7EC\uC11C \uC2B9\uC778\xB7\uAC70\uC808` : "\uC2B9\uC778\uC744 \uAE30\uB2E4\uB9AC\uB294 \uC81C\uC548\uC774 \uC5C6\uC2B5\uB2C8\uB2E4";
-      applyBtn3.title = dirty ? `RisuAI \uC5D0 \uC544\uC9C1 \uBC18\uC601\uD558\uC9C0 \uC54A\uC740 \uBCC0\uACBD ${dirty}\uAC74 \u2014 \uB20C\uB7EC\uC11C \uD55C \uBC88\uC5D0 \uBC18\uC601` : "RisuAI \uC5D0 \uBC18\uC601\uD560 \uBCC0\uACBD\uC774 \uC5C6\uC2B5\uB2C8\uB2E4";
+      applyBtn3.title = dirty2 ? `RisuAI \uC5D0 \uC544\uC9C1 \uBC18\uC601\uD558\uC9C0 \uC54A\uC740 \uBCC0\uACBD ${dirty2}\uAC74 \u2014 \uB20C\uB7EC\uC11C \uD55C \uBC88\uC5D0 \uBC18\uC601` : "RisuAI \uC5D0 \uBC18\uC601\uD560 \uBCC0\uACBD\uC774 \uC5C6\uC2B5\uB2C8\uB2E4";
     };
+    const local = () => {
+      if (!summary) return null;
+      const card2 = state.botChanges ? state.botChanges.total : summary.card.dirty ? summary.card.total : 0;
+      let n = card2;
+      for (const c of summary.chats) {
+        if (c.chatKey === state.activeChatKey && state.changes) n += state.changes.total;
+        else n += c.dirty ? c.total : 0;
+      }
+      for (const p of summary.personas ?? []) n += p.key === state.persona?.key ? 0 : p.total;
+      if (state.persona?.dirty) n += state.persona.total;
+      return n;
+    };
+    let inFlight2 = false;
+    let again = false;
     const refresh3 = async () => {
-      if (!state.activeCharKey || !state.health) {
-        paint();
+      if (!state.health) {
+        paint2();
         return;
       }
-      const mine = ++seq;
+      if (inFlight2) {
+        again = true;
+        return;
+      }
+      inFlight2 = true;
+      const charKey = state.activeCharKey;
       try {
         const [acts, staged, sum] = await Promise.all([
-          state.actionsForBot().catch(() => []),
+          state.activeCharKey ? state.actionsForBot().catch(() => []) : Promise.resolve([]),
           state.activeChatKey ? state.stagedEdits().catch(() => []) : Promise.resolve([]),
           state.dirtySummary()
         ]);
-        if (mine !== seq) return;
-        pending3 = acts.length + staged.length;
-        summary = sum;
-        dirty = sum ? (sum.card.dirty ? sum.card.total : 0) + sum.chats.reduce((n, c) => n + (c.dirty ? c.total : 0), 0) : 0;
+        if (charKey === state.activeCharKey) {
+          pending3 = acts.length + staged.length;
+          summary = sum;
+          dirty2 = sum ? (sum.card.dirty ? sum.card.total : 0) + sum.chats.reduce((n, c) => n + (c.dirty ? c.total : 0), 0) + (sum.personas ?? []).reduce((n, p) => n + p.total, 0) : 0;
+        }
       } catch {
+      } finally {
+        inFlight2 = false;
       }
-      paint();
+      paint2();
+      if (again) {
+        again = false;
+        void refresh3();
+      }
     };
     let timer2 = null;
     const soon = () => {
@@ -6128,10 +6581,18 @@ name: ${nm}
       timer2 = setTimeout(() => {
         timer2 = null;
         void refresh3();
-      }, 700);
+      }, 300);
     };
-    state.onChange(soon);
-    pollWhileVisible(() => void refresh3(), POLL_MS2, () => !!state.activeCharKey);
+    state.onChange(() => {
+      if (state.emitReason === "assetSync") return;
+      const n = local();
+      if (n !== null && n !== dirty2) {
+        dirty2 = n;
+        paint2();
+      }
+      soon();
+    });
+    pollWhileVisible(() => void refresh3(), POLL_MS2, () => !!state.health);
     setOnDecided(() => {
       state.bump();
       soon();
@@ -6140,7 +6601,7 @@ name: ${nm}
     applyBtn3.addEventListener("click", () => openApplyPopover(applyBtn3, () => summary, async () => {
       await refresh3();
     }));
-    paint();
+    paint2();
     void refresh3();
     return wrap;
   }
@@ -6178,13 +6639,13 @@ name: ${nm}
         fix?.addEventListener("click", async () => {
           if (d.scope === "chat" && d.key !== state.activeChatKey) await state.loadTurns(d.key);
           close();
-          openConflicts(d.scope, () => {
+          if (d.scope !== "persona") openConflicts(d.scope, () => {
             void refresh3();
             state.bump();
           });
         });
         list2.appendChild(el("div", { class: "stagedrow" }, [
-          el("span", { class: "badge", text: d.scope === "card" ? "\uBD07" : "\uCC57" }),
+          el("span", { class: "badge", text: d.scope === "card" ? "\uBD07" : d.scope === "persona" ? "\uD398\uB974\uC18C\uB098" : "\uCC57" }),
           el("div", { class: "grow" }, [
             el("div", { text: `${d.label} \u2014 \uBCC0\uACBD ${d.total}\uAC74` }),
             d.conflicts ? el("div", { class: "hint", text: "RisuAI \uCABD\uACFC \uCDA9\uB3CC\uC774 \uC788\uC5B4 \uBA3C\uC800 \uD574\uACB0\uD574\uC57C \uBC18\uC601\uB429\uB2C8\uB2E4" }) : null
@@ -6950,6 +7411,69 @@ pre.mono {
 .chatitem:hover { background: rgba(128,128,128,.10); }
 .chatitem.presetnow, .chatitem.current { background: rgba(37,99,235,.10); }
 .chatitem .n { color: var(--textcolor2, #79839a); font-size: 11px; min-width: 40px; text-align: right; }
+
+/* --- the first screen (\xA71-89): three modes, one unfolds ------------------ */
+.landing { max-width: 760px; }
+.landingfoot { margin-top: 12px; }
+.spin {
+  display: inline-block; width: 12px; height: 12px; flex-shrink: 0; vertical-align: -2px;
+  border: 2px solid #8886; border-top-color: #60a5fa; border-radius: 50%;
+  animation: write-spin .9s linear infinite;
+}
+.spin.big { width: 26px; height: 26px; border-width: 3px; }
+@media (prefers-reduced-motion: reduce) { .spin { animation-duration: 3s; } }
+.bootbox {
+  display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; margin-bottom: 12px;
+  border: 1px solid var(--borderc, #2b323f); border-radius: 8px; background: rgba(96,165,250,.06);
+}
+.bootbox.slim { flex-direction: row; align-items: center; gap: 8px; padding: 6px 10px; background: transparent; }
+.boothead { display: flex; gap: 12px; align-items: center; margin-bottom: 4px; }
+.bootstep { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--textcolor2, #79839a); }
+.bootstep.run, .bootstep.done { color: inherit; }
+.bootstep.err { color: #f87171; }
+.bootmark { width: 12px; text-align: center; font-weight: 700; }
+.bootstep.done .bootmark { color: #34d399; }
+.modecards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+@media (max-width: 620px) { .modecards { grid-template-columns: 1fr; } }
+.modecard {
+  display: flex; align-items: flex-start; gap: 10px; text-align: left; padding: 12px;
+  border: 1px solid var(--borderc, #2b323f); border-radius: 8px; background: rgba(128,128,128,.05);
+  color: inherit; cursor: pointer; min-width: 0;
+}
+.modecard:hover:not(:disabled) { background: rgba(128,128,128,.12); }
+.modecard.open { border-color: #2563eb; background: rgba(37,99,235,.10); }
+.modecard:disabled { opacity: .5; cursor: default; }
+.modeicon { font-size: 22px; line-height: 1; }
+.modetext { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
+.modetitle { font-weight: 700; font-size: 14px; }
+.modesub { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.modecaret { color: var(--textcolor2, #79839a); }
+.modebody { margin-top: 14px; }
+.loadingrow { cursor: default; }
+.foldrow { cursor: pointer; }
+.chatitem.busy { opacity: .6; }
+.chatitem.locked { cursor: default; opacity: .7; }
+.clip1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 460px; }
+.personaavatar {
+  width: 32px; height: 32px; border-radius: 6px; flex-shrink: 0; object-fit: cover;
+  background: rgba(128,128,128,.12);
+}
+.personaavatar.initials, .personabig.initials {
+  display: flex; align-items: center; justify-content: center; font-weight: 700;
+  color: var(--textcolor2, #79839a);
+}
+/* --- persona editor ---------------------------------------------------- */
+.personagrid { display: flex; gap: 18px; align-items: flex-start; flex-wrap: wrap; max-width: 980px; }
+.personaleft { width: 220px; flex-shrink: 0; }
+.personaright { flex: 1; min-width: 260px; display: flex; flex-direction: column; }
+.personabig {
+  width: 220px; height: 220px; border-radius: 10px; object-fit: cover; display: block;
+  background: rgba(128,128,128,.12); font-size: 48px;
+}
+.personaprompt { width: 100%; min-height: 220px; resize: vertical; }
+.personapick { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; max-height: 200px; overflow: auto; }
+.shellprompt .row { flex-wrap: wrap; }
+@media (max-width: 620px) { .personaleft { width: 100%; } .personabig { width: 160px; height: 160px; } }
 
 /* --- editor: explorer | turns | tools ------------------------------------ */
 
@@ -7919,6 +8443,24 @@ label.row { align-items: center; gap: 6px; }
 .styleedit textarea { width: 100%; box-sizing: border-box; resize: vertical; }
 .styleedit .field { display: block; margin-bottom: 6px; }
 .styleedit .field > span { display: block; font-size: 11px; opacity: .7; margin-bottom: 2px; }
+/* \xA71-90: what the style saves sits in one framed block (prompts, \uC694\uCCAD \uC124\uC815,
+   \uC800\uC7A5); the temporary prompts and the material buttons follow it. */
+.styleedit.stylesaved { margin: 6px 8px 0; padding: 6px 8px; border: 1px solid var(--border, #2b323f); border-radius: 8px; }
+.stylesaved .genrow { gap: 6px; align-items: center; margin: 2px 0 4px; min-width: 0; }
+.stylesaved .genpeek { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.stylesavebar { gap: 6px; align-items: center; padding-top: 6px; margin-top: 4px; border-top: 1px dashed var(--border, #2b323f); min-width: 0; }
+.stylesavebar .savestatus { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.stylesavebar .stylesave:disabled, .stylesavebar button:disabled { opacity: .45; }
+/* The left column before its data lands: a spinner and placeholder rows. */
+.studioskel { padding: 10px 8px; display: flex; flex-direction: column; gap: 8px; }
+.studioskel .skelhead { gap: 6px; align-items: center; }
+.studioskel .skelrow { height: 26px; border-radius: 6px; background: #8882; animation: skelpulse 1.2s ease-in-out infinite; }
+@keyframes skelpulse { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .studioskel .skelrow { animation: none; } }
+/* Each style prompt folds on its own; folded, its first line stays as a preview. */
+.promptfoldhead { gap: 6px; align-items: center; margin-bottom: 2px; cursor: default; min-width: 0; }
+.promptfoldhead .promptfoldlabel { font-size: 11px; opacity: .7; white-space: nowrap; }
+.promptfoldhead .promptpeek { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
 div.field > span:first-child { display: block; font-size: 11px; opacity: .7; margin-bottom: 2px; }
 div.field { min-width: 0; }
 
@@ -7942,7 +8484,6 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
 .refslider input[type=range] { flex: 1; min-width: 0; margin: 0; }
 .refslider .hint { flex: 0 0 auto; }
 .refval { min-width: 30px; text-align: right; font-family: var(--mono, monospace); }
-.stylefold summary { font-size: 12px; }
 
 /* Notices are toasts in the corner - never a bar that shoves the centre. */
 .toastwrap { position: fixed; top: 12px; right: 12px; z-index: 60; display: flex; flex-direction: column; gap: 6px; max-width: min(420px, 80vw); pointer-events: none; }
@@ -8498,397 +9039,10 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
   init_host();
   init_assets();
   init_transport();
-  function botSnapshots(editBot) {
-    const wrap = el("div");
-    if (!state.activeCharKey) return wrap;
-    void (async () => {
-      let cps = [];
-      try {
-        cps = (await state.cardCheckpoints()).filter((c) => c.kind !== "auto");
-      } catch {
-        return;
-      }
-      if (!cps.length) return;
-      wrap.appendChild(el("div", { class: "sectionline" }));
-      wrap.appendChild(el("div", { class: "sectiontitle", text: `\uBD07 \uC2A4\uB0C5\uC0F7 ${cps.length}\uAC1C` }));
-      const list2 = el("div", { class: "chatlist snaplist" });
-      const redraw = () => wrap.replaceWith(botSnapshots(editBot));
-      for (const c of cps.slice(0, 8)) {
-        const edit = el("button", { class: "ghost tiny", text: "\uD3B8\uC9D1" });
-        edit.title = "\uC791\uC5C5\uBCF8\uC744 \uC774 \uC2DC\uC810\uC73C\uB85C \uB418\uB3CC\uB9B0 \uB4A4 \uBD07 \uD3B8\uC9D1\uC73C\uB85C \uB4E4\uC5B4\uAC11\uB2C8\uB2E4 (\uC9C1\uC804 \uC0C1\uD0DC\uB3C4 \uC2A4\uB0C5\uC0F7\uC73C\uB85C \uB0A8\uC2B5\uB2C8\uB2E4)";
-        edit.addEventListener("click", async () => {
-          edit.disabled = true;
-          try {
-            await state.cardRestore(c.id);
-            setEditMode("bot", "meta");
-          } catch (e) {
-            flash(wrap, "\uBCF5\uC6D0\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + (e instanceof Error ? e.message : String(e)));
-            edit.disabled = false;
-          }
-        });
-        const row = el("div", { class: "chatitem" });
-        const del = el("button", { class: "ghost tiny", title: "\uC774 \uC2A4\uB0C5\uC0F7 \uC0AD\uC81C" });
-        armed(del, "\u2715", "\uC0AD\uC81C \uD655\uC778", async () => {
-          row.classList.add("deleting");
-          del.disabled = true;
-          edit.disabled = true;
-          try {
-            await state.deleteCardCheckpoint(c.id);
-            redraw();
-          } catch (e) {
-            row.classList.remove("deleting");
-            del.disabled = false;
-            edit.disabled = false;
-            flash(wrap, "\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + (e instanceof Error ? e.message : String(e)));
-          }
-        });
-        row.append(
-          el("span", { class: "grow", text: c.label || "(\uBB34\uC81C)" }),
-          el("span", { class: "n", text: fmtTime(c.created_at * 1e3) }),
-          edit,
-          del
-        );
-        list2.appendChild(row);
-      }
-      if (cps.length > 8) list2.appendChild(el("div", { class: "hint", style: { padding: "4px 0" }, text: `\uADF8 \uC678 ${cps.length - 8}\uAC1C \u2014 \uBD07 \uD3B8\uC9D1 \u2192 \u{1F558} \uBC84\uC804\uC5D0\uC11C \uC804\uBD80 \uBD05\uB2C8\uB2E4` }));
-      wrap.appendChild(list2);
-    })();
-    return wrap;
-  }
-  function assetSyncLine() {
-    const p = state.assetSync;
-    const wrap = el("div", { class: "assetsync" });
-    if (!p) {
-      wrap.appendChild(el("div", { class: "hint", text: state.activeCharKey ? "\uC5D0\uC14B \uB3D9\uAE30\uD654 \uB300\uAE30 \uC911" : "" }));
-      return wrap;
-    }
-    const busy = syncBusy(p);
-    const text2 = el("span", { class: "hint", text: describeSync(p) });
-    const tone = p.phase === "error" ? " err" : p.phase === "done" && p.failed ? " warn" : "";
-    const line = el("div", { class: "row assetline" + tone }, [text2]);
-    if (busy) {
-      const cancel = el("button", { class: "ghost tiny", text: "\uC911\uB2E8" });
-      cancel.addEventListener("click", () => {
-        state.cancelAssetSync();
-      });
-      line.appendChild(cancel);
-      let ratio = -1;
-      if (p.phase === "pulling" && p.pull && p.pull.total) ratio = p.pull.done / p.pull.total;
-      else if (p.phase === "pushing" && p.toPush) ratio = (p.read + p.readFailed) / p.toPush;
-      const bar3 = el("div", { class: "assetbar" + (ratio < 0 ? " indeterminate" : "") });
-      const fill2 = el("div", { class: "assetfill" });
-      if (ratio >= 0) fill2.style.width = Math.round(Math.min(1, ratio) * 100) + "%";
-      bar3.appendChild(fill2);
-      wrap.appendChild(line);
-      wrap.appendChild(bar3);
-    } else {
-      if (p.phase === "error" || p.phase === "cancelled" || p.failed) {
-        const again = el("button", { class: "ghost tiny", text: "\uB2E4\uC2DC \uB3D9\uAE30\uD654" });
-        again.title = "\uC5D0\uC14B \uBAA9\uB85D\uC744 \uB2E4\uC2DC \uB300\uC870\uD558\uACE0, \uBE60\uC9C4 \uAC83\uB9CC \uAC00\uC838\uC635\uB2C8\uB2E4";
-        again.addEventListener("click", () => {
-          state.syncAssets(true);
-        });
-        line.appendChild(again);
-      }
-      wrap.appendChild(line);
-    }
-    return wrap;
-  }
-  function refreshAssetSyncLine(mount2) {
-    const old = mount2.querySelector(".assetsync");
-    if (!old) return false;
-    old.replaceWith(assetSyncLine());
-    return true;
-  }
-  var portraitUrl = "";
-  var portraitImg = null;
-  var portraitPath = "";
-  var filterText = "";
-  function renderChatsTab(mount2) {
-    clear(mount2);
-    const pad = el("div", { class: "pad" });
-    mount2.appendChild(pad);
-    if (state.connectError) {
-      const go = el("button", { class: "primary tiny", text: "\uC124\uC815\uC73C\uB85C \uC774\uB3D9" });
-      go.addEventListener("click", () => setTab("settings"));
-      pad.appendChild(el("div", { class: "notice err" }, [
-        el("div", { text: "\uBC31\uC5D4\uB4DC\uC5D0 \uC5F0\uACB0\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4." }),
-        el("div", { class: "hint", text: state.connectError }),
-        // Measured on web RisuAI (risuai.xyz): the first connection after
-        // opening can take a couple of minutes while the host falls back from
-        // its proxy route to a direct one. The panel keeps retrying meanwhile.
-        transport.hostPlatform === "web" ? el("div", { class: "hint", style: { marginTop: "4px" }, text: "\uC6F9 RisuAI(risuai.xyz)\uC5D0\uC11C\uB294 \uCD5C\uCD08 \uC5F0\uACB0\uAE4C\uC9C0 3\uBD84 \uC815\uB3C4 \uAC78\uB9B4 \uC218 \uC788\uC2B5\uB2C8\uB2E4 (\uD504\uB85D\uC2DC \u2192 \uC9C1\uC811 \uC5F0\uACB0 \uD3F4\uBC31\uC5D0 \uAC78\uB9AC\uB294 \uC2DC\uAC04). \uD328\uB110\uC774 30\uCD08\uB9C8\uB2E4 \uC790\uB3D9\uC73C\uB85C \uB2E4\uC2DC \uC2DC\uB3C4\uD558\uB2C8 \uADF8\uB300\uB85C \uB450\uC154\uB3C4 \uB429\uB2C8\uB2E4." }) : null,
-        el("div", { class: "row", style: { marginTop: "6px" } }, [
-          el("span", { class: "hint", text: "\uC124\uC815 \u2192 \uC5F0\uACB0\uC5D0\uC11C URL\uACFC \uD1A0\uD070\uC744 \uD655\uC778\uD574 \uC8FC\uC138\uC694." }),
-          go
-        ])
-      ]));
-    }
-    if (state.slotError) {
-      pad.appendChild(el("div", { class: "notice" }, [
-        el("div", { text: "\uCE90\uB9AD\uD130\uAC00 \uC120\uD0DD\uB418\uC5B4 \uC788\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4." }),
-        el("div", { class: "hint", text: state.slotError })
-      ]));
-      return;
-    }
-    const char = state.character;
-    if (!char) {
-      pad.appendChild(el("div", { class: "empty", text: "\uCE90\uB9AD\uD130\uB97C \uC77D\uB294 \uC911\uC785\uB2C8\uB2E4\u2026" }));
-      return;
-    }
-    const liveChats = Array.isArray(char.chats) ? char.chats : [];
-    const folders = Array.isArray(char.chatFolders) ? char.chatFolders : [];
-    const editBot = el("button", { class: "primary tiny", text: "\uBD07 \uD3B8\uC9D1" });
-    editBot.addEventListener("click", () => {
-      if (!state.activeCharKey) {
-        flash(pad, "\uBC31\uC5D4\uB4DC\uC5D0 \uBD07\uC774 \uC544\uC9C1 \uC62C\uB77C\uAC00\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4. \uC5F0\uACB0\uC744 \uD655\uC778\uD574 \uC8FC\uC138\uC694.");
-        return;
-      }
-      setEditMode("bot", "meta");
-    });
-    const portrait = el("div", { class: "botinitials", text: initials(String(char.name || "?")) });
-    pad.appendChild(el("div", { class: "botcard" }, [
-      portrait,
-      el("div", { class: "grow" }, [
-        el("div", { class: "botname", text: String(char.name || "(\uC774\uB984 \uC5C6\uC74C)") }),
-        el("div", { class: "hint", text: `\uCC57 ${liveChats.length}\uAC1C` + (folders.length ? ` \xB7 \uD3F4\uB354 ${folders.length}\uAC1C` : "") }),
-        assetSyncLine(),
-        el("div", { class: "row", style: { marginTop: "8px" } }, [editBot]),
-        el("div", { class: "hint", style: { marginTop: "6px" } }, [
-          "\uB2E4\uB978 \uBD07\uC744 \uD3B8\uC9D1\uD558\uC2DC\uB824\uBA74 RisuAI\uC5D0\uC11C \uADF8 \uBD07\uC744 \uC5F4\uACE0 \u{1F504} \uB97C \uB20C\uB7EC \uC8FC\uC138\uC694."
-        ])
-      ])
-    ]));
-    void loadPortrait(char.image, portrait);
-    pad.appendChild(botSnapshots(editBot));
-    pad.appendChild(el("div", { class: "sectionline" }));
-    pad.appendChild(el("div", { class: "sectiontitle", text: "\uCC57 \uC120\uD0DD" }));
-    const ws = state.workspace;
-    const loadedFor = (c) => ws?.chats.find((w) => w.chatId === (c.id ?? ""));
-    if (liveChats.length > 6) {
-      setToolbarSearch(filterText, (v) => {
-        filterText = v;
-        renderChatsTab(mount2);
-        refocusSearch(null);
-      }, "\uCC57 \uCC3E\uAE30");
-    }
-    const needle = filterText.trim().toLowerCase();
-    const rows = liveChats.map((c, i) => ({ chat: c, index: i })).filter((r) => !needle || String(r.chat.name ?? "").toLowerCase().includes(needle));
-    const grouped3 = /* @__PURE__ */ new Map();
-    for (const r of rows) {
-      const key = String(r.chat.folderId ?? "");
-      if (!grouped3.has(key)) grouped3.set(key, []);
-      grouped3.get(key).push(r);
-    }
-    const dirtyBadges = /* @__PURE__ */ new Map();
-    const makeItem = (r) => {
-      const loaded = loadedFor(r.chat);
-      const edit = el("button", { class: "ghost tiny", text: "\uCC57 \uD3B8\uC9D1" });
-      const dirtyBadge = el("span", {
-        class: "badge warn",
-        style: { display: "none" },
-        title: "\uC774 \uCC57\uC5D0 \uC544\uC9C1 RisuAI\uC5D0 \uBC18\uC601\uD558\uC9C0 \uC54A\uC740 \uBCC0\uACBD\uC774 \uC788\uC2B5\uB2C8\uB2E4"
-      });
-      if (loaded) dirtyBadges.set(loaded.chatKey, dirtyBadge);
-      const item = el("div", {
-        class: "chatitem" + (loaded && loaded.chatKey === state.activeChatKey ? " current" : "")
-      }, [
-        el("span", { class: "grow", text: String(r.chat.name || `(\uCC57 ${r.index})`) }),
-        dirtyBadge,
-        el("span", { class: "n", text: `${(r.chat.message ?? []).length}\uD134` }),
-        edit
-      ]);
-      let busy = false;
-      const enter = async () => {
-        if (busy) return;
-        if (loaded) {
-          await state.loadTurns(loaded.chatKey);
-          setEditMode("chat", "editor");
-          return;
-        }
-        busy = true;
-        edit.disabled = true;
-        edit.textContent = "\uBD88\uB7EC\uC624\uB294 \uC911\u2026";
-        try {
-          await state.openChat(r.index);
-          setEditMode("chat", "editor");
-        } catch (e) {
-          flash(pad, e instanceof HostError && e.code === "missing" ? "RisuAI\uAC00 \uC774 \uCC57\uC744 \uC544\uC9C1 \uC77D\uC5B4 \uB450\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4. RisuAI\uC5D0\uC11C \uADF8 \uCC57\uC744 \uD55C \uBC88 \uC5F0 \uB2E4\uC74C \u{1F504} \uB97C \uB20C\uB7EC \uC8FC\uC138\uC694." : "\uCC57\uC744 \uBD88\uB7EC\uC624\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + (e instanceof Error ? e.message : String(e)));
-        } finally {
-          busy = false;
-          edit.disabled = false;
-          edit.textContent = "\uCC57 \uD3B8\uC9D1";
-        }
-      };
-      item.addEventListener("click", () => void enter());
-      edit.addEventListener("click", (ev) => {
-        ev.stopPropagation();
-        void enter();
-      });
-      return item;
-    };
-    void (async () => {
-      const s = await state.dirtySummary();
-      if (!s) return;
-      for (const c of s.chats) {
-        const b = dirtyBadges.get(c.chatKey);
-        if (!b || !c.dirty) continue;
-        b.textContent = `\uBBF8\uBC18\uC601 ${c.total || c.conflicts}`;
-        b.style.display = "";
-      }
-    })();
-    const loose = grouped3.get("") ?? [];
-    if (loose.length) {
-      const list2 = el("div", { class: "chatlist" });
-      for (const r of loose) list2.appendChild(makeItem(r));
-      pad.appendChild(list2);
-    }
-    for (const f of folders) {
-      const items5 = grouped3.get(String(f.id)) ?? [];
-      if (!items5.length) continue;
-      const body = el("div", { class: "folderbody" });
-      for (const r of items5) body.appendChild(makeItem(r));
-      const caret = el("span", { text: "\u25B8" });
-      const head = el("button", { class: "folderhead" }, [
-        caret,
-        el("span", { class: "folderdot", style: f.color ? { background: String(f.color) } : {} }),
-        el("span", { class: "grow", text: String(f.name || "\uD3F4\uB354") }),
-        el("span", { text: `${items5.length}` })
-      ]);
-      head.addEventListener("click", () => {
-        const open4 = body.classList.toggle("open");
-        caret.textContent = open4 ? "\u25BE" : "\u25B8";
-      });
-      pad.appendChild(el("div", { class: "folder" }, [head, body]));
-    }
-    const known = new Set(folders.map((f) => String(f.id)));
-    const orphans = [...grouped3.entries()].filter(([k]) => k !== "" && !known.has(k)).flatMap(([, v]) => v);
-    if (orphans.length) {
-      const list2 = el("div", { class: "chatlist" });
-      for (const r of orphans) list2.appendChild(makeItem(r));
-      pad.appendChild(el("div", { class: "sectiontitle", style: { marginTop: "10px" }, text: "\uD3F4\uB354 \uC5C6\uC74C" }));
-      pad.appendChild(list2);
-    }
-    pad.appendChild(el("div", { class: "row", style: { marginTop: "12px" } }, [
-      buildUploadAll(),
-      el("span", { class: "hint", text: "\uCC57\uC744 \uB204\uB974\uBA74 \uADF8 \uCC57\uB9CC \uBD88\uB7EC\uC635\uB2C8\uB2E4. \uC5EC\uB7EC \uCC57\uC744 \uC624\uAC00\uBA70 \uBCFC \uB54C\uB9CC \uC774 \uBC84\uD2BC\uC744 \uC4F0\uC138\uC694." })
-    ]));
-  }
-  function initials(name) {
-    const t = name.trim();
-    if (!t) return "?";
-    return /[가-힣]/.test(t[0]) ? t.slice(0, 1) : t.slice(0, 2).toUpperCase();
-  }
-  async function loadPortrait(path, mount2) {
-    if (!path) return;
-    if (portraitPath === path && portraitImg) {
-      mount2.replaceWith(portraitImg);
-      return;
-    }
-    try {
-      const bytes = await Risuai.readImage(path);
-      if (!bytes || !bytes.byteLength) return;
-      if (portraitUrl) URL.revokeObjectURL(portraitUrl);
-      const view2 = bytes;
-      const buf = new Uint8Array(view2.byteLength);
-      buf.set(view2);
-      portraitUrl = URL.createObjectURL(new Blob([buf]));
-      const img = el("img", { class: "botportrait", src: portraitUrl, alt: "" });
-      img.addEventListener("error", () => {
-        img.replaceWith(mount2);
-        portraitImg = null;
-        portraitPath = "";
-      });
-      portraitImg = img;
-      portraitPath = path;
-      if (mount2.isConnected) mount2.replaceWith(img);
-    } catch {
-    }
-  }
-  function buildUploadAll() {
-    const b = el("button", { text: "\uC774 \uBD07\uC758 \uBAA8\uB4E0 \uCC57 \uBD88\uB7EC\uC624\uAE30" });
-    b.addEventListener("click", async () => {
-      b.disabled = true;
-      b.textContent = "\uBD88\uB7EC\uC624\uB294 \uC911\uC785\uB2C8\uB2E4\u2026";
-      try {
-        await state.upload({ allChats: true });
-        if (state.activeChatKey) await state.loadTurns();
-      } catch (e) {
-        console.log("[risu-hina] upload all failed", e);
-      } finally {
-        b.disabled = false;
-        b.textContent = "\uC774 \uBD07\uC758 \uBAA8\uB4E0 \uCC57 \uBD88\uB7EC\uC624\uAE30";
-      }
-    });
-    return b;
-  }
-  function flash(pad, text2) {
-    const n = el("div", { class: "notice", text: text2 });
-    pad.insertBefore(n, pad.firstChild);
-    setTimeout(() => n.remove(), 5e3);
-  }
+  init_persona();
 
-  // src/ui/tab-editor.ts
+  // src/ui/kit.ts
   init_dom();
-  init_state();
-
-  // src/ui/explorer.ts
-  init_dom();
-  var GROUP = 50;
-  var Explorer = class {
-    constructor(opts) {
-      this.opts = opts;
-      this.root = el("div", { class: "explorer" });
-    }
-    root;
-    turns = [];
-    activeStart = -1;
-    setTurns(turns) {
-      this.turns = turns;
-      this.render();
-    }
-    /** Highlight the group containing the turn currently at the top of the view. */
-    setVisible(seq) {
-      const start = Math.floor(seq / GROUP) * GROUP;
-      if (start === this.activeStart) return;
-      this.activeStart = start;
-      for (const b of Array.from(this.root.querySelectorAll(".expgroup"))) {
-        b.classList.toggle("on", Number(b.dataset.start) === start);
-      }
-    }
-    render() {
-      clear(this.root);
-      if (!this.turns.length) {
-        this.root.appendChild(el("div", { class: "hint", style: { padding: "8px" }, text: "\uD134 \uC5C6\uC74C" }));
-        return;
-      }
-      const preview2 = this.opts.preview();
-      const deleting2 = this.opts.deleting();
-      const last = this.turns[this.turns.length - 1].seq;
-      for (let start = 0; start <= last; start += GROUP) {
-        const end = start + GROUP - 1;
-        const inGroup = this.turns.filter((t) => t.seq >= start && t.seq <= end);
-        if (!inGroup.length) continue;
-        const changed = inGroup.filter((t) => t.changed || t.isNew).length;
-        const pending3 = preview2 ? inGroup.filter((t) => preview2.has(t.msgId)).length : 0;
-        const doomed = deleting2 ? inGroup.filter((t) => deleting2.has(t.msgId)).length : 0;
-        const marks = [];
-        if (changed) marks.push(`\u270E${changed}`);
-        if (pending3) marks.push(`\u25C6${pending3}`);
-        if (doomed) marks.push(`\u2715${doomed}`);
-        const b = el("button", {
-          class: "expgroup" + (start === this.activeStart ? " on" : ""),
-          dataset: { start: String(start) },
-          title: `\uD134 ${start}\u2013${Math.min(end, last)} (${inGroup.length}\uAC1C)`
-        }, [
-          el("span", { text: `${start}\u2013${Math.min(end, last)}` }),
-          marks.length ? el("span", { class: "expmark", text: marks.join(" ") }) : null
-        ]);
-        b.addEventListener("click", () => this.opts.onJump(start));
-        this.root.appendChild(b);
-      }
-    }
-  };
 
   // src/ui/agent.ts
   init_dom();
@@ -10331,6 +10485,869 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     panel = null;
   }
 
+  // src/ui/kit.ts
+  init_state();
+  function makeNotice(margin = "10px 14px 0") {
+    const mount2 = el("div");
+    let timer2 = null;
+    return {
+      mount: mount2,
+      show(text2, kind = "") {
+        clear(mount2);
+        mount2.appendChild(el("div", { class: "notice " + kind, style: { margin }, text: text2 }));
+        if (timer2) clearTimeout(timer2);
+        timer2 = setTimeout(() => clear(mount2), 9e3);
+      }
+    };
+  }
+  var GATE_COPY = {
+    chat: "\uBA3C\uC800 \u201C\uC120\uD0DD\u201D \uD0ED\uC5D0\uC11C \uCC57\uC744 \uACE8\uB77C \uC8FC\uC138\uC694.",
+    bot: "\uBA3C\uC800 \uD328\uB110\uC744 \uC5F0 \uBD07\uC774 \uC788\uC5B4\uC57C \uD569\uB2C8\uB2E4. RisuAI\uC5D0\uC11C \uBD07\uC744 \uC5F4\uACE0 \uB2E4\uC2DC \uC5EC\uC138\uC694."
+  };
+  function savedText(what) {
+    return `${what} \uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4. \uBC18\uC601\uC744 \uB204\uB974\uAE30 \uC804\uAE4C\uC9C0 RisuAI \uC6D0\uBCF8\uC5D0\uB294 \uC4F0\uC774\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4.`;
+  }
+  function makeTab(spec3) {
+    let built2 = false;
+    let seen = "";
+    const n = makeNotice();
+    return (mount2) => {
+      const gate = spec3.gate ?? "none";
+      const pass = gate === "none" || (gate === "chat" ? !!state.activeChatKey : !!state.activeCharKey);
+      if (!pass) {
+        clear(mount2);
+        built2 = false;
+        mount2.appendChild(el("div", { class: "pad" }, [
+          el("div", { class: "empty", text: GATE_COPY[gate] })
+        ]));
+        return;
+      }
+      const key = JSON.stringify(spec3.keys());
+      if (!built2 || !mount2.querySelector(".split")) {
+        clear(mount2);
+        const pane = threePane();
+        if (spec3.noLeft) pane.left.style.display = "none";
+        pane.centre.appendChild(n.mount);
+        spec3.build(pane, { notice: n.show });
+        mount2.appendChild(pane.root);
+        built2 = true;
+        seen = key;
+        void spec3.refresh();
+      } else if (seen !== key) {
+        seen = key;
+        void spec3.refresh();
+      }
+      setToolbar(spec3.toolbar?.() ?? (spec3.search ? searchBox(spec3.search.get(), (v) => spec3.search.set(v), spec3.search.placeholder ?? "\uCC3E\uAE30") : null));
+      bindAgent({ notice: n.show });
+      const inner = mount2.querySelector(".right-inner");
+      if (inner) mountAgent(inner);
+    };
+  }
+  function listRow(spec3) {
+    const badges = (spec3.badges ?? []).map((b) => el("span", { class: ("badge " + (b.kind ?? "")).trim(), text: b.text, ...b.title ? { title: b.title } : {} }));
+    let toggle = null;
+    let toggleNode = null;
+    if (spec3.toggle) {
+      toggle = el("input", {
+        type: "checkbox",
+        ...spec3.toggle.title ? { title: spec3.toggle.title } : {}
+      });
+      toggleNode = toggle;
+      if (spec3.toggle.style === "switch") {
+        toggleNode = el(
+          "label",
+          { class: "switch", ...spec3.toggle.title ? { title: spec3.toggle.title } : {} },
+          [toggle, el("span", { class: "knob" })]
+        );
+        toggleNode.addEventListener("click", (e) => e.stopPropagation());
+      }
+      toggle.checked = spec3.toggle.checked;
+      toggle.addEventListener("click", (e) => e.stopPropagation());
+      toggle.addEventListener("change", async () => {
+        try {
+          await spec3.toggle.onChange(toggle.checked);
+        } catch {
+          toggle.checked = !toggle.checked;
+        }
+      });
+    }
+    const reorder = [];
+    if (spec3.reorder) {
+      const up = el("button", { class: "movebtn", text: "\u2191", title: "\uC704\uB85C" });
+      const down = el("button", { class: "movebtn", text: "\u2193", title: "\uC544\uB798\uB85C" });
+      up.disabled = !spec3.reorder.up;
+      down.disabled = !spec3.reorder.down;
+      up.addEventListener("click", (e) => {
+        e.stopPropagation();
+        spec3.reorder.up?.();
+      });
+      down.addEventListener("click", (e) => {
+        e.stopPropagation();
+        spec3.reorder.down?.();
+      });
+      reorder.push(up, down);
+    }
+    for (const a of spec3.actions ?? []) a.addEventListener("click", (e) => e.stopPropagation());
+    const title = typeof spec3.title === "string" ? el("span", { text: spec3.title }) : spec3.title;
+    let row;
+    if (spec3.variant === "pick") {
+      row = el("div", {
+        class: "pickrow" + (spec3.toggle && !spec3.toggle.checked ? " off" : "") + (spec3.cls ? " " + spec3.cls : "") + (spec3.selected ? " on" : "")
+      }, [
+        toggleNode,
+        el("div", { class: "grow" }, [
+          el("div", { class: "pickname" }, [title, ...badges]),
+          spec3.hint != null ? el("div", { class: "hint", text: spec3.hint }) : null,
+          spec3.sub != null ? el("div", { class: "hint dim", text: spec3.sub }) : null
+        ]),
+        ...reorder,
+        ...spec3.actions ?? []
+      ]);
+    } else {
+      row = el("div", {
+        class: "treerow lorecard" + (spec3.selected ? " on" : "")
+      }, [
+        toggleNode,
+        title,
+        ...badges,
+        spec3.hint != null ? el("span", { class: "hint", text: spec3.hint }) : null,
+        ...reorder,
+        ...spec3.actions ?? []
+      ]);
+    }
+    if (spec3.dimmed) row.style.opacity = "0.55";
+    if (spec3.onClick) {
+      row.addEventListener("click", () => spec3.onClick());
+      row.style.cursor = "pointer";
+    }
+    return row;
+  }
+  function namePopover(anchor, opts) {
+    const body = el("div", { class: "applypop" });
+    const close = popover(anchor, body);
+    const input2 = el("input", { placeholder: opts.placeholder ?? "", value: opts.value ?? "" });
+    const okBtn = el("button", { class: "primary tiny", text: opts.ok ?? "\uD655\uC778" });
+    okBtn.addEventListener("click", () => {
+      const v = input2.value.trim();
+      if (!v) return;
+      close();
+      void opts.onSubmit(v);
+    });
+    input2.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") okBtn.click();
+    });
+    body.appendChild(el("div", { class: "hint", text: opts.label }));
+    body.appendChild(el("div", { class: "row" }, [input2, okBtn]));
+    setTimeout(() => input2.focus(), 0);
+  }
+  function askName(title, opts) {
+    const input2 = el("input", { placeholder: opts.placeholder ?? "", value: opts.value ?? "" });
+    const okBtn = el("button", { class: "primary tiny", text: opts.ok ?? "\uB9CC\uB4E4\uAE30" });
+    const body = el("div", {}, [
+      opts.label ? el("div", { class: "hint", style: { marginBottom: "6px" }, text: opts.label }) : null,
+      el("div", { class: "row" }, [input2, okBtn])
+    ]);
+    const close = modal(title, body);
+    okBtn.addEventListener("click", () => {
+      const v = input2.value.trim();
+      if (!v) return;
+      close();
+      void opts.onSubmit(v);
+    });
+    input2.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") okBtn.click();
+    });
+    setTimeout(() => input2.focus(), 0);
+  }
+
+  // src/ui/tab-chats.ts
+  var openMode = "";
+  function foldLanding() {
+    openMode = "";
+    filterText = "";
+  }
+  var openFolders = /* @__PURE__ */ new Set();
+  var showAutoSnaps = false;
+  var filterText = "";
+  var padEl = null;
+  function assetSyncLine() {
+    const p = state.assetSync;
+    const wrap = el("div", { class: "assetsync" });
+    if (!p) {
+      wrap.appendChild(el("div", { class: "hint", text: state.activeCharKey ? "\uC5D0\uC14B \uB3D9\uAE30\uD654 \uB300\uAE30 \uC911" : "" }));
+      return wrap;
+    }
+    const busy = syncBusy(p);
+    const text2 = el("span", { class: "hint", text: describeSync(p) });
+    const tone = p.phase === "error" ? " err" : p.phase === "done" && p.failed ? " warn" : "";
+    const line = el("div", { class: "row assetline" + tone }, busy ? [el("span", { class: "spin" }), text2] : [text2]);
+    if (busy) {
+      const cancel = el("button", { class: "ghost tiny", text: "\uC911\uB2E8" });
+      cancel.addEventListener("click", () => {
+        state.cancelAssetSync();
+      });
+      line.appendChild(cancel);
+      let ratio = -1;
+      if (p.phase === "pulling" && p.pull && p.pull.total) ratio = p.pull.done / p.pull.total;
+      else if (p.phase === "pushing" && p.toPush) ratio = (p.read + p.readFailed) / p.toPush;
+      const bar3 = el("div", { class: "assetbar" + (ratio < 0 ? " indeterminate" : "") });
+      const fill2 = el("div", { class: "assetfill" });
+      if (ratio >= 0) fill2.style.width = Math.round(Math.min(1, ratio) * 100) + "%";
+      bar3.appendChild(fill2);
+      wrap.appendChild(line);
+      wrap.appendChild(bar3);
+    } else {
+      if (p.phase === "error" || p.phase === "cancelled" || p.failed) {
+        const again = el("button", { class: "ghost tiny", text: "\uB2E4\uC2DC \uB3D9\uAE30\uD654" });
+        again.title = "\uC5D0\uC14B \uBAA9\uB85D\uC744 \uB2E4\uC2DC \uB300\uC870\uD558\uACE0, \uBE60\uC9C4 \uAC83\uB9CC \uAC00\uC838\uC635\uB2C8\uB2E4";
+        again.addEventListener("click", () => {
+          state.syncAssets(true);
+        });
+        line.appendChild(again);
+      }
+      wrap.appendChild(line);
+    }
+    return wrap;
+  }
+  function refreshAssetSyncLine(mount2) {
+    const old = mount2.querySelector(".assetsync");
+    if (!old) return !!mount2.querySelector(".landing");
+    old.replaceWith(assetSyncLine());
+    return true;
+  }
+  function botReady() {
+    return !!state.workspace && !!state.character && !state.slotError;
+  }
+  function bootBox() {
+    const b = bootState();
+    if (!b.booting || botReady()) {
+      return b.booting ? el("div", { class: "bootbox slim" }, [
+        el("span", { class: "spin" }),
+        el("span", { class: "hint", text: b.phase || "\uBD88\uB7EC\uC624\uB294 \uC911\u2026" })
+      ]) : null;
+    }
+    const mark = (s) => s === "done" ? "\u2713" : s === "err" ? "\u2715" : s === "skip" ? "\u2013" : "";
+    const step = (s, label2) => el("div", { class: "bootstep " + s }, [
+      s === "run" ? el("span", { class: "spin" }) : el("span", { class: "bootmark", text: mark(s) }),
+      el("span", { text: label2 })
+    ]);
+    return el("div", { class: "bootbox" }, [
+      el("div", { class: "boothead" }, [
+        el("span", { class: "spin big" }),
+        el("div", {}, [
+          el("div", { class: "botname", text: "\uBD88\uB7EC\uC624\uB294 \uC911\uC785\uB2C8\uB2E4" }),
+          el("div", { class: "hint", text: "\uCC98\uC74C \uC5EC\uB294 \uBD07\uC740 \uC791\uC5C5\uBCF8\uC744 \uBC31\uC5D4\uB4DC\uC5D0 \uC62C\uB824\uC57C \uD3B8\uC9D1\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4. \uB05D\uB098\uBA74 \uC544\uB798 \uBC84\uD2BC\uC774 \uC5F4\uB9BD\uB2C8\uB2E4." })
+        ])
+      ]),
+      step(b.steps.connect, "\uBC31\uC5D4\uB4DC \uC5F0\uACB0"),
+      step(b.steps.host, "RisuAI\uC5D0\uC11C \uBD07 \uC77D\uAE30"),
+      step(b.steps.upload, "\uC791\uC5C5\uBCF8 \uC62C\uB9AC\uAE30"),
+      el("div", { class: "hint", style: { marginTop: "4px" }, text: "\uC5D0\uC14B(\uC774\uBBF8\uC9C0)\uC740 \uADF8 \uB4A4\uC5D0 \uBC31\uADF8\uB77C\uC6B4\uB4DC\uB85C \uBC1B\uC2B5\uB2C8\uB2E4 \u2014 \uAE30\uB2E4\uB9AC\uC9C0 \uC54A\uC544\uB3C4 \uB429\uB2C8\uB2E4." })
+    ]);
+  }
+  function refreshBootBox(mount2) {
+    const old = mount2.querySelector(".bootbox");
+    const next = bootBox();
+    const wasBlocking = !!old && !old.classList.contains("slim");
+    const blocking = !!next && !next.classList.contains("slim");
+    if (old && next && wasBlocking === blocking) {
+      old.replaceWith(next);
+      return;
+    }
+    if (mount2.querySelector(".landing")) renderChatsTab(mount2);
+  }
+  var Cached = class {
+    constructor(load) {
+      this.load = load;
+    }
+    key = "";
+    scope = "";
+    value = null;
+    error = "";
+    loading = false;
+    waiters = [];
+    want(scope, key, then) {
+      if (this.key === key && !this.loading) return;
+      this.waiters.push(then);
+      if (this.key === key && this.loading) return;
+      if (this.scope !== scope) this.value = null;
+      this.scope = scope;
+      this.key = key;
+      this.error = "";
+      this.loading = true;
+      void this.load().then((v) => {
+        if (this.key !== key) return;
+        this.value = v;
+      }, (e) => {
+        if (this.key !== key) return;
+        this.error = e instanceof Error ? e.message : String(e);
+      }).finally(() => {
+        if (this.key !== key) return;
+        this.loading = false;
+        const w = this.waiters;
+        this.waiters = [];
+        for (const fn of w) {
+          try {
+            fn();
+          } catch {
+          }
+        }
+      });
+    }
+    /** Refetch on the next want, keeping what is shown meanwhile. */
+    drop() {
+      this.key = "";
+      this.error = "";
+    }
+  };
+  var snaps = new Cached(() => state.cardCheckpoints());
+  var dirty = new Cached(() => state.dirtySummary());
+  var snapKey = () => `${state.botKey}:${state.epoch}`;
+  var dirtyKey = () => `${state.activeCharKey}:${state.epoch}:${state.changes?.total ?? ""}:${state.botChanges?.total ?? ""}`;
+  function loadingRow(text2) {
+    return el("div", { class: "chatitem loadingrow" }, [el("span", { class: "spin" }), el("span", { class: "hint grow", text: text2 })]);
+  }
+  function renderChatsTab(mount2) {
+    if (!padEl || padEl.parentElement !== mount2) {
+      clear(mount2);
+      padEl = el("div", { class: "pad" });
+      mount2.appendChild(padEl);
+    }
+    const pad = padEl;
+    const top = pad.scrollTop;
+    clear(pad);
+    const root2 = el("div", { class: "landing" });
+    pad.appendChild(root2);
+    if (state.connectError) {
+      const go = el("button", { class: "primary tiny", text: "\uC124\uC815\uC73C\uB85C \uC774\uB3D9" });
+      go.addEventListener("click", () => setTab("settings"));
+      root2.appendChild(el("div", { class: "notice err" }, [
+        el("div", { text: "\uBC31\uC5D4\uB4DC\uC5D0 \uC5F0\uACB0\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4." }),
+        el("div", { class: "hint", text: state.connectError }),
+        transport.hostPlatform === "web" ? el("div", { class: "hint", style: { marginTop: "4px" }, text: "\uC6F9 RisuAI(risuai.xyz)\uC5D0\uC11C\uB294 \uCD5C\uCD08 \uC5F0\uACB0\uAE4C\uC9C0 3\uBD84 \uC815\uB3C4 \uAC78\uB9B4 \uC218 \uC788\uC2B5\uB2C8\uB2E4 (\uD504\uB85D\uC2DC \u2192 \uC9C1\uC811 \uC5F0\uACB0 \uD3F4\uBC31\uC5D0 \uAC78\uB9AC\uB294 \uC2DC\uAC04). \uD328\uB110\uC774 30\uCD08\uB9C8\uB2E4 \uC790\uB3D9\uC73C\uB85C \uB2E4\uC2DC \uC2DC\uB3C4\uD558\uB2C8 \uADF8\uB300\uB85C \uB450\uC154\uB3C4 \uB429\uB2C8\uB2E4." }) : null,
+        el("div", { class: "row", style: { marginTop: "6px" } }, [
+          el("span", { class: "hint", text: "\uC124\uC815 \u2192 \uC5F0\uACB0\uC5D0\uC11C URL\uACFC \uD1A0\uD070\uC744 \uD655\uC778\uD574 \uC8FC\uC138\uC694." }),
+          go
+        ])
+      ]));
+    }
+    if (state.slotError) {
+      root2.appendChild(el("div", { class: "notice" }, [
+        el("div", { text: "\uCE90\uB9AD\uD130\uAC00 \uC120\uD0DD\uB418\uC5B4 \uC788\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4. \uBD07\xB7\uCC57 \uD3B8\uC9D1\uC740 RisuAI\uC5D0\uC11C \uBD07\uC744 \uC5F0 \uB2E4\uC74C \u{1F504} \uB97C \uB20C\uB7EC \uC8FC\uC138\uC694 (\uD398\uB974\uC18C\uB098 \uD3B8\uC9D1\uC740 \uADF8\uB300\uB85C \uB429\uB2C8\uB2E4)." }),
+        el("div", { class: "hint", text: state.slotError })
+      ]));
+    }
+    const box = bootBox();
+    if (box) root2.appendChild(box);
+    const blocked = !!box && !box.classList.contains("slim");
+    const char = state.character;
+    const chats = char && Array.isArray(char.chats) ? char.chats : [];
+    const botWhy = blocked ? "\uBD88\uB7EC\uC624\uB294 \uC911\uC785\uB2C8\uB2E4" : state.slotError ? "RisuAI\uC5D0\uC11C \uBD07\uC774 \uC120\uD0DD\uB418\uC5B4 \uC788\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4" : !state.health ? "\uBC31\uC5D4\uB4DC\uC5D0 \uC5F0\uACB0\uB418\uC5B4 \uC788\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4" : !botReady() ? "\uC791\uC5C5\uBCF8\uC774 \uC544\uC9C1 \uC62C\uB77C\uAC00\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4" : "";
+    const personaWhy = !state.health ? "\uBC31\uC5D4\uB4DC\uC5D0 \uC5F0\uACB0\uB418\uC5B4 \uC788\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4" : "";
+    const cards = el("div", { class: "modecards" });
+    const card2 = (m, icon, title, sub, desc, why) => {
+      const b = el("button", { class: "modecard" + (openMode === m ? " open" : ""), dataset: { mode: m } }, [
+        el("span", { class: "modeicon", text: icon }),
+        el("span", { class: "modetext" }, [
+          el("span", { class: "modetitle", text: title }),
+          el("span", { class: "modesub", text: why || sub }),
+          el("span", { class: "hint", text: desc })
+        ]),
+        el("span", { class: "modecaret", text: openMode === m ? "\u25BE" : "\u25B8" })
+      ]);
+      b.disabled = !!why;
+      if (why) b.title = why;
+      b.addEventListener("click", () => {
+        openMode = openMode === m ? "" : m;
+        if (openMode === "persona" && !state.personas && !state.personaLoading) void state.loadPersonas().catch(() => void 0);
+        renderChatsTab(mount2);
+      });
+      cards.appendChild(b);
+    };
+    card2("bot", "\u{1F916}", "\uBD07 \uD3B8\uC9D1", char?.name ? String(char.name) : "", "\uCE74\uB4DC\xB7\uC778\uC0AC\uB9D0\xB7\uB85C\uC5B4\uBD81\xB7Regex\xB7\uD2B8\uB9AC\uAC70\xB7\uC5D0\uC14B", botWhy);
+    card2("chat", "\u{1F4AC}", "\uCC57 \uD3B8\uC9D1", char ? `\uCC57 ${chats.length}\uAC1C` : "", "\uD134\xB7\uCC57 \uB85C\uC5B4\uBD81\xB7\uC7A5\uAE30\uAE30\uC5B5\xB7\uCC57 \uBCC0\uC218", botWhy);
+    card2("persona", "\u{1F464}", "\uD398\uB974\uC18C\uB098 \uD3B8\uC9D1", state.personas ? `\uD398\uB974\uC18C\uB098 ${state.personas.length}\uAC1C` : "RisuAI \uC0AC\uC6A9\uC790 \uD398\uB974\uC18C\uB098", "\uC774\uB984\xB7\uC124\uBA85\xB7\uD504\uB85C\uD544 \uC0AC\uC9C4", personaWhy);
+    root2.appendChild(cards);
+    if ((openMode === "bot" || openMode === "chat") && botWhy) openMode = "";
+    if (openMode === "persona" && personaWhy) openMode = "";
+    const body = el("div", { class: "modebody" });
+    if (openMode === "bot") botBody(body, mount2);
+    else if (openMode === "chat") chatBody(body, mount2);
+    else if (openMode === "persona") personaBody(body, mount2);
+    if (openMode) root2.appendChild(body);
+    else if (!blocked) {
+      root2.appendChild(el("div", { class: "hint landingfoot", text: char ? "\uD3B8\uC9D1\uD560 \uB300\uC0C1\uC744 \uACE0\uB974\uC138\uC694. \uB2E4\uB978 \uBD07\uC744 \uD3B8\uC9D1\uD558\uC2DC\uB824\uBA74 RisuAI\uC5D0\uC11C \uADF8 \uBD07\uC744 \uC5F4\uACE0 \u{1F504} \uB97C \uB20C\uB7EC \uC8FC\uC138\uC694." : "\uD3B8\uC9D1\uD560 \uB300\uC0C1\uC744 \uACE0\uB974\uC138\uC694." }));
+    }
+    pad.scrollTop = top;
+  }
+  function botBody(body, mount2) {
+    const char = state.character;
+    const folders = Array.isArray(char.chatFolders) ? char.chatFolders : [];
+    const chats = Array.isArray(char.chats) ? char.chats : [];
+    const portrait = el("div", { class: "botinitials", text: initials(String(char.name || "?")) });
+    body.appendChild(el("div", { class: "botcard" }, [
+      portrait,
+      el("div", { class: "grow" }, [
+        el("div", { class: "botname", text: String(char.name || "(\uC774\uB984 \uC5C6\uC74C)") }),
+        el("div", { class: "hint", text: `\uCC57 ${chats.length}\uAC1C` + (folders.length ? ` \xB7 \uD3F4\uB354 ${folders.length}\uAC1C` : "") }),
+        assetSyncLine(),
+        el("div", { class: "hint", style: { marginTop: "6px" } }, [
+          "\uB2E4\uB978 \uBD07\uC744 \uD3B8\uC9D1\uD558\uC2DC\uB824\uBA74 RisuAI\uC5D0\uC11C \uADF8 \uBD07\uC744 \uC5F4\uACE0 \u{1F504} \uB97C \uB20C\uB7EC \uC8FC\uC138\uC694."
+        ])
+      ])
+    ]));
+    void loadPortrait(char.image, portrait);
+    body.appendChild(el("div", { class: "sectiontitle", style: { marginTop: "14px" }, text: "\uC5B4\uB290 \uC2DC\uC810\uC744 \uD3B8\uC9D1\uD560\uAE4C\uC694" }));
+    const list2 = el("div", { class: "chatlist snaplist" });
+    body.appendChild(list2);
+    const pending3 = state.botChanges?.total ?? 0;
+    const cur = el("button", { class: "primary tiny", text: "\uD3B8\uC9D1" });
+    cur.title = "\uC9C0\uAE08 \uC791\uC5C5\uBCF8(\uC544\uC9C1 \uBC18\uC601\uD558\uC9C0 \uC54A\uC740 \uBCC0\uACBD \uD3EC\uD568)\uC73C\uB85C \uBD07 \uD3B8\uC9D1\uC5D0 \uB4E4\uC5B4\uAC11\uB2C8\uB2E4";
+    cur.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      setEditMode("bot", "meta");
+    });
+    const curRow = el("div", { class: "chatitem current" }, [
+      el("span", { class: "grow" }, [
+        el("span", { text: "\uD604\uC7AC \uC791\uC5C5\uBCF8" }),
+        el("span", { class: "hint", text: "  RisuAI\uC758 \uC9C0\uAE08 \uCE74\uB4DC + \uD3B8\uC9D1 \uC911\uC778 \uBCC0\uACBD" })
+      ]),
+      pending3 ? el("span", { class: "badge warn", text: `\uBBF8\uBC18\uC601 ${pending3}` }) : null,
+      cur
+    ]);
+    curRow.addEventListener("click", () => setEditMode("bot", "meta"));
+    list2.appendChild(curRow);
+    const rows = el("div", { class: "snaprows" });
+    list2.appendChild(rows);
+    const fill2 = () => {
+      clear(rows);
+      if (snaps.loading && snaps.value === null) {
+        rows.appendChild(loadingRow("\uC2A4\uB0C5\uC0F7 \uBAA9\uB85D\uC744 \uBD88\uB7EC\uC624\uB294 \uC911\u2026"));
+        return;
+      }
+      if (snaps.error) {
+        rows.appendChild(el("div", { class: "chatitem" }, [el("span", { class: "hint", text: "\uC2A4\uB0C5\uC0F7 \uBAA9\uB85D\uC744 \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + snaps.error })]));
+        return;
+      }
+      const all = snaps.value ?? [];
+      const saved2 = all.filter((c) => c.kind !== "auto");
+      const auto = all.filter((c) => c.kind === "auto");
+      for (const c of saved2.slice(0, 20)) rows.appendChild(snapRow(c, true, mount2));
+      if (saved2.length > 20) rows.appendChild(el("div", { class: "chatitem" }, [el("span", { class: "hint", text: `\uADF8 \uC678 ${saved2.length - 20}\uAC1C \u2014 \uBD07 \uD3B8\uC9D1 \u2192 \u{1F558} \uBC84\uC804\uC5D0\uC11C \uC804\uBD80 \uBD05\uB2C8\uB2E4` })]));
+      if (auto.length) {
+        const head = el("div", { class: "chatitem foldrow" }, [
+          el("span", { text: showAutoSnaps ? "\u25BE" : "\u25B8" }),
+          el("span", { class: "grow hint", text: `\uC790\uB3D9 \uBC31\uC5C5 ${auto.length}\uAC1C (\uBC18\uC601\xB7\uBCF5\uC6D0 \uC9C1\uC804 \uB4F1\uC5D0 \uC800\uC808\uB85C \uB0A8\uC740 \uAC83)` })
+        ]);
+        head.addEventListener("click", () => {
+          showAutoSnaps = !showAutoSnaps;
+          fill2();
+        });
+        rows.appendChild(head);
+        if (showAutoSnaps) for (const c of auto.slice(0, 20)) rows.appendChild(snapRow(c, false, mount2));
+      }
+      if (!saved2.length && !auto.length) {
+        rows.appendChild(el("div", { class: "chatitem" }, [el("span", { class: "hint", text: "\uC800\uC7A5\uB41C \uC2A4\uB0C5\uC0F7\uC774 \uC5C6\uC2B5\uB2C8\uB2E4 \u2014 \uBD07 \uD3B8\uC9D1 \u2192 \u{1F516} \uB85C \uC9C0\uAE08 \uC0C1\uD0DC\uB97C \uB0A8\uAE38 \uC218 \uC788\uC2B5\uB2C8\uB2E4" })]));
+      }
+    };
+    snaps.want(state.botKey, snapKey(), () => {
+      if (rows.isConnected) fill2();
+    });
+    fill2();
+  }
+  function snapRow(c, deletable, mount2) {
+    const row = el("div", { class: "chatitem" });
+    const edit = el("button", { class: "ghost tiny", text: "\uD3B8\uC9D1" });
+    edit.title = "\uC791\uC5C5\uBCF8\uC744 \uC774 \uC2DC\uC810\uC73C\uB85C \uB418\uB3CC\uB9B0 \uB4A4 \uBD07 \uD3B8\uC9D1\uC73C\uB85C \uB4E4\uC5B4\uAC11\uB2C8\uB2E4 (\uC9C1\uC804 \uC0C1\uD0DC\uB3C4 \uC2A4\uB0C5\uC0F7\uC73C\uB85C \uB0A8\uC2B5\uB2C8\uB2E4)";
+    edit.addEventListener("click", async (ev) => {
+      ev.stopPropagation();
+      edit.disabled = true;
+      edit.textContent = "\uB418\uB3CC\uB9AC\uB294 \uC911\u2026";
+      try {
+        await state.cardRestore(c.id);
+        snaps.drop();
+        setEditMode("bot", "meta");
+      } catch (e) {
+        flash("\uBCF5\uC6D0\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg8(e));
+        edit.disabled = false;
+        edit.textContent = "\uD3B8\uC9D1";
+      }
+    });
+    row.append(
+      el("span", { class: "grow", text: c.label || "(\uBB34\uC81C)" }),
+      el("span", { class: "n", text: fmtTime(c.created_at * 1e3) }),
+      edit
+    );
+    if (deletable) {
+      const del = el("button", { class: "ghost tiny", title: "\uC774 \uC2A4\uB0C5\uC0F7 \uC0AD\uC81C" });
+      armed(del, "\u2715", "\uC0AD\uC81C \uD655\uC778", async () => {
+        row.classList.add("deleting");
+        del.disabled = true;
+        edit.disabled = true;
+        try {
+          await state.deleteCardCheckpoint(c.id);
+          snaps.drop();
+          renderChatsTab(mount2);
+        } catch (e) {
+          row.classList.remove("deleting");
+          del.disabled = false;
+          edit.disabled = false;
+          flash("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg8(e));
+        }
+      });
+      row.appendChild(del);
+    }
+    return row;
+  }
+  function chatBody(body, mount2) {
+    const char = state.character;
+    const liveChats = Array.isArray(char.chats) ? char.chats : [];
+    const folders = Array.isArray(char.chatFolders) ? char.chatFolders : [];
+    const ws = state.workspace;
+    const loadedFor = (c) => ws?.chats.find((w) => w.chatId === (c.id ?? ""));
+    if (liveChats.length > 6) {
+      setToolbarSearch(filterText, (v) => {
+        filterText = v;
+        renderChatsTab(mount2);
+        refocusSearch(null);
+      }, "\uCC57 \uCC3E\uAE30");
+    }
+    body.appendChild(el("div", { class: "sectiontitle", text: "\uD3B8\uC9D1\uD560 \uCC57\uC744 \uACE0\uB974\uC138\uC694" }));
+    if (!liveChats.length) {
+      body.appendChild(el("div", { class: "hint", text: "\uC774 \uBD07\uC5D0\uB294 \uCC57\uC774 \uC5C6\uC2B5\uB2C8\uB2E4." }));
+      return;
+    }
+    const needle = filterText.trim().toLowerCase();
+    const rows = liveChats.map((c, i) => ({ chat: c, index: i })).filter((r) => !needle || String(r.chat.name ?? "").toLowerCase().includes(needle));
+    const grouped3 = /* @__PURE__ */ new Map();
+    for (const r of rows) {
+      const key = String(r.chat.folderId ?? "");
+      if (!grouped3.has(key)) grouped3.set(key, []);
+      grouped3.get(key).push(r);
+    }
+    const dirtyBadges = /* @__PURE__ */ new Map();
+    const paintDirty = () => {
+      const s = dirty.value;
+      for (const [key, b] of dirtyBadges) {
+        const c = s?.chats.find((x) => x.chatKey === key);
+        const on = !!c && c.dirty;
+        b.textContent = on ? `\uBBF8\uBC18\uC601 ${c.total || c.conflicts}` : "";
+        b.style.display = on ? "" : "none";
+      }
+    };
+    const makeItem = (r) => {
+      const loaded = loadedFor(r.chat);
+      const edit = el("button", { class: "ghost tiny", text: "\uCC57 \uD3B8\uC9D1" });
+      const dirtyBadge2 = el("span", {
+        class: "badge warn",
+        style: { display: "none" },
+        title: "\uC774 \uCC57\uC5D0 \uC544\uC9C1 RisuAI\uC5D0 \uBC18\uC601\uD558\uC9C0 \uC54A\uC740 \uBCC0\uACBD\uC774 \uC788\uC2B5\uB2C8\uB2E4"
+      });
+      if (loaded) dirtyBadges.set(loaded.chatKey, dirtyBadge2);
+      const item = el("div", {
+        class: "chatitem" + (loaded && loaded.chatKey === state.activeChatKey ? " current" : "")
+      }, [
+        el("span", { class: "grow", text: String(r.chat.name || `(\uCC57 ${r.index})`) }),
+        dirtyBadge2,
+        el("span", { class: "n", text: `${(r.chat.message ?? []).length}\uD134` }),
+        edit
+      ]);
+      let busy = false;
+      const enter = async () => {
+        if (busy) return;
+        busy = true;
+        edit.disabled = true;
+        edit.textContent = "\uBD88\uB7EC\uC624\uB294 \uC911\u2026";
+        item.classList.add("busy");
+        try {
+          if (loaded) await state.loadTurns(loaded.chatKey);
+          else await state.openChat(r.index);
+          setEditMode("chat", "editor");
+        } catch (e) {
+          flash(e instanceof HostError && e.code === "missing" ? "RisuAI\uAC00 \uC774 \uCC57\uC744 \uC544\uC9C1 \uC77D\uC5B4 \uB450\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4. RisuAI\uC5D0\uC11C \uADF8 \uCC57\uC744 \uD55C \uBC88 \uC5F0 \uB2E4\uC74C \u{1F504} \uB97C \uB20C\uB7EC \uC8FC\uC138\uC694." : "\uCC57\uC744 \uBD88\uB7EC\uC624\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg8(e));
+        } finally {
+          busy = false;
+          if (item.isConnected) {
+            edit.disabled = false;
+            edit.textContent = "\uCC57 \uD3B8\uC9D1";
+            item.classList.remove("busy");
+          }
+        }
+      };
+      item.addEventListener("click", () => void enter());
+      edit.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        void enter();
+      });
+      return item;
+    };
+    const loose = grouped3.get("") ?? [];
+    if (loose.length) {
+      const list2 = el("div", { class: "chatlist" });
+      for (const r of loose) list2.appendChild(makeItem(r));
+      body.appendChild(list2);
+    }
+    for (const f of folders) {
+      const items5 = grouped3.get(String(f.id)) ?? [];
+      if (!items5.length) continue;
+      const fid = String(f.id);
+      const isOpen = openFolders.has(fid) || !!needle;
+      const fbody = el("div", { class: "folderbody" + (isOpen ? " open" : "") });
+      for (const r of items5) fbody.appendChild(makeItem(r));
+      const caret = el("span", { text: isOpen ? "\u25BE" : "\u25B8" });
+      const head = el("button", { class: "folderhead" }, [
+        caret,
+        el("span", { class: "folderdot", style: f.color ? { background: String(f.color) } : {} }),
+        el("span", { class: "grow", text: String(f.name || "\uD3F4\uB354") }),
+        el("span", { text: `${items5.length}` })
+      ]);
+      head.addEventListener("click", () => {
+        const open4 = fbody.classList.toggle("open");
+        if (open4) openFolders.add(fid);
+        else openFolders.delete(fid);
+        caret.textContent = open4 ? "\u25BE" : "\u25B8";
+      });
+      body.appendChild(el("div", { class: "folder" }, [head, fbody]));
+    }
+    const known = new Set(folders.map((f) => String(f.id)));
+    const orphans = [...grouped3.entries()].filter(([k]) => k !== "" && !known.has(k)).flatMap(([, v]) => v);
+    if (orphans.length) {
+      const list2 = el("div", { class: "chatlist" });
+      for (const r of orphans) list2.appendChild(makeItem(r));
+      body.appendChild(el("div", { class: "sectiontitle", style: { marginTop: "10px" }, text: "\uD3F4\uB354 \uC5C6\uC74C" }));
+      body.appendChild(list2);
+    }
+    body.appendChild(el("div", { class: "row", style: { marginTop: "12px" } }, [
+      buildUploadAll(),
+      el("span", { class: "hint", text: "\uCC57\uC744 \uB204\uB974\uBA74 \uADF8 \uCC57\uB9CC \uBD88\uB7EC\uC635\uB2C8\uB2E4. \uC5EC\uB7EC \uCC57\uC744 \uC624\uAC00\uBA70 \uBCFC \uB54C\uB9CC \uC774 \uBC84\uD2BC\uC744 \uC4F0\uC138\uC694." })
+    ]));
+    paintDirty();
+    dirty.want(state.activeCharKey, dirtyKey(), () => {
+      if (body.isConnected) paintDirty();
+    });
+  }
+  function buildUploadAll() {
+    const b = el("button", { text: "\uC774 \uBD07\uC758 \uBAA8\uB4E0 \uCC57 \uBD88\uB7EC\uC624\uAE30" });
+    b.addEventListener("click", async () => {
+      b.disabled = true;
+      b.textContent = "\uBD88\uB7EC\uC624\uB294 \uC911\uC785\uB2C8\uB2E4\u2026";
+      try {
+        await state.upload({ allChats: true });
+        if (state.activeChatKey) await state.loadTurns();
+      } catch (e) {
+        console.log("[risu-hina] upload all failed", e);
+      } finally {
+        b.disabled = false;
+        b.textContent = "\uC774 \uBD07\uC758 \uBAA8\uB4E0 \uCC57 \uBD88\uB7EC\uC624\uAE30";
+      }
+    });
+    return b;
+  }
+  function personaBody(body, mount2) {
+    const head = el("div", { class: "row", style: { marginBottom: "8px" } }, [
+      el("span", { class: "sectiontitle grow", style: { marginBottom: "0" }, text: "\uD3B8\uC9D1\uD560 \uD398\uB974\uC18C\uB098\uB97C \uACE0\uB974\uC138\uC694" })
+    ]);
+    const again = el("button", { class: "ghost tiny", text: "\uB2E4\uC2DC \uC77D\uAE30", title: "RisuAI\uC5D0\uC11C \uD398\uB974\uC18C\uB098 \uBAA9\uB85D\uC744 \uB2E4\uC2DC \uC77D\uC5B4 \uC635\uB2C8\uB2E4" });
+    again.disabled = state.personaLoading;
+    again.addEventListener("click", () => {
+      void state.loadPersonas().catch(() => void 0);
+    });
+    head.append(newPersonaButton(), again);
+    body.appendChild(head);
+    if (state.personaError) {
+      body.appendChild(el("div", { class: "notice err", text: state.personaError }));
+    }
+    const list2 = el("div", { class: "chatlist personalist" });
+    body.appendChild(list2);
+    const ps = (state.personas ?? []).filter((p) => !p.gone);
+    if (!state.personas) {
+      list2.appendChild(loadingRow(state.personaLoading ? "RisuAI\uC5D0\uC11C \uD398\uB974\uC18C\uB098\uB97C \uC77D\uB294 \uC911\u2026" : "\uD398\uB974\uC18C\uB098 \uBAA9\uB85D\uC774 \uC5C6\uC2B5\uB2C8\uB2E4"));
+      return;
+    }
+    if (!ps.length) list2.appendChild(el("div", { class: "chatitem" }, [el("span", { class: "hint", text: "RisuAI\uC5D0 \uD398\uB974\uC18C\uB098\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4." })]));
+    for (const p of ps) list2.appendChild(personaRow(p, mount2));
+    body.appendChild(el("div", { class: "hint", style: { marginTop: "8px" }, text: "\uD3B8\uC9D1\uC740 \uC791\uC5C5\uBCF8\uC5D0 \uC800\uC7A5\uB418\uACE0, \uBC18\uC601\uD574\uC57C RisuAI\uC5D0 \uB4E4\uC5B4\uAC11\uB2C8\uB2E4. RisuAI\uC5D0\uC11C \uC9C0\uAE08 \uC120\uD0DD\uB41C \uD398\uB974\uC18C\uB098\uB3C4 \uD3B8\uC9D1\uD560 \uC218 \uC788\uC9C0\uB9CC \uBC18\uC601\uC740 RisuAI\uC5D0\uC11C \uB2E4\uB978 \uD398\uB974\uC18C\uB098\uB97C \uACE0\uB978 \uB4A4\uC5D0 \uB429\uB2C8\uB2E4 (RisuAI\uAC00 \uC120\uD0DD\uB41C \uD398\uB974\uC18C\uB098\uB97C \uB530\uB85C \uBCF5\uC0AC\uD574 \uB450\uACE0 \uC368\uC11C, \uADF8\uB300\uB85C \uC4F0\uBA74 \uB36E\uC5B4\uC368\uC9D1\uB2C8\uB2E4)." }));
+  }
+  function personaRow(p, mount2) {
+    const edit = el("button", { class: "ghost tiny", text: "\uD3B8\uC9D1" });
+    const name = p.work.name || p.name;
+    const row = el("div", { class: "chatitem" }, [
+      personaAvatar(p.iconKey, name),
+      el("span", { class: "grow" }, [
+        el("div", { text: name || "(\uC774\uB984 \uC5C6\uC74C)" }),
+        el("div", { class: "hint clip1", text: (p.work.prompt || "").split("\n")[0].slice(0, 80) || "(\uC124\uBA85 \uC5C6\uC74C)" })
+      ]),
+      p.selected ? el("span", { class: "badge", text: "RisuAI \uC120\uD0DD\uB428", title: "RisuAI\uC5D0\uC11C \uC9C0\uAE08 \uC120\uD0DD\uB41C \uD398\uB974\uC18C\uB098 - \uD3B8\uC9D1\uC740 \uB418\uACE0, \uBC18\uC601\uC740 \uB2E4\uB978 \uD398\uB974\uC18C\uB098\uB97C \uACE0\uB978 \uB4A4\uC5D0 \uB429\uB2C8\uB2E4" }) : null,
+      p.isNew ? el("span", { class: "badge", text: "\uC0C8\uB85C \uB9CC\uB4E6", title: "Hina\uC5D0\uC11C \uB9CC\uB4E0 \uD398\uB974\uC18C\uB098 - \uBC18\uC601\uD558\uBA74 RisuAI \uBAA9\uB85D\uC5D0 \uCD94\uAC00\uB429\uB2C8\uB2E4" }) : null,
+      p.dirty ? el("span", { class: "badge warn", text: `\uBBF8\uBC18\uC601 ${p.total}` }) : null,
+      edit
+    ]);
+    let busy = false;
+    const enter = async () => {
+      if (busy) return;
+      busy = true;
+      edit.disabled = true;
+      edit.textContent = "\uC5EC\uB294 \uC911\u2026";
+      try {
+        await state.openPersona(p.key);
+        setEditMode("persona", "persona");
+      } catch (e) {
+        flash("\uD398\uB974\uC18C\uB098\uB97C \uC5F4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg8(e));
+      } finally {
+        busy = false;
+        if (row.isConnected) {
+          edit.disabled = false;
+          edit.textContent = "\uD3B8\uC9D1";
+        }
+      }
+    };
+    row.addEventListener("click", () => void enter());
+    edit.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      void enter();
+    });
+    return row;
+  }
+  function newPersonaButton(onMade) {
+    const b = el("button", { class: "ghost tiny", text: "\uFF0B \uC0C8 \uD398\uB974\uC18C\uB098", title: "\uC0C8 \uD398\uB974\uC18C\uB098\uB97C \uB9CC\uB4ED\uB2C8\uB2E4 - \uBC18\uC601\uD558\uBA74 RisuAI \uD398\uB974\uC18C\uB098 \uBAA9\uB85D\uC5D0 \uCD94\uAC00\uB429\uB2C8\uB2E4" });
+    b.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      askName("\uC0C8 \uD398\uB974\uC18C\uB098", {
+        label: "\uC774\uB984\uC744 \uC815\uD558\uBA74 \uBC14\uB85C \uD3B8\uC9D1\uC73C\uB85C \uB4E4\uC5B4\uAC11\uB2C8\uB2E4. \uC124\uBA85\xB7\uC0AC\uC9C4\uC744 \uCC44\uC6B4 \uB4A4 \uBC18\uC601\uD558\uBA74 RisuAI \uBAA9\uB85D\uC5D0 \uCD94\uAC00\uB429\uB2C8\uB2E4.",
+        placeholder: "\uD398\uB974\uC18C\uB098 \uC774\uB984",
+        ok: "\uB9CC\uB4E4\uAE30",
+        onSubmit: async (name) => {
+          try {
+            await state.createPersona(name);
+            if (onMade) onMade();
+            else setEditMode("persona", "persona");
+          } catch (e) {
+            flash("\uD398\uB974\uC18C\uB098\uB97C \uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg8(e));
+          }
+        }
+      });
+    });
+    return b;
+  }
+  var avatarCache = /* @__PURE__ */ new Map();
+  function personaAvatar(icon, name, cls = "personaavatar") {
+    const fallback = el("span", { class: cls + " initials", text: initials(name || "?") });
+    if (!icon || typeof URL === "undefined" || typeof URL.createObjectURL !== "function") return fallback;
+    const hit = avatarCache.get(icon);
+    if (hit) return el("img", { class: cls, src: hit, alt: "" });
+    void personaImage(icon).then((bytes) => {
+      if (!bytes) return;
+      const buf = new Uint8Array(bytes.byteLength);
+      buf.set(bytes);
+      const url = URL.createObjectURL(new Blob([buf]));
+      avatarCache.set(icon, url);
+      if (fallback.isConnected) fallback.replaceWith(el("img", { class: cls, src: url, alt: "" }));
+    });
+    return fallback;
+  }
+  function initials(name) {
+    const t = name.trim();
+    if (!t) return "?";
+    return /[가-힣]/.test(t[0]) ? t.slice(0, 1) : t.slice(0, 2).toUpperCase();
+  }
+  var portraitUrl = "";
+  var portraitImg = null;
+  var portraitPath = "";
+  async function loadPortrait(path, mount2) {
+    if (!path) return;
+    if (portraitPath === path && portraitImg) {
+      mount2.replaceWith(portraitImg);
+      return;
+    }
+    try {
+      const bytes = await Risuai.readImage(path);
+      if (!bytes || !bytes.byteLength) return;
+      if (portraitUrl) URL.revokeObjectURL(portraitUrl);
+      const view2 = bytes;
+      const buf = new Uint8Array(view2.byteLength);
+      buf.set(view2);
+      portraitUrl = URL.createObjectURL(new Blob([buf]));
+      const img = el("img", { class: "botportrait", src: portraitUrl, alt: "" });
+      img.addEventListener("error", () => {
+        img.replaceWith(mount2);
+        portraitImg = null;
+        portraitPath = "";
+      });
+      portraitImg = img;
+      portraitPath = path;
+      if (mount2.isConnected) mount2.replaceWith(img);
+    } catch {
+    }
+  }
+  function msg8(e) {
+    return e instanceof Error ? e.message : String(e);
+  }
+  function flash(text2) {
+    shellNotice(text2, "err");
+  }
+
+  // src/ui/tab-editor.ts
+  init_dom();
+  init_state();
+
+  // src/ui/explorer.ts
+  init_dom();
+  var GROUP = 50;
+  var Explorer = class {
+    constructor(opts) {
+      this.opts = opts;
+      this.root = el("div", { class: "explorer" });
+    }
+    root;
+    turns = [];
+    activeStart = -1;
+    setTurns(turns) {
+      this.turns = turns;
+      this.render();
+    }
+    /** Highlight the group containing the turn currently at the top of the view. */
+    setVisible(seq) {
+      const start = Math.floor(seq / GROUP) * GROUP;
+      if (start === this.activeStart) return;
+      this.activeStart = start;
+      for (const b of Array.from(this.root.querySelectorAll(".expgroup"))) {
+        b.classList.toggle("on", Number(b.dataset.start) === start);
+      }
+    }
+    render() {
+      clear(this.root);
+      if (!this.turns.length) {
+        this.root.appendChild(el("div", { class: "hint", style: { padding: "8px" }, text: "\uD134 \uC5C6\uC74C" }));
+        return;
+      }
+      const preview2 = this.opts.preview();
+      const deleting2 = this.opts.deleting();
+      const last = this.turns[this.turns.length - 1].seq;
+      for (let start = 0; start <= last; start += GROUP) {
+        const end = start + GROUP - 1;
+        const inGroup = this.turns.filter((t) => t.seq >= start && t.seq <= end);
+        if (!inGroup.length) continue;
+        const changed = inGroup.filter((t) => t.changed || t.isNew).length;
+        const pending3 = preview2 ? inGroup.filter((t) => preview2.has(t.msgId)).length : 0;
+        const doomed = deleting2 ? inGroup.filter((t) => deleting2.has(t.msgId)).length : 0;
+        const marks = [];
+        if (changed) marks.push(`\u270E${changed}`);
+        if (pending3) marks.push(`\u25C6${pending3}`);
+        if (doomed) marks.push(`\u2715${doomed}`);
+        const b = el("button", {
+          class: "expgroup" + (start === this.activeStart ? " on" : ""),
+          dataset: { start: String(start) },
+          title: `\uD134 ${start}\u2013${Math.min(end, last)} (${inGroup.length}\uAC1C)`
+        }, [
+          el("span", { text: `${start}\u2013${Math.min(end, last)}` }),
+          marks.length ? el("span", { class: "expmark", text: marks.join(" ") }) : null
+        ]);
+        b.addEventListener("click", () => this.opts.onJump(start));
+        this.root.appendChild(b);
+      }
+    }
+  };
+
   // src/ui/turnlist.ts
   init_dom();
 
@@ -10523,17 +11540,17 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         this.body.appendChild(this.renderTurn(this.turns[i]));
       }
       requestAnimationFrame(() => {
-        let dirty = false;
+        let dirty2 = false;
         for (const child of Array.from(this.body.children)) {
           const id = child.dataset.msgid;
           if (!id) continue;
           const h = child.getBoundingClientRect().height;
           if (h > 0 && Math.abs((this.heights.get(id) ?? 0) - h) > 1) {
             this.heights.set(id, h);
-            dirty = true;
+            dirty2 = true;
           }
         }
-        if (dirty) this.schedule();
+        if (dirty2) this.schedule();
       });
     }
     /**
@@ -10677,184 +11694,6 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
 
   // src/ui/tab-editor.ts
   init_host();
-
-  // src/ui/kit.ts
-  init_dom();
-  init_state();
-  function makeNotice(margin = "10px 14px 0") {
-    const mount2 = el("div");
-    let timer2 = null;
-    return {
-      mount: mount2,
-      show(text2, kind = "") {
-        clear(mount2);
-        mount2.appendChild(el("div", { class: "notice " + kind, style: { margin }, text: text2 }));
-        if (timer2) clearTimeout(timer2);
-        timer2 = setTimeout(() => clear(mount2), 9e3);
-      }
-    };
-  }
-  var GATE_COPY = {
-    chat: "\uBA3C\uC800 \u201C\uC120\uD0DD\u201D \uD0ED\uC5D0\uC11C \uCC57\uC744 \uACE8\uB77C \uC8FC\uC138\uC694.",
-    bot: "\uBA3C\uC800 \uD328\uB110\uC744 \uC5F0 \uBD07\uC774 \uC788\uC5B4\uC57C \uD569\uB2C8\uB2E4. RisuAI\uC5D0\uC11C \uBD07\uC744 \uC5F4\uACE0 \uB2E4\uC2DC \uC5EC\uC138\uC694."
-  };
-  function savedText(what) {
-    return `${what} \uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4. \uBC18\uC601\uC744 \uB204\uB974\uAE30 \uC804\uAE4C\uC9C0 RisuAI \uC6D0\uBCF8\uC5D0\uB294 \uC4F0\uC774\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4.`;
-  }
-  function makeTab(spec3) {
-    let built2 = false;
-    let seen = "";
-    const n = makeNotice();
-    return (mount2) => {
-      const gate = spec3.gate ?? "none";
-      const pass = gate === "none" || (gate === "chat" ? !!state.activeChatKey : !!state.activeCharKey);
-      if (!pass) {
-        clear(mount2);
-        built2 = false;
-        mount2.appendChild(el("div", { class: "pad" }, [
-          el("div", { class: "empty", text: GATE_COPY[gate] })
-        ]));
-        return;
-      }
-      const key = JSON.stringify(spec3.keys());
-      if (!built2 || !mount2.querySelector(".split")) {
-        clear(mount2);
-        const pane = threePane();
-        if (spec3.noLeft) pane.left.style.display = "none";
-        pane.centre.appendChild(n.mount);
-        spec3.build(pane, { notice: n.show });
-        mount2.appendChild(pane.root);
-        built2 = true;
-        seen = key;
-        void spec3.refresh();
-      } else if (seen !== key) {
-        seen = key;
-        void spec3.refresh();
-      }
-      setToolbar(spec3.toolbar?.() ?? (spec3.search ? searchBox(spec3.search.get(), (v) => spec3.search.set(v), spec3.search.placeholder ?? "\uCC3E\uAE30") : null));
-      bindAgent({ notice: n.show });
-      const inner = mount2.querySelector(".right-inner");
-      if (inner) mountAgent(inner);
-    };
-  }
-  function listRow(spec3) {
-    const badges = (spec3.badges ?? []).map((b) => el("span", { class: ("badge " + (b.kind ?? "")).trim(), text: b.text, ...b.title ? { title: b.title } : {} }));
-    let toggle = null;
-    let toggleNode = null;
-    if (spec3.toggle) {
-      toggle = el("input", {
-        type: "checkbox",
-        ...spec3.toggle.title ? { title: spec3.toggle.title } : {}
-      });
-      toggleNode = toggle;
-      if (spec3.toggle.style === "switch") {
-        toggleNode = el(
-          "label",
-          { class: "switch", ...spec3.toggle.title ? { title: spec3.toggle.title } : {} },
-          [toggle, el("span", { class: "knob" })]
-        );
-        toggleNode.addEventListener("click", (e) => e.stopPropagation());
-      }
-      toggle.checked = spec3.toggle.checked;
-      toggle.addEventListener("click", (e) => e.stopPropagation());
-      toggle.addEventListener("change", async () => {
-        try {
-          await spec3.toggle.onChange(toggle.checked);
-        } catch {
-          toggle.checked = !toggle.checked;
-        }
-      });
-    }
-    const reorder = [];
-    if (spec3.reorder) {
-      const up = el("button", { class: "movebtn", text: "\u2191", title: "\uC704\uB85C" });
-      const down = el("button", { class: "movebtn", text: "\u2193", title: "\uC544\uB798\uB85C" });
-      up.disabled = !spec3.reorder.up;
-      down.disabled = !spec3.reorder.down;
-      up.addEventListener("click", (e) => {
-        e.stopPropagation();
-        spec3.reorder.up?.();
-      });
-      down.addEventListener("click", (e) => {
-        e.stopPropagation();
-        spec3.reorder.down?.();
-      });
-      reorder.push(up, down);
-    }
-    for (const a of spec3.actions ?? []) a.addEventListener("click", (e) => e.stopPropagation());
-    const title = typeof spec3.title === "string" ? el("span", { text: spec3.title }) : spec3.title;
-    let row;
-    if (spec3.variant === "pick") {
-      row = el("div", {
-        class: "pickrow" + (spec3.toggle && !spec3.toggle.checked ? " off" : "") + (spec3.cls ? " " + spec3.cls : "") + (spec3.selected ? " on" : "")
-      }, [
-        toggleNode,
-        el("div", { class: "grow" }, [
-          el("div", { class: "pickname" }, [title, ...badges]),
-          spec3.hint != null ? el("div", { class: "hint", text: spec3.hint }) : null,
-          spec3.sub != null ? el("div", { class: "hint dim", text: spec3.sub }) : null
-        ]),
-        ...reorder,
-        ...spec3.actions ?? []
-      ]);
-    } else {
-      row = el("div", {
-        class: "treerow lorecard" + (spec3.selected ? " on" : "")
-      }, [
-        toggleNode,
-        title,
-        ...badges,
-        spec3.hint != null ? el("span", { class: "hint", text: spec3.hint }) : null,
-        ...reorder,
-        ...spec3.actions ?? []
-      ]);
-    }
-    if (spec3.dimmed) row.style.opacity = "0.55";
-    if (spec3.onClick) {
-      row.addEventListener("click", () => spec3.onClick());
-      row.style.cursor = "pointer";
-    }
-    return row;
-  }
-  function namePopover(anchor, opts) {
-    const body = el("div", { class: "applypop" });
-    const close = popover(anchor, body);
-    const input2 = el("input", { placeholder: opts.placeholder ?? "", value: opts.value ?? "" });
-    const okBtn = el("button", { class: "primary tiny", text: opts.ok ?? "\uD655\uC778" });
-    okBtn.addEventListener("click", () => {
-      const v = input2.value.trim();
-      if (!v) return;
-      close();
-      void opts.onSubmit(v);
-    });
-    input2.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") okBtn.click();
-    });
-    body.appendChild(el("div", { class: "hint", text: opts.label }));
-    body.appendChild(el("div", { class: "row" }, [input2, okBtn]));
-    setTimeout(() => input2.focus(), 0);
-  }
-  function askName(title, opts) {
-    const input2 = el("input", { placeholder: opts.placeholder ?? "", value: opts.value ?? "" });
-    const okBtn = el("button", { class: "primary tiny", text: opts.ok ?? "\uB9CC\uB4E4\uAE30" });
-    const body = el("div", {}, [
-      opts.label ? el("div", { class: "hint", style: { marginBottom: "6px" }, text: opts.label }) : null,
-      el("div", { class: "row" }, [input2, okBtn])
-    ]);
-    const close = modal(title, body);
-    okBtn.addEventListener("click", () => {
-      const v = input2.value.trim();
-      if (!v) return;
-      close();
-      void opts.onSubmit(v);
-    });
-    input2.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") okBtn.click();
-    });
-    setTimeout(() => input2.focus(), 0);
-  }
-
-  // src/ui/tab-editor.ts
   init_transport();
   var list = null;
   var rightMount = null;
@@ -10896,8 +11735,8 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           try {
             await state.editTurn(t.msgId, t.body, next);
           } catch (e) {
-            notice("\uC218\uC815\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg8(e), "err");
-            void clientLog("error", "turn edit failed", { msgId: t.msgId, error: msg8(e) });
+            notice("\uC218\uC815\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg9(e), "err");
+            void clientLog("error", "turn edit failed", { msgId: t.msgId, error: msg9(e) });
           }
         }
       });
@@ -10976,7 +11815,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       if (noticeMount2) clear(noticeMount2);
     }, 9e3);
   }
-  function msg8(e) {
+  function msg9(e) {
     return e instanceof Error ? e.message : String(e);
   }
   function visibleTurns() {
@@ -11247,7 +12086,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       try {
         setPreview(await state.bulk(params()));
       } catch (e) {
-        summary.textContent = msg8(e);
+        summary.textContent = msg9(e);
         setPreview(null);
       } finally {
         previewBtn.disabled = false;
@@ -11262,8 +12101,8 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         await state.loadTurns();
         notice(`${r.applied}\uAC1C \uD134\uC744 \uBC14\uAFE8\uC2B5\uB2C8\uB2E4. \uB418\uB3CC\uB9AC\uC2DC\uB824\uBA74 \u{1F558} \uBC84\uC804\uC758 \uC2A4\uB0C5\uC0F7\uC744 \uC4F0\uC2DC\uBA74 \uB429\uB2C8\uB2E4.`, "ok");
       } catch (e) {
-        void clientLog("error", "find/replace apply failed", { error: msg8(e) });
-        notice("\uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg8(e), "err");
+        void clientLog("error", "find/replace apply failed", { error: msg9(e) });
+        notice("\uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg9(e), "err");
       }
     });
     clearBtn.addEventListener("click", () => setPreview(null));
@@ -11319,8 +12158,8 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         setPreview(null);
         notice(`\uD134 ${r[0]}~${r[1]} \uC744 \uC9C0\uC6E0\uC2B5\uB2C8\uB2E4. \uD558\uC774\uD30C \uC694\uC57D\uC774 \uC9C0\uC6CC\uC9C4 \uD134\uC744 \uC778\uC6A9\uD558\uACE0 \uC788\uC73C\uBA74 \uBC18\uC601\uD560 \uB54C \uC54C\uB824 \uB4DC\uB9BD\uB2C8\uB2E4.`, "ok");
       } catch (e) {
-        void clientLog("error", "deleteRange failed", { range: r, error: msg8(e) });
-        notice("\uC0AD\uC81C\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg8(e), "err");
+        void clientLog("error", "deleteRange failed", { range: r, error: msg9(e) });
+        notice("\uC0AD\uC81C\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg9(e), "err");
       }
     });
     clearBtn.addEventListener("click", () => setPreview(null));
@@ -11339,7 +12178,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const r = await state.exportMarkdown();
         download(r.filename, r.markdown, "text/markdown;charset=utf-8");
       } catch (e) {
-        notice("\uB0B4\uBCF4\uB0B4\uAE30\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg8(e), "err");
+        notice("\uB0B4\uBCF4\uB0B4\uAE30\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg9(e), "err");
       }
     });
     const rc = el("button", { text: "risuChat \uB0B4\uB824\uBC1B\uAE30" });
@@ -11348,7 +12187,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const r = await state.exportRisuchat();
         download(r.filename, JSON.stringify(r.envelope), "application/json");
       } catch (e) {
-        notice("\uB0B4\uBCF4\uB0B4\uAE30\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg8(e), "err");
+        notice("\uB0B4\uBCF4\uB0B4\uAE30\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg9(e), "err");
       }
     });
     const cb = el("button", { class: "ghost", text: "md \uD074\uB9BD\uBCF4\uB4DC \uBCF5\uC0AC" });
@@ -11358,7 +12197,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const ok = copyToClipboard(r.markdown);
         notice(ok ? "\uD074\uB9BD\uBCF4\uB4DC\uC5D0 \uBCF5\uC0AC\uD588\uC2B5\uB2C8\uB2E4." : "\uBCF5\uC0AC\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4.", ok ? "ok" : "err");
       } catch (e) {
-        notice("\uBCF5\uC0AC\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg8(e), "err");
+        notice("\uBCF5\uC0AC\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg9(e), "err");
       }
     });
     return el("div", { class: "card" }, [
@@ -11495,7 +12334,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       pane.centre.appendChild(viewMount);
       installDrop(pane.centre, { into: () => uploadTarget(), onFiles: (path, files) => void uploadMany(files, path), onMove: (path, sources) => void moveSelected(sources, path) });
       for (const target of [pane.left, pane.centre]) target.addEventListener("file-drop-error", (ev) => {
-        notice2("\uB4DC\uB86D\uD55C \uD30C\uC77C\uC744 \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg9(ev.detail) + " \xB7 \uD30C\uC77C \uC62C\uB9AC\uAE30 \uBC84\uD2BC\uC73C\uB85C \uB2E4\uC2DC \uC120\uD0DD\uD574 \uC8FC\uC138\uC694.", "err");
+        notice2("\uB4DC\uB86D\uD55C \uD30C\uC77C\uC744 \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg10(ev.detail) + " \xB7 \uD30C\uC77C \uC62C\uB9AC\uAE30 \uBC84\uD2BC\uC73C\uB85C \uB2E4\uC2DC \uC120\uD0DD\uD574 \uC8FC\uC138\uC694.", "err");
       });
     },
     async refresh() {
@@ -11564,8 +12403,10 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           selectedDir = dir;
           expandTo(dir);
         }
-        previewPath = want;
-        selection = /* @__PURE__ */ new Set([want]);
+        if (!want.endsWith("/")) {
+          previewPath = want;
+          selection = /* @__PURE__ */ new Set([want]);
+        }
       }
       drawTree();
       drawCentre();
@@ -11573,10 +12414,10 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       if (key !== refreshKey()) return;
       if (!lastListing) {
         clear(treeMount);
-        treeMount.appendChild(el("div", { class: "notice err", text: msg9(e) }));
-      } else notice2("\uBAA9\uB85D \uAC31\uC2E0 \uC2E4\uD328 \u2014 \uB9C8\uC9C0\uB9C9\uC73C\uB85C \uBC1B\uC740 \uBAA9\uB85D\uC785\uB2C8\uB2E4: " + msg9(e), "err");
+        treeMount.appendChild(el("div", { class: "notice err", text: msg10(e) }));
+      } else notice2("\uBAA9\uB85D \uAC31\uC2E0 \uC2E4\uD328 \u2014 \uB9C8\uC9C0\uB9C9\uC73C\uB85C \uBC1B\uC740 \uBAA9\uB85D\uC785\uB2C8\uB2E4: " + msg10(e), "err");
       void clientLog("error", "files tab refresh failed", {
-        error: msg9(e),
+        error: msg10(e),
         stack: e instanceof Error ? String(e.stack).slice(0, 1500) : ""
       });
     }
@@ -11707,7 +12548,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           expandTo(where + "/" + n);
           await refresh();
         } catch (e) {
-          notice2("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg9(e), "err");
+          notice2("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg10(e), "err");
         }
       });
       name.addEventListener("keydown", (e) => {
@@ -11805,12 +12646,12 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
               result.failed.length ? "err" : "ok"
             );
           } catch (e) {
-            status.textContent = msg9(e);
+            status.textContent = msg10(e);
             apply.disabled = false;
           }
         });
       } catch (e) {
-        notice2("\uC815\uB9AC \uB300\uC0C1\uC744 \uD655\uC778\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg9(e), "err");
+        notice2("\uC815\uB9AC \uB300\uC0C1\uC744 \uD655\uC778\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg10(e), "err");
       } finally {
         button2.disabled = false;
       }
@@ -11978,7 +12819,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const bytes = await state.downloadZip([n.path], n.name);
         notice2(`${fmtSize3(bytes)} zip \uC744 \uBE0C\uB77C\uC6B0\uC800 \uB2E4\uC6B4\uB85C\uB4DC\uB85C \uB118\uACBC\uC2B5\uB2C8\uB2E4.`, "ok");
       } catch (e) {
-        notice2("\uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg9(e), "err");
+        notice2("\uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg10(e), "err");
       } finally {
         zipAll.disabled = false;
       }
@@ -12405,7 +13246,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       const r = await fileOperation(`${paths.length}\uAC1C \uC0AD\uC81C \uC911\u2026`, () => state.deleteFiles(paths));
       notice2(r.failed.length ? `${r.done}\uAC1C\uB97C \uC9C0\uC6E0\uC2B5\uB2C8\uB2E4. ${r.failed.length}\uAC1C \uC2E4\uD328 \u2014 ${r.failed[0].error}` : `${r.done}\uAC1C\uB97C \uC9C0\uC6E0\uC2B5\uB2C8\uB2E4.`, r.failed.length ? "err" : "ok");
     } catch (e) {
-      notice2("\uC9C0\uC6B0\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg9(e), "err");
+      notice2("\uC9C0\uC6B0\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg10(e), "err");
     }
     treeSel.clear();
     state.touchFiles();
@@ -12417,7 +13258,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       const bytes = await state.downloadZip(paths, name);
       notice2(`${fmtSize3(bytes)} zip \uC744 \uBE0C\uB77C\uC6B0\uC800 \uB2E4\uC6B4\uB85C\uB4DC\uB85C \uB118\uACBC\uC2B5\uB2C8\uB2E4.`, "ok");
     } catch (e) {
-      notice2("\uB0B4\uB824\uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg9(e), "err");
+      notice2("\uB0B4\uB824\uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg10(e), "err");
     }
   }
   function treeNewFolder(where) {
@@ -12434,7 +13275,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           state.touchFiles();
           await refresh();
         } catch (e) {
-          notice2("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg9(e), "err");
+          notice2("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg10(e), "err");
         }
       }
     });
@@ -12456,7 +13297,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           state.touchFiles();
           await refresh();
         } catch (err) {
-          notice2("\uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg9(err), "err");
+          notice2("\uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg10(err), "err");
         }
       }
     });
@@ -12477,7 +13318,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       if (!r) return;
       notice2(batchText(r, target, clip.op === "copy" ? "\uBCF5\uC0AC" : "\uC774\uB3D9"), r.failed.length ? "err" : "ok");
     } catch (e) {
-      notice2("\uCC98\uB9AC \uACB0\uACFC\uB97C \uD655\uC778\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg9(e) + " \xB7 \uD604\uC7AC \uBAA9\uB85D\uC744 \uB2E4\uC2DC \uD655\uC778\uD569\uB2C8\uB2E4.", "err");
+      notice2("\uCC98\uB9AC \uACB0\uACFC\uB97C \uD655\uC778\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg10(e) + " \xB7 \uD604\uC7AC \uBAA9\uB85D\uC744 \uB2E4\uC2DC \uD655\uC778\uD569\uB2C8\uB2E4.", "err");
     }
     if (clip.op === "cut") {
       selection.clear();
@@ -12491,7 +13332,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       const r = await fileOperation(`${list2.length}\uAC1C \uC774\uB3D9 \uC911\u2026`, () => state.moveFiles(list2, target));
       notice2(batchText(r, target, "\uC774\uB3D9"), r.failed.length ? "err" : "ok");
     } catch (e) {
-      notice2("\uC62E\uAE30\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg9(e), "err");
+      notice2("\uC62E\uAE30\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg10(e), "err");
     }
     selection.clear();
     previewPath = "";
@@ -12627,7 +13468,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const bytes = await state.downloadFile(f.path);
         out.textContent = `${fmtSize3(bytes)} \uB97C \uBE0C\uB77C\uC6B0\uC800 \uB2E4\uC6B4\uB85C\uB4DC\uB85C \uB118\uACBC\uC2B5\uB2C8\uB2E4.`;
       } catch (e) {
-        out.textContent = "\uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg9(e);
+        out.textContent = "\uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg10(e);
       } finally {
         save.disabled = false;
       }
@@ -12661,7 +13502,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         body.append(detail, img);
       } catch (e) {
         clear(body);
-        body.appendChild(el("div", { class: "notice err", text: msg9(e) }));
+        body.appendChild(el("div", { class: "notice err", text: msg10(e) }));
       }
       return;
     }
@@ -12699,7 +13540,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
                 revision = result.revision;
                 status.textContent = "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4.";
               } catch (error) {
-                status.textContent = msg9(error);
+                status.textContent = msg10(error);
               } finally {
                 save2.disabled = false;
               }
@@ -12712,7 +13553,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
             );
             done.addEventListener("click", close);
           } catch (error) {
-            notice2(msg9(error), "err");
+            notice2(msg10(error), "err");
           } finally {
             edit.disabled = false;
           }
@@ -12734,7 +13575,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       }
     } catch (e) {
       clear(body);
-      body.appendChild(el("div", { class: "notice err", text: msg9(e) }));
+      body.appendChild(el("div", { class: "notice err", text: msg10(e) }));
     }
   }
   async function runDelete(n) {
@@ -12745,7 +13586,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       if (paths.includes(previewPath)) previewPath = "";
       notice2(r.failed.length ? `${r.done}\uAC1C\uB97C \uC9C0\uC6E0\uC2B5\uB2C8\uB2E4. ${r.failed.length}\uAC1C \uC2E4\uD328 \u2014 ${r.failed[0].error}` : `${r.done}\uAC1C\uB97C \uC9C0\uC6E0\uC2B5\uB2C8\uB2E4.`, r.failed.length ? "err" : "ok");
     } catch (e) {
-      notice2("\uC9C0\uC6B0\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg9(e), "err");
+      notice2("\uC9C0\uC6B0\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg10(e), "err");
     }
     selection.clear();
     state.touchFiles();
@@ -12767,7 +13608,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           const r = await fileOperation(`${paths.length}\uAC1C \uC774\uB3D9 \uC911\u2026`, () => state.moveFiles(paths, target));
           notice2(batchText(r, target, "\uC774\uB3D9"), r.failed.length ? "err" : "ok");
         } catch (e) {
-          notice2("\uC62E\uAE30\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg9(e), "err");
+          notice2("\uC62E\uAE30\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg10(e), "err");
         }
         selection.clear();
         previewPath = "";
@@ -12792,7 +13633,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       const bytes = await state.downloadZip(paths, name);
       notice2(`${paths.length}\uAC1C \xB7 ${fmtSize3(bytes)} zip \uC744 \uBE0C\uB77C\uC6B0\uC800 \uB2E4\uC6B4\uB85C\uB4DC\uB85C \uB118\uACBC\uC2B5\uB2C8\uB2E4.`, "ok");
     } catch (e) {
-      notice2("\uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg9(e), "err");
+      notice2("\uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg10(e), "err");
     }
   }
   var upPanel = null;
@@ -12890,7 +13731,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     let failed = 0;
     let extracted = 0;
     const t0 = Date.now();
-    const paint = (extraNote = "") => {
+    const paint2 = (extraNote = "") => {
       const secs = Math.max(1, Math.round((Date.now() - t0) / 1e3));
       ui8.set(
         sentBytes,
@@ -12898,7 +13739,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         extraNote || `${done + failed}/${todo.length} \xB7 ${fmtSize3(sentBytes)}/${fmtSize3(totalBytes)} \xB7 ${secs}\uCD08`
       );
     };
-    paint();
+    paint2();
     const BATCH = 16 * 1024 * 1024;
     const batches = [];
     const big = [];
@@ -12935,15 +13776,15 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
             extract
           }, bytes);
           sentBytes = before + end;
-          paint(`${name} ${Math.round(end / file.size * 100)}% (${Math.round(end / 1048576)}/${Math.round(file.size / 1048576)}MB)`);
+          paint2(`${name} ${Math.round(end / file.size * 100)}% (${Math.round(end / 1048576)}/${Math.round(file.size / 1048576)}MB)`);
         }
         done += 1;
       } catch (e) {
         failed += 1;
         sentBytes = before + file.size;
-        ui8.error(`${name}: ` + msg9(e));
+        ui8.error(`${name}: ` + msg10(e));
       }
-      paint();
+      paint2();
     };
     const sendBatch = async (batch) => {
       const bytes = batch.reduce((s, b) => s + b.file.size, 0);
@@ -12965,12 +13806,12 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
             if (r.extracted) extracted += r.extracted;
           } catch (e2) {
             failed += 1;
-            ui8.error(`${file.name}: ` + msg9(e2));
+            ui8.error(`${file.name}: ` + msg10(e2));
           }
           sentBytes += file.size;
         }
       }
-      paint();
+      paint2();
     };
     let next = 0;
     const worker = async () => {
@@ -13022,7 +13863,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       return "";
     }
   }
-  function msg9(e) {
+  function msg10(e) {
     return e instanceof Error ? e.message : String(e);
   }
 
@@ -13035,7 +13876,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     let viewMount6 = null;
     let openId4 = "";
     let entries = [];
-    const openFolders3 = /* @__PURE__ */ new Set();
+    const openFolders4 = /* @__PURE__ */ new Set();
     let filterText6 = "";
     let ui8 = null;
     function notice10(text2, kind = "") {
@@ -13052,7 +13893,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         }
       } catch (e) {
         clear(treeMount5);
-        treeMount5.appendChild(el("div", { class: "notice err", text: msg10(e) }));
+        treeMount5.appendChild(el("div", { class: "notice err", text: msg11(e) }));
         return;
       }
       drawTree5();
@@ -13106,7 +13947,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         if (folder && named.length) {
           const folderEntry = entries.find((x) => isFolder(x) && String(x.entry.key ?? "").trim() === folder);
           const label2 = names.get(folder) || shortId(folder);
-          const isOpen = !!needle || openFolders3.has(folder);
+          const isOpen = !!needle || openFolders4.has(folder);
           const caret = el("span", { text: isOpen ? "\u25BE" : "\u25B8" });
           const head = el("button", { class: "treebranch", title: folder }, [
             caret,
@@ -13126,9 +13967,9 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           const kids = el("div", { class: "treekids" }, group.map((e) => entryRow(e, items5)));
           kids.style.display = isOpen ? "block" : "none";
           head.addEventListener("click", () => {
-            if (openFolders3.has(folder)) openFolders3.delete(folder);
-            else openFolders3.add(folder);
-            const now = openFolders3.has(folder);
+            if (openFolders4.has(folder)) openFolders4.delete(folder);
+            else openFolders4.add(folder);
+            const now = openFolders4.has(folder);
             kids.style.display = now ? "block" : "none";
             caret.textContent = now ? "\u25BE" : "\u25B8";
           });
@@ -13153,7 +13994,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           notice10(savedText("\uD3F4\uB354\uB97C"), "ok");
           await refreshNow7();
         } catch (err) {
-          notice10("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg10(err), "err");
+          notice10("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg11(err), "err");
         } finally {
           save.disabled = false;
         }
@@ -13165,7 +14006,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           if (opts.scope === "global") void state.refreshBotChanges();
           await refreshNow7();
         } catch (err) {
-          notice10("\uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg10(err), "err");
+          notice10("\uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg11(err), "err");
         }
       });
       const del = el("button", { class: "ghost" });
@@ -13177,7 +14018,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           if (viewMount6) clear(viewMount6);
           await refreshNow7();
         } catch (err) {
-          notice10("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg10(err), "err");
+          notice10("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg11(err), "err");
         }
       });
       clear(viewMount6);
@@ -13196,7 +14037,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           await state.moveLore(e.id, all.findIndex((x) => x.id === neighbor.id));
           await refreshNow7();
         } catch (err) {
-          notice10("\uC21C\uC11C\uB97C \uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg10(err), "err");
+          notice10("\uC21C\uC11C\uB97C \uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg11(err), "err");
         }
       };
       const row = listRow({
@@ -13288,7 +14129,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           if (opts.scope === "global") void state.refreshBotChanges();
           await refreshNow7();
         } catch (err) {
-          notice10("\uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg10(err), "err");
+          notice10("\uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg11(err), "err");
         }
       });
       const save = el("button", { class: "primary", text: "\uC800\uC7A5" });
@@ -13310,7 +14151,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           notice10(savedText("\uB85C\uC5B4\uBD81 \uD56D\uBAA9\uC744"), "ok");
           await refreshNow7();
         } catch (err) {
-          notice10("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg10(err), "err");
+          notice10("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg11(err), "err");
         } finally {
           save.disabled = false;
         }
@@ -13324,7 +14165,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           if (viewMount6) clear(viewMount6);
           await refreshNow7();
         } catch (err) {
-          notice10("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg10(err), "err");
+          notice10("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg11(err), "err");
         }
       });
       const orig = e.origin === "edited" && e.original ? e.original : null;
@@ -13385,7 +14226,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const made = entries.find((e) => e.id === id);
         if (made) open4(made);
       } catch (e) {
-        notice10("\uD3F4\uB354\uB97C \uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg10(e), "err");
+        notice10("\uD3F4\uB354\uB97C \uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg11(e), "err");
       }
     }
     async function create2() {
@@ -13399,7 +14240,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const made = entries.find((e) => e.id === id);
         if (made) open4(made);
       } catch (e) {
-        notice10("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg10(e), "err");
+        notice10("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg11(e), "err");
       }
     }
     return makeTab({
@@ -13457,7 +14298,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
   function shortId(id) {
     return id.length > 10 ? `\uD3F4\uB354 ${id.slice(0, 6)}\u2026` : `\uD3F4\uB354 ${id}`;
   }
-  function msg10(e) {
+  function msg11(e) {
     return e instanceof Error ? e.message : String(e);
   }
 
@@ -13539,7 +14380,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       drawTree2();
     } catch (e) {
       clear(treeMount2);
-      treeMount2.appendChild(el("div", { class: "notice err", text: msg11(e) }));
+      treeMount2.appendChild(el("div", { class: "notice err", text: msg12(e) }));
     }
   }
   function syncCount() {
@@ -13619,7 +14460,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const fresh = items.find((i) => i.id === item.id);
         if (fresh) open(fresh);
       } catch (e) {
-        notice3("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg11(e), "err");
+        notice3("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg12(e), "err");
       } finally {
         save.disabled = false;
       }
@@ -13638,7 +14479,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         if (viewMount2) clear(viewMount2);
         await refreshNow();
       } catch (e) {
-        notice3("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg11(e), "err");
+        notice3("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg12(e), "err");
       }
     });
     clear(viewMount2);
@@ -13669,10 +14510,10 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       await refreshNow();
       open(made);
     } catch (e) {
-      notice3("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg11(e), "err");
+      notice3("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg12(e), "err");
     }
   }
-  function msg11(e) {
+  function msg12(e) {
     return e instanceof Error ? e.message : String(e);
   }
 
@@ -13716,7 +14557,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         draw();
       } catch (e) {
         clear(listMount);
-        listMount.appendChild(el("div", { class: "notice err", text: msg12(e) }));
+        listMount.appendChild(el("div", { class: "notice err", text: msg13(e) }));
       }
     }
   });
@@ -13725,7 +14566,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       const r = await state.memory();
       items2 = r.items.filter((i) => i.kind === KIND2);
     } catch (e) {
-      notice4(msg12(e), "err");
+      notice4(msg13(e), "err");
     }
     draw();
   }
@@ -13794,7 +14635,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         notice4(savedText(`${item.title} \uC744(\uB97C)`), "ok");
         await refreshNow2();
       } catch (e) {
-        notice4("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg12(e), "err");
+        notice4("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg13(e), "err");
         save.disabled = false;
       }
     };
@@ -13810,7 +14651,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         await state.saveMemory(item.id, item.original);
         await refreshNow2();
       } catch (e) {
-        notice4("\uB418\uB3CC\uB9AC\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg12(e), "err");
+        notice4("\uB418\uB3CC\uB9AC\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg13(e), "err");
       }
     });
     const del = el("button", { class: "ghost tiny" });
@@ -13820,7 +14661,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         notice4(`${item.title} \uC744(\uB97C) \uC9C0\uC6E0\uC2B5\uB2C8\uB2E4. \uBC18\uC601\uD558\uBA74 RisuAI\uC5D0\uC11C\uB3C4 \uC0AC\uB77C\uC9D1\uB2C8\uB2E4.`, "ok");
         await refreshNow2();
       } catch (e) {
-        notice4("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg12(e), "err");
+        notice4("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg13(e), "err");
       }
     });
     const badge = item.isNew ? el("span", { class: "badge ok", text: "\uCD94\uAC00" }) : item.changed ? el("span", { class: "badge warn", text: "\uC218\uC815" }) : el("span");
@@ -13849,14 +14690,14 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         notice4(`${k} \uC744(\uB97C) \uCD94\uAC00\uD588\uC2B5\uB2C8\uB2E4.`, "ok");
         await refreshNow2();
       } catch (e) {
-        notice4("\uCD94\uAC00\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg12(e), "err");
+        notice4("\uCD94\uAC00\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg13(e), "err");
       } finally {
         add.disabled = false;
       }
     });
     return el("div", { class: "varadd row", style: { marginTop: "10px" } }, [key, value, add]);
   }
-  function msg12(e) {
+  function msg13(e) {
     return e instanceof Error ? e.message : String(e);
   }
 
@@ -13889,6 +14730,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       open4
     ]);
   }
+  var foldedFolders = /* @__PURE__ */ new Map();
   function openListPicker(spec3) {
     const listMount2 = el("div");
     const body = el("div", {}, [
@@ -13903,23 +14745,97 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       try {
         const entries = await spec3.load();
         clear(listMount2);
-        for (const entry of entries) listMount2.appendChild(row(entry));
+        if (spec3.folders) drawFolders(entries, spec3.folders);
+        else for (const entry of entries) listMount2.appendChild(row(entry));
+        const actions = el("div", { class: "row", style: { marginTop: "10px", gap: "6px" } });
         if (spec3.onCreate) {
-          const add = el("button", { class: "primary", text: spec3.createLabel ?? "\uC0C8\uB85C \uCD94\uAC00", style: { marginTop: "10px" } });
+          const add = el("button", { class: "primary", text: spec3.createLabel ?? "\uC0C8\uB85C \uCD94\uAC00" });
           add.addEventListener("click", () => {
             close();
             spec3.onCreate?.();
           });
-          listMount2.appendChild(add);
+          actions.appendChild(add);
         }
+        if (spec3.folders) {
+          const folders = spec3.folders;
+          const addFolder = el("button", { class: "ghost", text: "\uFF0B \uD3F4\uB354" });
+          addFolder.addEventListener("click", async () => {
+            try {
+              if (await folders.create(addFolder)) await draw2();
+            } catch (e) {
+              complain(e);
+            }
+          });
+          actions.appendChild(addFolder);
+        }
+        if (actions.childElementCount) listMount2.appendChild(actions);
       } catch (e) {
         clear(listMount2);
-        listMount2.appendChild(el("div", { class: "notice err", text: msg13(e) }));
+        listMount2.appendChild(el("div", { class: "notice err", text: msg14(e) }));
       }
+    };
+    const folded2 = foldedFolders.get(spec3.title) ?? /* @__PURE__ */ new Set();
+    foldedFolders.set(spec3.title, folded2);
+    const drawFolders = (entries, folders) => {
+      const names = [.../* @__PURE__ */ new Set([...folders.list(), ...entries.map((e) => e.group ?? "")])].filter(Boolean).sort((a, b) => a.localeCompare(b));
+      for (const entry of entries.filter((e) => !e.group)) listMount2.appendChild(row(entry));
+      for (const name of names) {
+        const inside = entries.filter((e) => e.group === name);
+        const open4 = !folded2.has(name);
+        const head = el("div", { class: "row secthead pickfolder", style: { cursor: "pointer", padding: "6px 2px 2px" } }, [
+          el("span", { class: "hint", text: open4 ? "\u25BE" : "\u25B8" }),
+          el("span", { class: "sectiontitle grow", text: name }),
+          el("span", { class: "hint", text: String(inside.length) })
+        ]);
+        head.addEventListener("click", () => {
+          if (folded2.has(name)) folded2.delete(name);
+          else folded2.add(name);
+          void draw2();
+        });
+        if (folders.createIn) {
+          const addHere = el("button", { class: "ghost tiny", text: "\uFF0B", title: "\uC774 \uD3F4\uB354\uC5D0 \uCD94\uAC00" });
+          addHere.addEventListener("click", (ev) => {
+            ev.stopPropagation();
+            close();
+            folders.createIn?.(name);
+          });
+          head.appendChild(addHere);
+        }
+        listMount2.appendChild(head);
+        if (!open4) continue;
+        if (!inside.length) {
+          listMount2.appendChild(el("div", { class: "hint", style: { padding: "0 8px 4px" }, text: "(\uBE44\uC5B4 \uC788\uC74C)" }));
+          continue;
+        }
+        for (const entry of inside) listMount2.appendChild(row(entry));
+      }
+    };
+    const moveButton = (entry, folders) => {
+      const b = el("button", { class: "ghost tiny", text: "\uC774\uB3D9", title: "\uB2E4\uB978 \uD3F4\uB354\uB85C \uC62E\uAE41\uB2C8\uB2E4" });
+      b.addEventListener("click", () => {
+        const body2 = el("div", { class: "applypop" });
+        const closePop = popover(b, body2);
+        const targets2 = ["", ...new Set(folders.list())].filter((t, i, a) => a.indexOf(t) === i);
+        for (const t of targets2) {
+          const go = el("button", { class: "ghost tiny", text: t || "(\uCD5C\uC0C1\uC704)" });
+          go.disabled = t === (entry.group ?? "");
+          go.addEventListener("click", async () => {
+            closePop();
+            try {
+              await folders.move(entry, t);
+              await draw2();
+            } catch (e) {
+              complain(e);
+            }
+          });
+          body2.appendChild(go);
+        }
+      });
+      return b;
     };
     const complain = (e) => {
       clear(listMount2);
-      listMount2.appendChild(el("div", { class: "notice err", text: msg13(e) }));
+      listMount2.appendChild(el("div", { class: "notice err", text: msg14(e) }));
       setTimeout(() => void draw2(), 2500);
     };
     const row = (entry) => {
@@ -13950,6 +14866,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         });
         cells2.push(edit);
       }
+      if (spec3.folders) cells2.push(moveButton(entry, spec3.folders));
       if (spec3.onDelete && !entry.noDelete) {
         const del = el("button", { class: "ghost tiny" });
         armed(del, "\uC0AD\uC81C", "\uD55C \uBC88 \uB354", async () => {
@@ -13966,7 +14883,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     };
     void draw2();
   }
-  function msg13(e) {
+  function msg14(e) {
     return e instanceof Error ? e.message : String(e);
   }
 
@@ -14005,7 +14922,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         generalMount.appendChild(currentRow("general", r.selected, general.length));
       } catch (e) {
         clear(generalMount);
-        generalMount.appendChild(el("div", { class: "notice err", text: msg14(e) }));
+        generalMount.appendChild(el("div", { class: "notice err", text: msg15(e) }));
       }
       await opts.onChanged();
     };
@@ -14047,7 +14964,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           }
         } catch (e) {
           clear(box);
-          box.appendChild(el("div", { class: "notice err", text: msg14(e) }));
+          box.appendChild(el("div", { class: "notice err", text: msg15(e) }));
         } finally {
           testBtn.disabled = false;
         }
@@ -14338,7 +15255,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         status.textContent = (r.ready ? `\uC9C0\uAE08: ${r.modes.find((m) => m.id === r.mode)?.name ?? r.mode} \u2014 \uC0AC\uC6A9 \uAC00\uB2A5` : `\uC0AC\uC6A9 \uBD88\uAC00: ${r.whyNot}`) + (r.pillow ? "" : " \xB7 Pillow \uC5C6\uC74C: \uC218\uCE58 \uBD84\uC11D\uC774 \uC81C\uD55C\uB429\uB2C8\uB2E4");
         status.className = "hint " + (r.ready ? "" : "diff-del-n");
       } catch (e) {
-        status.textContent = msg14(e);
+        status.textContent = msg15(e);
       }
     };
     const patch = () => {
@@ -14369,7 +15286,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         out.appendChild(el("div", { class: "notice ok", text: "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4." }));
       } catch (e) {
         clear(out);
-        out.appendChild(el("div", { class: "notice err", text: msg14(e) }));
+        out.appendChild(el("div", { class: "notice err", text: msg15(e) }));
       } finally {
         save.disabled = false;
       }
@@ -14394,7 +15311,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         ]));
       } catch (e) {
         clear(out);
-        out.appendChild(el("div", { class: "notice err", text: msg14(e) }));
+        out.appendChild(el("div", { class: "notice err", text: msg15(e) }));
       } finally {
         test.disabled = false;
       }
@@ -14505,7 +15422,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         status.textContent = r.ready ? `\uC9C0\uAE08: ${r.modes.find((m) => m.id === r.mode)?.name ?? r.mode} \u2014 \uAC80\uC0C9 \uAC00\uB2A5` : `\uAC80\uC0C9 \uBD88\uAC00: ${r.whyNot}`;
         status.className = "hint " + (r.ready ? "" : "diff-del-n");
       } catch (e) {
-        status.textContent = msg14(e);
+        status.textContent = msg15(e);
       }
     };
     const patch = () => {
@@ -14536,7 +15453,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         out.appendChild(el("div", { class: "notice ok", text: "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4." }));
       } catch (e) {
         clear(out);
-        out.appendChild(el("div", { class: "notice err", text: msg14(e) }));
+        out.appendChild(el("div", { class: "notice err", text: msg15(e) }));
       } finally {
         save.disabled = false;
       }
@@ -14560,7 +15477,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         ]));
       } catch (e) {
         clear(out);
-        out.appendChild(el("div", { class: "notice err", text: msg14(e) }));
+        out.appendChild(el("div", { class: "notice err", text: msg15(e) }));
       } finally {
         test.disabled = false;
       }
@@ -14760,7 +15677,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         syncProvider();
         keyNote.textContent = p.apiKey?.set ? `\uC124\uC815\uB428 (${p.apiKey.length}\uC790) \u2014 \uBC14\uAFB8\uB824\uBA74 \uC0C8\uB85C \uC785\uB825` : "\uC124\uC815\uB418\uC9C0 \uC54A\uC74C";
       } catch (e) {
-        keyNote.textContent = msg14(e);
+        keyNote.textContent = msg15(e);
       }
     };
     const save = el("button", { class: "primary", text: "\uC800\uC7A5" });
@@ -14844,7 +15761,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         openPicker(kind, refresh3, say);
       } catch (e) {
         clear(out);
-        out.appendChild(el("div", { class: "notice err", text: msg14(e) }));
+        out.appendChild(el("div", { class: "notice err", text: msg15(e) }));
       } finally {
         save.disabled = false;
       }
@@ -14931,7 +15848,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           }
         }
       } catch (e) {
-        line.textContent = msg14(e);
+        line.textContent = msg15(e);
       }
     };
     const begin = async (account, consent = false) => {
@@ -14995,7 +15912,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           })();
         }, 2e3);
       } catch (e) {
-        out.appendChild(el("div", { class: "notice err", text: msg14(e) }));
+        out.appendChild(el("div", { class: "notice err", text: msg15(e) }));
       } finally {
         login.disabled = false;
       }
@@ -15015,7 +15932,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         await refresh3();
       } catch (e) {
         clear(out);
-        out.appendChild(el("div", { class: "notice err", text: msg14(e) }));
+        out.appendChild(el("div", { class: "notice err", text: msg15(e) }));
       } finally {
         finish.disabled = false;
       }
@@ -15028,7 +15945,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           out.appendChild(el("div", { class: "notice warn", text: "\uC774 \uAE30\uAE30\uC5D0\uC11C\uB294 \uB85C\uADF8\uC544\uC6C3\uD588\uC9C0\uB9CC OpenAI \uCABD \uC138\uC158 \uD574\uC9C0\uB294 \uD655\uC778\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4. \uD544\uC694\uD558\uBA74 ChatGPT \uC124\uC815\uC5D0\uC11C \uC774 \uC571\uC758 \uC5F0\uACB0\uC744 \uB04A\uC5B4 \uC8FC\uC138\uC694." }));
         }
       } catch (e) {
-        out.appendChild(el("div", { class: "notice err", text: msg14(e) }));
+        out.appendChild(el("div", { class: "notice err", text: msg15(e) }));
       }
     });
     const root2 = withLogin ? el("div", { class: "card codexbox" }, [
@@ -15097,7 +16014,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         if (r.truncated) list2.appendChild(el("div", { class: "hint", text: "\uB354 \uC788\uC2B5\uB2C8\uB2E4 \u2014 \uAC80\uC0C9\uC5B4\uB97C \uC881\uD600 \uC8FC\uC138\uC694." }));
       } catch (e) {
         clear(list2);
-        list2.appendChild(el("div", { class: "notice err", text: msg14(e) }));
+        list2.appendChild(el("div", { class: "notice err", text: msg15(e) }));
       }
     };
     input2.addEventListener("input", () => {
@@ -15113,7 +16030,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     }
     return sel;
   }
-  function msg14(e) {
+  function msg15(e) {
     return e instanceof Error ? e.message : String(e);
   }
 
@@ -15147,7 +16064,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         for (const s of r.skills) listMount2.appendChild(row(s));
       } catch (e) {
         clear(listMount2);
-        listMount2.appendChild(el("div", { class: "notice err", text: msg15(e) }));
+        listMount2.appendChild(el("div", { class: "notice err", text: msg16(e) }));
       }
     };
     const row = (s) => {
@@ -15158,7 +16075,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           await refresh3();
         } catch (e) {
           toggle.checked = !toggle.checked;
-          say(msg15(e), "err");
+          say(msg16(e), "err");
         }
       });
       const editBtn = el("button", { class: "ghost tiny", text: "\uC218\uC815" });
@@ -15169,7 +16086,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           await state.deleteSkill(s.id);
           await refresh3();
         } catch (e) {
-          say(msg15(e), "err");
+          say(msg16(e), "err");
         }
       });
       const files = s.files?.length ? ` \xB7 \uD30C\uC77C ${s.files.length}` : "";
@@ -15200,7 +16117,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         await refresh3();
         say(`\u201C${skill.name}\u201D \uC2A4\uD0AC\uC744 \uB9CC\uB4E4\uC5C8\uC2B5\uB2C8\uB2E4 (skills/${skill.id}). \uC124\uBA85\uC744 \uB2E4\uB4EC\uC5B4 \uB450\uBA74 \uC5D0\uC774\uC804\uD2B8\uAC00 \uB354 \uC815\uD655\uD788 \uACE0\uB985\uB2C8\uB2E4.`, "ok");
       } catch (e) {
-        say("\uC5C5\uB85C\uB4DC\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg15(e), "err");
+        say("\uC5C5\uB85C\uB4DC\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg16(e), "err");
       } finally {
         picker.value = "";
       }
@@ -15221,7 +16138,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           el("pre", { class: "mono filepreview", text: r.prompt || "(\uCF1C \uB454 \uC2A4\uD0AC\uC774 \uC5C6\uC2B5\uB2C8\uB2E4)" })
         ]), { wide: true });
       } catch (e) {
-        say(msg15(e), "err");
+        say(msg16(e), "err");
       } finally {
         previewBtn.disabled = false;
       }
@@ -15236,7 +16153,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         await refresh3();
         say(`\uC2A4\uD0AC \uB3D9\uAE30\uD654 \uC644\uB8CC: ${result.updated}\uAC1C \uAC31\uC2E0, ${result.created}\uAC1C \uCD94\uAC00. \uB2E4\uC74C \uC5D0\uC774\uC804\uD2B8 \uC2E4\uD589\uBD80\uD130 \uC801\uC6A9\uB429\uB2C8\uB2E4.`, "ok");
       } catch (e) {
-        say("\uC2A4\uD0AC \uB3D9\uAE30\uD654\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg15(e), "err");
+        say("\uC2A4\uD0AC \uB3D9\uAE30\uD654\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg16(e), "err");
       } finally {
         syncBtn.disabled = false;
         syncBtn.textContent = "\uC11C\uBC84 \uAE30\uBCF8 \uC2A4\uD0AC\uACFC \uB3D9\uAE30\uD654";
@@ -15269,7 +16186,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       try {
         skill = await state.skill(id);
       } catch (e) {
-        say(msg15(e), "err");
+        say(msg16(e), "err");
         return;
       }
     }
@@ -15325,7 +16242,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
                 await refresh3();
                 say("\uC774\uC804 \uBC84\uC804\uC73C\uB85C \uB418\uB3CC\uB838\uC2B5\uB2C8\uB2E4.", "ok");
               } catch (e) {
-                out.textContent = msg15(e);
+                out.textContent = msg16(e);
                 restore.disabled = false;
               }
             });
@@ -15337,7 +16254,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           }
           if (!data.revisions.length) versions.textContent = "\uC544\uC9C1 \uBCC0\uACBD \uAE30\uB85D\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.";
         } catch (e) {
-          out.textContent = msg15(e);
+          out.textContent = msg16(e);
         }
       });
       form.appendChild(el("div", {}, [history, versions]));
@@ -15361,7 +16278,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         say("\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4.", "ok");
       } catch (e) {
         clear(out);
-        out.appendChild(el("div", { class: "notice err", text: msg15(e) }));
+        out.appendChild(el("div", { class: "notice err", text: msg16(e) }));
       } finally {
         save.disabled = false;
       }
@@ -15386,7 +16303,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
             draw2();
           } catch (e) {
             clear(out);
-            out.appendChild(el("div", { class: "notice err", text: msg15(e) }));
+            out.appendChild(el("div", { class: "notice err", text: msg16(e) }));
           }
         });
         list2.appendChild(el("div", { class: "pickrow" }, [
@@ -15413,7 +16330,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         say(`${r.path} \uC744(\uB97C) \uB123\uC5C8\uC2B5\uB2C8\uB2E4. \uBCF8\uBB38\uC5D0\uC11C skills/${skill.id}/${r.path} \uB85C \uAC00\uB9AC\uCF1C \uC8FC\uC138\uC694.`, "ok");
       } catch (e) {
         clear(out);
-        out.appendChild(el("div", { class: "notice err", text: msg15(e) }));
+        out.appendChild(el("div", { class: "notice err", text: msg16(e) }));
       } finally {
         picker.value = "";
       }
@@ -15432,7 +16349,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)}KB`;
     return `${(n / 1024 / 1024).toFixed(1)}MB`;
   }
-  function msg15(e) {
+  function msg16(e) {
     return e instanceof Error ? e.message : String(e);
   }
 
@@ -15630,10 +16547,10 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           return;
         }
         if (!r.newer) {
-          const mismatch = r.current !== "0.15.32";
+          const mismatch = r.current !== "0.15.33";
           const ahead = r.ahead ?? (!!r.latest && r.latest !== r.current);
           say(
-            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.32"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
+            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.33"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
             mismatch || ahead ? "" : "ok"
           );
           return;
@@ -15649,7 +16566,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           out.appendChild(notes);
         }
       } catch (e) {
-        say(msg16(e), "err");
+        say(msg17(e), "err");
       } finally {
         checkBtn.disabled = false;
       }
@@ -15668,7 +16585,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const version = await state.waitForBackend(90);
         say(`\uBC31\uC5D4\uB4DC\uAC00 v${version} \uC73C\uB85C \uB2E4\uC2DC \uC2DC\uC791\uD588\uC2B5\uB2C8\uB2E4.`, "ok");
       } catch (e) {
-        say("\uC124\uCE58 \uB610\uB294 \uC7AC\uC2DC\uC791\uC744 \uD655\uC778\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg16(e) + " \u2014 \uC7A0\uC2DC \uD6C4 \uC0C8\uB85C\uACE0\uCE68\uD574\uC11C \uBC84\uC804\uC744 \uD655\uC778\uD574 \uC8FC\uC138\uC694.", "err");
+        say("\uC124\uCE58 \uB610\uB294 \uC7AC\uC2DC\uC791\uC744 \uD655\uC778\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg17(e) + " \u2014 \uC7A0\uC2DC \uD6C4 \uC0C8\uB85C\uACE0\uCE68\uD574\uC11C \uBC84\uC804\uC744 \uD655\uC778\uD574 \uC8FC\uC138\uC694.", "err");
       } finally {
         checkBtn.disabled = false;
       }
@@ -15724,7 +16641,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.15.32",
+            version: "0.15.33",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -15747,7 +16664,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         };
         show("\uC9C4\uB2E8 \uC815\uBCF4", JSON.stringify(report, null, 2));
       } catch (e) {
-        say("\uC9C4\uB2E8 \uC815\uBCF4\uB97C \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg16(e), "err");
+        say("\uC9C4\uB2E8 \uC815\uBCF4\uB97C \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg17(e), "err");
       } finally {
         diagBtn.disabled = false;
       }
@@ -15759,7 +16676,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const r = await state.logs(400, selectedLevel(levelSel));
         show("\uC11C\uBC84 \uB85C\uADF8", r.lines.join("\n") || "(\uBE44\uC5B4 \uC788\uC2B5\uB2C8\uB2E4)");
       } catch (e) {
-        say("\uB85C\uADF8\uB97C \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg16(e), "err");
+        say("\uB85C\uADF8\uB97C \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg17(e), "err");
       } finally {
         logBtn.disabled = false;
       }
@@ -15797,7 +16714,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1e4);
   }
-  function msg16(e) {
+  function msg17(e) {
     return e instanceof Error ? e.message : String(e);
   }
 
@@ -15947,7 +16864,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         await transport.post("/config", { config: { workspace: { globalPath: path.value.trim() } } });
         out.textContent = "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4. \uD30C\uC77C\uC740 \uC790\uB3D9\uC73C\uB85C \uC62E\uACA8\uC9C0\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4 \u2014 \uACBD\uB85C\uB97C \uBC14\uAFE8\uB2E4\uBA74 \uAE30\uC874 \uD3F4\uB354\uB97C \uC9C1\uC811 \uC62E\uACA8 \uC8FC\uC138\uC694.";
       } catch (e) {
-        out.textContent = "\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg17(e);
+        out.textContent = "\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e);
       } finally {
         save.disabled = false;
       }
@@ -16083,7 +17000,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       ])
     ]);
   }
-  function msg17(e) {
+  function msg18(e) {
     return e instanceof Error ? e.message : String(e);
   }
   function buildNaiCard() {
@@ -16099,7 +17016,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       try {
         st = await state.studio.status();
       } catch (e) {
-        meters.appendChild(el("span", { class: "hint err", text: msg17(e) }));
+        meters.appendChild(el("span", { class: "hint err", text: msg18(e) }));
         return;
       }
       if (!st.configured) {
@@ -16140,7 +17057,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         await refresh3();
         out.textContent = "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4.";
       } catch (e) {
-        out.textContent = msg17(e);
+        out.textContent = msg18(e);
       } finally {
         save.disabled = false;
       }
@@ -16152,7 +17069,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const st = await state.studio.status();
         out.textContent = st.configured && st.account ? `\uC5F0\uACB0\uB428 \u2014 Anlas ${st.account.anlas}, tier ${st.account.tier}` : st.error || st.note || "\uD1A0\uD070\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.";
       } catch (e) {
-        out.textContent = msg17(e);
+        out.textContent = msg18(e);
       } finally {
         test.disabled = false;
       }
@@ -16422,7 +17339,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.32"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.33"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -16513,7 +17430,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       full = r.full;
     } catch (e) {
       clear(treeMount3);
-      treeMount3.appendChild(el("div", { class: "notice err", text: msg18(e) }));
+      treeMount3.appendChild(el("div", { class: "notice err", text: msg19(e) }));
       return;
     }
     drawTree3();
@@ -16539,7 +17456,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const fresh = fields.find((f) => f.id === made.id);
         if (fresh) open2(fresh);
       } catch (e) {
-        notice5("\uCD94\uAC00\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+        notice5("\uCD94\uAC00\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg19(e), "err");
       }
     });
     const reloadBtn = el("button", { class: "ghost tiny", text: "\uC0C8\uB85C\uACE0\uCE68" });
@@ -16582,7 +17499,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       notice5(savedText("\uCE74\uB4DC \uD544\uB4DC\uB97C"), "ok");
       await refreshNow3();
     } catch (e) {
-      notice5("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+      notice5("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg19(e), "err");
     } finally {
       btn.disabled = false;
     }
@@ -16671,7 +17588,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         notice5(f.deleted ? "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4. \uC0AD\uC81C \uD45C\uC2DC\uB294 \uD574\uC81C\uB418\uC5C8\uC2B5\uB2C8\uB2E4." : savedText("\uCE74\uB4DC \uD544\uB4DC\uB97C"), "ok");
         await refreshNow3();
       } catch (e) {
-        notice5("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+        notice5("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg19(e), "err");
       } finally {
         save.disabled = false;
       }
@@ -16686,7 +17603,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           if (viewMount3) clear(viewMount3);
           await refreshNow3();
         } catch (e) {
-          notice5("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
+          notice5("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg19(e), "err");
         }
       });
       buttons.push(del);
@@ -16722,7 +17639,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       el("div", { class: "row" }, buttons)
     ]));
   }
-  function msg18(e) {
+  function msg19(e) {
     return e instanceof Error ? e.message : String(e);
   }
 
@@ -16794,7 +17711,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       bgFields = r.fields.filter((f) => f.field in BG_LABEL);
     } catch (e) {
       clear(treeMount4);
-      treeMount4.appendChild(el("div", { class: "notice err", text: msg19(e) }));
+      treeMount4.appendChild(el("div", { class: "notice err", text: msg20(e) }));
       return;
     }
     drawTree4();
@@ -16825,7 +17742,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const made = items3.find((s) => s.id === id);
         if (made) open3(made);
       } catch (e) {
-        notice6("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg19(e), "err");
+        notice6("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg20(e), "err");
       }
     });
     const reloadBtn = el("button", { class: "ghost tiny", text: "\uC0C8\uB85C\uACE0\uCE68" });
@@ -16872,7 +17789,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           await state.moveScript(s.id, to);
           await refreshNow4();
         } catch (err) {
-          notice6("\uC21C\uC11C\uB97C \uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg19(err), "err");
+          notice6("\uC21C\uC11C\uB97C \uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg20(err), "err");
         }
       };
       const size = String(e.out ?? "").length;
@@ -16915,7 +17832,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         notice6(savedText(BG_LABEL[f.field] + " \uC744(\uB97C)"), "ok");
         await refreshNow4();
       } catch (err) {
-        notice6("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg19(err), "err");
+        notice6("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg20(err), "err");
       } finally {
         save.disabled = false;
       }
@@ -16981,7 +17898,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         notice6(savedText("\uC2A4\uD06C\uB9BD\uD2B8\uB97C"), "ok");
         await refreshNow4();
       } catch (err) {
-        notice6("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg19(err), "err");
+        notice6("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg20(err), "err");
       } finally {
         save.disabled = false;
       }
@@ -16994,7 +17911,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         if (viewMount4) clear(viewMount4);
         await refreshNow4();
       } catch (err) {
-        notice6("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg19(err), "err");
+        notice6("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg20(err), "err");
       }
     });
     const orig = s.origin === "edited" && s.original ? s.original : null;
@@ -17029,7 +17946,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       el("div", { class: "row" }, [save, del])
     ]));
   }
-  function msg19(e) {
+  function msg20(e) {
     return e instanceof Error ? e.message : String(e);
   }
 
@@ -17072,7 +17989,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       items4 = await state.cardScripts("triggerscript");
     } catch (e) {
       items4 = [];
-      notice7("\uD2B8\uB9AC\uAC70\uB97C \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg20(e), "err");
+      notice7("\uD2B8\uB9AC\uAC70\uB97C \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg21(e), "err");
     }
     drawSide();
     drawView();
@@ -17137,7 +18054,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       await refreshNow5();
       notice7("\uBAA8\uB4DC\uB97C \uBC14\uAFE8\uC2B5\uB2C8\uB2E4. " + savedText("\uD2B8\uB9AC\uAC70\uB97C"), "ok");
     } catch (e) {
-      notice7("\uBAA8\uB4DC\uB97C \uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg20(e), "err");
+      notice7("\uBAA8\uB4DC\uB97C \uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg21(e), "err");
     }
   }
   function drawView() {
@@ -17169,7 +18086,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           notice7(savedText("Lua \uD2B8\uB9AC\uAC70\uB97C"), "ok");
           await refreshNow5();
         } catch (err) {
-          notice7("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg20(err), "err");
+          notice7("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg21(err), "err");
         } finally {
           save.disabled = false;
         }
@@ -17200,7 +18117,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           await state.deleteScript(s.id);
           await refreshNow5();
         } catch (err) {
-          notice7(msg20(err), "err");
+          notice7(msg21(err), "err");
         }
       });
       return el("div", { class: "verrow" }, [
@@ -17217,7 +18134,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       ...rows.length ? rows : [el("div", { class: "hint", text: "\uC774\uBCA4\uD2B8\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4." })]
     ]));
   }
-  function msg20(e) {
+  function msg21(e) {
     return e instanceof Error ? e.message : String(e);
   }
 
@@ -17298,7 +18215,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const n = await state.cardReset();
         shellNotice("\uCE74\uB4DC\uC758 \uBBF8\uBC18\uC601 \uBCC0\uACBD\uC744 \uBC84\uB838\uC2B5\uB2C8\uB2E4" + (n ? ` (${n}\uAC74)` : "") + ". \uC791\uC5C5\uBCF8\uC774 \uAE30\uC900\uC120(RisuAI \uC0C1\uD0DC)\uC73C\uB85C \uB3CC\uC544\uAC14\uC2B5\uB2C8\uB2E4.", "ok");
       } catch (e) {
-        shellNotice("\uBCC0\uACBD \uCDE8\uC18C\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg21(e), "err");
+        shellNotice("\uBCC0\uACBD \uCDE8\uC18C\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg22(e), "err");
       }
     });
     summaryEl2 = el("span", { class: "dim changesum", title: "\uC774 \uBD07\uC758 \uCE74\uB4DC\uC5D0\uC11C \uC544\uC9C1 RisuAI\uC5D0 \uC4F0\uC9C0 \uC54A\uC740 \uBCC0\uACBD" });
@@ -17340,7 +18257,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           out.appendChild(el("div", { class: "notice err", text: `\uC5D0\uC14B ${missing.length}\uAC1C\uAC00 \uC2A4\uD1A0\uC5B4\uC5D0 \uC5C6\uC5B4 \uB9CC\uB4E4\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4: ` + missing.slice(0, 6).map((m) => m.name || m.type).join(", ") + (missing.length > 6 ? " \u2026" : "") }));
           buildAnyway.style.display = "";
         } else {
-          out.appendChild(el("div", { class: "notice err", text: "charx \uB97C \uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg21(e) }));
+          out.appendChild(el("div", { class: "notice err", text: "charx \uB97C \uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg22(e) }));
         }
       } finally {
         build.disabled = !!charxBlockReason();
@@ -17398,7 +18315,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     if (x.deleted) bits.push(`\u2212${x.deleted}`);
     return bits.join(" ");
   }
-  function msg21(e) {
+  function msg22(e) {
     return e instanceof Error ? e.message : String(e);
   }
   async function openApply2(anchor) {
@@ -17451,7 +18368,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           close();
         }
       } catch (e) {
-        const m = msg21(e);
+        const m = msg22(e);
         out.textContent = m;
         void clientLog("error", "cardWriteBack failed", { error: m });
         shellNotice("\uCE74\uB4DC \uBC18\uC601\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + m, "err");
@@ -17482,9 +18399,9 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         body.appendChild(el("div", { class: "hint", text: "\uBC31\uC5C5 \uBD07\uC740 RisuAI \uBD07 \uBAA9\uB85D\uC5D0 \uC0C8 \uCE90\uB9AD\uD130\uB85C \uC788\uC2B5\uB2C8\uB2E4. \uCC57\uB3C4 \uD568\uAED8 \uBCF5\uC0AC\uB418\uC5C8\uACE0 \uC5D0\uC14B\uC740 \uACF5\uC720\uD569\uB2C8\uB2E4." }));
         body.appendChild(el("div", { class: "row", style: { marginTop: "8px" } }, [ok]));
       } catch (e) {
-        void clientLog("error", "saveAsNewBot failed", { error: msg21(e) });
-        shellNotice("\uC0C8 \uBD07\uC73C\uB85C \uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg21(e), "err");
-        out.textContent = "\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg21(e);
+        void clientLog("error", "saveAsNewBot failed", { error: msg22(e) });
+        shellNotice("\uC0C8 \uBD07\uC73C\uB85C \uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg22(e), "err");
+        out.textContent = "\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg22(e);
         saveNew.disabled = !!applyBlockReason();
         saveNew.textContent = was;
       }
@@ -17536,7 +18453,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
             close();
             shellNotice("\uCE74\uB4DC\xB7\uBD07 \uB85C\uC5B4\uBD81\xB7\uC2A4\uD06C\uB9BD\uD2B8\uB97C \uB418\uB3CC\uB838\uC2B5\uB2C8\uB2E4. \uB418\uB3CC\uB9AC\uAE30 \uC9C1\uC804 \uC0C1\uD0DC\uB3C4 \uC2A4\uB0C5\uC0F7\uC73C\uB85C \uB0A8\uACA8 \uB450\uC5C8\uC2B5\uB2C8\uB2E4.", "ok");
           } catch (e) {
-            shellNotice("\uBCF5\uC6D0\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg21(e), "err");
+            shellNotice("\uBCF5\uC6D0\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg22(e), "err");
           }
         });
         const title = el("div", {}, [
@@ -17561,7 +18478,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           } catch (e) {
             row.classList.remove("deleting");
             del.disabled = false;
-            shellNotice("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg21(e), "err");
+            shellNotice("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg22(e), "err");
           }
         });
         row.append(
@@ -17605,7 +18522,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       }));
     } catch (e) {
       clear(body);
-      body.appendChild(el("div", { class: "hint", text: msg21(e) }));
+      body.appendChild(el("div", { class: "hint", text: msg22(e) }));
     }
   }
 
@@ -17977,11 +18894,442 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     } : void 0);
   }
 
+  // src/ui/tab-persona.ts
+  init_dom();
+  init_state();
+  init_blobimg();
+  init_persona();
+  var IMAGE_RE3 = /\.(png|jpe?g|webp|gif|avif)$/i;
+  function msg23(e) {
+    return e instanceof Error ? e.message : String(e);
+  }
+  var builtFor = "";
+  var paint = null;
+  function renderPersonaTab(mount2) {
+    const p = state.persona;
+    if (!p) {
+      builtFor = "";
+      paint = null;
+      clear(mount2);
+      setToolbar(null);
+      const back = el("button", { class: "primary tiny", text: "\uCCAB \uD654\uBA74\uC73C\uB85C" });
+      back.addEventListener("click", () => setTab("chats"));
+      mount2.appendChild(el("div", { class: "pad" }, [
+        el("div", { class: "empty" }, [el("div", { text: "\uD3B8\uC9D1\uD560 \uD398\uB974\uC18C\uB098\uB97C \uCCAB \uD654\uBA74\uC5D0\uC11C \uACE8\uB77C \uC8FC\uC138\uC694." }), back])
+      ]));
+      return;
+    }
+    if (builtFor === p.key && mount2.querySelector(".split.personasplit")) {
+      paint?.();
+      mountRight(mount2);
+      return;
+    }
+    builtFor = p.key;
+    clear(mount2);
+    const pane = threePane();
+    pane.root.classList.add("personasplit");
+    mount2.appendChild(pane.root);
+    const list2 = el("div", { class: "tree personatree" });
+    const reread = el("button", { class: "ghost tiny", text: "\uB2E4\uC2DC \uC77D\uAE30", title: "RisuAI\uC5D0\uC11C \uD398\uB974\uC18C\uB098 \uBAA9\uB85D\uC744 \uB2E4\uC2DC \uC77D\uC5B4 \uC635\uB2C8\uB2E4" });
+    reread.addEventListener("click", () => {
+      void state.loadPersonas().catch((e) => shellNotice(msg23(e), "err"));
+    });
+    pane.left.append(el("div", { class: "row treehead", style: { padding: "6px 8px", flexWrap: "wrap", gap: "4px" } }, [
+      el("span", { class: "sectiontitle grow", style: { marginBottom: "0" }, text: "\uD398\uB974\uC18C\uB098" }),
+      newPersonaButton(() => state.emit()),
+      reread
+    ]), list2);
+    const drawList = () => {
+      clear(list2);
+      for (const r of state.personas ?? [p]) {
+        if (r.gone) continue;
+        const row = el("div", { class: "chatitem" + (r.key === state.persona?.key ? " current" : "") }, [
+          personaAvatar(r.iconKey, r.work.name || r.name),
+          el("span", { class: "grow", text: r.work.name || r.name || "(\uC774\uB984 \uC5C6\uC74C)" }),
+          r.selected ? el("span", { class: "badge", text: "\uC120\uD0DD\uB428", title: "RisuAI\uC5D0\uC11C \uC9C0\uAE08 \uC120\uD0DD\uB41C \uD398\uB974\uC18C\uB098 - \uBC18\uC601\uC740 \uB2E4\uB978 \uD398\uB974\uC18C\uB098\uB97C \uACE0\uB978 \uB4A4\uC5D0 \uB429\uB2C8\uB2E4" }) : null,
+          r.isNew ? el("span", { class: "badge", text: "\uC0C8\uB85C \uB9CC\uB4E6" }) : null,
+          r.dirty ? el("span", { class: "badge warn", text: `\uBBF8\uBC18\uC601 ${r.total}` }) : null
+        ]);
+        row.addEventListener("click", async () => {
+          if (r.key === state.persona?.key) return;
+          try {
+            await state.openPersona(r.key);
+          } catch (e) {
+            shellNotice("\uD398\uB974\uC18C\uB098\uB97C \uC5F4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg23(e), "err");
+          }
+        });
+        list2.appendChild(row);
+      }
+    };
+    const nameIn = el("input", { placeholder: "\uD398\uB974\uC18C\uB098 \uC774\uB984" });
+    const prompt = el("textarea", { class: "personaprompt", rows: 14, placeholder: "\uD398\uB974\uC18C\uB098 \uC124\uBA85 \u2014 RisuAI\uAC00 {{user}} \uC124\uBA85\uC73C\uB85C \uD504\uB86C\uD504\uD2B8\uC5D0 \uB123\uB294 \uAE00\uC785\uB2C8\uB2E4" });
+    const count = el("span", { class: "hint" });
+    const saved2 = el("span", { class: "hint" });
+    const recount = () => {
+      count.textContent = `${prompt.value.length.toLocaleString()}\uC790`;
+    };
+    let timer2 = null;
+    let pendingSave = {};
+    const flush = async () => {
+      if (timer2) {
+        clearTimeout(timer2);
+        timer2 = null;
+      }
+      const f = pendingSave;
+      pendingSave = {};
+      if (!Object.keys(f).length || !state.persona) return;
+      saved2.textContent = "\uC800\uC7A5 \uC911\u2026";
+      try {
+        await state.editPersona(f);
+        saved2.textContent = "\uC791\uC5C5\uBCF8\uC5D0 \uC800\uC7A5\uB428";
+      } catch (e) {
+        saved2.textContent = "";
+        shellNotice("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg23(e), "err");
+      }
+    };
+    const queue2 = (f) => {
+      pendingSave = { ...pendingSave, ...f };
+      saved2.textContent = "\uC785\uB825 \uC911\u2026";
+      if (timer2) clearTimeout(timer2);
+      timer2 = setTimeout(() => void flush(), 700);
+    };
+    nameIn.addEventListener("input", () => queue2({ name: nameIn.value }));
+    prompt.addEventListener("input", () => {
+      recount();
+      queue2({ prompt: prompt.value });
+    });
+    nameIn.addEventListener("blur", () => void flush());
+    prompt.addEventListener("blur", () => void flush());
+    const picBox = el("div", { class: "personapic" });
+    const picNote = el("div", { class: "hint" });
+    let picSig = "";
+    const drawPic = (r) => {
+      const sig = r.work.image + "|" + r.iconPath + "|" + r.iconKey;
+      if (sig === picSig) return;
+      picSig = sig;
+      clear(picBox);
+      if (r.work.image) {
+        picBox.appendChild(workspaceImage(r.work.image, "\uC0C8 \uD504\uB85C\uD544 \uC0AC\uC9C4"));
+        picNote.textContent = `\uC0C8 \uC0AC\uC9C4: ${r.work.image.split("/").pop()} (\uBC18\uC601\uD558\uBA74 \uBC14\uB01D\uB2C8\uB2E4)`;
+      } else {
+        picBox.appendChild(r.iconPath ? workspaceImage(r.iconPath, "\uD504\uB85C\uD544 \uC0AC\uC9C4") : personaAvatar(r.iconKey, r.work.name, "personabig"));
+        picNote.textContent = r.iconKey ? "" : "\uD504\uB85C\uD544 \uC0AC\uC9C4\uC774 \uC5C6\uC2B5\uB2C8\uB2E4";
+      }
+    };
+    const fileIn = el("input", { type: "file", accept: "image/*", style: { display: "none" } });
+    fileIn.addEventListener("change", async () => {
+      const f = fileIn.files?.[0];
+      fileIn.value = "";
+      if (!f || !state.persona) return;
+      try {
+        const bytes = new Uint8Array(await f.arrayBuffer());
+        let bin = "";
+        for (let i = 0; i < bytes.length; i += 32768) bin += String.fromCharCode(...bytes.subarray(i, i + 32768));
+        const up = await state.uploadFile(f.name, btoa(bin), true, state.personaFolder);
+        await state.editPersona({ image: up.path });
+        state.touchFiles([up.path]);
+      } catch (e) {
+        shellNotice("\uC774\uBBF8\uC9C0\uB97C \uC62C\uB9AC\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg23(e), "err");
+      }
+    });
+    const upBtn = el("button", { class: "ghost tiny", text: "\uC774\uBBF8\uC9C0 \uC62C\uB9AC\uAE30" });
+    upBtn.addEventListener("click", () => fileIn.click());
+    const pickBtn = el("button", { class: "ghost tiny", text: "\uD504\uB85C\uC81D\uD2B8 \uD3F4\uB354\uC5D0\uC11C \uACE0\uB974\uAE30" });
+    const pickList = el("div", { class: "personapick" });
+    pickBtn.addEventListener("click", async () => {
+      if (pickList.childElementCount) {
+        clear(pickList);
+        return;
+      }
+      const folder = state.personaFolder;
+      pickList.appendChild(el("div", { class: "hint", text: "\uD3F4\uB354\uB97C \uC77D\uB294 \uC911\u2026" }));
+      try {
+        const listing = await state.files(folder);
+        const files = listing.areas.flatMap((a) => a.files).filter((f) => f.path.startsWith(folder + "/") && IMAGE_RE3.test(f.name));
+        clear(pickList);
+        if (!files.length) {
+          pickList.appendChild(el("div", { class: "hint", text: `${folder} \uC5D0 \uC774\uBBF8\uC9C0\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4 \u2014 \uC5D0\uC14B \uC2A4\uD29C\uB514\uC624\uC5D0\uC11C \uB9CC\uB4E4\uAC70\uB098 \uD30C\uC77C \uD0ED\uC5D0\uC11C \uC62C\uB824 \uB450\uC138\uC694.` }));
+          return;
+        }
+        for (const f of files.slice(0, 60)) {
+          const cell2 = el("button", { class: "ghost personapickcell", title: f.path.slice(folder.length + 1) }, [
+            workspaceImage(f.path, f.name, { thumb: true }),
+            el("span", { class: "hint clip1", text: f.name })
+          ]);
+          cell2.addEventListener("click", async () => {
+            cell2.disabled = true;
+            try {
+              await state.editPersona({ image: f.path });
+              clear(pickList);
+            } catch (e) {
+              shellNotice(msg23(e), "err");
+              cell2.disabled = false;
+            }
+          });
+          pickList.appendChild(cell2);
+        }
+      } catch (e) {
+        clear(pickList);
+        pickList.appendChild(el("div", { class: "notice err", text: "\uD3F4\uB354\uB97C \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg23(e) }));
+      }
+    });
+    const undoPic = el("button", { class: "ghost tiny", text: "\uC0AC\uC9C4 \uB418\uB3CC\uB9AC\uAE30" });
+    undoPic.addEventListener("click", () => {
+      void state.editPersona({ image: "" }).catch((e) => shellNotice(msg23(e), "err"));
+    });
+    const lockNote = el("div", { class: "notice", style: { display: "none", marginBottom: "10px" }, text: SELECTED_REFUSAL });
+    const openFolder2 = el("button", { class: "ghost tiny", text: "\uD30C\uC77C \uD0ED\uC5D0\uC11C \uC5F4\uAE30" });
+    openFolder2.addEventListener("click", () => state.requestOpenFile(state.personaFolder + "/"));
+    const folderLine = el("span", { class: "hint grow" });
+    pane.centre.appendChild(el("div", { class: "pad personaedit" }, [
+      lockNote,
+      el("div", { class: "personagrid" }, [
+        el("div", { class: "personaleft" }, [
+          picBox,
+          picNote,
+          el("div", { class: "row", style: { flexWrap: "wrap", gap: "6px", marginTop: "8px" } }, [upBtn, pickBtn, undoPic, fileIn]),
+          pickList
+        ]),
+        el("div", { class: "personaright" }, [
+          el("label", { class: "sectiontitle", text: "\uC774\uB984" }),
+          nameIn,
+          el("div", { class: "row", style: { marginTop: "12px", marginBottom: "6px" } }, [
+            el("label", { class: "sectiontitle grow", style: { marginBottom: "0" }, text: "\uC124\uBA85" }),
+            saved2,
+            count,
+            focusButton(prompt, "\uD398\uB974\uC18C\uB098 \uC124\uBA85")
+          ]),
+          prompt,
+          el("div", { class: "sectionline" }),
+          el("div", { class: "row", style: { gap: "8px" } }, [folderLine, openFolder2]),
+          el("div", { class: "hint", style: { marginTop: "4px" }, text: "\uC774 \uD398\uB974\uC18C\uB098\uC758 \uC0AC\uC9C4\xB7\uBA54\uBAA8\uB97C \uB450\uB294 \uACF3\uC785\uB2C8\uB2E4. RisuAI \uD504\uB85C\uD544 \uC0AC\uC9C4\uB3C4 \uC5EC\uAE30 \uC0AC\uBCF8\uC774 \uC788\uC5B4 AI\uAC00 \uBCFC \uC218 \uC788\uC2B5\uB2C8\uB2E4. \uC774\uB984\uC744 \uBC14\uAFD4 \uBC18\uC601\uD558\uBA74 \uD3F4\uB354 \uC774\uB984\uB3C4 \uB530\uB77C\uAC11\uB2C8\uB2E4." })
+        ])
+      ])
+    ]));
+    const applyBadge3 = el("span", { class: "badge warn applybadge", style: { display: "none" } });
+    const applyBtn3 = el("button", { class: "tool", dataset: { tool: "persona-apply" }, title: "\uC774 \uD398\uB974\uC18C\uB098\uC758 \uC791\uC5C5\uBCF8\uC744 RisuAI\uC5D0 \uBC18\uC601\uD569\uB2C8\uB2E4" }, [
+      el("span", { class: "glyph", text: TOOL.apply }),
+      el("span", { class: "tool-label", text: "\uBC18\uC601" }),
+      applyBadge3
+    ]);
+    applyBtn3.addEventListener("click", async () => {
+      await flush();
+      applyBtn3.disabled = true;
+      try {
+        const r = await state.personaWriteBack();
+        shellNotice(r.written ? `\uD398\uB974\uC18C\uB098 '${r.name}' \uC744(\uB97C) RisuAI\uC5D0 \uBC18\uC601\uD558\uACE0 \uC800\uC7A5\uC744 \uD655\uC778\uD588\uC2B5\uB2C8\uB2E4.` : "\uBC18\uC601\uD560 \uBCC0\uACBD\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.", "ok");
+      } catch (e) {
+        shellNotice("\uBC18\uC601\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg23(e), "err");
+      } finally {
+        applyBtn3.disabled = false;
+      }
+    });
+    const snap = el("button", { class: "tool", dataset: { tool: "persona-snapshot" }, title: "\uC774 \uD398\uB974\uC18C\uB098\uC758 \uC791\uC5C5\uBCF8\uC744 \uC2A4\uB0C5\uC0F7\uC73C\uB85C \uC800\uC7A5\uD569\uB2C8\uB2E4" }, [
+      el("span", { class: "glyph", text: TOOL.snapshot }),
+      el("span", { class: "tool-label", text: "\uC2A4\uB0C5\uC0F7" })
+    ]);
+    snap.addEventListener("click", () => {
+      openSnapshotName(snap, "\uC218\uB3D9", async (label2) => {
+        await flush();
+        await state.personaCheckpoint(label2);
+        shellNotice("\uD398\uB974\uC18C\uB098 \uC2A4\uB0C5\uC0F7\uC744 \uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4. \u{1F558} \uBC84\uC804\uC5D0\uC11C \uB418\uB3CC\uB9B4 \uC218 \uC788\uC2B5\uB2C8\uB2E4.", "ok");
+      });
+    });
+    const versions = el("button", { class: "tool", dataset: { tool: "persona-versions" }, title: "\uD398\uB974\uC18C\uB098 \uC2A4\uB0C5\uC0F7 \uBAA9\uB85D\uC5D0\uC11C \uB418\uB3CC\uB9AC\uAE30" }, [
+      el("span", { class: "glyph", text: TOOL.versions }),
+      el("span", { class: "tool-label", text: "\uBC84\uC804" })
+    ]);
+    versions.addEventListener("click", () => void openVersions3(versions));
+    const discard = el("button", { class: "tool", dataset: { tool: "persona-discard" }, title: "\uC774 \uD398\uB974\uC18C\uB098\uC758 \uBBF8\uBC18\uC601 \uBCC0\uACBD\uC744 \uBC84\uB9AC\uACE0 RisuAI \uC0C1\uD0DC\uB85C \uB418\uB3CC\uB9BD\uB2C8\uB2E4" });
+    armed(discard, TOOL.discard + " \uBCC0\uACBD \uCDE8\uC18C", "\uC815\uB9D0 \uBC84\uB9B4\uAE4C\uC694?", async () => {
+      try {
+        const n = await state.personaReset();
+        shellNotice("\uD398\uB974\uC18C\uB098\uC758 \uBBF8\uBC18\uC601 \uBCC0\uACBD\uC744 \uBC84\uB838\uC2B5\uB2C8\uB2E4" + (n ? ` (${n}\uAC74)` : "") + ".", "ok");
+      } catch (e) {
+        shellNotice("\uBCC0\uACBD \uCDE8\uC18C\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg23(e), "err");
+      }
+    });
+    const summary = el("span", { class: "dim changesum" });
+    const bar3 = el("div", { class: "toolrow personabar" }, [applyBtn3, snap, versions, discard, summary]);
+    paint = () => {
+      const r = state.persona;
+      if (!r) return;
+      drawList();
+      const active3 = document.activeElement;
+      if (active3 !== nameIn && !pendingSave.name && nameIn.value !== r.work.name) nameIn.value = r.work.name;
+      if (active3 !== prompt && !pendingSave.prompt && prompt.value !== r.work.prompt) {
+        prompt.value = r.work.prompt;
+        recount();
+      }
+      drawPic(r);
+      undoPic.style.display = r.work.image ? "" : "none";
+      lockNote.style.display = r.selected ? "" : "none";
+      folderLine.textContent = `\uD504\uB85C\uC81D\uD2B8 \uD3F4\uB354: ${r.folder}`;
+      const parts = [];
+      if (r.work.name !== r.base.name) parts.push("\uC774\uB984");
+      if (r.work.prompt !== r.base.prompt) parts.push("\uC124\uBA85");
+      if (r.work.image) parts.push("\uC0AC\uC9C4");
+      summary.textContent = parts.length ? parts.join(" \xB7 ") + " \uBCC0\uACBD" : "\uBCC0\uACBD \uC5C6\uC74C";
+      applyBadge3.textContent = String(r.total);
+      applyBadge3.style.display = r.total ? "" : "none";
+      applyBtn3.classList.toggle("dimmed", r.selected);
+      applyBtn3.title = r.selected ? SELECTED_REFUSAL : "\uC774 \uD398\uB974\uC18C\uB098\uC758 \uC791\uC5C5\uBCF8\uC744 RisuAI\uC5D0 \uBC18\uC601\uD569\uB2C8\uB2E4";
+      discard.style.display = r.dirty ? "" : "none";
+      discard.title = r.isNew ? "\uC544\uC9C1 RisuAI\uC5D0 \uC5C6\uB294 \uC0C8 \uD398\uB974\uC18C\uB098\uB97C \uC9C0\uC6C1\uB2C8\uB2E4 (\uD3F4\uB354\uB294 \uB0A8\uC2B5\uB2C8\uB2E4)" : "\uC774 \uD398\uB974\uC18C\uB098\uC758 \uBBF8\uBC18\uC601 \uBCC0\uACBD\uC744 \uBC84\uB9AC\uACE0 RisuAI \uC0C1\uD0DC\uB85C \uB418\uB3CC\uB9BD\uB2C8\uB2E4";
+      applyBtn3.title = r.isNew ? "\uC774 \uC0C8 \uD398\uB974\uC18C\uB098\uB97C RisuAI \uD398\uB974\uC18C\uB098 \uBAA9\uB85D\uC5D0 \uCD94\uAC00\uD569\uB2C8\uB2E4" : applyBtn3.title;
+      setToolbar(bar3);
+    };
+    nameIn.value = p.work.name;
+    prompt.value = p.work.prompt;
+    recount();
+    paint();
+    mountRight(mount2);
+  }
+  function mountRight(mount2) {
+    bindAgent({ notice: (t, k) => shellNotice(t, k === "err" ? "err" : k === "ok" ? "ok" : "") });
+    const inner = mount2.querySelector(".right-inner");
+    if (inner) mountAgent(inner);
+  }
+  async function openVersions3(anchor) {
+    const body = el("div", { class: "verlist" }, [el("div", { class: "hint", text: "\uBD88\uB7EC\uC624\uB294 \uC911\uC785\uB2C8\uB2E4\u2026" })]);
+    const close = popover(anchor, body);
+    try {
+      const cps = await state.personaCheckpoints();
+      clear(body);
+      if (!cps.length) {
+        body.appendChild(el("div", { class: "hint", text: "\uC544\uC9C1 \uD398\uB974\uC18C\uB098 \uC2A4\uB0C5\uC0F7\uC774 \uC5C6\uC2B5\uB2C8\uB2E4. \u{1F516} \uC2A4\uB0C5\uC0F7 \uBC84\uD2BC\uC73C\uB85C \uC800\uC7A5\uD574 \uC8FC\uC138\uC694." }));
+        return;
+      }
+      const users = cps.filter((c) => c.kind !== "auto");
+      const autos = cps.filter((c) => c.kind === "auto");
+      const row = (c, auto) => {
+        const back = el("button", { class: "ghost tiny", text: "\uB418\uB3CC\uB9AC\uAE30", title: "\uC791\uC5C5\uBCF8\uC744 \uC774 \uC2DC\uC810\uC73C\uB85C \uB418\uB3CC\uB9BD\uB2C8\uB2E4 (\uC9C1\uC804 \uC0C1\uD0DC\uB3C4 \uC2A4\uB0C5\uC0F7\uC73C\uB85C \uB0A8\uC2B5\uB2C8\uB2E4)" });
+        back.addEventListener("click", async () => {
+          back.disabled = true;
+          try {
+            await state.personaRestore(c.id);
+            close();
+            shellNotice("\uD398\uB974\uC18C\uB098\uB97C \uB418\uB3CC\uB838\uC2B5\uB2C8\uB2E4. \uB418\uB3CC\uB9AC\uAE30 \uC9C1\uC804 \uC0C1\uD0DC\uB3C4 \uC2A4\uB0C5\uC0F7\uC73C\uB85C \uB0A8\uACA8 \uB450\uC5C8\uC2B5\uB2C8\uB2E4.", "ok");
+          } catch (e) {
+            shellNotice("\uBCF5\uC6D0\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg23(e), "err");
+            back.disabled = false;
+          }
+        });
+        const title = el("span", { text: c.label || "(\uBB34\uC81C)" });
+        const r = el("div", { class: "verrow" }, [
+          el("div", { class: "grow" }, [el("div", {}, [title]), el("div", { class: "hint", text: fmtTime(c.created_at * 1e3) })]),
+          back
+        ]);
+        if (!auto) {
+          const ren = el("button", { class: "ghost tiny", text: "\u270E", title: "\uC774\uB984 \uBC14\uAFB8\uAE30" });
+          ren.addEventListener("click", () => openSnapshotName(ren, c.label || "", async (label2) => {
+            await state.renamePersonaCheckpoint(c.id, label2);
+            title.textContent = label2;
+          }));
+          const del = el("button", { class: "ghost tiny", title: "\uC774 \uC2A4\uB0C5\uC0F7 \uC0AD\uC81C" });
+          armed(del, "\u2715", "\uC0AD\uC81C \uD655\uC778", async () => {
+            r.classList.add("deleting");
+            try {
+              await state.deletePersonaCheckpoint(c.id);
+              r.remove();
+            } catch (e) {
+              r.classList.remove("deleting");
+              shellNotice(msg23(e), "err");
+            }
+          });
+          r.append(ren, del);
+        }
+        return r;
+      };
+      for (const c of users) body.appendChild(row(c, false));
+      if (autos.length) {
+        const fold2 = el("div", { class: "autohead" });
+        const auto = el("div", { style: { display: "none" } });
+        const head = el("button", { class: "ghost tiny", text: `\u25B8 \uC790\uB3D9 \uBC31\uC5C5 ${autos.length}\uAC1C` });
+        head.addEventListener("click", () => {
+          const open4 = auto.style.display === "none";
+          auto.style.display = open4 ? "" : "none";
+          head.textContent = `${open4 ? "\u25BE" : "\u25B8"} \uC790\uB3D9 \uBC31\uC5C5 ${autos.length}\uAC1C`;
+        });
+        fold2.appendChild(head);
+        for (const c of autos) auto.appendChild(row(c, true));
+        body.append(fold2, auto);
+      }
+    } catch (e) {
+      clear(body);
+      body.appendChild(el("div", { class: "notice err", text: "\uC2A4\uB0C5\uC0F7 \uBAA9\uB85D\uC744 \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg23(e) }));
+    }
+  }
+
+  // src/ui/folder-suggest.ts
+  init_state();
+  var DISMISS_KEY = "hina.folderSuggestDismissed";
+  function dismissed() {
+    try {
+      return JSON.parse(localStorage.getItem(DISMISS_KEY) || "{}");
+    } catch {
+      return {};
+    }
+  }
+  function dismiss2(charKey, name) {
+    try {
+      const d = dismissed();
+      d[charKey] = name;
+      localStorage.setItem(DISMISS_KEY, JSON.stringify(d));
+    } catch {
+    }
+  }
+  var askedFor = "";
+  async function suggestFolderRename() {
+    const ck = state.activeCharKey;
+    if (!ck || !state.health) return;
+    let info = null;
+    try {
+      info = await state.botFolderInfo();
+    } catch {
+      return;
+    }
+    if (!info || !info.suggested || !info.hashLike || ck !== state.activeCharKey) return;
+    if (dismissed()[ck] === info.suggested) return;
+    const tag = ck + "\0" + info.suggested + "\0" + info.folder;
+    if (askedFor === tag) return;
+    askedFor = tag;
+    const why = `\uC774 \uBD07\uC758 \uC791\uC5C5 \uD3F4\uB354\uAC00 \uC774\uB984\uC774 \uC815\uD574\uC9C0\uAE30 \uC804\uC5D0 \uC784\uC2DC \uC774\uB984(projects/${info.folder})\uC73C\uB85C \uB9CC\uB4E4\uC5B4\uC84C\uC2B5\uB2C8\uB2E4.`;
+    shellPrompt(`${why} \uBD07 \uC774\uB984\uC5D0 \uB9DE\uCDB0 projects/${info.suggested} \uB85C \uBC14\uAFC0\uAE4C\uC694? (\uD3F4\uB354 \uC548 \uD30C\uC77C\xB7AI \uBA54\uBAA8\xB7\uC5D0\uC14B \uADDC\uCE59\xB7\uC2A4\uD29C\uB514\uC624 \uACB0\uACFC\uB3C4 \uD568\uAED8 \uC62E\uAE41\uB2C8\uB2E4)`, [
+      {
+        label: `${info.suggested} \uB85C \uBC14\uAFB8\uAE30`,
+        primary: true,
+        run: async () => {
+          try {
+            const r = await state.renameBotFolder(info.suggested);
+            shellNotice(`\uC791\uC5C5 \uD3F4\uB354\uB97C projects/${r.folder} \uB85C \uBC14\uAFE8\uC2B5\uB2C8\uB2E4.`, "ok");
+          } catch (e) {
+            shellNotice("\uD3F4\uB354 \uC774\uB984\uC744 \uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + (e instanceof Error ? e.message : String(e)), "err");
+          }
+        }
+      },
+      { label: "\uADF8\uB300\uB85C \uB450\uAE30", run: () => {
+        dismiss2(ck, info.suggested);
+      } }
+    ]);
+  }
+  var seenName = "";
+  state.onChange(() => {
+    const ws = state.workspace;
+    if (!ws) return;
+    const tag = ws.charKey + "\0" + (ws.characterName || "");
+    if (tag === seenName) return;
+    const sameBot = seenName.startsWith(ws.charKey + "\0");
+    seenName = tag;
+    if (sameBot && ws.characterName) void suggestFolderRename();
+  });
+
   // src/ui/studio/index.ts
   init_dom();
   init_blobimg();
   init_state();
   init_store();
+  init_transport();
 
   // src/ui/studio/gen.ts
   init_dom();
@@ -18486,7 +19834,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     const planBtn = el("button", { class: "ghost tiny", text: "\uACC4\uD68D \uBCF4\uAE30", title: "\uBB34\uC5C7\uC774 \uBA87 \uC7A5 \uC0DD\uC131\uB420\uC9C0 \uBBF8\uB9AC \uBD05\uB2C8\uB2E4 (\uBB34\uB8CC)" });
     planBtn.addEventListener("click", () => void showPlan(out));
     const bound = styleSync.boundName();
-    const bindNote = el("div", { class: bound ? "notice ok genbind" : "hint genbind", text: bound ? `\uC774 \uC124\uC815\uC740 \uC2A4\uD0C0\uC77C \u2018${bound}\u2019 \uC5D0 \uD568\uAED8 \uC800\uC7A5\uB429\uB2C8\uB2E4 \u2014 \uC2A4\uD0C0\uC77C\uC744 \uACE0\uB974\uBA74 \uADF8 \uC2A4\uD0C0\uC77C\uC758 \uC124\uC815\uC73C\uB85C \uBC14\uB01D\uB2C8\uB2E4. (\uC2DC\uB4DC \xB7 \uC800\uC7A5 \uD3F4\uB354 \xB7 \uC5D0\uC14B\uC740 \uC774\uBC88 \uC791\uC5C5\uC6A9\uC774\uB77C \uC800\uC7A5\uD558\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4)` : "\uC120\uD0DD\uB41C \uC2A4\uD0C0\uC77C\uC774 \uC5C6\uC5B4 \uC774 \uC124\uC815\uC740 \uC774 \uBE0C\uB77C\uC6B0\uC800\uC5D0\uB9CC \uC800\uC7A5\uB429\uB2C8\uB2E4." });
+    const bindNote = el("div", { class: bound ? "notice ok genbind" : "hint genbind", text: bound ? `\uC774 \uC124\uC815\uC740 \uC2A4\uD0C0\uC77C \u2018${bound}\u2019 \uC758 \uC77C\uBD80\uC785\uB2C8\uB2E4 \u2014 \uBC14\uAFB8\uBA74 \uBC14\uB85C \uB2E4\uC74C \uC0DD\uC131\uC5D0 \uC4F0\uC774\uACE0, \uC67C\uCABD \uC2A4\uD0C0\uC77C \uBE14\uB85D\uC758 [\uC800\uC7A5]\uC744 \uB20C\uB7EC\uC57C \uC2A4\uD0C0\uC77C \uD30C\uC77C\uC5D0 \uC800\uC7A5\uB429\uB2C8\uB2E4. \uC2A4\uD0C0\uC77C\uC744 \uACE0\uB974\uBA74 \uADF8 \uC2A4\uD0C0\uC77C\uC758 \uC124\uC815\uC73C\uB85C \uBC14\uB01D\uB2C8\uB2E4. (\uC2DC\uB4DC \xB7 \uC800\uC7A5 \uD3F4\uB354 \xB7 \uC5D0\uC14B\uC740 \uC774\uBC88 \uC791\uC5C5\uC6A9\uC774\uB77C \uC800\uC7A5\uD558\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4)` : "\uC120\uD0DD\uB41C \uC2A4\uD0C0\uC77C\uC774 \uC5C6\uC5B4 \uC774 \uC124\uC815\uC740 \uC774 \uBE0C\uB77C\uC6B0\uC800\uC5D0\uB9CC \uC800\uC7A5\uB429\uB2C8\uB2E4." });
     const body = el("div", { class: "genform" }, [
       bindNote,
       field2("\uBAA8\uB378", modelInput),
@@ -18697,6 +20045,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     return el("div", { class: "field grow" }, [el("span", { text: "\uC52C \uD504\uB9AC\uC14B" }), row]);
   }
   async function startRun(overrides = {}) {
+    if (!await styleSync.beforeRun()) return;
     try {
       const body = { ...spec(), ...overrides };
       if (!body.scenePreset) delete body.scenePreset;
@@ -18923,6 +20272,11 @@ ${doc.negative.trim()}
       if (v === void 0 || v === null || v === "") meta.delete(m);
       else meta.set(m, String(v));
     }
+  }
+  function genSnapshot(g) {
+    const out = {};
+    for (const [k] of GEN_META) out[k] = g[k] ?? null;
+    return out;
   }
   function describeGen(g) {
     const bits = [];
@@ -19761,15 +21115,32 @@ ${negative.value.trim()}
   init_store();
   var pending2 = null;
   var loadedDoc = null;
-  var saveTimer = null;
+  var genAtLoad = null;
+  var saveBtn = null;
+  var revertBtn = null;
+  var dirtyBadge = null;
+  var saveStatus = null;
+  var genSummary = null;
   var charBadge = null;
   var fragBadge = null;
   var fragErrBadge = null;
-  function styleOpen() {
+  var STYLES_DIR = "studio/config/styles";
+  var extraStyleFolders = /* @__PURE__ */ new Set();
+  function styleFolder(i) {
+    const f = String(i.folder ?? "");
+    return f === "." ? "" : f;
+  }
+  function promptOpen(which) {
     try {
-      return localStorage.getItem("hina.studioStyleOpen") !== "0";
+      return localStorage.getItem("hina.studioPromptOpen." + which) === "1";
     } catch {
-      return true;
+      return false;
+    }
+  }
+  function setPromptOpen(which, open4) {
+    try {
+      localStorage.setItem("hina.studioPromptOpen." + which, open4 ? "1" : "0");
+    } catch {
     }
   }
   function styleItems() {
@@ -19779,38 +21150,82 @@ ${negative.value.trim()}
     const path = activeOf("styles")[0];
     return (S.cards.styles ?? []).find((i) => i.path === path) ?? null;
   }
+  function activeStylePath() {
+    return activeOf("styles")[0] ?? "";
+  }
+  function promptDirty(path = activeStylePath()) {
+    if (!path || !pending2 || pending2.path !== path) return false;
+    if (!loadedDoc || loadedDoc.path !== path) return true;
+    return pending2.positive !== loadedDoc.doc.positive || pending2.negative !== loadedDoc.doc.negative;
+  }
+  function genDirty(path = activeStylePath()) {
+    if (!path || !genAtLoad || genAtLoad.path !== path) return false;
+    return JSON.stringify(genSnapshot(gen)) !== JSON.stringify(genAtLoad.snap);
+  }
+  function isDirty(path = activeStylePath()) {
+    return promptDirty(path) || genDirty(path);
+  }
+  function markLoaded(path, doc) {
+    loadedDoc = { path, doc };
+    genAtLoad = { path, snap: genSnapshot(gen) };
+  }
+  function shortGen() {
+    return [
+      gen.model.replace(/^nai-diffusion-/, "v"),
+      `${gen.steps} steps`,
+      `CFG ${gen.scale}`,
+      `${gen.width}\xD7${gen.height}`
+    ].join(" \xB7 ");
+  }
+  function updateSaveBar() {
+    const path = activeStylePath();
+    const pd = promptDirty(path);
+    const gd = genDirty(path);
+    const dirty2 = pd || gd;
+    if (saveBtn?.isConnected) {
+      saveBtn.disabled = !dirty2;
+      saveBtn.classList.toggle("primary", dirty2);
+    }
+    if (revertBtn?.isConnected) revertBtn.disabled = !dirty2;
+    if (dirtyBadge?.isConnected) {
+      dirtyBadge.style.display = dirty2 ? "" : "none";
+      dirtyBadge.title = [pd ? "\uD504\uB86C\uD504\uD2B8" : "", gd ? "\uC694\uCCAD \uC124\uC815" : ""].filter(Boolean).join(" \xB7 ") + " \uC218\uC815\uC774 \uC544\uC9C1 \uC800\uC7A5\uB418\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4";
+    }
+    if (saveStatus?.isConnected && dirty2) {
+      saveStatus.textContent = pd && gd ? "\uD504\uB86C\uD504\uD2B8\xB7\uC694\uCCAD \uC124\uC815 \uBBF8\uC800\uC7A5" : pd ? "\uD504\uB86C\uD504\uD2B8 \uBBF8\uC800\uC7A5 \u2014 \uC0DD\uC131\uC5D0\uB294 \uC800\uC7A5\uB41C \uD504\uB86C\uD504\uD2B8\uAC00 \uC4F0\uC785\uB2C8\uB2E4" : "\uC694\uCCAD \uC124\uC815 \uBBF8\uC800\uC7A5 (\uC774\uBC88 \uC0DD\uC131\uC5D0\uB294 \uC801\uC6A9\uB428)";
+    }
+    if (genSummary?.isConnected) genSummary.textContent = shortGen();
+  }
   function buildLeftPrompt(mount2) {
     const cur = currentStyle();
     const items5 = styleItems();
-    const pickTitle = items5.length ? `\uC800\uC7A5\uB41C \uC2A4\uD0C0\uC77C ${items5.length}\uAC1C \u2014 \uC120\uD0DD \xB7 \uC218\uC815 \xB7 \uC0AD\uC81C \xB7 \uCD94\uAC00` : "\uC2A4\uD0C0\uC77C \uCD94\uAC00";
+    const pickTitle = items5.length ? `\uC800\uC7A5\uB41C \uC2A4\uD0C0\uC77C ${items5.length}\uAC1C \u2014 \uC120\uD0DD \xB7 \uC774\uB3D9 \xB7 \uC0AD\uC81C \xB7 \uCD94\uAC00` : "\uC2A4\uD0C0\uC77C \uCD94\uAC00";
     mount2.appendChild(el("div", { class: "sectiontitle", style: { padding: "6px 8px 0" }, text: "\uC2A4\uD0C0\uC77C \uD504\uB86C\uD504\uD2B8" }));
     mount2.appendChild(el("div", { style: { padding: "4px 8px 0" } }, [
-      pickerRow(cur ? { name: cur.name, hint: cur.description || void 0 } : null, {
+      pickerRow(cur ? {
+        name: cur.name,
+        hint: cur.description || void 0,
+        badges: styleFolder(cur) ? [{ text: styleFolder(cur) }] : void 0
+      } : null, {
         title: pickTitle,
         emptyHint: items5.length ? "\uC120\uD0DD\uB41C \uC2A4\uD0C0\uC77C \uC5C6\uC74C \u2014 \u203A \uC5D0\uC11C \uACE0\uB974\uC138\uC694" : "\uC2A4\uD0C0\uC77C\uC774 \uC5C6\uC2B5\uB2C8\uB2E4. \u203A \uC5D0\uC11C \uD558\uB098 \uB9CC\uB4E4\uC5B4 \uC8FC\uC138\uC694.",
         onOpen: openStylePicker
       })
     ]));
-    const editBox = el("div", { class: "styleedit" });
+    const editBox = el("div", { class: "styleedit stylesaved" });
     if (cur) buildStyleEditor(editBox, cur.path);
     else editBox.appendChild(el("div", {
       class: "hint",
       style: { padding: "6px 0" },
-      text: "\uC2A4\uD0C0\uC77C\uC744 \uC120\uD0DD\uD558\uBA74 \uAE0D\uC815/\uBD80\uC815 \uD504\uB86C\uD504\uD2B8\uB97C \uC5EC\uAE30\uC11C \uBC14\uB85C \uC218\uC815\uD569\uB2C8\uB2E4."
+      text: "\uC2A4\uD0C0\uC77C\uC744 \uC120\uD0DD\uD558\uBA74 \uAE0D\uC815/\uBD80\uC815 \uD504\uB86C\uD504\uD2B8\uC640 \uC694\uCCAD \uC124\uC815\uC744 \uC5EC\uAE30\uC11C \uACE0\uCE58\uACE0 \uC800\uC7A5\uD569\uB2C8\uB2E4."
     }));
-    const fold2 = el("details", { class: "advbox stylefold", ...styleOpen() ? { open: true } : {} }, [
-      el("summary", { text: "\uD504\uB86C\uD504\uD2B8 \uC218\uC815" }),
-      editBox
-    ]);
-    fold2.addEventListener("toggle", () => {
-      try {
-        localStorage.setItem("hina.studioStyleOpen", fold2.open ? "1" : "0");
-      } catch {
-      }
-    });
-    mount2.appendChild(fold2);
+    editBox.appendChild(paramsRow(!!cur));
+    if (cur) editBox.appendChild(saveBar());
+    mount2.appendChild(editBox);
+    mount2.appendChild(el("div", { class: "sectiontitle", style: { padding: "10px 8px 0" }, text: "\uC784\uC2DC \uD504\uB86C\uD504\uD2B8 (\uC800\uC7A5 \uC548 \uB428)" }));
     buildTemporaryPrompt(mount2);
     buildTemporaryPrompt(mount2, true);
+    mount2.appendChild(el("div", { class: "sectiontitle", style: { padding: "10px 8px 0" }, text: "\uCE90\uB9AD\uD130 \xB7 \uC870\uAC01" }));
     const nChars = activeOf("characters").length;
     charBadge = el("span", { class: "badge" + (nChars ? " ok" : ""), text: String(nChars) });
     const charBtn = el(
@@ -19840,13 +21255,33 @@ ${negative.value.trim()}
       S.selectedFile = "";
       hub.drawCentre();
     });
+    mount2.appendChild(el("div", { class: "toolbtns" }, [charBtn, fragBtn]));
+    updateSaveBar();
+  }
+  function paramsRow(bound) {
     const paramsBtn = el(
       "button",
-      { class: "ghost toolbtn", title: "\uC694\uCCAD \uC124\uC815 \u2014 \uBAA8\uB378\xB7\uD06C\uAE30\xB7\uC2A4\uD15D\xB7UC \uB4F1 \uC0DD\uC131 \uC694\uCCAD\uC758 \uD30C\uB77C\uBBF8\uD130" },
+      { class: "ghost tiny", title: "\uC694\uCCAD \uC124\uC815 \u2014 \uBAA8\uB378\xB7\uD06C\uAE30\xB7\uC2A4\uD15D\xB7UC \uB4F1 \uC0DD\uC131 \uC694\uCCAD\uC758 \uD30C\uB77C\uBBF8\uD130" },
       [el("span", { text: "\u2699 \uC694\uCCAD \uC124\uC815" })]
     );
     paramsBtn.addEventListener("click", () => openParamsDialog());
-    mount2.appendChild(el("div", { class: "toolbtns" }, [charBtn, fragBtn, paramsBtn]));
+    genSummary = el("span", {
+      class: "hint grow genpeek",
+      text: shortGen(),
+      title: bound ? "\uC2A4\uD0C0\uC77C\uC5D0 \uD568\uAED8 \uC800\uC7A5\uB418\uB294 \uC694\uCCAD \uC124\uC815" : "\uC2A4\uD0C0\uC77C\uC774 \uC5C6\uC5B4 \uC774 \uBE0C\uB77C\uC6B0\uC800\uC5D0\uB9CC \uC800\uC7A5\uB429\uB2C8\uB2E4"
+    });
+    return el("div", { class: "row genrow" }, [paramsBtn, genSummary]);
+  }
+  function saveBar() {
+    saveBtn = el("button", { class: "tiny stylesave", text: "\uC800\uC7A5", title: "\uAE0D\uC815\xB7\uBD80\uC815 \uD504\uB86C\uD504\uD2B8\uC640 \uC694\uCCAD \uC124\uC815\uC744 \uC2A4\uD0C0\uC77C \uD30C\uC77C\uC5D0 \uC800\uC7A5\uD569\uB2C8\uB2E4 (Ctrl+S)" });
+    revertBtn = el("button", { class: "ghost tiny", text: "\uB418\uB3CC\uB9AC\uAE30", title: "\uC800\uC7A5\uD558\uC9C0 \uC54A\uC740 \uC218\uC815\uC744 \uBC84\uB9AC\uACE0 \uC800\uC7A5\uB41C \uC2A4\uD0C0\uC77C\uB85C \uB3CC\uC544\uAC11\uB2C8\uB2E4" });
+    dirtyBadge = el("span", { class: "badge warn stylebadge", text: "\uBBF8\uC800\uC7A5" });
+    saveStatus = el("span", { class: "hint grow savestatus" });
+    saveBtn.addEventListener("click", () => {
+      void saveStyle();
+    });
+    revertBtn.addEventListener("click", () => revertEdits());
+    return el("div", { class: "row stylesavebar" }, [dirtyBadge, saveStatus, revertBtn, saveBtn]);
   }
   function buildTemporaryPrompt(mount2, negative = false) {
     const label2 = negative ? "\uC784\uC2DC \uB124\uAC70\uD2F0\uBE0C \uD504\uB86C\uD504\uD2B8" : "\uC784\uC2DC \uD504\uB86C\uD504\uD2B8";
@@ -19888,7 +21323,7 @@ ${negative.value.trim()}
       sync();
       checkUnresolved();
     });
-    mount2.appendChild(el("div", { class: "styleedit" }, [
+    mount2.appendChild(el("div", { class: "styleedit temporary" }, [
       el("div", { class: "row" }, [toggle, el("span", { text: label2 }), status]),
       body
     ]));
@@ -19908,8 +21343,60 @@ ${negative.value.trim()}
       fragErrBadge.title = "\uD504\uB86C\uD504\uD2B8\uAC00 \uCC38\uC870\uD558\uB294\uB370 \uC870\uAC01\uC774 \uC5C6\uB294 \uC774\uB984: " + S.unresolvedRefs.join(", ");
     }
   }
+  function askChoice(title, text2, choices) {
+    return new Promise((resolve) => {
+      let done = false;
+      let close = () => {
+      };
+      const finish = (v) => {
+        if (done) return;
+        done = true;
+        close();
+        resolve(v);
+      };
+      const btns2 = choices.map((c) => {
+        const b = el("button", { class: c.cls ?? "ghost", text: c.label });
+        b.addEventListener("click", () => finish(c.value));
+        return b;
+      });
+      close = modal(title, el("div", { class: "unsavedask" }, [
+        el("div", { text: text2 }),
+        el("div", { class: "row", style: { gap: "6px", justifyContent: "flex-end", marginTop: "12px", flexWrap: "wrap" } }, btns2)
+      ]), { onClose: () => finish("cancel") });
+    });
+  }
+  async function resolveUnsaved(action) {
+    const path = activeStylePath();
+    if (!isDirty(path)) return true;
+    const name = styleSync.boundName();
+    const pick2 = await askChoice("\uC800\uC7A5\uD558\uC9C0 \uC54A\uC740 \uC2A4\uD0C0\uC77C \uC218\uC815", `\uC2A4\uD0C0\uC77C \u2018${name}\u2019 \uC5D0 \uC800\uC7A5\uD558\uC9C0 \uC54A\uC740 \uC218\uC815\uC774 \uC788\uC2B5\uB2C8\uB2E4. ${action}`, [
+      { label: "\uCDE8\uC18C", value: "cancel" },
+      { label: "\uBC84\uB9AC\uACE0 \uACC4\uC18D", value: "discard" },
+      { label: "\uC800\uC7A5\uD558\uACE0 \uACC4\uC18D", value: "save", cls: "primary" }
+    ]);
+    if (pick2 === "save") return await saveStyle();
+    if (pick2 === "discard") {
+      revertEdits(false);
+      return true;
+    }
+    return false;
+  }
+  styleSync.dirty = () => isDirty();
+  styleSync.beforeRun = async () => {
+    if (!promptDirty()) return true;
+    const pick2 = await askChoice(
+      "\uC800\uC7A5\uD558\uC9C0 \uC54A\uC740 \uC2A4\uD0C0\uC77C \uD504\uB86C\uD504\uD2B8",
+      `\uC2A4\uD0C0\uC77C \u2018${styleSync.boundName()}\u2019 \uC758 \uD504\uB86C\uD504\uD2B8 \uC218\uC815\uC774 \uC800\uC7A5\uB418\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4. \uC0DD\uC131\uC740 \uC800\uC7A5\uB41C \uD504\uB86C\uD504\uD2B8\uB85C \uC2E4\uD589\uB429\uB2C8\uB2E4.`,
+      [
+        { label: "\uCDE8\uC18C", value: "cancel" },
+        { label: "\uC800\uC7A5 \uC548 \uD558\uACE0 \uC0DD\uC131", value: "run" },
+        { label: "\uC800\uC7A5\uD558\uACE0 \uC0DD\uC131", value: "save", cls: "primary" }
+      ]
+    );
+    if (pick2 === "save") return await saveStyle();
+    return pick2 === "run";
+  };
   function openStylePicker() {
-    void flushSave();
     openListPicker({
       title: "\uC2A4\uD0C0\uC77C \uD504\uB86C\uD504\uD2B8 \uC120\uD0DD",
       hint: "\uD55C \uBC88\uC5D0 \uD558\uB098\uB9CC \uC2E4\uB9BD\uB2C8\uB2E4. \uC120\uD0DD\uD558\uBA74 \uBC14\uB85C \uC801\uC6A9\uB429\uB2C8\uB2E4.",
@@ -19917,14 +21404,48 @@ ${negative.value.trim()}
         id: i.path,
         name: i.name,
         hint: i.description || void 0,
-        selected: !!i.enabled
+        selected: !!i.enabled,
+        group: styleFolder(i)
       })),
-      onSelect: (e) => selectStyle(e.id),
+      // Styles in folders, like fragments (user: "스타일 프리셋도 폴더").
+      folders: {
+        list: () => [.../* @__PURE__ */ new Set([...extraStyleFolders, ...styleItems().map(styleFolder)])].filter(Boolean),
+        create: (anchor) => new Promise((resolve) => {
+          namePopover(anchor, {
+            label: "\uC0C8 \uD3F4\uB354 \uC774\uB984",
+            ok: "\uB9CC\uB4E4\uAE30",
+            onSubmit: async (raw) => {
+              const nm = cardStem(raw);
+              if (!nm) return;
+              await state.mkdirFile(`${STYLES_DIR}/${nm}`);
+              extraStyleFolders.add(nm);
+              resolve(nm);
+            }
+          });
+        }),
+        move: async (e, folder) => {
+          const r = await state.moveFile(e.id, STYLES_DIR + (folder ? "/" + folder : ""));
+          if (pending2?.path === e.id) pending2 = { ...pending2, path: r.to };
+          if (loadedDoc?.path === e.id) loadedDoc = { ...loadedDoc, path: r.to };
+          if (genAtLoad?.path === e.id) genAtLoad = { ...genAtLoad, path: r.to };
+          await hub.refreshArea("styles");
+          hub.drawLeft();
+        },
+        createIn: (folder) => createStyle(folder)
+      },
+      onSelect: async (e) => {
+        if (e.id === activeStylePath()) return;
+        if (!await resolveUnsaved("\uB2E4\uB978 \uC2A4\uD0C0\uC77C\uB85C \uBC14\uAFB8\uAE30 \uC804\uC5D0 \uC5B4\uB5BB\uAC8C \uD560\uAE4C\uC694?")) return;
+        await selectStyle(e.id);
+      },
       // No 수정 here (§1-39): a style is edited in place in this column; the
       // centre card editor for the same file confused more than it helped.
       onDelete: async (e) => {
         await state.deleteFile(e.id);
         S.cards.styles = (S.cards.styles ?? []).filter((i) => i.path !== e.id);
+        if (pending2?.path === e.id) pending2 = null;
+        if (loadedDoc?.path === e.id) loadedDoc = null;
+        if (genAtLoad?.path === e.id) genAtLoad = null;
         if (S.selectedFile === e.id) {
           S.selectedFile = "";
           hub.drawCentre();
@@ -19932,18 +21453,21 @@ ${negative.value.trim()}
         hub.drawLeft();
         hub.touchQuiet();
       },
-      onCreate: () => {
-        askName("\uC0C8 \uC2A4\uD0C0\uC77C", {
-          label: "\uC774\uB984\uC774 \uACE7 \uD30C\uC77C\uBA85\uC785\uB2C8\uB2E4.",
-          placeholder: "\uC608: \uC218\uCC44\uD654",
-          onSubmit: async (nm) => {
-            const path = await newCard("styles", "", nm);
-            if (!path) return;
-            void selectStyle(path);
-          }
-        });
-      },
+      onCreate: () => createStyle(""),
       createLabel: "\uC0C8 \uC2A4\uD0C0\uC77C \uCD94\uAC00"
+    });
+  }
+  function createStyle(folder) {
+    askName(folder ? `\uC0C8 \uC2A4\uD0C0\uC77C \u2014 ${folder}/` : "\uC0C8 \uC2A4\uD0C0\uC77C", {
+      label: "\uC774\uB984\uC774 \uACE7 \uD30C\uC77C\uBA85\uC785\uB2C8\uB2E4.",
+      placeholder: "\uC608: \uC218\uCC44\uD654",
+      onSubmit: async (nm) => {
+        if (!await resolveUnsaved("\uC0C8 \uC2A4\uD0C0\uC77C\uB85C \uBC14\uAFB8\uAE30 \uC804\uC5D0 \uC5B4\uB5BB\uAC8C \uD560\uAE4C\uC694?")) return;
+        const path = await newCard("styles", folder, nm);
+        if (!path) return;
+        if (folder) extraStyleFolders.delete(folder);
+        void selectStyle(path);
+      }
     });
   }
   async function selectStyle(path) {
@@ -19961,11 +21485,12 @@ ${negative.value.trim()}
     }
     pending2 = null;
     loadedDoc = null;
+    genAtLoad = null;
     try {
       const doc = parseStyleDoc((await state.readFile(path)).content);
-      loadedDoc = { path, doc };
       const g = genFromMeta(doc.meta);
       if (applyGen(g)) hub.notice("\uC2A4\uD0C0\uC77C\uC758 \uC694\uCCAD \uC124\uC815\uC744 \uBD88\uB7EC\uC654\uC2B5\uB2C8\uB2E4: " + describeGen(g), "ok");
+      markLoaded(path, doc);
     } catch {
     }
     hub.drawLeft();
@@ -19979,39 +21504,8 @@ ${negative.value.trim()}
     persistGen();
     return true;
   }
-  function activeStylePath() {
-    return activeOf("styles")[0] ?? "";
-  }
-  var genTimer = null;
-  async function saveGenToStyle() {
-    genTimer = null;
-    const path = activeStylePath();
-    if (!path) return;
-    await flushSave();
-    let doc;
-    try {
-      doc = loadedDoc && loadedDoc.path === path ? loadedDoc.doc : parseStyleDoc((await state.readFile(path)).content);
-    } catch (e) {
-      hub.notice("\uC694\uCCAD \uC124\uC815\uC744 \uC2A4\uD0C0\uC77C\uC5D0 \uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg(e), "err");
-      return;
-    }
-    const meta = new Map(doc.meta);
-    writeGenMeta(meta, gen);
-    const next = { meta, positive: doc.positive, negative: doc.negative };
-    try {
-      const dir = path.slice(0, path.lastIndexOf("/"));
-      const fname = path.slice(path.lastIndexOf("/") + 1);
-      await state.uploadFile(fname, buildStyleDoc(next), false, dir);
-      if (!pending2 || pending2.path !== path) loadedDoc = { path, doc: next };
-      hub.touchQuiet();
-    } catch (e) {
-      hub.notice("\uC694\uCCAD \uC124\uC815\uC744 \uC2A4\uD0C0\uC77C\uC5D0 \uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg(e), "err");
-    }
-  }
   styleSync.edited = () => {
-    if (!activeStylePath()) return;
-    if (genTimer) clearTimeout(genTimer);
-    genTimer = setTimeout(() => void saveGenToStyle(), 800);
+    updateSaveBar();
   };
   styleSync.boundName = () => {
     const path = activeStylePath();
@@ -20019,98 +21513,164 @@ ${negative.value.trim()}
     const card2 = (S.cards.styles ?? []).find((i) => i.path === path);
     return String(card2?.name || path.slice(path.lastIndexOf("/") + 1).replace(/\.md$/, ""));
   };
+  styleSync.prime = (s) => {
+    if (!s || !s.path) return false;
+    if (isDirty(s.path)) return false;
+    const doc = parseStyleDoc(s.content);
+    if (loadedDoc && loadedDoc.path === s.path && buildStyleDoc(loadedDoc.doc) === buildStyleDoc(doc)) return false;
+    applyGen(genFromMeta(doc.meta));
+    markLoaded(s.path, doc);
+    return true;
+  };
   function buildStyleEditor(mountEl, path) {
     const pos = el("textarea", { rows: "7", class: "promptedit", placeholder: "\uAE0D\uC815 \uD504\uB86C\uD504\uD2B8" });
     const neg = el("textarea", { rows: "4", class: "promptedit", placeholder: "\uBD80\uC815 \uD504\uB86C\uD504\uD2B8" });
-    const status = el("div", { class: "hint", style: { minHeight: "14px" } });
-    mountEl.append(
-      el("label", { class: "field" }, [el("span", { text: "\uAE0D\uC815 \uD504\uB86C\uD504\uD2B8" }), pos]),
-      el("label", { class: "field" }, [el("span", { text: "\uBD80\uC815 \uD504\uB86C\uD504\uD2B8" }), neg]),
-      status
-    );
+    const posFold = promptFold("pos", "\uAE0D\uC815 \uD504\uB86C\uD504\uD2B8", pos);
+    const negFold = promptFold("neg", "\uBD80\uC815 \uD504\uB86C\uD504\uD2B8", neg);
+    mountEl.append(posFold.node, negFold.node);
     const fragNames2 = () => fragKeys();
     attachHilite(pos, { mode: "nai", fragments: fragNames2 });
     attachHilite(neg, { mode: "nai", fragments: fragNames2 });
     const fill2 = (positive, negative) => {
       pos.value = positive;
       neg.value = negative;
+      posFold.preview();
+      negFold.preview();
     };
     if (pending2 && pending2.path === path) {
       fill2(pending2.positive, pending2.negative);
-      schedule(path, status);
     } else if (loadedDoc && loadedDoc.path === path) {
       fill2(loadedDoc.doc.positive, loadedDoc.doc.negative);
     } else {
-      status.textContent = "\uC77D\uB294 \uC911\uC785\uB2C8\uB2E4\u2026";
+      posFold.setPeek("\uC77D\uB294 \uC911\uC785\uB2C8\uB2E4\u2026");
       void state.readFile(path).then((r) => {
         const doc = parseStyleDoc(r.content);
-        loadedDoc = { path, doc };
-        if (!pending2 || pending2.path !== path) {
-          if (pos.isConnected) fill2(doc.positive, doc.negative);
+        if (!isDirty(path)) {
+          applyGen(genFromMeta(doc.meta));
+          markLoaded(path, doc);
+        } else if (!loadedDoc || loadedDoc.path !== path) {
+          loadedDoc = { path, doc };
         }
-        applyGen(genFromMeta(doc.meta));
-        status.textContent = "";
+        if (pos.isConnected && (!pending2 || pending2.path !== path)) fill2(doc.positive, doc.negative);
+        updateSaveBar();
       }).catch((e) => {
-        status.textContent = msg(e);
+        posFold.setPeek(msg(e));
       });
     }
     const onEdit = () => {
+      posFold.preview();
+      negFold.preview();
       pending2 = { path, positive: pos.value, negative: neg.value };
-      schedule(path, status);
+      updateSaveBar();
     };
     pos.addEventListener("input", onEdit);
     neg.addEventListener("input", onEdit);
+    const onKey = (ev) => {
+      const k = ev;
+      if ((k.ctrlKey || k.metaKey) && (k.key === "s" || k.key === "S")) {
+        k.preventDefault();
+        void saveStyle();
+      }
+    };
+    pos.addEventListener("keydown", onKey);
+    neg.addEventListener("keydown", onKey);
   }
-  function schedule(path, status) {
-    if (saveTimer) clearTimeout(saveTimer);
-    status.textContent = "\uC218\uC815 \uC911\u2026";
-    saveTimer = setTimeout(() => {
-      void flushSave().then((ok) => {
-        if (ok && status.isConnected) {
-          status.textContent = `\uC800\uC7A5\uB428 ${(/* @__PURE__ */ new Date()).toLocaleTimeString()}`;
-        }
-      });
-    }, 800);
+  function promptFold(which, label2, input2) {
+    let open4 = promptOpen(which);
+    const toggle = el("button", { class: "ghost tiny" });
+    const peek = el("span", { class: "hint grow promptpeek" });
+    const body = el("div", {}, [input2]);
+    const sync = () => {
+      toggle.textContent = open4 ? "\u2212" : "+";
+      toggle.title = label2 + (open4 ? " \uC811\uAE30" : " \uD3BC\uCE58\uAE30");
+      toggle.setAttribute("aria-expanded", String(open4));
+      body.style.display = open4 ? "" : "none";
+      peek.style.display = open4 ? "none" : "";
+    };
+    const preview2 = () => {
+      const first = input2.value.split("\n").map((l) => l.trim()).find(Boolean) ?? "";
+      peek.textContent = first || "(\uBE44\uC5B4 \uC788\uC74C)";
+      peek.title = first;
+    };
+    toggle.addEventListener("click", () => {
+      open4 = !open4;
+      setPromptOpen(which, open4);
+      sync();
+    });
+    const head = el("div", { class: "row promptfoldhead" }, [toggle, el("span", { class: "promptfoldlabel", text: label2 }), peek]);
+    head.addEventListener("click", (ev) => {
+      if (ev.target !== toggle && !open4) toggle.click();
+    });
+    sync();
+    preview2();
+    return {
+      node: el("div", { class: "field promptfold" }, [head, body]),
+      preview: preview2,
+      setPeek: (t) => {
+        peek.textContent = t;
+      }
+    };
   }
-  async function flushSave() {
-    if (saveTimer) {
-      clearTimeout(saveTimer);
-      saveTimer = null;
-    }
-    const p = pending2;
-    if (!p) return false;
-    let meta;
-    if (loadedDoc && loadedDoc.path === p.path) {
-      meta = loadedDoc.doc.meta;
+  async function saveStyle() {
+    const path = activeStylePath();
+    if (!path) return false;
+    if (!isDirty(path)) return true;
+    let base;
+    if (loadedDoc && loadedDoc.path === path) {
+      base = loadedDoc.doc;
     } else {
       try {
-        meta = parseStyleDoc((await state.readFile(p.path)).content).meta;
+        base = parseStyleDoc((await state.readFile(path)).content);
       } catch (e) {
         hub.notice("\uC2A4\uD0C0\uC77C\uC744 \uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg(e), "err");
         return false;
       }
     }
-    const doc = { meta, positive: p.positive, negative: p.negative };
+    const p = pending2 && pending2.path === path ? pending2 : null;
+    const meta = new Map(base.meta);
+    const withGen = genDirty(path);
+    if (withGen) writeGenMeta(meta, gen);
+    const doc = { meta, positive: p ? p.positive : base.positive, negative: p ? p.negative : base.negative };
+    if (saveBtn) saveBtn.disabled = true;
+    if (saveStatus) saveStatus.textContent = "\uC800\uC7A5 \uC911\u2026";
     try {
-      const dir = p.path.slice(0, p.path.lastIndexOf("/"));
-      const fname = p.path.slice(p.path.lastIndexOf("/") + 1);
+      const dir = path.slice(0, path.lastIndexOf("/"));
+      const fname = path.slice(path.lastIndexOf("/") + 1);
       await state.uploadFile(fname, buildStyleDoc(doc), false, dir);
-      loadedDoc = { path: p.path, doc };
+      loadedDoc = { path, doc };
+      if (withGen || !genAtLoad || genAtLoad.path !== path) {
+        genAtLoad = { path, snap: genSnapshot(gen) };
+      }
       if (pending2 === p) pending2 = null;
+      if (saveStatus) saveStatus.textContent = `\uC800\uC7A5\uB428 ${(/* @__PURE__ */ new Date()).toLocaleTimeString()}`;
       hub.touchQuiet();
       checkUnresolved();
+      updateSaveBar();
       return true;
     } catch (e) {
       hub.notice("\uC2A4\uD0C0\uC77C\uC744 \uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg(e), "err");
+      if (saveStatus) saveStatus.textContent = "\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4";
+      updateSaveBar();
       return false;
     }
+  }
+  function revertEdits(redraw = true) {
+    const path = activeStylePath();
+    if (pending2 && pending2.path === path) pending2 = null;
+    if (genAtLoad && genAtLoad.path === path) {
+      Object.assign(gen, genAtLoad.snap);
+      persistGen();
+    }
+    if (saveStatus) saveStatus.textContent = "";
+    if (redraw) hub.drawLeft();
+    else updateSaveBar();
   }
 
   // src/ui/studio/left-chars.ts
   init_dom();
   init_state();
   init_store();
-  var openFolders = /* @__PURE__ */ new Set([""]);
+  var openFolders2 = /* @__PURE__ */ new Set([""]);
   var extraFolders = /* @__PURE__ */ new Set();
   var filter4 = "";
   function grouped() {
@@ -20137,7 +21697,7 @@ ${negative.value.trim()}
         const r = await state.moveFile(src, dstDir);
         if (S.charOpen === src) S.charOpen = r.to;
       }
-      if (folder) openFolders.add(folder);
+      if (folder) openFolders2.add(folder);
       await hub.refreshArea("characters");
     } catch (e) {
       hub.notice("\uC62E\uAE30\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg(e), "err");
@@ -20198,7 +21758,7 @@ ${negative.value.trim()}
           try {
             await state.mkdirFile("studio/config/characters/" + nm);
             extraFolders.add(nm);
-            openFolders.add(nm);
+            openFolders2.add(nm);
             hub.touchQuiet();
             hub.drawLeft();
           } catch (e) {
@@ -20223,7 +21783,7 @@ ${negative.value.trim()}
       }));
     }
     for (const [folder, items5] of groups2) {
-      const isOpen = folder === "" || openFolders.has(folder);
+      const isOpen = folder === "" || openFolders2.has(folder);
       const head = el("div", {
         class: "row secthead",
         style: { padding: "4px 6px 0", cursor: folder ? "pointer" : "default" },
@@ -20236,8 +21796,8 @@ ${negative.value.trim()}
       installDrop(head, { into: () => folder, onMove: (f, sources) => void moveCards(f, sources) });
       if (folder) {
         head.addEventListener("click", () => {
-          if (openFolders.has(folder)) openFolders.delete(folder);
-          else openFolders.add(folder);
+          if (openFolders2.has(folder)) openFolders2.delete(folder);
+          else openFolders2.add(folder);
           hub.drawLeft();
         });
         const addHere = el("button", { class: "ghost tiny", text: "\uFF0B", title: "\uC774 \uD3F4\uB354\uC5D0 \uCE90\uB9AD\uD130 \uCD94\uAC00" });
@@ -20307,7 +21867,7 @@ ${negative.value.trim()}
       onSubmit: async (nm) => {
         const path = await newCard("characters", folder, nm);
         if (!path) return;
-        if (folder) openFolders.add(folder);
+        if (folder) openFolders2.add(folder);
         S.charOpen = path;
         hub.drawLeft();
       }
@@ -20767,7 +22327,7 @@ ${negative.value.trim()}
   init_state();
   init_store();
   var selFrag = "";
-  var openFolders2 = /* @__PURE__ */ new Set([""]);
+  var openFolders3 = /* @__PURE__ */ new Set([""]);
   var extraFolders2 = /* @__PURE__ */ new Set();
   var filter5 = "";
   function norm(f) {
@@ -20805,7 +22365,7 @@ ${negative.value.trim()}
           try {
             await state.mkdirFile("studio/config/fragments/" + nm);
             extraFolders2.add(nm);
-            openFolders2.add(nm);
+            openFolders3.add(nm);
             hub.touchQuiet();
             hub.drawCentre();
           } catch (e) {
@@ -20847,15 +22407,15 @@ ${negative.value.trim()}
     const groups2 = grouped2();
     for (const [folder, items5] of groups2) {
       if (folder) {
-        const isOpen = openFolders2.has(folder);
+        const isOpen = openFolders3.has(folder);
         const fhead = el("div", { class: "row secthead", style: { padding: "4px 2px 0", cursor: "pointer" } }, [
           el("span", { class: "hint", text: isOpen ? "\u25BE" : "\u25B8" }),
           el("span", { class: "sectiontitle grow", text: folder }),
           el("span", { class: "hint", text: String(items5.length) })
         ]);
         fhead.addEventListener("click", () => {
-          if (openFolders2.has(folder)) openFolders2.delete(folder);
-          else openFolders2.add(folder);
+          if (openFolders3.has(folder)) openFolders3.delete(folder);
+          else openFolders3.add(folder);
           hub.drawCentre();
         });
         const addHere = el("button", { class: "ghost tiny", text: "\uFF0B", title: "\uC774 \uD3F4\uB354\uC5D0 \uC870\uAC01 \uCD94\uAC00" });
@@ -20942,7 +22502,7 @@ ${negative.value.trim()}
       onSubmit: async (nm) => {
         const path = await newCard("fragments", folder, nm);
         if (!path) return;
-        if (folder) openFolders2.add(folder);
+        if (folder) openFolders3.add(folder);
         selFrag = path;
         hub.drawCentre();
       }
@@ -22769,6 +24329,9 @@ ${negative.value.trim()}
   var tabbar = null;
   hub.studioShowing = () => wasStudioActive;
   function noteStudioLeft() {
+    if (wasStudioActive && styleSync.dirty()) {
+      notice9(`\uC2A4\uD0C0\uC77C \u2018${styleSync.boundName()}\u2019 \uC5D0 \uC800\uC7A5\uD558\uC9C0 \uC54A\uC740 \uC218\uC815\uC774 \uC788\uC2B5\uB2C8\uB2E4 \u2014 \uC5D0\uC14B \uC2A4\uD29C\uB514\uC624\uB85C \uB3CC\uC544\uAC00\uBA74 \uADF8\uB300\uB85C \uC788\uC9C0\uB9CC, \uC0C8\uB85C\uACE0\uCE68\uD558\uBA74 \uC0AC\uB77C\uC9D1\uB2C8\uB2E4.`, "err");
+    }
     wasStudioActive = false;
   }
   var PANELS_KEY = "hina.studioPanels";
@@ -22836,6 +24399,7 @@ ${negative.value.trim()}
     wasStudioActive = true;
     ensureLayoutControls();
     if (!built || !mount2.querySelector(".split")) {
+      if (!S.libraryLoaded) primeFromCache();
       clear(mount2);
       const pane = threePane(void 0, { controls: false });
       splitRoot = pane.root;
@@ -22849,6 +24413,12 @@ ${negative.value.trim()}
       S.noticeMount = el("div");
       S.viewMount = el("div", { class: "pad filepad" });
       pane.centre.append(S.noticeMount, S.viewMount);
+      drawLeft();
+      if (S.libraryLoaded) drawCentre2();
+      else S.viewMount.appendChild(el("div", { class: "hint studioskelhint" }, [
+        el("span", { class: "spin" }),
+        el("span", { text: " \uC2A4\uD29C\uB514\uC624\uB97C \uBD88\uB7EC\uC624\uB294 \uC911\uC785\uB2C8\uB2E4\u2026" })
+      ]));
       pane.centre.appendChild(buildStrip());
       applyPanels();
       mount2.appendChild(pane.root);
@@ -22858,7 +24428,7 @@ ${negative.value.trim()}
       pollWhileVisible(() => {
         if (S.centreMode === "selector" || S.centreMode === "tab" && !S.selectedFile && S.centreTab === "inspect") void pollGroups();
         if (renderedRev !== state.filesRev && !S.jobId) {
-          void refresh2();
+          void refresh2({ visit: false });
           return;
         }
         void loadJobs(true).then(() => hub.jobTick());
@@ -22891,50 +24461,101 @@ ${negative.value.trim()}
     while (wrap.children.length > 4) wrap.firstChild?.remove();
     setTimeout(() => t.remove(), kind === "err" ? 12e3 : 6e3);
   }
+  var LIB_CACHE_KEY = "hina.studioLibrary";
+  function primeFromCache() {
+    try {
+      const c = JSON.parse(localStorage.getItem(LIB_CACHE_KEY) || "null");
+      if (!c || c.url !== transport.config.url || !c.lib?.areas) return;
+      const lib = c.lib;
+      S.cards = Object.fromEntries(CARD_AREAS.map((a) => [a.area, lib.areas[a.area] ?? []]));
+      cardsSig = JSON.stringify(S.cards);
+      styleSync.prime(lib.activeStyle ?? null);
+      S.libraryLoaded = true;
+    } catch {
+    }
+  }
+  function saveCache(lib) {
+    try {
+      localStorage.setItem(LIB_CACHE_KEY, JSON.stringify({
+        url: transport.config.url,
+        lib: { areas: S.cards, activeStyle: lib.activeStyle ?? null }
+      }));
+    } catch {
+    }
+  }
   var refreshPending = false;
-  async function refresh2() {
+  var cardsSig = "";
+  var outputSig = "";
+  function centreShowsOutput() {
+    if (S.selectedFile) return false;
+    return S.centreMode === "folder" || S.centreMode === "selector" || S.centreMode === "tab" && S.centreTab === "inspect";
+  }
+  async function refresh2(opts = {}) {
+    const visit = opts.visit !== false;
     const ae = document.activeElement;
     if (!state.openStudioRequest && ae && splitRoot && splitRoot.contains(ae) && /^(TEXTAREA|INPUT|SELECT)$/.test(ae.tagName)) {
       if (!refreshPending) {
         refreshPending = true;
         ae.addEventListener("blur", () => {
           refreshPending = false;
-          void refresh2();
+          void refresh2(opts);
         }, { once: true });
       }
       return;
     }
     renderedRev = state.filesRev;
-    try {
-      const [l, ...areas] = await Promise.all([
-        // Only the output slice: the studio never reads the rest of the space.
-        state.files(OUTPUT_ROOT),
-        // A failed area read keeps the list it had (§1-78): replacing it with
-        // [] is what made a list "fly away" under a slow or timed-out request.
-        ...CARD_AREAS.map((a) => state.studio.items(a.area).then((r) => r.items).catch(() => null))
-      ]);
-      S.listing = l;
-      S.cards = Object.fromEntries(CARD_AREAS.map((a, i) => [a.area, areas[i] ?? S.cards[a.area] ?? []]));
-    } catch (e) {
-      S.listing = null;
-      drawLeft();
-      if (S.viewMount) {
-        clear(S.viewMount);
-        S.viewMount.appendChild(el("div", { class: "notice err" }, [
-          el("div", { text: "\uC2A4\uD29C\uB514\uC624 \uB77C\uC774\uBE0C\uB7EC\uB9AC\uB97C \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4." }),
-          el("div", { class: "hint", text: e instanceof Error ? e.message : String(e) }),
-          el("div", { class: "hint", text: "\uC124\uC815 \u2192 \uC5F0\uACB0\uC5D0\uC11C \uBC31\uC5D4\uB4DC \uC0C1\uD0DC\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." })
-        ]));
-      }
-      return;
-    }
-    await migrateSingleStyle();
-    buildOutput();
-    invalidateGroups();
     const want = state.openStudioRequest;
     const wantFolder = want ? canonPath(want.folder) : "";
     if (wantFolder && !isOutputPath(wantFolder)) addExtra(wantFolder);
-    await loadExtras();
+    const outP = state.files(OUTPUT_ROOT).catch((e) => e instanceof Error ? e : new Error(String(e)));
+    const extrasP = loadExtras();
+    let libChanged = false;
+    try {
+      const lib = await fetchLibrary();
+      const next = Object.fromEntries(CARD_AREAS.map((a) => [a.area, lib.areas?.[a.area] ?? S.cards[a.area] ?? []]));
+      const sig = JSON.stringify(next);
+      S.cards = next;
+      const styleChanged = styleSync.prime(lib.activeStyle ?? null);
+      libChanged = !S.libraryLoaded || sig !== cardsSig || styleChanged;
+      cardsSig = sig;
+      S.libraryLoaded = true;
+      S.libraryError = "";
+      saveCache(lib);
+      if (await migrateSingleStyle()) libChanged = true;
+    } catch (e) {
+      if (!S.libraryLoaded) {
+        S.libraryError = msg(e);
+        drawLeft();
+        if (S.viewMount) {
+          clear(S.viewMount);
+          S.viewMount.appendChild(el("div", { class: "notice err" }, [
+            el("div", { text: "\uC2A4\uD29C\uB514\uC624 \uB77C\uC774\uBE0C\uB7EC\uB9AC\uB97C \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4." }),
+            el("div", { class: "hint", text: msg(e) }),
+            el("div", { class: "hint", text: "\uC124\uC815 \u2192 \uC5F0\uACB0\uC5D0\uC11C \uBC31\uC5D4\uB4DC \uC0C1\uD0DC\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." })
+          ]));
+        }
+        return;
+      }
+    }
+    if (libChanged && !want) {
+      if (S.leftTab !== "output") drawLeft();
+      if (!centreShowsOutput() || S.outputLoaded) drawCentre2();
+    }
+    const out = await outP;
+    const extrasChanged = await extrasP;
+    let outChanged = extrasChanged;
+    if (out instanceof Error) {
+      if (!S.outputLoaded) notice9("OUTPUT \uBAA9\uB85D\uC744 \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + out.message, "err");
+    } else {
+      const sig = JSON.stringify(out.areas);
+      if (!S.outputLoaded || sig !== outputSig) outChanged = true;
+      outputSig = sig;
+      S.listing = out;
+    }
+    const firstOutput = !S.outputLoaded;
+    S.outputLoaded = true;
+    if (outChanged || firstOutput) buildOutput();
+    if (outChanged || firstOutput || visit) invalidateGroups();
     if (want) {
       state.openStudioRequest = null;
       const folder = wantFolder;
@@ -22953,14 +24574,18 @@ ${negative.value.trim()}
       } else {
         notice9("\uADF8 \uD3F4\uB354\uB97C \uCC3E\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + folder, "err");
       }
+      drawLeft();
+      drawCentre2();
+    } else {
+      if (S.leftTab === "output" && (outChanged || firstOutput || libChanged)) drawLeft();
+      if (centreShowsOutput() && (outChanged || firstOutput || libChanged || visit)) drawCentre2();
     }
-    drawLeft();
-    drawCentre2();
-    checkUnresolved();
+    if (libChanged) checkUnresolved();
     markJobsStale();
     void refreshStrip();
     if (S.jobId) void pollJob();
   }
+  var extrasSig = "";
   async function loadExtras() {
     const pairs = await Promise.all(extraPaths.map(async (p) => {
       try {
@@ -22969,13 +24594,17 @@ ${negative.value.trim()}
         return [p, null];
       }
     }));
+    const sig = JSON.stringify(pairs.map(([p, l]) => [p, l?.areas ?? null]));
+    if (sig === extrasSig) return false;
+    extrasSig = sig;
     buildExtras(Object.fromEntries(pairs));
     for (const p of extraPaths) S.open.add(p);
+    return true;
   }
   var migrated = false;
   async function migrateSingleStyle() {
     const on = (S.cards.styles ?? []).filter((i) => i.enabled).sort((a, b) => (a.order ?? 100) - (b.order ?? 100) || a.path.localeCompare(b.path));
-    if (on.length <= 1) return;
+    if (on.length <= 1) return false;
     const keep = on[0];
     try {
       for (const it of on.slice(1)) {
@@ -22989,6 +24618,7 @@ ${negative.value.trim()}
       touchQuiet();
     } catch {
     }
+    return true;
   }
   function touchQuiet(paths = []) {
     renderedRev = state.filesRev + 1;
@@ -23056,6 +24686,11 @@ ${negative.value.trim()}
     tabbar.append(mk("prompt", "\uD504\uB86C\uD504\uD2B8"), mk("output", "OUTPUT"));
     const hadFocus = leftContent.contains(document.activeElement);
     clear(leftContent);
+    const waiting = S.leftTab === "output" ? !S.outputLoaded : !S.libraryLoaded;
+    if (waiting) {
+      leftContent.appendChild(skeleton(S.libraryError));
+      return;
+    }
     if (S.leftTab === "output") {
       buildLeftOutput(leftContent);
     } else if (S.leftView === "characters") {
@@ -23070,6 +24705,18 @@ ${negative.value.trim()}
       } catch {
       }
     }
+  }
+  function skeleton(error) {
+    if (error) {
+      return el("div", { class: "studioskel" }, [
+        el("div", { class: "hint err", text: "\uC2A4\uD29C\uB514\uC624 \uB77C\uC774\uBE0C\uB7EC\uB9AC\uB97C \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + error })
+      ]);
+    }
+    const bars = [70, 100, 100, 55, 85, 85].map((w) => el("div", { class: "skelrow", style: { width: w + "%" } }));
+    return el("div", { class: "studioskel", "aria-busy": "true" }, [
+      el("div", { class: "row hint skelhead" }, [el("span", { class: "spin" }), el("span", { text: "\uBD88\uB7EC\uC624\uB294 \uC911\u2026" })]),
+      ...bars
+    ]);
   }
   function drawCentre2() {
     const viewMount6 = S.viewMount;
@@ -23185,32 +24832,42 @@ ${negative.value.trim()}
     ["regex", "Regex"],
     ["trigger", "\uD2B8\uB9AC\uAC70"],
     ["assets", "\uC5D0\uC14B"],
+    // The third mode (§1-89): RisuAI's user personas - a name, a description
+    // and a picture. One tab is all it needs.
+    ["persona", "\uD398\uB974\uC18C\uB098"],
     ["files", "\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 \uD30C\uC77C"],
     // Not this bot's, and not any bot's: the studio library outlives them.
     ["studio", "\uC5D0\uC14B \uC2A4\uD29C\uB514\uC624"]
   ];
   var CHAT_TABS = /* @__PURE__ */ new Set(["editor", "lore", "memory", "vars"]);
   var BOT_TABS = /* @__PURE__ */ new Set(["meta", "botlore", "regex", "trigger", "assets"]);
+  var PERSONA_TABS = /* @__PURE__ */ new Set(["persona"]);
+  var MODE_TABS = { chat: CHAT_TABS, bot: BOT_TABS, persona: PERSONA_TABS };
+  var MODE_LABEL = { chat: "\uCC57 \uD3B8\uC9D1", bot: "\uBD07 \uD3B8\uC9D1", persona: "\uD398\uB974\uC18C\uB098 \uD3B8\uC9D1" };
+  var MODE_TITLE = {
+    chat: "\uC774 \uCC57\uC758 \uC7AC\uB8CC(\uD134\xB7\uCC57 \uB85C\uC5B4\uBD81\xB7\uC7A5\uAE30\uAE30\uC5B5\xB7\uCC57 \uBCC0\uC218)\uB97C \uACE0\uCE58\uB294 \uD654\uBA74\uC785\uB2C8\uB2E4",
+    bot: "\uBD07 \uCE74\uB4DC\uC758 \uC7AC\uB8CC(\uBA54\uD0C0\xB7\uC778\uC0AC\uB9D0\xB7\uBD07 \uB85C\uC5B4\uBD81\xB7Regex\xB7\uD2B8\uB9AC\uAC70\xB7\uC5D0\uC14B)\uB97C \uACE0\uCE58\uB294 \uD654\uBA74\uC785\uB2C8\uB2E4",
+    persona: "RisuAI \uC0AC\uC6A9\uC790 \uD398\uB974\uC18C\uB098(\uC774\uB984\xB7\uC124\uBA85\xB7\uD504\uB85C\uD544 \uC0AC\uC9C4)\uB97C \uACE0\uCE58\uB294 \uD654\uBA74\uC785\uB2C8\uB2E4"
+  };
   function setEditMode(m, tab) {
     mode = m;
     state.editMode = m;
     syncModeTabs();
     if (tab) setTab(tab);
-    else if ((m === "chat" ? BOT_TABS : CHAT_TABS).has(active2)) setTab("chats");
+    else if (!MODE_TABS[m].has(active2) && (CHAT_TABS.has(active2) || BOT_TABS.has(active2) || PERSONA_TABS.has(active2))) setTab("chats");
   }
   function activeHalf() {
     if (BOT_TABS.has(active2)) return "bot";
     if (CHAT_TABS.has(active2)) return "chat";
+    if (PERSONA_TABS.has(active2)) return "persona";
     return mode;
   }
   function syncModeTabs() {
-    for (const id of CHAT_TABS) {
-      const b = document.getElementById("tab-" + id);
-      if (b) b.style.display = mode === "chat" ? "" : "none";
-    }
-    for (const id of BOT_TABS) {
-      const b = document.getElementById("tab-" + id);
-      if (b) b.style.display = mode === "bot" ? "" : "none";
+    for (const m of Object.keys(MODE_TABS)) {
+      for (const id of MODE_TABS[m]) {
+        const b = document.getElementById("tab-" + id);
+        if (b) b.style.display = mode === m ? "" : "none";
+      }
     }
     syncBackTab();
   }
@@ -23220,9 +24877,10 @@ ${negative.value.trim()}
     const btn = document.getElementById("tab-chats");
     const inEdit = active2 !== "chats";
     if (label2) label2.textContent = inEdit ? "\u2039 \uB4A4\uB85C" : "\uC120\uD0DD";
-    if (btn) btn.title = inEdit ? "\uC120\uD0DD \uD654\uBA74\uC73C\uB85C \uB3CC\uC544\uAC11\uB2C8\uB2E4 (\uBD07\xB7\uCC57 \uB2E4\uC2DC \uACE0\uB974\uAE30)" : "\uBD07\uACFC \uCC57\uC744 \uACE0\uB974\uB294 \uD654\uBA74\uC785\uB2C8\uB2E4";
-    modeChip.textContent = mode === "chat" ? "\uCC57 \uD3B8\uC9D1" : "\uBD07 \uD3B8\uC9D1";
-    modeChip.title = mode === "chat" ? "\uC774 \uCC57\uC758 \uC7AC\uB8CC(\uD134\xB7\uCC57 \uB85C\uC5B4\uBD81\xB7\uC7A5\uAE30\uAE30\uC5B5\xB7\uCC57 \uBCC0\uC218)\uB97C \uACE0\uCE58\uB294 \uD654\uBA74\uC785\uB2C8\uB2E4" : "\uBD07 \uCE74\uB4DC\uC758 \uC7AC\uB8CC(\uBA54\uD0C0\xB7\uC778\uC0AC\uB9D0\xB7\uBD07 \uB85C\uC5B4\uBD81\xB7Regex\xB7\uD2B8\uB9AC\uAC70\xB7\uC5D0\uC14B)\uB97C \uACE0\uCE58\uB294 \uD654\uBA74\uC785\uB2C8\uB2E4";
+    if (btn) btn.title = inEdit ? "\uCCAB \uD654\uBA74\uC73C\uB85C \uB3CC\uC544\uAC11\uB2C8\uB2E4 (\uBD07\xB7\uCC57\xB7\uD398\uB974\uC18C\uB098 \uB2E4\uC2DC \uACE0\uB974\uAE30)" : "\uBB34\uC5C7\uC744 \uD3B8\uC9D1\uD560\uC9C0 \uACE0\uB974\uB294 \uCCAB \uD654\uBA74\uC785\uB2C8\uB2E4";
+    modeChip.textContent = MODE_LABEL[mode];
+    modeChip.title = MODE_TITLE[mode];
+    modeChip.style.display = inEdit && active2 !== "settings" && active2 !== "files" && active2 !== "studio" ? "" : "none";
   }
   var ALL_TABS = [...CONTENT_TABS.map(([id]) => id), "settings"];
   var active2 = "chats";
@@ -23360,6 +25018,7 @@ ${negative.value.trim()}
     else if (active2 === "regex") renderRegexTab(node);
     else if (active2 === "trigger") renderTriggerTab(node);
     else if (active2 === "assets") renderAssetsTab(node);
+    else if (active2 === "persona") renderPersonaTab(node);
     else if (active2 === "files") renderFilesTab(node);
     else if (active2 === "studio") renderStudioTab(node);
     else renderSettingsTab(node);
@@ -23381,7 +25040,7 @@ ${negative.value.trim()}
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.32"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.33"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
@@ -23393,12 +25052,12 @@ ${negative.value.trim()}
       }
     }
     if (bootPhase) healthEl.appendChild(el("span", { class: "hint bootphase", text: "\xB7 " + bootPhase }));
-    if (CHAT_TABS.has(active2) || BOT_TABS.has(active2)) {
-      healthEl.appendChild(el("span", {
-        class: "badge modechip",
-        text: mode === "chat" ? "\uCC57 \uD3B8\uC9D1" : "\uBD07 \uD3B8\uC9D1",
-        title: mode === "chat" ? "\uC774 \uCC57\uC758 \uC7AC\uB8CC(\uD134\xB7\uCC57 \uB85C\uC5B4\uBD81\xB7\uC7A5\uAE30\uAE30\uC5B5\xB7\uCC57 \uBCC0\uC218)\uB97C \uACE0\uCE58\uB294 \uD654\uBA74\uC785\uB2C8\uB2E4" : "\uBD07 \uCE74\uB4DC\uC758 \uC7AC\uB8CC(\uBA54\uD0C0\xB7\uC778\uC0AC\uB9D0\xB7\uBD07 \uB85C\uC5B4\uBD81\xB7Regex\xB7\uD2B8\uB9AC\uAC70\xB7\uC5D0\uC14B)\uB97C \uACE0\uCE58\uB294 \uD654\uBA74\uC785\uB2C8\uB2E4"
-      }));
+    if (CHAT_TABS.has(active2) || BOT_TABS.has(active2) || PERSONA_TABS.has(active2)) {
+      healthEl.appendChild(el("span", { class: "badge modechip", text: MODE_LABEL[mode], title: MODE_TITLE[mode] }));
+    }
+    if (PERSONA_TABS.has(active2) && state.persona) {
+      healthEl.appendChild(el("span", { class: "hint botname", text: `\xB7 ${state.persona.name || "(\uC774\uB984 \uC5C6\uC74C)"}` }));
+      return;
     }
     const botName = state.character?.name ? String(state.character.name) : "";
     if (botName) healthEl.appendChild(el("span", { class: "hint botname", text: `\xB7 ${botName}` }));
@@ -23423,6 +25082,7 @@ ${negative.value.trim()}
         el("span", { class: "badge warn tabbadge", style: { display: "none" } })
       ]);
       b.addEventListener("click", () => {
+        if (id === "chats") foldLanding();
         setTab(id);
       });
       return b;
@@ -23472,7 +25132,7 @@ ${negative.value.trim()}
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.15.32" }),
+        el("span", { class: "dim", text: "v0.15.33" }),
         healthEl,
         el("span", { class: "spacer" }),
         // 승인 / 반영 for the whole bot, from every tab (§1-76).
@@ -23535,7 +25195,7 @@ ${negative.value.trim()}
     if (state.openTabRequest) {
       const tab = state.openTabRequest;
       state.openTabRequest = null;
-      const want = CHAT_TABS.has(tab) ? "chat" : BOT_TABS.has(tab) ? "bot" : null;
+      const want = CHAT_TABS.has(tab) ? "chat" : BOT_TABS.has(tab) ? "bot" : PERSONA_TABS.has(tab) ? "persona" : null;
       if (want && want !== mode) {
         setEditMode(want, tab);
       } else if (want) {
@@ -23568,23 +25228,32 @@ ${negative.value.trim()}
     if (!mounted) buildShell();
     setTab(active2);
     const t0 = Date.now();
+    booting = true;
+    bootSteps = { connect: "run", host: "wait", upload: "wait" };
     setBootPhase("\uBC31\uC5D4\uB4DC\uC5D0 \uC5F0\uACB0\uD558\uB294 \uC911\u2026");
     await transport.detectPlatform();
     const connected = await state.connect();
+    bootSteps.connect = connected ? "done" : "err";
     const t1 = Date.now();
+    bootSteps.host = "run";
     setBootPhase("RisuAI\uC5D0\uC11C \uBD07\uC744 \uC77D\uB294 \uC911\u2026");
-    await state.readHost();
+    const hostOk = await state.readHost();
+    bootSteps.host = hostOk ? "done" : "err";
     const t2 = Date.now();
     if (connected) {
-      setBootPhase("\uBC31\uC5D4\uB4DC\uC5D0 \uC62C\uB9AC\uB294 \uC911\u2026");
+      bootSteps.upload = hostOk ? "run" : "skip";
+      setBootPhase("\uC791\uC5C5\uBCF8\uC744 \uBC31\uC5D4\uB4DC\uC5D0 \uC62C\uB9AC\uB294 \uC911\u2026");
       await uploadAfterConnect(force);
+      bootSteps.upload = !hostOk ? "skip" : state.workspace ? "done" : "err";
     } else {
       startReconnect(force);
     }
     const t3 = Date.now();
+    booting = false;
     setBootPhase("");
     refreshStatus();
     renderActive();
+    if (state.workspace) void suggestFolderRename();
     const hostMs = t2 - t1;
     if (connected) {
       void clientLog(hostMs > 5e3 ? "warn" : "info", "boot", {
@@ -23597,9 +25266,15 @@ ${negative.value.trim()}
     }
   }
   var bootPhase = "";
+  var booting = false;
+  var bootSteps = { connect: "wait", host: "wait", upload: "wait" };
+  function bootState() {
+    return { booting, phase: bootPhase, steps: bootSteps };
+  }
   function setBootPhase(text2) {
     bootPhase = text2;
     refreshStatus();
+    if (active2 === "chats" && mounts.chats) refreshBootBox(mounts.chats);
   }
   var uploadInFlight = null;
   function announceMerge() {
@@ -23802,6 +25477,6 @@ ${negative.value.trim()}
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.15.32"} loaded`);
+    console.log(`[risu-hina] v${"0.15.33"} loaded`);
   })();
 })();

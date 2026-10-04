@@ -1,4 +1,13 @@
-# 06. Implementation status — as of 2026-10-04 (v0.15.32, Risu Hina)
+# 06. Implementation status — as of 2026-10-04 (v0.15.33, Risu Hina)
+
+## 0.15.33 (2026-10-04): §1-88 ~ §1-90 released
+
+Everything below down to 0.15.32 ships in this version: style folders and folding prompts in the studio (§1-88),
+the three-mode first screen with persona editing, the project folder rename and the no-blink open (§1-89, two
+rounds: personas as a working copy with snapshots, 반영, AI tools and new personas), and the studio's one-read
+left panel with explicit style saves (§1-90). Schema 15 (persona tables). The §1-89/§1-90 backends ran on
+the test server staging before release; the plugin was checked with a re-imported bundle (round 1) and in the browser
+harness at 390px (round 2).
 
 ## unreleased (2026-10-04): §1-90 studio left panel: one read, explicit save, folded prompts
 
@@ -46,7 +55,7 @@
   asset bindings. Saved assignments now move by path with their digest, and embedded bindings naming a renamed
   project are translated when read (`workspace.project_alias` over `.hina/folder-renames.json`). The panel waits
   up to 180s and, if the answer is lost, reads the folder back instead of reporting a failure.
-- **Staging lesson:** test-server's backend was still 0.15.31 (its /update/apply had been held), and the first
+- **Staging lesson:** the test server's backend was still 0.15.31 (its /update/apply had been held), and the first
   staging copied only files changed since 0.15.32 - the new studio.py called the old nai.py (uc_preset_index).
   Stage everything changed since the version the target actually runs (`/health` version), not since the last tag.
 
@@ -108,13 +117,13 @@
 Everything below down to 0.15.31 ships in this version: `import risuhina` on the Windows install (§1-83, GitHub
 #2), an approved chat 반영 becomes the baseline (§1-84, #1), studio 검수 and 자세히 보기 at PC quality (§1-85), a
 picked fragment shows its text (§1-86) and the UC preset defaulting to None with its numbers documented
-(§1-87). §1-83 ~ §1-86 ran on test-server staging before release; §1-87 did not (a batch was running).
+(§1-87). §1-83 ~ §1-86 ran on the test server staging before release; §1-87 did not (a batch was running).
 
 ## unreleased (2026-10-03): §1-87 UC preset: default None, names accepted, the numbers documented
 
 - **Field report:** the agent tried to drop `nsfw` from the negative and concluded "the studio core assembles
   the Heavy block itself; no spec field can remove it", then worked around it with `2::nsfw::` in the prompt.
-- **What actually happened (job rows on test-server):** it sent `ucPreset: "None"` and `"none"` (forwarded to
+- **What actually happened (job rows on the test server):** it sent `ucPreset: "None"` and `"none"` (forwarded to
   NovelAI as strings -> HTTP 500) and `3` (Human Focus, which *is* Heavy plus more). It never sent `2`, which
   removes the block - the tool text listed `ucPreset` without saying what the numbers mean. The style in use
   carried no ucPreset; the Heavy came from the default (0) filling the unset key. Explicit values were never
@@ -141,7 +150,7 @@ picked fragment shows its text (§1-86) and the UC preset defaulting to None wit
 ## unreleased (2026-10-03): §1-85 asset studio 검수 and 자세히 보기 at PC quality
 
 - **Field report:** "에셋 검수 및 자세히보기 모달에서 이미지 해상도가 너무 떨어진다 - PC에서 봤을 때도 괜찮게".
-- **Cause (measured on a real 832x1216 studio picture from test-server):** the size was not the problem - the
+- **Cause (measured on a real 832x1216 studio picture from the test server):** the size was not the problem - the
   검수 cell already asked for >=768px. The WebP thumbnail was encoded at quality 82, which smears line art
   (hair strands, lashes, collar edges) even at the picture's own size. q95 is indistinguishable from the PNG
   at ~130KB (the PNG is ~1.2MB). The 자세히 보기 modal showed the original but capped at 72vh, ~700px on a
@@ -169,7 +178,7 @@ picked fragment shows its text (§1-86) and the UC preset defaulting to None wit
 
 - **Field reports:** agent reports said "risuhina/realooc import가 모두 실패" (Parma Knights lorebook audit,
   twice) and fell back to reading entries one tool call at a time.
-- **Cause (measured on test-server):** the Windows bundle's embeddable Python has `python311._pth`, which runs
+- **Cause (measured on the test server):** the Windows bundle's embeddable Python has `python311._pth`, which runs
   it isolated - `sys.flags.isolated=1, ignore_environment=1, safe_path=True`. run_python handed the helper's
   folder over only as `PYTHONPATH`, so the import failed on every Windows install and worked from a checkout
   (`.venv`) - hence "sometimes". `realooc` is the pre-§1-71 alias the agent tried next; it lives in the same
@@ -186,7 +195,7 @@ Everything below that was marked "unreleased" ships in this version: title-row �
 (§1-76), a style carries its generation settings (§1-77), studio saves stop reloading everything (§1-78), an
 MCP batch waits in the approval queue (§1-79), RisuAI's own server save is watched and partial edits of one
 field all land (§1-80), Vertex tokens renew on a cached agent (§1-81), and the ChatGPT plan through the
-official Sign in with ChatGPT (§1-82; a real sign-in was checked on test-server staging before release).
+official Sign in with ChatGPT (§1-82; a real sign-in was checked on the test server staging before release).
 
 ## unreleased (2026-09-30): §1-82 the ChatGPT plan through the official Sign in with ChatGPT
 
@@ -235,7 +244,7 @@ official Sign in with ChatGPT (§1-82; a real sign-in was checked on test-server
 
 - **Incident (user, reconstructed from both servers' logs):** MCP work from 18:21 to 20:14 (assets, Regex,
   background HTML, global note, first message) vanished after a RisuAI reload, with 241 conflicts. Cause: at
-  16:46 the RisuAI (NodeOnly) tab's save to its server failed with a Cloudflare 524 while test-server was
+  16:46 the RisuAI (NodeOnly) tab's save to its server failed with a Cloudflare 524 while the test server was
   thrashing (my 6.8 GB data backup was running at the same time); the full-write fallback failed too, and the
   tab then saved NOTHING to its server for 3.5 hours, with only a console error. Every Risu Hina write-back in
   that window "verified" - by reading the tab's memory. The 20:15 reload fetched the server's old database.
@@ -276,7 +285,7 @@ official Sign in with ChatGPT (§1-82; a real sign-in was checked on test-server
 
 - **Report (user):** editing and saving a style prompt or a character prompt re-rendered the DOM often and
   stuttered, the save took very long to show, and sometimes a list vanished and did not come back.
-- **Measured on test-server (281 character cards):** `/studio/list?area=characters` 0.84 s, `/files?prefix=
+- **Measured on the test server (281 character cards):** `/studio/list?area=characters` 0.84 s, `/files?prefix=
   studio/output` 0.6 s, `/studio/plan` (the unresolved-reference check after every save) 0.66 s. A character
   save did: rename check, two uploads, the whole list re-read, **the open editor rebuilt** (re-reading
   prompt.md, preset.json and stat-ing its reference images), a plan, and a panel-wide emit that set off the
@@ -357,7 +366,7 @@ official Sign in with ChatGPT (§1-82; a real sign-in was checked on test-server
 
 ## 0.15.30 (2026-09-27): §1-75 MCP, after the first field use
 
-The user installed 0.15.29 on test-server and used it through `hina.example.com` (cloudflared, docs/08 §0).
+The user installed 0.15.29 on the test server and used it through `hina.example.com` (cloudflared, docs/08 §0).
 What came out of that, all in docs/08 §0:
 
 - **Settings cards follow a backend update** - the panel goes straight from the old health to the new one,
@@ -434,7 +443,7 @@ What came out of that, all in docs/08 §0:
   gone for *The Irregular at Magic High School* but not for Parma; folding the
   agent brought back the right part of the centre, unfolding pushed it off.
 - **Reproduced** with that bot's card and its latest agent session (read-only
-  from test-server: `characters.card_json`, `GET /session` over loopback)
+  from <server>: `characters.card_json`, `GET /session` over loopback)
   injected into the harness: the tab laid out ~3000px wide, the agent starting
   at x=1511 of 1180 - and at 1920px on a desktop too. **Not a 0.15.26
   regression:** the released 0.15.25 bundle does the same with that session;
@@ -904,7 +913,7 @@ platform archives passed CRC, SHA256 and all 83 app-source/plugin equality check
 
 ## 0.15.17: update-check rendering hang
 
-Observed on test-server with backend 0.15.15: `/update/check` returned HTTP 200 in
+Observed on the test server with backend 0.15.15: `/update/check` returned HTTP 200 in
 426–442 ms and reported 0.15.16 installable. The published release notes carried
 12 CRLF line endings. The Markdown parser recognized a bullet prefix but its
 full-line match rejected the trailing CR, leaving the input index unchanged and
@@ -1021,7 +1030,7 @@ in tests; actual user credentials are not used for release verification.
 
 ## 0.15.11 field fixes
 
-User requested staging on test-server and a public release. See
+User requested staging on the test server and a public release. See
 `docs/15-agent-discovery-and-review.md` for tool-result recovery, bot discovery,
 live exclusive review decisions, naming/inpaint preservation, temporary prompts,
 mobile navigation, explicit AI writeback, and workspace transfer fixes.
@@ -1033,7 +1042,7 @@ The original plan for bot edit mode (M0 measurements, M2 spec) is `~/.claude/pla
 
 ## 0. Starting point for the next session (read this first)
 
-**Releases are manual now (2026-08-29, the user's instruction).** The plugin has users other than us, so **do not release or deploy after every fix**. Land the change, run the gate, leave it on master, and say what is waiting; `tools/release.py`, `gh release create` and the test-server deploy happen **only when the user asks for them**. One mechanical consequence to keep in mind: `tools/bundle.py` writes `plugin/Risu.Hina.Plugin.js` (and the old-name twin) into the repository, and *that committed file is what RisuAI's `+` update check reads* — so a release is not the tag, it is that commit. An ordinary fix commit must leave those two files alone, which `node plugin/build.config.mjs` does by itself (it only writes `plugin/dist/`).
+**Releases are manual now (2026-08-29, the user's instruction).** The plugin has users other than us, so **do not release or deploy after every fix**. Land the change, run the gate, leave it on master, and say what is waiting; `tools/release.py`, `gh release create` and the the test server deploy happen **only when the user asks for them**. One mechanical consequence to keep in mind: `tools/bundle.py` writes `plugin/Risu.Hina.Plugin.js` (and the old-name twin) into the repository, and *that committed file is what RisuAI's `+` update check reads* — so a release is not the tag, it is that commit. An ordinary fix commit must leave those two files alone, which `node plugin/build.config.mjs` does by itself (it only writes `plugin/dist/`).
 
 **Code state**: master = **0.11.0 (unreleased)** - §1-17 the ONE global file space (the studio-asset
 branch rebased in) **+ §1-18 the tab kit · prompt cards · character reference (measured) · artifacts**
@@ -1109,7 +1118,7 @@ selected position and the backend `_group_key` joins `t1+t2` composites; legacy 
 saves fold into `tokens[]`) · the OUTPUT tree carries the file tab's right-click folder verbs
 (새 폴더 · rename · copy/cut/paste · path · zip · two-menu delete) · the files tab select-all
 icon toggles to deselect and the empty-space menu gains 선택 해제.)
-(gate ALL GREEN; the minor went up so the version gate trips when it ships). **Staged on test-server
+(gate ALL GREEN; the minor went up so the version gate trips when it ships). **Staged on the test server
 2026-08-30 night AT §1-25 (= §1-19~24 included): service stopped → backup `data-backup-20260830-s120`
 (11,358 files) → app/*.py + seeds/studio-image-ops.md + tools/probe_nai.py + requirements.in scp'd,
 msgpack 1.1.0 pip-installed into the bundled interpreter, the 0.11.0 dev bundle refreshed in
@@ -1128,9 +1137,9 @@ mixed-cast multi-entry batch from the panel.** Released = **v0.10.0 BETA** (§1-
 
 | Where | What | Notes |
 |---|---|---|
-| test-server **running** | **0.11.0 (unreleased, STAGED 2026-08-30)** — scp of `app/*.py` + seeds + tools + the dev plugin bundle into `data/plugin/` (served at `/plugin.js`); service stopped, `data` backed up to `data-backup-20260830-space` (11,263 files), then the space_v1 boot migration verified: manifest 1,868 moves = the pre-inventory exactly, 0 left in the old workspaces, 34 original/ files untouched, Korean bot folders intact on disk, `/health` 0.11.0 + space path, `/diag migrated:true`, `/studio/status charref:true`. Trap found: remote `pyserver\tools` was a 20KB FILE from the 2026-08-29 staging (scp'd without the dir) — deleted, mkdir, re-sent. The user installs the 0.11.0 dev plugin once from the backend's `/plugin.js` (the `+` check reads the committed 0.10.0 bundle). Previously: **0.10.0 BETA** (2026-08-30, `/update/apply` from the release (after a staging round of the same code by scp) -> new SSH session `/health` 0.10.0 `agentReady:true` `codexEnabled:true`, 12 workspaces; schema 13 backfill verified live (chat auto 9, card auto 2 / user 1); `data-backup-20260830` was taken with the service stopped before the schema migration. The user still has to press `+` on the plugin - the minor went up, so the version gate holds the panel until then). That update overwrote the 2026-08-29 asset-studio staging (scp of `app/*.py` + seeds + a dev plugin build into `data/plugin/`, unreleased) — the studio code lives only on this branch again, while that machine’s `data/studio` (characters/ included) is still on disk. 0.9.6 was (2026-08-29, `/update/apply` → new SSH session `/health` 0.9.6 `agentReady:true` `codexEnabled:true`, 10 workspaces intact). 0.9.5 was (2026-08-29, `/update/apply` → `/health` 0.9.5 `agentReady:true`). 0.8.3 was (evening of 2026-08-28, `/update/apply` → `/health` 0.8.3 `agentReady:true`; the user's setting, which had been `provider=native`, was migrated to **mode=native** — measured remotely via `/websearch/test`: on the general agent glm-5.3-flash@ollama.com, **the Ollama cloud web_search API in 1.4 s**, a result list (including the release page body), `nativeShape=ollama` remembered). 0.8.2 was (2026-08-28, `/update/apply` → `/health` 0.8.2; confirmed `native` added to the `/websearch` provider list). 0.8.1 was (2026-08-27 23:20, `/update/apply`; `/websearch` duckduckgo and the search test OK, 9 skills seeded). 0.8.0 was (22:05). 0.7.2 was (21:45; skill default migration, POST blob verified). 0.7.1 was (21:08, the same way; `/config/test` `ok:true toolCalls:1`, hook skill seeding confirmed). 0.7.0 was (2026-08-27 20:33 — I ran `curl -X POST /update/apply` over loopback via ssh → the updater fetched the GitHub asset, installed it and restarted NSSM; new session `/health` 0.7.0 `agentReady:true`; the user only has to press `+` on the plugin in RisuAI). Before that, 0.5.2 — clean install at `D:\code\risu-hina`, **NSSM service `RisuHina`** (`cmd.exe /c start.bat 6020`, Automatic, the same way as ActiveRecall and risuai). On the night of 2026-08-26, over ssh: removed the damaged `pyserver\python` → unpacked the 0.5.2 zip over the folder (keeping `data/`) → `nssm stop/start` → confirmed `/health` 0.5.2 `agentReady:true` | Old data at `D:\code\risu-elf-backup\data` (**not migrated** — to move it, stop the service first; the first startup adopts `risuelf.db→risuhina.db`) |
-| test-server config | `pocketrisu.savePath = D:\code\risu-nodeonly\Risuai-NodeOnly\save` → `/diag` `fastPath:true, serverWrite:true` | Reads the PocketRisu on the same PC directly through SQLite |
-| GitHub releases | **v0.9.6 · BETA Latest** (2026-08-29, commit `1abd018` — plugin-only change; the backend moved by its version number alone, so the patch level does not trip the gate and `+` on the plugin is enough) · v0.9.5 (2026-08-29, commit `cc7f403`) · v0.9.4 · v0.9.3 · v0.9.2 · v0.9.1 · v0.9.0 · v0.8.4 · v0.8.3 (2026-08-28, commit `32dca6e`) · v0.8.2 (commit `28a2073`) · v0.8.1 (2026-08-27 23:19) · v0.8.0 · v0.7.2 · v0.7.1 · v0.7.0 (2026-08-27 20:32, 4 assets, done by me directly with `gh release create` — it went through even in auto mode; the notes go in the scratchpad because `tools/bundle.py` empties `release/`) · v0.6.2 · v0.6.1 · v0.6.0 · v0.5.2 · … · v0.1.0 | `gh release create` is blocked by the auto-mode classifier — in manual permission mode I run it myself (0.3.1, 0.3.2). test-server has 0.3.2 deployed and verified, and the raw URL is 0.3.2 too |
+| the test server **running** | **0.11.0 (unreleased, STAGED 2026-08-30)** — scp of `app/*.py` + seeds + tools + the dev plugin bundle into `data/plugin/` (served at `/plugin.js`); service stopped, `data` backed up to `data-backup-20260830-space` (11,263 files), then the space_v1 boot migration verified: manifest 1,868 moves = the pre-inventory exactly, 0 left in the old workspaces, 34 original/ files untouched, Korean bot folders intact on disk, `/health` 0.11.0 + space path, `/diag migrated:true`, `/studio/status charref:true`. Trap found: remote `pyserver\tools` was a 20KB FILE from the 2026-08-29 staging (scp'd without the dir) — deleted, mkdir, re-sent. The user installs the 0.11.0 dev plugin once from the backend's `/plugin.js` (the `+` check reads the committed 0.10.0 bundle). Previously: **0.10.0 BETA** (2026-08-30, `/update/apply` from the release (after a staging round of the same code by scp) -> new SSH session `/health` 0.10.0 `agentReady:true` `codexEnabled:true`, 12 workspaces; schema 13 backfill verified live (chat auto 9, card auto 2 / user 1); `data-backup-20260830` was taken with the service stopped before the schema migration. The user still has to press `+` on the plugin - the minor went up, so the version gate holds the panel until then). That update overwrote the 2026-08-29 asset-studio staging (scp of `app/*.py` + seeds + a dev plugin build into `data/plugin/`, unreleased) — the studio code lives only on this branch again, while that machine’s `data/studio` (characters/ included) is still on disk. 0.9.6 was (2026-08-29, `/update/apply` → new SSH session `/health` 0.9.6 `agentReady:true` `codexEnabled:true`, 10 workspaces intact). 0.9.5 was (2026-08-29, `/update/apply` → `/health` 0.9.5 `agentReady:true`). 0.8.3 was (evening of 2026-08-28, `/update/apply` → `/health` 0.8.3 `agentReady:true`; the user's setting, which had been `provider=native`, was migrated to **mode=native** — measured remotely via `/websearch/test`: on the general agent glm-5.3-flash@ollama.com, **the Ollama cloud web_search API in 1.4 s**, a result list (including the release page body), `nativeShape=ollama` remembered). 0.8.2 was (2026-08-28, `/update/apply` → `/health` 0.8.2; confirmed `native` added to the `/websearch` provider list). 0.8.1 was (2026-08-27 23:20, `/update/apply`; `/websearch` duckduckgo and the search test OK, 9 skills seeded). 0.8.0 was (22:05). 0.7.2 was (21:45; skill default migration, POST blob verified). 0.7.1 was (21:08, the same way; `/config/test` `ok:true toolCalls:1`, hook skill seeding confirmed). 0.7.0 was (2026-08-27 20:33 — I ran `curl -X POST /update/apply` over loopback via ssh → the updater fetched the GitHub asset, installed it and restarted NSSM; new session `/health` 0.7.0 `agentReady:true`; the user only has to press `+` on the plugin in RisuAI). Before that, 0.5.2 — clean install at `D:\code\risu-hina`, **NSSM service `RisuHina`** (`cmd.exe /c start.bat 6020`, Automatic, the same way as ActiveRecall and risuai). On the night of 2026-08-26, over ssh: removed the damaged `pyserver\python` → unpacked the 0.5.2 zip over the folder (keeping `data/`) → `nssm stop/start` → confirmed `/health` 0.5.2 `agentReady:true` | Old data at `D:\code\risu-elf-backup\data` (**not migrated** — to move it, stop the service first; the first startup adopts `risuelf.db→risuhina.db`) |
+| the test server config | `pocketrisu.savePath = D:\code\risu-nodeonly\Risuai-NodeOnly\save` → `/diag` `fastPath:true, serverWrite:true` | Reads the PocketRisu on the same PC directly through SQLite |
+| GitHub releases | **v0.9.6 · BETA Latest** (2026-08-29, commit `1abd018` — plugin-only change; the backend moved by its version number alone, so the patch level does not trip the gate and `+` on the plugin is enough) · v0.9.5 (2026-08-29, commit `cc7f403`) · v0.9.4 · v0.9.3 · v0.9.2 · v0.9.1 · v0.9.0 · v0.8.4 · v0.8.3 (2026-08-28, commit `32dca6e`) · v0.8.2 (commit `28a2073`) · v0.8.1 (2026-08-27 23:19) · v0.8.0 · v0.7.2 · v0.7.1 · v0.7.0 (2026-08-27 20:32, 4 assets, done by me directly with `gh release create` — it went through even in auto mode; the notes go in the scratchpad because `tools/bundle.py` empties `release/`) · v0.6.2 · v0.6.1 · v0.6.0 · v0.5.2 · … · v0.1.0 | `gh release create` is blocked by the auto-mode classifier — in manual permission mode I run it myself (0.3.1, 0.3.2). the test server has 0.3.2 deployed and verified, and the raw URL is 0.3.2 too |
 | Plugin installed in RisuAI | **0.3.1 has to be reinstalled by hand once** — the installed copy's `//@update-url` is a release URL with no CORS, so `+` never appears (docs/04 B.4) | After that it is the raw URL, so `+` appears |
 
 **0.3.2 (night of 2026-08-25)** — first real use: 312 images for a bot in the PC browser (risu.xyz) in 0.6 s, 2980 images for `office counseling` on the iPhone (risu.xyz) in 5.3 s, all `fast=N` (cache hits in the PocketRisu `risuai.db` on the same PC, zero browser transfer). The user suspected "it read them as if connected from PocketRisu" → confirmed the bytes are identical since the key is SHA-256, then made `assets.store_bytes` verify **key hash = byte hash** (rejecting regardless of origin) and made the sync line state the origin (PocketRisu DB / hub / this browser) (docs/04 E.2). The fast path is read-only, and writes always go only to the connected client.
@@ -1353,7 +1362,7 @@ running) - the prompt asks for review_folder → suggest_selection with flags un
 invisible - `button.iconbtn` (transparent, later in the sheet) outranked `button.danger`; a
 `button.iconbtn.danger` rule paints it red. Released as 0.14.1 with §1-43/§1-44.
 
-**+ §1-44 (2026-09-06, the 8M-token turns and 중단)**: measured on test-server: one session's
+**+ §1-44 (2026-09-06, the 8M-token turns and 중단)**: measured on <server>: one session's
 stored history had grown to 104MB (694 messages, 178 run_python calls), turns of 7-30 model
 requests billed 5-14M input tokens each, and the log showed `history compaction failed:
 … finish_reason 'content_filter: PROHIBITED_CONTENT'` on EVERY turn - Gemini refused to
@@ -1593,15 +1602,15 @@ icons outside the studio, compact rows + switch, the caveat card and its `<stron
   by default, the row-menu delete confirm). The MINOR went up: backend and plugin go together
   (`/files?bot=`, deliverables in `projects/<봇>/out/`, `out_v3`), so the version gate trips -
   update the backend, then `+` on the plugin. Release notes: the scratchpad `notes-0.12.0.md`
-  (bundle.py empties `release/`). test-server: deployed by `/update/apply` after the release.
+  (bundle.py empties `release/`). <server>: deployed by `/update/apply` after the release.
 - **State (2026-09-05, later)**: + **§1-34** (portrait blink, strip containment, auto temp
-  sweep, tree clipboard focus) - restaged on test-server the same way.
+  sweep, tree clipboard focus) - restaged on the test server the same way.
 - **State (2026-09-05)**: master = 0.11.1 + **§1-33 unreleased** (files: hina/ hidden,
   deliverables in `projects/<봇>/out/` with the `out_v3` boot migration, 이 봇만, 검수 on any
   folder, the rule popover redone, the two-splitter overflow fixed). When it ships the
   backend and plugin go together (the out/ move + `?bot=`), so bump the MINOR. The live
-  site at 2026-09-05 06:40 KST ran 0.11.1 on both ends (test-server updated by the user).
-- **State (2026-09-03 night)**: master = **0.11.1 RELEASED** (§1-32, two first-use fixes on 0.11.0: the split no longer grows past the screen because of the bottom strip; a running asset sync no longer rebuilds the 선택 page every 400ms). 0.11.0 (`31d7a71`) was released earlier the same evening and hand-deployed to test-server (backup `data-backup-20260903`, six app modules + the bundle to `data/plugin/`, `/plugin.js` hash = release bundle). 0.11.1 is a PATCH: the version gate stays quiet, so test-server updates through 설정 → 백엔드 업데이트 (release assets) and the plugin through `+`. The user's next action: update both, then the Codex originator real-use check.
+  site at 2026-09-05 06:40 KST ran 0.11.1 on both ends (the test server updated by the user).
+- **State (2026-09-03 night)**: master = **0.11.1 RELEASED** (§1-32, two first-use fixes on 0.11.0: the split no longer grows past the screen because of the bottom strip; a running asset sync no longer rebuilds the 선택 page every 400ms). 0.11.0 (`31d7a71`) was released earlier the same evening and hand-deployed to the test server (backup `data-backup-20260903`, six app modules + the bundle to `data/plugin/`, `/plugin.js` hash = release bundle). 0.11.1 is a PATCH: the version gate stays quiet, so the test server updates through 설정 → 백엔드 업데이트 (release assets) and the plugin through `+`. The user's next action: update both, then the Codex originator real-use check.
   (2026-08-31 night: stop → backup `data-backup-20260831` (20,576 files) → 10 app modules + 2
   seeds + the 764,648B dev bundle → start; verified live: `/health` 0.11.0, **studio_v2 moved
   1,809 files into config/+output/** (manifest 511KB), skills seed v6 landed the NSFW skill,
@@ -1775,7 +1784,7 @@ Not done here (deliberate): storage relocation of machinery (rejected), per-cate
 tint colours (NAI suggest-tags drops `category`; a 1-line pass-through when wanted), md/nai
 집중 편집 tints (only code modes wired), marquee edge auto-scroll.
 
-**Staged on test-server 2026-09-02 (commit 9c22085)**: stop → backup `data-backup-20260902`
+**Staged on the test server 2026-09-02 (commit 9c22085)**: stop → backup `data-backup-20260902`
 (20,590 files) → files.py/main.py/studio.py + requirements.in → **pillow 11.3.0 pip-installed
 into the bundled interpreter** → dev bundle 803,875 B into `data/plugin/` → start. Verified:
 `/health` 0.11.0 · a real probe image (`스테이징프로브/probe2-…png`, 1.9 MB) answers `/files/thumb`
@@ -1787,7 +1796,7 @@ the release note must say existing installs re-run setup for pillow.
 ## 1-28. 2026-08-31 - 0.11.0 (unreleased, continued): the NSFW-assets skill, ucPreset 2, serial batches, no-refresh file visibility
 
 The user's generation try-and-error notes become a SKILL, plus one bug ("파일을 생성하면
-새로고침 해야 보임"). One commit, gate ALL GREEN. Staged to test-server 2026-08-31 night
+새로고침 해야 보임"). One commit, gate ALL GREEN. Staged to the test server 2026-08-31 night
 together with §1-26·§1-27 (see §0 Handoff for the verified record).
 
 - **New seeded skill "NSFW 에셋 생성 함정"** (`seeds/studio-nsfw-assets.md`, SEED_KEY → v6 so
@@ -2107,7 +2116,7 @@ from the panel itself.
 
 ## 1-19. 2026-08-30 - 0.11.0 (unreleased, continued): the first studio field report - 26 items
 
-The user staged 0.11.0 on test-server (see §0's table) and used the studio for real; 26 items of
+The user staged 0.11.0 on the test server (see §0's table) and used the studio for real; 26 items of
 feedback came back. Nine commits (P1-P9), each gate-green, all on master, still 0.11.0 unreleased:
 
 - **P1 names are the identity**: a new card asks for its name first and the name IS the filename
@@ -2284,7 +2293,7 @@ Six commits, each gate-green:
 - **plugin: 버전 lists 'user' snapshots only**, autos behind "자동 백업 N개 보기" (restorable, not
   renamable, flagged as possibly behind RisuAI); `/checkpoint/clear` sweeps saved rows only.
 
-Staging round (backend files scp'd to test-server, schema 13 backfill verified live): the user
+Staging round (backend files scp'd to the test server, schema 13 backfill verified live): the user
 confirmed the intended behaviour and caught two more - (1) an empty FIRST upload also founded a
 0-turn chat (the guard only protected chats already held); the rule completed with a `live` flag -
 the plugin marks the chat RisuAI has open, the one chat a lazy host never stubs, and only `live` or
@@ -2367,7 +2376,7 @@ plugin the whole selected character, chats included, and `getChatFromIndex` read
 - **Evidence 1 — the log**: two `[plugin] connect recovered` entries in `server.log`, `attempts=5 seconds=49` / `attempts=6 seconds=79` (exactly matching the retry intervals 3, 5, 8, 12, 20 = 48 seconds).
 - **Evidence 2 — the length of the error string**: at the time, `lastError=str(181)`. Working out the lengths of the two candidate strings, 181 = the "백엔드에서 Risu Hina 응답을 받지 못했습니다 (…)" string (90 characters) + `HTTP nnn · ` (11 characters) + **80 characters of body (hitting the slice cap exactly)**. So this was not a network failure: **an HTTP response arrived, and its body was non-JSON (HTML) of 80 characters or more**.
 - **Evidence 3 — decisive**: during the two failure windows (21:04:30~21:06:29, 21:51:30~21:53:37) **zero requests reached the backend**, and the first request that did arrive (`GET /health -> 200 7ms`) succeeded immediately, with the recovered log written right after it. → The request never reached the origin yet a response came back = **something in the middle answered instead**.
-- Checking what sits in front: test-server runs a **Cloudflare Tunnel** (two `cloudflared` services; it is a remotely-managed token tunnel, so the ingress config lives in the dashboard), and the backend listens on `127.0.0.1:6020`, **IPv4 loopback only**. The event log has nothing but the service starting at boot — no reconnections. In 0.7.2 we already confirmed that **the same edge ignores the query string and caches** (every asset thumbnail came back as one image) → there is a cache in front behaving like "Cache Everything + Ignore Query String", and the reading is that it had latched onto an error page and kept handing it back for `GET /health` for the length of the TTL (≈1 minute).
+- Checking what sits in front: the test server runs a **Cloudflare Tunnel** (two `cloudflared` services; it is a remotely-managed token tunnel, so the ingress config lives in the dashboard), and the backend listens on `127.0.0.1:6020`, **IPv4 loopback only**. The event log has nothing but the service starting at boot — no reconnections. In 0.7.2 we already confirmed that **the same edge ignores the query string and caches** (every asset thumbnail came back as one image) → there is a cache in front behaving like "Cache Everything + Ignore Query String", and the reading is that it had latched onto an error page and kept handing it back for `GET /health` for the length of the TTL (≈1 minute).
 - Fix (on our side, at the root):
   - **Added a `POST /health` route** (same handler, same AUTH_EXEMPT). The plugin's connection probe `transport.probe()` goes **POST first**, falling back to GET on 404/405 (for backends at 0.8.3 and below). A CDN cannot serve a POST out of cache — a query cache-buster is meaningless at this edge (it ignores the query), so POST is the only sure method.
   - **`Cache-Control: no-store` on every JSON response** (`_json`). This API is per-request state throughout; nothing in the middle should be replaying it.
@@ -2389,7 +2398,7 @@ plugin the whole selected character, chats included, and `getChatFromIndex` read
 ## 1-10. Morning of 2026-08-28 — v0.8.2: the search engine moves inside the agent · built-in search measured · 3 mobile items · "no backend connection after another plugin updates"
 
 - **"Why are the agent and the provider separate?"** — the roles: the preset model composes the query and reads and organises the results; the provider actually queries the web. A vendor's built-in search does not come through the OpenAI-compatible chat completions path (relays such as Vercel), so we have to attach a search engine ourselves. UI: the "검색 제공자" (search provider) card was folded **inside** the search agent card as a `details.fold` labelled "검색 엔진 — 기본 DuckDuckGo · 결과가 부실하면 여기서 바꿉니다" (search engine — DuckDuckGo by default, change it here if the results are poor) (for the user it is "just pick one preset"). Smoke-tested.
-- **Built-in search measured** (test-server; the probe script was deleted after running, and credentials never left that PC): Vercel AI Gateway (gemini-3.7-flash): the `google_search` and `web_search` types give 400 (allowed: function · custom · `vercel:exa_search` · `parallel_search` · `perplexity_search` · `tako_search`), and `extra_body google.tools` is silently ignored. `vercel:exa_search` 17.3 s · $0.066 · the 8/24 release (approximately), `vercel:parallel_search` 10.2 s · $0.032 · **the March release (a five-month-stale wrong answer)**; prompt tokens 38k–72k (the gateway stuffs the results into the prompt). → a **`native` provider, "모델 내장 검색"** (the model's built-in search): `websearch.native_kind()` picks the shape from the endpoint's host (`ai-gateway.vercel.sh` → vercel, '' when it recognises nothing); `agent.native_research()` calls it directly without pydantic-ai (vercel uses `exa_search`), with `research()` branching first; `POST /websearch/test` runs one real query asynchronously. **The default stays duckduckgo** (a fresh install may have neither). Three test_http cases (the list, the not-ready reason, and the test giving the same reason without making a call).
+- **Built-in search measured** (the test server; the probe script was deleted after running, and credentials never left that PC): Vercel AI Gateway (gemini-3.7-flash): the `google_search` and `web_search` types give 400 (allowed: function · custom · `vercel:exa_search` · `parallel_search` · `perplexity_search` · `tako_search`), and `extra_body google.tools` is silently ignored. `vercel:exa_search` 17.3 s · $0.066 · the 8/24 release (approximately), `vercel:parallel_search` 10.2 s · $0.032 · **the March release (a five-month-stale wrong answer)**; prompt tokens 38k–72k (the gateway stuffs the results into the prompt). → a **`native` provider, "모델 내장 검색"** (the model's built-in search): `websearch.native_kind()` picks the shape from the endpoint's host (`ai-gateway.vercel.sh` → vercel, '' when it recognises nothing); `agent.native_research()` calls it directly without pydantic-ai (vercel uses `exa_search`), with `research()` branching first; `POST /websearch/test` runs one real query asynchronously. **The default stays duckduckgo** (a fresh install may have neither). Three test_http cases (the list, the not-ready reason, and the test giving the same reason without making a call).
 - **risu.xyz "no backend connection for a while after another plugin (cupcake) shows an update notice"** — checked the RisuAI source (`plugins.svelte.ts`, `apiV3/v3.svelte.ts`, `factory.ts`): `updatePlugin → importPlugin → loadPlugins()` → `loadV3Plugins` **unloads every running V3 plugin** (waits 1 second for the onUnload callback → `host.terminate()` = remove the message listener + **remove the iframe**) and runs them again. So whenever any plugin is updated or installed, our panel disappears and the next open is a cold start. The server ring log (06:52:56 `GET /health` → **a 2-minute gap** → 06:54:57 `/health` plus a normal 3-second load, no `connect recovered`) shows the first open sitting for 2 minutes in `readHost` (the host bridge `getCharacterFromIndex` = `$state.snapshot(the whole character)`) — the backend answered instantly, but the panel was empty and that read as "not connected" (the same symptom as round 10's "3 minutes for the first connection on web"). Fixes: (1) **boot stages** in the header status line ("백엔드에 연결하는 중… / RisuAI에서 봇을 읽는 중… / 백엔드에 올리는 중…" — connecting to the backend / reading the bot from RisuAI / uploading to the backend), (2) `clientLog('boot', {connectMs, hostMs, uploadMs, platform, hostError})` on every open — warn if hostMs > 5 seconds, (3) `clientLog('unloaded by host (plugin reload or disable)')` in `onUnload`, (4) `h_clientlog` records the strings in detail verbatim (`_client_detail`; previously the content vanished as `agent stream error {error=str(71)}`). The next report can be settled from the log.
 - **Three mobile items** — measured with `tools/harness.mjs` (the plugin bundle + a stub host for the browser + a temporary backend, captured in headless Chrome). Headless Chrome **refuses a window width under 500px** (at viewport 500 only the capture was cropped to 390, which made "the buttons go off screen" look real when it was an illusion) → the plugin page is put in an iframe of the requested size (`/?w=390&h=760`) so the media queries see the iframe width; with `&probe=1` the layout numbers are written to the parent's `#probe` via `postMessage` and read out with `--dump-dom`. The real problems confirmed: ① the switch button (a floating pill) sits **on top of** the attach and send buttons in the AI chat view, and its label is the name of "the other side", which is confusing → a segment bar at the top of the split, `.mbar` (📄 편집 | 💬 AI 챗, current view lit) plus "☰ 목록 펼치기/접기" (expand/collapse the list) on the tree tab (`.m-list`: 150px ↔ 62%); ② the tree strip had `max-height:190px` + `overflow-y:hidden` (inherited from the strip rule), so everything from the fifth item on was unreachable → `.explorer:has(.tree)` is block · 150px · `overflow-y:auto`; ③ the header status pill folded into 3 lines at 80px → one line, nowrap, with the bot name hidden.
 - **Stretching the input box pushed the buttons off screen** — the textarea's default `resize: both` dragged the width along and pushed things outside the column → `resize: vertical`, `max-width:100%`, `max-height:min(220px, 40vh)`.
@@ -2467,7 +2476,7 @@ plugin the whole selected character, chats included, and `getChatFromIndex` read
 - **Structure** (`pyserver/app/providers.py`): `PROFILES` (id · api · hosts · auth · modelExample · endpoint chat|responses · capField · strictTools · unsupported · modelRules · template · note · docs) → `plan_for(cfg)` builds `Plan{settings, drop, cap_field, strict_tools, api}` in this order: the section's numeric fields → the profile's reject list → the preset's **`params` JSON** (real field names, `null` = do not send, with `api` and `strict` as pseudo keys). `agent._model_for` picks `OpenAIChatModel`/`OpenAIResponsesModel` from `_client` (a create wrapper that pops the `drop` fields — library fields such as `stream_options` too) plus `_profile` (`merge_profile(openai_model_profile, {max_completion_tokens supported, strict allowed})`). `hint(text)` pulls the field out of a 400 body and states the JSON to put in — applied in `session._explain`, the connection test and the search agent. The connection test sends with the same plan (API and fields).
 - Presets: `temperature` defaults to **None (not sent)** — `-1` in the NOT NULL DB column (`TEMP_UNSET`); a `params` column (schema v11). `providers` and `maxParams` on `/presets`, plus `GET /catalog/providers`. Plugin: a *parameter JSON* field in the editor plus a provider guidance box (fills in example JSON), and auth/address guidance on the key form.
 - Everything else (user feedback): Hina's default instructions moved to English with the Korean speech style "~해요/~할까요?" (presets still on the old default text are refreshed automatically by `_migrate_default_text`) · the agent's scroll position survives a tab switch (`mountAgent` saves and restores scrollTop before detaching) · progress and results shown for approve / approve all / clone bot (left in the conversation as a `bubble note`) · snapshots can be named and renamed (`/checkpoint/rename`, `/card/checkpoint/rename`, `openSnapshotName`) · a lorebook `alwaysActive` badge and checkbox (turning it on clears the key) plus the agent's `always_active` · a per-tab change-count badge on the bot tabs (`refreshTabBadges`) · `start.bat` respects `RISUHINA_HOST` · **a full revision of the bundle README** (types 1 and 2, NSSM and pm2, Tailscale, Cloudflare and LAN, updating).
-- Verification: `tests/test_providers.py` (added to the gate), params/providers/rename checks in test_http, and the smoke test fixed to find the instructions textarea by placeholder. Released as v0.6.0. **test-server gets raised by the user pressing plugin `+` → backend update (doubling as the first real-use verification of the 0.5.2 updater)** — if that fails, overwrite with the zip over ssh (`nssm stop` first).
+- Verification: `tests/test_providers.py` (added to the gate), params/providers/rename checks in test_http, and the smoke test fixed to find the instructions textarea by placeholder. Released as v0.6.0. **the test server gets raised by the user pressing plugin `+` → backend update (doubling as the first real-use verification of the 0.5.2 updater)** — if that fails, overwrite with the zip over ssh (`nssm stop` first).
 
 ## 1. 2026-08-26 — round 3 + the rename (v0.5.0) (docs/04 Appendix G)
 
@@ -2479,7 +2488,7 @@ plugin the whole selected character, chats included, and `getChatFromIndex` read
 | Settings | opening settings replaces the tab row with sections (`getSettingsBar`) · cards reload after connecting (`refreshers`) · an API key / auth tab (add and edit modals) · preset `›` |
 | Verification | test_http `test_workspace_folders_and_family` and others, smoke updated. Gate ALL GREEN |
 
-**Deployment**: at the user's request, not deployed to test-server directly — the user verifies the plugin `+` → backend update path themselves. The old updater picks its asset by `Install.Package`+OS, so it takes the `Risu.Hina.*` zip too, and it looks for `*/pyserver/app` inside the zip, so the changed top-level folder name does not matter either.
+**Deployment**: at the user's request, not deployed to the test server directly — the user verifies the plugin `+` → backend update path themselves. The old updater picks its asset by `Install.Package`+OS, so it takes the `Risu.Hina.*` zip too, and it looks for `*/pyserver/app` inside the zip, so the changed top-level folder name does not matter either.
 
 ## 1-0. Night of 2026-08-26 — v0.5.2: the updater died moving its own interpreter, and the version gate
 
@@ -2487,7 +2496,7 @@ plugin the whole selected character, chats included, and `getChatFromIndex` read
 - Fix: the interpreter is **staged as `python.new`**, and `start.bat`/`start.sh` swap it in on the next startup (`python`→`python.old`). The same bundle (the `python/bundle.txt` stamp = Python version + lock hash) is skipped. **An install running the old launcher needs its launcher replaced by hand once** for the swap to happen (the updater leaves it as `start.bat.new`).
 - Fixed a bug where the plugin's `selectedValue()` read the `selected` attribute ahead of the user's own choice (key selection not taking, a missing keyRef). If the connection comes up late, it retries and uploads (`startReconnect`, watching for health to come up).
 - **Version gate**: when major.minor differ, the plugin refuses every call except `/health`, `/update/*`, `/plugin`, `/logs`, `/diag` and `/config`, and the header says "버전이 다릅니다 → 백엔드 업데이트로 / 플러그인 업데이트" (the versions differ → go to backend update / update the plugin). The backend update card moved to the **top of the connection tab**.
-- test-server recovery (done, directly over ssh): `manage.ps1 stop` → deleted the damaged `pyserver\python` and `python.new` → `Expand-Archive -Force` of the 0.5.2 zip over `D:\code` (keeping `data/`) → confirmed `bundle.txt`=`3.11.9 deps=4fe2e353af438144 pip` → restarted the NSSM service → `/health` 0.5.2.
+- the test server recovery (done, directly over ssh): `manage.ps1 stop` → deleted the damaged `pyserver\python` and `python.new` → `Expand-Archive -Force` of the 0.5.2 zip over `D:\code` (keeping `data/`) → confirmed `bundle.txt`=`3.11.9 deps=4fe2e353af438144 pip` → restarted the NSSM service → `/health` 0.5.2.
 - **NSSM operating rule**: the `RisuHina` service is `AppExit Restart`, so `manage.ps1 -Action stop` on its own (killing the process) just has NSSM bring it back moments later, and in between the status reads **Paused**. Replacing files or moving `data/` must go `nssm stop RisuHina` (or `Stop-Service RisuHina`) → do the work → `nssm start RisuHina`. nssm path: `C:\Users\<user>\AppData\Local\Microsoft\WinGet\Packages\NSSM.NSSM_…\win64\nssm.exe`. An ssh session carries an administrator token, so `setup.bat -Service` works as-is (if it is already registered it stops with "already exists" — run `uninstall.bat`, then register again).
 
 ## 1-1. 2026-08-26 — round 4 (v0.5.1)
@@ -2520,7 +2529,7 @@ Tests: test_http `test_card_assets` and `test_keys_and_agent_kinds`; in smoke, t
 ## 1b. What went in on 2026-08-25 — the release and all of M2
 
 **Operations**: M1.1 deployed (19:51) → v0.2.0 tagged and pushed → 0.2.0 deployed (20:03) → M2 ①–⑦ → v0.3.0 tagged and pushed → 0.3.0 deployed (21:01).
-Remote execution (`ssh test-server "powershell -File …deploy.ps1"`) is **something I can run myself** (the earlier "the classifier blocks it" was wrong). What does get blocked is
+Remote execution (`ssh <server> "powershell -File …deploy.ps1"`) is **something I can run myself** (the earlier "the classifier blocks it" was wrong). What does get blocked is
 `gh release create` (publishing externally) and compound remote commands with `del` mixed in. The script is `_stage\deploy.ps1` (generic: `*.py` + the newest `risu-hina-*.js`).
 
 **M2 ① backend asset store** (`assets.py`, commit `ba015b0`) — `data/assets/<sha256>.<ext>` globally, DB **v9** `asset_blobs`/`asset_keys(state present|missing|failed)`/`char_assets` (the manifest, in card order).
@@ -2531,7 +2540,7 @@ config `assets{maxItemBytes,gcDays,hubPull,hubWorkers,hubTimeoutSeconds}`, `pock
 **M2 ② plugin background importer** (`assets.ts syncAssets`, `a383b5b`) — automatic right after `state.upload()`. manifest → (if pulling, poll status → request the manifest again) → readImage for the missing keys only, **4 concurrent (web) / 6** → batch upload at 8MB / 50 items (up to 2 batches overlapping in flight) → `/assets/fail`. A 404 on the route means `unsupported` (the gate opens).
 `state.assetSync`/`assetGateReason` → read by the bot bar's `applyBlockReason` (`setAssetGate` deleted). A progress line, a bar, and 중단/다시 동기화 (abort / resync) on the bot card.
 
-**M2 ③ SQLite fast path** — `assets._fast_fill`: `file:…?mode=ro` + `query_only` + `busy_timeout`, with automatic detection of the key/value table (PocketRisu uses `kv(key TEXT, value BLOB)` with the original bytes as-is — measured on test-server). If `__jwt_secret` is present, `serverWrite:true` (a flag only).
+**M2 ③ SQLite fast path** — `assets._fast_fill`: `file:…?mode=ro` + `query_only` + `busy_timeout`, with automatic detection of the key/value table (PocketRisu uses `kv(key TEXT, value BLOB)` with the original bytes as-is — measured on the test server). If `__jwt_secret` is present, `serverWrite:true` (a flag only).
 
 **M2 ④ assets tab** (`tab-assets.ts`, `b8642be`) — the fifth bot tab (`BOT_TABS` += assets, 11 tabs). Grouped by field, search, status badges, item detail (key, hash, size), desktop thumbnails (readImage→blob, 40 cached), and format icons on web. Settings → 연결 → an **에셋 스토어** (asset store) card (saves savePath, store size, GC).
 **The header redraws only when the sync state changes** — drawing on every emit wiped the charx result (the smoke test caught it).
@@ -2563,11 +2572,11 @@ The asset sync is waited on by **asset editing and charx only** (반영 does not
 
 ```
 # (from 0.5.2 on, NSSM service) — for a hotfix, unpack the zip over D:\code or replace only app/*.py:
-#   ssh test-server "<nssm> stop RisuHina" → scp/Expand-Archive → ssh test-server "<nssm> start RisuHina" → /health in a new session
+#   ssh <server> "<nssm> stop RisuHina" → scp/Expand-Archive → ssh <server> "<nssm> start RisuHina" → /health in a new session
 # (the 0.4.x era, path D:\code\risu-elf — gone now)
-scp -q pyserver/app/*.py plugin/dist/risu-hina-<ver>.js test-server:D:/code/risu-elf/_stage/
-ssh test-server "powershell -ExecutionPolicy Bypass -File D:\code\risu-elf\_stage\deploy.ps1"   # stop → app.bak-<time> → replace → delete __pycache__ → start
-ssh test-server "curl.exe -s http://127.0.0.1:6020/health"   # must be a new SSH session
+scp -q pyserver/app/*.py plugin/dist/risu-hina-<ver>.js <server>:D:/code/risu-elf/_stage/
+ssh <server> "powershell -ExecutionPolicy Bypass -File D:\code\risu-elf\_stage\deploy.ps1"   # stop → app.bak-<time> → replace → delete __pycache__ → start
+ssh <server> "curl.exe -s http://127.0.0.1:6020/health"   # must be a new SSH session
 ```
 The original `deploy.ps1` is in the session scratchpad; a copy is still in the remote `_stage`. If the seeds change, upload `_stage\seeds\` too (the script copies it when it is there).
 The plugin is reinstalled into RisuAI by the user. **Move `data/` with the server stopped** (§4).
@@ -2582,7 +2591,7 @@ Evidence in `data/forensic-20260823/`. Rule: **move `data/` with the server stop
 1. ~~**GitHub release v0.3.1**~~ — done (21:20). Procedure for the next release — **run it only when the user asks for a release (§0)**: bump the version in 5 places → `pyserver/.venv/Scripts/python.exe tools/release.py` (this refreshes `plugin/Risu.Hina.Plugin.js` in the repository too) → gate → commit (bundle included), tag, push → deploy →
    `cd release && gh release create v<ver> -R nilsonwhang3-spec/risu-hina --title "Risu Hina <ver>" --notes-file notes-<ver>.md <the 2 zips> Risu.Hina.Plugin.js SHA256SUMS-<ver>.txt`
    (run it in manual permission mode, since the classifier blocks it in auto mode). The user has to reinstall `plugin/Risu.Hina.Plugin.js` into RisuAI by hand once before `+` starts appearing.
-2. **Real-use check (M2)** — PocketRisu (test-server, fastPath on): open the panel → the progress line on the bot card → complete within seconds (reading SQLite directly) → thumbnails on the assets tab → build charx → save from the files tab → **import into PocketRisu** (whether the assets, lore, triggers, Regex and CBS render the same as the original — this is the core verification for charx). Web Risu (elf.example.com): hub pull progress, 0 items the second time, the gate.
+2. **Real-use check (M2)** — PocketRisu (the test server, fastPath on): open the panel → the progress line on the bot card → complete within seconds (reading SQLite directly) → thumbnails on the assets tab → build charx → save from the files tab → **import into PocketRisu** (whether the assets, lore, triggers, Regex and CBS render the same as the original — this is the core verification for charx). Web Risu (elf.example.com): hub pull progress, 0 items the second time, the gate.
    Agent: "turn the profile black and white and add it as an extra asset" → fetch_assets → PIL → propose_asset_add → approve → check the card in RisuAI.
 3. **Security review of the public backend** — `elf.example.com`: token length, the rate limit on failures (present: 20 per 60 seconds), the `tokenRequired:false` exposure on `/health`, and whether `/diag/*`, `/assets/*` and `/files/download` sit behind auth (AUTH_EXEMPT is health and plugin.js only — confirmed).
 4. **On hold, written up but not started**: an MCP surface on the backend so Claude Code and other clients can work
@@ -2597,7 +2606,7 @@ Evidence in `data/forensic-20260823/`. Rule: **move `data/` with the server stop
 bash tests/gate.sh                               # gate (system python is 3.6 → venv automatically)
 pyserver/.venv/Scripts/python.exe tools/release.py   # release assets (the system python gives a SyntaxError)
 node plugin/build.config.mjs && node tests/plugin_smoke.mjs
-ssh test-server "curl.exe -s http://127.0.0.1:6020/diag"          # assets{blobs,bytes,fastPath,serverWrite}
-ssh test-server "curl.exe -s \"http://127.0.0.1:6020/assets/status?charKey=<ck>\""
-ssh test-server "curl.exe -s \"http://127.0.0.1:6020/charx/preview?charKey=<ck>\""
+ssh <server> "curl.exe -s http://127.0.0.1:6020/diag"          # assets{blobs,bytes,fastPath,serverWrite}
+ssh <server> "curl.exe -s \"http://127.0.0.1:6020/assets/status?charKey=<ck>\""
+ssh <server> "curl.exe -s \"http://127.0.0.1:6020/charx/preview?charKey=<ck>\""
 ```
