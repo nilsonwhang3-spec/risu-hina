@@ -5,9 +5,10 @@
 
 ## 시작
 
-Docker Engine 또는 Docker Desktop 과 Docker Compose 가 필요하다. 현재 이미지는 저장소의
-CPython 3.11 Linux x86_64 의존성 해시 잠금을 사용하므로 **`linux/amd64`만 지원한다.**
-ARM 기기는 Docker 의 amd64 에뮬레이션이 필요하며, 네이티브 ARM 빌드는 지원하지 않는다.
+Docker Engine 또는 Docker Desktop 과 Docker Compose 가 필요하다. **`linux/amd64`와 `linux/arm64`를 지원한다.**
+Compose 는 Docker 호스트의 아키텍처로 빌드한다. AMD64 서버와 ARM64 서버/Apple Silicon 의
+Linux 컨테이너 모두 네이티브 이미지를 사용하며, Dockerfile 이 CPython 3.11 에 맞는 의존성 해시 잠금을 선택한다.
+두 잠금의 패키지 버전은 같고, CPU 별로 컴파일된 wheel 의 해시만 달라진다.
 
 ```sh
 git clone https://github.com/nilsonwhang3-spec/risu-hina.git
@@ -143,11 +144,39 @@ docker compose ps
 ```sh
 docker compose config --quiet
 python3 tests/test_updater.py
-docker build --platform linux/amd64 -t risu-hina:test .
+docker build -t risu-hina:test .
 python3 tests/test_docker.py --image risu-hina:test
 ```
 
 스모크 테스트는 고유 이름의 컨테이너/볼륨을 만들고 끝나면 그것만 제거한다. 비루트 기동, healthcheck,
 HTTP 인증, 플러그인 번들/기본 스킬 제공, 자체 업데이트 거부, 정상 종료, 컨테이너 재생성 후
 토큰·설정·챗 편집·이미지 유지 여부를 확인한다. 모델 API 호출이나 실제 RisuAI 브라우저 조작은 하지 않는다.
-GitHub Actions 도 이미지 빌드와 이 검사 및 기존 HTTP 회귀 검사를 실행하며 이미지를 배포하지 않는다.
+GitHub Actions 는 `ubuntu-24.04`(AMD64)와 `ubuntu-24.04-arm`(ARM64) 네이티브 러너에서
+각각 이미지 빌드, 이 검사, 기존 HTTP 회귀 검사를 실행하며 이미지를 배포하지 않는다.
+다른 CPU 용으로 교차 빌드하려면 `docker build --platform linux/arm64 ...` 처럼 대상을 지정한다.
+이 Dockerfile 은 대상 Python 을 실행해 패키지를 설치하므로, 교차 빌드에는 해당 CPU 의 원격 빌더나
+Docker 에 설정된 에뮬레이션이 필요하다. 네이티브 빌드에는 에뮬레이션이 필요 없다.
+
+### ARM64 의존성 잠금 재생성
+
+`pyserver/locks/linux-aarch64-cp311.txt` 는 기존 `linux-x86_64-cp311.txt` 의 모든 패키지 버전을
+유지한 채 ARM64 wheel 을 다운로드하고, 저장소의 `genlock.py` 로 SHA-256 을 계산해 생성한다.
+저장소 루트에서 다음 명령을 실행한다. wheel 은 실행하지 않으므로 AMD64 머신에서도 생성할 수 있다.
+
+```sh
+wheel_dir="$(mktemp -d)"
+python3 - <<'PYLOCK' > "$wheel_dir/requirements.txt"
+from pathlib import Path
+for line in Path("pyserver/locks/linux-x86_64-cp311.txt").read_text().splitlines():
+    if line.strip() and not line.startswith("#"):
+        print(line.split()[0])
+PYLOCK
+python3 -m pip download --only-binary=:all: --no-deps \
+  --platform manylinux2014_aarch64 --platform manylinux_2_17_aarch64 \
+  --platform manylinux_2_28_aarch64 --platform linux_aarch64 \
+  --python-version 3.11 --implementation cp --abi cp311 --abi abi3 --abi none \
+  --dest "$wheel_dir/wheels" -r "$wheel_dir/requirements.txt"
+python3 pyserver/tools/genlock.py "$wheel_dir/wheels" > pyserver/locks/linux-aarch64-cp311.txt
+```
+
+의존성 버전을 바꿀 때는 두 플랫폼 잠금을 함께 갱신하고, 두 네이티브 CI 작업이 통과하는지 확인한다.

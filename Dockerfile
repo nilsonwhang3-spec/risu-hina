@@ -3,10 +3,14 @@ FROM python:3.11-slim-bookworm
 ARG TARGETARCH
 WORKDIR /app/pyserver
 
-# This lock contains the project's hashed CPython 3.11 Linux x86_64 wheels.
-COPY pyserver/locks/linux-x86_64-cp311.txt /tmp/requirements.lock
-RUN test "$TARGETARCH" = "amd64" || (echo "This image currently supports linux/amd64 only." >&2; exit 1)
-RUN python -m pip install --no-cache-dir --require-hashes --only-binary=:all: -r /tmp/requirements.lock
+# Compiled wheel hashes are specific to the target CPU architecture.
+COPY pyserver/locks/linux-*-cp311.txt /tmp/locks/
+RUN case "$TARGETARCH" in \
+        amd64) lockfile=linux-x86_64-cp311.txt ;; \
+        arm64) lockfile=linux-aarch64-cp311.txt ;; \
+        *) echo "Unsupported architecture: $TARGETARCH (expected amd64 or arm64)." >&2; exit 1 ;; \
+    esac \
+    && python -m pip install --no-cache-dir --require-hashes --only-binary=:all: -r "/tmp/locks/$lockfile"
 
 RUN groupadd --gid 10001 risuhina \
     && useradd --uid 10001 --gid risuhina --home-dir /data --create-home --no-log-init risuhina
