@@ -17,9 +17,13 @@
   every other route is 503 - and the database is left as it was.
 - Verified: tests/test_schema_guard.py (refused, 503 elsewhere, schema number untouched; installKind standard /
   docker), tests/version_hints.mjs (backendBehind wording per install kind, the gate unchanged). Both in the gate.
-- PR #4 review asks the contributor to keep `check()` querying releases in Docker (newer/latest reported,
-  `installable: false` with the rebuild path), a test that keeps the two Linux locks' `package==version` sets
-  equal, and a free docs number.
+- **PR #4 (Docker Compose for AMD64/ARM64, by an outside contributor) merged** (rebase; aarch64 lock hashes
+  checked against PyPI; native AMD64/ARM64 CI green). Follow-up on master instead of a second review round:
+  `updater.check()` still looks up the release in Docker (`image_managed()`), reports `newer`/`latest`, and
+  only refuses the install (`installable: false`, the tag and the rebuild command as `reason`; the existing
+  update card already shows it); `/health.installKind` uses the same function; tests/test_updater.py asserts
+  that and keeps the two Linux locks' `package==version` sets equal (in the gate and the Docker CI);
+  tests/test_docker.py follows the new contract; the Docker guide moved to docs/17-docker.md (07 was taken).
 
 ## 0.15.33 (2026-10-04): §1-88 ~ §1-90 released
 

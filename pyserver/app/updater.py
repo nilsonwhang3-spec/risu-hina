@@ -112,11 +112,28 @@ def _ver_tuple(v: str) -> tuple:
     return tuple(nums) if nums else (0,)
 
 
+def image_managed() -> bool:
+    """The image owns the code (Docker: RISUHINA_DISABLE_SELF_UPDATE); updates
+    are a rebuild and a recreated container, never an in-place install."""
+    return os.environ.get("RISUHINA_DISABLE_SELF_UPDATE", "").strip().lower() in ("1", "true", "yes", "on")
+
+
 def check() -> dict:
-    # Container code is replaced by rebuilding the image, never in-place.
-    if os.environ.get("RISUHINA_DISABLE_SELF_UPDATE", "").strip().lower() in ("1", "true", "yes", "on"):
-        return {"ok": False, "configured": True, "current": config.VERSION,
-                "error": "이 설치에서는 자체 업데이트를 사용할 수 없습니다. Docker 이미지를 다시 빌드하고 컨테이너를 재생성해 주세요."}
+    info = _check_release()
+    # Container code is replaced by rebuilding the image, never in-place. The
+    # release is still looked up (§1-91): the plugin updates itself from
+    # master, so a Docker backend has to be told a newer one exists - only the
+    # install is refused, with the way to do it.
+    if image_managed() and info.get("ok"):
+        target = f"v{info['latest']}" if info.get("newer") and info.get("latest") else "새 릴리스"
+        info = {**info, "installable": False,
+                "reason": (f"Docker 설치는 앱 안에서 업데이트하지 않습니다. 체크아웃을 {target} 태그로 바꾸고 "
+                           "`docker compose build --pull && docker compose up -d --force-recreate` 로 이미지를 "
+                           "다시 빌드해 주세요 (docs/17-docker.md).")}
+    return info
+
+
+def _check_release() -> dict:
     name = repo()
     if not name:
         return {"ok": False, "configured": False,

@@ -37,6 +37,7 @@ run "three-way merge"         "$PY" tests/test_merge.py
 run "edit-session lifecycle"  "$PY" tests/test_lifecycle.py
 run "backend HTTP (black-box)" "$PY" tests/test_http.py
 run "newer database refused, not migrated down" "$PY" tests/test_schema_guard.py
+run "self-update in Docker, Linux lock parity" "$PY" tests/test_updater.py
 # The optional MCP add-on: install (cached in .cache/mcp-addon after the first
 # run), the always-tokened /mcp route, and the panel bridge.
 run "MCP add-on and bridge" "$PY" tests/test_mcp.py

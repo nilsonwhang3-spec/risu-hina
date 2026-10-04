@@ -158,8 +158,7 @@ def _install_kind() -> str:
     """How this backend is updated: 'docker' when the image owns the code
     (RISUHINA_DISABLE_SELF_UPDATE, set by the Dockerfile), else 'standard'
     (the in-app updater). The panel words its "backend is behind" hint by it."""
-    v = os.environ.get("RISUHINA_DISABLE_SELF_UPDATE", "").strip().lower()
-    return "docker" if v in ("1", "true", "yes", "on") else "standard"
+    return "docker" if updater.image_managed() else "standard"
 
 
 def h_health(arg: dict) -> dict:

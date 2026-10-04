@@ -129,9 +129,20 @@ def run(image: str) -> None:
         ]})
         require(status == 200 and uploaded.get("stored") == 1, "store an image asset")
 
-        for path, expected_status in (("/update/check", 200), ("/update/apply", 400)):
-            status, result = request(base, path, token, {})
-            require(status == expected_status and "Docker" in result.get("error", ""), "self-update must explain the image upgrade path")
+        # The release is still looked up (a Docker backend must hear about a
+        # newer one); only the install is refused. Offline, the check reports
+        # its network error instead - either way nothing is installed.
+        status, result = request(base, "/update/check", token, {})
+        require(status == 200, "update check answers")
+        if result.get("ok"):
+            require(result.get("installable") is False and "Docker" in (result.get("reason") or ""),
+                    "the check says why it cannot install and how to update the image")
+        status, result = request(base, "/update/apply", token, {})
+        require((status == 400 and ("Docker" in result.get("error", "") or not result.get("updated")))
+                or (status == 200 and result.get("updated") is False),
+                f"self-update must never install in the image ({status} {result})")
+        _, health = request(base, "/health")
+        require(health.get("installKind") == "docker", "health names the image-managed install")
         require(request(base, "/health")[0] == 200, "refusing self-update should leave the server running")
         print("ok: image-managed update refusal (read-only root filesystem)")
 
