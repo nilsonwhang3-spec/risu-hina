@@ -1,4 +1,10 @@
-# 06. Implementation status — as of 2026-10-04 (v0.15.33, Risu Hina)
+# 06. Implementation status — as of 2026-10-04 (v0.15.34, Risu Hina)
+
+## 0.15.34 (2026-10-04): GitHub #3, §1-91, Docker (PR #4) released
+
+The 반영 lock now goes up before the save-clock read (GitHub #3); the panel says when the backend is an older
+patch than the plugin, and a backend refuses a database written by a newer one (§1-91); Docker Compose for
+AMD64/ARM64 from an outside contributor (PR #4), with the in-app update check kept alive in Docker.
 
 ## unreleased (2026-10-04): §1-91 versions out of step: the backend behind the plugin, a database from a newer backend
 

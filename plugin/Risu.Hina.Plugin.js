@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.15.33
+//@display-name Risu Hina v0.15.34
 //@api 3.0
-//@version 0.15.33
+//@version 0.15.34
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -59,6 +59,15 @@
   }
   function isRaw(v) {
     return !!v && typeof v === "object" && "_raw" in v && Object.keys(v).length === 1;
+  }
+  function backendBehind(plugin, backend, installKind = "") {
+    const v = (s) => s.split(".").map((x) => parseInt(x, 10) || 0);
+    if (!backend) return "";
+    const [pa, pb, pc] = v(plugin);
+    const [ba, bb, bc] = v(backend);
+    if (pa !== ba || pb !== bb || !((pc ?? 0) > (bc ?? 0))) return "";
+    const how = installKind === "docker" ? "\uC774 \uBC31\uC5D4\uB4DC\uB294 Docker \uC124\uCE58\uC785\uB2C8\uB2E4 - \uC774\uBBF8\uC9C0\uB97C \uC0C8 \uBC84\uC804\uC73C\uB85C \uB2E4\uC2DC \uBC1B\uAC70\uB098 \uBE4C\uB4DC\uD55C \uB4A4 \uCEE8\uD14C\uC774\uB108\uB97C \uB2E4\uC2DC \uB9CC\uB4E4\uC5B4 \uC8FC\uC138\uC694." : "\u2699 \u2192 \uC815\uBCF4 \xB7 \uB85C\uADF8 \u2192 \uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB97C \uB20C\uB7EC \uC8FC\uC138\uC694.";
+    return `\uBC31\uC5D4\uB4DC v${backend} \uAC00 \uD50C\uB7EC\uADF8\uC778 v${plugin} \uBCF4\uB2E4 \uC624\uB798\uB410\uC2B5\uB2C8\uB2E4. \uC0C8 \uAE30\uB2A5 \uC77C\uBD80\uAC00 \uB3D9\uC791\uD558\uC9C0 \uC54A\uC744 \uC218 \uC788\uC2B5\uB2C8\uB2E4. ${how}`;
   }
   function versionGate(plugin, backend) {
     const mm = (v) => v.split(".").slice(0, 2).map((x) => parseInt(x, 10) || 0);
@@ -177,11 +186,16 @@
               body
             );
           }
+          if (body.ok === false && body.error) {
+            this.route = "direct";
+            this.tokenSafe = true;
+            throw new BackendError(503, String(body.error), body);
+          }
           this.route = "direct";
           this.tokenSafe = true;
           this.lastHealth = body;
           this.probeInfo = "";
-          this.gate = versionGate("0.15.33", String(body.version || ""));
+          this.gate = versionGate("0.15.34", String(body.version || ""));
           return body;
         }
         /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -3771,6 +3785,12 @@ name: ${nm}
          * persona.ts) and when RisuAI's copy moved since the last read.
          */
         async personaWriteBack(key = this.persona?.key ?? "") {
+          return foregroundWrite(async (report) => {
+            report("\uD398\uB974\uC18C\uB098\uB97C RisuAI\uC5D0 \uBC18\uC601\uD558\uB294 \uC911\u2026");
+            return this.performPersonaWriteBack(key);
+          });
+        }
+        async performPersonaWriteBack(key) {
           const row = await transport.get("/persona", { key });
           if (!row.dirty) return { written: false, name: row.work.name };
           if (row.isNew) {
@@ -4151,8 +4171,9 @@ name: ${nm}
          * differs from the baseline; the host write replaces the field either way.
          */
         async writeBack() {
-          const since = await persistBaseline();
-          const r = await foregroundWrite((report) => {
+          let since = null;
+          const r = await foregroundWrite(async (report) => {
+            since = await persistBaseline();
             report("\uB300\uD654 \uC800\uC7A5 \uBC0F \uBC18\uC601 \uACB0\uACFC \uD655\uC778 \uC911\u2026");
             return this.performWriteBack();
           });
@@ -4993,11 +5014,14 @@ name: ${nm}
          */
         async cardWriteBack(progress = () => {
         }) {
-          const since = await persistBaseline();
-          const r = await foregroundWrite((report) => this.performCardWriteBack((text2) => {
-            report(text2);
-            progress(text2);
-          }));
+          let since = null;
+          const r = await foregroundWrite(async (report) => {
+            since = await persistBaseline();
+            return this.performCardWriteBack((text2) => {
+              report(text2);
+              progress(text2);
+            });
+          });
           if (r.verified && r.mode !== "noop") watchPersist(since);
           return r;
         }
@@ -16547,10 +16571,10 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           return;
         }
         if (!r.newer) {
-          const mismatch = r.current !== "0.15.33";
+          const mismatch = r.current !== "0.15.34";
           const ahead = r.ahead ?? (!!r.latest && r.latest !== r.current);
           say(
-            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.33"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
+            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.34"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
             mismatch || ahead ? "" : "ok"
           );
           return;
@@ -16641,7 +16665,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.15.33",
+            version: "0.15.34",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -17339,7 +17363,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.33"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.34"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -25040,13 +25064,22 @@ ${negative.value.trim()}
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.33"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.34"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
       healthEl.title = transport.versionGate;
     } else {
       healthEl.appendChild(el("span", { class: "hint", text: `\uBC31\uC5D4\uB4DC v${h.version}` }));
+      const behind = backendBehind("0.15.34", h.version, h.installKind);
+      if (behind) {
+        const b = el("button", { class: "ghost tiny behindchip", text: "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8 \uD544\uC694", title: behind });
+        b.addEventListener("click", () => {
+          shellNotice(behind, "err");
+          if (h.installKind !== "docker") setTab("settings");
+        });
+        healthEl.appendChild(b);
+      }
       if (!h.agentReady) {
         healthEl.appendChild(el("span", { class: "hint", text: "\xB7 AI \uBBF8\uC124\uC815" }));
       }
@@ -25132,7 +25165,7 @@ ${negative.value.trim()}
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.15.33" }),
+        el("span", { class: "dim", text: "v0.15.34" }),
         healthEl,
         el("span", { class: "spacer" }),
         // 승인 / 반영 for the whole bot, from every tab (§1-76).
@@ -25477,6 +25510,6 @@ ${negative.value.trim()}
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.15.33"} loaded`);
+    console.log(`[risu-hina] v${"0.15.34"} loaded`);
   })();
 })();
