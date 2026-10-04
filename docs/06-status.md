@@ -1,5 +1,28 @@
 # 06. Implementation status — as of 2026-10-04 (v0.15.34, Risu Hina)
 
+## unreleased (2026-10-04): §1-93 personas: the selected one saves as a copy, RisuAI-side changes, GitHub #5
+
+- **Stale "selected":** which persona RisuAI has selected was read only when the persona list was first loaded
+  (or on 다시 읽기), so after switching persona in RisuAI and coming back, the panel (and the AI tools, which read
+  the backend's synced flag) still called the old one selected. Every panel open (shell `bootstrap`) now re-reads
+  the persona list once it has been loaded. 반영 itself always checked RisuAI live.
+- **반영 of the selected persona = a new persona (사본):** RisuAI keeps a live copy of the selected persona that
+  plugins cannot write (persona.ts), so instead of refusing, 반영 appends the working copy as a new persona —
+  the edited name, or `<name> (사본)` when not renamed; the original's picture, note and large-portrait setting
+  come along unless a new picture was set. The original's working copy is reset to RisuAI's (auto snapshot
+  "버리기 직전" keeps the edit), the list is re-read and the copy opens. The bar button reads "사본으로 반영".
+  `propose_persona_writeback` no longer refuses; it proposes the copy, and the plugin decides at approval time
+  from RisuAI's live selection. `writePersona` still refuses the selected one as a guard.
+- **RisuAI changed a persona that has unapplied edits here:** sync used to move the baseline silently, so 반영
+  overwrote RisuAI's change with no word. Now the row is flagged `risuChanged` (kept in base_json, no schema
+  change; cleared by 반영 and 변경 취소), RisuAI's version is saved as an auto snapshot "RisuAI 쪽 변경 (반영 전에
+  받아 둠)", and the panel (notice + list badge), list_personas/read_persona and the 반영 proposal say 반영 will
+  overwrite it. A clean working copy still follows RisuAI as before.
+- **GitHub #5:** after 반영 of a new picture the centre picture showed the old one: the cached copy keeps its
+  name (`RisuAI 프로필.png`), so the blob cache (keyed by path) returned the old object URL. The picture is now
+  stamped with RisuAI's asset key (`workspaceImage(..., { stamp: iconKey })`), which changes with the picture —
+  also when it changes on RisuAI's side or another device.
+
 ## unreleased (2026-10-04): §1-92 the Docker image is an official release artifact (GHCR)
 
 - **What:** every published GitHub release now also ships `ghcr.io/nilsonwhang3-spec/risu-hina` for linux/amd64

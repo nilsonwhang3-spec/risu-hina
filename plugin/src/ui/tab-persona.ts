@@ -11,8 +11,9 @@
  * approved AI proposal lands in the same copy, 🔖 / 🕘 keep and restore
  * snapshots, and 반영 (the bar, or the title-row 반영 next to the bot and
  * chats) writes it into RisuAI. RisuAI's SELECTED persona can be edited here
- * but not written: RisuAI keeps a live copy of it that plugins cannot write
- * (persona.ts), so 반영 waits until another persona is selected there.
+ * but not written in place: RisuAI keeps a live copy of it that plugins cannot
+ * write (persona.ts), so its 반영 saves the edit as a new persona (a copy).
+ * The selection is re-read each time the panel opens (shell bootstrap).
  *
  * Built once per persona and patched in place on the panel's many re-renders:
  * a rebuild would drop the caret out of the description box.
@@ -25,7 +26,7 @@ import { bindAgent, mountAgent } from './agentpane';
 import { personaAvatar, newPersonaButton } from './tab-chats';
 import { shellNotice, openSnapshotName } from './chatbar';
 import { workspaceImage } from './blobimg';
-import { SELECTED_REFUSAL } from '../persona';
+import { SELECTED_COPY_NOTE, copyName } from '../persona';
 
 const IMAGE_RE = /\.(png|jpe?g|webp|gif|avif)$/i;
 
@@ -76,9 +77,10 @@ export function renderPersonaTab(mount: HTMLElement): void {
       const row = el('div', { class: 'chatitem' + (r.key === state.persona?.key ? ' current' : '') }, [
         personaAvatar(r.iconKey, r.work.name || r.name),
         el('span', { class: 'grow', text: r.work.name || r.name || '(이름 없음)' }),
-        r.selected ? el('span', { class: 'badge', text: '선택됨', title: 'RisuAI에서 지금 선택된 페르소나 - 반영은 다른 페르소나를 고른 뒤에 됩니다' }) : null,
+        r.selected ? el('span', { class: 'badge', text: '선택됨', title: 'RisuAI에서 지금 선택된 페르소나 - 반영하면 새 페르소나(사본)로 저장됩니다' }) : null,
         r.isNew ? el('span', { class: 'badge', text: '새로 만듦' }) : null,
         r.dirty ? el('span', { class: 'badge warn', text: `미반영 ${r.total}` }) : null,
+        r.risuChanged ? el('span', { class: 'badge warn', text: 'RisuAI도 바뀜', title: 'RisuAI 쪽에서도 바뀌었습니다 - 반영하면 덮어씁니다' }) : null,
       ]);
       row.addEventListener('click', async () => {
         if (r.key === state.persona?.key) return;
@@ -136,7 +138,12 @@ export function renderPersonaTab(mount: HTMLElement): void {
       picBox.appendChild(workspaceImage(r.work.image, '새 프로필 사진'));
       picNote.textContent = `새 사진: ${r.work.image.split('/').pop()} (반영하면 바뀝니다)`;
     } else {
-      picBox.appendChild(r.iconPath ? workspaceImage(r.iconPath, '프로필 사진') : personaAvatar(r.iconKey, r.work.name, 'personabig'));
+      // The cached copy keeps its name ('RisuAI 프로필.png') when the picture
+      // changes; RisuAI's asset key does not, so it stamps the blob cache -
+      // otherwise the old picture's object URL came back after 반영 (#5).
+      picBox.appendChild(r.iconPath
+        ? workspaceImage(r.iconPath, '프로필 사진', { stamp: r.iconKey })
+        : personaAvatar(r.iconKey, r.work.name, 'personabig'));
       picNote.textContent = r.iconKey ? '' : '프로필 사진이 없습니다';
     }
   };
@@ -195,13 +202,16 @@ export function renderPersonaTab(mount: HTMLElement): void {
   const undoPic = el('button', { class: 'ghost tiny', text: '사진 되돌리기' });
   undoPic.addEventListener('click', () => { void state.editPersona({ image: '' }).catch((e) => shellNotice(msg(e), 'err')); });
 
-  const lockNote = el('div', { class: 'notice', style: { display: 'none', marginBottom: '10px' }, text: SELECTED_REFUSAL });
+  const lockNote = el('div', { class: 'notice', style: { display: 'none', marginBottom: '10px' }, text: SELECTED_COPY_NOTE });
+  const driftNote = el('div', { class: 'notice warn', style: { display: 'none', marginBottom: '10px' },
+    text: '작업본에 미반영 변경이 있는 동안 RisuAI 쪽에서도 이 페르소나가 바뀌었습니다. 반영하면 RisuAI 쪽 변경을 덮어씁니다. '
+      + 'RisuAI 버전은 🕘 버전의 자동 백업 “RisuAI 쪽 변경” 으로 남겨 두었고, 변경 취소를 누르면 RisuAI 버전으로 돌아갑니다.' });
   const openFolder = el('button', { class: 'ghost tiny', text: '파일 탭에서 열기' });
   openFolder.addEventListener('click', () => state.requestOpenFile(state.personaFolder + '/'));
   const folderLine = el('span', { class: 'hint grow' });
 
   pane.centre.appendChild(el('div', { class: 'pad personaedit' }, [
-    lockNote,
+    lockNote, driftNote,
     el('div', { class: 'personagrid' }, [
       el('div', { class: 'personaleft' }, [
         picBox, picNote,
@@ -226,15 +236,18 @@ export function renderPersonaTab(mount: HTMLElement): void {
 
   // --- the bar: 반영 · 스냅샷 · 버전 · 변경 취소, like the bot bar
   const applyBadge = el('span', { class: 'badge warn applybadge', style: { display: 'none' } });
+  const applyLabel = el('span', { class: 'tool-label', text: '반영' });
   const applyBtn = el('button', { class: 'tool', dataset: { tool: 'persona-apply' }, title: '이 페르소나의 작업본을 RisuAI에 반영합니다' }, [
-    el('span', { class: 'glyph', text: TOOL.apply }), el('span', { class: 'tool-label', text: '반영' }), applyBadge,
+    el('span', { class: 'glyph', text: TOOL.apply }), applyLabel, applyBadge,
   ]) as HTMLButtonElement;
   applyBtn.addEventListener('click', async () => {
     await flush();
     applyBtn.disabled = true;
     try {
       const r = await state.personaWriteBack();
-      shellNotice(r.written ? `페르소나 '${r.name}' 을(를) RisuAI에 반영하고 저장을 확인했습니다.` : '반영할 변경이 없습니다.', 'ok');
+      shellNotice(r.copied
+        ? `선택된 페르소나라 새 페르소나 '${r.name}' (사본)으로 RisuAI에 저장했습니다. 원본은 그대로입니다.`
+        : r.written ? `페르소나 '${r.name}' 을(를) RisuAI에 반영하고 저장을 확인했습니다.` : '반영할 변경이 없습니다.', 'ok');
     } catch (e) {
       shellNotice('반영하지 못했습니다: ' + msg(e), 'err');
     } finally {
@@ -279,6 +292,7 @@ export function renderPersonaTab(mount: HTMLElement): void {
     drawPic(r);
     undoPic.style.display = r.work.image ? '' : 'none';
     lockNote.style.display = r.selected ? '' : 'none';
+    driftNote.style.display = r.risuChanged ? '' : 'none';
     folderLine.textContent = `프로젝트 폴더: ${r.folder}`;
     const parts: string[] = [];
     if (r.work.name !== r.base.name) parts.push('이름');
@@ -287,8 +301,11 @@ export function renderPersonaTab(mount: HTMLElement): void {
     summary.textContent = parts.length ? parts.join(' · ') + ' 변경' : '변경 없음';
     applyBadge.textContent = String(r.total);
     applyBadge.style.display = r.total ? '' : 'none';
-    applyBtn.classList.toggle('dimmed', r.selected);
-    applyBtn.title = r.selected ? SELECTED_REFUSAL : '이 페르소나의 작업본을 RisuAI에 반영합니다';
+    const asCopy = r.selected && !r.isNew;
+    applyLabel.textContent = asCopy ? '사본으로 반영' : '반영';
+    applyBtn.title = asCopy
+      ? `선택된 페르소나라 새 페르소나 '${copyName(r.base.name, r.work.name)}' 로 저장합니다 (원본은 그대로)`
+      : '이 페르소나의 작업본을 RisuAI에 반영합니다';
     discard.style.display = r.dirty ? '' : 'none';
     discard.title = r.isNew ? '아직 RisuAI에 없는 새 페르소나를 지웁니다 (폴더는 남습니다)' : '이 페르소나의 미반영 변경을 버리고 RisuAI 상태로 되돌립니다';
     applyBtn.title = r.isNew ? '이 새 페르소나를 RisuAI 페르소나 목록에 추가합니다' : applyBtn.title;

@@ -95,6 +95,9 @@ def _icon_cached(row: dict) -> bool:
 
 
 NEW_PREFIX = "new:"
+# Kept in base_json beside name/prompt (no schema change): RisuAI moved the
+# baseline under unapplied work. _base() drops it, so commit() clears it.
+RISU_CHANGED = "risuChanged"
 
 
 def _is_new(key: str) -> bool:
@@ -117,6 +120,9 @@ def shape(row: dict) -> dict:
         "isNew": new,
         "folder": row["folder"] or "", "base": base, "work": work,
         "dirty": new or total > 0, "total": total,
+        # RisuAI changed this persona while it had unapplied edits here (sync):
+        # 반영 would overwrite that change, so the panel says so.
+        "risuChanged": bool(not new and total > 0 and db.unjs(row["base_json"], {}).get(RISU_CHANGED)),
         "iconPath": (row["icon_path"] or "") if _icon_cached(row) else "",
         "iconKey": row["icon_key"] or "",
     }
@@ -135,8 +141,9 @@ def sync(personas: list[dict]) -> list[dict]:
     A persona RisuAI changed on its own side (the user edited it in RisuAI)
     moves the baseline. The working copy follows only when it had nothing of
     its own - otherwise the user's unsaved edit would silently vanish, which
-    is the one thing a working copy exists to prevent; it stays, and 반영
-    will overwrite RisuAI's change with it, as the panel shows.
+    is the one thing a working copy exists to prevent; it stays, flagged
+    `risuChanged` (반영 would overwrite RisuAI's change, as the panel shows),
+    and RisuAI's version is kept as an automatic snapshot to go back to.
     """
     if not isinstance(personas, list):
         raise PersonaError("personas 는 목록이어야 합니다")
@@ -170,10 +177,18 @@ def sync(personas: list[dict]) -> list[dict]:
                     "icon_path, selected, gone, updated_at) VALUES(?,?,?,?,?,?,?,?,?,0,?)",
                     (key, pid, idx, folder, db.js(base), db.js(_fresh(base)), "", "", selected, now))
             else:
-                old = _base(db.unjs(row["base_json"], {}))
+                stored = db.unjs(row["base_json"], {})
+                old = _base(stored)
                 work = _work(db.unjs(row["work_json"], {}))
+                flagged = bool(isinstance(stored, dict) and stored.get(RISU_CHANGED))
                 if old != base and work == _fresh(old):
                     work = _fresh(base)
+                elif old != base and work != _fresh(base):
+                    flagged = True
+                    checkpoint_create(key, "RisuAI 쪽 변경 (반영 전에 받아 둠)", kind="auto", data=_fresh(base))
+                    log.info("persona %s: changed in RisuAI under unapplied edits", key)
+                if flagged and work != _fresh(base):
+                    base = {**base, RISU_CHANGED: True}
                 icon_key, icon_path = row["icon_key"] or "", row["icon_path"] or ""
                 if not icon:
                     # RisuAI dropped the picture: forget it, but the cached
@@ -388,6 +403,7 @@ def reset(key: str) -> dict:
     if p["dirty"]:
         checkpoint_create(key, "버리기 직전", kind="auto")
     _save_work(key, _fresh(p["base"]))
+    db.execute("UPDATE personas SET base_json = ? WHERE pkey = ?", (db.js(_base(p["base"])), key))
     return {**shape(_need(key)), "discarded": p["total"]}
 
 
@@ -558,6 +574,8 @@ def describe_row(p: dict) -> str:
         bits.append("[새 페르소나 - RisuAI 에는 반영 후 생김]")
     if p["selected"]:
         bits.append("[RisuAI 선택 중]")
+    if p.get("risuChanged"):
+        bits.append("[RisuAI 쪽에서도 바뀜 - 반영하면 덮어씀]")
     bits.append(f"변경 {p['total']}건" if p["dirty"] else "변경 없음")
     bits.append(f"폴더 {p['folder']}")
     bits.append(f"프로필 사진 {p['iconPath']} (view_image 로 볼 수 있음)" if p["iconPath"] else "프로필 사진 없음/미수신")
@@ -574,7 +592,7 @@ def describe_full(p: dict, snapshots: int) -> str:
     out = [f"페르소나 {work['name'] or p['name']} (key={p['key']})",
            *(["새 페르소나: RisuAI 에는 아직 없습니다 (propose_persona_writeback 승인 시 RisuAI 목록에 추가)"]
              if p.get("isNew") else []),
-           f"RisuAI 선택 중: {'예 - 이 페르소나는 반영할 수 없습니다 (RisuAI 에서 다른 페르소나를 고른 뒤 반영)' if p['selected'] else '아니오'}",
+           f"RisuAI 선택 중: {'예 - 반영하면 원본 대신 새 페르소나(사본)로 저장됩니다 (원본을 고치려면 RisuAI 에서 다른 페르소나를 고른 뒤 패널을 다시 열기)' if p['selected'] else '아니오'}",
            f"폴더: {p['folder']}",
            f"RisuAI 프로필 사진: {p['iconPath'] + ' (view_image 로 볼 수 있음)' if p['iconPath'] else '없음/미수신'}",
            f"반영 대기 새 사진: {work['image'] or '없음'}",
@@ -583,6 +601,10 @@ def describe_full(p: dict, snapshots: int) -> str:
            + (f" (이름: {base['name']} -> {work['name']})" if work["name"] != base["name"] else "")]
     if p["gone"]:
         out.append("주의: RisuAI 목록에 더 이상 없는 페르소나입니다 (반영 불가)")
+    if p.get("risuChanged"):
+        out.append("주의: 이 작업본에 미반영 변경이 있는 동안 RisuAI 쪽에서도 이 페르소나가 바뀌었습니다. 반영하면 "
+                   "RisuAI 쪽 변경을 덮어씁니다 (RisuAI 버전은 자동 스냅샷 'RisuAI 쪽 변경' 으로 남아 있음) - "
+                   "반영 전에 사용자에게 확인하세요.")
     if work["prompt"] == base["prompt"]:
         out.append(f"--- 설명 (RisuAI = 작업본)\n{base['prompt']}")
     else:

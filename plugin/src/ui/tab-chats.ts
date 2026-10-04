@@ -591,8 +591,8 @@ function personaBody(body: HTMLElement, mount: HTMLElement): void {
   if (!ps.length) list.appendChild(el('div', { class: 'chatitem' }, [el('span', { class: 'hint', text: 'RisuAI에 페르소나가 없습니다.' })]));
   for (const p of ps) list.appendChild(personaRow(p, mount));
   body.appendChild(el('div', { class: 'hint', style: { marginTop: '8px' }, text:
-    '편집은 작업본에 저장되고, 반영해야 RisuAI에 들어갑니다. RisuAI에서 지금 선택된 페르소나도 편집할 수 있지만 반영은 '
-    + 'RisuAI에서 다른 페르소나를 고른 뒤에 됩니다 (RisuAI가 선택된 페르소나를 따로 복사해 두고 써서, 그대로 쓰면 덮어써집니다).' }));
+    '편집은 작업본에 저장되고, 반영해야 RisuAI에 들어갑니다. RisuAI에서 지금 선택된 페르소나도 편집할 수 있지만, '
+    + '반영하면 원본 대신 새 페르소나(사본)로 저장됩니다 (RisuAI가 선택된 페르소나를 따로 복사해 두고 써서, 그대로 쓰면 덮어써집니다).' }));
 }
 
 function personaRow(p: PersonaRow, mount: HTMLElement): HTMLElement {
@@ -604,7 +604,7 @@ function personaRow(p: PersonaRow, mount: HTMLElement): HTMLElement {
       el('div', { text: name || '(이름 없음)' }),
       el('div', { class: 'hint clip1', text: (p.work.prompt || '').split('\n')[0].slice(0, 80) || '(설명 없음)' }),
     ]),
-    p.selected ? el('span', { class: 'badge', text: 'RisuAI 선택됨', title: 'RisuAI에서 지금 선택된 페르소나 - 편집은 되고, 반영은 다른 페르소나를 고른 뒤에 됩니다' }) : null,
+    p.selected ? el('span', { class: 'badge', text: 'RisuAI 선택됨', title: 'RisuAI에서 지금 선택된 페르소나 - 편집은 되고, 반영하면 새 페르소나(사본)로 저장됩니다' }) : null,
     p.isNew ? el('span', { class: 'badge', text: '새로 만듦', title: 'Hina에서 만든 페르소나 - 반영하면 RisuAI 목록에 추가됩니다' }) : null,
     p.dirty ? el('span', { class: 'badge warn', text: `미반영 ${p.total}` }) : null,
     edit,

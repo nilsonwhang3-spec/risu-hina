@@ -13,8 +13,9 @@
  * not on the allow-list - a plugin write to them lands in pluginCustomStorage
  * and changes nothing. So an edit to the selected persona would show nowhere
  * and be overwritten by the stale live copy on the next switch. Only personas
- * that are NOT selected are written; the selected one is refused with the way
- * out (pick another persona in RisuAI first).
+ * that are NOT selected are written in place; 반영 of the selected one saves
+ * the working copy as a NEW persona (a copy) instead, which never touches the
+ * live copy (createPersona with `copyFrom`).
  */
 import { HostError } from './host';
 
@@ -102,6 +103,17 @@ export const SELECTED_REFUSAL =
   + '고쳐도 화면에 안 보이고 다음에 페르소나를 바꿀 때 옛 내용으로 덮어써집니다. '
   + 'RisuAI에서 다른 페르소나를 잠깐 선택한 뒤 다시 시도해 주세요.';
 
+/** Shown on the selected persona: what 반영 will do instead of refusing. */
+export const SELECTED_COPY_NOTE =
+  'RisuAI에서 지금 선택된 페르소나입니다. RisuAI가 선택된 페르소나를 따로 복사해 두고 쓰기 때문에 원본은 여기서 고쳐 쓸 수 없어, '
+  + '반영하면 편집 내용이 새 페르소나(사본)로 저장되고 원본은 그대로 남습니다. '
+  + '원본을 고치려면 RisuAI에서 다른 페르소나를 고른 뒤 패널을 다시 열어 주세요.';
+
+/** The copy's name: the edited name, or the original's with ' (사본)' when it was not renamed. */
+export function copyName(baseName: string, workName: string): string {
+  return workName !== baseName ? workName : `${workName} (사본)`;
+}
+
 /**
  * Write one persona's name / description / picture back, and confirm it.
  *
@@ -166,12 +178,21 @@ function newPersonaId(): string {
  * "add persona" makes (an id, an icon key from saveAsset or ''), then read it
  * back. Appending never touches the selected persona, so the live-copy rule
  * above does not apply.
+ *
+ * `copyFrom` makes it a copy of that persona: its other fields (note, large
+ * portrait) and its picture come along unless `imageBytes` replaces it.
  */
 export async function createPersona(next: { name: string; prompt: string },
-  imageBytes?: Uint8Array | null): Promise<Persona> {
+  imageBytes?: Uint8Array | null, copyFrom?: Persona): Promise<Persona> {
   const slice = await readSlice();
   const raw = (slice['personas'] as Record<string, unknown>[]).slice();
-  let icon = '';
+  let template: Record<string, unknown> = {};
+  if (copyFrom) {
+    const at = locate(raw, copyFrom);
+    if (at < 0) throw new HostError('missing', 'RisuAI에서 원본 페르소나를 찾지 못했습니다 (지워졌을 수 있습니다). 목록을 다시 읽어 주세요');
+    template = raw[at] ?? {};
+  }
+  let icon = String(template['icon'] ?? '');
   if (imageBytes && imageBytes.byteLength) {
     try {
       icon = await Risuai.saveAsset(imageBytes);
@@ -180,7 +201,7 @@ export async function createPersona(next: { name: string; prompt: string },
     }
   }
   const id = newPersonaId();
-  raw.push({ name: next.name, personaPrompt: next.prompt, icon, id, note: '', largePortrait: false });
+  raw.push({ note: '', largePortrait: false, ...template, name: next.name, personaPrompt: next.prompt, icon, id });
   await Risuai.setDatabase({ personas: raw });
   const check = await readSlice();
   const after = check['personas'] as Record<string, unknown>[];

@@ -109,6 +109,13 @@ r = sync({"id": "p1", "index": 0, "name": "아키라", "prompt": "RisuAI 에서 
 check("clean working copy follows RisuAI's change", r["p1"]["work"]["prompt"] == "RisuAI 에서 고침" and not r["p1"]["dirty"])
 check("dirty working copy is kept", r["p2"]["work"]["prompt"] == "대학생"
       and r["p2"]["base"]["prompt"] == "RisuAI 쪽 변경" and r["p2"]["dirty"], str(r["p2"]))
+check("both sides changed -> risuChanged, the clean one is not", r["p2"]["risuChanged"] and not r["p1"]["risuChanged"], str(r["p2"]))
+cps = main.h_persona_checkpoints({"key": "p2"})["checkpoints"]
+check("RisuAI's version is kept as an auto snapshot", any(c["kind"] == "auto" and "RisuAI 쪽 변경" in c["label"] for c in cps), str(cps))
+check("read_persona warns about it", "덮어씁니다" in personas.describe_full(main.h_persona_get({"key": "p2"}), 0))
+r = sync({"id": "p1", "index": 0, "name": "아키라", "prompt": "RisuAI 에서 고침", "icon": "assets/b.png", "selected": True},
+         {"id": "p2", "index": 1, "name": "카이", "prompt": "RisuAI 쪽 변경", "icon": "", "selected": False})
+check("the flag survives an unchanged re-read", r["p2"]["risuChanged"])
 r = sync({"id": "p1", "index": 0, "name": "아키라", "prompt": "RisuAI 에서 고침", "icon": "", "selected": False},
          {"id": "p3", "index": 1, "name": "세라", "prompt": "의사", "icon": "", "selected": True})
 check("unlisted persona -> gone, kept", main.h_persona_get({"key": "p2"})["gone"]
@@ -218,7 +225,7 @@ check("Deps carries the open persona", agent.Deps(chat_key="", char_key="", sess
                                                   workspace_dir=DATA, mode="persona", persona="p4").persona == "p4")
 scr = agent._persona_screen("p4")
 check("persona screen names the open persona and the tools", "미나" in scr and "key=p4" in scr
-      and "propose_persona_edit" in scr and "반영 불가" in scr, scr)
+      and "propose_persona_edit" in scr and "사본" in scr, scr)
 
 print("\ntest_new_persona")
 check("create with an empty name -> 400", status_of(main.h_persona_create, {"name": " "}) == 400)
@@ -288,7 +295,7 @@ txt = call_tool("propose_persona_writeback", {"persona": made["key"], "reason": 
 check("writeback tool accepts a new persona", "제안했습니다" in txt and "RisuAI 페르소나 목록에 추가" in txt, txt)
 main.h_persona_edit({"key": "p4", "prompt": "재즈 피아니스트"})
 txt = call_tool("propose_persona_writeback", {"persona": "미나", "reason": "x"})
-check("writeback tool refuses the selected persona", "선택된 페르소나" in txt, txt)
+check("writeback tool proposes the selected persona as a copy", "제안했습니다" in txt and "사본" in txt, txt)
 txt = call_tool("propose_persona_create", {"name": "하루", "reason": "후보 1"})
 check("propose_persona_create tool queues a persona_create", "제안했습니다" in txt
       and any(a["kind"] == "persona_create" for a in actions.pending(TK)), txt)

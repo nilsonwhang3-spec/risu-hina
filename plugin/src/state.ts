@@ -8,6 +8,8 @@ import type { Persona } from './persona';
 /** A persona's backend row: RisuAI's copy (base) and the working copy (work). */
 export interface PersonaRow {
   key: string; id: string; index: number; name: string; selected: boolean; gone: boolean;
+  /** RisuAI changed it while it had unapplied edits here: 반영 overwrites that. */
+  risuChanged?: boolean;
   folder: string;
   base: { name: string; prompt: string };
   work: { name: string; prompt: string; image: string };
@@ -1202,10 +1204,12 @@ class AppState {
 
   /**
    * 반영 for one persona: write its working copy into RisuAI, read it back,
-   * and move the backend baseline. Refused while RisuAI has it selected (see
-   * persona.ts) and when RisuAI's copy moved since the last read.
+   * and move the backend baseline. Refused when RisuAI's copy moved since the
+   * last read. While RisuAI has it selected it cannot be written in place
+   * (persona.ts), so the working copy is saved as a new persona instead
+   * (`copied`), and the original's working copy goes back to RisuAI's.
    */
-  async personaWriteBack(key = this.persona?.key ?? ''): Promise<{ written: boolean; name: string }> {
+  async personaWriteBack(key = this.persona?.key ?? ''): Promise<{ written: boolean; name: string; copied?: boolean }> {
     // The same lock as the card and chat 반영: one write to RisuAI at a time.
     return foregroundWrite(async (report) => {
       report('페르소나를 RisuAI에 반영하는 중…');
@@ -1213,7 +1217,7 @@ class AppState {
     });
   }
 
-  private async performPersonaWriteBack(key: string): Promise<{ written: boolean; name: string }> {
+  private async performPersonaWriteBack(key: string): Promise<{ written: boolean; name: string; copied?: boolean }> {
     const row = await transport.get<PersonaRow>('/persona', { key });
     if (!row.dirty) return { written: false, name: row.work.name };
     if (row.isNew) {
@@ -1233,7 +1237,7 @@ class AppState {
     const live = (await personaHost.readPersonas()).personas;
     const p = live.find((x) => (row.id ? x.id === row.id : x.index === row.index && x.name === row.base.name));
     if (!p) throw new Error('RisuAI에서 이 페르소나를 찾지 못했습니다 (지워졌을 수 있습니다). 첫 화면에서 다시 읽어 주세요');
-    if (p.selected) throw new Error(personaHost.SELECTED_REFUSAL);
+    if (p.selected) return this.personaSaveAsCopy(key, row, p);
     if (p.name !== row.base.name || p.prompt !== row.base.prompt || p.icon !== row.iconKey) {
       throw new Error('RisuAI 쪽에서 이 페르소나가 바뀌었습니다. 첫 화면에서 페르소나를 다시 읽어 주세요 (편집 내용은 작업본에 남아 있습니다)');
     }
@@ -1252,6 +1256,30 @@ class AppState {
     // The renamed folder and the new picture: one more read refreshes both.
     void this.loadPersonas().catch(() => undefined);
     return { written: true, name: saved.name };
+  }
+
+  /**
+   * 반영 of the persona RisuAI has selected: its working copy becomes a new
+   * persona (the original's picture, note and portrait setting come along),
+   * the original's working copy goes back to RisuAI's (an automatic snapshot
+   * keeps the edit there too), and the copy is what the persona tab shows next.
+   */
+  private async personaSaveAsCopy(key: string, row: PersonaRow, p: Persona): Promise<{ written: boolean; name: string; copied: boolean }> {
+    const name = personaHost.copyName(row.base.name, row.work.name);
+    const bytes = row.work.image ? await this.fileBytes(row.work.image) : null;
+    const made = await personaHost.createPersona({ name, prompt: row.work.prompt }, bytes, p);
+    try {
+      await transport.post('/persona/reset', { key });
+    } catch (e) {
+      void clientLog('warn', 'persona copy: original not reset', { error: String(e).slice(0, 200) });
+    }
+    try {
+      await this.loadPersonas();
+      const copy = this.personas?.find((x) => x.id === made.id);
+      if (copy && this.persona?.key === key) await this.openPersona(copy.key);
+    } catch { /* the copy is in RisuAI; the list catches up on the next read */ }
+    this.touchFiles();
+    return { written: true, name: made.name, copied: true };
   }
 
   /** The bot's project folder under projects/, and the name it could take (§1-89). */
@@ -2356,7 +2384,9 @@ class AppState {
         detail = `복제 봇 “${name}” 을 만들었습니다. RisuAI 목록에서 확인해 주세요.`;
       } else if (r.host.kind === 'host_persona_writeback') {
         const out = await this.personaWriteBack(String(r.host.args?.key || ''));
-        detail = out.written
+        detail = out.copied
+          ? `선택된 페르소나라 원본 대신 새 페르소나 '${out.name}' (사본)으로 RisuAI에 저장하고 확인했습니다.`
+          : out.written
           ? `페르소나 '${out.name}' 을(를) RisuAI에 반영하고 저장을 확인했습니다.`
           : '페르소나에 반영할 변경이 없었습니다.';
       } else if (r.host.kind === 'host_open_tab') {

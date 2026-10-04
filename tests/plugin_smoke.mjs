@@ -3740,22 +3740,39 @@ console.log('\ntest_persona_edit');
   check('and left the selected one alone', host.personas[0].personaPrompt === '선택된 페르소나');
   row = await api('/persona?key=' + encodeURIComponent(key));
   check('the baseline moved: nothing pending', row.dirty === false, JSON.stringify(row).slice(0, 200));
-  // RisuAI's selected persona: edits stay in the working copy, 반영 is refused.
+  // RisuAI's selected persona, switched while the panel was shut: reopening
+  // re-reads the selection, and 반영 saves the edit as a new persona (a copy).
   host.selectPersona(1);
+  await registered[0].cb();
+  await settle(1500);
+  check('reopening the panel re-reads which persona is selected',
+        /선택됨/.test(document.querySelector('.panel.active .personatree .chatitem.current')?.textContent || '')
+        && /사본으로 반영/.test(document.querySelector('.tool[data-tool="persona-apply"]')?.textContent || ''),
+        (document.querySelector('.panel.active .personatree')?.textContent || '').slice(0, 160));
   const ta2 = document.querySelector('.personaedit textarea.personaprompt');
   ta2.value = '또 고침';
   ta2.dispatchEvent(new window.Event('input', { bubbles: true }));
   await settle(1300);
+  const before2 = host.personas.length;
   document.querySelector('.tool[data-tool="persona-apply"]')?.dispatchEvent(new window.Event('click', { bubbles: true }));
-  await settle(900);
-  check('a persona RisuAI has selected is not written', host.personas[1].personaPrompt !== '또 고침'
-        && /선택된 페르소나/.test(document.querySelector('.shellnotice')?.textContent || ''),
+  await settle(2000);
+  const copy = host.personas[host.personas.length - 1];
+  check('반영 of the selected persona leaves it alone', host.personas[1].personaPrompt === '사립 탐정이다. 비 오는 밤을 좋아한다.',
+        JSON.stringify(host.personas[1]));
+  check('and saves the edit as a new persona (사본)', host.personas.length === before2 + 1
+        && copy?.name === '탐정 (사본)' && copy?.personaPrompt === '또 고침' && !!copy?.id && copy.id !== 'p-det'
+        && copy?.icon === host.personas[1].icon,
+        JSON.stringify(copy));
+  check('the notice says it went to a copy', /사본/.test(document.querySelector('.shellnotice')?.textContent || ''),
         (document.querySelector('.shellnotice')?.textContent || '').slice(0, 160));
   row = await api('/persona?key=' + encodeURIComponent(key));
-  check('and the edit stays in the working copy', row.work?.prompt === '또 고침' && row.dirty === true);
+  check('the original working copy is back to RisuAI', row.dirty === false && row.work?.prompt === '사립 탐정이다. 비 오는 밤을 좋아한다.',
+        JSON.stringify(row).slice(0, 200));
+  const copyRow = ((await api('/personas')).personas || []).find((p) => p.id === copy?.id);
+  check('the copy is a clean working copy, opened in the editor', !!copyRow && !copyRow.dirty
+        && document.querySelector('.personaedit input:not([type=file])')?.value === '탐정 (사본)',
+        JSON.stringify(copyRow).slice(0, 200));
   host.selectPersona(0);
-  // Leave nothing pending for the scenarios after this one.
-  await fetch(backend.url + '/persona/reset', { method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' }, body: JSON.stringify({ key }) });
   await settle(300);
 
   // A NEW persona: ＋ 새 페르소나 → name → it opens; 반영 appends it to RisuAI.

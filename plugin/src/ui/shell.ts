@@ -681,6 +681,9 @@ export async function bootstrap(force = false): Promise<void> {
   setBootPhase('');
   refreshStatus();
   renderActive();
+  // The user may have switched persona in RisuAI while the panel was shut;
+  // which one is selected decides whether 반영 writes in place or as a copy.
+  if (connected && state.personas !== null) void state.loadPersonas().catch(() => undefined);
   // A placeholder project folder gets its rename offered once the bot is up.
   if (state.workspace) void suggestFolderRename();
   const hostMs = t2 - t1;

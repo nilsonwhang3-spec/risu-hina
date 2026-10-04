@@ -318,7 +318,7 @@ def _persona_screen(key: str) -> str:
             p = personamod.get(key)
             who = f"열린 페르소나: {p['work']['name'] or p['name']} (key={p['key']})"
             if p["selected"]:
-                who += " - RisuAI 에서 선택 중이라 반영 불가(다른 페르소나를 고른 뒤 반영)"
+                who += " - RisuAI 에서 선택 중이라 반영하면 원본 대신 새 페르소나(사본)로 저장됨"
         except personamod.PersonaError:
             who = f"열린 페르소나 key={key} (아직 목록에 없음)"
     return ("지금 열려 있는 화면: 페르소나 편집 (RisuAI 사용자 페르소나의 이름·설명·프로필 사진). " + who + ". "
@@ -1706,8 +1706,9 @@ def build(model: Any = None) -> Agent[Deps]:
         (832x1216): with run_python + Pillow crop a square from the UPPER part around the face/upper
         body, resize with Image.LANCZOS, save as PNG in your output folder, and pass that path here.
 
-        The persona RisuAI currently has SELECTED can be edited here, but cannot be written back
-        until the user selects another persona in RisuAI - say so when that is the case.
+        The persona RisuAI currently has SELECTED can be edited here, but 반영 cannot write it in
+        place: it saves the edit as a NEW persona (a copy) and leaves the original - say so when
+        that is the case.
         """
         try:
             p = personamod.resolve(persona)
@@ -1735,8 +1736,9 @@ def build(model: Any = None) -> Agent[Deps]:
         label = p["work"]["name"] or p["name"]
         out = _propose(ctx, "persona_edit", f"페르소나 '{label}' 수정 ({', '.join(parts)}) — {reason}", args)
         if p["selected"]:
-            out += (" 참고: 이 페르소나는 지금 RisuAI 에서 선택된 페르소나라, 작업본은 고칠 수 있어도 "
-                    "사용자가 RisuAI 에서 다른 페르소나를 고르기 전에는 반영할 수 없습니다.")
+            out += (" 참고: 이 페르소나는 지금 RisuAI 에서 선택된 페르소나라, 반영하면 원본은 그대로 두고 "
+                    "편집 내용이 새 페르소나(사본)로 저장됩니다. 원본을 고치려면 사용자가 RisuAI 에서 다른 "
+                    "페르소나를 고른 뒤 패널을 다시 열어야 합니다.")
         return out
 
     @agent.tool
@@ -1810,9 +1812,11 @@ def build(model: Any = None) -> Agent[Deps]:
         On approval the plugin performs it. A NEW persona (made with propose_persona_create) is
         appended to RisuAI's persona list.
 
-        RisuAI's currently SELECTED persona cannot be written back: RisuAI keeps a live copy of it that
-        plugins cannot write, so the edit would be overwritten. Its working copy can still be edited;
-        tell the user to select another persona in RisuAI first, then 반영.
+        RisuAI's currently SELECTED persona cannot be written in place: RisuAI keeps a live copy of it
+        that plugins cannot write. 반영 of it saves the working copy as a NEW persona (a copy; the name
+        gets ' (사본)' unless it was renamed) and resets the original's working copy - tell the user
+        so. To change the original itself, the user selects another persona in RisuAI first and
+        reopens the panel.
         """
         try:
             p = personamod.resolve(persona)
@@ -1826,10 +1830,14 @@ def build(model: Any = None) -> Agent[Deps]:
             return f"'{label}' 은(는) RisuAI 목록에 더 이상 없는 페르소나라 반영할 수 없습니다."
         if not p["dirty"]:
             return f"'{label}' 페르소나에는 반영할 변경이 없습니다 (작업본 = RisuAI)."
+        if p.get("risuChanged"):
+            reason += " (주의: RisuAI 쪽 변경을 덮어씀)"
         if p["selected"]:
-            return (f"'{label}' 은(는) 지금 RisuAI 에서 선택된 페르소나라 반영할 수 없습니다 - RisuAI 가 들고 있는 "
-                    "사본을 플러그인이 고칠 수 없어 덮어써집니다. 사용자에게 RisuAI 에서 다른 페르소나를 고른 뒤 "
-                    "(패널의 페르소나 탭을 다시 열어 목록을 새로 읽게 하고) 반영하자고 알려 주세요.")
+            return _propose(ctx, "host_persona_writeback",
+                            f"선택된 페르소나 '{label}' 의 편집을 새 페르소나(사본)로 RisuAI에 저장 — {reason}",
+                            {"key": p["key"]}) + (
+                " 참고: RisuAI 에서 선택 중인 페르소나라 원본은 그대로 두고 사본으로 저장됩니다 "
+                "(승인 시점에 다시 확인하므로, 그 사이 사용자가 다른 페르소나를 골랐다면 원본에 반영됩니다).")
         return _propose(ctx, "host_persona_writeback", f"페르소나 '{label}' 을(를) RisuAI에 반영 — {reason}",
                         {"key": p["key"]})
 
