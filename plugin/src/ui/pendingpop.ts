@@ -50,9 +50,13 @@ function opLabel(s: StagedEdit): string {
   return `턴 ${where} ${what}`.replace(/\s+/g, ' ').trim();
 }
 
-/** Called after anything was decided, so bars, tabs and counters follow. */
-let onDecided: () => void = () => { /* set by the title row */ };
-export function setOnDecided(fn: () => void): void { onDecided = fn; }
+/** Called after anything was decided, so bars, tabs and counters follow.
+ * Several listeners: the title row's counts AND the agent pane's proposal
+ * card - with one slot the card kept showing a proposal approved here, and
+ * its own buttons then failed on the already-decided id (no way to clear it). */
+const decidedListeners: (() => void)[] = [];
+export function addOnDecided(fn: () => void): void { decidedListeners.push(fn); }
+function onDecided(): void { for (const fn of decidedListeners) fn(); }
 
 export function openPendingPopover(anchor: HTMLElement): void {
   const body = el('div', { class: 'applypop pendingpop' });

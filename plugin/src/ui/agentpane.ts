@@ -14,6 +14,7 @@
 import { AgentPanel, type AgentPanelHooks } from './agent';
 import { state, type StagedEdit } from '../state';
 import { mcp } from '../mcp';
+import { addOnDecided } from './pendingpop';
 
 let panel: AgentPanel | null = null;
 let panelContext = '';
@@ -67,6 +68,8 @@ mcp.onPendingChanged = () => {
   panel?.refreshPending();
   state.bump();
 };
+// The same queue decided from the title row's 승인 popover.
+addOnDecided(() => panel?.refreshPending());
 
 function toastBusy(): void {
   let wrap = document.querySelector<HTMLElement>('.toastwrap');

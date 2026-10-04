@@ -216,7 +216,7 @@ Workspace rules (mandatory - every bot shares ONE global space):
   again. Keep long documents as files too (write_file) and say where.
 - Other bots' folders are visible. Reading is fine; **never modify another bot's folder unasked.**
 - **You handle assets (images) too.** list_assets for the list, fetch_assets to pull them into
-  scratch/, run_python (PIL) to process, then propose the resulting PNG/WebP with propose_asset_add /
+  hina/<bot>/scratch/assets/, run_python (PIL) to process, then propose the resulting PNG/WebP with propose_asset_add /
   propose_asset_replace. Approval snapshots the image bytes in Hina and stages card references.
   The user must then use 봇 반영 to upload the images and write the card to RisuAI, just like Regex edits.
   PNG and WebP are supported without conversion. The host's .png storage-key suffix
@@ -1867,14 +1867,18 @@ def build(model: Any = None) -> Agent[Deps]:
 
     @agent.tool
     def fetch_assets(ctx: RunContext[Deps], names: str) -> str:
-        """Fetch assets into the workspace scratch/assets/. Comma-separated for several.
+        """Fetch assets into hina/<bot>/scratch/assets/. Comma-separated for several.
 
-        Open the returned paths with PIL in run_python. Several of the same name (a random pool)
-        get _1, _2. An 'assets/...' key is accepted instead of a name.
+        Returns space paths (hina/<bot>/scratch/assets/...) for view_image, the file tools and
+        studio_inpaint; run_python's cwd is hina/<bot>/, so PIL opens them as scratch/assets/....
+        Several of the same name (a random pool) get _1, _2. An 'assets/...' key is accepted
+        instead of a name.
         """
         wanted = [n.strip() for n in names.split(",") if n.strip()]
         r = assets.fetch_to_scratch(ctx.deps.char_key, wanted)
         lines = [f"{p}" for p in r["paths"]]
+        if lines:
+            lines.append("(run_python 에서는 cwd 가 hina/<봇>/ 이므로 scratch/assets/<파일> 로 엽니다)")
         if r["missing"]:
             lines.append("없음: " + ", ".join(r["missing"]))
         return "\n".join(lines) or "꺼낸 것이 없습니다"

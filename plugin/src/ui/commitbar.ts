@@ -21,7 +21,7 @@
  */
 import { el, clear, popover, pollWhileVisible } from './dom';
 import { state, type DirtySummary } from '../state';
-import { openPendingPopover, setOnDecided } from './pendingpop';
+import { openPendingPopover, addOnDecided } from './pendingpop';
 import { collect, applyOne, type DirtyItem } from './leaveguard';
 import { openConflicts } from './conflicts';
 
@@ -120,7 +120,7 @@ export function commitControls(): HTMLElement {
     soon();
   });
   pollWhileVisible(() => void refresh(), POLL_MS, () => !!state.health);
-  setOnDecided(() => { state.bump(); soon(); });
+  addOnDecided(() => { state.bump(); soon(); });
 
   approveBtn.addEventListener('click', () => openPendingPopover(approveBtn));
   applyBtn.addEventListener('click', () => openApplyPopover(applyBtn, () => summary, async () => { await refresh(); }));

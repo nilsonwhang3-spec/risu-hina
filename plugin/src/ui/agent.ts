@@ -520,6 +520,9 @@ export class AgentPanel {
           busy.textContent = '';
           yes.disabled = false;
           no.disabled = false;
+          // Decided elsewhere meanwhile (title row, MCP, 검수): re-read, so a
+          // row whose id is gone leaves instead of failing on every click.
+          await this.refreshActions();
         }
       };
       yes.addEventListener('click', () => void decide(true));

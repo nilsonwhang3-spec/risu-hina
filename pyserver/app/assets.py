@@ -324,36 +324,42 @@ def store_stats() -> dict:
 
 
 def fetch_to_scratch(ck: str, wanted: list[str]) -> dict:
-    """Copy present assets into <workspace>/scratch/assets/ for the agent's
-    PIL work. Names or keys; a name shared by several entries (a random
-    pool) yields name, name_1, name_2..."""
+    """Copy present assets into hina/<bot>/scratch/assets/ for the agent's
+    PIL work, returning SPACE paths. Names or keys; a name shared by several
+    entries (a random pool) yields name, name_1, name_2...
+
+    Not ws.root(): that is the bot's SYSTEM dir outside the space, which no
+    file tool, view_image or the run_python cwd can reach - the copies
+    landed there and the agent saw "scratch/assets/x.png" that did not exist.
+    """
     from . import workspace as ws
-    rows = _rows_for(ck)
-    dest = ws.root(ck) / "scratch" / "assets"
+    rows = listing(ck)["items"]  # incl. staged (pending) ones list_assets shows
+    dest = ws.hina_dir(ck) / "scratch" / "assets"
+    space = ws.space_root()
     dest.mkdir(parents=True, exist_ok=True)
     paths: list[str] = []
     missing: list[str] = []
     for want in wanted:
-        hits = [r for r in rows if r["risu_key"] == want or (r["name"] or "") == want]
+        hits = [r for r in rows if r["key"] == want or (r["name"] or "") == want]
         if not hits:
             missing.append(want)
             continue
         used: set[str] = set()
         for r in hits:
-            p = locate(r["risu_key"])
+            p = locate(r["key"])
             if p is None:
                 missing.append(f"{want} ({r['state']})")
                 continue
-            ext = r["ext"] or ext_of(r["risu_key"])
+            ext = r["ext"] or ext_of(r["key"])
             stem = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", r["name"] or "asset").strip(". ") or "asset"
             name, n = stem, 0
-            while name in used or (dest / f"{name}.{ext}").exists() and name in used:
+            while name in used:
                 n += 1
                 name = f"{stem}_{n}"
             used.add(name)
             target = dest / f"{name}.{ext}"
             target.write_bytes(p.read_bytes())
-            paths.append(f"scratch/assets/{name}.{ext}")
+            paths.append(target.relative_to(space).as_posix())
     return {"paths": paths, "missing": missing}
 
 

@@ -57,6 +57,18 @@ class StagedAssets(unittest.TestCase):
         with self.assertRaises(main.ApiError): main.h_card_patch({'charKey': self.ck})
         self.assertEqual(main.h_card_patch({'charKey': self.ck, 'stagedAssets': '1'})['assets']['changed'], 1)
 
+    def test_fetch_lands_in_the_space_where_view_and_run_python_look(self):
+        path, data = self.image('hero.webp')
+        self.approve([{'name': 'hero', 'path': path}])
+        r = assets.fetch_to_scratch(self.ck, ['hero'])
+        self.assertEqual(r['missing'], [])
+        self.assertEqual(len(r['paths']), 1)
+        got = files._resolve(files.SPACE, r['paths'][0])
+        self.assertTrue(r['paths'][0].startswith('hina/'), r['paths'])
+        self.assertEqual(got.read_bytes(), data)
+        from app import workspace
+        self.assertEqual(got.relative_to(workspace.hina_dir(self.ck)).as_posix(), 'scratch/assets/hero.webp')
+
     def test_reset_discards_pending_card_change_and_keeps_original_file(self):
         path, _ = self.image('hero.webp')
         self.approve([{'name': 'hero', 'path': path}])
