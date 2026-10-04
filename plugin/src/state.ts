@@ -1206,6 +1206,14 @@ class AppState {
    * persona.ts) and when RisuAI's copy moved since the last read.
    */
   async personaWriteBack(key = this.persona?.key ?? ''): Promise<{ written: boolean; name: string }> {
+    // The same lock as the card and chat 반영: one write to RisuAI at a time.
+    return foregroundWrite(async (report) => {
+      report('페르소나를 RisuAI에 반영하는 중…');
+      return this.performPersonaWriteBack(key);
+    });
+  }
+
+  private async performPersonaWriteBack(key: string): Promise<{ written: boolean; name: string }> {
     const row = await transport.get<PersonaRow>('/persona', { key });
     if (!row.dirty) return { written: false, name: row.work.name };
     if (row.isNew) {
@@ -1612,8 +1620,11 @@ class AppState {
   async writeBack(): Promise<WriteBackResult> {
     // RisuAI's own server save is watched after the write (§1-80): "verified"
     // reads the tab's memory, which is not the same as kept.
-    const since = await persistBaseline();
-    const r = await foregroundWrite(report => {
+    // The lock goes up first (GitHub #3): the save-clock read below can take
+    // seconds, and the panel used to sit unlocked through it.
+    let since: number | null = null;
+    const r = await foregroundWrite(async report => {
+      since = await persistBaseline();
       report('대화 저장 및 반영 결과 확인 중…');
       return this.performWriteBack();
     });
@@ -2618,8 +2629,14 @@ class AppState {
    * an approved host_card_writeback - and they must not drift apart.
    */
   async cardWriteBack(progress: (text: string) => void = () => {}): Promise<{ applied: number; mode: string; verified: boolean; drift?: string; parts?: string[] }> {
-    const since = await persistBaseline();
-    const r = await foregroundWrite(report => this.performCardWriteBack(text => { report(text); progress(text); }));
+    // Locked from the first moment (GitHub #3): the save-clock read used to run
+    // before the lock, up to 8s of a panel that looked idle - and still
+    // clickable - while a (large) 반영 had already started.
+    let since: number | null = null;
+    const r = await foregroundWrite(async report => {
+      since = await persistBaseline();
+      return this.performCardWriteBack(text => { report(text); progress(text); });
+    });
     if (r.verified && r.mode !== 'noop') watchPersist(since);
     return r;
   }

@@ -3658,6 +3658,30 @@ console.log('\ntest_mcp_switch');
   }
 }
 
+console.log('\ntest_writeback_locks_at_once');
+{
+  // GitHub #3: a 반영 locked the panel only after the save-clock read
+  // (/risu/saved, up to 8s), so a long 반영 looked idle and clickable.
+  await enterBot(document);
+  await settle(600);
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, opts) => {
+    if (String(url).includes('/risu/saved')) await settle(1500);
+    return realFetch(url, opts);
+  };
+  try {
+    clickTool(document, 'card-apply');
+    await settle(400);
+    clickButton(document.querySelector('.popover'), 'RisuAI에 반영');
+    await settle(300);
+    check('the 반영 lock is up at once, before the save-clock read returns', !!document.querySelector('.write-progress'));
+    await settle(3000);
+  } finally { globalThis.fetch = realFetch; }
+  check('and comes down when the 반영 is done', !document.querySelector('.write-progress'));
+  pressEscape(document);
+  await settle(200);
+}
+
 console.log('\ntest_persona_edit');
 {
   // §1-89: personas work like the bot - a backend working copy, snapshots,
