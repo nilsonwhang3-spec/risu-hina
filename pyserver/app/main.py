@@ -38,6 +38,7 @@ from . import (chatfmt, config, db, files, log, nai, presets, session, skills, s
 from . import actions, assets, catalog, charx, codexauth, conflicts, keys, permits, providers, snapshots, updater, vision
 from . import agentnotes, assetrules, mcpaddon, mcpbridge, mcpserver, studio, studiojob
 from . import card as cardmod
+from . import personas as personamod
 from . import memory as mem
 
 Handler = Callable[..., Any]
@@ -1166,6 +1167,11 @@ def h_studio_list(arg: dict) -> dict:
     return {"area": area, "items": studio.listing(area)}
 
 
+def h_studio_library(arg: dict) -> dict:
+    """The studio's four card lists and the active style's text, one trip."""
+    return studio.library()
+
+
 def h_studio_meta(arg: dict) -> dict:
     """One card's front matter: the enable toggle and the order, one writer."""
     changes = arg.get("set")
@@ -1994,6 +2000,101 @@ def h_persona_folder_rename(arg: dict) -> dict:
         raise _folder_error(e)
 
 
+# --- persona working copies (personas.py) -------------------------------------------
+#
+# The panel reads RisuAI's personas and syncs them here; edits, snapshots and
+# the AI's approved proposals land in the working copy, and 반영 (plugin) ends
+# in /persona/commit. Every route answers with personas.shape().
+
+def _persona_call(fn: Callable[..., Any], *a: Any, **kw: Any) -> Any:
+    try:
+        return fn(*a, **kw)
+    except personamod.PersonaError as e:
+        raise ApiError(e.status, str(e))
+
+
+def _pkey(arg: dict) -> str:
+    key = str(arg.get("key") or "")
+    if not key:
+        raise ApiError(400, "key 가 필요합니다")
+    return key
+
+
+def h_persona_sync(arg: dict) -> dict:
+    """RisuAI's persona list as the panel just read it: [{id, index, name,
+    prompt, icon, selected}]. needIcon = send the picture (/persona/icon)."""
+    return {"personas": _persona_call(personamod.sync, arg.get("personas") or [])}
+
+
+def h_persona_icon(arg: dict) -> dict:
+    return _persona_call(personamod.set_icon, _pkey(arg), str(arg.get("iconKey") or ""),
+                         str(arg.get("base64") or ""))
+
+
+def h_persona_get(arg: dict) -> dict:
+    return _persona_call(personamod.get, _pkey(arg))
+
+
+def h_persona_edit(arg: dict) -> dict:
+    """Only the fields present change; image '' drops a pending picture."""
+    kw = {k: str(arg[k]) for k in ("name", "prompt", "image") if arg.get(k) is not None}
+    return _persona_call(personamod.edit, _pkey(arg), **kw)
+
+
+def h_persona_reset(arg: dict) -> dict:
+    return _persona_call(personamod.reset, _pkey(arg))
+
+
+def h_persona_checkpoints(arg: dict) -> dict:
+    return {"checkpoints": _persona_call(personamod.checkpoints, _pkey(arg))}
+
+
+def h_persona_checkpoint_create(arg: dict) -> dict:
+    return {"id": _persona_call(personamod.checkpoint_create, _pkey(arg), str(arg.get("label") or ""))}
+
+
+def h_persona_checkpoint_restore(arg: dict) -> dict:
+    return _persona_call(personamod.checkpoint_restore, _pkey(arg), str(arg.get("id") or ""))
+
+
+def h_persona_checkpoint_delete(arg: dict) -> dict:
+    _persona_call(personamod.checkpoint_delete, _pkey(arg), str(arg.get("id") or ""))
+    return {"ok": True}
+
+
+def h_persona_checkpoint_rename(arg: dict) -> dict:
+    _persona_call(personamod.checkpoint_rename, _pkey(arg), str(arg.get("id") or ""), str(arg.get("label") or ""))
+    return {"ok": True}
+
+
+def h_persona_create(arg: dict) -> dict:
+    """A persona RisuAI does not have yet (key 'new:<hex>'); 반영 appends it."""
+    return _persona_call(personamod.create, str(arg.get("name") or ""), str(arg.get("prompt") or ""),
+                         str(arg.get("image") or ""))
+
+
+def h_persona_commit(arg: dict) -> dict:
+    """The plugin wrote the persona to RisuAI; the baseline moves. For a new
+    persona, `id`/`index` are what RisuAI gave the appended entry and the
+    response carries the new key (= id)."""
+    index = arg.get("index")
+    try:
+        index = int(index) if index not in (None, "") else None
+    except (TypeError, ValueError):
+        raise ApiError(400, "index 는 정수여야 합니다")
+    return _persona_call(personamod.commit, _pkey(arg), str(arg.get("name") or ""),
+                         str(arg.get("prompt") or ""), str(arg.get("iconKey") or ""),
+                         str(arg.get("id") or ""), index)
+
+
+def h_persona_dirty(arg: dict) -> dict:
+    return {"personas": personamod.dirty()}
+
+
+def h_personas(arg: dict) -> dict:
+    return {"personas": personamod.listing(str(arg.get("query") or ""))}
+
+
 def h_changes(arg: dict) -> dict:
     """What is pending on this chat, as counts - the shared bar's one line."""
     tk = _chat(arg)
@@ -2614,6 +2715,7 @@ ROUTES: dict[str, Handler] = {
     "GET /studio/tag-suggest": h_studio_tag_suggest,
     "POST /studio/model-check": h_studio_model_check,
     "GET /studio/list": h_studio_list,
+    "GET /studio/library": h_studio_library,
     "POST /studio/meta": h_studio_meta,
     "POST /studio/plan": h_studio_plan,
     "POST /studio/generate": h_studio_generate,
@@ -2728,6 +2830,20 @@ ROUTES: dict[str, Handler] = {
     "POST /workspace/folder/rename": h_workspace_folder_rename,
     "POST /persona/folder": h_persona_folder,
     "POST /persona/folder/rename": h_persona_folder_rename,
+    "POST /persona/sync": h_persona_sync,
+    "POST /persona/icon": h_persona_icon,
+    "GET /persona": h_persona_get,
+    "POST /persona/edit": h_persona_edit,
+    "POST /persona/reset": h_persona_reset,
+    "GET /persona/checkpoints": h_persona_checkpoints,
+    "POST /persona/checkpoint": h_persona_checkpoint_create,
+    "POST /persona/checkpoint/restore": h_persona_checkpoint_restore,
+    "POST /persona/checkpoint/delete": h_persona_checkpoint_delete,
+    "POST /persona/checkpoint/rename": h_persona_checkpoint_rename,
+    "POST /persona/commit": h_persona_commit,
+    "POST /persona/create": h_persona_create,
+    "GET /persona/dirty": h_persona_dirty,
+    "GET /personas": h_personas,
 
     "GET /turns": h_turns,
     "POST /turn": h_turn_edit,
@@ -3140,9 +3256,10 @@ async def dispatch(path: str, request: Request) -> Response:
         if not sid or not prompt:
             return _json(400, {"error": "sessionId 와 prompt 가 필요합니다"}, origin)
         mode = str(body.get("mode") or "")
+        persona = str(body.get("persona") or "")
         log.info("POST /chat session=%s prompt=%sB mode=%s", sid, len(prompt), mode or "-")
         return StreamingResponse(
-            session.run(sid, prompt, mode),
+            session.run(sid, prompt, mode, persona),
             media_type="application/x-ndjson; charset=utf-8",
             headers={
                 **config.cors_headers(origin),

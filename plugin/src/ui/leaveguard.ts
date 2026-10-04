@@ -25,7 +25,7 @@ import { shellNotice } from './chatbar';
 import { openConflicts } from './conflicts';
 
 export interface DirtyItem {
-  scope: 'card' | 'chat';
+  scope: 'card' | 'chat' | 'persona';
   /** chatKey for a chat; '' for the card. */
   key: string;
   label: string;
@@ -87,6 +87,9 @@ export function collect(summary: DirtySummary, except?: LeaveExempt): DirtyItem[
       total: c.total, conflicts: c.conflicts,
     });
   }
+  for (const p of summary.personas ?? []) {
+    out.push({ scope: 'persona', key: p.key, label: `'${p.name || '이름 없는'}' 페르소나`, total: p.total, conflicts: 0 });
+  }
   return out;
 }
 
@@ -96,6 +99,10 @@ function msg(e: unknown): string {
 
 /** 반영 for one dirty item; throws with the reason when it did not land. */
 export async function applyOne(d: DirtyItem): Promise<void> {
+  if (d.scope === 'persona') {
+    await state.personaWriteBack(d.key);
+    return;
+  }
   if (d.scope === 'card') {
     const r = await state.cardWriteBack();
     if (!r.verified) {
@@ -115,6 +122,10 @@ export async function applyOne(d: DirtyItem): Promise<void> {
 }
 
 async function discardOne(d: DirtyItem): Promise<string> {
+  if (d.scope === 'persona') {
+    const n = await state.personaReset(d.key);
+    return n ? `${n}건` : '';
+  }
   if (d.scope === 'card') {
     const n = await state.cardReset();
     return n ? `${n}건` : '';

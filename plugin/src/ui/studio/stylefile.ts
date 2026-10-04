@@ -112,6 +112,14 @@ export function writeGenMeta(meta: Map<string, string>, gen: Record<string, unkn
   }
 }
 
+/** The style-bound settings of a generation card, for "did they change since
+ * the style was loaded or saved" (§1-90: the style block saves explicitly). */
+export function genSnapshot(g: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k] of GEN_META) out[k] = g[k] ?? null;
+  return out;
+}
+
 export function clearGenMeta(meta: Map<string, string>): void {
   for (const [, m] of GEN_META) meta.delete(m);
 }

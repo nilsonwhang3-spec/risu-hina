@@ -1378,6 +1378,20 @@ label.row { align-items: center; gap: 6px; }
 .styleedit textarea { width: 100%; box-sizing: border-box; resize: vertical; }
 .styleedit .field { display: block; margin-bottom: 6px; }
 .styleedit .field > span { display: block; font-size: 11px; opacity: .7; margin-bottom: 2px; }
+/* §1-90: what the style saves sits in one framed block (prompts, 요청 설정,
+   저장); the temporary prompts and the material buttons follow it. */
+.styleedit.stylesaved { margin: 6px 8px 0; padding: 6px 8px; border: 1px solid var(--border, #2b323f); border-radius: 8px; }
+.stylesaved .genrow { gap: 6px; align-items: center; margin: 2px 0 4px; min-width: 0; }
+.stylesaved .genpeek { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.stylesavebar { gap: 6px; align-items: center; padding-top: 6px; margin-top: 4px; border-top: 1px dashed var(--border, #2b323f); min-width: 0; }
+.stylesavebar .savestatus { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.stylesavebar .stylesave:disabled, .stylesavebar button:disabled { opacity: .45; }
+/* The left column before its data lands: a spinner and placeholder rows. */
+.studioskel { padding: 10px 8px; display: flex; flex-direction: column; gap: 8px; }
+.studioskel .skelhead { gap: 6px; align-items: center; }
+.studioskel .skelrow { height: 26px; border-radius: 6px; background: #8882; animation: skelpulse 1.2s ease-in-out infinite; }
+@keyframes skelpulse { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .studioskel .skelrow { animation: none; } }
 /* Each style prompt folds on its own; folded, its first line stays as a preview. */
 .promptfoldhead { gap: 6px; align-items: center; margin-bottom: 2px; cursor: default; min-width: 0; }
 .promptfoldhead .promptfoldlabel { font-size: 11px; opacity: .7; white-space: nowrap; }

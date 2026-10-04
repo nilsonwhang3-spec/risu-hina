@@ -459,9 +459,12 @@ console.log('\ntest_chat_selection_layout');
   await settle(200);
   check('folder expands on click', !!document.querySelector('.folderbody.open'));
   // An unfolded folder stays unfolded through the screen's re-renders.
+  await openLanding(document, 'chat');
+  check('an open folder survives a re-render', !!document.querySelector('.folderbody.open'));
+  // 선택 (‹ 뒤로) is the way to the dashboard: every card folded (§1-89).
   clickById(document, 'tab-chats');
   await settle(300);
-  check('an open folder survives a re-render', !!document.querySelector('.folderbody.open'));
+  check('선택 folds the first screen back to the dashboard', !document.querySelector('.modecard.open'));
   await openLanding(document, 'bot');
   // The bot-switching note is an aside under the bot, not a warning banner.
   check('bot-switch note lives in the bot section',
@@ -2271,8 +2274,27 @@ console.log('\ntest_studio_tab');
 {
   // The library, not a bot: the left column is two tabs (프롬프트 · OUTPUT)
   // over the generation card, and Hina sits beside it.
-  clickById(document, 'tab-studio');
-  await settle(900);
+  // §1-90 ("로컬인데도 왼쪽 패널이 한참 빈 채로"): the first entry draws a
+  // skeleton at once, and the card lists + the active style's text arrive in
+  // ONE /studio/library read beside the OUTPUT listing - no per-area
+  // /studio/list, no follow-up read of the style file.
+  const entrySeen = [];
+  const entryFetch = globalThis.fetch;
+  globalThis.fetch = async (url, opts) => { entrySeen.push(new URL(String(url)).pathname); return entryFetch(url, opts); };
+  try {
+    clickById(document, 'tab-studio');
+    check('the first entry draws a loading skeleton at once, not an empty column',
+          !!document.querySelector('.panel.active .filetree .studioskel .spin'),
+          (document.querySelector('.panel.active .filetree')?.innerHTML || '(none)').slice(0, 120));
+    await settle(900);
+  } finally {
+    globalThis.fetch = entryFetch;
+  }
+  check('the library arrives in one request beside the OUTPUT listing',
+        entrySeen.filter((p) => p === '/studio/library').length === 1 && !entrySeen.includes('/studio/list')
+        && !entrySeen.includes('/files/read') && entrySeen.includes('/files'),
+        entrySeen.join(' '));
+  check('and the skeleton is gone once it is in', !document.querySelector('.panel.active .filetree .studioskel'));
   const text = () => document.querySelector('.panel.active')?.textContent || '';
   check('the studio tab renders its left column', !!document.querySelector('.panel.active .filetree'));
   const tabsBar = () => document.querySelector('.panel.active .studiotabs');
@@ -2396,24 +2418,47 @@ console.log('\ntest_studio_cards');
         /활성 카드: 스타일 1/.test(document.querySelector('.panel.active .centrebody')?.textContent || ''),
         (document.querySelector('.panel.active .centrebody')?.textContent || '').slice(0, 160));
 
-  // The picked style is edited in place - 긍정/부정 split, debounced save.
+  // §1-90 (user): the left column goes [style picker] -> ONE block of what the
+  // style saves (긍정 · 부정 · 요청 설정 · 저장) -> the unsaved temporary
+  // prompts -> the 캐릭터 / 조각 buttons. Nothing in the block autosaves.
+  const L = () => document.querySelector('.panel.active .filetree');
+  {
+    const all = [...(L()?.querySelectorAll('*') ?? [])];
+    const at = (n) => (n ? all.indexOf(n) : -1);
+    const block = L()?.querySelector('.stylesaved');
+    const picker = L()?.querySelector('.presetnow');
+    const temp = L()?.querySelector('textarea[aria-label$="(저장되지 않음)"]');
+    const tools = L()?.querySelector('.toolbtns');
+    const paramsBtn = [...(block?.querySelectorAll('button') ?? [])].find((b) => /요청 설정/.test(b.textContent || ''));
+    check('the style block holds 긍정 · 부정 · 요청 설정 and its 저장 together',
+          block?.querySelectorAll('.promptfold').length === 2 && !!paramsBtn && !!block?.querySelector('.stylesavebar .stylesave'),
+          (block?.textContent || '(no block)').slice(0, 200));
+    check('order: picker, saved block, temporary prompts, then 캐릭터/조각',
+          at(picker) >= 0 && at(picker) < at(block) && at(block) < at(temp) && at(temp) < at(tools)
+          && !block?.contains(temp) && /캐릭터/.test(tools?.textContent || '') && /조각/.test(tools?.textContent || ''),
+          `${at(picker)} ${at(block)} ${at(temp)} ${at(tools)}`);
+  }
   const pos = explorer()?.querySelector('.styleedit textarea');
   check('the picked style unfolds 긍정/부정 in the column',
         explorer()?.querySelectorAll('.styleedit .promptfold textarea').length === 2,
         (explorer()?.textContent || '').slice(0, 200));
-  // Each prompt folds on its own and leaves its first line as a preview.
-  const posFold = explorer()?.querySelector('.styleedit .promptfold');
+  // Both prompts start folded (user: "기본적으로 접어놓기"), each keeping its
+  // first line as a preview; each unfolds on its own.
+  const folds = () => [...(explorer()?.querySelectorAll('.styleedit .promptfold') ?? [])];
+  check('both style prompts are folded by default, with a one-line preview',
+        folds().length === 2 && folds().every((f) => f.children[1]?.style.display === 'none')
+        && (folds()[0]?.querySelector('.promptpeek')?.textContent || '').includes('스타일본문'),
+        folds().map((f) => `${f.children[1]?.style.display}|${f.querySelector('.promptpeek')?.textContent}`).join(' / '));
+  const posFold = folds()[0];
   const foldBtn = posFold?.querySelector('.promptfoldhead button');
   foldBtn?.click();
   const posBody = posFold?.children[1];
-  const peek = posFold?.querySelector('.promptpeek');
-  check('긍정 프롬프트 folds alone, showing its first line',
-        posBody?.style.display === 'none' && peek?.style.display !== 'none'
-        && (peek?.textContent || '').includes('스타일본문')
-        && explorer()?.querySelectorAll('.promptfold')[1]?.children[1]?.style.display !== 'none',
-        `${posBody?.style.display} | ${peek?.textContent}`);
+  check('긍정 프롬프트 unfolds alone',
+        posBody?.style.display === '' && folds()[1]?.children[1]?.style.display === 'none',
+        `${posBody?.style.display}`);
+  check('and the unfold is remembered', localStorage.getItem('hina.studioPromptOpen.pos') === '1');
   foldBtn?.click();
-  check('and unfolds again', posBody?.style.display === '');
+  check('and folds again', posBody?.style.display === 'none');
   const temporary = explorer()?.querySelectorAll('textarea[aria-label$="(저장되지 않음)"]');
   check('temporary positive and negative prompts have separate unsaved fields', temporary?.length === 2);
   if (temporary?.length === 2) {
@@ -2421,24 +2466,43 @@ console.log('\ntest_studio_cards');
     temporary[1].value = 'temporary-negative-test';
     for (const input of temporary) input.dispatchEvent(new window.Event('input', { bubbles: true }));
   }
+  const readStyle = async (name) => (await (await fetch(backend.url
+    + '/files/read?path=' + encodeURIComponent('studio/styles/' + name), { headers: auth })).json()).content || '';
+  const saveBtn = () => explorer()?.querySelector('.stylesavebar .stylesave');
+  const dirtyShown = () => explorer()?.querySelector('.stylesavebar .stylebadge')?.style.display !== 'none';
+  const pressSave = async () => {
+    saveBtn()?.dispatchEvent(new window.Event('click', { bubbles: true }));
+    await settle(700);
+  };
   if (pos) {
+    check('a clean style shows no 미저장 and 저장 is off', !dirtyShown() && saveBtn()?.disabled === true);
     pos.value = '스모크, 최고 화질';
     pos.dispatchEvent(new window.Event('input', { bubbles: true }));
     await settle(1700);
-    const saved = await (await fetch(backend.url
-      + '/files/read?path=' + encodeURIComponent('studio/styles/스모크스타일.md'), { headers: auth })).json();
-    check('temporary prompts do not enter the saved style', !/temporary-(positive|negative)-test/.test(saved.content || ''));
-    check('typing saves the style body (## positive)',
-          /## positive[\s\S]*스모크, 최고 화질/.test(saved.content || ''),
-          (saved.content || '').slice(0, 160));
-    check('and keeps the front matter', /name: 스모크스타일/.test(saved.content || ''),
-          (saved.content || '').slice(0, 160));
+    let saved = await readStyle('스모크스타일.md');
+    check('typing no longer saves the style', /스타일본문/.test(saved) && !/최고 화질/.test(saved), saved.slice(0, 160));
+    check('the block says 미저장 and 저장 lights up', dirtyShown() && saveBtn()?.disabled === false);
+    await pressSave();
+    saved = await readStyle('스모크스타일.md');
+    check('temporary prompts do not enter the saved style', !/temporary-(positive|negative)-test/.test(saved));
+    check('저장 writes the style body (## positive)',
+          /## positive[\s\S]*스모크, 최고 화질/.test(saved), saved.slice(0, 160));
+    check('and keeps the front matter', /name: 스모크스타일/.test(saved), saved.slice(0, 160));
+    check('after 저장 the block is clean again', !dirtyShown() && saveBtn()?.disabled === true);
 
-    // §1-77 (user): a style's 요청 설정 behave like its prompt - loaded with
-    // the style, saved back on edit - and there is no separate row for them.
+    // 되돌리기 drops an edit without touching the file.
+    pos.value = '버릴 수정';
+    pos.dispatchEvent(new window.Event('input', { bubbles: true }));
+    clickButton(explorer()?.querySelector('.stylesavebar'), '되돌리기');
+    await settle(300);
+    check('되돌리기 puts the saved prompt back and clears 미저장',
+          /스모크, 최고 화질/.test(explorer()?.querySelector('.styleedit textarea')?.value || '') && !dirtyShown(),
+          explorer()?.querySelector('.styleedit textarea')?.value);
+    check('and wrote nothing', /스모크, 최고 화질/.test(await readStyle('스모크스타일.md')));
+
+    // §1-77 (user): a style's 요청 설정 belong to it - loaded with the style,
+    // and (§1-90) saved by the same 저장, not on every change.
     check('no separate 제작 설정 row under the prompts', !explorer()?.querySelector('.stylegen, .stylegenrow'));
-    const readStyle = async (name) => (await (await fetch(backend.url
-      + '/files/read?path=' + encodeURIComponent('studio/styles/' + name), { headers: auth })).json()).content || '';
     const openParams = async () => {
       pressEscape(document);
       await settle(200);
@@ -2447,7 +2511,8 @@ console.log('\ntest_studio_cards');
       return [...document.querySelectorAll('.modalbox')].find((m) => m.querySelector('.genform')) || null;
     };
     let dlg = await openParams();
-    check('요청 설정 names the style it saves into', /스모크스타일/.test(dlg?.querySelector('.genbind')?.textContent || ''),
+    check('요청 설정 names the style it belongs to', /스모크스타일/.test(dlg?.querySelector('.genbind')?.textContent || '')
+          && /저장/.test(dlg?.querySelector('.genbind')?.textContent || ''),
           (dlg?.querySelector('.genbind')?.textContent || '(no note)').slice(0, 160));
     const stepsInput = [...(dlg?.querySelectorAll('label.field') ?? [])]
       .find((l) => (l.querySelector('span')?.textContent || '') === '스텝')?.querySelector('input');
@@ -2466,16 +2531,26 @@ console.log('\ntest_studio_cards');
     if (brownian) chooseOpt(brownian, 'true');
     await settle(1600);
     let content = await readStyle('스모크스타일.md');
-    check('an edit in 요청 설정 is saved into the style', /steps: 33/.test(content) && /model: nai-diffusion/.test(content)
+    check('an edit in 요청 설정 is not written on its own', !/steps: 33/.test(content) && !/prefer_brownian/.test(content),
+          content.slice(0, 300));
+    check('it marks the style block 미저장', dirtyShown());
+    pressEscape(document);
+    await settle(200);
+    await pressSave();
+    content = await readStyle('스모크스타일.md');
+    check('저장 writes 요청 설정 into the style', /steps: 33/.test(content) && /model: nai-diffusion/.test(content)
           && /sampler: /.test(content) && /prefer_brownian: true/.test(content), content.slice(0, 300));
     check('without touching the prompt or the name',
           /스모크, 최고 화질/.test(content) && /name: 스모크스타일/.test(content));
-    if (brownian) chooseOpt(brownian, '');
-    await settle(1600);
-    content = await readStyle('스모크스타일.md');
-    check('기본 (보내지 않음) removes the flag from the style', !/prefer_brownian/.test(content), content.slice(0, 300));
+    dlg = await openParams();
+    const brownian2 = [...(dlg?.querySelectorAll('label.field') ?? [])]
+      .find((l) => /Brownian/.test(l.querySelector('span')?.textContent || ''))?.querySelector('select');
+    if (brownian2) chooseOpt(brownian2, '');
     pressEscape(document);
     await settle(200);
+    await pressSave();
+    content = await readStyle('스모크스타일.md');
+    check('기본 (보내지 않음) removes the flag from the style', !/prefer_brownian/.test(content), content.slice(0, 300));
 
     // Switching to another style loads ITS settings over whatever the dialog held.
     await fetch(backend.url + '/files/upload', {
@@ -2488,22 +2563,33 @@ console.log('\ntest_studio_cards');
     await settle(200);
     clickById(document, 'tab-studio');
     await settle(1100);
-    const pick = async (re) => {
+    const pick = async (re, answer = '') => {
       explorer()?.querySelector('.presetnow .chev')?.dispatchEvent(new window.Event('click', { bubbles: true }));
       await settle(800);
       [...([...document.querySelectorAll('.modalback .pickrow')].find((r) => re.test(r.textContent || ''))
         ?.querySelectorAll('button') ?? [])].find((b) => (b.textContent || '') === '선택')
         ?.dispatchEvent(new window.Event('click', { bubbles: true }));
-      await settle(1800);
+      await settle(300);
+      const ask = [...document.querySelectorAll('.modalbox')].find((m) => m.querySelector('.unsavedask'));
+      if (answer && ask) clickButton(ask, answer);
+      await settle(1500);
       pressEscape(document);
       await settle(200);
+      return !!ask;
     };
-    await pick(/스모크둘/);
+    // Switching away from unsaved edits asks first (저장 / 버리기 / 취소).
+    const p0 = explorer()?.querySelector('.styleedit textarea');
+    if (p0) { p0.value = '스모크, 최고 화질, 미저장'; p0.dispatchEvent(new window.Event('input', { bubbles: true })); }
+    const asked = await pick(/스모크둘/, '버리고 계속');
+    check('switching style with unsaved edits asks first', asked);
+    check('버리고 계속 switches without writing the edit',
+          !/미저장/.test(await readStyle('스모크스타일.md')) && /스모크둘/.test(explorer()?.querySelector('.presetnow')?.textContent || ''),
+          (explorer()?.querySelector('.presetnow')?.textContent || '').slice(0, 80));
     let cardGen = JSON.parse(localStorage.getItem('hina.studioGen') || '{}');
     check('picking a style loads its settings into 요청 설정',
           cardGen.steps === 17 && cardGen.sampler === 'k_dpmpp_2m', JSON.stringify(cardGen).slice(0, 200));
     dlg = await openParams();
-    check('and the dialog now saves into that style', /스모크둘/.test(dlg?.querySelector('.genbind')?.textContent || ''));
+    check('and the dialog now belongs to that style', /스모크둘/.test(dlg?.querySelector('.genbind')?.textContent || ''));
     pressEscape(document);
     await settle(200);
 
@@ -2785,6 +2871,36 @@ console.log('\ntest_studio_request_settings');
         JSON.stringify(planBody?.params));
   pressEscape(document);
   await settle(200);
+
+  // §1-90: unsaved style PROMPT edits are not what the backend reads, so a
+  // run asks first; 취소 sends nothing, and 되돌리기 leaves no edit behind.
+  const pos = document.querySelector('.panel.active .filetree .stylesaved textarea');
+  if (pos) {
+    const before = pos.value;
+    pos.value = before + ', 미저장 런';
+    pos.dispatchEvent(new window.Event('input', { bubbles: true }));
+    let generated = 0;
+    globalThis.fetch = async (url, opts) => {
+      if (String(url).endsWith('/studio/generate')) generated += 1;
+      return orig(url, opts);
+    };
+    try {
+      document.querySelector('.panel.active .studio-run-footer button.primary')
+        ?.dispatchEvent(new window.Event('click', { bubbles: true }));
+      await settle(300);
+      const ask = [...document.querySelectorAll('.modalbox')].find((m) => m.querySelector('.unsavedask'));
+      check('a run with unsaved style prompt edits asks first', !!ask && /저장하고 생성/.test(ask?.textContent || ''),
+            (ask?.textContent || '(no ask)').slice(0, 160));
+      clickButton(ask, '취소');
+      await settle(300);
+      check('and 취소 starts nothing', generated === 0, String(generated));
+    } finally { globalThis.fetch = orig; }
+    clickButton(document.querySelector('.panel.active .stylesavebar'), '되돌리기');
+    await settle(300);
+    check('되돌리기 leaves the style clean', document.querySelector('.panel.active .filetree .stylesaved textarea')?.value === before);
+  } else {
+    check('the style block is on screen for the run guard', false);
+  }
 }
 
 console.log('\ntest_studio_bottom_strip');
@@ -3544,54 +3660,108 @@ console.log('\ntest_mcp_switch');
 
 console.log('\ntest_persona_edit');
 {
-  // §1-89: 페르소나 편집 lists RisuAI's personas; the selected one cannot be
-  // edited (RisuAI keeps a live copy the plugin cannot write), another can,
-  // gets a projects/페르소나/<이름> folder, and 반영 writes it back.
+  // §1-89: personas work like the bot - a backend working copy, snapshots,
+  // 반영 from the bar or the title row, and the AI pane on the right.
+  const auth = { Authorization: 'Bearer plugin-smoke-token' };
+  const api = async (path) => (await fetch(backend.url + path, { headers: auth })).json();
   await openLanding(document, 'persona');
-  await settle(600);
+  await settle(800);
   const rows = [...document.querySelectorAll('.personalist .chatitem')];
   check('the personas are listed', rows.length === 2, String(rows.length));
-  const meBtn = rows[0]?.querySelector('button');
-  check('the selected persona is locked', !!meBtn?.disabled && /선택됨/.test(rows[0]?.textContent || ''), rows[0]?.textContent);
-  const detBtn = rows[1]?.querySelector('button');
-  detBtn?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  check('the RisuAI-selected persona is marked', /RisuAI 선택됨/.test(rows[0]?.textContent || ''), rows[0]?.textContent);
+  rows[1]?.querySelector('button')?.dispatchEvent(new window.Event('click', { bubbles: true }));
   await settle(900);
-  check('another persona opens the persona tab', document.getElementById('tab-persona')?.classList.contains('active'));
+  check('a persona opens the persona tab', document.getElementById('tab-persona')?.classList.contains('active'));
   check('only the persona tab is in the bar', document.getElementById('tab-persona')?.style.display !== 'none'
         && document.getElementById('tab-meta')?.style.display === 'none' && document.getElementById('tab-editor')?.style.display === 'none');
-  const auth = { Authorization: 'Bearer plugin-smoke-token' };
-  const listing = await (await fetch(backend.url + '/files?prefix=' + encodeURIComponent('projects/페르소나'), { headers: auth })).json();
+  check('the AI pane sits on the right', !!document.querySelector('.panel.active .split.personasplit .right .agentpanel'));
+  check('every persona is listed on the left', document.querySelectorAll('.panel.active .personatree .chatitem').length === 2);
+  const listing = await api('/files?prefix=' + encodeURIComponent('projects/페르소나'));
   const dirs = (listing.areas || []).flatMap((a) => a.dirs || []);
   check('its project folder is made under projects/페르소나', dirs.some((d) => /projects\/페르소나\/탐정$/.test(d)), dirs.join(','));
   const ta = document.querySelector('.personaedit textarea.personaprompt');
   check('the description is in the editor', ta?.value === '사립 탐정이다.', ta?.value);
   ta.value = '사립 탐정이다. 비 오는 밤을 좋아한다.';
   ta.dispatchEvent(new window.Event('input', { bubbles: true }));
-  await settle(100);
-  const writesBefore = host.dbWrites.length;
-  clickButton(document.querySelector('.personaedit'), 'RisuAI에 반영');
+  await settle(1300);
+  const key = (await api('/personas')).personas?.find((p) => p.id === 'p-det')?.key || '';
+  let row = await api('/persona?key=' + encodeURIComponent(key));
+  check('typing saves to the backend working copy', row.work?.prompt === '사립 탐정이다. 비 오는 밤을 좋아한다.' && row.dirty === true,
+        JSON.stringify(row).slice(0, 200));
+  check('RisuAI is untouched until 반영', host.personas[1].personaPrompt === '사립 탐정이다.');
+  await settle(800);
+  check('the title-row 반영 counts the persona',
+        Number(document.querySelector('header .commitchip.apply .commitn')?.textContent) >= 1,
+        document.querySelector('header .commitchip.apply')?.textContent);
+  // 🔖 스냅샷
+  document.querySelector('.tool[data-tool="persona-snapshot"]')?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(200);
+  clickButton(document.querySelector('.popover'), '저장');
+  await settle(700);
+  const cps = await api('/persona/checkpoints?key=' + encodeURIComponent(key));
+  check('a persona snapshot is saved', (cps.checkpoints || []).some((c) => c.kind !== 'auto'), JSON.stringify(cps).slice(0, 160));
+  // The title-row popover names it next to the bot and chats.
+  document.querySelector('header .commitchip.apply')?.dispatchEvent(new window.Event('click', { bubbles: true }));
   await settle(900);
-  check('반영 wrote the persona to RisuAI', host.dbWrites.length === writesBefore + 1
+  check('the title-row 반영 lists the persona', /'탐정' 페르소나/.test(document.querySelector('.commitpop')?.textContent || ''),
+        (document.querySelector('.commitpop')?.textContent || '').slice(0, 200));
+  pressEscape(document);
+  await settle(200);
+  // 반영 from the persona bar
+  const writesBefore = host.dbWrites.length;
+  document.querySelector('.tool[data-tool="persona-apply"]')?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(1500);
+  check('반영 wrote the persona to RisuAI', host.dbWrites.length > writesBefore
         && host.personas[1].personaPrompt === '사립 탐정이다. 비 오는 밤을 좋아한다.', JSON.stringify(host.personas[1]));
   check('and left the selected one alone', host.personas[0].personaPrompt === '선택된 페르소나');
-  // The selected persona is refused at write time too, not only in the list.
+  row = await api('/persona?key=' + encodeURIComponent(key));
+  check('the baseline moved: nothing pending', row.dirty === false, JSON.stringify(row).slice(0, 200));
+  // RisuAI's selected persona: edits stay in the working copy, 반영 is refused.
   host.selectPersona(1);
-  ta.value = '또 고침';
   const ta2 = document.querySelector('.personaedit textarea.personaprompt');
   ta2.value = '또 고침';
   ta2.dispatchEvent(new window.Event('input', { bubbles: true }));
-  await settle(100);
-  clickButton(document.querySelector('.personaedit'), 'RisuAI에 반영');
+  await settle(1300);
+  document.querySelector('.tool[data-tool="persona-apply"]')?.dispatchEvent(new window.Event('click', { bubbles: true }));
   await settle(900);
-  check('a persona that became selected meanwhile is refused', host.personas[1].personaPrompt !== '또 고침'
-        && /선택된 페르소나/.test(document.querySelector('.personaedit')?.textContent || ''));
+  check('a persona RisuAI has selected is not written', host.personas[1].personaPrompt !== '또 고침'
+        && /선택된 페르소나/.test(document.querySelector('.shellnotice')?.textContent || ''),
+        (document.querySelector('.shellnotice')?.textContent || '').slice(0, 160));
+  row = await api('/persona?key=' + encodeURIComponent(key));
+  check('and the edit stays in the working copy', row.work?.prompt === '또 고침' && row.dirty === true);
   host.selectPersona(0);
-  await openLanding(document, 'persona');
+  // Leave nothing pending for the scenarios after this one.
+  await fetch(backend.url + '/persona/reset', { method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' }, body: JSON.stringify({ key }) });
   await settle(300);
-  check('the unsent edit is marked on the first screen', /미반영/.test(document.querySelectorAll('.personalist .chatitem')[1]?.textContent || ''));
-  // Leave the next scenario a plain first screen.
-  document.querySelector('.modecard[data-mode="persona"]')?.dispatchEvent(new window.Event('click', { bubbles: true }));
+
+  // A NEW persona: ＋ 새 페르소나 → name → it opens; 반영 appends it to RisuAI.
+  clickButton(document.querySelector('.panel.active .personatree')?.parentElement, '새 페르소나');
   await settle(200);
+  const nameBox = document.querySelector('.modalbox input');
+  check('＋ 새 페르소나 asks for a name', !!nameBox);
+  nameBox.value = '조수';
+  clickButton(document.querySelector('.modalbox'), '만들기');
+  await settle(900);
+  const nameField = document.querySelector('.personaedit input:not([type=file])');
+  check('the new persona opens in the editor', nameField?.value === '조수', nameField?.value);
+  check('and is marked new in the list', /새로 만듦/.test(document.querySelector('.panel.active .personatree')?.textContent || ''));
+  const ta3 = document.querySelector('.personaedit textarea.personaprompt');
+  ta3.value = '탐정의 조수.';
+  ta3.dispatchEvent(new window.Event('input', { bubbles: true }));
+  await settle(1300);
+  const before3 = host.personas.length;
+  document.querySelector('.tool[data-tool="persona-apply"]')?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(1800);
+  const made = host.personas[host.personas.length - 1];
+  check('반영 appends the new persona to RisuAI', host.personas.length === before3 + 1
+        && made?.name === '조수' && made?.personaPrompt === '탐정의 조수.' && !!made?.id, JSON.stringify(made));
+  const rows3 = (await api('/personas')).personas || [];
+  const mine = rows3.find((p) => p.id === made?.id);
+  check('the working copy is now that RisuAI persona', !!mine && !mine.isNew && !mine.dirty, JSON.stringify(mine).slice(0, 200));
+  clickById(document, 'tab-chats');
+  await settle(400);
+  check('선택 from the persona tab lands on the folded dashboard',
+        document.getElementById('tab-chats')?.classList.contains('active') && !document.querySelector('.modecard.open'));
 }
 
 console.log('\ntest_no_character_selected');

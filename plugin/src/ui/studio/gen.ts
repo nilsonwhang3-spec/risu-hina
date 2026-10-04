@@ -189,7 +189,7 @@ export function openParamsDialog(): void {
 
   const bound = styleSync.boundName();
   const bindNote = el('div', { class: bound ? 'notice ok genbind' : 'hint genbind', text: bound
-    ? `이 설정은 스타일 ‘${bound}’ 에 함께 저장됩니다 — 스타일을 고르면 그 스타일의 설정으로 바뀝니다. (시드 · 저장 폴더 · 에셋은 이번 작업용이라 저장하지 않습니다)`
+    ? `이 설정은 스타일 ‘${bound}’ 의 일부입니다 — 바꾸면 바로 다음 생성에 쓰이고, 왼쪽 스타일 블록의 [저장]을 눌러야 스타일 파일에 저장됩니다. 스타일을 고르면 그 스타일의 설정으로 바뀝니다. (시드 · 저장 폴더 · 에셋은 이번 작업용이라 저장하지 않습니다)`
     : '선택된 스타일이 없어 이 설정은 이 브라우저에만 저장됩니다.' });
   const body = el('div', { class: 'genform' }, [
     bindNote,
@@ -391,6 +391,8 @@ export function scenePicker(): HTMLElement {
 /** Start a batch from the current panel setup, with per-call overrides
  * (the 1장 tab passes `{ scenePreset: '', count: n }`). */
 export async function startRun(overrides: Record<string, unknown> = {}): Promise<void> {
+  // Unsaved style prompt edits are not what the backend reads (§1-90): ask.
+  if (!(await styleSync.beforeRun())) return;
   try {
     const body = { ...spec(), ...overrides };
     if (!body.scenePreset) delete body.scenePreset;

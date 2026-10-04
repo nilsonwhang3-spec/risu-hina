@@ -4,6 +4,26 @@ import { transport, BackendError, clientLog, type HealthInfo } from './transport
 import * as host from './host';
 import * as personaHost from './persona';
 import type { Persona } from './persona';
+
+/** A persona's backend row: RisuAI's copy (base) and the working copy (work). */
+export interface PersonaRow {
+  key: string; id: string; index: number; name: string; selected: boolean; gone: boolean;
+  folder: string;
+  base: { name: string; prompt: string };
+  work: { name: string; prompt: string; image: string };
+  dirty: boolean; total: number;
+  /** Made in Hina and not in RisuAI yet: 반영 appends it to RisuAI's list. */
+  isNew?: boolean;
+  /** The RisuAI picture, cached as a file (the AI views it); '' until cached. */
+  iconPath: string; iconKey: string;
+  checkpoints?: number;
+}
+
+function toBase64(bytes: Uint8Array): string {
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(s);
+}
 import { boundedAssets, foregroundWrite } from './operation';
 import { syncAssets, syncBusy, describeSync, type SyncProgress, type SyncController } from './assets';
 import type { RisuChat, RisuCharacter, RisuMessage } from './risuai';
@@ -29,6 +49,8 @@ export interface DirtySummary {
     chatKey: string; chatId?: string; name: string;
     dirty: boolean; total: number; conflicts: number;
   }[];
+  /** Personas holding unapplied work (§1-89); not bot-scoped. */
+  personas?: { key: string; name: string; total: number }[];
 }
 
 export interface WorkspaceInfo {
@@ -1025,34 +1047,42 @@ class AppState {
    * as the one that is.
    */
   // --- personas (§1-89) ----------------------------------------------------
+  //
+  // Same shape as the card: RisuAI holds the persona, the backend holds a
+  // working copy (base = what RisuAI had at the last read, work = the edits),
+  // snapshots of it, and AI proposals land in it on approval. 반영 is the one
+  // write to RisuAI, carried out here because only the plugin can reach it.
 
-  /** RisuAI's personas as last read; null before the first read. */
-  personas: Persona[] | null = null;
+  /** Every persona the backend knows, as of the last read of RisuAI; null before it. */
+  personas: PersonaRow[] | null = null;
   personaError = '';
   personaLoading = false;
-  /** The persona open in the persona tab, as it was read when opened. */
-  persona: Persona | null = null;
-  /** Unsaved edits per persona (id, or `#index`), kept across back-and-forth. */
-  personaDrafts = new Map<string, { name: string; prompt: string; image: Uint8Array | null; imageName: string }>();
-  /** projects/페르소나/<name>: the persona's project folder in the file space. */
-  personaFolder = '';
+  /** The persona open in the persona tab (its backend row). */
+  persona: PersonaRow | null = null;
 
-  personaKey(p: Persona): string {
-    return p.id || '#' + p.index;
+  /** projects/페르소나/<name>: the open persona's project folder. */
+  get personaFolder(): string {
+    return this.persona?.folder ?? '';
   }
 
-  async loadPersonas(): Promise<Persona[]> {
+  /**
+   * Read RisuAI's personas and hand them to the backend, which keeps their
+   * working copies; the pictures it has not cached yet follow in the
+   * background (the AI looks at them as files).
+   */
+  async loadPersonas(): Promise<PersonaRow[]> {
     this.personaLoading = true;
     this.personaError = '';
     this.emit();
     try {
       const r = await personaHost.readPersonas();
-      this.personas = r.personas;
-      if (this.persona) {
-        const now = r.personas.find((p) => (this.persona!.id ? p.id === this.persona!.id : p.index === this.persona!.index));
-        if (now) this.persona = now;
-      }
-      return r.personas;
+      const res = await transport.post<{ personas: (PersonaRow & { needIcon?: boolean })[] }>('/persona/sync', {
+        personas: r.personas.map((p) => ({ id: p.id, index: p.index, name: p.name, prompt: p.prompt, icon: p.icon, selected: p.selected })),
+      });
+      this.personas = res.personas;
+      if (this.persona) this.persona = res.personas.find((p) => p.key === this.persona!.key) ?? this.persona;
+      void this.cachePersonaIcons(res.personas.filter((p) => p.needIcon), r.personas);
+      return res.personas;
     } catch (e) {
       this.personaError = e instanceof Error ? e.message : String(e);
       throw e;
@@ -1060,6 +1090,160 @@ class AppState {
       this.personaLoading = false;
       this.emit();
     }
+  }
+
+  private async cachePersonaIcons(rows: PersonaRow[], live: Persona[]): Promise<void> {
+    for (const row of rows) {
+      const p = live.find((x) => (row.id ? x.id === row.id : x.index === row.index));
+      if (!p?.icon) continue;
+      const bytes = await personaHost.personaImage(p.icon);
+      if (!bytes) continue;
+      try {
+        const saved = await transport.post<PersonaRow>('/persona/icon', { key: row.key, iconKey: p.icon, base64: toBase64(bytes) });
+        this.patchPersona(saved);
+      } catch (e) {
+        void clientLog('warn', 'persona icon cache', { error: String(e).slice(0, 200) });
+      }
+    }
+  }
+
+  /** One row changed: the list and the open persona follow, one emit. */
+  private patchPersona(row: PersonaRow): PersonaRow {
+    if (this.personas) this.personas = this.personas.map((x) => (x.key === row.key ? { ...x, ...row } : x));
+    if (this.persona?.key === row.key) this.persona = { ...this.persona, ...row };
+    this.emit();
+    return row;
+  }
+
+  /** Open one persona for editing (its project folder exists from the sync). */
+  async openPersona(key: string): Promise<PersonaRow> {
+    const row = await transport.get<PersonaRow>('/persona', { key });
+    this.persona = row;
+    this.touchFiles();
+    return row;
+  }
+
+  /** The backend's rows again, without reading RisuAI (an approved AI edit). */
+  async refreshPersonaList(): Promise<void> {
+    if (this.personas === null && !this.persona) return;
+    try {
+      const r = await transport.get<{ personas: PersonaRow[] }>('/personas');
+      this.personas = r.personas;
+      if (this.persona) this.persona = r.personas.find((p) => p.key === this.persona!.key) ?? this.persona;
+      this.emit();
+    } catch { /* next time */ }
+  }
+
+  async refreshPersona(): Promise<void> {
+    if (!this.persona) return;
+    try { this.patchPersona(await transport.get<PersonaRow>('/persona', { key: this.persona.key })); } catch { /* next time */ }
+  }
+
+  /** Edit the working copy: only the given fields; image '' drops a pending new picture. */
+  async editPersona(fields: { name?: string; prompt?: string; image?: string }, key = this.persona?.key ?? ''): Promise<PersonaRow> {
+    return this.patchPersona(await transport.post<PersonaRow>('/persona/edit', { key, ...fields }));
+  }
+
+  async personaReset(key = this.persona?.key ?? ''): Promise<number> {
+    const r = await transport.post<PersonaRow & { discarded?: number; deleted?: boolean }>('/persona/reset', { key });
+    if (r.deleted) {
+      // A new persona discarded is a persona gone: nothing in RisuAI to go back to.
+      if (this.personas) this.personas = this.personas.filter((x) => x.key !== key);
+      if (this.persona?.key === key) this.persona = null;
+      this.emit();
+      return 1;
+    }
+    this.patchPersona(r);
+    return r.discarded ?? 0;
+  }
+
+  /** A NEW persona in the working copy; RisuAI gets it on 반영. */
+  async createPersona(name: string, prompt = ''): Promise<PersonaRow> {
+    const row = await transport.post<PersonaRow>('/persona/create', { name, prompt });
+    this.personas = [...(this.personas ?? []), row];
+    this.persona = row;
+    this.touchFiles();
+    return row;
+  }
+
+  async personaCheckpoints(key = this.persona?.key ?? ''): Promise<{ id: string; label: string; created_at: number; kind?: string }[]> {
+    const r = await transport.get<{ checkpoints: any[] }>('/persona/checkpoints', { key });
+    return r.checkpoints ?? [];
+  }
+
+  async personaCheckpoint(label: string, key = this.persona?.key ?? ''): Promise<void> {
+    await transport.post('/persona/checkpoint', { key, label });
+    await this.refreshPersona();
+  }
+
+  async personaRestore(id: string, key = this.persona?.key ?? ''): Promise<void> {
+    const r = await transport.post<PersonaRow>('/persona/checkpoint/restore', { key, id });
+    if (r && (r as PersonaRow).key) this.patchPersona(r);
+    else await this.refreshPersona();
+  }
+
+  async deletePersonaCheckpoint(id: string, key = this.persona?.key ?? ''): Promise<void> {
+    await transport.post('/persona/checkpoint/delete', { key, id });
+  }
+
+  async renamePersonaCheckpoint(id: string, label: string, key = this.persona?.key ?? ''): Promise<void> {
+    await transport.post('/persona/checkpoint/rename', { key, id, label });
+  }
+
+  /** Personas holding unapplied work - the title-row 반영 lists them too. */
+  async personaDirty(): Promise<{ key: string; name: string; total: number }[]> {
+    try {
+      const r = await transport.get<{ personas: { key: string; name: string; total: number }[] }>('/persona/dirty');
+      return r.personas ?? [];
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * 반영 for one persona: write its working copy into RisuAI, read it back,
+   * and move the backend baseline. Refused while RisuAI has it selected (see
+   * persona.ts) and when RisuAI's copy moved since the last read.
+   */
+  async personaWriteBack(key = this.persona?.key ?? ''): Promise<{ written: boolean; name: string }> {
+    const row = await transport.get<PersonaRow>('/persona', { key });
+    if (!row.dirty) return { written: false, name: row.work.name };
+    if (row.isNew) {
+      // A persona made here: RisuAI's list grows by one.
+      const bytes = row.work.image ? await this.fileBytes(row.work.image) : null;
+      const made = await personaHost.createPersona({ name: row.work.name, prompt: row.work.prompt }, bytes);
+      const after = await transport.post<PersonaRow>('/persona/commit', {
+        key, id: made.id, index: made.index, name: made.name, prompt: made.prompt, iconKey: made.icon,
+      });
+      if (this.persona?.key === key) this.persona = after;
+      if (this.personas) this.personas = this.personas.map((x) => (x.key === key ? after : x));
+      this.patchPersona(after);
+      this.touchFiles();
+      void this.loadPersonas().catch(() => undefined);
+      return { written: true, name: made.name };
+    }
+    const live = (await personaHost.readPersonas()).personas;
+    const p = live.find((x) => (row.id ? x.id === row.id : x.index === row.index && x.name === row.base.name));
+    if (!p) throw new Error('RisuAI에서 이 페르소나를 찾지 못했습니다 (지워졌을 수 있습니다). 첫 화면에서 다시 읽어 주세요');
+    if (p.selected) throw new Error(personaHost.SELECTED_REFUSAL);
+    if (p.name !== row.base.name || p.prompt !== row.base.prompt || p.icon !== row.iconKey) {
+      throw new Error('RisuAI 쪽에서 이 페르소나가 바뀌었습니다. 첫 화면에서 페르소나를 다시 읽어 주세요 (편집 내용은 작업본에 남아 있습니다)');
+    }
+    const bytes = row.work.image ? await this.fileBytes(row.work.image) : null;
+    const saved = await personaHost.writePersona(p, { name: row.work.name, prompt: row.work.prompt }, bytes);
+    const after = await transport.post<PersonaRow>('/persona/commit', {
+      key, name: saved.name, prompt: saved.prompt, iconKey: saved.icon,
+    });
+    // A persona without an id is keyed by its name, so a rename moves its key.
+    if (after.key !== key) {
+      if (this.persona?.key === key) this.persona = after;
+      if (this.personas) this.personas = this.personas.map((x) => (x.key === key ? after : x));
+    }
+    this.patchPersona(after);
+    this.touchFiles();
+    // The renamed folder and the new picture: one more read refreshes both.
+    void this.loadPersonas().catch(() => undefined);
+    return { written: true, name: saved.name };
   }
 
   /** The bot's project folder under projects/, and the name it could take (§1-89). */
@@ -1070,43 +1254,21 @@ class AppState {
 
   /** Rename the project folder with everything keyed by it (notes, rules, studio output). */
   async renameBotFolder(folder: string): Promise<{ old: string; folder: string }> {
-    const r = await transport.post<{ old: string; folder: string }>('/workspace/folder/rename', { charKey: this.activeCharKey, folder });
-    this.touchFiles();
-    return r;
-  }
-
-  /** Open one persona for editing: its project folder is made (or found) first. */
-  async openPersona(p: Persona): Promise<void> {
-    const r = await transport.post<{ path: string; folder: string }>('/persona/folder', { id: p.id, name: p.name });
-    this.persona = p;
-    this.personaFolder = r.path;
-    this.touchFiles();
-  }
-
-  /** Write the open persona's draft to RisuAI; the draft goes on success. */
-  async savePersona(): Promise<Persona> {
-    const p = this.persona;
-    if (!p) throw new Error('편집 중인 페르소나가 없습니다');
-    const key = this.personaKey(p);
-    const d = this.personaDrafts.get(key);
-    if (!d) return p;
-    const saved = await personaHost.writePersona(p, { name: d.name, prompt: d.prompt }, d.image);
-    if (saved.name !== p.name) {
-      // The project folder follows the name; a refusal there (a taken name)
-      // leaves the old folder, which is harmless.
-      try {
-        const r = await transport.post<{ path: string }>('/persona/folder/rename', { id: p.id, name: p.name, folder: saved.name });
-        this.personaFolder = r.path;
-        this.touchFiles();
-      } catch (e) {
-        void clientLog('warn', 'persona folder rename', { error: String(e).slice(0, 200) });
-      }
+    // Moving a big studio output folder can take a while; a lost answer is
+    // checked against the folder itself rather than reported as a failure
+    // (the first real rename finished server-side after the panel gave up).
+    const ck = this.activeCharKey;
+    try {
+      const r = await transport.post<{ old: string; folder: string }>('/workspace/folder/rename', { charKey: ck, folder }, 180_000);
+      this.touchFiles();
+      return r;
+    } catch (e) {
+      if (e instanceof BackendError && e.status >= 400 && e.status < 500) throw e;
+      const info = await transport.get<{ folder: string }>('/workspace/folder', { charKey: ck }).catch(() => null);
+      this.touchFiles();
+      if (info && info.folder !== '' && info.folder === folder.trim()) return { old: '', folder: info.folder };
+      throw e;
     }
-    this.personaDrafts.delete(key);
-    this.persona = saved;
-    if (this.personas) this.personas = this.personas.map((x) => (x.index === saved.index ? saved : x));
-    this.emit();
-    return saved;
   }
 
   async openChat(chatIndex: number): Promise<void> {
@@ -1392,9 +1554,15 @@ class AppState {
 
   /** Pending state across the whole bot - the leave guard's one call. */
   async dirtySummary(): Promise<DirtySummary | null> {
-    if (!this.activeCharKey) return null;
+    const personas = this.health ? this.personaDirty() : Promise.resolve([]);
+    if (!this.activeCharKey) {
+      const ps = await personas;
+      return ps.length ? { charKey: '', card: { dirty: false, total: 0, conflicts: 0 }, chats: [], personas: ps } : null;
+    }
     try {
-      return await transport.get<DirtySummary>('/workspace/dirty', { charKey: this.activeCharKey });
+      const [s, ps] = await Promise.all([
+        transport.get<DirtySummary>('/workspace/dirty', { charKey: this.activeCharKey }), personas]);
+      return { ...s, personas: ps };
     } catch {
       // The guard treats "cannot check" as "nothing to resolve": a dead
       // backend must never lock the user inside the panel.
@@ -1583,6 +1751,8 @@ class AppState {
     yield* transport.stream('/chat', {
       sessionId: this.sessionId, prompt,
       mode: this.activeTab === 'studio' ? 'studio' : this.editMode,
+      // Which persona the persona tab has open (§1-89); the agent is told.
+      persona: this.editMode === 'persona' ? (this.persona?.key ?? '') : '',
     }, signal);
   }
 
@@ -2134,7 +2304,7 @@ class AppState {
       // A lorebook or memory proposal just landed in the working copy; the
       // tabs caching those lists and the shared bar both have to hear it.
       this.bump();
-      await Promise.all([this.refreshChanges(), this.refreshBotChanges()]);
+      await Promise.all([this.refreshChanges(), this.refreshBotChanges(), this.refreshPersonaList()]);
       return String(r.result ?? '실행했습니다.');
     }
 
@@ -2173,6 +2343,11 @@ class AppState {
         const name = String(r.host.args?.name || '') || '복제 봇';
         await this.cloneBot(name);
         detail = `복제 봇 “${name}” 을 만들었습니다. RisuAI 목록에서 확인해 주세요.`;
+      } else if (r.host.kind === 'host_persona_writeback') {
+        const out = await this.personaWriteBack(String(r.host.args?.key || ''));
+        detail = out.written
+          ? `페르소나 '${out.name}' 을(를) RisuAI에 반영하고 저장을 확인했습니다.`
+          : '페르소나에 반영할 변경이 없었습니다.';
       } else if (r.host.kind === 'host_open_tab') {
         const tab = String(r.host.args?.tab || '');
         this.openTabRequest = tab;

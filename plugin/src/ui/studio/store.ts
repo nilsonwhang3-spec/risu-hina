@@ -9,6 +9,7 @@
  */
 import { state, type FileListing, type StudioItem, type StudioJob, type StudioStatus,
          type WorkspaceFile } from '../../state';
+import { transport, BackendError } from '../../transport';
 
 // The card areas, in the order the work goes in. styles/characters carry the
 // enable toggle; scenes (SD스튜디오 프리셋) are picked per run; fragments are
@@ -65,6 +66,12 @@ export const S = {
   extraRoots: [] as Folder[],
   /** The card lists, one per area. */
   cards: {} as Record<string, StudioItem[]>,
+  /** Whether the card lists / the OUTPUT listing have arrived at least once
+   * (until then the left column draws its skeleton, not an empty list). */
+  libraryLoaded: false,
+  outputLoaded: false,
+  /** Why the very first library read failed ('' = it did not). */
+  libraryError: '',
   selected: OUTPUT_ROOT,
   /** A card picked in the list; the centre shows its editor instead of a folder. */
   selectedFile: '',
@@ -199,11 +206,43 @@ export function persistGen(): void {
  * registers the two hooks; gen.ts calls `edited()` on every style-bound field.
  */
 export const styleSync = {
-  /** A style-bound field changed: save it into the active style (debounced). */
+  /** A style-bound field changed: the style block shows 미저장 (§1-90 - no
+   * autosave; the block's 저장 writes prompts and settings together). */
   edited: () => { /* registered by left-prompt */ },
   /** The style the settings are saved into ('' = none selected). */
   boundName: (): string => '',
+  /** The library read brought the active style's text: take it as the saved
+   * version unless edits are pending. True = the editor should redraw. */
+  prime: (_s: { path: string; content: string } | null): boolean => false,
+  /** Unsaved edits in the style block (prompts or settings). */
+  dirty: (): boolean => false,
+  /** Before a run: unsaved PROMPT edits are not what the backend reads, so
+   * ask. Resolves false to cancel the run. */
+  beforeRun: async (): Promise<boolean> => true,
 };
+
+/** The library read (§1-90): the four card lists and the active style's text
+ * in one request. A backend from before /studio/library answers 404; then
+ * the four per-area reads run as before (in parallel). */
+export interface LibraryReply {
+  areas: Record<string, StudioItem[]>;
+  errors?: Record<string, string>;
+  activeStyle?: { path: string; content: string } | null;
+}
+
+export async function fetchLibrary(): Promise<LibraryReply> {
+  try {
+    return await transport.get<LibraryReply>('/studio/library');
+  } catch (e) {
+    if (!(e instanceof BackendError) || e.status !== 404) throw e;
+  }
+  const lists = await Promise.all(CARD_AREAS.map((a) =>
+    state.studio.items(a.area).then((r) => r.items).catch(() => null)));
+  const areas: Record<string, StudioItem[]> = {};
+  CARD_AREAS.forEach((a, i) => { const l = lists[i]; if (l) areas[a.area] = l; });
+  if (!Object.keys(areas).length) throw new Error('스튜디오 카드 목록을 읽지 못했습니다.');
+  return { areas, activeStyle: null };
+}
 
 /** The active cards of one area, in (order, path) order - what a run sends. */
 export function activeOf(area: string): string[] {

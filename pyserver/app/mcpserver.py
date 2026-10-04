@@ -121,7 +121,8 @@ def _deps() -> Any:
     char_key = crow["char_key"]
     pyexec.install_skills(workspace.hina_dir(char_key))
     return agent_mod.Deps(chat_key=chat_key, char_key=char_key, session_id=_session_for(chat_key),
-                          workspace_dir=workspace.root(char_key), mode="")
+                          workspace_dir=workspace.root(char_key), mode="",
+                          persona=str(ctx.get("persona") or ""))
 
 
 class _Refusal(Exception):
@@ -166,6 +167,14 @@ def _hina_status() -> str:
         lines.append(f"열린 봇: {ctx.get('botName') or '?'} (charKey {crow['char_key'] if crow else '?'})")
         lines.append(f"열린 챗: {ctx.get('chatName') or '?'} (chatKey {ctx['chatKey']})")
         lines.append(f"패널 화면: {ctx.get('mode') or '선택 화면'}")
+        if ctx.get("persona"):
+            from . import personas
+            try:
+                p = personas.get(ctx["persona"])
+                lines.append(f"열린 페르소나: {p['work']['name'] or p['name']} (key {p['key']}) - "
+                             "list_personas / read_persona / propose_persona_* 로 다룹니다")
+            except personas.PersonaError:
+                lines.append(f"열린 페르소나: key {ctx['persona']}")
         pend = mcpbridge._pending_actions(ctx["chatKey"], crow["char_key"] if crow else "")
         lines.append(f"승인 대기: 제안 {pend['actions']}건 · 턴 수정 {pend['staged']}건 "
                      "(approve_proposals / approve_staged 또는 패널에서 승인)")
@@ -262,7 +271,8 @@ async def _approve_proposals(args: dict) -> str:
                 mcpbridge.push_job({"type": "host-action", "id": a["id"], "kind": a["kind"],
                                     "charKey": char_key, "chatKey": a["chatKey"]})
                 status, detail, approved_at = await _await_host(a["id"])
-                if status == "done" and a["kind"] in ("host_writeback", "host_card_writeback", "host_save_copy"):
+                if status == "done" and a["kind"] in ("host_writeback", "host_card_writeback", "host_save_copy",
+                                                      "host_persona_writeback"):
                     from . import risupersist
                     since = approved_at if approved_at is not None else time.time() - 5
                     note = risupersist.describe(await risupersist.wait_saved(since))

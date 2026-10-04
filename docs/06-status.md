@@ -1,5 +1,55 @@
 # 06. Implementation status — as of 2026-10-04 (v0.15.32, Risu Hina)
 
+## unreleased (2026-10-04): §1-90 studio left panel: one read, explicit save, folded prompts
+
+- **Field report:** entering the studio left the left panel empty for a long while (even on LAN) and then filled
+  it piece by piece; the style's saved parts should sit together (긍정·부정·요청 설정), then the unsaved temporary
+  prompts, then the character/fragment pickers; prompts must save explicitly; style prompts folded by default.
+- **Cause of the wait:** not the backend (each list 10-75ms warm) but round trips through the relay: entry waited
+  on four `/studio/list` + the OUTPUT listing before drawing, then the style editor fired a dependent
+  `/files/read` - two visible steps, 9 requests before the style text. **Fix:** `GET /studio/library` answers all
+  four lists plus the active style's text in one read (404 → old per-area reads); library, OUTPUT and pins load in
+  parallel; a skeleton paints at once; data is kept across visits (and in localStorage per backend), re-reads
+  patch only what changed, `/studio/plan` only when cards changed. Measured with 150/400ms simulated latency:
+  first paint 247/490ms → 9/12ms, style text 426/914ms in two steps → 244/492ms in one.
+- **Order and save:** style picker → one framed block (긍정 · 부정 · ⚙ 요청 설정 + 미저장 badge · 되돌리기 · 저장,
+  Ctrl+S) → 임시 프롬프트 (저장 안 됨) → 캐릭터 · 조각. The 800ms prompt autosave and the 요청 설정 autosave are
+  gone; switching style with unsaved edits asks (저장하고 계속 / 버리고 계속 / 취소); a run with unsaved prompt
+  edits asks (the backend reads the saved file); leaving the tab warns.
+- **Folded by default:** `hina.studioPromptOpen.pos/neg` default folded; only an explicit unfold is remembered.
+- Verified: plugin_smoke (skeleton, one library read, order, folded, no write before 저장, guards), test_studio
+  (`test_library_one_read`), test_studio_improvements.
+
+## unreleased (2026-10-04): §1-89 round 2 - personas like the bot (working copy, snapshots, 반영, AI), new personas
+
+- **Field report after staging:** the persona screen had no AI pane; 폴더 이름 바꾸기 "failed" at 20s; 선택 came
+  back to the unfolded persona list (no way to the dashboard); the AI must change persona pictures, search and
+  browse other personas and edit the persona open in the panel; personas need snapshots/반영 like bot and chat;
+  a NEW persona must be creatable ("이 봇에 어울리는 페르소나 3개" → pick → create → studio picture → Pillow crop →
+  set → 반영); the staged studio failed with a uc_preset error.
+- **Working copy (personas.py, schema 15):** `personas` / `persona_checkpoints` tables. The plugin syncs RisuAI's
+  list (`/persona/sync`) and caches each RisuAI picture as `<folder>/RisuAI 프로필.<ext>` (the AI views it);
+  edits (`/persona/edit`, typed with a 700ms pause), snapshots (manual + auto "복원 직전"/"버리기 직전"/"반영 직전"),
+  `/persona/commit` after a verified write. New personas are `new:<hex>` rows; 반영 appends them to RisuAI's list
+  (persona.ts createPersona) and the row is re-keyed to the RisuAI id. A picture from outside the persona folder
+  is copied in as `프로필 <n>.<ext>`.
+- **Title-row 반영 / leave guard** list dirty personas next to the card and chats (`/persona/dirty`), 반영 and
+  변경 취소 per persona; approvals of `persona_*` proposals refresh the list; `host_persona_writeback` is carried
+  out by the plugin. RisuAI's selected persona can be edited; its 반영 is refused (its live copy is not writable).
+- **AI:** list_personas / read_persona / list_persona_snapshots / propose_persona_edit|create|snapshot|restore|
+  writeback (agent and MCP); the open persona rides `/chat` and the MCP bridge context as `persona`. Picture
+  guidance: square PNG (512 recommended) cropped from the studio's 832x1216 with run_python + Pillow.
+- **Persona tab** is a three-pane like the others: persona list (＋ 새 페르소나) · editor · AI pane; a bar with
+  반영 · 스냅샷 · 버전 · 변경 취소. Checked at 390px in tools/harness (which now has stub personas).
+- **선택 / ‹ 뒤로** always lands on the folded dashboard (foldLanding).
+- **Folder rename 29s → paths only:** the rename read, hashed and parsed every moved PNG to rewrite embedded
+  asset bindings. Saved assignments now move by path with their digest, and embedded bindings naming a renamed
+  project are translated when read (`workspace.project_alias` over `.hina/folder-renames.json`). The panel waits
+  up to 180s and, if the answer is lost, reads the folder back instead of reporting a failure.
+- **Staging lesson:** test-server's backend was still 0.15.31 (its /update/apply had been held), and the first
+  staging copied only files changed since 0.15.32 - the new studio.py called the old nai.py (uc_preset_index).
+  Stage everything changed since the version the target actually runs (`/health` version), not since the last tag.
+
 ## unreleased (2026-10-04): §1-89 three-mode first screen · persona editing · project folder rename · no-blink open · title-row 반영 in step
 
 - **Field report (7 items):** a landing that separates 봇 / 챗 / 페르소나 편집; 봇 unfolds current-or-snapshot,

@@ -104,6 +104,7 @@ class McpBridge {
       botName: state.workspace?.characterName || String(state.character?.name || ''),
       chatName: chat?.name || '',
       mode: state.activeTab === 'chats' ? '' : (state.activeTab === 'studio' ? 'studio' : state.editMode),
+      persona: state.editMode === 'persona' ? (state.persona?.key ?? '') : '',
     };
   }
 

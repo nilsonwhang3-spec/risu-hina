@@ -22,7 +22,7 @@ from typing import Any, Iterable, Iterator
 
 from . import config
 
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 
 LOCK = threading.RLock()
 _conn: sqlite3.Connection | None = None
@@ -591,6 +591,39 @@ DDL = [
     """,
     "CREATE UNIQUE INDEX IF NOT EXISTS api_keys_name ON api_keys(name COLLATE NOCASE)",
 
+    # --- v15: RisuAI user personas (personas.py) ---------------------------
+    # A working copy per persona, the same shape as a bot's: `base_json` is
+    # what RisuAI held when the panel last read it ({name, prompt}),
+    # `work_json` is what the user and the AI are editing ({name, prompt,
+    # image}; image = a space path of a new picture waiting for 반영, '' =
+    # keep RisuAI's). A persona RisuAI no longer lists is `gone`, not
+    # deleted - its snapshots and unsaved work are still the user's.
+    """
+    CREATE TABLE IF NOT EXISTS personas (
+        pkey        TEXT PRIMARY KEY,
+        persona_id  TEXT NOT NULL DEFAULT '',
+        idx         INTEGER NOT NULL DEFAULT 0,
+        folder      TEXT NOT NULL DEFAULT '',
+        base_json   TEXT NOT NULL,
+        work_json   TEXT NOT NULL,
+        icon_key    TEXT NOT NULL DEFAULT '',
+        icon_path   TEXT NOT NULL DEFAULT '',
+        selected    INTEGER NOT NULL DEFAULT 0,
+        gone        INTEGER NOT NULL DEFAULT 0,
+        updated_at  REAL NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS persona_checkpoints (
+        id          TEXT PRIMARY KEY,
+        pkey        TEXT NOT NULL,
+        label       TEXT NOT NULL DEFAULT '',
+        kind        TEXT NOT NULL DEFAULT 'manual',
+        data_json   TEXT NOT NULL,
+        created_at  REAL NOT NULL
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS persona_checkpoints_key ON persona_checkpoints(pkey, created_at DESC)",
 ]
 
 

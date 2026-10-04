@@ -45,7 +45,7 @@ export function commitControls(): HTMLElement {
   let summary: DirtySummary | null = null;
 
   const paint = () => {
-    wrap.style.display = state.activeCharKey && state.health ? '' : 'none';
+    wrap.style.display = state.health && (state.activeCharKey || dirty > 0) ? '' : 'none';
     approveCount.textContent = String(pending);
     applyCount.textContent = String(dirty);
     approveBtn.classList.toggle('hot', pending > 0);
@@ -70,6 +70,9 @@ export function commitControls(): HTMLElement {
       if (c.chatKey === state.activeChatKey && state.changes) n += state.changes.total;
       else n += c.dirty ? c.total : 0;
     }
+    // The open persona's count is held too (state.persona); others from the summary.
+    for (const p of summary.personas ?? []) n += p.key === state.persona?.key ? 0 : p.total;
+    if (state.persona?.dirty) n += state.persona.total;
     return n;
   };
 
@@ -79,20 +82,21 @@ export function commitControls(): HTMLElement {
   let inFlight = false;
   let again = false;
   const refresh = async (): Promise<void> => {
-    if (!state.activeCharKey || !state.health) { paint(); return; }
+    if (!state.health) { paint(); return; }
     if (inFlight) { again = true; return; }
     inFlight = true;
     const charKey = state.activeCharKey;
     try {
       const [acts, staged, sum] = await Promise.all([
-        state.actionsForBot().catch(() => []),
+        state.activeCharKey ? state.actionsForBot().catch(() => []) : Promise.resolve([]),
         state.activeChatKey ? state.stagedEdits().catch(() => []) : Promise.resolve([]),
         state.dirtySummary(),
       ]);
       if (charKey === state.activeCharKey) {
         pending = acts.length + staged.length;
         summary = sum;
-        dirty = sum ? (sum.card.dirty ? sum.card.total : 0) + sum.chats.reduce((n, c) => n + (c.dirty ? c.total : 0), 0) : 0;
+        dirty = sum ? (sum.card.dirty ? sum.card.total : 0) + sum.chats.reduce((n, c) => n + (c.dirty ? c.total : 0), 0)
+          + (sum.personas ?? []).reduce((n, p) => n + p.total, 0) : 0;
       }
     } catch { /* keep the last numbers; the next tick tries again */ }
     finally { inFlight = false; }
@@ -115,7 +119,7 @@ export function commitControls(): HTMLElement {
     if (n !== null && n !== dirty) { dirty = n; paint(); }
     soon();
   });
-  pollWhileVisible(() => void refresh(), POLL_MS, () => !!state.activeCharKey);
+  pollWhileVisible(() => void refresh(), POLL_MS, () => !!state.health);
   setOnDecided(() => { state.bump(); soon(); });
 
   approveBtn.addEventListener('click', () => openPendingPopover(approveBtn));
@@ -163,10 +167,10 @@ function openApplyPopover(anchor: HTMLElement, last: () => DirtySummary | null, 
       fix?.addEventListener('click', async () => {
         if (d.scope === 'chat' && d.key !== state.activeChatKey) await state.loadTurns(d.key);
         close();
-        openConflicts(d.scope, () => { void refresh(); state.bump(); });
+        if (d.scope !== 'persona') openConflicts(d.scope, () => { void refresh(); state.bump(); });
       });
       list.appendChild(el('div', { class: 'stagedrow' }, [
-        el('span', { class: 'badge', text: d.scope === 'card' ? '봇' : '챗' }),
+        el('span', { class: 'badge', text: d.scope === 'card' ? '봇' : d.scope === 'persona' ? '페르소나' : '챗' }),
         el('div', { class: 'grow' }, [
           el('div', { text: `${d.label} — 변경 ${d.total}건` }),
           d.conflicts ? el('div', { class: 'hint', text: 'RisuAI 쪽과 충돌이 있어 먼저 해결해야 반영됩니다' }) : null,

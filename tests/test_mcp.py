@@ -180,6 +180,9 @@ def main() -> int:
         check("agent tools listed", {"read_card", "list_turns", "propose_lore_add", "run_python"} <= names,
               str(sorted(names))[:300])
         check("own tools listed", {"hina_status", "hina_guide", "approve_proposals", "approve_staged"} <= names, "")
+        persona_tools = {"list_personas", "read_persona", "propose_persona_edit", "propose_persona_create", "propose_persona_snapshot",
+                         "propose_persona_restore", "list_persona_snapshots", "propose_persona_writeback"}
+        check("persona tools listed", persona_tools <= names, str(sorted(persona_tools - names)))
         check("panel-only tools left out", not ({"run_shell", "pip_install", "propose_open_tab", "update_plan"} & names),
               str(sorted(names & {"run_shell", "pip_install", "propose_open_tab", "update_plan"})))
         schema = next(t for t in r["result"]["tools"] if t["name"] == "propose_lore_add").get("inputSchema") or {}

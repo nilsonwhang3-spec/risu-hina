@@ -27,13 +27,25 @@ import type { RisuChat } from '../risuai';
 import { HostError } from '../host';
 import { describeSync, syncBusy } from '../assets';
 import { transport } from '../transport';
-import { personaImage, type Persona } from '../persona';
+import { personaImage } from '../persona';
+import type { PersonaRow } from '../state';
 import { shellNotice } from './chatbar';
+import { askName } from './kit';
 
 type Mode = 'bot' | 'chat' | 'persona';
 
-/** Which card is unfolded; '' = none. Survives re-renders and 뒤로. */
+/** Which card is unfolded; '' = none. Survives re-renders, not 선택/뒤로. */
 let openMode: Mode | '' = '';
+
+/**
+ * The tab bar's 선택 (‹ 뒤로) is the way to the dashboard: every card folded.
+ * Coming back to the card the user had unfolded read as "still in the
+ * persona picker, with no way back" (field report §1-89).
+ */
+export function foldLanding(): void {
+  openMode = '';
+  filterText = '';
+}
 /** Chat folders the user unfolded (by folder id). */
 const openFolders = new Set<string>();
 let showAutoSnaps = false;
@@ -563,7 +575,7 @@ function personaBody(body: HTMLElement, mount: HTMLElement): void {
   const again = el('button', { class: 'ghost tiny', text: '다시 읽기', title: 'RisuAI에서 페르소나 목록을 다시 읽어 옵니다' }) as HTMLButtonElement;
   again.disabled = state.personaLoading;
   again.addEventListener('click', () => { void state.loadPersonas().catch(() => undefined); });
-  head.appendChild(again);
+  head.append(newPersonaButton(), again);
   body.appendChild(head);
 
   if (state.personaError) {
@@ -571,53 +583,73 @@ function personaBody(body: HTMLElement, mount: HTMLElement): void {
   }
   const list = el('div', { class: 'chatlist personalist' });
   body.appendChild(list);
-  const ps = state.personas;
-  if (!ps) {
+  const ps = (state.personas ?? []).filter((p) => !p.gone);
+  if (!state.personas) {
     list.appendChild(loadingRow(state.personaLoading ? 'RisuAI에서 페르소나를 읽는 중…' : '페르소나 목록이 없습니다'));
     return;
   }
   if (!ps.length) list.appendChild(el('div', { class: 'chatitem' }, [el('span', { class: 'hint', text: 'RisuAI에 페르소나가 없습니다.' })]));
   for (const p of ps) list.appendChild(personaRow(p, mount));
   body.appendChild(el('div', { class: 'hint', style: { marginTop: '8px' }, text:
-    'RisuAI에서 지금 선택된 페르소나는 여기서 고칠 수 없습니다 (RisuAI가 그 페르소나를 따로 복사해 두고 써서, 고쳐도 덮어써집니다). '
-    + '고치려면 RisuAI에서 다른 페르소나를 잠깐 고른 뒤 다시 읽기를 눌러 주세요.' }));
+    '편집은 작업본에 저장되고, 반영해야 RisuAI에 들어갑니다. RisuAI에서 지금 선택된 페르소나도 편집할 수 있지만 반영은 '
+    + 'RisuAI에서 다른 페르소나를 고른 뒤에 됩니다 (RisuAI가 선택된 페르소나를 따로 복사해 두고 써서, 그대로 쓰면 덮어써집니다).' }));
 }
 
-function personaRow(p: Persona, mount: HTMLElement): HTMLElement {
-  const draft = state.personaDrafts.get(state.personaKey(p));
+function personaRow(p: PersonaRow, mount: HTMLElement): HTMLElement {
   const edit = el('button', { class: 'ghost tiny', text: '편집' }) as HTMLButtonElement;
-  edit.disabled = p.selected;
-  edit.title = p.selected ? 'RisuAI에서 지금 선택된 페르소나는 고칠 수 없습니다 — 아래 안내를 보세요' : '이 페르소나를 편집합니다';
-  const row = el('div', { class: 'chatitem' + (p.selected ? ' locked' : '') }, [
-    personaAvatar(p.icon, p.name),
+  const name = p.work.name || p.name;
+  const row = el('div', { class: 'chatitem' }, [
+    personaAvatar(p.iconKey, name),
     el('span', { class: 'grow' }, [
-      el('div', { text: p.name || '(이름 없음)' }),
-      el('div', { class: 'hint clip1', text: (p.prompt || '').split('\n')[0].slice(0, 80) || '(설명 없음)' }),
+      el('div', { text: name || '(이름 없음)' }),
+      el('div', { class: 'hint clip1', text: (p.work.prompt || '').split('\n')[0].slice(0, 80) || '(설명 없음)' }),
     ]),
-    p.selected ? el('span', { class: 'badge', text: '선택됨' }) : null,
-    draft ? el('span', { class: 'badge warn', text: '미반영' }) : null,
+    p.selected ? el('span', { class: 'badge', text: 'RisuAI 선택됨', title: 'RisuAI에서 지금 선택된 페르소나 - 편집은 되고, 반영은 다른 페르소나를 고른 뒤에 됩니다' }) : null,
+    p.isNew ? el('span', { class: 'badge', text: '새로 만듦', title: 'Hina에서 만든 페르소나 - 반영하면 RisuAI 목록에 추가됩니다' }) : null,
+    p.dirty ? el('span', { class: 'badge warn', text: `미반영 ${p.total}` }) : null,
     edit,
   ]);
   let busy = false;
   const enter = async () => {
-    if (busy || p.selected) return;
+    if (busy) return;
     busy = true;
     edit.disabled = true;
     edit.textContent = '여는 중…';
     try {
-      await state.openPersona(p);
+      await state.openPersona(p.key);
       setEditMode('persona', 'persona');
     } catch (e) {
       flash('페르소나를 열지 못했습니다: ' + msg(e));
     } finally {
       busy = false;
-      if (row.isConnected) { edit.disabled = p.selected; edit.textContent = '편집'; }
+      if (row.isConnected) { edit.disabled = false; edit.textContent = '편집'; }
     }
   };
   row.addEventListener('click', () => void enter());
   edit.addEventListener('click', (ev) => { ev.stopPropagation(); void enter(); });
   void mount;
   return row;
+}
+
+/** ＋ 새 페르소나: a new persona in the working copy; RisuAI gets it on 반영. */
+export function newPersonaButton(onMade?: () => void): HTMLElement {
+  const b = el('button', { class: 'ghost tiny', text: '＋ 새 페르소나', title: '새 페르소나를 만듭니다 - 반영하면 RisuAI 페르소나 목록에 추가됩니다' });
+  b.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    askName('새 페르소나', {
+      label: '이름을 정하면 바로 편집으로 들어갑니다. 설명·사진을 채운 뒤 반영하면 RisuAI 목록에 추가됩니다.',
+      placeholder: '페르소나 이름', ok: '만들기',
+      onSubmit: async (name) => {
+        try {
+          await state.createPersona(name);
+          if (onMade) onMade(); else setEditMode('persona', 'persona');
+        } catch (e) {
+          flash('페르소나를 만들지 못했습니다: ' + msg(e));
+        }
+      },
+    });
+  });
+  return b;
 }
 
 /** Decoded persona pictures by asset key, reused across renders (no blink). */

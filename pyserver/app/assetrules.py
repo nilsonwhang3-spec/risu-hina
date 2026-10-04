@@ -279,13 +279,24 @@ def _metadata(path: str, mtime: int, size: int) -> dict | None:
     if assignment.is_file():
         saved = json.loads(assignment.read_text(encoding="utf-8"))
         if saved["digest"] == digest:
-            return saved["asset"]
+            return _aliased(saved["asset"])
     assigned = _root() / "identities" / (digest + ".json")
     if assigned.is_file():
         saved = json.loads(assigned.read_text(encoding="utf-8"))
         if not saved.get("ambiguous"):
-            return saved["asset"]
-    return nai.recipe(body).get("hina", {}).get("asset")
+            return _aliased(saved["asset"])
+    return _aliased(nai.recipe(body).get("hina", {}).get("asset"))
+
+
+def _aliased(asset: object) -> dict | None:
+    """An embedded binding naming a renamed project reads as the new name
+    (workspace.project_alias) - the PNG keeps the name it was made with."""
+    if not isinstance(asset, dict):
+        return None
+    from . import workspace
+    project = str(asset.get("project") or "")
+    current = workspace.project_alias(project)
+    return asset if current == project else {**asset, "project": current}
 
 
 def metadata(path: Path) -> dict | None:
@@ -541,34 +552,23 @@ def rekey_project(old: str, new: str, moved: list[tuple[str, Path]]) -> dict:
                     _write(f, {**saved, "asset": fix(saved["asset"])})
                     counts["identities"] += 1
         assign = base / "assignments"
+        # Saved assignments follow their image by path; the digest they hold
+        # still describes the (unchanged) bytes, so no image is read. An
+        # image with only an embedded binding needs nothing here: the old
+        # project name is translated where it is read (_aliased).
         for old_path, new_path in moved:
             a_old = assign / (_hash(old_path) + ".json")
-            saved = None
-            if a_old.is_file():
-                try:
-                    saved = json.loads(a_old.read_text(encoding="utf-8"))
-                except ValueError:
-                    saved = None
-                a_old.unlink(missing_ok=True)
-            if not new_path.is_file():
+            if not a_old.is_file():
                 continue
-            body = new_path.read_bytes()
-            digest = hashlib.sha256(body).hexdigest()
-            asset = saved.get("asset") if isinstance(saved, dict) and saved.get("digest") == digest else None
-            if asset is None and saved is None:
-                id_file = ident / (digest + ".json")
-                if id_file.is_file():
-                    continue  # the identity (rewritten above) still resolves it
-                try:
-                    embedded = nai.recipe(body).get("hina", {}).get("asset")
-                except Exception:  # noqa: BLE001 - not a readable PNG recipe
-                    embedded = None
-                if not (isinstance(embedded, dict) and embedded.get("project") == old):
-                    continue
-                asset = embedded
-            if asset is None:
+            try:
+                saved = json.loads(a_old.read_text(encoding="utf-8"))
+            except ValueError:
+                saved = None
+            a_old.unlink(missing_ok=True)
+            if not (isinstance(saved, dict) and saved.get("asset") and saved.get("digest")):
                 continue
-            _write(assign / (_hash(str(new_path.resolve())) + ".json"), {"digest": digest, "asset": fix(asset)})
+            _write(assign / (_hash(str(new_path.resolve())) + ".json"),
+                   {**saved, "asset": fix(saved["asset"])})
             counts["assignments"] += 1
         if assign.is_dir():
             # Bindings of files that did not move (adoption copies, exports

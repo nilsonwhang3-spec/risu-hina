@@ -29,6 +29,7 @@ from . import (actions, assets, codexauth, config, files, keys, log, permits, pr
                staging, store, websearch, workspace)
 from . import agentnotes, assetrules, batchreview, continuity, nai, studio, studiojob, toolsigs, vision
 from . import card as cardmod
+from . import personas as personamod
 from . import memory as mem
 
 INSTRUCTIONS = """\
@@ -255,6 +256,10 @@ class Deps:
     # landing in a screen they are not looking at. The studio is a third
     # screen, not a half - adopting an image into the card is its own verb.
     mode: str = ""
+    # The key of the persona open in the panel's persona tab ('' = none).
+    # Only context for the model: the persona tools take a persona argument,
+    # because a persona belongs to no screen and the user may name any one.
+    persona: str = ""
     force_compact: bool = False
     continuity_parts: list[str] | None = None
     learning_reviewed: bool = False
@@ -270,6 +275,11 @@ BOT_KINDS = frozenset({"card_edit", "card_greeting_add", "card_greeting_delete",
 _MODE_TAB = {"chat": ("챗 편집", "editor"), "bot": ("봇 편집", "meta")}
 _SCREEN_LABEL = {"chat": "챗 편집", "bot": "봇 편집", "studio": "에셋 스튜디오", "persona": "페르소나 편집"}
 
+# RisuAI persona proposals. A persona is neither this chat's material nor
+# this bot's, so no screen owns it: these pass the screen gate from anywhere.
+PERSONA_KINDS = frozenset({"persona_edit", "persona_create", "persona_checkpoint_create", "persona_checkpoint_restore",
+                           "host_persona_writeback"})
+
 # The studio's own verbs: adopting an image into the card is what the studio
 # is for, so these pass the screen gate there (the approval queue still runs).
 _STUDIO_KINDS = frozenset({"host_asset_add", "host_asset_add_many", "host_asset_replace", "asset_rename"})
@@ -277,6 +287,51 @@ _STUDIO_KINDS = frozenset({"host_asset_add", "host_asset_add_many", "host_asset_
 # Batches whose saved images were already shown as a strip: a job is polled
 # many times, and the pictures should appear once.
 _IMAGES_SENT: set[str] = set()
+
+
+def persona_list_text(query: str = "") -> str:
+    """list_personas, callable without a run context (tests, MCP)."""
+    rows = personamod.listing(query)
+    if not rows:
+        return ("조건에 맞는 페르소나가 없습니다" if query else
+                "알려진 페르소나가 없습니다 - 패널의 페르소나 탭을 한 번 열면 RisuAI 목록을 읽어 옵니다")
+    head = (f"페르소나 {len(rows)}개" + (f" ('{query}' 검색)" if query else "")
+            + " - 패널이 마지막으로 RisuAI 목록을 읽은 시점 기준")
+    return "\n".join([head] + [personamod.describe_row(p) for p in rows])
+
+
+def persona_read_text(ref: str) -> str:
+    """read_persona, callable without a run context."""
+    try:
+        p = personamod.resolve(ref)
+        return personamod.describe_full(p, personamod.get(p["key"])["checkpoints"])
+    except personamod.PersonaError as e:
+        return str(e)
+
+
+def _persona_screen(key: str) -> str:
+    """What the persona screen says to the model: which persona is open, and
+    that the persona tools exist (the screen used to say there were none)."""
+    who = "열린 페르소나 없음"
+    if key:
+        try:
+            p = personamod.get(key)
+            who = f"열린 페르소나: {p['work']['name'] or p['name']} (key={p['key']})"
+            if p["selected"]:
+                who += " - RisuAI 에서 선택 중이라 반영 불가(다른 페르소나를 고른 뒤 반영)"
+        except personamod.PersonaError:
+            who = f"열린 페르소나 key={key} (아직 목록에 없음)"
+    return ("지금 열려 있는 화면: 페르소나 편집 (RisuAI 사용자 페르소나의 이름·설명·프로필 사진). " + who + ". "
+            "list_personas / read_persona 로 페르소나를 찾고 읽을 수 있고, 프로필 사진은 view_image 로 봅니다. "
+            "propose_persona_create(새 페르소나) / propose_persona_edit(이름·설명·사진) / propose_persona_snapshot / "
+            "propose_persona_restore / propose_persona_writeback 으로 제안합니다 - 승인 뒤 페르소나 작업본에 들어가고, "
+            "RisuAI 에는 반영(propose_persona_writeback 승인)으로 써집니다(새 페르소나는 RisuAI 목록에 추가). "
+            "프로필 사진은 RisuAI 가 정사각형으로 잘라 보여 주니 얼굴이 가운데인 정사각형 PNG(512x512 권장, 최소 256)로: "
+            "스튜디오 결과는 세로(832x1216)라 run_python + Pillow 로 위쪽(얼굴·상반신)을 정사각형으로 잘라 LANCZOS 로 "
+            "줄여 출력 폴더에 PNG 로 저장한 뒤 그 경로를 image_path 로 넘깁니다(백엔드가 페르소나 폴더로 복사). "
+            "\"어울리는 페르소나 제안\" 흐름: 후보를 답변으로 제시 → 사용자가 고르면 propose_persona_create → "
+            "studio_generate → run_python 으로 자르기 → propose_persona_edit(image_path) → propose_persona_writeback. "
+            "봇·챗 재료를 고치는 제안은 그 화면으로 이동한 뒤에만 됩니다.")
 
 
 def _screen_refusal(mode: str, need: str) -> str | None:
@@ -299,7 +354,7 @@ def screen_gate(mode: str, kind: str) -> str | None:
     """
     # Saving already accepted card changes resolves pending work; it does
     # not require switching the editor to a particular material/tab.
-    if kind == "host_card_writeback":
+    if kind == "host_card_writeback" or kind in PERSONA_KINDS:
         return None
     if mode == "studio" and kind in _STUDIO_KINDS:
         return None
@@ -741,10 +796,7 @@ def build(model: Any = None) -> Agent[Deps]:
         if ctx.deps.mode == "chat":
             return "지금 열려 있는 화면: 챗 편집 (이 챗의 재료 - 턴·챗 로어북·장기기억·챗 변수)."
         if ctx.deps.mode == "persona":
-            return ("지금 열려 있는 화면: 페르소나 편집 (RisuAI 사용자 페르소나 하나의 이름·설명·프로필 사진; "
-                    "페르소나 자체는 사용자가 이 화면에서 직접 고치고 반영합니다 - 그것을 고치는 툴은 없습니다. "
-                    "설명 초안을 써 달라고 하면 답변으로 주고, 사진은 에셋 스튜디오로 만들 수 있습니다. "
-                    "봇·챗 재료를 고치는 제안은 그 화면으로 이동한 뒤에만 됩니다).")
+            return _persona_screen(ctx.deps.persona)
         if ctx.deps.mode == "studio":
             return ("지금 열려 있는 화면: 에셋 스튜디오 (봇과 무관한 전역 이미지 라이브러리 - "
                     "프롬프트 카드·생성·선별. 카드로의 에셋 반영 제안은 여기서도 됩니다).")
@@ -1613,6 +1665,173 @@ def build(model: Any = None) -> Agent[Deps]:
         from . import hostwriteback
         return json.dumps(await hostwriteback.save_card(ctx.deps.session_id or "", ctx.deps.char_key,
                                                       ctx.deps.chat_key, reason), ensure_ascii=False)
+
+    # --- RisuAI user personas (personas.py) -----------------------------------
+    # A persona has a working copy like the card: proposals land there after
+    # approval, snapshots keep versions, 반영 writes RisuAI (plugin). No
+    # screen owns a persona, so these work from every screen.
+
+    @agent.tool
+    def list_personas(ctx: RunContext[Deps], query: str = "") -> str:
+        """The user's RisuAI personas (the user's own character in roleplay): name, key, whether RisuAI
+        has it selected, unsaved changes, project folder, profile picture path (open it with
+        view_image), pending new picture, first line of the description.
+
+        query filters by name/description. The list is as of the last time the panel read RisuAI's
+        personas (opening the persona tab refreshes it). Read one in full with read_persona.
+        """
+        return persona_list_text(query)
+
+    @agent.tool
+    def read_persona(ctx: RunContext[Deps], persona: str) -> str:
+        """One persona in full: the working-copy description and RisuAI's original (when they differ),
+        profile picture path (view_image to look at it), pending new picture, folder, snapshot count.
+        persona = its key or its name (exact, or a unique part of it).
+        """
+        return persona_read_text(persona)
+
+    @agent.tool
+    def propose_persona_edit(ctx: RunContext[Deps], persona: str, reason: str, name: str = "", prompt: str = "",
+                             image_path: str = "", clear_image: bool = False) -> str:
+        """Propose editing a persona's WORKING COPY: name, description, profile picture.
+
+        prompt = the FULL new description (it replaces the whole text; read_persona first and keep what
+        should stay). Empty name/prompt/image_path = that part unchanged. image_path = a space image
+        (png/jpg/webp/gif) to become the new profile picture; the backend copies it into the persona's
+        folder. clear_image=True drops a pending new picture (RisuAI's current one stays). Applied to
+        the working copy after the user approves; RisuAI gets it only on 반영 (propose_persona_writeback).
+
+        Picture: RisuAI shows it like a character icon - square, cover-cropped. Give it a square PNG
+        (512x512 recommended, at least 256) with the face centered. Studio outputs are portrait
+        (832x1216): with run_python + Pillow crop a square from the UPPER part around the face/upper
+        body, resize with Image.LANCZOS, save as PNG in your output folder, and pass that path here.
+
+        The persona RisuAI currently has SELECTED can be edited here, but cannot be written back
+        until the user selects another persona in RisuAI - say so when that is the case.
+        """
+        try:
+            p = personamod.resolve(persona)
+        except personamod.PersonaError as e:
+            return str(e)
+        args: dict[str, Any] = {"key": p["key"]}
+        parts = []
+        if name.strip():
+            args["name"] = name
+            parts.append(f"이름 → {name}")
+        if prompt:
+            args["prompt"] = prompt
+            parts.append(f"설명 {len(prompt)}자")
+        if clear_image:
+            args["image"] = ""
+            parts.append("새 사진 취소")
+        elif image_path.strip():
+            try:
+                args["image"] = personamod._image_rel(image_path)
+            except personamod.PersonaError as e:
+                return str(e)
+            parts.append(f"프로필 사진 → {args['image']}")
+        if not parts:
+            return "바꿀 내용이 없습니다 (name / prompt / image_path / clear_image 중 하나는 필요합니다)"
+        label = p["work"]["name"] or p["name"]
+        out = _propose(ctx, "persona_edit", f"페르소나 '{label}' 수정 ({', '.join(parts)}) — {reason}", args)
+        if p["selected"]:
+            out += (" 참고: 이 페르소나는 지금 RisuAI 에서 선택된 페르소나라, 작업본은 고칠 수 있어도 "
+                    "사용자가 RisuAI 에서 다른 페르소나를 고르기 전에는 반영할 수 없습니다.")
+        return out
+
+    @agent.tool
+    def propose_persona_create(ctx: RunContext[Deps], name: str, reason: str, prompt: str = "",
+                               image_path: str = "") -> str:
+        """Propose creating a NEW RisuAI persona (the user's own character). After approval it exists in
+        the Hina working copy only (list_personas marks it new); it reaches RisuAI on 반영
+        (propose_persona_writeback), which appends it to RisuAI's persona list.
+
+        prompt = its description. image_path = optional profile picture (a space image; copied into the
+        persona's folder): a square PNG, 512x512 recommended (at least 256), face centered - RisuAI
+        cover-crops it to a square icon. Studio outputs are portrait (832x1216): crop a square from the
+        upper part with run_python + Pillow (resize with Image.LANCZOS, save PNG in your output folder).
+
+        Typical flow for "이 봇에 어울리는 페르소나 제안해줘": read the bot, suggest options in prose and
+        let the user pick -> propose_persona_create -> (after approval) studio_generate a portrait ->
+        view_image -> run_python crop/resize -> propose_persona_edit(image_path=...) ->
+        propose_persona_writeback.
+        """
+        if not name.strip():
+            return "페르소나 이름이 비어 있습니다"
+        args: dict[str, Any] = {"name": name, "prompt": prompt, "image": ""}
+        if image_path.strip():
+            try:
+                args["image"] = personamod._image_rel(image_path)
+            except personamod.PersonaError as e:
+                return str(e)
+        extra = f", 설명 {len(prompt)}자" if prompt else ""
+        extra += f", 사진 {args['image']}" if args["image"] else ""
+        return _propose(ctx, "persona_create", f"새 페르소나 '{name}' 만들기{extra} — {reason}", args)
+
+    @agent.tool
+    def propose_persona_snapshot(ctx: RunContext[Deps], persona: str, label: str) -> str:
+        """Propose saving a snapshot of a persona's working copy (name, description, pending picture)."""
+        try:
+            p = personamod.resolve(persona)
+        except personamod.PersonaError as e:
+            return str(e)
+        return _propose(ctx, "persona_checkpoint_create",
+                        f"페르소나 '{p['work']['name'] or p['name']}' 스냅샷 저장 — {label}",
+                        {"key": p["key"], "label": label})
+
+    @agent.tool
+    def propose_persona_restore(ctx: RunContext[Deps], persona: str, checkpoint_id: str, reason: str) -> str:
+        """Propose restoring a persona snapshot into its working copy (overwrites the working copy;
+        the current one is kept as an automatic snapshot). Snapshot ids: list_persona_snapshots."""
+        try:
+            p = personamod.resolve(persona)
+            personamod._checkpoint(p["key"], checkpoint_id)
+        except personamod.PersonaError as e:
+            return str(e)
+        return _propose(ctx, "persona_checkpoint_restore",
+                        f"페르소나 '{p['work']['name'] or p['name']}' 스냅샷 {checkpoint_id} 로 되돌리기 — {reason}",
+                        {"key": p["key"], "id": checkpoint_id})
+
+    @agent.tool
+    def list_persona_snapshots(ctx: RunContext[Deps], persona: str) -> str:
+        """A persona's snapshots, newest first (kind auto = saved by the code before restore/reset/반영)."""
+        try:
+            p = personamod.resolve(persona)
+            rows = personamod.checkpoints(p["key"])
+        except personamod.PersonaError as e:
+            return str(e)
+        if not rows:
+            return "이 페르소나의 스냅샷이 없습니다"
+        return "\n".join(f"id={r['id']} [{r['kind']}] {r['label'] or '(이름 없음)'}" for r in rows)
+
+    @agent.tool
+    def propose_persona_writeback(ctx: RunContext[Deps], persona: str, reason: str) -> str:
+        """Propose 반영: writing a persona's working copy (name, description, new picture) to RisuAI.
+        On approval the plugin performs it. A NEW persona (made with propose_persona_create) is
+        appended to RisuAI's persona list.
+
+        RisuAI's currently SELECTED persona cannot be written back: RisuAI keeps a live copy of it that
+        plugins cannot write, so the edit would be overwritten. Its working copy can still be edited;
+        tell the user to select another persona in RisuAI first, then 반영.
+        """
+        try:
+            p = personamod.resolve(persona)
+        except personamod.PersonaError as e:
+            return str(e)
+        label = p["work"]["name"] or p["name"]
+        if p["isNew"]:
+            return _propose(ctx, "host_persona_writeback",
+                            f"새 페르소나 '{label}' 을(를) RisuAI 페르소나 목록에 추가 — {reason}", {"key": p["key"]})
+        if p["gone"]:
+            return f"'{label}' 은(는) RisuAI 목록에 더 이상 없는 페르소나라 반영할 수 없습니다."
+        if not p["dirty"]:
+            return f"'{label}' 페르소나에는 반영할 변경이 없습니다 (작업본 = RisuAI)."
+        if p["selected"]:
+            return (f"'{label}' 은(는) 지금 RisuAI 에서 선택된 페르소나라 반영할 수 없습니다 - RisuAI 가 들고 있는 "
+                    "사본을 플러그인이 고칠 수 없어 덮어써집니다. 사용자에게 RisuAI 에서 다른 페르소나를 고른 뒤 "
+                    "(패널의 페르소나 탭을 다시 열어 목록을 새로 읽게 하고) 반영하자고 알려 주세요.")
+        return _propose(ctx, "host_persona_writeback", f"페르소나 '{label}' 을(를) RisuAI에 반영 — {reason}",
+                        {"key": p["key"]})
 
     # --- assets ---------------------------------------------------------------
 

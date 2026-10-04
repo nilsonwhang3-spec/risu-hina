@@ -39,7 +39,8 @@ FAILED = "failed"
 # host_open_tab is a UI move, not a write - it rides the same queue because
 # the queue is exactly the "~하시겠습니까? [승인]" interaction the ask needs.
 HOST_KINDS = ("host_writeback", "host_save_copy",
-              "host_card_writeback", "host_clone_bot", "host_open_tab")
+              "host_card_writeback", "host_clone_bot", "host_open_tab",
+              "host_persona_writeback")
 
 
 class ActionError(ValueError):
@@ -112,9 +113,11 @@ def clear(chat_key: str) -> int:
 def scope_of(action: dict) -> str:
     """Which working copy an approved action writes: 'chat', 'card' or ''.
 
-    '' covers three shapes on purpose: the host write-backs (they *resolve*
+    '' covers four shapes on purpose: the host write-backs (they *resolve*
     pending state rather than create it), snapshot creation (no working copy
-    is touched), and pure UI moves. Lore rows carry their scope themselves -
+    is touched), pure UI moves, and everything about a RisuAI persona - a
+    persona is neither this chat's material nor this bot's, so no screen
+    owns it and its proposals pass from any of them. Lore rows carry their scope themselves -
     a global entry is card material even though the proposal rode a chat.
     """
     kind = action["kind"]
@@ -408,7 +411,41 @@ def _studio_batch(a: dict) -> str:
     return "배치를 시작했습니다: " + ", ".join(started) + " - studio_job 으로 진행을 확인하세요."
 
 
+def _persona_edit(a: dict) -> str:
+    from . import personas
+    args = a["args"]
+    key = str(args.get("key") or "")
+    p = personas.edit(key, name=args.get("name"), prompt=args.get("prompt"), image=args.get("image"))
+    what = [w for w, k in (("이름", "name"), ("설명", "prompt"), ("프로필 사진", "image")) if k in args]
+    return (f"페르소나 '{p['work']['name'] or p['name']}' 작업본의 {'·'.join(what) or '내용'}을(를) 고쳤습니다 "
+            f"(변경 {p['total']}건). RisuAI 에는 반영 후 들어갑니다.")
+
+
+def _persona_create(a: dict) -> str:
+    from . import personas
+    args = a["args"]
+    p = personas.create(str(args.get("name") or ""), str(args.get("prompt") or ""), str(args.get("image") or ""))
+    return (f"새 페르소나 '{p['work']['name']}' 을(를) Hina 작업본에 만들었습니다 (key={p['key']}). "
+            "RisuAI 에는 반영(propose_persona_writeback 승인) 때 추가됩니다.")
+
+
+def _persona_checkpoint_create(a: dict) -> str:
+    from . import personas
+    cid = personas.checkpoint_create(str(a["args"].get("key") or ""), str(a["args"].get("label") or "에이전트"))
+    return f"페르소나 스냅샷을 저장했습니다 (id={cid})"
+
+
+def _persona_checkpoint_restore(a: dict) -> str:
+    from . import personas
+    p = personas.checkpoint_restore(str(a["args"].get("key") or ""), str(a["args"].get("id") or ""))
+    return f"페르소나 '{p['work']['name'] or p['name']}' 작업본을 스냅샷으로 되돌렸습니다 (변경 {p['total']}건)"
+
+
 EXECUTORS: dict[str, Callable[[dict], str]] = {
+    "persona_edit": _persona_edit,
+    "persona_create": _persona_create,
+    "persona_checkpoint_create": _persona_checkpoint_create,
+    "persona_checkpoint_restore": _persona_checkpoint_restore,
     "studio_batch": _studio_batch,
     'asset_rename': _asset_rename,
     'host_asset_add': _asset_stage,

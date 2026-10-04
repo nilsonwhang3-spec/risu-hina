@@ -339,8 +339,10 @@ def neutralise_thinking(history: list, model: Any) -> list:
 
 
 # The screens the plugin may report. Anything else is treated as unknown - an
-# older plugin, not an error. The studio is the third screen (agent.screen_gate).
-SCREEN_MODES = ("chat", "bot", "studio")
+# older plugin, not an error. The studio is the third screen (agent.screen_gate);
+# the persona tab is the fourth (it owns no proposal kind; agent.PERSONA_KINDS
+# pass from every screen).
+SCREEN_MODES = ("chat", "bot", "studio", "persona")
 
 # --- side events ----------------------------------------------------------------
 #
@@ -476,9 +478,10 @@ def _drain_extra(session_id: str) -> list[dict]:
         return _EXTRA.pop(session_id, [])
 
 
-async def run(session_id: str, prompt: str, mode: str = "") -> AsyncGenerator[str, None]:
-    """Drive one agent turn, yielding NDJSON lines. `mode` is the half of the
-    panel the user is looking at ('chat' | 'bot'), see agent.Deps.mode."""
+async def run(session_id: str, prompt: str, mode: str = "", persona: str = "") -> AsyncGenerator[str, None]:
+    """Drive one agent turn, yielding NDJSON lines. `mode` is the screen of
+    the panel the user is looking at, see agent.Deps.mode; `persona` the key
+    of the persona open in the persona tab (agent.Deps.persona)."""
     srow = db.one("SELECT * FROM sessions WHERE id = ?", (session_id,))
     if srow is None:
         yield _line({"type": "error", "error": f"unknown session: {session_id}"})
@@ -501,6 +504,7 @@ async def run(session_id: str, prompt: str, mode: str = "") -> AsyncGenerator[st
         session_id=session_id,
         workspace_dir=ws_dir,
         mode=mode if mode in SCREEN_MODES else "",
+        persona=str(persona or "")[:200],
     )
 
     # One turn per session: a turn the client lost is stopped and its prompt

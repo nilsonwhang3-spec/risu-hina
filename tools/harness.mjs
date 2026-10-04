@@ -151,8 +151,14 @@ const pageHtml = (backendUrl) => `<!doctype html>
   const storage = new Map([['backend', { url: backendUrl, token }]]);
   const registered = [];
   const calls = [];
+  // RisuAI user personas (§1-89); the first is the one RisuAI has selected.
+  const personas = [
+    { name: '기본 유저', personaPrompt: 'RisuAI에서 선택된 페르소나', icon: 'assets/me.png', id: 'p-me' },
+    { name: '탐정', personaPrompt: '사립 탐정이다. 비 오는 밤을 좋아한다.', icon: '', id: 'p-det' },
+    { name: '마법사', personaPrompt: '견습 마법사.', icon: 'assets/wiz.png', id: 'p-wiz' },
+  ];
   const log = (m) => { document.getElementById('hostlog').textContent = m; console.log('[host]', m); };
-  window.__host = { calls, registered, liveChar };
+  window.__host = { calls, registered, liveChar, personas };
   window.Risuai = {
     async getArgument() { return ''; },
     async setArgument() {},
@@ -165,8 +171,14 @@ const pageHtml = (backendUrl) => `<!doctype html>
     async getCurrentChatIndex() { return liveChar.chatPage; },
     async getCharacterFromIndex() { return structuredClone(liveChar); },
     async setCharacterToIndex(i, char) { Object.assign(liveChar, structuredClone(char)); },
-    async getDatabase() { return { characters: [structuredClone(liveChar)] }; },
-    async setDatabase() {},
+    async getDatabase(keys) {
+      const out = {};
+      if (!keys || keys === 'all' || keys.includes('characters')) out.characters = [structuredClone(liveChar)];
+      if (!keys || keys === 'all' || keys.includes('personas')) out.personas = structuredClone(personas);
+      if (!keys || keys === 'all' || keys.includes('selectedPersona')) out.selectedPersona = 0;
+      return out;
+    },
+    async setDatabase(patch) { if (patch.personas) personas.splice(0, personas.length, ...structuredClone(patch.personas)); },
     async checkCharOrder() {},
     async getChatFromIndex(ci, chi) { return structuredClone(liveChar.chats[chi] ?? null); },
     async setChatToIndex(ci, chi, chat) { if (liveChar.chats[chi]) liveChar.chats[chi] = structuredClone(chat); },

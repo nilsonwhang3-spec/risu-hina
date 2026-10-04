@@ -30,7 +30,9 @@ import { threePane, showMobileCentre } from '../panes';
 import { bindAgent, mountAgent } from '../agentpane';
 import { CARD_AREAS, OUTPUT_ROOT, S, hub, areaOfPath, canonPath, checkUnresolved,
          persistLeftTab, persistCentreTab, buildOutput, buildExtras, extraPaths, addExtra,
-         isOutputPath, find, msg } from './store';
+         isOutputPath, find, msg, fetchLibrary, styleSync } from './store';
+import { type FileListing } from '../../state';
+import { transport } from '../../transport';
 import { pollJob, loadJobs, markJobsStale } from './gen';
 import { drawCardEditor, drawSceneEditor, drawRawFile, rawView } from './editors';
 import { drawCharacterEditor } from './char-edit';
@@ -63,6 +65,11 @@ let tabbar: HTMLElement | null = null;
 hub.studioShowing = () => wasStudioActive;
 
 export function noteStudioLeft(): void {
+  // Unsaved style edits stay in the column (it is not torn down on a tab
+  // switch), but a reload would lose them: say so once on the way out.
+  if (wasStudioActive && styleSync.dirty()) {
+    notice(`스타일 ‘${styleSync.boundName()}’ 에 저장하지 않은 수정이 있습니다 — 에셋 스튜디오로 돌아가면 그대로 있지만, 새로고침하면 사라집니다.`, 'err');
+  }
   wasStudioActive = false;
 }
 
@@ -143,6 +150,9 @@ export function renderStudioTab(mount: HTMLElement): void {
   wasStudioActive = true;
   ensureLayoutControls();
   if (!built || !mount.querySelector('.split')) {
+    // A panel opened afresh draws the last library it saw on this device at
+    // once (§1-90); the live read below patches whatever moved since.
+    if (!S.libraryLoaded) primeFromCache();
     clear(mount);
     // The studio runs its own fold state (검수 auto-fold); no shared controls.
     const pane = threePane(undefined, { controls: false });
@@ -159,6 +169,12 @@ export function renderStudioTab(mount: HTMLElement): void {
     S.noticeMount = el('div');
     S.viewMount = el('div', { class: 'pad filepad' });
     pane.centre.append(S.noticeMount, S.viewMount);
+    // Data held from an earlier build (the module outlives the DOM) draws
+    // at once; a first visit draws the skeleton until the library lands.
+    drawLeft();
+    if (S.libraryLoaded) drawCentre();
+    else S.viewMount.appendChild(el('div', { class: 'hint studioskelhint' }, [
+      el('span', { class: 'spin' }), el('span', { text: ' 스튜디오를 불러오는 중입니다…' })]));
     // The bottom strip sits AFTER the scrolling .pad, so it is the fixed bar
     // under every centre view (the .left column is a flex column).
     pane.centre.appendChild(buildStrip());
@@ -180,7 +196,7 @@ export function renderStudioTab(mount: HTMLElement): void {
       // tab visit (§1-39 "AI 로 수정한 뒤 표시 안 됨").
       // 검수 on screen: re-read its folder even while a batch runs (§1-48).
       if (S.centreMode === 'selector' || (S.centreMode === 'tab' && !S.selectedFile && S.centreTab === 'inspect')) void pollGroups();
-      if (renderedRev !== state.filesRev && !S.jobId) { void refresh(); return; }
+      if (renderedRev !== state.filesRev && !S.jobId) { void refresh({ visit: false }); return; }
       // A job on screen whose poll is not running (it never survives a
       // page reload; a network error used to kill it): re-read the list,
       // which adopts, finishes or forgets it (§1-58).
@@ -225,9 +241,59 @@ function notice(text: string, kind: 'ok' | 'err' | '' = ''): void {
   setTimeout(() => t.remove(), kind === 'err' ? 12000 : 6000);
 }
 
-let refreshPending = false;
+// --- the library, remembered per backend (§1-90) ----------------------------------
+const LIB_CACHE_KEY = 'hina.studioLibrary';
 
-async function refresh(): Promise<void> {
+function primeFromCache(): void {
+  try {
+    const c = JSON.parse(localStorage.getItem(LIB_CACHE_KEY) || 'null') as
+      { url?: string; lib?: { areas?: Record<string, unknown> } } | null;
+    if (!c || c.url !== transport.config.url || !c.lib?.areas) return;
+    const lib = c.lib as Awaited<ReturnType<typeof fetchLibrary>>;
+    S.cards = Object.fromEntries(CARD_AREAS.map((a) => [a.area, lib.areas[a.area] ?? []]));
+    cardsSig = JSON.stringify(S.cards);
+    styleSync.prime(lib.activeStyle ?? null);
+    S.libraryLoaded = true;
+  } catch { /* no cache: the skeleton shows until the read lands */ }
+}
+
+function saveCache(lib: Awaited<ReturnType<typeof fetchLibrary>>): void {
+  try {
+    localStorage.setItem(LIB_CACHE_KEY, JSON.stringify({ url: transport.config.url,
+      lib: { areas: S.cards, activeStyle: lib.activeStyle ?? null } }));
+  } catch { /* quota or no storage: the cache is only a head start */ }
+}
+
+let refreshPending = false;
+/** What the last drawn library / OUTPUT looked like: a background re-read
+ * that brings the same data back redraws nothing (§1-90). */
+let cardsSig = '';
+let outputSig = '';
+
+/** The OUTPUT views that depend on the listing (the prompt tab does not). */
+function centreShowsOutput(): boolean {
+  if (S.selectedFile) return false;
+  return S.centreMode === 'folder' || S.centreMode === 'selector'
+    || (S.centreMode === 'tab' && S.centreTab === 'inspect');
+}
+
+/**
+ * Re-read the library and draw it - once per part, and only what changed.
+ *
+ * §1-90 (field report: "로컬인데도 왼쪽 패널이 한참 빈 채로 있다가 두두두
+ * 생겨남"): the left column waited for FIVE requests (four card lists and the
+ * whole OUTPUT tree, which the 프롬프트 tab does not even show), then drew,
+ * then read the active style's file and filled the prompt in a second step.
+ * Now the cards and the style's text come in one /studio/library answer, the
+ * OUTPUT listing and pinned folders run beside it, and the 프롬프트 tab draws
+ * the moment its own data is in. Coming back to the tab keeps the drawn
+ * column and patches it only if the re-read differs.
+ */
+async function refresh(opts: { visit?: boolean } = {}): Promise<void> {
+  // A visit (entering the tab, or a caller asking outright) also re-reads
+  // the 검수 groups, whose selection files the OUTPUT listing does not show;
+  // the background poll only redraws what its listing says moved.
+  const visit = opts.visit !== false;
   // Never rebuild the studio under the user's caret (§1-50): an agent batch
   // bumps filesRev per image, and each bump used to redraw both columns -
   // the prompt being typed lost focus and caret every few seconds. The
@@ -236,43 +302,74 @@ async function refresh(): Promise<void> {
   if (!state.openStudioRequest && ae && splitRoot && splitRoot.contains(ae) && /^(TEXTAREA|INPUT|SELECT)$/.test(ae.tagName)) {
     if (!refreshPending) {
       refreshPending = true;
-      ae.addEventListener('blur', () => { refreshPending = false; void refresh(); }, { once: true });
+      ae.addEventListener('blur', () => { refreshPending = false; void refresh(opts); }, { once: true });
     }
     return;
   }
   renderedRev = state.filesRev;
-  try {
-    const [l, ...areas] = await Promise.all([
-      // Only the output slice: the studio never reads the rest of the space.
-      state.files(OUTPUT_ROOT),
-      // A failed area read keeps the list it had (§1-78): replacing it with
-      // [] is what made a list "fly away" under a slow or timed-out request.
-      ...CARD_AREAS.map((a) => state.studio.items(a.area).then((r) => r.items).catch(() => null)),
-    ]);
-    S.listing = l;
-    S.cards = Object.fromEntries(CARD_AREAS.map((a, i) => [a.area, areas[i] ?? S.cards[a.area] ?? []]));
-  } catch (e) {
-    S.listing = null;
-    drawLeft();
-    if (S.viewMount) {
-      clear(S.viewMount);
-      S.viewMount.appendChild(el('div', { class: 'notice err' }, [
-        el('div', { text: '스튜디오 라이브러리를 읽지 못했습니다.' }),
-        el('div', { class: 'hint', text: e instanceof Error ? e.message : String(e) }),
-        el('div', { class: 'hint', text: '설정 → 연결에서 백엔드 상태를 확인해 주세요.' }),
-      ]));
-    }
-    return;
-  }
-  await migrateSingleStyle();
-  buildOutput();
-  invalidateGroups();
   // The agent (or a batch strip in the chat, or the files tab) asked for
-  // 검수 on a folder. One outside OUTPUT gets pinned first (§1-33).
+  // 검수 on a folder. One outside OUTPUT gets pinned first (§1-33), so its
+  // listing rides with the others.
   const want = state.openStudioRequest;
   const wantFolder = want ? canonPath(want.folder) : '';
   if (wantFolder && !isOutputPath(wantFolder)) addExtra(wantFolder);
-  await loadExtras();
+
+  // All three in flight at once; each part draws when it lands.
+  const outP: Promise<FileListing | Error> = state.files(OUTPUT_ROOT)
+    .catch((e: unknown) => (e instanceof Error ? e : new Error(String(e))));
+  const extrasP = loadExtras();
+
+  let libChanged = false;
+  try {
+    const lib = await fetchLibrary();
+    // A failed area keeps the list it had (§1-78): replacing it with [] is
+    // what made a list "fly away" under a slow or timed-out request.
+    const next = Object.fromEntries(CARD_AREAS.map((a) => [a.area, lib.areas?.[a.area] ?? S.cards[a.area] ?? []]));
+    const sig = JSON.stringify(next);
+    S.cards = next;
+    const styleChanged = styleSync.prime(lib.activeStyle ?? null);
+    libChanged = !S.libraryLoaded || sig !== cardsSig || styleChanged;
+    cardsSig = sig;
+    S.libraryLoaded = true;
+    S.libraryError = '';
+    saveCache(lib);
+    if (await migrateSingleStyle()) libChanged = true;
+  } catch (e) {
+    if (!S.libraryLoaded) {
+      S.libraryError = msg(e);
+      drawLeft();
+      if (S.viewMount) {
+        clear(S.viewMount);
+        S.viewMount.appendChild(el('div', { class: 'notice err' }, [
+          el('div', { text: '스튜디오 라이브러리를 읽지 못했습니다.' }),
+          el('div', { class: 'hint', text: msg(e) }),
+          el('div', { class: 'hint', text: '설정 → 연결에서 백엔드 상태를 확인해 주세요.' }),
+        ]));
+      }
+      return;
+    }
+    // Keep showing what we had; the next visit or poll tries again.
+  }
+  if (libChanged && !want) {
+    if (S.leftTab !== 'output') drawLeft();
+    if (!centreShowsOutput() || S.outputLoaded) drawCentre();
+  }
+
+  const out = await outP;
+  const extrasChanged = await extrasP;
+  let outChanged = extrasChanged;
+  if (out instanceof Error) {
+    if (!S.outputLoaded) notice('OUTPUT 목록을 읽지 못했습니다: ' + out.message, 'err');
+  } else {
+    const sig = JSON.stringify(out.areas);
+    if (!S.outputLoaded || sig !== outputSig) outChanged = true;
+    outputSig = sig;
+    S.listing = out;
+  }
+  const firstOutput = !S.outputLoaded;
+  S.outputLoaded = true;
+  if (outChanged || firstOutput) buildOutput();
+  if (outChanged || firstOutput || visit) invalidateGroups();
   if (want) {
     state.openStudioRequest = null;
     const folder = wantFolder;
@@ -293,33 +390,42 @@ async function refresh(): Promise<void> {
     } else {
       notice('그 폴더를 찾지 못했습니다: ' + folder, 'err');
     }
+    drawLeft();
+    drawCentre();
+  } else {
+    if (S.leftTab === 'output' && (outChanged || firstOutput || libChanged)) drawLeft();
+    if (centreShowsOutput() && (outChanged || firstOutput || libChanged || visit)) drawCentre();
   }
-  drawLeft();
-  drawCentre();
-  checkUnresolved();
+  if (libChanged) checkUnresolved();
   markJobsStale();
   void refreshStrip();
   if (S.jobId) void pollJob();
 }
 
-/** The pinned folders' own listings (one request each; usually zero or one). */
-async function loadExtras(): Promise<void> {
+/** The pinned folders' own listings (one request each; usually zero or one).
+ * True when what they hold changed since the last read. */
+let extrasSig = '';
+async function loadExtras(): Promise<boolean> {
   const pairs = await Promise.all(extraPaths.map(async (p) => {
     try { return [p, await state.files(p)] as const; } catch { return [p, null] as const; }
   }));
+  const sig = JSON.stringify(pairs.map(([p, l]) => [p, l?.areas ?? null]));
+  if (sig === extrasSig) return false;
+  extrasSig = sig;
   buildExtras(Object.fromEntries(pairs));
   for (const p of extraPaths) S.open.add(p);
+  return true;
 }
 
 /** The dropdown means ONE style. Cards written before the dropdown could have
  * several enabled; the first (order, path) stays on and the rest are turned
  * off, said out loud once. */
 let migrated = false;
-async function migrateSingleStyle(): Promise<void> {
+async function migrateSingleStyle(): Promise<boolean> {
   const on = (S.cards.styles ?? [])
     .filter((i) => i.enabled)
     .sort((a, b) => ((a.order ?? 100) - (b.order ?? 100)) || a.path.localeCompare(b.path));
-  if (on.length <= 1) return;
+  if (on.length <= 1) return false;
   const keep = on[0];
   try {
     for (const it of on.slice(1)) {
@@ -332,6 +438,7 @@ async function migrateSingleStyle(): Promise<void> {
     }
     touchQuiet();
   } catch { /* the next refresh tries again */ }
+  return true;
 }
 
 /** Tell the files tab about a studio write without re-reading our own world:
@@ -429,6 +536,13 @@ function drawLeft(): void {
   // row so Ctrl+C/X/V keep working (§1-35, as in the files tab).
   const hadFocus = leftContent.contains(document.activeElement);
   clear(leftContent);
+  // Nothing to draw yet: a skeleton with a spinner, not an empty column
+  // (§1-90) - and the real content replaces it in one go.
+  const waiting = S.leftTab === 'output' ? !S.outputLoaded : !S.libraryLoaded;
+  if (waiting) {
+    leftContent.appendChild(skeleton(S.libraryError));
+    return;
+  }
   if (S.leftTab === 'output') {
     buildLeftOutput(leftContent);
   } else if (S.leftView === 'characters') {
@@ -440,6 +554,20 @@ function drawLeft(): void {
     const row = leftContent.querySelector<HTMLElement>('.treebranch.on') ?? leftContent;
     try { row.focus({ preventScroll: true }); } catch { /* test DOM */ }
   }
+}
+
+function skeleton(error: string): HTMLElement {
+  if (error) {
+    return el('div', { class: 'studioskel' }, [
+      el('div', { class: 'hint err', text: '스튜디오 라이브러리를 읽지 못했습니다: ' + error }),
+    ]);
+  }
+  const bars = [70, 100, 100, 55, 85, 85].map((w) =>
+    el('div', { class: 'skelrow', style: { width: w + '%' } }));
+  return el('div', { class: 'studioskel', 'aria-busy': 'true' }, [
+    el('div', { class: 'row hint skelhead' }, [el('span', { class: 'spin' }), el('span', { text: '불러오는 중…' })]),
+    ...bars,
+  ]);
 }
 
 // --- the centre: tabs, and the modes that override them ---------------------------

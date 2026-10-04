@@ -1027,6 +1027,27 @@ check("an explicit flag still wins", (_s5.get("params") or {}).get("deliberate_e
 check("a style without the flags leaves them unset",
       "prefer_brownian" not in (studio.apply_style_gen({"styles": [_sa], "characters": []}).get("params") or {}))
 
+print("\ntest_library_one_read")
+# §1-90: the panel's left column reads the four card lists and the active
+# style's text in ONE request instead of four listings and a file read.
+files.upload(files.SPACE, "라이브러리.md",
+             text="---\nname: 라이브러리\nenabled: true\norder: -5\n---\n## positive\n도서관\n",
+             into="studio/styles")
+lib = studio.library()
+check("the library holds the four card areas",
+      set(lib["areas"]) == {"styles", "characters", "scenes", "fragments"} and lib["errors"] == {},
+      str(sorted(lib["areas"])) + str(lib["errors"]))
+check("each area is exactly its own listing",
+      all(lib["areas"][a] == studio.listing(a) for a in lib["areas"]))
+check("the active style's text rides along (the first enabled by order)",
+      (lib["activeStyle"] or {}).get("path") == studio.active("styles")[0]
+      and "도서관" in (lib["activeStyle"] or {}).get("content", ""),
+      str(lib["activeStyle"])[:160])
+files.delete(files.SPACE, "studio/styles/라이브러리.md")
+lib = studio.library()
+check("with none enabled there is no active style text",
+      (lib["activeStyle"] is None) == (not studio.active("styles")), str(lib["activeStyle"])[:120])
+
 if FAILURES:
     print(f"FAIL - {len(FAILURES)} check(s): " + ", ".join(FAILURES))
     sys.exit(1)

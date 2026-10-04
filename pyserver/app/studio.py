@@ -452,6 +452,38 @@ def active(area: str) -> list[str]:
     return [path for _o, path in sorted(rows)]
 
 
+LIBRARY_AREAS = ("styles", "characters", "scenes", "fragments")
+
+
+def library() -> dict:
+    """Every card list the studio's left column needs, in ONE answer.
+
+    The panel used to ask for the four areas one /studio/list each and then,
+    once the style list was in, read the active style's file - five requests
+    plus a dependent sixth before the 프롬프트 tab could draw, each paying the
+    plugin relay's round trip. Here: the four listings, and the active
+    style's text (the first enabled one, as `active` orders them) so the
+    inline editor has its prompt without another trip. An area that fails
+    is reported in `errors` and left out, so the panel keeps its old list.
+    """
+    areas: dict[str, list] = {}
+    errors: dict[str, str] = {}
+    for area in LIBRARY_AREAS:
+        try:
+            areas[area] = listing(area)
+        except Exception as e:  # noqa: BLE001 - one bad area must not sink the rest
+            errors[area] = str(e)
+    style = None
+    rows = sorted((i.get("order", 100), i["path"]) for i in areas.get("styles", []) if i.get("enabled"))
+    if rows:
+        path = rows[0][1]
+        try:
+            style = {"path": path, "content": _read_text(path)}
+        except (StudioError, files.FileError, OSError):
+            style = None
+    return {"areas": areas, "errors": errors, "activeStyle": style}
+
+
 _MIGRATED_ONCE = False
 
 

@@ -123,7 +123,8 @@ def set_enabled(on: bool, ctx: dict | None = None) -> dict:
 
 
 def _clean_ctx(ctx: dict) -> dict:
-    keep = ("charKey", "chatKey", "botName", "chatName", "mode")
+    # persona: the key of the persona open in the panel's persona tab.
+    keep = ("charKey", "chatKey", "botName", "chatName", "mode", "persona")
     return {k: str(ctx.get(k) or "")[:200] for k in keep}
 
 

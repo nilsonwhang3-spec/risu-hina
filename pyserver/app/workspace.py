@@ -283,6 +283,44 @@ def _write_manifest(name: str, entry: dict) -> None:
     p.write_text(json.dumps(doc, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
+_ALIAS_CACHE: tuple[float, dict[str, str]] = (-1.0, {})
+
+
+def project_alias(name: str) -> str:
+    """The current name of a bot project that was renamed (§1-89), else `name`.
+
+    An image made before a rename carries the old project name embedded in
+    its PNG. Rewriting every such file on rename meant reading each one
+    (a studio output folder: hundreds of ~1MB PNGs, 29s measured), so the
+    bindings are left as they are and the name is translated where it is
+    read. Follows chains (a -> b -> c); persona renames are not projects.
+    """
+    global _ALIAS_CACHE
+    if not name:
+        return name
+    p = space_root() / ".hina" / "folder-renames.json"
+    try:
+        mtime = p.stat().st_mtime
+    except OSError:
+        return name
+    if _ALIAS_CACHE[0] != mtime:
+        table: dict[str, str] = {}
+        try:
+            doc = json.loads(p.read_text(encoding="utf-8"))
+            for r in doc.get("renames") or []:
+                if isinstance(r, dict) and r.get("key") and r.get("old") and r.get("new"):
+                    table[str(r["old"])] = str(r["new"])
+        except (OSError, ValueError):
+            table = {}
+        _ALIAS_CACHE = (mtime, table)
+    table = _ALIAS_CACHE[1]
+    seen = {name}
+    while name in table and table[name] not in seen:
+        name = table[name]
+        seen.add(name)
+    return name
+
+
 def _move_dir(src: Path, dst: Path) -> None:
     """One directory to a free name. An empty placeholder at dst is removed
     (an out_dir() call may have grown it); _occupied refused anything else."""
@@ -333,9 +371,13 @@ def rename_folder_by_key(key: str, new_name: str) -> dict:
             for d in [src, *sorted(p for p in src.rglob("*") if p.is_dir())]:
                 rel = d.relative_to(src)
                 dir_pairs.append((d.relative_to(sp).as_posix(), (dst / rel).relative_to(sp).as_posix()))
+            # Paths only - no image is opened (§1-89: reading them all was
+            # the 29s rename); assetrules moves the saved assignments by path.
+            base = str(src.resolve())
             for f in src.rglob("*"):
-                if f.is_file() and f.suffix.lower() in (".png", ".webp", ".jpg", ".jpeg"):
-                    images.append((str(f.resolve()), dst / f.relative_to(src)))
+                if f.suffix.lower() in (".png", ".webp", ".jpg", ".jpeg"):
+                    rel = f.relative_to(src)
+                    images.append((str(Path(base) / rel), dst / rel))
 
         moved: list[dict] = []
         done: list[tuple[Path, Path]] = []
@@ -489,6 +531,30 @@ def rename_persona_folder(persona_id: str, name: str, new: str) -> dict:
             "at": time.time(), "persona": key, "old": old, "new": folder_new,
             "moves": [{"from": f"projects/{PERSONA_TOP}/{old}", "to": f"projects/{PERSONA_TOP}/{folder_new}"}]})
         return {"path": f"projects/{PERSONA_TOP}/{folder_new}", "folder": folder_new, "old": old}
+
+
+def rekey_persona(old_key: str, new_key: str) -> dict:
+    """Move a persona's folder pin from one key to another without moving the
+    folder: a persona made in Hina ('new:<hex>') gets its RisuAI id at 반영.
+    A pin already under `new_key` (a sync that ran before the commit made
+    one) gives way; its folder is removed only when empty. Returns the pin."""
+    with _FOLDER_LOCK:
+        mapping = _personas()
+        entry = mapping.pop(old_key, None)
+        if not isinstance(entry, dict):
+            hit = mapping.get(new_key)
+            return dict(hit) if isinstance(hit, dict) else {}
+        dup = mapping.pop(new_key, None)
+        if isinstance(dup, dict) and str(dup.get("folder") or "") and dup.get("folder") != entry.get("folder"):
+            d = persona_root() / str(dup["folder"])
+            try:
+                if d.is_dir() and not any(d.iterdir()):
+                    d.rmdir()
+            except OSError:
+                pass
+        mapping[new_key] = {**entry, "rekeyedFrom": old_key, "rekeyedAt": time.time()}
+        _save_personas(mapping)
+        return dict(mapping[new_key])
 
 
 def persona_key_for_folder(folder: str) -> str:

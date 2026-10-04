@@ -17,7 +17,7 @@ import { injectStyles } from './styles';
 import { state } from '../state';
 import { transport, clientLog } from '../transport';
 import { remountArtifact } from './artifact';
-import { renderChatsTab, refreshAssetSyncLine, refreshBootBox } from './tab-chats';
+import { renderChatsTab, refreshAssetSyncLine, refreshBootBox, foldLanding } from './tab-chats';
 import { renderEditorTab } from './tab-editor';
 import { renderFilesTab } from './tab-files';
 import { renderLoreTab } from './tab-lore';
@@ -442,6 +442,7 @@ export function buildShell(): void {
       // Moving around the panel never asks any more (§1-76): pending work
       // stays pending and the title-row 반영 shows and writes it. Only the
       // exits that would lose it (닫기, 🔄) still ask.
+      if (id === 'chats') foldLanding();
       setTab(id);
     });
     return b;

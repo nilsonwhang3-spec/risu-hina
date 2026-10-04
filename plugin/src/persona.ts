@@ -152,3 +152,41 @@ export async function personaImage(icon: string): Promise<Uint8Array | null> {
     return null;
   }
 }
+
+function newPersonaId(): string {
+  try { return crypto.randomUUID(); } catch { /* below */ }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+  });
+}
+
+/**
+ * Append a NEW persona to RisuAI's list (§1-89), shaped like the ones its own
+ * "add persona" makes (an id, an icon key from saveAsset or ''), then read it
+ * back. Appending never touches the selected persona, so the live-copy rule
+ * above does not apply.
+ */
+export async function createPersona(next: { name: string; prompt: string },
+  imageBytes?: Uint8Array | null): Promise<Persona> {
+  const slice = await readSlice();
+  const raw = (slice['personas'] as Record<string, unknown>[]).slice();
+  let icon = '';
+  if (imageBytes && imageBytes.byteLength) {
+    try {
+      icon = await Risuai.saveAsset(imageBytes);
+    } catch (e) {
+      throw new HostError('failed', '프로필 이미지를 RisuAI에 저장하지 못했습니다: ' + String(e));
+    }
+  }
+  const id = newPersonaId();
+  raw.push({ name: next.name, personaPrompt: next.prompt, icon, id, note: '', largePortrait: false });
+  await Risuai.setDatabase({ personas: raw });
+  const check = await readSlice();
+  const after = check['personas'] as Record<string, unknown>[];
+  const at = after.findIndex((x) => String(x?.['id'] ?? '') === id);
+  if (at < 0) {
+    throw new HostError('failed', 'RisuAI가 새 페르소나를 받지 않았습니다. RisuAI가 다른 창이나 기기에 열려 있지 않은지 확인해 주세요');
+  }
+  return toPersona(after[at], at, Number(check['selectedPersona'] ?? 0) || 0);
+}
