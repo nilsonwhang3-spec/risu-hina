@@ -50,21 +50,25 @@
 
 | 부분 | 어디에 | 하는 일 |
 |---|---|---|
-| **백엔드** | PC 나 서버에 상주하는 파이썬 서버(인터프리터 동봉) | 챗·봇·에셋 저장, 에이전트 실행, 파일 공간, 이미지 생성 |
+| **백엔드** | PC 나 서버에 상주하는 파이썬 서버(설치 패키지에 인터프리터 동봉, 또는 Docker 이미지) | 챗·봇·에셋 저장, 에이전트 실행, 파일 공간, 이미지 생성 |
 | **플러그인** `Risu.Hina.Plugin.js` | RisuAI(웹 또는 PocketRisu) 안 | 화면. 백엔드에 HTTP 로 붙는다 |
 
-플러그인과 백엔드는 버전 앞 두 자리(major.minor)가 같아야 통신한다. 백엔드는 설정 화면에서 업데이트하고, 플러그인은 RisuAI 플러그인 화면의 `+` 로 업데이트한다.
+플러그인과 백엔드는 버전 앞 두 자리(major.minor)가 같아야 통신한다. 플러그인은 RisuAI 가 자동으로 업데이트하고(또는 플러그인 화면의 `+`), 백엔드는 설정 화면에서 업데이트한다(Docker 는 `docker compose pull`). 백엔드가 플러그인보다 오래되면 패널 제목 줄에 **백엔드 업데이트 필요**가 뜬다.
 
 ---
 
 ## 설치
 
-두 가지 방법 중 하나로 백엔드를 설치한다.
+백엔드를 아래 두 방법 중 하나로 설치한 뒤, 플러그인을 RisuAI 에 추가한다.
 
-- **설치 패키지 (Windows · Linux x64)** — 아래 순서대로. 업데이트는 설정 화면에서 한 번에 된다.
-- **Docker (AMD64 · ARM64)** — 릴리스마다 공식 이미지 `ghcr.io/nilsonwhang3-spec/risu-hina` 를 배포한다.
-  `compose.yaml` 하나로 설치하고 `docker compose pull && docker compose up -d` 로 업데이트한다.
-  라즈베리파이·ARM 서버·Apple Silicon 은 이쪽을 쓴다 → [Docker 설치 안내](docs/17-docker.md)
+| | 설치 패키지 | Docker |
+|---|---|---|
+| 지원 | Windows x64 · Linux x64 | AMD64 · ARM64 (라즈베리파이·ARM 서버·Apple Silicon 포함) |
+| 필요한 것 | 없음 (파이썬 동봉) | Docker + Docker Compose |
+| 업데이트 | 설정 → 정보 · 로그 → 백엔드 업데이트 | `docker compose pull && docker compose up -d` |
+| 자동 기동 | `setup -Service` / `--service` | 기본 (`restart: unless-stopped`) |
+
+### A. 설치 패키지 (Windows · Linux x64)
 
 [릴리스](../../releases/latest)에서 `Risu.Hina.<버전>.<OS>.x64.Auto.Install.Package.zip` 을 받아 원하는 폴더에 푼다. 파이썬을 따로 깔 필요는 없다.
 
@@ -73,7 +77,21 @@ setup.bat          # Windows
 ./setup.sh         # Linux
 ```
 
-`Risu.Hina.Plugin.js` 를 RisuAI 플러그인 화면에 추가하고, 챗 화면의 **Risu Hina** 버튼 → ⚙ → **연결**에 백엔드 주소를, **에이전트**에 모델 자격증명을 넣는다.
+### B. Docker (AMD64 · ARM64)
+
+릴리스마다 공식 이미지 `ghcr.io/nilsonwhang3-spec/risu-hina` 를 배포한다. 빈 폴더에서:
+
+```sh
+curl -fsSLO https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/compose.yaml
+docker compose up -d
+docker compose exec risu-hina cat /data/token.txt   # 연결 설정에 넣을 토큰
+```
+
+Docker 는 같은 PC 에서 `127.0.0.1` 로 붙어도 **토큰이 필요하다**. 데이터는 `/data` 볼륨에 남고, 버전 고정·PocketRisu 컨테이너와의 연결·백업·소스 빌드는 [Docker 설치 안내](docs/17-docker.md)에 있다.
+
+### 플러그인
+
+`Risu.Hina.Plugin.js`([릴리스](../../releases/latest), 또는 실행 중인 백엔드의 `http://127.0.0.1:6020/plugin.js`)를 RisuAI 플러그인 화면에 추가하고, 챗 화면의 **Risu Hina** 버튼 → ⚙ → **연결**에 백엔드 주소(와 토큰)를, **에이전트**에 모델 자격증명을 넣는다.
 
 ### 방법 1 — PocketRisu 와 같은 PC
 
@@ -83,7 +101,7 @@ setup.bat          # Windows
 PocketRisu (브라우저)  ←→  리스히나 백엔드 (같은 PC)
 ```
 
-연결 주소: `http://127.0.0.1:6020` (토큰 불필요)
+연결 주소: `http://127.0.0.1:6020` (설치 패키지는 토큰 불필요, Docker 는 토큰 필요)
 
 ### 방법 2 — 웹 RisuAI / 다른 기기 + Tailscale
 
@@ -96,7 +114,9 @@ PocketRisu (브라우저)  ←→  리스히나 백엔드 (같은 PC)
 
 연결 주소: `http://<Tailscale IP>:6020`. 루프백이 아니면 토큰이 필수다. 최초 기동 때 콘솔에 나오는 토큰(`data/token.txt`)을 연결 설정에 넣는다. 웹 RisuAI(https)에서 붙으려면 HTTPS 주소(Tailscale serve, Cloudflare 터널 등)와 RisuAI 의 **Use Plain Fetch** 설정이 필요하다.
 
-### 재부팅 후 자동 기동
+### 재부팅 후 자동 기동 (설치 패키지)
+
+Docker 는 따로 할 것이 없다 (Docker 가 켜지면 함께 뜬다).
 
 ```powershell
 setup.bat -Service       # Windows (NSSM, 관리자 권한)
@@ -110,6 +130,6 @@ uninstall.bat            # 서비스 제거
 
 ---
 
-설치 옵션 상세(연결 유형·토큰·포트·데이터 위치, 문제 해결)는 압축 안의 `INSTALL.md` 와 [docs/05-install.md](docs/05-install.md),
+설치 옵션 상세(연결 유형·토큰·포트·데이터 위치, 문제 해결)는 압축 안의 `INSTALL.md` 와 [docs/05-install.md](docs/05-install.md), Docker 는 [docs/17-docker.md](docs/17-docker.md),
 설계 문서는 [docs/](docs/), 변경 이력은 [docs/06-status.md](docs/06-status.md),
 문제 제보는 [Issues](https://github.com/nilsonwhang3-spec/risu-hina/issues).
