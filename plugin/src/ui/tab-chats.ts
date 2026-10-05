@@ -258,7 +258,7 @@ export function renderChatsTab(mount: HTMLElement): void {
       el('span', { class: 'modeicon', text: icon }),
       el('span', { class: 'modetext' }, [
         el('span', { class: 'modetitle', text: title }),
-        el('span', { class: 'modesub', text: why || sub }),
+        el('span', { class: 'modesub' + (why ? ' why' : ''), text: why || sub }),
         el('span', { class: 'hint', text: desc }),
       ]),
       el('span', { class: 'modecaret', text: openMode === m ? '▾' : '▸' }),

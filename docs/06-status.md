@@ -1,5 +1,47 @@
 # 06. Implementation status — as of 2026-10-04 (v0.15.34, Risu Hina)
 
+## unreleased (2026-10-06): §1-94 GitHub #6, dashboard cards, 승인 before its card, one folder per bot name, uploads into the project
+
+- **GitHub #6 — the launcher died on a weekday date:** with a Windows date format that shows the weekday
+  (`2026-10-05 (월)`), `%DATE%` inside start.bat's `if ( … )` block closed the block early and cmd quit. The
+  echo now quotes `"%DATE% %TIME%"`, and the two `set SERVER=…` lines in a block are `set "SERVER=…"` so an
+  install path under `Program Files (x86)` cannot do the same. Reproduced with a stand-in `DATE`: the old line
+  fails, the new one passes.
+- **GitHub #5** was fixed in §1-93 (asset-key stamp on the cached picture) and ships here.
+- **Dashboard mode cards:** a card is a `<button>`, and buttons are `white-space: nowrap`, so a long description
+  (the bot card's, or a disabled reason) ran out of the card. The card wraps now (`white-space: normal`,
+  `overflow-wrap: anywhere`); the bot name line keeps its ellipsis, a disabled reason wraps.
+- **The title-row 승인 lit up before the AI's card was there:** the backend queues a proposal the moment a
+  propose_*/stage_* tool runs, and the title row re-counts on any state change (300ms) or every 8s, but the agent
+  panel drew the card only at `done`, after two more round trips. The panel now redraws the queues on the
+  `toolResult` of a proposing tool (propose_*, stage_*, studio_generate), mid-turn, and reads staged edits and
+  actions alongside the change summaries instead of after them.
+- **One folder per bot name (no more `이름~2`):** bots.json pinned each bot key to its own folder and a second bot
+  of the same name got `이름~2`, splitting notes, asset rules and studio work. A creator often keeps several bots
+  under one name, so bots whose names are (almost) the same now share one folder: `workspace.name_stem` folds
+  width and case, drops copy/version tails (`(사본)`, `copy`, `~2`, `(2)`, `v2`, `ver 1.3`) and ignores spacing
+  and symbols. A new bot whose stem matches a pinned folder is pinned to it. An existing `이름~N` (not one the
+  user renamed to) is merged into its namesake the next time it is used: files move one by one, notes, asset
+  rules, review sidecars and skills' learned_project follow (the rename machinery, now `_relocate(merge=True)`),
+  and `folder-renames.json` records it so `project_alias` resolves the old name in PNG bindings. A file, notes or
+  rules on both sides refuse the merge (nothing is overwritten); the `~N` stays and is not retried until restart.
+  Renaming a shared folder moves every bot pinned to it; bots sharing the folder are not "another bot" for the
+  name check.
+- **Uploads landed at the top of the space; persona editing opened the bot's folder:**
+  - an AI-chat attachment (and the assets tab's portrait swap, which still asked for the long-gone `uploads/`
+    area and was refused) sent no folder, so the backend put it in `projects/`. `uploadFile` without a folder
+    now sends `bot`, and `/files/upload` uses `projects/<봇>`; in persona mode the persona's folder is used.
+  - the files tab focused the bot's folder only if it already existed, so a bot that had never written anything
+    stayed on `projects/` and every drop/paste/upload went there. `/files?bot=` now creates the bot's project
+    folder; under "이 봇만" an upload with `projects/` itself selected goes to the project being edited.
+  - in persona mode the tab follows the persona: its folder (`projects/페르소나/<이름>`) is kept by the "이 봇만"
+    filter (it was filtered out, so 파일 탭에서 열기 fell back to the bot), the tree re-focuses on it when persona
+    editing starts or the persona changes, and a requested folder that is not listed selects its nearest parent
+    instead of being dropped.
+- Verified: tests/test_project_folder.py (stem rules, sharing, rename of a shared folder, `~2` merge with files
+  and notes, a clash keeps `~2` untouched, upload default per bot), tests/test_files.py updated (same name
+  shares), plugin tsc/build/smoke, the gate.
+
 ## unreleased (2026-10-04): §1-93 personas: the selected one saves as a copy, RisuAI-side changes, GitHub #5
 
 - **Stale "selected":** which persona RisuAI has selected was read only when the persona list was first loaded

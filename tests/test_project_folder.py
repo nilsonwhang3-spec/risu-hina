@@ -215,6 +215,74 @@ check("route: persona rename conflict -> 409", status_of(main.h_persona_folder_r
 raises("a bot cannot take the persona top name via files.move", files.move, files.SPACE,
        "projects/미도리", f"projects/{workspace.PERSONA_TOP}")
 
+print("\ntest_same_name_shares")
+st = workspace.name_stem
+check("stem ignores case, spacing and symbols", st("Blue Archive!") == st("bluearchive") == "bluearchive")
+check("stem drops copy / version tails",
+      st("완간서 (사본)") == st("완간서 v2") == st("완간서~3") == st("완간서 ver 1.2") == st("완간서(2)") == "완간서",
+      st("완간서 v2"))
+check("stem keeps a word that merely ends in v+digit", st("Dev2") != st("De"), st("Dev2"))
+check("different names stay different", st("완간서") != st("완간서 외전"))
+CKA = store.upsert_character("cha-share-1", "완간서", {"name": "완간서"}, 5)
+CKB = store.upsert_character("cha-share-2", "완간서 v2", {"name": "완간서 v2"}, 6)
+CKC = store.upsert_character("cha-share-3", "완간서 외전", {"name": "완간서 외전"}, 7)
+fa, fb, fc = workspace.bot_folder(CKA), workspace.bot_folder(CKB), workspace.bot_folder(CKC)
+check("an almost-same name shares the folder", fa == fb == "완간서", f"{fa} {fb}")
+check("a different name gets its own", fc == "완간서 외전", fc)
+workspace.out_dir(CKA)
+r = workspace.rename_bot_folder(CKB, "완간서 정본")
+bots = json.loads((space / ".hina" / "bots.json").read_text(encoding="utf-8"))
+check("renaming a shared folder moves every bot on it",
+      bots[CKA]["folder"] == bots[CKB]["folder"] == "완간서 정본" and r["folder"] == "완간서 정본", str(bots))
+
+print("\ntest_numbered_folder_heals")
+CKD = store.upsert_character("cha-share-4", "하루", {"name": "하루"}, 8)
+CKE = store.upsert_character("cha-share-5", "하루", {"name": "하루"}, 9)
+check("first 하루 pinned", workspace.bot_folder(CKD) == "하루")
+(space / "projects" / "하루" / "out").mkdir(parents=True, exist_ok=True)
+(space / "projects" / "하루" / "out" / "a.md").write_text("a", encoding="utf-8")
+# What older versions left behind: a second bot of the same name on 하루~2.
+bots = json.loads((space / ".hina" / "bots.json").read_text(encoding="utf-8"))
+bots[CKE] = {"folder": "하루~2", "createdAt": 1.0}
+(space / ".hina" / "bots.json").write_text(json.dumps(bots, ensure_ascii=False), encoding="utf-8")
+(space / "projects" / "하루~2" / "out").mkdir(parents=True)
+(space / "projects" / "하루~2" / "out" / "b.md").write_text("b", encoding="utf-8")
+(space / "hina" / "하루~2" / "scripts").mkdir(parents=True)
+(space / "hina" / "하루~2" / "scripts" / "s.py").write_text("pass", encoding="utf-8")
+agentnotes.save("project:하루~2", "메모", "하루~2 쪽 메모", "테스트")
+check("the ~2 bot is merged into 하루 on its next use", workspace.bot_folder(CKE) == "하루")
+check("its files came along", (space / "projects" / "하루" / "out" / "b.md").is_file()
+      and (space / "projects" / "하루" / "out" / "a.md").is_file()
+      and (space / "hina" / "하루" / "scripts" / "s.py").is_file())
+check("the ~2 folders are gone", not (space / "projects" / "하루~2").exists() and not (space / "hina" / "하루~2").exists())
+check("its notes came along", [n["title"] for n in agentnotes.listing("project:하루")["notes"]] == ["메모"])
+check("an old project name resolves to the merged one", workspace.project_alias("하루~2") == "하루")
+CKF = store.upsert_character("cha-share-6", "나츠", {"name": "나츠"}, 10)
+check("나츠 pinned", workspace.bot_folder(CKF) == "나츠")
+(space / "projects" / "나츠").mkdir(parents=True, exist_ok=True)
+(space / "projects" / "나츠" / "same.md").write_text("1", encoding="utf-8")
+CKG = store.upsert_character("cha-share-7", "나츠", {"name": "나츠"}, 11)
+bots = json.loads((space / ".hina" / "bots.json").read_text(encoding="utf-8"))
+bots[CKG] = {"folder": "나츠~2", "createdAt": 1.0}
+(space / ".hina" / "bots.json").write_text(json.dumps(bots, ensure_ascii=False), encoding="utf-8")
+(space / "projects" / "나츠~2").mkdir(parents=True)
+(space / "projects" / "나츠~2" / "same.md").write_text("2", encoding="utf-8")
+check("a clash keeps the ~2 folder as it is", workspace.bot_folder(CKG) == "나츠~2")
+check("nothing was overwritten", (space / "projects" / "나츠" / "same.md").read_text(encoding="utf-8") == "1"
+      and (space / "projects" / "나츠~2" / "same.md").read_text(encoding="utf-8") == "2")
+
+print("\ntest_upload_lands_in_project")
+CKU = store.upsert_character("cha-upload-1", "업로드 봇", {"name": "업로드 봇"}, 12)
+listing = main.h_files({"bot": CKU})
+check("listing a bot creates its project folder",
+      listing["botFolder"] == "업로드 봇" and (space / "projects" / "업로드 봇").is_dir(), str(listing.get("botFolder")))
+up = main.h_file_upload({"name": "첨부.md", "text": "x", "bot": CKU})
+check("an upload without a folder lands in the bot's project", up["path"] == "projects/업로드 봇/첨부.md", up["path"])
+up = main.h_file_upload({"name": "지정.md", "text": "x", "dir": "projects/페르소나", "bot": CKU})
+check("a named folder still wins", up["path"] == "projects/페르소나/지정.md", up["path"])
+up = main.h_file_upload({"name": "봇없음.md", "text": "x"})
+check("no bot: projects/ as before", up["path"] == "projects/봇없음.md", up["path"])
+
 print()
 if FAILURES:
     print(f"FAIL - {len(FAILURES)} check(s): " + ", ".join(FAILURES))

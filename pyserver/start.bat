@@ -10,6 +10,11 @@ REM exit code 75 means "a new version was installed, re-enter it". NSSM, PM2,
 REM systemd or a double-click all get the same behaviour because the loop lives
 REM here rather than in the supervisor.
 REM
+REM Inside ( ) blocks every %VAR% that can hold a ")" is quoted: a locale
+REM whose %DATE% reads "2026-10-05 (Mon)" closed the block early and the
+REM launcher died (GitHub #6); an install path under "Program Files (x86)"
+REM would do the same to SERVER.
+REM
 REM Works from either place. A release unpacks this at the install root, next to
 REM pyserver\ - which matters, because cmd re-reads a running batch file by byte
 REM offset, so an update that overwrote the launcher mid-loop could make cmd
@@ -17,9 +22,9 @@ REM execute nonsense. Older installs have it inside pyserver\ and still work.
 setlocal
 set HERE=%~dp0
 if exist "%HERE%app\" (
-    set SERVER=%HERE%
+    set "SERVER=%HERE%"
 ) else (
-    set SERVER=%HERE%pyserver\
+    set "SERVER=%HERE%pyserver\"
 )
 if not exist "%SERVER%run.py" (
     echo cannot find run.py - expected "%SERVER%run.py"
@@ -51,7 +56,7 @@ if exist "%SERVER%python.new\" (
     if exist "%SERVER%python.old\" rmdir /s /q "%SERVER%python.old"
     if exist "%SERVER%python\" move "%SERVER%python" "%SERVER%python.old" >nul
     move "%SERVER%python.new" "%SERVER%python" >nul
-    echo === interpreter swapped in at %DATE% %TIME% >> "%LOG%"
+    echo === interpreter swapped in at "%DATE% %TIME%" >> "%LOG%"
 )
 echo === start %DATE% %TIME% port=%PORT% >> "%LOG%"
 "%PY%" "%SERVER%run.py" >> "%LOG%" 2>&1

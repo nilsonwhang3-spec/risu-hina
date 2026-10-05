@@ -25,6 +25,8 @@ import { activeHalf } from './shell';
 import { installDrop } from './tree';
 
 const IMG_RE = /\.(png|jpe?g|gif|webp|avif|bmp)$/i;
+/** Tools whose result is a queued proposal (studio_generate queues 2+ images). */
+const PROPOSING_TOOL = /^(propose_|stage_|studio_generate$)/;
 
 /** A phone or tablet: the primary pointer is a finger (iPad in landscape is
  * wider than smallScreen's breakpoint but still types on a screen keyboard). */
@@ -863,6 +865,8 @@ export class AgentPanel {
       if (textTimer === null) textTimer = setTimeout(flushText, 120);
     };
 
+    // Set when a propose_* / stage_* call starts; its toolResult draws the card.
+    let proposingTool = false;
     try {
       for await (const ev of state.agentChat(prompt, abort.signal)) {
         if (this.destroyed) break;
@@ -921,9 +925,18 @@ export class AgentPanel {
             // A skill load is the one call whose argument is the whole story:
             // "스킬" says nothing, "스킬: 말투 통일" says what the agent decided.
             const detail = name === 'load_skill' ? skillArg(e.args) : '';
+            if (PROPOSING_TOOL.test(name)) proposingTool = true;
             traceSegment().push(name, detail);
             setThinking(true, (TOOL_GLYPH[name]?.[1] ?? name) + (detail ? `: ${detail}` : '') + ' 중입니다…');
             this.scroll();
+            break;
+          }
+          case 'toolResult': {
+            // The proposal is queued the moment the tool returns. The title-row
+            // 승인 counts the queue on its own clock, so drawing the card only
+            // at 'done' let that button light up before the card it approves
+            // was in the chat. Draw it now.
+            if (proposingTool) { proposingTool = false; void this.refreshStaged(); }
             break;
           }
           case 'artifact': {
@@ -1141,10 +1154,17 @@ export class AgentPanel {
 
   private async refreshStaged(): Promise<void> {
     if (this.destroyed) return;
-    await Promise.all([state.refreshChanges(), state.refreshBotChanges()]);
+    // The queues are read alongside the change summaries, not after them:
+    // those emit, the title-row 승인 re-counts 300ms later, and a card drawn
+    // after two more round trips came in behind the lit button.
+    const [, staged, acts] = await Promise.all([
+      Promise.all([state.refreshChanges(), state.refreshBotChanges()]),
+      state.stagedEdits().catch(() => null),
+      state.actions().catch(() => null),
+    ]);
     try {
-      this.setStaged(await state.stagedEdits());
-      await this.refreshActions();
+      if (staged) this.setStaged(staged);
+      if (acts) this.setActions(acts);
       await this.refreshOutputs();
     } catch { /* the turn already reported its own failure */ }
   }

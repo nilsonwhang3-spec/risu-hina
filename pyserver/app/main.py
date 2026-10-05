@@ -996,15 +996,24 @@ def h_cost(arg: dict) -> dict:
 # --- workspace files --------------------------------------------------------
 
 def h_files(arg: dict) -> dict:
-    out = files.listing(_scope(arg), str(arg.get("prefix") or ""), bool(arg.get("hidden")))
+    scope = _scope(arg)
     # The panel's "이 봇만" filter needs the bot's folder name under projects/
     # and hina/ - pinned in bots.json, so it is asked for, not guessed.
     bot = str(arg.get("bot") or "")
+    folder = ""
     if bot:
         try:
-            out["botFolder"] = workspace.bot_folder(bot)
+            folder = workspace.bot_folder(bot)
         except workspace.WorkspaceError:
-            out["botFolder"] = ""
+            folder = ""
+        if folder and scope == files.SPACE:
+            # The tab focuses this folder and uploads land in it: a bot that
+            # had never written anything had none, so the tree stayed on
+            # projects/ and uploads went to the top level.
+            (workspace.ensure_space() / "projects" / folder).mkdir(parents=True, exist_ok=True)
+    out = files.listing(scope, str(arg.get("prefix") or ""), bool(arg.get("hidden")))
+    if bot:
+        out["botFolder"] = folder
     return out
 
 
@@ -1035,12 +1044,20 @@ def _write_scope(arg: dict) -> str:
 
 
 def h_file_upload(arg: dict) -> dict:
+    into = str(arg.get("dir") or "")
+    bot = str(arg.get("bot") or "")
+    if not into and bot:
+        # No folder named: the open bot's project folder, not projects/ itself.
+        try:
+            into = "projects/" + workspace.bot_folder(bot)
+        except workspace.WorkspaceError:
+            into = ""
     try:
         return files.upload(
             _write_scope(arg), str(arg.get("name") or ""),
             text=arg.get("text") if isinstance(arg.get("text"), str) else None,
             base64_data=arg.get("base64") if isinstance(arg.get("base64"), str) else None,
-            into=str(arg.get("dir") or ""),
+            into=into,
             extract=bool(arg.get("extract")),
         )
     except files.FileError as e:

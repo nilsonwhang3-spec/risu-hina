@@ -2014,9 +2014,22 @@ class AppState {
 
   async uploadFile(name: string, content: string, base64 = false, dir = '', extract = false)
     : Promise<{ path: string; size: number; extracted?: number }> {
+    // No folder named (an AI-chat attachment, a portrait swap): the project
+    // being edited - the persona's folder in persona mode, otherwise the
+    // backend picks the bot's projects/<봇> from `bot`. It used to fall to
+    // projects/ itself, the top of the space.
+    if (!dir && this.editMode === 'persona' && this.personaFolder) dir = this.personaFolder;
+    const bot = dir ? undefined : this.activeCharKey || undefined;
     return await transport.upload('/files/upload', base64
-      ? { name, base64: content, dir, extract }
-      : { name, text: content, dir });
+      ? { name, base64: content, dir, extract, bot }
+      : { name, text: content, dir, bot });
+  }
+
+  /** The project folder being edited: the persona's in persona mode, else
+   *  the bot's (`botFolder` from the files listing; '' before it is known). */
+  projectDir(botFolder: string): string {
+    if (this.editMode === 'persona' && this.personaFolder) return this.personaFolder;
+    return botFolder ? `projects/${botFolder}` : '';
   }
 
   /**

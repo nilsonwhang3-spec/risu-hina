@@ -373,7 +373,10 @@ pre.mono {
 .modecard {
   display: flex; align-items: flex-start; gap: 10px; text-align: left; padding: 12px;
   border: 1px solid var(--borderc, #2b323f); border-radius: 8px; background: rgba(128,128,128,.05);
-  color: inherit; cursor: pointer; min-width: 0;
+  color: inherit; cursor: pointer; min-width: 0; overflow: hidden;
+  /* A card is a <button>, and buttons are nowrap: its description ran out of
+     the card instead of wrapping. */
+  white-space: normal;
 }
 .modecard:hover:not(:disabled) { background: rgba(128,128,128,.12); }
 .modecard.open { border-color: #2563eb; background: rgba(37,99,235,.10); }
@@ -382,6 +385,8 @@ pre.mono {
 .modetext { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
 .modetitle { font-weight: 700; font-size: 14px; }
 .modesub { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.modesub.why { white-space: normal; }
+.modetext > span { overflow-wrap: anywhere; }
 .modecaret { color: var(--textcolor2, #79839a); }
 .modebody { margin-top: 14px; }
 .loadingrow { cursor: default; }

@@ -288,7 +288,9 @@ function cell(c: Cell): HTMLElement {
           fr.onerror = () => reject(fr.error ?? new Error('read failed'));
           fr.readAsDataURL(file);
         });
-        const up = await state.uploadFile(file.name, b64, true, 'uploads');
+        // No folder: the bot's project folder ('uploads' is not an area of
+        // the space any more and was refused).
+        const up = await state.uploadFile(file.name, b64, true);
         await state.replacePortrait(up.path);
         notice('프로필 이미지를 작업본에 올렸습니다. 봇 반영을 누르면 RisuAI 에 등록됩니다.', 'ok');
         await refreshNow();

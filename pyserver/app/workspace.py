@@ -27,6 +27,7 @@ import re
 import shutil
 import threading
 import time
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -99,26 +100,102 @@ def bot_folder(char_key: str) -> str:
     """The bot-named folder under projects/ and hina/, pinned in bots.json.
 
     Pinned so a rename does not orphan the folder; family bots share one
-    folder by the family key, the same sharing rule root() applies. A name
-    collision takes `이름~2` rather than merging two bots' work.
+    folder by the family key, the same sharing rule root() applies.
+
+    Bots whose names are (almost) the same share ONE folder (name_stem):
+    a creator keeps several versions of a bot under one name, and each used
+    to get its own `이름~2`, `이름~3` with the notes, rules and studio work
+    split between them. A `~N` folder made that way is merged back into its
+    namesake when nothing clashes (_heal_numbered).
     """
     key = _bot_key(char_key)
     with _FOLDER_LOCK:
         mapping = _bots_map()
         hit = mapping.get(key)
         if isinstance(hit, dict) and str(hit.get("folder") or ""):
-            return str(hit["folder"])
-        folder = clean_folder_name(_char_name(key)) or key
-        # PERSONA_TOP is the personas' own top folder under projects/: a bot
-        # literally named 페르소나 counts up like any other collision.
-        taken = {str(v.get("folder") or "") for v in mapping.values() if isinstance(v, dict)}
-        taken.add(PERSONA_TOP)
-        base, n = folder, 2
-        while folder in taken:
-            folder = f"{base}~{n}"
-            n += 1
+            folder = str(hit["folder"])
+            # A name the user picked (renamedFrom) is theirs, ~N or not.
+            if _NUMBERED.match(folder) and folder not in _HEAL_FAILED and not hit.get("renamedFrom"):
+                folder = _heal_numbered(key, folder)
+            return folder
+        name = _char_name(key) or (_char_name(char_key) if char_key != key else "")
+        folder = clean_folder_name(name) or key
+        shared = _namesake(mapping, folder) if name else ""
+        if shared:
+            folder = shared
+        else:
+            # PERSONA_TOP is the personas' own top folder under projects/: a
+            # bot literally named 페르소나 counts up.
+            taken = {str(v.get("folder") or "").casefold() for v in mapping.values() if isinstance(v, dict)}
+            taken.add(PERSONA_TOP.casefold())
+            base, n = folder, 2
+            while folder.casefold() in taken:
+                folder = f"{base}~{n}"
+                n += 1
         mapping[key] = {"folder": folder, "createdAt": time.time()}
         _save_bots_map(mapping)
+        if shared:
+            log.info("bot folder shared key=%s -> %s (same name)", key, folder)
+        return folder
+
+
+# `이름~2`: the suffix bot_folder used to add on a name collision.
+_NUMBERED = re.compile(r"^(.+)~\d+$")
+# Trailing copy / version markers that do not make a different bot:
+# "(사본)", "[copy]", "~2", "(2)", "v2", "ver 1.3", "- 복사본".
+_STEM_TAIL = re.compile(
+    r"(?:[\s\-_.]*(?:[(\[{](?:사본|복사본|copy|\d+)[)\]}]|사본|복사본|copy|~\d+"
+    r"|(?<![a-z])v(?:er(?:sion)?)?\.?\s*\d+(?:\.\d+)*))+\s*$")
+# Folders a merge was refused for (a file on both sides): not retried on
+# every bot_folder call; a restart tries again.
+_HEAL_FAILED: set[str] = set()
+
+
+def name_stem(name: str) -> str:
+    """What makes two bot names "the same" for sharing a folder: width and
+    case folded, copy / version markers dropped from the end, then spacing,
+    punctuation and symbols ignored. '' when nothing is left."""
+    s = unicodedata.normalize("NFKC", str(name or "")).casefold().strip()
+    prev = None
+    while prev != s:
+        prev, s = s, _STEM_TAIL.sub("", s).strip()
+    return re.sub(r"[\W_]+", "", s)
+
+
+def _namesake(mapping: dict, folder: str, *, exclude: str = "") -> str:
+    """The pinned folder another bot of (almost) the same name already uses.
+    An unnumbered one wins over `~N`, then the oldest."""
+    stem = name_stem(folder)
+    if not stem:
+        return ""
+    best: tuple[int, float, str] | None = None
+    for v in mapping.values():
+        if not isinstance(v, dict):
+            continue
+        f = str(v.get("folder") or "")
+        if not f or f == exclude or _HASH_FOLDER.match(f) or name_stem(f) != stem:
+            continue
+        rank = (1 if _NUMBERED.match(f) else 0, float(v.get("createdAt") or 0), f)
+        if best is None or rank < best:
+            best = rank
+    return best[2] if best else ""
+
+
+def _heal_numbered(key: str, folder: str) -> str:
+    """Merge an old `이름~N` folder into its namesake (see bot_folder).
+
+    Every key pinned to `folder` moves with it. Refused - the folder stays
+    as it is - when a file, the notes or the asset rules exist on both sides;
+    nothing is ever overwritten."""
+    target = _namesake(_bots_map(), folder, exclude=folder)
+    if not target:
+        return folder
+    try:
+        _relocate(key, folder, target, merge=True)
+        return target
+    except WorkspaceError as e:
+        _HEAL_FAILED.add(folder)
+        log.info("bot folder %s not merged into %s: %s", folder, target, e)
         return folder
 
 
@@ -234,7 +311,8 @@ def bot_key_for_folder(folder: str) -> str:
 
 def _check_free(key: str, old: str, new: str) -> None:
     for k, v in _bots_map().items():
-        if (k != key and isinstance(v, dict)
+        # Bots sharing this folder (same name) are not "another bot".
+        if (k != key and isinstance(v, dict) and str(v.get("folder") or "") != old
                 and str(v.get("folder") or "").casefold() == new.casefold()):
             raise FolderConflict(f"다른 봇이 이미 쓰는 폴더 이름입니다: {new}")
     for src, dst in _bot_areas(old, new):
@@ -338,22 +416,63 @@ def rename_folder_by_key(key: str, new_name: str) -> dict:
     already there, or notes / asset rules on both names are refused before
     anything moves. A directory move that fails puts the earlier ones back.
     Recorded in `.hina/folder-renames.json`. Returns {old, folder, moved}.
+    Every bot sharing the folder (same name, see bot_folder) follows it.
     """
-    from . import agentnotes, assetrules, skills, studio
     with _FOLDER_LOCK:
-        mapping = _bots_map()
-        hit = mapping.get(key)
+        hit = _bots_map().get(key)
         if not isinstance(hit, dict) or not str(hit.get("folder") or ""):
             raise WorkspaceError("이 봇의 폴더가 아직 정해지지 않았습니다")
         old = str(hit["folder"])
         new = _check_name(new_name)
         if new == old:
             return {"old": old, "folder": old, "moved": []}
+        return _relocate(key, old, new, merge=False)
+
+
+def _merge_clashes(src: Path, dst: Path) -> list[str]:
+    """Paths under src that already exist under dst (a merge would overwrite)."""
+    out: list[str] = []
+    if not dst.exists():
+        return out
+    for f in src.rglob("*"):
+        rel = f.relative_to(src)
+        d = dst / rel
+        if d.exists() and not (f.is_dir() and d.is_dir()):
+            out.append(rel.as_posix())
+    return out
+
+
+def _merge_dir(src: Path, dst: Path, done: list[tuple[Path, Path]]) -> None:
+    """Move src's files into an existing dst one by one (no clash: checked
+    first), then drop src's emptied directories."""
+    for f in sorted(p for p in src.rglob("*") if p.is_file()):
+        d = dst / f.relative_to(src)
+        d.parent.mkdir(parents=True, exist_ok=True)
+        os.rename(f, d)
+        done.append((f, d))
+    for d in sorted((p for p in src.rglob("*") if p.is_dir()), key=lambda p: len(p.parts), reverse=True):
+        try:
+            d.rmdir()
+        except OSError:
+            pass
+    try:
+        src.rmdir()
+    except OSError:
+        pass
+
+
+def _relocate(key: str, old: str, new: str, *, merge: bool) -> dict:
+    """The folder move behind a rename (merge=False: `new` must be free) and
+    behind merging an old `이름~N` into its namesake (merge=True: `new` is in
+    use by bots of the same name; files, notes and rules may not clash)."""
+    from . import agentnotes, assetrules, skills, studio
+    with _FOLDER_LOCK:
         try:
             assetrules.project_name(new)
         except assetrules.RuleError as e:
             raise WorkspaceError(str(e)) from e
-        _check_free(key, old, new)
+        if not merge:
+            _check_free(key, old, new)
         old_scope, new_scope = "project:" + old, "project:" + new
         if agentnotes.listing(old_scope)["notes"] and agentnotes.listing(new_scope)["notes"]:
             raise FolderConflict(f"'{new}' 에 이미 메모가 있어 합칠 수 없습니다")
@@ -363,6 +482,12 @@ def rename_folder_by_key(key: str, new_name: str) -> dict:
 
         sp = space_root()
         areas = [(s, d) for s, d in _bot_areas(old, new) if s.is_dir()]
+        if merge:
+            for src, dst in areas:
+                clash = _merge_clashes(src, dst)
+                if clash:
+                    raise FolderConflict(
+                        f"두 폴더에 같은 파일이 있습니다: {dst.relative_to(sp).as_posix()}/{clash[0]}")
         # What has to follow the files, read while they are still in place:
         # review sidecars by folder path, asset bindings by file path.
         dir_pairs: list[tuple[str, str]] = []
@@ -383,22 +508,34 @@ def rename_folder_by_key(key: str, new_name: str) -> dict:
         done: list[tuple[Path, Path]] = []
         try:
             for src, dst in areas:
-                _move_dir(src, dst)
-                done.append((src, dst))
+                if merge and dst.exists() and not _same_dir(dst, src):
+                    _merge_dir(src, dst, done)
+                else:
+                    _move_dir(src, dst)
+                    done.append((src, dst))
                 moved.append({"from": src.relative_to(sp).as_posix(), "to": dst.relative_to(sp).as_posix()})
         except OSError as e:
             for src, dst in reversed(done):
                 try:
+                    src.parent.mkdir(parents=True, exist_ok=True)
                     os.rename(dst, src)
                 except OSError:
-                    log.warn("folder rename rollback failed: %s -> %s", dst, src)
+                    log.warn("folder move rollback failed: %s -> %s", dst, src)
             raise WorkspaceError(f"폴더를 옮기지 못했습니다: {e}") from e
 
         mapping = _bots_map()
-        entry = dict(mapping.get(key) or {})
-        entry.update({"folder": new, "renamedFrom": old, "renamedAt": time.time()})
-        entry.setdefault("createdAt", time.time())
-        mapping[key] = entry
+        now = time.time()
+        for k, v in list(mapping.items()):
+            if not isinstance(v, dict) or str(v.get("folder") or "") != old:
+                continue
+            entry = dict(v)
+            entry["folder"] = new
+            if merge:
+                entry.update({"mergedFrom": old, "mergedAt": now})
+            elif k == key:
+                entry.update({"renamedFrom": old, "renamedAt": now})
+            entry.setdefault("createdAt", now)
+            mapping[k] = entry
         _save_bots_map(mapping)
 
         rekeyed: dict[str, Any] = {}
@@ -412,12 +549,16 @@ def rename_folder_by_key(key: str, new_name: str) -> dict:
             try:
                 rekeyed[label] = fn()
             except Exception as e:  # noqa: BLE001 - the folders already moved; report, don't unwind
-                log.warn("folder rename %s -> %s: %s re-key failed: %s", old, new, label, e)
+                log.warn("folder %s %s -> %s: %s re-key failed: %s",
+                         "merge" if merge else "rename", old, new, label, e)
                 warnings.append(f"{label}: {e}")
+        # One manifest for both: project_alias reads it, so a PNG that names
+        # the old project resolves to the new one either way.
         _write_manifest("folder-renames.json", {
-            "at": time.time(), "key": key, "old": old, "new": new,
+            "at": now, "key": key, "old": old, "new": new, "merged": merge,
             "moves": moved, "rekeyed": rekeyed, "warnings": warnings})
-        log.info("bot folder renamed key=%s %s -> %s moved=%d", key, old, new, len(moved))
+        log.info("bot folder %s key=%s %s -> %s moved=%d",
+                 "merged" if merge else "renamed", key, old, new, len(moved))
         out = {"old": old, "folder": new, "moved": moved, "rekeyed": rekeyed}
         if warnings:
             out["warnings"] = warnings

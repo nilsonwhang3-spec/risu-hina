@@ -166,8 +166,15 @@ const kitRender = makeTab({
 let filesContext = '';
 let focusBotProject = false;
 
+/** The persona whose folder the tab follows ('' outside persona mode). */
+function personaContext(): string {
+  return state.editMode === 'persona' ? state.personaFolder : '';
+}
+
 export function renderFilesTab(mount: HTMLElement): void {
-  const context = JSON.stringify([state.contextRevision, state.activeCharKey]);
+  // Entering persona editing (or another persona) re-focuses the tree on
+  // that persona's folder, the way opening a bot focuses the bot's.
+  const context = JSON.stringify([state.contextRevision, state.activeCharKey, personaContext()]);
   if (context !== filesContext) {
     filesContext = context;
     lastListing = null;
@@ -194,7 +201,8 @@ export function renderFilesTab(mount: HTMLElement): void {
 
 const pendingRefreshes = new Map<string, Promise<void>>();
 function refreshKey(): string {
-  return JSON.stringify([state.contextRevision, state.filesRev, showInternal, onlyMine, state.activeCharKey, state.openFileRequest]);
+  return JSON.stringify([state.contextRevision, state.filesRev, showInternal, onlyMine, state.activeCharKey,
+    personaContext(), state.openFileRequest]);
 }
 
 function refresh(): Promise<void> {
@@ -215,9 +223,9 @@ async function refreshOnce(key: string): Promise<void> {
     if (key !== refreshKey()) return; // a pre-operation response must not restore old files
     lastListing = data;
     buildNodes(data);
-    if (focusBotProject && data.botFolder) {
-      const project = `projects/${data.botFolder}`;
-      if (nodes.has(project)) { selectedDir = project; expandTo(project); }
+    if (focusBotProject) {
+      const project = state.projectDir(data.botFolder ?? '');
+      if (project && nodes.has(project)) { selectedDir = project; expandTo(project); }
       focusBotProject = false;
     }
     if (!nodes.has(selectedDir)) selectedDir = nodes.has('projects') ? 'projects' : (nodes.keys().next().value ?? '');
@@ -230,7 +238,10 @@ async function refreshOnce(key: string): Promise<void> {
     const want = state.openFileRequest;
     if (want) {
       state.openFileRequest = null;
-      const dir = want.includes('/') ? want.slice(0, want.lastIndexOf('/')) : want;
+      let dir = want.includes('/') ? want.slice(0, want.lastIndexOf('/')) : want;
+      // A folder the view filtered out or that is not listed yet: the
+      // nearest folder above it, rather than dropping the request.
+      while (dir.includes('/') && !nodes.has(dir)) dir = dir.slice(0, dir.lastIndexOf('/'));
       if (nodes.has(dir)) { selectedDir = dir; expandTo(dir); }
       // A trailing slash asks for the folder itself (the persona tab's
       // project folder, §1-89): select it, preview nothing.
@@ -277,8 +288,13 @@ function buildNodes(data: FileListing): void {
   const shown = (data.areas ?? []).filter((a) => showInternal || DEFAULT_AREAS.has(a.area));
   // "이 봇만": a per-bot area keeps only the open bot's folder.
   const mine = onlyMine && data.botFolder ? data.botFolder : '';
+  // In persona mode the persona's folder (projects/페르소나/<이름>) is shown
+  // too: the filter used to drop it, so 파일 탭에서 열기 landed on the bot.
+  const persona = onlyMine ? personaContext() : '';
   const keep = (area: string, path: string): boolean =>
-    !mine || !PER_BOT_AREAS.has(area) || path === `${area}/${mine}` || path.startsWith(`${area}/${mine}/`);
+    (!mine && !persona) || !PER_BOT_AREAS.has(area)
+    || (!!mine && (path === `${area}/${mine}` || path.startsWith(`${area}/${mine}/`)))
+    || (!!persona && (path === persona || path.startsWith(persona + '/')));
   for (const area of shown) {
     const root: Folder = { path: area.area, name: AREA_LABEL[area.area]?.[0] ?? area.area, area, kids: [], files: [] };
     nodes.set(root.path, root);
@@ -342,8 +358,14 @@ function expandTo(path: string): void {
 /** The folder an upload from the current view lands in. */
 function uploadTarget(): string {
   const n = nodes.get(selectedDir);
-  if (n && !n.virtual && USER_AREAS.has(n.area.area)) return n.path;
-  return 'projects';
+  const project = state.projectDir(lastListing?.botFolder ?? '');
+  // Under "이 봇만" projects/ itself is not a place anyone means to drop a
+  // file: with it selected (the default before the bot's folder existed)
+  // uploads went to the top of the space. The project being edited takes
+  // them. 전체 보기 keeps projects/ as a real target (a new project folder).
+  const top = n?.path === 'projects' && onlyMine && !!project;
+  if (n && !n.virtual && USER_AREAS.has(n.area.area) && !top) return n.path;
+  return project || 'projects';
 }
 
 /** Folders a file may be moved into: the deletable areas and their folders. */
