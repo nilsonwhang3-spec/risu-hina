@@ -1,4 +1,11 @@
-# 06. Implementation status — as of 2026-10-04 (v0.15.34, Risu Hina)
+# 06. Implementation status — as of 2026-10-06 (v0.15.35, Risu Hina)
+
+## 0.15.35 (2026-10-06): GitHub #5 · #6, §1-92 ~ §1-94 released
+
+The launcher survives a weekday date (#6) and the persona picture refreshes after 반영 (#5); the selected persona
+saves as a copy and RisuAI-side changes are flagged (§1-93); the Docker image is published to GHCR with each
+release (§1-92); dashboard cards wrap, the title-row 승인 waits for its card, bots of the same name share one
+folder (old `~N` folders merge back), and uploads land in the project being edited (§1-94).
 
 ## unreleased (2026-10-06): §1-94 GitHub #6, dashboard cards, 승인 before its card, one folder per bot name, uploads into the project
 

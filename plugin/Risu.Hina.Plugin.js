@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.15.34
+//@display-name Risu Hina v0.15.35
 //@api 3.0
-//@version 0.15.34
+//@version 0.15.35
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -66,7 +66,7 @@
     const [pa, pb, pc] = v(plugin);
     const [ba, bb, bc] = v(backend);
     if (pa !== ba || pb !== bb || !((pc ?? 0) > (bc ?? 0))) return "";
-    const how = installKind === "docker" ? "\uC774 \uBC31\uC5D4\uB4DC\uB294 Docker \uC124\uCE58\uC785\uB2C8\uB2E4 - \uC774\uBBF8\uC9C0\uB97C \uC0C8 \uBC84\uC804\uC73C\uB85C \uB2E4\uC2DC \uBC1B\uAC70\uB098 \uBE4C\uB4DC\uD55C \uB4A4 \uCEE8\uD14C\uC774\uB108\uB97C \uB2E4\uC2DC \uB9CC\uB4E4\uC5B4 \uC8FC\uC138\uC694." : "\u2699 \u2192 \uC815\uBCF4 \xB7 \uB85C\uADF8 \u2192 \uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB97C \uB20C\uB7EC \uC8FC\uC138\uC694.";
+    const how = installKind === "docker" ? "\uC774 \uBC31\uC5D4\uB4DC\uB294 Docker \uC124\uCE58\uC785\uB2C8\uB2E4 - compose.yaml \uC774 \uC788\uB294 \uD3F4\uB354\uC5D0\uC11C docker compose pull && docker compose up -d \uB97C \uC2E4\uD589\uD574 \uC8FC\uC138\uC694." : "\u2699 \u2192 \uC815\uBCF4 \xB7 \uB85C\uADF8 \u2192 \uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB97C \uB20C\uB7EC \uC8FC\uC138\uC694.";
     return `\uBC31\uC5D4\uB4DC v${backend} \uAC00 \uD50C\uB7EC\uADF8\uC778 v${plugin} \uBCF4\uB2E4 \uC624\uB798\uB410\uC2B5\uB2C8\uB2E4. \uC0C8 \uAE30\uB2A5 \uC77C\uBD80\uAC00 \uB3D9\uC791\uD558\uC9C0 \uC54A\uC744 \uC218 \uC788\uC2B5\uB2C8\uB2E4. ${how}`;
   }
   function versionGate(plugin, backend) {
@@ -195,7 +195,7 @@
           this.tokenSafe = true;
           this.lastHealth = body;
           this.probeInfo = "";
-          this.gate = versionGate("0.15.34", String(body.version || ""));
+          this.gate = versionGate("0.15.35", String(body.version || ""));
           return body;
         }
         /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -1071,6 +1071,9 @@
     const at = raw[p.index];
     return at && String(at["name"] ?? "") === p.name && !at["id"] ? p.index : -1;
   }
+  function copyName(baseName, workName) {
+    return workName !== baseName ? workName : `${workName} (\uC0AC\uBCF8)`;
+  }
   async function writePersona(before, next, imageBytes) {
     const slice = await readSlice();
     const raw = slice["personas"].slice();
@@ -1119,10 +1122,16 @@
       return (c === "x" ? r : r & 3 | 8).toString(16);
     });
   }
-  async function createPersona(next, imageBytes) {
+  async function createPersona(next, imageBytes, copyFrom) {
     const slice = await readSlice();
     const raw = slice["personas"].slice();
-    let icon = "";
+    let template = {};
+    if (copyFrom) {
+      const at2 = locate(raw, copyFrom);
+      if (at2 < 0) throw new HostError("missing", "RisuAI\uC5D0\uC11C \uC6D0\uBCF8 \uD398\uB974\uC18C\uB098\uB97C \uCC3E\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4 (\uC9C0\uC6CC\uC84C\uC744 \uC218 \uC788\uC2B5\uB2C8\uB2E4). \uBAA9\uB85D\uC744 \uB2E4\uC2DC \uC77D\uC5B4 \uC8FC\uC138\uC694");
+      template = raw[at2] ?? {};
+    }
+    let icon = String(template["icon"] ?? "");
     if (imageBytes && imageBytes.byteLength) {
       try {
         icon = await Risuai.saveAsset(imageBytes);
@@ -1131,7 +1140,7 @@
       }
     }
     const id = newPersonaId();
-    raw.push({ name: next.name, personaPrompt: next.prompt, icon, id, note: "", largePortrait: false });
+    raw.push({ note: "", largePortrait: false, ...template, name: next.name, personaPrompt: next.prompt, icon, id });
     await Risuai.setDatabase({ personas: raw });
     const check = await readSlice();
     const after = check["personas"];
@@ -1141,12 +1150,13 @@
     }
     return toPersona(after[at], at, Number(check["selectedPersona"] ?? 0) || 0);
   }
-  var SELECTED_REFUSAL;
+  var SELECTED_REFUSAL, SELECTED_COPY_NOTE;
   var init_persona = __esm({
     "src/persona.ts"() {
       "use strict";
       init_host();
       SELECTED_REFUSAL = "RisuAI\uC5D0\uC11C \uC9C0\uAE08 \uC120\uD0DD\uB41C \uD398\uB974\uC18C\uB098\uB294 \uC5EC\uAE30\uC11C \uACE0\uCE60 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4 \u2014 RisuAI\uAC00 \uC120\uD0DD\uB41C \uD398\uB974\uC18C\uB098\uB97C \uB530\uB85C \uBCF5\uC0AC\uD574 \uB450\uACE0 \uC4F0\uAE30 \uB54C\uBB38\uC5D0, \uACE0\uCCD0\uB3C4 \uD654\uBA74\uC5D0 \uC548 \uBCF4\uC774\uACE0 \uB2E4\uC74C\uC5D0 \uD398\uB974\uC18C\uB098\uB97C \uBC14\uAFC0 \uB54C \uC61B \uB0B4\uC6A9\uC73C\uB85C \uB36E\uC5B4\uC368\uC9D1\uB2C8\uB2E4. RisuAI\uC5D0\uC11C \uB2E4\uB978 \uD398\uB974\uC18C\uB098\uB97C \uC7A0\uAE50 \uC120\uD0DD\uD55C \uB4A4 \uB2E4\uC2DC \uC2DC\uB3C4\uD574 \uC8FC\uC138\uC694.";
+      SELECTED_COPY_NOTE = "RisuAI\uC5D0\uC11C \uC9C0\uAE08 \uC120\uD0DD\uB41C \uD398\uB974\uC18C\uB098\uC785\uB2C8\uB2E4. RisuAI\uAC00 \uC120\uD0DD\uB41C \uD398\uB974\uC18C\uB098\uB97C \uB530\uB85C \uBCF5\uC0AC\uD574 \uB450\uACE0 \uC4F0\uAE30 \uB54C\uBB38\uC5D0 \uC6D0\uBCF8\uC740 \uC5EC\uAE30\uC11C \uACE0\uCCD0 \uC4F8 \uC218 \uC5C6\uC5B4, \uBC18\uC601\uD558\uBA74 \uD3B8\uC9D1 \uB0B4\uC6A9\uC774 \uC0C8 \uD398\uB974\uC18C\uB098(\uC0AC\uBCF8)\uB85C \uC800\uC7A5\uB418\uACE0 \uC6D0\uBCF8\uC740 \uADF8\uB300\uB85C \uB0A8\uC2B5\uB2C8\uB2E4. \uC6D0\uBCF8\uC744 \uACE0\uCE58\uB824\uBA74 RisuAI\uC5D0\uC11C \uB2E4\uB978 \uD398\uB974\uC18C\uB098\uB97C \uACE0\uB978 \uB4A4 \uD328\uB110\uC744 \uB2E4\uC2DC \uC5F4\uC5B4 \uC8FC\uC138\uC694.";
     }
   });
 
@@ -3781,8 +3791,10 @@ name: ${nm}
         }
         /**
          * 반영 for one persona: write its working copy into RisuAI, read it back,
-         * and move the backend baseline. Refused while RisuAI has it selected (see
-         * persona.ts) and when RisuAI's copy moved since the last read.
+         * and move the backend baseline. Refused when RisuAI's copy moved since the
+         * last read. While RisuAI has it selected it cannot be written in place
+         * (persona.ts), so the working copy is saved as a new persona instead
+         * (`copied`), and the original's working copy goes back to RisuAI's.
          */
         async personaWriteBack(key = this.persona?.key ?? "") {
           return foregroundWrite(async (report) => {
@@ -3814,7 +3826,7 @@ name: ${nm}
           const live = (await readPersonas()).personas;
           const p = live.find((x) => row.id ? x.id === row.id : x.index === row.index && x.name === row.base.name);
           if (!p) throw new Error("RisuAI\uC5D0\uC11C \uC774 \uD398\uB974\uC18C\uB098\uB97C \uCC3E\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4 (\uC9C0\uC6CC\uC84C\uC744 \uC218 \uC788\uC2B5\uB2C8\uB2E4). \uCCAB \uD654\uBA74\uC5D0\uC11C \uB2E4\uC2DC \uC77D\uC5B4 \uC8FC\uC138\uC694");
-          if (p.selected) throw new Error(SELECTED_REFUSAL);
+          if (p.selected) return this.personaSaveAsCopy(key, row, p);
           if (p.name !== row.base.name || p.prompt !== row.base.prompt || p.icon !== row.iconKey) {
             throw new Error("RisuAI \uCABD\uC5D0\uC11C \uC774 \uD398\uB974\uC18C\uB098\uAC00 \uBC14\uB00C\uC5C8\uC2B5\uB2C8\uB2E4. \uCCAB \uD654\uBA74\uC5D0\uC11C \uD398\uB974\uC18C\uB098\uB97C \uB2E4\uC2DC \uC77D\uC5B4 \uC8FC\uC138\uC694 (\uD3B8\uC9D1 \uB0B4\uC6A9\uC740 \uC791\uC5C5\uBCF8\uC5D0 \uB0A8\uC544 \uC788\uC2B5\uB2C8\uB2E4)");
           }
@@ -3834,6 +3846,30 @@ name: ${nm}
           this.touchFiles();
           void this.loadPersonas().catch(() => void 0);
           return { written: true, name: saved2.name };
+        }
+        /**
+         * 반영 of the persona RisuAI has selected: its working copy becomes a new
+         * persona (the original's picture, note and portrait setting come along),
+         * the original's working copy goes back to RisuAI's (an automatic snapshot
+         * keeps the edit there too), and the copy is what the persona tab shows next.
+         */
+        async personaSaveAsCopy(key, row, p) {
+          const name = copyName(row.base.name, row.work.name);
+          const bytes = row.work.image ? await this.fileBytes(row.work.image) : null;
+          const made = await createPersona({ name, prompt: row.work.prompt }, bytes, p);
+          try {
+            await transport.post("/persona/reset", { key });
+          } catch (e) {
+            void clientLog("warn", "persona copy: original not reset", { error: String(e).slice(0, 200) });
+          }
+          try {
+            await this.loadPersonas();
+            const copy = this.personas?.find((x) => x.id === made.id);
+            if (copy && this.persona?.key === key) await this.openPersona(copy.key);
+          } catch {
+          }
+          this.touchFiles();
+          return { written: true, name: made.name, copied: true };
         }
         /** The bot's project folder under projects/, and the name it could take (§1-89). */
         async botFolderInfo() {
@@ -4485,7 +4521,15 @@ name: ${nm}
           return await transport.get("/files/read?path=" + encodeURIComponent(path));
         }
         async uploadFile(name, content, base64 = false, dir = "", extract = false) {
-          return await transport.upload("/files/upload", base64 ? { name, base64: content, dir, extract } : { name, text: content, dir });
+          if (!dir && this.editMode === "persona" && this.personaFolder) dir = this.personaFolder;
+          const bot = dir ? void 0 : this.activeCharKey || void 0;
+          return await transport.upload("/files/upload", base64 ? { name, base64: content, dir, extract, bot } : { name, text: content, dir, bot });
+        }
+        /** The project folder being edited: the persona's in persona mode, else
+         *  the bot's (`botFolder` from the files listing; '' before it is known). */
+        projectDir(botFolder) {
+          if (this.editMode === "persona" && this.personaFolder) return this.personaFolder;
+          return botFolder ? `projects/${botFolder}` : "";
         }
         /**
          * A batch of files as one binary body: [u32 header length][JSON header][bytes…].
@@ -4770,7 +4814,7 @@ name: ${nm}
               detail = `\uBCF5\uC81C \uBD07 \u201C${name}\u201D \uC744 \uB9CC\uB4E4\uC5C8\uC2B5\uB2C8\uB2E4. RisuAI \uBAA9\uB85D\uC5D0\uC11C \uD655\uC778\uD574 \uC8FC\uC138\uC694.`;
             } else if (r.host.kind === "host_persona_writeback") {
               const out = await this.personaWriteBack(String(r.host.args?.key || ""));
-              detail = out.written ? `\uD398\uB974\uC18C\uB098 '${out.name}' \uC744(\uB97C) RisuAI\uC5D0 \uBC18\uC601\uD558\uACE0 \uC800\uC7A5\uC744 \uD655\uC778\uD588\uC2B5\uB2C8\uB2E4.` : "\uD398\uB974\uC18C\uB098\uC5D0 \uBC18\uC601\uD560 \uBCC0\uACBD\uC774 \uC5C6\uC5C8\uC2B5\uB2C8\uB2E4.";
+              detail = out.copied ? `\uC120\uD0DD\uB41C \uD398\uB974\uC18C\uB098\uB77C \uC6D0\uBCF8 \uB300\uC2E0 \uC0C8 \uD398\uB974\uC18C\uB098 '${out.name}' (\uC0AC\uBCF8)\uC73C\uB85C RisuAI\uC5D0 \uC800\uC7A5\uD558\uACE0 \uD655\uC778\uD588\uC2B5\uB2C8\uB2E4.` : out.written ? `\uD398\uB974\uC18C\uB098 '${out.name}' \uC744(\uB97C) RisuAI\uC5D0 \uBC18\uC601\uD558\uACE0 \uC800\uC7A5\uC744 \uD655\uC778\uD588\uC2B5\uB2C8\uB2E4.` : "\uD398\uB974\uC18C\uB098\uC5D0 \uBC18\uC601\uD560 \uBCC0\uACBD\uC774 \uC5C6\uC5C8\uC2B5\uB2C8\uB2E4.";
             } else if (r.host.kind === "host_open_tab") {
               const tab = String(r.host.args?.tab || "");
               this.openTabRequest = tab;
@@ -5672,10 +5716,12 @@ name: ${nm}
     const what = s.op === "delete" ? "\uC0AD\uC81C" : s.op === "insert" ? "\uC0BD\uC785" : "\uC218\uC815";
     return `\uD134 ${where} ${what}`.replace(/\s+/g, " ").trim();
   }
-  var onDecided = () => {
-  };
-  function setOnDecided(fn) {
-    onDecided = fn;
+  var decidedListeners = [];
+  function addOnDecided(fn) {
+    decidedListeners.push(fn);
+  }
+  function onDecided() {
+    for (const fn of decidedListeners) fn();
   }
   function openPendingPopover(anchor) {
     const body = el("div", { class: "applypop pendingpop" });
@@ -6617,7 +6663,7 @@ name: ${nm}
       soon();
     });
     pollWhileVisible(() => void refresh3(), POLL_MS2, () => !!state.health);
-    setOnDecided(() => {
+    addOnDecided(() => {
       state.bump();
       soon();
     });
@@ -7462,7 +7508,10 @@ pre.mono {
 .modecard {
   display: flex; align-items: flex-start; gap: 10px; text-align: left; padding: 12px;
   border: 1px solid var(--borderc, #2b323f); border-radius: 8px; background: rgba(128,128,128,.05);
-  color: inherit; cursor: pointer; min-width: 0;
+  color: inherit; cursor: pointer; min-width: 0; overflow: hidden;
+  /* A card is a <button>, and buttons are nowrap: its description ran out of
+     the card instead of wrapping. */
+  white-space: normal;
 }
 .modecard:hover:not(:disabled) { background: rgba(128,128,128,.12); }
 .modecard.open { border-color: #2563eb; background: rgba(37,99,235,.10); }
@@ -7471,6 +7520,8 @@ pre.mono {
 .modetext { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
 .modetitle { font-weight: 700; font-size: 14px; }
 .modesub { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.modesub.why { white-space: normal; }
+.modetext > span { overflow-wrap: anywhere; }
 .modecaret { color: var(--textcolor2, #79839a); }
 .modebody { margin-top: 14px; }
 .loadingrow { cursor: default; }
@@ -9226,6 +9277,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
 
   // src/ui/agent.ts
   var IMG_RE = /\.(png|jpe?g|gif|webp|avif|bmp)$/i;
+  var PROPOSING_TOOL = /^(propose_|stage_|studio_generate$)/;
   function touchInput() {
     try {
       return smallScreen() || window.matchMedia("(pointer: coarse)").matches;
@@ -9653,6 +9705,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
             busy.textContent = "";
             yes.disabled = false;
             no.disabled = false;
+            await this.refreshActions();
           }
         };
         yes.addEventListener("click", () => void decide(true));
@@ -9942,6 +9995,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         }
         if (textTimer === null) textTimer = setTimeout(flushText, 120);
       };
+      let proposingTool = false;
       try {
         for await (const ev of state.agentChat(prompt, abort.signal)) {
           if (this.destroyed) break;
@@ -9994,9 +10048,17 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
             case "tool": {
               const name = String(e.name ?? "?");
               const detail = name === "load_skill" ? skillArg(e.args) : "";
+              if (PROPOSING_TOOL.test(name)) proposingTool = true;
               traceSegment().push(name, detail);
               setThinking(true, (TOOL_GLYPH[name]?.[1] ?? name) + (detail ? `: ${detail}` : "") + " \uC911\uC785\uB2C8\uB2E4\u2026");
               this.scroll();
+              break;
+            }
+            case "toolResult": {
+              if (proposingTool) {
+                proposingTool = false;
+                void this.refreshStaged();
+              }
               break;
             }
             case "artifact": {
@@ -10183,10 +10245,14 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     }
     async refreshStaged() {
       if (this.destroyed) return;
-      await Promise.all([state.refreshChanges(), state.refreshBotChanges()]);
+      const [, staged, acts] = await Promise.all([
+        Promise.all([state.refreshChanges(), state.refreshBotChanges()]),
+        state.stagedEdits().catch(() => null),
+        state.actions().catch(() => null)
+      ]);
       try {
-        this.setStaged(await state.stagedEdits());
-        await this.refreshActions();
+        if (staged) this.setStaged(staged);
+        if (acts) this.setActions(acts);
         await this.refreshOutputs();
       } catch {
       }
@@ -10466,6 +10532,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     panel?.refreshPending();
     state.bump();
   };
+  addOnDecided(() => panel?.refreshPending());
   function toastBusy() {
     let wrap = document.querySelector(".toastwrap");
     if (!wrap) {
@@ -10874,7 +10941,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         el("span", { class: "modeicon", text: icon }),
         el("span", { class: "modetext" }, [
           el("span", { class: "modetitle", text: title }),
-          el("span", { class: "modesub", text: why || sub }),
+          el("span", { class: "modesub" + (why ? " why" : ""), text: why || sub }),
           el("span", { class: "hint", text: desc })
         ]),
         el("span", { class: "modecaret", text: openMode === m ? "\u25BE" : "\u25B8" })
@@ -11190,7 +11257,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     }
     if (!ps.length) list2.appendChild(el("div", { class: "chatitem" }, [el("span", { class: "hint", text: "RisuAI\uC5D0 \uD398\uB974\uC18C\uB098\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4." })]));
     for (const p of ps) list2.appendChild(personaRow(p, mount2));
-    body.appendChild(el("div", { class: "hint", style: { marginTop: "8px" }, text: "\uD3B8\uC9D1\uC740 \uC791\uC5C5\uBCF8\uC5D0 \uC800\uC7A5\uB418\uACE0, \uBC18\uC601\uD574\uC57C RisuAI\uC5D0 \uB4E4\uC5B4\uAC11\uB2C8\uB2E4. RisuAI\uC5D0\uC11C \uC9C0\uAE08 \uC120\uD0DD\uB41C \uD398\uB974\uC18C\uB098\uB3C4 \uD3B8\uC9D1\uD560 \uC218 \uC788\uC9C0\uB9CC \uBC18\uC601\uC740 RisuAI\uC5D0\uC11C \uB2E4\uB978 \uD398\uB974\uC18C\uB098\uB97C \uACE0\uB978 \uB4A4\uC5D0 \uB429\uB2C8\uB2E4 (RisuAI\uAC00 \uC120\uD0DD\uB41C \uD398\uB974\uC18C\uB098\uB97C \uB530\uB85C \uBCF5\uC0AC\uD574 \uB450\uACE0 \uC368\uC11C, \uADF8\uB300\uB85C \uC4F0\uBA74 \uB36E\uC5B4\uC368\uC9D1\uB2C8\uB2E4)." }));
+    body.appendChild(el("div", { class: "hint", style: { marginTop: "8px" }, text: "\uD3B8\uC9D1\uC740 \uC791\uC5C5\uBCF8\uC5D0 \uC800\uC7A5\uB418\uACE0, \uBC18\uC601\uD574\uC57C RisuAI\uC5D0 \uB4E4\uC5B4\uAC11\uB2C8\uB2E4. RisuAI\uC5D0\uC11C \uC9C0\uAE08 \uC120\uD0DD\uB41C \uD398\uB974\uC18C\uB098\uB3C4 \uD3B8\uC9D1\uD560 \uC218 \uC788\uC9C0\uB9CC, \uBC18\uC601\uD558\uBA74 \uC6D0\uBCF8 \uB300\uC2E0 \uC0C8 \uD398\uB974\uC18C\uB098(\uC0AC\uBCF8)\uB85C \uC800\uC7A5\uB429\uB2C8\uB2E4 (RisuAI\uAC00 \uC120\uD0DD\uB41C \uD398\uB974\uC18C\uB098\uB97C \uB530\uB85C \uBCF5\uC0AC\uD574 \uB450\uACE0 \uC368\uC11C, \uADF8\uB300\uB85C \uC4F0\uBA74 \uB36E\uC5B4\uC368\uC9D1\uB2C8\uB2E4)." }));
   }
   function personaRow(p, mount2) {
     const edit = el("button", { class: "ghost tiny", text: "\uD3B8\uC9D1" });
@@ -11201,7 +11268,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         el("div", { text: name || "(\uC774\uB984 \uC5C6\uC74C)" }),
         el("div", { class: "hint clip1", text: (p.work.prompt || "").split("\n")[0].slice(0, 80) || "(\uC124\uBA85 \uC5C6\uC74C)" })
       ]),
-      p.selected ? el("span", { class: "badge", text: "RisuAI \uC120\uD0DD\uB428", title: "RisuAI\uC5D0\uC11C \uC9C0\uAE08 \uC120\uD0DD\uB41C \uD398\uB974\uC18C\uB098 - \uD3B8\uC9D1\uC740 \uB418\uACE0, \uBC18\uC601\uC740 \uB2E4\uB978 \uD398\uB974\uC18C\uB098\uB97C \uACE0\uB978 \uB4A4\uC5D0 \uB429\uB2C8\uB2E4" }) : null,
+      p.selected ? el("span", { class: "badge", text: "RisuAI \uC120\uD0DD\uB428", title: "RisuAI\uC5D0\uC11C \uC9C0\uAE08 \uC120\uD0DD\uB41C \uD398\uB974\uC18C\uB098 - \uD3B8\uC9D1\uC740 \uB418\uACE0, \uBC18\uC601\uD558\uBA74 \uC0C8 \uD398\uB974\uC18C\uB098(\uC0AC\uBCF8)\uB85C \uC800\uC7A5\uB429\uB2C8\uB2E4" }) : null,
       p.isNew ? el("span", { class: "badge", text: "\uC0C8\uB85C \uB9CC\uB4E6", title: "Hina\uC5D0\uC11C \uB9CC\uB4E0 \uD398\uB974\uC18C\uB098 - \uBC18\uC601\uD558\uBA74 RisuAI \uBAA9\uB85D\uC5D0 \uCD94\uAC00\uB429\uB2C8\uB2E4" }) : null,
       p.dirty ? el("span", { class: "badge warn", text: `\uBBF8\uBC18\uC601 ${p.total}` }) : null,
       edit
@@ -12367,8 +12434,11 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
   });
   var filesContext = "";
   var focusBotProject = false;
+  function personaContext() {
+    return state.editMode === "persona" ? state.personaFolder : "";
+  }
   function renderFilesTab(mount2) {
-    const context = JSON.stringify([state.contextRevision, state.activeCharKey]);
+    const context = JSON.stringify([state.contextRevision, state.activeCharKey, personaContext()]);
     if (context !== filesContext) {
       filesContext = context;
       lastListing = null;
@@ -12390,7 +12460,15 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
   }
   var pendingRefreshes = /* @__PURE__ */ new Map();
   function refreshKey() {
-    return JSON.stringify([state.contextRevision, state.filesRev, showInternal, onlyMine, state.activeCharKey, state.openFileRequest]);
+    return JSON.stringify([
+      state.contextRevision,
+      state.filesRev,
+      showInternal,
+      onlyMine,
+      state.activeCharKey,
+      personaContext(),
+      state.openFileRequest
+    ]);
   }
   function refresh() {
     const key = refreshKey();
@@ -12407,9 +12485,9 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       if (key !== refreshKey()) return;
       lastListing = data;
       buildNodes(data);
-      if (focusBotProject && data.botFolder) {
-        const project = `projects/${data.botFolder}`;
-        if (nodes.has(project)) {
+      if (focusBotProject) {
+        const project = state.projectDir(data.botFolder ?? "");
+        if (project && nodes.has(project)) {
           selectedDir = project;
           expandTo(project);
         }
@@ -12422,7 +12500,8 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       const want = state.openFileRequest;
       if (want) {
         state.openFileRequest = null;
-        const dir = want.includes("/") ? want.slice(0, want.lastIndexOf("/")) : want;
+        let dir = want.includes("/") ? want.slice(0, want.lastIndexOf("/")) : want;
+        while (dir.includes("/") && !nodes.has(dir)) dir = dir.slice(0, dir.lastIndexOf("/"));
         if (nodes.has(dir)) {
           selectedDir = dir;
           expandTo(dir);
@@ -12464,7 +12543,8 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     nodes = /* @__PURE__ */ new Map();
     const shown = (data.areas ?? []).filter((a) => showInternal || DEFAULT_AREAS.has(a.area));
     const mine = onlyMine && data.botFolder ? data.botFolder : "";
-    const keep = (area, path) => !mine || !PER_BOT_AREAS.has(area) || path === `${area}/${mine}` || path.startsWith(`${area}/${mine}/`);
+    const persona = onlyMine ? personaContext() : "";
+    const keep = (area, path) => !mine && !persona || !PER_BOT_AREAS.has(area) || !!mine && (path === `${area}/${mine}` || path.startsWith(`${area}/${mine}/`)) || !!persona && (path === persona || path.startsWith(persona + "/"));
     for (const area of shown) {
       const root2 = { path: area.area, name: AREA_LABEL[area.area]?.[0] ?? area.area, area, kids: [], files: [] };
       nodes.set(root2.path, root2);
@@ -12519,8 +12599,10 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
   }
   function uploadTarget() {
     const n = nodes.get(selectedDir);
-    if (n && !n.virtual && USER_AREAS.has(n.area.area)) return n.path;
-    return "projects";
+    const project = state.projectDir(lastListing?.botFolder ?? "");
+    const top = n?.path === "projects" && onlyMine && !!project;
+    if (n && !n.virtual && USER_AREAS.has(n.area.area) && !top) return n.path;
+    return project || "projects";
   }
   function moveTargets() {
     const out = [];
@@ -16571,10 +16653,10 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           return;
         }
         if (!r.newer) {
-          const mismatch = r.current !== "0.15.34";
+          const mismatch = r.current !== "0.15.35";
           const ahead = r.ahead ?? (!!r.latest && r.latest !== r.current);
           say(
-            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.34"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
+            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.35"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
             mismatch || ahead ? "" : "ok"
           );
           return;
@@ -16665,7 +16747,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.15.34",
+            version: "0.15.35",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -17363,7 +17445,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.34"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.35"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -18801,7 +18883,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
             fr.onerror = () => reject(fr.error ?? new Error("read failed"));
             fr.readAsDataURL(file);
           });
-          const up = await state.uploadFile(file.name, b64, true, "uploads");
+          const up = await state.uploadFile(file.name, b64, true);
           await state.replacePortrait(up.path);
           notice8("\uD504\uB85C\uD544 \uC774\uBBF8\uC9C0\uB97C \uC791\uC5C5\uBCF8\uC5D0 \uC62C\uB838\uC2B5\uB2C8\uB2E4. \uBD07 \uBC18\uC601\uC744 \uB204\uB974\uBA74 RisuAI \uC5D0 \uB4F1\uB85D\uB429\uB2C8\uB2E4.", "ok");
           await refreshNow6();
@@ -18970,9 +19052,10 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const row = el("div", { class: "chatitem" + (r.key === state.persona?.key ? " current" : "") }, [
           personaAvatar(r.iconKey, r.work.name || r.name),
           el("span", { class: "grow", text: r.work.name || r.name || "(\uC774\uB984 \uC5C6\uC74C)" }),
-          r.selected ? el("span", { class: "badge", text: "\uC120\uD0DD\uB428", title: "RisuAI\uC5D0\uC11C \uC9C0\uAE08 \uC120\uD0DD\uB41C \uD398\uB974\uC18C\uB098 - \uBC18\uC601\uC740 \uB2E4\uB978 \uD398\uB974\uC18C\uB098\uB97C \uACE0\uB978 \uB4A4\uC5D0 \uB429\uB2C8\uB2E4" }) : null,
+          r.selected ? el("span", { class: "badge", text: "\uC120\uD0DD\uB428", title: "RisuAI\uC5D0\uC11C \uC9C0\uAE08 \uC120\uD0DD\uB41C \uD398\uB974\uC18C\uB098 - \uBC18\uC601\uD558\uBA74 \uC0C8 \uD398\uB974\uC18C\uB098(\uC0AC\uBCF8)\uB85C \uC800\uC7A5\uB429\uB2C8\uB2E4" }) : null,
           r.isNew ? el("span", { class: "badge", text: "\uC0C8\uB85C \uB9CC\uB4E6" }) : null,
-          r.dirty ? el("span", { class: "badge warn", text: `\uBBF8\uBC18\uC601 ${r.total}` }) : null
+          r.dirty ? el("span", { class: "badge warn", text: `\uBBF8\uBC18\uC601 ${r.total}` }) : null,
+          r.risuChanged ? el("span", { class: "badge warn", text: "RisuAI\uB3C4 \uBC14\uB01C", title: "RisuAI \uCABD\uC5D0\uC11C\uB3C4 \uBC14\uB00C\uC5C8\uC2B5\uB2C8\uB2E4 - \uBC18\uC601\uD558\uBA74 \uB36E\uC5B4\uC501\uB2C8\uB2E4" }) : null
         ]);
         row.addEventListener("click", async () => {
           if (r.key === state.persona?.key) return;
@@ -19036,7 +19119,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         picBox.appendChild(workspaceImage(r.work.image, "\uC0C8 \uD504\uB85C\uD544 \uC0AC\uC9C4"));
         picNote.textContent = `\uC0C8 \uC0AC\uC9C4: ${r.work.image.split("/").pop()} (\uBC18\uC601\uD558\uBA74 \uBC14\uB01D\uB2C8\uB2E4)`;
       } else {
-        picBox.appendChild(r.iconPath ? workspaceImage(r.iconPath, "\uD504\uB85C\uD544 \uC0AC\uC9C4") : personaAvatar(r.iconKey, r.work.name, "personabig"));
+        picBox.appendChild(r.iconPath ? workspaceImage(r.iconPath, "\uD504\uB85C\uD544 \uC0AC\uC9C4", { stamp: r.iconKey }) : personaAvatar(r.iconKey, r.work.name, "personabig"));
         picNote.textContent = r.iconKey ? "" : "\uD504\uB85C\uD544 \uC0AC\uC9C4\uC774 \uC5C6\uC2B5\uB2C8\uB2E4";
       }
     };
@@ -19101,12 +19184,18 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     undoPic.addEventListener("click", () => {
       void state.editPersona({ image: "" }).catch((e) => shellNotice(msg23(e), "err"));
     });
-    const lockNote = el("div", { class: "notice", style: { display: "none", marginBottom: "10px" }, text: SELECTED_REFUSAL });
+    const lockNote = el("div", { class: "notice", style: { display: "none", marginBottom: "10px" }, text: SELECTED_COPY_NOTE });
+    const driftNote = el("div", {
+      class: "notice warn",
+      style: { display: "none", marginBottom: "10px" },
+      text: "\uC791\uC5C5\uBCF8\uC5D0 \uBBF8\uBC18\uC601 \uBCC0\uACBD\uC774 \uC788\uB294 \uB3D9\uC548 RisuAI \uCABD\uC5D0\uC11C\uB3C4 \uC774 \uD398\uB974\uC18C\uB098\uAC00 \uBC14\uB00C\uC5C8\uC2B5\uB2C8\uB2E4. \uBC18\uC601\uD558\uBA74 RisuAI \uCABD \uBCC0\uACBD\uC744 \uB36E\uC5B4\uC501\uB2C8\uB2E4. RisuAI \uBC84\uC804\uC740 \u{1F558} \uBC84\uC804\uC758 \uC790\uB3D9 \uBC31\uC5C5 \u201CRisuAI \uCABD \uBCC0\uACBD\u201D \uC73C\uB85C \uB0A8\uACA8 \uB450\uC5C8\uACE0, \uBCC0\uACBD \uCDE8\uC18C\uB97C \uB204\uB974\uBA74 RisuAI \uBC84\uC804\uC73C\uB85C \uB3CC\uC544\uAC11\uB2C8\uB2E4."
+    });
     const openFolder2 = el("button", { class: "ghost tiny", text: "\uD30C\uC77C \uD0ED\uC5D0\uC11C \uC5F4\uAE30" });
     openFolder2.addEventListener("click", () => state.requestOpenFile(state.personaFolder + "/"));
     const folderLine = el("span", { class: "hint grow" });
     pane.centre.appendChild(el("div", { class: "pad personaedit" }, [
       lockNote,
+      driftNote,
       el("div", { class: "personagrid" }, [
         el("div", { class: "personaleft" }, [
           picBox,
@@ -19131,9 +19220,10 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       ])
     ]));
     const applyBadge3 = el("span", { class: "badge warn applybadge", style: { display: "none" } });
+    const applyLabel = el("span", { class: "tool-label", text: "\uBC18\uC601" });
     const applyBtn3 = el("button", { class: "tool", dataset: { tool: "persona-apply" }, title: "\uC774 \uD398\uB974\uC18C\uB098\uC758 \uC791\uC5C5\uBCF8\uC744 RisuAI\uC5D0 \uBC18\uC601\uD569\uB2C8\uB2E4" }, [
       el("span", { class: "glyph", text: TOOL.apply }),
-      el("span", { class: "tool-label", text: "\uBC18\uC601" }),
+      applyLabel,
       applyBadge3
     ]);
     applyBtn3.addEventListener("click", async () => {
@@ -19141,7 +19231,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       applyBtn3.disabled = true;
       try {
         const r = await state.personaWriteBack();
-        shellNotice(r.written ? `\uD398\uB974\uC18C\uB098 '${r.name}' \uC744(\uB97C) RisuAI\uC5D0 \uBC18\uC601\uD558\uACE0 \uC800\uC7A5\uC744 \uD655\uC778\uD588\uC2B5\uB2C8\uB2E4.` : "\uBC18\uC601\uD560 \uBCC0\uACBD\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.", "ok");
+        shellNotice(r.copied ? `\uC120\uD0DD\uB41C \uD398\uB974\uC18C\uB098\uB77C \uC0C8 \uD398\uB974\uC18C\uB098 '${r.name}' (\uC0AC\uBCF8)\uC73C\uB85C RisuAI\uC5D0 \uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4. \uC6D0\uBCF8\uC740 \uADF8\uB300\uB85C\uC785\uB2C8\uB2E4.` : r.written ? `\uD398\uB974\uC18C\uB098 '${r.name}' \uC744(\uB97C) RisuAI\uC5D0 \uBC18\uC601\uD558\uACE0 \uC800\uC7A5\uC744 \uD655\uC778\uD588\uC2B5\uB2C8\uB2E4.` : "\uBC18\uC601\uD560 \uBCC0\uACBD\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.", "ok");
       } catch (e) {
         shellNotice("\uBC18\uC601\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg23(e), "err");
       } finally {
@@ -19188,6 +19278,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       drawPic(r);
       undoPic.style.display = r.work.image ? "" : "none";
       lockNote.style.display = r.selected ? "" : "none";
+      driftNote.style.display = r.risuChanged ? "" : "none";
       folderLine.textContent = `\uD504\uB85C\uC81D\uD2B8 \uD3F4\uB354: ${r.folder}`;
       const parts = [];
       if (r.work.name !== r.base.name) parts.push("\uC774\uB984");
@@ -19196,8 +19287,9 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       summary.textContent = parts.length ? parts.join(" \xB7 ") + " \uBCC0\uACBD" : "\uBCC0\uACBD \uC5C6\uC74C";
       applyBadge3.textContent = String(r.total);
       applyBadge3.style.display = r.total ? "" : "none";
-      applyBtn3.classList.toggle("dimmed", r.selected);
-      applyBtn3.title = r.selected ? SELECTED_REFUSAL : "\uC774 \uD398\uB974\uC18C\uB098\uC758 \uC791\uC5C5\uBCF8\uC744 RisuAI\uC5D0 \uBC18\uC601\uD569\uB2C8\uB2E4";
+      const asCopy = r.selected && !r.isNew;
+      applyLabel.textContent = asCopy ? "\uC0AC\uBCF8\uC73C\uB85C \uBC18\uC601" : "\uBC18\uC601";
+      applyBtn3.title = asCopy ? `\uC120\uD0DD\uB41C \uD398\uB974\uC18C\uB098\uB77C \uC0C8 \uD398\uB974\uC18C\uB098 '${copyName(r.base.name, r.work.name)}' \uB85C \uC800\uC7A5\uD569\uB2C8\uB2E4 (\uC6D0\uBCF8\uC740 \uADF8\uB300\uB85C)` : "\uC774 \uD398\uB974\uC18C\uB098\uC758 \uC791\uC5C5\uBCF8\uC744 RisuAI\uC5D0 \uBC18\uC601\uD569\uB2C8\uB2E4";
       discard.style.display = r.dirty ? "" : "none";
       discard.title = r.isNew ? "\uC544\uC9C1 RisuAI\uC5D0 \uC5C6\uB294 \uC0C8 \uD398\uB974\uC18C\uB098\uB97C \uC9C0\uC6C1\uB2C8\uB2E4 (\uD3F4\uB354\uB294 \uB0A8\uC2B5\uB2C8\uB2E4)" : "\uC774 \uD398\uB974\uC18C\uB098\uC758 \uBBF8\uBC18\uC601 \uBCC0\uACBD\uC744 \uBC84\uB9AC\uACE0 RisuAI \uC0C1\uD0DC\uB85C \uB418\uB3CC\uB9BD\uB2C8\uB2E4";
       applyBtn3.title = r.isNew ? "\uC774 \uC0C8 \uD398\uB974\uC18C\uB098\uB97C RisuAI \uD398\uB974\uC18C\uB098 \uBAA9\uB85D\uC5D0 \uCD94\uAC00\uD569\uB2C8\uB2E4" : applyBtn3.title;
@@ -25064,14 +25156,14 @@ ${negative.value.trim()}
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.34"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.35"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
       healthEl.title = transport.versionGate;
     } else {
       healthEl.appendChild(el("span", { class: "hint", text: `\uBC31\uC5D4\uB4DC v${h.version}` }));
-      const behind = backendBehind("0.15.34", h.version, h.installKind);
+      const behind = backendBehind("0.15.35", h.version, h.installKind);
       if (behind) {
         const b = el("button", { class: "ghost tiny behindchip", text: "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8 \uD544\uC694", title: behind });
         b.addEventListener("click", () => {
@@ -25165,7 +25257,7 @@ ${negative.value.trim()}
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.15.34" }),
+        el("span", { class: "dim", text: "v0.15.35" }),
         healthEl,
         el("span", { class: "spacer" }),
         // 승인 / 반영 for the whole bot, from every tab (§1-76).
@@ -25286,6 +25378,7 @@ ${negative.value.trim()}
     setBootPhase("");
     refreshStatus();
     renderActive();
+    if (connected && state.personas !== null) void state.loadPersonas().catch(() => void 0);
     if (state.workspace) void suggestFolderRename();
     const hostMs = t2 - t1;
     if (connected) {
@@ -25510,6 +25603,6 @@ ${negative.value.trim()}
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.15.34"} loaded`);
+    console.log(`[risu-hina] v${"0.15.35"} loaded`);
   })();
 })();
