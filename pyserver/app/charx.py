@@ -101,6 +101,16 @@ def working_character(ck: str) -> dict:
             holder[inner] = f["body"]
             char[top] = holder
             char[f["field"]] = f["body"]
+        elif f["field"] in cardmod.BOOL_FIELDS:
+            # Typed rows (§1-66) hold encoded text: "0" is False, not a
+            # non-empty string (an exported charx said lowLevelAccess: true).
+            char[f["field"]] = f["body"] == "1"
+        elif f["field"] == cardmod.LORE_SETTINGS_FIELD:
+            decoded = cardmod.decode_lore_settings(f["body"])
+            if decoded is None:
+                char.pop(f["field"], None)
+            else:
+                char[f["field"]] = decoded
         else:
             char[f["field"]] = f["body"]
     char[cardmod.LIST_FIELD] = [b for _s, b in sorted(greetings)]

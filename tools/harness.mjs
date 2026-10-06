@@ -157,8 +157,22 @@ const pageHtml = (backendUrl) => `<!doctype html>
     { name: '탐정', personaPrompt: '사립 탐정이다. 비 오는 밤을 좋아한다.', icon: '', id: 'p-det' },
     { name: '마법사', personaPrompt: '견습 마법사.', icon: 'assets/wiz.png', id: 'p-wiz' },
   ];
+  // RisuAI modules (§1-95): an asset module, a prompt module, a status window, an MCP one.
+  const modules = [
+    { id: 'mod-assets', name: 'Parma 에셋봇', description: '에셋 모듈', assets: [['knight_smile', 'assets/k1.png', 'png'], ['knight_angry', 'assets/k2.png', 'png']],
+      lorebook: [], regex: [{ comment: '이미지 치환', in: '<img=(.+?)>', out: '{{asset::$1}}', type: 'editdisplay' }], trigger: [],
+      customModuleToggle: 'img_on=이미지 표시' },
+    { id: 'mod-prompt', name: '서리 프롬프트 보조', description: '프롬프트 모듈 - 정규식과 토글', lorebook: [],
+      regex: Array.from({ length: 4 }, (_, i) => ({ comment: '정리 ' + i, in: 'x' + i, out: 'y' + i, type: 'editoutput' })),
+      trigger: [], customModuleToggle: ['nsfw=수위=select=낮음,보통,높음', 'len=길이 제한=text'].join(String.fromCharCode(10)), lowLevelAccess: true },
+    { id: 'mod-status', name: '범용 상태창', description: '상태창·인벤토리', namespace: 'status',
+      lorebook: [{ key: '상태', secondkey: '', insertorder: 100, comment: '상태 규칙', content: '상태창 규칙', mode: 'normal', alwaysActive: true, selective: false }],
+      regex: [], trigger: [{ comment: '상태 갱신', type: 'output', conditions: [], effect: [] }], backgroundEmbedding: '<style>.st{}</style>' },
+    { id: 'mod-mcp', name: '웹 검색 MCP', description: '', mcp: { url: 'http://localhost:1' } },
+  ];
+  liveChar.modules = ['mod-assets'];
   const log = (m) => { document.getElementById('hostlog').textContent = m; console.log('[host]', m); };
-  window.__host = { calls, registered, liveChar, personas };
+  window.__host = { calls, registered, liveChar, personas, modules };
   window.Risuai = {
     async getArgument() { return ''; },
     async setArgument() {},
@@ -176,9 +190,14 @@ const pageHtml = (backendUrl) => `<!doctype html>
       if (!keys || keys === 'all' || keys.includes('characters')) out.characters = [structuredClone(liveChar)];
       if (!keys || keys === 'all' || keys.includes('personas')) out.personas = structuredClone(personas);
       if (!keys || keys === 'all' || keys.includes('selectedPersona')) out.selectedPersona = 0;
+      if (!keys || keys === 'all' || keys.includes('modules')) out.modules = structuredClone(modules);
+      if (!keys || keys === 'all' || keys.includes('enabledModules')) out.enabledModules = ['mod-prompt'];
       return out;
     },
-    async setDatabase(patch) { if (patch.personas) personas.splice(0, personas.length, ...structuredClone(patch.personas)); },
+    async setDatabase(patch) {
+      if (patch.personas) personas.splice(0, personas.length, ...structuredClone(patch.personas));
+      if (patch.modules) modules.splice(0, modules.length, ...structuredClone(patch.modules));
+    },
     async checkCharOrder() {},
     async getChatFromIndex(ci, chi) { return structuredClone(liveChar.chats[chi] ?? null); },
     async setChatToIndex(ci, chi, chat) { if (liveChar.chats[chi]) liveChar.chats[chi] = structuredClone(chat); },

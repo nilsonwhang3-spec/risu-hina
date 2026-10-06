@@ -142,6 +142,14 @@ function makeHost(backendUrl, token) {
     { name: '탐정', personaPrompt: '사립 탐정이다.', icon: '', id: 'p-det' },
   ];
   let selectedPersona = 0;
+  // RisuAI modules (§1-95): db.modules, the first turned on for the bot.
+  const modules = [
+    { id: 'mod-a', name: '에셋 모듈', description: '에셋', assets: [], lorebook: [], trigger: [],
+      regex: [{ comment: '치환', in: 'a', out: 'b', type: 'editdisplay' }], customModuleToggle: 'on=켜기' },
+    { id: 'mod-b', name: '상태창', description: '범용', regex: [], trigger: [],
+      lorebook: [{ key: '상태', secondkey: '', insertorder: 100, comment: '상태', content: '규칙', mode: 'normal', alwaysActive: true, selective: false }] },
+  ];
+  liveChar.modules = ['mod-a'];
 
   return {
     liveChar,
@@ -199,12 +207,15 @@ function makeHost(backendUrl, token) {
         if (!keys || keys === 'all' || keys.includes('characters')) out.characters = [structuredClone(liveChar)];
         if (!keys || keys === 'all' || keys.includes('personas')) out.personas = structuredClone(personas);
         if (!keys || keys === 'all' || keys.includes('selectedPersona')) out.selectedPersona = selectedPersona;
+        if (!keys || keys === 'all' || keys.includes('modules')) out.modules = structuredClone(modules);
+        if (!keys || keys === 'all' || keys.includes('enabledModules')) out.enabledModules = [];
         return out;
       },
       async setDatabase(patch) {
         calls.push('setDatabase');
         dbWrites.push(structuredClone(patch));
         if (patch.personas) personas.splice(0, personas.length, ...structuredClone(patch.personas));
+        if (patch.modules) modules.splice(0, modules.length, ...structuredClone(patch.modules));
       },
       async checkCharOrder() { calls.push('checkCharOrder'); },
       async getChatFromIndex(ci, chi) { calls.push('getChatFromIndex'); return structuredClone(liveChar.chats[chi] ?? null); },
@@ -240,6 +251,7 @@ function makeHost(backendUrl, token) {
     },
     selectNone() { selectedChar = -1; },
     personas,
+    modules,
     selectPersona(i) { selectedPersona = i; },
   };
 }
@@ -390,7 +402,8 @@ check('shell rendered', !!document.querySelector('.wrap'));
 // Content views in the tab bar; settings is a header verb, not a view. The
 // middle of the bar is modal: chat tabs and bot tabs share the slot and only
 // one set is visible at a time.
-check('thirteen content tabs present', document.querySelectorAll('.tab').length === 13,
+// + the tab row's ＋ 모듈 (§1-95).
+check('fourteen tabs present (13 content + ＋ 모듈)', document.querySelectorAll('.tab').length === 14,
       [...document.querySelectorAll('.tab')].map((t) => t.textContent).join(','));
 check('the workspace files tab is set apart', !!document.querySelector('.tabs .tabsep')
       && document.querySelector('.tabs .tabsep')?.nextElementSibling?.id === 'tab-files');
@@ -425,7 +438,7 @@ console.log('\ntest_landing');
   clickById(document, 'tab-chats');
   await settle(400);
   const cards = [...document.querySelectorAll('.modecard')].map((c) => c.getAttribute('data-mode'));
-  check('three mode cards', cards.join(',') === 'bot,chat,persona', cards.join(','));
+  check('four mode cards', cards.join(',') === 'bot,chat,persona,module', cards.join(','));
   check('none unfolded at first', !document.querySelector('.modecard.open') && !document.querySelector('.modebody'));
   check('the open has finished: no blocking boot box', !document.querySelector('.bootbox:not(.slim)'));
   check('the mode cards are usable', [...document.querySelectorAll('.modecard')].every((c) => !c.disabled));
@@ -3803,6 +3816,60 @@ console.log('\ntest_persona_edit');
   await settle(400);
   check('선택 from the persona tab lands on the folded dashboard',
         document.getElementById('tab-chats')?.classList.contains('active') && !document.querySelector('.modecard.open'));
+}
+
+console.log('\ntest_modules');
+{
+  // 모듈 편집 (§1-95): a RisuAI module is edited with the card tabs and
+  // written back into db.modules; the bot remembers the modules opened with it.
+  const auth = { Authorization: 'Bearer plugin-smoke-token' };
+  // Earlier tests replace the character whole; RisuAI keeps its modules list.
+  host.liveChar.modules = ['mod-a'];
+  await openLanding(document, 'module');
+  await settle(800);
+  const rows = [...document.querySelectorAll('.modlist .chatitem')];
+  check('the modules are listed', rows.length === 2, String(rows.length));
+  rows.find((r) => /상태창/.test(r.textContent || ''))?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(1500);
+  const tabs = () => [...document.querySelectorAll('.tabs .tab')].filter((b) => b.style.display !== 'none' && !b.closest('[style*="display: none"]')).map((b) => b.textContent).join('|');
+  check('a module opens as a tab group with its own tabs', /◫ 상태창/.test(tabs()) && /정보\|로어북\|Regex\|트리거\|에셋/.test(tabs()), tabs());
+  check('the card tabs show the module', /상태/.test(document.querySelector('.panel.active')?.textContent || ''));
+  const mk = (await (await fetch(backend.url + '/modules', { headers: auth })).json()).modules?.find((m) => m.id === 'mod-b')?.key || '';
+  const fields = (await (await fetch(backend.url + '/card?charKey=' + mk, { headers: auth })).json()).fields || [];
+  const tog = fields.find((f) => f.field === 'customModuleToggle');
+  check('module rows are the module scalars', !!tog && !fields.some((f) => f.field === 'desc'), fields.map((f) => f.field).join(','));
+  await fetch(backend.url + '/card/field', { method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ charKey: mk, id: tog.id, body: 'hud=HUD 표시' }) });
+  document.querySelector('.tool[data-tool="card-apply"]')?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(1000);
+  const go = [...document.querySelectorAll('.applypop button')].find((b) => b.textContent === 'RisuAI 모듈에 반영');
+  check('the bar offers 반영 to the module', !!go);
+  go?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(1800);
+  check('반영 wrote the module into db.modules', host.modules[1].customModuleToggle === 'hud=HUD 표시'
+        && host.modules[1].lorebook.length === 1, JSON.stringify(host.modules[1]).slice(0, 200));
+  // Opened next to the bot: + in 봇 편집, remembered for the bot.
+  await enterBot(document);
+  await settle(1200);
+  check('봇 편집 starts on the bot', document.getElementById('tab-meta')?.classList.contains('active') && !/◫/.test(tabs()), tabs());
+  document.querySelector('.modadd')?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(800);
+  const prow = [...document.querySelectorAll('.modrow')].find((r) => /에셋 모듈/.test(r.textContent || ''));
+  check('the picker marks the module linked to the bot', /연결됨/.test(prow?.textContent || ''), prow?.textContent);
+  const box = prow?.querySelector('input');
+  if (box) { box.checked = true; box.dispatchEvent(new window.Event('change', { bubbles: true })); }
+  document.querySelector('.modpicker .primary')?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(1500);
+  check('the module joins the bot tabs', /◫ 에셋 모듈/.test(tabs()), tabs());
+  clickById(document, 'tab-meta');
+  await settle(400);
+  check('the bot tab points the card tabs back at the bot', !/◫/.test(document.querySelector('.status')?.textContent || ''),
+        document.querySelector('.status')?.textContent);
+  await openLanding(document, 'persona');
+  await settle(300);
+  await enterBot(document);
+  await settle(1500);
+  check('the bot reopens with its modules', /◫ 에셋 모듈/.test(tabs()), tabs());
 }
 
 console.log('\ntest_no_character_selected');

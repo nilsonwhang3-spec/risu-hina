@@ -7,6 +7,10 @@
  * write requires the bot to be the one RisuAI has selected, because mainline
  * silently drops writes to any other character.
  *
+ * While a RisuAI module is the card tabs' target (§1-95) the same bar acts on
+ * the module: 반영 writes db.modules (no live bot needed), the charx button
+ * becomes 내보내기 (.charx / .risum), and 새 봇으로 저장 is not offered.
+ *
  * The asset gate: 반영 stays disabled until the background importer
  * (assets.ts, started by state.upload) reports the bot's assets in the
  * store - `state.assetGateReason` is the importer's word on that. A card
@@ -19,6 +23,7 @@ import { shellNotice, openSnapshotName, snapshotCleanup, applyHelp } from './cha
 import { clientLog } from '../transport';
 import { openConflicts } from './conflicts';
 import { syncPendingChip } from './pendingpop';
+import { MODULE_CACHE_NOTE } from '../modules';
 
 let bar: HTMLElement | null = null;
 let applyBtn: HTMLButtonElement | null = null;
@@ -27,6 +32,8 @@ let applyBadge: HTMLElement | null = null;
 let summaryEl: HTMLElement | null = null;
 
 function applyBlockReason(): string | null {
+  // A module is written into RisuAI's module list, whichever bot is open.
+  if (state.cardTarget) return null;
   if (!state.isLiveBot) {
     return 'RisuAI에서 이 봇을 선택해야 반영할 수 있습니다';
   }
@@ -81,7 +88,10 @@ export function buildBotBar(): HTMLElement {
     el('span', { class: 'glyph', text: TOOL.export }),
     el('span', { class: 'tool-label', text: 'charx' }),
   ]) as HTMLButtonElement;
-  charxBtn.addEventListener('click', () => { if (charxBtn) openCharx(charxBtn); });
+  charxBtn.addEventListener('click', () => {
+    if (!charxBtn) return;
+    if (state.cardTarget) openModuleExport(charxBtn); else openCharx(charxBtn);
+  });
 
   // The chat bar's 변경 취소, for the card. See there for why it is a bar
   // verb and not a popover row.
@@ -111,7 +121,61 @@ let charxBtn: HTMLButtonElement | null = null;
 
 /** charx waits for the importer: a zip missing its images is not the card. */
 function charxBlockReason(): string | null {
+  if (state.cardTarget) {
+    const p = state.targetSync;
+    return p && p.phase !== 'done' && p.phase !== 'error' && p.phase !== 'cancelled' && p.phase !== 'unsupported'
+      ? '모듈 에셋을 받는 중입니다 — 끝나면 내보낼 수 있습니다' : null;
+  }
   return state.assetGateReason;
+}
+
+// --- module export (popover, §1-95) -----------------------------------------------
+
+function openModuleExport(anchor: HTMLElement): void {
+  const mod = state.targetModule;
+  const out = el('div', { class: 'outbox' });
+  const body = el('div', { class: 'applypop' });
+  const close = popover(anchor, body);
+  const blocked = charxBlockReason();
+  if (blocked) body.appendChild(el('div', { class: 'notice', text: blocked }));
+  const nameInput = el('input', { value: mod?.name || 'module', placeholder: '파일 이름' }) as HTMLInputElement;
+  const run = async (format: 'charx' | 'risum', allowMissing: boolean, btn: HTMLButtonElement): Promise<void> => {
+    btn.disabled = true;
+    clear(out);
+    out.appendChild(el('div', { class: 'hint', text: '만드는 중입니다…' }));
+    try {
+      const r = await state.exportModule(format, allowMissing, nameInput.value.trim());
+      clear(out);
+      shellNotice(`${r.file} · ${(r.size / 1048576).toFixed(2)}MB · 에셋 ${r.assets}개`
+        + (r.dropped ? ` (${r.dropped}개 제외)` : '') + ' — 워크스페이스 파일 탭의 out/ 에서 내 PC에 저장할 수 있습니다.', 'ok');
+      close();
+    } catch (e) {
+      clear(out);
+      const missing = (e as { body?: { missing?: { name: string }[] } }).body?.missing;
+      if (Array.isArray(missing) && missing.length) {
+        out.appendChild(el('div', { class: 'notice err', text:
+          `에셋 ${missing.length}개가 스토어에 없어 만들지 않았습니다: ` + missing.slice(0, 6).map((m) => m.name).join(', ') }));
+        const anyway = el('button', { class: 'ghost tiny', text: '빠진 에셋 빼고 만들기' }) as HTMLButtonElement;
+        anyway.addEventListener('click', () => { void run(format, true, anyway); });
+        out.appendChild(anyway);
+      } else {
+        out.appendChild(el('div', { class: 'notice err', text: '내보내지 못했습니다: ' + msg(e) }));
+      }
+    } finally {
+      btn.disabled = false;
+    }
+  };
+  const charx = el('button', { class: 'primary', text: '.charx 로 (권장)' }) as HTMLButtonElement;
+  const risum = el('button', { text: '.risum 으로' }) as HTMLButtonElement;
+  charx.disabled = risum.disabled = !!blocked;
+  charx.addEventListener('click', () => { void run('charx', false, charx); });
+  risum.addEventListener('click', () => { void run('risum', false, risum); });
+  body.appendChild(el('div', { class: 'hint', text:
+    '작업본 모듈(반영하지 않은 편집 포함)과 스토어의 에셋으로 파일을 만듭니다. .charx 는 RisuAI 최신판이 권하는 형식이고 '
+    + '(에셋 모듈은 보통 “○○ 에셋봇” 같은 이름의 charx 로 배포합니다), .risum 은 예전 형식입니다(아이템·프롬프트 모듈에서 아직 흔합니다).' }));
+  body.appendChild(el('div', { class: 'row' }, [nameInput]));
+  body.appendChild(el('div', { class: 'row' }, [charx, risum]));
+  body.appendChild(out);
 }
 
 // --- charx (popover) -----------------------------------------------------------
@@ -172,7 +236,8 @@ export function refreshBotBar(): void {
   if (!bar || !summaryEl || !applyBadge || !applyBtn) return;
   const c = state.botChanges;
   const parts = describe(c);
-  summaryEl.textContent = parts.length ? parts.join(' · ') : (state.botKey ? '변경 없음' : '');
+  summaryEl.textContent = (state.targetModule ? `◫ ${state.targetModule.name}: ` : '')
+    + (parts.length ? parts.join(' · ') : (state.botKey ? '변경 없음' : ''));
   syncPendingChip(summaryEl, c?.actions || 0);
   const total = c?.total ?? 0;
   applyBadge.textContent = String(total);
@@ -183,9 +248,17 @@ export function refreshBotBar(): void {
   if (charxBtn) {
     const cb = charxBlockReason();
     charxBtn.classList.toggle('dimmed', !!cb);
-    charxBtn.title = cb ? cb : '작업본 카드와 스토어의 에셋으로 charx 파일을 만듭니다';
+    const label = charxBtn.querySelector('.tool-label');
+    if (label) label.textContent = state.cardTarget ? '내보내기' : 'charx';
+    charxBtn.title = cb ? cb : state.cardTarget
+      ? '작업본 모듈을 .charx / .risum 파일로 만듭니다'
+      : '작업본 카드와 스토어의 에셋으로 charx 파일을 만듭니다';
   }
-  applyBtn.title = blocked
+  const mod = state.targetModule;
+  summaryEl.title = mod ? `모듈 '${mod.name}' 에서 아직 RisuAI에 쓰지 않은 변경` : '이 봇의 카드에서 아직 RisuAI에 쓰지 않은 변경';
+  applyBtn.title = mod
+    ? `모듈 '${mod.name}' 을(를) RisuAI 모듈 목록에 반영`
+    : blocked
     ? blocked + ' (새 봇으로 저장은 눌러서 쓸 수 있습니다)'
     : '카드를 RisuAI에 반영 · 새 봇으로 저장';
 }
@@ -234,6 +307,8 @@ async function openApply(anchor: HTMLElement): Promise<void> {
   }
 
   const lines = describe(state.botChanges);
+  const mod = state.targetModule;
+  if (mod) body.appendChild(el('div', { class: 'sectiontitle', text: `◫ 모듈 '${mod.name}'` }));
   body.appendChild(el('div', { class: 'hint', text: lines.length ? lines.join(' · ') : '반영할 변경이 없습니다.' }));
   const blocked = applyBlockReason();
   if (blocked) body.appendChild(el('div', { class: 'notice', text: blocked }));
@@ -253,7 +328,7 @@ async function openApply(anchor: HTMLElement): Promise<void> {
     ]));
   }
 
-  const apply = el('button', { class: 'primary', text: 'RisuAI에 반영' }) as HTMLButtonElement;
+  const apply = el('button', { class: 'primary', text: mod ? 'RisuAI 모듈에 반영' : 'RisuAI에 반영' }) as HTMLButtonElement;
   apply.disabled = !!blocked || conflicts > 0;
   apply.addEventListener('click', async () => {
     apply.disabled = true;
@@ -271,7 +346,9 @@ async function openApply(anchor: HTMLElement): Promise<void> {
         void clientLog('error', 'cardWriteBack unverified', { drift: r.drift ?? '' });
         shellNotice(m, 'err');
       } else {
-        shellNotice('카드를 RisuAI에 반영하고 다시 읽었습니다.', 'ok');
+        shellNotice(mod
+          ? `모듈 '${mod.name}' 을(를) RisuAI에 반영하고 다시 읽었습니다. ${MODULE_CACHE_NOTE}`
+          : '카드를 RisuAI에 반영하고 다시 읽었습니다.', 'ok');
         close();
       }
     } catch (e) {
@@ -328,6 +405,27 @@ async function openApply(anchor: HTMLElement): Promise<void> {
 
   body.appendChild(el('div', { class: 'row' }, [apply]));
   body.appendChild(out);
+  if (mod) {
+    // A module: no backup bot. RisuAI-side changes can be pulled in first.
+    const reread = el('button', { class: 'ghost tiny', text: 'RisuAI 쪽 다시 읽기 (병합)' }) as HTMLButtonElement;
+    reread.title = 'RisuAI에서 이 모듈을 다시 읽어 작업본에 병합합니다. 양쪽에서 바뀐 항목은 충돌로 표시됩니다';
+    reread.addEventListener('click', async () => {
+      reread.disabled = true;
+      try {
+        const m = await state.rereadModule(mod.key);
+        const n = m ? Object.values(m).reduce((a, b) => a + b, 0) : 0;
+        shellNotice(n ? `RisuAI 쪽 변경을 받았습니다 (${Object.entries(m!).map(([k, v]) => `${k} ${v}`).join(' · ')}).` : 'RisuAI 쪽에서 바뀐 것이 없습니다.', 'ok');
+        close();
+      } catch (e) {
+        out.textContent = '다시 읽지 못했습니다: ' + msg(e);
+        reread.disabled = false;
+      }
+    });
+    body.appendChild(el('div', { class: 'row', style: { marginTop: '6px' } }, [reread]));
+    body.appendChild(el('div', { class: 'hint', text:
+      '이름·설명·토글·로어북·Regex·트리거·에셋이 RisuAI 모듈 목록의 이 모듈에 한 번에 쓰입니다. ' + MODULE_CACHE_NOTE }));
+    return;
+  }
   body.appendChild(el('div', {
     class: 'hint',
     text: '메타·인사말·봇 로어북·Regex·트리거가 한 번에 쓰입니다. 챗은 절대 건드리지 않습니다.',

@@ -57,7 +57,8 @@ function notice(text: string, kind: NoticeKind = ''): void {
 
 export const renderAssetsTab = makeTab({
   gate: 'bot',
-  keys: () => [state.epoch, state.botKey, state.assetSync?.finishedAt ?? 0, syncBusy(state.assetSync)],
+  // targetSync: the bot's import, or the target module's (§1-95).
+  keys: () => [state.epoch, state.botKey, state.targetSync?.finishedAt ?? 0, syncBusy(state.targetSync)],
   search: {
     placeholder: '에셋 찾기',
     get: () => filterText,
@@ -94,7 +95,8 @@ async function refreshNow(): Promise<void> {
   const byKey = new Map(store.map((i) => [i.key, i]));
   const out: Cell[] = [];
   const portrait = store.find((i) => i.field === 'image') ?? null;
-  const image = String(imageRow?.body || state.character?.image || '');
+  // A module's icon is its own row; the bot's portrait is no fallback for it.
+  const image = String(imageRow?.body || (state.cardTarget ? '' : state.character?.image) || '');
   if (image) {
     out.push({
       row: null, field: 'image', name: '프로필', key: image, ext: image.split('.').pop() || 'png',
@@ -120,13 +122,13 @@ async function refreshNow(): Promise<void> {
 // --- side: totals, sync state, tools ----------------------------------------------
 
 function editable(): boolean {
-  return !syncBusy(state.assetSync);
+  return !syncBusy(state.targetSync);
 }
 
 function drawSide(): void {
   if (!sideMount) return;
   clear(sideMount);
-  const p = state.assetSync;
+  const p = state.targetSync;
   const present = cells.filter((c) => c.state === 'present').length;
   const bytes = cells.reduce((n, c) => n + (c.size || 0), 0);
   const counts = new Map<string, number>();
@@ -141,7 +143,7 @@ function drawSide(): void {
 
   const again = el('button', { class: 'ghost tiny', text: syncBusy(p) ? '동기화 중…' : '다시 동기화' }) as HTMLButtonElement;
   again.disabled = syncBusy(p);
-  again.addEventListener('click', () => { state.syncAssets(true); });
+  again.addEventListener('click', () => { void state.resyncTargetAssets(); });
   sideMount.appendChild(el('div', { class: 'hint', style: { padding: '0 8px 6px' }, text: p ? describeSync(p) : `스토어 ${present}/${cells.length}` }));
   sideMount.appendChild(el('div', { style: { padding: '0 6px' } }, [again]));
 

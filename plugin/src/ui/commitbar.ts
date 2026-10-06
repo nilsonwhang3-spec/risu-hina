@@ -64,8 +64,10 @@ export function commitControls(): HTMLElement {
    */
   const local = (): number | null => {
     if (!summary) return null;
-    const card = state.botChanges ? state.botChanges.total : (summary.card.dirty ? summary.card.total : 0);
+    // botChanges is the card tabs' target: the bot's only while no module is.
+    const card = state.botChanges && !state.cardTarget ? state.botChanges.total : (summary.card.dirty ? summary.card.total : 0);
     let n = card;
+    for (const m of summary.modules ?? []) n += m.key === state.cardTarget && state.botChanges ? state.botChanges.total : m.total;
     for (const c of summary.chats) {
       if (c.chatKey === state.activeChatKey && state.changes) n += state.changes.total;
       else n += c.dirty ? c.total : 0;
@@ -96,7 +98,8 @@ export function commitControls(): HTMLElement {
         pending = acts.length + staged.length;
         summary = sum;
         dirty = sum ? (sum.card.dirty ? sum.card.total : 0) + sum.chats.reduce((n, c) => n + (c.dirty ? c.total : 0), 0)
-          + (sum.personas ?? []).reduce((n, p) => n + p.total, 0) : 0;
+          + (sum.personas ?? []).reduce((n, p) => n + p.total, 0)
+          + (sum.modules ?? []).reduce((n, m) => n + m.total, 0) : 0;
       }
     } catch { /* keep the last numbers; the next tick tries again */ }
     finally { inFlight = false; }
@@ -167,10 +170,11 @@ function openApplyPopover(anchor: HTMLElement, last: () => DirtySummary | null, 
       fix?.addEventListener('click', async () => {
         if (d.scope === 'chat' && d.key !== state.activeChatKey) await state.loadTurns(d.key);
         close();
-        if (d.scope !== 'persona') openConflicts(d.scope, () => { void refresh(); state.bump(); });
+        if (d.scope === 'module') state.focusModule(d.key);
+        if (d.scope !== 'persona') openConflicts(d.scope === 'module' ? 'card' : d.scope, () => { void refresh(); state.bump(); });
       });
       list.appendChild(el('div', { class: 'stagedrow' }, [
-        el('span', { class: 'badge', text: d.scope === 'card' ? '봇' : d.scope === 'persona' ? '페르소나' : '챗' }),
+        el('span', { class: 'badge', text: d.scope === 'card' ? '봇' : d.scope === 'persona' ? '페르소나' : d.scope === 'module' ? '모듈' : '챗' }),
         el('div', { class: 'grow' }, [
           el('div', { text: `${d.label} — 변경 ${d.total}건` }),
           d.conflicts ? el('div', { class: 'hint', text: 'RisuAI 쪽과 충돌이 있어 먼저 해결해야 반영됩니다' }) : null,

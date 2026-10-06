@@ -120,9 +120,26 @@ def _deps() -> Any:
         raise _Refusal("Risu Hina 패널에 열린 봇·챗이 없습니다. RisuAI 에서 Risu Hina 를 열고 봇과 챗을 골라 주세요.")
     char_key = crow["char_key"]
     pyexec.install_skills(workspace.hina_dir(char_key))
-    return agent_mod.Deps(chat_key=chat_key, char_key=char_key, session_id=_session_for(chat_key),
+    deps = agent_mod.Deps(chat_key=chat_key, char_key=char_key, session_id=_session_for(chat_key),
                           workspace_dir=workspace.root(char_key), mode="",
                           persona=str(ctx.get("persona") or ""))
+    # The modules opened in the panel and the one its card tabs show (as in
+    # session.run). A focus_target from this client lasts until the panel's
+    # own target changes - each MCP call builds its Deps afresh.
+    from . import modules as modmod
+    deps.bot_key = char_key
+    deps.modules = [k for k in str(ctx.get("modules") or "").split(",") if k and modmod.is_module_key(k)]
+    panel = str(ctx.get("target") or "")
+    if panel and panel in deps.modules:
+        deps.char_key = panel
+    held = _FOCUS.get(chat_key)
+    if held and held[0] == panel and (held[1] == char_key or held[1] in deps.modules):
+        deps.char_key = held[1]
+    return deps
+
+
+# chat_key -> (the panel's target when focus_target ran, the chosen key).
+_FOCUS: dict[str, tuple[str, str]] = {}
 
 
 class _Refusal(Exception):
@@ -167,6 +184,15 @@ def _hina_status() -> str:
         lines.append(f"열린 봇: {ctx.get('botName') or '?'} (charKey {crow['char_key'] if crow else '?'})")
         lines.append(f"열린 챗: {ctx.get('chatName') or '?'} (chatKey {ctx['chatKey']})")
         lines.append(f"패널 화면: {ctx.get('mode') or '선택 화면'}")
+        if ctx.get("modules"):
+            from . import modules as modmod
+            names = []
+            for k in str(ctx["modules"]).split(","):
+                if k and modmod.is_module_key(k):
+                    names.append(modmod.row(k)["name"] + (" (지금 편집 대상)" if k == ctx.get("target") else ""))
+            if names:
+                lines.append("함께 열린 RisuAI 모듈: " + ", ".join(names)
+                             + " - 카드 툴은 패널이 보여 주는 대상에 적용되고, focus_target 으로 바꿉니다")
         if ctx.get("persona"):
             from . import personas
             try:
@@ -248,8 +274,10 @@ async def _approve_proposals(args: dict) -> str:
     char_key, open_chat = crow["char_key"], ctx["chatKey"]
     approve = args.get("approve") is not False
     want = _ids(args.get("ids"))
-    rows = db.query("SELECT * FROM pending_actions WHERE char_key = ? AND status = 'pending' ORDER BY created_at",
-                    (char_key,))
+    from . import modules as modmod
+    keys_ = [char_key, *[k for k in str(ctx.get("modules") or "").split(",") if k and modmod.is_module_key(k)]]
+    rows = db.query(f"SELECT * FROM pending_actions WHERE char_key IN ({','.join('?' * len(keys_))}) "
+                    "AND status = 'pending' ORDER BY created_at", tuple(keys_))
     todo = [actions._row(r) | {"chatKey": str(r["chat_key"])} for r in rows]
     if want is not None:
         known = {a["id"] for a in todo}
@@ -657,6 +685,8 @@ async def _call_tool(ctx: Any, params: Any) -> Any:
         except Exception as e:  # noqa: BLE001 - pydantic ValidationError, shown to the model
             return err(f"인자가 올바르지 않습니다: {e}")
         result = await ts.call_tool(name, validated, rctx, tool)
+        if name == "focus_target":
+            _FOCUS[deps.chat_key] = (str(mcpbridge.context().get("target") or ""), deps.char_key)
     except _Refusal as e:
         return err(str(e))
     except ModelRetry as e:

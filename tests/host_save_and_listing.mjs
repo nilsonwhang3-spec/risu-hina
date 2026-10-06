@@ -27,7 +27,7 @@ vm.runInContext(transformSync(`class State {
 }
 globalThis.state = new State();`, { loader: 'ts' }).code, context);
 const state = context.state;
-state.botKey = 'bot'; state.activeChatKey = 'active'; state.activeTab = 'studio';
+state.botKey = 'bot'; state.activeCharKey = 'bot'; state.openModules = []; state.activeChatKey = 'active'; state.activeTab = 'studio';
 state.cardWriteBack = async () => ({ verified: true, applied: 2 });
 assert.match(await state.requestedCardWriteback('save', 'bot', 'requested-chat'), /2/);
 assert.equal(completions.at(-1).ok, true);

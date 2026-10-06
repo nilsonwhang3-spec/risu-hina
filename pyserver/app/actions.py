@@ -176,7 +176,9 @@ def decide(action_id: str, approve: bool, mode: str = '') -> dict:
         db.execute("UPDATE pending_actions SET status = ?, decided_at = ? WHERE id = ?",
                    (APPROVED, db.now(), action_id))
         return {"id": action_id, "approved": True, "kind": act["kind"],
-                "host": {"kind": act["kind"], "args": act["args"]}}
+                # charKey: which working copy - the bot, or a module opened
+                # next to it (app/modules.py) - the plugin is to write.
+                "host": {"kind": act["kind"], "args": act["args"], "charKey": act["charKey"]}}
 
     try:
         result = EXECUTORS[act["kind"]](act)

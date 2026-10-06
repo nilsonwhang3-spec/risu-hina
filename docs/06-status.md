@@ -7,6 +7,56 @@ saves as a copy and RisuAI-side changes are flagged (§1-93); the Docker image i
 release (§1-92); dashboard cards wrap, the title-row 승인 waits for its card, bots of the same name share one
 folder (old `~N` folders merge back), and uploads land in the project being edited (§1-94).
 
+## unreleased (2026-10-06): §1-95 RisuAI modules: 모듈 편집 mode, modules opened next to a bot or persona, .risum/.charx
+
+- **Ask:** after persona editing, a module editing mode. A RisuAI module (`db.modules`, process/modules.ts) bundles
+  lorebook, Regex, triggers, assets, a toggle definition and a background embedding, and is combined with a bot
+  (asset modules - "에셋봇", extra toggles and images), a prompt preset (prompt modules - Regex, toggles) or anything
+  (status window, inventory, magic, items). Open several modules from 봇 편집 (＋ after the card tabs) and
+  페르소나 편집 (＋ after 페르소나), edit them in the same context, and remember the combination.
+- **A module is edited as a card** (pyserver/app/modules.py). RisuAI converts one into the other itself
+  (interchangeability.ts; a module exported today IS the charx of the converted character), so a module gets a
+  `characters` row under its own key (`m<hash>`, never a bot's `c<hash>`) and every card route, merge, conflict,
+  snapshot, diff and agent tool works on it unchanged. Mapping (mirrored in plugin/src/modules.ts):
+  name→name, description→creatorNotes, lorebook→globalLore, regex→customscript, trigger→triggerscript,
+  assets→additionalAssets, lowLevelAccess, hideIcon→hideChatIcon, backgroundEmbedding→backgroundHTML,
+  namespace→moduleNamespace, customModuleToggle, icon→image. `card.MODULE_SCALARS` replaces the bot scalars for a
+  module key (no greetings/desc); `hideChatIcon` is a typed bool row on both sides. MCP modules are refused
+  (nothing to edit).
+- **Routes:** `GET /modules`, `POST /module/sync` (first read loads, later reads merge, `reset` after 반영),
+  `POST /module/forget`, `GET /module/dirty`, `GET|POST /module/combo` (per owner `bot:<key>` / `persona:<key>` /
+  `module`, in `meta`), `POST /module/parse` (.risum / .charx / risuModule .json in the space → a module whose
+  images are in the store under pending keys), `POST /module/export` (`<name>.module.charx` through the charx
+  builder, or `<name>.risum` - rpack + blobs - into the module's `projects/<폴더>/out/`).
+- **반영:** the plugin writes the card patch onto the module in `db.modules` (modules.ts writeModule: every scalar's
+  `before` and every list's base are checked first, then one setDatabase, then a read-back), commits, and re-syncs
+  with reset. Pending asset keys are registered with saveAsset first, as for a bot. RisuAI caches the modules of the
+  open chat until its module set changes or its module settings page closes; the panel says so after 반영.
+- **Panel:** a fourth mode card 모듈 편집 (list, MCP greyed, 파일에서 가져오기 from the PC). In every mode but chat
+  the tab row ends with one group per open module - `◫ 이름` and, while it is the target, its own
+  정보 · 로어북 · Regex · 트리거 · 에셋 and ✕ - then ＋. The group's tabs are the bot tabs re-pointed:
+  `state.botKey` is `cardTarget || activeCharKey`, so the tabs, the bot bar, conflicts and lore follow the module;
+  the bot's own tabs point back at the bot. The bar's 반영 writes the module (no live bot needed), its charx button
+  becomes 내보내기 (.charx 권장 / .risum), 새 봇으로 저장 is not offered, and 반영 offers "RisuAI 쪽 다시 읽기 (병합)".
+  The ＋ picker is multi-select, marks modules RisuAI turns on for this bot/chat (연결됨, re-read live) or globally
+  (전역), selects all linked ones in one click, and imports a file. The chosen set is saved per owner and reopened
+  (read from RisuAI and merged) when that bot / persona / module mode is entered again; a module deleted in RisuAI
+  drops out. Modules with pending work are in the title-row 반영 (scope `module`) and in the leave guard; their AI
+  proposals are in the title-row 승인 (`/actions?modules=`). Uploads and the files tab follow the module's folder.
+- **Agent / MCP:** `/chat` and the MCP bridge context carry `target` (the module the card tabs show) and `modules`
+  (the open ones). The turn's `char_key` is the target, so the card tools edit it; `bot_key` keeps the bot. The
+  screen line says which module and what its fields mean; `list_modules` lists them, `focus_target("bot" | module)`
+  moves the card tools inside a turn (over MCP it lasts until the panel's own target changes). Greetings and clone
+  proposals are refused on a module; an emotion image staged for a module becomes an additional asset. A decided
+  host action carries its `charKey`, so `host_card_writeback` of a module writes that module and `host_open_tab`
+  opens its tab. A module proposal is approvable from the bot's chat.
+- **Also fixed:** `charx.working_character` put typed rows on the card as their row text, so an exported charx had
+  `lowLevelAccess: true` whenever the row said "0" (bots too). Decoded now (bools and loreSettings).
+- Verified: tests/test_modules.py (new, in the gate: sync/merge/reset, scalars, patch, combos, risum round trip and a
+  real RisuAI .risum, charx/risum export read back, agent target/focus/refusals, approvals), tests/plugin_smoke.mjs
+  (module mode, module tabs, 반영 into db.modules, ＋ with 연결됨, the bot reopening its modules), the browser
+  harness (stub modules: picker, persona combo, ✕, export .risum → import), gate ALL GREEN.
+
 ## unreleased (2026-10-06): §1-94 GitHub #6, dashboard cards, 승인 before its card, one folder per bot name, uploads into the project
 
 - **GitHub #6 — the launcher died on a weekday date:** with a Windows date format that shows the weekday

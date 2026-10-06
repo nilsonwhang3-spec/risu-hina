@@ -40,6 +40,7 @@ from . import actions, assets, catalog, charx, codexauth, conflicts, keys, permi
 from . import agentnotes, assetrules, mcpaddon, mcpbridge, mcpserver, studio, studiojob
 from . import card as cardmod
 from . import personas as personamod
+from . import modules as modmod
 from . import memory as mem
 
 Handler = Callable[..., Any]
@@ -2128,6 +2129,69 @@ def h_personas(arg: dict) -> dict:
     return {"personas": personamod.listing(str(arg.get("query") or ""))}
 
 
+# --- RisuAI modules (app/modules.py) ---------------------------------------------
+#
+# A module's working copy is a card under its own key, so everything after the
+# sync (edits, snapshots, changes, patch, commit) goes through the /card routes
+# with that key. These are the module-only parts: reading RisuAI's list in,
+# which modules are opened together with a bot or a persona, and files.
+
+def _module_call(fn, *a, **kw):
+    try:
+        return fn(*a, **kw)
+    except modmod.ModuleError as e:
+        raise ApiError(400, str(e))
+
+
+def h_modules(arg: dict) -> dict:
+    return {"modules": modmod.listing(str(arg.get("query") or ""))}
+
+
+def h_module_sync(arg: dict) -> dict:
+    """One module as the panel just read it from RisuAI (`reset` after 반영)."""
+    return _module_call(modmod.sync, arg.get("module") or {}, reset=bool(arg.get("reset")))
+
+
+def h_module_forget(arg: dict) -> dict:
+    ck = str(arg.get("key") or arg.get("charKey") or "")
+    modmod.forget(ck)
+    return {"ok": True}
+
+
+def h_module_dirty(arg: dict) -> dict:
+    return {"modules": modmod.dirty()}
+
+
+def h_module_combo(arg: dict) -> dict:
+    """GET: the module ids opened with this owner; POST: remember them."""
+    owner = str(arg.get("owner") or "")
+    if "ids" in arg:
+        return {"owner": owner, "ids": _module_call(modmod.set_combo, owner, arg.get("ids") or [])}
+    return {"owner": owner, "ids": _module_call(modmod.combo, owner)}
+
+
+def h_module_parse(arg: dict) -> dict:
+    """A .risum / .charx / .json in the space, ready for the plugin to import."""
+    try:
+        return _module_call(modmod.parse_file, str(arg.get("path") or ""))
+    except (files.FileError, assets.AssetError) as e:
+        raise ApiError(400, str(e))
+
+
+def h_module_export(arg: dict) -> dict:
+    ck = _char(arg)
+    if not modmod.is_module_key(ck):
+        raise ApiError(400, "모듈 작업본이 아닙니다")
+    try:
+        r = _module_call(modmod.export, ck, str(arg.get("format") or "charx"),
+                         filename=str(arg.get("name") or ""), allow_missing=bool(arg.get("allowMissing")))
+    except charx.CharxError as e:
+        raise ApiError(400, str(e))
+    if not r.get("ok"):
+        raise ApiError(409, "에셋이 빠져 있어 만들지 않았습니다", missing=r.get("missing"), hint=r.get("hint"))
+    return r
+
+
 def h_changes(arg: dict) -> dict:
     """What is pending on this chat, as counts - the shared bar's one line."""
     tk = _chat(arg)
@@ -2630,14 +2694,22 @@ def h_actions(arg: dict) -> dict:
     # with no way to see or discard them.
     ck = str(arg.get("charKey") or "").strip()
     if ck and not arg.get("chatKey"):
+        # Modules opened next to the bot (comma-separated keys) are listed too:
+        # the agent's proposals for them are the same session's work.
+        mods = [m for m in str(arg.get("modules") or "").split(",") if m and modmod.is_module_key(m)]
+        keys_ = [ck, *mods]
         rows = db.query(
-            "SELECT * FROM pending_actions WHERE char_key = ? AND status = 'pending' ORDER BY created_at", (ck,))
+            f"SELECT * FROM pending_actions WHERE char_key IN ({','.join('?' * len(keys_))}) "
+            "AND status = 'pending' ORDER BY created_at", tuple(keys_))
         names = {str(r.get("chat_key") or ""): str(r.get("name") or "") for r in store.chats_of(ck)}
+        mod_names = {m: modmod.row(m)["name"] for m in mods}
         out = []
         for r in rows:
             a = actions._row(r)
             a["chatKey"] = str(r["chat_key"])
             a["chatName"] = names.get(str(r["chat_key"]), "")
+            if a["charKey"] in mod_names:
+                a["moduleName"] = mod_names[a["charKey"]]
             out.append(a)
         return {"actions": out}
     return {"actions": actions.pending(_chat(arg))}
@@ -2649,7 +2721,8 @@ def h_action_decide(arg: dict) -> dict:
         action = actions.get(str(arg.get('id') or ''))
         if action:
             current = db.one('SELECT char_key FROM chats WHERE chat_key=?', (tk,))
-            if current and action['charKey'] != current['char_key']:
+            # A module opened next to the bot (app/modules.py) is not "another bot".
+            if current and action['charKey'] != current['char_key'] and not modmod.is_module_key(action['charKey']):
                 raise ApiError(400, '현재 봇의 제안만 승인할 수 있습니다.')
             if (actions.scope_of(action) == 'chat' or action['kind'] in ('host_writeback', 'host_save_copy')) and action['chatKey'] != tk:
                 raise ApiError(400, '선택한 챗의 제안만 승인할 수 있습니다.')
@@ -2877,6 +2950,14 @@ ROUTES: dict[str, Handler] = {
     "POST /persona/create": h_persona_create,
     "GET /persona/dirty": h_persona_dirty,
     "GET /personas": h_personas,
+    "GET /modules": h_modules,
+    "POST /module/sync": h_module_sync,
+    "POST /module/forget": h_module_forget,
+    "GET /module/dirty": h_module_dirty,
+    "GET /module/combo": h_module_combo,
+    "POST /module/combo": h_module_combo,
+    "POST /module/parse": h_module_parse,
+    "POST /module/export": h_module_export,
 
     "GET /turns": h_turns,
     "POST /turn": h_turn_edit,
@@ -3296,9 +3377,13 @@ async def dispatch(path: str, request: Request) -> Response:
             return _json(400, {"error": "sessionId 와 prompt 가 필요합니다"}, origin)
         mode = str(body.get("mode") or "")
         persona = str(body.get("persona") or "")
-        log.info("POST /chat session=%s prompt=%sB mode=%s", sid, len(prompt), mode or "-")
+        # The module the bot tabs show right now ('' = the bot) and the modules
+        # opened alongside (app/modules.py) - the agent edits the target.
+        target = str(body.get("target") or "")
+        opened = [str(k) for k in (body.get("modules") or []) if k][:40]
+        log.info("POST /chat session=%s prompt=%sB mode=%s target=%s", sid, len(prompt), mode or "-", target or "-")
         return StreamingResponse(
-            session.run(sid, prompt, mode, persona),
+            session.run(sid, prompt, mode, persona, target=target, modules=opened),
             media_type="application/x-ndjson; charset=utf-8",
             headers={
                 **config.cors_headers(origin),

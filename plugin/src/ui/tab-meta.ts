@@ -29,6 +29,16 @@ const LABELS: Record<string, string> = {
   lowLevelAccess: '저수준 접근 (Lua)',
   loreSettings: '로어북 설정',
   alternateGreetings: '대체 인사말',
+  // A RisuAI module's own rows (§1-95).
+  customModuleToggle: '토글 (커스텀 토글)',
+  moduleNamespace: '네임스페이스',
+  hideChatIcon: '채팅 아이콘 숨기기',
+};
+
+/** Labels that read differently on a module (its creatorNotes is its description). */
+const MODULE_LABELS: Record<string, string> = {
+  name: '모듈 이름',
+  creatorNotes: '모듈 설명',
 };
 
 /** A one-line reminder of the format, above the editor. */
@@ -36,6 +46,9 @@ const HINTS: Record<string, string> = {
   defaultVariables: '한 줄에 하나, 이름=값. 채팅 변수가 없을 때 쓰는 기본값입니다 (RisuAI 기본 변수).',
   systemPrompt: '비어 있지 않으면 프리셋의 메인 프롬프트를 통째로 대체합니다. {{original}} 자리에 원래 메인 프롬프트가 들어갑니다.',
   exampleMessage: 'RisuAI 의 예시 대화 칸입니다. <START> 로 예시를 나눕니다.',
+  customModuleToggle: '한 줄에 하나: 키=표시 이름 (체크박스) · 키=이름=select=옵션1,옵션2 · 키=이름=text · 키=이름=textarea · '
+    + '=묶음 이름=group … ==groupEnd · ==divider · =설명 글=caption. 값은 {{getglobalvar::toggle_키}} 로 읽습니다 (체크박스는 1/0).',
+  moduleNamespace: '비워 두면 없음. 같은 네임스페이스를 쓰는 봇·챗은 id 대신 이 이름으로 모듈을 켤 수 있습니다 (모듈 연결 시 namespace 로 매칭).',
 };
 
 // Card fields, but not meta: the Regex tab owns backgroundHTML (it lives
@@ -58,6 +71,10 @@ const FIELD_RANK: Record<string, number> = {
   translatorNote: 115,
   lowLevelAccess: 120,
   loreSettings: 121,
+  // A module: name, its description, then the toggles - the part users edit.
+  customModuleToggle: 15,
+  moduleNamespace: 105,
+  hideChatIcon: 122,
 };
 
 let treeMount: HTMLElement | null = null;
@@ -113,6 +130,7 @@ async function refreshNow(): Promise<void> {
 
 function labelOf(f: CardField): string {
   if (f.field === 'alternateGreetings') return `대체 인사말 #${f.seq + 1}`;
+  if (state.cardTarget && MODULE_LABELS[f.field]) return MODULE_LABELS[f.field];
   return LABELS[f.field] || f.field;
 }
 
@@ -133,7 +151,8 @@ function drawTree(): void {
   });
   const reloadBtn = el('button', { class: 'ghost tiny', text: '새로고침' });
   reloadBtn.addEventListener('click', () => void refreshNow());
-  treeMount.appendChild(el('div', { class: 'treehead' }, [addGreet, reloadBtn]));
+  // A module has no greetings (§1-95).
+  treeMount.appendChild(el('div', { class: 'treehead' }, state.cardTarget ? [reloadBtn] : [addGreet, reloadBtn]));
 
   if (!full) {
     treeMount.appendChild(el('div', {
@@ -157,7 +176,7 @@ function drawTree(): void {
       ruled = true;
       treeMount.appendChild(el('div', { class: 'sectionline', style: { margin: '8px 6px' } }));
     }
-    const suffix = f.field === 'lowLevelAccess' ? (f.body === '1' ? ' (켬)' : ' (끔)')
+    const suffix = f.field === 'lowLevelAccess' || f.field === 'hideChatIcon' ? (f.body === '1' ? ' (켬)' : ' (끔)')
       : f.field === LORE_SETTINGS_FIELD ? (f.body ? ' (봇 설정)' : ' (글로벌)')
       : (f.body ? '' : ' (비어 있음)');
     const name = el('button', {
@@ -187,18 +206,21 @@ async function saveTyped(f: CardField, value: string, btn: HTMLButtonElement): P
   }
 }
 
-/** lowLevelAccess: one checkbox. The row text is "1" / "0". */
+/** lowLevelAccess / hideChatIcon: one checkbox. The row text is "1" / "0". */
 function openBool(f: CardField): void {
   if (!viewMount) return;
   const box = el('input', { type: 'checkbox' }) as HTMLInputElement;
   box.checked = f.body === '1';
   const save = el('button', { class: 'primary', text: '저장' }) as HTMLButtonElement;
   save.addEventListener('click', () => void saveTyped(f, box.checked ? '1' : '0', save));
+  const icon = f.field === 'hideChatIcon';
   clear(viewMount);
   viewMount.appendChild(el('div', { class: 'card' }, [
     el('h2', {}, [el('span', { text: labelOf(f) })]),
-    el('div', { class: 'hint', text: 'Lua 트리거가 저수준 API 를 쓰려면 켜야 합니다. RisuAI 는 켜진 봇에 경고를 띄웁니다.' }),
-    el('label', { class: 'field row' }, [box, el('span', { text: '저수준 접근 허용' })]),
+    el('div', { class: 'hint', text: icon
+      ? '켜면 이 모듈이 켜진 챗에서 캐릭터 아이콘을 숨깁니다 (상태창·전용 UI 모듈이 흔히 씁니다).'
+      : 'Lua 트리거가 저수준 API 를 쓰려면 켜야 합니다. RisuAI 는 켜진 봇·모듈에 경고를 띄웁니다.' }),
+    el('label', { class: 'field row' }, [box, el('span', { text: icon ? '채팅 아이콘 숨기기' : '저수준 접근 허용' })]),
     ...(f.changed ? [el('div', { class: 'hint diffmeta', text: `기준선: ${f.original === '1' ? '켬' : '끔'}` })] : []),
     el('div', { class: 'row' }, [save]),
   ]));
@@ -252,12 +274,12 @@ function open(f: CardField): void {
   const was = openId;
   openId = f.id;
   if (was !== f.id) drawTree();
-  if (f.field === 'lowLevelAccess') { openBool(f); return; }
+  if (f.field === 'lowLevelAccess' || f.field === 'hideChatIcon') { openBool(f); return; }
   if (f.field === LORE_SETTINGS_FIELD) { openLoreSettings(f); return; }
 
   const body = el('textarea', {
     value: f.body,
-    style: { minHeight: f.field === 'name' ? '48px' : '340px' },
+    style: { minHeight: f.field === 'name' || f.field === 'moduleNamespace' ? '48px' : '340px' },
   }) as HTMLTextAreaElement;
 
   const save = el('button', { class: 'primary', text: '저장' });

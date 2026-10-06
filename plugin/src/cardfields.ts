@@ -10,7 +10,8 @@
  */
 import type { RisuCharacter } from './risuai';
 
-export const BOOL_FIELDS = new Set(['lowLevelAccess']);
+// hideChatIcon: a RisuAI module's row (§1-95, card.py MODULE_SCALARS).
+export const BOOL_FIELDS = new Set(['lowLevelAccess', 'hideChatIcon']);
 export const LORE_SETTINGS_FIELD = 'loreSettings';
 
 export interface LoreSettings {

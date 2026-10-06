@@ -103,8 +103,11 @@ class McpBridge {
       chatKey: state.activeChatKey || '',
       botName: state.workspace?.characterName || String(state.character?.name || ''),
       chatName: chat?.name || '',
-      mode: state.activeTab === 'chats' ? '' : (state.activeTab === 'studio' ? 'studio' : state.editMode),
+      mode: state.activeTab === 'chats' ? '' : state.agentMode,
       persona: state.editMode === 'persona' ? (state.persona?.key ?? '') : '',
+      // The module the card tabs show and every module opened (§1-95).
+      target: state.cardTarget,
+      modules: state.openModules.map((m) => m.key).join(','),
     };
   }
 
@@ -193,7 +196,8 @@ class McpBridge {
    * backend tool times out and says so, and the proposal is not lost.
    */
   private async runHostAction(job: PollReply['jobs'][number]): Promise<void> {
-    if (job.charKey !== state.botKey || (CHAT_HOST_KINDS.has(job.kind || '') && job.chatKey !== state.activeChatKey)) {
+    const ours = job.charKey === state.activeCharKey || state.openModules.some((m) => m.key === job.charKey);
+    if (!ours || (CHAT_HOST_KINDS.has(job.kind || '') && job.chatKey !== state.activeChatKey)) {
       this.onNotice('MCP 승인 요청을 건너뛰었습니다: 이 패널에 열린 봇·챗의 작업이 아닙니다.', 'err');
       return;
     }

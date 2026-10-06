@@ -124,8 +124,13 @@ def set_enabled(on: bool, ctx: dict | None = None) -> dict:
 
 def _clean_ctx(ctx: dict) -> dict:
     # persona: the key of the persona open in the panel's persona tab.
-    keep = ("charKey", "chatKey", "botName", "chatName", "mode", "persona")
-    return {k: str(ctx.get(k) or "")[:200] for k in keep}
+    # target / modules: the module the card tabs show and every module opened
+    # (comma-separated keys, app/modules.py).
+    keep = ("charKey", "chatKey", "botName", "chatName", "mode", "persona", "target")
+    out = {k: str(ctx.get(k) or "")[:200] for k in keep}
+    mods = ctx.get("modules")
+    out["modules"] = (",".join(str(m) for m in mods) if isinstance(mods, list) else str(mods or ""))[:2000]
+    return out
 
 
 def note_call(tool: str, ok: bool) -> None:

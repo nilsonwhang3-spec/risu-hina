@@ -4,6 +4,26 @@ import { transport, BackendError, clientLog, type HealthInfo } from './transport
 import * as host from './host';
 import * as personaHost from './persona';
 import type { Persona } from './persona';
+import * as moduleHost from './modules';
+
+/** A RisuAI module's working copy, as the backend lists it (pyserver/app/modules.py). */
+export interface ModuleRow {
+  key: string; id: string; name: string; baseName: string; description: string;
+  lore: number; regex: number; trigger: number; assets: number; toggles: boolean; lowLevelAccess: boolean;
+  total: number; dirty: boolean; conflicts: number; folder: string; syncedAt: number;
+}
+
+/** A module as RisuAI holds it right now (the + picker and the 모듈 편집 list). */
+export interface LiveModule {
+  id: string; name: string; description: string; namespace: string;
+  lore: number; regex: number; trigger: number; assets: number; toggles: boolean; lowLevelAccess: boolean;
+  /** An MCP module: nothing here to edit. */
+  mcp: boolean;
+  /** On for every chat (RisuAI 설정 → 모듈). */
+  global: boolean;
+  /** Turned on for the open bot or the open chat. */
+  linked: boolean;
+}
 
 /** A persona's backend row: RisuAI's copy (base) and the working copy (work). */
 export interface PersonaRow {
@@ -30,6 +50,9 @@ import { boundedAssets, foregroundWrite } from './operation';
 import { syncAssets, syncBusy, describeSync, type SyncProgress, type SyncController } from './assets';
 import type { RisuChat, RisuCharacter, RisuMessage } from './risuai';
 
+/** The tabs that show a card - the bot's, or a module's while one is the target. */
+const CARD_TABS = new Set(['meta', 'botlore', 'regex', 'trigger', 'assets']);
+
 export interface ChatInfo {
   chatKey: string;
   chatId: string;
@@ -53,6 +76,8 @@ export interface DirtySummary {
   }[];
   /** Personas holding unapplied work (§1-89); not bot-scoped. */
   personas?: { key: string; name: string; total: number }[];
+  /** RisuAI modules holding unapplied work; not bot-scoped either. */
+  modules?: { key: string; name: string; total: number; conflicts: number }[];
 }
 
 export interface WorkspaceInfo {
@@ -804,7 +829,7 @@ class AppState {
   /** What the last upload's merge did, until the shell has announced it. */
   lastMerge: WorkspaceInfo['merge'] | null = null;
   /** Which half of the panel is open ('chat' | 'bot'); the shell keeps it current, the agent is told. */
-  editMode: 'chat' | 'bot' | 'persona' = 'bot';
+  editMode: 'chat' | 'bot' | 'persona' | 'module' = 'bot';
   /** The active tab id, verbatim from the shell. The studio is a third screen
    * (neither half), and the agent has to be told the truth about it. */
   activeTab = '';
@@ -865,6 +890,12 @@ class AppState {
     this.warnings = [];
     this.changes = null;
     this.botChanges = null;
+    // The modules opened with the old bot are that bot's combination.
+    if (this.moduleOwnerKey.startsWith('bot:')) {
+      this.openModules = [];
+      this.cardTarget = '';
+      this.moduleOwnerKey = '';
+    }
     this.unseenOutputs = [];
     this.openFileRequest = null;
     this.openTabRequest = null;
@@ -903,7 +934,9 @@ class AppState {
    * non-selected character), so there is no browsing of other workspaces.
    */
   get botKey(): string {
-    return this.activeCharKey;
+    // A RisuAI module opened next to the bot or persona (§1-95) is edited by
+    // the same tabs: while one is the target, they address its working copy.
+    return this.cardTarget || this.activeCharKey;
   }
 
   /** Whether a live, writable bot is behind the bot tabs right now. */
@@ -1048,6 +1081,326 @@ class AppState {
    * (see `chatSlot`), so a chat that is not on screen in RisuAI is as editable
    * as the one that is.
    */
+  // --- RisuAI modules (§1-95) -------------------------------------------------
+  //
+  // A module is edited as a card: the backend keeps its working copy under a
+  // key of its own (pyserver/app/modules.py) and every card call addresses it
+  // through `botKey` while it is the `cardTarget`. Modules open next to a bot
+  // (봇 편집), a persona (페르소나 편집) or on their own (모듈 편집); which ones
+  // were opened together is remembered per owner and reopened next time.
+
+  /** RisuAI's modules as last read; null before the first read. */
+  liveModules: LiveModule[] | null = null;
+  moduleError = '';
+  moduleLoading = false;
+  /** The modules open in the tab row, in tab order (their backend rows). */
+  openModules: ModuleRow[] = [];
+  /** The module the card tabs show, '' = the bot. */
+  cardTarget = '';
+  /** Whose combination `openModules` is: 'bot:<key>' / 'persona:<key>' / 'module'. */
+  private moduleOwnerKey = '';
+  /** Each open module's asset import (the bot's is `assetSync`). */
+  moduleSyncs: Record<string, SyncProgress> = {};
+  private moduleSyncCtl: Record<string, SyncController> = {};
+
+  /** The owner the current screen's combination belongs to. */
+  get moduleOwner(): string {
+    if (this.editMode === 'persona') return this.persona ? 'persona:' + this.persona.key : '';
+    if (this.editMode === 'module') return 'module';
+    if (this.editMode === 'bot') return this.activeCharKey ? 'bot:' + this.activeCharKey : '';
+    return '';
+  }
+
+  get targetModule(): ModuleRow | null {
+    return this.cardTarget ? this.openModules.find((m) => m.key === this.cardTarget) ?? null : null;
+  }
+
+  /** The screen the agent is told: a module on a card tab is edited like the bot's card. */
+  get agentMode(): string {
+    if (this.activeTab === 'studio') return 'studio';
+    if (this.cardTarget && CARD_TABS.has(this.activeTab)) return 'bot';
+    return this.editMode === 'module' ? 'bot' : this.editMode;
+  }
+
+  /** The asset import behind the card tabs: the target module's, or the bot's. */
+  get targetSync(): SyncProgress | null {
+    return this.cardTarget ? this.moduleSyncs[this.cardTarget] ?? null : this.assetSync;
+  }
+
+  /** Read RisuAI's module list (the + picker, the 모듈 편집 list). */
+  async loadModules(): Promise<LiveModule[]> {
+    this.moduleLoading = true;
+    this.moduleError = '';
+    this.emit();
+    try {
+      const { modules, enabled } = await moduleHost.readModules();
+      // Which modules RisuAI turns on for the bot right now (it may have
+      // changed there since the panel read the bot).
+      let char: RisuCharacter | null = this.character;
+      if (this.slot) { try { char = await host.readCharacter(this.slot.characterIndex); } catch { /* the cached read */ } }
+      const linked = new Set<string>([
+        ...((char?.['modules'] as unknown[] | undefined) ?? []).map(String),
+        ...((this.liveChat?.['modules'] as unknown[] | undefined) ?? []).map(String),
+      ]);
+      const global = new Set(enabled);
+      this.liveModules = modules.map((m) => {
+        const c = moduleHost.moduleCounts(m);
+        const id = String(m['id'] ?? '');
+        const ns = String(m['namespace'] ?? '');
+        return {
+          id, name: String(m['name'] ?? ''), description: String(m['description'] ?? ''), namespace: ns,
+          lore: c.lore, regex: c.regex, trigger: c.trigger, assets: c.assets, toggles: c.toggles,
+          lowLevelAccess: !!m['lowLevelAccess'], mcp: c.mcp,
+          global: global.has(id) || (!!ns && global.has(ns)),
+          linked: linked.has(id) || (!!ns && linked.has(ns)),
+        };
+      });
+      return this.liveModules;
+    } catch (e) {
+      this.moduleError = e instanceof Error ? e.message : String(e);
+      throw e;
+    } finally {
+      this.moduleLoading = false;
+      this.emit();
+    }
+  }
+
+  /** Hand one RisuAI module to the backend (first read, a merge, or `reset` after 반영). */
+  private async syncModule(raw: Record<string, unknown>, reset = false): Promise<ModuleRow & { merge?: Record<string, number> }> {
+    const row = await transport.post<ModuleRow & { merge?: Record<string, number> }>('/module/sync', { module: raw, reset }, 120_000);
+    this.openModules = this.openModules.map((m) => (m.key === row.key ? row : m));
+    this.syncModuleAssets(raw, row.key);
+    return row;
+  }
+
+  /** A module's images into the store, like the bot's (assets.ts), in the background. */
+  private syncModuleAssets(raw: Record<string, unknown>, key: string): void {
+    this.moduleSyncCtl[key]?.cancel();
+    const web = transport.hostPlatform === 'web';
+    const ctl = syncAssets(moduleHost.assetCarrier(raw) as RisuCharacter, key, { hubPull: web, concurrency: web ? 4 : 6 }, (p) => {
+      this.moduleSyncs = { ...this.moduleSyncs, [key]: p };
+      if (!syncBusy(p)) { this.epoch += 1; this.emit(); }
+    });
+    this.moduleSyncCtl[key] = ctl;
+  }
+
+  /** Re-run the target's asset import (the assets tab's 다시 동기화). */
+  async resyncTargetAssets(): Promise<void> {
+    if (!this.cardTarget) { this.syncAssets(true); return; }
+    const m = this.targetModule;
+    if (!m) return;
+    this.syncModuleAssets(await moduleHost.readModule(m.id), m.key);
+  }
+
+  /**
+   * The combination for the current screen: when the owner changed (another
+   * bot, persona or mode), the previous set closes and this owner's last set
+   * reopens. Cheap when nothing changed.
+   */
+  syncModuleOwner(): Promise<void> {
+    const owner = this.moduleOwner;
+    if (owner === this.moduleOwnerKey) return this.ownerSync;
+    this.moduleOwnerKey = owner;
+    this.openModules = [];
+    this.cardTarget = '';
+    this.emit();
+    this.ownerSync = this.reopenCombo(owner);
+    return this.ownerSync;
+  }
+
+  /** In flight while an owner's combination reopens; joined by a second caller. */
+  private ownerSync: Promise<void> = Promise.resolve();
+
+  private async reopenCombo(owner: string): Promise<void> {
+    if (!owner || !this.health) return;
+    let ids: string[] = [];
+    try {
+      ids = (await transport.get<{ ids: string[] }>('/module/combo', { owner })).ids ?? [];
+    } catch { return; }
+    if (!ids.length || this.moduleOwnerKey !== owner) return;
+    try {
+      const { modules } = await moduleHost.readModules();
+      const rows: ModuleRow[] = [];
+      for (const id of ids) {
+        const raw = modules.find((m) => String(m['id'] ?? '') === id);
+        if (!raw || raw['mcp']) continue;
+        const row = await transport.post<ModuleRow>('/module/sync', { module: raw }, 120_000);
+        rows.push(row);
+        this.syncModuleAssets(raw, row.key);
+      }
+      if (this.moduleOwnerKey !== owner) return;
+      this.openModules = rows;
+      // A module deleted in RisuAI drops out of the combination.
+      if (rows.length !== ids.length) void this.saveModuleCombo();
+      this.emit();
+    } catch (e) {
+      void clientLog('warn', 'module combo reopen', { error: String(e).slice(0, 200) });
+    }
+  }
+
+  private async saveModuleCombo(): Promise<void> {
+    const owner = this.moduleOwnerKey || this.moduleOwner;
+    if (!owner) return;
+    try {
+      await transport.post('/module/combo', { owner, ids: this.openModules.map((m) => m.id) });
+    } catch { /* remembered next time */ }
+  }
+
+  /**
+   * The + picker's answer: exactly these modules open, in this order. New ones
+   * are read from RisuAI and synced; the combination is remembered.
+   */
+  async setOpenModules(ids: string[]): Promise<ModuleRow[]> {
+    if (!this.moduleOwnerKey) this.moduleOwnerKey = this.moduleOwner;
+    const { modules } = await moduleHost.readModules();
+    const rows: ModuleRow[] = [];
+    for (const id of ids) {
+      const raw = modules.find((m) => String(m['id'] ?? '') === id);
+      if (!raw) continue;
+      if (raw['mcp']) throw new Error(`'${String(raw['name'] ?? '')}' 은(는) MCP 모듈이라 편집할 내용이 없습니다`);
+      const row = await transport.post<ModuleRow>('/module/sync', { module: raw }, 120_000);
+      rows.push(row);
+      this.syncModuleAssets(raw, row.key);
+    }
+    this.openModules = rows;
+    if (this.cardTarget && !rows.some((m) => m.key === this.cardTarget)) this.cardTarget = '';
+    this.epoch += 1;
+    await this.saveModuleCombo();
+    this.emit();
+    void this.refreshBotChanges();
+    return rows;
+  }
+
+  /** Open one more module (or focus it when it is open already). */
+  async openModule(id: string, focus = true): Promise<ModuleRow> {
+    const ids = this.openModules.map((m) => m.id);
+    if (!ids.includes(id)) await this.setOpenModules([...ids, id]);
+    const row = this.openModules.find((m) => m.id === id);
+    if (!row) throw new Error('RisuAI에서 이 모듈을 찾지 못했습니다');
+    if (focus) this.focusModule(row.key);
+    return row;
+  }
+
+  async closeModule(key: string): Promise<void> {
+    this.openModules = this.openModules.filter((m) => m.key !== key);
+    if (this.cardTarget === key) this.cardTarget = '';
+    this.moduleSyncCtl[key]?.cancel();
+    delete this.moduleSyncCtl[key];
+    this.epoch += 1;
+    await this.saveModuleCombo();
+    this.emit();
+    void this.refreshBotChanges();
+  }
+
+  /** Point the card tabs at a module, or back at the bot (''). */
+  focusModule(key: string): void {
+    if (this.cardTarget === key) return;
+    this.cardTarget = key;
+    this.botChanges = null;
+    this.epoch += 1;
+    this.emit();
+    void this.refreshBotChanges();
+  }
+
+  /** The open modules' rows again (counts after an edit or an approval). */
+  async refreshModuleRows(): Promise<void> {
+    if (!this.openModules.length) return;
+    try {
+      const r = await transport.get<{ modules: ModuleRow[] }>('/modules');
+      const by = new Map(r.modules.map((m) => [m.key, m]));
+      this.openModules = this.openModules.map((m) => by.get(m.key) ?? m);
+      this.emit();
+    } catch { /* next time */ }
+  }
+
+  async moduleDirty(): Promise<{ key: string; name: string; total: number; conflicts: number }[]> {
+    try {
+      return (await transport.get<{ modules: { key: string; name: string; total: number; conflicts: number }[] }>('/module/dirty')).modules ?? [];
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * 반영 for a module: the card patch of its working copy, written into
+   * db.modules (modules.ts writeModule), read back, then the working copy
+   * reloads from RisuAI.
+   */
+  async moduleWriteBack(key: string, progress: (text: string) => void = () => {}): Promise<{ applied: number; mode: string; verified: boolean; drift?: string; parts?: string[] }> {
+    return foregroundWrite(async (report) => {
+      const say = (t: string) => { report(t); progress(t); };
+      let row = this.openModules.find((m) => m.key === key);
+      if (!row) row = (await transport.get<{ modules: ModuleRow[] }>('/modules')).modules.find((m) => m.key === key);
+      if (!row) throw new Error('모듈 작업본을 찾지 못했습니다');
+      say(`모듈 '${row.name}' 을(를) RisuAI에 반영하는 중…`);
+      const patch = await this.cardPatch(key);
+      const update = this.cardUpdateFrom(patch, false);
+      if (!update) return { applied: 0, mode: 'noop', verified: true };
+      await this.resolveStagedAssets(update, say, key);
+      const r = await moduleHost.writeModule(row.id, update);
+      if (!r.verified) {
+        return { applied: r.applied, mode: r.mode, verified: false, parts: r.parts, ...(r.drift ? { drift: r.drift } : {}) };
+      }
+      say('RisuAI 반영 확인 완료 · 모듈 작업본을 동기화하는 중…');
+      await this.cardCommit('반영 직전', key);
+      await this.syncModule(await moduleHost.readModule(row.id), true);
+      this.bump();
+      void this.refreshBotChanges();
+      return { applied: r.applied, mode: r.mode, verified: true, parts: r.parts };
+    });
+  }
+
+  /** Read RisuAI's copy of the target module again (a change made over there). */
+  async rereadModule(key = this.cardTarget): Promise<Record<string, number> | undefined> {
+    const row = this.openModules.find((m) => m.key === key);
+    if (!row) return undefined;
+    const r = await this.syncModule(await moduleHost.readModule(row.id));
+    this.bump();
+    void this.refreshBotChanges();
+    return r.merge;
+  }
+
+  /**
+   * A .risum / .charx / .json in the space becomes a new RisuAI module: the
+   * backend reads it (its images go to the store under pending keys), the
+   * images are registered with RisuAI, and the module is appended and opened.
+   */
+  async importModuleFile(path: string, progress: (text: string) => void = () => {}): Promise<ModuleRow> {
+    const parsed = await transport.post<{ module: Record<string, unknown>; summary: { name: string } }>('/module/parse', { path }, 180_000);
+    const module = parsed.module;
+    const pending = new Set<string>();
+    for (const a of (module['assets'] as unknown[] | undefined) ?? []) {
+      if (Array.isArray(a) && typeof a[1] === 'string' && a[1].startsWith('assets/hina-pending-')) pending.add(a[1]);
+    }
+    const icon = String(module['icon'] ?? '');
+    if (icon.startsWith('assets/hina-pending-')) pending.add(icon);
+    const resolved = new Map<string, string>();
+    let done = 0;
+    await boundedAssets([...pending], async (key) => {
+      const bytes = await transport.getBinary('/assets/blob', { key });
+      const real = await Risuai.saveAsset(bytes);
+      if (!real || typeof real !== 'string') throw new Error('RisuAI가 에셋 저장 키를 반환하지 않았습니다');
+      resolved.set(key, real);
+      progress(`에셋 등록 ${++done}/${pending.size}`);
+    });
+    module['assets'] = ((module['assets'] as unknown[] | undefined) ?? []).map((a) => (
+      Array.isArray(a) ? [a[0], resolved.get(String(a[1])) ?? a[1], ...a.slice(2)] : a));
+    if (icon) module['icon'] = resolved.get(icon) ?? icon;
+    progress('RisuAI 모듈 목록에 추가하는 중…');
+    const made = await moduleHost.createModule(module);
+    await this.loadModules().catch(() => undefined);
+    return await this.openModule(String(made['id']), true);
+  }
+
+  /** The target module as a file in its project out/ folder. */
+  async exportModule(format: 'charx' | 'risum', allowMissing = false, name = ''): Promise<{ file: string; path: string; size: number; assets: number; dropped: number }> {
+    const r = await transport.post<{ file: string; path: string; size: number; assets: number; dropped: number }>(
+      '/module/export', { charKey: this.cardTarget, format, allowMissing, name }, 300_000);
+    this.touchFiles([r.path]);
+    return r;
+  }
+
+
   // --- personas (§1-89) ----------------------------------------------------
   //
   // Same shape as the card: RisuAI holds the persona, the backend holds a
@@ -1122,6 +1475,8 @@ class AppState {
     const row = await transport.get<PersonaRow>('/persona', { key });
     this.persona = row;
     this.touchFiles();
+    // Another persona: its own module combination (§1-95).
+    if (this.editMode === 'persona') void this.syncModuleOwner();
     return row;
   }
 
@@ -1591,14 +1946,16 @@ class AppState {
   /** Pending state across the whole bot - the leave guard's one call. */
   async dirtySummary(): Promise<DirtySummary | null> {
     const personas = this.health ? this.personaDirty() : Promise.resolve([]);
+    const modules = this.health ? this.moduleDirty() : Promise.resolve([]);
     if (!this.activeCharKey) {
-      const ps = await personas;
-      return ps.length ? { charKey: '', card: { dirty: false, total: 0, conflicts: 0 }, chats: [], personas: ps } : null;
+      const [ps, ms] = await Promise.all([personas, modules]);
+      return ps.length || ms.length
+        ? { charKey: '', card: { dirty: false, total: 0, conflicts: 0 }, chats: [], personas: ps, modules: ms } : null;
     }
     try {
-      const [s, ps] = await Promise.all([
-        transport.get<DirtySummary>('/workspace/dirty', { charKey: this.activeCharKey }), personas]);
-      return { ...s, personas: ps };
+      const [s, ps, ms] = await Promise.all([
+        transport.get<DirtySummary>('/workspace/dirty', { charKey: this.activeCharKey }), personas, modules]);
+      return { ...s, personas: ps, modules: ms };
     } catch {
       // The guard treats "cannot check" as "nothing to resolve": a dead
       // backend must never lock the user inside the panel.
@@ -1789,9 +2146,12 @@ class AppState {
     if (signal?.aborted) return;
     yield* transport.stream('/chat', {
       sessionId: this.sessionId, prompt,
-      mode: this.activeTab === 'studio' ? 'studio' : this.editMode,
+      mode: this.agentMode,
       // Which persona the persona tab has open (§1-89); the agent is told.
       persona: this.editMode === 'persona' ? (this.persona?.key ?? '') : '',
+      // The module the card tabs show and every module opened (§1-95).
+      target: this.cardTarget,
+      modules: this.openModules.map((m) => m.key),
     }, signal);
   }
 
@@ -1808,7 +2168,8 @@ class AppState {
   async conflicts(scope: 'chat' | 'card' | 'both' = 'both'): Promise<ConflictItem[]> {
     const q: Record<string, string> = {};
     if (scope !== 'card' && this.activeChatKey) q.chatKey = this.activeChatKey;
-    if (scope !== 'chat' && this.activeCharKey) q.charKey = this.activeCharKey;
+    // The card tabs' target: the bot, or a module (§1-95).
+    if (scope !== 'chat' && this.botKey) q.charKey = this.botKey;
     if (!Object.keys(q).length) return [];
     const r = await transport.get<{ conflicts: ConflictItem[] }>('/conflicts', q);
     return r.conflicts ?? [];
@@ -1822,7 +2183,7 @@ class AppState {
   async resolveAllConflicts(choice: 'mine' | 'theirs', scope: 'chat' | 'card'): Promise<number> {
     const r = await transport.post<{ resolved: number }>('/conflict/resolve', {
       all: true, choice,
-      ...(scope === 'chat' ? { chatKey: this.activeChatKey } : { charKey: this.activeCharKey }),
+      ...(scope === 'chat' ? { chatKey: this.activeChatKey } : { charKey: this.botKey }),
     });
     await this.afterResolve();
     return r.resolved ?? 0;
@@ -1963,13 +2324,13 @@ class AppState {
   // --- charx ------------------------------------------------------------------
 
   async charxPreview(): Promise<CharxPreview> {
-    return await transport.get('/charx/preview', { charKey: this.botKey });
+    return await transport.get('/charx/preview', { charKey: this.activeCharKey });
   }
 
   /** Build out/<name>.charx on the backend from the working card + store. */
   async charxBuild(opts: { allowMissing?: boolean; name?: string } = {}): Promise<CharxBuilt> {
     const r = await transport.post<CharxBuilt>('/charx/build', {
-      charKey: this.botKey, allowMissing: !!opts.allowMissing, name: opts.name || '',
+      charKey: this.activeCharKey, allowMissing: !!opts.allowMissing, name: opts.name || '',
     }, 600_000);
     this.touchFiles([r.path]);
     return r;
@@ -2018,6 +2379,7 @@ class AppState {
     // being edited - the persona's folder in persona mode, otherwise the
     // backend picks the bot's projects/<봇> from `bot`. It used to fall to
     // projects/ itself, the top of the space.
+    if (!dir && this.targetModule) dir = `projects/${this.targetModule.folder}`;
     if (!dir && this.editMode === 'persona' && this.personaFolder) dir = this.personaFolder;
     const bot = dir ? undefined : this.activeCharKey || undefined;
     return await transport.upload('/files/upload', base64
@@ -2028,6 +2390,7 @@ class AppState {
   /** The project folder being edited: the persona's in persona mode, else
    *  the bot's (`botFolder` from the files listing; '' before it is known). */
   projectDir(botFolder: string): string {
+    if (this.targetModule) return `projects/${this.targetModule.folder}`;
     if (this.editMode === 'persona' && this.personaFolder) return this.personaFolder;
     return botFolder ? `projects/${botFolder}` : '';
   }
@@ -2320,8 +2683,10 @@ class AppState {
   /** Every pending proposal of the open bot, whichever chat it rode on. */
   async actionsForBot(): Promise<PendingAction[]> {
     if (!this.activeCharKey) return [];
+    const mods = this.openModules.map((m) => m.key).join(',');
     const r = await transport.get(
-      '/actions?charKey=' + encodeURIComponent(this.activeCharKey)) as { actions: PendingAction[] };
+      '/actions?charKey=' + encodeURIComponent(this.activeCharKey)
+      + (mods ? '&modules=' + encodeURIComponent(mods) : '')) as { actions: PendingAction[] };
     return r.actions;
   }
 
@@ -2349,14 +2714,14 @@ class AppState {
     // that want the gate explicitly.
     const r = await transport.post('/actions/decide', {
       chatKey: chatKey || this.activeChatKey, id, approve, mode: mode ?? '',
-    }) as { approved: boolean; result?: string; host?: { kind: string; args: Record<string, any> } };
+    }) as { approved: boolean; result?: string; host?: { kind: string; args: Record<string, any>; charKey?: string } };
 
     if (!r.approved) return '거절했습니다.';
     if (!r.host) {
       // A lorebook or memory proposal just landed in the working copy; the
       // tabs caching those lists and the shared bar both have to hear it.
       this.bump();
-      await Promise.all([this.refreshChanges(), this.refreshBotChanges(), this.refreshPersonaList()]);
+      await Promise.all([this.refreshChanges(), this.refreshBotChanges(), this.refreshPersonaList(), this.refreshModuleRows()]);
       return String(r.result ?? '실행했습니다.');
     }
 
@@ -2386,7 +2751,8 @@ class AppState {
         await this.saveCopy(name);
         detail = `“${name}” 으로 복사본을 저장했습니다.`;
       } else if (r.host.kind === 'host_card_writeback') {
-        const out = await this.cardWriteBack();
+        // The proposal names its working copy: the bot, or a module (§1-95).
+        const out = await this.cardWriteBack(() => {}, r.host.charKey || this.activeCharKey);
         if (!out.verified) throw new Error(out.drift || 'RisuAI 저장 결과를 확인하지 못했습니다. 미반영 변경을 보존했습니다.');
         detail = out.mode === 'noop'
           ? '카드에 반영할 변경이 없었습니다.'
@@ -2404,6 +2770,10 @@ class AppState {
           : '페르소나에 반영할 변경이 없었습니다.';
       } else if (r.host.kind === 'host_open_tab') {
         const tab = String(r.host.args?.tab || '');
+        // A proposal made while a module was the target opens that module's tab.
+        const mk = r.host.charKey || '';
+        if (this.openModules.some((m) => m.key === mk)) this.cardTarget = mk;
+        else if (mk === this.activeCharKey) this.cardTarget = '';
         this.openTabRequest = tab;
         this.emit();
         detail = '탭을 이동했습니다.';
@@ -2430,7 +2800,7 @@ class AppState {
   /** The agent's save tool runs only for an explicit user writeback request. */
   async requestedCardWriteback(id: string, charKey: string, chatKey: string): Promise<string> {
     if (!id || !charKey) throw new Error('잘못된 봇 저장 요청입니다.');
-    if (this.botKey !== charKey) {
+    if (this.activeCharKey !== charKey && !this.openModules.some((m) => m.key === charKey)) {
       const detail = '요청한 봇과 현재 봇이 달라 저장하지 않았습니다.';
       await transport.post('/actions/complete', { chatKey, id, ok: false, detail });
       throw new Error(detail);
@@ -2446,20 +2816,20 @@ class AppState {
   }
 
   async lore(scope?: 'global' | 'local'): Promise<LoreEntry[]> {
-    const q = '/lore?charKey=' + encodeURIComponent(this.activeCharKey)
+    const q = '/lore?charKey=' + encodeURIComponent(scope === 'local' ? this.activeCharKey : this.botKey)
       + (scope ? '&scope=' + scope : '');
     const r = await transport.get(q) as { lore: LoreEntry[] };
     return r.lore;
   }
 
   async saveLore(id: string, entry: Record<string, unknown>): Promise<void> {
-    await transport.post('/lore/update', { charKey: this.activeCharKey, id, entry });
+    await transport.post('/lore/update', { charKey: this.botKey, id, entry });
     void this.refreshChanges();
   }
 
   async addLore(entry: Record<string, unknown>, scope: 'global' | 'local'): Promise<string> {
     const r = await transport.post('/lore', {
-      charKey: this.activeCharKey, entry, scope,
+      charKey: scope === 'local' ? this.activeCharKey : this.botKey, entry, scope,
       chatKey: scope === 'local' ? this.activeChatKey : undefined,
     }) as { id: string };
     void this.refreshChanges();
@@ -2467,12 +2837,12 @@ class AppState {
   }
 
   async deleteLore(id: string): Promise<void> {
-    await transport.post('/lore/delete', { charKey: this.activeCharKey, id });
+    await transport.post('/lore/delete', { charKey: this.botKey, id });
     void this.refreshChanges();
   }
 
   async moveLore(id: string, toSeq: number): Promise<void> {
-    await transport.post('/lore/move', { charKey: this.activeCharKey, id, toSeq });
+    await transport.post('/lore/move', { charKey: this.botKey, id, toSeq });
     void this.refreshChanges();
     void this.refreshBotChanges();
   }
@@ -2585,12 +2955,12 @@ class AppState {
     await transport.post('/card/script/move', { charKey: this.botKey, id, toSeq });
   }
 
-  async cardPatch(): Promise<CardPatch> {
-    return await transport.get<CardPatch>('/card/patch', { charKey: this.botKey, stagedAssets: '1' });
+  async cardPatch(key = this.botKey): Promise<CardPatch> {
+    return await transport.get<CardPatch>('/card/patch', { charKey: key, stagedAssets: '1' });
   }
 
-  async cardCommit(label: string): Promise<void> {
-    await transport.post('/card/commit', { charKey: this.botKey, label });
+  async cardCommit(label: string, key = this.botKey): Promise<void> {
+    await transport.post('/card/commit', { charKey: key, label });
     this.bump();
     void this.refreshBotChanges();
   }
@@ -2671,7 +3041,9 @@ class AppState {
    * whole sequence lives here because two callers need it - the bot bar and
    * an approved host_card_writeback - and they must not drift apart.
    */
-  async cardWriteBack(progress: (text: string) => void = () => {}): Promise<{ applied: number; mode: string; verified: boolean; drift?: string; parts?: string[] }> {
+  async cardWriteBack(progress: (text: string) => void = () => {}, key = this.botKey): Promise<{ applied: number; mode: string; verified: boolean; drift?: string; parts?: string[] }> {
+    // A module's 반영 writes db.modules, not a character (§1-95).
+    if (key && key !== this.activeCharKey) return this.moduleWriteBack(key, progress);
     // Locked from the first moment (GitHub #3): the save-clock read used to run
     // before the lock, up to 8s of a panel that looked idle - and still
     // clickable - while a (large) 반영 had already started.
@@ -2690,13 +3062,14 @@ class AppState {
         + 'RisuAI에서 봇을 선택한 뒤 패널을 다시 열어 주세요');
     }
     const slot = await host.currentSlot();
-    const patch = await this.cardPatch();
+    const botKey = this.activeCharKey;
+    const patch = await this.cardPatch(botKey);
     if (!patch.full) {
       throw new Error('구버전 업로드 상태의 카드라 반영할 수 없습니다. 패널을 닫았다 다시 열어 주세요');
     }
     const update = this.cardUpdateFrom(patch, false);
     if (!update) return { applied: 0, mode: 'noop', verified: true };
-    await this.resolveStagedAssets(update, progress);
+    await this.resolveStagedAssets(update, progress, botKey);
     const current = await host.currentSlot();
     if (current.characterIndex !== slot.characterIndex) throw new Error('이미지 업로드 중 선택된 봇이 바뀌었습니다. 미반영 변경을 보존했습니다.');
     progress('이미지 준비 완료 · 카드 저장 및 반영 결과 확인 중…');
@@ -2707,7 +3080,7 @@ class AppState {
       return { applied: r.applied, mode: r.mode, verified: false, parts: r.parts, ...(r.drift ? { drift: r.drift } : {}) };
     }
     progress('RisuAI 반영 확인 완료 · 작업본을 동기화하는 중…');
-    await this.cardCommit('반영 직전');
+    await this.cardCommit('반영 직전', botKey);
     await this.rereadCard();
     return { applied: r.applied, mode: r.mode, verified: true, parts: r.parts };
   }
@@ -2766,7 +3139,7 @@ class AppState {
   }
 
   /** Resolve local asset snapshots only when the user writes the card. */
-  private async resolveStagedAssets(update: host.CardUpdate, progress: (text: string) => void): Promise<void> {
+  private async resolveStagedAssets(update: host.CardUpdate, progress: (text: string) => void, charKey = this.botKey): Promise<void> {
     const pending = new Set<string>();
     const collect = (value: unknown): void => {
       if (typeof value === 'string' && value.startsWith('assets/hina-pending-')) pending.add(value);
@@ -2779,7 +3152,6 @@ class AppState {
     const resolved = new Map<string, string>();
     let done = 0;
     if (pending.size) progress(`RisuAI 이미지 등록 0/${pending.size} · 카드 저장 대기`);
-    const charKey = this.botKey;
     await boundedAssets([...pending], async key => {
       const bytes = await transport.getBinary('/assets/blob', { key });
       const realKey = await Risuai.saveAsset(bytes);
@@ -2811,7 +3183,7 @@ class AppState {
 
   private async performSaveAsNewBot(backupName: string, progress: (text: string) => void): Promise<{ backupChaId: string; applied: number; mode: string }> {
     if (!this.slot) throw new Error('호스트 상태를 먼저 읽어야 합니다');
-    const patch = await this.cardPatch();
+    const patch = await this.cardPatch(this.activeCharKey);
     if (!patch.full) {
       throw new Error('구버전 업로드 상태의 카드라 저장할 수 없습니다. 패널을 닫았다 다시 열어 주세요');
     }
@@ -2835,17 +3207,17 @@ class AppState {
 
   private async performCloneBot(name: string, progress: (text: string) => void): Promise<string> {
     if (!this.slot) throw new Error('호스트 상태를 먼저 읽어야 합니다');
-    const patch = await this.cardPatch();
+    const patch = await this.cardPatch(this.activeCharKey);
     if (!patch.full) {
       throw new Error('구버전 업로드 상태의 카드라 복제할 수 없습니다. 패널을 닫았다 다시 열어 주세요');
     }
     const update = this.cardUpdateFrom(patch, true) ?? {};
-    await this.resolveStagedAssets(update, progress);
+    await this.resolveStagedAssets(update, progress, this.activeCharKey);
     progress('이미지 준비 완료 · 복제 봇 저장 중…');
     // The clone shares this bot's workspace: it carries the family key.
     const family = this.workspace?.familyKey || this.activeCharKey;
     const chaId = await host.cloneBot(this.slot.characterIndex, patch.chaId, name, update, family);
-    await this.cardCommit('복제 직전');
+    await this.cardCommit('복제 직전', this.activeCharKey);
     return chaId;
   }
 

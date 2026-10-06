@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 import asyncio
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +30,7 @@ from . import (actions, assets, codexauth, config, files, keys, log, permits, pr
 from . import agentnotes, assetrules, batchreview, continuity, nai, studio, studiojob, toolsigs, vision
 from . import card as cardmod
 from . import personas as personamod
+from . import modules as modmod
 from . import memory as mem
 
 INSTRUCTIONS = """\
@@ -260,6 +261,12 @@ class Deps:
     # Only context for the model: the persona tools take a persona argument,
     # because a persona belongs to no screen and the user may name any one.
     persona: str = ""
+    # RisuAI modules opened next to the bot or persona (app/modules.py), by
+    # key. When the card tabs show one of them, `char_key` IS that module's
+    # working copy and every card tool edits it; `bot_key` keeps the bot's.
+    # focus_target moves between them inside a turn.
+    bot_key: str = ""
+    modules: list[str] = field(default_factory=list)
     force_compact: bool = False
     continuity_parts: list[str] | None = None
     learning_reviewed: bool = False
@@ -283,6 +290,9 @@ PERSONA_KINDS = frozenset({"persona_edit", "persona_create", "persona_checkpoint
 # The studio's own verbs: adopting an image into the card is what the studio
 # is for, so these pass the screen gate there (the approval queue still runs).
 _STUDIO_KINDS = frozenset({"host_asset_add", "host_asset_add_many", "host_asset_replace", "asset_rename"})
+
+# A module (app/modules.py) has no greetings and is not a bot to clone.
+_NOT_FOR_MODULES = frozenset({"card_greeting_add", "card_greeting_delete", "host_clone_bot"})
 
 # Batches whose saved images were already shown as a strip: a job is polled
 # many times, and the pictures should appear once.
@@ -332,6 +342,48 @@ def _persona_screen(key: str) -> str:
             "\"어울리는 페르소나 제안\" 흐름: 후보를 답변으로 제시 → 사용자가 고르면 propose_persona_create → "
             "studio_generate → run_python 으로 자르기 → propose_persona_edit(image_path) → propose_persona_writeback. "
             "봇·챗 재료를 고치는 제안은 그 화면으로 이동한 뒤에만 됩니다.")
+
+
+def opened_modules_line(deps: "Deps") -> str:
+    """The modules opened next to the bot or persona, for the screen line."""
+    if not deps.modules:
+        return ""
+    names = []
+    for k in deps.modules:
+        try:
+            names.append(f"'{modmod.row(k)['name']}'({k})")
+        except Exception:  # noqa: BLE001 - a module forgotten meanwhile
+            continue
+    if not names:
+        return ""
+    return (" 함께 열린 RisuAI 모듈: " + ", ".join(names) + ". 카드 툴은 지금 봇 카드에 적용되며, "
+            "모듈을 고치려면 먼저 focus_target(모듈 이름) 으로 대상을 바꿉니다.")
+
+
+def module_screen(deps: "Deps") -> str:
+    """The screen line when the card tabs show a RisuAI module."""
+    try:
+        r = modmod.row(deps.char_key)
+        who = modmod.describe(r)[2:]
+    except Exception:  # noqa: BLE001
+        who = deps.char_key
+    others = [k for k in deps.modules if k != deps.char_key]
+    other_names = []
+    for k in others:
+        try:
+            other_names.append(modmod.row(k)["name"])
+        except Exception:  # noqa: BLE001
+            continue
+    back = "봇 카드" if deps.bot_key else ""
+    return ("지금 열려 있는 화면: 모듈 편집 - RisuAI 모듈 " + who + ". "
+            "모듈은 봇·페르소나·프롬프트와 조합해 쓰는 묶음입니다(에셋 모듈 = 봇에 에셋·토글 추가, 프롬프트 모듈 = 프리셋에 "
+            "정규식·토글 추가, 기타 = 범용 상태창·인벤토리 등). 이번 턴의 카드 툴(read_card, list_lore, list_scripts, "
+            "propose_lore_* / propose_regex_* / propose_trigger_* / propose_card_edit, 에셋, 봇 스냅샷, write_card_to_risu)은 "
+            "이 모듈의 작업본에 적용되고, 반영하면 RisuAI 모듈 목록의 이 모듈이 바뀝니다. 모듈의 필드: name, creatorNotes(모듈 설명), "
+            "customModuleToggle(토글 정의 - RisuAI 커스텀 토글 문법, 한 줄에 하나), moduleNamespace, lowLevelAccess, "
+            "hideChatIcon, backgroundHTML(배경 임베딩), image(아이콘). 인사말·desc 같은 캐릭터 필드는 없습니다."
+            + (" 함께 열린 다른 모듈: " + ", ".join(other_names) + "." if other_names else "")
+            + (f" {back}로 돌아가려면 focus_target(\"bot\")." if back else ""))
 
 
 def _screen_refusal(mode: str, need: str) -> str | None:
@@ -791,12 +843,15 @@ def build(model: Any = None) -> Agent[Deps]:
     def _current_screen(ctx: RunContext[Deps]) -> str:
         # Stated up front rather than discovered through a tool refusal, in
         # the same words the panel header shows (user request, 2026-08-30).
+        if modmod.is_module_key(ctx.deps.char_key):
+            return module_screen(ctx.deps)
+        extra = opened_modules_line(ctx.deps)
         if ctx.deps.mode == "bot":
-            return "지금 열려 있는 화면: 봇 편집 (카드 재료 - 메타·인사말·봇 로어북·Regex·트리거·에셋)."
+            return "지금 열려 있는 화면: 봇 편집 (카드 재료 - 메타·인사말·봇 로어북·Regex·트리거·에셋)." + extra
         if ctx.deps.mode == "chat":
             return "지금 열려 있는 화면: 챗 편집 (이 챗의 재료 - 턴·챗 로어북·장기기억·챗 변수)."
         if ctx.deps.mode == "persona":
-            return _persona_screen(ctx.deps.persona)
+            return _persona_screen(ctx.deps.persona) + extra
         if ctx.deps.mode == "studio":
             return ("지금 열려 있는 화면: 에셋 스튜디오 (봇과 무관한 전역 이미지 라이브러리 - "
                     "프롬프트 카드·생성·선별. 카드로의 에셋 반영 제안은 여기서도 됩니다).")
@@ -1104,6 +1159,9 @@ def build(model: Any = None) -> Agent[Deps]:
         return "\n\n".join(out)[:30000]
 
     def _propose(ctx: RunContext[Deps], kind: str, summary: str, args: dict) -> str:
+        if kind in _NOT_FOR_MODULES and modmod.is_module_key(ctx.deps.char_key):
+            return ("지금 대상은 RisuAI 모듈입니다. 모듈에는 인사말이 없고 봇 복제도 할 수 없습니다 - "
+                    "봇 카드에 하려면 focus_target(\"bot\") 뒤에 다시 제안해 주세요.")
         wrong = screen_gate(ctx.deps.mode, kind)
         scope = actions.scope_of({'kind': kind, 'args': args})
         if scope and not (ctx.deps.mode == 'studio' and kind in _STUDIO_KINDS):
@@ -1620,6 +1678,50 @@ def build(model: Any = None) -> Agent[Deps]:
             return "모르는 탭입니다: " + tab + " (가능: " + ", ".join(labels) + ")"
         return _propose(ctx, "host_open_tab",
                         f"{labels[tab]} 탭으로 이동 — {reason}", {"tab": tab})
+
+    # --- RisuAI modules (app/modules.py) -----------------------------------
+
+    @agent.tool
+    def list_modules(ctx: RunContext[Deps], query: str = "") -> str:
+        """RisuAI modules (bundles of lorebook / Regex / triggers / assets / toggles that combine with a
+        bot, a persona or a prompt preset): name, key, counts, unsaved changes, and which are opened in
+        the panel now. query filters by name/description. Only modules the panel has read are known."""
+        rows = modmod.listing(query)
+        if not rows:
+            return ("조건에 맞는 모듈이 없습니다" if query else
+                    "알려진 모듈이 없습니다 - 패널에서 모듈을 열거나 + 버튼으로 모듈 목록을 읽어야 알 수 있습니다")
+        opened = set(ctx.deps.modules)
+        lines = [f"모듈 {len(rows)}개 (열림 = 지금 패널에 함께 열린 모듈)"]
+        for r in rows:
+            mark = " [열림]" if r["key"] in opened else ""
+            mark += " [지금 편집 대상]" if r["key"] == ctx.deps.char_key else ""
+            lines.append(modmod.describe(r) + mark)
+        return "\n".join(lines)
+
+    @agent.tool
+    def focus_target(ctx: RunContext[Deps], target: str) -> str:
+        """Choose what the card tools (read_card, list_lore, list_scripts, propose_lore_*, propose_regex_*,
+        propose_trigger_*, propose_card_*, assets, snapshots, write_card_to_risu ...) work on for the rest
+        of this turn: "bot" = the bot's card, or a module (name or key) opened in the panel.
+        Proposals keep the target they were made for."""
+        t = str(target or "").strip()
+        if t.lower() in ("bot", "봇", "") or t == ctx.deps.bot_key:
+            if not ctx.deps.bot_key:
+                return "봇이 없습니다"
+            ctx.deps.char_key = ctx.deps.bot_key
+            return "이제 카드 툴은 봇 카드에 적용됩니다."
+        try:
+            ck = modmod.resolve(t)
+        except modmod.ModuleError as e:
+            return str(e)
+        if ck not in ctx.deps.modules:
+            return ("그 모듈은 패널에 열려 있지 않습니다. 사용자에게 탭 줄의 + 버튼으로 모듈을 열어 달라고 요청해 주세요. "
+                    "열린 모듈: " + (", ".join(modmod.row(k)["name"] for k in ctx.deps.modules) or "없음"))
+        ctx.deps.char_key = ck
+        r = modmod.row(ck)
+        return (f"이제 카드 툴은 모듈 '{r['name']}' 작업본에 적용됩니다 ({modmod.describe(r)[2:]}). "
+                "모듈의 설명은 creatorNotes, 토글은 customModuleToggle, 네임스페이스는 moduleNamespace, "
+                "배경 임베딩은 backgroundHTML 필드입니다.")
 
     @agent.tool
     def list_bot_snapshots(ctx: RunContext[Deps]) -> str:

@@ -417,10 +417,16 @@ def stage_changes(ck: str, kind: str, items: list[dict]) -> dict:
         raise AssetError('봇 작업본을 먼저 불러와 주세요')
     if not items or len(items) > 5000:
         raise AssetError('에셋은 1~5000개씩 승인해 주세요')
+    from . import modules
+    # A module keeps one asset list (`assets`, the card's additional list):
+    # an emotion image for it is an additional asset of the same name.
+    is_module = modules.is_module_key(ck)
     prepared = []
     for item in items:
         name = str(item.get('name') or '').strip()
         field = str(item.get('field') or 'additional')
+        if is_module and field == 'emotion':
+            field = 'additional'
         if field == 'image':
             # The profile picture (§1-66): not a list entry but the card's
             # `image` key, so it lands on the card_fields row instead.

@@ -56,7 +56,11 @@ from . import db, log, merge, store
 SCALARS = ("name", "desc", "firstMessage", "creatorNotes", "characterVersion",
            "replaceGlobalNote", "systemPrompt", "exampleMessage", "defaultVariables",
            "translatorNote", "lowLevelAccess", "loreSettings", "image", "backgroundHTML")
-BOOL_FIELDS = ("lowLevelAccess",)
+# A RisuAI module edited as a card (app/modules.py) has these instead: no
+# greetings or prose, but a toggle definition, a namespace and the icon switch.
+MODULE_SCALARS = ("name", "creatorNotes", "customModuleToggle", "moduleNamespace",
+                  "lowLevelAccess", "hideChatIcon", "image", "backgroundHTML")
+BOOL_FIELDS = ("lowLevelAccess", "hideChatIcon")
 LORE_SETTINGS_FIELD = "loreSettings"
 # (key, kind) in encoding order. RisuAI's defaults are 5 / 800 / off / off.
 LORE_SETTINGS_KEYS = (("recursiveScanning", "bool"), ("fullWordMatching", "bool"),
@@ -81,6 +85,12 @@ LIST_FIELD = "alternateGreetings"
 # only what the card says about them.
 ASSET_KIND = "assetref"
 SCRIPT_KINDS = ("customscript", "triggerscript", ASSET_KIND)
+
+
+def scalars_for(ck: str) -> tuple[str, ...]:
+    """The scalar rows a working copy has: a module's, or a bot's."""
+    from . import modules
+    return MODULE_SCALARS if modules.is_module_key(ck) else SCALARS
 
 
 def encode_lore_settings(value: Any) -> str:
@@ -218,7 +228,13 @@ def ingest(ck: str, card: dict, *, reset: bool) -> dict:
             (ck, *_RETIRED))
 
     field_rows: list[tuple[str, int, str]] = []
-    for f in SCALARS:
+    scalars = scalars_for(ck)
+    # A field the other kind has (a module row on a bot key, or the reverse)
+    # cannot arise from a card, but a key reused across kinds must not keep it.
+    db.execute(
+        f"DELETE FROM card_fields WHERE char_key = ? AND field <> ? AND field NOT IN ({','.join('?' * len(scalars))})",
+        (ck, LIST_FIELD, *scalars))
+    for f in scalars:
         field_rows.append((f, 0, scalar_of(card, f)))
         counts["fields"] += 1
     greetings = card.get(LIST_FIELD)
@@ -439,7 +455,7 @@ def listing(ck: str) -> dict:
     items = [_field_row(r) for r in rows]
     # Declaration order with greetings tucked under firstMessage - the ORDER BY
     # above is alphabetical, which is nobody's mental model of a card.
-    order = {f: i * 2 for i, f in enumerate(SCALARS)}
+    order = {f: i * 2 for i, f in enumerate(scalars_for(ck))}
     order[LIST_FIELD] = order.get("firstMessage", len(order) * 2) + 1
     items.sort(key=lambda x: (order.get(x["field"], 99), x["seq"]))
     return {

@@ -25,7 +25,7 @@ import { shellNotice } from './chatbar';
 import { openConflicts } from './conflicts';
 
 export interface DirtyItem {
-  scope: 'card' | 'chat' | 'persona';
+  scope: 'card' | 'chat' | 'persona' | 'module';
   /** chatKey for a chat; '' for the card. */
   key: string;
   label: string;
@@ -90,6 +90,9 @@ export function collect(summary: DirtySummary, except?: LeaveExempt): DirtyItem[
   for (const p of summary.personas ?? []) {
     out.push({ scope: 'persona', key: p.key, label: `'${p.name || '이름 없는'}' 페르소나`, total: p.total, conflicts: 0 });
   }
+  for (const m of summary.modules ?? []) {
+    out.push({ scope: 'module', key: m.key, label: `'${m.name || '이름 없는'}' 모듈`, total: m.total, conflicts: m.conflicts });
+  }
   return out;
 }
 
@@ -103,8 +106,9 @@ export async function applyOne(d: DirtyItem): Promise<void> {
     await state.personaWriteBack(d.key);
     return;
   }
-  if (d.scope === 'card') {
-    const r = await state.cardWriteBack();
+  if (d.scope === 'card' || d.scope === 'module') {
+    // The bot's card, or a RisuAI module (§1-95) - each by its own key.
+    const r = await state.cardWriteBack(() => {}, d.scope === 'card' ? state.activeCharKey : d.key);
     if (!r.verified) {
       throw new Error('RisuAI 가 이 쓰기를 받지 않았습니다' + (r.drift ? ` (${r.drift})` : '')
         + '. 편집 내용은 그대로 있습니다. RisuAI 가 다른 창이나 기기에 열려 있지 않은지 확인해 주세요.');

@@ -159,6 +159,23 @@ button.outline:hover { background: rgba(37,99,235,.18); }
   color: var(--textcolor2, #79839a); border-bottom: 2px solid transparent; margin-bottom: -1px;
 }
 .tab.active { color: var(--textcolor, #d8dce4); border-bottom-color: #2563eb; font-weight: 700; }
+/* RisuAI modules on the tab row (§1-95): one group per open module - its chip,
+   and while it is the target its own 정보 · 로어북 · Regex · 트리거 · 에셋 - then ＋. */
+.modtabs { display: inline-flex; align-items: stretch; gap: 2px; flex-shrink: 0; }
+.modgroup { display: inline-flex; align-items: stretch; border-left: 1px solid var(--borderc, #2b323f); padding-left: 2px; }
+.modgroup.on { background: rgba(124,92,255,.08); border-radius: 6px 6px 0 0; }
+.modchip { padding: 8px 10px; color: #a58bff; }
+.modchip.on { font-weight: 700; }
+.modchip .tabbadge { margin-left: 4px; }
+.modsub { padding: 8px 9px; font-size: 12px; }
+.modclose { align-self: center; padding: 1px 6px; min-width: 0; opacity: .6; }
+.modclose:hover { opacity: 1; }
+.modadd { padding: 8px 10px; color: #a58bff; }
+.modpicker { min-width: 300px; max-width: 460px; }
+.modlist { max-height: 46vh; overflow-y: auto; }
+.modrow { cursor: pointer; gap: 8px; }
+.modrow input[type=checkbox] { flex-shrink: 0; }
+.chatitem.dim { opacity: .55; }
 /* The asset importer's progress at the end of the tab row. */
 /* The panel fold toggles (every three-pane tab), on the tab row before the sync badge. */
 .layoutslot { margin-left: auto; align-items: center; gap: 2px; }

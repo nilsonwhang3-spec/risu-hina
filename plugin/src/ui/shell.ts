@@ -37,6 +37,7 @@ import { suggestFolderRename } from './folder-suggest';
 import { noteStudioLeft, renderStudioTab } from './tab-studio';
 import { getSettingsBar } from './tab-settings';
 import { installDropGuard } from './tree';
+import { openModulePicker, setModuleFocusHandler } from './module-picker';
 
 /**
  * Content views in the tab bar; settings is not one of them.
@@ -58,7 +59,7 @@ export type TabId = 'chats' | 'editor' | 'lore' | 'memory' | 'vars'
  * 선택 | 메타 · 봇 로어북 · Regex · 트리거 ┃ 워크스페이스 파일          (bot)
  * Clicking a chat on the picker enters chat mode; "봇 편집" enters bot mode.
  */
-export type EditMode = 'chat' | 'bot' | 'persona';
+export type EditMode = 'chat' | 'bot' | 'persona' | 'module';
 // The bot half opens first: a session usually starts by looking at the card,
 // and the chat tabs are one click away on the picker either way.
 let mode: EditMode = 'bot';
@@ -91,19 +92,37 @@ const BOT_TABS = new Set<TabId>(['meta', 'botlore', 'regex', 'trigger', 'assets'
 /** The persona mode's one tab. */
 const PERSONA_TABS = new Set<TabId>(['persona']);
 
-const MODE_TABS: Record<EditMode, Set<TabId>> = { chat: CHAT_TABS, bot: BOT_TABS, persona: PERSONA_TABS };
+/**
+ * The fourth mode (§1-95): RisuAI modules on their own. It has no fixed tabs -
+ * each open module is a tab group of its own (see syncModuleTabs), the same
+ * groups that sit after 트리거 · 에셋 in 봇 편집 and after 페르소나.
+ */
+const MODULE_MODE_TABS = new Set<TabId>();
 
-const MODE_LABEL: Record<EditMode, string> = { chat: '챗 편집', bot: '봇 편집', persona: '페르소나 편집' };
+const MODE_TABS: Record<EditMode, Set<TabId>> = { chat: CHAT_TABS, bot: BOT_TABS, persona: PERSONA_TABS, module: MODULE_MODE_TABS };
+
+const MODE_LABEL: Record<EditMode, string> = { chat: '챗 편집', bot: '봇 편집', persona: '페르소나 편집', module: '모듈 편집' };
 const MODE_TITLE: Record<EditMode, string> = {
   chat: '이 챗의 재료(턴·챗 로어북·장기기억·챗 변수)를 고치는 화면입니다',
   bot: '봇 카드의 재료(메타·인사말·봇 로어북·Regex·트리거·에셋)를 고치는 화면입니다',
   persona: 'RisuAI 사용자 페르소나(이름·설명·프로필 사진)를 고치는 화면입니다',
+  module: 'RisuAI 모듈(로어북·Regex·트리거·에셋·토글)을 고치는 화면입니다',
 };
+
+/** A module's tabs: the bot tabs, re-pointed at the module (state.cardTarget). */
+const MODULE_SUBTABS: [TabId, string][] = [
+  ['meta', '정보'], ['botlore', '로어북'], ['regex', 'Regex'], ['trigger', '트리거'], ['assets', '에셋'],
+];
+/** Which sub-tab each module was last on, so its chip returns there. */
+const lastSub: Record<string, TabId> = {};
 
 export function setEditMode(m: EditMode, tab?: TabId): void {
   mode = m;
   // The agent is told which half is open with every prompt (Deps.mode).
   state.editMode = m;
+  // Chats have no modules; the other modes reopen their own set (§1-95).
+  if (m === 'chat') state.focusModule('');
+  void state.syncModuleOwner();
   syncModeTabs();
   if (tab) setTab(tab);
   else if (!MODE_TABS[m].has(active) && (CHAT_TABS.has(active) || BOT_TABS.has(active) || PERSONA_TABS.has(active))) setTab('chats');
@@ -122,6 +141,67 @@ export function activeHalf(): EditMode {
   return mode;
 }
 
+/** The tab row's module groups and ＋ (§1-95), rebuilt from state. */
+const modTabs = el('span', { class: 'modtabs' });
+let modSig = '';
+
+function syncModuleTabs(): void {
+  const inEdit = mode !== 'chat' && active !== 'settings';
+  modTabs.style.display = inEdit && (mode !== 'bot' || !!state.activeCharKey || state.openModules.length > 0) ? '' : 'none';
+  // The bot's own tabs are lit only while the bot is the target.
+  for (const id of BOT_TABS) {
+    document.getElementById('tab-' + id)?.classList.toggle('active', id === active && !state.cardTarget);
+  }
+  const sig = JSON.stringify([mode, active, state.cardTarget,
+    state.openModules.map((m) => [m.key, m.name, m.total, m.conflicts])]);
+  if (sig === modSig) return;
+  modSig = sig;
+  clear(modTabs);
+  for (const m of state.openModules) {
+    const on = state.cardTarget === m.key;
+    const badge = m.total ? el('span', { class: 'badge warn tabbadge', text: String(m.total) }) : null;
+    const chip = el('button', {
+      class: 'tab modchip' + (on && BOT_TABS.has(active) ? ' active' : '') + (on ? ' on' : ''),
+      title: `RisuAI 모듈 '${m.name}' - 로어북 ${m.lore} · Regex ${m.regex} · 트리거 ${m.trigger} · 에셋 ${m.assets}`,
+    }, [el('span', { class: 'tablabel', text: '◫ ' + (m.name || '(이름 없음)') }), badge]);
+    chip.addEventListener('click', () => focusModuleTab(m.key));
+    const group = el('span', { class: 'modgroup' + (on ? ' on' : '') }, [chip]);
+    if (on) {
+      for (const [id, label] of MODULE_SUBTABS) {
+        const sub = el('button', { class: 'tab modsub' + (active === id ? ' active' : ''), text: label });
+        sub.addEventListener('click', () => { lastSub[m.key] = id; if (state.cardTarget !== m.key) state.focusModule(m.key); setTab(id); });
+        group.appendChild(sub);
+      }
+      const x = el('button', { class: 'ghost tiny modclose', text: '✕', title: '이 모듈을 닫습니다 (작업본과 미반영 변경은 남습니다)' });
+      x.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const back = mode === 'persona' ? 'persona' : mode === 'bot' ? 'meta' : null;
+        void state.closeModule(m.key).then(() => {
+          if (!state.cardTarget && BOT_TABS.has(active) && mode !== 'bot') setTab(back ?? (state.openModules[0] ? active : 'chats'));
+          if (mode === 'module' && state.openModules[0]) focusModuleTab(state.openModules[0].key);
+        });
+      });
+      group.appendChild(x);
+    }
+    modTabs.appendChild(group);
+  }
+  const none = !state.openModules.length;
+  const add = el('button', {
+    class: 'tab modadd',
+    title: 'RisuAI 모듈을 함께 엽니다 (여러 개 가능, 조합은 기억됩니다)',
+    text: none ? (mode === 'module' ? '＋ 모듈 열기' : '＋ 모듈') : '＋',
+  });
+  add.addEventListener('click', () => openModulePicker(add));
+  modTabs.appendChild(add);
+}
+
+/** A module chip: the card tabs now show that module, on its last sub-tab. */
+function focusModuleTab(key: string): void {
+  state.focusModule(key);
+  setTab(BOT_TABS.has(active) && lastSub[key] === undefined ? active : (lastSub[key] ?? 'botlore'));
+}
+setModuleFocusHandler(focusModuleTab);
+
 function syncModeTabs(): void {
   for (const m of Object.keys(MODE_TABS) as EditMode[]) {
     for (const id of MODE_TABS[m]) {
@@ -130,6 +210,7 @@ function syncModeTabs(): void {
     }
   }
   syncBackTab();
+  syncModuleTabs();
 }
 
 /** The tab bar's mode chip: which half the mode tabs belong to. */
@@ -146,7 +227,7 @@ function syncBackTab(): void {
   const btn = document.getElementById('tab-chats');
   const inEdit = active !== 'chats';
   if (label) label.textContent = inEdit ? '‹ 뒤로' : '선택';
-  if (btn) btn.title = inEdit ? '첫 화면으로 돌아갑니다 (봇·챗·페르소나 다시 고르기)' : '무엇을 편집할지 고르는 첫 화면입니다';
+  if (btn) btn.title = inEdit ? '첫 화면으로 돌아갑니다 (봇·챗·페르소나·모듈 다시 고르기)' : '무엇을 편집할지 고르는 첫 화면입니다';
   modeChip.textContent = MODE_LABEL[mode];
   modeChip.title = MODE_TITLE[mode];
   // On the first screen no mode has been chosen yet: the chip would name a
@@ -229,7 +310,10 @@ function syncToolslot(): void {
   const chatPending = !!(state.changes?.total || state.changes?.actions || state.changes?.staged || state.changes?.conflicts);
   const botPending = !!(state.botChanges?.total || state.botChanges?.actions || state.botChanges?.conflicts);
   const showChat = mode === 'chat' && !!state.activeChatKey && (CHAT_TABS.has(active) || chatPending);
-  const showBot = (mode === 'bot' || active === 'studio') && !!state.botKey && (BOT_TABS.has(active) || botPending);
+  // On a card tab the bar acts on what the tab shows - the bot, or a module
+  // (§1-95) in any mode; elsewhere it stays for the bot's pending work.
+  const showBot = !!state.botKey && (BOT_TABS.has(active)
+    || ((mode === 'bot' || active === 'studio') && botPending && !state.cardTarget));
   const chatLabel = chatBarEl.querySelector('[data-tool="apply"] .tool-label');
   const botLabel = botBarEl.querySelector('[data-tool="card-apply"] .tool-label');
   if (chatLabel) chatLabel.textContent = CHAT_TABS.has(active) && !showBot ? '반영' : '챗 반영';
@@ -279,6 +363,7 @@ export function setTab(tab: TabId): void {
   // The gear is a toggle, so it has to look pressed while settings is open.
   document.getElementById('open-settings')?.classList.toggle('on', tab === 'settings');
   syncBackTab();
+  syncModuleTabs();
   renderActive();
   syncSettingsBar();
   syncToolslot();
@@ -306,6 +391,7 @@ function syncSettingsBar(): void {
   if (!row) return;
   const inSettings = active === 'settings';
   for (const b of Array.from(row.querySelectorAll('.tab, .tabsep, .modetab'))) {
+    if ((b as HTMLElement).closest('.modtabs')) continue;
     (b as HTMLElement).style.display = inSettings ? 'none' : '';
   }
   if (!inSettings) syncModeTabs();
@@ -414,9 +500,16 @@ export function refreshStatus(): void {
   // while an edit tab is open - on the picker the question is not answered
   // yet, and in settings or files it is not being asked.
   if (CHAT_TABS.has(active) || BOT_TABS.has(active) || PERSONA_TABS.has(active)) {
-    healthEl.appendChild(el('span', { class: 'badge modechip', text: MODE_LABEL[mode], title: MODE_TITLE[mode] }));
+    // A module on the card tabs is module editing, whichever mode opened it.
+    const m: EditMode = BOT_TABS.has(active) && state.cardTarget ? 'module' : mode;
+    healthEl.appendChild(el('span', { class: 'badge modechip', text: MODE_LABEL[m], title: MODE_TITLE[m] }));
   }
-  if (PERSONA_TABS.has(active) && state.persona) {
+  const mod = BOT_TABS.has(active) ? state.targetModule : null;
+  if (mod) {
+    healthEl.appendChild(el('span', { class: 'hint botname', text: `· ◫ ${mod.name || '(이름 없음)'}`, title: 'RisuAI 모듈 - 반영하면 RisuAI 모듈 목록의 이 모듈이 바뀝니다' }));
+    return;
+  }
+  if ((PERSONA_TABS.has(active) || mode === 'persona') && state.persona) {
     healthEl.appendChild(el('span', { class: 'hint botname', text: `· ${state.persona.name || '(이름 없음)'}` }));
     return;
   }
@@ -453,6 +546,8 @@ export function buildShell(): void {
       // stays pending and the title-row 반영 shows and writes it. Only the
       // exits that would lose it (닫기, 🔄) still ask.
       if (id === 'chats') foldLanding();
+      // The bot's own tab: the card tabs leave any module (§1-95).
+      if (BOT_TABS.has(id)) state.focusModule('');
       setTab(id);
     });
     return b;
@@ -533,7 +628,7 @@ export function buildShell(): void {
     el('div', { class: 'tabs' }, [
       ...CONTENT_TABS.flatMap(([id, label]) => (
         id === 'files'
-          ? [el('span', { class: 'tabsep', title: '여기부터는 편집 대상이 아니라 작업 공간입니다 — 봇의 워크스페이스와, 봇과 무관한 에셋 스튜디오' }), tabButton(id, label)]
+          ? [modTabs, el('span', { class: 'tabsep', title: '여기부터는 편집 대상이 아니라 작업 공간입니다 — 봇의 워크스페이스와, 봇과 무관한 에셋 스튜디오' }), tabButton(id, label)]
           // The mode chip sits right after the back tab, naming the group of
           // tabs beside it (봇 편집 / 챗 편집) - the user asked for the mode
           // to be readable at the tab bar, not only in the title row.
@@ -597,7 +692,10 @@ state.onChange(() => {
     const tab = state.openTabRequest as TabId;
     state.openTabRequest = null;
     const want: EditMode | null = CHAT_TABS.has(tab) ? 'chat' : BOT_TABS.has(tab) ? 'bot' : PERSONA_TABS.has(tab) ? 'persona' : null;
-    if (want && want !== mode) {
+    if (want === 'bot' && state.cardTarget) {
+      // A module's tab (§1-95): stay in the mode that opened the module.
+      setTab(tab);
+    } else if (want && want !== mode) {
       // The agent asked for the other half: a plain mode switch (§1-76 -
       // the card and chats may both hold pending work now).
       setEditMode(want, tab);
@@ -630,6 +728,14 @@ state.onChange(() => {
   refreshBotBar();
   refreshTabBadges();
   refreshSyncBadge();
+  // Another bot (🔄) or persona: its own module set (cheap when unchanged).
+  if (mode !== 'chat') void state.syncModuleOwner();
+  syncModuleTabs();
+  // A module closed under the card tabs in persona/module mode: leave them.
+  if (BOT_TABS.has(active) && !state.cardTarget && mode !== 'bot') {
+    setTab(mode === 'persona' ? 'persona' : 'chats');
+    return;
+  }
   renderActive();
   syncToolslot();
 });

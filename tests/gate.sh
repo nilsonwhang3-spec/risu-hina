@@ -62,6 +62,8 @@ run "global file space" "$PY" tests/test_files.py
 run "project folder rename" "$PY" tests/test_project_folder.py
 # RisuAI personas as a working copy: sync, snapshots, 반영, AI proposals.
 run "persona working copies" "$PY" tests/test_personas.py
+# RisuAI modules as card working copies: merge, combos, risum/charx, agent target.
+run "module working copies" "$PY" tests/test_modules.py
 run "reversible AI temp cleanup" "$PY" tests/test_ai_cleanup.py
 # Side events (artifact / images) and the artifact writer's file rules.
 run "stream side events" "$PY" tests/test_stream_events.py

@@ -37,6 +37,7 @@ from pydantic_ai.messages import (
 from pydantic_ai import capture_run_messages
 
 from . import agent as agent_mod
+from . import modules as modmod
 from . import providers
 from . import config, db, log, permits, presets, pyexec, skills, staging, store, vision, workspace
 
@@ -478,10 +479,13 @@ def _drain_extra(session_id: str) -> list[dict]:
         return _EXTRA.pop(session_id, [])
 
 
-async def run(session_id: str, prompt: str, mode: str = "", persona: str = "") -> AsyncGenerator[str, None]:
+async def run(session_id: str, prompt: str, mode: str = "", persona: str = "", *,
+              target: str = "", modules: list[str] | None = None) -> AsyncGenerator[str, None]:
     """Drive one agent turn, yielding NDJSON lines. `mode` is the screen of
     the panel the user is looking at, see agent.Deps.mode; `persona` the key
-    of the persona open in the persona tab (agent.Deps.persona)."""
+    of the persona open in the persona tab (agent.Deps.persona); `target` the
+    module the card tabs show ('' = the bot) and `modules` every module opened
+    alongside (agent.Deps.modules)."""
     srow = db.one("SELECT * FROM sessions WHERE id = ?", (session_id,))
     if srow is None:
         yield _line({"type": "error", "error": f"unknown session: {session_id}"})
@@ -506,6 +510,15 @@ async def run(session_id: str, prompt: str, mode: str = "", persona: str = "") -
         mode=mode if mode in SCREEN_MODES else "",
         persona=str(persona or "")[:200],
     )
+    # A module opened next to the bot is edited with the card tools: the turn
+    # addresses its working copy (app/modules.py). The bot stays reachable
+    # through focus_target, and the chat tools still see the chat.
+    deps.bot_key = deps.char_key
+    deps.modules = [k for k in (modules or []) if modmod.is_module_key(k)]
+    if target and modmod.is_module_key(target):
+        if target not in deps.modules:
+            deps.modules.append(target)
+        deps.char_key = target
 
     # One turn per session: a turn the client lost is stopped and its prompt
     # lands in the history before this one reads it.

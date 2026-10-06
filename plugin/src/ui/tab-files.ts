@@ -168,6 +168,9 @@ let focusBotProject = false;
 
 /** The persona whose folder the tab follows ('' outside persona mode). */
 function personaContext(): string {
+  // A module being edited (§1-95) has a project folder of its own, too.
+  const mod = state.targetModule;
+  if (mod) return `projects/${mod.folder}`;
   return state.editMode === 'persona' ? state.personaFolder : '';
 }
 

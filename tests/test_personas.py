@@ -216,7 +216,7 @@ check("persona_checkpoint_restore", main.h_persona_get({"key": "p5"})["work"]["p
 pr = actions.propose("host_persona_writeback", chat_key=TK, char_key=CK, summary="w", args={"key": "p5"})
 out = actions.decide(pr["id"], True, mode="studio")
 check("host_persona_writeback is handed to the plugin", out.get("host") == {"kind": "host_persona_writeback",
-                                                                           "args": {"key": "p5"}}, str(out))
+                                                                           "args": {"key": "p5"}, "charKey": CK}, str(out))
 for mode in ("bot", "chat", "persona", "studio", ""):
     check(f"screen gate passes persona kinds on '{mode or '-'}'",
           all(agent.screen_gate(mode, k) is None for k in agent.PERSONA_KINDS))

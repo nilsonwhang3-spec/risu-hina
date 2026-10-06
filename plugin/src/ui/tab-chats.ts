@@ -1,11 +1,12 @@
 /**
  * The first screen: what to edit (§1-89).
  *
- * Three modes, three cards - 봇 편집 · 챗 편집 · 페르소나 편집 - and nothing
- * else competing with them. Pressing one unfolds its choices underneath:
+ * Four modes, four cards - 봇 편집 · 챗 편집 · 페르소나 편집 · 모듈 편집 - and
+ * nothing else competing with them. Pressing one unfolds its choices underneath:
  *   봇     the current working copy, or a saved / automatic snapshot of it
  *   챗     the bot's chats, folders as RisuAI keeps them
  *   페르소나 RisuAI's user personas
+ *   모듈   RisuAI's modules (§1-95), or one added from a .risum/.charx file
  * and picking one enters that mode's tabs.
  *
  * Built for not blinking. The screen is re-rendered on every state change
@@ -31,8 +32,10 @@ import { personaImage } from '../persona';
 import type { PersonaRow } from '../state';
 import { shellNotice } from './chatbar';
 import { askName } from './kit';
+import type { LiveModule } from '../state';
+import { moduleLine } from './module-picker';
 
-type Mode = 'bot' | 'chat' | 'persona';
+type Mode = 'bot' | 'chat' | 'persona' | 'module';
 
 /** Which card is unfolded; '' = none. Survives re-renders, not 선택/뒤로. */
 let openMode: Mode | '' = '';
@@ -193,7 +196,7 @@ class Cached<T> {
 const snaps = new Cached<Snap[]>(() => state.cardCheckpoints());
 const dirty = new Cached<DirtySummary | null>(() => state.dirtySummary());
 
-const snapKey = () => `${state.botKey}:${state.epoch}`;
+const snapKey = () => `${state.activeCharKey}:${state.epoch}`;
 const dirtyKey = () => `${state.activeCharKey}:${state.epoch}:${state.changes?.total ?? ''}:${state.botChanges?.total ?? ''}`;
 
 function loadingRow(text: string): HTMLElement {
@@ -268,6 +271,7 @@ export function renderChatsTab(mount: HTMLElement): void {
     b.addEventListener('click', () => {
       openMode = openMode === m ? '' : m;
       if (openMode === 'persona' && !state.personas && !state.personaLoading) void state.loadPersonas().catch(() => undefined);
+      if (openMode === 'module' && !state.moduleLoading) void state.loadModules().catch(() => undefined);
       renderChatsTab(mount);
     });
     cards.appendChild(b);
@@ -275,16 +279,18 @@ export function renderChatsTab(mount: HTMLElement): void {
   card('bot', '🤖', '봇 편집', char?.name ? String(char.name) : '', '카드·인사말·로어북·Regex·트리거·에셋', botWhy);
   card('chat', '💬', '챗 편집', char ? `챗 ${chats.length}개` : '', '턴·챗 로어북·장기기억·챗 변수', botWhy);
   card('persona', '👤', '페르소나 편집', state.personas ? `페르소나 ${state.personas.length}개` : 'RisuAI 사용자 페르소나', '이름·설명·프로필 사진', personaWhy);
+  card('module', '◫', '모듈 편집', state.liveModules ? `모듈 ${state.liveModules.length}개` : 'RisuAI 모듈', '로어북·Regex·트리거·에셋·토글 (봇·페르소나와 조합)', personaWhy);
   root.appendChild(cards);
 
   // A card that was open but can no longer be used folds itself.
   if ((openMode === 'bot' || openMode === 'chat') && botWhy) openMode = '';
-  if (openMode === 'persona' && personaWhy) openMode = '';
+  if ((openMode === 'persona' || openMode === 'module') && personaWhy) openMode = '';
 
   const body = el('div', { class: 'modebody' });
   if (openMode === 'bot') botBody(body, mount);
   else if (openMode === 'chat') chatBody(body, mount);
   else if (openMode === 'persona') personaBody(body, mount);
+  else if (openMode === 'module') moduleBody(body, mount);
   if (openMode) root.appendChild(body);
   else if (!blocked) {
     root.appendChild(el('div', { class: 'hint landingfoot', text: char
@@ -322,7 +328,8 @@ function botBody(body: HTMLElement, mount: HTMLElement): void {
   const pending = state.botChanges?.total ?? 0;
   const cur = el('button', { class: 'primary tiny', text: '편집' }) as HTMLButtonElement;
   cur.title = '지금 작업본(아직 반영하지 않은 변경 포함)으로 봇 편집에 들어갑니다';
-  cur.addEventListener('click', (ev) => { ev.stopPropagation(); setEditMode('bot', 'meta'); });
+  const enterBot = () => { state.focusModule(''); setEditMode('bot', 'meta'); };
+  cur.addEventListener('click', (ev) => { ev.stopPropagation(); enterBot(); });
   const curRow = el('div', { class: 'chatitem current' }, [
     el('span', { class: 'grow' }, [
       el('span', { text: '현재 작업본' }),
@@ -331,7 +338,7 @@ function botBody(body: HTMLElement, mount: HTMLElement): void {
     pending ? el('span', { class: 'badge warn', text: `미반영 ${pending}` }) : null,
     cur,
   ]);
-  curRow.addEventListener('click', () => setEditMode('bot', 'meta'));
+  curRow.addEventListener('click', enterBot);
   list.appendChild(curRow);
 
   const rows = el('div', { class: 'snaprows' });
@@ -358,7 +365,7 @@ function botBody(body: HTMLElement, mount: HTMLElement): void {
       rows.appendChild(el('div', { class: 'chatitem' }, [el('span', { class: 'hint', text: '저장된 스냅샷이 없습니다 — 봇 편집 → 🔖 로 지금 상태를 남길 수 있습니다' })]));
     }
   };
-  snaps.want(state.botKey, snapKey(), () => { if (rows.isConnected) fill(); });
+  snaps.want(state.activeCharKey, snapKey(), () => { if (rows.isConnected) fill(); });
   fill();
 }
 
@@ -371,6 +378,7 @@ function snapRow(c: Snap, deletable: boolean, mount: HTMLElement): HTMLElement {
     edit.disabled = true;
     edit.textContent = '되돌리는 중…';
     try {
+      state.focusModule('');
       await state.cardRestore(c.id);
       snaps.drop();
       setEditMode('bot', 'meta');
@@ -628,6 +636,116 @@ function personaRow(p: PersonaRow, mount: HTMLElement): HTMLElement {
   row.addEventListener('click', () => void enter());
   edit.addEventListener('click', (ev) => { ev.stopPropagation(); void enter(); });
   void mount;
+  return row;
+}
+
+// --- 모듈 (§1-95) ------------------------------------------------------------------
+
+/** Enter module editing on one module (it joins the 모듈 편집 set). */
+async function enterModule(id: string): Promise<void> {
+  setEditMode('module');
+  await state.syncModuleOwner();
+  await state.openModule(id, true);
+  setTab('botlore');
+}
+
+/** A module file from the PC: uploaded, read by the backend, added to RisuAI, opened. */
+export async function importModuleFromPc(f: File, progress: (text: string) => void): Promise<string> {
+  const bytes = new Uint8Array(await f.arrayBuffer());
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  progress(`${f.name} 올리는 중…`);
+  // Into the bot's project when there is one, else the top of projects/.
+  const up = await state.uploadFile(f.name, btoa(bin), true, state.activeCharKey || state.targetModule ? '' : 'projects');
+  state.touchFiles([up.path]);
+  setEditMode('module');
+  await state.syncModuleOwner();
+  const row = await state.importModuleFile(up.path, progress);
+  setTab('botlore');
+  shellNotice(`'${row.name}' 모듈을 RisuAI에 추가하고 열었습니다 (원본 파일: ${up.path}).`, 'ok');
+  return row.key;
+}
+
+function moduleBody(body: HTMLElement, mount: HTMLElement): void {
+  const head = el('div', { class: 'row', style: { marginBottom: '8px', gap: '6px' } }, [
+    el('span', { class: 'sectiontitle grow', style: { marginBottom: '0' }, text: '편집할 모듈을 고르세요' }),
+  ]);
+  const fileIn = el('input', { type: 'file', accept: '.risum,.charx,.json', style: { display: 'none' } }) as HTMLInputElement;
+  const fromFile = el('button', { class: 'ghost tiny', text: '파일에서 가져오기…', title: '.risum · .charx · 모듈 .json 을 RisuAI 모듈 목록에 추가하고 엽니다' }) as HTMLButtonElement;
+  fromFile.addEventListener('click', (ev) => { ev.stopPropagation(); fileIn.click(); });
+  fileIn.addEventListener('change', async () => {
+    const f = fileIn.files?.[0];
+    fileIn.value = '';
+    if (!f) return;
+    fromFile.disabled = true;
+    try {
+      await importModuleFromPc(f, (t) => { fromFile.textContent = t; });
+    } catch (e) {
+      flash('가져오지 못했습니다: ' + msg(e));
+    } finally {
+      fromFile.disabled = false;
+      fromFile.textContent = '파일에서 가져오기…';
+    }
+  });
+  const again = el('button', { class: 'ghost tiny', text: '다시 읽기', title: 'RisuAI에서 모듈 목록을 다시 읽어 옵니다' }) as HTMLButtonElement;
+  again.disabled = state.moduleLoading;
+  again.addEventListener('click', () => { void state.loadModules().catch(() => undefined); });
+  head.append(fromFile, fileIn, again);
+  body.appendChild(head);
+  if (state.moduleError) body.appendChild(el('div', { class: 'notice err', text: state.moduleError }));
+  const all = state.liveModules;
+  const list = el('div', { class: 'chatlist modlist' });
+  body.appendChild(list);
+  if (!all) {
+    list.appendChild(loadingRow(state.moduleLoading ? 'RisuAI에서 모듈을 읽는 중…' : '모듈 목록이 없습니다'));
+    return;
+  }
+  if (all.length > 8) {
+    setToolbarSearch(filterText, (v) => { filterText = v; renderChatsTab(mount); refocusSearch(null); }, '모듈 찾기');
+  }
+  const needle = filterText.trim().toLowerCase();
+  const shown = all.filter((m) => !needle || m.name.toLowerCase().includes(needle) || m.description.toLowerCase().includes(needle))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  if (!all.length) list.appendChild(el('div', { class: 'chatitem' }, [el('span', { class: 'hint', text: 'RisuAI에 모듈이 없습니다. 파일에서 가져올 수 있습니다.' })]));
+  for (const m of shown) list.appendChild(moduleRow(m));
+  body.appendChild(el('div', { class: 'hint', style: { marginTop: '8px' }, text:
+    '모듈은 봇 카드와 같은 탭(정보·로어북·Regex·트리거·에셋)으로 편집되고, 반영해야 RisuAI 모듈 목록에 들어갑니다. '
+    + '봇 편집·페르소나 편집에서도 탭 줄 끝의 ＋ 로 모듈을 함께 열 수 있고, 그 조합은 기억됩니다. '
+    + '파일로 내보내기(.charx 권장 · .risum)는 모듈을 연 뒤 메뉴 줄의 ⬇ 내보내기로 합니다.' }));
+}
+
+function moduleRow(m: LiveModule): HTMLElement {
+  const edit = el('button', { class: 'ghost tiny', text: '편집' }) as HTMLButtonElement;
+  const open = state.openModules.find((x) => x.id === m.id);
+  const first = m.description.split('\n')[0].slice(0, 80);
+  const row = el('div', { class: 'chatitem' + (m.mcp ? ' dim' : '') }, [
+    el('span', { class: 'grow' }, [
+      el('div', { text: '◫ ' + (m.name || '(이름 없음)') }),
+      el('div', { class: 'hint clip1', text: m.mcp ? 'MCP 모듈 - 편집할 내용이 없습니다' : moduleLine(m) + (first ? ' — ' + first : '') }),
+    ]),
+    m.linked ? el('span', { class: 'badge', text: '이 봇에 연결됨' }) : null,
+    m.global ? el('span', { class: 'badge', text: '전역' }) : null,
+    open?.total ? el('span', { class: 'badge warn', text: `미반영 ${open.total}` }) : null,
+    m.mcp ? null : edit,
+  ]);
+  if (m.mcp) return row;
+  let busy = false;
+  const enter = async () => {
+    if (busy) return;
+    busy = true;
+    edit.disabled = true;
+    edit.textContent = '여는 중…';
+    try {
+      await enterModule(m.id);
+    } catch (e) {
+      flash('모듈을 열지 못했습니다: ' + msg(e));
+    } finally {
+      busy = false;
+      if (row.isConnected) { edit.disabled = false; edit.textContent = '편집'; }
+    }
+  };
+  row.addEventListener('click', () => void enter());
+  edit.addEventListener('click', (ev) => { ev.stopPropagation(); void enter(); });
   return row;
 }
 
