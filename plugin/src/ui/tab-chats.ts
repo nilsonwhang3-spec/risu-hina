@@ -33,7 +33,7 @@ import type { PersonaRow } from '../state';
 import { shellNotice } from './chatbar';
 import { askName } from './kit';
 import type { LiveModule } from '../state';
-import { moduleLine } from './module-picker';
+import { moduleLine, riskBadges } from './module-picker';
 import { moduleSaveRows } from './module-export';
 
 type Mode = 'bot' | 'chat' | 'persona' | 'module';
@@ -725,8 +725,8 @@ function moduleRow(m: LiveModule): HTMLElement {
       el('div', { text: '◫ ' + (m.name || '(이름 없음)') }),
       el('div', { class: 'hint clip1', text: m.mcp ? 'MCP 모듈 - 편집할 내용이 없습니다' : moduleLine(m) + (first ? ' — ' + first : '') }),
     ]),
-    m.linked ? el('span', { class: 'badge', text: '이 봇에 연결됨' }) : null,
-    m.global ? el('span', { class: 'badge', text: '전역' }) : null,
+    ...riskBadges(m),
+    open ? el('span', { class: 'badge ok', text: '✓ 패널에 열림' }) : null,
     open?.total ? el('span', { class: 'badge warn', text: `미반영 ${open.total}` }) : null,
     m.mcp ? null : save,
     m.mcp ? null : edit,

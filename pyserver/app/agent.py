@@ -198,6 +198,8 @@ Principles:
   material (big image sets, NSFW, persona assets) in the dedicated module, not the bot card; keep names
   consistent across bot and module (CBS/asset names resolve across all active modules); when the user's bot has
   a dedicated module open in the panel, check it before concluding something is missing from the bot.
+  **Files:** you never encode .charx / .risum yourself - save_bot_charx builds the bot's charx and
+  save_module_file a module's .module.charx or .risum (working copies, into the project's out/).
 - **Toggles (customModuleToggle on a module, or on a bot card - RisuAI shows both in the sidebar).** One
   line each: `key=Label` checkbox · `key=Label=select=A,B,C` · `key=Label=text` · `key=Label=textarea` ·
   `=Name=group` … `=Name=groupEnd` · `=Name=divider` · `=Text=caption`. The value lives in the global chat
@@ -286,6 +288,9 @@ class Deps:
     # focus_target moves between them inside a turn.
     bot_key: str = ""
     modules: list[str] = field(default_factory=list)
+    # [{id, name}]: modules RisuAI turns on for the bot/chat that the panel has
+    # not opened - the agent offers propose_open_module for them (§1-97).
+    linked: list[dict] = field(default_factory=list)
     force_compact: bool = False
     continuity_parts: list[str] | None = None
     learning_reviewed: bool = False
@@ -379,6 +384,16 @@ def opened_modules_line(deps: "Deps") -> str:
             "모듈을 고치려면 먼저 focus_target(모듈 이름) 으로 대상을 바꿉니다.")
 
 
+def linked_line(deps: "Deps") -> str:
+    """RisuAI-side modules of this bot/chat that are not open in the panel."""
+    names = [str(m.get("name") or m.get("id")) for m in deps.linked if m.get("id")]
+    if not names:
+        return ""
+    return (" RisuAI 에서 이 봇·챗에 켜져 있지만 패널에 아직 열리지 않은 모듈: " + ", ".join(names[:12])
+            + ". 이 모듈을 보거나 고쳐야 하면 화면 이동을 안내하지 말고 propose_open_module(모듈 이름, 이유) 로 "
+            "여는 것을 제안하세요 - 승인되면 패널이 지금 화면 그대로 그 모듈 탭을 엽니다.")
+
+
 def module_screen(deps: "Deps") -> str:
     """The screen line when the card tabs show a RisuAI module."""
     try:
@@ -402,7 +417,7 @@ def module_screen(deps: "Deps") -> str:
             "customModuleToggle(토글 정의 - RisuAI 커스텀 토글 문법, 한 줄에 하나), moduleNamespace, lowLevelAccess, "
             "hideChatIcon, backgroundHTML(배경 임베딩), image(아이콘). 인사말·desc 같은 캐릭터 필드는 없습니다."
             + (" 함께 열린 다른 모듈: " + ", ".join(other_names) + "." if other_names else "")
-            + (f" {back}로 돌아가려면 focus_target(\"bot\")." if back else ""))
+            + (f" {back}로 돌아가려면 focus_target(\"bot\")." if back else "") + linked_line(deps))
 
 
 def _screen_refusal(mode: str, need: str) -> str | None:
@@ -864,7 +879,7 @@ def build(model: Any = None) -> Agent[Deps]:
         # the same words the panel header shows (user request, 2026-08-30).
         if modmod.is_module_key(ctx.deps.char_key):
             return module_screen(ctx.deps)
-        extra = opened_modules_line(ctx.deps)
+        extra = opened_modules_line(ctx.deps) + linked_line(ctx.deps)
         if ctx.deps.mode == "bot":
             return "지금 열려 있는 화면: 봇 편집 (카드 재료 - 메타·인사말·봇 로어북·Regex·트리거·에셋)." + extra
         if ctx.deps.mode == "chat":
@@ -1717,6 +1732,81 @@ def build(model: Any = None) -> Agent[Deps]:
             lines.append(modmod.describe(r) + mark)
         return "\n".join(lines)
 
+    # --- files: .charx / .risum (§1-97) ------------------------------------
+    #
+    # The backend builds these (charx.build, modules.export) - the model does
+    # not have to encode a zip or rpack itself, and it used to tell the user it
+    # could not. Writing a deliverable into a project's out/ needs no approval.
+
+    def _missing_text(r: dict) -> str:
+        names = ", ".join(str(m.get("name") or m.get("key") or "?") for m in (r.get("missing") or [])[:8])
+        return (f"에셋 {len(r.get('missing') or [])}개가 스토어에 없어 만들지 않았습니다 ({names}). "
+                "에셋 동기화가 끝난 뒤 다시 하거나, allow_missing=true 로 빠진 에셋을 빼고 만들 수 있습니다.")
+
+    @agent.tool
+    def save_bot_charx(ctx: RunContext[Deps], filename: str = "", allow_missing: bool = False) -> str:
+        """Build the BOT's working card (unapplied edits included: fields, greetings, lorebook, Regex,
+        triggers, toggles, assets from the store) as a .charx file in projects/<bot>/out/. Use it whenever
+        the user wants the bot as a charx file - you do not encode charx yourself. The user downloads it
+        from the files tab (or download_file over MCP)."""
+        from . import charx as charxmod
+        ck = ctx.deps.bot_key or ctx.deps.char_key
+        if modmod.is_module_key(ck):
+            return "봇이 없습니다. 모듈은 save_module_file 을 쓰세요."
+        try:
+            r = charxmod.build(ck, allow_missing=allow_missing, filename=filename or None)
+        except charxmod.CharxError as e:
+            return str(e)
+        if not r.get("ok"):
+            return _missing_text(r)
+        return (f"만들었습니다: {r['path']} ({r['size'] / 1048576:.2f}MB, 에셋 {r['assets']}개"
+                + (f", {r['dropped']}개 제외" if r.get("dropped") else "") + ")")
+
+    @agent.tool
+    def save_module_file(ctx: RunContext[Deps], module: str = "", format: str = "charx",
+                         allow_missing: bool = False) -> str:
+        """Save a RisuAI module's working copy (unapplied edits included) as a file in that module's
+        projects/<module>/out/: format "charx" (<name>.module.charx, RisuAI's recommended format - asset
+        modules usually ship this way) or "risum" (legacy, still common for item/prompt modules).
+        module = name or key; empty = the module the card tools are on now. The module must be known to
+        the panel (open it with propose_open_module first if it is only turned on in RisuAI)."""
+        ref = str(module or "").strip()
+        try:
+            ck = ctx.deps.char_key if not ref and modmod.is_module_key(ctx.deps.char_key) else modmod.resolve(ref)
+        except modmod.ModuleError as e:
+            hint = (" RisuAI 에서 켜졌지만 패널에 없는 모듈이면 propose_open_module 로 먼저 여세요."
+                    if ctx.deps.linked else "")
+            return str(e) + hint
+        try:
+            r = modmod.export(ck, format, allow_missing=allow_missing)
+        except (modmod.ModuleError, Exception) as e:  # noqa: BLE001 - charx errors come back as text
+            return f"만들지 못했습니다: {e}"
+        if not r.get("ok"):
+            return _missing_text(r)
+        return (f"만들었습니다: {r['path']} ({r['size'] / 1048576:.2f}MB, 에셋 {r['assets']}개"
+                + (f", {r['dropped']}개 제외" if r.get("dropped") else "") + ")")
+
+    @agent.tool
+    def propose_open_module(ctx: RunContext[Deps], module: str, reason: str) -> str:
+        """Propose opening a RisuAI module in the panel, next to the bot or persona being edited (the
+        user stays on the same screen; the module's card tabs open). Use it when the user asks about a
+        module RisuAI has turned on for this bot/chat (listed in the screen line) or any module the
+        panel knows (list_modules) that is not open yet - instead of telling them to switch screens.
+        After approval the module can be read and edited (focus_target)."""
+        t = str(module or "").strip()
+        hit = next((m for m in ctx.deps.linked if t in (m.get("id"), m.get("name"))), None)
+        if hit is None:
+            try:
+                r = modmod.row(modmod.resolve(t))
+                hit = {"id": r["id"], "name": r["name"]}
+            except modmod.ModuleError as e:
+                names = ", ".join(str(m.get("name")) for m in ctx.deps.linked)
+                return str(e) + (f" (RisuAI 에서 이 봇·챗에 켜진 모듈: {names})" if names else "")
+        if any(modmod.key_of(hit["id"]) == k for k in ctx.deps.modules):
+            return f"'{hit['name']}' 은(는) 이미 패널에 열려 있습니다. focus_target(\"{hit['name']}\") 으로 대상을 바꾸세요."
+        return _propose(ctx, "host_open_module", f"모듈 '{hit['name']}' 을(를) 패널에 열기 — {reason}",
+                        {"id": hit["id"], "name": hit["name"]})
+
     @agent.tool
     def focus_target(ctx: RunContext[Deps], target: str) -> str:
         """Choose what the card tools (read_card, list_lore, list_scripts, propose_lore_*, propose_regex_*,
@@ -1734,7 +1824,8 @@ def build(model: Any = None) -> Agent[Deps]:
         except modmod.ModuleError as e:
             return str(e)
         if ck not in ctx.deps.modules:
-            return ("그 모듈은 패널에 열려 있지 않습니다. 사용자에게 탭 줄의 + 버튼으로 모듈을 열어 달라고 요청해 주세요. "
+            return ("그 모듈은 패널에 열려 있지 않습니다. propose_open_module(모듈 이름, 이유) 로 여는 것을 제안하세요 "
+                    "(승인되면 열리고, 그 뒤 focus_target 이 됩니다). "
                     "열린 모듈: " + (", ".join(modmod.row(k)["name"] for k in ctx.deps.modules) or "없음"))
         ctx.deps.char_key = ck
         r = modmod.row(ck)

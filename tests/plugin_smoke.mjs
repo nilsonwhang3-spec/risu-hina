@@ -3855,12 +3855,15 @@ console.log('\ntest_modules');
   document.querySelector('.modadd')?.dispatchEvent(new window.Event('click', { bubbles: true }));
   await settle(800);
   const prow = [...document.querySelectorAll('.modrow')].find((r) => /에셋 모듈/.test(r.textContent || ''));
-  check('the picker marks the module linked to the bot', /연결됨/.test(prow?.textContent || ''), prow?.textContent);
-  const box = prow?.querySelector('input');
-  if (box) { box.checked = true; box.dispatchEvent(new window.Event('change', { bubbles: true })); }
-  document.querySelector('.modpicker .primary')?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  check('the picker says RisuAI turns the module on for the bot', /RisuAI: 이 봇에 켜짐/.test(prow?.textContent || '')
+        && !/패널에 열림/.test(prow?.textContent || ''), prow?.textContent);
+  // §1-97: one click opens; no tick-and-confirm.
+  prow?.querySelector('button.primary')?.dispatchEvent(new window.Event('click', { bubbles: true }));
   await settle(1500);
   check('the module joins the bot tabs', /◫ 에셋 모듈/.test(tabs()), tabs());
+  const prow2 = [...document.querySelectorAll('.modrow')].find((r) => /에셋 모듈/.test(r.textContent || ''));
+  check('the picker stays and marks it opened', /✓ 패널에 열림/.test(prow2?.textContent || ''), prow2?.textContent);
+  document.body.dispatchEvent(new window.Event('mousedown', { bubbles: true }));
   clickById(document, 'tab-meta');
   await settle(400);
   check('the bot tab points the card tabs back at the bot', !/◫/.test(document.querySelector('.status')?.textContent || ''),

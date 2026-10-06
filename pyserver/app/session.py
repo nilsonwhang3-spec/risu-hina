@@ -480,7 +480,8 @@ def _drain_extra(session_id: str) -> list[dict]:
 
 
 async def run(session_id: str, prompt: str, mode: str = "", persona: str = "", *,
-              target: str = "", modules: list[str] | None = None) -> AsyncGenerator[str, None]:
+              target: str = "", modules: list[str] | None = None,
+              linked: list[dict] | None = None) -> AsyncGenerator[str, None]:
     """Drive one agent turn, yielding NDJSON lines. `mode` is the screen of
     the panel the user is looking at, see agent.Deps.mode; `persona` the key
     of the persona open in the persona tab (agent.Deps.persona); `target` the
@@ -515,6 +516,7 @@ async def run(session_id: str, prompt: str, mode: str = "", persona: str = "", *
     # through focus_target, and the chat tools still see the chat.
     deps.bot_key = deps.char_key
     deps.modules = [k for k in (modules or []) if modmod.is_module_key(k)]
+    deps.linked = list(linked or [])
     if target and modmod.is_module_key(target):
         if target not in deps.modules:
             deps.modules.append(target)

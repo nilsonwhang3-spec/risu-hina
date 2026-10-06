@@ -1122,6 +1122,13 @@ class AppState {
     return this.editMode === 'module' ? 'bot' : this.editMode;
   }
 
+  /** Modules RisuAI turns on for this bot/chat that the panel has not opened (told to the agent). */
+  get linkedNotOpen(): { id: string; name: string }[] {
+    if (this.editMode === 'chat') return [];
+    return (this.liveModules ?? []).filter((m) => m.linked && !m.mcp && !this.openModules.some((o) => o.id === m.id))
+      .map((m) => ({ id: m.id, name: m.name }));
+  }
+
   /** The asset import behind the card tabs: the target module's, or the bot's. */
   get targetSync(): SyncProgress | null {
     return this.cardTarget ? this.moduleSyncs[this.cardTarget] ?? null : this.assetSync;
@@ -2180,6 +2187,11 @@ class AppState {
       await this.newAgentSession();
     }
     if (signal?.aborted) return;
+    // Which modules RisuAI turns on for this bot/chat: read once, so the agent
+    // can offer to open one (propose_open_module, §1-97).
+    if (this.liveModules === null && this.editMode !== 'chat' && !this.moduleLoading) {
+      await this.loadModules().catch(() => undefined);
+    }
     yield* transport.stream('/chat', {
       sessionId: this.sessionId, prompt,
       mode: this.agentMode,
@@ -2188,6 +2200,7 @@ class AppState {
       // The module the card tabs show and every module opened (§1-95).
       target: this.cardTarget,
       modules: this.openModules.map((m) => m.key),
+      linked: this.linkedNotOpen,
     }, signal);
   }
 
@@ -2804,6 +2817,12 @@ class AppState {
           : out.written
           ? `페르소나 '${out.name}' 을(를) RisuAI에 반영하고 저장을 확인했습니다.`
           : '페르소나에 반영할 변경이 없었습니다.';
+      } else if (r.host.kind === 'host_open_module') {
+        // Opened where the user is (bot / persona / module editing), on its card tabs.
+        const row = await this.openModule(String(r.host.args?.id || ''), true);
+        this.openTabRequest = CARD_TABS.has(this.activeTab) ? this.activeTab : 'botlore';
+        this.emit();
+        detail = `모듈 '${row.name}' 을(를) 패널에 열었습니다. 이제 이 모듈을 읽고 고칠 수 있습니다 (focus_target).`;
       } else if (r.host.kind === 'host_open_tab') {
         const tab = String(r.host.args?.tab || '');
         // A proposal made while a module was the target opens that module's tab.

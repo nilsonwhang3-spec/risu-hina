@@ -172,7 +172,12 @@ button.outline:hover { background: rgba(37,99,235,.18); }
 .modclose:hover { opacity: 1; }
 .modadd { padding: 8px 10px; color: #a58bff; }
 .modpicker { min-width: 300px; max-width: 460px; }
-.modlist { max-height: 46vh; overflow-y: auto; }
+/* The landing's list grows with the page (the .pad scrolls); in the ＋ picker
+   the list scrolls between the pinned header and actions. .chatlist is
+   overflow:hidden further down, hence the doubled class. */
+.chatlist.modlist { max-height: none; overflow: visible; }
+.modpicker .chatlist.modlist { max-height: min(52vh, 460px); overflow-y: auto; }
+.modrow .modstate { white-space: nowrap; }
 .modrow { cursor: pointer; gap: 8px; }
 .modrow input[type=checkbox] { flex-shrink: 0; }
 .chatitem.dim { opacity: .55; }

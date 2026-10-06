@@ -171,6 +171,8 @@ const pageHtml = (backendUrl) => `<!doctype html>
     { id: 'mod-mcp', name: '웹 검색 MCP', description: '', mcp: { url: 'http://localhost:1' } },
   ];
   liveChar.modules = ['mod-assets'];
+  // Enough modules to scroll (a real account has dozens).
+  for (let i = 1; i <= 24; i++) modules.push({ id: 'mod-x' + i, name: '아이템 모듈 ' + i, description: '기타', lorebook: [], regex: [], trigger: [] });
   const log = (m) => { document.getElementById('hostlog').textContent = m; console.log('[host]', m); };
   window.__host = { calls, registered, liveChar, personas, modules };
   window.Risuai = {

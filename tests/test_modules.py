@@ -224,6 +224,32 @@ other = modules.sync({"id": "99999999-0000-4000-8000-000000000000", "name": "닫
 txt, deps = call_tool("focus_target", {"target": "닫힌 모듈"}, deps)
 check("a module not opened is refused", deps.char_key == CK and "열려 있지 않습니다" in txt, txt)
 
+print("== open a linked module (§1-97) ==")
+deps = agent.Deps(chat_key=TK, char_key=CK, session_id=None, workspace_dir=DATA, mode="bot", bot_key=CK,
+                  modules=[], linked=[{"id": "lnk-1", "name": "에셋봇 모듈"}])
+check("the screen line names the linked module and the tool", "에셋봇 모듈" in agent.linked_line(deps)
+      and "propose_open_module" in agent.linked_line(deps))
+txt, deps = call_tool("propose_open_module", {"module": "에셋봇 모듈", "reason": "열어서 확인"}, deps)
+check("propose_open_module queues host_open_module", "제안했습니다" in txt
+      and any(a["kind"] == "host_open_module" and a["args"]["id"] == "lnk-1" for a in actions.pending(TK)), txt)
+pend = [a for a in actions.pending(TK) if a["kind"] == "host_open_module"][0]
+out = actions.decide(pend["id"], True, mode="persona")
+check("it is handed to the plugin from any screen", out.get("host", {}).get("kind") == "host_open_module", str(out))
+txt, deps = call_tool("focus_target", {"target": "닫힌 모듈"}, deps)
+check("focus_target on an unopened module points at propose_open_module", "propose_open_module" in txt, txt)
+txt, _ = call_tool("propose_open_module", {"module": "인벤토리", "reason": "x"},
+                   agent.Deps(chat_key=TK, char_key=CK, session_id=None, workspace_dir=DATA, mode="bot", bot_key=CK, modules=[MK]))
+check("an already open module says use focus_target", "이미 패널에 열려" in txt, txt)
+
+print("== files from the agent (§1-97) ==")
+d2 = agent.Deps(chat_key=TK, char_key=MK, session_id=None, workspace_dir=DATA, mode="bot", bot_key=BK, modules=[MK])
+txt, d2 = call_tool("save_module_file", {"format": "risum"}, d2)
+check("save_module_file writes the target module", "만들었습니다" in txt and ".risum" in txt, txt)
+txt, d2 = call_tool("save_module_file", {"module": "인벤토리", "format": "charx"}, d2)
+check("save_module_file by name as .module.charx", ".module.charx" in txt, txt)
+txt, d2 = call_tool("save_bot_charx", {}, d2)
+check("save_bot_charx builds the bot even while a module is the target", "만들었습니다" in txt and "토글봇" in txt, txt)
+
 print("== approvals ==")
 db.execute("INSERT INTO chats(chat_key, char_key, chat_id, chat_index, name, meta_json, orig_count, created_at, updated_at) "
            "VALUES(?,?,?,?,?,?,?,?,?)", (TK, CK, "chat-1", 0, "챗", "{}", 0, db.now(), db.now()))

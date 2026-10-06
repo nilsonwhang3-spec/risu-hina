@@ -7,6 +7,31 @@ saves as a copy and RisuAI-side changes are flagged (§1-93); the Docker image i
 release (§1-92); dashboard cards wrap, the title-row 승인 waits for its card, bots of the same name share one
 folder (old `~N` folders merge back), and uploads land in the project being edited (§1-94).
 
+## unreleased (2026-10-06): §1-97 module lists scroll, one-click open, the AI opens linked modules and saves charx/risum
+
+- **Field report (4 + 1):** the 모듈 편집 list and the ＋ picker were cut off with no scroll; "연결됨" read as
+  "already loaded" and opening needed tick + confirm; asked whether a linked module could be edited, the AI said to
+  switch screens; the AI said it could not encode charx.
+- **Scroll:** `.chatlist { overflow: hidden }` sits later in the stylesheet than `.modlist { max-height; overflow-y:
+  auto }`, so the list was capped and unscrollable. `.chatlist.modlist` now grows with the page on the landing and
+  scrolls inside the picker (min(52vh, 460px)); the picker popover may be 82vh tall.
+- **Picker:** one click opens (row or 열기), the module shows on the card tabs at once and the popover stays for more;
+  an open row says ✓ 패널에 열림 with 편집 / 닫기. RisuAI's own state is worded apart: "RisuAI: 이 봇에 켜짐" /
+  "RisuAI: 전역". "RisuAI에서 켜진 모듈 모두 열기 (n)" opens the rest. Same badges on the landing list.
+- **AI opens linked modules:** `/chat` and the MCP context carry `linked` (modules RisuAI turns on for the bot/chat that
+  the panel has not opened; the plugin reads the module list once before the first prompt). The screen line names
+  them and says to propose instead of sending the user elsewhere; `propose_open_module(module, reason)` queues
+  `host_open_module` (a UI move, any screen), and on approval the panel opens it where the user is, on its card tabs.
+  focus_target on an unopened module points at it.
+- **AI saves files:** `save_bot_charx(filename, allow_missing)` (the bot's working card via charx.build, also while a
+  module is the target) and `save_module_file(module, format=charx|risum, allow_missing)` (modules.export) write into
+  the project's out/; missing store assets come back as a list with the allow_missing hint. INSTRUCTIONS say the
+  model never encodes charx/risum itself.
+- Verified: tests/test_modules.py (linked line, propose_open_module → host action from any screen, focus_target hint,
+  already-open refusal, save_module_file both formats, save_bot_charx while a module is the target), plugin_smoke
+  (picker: RisuAI badge vs ✓ 패널에 열림, one-click open), browser harness with 28 modules (landing scrolls to the
+  end, picker list scrolls inside), gate.
+
 ## unreleased (2026-10-06): §1-96 bot toggles, modules saved as files from every screen, module guidance for the AI
 
 - **Bot toggles:** in current RisuAI a charx and a module are the same structure, and the character editor already

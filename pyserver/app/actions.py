@@ -40,7 +40,9 @@ FAILED = "failed"
 # the queue is exactly the "~하시겠습니까? [승인]" interaction the ask needs.
 HOST_KINDS = ("host_writeback", "host_save_copy",
               "host_card_writeback", "host_clone_bot", "host_open_tab",
-              "host_persona_writeback")
+              "host_persona_writeback",
+              # Open a RisuAI module in the panel (§1-97) - a UI move like host_open_tab.
+              "host_open_module")
 
 
 class ActionError(ValueError):

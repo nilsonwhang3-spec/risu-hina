@@ -3381,9 +3381,12 @@ async def dispatch(path: str, request: Request) -> Response:
         # opened alongside (app/modules.py) - the agent edits the target.
         target = str(body.get("target") or "")
         opened = [str(k) for k in (body.get("modules") or []) if k][:40]
+        # Modules RisuAI turns on for this bot/chat that the panel has not opened.
+        linked = [{"id": str(m.get("id") or ""), "name": str(m.get("name") or "")[:120]}
+                  for m in (body.get("linked") or []) if isinstance(m, dict) and m.get("id")][:60]
         log.info("POST /chat session=%s prompt=%sB mode=%s target=%s", sid, len(prompt), mode or "-", target or "-")
         return StreamingResponse(
-            session.run(sid, prompt, mode, persona, target=target, modules=opened),
+            session.run(sid, prompt, mode, persona, target=target, modules=opened, linked=linked),
             media_type="application/x-ndjson; charset=utf-8",
             headers={
                 **config.cors_headers(origin),

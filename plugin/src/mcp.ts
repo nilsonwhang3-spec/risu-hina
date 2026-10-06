@@ -96,7 +96,7 @@ class McpBridge {
     return r.token;
   }
 
-  context(): Record<string, string> {
+  context(): Record<string, unknown> {
     const chat = state.workspace?.chats.find((c) => c.chatKey === state.activeChatKey);
     return {
       charKey: state.activeCharKey || '',
@@ -108,6 +108,7 @@ class McpBridge {
       // The module the card tabs show and every module opened (§1-95).
       target: state.cardTarget,
       modules: state.openModules.map((m) => m.key).join(','),
+      linked: state.linkedNotOpen,
     };
   }
 

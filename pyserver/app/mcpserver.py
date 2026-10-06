@@ -129,6 +129,7 @@ def _deps() -> Any:
     from . import modules as modmod
     deps.bot_key = char_key
     deps.modules = [k for k in str(ctx.get("modules") or "").split(",") if k and modmod.is_module_key(k)]
+    deps.linked = list(ctx.get("linked") or []) if isinstance(ctx.get("linked"), list) else []
     panel = str(ctx.get("target") or "")
     if panel and panel in deps.modules:
         deps.char_key = panel

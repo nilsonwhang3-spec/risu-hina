@@ -130,6 +130,10 @@ def _clean_ctx(ctx: dict) -> dict:
     out = {k: str(ctx.get(k) or "")[:200] for k in keep}
     mods = ctx.get("modules")
     out["modules"] = (",".join(str(m) for m in mods) if isinstance(mods, list) else str(mods or ""))[:2000]
+    # linked: [{id, name}] RisuAI turns on for the bot/chat, not opened in the panel.
+    linked = ctx.get("linked")
+    out["linked"] = [{"id": str(m.get("id") or "")[:80], "name": str(m.get("name") or "")[:120]}
+                     for m in linked if isinstance(m, dict) and m.get("id")][:60] if isinstance(linked, list) else []
     return out
 
 
