@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any
 
 APP_NAME = "risu-hina"
-VERSION = "0.15.36"
+VERSION = "0.15.37"
 
 def _ENV(name: str, default: Any = None) -> Any:
     value = os.environ.get(name)

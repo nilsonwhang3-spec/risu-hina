@@ -24,6 +24,63 @@ import { clientLog } from '../transport';
 import { activeHalf } from './shell';
 import { installDrop } from './tree';
 
+type ScreenKind = 'chat' | 'bot' | 'persona' | 'module';
+
+/** What the panel is editing: a module on the card tabs is a module, not the bot. */
+function screenKind(): ScreenKind {
+  const half = activeHalf();
+  if (half === 'bot' && state.cardTarget) return 'module';
+  return half;
+}
+
+/**
+ * The input's prompt and the empty conversation's words, per screen. The
+ * examples are starting points for the material in front of the user - a
+ * persona or a module has no turns and no greetings to talk about.
+ */
+const SCREEN_WORDS: Record<ScreenKind, { where: string; title: string; knows: string; examples: string[] }> = {
+  chat: {
+    where: '챗',
+    title: '조정해야 할 항목을 상담하세요',
+    knows: 'AI 에이전트는 현재 탭뿐만 아니라 선택된 봇 및 챗의 전반적인 정보를 모두 알고 있습니다.',
+    examples: [
+      '대화에서 페르소나를 조금 더 착한 사람으로 조정해줘',
+      '{{char}}에게 고백한 일을 없던 걸로 해줘',
+      '챗 이사가고 싶어. 전체 항목을 체계적으로 요약해서 챗 로어북에 넣고, 10턴만 남겨줘',
+    ],
+  },
+  bot: {
+    where: '봇',
+    title: '봇(카드)에서 조정할 항목을 상담하세요',
+    knows: 'AI 에이전트는 현재 탭뿐만 아니라 선택된 봇 및 챗의 전반적인 정보를 모두 알고 있습니다.',
+    examples: [
+      '봇 로어북을 훑어서 겹치거나 빈 항목을 정리하고 폴더로 묶어줘',
+      '퍼스트 메시지와 대체 인사말의 말투를 설명(desc)과 맞춰줘',
+      '에셋 이름 끝의 확장자를 떼고, 감정 이미지 이름을 감정 단어로 통일해줘',
+    ],
+  },
+  persona: {
+    where: '페르소나',
+    title: '페르소나에서 조정할 항목을 상담하세요',
+    knows: 'AI 에이전트는 열려 있는 페르소나와 함께 연 모듈을 알고 있습니다. 봇이 선택되어 있으면 그 봇도 참고합니다.',
+    examples: [
+      '이 페르소나 설명을 외모·성격·말투·배경 항목으로 나눠 정리해줘',
+      '설명에서 특정 봇에만 맞는 내용을 빼고 어느 봇에서나 쓸 수 있게 다듬어줘',
+      '이 페르소나를 바탕으로 성격이 정반대인 새 페르소나를 하나 만들어줘',
+    ],
+  },
+  module: {
+    where: '모듈',
+    title: '모듈에서 조정할 항목을 상담하세요',
+    knows: 'AI 에이전트는 지금 편집 중인 모듈과 함께 연 모듈을 알고 있습니다. 봇이 선택되어 있으면 그 봇도 참고합니다.',
+    examples: [
+      '이 모듈의 로어북을 훑어서 겹치거나 빈 항목을 정리하고 폴더로 묶어줘',
+      '모듈 토글을 정리하고, 토글을 끄면 관련 Regex·로어북도 꺼지게 맞춰줘',
+      '특정 봇 이름에 기대는 부분을 찾아서 어느 봇에 붙여도 동작하게 바꿔줘',
+    ],
+  },
+};
+
 const IMG_RE = /\.(png|jpe?g|gif|webp|avif|bmp)$/i;
 /** Tools whose result is a queued proposal (studio_generate queues 2+ images). */
 const PROPOSING_TOOL = /^(propose_|stage_|studio_generate$)/;
@@ -283,7 +340,16 @@ export class AgentPanel {
     // A session is bound to a chat (the workspace, the approval queue, the
     // scope DB all hang off it). With none selected the backend can only say
     // "chatKey is required" - say the useful sentence instead of the error.
-    if (!state.activeChatKey) {
+    // No bot open in RisuAI: persona and module editing talk from the
+    // backend's home chat. Fetching it changes the agent context, which
+    // rebuilds this panel (agentpane.syncAgentContext) - so just wait here.
+    if (!state.agentChatKey && (state.editMode === 'persona' || state.editMode === 'module') && state.health) {
+      this.loaded = false;
+      this.log.appendChild(el('div', { class: 'hint agentloading', text: '대화를 준비하는 중입니다…' }));
+      void state.ensureHome().catch((e) => { this.status.textContent = e instanceof Error ? e.message : String(e); });
+      return;
+    }
+    if (!state.agentChatKey) {
       // Not loaded: the next mount retries, so picking a chat later un-gates
       // the panel without an explicit invalidate.
       this.loaded = false;
@@ -344,7 +410,7 @@ export class AgentPanel {
    * a chat tab (the user read "챗에서" while editing a card). Called on every
    * mount too - load() dedupes renders, and a tab switch changes the half. */
   syncPlaceholder(): void {
-    const where = activeHalf() === 'bot' ? '봇' : '챗';
+    const where = SCREEN_WORDS[screenKind()].where;
     this.input.placeholder = `${where}에서 수정이나 조정이 필요한 부분을 말씀하세요. 궁금한 점이 있다면 무엇이든 물어보세요.`;
     this.planLine.style.display = state.health?.chatgptPlan ? '' : 'none';
     // The welcome's examples follow the half as well.
@@ -364,27 +430,17 @@ export class AgentPanel {
   private welcome(): HTMLElement {
     // The examples follow the tab bar's mode: a chat's three sizes of job, or
     // the card's - the agent is the same, the material in front of it differs.
-    const bot = activeHalf() === 'bot';
-    const examples = bot
-      ? [
-        '봇 로어북을 훑어서 겹치거나 빈 항목을 정리하고 폴더로 묶어줘',
-        '퍼스트 메시지와 대체 인사말의 말투를 설명(desc)과 맞춰줘',
-        '에셋 이름 끝의 확장자를 떼고, 감정 이미지 이름을 감정 단어로 통일해줘',
-      ]
-      : [
-        '대화에서 페르소나를 조금 더 착한 사람으로 조정해줘',
-        '{{char}}에게 고백한 일을 없던 걸로 해줘',
-        '챗 이사가고 싶어. 전체 항목을 체계적으로 요약해서 챗 로어북에 넣고, 10턴만 남겨줘',
-      ];
+    const words = SCREEN_WORDS[screenKind()];
+    const examples = words.examples;
     const box = el('div', { class: 'welcome' }, [
-      el('div', { class: 'welcome-title', text: bot ? '봇(카드)에서 조정할 항목을 상담하세요' : '조정해야 할 항목을 상담하세요' }),
+      el('div', { class: 'welcome-title', text: words.title }),
       el('div', {
         class: 'hint',
         text: '고칠 곳을 말씀하시면 제안을 만듭니다. 편집·에셋 제안을 승인하면 작업본에 저장됩니다. RisuAI에 저장·등록하려면 별도로 반영을 눌러 주세요.',
       }),
       el('div', {
         class: 'hint',
-        text: 'AI 에이전트는 현재 탭뿐만 아니라 선택된 봇 및 챗의 전반적인 정보를 모두 알고 있습니다.',
+        text: words.knows,
       }),
     ]);
     for (const text of examples) {

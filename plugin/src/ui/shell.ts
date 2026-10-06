@@ -123,6 +123,8 @@ export function setEditMode(m: EditMode, tab?: TabId): void {
   // Chats have no modules; the other modes reopen their own set (§1-95).
   if (m === 'chat') state.focusModule('');
   void state.syncModuleOwner();
+  // No bot open: the agent talks from the backend's home chat (app/home.py).
+  if (m === 'persona' || m === 'module') void state.ensureHome().catch(() => undefined);
   syncModeTabs();
   if (tab) setTab(tab);
   else if (!MODE_TABS[m].has(active) && (CHAT_TABS.has(active) || BOT_TABS.has(active) || PERSONA_TABS.has(active))) setTab('chats');

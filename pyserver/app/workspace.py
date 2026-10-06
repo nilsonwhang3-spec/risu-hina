@@ -1027,8 +1027,10 @@ def info(char_key: str) -> dict | None:
 
 
 def list_all() -> list[dict]:
+    from . import home
     rows = db.query("SELECT char_key FROM characters ORDER BY updated_at DESC")
-    return [i for i in (info(r["char_key"]) for r in rows) if i]
+    # The agent's home (app/home.py) is not a bot.
+    return [i for i in (info(r["char_key"]) for r in rows if not home.is_home(r["char_key"])) if i]
 
 
 def chat_owner(chat_key: str) -> str | None:

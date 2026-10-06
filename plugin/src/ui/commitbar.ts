@@ -45,7 +45,7 @@ export function commitControls(): HTMLElement {
   let summary: DirtySummary | null = null;
 
   const paint = () => {
-    wrap.style.display = state.health && (state.activeCharKey || dirty > 0) ? '' : 'none';
+    wrap.style.display = state.health && (state.activeCharKey || dirty > 0 || pending > 0) ? '' : 'none';
     approveCount.textContent = String(pending);
     applyCount.textContent = String(dirty);
     approveBtn.classList.toggle('hot', pending > 0);
@@ -90,8 +90,8 @@ export function commitControls(): HTMLElement {
     const charKey = state.activeCharKey;
     try {
       const [acts, staged, sum] = await Promise.all([
-        state.activeCharKey ? state.actionsForBot().catch(() => []) : Promise.resolve([]),
-        state.activeChatKey ? state.stagedEdits().catch(() => []) : Promise.resolve([]),
+        state.activeCharKey || state.homeChatKey ? state.actionsForBot().catch(() => []) : Promise.resolve([]),
+        state.agentChatKey ? state.stagedEdits().catch(() => []) : Promise.resolve([]),
         state.dirtySummary(),
       ]);
       if (charKey === state.activeCharKey) {

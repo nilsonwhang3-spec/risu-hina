@@ -79,7 +79,7 @@ export function openPendingPopover(anchor: HTMLElement): void {
     try {
       [items, staged] = await Promise.all([
         state.actionsForBot(),
-        state.activeChatKey ? state.stagedEdits() : Promise.resolve([] as StagedEdit[]),
+        state.agentChatKey ? state.stagedEdits() : Promise.resolve([] as StagedEdit[]),
       ]);
     } catch (e) {
       clear(list);

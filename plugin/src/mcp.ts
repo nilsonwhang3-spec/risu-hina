@@ -100,7 +100,7 @@ class McpBridge {
     const chat = state.workspace?.chats.find((c) => c.chatKey === state.activeChatKey);
     return {
       charKey: state.activeCharKey || '',
-      chatKey: state.activeChatKey || '',
+      chatKey: state.agentChatKey || '',
       botName: state.workspace?.characterName || String(state.character?.name || ''),
       chatName: chat?.name || '',
       mode: state.activeTab === 'chats' ? '' : state.agentMode,

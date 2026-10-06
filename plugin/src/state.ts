@@ -834,6 +834,9 @@ class AppState {
    * (neither half), and the agent has to be told the truth about it. */
   activeTab = '';
   activeChatKey = '';
+  /** The backend's chat for the agent when no bot is open (app/home.py): set
+   * once by ensureHome(), used only while activeChatKey is empty. */
+  homeChatKey = '';
   botChanges: CardChanges | null = null;
   /**
    * The background asset importer's progress for the live bot, or null before
@@ -2138,13 +2141,13 @@ class AppState {
    * excluded server-side; the limit keeps the rest small too). */
   async agentSession(sessionId?: string, limit = 0): Promise<AgentSession> {
     const revision = this.contextRevision;
-    const chatKey = this.activeChatKey;
+    const chatKey = this.agentChatKey;
     const r = await transport.get<AgentSession>('/session', {
       chatKey,
       sessionId: sessionId || undefined,
       limit: limit > 0 ? limit : undefined,
     });
-    if (revision !== this.contextRevision || chatKey !== this.activeChatKey) throw new Error('봇 또는 챗 선택이 변경되었습니다');
+    if (revision !== this.contextRevision || chatKey !== this.agentChatKey) throw new Error('봇 또는 챗 선택이 변경되었습니다');
     this.sessionId = r.session?.sessionId ?? '';
     return r;
   }
@@ -2153,7 +2156,7 @@ class AppState {
     if (!this.sessionId) await this.newAgentSession();
     const sid = this.sessionId;
     const context = this.contextRevision;
-    const args = { sessionId: sid, chatKey: this.activeChatKey, ...(mode ? { mode, revision } : {}) };
+    const args = { sessionId: sid, chatKey: this.agentChatKey, ...(mode ? { mode, revision } : {}) };
     const result = mode ? await transport.post<WorkPlan>('/agent/plan', args)
       : await transport.get<WorkPlan>('/agent/plan', args);
     if (sid !== this.sessionId || context !== this.contextRevision) throw new Error('대화가 변경되었습니다');
@@ -2162,17 +2165,37 @@ class AppState {
 
   async agentSessions(): Promise<AgentSessionInfo[]> {
     const r = await transport.get<{ sessions: AgentSessionInfo[] }>('/sessions', {
-      chatKey: this.activeChatKey,
+      chatKey: this.agentChatKey,
     });
     return r.sessions ?? [];
+  }
+
+  /**
+   * The chat the agent talks from. A session needs a chat; with no bot open
+   * in RisuAI (persona or module editing on their own) it is the backend's
+   * home chat, so the agent works there too.
+   */
+  get agentChatKey(): string {
+    return this.activeChatKey || this.homeChatKey;
+  }
+
+  /** Fetch the home chat's key once (no-op with a chat open or no backend). */
+  async ensureHome(): Promise<string> {
+    if (this.activeChatKey || this.homeChatKey || !this.health) return this.agentChatKey;
+    const r = await transport.post<{ chatKey: string }>('/home', {});
+    if (!this.homeChatKey) {
+      this.homeChatKey = r.chatKey || '';
+      this.emit();
+    }
+    return this.agentChatKey;
   }
 
   /** Start a fresh conversation; the previous one stays in the history list. */
   async newAgentSession(): Promise<void> {
     const revision = this.contextRevision;
-    const chatKey = this.activeChatKey;
+    const chatKey = this.agentChatKey;
     const r = await transport.post<{ sessionId: string }>('/session', { chatKey });
-    if (revision !== this.contextRevision || chatKey !== this.activeChatKey) throw new Error('봇 또는 챗 선택이 변경되었습니다');
+    if (revision !== this.contextRevision || chatKey !== this.agentChatKey) throw new Error('봇 또는 챗 선택이 변경되었습니다');
     this.sessionId = r.sessionId;
   }
 
@@ -2247,13 +2270,13 @@ class AppState {
   }
 
   async stagedEdits(): Promise<StagedEdit[]> {
-    const r = await transport.get<{ staged: StagedEdit[] }>('/staged', { chatKey: this.activeChatKey });
+    const r = await transport.get<{ staged: StagedEdit[] }>('/staged', { chatKey: this.agentChatKey });
     return r.staged ?? [];
   }
 
   async approveStaged(approve: boolean): Promise<{ decided: number; applied: number }> {
     const r = await transport.post<{ decided: number; applied: number }>(
-      '/approve', { chatKey: this.activeChatKey, all: true, approve });
+      '/approve', { chatKey: this.agentChatKey, all: true, approve });
     void this.refreshChanges();
     return r;
   }
@@ -2725,13 +2748,14 @@ class AppState {
 
   async actions(): Promise<PendingAction[]> {
     const r = await transport.get(
-      '/actions?chatKey=' + encodeURIComponent(this.activeChatKey)) as { actions: PendingAction[] };
+      '/actions?chatKey=' + encodeURIComponent(this.agentChatKey)) as { actions: PendingAction[] };
     return r.actions;
   }
 
   /** Every pending proposal of the open bot, whichever chat it rode on. */
   async actionsForBot(): Promise<PendingAction[]> {
-    if (!this.activeCharKey) return [];
+    // No bot open: the home chat's queue (persona / module proposals).
+    if (!this.activeCharKey) return this.homeChatKey ? this.actions() : [];
     const mods = this.openModules.map((m) => m.key).join(',');
     const r = await transport.get(
       '/actions?charKey=' + encodeURIComponent(this.activeCharKey)
@@ -2762,7 +2786,7 @@ class AppState {
     // only from the half of the panel it belongs to. `mode` stays for callers
     // that want the gate explicitly.
     const r = await transport.post('/actions/decide', {
-      chatKey: chatKey || this.activeChatKey, id, approve, mode: mode ?? '',
+      chatKey: chatKey || this.agentChatKey, id, approve, mode: mode ?? '',
     }) as { approved: boolean; result?: string; host?: { kind: string; args: Record<string, any>; charKey?: string } };
 
     if (!r.approved) return '거절했습니다.';
@@ -2839,12 +2863,12 @@ class AppState {
       } else {
         throw new Error('플러그인이 모르는 작업입니다: ' + r.host.kind);
       }
-      await transport.post('/actions/complete', { chatKey: chatKey || this.activeChatKey, id, ok: true, detail });
+      await transport.post('/actions/complete', { chatKey: chatKey || this.agentChatKey, id, ok: true, detail });
       return detail;
     } catch (e) {
       const why = e instanceof Error ? e.message : String(e);
       await transport.post('/actions/complete', {
-        chatKey: chatKey || this.activeChatKey, id, ok: false, detail: why,
+        chatKey: chatKey || this.agentChatKey, id, ok: false, detail: why,
       });
       throw e;
     }

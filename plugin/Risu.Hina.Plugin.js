@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.15.36
+//@display-name Risu Hina v0.15.37
 //@api 3.0
-//@version 0.15.36
+//@version 0.15.37
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -195,7 +195,7 @@
           this.tokenSafe = true;
           this.lastHealth = body;
           this.probeInfo = "";
-          this.gate = versionGate("0.15.36", String(body.version || ""));
+          this.gate = versionGate("0.15.37", String(body.version || ""));
           return body;
         }
         /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -3631,6 +3631,9 @@ name: ${nm}
          * (neither half), and the agent has to be told the truth about it. */
         activeTab = "";
         activeChatKey = "";
+        /** The backend's chat for the agent when no bot is open (app/home.py): set
+         * once by ensureHome(), used only while activeChatKey is empty. */
+        homeChatKey = "";
         botChanges = null;
         /**
          * The background asset importer's progress for the live bot, or null before
@@ -4853,13 +4856,13 @@ name: ${nm}
          * excluded server-side; the limit keeps the rest small too). */
         async agentSession(sessionId, limit = 0) {
           const revision = this.contextRevision;
-          const chatKey = this.activeChatKey;
+          const chatKey = this.agentChatKey;
           const r = await transport.get("/session", {
             chatKey,
             sessionId: sessionId || void 0,
             limit: limit > 0 ? limit : void 0
           });
-          if (revision !== this.contextRevision || chatKey !== this.activeChatKey) throw new Error("\uBD07 \uB610\uB294 \uCC57 \uC120\uD0DD\uC774 \uBCC0\uACBD\uB418\uC5C8\uC2B5\uB2C8\uB2E4");
+          if (revision !== this.contextRevision || chatKey !== this.agentChatKey) throw new Error("\uBD07 \uB610\uB294 \uCC57 \uC120\uD0DD\uC774 \uBCC0\uACBD\uB418\uC5C8\uC2B5\uB2C8\uB2E4");
           this.sessionId = r.session?.sessionId ?? "";
           return r;
         }
@@ -4867,23 +4870,41 @@ name: ${nm}
           if (!this.sessionId) await this.newAgentSession();
           const sid = this.sessionId;
           const context = this.contextRevision;
-          const args = { sessionId: sid, chatKey: this.activeChatKey, ...mode2 ? { mode: mode2, revision } : {} };
+          const args = { sessionId: sid, chatKey: this.agentChatKey, ...mode2 ? { mode: mode2, revision } : {} };
           const result = mode2 ? await transport.post("/agent/plan", args) : await transport.get("/agent/plan", args);
           if (sid !== this.sessionId || context !== this.contextRevision) throw new Error("\uB300\uD654\uAC00 \uBCC0\uACBD\uB418\uC5C8\uC2B5\uB2C8\uB2E4");
           return result;
         }
         async agentSessions() {
           const r = await transport.get("/sessions", {
-            chatKey: this.activeChatKey
+            chatKey: this.agentChatKey
           });
           return r.sessions ?? [];
+        }
+        /**
+         * The chat the agent talks from. A session needs a chat; with no bot open
+         * in RisuAI (persona or module editing on their own) it is the backend's
+         * home chat, so the agent works there too.
+         */
+        get agentChatKey() {
+          return this.activeChatKey || this.homeChatKey;
+        }
+        /** Fetch the home chat's key once (no-op with a chat open or no backend). */
+        async ensureHome() {
+          if (this.activeChatKey || this.homeChatKey || !this.health) return this.agentChatKey;
+          const r = await transport.post("/home", {});
+          if (!this.homeChatKey) {
+            this.homeChatKey = r.chatKey || "";
+            this.emit();
+          }
+          return this.agentChatKey;
         }
         /** Start a fresh conversation; the previous one stays in the history list. */
         async newAgentSession() {
           const revision = this.contextRevision;
-          const chatKey = this.activeChatKey;
+          const chatKey = this.agentChatKey;
           const r = await transport.post("/session", { chatKey });
-          if (revision !== this.contextRevision || chatKey !== this.activeChatKey) throw new Error("\uBD07 \uB610\uB294 \uCC57 \uC120\uD0DD\uC774 \uBCC0\uACBD\uB418\uC5C8\uC2B5\uB2C8\uB2E4");
+          if (revision !== this.contextRevision || chatKey !== this.agentChatKey) throw new Error("\uBD07 \uB610\uB294 \uCC57 \uC120\uD0DD\uC774 \uBCC0\uACBD\uB418\uC5C8\uC2B5\uB2C8\uB2E4");
           this.sessionId = r.sessionId;
         }
         /**
@@ -4952,13 +4973,13 @@ name: ${nm}
           this.emit();
         }
         async stagedEdits() {
-          const r = await transport.get("/staged", { chatKey: this.activeChatKey });
+          const r = await transport.get("/staged", { chatKey: this.agentChatKey });
           return r.staged ?? [];
         }
         async approveStaged(approve) {
           const r = await transport.post(
             "/approve",
-            { chatKey: this.activeChatKey, all: true, approve }
+            { chatKey: this.agentChatKey, all: true, approve }
           );
           void this.refreshChanges();
           return r;
@@ -5322,13 +5343,13 @@ name: ${nm}
         // --- the approval queue ----------------------------------------------------
         async actions() {
           const r = await transport.get(
-            "/actions?chatKey=" + encodeURIComponent(this.activeChatKey)
+            "/actions?chatKey=" + encodeURIComponent(this.agentChatKey)
           );
           return r.actions;
         }
         /** Every pending proposal of the open bot, whichever chat it rode on. */
         async actionsForBot() {
-          if (!this.activeCharKey) return [];
+          if (!this.activeCharKey) return this.homeChatKey ? this.actions() : [];
           const mods = this.openModules.map((m) => m.key).join(",");
           const r = await transport.get(
             "/actions?charKey=" + encodeURIComponent(this.activeCharKey) + (mods ? "&modules=" + encodeURIComponent(mods) : "")
@@ -5353,7 +5374,7 @@ name: ${nm}
          */
         async decideAction(id, approve, chatKey = "", mode2) {
           const r = await transport.post("/actions/decide", {
-            chatKey: chatKey || this.activeChatKey,
+            chatKey: chatKey || this.agentChatKey,
             id,
             approve,
             mode: mode2 ?? ""
@@ -5413,12 +5434,12 @@ name: ${nm}
             } else {
               throw new Error("\uD50C\uB7EC\uADF8\uC778\uC774 \uBAA8\uB974\uB294 \uC791\uC5C5\uC785\uB2C8\uB2E4: " + r.host.kind);
             }
-            await transport.post("/actions/complete", { chatKey: chatKey || this.activeChatKey, id, ok: true, detail });
+            await transport.post("/actions/complete", { chatKey: chatKey || this.agentChatKey, id, ok: true, detail });
             return detail;
           } catch (e) {
             const why = e instanceof Error ? e.message : String(e);
             await transport.post("/actions/complete", {
-              chatKey: chatKey || this.activeChatKey,
+              chatKey: chatKey || this.agentChatKey,
               id,
               ok: false,
               detail: why
@@ -5861,7 +5882,7 @@ name: ${nm}
       const chat = state.workspace?.chats.find((c) => c.chatKey === state.activeChatKey);
       return {
         charKey: state.activeCharKey || "",
-        chatKey: state.activeChatKey || "",
+        chatKey: state.agentChatKey || "",
         botName: state.workspace?.characterName || String(state.character?.name || ""),
         chatName: chat?.name || "",
         mode: state.activeTab === "chats" ? "" : state.agentMode,
@@ -6334,7 +6355,7 @@ name: ${nm}
       try {
         [items5, staged] = await Promise.all([
           state.actionsForBot(),
-          state.activeChatKey ? state.stagedEdits() : Promise.resolve([])
+          state.agentChatKey ? state.stagedEdits() : Promise.resolve([])
         ]);
       } catch (e) {
         clear(list2);
@@ -7187,7 +7208,7 @@ name: ${nm}
     let dirty2 = 0;
     let summary = null;
     const paint2 = () => {
-      wrap.style.display = state.health && (state.activeCharKey || dirty2 > 0) ? "" : "none";
+      wrap.style.display = state.health && (state.activeCharKey || dirty2 > 0 || pending3 > 0) ? "" : "none";
       approveCount.textContent = String(pending3);
       applyCount.textContent = String(dirty2);
       approveBtn.classList.toggle("hot", pending3 > 0);
@@ -7223,8 +7244,8 @@ name: ${nm}
       const charKey = state.activeCharKey;
       try {
         const [acts, staged, sum] = await Promise.all([
-          state.activeCharKey ? state.actionsForBot().catch(() => []) : Promise.resolve([]),
-          state.activeChatKey ? state.stagedEdits().catch(() => []) : Promise.resolve([]),
+          state.activeCharKey || state.homeChatKey ? state.actionsForBot().catch(() => []) : Promise.resolve([]),
+          state.agentChatKey ? state.stagedEdits().catch(() => []) : Promise.resolve([]),
           state.dirtySummary()
         ]);
         if (charKey === state.activeCharKey) {
@@ -9896,6 +9917,53 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
   }
 
   // src/ui/agent.ts
+  function screenKind() {
+    const half = activeHalf();
+    if (half === "bot" && state.cardTarget) return "module";
+    return half;
+  }
+  var SCREEN_WORDS = {
+    chat: {
+      where: "\uCC57",
+      title: "\uC870\uC815\uD574\uC57C \uD560 \uD56D\uBAA9\uC744 \uC0C1\uB2F4\uD558\uC138\uC694",
+      knows: "AI \uC5D0\uC774\uC804\uD2B8\uB294 \uD604\uC7AC \uD0ED\uBFD0\uB9CC \uC544\uB2C8\uB77C \uC120\uD0DD\uB41C \uBD07 \uBC0F \uCC57\uC758 \uC804\uBC18\uC801\uC778 \uC815\uBCF4\uB97C \uBAA8\uB450 \uC54C\uACE0 \uC788\uC2B5\uB2C8\uB2E4.",
+      examples: [
+        "\uB300\uD654\uC5D0\uC11C \uD398\uB974\uC18C\uB098\uB97C \uC870\uAE08 \uB354 \uCC29\uD55C \uC0AC\uB78C\uC73C\uB85C \uC870\uC815\uD574\uC918",
+        "{{char}}\uC5D0\uAC8C \uACE0\uBC31\uD55C \uC77C\uC744 \uC5C6\uB358 \uAC78\uB85C \uD574\uC918",
+        "\uCC57 \uC774\uC0AC\uAC00\uACE0 \uC2F6\uC5B4. \uC804\uCCB4 \uD56D\uBAA9\uC744 \uCCB4\uACC4\uC801\uC73C\uB85C \uC694\uC57D\uD574\uC11C \uCC57 \uB85C\uC5B4\uBD81\uC5D0 \uB123\uACE0, 10\uD134\uB9CC \uB0A8\uACA8\uC918"
+      ]
+    },
+    bot: {
+      where: "\uBD07",
+      title: "\uBD07(\uCE74\uB4DC)\uC5D0\uC11C \uC870\uC815\uD560 \uD56D\uBAA9\uC744 \uC0C1\uB2F4\uD558\uC138\uC694",
+      knows: "AI \uC5D0\uC774\uC804\uD2B8\uB294 \uD604\uC7AC \uD0ED\uBFD0\uB9CC \uC544\uB2C8\uB77C \uC120\uD0DD\uB41C \uBD07 \uBC0F \uCC57\uC758 \uC804\uBC18\uC801\uC778 \uC815\uBCF4\uB97C \uBAA8\uB450 \uC54C\uACE0 \uC788\uC2B5\uB2C8\uB2E4.",
+      examples: [
+        "\uBD07 \uB85C\uC5B4\uBD81\uC744 \uD6D1\uC5B4\uC11C \uACB9\uCE58\uAC70\uB098 \uBE48 \uD56D\uBAA9\uC744 \uC815\uB9AC\uD558\uACE0 \uD3F4\uB354\uB85C \uBB36\uC5B4\uC918",
+        "\uD37C\uC2A4\uD2B8 \uBA54\uC2DC\uC9C0\uC640 \uB300\uCCB4 \uC778\uC0AC\uB9D0\uC758 \uB9D0\uD22C\uB97C \uC124\uBA85(desc)\uACFC \uB9DE\uCDB0\uC918",
+        "\uC5D0\uC14B \uC774\uB984 \uB05D\uC758 \uD655\uC7A5\uC790\uB97C \uB5BC\uACE0, \uAC10\uC815 \uC774\uBBF8\uC9C0 \uC774\uB984\uC744 \uAC10\uC815 \uB2E8\uC5B4\uB85C \uD1B5\uC77C\uD574\uC918"
+      ]
+    },
+    persona: {
+      where: "\uD398\uB974\uC18C\uB098",
+      title: "\uD398\uB974\uC18C\uB098\uC5D0\uC11C \uC870\uC815\uD560 \uD56D\uBAA9\uC744 \uC0C1\uB2F4\uD558\uC138\uC694",
+      knows: "AI \uC5D0\uC774\uC804\uD2B8\uB294 \uC5F4\uB824 \uC788\uB294 \uD398\uB974\uC18C\uB098\uC640 \uD568\uAED8 \uC5F0 \uBAA8\uB4C8\uC744 \uC54C\uACE0 \uC788\uC2B5\uB2C8\uB2E4. \uBD07\uC774 \uC120\uD0DD\uB418\uC5B4 \uC788\uC73C\uBA74 \uADF8 \uBD07\uB3C4 \uCC38\uACE0\uD569\uB2C8\uB2E4.",
+      examples: [
+        "\uC774 \uD398\uB974\uC18C\uB098 \uC124\uBA85\uC744 \uC678\uBAA8\xB7\uC131\uACA9\xB7\uB9D0\uD22C\xB7\uBC30\uACBD \uD56D\uBAA9\uC73C\uB85C \uB098\uB220 \uC815\uB9AC\uD574\uC918",
+        "\uC124\uBA85\uC5D0\uC11C \uD2B9\uC815 \uBD07\uC5D0\uB9CC \uB9DE\uB294 \uB0B4\uC6A9\uC744 \uBE7C\uACE0 \uC5B4\uB290 \uBD07\uC5D0\uC11C\uB098 \uC4F8 \uC218 \uC788\uAC8C \uB2E4\uB4EC\uC5B4\uC918",
+        "\uC774 \uD398\uB974\uC18C\uB098\uB97C \uBC14\uD0D5\uC73C\uB85C \uC131\uACA9\uC774 \uC815\uBC18\uB300\uC778 \uC0C8 \uD398\uB974\uC18C\uB098\uB97C \uD558\uB098 \uB9CC\uB4E4\uC5B4\uC918"
+      ]
+    },
+    module: {
+      where: "\uBAA8\uB4C8",
+      title: "\uBAA8\uB4C8\uC5D0\uC11C \uC870\uC815\uD560 \uD56D\uBAA9\uC744 \uC0C1\uB2F4\uD558\uC138\uC694",
+      knows: "AI \uC5D0\uC774\uC804\uD2B8\uB294 \uC9C0\uAE08 \uD3B8\uC9D1 \uC911\uC778 \uBAA8\uB4C8\uACFC \uD568\uAED8 \uC5F0 \uBAA8\uB4C8\uC744 \uC54C\uACE0 \uC788\uC2B5\uB2C8\uB2E4. \uBD07\uC774 \uC120\uD0DD\uB418\uC5B4 \uC788\uC73C\uBA74 \uADF8 \uBD07\uB3C4 \uCC38\uACE0\uD569\uB2C8\uB2E4.",
+      examples: [
+        "\uC774 \uBAA8\uB4C8\uC758 \uB85C\uC5B4\uBD81\uC744 \uD6D1\uC5B4\uC11C \uACB9\uCE58\uAC70\uB098 \uBE48 \uD56D\uBAA9\uC744 \uC815\uB9AC\uD558\uACE0 \uD3F4\uB354\uB85C \uBB36\uC5B4\uC918",
+        "\uBAA8\uB4C8 \uD1A0\uAE00\uC744 \uC815\uB9AC\uD558\uACE0, \uD1A0\uAE00\uC744 \uB044\uBA74 \uAD00\uB828 Regex\xB7\uB85C\uC5B4\uBD81\uB3C4 \uAEBC\uC9C0\uAC8C \uB9DE\uCDB0\uC918",
+        "\uD2B9\uC815 \uBD07 \uC774\uB984\uC5D0 \uAE30\uB300\uB294 \uBD80\uBD84\uC744 \uCC3E\uC544\uC11C \uC5B4\uB290 \uBD07\uC5D0 \uBD99\uC5EC\uB3C4 \uB3D9\uC791\uD558\uAC8C \uBC14\uAFD4\uC918"
+      ]
+    }
+  };
   var IMG_RE = /\.(png|jpe?g|gif|webp|avif|bmp)$/i;
   var PROPOSING_TOOL = /^(propose_|stage_|studio_generate$)/;
   function touchInput() {
@@ -10114,7 +10182,15 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     }
     async render(sessionId, limit = _AgentPanel.pageSize()) {
       clear(this.log);
-      if (!state.activeChatKey) {
+      if (!state.agentChatKey && (state.editMode === "persona" || state.editMode === "module") && state.health) {
+        this.loaded = false;
+        this.log.appendChild(el("div", { class: "hint agentloading", text: "\uB300\uD654\uB97C \uC900\uBE44\uD558\uB294 \uC911\uC785\uB2C8\uB2E4\u2026" }));
+        void state.ensureHome().catch((e) => {
+          this.status.textContent = e instanceof Error ? e.message : String(e);
+        });
+        return;
+      }
+      if (!state.agentChatKey) {
         this.loaded = false;
         this.status.textContent = "";
         this.log.appendChild(el("div", { class: "notice" }, [
@@ -10173,7 +10249,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
      * a chat tab (the user read "챗에서" while editing a card). Called on every
      * mount too - load() dedupes renders, and a tab switch changes the half. */
     syncPlaceholder() {
-      const where = activeHalf() === "bot" ? "\uBD07" : "\uCC57";
+      const where = SCREEN_WORDS[screenKind()].where;
       this.input.placeholder = `${where}\uC5D0\uC11C \uC218\uC815\uC774\uB098 \uC870\uC815\uC774 \uD544\uC694\uD55C \uBD80\uBD84\uC744 \uB9D0\uC500\uD558\uC138\uC694. \uAD81\uAE08\uD55C \uC810\uC774 \uC788\uB2E4\uBA74 \uBB34\uC5C7\uC774\uB4E0 \uBB3C\uC5B4\uBCF4\uC138\uC694.`;
       this.planLine.style.display = state.health?.chatgptPlan ? "" : "none";
       const w = this.log.querySelector(".welcome");
@@ -10189,25 +10265,17 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
      * it: they are starting points to edit, not commands.
      */
     welcome() {
-      const bot = activeHalf() === "bot";
-      const examples = bot ? [
-        "\uBD07 \uB85C\uC5B4\uBD81\uC744 \uD6D1\uC5B4\uC11C \uACB9\uCE58\uAC70\uB098 \uBE48 \uD56D\uBAA9\uC744 \uC815\uB9AC\uD558\uACE0 \uD3F4\uB354\uB85C \uBB36\uC5B4\uC918",
-        "\uD37C\uC2A4\uD2B8 \uBA54\uC2DC\uC9C0\uC640 \uB300\uCCB4 \uC778\uC0AC\uB9D0\uC758 \uB9D0\uD22C\uB97C \uC124\uBA85(desc)\uACFC \uB9DE\uCDB0\uC918",
-        "\uC5D0\uC14B \uC774\uB984 \uB05D\uC758 \uD655\uC7A5\uC790\uB97C \uB5BC\uACE0, \uAC10\uC815 \uC774\uBBF8\uC9C0 \uC774\uB984\uC744 \uAC10\uC815 \uB2E8\uC5B4\uB85C \uD1B5\uC77C\uD574\uC918"
-      ] : [
-        "\uB300\uD654\uC5D0\uC11C \uD398\uB974\uC18C\uB098\uB97C \uC870\uAE08 \uB354 \uCC29\uD55C \uC0AC\uB78C\uC73C\uB85C \uC870\uC815\uD574\uC918",
-        "{{char}}\uC5D0\uAC8C \uACE0\uBC31\uD55C \uC77C\uC744 \uC5C6\uB358 \uAC78\uB85C \uD574\uC918",
-        "\uCC57 \uC774\uC0AC\uAC00\uACE0 \uC2F6\uC5B4. \uC804\uCCB4 \uD56D\uBAA9\uC744 \uCCB4\uACC4\uC801\uC73C\uB85C \uC694\uC57D\uD574\uC11C \uCC57 \uB85C\uC5B4\uBD81\uC5D0 \uB123\uACE0, 10\uD134\uB9CC \uB0A8\uACA8\uC918"
-      ];
+      const words = SCREEN_WORDS[screenKind()];
+      const examples = words.examples;
       const box = el("div", { class: "welcome" }, [
-        el("div", { class: "welcome-title", text: bot ? "\uBD07(\uCE74\uB4DC)\uC5D0\uC11C \uC870\uC815\uD560 \uD56D\uBAA9\uC744 \uC0C1\uB2F4\uD558\uC138\uC694" : "\uC870\uC815\uD574\uC57C \uD560 \uD56D\uBAA9\uC744 \uC0C1\uB2F4\uD558\uC138\uC694" }),
+        el("div", { class: "welcome-title", text: words.title }),
         el("div", {
           class: "hint",
           text: "\uACE0\uCE60 \uACF3\uC744 \uB9D0\uC500\uD558\uC2DC\uBA74 \uC81C\uC548\uC744 \uB9CC\uB4ED\uB2C8\uB2E4. \uD3B8\uC9D1\xB7\uC5D0\uC14B \uC81C\uC548\uC744 \uC2B9\uC778\uD558\uBA74 \uC791\uC5C5\uBCF8\uC5D0 \uC800\uC7A5\uB429\uB2C8\uB2E4. RisuAI\uC5D0 \uC800\uC7A5\xB7\uB4F1\uB85D\uD558\uB824\uBA74 \uBCC4\uB3C4\uB85C \uBC18\uC601\uC744 \uB20C\uB7EC \uC8FC\uC138\uC694."
         }),
         el("div", {
           class: "hint",
-          text: "AI \uC5D0\uC774\uC804\uD2B8\uB294 \uD604\uC7AC \uD0ED\uBFD0\uB9CC \uC544\uB2C8\uB77C \uC120\uD0DD\uB41C \uBD07 \uBC0F \uCC57\uC758 \uC804\uBC18\uC801\uC778 \uC815\uBCF4\uB97C \uBAA8\uB450 \uC54C\uACE0 \uC788\uC2B5\uB2C8\uB2E4."
+          text: words.knows
         })
       ]);
       for (const text2 of examples) {
@@ -11185,7 +11253,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     void p.load();
   }
   function syncAgentContext() {
-    const key = JSON.stringify([state.contextRevision, state.activeCharKey, state.activeChatKey]);
+    const key = JSON.stringify([state.contextRevision, state.activeCharKey, state.agentChatKey]);
     if (key === panelContext) return;
     panelContext = key;
     resetAgentPane();
@@ -11224,7 +11292,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     const n = makeNotice();
     return (mount2) => {
       const gate = spec3.gate ?? "none";
-      const pass = gate === "none" || (gate === "chat" ? !!state.activeChatKey : !!state.activeCharKey);
+      const pass = gate === "none" || (gate === "chat" ? !!state.activeChatKey : !!state.botKey);
       if (!pass) {
         clear(mount2);
         built2 = false;
@@ -11833,7 +11901,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     }
     if (state.slotError) {
       root2.appendChild(el("div", { class: "notice" }, [
-        el("div", { text: "\uCE90\uB9AD\uD130\uAC00 \uC120\uD0DD\uB418\uC5B4 \uC788\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4. \uBD07\xB7\uCC57 \uD3B8\uC9D1\uC740 RisuAI\uC5D0\uC11C \uBD07\uC744 \uC5F0 \uB2E4\uC74C \u{1F504} \uB97C \uB20C\uB7EC \uC8FC\uC138\uC694 (\uD398\uB974\uC18C\uB098 \uD3B8\uC9D1\uC740 \uADF8\uB300\uB85C \uB429\uB2C8\uB2E4)." }),
+        el("div", { text: "\uCE90\uB9AD\uD130\uAC00 \uC120\uD0DD\uB418\uC5B4 \uC788\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4. \uBD07\xB7\uCC57 \uD3B8\uC9D1\uC740 RisuAI\uC5D0\uC11C \uBD07\uC744 \uC5F0 \uB2E4\uC74C \u{1F504} \uB97C \uB20C\uB7EC \uC8FC\uC138\uC694 (\uD398\uB974\uC18C\uB098\xB7\uBAA8\uB4C8 \uD3B8\uC9D1\uACFC AI \uCC57\uC740 \uADF8\uB300\uB85C \uB429\uB2C8\uB2E4)." }),
         el("div", { class: "hint", text: state.slotError })
       ]));
     }
@@ -17696,10 +17764,10 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           return;
         }
         if (!r.newer) {
-          const mismatch = r.current !== "0.15.36";
+          const mismatch = r.current !== "0.15.37";
           const ahead = r.ahead ?? (!!r.latest && r.latest !== r.current);
           say(
-            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.36"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
+            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.37"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
             mismatch || ahead ? "" : "ok"
           );
           return;
@@ -17790,7 +17858,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.15.36",
+            version: "0.15.37",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -18488,7 +18556,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.36"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.37"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -26151,6 +26219,7 @@ ${negative.value.trim()}
     state.editMode = m;
     if (m === "chat") state.focusModule("");
     void state.syncModuleOwner();
+    if (m === "persona" || m === "module") void state.ensureHome().catch(() => void 0);
     syncModeTabs();
     if (tab) setTab(tab);
     else if (!MODE_TABS[m].has(active2) && (CHAT_TABS.has(active2) || BOT_TABS.has(active2) || PERSONA_TABS.has(active2))) setTab("chats");
@@ -26405,14 +26474,14 @@ ${negative.value.trim()}
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.36"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.37"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
       healthEl.title = transport.versionGate;
     } else {
       healthEl.appendChild(el("span", { class: "hint", text: `\uBC31\uC5D4\uB4DC v${h.version}` }));
-      const behind = backendBehind("0.15.36", h.version, h.installKind);
+      const behind = backendBehind("0.15.37", h.version, h.installKind);
       if (behind) {
         const b = el("button", { class: "ghost tiny behindchip", text: "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8 \uD544\uC694", title: behind });
         b.addEventListener("click", () => {
@@ -26513,7 +26582,7 @@ ${negative.value.trim()}
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.15.36" }),
+        el("span", { class: "dim", text: "v0.15.37" }),
         healthEl,
         el("span", { class: "spacer" }),
         // 승인 / 반영 for the whole bot, from every tab (§1-76).
@@ -26867,6 +26936,6 @@ ${negative.value.trim()}
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.15.36"} loaded`);
+    console.log(`[risu-hina] v${"0.15.37"} loaded`);
   })();
 })();

@@ -100,7 +100,7 @@ export function mountAgent(into: HTMLElement): void {
 }
 
 function syncAgentContext(): void {
-  const key = JSON.stringify([state.contextRevision, state.activeCharKey, state.activeChatKey]);
+  const key = JSON.stringify([state.contextRevision, state.activeCharKey, state.agentChatKey]);
   if (key === panelContext) return;
   panelContext = key;
   resetAgentPane();

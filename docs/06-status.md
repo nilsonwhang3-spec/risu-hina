@@ -1,4 +1,24 @@
-# 06. Implementation status — as of 2026-10-06 (v0.15.36, Risu Hina)
+# 06. Implementation status — as of 2026-10-06 (v0.15.37, Risu Hina)
+
+## 0.15.37 (2026-10-06): §1-98 quick fix — 모듈 편집 without a bot, AI chat on persona/module screens
+
+## §1-98 (2026-10-06) 모듈 편집 with no bot, the AI chat there, screen-fitting prompt examples
+
+- **Field report (3):** 모듈 편집 needed a bot selected in RisuAI (페르소나 편집 did not); the module screen had no
+  AI chat on the right; the AI chat's examples on the persona / module screens were the bot's and the chat's.
+- **No bot needed:** the card tabs' gate (`kit.makeTab`, gate 'bot') checked `activeCharKey`, so a module open with
+  no bot showed "먼저 패널을 연 봇이 있어야 합니다" and no right pane. It now checks `state.botKey` (the module target
+  or the bot); everything under the card tabs already addressed `botKey`.
+- **AI chat with no bot:** an agent session hangs off a chat. The backend now keeps one reserved home character +
+  chat (`app/home.py`, key `hina-home`, folder `_공용`; `POST /home` creates it once, `workspace.list_all` hides it).
+  The plugin's `state.agentChatKey` = the open chat, else the home chat (fetched on entering persona / module mode
+  or by the agent panel); the session, plan, staged edits, approval queue, title-row 승인 and the MCP context use it.
+  `session.run` / `mcpserver._deps` clear `bot_key` on the home chat (no focus_target back to a bot), and the screen
+  line tells the model no bot is selected (module mode with nothing open says to propose opening one).
+- **Prompt examples per screen:** the input's placeholder, the welcome title, the "knows" line and the three examples
+  now follow the material: 챗 / 봇 / 페르소나 / 모듈 (a module on the card tabs is 모듈, not 봇).
+- Verified: tests/test_modules.py (home chat idempotent and unlisted, a session on it, card tools on a module with no
+  bot, a module proposal approved from the home chat, whole turns in persona / empty-module / module mode), tsc.
 
 ## 0.15.36 (2026-10-06): RisuAI modules, §1-95 ~ §1-97 released
 

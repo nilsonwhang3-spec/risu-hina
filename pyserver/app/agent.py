@@ -877,9 +877,15 @@ def build(model: Any = None) -> Agent[Deps]:
     def _current_screen(ctx: RunContext[Deps]) -> str:
         # Stated up front rather than discovered through a tool refusal, in
         # the same words the panel header shows (user request, 2026-08-30).
+        from . import home
+        nobot = (" RisuAI에서 봇이 선택되지 않은 상태라 봇 카드·챗 도구는 쓸 수 없습니다"
+                 " (봇이나 챗을 고치려면 사용자가 RisuAI에서 봇을 열어야 합니다).") if home.is_home(ctx.deps.chat_key) else ""
         if modmod.is_module_key(ctx.deps.char_key):
-            return module_screen(ctx.deps)
-        extra = opened_modules_line(ctx.deps) + linked_line(ctx.deps)
+            return module_screen(ctx.deps) + nobot
+        extra = opened_modules_line(ctx.deps) + linked_line(ctx.deps) + nobot
+        if home.is_home(ctx.deps.chat_key) and ctx.deps.mode == "bot":
+            return ("지금 열려 있는 화면: 모듈 편집 (아직 연 모듈이 없습니다 - 모듈 목록을 보고"
+                    " propose_open_module 로 열 수 있습니다)." + extra)
         if ctx.deps.mode == "bot":
             return "지금 열려 있는 화면: 봇 편집 (카드 재료 - 메타·인사말·봇 로어북·Regex·트리거·에셋)." + extra
         if ctx.deps.mode == "chat":

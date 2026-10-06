@@ -238,7 +238,7 @@ export function renderChatsTab(mount: HTMLElement): void {
   if (state.slotError) {
     // Bot and chat need a bot; personas do not, so the screen stays.
     root.appendChild(el('div', { class: 'notice' }, [
-      el('div', { text: '캐릭터가 선택되어 있지 않습니다. 봇·챗 편집은 RisuAI에서 봇을 연 다음 🔄 를 눌러 주세요 (페르소나 편집은 그대로 됩니다).' }),
+      el('div', { text: '캐릭터가 선택되어 있지 않습니다. 봇·챗 편집은 RisuAI에서 봇을 연 다음 🔄 를 눌러 주세요 (페르소나·모듈 편집과 AI 챗은 그대로 됩니다).' }),
       el('div', { class: 'hint', text: state.slotError }),
     ]));
   }

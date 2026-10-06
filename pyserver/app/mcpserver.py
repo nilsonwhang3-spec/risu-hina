@@ -126,8 +126,8 @@ def _deps() -> Any:
     # The modules opened in the panel and the one its card tabs show (as in
     # session.run). A focus_target from this client lasts until the panel's
     # own target changes - each MCP call builds its Deps afresh.
-    from . import modules as modmod
-    deps.bot_key = char_key
+    from . import modules as modmod, home
+    deps.bot_key = "" if home.is_home(char_key) else char_key
     deps.modules = [k for k in str(ctx.get("modules") or "").split(",") if k and modmod.is_module_key(k)]
     deps.linked = list(ctx.get("linked") or []) if isinstance(ctx.get("linked"), list) else []
     panel = str(ctx.get("target") or "")
@@ -182,8 +182,12 @@ def _hina_status() -> str:
         return "\n".join(lines)
     if ctx.get("chatKey"):
         crow = store.chat_row(ctx["chatKey"])
-        lines.append(f"열린 봇: {ctx.get('botName') or '?'} (charKey {crow['char_key'] if crow else '?'})")
-        lines.append(f"열린 챗: {ctx.get('chatName') or '?'} (chatKey {ctx['chatKey']})")
+        from . import home
+        if home.is_home(ctx["chatKey"]):
+            lines.append("열린 봇: 없음 - RisuAI에서 봇이 선택되지 않아 페르소나·모듈만 편집할 수 있습니다")
+        else:
+            lines.append(f"열린 봇: {ctx.get('botName') or '?'} (charKey {crow['char_key'] if crow else '?'})")
+            lines.append(f"열린 챗: {ctx.get('chatName') or '?'} (chatKey {ctx['chatKey']})")
         lines.append(f"패널 화면: {ctx.get('mode') or '선택 화면'}")
         if ctx.get("modules"):
             from . import modules as modmod

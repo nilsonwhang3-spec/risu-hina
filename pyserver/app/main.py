@@ -2143,6 +2143,12 @@ def _module_call(fn, *a, **kw):
         raise ApiError(400, str(e))
 
 
+def h_home(arg: dict) -> dict:
+    """The agent's chat when no bot is open (persona / module editing, app/home.py)."""
+    from . import home
+    return home.ensure()
+
+
 def h_modules(arg: dict) -> dict:
     return {"modules": modmod.listing(str(arg.get("query") or ""))}
 
@@ -2951,6 +2957,7 @@ ROUTES: dict[str, Handler] = {
     "GET /persona/dirty": h_persona_dirty,
     "GET /personas": h_personas,
     "GET /modules": h_modules,
+    "POST /home": h_home,
     "POST /module/sync": h_module_sync,
     "POST /module/forget": h_module_forget,
     "GET /module/dirty": h_module_dirty,

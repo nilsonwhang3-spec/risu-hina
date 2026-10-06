@@ -515,6 +515,10 @@ async def run(session_id: str, prompt: str, mode: str = "", persona: str = "", *
     # addresses its working copy (app/modules.py). The bot stays reachable
     # through focus_target, and the chat tools still see the chat.
     deps.bot_key = deps.char_key
+    # No bot open (app/home.py): there is no bot to fall back to.
+    from . import home
+    if home.is_home(deps.char_key):
+        deps.bot_key = ""
     deps.modules = [k for k in (modules or []) if modmod.is_module_key(k)]
     deps.linked = list(linked or [])
     if target and modmod.is_module_key(target):

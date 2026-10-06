@@ -93,7 +93,8 @@ export function makeTab(spec: TabSpec): (mount: HTMLElement) => void {
   return (mount: HTMLElement): void => {
     const gate = spec.gate ?? 'none';
     const pass = gate === 'none'
-      || (gate === 'chat' ? !!state.activeChatKey : !!state.activeCharKey);
+      // A module open on the card tabs needs no bot (§1-95: 모듈 편집 on its own).
+      || (gate === 'chat' ? !!state.activeChatKey : !!state.botKey);
     if (!pass) {
       clear(mount);
       built = false;

@@ -265,6 +265,50 @@ pr2 = actions.propose("card_edit", chat_key=TK, char_key=store.upsert_character(
                       summary="x", args={"id": "nope", "body": "x"})
 check("another bot's proposal still refused", status_of(main.h_action_decide, {"chatKey": TK, "id": pr2["id"], "approve": True}) == 400)
 
+print("== no bot open: the home chat (app/home.py) ==")
+from app import home, session as sessmod  # noqa: E402
+h = main.h_home({})
+check("POST /home gives a chat", h["chatKey"] == home.KEY and store.chat_row(h["chatKey"]) is not None, str(h))
+check("calling it again is idempotent", main.h_home({}) == h)
+check("the home is not listed as a bot", not any(w["charKey"] == home.KEY for w in workspace.list_all()))
+sid = sessmod.create(h["chatKey"])["sessionId"]
+check("a session opens on the home chat", bool(sid))
+hd = agent.Deps(chat_key=home.KEY, char_key=MK, session_id=sid, workspace_dir=workspace.root(home.KEY), mode="bot", bot_key="", modules=[MK])
+txt, hd = call_tool("read_card", {}, hd)
+check("the card tools edit the module with no bot", "인벤토리" in txt, txt[:200])
+pr3 = actions.propose("card_edit", chat_key=home.KEY, char_key=MK, summary="모듈 설명", args={"id": f["creatorNotes"]["id"], "body": "홈에서 고침"})
+out = main.h_action_decide({"chatKey": home.KEY, "id": pr3["id"], "approve": True, "mode": "bot"})
+f = {x["field"]: x for x in main.h_card({"charKey": MK})["fields"]}
+check("a module proposal is approved from the home chat", out.get("approved") and f["creatorNotes"]["body"] == "홈에서 고침", str(out))
+check("pending listing works for the home chat", isinstance(main.h_actions({"chatKey": home.KEY})["actions"], list))
+
+
+
+def home_turn(mode: str, target: str) -> str:
+    """One whole turn on the home chat; returns the instructions the model saw."""
+    import asyncio
+    from pydantic_ai.messages import ModelResponse, TextPart
+    from pydantic_ai.models.function import FunctionModel
+    seen: list[str] = []
+
+    def respond(messages, info):
+        seen.append(str(info.instructions or ""))
+        return ModelResponse(parts=[TextPart("ok")])
+
+    ag = agent.build(model=FunctionModel(respond))
+    d = agent.Deps(chat_key=home.KEY, char_key=target or home.KEY, session_id=sid,
+                   workspace_dir=workspace.root(home.KEY), mode=mode, bot_key="", modules=[MK] if target else [])
+    asyncio.run(ag.run("안녕", deps=d))
+    return seen[0] if seen else ""
+
+
+ins = home_turn("persona", "")
+check("a persona turn runs on the home chat and says there is no bot", "봇이 선택되지 않은" in ins, ins[-400:])
+ins = home_turn("bot", "")
+check("module mode with nothing open says so", "아직 연 모듈이 없습니다" in ins, ins[-400:])
+ins = home_turn("bot", MK)
+check("a module turn on the home chat names the module", "RisuAI 모듈" in ins and "봇이 선택되지 않은" in ins and "focus_target(\"bot\")" not in ins, ins[-600:])
+
 if FAILURES:
     print(f"\nFAIL - {len(FAILURES)}: {', '.join(FAILURES)}")
     sys.exit(1)
