@@ -394,6 +394,7 @@ const FIELD_LABEL: Record<string, string> = {
   characterVersion: '봇 버전', replaceGlobalNote: '글로벌 노트', systemPrompt: '시스템 프롬프트',
   exampleMessage: '예시 대화', defaultVariables: '기본 변수', translatorNote: '번역가 노트',
   lowLevelAccess: '저수준 접근', loreSettings: '로어북 설정', backgroundHTML: '배경 HTML', image: '프로필 이미지',
+  customModuleToggle: '토글', hideChatIcon: '채팅 아이콘 숨기기',
 };
 
 /**

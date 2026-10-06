@@ -21,7 +21,7 @@
  * choices are shut and the open's steps are shown: nothing on the bot or its
  * chats can be edited before the working copy exists.
  */
-import { el, clear, refocusSearch, fmtTime, armed } from './dom';
+import { el, clear, refocusSearch, fmtTime, armed, popover } from './dom';
 import { state, type DirtySummary } from '../state';
 import { setEditMode, setToolbarSearch, setTab, bootState, type BootStep } from './shell';
 import type { RisuChat } from '../risuai';
@@ -34,6 +34,7 @@ import { shellNotice } from './chatbar';
 import { askName } from './kit';
 import type { LiveModule } from '../state';
 import { moduleLine } from './module-picker';
+import { moduleSaveRows } from './module-export';
 
 type Mode = 'bot' | 'chat' | 'persona' | 'module';
 
@@ -716,6 +717,7 @@ function moduleBody(body: HTMLElement, mount: HTMLElement): void {
 
 function moduleRow(m: LiveModule): HTMLElement {
   const edit = el('button', { class: 'ghost tiny', text: '편집' }) as HTMLButtonElement;
+  const save = el('button', { class: 'ghost tiny', text: '⬇ 저장', title: '이 모듈을 .charx / .risum 으로 워크스페이스에 저장합니다' }) as HTMLButtonElement;
   const open = state.openModules.find((x) => x.id === m.id);
   const first = m.description.split('\n')[0].slice(0, 80);
   const row = el('div', { class: 'chatitem' + (m.mcp ? ' dim' : '') }, [
@@ -726,9 +728,18 @@ function moduleRow(m: LiveModule): HTMLElement {
     m.linked ? el('span', { class: 'badge', text: '이 봇에 연결됨' }) : null,
     m.global ? el('span', { class: 'badge', text: '전역' }) : null,
     open?.total ? el('span', { class: 'badge warn', text: `미반영 ${open.total}` }) : null,
+    m.mcp ? null : save,
     m.mcp ? null : edit,
   ]);
   if (m.mcp) return row;
+  save.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    const box = el('div', { class: 'applypop' });
+    popover(save, box);
+    const rows = el('div');
+    box.append(el('div', { class: 'sectiontitle', text: '파일로 저장' }), rows);
+    moduleSaveRows(rows, [{ id: m.id, name: m.name, open: !!open, linked: m.linked }]);
+  });
   let busy = false;
   const enter = async () => {
     if (busy) return;

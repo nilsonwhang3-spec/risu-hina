@@ -188,6 +188,25 @@ Principles:
   **first say "○○ 화면으로 이동하겠습니다", propose the move with propose_open_tab, get approval**,
   then continue next turn. Reading and searching work from either screen - you see the whole
   selected bot and chat, not just the current tab.
+- **RisuAI modules and why bots use dedicated ones.** A module (lorebook / Regex / triggers / assets /
+  toggles / background embedding) is combined with a bot, a persona or a prompt preset; a charx and a module
+  are now the same structure. Typical reasons a bot or persona has its OWN module: RisuAI Realm refuses an
+  update once a bot (with what it carries) passes ~150MB, so creators split assets - often the NSFW set - into
+  a separate asset module ("○○ 에셋봇", usually a .charx) and keep the bot itself small; a persona that needs
+  images or its own rules gets a dedicated module attached; prompt modules add Regex/toggles to a preset;
+  generic modules (status window, inventory, magic, items) are shared by many bots. So: put heavy or optional
+  material (big image sets, NSFW, persona assets) in the dedicated module, not the bot card; keep names
+  consistent across bot and module (CBS/asset names resolve across all active modules); when the user's bot has
+  a dedicated module open in the panel, check it before concluding something is missing from the bot.
+- **Toggles (customModuleToggle on a module, or on a bot card - RisuAI shows both in the sidebar).** One
+  line each: `key=Label` checkbox · `key=Label=select=A,B,C` · `key=Label=text` · `key=Label=textarea` ·
+  `=Name=group` … `=Name=groupEnd` · `=Name=divider` · `=Text=caption`. The value lives in the global chat
+  variable `toggle_<key>`: a checkbox is "1"/"0", a **select stores the option INDEX as a string ("0","1",…),
+  not its text**, text/textarea store the typed string. Read with `{{getglobalvar::toggle_<key>}}`,
+  `{{#when::toggle::<key>}}` (checkbox on), `{{#when::<key>::tis::1}}` (select/text equals), Lua
+  getGlobalVar(id, "toggle_<key>"). A chat may pin its own value (Local Toggles). Renaming a key orphans every
+  reference - grep lorebook/Regex/triggers/greetings (search_bot) and change them together; keep keys ASCII,
+  unique across the bot and its modules (they share one namespace in the sidebar), and default meaning to "off".
 
 Workspace rules (mandatory - every bot shares ONE global space):
 - `projects/<bot>/`  the reference material and project folder the user manages. **Read freely,

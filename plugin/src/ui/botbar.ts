@@ -24,6 +24,7 @@ import { clientLog } from '../transport';
 import { openConflicts } from './conflicts';
 import { syncPendingChip } from './pendingpop';
 import { MODULE_CACHE_NOTE } from '../modules';
+import { moduleSaveRows } from './module-export';
 
 let bar: HTMLElement | null = null;
 let applyBtn: HTMLButtonElement | null = null;
@@ -176,6 +177,14 @@ function openModuleExport(anchor: HTMLElement): void {
   body.appendChild(el('div', { class: 'row' }, [nameInput]));
   body.appendChild(el('div', { class: 'row' }, [charx, risum]));
   body.appendChild(out);
+  // The other modules open here too (모듈 편집 with several, §1-96).
+  const others = state.openModules.filter((m) => m.key !== state.cardTarget);
+  if (others.length) {
+    const box = el('div');
+    body.append(el('div', { class: 'sectionline', style: { margin: '10px 0' } }),
+      el('div', { class: 'sectiontitle', text: '함께 열린 다른 모듈' }), box);
+    moduleSaveRows(box, others.map((m) => ({ id: m.id, name: m.name, open: true, linked: false })));
+  }
 }
 
 // --- charx (popover) -----------------------------------------------------------
@@ -229,6 +238,12 @@ function openCharx(anchor: HTMLElement): void {
   body.appendChild(el('div', { class: 'row' }, [nameInput]));
   body.appendChild(el('div', { class: 'row' }, [build, buildAnyway]));
   body.appendChild(out);
+  // The bot's modules as files too (§1-96): opened with it, or linked in RisuAI.
+  const box = el('div', {}, [el('div', { class: 'hint', text: '이 봇의 모듈을 읽는 중…' })]);
+  body.append(el('div', { class: 'sectionline', style: { margin: '10px 0' } }),
+    el('div', { class: 'sectiontitle', text: '이 봇의 모듈도 파일로 저장' }),
+    el('div', { class: 'hint', text: '＋ 로 함께 연 모듈과 RisuAI에서 이 봇·챗에 켜 둔 모듈입니다. 각 모듈 폴더의 out/ 에 저장합니다.' }), box);
+  void state.ownerModules().then((mods) => { if (box.isConnected) moduleSaveRows(box, mods); }, () => clear(box));
 }
 
 /** Redraw the counts; the shell calls this on every state change. */

@@ -168,6 +168,23 @@ check("charx parses back to a module", parsed["name"] == "인벤토리" and pars
       and parsed["assets"][0][0] == "coin" and parsed["assets"][0][1].startswith(assets.PENDING_PREFIX), str(parsed["assets"]))
 check("bot key refused for module export", status_of(main.h_module_export, {"charKey": store.upsert_character("cha-b", "봇", {"name": "봇"}, 0), "format": "risum"}) == 400)
 
+print("== bot toggles (a charx carries them too) ==")
+from app import charx as charxmod  # noqa: E402
+BK = store.upsert_character("cha-toggle-bot", "토글봇", {"name": "토글봇"}, 0)
+cardmod.ingest(BK, {"name": "토글봇", "customModuleToggle": "mood=기분=select=좋음,나쁨", "hideChatIcon": True}, reset=True)
+cardmod.set_full(BK, True)
+bf = {f["field"]: f for f in cardmod.listing(BK)["fields"]}
+check("a bot has toggle and icon rows", bf["customModuleToggle"]["body"].startswith("mood=") and bf["hideChatIcon"]["body"] == "1"
+      and "desc" in bf, str(sorted(bf)))
+cardmod.update_field(bf["customModuleToggle"]["id"], "mood=기분")
+bp = cardmod.patch(BK)
+check("the bot patch carries the toggle edit", any(f["field"] == "customModuleToggle" and f["after"] == "mood=기분" for f in bp["fields"]), str(bp["fields"]))
+risu_b = charxmod.create_base_v3(charxmod.working_character(BK))["data"]["extensions"]["risuai"]
+check("the bot charx exports toggles and the icon switch", risu_b["toggles"] == "mood=기분" and risu_b["hideChatIcon"] is True, str(risu_b.get("toggles")))
+cardmod.ingest(BK, {"name": "토글봇"}, reset=False)
+bf = {f["field"]: f for f in cardmod.listing(BK)["fields"]}
+check("an older bot card gains the rows on re-read", "customModuleToggle" in bf and bf["hideChatIcon"]["body"] == "0", str(sorted(bf)))
+
 print("== agent target ==")
 CK = store.upsert_character("cha-mod-bot", "봇", {"name": "봇"}, 0)
 TK = "chat-modules"

@@ -47,7 +47,8 @@ const HINTS: Record<string, string> = {
   systemPrompt: '비어 있지 않으면 프리셋의 메인 프롬프트를 통째로 대체합니다. {{original}} 자리에 원래 메인 프롬프트가 들어갑니다.',
   exampleMessage: 'RisuAI 의 예시 대화 칸입니다. <START> 로 예시를 나눕니다.',
   customModuleToggle: '한 줄에 하나: 키=표시 이름 (체크박스) · 키=이름=select=옵션1,옵션2 · 키=이름=text · 키=이름=textarea · '
-    + '=묶음 이름=group … ==groupEnd · ==divider · =설명 글=caption. 값은 {{getglobalvar::toggle_키}} 로 읽습니다 (체크박스는 1/0).',
+    + '=묶음 이름=group … ==groupEnd · ==divider · =설명 글=caption. 값은 {{getglobalvar::toggle_키}} 로 읽습니다 (체크박스는 1/0, select 는 고른 옵션의 번호 0·1·2…). '
+    + '봇에 넣은 토글도 모듈 토글처럼 RisuAI 사이드바 토글 목록에 함께 나옵니다.',
   moduleNamespace: '비워 두면 없음. 같은 네임스페이스를 쓰는 봇·챗은 id 대신 이 이름으로 모듈을 켤 수 있습니다 (모듈 연결 시 namespace 로 매칭).',
 };
 
@@ -128,6 +129,12 @@ async function refreshNow(): Promise<void> {
   else if (openId && viewMount) { openId = ''; clear(viewMount); }
 }
 
+/** A bot puts its toggles next to the default variables; a module right under its description. */
+function rankOf(field: string): number {
+  if (!state.cardTarget && field === 'customModuleToggle') return 41;
+  return FIELD_RANK[field] ?? 50;
+}
+
 function labelOf(f: CardField): string {
   if (f.field === 'alternateGreetings') return `대체 인사말 #${f.seq + 1}`;
   if (state.cardTarget && MODULE_LABELS[f.field]) return MODULE_LABELS[f.field];
@@ -169,10 +176,10 @@ function drawTree(): void {
   // The order a person reads a card in, not the order the schema lists it:
   // what the bot is, what it says, the note that overrides the global one -
   // then, below a rule, the housekeeping fields (version, creator's notes).
-  shown.sort((a, b) => (FIELD_RANK[a.field] ?? 50) - (FIELD_RANK[b.field] ?? 50) || a.seq - b.seq);
+  shown.sort((a, b) => rankOf(a.field) - rankOf(b.field) || a.seq - b.seq);
   let ruled = false;
   for (const f of shown) {
-    if (!ruled && (FIELD_RANK[f.field] ?? 50) >= 100) {
+    if (!ruled && rankOf(f.field) >= 100) {
       ruled = true;
       treeMount.appendChild(el('div', { class: 'sectionline', style: { margin: '8px 6px' } }));
     }

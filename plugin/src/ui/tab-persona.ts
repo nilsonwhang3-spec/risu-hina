@@ -27,6 +27,7 @@ import { personaAvatar, newPersonaButton } from './tab-chats';
 import { shellNotice, openSnapshotName } from './chatbar';
 import { workspaceImage } from './blobimg';
 import { SELECTED_COPY_NOTE, copyName } from '../persona';
+import { openModuleSave } from './module-export';
 
 const IMAGE_RE = /\.(png|jpe?g|webp|gif|avif)$/i;
 
@@ -278,7 +279,12 @@ export function renderPersonaTab(mount: HTMLElement): void {
     }
   });
   const summary = el('span', { class: 'dim changesum' });
-  const bar = el('div', { class: 'toolrow personabar' }, [applyBtn, snap, versions, discard, summary]);
+  // The persona's modules (＋ on the tab row) as .charx / .risum files (§1-96).
+  const saveMods = el('button', { class: 'tool', dataset: { tool: 'persona-modules-save' }, title: '이 페르소나와 함께 연 모듈을 .charx / .risum 으로 워크스페이스에 저장합니다' }, [
+    el('span', { class: 'glyph', text: TOOL.export }), el('span', { class: 'tool-label', text: '모듈 저장' }),
+  ]);
+  saveMods.addEventListener('click', () => openModuleSave(saveMods));
+  const bar = el('div', { class: 'toolrow personabar' }, [applyBtn, snap, versions, discard, saveMods, summary]);
 
   paint = () => {
     const r = state.persona;
@@ -309,6 +315,7 @@ export function renderPersonaTab(mount: HTMLElement): void {
     discard.style.display = r.dirty ? '' : 'none';
     discard.title = r.isNew ? '아직 RisuAI에 없는 새 페르소나를 지웁니다 (폴더는 남습니다)' : '이 페르소나의 미반영 변경을 버리고 RisuAI 상태로 되돌립니다';
     applyBtn.title = r.isNew ? '이 새 페르소나를 RisuAI 페르소나 목록에 추가합니다' : applyBtn.title;
+    saveMods.style.display = state.openModules.length ? '' : 'none';
     setToolbar(bar);
   };
 

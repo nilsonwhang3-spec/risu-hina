@@ -3870,6 +3870,18 @@ console.log('\ntest_modules');
   await enterBot(document);
   await settle(1500);
   check('the bot reopens with its modules', /◫ 에셋 모듈/.test(tabs()), tabs());
+  // §1-96: the bot's charx popover saves its modules as files too.
+  clickById(document, 'tab-meta');
+  await settle(300);
+  document.querySelector('.tool[data-tool="card-charx"]')?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(1200);
+  const pop = document.querySelector('.applypop');
+  check('the bot charx popover lists its modules', /이 봇의 모듈도 파일로 저장/.test(pop?.textContent || '') && /에셋 모듈/.test(pop?.textContent || ''),
+        (pop?.textContent || '').slice(0, 200));
+  [...(pop?.querySelectorAll('button') || [])].find((b) => b.textContent === '.risum')?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(1800);
+  check('a module is saved as a file from there', /✔ projects\/.+\.risum/.test(pop?.textContent || ''), (pop?.textContent || '').slice(0, 300));
+  check('the bot meta lists its toggles', [...document.querySelectorAll('.panel.active .treefile')].some((b) => /^토글/.test(b.textContent || '')));
 }
 
 console.log('\ntest_no_character_selected');

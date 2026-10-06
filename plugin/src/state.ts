@@ -1174,7 +1174,7 @@ class AppState {
   }
 
   /** A module's images into the store, like the bot's (assets.ts), in the background. */
-  private syncModuleAssets(raw: Record<string, unknown>, key: string): void {
+  private syncModuleAssets(raw: Record<string, unknown>, key: string): Promise<SyncProgress> {
     this.moduleSyncCtl[key]?.cancel();
     const web = transport.hostPlatform === 'web';
     const ctl = syncAssets(moduleHost.assetCarrier(raw) as RisuCharacter, key, { hubPull: web, concurrency: web ? 4 : 6 }, (p) => {
@@ -1182,6 +1182,7 @@ class AppState {
       if (!syncBusy(p)) { this.epoch += 1; this.emit(); }
     });
     this.moduleSyncCtl[key] = ctl;
+    return ctl.done;
   }
 
   /** Re-run the target's asset import (the assets tab's 다시 동기화). */
@@ -1393,11 +1394,46 @@ class AppState {
   }
 
   /** The target module as a file in its project out/ folder. */
-  async exportModule(format: 'charx' | 'risum', allowMissing = false, name = ''): Promise<{ file: string; path: string; size: number; assets: number; dropped: number }> {
+  async exportModule(format: 'charx' | 'risum', allowMissing = false, name = '', key = this.cardTarget): Promise<{ file: string; path: string; size: number; assets: number; dropped: number }> {
+    // Its images have to be in the store first: wait for a running import.
+    const ctl = this.moduleSyncCtl[key];
+    if (ctl) await ctl.done;
     const r = await transport.post<{ file: string; path: string; size: number; assets: number; dropped: number }>(
-      '/module/export', { charKey: this.cardTarget, format, allowMissing, name }, 300_000);
+      '/module/export', { charKey: key, format, allowMissing, name }, 300_000);
     this.touchFiles([r.path]);
     return r;
+  }
+
+  /**
+   * Save any RisuAI module as a file in its project folder (§1-96) - one that is
+   * open (its working copy, unapplied edits included) or one only linked to
+   * the bot (read from RisuAI, given a working copy, its images imported first).
+   */
+  async exportModuleById(id: string, format: 'charx' | 'risum', allowMissing = false): Promise<{ file: string; path: string; size: number; assets: number; dropped: number }> {
+    let key = this.openModules.find((m) => m.id === id)?.key ?? '';
+    if (!key) {
+      const raw = await moduleHost.readModule(id);
+      if (raw['mcp']) throw new Error('MCP 모듈은 파일로 저장할 내용이 없습니다');
+      const row = await transport.post<ModuleRow>('/module/sync', { module: raw }, 120_000);
+      key = row.key;
+      await this.syncModuleAssets(raw, key);
+    }
+    return await this.exportModule(format, allowMissing, '', key);
+  }
+
+  /** The modules that go with the current screen: the open ones, and in 봇 편집 also those RisuAI links to the bot. */
+  async ownerModules(): Promise<{ id: string; name: string; open: boolean; linked: boolean }[]> {
+    const out = this.openModules.map((m) => ({ id: m.id, name: m.name, open: true, linked: false }));
+    if (this.editMode === 'bot' || this.editMode === 'module') {
+      const live = this.liveModules ?? await this.loadModules().catch(() => [] as LiveModule[]);
+      for (const m of live) {
+        if (m.mcp) continue;
+        const hit = out.find((x) => x.id === m.id);
+        if (hit) hit.linked = m.linked;
+        else if (this.editMode === 'bot' && m.linked) out.push({ id: m.id, name: m.name, open: false, linked: true });
+      }
+    }
+    return out;
   }
 
 

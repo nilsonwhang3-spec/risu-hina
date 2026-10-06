@@ -7,6 +7,28 @@ saves as a copy and RisuAI-side changes are flagged (§1-93); the Docker image i
 release (§1-92); dashboard cards wrap, the title-row 승인 waits for its card, bots of the same name share one
 folder (old `~N` folders merge back), and uploads land in the project being edited (§1-94).
 
+## unreleased (2026-10-06): §1-96 bot toggles, modules saved as files from every screen, module guidance for the AI
+
+- **Bot toggles:** in current RisuAI a charx and a module are the same structure, and the character editor already
+  edits `customModuleToggle` (CharConfig.svelte) and `hideChatIcon`; the sidebar merges global + module + character
+  toggles (Toggles.svelte). Both are now bot scalars (card.SCALARS): the meta tab shows 토글 next to 기본 변수 and
+  채팅 아이콘 숨기기 as a checkbox; 반영 writes them; the bot charx exports them (`toggles`, `hideChatIcon`). An older
+  bot's working copy gains the two rows on its next read.
+- **Modules as files from every screen** (`.charx` recommended, `.risum` legacy; into each module's project out/):
+  the bot bar's charx popover has "이 봇의 모듈도 파일로 저장" (the modules opened with the bot and those RisuAI links
+  to it - a linked one is read from RisuAI, given a working copy and its images imported first), the module export
+  popover lists the other open modules, the persona bar has 모듈 저장, and each row of the 모듈 편집 list has ⬇ 저장.
+  "모두 .charx 로 저장" saves them in one go; missing images offer "빼고 저장". (`state.exportModuleById`,
+  `state.ownerModules`, ui/module-export.ts.)
+- **AI guidance (agent INSTRUCTIONS):** why bots and personas carry dedicated modules (Realm refuses an update past
+  ~150MB, so assets - often the NSFW set - go to a separate asset module, usually a charx; personas get their own
+  module for images/rules; prompt and generic modules), and toggle background: the line syntax, `toggle_<key>`
+  values (checkbox "1"/"0", **select = option index**, text = string), how CBS/Lua read them
+  (`{{#when::toggle::k}}`, `{{#when::k::tis::1}}`, getGlobalVar), local pinned values, and renaming keys together.
+  The meta tab's toggle hint says select stores the index.
+- Verified: tests/test_modules.py (bot toggle rows, patch, charx export, older card gains rows), plugin_smoke (bot
+  charx popover lists and saves a module, bot meta lists 토글), gate ALL GREEN.
+
 ## unreleased (2026-10-06): §1-95 RisuAI modules: 모듈 편집 mode, modules opened next to a bot or persona, .risum/.charx
 
 - **Ask:** after persona editing, a module editing mode. A RisuAI module (`db.modules`, process/modules.ts) bundles

@@ -55,7 +55,12 @@ from . import db, log, merge, store
 #                            is a pending key the write-back resolves
 SCALARS = ("name", "desc", "firstMessage", "creatorNotes", "characterVersion",
            "replaceGlobalNote", "systemPrompt", "exampleMessage", "defaultVariables",
-           "translatorNote", "lowLevelAccess", "loreSettings", "image", "backgroundHTML")
+           "translatorNote", "lowLevelAccess", "loreSettings", "image", "backgroundHTML",
+           "customModuleToggle", "hideChatIcon")
+# customModuleToggle / hideChatIcon (§1-96): a character carries a module's
+# toggle definition and icon switch too - RisuAI's CharConfig edits both, and
+# the sidebar merges the character's toggles with the modules' (Toggles.svelte),
+# since a charx and a module became the same thing.
 # A RisuAI module edited as a card (app/modules.py) has these instead: no
 # greetings or prose, but a toggle definition, a namespace and the icon switch.
 MODULE_SCALARS = ("name", "creatorNotes", "customModuleToggle", "moduleNamespace",
