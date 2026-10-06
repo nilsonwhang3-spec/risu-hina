@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.15.35
+//@display-name Risu Hina v0.15.36
 //@api 3.0
-//@version 0.15.35
+//@version 0.15.36
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -80,13 +80,13 @@
   }
   async function toError(res) {
     const body = await readJson(res);
-    let msg24 = body && typeof body === "object" && "error" in body ? String(body.error) : `HTTP ${res.status}`;
+    let msg26 = body && typeof body === "object" && "error" in body ? String(body.error) : `HTTP ${res.status}`;
     if (res.status === 401) {
-      msg24 = '\uD1A0\uD070\uC774 \uB9DE\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4. \uBC31\uC5D4\uB4DC PC \uC758 data/token.txt \uB0B4\uC6A9\uC744 \u2699 \u2192 \uC5F0\uACB0 \u2192 \uD1A0\uD070\uC5D0 \uB123\uACE0 "\uC800\uC7A5\uD558\uACE0 \uC5F0\uACB0"\uC744 \uB20C\uB7EC \uC8FC\uC138\uC694 (127.0.0.1 \uB85C \uC811\uC18D\uD560 \uB54C\uB294 \uBE44\uC6CC\uB3C4 \uB429\uB2C8\uB2E4).';
+      msg26 = '\uD1A0\uD070\uC774 \uB9DE\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4. \uBC31\uC5D4\uB4DC PC \uC758 data/token.txt \uB0B4\uC6A9\uC744 \u2699 \u2192 \uC5F0\uACB0 \u2192 \uD1A0\uD070\uC5D0 \uB123\uACE0 "\uC800\uC7A5\uD558\uACE0 \uC5F0\uACB0"\uC744 \uB20C\uB7EC \uC8FC\uC138\uC694 (127.0.0.1 \uB85C \uC811\uC18D\uD560 \uB54C\uB294 \uBE44\uC6CC\uB3C4 \uB429\uB2C8\uB2E4).';
     } else if (res.status === 429) {
-      msg24 = "\uD2C0\uB9B0 \uD1A0\uD070\uC774 \uC5EC\uB7EC \uBC88 \uAC70\uBD80\uB418\uC5B4 \uC7A0\uC2DC \uB9C9\uD614\uC2B5\uB2C8\uB2E4. 1\uBD84 \uB4A4 \uB2E4\uC2DC \uC2DC\uB3C4\uD574 \uC8FC\uC138\uC694.";
+      msg26 = "\uD2C0\uB9B0 \uD1A0\uD070\uC774 \uC5EC\uB7EC \uBC88 \uAC70\uBD80\uB418\uC5B4 \uC7A0\uC2DC \uB9C9\uD614\uC2B5\uB2C8\uB2E4. 1\uBD84 \uB4A4 \uB2E4\uC2DC \uC2DC\uB3C4\uD574 \uC8FC\uC138\uC694.";
     }
-    return new BackendError(res.status, msg24, body);
+    return new BackendError(res.status, msg26, body);
   }
   function clientLog(level, event, detail) {
     return transport.post("/clientlog", { level, event, detail }).then(() => void 0).catch(() => void 0);
@@ -195,7 +195,7 @@
           this.tokenSafe = true;
           this.lastHealth = body;
           this.probeInfo = "";
-          this.gate = versionGate("0.15.35", String(body.version || ""));
+          this.gate = versionGate("0.15.36", String(body.version || ""));
           return body;
         }
         /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -543,7 +543,7 @@
   var init_cardfields = __esm({
     "src/cardfields.ts"() {
       "use strict";
-      BOOL_FIELDS = /* @__PURE__ */ new Set(["lowLevelAccess"]);
+      BOOL_FIELDS = /* @__PURE__ */ new Set(["lowLevelAccess", "hideChatIcon"]);
       LORE_SETTINGS_FIELD = "loreSettings";
       LORE_SETTINGS_DEFAULTS = {
         recursiveScanning: false,
@@ -1007,7 +1007,9 @@
         lowLevelAccess: "\uC800\uC218\uC900 \uC811\uADFC",
         loreSettings: "\uB85C\uC5B4\uBD81 \uC124\uC815",
         backgroundHTML: "\uBC30\uACBD HTML",
-        image: "\uD504\uB85C\uD544 \uC774\uBBF8\uC9C0"
+        image: "\uD504\uB85C\uD544 \uC774\uBBF8\uC9C0",
+        customModuleToggle: "\uD1A0\uAE00",
+        hideChatIcon: "\uCC44\uD305 \uC544\uC774\uCF58 \uC228\uAE30\uAE30"
       };
     }
   });
@@ -1157,6 +1159,196 @@
       init_host();
       SELECTED_REFUSAL = "RisuAI\uC5D0\uC11C \uC9C0\uAE08 \uC120\uD0DD\uB41C \uD398\uB974\uC18C\uB098\uB294 \uC5EC\uAE30\uC11C \uACE0\uCE60 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4 \u2014 RisuAI\uAC00 \uC120\uD0DD\uB41C \uD398\uB974\uC18C\uB098\uB97C \uB530\uB85C \uBCF5\uC0AC\uD574 \uB450\uACE0 \uC4F0\uAE30 \uB54C\uBB38\uC5D0, \uACE0\uCCD0\uB3C4 \uD654\uBA74\uC5D0 \uC548 \uBCF4\uC774\uACE0 \uB2E4\uC74C\uC5D0 \uD398\uB974\uC18C\uB098\uB97C \uBC14\uAFC0 \uB54C \uC61B \uB0B4\uC6A9\uC73C\uB85C \uB36E\uC5B4\uC368\uC9D1\uB2C8\uB2E4. RisuAI\uC5D0\uC11C \uB2E4\uB978 \uD398\uB974\uC18C\uB098\uB97C \uC7A0\uAE50 \uC120\uD0DD\uD55C \uB4A4 \uB2E4\uC2DC \uC2DC\uB3C4\uD574 \uC8FC\uC138\uC694.";
       SELECTED_COPY_NOTE = "RisuAI\uC5D0\uC11C \uC9C0\uAE08 \uC120\uD0DD\uB41C \uD398\uB974\uC18C\uB098\uC785\uB2C8\uB2E4. RisuAI\uAC00 \uC120\uD0DD\uB41C \uD398\uB974\uC18C\uB098\uB97C \uB530\uB85C \uBCF5\uC0AC\uD574 \uB450\uACE0 \uC4F0\uAE30 \uB54C\uBB38\uC5D0 \uC6D0\uBCF8\uC740 \uC5EC\uAE30\uC11C \uACE0\uCCD0 \uC4F8 \uC218 \uC5C6\uC5B4, \uBC18\uC601\uD558\uBA74 \uD3B8\uC9D1 \uB0B4\uC6A9\uC774 \uC0C8 \uD398\uB974\uC18C\uB098(\uC0AC\uBCF8)\uB85C \uC800\uC7A5\uB418\uACE0 \uC6D0\uBCF8\uC740 \uADF8\uB300\uB85C \uB0A8\uC2B5\uB2C8\uB2E4. \uC6D0\uBCF8\uC744 \uACE0\uCE58\uB824\uBA74 RisuAI\uC5D0\uC11C \uB2E4\uB978 \uD398\uB974\uC18C\uB098\uB97C \uACE0\uB978 \uB4A4 \uD328\uB110\uC744 \uB2E4\uC2DC \uC5F4\uC5B4 \uC8FC\uC138\uC694.";
+    }
+  });
+
+  // src/modules.ts
+  async function readSlice2() {
+    const read = Risuai.getDatabase(["modules", "enabledModules"]);
+    let slice;
+    const quick = await Promise.race([
+      read.then((v) => ({ v })),
+      new Promise((r) => setTimeout(() => r(null), 900))
+    ]).catch((e) => {
+      throw new HostError("failed", "\uBAA8\uB4C8 \uBAA9\uB85D\uC744 \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + String(e));
+    });
+    if (quick) slice = quick.v;
+    else {
+      try {
+        await Risuai.hideContainer();
+      } catch {
+      }
+      try {
+        slice = await read;
+      } catch (e) {
+        throw new HostError("failed", "\uBAA8\uB4C8 \uBAA9\uB85D\uC744 \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + String(e));
+      } finally {
+        try {
+          await Risuai.showContainer("fullscreen");
+        } catch {
+        }
+      }
+    }
+    if (!slice || !Array.isArray(slice["modules"])) {
+      throw new HostError(
+        "failed",
+        "\uBAA8\uB4C8\uC744 \uC77D\uC73C\uB824\uBA74 'db' \uAD8C\uD55C\uC774 \uD544\uC694\uD569\uB2C8\uB2E4. RisuAI\uAC00 \uB744\uC6B4 \uAD8C\uD55C \uC694\uCCAD\uC744 \uD5C8\uC6A9\uD558\uACE0 \uB2E4\uC2DC \uC2DC\uB3C4\uD574 \uC8FC\uC138\uC694"
+      );
+    }
+    const enabled = Array.isArray(slice["enabledModules"]) ? slice["enabledModules"].map(String) : [];
+    return { modules: slice["modules"].filter((m) => m && typeof m === "object"), enabled };
+  }
+  async function readModules() {
+    return await readSlice2();
+  }
+  async function readModule(id) {
+    const { modules } = await readSlice2();
+    const m = modules.find((x) => String(x["id"] ?? "") === id);
+    if (!m) throw new HostError("missing", "RisuAI\uC5D0\uC11C \uC774 \uBAA8\uB4C8\uC744 \uCC3E\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4 (\uC9C0\uC6CC\uC84C\uC744 \uC218 \uC788\uC2B5\uB2C8\uB2E4). \uBAA8\uB4C8 \uBAA9\uB85D\uC744 \uB2E4\uC2DC \uC77D\uC5B4 \uC8FC\uC138\uC694");
+    return m;
+  }
+  function encode(m, field2) {
+    const v = m[SCALAR_MAP[field2]];
+    if (BOOLS.has(field2)) return v ? "1" : "0";
+    return v === void 0 || v === null ? "" : String(v);
+  }
+  function decodeInto(m, field2, text2) {
+    const k = SCALAR_MAP[field2];
+    if (BOOLS.has(field2)) {
+      m[k] = text2 === "1";
+      return;
+    }
+    if ((k === "namespace" || k === "icon") && !text2) {
+      delete m[k];
+      return;
+    }
+    m[k] = text2;
+  }
+  async function writeModule(id, update) {
+    const { modules } = await readSlice2();
+    const at = modules.findIndex((x) => String(x["id"] ?? "") === id);
+    if (at < 0) throw new HostError("missing", "RisuAI\uC5D0\uC11C \uC774 \uBAA8\uB4C8\uC744 \uCC3E\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4 (\uC9C0\uC6CC\uC84C\uC744 \uC218 \uC788\uC2B5\uB2C8\uB2E4). \uBAA8\uB4C8 \uBAA9\uB85D\uC744 \uB2E4\uC2DC \uC77D\uC5B4 \uC8FC\uC138\uC694");
+    const live = modules[at];
+    for (const e of update.fields ?? []) {
+      if (!(e.field in SCALAR_MAP)) throw new HostError("failed", `\uBAA8\uB4C8\uC5D0 \uC5C6\uB294 \uD544\uB4DC\uC785\uB2C8\uB2E4: ${e.field}`);
+      const now = encode(live, e.field);
+      if (now !== e.before && now !== e.after) {
+        throw new HostError("changed", `RisuAI \uCABD\uC5D0\uC11C \uBAA8\uB4C8\uC774 \uBC14\uB00C\uC5C8\uC2B5\uB2C8\uB2E4 (${e.field}). \uBAA8\uB4C8\uC744 \uB2E4\uC2DC \uC5F4\uC5B4 \uBCD1\uD569\uD55C \uB4A4 \uBC18\uC601\uD574 \uC8FC\uC138\uC694`);
+      }
+    }
+    const upd = update;
+    for (const [list2, key] of Object.entries(LIST_MAP)) {
+      const wanted = upd[list2];
+      const before = update.before?.[list2];
+      if (wanted && before !== void 0 && canon(live[key] ?? []) !== canon(wanted) && canon(live[key] ?? []) !== canon(before ?? [])) {
+        throw new HostError("changed", `RisuAI \uCABD\uC5D0\uC11C ${LIST_LABEL2[list2]}\uC774(\uAC00) \uBC14\uB00C\uC5C8\uC2B5\uB2C8\uB2E4. \uBAA8\uB4C8\uC744 \uB2E4\uC2DC \uC5F4\uC5B4 \uBCD1\uD569\uD55C \uB4A4 \uBC18\uC601\uD574 \uC8FC\uC138\uC694`);
+      }
+    }
+    if (update.emotionImages?.length || update.ccAssets?.length) {
+      throw new HostError("failed", "\uBAA8\uB4C8\uC740 \uAC10\uC815 \uC774\uBBF8\uC9C0\xB7cc \uC5D0\uC14B\uC744 \uAC00\uC9C8 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4 (\uC5D0\uC14B\uC740 \uCD94\uAC00 \uC5D0\uC14B\uC73C\uB85C \uB123\uC5B4 \uC8FC\uC138\uC694)");
+    }
+    const next = { ...live };
+    const parts = [];
+    for (const e of update.fields ?? []) {
+      decodeInto(next, e.field, e.after);
+      parts.push(e.field);
+    }
+    for (const [list2, key] of Object.entries(LIST_MAP)) {
+      if (upd[list2]) {
+        next[key] = upd[list2];
+        parts.push(list2);
+      }
+    }
+    if (!parts.length) return { applied: 0, mode: "noop", parts, verified: true };
+    const all = modules.slice();
+    all[at] = next;
+    await Risuai.setDatabase({ modules: all });
+    let verified = true;
+    let drift = "";
+    try {
+      const after = (await readSlice2()).modules.find((x) => String(x["id"] ?? "") === id);
+      if (!after) throw new Error("\uC4F4 \uB4A4 \uBAA8\uB4C8\uC774 \uBCF4\uC774\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4");
+      const missed = (update.fields ?? []).find((e) => encode(after, e.field) !== e.after);
+      if (missed) {
+        verified = false;
+        drift = `${missed.field} \uC774(\uAC00) \uC4F0\uAE30 \uC804 \uAC12 \uADF8\uB300\uB85C\uC785\uB2C8\uB2E4`;
+      }
+      for (const [list2, key] of Object.entries(LIST_MAP)) {
+        if (verified && upd[list2] && canon(after[key] ?? []) !== canon(upd[list2])) {
+          verified = false;
+          drift = `${LIST_LABEL2[list2]} \uC774(\uAC00) \uC4F0\uAE30 \uC804 \uB0B4\uC6A9 \uADF8\uB300\uB85C\uC785\uB2C8\uB2E4`;
+        }
+      }
+    } catch (e) {
+      verified = false;
+      drift = "\uC4F4 \uB4A4 \uB2E4\uC2DC \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + (e instanceof Error ? e.message : String(e));
+    }
+    return { applied: parts.length, mode: "edits", parts, verified, ...drift ? { drift } : {} };
+  }
+  function newId() {
+    try {
+      return crypto.randomUUID();
+    } catch {
+    }
+    return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+      const r = Math.random() * 16 | 0;
+      return (c === "x" ? r : r & 3 | 8).toString(16);
+    });
+  }
+  async function createModule(module) {
+    const { modules } = await readSlice2();
+    const id = newId();
+    const made = { ...module, id };
+    await Risuai.setDatabase({ modules: [...modules, made] });
+    const after = (await readSlice2()).modules.find((x) => String(x["id"] ?? "") === id);
+    if (!after) {
+      throw new HostError("failed", "RisuAI\uAC00 \uC0C8 \uBAA8\uB4C8\uC744 \uBC1B\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4. RisuAI\uAC00 \uB2E4\uB978 \uCC3D\uC774\uB098 \uAE30\uAE30\uC5D0 \uC5F4\uB824 \uC788\uC9C0 \uC54A\uC740\uC9C0 \uD655\uC778\uD574 \uC8FC\uC138\uC694");
+    }
+    return after;
+  }
+  function assetCarrier(m) {
+    return { image: m["icon"] ?? "", additionalAssets: Array.isArray(m["assets"]) ? m["assets"] : [] };
+  }
+  function moduleCounts(m) {
+    const n = (k) => Array.isArray(m[k]) ? m[k].length : 0;
+    return {
+      lore: n("lorebook"),
+      regex: n("regex"),
+      trigger: n("trigger"),
+      assets: n("assets"),
+      toggles: !!String(m["customModuleToggle"] ?? "").trim(),
+      mcp: !!m["mcp"]
+    };
+  }
+  var SCALAR_MAP, BOOLS, LIST_MAP, MODULE_CACHE_NOTE, LIST_LABEL2;
+  var init_modules = __esm({
+    "src/modules.ts"() {
+      "use strict";
+      init_host();
+      SCALAR_MAP = {
+        name: "name",
+        creatorNotes: "description",
+        customModuleToggle: "customModuleToggle",
+        moduleNamespace: "namespace",
+        lowLevelAccess: "lowLevelAccess",
+        hideChatIcon: "hideIcon",
+        backgroundHTML: "backgroundEmbedding",
+        image: "icon"
+      };
+      BOOLS = /* @__PURE__ */ new Set(["lowLevelAccess", "hideChatIcon"]);
+      LIST_MAP = {
+        globalLore: "lorebook",
+        customscript: "regex",
+        triggerscript: "trigger",
+        additionalAssets: "assets"
+      };
+      MODULE_CACHE_NOTE = "RisuAI\uB294 \uC0AC\uC6A9 \uC911\uC778 \uBAA8\uB4C8 \uB0B4\uC6A9\uC744 \uCE90\uC2DC\uD574 \uB461\uB2C8\uB2E4. \uC9C0\uAE08 \uCC57\uC5D0\uC11C \uC4F0\uB294 \uBAA8\uB4C8\uC774\uBA74 RisuAI \uC124\uC815 \u2192 \uBAA8\uB4C8 \uD654\uBA74\uC744 \uD55C \uBC88 \uC5F4\uC5C8\uB2E4 \uB2EB\uAC70\uB098 \uC0C8\uB85C\uACE0\uCE68(F5)\uD558\uBA74 \uC0C8 \uB0B4\uC6A9\uC774 \uC801\uC6A9\uB429\uB2C8\uB2E4.";
+      LIST_LABEL2 = {
+        globalLore: "\uBAA8\uB4C8 \uB85C\uC5B4\uBD81",
+        customscript: "Regex",
+        triggerscript: "\uD2B8\uB9AC\uAC70",
+        additionalAssets: "\uC5D0\uC14B"
+      };
     }
   });
 
@@ -2442,6 +2634,11 @@
         read_turns: ["\u{1F4D6}", "\uC77D\uAE30"],
         search_turns: ["\u{1F50D}", "\uAC80\uC0C9"],
         read_card: ["\u{1FAAA}", "\uCE74\uB4DC"],
+        list_modules: ["\u25EB", "\uBAA8\uB4C8"],
+        focus_target: ["\u25EB", "\uB300\uC0C1"],
+        propose_open_module: ["\u25EB", "\uBAA8\uB4C8 \uC5F4\uAE30"],
+        save_bot_charx: ["\u2B07", "charx"],
+        save_module_file: ["\u2B07", "\uBAA8\uB4C8 \uD30C\uC77C"],
         read_lore: ["\u{1F4DA}", "\uB85C\uC5B4"],
         read_memory: ["\u{1F9E0}", "\uC694\uC57D"],
         list_skills: ["\u{1F9E9}", "\uC2A4\uD0AC \uBAA9\uB85D"],
@@ -3319,7 +3516,7 @@ name: ${nm}
     }
     return btoa(bin);
   }
-  var StudioFiles, AppState, state;
+  var CARD_TABS, StudioFiles, AppState, state;
   var init_state = __esm({
     "src/state.ts"() {
       "use strict";
@@ -3327,8 +3524,10 @@ name: ${nm}
       init_transport();
       init_host();
       init_persona();
+      init_modules();
       init_operation();
       init_assets();
+      CARD_TABS = /* @__PURE__ */ new Set(["meta", "botlore", "regex", "trigger", "assets"]);
       StudioFiles = class {
         // --- NovelAI ---------------------------------------------------------------
         /** Two meters and the library path. Anlas and the v5 quota are separate. */
@@ -3487,6 +3686,11 @@ name: ${nm}
           this.warnings = [];
           this.changes = null;
           this.botChanges = null;
+          if (this.moduleOwnerKey.startsWith("bot:")) {
+            this.openModules = [];
+            this.cardTarget = "";
+            this.moduleOwnerKey = "";
+          }
           this.unseenOutputs = [];
           this.openFileRequest = null;
           this.openTabRequest = null;
@@ -3523,7 +3727,7 @@ name: ${nm}
          * non-selected character), so there is no browsing of other workspaces.
          */
         get botKey() {
-          return this.activeCharKey;
+          return this.cardTarget || this.activeCharKey;
         }
         /** Whether a live, writable bot is behind the bot tabs right now. */
         get isLiveBot() {
@@ -3650,6 +3854,366 @@ name: ${nm}
          * (see `chatSlot`), so a chat that is not on screen in RisuAI is as editable
          * as the one that is.
          */
+        // --- RisuAI modules (§1-95) -------------------------------------------------
+        //
+        // A module is edited as a card: the backend keeps its working copy under a
+        // key of its own (pyserver/app/modules.py) and every card call addresses it
+        // through `botKey` while it is the `cardTarget`. Modules open next to a bot
+        // (봇 편집), a persona (페르소나 편집) or on their own (모듈 편집); which ones
+        // were opened together is remembered per owner and reopened next time.
+        /** RisuAI's modules as last read; null before the first read. */
+        liveModules = null;
+        moduleError = "";
+        moduleLoading = false;
+        /** The modules open in the tab row, in tab order (their backend rows). */
+        openModules = [];
+        /** The module the card tabs show, '' = the bot. */
+        cardTarget = "";
+        /** Whose combination `openModules` is: 'bot:<key>' / 'persona:<key>' / 'module'. */
+        moduleOwnerKey = "";
+        /** Each open module's asset import (the bot's is `assetSync`). */
+        moduleSyncs = {};
+        moduleSyncCtl = {};
+        /** The owner the current screen's combination belongs to. */
+        get moduleOwner() {
+          if (this.editMode === "persona") return this.persona ? "persona:" + this.persona.key : "";
+          if (this.editMode === "module") return "module";
+          if (this.editMode === "bot") return this.activeCharKey ? "bot:" + this.activeCharKey : "";
+          return "";
+        }
+        get targetModule() {
+          return this.cardTarget ? this.openModules.find((m) => m.key === this.cardTarget) ?? null : null;
+        }
+        /** The screen the agent is told: a module on a card tab is edited like the bot's card. */
+        get agentMode() {
+          if (this.activeTab === "studio") return "studio";
+          if (this.cardTarget && CARD_TABS.has(this.activeTab)) return "bot";
+          return this.editMode === "module" ? "bot" : this.editMode;
+        }
+        /** Modules RisuAI turns on for this bot/chat that the panel has not opened (told to the agent). */
+        get linkedNotOpen() {
+          if (this.editMode === "chat") return [];
+          return (this.liveModules ?? []).filter((m) => m.linked && !m.mcp && !this.openModules.some((o) => o.id === m.id)).map((m) => ({ id: m.id, name: m.name }));
+        }
+        /** The asset import behind the card tabs: the target module's, or the bot's. */
+        get targetSync() {
+          return this.cardTarget ? this.moduleSyncs[this.cardTarget] ?? null : this.assetSync;
+        }
+        /** Read RisuAI's module list (the + picker, the 모듈 편집 list). */
+        async loadModules() {
+          this.moduleLoading = true;
+          this.moduleError = "";
+          this.emit();
+          try {
+            const { modules, enabled } = await readModules();
+            let char = this.character;
+            if (this.slot) {
+              try {
+                char = await readCharacter(this.slot.characterIndex);
+              } catch {
+              }
+            }
+            const linked = /* @__PURE__ */ new Set([
+              ...(char?.["modules"] ?? []).map(String),
+              ...(this.liveChat?.["modules"] ?? []).map(String)
+            ]);
+            const global = new Set(enabled);
+            this.liveModules = modules.map((m) => {
+              const c = moduleCounts(m);
+              const id = String(m["id"] ?? "");
+              const ns = String(m["namespace"] ?? "");
+              return {
+                id,
+                name: String(m["name"] ?? ""),
+                description: String(m["description"] ?? ""),
+                namespace: ns,
+                lore: c.lore,
+                regex: c.regex,
+                trigger: c.trigger,
+                assets: c.assets,
+                toggles: c.toggles,
+                lowLevelAccess: !!m["lowLevelAccess"],
+                mcp: c.mcp,
+                global: global.has(id) || !!ns && global.has(ns),
+                linked: linked.has(id) || !!ns && linked.has(ns)
+              };
+            });
+            return this.liveModules;
+          } catch (e) {
+            this.moduleError = e instanceof Error ? e.message : String(e);
+            throw e;
+          } finally {
+            this.moduleLoading = false;
+            this.emit();
+          }
+        }
+        /** Hand one RisuAI module to the backend (first read, a merge, or `reset` after 반영). */
+        async syncModule(raw, reset = false) {
+          const row = await transport.post("/module/sync", { module: raw, reset }, 12e4);
+          this.openModules = this.openModules.map((m) => m.key === row.key ? row : m);
+          this.syncModuleAssets(raw, row.key);
+          return row;
+        }
+        /** A module's images into the store, like the bot's (assets.ts), in the background. */
+        syncModuleAssets(raw, key) {
+          this.moduleSyncCtl[key]?.cancel();
+          const web = transport.hostPlatform === "web";
+          const ctl = syncAssets(assetCarrier(raw), key, { hubPull: web, concurrency: web ? 4 : 6 }, (p) => {
+            this.moduleSyncs = { ...this.moduleSyncs, [key]: p };
+            if (!syncBusy(p)) {
+              this.epoch += 1;
+              this.emit();
+            }
+          });
+          this.moduleSyncCtl[key] = ctl;
+          return ctl.done;
+        }
+        /** Re-run the target's asset import (the assets tab's 다시 동기화). */
+        async resyncTargetAssets() {
+          if (!this.cardTarget) {
+            this.syncAssets(true);
+            return;
+          }
+          const m = this.targetModule;
+          if (!m) return;
+          this.syncModuleAssets(await readModule(m.id), m.key);
+        }
+        /**
+         * The combination for the current screen: when the owner changed (another
+         * bot, persona or mode), the previous set closes and this owner's last set
+         * reopens. Cheap when nothing changed.
+         */
+        syncModuleOwner() {
+          const owner = this.moduleOwner;
+          if (owner === this.moduleOwnerKey) return this.ownerSync;
+          this.moduleOwnerKey = owner;
+          this.openModules = [];
+          this.cardTarget = "";
+          this.emit();
+          this.ownerSync = this.reopenCombo(owner);
+          return this.ownerSync;
+        }
+        /** In flight while an owner's combination reopens; joined by a second caller. */
+        ownerSync = Promise.resolve();
+        async reopenCombo(owner) {
+          if (!owner || !this.health) return;
+          let ids = [];
+          try {
+            ids = (await transport.get("/module/combo", { owner })).ids ?? [];
+          } catch {
+            return;
+          }
+          if (!ids.length || this.moduleOwnerKey !== owner) return;
+          try {
+            const { modules } = await readModules();
+            const rows = [];
+            for (const id of ids) {
+              const raw = modules.find((m) => String(m["id"] ?? "") === id);
+              if (!raw || raw["mcp"]) continue;
+              const row = await transport.post("/module/sync", { module: raw }, 12e4);
+              rows.push(row);
+              this.syncModuleAssets(raw, row.key);
+            }
+            if (this.moduleOwnerKey !== owner) return;
+            this.openModules = rows;
+            if (rows.length !== ids.length) void this.saveModuleCombo();
+            this.emit();
+          } catch (e) {
+            void clientLog("warn", "module combo reopen", { error: String(e).slice(0, 200) });
+          }
+        }
+        async saveModuleCombo() {
+          const owner = this.moduleOwnerKey || this.moduleOwner;
+          if (!owner) return;
+          try {
+            await transport.post("/module/combo", { owner, ids: this.openModules.map((m) => m.id) });
+          } catch {
+          }
+        }
+        /**
+         * The + picker's answer: exactly these modules open, in this order. New ones
+         * are read from RisuAI and synced; the combination is remembered.
+         */
+        async setOpenModules(ids) {
+          if (!this.moduleOwnerKey) this.moduleOwnerKey = this.moduleOwner;
+          const { modules } = await readModules();
+          const rows = [];
+          for (const id of ids) {
+            const raw = modules.find((m) => String(m["id"] ?? "") === id);
+            if (!raw) continue;
+            if (raw["mcp"]) throw new Error(`'${String(raw["name"] ?? "")}' \uC740(\uB294) MCP \uBAA8\uB4C8\uC774\uB77C \uD3B8\uC9D1\uD560 \uB0B4\uC6A9\uC774 \uC5C6\uC2B5\uB2C8\uB2E4`);
+            const row = await transport.post("/module/sync", { module: raw }, 12e4);
+            rows.push(row);
+            this.syncModuleAssets(raw, row.key);
+          }
+          this.openModules = rows;
+          if (this.cardTarget && !rows.some((m) => m.key === this.cardTarget)) this.cardTarget = "";
+          this.epoch += 1;
+          await this.saveModuleCombo();
+          this.emit();
+          void this.refreshBotChanges();
+          return rows;
+        }
+        /** Open one more module (or focus it when it is open already). */
+        async openModule(id, focus = true) {
+          const ids = this.openModules.map((m) => m.id);
+          if (!ids.includes(id)) await this.setOpenModules([...ids, id]);
+          const row = this.openModules.find((m) => m.id === id);
+          if (!row) throw new Error("RisuAI\uC5D0\uC11C \uC774 \uBAA8\uB4C8\uC744 \uCC3E\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4");
+          if (focus) this.focusModule(row.key);
+          return row;
+        }
+        async closeModule(key) {
+          this.openModules = this.openModules.filter((m) => m.key !== key);
+          if (this.cardTarget === key) this.cardTarget = "";
+          this.moduleSyncCtl[key]?.cancel();
+          delete this.moduleSyncCtl[key];
+          this.epoch += 1;
+          await this.saveModuleCombo();
+          this.emit();
+          void this.refreshBotChanges();
+        }
+        /** Point the card tabs at a module, or back at the bot (''). */
+        focusModule(key) {
+          if (this.cardTarget === key) return;
+          this.cardTarget = key;
+          this.botChanges = null;
+          this.epoch += 1;
+          this.emit();
+          void this.refreshBotChanges();
+        }
+        /** The open modules' rows again (counts after an edit or an approval). */
+        async refreshModuleRows() {
+          if (!this.openModules.length) return;
+          try {
+            const r = await transport.get("/modules");
+            const by = new Map(r.modules.map((m) => [m.key, m]));
+            this.openModules = this.openModules.map((m) => by.get(m.key) ?? m);
+            this.emit();
+          } catch {
+          }
+        }
+        async moduleDirty() {
+          try {
+            return (await transport.get("/module/dirty")).modules ?? [];
+          } catch {
+            return [];
+          }
+        }
+        /**
+         * 반영 for a module: the card patch of its working copy, written into
+         * db.modules (modules.ts writeModule), read back, then the working copy
+         * reloads from RisuAI.
+         */
+        async moduleWriteBack(key, progress = () => {
+        }) {
+          return foregroundWrite(async (report) => {
+            const say = (t) => {
+              report(t);
+              progress(t);
+            };
+            let row = this.openModules.find((m) => m.key === key);
+            if (!row) row = (await transport.get("/modules")).modules.find((m) => m.key === key);
+            if (!row) throw new Error("\uBAA8\uB4C8 \uC791\uC5C5\uBCF8\uC744 \uCC3E\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4");
+            say(`\uBAA8\uB4C8 '${row.name}' \uC744(\uB97C) RisuAI\uC5D0 \uBC18\uC601\uD558\uB294 \uC911\u2026`);
+            const patch = await this.cardPatch(key);
+            const update = this.cardUpdateFrom(patch, false);
+            if (!update) return { applied: 0, mode: "noop", verified: true };
+            await this.resolveStagedAssets(update, say, key);
+            const r = await writeModule(row.id, update);
+            if (!r.verified) {
+              return { applied: r.applied, mode: r.mode, verified: false, parts: r.parts, ...r.drift ? { drift: r.drift } : {} };
+            }
+            say("RisuAI \uBC18\uC601 \uD655\uC778 \uC644\uB8CC \xB7 \uBAA8\uB4C8 \uC791\uC5C5\uBCF8\uC744 \uB3D9\uAE30\uD654\uD558\uB294 \uC911\u2026");
+            await this.cardCommit("\uBC18\uC601 \uC9C1\uC804", key);
+            await this.syncModule(await readModule(row.id), true);
+            this.bump();
+            void this.refreshBotChanges();
+            return { applied: r.applied, mode: r.mode, verified: true, parts: r.parts };
+          });
+        }
+        /** Read RisuAI's copy of the target module again (a change made over there). */
+        async rereadModule(key = this.cardTarget) {
+          const row = this.openModules.find((m) => m.key === key);
+          if (!row) return void 0;
+          const r = await this.syncModule(await readModule(row.id));
+          this.bump();
+          void this.refreshBotChanges();
+          return r.merge;
+        }
+        /**
+         * A .risum / .charx / .json in the space becomes a new RisuAI module: the
+         * backend reads it (its images go to the store under pending keys), the
+         * images are registered with RisuAI, and the module is appended and opened.
+         */
+        async importModuleFile(path, progress = () => {
+        }) {
+          const parsed = await transport.post("/module/parse", { path }, 18e4);
+          const module = parsed.module;
+          const pending3 = /* @__PURE__ */ new Set();
+          for (const a of module["assets"] ?? []) {
+            if (Array.isArray(a) && typeof a[1] === "string" && a[1].startsWith("assets/hina-pending-")) pending3.add(a[1]);
+          }
+          const icon = String(module["icon"] ?? "");
+          if (icon.startsWith("assets/hina-pending-")) pending3.add(icon);
+          const resolved = /* @__PURE__ */ new Map();
+          let done = 0;
+          await boundedAssets([...pending3], async (key) => {
+            const bytes = await transport.getBinary("/assets/blob", { key });
+            const real = await Risuai.saveAsset(bytes);
+            if (!real || typeof real !== "string") throw new Error("RisuAI\uAC00 \uC5D0\uC14B \uC800\uC7A5 \uD0A4\uB97C \uBC18\uD658\uD558\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4");
+            resolved.set(key, real);
+            progress(`\uC5D0\uC14B \uB4F1\uB85D ${++done}/${pending3.size}`);
+          });
+          module["assets"] = (module["assets"] ?? []).map((a) => Array.isArray(a) ? [a[0], resolved.get(String(a[1])) ?? a[1], ...a.slice(2)] : a);
+          if (icon) module["icon"] = resolved.get(icon) ?? icon;
+          progress("RisuAI \uBAA8\uB4C8 \uBAA9\uB85D\uC5D0 \uCD94\uAC00\uD558\uB294 \uC911\u2026");
+          const made = await createModule(module);
+          await this.loadModules().catch(() => void 0);
+          return await this.openModule(String(made["id"]), true);
+        }
+        /** The target module as a file in its project out/ folder. */
+        async exportModule(format, allowMissing = false, name = "", key = this.cardTarget) {
+          const ctl = this.moduleSyncCtl[key];
+          if (ctl) await ctl.done;
+          const r = await transport.post(
+            "/module/export",
+            { charKey: key, format, allowMissing, name },
+            3e5
+          );
+          this.touchFiles([r.path]);
+          return r;
+        }
+        /**
+         * Save any RisuAI module as a file in its project folder (§1-96) - one that is
+         * open (its working copy, unapplied edits included) or one only linked to
+         * the bot (read from RisuAI, given a working copy, its images imported first).
+         */
+        async exportModuleById(id, format, allowMissing = false) {
+          let key = this.openModules.find((m) => m.id === id)?.key ?? "";
+          if (!key) {
+            const raw = await readModule(id);
+            if (raw["mcp"]) throw new Error("MCP \uBAA8\uB4C8\uC740 \uD30C\uC77C\uB85C \uC800\uC7A5\uD560 \uB0B4\uC6A9\uC774 \uC5C6\uC2B5\uB2C8\uB2E4");
+            const row = await transport.post("/module/sync", { module: raw }, 12e4);
+            key = row.key;
+            await this.syncModuleAssets(raw, key);
+          }
+          return await this.exportModule(format, allowMissing, "", key);
+        }
+        /** The modules that go with the current screen: the open ones, and in 봇 편집 also those RisuAI links to the bot. */
+        async ownerModules() {
+          const out = this.openModules.map((m) => ({ id: m.id, name: m.name, open: true, linked: false }));
+          if (this.editMode === "bot" || this.editMode === "module") {
+            const live = this.liveModules ?? await this.loadModules().catch(() => []);
+            for (const m of live) {
+              if (m.mcp) continue;
+              const hit = out.find((x) => x.id === m.id);
+              if (hit) hit.linked = m.linked;
+              else if (this.editMode === "bot" && m.linked) out.push({ id: m.id, name: m.name, open: false, linked: true });
+            }
+          }
+          return out;
+        }
         // --- personas (§1-89) ----------------------------------------------------
         //
         // Same shape as the card: RisuAI holds the persona, the backend holds a
@@ -3718,6 +4282,7 @@ name: ${nm}
           const row = await transport.get("/persona", { key });
           this.persona = row;
           this.touchFiles();
+          if (this.editMode === "persona") void this.syncModuleOwner();
           return row;
         }
         /** The backend's rows again, without reading RisuAI (an approved AI edit). */
@@ -4157,16 +4722,18 @@ name: ${nm}
         /** Pending state across the whole bot - the leave guard's one call. */
         async dirtySummary() {
           const personas = this.health ? this.personaDirty() : Promise.resolve([]);
+          const modules = this.health ? this.moduleDirty() : Promise.resolve([]);
           if (!this.activeCharKey) {
-            const ps = await personas;
-            return ps.length ? { charKey: "", card: { dirty: false, total: 0, conflicts: 0 }, chats: [], personas: ps } : null;
+            const [ps, ms] = await Promise.all([personas, modules]);
+            return ps.length || ms.length ? { charKey: "", card: { dirty: false, total: 0, conflicts: 0 }, chats: [], personas: ps, modules: ms } : null;
           }
           try {
-            const [s, ps] = await Promise.all([
+            const [s, ps, ms] = await Promise.all([
               transport.get("/workspace/dirty", { charKey: this.activeCharKey }),
-              personas
+              personas,
+              modules
             ]);
-            return { ...s, personas: ps };
+            return { ...s, personas: ps, modules: ms };
           } catch {
             return null;
           }
@@ -4330,12 +4897,19 @@ name: ${nm}
             await this.newAgentSession();
           }
           if (signal?.aborted) return;
+          if (this.liveModules === null && this.editMode !== "chat" && !this.moduleLoading) {
+            await this.loadModules().catch(() => void 0);
+          }
           yield* transport.stream("/chat", {
             sessionId: this.sessionId,
             prompt,
-            mode: this.activeTab === "studio" ? "studio" : this.editMode,
+            mode: this.agentMode,
             // Which persona the persona tab has open (§1-89); the agent is told.
-            persona: this.editMode === "persona" ? this.persona?.key ?? "" : ""
+            persona: this.editMode === "persona" ? this.persona?.key ?? "" : "",
+            // The module the card tabs show and every module opened (§1-95).
+            target: this.cardTarget,
+            modules: this.openModules.map((m) => m.key),
+            linked: this.linkedNotOpen
           }, signal);
         }
         /** 중단 as a request the backend hears at once (§1-44): the aborted fetch
@@ -4352,7 +4926,7 @@ name: ${nm}
         async conflicts(scope = "both") {
           const q = {};
           if (scope !== "card" && this.activeChatKey) q.chatKey = this.activeChatKey;
-          if (scope !== "chat" && this.activeCharKey) q.charKey = this.activeCharKey;
+          if (scope !== "chat" && this.botKey) q.charKey = this.botKey;
           if (!Object.keys(q).length) return [];
           const r = await transport.get("/conflicts", q);
           return r.conflicts ?? [];
@@ -4365,7 +4939,7 @@ name: ${nm}
           const r = await transport.post("/conflict/resolve", {
             all: true,
             choice,
-            ...scope === "chat" ? { chatKey: this.activeChatKey } : { charKey: this.activeCharKey }
+            ...scope === "chat" ? { chatKey: this.activeChatKey } : { charKey: this.botKey }
           });
           await this.afterResolve();
           return r.resolved ?? 0;
@@ -4481,12 +5055,12 @@ name: ${nm}
         }
         // --- charx ------------------------------------------------------------------
         async charxPreview() {
-          return await transport.get("/charx/preview", { charKey: this.botKey });
+          return await transport.get("/charx/preview", { charKey: this.activeCharKey });
         }
         /** Build out/<name>.charx on the backend from the working card + store. */
         async charxBuild(opts = {}) {
           const r = await transport.post("/charx/build", {
-            charKey: this.botKey,
+            charKey: this.activeCharKey,
             allowMissing: !!opts.allowMissing,
             name: opts.name || ""
           }, 6e5);
@@ -4521,6 +5095,7 @@ name: ${nm}
           return await transport.get("/files/read?path=" + encodeURIComponent(path));
         }
         async uploadFile(name, content, base64 = false, dir = "", extract = false) {
+          if (!dir && this.targetModule) dir = `projects/${this.targetModule.folder}`;
           if (!dir && this.editMode === "persona" && this.personaFolder) dir = this.personaFolder;
           const bot = dir ? void 0 : this.activeCharKey || void 0;
           return await transport.upload("/files/upload", base64 ? { name, base64: content, dir, extract, bot } : { name, text: content, dir, bot });
@@ -4528,6 +5103,7 @@ name: ${nm}
         /** The project folder being edited: the persona's in persona mode, else
          *  the bot's (`botFolder` from the files listing; '' before it is known). */
         projectDir(botFolder) {
+          if (this.targetModule) return `projects/${this.targetModule.folder}`;
           if (this.editMode === "persona" && this.personaFolder) return this.personaFolder;
           return botFolder ? `projects/${botFolder}` : "";
         }
@@ -4753,8 +5329,9 @@ name: ${nm}
         /** Every pending proposal of the open bot, whichever chat it rode on. */
         async actionsForBot() {
           if (!this.activeCharKey) return [];
+          const mods = this.openModules.map((m) => m.key).join(",");
           const r = await transport.get(
-            "/actions?charKey=" + encodeURIComponent(this.activeCharKey)
+            "/actions?charKey=" + encodeURIComponent(this.activeCharKey) + (mods ? "&modules=" + encodeURIComponent(mods) : "")
           );
           return r.actions;
         }
@@ -4784,7 +5361,7 @@ name: ${nm}
           if (!r.approved) return "\uAC70\uC808\uD588\uC2B5\uB2C8\uB2E4.";
           if (!r.host) {
             this.bump();
-            await Promise.all([this.refreshChanges(), this.refreshBotChanges(), this.refreshPersonaList()]);
+            await Promise.all([this.refreshChanges(), this.refreshBotChanges(), this.refreshPersonaList(), this.refreshModuleRows()]);
             return String(r.result ?? "\uC2E4\uD589\uD588\uC2B5\uB2C8\uB2E4.");
           }
           try {
@@ -4805,7 +5382,8 @@ name: ${nm}
               await this.saveCopy(name);
               detail = `\u201C${name}\u201D \uC73C\uB85C \uBCF5\uC0AC\uBCF8\uC744 \uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4.`;
             } else if (r.host.kind === "host_card_writeback") {
-              const out = await this.cardWriteBack();
+              const out = await this.cardWriteBack(() => {
+              }, r.host.charKey || this.activeCharKey);
               if (!out.verified) throw new Error(out.drift || "RisuAI \uC800\uC7A5 \uACB0\uACFC\uB97C \uD655\uC778\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4. \uBBF8\uBC18\uC601 \uBCC0\uACBD\uC744 \uBCF4\uC874\uD588\uC2B5\uB2C8\uB2E4.");
               detail = out.mode === "noop" ? "\uCE74\uB4DC\uC5D0 \uBC18\uC601\uD560 \uBCC0\uACBD\uC774 \uC5C6\uC5C8\uC2B5\uB2C8\uB2E4." : `\uCE74\uB4DC \uBCC0\uACBD ${out.applied}\uAC74${out.parts?.length ? `(${describeCardParts(out.parts)})` : ""}\uC744 RisuAI\uC5D0 \uBC18\uC601\uD558\uACE0 \uC800\uC7A5\uC744 \uD655\uC778\uD588\uC2B5\uB2C8\uB2E4.`;
             } else if (r.host.kind === "host_clone_bot") {
@@ -4815,8 +5393,16 @@ name: ${nm}
             } else if (r.host.kind === "host_persona_writeback") {
               const out = await this.personaWriteBack(String(r.host.args?.key || ""));
               detail = out.copied ? `\uC120\uD0DD\uB41C \uD398\uB974\uC18C\uB098\uB77C \uC6D0\uBCF8 \uB300\uC2E0 \uC0C8 \uD398\uB974\uC18C\uB098 '${out.name}' (\uC0AC\uBCF8)\uC73C\uB85C RisuAI\uC5D0 \uC800\uC7A5\uD558\uACE0 \uD655\uC778\uD588\uC2B5\uB2C8\uB2E4.` : out.written ? `\uD398\uB974\uC18C\uB098 '${out.name}' \uC744(\uB97C) RisuAI\uC5D0 \uBC18\uC601\uD558\uACE0 \uC800\uC7A5\uC744 \uD655\uC778\uD588\uC2B5\uB2C8\uB2E4.` : "\uD398\uB974\uC18C\uB098\uC5D0 \uBC18\uC601\uD560 \uBCC0\uACBD\uC774 \uC5C6\uC5C8\uC2B5\uB2C8\uB2E4.";
+            } else if (r.host.kind === "host_open_module") {
+              const row = await this.openModule(String(r.host.args?.id || ""), true);
+              this.openTabRequest = CARD_TABS.has(this.activeTab) ? this.activeTab : "botlore";
+              this.emit();
+              detail = `\uBAA8\uB4C8 '${row.name}' \uC744(\uB97C) \uD328\uB110\uC5D0 \uC5F4\uC5C8\uC2B5\uB2C8\uB2E4. \uC774\uC81C \uC774 \uBAA8\uB4C8\uC744 \uC77D\uACE0 \uACE0\uCE60 \uC218 \uC788\uC2B5\uB2C8\uB2E4 (focus_target).`;
             } else if (r.host.kind === "host_open_tab") {
               const tab = String(r.host.args?.tab || "");
+              const mk = r.host.charKey || "";
+              if (this.openModules.some((m) => m.key === mk)) this.cardTarget = mk;
+              else if (mk === this.activeCharKey) this.cardTarget = "";
               this.openTabRequest = tab;
               this.emit();
               detail = "\uD0ED\uC744 \uC774\uB3D9\uD588\uC2B5\uB2C8\uB2E4.";
@@ -4844,7 +5430,7 @@ name: ${nm}
         /** The agent's save tool runs only for an explicit user writeback request. */
         async requestedCardWriteback(id, charKey, chatKey) {
           if (!id || !charKey) throw new Error("\uC798\uBABB\uB41C \uBD07 \uC800\uC7A5 \uC694\uCCAD\uC785\uB2C8\uB2E4.");
-          if (this.botKey !== charKey) {
+          if (this.activeCharKey !== charKey && !this.openModules.some((m) => m.key === charKey)) {
             const detail = "\uC694\uCCAD\uD55C \uBD07\uACFC \uD604\uC7AC \uBD07\uC774 \uB2EC\uB77C \uC800\uC7A5\uD558\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4.";
             await transport.post("/actions/complete", { chatKey, id, ok: false, detail });
             throw new Error(detail);
@@ -4858,17 +5444,17 @@ name: ${nm}
           }
         }
         async lore(scope) {
-          const q = "/lore?charKey=" + encodeURIComponent(this.activeCharKey) + (scope ? "&scope=" + scope : "");
+          const q = "/lore?charKey=" + encodeURIComponent(scope === "local" ? this.activeCharKey : this.botKey) + (scope ? "&scope=" + scope : "");
           const r = await transport.get(q);
           return r.lore;
         }
         async saveLore(id, entry) {
-          await transport.post("/lore/update", { charKey: this.activeCharKey, id, entry });
+          await transport.post("/lore/update", { charKey: this.botKey, id, entry });
           void this.refreshChanges();
         }
         async addLore(entry, scope) {
           const r = await transport.post("/lore", {
-            charKey: this.activeCharKey,
+            charKey: scope === "local" ? this.activeCharKey : this.botKey,
             entry,
             scope,
             chatKey: scope === "local" ? this.activeChatKey : void 0
@@ -4877,11 +5463,11 @@ name: ${nm}
           return r.id;
         }
         async deleteLore(id) {
-          await transport.post("/lore/delete", { charKey: this.activeCharKey, id });
+          await transport.post("/lore/delete", { charKey: this.botKey, id });
           void this.refreshChanges();
         }
         async moveLore(id, toSeq) {
-          await transport.post("/lore/move", { charKey: this.activeCharKey, id, toSeq });
+          await transport.post("/lore/move", { charKey: this.botKey, id, toSeq });
           void this.refreshChanges();
           void this.refreshBotChanges();
         }
@@ -4985,11 +5571,11 @@ name: ${nm}
         async moveScript(id, toSeq) {
           await transport.post("/card/script/move", { charKey: this.botKey, id, toSeq });
         }
-        async cardPatch() {
-          return await transport.get("/card/patch", { charKey: this.botKey, stagedAssets: "1" });
+        async cardPatch(key = this.botKey) {
+          return await transport.get("/card/patch", { charKey: key, stagedAssets: "1" });
         }
-        async cardCommit(label2) {
-          await transport.post("/card/commit", { charKey: this.botKey, label: label2 });
+        async cardCommit(label2, key = this.botKey) {
+          await transport.post("/card/commit", { charKey: key, label: label2 });
           this.bump();
           void this.refreshBotChanges();
         }
@@ -5057,7 +5643,8 @@ name: ${nm}
          * an approved host_card_writeback - and they must not drift apart.
          */
         async cardWriteBack(progress = () => {
-        }) {
+        }, key = this.botKey) {
+          if (key && key !== this.activeCharKey) return this.moduleWriteBack(key, progress);
           let since = null;
           const r = await foregroundWrite(async (report) => {
             since = await persistBaseline();
@@ -5074,13 +5661,14 @@ name: ${nm}
             throw new Error("\uBC18\uC601\uC740 RisuAI\uC5D0\uC11C \uC774 \uBD07\uC774 \uC120\uD0DD\uB418\uC5B4 \uC788\uC5B4\uC57C \uD569\uB2C8\uB2E4. RisuAI\uC5D0\uC11C \uBD07\uC744 \uC120\uD0DD\uD55C \uB4A4 \uD328\uB110\uC744 \uB2E4\uC2DC \uC5F4\uC5B4 \uC8FC\uC138\uC694");
           }
           const slot = await currentSlot();
-          const patch = await this.cardPatch();
+          const botKey = this.activeCharKey;
+          const patch = await this.cardPatch(botKey);
           if (!patch.full) {
             throw new Error("\uAD6C\uBC84\uC804 \uC5C5\uB85C\uB4DC \uC0C1\uD0DC\uC758 \uCE74\uB4DC\uB77C \uBC18\uC601\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4. \uD328\uB110\uC744 \uB2EB\uC558\uB2E4 \uB2E4\uC2DC \uC5F4\uC5B4 \uC8FC\uC138\uC694");
           }
           const update = this.cardUpdateFrom(patch, false);
           if (!update) return { applied: 0, mode: "noop", verified: true };
-          await this.resolveStagedAssets(update, progress);
+          await this.resolveStagedAssets(update, progress, botKey);
           const current3 = await currentSlot();
           if (current3.characterIndex !== slot.characterIndex) throw new Error("\uC774\uBBF8\uC9C0 \uC5C5\uB85C\uB4DC \uC911 \uC120\uD0DD\uB41C \uBD07\uC774 \uBC14\uB00C\uC5C8\uC2B5\uB2C8\uB2E4. \uBBF8\uBC18\uC601 \uBCC0\uACBD\uC744 \uBCF4\uC874\uD588\uC2B5\uB2C8\uB2E4.");
           progress("\uC774\uBBF8\uC9C0 \uC900\uBE44 \uC644\uB8CC \xB7 \uCE74\uB4DC \uC800\uC7A5 \uBC0F \uBC18\uC601 \uACB0\uACFC \uD655\uC778 \uC911\u2026");
@@ -5089,7 +5677,7 @@ name: ${nm}
             return { applied: r.applied, mode: r.mode, verified: false, parts: r.parts, ...r.drift ? { drift: r.drift } : {} };
           }
           progress("RisuAI \uBC18\uC601 \uD655\uC778 \uC644\uB8CC \xB7 \uC791\uC5C5\uBCF8\uC744 \uB3D9\uAE30\uD654\uD558\uB294 \uC911\u2026");
-          await this.cardCommit("\uBC18\uC601 \uC9C1\uC804");
+          await this.cardCommit("\uBC18\uC601 \uC9C1\uC804", botKey);
           await this.rereadCard();
           return { applied: r.applied, mode: r.mode, verified: true, parts: r.parts };
         }
@@ -5140,7 +5728,7 @@ name: ${nm}
           this.emit();
         }
         /** Resolve local asset snapshots only when the user writes the card. */
-        async resolveStagedAssets(update, progress) {
+        async resolveStagedAssets(update, progress, charKey = this.botKey) {
           const pending3 = /* @__PURE__ */ new Set();
           const collect2 = (value) => {
             if (typeof value === "string" && value.startsWith("assets/hina-pending-")) pending3.add(value);
@@ -5152,7 +5740,6 @@ name: ${nm}
           const resolved = /* @__PURE__ */ new Map();
           let done = 0;
           if (pending3.size) progress(`RisuAI \uC774\uBBF8\uC9C0 \uB4F1\uB85D 0/${pending3.size} \xB7 \uCE74\uB4DC \uC800\uC7A5 \uB300\uAE30`);
-          const charKey = this.botKey;
           await boundedAssets([...pending3], async (key) => {
             const bytes = await transport.getBinary("/assets/blob", { key });
             const realKey = await Risuai.saveAsset(bytes);
@@ -5182,7 +5769,7 @@ name: ${nm}
         }
         async performSaveAsNewBot(backupName, progress) {
           if (!this.slot) throw new Error("\uD638\uC2A4\uD2B8 \uC0C1\uD0DC\uB97C \uBA3C\uC800 \uC77D\uC5B4\uC57C \uD569\uB2C8\uB2E4");
-          const patch = await this.cardPatch();
+          const patch = await this.cardPatch(this.activeCharKey);
           if (!patch.full) {
             throw new Error("\uAD6C\uBC84\uC804 \uC5C5\uB85C\uB4DC \uC0C1\uD0DC\uC758 \uCE74\uB4DC\uB77C \uC800\uC7A5\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4. \uD328\uB110\uC744 \uB2EB\uC558\uB2E4 \uB2E4\uC2DC \uC5F4\uC5B4 \uC8FC\uC138\uC694");
           }
@@ -5201,16 +5788,16 @@ name: ${nm}
         }
         async performCloneBot(name, progress) {
           if (!this.slot) throw new Error("\uD638\uC2A4\uD2B8 \uC0C1\uD0DC\uB97C \uBA3C\uC800 \uC77D\uC5B4\uC57C \uD569\uB2C8\uB2E4");
-          const patch = await this.cardPatch();
+          const patch = await this.cardPatch(this.activeCharKey);
           if (!patch.full) {
             throw new Error("\uAD6C\uBC84\uC804 \uC5C5\uB85C\uB4DC \uC0C1\uD0DC\uC758 \uCE74\uB4DC\uB77C \uBCF5\uC81C\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4. \uD328\uB110\uC744 \uB2EB\uC558\uB2E4 \uB2E4\uC2DC \uC5F4\uC5B4 \uC8FC\uC138\uC694");
           }
           const update = this.cardUpdateFrom(patch, true) ?? {};
-          await this.resolveStagedAssets(update, progress);
+          await this.resolveStagedAssets(update, progress, this.activeCharKey);
           progress("\uC774\uBBF8\uC9C0 \uC900\uBE44 \uC644\uB8CC \xB7 \uBCF5\uC81C \uBD07 \uC800\uC7A5 \uC911\u2026");
           const family = this.workspace?.familyKey || this.activeCharKey;
           const chaId = await cloneBot(this.slot.characterIndex, patch.chaId, name, update, family);
-          await this.cardCommit("\uBCF5\uC81C \uC9C1\uC804");
+          await this.cardCommit("\uBCF5\uC81C \uC9C1\uC804", this.activeCharKey);
           return chaId;
         }
       };
@@ -5277,8 +5864,12 @@ name: ${nm}
         chatKey: state.activeChatKey || "",
         botName: state.workspace?.characterName || String(state.character?.name || ""),
         chatName: chat?.name || "",
-        mode: state.activeTab === "chats" ? "" : state.activeTab === "studio" ? "studio" : state.editMode,
-        persona: state.editMode === "persona" ? state.persona?.key ?? "" : ""
+        mode: state.activeTab === "chats" ? "" : state.agentMode,
+        persona: state.editMode === "persona" ? state.persona?.key ?? "" : "",
+        // The module the card tabs show and every module opened (§1-95).
+        target: state.cardTarget,
+        modules: state.openModules.map((m) => m.key).join(","),
+        linked: state.linkedNotOpen
       };
     }
     async activate() {
@@ -5361,7 +5952,8 @@ name: ${nm}
      * backend tool times out and says so, and the proposal is not lost.
      */
     async runHostAction(job) {
-      if (job.charKey !== state.botKey || CHAT_HOST_KINDS.has(job.kind || "") && job.chatKey !== state.activeChatKey) {
+      const ours = job.charKey === state.activeCharKey || state.openModules.some((m) => m.key === job.charKey);
+      if (!ours || CHAT_HOST_KINDS.has(job.kind || "") && job.chatKey !== state.activeChatKey) {
         this.onNotice("MCP \uC2B9\uC778 \uC694\uCCAD\uC744 \uAC74\uB108\uB6F0\uC5C8\uC2B5\uB2C8\uB2E4: \uC774 \uD328\uB110\uC5D0 \uC5F4\uB9B0 \uBD07\xB7\uCC57\uC758 \uC791\uC5C5\uC774 \uC544\uB2D9\uB2C8\uB2E4.", "err");
         return;
       }
@@ -6441,6 +7033,9 @@ name: ${nm}
     for (const p of summary.personas ?? []) {
       out.push({ scope: "persona", key: p.key, label: `'${p.name || "\uC774\uB984 \uC5C6\uB294"}' \uD398\uB974\uC18C\uB098`, total: p.total, conflicts: 0 });
     }
+    for (const m of summary.modules ?? []) {
+      out.push({ scope: "module", key: m.key, label: `'${m.name || "\uC774\uB984 \uC5C6\uB294"}' \uBAA8\uB4C8`, total: m.total, conflicts: m.conflicts });
+    }
     return out;
   }
   function msg5(e) {
@@ -6451,8 +7046,9 @@ name: ${nm}
       await state.personaWriteBack(d.key);
       return;
     }
-    if (d.scope === "card") {
-      const r2 = await state.cardWriteBack();
+    if (d.scope === "card" || d.scope === "module") {
+      const r2 = await state.cardWriteBack(() => {
+      }, d.scope === "card" ? state.activeCharKey : d.key);
       if (!r2.verified) {
         throw new Error("RisuAI \uAC00 \uC774 \uC4F0\uAE30\uB97C \uBC1B\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4" + (r2.drift ? ` (${r2.drift})` : "") + ". \uD3B8\uC9D1 \uB0B4\uC6A9\uC740 \uADF8\uB300\uB85C \uC788\uC2B5\uB2C8\uB2E4. RisuAI \uAC00 \uB2E4\uB978 \uCC3D\uC774\uB098 \uAE30\uAE30\uC5D0 \uC5F4\uB824 \uC788\uC9C0 \uC54A\uC740\uC9C0 \uD655\uC778\uD574 \uC8FC\uC138\uC694.");
       }
@@ -6601,8 +7197,9 @@ name: ${nm}
     };
     const local = () => {
       if (!summary) return null;
-      const card2 = state.botChanges ? state.botChanges.total : summary.card.dirty ? summary.card.total : 0;
+      const card2 = state.botChanges && !state.cardTarget ? state.botChanges.total : summary.card.dirty ? summary.card.total : 0;
       let n = card2;
+      for (const m of summary.modules ?? []) n += m.key === state.cardTarget && state.botChanges ? state.botChanges.total : m.total;
       for (const c of summary.chats) {
         if (c.chatKey === state.activeChatKey && state.changes) n += state.changes.total;
         else n += c.dirty ? c.total : 0;
@@ -6633,7 +7230,7 @@ name: ${nm}
         if (charKey === state.activeCharKey) {
           pending3 = acts.length + staged.length;
           summary = sum;
-          dirty2 = sum ? (sum.card.dirty ? sum.card.total : 0) + sum.chats.reduce((n, c) => n + (c.dirty ? c.total : 0), 0) + (sum.personas ?? []).reduce((n, p) => n + p.total, 0) : 0;
+          dirty2 = sum ? (sum.card.dirty ? sum.card.total : 0) + sum.chats.reduce((n, c) => n + (c.dirty ? c.total : 0), 0) + (sum.personas ?? []).reduce((n, p) => n + p.total, 0) + (sum.modules ?? []).reduce((n, m) => n + m.total, 0) : 0;
         }
       } catch {
       } finally {
@@ -6709,13 +7306,14 @@ name: ${nm}
         fix?.addEventListener("click", async () => {
           if (d.scope === "chat" && d.key !== state.activeChatKey) await state.loadTurns(d.key);
           close();
-          if (d.scope !== "persona") openConflicts(d.scope, () => {
+          if (d.scope === "module") state.focusModule(d.key);
+          if (d.scope !== "persona") openConflicts(d.scope === "module" ? "card" : d.scope, () => {
             void refresh3();
             state.bump();
           });
         });
         list2.appendChild(el("div", { class: "stagedrow" }, [
-          el("span", { class: "badge", text: d.scope === "card" ? "\uBD07" : d.scope === "persona" ? "\uD398\uB974\uC18C\uB098" : "\uCC57" }),
+          el("span", { class: "badge", text: d.scope === "card" ? "\uBD07" : d.scope === "persona" ? "\uD398\uB974\uC18C\uB098" : d.scope === "module" ? "\uBAA8\uB4C8" : "\uCC57" }),
           el("div", { class: "grow" }, [
             el("div", { text: `${d.label} \u2014 \uBCC0\uACBD ${d.total}\uAC74` }),
             d.conflicts ? el("div", { class: "hint", text: "RisuAI \uCABD\uACFC \uCDA9\uB3CC\uC774 \uC788\uC5B4 \uBA3C\uC800 \uD574\uACB0\uD574\uC57C \uBC18\uC601\uB429\uB2C8\uB2E4" }) : null
@@ -7294,6 +7892,28 @@ button.outline:hover { background: rgba(37,99,235,.18); }
   color: var(--textcolor2, #79839a); border-bottom: 2px solid transparent; margin-bottom: -1px;
 }
 .tab.active { color: var(--textcolor, #d8dce4); border-bottom-color: #2563eb; font-weight: 700; }
+/* RisuAI modules on the tab row (\xA71-95): one group per open module - its chip,
+   and while it is the target its own \uC815\uBCF4 \xB7 \uB85C\uC5B4\uBD81 \xB7 Regex \xB7 \uD2B8\uB9AC\uAC70 \xB7 \uC5D0\uC14B - then \uFF0B. */
+.modtabs { display: inline-flex; align-items: stretch; gap: 2px; flex-shrink: 0; }
+.modgroup { display: inline-flex; align-items: stretch; border-left: 1px solid var(--borderc, #2b323f); padding-left: 2px; }
+.modgroup.on { background: rgba(124,92,255,.08); border-radius: 6px 6px 0 0; }
+.modchip { padding: 8px 10px; color: #a58bff; }
+.modchip.on { font-weight: 700; }
+.modchip .tabbadge { margin-left: 4px; }
+.modsub { padding: 8px 9px; font-size: 12px; }
+.modclose { align-self: center; padding: 1px 6px; min-width: 0; opacity: .6; }
+.modclose:hover { opacity: 1; }
+.modadd { padding: 8px 10px; color: #a58bff; }
+.modpicker { min-width: 300px; max-width: 460px; }
+/* The landing's list grows with the page (the .pad scrolls); in the \uFF0B picker
+   the list scrolls between the pinned header and actions. .chatlist is
+   overflow:hidden further down, hence the doubled class. */
+.chatlist.modlist { max-height: none; overflow: visible; }
+.modpicker .chatlist.modlist { max-height: min(52vh, 460px); overflow-y: auto; }
+.modrow .modstate { white-space: nowrap; }
+.modrow { cursor: pointer; gap: 8px; }
+.modrow input[type=checkbox] { flex-shrink: 0; }
+.chatitem.dim { opacity: .55; }
 /* The asset importer's progress at the end of the tab row. */
 /* The panel fold toggles (every three-pane tab), on the tab row before the sync badge. */
 .layoutslot { margin-left: auto; align-items: center; gap: 2px; }
@@ -10751,6 +11371,295 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     setTimeout(() => input2.focus(), 0);
   }
 
+  // src/ui/module-picker.ts
+  init_dom();
+  init_state();
+  init_modules();
+  function msg8(e) {
+    return e instanceof Error ? e.message : String(e);
+  }
+  function moduleLine(m) {
+    const bits = [];
+    if (m.lore) bits.push(`\uB85C\uC5B4\uBD81 ${m.lore}`);
+    if (m.regex) bits.push(`Regex ${m.regex}`);
+    if (m.trigger) bits.push(`\uD2B8\uB9AC\uAC70 ${m.trigger}`);
+    if (m.assets) bits.push(`\uC5D0\uC14B ${m.assets}`);
+    if (m.toggles) bits.push("\uD1A0\uAE00");
+    return bits.join(" \xB7 ") || "\uBE44\uC5B4 \uC788\uC74C";
+  }
+  function riskBadges(m) {
+    return [
+      m.linked ? el("span", { class: "badge", text: "RisuAI: \uC774 \uBD07\uC5D0 \uCF1C\uC9D0", title: "RisuAI\uC5D0\uC11C \uC774 \uBD07\uC774\uB098 \uCC57\uC5D0 \uCF1C \uB454 \uBAA8\uB4C8\uC785\uB2C8\uB2E4 (Hina \uD328\uB110\uC5D0 \uC5F4\uB838\uB2E4\uB294 \uB73B\uC740 \uC544\uB2D9\uB2C8\uB2E4)" }) : null,
+      m.global ? el("span", { class: "badge", text: "RisuAI: \uC804\uC5ED", title: "RisuAI\uC5D0\uC11C \uBAA8\uB4E0 \uCC57\uC5D0 \uCF1C \uB454 \uBAA8\uB4C8\uC785\uB2C8\uB2E4" }) : null,
+      m.lowLevelAccess ? el("span", { class: "badge", text: "\uC800\uC218\uC900" }) : null
+    ];
+  }
+  function ownerWord() {
+    if (state.editMode === "persona") return "\uC774 \uD398\uB974\uC18C\uB098";
+    if (state.editMode === "module") return "\uBAA8\uB4C8 \uD3B8\uC9D1";
+    return "\uC774 \uBD07";
+  }
+  function openModulePicker(anchor) {
+    const body = el("div", { class: "modpicker" });
+    const close = popover(anchor, body);
+    const pop = body.parentElement;
+    if (pop) pop.style.maxHeight = "82vh";
+    let needle = "";
+    let busy = "";
+    const head = el("div", { class: "row", style: { marginBottom: "6px", gap: "6px" } });
+    const search = el("input", { class: "searchinput", placeholder: "\uBAA8\uB4C8 \uCC3E\uAE30" });
+    const reread = el("button", { class: "ghost tiny", text: "\uB2E4\uC2DC \uC77D\uAE30", title: "RisuAI\uC5D0\uC11C \uBAA8\uB4C8 \uBAA9\uB85D\uC744 \uB2E4\uC2DC \uC77D\uC5B4 \uC635\uB2C8\uB2E4" });
+    const fileIn = el("input", { type: "file", accept: ".risum,.charx,.json", style: { display: "none" } });
+    const fromFile = el("button", { class: "ghost tiny", text: "\uD30C\uC77C\uC5D0\uC11C \uAC00\uC838\uC624\uAE30\u2026", title: ".risum \xB7 .charx \xB7 \uBAA8\uB4C8 .json \uC744 RisuAI \uBAA8\uB4C8 \uBAA9\uB85D\uC5D0 \uCD94\uAC00\uD558\uACE0 \uC5FD\uB2C8\uB2E4" });
+    head.append(el("span", { class: "sectiontitle grow", style: { marginBottom: "0" }, text: "\uBAA8\uB4C8 \uC5F4\uAE30" }), fromFile, fileIn, reread);
+    const actions = el("div", { class: "row", style: { marginBottom: "6px", gap: "6px", flexWrap: "wrap" } });
+    const note = el("div");
+    const list2 = el("div", { class: "chatlist modlist" });
+    body.append(
+      head,
+      el("div", { class: "row", style: { marginBottom: "6px" } }, [search]),
+      actions,
+      note,
+      list2,
+      el("div", { class: "hint", style: { marginTop: "6px" }, text: `\uC5F4\uAE30\uB97C \uB204\uB974\uBA74 \uBC14\uB85C \uD0ED \uC904\uC5D0 \uC5F4\uB9AC\uACE0, \uC5F0 \uBAA8\uB4C8\uC740 ${ownerWord()}\uC5D0 \uAE30\uC5B5\uB418\uC5B4 \uB2E4\uC74C\uC5D0\uB3C4 \uD568\uAED8 \uC5F4\uB9BD\uB2C8\uB2E4. \u201CRisuAI: \uC774 \uBD07\uC5D0 \uCF1C\uC9D0\u201D\uC740 RisuAI \uCABD \uC124\uC815\uC774\uACE0, \uD3B8\uC9D1\uD558\uB824\uBA74 \uC5EC\uAE30\uC11C \uC5F4\uC5B4\uC57C \uD569\uB2C8\uB2E4. ` + MODULE_CACHE_NOTE })
+    );
+    const say = (text2, kind = "") => {
+      clear(note);
+      if (text2) note.appendChild(el("div", { class: kind === "err" ? "notice err" : "hint", text: text2 }));
+    };
+    const open4 = async (ids, focus) => {
+      const keep = state.openModules.map((m) => m.id);
+      busy = ids.join(",");
+      draw2();
+      try {
+        await state.setOpenModules([...keep, ...ids.filter((i) => !keep.includes(i))]);
+        const row2 = state.openModules.find((m) => m.id === focus);
+        if (row2) onFocus(row2.key);
+        say(ids.length > 1 ? `\uBAA8\uB4C8 ${ids.length}\uAC1C\uB97C \uC5F4\uC5C8\uC2B5\uB2C8\uB2E4.` : `'${row2?.name ?? ""}' \uC744(\uB97C) \uC5F4\uC5C8\uC2B5\uB2C8\uB2E4. \uD0ED \uC904\uC5D0\uC11C \uD3B8\uC9D1\uD569\uB2C8\uB2E4.`);
+      } catch (e) {
+        say("\uC5F4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg8(e), "err");
+      } finally {
+        busy = "";
+        if (body.isConnected) draw2();
+      }
+    };
+    const row = (m) => {
+      const opened = state.openModules.find((x) => x.id === m.id);
+      const right = [];
+      if (m.mcp) {
+        right.push(el("span", { class: "hint modstate", text: "\uD3B8\uC9D1\uD560 \uB0B4\uC6A9 \uC5C6\uC74C" }));
+      } else if (busy.split(",").includes(m.id)) {
+        right.push(el("span", { class: "hint modstate", text: "\uC5EC\uB294 \uC911\u2026" }));
+      } else if (opened) {
+        const edit = el("button", { class: "ghost tiny", text: "\uD3B8\uC9D1" });
+        edit.addEventListener("click", (ev) => {
+          ev.stopPropagation();
+          onFocus(opened.key);
+          close();
+        });
+        const shut = el("button", { class: "ghost tiny", text: "\uB2EB\uAE30", title: "\uD328\uB110\uC5D0\uC11C \uB2EB\uC2B5\uB2C8\uB2E4 (\uC791\uC5C5\uBCF8\uACFC \uBBF8\uBC18\uC601 \uBCC0\uACBD\uC740 \uB0A8\uC2B5\uB2C8\uB2E4)" });
+        shut.addEventListener("click", async (ev) => {
+          ev.stopPropagation();
+          await state.closeModule(opened.key);
+          if (body.isConnected) draw2();
+        });
+        right.push(el("span", { class: "badge ok modstate", text: "\u2713 \uD328\uB110\uC5D0 \uC5F4\uB9BC" }), edit, shut);
+      } else {
+        const go = el("button", { class: "primary tiny", text: "\uC5F4\uAE30" });
+        go.addEventListener("click", (ev) => {
+          ev.stopPropagation();
+          void open4([m.id], m.id);
+        });
+        right.push(go);
+      }
+      const item = el("div", { class: "chatitem modrow" + (m.mcp ? " dim" : "") + (opened ? " current" : "") }, [
+        el("span", { class: "grow" }, [
+          el("div", { text: "\u25EB " + (m.name || "(\uC774\uB984 \uC5C6\uC74C)") }),
+          el("div", { class: "hint clip1", text: m.mcp ? "MCP \uBAA8\uB4C8" : moduleLine(m) + (m.description ? " \u2014 " + m.description.split("\n")[0].slice(0, 60) : "") })
+        ]),
+        ...riskBadges(m),
+        opened?.total ? el("span", { class: "badge warn", text: `\uBBF8\uBC18\uC601 ${opened.total}` }) : null,
+        ...right
+      ]);
+      if (!m.mcp) {
+        item.addEventListener("click", () => {
+          if (busy) return;
+          if (opened) {
+            onFocus(opened.key);
+            close();
+          } else void open4([m.id], m.id);
+        });
+      }
+      return item;
+    };
+    const draw2 = () => {
+      clear(list2);
+      clear(actions);
+      if (state.moduleError) say(state.moduleError, "err");
+      const all = state.liveModules;
+      if (!all) {
+        list2.appendChild(el("div", { class: "chatitem" }, [el("span", { class: "spin" }), el("span", { class: "hint", text: "RisuAI\uC5D0\uC11C \uBAA8\uB4C8\uC744 \uC77D\uB294 \uC911\u2026" })]));
+        return;
+      }
+      const q = needle.trim().toLowerCase();
+      const shown = all.filter((m) => !q || m.name.toLowerCase().includes(q) || m.description.toLowerCase().includes(q));
+      const rank = (m) => state.openModules.some((x) => x.id === m.id) ? 0 : m.linked ? 1 : 2;
+      shown.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
+      if (!all.length) list2.appendChild(el("div", { class: "hint", style: { padding: "8px" }, text: "RisuAI\uC5D0 \uBAA8\uB4C8\uC774 \uC5C6\uC2B5\uB2C8\uB2E4. \uD30C\uC77C\uC5D0\uC11C \uAC00\uC838\uC62C \uC218 \uC788\uC2B5\uB2C8\uB2E4." }));
+      for (const m of shown) list2.appendChild(row(m));
+      const pending3 = all.filter((m) => m.linked && !m.mcp && !state.openModules.some((x) => x.id === m.id));
+      if (pending3.length && state.editMode === "bot") {
+        const b = el("button", { class: "ghost tiny", text: `RisuAI\uC5D0\uC11C \uCF1C\uC9C4 \uBAA8\uB4C8 \uBAA8\uB450 \uC5F4\uAE30 (${pending3.length})` });
+        b.disabled = !!busy;
+        b.addEventListener("click", () => {
+          void open4(pending3.map((m) => m.id), pending3[0].id);
+        });
+        actions.appendChild(b);
+      }
+    };
+    search.addEventListener("input", () => {
+      needle = search.value;
+      draw2();
+    });
+    reread.addEventListener("click", () => {
+      reread.disabled = true;
+      void state.loadModules().catch(() => void 0).finally(() => {
+        reread.disabled = false;
+        if (body.isConnected) draw2();
+      });
+    });
+    fromFile.addEventListener("click", () => fileIn.click());
+    fileIn.addEventListener("change", async () => {
+      const f = fileIn.files?.[0];
+      fileIn.value = "";
+      if (!f) return;
+      fromFile.disabled = true;
+      try {
+        say(`${f.name} \uC62C\uB9AC\uB294 \uC911\u2026`);
+        const bytes = new Uint8Array(await f.arrayBuffer());
+        let bin = "";
+        for (let i = 0; i < bytes.length; i += 32768) bin += String.fromCharCode(...bytes.subarray(i, i + 32768));
+        const up = await state.uploadFile(f.name, btoa(bin), true);
+        state.touchFiles([up.path]);
+        const made = await state.importModuleFile(up.path, (t) => say(t));
+        close();
+        onFocus(made.key);
+        shellNotice(`'${made.name}' \uBAA8\uB4C8\uC744 RisuAI\uC5D0 \uCD94\uAC00\uD558\uACE0 \uC5F4\uC5C8\uC2B5\uB2C8\uB2E4 (\uC6D0\uBCF8 \uD30C\uC77C: ${up.path}).`, "ok");
+      } catch (e) {
+        say("\uAC00\uC838\uC624\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg8(e), "err");
+      } finally {
+        fromFile.disabled = false;
+      }
+    });
+    draw2();
+    if (!state.moduleLoading) {
+      void state.loadModules().catch(() => void 0).finally(() => {
+        if (body.isConnected) draw2();
+      });
+    }
+    setTimeout(() => {
+      try {
+        search.focus();
+      } catch {
+      }
+    }, 0);
+  }
+  var onFocus = (key) => state.focusModule(key);
+  function setModuleFocusHandler(fn) {
+    onFocus = fn;
+  }
+
+  // src/ui/module-export.ts
+  init_dom();
+  init_state();
+  function msg9(e) {
+    return e instanceof Error ? e.message : String(e);
+  }
+  function moduleSaveRows(box, mods) {
+    clear(box);
+    if (!mods.length) {
+      box.appendChild(el("div", { class: "hint", text: "\uD568\uAED8 \uC5F4\uAC70\uB098 \uC5F0\uACB0\uB41C \uBAA8\uB4C8\uC774 \uC5C6\uC2B5\uB2C8\uB2E4. \uD0ED \uC904\uC758 \uFF0B \uB85C \uBAA8\uB4C8\uC744 \uC5F4 \uC218 \uC788\uC2B5\uB2C8\uB2E4." }));
+      return;
+    }
+    const runners = [];
+    for (const m of mods) {
+      const status = el("div", { class: "hint" });
+      const charx = el("button", { class: "ghost tiny", text: ".charx" });
+      const risum = el("button", { class: "ghost tiny", text: ".risum" });
+      const run = async (fmt2, allowMissing = false) => {
+        charx.disabled = risum.disabled = true;
+        clear(status);
+        status.textContent = "\uC800\uC7A5 \uC911\u2026";
+        try {
+          const r = await state.exportModuleById(m.id, fmt2, allowMissing);
+          status.textContent = `\u2714 ${r.path} \xB7 \uC5D0\uC14B ${r.assets}\uAC1C` + (r.dropped ? ` (${r.dropped}\uAC1C \uC81C\uC678)` : "");
+          return true;
+        } catch (e) {
+          const missing = e.body?.missing;
+          clear(status);
+          if (Array.isArray(missing) && missing.length) {
+            status.appendChild(el("span", { text: `\uC5D0\uC14B ${missing.length}\uAC1C\uAC00 \uC2A4\uD1A0\uC5B4\uC5D0 \uC5C6\uC2B5\uB2C8\uB2E4. ` }));
+            const anyway = el("button", { class: "ghost tiny", text: "\uBE7C\uACE0 \uC800\uC7A5" });
+            anyway.addEventListener("click", () => {
+              void run(fmt2, true);
+            });
+            status.appendChild(anyway);
+          } else {
+            status.textContent = "\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg9(e);
+          }
+          return false;
+        } finally {
+          charx.disabled = risum.disabled = false;
+        }
+      };
+      charx.addEventListener("click", () => {
+        void run("charx");
+      });
+      risum.addEventListener("click", () => {
+        void run("risum");
+      });
+      runners.push((fmt2) => run(fmt2));
+      box.appendChild(el("div", { class: "stagedrow" }, [
+        el("div", { class: "grow" }, [
+          el("div", { text: "\u25EB " + (m.name || "(\uC774\uB984 \uC5C6\uC74C)") }),
+          status
+        ]),
+        m.open ? el("span", { class: "badge", text: "\uC5F4\uB9BC", title: "\uC791\uC5C5\uBCF8(\uBC18\uC601 \uC804 \uD3B8\uC9D1 \uD3EC\uD568)\uC73C\uB85C \uC800\uC7A5\uD569\uB2C8\uB2E4" }) : null,
+        m.linked ? el("span", { class: "badge", text: "\uC5F0\uACB0\uB428", title: "RisuAI\uC5D0\uC11C \uC774 \uBD07\xB7\uCC57\uC5D0 \uCF1C \uB454 \uBAA8\uB4C8" }) : null,
+        charx,
+        risum
+      ]));
+    }
+    if (mods.length > 1) {
+      const all = el("button", { class: "ghost tiny", text: `\uBAA8\uB450 .charx \uB85C \uC800\uC7A5 (${mods.length})` });
+      all.addEventListener("click", async () => {
+        all.disabled = true;
+        let ok = 0;
+        for (const r of runners) if (await r("charx")) ok += 1;
+        shellNotice(`\uBAA8\uB4C8 ${ok}/${runners.length}\uAC1C\uB97C .charx \uB85C \uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4 \u2014 \uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 \uD30C\uC77C \uD0ED\uC758 \uAC01 \uBAA8\uB4C8 \uD3F4\uB354 out/ \uC5D0 \uC788\uC2B5\uB2C8\uB2E4.`, ok === runners.length ? "ok" : "err");
+        all.disabled = false;
+      });
+      box.appendChild(el("div", { class: "row", style: { marginTop: "6px" } }, [all]));
+    }
+  }
+  function openModuleSave(anchor) {
+    const body = el("div", { class: "applypop" });
+    popover(anchor, body);
+    body.appendChild(el("div", { class: "sectiontitle", text: "\uBAA8\uB4C8\uC744 \uD30C\uC77C\uB85C \uC800\uC7A5" }));
+    body.appendChild(el("div", { class: "hint", text: "\uAC01 \uBAA8\uB4C8 \uD504\uB85C\uC81D\uD2B8 \uD3F4\uB354\uC758 out/ \uC5D0 \uC800\uC7A5\uD569\uB2C8\uB2E4. .charx \uB294 RisuAI \uAD8C\uC7A5 \uD615\uC2DD, .risum \uC740 \uC608\uC804 \uD615\uC2DD\uC785\uB2C8\uB2E4. \uC5F4\uB9B0 \uBAA8\uB4C8\uC740 \uBC18\uC601 \uC804 \uD3B8\uC9D1\uB3C4 \uB4E4\uC5B4\uAC11\uB2C8\uB2E4." }));
+    const box = el("div", { style: { marginTop: "6px" } }, [el("div", { class: "hint", text: "\uBAA8\uB4C8\uC744 \uC77D\uB294 \uC911\u2026" })]);
+    body.appendChild(box);
+    void state.ownerModules().then(
+      (mods) => {
+        if (box.isConnected) moduleSaveRows(box, mods);
+      },
+      (e) => {
+        clear(box);
+        box.appendChild(el("div", { class: "notice err", text: msg9(e) }));
+      }
+    );
+  }
+
   // src/ui/tab-chats.ts
   var openMode = "";
   function foldLanding() {
@@ -10893,7 +11802,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
   };
   var snaps = new Cached(() => state.cardCheckpoints());
   var dirty = new Cached(() => state.dirtySummary());
-  var snapKey = () => `${state.botKey}:${state.epoch}`;
+  var snapKey = () => `${state.activeCharKey}:${state.epoch}`;
   var dirtyKey = () => `${state.activeCharKey}:${state.epoch}:${state.changes?.total ?? ""}:${state.botChanges?.total ?? ""}`;
   function loadingRow(text2) {
     return el("div", { class: "chatitem loadingrow" }, [el("span", { class: "spin" }), el("span", { class: "hint grow", text: text2 })]);
@@ -10951,6 +11860,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       b.addEventListener("click", () => {
         openMode = openMode === m ? "" : m;
         if (openMode === "persona" && !state.personas && !state.personaLoading) void state.loadPersonas().catch(() => void 0);
+        if (openMode === "module" && !state.moduleLoading) void state.loadModules().catch(() => void 0);
         renderChatsTab(mount2);
       });
       cards.appendChild(b);
@@ -10958,13 +11868,15 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     card2("bot", "\u{1F916}", "\uBD07 \uD3B8\uC9D1", char?.name ? String(char.name) : "", "\uCE74\uB4DC\xB7\uC778\uC0AC\uB9D0\xB7\uB85C\uC5B4\uBD81\xB7Regex\xB7\uD2B8\uB9AC\uAC70\xB7\uC5D0\uC14B", botWhy);
     card2("chat", "\u{1F4AC}", "\uCC57 \uD3B8\uC9D1", char ? `\uCC57 ${chats.length}\uAC1C` : "", "\uD134\xB7\uCC57 \uB85C\uC5B4\uBD81\xB7\uC7A5\uAE30\uAE30\uC5B5\xB7\uCC57 \uBCC0\uC218", botWhy);
     card2("persona", "\u{1F464}", "\uD398\uB974\uC18C\uB098 \uD3B8\uC9D1", state.personas ? `\uD398\uB974\uC18C\uB098 ${state.personas.length}\uAC1C` : "RisuAI \uC0AC\uC6A9\uC790 \uD398\uB974\uC18C\uB098", "\uC774\uB984\xB7\uC124\uBA85\xB7\uD504\uB85C\uD544 \uC0AC\uC9C4", personaWhy);
+    card2("module", "\u25EB", "\uBAA8\uB4C8 \uD3B8\uC9D1", state.liveModules ? `\uBAA8\uB4C8 ${state.liveModules.length}\uAC1C` : "RisuAI \uBAA8\uB4C8", "\uB85C\uC5B4\uBD81\xB7Regex\xB7\uD2B8\uB9AC\uAC70\xB7\uC5D0\uC14B\xB7\uD1A0\uAE00 (\uBD07\xB7\uD398\uB974\uC18C\uB098\uC640 \uC870\uD569)", personaWhy);
     root2.appendChild(cards);
     if ((openMode === "bot" || openMode === "chat") && botWhy) openMode = "";
-    if (openMode === "persona" && personaWhy) openMode = "";
+    if ((openMode === "persona" || openMode === "module") && personaWhy) openMode = "";
     const body = el("div", { class: "modebody" });
     if (openMode === "bot") botBody(body, mount2);
     else if (openMode === "chat") chatBody(body, mount2);
     else if (openMode === "persona") personaBody(body, mount2);
+    else if (openMode === "module") moduleBody(body, mount2);
     if (openMode) root2.appendChild(body);
     else if (!blocked) {
       root2.appendChild(el("div", { class: "hint landingfoot", text: char ? "\uD3B8\uC9D1\uD560 \uB300\uC0C1\uC744 \uACE0\uB974\uC138\uC694. \uB2E4\uB978 \uBD07\uC744 \uD3B8\uC9D1\uD558\uC2DC\uB824\uBA74 RisuAI\uC5D0\uC11C \uADF8 \uBD07\uC744 \uC5F4\uACE0 \u{1F504} \uB97C \uB20C\uB7EC \uC8FC\uC138\uC694." : "\uD3B8\uC9D1\uD560 \uB300\uC0C1\uC744 \uACE0\uB974\uC138\uC694." }));
@@ -10994,9 +11906,13 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     const pending3 = state.botChanges?.total ?? 0;
     const cur = el("button", { class: "primary tiny", text: "\uD3B8\uC9D1" });
     cur.title = "\uC9C0\uAE08 \uC791\uC5C5\uBCF8(\uC544\uC9C1 \uBC18\uC601\uD558\uC9C0 \uC54A\uC740 \uBCC0\uACBD \uD3EC\uD568)\uC73C\uB85C \uBD07 \uD3B8\uC9D1\uC5D0 \uB4E4\uC5B4\uAC11\uB2C8\uB2E4";
+    const enterBot = () => {
+      state.focusModule("");
+      setEditMode("bot", "meta");
+    };
     cur.addEventListener("click", (ev) => {
       ev.stopPropagation();
-      setEditMode("bot", "meta");
+      enterBot();
     });
     const curRow = el("div", { class: "chatitem current" }, [
       el("span", { class: "grow" }, [
@@ -11006,7 +11922,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       pending3 ? el("span", { class: "badge warn", text: `\uBBF8\uBC18\uC601 ${pending3}` }) : null,
       cur
     ]);
-    curRow.addEventListener("click", () => setEditMode("bot", "meta"));
+    curRow.addEventListener("click", enterBot);
     list2.appendChild(curRow);
     const rows = el("div", { class: "snaprows" });
     list2.appendChild(rows);
@@ -11041,7 +11957,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         rows.appendChild(el("div", { class: "chatitem" }, [el("span", { class: "hint", text: "\uC800\uC7A5\uB41C \uC2A4\uB0C5\uC0F7\uC774 \uC5C6\uC2B5\uB2C8\uB2E4 \u2014 \uBD07 \uD3B8\uC9D1 \u2192 \u{1F516} \uB85C \uC9C0\uAE08 \uC0C1\uD0DC\uB97C \uB0A8\uAE38 \uC218 \uC788\uC2B5\uB2C8\uB2E4" })]));
       }
     };
-    snaps.want(state.botKey, snapKey(), () => {
+    snaps.want(state.activeCharKey, snapKey(), () => {
       if (rows.isConnected) fill2();
     });
     fill2();
@@ -11055,11 +11971,12 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       edit.disabled = true;
       edit.textContent = "\uB418\uB3CC\uB9AC\uB294 \uC911\u2026";
       try {
+        state.focusModule("");
         await state.cardRestore(c.id);
         snaps.drop();
         setEditMode("bot", "meta");
       } catch (e) {
-        flash("\uBCF5\uC6D0\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg8(e));
+        flash("\uBCF5\uC6D0\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg10(e));
         edit.disabled = false;
         edit.textContent = "\uD3B8\uC9D1";
       }
@@ -11083,7 +12000,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           row.classList.remove("deleting");
           del.disabled = false;
           edit.disabled = false;
-          flash("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg8(e));
+          flash("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg10(e));
         }
       });
       row.appendChild(del);
@@ -11155,7 +12072,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           else await state.openChat(r.index);
           setEditMode("chat", "editor");
         } catch (e) {
-          flash(e instanceof HostError && e.code === "missing" ? "RisuAI\uAC00 \uC774 \uCC57\uC744 \uC544\uC9C1 \uC77D\uC5B4 \uB450\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4. RisuAI\uC5D0\uC11C \uADF8 \uCC57\uC744 \uD55C \uBC88 \uC5F0 \uB2E4\uC74C \u{1F504} \uB97C \uB20C\uB7EC \uC8FC\uC138\uC694." : "\uCC57\uC744 \uBD88\uB7EC\uC624\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg8(e));
+          flash(e instanceof HostError && e.code === "missing" ? "RisuAI\uAC00 \uC774 \uCC57\uC744 \uC544\uC9C1 \uC77D\uC5B4 \uB450\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4. RisuAI\uC5D0\uC11C \uADF8 \uCC57\uC744 \uD55C \uBC88 \uC5F0 \uB2E4\uC74C \u{1F504} \uB97C \uB20C\uB7EC \uC8FC\uC138\uC694." : "\uCC57\uC744 \uBD88\uB7EC\uC624\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg10(e));
         } finally {
           busy = false;
           if (item.isConnected) {
@@ -11283,7 +12200,131 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         await state.openPersona(p.key);
         setEditMode("persona", "persona");
       } catch (e) {
-        flash("\uD398\uB974\uC18C\uB098\uB97C \uC5F4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg8(e));
+        flash("\uD398\uB974\uC18C\uB098\uB97C \uC5F4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg10(e));
+      } finally {
+        busy = false;
+        if (row.isConnected) {
+          edit.disabled = false;
+          edit.textContent = "\uD3B8\uC9D1";
+        }
+      }
+    };
+    row.addEventListener("click", () => void enter());
+    edit.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      void enter();
+    });
+    return row;
+  }
+  async function enterModule(id) {
+    setEditMode("module");
+    await state.syncModuleOwner();
+    await state.openModule(id, true);
+    setTab("botlore");
+  }
+  async function importModuleFromPc(f, progress) {
+    const bytes = new Uint8Array(await f.arrayBuffer());
+    let bin = "";
+    for (let i = 0; i < bytes.length; i += 32768) bin += String.fromCharCode(...bytes.subarray(i, i + 32768));
+    progress(`${f.name} \uC62C\uB9AC\uB294 \uC911\u2026`);
+    const up = await state.uploadFile(f.name, btoa(bin), true, state.activeCharKey || state.targetModule ? "" : "projects");
+    state.touchFiles([up.path]);
+    setEditMode("module");
+    await state.syncModuleOwner();
+    const row = await state.importModuleFile(up.path, progress);
+    setTab("botlore");
+    shellNotice(`'${row.name}' \uBAA8\uB4C8\uC744 RisuAI\uC5D0 \uCD94\uAC00\uD558\uACE0 \uC5F4\uC5C8\uC2B5\uB2C8\uB2E4 (\uC6D0\uBCF8 \uD30C\uC77C: ${up.path}).`, "ok");
+    return row.key;
+  }
+  function moduleBody(body, mount2) {
+    const head = el("div", { class: "row", style: { marginBottom: "8px", gap: "6px" } }, [
+      el("span", { class: "sectiontitle grow", style: { marginBottom: "0" }, text: "\uD3B8\uC9D1\uD560 \uBAA8\uB4C8\uC744 \uACE0\uB974\uC138\uC694" })
+    ]);
+    const fileIn = el("input", { type: "file", accept: ".risum,.charx,.json", style: { display: "none" } });
+    const fromFile = el("button", { class: "ghost tiny", text: "\uD30C\uC77C\uC5D0\uC11C \uAC00\uC838\uC624\uAE30\u2026", title: ".risum \xB7 .charx \xB7 \uBAA8\uB4C8 .json \uC744 RisuAI \uBAA8\uB4C8 \uBAA9\uB85D\uC5D0 \uCD94\uAC00\uD558\uACE0 \uC5FD\uB2C8\uB2E4" });
+    fromFile.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      fileIn.click();
+    });
+    fileIn.addEventListener("change", async () => {
+      const f = fileIn.files?.[0];
+      fileIn.value = "";
+      if (!f) return;
+      fromFile.disabled = true;
+      try {
+        await importModuleFromPc(f, (t) => {
+          fromFile.textContent = t;
+        });
+      } catch (e) {
+        flash("\uAC00\uC838\uC624\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg10(e));
+      } finally {
+        fromFile.disabled = false;
+        fromFile.textContent = "\uD30C\uC77C\uC5D0\uC11C \uAC00\uC838\uC624\uAE30\u2026";
+      }
+    });
+    const again = el("button", { class: "ghost tiny", text: "\uB2E4\uC2DC \uC77D\uAE30", title: "RisuAI\uC5D0\uC11C \uBAA8\uB4C8 \uBAA9\uB85D\uC744 \uB2E4\uC2DC \uC77D\uC5B4 \uC635\uB2C8\uB2E4" });
+    again.disabled = state.moduleLoading;
+    again.addEventListener("click", () => {
+      void state.loadModules().catch(() => void 0);
+    });
+    head.append(fromFile, fileIn, again);
+    body.appendChild(head);
+    if (state.moduleError) body.appendChild(el("div", { class: "notice err", text: state.moduleError }));
+    const all = state.liveModules;
+    const list2 = el("div", { class: "chatlist modlist" });
+    body.appendChild(list2);
+    if (!all) {
+      list2.appendChild(loadingRow(state.moduleLoading ? "RisuAI\uC5D0\uC11C \uBAA8\uB4C8\uC744 \uC77D\uB294 \uC911\u2026" : "\uBAA8\uB4C8 \uBAA9\uB85D\uC774 \uC5C6\uC2B5\uB2C8\uB2E4"));
+      return;
+    }
+    if (all.length > 8) {
+      setToolbarSearch(filterText, (v) => {
+        filterText = v;
+        renderChatsTab(mount2);
+        refocusSearch(null);
+      }, "\uBAA8\uB4C8 \uCC3E\uAE30");
+    }
+    const needle = filterText.trim().toLowerCase();
+    const shown = all.filter((m) => !needle || m.name.toLowerCase().includes(needle) || m.description.toLowerCase().includes(needle)).sort((a, b) => a.name.localeCompare(b.name));
+    if (!all.length) list2.appendChild(el("div", { class: "chatitem" }, [el("span", { class: "hint", text: "RisuAI\uC5D0 \uBAA8\uB4C8\uC774 \uC5C6\uC2B5\uB2C8\uB2E4. \uD30C\uC77C\uC5D0\uC11C \uAC00\uC838\uC62C \uC218 \uC788\uC2B5\uB2C8\uB2E4." })]));
+    for (const m of shown) list2.appendChild(moduleRow(m));
+    body.appendChild(el("div", { class: "hint", style: { marginTop: "8px" }, text: "\uBAA8\uB4C8\uC740 \uBD07 \uCE74\uB4DC\uC640 \uAC19\uC740 \uD0ED(\uC815\uBCF4\xB7\uB85C\uC5B4\uBD81\xB7Regex\xB7\uD2B8\uB9AC\uAC70\xB7\uC5D0\uC14B)\uC73C\uB85C \uD3B8\uC9D1\uB418\uACE0, \uBC18\uC601\uD574\uC57C RisuAI \uBAA8\uB4C8 \uBAA9\uB85D\uC5D0 \uB4E4\uC5B4\uAC11\uB2C8\uB2E4. \uBD07 \uD3B8\uC9D1\xB7\uD398\uB974\uC18C\uB098 \uD3B8\uC9D1\uC5D0\uC11C\uB3C4 \uD0ED \uC904 \uB05D\uC758 \uFF0B \uB85C \uBAA8\uB4C8\uC744 \uD568\uAED8 \uC5F4 \uC218 \uC788\uACE0, \uADF8 \uC870\uD569\uC740 \uAE30\uC5B5\uB429\uB2C8\uB2E4. \uD30C\uC77C\uB85C \uB0B4\uBCF4\uB0B4\uAE30(.charx \uAD8C\uC7A5 \xB7 .risum)\uB294 \uBAA8\uB4C8\uC744 \uC5F0 \uB4A4 \uBA54\uB274 \uC904\uC758 \u2B07 \uB0B4\uBCF4\uB0B4\uAE30\uB85C \uD569\uB2C8\uB2E4." }));
+  }
+  function moduleRow(m) {
+    const edit = el("button", { class: "ghost tiny", text: "\uD3B8\uC9D1" });
+    const save = el("button", { class: "ghost tiny", text: "\u2B07 \uC800\uC7A5", title: "\uC774 \uBAA8\uB4C8\uC744 .charx / .risum \uC73C\uB85C \uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4\uC5D0 \uC800\uC7A5\uD569\uB2C8\uB2E4" });
+    const open4 = state.openModules.find((x) => x.id === m.id);
+    const first = m.description.split("\n")[0].slice(0, 80);
+    const row = el("div", { class: "chatitem" + (m.mcp ? " dim" : "") }, [
+      el("span", { class: "grow" }, [
+        el("div", { text: "\u25EB " + (m.name || "(\uC774\uB984 \uC5C6\uC74C)") }),
+        el("div", { class: "hint clip1", text: m.mcp ? "MCP \uBAA8\uB4C8 - \uD3B8\uC9D1\uD560 \uB0B4\uC6A9\uC774 \uC5C6\uC2B5\uB2C8\uB2E4" : moduleLine(m) + (first ? " \u2014 " + first : "") })
+      ]),
+      ...riskBadges(m),
+      open4 ? el("span", { class: "badge ok", text: "\u2713 \uD328\uB110\uC5D0 \uC5F4\uB9BC" }) : null,
+      open4?.total ? el("span", { class: "badge warn", text: `\uBBF8\uBC18\uC601 ${open4.total}` }) : null,
+      m.mcp ? null : save,
+      m.mcp ? null : edit
+    ]);
+    if (m.mcp) return row;
+    save.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      const box = el("div", { class: "applypop" });
+      popover(save, box);
+      const rows = el("div");
+      box.append(el("div", { class: "sectiontitle", text: "\uD30C\uC77C\uB85C \uC800\uC7A5" }), rows);
+      moduleSaveRows(rows, [{ id: m.id, name: m.name, open: !!open4, linked: m.linked }]);
+    });
+    let busy = false;
+    const enter = async () => {
+      if (busy) return;
+      busy = true;
+      edit.disabled = true;
+      edit.textContent = "\uC5EC\uB294 \uC911\u2026";
+      try {
+        await enterModule(m.id);
+      } catch (e) {
+        flash("\uBAA8\uB4C8\uC744 \uC5F4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg10(e));
       } finally {
         busy = false;
         if (row.isConnected) {
@@ -11313,7 +12354,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
             if (onMade) onMade();
             else setEditMode("persona", "persona");
           } catch (e) {
-            flash("\uD398\uB974\uC18C\uB098\uB97C \uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg8(e));
+            flash("\uD398\uB974\uC18C\uB098\uB97C \uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg10(e));
           }
         }
       });
@@ -11370,7 +12411,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     } catch {
     }
   }
-  function msg8(e) {
+  function msg10(e) {
     return e instanceof Error ? e.message : String(e);
   }
   function flash(text2) {
@@ -11826,8 +12867,8 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           try {
             await state.editTurn(t.msgId, t.body, next);
           } catch (e) {
-            notice("\uC218\uC815\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg9(e), "err");
-            void clientLog("error", "turn edit failed", { msgId: t.msgId, error: msg9(e) });
+            notice("\uC218\uC815\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg11(e), "err");
+            void clientLog("error", "turn edit failed", { msgId: t.msgId, error: msg11(e) });
           }
         }
       });
@@ -11906,7 +12947,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       if (noticeMount2) clear(noticeMount2);
     }, 9e3);
   }
-  function msg9(e) {
+  function msg11(e) {
     return e instanceof Error ? e.message : String(e);
   }
   function visibleTurns() {
@@ -12177,7 +13218,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       try {
         setPreview(await state.bulk(params()));
       } catch (e) {
-        summary.textContent = msg9(e);
+        summary.textContent = msg11(e);
         setPreview(null);
       } finally {
         previewBtn.disabled = false;
@@ -12192,8 +13233,8 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         await state.loadTurns();
         notice(`${r.applied}\uAC1C \uD134\uC744 \uBC14\uAFE8\uC2B5\uB2C8\uB2E4. \uB418\uB3CC\uB9AC\uC2DC\uB824\uBA74 \u{1F558} \uBC84\uC804\uC758 \uC2A4\uB0C5\uC0F7\uC744 \uC4F0\uC2DC\uBA74 \uB429\uB2C8\uB2E4.`, "ok");
       } catch (e) {
-        void clientLog("error", "find/replace apply failed", { error: msg9(e) });
-        notice("\uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg9(e), "err");
+        void clientLog("error", "find/replace apply failed", { error: msg11(e) });
+        notice("\uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg11(e), "err");
       }
     });
     clearBtn.addEventListener("click", () => setPreview(null));
@@ -12249,8 +13290,8 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         setPreview(null);
         notice(`\uD134 ${r[0]}~${r[1]} \uC744 \uC9C0\uC6E0\uC2B5\uB2C8\uB2E4. \uD558\uC774\uD30C \uC694\uC57D\uC774 \uC9C0\uC6CC\uC9C4 \uD134\uC744 \uC778\uC6A9\uD558\uACE0 \uC788\uC73C\uBA74 \uBC18\uC601\uD560 \uB54C \uC54C\uB824 \uB4DC\uB9BD\uB2C8\uB2E4.`, "ok");
       } catch (e) {
-        void clientLog("error", "deleteRange failed", { range: r, error: msg9(e) });
-        notice("\uC0AD\uC81C\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg9(e), "err");
+        void clientLog("error", "deleteRange failed", { range: r, error: msg11(e) });
+        notice("\uC0AD\uC81C\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg11(e), "err");
       }
     });
     clearBtn.addEventListener("click", () => setPreview(null));
@@ -12269,7 +13310,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const r = await state.exportMarkdown();
         download(r.filename, r.markdown, "text/markdown;charset=utf-8");
       } catch (e) {
-        notice("\uB0B4\uBCF4\uB0B4\uAE30\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg9(e), "err");
+        notice("\uB0B4\uBCF4\uB0B4\uAE30\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg11(e), "err");
       }
     });
     const rc = el("button", { text: "risuChat \uB0B4\uB824\uBC1B\uAE30" });
@@ -12278,7 +13319,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const r = await state.exportRisuchat();
         download(r.filename, JSON.stringify(r.envelope), "application/json");
       } catch (e) {
-        notice("\uB0B4\uBCF4\uB0B4\uAE30\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg9(e), "err");
+        notice("\uB0B4\uBCF4\uB0B4\uAE30\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg11(e), "err");
       }
     });
     const cb = el("button", { class: "ghost", text: "md \uD074\uB9BD\uBCF4\uB4DC \uBCF5\uC0AC" });
@@ -12288,7 +13329,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const ok = copyToClipboard(r.markdown);
         notice(ok ? "\uD074\uB9BD\uBCF4\uB4DC\uC5D0 \uBCF5\uC0AC\uD588\uC2B5\uB2C8\uB2E4." : "\uBCF5\uC0AC\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4.", ok ? "ok" : "err");
       } catch (e) {
-        notice("\uBCF5\uC0AC\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg9(e), "err");
+        notice("\uBCF5\uC0AC\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg11(e), "err");
       }
     });
     return el("div", { class: "card" }, [
@@ -12425,7 +13466,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       pane.centre.appendChild(viewMount);
       installDrop(pane.centre, { into: () => uploadTarget(), onFiles: (path, files) => void uploadMany(files, path), onMove: (path, sources) => void moveSelected(sources, path) });
       for (const target of [pane.left, pane.centre]) target.addEventListener("file-drop-error", (ev) => {
-        notice2("\uB4DC\uB86D\uD55C \uD30C\uC77C\uC744 \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg10(ev.detail) + " \xB7 \uD30C\uC77C \uC62C\uB9AC\uAE30 \uBC84\uD2BC\uC73C\uB85C \uB2E4\uC2DC \uC120\uD0DD\uD574 \uC8FC\uC138\uC694.", "err");
+        notice2("\uB4DC\uB86D\uD55C \uD30C\uC77C\uC744 \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg12(ev.detail) + " \xB7 \uD30C\uC77C \uC62C\uB9AC\uAE30 \uBC84\uD2BC\uC73C\uB85C \uB2E4\uC2DC \uC120\uD0DD\uD574 \uC8FC\uC138\uC694.", "err");
       });
     },
     async refresh() {
@@ -12435,6 +13476,8 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
   var filesContext = "";
   var focusBotProject = false;
   function personaContext() {
+    const mod = state.targetModule;
+    if (mod) return `projects/${mod.folder}`;
     return state.editMode === "persona" ? state.personaFolder : "";
   }
   function renderFilesTab(mount2) {
@@ -12517,10 +13560,10 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       if (key !== refreshKey()) return;
       if (!lastListing) {
         clear(treeMount);
-        treeMount.appendChild(el("div", { class: "notice err", text: msg10(e) }));
-      } else notice2("\uBAA9\uB85D \uAC31\uC2E0 \uC2E4\uD328 \u2014 \uB9C8\uC9C0\uB9C9\uC73C\uB85C \uBC1B\uC740 \uBAA9\uB85D\uC785\uB2C8\uB2E4: " + msg10(e), "err");
+        treeMount.appendChild(el("div", { class: "notice err", text: msg12(e) }));
+      } else notice2("\uBAA9\uB85D \uAC31\uC2E0 \uC2E4\uD328 \u2014 \uB9C8\uC9C0\uB9C9\uC73C\uB85C \uBC1B\uC740 \uBAA9\uB85D\uC785\uB2C8\uB2E4: " + msg12(e), "err");
       void clientLog("error", "files tab refresh failed", {
-        error: msg10(e),
+        error: msg12(e),
         stack: e instanceof Error ? String(e.stack).slice(0, 1500) : ""
       });
     }
@@ -12654,7 +13697,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           expandTo(where + "/" + n);
           await refresh();
         } catch (e) {
-          notice2("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg10(e), "err");
+          notice2("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg12(e), "err");
         }
       });
       name.addEventListener("keydown", (e) => {
@@ -12752,12 +13795,12 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
               result.failed.length ? "err" : "ok"
             );
           } catch (e) {
-            status.textContent = msg10(e);
+            status.textContent = msg12(e);
             apply.disabled = false;
           }
         });
       } catch (e) {
-        notice2("\uC815\uB9AC \uB300\uC0C1\uC744 \uD655\uC778\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg10(e), "err");
+        notice2("\uC815\uB9AC \uB300\uC0C1\uC744 \uD655\uC778\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg12(e), "err");
       } finally {
         button2.disabled = false;
       }
@@ -12925,7 +13968,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const bytes = await state.downloadZip([n.path], n.name);
         notice2(`${fmtSize3(bytes)} zip \uC744 \uBE0C\uB77C\uC6B0\uC800 \uB2E4\uC6B4\uB85C\uB4DC\uB85C \uB118\uACBC\uC2B5\uB2C8\uB2E4.`, "ok");
       } catch (e) {
-        notice2("\uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg10(e), "err");
+        notice2("\uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg12(e), "err");
       } finally {
         zipAll.disabled = false;
       }
@@ -13352,7 +14395,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       const r = await fileOperation(`${paths.length}\uAC1C \uC0AD\uC81C \uC911\u2026`, () => state.deleteFiles(paths));
       notice2(r.failed.length ? `${r.done}\uAC1C\uB97C \uC9C0\uC6E0\uC2B5\uB2C8\uB2E4. ${r.failed.length}\uAC1C \uC2E4\uD328 \u2014 ${r.failed[0].error}` : `${r.done}\uAC1C\uB97C \uC9C0\uC6E0\uC2B5\uB2C8\uB2E4.`, r.failed.length ? "err" : "ok");
     } catch (e) {
-      notice2("\uC9C0\uC6B0\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg10(e), "err");
+      notice2("\uC9C0\uC6B0\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg12(e), "err");
     }
     treeSel.clear();
     state.touchFiles();
@@ -13364,7 +14407,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       const bytes = await state.downloadZip(paths, name);
       notice2(`${fmtSize3(bytes)} zip \uC744 \uBE0C\uB77C\uC6B0\uC800 \uB2E4\uC6B4\uB85C\uB4DC\uB85C \uB118\uACBC\uC2B5\uB2C8\uB2E4.`, "ok");
     } catch (e) {
-      notice2("\uB0B4\uB824\uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg10(e), "err");
+      notice2("\uB0B4\uB824\uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg12(e), "err");
     }
   }
   function treeNewFolder(where) {
@@ -13381,7 +14424,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           state.touchFiles();
           await refresh();
         } catch (e) {
-          notice2("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg10(e), "err");
+          notice2("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg12(e), "err");
         }
       }
     });
@@ -13403,7 +14446,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           state.touchFiles();
           await refresh();
         } catch (err) {
-          notice2("\uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg10(err), "err");
+          notice2("\uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg12(err), "err");
         }
       }
     });
@@ -13424,7 +14467,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       if (!r) return;
       notice2(batchText(r, target, clip.op === "copy" ? "\uBCF5\uC0AC" : "\uC774\uB3D9"), r.failed.length ? "err" : "ok");
     } catch (e) {
-      notice2("\uCC98\uB9AC \uACB0\uACFC\uB97C \uD655\uC778\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg10(e) + " \xB7 \uD604\uC7AC \uBAA9\uB85D\uC744 \uB2E4\uC2DC \uD655\uC778\uD569\uB2C8\uB2E4.", "err");
+      notice2("\uCC98\uB9AC \uACB0\uACFC\uB97C \uD655\uC778\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg12(e) + " \xB7 \uD604\uC7AC \uBAA9\uB85D\uC744 \uB2E4\uC2DC \uD655\uC778\uD569\uB2C8\uB2E4.", "err");
     }
     if (clip.op === "cut") {
       selection.clear();
@@ -13438,7 +14481,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       const r = await fileOperation(`${list2.length}\uAC1C \uC774\uB3D9 \uC911\u2026`, () => state.moveFiles(list2, target));
       notice2(batchText(r, target, "\uC774\uB3D9"), r.failed.length ? "err" : "ok");
     } catch (e) {
-      notice2("\uC62E\uAE30\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg10(e), "err");
+      notice2("\uC62E\uAE30\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg12(e), "err");
     }
     selection.clear();
     previewPath = "";
@@ -13574,7 +14617,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const bytes = await state.downloadFile(f.path);
         out.textContent = `${fmtSize3(bytes)} \uB97C \uBE0C\uB77C\uC6B0\uC800 \uB2E4\uC6B4\uB85C\uB4DC\uB85C \uB118\uACBC\uC2B5\uB2C8\uB2E4.`;
       } catch (e) {
-        out.textContent = "\uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg10(e);
+        out.textContent = "\uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg12(e);
       } finally {
         save.disabled = false;
       }
@@ -13608,7 +14651,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         body.append(detail, img);
       } catch (e) {
         clear(body);
-        body.appendChild(el("div", { class: "notice err", text: msg10(e) }));
+        body.appendChild(el("div", { class: "notice err", text: msg12(e) }));
       }
       return;
     }
@@ -13646,7 +14689,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
                 revision = result.revision;
                 status.textContent = "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4.";
               } catch (error) {
-                status.textContent = msg10(error);
+                status.textContent = msg12(error);
               } finally {
                 save2.disabled = false;
               }
@@ -13659,7 +14702,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
             );
             done.addEventListener("click", close);
           } catch (error) {
-            notice2(msg10(error), "err");
+            notice2(msg12(error), "err");
           } finally {
             edit.disabled = false;
           }
@@ -13681,7 +14724,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       }
     } catch (e) {
       clear(body);
-      body.appendChild(el("div", { class: "notice err", text: msg10(e) }));
+      body.appendChild(el("div", { class: "notice err", text: msg12(e) }));
     }
   }
   async function runDelete(n) {
@@ -13692,7 +14735,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       if (paths.includes(previewPath)) previewPath = "";
       notice2(r.failed.length ? `${r.done}\uAC1C\uB97C \uC9C0\uC6E0\uC2B5\uB2C8\uB2E4. ${r.failed.length}\uAC1C \uC2E4\uD328 \u2014 ${r.failed[0].error}` : `${r.done}\uAC1C\uB97C \uC9C0\uC6E0\uC2B5\uB2C8\uB2E4.`, r.failed.length ? "err" : "ok");
     } catch (e) {
-      notice2("\uC9C0\uC6B0\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg10(e), "err");
+      notice2("\uC9C0\uC6B0\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg12(e), "err");
     }
     selection.clear();
     state.touchFiles();
@@ -13714,7 +14757,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           const r = await fileOperation(`${paths.length}\uAC1C \uC774\uB3D9 \uC911\u2026`, () => state.moveFiles(paths, target));
           notice2(batchText(r, target, "\uC774\uB3D9"), r.failed.length ? "err" : "ok");
         } catch (e) {
-          notice2("\uC62E\uAE30\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg10(e), "err");
+          notice2("\uC62E\uAE30\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg12(e), "err");
         }
         selection.clear();
         previewPath = "";
@@ -13739,7 +14782,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       const bytes = await state.downloadZip(paths, name);
       notice2(`${paths.length}\uAC1C \xB7 ${fmtSize3(bytes)} zip \uC744 \uBE0C\uB77C\uC6B0\uC800 \uB2E4\uC6B4\uB85C\uB4DC\uB85C \uB118\uACBC\uC2B5\uB2C8\uB2E4.`, "ok");
     } catch (e) {
-      notice2("\uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg10(e), "err");
+      notice2("\uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg12(e), "err");
     }
   }
   var upPanel = null;
@@ -13888,7 +14931,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       } catch (e) {
         failed += 1;
         sentBytes = before + file.size;
-        ui8.error(`${name}: ` + msg10(e));
+        ui8.error(`${name}: ` + msg12(e));
       }
       paint2();
     };
@@ -13912,7 +14955,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
             if (r.extracted) extracted += r.extracted;
           } catch (e2) {
             failed += 1;
-            ui8.error(`${file.name}: ` + msg10(e2));
+            ui8.error(`${file.name}: ` + msg12(e2));
           }
           sentBytes += file.size;
         }
@@ -13969,7 +15012,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       return "";
     }
   }
-  function msg10(e) {
+  function msg12(e) {
     return e instanceof Error ? e.message : String(e);
   }
 
@@ -13999,7 +15042,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         }
       } catch (e) {
         clear(treeMount5);
-        treeMount5.appendChild(el("div", { class: "notice err", text: msg11(e) }));
+        treeMount5.appendChild(el("div", { class: "notice err", text: msg13(e) }));
         return;
       }
       drawTree5();
@@ -14100,7 +15143,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           notice10(savedText("\uD3F4\uB354\uB97C"), "ok");
           await refreshNow7();
         } catch (err) {
-          notice10("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg11(err), "err");
+          notice10("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg13(err), "err");
         } finally {
           save.disabled = false;
         }
@@ -14112,7 +15155,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           if (opts.scope === "global") void state.refreshBotChanges();
           await refreshNow7();
         } catch (err) {
-          notice10("\uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg11(err), "err");
+          notice10("\uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg13(err), "err");
         }
       });
       const del = el("button", { class: "ghost" });
@@ -14124,7 +15167,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           if (viewMount6) clear(viewMount6);
           await refreshNow7();
         } catch (err) {
-          notice10("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg11(err), "err");
+          notice10("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg13(err), "err");
         }
       });
       clear(viewMount6);
@@ -14143,7 +15186,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           await state.moveLore(e.id, all.findIndex((x) => x.id === neighbor.id));
           await refreshNow7();
         } catch (err) {
-          notice10("\uC21C\uC11C\uB97C \uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg11(err), "err");
+          notice10("\uC21C\uC11C\uB97C \uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg13(err), "err");
         }
       };
       const row = listRow({
@@ -14235,7 +15278,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           if (opts.scope === "global") void state.refreshBotChanges();
           await refreshNow7();
         } catch (err) {
-          notice10("\uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg11(err), "err");
+          notice10("\uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg13(err), "err");
         }
       });
       const save = el("button", { class: "primary", text: "\uC800\uC7A5" });
@@ -14257,7 +15300,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           notice10(savedText("\uB85C\uC5B4\uBD81 \uD56D\uBAA9\uC744"), "ok");
           await refreshNow7();
         } catch (err) {
-          notice10("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg11(err), "err");
+          notice10("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg13(err), "err");
         } finally {
           save.disabled = false;
         }
@@ -14271,7 +15314,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           if (viewMount6) clear(viewMount6);
           await refreshNow7();
         } catch (err) {
-          notice10("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg11(err), "err");
+          notice10("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg13(err), "err");
         }
       });
       const orig = e.origin === "edited" && e.original ? e.original : null;
@@ -14332,7 +15375,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const made = entries.find((e) => e.id === id);
         if (made) open4(made);
       } catch (e) {
-        notice10("\uD3F4\uB354\uB97C \uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg11(e), "err");
+        notice10("\uD3F4\uB354\uB97C \uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg13(e), "err");
       }
     }
     async function create2() {
@@ -14346,7 +15389,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const made = entries.find((e) => e.id === id);
         if (made) open4(made);
       } catch (e) {
-        notice10("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg11(e), "err");
+        notice10("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg13(e), "err");
       }
     }
     return makeTab({
@@ -14404,7 +15447,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
   function shortId(id) {
     return id.length > 10 ? `\uD3F4\uB354 ${id.slice(0, 6)}\u2026` : `\uD3F4\uB354 ${id}`;
   }
-  function msg11(e) {
+  function msg13(e) {
     return e instanceof Error ? e.message : String(e);
   }
 
@@ -14486,7 +15529,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       drawTree2();
     } catch (e) {
       clear(treeMount2);
-      treeMount2.appendChild(el("div", { class: "notice err", text: msg12(e) }));
+      treeMount2.appendChild(el("div", { class: "notice err", text: msg14(e) }));
     }
   }
   function syncCount() {
@@ -14566,7 +15609,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const fresh = items.find((i) => i.id === item.id);
         if (fresh) open(fresh);
       } catch (e) {
-        notice3("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg12(e), "err");
+        notice3("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg14(e), "err");
       } finally {
         save.disabled = false;
       }
@@ -14585,7 +15628,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         if (viewMount2) clear(viewMount2);
         await refreshNow();
       } catch (e) {
-        notice3("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg12(e), "err");
+        notice3("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg14(e), "err");
       }
     });
     clear(viewMount2);
@@ -14616,10 +15659,10 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       await refreshNow();
       open(made);
     } catch (e) {
-      notice3("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg12(e), "err");
+      notice3("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg14(e), "err");
     }
   }
-  function msg12(e) {
+  function msg14(e) {
     return e instanceof Error ? e.message : String(e);
   }
 
@@ -14663,7 +15706,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         draw();
       } catch (e) {
         clear(listMount);
-        listMount.appendChild(el("div", { class: "notice err", text: msg13(e) }));
+        listMount.appendChild(el("div", { class: "notice err", text: msg15(e) }));
       }
     }
   });
@@ -14672,7 +15715,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       const r = await state.memory();
       items2 = r.items.filter((i) => i.kind === KIND2);
     } catch (e) {
-      notice4(msg13(e), "err");
+      notice4(msg15(e), "err");
     }
     draw();
   }
@@ -14741,7 +15784,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         notice4(savedText(`${item.title} \uC744(\uB97C)`), "ok");
         await refreshNow2();
       } catch (e) {
-        notice4("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg13(e), "err");
+        notice4("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg15(e), "err");
         save.disabled = false;
       }
     };
@@ -14757,7 +15800,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         await state.saveMemory(item.id, item.original);
         await refreshNow2();
       } catch (e) {
-        notice4("\uB418\uB3CC\uB9AC\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg13(e), "err");
+        notice4("\uB418\uB3CC\uB9AC\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg15(e), "err");
       }
     });
     const del = el("button", { class: "ghost tiny" });
@@ -14767,7 +15810,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         notice4(`${item.title} \uC744(\uB97C) \uC9C0\uC6E0\uC2B5\uB2C8\uB2E4. \uBC18\uC601\uD558\uBA74 RisuAI\uC5D0\uC11C\uB3C4 \uC0AC\uB77C\uC9D1\uB2C8\uB2E4.`, "ok");
         await refreshNow2();
       } catch (e) {
-        notice4("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg13(e), "err");
+        notice4("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg15(e), "err");
       }
     });
     const badge = item.isNew ? el("span", { class: "badge ok", text: "\uCD94\uAC00" }) : item.changed ? el("span", { class: "badge warn", text: "\uC218\uC815" }) : el("span");
@@ -14796,14 +15839,14 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         notice4(`${k} \uC744(\uB97C) \uCD94\uAC00\uD588\uC2B5\uB2C8\uB2E4.`, "ok");
         await refreshNow2();
       } catch (e) {
-        notice4("\uCD94\uAC00\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg13(e), "err");
+        notice4("\uCD94\uAC00\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg15(e), "err");
       } finally {
         add.disabled = false;
       }
     });
     return el("div", { class: "varadd row", style: { marginTop: "10px" } }, [key, value, add]);
   }
-  function msg13(e) {
+  function msg15(e) {
     return e instanceof Error ? e.message : String(e);
   }
 
@@ -14877,7 +15920,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         if (actions.childElementCount) listMount2.appendChild(actions);
       } catch (e) {
         clear(listMount2);
-        listMount2.appendChild(el("div", { class: "notice err", text: msg14(e) }));
+        listMount2.appendChild(el("div", { class: "notice err", text: msg16(e) }));
       }
     };
     const folded2 = foldedFolders.get(spec3.title) ?? /* @__PURE__ */ new Set();
@@ -14941,7 +15984,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     };
     const complain = (e) => {
       clear(listMount2);
-      listMount2.appendChild(el("div", { class: "notice err", text: msg14(e) }));
+      listMount2.appendChild(el("div", { class: "notice err", text: msg16(e) }));
       setTimeout(() => void draw2(), 2500);
     };
     const row = (entry) => {
@@ -14989,7 +16032,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     };
     void draw2();
   }
-  function msg14(e) {
+  function msg16(e) {
     return e instanceof Error ? e.message : String(e);
   }
 
@@ -15028,7 +16071,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         generalMount.appendChild(currentRow("general", r.selected, general.length));
       } catch (e) {
         clear(generalMount);
-        generalMount.appendChild(el("div", { class: "notice err", text: msg15(e) }));
+        generalMount.appendChild(el("div", { class: "notice err", text: msg17(e) }));
       }
       await opts.onChanged();
     };
@@ -15070,7 +16113,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           }
         } catch (e) {
           clear(box);
-          box.appendChild(el("div", { class: "notice err", text: msg15(e) }));
+          box.appendChild(el("div", { class: "notice err", text: msg17(e) }));
         } finally {
           testBtn.disabled = false;
         }
@@ -15361,7 +16404,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         status.textContent = (r.ready ? `\uC9C0\uAE08: ${r.modes.find((m) => m.id === r.mode)?.name ?? r.mode} \u2014 \uC0AC\uC6A9 \uAC00\uB2A5` : `\uC0AC\uC6A9 \uBD88\uAC00: ${r.whyNot}`) + (r.pillow ? "" : " \xB7 Pillow \uC5C6\uC74C: \uC218\uCE58 \uBD84\uC11D\uC774 \uC81C\uD55C\uB429\uB2C8\uB2E4");
         status.className = "hint " + (r.ready ? "" : "diff-del-n");
       } catch (e) {
-        status.textContent = msg15(e);
+        status.textContent = msg17(e);
       }
     };
     const patch = () => {
@@ -15392,7 +16435,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         out.appendChild(el("div", { class: "notice ok", text: "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4." }));
       } catch (e) {
         clear(out);
-        out.appendChild(el("div", { class: "notice err", text: msg15(e) }));
+        out.appendChild(el("div", { class: "notice err", text: msg17(e) }));
       } finally {
         save.disabled = false;
       }
@@ -15417,7 +16460,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         ]));
       } catch (e) {
         clear(out);
-        out.appendChild(el("div", { class: "notice err", text: msg15(e) }));
+        out.appendChild(el("div", { class: "notice err", text: msg17(e) }));
       } finally {
         test.disabled = false;
       }
@@ -15528,7 +16571,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         status.textContent = r.ready ? `\uC9C0\uAE08: ${r.modes.find((m) => m.id === r.mode)?.name ?? r.mode} \u2014 \uAC80\uC0C9 \uAC00\uB2A5` : `\uAC80\uC0C9 \uBD88\uAC00: ${r.whyNot}`;
         status.className = "hint " + (r.ready ? "" : "diff-del-n");
       } catch (e) {
-        status.textContent = msg15(e);
+        status.textContent = msg17(e);
       }
     };
     const patch = () => {
@@ -15559,7 +16602,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         out.appendChild(el("div", { class: "notice ok", text: "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4." }));
       } catch (e) {
         clear(out);
-        out.appendChild(el("div", { class: "notice err", text: msg15(e) }));
+        out.appendChild(el("div", { class: "notice err", text: msg17(e) }));
       } finally {
         save.disabled = false;
       }
@@ -15583,7 +16626,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         ]));
       } catch (e) {
         clear(out);
-        out.appendChild(el("div", { class: "notice err", text: msg15(e) }));
+        out.appendChild(el("div", { class: "notice err", text: msg17(e) }));
       } finally {
         test.disabled = false;
       }
@@ -15783,7 +16826,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         syncProvider();
         keyNote.textContent = p.apiKey?.set ? `\uC124\uC815\uB428 (${p.apiKey.length}\uC790) \u2014 \uBC14\uAFB8\uB824\uBA74 \uC0C8\uB85C \uC785\uB825` : "\uC124\uC815\uB418\uC9C0 \uC54A\uC74C";
       } catch (e) {
-        keyNote.textContent = msg15(e);
+        keyNote.textContent = msg17(e);
       }
     };
     const save = el("button", { class: "primary", text: "\uC800\uC7A5" });
@@ -15867,7 +16910,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         openPicker(kind, refresh3, say);
       } catch (e) {
         clear(out);
-        out.appendChild(el("div", { class: "notice err", text: msg15(e) }));
+        out.appendChild(el("div", { class: "notice err", text: msg17(e) }));
       } finally {
         save.disabled = false;
       }
@@ -15954,7 +16997,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           }
         }
       } catch (e) {
-        line.textContent = msg15(e);
+        line.textContent = msg17(e);
       }
     };
     const begin = async (account, consent = false) => {
@@ -16018,7 +17061,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           })();
         }, 2e3);
       } catch (e) {
-        out.appendChild(el("div", { class: "notice err", text: msg15(e) }));
+        out.appendChild(el("div", { class: "notice err", text: msg17(e) }));
       } finally {
         login.disabled = false;
       }
@@ -16038,7 +17081,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         await refresh3();
       } catch (e) {
         clear(out);
-        out.appendChild(el("div", { class: "notice err", text: msg15(e) }));
+        out.appendChild(el("div", { class: "notice err", text: msg17(e) }));
       } finally {
         finish.disabled = false;
       }
@@ -16051,7 +17094,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           out.appendChild(el("div", { class: "notice warn", text: "\uC774 \uAE30\uAE30\uC5D0\uC11C\uB294 \uB85C\uADF8\uC544\uC6C3\uD588\uC9C0\uB9CC OpenAI \uCABD \uC138\uC158 \uD574\uC9C0\uB294 \uD655\uC778\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4. \uD544\uC694\uD558\uBA74 ChatGPT \uC124\uC815\uC5D0\uC11C \uC774 \uC571\uC758 \uC5F0\uACB0\uC744 \uB04A\uC5B4 \uC8FC\uC138\uC694." }));
         }
       } catch (e) {
-        out.appendChild(el("div", { class: "notice err", text: msg15(e) }));
+        out.appendChild(el("div", { class: "notice err", text: msg17(e) }));
       }
     });
     const root2 = withLogin ? el("div", { class: "card codexbox" }, [
@@ -16120,7 +17163,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         if (r.truncated) list2.appendChild(el("div", { class: "hint", text: "\uB354 \uC788\uC2B5\uB2C8\uB2E4 \u2014 \uAC80\uC0C9\uC5B4\uB97C \uC881\uD600 \uC8FC\uC138\uC694." }));
       } catch (e) {
         clear(list2);
-        list2.appendChild(el("div", { class: "notice err", text: msg15(e) }));
+        list2.appendChild(el("div", { class: "notice err", text: msg17(e) }));
       }
     };
     input2.addEventListener("input", () => {
@@ -16136,7 +17179,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     }
     return sel;
   }
-  function msg15(e) {
+  function msg17(e) {
     return e instanceof Error ? e.message : String(e);
   }
 
@@ -16170,7 +17213,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         for (const s of r.skills) listMount2.appendChild(row(s));
       } catch (e) {
         clear(listMount2);
-        listMount2.appendChild(el("div", { class: "notice err", text: msg16(e) }));
+        listMount2.appendChild(el("div", { class: "notice err", text: msg18(e) }));
       }
     };
     const row = (s) => {
@@ -16181,7 +17224,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           await refresh3();
         } catch (e) {
           toggle.checked = !toggle.checked;
-          say(msg16(e), "err");
+          say(msg18(e), "err");
         }
       });
       const editBtn = el("button", { class: "ghost tiny", text: "\uC218\uC815" });
@@ -16192,7 +17235,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           await state.deleteSkill(s.id);
           await refresh3();
         } catch (e) {
-          say(msg16(e), "err");
+          say(msg18(e), "err");
         }
       });
       const files = s.files?.length ? ` \xB7 \uD30C\uC77C ${s.files.length}` : "";
@@ -16223,7 +17266,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         await refresh3();
         say(`\u201C${skill.name}\u201D \uC2A4\uD0AC\uC744 \uB9CC\uB4E4\uC5C8\uC2B5\uB2C8\uB2E4 (skills/${skill.id}). \uC124\uBA85\uC744 \uB2E4\uB4EC\uC5B4 \uB450\uBA74 \uC5D0\uC774\uC804\uD2B8\uAC00 \uB354 \uC815\uD655\uD788 \uACE0\uB985\uB2C8\uB2E4.`, "ok");
       } catch (e) {
-        say("\uC5C5\uB85C\uB4DC\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg16(e), "err");
+        say("\uC5C5\uB85C\uB4DC\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
       } finally {
         picker.value = "";
       }
@@ -16244,7 +17287,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           el("pre", { class: "mono filepreview", text: r.prompt || "(\uCF1C \uB454 \uC2A4\uD0AC\uC774 \uC5C6\uC2B5\uB2C8\uB2E4)" })
         ]), { wide: true });
       } catch (e) {
-        say(msg16(e), "err");
+        say(msg18(e), "err");
       } finally {
         previewBtn.disabled = false;
       }
@@ -16259,7 +17302,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         await refresh3();
         say(`\uC2A4\uD0AC \uB3D9\uAE30\uD654 \uC644\uB8CC: ${result.updated}\uAC1C \uAC31\uC2E0, ${result.created}\uAC1C \uCD94\uAC00. \uB2E4\uC74C \uC5D0\uC774\uC804\uD2B8 \uC2E4\uD589\uBD80\uD130 \uC801\uC6A9\uB429\uB2C8\uB2E4.`, "ok");
       } catch (e) {
-        say("\uC2A4\uD0AC \uB3D9\uAE30\uD654\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg16(e), "err");
+        say("\uC2A4\uD0AC \uB3D9\uAE30\uD654\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e), "err");
       } finally {
         syncBtn.disabled = false;
         syncBtn.textContent = "\uC11C\uBC84 \uAE30\uBCF8 \uC2A4\uD0AC\uACFC \uB3D9\uAE30\uD654";
@@ -16292,7 +17335,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       try {
         skill = await state.skill(id);
       } catch (e) {
-        say(msg16(e), "err");
+        say(msg18(e), "err");
         return;
       }
     }
@@ -16348,7 +17391,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
                 await refresh3();
                 say("\uC774\uC804 \uBC84\uC804\uC73C\uB85C \uB418\uB3CC\uB838\uC2B5\uB2C8\uB2E4.", "ok");
               } catch (e) {
-                out.textContent = msg16(e);
+                out.textContent = msg18(e);
                 restore.disabled = false;
               }
             });
@@ -16360,7 +17403,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           }
           if (!data.revisions.length) versions.textContent = "\uC544\uC9C1 \uBCC0\uACBD \uAE30\uB85D\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.";
         } catch (e) {
-          out.textContent = msg16(e);
+          out.textContent = msg18(e);
         }
       });
       form.appendChild(el("div", {}, [history, versions]));
@@ -16384,7 +17427,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         say("\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4.", "ok");
       } catch (e) {
         clear(out);
-        out.appendChild(el("div", { class: "notice err", text: msg16(e) }));
+        out.appendChild(el("div", { class: "notice err", text: msg18(e) }));
       } finally {
         save.disabled = false;
       }
@@ -16409,7 +17452,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
             draw2();
           } catch (e) {
             clear(out);
-            out.appendChild(el("div", { class: "notice err", text: msg16(e) }));
+            out.appendChild(el("div", { class: "notice err", text: msg18(e) }));
           }
         });
         list2.appendChild(el("div", { class: "pickrow" }, [
@@ -16436,7 +17479,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         say(`${r.path} \uC744(\uB97C) \uB123\uC5C8\uC2B5\uB2C8\uB2E4. \uBCF8\uBB38\uC5D0\uC11C skills/${skill.id}/${r.path} \uB85C \uAC00\uB9AC\uCF1C \uC8FC\uC138\uC694.`, "ok");
       } catch (e) {
         clear(out);
-        out.appendChild(el("div", { class: "notice err", text: msg16(e) }));
+        out.appendChild(el("div", { class: "notice err", text: msg18(e) }));
       } finally {
         picker.value = "";
       }
@@ -16455,7 +17498,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)}KB`;
     return `${(n / 1024 / 1024).toFixed(1)}MB`;
   }
-  function msg16(e) {
+  function msg18(e) {
     return e instanceof Error ? e.message : String(e);
   }
 
@@ -16653,10 +17696,10 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           return;
         }
         if (!r.newer) {
-          const mismatch = r.current !== "0.15.35";
+          const mismatch = r.current !== "0.15.36";
           const ahead = r.ahead ?? (!!r.latest && r.latest !== r.current);
           say(
-            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.35"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
+            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.36"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
             mismatch || ahead ? "" : "ok"
           );
           return;
@@ -16672,7 +17715,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           out.appendChild(notes);
         }
       } catch (e) {
-        say(msg17(e), "err");
+        say(msg19(e), "err");
       } finally {
         checkBtn.disabled = false;
       }
@@ -16691,7 +17734,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const version = await state.waitForBackend(90);
         say(`\uBC31\uC5D4\uB4DC\uAC00 v${version} \uC73C\uB85C \uB2E4\uC2DC \uC2DC\uC791\uD588\uC2B5\uB2C8\uB2E4.`, "ok");
       } catch (e) {
-        say("\uC124\uCE58 \uB610\uB294 \uC7AC\uC2DC\uC791\uC744 \uD655\uC778\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg17(e) + " \u2014 \uC7A0\uC2DC \uD6C4 \uC0C8\uB85C\uACE0\uCE68\uD574\uC11C \uBC84\uC804\uC744 \uD655\uC778\uD574 \uC8FC\uC138\uC694.", "err");
+        say("\uC124\uCE58 \uB610\uB294 \uC7AC\uC2DC\uC791\uC744 \uD655\uC778\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg19(e) + " \u2014 \uC7A0\uC2DC \uD6C4 \uC0C8\uB85C\uACE0\uCE68\uD574\uC11C \uBC84\uC804\uC744 \uD655\uC778\uD574 \uC8FC\uC138\uC694.", "err");
       } finally {
         checkBtn.disabled = false;
       }
@@ -16747,7 +17790,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.15.35",
+            version: "0.15.36",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -16770,7 +17813,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         };
         show("\uC9C4\uB2E8 \uC815\uBCF4", JSON.stringify(report, null, 2));
       } catch (e) {
-        say("\uC9C4\uB2E8 \uC815\uBCF4\uB97C \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg17(e), "err");
+        say("\uC9C4\uB2E8 \uC815\uBCF4\uB97C \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg19(e), "err");
       } finally {
         diagBtn.disabled = false;
       }
@@ -16782,7 +17825,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const r = await state.logs(400, selectedLevel(levelSel));
         show("\uC11C\uBC84 \uB85C\uADF8", r.lines.join("\n") || "(\uBE44\uC5B4 \uC788\uC2B5\uB2C8\uB2E4)");
       } catch (e) {
-        say("\uB85C\uADF8\uB97C \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg17(e), "err");
+        say("\uB85C\uADF8\uB97C \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg19(e), "err");
       } finally {
         logBtn.disabled = false;
       }
@@ -16820,7 +17863,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1e4);
   }
-  function msg17(e) {
+  function msg19(e) {
     return e instanceof Error ? e.message : String(e);
   }
 
@@ -16970,7 +18013,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         await transport.post("/config", { config: { workspace: { globalPath: path.value.trim() } } });
         out.textContent = "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4. \uD30C\uC77C\uC740 \uC790\uB3D9\uC73C\uB85C \uC62E\uACA8\uC9C0\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4 \u2014 \uACBD\uB85C\uB97C \uBC14\uAFE8\uB2E4\uBA74 \uAE30\uC874 \uD3F4\uB354\uB97C \uC9C1\uC811 \uC62E\uACA8 \uC8FC\uC138\uC694.";
       } catch (e) {
-        out.textContent = "\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg18(e);
+        out.textContent = "\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg20(e);
       } finally {
         save.disabled = false;
       }
@@ -17106,7 +18149,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       ])
     ]);
   }
-  function msg18(e) {
+  function msg20(e) {
     return e instanceof Error ? e.message : String(e);
   }
   function buildNaiCard() {
@@ -17122,7 +18165,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       try {
         st = await state.studio.status();
       } catch (e) {
-        meters.appendChild(el("span", { class: "hint err", text: msg18(e) }));
+        meters.appendChild(el("span", { class: "hint err", text: msg20(e) }));
         return;
       }
       if (!st.configured) {
@@ -17163,7 +18206,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         await refresh3();
         out.textContent = "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4.";
       } catch (e) {
-        out.textContent = msg18(e);
+        out.textContent = msg20(e);
       } finally {
         save.disabled = false;
       }
@@ -17175,7 +18218,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const st = await state.studio.status();
         out.textContent = st.configured && st.account ? `\uC5F0\uACB0\uB428 \u2014 Anlas ${st.account.anlas}, tier ${st.account.tier}` : st.error || st.note || "\uD1A0\uD070\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.";
       } catch (e) {
-        out.textContent = msg18(e);
+        out.textContent = msg20(e);
       } finally {
         test.disabled = false;
       }
@@ -17445,7 +18488,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.35"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.36"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -17470,12 +18513,22 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     translatorNote: "\uBC88\uC5ED\uAC00 \uB178\uD2B8",
     lowLevelAccess: "\uC800\uC218\uC900 \uC811\uADFC (Lua)",
     loreSettings: "\uB85C\uC5B4\uBD81 \uC124\uC815",
-    alternateGreetings: "\uB300\uCCB4 \uC778\uC0AC\uB9D0"
+    alternateGreetings: "\uB300\uCCB4 \uC778\uC0AC\uB9D0",
+    // A RisuAI module's own rows (§1-95).
+    customModuleToggle: "\uD1A0\uAE00 (\uCEE4\uC2A4\uD140 \uD1A0\uAE00)",
+    moduleNamespace: "\uB124\uC784\uC2A4\uD398\uC774\uC2A4",
+    hideChatIcon: "\uCC44\uD305 \uC544\uC774\uCF58 \uC228\uAE30\uAE30"
+  };
+  var MODULE_LABELS = {
+    name: "\uBAA8\uB4C8 \uC774\uB984",
+    creatorNotes: "\uBAA8\uB4C8 \uC124\uBA85"
   };
   var HINTS = {
     defaultVariables: "\uD55C \uC904\uC5D0 \uD558\uB098, \uC774\uB984=\uAC12. \uCC44\uD305 \uBCC0\uC218\uAC00 \uC5C6\uC744 \uB54C \uC4F0\uB294 \uAE30\uBCF8\uAC12\uC785\uB2C8\uB2E4 (RisuAI \uAE30\uBCF8 \uBCC0\uC218).",
     systemPrompt: "\uBE44\uC5B4 \uC788\uC9C0 \uC54A\uC73C\uBA74 \uD504\uB9AC\uC14B\uC758 \uBA54\uC778 \uD504\uB86C\uD504\uD2B8\uB97C \uD1B5\uC9F8\uB85C \uB300\uCCB4\uD569\uB2C8\uB2E4. {{original}} \uC790\uB9AC\uC5D0 \uC6D0\uB798 \uBA54\uC778 \uD504\uB86C\uD504\uD2B8\uAC00 \uB4E4\uC5B4\uAC11\uB2C8\uB2E4.",
-    exampleMessage: "RisuAI \uC758 \uC608\uC2DC \uB300\uD654 \uCE78\uC785\uB2C8\uB2E4. <START> \uB85C \uC608\uC2DC\uB97C \uB098\uB215\uB2C8\uB2E4."
+    exampleMessage: "RisuAI \uC758 \uC608\uC2DC \uB300\uD654 \uCE78\uC785\uB2C8\uB2E4. <START> \uB85C \uC608\uC2DC\uB97C \uB098\uB215\uB2C8\uB2E4.",
+    customModuleToggle: "\uD55C \uC904\uC5D0 \uD558\uB098: \uD0A4=\uD45C\uC2DC \uC774\uB984 (\uCCB4\uD06C\uBC15\uC2A4) \xB7 \uD0A4=\uC774\uB984=select=\uC635\uC1581,\uC635\uC1582 \xB7 \uD0A4=\uC774\uB984=text \xB7 \uD0A4=\uC774\uB984=textarea \xB7 =\uBB36\uC74C \uC774\uB984=group \u2026 ==groupEnd \xB7 ==divider \xB7 =\uC124\uBA85 \uAE00=caption. \uAC12\uC740 {{getglobalvar::toggle_\uD0A4}} \uB85C \uC77D\uC2B5\uB2C8\uB2E4 (\uCCB4\uD06C\uBC15\uC2A4\uB294 1/0, select \uB294 \uACE0\uB978 \uC635\uC158\uC758 \uBC88\uD638 0\xB71\xB72\u2026). \uBD07\uC5D0 \uB123\uC740 \uD1A0\uAE00\uB3C4 \uBAA8\uB4C8 \uD1A0\uAE00\uCC98\uB7FC RisuAI \uC0AC\uC774\uB4DC\uBC14 \uD1A0\uAE00 \uBAA9\uB85D\uC5D0 \uD568\uAED8 \uB098\uC635\uB2C8\uB2E4.",
+    moduleNamespace: "\uBE44\uC6CC \uB450\uBA74 \uC5C6\uC74C. \uAC19\uC740 \uB124\uC784\uC2A4\uD398\uC774\uC2A4\uB97C \uC4F0\uB294 \uBD07\xB7\uCC57\uC740 id \uB300\uC2E0 \uC774 \uC774\uB984\uC73C\uB85C \uBAA8\uB4C8\uC744 \uCF24 \uC218 \uC788\uC2B5\uB2C8\uB2E4 (\uBAA8\uB4C8 \uC5F0\uACB0 \uC2DC namespace \uB85C \uB9E4\uCE6D)."
   };
   var NOT_HERE = /* @__PURE__ */ new Set(["backgroundHTML", "image"]);
   var FIELD_RANK = {
@@ -17491,7 +18544,11 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     creatorNotes: 110,
     translatorNote: 115,
     lowLevelAccess: 120,
-    loreSettings: 121
+    loreSettings: 121,
+    // A module: name, its description, then the toggles - the part users edit.
+    customModuleToggle: 15,
+    moduleNamespace: 105,
+    hideChatIcon: 122
   };
   var treeMount3 = null;
   var viewMount3 = null;
@@ -17536,7 +18593,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       full = r.full;
     } catch (e) {
       clear(treeMount3);
-      treeMount3.appendChild(el("div", { class: "notice err", text: msg19(e) }));
+      treeMount3.appendChild(el("div", { class: "notice err", text: msg21(e) }));
       return;
     }
     drawTree3();
@@ -17547,8 +18604,13 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       clear(viewMount3);
     }
   }
+  function rankOf(field2) {
+    if (!state.cardTarget && field2 === "customModuleToggle") return 41;
+    return FIELD_RANK[field2] ?? 50;
+  }
   function labelOf(f) {
     if (f.field === "alternateGreetings") return `\uB300\uCCB4 \uC778\uC0AC\uB9D0 #${f.seq + 1}`;
+    if (state.cardTarget && MODULE_LABELS[f.field]) return MODULE_LABELS[f.field];
     return LABELS[f.field] || f.field;
   }
   function drawTree3() {
@@ -17562,12 +18624,12 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const fresh = fields.find((f) => f.id === made.id);
         if (fresh) open2(fresh);
       } catch (e) {
-        notice5("\uCD94\uAC00\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg19(e), "err");
+        notice5("\uCD94\uAC00\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg21(e), "err");
       }
     });
     const reloadBtn = el("button", { class: "ghost tiny", text: "\uC0C8\uB85C\uACE0\uCE68" });
     reloadBtn.addEventListener("click", () => void refreshNow3());
-    treeMount3.appendChild(el("div", { class: "treehead" }, [addGreet, reloadBtn]));
+    treeMount3.appendChild(el("div", { class: "treehead" }, state.cardTarget ? [reloadBtn] : [addGreet, reloadBtn]));
     if (!full) {
       treeMount3.appendChild(el("div", {
         class: "notice",
@@ -17577,14 +18639,14 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     }
     const needle = filterText3.trim().toLowerCase();
     const shown = fields.filter((f) => !needle || labelOf(f).toLowerCase().includes(needle) || f.body.toLowerCase().includes(needle));
-    shown.sort((a, b) => (FIELD_RANK[a.field] ?? 50) - (FIELD_RANK[b.field] ?? 50) || a.seq - b.seq);
+    shown.sort((a, b) => rankOf(a.field) - rankOf(b.field) || a.seq - b.seq);
     let ruled = false;
     for (const f of shown) {
-      if (!ruled && (FIELD_RANK[f.field] ?? 50) >= 100) {
+      if (!ruled && rankOf(f.field) >= 100) {
         ruled = true;
         treeMount3.appendChild(el("div", { class: "sectionline", style: { margin: "8px 6px" } }));
       }
-      const suffix = f.field === "lowLevelAccess" ? f.body === "1" ? " (\uCF2C)" : " (\uB054)" : f.field === LORE_SETTINGS_FIELD ? f.body ? " (\uBD07 \uC124\uC815)" : " (\uAE00\uB85C\uBC8C)" : f.body ? "" : " (\uBE44\uC5B4 \uC788\uC74C)";
+      const suffix = f.field === "lowLevelAccess" || f.field === "hideChatIcon" ? f.body === "1" ? " (\uCF2C)" : " (\uB054)" : f.field === LORE_SETTINGS_FIELD ? f.body ? " (\uBD07 \uC124\uC815)" : " (\uAE00\uB85C\uBC8C)" : f.body ? "" : " (\uBE44\uC5B4 \uC788\uC74C)";
       const name = el("button", {
         class: "treefile" + (f.id === openId2 ? " on" : ""),
         text: labelOf(f) + suffix,
@@ -17605,7 +18667,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       notice5(savedText("\uCE74\uB4DC \uD544\uB4DC\uB97C"), "ok");
       await refreshNow3();
     } catch (e) {
-      notice5("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg19(e), "err");
+      notice5("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg21(e), "err");
     } finally {
       btn.disabled = false;
     }
@@ -17616,11 +18678,12 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     box.checked = f.body === "1";
     const save = el("button", { class: "primary", text: "\uC800\uC7A5" });
     save.addEventListener("click", () => void saveTyped(f, box.checked ? "1" : "0", save));
+    const icon = f.field === "hideChatIcon";
     clear(viewMount3);
     viewMount3.appendChild(el("div", { class: "card" }, [
       el("h2", {}, [el("span", { text: labelOf(f) })]),
-      el("div", { class: "hint", text: "Lua \uD2B8\uB9AC\uAC70\uAC00 \uC800\uC218\uC900 API \uB97C \uC4F0\uB824\uBA74 \uCF1C\uC57C \uD569\uB2C8\uB2E4. RisuAI \uB294 \uCF1C\uC9C4 \uBD07\uC5D0 \uACBD\uACE0\uB97C \uB744\uC6C1\uB2C8\uB2E4." }),
-      el("label", { class: "field row" }, [box, el("span", { text: "\uC800\uC218\uC900 \uC811\uADFC \uD5C8\uC6A9" })]),
+      el("div", { class: "hint", text: icon ? "\uCF1C\uBA74 \uC774 \uBAA8\uB4C8\uC774 \uCF1C\uC9C4 \uCC57\uC5D0\uC11C \uCE90\uB9AD\uD130 \uC544\uC774\uCF58\uC744 \uC228\uAE41\uB2C8\uB2E4 (\uC0C1\uD0DC\uCC3D\xB7\uC804\uC6A9 UI \uBAA8\uB4C8\uC774 \uD754\uD788 \uC501\uB2C8\uB2E4)." : "Lua \uD2B8\uB9AC\uAC70\uAC00 \uC800\uC218\uC900 API \uB97C \uC4F0\uB824\uBA74 \uCF1C\uC57C \uD569\uB2C8\uB2E4. RisuAI \uB294 \uCF1C\uC9C4 \uBD07\xB7\uBAA8\uB4C8\uC5D0 \uACBD\uACE0\uB97C \uB744\uC6C1\uB2C8\uB2E4." }),
+      el("label", { class: "field row" }, [box, el("span", { text: icon ? "\uCC44\uD305 \uC544\uC774\uCF58 \uC228\uAE30\uAE30" : "\uC800\uC218\uC900 \uC811\uADFC \uD5C8\uC6A9" })]),
       ...f.changed ? [el("div", { class: "hint diffmeta", text: `\uAE30\uC900\uC120: ${f.original === "1" ? "\uCF2C" : "\uB054"}` })] : [],
       el("div", { class: "row" }, [save])
     ]));
@@ -17674,7 +18737,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     const was = openId2;
     openId2 = f.id;
     if (was !== f.id) drawTree3();
-    if (f.field === "lowLevelAccess") {
+    if (f.field === "lowLevelAccess" || f.field === "hideChatIcon") {
       openBool(f);
       return;
     }
@@ -17684,7 +18747,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     }
     const body = el("textarea", {
       value: f.body,
-      style: { minHeight: f.field === "name" ? "48px" : "340px" }
+      style: { minHeight: f.field === "name" || f.field === "moduleNamespace" ? "48px" : "340px" }
     });
     const save = el("button", { class: "primary", text: "\uC800\uC7A5" });
     save.addEventListener("click", async () => {
@@ -17694,7 +18757,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         notice5(f.deleted ? "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4. \uC0AD\uC81C \uD45C\uC2DC\uB294 \uD574\uC81C\uB418\uC5C8\uC2B5\uB2C8\uB2E4." : savedText("\uCE74\uB4DC \uD544\uB4DC\uB97C"), "ok");
         await refreshNow3();
       } catch (e) {
-        notice5("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg19(e), "err");
+        notice5("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg21(e), "err");
       } finally {
         save.disabled = false;
       }
@@ -17709,7 +18772,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           if (viewMount3) clear(viewMount3);
           await refreshNow3();
         } catch (e) {
-          notice5("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg19(e), "err");
+          notice5("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg21(e), "err");
         }
       });
       buttons.push(del);
@@ -17745,7 +18808,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       el("div", { class: "row" }, buttons)
     ]));
   }
-  function msg19(e) {
+  function msg21(e) {
     return e instanceof Error ? e.message : String(e);
   }
 
@@ -17817,7 +18880,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       bgFields = r.fields.filter((f) => f.field in BG_LABEL);
     } catch (e) {
       clear(treeMount4);
-      treeMount4.appendChild(el("div", { class: "notice err", text: msg20(e) }));
+      treeMount4.appendChild(el("div", { class: "notice err", text: msg22(e) }));
       return;
     }
     drawTree4();
@@ -17848,7 +18911,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const made = items3.find((s) => s.id === id);
         if (made) open3(made);
       } catch (e) {
-        notice6("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg20(e), "err");
+        notice6("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg22(e), "err");
       }
     });
     const reloadBtn = el("button", { class: "ghost tiny", text: "\uC0C8\uB85C\uACE0\uCE68" });
@@ -17895,7 +18958,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           await state.moveScript(s.id, to);
           await refreshNow4();
         } catch (err) {
-          notice6("\uC21C\uC11C\uB97C \uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg20(err), "err");
+          notice6("\uC21C\uC11C\uB97C \uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg22(err), "err");
         }
       };
       const size = String(e.out ?? "").length;
@@ -17938,7 +19001,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         notice6(savedText(BG_LABEL[f.field] + " \uC744(\uB97C)"), "ok");
         await refreshNow4();
       } catch (err) {
-        notice6("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg20(err), "err");
+        notice6("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg22(err), "err");
       } finally {
         save.disabled = false;
       }
@@ -18004,7 +19067,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         notice6(savedText("\uC2A4\uD06C\uB9BD\uD2B8\uB97C"), "ok");
         await refreshNow4();
       } catch (err) {
-        notice6("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg20(err), "err");
+        notice6("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg22(err), "err");
       } finally {
         save.disabled = false;
       }
@@ -18017,7 +19080,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         if (viewMount4) clear(viewMount4);
         await refreshNow4();
       } catch (err) {
-        notice6("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg20(err), "err");
+        notice6("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg22(err), "err");
       }
     });
     const orig = s.origin === "edited" && s.original ? s.original : null;
@@ -18052,7 +19115,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       el("div", { class: "row" }, [save, del])
     ]));
   }
-  function msg20(e) {
+  function msg22(e) {
     return e instanceof Error ? e.message : String(e);
   }
 
@@ -18095,7 +19158,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       items4 = await state.cardScripts("triggerscript");
     } catch (e) {
       items4 = [];
-      notice7("\uD2B8\uB9AC\uAC70\uB97C \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg21(e), "err");
+      notice7("\uD2B8\uB9AC\uAC70\uB97C \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg23(e), "err");
     }
     drawSide();
     drawView();
@@ -18160,7 +19223,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       await refreshNow5();
       notice7("\uBAA8\uB4DC\uB97C \uBC14\uAFE8\uC2B5\uB2C8\uB2E4. " + savedText("\uD2B8\uB9AC\uAC70\uB97C"), "ok");
     } catch (e) {
-      notice7("\uBAA8\uB4DC\uB97C \uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg21(e), "err");
+      notice7("\uBAA8\uB4DC\uB97C \uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg23(e), "err");
     }
   }
   function drawView() {
@@ -18192,7 +19255,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           notice7(savedText("Lua \uD2B8\uB9AC\uAC70\uB97C"), "ok");
           await refreshNow5();
         } catch (err) {
-          notice7("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg21(err), "err");
+          notice7("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg23(err), "err");
         } finally {
           save.disabled = false;
         }
@@ -18223,7 +19286,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           await state.deleteScript(s.id);
           await refreshNow5();
         } catch (err) {
-          notice7(msg21(err), "err");
+          notice7(msg23(err), "err");
         }
       });
       return el("div", { class: "verrow" }, [
@@ -18240,7 +19303,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       ...rows.length ? rows : [el("div", { class: "hint", text: "\uC774\uBCA4\uD2B8\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4." })]
     ]));
   }
-  function msg21(e) {
+  function msg23(e) {
     return e instanceof Error ? e.message : String(e);
   }
 
@@ -18248,12 +19311,14 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
   init_dom();
   init_state();
   init_transport();
+  init_modules();
   var bar2 = null;
   var applyBtn2 = null;
   var discardBtn2 = null;
   var applyBadge2 = null;
   var summaryEl2 = null;
   function applyBlockReason() {
+    if (state.cardTarget) return null;
     if (!state.isLiveBot) {
       return "RisuAI\uC5D0\uC11C \uC774 \uBD07\uC744 \uC120\uD0DD\uD574\uC57C \uBC18\uC601\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4";
     }
@@ -18308,7 +19373,9 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       el("span", { class: "tool-label", text: "charx" })
     ]);
     charxBtn.addEventListener("click", () => {
-      if (charxBtn) openCharx(charxBtn);
+      if (!charxBtn) return;
+      if (state.cardTarget) openModuleExport(charxBtn);
+      else openCharx(charxBtn);
     });
     discardBtn2 = el("button", {
       class: "tool",
@@ -18321,7 +19388,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const n = await state.cardReset();
         shellNotice("\uCE74\uB4DC\uC758 \uBBF8\uBC18\uC601 \uBCC0\uACBD\uC744 \uBC84\uB838\uC2B5\uB2C8\uB2E4" + (n ? ` (${n}\uAC74)` : "") + ". \uC791\uC5C5\uBCF8\uC774 \uAE30\uC900\uC120(RisuAI \uC0C1\uD0DC)\uC73C\uB85C \uB3CC\uC544\uAC14\uC2B5\uB2C8\uB2E4.", "ok");
       } catch (e) {
-        shellNotice("\uBCC0\uACBD \uCDE8\uC18C\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg22(e), "err");
+        shellNotice("\uBCC0\uACBD \uCDE8\uC18C\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg24(e), "err");
       }
     });
     summaryEl2 = el("span", { class: "dim changesum", title: "\uC774 \uBD07\uC758 \uCE74\uB4DC\uC5D0\uC11C \uC544\uC9C1 RisuAI\uC5D0 \uC4F0\uC9C0 \uC54A\uC740 \uBCC0\uACBD" });
@@ -18331,7 +19398,69 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
   }
   var charxBtn = null;
   function charxBlockReason() {
+    if (state.cardTarget) {
+      const p = state.targetSync;
+      return p && p.phase !== "done" && p.phase !== "error" && p.phase !== "cancelled" && p.phase !== "unsupported" ? "\uBAA8\uB4C8 \uC5D0\uC14B\uC744 \uBC1B\uB294 \uC911\uC785\uB2C8\uB2E4 \u2014 \uB05D\uB098\uBA74 \uB0B4\uBCF4\uB0BC \uC218 \uC788\uC2B5\uB2C8\uB2E4" : null;
+    }
     return state.assetGateReason;
+  }
+  function openModuleExport(anchor) {
+    const mod = state.targetModule;
+    const out = el("div", { class: "outbox" });
+    const body = el("div", { class: "applypop" });
+    const close = popover(anchor, body);
+    const blocked = charxBlockReason();
+    if (blocked) body.appendChild(el("div", { class: "notice", text: blocked }));
+    const nameInput = el("input", { value: mod?.name || "module", placeholder: "\uD30C\uC77C \uC774\uB984" });
+    const run = async (format, allowMissing, btn) => {
+      btn.disabled = true;
+      clear(out);
+      out.appendChild(el("div", { class: "hint", text: "\uB9CC\uB4DC\uB294 \uC911\uC785\uB2C8\uB2E4\u2026" }));
+      try {
+        const r = await state.exportModule(format, allowMissing, nameInput.value.trim());
+        clear(out);
+        shellNotice(`${r.file} \xB7 ${(r.size / 1048576).toFixed(2)}MB \xB7 \uC5D0\uC14B ${r.assets}\uAC1C` + (r.dropped ? ` (${r.dropped}\uAC1C \uC81C\uC678)` : "") + " \u2014 \uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 \uD30C\uC77C \uD0ED\uC758 out/ \uC5D0\uC11C \uB0B4 PC\uC5D0 \uC800\uC7A5\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4.", "ok");
+        close();
+      } catch (e) {
+        clear(out);
+        const missing = e.body?.missing;
+        if (Array.isArray(missing) && missing.length) {
+          out.appendChild(el("div", { class: "notice err", text: `\uC5D0\uC14B ${missing.length}\uAC1C\uAC00 \uC2A4\uD1A0\uC5B4\uC5D0 \uC5C6\uC5B4 \uB9CC\uB4E4\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4: ` + missing.slice(0, 6).map((m) => m.name).join(", ") }));
+          const anyway = el("button", { class: "ghost tiny", text: "\uBE60\uC9C4 \uC5D0\uC14B \uBE7C\uACE0 \uB9CC\uB4E4\uAE30" });
+          anyway.addEventListener("click", () => {
+            void run(format, true, anyway);
+          });
+          out.appendChild(anyway);
+        } else {
+          out.appendChild(el("div", { class: "notice err", text: "\uB0B4\uBCF4\uB0B4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg24(e) }));
+        }
+      } finally {
+        btn.disabled = false;
+      }
+    };
+    const charx = el("button", { class: "primary", text: ".charx \uB85C (\uAD8C\uC7A5)" });
+    const risum = el("button", { text: ".risum \uC73C\uB85C" });
+    charx.disabled = risum.disabled = !!blocked;
+    charx.addEventListener("click", () => {
+      void run("charx", false, charx);
+    });
+    risum.addEventListener("click", () => {
+      void run("risum", false, risum);
+    });
+    body.appendChild(el("div", { class: "hint", text: "\uC791\uC5C5\uBCF8 \uBAA8\uB4C8(\uBC18\uC601\uD558\uC9C0 \uC54A\uC740 \uD3B8\uC9D1 \uD3EC\uD568)\uACFC \uC2A4\uD1A0\uC5B4\uC758 \uC5D0\uC14B\uC73C\uB85C \uD30C\uC77C\uC744 \uB9CC\uB4ED\uB2C8\uB2E4. .charx \uB294 RisuAI \uCD5C\uC2E0\uD310\uC774 \uAD8C\uD558\uB294 \uD615\uC2DD\uC774\uACE0 (\uC5D0\uC14B \uBAA8\uB4C8\uC740 \uBCF4\uD1B5 \u201C\u25CB\u25CB \uC5D0\uC14B\uBD07\u201D \uAC19\uC740 \uC774\uB984\uC758 charx \uB85C \uBC30\uD3EC\uD569\uB2C8\uB2E4), .risum \uC740 \uC608\uC804 \uD615\uC2DD\uC785\uB2C8\uB2E4(\uC544\uC774\uD15C\xB7\uD504\uB86C\uD504\uD2B8 \uBAA8\uB4C8\uC5D0\uC11C \uC544\uC9C1 \uD754\uD569\uB2C8\uB2E4)." }));
+    body.appendChild(el("div", { class: "row" }, [nameInput]));
+    body.appendChild(el("div", { class: "row" }, [charx, risum]));
+    body.appendChild(out);
+    const others = state.openModules.filter((m) => m.key !== state.cardTarget);
+    if (others.length) {
+      const box = el("div");
+      body.append(
+        el("div", { class: "sectionline", style: { margin: "10px 0" } }),
+        el("div", { class: "sectiontitle", text: "\uD568\uAED8 \uC5F4\uB9B0 \uB2E4\uB978 \uBAA8\uB4C8" }),
+        box
+      );
+      moduleSaveRows(box, others.map((m) => ({ id: m.id, name: m.name, open: true, linked: false })));
+    }
   }
   function openCharx(anchor) {
     const out = el("div", { class: "outbox" });
@@ -18363,7 +19492,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           out.appendChild(el("div", { class: "notice err", text: `\uC5D0\uC14B ${missing.length}\uAC1C\uAC00 \uC2A4\uD1A0\uC5B4\uC5D0 \uC5C6\uC5B4 \uB9CC\uB4E4\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4: ` + missing.slice(0, 6).map((m) => m.name || m.type).join(", ") + (missing.length > 6 ? " \u2026" : "") }));
           buildAnyway.style.display = "";
         } else {
-          out.appendChild(el("div", { class: "notice err", text: "charx \uB97C \uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg22(e) }));
+          out.appendChild(el("div", { class: "notice err", text: "charx \uB97C \uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg24(e) }));
         }
       } finally {
         build.disabled = !!charxBlockReason();
@@ -18380,12 +19509,22 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     body.appendChild(el("div", { class: "row" }, [nameInput]));
     body.appendChild(el("div", { class: "row" }, [build, buildAnyway]));
     body.appendChild(out);
+    const box = el("div", {}, [el("div", { class: "hint", text: "\uC774 \uBD07\uC758 \uBAA8\uB4C8\uC744 \uC77D\uB294 \uC911\u2026" })]);
+    body.append(
+      el("div", { class: "sectionline", style: { margin: "10px 0" } }),
+      el("div", { class: "sectiontitle", text: "\uC774 \uBD07\uC758 \uBAA8\uB4C8\uB3C4 \uD30C\uC77C\uB85C \uC800\uC7A5" }),
+      el("div", { class: "hint", text: "\uFF0B \uB85C \uD568\uAED8 \uC5F0 \uBAA8\uB4C8\uACFC RisuAI\uC5D0\uC11C \uC774 \uBD07\xB7\uCC57\uC5D0 \uCF1C \uB454 \uBAA8\uB4C8\uC785\uB2C8\uB2E4. \uAC01 \uBAA8\uB4C8 \uD3F4\uB354\uC758 out/ \uC5D0 \uC800\uC7A5\uD569\uB2C8\uB2E4." }),
+      box
+    );
+    void state.ownerModules().then((mods) => {
+      if (box.isConnected) moduleSaveRows(box, mods);
+    }, () => clear(box));
   }
   function refreshBotBar() {
     if (!bar2 || !summaryEl2 || !applyBadge2 || !applyBtn2) return;
     const c = state.botChanges;
     const parts = describe2(c);
-    summaryEl2.textContent = parts.length ? parts.join(" \xB7 ") : state.botKey ? "\uBCC0\uACBD \uC5C6\uC74C" : "";
+    summaryEl2.textContent = (state.targetModule ? `\u25EB ${state.targetModule.name}: ` : "") + (parts.length ? parts.join(" \xB7 ") : state.botKey ? "\uBCC0\uACBD \uC5C6\uC74C" : "");
     syncPendingChip(summaryEl2, c?.actions || 0);
     const total = c?.total ?? 0;
     applyBadge2.textContent = String(total);
@@ -18396,9 +19535,13 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     if (charxBtn) {
       const cb = charxBlockReason();
       charxBtn.classList.toggle("dimmed", !!cb);
-      charxBtn.title = cb ? cb : "\uC791\uC5C5\uBCF8 \uCE74\uB4DC\uC640 \uC2A4\uD1A0\uC5B4\uC758 \uC5D0\uC14B\uC73C\uB85C charx \uD30C\uC77C\uC744 \uB9CC\uB4ED\uB2C8\uB2E4";
+      const label2 = charxBtn.querySelector(".tool-label");
+      if (label2) label2.textContent = state.cardTarget ? "\uB0B4\uBCF4\uB0B4\uAE30" : "charx";
+      charxBtn.title = cb ? cb : state.cardTarget ? "\uC791\uC5C5\uBCF8 \uBAA8\uB4C8\uC744 .charx / .risum \uD30C\uC77C\uB85C \uB9CC\uB4ED\uB2C8\uB2E4" : "\uC791\uC5C5\uBCF8 \uCE74\uB4DC\uC640 \uC2A4\uD1A0\uC5B4\uC758 \uC5D0\uC14B\uC73C\uB85C charx \uD30C\uC77C\uC744 \uB9CC\uB4ED\uB2C8\uB2E4";
     }
-    applyBtn2.title = blocked ? blocked + " (\uC0C8 \uBD07\uC73C\uB85C \uC800\uC7A5\uC740 \uB20C\uB7EC\uC11C \uC4F8 \uC218 \uC788\uC2B5\uB2C8\uB2E4)" : "\uCE74\uB4DC\uB97C RisuAI\uC5D0 \uBC18\uC601 \xB7 \uC0C8 \uBD07\uC73C\uB85C \uC800\uC7A5";
+    const mod = state.targetModule;
+    summaryEl2.title = mod ? `\uBAA8\uB4C8 '${mod.name}' \uC5D0\uC11C \uC544\uC9C1 RisuAI\uC5D0 \uC4F0\uC9C0 \uC54A\uC740 \uBCC0\uACBD` : "\uC774 \uBD07\uC758 \uCE74\uB4DC\uC5D0\uC11C \uC544\uC9C1 RisuAI\uC5D0 \uC4F0\uC9C0 \uC54A\uC740 \uBCC0\uACBD";
+    applyBtn2.title = mod ? `\uBAA8\uB4C8 '${mod.name}' \uC744(\uB97C) RisuAI \uBAA8\uB4C8 \uBAA9\uB85D\uC5D0 \uBC18\uC601` : blocked ? blocked + " (\uC0C8 \uBD07\uC73C\uB85C \uC800\uC7A5\uC740 \uB20C\uB7EC\uC11C \uC4F8 \uC218 \uC788\uC2B5\uB2C8\uB2E4)" : "\uCE74\uB4DC\uB97C RisuAI\uC5D0 \uBC18\uC601 \xB7 \uC0C8 \uBD07\uC73C\uB85C \uC800\uC7A5";
   }
   function describe2(c) {
     if (!c) return [];
@@ -18421,7 +19564,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     if (x.deleted) bits.push(`\u2212${x.deleted}`);
     return bits.join(" ");
   }
-  function msg22(e) {
+  function msg24(e) {
     return e instanceof Error ? e.message : String(e);
   }
   async function openApply2(anchor) {
@@ -18437,6 +19580,8 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       return;
     }
     const lines = describe2(state.botChanges);
+    const mod = state.targetModule;
+    if (mod) body.appendChild(el("div", { class: "sectiontitle", text: `\u25EB \uBAA8\uB4C8 '${mod.name}'` }));
     body.appendChild(el("div", { class: "hint", text: lines.length ? lines.join(" \xB7 ") : "\uBC18\uC601\uD560 \uBCC0\uACBD\uC774 \uC5C6\uC2B5\uB2C8\uB2E4." }));
     const blocked = applyBlockReason();
     if (blocked) body.appendChild(el("div", { class: "notice", text: blocked }));
@@ -18454,7 +19599,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         el("div", { class: "row", style: { marginTop: "6px" } }, [open4])
       ]));
     }
-    const apply = el("button", { class: "primary", text: "RisuAI\uC5D0 \uBC18\uC601" });
+    const apply = el("button", { class: "primary", text: mod ? "RisuAI \uBAA8\uB4C8\uC5D0 \uBC18\uC601" : "RisuAI\uC5D0 \uBC18\uC601" });
     apply.disabled = !!blocked || conflicts > 0;
     apply.addEventListener("click", async () => {
       apply.disabled = true;
@@ -18470,11 +19615,11 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           void clientLog("error", "cardWriteBack unverified", { drift: r.drift ?? "" });
           shellNotice(m, "err");
         } else {
-          shellNotice("\uCE74\uB4DC\uB97C RisuAI\uC5D0 \uBC18\uC601\uD558\uACE0 \uB2E4\uC2DC \uC77D\uC5C8\uC2B5\uB2C8\uB2E4.", "ok");
+          shellNotice(mod ? `\uBAA8\uB4C8 '${mod.name}' \uC744(\uB97C) RisuAI\uC5D0 \uBC18\uC601\uD558\uACE0 \uB2E4\uC2DC \uC77D\uC5C8\uC2B5\uB2C8\uB2E4. ${MODULE_CACHE_NOTE}` : "\uCE74\uB4DC\uB97C RisuAI\uC5D0 \uBC18\uC601\uD558\uACE0 \uB2E4\uC2DC \uC77D\uC5C8\uC2B5\uB2C8\uB2E4.", "ok");
           close();
         }
       } catch (e) {
-        const m = msg22(e);
+        const m = msg24(e);
         out.textContent = m;
         void clientLog("error", "cardWriteBack failed", { error: m });
         shellNotice("\uCE74\uB4DC \uBC18\uC601\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + m, "err");
@@ -18505,9 +19650,9 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         body.appendChild(el("div", { class: "hint", text: "\uBC31\uC5C5 \uBD07\uC740 RisuAI \uBD07 \uBAA9\uB85D\uC5D0 \uC0C8 \uCE90\uB9AD\uD130\uB85C \uC788\uC2B5\uB2C8\uB2E4. \uCC57\uB3C4 \uD568\uAED8 \uBCF5\uC0AC\uB418\uC5C8\uACE0 \uC5D0\uC14B\uC740 \uACF5\uC720\uD569\uB2C8\uB2E4." }));
         body.appendChild(el("div", { class: "row", style: { marginTop: "8px" } }, [ok]));
       } catch (e) {
-        void clientLog("error", "saveAsNewBot failed", { error: msg22(e) });
-        shellNotice("\uC0C8 \uBD07\uC73C\uB85C \uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg22(e), "err");
-        out.textContent = "\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg22(e);
+        void clientLog("error", "saveAsNewBot failed", { error: msg24(e) });
+        shellNotice("\uC0C8 \uBD07\uC73C\uB85C \uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg24(e), "err");
+        out.textContent = "\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg24(e);
         saveNew.disabled = !!applyBlockReason();
         saveNew.textContent = was;
       }
@@ -18515,6 +19660,25 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     const clone = saveNew;
     body.appendChild(el("div", { class: "row" }, [apply]));
     body.appendChild(out);
+    if (mod) {
+      const reread = el("button", { class: "ghost tiny", text: "RisuAI \uCABD \uB2E4\uC2DC \uC77D\uAE30 (\uBCD1\uD569)" });
+      reread.title = "RisuAI\uC5D0\uC11C \uC774 \uBAA8\uB4C8\uC744 \uB2E4\uC2DC \uC77D\uC5B4 \uC791\uC5C5\uBCF8\uC5D0 \uBCD1\uD569\uD569\uB2C8\uB2E4. \uC591\uCABD\uC5D0\uC11C \uBC14\uB010 \uD56D\uBAA9\uC740 \uCDA9\uB3CC\uB85C \uD45C\uC2DC\uB429\uB2C8\uB2E4";
+      reread.addEventListener("click", async () => {
+        reread.disabled = true;
+        try {
+          const m = await state.rereadModule(mod.key);
+          const n = m ? Object.values(m).reduce((a, b) => a + b, 0) : 0;
+          shellNotice(n ? `RisuAI \uCABD \uBCC0\uACBD\uC744 \uBC1B\uC558\uC2B5\uB2C8\uB2E4 (${Object.entries(m).map(([k, v]) => `${k} ${v}`).join(" \xB7 ")}).` : "RisuAI \uCABD\uC5D0\uC11C \uBC14\uB010 \uAC83\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.", "ok");
+          close();
+        } catch (e) {
+          out.textContent = "\uB2E4\uC2DC \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg24(e);
+          reread.disabled = false;
+        }
+      });
+      body.appendChild(el("div", { class: "row", style: { marginTop: "6px" } }, [reread]));
+      body.appendChild(el("div", { class: "hint", text: "\uC774\uB984\xB7\uC124\uBA85\xB7\uD1A0\uAE00\xB7\uB85C\uC5B4\uBD81\xB7Regex\xB7\uD2B8\uB9AC\uAC70\xB7\uC5D0\uC14B\uC774 RisuAI \uBAA8\uB4C8 \uBAA9\uB85D\uC758 \uC774 \uBAA8\uB4C8\uC5D0 \uD55C \uBC88\uC5D0 \uC4F0\uC785\uB2C8\uB2E4. " + MODULE_CACHE_NOTE }));
+      return;
+    }
     body.appendChild(el("div", {
       class: "hint",
       text: "\uBA54\uD0C0\xB7\uC778\uC0AC\uB9D0\xB7\uBD07 \uB85C\uC5B4\uBD81\xB7Regex\xB7\uD2B8\uB9AC\uAC70\uAC00 \uD55C \uBC88\uC5D0 \uC4F0\uC785\uB2C8\uB2E4. \uCC57\uC740 \uC808\uB300 \uAC74\uB4DC\uB9AC\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4."
@@ -18559,7 +19723,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
             close();
             shellNotice("\uCE74\uB4DC\xB7\uBD07 \uB85C\uC5B4\uBD81\xB7\uC2A4\uD06C\uB9BD\uD2B8\uB97C \uB418\uB3CC\uB838\uC2B5\uB2C8\uB2E4. \uB418\uB3CC\uB9AC\uAE30 \uC9C1\uC804 \uC0C1\uD0DC\uB3C4 \uC2A4\uB0C5\uC0F7\uC73C\uB85C \uB0A8\uACA8 \uB450\uC5C8\uC2B5\uB2C8\uB2E4.", "ok");
           } catch (e) {
-            shellNotice("\uBCF5\uC6D0\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg22(e), "err");
+            shellNotice("\uBCF5\uC6D0\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg24(e), "err");
           }
         });
         const title = el("div", {}, [
@@ -18584,7 +19748,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           } catch (e) {
             row.classList.remove("deleting");
             del.disabled = false;
-            shellNotice("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg22(e), "err");
+            shellNotice("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg24(e), "err");
           }
         });
         row.append(
@@ -18628,7 +19792,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       }));
     } catch (e) {
       clear(body);
-      body.appendChild(el("div", { class: "hint", text: msg22(e) }));
+      body.appendChild(el("div", { class: "hint", text: msg24(e) }));
     }
   }
 
@@ -18656,7 +19820,8 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
   }
   var renderAssetsTab = makeTab({
     gate: "bot",
-    keys: () => [state.epoch, state.botKey, state.assetSync?.finishedAt ?? 0, syncBusy(state.assetSync)],
+    // targetSync: the bot's import, or the target module's (§1-95).
+    keys: () => [state.epoch, state.botKey, state.targetSync?.finishedAt ?? 0, syncBusy(state.targetSync)],
     search: {
       placeholder: "\uC5D0\uC14B \uCC3E\uAE30",
       get: () => filterText5,
@@ -18693,7 +19858,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     const byKey = new Map(store.map((i) => [i.key, i]));
     const out = [];
     const portrait = store.find((i) => i.field === "image") ?? null;
-    const image = String(imageRow?.body || state.character?.image || "");
+    const image = String(imageRow?.body || (state.cardTarget ? "" : state.character?.image) || "");
     if (image) {
       out.push({
         row: null,
@@ -18726,12 +19891,12 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     drawGrid();
   }
   function editable() {
-    return !syncBusy(state.assetSync);
+    return !syncBusy(state.targetSync);
   }
   function drawSide2() {
     if (!sideMount2) return;
     clear(sideMount2);
-    const p = state.assetSync;
+    const p = state.targetSync;
     const present = cells.filter((c) => c.state === "present").length;
     const bytes = cells.reduce((n, c) => n + (c.size || 0), 0);
     const counts2 = /* @__PURE__ */ new Map();
@@ -18745,7 +19910,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     const again = el("button", { class: "ghost tiny", text: syncBusy(p) ? "\uB3D9\uAE30\uD654 \uC911\u2026" : "\uB2E4\uC2DC \uB3D9\uAE30\uD654" });
     again.disabled = syncBusy(p);
     again.addEventListener("click", () => {
-      state.syncAssets(true);
+      void state.resyncTargetAssets();
     });
     sideMount2.appendChild(el("div", { class: "hint", style: { padding: "0 8px 6px" }, text: p ? describeSync(p) : `\uC2A4\uD1A0\uC5B4 ${present}/${cells.length}` }));
     sideMount2.appendChild(el("div", { style: { padding: "0 6px" } }, [again]));
@@ -19006,7 +20171,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
   init_blobimg();
   init_persona();
   var IMAGE_RE3 = /\.(png|jpe?g|webp|gif|avif)$/i;
-  function msg23(e) {
+  function msg25(e) {
     return e instanceof Error ? e.message : String(e);
   }
   var builtFor = "";
@@ -19038,7 +20203,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     const list2 = el("div", { class: "tree personatree" });
     const reread = el("button", { class: "ghost tiny", text: "\uB2E4\uC2DC \uC77D\uAE30", title: "RisuAI\uC5D0\uC11C \uD398\uB974\uC18C\uB098 \uBAA9\uB85D\uC744 \uB2E4\uC2DC \uC77D\uC5B4 \uC635\uB2C8\uB2E4" });
     reread.addEventListener("click", () => {
-      void state.loadPersonas().catch((e) => shellNotice(msg23(e), "err"));
+      void state.loadPersonas().catch((e) => shellNotice(msg25(e), "err"));
     });
     pane.left.append(el("div", { class: "row treehead", style: { padding: "6px 8px", flexWrap: "wrap", gap: "4px" } }, [
       el("span", { class: "sectiontitle grow", style: { marginBottom: "0" }, text: "\uD398\uB974\uC18C\uB098" }),
@@ -19062,7 +20227,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           try {
             await state.openPersona(r.key);
           } catch (e) {
-            shellNotice("\uD398\uB974\uC18C\uB098\uB97C \uC5F4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg23(e), "err");
+            shellNotice("\uD398\uB974\uC18C\uB098\uB97C \uC5F4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg25(e), "err");
           }
         });
         list2.appendChild(row);
@@ -19091,7 +20256,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         saved2.textContent = "\uC791\uC5C5\uBCF8\uC5D0 \uC800\uC7A5\uB428";
       } catch (e) {
         saved2.textContent = "";
-        shellNotice("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg23(e), "err");
+        shellNotice("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg25(e), "err");
       }
     };
     const queue2 = (f) => {
@@ -19136,7 +20301,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         await state.editPersona({ image: up.path });
         state.touchFiles([up.path]);
       } catch (e) {
-        shellNotice("\uC774\uBBF8\uC9C0\uB97C \uC62C\uB9AC\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg23(e), "err");
+        shellNotice("\uC774\uBBF8\uC9C0\uB97C \uC62C\uB9AC\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg25(e), "err");
       }
     });
     const upBtn = el("button", { class: "ghost tiny", text: "\uC774\uBBF8\uC9C0 \uC62C\uB9AC\uAE30" });
@@ -19169,7 +20334,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
               await state.editPersona({ image: f.path });
               clear(pickList);
             } catch (e) {
-              shellNotice(msg23(e), "err");
+              shellNotice(msg25(e), "err");
               cell2.disabled = false;
             }
           });
@@ -19177,12 +20342,12 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         }
       } catch (e) {
         clear(pickList);
-        pickList.appendChild(el("div", { class: "notice err", text: "\uD3F4\uB354\uB97C \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg23(e) }));
+        pickList.appendChild(el("div", { class: "notice err", text: "\uD3F4\uB354\uB97C \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg25(e) }));
       }
     });
     const undoPic = el("button", { class: "ghost tiny", text: "\uC0AC\uC9C4 \uB418\uB3CC\uB9AC\uAE30" });
     undoPic.addEventListener("click", () => {
-      void state.editPersona({ image: "" }).catch((e) => shellNotice(msg23(e), "err"));
+      void state.editPersona({ image: "" }).catch((e) => shellNotice(msg25(e), "err"));
     });
     const lockNote = el("div", { class: "notice", style: { display: "none", marginBottom: "10px" }, text: SELECTED_COPY_NOTE });
     const driftNote = el("div", {
@@ -19233,7 +20398,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const r = await state.personaWriteBack();
         shellNotice(r.copied ? `\uC120\uD0DD\uB41C \uD398\uB974\uC18C\uB098\uB77C \uC0C8 \uD398\uB974\uC18C\uB098 '${r.name}' (\uC0AC\uBCF8)\uC73C\uB85C RisuAI\uC5D0 \uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4. \uC6D0\uBCF8\uC740 \uADF8\uB300\uB85C\uC785\uB2C8\uB2E4.` : r.written ? `\uD398\uB974\uC18C\uB098 '${r.name}' \uC744(\uB97C) RisuAI\uC5D0 \uBC18\uC601\uD558\uACE0 \uC800\uC7A5\uC744 \uD655\uC778\uD588\uC2B5\uB2C8\uB2E4.` : "\uBC18\uC601\uD560 \uBCC0\uACBD\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.", "ok");
       } catch (e) {
-        shellNotice("\uBC18\uC601\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg23(e), "err");
+        shellNotice("\uBC18\uC601\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg25(e), "err");
       } finally {
         applyBtn3.disabled = false;
       }
@@ -19260,11 +20425,16 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const n = await state.personaReset();
         shellNotice("\uD398\uB974\uC18C\uB098\uC758 \uBBF8\uBC18\uC601 \uBCC0\uACBD\uC744 \uBC84\uB838\uC2B5\uB2C8\uB2E4" + (n ? ` (${n}\uAC74)` : "") + ".", "ok");
       } catch (e) {
-        shellNotice("\uBCC0\uACBD \uCDE8\uC18C\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg23(e), "err");
+        shellNotice("\uBCC0\uACBD \uCDE8\uC18C\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg25(e), "err");
       }
     });
     const summary = el("span", { class: "dim changesum" });
-    const bar3 = el("div", { class: "toolrow personabar" }, [applyBtn3, snap, versions, discard, summary]);
+    const saveMods = el("button", { class: "tool", dataset: { tool: "persona-modules-save" }, title: "\uC774 \uD398\uB974\uC18C\uB098\uC640 \uD568\uAED8 \uC5F0 \uBAA8\uB4C8\uC744 .charx / .risum \uC73C\uB85C \uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4\uC5D0 \uC800\uC7A5\uD569\uB2C8\uB2E4" }, [
+      el("span", { class: "glyph", text: TOOL.export }),
+      el("span", { class: "tool-label", text: "\uBAA8\uB4C8 \uC800\uC7A5" })
+    ]);
+    saveMods.addEventListener("click", () => openModuleSave(saveMods));
+    const bar3 = el("div", { class: "toolrow personabar" }, [applyBtn3, snap, versions, discard, saveMods, summary]);
     paint = () => {
       const r = state.persona;
       if (!r) return;
@@ -19293,6 +20463,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       discard.style.display = r.dirty ? "" : "none";
       discard.title = r.isNew ? "\uC544\uC9C1 RisuAI\uC5D0 \uC5C6\uB294 \uC0C8 \uD398\uB974\uC18C\uB098\uB97C \uC9C0\uC6C1\uB2C8\uB2E4 (\uD3F4\uB354\uB294 \uB0A8\uC2B5\uB2C8\uB2E4)" : "\uC774 \uD398\uB974\uC18C\uB098\uC758 \uBBF8\uBC18\uC601 \uBCC0\uACBD\uC744 \uBC84\uB9AC\uACE0 RisuAI \uC0C1\uD0DC\uB85C \uB418\uB3CC\uB9BD\uB2C8\uB2E4";
       applyBtn3.title = r.isNew ? "\uC774 \uC0C8 \uD398\uB974\uC18C\uB098\uB97C RisuAI \uD398\uB974\uC18C\uB098 \uBAA9\uB85D\uC5D0 \uCD94\uAC00\uD569\uB2C8\uB2E4" : applyBtn3.title;
+      saveMods.style.display = state.openModules.length ? "" : "none";
       setToolbar(bar3);
     };
     nameIn.value = p.work.name;
@@ -19327,7 +20498,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
             close();
             shellNotice("\uD398\uB974\uC18C\uB098\uB97C \uB418\uB3CC\uB838\uC2B5\uB2C8\uB2E4. \uB418\uB3CC\uB9AC\uAE30 \uC9C1\uC804 \uC0C1\uD0DC\uB3C4 \uC2A4\uB0C5\uC0F7\uC73C\uB85C \uB0A8\uACA8 \uB450\uC5C8\uC2B5\uB2C8\uB2E4.", "ok");
           } catch (e) {
-            shellNotice("\uBCF5\uC6D0\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg23(e), "err");
+            shellNotice("\uBCF5\uC6D0\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg25(e), "err");
             back.disabled = false;
           }
         });
@@ -19350,7 +20521,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
               r.remove();
             } catch (e) {
               r.classList.remove("deleting");
-              shellNotice(msg23(e), "err");
+              shellNotice(msg25(e), "err");
             }
           });
           r.append(ren, del);
@@ -19373,7 +20544,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       }
     } catch (e) {
       clear(body);
-      body.appendChild(el("div", { class: "notice err", text: "\uC2A4\uB0C5\uC0F7 \uBAA9\uB85D\uC744 \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg23(e) }));
+      body.appendChild(el("div", { class: "notice err", text: "\uC2A4\uB0C5\uC0F7 \uBAA9\uB85D\uC744 \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg25(e) }));
     }
   }
 
@@ -24958,16 +26129,28 @@ ${negative.value.trim()}
   var CHAT_TABS = /* @__PURE__ */ new Set(["editor", "lore", "memory", "vars"]);
   var BOT_TABS = /* @__PURE__ */ new Set(["meta", "botlore", "regex", "trigger", "assets"]);
   var PERSONA_TABS = /* @__PURE__ */ new Set(["persona"]);
-  var MODE_TABS = { chat: CHAT_TABS, bot: BOT_TABS, persona: PERSONA_TABS };
-  var MODE_LABEL = { chat: "\uCC57 \uD3B8\uC9D1", bot: "\uBD07 \uD3B8\uC9D1", persona: "\uD398\uB974\uC18C\uB098 \uD3B8\uC9D1" };
+  var MODULE_MODE_TABS = /* @__PURE__ */ new Set();
+  var MODE_TABS = { chat: CHAT_TABS, bot: BOT_TABS, persona: PERSONA_TABS, module: MODULE_MODE_TABS };
+  var MODE_LABEL = { chat: "\uCC57 \uD3B8\uC9D1", bot: "\uBD07 \uD3B8\uC9D1", persona: "\uD398\uB974\uC18C\uB098 \uD3B8\uC9D1", module: "\uBAA8\uB4C8 \uD3B8\uC9D1" };
   var MODE_TITLE = {
     chat: "\uC774 \uCC57\uC758 \uC7AC\uB8CC(\uD134\xB7\uCC57 \uB85C\uC5B4\uBD81\xB7\uC7A5\uAE30\uAE30\uC5B5\xB7\uCC57 \uBCC0\uC218)\uB97C \uACE0\uCE58\uB294 \uD654\uBA74\uC785\uB2C8\uB2E4",
     bot: "\uBD07 \uCE74\uB4DC\uC758 \uC7AC\uB8CC(\uBA54\uD0C0\xB7\uC778\uC0AC\uB9D0\xB7\uBD07 \uB85C\uC5B4\uBD81\xB7Regex\xB7\uD2B8\uB9AC\uAC70\xB7\uC5D0\uC14B)\uB97C \uACE0\uCE58\uB294 \uD654\uBA74\uC785\uB2C8\uB2E4",
-    persona: "RisuAI \uC0AC\uC6A9\uC790 \uD398\uB974\uC18C\uB098(\uC774\uB984\xB7\uC124\uBA85\xB7\uD504\uB85C\uD544 \uC0AC\uC9C4)\uB97C \uACE0\uCE58\uB294 \uD654\uBA74\uC785\uB2C8\uB2E4"
+    persona: "RisuAI \uC0AC\uC6A9\uC790 \uD398\uB974\uC18C\uB098(\uC774\uB984\xB7\uC124\uBA85\xB7\uD504\uB85C\uD544 \uC0AC\uC9C4)\uB97C \uACE0\uCE58\uB294 \uD654\uBA74\uC785\uB2C8\uB2E4",
+    module: "RisuAI \uBAA8\uB4C8(\uB85C\uC5B4\uBD81\xB7Regex\xB7\uD2B8\uB9AC\uAC70\xB7\uC5D0\uC14B\xB7\uD1A0\uAE00)\uC744 \uACE0\uCE58\uB294 \uD654\uBA74\uC785\uB2C8\uB2E4"
   };
+  var MODULE_SUBTABS = [
+    ["meta", "\uC815\uBCF4"],
+    ["botlore", "\uB85C\uC5B4\uBD81"],
+    ["regex", "Regex"],
+    ["trigger", "\uD2B8\uB9AC\uAC70"],
+    ["assets", "\uC5D0\uC14B"]
+  ];
+  var lastSub = {};
   function setEditMode(m, tab) {
     mode = m;
     state.editMode = m;
+    if (m === "chat") state.focusModule("");
+    void state.syncModuleOwner();
     syncModeTabs();
     if (tab) setTab(tab);
     else if (!MODE_TABS[m].has(active2) && (CHAT_TABS.has(active2) || BOT_TABS.has(active2) || PERSONA_TABS.has(active2))) setTab("chats");
@@ -24978,6 +26161,69 @@ ${negative.value.trim()}
     if (PERSONA_TABS.has(active2)) return "persona";
     return mode;
   }
+  var modTabs = el("span", { class: "modtabs" });
+  var modSig = "";
+  function syncModuleTabs() {
+    const inEdit = mode !== "chat" && active2 !== "settings";
+    modTabs.style.display = inEdit && (mode !== "bot" || !!state.activeCharKey || state.openModules.length > 0) ? "" : "none";
+    for (const id of BOT_TABS) {
+      document.getElementById("tab-" + id)?.classList.toggle("active", id === active2 && !state.cardTarget);
+    }
+    const sig = JSON.stringify([
+      mode,
+      active2,
+      state.cardTarget,
+      state.openModules.map((m) => [m.key, m.name, m.total, m.conflicts])
+    ]);
+    if (sig === modSig) return;
+    modSig = sig;
+    clear(modTabs);
+    for (const m of state.openModules) {
+      const on = state.cardTarget === m.key;
+      const badge = m.total ? el("span", { class: "badge warn tabbadge", text: String(m.total) }) : null;
+      const chip = el("button", {
+        class: "tab modchip" + (on && BOT_TABS.has(active2) ? " active" : "") + (on ? " on" : ""),
+        title: `RisuAI \uBAA8\uB4C8 '${m.name}' - \uB85C\uC5B4\uBD81 ${m.lore} \xB7 Regex ${m.regex} \xB7 \uD2B8\uB9AC\uAC70 ${m.trigger} \xB7 \uC5D0\uC14B ${m.assets}`
+      }, [el("span", { class: "tablabel", text: "\u25EB " + (m.name || "(\uC774\uB984 \uC5C6\uC74C)") }), badge]);
+      chip.addEventListener("click", () => focusModuleTab(m.key));
+      const group = el("span", { class: "modgroup" + (on ? " on" : "") }, [chip]);
+      if (on) {
+        for (const [id, label2] of MODULE_SUBTABS) {
+          const sub = el("button", { class: "tab modsub" + (active2 === id ? " active" : ""), text: label2 });
+          sub.addEventListener("click", () => {
+            lastSub[m.key] = id;
+            if (state.cardTarget !== m.key) state.focusModule(m.key);
+            setTab(id);
+          });
+          group.appendChild(sub);
+        }
+        const x = el("button", { class: "ghost tiny modclose", text: "\u2715", title: "\uC774 \uBAA8\uB4C8\uC744 \uB2EB\uC2B5\uB2C8\uB2E4 (\uC791\uC5C5\uBCF8\uACFC \uBBF8\uBC18\uC601 \uBCC0\uACBD\uC740 \uB0A8\uC2B5\uB2C8\uB2E4)" });
+        x.addEventListener("click", (ev) => {
+          ev.stopPropagation();
+          const back = mode === "persona" ? "persona" : mode === "bot" ? "meta" : null;
+          void state.closeModule(m.key).then(() => {
+            if (!state.cardTarget && BOT_TABS.has(active2) && mode !== "bot") setTab(back ?? (state.openModules[0] ? active2 : "chats"));
+            if (mode === "module" && state.openModules[0]) focusModuleTab(state.openModules[0].key);
+          });
+        });
+        group.appendChild(x);
+      }
+      modTabs.appendChild(group);
+    }
+    const none = !state.openModules.length;
+    const add = el("button", {
+      class: "tab modadd",
+      title: "RisuAI \uBAA8\uB4C8\uC744 \uD568\uAED8 \uC5FD\uB2C8\uB2E4 (\uC5EC\uB7EC \uAC1C \uAC00\uB2A5, \uC870\uD569\uC740 \uAE30\uC5B5\uB429\uB2C8\uB2E4)",
+      text: none ? mode === "module" ? "\uFF0B \uBAA8\uB4C8 \uC5F4\uAE30" : "\uFF0B \uBAA8\uB4C8" : "\uFF0B"
+    });
+    add.addEventListener("click", () => openModulePicker(add));
+    modTabs.appendChild(add);
+  }
+  function focusModuleTab(key) {
+    state.focusModule(key);
+    setTab(BOT_TABS.has(active2) && lastSub[key] === void 0 ? active2 : lastSub[key] ?? "botlore");
+  }
+  setModuleFocusHandler(focusModuleTab);
   function syncModeTabs() {
     for (const m of Object.keys(MODE_TABS)) {
       for (const id of MODE_TABS[m]) {
@@ -24986,6 +26232,7 @@ ${negative.value.trim()}
       }
     }
     syncBackTab();
+    syncModuleTabs();
   }
   var modeChip = el("span", { class: "badge modechip modetab" });
   function syncBackTab() {
@@ -24993,7 +26240,7 @@ ${negative.value.trim()}
     const btn = document.getElementById("tab-chats");
     const inEdit = active2 !== "chats";
     if (label2) label2.textContent = inEdit ? "\u2039 \uB4A4\uB85C" : "\uC120\uD0DD";
-    if (btn) btn.title = inEdit ? "\uCCAB \uD654\uBA74\uC73C\uB85C \uB3CC\uC544\uAC11\uB2C8\uB2E4 (\uBD07\xB7\uCC57\xB7\uD398\uB974\uC18C\uB098 \uB2E4\uC2DC \uACE0\uB974\uAE30)" : "\uBB34\uC5C7\uC744 \uD3B8\uC9D1\uD560\uC9C0 \uACE0\uB974\uB294 \uCCAB \uD654\uBA74\uC785\uB2C8\uB2E4";
+    if (btn) btn.title = inEdit ? "\uCCAB \uD654\uBA74\uC73C\uB85C \uB3CC\uC544\uAC11\uB2C8\uB2E4 (\uBD07\xB7\uCC57\xB7\uD398\uB974\uC18C\uB098\xB7\uBAA8\uB4C8 \uB2E4\uC2DC \uACE0\uB974\uAE30)" : "\uBB34\uC5C7\uC744 \uD3B8\uC9D1\uD560\uC9C0 \uACE0\uB974\uB294 \uCCAB \uD654\uBA74\uC785\uB2C8\uB2E4";
     modeChip.textContent = MODE_LABEL[mode];
     modeChip.title = MODE_TITLE[mode];
     modeChip.style.display = inEdit && active2 !== "settings" && active2 !== "files" && active2 !== "studio" ? "" : "none";
@@ -25051,7 +26298,7 @@ ${negative.value.trim()}
     const chatPending = !!(state.changes?.total || state.changes?.actions || state.changes?.staged || state.changes?.conflicts);
     const botPending = !!(state.botChanges?.total || state.botChanges?.actions || state.botChanges?.conflicts);
     const showChat = mode === "chat" && !!state.activeChatKey && (CHAT_TABS.has(active2) || chatPending);
-    const showBot = (mode === "bot" || active2 === "studio") && !!state.botKey && (BOT_TABS.has(active2) || botPending);
+    const showBot = !!state.botKey && (BOT_TABS.has(active2) || (mode === "bot" || active2 === "studio") && botPending && !state.cardTarget);
     const chatLabel = chatBarEl.querySelector('[data-tool="apply"] .tool-label');
     const botLabel = botBarEl.querySelector('[data-tool="card-apply"] .tool-label');
     if (chatLabel) chatLabel.textContent = CHAT_TABS.has(active2) && !showBot ? "\uBC18\uC601" : "\uCC57 \uBC18\uC601";
@@ -25092,6 +26339,7 @@ ${negative.value.trim()}
     }
     document.getElementById("open-settings")?.classList.toggle("on", tab === "settings");
     syncBackTab();
+    syncModuleTabs();
     renderActive();
     syncSettingsBar();
     syncToolslot();
@@ -25109,6 +26357,7 @@ ${negative.value.trim()}
     if (!row) return;
     const inSettings = active2 === "settings";
     for (const b of Array.from(row.querySelectorAll(".tab, .tabsep, .modetab"))) {
+      if (b.closest(".modtabs")) continue;
       b.style.display = inSettings ? "none" : "";
     }
     if (!inSettings) syncModeTabs();
@@ -25156,14 +26405,14 @@ ${negative.value.trim()}
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.35"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.36"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
       healthEl.title = transport.versionGate;
     } else {
       healthEl.appendChild(el("span", { class: "hint", text: `\uBC31\uC5D4\uB4DC v${h.version}` }));
-      const behind = backendBehind("0.15.35", h.version, h.installKind);
+      const behind = backendBehind("0.15.36", h.version, h.installKind);
       if (behind) {
         const b = el("button", { class: "ghost tiny behindchip", text: "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8 \uD544\uC694", title: behind });
         b.addEventListener("click", () => {
@@ -25178,9 +26427,15 @@ ${negative.value.trim()}
     }
     if (bootPhase) healthEl.appendChild(el("span", { class: "hint bootphase", text: "\xB7 " + bootPhase }));
     if (CHAT_TABS.has(active2) || BOT_TABS.has(active2) || PERSONA_TABS.has(active2)) {
-      healthEl.appendChild(el("span", { class: "badge modechip", text: MODE_LABEL[mode], title: MODE_TITLE[mode] }));
+      const m = BOT_TABS.has(active2) && state.cardTarget ? "module" : mode;
+      healthEl.appendChild(el("span", { class: "badge modechip", text: MODE_LABEL[m], title: MODE_TITLE[m] }));
     }
-    if (PERSONA_TABS.has(active2) && state.persona) {
+    const mod = BOT_TABS.has(active2) ? state.targetModule : null;
+    if (mod) {
+      healthEl.appendChild(el("span", { class: "hint botname", text: `\xB7 \u25EB ${mod.name || "(\uC774\uB984 \uC5C6\uC74C)"}`, title: "RisuAI \uBAA8\uB4C8 - \uBC18\uC601\uD558\uBA74 RisuAI \uBAA8\uB4C8 \uBAA9\uB85D\uC758 \uC774 \uBAA8\uB4C8\uC774 \uBC14\uB01D\uB2C8\uB2E4" }));
+      return;
+    }
+    if ((PERSONA_TABS.has(active2) || mode === "persona") && state.persona) {
       healthEl.appendChild(el("span", { class: "hint botname", text: `\xB7 ${state.persona.name || "(\uC774\uB984 \uC5C6\uC74C)"}` }));
       return;
     }
@@ -25208,6 +26463,7 @@ ${negative.value.trim()}
       ]);
       b.addEventListener("click", () => {
         if (id === "chats") foldLanding();
+        if (BOT_TABS.has(id)) state.focusModule("");
         setTab(id);
       });
       return b;
@@ -25257,7 +26513,7 @@ ${negative.value.trim()}
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.15.35" }),
+        el("span", { class: "dim", text: "v0.15.36" }),
         healthEl,
         el("span", { class: "spacer" }),
         // 승인 / 반영 for the whole bot, from every tab (§1-76).
@@ -25273,7 +26529,7 @@ ${negative.value.trim()}
       // margin-left:auto, which pushed 워크스페이스 파일 to the opposite edge
       // of the bar from the tab it belongs beside.
       el("div", { class: "tabs" }, [
-        ...CONTENT_TABS.flatMap(([id, label2]) => id === "files" ? [el("span", { class: "tabsep", title: "\uC5EC\uAE30\uBD80\uD130\uB294 \uD3B8\uC9D1 \uB300\uC0C1\uC774 \uC544\uB2C8\uB77C \uC791\uC5C5 \uACF5\uAC04\uC785\uB2C8\uB2E4 \u2014 \uBD07\uC758 \uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4\uC640, \uBD07\uACFC \uBB34\uAD00\uD55C \uC5D0\uC14B \uC2A4\uD29C\uB514\uC624" }), tabButton(id, label2)] : id === "chats" ? [tabButton(id, label2), modeChip] : [tabButton(id, label2)]),
+        ...CONTENT_TABS.flatMap(([id, label2]) => id === "files" ? [modTabs, el("span", { class: "tabsep", title: "\uC5EC\uAE30\uBD80\uD130\uB294 \uD3B8\uC9D1 \uB300\uC0C1\uC774 \uC544\uB2C8\uB77C \uC791\uC5C5 \uACF5\uAC04\uC785\uB2C8\uB2E4 \u2014 \uBD07\uC758 \uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4\uC640, \uBD07\uACFC \uBB34\uAD00\uD55C \uC5D0\uC14B \uC2A4\uD29C\uB514\uC624" }), tabButton(id, label2)] : id === "chats" ? [tabButton(id, label2), modeChip] : [tabButton(id, label2)]),
         layoutSlot,
         syncBadge
       ]),
@@ -25321,7 +26577,9 @@ ${negative.value.trim()}
       const tab = state.openTabRequest;
       state.openTabRequest = null;
       const want = CHAT_TABS.has(tab) ? "chat" : BOT_TABS.has(tab) ? "bot" : PERSONA_TABS.has(tab) ? "persona" : null;
-      if (want && want !== mode) {
+      if (want === "bot" && state.cardTarget) {
+        setTab(tab);
+      } else if (want && want !== mode) {
         setEditMode(want, tab);
       } else if (want) {
         setEditMode(want, tab);
@@ -25346,6 +26604,12 @@ ${negative.value.trim()}
     refreshBotBar();
     refreshTabBadges();
     refreshSyncBadge();
+    if (mode !== "chat") void state.syncModuleOwner();
+    syncModuleTabs();
+    if (BOT_TABS.has(active2) && !state.cardTarget && mode !== "bot") {
+      setTab(mode === "persona" ? "persona" : "chats");
+      return;
+    }
     renderActive();
     syncToolslot();
   });
@@ -25603,6 +26867,6 @@ ${negative.value.trim()}
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.15.35"} loaded`);
+    console.log(`[risu-hina] v${"0.15.36"} loaded`);
   })();
 })();

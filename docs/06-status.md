@@ -1,4 +1,12 @@
-# 06. Implementation status — as of 2026-10-06 (v0.15.35, Risu Hina)
+# 06. Implementation status — as of 2026-10-06 (v0.15.36, Risu Hina)
+
+## 0.15.36 (2026-10-06): RisuAI modules, §1-95 ~ §1-97 released
+
+A fourth mode, 모듈 편집: RisuAI modules are edited as card working copies and opened next to a bot or persona from
+the tab row's ＋, the combination remembered (§1-95); bots get the toggle and hide-icon fields, modules save as
+.charx/.risum from every screen, and the AI knows why bots use dedicated modules and how toggles work (§1-96);
+module lists scroll, one click opens, and the AI proposes opening a linked module and saves charx/risum files
+itself (§1-97). Also fixed: an exported charx said lowLevelAccess on whenever the row was off.
 
 ## 0.15.35 (2026-10-06): GitHub #5 · #6, §1-92 ~ §1-94 released
 
