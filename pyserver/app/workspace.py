@@ -21,6 +21,7 @@ early turns into lore the whole character shares.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -589,11 +590,20 @@ def _save_personas(mapping: dict) -> None:
     p.write_text(json.dumps(mapping, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
+def persona_id_odd(persona_id: str) -> bool:
+    """An id that cannot be a key as it is (too long, control characters).
+    RisuAI makes short uuids; forks and imported data do not always."""
+    pid = str(persona_id or "").strip()
+    return bool(pid) and (len(pid) > 200 or re.search(r"[\x00-\x1f]", pid) is not None)
+
+
 def _persona_key(persona_id: str, name: str) -> str:
     pid = str(persona_id or "").strip()
     if pid:
-        if len(pid) > 200 or re.search(r"[\x00-\x1f]", pid):
-            raise WorkspaceError("페르소나 id 가 올바르지 않습니다")
+        if persona_id_odd(pid):
+            # Still that persona's own key (the row keeps the id as it is),
+            # only a digest of it - one odd id must not fail the whole list.
+            return "idh:" + hashlib.sha256(pid.encode("utf-8", "surrogatepass")).hexdigest()[:32]
         return pid
     return "name:" + clean_folder_name(name)
 

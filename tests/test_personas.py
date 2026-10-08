@@ -300,6 +300,22 @@ txt = call_tool("propose_persona_create", {"name": "하루", "reason": "후보 1
 check("propose_persona_create tool queues a persona_create", "제안했습니다" in txt
       and any(a["kind"] == "persona_create" for a in actions.pending(TK)), txt)
 
+print("\ntest_odd_ids")
+# A fork (field report: PocketRisu 1.13) handed over ids the key check refused,
+# and one such persona failed the whole list with "페르소나 id 가 올바르지 않습니다".
+long_id, ctrl_id = "x" * 500, "abc\ndef"
+r = sync({"id": long_id, "index": 0, "name": "긴아이디", "prompt": "a", "icon": "", "selected": False},
+         {"id": ctrl_id, "index": 1, "name": "줄바꿈", "prompt": "b", "icon": "", "selected": False},
+         {"id": "ok1", "index": 2, "name": "정상", "prompt": "c", "icon": "", "selected": False})
+odd = [p for p in r.values() if p["key"].startswith("idh:")]
+check("odd ids do not fail the list", len(r) == 3 and len(odd) == 2 and "ok1" in r, str(list(r)))
+check("the row keeps the id as RisuAI has it", {p["id"] for p in odd} == {long_id, ctrl_id})
+k_long = next(p["key"] for p in odd if p["id"] == long_id)
+r2 = sync({"id": long_id, "index": 0, "name": "긴아이디", "prompt": "a", "icon": "", "selected": False})
+check("an odd id keys the same persona on the next sync", k_long in r2 and len(k_long) < 64, str(list(r2)))
+main.h_persona_edit({"key": k_long, "prompt": "수정"})
+check("an odd-id persona is editable", main.h_persona_get({"key": k_long})["work"]["prompt"] == "수정")
+
 if FAILURES:
     print(f"\nFAIL - {len(FAILURES)}: {', '.join(FAILURES)}")
     sys.exit(1)

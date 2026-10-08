@@ -1,4 +1,17 @@
-# 06. Implementation status — as of 2026-10-06 (v0.15.37, Risu Hina)
+# 06. Implementation status — as of 2026-10-08 (v0.15.38, Risu Hina)
+
+## 0.15.38 (2026-10-08): §1-99 quick fix — a persona id the key check refused failed the whole persona list
+
+- **Field report:** on PocketRisu 1.13 (backend on loopback) 페르소나 편집 said "페르소나 id 가 올바르지 않습니다" and
+  no persona list loaded.
+- **Cause:** `workspace._persona_key` raised on an id longer than 200 characters or with a control character, and
+  `personas.sync` turned that into an error for the whole list - one persona with such an id (a fork's or imported
+  data's) took every persona down. Which shape PocketRisu's id has is not measured yet (asked the reporter).
+- **Fix:** such an id (`workspace.persona_id_odd`) is keyed by its digest, `idh:<sha256[:32]>` - stable across syncs,
+  the row keeps the id as RisuAI has it (the plugin still finds the entry by it) - and the sync logs a warning with
+  the index, length and first 40 characters so the next report says what the id looked like.
+- Verified: tests/test_personas.py (a 500-character id and one with a newline next to a normal one: list loads, ids
+  kept, the same key on the next sync, the persona editable), gate.
 
 ## 0.15.37 (2026-10-06): §1-98 quick fix — 모듈 편집 without a bot, AI chat on persona/module screens
 

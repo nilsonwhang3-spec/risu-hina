@@ -155,6 +155,9 @@ def sync(personas: list[dict]) -> list[dict]:
             continue
         pid = str(p.get("id") or "")
         base = _base({"name": p.get("name"), "prompt": p.get("prompt")})
+        if workspace.persona_id_odd(pid):
+            log.warn("persona sync: odd id at index %s (len=%d, head=%r) name=%s - keyed by its digest",
+                     p.get("index", i), len(pid), pid[:40], base["name"][:40])
         try:
             key = workspace._persona_key(pid, base["name"])
             folder = workspace.persona_folder(pid, base["name"])
