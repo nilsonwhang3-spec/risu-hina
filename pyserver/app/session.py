@@ -76,6 +76,48 @@ def create(chat_key: str, title: str = "") -> dict:
     return {"sessionId": sid, "chatKey": chat_key, "title": title}
 
 
+def _place(chat_key: str) -> dict:
+    """A chat as the user knows it: bot name and chat name."""
+    row = db.one("SELECT c.name AS chat, h.name AS bot, c.char_key FROM chats c "
+                 "LEFT JOIN characters h ON h.char_key = c.char_key WHERE c.chat_key = ?", (chat_key,))
+    if row is None:
+        return {"chatKey": chat_key}
+    return {"chatKey": chat_key, "charKey": row["char_key"], "bot": row["bot"] or "", "chat": row["chat"] or ""}
+
+
+def move(session_id: str, chat_key: str) -> dict:
+    """Carry a conversation to another chat (§1-100).
+
+    A session hangs off a chat (its scope DB, approval queue and workspace),
+    and switching bot or chat used to leave the conversation behind - while a
+    user moving between versions of a bot, or from a bot to its chat, wants
+    to keep talking with the same context. The rows stay; the session is
+    re-pointed and a 'moved' row records from where, so the next turn's
+    handover tells the model that the earlier turns were about another bot/chat.
+    Proposals already queued stay with the chat they were made for.
+    """
+    row = db.one("SELECT * FROM sessions WHERE id = ?", (session_id,))
+    if row is None:
+        raise LookupError(f"unknown session: {session_id}")
+    if store.chat_row(chat_key) is None:
+        raise LookupError(f"unknown chat: {chat_key}")
+    if row["title"] == MCP_SESSION_TITLE:
+        raise ValueError("MCP 대화는 옮길 수 없습니다")
+    if session_id in _ACTIVE and not _ACTIVE[session_id].is_set():
+        raise ValueError("이 대화의 턴이 아직 진행 중입니다. 끝난 뒤 옮겨 주세요")
+    if row["chat_key"] == chat_key:
+        return {"sessionId": session_id, "chatKey": chat_key, "moved": False}
+    src, dst = _place(row["chat_key"]), _place(chat_key)
+    db.execute("UPDATE sessions SET chat_key = ?, updated_at = ? WHERE id = ?", (chat_key, db.now(), session_id))
+    _save_message(session_id, "moved", {
+        "from": src, "to": dst,
+        "note": "이 대화는 다른 봇·챗에서 이어온 것입니다. 이전 턴의 봇·챗·제안 id 는 'from' 의 것이고, "
+                "지금 툴과 화면은 'to' 에 적용됩니다. 필요한 내용은 지금 봇·챗에서 다시 읽고 확인하세요.",
+    })
+    log.info("session moved id=%s %s -> %s", session_id, row["chat_key"], chat_key)
+    return {"sessionId": session_id, "chatKey": chat_key, "moved": True, "from": src, "to": dst}
+
+
 def latest(chat_key: str) -> dict | None:
     row = db.one(
         # The hidden MCP session (mcpserver._session_for) is not a panel
@@ -465,10 +507,14 @@ def push_stream_event(session_id: str | None, obj: dict) -> None:
     # An MCP call has no turn stream; the panel's MCP long poll carries the
     # side events that need the plugin to act: a requested card save, and
     # studio_open's jump to the 검수 tab.
-    if obj.get("type") in ("card-writeback", "open"):
+    if obj.get("type") in ("card-writeback", "open", "host-run", "images"):
         from . import mcpbridge
         if mcpbridge.is_mcp_session(session_id):
-            mcpbridge.push_job(obj)
+            if obj.get("type") == "images":
+                # A batch's saved images: the panel's tabs show them now (§1-100).
+                mcpbridge.files_changed([str(p) for p in (obj.get("paths") or []) if p])
+            else:
+                mcpbridge.push_job(obj)
             return
     with _EXTRA_LOCK:
         _EXTRA.setdefault(session_id, []).append(obj)

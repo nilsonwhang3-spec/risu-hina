@@ -880,6 +880,17 @@ def h_session_create(arg: dict) -> dict:
     return session.create(tk, str(arg.get("title") or ""))
 
 
+def h_session_move(arg: dict) -> dict:
+    """Carry a conversation to the chat the panel has open now (session.move)."""
+    tk = _chat(arg)
+    try:
+        return session.move(str(arg.get("sessionId") or ""), tk)
+    except LookupError as e:
+        raise ApiError(404, str(e))
+    except ValueError as e:
+        raise ApiError(409, str(e))
+
+
 def h_session_get(arg: dict) -> dict:
     """Session state for the agent panel.
 
@@ -2738,6 +2749,16 @@ def h_action_decide(arg: dict) -> dict:
         raise ApiError(400, str(e))
 
 
+def h_action_status(arg: dict) -> dict:
+    """One proposal's recorded state - the panel asks after a dropped answer
+    to its own approval, so it reports what happened instead of a failure."""
+    act = actions.get(str(arg.get("id") or ""))
+    if act is None:
+        raise ApiError(404, "없는 작업입니다")
+    return {"id": act["id"], "kind": act["kind"], "status": act["status"], "result": act["result"],
+            "summary": act["summary"]}
+
+
 def h_action_complete(arg: dict) -> dict:
     """The plugin reporting back on an action only it could carry out."""
     _chat(arg)
@@ -2983,6 +3004,7 @@ ROUTES: dict[str, Handler] = {
     "POST /chat": h_chat,
     "POST /session": h_session_create,
     "GET /session": h_session_get,
+    "POST /session/move": h_session_move,
     "GET /sessions": h_sessions,
     "GET /agent/plan": h_workplan_get,
     "POST /agent/plan": h_workplan,
@@ -3055,6 +3077,7 @@ ROUTES: dict[str, Handler] = {
     "GET /actions": h_actions,
     "POST /actions/decide": h_action_decide,
     "POST /actions/complete": h_action_complete,
+    "GET /actions/status": h_action_status,
     "POST /actions/clear": h_actions_clear,
 }
 

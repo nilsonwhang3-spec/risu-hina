@@ -19,7 +19,14 @@ const transport = {
     if (path === '/actions/complete') completions.push(payload);
   },
 };
+const helper = name => {
+  const start = source.indexOf(name);
+  assert.ok(start >= 0, name);
+  // '\n}' and not '\n}\n': the working tree may be CRLF.
+  return source.slice(start, source.indexOf('\n}', start) + 2) + '\n';
+};
 const context = vm.createContext({ BackendError, transport, setTimeout: fn => fn() });
+vm.runInContext(transformSync(helper('function lostAnswer(') + helper('async function reportOutcome('), { loader: 'ts' }).code, context);
 vm.runInContext(transformSync(`class State {
   ${method('files')}
   ${method('decideAction')}

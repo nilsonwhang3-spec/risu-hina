@@ -284,6 +284,7 @@ export const TOOL_GLYPH: Record<string, [string, string]> = {
   list_modules: ['◫', '모듈'],
   focus_target: ['◫', '대상'],
   propose_open_module: ['◫', '모듈 열기'],
+  create_module: ['◫', '모듈 만들기'],
   save_bot_charx: ['⬇', 'charx'],
   save_module_file: ['⬇', '모듈 파일'],
   read_lore: ['📚', '로어'],

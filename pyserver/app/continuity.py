@@ -84,7 +84,14 @@ def build(session_id: str, char_key: str, history: list) -> list[str]:
     previous = next((p for p in reversed(visible_parts) if p.startswith(STATE_MARKER)), None)
     if previous and json.dumps(notes, ensure_ascii=False) in previous:
         notes = "unchanged since the previous handover above (recall_notes for details)"
+    from . import actions
     snapshot = {
+        # Server-recorded outcomes of this conversation's proposals (§1-100):
+        # a dropped connection or an approval made elsewhere is not in the
+        # model's prose, and it used to retry a write that was already in.
+        "proposalOutcomes": actions.recent_for_session(session_id),
+        "unshippedToRisu": _unshipped(session_id, char_key),
+        "sessionMoves": _moves(session_id),
         "recordedWork": db.unjs(state_row['content_json'], None) if state_row else None,
         "previousAssistantReport": str(db.unjs(last_answer['content_json'], ''))[-3500:] if last_answer else None,
         "actualJobs": jobs,
@@ -92,9 +99,32 @@ def build(session_id: str, char_key: str, history: list) -> list[str]:
         "notes": notes,
     }
     text = (STATE_MARKER + '\n이전 답변/작업 메모는 모델의 보고이고 완료 증명이 아닙니다. '
-            'actualJobs는 서버 상태입니다. 파일·채택 상태는 실제 프로젝트에서 확인하세요. '
+            'actualJobs·proposalOutcomes·unshippedToRisu는 서버 상태입니다 - 제안이 이미 완료/적용됐거나 '
+            'RisuAI 에 반영할 변경이 0건이면 같은 쓰기를 다시 하지 말고 그렇다고 알리세요.파일·채택 상태는 실제 프로젝트에서 확인하세요. '
             '중단된 작업을 무작정 반복하지 말고, 현재 사용자 수정과 남은 작업에서 이어가세요. '
             '필요하면 recall_work로 원문을 확인하고 save_work_state로 목표·완료 보고·미완료·다음 행동을 남기세요.\n'
             + json.dumps(snapshot, ensure_ascii=False, sort_keys=True))
     parts.append(text)
     return parts
+
+
+def _unshipped(session_id: str, char_key: str) -> dict | None:
+    """Working-copy changes not yet written to RisuAI: the bot card and this chat."""
+    try:
+        from . import card, store
+        out = {"card": int(card.changes(char_key).get("total") or 0)}
+        row = db.one("SELECT chat_key FROM sessions WHERE id=?", (session_id,))
+        if row:
+            p = store.patch(row["chat_key"])
+            out["chatTurns"] = len(p["edits"]) + len(p["added"]) + len(p["removed"]) + (1 if p["reordered"] else 0)
+        return out
+    except Exception:  # noqa: BLE001 - a hint, never a reason to fail the turn
+        return None
+
+
+def _moves(session_id: str) -> list[dict]:
+    """Where this conversation was carried from (session.move): the earlier
+    turns talk about that bot/chat, the current screen line about this one."""
+    rows = db.query("SELECT content_json FROM agent_messages WHERE session_id=? AND role='moved' "
+                    "ORDER BY seq DESC LIMIT 3", (session_id,))
+    return [db.unjs(r["content_json"], {}) for r in reversed(rows)]

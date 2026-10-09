@@ -41,6 +41,7 @@ run "self-update in Docker, Linux lock parity" "$PY" tests/test_updater.py
 # The optional MCP add-on: install (cached in .cache/mcp-addon after the first
 # run), the always-tokened /mcp route, and the panel bridge.
 run "MCP add-on and bridge" "$PY" tests/test_mcp.py
+run "lost answers, host runs, MCP file refresh, carried conversations" "$PY" tests/test_host_recovery.py
 run "RisuAI server save watch" "$PY" tests/test_risupersist.py
 # Runs real Python through the real runner: the confinement claims in
 # sandbox.py are only worth stating if something checks them each time.

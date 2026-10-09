@@ -1,4 +1,49 @@
-# 06. Implementation status — as of 2026-10-08 (v0.15.38, Risu Hina)
+# 06. Implementation status — as of 2026-10-09 (v0.15.38 + unreleased §1-100, Risu Hina)
+
+## unreleased (2026-10-09): §1-100 lost answers, new modules, MCP file refresh, tray ✕, carried conversations
+
+- **Field report (5), checked against the test server's log and DB:**
+  1. Files made over MCP (upload_file, batches) did not show in the files / studio tabs until 새로고침.
+  2. A 반영 that RisuAI already held was reported to the model as failed. Log, 2026-10-09 08:25-08:30: the
+     user pressed 반영 (card commit shipped 1); during a run of provider "overloaded" errors the model then
+     called write_card_to_risu; the panel did not start it within `save_card`'s 15s, the backend cancelled it
+     (decide approve=False), the panel's approval a moment later got 400 "이미 처리된 작업입니다 (rejected)",
+     and the model was told "플러그인에서 저장이 시작되지 않아" - and retried, with the same result.
+  3. "에셋 모듈로 만들어서 추가해줘": the model said it had no way to create a module and asked the user to
+     make an empty one in RisuAI by hand (session of 2026-10-09 15:01).
+  4. The proposal cards between the log and the input could not be closed, and the conversation got narrower.
+  5. Switching chat or bot dropped the AI conversation; users move between versions of a bot (another
+     creator's new release) or from a bot to its chat and want to keep the context - ask, then continue.
+- **Lost answers:** `actions.decide` answers a repeat with the recorded outcome (`already`) instead of an
+  error: a done proposal returns its result, an approved-but-unreported write-back / open hands its host block
+  out again (`RERUNNABLE_HOST_KINDS`; never a copy, a clone or a new module), a repeated rejection is quiet.
+  The plugin retries a decide or `/actions/complete` whose answer was lost (fetch threw / timed out) once.
+  `GET /actions/status` reads one proposal's state.
+- **save_card / write_card_to_risu:** nothing unshipped (`card.changes().total == 0`) → `done` + "이미 반영됨",
+  no action queued. The panel's start window is 60s (`hostwriteback.START_S`), and the cancellation says
+  nothing was written. `run_host` is the general form (user-requested host actions, no second click).
+- **Turn handover (continuity):** `proposalOutcomes` (the session's proposals as recorded: 완료 / 실패 / 거절됨 /
+  승인됨 · 실행 결과 대기 / 승인 대기, with results), `unshippedToRisu` (card total, chat turns) and
+  `sessionMoves`; the marker tells the model not to repeat a write that is done or has nothing to write.
+- **create_module(name, reason, description, link_to_bot):** only on the user's request; `host_module_create`
+  through `run_host` - the panel creates an empty module in `db.modules`, adds its id to the bot's
+  `char.modules` when asked (`host.linkModule`, read back), opens it on its card tabs and reports `id=`; the tool
+  adds the key to `deps.modules` so `focus_target` works in the same turn. A module of that name is not made
+  twice. INSTRUCTIONS: never say modules cannot be created. Over MCP the 'host-run' event rides the long poll.
+- **MCP file refresh:** `mcpbridge.files_changed(paths)` queues one coalesced `files` job (only while the panel's
+  MCP is on): after an upload (and upload+extract), after a tool that writes into the space
+  (`mcpserver._FILE_TOOLS`, the writing `studio_*` verbs; proposals reach the panel through the pending rev),
+  after approve_proposals / approve_staged, and for a batch's `images` event on the
+  MCP session. The plugin evicts those thumbnails and bumps `filesRev`.
+- **Tray ✕:** each proposal card has ✕; it hides the card until the queue (its ids) changes. The title-row
+  승인 still counts what is hidden.
+- **Carried conversations:** the plugin remembers the last conversation (`state.carry`, localStorage, 24h).
+  When the panel opens on another chat (or the home chat), it shows that conversation with "「봇 · 챗」에서 하던
+  대화입니다. 지금 「…」에서 이어갈까요?" - 여기서 이어가기 (or just sending) calls `POST /session/move`
+  (`session.move`: re-points the session, writes a `moved` row the handover reports; refused while its turn
+  runs and for the MCP session); 이 챗의 대화로 전환 shows the chat's own conversation. Proposals already queued
+  stay with their chat.
+- Verified: tests/test_host_recovery.py (new, in the gate), tsc.
 
 ## 0.15.38 (2026-10-08): §1-99 quick fix — a persona id the key check refused failed the whole persona list
 

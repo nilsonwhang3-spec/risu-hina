@@ -291,12 +291,12 @@ def main() -> int:
           str(store.lore_entry(lore_id)))
     check("the queue is empty again", not actions.pending(tk))
 
-    # Deciding twice must not run it twice.
-    try:
-        actions.decide(act["id"], True)
-        check("a decided action cannot be re-run", False)
-    except actions.ActionError:
-        check("a decided action cannot be re-run", True)
+    # Deciding twice must not run it twice: the repeat (a lost answer
+    # retried, §1-100) gets the recorded outcome, nothing is executed again.
+    store.update_lore(lore_id, {**store.lore_entry(lore_id)["entry"], "content": "그 뒤 바뀐 내용"})
+    again = actions.decide(act["id"], True)
+    check("a decided action cannot be re-run", again.get("already") is True
+          and store.lore_entry(lore_id)["entry"]["content"] == "그 뒤 바뀐 내용", str(again))
 
     rejected = actions.propose("lore_delete", chat_key=tk, char_key=ck,
                                summary="삭제 제안", args={"id": lore_id})

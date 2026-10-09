@@ -559,6 +559,7 @@ async def _file_endpoint(request: Any) -> Any:
                                           into=parent, extract=True)
             part.unlink(missing_ok=True)
             log.info("mcp file upload+extract %s (%s bytes)", t["rel"], size)
+            mcpbridge.files_changed([t["rel"]])
             return JSONResponse({"ok": True, "extracted": out, "size": size, "sha256": h.hexdigest()}, headers=nostore)
         if dest.exists() and not t.get("overwrite"):
             raise ValueError(f"already exists: {t['rel']}")
@@ -567,6 +568,7 @@ async def _file_endpoint(request: Any) -> Any:
         part.unlink(missing_ok=True)
         return JSONResponse({"error": str(e)}, status_code=400, headers=nostore)
     log.info("mcp file upload %s (%s bytes)", t["rel"], size)
+    mcpbridge.files_changed([t["rel"]])
     return JSONResponse({"ok": True, "path": t["rel"], "size": size, "sha256": h.hexdigest()}, headers=nostore)
 
 
@@ -624,6 +626,22 @@ _OWN_TOOLS: dict[str, tuple[str, dict, Any, bool]] = {
 }
 
 
+# Tools that write into the space: the panel's files / studio tabs re-read
+# after them. Proposals are not here - they reach the panel through the
+# pending rev, and their approval through approve_proposals.
+_STUDIO_READS = frozenset({"studio_job", "studio_meta", "studio_parse", "studio_naming", "studio_duplicates",
+                           "studio_emotion_check"})
+_FILE_TOOLS = frozenset({"write_file", "run_python", "fetch_assets", "rename_assets", "export_script_text",
+                         "save_bot_charx", "save_module_file", "suggest_selection", "review_folder",
+                         "create_module", "improve_skill"})
+
+
+def _READS_ONLY(name: str) -> bool:
+    if name.startswith("studio_"):
+        return name in _STUDIO_READS
+    return name not in _FILE_TOOLS
+
+
 async def _list_tools(ctx: Any, params: Any) -> Any:
     import mcp_types as types
     tools = [types.Tool(name=n, description=d, input_schema=schema)
@@ -670,6 +688,9 @@ async def _call_tool(ctx: Any, params: Any) -> Any:
         finally:
             _BASE_URL.reset(token)
         mcpbridge.note_call(name, True)
+        if name in ("approve_proposals", "approve_staged"):
+            # Approved assets, cards, turns: the panel's tabs re-read now.
+            mcpbridge.files_changed()
         return types.CallToolResult(content=_content(out))
     if not mcpbridge.active():
         return err(off)
@@ -701,6 +722,10 @@ async def _call_tool(ctx: Any, params: Any) -> Any:
         return err(f"{type(e).__name__}: {e}")
     mcpbridge.note_call(name, True)
     log.info("mcp tool %s ok %.1fs", name, time.time() - t0)
+    if not _READS_ONLY(name):
+        # The panel's files / studio tabs re-read: a tool may have written
+        # anywhere in the space (studio_generate, run_python, renames).
+        mcpbridge.files_changed()
     return types.CallToolResult(content=_content(result) or [types.TextContent(type="text", text="(결과 없음)")])
 
 

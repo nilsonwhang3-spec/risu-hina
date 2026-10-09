@@ -17,6 +17,7 @@
  */
 import { transport } from './transport';
 import { state } from './state';
+import { evictBlob } from './ui/blobimg';
 
 export interface McpAddonStatus {
   installed: boolean;
@@ -42,7 +43,7 @@ export interface McpBridgeStatus {
 
 interface PollReply {
   enabled: boolean;
-  jobs: { type: string; id: string; charKey: string; chatKey: string; kind?: string; screen?: string; folder?: string }[];
+  jobs: { type: string; id: string; charKey: string; chatKey: string; kind?: string; screen?: string; folder?: string; paths?: string[] }[];
   pending?: { actions: number; staged: number; rev: string };
   lastCall?: McpBridgeStatus['lastCall'];
   calls?: number;
@@ -175,6 +176,25 @@ class McpBridge {
 
   private async run(job: PollReply['jobs'][number]): Promise<void> {
     if (job.type === 'host-action') return this.runHostAction(job);
+    // Files an MCP call wrote (upload_file, a batch, a script): the files and
+    // studio tabs show them now, and a picture re-written under the same name
+    // is fetched again instead of its cached thumbnail (§1-100).
+    if (job.type === 'files') {
+      const paths = Array.isArray(job.paths) ? job.paths.filter(Boolean) : [];
+      if (paths.length) evictBlob(paths);
+      state.touchFiles(paths.length ? paths : undefined);
+      return;
+    }
+    if (job.type === 'host-run') {
+      try {
+        const said = await state.requestedHostAction(job.id, job.chatKey);
+        this.onNotice('MCP 요청 실행: ' + said, 'ok');
+      } catch (e) {
+        this.onNotice('MCP 요청 실행 실패: ' + (e instanceof Error ? e.message : String(e)), 'err');
+      }
+      this.onPendingChanged();
+      return;
+    }
     // studio_open: the client asked for the 검수 tab at a folder.
     if (job.type === 'open') {
       if (job.screen === 'inspect' && job.folder) state.requestOpenStudio(String(job.folder));

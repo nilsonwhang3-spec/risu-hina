@@ -42,7 +42,17 @@ HOST_KINDS = ("host_writeback", "host_save_copy",
               "host_card_writeback", "host_clone_bot", "host_open_tab",
               "host_persona_writeback",
               # Open a RisuAI module in the panel (§1-97) - a UI move like host_open_tab.
-              "host_open_module")
+              "host_open_module",
+              # A new, empty RisuAI module, opened in the panel (§1-100).
+              "host_module_create")
+
+# Host actions a lost answer may run again: writing back what is already
+# written is a no-op, opening what is open is too. Not a copy, a clone or a new
+# module - those would make a second one.
+RERUNNABLE_HOST_KINDS = frozenset({"host_writeback", "host_card_writeback", "host_persona_writeback",
+                                   "host_open_tab", "host_open_module"})
+
+STATUS_WORD = {APPROVED: "승인됨 · 실행 결과 대기", DONE: "완료", FAILED: "실패", REJECTED: "거절됨"}
 
 
 class ActionError(ValueError):
@@ -106,6 +116,22 @@ def get(action_id: str) -> dict | None:
     return _row(r) if r is not None else None
 
 
+def recent_for_session(session_id: str, limit: int = 12) -> list[dict]:
+    """The session's proposals as the server recorded them, newest last.
+
+    For the turn handover (continuity.build): the model's own report of an
+    approval is prose, and a dropped connection leaves it believing a change
+    failed - or never happened - when the queue says it is in (§1-100)."""
+    if not session_id:
+        return []
+    rows = db.query(
+        "SELECT kind, summary, status, result, created_at, decided_at FROM pending_actions "
+        "WHERE session_id = ? ORDER BY created_at DESC LIMIT ?", (session_id, int(limit)))
+    return [{"kind": r["kind"], "summary": str(r["summary"] or "")[:160],
+             "status": STATUS_WORD.get(r["status"], "승인 대기" if r["status"] == PENDING else r["status"]),
+             "result": str(r["result"] or "")[:240]} for r in reversed(rows)]
+
+
 def clear(chat_key: str) -> int:
     return db.execute(
         "DELETE FROM pending_actions WHERE chat_key = ? AND status = ?",
@@ -148,7 +174,24 @@ def decide(action_id: str, approve: bool, mode: str = '') -> dict:
     if act is None:
         raise ActionError("없는 작업입니다")
     if act["status"] != PENDING:
-        raise ActionError(f"이미 처리된 작업입니다 ({act['status']})")
+        # A repeat of a decision that already went through - the usual cause
+        # is a dropped connection: the first approval ran here, its answer
+        # never reached the panel, and the retry used to fail with "이미
+        # 처리된 작업입니다" while the change was in fact in. Answer with the
+        # recorded outcome instead (§1-100).
+        if approve and act["status"] == DONE:
+            return {"id": action_id, "approved": True, "kind": act["kind"], "already": True,
+                    "result": act["result"] or "이미 실행된 작업입니다."}
+        if approve and act["status"] == APPROVED and act["kind"] in RERUNNABLE_HOST_KINDS:
+            # Approved but never reported back: the panel lost the answer
+            # before it ran it. These kinds are safe to run again (a write-back
+            # with nothing left to write is a no-op).
+            return {"id": action_id, "approved": True, "kind": act["kind"],
+                    "host": {"kind": act["kind"], "args": act["args"], "charKey": act["charKey"]}}
+        if not approve and act["status"] == REJECTED:
+            return {"id": action_id, "approved": False, "kind": act["kind"], "already": True}
+        raise ActionError(f"이미 처리된 작업입니다 ({STATUS_WORD.get(act['status'], act['status'])}"
+                          + (f": {act['result'][:200]}" if act.get("result") else "") + ")")
 
     log.info("action decide id=%s kind=%s approve=%s summary=%s", action_id, act["kind"], approve,
              str(act.get("summary") or "")[:120])

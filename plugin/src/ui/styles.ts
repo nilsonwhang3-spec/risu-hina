@@ -1101,6 +1101,10 @@ button.attachbtn { padding: 8px 9px; display: flex; align-items: center; flex-sh
 .attachchip > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .attachchip.bad { background: rgba(239, 68, 68, .14); border-color: rgba(239, 68, 68, .35); }
 .proposal-fold > summary { cursor: pointer; padding: 7px 2px; font-weight: 600; overflow-wrap: anywhere; }
+.proposal-fold > summary { display: flex; align-items: center; gap: 6px; }
+.proposal-fold > summary .trayclose { flex: none; padding: 0 6px; font-weight: 400; }
+.carrybanner { border: 1px solid var(--accent, #6b8afd); border-radius: 8px; padding: 8px 10px; margin: 4px 0 8px; display: flex; flex-direction: column; gap: 6px; }
+.carrybanner .row { display: flex; gap: 6px; flex-wrap: wrap; }
 .proposal-body { padding-top: 6px; }
 /* The plan / Todo strip (§1-62, user: "폰트가 크고 투박하고 자리를 많이
    차지함"): one 11.5px line when folded, a quiet 12px card when open. */

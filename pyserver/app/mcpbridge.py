@@ -177,6 +177,27 @@ def push_job(job: dict) -> None:
     _notify()
 
 
+def files_changed(paths: list[str] | None = None) -> None:
+    """Tell the panel that an MCP call wrote files (§1-100).
+
+    A file uploaded or generated over MCP never reached the panel's files and
+    studio tabs - they re-read on a turn's end, and an MCP client has no turn
+    in the panel - so the user saw nothing until a manual 새로고침. One queued
+    'files' job carries every path changed since the last poll; `paths` empty
+    means "something changed, re-read" (a script, a rename)."""
+    if not active():
+        return
+    with _lock:
+        hit = next((j for j in _jobs if j.get("type") == "files"), None)
+        if hit is None:
+            _jobs.append({"type": "files", "paths": [], "queuedAt": time.time()})
+            hit = _jobs[-1]
+        for p in paths or []:
+            if p and p not in hit["paths"] and len(hit["paths"]) < 500:
+                hit["paths"].append(p)
+    _notify()
+
+
 def is_mcp_session(session_id: str | None) -> bool:
     if not session_id:
         return False

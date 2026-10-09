@@ -2149,7 +2149,63 @@ class AppState {
     });
     if (revision !== this.contextRevision || chatKey !== this.agentChatKey) throw new Error('봇 또는 챗 선택이 변경되었습니다');
     this.sessionId = r.session?.sessionId ?? '';
+    if (this.sessionId && r.messages.length) this.rememberCarry();
     return r;
+  }
+
+  /**
+   * The conversation last talked in, wherever that was (§1-100). Switching
+   * bot or chat used to drop it: a session belongs to a chat. Users move
+   * between versions of a bot, or from a bot to its chat, and want to keep
+   * talking - so the panel shows this one after a switch and asks whether to
+   * carry it over (moveSession) or open the new chat's own conversation.
+   */
+  carry: { sessionId: string; chatKey: string; label: string; at?: number } | null = (() => {
+    try {
+      const v = JSON.parse(localStorage.getItem('hina.carry') || 'null');
+      // A conversation from days ago is not "the one I was just having".
+      return v && v.sessionId && Date.now() - Number(v.at || 0) < 24 * 3600_000 ? v : null;
+    } catch { return null; }
+  })();
+
+  /** Where the panel talks now, as the user knows it. */
+  agentPlaceLabel(): string {
+    if (!this.activeChatKey) return '봇 없음(페르소나·모듈)';
+    const bot = this.workspace?.characterName || String(this.character?.name || '') || '봇';
+    const chat = this.workspace?.chats.find((c) => c.chatKey === this.activeChatKey)?.name || '챗';
+    return `${bot} · ${chat}`;
+  }
+
+  rememberCarry(sessionId = this.sessionId): void {
+    if (!sessionId || !this.agentChatKey) return;
+    this.carry = { sessionId, chatKey: this.agentChatKey, label: this.agentPlaceLabel(), at: Date.now() };
+    try { localStorage.setItem('hina.carry', JSON.stringify(this.carry)); } catch { /* per-tab only */ }
+  }
+
+  forgetCarry(): void {
+    this.carry = null;
+    try { localStorage.removeItem('hina.carry'); } catch { /* fine */ }
+  }
+
+  /** The carried conversation's messages, read from the chat it belongs to. */
+  async carriedSession(limit = 0): Promise<AgentSession | null> {
+    const c = this.carry;
+    if (!c || c.chatKey === this.agentChatKey) return null;
+    try {
+      const r = await transport.get<AgentSession>('/session', { chatKey: c.chatKey, sessionId: c.sessionId, limit: limit > 0 ? limit : undefined });
+      return r.session && r.messages.length ? r : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Carry that conversation to the chat open now; it continues here. */
+  async moveSession(sessionId: string): Promise<void> {
+    const chatKey = this.agentChatKey;
+    await transport.post('/session/move', { sessionId, chatKey });
+    if (chatKey !== this.agentChatKey) throw new Error('봇 또는 챗 선택이 변경되었습니다');
+    this.sessionId = sessionId;
+    this.rememberCarry(sessionId);
   }
 
   async workPlan(mode?: WorkPlan['mode'], revision?: number): Promise<WorkPlan> {
@@ -2785,11 +2841,29 @@ class AppState {
     // wherever the user is - the title-row 승인, the agent pane, 검수 - not
     // only from the half of the panel it belongs to. `mode` stays for callers
     // that want the gate explicitly.
-    const r = await transport.post('/actions/decide', {
+    type Decided = { approved: boolean; already?: boolean; result?: string; host?: { kind: string; args: Record<string, any>; charKey?: string } };
+    const ask = () => transport.post('/actions/decide', {
       chatKey: chatKey || this.agentChatKey, id, approve, mode: mode ?? '',
-    }) as { approved: boolean; result?: string; host?: { kind: string; args: Record<string, any>; charKey?: string } };
+    }) as Promise<Decided>;
+    // A dropped answer (network error, timeout) does not mean the decision
+    // did not happen: the backend may have applied it. Asking again is safe -
+    // a repeat returns the recorded outcome (§1-100) - where giving up used
+    // to report a failure for a change that was in.
+    let r: Decided;
+    try {
+      r = await ask();
+    } catch (e) {
+      if (!lostAnswer(e)) throw e;
+      await new Promise((res) => setTimeout(res, 1500));
+      r = await ask();
+    }
 
     if (!r.approved) return '거절했습니다.';
+    if (r.already) {
+      this.bump();
+      await Promise.all([this.refreshChanges(), this.refreshBotChanges()]).catch(() => undefined);
+      return '이미 처리된 작업입니다 — ' + String(r.result ?? '실행했습니다.');
+    }
     if (!r.host) {
       // A lorebook or memory proposal just landed in the working copy; the
       // tabs caching those lists and the shared bar both have to hear it.
@@ -2841,6 +2915,26 @@ class AppState {
           : out.written
           ? `페르소나 '${out.name}' 을(를) RisuAI에 반영하고 저장을 확인했습니다.`
           : '페르소나에 반영할 변경이 없었습니다.';
+      } else if (r.host.kind === 'host_module_create') {
+        // A new, empty RisuAI module (§1-100), turned on for the bot when
+        // asked, then opened here on its card tabs like an imported one.
+        const name = String(r.host.args?.name || '').trim() || '새 모듈';
+        const made = await moduleHost.createModule({
+          name, description: String(r.host.args?.description || ''),
+          lorebook: [], regex: [], trigger: [], assets: [],
+        });
+        const mid = String(made['id']);
+        let linked = false;
+        if (r.host.args?.link && this.slot && this.activeCharKey) {
+          await host.linkModule(this.slot.characterIndex, mid);
+          linked = true;
+        }
+        await this.loadModules().catch(() => undefined);
+        const row = await this.openModule(mid, true);
+        this.openTabRequest = CARD_TABS.has(this.activeTab) ? this.activeTab : 'botlore';
+        this.emit();
+        detail = `RisuAI에 새 모듈 '${row.name}' 을(를) 만들고 패널에 열었습니다 (id=${mid}, key=${row.key})`
+          + (linked ? ' · 이 봇의 모듈 목록에 연결했습니다' : '') + '.';
       } else if (r.host.kind === 'host_open_module') {
         // Opened where the user is (bot / persona / module editing), on its card tabs.
         const row = await this.openModule(String(r.host.args?.id || ''), true);
@@ -2863,13 +2957,11 @@ class AppState {
       } else {
         throw new Error('플러그인이 모르는 작업입니다: ' + r.host.kind);
       }
-      await transport.post('/actions/complete', { chatKey: chatKey || this.agentChatKey, id, ok: true, detail });
+      await reportOutcome({ chatKey: chatKey || this.agentChatKey, id, ok: true, detail });
       return detail;
     } catch (e) {
       const why = e instanceof Error ? e.message : String(e);
-      await transport.post('/actions/complete', {
-        chatKey: chatKey || this.agentChatKey, id, ok: false, detail: why,
-      });
+      await reportOutcome({ chatKey: chatKey || this.agentChatKey, id, ok: false, detail: why }).catch(() => undefined);
       throw e;
     }
   }
@@ -2889,6 +2981,17 @@ class AppState {
     } catch (error) {
       // Also report failures before the host block (e.g. a stale action), so
       // the waiting tool need not wait for its timeout to learn the outcome.
+      await transport.post('/actions/complete', { chatKey, id, ok: false, detail: String(error) }).catch(() => {});
+      throw error;
+    }
+  }
+
+  /** A host action the agent ran on the user's own request (create_module, §1-100): no second click. */
+  async requestedHostAction(id: string, chatKey: string): Promise<string> {
+    if (!id) throw new Error('잘못된 요청입니다.');
+    try {
+      return await this.decideAction(id, true, chatKey);
+    } catch (error) {
       await transport.post('/actions/complete', { chatKey, id, ok: false, detail: String(error) }).catch(() => {});
       throw error;
     }
@@ -3310,6 +3413,23 @@ async function fileBase64(file: File): Promise<string> {
     bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
   }
   return btoa(bin);
+}
+
+/** A request whose answer never arrived (the host fetch threw, or timed out) - not a refusal. */
+function lostAnswer(e: unknown): boolean {
+  return !(e instanceof BackendError) || e.status === 0;
+}
+
+/** /actions/complete, retried once: a host action that ran but whose report
+ * was lost stays "approved" forever, and the agent reads it as unfinished. */
+async function reportOutcome(body: { chatKey: string; id: string; ok: boolean; detail: string }): Promise<void> {
+  try {
+    await transport.post('/actions/complete', body);
+  } catch (e) {
+    if (!lostAnswer(e)) throw e;
+    await new Promise((res) => setTimeout(res, 1500));
+    await transport.post('/actions/complete', body);
+  }
 }
 
 export const state = new AppState();

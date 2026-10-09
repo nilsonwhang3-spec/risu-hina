@@ -88,5 +88,38 @@ assert.equal(mobileEnter.defaultPrevented, false, 'mobile Enter types a newline'
 globalThis.__mobile = false;
 const deskEnter = enter(); desktop.root.querySelector('.agentinput').dispatchEvent(deskEnter);
 assert.equal(deskEnter.defaultPrevented, true, 'desktop Enter sends');
+
+// §1-100 tray ✕: closes the card until its queue changes.
+desktop.setStaged(proposals);
+desktop.root.querySelector('.stagedbox .trayclose').dispatchEvent(new window.Event('click'));
+assert.equal(desktop.root.querySelectorAll('.stagedbox .proposal-fold').length, 0, '✕ closes the card');
+desktop.setStaged(proposals);
+assert.equal(desktop.root.querySelectorAll('.stagedbox .proposal-fold').length, 0, 'the same queue stays closed');
+desktop.setStaged([...proposals, { ...proposals[0], id: 'p9' }]);
+assert.equal(desktop.root.querySelectorAll('.stagedbox .proposal-fold').length, 1, 'a changed queue shows again');
+
+// §1-100 carried conversation: shown with the question; continuing moves it.
+const moved = [];
+Object.assign(state, {
+  agentChatKey: 'chat-new', health: {}, carry: { sessionId: 'old-s', chatKey: 'chat-old', label: '옛봇 · 옛챗' },
+  agentPlaceLabel: () => '새봇 · 새챗',
+  async carriedSession() { return { session: { sessionId: 'old-s', chatKey: 'chat-old', title: '' },
+    messages: [{ seq: 1, role: 'user', content: '이전 요청', cost: null, usage: null },
+               { seq: 2, role: 'assistant', content: '이전 답변', cost: null, usage: null }], staged: [], agentReady: true }; },
+  async agentSession() { throw new Error('own conversation must not load before the user decides'); },
+  async moveSession(id) { moved.push(id); state.sessionId = id; },
+  async refreshChanges() {}, async refreshBotChanges() {}, async stagedEdits() { return []; }, async actions() { return []; },
+  async files() { return { areas: [] }; },
+});
+const carriedPanel = new AgentPanel({ onStagedChanged() {}, onApplied() {}, notice() {} });
+await carriedPanel.render();
+const banner = carriedPanel.root.querySelector('.carrybanner');
+assert.ok(banner && /옛봇 · 옛챗/.test(banner.textContent) && /이어갈까요/.test(banner.textContent), 'the carried conversation asks');
+assert.match(carriedPanel.root.querySelector('.agentlog').textContent, /이전 답변/, 'and shows its messages');
+banner.querySelector('button.primary').dispatchEvent(new window.Event('click'));
+await new Promise((r) => setTimeout(r, 0));
+assert.deepEqual(moved, ['old-s'], '여기서 이어가기 moves the session to this chat');
+assert.equal(carriedPanel.root.querySelector('.carrybanner'), null, 'and the question goes');
+carriedPanel.destroy();
 panel.destroy(); desktop.destroy();
 console.log('PASS - planning mode, Todo progress and persistent mobile proposal folding');

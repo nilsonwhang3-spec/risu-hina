@@ -198,6 +198,9 @@ Principles:
   material (big image sets, NSFW, persona assets) in the dedicated module, not the bot card; keep names
   consistent across bot and module (CBS/asset names resolve across all active modules); when the user's bot has
   a dedicated module open in the panel, check it before concluding something is missing from the bot.
+  **A new module:** when the user asks for one ("에셋 모듈로 만들어서 추가해줘"), call create_module yourself -
+  it creates an empty RisuAI module, links it to the bot and opens it in the panel; then focus_target it and
+  propose its content. Never say you cannot create modules or ask the user to make an empty one by hand.
   **Files:** you never encode .charx / .risum yourself - save_bot_charx builds the bot's charx and
   save_module_file a module's .module.charx or .risum (working copies, into the project's out/).
 - **Toggles (customModuleToggle on a module, or on a bot card - RisuAI shows both in the sidebar).** One
@@ -1812,6 +1815,44 @@ def build(model: Any = None) -> Agent[Deps]:
             return f"'{hit['name']}' 은(는) 이미 패널에 열려 있습니다. focus_target(\"{hit['name']}\") 으로 대상을 바꾸세요."
         return _propose(ctx, "host_open_module", f"모듈 '{hit['name']}' 을(를) 패널에 열기 — {reason}",
                         {"id": hit["id"], "name": hit["name"]})
+
+    @agent.tool
+    async def create_module(ctx: RunContext[Deps], name: str, reason: str, description: str = "",
+                            link_to_bot: bool = True) -> str:
+        """Create a NEW, empty RisuAI module and open it in the panel - ONLY when the user asked for a new
+        module (e.g. "에셋 모듈로 만들어서 추가해줘", "이 로어북을 모듈로 빼줘"). That request authorizes it;
+        do not tell the user to make one in RisuAI by hand. The panel carries it out and this waits for the
+        result. link_to_bot also turns it on for the open bot (RisuAI 캐릭터의 모듈 목록), so its chats use it.
+        After it is made, focus_target(<name>) and fill it with the usual proposals
+        (propose_assets_from_folder / propose_assets_add for an asset module, propose_lore_add, propose_regex_add...);
+        the user approves them and 반영 (write_card_to_risu while the module is the target) writes them."""
+        nm = str(name or "").strip()
+        if not nm:
+            return "모듈 이름이 필요합니다"
+        try:
+            existing = modmod.resolve(nm)
+            if modmod.row(existing)["name"] == nm:
+                return (f"'{nm}' 모듈이 이미 있습니다 (key={existing}). 새로 만들지 말고 그 모듈을 쓰세요"
+                        + ("" if existing in ctx.deps.modules else " - propose_open_module 로 패널에 여세요") + ".")
+        except modmod.ModuleError:
+            pass
+        owner = ctx.deps.bot_key
+        if not owner:
+            crow = store.chat_row(ctx.deps.chat_key)
+            owner = crow["char_key"] if crow else ctx.deps.char_key
+        from . import hostwriteback
+        out = await hostwriteback.run_host(
+            ctx.deps.session_id or "", "host_module_create", owner, ctx.deps.chat_key,
+            f"새 RisuAI 모듈 '{nm}' 만들기" + (" · 이 봇에 연결" if link_to_bot and ctx.deps.bot_key else "") + f" — {reason}",
+            {"name": nm, "description": str(description or ""), "link": bool(link_to_bot and ctx.deps.bot_key)})
+        if out.get("status") != actions.DONE:
+            return json.dumps(out, ensure_ascii=False)
+        m = re.search(r"id=([0-9A-Za-z-]+)", str(out.get("result") or ""))
+        key = modmod.key_of(m.group(1)) if m else ""
+        if key and key not in ctx.deps.modules:
+            ctx.deps.modules.append(key)
+        return (f"{out.get('result')}\n이제 focus_target(\"{nm}\") 으로 대상을 바꾼 뒤 내용을 제안하세요"
+                + (f" (key={key})" if key else "") + ".")
 
     @agent.tool
     def focus_target(ctx: RunContext[Deps], target: str) -> str:

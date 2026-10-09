@@ -348,6 +348,22 @@ export async function saveAsCopy(
   return 0;
 }
 
+/**
+ * Turn a module on for a character: its id joins `char.modules`, the list
+ * RisuAI merges into every chat of that bot (§1-100). Read fresh and written
+ * whole, like saveAsCopy; a re-read confirms it.
+ */
+export async function linkModule(characterIndex: number, moduleId: string): Promise<void> {
+  const char = await readCharacter(characterIndex);
+  const mods = Array.isArray(char['modules']) ? (char['modules'] as unknown[]).map(String) : [];
+  if (mods.includes(moduleId)) return;
+  await Risuai.setCharacterToIndex(characterIndex, { ...char, modules: [...mods, moduleId] });
+  const after = await readCharacter(characterIndex);
+  if (!(Array.isArray(after['modules']) && (after['modules'] as unknown[]).map(String).includes(moduleId))) {
+    throw new HostError('failed', '모듈은 만들었지만 봇에 연결하지 못했습니다. RisuAI 봇 설정 → 모듈에서 직접 켜 주세요');
+  }
+}
+
 /** One scalar card-field change, verified against `before` on the live card. */
 export interface CardFieldEdit { field: string; before: string; after: string }
 

@@ -254,6 +254,12 @@ def main() -> int:
         check("/risu/saved reads RisuAI's last server save", st_saved == 200 and before.get("available") is True,
               str(before)[:200])
         out: dict = {}
+        # Something to save: with nothing unshipped the tool now answers
+        # "이미 반영됨" without asking the panel (§1-100).
+        _, cardv0 = s.get(q("/card", charKey=ck))
+        desc = next((f for f in cardv0.get("fields") or [] if f.get("field") == "desc"), None) \
+            or (cardv0.get("fields") or [{}])[0]
+        s.post("/card/field", {"charKey": ck, "id": desc.get("id"), "body": str(desc.get("body") or "") + " (MCP 저장 테스트)"})
 
         def save() -> None:
             out["r"] = m.tool("write_card_to_risu", {"reason": "사용자 요청"})
@@ -261,7 +267,8 @@ def main() -> int:
         th_save = threading.Thread(target=save)
         th_save.start()
         st, body = s.post("/mcp/bridge/poll", {"context": ctx})
-        jobs = body.get("jobs") or []
+        # Other jobs may ride along (a 'files' refresh from earlier tool calls, §1-100).
+        jobs = [j for j in (body.get("jobs") or []) if j.get("type") != "files"]
         check("card save handed to the panel", st == 200 and jobs and jobs[0].get("type") == "card-writeback"
               and jobs[0].get("charKey") == ck, str(body)[:300])
         if jobs:
@@ -339,8 +346,13 @@ def main() -> int:
         res: dict = {}
         th_ap = threading.Thread(target=lambda: res.update(r=m.tool("approve_proposals")))
         th_ap.start()
-        st, body = s.post("/mcp/bridge/poll", {"context": ctx})
-        jobs = body.get("jobs") or []
+        # A 'files' refresh from an earlier tool may come first (§1-100).
+        jobs = []
+        for _ in range(3):
+            st, body = s.post("/mcp/bridge/poll", {"context": ctx})
+            jobs = [j for j in (body.get("jobs") or []) if j.get("type") != "files"]
+            if jobs:
+                break
         job = jobs[0] if jobs else {}
         check("host approval handed to the panel", job.get("type") == "host-action" and job.get("kind") == "host_writeback"
               and job.get("chatKey") == tk, str(body)[:300])

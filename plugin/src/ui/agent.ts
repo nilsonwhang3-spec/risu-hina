@@ -16,7 +16,7 @@
  * long run does not become a wall of identical chips.
  */
 import { el, clear, popover, TOOL_GLYPH, PAPER_PLANE, ICON, pollWhileVisible } from './dom';
-import { state, type StagedEdit, type AgentSessionInfo, type PendingAction, type WorkPlan } from '../state';
+import { state, type StagedEdit, type AgentSession, type AgentSessionInfo, type PendingAction, type WorkPlan } from '../state';
 import { renderMarkdown } from './markdown';
 import { workspaceImage, evictBlob, smallScreen } from './blobimg';
 import { showArtifact } from './artifact';
@@ -361,6 +361,16 @@ export class AgentPanel {
       this.send.disabled = true;
       return;
     }
+    // The conversation last had somewhere else (another chat or bot): keep it
+    // on screen and ask whether it continues here (§1-100).
+    if (!sessionId && !this.carryDecided && state.carry && state.carry.chatKey !== state.agentChatKey) {
+      const wait = el('div', { class: 'hint agentloading', text: '대화를 불러오는 중입니다…' });
+      this.log.appendChild(wait);
+      const carried = await state.carriedSession(limit);
+      if (this.destroyed) return;
+      wait.remove();
+      if (carried?.session) { this.renderCarried(carried); return; }
+    }
     const loading = el('div', { class: 'hint agentloading', text: '대화를 불러오는 중입니다…' });
     this.log.appendChild(loading);
     try {
@@ -404,6 +414,66 @@ export class AgentPanel {
     } catch (e) {
       this.status.textContent = e instanceof Error ? e.message : String(e);
     }
+  }
+
+  /** A conversation shown from another chat until the user says where it goes. */
+  private pendingCarry = '';
+  /** "이 챗의 대화로" was chosen: this panel shows its own chat's conversation. */
+  private carryDecided = false;
+
+  /**
+   * The last conversation, from the chat it was had in, with the question on
+   * top: continue it here, or switch to this chat's own. Sending a message
+   * counts as continuing - the user is typing into what they see.
+   */
+  private renderCarried(s: AgentSession): void {
+    const from = state.carry?.label || '다른 챗';
+    const sid = s.session!.sessionId;
+    this.pendingCarry = sid;
+    state.sessionId = '';
+    clear(this.log);
+    const keep = el('button', { class: 'primary tiny', text: '여기서 이어가기' }) as HTMLButtonElement;
+    const own = el('button', { class: 'ghost tiny', text: '이 챗의 대화로 전환' }) as HTMLButtonElement;
+    const banner = el('div', { class: 'carrybanner' }, [
+      el('div', { text: `이 대화는 「${from}」에서 하던 대화입니다. 지금 「${state.agentPlaceLabel()}」에서 이어갈까요?` }),
+      el('div', { class: 'hint', text: '이어가면 대화와 맥락은 그대로이고, 이제부터 툴과 제안은 지금 봇·챗에 적용됩니다. 그대로 메시지를 보내도 이어가기로 처리합니다.' }),
+      el('div', { class: 'row' }, [keep, own]),
+    ]);
+    keep.addEventListener('click', async () => {
+      keep.disabled = own.disabled = true;
+      try {
+        await this.carryHere();
+        banner.remove();
+      } catch (e) {
+        keep.disabled = own.disabled = false;
+        this.hooks.notice('대화를 옮기지 못했습니다: ' + msg(e), 'err');
+      }
+    });
+    own.addEventListener('click', () => {
+      this.pendingCarry = '';
+      this.carryDecided = true;
+      void this.render();
+    });
+    this.log.appendChild(banner);
+    for (const m of s.messages) {
+      if (m.role === 'user') this.addBubble('user', String(m.content ?? ''));
+      else if (m.role === 'assistant') this.addBubble('assistant', String(m.content ?? ''), m.usage ?? undefined, m.cost);
+    }
+    this.send.disabled = s.agentReady === false;
+    this.status.textContent = '다른 챗의 대화';
+    void this.refreshStaged();
+    this.scroll();
+  }
+
+  /** Move the shown conversation to this chat (session.move). */
+  private async carryHere(): Promise<void> {
+    const sid = this.pendingCarry;
+    if (!sid) return;
+    await state.moveSession(sid);
+    this.pendingCarry = '';
+    this.status.textContent = '';
+    this.note(`↪ 이 대화를 「${state.agentPlaceLabel()}」로 옮겨 이어갑니다.`, 'ok');
+    void state.workPlan().then((p) => this.setPlan(p)).catch(() => {});
   }
 
   /** The input's prompt names the half that is open: 봇 on a bot tab, 챗 on
@@ -639,13 +709,14 @@ export class AgentPanel {
       unfold.textContent = open ? '접기' : `그 외 ${rest.length}건 보기`;
     });
 
-    this.actionBox.appendChild(this.foldCard('actions', `승인 요청 ${items.length}건`, [
+    const actCard = this.foldCard('actions', `승인 요청 ${items.length}건`, [
       el('div', { class: 'hint', text: '승인해야 실행됩니다. 전사 수정이 아닌 변경입니다.' }),
       items.length > 1 ? el('div', { class: 'row', style: { margin: '6px 0' } }, [allYes, allNo, progress]) : null,
       ...shown,
       restBox,
       unfold,
-    ]));
+    ], items.map((a) => a.id).join(','));
+    if (actCard) this.actionBox.appendChild(actCard);
   }
 
   private async newConversation(): Promise<void> {
@@ -768,6 +839,16 @@ export class AgentPanel {
     const prompt = extras.length
       ? (typed ? typed + '\n\n' : '') + extras.join('\n\n')
       : typed;
+
+    if (this.pendingCarry) {
+      try {
+        await this.carryHere();
+        this.log.querySelector('.carrybanner')?.remove();
+      } catch (e) {
+        this.hooks.notice('대화를 옮기지 못했습니다: ' + msg(e), 'err');
+        return;
+      }
+    }
 
     this.busy = true;
     this.modeButton.disabled = true;
@@ -943,6 +1024,16 @@ export class AgentPanel {
               .catch(error => { status.className = 'notice err'; status.textContent = String(error); });
             break;
           }
+          case 'host-run': {
+            // A host action the user asked the agent for (a new module): the
+            // panel runs it at once and the waiting tool reads the outcome.
+            const status = el('div', { class: 'notice', text: '요청하신 작업을 RisuAI에서 실행하는 중입니다…' });
+            bubble.insertBefore(status, thinking);
+            void state.requestedHostAction(String(e.id || ''), String(e.chatKey || ''))
+              .then(detail => { status.className = 'notice ok'; status.textContent = detail; })
+              .catch(error => { status.className = 'notice err'; status.textContent = String(error); });
+            break;
+          }
           case 'context': {
             if (!contextNotice) {
               contextNotice = el('div', { class: 'hint context-notice' });
@@ -1095,6 +1186,7 @@ export class AgentPanel {
             // the clock stopped and the dots frozen that fetch looked like a
             // hang right before the cards appeared. Keep it visibly alive
             // until the cards are in, then mark the turn finished.
+            state.rememberCarry();
             setThinking(true, '제안·변경 카드를 정리하는 중입니다…');
             await this.refreshStaged();
             // The turn may have written files ANYWHERE in the space
@@ -1273,7 +1365,7 @@ export class AgentPanel {
       }
     });
 
-    this.stagedBox.appendChild(this.foldCard('staged', `승인 대기 ${items.length}건`, [
+    const stagedCard = this.foldCard('staged', `승인 대기 ${items.length}건`, [
       el('div', { class: 'hint', text: summary + ' — 왼쪽 패널에 미리보기로 표시했습니다.' }),
       ...items.slice(0, 8).map((i) => el('div', { class: 'stagedrow' }, [
         el('span', { class: 'badge warn', text: label(i.op) }),
@@ -1281,7 +1373,8 @@ export class AgentPanel {
       ])),
       items.length > 8 ? el('div', { class: 'hint', text: `그 외 ${items.length - 8}건` }) : null,
       el('div', { class: 'row', style: { marginTop: '8px' } }, [approve, reject]),
-    ]));
+    ], items.map((i) => i.id).join(','));
+    if (stagedCard) this.stagedBox.appendChild(stagedCard);
   }
 
   /**
@@ -1350,14 +1443,32 @@ export class AgentPanel {
     return [grip, tray];
   }
 
-  private foldCard(key: string, title: string, children: (Node | null)[]): HTMLElement {
+  /**
+   * One tray card. `sig` names what it holds (the queue's ids): ✕ hides the
+   * card until that changes (§1-100). Cards that stayed - a queue the user
+   * meant to decide later, a result they had read - took a slice of the
+   * conversation each and left it narrower and narrower; the title row's
+   * 승인 still counts what is hidden, so nothing is lost by closing one.
+   */
+  private foldCard(key: string, title: string, children: (Node | null)[], sig = ''): HTMLElement | null {
+    if (sig && this.dismissed[key] === sig) return null;
     const card = el('details', { class: 'card staged proposal-fold' });
     card.open = this.folds[key] ?? !smallScreen();
-    card.appendChild(el('summary', { text: title + ' · 펼치기/접기' }));
+    const close = el('button', { class: 'ghost tiny trayclose', text: '✕', title: '이 카드 닫기 — 상단 승인 버튼에서 계속 볼 수 있습니다' });
+    close.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (sig) this.dismissed[key] = sig;
+      card.remove();
+    });
+    card.appendChild(el('summary', {}, [el('span', { class: 'grow', text: title + ' · 펼치기/접기' }), close]));
     card.appendChild(el('div', { class: 'proposal-body' }, children));
     card.addEventListener('toggle', () => { this.folds[key] = card.open; });
     return card;
   }
+
+  /** Tray cards closed with ✕, by the queue they showed. */
+  private dismissed: Record<string, string> = {};
 
   private setPlan(plan: WorkPlan): void {
     if (this.destroyed) return;

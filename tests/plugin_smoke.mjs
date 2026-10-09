@@ -3573,7 +3573,13 @@ console.log('\ntest_bot_switch_resets_workspace_and_agent');
   check('changing bots replaces the shared agent panel', !!nextPanel && nextPanel !== previousPanel);
   check('previous bot AI messages are cleared', !nextPanel?.textContent.includes('PREVIOUS BOT AI CONVERSATION'));
   check('previous bot draft is cleared', nextPanel?.querySelector('.agentinput')?.value === '');
-  check('new bot loads its own conversation context', sessionReads.length > 0 && sessionReads.every(key => key === switchedWorkspace?.chats[0]?.chatKey), JSON.stringify(sessionReads));
+  // §1-100: the conversation last had on the previous bot is shown with a
+  // "continue here?" banner; otherwise the new bot's own conversation loads.
+  const ownKey = switchedWorkspace?.chats[0]?.chatKey;
+  const carried = !!nextPanel?.querySelector('.carrybanner');
+  check('new bot loads its own conversation context or offers to carry the last one',
+    sessionReads.length > 0 && (carried || sessionReads.at(-1) === ownKey)
+    && (carried ? /이어갈까요/.test(nextPanel.textContent) : true), JSON.stringify({ sessionReads, ownKey, carried }));
   check('workspace selects the new bot project', /New Switch Bot/.test(document.querySelector('.panel.active .filepad')?.textContent || ''));
   check('new bot project files are visible', /new-bot.md/.test(document.querySelector('.panel.active .filepad')?.textContent || ''));
 }
