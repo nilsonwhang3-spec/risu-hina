@@ -203,6 +203,19 @@ mcpbridge.set_enabled(False)
 mcpbridge.files_changed(["x"])
 check("nothing queued while MCP is off", not mcpbridge._jobs)
 
+print("== settings and agent-panel reads stay small ==")
+space = workspace.ensure_space()
+for rel in ("projects/봇A/out/report.md", "projects/봇A/out/img/a.png", "projects/봇A/notes.md", "studio/images/x.png"):
+    (space / rel).parent.mkdir(parents=True, exist_ok=True)
+    (space / rel).write_text("x", encoding="utf-8")
+outs = main.h_files_outputs({})
+paths = [f["path"] for a in outs["areas"] for f in a["files"]]
+check("/files/outputs lists only out/ folders", sorted(paths) == ["projects/봇A/out/img/a.png", "projects/봇A/out/report.md"], str(paths))
+light = main.h_diag({"space": "0"})
+check("/diag?space=0 skips the space walk", light["space"]["areas"] == {} and light["space"]["path"], str(light["space"]))
+full = main.h_diag({})
+check("the full /diag still sizes the areas", full["space"]["areas"].get("studio", {}).get("count", 0) >= 1, str(full["space"]))
+
 if FAILURES:
     print(f"\nFAIL - {len(FAILURES)}: {', '.join(FAILURES)}")
     sys.exit(1)

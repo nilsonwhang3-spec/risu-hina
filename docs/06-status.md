@@ -43,7 +43,17 @@
   (`session.move`: re-points the session, writes a `moved` row the handover reports; refused while its turn
   runs and for the MCP session); 이 챗의 대화로 전환 shows the chat's own conversation. Proposals already queued
   stay with their chat.
-- Verified: tests/test_host_recovery.py (new, in the gate), tsc.
+- **Settings open/close was slow (report 6).** The test server's log of one open: `/diag` 3.5s twice (the
+  connection and assets cards; `_space_diag` walked all ~23,000 files of the space for sizes neither card shows),
+  `/codex/status` 4.3s (token refresh + the account's `/models`, cached 10 min - left as is). On close: `/session`
+  (200 messages re-rendered) and `/files` 3.3MB. Causes: the presets card's mount-time read called `onChanged`
+  (reconnect + `agentPanel().invalidate()`), so leaving settings re-fetched the whole conversation; and the
+  agent panel's `refreshOutputs` fetched the entire file listing to find `projects/*/out/` files - on every
+  open and after every turn. Fixes: reading presets no longer counts as a change (only 선택/수정/삭제/추가 do);
+  `GET /diag?space=0` skips the walk (the settings cards use it; 정보 · 로그 keeps the full one);
+  `GET /files/outputs` lists only the out/ folders (`files.outputs`), the plugin falls back to `/files` on 404.
+- Verified: tests/test_host_recovery.py (new, in the gate), plugin_smoke (settings open + close fetches no
+  `/session` / `/files`, light `/diag`; fails on the previous bundle), tsc.
 
 ## 0.15.38 (2026-10-08): §1-99 quick fix — a persona id the key check refused failed the whole persona list
 

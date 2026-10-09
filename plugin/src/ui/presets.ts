@@ -54,7 +54,10 @@ export function buildPresetsCard(opts: PresetsCardOptions): HTMLElement {
     out.appendChild(el('div', { class: 'notice ' + kind, text }));
   };
 
-  const refresh = async (): Promise<void> => {
+  // Reading is not changing: onChanged reconnects and makes the agent panel
+  // re-fetch its whole conversation, so opening settings used to cost a
+  // transcript reload on the way out. Only a change made here calls it.
+  const load = async (): Promise<void> => {
     clear(generalMount);
     generalMount.appendChild(el('div', { class: 'hint', text: '읽는 중입니다…' }));
     try {
@@ -66,6 +69,9 @@ export function buildPresetsCard(opts: PresetsCardOptions): HTMLElement {
       clear(generalMount);
       generalMount.appendChild(el('div', { class: 'notice err', text: msg(e) }));
     }
+  };
+  const refresh = async (): Promise<void> => {
+    await load();
     await opts.onChanged();
   };
 
@@ -119,8 +125,8 @@ export function buildPresetsCard(opts: PresetsCardOptions): HTMLElement {
     return testBtn;
   };
 
-  opts.onMount?.(refresh);
-  void refresh();
+  opts.onMount?.(load);
+  void load();
   return el('div', {}, [
     el('div', { class: 'card' }, [
       el('h2', { text: '일반 에이전트' }),

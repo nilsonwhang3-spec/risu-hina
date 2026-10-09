@@ -181,7 +181,7 @@ function buildSpaceCard(): HTMLElement {
   const save = el('button', { class: 'primary tiny', text: '저장' }) as HTMLButtonElement;
   const load = async (): Promise<void> => {
     try {
-      const d = await state.diagnostics() as { space?: { path?: string; migrated?: boolean } };
+      const d = await state.diagnostics(false) as { space?: { path?: string; migrated?: boolean } };
       const sp = d.space ?? {};
       out.textContent = `현재: ${sp.path ?? state.health?.space ?? '(연결 안 됨)'}`
         + (sp.migrated ? ' · 기존 파일 이관 완료' : '');
@@ -294,7 +294,7 @@ function buildAssetsCard(): HTMLElement {
       savePath.value = pr.savePath || '';
     } catch { /* offline: leave blank */ }
     try {
-      const d = await state.diagnostics() as { assets?: { blobs?: number; bytes?: number; fastPath?: boolean; serverWrite?: boolean; dir?: string } };
+      const d = await state.diagnostics(false) as { assets?: { blobs?: number; bytes?: number; fastPath?: boolean; serverWrite?: boolean; dir?: string } };
       const a = d.assets || {};
       stats.textContent = `스토어 ${a.blobs ?? '?'}개 · ${((a.bytes ?? 0) / 1048576).toFixed(1)}MB · ${a.dir ?? ''}`
         + (a.fastPath ? ' · SQLite 고속 경로 사용 중' : '') + (a.serverWrite ? ' · 서버 쓰기 가능' : '');

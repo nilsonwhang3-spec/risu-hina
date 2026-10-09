@@ -1739,6 +1739,24 @@ console.log('\ntest_save_as_new_bot');
 
 console.log('\ntest_settings_tab');
 // Settings is opened from the header now, not from a tab.
+{
+  // Opening and closing settings changes nothing: the agent panel must not
+  // re-fetch its conversation, nor anything the whole file list (it was a
+  // 3 MB listing on a real space), and the cards skip the space walk.
+  const orig = globalThis.fetch;
+  const seen = [];
+  globalThis.fetch = async (url, opts) => { seen.push(new URL(String(url)).pathname + new URL(String(url)).search); return orig(url, opts); };
+  try {
+    document.getElementById('open-settings')?.dispatchEvent(new window.Event('click', { bubbles: true }));
+    await settle(900);
+    document.getElementById('open-settings')?.dispatchEvent(new window.Event('click', { bubbles: true }));
+    await settle(900);
+  } finally { globalThis.fetch = orig; }
+  check('settings open + close re-reads neither the conversation nor the file list',
+        !seen.some((p) => p.startsWith('/session') || /^\/files(\?|$)/.test(p)), seen.join(' '));
+  check('the settings cards ask for the light diagnostic',
+        seen.some((p) => p === '/diag?space=0') && !seen.includes('/diag'), seen.filter((p) => p.startsWith('/diag')).join(' '));
+}
 document.getElementById('open-settings')
   ?.dispatchEvent(new window.Event('click', { bubbles: true }));
 await settle(900);

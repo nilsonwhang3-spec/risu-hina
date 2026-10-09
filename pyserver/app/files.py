@@ -259,6 +259,48 @@ def listing(scope: str, prefix: str = "", include_hidden: bool = False) -> dict:
     return {"charKey": scope, "root": str(root), "totalSize": total, "areas": areas}
 
 
+def outputs(scope: str) -> dict:
+    """Only the files under projects/<bot>/out/ (and the legacy hina/<bot>/out/),
+    in listing()'s shape. The agent panel looks for fresh deliverables after
+    every turn and on every open; it used to fetch the whole listing for this -
+    3 MB for a space of 20,000 files - and keep a few rows of it."""
+    root = _root(scope)
+    areas = []
+    for name in ("projects", "hina"):
+        files: list[dict] = []
+        try:
+            bots = [e for e in os.scandir(root / name) if e.is_dir()]
+        except OSError:
+            bots = []
+        for bot in bots:
+            pending = [(os.path.join(bot.path, "out"), f"{name}/{bot.name}/out")]
+            while pending:
+                parent, parent_rel = pending.pop()
+                try:
+                    with os.scandir(parent) as entries:
+                        for entry in entries:
+                            rel_p = parent_rel + "/" + entry.name
+                            if _listing_hidden(rel_p):
+                                continue
+                            try:
+                                if entry.is_dir():
+                                    if not entry.is_symlink():
+                                        pending.append((entry.path, rel_p))
+                                    continue
+                                if not entry.is_file() or entry.name.endswith(PART_SUFFIX):
+                                    continue
+                                st = entry.stat()
+                            except OSError:
+                                continue
+                            files.append({"path": rel_p, "name": entry.name,
+                                          "size": st.st_size, "modified": st.st_mtime})
+                except OSError:
+                    continue
+        files.sort(key=lambda f: f["path"])
+        areas.append({"area": name, "files": files})
+    return {"charKey": scope, "areas": areas}
+
+
 def read(scope: str, rel: str) -> dict:
     path = _resolve(scope, rel)
     if not path.is_file():

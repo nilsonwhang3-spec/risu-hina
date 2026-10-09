@@ -2391,8 +2391,10 @@ class AppState {
       `/logs?limit=${limit}` + (level ? '&level=' + encodeURIComponent(level) : ''));
   }
 
-  async diagnostics(): Promise<Record<string, unknown>> {
-    return await transport.get('/diag');
+  /** `full` walks the whole space for its sizes (seconds on a big one) -
+   * the bug-report block wants that; the settings cards only read paths. */
+  async diagnostics(full = true): Promise<Record<string, unknown>> {
+    return await transport.get(full ? '/diag' : '/diag?space=0');
   }
 
   // --- backend update -------------------------------------------------------
@@ -2489,6 +2491,19 @@ class AppState {
       throw new Error('파일 목록을 받지 못했습니다 (백엔드가 재시작 중이거나 응답이 비어 있음) — 잠시 뒤 새로고침하세요.');
     }
     return r;
+  }
+
+  /** Just the out/ folders, for the agent panel's "new file" lines. The full
+   * listing was 3 MB on a real space and was fetched on every panel open and
+   * after every turn. An older backend has no route: fall back to it. */
+  async fileOutputs(): Promise<FileListing> {
+    try {
+      const r = await transport.get<FileListing | null>('/files/outputs');
+      if (r && Array.isArray(r.areas)) return r;
+    } catch (e) {
+      if (!(e instanceof BackendError) || e.status !== 404) throw e;
+    }
+    return await this.files();
   }
 
   /** This bot's SYSTEM directory: frozen originals and machinery, read-only. */

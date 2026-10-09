@@ -525,14 +525,17 @@ def h_diag(arg: dict) -> dict:
         "assets": assets.summary_for_diag(),
         "counts": counts,
         "routes": len(ROUTES),
-        "space": _space_diag(),
+        # The settings cards only want the path; walking 20,000 files took
+        # 3.5 s and they asked twice on every open. The bug-report block
+        # (정보 · 로그) still gets the sizes.
+        "space": _space_diag(walk=str(arg.get("space") or "1") != "0"),
     }
 
 
-def _space_diag() -> dict:
+def _space_diag(walk: bool = True) -> dict:
     root = workspace.space_root()
     areas: dict[str, dict] = {}
-    for a in ("projects", "studio", "hina"):
+    for a in (("projects", "studio", "hina") if walk else ()):
         d = root / a
         n = size = 0
         if d.is_dir():
@@ -1027,6 +1030,10 @@ def h_files(arg: dict) -> dict:
     if bot:
         out["botFolder"] = folder
     return out
+
+
+def h_files_outputs(arg: dict) -> dict:
+    return files.outputs(_scope(arg))
 
 
 def h_file_read(arg: dict) -> dict:
@@ -2945,6 +2952,7 @@ ROUTES: dict[str, Handler] = {
     "POST /skills/file/delete": h_skill_file_delete,
 
     "GET /files": h_files,
+    "GET /files/outputs": h_files_outputs,
     "GET /files/read": h_file_read,
     "POST /files/text": h_file_text,
     "POST /files/upload": h_file_upload,

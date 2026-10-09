@@ -543,7 +543,7 @@ export class AgentPanel {
    */
   private async refreshOutputs(): Promise<void> {
     try {
-      const listing = await state.files();
+      const listing = await state.fileOutputs();
       if (this.destroyed) return;
       // Deliverables live at projects/<봇>/out/ in the global space (§1-33;
       // the legacy hina/<봇>/out is still watched for an old backend). Every
