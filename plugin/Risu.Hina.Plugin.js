@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.15.38
+//@display-name Risu Hina v0.15.39
 //@api 3.0
-//@version 0.15.38
+//@version 0.15.39
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -195,7 +195,7 @@
           this.tokenSafe = true;
           this.lastHealth = body;
           this.probeInfo = "";
-          this.gate = versionGate("0.15.38", String(body.version || ""));
+          this.gate = versionGate("0.15.39", String(body.version || ""));
           return body;
         }
         /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -745,6 +745,16 @@
     chats.unshift(copy);
     await Risuai.setCharacterToIndex(slot.characterIndex, { ...char, chats });
     return 0;
+  }
+  async function linkModule(characterIndex, moduleId) {
+    const char = await readCharacter(characterIndex);
+    const mods = Array.isArray(char["modules"]) ? char["modules"].map(String) : [];
+    if (mods.includes(moduleId)) return;
+    await Risuai.setCharacterToIndex(characterIndex, { ...char, modules: [...mods, moduleId] });
+    const after = await readCharacter(characterIndex);
+    if (!(Array.isArray(after["modules"]) && after["modules"].map(String).includes(moduleId))) {
+      throw new HostError("failed", "\uBAA8\uB4C8\uC740 \uB9CC\uB4E4\uC5C8\uC9C0\uB9CC \uBD07\uC5D0 \uC5F0\uACB0\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4. RisuAI \uBD07 \uC124\uC815 \u2192 \uBAA8\uB4C8\uC5D0\uC11C \uC9C1\uC811 \uCF1C \uC8FC\uC138\uC694");
+    }
   }
   function describeCardParts(parts) {
     const names = parts.map((p) => p === "triggerscript" ? "\uD2B8\uB9AC\uAC70(Lua)" : LIST_LABEL[p] ?? FIELD_LABEL[p] ?? p);
@@ -2637,6 +2647,7 @@
         list_modules: ["\u25EB", "\uBAA8\uB4C8"],
         focus_target: ["\u25EB", "\uB300\uC0C1"],
         propose_open_module: ["\u25EB", "\uBAA8\uB4C8 \uC5F4\uAE30"],
+        create_module: ["\u25EB", "\uBAA8\uB4C8 \uB9CC\uB4E4\uAE30"],
         save_bot_charx: ["\u2B07", "charx"],
         save_module_file: ["\u2B07", "\uBAA8\uB4C8 \uD30C\uC77C"],
         read_lore: ["\u{1F4DA}", "\uB85C\uC5B4"],
@@ -3515,6 +3526,18 @@ name: ${nm}
       bin += String.fromCharCode(...buf.subarray(i, i + 32768));
     }
     return btoa(bin);
+  }
+  function lostAnswer(e) {
+    return !(e instanceof BackendError) || e.status === 0;
+  }
+  async function reportOutcome(body) {
+    try {
+      await transport.post("/actions/complete", body);
+    } catch (e) {
+      if (!lostAnswer(e)) throw e;
+      await new Promise((res) => setTimeout(res, 1500));
+      await transport.post("/actions/complete", body);
+    }
   }
   var CARD_TABS, StudioFiles, AppState, state;
   var init_state = __esm({
@@ -4864,7 +4887,64 @@ name: ${nm}
           });
           if (revision !== this.contextRevision || chatKey !== this.agentChatKey) throw new Error("\uBD07 \uB610\uB294 \uCC57 \uC120\uD0DD\uC774 \uBCC0\uACBD\uB418\uC5C8\uC2B5\uB2C8\uB2E4");
           this.sessionId = r.session?.sessionId ?? "";
+          if (this.sessionId && r.messages.length) this.rememberCarry();
           return r;
+        }
+        /**
+         * The conversation last talked in, wherever that was (§1-100). Switching
+         * bot or chat used to drop it: a session belongs to a chat. Users move
+         * between versions of a bot, or from a bot to its chat, and want to keep
+         * talking - so the panel shows this one after a switch and asks whether to
+         * carry it over (moveSession) or open the new chat's own conversation.
+         */
+        carry = (() => {
+          try {
+            const v = JSON.parse(localStorage.getItem("hina.carry") || "null");
+            return v && v.sessionId && Date.now() - Number(v.at || 0) < 24 * 36e5 ? v : null;
+          } catch {
+            return null;
+          }
+        })();
+        /** Where the panel talks now, as the user knows it. */
+        agentPlaceLabel() {
+          if (!this.activeChatKey) return "\uBD07 \uC5C6\uC74C(\uD398\uB974\uC18C\uB098\xB7\uBAA8\uB4C8)";
+          const bot = this.workspace?.characterName || String(this.character?.name || "") || "\uBD07";
+          const chat = this.workspace?.chats.find((c) => c.chatKey === this.activeChatKey)?.name || "\uCC57";
+          return `${bot} \xB7 ${chat}`;
+        }
+        rememberCarry(sessionId = this.sessionId) {
+          if (!sessionId || !this.agentChatKey) return;
+          this.carry = { sessionId, chatKey: this.agentChatKey, label: this.agentPlaceLabel(), at: Date.now() };
+          try {
+            localStorage.setItem("hina.carry", JSON.stringify(this.carry));
+          } catch {
+          }
+        }
+        forgetCarry() {
+          this.carry = null;
+          try {
+            localStorage.removeItem("hina.carry");
+          } catch {
+          }
+        }
+        /** The carried conversation's messages, read from the chat it belongs to. */
+        async carriedSession(limit = 0) {
+          const c = this.carry;
+          if (!c || c.chatKey === this.agentChatKey) return null;
+          try {
+            const r = await transport.get("/session", { chatKey: c.chatKey, sessionId: c.sessionId, limit: limit > 0 ? limit : void 0 });
+            return r.session && r.messages.length ? r : null;
+          } catch {
+            return null;
+          }
+        }
+        /** Carry that conversation to the chat open now; it continues here. */
+        async moveSession(sessionId) {
+          const chatKey = this.agentChatKey;
+          await transport.post("/session/move", { sessionId, chatKey });
+          if (chatKey !== this.agentChatKey) throw new Error("\uBD07 \uB610\uB294 \uCC57 \uC120\uD0DD\uC774 \uBCC0\uACBD\uB418\uC5C8\uC2B5\uB2C8\uB2E4");
+          this.sessionId = sessionId;
+          this.rememberCarry(sessionId);
         }
         async workPlan(mode2, revision) {
           if (!this.sessionId) await this.newAgentSession();
@@ -5024,8 +5104,10 @@ name: ${nm}
             `/logs?limit=${limit}` + (level ? "&level=" + encodeURIComponent(level) : "")
           );
         }
-        async diagnostics() {
-          return await transport.get("/diag");
+        /** `full` walks the whole space for its sizes (seconds on a big one) -
+         * the bug-report block wants that; the settings cards only read paths. */
+        async diagnostics(full2 = true) {
+          return await transport.get(full2 ? "/diag" : "/diag?space=0");
         }
         // --- backend update -------------------------------------------------------
         async updateCheck() {
@@ -5107,6 +5189,18 @@ name: ${nm}
             throw new Error("\uD30C\uC77C \uBAA9\uB85D\uC744 \uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4 (\uBC31\uC5D4\uB4DC\uAC00 \uC7AC\uC2DC\uC791 \uC911\uC774\uAC70\uB098 \uC751\uB2F5\uC774 \uBE44\uC5B4 \uC788\uC74C) \u2014 \uC7A0\uC2DC \uB4A4 \uC0C8\uB85C\uACE0\uCE68\uD558\uC138\uC694.");
           }
           return r;
+        }
+        /** Just the out/ folders, for the agent panel's "new file" lines. The full
+         * listing was 3 MB on a real space and was fetched on every panel open and
+         * after every turn. An older backend has no route: fall back to it. */
+        async fileOutputs() {
+          try {
+            const r = await transport.get("/files/outputs");
+            if (r && Array.isArray(r.areas)) return r;
+          } catch (e) {
+            if (!(e instanceof BackendError) || e.status !== 404) throw e;
+          }
+          return await this.files();
         }
         /** This bot's SYSTEM directory: frozen originals and machinery, read-only. */
         async systemFiles() {
@@ -5373,13 +5467,26 @@ name: ${nm}
          * a failure here does not leave a queue entry claiming success.
          */
         async decideAction(id, approve, chatKey = "", mode2) {
-          const r = await transport.post("/actions/decide", {
+          const ask = () => transport.post("/actions/decide", {
             chatKey: chatKey || this.agentChatKey,
             id,
             approve,
             mode: mode2 ?? ""
           });
+          let r;
+          try {
+            r = await ask();
+          } catch (e) {
+            if (!lostAnswer(e)) throw e;
+            await new Promise((res) => setTimeout(res, 1500));
+            r = await ask();
+          }
           if (!r.approved) return "\uAC70\uC808\uD588\uC2B5\uB2C8\uB2E4.";
+          if (r.already) {
+            this.bump();
+            await Promise.all([this.refreshChanges(), this.refreshBotChanges()]).catch(() => void 0);
+            return "\uC774\uBBF8 \uCC98\uB9AC\uB41C \uC791\uC5C5\uC785\uB2C8\uB2E4 \u2014 " + String(r.result ?? "\uC2E4\uD589\uD588\uC2B5\uB2C8\uB2E4.");
+          }
           if (!r.host) {
             this.bump();
             await Promise.all([this.refreshChanges(), this.refreshBotChanges(), this.refreshPersonaList(), this.refreshModuleRows()]);
@@ -5414,6 +5521,27 @@ name: ${nm}
             } else if (r.host.kind === "host_persona_writeback") {
               const out = await this.personaWriteBack(String(r.host.args?.key || ""));
               detail = out.copied ? `\uC120\uD0DD\uB41C \uD398\uB974\uC18C\uB098\uB77C \uC6D0\uBCF8 \uB300\uC2E0 \uC0C8 \uD398\uB974\uC18C\uB098 '${out.name}' (\uC0AC\uBCF8)\uC73C\uB85C RisuAI\uC5D0 \uC800\uC7A5\uD558\uACE0 \uD655\uC778\uD588\uC2B5\uB2C8\uB2E4.` : out.written ? `\uD398\uB974\uC18C\uB098 '${out.name}' \uC744(\uB97C) RisuAI\uC5D0 \uBC18\uC601\uD558\uACE0 \uC800\uC7A5\uC744 \uD655\uC778\uD588\uC2B5\uB2C8\uB2E4.` : "\uD398\uB974\uC18C\uB098\uC5D0 \uBC18\uC601\uD560 \uBCC0\uACBD\uC774 \uC5C6\uC5C8\uC2B5\uB2C8\uB2E4.";
+            } else if (r.host.kind === "host_module_create") {
+              const name = String(r.host.args?.name || "").trim() || "\uC0C8 \uBAA8\uB4C8";
+              const made = await createModule({
+                name,
+                description: String(r.host.args?.description || ""),
+                lorebook: [],
+                regex: [],
+                trigger: [],
+                assets: []
+              });
+              const mid = String(made["id"]);
+              let linked = false;
+              if (r.host.args?.link && this.slot && this.activeCharKey) {
+                await linkModule(this.slot.characterIndex, mid);
+                linked = true;
+              }
+              await this.loadModules().catch(() => void 0);
+              const row = await this.openModule(mid, true);
+              this.openTabRequest = CARD_TABS.has(this.activeTab) ? this.activeTab : "botlore";
+              this.emit();
+              detail = `RisuAI\uC5D0 \uC0C8 \uBAA8\uB4C8 '${row.name}' \uC744(\uB97C) \uB9CC\uB4E4\uACE0 \uD328\uB110\uC5D0 \uC5F4\uC5C8\uC2B5\uB2C8\uB2E4 (id=${mid}, key=${row.key})` + (linked ? " \xB7 \uC774 \uBD07\uC758 \uBAA8\uB4C8 \uBAA9\uB85D\uC5D0 \uC5F0\uACB0\uD588\uC2B5\uB2C8\uB2E4" : "") + ".";
             } else if (r.host.kind === "host_open_module") {
               const row = await this.openModule(String(r.host.args?.id || ""), true);
               this.openTabRequest = CARD_TABS.has(this.activeTab) ? this.activeTab : "botlore";
@@ -5434,16 +5562,11 @@ name: ${nm}
             } else {
               throw new Error("\uD50C\uB7EC\uADF8\uC778\uC774 \uBAA8\uB974\uB294 \uC791\uC5C5\uC785\uB2C8\uB2E4: " + r.host.kind);
             }
-            await transport.post("/actions/complete", { chatKey: chatKey || this.agentChatKey, id, ok: true, detail });
+            await reportOutcome({ chatKey: chatKey || this.agentChatKey, id, ok: true, detail });
             return detail;
           } catch (e) {
             const why = e instanceof Error ? e.message : String(e);
-            await transport.post("/actions/complete", {
-              chatKey: chatKey || this.agentChatKey,
-              id,
-              ok: false,
-              detail: why
-            });
+            await reportOutcome({ chatKey: chatKey || this.agentChatKey, id, ok: false, detail: why }).catch(() => void 0);
             throw e;
           }
         }
@@ -5456,6 +5579,17 @@ name: ${nm}
             await transport.post("/actions/complete", { chatKey, id, ok: false, detail });
             throw new Error(detail);
           }
+          try {
+            return await this.decideAction(id, true, chatKey);
+          } catch (error) {
+            await transport.post("/actions/complete", { chatKey, id, ok: false, detail: String(error) }).catch(() => {
+            });
+            throw error;
+          }
+        }
+        /** A host action the agent ran on the user's own request (create_module, §1-100): no second click. */
+        async requestedHostAction(id, chatKey) {
+          if (!id) throw new Error("\uC798\uBABB\uB41C \uC694\uCCAD\uC785\uB2C8\uB2E4.");
           try {
             return await this.decideAction(id, true, chatKey);
           } catch (error) {
@@ -5832,6 +5966,7 @@ name: ${nm}
   // src/mcp.ts
   init_transport();
   init_state();
+  init_blobimg();
   var POLL_TIMEOUT_MS = 4e4;
   var RETRY_MS = 3e3;
   var McpBridge = class {
@@ -5953,6 +6088,22 @@ name: ${nm}
     }
     async run(job) {
       if (job.type === "host-action") return this.runHostAction(job);
+      if (job.type === "files") {
+        const paths = Array.isArray(job.paths) ? job.paths.filter(Boolean) : [];
+        if (paths.length) evictBlob(paths);
+        state.touchFiles(paths.length ? paths : void 0);
+        return;
+      }
+      if (job.type === "host-run") {
+        try {
+          const said = await state.requestedHostAction(job.id, job.chatKey);
+          this.onNotice("MCP \uC694\uCCAD \uC2E4\uD589: " + said, "ok");
+        } catch (e) {
+          this.onNotice("MCP \uC694\uCCAD \uC2E4\uD589 \uC2E4\uD328: " + (e instanceof Error ? e.message : String(e)), "err");
+        }
+        this.onPendingChanged();
+        return;
+      }
       if (job.type === "open") {
         if (job.screen === "inspect" && job.folder) state.requestOpenStudio(String(job.folder));
         return;
@@ -8855,6 +9006,10 @@ button.attachbtn { padding: 8px 9px; display: flex; align-items: center; flex-sh
 .attachchip > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .attachchip.bad { background: rgba(239, 68, 68, .14); border-color: rgba(239, 68, 68, .35); }
 .proposal-fold > summary { cursor: pointer; padding: 7px 2px; font-weight: 600; overflow-wrap: anywhere; }
+.proposal-fold > summary { display: flex; align-items: center; gap: 6px; }
+.proposal-fold > summary .trayclose { flex: none; padding: 0 6px; font-weight: 400; }
+.carrybanner { border: 1px solid var(--accent, #6b8afd); border-radius: 8px; padding: 8px 10px; margin: 4px 0 8px; display: flex; flex-direction: column; gap: 6px; }
+.carrybanner .row { display: flex; gap: 6px; flex-wrap: wrap; }
 .proposal-body { padding-top: 6px; }
 /* The plan / Todo strip (\xA71-62, user: "\uD3F0\uD2B8\uAC00 \uD06C\uACE0 \uD22C\uBC15\uD558\uACE0 \uC790\uB9AC\uB97C \uB9CE\uC774
    \uCC28\uC9C0\uD568"): one 11.5px line when folded, a quiet 12px card when open. */
@@ -10200,6 +10355,17 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         this.send.disabled = true;
         return;
       }
+      if (!sessionId && !this.carryDecided && state.carry && state.carry.chatKey !== state.agentChatKey) {
+        const wait = el("div", { class: "hint agentloading", text: "\uB300\uD654\uB97C \uBD88\uB7EC\uC624\uB294 \uC911\uC785\uB2C8\uB2E4\u2026" });
+        this.log.appendChild(wait);
+        const carried = await state.carriedSession(limit);
+        if (this.destroyed) return;
+        wait.remove();
+        if (carried?.session) {
+          this.renderCarried(carried);
+          return;
+        }
+      }
       const loading = el("div", { class: "hint agentloading", text: "\uB300\uD654\uB97C \uBD88\uB7EC\uC624\uB294 \uC911\uC785\uB2C8\uB2E4\u2026" });
       this.log.appendChild(loading);
       try {
@@ -10244,6 +10410,64 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       } catch (e) {
         this.status.textContent = e instanceof Error ? e.message : String(e);
       }
+    }
+    /** A conversation shown from another chat until the user says where it goes. */
+    pendingCarry = "";
+    /** "이 챗의 대화로" was chosen: this panel shows its own chat's conversation. */
+    carryDecided = false;
+    /**
+     * The last conversation, from the chat it was had in, with the question on
+     * top: continue it here, or switch to this chat's own. Sending a message
+     * counts as continuing - the user is typing into what they see.
+     */
+    renderCarried(s) {
+      const from = state.carry?.label || "\uB2E4\uB978 \uCC57";
+      const sid = s.session.sessionId;
+      this.pendingCarry = sid;
+      state.sessionId = "";
+      clear(this.log);
+      const keep = el("button", { class: "primary tiny", text: "\uC5EC\uAE30\uC11C \uC774\uC5B4\uAC00\uAE30" });
+      const own = el("button", { class: "ghost tiny", text: "\uC774 \uCC57\uC758 \uB300\uD654\uB85C \uC804\uD658" });
+      const banner2 = el("div", { class: "carrybanner" }, [
+        el("div", { text: `\uC774 \uB300\uD654\uB294 \u300C${from}\u300D\uC5D0\uC11C \uD558\uB358 \uB300\uD654\uC785\uB2C8\uB2E4. \uC9C0\uAE08 \u300C${state.agentPlaceLabel()}\u300D\uC5D0\uC11C \uC774\uC5B4\uAC08\uAE4C\uC694?` }),
+        el("div", { class: "hint", text: "\uC774\uC5B4\uAC00\uBA74 \uB300\uD654\uC640 \uB9E5\uB77D\uC740 \uADF8\uB300\uB85C\uC774\uACE0, \uC774\uC81C\uBD80\uD130 \uD234\uACFC \uC81C\uC548\uC740 \uC9C0\uAE08 \uBD07\xB7\uCC57\uC5D0 \uC801\uC6A9\uB429\uB2C8\uB2E4. \uADF8\uB300\uB85C \uBA54\uC2DC\uC9C0\uB97C \uBCF4\uB0B4\uB3C4 \uC774\uC5B4\uAC00\uAE30\uB85C \uCC98\uB9AC\uD569\uB2C8\uB2E4." }),
+        el("div", { class: "row" }, [keep, own])
+      ]);
+      keep.addEventListener("click", async () => {
+        keep.disabled = own.disabled = true;
+        try {
+          await this.carryHere();
+          banner2.remove();
+        } catch (e) {
+          keep.disabled = own.disabled = false;
+          this.hooks.notice("\uB300\uD654\uB97C \uC62E\uAE30\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg7(e), "err");
+        }
+      });
+      own.addEventListener("click", () => {
+        this.pendingCarry = "";
+        this.carryDecided = true;
+        void this.render();
+      });
+      this.log.appendChild(banner2);
+      for (const m of s.messages) {
+        if (m.role === "user") this.addBubble("user", String(m.content ?? ""));
+        else if (m.role === "assistant") this.addBubble("assistant", String(m.content ?? ""), m.usage ?? void 0, m.cost);
+      }
+      this.send.disabled = s.agentReady === false;
+      this.status.textContent = "\uB2E4\uB978 \uCC57\uC758 \uB300\uD654";
+      void this.refreshStaged();
+      this.scroll();
+    }
+    /** Move the shown conversation to this chat (session.move). */
+    async carryHere() {
+      const sid = this.pendingCarry;
+      if (!sid) return;
+      await state.moveSession(sid);
+      this.pendingCarry = "";
+      this.status.textContent = "";
+      this.note(`\u21AA \uC774 \uB300\uD654\uB97C \u300C${state.agentPlaceLabel()}\u300D\uB85C \uC62E\uACA8 \uC774\uC5B4\uAC11\uB2C8\uB2E4.`, "ok");
+      void state.workPlan().then((p) => this.setPlan(p)).catch(() => {
+      });
     }
     /** The input's prompt names the half that is open: 봇 on a bot tab, 챗 on
      * a chat tab (the user read "챗에서" while editing a card). Called on every
@@ -10307,7 +10531,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
      */
     async refreshOutputs() {
       try {
-        const listing = await state.files();
+        const listing = await state.fileOutputs();
         if (this.destroyed) return;
         const files = listing.areas.filter((a) => a.area === "projects" || a.area === "hina").flatMap((a) => a.files).filter((f) => /^(projects|hina)\/[^/]+\/out\//.test(f.path));
         const stamp = files.map((f) => `${f.path}:${f.size}:${f.modified}`).join("|");
@@ -10442,13 +10666,14 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         restBox.style.display = open4 ? "" : "none";
         unfold.textContent = open4 ? "\uC811\uAE30" : `\uADF8 \uC678 ${rest.length}\uAC74 \uBCF4\uAE30`;
       });
-      this.actionBox.appendChild(this.foldCard("actions", `\uC2B9\uC778 \uC694\uCCAD ${items5.length}\uAC74`, [
+      const actCard = this.foldCard("actions", `\uC2B9\uC778 \uC694\uCCAD ${items5.length}\uAC74`, [
         el("div", { class: "hint", text: "\uC2B9\uC778\uD574\uC57C \uC2E4\uD589\uB429\uB2C8\uB2E4. \uC804\uC0AC \uC218\uC815\uC774 \uC544\uB2CC \uBCC0\uACBD\uC785\uB2C8\uB2E4." }),
         items5.length > 1 ? el("div", { class: "row", style: { margin: "6px 0" } }, [allYes, allNo, progress]) : null,
         ...shown,
         restBox,
         unfold
-      ]));
+      ], items5.map((a) => a.id).join(","));
+      if (actCard) this.actionBox.appendChild(actCard);
     }
     async newConversation() {
       if (this.busy) return;
@@ -10549,6 +10774,15 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         extras.push("\uCCA8\uBD80\uD55C \uCE74\uB4DC \uC5D0\uC14B: " + assets.join(", ") + "\n(list_assets \uB85C \uD655\uC778\uD558\uACE0 fetch_assets \uB85C scratch/ \uC5D0 \uAEBC\uB0B4 \uBD10 \uC8FC\uC138\uC694.)");
       }
       const prompt = extras.length ? (typed ? typed + "\n\n" : "") + extras.join("\n\n") : typed;
+      if (this.pendingCarry) {
+        try {
+          await this.carryHere();
+          this.log.querySelector(".carrybanner")?.remove();
+        } catch (e) {
+          this.hooks.notice("\uB300\uD654\uB97C \uC62E\uAE30\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg7(e), "err");
+          return;
+        }
+      }
       this.busy = true;
       this.modeButton.disabled = true;
       this.input.value = "";
@@ -10706,6 +10940,18 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
               });
               break;
             }
+            case "host-run": {
+              const status = el("div", { class: "notice", text: "\uC694\uCCAD\uD558\uC2E0 \uC791\uC5C5\uC744 RisuAI\uC5D0\uC11C \uC2E4\uD589\uD558\uB294 \uC911\uC785\uB2C8\uB2E4\u2026" });
+              bubble.insertBefore(status, thinking);
+              void state.requestedHostAction(String(e.id || ""), String(e.chatKey || "")).then((detail) => {
+                status.className = "notice ok";
+                status.textContent = detail;
+              }).catch((error) => {
+                status.className = "notice err";
+                status.textContent = String(error);
+              });
+              break;
+            }
             case "context": {
               if (!contextNotice) {
                 contextNotice = el("div", { class: "hint context-notice" });
@@ -10825,6 +11071,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
               break;
             }
             case "done": {
+              state.rememberCarry();
               setThinking(true, "\uC81C\uC548\xB7\uBCC0\uACBD \uCE74\uB4DC\uB97C \uC815\uB9AC\uD558\uB294 \uC911\uC785\uB2C8\uB2E4\u2026");
               await this.refreshStaged();
               state.touchFiles();
@@ -10989,7 +11236,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           reject.disabled = false;
         }
       });
-      this.stagedBox.appendChild(this.foldCard("staged", `\uC2B9\uC778 \uB300\uAE30 ${items5.length}\uAC74`, [
+      const stagedCard = this.foldCard("staged", `\uC2B9\uC778 \uB300\uAE30 ${items5.length}\uAC74`, [
         el("div", { class: "hint", text: summary + " \u2014 \uC67C\uCABD \uD328\uB110\uC5D0 \uBBF8\uB9AC\uBCF4\uAE30\uB85C \uD45C\uC2DC\uD588\uC2B5\uB2C8\uB2E4." }),
         ...items5.slice(0, 8).map((i) => el("div", { class: "stagedrow" }, [
           el("span", { class: "badge warn", text: label2(i.op) }),
@@ -10997,7 +11244,8 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         ])),
         items5.length > 8 ? el("div", { class: "hint", text: `\uADF8 \uC678 ${items5.length - 8}\uAC74` }) : null,
         el("div", { class: "row", style: { marginTop: "8px" } }, [approve, reject])
-      ]));
+      ], items5.map((i) => i.id).join(","));
+      if (stagedCard) this.stagedBox.appendChild(stagedCard);
     }
     /**
      * The two proposal cards share one tray between the log and the input, and
@@ -11073,16 +11321,33 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       });
       return [grip, tray];
     }
-    foldCard(key, title, children) {
+    /**
+     * One tray card. `sig` names what it holds (the queue's ids): ✕ hides the
+     * card until that changes (§1-100). Cards that stayed - a queue the user
+     * meant to decide later, a result they had read - took a slice of the
+     * conversation each and left it narrower and narrower; the title row's
+     * 승인 still counts what is hidden, so nothing is lost by closing one.
+     */
+    foldCard(key, title, children, sig = "") {
+      if (sig && this.dismissed[key] === sig) return null;
       const card2 = el("details", { class: "card staged proposal-fold" });
       card2.open = this.folds[key] ?? !smallScreen();
-      card2.appendChild(el("summary", { text: title + " \xB7 \uD3BC\uCE58\uAE30/\uC811\uAE30" }));
+      const close = el("button", { class: "ghost tiny trayclose", text: "\u2715", title: "\uC774 \uCE74\uB4DC \uB2EB\uAE30 \u2014 \uC0C1\uB2E8 \uC2B9\uC778 \uBC84\uD2BC\uC5D0\uC11C \uACC4\uC18D \uBCFC \uC218 \uC788\uC2B5\uB2C8\uB2E4" });
+      close.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        if (sig) this.dismissed[key] = sig;
+        card2.remove();
+      });
+      card2.appendChild(el("summary", {}, [el("span", { class: "grow", text: title + " \xB7 \uD3BC\uCE58\uAE30/\uC811\uAE30" }), close]));
       card2.appendChild(el("div", { class: "proposal-body" }, children));
       card2.addEventListener("toggle", () => {
         this.folds[key] = card2.open;
       });
       return card2;
     }
+    /** Tray cards closed with ✕, by the queue they showed. */
+    dismissed = {};
     setPlan(plan) {
       if (this.destroyed) return;
       this.modeButton.textContent = plan.mode === "plan" ? "\uACC4\uD68D \uBAA8\uB4DC" : "\uC2E4\uD589 \uBAA8\uB4DC";
@@ -16129,7 +16394,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       clear(out);
       out.appendChild(el("div", { class: "notice " + kind, text: text2 }));
     };
-    const refresh3 = async () => {
+    const load = async () => {
       clear(generalMount);
       generalMount.appendChild(el("div", { class: "hint", text: "\uC77D\uB294 \uC911\uC785\uB2C8\uB2E4\u2026" }));
       try {
@@ -16141,6 +16406,9 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         clear(generalMount);
         generalMount.appendChild(el("div", { class: "notice err", text: msg17(e) }));
       }
+    };
+    const refresh3 = async () => {
+      await load();
       await opts.onChanged();
     };
     const currentRow = (kind, p, total) => {
@@ -16188,8 +16456,8 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       });
       return testBtn;
     };
-    opts.onMount?.(refresh3);
-    void refresh3();
+    opts.onMount?.(load);
+    void load();
     return el("div", {}, [
       el("div", { class: "card" }, [
         el("h2", { text: "\uC77C\uBC18 \uC5D0\uC774\uC804\uD2B8" }),
@@ -17764,10 +18032,10 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           return;
         }
         if (!r.newer) {
-          const mismatch = r.current !== "0.15.38";
+          const mismatch = r.current !== "0.15.39";
           const ahead = r.ahead ?? (!!r.latest && r.latest !== r.current);
           say(
-            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.38"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
+            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.39"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
             mismatch || ahead ? "" : "ok"
           );
           return;
@@ -17858,7 +18126,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.15.38",
+            version: "0.15.39",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -18068,7 +18336,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     const save = el("button", { class: "primary tiny", text: "\uC800\uC7A5" });
     const load = async () => {
       try {
-        const d = await state.diagnostics();
+        const d = await state.diagnostics(false);
         const sp = d.space ?? {};
         out.textContent = `\uD604\uC7AC: ${sp.path ?? state.health?.space ?? "(\uC5F0\uACB0 \uC548 \uB428)"}` + (sp.migrated ? " \xB7 \uAE30\uC874 \uD30C\uC77C \uC774\uAD00 \uC644\uB8CC" : "");
       } catch {
@@ -18168,7 +18436,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       } catch {
       }
       try {
-        const d = await state.diagnostics();
+        const d = await state.diagnostics(false);
         const a = d.assets || {};
         stats.textContent = `\uC2A4\uD1A0\uC5B4 ${a.blobs ?? "?"}\uAC1C \xB7 ${((a.bytes ?? 0) / 1048576).toFixed(1)}MB \xB7 ${a.dir ?? ""}` + (a.fastPath ? " \xB7 SQLite \uACE0\uC18D \uACBD\uB85C \uC0AC\uC6A9 \uC911" : "") + (a.serverWrite ? " \xB7 \uC11C\uBC84 \uC4F0\uAE30 \uAC00\uB2A5" : "");
       } catch {
@@ -18556,7 +18824,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.38"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.39"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -26474,14 +26742,14 @@ ${negative.value.trim()}
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.38"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.39"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
       healthEl.title = transport.versionGate;
     } else {
       healthEl.appendChild(el("span", { class: "hint", text: `\uBC31\uC5D4\uB4DC v${h.version}` }));
-      const behind = backendBehind("0.15.38", h.version, h.installKind);
+      const behind = backendBehind("0.15.39", h.version, h.installKind);
       if (behind) {
         const b = el("button", { class: "ghost tiny behindchip", text: "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8 \uD544\uC694", title: behind });
         b.addEventListener("click", () => {
@@ -26582,7 +26850,7 @@ ${negative.value.trim()}
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.15.38" }),
+        el("span", { class: "dim", text: "v0.15.39" }),
         healthEl,
         el("span", { class: "spacer" }),
         // 승인 / 반영 for the whole bot, from every tab (§1-76).
@@ -26936,6 +27204,6 @@ ${negative.value.trim()}
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.15.38"} loaded`);
+    console.log(`[risu-hina] v${"0.15.39"} loaded`);
   })();
 })();

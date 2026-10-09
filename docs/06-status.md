@@ -1,6 +1,6 @@
-# 06. Implementation status — as of 2026-10-09 (v0.15.38 + unreleased §1-100, Risu Hina)
+# 06. Implementation status — as of 2026-10-09 (v0.15.39, Risu Hina)
 
-## unreleased (2026-10-09): §1-100 lost answers, new modules, MCP file refresh, tray ✕, carried conversations
+## 0.15.39 (2026-10-09): §1-100 lost answers, new modules, MCP file refresh, tray ✕, carried conversations
 
 - **Field report (5), checked against the test server's log and DB:**
   1. Files made over MCP (upload_file, batches) did not show in the files / studio tabs until 새로고침.
