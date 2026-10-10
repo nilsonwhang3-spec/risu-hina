@@ -37,7 +37,7 @@ from starlette.concurrency import run_in_threadpool
 from . import (chatfmt, config, db, files, log, nai, presets, session, skills, staging,
                store, websearch, workspace)
 from . import actions, assets, catalog, charx, codexauth, conflicts, keys, permits, providers, snapshots, updater, vision
-from . import agentnotes, assetrules, mcpaddon, mcpbridge, mcpserver, studio, studiojob
+from . import agentnotes, assetrules, mcpaddon, mcpbridge, mcpserver, presence, studio, studiojob
 from . import card as cardmod
 from . import personas as personamod
 from . import modules as modmod
@@ -1844,6 +1844,41 @@ def h_skill_preview(arg: dict) -> dict:
     return {"prompt": block, "chars": len(block)}
 
 
+def h_bots(arg: dict) -> dict:
+    """Every bot Hina holds, with whether RisuAI still has it (§1-102)."""
+    return {"bots": presence.listing()}
+
+
+def h_bots_presence(arg: dict) -> dict:
+    """The panel read RisuAI's character list: record live / trash / missing."""
+    chars = arg.get("characters")
+    if not isinstance(chars, list):
+        raise ApiError(400, "characters 가 필요합니다")
+    try:
+        return presence.record(chars)
+    except presence.PresenceError as e:
+        raise ApiError(409, str(e))
+
+
+def h_bots_forget(arg: dict) -> dict:
+    """Remove Hina's copy of bots RisuAI no longer has: `charKey`, or
+    `charKeys` for many at once (one refusal does not stop the rest)."""
+    many = arg.get("charKeys")
+    if isinstance(many, list):
+        done, failed = [], []
+        for ck in [str(k) for k in many if k]:
+            try:
+                done.append(presence.forget(ck))
+            except presence.PresenceError as e:
+                failed.append({"charKey": ck, "error": str(e)})
+        return {"forgotten": done, "failed": failed}
+    ck = str(arg.get("charKey") or "")
+    try:
+        return presence.forget(ck)
+    except presence.PresenceError as e:
+        raise ApiError(409, str(e))
+
+
 def h_workspace_list(arg: dict) -> dict:
     return {"workspaces": workspace.list_all()}
 
@@ -2964,6 +2999,9 @@ ROUTES: dict[str, Handler] = {
     "POST /files/cleanup-ai": h_file_cleanup_ai,
 
     "GET /workspace": h_workspace_list,
+    "GET /bots": h_bots,
+    "POST /bots/presence": h_bots_presence,
+    "POST /bots/forget": h_bots_forget,
     "POST /workspace": h_workspace_create,
     "GET /workspace/get": h_workspace_get,
     "GET /workspace/dirty": h_workspace_dirty,

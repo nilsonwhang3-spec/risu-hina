@@ -1683,10 +1683,10 @@ console.log('\ntest_card_write_back');
         document.querySelector('.botbar .changesum')?.textContent);
 }
 
-console.log('\ntest_save_as_new_bot');
+console.log('\ntest_no_save_as_new_bot');
 {
-  // An edit pending, so the save has something to write into this bot while
-  // the backup keeps what RisuAI held.
+  // §1-102 (user): 새 봇으로 저장 is gone - every clone was one more bot of the
+  // same name in RisuAI and in Hina. 반영 writes this bot, nothing else.
   clickById(document, 'tab-meta');
   await settle(600);
   clickButton(document.querySelector('.panel.active .tree'), '설명 (desc)');
@@ -1696,40 +1696,21 @@ console.log('\ntest_save_as_new_bot');
         /^봇에서/.test(document.querySelector('.agentinput')?.getAttribute('placeholder') || ''),
         document.querySelector('.agentinput')?.getAttribute('placeholder'));
   const c = document.querySelector('.panel.active .left');
-  c.querySelector('textarea').value = '새 봇으로 저장 전에 고친 설명';
+  c.querySelector('textarea').value = '반영 전에 고친 설명';
   clickButton(c, '저장');
   await settle(1000);
 
   clickTool(document, 'card-apply');
   await settle(300);
   const pop = document.querySelector('.popover');
-  check('the verb is 새 봇으로 저장, not a clone', !!findButton(pop, '새 봇으로 저장') && !findButton(pop, '복제 봇 생성'));
-  const nameBox = pop?.querySelector('input');
-  check('the backup name is prefilled with (백업)', /\(백업\)$/.test(nameBox?.value || ''), nameBox?.value);
-  nameBox.value = '스모크 (백업)';
-  const hides = host.calls.filter((x) => x === 'hideContainer').length;
-  clickButton(pop, '새 봇으로 저장');
+  check('the 반영 popover offers no 새 봇으로 저장 / clone',
+        !!findButton(pop, 'RisuAI에 반영') && !findButton(pop, '새 봇으로 저장') && !findButton(pop, '복제 봇 생성')
+        && !/새 봇으로 저장/.test(pop?.textContent || ''), pop?.textContent?.slice(0, 200));
+  const writes = host.dbWrites.length;
+  clickButton(pop, 'RisuAI에 반영');
   await settle(2000);
-  check('the backup went through setDatabase', host.dbWrites.length === 1, String(host.dbWrites.length));
-  const chars = host.dbWrites[0]?.characters ?? [];
-  const backup = chars[chars.length - 1];
-  check('as a new character named for the backup', chars.length === 2 && backup?.name === '스모크 (백업)',
-        JSON.stringify({ n: chars.length, name: backup?.name }));
-  check('with a fresh chaId', !!backup?.chaId && backup.chaId !== 'cha-smoke', backup?.chaId);
-  const srcChats = chars[0]?.chats ?? [];
-  check('and the chats come along', backup?.chats?.length === srcChats.length
-        && backup.chats.every((c2, i) => c2.message.length === srcChats[i].message.length),
-        JSON.stringify(backup?.chats?.map((c2) => c2.message.length)));
-  check('the backup holds the card as RisuAI had it', backup?.desc === '스모크가 고친 설명', backup?.desc);
-  check('the live bot got the pending edit', host.liveChar.desc === '새 봇으로 저장 전에 고친 설명', host.liveChar.desc);
-  check('assets shared by reference, not copied', backup?.image === 'assets/portrait.png');
-  check('the sidebar was told about it', host.calls.includes('checkCharOrder'));
-  check('the panel stepped aside for the permission prompt and came back',
-        host.calls.filter((x) => x === 'hideContainer').length > hides && host.calls.includes('showContainer'));
-  check('the popover says what happened',
-        /새 봇으로 저장하였습니다/.test(document.querySelector('.popover')?.textContent || '')
-        && /백업/.test(document.querySelector('.popover')?.textContent || ''),
-        document.querySelector('.popover')?.textContent?.slice(0, 200));
+  check('the live bot got the pending edit', host.liveChar.desc === '반영 전에 고친 설명', host.liveChar.desc);
+  check('no character was appended to RisuAI', host.dbWrites.length === writes, String(host.dbWrites.length));
   pressEscape(document);
   await settle(600);
   check('the bot bar is back to 변경 없음 (the edit became the baseline)',
@@ -1761,7 +1742,8 @@ document.getElementById('open-settings')
   ?.dispatchEvent(new window.Event('click', { bubbles: true }));
 await settle(900);
 check('the gear shows as pressed', document.getElementById('open-settings')?.classList.contains('on'));
-check('settings is split into sub-tabs', document.querySelectorAll('.subtab').length === 6,
+check('settings is split into sub-tabs', document.querySelectorAll('.subtab').length === 7
+      && [...document.querySelectorAll('.subtab')].some((t) => t.textContent === '저장공간 정리'),
       [...document.querySelectorAll('.subtab')].map((t) => t.textContent).join(','));
 check('connection card present', !!findButton(document, '저장하고 연결'));
 check('diagnostic present', !!findButton(document, '연결 진단'));
@@ -3947,6 +3929,42 @@ console.log('\ntest_landing_filter_pages');
   host.modules.splice(host.modules.length - extra.length, extra.length);
   clickById(document, 'tab-chats');
   await settle(200);
+}
+
+console.log('\ntest_bot_cleanup');
+{
+  // §1-102: a bot Hina holds that RisuAI no longer has (deleted, trashed, or
+  // imported again as a new bot) is listed after 'RisuAI와 대조' and can be
+  // forgotten; the bot RisuAI has is never offered.
+  const auth = { Authorization: 'Bearer plugin-smoke-token', 'Content-Type': 'application/json' };
+  await fetch(backend.url + '/workspace', { method: 'POST', headers: auth, body: JSON.stringify({
+    charId: 'cha-gone-smoke', characterIndex: 7, card: { name: '사라진 봇', chaId: 'cha-gone-smoke' }, chats: [] }) });
+  document.getElementById('open-settings')?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(900);
+  const card = () => [...document.querySelectorAll('.card')].find((c) => c.querySelector('h2')?.textContent === 'Hina에만 남은 봇');
+  check('settings carry the leftover-bot card', !!card());
+  findButton(card(), 'RisuAI와 대조')?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(1500);
+  const rows = () => [...(card()?.querySelectorAll('.botcleanrow') ?? [])];
+  // Earlier tests left other bots behind (characters replaced whole); only
+  // the open one is RisuAI's.
+  const gone = () => rows().find((r) => /사라진 봇/.test(r.textContent || ''));
+  const openName = String(host.liveChar.name || '');
+  check('the bot RisuAI does not have is listed, the open one is not',
+        !!gone() && /RisuAI에 없음/.test(gone()?.textContent || '')
+        && !rows().some((r) => (r.querySelector('.grow > div')?.textContent || '') === openName),
+        (card()?.textContent || '').slice(0, 300));
+  const del = [...(gone()?.querySelectorAll('button') ?? [])].find((b) => /삭제/.test(b.textContent || ''));
+  del?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(100);
+  del?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(1200);
+  const left = (await (await fetch(backend.url + '/bots', { headers: auth })).json()).bots || [];
+  check('삭제 forgets it in Hina', !left.some((b) => b.name === '사라진 봇') && !gone(),
+        left.map((b) => b.name + ':' + b.state).join(', '));
+  check('the open bot stays, marked live', left.some((b) => b.state === 'live'), JSON.stringify(left).slice(0, 200));
+  document.getElementById('open-settings')?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(300);
 }
 
 console.log('\ntest_no_character_selected');

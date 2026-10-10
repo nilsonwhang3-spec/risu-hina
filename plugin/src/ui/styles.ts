@@ -415,6 +415,12 @@ pre.mono {
 .landfilter { margin: 0 0 8px; max-width: 640px; }
 .landfilter input { width: 100%; box-sizing: border-box; }
 .pagenav { gap: 6px; align-items: center; padding: 6px 8px; border-top: 1px solid var(--borderc, #2b323f); }
+/* 설정 → 저장공간 정리 (§1-102). */
+.botcleanchips { gap: 4px; flex-wrap: wrap; margin: 4px 0 6px; }
+.botcleanchips .chip.on { background: rgba(37, 99, 235, .18); border-color: #2563eb; }
+.botcleantools { gap: 8px; align-items: center; max-width: 640px; margin-bottom: 6px; }
+.botcleanrow { flex-wrap: wrap; }
+.botcleanrow input[type=checkbox] { width: auto; flex-shrink: 0; }
 .loadingrow { cursor: default; }
 .foldrow { cursor: pointer; }
 .chatitem.busy { opacity: .6; }
@@ -1503,9 +1509,22 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
 /* The fragment organizer in the centre. */
 /* The editor needs room: in a narrow centre it goes UNDER the list instead of
    being squeezed to a column of single characters (§1-101). */
-.fragcols { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start; width: 100%; }
-.fragcols > .fraglist { flex: 1 1 220px; max-width: 100%; min-width: 0; max-height: 50vh; overflow-y: auto; }
-.fragcols > .fragedit { flex: 3 1 300px; min-width: 0; }
+.filepad:has(> .fragview) { overflow: hidden; display: flex; flex-direction: column; }
+.fragview { flex: 1; min-height: 0; display: flex; flex-direction: column; container-type: inline-size; }
+.fragcols { flex: 1; min-height: 0; display: flex; gap: 14px; align-items: stretch; width: 100%; }
+.fragcols > .fraglist { flex: 0 0 240px; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.fraglist > .fraglistbody { flex: 1; min-height: 0; overflow-y: auto; }
+.fragcols > .fragedit { flex: 1 1 auto; min-width: 0; overflow-y: auto; display: flex; flex-direction: column; }
+.fragedit > .cardedit { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.fragedit .cardbodyfield { flex: 1; min-height: 220px; display: flex; flex-direction: column; margin-bottom: 0; }
+.fragedit .cardbodyfield > .hlwrap { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.fragedit .cardbodyfield textarea.promptedit { flex: 1; min-height: 0; height: auto; resize: none; }
+/* A narrow centre: the list on top (a third of the height), the editor under it. */
+@container (max-width: 560px) {
+  .fragcols { flex-direction: column; }
+  .fragcols > .fraglist { flex: 0 0 auto; max-height: 40%; }
+  .fragcols > .fragedit { flex: 1 1 auto; min-height: 0; }
+}
 .fraghead { gap: 8px; align-items: baseline; margin-bottom: 10px; flex-wrap: wrap; }
 .fraghelp { font-size: 11px; }
 .fraghelp summary { cursor: pointer; color: var(--textcolor2, #79839a); }
@@ -1516,7 +1535,6 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
 .fraglist .secthead .addhere { visibility: hidden; }
 .fraglist .secthead:hover .addhere, .fraglist .secthead .addhere:focus { visibility: visible; }
 @media (hover: none) { .fraglist .secthead .addhere { visibility: visible; } }
-.fragedit textarea.promptedit { min-height: 50vh; }
 .fraglist input { width: 100%; box-sizing: border-box; }
 
 /* The centre tabs (1장 · 배치 · 잡 히스토리) style via .tabstrip above. */

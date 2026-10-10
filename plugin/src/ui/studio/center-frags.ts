@@ -20,6 +20,12 @@ const openFolders = new Set<string>(['']);
  * an empty directory, so the panel remembers what it just made). */
 const extraFolders = new Set<string>();
 let filter = '';
+/** Where the list and the editor were scrolled: every click (a folder, a
+ * fragment) redraws the centre, and a fresh column starts at the top - the
+ * folder just opened jumped out of view (§1-102). */
+let listScroll = 0;
+let editScroll = 0;
+let editScrollFor = '';
 
 function norm(f: string): string {
   return f === '.' ? '' : f;
@@ -87,8 +93,24 @@ export function drawFragments(): void {
   ]));
 
   const listCol = el('div', { class: 'fraglist' });
+  // The tools stay put; only the rows scroll.
+  const listBody = el('div', { class: 'fraglistbody' });
   const editCol = el('div', { class: 'fragedit' });
-  viewMount.appendChild(el('div', { class: 'fragcols' }, [listCol, editCol]));
+  // The view fills the centre (§1-102): the list and the editor scroll on
+  // their own, the body box takes the height that is left.
+  const view = el('div', { class: 'fragview' });
+  while (viewMount.firstChild) view.appendChild(viewMount.firstChild);
+  view.appendChild(el('div', { class: 'fragcols' }, [listCol, editCol]));
+  viewMount.appendChild(view);
+  listBody.addEventListener('scroll', () => { listScroll = listBody.scrollTop; });
+  editCol.addEventListener('scroll', () => { editScroll = editCol.scrollTop; editScrollFor = selFrag; });
+  // Put both back once the rows are in (and again after the editor's read).
+  const restore = () => {
+    listBody.scrollTop = listScroll;
+    if (editScrollFor === selFrag) editCol.scrollTop = editScroll;
+  };
+  setTimeout(restore, 0);
+  setTimeout(restore, 120);
 
   const search = el('input', { placeholder: '이름·설명 검색', value: filter }) as HTMLInputElement;
   search.addEventListener('input', () => {
@@ -100,6 +122,7 @@ export function drawFragments(): void {
   });
   search.classList.add('fragsearch');
   listCol.appendChild(el('div', { class: 'fragtools' }, [search, el('div', { class: 'row' }, [add, addFolder])]));
+  listCol.appendChild(listBody);
 
   // Duplicate stems across folders are invisible in the picker otherwise:
   // both render as the bare name while a bare <name> resolves to just one.
@@ -122,10 +145,10 @@ export function drawFragments(): void {
       const addHere = el('button', { class: 'ghost tiny addhere', text: '＋', title: '이 폴더에 조각 추가' });
       addHere.addEventListener('click', (e) => { e.stopPropagation(); addFragment(addHere, folder); });
       fhead.appendChild(addHere);
-      listCol.appendChild(fhead);
+      listBody.appendChild(fhead);
       if (!isOpen) continue;
       if (!items.length) {
-        listCol.appendChild(el('div', { class: 'hint', style: { padding: '0 8px 4px' }, text: '(비어 있음)' }));
+        listBody.appendChild(el('div', { class: 'hint', style: { padding: '0 8px 4px' }, text: '(비어 있음)' }));
         continue;
       }
     } else if (!items.length) {
@@ -147,7 +170,7 @@ export function drawFragments(): void {
       // Draggable into the chat: the fragment FILE, for Hina to read.
       installDrag(row, () => [it.path]);
       row.addEventListener('click', () => { selFrag = it.path; hub.drawCentre(); });
-      listCol.appendChild(row);
+      listBody.appendChild(row);
     }
   }
 

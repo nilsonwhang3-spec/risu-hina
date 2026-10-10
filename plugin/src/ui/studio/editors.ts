@@ -99,14 +99,14 @@ export function cardEditor(path: string, opts: CardEditorOpts = {}): HTMLElement
     ? editorHead(path, [del, save])
     : el('div', { class: 'row', style: { marginBottom: '6px', justifyContent: 'flex-end', gap: '6px' } }, [del, save]);
 
-  const rootEl = el('div', {}, [
+  const rootEl = el('div', { class: 'cardedit' }, [
     head,
     el('label', { class: 'field' }, [el('span', { text: '이름' }), name]),
     el('label', { class: 'field' }, [el('span', { text: '설명' }), desc]),
     isStyle ? el('div', { class: 'row', style: { marginBottom: '8px' } }, [
       el('label', { class: 'row' }, [enabledBox, el('span', { text: '활성 (생성에 실림)' })]),
     ]) : null,
-    el('label', { class: 'field' }, [el('span', { text: isStyle ? '본문 (## positive / ## negative)' : '본문' }), body]),
+    el('label', { class: 'field cardbodyfield' }, [el('span', { text: isStyle ? '본문 (## positive / ## negative)' : '본문' }), body]),
     out,
   ]);
 

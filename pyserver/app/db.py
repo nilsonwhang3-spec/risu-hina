@@ -668,6 +668,11 @@ ADD_COLUMNS = [
     ("agent_presets", "provider", "TEXT NOT NULL DEFAULT ''"),
     # The workspace a copy / new version of a bot shares (workspace.root).
     ("characters", "family_key", "TEXT NOT NULL DEFAULT ''"),
+    # §1-102: whether RisuAI still has the bot (presence.py): '' never compared,
+    # 'live', 'trash' (RisuAI trash, risu_trash_time in ms), 'missing'.
+    ("characters", "risu_state", "TEXT NOT NULL DEFAULT ''"),
+    ("characters", "risu_trash_time", "INTEGER NOT NULL DEFAULT 0"),
+    ("characters", "risu_checked_at", "REAL NOT NULL DEFAULT 0"),
     # What the agent calls itself (presets.agentName).
     ("agent_presets", "agent_name", "TEXT NOT NULL DEFAULT ''"),
     # v11: request-parameter JSON (providers.plan_for). temperature keeps its

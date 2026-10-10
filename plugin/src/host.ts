@@ -56,6 +56,30 @@ export async function readCharacter(characterIndex: number): Promise<RisuCharact
   return char;
 }
 
+/**
+ * Every character RisuAI holds, as identity only (§1-102): chaId, name and
+ * RisuAI's trash marker. PocketRisu's trashed / deactivated characters are not
+ * in `characters` at all (their stubs are not readable by a plugin), so to us
+ * they are simply absent. The read asks for the 'db' permission the first
+ * time, and that prompt sits behind the fullscreen panel - step aside for it,
+ * as cloneBot does.
+ */
+export async function listCharacters(): Promise<{ chaId: string; name: string; trashTime: number }[]> {
+  let dbSlice: Record<string, unknown> | null = null;
+  try { await Risuai.hideContainer(); } catch { /* not shown */ }
+  try {
+    dbSlice = await Risuai.getDatabase(['characters']);
+  } catch (e) {
+    throw new HostError('failed', 'RisuAI 캐릭터 목록을 읽지 못했습니다: ' + String(e));
+  } finally {
+    try { await Risuai.showContainer('fullscreen'); } catch { /* fine */ }
+  }
+  const list = dbSlice && Array.isArray(dbSlice['characters']) ? dbSlice['characters'] as RisuCharacter[] : null;
+  if (!list) throw new HostError('failed', 'RisuAI 캐릭터 목록을 읽지 못했습니다 (권한을 허용했는지 확인해 주세요)');
+  return list.filter((c) => c && typeof c.chaId === 'string' && c.chaId)
+    .map((c) => ({ chaId: String(c.chaId), name: String(c.name ?? ''), trashTime: Number((c as Record<string, unknown>).trashTime) || 0 }));
+}
+
 export async function readChat(slot: Slot): Promise<RisuChat> {
   const chat = await Risuai.getChatFromIndex(slot.characterIndex, slot.chatIndex);
   if (!chat || !Array.isArray(chat.message)) {
@@ -551,92 +575,6 @@ export async function writeCharacter(
     drift = '쓴 뒤 다시 읽지 못했습니다: ' + (e instanceof Error ? e.message : String(e));
   }
   return { applied, mode: 'edits', parts, verified, ...(drift ? { drift } : {}) };
-}
-
-/**
- * Create a clone bot carrying the working card, as a NEW character.
- *
- * A new chaId is the one write that is safe on every host: mainline's save
- * encoder skips re-encoding an existing non-selected character (edits there
- * silently do not persist), but a chaId it has never seen is always encoded.
- * Assets are shared by reference - keys are content hashes and RisuAI's GC
- * scans every character, so nothing needs copying and the clone is instant.
- *
- * Needs the 'db' permission (getDatabase prompts on first use and returns
- * null when refused) because appending a character is a database write.
- */
-export async function cloneBot(
-  sourceIndex: number,
-  seenChaId: string | undefined,
-  name: string,
-  update: CardUpdate,
-  familyKey = '',
-): Promise<string> {
-  const src = await readCharacter(sourceIndex);
-  if (seenChaId && src.chaId && src.chaId !== seenChaId) {
-    throw new HostError('changed', '봇이 바뀌었습니다. 봇 선택 탭에서 다시 불러와 주세요');
-  }
-
-  const copy: RisuCharacter = structuredClone(src);
-  // The copy shares the source's workspace: the backend reads this stamp on
-  // upload (workspace.family_from_card). RisuAI keeps unknown extension keys
-  // through save, export and charx import, so it survives round trips.
-  if (familyKey) {
-    const ext = { ...((copy['extentions'] as Record<string, unknown> | undefined) ?? {}) };
-    ext['risu_hina'] = { ...((ext['risu_hina'] as Record<string, unknown> | undefined) ?? {}), family: familyKey };
-    copy['extentions'] = ext;
-  }
-  for (const e of update.fields ?? []) copy[e.field] = e.after;
-  if (update.alternateGreetings) copy.alternateGreetings = update.alternateGreetings;
-  if (update.globalLore) copy.globalLore = update.globalLore;
-  if (update.customscript) copy['customscript'] = update.customscript;
-  if (update.triggerscript) copy['triggerscript'] = update.triggerscript;
-
-  copy.chaId = cryptoRandomId();
-  copy.name = name;
-  delete copy['realmId'];
-
-  // RisuAI asks for the 'db' permission with a dialog drawn UNDER the
-  // fullscreen plugin container, so the first clone ever sat at "복제 중…"
-  // until the user closed the panel and found the prompt waiting. The panel
-  // steps aside for the read and comes back right after.
-  let dbSlice: Record<string, unknown> | null = null;
-  try { await Risuai.hideContainer(); } catch { /* not shown */ }
-  try {
-    dbSlice = await Risuai.getDatabase(['characters']);
-  } catch (e) {
-    throw new HostError('failed', '캐릭터 목록을 읽지 못했습니다: ' + String(e));
-  } finally {
-    try { await Risuai.showContainer('fullscreen'); } catch { /* fine */ }
-  }
-  const characters = dbSlice && Array.isArray(dbSlice['characters'])
-    ? (dbSlice['characters'] as RisuCharacter[]).slice()
-    : null;
-  if (!characters) {
-    throw new HostError('failed',
-      "복제에는 'db' 권한이 필요합니다. RisuAI가 띄운 권한 요청을 허용하고 다시 시도해 주세요");
-  }
-
-  // The chats come along. readCharacter can hand back stubs for inactive
-  // chats (PocketRisu loads them lazily), so they are taken from the database
-  // slice, which holds the character whole; a chat that still has no message
-  // list is a stub and is skipped. No real chat: one fresh chat, as before.
-  const srcDb = characters.find((c) => c.chaId && c.chaId === src.chaId) ?? characters[sourceIndex];
-  const srcChats = Array.isArray(srcDb?.chats) ? (srcDb.chats as Record<string, unknown>[]) : [];
-  const real = srcChats.filter((c) => c && Array.isArray(c['message']));
-  if (real.length) {
-    copy.chats = structuredClone(real).map((c) => (c['id'] ? { ...c, id: cryptoRandomId() } : c)) as RisuCharacter['chats'];
-    const page = Number(srcDb?.chatPage ?? src.chatPage ?? 0);
-    copy.chatPage = Number.isFinite(page) ? Math.max(0, Math.min(page, real.length - 1)) : 0;
-  } else {
-    copy.chats = [{ message: [], note: '', name: 'Chat 1', localLore: [] }];
-    copy.chatPage = 0;
-  }
-  characters.push(copy);
-  await Risuai.setDatabase({ characters });
-  // Without this the clone exists but the sidebar never shows it.
-  try { await Risuai.checkCharOrder?.(); } catch { /* cosmetic on hosts without it */ }
-  return copy.chaId ?? '';
 }
 
 function cryptoRandomId(): string {

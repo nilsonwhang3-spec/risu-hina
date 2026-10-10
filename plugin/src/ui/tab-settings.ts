@@ -17,6 +17,7 @@ import { buildDebugCard, buildUpdateCard } from './debugpanel';
 import { transport } from '../transport';
 import { copyToClipboard } from '../host';
 import { buildMcpCard } from './mcp-ui';
+import { buildBotCleanupCard } from './bot-cleanup';
 
 let aboutMount: HTMLElement | null = null;
 
@@ -91,6 +92,8 @@ export function renderSettingsTab(mount: HTMLElement): void {
     ['스킬', [buildSkillsCard({ onMount: (refresh) => { refreshers.push(refresh); } })]],
     // Opt-in extras that are not part of the release bundle.
     ['고급 기능', [buildMcpCard((refresh) => { refreshers.push(refresh); })]],
+    // Its own tab (§1-102, user): some people have hundreds of bots.
+    ['저장공간 정리', [buildBotCleanupCard((refresh) => { refreshers.push(refresh); })]],
     ['정보 · 로그', [buildCatalogCard(), buildDebugCard(), aboutMount]],
   ];
 

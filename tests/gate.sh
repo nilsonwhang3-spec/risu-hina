@@ -34,6 +34,7 @@ run "provider plan & hints"   "$PY" tests/test_providers.py
 run "history thinking ids"    "$PY" tests/test_history.py
 run "partial replace"         "$PY" tests/test_textedit.py
 run "reference bots are read-only" "$PY" tests/test_reference_bots.py
+run "bots RisuAI no longer has" "$PY" tests/test_bot_presence.py
 run "three-way merge"         "$PY" tests/test_merge.py
 run "edit-session lifecycle"  "$PY" tests/test_lifecycle.py
 run "backend HTTP (black-box)" "$PY" tests/test_http.py

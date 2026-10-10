@@ -1,4 +1,44 @@
-# 06. Implementation status — as of 2026-10-10 (v0.15.39 + §1-101 unreleased, Risu Hina)
+# 06. Implementation status — as of 2026-10-10 (v0.15.39 + §1-101~102 unreleased, Risu Hina)
+
+## §1-102 (2026-10-10, unreleased): bots RisuAI no longer has, no more 새 봇으로 저장, fragment editor height
+
+- **Field report:** Hina's DB held "Over The Next" twice - 0.2 imported, trashed in PocketRisu (restorable),
+  0.3 imported. RisuAI gives an imported .charx a new chaId, so every re-import is a new Hina bot and the old
+  one stays; the reference lookup (§1-101) saw both. Asked for: decide how trashed / hidden bots are treated,
+  list Hina's bots that RisuAI no longer has in a 저장공간 정리 tab beside 고급 기능 (people have hundreds of
+  bots), delete them or save them as .charx. Also: drop the bot's "save as" (새 봇으로 저장) - it only makes more
+  same-named bots; and the fragment editor jumped to the top on every folder click and did not fill the panel.
+- **What a plugin can see** (upstream sources, 2026-10-10): RisuAI's trash is the live `characters` entry with
+  `trashTime`, removed for good at a boot three days later (bootstrap.ts). PocketRisu's trash and 비활성화 move
+  the character out of `characters` into `nodeOnlyArchivedCharacters` (trash = stub + `trashedAt`), and 가리기
+  lists the chaId in `nodeOnlyHiddenCharacterIds`; neither key is in the plugin API's allowed list. So: hidden =
+  live; PocketRisu trash / deactivated = absent, indistinguishable from deleted.
+- **Presence** (`presence.py`, columns `characters.risu_state / risu_trash_time / risu_checked_at`): the panel's
+  'RisuAI와 대조' reads `getDatabase(['characters'])` (identity only: chaId, name, trashTime; the panel steps
+  aside for the db permission prompt) and `POST /bots/presence` records `live` / `trash` / `missing` for every
+  bot (not modules, not the home chat). An empty list is refused. Opening a bot (materialize) marks it live.
+  `GET /bots` lists them with chats, turns, pending proposals, `liveNamesake` (a live bot of the same name -
+  usually the re-imported version) and `charxReady` (a full card; an old partial upload cannot become .charx).
+- **Forget** (`POST /bots/forget`, `charKey` or `charKeys`): only `trash` / `missing` bots. Deletes the DB rows
+  (chats → turns, lore, card fields/scripts, asset refs cascade; sessions + messages, staged edits, checkpoints,
+  memories, proposals, card checkpoints explicitly) and the bot's system folder unless a live family member
+  shares it. RisuAI is never touched; projects/ files stay; blobs go with asset GC. `workspace.destroy` (unused,
+  and it removed a shared family folder) is left alone.
+- **설정 → 저장공간 정리** (`ui/bot-cleanup.ts`): its own tab after 고급 기능 - 대조 button and summary, a name
+  filter, chips (전체 · 휴지통 · RisuAI에 없음 · 같은 이름이 RisuAI에 있음), 30 rows a page (natural sort),
+  checkboxes with 이 쪽 전체 and one armed bulk 삭제; per row: state, RisuAI's purge date for trash, CharX로 저장
+  (`/charx/build` with any charKey, missing assets left out, then downloaded) and Hina에서 삭제.
+- **Reference tools:** a name shared by a live bot and its leftovers resolves to the live one; leftovers are
+  tagged [RisuAI 휴지통] / [RisuAI에 없음] in list_reference_bots.
+- **새 봇으로 저장 removed:** the 반영 popover's 고급 · 새 봇으로 저장, `state.saveAsNewBot`, `host.cloneBot`,
+  the agent's `propose_clone_bot`; `actions.propose` refuses `host_clone_bot`, and a card queued before the update
+  fails with a message instead of cloning. The instructions point to snapshots / save_bot_charx instead.
+- **Fragment editor:** the view fills the centre (list and editor scroll on their own, the body box takes the rest;
+  a narrow centre stacks them via a container query), the list's tools stay above its scrolling rows, and the
+  list / editor scroll positions survive the redraw each click causes.
+- Verified: tests/test_bot_presence.py (new, in the gate), test_reference_bots, plugin_smoke (cleanup tab,
+  no 새 봇으로 저장, 7 settings tabs), harness in Chrome (46 leftover bots: pages, filter, CharX, bulk delete;
+  fragment scroll kept at 250px across clicks), gate.
 
 ## §1-101 (2026-10-10, unreleased): long landing lists, studio layout, 1장 finish, reference bots
 

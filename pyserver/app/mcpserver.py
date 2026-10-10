@@ -601,7 +601,7 @@ _OWN_TOOLS: dict[str, tuple[str, dict, Any, bool]] = {
     "approve_proposals": (
         "Approve (or reject) pending proposals of the open bot - the panel's 승인 button. Covers lorebook, "
         "card, script, memory, asset, snapshot proposals (see list_proposals for ids) and host actions: an "
-        "approved propose_writeback / propose_save_copy / propose_clone_bot is carried out by the panel in "
+        "approved propose_writeback / propose_save_copy is carried out by the panel in "
         "RisuAI and this waits for its result. Approving applies to the Hina working copy; approve only what "
         "the user asked for or agreed to. Stops at the first failure.",
         _IDS_SCHEMA, _approve_proposals, True),

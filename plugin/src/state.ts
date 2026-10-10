@@ -295,6 +295,14 @@ export interface CharxPreview {
   lore: number; regex: number; triggers: number; greetings: number;
 }
 
+/** A bot Hina holds and whether RisuAI still has it (§1-102). */
+export interface HinaBot {
+  charKey: string; chaId: string; name: string;
+  state: '' | 'live' | 'trash' | 'missing';
+  trashTime: number; purgeAt: number; checkedAt: number; updatedAt: number;
+  chats: number; turns: number; pendingActions: number; liveNamesake: boolean; charxReady: boolean;
+}
+
 export interface CharxBuilt {
   ok: boolean; file: string; path: string; size: number; assets: number; dropped: number;
   missing: { name: string; type: string; key: string }[]; assetBytes: number; seconds: number;
@@ -2459,6 +2467,35 @@ class AppState {
     return await transport.get('/charx/preview', { charKey: this.activeCharKey });
   }
 
+  /** Hina's bots with their RisuAI state, as last compared (§1-102). */
+  async hinaBots(): Promise<HinaBot[]> {
+    return (await transport.get<{ bots: HinaBot[] }>('/bots')).bots ?? [];
+  }
+
+  /** Read RisuAI's character list and record which of Hina's bots it still has. */
+  async compareBots(): Promise<{ counts: Record<string, number>; risuCount: number; bots: HinaBot[] }> {
+    const { listCharacters } = await import('./host');
+    const characters = await listCharacters();
+    return await transport.post('/bots/presence', { characters });
+  }
+
+  /** Remove Hina's copy of a bot RisuAI no longer has. RisuAI is not touched. */
+  async forgetBot(charKey: string): Promise<{ name: string; note: string }> {
+    return await transport.post('/bots/forget', { charKey });
+  }
+
+  /** The same for many at once; one refusal does not stop the rest. */
+  async forgetBots(charKeys: string[]): Promise<{ forgotten: { name: string }[]; failed: { charKey: string; error: string }[] }> {
+    return await transport.post('/bots/forget', { charKeys }, 300_000);
+  }
+
+  /** A .charx of any Hina bot (not only the open one), assets it lacks left out. */
+  async charxOf(charKey: string): Promise<CharxBuilt> {
+    const r = await transport.post<CharxBuilt>('/charx/build', { charKey, allowMissing: true, name: '' }, 600_000);
+    this.touchFiles([r.path]);
+    return r;
+  }
+
   /** Build out/<name>.charx on the backend from the working card + store. */
   async charxBuild(opts: { allowMissing?: boolean; name?: string } = {}): Promise<CharxBuilt> {
     const r = await transport.post<CharxBuilt>('/charx/build', {
@@ -2922,9 +2959,9 @@ class AppState {
           ? '카드에 반영할 변경이 없었습니다.'
           : `카드 변경 ${out.applied}건${out.parts?.length ? `(${host.describeCardParts(out.parts)})` : ""}을 RisuAI에 반영하고 저장을 확인했습니다.`;
       } else if (r.host.kind === 'host_clone_bot') {
-        const name = String(r.host.args?.name || '') || '복제 봇';
-        await this.cloneBot(name);
-        detail = `복제 봇 “${name}” 을 만들었습니다. RisuAI 목록에서 확인해 주세요.`;
+        // Removed (§1-102): a clone is one more same-named bot in RisuAI and
+        // Hina. A card queued before the update is refused, not run.
+        throw new Error('봇 복제(새 봇으로 저장)는 더 이상 지원하지 않습니다');
       } else if (r.host.kind === 'host_persona_writeback') {
         const out = await this.personaWriteBack(String(r.host.args?.key || ''));
         detail = out.copied
@@ -3364,60 +3401,6 @@ class AppState {
     if (update.emotionImages) update.emotionImages = update.emotionImages.map(row => Array.isArray(row) ? [row[0], replace(row[1]), ...row.slice(2)] : row);
     if (update.additionalAssets) update.additionalAssets = update.additionalAssets.map(row => Array.isArray(row) ? [row[0], replace(row[1]), ...row.slice(2)] : row);
     if (update.ccAssets) update.ccAssets = update.ccAssets.map(row => row && typeof row === 'object' ? { ...row, uri: replace((row as { uri?: unknown }).uri) } : row);
-  }
-
-  /**
-   * 새 봇으로 저장: keep editing this bot, and keep what it was.
-   *
-   * The bot as RisuAI holds it now - the baseline, untouched by the working
-   * copy - is cloned first as "<name> (백업)", chats included. Then the
-   * working copy is written into the live bot and becomes its baseline, so
-   * the workspace, snapshots and conversation carry on where they are. The
-   * opposite (clone the edited card, leave the original) put the user in a
-   * new bot with an empty workspace and the old one still pending.
-   */
-  async saveAsNewBot(backupName: string): Promise<{ backupChaId: string; applied: number; mode: string }> {
-    return foregroundWrite(report => this.performSaveAsNewBot(backupName, report));
-  }
-
-  private async performSaveAsNewBot(backupName: string, progress: (text: string) => void): Promise<{ backupChaId: string; applied: number; mode: string }> {
-    if (!this.slot) throw new Error('호스트 상태를 먼저 읽어야 합니다');
-    const patch = await this.cardPatch(this.activeCharKey);
-    if (!patch.full) {
-      throw new Error('구버전 업로드 상태의 카드라 저장할 수 없습니다. 패널을 닫았다 다시 열어 주세요');
-    }
-    // No card update: the backup is the live card as it is.
-    const family = this.workspace?.familyKey || this.activeCharKey;
-    progress('기존 봇의 백업을 저장하는 중…');
-    const backupChaId = await host.cloneBot(this.slot.characterIndex, patch.chaId, backupName, {}, family);
-    const r = await this.performCardWriteBack(progress);
-    if (!r.verified) {
-      throw new Error('RisuAI 가 카드 쓰기를 받지 않았습니다'
-        + (r.drift ? ` (${r.drift})` : '')
-        + '. 백업 봇은 만들어졌지만 이 봇에는 반영되지 않았습니다 - 편집 내용은 그대로 있습니다.');
-    }
-    return { backupChaId, applied: r.applied, mode: r.mode };
-  }
-
-  /** Create a clone bot in RisuAI carrying the working card. */
-  async cloneBot(name: string): Promise<string> {
-    return foregroundWrite(report => this.performCloneBot(name, report));
-  }
-
-  private async performCloneBot(name: string, progress: (text: string) => void): Promise<string> {
-    if (!this.slot) throw new Error('호스트 상태를 먼저 읽어야 합니다');
-    const patch = await this.cardPatch(this.activeCharKey);
-    if (!patch.full) {
-      throw new Error('구버전 업로드 상태의 카드라 복제할 수 없습니다. 패널을 닫았다 다시 열어 주세요');
-    }
-    const update = this.cardUpdateFrom(patch, true) ?? {};
-    await this.resolveStagedAssets(update, progress, this.activeCharKey);
-    progress('이미지 준비 완료 · 복제 봇 저장 중…');
-    // The clone shares this bot's workspace: it carries the family key.
-    const family = this.workspace?.familyKey || this.activeCharKey;
-    const chaId = await host.cloneBot(this.slot.characterIndex, patch.chaId, name, update, family);
-    await this.cardCommit('복제 직전', this.activeCharKey);
-    return chaId;
   }
 
 }

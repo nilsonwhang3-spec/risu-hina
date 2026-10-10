@@ -90,6 +90,10 @@ def propose(kind: str, *, chat_key: str, char_key: str, summary: str,
     """Record an intent. Nothing happens until someone approves it."""
     if kind not in EXECUTORS and kind not in HOST_KINDS:
         raise ActionError(f"모르는 작업입니다: {kind}")
+    if kind == "host_clone_bot":
+        # Removed (§1-102): a clone is one more same-named bot to tell apart.
+        # The kind stays known so a card queued before the update can be rejected.
+        raise ActionError("봇 복제(새 봇으로 저장)는 더 이상 지원하지 않습니다 - 스냅샷이나 CharX 저장을 쓰세요")
     args = dict(args or {})
     foreign = foreign_rows(char_key, args)
     if foreign:

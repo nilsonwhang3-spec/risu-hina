@@ -9,7 +9,11 @@
  *
  * While a RisuAI module is the card tabs' target (§1-95) the same bar acts on
  * the module: 반영 writes db.modules (no live bot needed), the charx button
- * becomes 내보내기 (.charx / .risum), and 새 봇으로 저장 is not offered.
+ * becomes 내보내기 (.charx / .risum).
+ *
+ * 새 봇으로 저장 (a backup clone left in RisuAI) is gone (§1-102, user): every
+ * clone is one more bot of the same name in RisuAI and in Hina, and the
+ * leftovers were already hard to tell apart.
  *
  * The asset gate: 반영 stays disabled until the background importer
  * (assets.ts, started by state.upload) reports the bot's assets in the
@@ -51,7 +55,7 @@ export function buildBotBar(): HTMLElement {
   applyBadge = el('span', { class: 'badge warn applybadge', style: { display: 'none' } });
   applyBtn = el('button', {
     class: 'tool', dataset: { tool: 'card-apply' },
-    title: '카드를 RisuAI에 반영 · 새 봇으로 저장',
+    title: '카드를 RisuAI에 반영',
   }, [
     el('span', { class: 'glyph', text: TOOL.apply }),
     el('span', { class: 'tool-label', text: '반영' }),
@@ -274,8 +278,8 @@ export function refreshBotBar(): void {
   applyBtn.title = mod
     ? `모듈 '${mod.name}' 을(를) RisuAI 모듈 목록에 반영`
     : blocked
-    ? blocked + ' (새 봇으로 저장은 눌러서 쓸 수 있습니다)'
-    : '카드를 RisuAI에 반영 · 새 봇으로 저장';
+    ? blocked
+    : '카드를 RisuAI에 반영';
 }
 
 function describe(c: CardChanges | null): string[] {
@@ -377,46 +381,6 @@ async function openApply(anchor: HTMLElement): Promise<void> {
     }
   });
 
-  // 새 봇으로 저장: the bot as RisuAI has it now is kept as "(백업)", the
-  // edits go into this bot and become its baseline, editing carries on here.
-  // It replaced "복제 봇 생성" (a clone of the edited card next to an
-  // untouched original), which left the user in a new bot with an empty
-  // workspace and the old one still showing every change as pending.
-  const nameInput = el('input', {
-    value: (state.workspace?.characterName || '봇') + ' (백업)',
-    placeholder: '백업 봇 이름',
-  }) as HTMLInputElement;
-  const saveNew = el('button', { text: '새 봇으로 저장', title: '기준선(편집 전, RisuAI 가 지금 들고 있는 카드)을 백업 봇으로 복제한 뒤, 편집 중인 내용을 이 봇에 반영하고 계속 편집합니다' }) as HTMLButtonElement;
-  saveNew.disabled = !!blocked;
-  saveNew.addEventListener('click', async () => {
-    saveNew.disabled = true;
-    const was = saveNew.textContent;
-    // The popover itself reports: the shell notice sits above the tabs and
-    // is easy to miss, and the backup can wait on RisuAI's permission prompt
-    // (the panel steps aside for it and comes back).
-    saveNew.textContent = '저장 중…';
-    out.textContent = '백업 봇을 만드는 중입니다. RisuAI 가 db 권한을 물으면 허용해 주세요.';
-    try {
-      const backup = nameInput.value.trim() || '백업';
-      const r = await state.saveAsNewBot(backup);
-      const said = `현재 편집 중인 봇을 새 봇으로 저장하였습니다. 기존 봇은 “${backup}” 이름으로 복제되었습니다.`
-        + (r.mode === 'noop' ? ' (반영할 변경은 없었습니다.)' : ` 변경 ${r.applied}건이 이 봇에 반영되어 새 기준선이 되었습니다.`);
-      shellNotice(said, 'ok');
-      clear(body);
-      const ok = el('button', { class: 'primary tiny', text: '닫기' });
-      ok.addEventListener('click', close);
-      body.appendChild(el('div', { class: 'notice ok', text: '✔ ' + said }));
-      body.appendChild(el('div', { class: 'hint', text: '백업 봇은 RisuAI 봇 목록에 새 캐릭터로 있습니다. 챗도 함께 복사되었고 에셋은 공유합니다.' }));
-      body.appendChild(el('div', { class: 'row', style: { marginTop: '8px' } }, [ok]));
-    } catch (e) {
-      void clientLog('error', 'saveAsNewBot failed', { error: msg(e) });
-      shellNotice('새 봇으로 저장하지 못했습니다: ' + msg(e), 'err');
-      out.textContent = '저장하지 못했습니다: ' + msg(e);
-      saveNew.disabled = !!applyBlockReason();
-      saveNew.textContent = was;
-    }
-  });
-  const clone = saveNew;
 
   body.appendChild(el('div', { class: 'row' }, [apply]));
   body.appendChild(out);
@@ -445,14 +409,6 @@ async function openApply(anchor: HTMLElement): Promise<void> {
     class: 'hint',
     text: '메타·인사말·봇 로어북·Regex·트리거가 한 번에 쓰입니다. 챗은 절대 건드리지 않습니다.',
   }));
-  // 새 봇으로 저장 is for the rare case (§1-62, user): folded small under
-  // 고급, not spread across the modal next to the one button people press.
-  body.appendChild(el('details', { class: 'advbox applyadv' }, [
-    el('summary', { text: '고급 · 새 봇으로 저장 (백업 봇을 남기고 반영)' }),
-    el('div', { class: 'hint', style: { margin: '4px 0 6px' },
-      text: '기준선(편집 전 상태)을 백업 봇(챗 포함, 새 캐릭터)으로 남기고 편집본을 이 봇에 반영해 새 기준선으로 삼습니다. 처음 한 번 db 권한 허용이 필요합니다.' }),
-    el('div', { class: 'row' }, [nameInput, clone]),
-  ]));
 }
 
 // --- 버전 (popover) -----------------------------------------------------------

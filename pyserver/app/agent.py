@@ -175,8 +175,9 @@ Principles:
 - **Bot (card) editing follows the same grammar.** See rows with read_card and propose with
   propose_card_edit / propose_greeting_* / propose_regex_* / propose_trigger_*. The card affects
   **every chat** of this bot - never fix one chat's problem in the card. Writing to RisuAI
-  (propose_card_writeback) and cloning a bot (propose_clone_bot) touch the RisuAI original:
-  get agreement first.
+  (propose_card_writeback) touches the RisuAI original: get agreement first. There is no
+  "save as a new bot"/clone: every copy was one more same-named bot to tell apart. To keep the
+  current state, propose_bot_snapshot; to hand out a copy, save_bot_charx.
 - If the user explicitly says to save/apply all the way to RisuAI, call write_card_to_risu for
   already accepted card changes. Their request is authorization; do not demand another click or
   a move to the meta tab. It awaits the plugin's verified result in this turn. Pending unapproved
@@ -1072,13 +1073,17 @@ def build(model: Any = None) -> Agent[Deps]:
     # entry on the open bot (propose_regex_add / propose_trigger_add /
     # propose_lore_add / propose_card_edit ...).
 
+    _REF_STATE = {"live": "", "trash": "RisuAI 휴지통", "missing": "RisuAI에 없음(삭제·포켓리스 휴지통/비활성화)",
+                  "": "RisuAI 대조 전"}
+
     def _ref_bots() -> list[dict]:
         out = []
-        for r in db.query("SELECT char_key, name, updated_at FROM characters ORDER BY updated_at DESC"):
+        for r in db.query("SELECT char_key, name, updated_at, risu_state FROM characters ORDER BY updated_at DESC"):
             ck = r["char_key"]
             if home.is_home(ck) or modmod.is_module_key(ck):
                 continue
-            out.append({"charKey": ck, "name": r["name"] or "", "updatedAt": r["updated_at"]})
+            out.append({"charKey": ck, "name": r["name"] or "", "updatedAt": r["updated_at"],
+                        "state": r["risu_state"] or ""})
         return out
 
     def _ref_resolve(ctx: RunContext[Deps], bot: str) -> tuple[str, str] | str:
@@ -1094,8 +1099,15 @@ def build(model: Any = None) -> Agent[Deps]:
                   [b for b in bots if low in b["name"].casefold()]
         if not hit:
             return f"'{want}' 봇이 히나 DB에 없습니다 - list_reference_bots 로 이름을 확인하세요"
+        # The same bot imported again is a second row (a new chaId); the old
+        # one usually sits in RisuAI's trash or is gone (§1-102). One that
+        # RisuAI still has wins over its leftovers.
+        live = [b for b in hit if b["state"] == "live"]
+        if len(hit) > 1 and len(live) == 1:
+            hit = live
         if len(hit) > 1:
-            names = ", ".join(f"{b['name']} (charKey={b['charKey']})" for b in hit[:8])
+            names = ", ".join(f"{b['name']} (charKey={b['charKey']}{', ' + _REF_STATE.get(b['state'], '') if _REF_STATE.get(b['state']) else ''})"
+                              for b in hit[:8])
             return f"'{want}' 에 맞는 봇이 여러 개입니다. charKey 로 하나를 고르세요: {names}"
         b = hit[0]
         if b["charKey"] in (ctx.deps.char_key, ctx.deps.bot_key):
@@ -1112,7 +1124,9 @@ def build(model: Any = None) -> Agent[Deps]:
     def list_reference_bots(ctx: RunContext[Deps], query: str = "") -> str:
         """Other bots stored in Hina's DB, usable as READ-ONLY references ("B 봇의 ~ 기능을 참고해서").
 
-        query filters by name. Then read one with ref_bot_overview / ref_search / ref_read_card /
+        query filters by name. A bot tagged [RisuAI 휴지통]/[RisuAI에 없음] is a leftover (often an
+        older version of a bot imported again); prefer the untagged one of the same name.
+        Then read one with ref_bot_overview / ref_search / ref_read_card /
         ref_list_scripts / ref_read / ref_read_script_text / ref_list_lore (bot = its name or charKey).
         """
         low = query.strip().casefold()
@@ -1128,8 +1142,9 @@ def build(model: Any = None) -> Agent[Deps]:
             n = {k: db.one("SELECT COUNT(*) AS n FROM card_scripts WHERE char_key = ? AND kind = ? "
                            "AND origin <> 'deleted'", (b["charKey"], k))["n"]
                  for k in ("customscript", "triggerscript")}
+            tag = _REF_STATE.get(b["state"], "")
             out.append(f"- {b['name'] or '(이름 없음)'}  charKey={b['charKey']}  로어북 {n_lore} · "
-                       f"Regex {n['customscript']} · 트리거 {n['triggerscript']}")
+                       f"Regex {n['customscript']} · 트리거 {n['triggerscript']}" + (f"  [{tag}]" if tag else ""))
         if len(bots) > 100:
             out.append(f"… 외 {len(bots) - 100}개 - query 로 좁히세요")
         return "\n".join(out)
@@ -3057,15 +3072,6 @@ def build(model: Any = None) -> Agent[Deps]:
         return _propose(ctx, "host_asset_replace",
                         f"에셋 교체 “{name}” ({info['size'] // 1024}KB) — {reason}",
                         {"name": name, "path": info["path"], "ext": info["ext"]})
-
-    @agent.tool
-    def propose_clone_bot(ctx: RunContext[Deps], name: str, reason: str) -> str:
-        """Propose creating a clone bot in RisuAI carrying the current edits.
-
-        The original bot is untouched. Assets share their references, so the clone is instant.
-        """
-        return _propose(ctx, "host_clone_bot", f"복제 봇 “{name}” 생성 — {reason}",
-                        {"name": name})
 
     # --- the jobs the panel can do, so the agent can too ---------------------
 

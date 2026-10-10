@@ -882,6 +882,9 @@ def materialize(payload: dict, *, force: bool = False) -> dict:
         cha_id, str(card.get("name") or ""), card, payload.get("characterIndex"),
         family_key=family if family != store.char_key(cha_id) else "",
     )
+    # Read from RisuAI just now: it has the bot (§1-102).
+    from . import presence
+    presence.mark_live(ck)
     base = root(ck)
 
     _write(base / "card.md", card_markdown(card))
