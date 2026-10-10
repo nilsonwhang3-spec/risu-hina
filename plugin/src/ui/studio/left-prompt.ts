@@ -143,15 +143,16 @@ export function buildLeftPrompt(mount: HTMLElement): void {
   const pickTitle = items.length
     ? `저장된 스타일 ${items.length}개 — 선택 · 이동 · 삭제 · 추가`
     : '스타일 추가';
-  mount.appendChild(el('div', { class: 'sectiontitle', style: { padding: '6px 8px 0' }, text: '스타일 프롬프트' }));
-  mount.appendChild(el('div', { style: { padding: '4px 8px 0' } }, [
-    pickerRow(cur ? { name: cur.name, hint: cur.description || undefined,
-      badges: styleFolder(cur) ? [{ text: styleFolder(cur) }] : undefined } : null, {
-      title: pickTitle,
-      emptyHint: items.length ? '선택된 스타일 없음 — › 에서 고르세요' : '스타일이 없습니다. › 에서 하나 만들어 주세요.',
-      onOpen: openStylePicker,
-    }),
-  ]));
+  // Each part of the column is ONE section with ONE header (§1-101, user:
+  // "섹션 구분 확실히", "카드 안에 카드가 많음"): a rule between sections, no
+  // frame around a frame.
+  const styleSec = section('스타일 프롬프트', '스타일 파일에 저장됩니다');
+  styleSec.body.appendChild(pickerRow(cur ? { name: cur.name, hint: cur.description || undefined,
+    badges: styleFolder(cur) ? [{ text: styleFolder(cur) }] : undefined } : null, {
+    title: pickTitle,
+    emptyHint: items.length ? '선택된 스타일 없음 — › 에서 고르세요' : '스타일이 없습니다. › 에서 하나 만들어 주세요.',
+    onOpen: openStylePicker,
+  }));
 
   // --- 2. what the style saves: prompts + 요청 설정 + 저장 ------------------------------
   const editBox = el('div', { class: 'styleedit stylesaved' });
@@ -160,25 +161,30 @@ export function buildLeftPrompt(mount: HTMLElement): void {
     text: '스타일을 선택하면 긍정/부정 프롬프트와 요청 설정을 여기서 고치고 저장합니다.' }));
   editBox.appendChild(paramsRow(!!cur));
   if (cur) editBox.appendChild(saveBar());
-  mount.appendChild(editBox);
+  styleSec.body.appendChild(editBox);
+  mount.appendChild(styleSec.node);
 
   // --- 3. not saved: this session's extra tags -----------------------------------------
-  mount.appendChild(el('div', { class: 'sectiontitle', style: { padding: '10px 8px 0' }, text: '임시 프롬프트 (저장 안 됨)' }));
-  buildTemporaryPrompt(mount);
-  buildTemporaryPrompt(mount, true);
+  // Said ONCE, in the header: every row and the body used to repeat it.
+  const tempSec = section('임시 프롬프트', '저장 안 됨');
+  buildTemporaryPrompt(tempSec.body);
+  buildTemporaryPrompt(tempSec.body, true);
+  mount.appendChild(tempSec.node);
 
   // --- 4. the material: characters and fragments ------------------------------------------
-  mount.appendChild(el('div', { class: 'sectiontitle', style: { padding: '10px 8px 0' }, text: '캐릭터 · 조각' }));
+  const matSec = section('캐릭터 · 조각', '');
   const nChars = activeOf('characters').length;
-  charBadge = el('span', { class: 'badge' + (nChars ? ' ok' : ''), text: String(nChars) });
+  // A count is text, not a box inside the button (user: "버튼에 숫자표기에
+  // 또 중첩된 네모").
+  charBadge = el('span', { class: 'toolcount' + (nChars ? ' on' : ''), text: String(nChars) });
   const charBtn = el('button', { class: 'ghost toolbtn', title: '캐릭터 프롬프트 — 이 열이 캐릭터 목록으로 바뀝니다' },
     [el('span', { text: '캐릭터' }), charBadge]);
   charBtn.addEventListener('click', () => { S.leftView = 'characters'; hub.drawLeft(); });
 
   const nFrags = (S.cards.fragments ?? []).length;
-  fragBadge = el('span', { class: 'badge', text: String(nFrags) });
+  fragBadge = el('span', { class: 'toolcount', text: String(nFrags) });
   fragErrBadge = el('span', {
-    class: 'badge err',
+    class: 'toolcount err',
     style: { display: S.unresolvedRefs.length ? '' : 'none' },
     text: `미해결 ${S.unresolvedRefs.length}`,
     title: '프롬프트가 참조하는데 조각이 없는 이름',
@@ -190,8 +196,22 @@ export function buildLeftPrompt(mount: HTMLElement): void {
     S.selectedFile = '';
     hub.drawCentre();
   });
-  mount.appendChild(el('div', { class: 'toolbtns' }, [charBtn, fragBtn]));
+  matSec.body.appendChild(el('div', { class: 'toolbtns' }, [charBtn, fragBtn]));
+  mount.appendChild(matSec.node);
   updateSaveBar();
+}
+
+/** One section of the column: a header (title + a muted note) over its body. */
+function section(title: string, note: string): { node: HTMLElement; body: HTMLElement } {
+  const body = el('div', { class: 'studiosecbody' });
+  const node = el('div', { class: 'studiosec' }, [
+    el('div', { class: 'studiosechead' }, [
+      el('span', { class: 'studiosectitle', text: title }),
+      note ? el('span', { class: 'studiosecnote', text: note }) : null,
+    ]),
+    body,
+  ]);
+  return { node, body };
 }
 
 /** 요청 설정 (§1-35, §1-77) sits inside the style block: it is part of what
@@ -219,27 +239,30 @@ function buildTemporaryPrompt(mount: HTMLElement, negative = false): void {
   const label = negative ? '임시 네거티브 프롬프트' : '임시 프롬프트';
   const textKey = negative ? 'negativeText' : 'text';
   const expandedKey = negative ? 'negativeExpanded' : 'expanded';
-  const toggle = el('button', { class: 'ghost tiny', title: label + ' 펼치기' }) as HTMLButtonElement;
-  const status = el('span', { class: 'hint' });
+  const toggle = el('button', { class: 'ghost tiny foldcaret', title: label + ' 펼치기' }) as HTMLButtonElement;
+  const status = el('span', { class: 'badge ok tempon' });
   const input = el('textarea', { rows: '4', class: 'promptedit', placeholder: negative ? '이번 작업에서 제외할 태그' : '이번 작업에 추가할 태그',
     'aria-label': label + ' (저장되지 않음)' }) as HTMLTextAreaElement;
   input.value = temporaryPrompt[textKey];
   const reset = el('button', { class: 'ghost tiny', text: '비우기' });
-  const body = el('div', {}, [input,
-    el('div', { class: 'row' }, [el('span', { class: 'hint grow', text: '저장되지 않음 · 새로고침하면 초기화됩니다' }), reset])]);
+  const body = el('div', { class: 'tempbody' }, [input,
+    el('div', { class: 'row', style: { justifyContent: 'flex-end' } }, [reset])]);
   const sync = (): void => {
-    toggle.textContent = temporaryPrompt[expandedKey] ? '−' : '+';
+    toggle.textContent = temporaryPrompt[expandedKey] ? '▾' : '▸';
     toggle.setAttribute('aria-expanded', String(temporaryPrompt[expandedKey]));
     toggle.title = label + (temporaryPrompt[expandedKey] ? ' 접기' : ' 펼치기');
     body.style.display = temporaryPrompt[expandedKey] ? '' : 'none';
-    status.textContent = temporaryPrompt[textKey].trim() ? '생성에 적용 중 · 저장되지 않음' : '저장되지 않음';
+    // Only the useful fact per row: this one is riding the next run.
+    const on = !!temporaryPrompt[textKey].trim();
+    status.textContent = on ? '적용 중' : '';
+    status.style.display = on ? '' : 'none';
   };
   toggle.addEventListener('click', () => { temporaryPrompt[expandedKey] = !temporaryPrompt[expandedKey]; sync(); });
   input.addEventListener('input', () => { temporaryPrompt[textKey] = input.value; sync(); checkUnresolved(); });
   reset.addEventListener('click', () => { temporaryPrompt[textKey] = ''; input.value = ''; sync(); checkUnresolved(); });
-  mount.appendChild(el('div', { class: 'styleedit temporary' }, [
-    el('div', { class: 'row' }, [toggle, el('span', { text: label }), status]), body,
-  ]));
+  const head = el('div', { class: 'row promptfoldhead' }, [toggle, el('span', { class: 'promptfoldlabel', text: label }), status]);
+  head.addEventListener('click', (ev) => { if (ev.target !== toggle) toggle.click(); });
+  mount.appendChild(el('div', { class: 'temporary promptfold' }, [head, body]));
   attachHilite(input, { mode: 'nai', fragments: () => fragKeys() });
   sync();
 }
@@ -249,7 +272,7 @@ export function syncPromptBadges(): void {
   if (charBadge?.isConnected) {
     const n = activeOf('characters').length;
     charBadge.textContent = String(n);
-    charBadge.className = 'badge' + (n ? ' ok' : '');
+    charBadge.className = 'toolcount' + (n ? ' on' : '');
   }
   if (fragBadge?.isConnected) fragBadge.textContent = String((S.cards.fragments ?? []).length);
   if (fragErrBadge?.isConnected) {
@@ -525,12 +548,12 @@ function buildStyleEditor(mountEl: HTMLElement, path: string): void {
 function promptFold(which: 'pos' | 'neg', label: string, input: HTMLTextAreaElement):
     { node: HTMLElement; preview(): void; setPeek(t: string): void } {
   let open = promptOpen(which);
-  const toggle = el('button', { class: 'ghost tiny' }) as HTMLButtonElement;
+  const toggle = el('button', { class: 'ghost tiny foldcaret' }) as HTMLButtonElement;
   const peek = el('span', { class: 'hint grow promptpeek' });
   // The hilite wraps the textarea later; folding hides this box, wrapper and all.
   const body = el('div', {}, [input]);
   const sync = (): void => {
-    toggle.textContent = open ? '−' : '+';
+    toggle.textContent = open ? '▾' : '▸';
     toggle.title = label + (open ? ' 접기' : ' 펼치기');
     toggle.setAttribute('aria-expanded', String(open));
     body.style.display = open ? '' : 'none';

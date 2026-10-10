@@ -411,6 +411,10 @@ pre.mono {
 .modetext > span { overflow-wrap: anywhere; }
 .modecaret { color: var(--textcolor2, #79839a); }
 .modebody { margin-top: 14px; }
+/* §1-101: each landing list's own filter box and its page line. */
+.landfilter { margin: 0 0 8px; max-width: 640px; }
+.landfilter input { width: 100%; box-sizing: border-box; }
+.pagenav { gap: 6px; align-items: center; padding: 6px 8px; border-top: 1px solid var(--borderc, #2b323f); }
 .loadingrow { cursor: default; }
 .foldrow { cursor: pointer; }
 .chatitem.busy { opacity: .6; }
@@ -1400,18 +1404,55 @@ label.row { align-items: center; gap: 6px; }
 .split.lcollapse > .explorer, .split.lcollapse > .gutter.leftside { display: none; }
 .split.rcollapse > .right, .split.rcollapse > .gutter:not(.leftside) { display: none; }
 
-/* The tool buttons under the style editor (캐릭터 · 조각). */
-.toolbtns { display: flex; gap: 6px; padding: 6px 8px; }
+/* The 배치 tab in three regions - preset, scenes, 예약·생성 - and the
+   server queue as one folded line above them (§1-101). */
+.batchsec { padding: 10px 0; border-top: 1px solid var(--border, #2b323f); }
+.batchsec.first { border-top: none; padding-top: 2px; }
+.studio-job-list { margin-bottom: 8px; }
+.jobqueue { border: 1px solid var(--border, #2b323f); border-radius: 6px; padding: 4px 8px; }
+.jobqueue > summary { cursor: pointer; display: flex; gap: 8px; align-items: baseline; list-style: none; }
+.jobqueue > summary::before { content: '▸'; font-size: 10px; color: var(--textcolor2, #79839a); }
+.jobqueue[open] > summary::before { content: '▾'; }
+.jobqueuelist { max-height: 30vh; overflow-y: auto; margin-top: 4px; }
+.jobqueuelist > .row { gap: 6px; align-items: center; padding: 2px 0; min-width: 0; }
+/* The 프롬프트 column's sections (§1-101): one header each, a rule between
+   them, no frame inside a frame. */
+.studiosec { padding: 10px 8px 12px; border-top: 1px solid var(--border, #2b323f); }
+.studiosec:first-child { border-top: none; padding-top: 8px; }
+.studiosechead { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; min-width: 0; }
+.studiosectitle { font-size: 12px; font-weight: 700; letter-spacing: .02em; white-space: nowrap; }
+.studiosecnote { font-size: 11px; color: var(--textcolor2, #79839a); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The tool buttons of the material section (캐릭터 · 조각). */
+.toolbtns { display: flex; gap: 6px; }
 .toolbtns .toolbtn { flex: 1; padding: 7px 6px; display: flex; align-items: center; justify-content: center; gap: 6px; }
+.toolcount { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--textcolor2, #79839a); }
+.toolcount.on { color: #4ade80; font-weight: 600; }
+.toolcount.err { color: var(--err, #f87171); }
+/* Fold toggles are a caret, not a boxed +/-. */
+button.foldcaret { border: none; background: none; padding: 0 2px; min-width: 14px; font-size: 11px; color: var(--textcolor2, #79839a); }
+.temporary { margin-bottom: 4px; }
+.temporary .promptfoldhead { cursor: pointer; }
+.temporary .tempbody { margin: 4px 0 6px; }
+.temporary textarea { width: 100%; box-sizing: border-box; }
+.temporary textarea.promptedit { min-height: 60px; resize: vertical; }
+.badge.tempon { font-size: 10px; padding: 0 6px; }
+/* The run footer: 장수 as one stepper, every part the same height. */
+.runctl { gap: 8px; align-items: center; }
+.stepper { display: inline-flex; align-items: stretch; height: 28px; border: 1px solid var(--border, #2b323f); border-radius: 6px; overflow: hidden; }
+.stepper > button { height: 100%; min-width: 28px; padding: 0 8px; border: none; border-radius: 0; background: transparent; line-height: 1; }
+.stepper > input.countbox { height: 100%; width: 44px; padding: 0 2px; margin: 0; border: none; border-left: 1px solid var(--border, #2b323f);
+  border-right: 1px solid var(--border, #2b323f); border-radius: 0; background: transparent; box-sizing: border-box; -moz-appearance: textfield; }
+.stepper > input.countbox::-webkit-outer-spin-button, .stepper > input.countbox::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.runctl > button.primary { height: 28px; padding: 0 14px; }
 
 /* The selected style, edited in place in the left column. */
-.styleedit { padding: 4px 8px 0; }
+.styleedit { padding: 4px 0 0; }
 .styleedit textarea { width: 100%; box-sizing: border-box; resize: vertical; }
 .styleedit .field { display: block; margin-bottom: 6px; }
 .styleedit .field > span { display: block; font-size: 11px; opacity: .7; margin-bottom: 2px; }
 /* §1-90: what the style saves sits in one framed block (prompts, 요청 설정,
    저장); the temporary prompts and the material buttons follow it. */
-.styleedit.stylesaved { margin: 6px 8px 0; padding: 6px 8px; border: 1px solid var(--border, #2b323f); border-radius: 8px; }
+.styleedit.stylesaved { margin: 8px 0 0; padding: 0; }
 .stylesaved .genrow { gap: 6px; align-items: center; margin: 2px 0 4px; min-width: 0; }
 .stylesaved .genpeek { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
 .stylesavebar { gap: 6px; align-items: center; padding-top: 6px; margin-top: 4px; border-top: 1px dashed var(--border, #2b323f); min-width: 0; }
@@ -1460,9 +1501,21 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
 .toast.err { border-color: rgba(239, 68, 68, .7); }
 
 /* The fragment organizer in the centre. */
-.fragcols { display: flex; gap: 14px; align-items: flex-start; width: 100%; }
-.fragcols > .fraglist { flex: 0 0 220px; min-width: 0; }
-.fragcols > .fragedit { flex: 1 1 auto; min-width: 0; width: 100%; }
+/* The editor needs room: in a narrow centre it goes UNDER the list instead of
+   being squeezed to a column of single characters (§1-101). */
+.fragcols { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start; width: 100%; }
+.fragcols > .fraglist { flex: 1 1 220px; max-width: 100%; min-width: 0; max-height: 50vh; overflow-y: auto; }
+.fragcols > .fragedit { flex: 3 1 300px; min-width: 0; }
+.fraghead { gap: 8px; align-items: baseline; margin-bottom: 10px; flex-wrap: wrap; }
+.fraghelp { font-size: 11px; }
+.fraghelp summary { cursor: pointer; color: var(--textcolor2, #79839a); }
+.fraghelp[open] { flex-basis: 100%; order: 9; }
+.fragtools { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.fragtools .row { gap: 6px; }
+.fragtools .row > button { flex: 1; }
+.fraglist .secthead .addhere { visibility: hidden; }
+.fraglist .secthead:hover .addhere, .fraglist .secthead .addhere:focus { visibility: visible; }
+@media (hover: none) { .fraglist .secthead .addhere { visibility: visible; } }
 .fragedit textarea.promptedit { min-height: 50vh; }
 .fraglist input { width: 100%; box-sizing: border-box; }
 
@@ -1476,6 +1529,12 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
 }
 .bigpreview img { max-width: 100%; max-height: 72vh; object-fit: contain; display: block; }
 .bigpreview .previewname { padding: 4px 8px; }
+/* 마무리 중 / 완성본 불러오는 중 / an error with 다시, over the held frame (§1-101). */
+.bigpreview { position: relative; }
+.bigpreview .previewstate { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); max-width: calc(100% - 24px);
+  display: flex; gap: 8px; align-items: center; padding: 5px 12px; border-radius: 999px; font-size: 12px;
+  background: rgba(15, 17, 23, .82); color: #e5e7eb; border: 1px solid var(--borderc, #2b323f); }
+.bigpreview .previewstate.err { border-color: var(--err, #f87171); color: #fecaca; }
 .countbox { width: 56px; text-align: center; }
 .striprow { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; }
 /* --- the bottom generation strip (replaces the old history tab) ------------- */

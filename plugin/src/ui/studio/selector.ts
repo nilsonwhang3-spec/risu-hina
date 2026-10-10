@@ -67,7 +67,14 @@ function prefsFor(folder: string): GroupPrefs {
   return { ...DEF, ...p, mode, tokens };
 }
 
+/** Bumped by every rule change. The 5s poll reads the server's saved rule
+ * and regroups; a reply that left before the user's last click must not land
+ * on top of it - it used to put the previous rule back (a token picked, then
+ * silently un-picked; the smoke's multi-select check under load, §1-101). */
+let ruleGen = 0;
+
 function setPrefs(folder: string, next: Partial<GroupPrefs>): void {
+  ruleGen += 1;
   prefs[folder] = { ...prefsFor(folder), ...next };
   try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch { /* fine */ }
 }
@@ -251,11 +258,14 @@ function groupSig(g: typeof groups): string {
 export async function pollGroups(): Promise<void> {
   if (!groups || !S.selected || groups.folder !== S.selected) return;
   const folder = groups.folder;
+  const gen0 = ruleGen;
   try {
-    await syncProfile(folder);
+    await syncProfile(folder, gen0);
+    if (ruleGen !== gen0 && ruleGen !== gen0 + 1) return;
+    const gen1 = ruleGen;
     const eff = effective(prefsFor(folder));
     const fresh = await state.studio.group(folder, eff.pattern, eff.groupBy);
-    if (!groups || groups.folder !== folder) return;
+    if (!groups || groups.folder !== folder || ruleGen !== gen1) return;
     if (groupSig(fresh) === groupSig(groups)) return;
     // Keep flags the user just clicked (the debounced save may not have
     // landed) for files that are still there; new files take the server's.
@@ -270,8 +280,9 @@ export async function pollGroups(): Promise<void> {
   } catch { /* the next tick tries again */ }
 }
 
-async function syncProfile(folder: string): Promise<void> {
+async function syncProfile(folder: string, gen = ruleGen): Promise<void> {
   const profile = await state.studio.groupProfile(folder);
+  if (ruleGen !== gen) return; // the user changed the rule meanwhile: theirs wins
   const local = effective(prefsFor(folder));
   if (profile.exists && (local.pattern !== profile.pattern || local.groupBy !== profile.groupBy)) {
     setPrefs(folder, { mode: profile.pattern ? 'regex' : 'default', pattern: profile.pattern, groupBy: profile.groupBy });

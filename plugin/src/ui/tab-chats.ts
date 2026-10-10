@@ -21,9 +21,9 @@
  * choices are shut and the open's steps are shown: nothing on the bot or its
  * chats can be edited before the working copy exists.
  */
-import { el, clear, refocusSearch, fmtTime, armed, popover } from './dom';
+import { el, clear, fmtTime, armed, popover } from './dom';
 import { state, type DirtySummary } from '../state';
-import { setEditMode, setToolbarSearch, setTab, bootState, type BootStep } from './shell';
+import { setEditMode, setTab, bootState, type BootStep } from './shell';
 import type { RisuChat } from '../risuai';
 import { HostError } from '../host';
 import { describeSync, syncBusy } from '../assets';
@@ -48,12 +48,67 @@ let openMode: Mode | '' = '';
  */
 export function foldLanding(): void {
   openMode = '';
-  filterText = '';
+  filters.chat = filters.persona = filters.module = '';
+  pages.clear();
 }
 /** Chat folders the user unfolded (by folder id). */
 const openFolders = new Set<string>();
 let showAutoSnaps = false;
-let filterText = '';
+
+// --- filter + pages (§1-101) ---------------------------------------------------------
+//
+// Field report: picking 챗/페르소나/모듈 편집 with hundreds of entries gave one
+// endless list. The filter box used to live on the menu line - hidden on a
+// phone, and only there for chats and modules. Now each list carries its own
+// box (drawn once; typing redraws the rows, never the box) and shows PAGE
+// rows at a time with ‹ › between pages.
+
+type ListMode = 'chat' | 'persona' | 'module';
+const filters: Record<ListMode, string> = { chat: '', persona: '', module: '' };
+/** Page per list (a mode, or a chat folder `chat:<id>`); a filter resets it. */
+const pages = new Map<string, number>();
+const PAGE = 30;
+/** A list this short needs neither. */
+const FILTER_MIN = 8;
+
+function needleOf(mode: ListMode): string {
+  return filters[mode].trim().toLowerCase();
+}
+
+/** The list's filter box. `redraw` repaints the rows only. */
+function filterBox(mode: ListMode, placeholder: string, total: number, redraw: () => void): HTMLElement | null {
+  if (total < FILTER_MIN && !filters[mode]) return null;
+  const input = el('input', { class: 'searchinput', placeholder, value: filters[mode], type: 'search' }) as HTMLInputElement;
+  input.dataset.landfilter = mode;
+  input.addEventListener('input', () => {
+    filters[mode] = input.value;
+    for (const k of [...pages.keys()]) if (k === mode || k.startsWith(mode + ':')) pages.delete(k);
+    redraw();
+  });
+  return el('div', { class: 'landfilter' }, [input]);
+}
+
+/** The rows of one page, and the ‹ n/m › line under them (null for one page). */
+function paged<T>(key: string, rows: T[]): { rows: T[]; nav: HTMLElement | null; redrawOn: (fn: () => void) => void } {
+  const count = Math.max(1, Math.ceil(rows.length / PAGE));
+  const page = Math.min(pages.get(key) ?? 0, count - 1);
+  let redraw: () => void = () => { /* set by redrawOn */ };
+  const slice = rows.slice(page * PAGE, page * PAGE + PAGE);
+  if (count <= 1) return { rows: slice, nav: null, redrawOn: () => undefined };
+  const go = (p: number) => { pages.set(key, Math.max(0, Math.min(count - 1, p))); redraw(); };
+  const prev = el('button', { class: 'ghost tiny', text: '‹ 이전', title: '이전 쪽' }) as HTMLButtonElement;
+  const next = el('button', { class: 'ghost tiny', text: '다음 ›', title: '다음 쪽' }) as HTMLButtonElement;
+  prev.disabled = page === 0;
+  next.disabled = page === count - 1;
+  prev.addEventListener('click', (ev) => { ev.stopPropagation(); go(page - 1); });
+  next.addEventListener('click', (ev) => { ev.stopPropagation(); go(page + 1); });
+  const from = page * PAGE + 1;
+  const to = Math.min(rows.length, from + PAGE - 1);
+  const nav = el('div', { class: 'row pagenav' }, [
+    prev, el('span', { class: 'hint grow', style: { textAlign: 'center' }, text: `${from}–${to} / ${rows.length}` }), next,
+  ]);
+  return { rows: slice, nav, redrawOn: (fn) => { redraw = fn; } };
+}
 
 /** The scroller, kept across renders so the page does not jump. */
 let padEl: HTMLElement | null = null;
@@ -215,6 +270,8 @@ export function renderChatsTab(mount: HTMLElement): void {
   }
   const pad = padEl;
   const top = pad.scrollTop;
+  // A state change redraws the screen; a filter being typed in keeps its caret.
+  const typing = (document.activeElement as HTMLInputElement | null)?.dataset?.landfilter ?? '';
   clear(pad);
   const root = el('div', { class: 'landing' });
   pad.appendChild(root);
@@ -271,6 +328,7 @@ export function renderChatsTab(mount: HTMLElement): void {
     if (why) b.title = why;
     b.addEventListener('click', () => {
       openMode = openMode === m ? '' : m;
+      pages.clear();
       if (openMode === 'persona' && !state.personas && !state.personaLoading) void state.loadPersonas().catch(() => undefined);
       if (openMode === 'module' && !state.moduleLoading) void state.loadModules().catch(() => undefined);
       renderChatsTab(mount);
@@ -300,6 +358,13 @@ export function renderChatsTab(mount: HTMLElement): void {
   }
 
   pad.scrollTop = top;
+  if (typing) {
+    const again = pad.querySelector<HTMLInputElement>(`input[data-landfilter="${typing}"]`);
+    if (again) {
+      again.focus();
+      try { again.setSelectionRange(again.value.length, again.value.length); } catch { /* fine */ }
+    }
+  }
 }
 
 // --- 봇 ------------------------------------------------------------------------
@@ -427,27 +492,15 @@ function chatBody(body: HTMLElement, mount: HTMLElement): void {
   const ws = state.workspace;
   const loadedFor = (c: RisuChat) => ws?.chats.find((w) => w.chatId === (c.id ?? ''));
 
-  if (liveChats.length > 6) {
-    setToolbarSearch(filterText, (v) => {
-      filterText = v;
-      renderChatsTab(mount);
-      refocusSearch(null);
-    }, '챗 찾기');
-  }
   body.appendChild(el('div', { class: 'sectiontitle', text: '편집할 챗을 고르세요' }));
   if (!liveChats.length) {
     body.appendChild(el('div', { class: 'hint', text: '이 봇에는 챗이 없습니다.' }));
     return;
   }
-  const needle = filterText.trim().toLowerCase();
-  const rows = liveChats.map((c, i) => ({ chat: c, index: i }))
-    .filter((r) => !needle || String(r.chat.name ?? '').toLowerCase().includes(needle));
-  const grouped = new Map<string, { chat: RisuChat; index: number }[]>();
-  for (const r of rows) {
-    const key = String((r.chat as Record<string, unknown>).folderId ?? '');
-    if (!grouped.has(key)) grouped.set(key, []);
-    grouped.get(key)!.push(r);
-  }
+  const listArea = el('div', { class: 'landlist' });
+  const fbox = filterBox('chat', `챗 ${liveChats.length}개 중 찾기 (이름)`, liveChats.length, () => fillChats());
+  if (fbox) body.appendChild(fbox);
+  body.appendChild(listArea);
 
   // Which chat still owes a 반영: drawn from the cached summary right away,
   // refreshed in place when a newer one lands.
@@ -507,46 +560,74 @@ function chatBody(body: HTMLElement, mount: HTMLElement): void {
     return item;
   };
 
-  const loose = grouped.get('') ?? [];
-  if (loose.length) {
+  /** One list of chat rows, a page at a time. */
+  const pagedList = (key: string, items: { chat: RisuChat; index: number }[], into: HTMLElement) => {
     const list = el('div', { class: 'chatlist' });
-    for (const r of loose) list.appendChild(makeItem(r));
-    body.appendChild(list);
-  }
+    const draw = () => {
+      clear(list);
+      const p = paged(key, items);
+      p.redrawOn(draw);
+      for (const r of p.rows) list.appendChild(makeItem(r));
+      if (p.nav) list.appendChild(p.nav);
+      paintDirty();
+    };
+    draw();
+    into.appendChild(list);
+  };
 
-  for (const f of folders) {
-    const items = grouped.get(String(f.id)) ?? [];
-    if (!items.length) continue;
-    const fid = String(f.id);
-    // A search shows every match: a folded folder would hide the hit.
-    const isOpen = openFolders.has(fid) || !!needle;
-    const fbody = el('div', { class: 'folderbody' + (isOpen ? ' open' : '') });
-    for (const r of items) fbody.appendChild(makeItem(r));
-    const caret = el('span', { text: isOpen ? '▾' : '▸' });
-    const head = el('button', { class: 'folderhead' }, [
-      caret,
-      el('span', { class: 'folderdot', style: f.color ? { background: String(f.color) } : {} }),
-      el('span', { class: 'grow', text: String(f.name || '폴더') }),
-      el('span', { text: `${items.length}` }),
-    ]);
-    head.addEventListener('click', () => {
-      const open = fbody.classList.toggle('open');
-      if (open) openFolders.add(fid); else openFolders.delete(fid);
-      caret.textContent = open ? '▾' : '▸';
-    });
-    body.appendChild(el('div', { class: 'folder' }, [head, fbody]));
-  }
+  const fillChats = () => {
+    clear(listArea);
+    dirtyBadges.clear();
+    const needle = needleOf('chat');
+    const rows = liveChats.map((c, i) => ({ chat: c, index: i }))
+      .filter((r) => !needle || String(r.chat.name ?? '').toLowerCase().includes(needle));
+    if (needle) {
+      // A search is one flat list of hits: folded folders would hide them.
+      if (!rows.length) listArea.appendChild(el('div', { class: 'hint', text: `‘${filters.chat}’ 에 맞는 챗이 없습니다.` }));
+      else pagedList('chat', rows, listArea);
+      return;
+    }
+    const grouped = new Map<string, { chat: RisuChat; index: number }[]>();
+    for (const r of rows) {
+      const key = String((r.chat as Record<string, unknown>).folderId ?? '');
+      if (!grouped.has(key)) grouped.set(key, []);
+      grouped.get(key)!.push(r);
+    }
+    const loose = grouped.get('') ?? [];
+    if (loose.length) pagedList('chat', loose, listArea);
 
-  const known = new Set(folders.map((f) => String(f.id)));
-  const orphans = [...grouped.entries()]
-    .filter(([k]) => k !== '' && !known.has(k))
-    .flatMap(([, v]) => v);
-  if (orphans.length) {
-    const list = el('div', { class: 'chatlist' });
-    for (const r of orphans) list.appendChild(makeItem(r));
-    body.appendChild(el('div', { class: 'sectiontitle', style: { marginTop: '10px' }, text: '폴더 없음' }));
-    body.appendChild(list);
-  }
+    for (const f of folders) {
+      const items = grouped.get(String(f.id)) ?? [];
+      if (!items.length) continue;
+      const fid = String(f.id);
+      const isOpen = openFolders.has(fid);
+      const fbody = el('div', { class: 'folderbody' + (isOpen ? ' open' : '') });
+      pagedList('chat:' + fid, items, fbody);
+      const caret = el('span', { text: isOpen ? '▾' : '▸' });
+      const head = el('button', { class: 'folderhead' }, [
+        caret,
+        el('span', { class: 'folderdot', style: f.color ? { background: String(f.color) } : {} }),
+        el('span', { class: 'grow', text: String(f.name || '폴더') }),
+        el('span', { text: `${items.length}` }),
+      ]);
+      head.addEventListener('click', () => {
+        const open = fbody.classList.toggle('open');
+        if (open) openFolders.add(fid); else openFolders.delete(fid);
+        caret.textContent = open ? '▾' : '▸';
+      });
+      listArea.appendChild(el('div', { class: 'folder' }, [head, fbody]));
+    }
+
+    const known = new Set(folders.map((f) => String(f.id)));
+    const orphans = [...grouped.entries()]
+      .filter(([k]) => k !== '' && !known.has(k))
+      .flatMap(([, v]) => v);
+    if (orphans.length) {
+      listArea.appendChild(el('div', { class: 'sectiontitle', style: { marginTop: '10px' }, text: '폴더 없음' }));
+      pagedList('chat:orphans', orphans, listArea);
+    }
+  };
+  fillChats();
 
   body.appendChild(el('div', { class: 'row', style: { marginTop: '12px' } }, [
     buildUploadAll(),
@@ -591,14 +672,29 @@ function personaBody(body: HTMLElement, mount: HTMLElement): void {
     body.appendChild(el('div', { class: 'notice err', text: state.personaError }));
   }
   const list = el('div', { class: 'chatlist personalist' });
-  body.appendChild(list);
   const ps = (state.personas ?? []).filter((p) => !p.gone);
   if (!state.personas) {
+    body.appendChild(list);
     list.appendChild(loadingRow(state.personaLoading ? 'RisuAI에서 페르소나를 읽는 중…' : '페르소나 목록이 없습니다'));
     return;
   }
-  if (!ps.length) list.appendChild(el('div', { class: 'chatitem' }, [el('span', { class: 'hint', text: 'RisuAI에 페르소나가 없습니다.' })]));
-  for (const p of ps) list.appendChild(personaRow(p, mount));
+  const fill = () => {
+    clear(list);
+    if (!ps.length) { list.appendChild(el('div', { class: 'chatitem' }, [el('span', { class: 'hint', text: 'RisuAI에 페르소나가 없습니다.' })])); return; }
+    const needle = needleOf('persona');
+    const hits = ps.filter((p) => !needle
+      || (p.work.name || p.name || '').toLowerCase().includes(needle)
+      || (p.work.prompt || '').toLowerCase().includes(needle));
+    if (!hits.length) { list.appendChild(el('div', { class: 'chatitem' }, [el('span', { class: 'hint', text: `‘${filters.persona}’ 에 맞는 페르소나가 없습니다.` })])); return; }
+    const p = paged('persona', hits);
+    p.redrawOn(fill);
+    for (const row of p.rows) list.appendChild(personaRow(row, mount));
+    if (p.nav) list.appendChild(p.nav);
+  };
+  const fbox = filterBox('persona', `페르소나 ${ps.length}개 중 찾기 (이름·설명)`, ps.length, fill);
+  if (fbox) body.appendChild(fbox);
+  body.appendChild(list);
+  fill();
   body.appendChild(el('div', { class: 'hint', style: { marginTop: '8px' }, text:
     '편집은 작업본에 저장되고, 반영해야 RisuAI에 들어갑니다. RisuAI에서 지금 선택된 페르소나도 편집할 수 있지만, '
     + '반영하면 원본 대신 새 페르소나(사본)로 저장됩니다 (RisuAI가 선택된 페르소나를 따로 복사해 두고 써서, 그대로 쓰면 덮어써집니다).' }));
@@ -696,19 +792,27 @@ function moduleBody(body: HTMLElement, mount: HTMLElement): void {
   if (state.moduleError) body.appendChild(el('div', { class: 'notice err', text: state.moduleError }));
   const all = state.liveModules;
   const list = el('div', { class: 'chatlist modlist' });
-  body.appendChild(list);
   if (!all) {
+    body.appendChild(list);
     list.appendChild(loadingRow(state.moduleLoading ? 'RisuAI에서 모듈을 읽는 중…' : '모듈 목록이 없습니다'));
     return;
   }
-  if (all.length > 8) {
-    setToolbarSearch(filterText, (v) => { filterText = v; renderChatsTab(mount); refocusSearch(null); }, '모듈 찾기');
-  }
-  const needle = filterText.trim().toLowerCase();
-  const shown = all.filter((m) => !needle || m.name.toLowerCase().includes(needle) || m.description.toLowerCase().includes(needle))
-    .sort((a, b) => a.name.localeCompare(b.name));
-  if (!all.length) list.appendChild(el('div', { class: 'chatitem' }, [el('span', { class: 'hint', text: 'RisuAI에 모듈이 없습니다. 파일에서 가져올 수 있습니다.' })]));
-  for (const m of shown) list.appendChild(moduleRow(m));
+  const fill = () => {
+    clear(list);
+    if (!all.length) { list.appendChild(el('div', { class: 'chatitem' }, [el('span', { class: 'hint', text: 'RisuAI에 모듈이 없습니다. 파일에서 가져올 수 있습니다.' })])); return; }
+    const needle = needleOf('module');
+    const shown = all.filter((m) => !needle || m.name.toLowerCase().includes(needle) || m.description.toLowerCase().includes(needle))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    if (!shown.length) { list.appendChild(el('div', { class: 'chatitem' }, [el('span', { class: 'hint', text: `‘${filters.module}’ 에 맞는 모듈이 없습니다.` })])); return; }
+    const p = paged('module', shown);
+    p.redrawOn(fill);
+    for (const m of p.rows) list.appendChild(moduleRow(m));
+    if (p.nav) list.appendChild(p.nav);
+  };
+  const fbox = filterBox('module', `모듈 ${all.length}개 중 찾기 (이름·설명)`, all.length, fill);
+  if (fbox) body.appendChild(fbox);
+  body.appendChild(list);
+  fill();
   body.appendChild(el('div', { class: 'hint', style: { marginTop: '8px' }, text:
     '모듈은 봇 카드와 같은 탭(정보·로어북·Regex·트리거·에셋)으로 편집되고, 반영해야 RisuAI 모듈 목록에 들어갑니다. '
     + '봇 편집·페르소나 편집에서도 탭 줄 끝의 ＋ 로 모듈을 함께 열 수 있고, 그 조합은 기억됩니다. '

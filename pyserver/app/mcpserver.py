@@ -47,6 +47,9 @@ How it works:
 - Every tool acts on the bot and chat that are currently open in the Risu Hina panel inside RisuAI,
   where the user pressed 'MCP 연결' (title row). Call hina_status first to see which bot/chat that is. To work
   on another bot, ask the user to open it in the panel.
+- Other bots already in Hina's DB are READ-ONLY references ("B 봇의 ~ 기능을 참고해서"): list_reference_bots,
+  then ref_bot_overview / ref_search / ref_list_scripts / ref_list_lore / ref_read / ref_read_script_text.
+  To bring something over, propose it as NEW entries on the open bot; a reference bot's ids are refused.
 - Tools read and edit the Hina WORKING COPY, not live RisuAI. Writes are PROPOSALS (propose_*, stage_*).
   They are applied when approved - in the panel, or here with approve_proposals (list_proposals ids) and
   approve_staged (turn edits). Approve what the user asked for; until approved, say "proposed", not "done".

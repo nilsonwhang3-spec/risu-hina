@@ -26,6 +26,7 @@ import binascii
 import hashlib
 import io
 import json
+import os
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -34,7 +35,9 @@ import httpx
 
 from . import config, db, log
 
-BASE = "https://image.novelai.net"
+# RISUHINA_NAI_BASE points the image API elsewhere - a local fake NovelAI
+# for the browser harness (tools/fake_nai.py); nothing else sets it.
+BASE = (os.environ.get("RISUHINA_NAI_BASE") or "https://image.novelai.net").rstrip("/")
 
 # What a spec without a model gets. The agent's studio_generate call skipped
 # the HTTP handler's "model is required" and sent "" straight to NovelAI,

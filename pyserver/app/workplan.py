@@ -12,7 +12,9 @@ recall_notes compact_context list_turns read_turns search_turns bot_structure se
 read_card read_card_field list_scripts read_script read_script_text read_lore read_lore_entry
 list_lore list_skills load_skill skill_history work_status read_memory list_bot_snapshots
 list_assets list_snapshots list_proposals list_staged list_files read_file find_files search_files
-web_search view_image compare_images image_metrics studio_job studio_naming studio_recipe""".split())
+web_search view_image compare_images image_metrics studio_job studio_naming studio_recipe
+list_reference_bots ref_bot_overview ref_search ref_read_card ref_list_scripts ref_list_lore ref_read
+ref_read_script_text""".split())
 
 
 def get(session_id: str) -> dict:

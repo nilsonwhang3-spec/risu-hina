@@ -1,4 +1,51 @@
-# 06. Implementation status — as of 2026-10-09 (v0.15.39, Risu Hina)
+# 06. Implementation status — as of 2026-10-10 (v0.15.39 + §1-101 unreleased, Risu Hina)
+
+## §1-101 (2026-10-10, unreleased): long landing lists, studio layout, 1장 finish, reference bots
+
+- **Field report (5 + 1):** 모듈/페르소나/챗 편집 lists had no filter or pages; the studio's left column
+  had cards inside cards, boxed counts inside buttons, a − 장수 + of three heights and "저장 안 됨" said
+  four times; the fragment editor's ＋ 폴더 / ＋ 조각 sat oddly; a 28-step 1장 run "stopped blurry before
+  the end"; many queued batches pushed the 배치 tab's scene preset down. Added during the round: with bot
+  A open, read bot B in Hina's DB as a reference ("B 봇의 ~ 기능 참고해서 구현해줘").
+- **Landing lists:** each list (chat, persona, module) carries its own filter box from 8 entries
+  (`input[data-landfilter]`; the menu-line box was hidden on a phone and absent for personas) and shows
+  30 rows a page with ‹ 이전 · n–m / N · 다음 ›. Typing redraws the rows, never the box; a state-driven
+  redraw keeps the caret. A chat search is one flat list of hits; without one, the loose list and each
+  folder page on their own.
+- **Studio left column:** four sections with one header each and a rule between them (스타일 프롬프트 ·
+  임시 프롬프트 · 캐릭터 · 조각 · 장수), no frame around the style block, ▸/▾ carets instead of boxed
+  +/−, counts as text (`.toolcount`), "저장 안 됨" once in the header (a row shows only 적용 중), and the
+  run footer's − n + as one 28px stepper.
+- **Fragments:** the header says where you are (← 돌아가기 · 조각 프롬프트 · n개 · 참조 방법 fold); 찾기,
+  ＋ 조각, ＋ 폴더 sit on top of the list they act on; a folder's ＋ shows on hover. In a narrow centre the
+  editor wraps under the list (capped at 50vh) instead of shrinking to a column of single characters;
+  the editor's title is the reference (`<폴더/이름>`), the path is its tooltip.
+- **1장 finish:** measured against NovelAI (28 steps): intermediate `step_ix` 0..26 (small blurry
+  PNGs), then `final` ~0.6s later. The panel showed the raw index (26/28 - "never reaches the end"),
+  fetched the 1-2 MB PNG behind the strip's thumbnails, and on a failed load or a failed run kept the
+  blurry frame for good (a hint never blanks a picture). Now: steps done (27/28) and 마무리 중 over the
+  frame near the end; 완성본 불러오는 중 while the finished picture loads as a 1280px WebP at the FRONT of
+  the fetch queue (`blobUrl(..., { front: true })`); a failed load drops the frame for the reason and
+  다시; a run that saved nothing shows the last failure's error. When the stream breaks mid-image the job
+  sets `payload.streaming = false` and drops its frame; the 1장 tab says it is drawing again without
+  previews (ZIP fallback). `tools/fake_nai.py` + `RISUHINA_NAI_BASE` run the harness against a local
+  fake NovelAI (`--drop-at N` tears the stream).
+- **배치 tab:** the server queue is one folded line (서버 작업 · 실행 n · 대기 n) over a 30vh scrolling
+  list whose rows name the job by its first scene/image (id in the tooltip); the tab reads in three
+  regions (preset · 씬 · 예약/생성).
+- **검수 rule race (found by the gate):** the 5s poll read the server's saved grouping rule and applied it
+  over a token the user had just clicked whose save had not landed - the click was undone. A rule
+  generation counter drops replies that started before the last change.
+- **Reference bots:** `list_reference_bots(query)`, `ref_bot_overview`, `ref_search`, `ref_read_card`,
+  `ref_list_scripts`, `ref_list_lore`, `ref_read(bot, id)`, `ref_read_script_text` - `bot` is a name
+  (exact, then unique substring) or charKey; the open bot, modules and the home chat are not references.
+  Other bots' CHATS stay invisible. Read-only is enforced where it matters: `actions.propose` refuses
+  any `id`/`ids` that is a card field, script or lore row of another bot (it used to accept any row id -
+  harmless while no other bot's id was visible). INSTRUCTIONS / MCP instructions: never say other bots
+  cannot be seen; bring things over as NEW entries on the open bot. Allowed in planning mode.
+- Verified: tests/test_reference_bots.py (new, in the gate), plugin_smoke (landing pages + filter,
+  folded job queue), harness + fake NovelAI in Chrome (normal run, torn stream → ZIP, NovelAI down),
+  tsc, gate.
 
 ## 0.15.39 (2026-10-09): §1-100 lost answers, new modules, MCP file refresh, tray ✕, carried conversations
 

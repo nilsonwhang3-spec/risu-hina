@@ -300,6 +300,12 @@ def _run_locked(job_id: str) -> None:
             except Exception as e:  # noqa: BLE001
                 stream_ok = False
                 log.warn("studio batch %s: streaming failed (%s) - ZIP fallback for the rest", job_id, e)
+                # The panel held the last (blurry) frame with no word that the
+                # image was being drawn again without previews (§1-101).
+                with _preview_lock:
+                    _preview.pop(job_id, None)
+                payload["streaming"] = False
+                _update(job_id, payload_json=payload)
         return nai.generate(model, item["prompt"], item["negative"], p,
                             vibes or None, charrefs or None)
 

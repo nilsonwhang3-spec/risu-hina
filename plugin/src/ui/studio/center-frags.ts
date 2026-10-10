@@ -66,27 +66,40 @@ export function drawFragments(): void {
   });
   const add = el('button', { class: 'primary tiny', text: '＋ 조각' });
   add.addEventListener('click', () => addFragment(add, ''));
-  const head = el('div', { class: 'row', style: { marginBottom: '6px' } }, [
+  // The page header says where you are; the list's own tools (찾기 · ＋ 조각 ·
+  // ＋ 폴더) sit on top of the list they act on, not in the header across
+  // from it (§1-101, user: "+폴더, +조각 버튼 위치 어색").
+  const help = el('details', { class: 'fraghelp' }, [
+    el('summary', { text: '참조 방법' }),
+    el('div', { class: 'hint', text: '프롬프트에서 <이름> · <폴더/이름> · <컬렉션.키> 로 참조합니다. 이름이 곧 참조 키이고, 같은 이름이 여러 폴더에 있으면 <폴더/이름> 으로 구분해 주세요. '
+      + '여러 줄 조각은 장마다 랜덤으로 1줄만 실립니다 (# 주석·빈 줄 제외).' }),
+  ]);
+  viewMount.appendChild(el('div', { class: 'row fraghead' }, [
     back,
-    el('span', { class: 'sectiontitle grow', text: `조각 프롬프트 · ${(S.cards.fragments ?? []).length}개` }),
+    el('span', { class: 'studiosectitle', text: '조각 프롬프트' }),
+    el('span', { class: 'studiosecnote', text: `${(S.cards.fragments ?? []).length}개` }),
     S.unresolvedRefs.length ? el('span', {
       class: 'badge err', text: `미해결 ${S.unresolvedRefs.length}`,
       title: '프롬프트가 참조하는데 조각이 없는 이름: ' + S.unresolvedRefs.join(', '),
     }) : null,
-    addFolder, add,
-  ]);
-  viewMount.appendChild(head);
-  viewMount.appendChild(el('div', { class: 'hint', style: { marginBottom: '8px' },
-    text: '프롬프트에서 <이름> · <폴더/이름> · <컬렉션.키> 로 참조합니다. 이름이 곧 참조 키이고, 같은 이름이 여러 폴더에 있으면 <폴더/이름> 으로 구분해 주세요. '
-      + '여러 줄 조각은 장마다 랜덤으로 1줄만 실립니다 (# 주석·빈 줄 제외).' }));
+    el('span', { class: 'grow' }),
+    help,
+  ]));
 
   const listCol = el('div', { class: 'fraglist' });
   const editCol = el('div', { class: 'fragedit' });
   viewMount.appendChild(el('div', { class: 'fragcols' }, [listCol, editCol]));
 
   const search = el('input', { placeholder: '이름·설명 검색', value: filter }) as HTMLInputElement;
-  search.addEventListener('input', () => { filter = search.value; hub.drawCentre(); });
-  listCol.appendChild(el('div', { style: { marginBottom: '4px' } }, [search]));
+  search.addEventListener('input', () => {
+    filter = search.value;
+    hub.drawCentre();
+    // The redraw replaced this box: put the caret back in the new one.
+    const again = S.viewMount?.querySelector<HTMLInputElement>('.fraglist .fragsearch');
+    if (again) { again.focus(); try { again.setSelectionRange(again.value.length, again.value.length); } catch { /* fine */ } }
+  });
+  search.classList.add('fragsearch');
+  listCol.appendChild(el('div', { class: 'fragtools' }, [search, el('div', { class: 'row' }, [add, addFolder])]));
 
   // Duplicate stems across folders are invisible in the picker otherwise:
   // both render as the bare name while a bare <name> resolves to just one.
@@ -106,7 +119,7 @@ export function drawFragments(): void {
         if (openFolders.has(folder)) openFolders.delete(folder); else openFolders.add(folder);
         hub.drawCentre();
       });
-      const addHere = el('button', { class: 'ghost tiny', text: '＋', title: '이 폴더에 조각 추가' });
+      const addHere = el('button', { class: 'ghost tiny addhere', text: '＋', title: '이 폴더에 조각 추가' });
       addHere.addEventListener('click', (e) => { e.stopPropagation(); addFragment(addHere, folder); });
       fhead.appendChild(addHere);
       listCol.appendChild(fhead);
@@ -139,7 +152,7 @@ export function drawFragments(): void {
   }
 
   if (!selFrag) {
-    editCol.appendChild(el('div', { class: 'empty', text: '왼쪽에서 조각을 고르거나 ＋ 조각 으로 만들어 주세요.' }));
+    editCol.appendChild(el('div', { class: 'empty', text: '목록에서 조각을 고르거나 ＋ 조각 으로 만들어 주세요.' }));
     return;
   }
   const moveBtn = el('button', { class: 'ghost tiny', text: '폴더 이동' });
@@ -165,7 +178,9 @@ export function drawFragments(): void {
     }
   });
   editCol.appendChild(el('div', { class: 'row', style: { marginBottom: '4px' } }, [
-    el('span', { class: 'sectiontitle grow', text: selFrag }),
+    // What the prompt writes, not the file path (that is the tooltip).
+    el('span', { class: 'studiosectitle grow', title: selFrag,
+      text: '<' + selFrag.replace(/^studio\/config\/fragments\//, '').replace(/\.md$/i, '') + '>' }),
     moveBtn,
   ]));
   editCol.appendChild(cardEditor(selFrag, {

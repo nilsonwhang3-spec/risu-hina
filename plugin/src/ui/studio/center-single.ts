@@ -8,7 +8,7 @@
  * hijacking the view while a pin holds (라이브 releases it).
  */
 import { el } from '../dom';
-import { blobUrl, safeWorkspacePath } from '../blobimg';
+import { blobUrl, safeWorkspacePath, smallScreen } from '../blobimg';
 import { S, gen, persistGen, stateLabel } from './store';
 import { showArtifact } from '../artifact';
 import { statusRow, tokenNotice, startRun, cancelRun, pendingCount,
@@ -18,6 +18,11 @@ let previewBox: HTMLElement | null = null;
 let imgEl: HTMLImageElement | null = null;
 let captionEl: HTMLElement | null = null;
 let emptyEl: HTMLElement | null = null;
+/** The line over the picture: 마무리 중 / 완성본 불러오는 중 / an error + 다시. */
+let stateEl: HTMLElement | null = null;
+/** The finished file a load is under way (or failed) for. */
+let loadingPath = '';
+let failedPath = '';
 let progressLine: HTMLElement | null = null;
 let runBtn: HTMLButtonElement | null = null;
 /** What the <img> currently shows: a workspace path, or 'live'. */
@@ -36,7 +41,10 @@ export function drawSingle(mount: HTMLElement): void {
   imgEl.addEventListener('click', () => { if (shownKey && shownKey !== 'live') openImage(shownKey, S.viewList); });
   captionEl = el('div', { class: 'hint previewname' });
   emptyEl = el('div', { class: 'empty' });
-  previewBox = el('div', { class: 'bigpreview' }, [imgEl, captionEl, emptyEl]);
+  stateEl = el('div', { class: 'previewstate', style: { display: 'none' } });
+  loadingPath = '';
+  failedPath = '';
+  previewBox = el('div', { class: 'bigpreview' }, [imgEl, stateEl, captionEl, emptyEl]);
   mount.appendChild(previewBox);
 
   // ← live → : walking the pinned batch.
@@ -64,8 +72,8 @@ export function drawSingle(mount: HTMLElement): void {
 /** The 1장 run controls - count ± and 생성 시작/취소 - mounted by the left
  * prompt column (§1-39). One live instance: the newest build owns runBtn. */
 export function buildRunControls(): HTMLElement {
-  const minus = el('button', { class: 'ghost tiny', text: '−' });
-  const plus = el('button', { class: 'ghost tiny', text: '＋' });
+  const minus = el('button', { class: 'ghost', text: '−', title: '한 장 줄이기' });
+  const plus = el('button', { class: 'ghost', text: '+', title: '한 장 늘리기' });
   const count = el('input', { type: 'number', value: String(gen.count), min: '1', max: '99',
                               class: 'countbox', title: '장수' }) as HTMLInputElement;
   const setCount = (n: number) => {
@@ -83,9 +91,11 @@ export function buildRunControls(): HTMLElement {
     // The 1장 loop is the current setup only - no scene preset expansion.
     else void startRun({ scenePreset: '', count: gen.count });
   });
-  const row = el('div', { class: 'row', style: { gap: '6px' } }, [
-    el('span', { class: 'hint', text: '장수' }),
-    el('div', { class: 'row', style: { gap: '2px' } }, [minus, count, plus]),
+  // − 장수 + is one joined stepper of one height (user: "장수 토글 때문에
+  // 높이가 다른게 못생겨 보임" - the number box was taller than its buttons).
+  const row = el('div', { class: 'row runctl' }, [
+    el('span', { class: 'studiosectitle', text: '장수' }),
+    el('div', { class: 'stepper' }, [minus, count, plus]),
     el('span', { class: 'grow' }),
     runBtn,
   ]);
@@ -121,6 +131,15 @@ export function syncControls(): void {
  * What the big preview shows, by priority: the pin, then (while running) the
  * live stream frame (4.12), then the newest save. A finished file replaces a
  * held frame only once its blob has loaded - never a blank in between.
+ *
+ * §1-101 (field report: "28 step 1장이 끝까지 안 가고 흐린 채로 멈춤"): the
+ * held frame is NovelAI's last intermediate - small and blurry - and nothing
+ * on screen said the run was over. The step read 26/28 (step_ix is 0-based),
+ * the finished PNG queued behind the strip's thumbnails, and a load that
+ * failed (or a run that saved nothing) kept the blurry frame for good, since
+ * a hint never blanks a picture. Now the frame carries 마무리 중 / 완성본
+ * 불러오는 중, the finished picture comes as a large WebP at the front of the
+ * fetch queue, and a failure drops the frame for the reason and 다시.
  */
 function syncPreview(): void {
   const img = imgEl;
@@ -128,12 +147,14 @@ function syncPreview(): void {
   const running = !!S.jobId;
   const saved = S.queueJob?.payload?.saved ?? [];
   const pinned = S.viewPath;
-  const showEmpty = (text: string) => {
-    if (shownKey) return; // something is on screen - never blank it for a hint
+  const showEmpty = (text: string, force = false) => {
+    if (shownKey && !force) return; // something is on screen - never blank it for a hint
+    shownKey = '';
     emptyEl!.textContent = text;
     emptyEl!.style.display = '';
     img.style.display = 'none';
     captionEl!.style.display = 'none';
+    setState('');
   };
   const showImg = (key: string, src: string, caption: string) => {
     shownKey = key;
@@ -146,31 +167,90 @@ function syncPreview(): void {
 
   if (!pinned && running && livePreview.url) {
     // The live frame - unless a pin holds the view (openImage mid-run).
+    const last = livePreview.total > 0 && livePreview.step >= livePreview.total - 2;
+    const noStream = S.queueJob?.payload?.streaming === false;
     showImg('live', livePreview.url,
             `생성 중 ${livePreview.step}/${livePreview.total}${livePreview.current ? ' · ' + livePreview.current : ''}`);
+    setState(noStream ? '스트리밍이 끊겨 미리보기 없이 다시 생성하는 중…'
+      : last ? '마무리 중… 완성본을 기다립니다' : '');
     return;
   }
   const path = pinned || saved[saved.length - 1] || '';
   if (!path) {
+    const failed = S.queueJob?.payload?.failed ?? [];
+    if (!running && (shownKey === 'live' || failed.length)) {
+      // The run ended with nothing to show (it failed or was cancelled):
+      // say why, and never let the blurry frame stand in for a result.
+      const why = failed.length ? String(failed[failed.length - 1].error || '') : '';
+      showEmpty(why ? '생성에 실패했습니다: ' + why : '저장된 이미지가 없습니다.', true);
+      if (shownKey === '') releasePreview();
+      return;
+    }
     showEmpty(running
       ? '생성 중입니다… 첫 프레임이 오면 여기 나타납니다.'
       : '생성 시작을 누르거나, 아래 결과에서 한 장을 고르세요.');
     return;
   }
   if (path === shownKey || !safeWorkspacePath(path)) return;
-  const want = path;
-  void blobUrl(want).then((url) => {
+  if (path === loadingPath || path === failedPath) return;
+  if (shownKey === 'live') setState('완성본 불러오는 중…');
+  loadFinal(path);
+}
+
+function loadFinal(want: string): void {
+  const img = imgEl;
+  if (!img) return;
+  loadingPath = want;
+  failedPath = '';
+  // A large WebP, not the 1-2 MB PNG: on a remote backend the original took
+  // long enough to read as "stuck". The full file opens on click.
+  void blobUrl(want, '', { thumb: true, w: smallScreen() ? 720 : 1280, front: true }).then((url) => {
+    if (loadingPath === want) loadingPath = '';
     if (!img.isConnected) return;
     // Still what we want? (the user may have pinned elsewhere meanwhile)
     const nowPath = S.viewPath || (S.queueJob?.payload?.saved ?? []).slice(-1)[0] || '';
     if ((S.viewPath || !(S.jobId && livePreview.url)) && nowPath === want) {
-      showImg(want, url, want);
+      shownKey = want;
+      img.src = url;
+      img.style.display = '';
+      emptyEl!.style.display = 'none';
+      captionEl!.textContent = want;
+      captionEl!.style.display = '';
+      setState('');
       // The finished file is on screen: the held stream frame can go.
       if (!S.jobId) releasePreview();
     }
-  }).catch(() => {
-    if (shownKey === '') showEmpty('이미지를 읽지 못했습니다: ' + want);
+  }).catch((e: unknown) => {
+    if (loadingPath === want) loadingPath = '';
+    failedPath = want;
+    if (!img.isConnected) return;
+    const why = e instanceof Error ? e.message : String(e);
+    if (shownKey === 'live' || shownKey === '') {
+      // Never leave the blurry frame posing as the result.
+      shownKey = '';
+      img.style.display = 'none';
+      captionEl!.style.display = 'none';
+      emptyEl!.textContent = '';
+      emptyEl!.style.display = 'none';
+      if (!S.jobId) releasePreview();
+    }
+    setState('완성본을 불러오지 못했습니다: ' + why, () => { failedPath = ''; setState(''); syncPreview(); });
   });
+}
+
+/** The line over the picture; '' hides it. `retry` adds 다시. */
+function setState(text: string, retry?: () => void): void {
+  if (!stateEl) return;
+  stateEl.textContent = '';
+  stateEl.style.display = text ? '' : 'none';
+  stateEl.classList.toggle('err', !!retry);
+  if (!text) return;
+  stateEl.appendChild(el('span', { text }));
+  if (retry) {
+    const b = el('button', { class: 'ghost tiny', text: '다시' });
+    b.addEventListener('click', retry);
+    stateEl.appendChild(b);
+  }
 }
 
 function walk(dir: 1 | -1): void {

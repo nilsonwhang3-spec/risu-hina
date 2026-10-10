@@ -3008,15 +3008,19 @@ console.log('\ntest_studio_bottom_strip');
     await settle(100);
     clickById(document, 'tab-studio');
     await settle(900);
-    const jobRows = [...document.querySelectorAll('.studio-job-list .row')];
+    // The queue is one folded line (실행 n · 대기 n) over its rows (§1-101);
+    // a row names the job by its content and keeps the id in its tooltip.
+    const queueLine = document.querySelector('.studio-job-list .jobqueue > summary')?.textContent || '';
+    check('the server queue is one line counting running and waiting', /실행 1 · 대기 1/.test(queueLine), queueLine);
+    const jobRows = [...document.querySelectorAll('.studio-job-list .jobqueuelist .row')];
     check('all active AI jobs appear together in the batch view', jobRows.length === 2);
-    const secondRow = jobRows.find(row => row.textContent.includes('job_ai_second'));
+    const secondRow = jobRows.find(row => row.title === 'job_ai_second');
     secondRow?.querySelector('button')?.click();
     await settle(500);
     check('a job row cancels its own job, not the selected first job', cancelledId === 'job_ai_second');
+    const ids = () => [...document.querySelectorAll('.studio-job-list .jobqueuelist .row')].map((r) => r.title);
     check('the remaining running job stays visible',
-      document.querySelector('.studio-job-list')?.textContent.includes('job_ai_first') &&
-      !document.querySelector('.studio-job-list')?.textContent.includes('job_ai_second'));
+      ids().includes('job_ai_first') && !ids().includes('job_ai_second'), ids().join(','));
     mockJobs[0].state = 'done';
     mockJobs[0].result = job.result;
     await settle(1800);
@@ -3909,6 +3913,40 @@ console.log('\ntest_modules');
   await settle(1800);
   check('a module is saved as a file from there', /✔ projects\/.+\.risum/.test(pop?.textContent || ''), (pop?.textContent || '').slice(0, 300));
   check('the bot meta lists its toggles', [...document.querySelectorAll('.panel.active .treefile')].some((b) => /^토글/.test(b.textContent || '')));
+}
+
+console.log('\ntest_landing_filter_pages');
+{
+  // §1-101: a long 모듈/페르소나/챗 list carries its own filter box and pages
+  // of 30 (the menu-line box was hidden on a phone and missing for personas).
+  const extra = Array.from({ length: 45 }, (_, i) => ({ id: 'mod-page' + i, name: '페이지 모듈 ' + i,
+    description: '설명', lorebook: [], regex: [], trigger: [] }));
+  host.modules.push(...extra);
+  await openLanding(document, 'module');
+  findButton(document.querySelector('.modebody'), '다시 읽기')?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(800);
+  const box = document.querySelector('.modebody input[data-landfilter="module"]');
+  check('the module list has its own filter box', !!box);
+  check('one page shows 30 modules', document.querySelectorAll('.modlist .chatitem').length === 30,
+        String(document.querySelectorAll('.modlist .chatitem').length));
+  const nav = () => document.querySelector('.modlist .pagenav')?.textContent || '';
+  check('the page line counts the whole list', /1–30 \/ \d+/.test(nav()), nav());
+  findButton(document.querySelector('.modlist .pagenav'), '다음 ›')?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(100);
+  check('다음 shows the next page', /^‹ 이전31–/.test(nav()), nav());
+  box.value = '페이지 모듈 4';
+  box.dispatchEvent(new window.Event('input', { bubbles: true }));
+  await settle(100);
+  const shown = [...document.querySelectorAll('.modlist .chatitem')].map((r) => r.textContent || '');
+  check('the filter narrows the rows and starts again on page 1',
+        shown.length === 6 && shown.every((t) => /페이지 모듈 4/.test(t)) && !document.querySelector('.modlist .pagenav'),
+        String(shown.length));
+  check('typing redraws the rows, not the box', document.querySelector('.modebody input[data-landfilter="module"]') === box);
+  box.value = '';
+  box.dispatchEvent(new window.Event('input', { bubbles: true }));
+  host.modules.splice(host.modules.length - extra.length, extra.length);
+  clickById(document, 'tab-chats');
+  await settle(200);
 }
 
 console.log('\ntest_no_character_selected');

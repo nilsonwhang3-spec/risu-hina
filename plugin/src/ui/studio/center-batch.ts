@@ -22,6 +22,8 @@ let runBtn: HTMLButtonElement | null = null;
 let progressLine: HTMLElement | null = null;
 let jobsBox: HTMLElement | null = null;
 let jobsKey = '';
+/** The server queue fold, open or not, across redraws. */
+let jobsOpen = false;
 /** The queue summary, rebuilt alone when a reservation moves. */
 let summaryBox: HTMLElement | null = null;
 /** Per-scene card registry: the working ring and its mini step bar. */
@@ -50,6 +52,9 @@ export async function scenesOf(preset: string): Promise<{ name: string; prompt: 
 }
 
 export function drawBatch(mount: HTMLElement): void {
+  // The server queue is ONE line (실행 n · 대기 n) that unfolds into a short
+  // scrolling list - a run of queued jobs used to list every id above the
+  // scene preset and push the whole tab down (§1-101).
   jobsBox = el('div', { class: 'studio-job-list' });
   jobsKey = '';
   mount.appendChild(jobsBox);
@@ -65,26 +70,27 @@ export function drawBatch(mount: HTMLElement): void {
       gEl.style.gridTemplateColumns = `repeat(${S.cols}, minmax(0, 1fr))`;
     }
   } });
-  mount.appendChild(el('div', { class: 'row', style: { marginBottom: '6px', flexWrap: 'wrap' } }, [
-    scenePicker(), cols,
-  ]));
   const nChars = activeOf('characters').length;
-  mount.appendChild(el('div', { class: 'hint', style: { marginBottom: '6px' },
-    text: `캐릭터는 좌측에서 켠 카드가 실립니다 (지금 ${nChars}개) · 씬 카드의 ＋ 로 필요한 씬만 예약에 담습니다` }));
+  mount.appendChild(el('div', { class: 'batchsec first' }, [
+    el('div', { class: 'row', style: { flexWrap: 'wrap', alignItems: 'flex-end' } }, [scenePicker(), cols]),
+    el('div', { class: 'hint', style: { marginTop: '6px' },
+      text: `캐릭터는 좌측에서 켠 카드가 실립니다 (지금 ${nChars}개) · 씬 카드의 ＋ 로 필요한 씬만 예약에 담습니다` }),
+  ]));
 
   // --- the scene cards (the queue's face) ---------------------------------------
-  const cardsBox = el('div', {});
+  const cardsBox = el('div', { class: 'batchsec' });
   mount.appendChild(cardsBox);
   void drawSceneCards(cardsBox);
 
   // --- the queue summary and the one submit -------------------------------------
   const summary = el('div', {});
-  mount.appendChild(summary);
+  const runSec = el('div', { class: 'batchsec batchrun' }, [summary]);
+  mount.appendChild(runSec);
   summaryBox = summary;
   drawSummary(summary);
 
   batchBar = el('div', { class: 'batchbar', style: { display: 'none' } });
-  mount.appendChild(batchBar);
+  runSec.appendChild(batchBar);
 
   runBtn = el('button', { class: 'primary tiny' }) as HTMLButtonElement;
   runBtn.addEventListener('click', () => {
@@ -92,7 +98,7 @@ export function drawBatch(mount: HTMLElement): void {
     else void submitReserved();
   });
   progressLine = el('span', { class: 'hint' });
-  mount.appendChild(el('div', { class: 'row', style: { margin: '8px 0', flexWrap: 'wrap' } }, [
+  runSec.appendChild(el('div', { class: 'row', style: { marginTop: '8px', flexWrap: 'wrap' } }, [
     progressLine, el('span', { class: 'grow' }), runBtn,
   ]));
   syncRunBtn();
@@ -108,13 +114,30 @@ export function batchTick(): void {
     if (key !== jobsKey) {
       jobsKey = key;
       clear(jobsBox);
-      jobsBox.appendChild(el('div', { class: 'sectiontitle', text: `서버 JOB · 실행/대기 ${jobs.length}개` }));
-      for (const job of jobs) {
-        const cancel = el('button', { class: 'ghost tiny', text: job.cancelRequested ? '취소 요청됨' : '취소', disabled: !!job.cancelRequested });
-        cancel.addEventListener('click', () => { cancel.disabled = true; void cancelRun(job.id).then(() => batchTick()); });
-        jobsBox.appendChild(el('div', { class: 'row' }, [
-          el('span', { class: 'grow', text: `${job.id} · ${stateLabel(job.state)} · ${job.payload?.done ?? 0}/${job.payload?.total ?? 0}` }), cancel,
+      jobsBox.style.display = jobs.length ? '' : 'none';
+      if (jobs.length) {
+        const nRun = jobs.filter((j) => j.state === 'running').length;
+        const det = el('details', { class: 'jobqueue', ...(jobsOpen ? { open: true } : {}) }) as HTMLDetailsElement;
+        det.addEventListener('toggle', () => { jobsOpen = det.open; });
+        det.appendChild(el('summary', {}, [
+          el('span', { class: 'studiosectitle', text: '서버 작업' }),
+          el('span', { class: 'studiosecnote', text: `실행 ${nRun} · 대기 ${jobs.length - nRun}` }),
         ]));
+        const list = el('div', { class: 'jobqueuelist' });
+        for (const job of jobs) {
+          const cancel = el('button', { class: 'ghost tiny', text: job.cancelRequested ? '취소 요청됨' : '취소', disabled: !!job.cancelRequested });
+          cancel.addEventListener('click', () => { cancel.disabled = true; void cancelRun(job.id).then(() => batchTick()); });
+          const first = job.payload?.items?.[0];
+          const what = first ? (first.scene || first.name) + (job.payload!.total > 1 ? ` 외 ${job.payload!.total - 1}` : '') : job.id;
+          list.appendChild(el('div', { class: 'row', title: job.id }, [
+            el('span', { class: 'badge' + (job.state === 'running' ? ' warn' : ''), text: stateLabel(job.state) }),
+            el('span', { class: 'grow clip1', text: what }),
+            el('span', { class: 'hint', text: `${job.payload?.done ?? 0}/${job.payload?.total ?? 0}` }),
+            cancel,
+          ]));
+        }
+        det.appendChild(list);
+        jobsBox.appendChild(det);
       }
     }
   }
@@ -248,7 +271,8 @@ async function drawSceneCards(box: HTMLElement): Promise<void> {
   clearHere.disabled = !Object.keys(reserves[gen.scenePreset] ?? {}).length;
   clearHere.addEventListener('click', () => { clearReserves(gen.scenePreset); hub.drawCentre(); });
   box.appendChild(el('div', { class: 'row', style: { marginBottom: '6px' } }, [
-    el('span', { class: 'sectiontitle grow', text: `씬 ${scenes.length}개` }),
+    el('span', { class: 'studiosectitle', text: '씬' }),
+    el('span', { class: 'studiosecnote grow', text: `${scenes.length}개` }),
     addAll, clearHere,
   ]));
 

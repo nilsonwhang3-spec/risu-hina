@@ -28,6 +28,7 @@ from pydantic_ai.providers.openai import OpenAIProvider
 from . import (actions, assets, codexauth, config, files, keys, log, permits, presets, providers, pyexec, skills, snapshots, textedit,
                staging, store, websearch, workspace)
 from . import agentnotes, assetrules, batchreview, continuity, nai, studio, studiojob, toolsigs, vision
+from . import db, home
 from . import card as cardmod
 from . import personas as personamod
 from . import modules as modmod
@@ -262,8 +263,13 @@ Workspace rules (mandatory - every bot shares ONE global space):
   random). `_1`, `_2` in charx filenames only make filenames unique; they are not the name. A
   trailing `.png` in a name is usually a mistake (calls use the bare name); bulk removal is the
   card tools' job.
-- Nothing outside the global space and system/ can be read or written. Other bots' DBs (chats,
-  lore) are not visible.
+- Nothing outside the global space and system/ can be read or written. Other bots' CHATS are not
+  visible. Other bots' cards, Regex, Lua/triggers and lorebooks ARE readable as READ-ONLY
+  references: "B 봇의 상태창/기능을 참고해서" -> list_reference_bots(query) -> ref_bot_overview /
+  ref_search / ref_list_scripts / ref_list_lore -> ref_read / ref_read_script_text. Never say
+  other bots cannot be seen. To bring something over, adapt it (names, variables, asset keys) to
+  the OPEN bot and propose it as NEW entries there (propose_regex_add, propose_trigger_add,
+  propose_lore_add, propose_card_edit ...); a reference bot's ids are refused by every proposal.
 - Before creating a file, check with find_files whether it exists. Never overwrite a same-named file.
 """
 
@@ -1054,6 +1060,212 @@ def build(model: Any = None) -> Agent[Deps]:
         try:
             return scripttext.read(ctx.deps.char_key, script_id, field, offset, limit, query)
         except (ValueError, OSError) as e:
+            return f"코드 조회 실패: {e}"
+
+    # --- reference bots (§1-101) -----------------------------------------------
+    #
+    # Other bots in Hina's DB, READ-ONLY: "A 봇을 연 상태에서 B 봇의 상태창을
+    # 참고해서 구현해줘". Every ref_* tool resolves `bot` (name or charKey) to
+    # one stored bot and reads its working copy; nothing here writes, and a
+    # proposal carrying a reference bot's row id is refused (actions.propose).
+    # Bringing something over = reading it here, then proposing it as a NEW
+    # entry on the open bot (propose_regex_add / propose_trigger_add /
+    # propose_lore_add / propose_card_edit ...).
+
+    def _ref_bots() -> list[dict]:
+        out = []
+        for r in db.query("SELECT char_key, name, updated_at FROM characters ORDER BY updated_at DESC"):
+            ck = r["char_key"]
+            if home.is_home(ck) or modmod.is_module_key(ck):
+                continue
+            out.append({"charKey": ck, "name": r["name"] or "", "updatedAt": r["updated_at"]})
+        return out
+
+    def _ref_resolve(ctx: RunContext[Deps], bot: str) -> tuple[str, str] | str:
+        """(charKey, name) of the reference bot, or a message saying why not."""
+        want = (bot or "").strip()
+        if not want:
+            return "bot 에 레퍼런스 봇의 이름(또는 charKey)을 주세요 - list_reference_bots 로 찾습니다"
+        bots = _ref_bots()
+        hit = [b for b in bots if b["charKey"] == want]
+        if not hit:
+            low = want.casefold()
+            hit = [b for b in bots if b["name"].casefold() == low] or \
+                  [b for b in bots if low in b["name"].casefold()]
+        if not hit:
+            return f"'{want}' 봇이 히나 DB에 없습니다 - list_reference_bots 로 이름을 확인하세요"
+        if len(hit) > 1:
+            names = ", ".join(f"{b['name']} (charKey={b['charKey']})" for b in hit[:8])
+            return f"'{want}' 에 맞는 봇이 여러 개입니다. charKey 로 하나를 고르세요: {names}"
+        b = hit[0]
+        if b["charKey"] in (ctx.deps.char_key, ctx.deps.bot_key):
+            return f"'{b['name']}' 은 지금 연 봇입니다 - 레퍼런스가 아니라 일반 도구(read_card 등)로 읽으세요"
+        return b["charKey"], b["name"]
+
+    def _ref_head(name: str) -> str:
+        return f"[레퍼런스 봇 '{name}' - 읽기 전용. 이 id 들로 제안하지 말 것; 가져오려면 지금 봇에 새 항목으로 제안]\n"
+
+    def _ref_owned(table: str, row_id: str, ck: str) -> bool:
+        return db.one(f"SELECT 1 FROM {table} WHERE id = ? AND char_key = ?", (row_id, ck)) is not None
+
+    @agent.tool
+    def list_reference_bots(ctx: RunContext[Deps], query: str = "") -> str:
+        """Other bots stored in Hina's DB, usable as READ-ONLY references ("B 봇의 ~ 기능을 참고해서").
+
+        query filters by name. Then read one with ref_bot_overview / ref_search / ref_read_card /
+        ref_list_scripts / ref_read / ref_read_script_text / ref_list_lore (bot = its name or charKey).
+        """
+        low = query.strip().casefold()
+        bots = [b for b in _ref_bots() if b["charKey"] not in (ctx.deps.char_key, ctx.deps.bot_key)
+                and (not low or low in b["name"].casefold())]
+        if not bots:
+            return "레퍼런스로 쓸 다른 봇이 히나 DB에 없습니다" + (f" ('{query}')" if query else "") + \
+                " - 히나 패널에서 한 번 연 봇만 DB에 있습니다"
+        out = [f"레퍼런스 봇 {len(bots)}개 (읽기 전용)"]
+        for b in bots[:100]:
+            n_lore = db.one("SELECT COUNT(*) AS n FROM lore_entries WHERE char_key = ? AND scope = 'global' "
+                            "AND origin <> 'deleted'", (b["charKey"],))["n"]
+            n = {k: db.one("SELECT COUNT(*) AS n FROM card_scripts WHERE char_key = ? AND kind = ? "
+                           "AND origin <> 'deleted'", (b["charKey"], k))["n"]
+                 for k in ("customscript", "triggerscript")}
+            out.append(f"- {b['name'] or '(이름 없음)'}  charKey={b['charKey']}  로어북 {n_lore} · "
+                       f"Regex {n['customscript']} · 트리거 {n['triggerscript']}")
+        if len(bots) > 100:
+            out.append(f"… 외 {len(bots) - 100}개 - query 로 좁히세요")
+        return "\n".join(out)
+
+    @agent.tool
+    def ref_bot_overview(ctx: RunContext[Deps], bot: str) -> str:
+        """A reference bot at a glance: card rows, Regex/trigger/lore counts and names (READ-ONLY)."""
+        r = _ref_resolve(ctx, bot)
+        if isinstance(r, str):
+            return r
+        ck, name = r
+        data = cardmod.listing(ck)
+        out = [_ref_head(name).rstrip(), f"카드 필드 {len(data['fields'])}개"]
+        for kind, label in (("customscript", "Regex"), ("triggerscript", "트리거/Lua")):
+            items = cardmod.scripts(ck, kind)
+            names = [str((i["entry"] or {}).get("comment") or (i["entry"] or {}).get("name") or "(설명 없음)")
+                     for i in items[:40]]
+            out.append(f"{label} {len(items)}개: " + ", ".join(names) + (" …" if len(items) > 40 else ""))
+        lore = [e for e in store.lore(ck, "global")]
+        titles = [str((e["entry"] or {}).get("comment") or "(제목 없음)") for e in lore[:60]]
+        out.append(f"로어북 {len(lore)}개: " + ", ".join(titles) + (" …" if len(lore) > 60 else ""))
+        out.append("자세히: ref_search(bot, query) · ref_read_card · ref_list_scripts · ref_list_lore → ref_read(bot, id)")
+        return "\n".join(out)
+
+    @agent.tool
+    def ref_search(ctx: RunContext[Deps], bot: str, query: str, offset: int = 0, limit: int = 30) -> str:
+        """Search a REFERENCE bot's card fields, Regex/Lua/assetref and bot lorebook (READ-ONLY).
+        Read a hit in full with ref_read(bot, id) (or ref_read_script_text for long Lua)."""
+        from . import botsearch
+        r = _ref_resolve(ctx, bot)
+        if isinstance(r, str):
+            return r
+        ck, name = r
+        res = botsearch.search(ck, "", query, offset, limit)
+        for it in res.get("items", []):
+            it["readTool"] = "ref_read"
+        return _ref_head(name) + json.dumps(res, ensure_ascii=False)
+
+    @agent.tool
+    def ref_read_card(ctx: RunContext[Deps], bot: str) -> str:
+        """Skim a REFERENCE bot's card rows (first line each); ref_read(bot, id) for a full body."""
+        r = _ref_resolve(ctx, bot)
+        if isinstance(r, str):
+            return r
+        ck, name = r
+        data = cardmod.listing(ck)
+        out = [_ref_head(name).rstrip(), f"카드 필드 {len(data['fields'])}개"]
+        for f in data["fields"]:
+            if f["deleted"]:
+                continue
+            head = (f["body"] or "").split("\n", 1)[0][:100]
+            tag = f["field"] + (f"[{f['seq']}]" if f["field"] == "alternateGreetings" else "")
+            out.append(f"--- [{tag}] id={f['id']} ({len(f['body'] or '')}자) {head}")
+        return "\n".join(out)
+
+    @agent.tool
+    def ref_list_scripts(ctx: RunContext[Deps], bot: str, kind: str = "customscript", query: str = "",
+                         offset: int = 0, limit: int = 50) -> str:
+        """A REFERENCE bot's Regex (customscript), triggerscript (Lua/트리거) or assetref entries.
+        query searches the full entry JSON. Read one with ref_read(bot, id)."""
+        r = _ref_resolve(ctx, bot)
+        if isinstance(r, str):
+            return r
+        ck, name = r
+        try:
+            items = cardmod.scripts(ck, kind)
+        except ValueError as e:
+            return str(e)
+        items = [i for i in items if query.casefold() in json.dumps(i['entry'], ensure_ascii=False).casefold()]
+        offset, limit = max(0, offset), max(1, min(200, limit))
+        page = items[offset:offset + limit]
+        out = [_ref_head(name).rstrip(),
+               f"total={len(items)} offset={offset} nextOffset={offset + len(page) if offset + len(page) < len(items) else None}"]
+        for i in page:
+            e = i["entry"] or {}
+            out.append(f"#{i['seq']} id={i['id']} “{e.get('name') or e.get('comment') or '(설명 없음)'}”"
+                       f" type={e.get('type') or ''} ({len(json.dumps(e, ensure_ascii=False))}자)")
+        return "\n".join(out)
+
+    @agent.tool
+    def ref_list_lore(ctx: RunContext[Deps], bot: str, query: str = "") -> str:
+        """A REFERENCE bot's lorebook (bot lore, not its chats'): one line per entry. query filters
+        titles/keys/bodies. Read one with ref_read(bot, id)."""
+        r = _ref_resolve(ctx, bot)
+        if isinstance(r, str):
+            return r
+        ck, name = r
+        low = query.casefold()
+        entries = [e for e in store.lore(ck, "global")
+                   if not low or low in json.dumps(e["entry"], ensure_ascii=False).casefold()]
+        out = [_ref_head(name).rstrip(), f"로어북 {len(entries)}개"]
+        for e in entries[:300]:
+            entry = e["entry"] or {}
+            kind = "[폴더] " if str(entry.get("mode") or "") == "folder" else ""
+            keys = entry.get("key") or entry.get("keys") or ""
+            out.append(f"#{e['seq']} {kind}id={e['id']} {entry.get('comment') or '(제목 없음)'}"
+                       f" key={str(keys)[:60]} ({len(str(entry.get('content') or ''))}자)")
+        if len(entries) > 300:
+            out.append(f"… 외 {len(entries) - 300}개 - query 로 좁히세요")
+        return "\n".join(out)
+
+    @agent.tool
+    def ref_read(ctx: RunContext[Deps], bot: str, id: str) -> str:
+        """The full body of one REFERENCE-bot item by id: a card field, a script entry (Regex/
+        trigger/assetref JSON) or a lorebook entry. READ-ONLY - to bring it over, propose it as a
+        new entry on the open bot."""
+        r = _ref_resolve(ctx, bot)
+        if isinstance(r, str):
+            return r
+        ck, name = r
+        if _ref_owned("card_fields", id, ck):
+            cur = cardmod.get_field(id) or {}
+            return _ref_head(name) + f"[{cur.get('field')}#{cur.get('seq')}]\n{cur.get('body') or ''}"
+        if _ref_owned("card_scripts", id, ck):
+            row = cardmod.script_entry(id)
+            if row is not None:
+                return _ref_head(name) + json.dumps(row, ensure_ascii=False, indent=2)
+        if _ref_owned("lore_entries", id, ck):
+            cur = store.lore_entry(id)
+            if cur is not None:
+                return _ref_head(name) + json.dumps(cur, ensure_ascii=False, indent=2)
+        return f"'{name}' 봇에 그 id 가 없습니다 - ref_search / ref_list_* 의 id 를 쓰세요"
+
+    @agent.tool
+    def ref_read_script_text(ctx: RunContext[Deps], bot: str, script_id: str, field: str = "",
+                             offset: int = 0, limit: int = 4000, query: str = "") -> str:
+        """Read/search a REFERENCE bot's raw Lua or other script string without JSON escapes,
+        like read_script_text (omit field first to list fields). READ-ONLY."""
+        from . import scripttext
+        r = _ref_resolve(ctx, bot)
+        if isinstance(r, str):
+            return r
+        ck, name = r
+        try:
+            return _ref_head(name) + scripttext.read(ck, script_id, field, offset, limit, query)
+        except (ValueError, OSError, LookupError) as e:
             return f"코드 조회 실패: {e}"
 
     @agent.tool

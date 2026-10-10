@@ -63,6 +63,9 @@ export interface BlobOptions {
   thumb?: boolean;
   /** Thumbnail width (default 360; 검수 asks for 720, §1-39). */
   w?: number;
+  /** Jump the 1-of-6 queue: the picture the user is waiting for (the 1장
+   * tab's finished image) must not sit behind a strip of thumbnails. */
+  front?: boolean;
 }
 
 /** A phone: ≤760px, or a coarse pointer up to 1024px. iOS reloads the whole
@@ -140,7 +143,7 @@ export async function blobUrl(path: string, stamp = '', opts: BlobOptions = {}):
   const key = (opts.thumb ? `t${opts.w || 360}:` : '') + (stamp ? `${path}:${stamp}` : path);
   return blobFrom(key, () => opts.thumb
     ? state.fileThumb(path, opts.w || 360)
-    : state.fileBytes(path, IMAGE_TIMEOUT_MS));
+    : state.fileBytes(path, IMAGE_TIMEOUT_MS), !!opts.front);
 }
 
 /**
@@ -148,7 +151,7 @@ export async function blobUrl(path: string, stamp = '', opts: BlobOptions = {}):
  * RisuAI asset by key, say. `fetch` runs inside the 1-of-6 slot; a null
  * result rejects so the caller shows its own placeholder.
  */
-export async function blobFrom(key: string, fetch: () => Promise<Uint8Array | null | undefined>): Promise<string> {
+export async function blobFrom(key: string, fetch: () => Promise<Uint8Array | null | undefined>, front = false): Promise<string> {
   const hit = cache.get(key);
   if (hit) {
     cache.delete(key);
@@ -159,7 +162,7 @@ export async function blobFrom(key: string, fetch: () => Promise<Uint8Array | nu
   // - both callers passed the semaphore before either had filled the cache.
   const running = inflight.get(key);
   if (running) return running;
-  const job = fetchBlob(key, fetch);
+  const job = fetchBlob(key, fetch, front);
   inflight.set(key, job);
   try {
     return await job;
@@ -168,10 +171,10 @@ export async function blobFrom(key: string, fetch: () => Promise<Uint8Array | nu
   }
 }
 
-async function fetchBlob(key: string, fetch: () => Promise<Uint8Array | null | undefined>): Promise<string> {
+async function fetchBlob(key: string, fetch: () => Promise<Uint8Array | null | undefined>, front = false): Promise<string> {
   await new Promise<void>((resolve) => {
     const go = () => { active += 1; resolve(); };
-    if (active < PARALLEL) go(); else queue.push(go);
+    if (active < PARALLEL) go(); else if (front) queue.unshift(go); else queue.push(go);
   });
   try {
     // A second waiter for the same key may have filled it meanwhile.

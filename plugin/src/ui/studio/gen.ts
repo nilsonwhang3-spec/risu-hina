@@ -81,11 +81,14 @@ function pollPreview(): void {
       if (b64 && typeof r.rev === 'number') {
         previewRev = r.rev;
         setFrame(b64, r.img ? (r.mime || 'image/webp') : 'image/png');
-        livePreview.step = r.step ?? 0;
+        // NovelAI's step_ix counts from 0 and the last frame before `final`
+        // is total-2: shown raw, a 28-step run "stopped" at 26/28 (§1-101).
+        // Steps DONE reads 27/28, and the 1장 tab says 마무리 중 after it.
+        livePreview.step = (r.step ?? 0) + 1;
         livePreview.total = r.total ?? 0;
         livePreview.current = r.current ?? '';
         const now = Date.now();
-        const step = r.step ?? 0;
+        const step = livePreview.step;
         if (lastStepAt && step > lastStep) {
           const per = (now - lastStepAt) / (step - lastStep);
           emaStepMs = emaStepMs ? emaStepMs * 0.7 + per * 0.3 : per;

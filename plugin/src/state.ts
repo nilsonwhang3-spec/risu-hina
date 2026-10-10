@@ -684,6 +684,8 @@ export interface StudioJob {
     current?: string;
     /** A run-time remark (e.g. references skipped on a v5 model). */
     note?: string;
+    /** false once the stream broke and the rest runs without previews. */
+    streaming?: boolean;
     anlasBefore: number | null; anlasAfter: number | null;
   } | null;
   result: { saved: number; failed: number; anlasSpent: number | null } | null;
