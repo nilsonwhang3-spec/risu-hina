@@ -1,6 +1,8 @@
-# 06. Implementation status — as of 2026-10-10 (v0.15.39 + §1-101~102 unreleased, Risu Hina)
+# 06. Implementation status — as of 2026-10-10 (v0.15.40, Risu Hina)
 
-## §1-102 (2026-10-10, unreleased): bots RisuAI no longer has, no more 새 봇으로 저장, fragment editor height
+## 0.15.40 (2026-10-10): §1-101~102 landing pages, studio layout, 1장 finish, reference bots, 저장공간 정리
+
+## §1-102 (2026-10-10): bots RisuAI no longer has, no more 새 봇으로 저장, fragment editor height
 
 - **Field report:** Hina's DB held "Over The Next" twice - 0.2 imported, trashed in PocketRisu (restorable),
   0.3 imported. RisuAI gives an imported .charx a new chaId, so every re-import is a new Hina bot and the old
@@ -40,7 +42,7 @@
   no 새 봇으로 저장, 7 settings tabs), harness in Chrome (46 leftover bots: pages, filter, CharX, bulk delete;
   fragment scroll kept at 250px across clicks), gate.
 
-## §1-101 (2026-10-10, unreleased): long landing lists, studio layout, 1장 finish, reference bots
+## §1-101 (2026-10-10): long landing lists, studio layout, 1장 finish, reference bots
 
 - **Field report (5 + 1):** 모듈/페르소나/챗 편집 lists had no filter or pages; the studio's left column
   had cards inside cards, boxed counts inside buttons, a − 장수 + of three heights and "저장 안 됨" said

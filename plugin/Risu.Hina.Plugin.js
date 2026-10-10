@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.15.39
+//@display-name Risu Hina v0.15.40
 //@api 3.0
-//@version 0.15.39
+//@version 0.15.40
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -80,13 +80,13 @@
   }
   async function toError(res) {
     const body = await readJson(res);
-    let msg26 = body && typeof body === "object" && "error" in body ? String(body.error) : `HTTP ${res.status}`;
+    let msg27 = body && typeof body === "object" && "error" in body ? String(body.error) : `HTTP ${res.status}`;
     if (res.status === 401) {
-      msg26 = '\uD1A0\uD070\uC774 \uB9DE\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4. \uBC31\uC5D4\uB4DC PC \uC758 data/token.txt \uB0B4\uC6A9\uC744 \u2699 \u2192 \uC5F0\uACB0 \u2192 \uD1A0\uD070\uC5D0 \uB123\uACE0 "\uC800\uC7A5\uD558\uACE0 \uC5F0\uACB0"\uC744 \uB20C\uB7EC \uC8FC\uC138\uC694 (127.0.0.1 \uB85C \uC811\uC18D\uD560 \uB54C\uB294 \uBE44\uC6CC\uB3C4 \uB429\uB2C8\uB2E4).';
+      msg27 = '\uD1A0\uD070\uC774 \uB9DE\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4. \uBC31\uC5D4\uB4DC PC \uC758 data/token.txt \uB0B4\uC6A9\uC744 \u2699 \u2192 \uC5F0\uACB0 \u2192 \uD1A0\uD070\uC5D0 \uB123\uACE0 "\uC800\uC7A5\uD558\uACE0 \uC5F0\uACB0"\uC744 \uB20C\uB7EC \uC8FC\uC138\uC694 (127.0.0.1 \uB85C \uC811\uC18D\uD560 \uB54C\uB294 \uBE44\uC6CC\uB3C4 \uB429\uB2C8\uB2E4).';
     } else if (res.status === 429) {
-      msg26 = "\uD2C0\uB9B0 \uD1A0\uD070\uC774 \uC5EC\uB7EC \uBC88 \uAC70\uBD80\uB418\uC5B4 \uC7A0\uC2DC \uB9C9\uD614\uC2B5\uB2C8\uB2E4. 1\uBD84 \uB4A4 \uB2E4\uC2DC \uC2DC\uB3C4\uD574 \uC8FC\uC138\uC694.";
+      msg27 = "\uD2C0\uB9B0 \uD1A0\uD070\uC774 \uC5EC\uB7EC \uBC88 \uAC70\uBD80\uB418\uC5B4 \uC7A0\uC2DC \uB9C9\uD614\uC2B5\uB2C8\uB2E4. 1\uBD84 \uB4A4 \uB2E4\uC2DC \uC2DC\uB3C4\uD574 \uC8FC\uC138\uC694.";
     }
-    return new BackendError(res.status, msg26, body);
+    return new BackendError(res.status, msg27, body);
   }
   function clientLog(level, event, detail) {
     return transport.post("/clientlog", { level, event, detail }).then(() => void 0).catch(() => void 0);
@@ -195,7 +195,7 @@
           this.tokenSafe = true;
           this.lastHealth = body;
           this.probeInfo = "";
-          this.gate = versionGate("0.15.39", String(body.version || ""));
+          this.gate = versionGate("0.15.40", String(body.version || ""));
           return body;
         }
         /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -561,6 +561,26 @@
   });
 
   // src/host.ts
+  var host_exports = {};
+  __export(host_exports, {
+    HostError: () => HostError,
+    NO_SELECT_HINT: () => NO_SELECT_HINT,
+    canon: () => canon,
+    cardOf: () => cardOf,
+    copyToClipboard: () => copyToClipboard,
+    currentSlot: () => currentSlot,
+    describeCardParts: () => describeCardParts,
+    download: () => download,
+    downloadBytes: () => downloadBytes,
+    fnv32: () => fnv32,
+    linkModule: () => linkModule,
+    listCharacters: () => listCharacters,
+    readCharacter: () => readCharacter,
+    readChat: () => readChat,
+    saveAsCopy: () => saveAsCopy,
+    writeCharacter: () => writeCharacter,
+    writeChat: () => writeChat
+  });
   async function currentSlot() {
     let characterIndex;
     try {
@@ -584,6 +604,26 @@
     const char = await Risuai.getCharacterFromIndex(characterIndex);
     if (!char) throw new HostError("missing", `\uCE90\uB9AD\uD130 ${characterIndex}\uB97C \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4`);
     return char;
+  }
+  async function listCharacters() {
+    let dbSlice = null;
+    try {
+      await Risuai.hideContainer();
+    } catch {
+    }
+    try {
+      dbSlice = await Risuai.getDatabase(["characters"]);
+    } catch (e) {
+      throw new HostError("failed", "RisuAI \uCE90\uB9AD\uD130 \uBAA9\uB85D\uC744 \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + String(e));
+    } finally {
+      try {
+        await Risuai.showContainer("fullscreen");
+      } catch {
+      }
+    }
+    const list2 = dbSlice && Array.isArray(dbSlice["characters"]) ? dbSlice["characters"] : null;
+    if (!list2) throw new HostError("failed", "RisuAI \uCE90\uB9AD\uD130 \uBAA9\uB85D\uC744 \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4 (\uAD8C\uD55C\uC744 \uD5C8\uC6A9\uD588\uB294\uC9C0 \uD655\uC778\uD574 \uC8FC\uC138\uC694)");
+    return list2.filter((c) => c && typeof c.chaId === "string" && c.chaId).map((c) => ({ chaId: String(c.chaId), name: String(c.name ?? ""), trashTime: Number(c.trashTime) || 0 }));
   }
   async function readChat(slot) {
     const chat = await Risuai.getChatFromIndex(slot.characterIndex, slot.chatIndex);
@@ -859,66 +899,6 @@
       drift = "\uC4F4 \uB4A4 \uB2E4\uC2DC \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + (e instanceof Error ? e.message : String(e));
     }
     return { applied, mode: "edits", parts, verified, ...drift ? { drift } : {} };
-  }
-  async function cloneBot(sourceIndex, seenChaId, name, update, familyKey = "") {
-    const src = await readCharacter(sourceIndex);
-    if (seenChaId && src.chaId && src.chaId !== seenChaId) {
-      throw new HostError("changed", "\uBD07\uC774 \uBC14\uB00C\uC5C8\uC2B5\uB2C8\uB2E4. \uBD07 \uC120\uD0DD \uD0ED\uC5D0\uC11C \uB2E4\uC2DC \uBD88\uB7EC\uC640 \uC8FC\uC138\uC694");
-    }
-    const copy = structuredClone(src);
-    if (familyKey) {
-      const ext = { ...copy["extentions"] ?? {} };
-      ext["risu_hina"] = { ...ext["risu_hina"] ?? {}, family: familyKey };
-      copy["extentions"] = ext;
-    }
-    for (const e of update.fields ?? []) copy[e.field] = e.after;
-    if (update.alternateGreetings) copy.alternateGreetings = update.alternateGreetings;
-    if (update.globalLore) copy.globalLore = update.globalLore;
-    if (update.customscript) copy["customscript"] = update.customscript;
-    if (update.triggerscript) copy["triggerscript"] = update.triggerscript;
-    copy.chaId = cryptoRandomId();
-    copy.name = name;
-    delete copy["realmId"];
-    let dbSlice = null;
-    try {
-      await Risuai.hideContainer();
-    } catch {
-    }
-    try {
-      dbSlice = await Risuai.getDatabase(["characters"]);
-    } catch (e) {
-      throw new HostError("failed", "\uCE90\uB9AD\uD130 \uBAA9\uB85D\uC744 \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + String(e));
-    } finally {
-      try {
-        await Risuai.showContainer("fullscreen");
-      } catch {
-      }
-    }
-    const characters = dbSlice && Array.isArray(dbSlice["characters"]) ? dbSlice["characters"].slice() : null;
-    if (!characters) {
-      throw new HostError(
-        "failed",
-        "\uBCF5\uC81C\uC5D0\uB294 'db' \uAD8C\uD55C\uC774 \uD544\uC694\uD569\uB2C8\uB2E4. RisuAI\uAC00 \uB744\uC6B4 \uAD8C\uD55C \uC694\uCCAD\uC744 \uD5C8\uC6A9\uD558\uACE0 \uB2E4\uC2DC \uC2DC\uB3C4\uD574 \uC8FC\uC138\uC694"
-      );
-    }
-    const srcDb = characters.find((c) => c.chaId && c.chaId === src.chaId) ?? characters[sourceIndex];
-    const srcChats = Array.isArray(srcDb?.chats) ? srcDb.chats : [];
-    const real = srcChats.filter((c) => c && Array.isArray(c["message"]));
-    if (real.length) {
-      copy.chats = structuredClone(real).map((c) => c["id"] ? { ...c, id: cryptoRandomId() } : c);
-      const page = Number(srcDb?.chatPage ?? src.chatPage ?? 0);
-      copy.chatPage = Number.isFinite(page) ? Math.max(0, Math.min(page, real.length - 1)) : 0;
-    } else {
-      copy.chats = [{ message: [], note: "", name: "Chat 1", localLore: [] }];
-      copy.chatPage = 0;
-    }
-    characters.push(copy);
-    await Risuai.setDatabase({ characters });
-    try {
-      await Risuai.checkCharOrder?.();
-    } catch {
-    }
-    return copy.chaId ?? "";
   }
   function cryptoRandomId() {
     try {
@@ -2750,9 +2730,9 @@
   }
   async function blobUrl(path, stamp = "", opts = {}) {
     const key = (opts.thumb ? `t${opts.w || 360}:` : "") + (stamp ? `${path}:${stamp}` : path);
-    return blobFrom(key, () => opts.thumb ? state.fileThumb(path, opts.w || 360) : state.fileBytes(path, IMAGE_TIMEOUT_MS));
+    return blobFrom(key, () => opts.thumb ? state.fileThumb(path, opts.w || 360) : state.fileBytes(path, IMAGE_TIMEOUT_MS), !!opts.front);
   }
-  async function blobFrom(key, fetch) {
+  async function blobFrom(key, fetch, front = false) {
     const hit = cache.get(key);
     if (hit) {
       cache.delete(key);
@@ -2761,7 +2741,7 @@
     }
     const running = inflight.get(key);
     if (running) return running;
-    const job = fetchBlob(key, fetch);
+    const job = fetchBlob(key, fetch, front);
     inflight.set(key, job);
     try {
       return await job;
@@ -2769,13 +2749,14 @@
       inflight.delete(key);
     }
   }
-  async function fetchBlob(key, fetch) {
+  async function fetchBlob(key, fetch, front = false) {
     await new Promise((resolve) => {
       const go = () => {
         active += 1;
         resolve();
       };
       if (active < PARALLEL) go();
+      else if (front) queue.unshift(go);
       else queue.push(go);
     });
     try {
@@ -3975,10 +3956,10 @@ name: ${nm}
         }
         /** Hand one RisuAI module to the backend (first read, a merge, or `reset` after 반영). */
         async syncModule(raw, reset = false) {
-          const row = await transport.post("/module/sync", { module: raw, reset }, 12e4);
-          this.openModules = this.openModules.map((m) => m.key === row.key ? row : m);
-          this.syncModuleAssets(raw, row.key);
-          return row;
+          const row2 = await transport.post("/module/sync", { module: raw, reset }, 12e4);
+          this.openModules = this.openModules.map((m) => m.key === row2.key ? row2 : m);
+          this.syncModuleAssets(raw, row2.key);
+          return row2;
         }
         /** A module's images into the store, like the bot's (assets.ts), in the background. */
         syncModuleAssets(raw, key) {
@@ -4036,9 +4017,9 @@ name: ${nm}
             for (const id of ids) {
               const raw = modules.find((m) => String(m["id"] ?? "") === id);
               if (!raw || raw["mcp"]) continue;
-              const row = await transport.post("/module/sync", { module: raw }, 12e4);
-              rows.push(row);
-              this.syncModuleAssets(raw, row.key);
+              const row2 = await transport.post("/module/sync", { module: raw }, 12e4);
+              rows.push(row2);
+              this.syncModuleAssets(raw, row2.key);
             }
             if (this.moduleOwnerKey !== owner) return;
             this.openModules = rows;
@@ -4068,9 +4049,9 @@ name: ${nm}
             const raw = modules.find((m) => String(m["id"] ?? "") === id);
             if (!raw) continue;
             if (raw["mcp"]) throw new Error(`'${String(raw["name"] ?? "")}' \uC740(\uB294) MCP \uBAA8\uB4C8\uC774\uB77C \uD3B8\uC9D1\uD560 \uB0B4\uC6A9\uC774 \uC5C6\uC2B5\uB2C8\uB2E4`);
-            const row = await transport.post("/module/sync", { module: raw }, 12e4);
-            rows.push(row);
-            this.syncModuleAssets(raw, row.key);
+            const row2 = await transport.post("/module/sync", { module: raw }, 12e4);
+            rows.push(row2);
+            this.syncModuleAssets(raw, row2.key);
           }
           this.openModules = rows;
           if (this.cardTarget && !rows.some((m) => m.key === this.cardTarget)) this.cardTarget = "";
@@ -4084,10 +4065,10 @@ name: ${nm}
         async openModule(id, focus = true) {
           const ids = this.openModules.map((m) => m.id);
           if (!ids.includes(id)) await this.setOpenModules([...ids, id]);
-          const row = this.openModules.find((m) => m.id === id);
-          if (!row) throw new Error("RisuAI\uC5D0\uC11C \uC774 \uBAA8\uB4C8\uC744 \uCC3E\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4");
-          if (focus) this.focusModule(row.key);
-          return row;
+          const row2 = this.openModules.find((m) => m.id === id);
+          if (!row2) throw new Error("RisuAI\uC5D0\uC11C \uC774 \uBAA8\uB4C8\uC744 \uCC3E\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4");
+          if (focus) this.focusModule(row2.key);
+          return row2;
         }
         async closeModule(key) {
           this.openModules = this.openModules.filter((m) => m.key !== key);
@@ -4138,21 +4119,21 @@ name: ${nm}
               report(t);
               progress(t);
             };
-            let row = this.openModules.find((m) => m.key === key);
-            if (!row) row = (await transport.get("/modules")).modules.find((m) => m.key === key);
-            if (!row) throw new Error("\uBAA8\uB4C8 \uC791\uC5C5\uBCF8\uC744 \uCC3E\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4");
-            say(`\uBAA8\uB4C8 '${row.name}' \uC744(\uB97C) RisuAI\uC5D0 \uBC18\uC601\uD558\uB294 \uC911\u2026`);
+            let row2 = this.openModules.find((m) => m.key === key);
+            if (!row2) row2 = (await transport.get("/modules")).modules.find((m) => m.key === key);
+            if (!row2) throw new Error("\uBAA8\uB4C8 \uC791\uC5C5\uBCF8\uC744 \uCC3E\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4");
+            say(`\uBAA8\uB4C8 '${row2.name}' \uC744(\uB97C) RisuAI\uC5D0 \uBC18\uC601\uD558\uB294 \uC911\u2026`);
             const patch = await this.cardPatch(key);
             const update = this.cardUpdateFrom(patch, false);
             if (!update) return { applied: 0, mode: "noop", verified: true };
             await this.resolveStagedAssets(update, say, key);
-            const r = await writeModule(row.id, update);
+            const r = await writeModule(row2.id, update);
             if (!r.verified) {
               return { applied: r.applied, mode: r.mode, verified: false, parts: r.parts, ...r.drift ? { drift: r.drift } : {} };
             }
             say("RisuAI \uBC18\uC601 \uD655\uC778 \uC644\uB8CC \xB7 \uBAA8\uB4C8 \uC791\uC5C5\uBCF8\uC744 \uB3D9\uAE30\uD654\uD558\uB294 \uC911\u2026");
             await this.cardCommit("\uBC18\uC601 \uC9C1\uC804", key);
-            await this.syncModule(await readModule(row.id), true);
+            await this.syncModule(await readModule(row2.id), true);
             this.bump();
             void this.refreshBotChanges();
             return { applied: r.applied, mode: r.mode, verified: true, parts: r.parts };
@@ -4160,9 +4141,9 @@ name: ${nm}
         }
         /** Read RisuAI's copy of the target module again (a change made over there). */
         async rereadModule(key = this.cardTarget) {
-          const row = this.openModules.find((m) => m.key === key);
-          if (!row) return void 0;
-          const r = await this.syncModule(await readModule(row.id));
+          const row2 = this.openModules.find((m) => m.key === key);
+          if (!row2) return void 0;
+          const r = await this.syncModule(await readModule(row2.id));
           this.bump();
           void this.refreshBotChanges();
           return r.merge;
@@ -4220,8 +4201,8 @@ name: ${nm}
           if (!key) {
             const raw = await readModule(id);
             if (raw["mcp"]) throw new Error("MCP \uBAA8\uB4C8\uC740 \uD30C\uC77C\uB85C \uC800\uC7A5\uD560 \uB0B4\uC6A9\uC774 \uC5C6\uC2B5\uB2C8\uB2E4");
-            const row = await transport.post("/module/sync", { module: raw }, 12e4);
-            key = row.key;
+            const row2 = await transport.post("/module/sync", { module: raw }, 12e4);
+            key = row2.key;
             await this.syncModuleAssets(raw, key);
           }
           return await this.exportModule(format, allowMissing, "", key);
@@ -4283,13 +4264,13 @@ name: ${nm}
           }
         }
         async cachePersonaIcons(rows, live) {
-          for (const row of rows) {
-            const p = live.find((x) => row.id ? x.id === row.id : x.index === row.index);
+          for (const row2 of rows) {
+            const p = live.find((x) => row2.id ? x.id === row2.id : x.index === row2.index);
             if (!p?.icon) continue;
             const bytes = await personaImage(p.icon);
             if (!bytes) continue;
             try {
-              const saved2 = await transport.post("/persona/icon", { key: row.key, iconKey: p.icon, base64: toBase64(bytes) });
+              const saved2 = await transport.post("/persona/icon", { key: row2.key, iconKey: p.icon, base64: toBase64(bytes) });
               this.patchPersona(saved2);
             } catch (e) {
               void clientLog("warn", "persona icon cache", { error: String(e).slice(0, 200) });
@@ -4297,19 +4278,19 @@ name: ${nm}
           }
         }
         /** One row changed: the list and the open persona follow, one emit. */
-        patchPersona(row) {
-          if (this.personas) this.personas = this.personas.map((x) => x.key === row.key ? { ...x, ...row } : x);
-          if (this.persona?.key === row.key) this.persona = { ...this.persona, ...row };
+        patchPersona(row2) {
+          if (this.personas) this.personas = this.personas.map((x) => x.key === row2.key ? { ...x, ...row2 } : x);
+          if (this.persona?.key === row2.key) this.persona = { ...this.persona, ...row2 };
           this.emit();
-          return row;
+          return row2;
         }
         /** Open one persona for editing (its project folder exists from the sync). */
         async openPersona(key) {
-          const row = await transport.get("/persona", { key });
-          this.persona = row;
+          const row2 = await transport.get("/persona", { key });
+          this.persona = row2;
           this.touchFiles();
           if (this.editMode === "persona") void this.syncModuleOwner();
-          return row;
+          return row2;
         }
         /** The backend's rows again, without reading RisuAI (an approved AI edit). */
         async refreshPersonaList() {
@@ -4346,11 +4327,11 @@ name: ${nm}
         }
         /** A NEW persona in the working copy; RisuAI gets it on 반영. */
         async createPersona(name, prompt = "") {
-          const row = await transport.post("/persona/create", { name, prompt });
-          this.personas = [...this.personas ?? [], row];
-          this.persona = row;
+          const row2 = await transport.post("/persona/create", { name, prompt });
+          this.personas = [...this.personas ?? [], row2];
+          this.persona = row2;
           this.touchFiles();
-          return row;
+          return row2;
         }
         async personaCheckpoints(key = this.persona?.key ?? "") {
           const r = await transport.get("/persona/checkpoints", { key });
@@ -4394,11 +4375,11 @@ name: ${nm}
           });
         }
         async performPersonaWriteBack(key) {
-          const row = await transport.get("/persona", { key });
-          if (!row.dirty) return { written: false, name: row.work.name };
-          if (row.isNew) {
-            const bytes2 = row.work.image ? await this.fileBytes(row.work.image) : null;
-            const made = await createPersona({ name: row.work.name, prompt: row.work.prompt }, bytes2);
+          const row2 = await transport.get("/persona", { key });
+          if (!row2.dirty) return { written: false, name: row2.work.name };
+          if (row2.isNew) {
+            const bytes2 = row2.work.image ? await this.fileBytes(row2.work.image) : null;
+            const made = await createPersona({ name: row2.work.name, prompt: row2.work.prompt }, bytes2);
             const after2 = await transport.post("/persona/commit", {
               key,
               id: made.id,
@@ -4415,14 +4396,14 @@ name: ${nm}
             return { written: true, name: made.name };
           }
           const live = (await readPersonas()).personas;
-          const p = live.find((x) => row.id ? x.id === row.id : x.index === row.index && x.name === row.base.name);
+          const p = live.find((x) => row2.id ? x.id === row2.id : x.index === row2.index && x.name === row2.base.name);
           if (!p) throw new Error("RisuAI\uC5D0\uC11C \uC774 \uD398\uB974\uC18C\uB098\uB97C \uCC3E\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4 (\uC9C0\uC6CC\uC84C\uC744 \uC218 \uC788\uC2B5\uB2C8\uB2E4). \uCCAB \uD654\uBA74\uC5D0\uC11C \uB2E4\uC2DC \uC77D\uC5B4 \uC8FC\uC138\uC694");
-          if (p.selected) return this.personaSaveAsCopy(key, row, p);
-          if (p.name !== row.base.name || p.prompt !== row.base.prompt || p.icon !== row.iconKey) {
+          if (p.selected) return this.personaSaveAsCopy(key, row2, p);
+          if (p.name !== row2.base.name || p.prompt !== row2.base.prompt || p.icon !== row2.iconKey) {
             throw new Error("RisuAI \uCABD\uC5D0\uC11C \uC774 \uD398\uB974\uC18C\uB098\uAC00 \uBC14\uB00C\uC5C8\uC2B5\uB2C8\uB2E4. \uCCAB \uD654\uBA74\uC5D0\uC11C \uD398\uB974\uC18C\uB098\uB97C \uB2E4\uC2DC \uC77D\uC5B4 \uC8FC\uC138\uC694 (\uD3B8\uC9D1 \uB0B4\uC6A9\uC740 \uC791\uC5C5\uBCF8\uC5D0 \uB0A8\uC544 \uC788\uC2B5\uB2C8\uB2E4)");
           }
-          const bytes = row.work.image ? await this.fileBytes(row.work.image) : null;
-          const saved2 = await writePersona(p, { name: row.work.name, prompt: row.work.prompt }, bytes);
+          const bytes = row2.work.image ? await this.fileBytes(row2.work.image) : null;
+          const saved2 = await writePersona(p, { name: row2.work.name, prompt: row2.work.prompt }, bytes);
           const after = await transport.post("/persona/commit", {
             key,
             name: saved2.name,
@@ -4444,10 +4425,10 @@ name: ${nm}
          * the original's working copy goes back to RisuAI's (an automatic snapshot
          * keeps the edit there too), and the copy is what the persona tab shows next.
          */
-        async personaSaveAsCopy(key, row, p) {
-          const name = copyName(row.base.name, row.work.name);
-          const bytes = row.work.image ? await this.fileBytes(row.work.image) : null;
-          const made = await createPersona({ name, prompt: row.work.prompt }, bytes, p);
+        async personaSaveAsCopy(key, row2, p) {
+          const name = copyName(row2.base.name, row2.work.name);
+          const bytes = row2.work.image ? await this.fileBytes(row2.work.image) : null;
+          const made = await createPersona({ name, prompt: row2.work.prompt }, bytes, p);
           try {
             await transport.post("/persona/reset", { key });
           } catch (e) {
@@ -5160,6 +5141,30 @@ name: ${nm}
         async charxPreview() {
           return await transport.get("/charx/preview", { charKey: this.activeCharKey });
         }
+        /** Hina's bots with their RisuAI state, as last compared (§1-102). */
+        async hinaBots() {
+          return (await transport.get("/bots")).bots ?? [];
+        }
+        /** Read RisuAI's character list and record which of Hina's bots it still has. */
+        async compareBots() {
+          const { listCharacters: listCharacters2 } = await Promise.resolve().then(() => (init_host(), host_exports));
+          const characters = await listCharacters2();
+          return await transport.post("/bots/presence", { characters });
+        }
+        /** Remove Hina's copy of a bot RisuAI no longer has. RisuAI is not touched. */
+        async forgetBot(charKey) {
+          return await transport.post("/bots/forget", { charKey });
+        }
+        /** The same for many at once; one refusal does not stop the rest. */
+        async forgetBots(charKeys) {
+          return await transport.post("/bots/forget", { charKeys }, 3e5);
+        }
+        /** A .charx of any Hina bot (not only the open one), assets it lacks left out. */
+        async charxOf(charKey) {
+          const r = await transport.post("/charx/build", { charKey, allowMissing: true, name: "" }, 6e5);
+          this.touchFiles([r.path]);
+          return r;
+        }
         /** Build out/<name>.charx on the backend from the working card + store. */
         async charxBuild(opts = {}) {
           const r = await transport.post("/charx/build", {
@@ -5515,9 +5520,7 @@ name: ${nm}
               if (!out.verified) throw new Error(out.drift || "RisuAI \uC800\uC7A5 \uACB0\uACFC\uB97C \uD655\uC778\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4. \uBBF8\uBC18\uC601 \uBCC0\uACBD\uC744 \uBCF4\uC874\uD588\uC2B5\uB2C8\uB2E4.");
               detail = out.mode === "noop" ? "\uCE74\uB4DC\uC5D0 \uBC18\uC601\uD560 \uBCC0\uACBD\uC774 \uC5C6\uC5C8\uC2B5\uB2C8\uB2E4." : `\uCE74\uB4DC \uBCC0\uACBD ${out.applied}\uAC74${out.parts?.length ? `(${describeCardParts(out.parts)})` : ""}\uC744 RisuAI\uC5D0 \uBC18\uC601\uD558\uACE0 \uC800\uC7A5\uC744 \uD655\uC778\uD588\uC2B5\uB2C8\uB2E4.`;
             } else if (r.host.kind === "host_clone_bot") {
-              const name = String(r.host.args?.name || "") || "\uBCF5\uC81C \uBD07";
-              await this.cloneBot(name);
-              detail = `\uBCF5\uC81C \uBD07 \u201C${name}\u201D \uC744 \uB9CC\uB4E4\uC5C8\uC2B5\uB2C8\uB2E4. RisuAI \uBAA9\uB85D\uC5D0\uC11C \uD655\uC778\uD574 \uC8FC\uC138\uC694.`;
+              throw new Error("\uBD07 \uBCF5\uC81C(\uC0C8 \uBD07\uC73C\uB85C \uC800\uC7A5)\uB294 \uB354 \uC774\uC0C1 \uC9C0\uC6D0\uD558\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4");
             } else if (r.host.kind === "host_persona_writeback") {
               const out = await this.personaWriteBack(String(r.host.args?.key || ""));
               detail = out.copied ? `\uC120\uD0DD\uB41C \uD398\uB974\uC18C\uB098\uB77C \uC6D0\uBCF8 \uB300\uC2E0 \uC0C8 \uD398\uB974\uC18C\uB098 '${out.name}' (\uC0AC\uBCF8)\uC73C\uB85C RisuAI\uC5D0 \uC800\uC7A5\uD558\uACE0 \uD655\uC778\uD588\uC2B5\uB2C8\uB2E4.` : out.written ? `\uD398\uB974\uC18C\uB098 '${out.name}' \uC744(\uB97C) RisuAI\uC5D0 \uBC18\uC601\uD558\uACE0 \uC800\uC7A5\uC744 \uD655\uC778\uD588\uC2B5\uB2C8\uB2E4.` : "\uD398\uB974\uC18C\uB098\uC5D0 \uBC18\uC601\uD560 \uBCC0\uACBD\uC774 \uC5C6\uC5C8\uC2B5\uB2C8\uB2E4.";
@@ -5538,15 +5541,15 @@ name: ${nm}
                 linked = true;
               }
               await this.loadModules().catch(() => void 0);
-              const row = await this.openModule(mid, true);
+              const row2 = await this.openModule(mid, true);
               this.openTabRequest = CARD_TABS.has(this.activeTab) ? this.activeTab : "botlore";
               this.emit();
-              detail = `RisuAI\uC5D0 \uC0C8 \uBAA8\uB4C8 '${row.name}' \uC744(\uB97C) \uB9CC\uB4E4\uACE0 \uD328\uB110\uC5D0 \uC5F4\uC5C8\uC2B5\uB2C8\uB2E4 (id=${mid}, key=${row.key})` + (linked ? " \xB7 \uC774 \uBD07\uC758 \uBAA8\uB4C8 \uBAA9\uB85D\uC5D0 \uC5F0\uACB0\uD588\uC2B5\uB2C8\uB2E4" : "") + ".";
+              detail = `RisuAI\uC5D0 \uC0C8 \uBAA8\uB4C8 '${row2.name}' \uC744(\uB97C) \uB9CC\uB4E4\uACE0 \uD328\uB110\uC5D0 \uC5F4\uC5C8\uC2B5\uB2C8\uB2E4 (id=${mid}, key=${row2.key})` + (linked ? " \xB7 \uC774 \uBD07\uC758 \uBAA8\uB4C8 \uBAA9\uB85D\uC5D0 \uC5F0\uACB0\uD588\uC2B5\uB2C8\uB2E4" : "") + ".";
             } else if (r.host.kind === "host_open_module") {
-              const row = await this.openModule(String(r.host.args?.id || ""), true);
+              const row2 = await this.openModule(String(r.host.args?.id || ""), true);
               this.openTabRequest = CARD_TABS.has(this.activeTab) ? this.activeTab : "botlore";
               this.emit();
-              detail = `\uBAA8\uB4C8 '${row.name}' \uC744(\uB97C) \uD328\uB110\uC5D0 \uC5F4\uC5C8\uC2B5\uB2C8\uB2E4. \uC774\uC81C \uC774 \uBAA8\uB4C8\uC744 \uC77D\uACE0 \uACE0\uCE60 \uC218 \uC788\uC2B5\uB2C8\uB2E4 (focus_target).`;
+              detail = `\uBAA8\uB4C8 '${row2.name}' \uC744(\uB97C) \uD328\uB110\uC5D0 \uC5F4\uC5C8\uC2B5\uB2C8\uB2E4. \uC774\uC81C \uC774 \uBAA8\uB4C8\uC744 \uC77D\uACE0 \uACE0\uCE60 \uC218 \uC788\uC2B5\uB2C8\uB2E4 (focus_target).`;
             } else if (r.host.kind === "host_open_tab") {
               const tab = String(r.host.args?.tab || "");
               const mk = r.host.charKey || "";
@@ -5888,9 +5891,9 @@ name: ${nm}
           const collect2 = (value) => {
             if (typeof value === "string" && value.startsWith("assets/hina-pending-")) pending3.add(value);
           };
-          for (const row of update.emotionImages ?? []) if (Array.isArray(row)) collect2(row[1]);
-          for (const row of update.additionalAssets ?? []) if (Array.isArray(row)) collect2(row[1]);
-          for (const row of update.ccAssets ?? []) if (row && typeof row === "object") collect2(row.uri);
+          for (const row2 of update.emotionImages ?? []) if (Array.isArray(row2)) collect2(row2[1]);
+          for (const row2 of update.additionalAssets ?? []) if (Array.isArray(row2)) collect2(row2[1]);
+          for (const row2 of update.ccAssets ?? []) if (row2 && typeof row2 === "object") collect2(row2.uri);
           for (const f of update.fields ?? []) if (f.field === "image") collect2(f.after);
           const resolved = /* @__PURE__ */ new Map();
           let done = 0;
@@ -5905,55 +5908,9 @@ name: ${nm}
           });
           const replace = (value) => typeof value === "string" ? resolved.get(value) ?? value : value;
           if (update.fields) update.fields = update.fields.map((f) => f.field === "image" ? { ...f, after: String(replace(f.after)) } : f);
-          if (update.emotionImages) update.emotionImages = update.emotionImages.map((row) => Array.isArray(row) ? [row[0], replace(row[1]), ...row.slice(2)] : row);
-          if (update.additionalAssets) update.additionalAssets = update.additionalAssets.map((row) => Array.isArray(row) ? [row[0], replace(row[1]), ...row.slice(2)] : row);
-          if (update.ccAssets) update.ccAssets = update.ccAssets.map((row) => row && typeof row === "object" ? { ...row, uri: replace(row.uri) } : row);
-        }
-        /**
-         * 새 봇으로 저장: keep editing this bot, and keep what it was.
-         *
-         * The bot as RisuAI holds it now - the baseline, untouched by the working
-         * copy - is cloned first as "<name> (백업)", chats included. Then the
-         * working copy is written into the live bot and becomes its baseline, so
-         * the workspace, snapshots and conversation carry on where they are. The
-         * opposite (clone the edited card, leave the original) put the user in a
-         * new bot with an empty workspace and the old one still pending.
-         */
-        async saveAsNewBot(backupName) {
-          return foregroundWrite((report) => this.performSaveAsNewBot(backupName, report));
-        }
-        async performSaveAsNewBot(backupName, progress) {
-          if (!this.slot) throw new Error("\uD638\uC2A4\uD2B8 \uC0C1\uD0DC\uB97C \uBA3C\uC800 \uC77D\uC5B4\uC57C \uD569\uB2C8\uB2E4");
-          const patch = await this.cardPatch(this.activeCharKey);
-          if (!patch.full) {
-            throw new Error("\uAD6C\uBC84\uC804 \uC5C5\uB85C\uB4DC \uC0C1\uD0DC\uC758 \uCE74\uB4DC\uB77C \uC800\uC7A5\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4. \uD328\uB110\uC744 \uB2EB\uC558\uB2E4 \uB2E4\uC2DC \uC5F4\uC5B4 \uC8FC\uC138\uC694");
-          }
-          const family = this.workspace?.familyKey || this.activeCharKey;
-          progress("\uAE30\uC874 \uBD07\uC758 \uBC31\uC5C5\uC744 \uC800\uC7A5\uD558\uB294 \uC911\u2026");
-          const backupChaId = await cloneBot(this.slot.characterIndex, patch.chaId, backupName, {}, family);
-          const r = await this.performCardWriteBack(progress);
-          if (!r.verified) {
-            throw new Error("RisuAI \uAC00 \uCE74\uB4DC \uC4F0\uAE30\uB97C \uBC1B\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4" + (r.drift ? ` (${r.drift})` : "") + ". \uBC31\uC5C5 \uBD07\uC740 \uB9CC\uB4E4\uC5B4\uC84C\uC9C0\uB9CC \uC774 \uBD07\uC5D0\uB294 \uBC18\uC601\uB418\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4 - \uD3B8\uC9D1 \uB0B4\uC6A9\uC740 \uADF8\uB300\uB85C \uC788\uC2B5\uB2C8\uB2E4.");
-          }
-          return { backupChaId, applied: r.applied, mode: r.mode };
-        }
-        /** Create a clone bot in RisuAI carrying the working card. */
-        async cloneBot(name) {
-          return foregroundWrite((report) => this.performCloneBot(name, report));
-        }
-        async performCloneBot(name, progress) {
-          if (!this.slot) throw new Error("\uD638\uC2A4\uD2B8 \uC0C1\uD0DC\uB97C \uBA3C\uC800 \uC77D\uC5B4\uC57C \uD569\uB2C8\uB2E4");
-          const patch = await this.cardPatch(this.activeCharKey);
-          if (!patch.full) {
-            throw new Error("\uAD6C\uBC84\uC804 \uC5C5\uB85C\uB4DC \uC0C1\uD0DC\uC758 \uCE74\uB4DC\uB77C \uBCF5\uC81C\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4. \uD328\uB110\uC744 \uB2EB\uC558\uB2E4 \uB2E4\uC2DC \uC5F4\uC5B4 \uC8FC\uC138\uC694");
-          }
-          const update = this.cardUpdateFrom(patch, true) ?? {};
-          await this.resolveStagedAssets(update, progress, this.activeCharKey);
-          progress("\uC774\uBBF8\uC9C0 \uC900\uBE44 \uC644\uB8CC \xB7 \uBCF5\uC81C \uBD07 \uC800\uC7A5 \uC911\u2026");
-          const family = this.workspace?.familyKey || this.activeCharKey;
-          const chaId = await cloneBot(this.slot.characterIndex, patch.chaId, name, update, family);
-          await this.cardCommit("\uBCF5\uC81C \uC9C1\uC804", this.activeCharKey);
-          return chaId;
+          if (update.emotionImages) update.emotionImages = update.emotionImages.map((row2) => Array.isArray(row2) ? [row2[0], replace(row2[1]), ...row2.slice(2)] : row2);
+          if (update.additionalAssets) update.additionalAssets = update.additionalAssets.map((row2) => Array.isArray(row2) ? [row2[0], replace(row2[1]), ...row2.slice(2)] : row2);
+          if (update.ccAssets) update.ccAssets = update.ccAssets.map((row2) => row2 && typeof row2 === "object" ? { ...row2, uri: replace(row2.uri) } : row2);
         }
       };
       state = new AppState();
@@ -6555,7 +6512,7 @@ name: ${nm}
         const busy = el("span", { class: "hint" });
         const other = !!a.chatKey && a.chatKey !== state.activeChatKey;
         const lines = Array.isArray(a.args?.lines) ? a.args.lines.map(String).slice(0, 6) : [];
-        const row = el("div", { class: "stagedrow" }, [
+        const row2 = el("div", { class: "stagedrow" }, [
           a.kind === "studio_batch" ? el("span", { class: "badge warn", text: "\uC0DD\uC131" }) : a.byHost ? el("span", { class: "badge err", text: "RisuAI" }) : el("span", { class: "badge", text: "\uC791\uC5C5\uBCF8" }),
           el("div", { class: "grow" }, [
             el("div", { text: a.summary }),
@@ -6573,7 +6530,7 @@ name: ${nm}
             await decideAnywhere(a, approve);
           } catch (e) {
             busy.textContent = "";
-            list2.insertBefore(el("div", { class: "notice err", text: msg3(e) }), row);
+            list2.insertBefore(el("div", { class: "notice err", text: msg3(e) }), row2);
             yes.disabled = no.disabled = false;
             return;
           }
@@ -6582,7 +6539,7 @@ name: ${nm}
         };
         yes.addEventListener("click", () => void decide(true));
         no.addEventListener("click", () => void decide(false));
-        list2.appendChild(row);
+        list2.appendChild(row2);
       }
       if (staged.length) {
         const yes = el("button", { class: "primary tiny", text: `\uD134 \uC218\uC815 ${staged.length}\uAC74 \uC2B9\uC778` });
@@ -6880,19 +6837,19 @@ name: ${nm}
   function shellPrompt(text2, actions) {
     if (!noticeMount) return;
     clear(noticeMount);
-    const row = el("div", { class: "row", style: { marginTop: "6px", gap: "6px" } });
-    const box = el("div", { class: "notice shellprompt" }, [el("div", { text: text2 }), row]);
+    const row2 = el("div", { class: "row", style: { marginTop: "6px", gap: "6px" } });
+    const box = el("div", { class: "notice shellprompt" }, [el("div", { text: text2 }), row2]);
     for (const a of actions) {
       const b = el("button", { class: (a.primary ? "primary" : "ghost") + " tiny", text: a.label });
       b.addEventListener("click", async () => {
-        for (const x of Array.from(row.querySelectorAll("button"))) x.disabled = true;
+        for (const x of Array.from(row2.querySelectorAll("button"))) x.disabled = true;
         try {
           await a.run();
         } finally {
           if (box.isConnected) box.remove();
         }
       });
-      row.appendChild(b);
+      row2.appendChild(b);
     }
     noticeMount.appendChild(box);
   }
@@ -7037,21 +6994,21 @@ name: ${nm}
             title.firstChild.textContent = label2;
           });
         });
-        const row = el("div", { class: "verrow" });
+        const row2 = el("div", { class: "verrow" });
         const del = el("button", { class: "ghost tiny", title: "\uC774 \uC2A4\uB0C5\uC0F7 \uC0AD\uC81C" });
         armed(del, "\u2715", "\uC0AD\uC81C \uD655\uC778", async () => {
-          row.classList.add("deleting");
+          row2.classList.add("deleting");
           del.disabled = true;
           try {
             await state.deleteCheckpoint(c.id);
-            row.remove();
+            row2.remove();
           } catch (e) {
-            row.classList.remove("deleting");
+            row2.classList.remove("deleting");
             del.disabled = false;
             shellNotice("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg4(e), "err");
           }
         });
-        row.append(
+        row2.append(
           el("div", { class: "grow" }, [
             title,
             el("div", { class: "hint", text: `${c.message_count}\uD134 \xB7 ${fmtTime(c.created_at * 1e3)}` })
@@ -7060,7 +7017,7 @@ name: ${nm}
           b,
           del
         );
-        return row;
+        return row2;
       };
       for (const [idx, c] of users.slice(0, 12).entries()) {
         body.appendChild(verRow(c, { newest: idx === 0 }));
@@ -8316,6 +8273,16 @@ pre.mono {
 .modetext > span { overflow-wrap: anywhere; }
 .modecaret { color: var(--textcolor2, #79839a); }
 .modebody { margin-top: 14px; }
+/* \xA71-101: each landing list's own filter box and its page line. */
+.landfilter { margin: 0 0 8px; max-width: 640px; }
+.landfilter input { width: 100%; box-sizing: border-box; }
+.pagenav { gap: 6px; align-items: center; padding: 6px 8px; border-top: 1px solid var(--borderc, #2b323f); }
+/* \uC124\uC815 \u2192 \uC800\uC7A5\uACF5\uAC04 \uC815\uB9AC (\xA71-102). */
+.botcleanchips { gap: 4px; flex-wrap: wrap; margin: 4px 0 6px; }
+.botcleanchips .chip.on { background: rgba(37, 99, 235, .18); border-color: #2563eb; }
+.botcleantools { gap: 8px; align-items: center; max-width: 640px; margin-bottom: 6px; }
+.botcleanrow { flex-wrap: wrap; }
+.botcleanrow input[type=checkbox] { width: auto; flex-shrink: 0; }
 .loadingrow { cursor: default; }
 .foldrow { cursor: pointer; }
 .chatitem.busy { opacity: .6; }
@@ -9305,18 +9272,55 @@ label.row { align-items: center; gap: 6px; }
 .split.lcollapse > .explorer, .split.lcollapse > .gutter.leftside { display: none; }
 .split.rcollapse > .right, .split.rcollapse > .gutter:not(.leftside) { display: none; }
 
-/* The tool buttons under the style editor (\uCE90\uB9AD\uD130 \xB7 \uC870\uAC01). */
-.toolbtns { display: flex; gap: 6px; padding: 6px 8px; }
+/* The \uBC30\uCE58 tab in three regions - preset, scenes, \uC608\uC57D\xB7\uC0DD\uC131 - and the
+   server queue as one folded line above them (\xA71-101). */
+.batchsec { padding: 10px 0; border-top: 1px solid var(--border, #2b323f); }
+.batchsec.first { border-top: none; padding-top: 2px; }
+.studio-job-list { margin-bottom: 8px; }
+.jobqueue { border: 1px solid var(--border, #2b323f); border-radius: 6px; padding: 4px 8px; }
+.jobqueue > summary { cursor: pointer; display: flex; gap: 8px; align-items: baseline; list-style: none; }
+.jobqueue > summary::before { content: '\u25B8'; font-size: 10px; color: var(--textcolor2, #79839a); }
+.jobqueue[open] > summary::before { content: '\u25BE'; }
+.jobqueuelist { max-height: 30vh; overflow-y: auto; margin-top: 4px; }
+.jobqueuelist > .row { gap: 6px; align-items: center; padding: 2px 0; min-width: 0; }
+/* The \uD504\uB86C\uD504\uD2B8 column's sections (\xA71-101): one header each, a rule between
+   them, no frame inside a frame. */
+.studiosec { padding: 10px 8px 12px; border-top: 1px solid var(--border, #2b323f); }
+.studiosec:first-child { border-top: none; padding-top: 8px; }
+.studiosechead { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; min-width: 0; }
+.studiosectitle { font-size: 12px; font-weight: 700; letter-spacing: .02em; white-space: nowrap; }
+.studiosecnote { font-size: 11px; color: var(--textcolor2, #79839a); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The tool buttons of the material section (\uCE90\uB9AD\uD130 \xB7 \uC870\uAC01). */
+.toolbtns { display: flex; gap: 6px; }
 .toolbtns .toolbtn { flex: 1; padding: 7px 6px; display: flex; align-items: center; justify-content: center; gap: 6px; }
+.toolcount { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--textcolor2, #79839a); }
+.toolcount.on { color: #4ade80; font-weight: 600; }
+.toolcount.err { color: var(--err, #f87171); }
+/* Fold toggles are a caret, not a boxed +/-. */
+button.foldcaret { border: none; background: none; padding: 0 2px; min-width: 14px; font-size: 11px; color: var(--textcolor2, #79839a); }
+.temporary { margin-bottom: 4px; }
+.temporary .promptfoldhead { cursor: pointer; }
+.temporary .tempbody { margin: 4px 0 6px; }
+.temporary textarea { width: 100%; box-sizing: border-box; }
+.temporary textarea.promptedit { min-height: 60px; resize: vertical; }
+.badge.tempon { font-size: 10px; padding: 0 6px; }
+/* The run footer: \uC7A5\uC218 as one stepper, every part the same height. */
+.runctl { gap: 8px; align-items: center; }
+.stepper { display: inline-flex; align-items: stretch; height: 28px; border: 1px solid var(--border, #2b323f); border-radius: 6px; overflow: hidden; }
+.stepper > button { height: 100%; min-width: 28px; padding: 0 8px; border: none; border-radius: 0; background: transparent; line-height: 1; }
+.stepper > input.countbox { height: 100%; width: 44px; padding: 0 2px; margin: 0; border: none; border-left: 1px solid var(--border, #2b323f);
+  border-right: 1px solid var(--border, #2b323f); border-radius: 0; background: transparent; box-sizing: border-box; -moz-appearance: textfield; }
+.stepper > input.countbox::-webkit-outer-spin-button, .stepper > input.countbox::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.runctl > button.primary { height: 28px; padding: 0 14px; }
 
 /* The selected style, edited in place in the left column. */
-.styleedit { padding: 4px 8px 0; }
+.styleedit { padding: 4px 0 0; }
 .styleedit textarea { width: 100%; box-sizing: border-box; resize: vertical; }
 .styleedit .field { display: block; margin-bottom: 6px; }
 .styleedit .field > span { display: block; font-size: 11px; opacity: .7; margin-bottom: 2px; }
 /* \xA71-90: what the style saves sits in one framed block (prompts, \uC694\uCCAD \uC124\uC815,
    \uC800\uC7A5); the temporary prompts and the material buttons follow it. */
-.styleedit.stylesaved { margin: 6px 8px 0; padding: 6px 8px; border: 1px solid var(--border, #2b323f); border-radius: 8px; }
+.styleedit.stylesaved { margin: 8px 0 0; padding: 0; }
 .stylesaved .genrow { gap: 6px; align-items: center; margin: 2px 0 4px; min-width: 0; }
 .stylesaved .genpeek { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
 .stylesavebar { gap: 6px; align-items: center; padding-top: 6px; margin-top: 4px; border-top: 1px dashed var(--border, #2b323f); min-width: 0; }
@@ -9365,10 +9369,34 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
 .toast.err { border-color: rgba(239, 68, 68, .7); }
 
 /* The fragment organizer in the centre. */
-.fragcols { display: flex; gap: 14px; align-items: flex-start; width: 100%; }
-.fragcols > .fraglist { flex: 0 0 220px; min-width: 0; }
-.fragcols > .fragedit { flex: 1 1 auto; min-width: 0; width: 100%; }
-.fragedit textarea.promptedit { min-height: 50vh; }
+/* The editor needs room: in a narrow centre it goes UNDER the list instead of
+   being squeezed to a column of single characters (\xA71-101). */
+.filepad:has(> .fragview) { overflow: hidden; display: flex; flex-direction: column; }
+.fragview { flex: 1; min-height: 0; display: flex; flex-direction: column; container-type: inline-size; }
+.fragcols { flex: 1; min-height: 0; display: flex; gap: 14px; align-items: stretch; width: 100%; }
+.fragcols > .fraglist { flex: 0 0 240px; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.fraglist > .fraglistbody { flex: 1; min-height: 0; overflow-y: auto; }
+.fragcols > .fragedit { flex: 1 1 auto; min-width: 0; overflow-y: auto; display: flex; flex-direction: column; }
+.fragedit > .cardedit { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.fragedit .cardbodyfield { flex: 1; min-height: 220px; display: flex; flex-direction: column; margin-bottom: 0; }
+.fragedit .cardbodyfield > .hlwrap { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.fragedit .cardbodyfield textarea.promptedit { flex: 1; min-height: 0; height: auto; resize: none; }
+/* A narrow centre: the list on top (a third of the height), the editor under it. */
+@container (max-width: 560px) {
+  .fragcols { flex-direction: column; }
+  .fragcols > .fraglist { flex: 0 0 auto; max-height: 40%; }
+  .fragcols > .fragedit { flex: 1 1 auto; min-height: 0; }
+}
+.fraghead { gap: 8px; align-items: baseline; margin-bottom: 10px; flex-wrap: wrap; }
+.fraghelp { font-size: 11px; }
+.fraghelp summary { cursor: pointer; color: var(--textcolor2, #79839a); }
+.fraghelp[open] { flex-basis: 100%; order: 9; }
+.fragtools { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.fragtools .row { gap: 6px; }
+.fragtools .row > button { flex: 1; }
+.fraglist .secthead .addhere { visibility: hidden; }
+.fraglist .secthead:hover .addhere, .fraglist .secthead .addhere:focus { visibility: visible; }
+@media (hover: none) { .fraglist .secthead .addhere { visibility: visible; } }
 .fraglist input { width: 100%; box-sizing: border-box; }
 
 /* The centre tabs (1\uC7A5 \xB7 \uBC30\uCE58 \xB7 \uC7A1 \uD788\uC2A4\uD1A0\uB9AC) style via .tabstrip above. */
@@ -9381,6 +9409,12 @@ textarea.promptedit.compact, .styleedit textarea.promptedit { min-height: 60px; 
 }
 .bigpreview img { max-width: 100%; max-height: 72vh; object-fit: contain; display: block; }
 .bigpreview .previewname { padding: 4px 8px; }
+/* \uB9C8\uBB34\uB9AC \uC911 / \uC644\uC131\uBCF8 \uBD88\uB7EC\uC624\uB294 \uC911 / an error with \uB2E4\uC2DC, over the held frame (\xA71-101). */
+.bigpreview { position: relative; }
+.bigpreview .previewstate { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); max-width: calc(100% - 24px);
+  display: flex; gap: 8px; align-items: center; padding: 5px 12px; border-radius: 999px; font-size: 12px;
+  background: rgba(15, 17, 23, .82); color: #e5e7eb; border: 1px solid var(--borderc, #2b323f); }
+.bigpreview .previewstate.err { border-color: var(--err, #f87171); color: #fecaca; }
 .countbox { width: 56px; text-align: center; }
 .striprow { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; }
 /* --- the bottom generation strip (replaces the old history tab) ------------- */
@@ -10696,7 +10730,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           return;
         }
         for (const s of sessions) {
-          const row = el("div", { class: "sessrow" }, [
+          const row2 = el("div", { class: "sessrow" }, [
             el("div", { class: "grow" }, [
               el("div", { text: s.title }),
               el("div", {
@@ -10705,11 +10739,11 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
               })
             ])
           ]);
-          row.addEventListener("click", async () => {
+          row2.addEventListener("click", async () => {
             close();
             await this.render(s.sessionId);
           });
-          body.appendChild(row);
+          body.appendChild(row2);
         }
       } catch (e) {
         clear(body);
@@ -11083,17 +11117,17 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
               if (/(할까요|진행|괜찮|해도 될|원하시|할지|고를까요|어떻게)[^\n?]{0,40}\?\s*$/.test(textAcc.trim())) {
                 const yes = el("button", { class: "primary tiny", text: "\uB124, \uC9C4\uD589\uD574 \uC8FC\uC138\uC694" });
                 const no = el("button", { class: "ghost tiny", text: "\uC544\uB2C8\uC694" });
-                const row = el("div", { class: "row quickreply" }, [yes, no]);
+                const row2 = el("div", { class: "row quickreply" }, [yes, no]);
                 yes.addEventListener("click", () => {
-                  row.remove();
+                  row2.remove();
                   this.sendText("\uB124, \uADF8\uB300\uB85C \uC9C4\uD589\uD574 \uC8FC\uC138\uC694.");
                 });
                 no.addEventListener("click", () => {
-                  row.remove();
+                  row2.remove();
                   this.input.value = "\uC544\uB2C8\uC694, ";
                   this.input.focus();
                 });
-                bubble.appendChild(row);
+                bubble.appendChild(row2);
               }
               const more = el("button", { class: "ghost tiny continuebtn", text: "\uACC4\uC18D \uC774\uC5B4\uC11C", title: "\uBC29\uAE08 \uD134\uC5D0\uC11C \uB05D\uB0B4\uC9C0 \uBABB\uD55C \uC791\uC5C5\uC744 \uC774\uC5B4\uAC11\uB2C8\uB2E4" });
               more.addEventListener("click", () => {
@@ -11633,9 +11667,9 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     }
     for (const a of spec3.actions ?? []) a.addEventListener("click", (e) => e.stopPropagation());
     const title = typeof spec3.title === "string" ? el("span", { text: spec3.title }) : spec3.title;
-    let row;
+    let row2;
     if (spec3.variant === "pick") {
-      row = el("div", {
+      row2 = el("div", {
         class: "pickrow" + (spec3.toggle && !spec3.toggle.checked ? " off" : "") + (spec3.cls ? " " + spec3.cls : "") + (spec3.selected ? " on" : "")
       }, [
         toggleNode,
@@ -11648,7 +11682,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         ...spec3.actions ?? []
       ]);
     } else {
-      row = el("div", {
+      row2 = el("div", {
         class: "treerow lorecard" + (spec3.selected ? " on" : "")
       }, [
         toggleNode,
@@ -11659,12 +11693,12 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         ...spec3.actions ?? []
       ]);
     }
-    if (spec3.dimmed) row.style.opacity = "0.55";
+    if (spec3.dimmed) row2.style.opacity = "0.55";
     if (spec3.onClick) {
-      row.addEventListener("click", () => spec3.onClick());
-      row.style.cursor = "pointer";
+      row2.addEventListener("click", () => spec3.onClick());
+      row2.style.cursor = "pointer";
     }
-    return row;
+    return row2;
   }
   function namePopover(anchor, opts) {
     const body = el("div", { class: "applypop" });
@@ -11766,9 +11800,9 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       draw2();
       try {
         await state.setOpenModules([...keep, ...ids.filter((i) => !keep.includes(i))]);
-        const row2 = state.openModules.find((m) => m.id === focus);
-        if (row2) onFocus(row2.key);
-        say(ids.length > 1 ? `\uBAA8\uB4C8 ${ids.length}\uAC1C\uB97C \uC5F4\uC5C8\uC2B5\uB2C8\uB2E4.` : `'${row2?.name ?? ""}' \uC744(\uB97C) \uC5F4\uC5C8\uC2B5\uB2C8\uB2E4. \uD0ED \uC904\uC5D0\uC11C \uD3B8\uC9D1\uD569\uB2C8\uB2E4.`);
+        const row3 = state.openModules.find((m) => m.id === focus);
+        if (row3) onFocus(row3.key);
+        say(ids.length > 1 ? `\uBAA8\uB4C8 ${ids.length}\uAC1C\uB97C \uC5F4\uC5C8\uC2B5\uB2C8\uB2E4.` : `'${row3?.name ?? ""}' \uC744(\uB97C) \uC5F4\uC5C8\uC2B5\uB2C8\uB2E4. \uD0ED \uC904\uC5D0\uC11C \uD3B8\uC9D1\uD569\uB2C8\uB2E4.`);
       } catch (e) {
         say("\uC5F4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg8(e), "err");
       } finally {
@@ -11776,7 +11810,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         if (body.isConnected) draw2();
       }
     };
-    const row = (m) => {
+    const row2 = (m) => {
       const opened = state.openModules.find((x) => x.id === m.id);
       const right = [];
       if (m.mcp) {
@@ -11839,7 +11873,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       const rank = (m) => state.openModules.some((x) => x.id === m.id) ? 0 : m.linked ? 1 : 2;
       shown.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
       if (!all.length) list2.appendChild(el("div", { class: "hint", style: { padding: "8px" }, text: "RisuAI\uC5D0 \uBAA8\uB4C8\uC774 \uC5C6\uC2B5\uB2C8\uB2E4. \uD30C\uC77C\uC5D0\uC11C \uAC00\uC838\uC62C \uC218 \uC788\uC2B5\uB2C8\uB2E4." }));
-      for (const m of shown) list2.appendChild(row(m));
+      for (const m of shown) list2.appendChild(row2(m));
       const pending3 = all.filter((m) => m.linked && !m.mcp && !state.openModules.some((x) => x.id === m.id));
       if (pending3.length && state.editMode === "bot") {
         const b = el("button", { class: "ghost tiny", text: `RisuAI\uC5D0\uC11C \uCF1C\uC9C4 \uBAA8\uB4C8 \uBAA8\uB450 \uC5F4\uAE30 (${pending3.length})` });
@@ -11997,11 +12031,63 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
   var openMode = "";
   function foldLanding() {
     openMode = "";
-    filterText = "";
+    filters.chat = filters.persona = filters.module = "";
+    pages.clear();
   }
   var openFolders = /* @__PURE__ */ new Set();
   var showAutoSnaps = false;
-  var filterText = "";
+  var filters = { chat: "", persona: "", module: "" };
+  var pages = /* @__PURE__ */ new Map();
+  var PAGE = 30;
+  var FILTER_MIN = 8;
+  function needleOf(mode2) {
+    return filters[mode2].trim().toLowerCase();
+  }
+  function filterBox(mode2, placeholder, total, redraw) {
+    if (total < FILTER_MIN && !filters[mode2]) return null;
+    const input2 = el("input", { class: "searchinput", placeholder, value: filters[mode2], type: "search" });
+    input2.dataset.landfilter = mode2;
+    input2.addEventListener("input", () => {
+      filters[mode2] = input2.value;
+      for (const k of [...pages.keys()]) if (k === mode2 || k.startsWith(mode2 + ":")) pages.delete(k);
+      redraw();
+    });
+    return el("div", { class: "landfilter" }, [input2]);
+  }
+  function paged(key, rows) {
+    const count = Math.max(1, Math.ceil(rows.length / PAGE));
+    const page = Math.min(pages.get(key) ?? 0, count - 1);
+    let redraw = () => {
+    };
+    const slice = rows.slice(page * PAGE, page * PAGE + PAGE);
+    if (count <= 1) return { rows: slice, nav: null, redrawOn: () => void 0 };
+    const go = (p) => {
+      pages.set(key, Math.max(0, Math.min(count - 1, p)));
+      redraw();
+    };
+    const prev = el("button", { class: "ghost tiny", text: "\u2039 \uC774\uC804", title: "\uC774\uC804 \uCABD" });
+    const next = el("button", { class: "ghost tiny", text: "\uB2E4\uC74C \u203A", title: "\uB2E4\uC74C \uCABD" });
+    prev.disabled = page === 0;
+    next.disabled = page === count - 1;
+    prev.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      go(page - 1);
+    });
+    next.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      go(page + 1);
+    });
+    const from = page * PAGE + 1;
+    const to = Math.min(rows.length, from + PAGE - 1);
+    const nav = el("div", { class: "row pagenav" }, [
+      prev,
+      el("span", { class: "hint grow", style: { textAlign: "center" }, text: `${from}\u2013${to} / ${rows.length}` }),
+      next
+    ]);
+    return { rows: slice, nav, redrawOn: (fn) => {
+      redraw = fn;
+    } };
+  }
   var padEl = null;
   function assetSyncLine() {
     const p = state.assetSync;
@@ -12148,6 +12234,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     }
     const pad = padEl;
     const top = pad.scrollTop;
+    const typing = document.activeElement?.dataset?.landfilter ?? "";
     clear(pad);
     const root2 = el("div", { class: "landing" });
     pad.appendChild(root2);
@@ -12192,6 +12279,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       if (why) b.title = why;
       b.addEventListener("click", () => {
         openMode = openMode === m ? "" : m;
+        pages.clear();
         if (openMode === "persona" && !state.personas && !state.personaLoading) void state.loadPersonas().catch(() => void 0);
         if (openMode === "module" && !state.moduleLoading) void state.loadModules().catch(() => void 0);
         renderChatsTab(mount2);
@@ -12215,6 +12303,16 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       root2.appendChild(el("div", { class: "hint landingfoot", text: char ? "\uD3B8\uC9D1\uD560 \uB300\uC0C1\uC744 \uACE0\uB974\uC138\uC694. \uB2E4\uB978 \uBD07\uC744 \uD3B8\uC9D1\uD558\uC2DC\uB824\uBA74 RisuAI\uC5D0\uC11C \uADF8 \uBD07\uC744 \uC5F4\uACE0 \u{1F504} \uB97C \uB20C\uB7EC \uC8FC\uC138\uC694." : "\uD3B8\uC9D1\uD560 \uB300\uC0C1\uC744 \uACE0\uB974\uC138\uC694." }));
     }
     pad.scrollTop = top;
+    if (typing) {
+      const again = pad.querySelector(`input[data-landfilter="${typing}"]`);
+      if (again) {
+        again.focus();
+        try {
+          again.setSelectionRange(again.value.length, again.value.length);
+        } catch {
+        }
+      }
+    }
   }
   function botBody(body, mount2) {
     const char = state.character;
@@ -12296,7 +12394,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     fill2();
   }
   function snapRow(c, deletable, mount2) {
-    const row = el("div", { class: "chatitem" });
+    const row2 = el("div", { class: "chatitem" });
     const edit = el("button", { class: "ghost tiny", text: "\uD3B8\uC9D1" });
     edit.title = "\uC791\uC5C5\uBCF8\uC744 \uC774 \uC2DC\uC810\uC73C\uB85C \uB418\uB3CC\uB9B0 \uB4A4 \uBD07 \uD3B8\uC9D1\uC73C\uB85C \uB4E4\uC5B4\uAC11\uB2C8\uB2E4 (\uC9C1\uC804 \uC0C1\uD0DC\uB3C4 \uC2A4\uB0C5\uC0F7\uC73C\uB85C \uB0A8\uC2B5\uB2C8\uB2E4)";
     edit.addEventListener("click", async (ev) => {
@@ -12314,7 +12412,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         edit.textContent = "\uD3B8\uC9D1";
       }
     });
-    row.append(
+    row2.append(
       el("span", { class: "grow", text: c.label || "(\uBB34\uC81C)" }),
       el("span", { class: "n", text: fmtTime(c.created_at * 1e3) }),
       edit
@@ -12322,7 +12420,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     if (deletable) {
       const del = el("button", { class: "ghost tiny", title: "\uC774 \uC2A4\uB0C5\uC0F7 \uC0AD\uC81C" });
       armed(del, "\u2715", "\uC0AD\uC81C \uD655\uC778", async () => {
-        row.classList.add("deleting");
+        row2.classList.add("deleting");
         del.disabled = true;
         edit.disabled = true;
         try {
@@ -12330,15 +12428,15 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           snaps.drop();
           renderChatsTab(mount2);
         } catch (e) {
-          row.classList.remove("deleting");
+          row2.classList.remove("deleting");
           del.disabled = false;
           edit.disabled = false;
           flash("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg10(e));
         }
       });
-      row.appendChild(del);
+      row2.appendChild(del);
     }
-    return row;
+    return row2;
   }
   function chatBody(body, mount2) {
     const char = state.character;
@@ -12346,26 +12444,15 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     const folders = Array.isArray(char.chatFolders) ? char.chatFolders : [];
     const ws = state.workspace;
     const loadedFor = (c) => ws?.chats.find((w) => w.chatId === (c.id ?? ""));
-    if (liveChats.length > 6) {
-      setToolbarSearch(filterText, (v) => {
-        filterText = v;
-        renderChatsTab(mount2);
-        refocusSearch(null);
-      }, "\uCC57 \uCC3E\uAE30");
-    }
     body.appendChild(el("div", { class: "sectiontitle", text: "\uD3B8\uC9D1\uD560 \uCC57\uC744 \uACE0\uB974\uC138\uC694" }));
     if (!liveChats.length) {
       body.appendChild(el("div", { class: "hint", text: "\uC774 \uBD07\uC5D0\uB294 \uCC57\uC774 \uC5C6\uC2B5\uB2C8\uB2E4." }));
       return;
     }
-    const needle = filterText.trim().toLowerCase();
-    const rows = liveChats.map((c, i) => ({ chat: c, index: i })).filter((r) => !needle || String(r.chat.name ?? "").toLowerCase().includes(needle));
-    const grouped3 = /* @__PURE__ */ new Map();
-    for (const r of rows) {
-      const key = String(r.chat.folderId ?? "");
-      if (!grouped3.has(key)) grouped3.set(key, []);
-      grouped3.get(key).push(r);
-    }
+    const listArea = el("div", { class: "landlist" });
+    const fbox = filterBox("chat", `\uCC57 ${liveChats.length}\uAC1C \uC911 \uCC3E\uAE30 (\uC774\uB984)`, liveChats.length, () => fillChats());
+    if (fbox) body.appendChild(fbox);
+    body.appendChild(listArea);
     const dirtyBadges = /* @__PURE__ */ new Map();
     const paintDirty = () => {
       const s = dirty.value;
@@ -12422,42 +12509,67 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       });
       return item;
     };
-    const loose = grouped3.get("") ?? [];
-    if (loose.length) {
+    const pagedList = (key, items5, into) => {
       const list2 = el("div", { class: "chatlist" });
-      for (const r of loose) list2.appendChild(makeItem(r));
-      body.appendChild(list2);
-    }
-    for (const f of folders) {
-      const items5 = grouped3.get(String(f.id)) ?? [];
-      if (!items5.length) continue;
-      const fid = String(f.id);
-      const isOpen = openFolders.has(fid) || !!needle;
-      const fbody = el("div", { class: "folderbody" + (isOpen ? " open" : "") });
-      for (const r of items5) fbody.appendChild(makeItem(r));
-      const caret = el("span", { text: isOpen ? "\u25BE" : "\u25B8" });
-      const head = el("button", { class: "folderhead" }, [
-        caret,
-        el("span", { class: "folderdot", style: f.color ? { background: String(f.color) } : {} }),
-        el("span", { class: "grow", text: String(f.name || "\uD3F4\uB354") }),
-        el("span", { text: `${items5.length}` })
-      ]);
-      head.addEventListener("click", () => {
-        const open4 = fbody.classList.toggle("open");
-        if (open4) openFolders.add(fid);
-        else openFolders.delete(fid);
-        caret.textContent = open4 ? "\u25BE" : "\u25B8";
-      });
-      body.appendChild(el("div", { class: "folder" }, [head, fbody]));
-    }
-    const known = new Set(folders.map((f) => String(f.id)));
-    const orphans = [...grouped3.entries()].filter(([k]) => k !== "" && !known.has(k)).flatMap(([, v]) => v);
-    if (orphans.length) {
-      const list2 = el("div", { class: "chatlist" });
-      for (const r of orphans) list2.appendChild(makeItem(r));
-      body.appendChild(el("div", { class: "sectiontitle", style: { marginTop: "10px" }, text: "\uD3F4\uB354 \uC5C6\uC74C" }));
-      body.appendChild(list2);
-    }
+      const draw2 = () => {
+        clear(list2);
+        const p = paged(key, items5);
+        p.redrawOn(draw2);
+        for (const r of p.rows) list2.appendChild(makeItem(r));
+        if (p.nav) list2.appendChild(p.nav);
+        paintDirty();
+      };
+      draw2();
+      into.appendChild(list2);
+    };
+    const fillChats = () => {
+      clear(listArea);
+      dirtyBadges.clear();
+      const needle = needleOf("chat");
+      const rows = liveChats.map((c, i) => ({ chat: c, index: i })).filter((r) => !needle || String(r.chat.name ?? "").toLowerCase().includes(needle));
+      if (needle) {
+        if (!rows.length) listArea.appendChild(el("div", { class: "hint", text: `\u2018${filters.chat}\u2019 \uC5D0 \uB9DE\uB294 \uCC57\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.` }));
+        else pagedList("chat", rows, listArea);
+        return;
+      }
+      const grouped3 = /* @__PURE__ */ new Map();
+      for (const r of rows) {
+        const key = String(r.chat.folderId ?? "");
+        if (!grouped3.has(key)) grouped3.set(key, []);
+        grouped3.get(key).push(r);
+      }
+      const loose = grouped3.get("") ?? [];
+      if (loose.length) pagedList("chat", loose, listArea);
+      for (const f of folders) {
+        const items5 = grouped3.get(String(f.id)) ?? [];
+        if (!items5.length) continue;
+        const fid = String(f.id);
+        const isOpen = openFolders.has(fid);
+        const fbody = el("div", { class: "folderbody" + (isOpen ? " open" : "") });
+        pagedList("chat:" + fid, items5, fbody);
+        const caret = el("span", { text: isOpen ? "\u25BE" : "\u25B8" });
+        const head = el("button", { class: "folderhead" }, [
+          caret,
+          el("span", { class: "folderdot", style: f.color ? { background: String(f.color) } : {} }),
+          el("span", { class: "grow", text: String(f.name || "\uD3F4\uB354") }),
+          el("span", { text: `${items5.length}` })
+        ]);
+        head.addEventListener("click", () => {
+          const open4 = fbody.classList.toggle("open");
+          if (open4) openFolders.add(fid);
+          else openFolders.delete(fid);
+          caret.textContent = open4 ? "\u25BE" : "\u25B8";
+        });
+        listArea.appendChild(el("div", { class: "folder" }, [head, fbody]));
+      }
+      const known = new Set(folders.map((f) => String(f.id)));
+      const orphans = [...grouped3.entries()].filter(([k]) => k !== "" && !known.has(k)).flatMap(([, v]) => v);
+      if (orphans.length) {
+        listArea.appendChild(el("div", { class: "sectiontitle", style: { marginTop: "10px" }, text: "\uD3F4\uB354 \uC5C6\uC74C" }));
+        pagedList("chat:orphans", orphans, listArea);
+      }
+    };
+    fillChats();
     body.appendChild(el("div", { class: "row", style: { marginTop: "12px" } }, [
       buildUploadAll(),
       el("span", { class: "hint", text: "\uCC57\uC744 \uB204\uB974\uBA74 \uADF8 \uCC57\uB9CC \uBD88\uB7EC\uC635\uB2C8\uB2E4. \uC5EC\uB7EC \uCC57\uC744 \uC624\uAC00\uBA70 \uBCFC \uB54C\uB9CC \uC774 \uBC84\uD2BC\uC744 \uC4F0\uC138\uC694." })
@@ -12499,20 +12611,39 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       body.appendChild(el("div", { class: "notice err", text: state.personaError }));
     }
     const list2 = el("div", { class: "chatlist personalist" });
-    body.appendChild(list2);
     const ps = (state.personas ?? []).filter((p) => !p.gone);
     if (!state.personas) {
+      body.appendChild(list2);
       list2.appendChild(loadingRow(state.personaLoading ? "RisuAI\uC5D0\uC11C \uD398\uB974\uC18C\uB098\uB97C \uC77D\uB294 \uC911\u2026" : "\uD398\uB974\uC18C\uB098 \uBAA9\uB85D\uC774 \uC5C6\uC2B5\uB2C8\uB2E4"));
       return;
     }
-    if (!ps.length) list2.appendChild(el("div", { class: "chatitem" }, [el("span", { class: "hint", text: "RisuAI\uC5D0 \uD398\uB974\uC18C\uB098\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4." })]));
-    for (const p of ps) list2.appendChild(personaRow(p, mount2));
+    const fill2 = () => {
+      clear(list2);
+      if (!ps.length) {
+        list2.appendChild(el("div", { class: "chatitem" }, [el("span", { class: "hint", text: "RisuAI\uC5D0 \uD398\uB974\uC18C\uB098\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4." })]));
+        return;
+      }
+      const needle = needleOf("persona");
+      const hits = ps.filter((p2) => !needle || (p2.work.name || p2.name || "").toLowerCase().includes(needle) || (p2.work.prompt || "").toLowerCase().includes(needle));
+      if (!hits.length) {
+        list2.appendChild(el("div", { class: "chatitem" }, [el("span", { class: "hint", text: `\u2018${filters.persona}\u2019 \uC5D0 \uB9DE\uB294 \uD398\uB974\uC18C\uB098\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4.` })]));
+        return;
+      }
+      const p = paged("persona", hits);
+      p.redrawOn(fill2);
+      for (const row2 of p.rows) list2.appendChild(personaRow(row2, mount2));
+      if (p.nav) list2.appendChild(p.nav);
+    };
+    const fbox = filterBox("persona", `\uD398\uB974\uC18C\uB098 ${ps.length}\uAC1C \uC911 \uCC3E\uAE30 (\uC774\uB984\xB7\uC124\uBA85)`, ps.length, fill2);
+    if (fbox) body.appendChild(fbox);
+    body.appendChild(list2);
+    fill2();
     body.appendChild(el("div", { class: "hint", style: { marginTop: "8px" }, text: "\uD3B8\uC9D1\uC740 \uC791\uC5C5\uBCF8\uC5D0 \uC800\uC7A5\uB418\uACE0, \uBC18\uC601\uD574\uC57C RisuAI\uC5D0 \uB4E4\uC5B4\uAC11\uB2C8\uB2E4. RisuAI\uC5D0\uC11C \uC9C0\uAE08 \uC120\uD0DD\uB41C \uD398\uB974\uC18C\uB098\uB3C4 \uD3B8\uC9D1\uD560 \uC218 \uC788\uC9C0\uB9CC, \uBC18\uC601\uD558\uBA74 \uC6D0\uBCF8 \uB300\uC2E0 \uC0C8 \uD398\uB974\uC18C\uB098(\uC0AC\uBCF8)\uB85C \uC800\uC7A5\uB429\uB2C8\uB2E4 (RisuAI\uAC00 \uC120\uD0DD\uB41C \uD398\uB974\uC18C\uB098\uB97C \uB530\uB85C \uBCF5\uC0AC\uD574 \uB450\uACE0 \uC368\uC11C, \uADF8\uB300\uB85C \uC4F0\uBA74 \uB36E\uC5B4\uC368\uC9D1\uB2C8\uB2E4)." }));
   }
   function personaRow(p, mount2) {
     const edit = el("button", { class: "ghost tiny", text: "\uD3B8\uC9D1" });
     const name = p.work.name || p.name;
-    const row = el("div", { class: "chatitem" }, [
+    const row2 = el("div", { class: "chatitem" }, [
       personaAvatar(p.iconKey, name),
       el("span", { class: "grow" }, [
         el("div", { text: name || "(\uC774\uB984 \uC5C6\uC74C)" }),
@@ -12536,18 +12667,18 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         flash("\uD398\uB974\uC18C\uB098\uB97C \uC5F4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg10(e));
       } finally {
         busy = false;
-        if (row.isConnected) {
+        if (row2.isConnected) {
           edit.disabled = false;
           edit.textContent = "\uD3B8\uC9D1";
         }
       }
     };
-    row.addEventListener("click", () => void enter());
+    row2.addEventListener("click", () => void enter());
     edit.addEventListener("click", (ev) => {
       ev.stopPropagation();
       void enter();
     });
-    return row;
+    return row2;
   }
   async function enterModule(id) {
     setEditMode("module");
@@ -12564,10 +12695,10 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     state.touchFiles([up.path]);
     setEditMode("module");
     await state.syncModuleOwner();
-    const row = await state.importModuleFile(up.path, progress);
+    const row2 = await state.importModuleFile(up.path, progress);
     setTab("botlore");
-    shellNotice(`'${row.name}' \uBAA8\uB4C8\uC744 RisuAI\uC5D0 \uCD94\uAC00\uD558\uACE0 \uC5F4\uC5C8\uC2B5\uB2C8\uB2E4 (\uC6D0\uBCF8 \uD30C\uC77C: ${up.path}).`, "ok");
-    return row.key;
+    shellNotice(`'${row2.name}' \uBAA8\uB4C8\uC744 RisuAI\uC5D0 \uCD94\uAC00\uD558\uACE0 \uC5F4\uC5C8\uC2B5\uB2C8\uB2E4 (\uC6D0\uBCF8 \uD30C\uC77C: ${up.path}).`, "ok");
+    return row2.key;
   }
   function moduleBody(body, mount2) {
     const head = el("div", { class: "row", style: { marginBottom: "8px", gap: "6px" } }, [
@@ -12605,22 +12736,32 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     if (state.moduleError) body.appendChild(el("div", { class: "notice err", text: state.moduleError }));
     const all = state.liveModules;
     const list2 = el("div", { class: "chatlist modlist" });
-    body.appendChild(list2);
     if (!all) {
+      body.appendChild(list2);
       list2.appendChild(loadingRow(state.moduleLoading ? "RisuAI\uC5D0\uC11C \uBAA8\uB4C8\uC744 \uC77D\uB294 \uC911\u2026" : "\uBAA8\uB4C8 \uBAA9\uB85D\uC774 \uC5C6\uC2B5\uB2C8\uB2E4"));
       return;
     }
-    if (all.length > 8) {
-      setToolbarSearch(filterText, (v) => {
-        filterText = v;
-        renderChatsTab(mount2);
-        refocusSearch(null);
-      }, "\uBAA8\uB4C8 \uCC3E\uAE30");
-    }
-    const needle = filterText.trim().toLowerCase();
-    const shown = all.filter((m) => !needle || m.name.toLowerCase().includes(needle) || m.description.toLowerCase().includes(needle)).sort((a, b) => a.name.localeCompare(b.name));
-    if (!all.length) list2.appendChild(el("div", { class: "chatitem" }, [el("span", { class: "hint", text: "RisuAI\uC5D0 \uBAA8\uB4C8\uC774 \uC5C6\uC2B5\uB2C8\uB2E4. \uD30C\uC77C\uC5D0\uC11C \uAC00\uC838\uC62C \uC218 \uC788\uC2B5\uB2C8\uB2E4." })]));
-    for (const m of shown) list2.appendChild(moduleRow(m));
+    const fill2 = () => {
+      clear(list2);
+      if (!all.length) {
+        list2.appendChild(el("div", { class: "chatitem" }, [el("span", { class: "hint", text: "RisuAI\uC5D0 \uBAA8\uB4C8\uC774 \uC5C6\uC2B5\uB2C8\uB2E4. \uD30C\uC77C\uC5D0\uC11C \uAC00\uC838\uC62C \uC218 \uC788\uC2B5\uB2C8\uB2E4." })]));
+        return;
+      }
+      const needle = needleOf("module");
+      const shown = all.filter((m) => !needle || m.name.toLowerCase().includes(needle) || m.description.toLowerCase().includes(needle)).sort((a, b) => a.name.localeCompare(b.name));
+      if (!shown.length) {
+        list2.appendChild(el("div", { class: "chatitem" }, [el("span", { class: "hint", text: `\u2018${filters.module}\u2019 \uC5D0 \uB9DE\uB294 \uBAA8\uB4C8\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.` })]));
+        return;
+      }
+      const p = paged("module", shown);
+      p.redrawOn(fill2);
+      for (const m of p.rows) list2.appendChild(moduleRow(m));
+      if (p.nav) list2.appendChild(p.nav);
+    };
+    const fbox = filterBox("module", `\uBAA8\uB4C8 ${all.length}\uAC1C \uC911 \uCC3E\uAE30 (\uC774\uB984\xB7\uC124\uBA85)`, all.length, fill2);
+    if (fbox) body.appendChild(fbox);
+    body.appendChild(list2);
+    fill2();
     body.appendChild(el("div", { class: "hint", style: { marginTop: "8px" }, text: "\uBAA8\uB4C8\uC740 \uBD07 \uCE74\uB4DC\uC640 \uAC19\uC740 \uD0ED(\uC815\uBCF4\xB7\uB85C\uC5B4\uBD81\xB7Regex\xB7\uD2B8\uB9AC\uAC70\xB7\uC5D0\uC14B)\uC73C\uB85C \uD3B8\uC9D1\uB418\uACE0, \uBC18\uC601\uD574\uC57C RisuAI \uBAA8\uB4C8 \uBAA9\uB85D\uC5D0 \uB4E4\uC5B4\uAC11\uB2C8\uB2E4. \uBD07 \uD3B8\uC9D1\xB7\uD398\uB974\uC18C\uB098 \uD3B8\uC9D1\uC5D0\uC11C\uB3C4 \uD0ED \uC904 \uB05D\uC758 \uFF0B \uB85C \uBAA8\uB4C8\uC744 \uD568\uAED8 \uC5F4 \uC218 \uC788\uACE0, \uADF8 \uC870\uD569\uC740 \uAE30\uC5B5\uB429\uB2C8\uB2E4. \uD30C\uC77C\uB85C \uB0B4\uBCF4\uB0B4\uAE30(.charx \uAD8C\uC7A5 \xB7 .risum)\uB294 \uBAA8\uB4C8\uC744 \uC5F0 \uB4A4 \uBA54\uB274 \uC904\uC758 \u2B07 \uB0B4\uBCF4\uB0B4\uAE30\uB85C \uD569\uB2C8\uB2E4." }));
   }
   function moduleRow(m) {
@@ -12628,7 +12769,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     const save = el("button", { class: "ghost tiny", text: "\u2B07 \uC800\uC7A5", title: "\uC774 \uBAA8\uB4C8\uC744 .charx / .risum \uC73C\uB85C \uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4\uC5D0 \uC800\uC7A5\uD569\uB2C8\uB2E4" });
     const open4 = state.openModules.find((x) => x.id === m.id);
     const first = m.description.split("\n")[0].slice(0, 80);
-    const row = el("div", { class: "chatitem" + (m.mcp ? " dim" : "") }, [
+    const row2 = el("div", { class: "chatitem" + (m.mcp ? " dim" : "") }, [
       el("span", { class: "grow" }, [
         el("div", { text: "\u25EB " + (m.name || "(\uC774\uB984 \uC5C6\uC74C)") }),
         el("div", { class: "hint clip1", text: m.mcp ? "MCP \uBAA8\uB4C8 - \uD3B8\uC9D1\uD560 \uB0B4\uC6A9\uC774 \uC5C6\uC2B5\uB2C8\uB2E4" : moduleLine(m) + (first ? " \u2014 " + first : "") })
@@ -12639,7 +12780,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       m.mcp ? null : save,
       m.mcp ? null : edit
     ]);
-    if (m.mcp) return row;
+    if (m.mcp) return row2;
     save.addEventListener("click", (ev) => {
       ev.stopPropagation();
       const box = el("div", { class: "applypop" });
@@ -12660,18 +12801,18 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         flash("\uBAA8\uB4C8\uC744 \uC5F4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg10(e));
       } finally {
         busy = false;
-        if (row.isConnected) {
+        if (row2.isConnected) {
           edit.disabled = false;
           edit.textContent = "\uD3B8\uC9D1";
         }
       }
     };
-    row.addEventListener("click", () => void enter());
+    row2.addEventListener("click", () => void enter());
     edit.addEventListener("click", (ev) => {
       ev.stopPropagation();
       void enter();
     });
-    return row;
+    return row2;
   }
   function newPersonaButton(onMade) {
     const b = el("button", { class: "ghost tiny", text: "\uFF0B \uC0C8 \uD398\uB974\uC18C\uB098", title: "\uC0C8 \uD398\uB974\uC18C\uB098\uB97C \uB9CC\uB4ED\uB2C8\uB2E4 - \uBC18\uC601\uD558\uBA74 RisuAI \uD398\uB974\uC18C\uB098 \uBAA9\uB85D\uC5D0 \uCD94\uAC00\uB429\uB2C8\uB2E4" });
@@ -13749,7 +13890,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
   var anchorPath = "";
   var previewPath = "";
   var delCtrl = null;
-  var filterText2 = "";
+  var filterText = "";
   var view = "list";
   try {
     if (localStorage.getItem("hina.filesView") === "grid") view = "grid";
@@ -13824,7 +13965,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       treeSel.clear();
       anchorPath = "";
       previewPath = "";
-      filterText2 = "";
+      filterText = "";
       expanded.clear();
       expanded.add("projects");
       expanded.add("studio");
@@ -14080,9 +14221,9 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       el("div", { class: "hint", text: `\uC804\uCCB4 ${fmtSize3(data.totalSize)}` })
     ]));
     if (hadFocus) {
-      const row = treeMount.querySelector(".treebranch.on") ?? treeMount;
+      const row2 = treeMount.querySelector(".treebranch.on") ?? treeMount;
       try {
-        row.focus({ preventScroll: true });
+        row2.focus({ preventScroll: true });
       } catch {
       }
     }
@@ -14306,15 +14447,15 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         zipAll.disabled = false;
       }
     });
-    const searchWrap = el("span", { class: "fsearch" + (filterText2 ? " open" : "") });
-    const searchInput = el("input", { placeholder: "\uC774 \uD3F4\uB354\uC5D0\uC11C \uCC3E\uAE30", value: filterText2 });
+    const searchWrap = el("span", { class: "fsearch" + (filterText ? " open" : "") });
+    const searchInput = el("input", { placeholder: "\uC774 \uD3F4\uB354\uC5D0\uC11C \uCC3E\uAE30", value: filterText });
     const searchBtn = iconBtn(FICON.search, "\uC774 \uD3F4\uB354\uC5D0\uC11C \uCC3E\uAE30");
     searchBtn.addEventListener("click", () => {
       searchWrap.classList.add("open");
       searchInput.focus();
     });
     searchInput.addEventListener("input", () => {
-      filterText2 = searchInput.value;
+      filterText = searchInput.value;
       drawCentre();
       const again = viewMount?.querySelector(".fsearch input");
       if (again) {
@@ -14327,7 +14468,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     });
     searchInput.addEventListener("keydown", (ev) => {
       if (ev.key === "Escape") {
-        filterText2 = "";
+        filterText = "";
         drawCentre();
         focusList();
       }
@@ -14368,13 +14509,13 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       ]));
     }
     const list2 = el("div", { class: "filelist", tabindex: "0" });
-    const q = filterText2.trim().toLowerCase();
+    const q = filterText.trim().toLowerCase();
     const entries = [
       ...n.kids.map((k) => ({ path: k.path, name: k.name, node: k })),
       ...n.files.map((f) => ({ path: f.path, name: f.name, file: f }))
     ].filter((e) => !q || e.name.toLowerCase().includes(q));
     if (!entries.length) {
-      list2.appendChild(el("div", { class: "fempty", text: q ? `\u201C${filterText2}\u201D \uC5D0 \uB9DE\uB294 \uD56D\uBAA9\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.` : writable ? "\uBE44\uC5B4 \uC788\uC2B5\uB2C8\uB2E4. \uD30C\uC77C\uC744 \uB04C\uC5B4\uB2E4 \uB193\uAC70\uB098 \uC67C\uCABD \u201C\uC62C\uB9AC\uAE30\u201D\uB97C \uB204\uB974\uC138\uC694." : "\uBE44\uC5B4 \uC788\uC2B5\uB2C8\uB2E4." }));
+      list2.appendChild(el("div", { class: "fempty", text: q ? `\u201C${filterText}\u201D \uC5D0 \uB9DE\uB294 \uD56D\uBAA9\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.` : writable ? "\uBE44\uC5B4 \uC788\uC2B5\uB2C8\uB2E4. \uD30C\uC77C\uC744 \uB04C\uC5B4\uB2E4 \uB193\uAC70\uB098 \uC67C\uCABD \u201C\uC62C\uB9AC\uAE30\u201D\uB97C \uB204\uB974\uC138\uC694." : "\uBE44\uC5B4 \uC788\uC2B5\uB2C8\uB2E4." }));
     } else if (view === "grid" && hasImages) {
       const grid = el("div", { class: "fgrid" });
       for (const e of entries) grid.appendChild(gridCell(e, entries, n));
@@ -14544,7 +14685,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
   function listRow2(e, order, n) {
     const box = el("input", { type: "checkbox" });
     box.checked = selection.has(e.path);
-    const row = el("div", { class: "frow" + (selection.has(e.path) ? " sel" : "") + clipClass(e.path), title: e.path }, [
+    const row2 = el("div", { class: "frow" + (selection.has(e.path) ? " sel" : "") + clipClass(e.path), title: e.path }, [
       box,
       // A folder glyph for folders; files carry their extension as a small tag
       // instead of a pictogram - the picture glyphs rendered as stray letters
@@ -14565,20 +14706,20 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       drawCentre();
       focusList();
     });
-    row.addEventListener("click", (ev) => {
+    row2.addEventListener("click", (ev) => {
       pick(e.path, ev, order);
       drawCentre();
       focusList();
     });
-    row.addEventListener("dblclick", () => openEntry(e.path, n));
-    wireRowDnd(row, e, n);
-    row.addEventListener("contextmenu", (ev) => openRowMenu(ev, e, n));
-    return row;
+    row2.addEventListener("dblclick", () => openEntry(e.path, n));
+    wireRowDnd(row2, e, n);
+    row2.addEventListener("contextmenu", (ev) => openRowMenu(ev, e, n));
+    return row2;
   }
-  function wireRowDnd(row, e, n) {
-    if (!n.virtual) installDrag(row, () => selection.has(e.path) ? [...selection] : [e.path]);
+  function wireRowDnd(row2, e, n) {
+    if (!n.virtual) installDrag(row2, () => selection.has(e.path) ? [...selection] : [e.path]);
     if (e.node && !n.virtual && USER_AREAS.has(n.area.area)) {
-      installDrop(row, {
+      installDrop(row2, {
         into: () => e.path,
         onFiles: (path, files) => void uploadMany(files, path),
         onMove: (path, sources) => void moveSelected(sources, path)
@@ -15359,7 +15500,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     let openId4 = "";
     let entries = [];
     const openFolders4 = /* @__PURE__ */ new Set();
-    let filterText6 = "";
+    let filterText5 = "";
     let ui8 = null;
     function notice10(text2, kind = "") {
       ui8?.notice(text2, kind);
@@ -15402,7 +15543,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         }
         return;
       }
-      const needle = filterText6.trim().toLowerCase();
+      const needle = filterText5.trim().toLowerCase();
       const hit = (e) => {
         if (!needle) return true;
         const entry = e.entry;
@@ -15522,7 +15663,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           notice10("\uC21C\uC11C\uB97C \uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg13(err), "err");
         }
       };
-      const row = listRow({
+      const row2 = listRow({
         variant: "tree",
         selected: e.id === openId4,
         title: el("button", {
@@ -15540,19 +15681,19 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         onClick: () => open4(e)
       });
       const io2 = Number(e.entry.insertorder ?? 100);
-      row.insertBefore(
+      row2.insertBefore(
         el("span", { class: "hint ordertag", title: "\uC6B0\uC120\uC21C\uC704 (insertorder)", text: String(io2) }),
-        row.children[1] ?? null
+        row2.children[1] ?? null
       );
       if (e.conflict) {
-        row.insertBefore(conflictBadge(), row.querySelector(".movebtn"));
+        row2.insertBefore(conflictBadge(), row2.querySelector(".movebtn"));
       } else if (e.origin !== "original") {
-        row.insertBefore(
+        row2.insertBefore(
           el("span", { class: "badge warn", text: e.origin === "added" ? "\uCD94\uAC00" : "\uC218\uC815" }),
-          row.querySelector(".movebtn")
+          row2.querySelector(".movebtn")
         );
       }
-      return row;
+      return row2;
     }
     function open4(e) {
       if (!viewMount6) return;
@@ -15732,9 +15873,9 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         // Finding one entry among dozens is the common case; the filter searches
         // names and content, and a filtered view auto-opens its folders.
         placeholder: "\uCC3E\uAE30 (\uC774\uB984\xB7\uB0B4\uC6A9)",
-        get: () => filterText6,
+        get: () => filterText5,
         set: (v) => {
-          filterText6 = v;
+          filterText5 = v;
           drawTree5();
           refocusSearch(null);
         }
@@ -15914,10 +16055,10 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       title: item.id
     });
     name.addEventListener("click", () => open(item));
-    const row = el("div", { class: "treerow" }, [name]);
-    if (item.isNew) row.appendChild(el("span", { class: "badge ok", text: "\uCD94\uAC00" }));
-    else if (item.changed) row.appendChild(el("span", { class: "badge warn", text: "\uC218\uC815" }));
-    return row;
+    const row2 = el("div", { class: "treerow" }, [name]);
+    if (item.isNew) row2.appendChild(el("span", { class: "badge ok", text: "\uCD94\uAC00" }));
+    else if (item.changed) row2.appendChild(el("span", { class: "badge warn", text: "\uC218\uC815" }));
+    return row2;
   }
   function open(item) {
     if (!viewMount2) return;
@@ -16228,7 +16369,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const entries = await spec3.load();
         clear(listMount2);
         if (spec3.folders) drawFolders(entries, spec3.folders);
-        else for (const entry of entries) listMount2.appendChild(row(entry));
+        else for (const entry of entries) listMount2.appendChild(row2(entry));
         const actions = el("div", { class: "row", style: { marginTop: "10px", gap: "6px" } });
         if (spec3.onCreate) {
           const add = el("button", { class: "primary", text: spec3.createLabel ?? "\uC0C8\uB85C \uCD94\uAC00" });
@@ -16260,7 +16401,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     foldedFolders.set(spec3.title, folded2);
     const drawFolders = (entries, folders) => {
       const names = [.../* @__PURE__ */ new Set([...folders.list(), ...entries.map((e) => e.group ?? "")])].filter(Boolean).sort((a, b) => a.localeCompare(b));
-      for (const entry of entries.filter((e) => !e.group)) listMount2.appendChild(row(entry));
+      for (const entry of entries.filter((e) => !e.group)) listMount2.appendChild(row2(entry));
       for (const name of names) {
         const inside = entries.filter((e) => e.group === name);
         const open4 = !folded2.has(name);
@@ -16289,7 +16430,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           listMount2.appendChild(el("div", { class: "hint", style: { padding: "0 8px 4px" }, text: "(\uBE44\uC5B4 \uC788\uC74C)" }));
           continue;
         }
-        for (const entry of inside) listMount2.appendChild(row(entry));
+        for (const entry of inside) listMount2.appendChild(row2(entry));
       }
     };
     const moveButton = (entry, folders) => {
@@ -16320,7 +16461,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       listMount2.appendChild(el("div", { class: "notice err", text: msg16(e) }));
       setTimeout(() => void draw2(), 2500);
     };
-    const row = (entry) => {
+    const row2 = (entry) => {
       const pickArea = el("div", { class: "grow" }, [
         el("div", { class: "pickname" }, [
           el("span", { text: entry.name }),
@@ -17108,11 +17249,11 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       for (const n of p.modelNotes) provBox.appendChild(el("div", { class: "hint", text: "\xB7 " + n }));
       if (p.unsupported.length) provBox.appendChild(el("div", { class: "hint", text: "\uBCF4\uB0B4\uC9C0 \uC54A\uB294 \uD544\uB4DC: " + p.unsupported.join(", ") }));
       if (p.modelExample) provBox.appendChild(el("div", { class: "hint", text: "\uBAA8\uB378 \uC774\uB984 \uC608: " + p.modelExample }));
-      const row = el("div", { class: "row", style: { marginTop: "4px" } }, [
+      const row2 = el("div", { class: "row", style: { marginTop: "4px" } }, [
         Object.keys(p.template).length ? fill2 : null,
         p.docs ? el("a", { href: p.docs, target: "_blank", rel: "noopener", class: "hint", text: "\uBB38\uC11C \u2197" }) : null
       ]);
-      provBox.appendChild(row);
+      provBox.appendChild(row2);
     };
     keySel.addEventListener("change", syncProvider);
     baseUrl.addEventListener("input", syncProvider);
@@ -17546,13 +17687,13 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           listMount2.appendChild(el("div", { class: "hint", text: "\uB4F1\uB85D\uB41C \uC2A4\uD0AC\uC774 \uC5C6\uC2B5\uB2C8\uB2E4." }));
           return;
         }
-        for (const s of r.skills) listMount2.appendChild(row(s));
+        for (const s of r.skills) listMount2.appendChild(row2(s));
       } catch (e) {
         clear(listMount2);
         listMount2.appendChild(el("div", { class: "notice err", text: msg18(e) }));
       }
     };
-    const row = (s) => {
+    const row2 = (s) => {
       const toggle = el("input", { type: "checkbox", checked: s.enabled, title: "\uCF1C\uBA74 \uBAA9\uB85D\uC5D0 \uC2E4\uB824 \uC5D0\uC774\uC804\uD2B8\uAC00 \uBD88\uB7EC\uC62C \uC218 \uC788\uC2B5\uB2C8\uB2E4" });
       toggle.addEventListener("change", async () => {
         try {
@@ -18032,10 +18173,10 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           return;
         }
         if (!r.newer) {
-          const mismatch = r.current !== "0.15.39";
+          const mismatch = r.current !== "0.15.40";
           const ahead = r.ahead ?? (!!r.latest && r.latest !== r.current);
           say(
-            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.39"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
+            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.40"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
             mismatch || ahead ? "" : "ok"
           );
           return;
@@ -18126,7 +18267,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.15.39",
+            version: "0.15.40",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -18206,6 +18347,248 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
   // src/ui/tab-settings.ts
   init_transport();
   init_host();
+
+  // src/ui/bot-cleanup.ts
+  init_dom();
+  init_state();
+  var LABEL = { trash: "RisuAI \uD734\uC9C0\uD1B5", missing: "RisuAI\uC5D0 \uC5C6\uC74C" };
+  var PAGE2 = 30;
+  var CHIPS = [["all", "\uC804\uCCB4"], ["trash", "\uD734\uC9C0\uD1B5"], ["missing", "RisuAI\uC5D0 \uC5C6\uC74C"], ["namesake", "\uAC19\uC740 \uC774\uB984\uC774 RisuAI\uC5D0 \uC788\uC74C"]];
+  function buildBotCleanupCard(onMount) {
+    let bots = [];
+    let chip = "all";
+    let filter6 = "";
+    let page = 0;
+    const picked = /* @__PURE__ */ new Set();
+    const summary = el("div", { class: "hint" });
+    const out = el("div", {});
+    const tools = el("div", { class: "row botcleantools" });
+    const list2 = el("div", { class: "chatlist botcleanlist" });
+    const nav = el("div", {});
+    const compare = el("button", { class: "primary tiny", text: "RisuAI\uC640 \uB300\uC870" });
+    compare.title = "RisuAI\uC758 \uCE90\uB9AD\uD130 \uBAA9\uB85D\uC744 \uC77D\uC5B4 Hina\uC758 \uBD07\uACFC \uB9DE\uCDB0 \uBD05\uB2C8\uB2E4 (\uCC98\uC74C\uC5D0\uB294 RisuAI\uAC00 \uB370\uC774\uD130 \uC811\uADFC \uAD8C\uD55C\uC744 \uBB3B\uC2B5\uB2C8\uB2E4)";
+    const search = el("input", { class: "searchinput", type: "search", placeholder: "\uC774\uB984\uC73C\uB85C \uCC3E\uAE30" });
+    search.addEventListener("input", () => {
+      filter6 = search.value;
+      page = 0;
+      drawRows();
+    });
+    const chipBox = el("div", { class: "row botcleanchips" });
+    const pickAll = el("input", { type: "checkbox", title: "\uBCF4\uC774\uB294 \uCABD \uC804\uCCB4 \uC120\uD0DD" });
+    const bulk = el("button", { class: "ghost tiny danger" });
+    const gone = () => bots.filter((b) => b.state === "trash" || b.state === "missing");
+    const shown = () => {
+      const needle = filter6.trim().toLowerCase();
+      return gone().filter((b) => (chip === "all" || (chip === "namesake" ? b.liveNamesake : b.state === chip)) && (!needle || b.name.toLowerCase().includes(needle))).sort((a, b) => a.name.localeCompare(b.name, void 0, { numeric: true }) || b.updatedAt - a.updatedAt);
+    };
+    const drawSummary2 = () => {
+      const by = (s) => bots.filter((b) => b.state === s).length;
+      const checked = Math.max(0, ...bots.map((b) => b.checkedAt || 0));
+      const unchecked = bots.filter((b) => !b.state).length;
+      summary.textContent = `Hina\uC758 \uBD07 ${bots.length}\uAC1C \xB7 RisuAI\uC5D0 \uC788\uC74C ${by("live")} \xB7 \uD734\uC9C0\uD1B5 ${by("trash")} \xB7 \uC5C6\uC74C ${by("missing")}` + (unchecked ? ` \xB7 \uB300\uC870 \uC548 \uB428 ${unchecked}` : "") + (checked ? ` \xB7 \uB9C8\uC9C0\uB9C9 \uB300\uC870 ${fmtTime(checked * 1e3)}` : " \xB7 \uC544\uC9C1 \uB300\uC870\uD558\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4");
+    };
+    const syncBulk = () => {
+      for (const k of [...picked]) if (!gone().some((b) => b.charKey === k)) picked.delete(k);
+      bulk.textContent = picked.size ? `\uC120\uD0DD\uD55C ${picked.size}\uAC1C Hina\uC5D0\uC11C \uC0AD\uC81C` : "\uC120\uD0DD \uC0AD\uC81C";
+      bulk.disabled = !picked.size;
+      const vis = shown().slice(page * PAGE2, page * PAGE2 + PAGE2);
+      pickAll.checked = vis.length > 0 && vis.every((b) => picked.has(b.charKey));
+    };
+    const drawChips = () => {
+      clear(chipBox);
+      for (const [id, label2] of CHIPS) {
+        const n = id === "all" ? gone().length : id === "namesake" ? gone().filter((b2) => b2.liveNamesake).length : gone().filter((b2) => b2.state === id).length;
+        const b = el("button", { class: "ghost tiny chip" + (chip === id ? " on" : ""), text: `${label2} ${n}` });
+        b.addEventListener("click", () => {
+          chip = id;
+          page = 0;
+          drawChips();
+          drawRows();
+        });
+        chipBox.appendChild(b);
+      }
+    };
+    const drawRows = () => {
+      clear(list2);
+      clear(nav);
+      const rows = shown();
+      const pages2 = Math.max(1, Math.ceil(rows.length / PAGE2));
+      page = Math.min(page, pages2 - 1);
+      tools.style.display = gone().length ? "" : "none";
+      list2.style.display = rows.length ? "" : "none";
+      for (const b of rows.slice(page * PAGE2, page * PAGE2 + PAGE2)) {
+        list2.appendChild(row(b, picked, () => syncBulk(), () => {
+          void reload();
+        }));
+      }
+      if (!rows.length && gone().length) nav.appendChild(el("div", { class: "hint", text: "\uC870\uAC74\uC5D0 \uB9DE\uB294 \uBD07\uC774 \uC5C6\uC2B5\uB2C8\uB2E4." }));
+      if (pages2 > 1) {
+        const prev = el("button", { class: "ghost tiny", text: "\u2039 \uC774\uC804" });
+        const next = el("button", { class: "ghost tiny", text: "\uB2E4\uC74C \u203A" });
+        prev.disabled = page === 0;
+        next.disabled = page === pages2 - 1;
+        prev.addEventListener("click", () => {
+          page -= 1;
+          drawRows();
+        });
+        next.addEventListener("click", () => {
+          page += 1;
+          drawRows();
+        });
+        const from = page * PAGE2 + 1;
+        nav.appendChild(el("div", { class: "row pagenav" }, [
+          prev,
+          el("span", { class: "hint grow", style: { textAlign: "center" }, text: `${from}\u2013${Math.min(rows.length, from + PAGE2 - 1)} / ${rows.length}` }),
+          next
+        ]));
+      }
+      syncBulk();
+    };
+    const draw2 = (next) => {
+      bots = next;
+      drawSummary2();
+      drawChips();
+      drawRows();
+      if (!gone().length && bots.some((b) => b.checkedAt)) {
+        out.replaceChildren(el("div", { class: "hint", text: "RisuAI\uC5D0 \uC5C6\uB294 \uBD07\uC774 \uC5C6\uC2B5\uB2C8\uB2E4." }));
+      }
+    };
+    const reload = async () => {
+      try {
+        draw2(await state.hinaBots());
+      } catch (e) {
+        summary.textContent = "\uBD07 \uBAA9\uB85D\uC744 \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg20(e);
+      }
+    };
+    pickAll.addEventListener("change", () => {
+      for (const b of shown().slice(page * PAGE2, page * PAGE2 + PAGE2)) {
+        if (pickAll.checked) picked.add(b.charKey);
+        else picked.delete(b.charKey);
+      }
+      drawRows();
+    });
+    armed(bulk, "\uC120\uD0DD \uC0AD\uC81C", "\uC815\uB9D0 \uC9C0\uC6B8\uAE4C\uC694?", async () => {
+      const keys = [...picked];
+      bulk.disabled = true;
+      bulk.textContent = `${keys.length}\uAC1C \uC9C0\uC6B0\uB294 \uC911\u2026`;
+      clear(out);
+      try {
+        const r = await state.forgetBots(keys);
+        picked.clear();
+        out.appendChild(el("div", { class: "notice " + (r.failed.length ? "err" : "ok"), text: `Hina\uC5D0\uC11C ${r.forgotten.length}\uAC1C\uB97C \uC9C0\uC6E0\uC2B5\uB2C8\uB2E4.` + (r.failed.length ? ` ${r.failed.length}\uAC1C\uB294 \uC9C0\uC6B0\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: ${r.failed[0].error}` : "") + " RisuAI \uCABD\uACFC projects/ \uC758 \uD30C\uC77C\uC740 \uADF8\uB300\uB85C\uC785\uB2C8\uB2E4." }));
+      } catch (e) {
+        out.appendChild(el("div", { class: "notice err", text: "\uC9C0\uC6B0\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg20(e) }));
+      }
+      await reload();
+    });
+    tools.append(
+      el("label", { class: "row", title: "\uC774 \uCABD\uC5D0 \uBCF4\uC774\uB294 \uBD07 \uC804\uCCB4 \uC120\uD0DD" }, [pickAll, el("span", { class: "hint", text: "\uC774 \uCABD \uC804\uCCB4" })]),
+      el("span", { class: "grow" }),
+      bulk
+    );
+    compare.addEventListener("click", async () => {
+      compare.disabled = true;
+      compare.textContent = "RisuAI \uBAA9\uB85D \uC77D\uB294 \uC911\u2026";
+      clear(out);
+      try {
+        const r = await state.compareBots();
+        draw2(r.bots);
+        out.replaceChildren(el("div", { class: "notice ok", text: `RisuAI \uCE90\uB9AD\uD130 ${r.risuCount}\uAC1C\uC640 \uB300\uC870\uD588\uC2B5\uB2C8\uB2E4 \u2014 \uD734\uC9C0\uD1B5 ${r.counts.trash ?? 0} \xB7 \uC5C6\uC74C ${r.counts.missing ?? 0}` }));
+      } catch (e) {
+        out.replaceChildren(el("div", { class: "notice err", text: msg20(e) }));
+      } finally {
+        compare.disabled = false;
+        compare.textContent = "RisuAI\uC640 \uB300\uC870";
+      }
+    });
+    onMount?.(reload);
+    void reload();
+    return el("div", { class: "card" }, [
+      el("h2", { text: "Hina\uC5D0\uB9CC \uB0A8\uC740 \uBD07" }),
+      el("div", { class: "hint", text: "RisuAI\uC5D0\uC11C \uC9C0\uC6E0\uAC70\uB098 \uD734\uC9C0\uD1B5\uC5D0 \uB123\uC740 \uBD07, \uB2E4\uC2DC \uC784\uD3EC\uD2B8\uD574 \uC0C8 \uBD07\uC774 \uB41C \uC61B \uBC84\uC804\uC758 Hina \uC791\uC5C5\uBCF8\uC785\uB2C8\uB2E4. CharX\uB85C \uBC1B\uC544 \uB450\uAC70\uB098 Hina\uC5D0\uC11C \uC9C0\uC6B8 \uC218 \uC788\uC2B5\uB2C8\uB2E4 (RisuAI \uCABD\uC740 \uAC74\uB4DC\uB9AC\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4)." }),
+      el("div", { class: "row", style: { margin: "6px 0" } }, [compare]),
+      summary,
+      out,
+      el("div", { class: "landfilter", style: { marginTop: "8px" } }, [search]),
+      chipBox,
+      tools,
+      list2,
+      nav,
+      el("div", { class: "hint", style: { marginTop: "8px" }, text: '\uD3EC\uCF13\uB9AC\uC2A4\uC758 \uD734\uC9C0\uD1B5\xB7\uBE44\uD65C\uC131\uD654(\uBCF4\uAD00) \uBD07\uC740 \uD50C\uB7EC\uADF8\uC778\uC774 \uBCFC \uC218 \uC5C6\uB294 \uACF3\uC5D0 \uC788\uC5B4 "RisuAI\uC5D0 \uC5C6\uC74C"\uC73C\uB85C \uB098\uC635\uB2C8\uB2E4. \uAC00\uB9AC\uAE30\uB9CC \uD55C \uBD07\uC740 RisuAI\uC5D0 \uC788\uC74C\uC73C\uB85C \uC149\uB2C8\uB2E4. \uC9C0\uC6CC\uB3C4 projects/ \uC758 \uD30C\uC77C\uC740 \uB0A8\uACE0, \uC774\uBBF8\uC9C0 \uC800\uC7A5\uC18C\uB294 \uC2A4\uD1A0\uC5B4 \uC815\uB9AC(GC)\uAC00 \uC815\uB9AC\uD569\uB2C8\uB2E4.' })
+    ]);
+  }
+  function row(b, picked, onPick, after) {
+    const note = el("div", { class: "hint" });
+    const pick2 = el("input", { type: "checkbox", title: "\uC120\uD0DD" });
+    pick2.checked = picked.has(b.charKey);
+    pick2.addEventListener("change", () => {
+      if (pick2.checked) picked.add(b.charKey);
+      else picked.delete(b.charKey);
+      onPick();
+    });
+    const save = el("button", { class: "ghost tiny", text: "CharX\uB85C \uC800\uC7A5", title: "Hina \uC791\uC5C5\uBCF8\uC73C\uB85C .charx \uB97C \uB9CC\uB4E4\uC5B4 \uBC1B\uC2B5\uB2C8\uB2E4" });
+    if (!b.charxReady) {
+      save.disabled = true;
+      save.title = "\uC61B \uBC29\uC2DD(\uCE74\uB4DC \uC77C\uBD80\uB9CC)\uC73C\uB85C \uC62C\uB77C\uAC04 \uC791\uC5C5\uBCF8\uC774\uB77C CharX\uB97C \uB9CC\uB4E4 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4 - RisuAI\uC5D0 \uC6D0\uBCF8\uC774 \uC788\uB2E4\uBA74 \uAC70\uAE30\uC11C \uB0B4\uBCF4\uB0B4 \uC8FC\uC138\uC694";
+    }
+    save.addEventListener("click", async (ev) => {
+      ev.stopPropagation();
+      save.disabled = true;
+      save.textContent = "\uB9CC\uB4DC\uB294 \uC911\u2026";
+      try {
+        const r = await state.charxOf(b.charKey);
+        note.textContent = `${r.path} \uC5D0 \uB9CC\uB4E4\uC5C8\uC2B5\uB2C8\uB2E4` + (r.missing?.length ? ` (Hina\uC5D0 \uC5C6\uB294 \uC5D0\uC14B ${r.missing.length}\uAC1C\uB294 \uBE60\uC84C\uC2B5\uB2C8\uB2E4)` : "");
+        await state.downloadFile(r.path);
+      } catch (e) {
+        note.textContent = "CharX\uB97C \uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg20(e);
+      } finally {
+        save.disabled = false;
+        save.textContent = "CharX\uB85C \uC800\uC7A5";
+      }
+    });
+    const del = el("button", { class: "ghost tiny danger", title: "Hina\uC758 \uC791\uC5C5\uBCF8\xB7\uB300\uD654 \uAE30\uB85D\uC744 \uC9C0\uC6C1\uB2C8\uB2E4 (RisuAI\uB294 \uADF8\uB300\uB85C)" });
+    const item = el("div", { class: "chatitem botcleanrow" });
+    armed(del, "Hina\uC5D0\uC11C \uC0AD\uC81C", "\uC815\uB9D0 \uC9C0\uC6B8\uAE4C\uC694?", async () => {
+      del.disabled = true;
+      save.disabled = true;
+      item.classList.add("deleting");
+      try {
+        await state.forgetBot(b.charKey);
+        picked.delete(b.charKey);
+        after();
+      } catch (e) {
+        item.classList.remove("deleting");
+        del.disabled = false;
+        save.disabled = !b.charxReady;
+        note.textContent = "\uC9C0\uC6B0\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg20(e);
+      }
+    });
+    const when = b.state === "trash" && b.purgeAt ? ` \xB7 RisuAI\uAC00 ${fmtTime(b.purgeAt)}\uC5D0 \uC601\uAD6C \uC0AD\uC81C` : "";
+    item.append(
+      pick2,
+      el("span", { class: "grow" }, [
+        el("div", { text: b.name || "(\uC774\uB984 \uC5C6\uC74C)" }),
+        el("div", { class: "hint", text: `\uCC57 ${b.chats}\uAC1C \xB7 ${b.turns}\uD134 \xB7 Hina \uC218\uC815 ${fmtTime(b.updatedAt * 1e3)}${when}` + (b.pendingActions ? ` \xB7 \uC2B9\uC778 \uB300\uAE30 ${b.pendingActions}` : "") }),
+        note
+      ]),
+      el("span", { class: "badge" + (b.state === "trash" ? " warn" : ""), text: LABEL[b.state] || b.state }),
+      save,
+      del
+    );
+    if (b.liveNamesake) {
+      item.insertBefore(el("span", {
+        class: "badge ok",
+        text: "\uAC19\uC740 \uC774\uB984\uC774 RisuAI\uC5D0 \uC788\uC74C",
+        title: "\uB2E4\uC2DC \uC784\uD3EC\uD2B8\uD55C \uC0C8 \uBC84\uC804\uC77C \uAC00\uB2A5\uC131\uC774 \uD07D\uB2C8\uB2E4 - \uC774 \uD56D\uBAA9\uC740 \uC61B \uBC84\uC804\uC758 Hina \uC791\uC5C5\uBCF8\uC785\uB2C8\uB2E4"
+      }), save);
+    }
+    return item;
+  }
+  function msg20(e) {
+    return e instanceof Error ? e.message : String(e);
+  }
+
+  // src/ui/tab-settings.ts
   var aboutMount = null;
   var refreshers = [];
   var watchedHealth = null;
@@ -18260,6 +18643,10 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       } })]],
       // Opt-in extras that are not part of the release bundle.
       ["\uACE0\uAE09 \uAE30\uB2A5", [buildMcpCard((refresh3) => {
+        refreshers.push(refresh3);
+      })]],
+      // Its own tab (§1-102, user): some people have hundreds of bots.
+      ["\uC800\uC7A5\uACF5\uAC04 \uC815\uB9AC", [buildBotCleanupCard((refresh3) => {
         refreshers.push(refresh3);
       })]],
       ["\uC815\uBCF4 \xB7 \uB85C\uADF8", [buildCatalogCard(), buildDebugCard(), aboutMount]]
@@ -18349,7 +18736,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         await transport.post("/config", { config: { workspace: { globalPath: path.value.trim() } } });
         out.textContent = "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4. \uD30C\uC77C\uC740 \uC790\uB3D9\uC73C\uB85C \uC62E\uACA8\uC9C0\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4 \u2014 \uACBD\uB85C\uB97C \uBC14\uAFE8\uB2E4\uBA74 \uAE30\uC874 \uD3F4\uB354\uB97C \uC9C1\uC811 \uC62E\uACA8 \uC8FC\uC138\uC694.";
       } catch (e) {
-        out.textContent = "\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg20(e);
+        out.textContent = "\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg21(e);
       } finally {
         save.disabled = false;
       }
@@ -18485,7 +18872,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       ])
     ]);
   }
-  function msg20(e) {
+  function msg21(e) {
     return e instanceof Error ? e.message : String(e);
   }
   function buildNaiCard() {
@@ -18501,7 +18888,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       try {
         st = await state.studio.status();
       } catch (e) {
-        meters.appendChild(el("span", { class: "hint err", text: msg20(e) }));
+        meters.appendChild(el("span", { class: "hint err", text: msg21(e) }));
         return;
       }
       if (!st.configured) {
@@ -18542,7 +18929,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         await refresh3();
         out.textContent = "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4.";
       } catch (e) {
-        out.textContent = msg20(e);
+        out.textContent = msg21(e);
       } finally {
         save.disabled = false;
       }
@@ -18554,7 +18941,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const st = await state.studio.status();
         out.textContent = st.configured && st.account ? `\uC5F0\uACB0\uB428 \u2014 Anlas ${st.account.anlas}, tier ${st.account.tier}` : st.error || st.note || "\uD1A0\uD070\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.";
       } catch (e) {
-        out.textContent = msg20(e);
+        out.textContent = msg21(e);
       } finally {
         test.disabled = false;
       }
@@ -18703,7 +19090,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         for (const k of r.keys) {
           const edit = el("button", { class: "ghost tiny", text: "\uC218\uC815" });
           const del = el("button", { class: "ghost tiny" });
-          const row = el("div", { class: "verrow keyrow" }, [
+          const row2 = el("div", { class: "verrow keyrow" }, [
             el("div", { class: "grow" }, [
               el("div", {}, [
                 el("span", { text: k.name }),
@@ -18726,7 +19113,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
               say(e instanceof Error ? e.message : String(e), "err");
             }
           });
-          listMount2.appendChild(row);
+          listMount2.appendChild(row2);
         }
       } catch (e) {
         clear(listMount2);
@@ -18824,7 +19211,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.39"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.40"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -18891,7 +19278,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
   var openId2 = "";
   var fields = [];
   var full = true;
-  var filterText3 = "";
+  var filterText2 = "";
   var ui4 = null;
   function notice5(text2, kind = "") {
     ui4?.notice(text2, kind);
@@ -18901,9 +19288,9 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     keys: () => [state.epoch, state.botKey],
     search: {
       placeholder: "\uCC3E\uAE30 (\uC774\uB984\xB7\uBCF8\uBB38)",
-      get: () => filterText3,
+      get: () => filterText2,
       set: (v) => {
-        filterText3 = v;
+        filterText2 = v;
         drawTree3();
         refocusSearch(null);
       }
@@ -18929,7 +19316,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       full = r.full;
     } catch (e) {
       clear(treeMount3);
-      treeMount3.appendChild(el("div", { class: "notice err", text: msg21(e) }));
+      treeMount3.appendChild(el("div", { class: "notice err", text: msg22(e) }));
       return;
     }
     drawTree3();
@@ -18960,7 +19347,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const fresh = fields.find((f) => f.id === made.id);
         if (fresh) open2(fresh);
       } catch (e) {
-        notice5("\uCD94\uAC00\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg21(e), "err");
+        notice5("\uCD94\uAC00\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg22(e), "err");
       }
     });
     const reloadBtn = el("button", { class: "ghost tiny", text: "\uC0C8\uB85C\uACE0\uCE68" });
@@ -18973,7 +19360,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         text: "\uAD6C\uBC84\uC804 \uC5C5\uB85C\uB4DC \uC0C1\uD0DC\uC785\uB2C8\uB2E4. \uD328\uB110\uC744 \uB2EB\uC558\uB2E4 \uB2E4\uC2DC \uC5F4\uBA74 \uC804\uCCB4 \uCE74\uB4DC\uB85C \uAC31\uC2E0\uB429\uB2C8\uB2E4."
       }));
     }
-    const needle = filterText3.trim().toLowerCase();
+    const needle = filterText2.trim().toLowerCase();
     const shown = fields.filter((f) => !needle || labelOf(f).toLowerCase().includes(needle) || f.body.toLowerCase().includes(needle));
     shown.sort((a, b) => rankOf(a.field) - rankOf(b.field) || a.seq - b.seq);
     let ruled = false;
@@ -18989,11 +19376,11 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         title: f.id
       });
       name.addEventListener("click", () => open2(f));
-      const row = el("div", { class: "treerow" }, [name]);
-      if (f.deleted) row.appendChild(el("span", { class: "badge", text: "\uC0AD\uC81C \uC608\uC815" }));
-      else if (f.isNew) row.appendChild(el("span", { class: "badge warn", text: "\uCD94\uAC00" }));
-      else if (f.changed) row.appendChild(el("span", { class: "badge warn", text: "\uC218\uC815" }));
-      treeMount3.appendChild(row);
+      const row2 = el("div", { class: "treerow" }, [name]);
+      if (f.deleted) row2.appendChild(el("span", { class: "badge", text: "\uC0AD\uC81C \uC608\uC815" }));
+      else if (f.isNew) row2.appendChild(el("span", { class: "badge warn", text: "\uCD94\uAC00" }));
+      else if (f.changed) row2.appendChild(el("span", { class: "badge warn", text: "\uC218\uC815" }));
+      treeMount3.appendChild(row2);
     }
   }
   async function saveTyped(f, value, btn) {
@@ -19003,7 +19390,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       notice5(savedText("\uCE74\uB4DC \uD544\uB4DC\uB97C"), "ok");
       await refreshNow3();
     } catch (e) {
-      notice5("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg21(e), "err");
+      notice5("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg22(e), "err");
     } finally {
       btn.disabled = false;
     }
@@ -19093,7 +19480,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         notice5(f.deleted ? "\uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4. \uC0AD\uC81C \uD45C\uC2DC\uB294 \uD574\uC81C\uB418\uC5C8\uC2B5\uB2C8\uB2E4." : savedText("\uCE74\uB4DC \uD544\uB4DC\uB97C"), "ok");
         await refreshNow3();
       } catch (e) {
-        notice5("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg21(e), "err");
+        notice5("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg22(e), "err");
       } finally {
         save.disabled = false;
       }
@@ -19108,7 +19495,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           if (viewMount3) clear(viewMount3);
           await refreshNow3();
         } catch (e) {
-          notice5("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg21(e), "err");
+          notice5("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg22(e), "err");
         }
       });
       buttons.push(del);
@@ -19144,7 +19531,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       el("div", { class: "row" }, buttons)
     ]));
   }
-  function msg21(e) {
+  function msg22(e) {
     return e instanceof Error ? e.message : String(e);
   }
 
@@ -19178,7 +19565,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
   var openId3 = "";
   var items3 = [];
   var bgFields = [];
-  var filterText4 = "";
+  var filterText3 = "";
   var ui5 = null;
   function notice6(text2, kind = "") {
     ui5?.notice(text2, kind);
@@ -19188,9 +19575,9 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     keys: () => [state.epoch, state.botKey],
     search: {
       placeholder: "\uCC3E\uAE30 (\uC774\uB984\xB7\uD328\uD134\xB7\uBCF8\uBB38)",
-      get: () => filterText4,
+      get: () => filterText3,
       set: (v) => {
-        filterText4 = v;
+        filterText3 = v;
         drawTree4();
         refocusSearch(null);
       }
@@ -19216,7 +19603,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       bgFields = r.fields.filter((f) => f.field in BG_LABEL);
     } catch (e) {
       clear(treeMount4);
-      treeMount4.appendChild(el("div", { class: "notice err", text: msg22(e) }));
+      treeMount4.appendChild(el("div", { class: "notice err", text: msg23(e) }));
       return;
     }
     drawTree4();
@@ -19247,7 +19634,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const made = items3.find((s) => s.id === id);
         if (made) open3(made);
       } catch (e) {
-        notice6("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg22(e), "err");
+        notice6("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg23(e), "err");
       }
     });
     const reloadBtn = el("button", { class: "ghost tiny", text: "\uC0C8\uB85C\uACE0\uCE68" });
@@ -19277,7 +19664,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       }));
       return;
     }
-    const needle = filterText4.trim().toLowerCase();
+    const needle = filterText3.trim().toLowerCase();
     const shown = items3.map((s, i) => ({ s, i })).filter(({ s }) => {
       if (!needle) return true;
       const e = s.entry;
@@ -19294,7 +19681,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           await state.moveScript(s.id, to);
           await refreshNow4();
         } catch (err) {
-          notice6("\uC21C\uC11C\uB97C \uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg22(err), "err");
+          notice6("\uC21C\uC11C\uB97C \uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg23(err), "err");
         }
       };
       const size = String(e.out ?? "").length;
@@ -19337,7 +19724,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         notice6(savedText(BG_LABEL[f.field] + " \uC744(\uB97C)"), "ok");
         await refreshNow4();
       } catch (err) {
-        notice6("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg22(err), "err");
+        notice6("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg23(err), "err");
       } finally {
         save.disabled = false;
       }
@@ -19403,7 +19790,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         notice6(savedText("\uC2A4\uD06C\uB9BD\uD2B8\uB97C"), "ok");
         await refreshNow4();
       } catch (err) {
-        notice6("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg22(err), "err");
+        notice6("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg23(err), "err");
       } finally {
         save.disabled = false;
       }
@@ -19416,7 +19803,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         if (viewMount4) clear(viewMount4);
         await refreshNow4();
       } catch (err) {
-        notice6("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg22(err), "err");
+        notice6("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg23(err), "err");
       }
     });
     const orig = s.origin === "edited" && s.original ? s.original : null;
@@ -19451,7 +19838,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       el("div", { class: "row" }, [save, del])
     ]));
   }
-  function msg22(e) {
+  function msg23(e) {
     return e instanceof Error ? e.message : String(e);
   }
 
@@ -19494,7 +19881,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       items4 = await state.cardScripts("triggerscript");
     } catch (e) {
       items4 = [];
-      notice7("\uD2B8\uB9AC\uAC70\uB97C \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg23(e), "err");
+      notice7("\uD2B8\uB9AC\uAC70\uB97C \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg24(e), "err");
     }
     drawSide();
     drawView();
@@ -19522,12 +19909,12 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       else b.addEventListener("click", run);
       return b;
     };
-    const row = el("div", { class: "row", style: { padding: "6px" } });
-    if (mode2 === "v1") row.appendChild(btn("V1", true, () => {
+    const row2 = el("div", { class: "row", style: { padding: "6px" } });
+    if (mode2 === "v1") row2.appendChild(btn("V1", true, () => {
     }));
-    row.appendChild(btn("V2", mode2 === "v2", () => void switchMode("v2")));
-    row.appendChild(btn("Lua", mode2 === "lua", () => void switchMode("lua")));
-    sideMount.appendChild(row);
+    row2.appendChild(btn("V2", mode2 === "v2", () => void switchMode("v2")));
+    row2.appendChild(btn("Lua", mode2 === "lua", () => void switchMode("lua")));
+    sideMount.appendChild(row2);
     sideMount.appendChild(el("div", { class: "hint", style: { padding: "0 8px" }, text: mode2 === "lua" ? "Lua \uC2A4\uD06C\uB9BD\uD2B8 \uD55C \uAC1C\uAC00 \uC774 \uBD07\uC758 \uD2B8\uB9AC\uAC70\uC785\uB2C8\uB2E4." : mode2 === "v2" ? `V2 \uBE14\uB85D \uD504\uB85C\uADF8\uB7A8 \xB7 \uC774\uBCA4\uD2B8 ${Math.max(0, items4.length - 1)}\uAC1C` : mode2 === "v1" ? "V1 (\uAD6C\uD615) \uD2B8\uB9AC\uAC70\uC785\uB2C8\uB2E4." : "\uD2B8\uB9AC\uAC70\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4. \uBAA8\uB4DC\uB97C \uACE8\uB77C \uC2DC\uC791\uD569\uB2C8\uB2E4." }));
   }
   async function switchMode(to) {
@@ -19559,7 +19946,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       await refreshNow5();
       notice7("\uBAA8\uB4DC\uB97C \uBC14\uAFE8\uC2B5\uB2C8\uB2E4. " + savedText("\uD2B8\uB9AC\uAC70\uB97C"), "ok");
     } catch (e) {
-      notice7("\uBAA8\uB4DC\uB97C \uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg23(e), "err");
+      notice7("\uBAA8\uB4DC\uB97C \uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg24(e), "err");
     }
   }
   function drawView() {
@@ -19591,7 +19978,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           notice7(savedText("Lua \uD2B8\uB9AC\uAC70\uB97C"), "ok");
           await refreshNow5();
         } catch (err) {
-          notice7("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg23(err), "err");
+          notice7("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg24(err), "err");
         } finally {
           save.disabled = false;
         }
@@ -19622,7 +20009,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           await state.deleteScript(s.id);
           await refreshNow5();
         } catch (err) {
-          notice7(msg23(err), "err");
+          notice7(msg24(err), "err");
         }
       });
       return el("div", { class: "verrow" }, [
@@ -19639,7 +20026,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       ...rows.length ? rows : [el("div", { class: "hint", text: "\uC774\uBCA4\uD2B8\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4." })]
     ]));
   }
-  function msg23(e) {
+  function msg24(e) {
     return e instanceof Error ? e.message : String(e);
   }
 
@@ -19668,7 +20055,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     applyBtn2 = el("button", {
       class: "tool",
       dataset: { tool: "card-apply" },
-      title: "\uCE74\uB4DC\uB97C RisuAI\uC5D0 \uBC18\uC601 \xB7 \uC0C8 \uBD07\uC73C\uB85C \uC800\uC7A5"
+      title: "\uCE74\uB4DC\uB97C RisuAI\uC5D0 \uBC18\uC601"
     }, [
       el("span", { class: "glyph", text: TOOL.apply }),
       el("span", { class: "tool-label", text: "\uBC18\uC601" }),
@@ -19724,7 +20111,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const n = await state.cardReset();
         shellNotice("\uCE74\uB4DC\uC758 \uBBF8\uBC18\uC601 \uBCC0\uACBD\uC744 \uBC84\uB838\uC2B5\uB2C8\uB2E4" + (n ? ` (${n}\uAC74)` : "") + ". \uC791\uC5C5\uBCF8\uC774 \uAE30\uC900\uC120(RisuAI \uC0C1\uD0DC)\uC73C\uB85C \uB3CC\uC544\uAC14\uC2B5\uB2C8\uB2E4.", "ok");
       } catch (e) {
-        shellNotice("\uBCC0\uACBD \uCDE8\uC18C\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg24(e), "err");
+        shellNotice("\uBCC0\uACBD \uCDE8\uC18C\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg25(e), "err");
       }
     });
     summaryEl2 = el("span", { class: "dim changesum", title: "\uC774 \uBD07\uC758 \uCE74\uB4DC\uC5D0\uC11C \uC544\uC9C1 RisuAI\uC5D0 \uC4F0\uC9C0 \uC54A\uC740 \uBCC0\uACBD" });
@@ -19768,7 +20155,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           });
           out.appendChild(anyway);
         } else {
-          out.appendChild(el("div", { class: "notice err", text: "\uB0B4\uBCF4\uB0B4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg24(e) }));
+          out.appendChild(el("div", { class: "notice err", text: "\uB0B4\uBCF4\uB0B4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg25(e) }));
         }
       } finally {
         btn.disabled = false;
@@ -19828,7 +20215,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           out.appendChild(el("div", { class: "notice err", text: `\uC5D0\uC14B ${missing.length}\uAC1C\uAC00 \uC2A4\uD1A0\uC5B4\uC5D0 \uC5C6\uC5B4 \uB9CC\uB4E4\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4: ` + missing.slice(0, 6).map((m) => m.name || m.type).join(", ") + (missing.length > 6 ? " \u2026" : "") }));
           buildAnyway.style.display = "";
         } else {
-          out.appendChild(el("div", { class: "notice err", text: "charx \uB97C \uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg24(e) }));
+          out.appendChild(el("div", { class: "notice err", text: "charx \uB97C \uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg25(e) }));
         }
       } finally {
         build.disabled = !!charxBlockReason();
@@ -19877,7 +20264,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     }
     const mod = state.targetModule;
     summaryEl2.title = mod ? `\uBAA8\uB4C8 '${mod.name}' \uC5D0\uC11C \uC544\uC9C1 RisuAI\uC5D0 \uC4F0\uC9C0 \uC54A\uC740 \uBCC0\uACBD` : "\uC774 \uBD07\uC758 \uCE74\uB4DC\uC5D0\uC11C \uC544\uC9C1 RisuAI\uC5D0 \uC4F0\uC9C0 \uC54A\uC740 \uBCC0\uACBD";
-    applyBtn2.title = mod ? `\uBAA8\uB4C8 '${mod.name}' \uC744(\uB97C) RisuAI \uBAA8\uB4C8 \uBAA9\uB85D\uC5D0 \uBC18\uC601` : blocked ? blocked + " (\uC0C8 \uBD07\uC73C\uB85C \uC800\uC7A5\uC740 \uB20C\uB7EC\uC11C \uC4F8 \uC218 \uC788\uC2B5\uB2C8\uB2E4)" : "\uCE74\uB4DC\uB97C RisuAI\uC5D0 \uBC18\uC601 \xB7 \uC0C8 \uBD07\uC73C\uB85C \uC800\uC7A5";
+    applyBtn2.title = mod ? `\uBAA8\uB4C8 '${mod.name}' \uC744(\uB97C) RisuAI \uBAA8\uB4C8 \uBAA9\uB85D\uC5D0 \uBC18\uC601` : blocked ? blocked : "\uCE74\uB4DC\uB97C RisuAI\uC5D0 \uBC18\uC601";
   }
   function describe2(c) {
     if (!c) return [];
@@ -19900,7 +20287,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     if (x.deleted) bits.push(`\u2212${x.deleted}`);
     return bits.join(" ");
   }
-  function msg24(e) {
+  function msg25(e) {
     return e instanceof Error ? e.message : String(e);
   }
   async function openApply2(anchor) {
@@ -19955,7 +20342,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           close();
         }
       } catch (e) {
-        const m = msg24(e);
+        const m = msg25(e);
         out.textContent = m;
         void clientLog("error", "cardWriteBack failed", { error: m });
         shellNotice("\uCE74\uB4DC \uBC18\uC601\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + m, "err");
@@ -19963,37 +20350,6 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         apply.disabled = !!applyBlockReason() || (state.botChanges?.conflicts ?? 0) > 0;
       }
     });
-    const nameInput = el("input", {
-      value: (state.workspace?.characterName || "\uBD07") + " (\uBC31\uC5C5)",
-      placeholder: "\uBC31\uC5C5 \uBD07 \uC774\uB984"
-    });
-    const saveNew = el("button", { text: "\uC0C8 \uBD07\uC73C\uB85C \uC800\uC7A5", title: "\uAE30\uC900\uC120(\uD3B8\uC9D1 \uC804, RisuAI \uAC00 \uC9C0\uAE08 \uB4E4\uACE0 \uC788\uB294 \uCE74\uB4DC)\uC744 \uBC31\uC5C5 \uBD07\uC73C\uB85C \uBCF5\uC81C\uD55C \uB4A4, \uD3B8\uC9D1 \uC911\uC778 \uB0B4\uC6A9\uC744 \uC774 \uBD07\uC5D0 \uBC18\uC601\uD558\uACE0 \uACC4\uC18D \uD3B8\uC9D1\uD569\uB2C8\uB2E4" });
-    saveNew.disabled = !!blocked;
-    saveNew.addEventListener("click", async () => {
-      saveNew.disabled = true;
-      const was = saveNew.textContent;
-      saveNew.textContent = "\uC800\uC7A5 \uC911\u2026";
-      out.textContent = "\uBC31\uC5C5 \uBD07\uC744 \uB9CC\uB4DC\uB294 \uC911\uC785\uB2C8\uB2E4. RisuAI \uAC00 db \uAD8C\uD55C\uC744 \uBB3C\uC73C\uBA74 \uD5C8\uC6A9\uD574 \uC8FC\uC138\uC694.";
-      try {
-        const backup = nameInput.value.trim() || "\uBC31\uC5C5";
-        const r = await state.saveAsNewBot(backup);
-        const said = `\uD604\uC7AC \uD3B8\uC9D1 \uC911\uC778 \uBD07\uC744 \uC0C8 \uBD07\uC73C\uB85C \uC800\uC7A5\uD558\uC600\uC2B5\uB2C8\uB2E4. \uAE30\uC874 \uBD07\uC740 \u201C${backup}\u201D \uC774\uB984\uC73C\uB85C \uBCF5\uC81C\uB418\uC5C8\uC2B5\uB2C8\uB2E4.` + (r.mode === "noop" ? " (\uBC18\uC601\uD560 \uBCC0\uACBD\uC740 \uC5C6\uC5C8\uC2B5\uB2C8\uB2E4.)" : ` \uBCC0\uACBD ${r.applied}\uAC74\uC774 \uC774 \uBD07\uC5D0 \uBC18\uC601\uB418\uC5B4 \uC0C8 \uAE30\uC900\uC120\uC774 \uB418\uC5C8\uC2B5\uB2C8\uB2E4.`);
-        shellNotice(said, "ok");
-        clear(body);
-        const ok = el("button", { class: "primary tiny", text: "\uB2EB\uAE30" });
-        ok.addEventListener("click", close);
-        body.appendChild(el("div", { class: "notice ok", text: "\u2714 " + said }));
-        body.appendChild(el("div", { class: "hint", text: "\uBC31\uC5C5 \uBD07\uC740 RisuAI \uBD07 \uBAA9\uB85D\uC5D0 \uC0C8 \uCE90\uB9AD\uD130\uB85C \uC788\uC2B5\uB2C8\uB2E4. \uCC57\uB3C4 \uD568\uAED8 \uBCF5\uC0AC\uB418\uC5C8\uACE0 \uC5D0\uC14B\uC740 \uACF5\uC720\uD569\uB2C8\uB2E4." }));
-        body.appendChild(el("div", { class: "row", style: { marginTop: "8px" } }, [ok]));
-      } catch (e) {
-        void clientLog("error", "saveAsNewBot failed", { error: msg24(e) });
-        shellNotice("\uC0C8 \uBD07\uC73C\uB85C \uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg24(e), "err");
-        out.textContent = "\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg24(e);
-        saveNew.disabled = !!applyBlockReason();
-        saveNew.textContent = was;
-      }
-    });
-    const clone = saveNew;
     body.appendChild(el("div", { class: "row" }, [apply]));
     body.appendChild(out);
     if (mod) {
@@ -20007,7 +20363,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           shellNotice(n ? `RisuAI \uCABD \uBCC0\uACBD\uC744 \uBC1B\uC558\uC2B5\uB2C8\uB2E4 (${Object.entries(m).map(([k, v]) => `${k} ${v}`).join(" \xB7 ")}).` : "RisuAI \uCABD\uC5D0\uC11C \uBC14\uB010 \uAC83\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.", "ok");
           close();
         } catch (e) {
-          out.textContent = "\uB2E4\uC2DC \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg24(e);
+          out.textContent = "\uB2E4\uC2DC \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg25(e);
           reread.disabled = false;
         }
       });
@@ -20019,15 +20375,6 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       class: "hint",
       text: "\uBA54\uD0C0\xB7\uC778\uC0AC\uB9D0\xB7\uBD07 \uB85C\uC5B4\uBD81\xB7Regex\xB7\uD2B8\uB9AC\uAC70\uAC00 \uD55C \uBC88\uC5D0 \uC4F0\uC785\uB2C8\uB2E4. \uCC57\uC740 \uC808\uB300 \uAC74\uB4DC\uB9AC\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4."
     }));
-    body.appendChild(el("details", { class: "advbox applyadv" }, [
-      el("summary", { text: "\uACE0\uAE09 \xB7 \uC0C8 \uBD07\uC73C\uB85C \uC800\uC7A5 (\uBC31\uC5C5 \uBD07\uC744 \uB0A8\uAE30\uACE0 \uBC18\uC601)" }),
-      el("div", {
-        class: "hint",
-        style: { margin: "4px 0 6px" },
-        text: "\uAE30\uC900\uC120(\uD3B8\uC9D1 \uC804 \uC0C1\uD0DC)\uC744 \uBC31\uC5C5 \uBD07(\uCC57 \uD3EC\uD568, \uC0C8 \uCE90\uB9AD\uD130)\uC73C\uB85C \uB0A8\uAE30\uACE0 \uD3B8\uC9D1\uBCF8\uC744 \uC774 \uBD07\uC5D0 \uBC18\uC601\uD574 \uC0C8 \uAE30\uC900\uC120\uC73C\uB85C \uC0BC\uC2B5\uB2C8\uB2E4. \uCC98\uC74C \uD55C \uBC88 db \uAD8C\uD55C \uD5C8\uC6A9\uC774 \uD544\uC694\uD569\uB2C8\uB2E4."
-      }),
-      el("div", { class: "row" }, [nameInput, clone])
-    ]));
   }
   async function openVersions2(anchor) {
     const body = el("div", { class: "verlist" }, [el("div", { class: "hint", text: "\uBD88\uB7EC\uC624\uB294 \uC911\uC785\uB2C8\uB2E4\u2026" })]);
@@ -20059,7 +20406,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
             close();
             shellNotice("\uCE74\uB4DC\xB7\uBD07 \uB85C\uC5B4\uBD81\xB7\uC2A4\uD06C\uB9BD\uD2B8\uB97C \uB418\uB3CC\uB838\uC2B5\uB2C8\uB2E4. \uB418\uB3CC\uB9AC\uAE30 \uC9C1\uC804 \uC0C1\uD0DC\uB3C4 \uC2A4\uB0C5\uC0F7\uC73C\uB85C \uB0A8\uACA8 \uB450\uC5C8\uC2B5\uB2C8\uB2E4.", "ok");
           } catch (e) {
-            shellNotice("\uBCF5\uC6D0\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg24(e), "err");
+            shellNotice("\uBCF5\uC6D0\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg25(e), "err");
           }
         });
         const title = el("div", {}, [
@@ -20073,21 +20420,21 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
             title.firstChild.textContent = label2;
           });
         });
-        const row = el("div", { class: "verrow" });
+        const row2 = el("div", { class: "verrow" });
         const del = el("button", { class: "ghost tiny", title: "\uC774 \uC2A4\uB0C5\uC0F7 \uC0AD\uC81C" });
         armed(del, "\u2715", "\uC0AD\uC81C \uD655\uC778", async () => {
-          row.classList.add("deleting");
+          row2.classList.add("deleting");
           del.disabled = true;
           try {
             await state.deleteCardCheckpoint(c.id);
-            row.remove();
+            row2.remove();
           } catch (e) {
-            row.classList.remove("deleting");
+            row2.classList.remove("deleting");
             del.disabled = false;
-            shellNotice("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg24(e), "err");
+            shellNotice("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg25(e), "err");
           }
         });
-        row.append(
+        row2.append(
           el("div", { class: "grow" }, [
             title,
             el("div", { class: "hint", text: fmtTime(c.created_at * 1e3) })
@@ -20096,7 +20443,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           b,
           del
         );
-        return row;
+        return row2;
       };
       for (const [idx, c] of users.slice(0, 12).entries()) {
         body.appendChild(verRow(c, { newest: idx === 0 }));
@@ -20128,7 +20475,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       }));
     } catch (e) {
       clear(body);
-      body.appendChild(el("div", { class: "hint", text: msg24(e) }));
+      body.appendChild(el("div", { class: "hint", text: msg25(e) }));
     }
   }
 
@@ -20149,7 +20496,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
   var gridMount = null;
   var sideMount2 = null;
   var cells = [];
-  var filterText5 = "";
+  var filterText4 = "";
   var ui7 = null;
   function notice8(text2, kind = "") {
     ui7?.notice(text2, kind);
@@ -20160,9 +20507,9 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     keys: () => [state.epoch, state.botKey, state.targetSync?.finishedAt ?? 0, syncBusy(state.targetSync)],
     search: {
       placeholder: "\uC5D0\uC14B \uCC3E\uAE30",
-      get: () => filterText5,
+      get: () => filterText4,
       set: (v) => {
-        filterText5 = v;
+        filterText4 = v;
         drawGrid();
         refocusSearch(null);
       }
@@ -20314,7 +20661,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     if (!editable()) {
       gridMount.appendChild(el("div", { class: "notice", text: "\uC5D0\uC14B \uB3D9\uAE30\uD654 \uC911\uC785\uB2C8\uB2E4\u2026 \uB3D9\uAE30\uD654\uAC00 \uB05D\uB098\uAE30 \uC804\uAE4C\uC9C0 \uC5D0\uC14B \uD3B8\uC9D1\uC774 \uBD88\uAC00\uD569\uB2C8\uB2E4. \uB2E4\uB978 \uD0ED\uACFC \uBC18\uC601\uC740 \uADF8\uB300\uB85C \uC4F8 \uC218 \uC788\uC2B5\uB2C8\uB2E4." }));
     }
-    const needle = filterText5.trim().toLowerCase();
+    const needle = filterText4.trim().toLowerCase();
     const shown = cells.filter((c) => !needle || c.name.toLowerCase().includes(needle) || c.key.toLowerCase().includes(needle));
     if (!shown.length) {
       gridMount.appendChild(el("div", { class: "empty", text: cells.length ? "\uAC80\uC0C9 \uACB0\uACFC\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4." : "\uC774 \uBD07\uC740 \uC5D0\uC14B\uC744 \uCC38\uC870\uD558\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4." }));
@@ -20399,10 +20746,10 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     }
     if (c.row && editable()) {
       const del = el("button", { class: "ghost tiny", text: "\u2715", title: "\uCE74\uB4DC\uC5D0\uC11C \uC774 \uCC38\uC870\uB97C \uC9C0\uC6C1\uB2C8\uB2E4" });
-      const row = c.row;
+      const row2 = c.row;
       armed(del, "\u2715", "\uC815\uB9D0?", async () => {
         try {
-          await state.deleteScript(row.id);
+          await state.deleteScript(row2.id);
           void state.refreshBotChanges();
           await refreshNow6();
         } catch (e) {
@@ -20416,7 +20763,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
   }
   function beginRename(c, nameEl) {
     if (!c.row) return;
-    const row = c.row;
+    const row2 = c.row;
     const input2 = el("input", { value: c.name, class: "assetrename" });
     const done = async (commit) => {
       const v = input2.value.trim();
@@ -20425,7 +20772,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         return;
       }
       try {
-        await state.saveScript(row.id, { ...row.entry, name: v });
+        await state.saveScript(row2.id, { ...row2.entry, name: v });
         void state.refreshBotChanges();
         await refreshNow6();
       } catch (e) {
@@ -20507,7 +20854,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
   init_blobimg();
   init_persona();
   var IMAGE_RE3 = /\.(png|jpe?g|webp|gif|avif)$/i;
-  function msg25(e) {
+  function msg26(e) {
     return e instanceof Error ? e.message : String(e);
   }
   var builtFor = "";
@@ -20539,7 +20886,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     const list2 = el("div", { class: "tree personatree" });
     const reread = el("button", { class: "ghost tiny", text: "\uB2E4\uC2DC \uC77D\uAE30", title: "RisuAI\uC5D0\uC11C \uD398\uB974\uC18C\uB098 \uBAA9\uB85D\uC744 \uB2E4\uC2DC \uC77D\uC5B4 \uC635\uB2C8\uB2E4" });
     reread.addEventListener("click", () => {
-      void state.loadPersonas().catch((e) => shellNotice(msg25(e), "err"));
+      void state.loadPersonas().catch((e) => shellNotice(msg26(e), "err"));
     });
     pane.left.append(el("div", { class: "row treehead", style: { padding: "6px 8px", flexWrap: "wrap", gap: "4px" } }, [
       el("span", { class: "sectiontitle grow", style: { marginBottom: "0" }, text: "\uD398\uB974\uC18C\uB098" }),
@@ -20550,7 +20897,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       clear(list2);
       for (const r of state.personas ?? [p]) {
         if (r.gone) continue;
-        const row = el("div", { class: "chatitem" + (r.key === state.persona?.key ? " current" : "") }, [
+        const row2 = el("div", { class: "chatitem" + (r.key === state.persona?.key ? " current" : "") }, [
           personaAvatar(r.iconKey, r.work.name || r.name),
           el("span", { class: "grow", text: r.work.name || r.name || "(\uC774\uB984 \uC5C6\uC74C)" }),
           r.selected ? el("span", { class: "badge", text: "\uC120\uD0DD\uB428", title: "RisuAI\uC5D0\uC11C \uC9C0\uAE08 \uC120\uD0DD\uB41C \uD398\uB974\uC18C\uB098 - \uBC18\uC601\uD558\uBA74 \uC0C8 \uD398\uB974\uC18C\uB098(\uC0AC\uBCF8)\uB85C \uC800\uC7A5\uB429\uB2C8\uB2E4" }) : null,
@@ -20558,15 +20905,15 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           r.dirty ? el("span", { class: "badge warn", text: `\uBBF8\uBC18\uC601 ${r.total}` }) : null,
           r.risuChanged ? el("span", { class: "badge warn", text: "RisuAI\uB3C4 \uBC14\uB01C", title: "RisuAI \uCABD\uC5D0\uC11C\uB3C4 \uBC14\uB00C\uC5C8\uC2B5\uB2C8\uB2E4 - \uBC18\uC601\uD558\uBA74 \uB36E\uC5B4\uC501\uB2C8\uB2E4" }) : null
         ]);
-        row.addEventListener("click", async () => {
+        row2.addEventListener("click", async () => {
           if (r.key === state.persona?.key) return;
           try {
             await state.openPersona(r.key);
           } catch (e) {
-            shellNotice("\uD398\uB974\uC18C\uB098\uB97C \uC5F4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg25(e), "err");
+            shellNotice("\uD398\uB974\uC18C\uB098\uB97C \uC5F4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg26(e), "err");
           }
         });
-        list2.appendChild(row);
+        list2.appendChild(row2);
       }
     };
     const nameIn = el("input", { placeholder: "\uD398\uB974\uC18C\uB098 \uC774\uB984" });
@@ -20592,7 +20939,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         saved2.textContent = "\uC791\uC5C5\uBCF8\uC5D0 \uC800\uC7A5\uB428";
       } catch (e) {
         saved2.textContent = "";
-        shellNotice("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg25(e), "err");
+        shellNotice("\uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg26(e), "err");
       }
     };
     const queue2 = (f) => {
@@ -20637,7 +20984,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         await state.editPersona({ image: up.path });
         state.touchFiles([up.path]);
       } catch (e) {
-        shellNotice("\uC774\uBBF8\uC9C0\uB97C \uC62C\uB9AC\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg25(e), "err");
+        shellNotice("\uC774\uBBF8\uC9C0\uB97C \uC62C\uB9AC\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg26(e), "err");
       }
     });
     const upBtn = el("button", { class: "ghost tiny", text: "\uC774\uBBF8\uC9C0 \uC62C\uB9AC\uAE30" });
@@ -20670,7 +21017,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
               await state.editPersona({ image: f.path });
               clear(pickList);
             } catch (e) {
-              shellNotice(msg25(e), "err");
+              shellNotice(msg26(e), "err");
               cell2.disabled = false;
             }
           });
@@ -20678,12 +21025,12 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         }
       } catch (e) {
         clear(pickList);
-        pickList.appendChild(el("div", { class: "notice err", text: "\uD3F4\uB354\uB97C \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg25(e) }));
+        pickList.appendChild(el("div", { class: "notice err", text: "\uD3F4\uB354\uB97C \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg26(e) }));
       }
     });
     const undoPic = el("button", { class: "ghost tiny", text: "\uC0AC\uC9C4 \uB418\uB3CC\uB9AC\uAE30" });
     undoPic.addEventListener("click", () => {
-      void state.editPersona({ image: "" }).catch((e) => shellNotice(msg25(e), "err"));
+      void state.editPersona({ image: "" }).catch((e) => shellNotice(msg26(e), "err"));
     });
     const lockNote = el("div", { class: "notice", style: { display: "none", marginBottom: "10px" }, text: SELECTED_COPY_NOTE });
     const driftNote = el("div", {
@@ -20734,7 +21081,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const r = await state.personaWriteBack();
         shellNotice(r.copied ? `\uC120\uD0DD\uB41C \uD398\uB974\uC18C\uB098\uB77C \uC0C8 \uD398\uB974\uC18C\uB098 '${r.name}' (\uC0AC\uBCF8)\uC73C\uB85C RisuAI\uC5D0 \uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4. \uC6D0\uBCF8\uC740 \uADF8\uB300\uB85C\uC785\uB2C8\uB2E4.` : r.written ? `\uD398\uB974\uC18C\uB098 '${r.name}' \uC744(\uB97C) RisuAI\uC5D0 \uBC18\uC601\uD558\uACE0 \uC800\uC7A5\uC744 \uD655\uC778\uD588\uC2B5\uB2C8\uB2E4.` : "\uBC18\uC601\uD560 \uBCC0\uACBD\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.", "ok");
       } catch (e) {
-        shellNotice("\uBC18\uC601\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg25(e), "err");
+        shellNotice("\uBC18\uC601\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg26(e), "err");
       } finally {
         applyBtn3.disabled = false;
       }
@@ -20761,7 +21108,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const n = await state.personaReset();
         shellNotice("\uD398\uB974\uC18C\uB098\uC758 \uBBF8\uBC18\uC601 \uBCC0\uACBD\uC744 \uBC84\uB838\uC2B5\uB2C8\uB2E4" + (n ? ` (${n}\uAC74)` : "") + ".", "ok");
       } catch (e) {
-        shellNotice("\uBCC0\uACBD \uCDE8\uC18C\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg25(e), "err");
+        shellNotice("\uBCC0\uACBD \uCDE8\uC18C\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg26(e), "err");
       }
     });
     const summary = el("span", { class: "dim changesum" });
@@ -20825,7 +21172,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       }
       const users = cps.filter((c) => c.kind !== "auto");
       const autos = cps.filter((c) => c.kind === "auto");
-      const row = (c, auto) => {
+      const row2 = (c, auto) => {
         const back = el("button", { class: "ghost tiny", text: "\uB418\uB3CC\uB9AC\uAE30", title: "\uC791\uC5C5\uBCF8\uC744 \uC774 \uC2DC\uC810\uC73C\uB85C \uB418\uB3CC\uB9BD\uB2C8\uB2E4 (\uC9C1\uC804 \uC0C1\uD0DC\uB3C4 \uC2A4\uB0C5\uC0F7\uC73C\uB85C \uB0A8\uC2B5\uB2C8\uB2E4)" });
         back.addEventListener("click", async () => {
           back.disabled = true;
@@ -20834,7 +21181,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
             close();
             shellNotice("\uD398\uB974\uC18C\uB098\uB97C \uB418\uB3CC\uB838\uC2B5\uB2C8\uB2E4. \uB418\uB3CC\uB9AC\uAE30 \uC9C1\uC804 \uC0C1\uD0DC\uB3C4 \uC2A4\uB0C5\uC0F7\uC73C\uB85C \uB0A8\uACA8 \uB450\uC5C8\uC2B5\uB2C8\uB2E4.", "ok");
           } catch (e) {
-            shellNotice("\uBCF5\uC6D0\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg25(e), "err");
+            shellNotice("\uBCF5\uC6D0\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg26(e), "err");
             back.disabled = false;
           }
         });
@@ -20857,14 +21204,14 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
               r.remove();
             } catch (e) {
               r.classList.remove("deleting");
-              shellNotice(msg25(e), "err");
+              shellNotice(msg26(e), "err");
             }
           });
           r.append(ren, del);
         }
         return r;
       };
-      for (const c of users) body.appendChild(row(c, false));
+      for (const c of users) body.appendChild(row2(c, false));
       if (autos.length) {
         const fold2 = el("div", { class: "autohead" });
         const auto = el("div", { style: { display: "none" } });
@@ -20875,12 +21222,12 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           head.textContent = `${open4 ? "\u25BE" : "\u25B8"} \uC790\uB3D9 \uBC31\uC5C5 ${autos.length}\uAC1C`;
         });
         fold2.appendChild(head);
-        for (const c of autos) auto.appendChild(row(c, true));
+        for (const c of autos) auto.appendChild(row2(c, true));
         body.append(fold2, auto);
       }
     } catch (e) {
       clear(body);
-      body.appendChild(el("div", { class: "notice err", text: "\uC2A4\uB0C5\uC0F7 \uBAA9\uB85D\uC744 \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg25(e) }));
+      body.appendChild(el("div", { class: "notice err", text: "\uC2A4\uB0C5\uC0F7 \uBAA9\uB85D\uC744 \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg26(e) }));
     }
   }
 
@@ -21140,14 +21487,14 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         );
         const names = fields2(doc.rules.find((r) => r.id === aset.ruleId)?.template || "").filter((k) => k !== "character");
         for (const slot of aset.slots) {
-          const row = el("div", { class: "card" });
-          row.appendChild(field("\uC2AC\uB86F ID", input(slot.id, (v) => {
+          const row2 = el("div", { class: "card" });
+          row2.appendChild(field("\uC2AC\uB86F ID", input(slot.id, (v) => {
             slot.id = v;
           })));
-          for (const key of names) row.appendChild(field(key, input(slot.fields[key] || "", (v) => {
+          for (const key of names) row2.appendChild(field(key, input(slot.fields[key] || "", (v) => {
             slot.fields[key] = v;
           })));
-          row.append(
+          row2.append(
             select(modes, slot.status, (v) => {
               slot.status = v;
             }),
@@ -21156,7 +21503,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
               draw2();
             })
           );
-          sets.appendChild(row);
+          sets.appendChild(row2);
         }
         sets.appendChild(button("\uC2AC\uB86F \uCD94\uAC00", () => {
           aset.slots.push({ id: uid(), fields: {}, status: "required" });
@@ -21357,11 +21704,11 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         if (b64 && typeof r.rev === "number") {
           previewRev = r.rev;
           setFrame(b64, r.img ? r.mime || "image/webp" : "image/png");
-          livePreview.step = r.step ?? 0;
+          livePreview.step = (r.step ?? 0) + 1;
           livePreview.total = r.total ?? 0;
           livePreview.current = r.current ?? "";
           const now = Date.now();
-          const step = r.step ?? 0;
+          const step = livePreview.step;
           if (lastStepAt && step > lastStep) {
             const per = (now - lastStepAt) / (step - lastStep);
             emaStepMs = emaStepMs ? emaStepMs * 0.7 + per * 0.3 : per;
@@ -21390,18 +21737,18 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     lastStep = 0;
   }
   function statusRow() {
-    const row = el("div", { class: "row", style: { gap: "8px", flexWrap: "wrap", marginBottom: "6px" } });
+    const row2 = el("div", { class: "row", style: { gap: "8px", flexWrap: "wrap", marginBottom: "6px" } });
     const nStyles = activeOf("styles").length;
     const nChars = activeOf("characters").length;
-    row.appendChild(el("span", { class: "hint", text: `\uD65C\uC131 \uCE74\uB4DC: \uC2A4\uD0C0\uC77C ${nStyles} \xB7 \uCE90\uB9AD\uD130 ${nChars}` }));
+    row2.appendChild(el("span", { class: "hint", text: `\uD65C\uC131 \uCE74\uB4DC: \uC2A4\uD0C0\uC77C ${nStyles} \xB7 \uCE90\uB9AD\uD130 ${nChars}` }));
     const status = S.status;
     if (!status) {
-      row.appendChild(el("span", { class: "hint", text: "\uC0C1\uD0DC\uB97C \uC77D\uB294 \uC911\uC785\uB2C8\uB2E4\u2026" }));
-      return row;
+      row2.appendChild(el("span", { class: "hint", text: "\uC0C1\uD0DC\uB97C \uC77D\uB294 \uC911\uC785\uB2C8\uB2E4\u2026" }));
+      return row2;
     }
     const acc = status.account;
     if (acc) {
-      row.append(
+      row2.append(
         el("span", {
           class: "badge",
           title: "Anlas \u2014 \uB808\uD37C\uB7F0\uC2A4 \uC778\uCF54\uB529\uACFC \uB514\uB809\uD130 \uD234\uC774 \uC4F0\uB294 \uC794\uB7C9",
@@ -21415,8 +21762,8 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         el("span", { class: "hint", text: `tier ${acc.tier ?? "?"}` })
       );
     }
-    if (status.error) row.appendChild(el("span", { class: "hint err", text: status.error }));
-    return row;
+    if (status.error) row2.appendChild(el("span", { class: "hint err", text: status.error }));
+    return row2;
   }
   function tokenNotice() {
     const status = S.status;
@@ -21607,7 +21954,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     const items5 = S.cards.scenes ?? [];
     const cur = items5.find((i) => i.path === gen.scenePreset) ?? null;
     const label2 = (i) => i.name + (i.count ? ` (\uC52C ${i.count})` : "");
-    const row = pickerRow(cur ? { name: label2(cur) } : null, {
+    const row2 = pickerRow(cur ? { name: label2(cur) } : null, {
       title: items5.length ? `\uC800\uC7A5\uB41C \uD504\uB9AC\uC14B ${items5.length}\uAC1C \u2014 \uC120\uD0DD \xB7 \uC218\uC815 \xB7 \uC0AD\uC81C \xB7 \uCD94\uAC00` : "\uD504\uB9AC\uC14B \uCD94\uAC00",
       emptyHint: items5.length ? "\uC120\uD0DD\uB41C \uC52C \uD504\uB9AC\uC14B \uC5C6\uC74C \u2014 \u203A \uC5D0\uC11C \uACE0\uB974\uC138\uC694" : "\uC52C \uD504\uB9AC\uC14B\uC774 \uC5C6\uC2B5\uB2C8\uB2E4. \u203A \uC5D0\uC11C \uD558\uB098 \uB9CC\uB4E4\uC5B4 \uC8FC\uC138\uC694.",
       onOpen: () => openListPicker({
@@ -21665,7 +22012,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         createLabel: "\uC0C8 \uD504\uB9AC\uC14B \uCD94\uAC00"
       })
     });
-    return el("div", { class: "field grow" }, [el("span", { text: "\uC52C \uD504\uB9AC\uC14B" }), row]);
+    return el("div", { class: "field grow" }, [el("span", { text: "\uC52C \uD504\uB9AC\uC14B" }), row2]);
   }
   async function startRun(overrides = {}) {
     if (!await styleSync.beforeRun()) return;
@@ -21998,14 +22345,14 @@ ${doc.negative.trim()}
       }
     });
     const head = (opts.chrome ?? "centre") === "centre" ? editorHead(path, [del, save]) : el("div", { class: "row", style: { marginBottom: "6px", justifyContent: "flex-end", gap: "6px" } }, [del, save]);
-    const rootEl = el("div", {}, [
+    const rootEl = el("div", { class: "cardedit" }, [
       head,
       el("label", { class: "field" }, [el("span", { text: "\uC774\uB984" }), name]),
       el("label", { class: "field" }, [el("span", { text: "\uC124\uBA85" }), desc]),
       isStyle ? el("div", { class: "row", style: { marginBottom: "8px" } }, [
         el("label", { class: "row" }, [enabledBox, el("span", { text: "\uD65C\uC131 (\uC0DD\uC131\uC5D0 \uC2E4\uB9BC)" })])
       ]) : null,
-      el("label", { class: "field" }, [el("span", { text: isStyle ? "\uBCF8\uBB38 (## positive / ## negative)" : "\uBCF8\uBB38" }), body]),
+      el("label", { class: "field cardbodyfield" }, [el("span", { text: isStyle ? "\uBCF8\uBB38 (## positive / ## negative)" : "\uBCF8\uBB38" }), body]),
       out
     ]);
     void state.readFile(path).then((r) => {
@@ -22587,7 +22934,7 @@ ${negative.value.trim()}
       node,
       hint ? el("div", { class: "hint", text: hint }) : null
     ]);
-    let section = "prompt";
+    let section2 = "prompt";
     const promptPane = el("div", {}, [
       field2("\uC774\uB984", name),
       el("div", { class: "row", style: { marginBottom: "8px" } }, [
@@ -22648,17 +22995,17 @@ ${negative.value.trim()}
     const secPrompt = el("button", { class: "tab", text: "\uD504\uB86C\uD504\uD2B8" });
     const secRefs = el("button", { class: "tab", text: "\uB808\uD37C\uB7F0\uC2A4" });
     const syncSection = () => {
-      secPrompt.classList.toggle("on", section === "prompt");
-      secRefs.classList.toggle("on", section === "refs");
-      promptPane.style.display = section === "prompt" ? "" : "none";
-      refsPane.style.display = section === "refs" ? "" : "none";
+      secPrompt.classList.toggle("on", section2 === "prompt");
+      secRefs.classList.toggle("on", section2 === "refs");
+      promptPane.style.display = section2 === "prompt" ? "" : "none";
+      refsPane.style.display = section2 === "refs" ? "" : "none";
     };
     secPrompt.addEventListener("click", () => {
-      section = "prompt";
+      section2 = "prompt";
       syncSection();
     });
     secRefs.addEventListener("click", () => {
-      section = "refs";
+      section2 = "refs";
       syncSection();
     });
     const head = (opts.chrome ?? "centre") === "centre" ? editorHead(dir || "\uC0C8 \uCE90\uB9AD\uD130", [isNew2 ? null : del, save]) : el(
@@ -22823,18 +23170,16 @@ ${negative.value.trim()}
     const cur = currentStyle();
     const items5 = styleItems();
     const pickTitle = items5.length ? `\uC800\uC7A5\uB41C \uC2A4\uD0C0\uC77C ${items5.length}\uAC1C \u2014 \uC120\uD0DD \xB7 \uC774\uB3D9 \xB7 \uC0AD\uC81C \xB7 \uCD94\uAC00` : "\uC2A4\uD0C0\uC77C \uCD94\uAC00";
-    mount2.appendChild(el("div", { class: "sectiontitle", style: { padding: "6px 8px 0" }, text: "\uC2A4\uD0C0\uC77C \uD504\uB86C\uD504\uD2B8" }));
-    mount2.appendChild(el("div", { style: { padding: "4px 8px 0" } }, [
-      pickerRow(cur ? {
-        name: cur.name,
-        hint: cur.description || void 0,
-        badges: styleFolder(cur) ? [{ text: styleFolder(cur) }] : void 0
-      } : null, {
-        title: pickTitle,
-        emptyHint: items5.length ? "\uC120\uD0DD\uB41C \uC2A4\uD0C0\uC77C \uC5C6\uC74C \u2014 \u203A \uC5D0\uC11C \uACE0\uB974\uC138\uC694" : "\uC2A4\uD0C0\uC77C\uC774 \uC5C6\uC2B5\uB2C8\uB2E4. \u203A \uC5D0\uC11C \uD558\uB098 \uB9CC\uB4E4\uC5B4 \uC8FC\uC138\uC694.",
-        onOpen: openStylePicker
-      })
-    ]));
+    const styleSec = section("\uC2A4\uD0C0\uC77C \uD504\uB86C\uD504\uD2B8", "\uC2A4\uD0C0\uC77C \uD30C\uC77C\uC5D0 \uC800\uC7A5\uB429\uB2C8\uB2E4");
+    styleSec.body.appendChild(pickerRow(cur ? {
+      name: cur.name,
+      hint: cur.description || void 0,
+      badges: styleFolder(cur) ? [{ text: styleFolder(cur) }] : void 0
+    } : null, {
+      title: pickTitle,
+      emptyHint: items5.length ? "\uC120\uD0DD\uB41C \uC2A4\uD0C0\uC77C \uC5C6\uC74C \u2014 \u203A \uC5D0\uC11C \uACE0\uB974\uC138\uC694" : "\uC2A4\uD0C0\uC77C\uC774 \uC5C6\uC2B5\uB2C8\uB2E4. \u203A \uC5D0\uC11C \uD558\uB098 \uB9CC\uB4E4\uC5B4 \uC8FC\uC138\uC694.",
+      onOpen: openStylePicker
+    }));
     const editBox = el("div", { class: "styleedit stylesaved" });
     if (cur) buildStyleEditor(editBox, cur.path);
     else editBox.appendChild(el("div", {
@@ -22844,13 +23189,15 @@ ${negative.value.trim()}
     }));
     editBox.appendChild(paramsRow(!!cur));
     if (cur) editBox.appendChild(saveBar());
-    mount2.appendChild(editBox);
-    mount2.appendChild(el("div", { class: "sectiontitle", style: { padding: "10px 8px 0" }, text: "\uC784\uC2DC \uD504\uB86C\uD504\uD2B8 (\uC800\uC7A5 \uC548 \uB428)" }));
-    buildTemporaryPrompt(mount2);
-    buildTemporaryPrompt(mount2, true);
-    mount2.appendChild(el("div", { class: "sectiontitle", style: { padding: "10px 8px 0" }, text: "\uCE90\uB9AD\uD130 \xB7 \uC870\uAC01" }));
+    styleSec.body.appendChild(editBox);
+    mount2.appendChild(styleSec.node);
+    const tempSec = section("\uC784\uC2DC \uD504\uB86C\uD504\uD2B8", "\uC800\uC7A5 \uC548 \uB428");
+    buildTemporaryPrompt(tempSec.body);
+    buildTemporaryPrompt(tempSec.body, true);
+    mount2.appendChild(tempSec.node);
+    const matSec = section("\uCE90\uB9AD\uD130 \xB7 \uC870\uAC01", "");
     const nChars = activeOf("characters").length;
-    charBadge = el("span", { class: "badge" + (nChars ? " ok" : ""), text: String(nChars) });
+    charBadge = el("span", { class: "toolcount" + (nChars ? " on" : ""), text: String(nChars) });
     const charBtn = el(
       "button",
       { class: "ghost toolbtn", title: "\uCE90\uB9AD\uD130 \uD504\uB86C\uD504\uD2B8 \u2014 \uC774 \uC5F4\uC774 \uCE90\uB9AD\uD130 \uBAA9\uB85D\uC73C\uB85C \uBC14\uB01D\uB2C8\uB2E4" },
@@ -22861,9 +23208,9 @@ ${negative.value.trim()}
       hub.drawLeft();
     });
     const nFrags = (S.cards.fragments ?? []).length;
-    fragBadge = el("span", { class: "badge", text: String(nFrags) });
+    fragBadge = el("span", { class: "toolcount", text: String(nFrags) });
     fragErrBadge = el("span", {
-      class: "badge err",
+      class: "toolcount err",
       style: { display: S.unresolvedRefs.length ? "" : "none" },
       text: `\uBBF8\uD574\uACB0 ${S.unresolvedRefs.length}`,
       title: "\uD504\uB86C\uD504\uD2B8\uAC00 \uCC38\uC870\uD558\uB294\uB370 \uC870\uAC01\uC774 \uC5C6\uB294 \uC774\uB984"
@@ -22878,8 +23225,20 @@ ${negative.value.trim()}
       S.selectedFile = "";
       hub.drawCentre();
     });
-    mount2.appendChild(el("div", { class: "toolbtns" }, [charBtn, fragBtn]));
+    matSec.body.appendChild(el("div", { class: "toolbtns" }, [charBtn, fragBtn]));
+    mount2.appendChild(matSec.node);
     updateSaveBar();
+  }
+  function section(title, note) {
+    const body = el("div", { class: "studiosecbody" });
+    const node = el("div", { class: "studiosec" }, [
+      el("div", { class: "studiosechead" }, [
+        el("span", { class: "studiosectitle", text: title }),
+        note ? el("span", { class: "studiosecnote", text: note }) : null
+      ]),
+      body
+    ]);
+    return { node, body };
   }
   function paramsRow(bound) {
     const paramsBtn = el(
@@ -22910,8 +23269,8 @@ ${negative.value.trim()}
     const label2 = negative ? "\uC784\uC2DC \uB124\uAC70\uD2F0\uBE0C \uD504\uB86C\uD504\uD2B8" : "\uC784\uC2DC \uD504\uB86C\uD504\uD2B8";
     const textKey = negative ? "negativeText" : "text";
     const expandedKey = negative ? "negativeExpanded" : "expanded";
-    const toggle = el("button", { class: "ghost tiny", title: label2 + " \uD3BC\uCE58\uAE30" });
-    const status = el("span", { class: "hint" });
+    const toggle = el("button", { class: "ghost tiny foldcaret", title: label2 + " \uD3BC\uCE58\uAE30" });
+    const status = el("span", { class: "badge ok tempon" });
     const input2 = el("textarea", {
       rows: "4",
       class: "promptedit",
@@ -22920,16 +23279,18 @@ ${negative.value.trim()}
     });
     input2.value = temporaryPrompt[textKey];
     const reset = el("button", { class: "ghost tiny", text: "\uBE44\uC6B0\uAE30" });
-    const body = el("div", {}, [
+    const body = el("div", { class: "tempbody" }, [
       input2,
-      el("div", { class: "row" }, [el("span", { class: "hint grow", text: "\uC800\uC7A5\uB418\uC9C0 \uC54A\uC74C \xB7 \uC0C8\uB85C\uACE0\uCE68\uD558\uBA74 \uCD08\uAE30\uD654\uB429\uB2C8\uB2E4" }), reset])
+      el("div", { class: "row", style: { justifyContent: "flex-end" } }, [reset])
     ]);
     const sync = () => {
-      toggle.textContent = temporaryPrompt[expandedKey] ? "\u2212" : "+";
+      toggle.textContent = temporaryPrompt[expandedKey] ? "\u25BE" : "\u25B8";
       toggle.setAttribute("aria-expanded", String(temporaryPrompt[expandedKey]));
       toggle.title = label2 + (temporaryPrompt[expandedKey] ? " \uC811\uAE30" : " \uD3BC\uCE58\uAE30");
       body.style.display = temporaryPrompt[expandedKey] ? "" : "none";
-      status.textContent = temporaryPrompt[textKey].trim() ? "\uC0DD\uC131\uC5D0 \uC801\uC6A9 \uC911 \xB7 \uC800\uC7A5\uB418\uC9C0 \uC54A\uC74C" : "\uC800\uC7A5\uB418\uC9C0 \uC54A\uC74C";
+      const on = !!temporaryPrompt[textKey].trim();
+      status.textContent = on ? "\uC801\uC6A9 \uC911" : "";
+      status.style.display = on ? "" : "none";
     };
     toggle.addEventListener("click", () => {
       temporaryPrompt[expandedKey] = !temporaryPrompt[expandedKey];
@@ -22946,10 +23307,11 @@ ${negative.value.trim()}
       sync();
       checkUnresolved();
     });
-    mount2.appendChild(el("div", { class: "styleedit temporary" }, [
-      el("div", { class: "row" }, [toggle, el("span", { text: label2 }), status]),
-      body
-    ]));
+    const head = el("div", { class: "row promptfoldhead" }, [toggle, el("span", { class: "promptfoldlabel", text: label2 }), status]);
+    head.addEventListener("click", (ev) => {
+      if (ev.target !== toggle) toggle.click();
+    });
+    mount2.appendChild(el("div", { class: "temporary promptfold" }, [head, body]));
     attachHilite(input2, { mode: "nai", fragments: () => fragKeys() });
     sync();
   }
@@ -22957,7 +23319,7 @@ ${negative.value.trim()}
     if (charBadge?.isConnected) {
       const n = activeOf("characters").length;
       charBadge.textContent = String(n);
-      charBadge.className = "badge" + (n ? " ok" : "");
+      charBadge.className = "toolcount" + (n ? " on" : "");
     }
     if (fragBadge?.isConnected) fragBadge.textContent = String((S.cards.fragments ?? []).length);
     if (fragErrBadge?.isConnected) {
@@ -23200,11 +23562,11 @@ ${negative.value.trim()}
   }
   function promptFold(which, label2, input2) {
     let open4 = promptOpen(which);
-    const toggle = el("button", { class: "ghost tiny" });
+    const toggle = el("button", { class: "ghost tiny foldcaret" });
     const peek = el("span", { class: "hint grow promptpeek" });
     const body = el("div", {}, [input2]);
     const sync = () => {
-      toggle.textContent = open4 ? "\u2212" : "+";
+      toggle.textContent = open4 ? "\u25BE" : "\u25B8";
       toggle.title = label2 + (open4 ? " \uC811\uAE30" : " \uD3BC\uCE58\uAE30");
       toggle.setAttribute("aria-expanded", String(open4));
       body.style.display = open4 ? "" : "none";
@@ -23447,7 +23809,7 @@ ${negative.value.trim()}
     const badges = [];
     if (it.vibe) badges.push({ text: `\uBC14\uC774\uBE0C ${it.vibe}`, title: "\uC774 \uCE74\uB4DC\uC758 \uBC14\uC774\uBE0C\uAC00 \uD568\uAED8 \uC2E4\uB9BD\uB2C8\uB2E4" });
     if (it.charref) badges.push({ text: `\uB808\uD37C\uB7F0\uC2A4 ${it.charref}` });
-    const row = listRow({
+    const row2 = listRow({
       variant: "pick",
       selected: S.charOpen === it.path,
       title: it.name || it.path.split("/").pop() || it.path,
@@ -23479,8 +23841,8 @@ ${negative.value.trim()}
         hub.drawLeft();
       }
     });
-    installDrag(row, () => [it.path]);
-    return row;
+    installDrag(row2, () => [it.path]);
+    return row2;
   }
   function addCharacter(anchor, folder) {
     namePopover(anchor, {
@@ -23546,8 +23908,8 @@ ${negative.value.trim()}
       void pasteIn(sel);
     } else if ((ev.key === "Delete" || ev.key === "Backspace") && many.length) {
       ev.preventDefault();
-      const row = ev.currentTarget.querySelector(".treebranch.on");
-      const r = row?.getBoundingClientRect();
+      const row2 = ev.currentTarget.querySelector(".treebranch.on");
+      const r = row2?.getBoundingClientRect();
       confirmDelete(many, { clientX: (r?.left ?? 40) + 40, clientY: (r?.bottom ?? 60) + 4 });
     } else if (ev.key === "Escape" && treeSel2.size > 1) {
       treeSel2 = /* @__PURE__ */ new Set([sel]);
@@ -23953,6 +24315,9 @@ ${negative.value.trim()}
   var openFolders3 = /* @__PURE__ */ new Set([""]);
   var extraFolders2 = /* @__PURE__ */ new Set();
   var filter5 = "";
+  var listScroll = 0;
+  var editScroll = 0;
+  var editScrollFor = "";
   function norm(f) {
     return f === "." ? "" : f;
   }
@@ -23999,32 +24364,58 @@ ${negative.value.trim()}
     });
     const add = el("button", { class: "primary tiny", text: "\uFF0B \uC870\uAC01" });
     add.addEventListener("click", () => addFragment(add, ""));
-    const head = el("div", { class: "row", style: { marginBottom: "6px" } }, [
+    const help = el("details", { class: "fraghelp" }, [
+      el("summary", { text: "\uCC38\uC870 \uBC29\uBC95" }),
+      el("div", { class: "hint", text: "\uD504\uB86C\uD504\uD2B8\uC5D0\uC11C <\uC774\uB984> \xB7 <\uD3F4\uB354/\uC774\uB984> \xB7 <\uCEEC\uB809\uC158.\uD0A4> \uB85C \uCC38\uC870\uD569\uB2C8\uB2E4. \uC774\uB984\uC774 \uACE7 \uCC38\uC870 \uD0A4\uC774\uACE0, \uAC19\uC740 \uC774\uB984\uC774 \uC5EC\uB7EC \uD3F4\uB354\uC5D0 \uC788\uC73C\uBA74 <\uD3F4\uB354/\uC774\uB984> \uC73C\uB85C \uAD6C\uBD84\uD574 \uC8FC\uC138\uC694. \uC5EC\uB7EC \uC904 \uC870\uAC01\uC740 \uC7A5\uB9C8\uB2E4 \uB79C\uB364\uC73C\uB85C 1\uC904\uB9CC \uC2E4\uB9BD\uB2C8\uB2E4 (# \uC8FC\uC11D\xB7\uBE48 \uC904 \uC81C\uC678)." })
+    ]);
+    viewMount6.appendChild(el("div", { class: "row fraghead" }, [
       back,
-      el("span", { class: "sectiontitle grow", text: `\uC870\uAC01 \uD504\uB86C\uD504\uD2B8 \xB7 ${(S.cards.fragments ?? []).length}\uAC1C` }),
+      el("span", { class: "studiosectitle", text: "\uC870\uAC01 \uD504\uB86C\uD504\uD2B8" }),
+      el("span", { class: "studiosecnote", text: `${(S.cards.fragments ?? []).length}\uAC1C` }),
       S.unresolvedRefs.length ? el("span", {
         class: "badge err",
         text: `\uBBF8\uD574\uACB0 ${S.unresolvedRefs.length}`,
         title: "\uD504\uB86C\uD504\uD2B8\uAC00 \uCC38\uC870\uD558\uB294\uB370 \uC870\uAC01\uC774 \uC5C6\uB294 \uC774\uB984: " + S.unresolvedRefs.join(", ")
       }) : null,
-      addFolder,
-      add
-    ]);
-    viewMount6.appendChild(head);
-    viewMount6.appendChild(el("div", {
-      class: "hint",
-      style: { marginBottom: "8px" },
-      text: "\uD504\uB86C\uD504\uD2B8\uC5D0\uC11C <\uC774\uB984> \xB7 <\uD3F4\uB354/\uC774\uB984> \xB7 <\uCEEC\uB809\uC158.\uD0A4> \uB85C \uCC38\uC870\uD569\uB2C8\uB2E4. \uC774\uB984\uC774 \uACE7 \uCC38\uC870 \uD0A4\uC774\uACE0, \uAC19\uC740 \uC774\uB984\uC774 \uC5EC\uB7EC \uD3F4\uB354\uC5D0 \uC788\uC73C\uBA74 <\uD3F4\uB354/\uC774\uB984> \uC73C\uB85C \uAD6C\uBD84\uD574 \uC8FC\uC138\uC694. \uC5EC\uB7EC \uC904 \uC870\uAC01\uC740 \uC7A5\uB9C8\uB2E4 \uB79C\uB364\uC73C\uB85C 1\uC904\uB9CC \uC2E4\uB9BD\uB2C8\uB2E4 (# \uC8FC\uC11D\xB7\uBE48 \uC904 \uC81C\uC678)."
-    }));
+      el("span", { class: "grow" }),
+      help
+    ]));
     const listCol = el("div", { class: "fraglist" });
+    const listBody = el("div", { class: "fraglistbody" });
     const editCol = el("div", { class: "fragedit" });
-    viewMount6.appendChild(el("div", { class: "fragcols" }, [listCol, editCol]));
+    const view2 = el("div", { class: "fragview" });
+    while (viewMount6.firstChild) view2.appendChild(viewMount6.firstChild);
+    view2.appendChild(el("div", { class: "fragcols" }, [listCol, editCol]));
+    viewMount6.appendChild(view2);
+    listBody.addEventListener("scroll", () => {
+      listScroll = listBody.scrollTop;
+    });
+    editCol.addEventListener("scroll", () => {
+      editScroll = editCol.scrollTop;
+      editScrollFor = selFrag;
+    });
+    const restore = () => {
+      listBody.scrollTop = listScroll;
+      if (editScrollFor === selFrag) editCol.scrollTop = editScroll;
+    };
+    setTimeout(restore, 0);
+    setTimeout(restore, 120);
     const search = el("input", { placeholder: "\uC774\uB984\xB7\uC124\uBA85 \uAC80\uC0C9", value: filter5 });
     search.addEventListener("input", () => {
       filter5 = search.value;
       hub.drawCentre();
+      const again = S.viewMount?.querySelector(".fraglist .fragsearch");
+      if (again) {
+        again.focus();
+        try {
+          again.setSelectionRange(again.value.length, again.value.length);
+        } catch {
+        }
+      }
     });
-    listCol.appendChild(el("div", { style: { marginBottom: "4px" } }, [search]));
+    search.classList.add("fragsearch");
+    listCol.appendChild(el("div", { class: "fragtools" }, [search, el("div", { class: "row" }, [add, addFolder])]));
+    listCol.appendChild(listBody);
     const stemCount = /* @__PURE__ */ new Map();
     for (const it of S.cards.fragments ?? []) stemCount.set(it.name, (stemCount.get(it.name) ?? 0) + 1);
     const groups2 = grouped2();
@@ -24041,23 +24432,23 @@ ${negative.value.trim()}
           else openFolders3.add(folder);
           hub.drawCentre();
         });
-        const addHere = el("button", { class: "ghost tiny", text: "\uFF0B", title: "\uC774 \uD3F4\uB354\uC5D0 \uC870\uAC01 \uCD94\uAC00" });
+        const addHere = el("button", { class: "ghost tiny addhere", text: "\uFF0B", title: "\uC774 \uD3F4\uB354\uC5D0 \uC870\uAC01 \uCD94\uAC00" });
         addHere.addEventListener("click", (e) => {
           e.stopPropagation();
           addFragment(addHere, folder);
         });
         fhead.appendChild(addHere);
-        listCol.appendChild(fhead);
+        listBody.appendChild(fhead);
         if (!isOpen) continue;
         if (!items5.length) {
-          listCol.appendChild(el("div", { class: "hint", style: { padding: "0 8px 4px" }, text: "(\uBE44\uC5B4 \uC788\uC74C)" }));
+          listBody.appendChild(el("div", { class: "hint", style: { padding: "0 8px 4px" }, text: "(\uBE44\uC5B4 \uC788\uC74C)" }));
           continue;
         }
       } else if (!items5.length) {
         continue;
       }
       for (const it of items5) {
-        const row = el("div", { class: "pickrow" + (selFrag === it.path ? " on" : ""), title: it.path }, [
+        const row2 = el("div", { class: "pickrow" + (selFrag === it.path ? " on" : ""), title: it.path }, [
           el("div", { class: "grow" }, [
             el("div", { class: "pickname" }, [
               el("span", { text: it.name }),
@@ -24070,16 +24461,16 @@ ${negative.value.trim()}
             it.description ? el("div", { class: "hint", text: it.description }) : null
           ])
         ]);
-        installDrag(row, () => [it.path]);
-        row.addEventListener("click", () => {
+        installDrag(row2, () => [it.path]);
+        row2.addEventListener("click", () => {
           selFrag = it.path;
           hub.drawCentre();
         });
-        listCol.appendChild(row);
+        listBody.appendChild(row2);
       }
     }
     if (!selFrag) {
-      editCol.appendChild(el("div", { class: "empty", text: "\uC67C\uCABD\uC5D0\uC11C \uC870\uAC01\uC744 \uACE0\uB974\uAC70\uB098 \uFF0B \uC870\uAC01 \uC73C\uB85C \uB9CC\uB4E4\uC5B4 \uC8FC\uC138\uC694." }));
+      editCol.appendChild(el("div", { class: "empty", text: "\uBAA9\uB85D\uC5D0\uC11C \uC870\uAC01\uC744 \uACE0\uB974\uAC70\uB098 \uFF0B \uC870\uAC01 \uC73C\uB85C \uB9CC\uB4E4\uC5B4 \uC8FC\uC138\uC694." }));
       return;
     }
     const moveBtn = el("button", { class: "ghost tiny", text: "\uD3F4\uB354 \uC774\uB3D9" });
@@ -24105,7 +24496,12 @@ ${negative.value.trim()}
       }
     });
     editCol.appendChild(el("div", { class: "row", style: { marginBottom: "4px" } }, [
-      el("span", { class: "sectiontitle grow", text: selFrag }),
+      // What the prompt writes, not the file path (that is the tooltip).
+      el("span", {
+        class: "studiosectitle grow",
+        title: selFrag,
+        text: "<" + selFrag.replace(/^studio\/config\/fragments\//, "").replace(/\.md$/i, "") + ">"
+      }),
       moveBtn
     ]));
     editCol.appendChild(cardEditor(selFrag, {
@@ -24140,6 +24536,9 @@ ${negative.value.trim()}
   var imgEl = null;
   var captionEl = null;
   var emptyEl = null;
+  var stateEl = null;
+  var loadingPath = "";
+  var failedPath = "";
   var progressLine = null;
   var runBtn = null;
   var shownKey = "";
@@ -24155,7 +24554,10 @@ ${negative.value.trim()}
     });
     captionEl = el("div", { class: "hint previewname" });
     emptyEl = el("div", { class: "empty" });
-    previewBox = el("div", { class: "bigpreview" }, [imgEl, captionEl, emptyEl]);
+    stateEl = el("div", { class: "previewstate", style: { display: "none" } });
+    loadingPath = "";
+    failedPath = "";
+    previewBox = el("div", { class: "bigpreview" }, [imgEl, stateEl, captionEl, emptyEl]);
     mount2.appendChild(previewBox);
     const prev = el("button", { class: "ghost tiny", text: "\u25C0", title: "\uAC19\uC740 \uBC30\uCE58\uC758 \uC774\uC804 \uC7A5" });
     const next = el("button", { class: "ghost tiny", text: "\u25B6", title: "\uAC19\uC740 \uBC30\uCE58\uC758 \uB2E4\uC74C \uC7A5" });
@@ -24178,8 +24580,8 @@ ${negative.value.trim()}
     syncPreview();
   }
   function buildRunControls() {
-    const minus = el("button", { class: "ghost tiny", text: "\u2212" });
-    const plus = el("button", { class: "ghost tiny", text: "\uFF0B" });
+    const minus = el("button", { class: "ghost", text: "\u2212", title: "\uD55C \uC7A5 \uC904\uC774\uAE30" });
+    const plus = el("button", { class: "ghost", text: "+", title: "\uD55C \uC7A5 \uB298\uB9AC\uAE30" });
     const count = el("input", {
       type: "number",
       value: String(gen.count),
@@ -24201,14 +24603,14 @@ ${negative.value.trim()}
       if (S.jobId) void cancelRun();
       else void startRun({ scenePreset: "", count: gen.count });
     });
-    const row = el("div", { class: "row", style: { gap: "6px" } }, [
-      el("span", { class: "hint", text: "\uC7A5\uC218" }),
-      el("div", { class: "row", style: { gap: "2px" } }, [minus, count, plus]),
+    const row2 = el("div", { class: "row runctl" }, [
+      el("span", { class: "studiosectitle", text: "\uC7A5\uC218" }),
+      el("div", { class: "stepper" }, [minus, count, plus]),
       el("span", { class: "grow" }),
       runBtn
     ]);
     syncControls();
-    return row;
+    return row2;
   }
   function singleTick() {
     syncControls();
@@ -24233,12 +24635,14 @@ ${negative.value.trim()}
     const running = !!S.jobId;
     const saved2 = S.queueJob?.payload?.saved ?? [];
     const pinned = S.viewPath;
-    const showEmpty = (text2) => {
-      if (shownKey) return;
+    const showEmpty = (text2, force = false) => {
+      if (shownKey && !force) return;
+      shownKey = "";
       emptyEl.textContent = text2;
       emptyEl.style.display = "";
       img.style.display = "none";
       captionEl.style.display = "none";
+      setState("");
     };
     const showImg = (key, src, caption) => {
       shownKey = key;
@@ -24249,30 +24653,84 @@ ${negative.value.trim()}
       captionEl.style.display = "";
     };
     if (!pinned && running && livePreview.url) {
+      const last = livePreview.total > 0 && livePreview.step >= livePreview.total - 2;
+      const noStream = S.queueJob?.payload?.streaming === false;
       showImg(
         "live",
         livePreview.url,
         `\uC0DD\uC131 \uC911 ${livePreview.step}/${livePreview.total}${livePreview.current ? " \xB7 " + livePreview.current : ""}`
       );
+      setState(noStream ? "\uC2A4\uD2B8\uB9AC\uBC0D\uC774 \uB04A\uACA8 \uBBF8\uB9AC\uBCF4\uAE30 \uC5C6\uC774 \uB2E4\uC2DC \uC0DD\uC131\uD558\uB294 \uC911\u2026" : last ? "\uB9C8\uBB34\uB9AC \uC911\u2026 \uC644\uC131\uBCF8\uC744 \uAE30\uB2E4\uB9BD\uB2C8\uB2E4" : "");
       return;
     }
     const path = pinned || saved2[saved2.length - 1] || "";
     if (!path) {
+      const failed = S.queueJob?.payload?.failed ?? [];
+      if (!running && (shownKey === "live" || failed.length)) {
+        const why = failed.length ? String(failed[failed.length - 1].error || "") : "";
+        showEmpty(why ? "\uC0DD\uC131\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + why : "\uC800\uC7A5\uB41C \uC774\uBBF8\uC9C0\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4.", true);
+        if (shownKey === "") releasePreview();
+        return;
+      }
       showEmpty(running ? "\uC0DD\uC131 \uC911\uC785\uB2C8\uB2E4\u2026 \uCCAB \uD504\uB808\uC784\uC774 \uC624\uBA74 \uC5EC\uAE30 \uB098\uD0C0\uB0A9\uB2C8\uB2E4." : "\uC0DD\uC131 \uC2DC\uC791\uC744 \uB204\uB974\uAC70\uB098, \uC544\uB798 \uACB0\uACFC\uC5D0\uC11C \uD55C \uC7A5\uC744 \uACE0\uB974\uC138\uC694.");
       return;
     }
     if (path === shownKey || !safeWorkspacePath(path)) return;
-    const want = path;
-    void blobUrl(want).then((url) => {
+    if (path === loadingPath || path === failedPath) return;
+    if (shownKey === "live") setState("\uC644\uC131\uBCF8 \uBD88\uB7EC\uC624\uB294 \uC911\u2026");
+    loadFinal(path);
+  }
+  function loadFinal(want) {
+    const img = imgEl;
+    if (!img) return;
+    loadingPath = want;
+    failedPath = "";
+    void blobUrl(want, "", { thumb: true, w: smallScreen() ? 720 : 1280, front: true }).then((url) => {
+      if (loadingPath === want) loadingPath = "";
       if (!img.isConnected) return;
       const nowPath = S.viewPath || (S.queueJob?.payload?.saved ?? []).slice(-1)[0] || "";
       if ((S.viewPath || !(S.jobId && livePreview.url)) && nowPath === want) {
-        showImg(want, url, want);
+        shownKey = want;
+        img.src = url;
+        img.style.display = "";
+        emptyEl.style.display = "none";
+        captionEl.textContent = want;
+        captionEl.style.display = "";
+        setState("");
         if (!S.jobId) releasePreview();
       }
-    }).catch(() => {
-      if (shownKey === "") showEmpty("\uC774\uBBF8\uC9C0\uB97C \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + want);
+    }).catch((e) => {
+      if (loadingPath === want) loadingPath = "";
+      failedPath = want;
+      if (!img.isConnected) return;
+      const why = e instanceof Error ? e.message : String(e);
+      if (shownKey === "live" || shownKey === "") {
+        shownKey = "";
+        img.style.display = "none";
+        captionEl.style.display = "none";
+        emptyEl.textContent = "";
+        emptyEl.style.display = "none";
+        if (!S.jobId) releasePreview();
+      }
+      setState("\uC644\uC131\uBCF8\uC744 \uBD88\uB7EC\uC624\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + why, () => {
+        failedPath = "";
+        setState("");
+        syncPreview();
+      });
     });
+  }
+  function setState(text2, retry) {
+    if (!stateEl) return;
+    stateEl.textContent = "";
+    stateEl.style.display = text2 ? "" : "none";
+    stateEl.classList.toggle("err", !!retry);
+    if (!text2) return;
+    stateEl.appendChild(el("span", { text: text2 }));
+    if (retry) {
+      const b = el("button", { class: "ghost tiny", text: "\uB2E4\uC2DC" });
+      b.addEventListener("click", retry);
+      stateEl.appendChild(b);
+    }
   }
   function walk(dir) {
     const list2 = S.viewList.length ? S.viewList : S.queueJob?.payload?.saved ?? [];
@@ -24297,6 +24755,7 @@ ${negative.value.trim()}
   var progressLine2 = null;
   var jobsBox = null;
   var jobsKey = "";
+  var jobsOpen = false;
   var summaryBox = null;
   var cardRegs = /* @__PURE__ */ new Map();
   var batchBar = null;
@@ -24330,32 +24789,32 @@ ${negative.value.trim()}
         gEl.style.gridTemplateColumns = `repeat(${S.cols}, minmax(0, 1fr))`;
       }
     } });
-    mount2.appendChild(el("div", { class: "row", style: { marginBottom: "6px", flexWrap: "wrap" } }, [
-      scenePicker(),
-      cols
-    ]));
     const nChars = activeOf("characters").length;
-    mount2.appendChild(el("div", {
-      class: "hint",
-      style: { marginBottom: "6px" },
-      text: `\uCE90\uB9AD\uD130\uB294 \uC88C\uCE21\uC5D0\uC11C \uCF20 \uCE74\uB4DC\uAC00 \uC2E4\uB9BD\uB2C8\uB2E4 (\uC9C0\uAE08 ${nChars}\uAC1C) \xB7 \uC52C \uCE74\uB4DC\uC758 \uFF0B \uB85C \uD544\uC694\uD55C \uC52C\uB9CC \uC608\uC57D\uC5D0 \uB2F4\uC2B5\uB2C8\uB2E4`
-    }));
-    const cardsBox = el("div", {});
+    mount2.appendChild(el("div", { class: "batchsec first" }, [
+      el("div", { class: "row", style: { flexWrap: "wrap", alignItems: "flex-end" } }, [scenePicker(), cols]),
+      el("div", {
+        class: "hint",
+        style: { marginTop: "6px" },
+        text: `\uCE90\uB9AD\uD130\uB294 \uC88C\uCE21\uC5D0\uC11C \uCF20 \uCE74\uB4DC\uAC00 \uC2E4\uB9BD\uB2C8\uB2E4 (\uC9C0\uAE08 ${nChars}\uAC1C) \xB7 \uC52C \uCE74\uB4DC\uC758 \uFF0B \uB85C \uD544\uC694\uD55C \uC52C\uB9CC \uC608\uC57D\uC5D0 \uB2F4\uC2B5\uB2C8\uB2E4`
+      })
+    ]));
+    const cardsBox = el("div", { class: "batchsec" });
     mount2.appendChild(cardsBox);
     void drawSceneCards(cardsBox);
     const summary = el("div", {});
-    mount2.appendChild(summary);
+    const runSec = el("div", { class: "batchsec batchrun" }, [summary]);
+    mount2.appendChild(runSec);
     summaryBox = summary;
     drawSummary(summary);
     batchBar = el("div", { class: "batchbar", style: { display: "none" } });
-    mount2.appendChild(batchBar);
+    runSec.appendChild(batchBar);
     runBtn2 = el("button", { class: "primary tiny" });
     runBtn2.addEventListener("click", () => {
       if (S.jobId) void cancelRun();
       else void submitReserved();
     });
     progressLine2 = el("span", { class: "hint" });
-    mount2.appendChild(el("div", { class: "row", style: { margin: "8px 0", flexWrap: "wrap" } }, [
+    runSec.appendChild(el("div", { class: "row", style: { marginTop: "8px", flexWrap: "wrap" } }, [
       progressLine2,
       el("span", { class: "grow" }),
       runBtn2
@@ -24369,17 +24828,35 @@ ${negative.value.trim()}
       if (key !== jobsKey) {
         jobsKey = key;
         clear(jobsBox);
-        jobsBox.appendChild(el("div", { class: "sectiontitle", text: `\uC11C\uBC84 JOB \xB7 \uC2E4\uD589/\uB300\uAE30 ${jobs.length}\uAC1C` }));
-        for (const job of jobs) {
-          const cancel = el("button", { class: "ghost tiny", text: job.cancelRequested ? "\uCDE8\uC18C \uC694\uCCAD\uB428" : "\uCDE8\uC18C", disabled: !!job.cancelRequested });
-          cancel.addEventListener("click", () => {
-            cancel.disabled = true;
-            void cancelRun(job.id).then(() => batchTick());
+        jobsBox.style.display = jobs.length ? "" : "none";
+        if (jobs.length) {
+          const nRun = jobs.filter((j) => j.state === "running").length;
+          const det = el("details", { class: "jobqueue", ...jobsOpen ? { open: true } : {} });
+          det.addEventListener("toggle", () => {
+            jobsOpen = det.open;
           });
-          jobsBox.appendChild(el("div", { class: "row" }, [
-            el("span", { class: "grow", text: `${job.id} \xB7 ${stateLabel(job.state)} \xB7 ${job.payload?.done ?? 0}/${job.payload?.total ?? 0}` }),
-            cancel
+          det.appendChild(el("summary", {}, [
+            el("span", { class: "studiosectitle", text: "\uC11C\uBC84 \uC791\uC5C5" }),
+            el("span", { class: "studiosecnote", text: `\uC2E4\uD589 ${nRun} \xB7 \uB300\uAE30 ${jobs.length - nRun}` })
           ]));
+          const list2 = el("div", { class: "jobqueuelist" });
+          for (const job of jobs) {
+            const cancel = el("button", { class: "ghost tiny", text: job.cancelRequested ? "\uCDE8\uC18C \uC694\uCCAD\uB428" : "\uCDE8\uC18C", disabled: !!job.cancelRequested });
+            cancel.addEventListener("click", () => {
+              cancel.disabled = true;
+              void cancelRun(job.id).then(() => batchTick());
+            });
+            const first = job.payload?.items?.[0];
+            const what = first ? (first.scene || first.name) + (job.payload.total > 1 ? ` \uC678 ${job.payload.total - 1}` : "") : job.id;
+            list2.appendChild(el("div", { class: "row", title: job.id }, [
+              el("span", { class: "badge" + (job.state === "running" ? " warn" : ""), text: stateLabel(job.state) }),
+              el("span", { class: "grow clip1", text: what }),
+              el("span", { class: "hint", text: `${job.payload?.done ?? 0}/${job.payload?.total ?? 0}` }),
+              cancel
+            ]));
+          }
+          det.appendChild(list2);
+          jobsBox.appendChild(det);
         }
       }
     }
@@ -24501,7 +24978,8 @@ ${negative.value.trim()}
       hub.drawCentre();
     });
     box.appendChild(el("div", { class: "row", style: { marginBottom: "6px" } }, [
-      el("span", { class: "sectiontitle grow", text: `\uC52C ${scenes.length}\uAC1C` }),
+      el("span", { class: "studiosectitle", text: "\uC52C" }),
+      el("span", { class: "studiosecnote grow", text: `${scenes.length}\uAC1C` }),
       addAll,
       clearHere
     ]));
@@ -24825,7 +25303,9 @@ ${negative.value.trim()}
     const tokens = p.tokens && p.tokens.length ? p.tokens : p.tokenIndex ? [p.tokenIndex] : DEF.tokens;
     return { ...DEF, ...p, mode: mode2, tokens };
   }
+  var ruleGen = 0;
   function setPrefs(folder, next) {
+    ruleGen += 1;
     prefs[folder] = { ...prefsFor(folder), ...next };
     try {
       localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
@@ -25004,11 +25484,14 @@ ${negative.value.trim()}
   async function pollGroups() {
     if (!groups || !S.selected || groups.folder !== S.selected) return;
     const folder = groups.folder;
+    const gen0 = ruleGen;
     try {
-      await syncProfile(folder);
+      await syncProfile(folder, gen0);
+      if (ruleGen !== gen0 && ruleGen !== gen0 + 1) return;
+      const gen1 = ruleGen;
       const eff = effective(prefsFor(folder));
       const fresh = await state.studio.group(folder, eff.pattern, eff.groupBy);
-      if (!groups || groups.folder !== folder) return;
+      if (!groups || groups.folder !== folder || ruleGen !== gen1) return;
       if (groupSig(fresh) === groupSig(groups)) return;
       const mine = selection2;
       groups = fresh;
@@ -25021,8 +25504,9 @@ ${negative.value.trim()}
     } catch {
     }
   }
-  async function syncProfile(folder) {
+  async function syncProfile(folder, gen2 = ruleGen) {
     const profile = await state.studio.groupProfile(folder);
+    if (ruleGen !== gen2) return;
     const local = effective(prefsFor(folder));
     if (profile.exists && (local.pattern !== profile.pattern || local.groupBy !== profile.groupBy)) {
       setPrefs(folder, { mode: profile.pattern ? "regex" : "default", pattern: profile.pattern, groupBy: profile.groupBy });
@@ -25616,7 +26100,7 @@ ${negative.value.trim()}
         if (preview2.problems?.length) throw new Error(preview2.problems.join("\n"));
         if (preview2.managed) {
           const body = el("div", {}, [el("div", { class: "hint", text: "\uBCF5\uC218 \uCC44\uD0DD\uC740 .2, .3 \uBC88\uD638\uB85C \uC800\uC7A5\uD558\uBA70, \uBD07\uC5D0\uC11C\uB294 \uAC19\uC740 \uC774\uB984\uC758 \uB79C\uB364 \uD6C4\uBCF4\uB85C \uC0AC\uC6A9\uD569\uB2C8\uB2E4." })]);
-          for (const row of preview2.mapping || []) body.appendChild(el("div", { text: row.source.split("/").pop() + " \u2192 " + row.target }));
+          for (const row2 of preview2.mapping || []) body.appendChild(el("div", { text: row2.source.split("/").pop() + " \u2192 " + row2.target }));
           const run = el("button", { class: "primary", text: "\uB0B4\uBCF4\uB0B4\uAE30" });
           const output = el("div", { class: "notice" });
           run.addEventListener("click", async () => {
@@ -26322,9 +26806,9 @@ ${negative.value.trim()}
       buildLeftPrompt(leftContent);
     }
     if (hadFocus) {
-      const row = leftContent.querySelector(".treebranch.on") ?? leftContent;
+      const row2 = leftContent.querySelector(".treebranch.on") ?? leftContent;
       try {
-        row.focus({ preventScroll: true });
+        row2.focus({ preventScroll: true });
       } catch {
       }
     }
@@ -26627,9 +27111,6 @@ ${negative.value.trim()}
     if (node) tabSlot.appendChild(node);
     syncToolslot();
   }
-  function setToolbarSearch(value, onInput, placeholder = "\uCC3E\uAE30") {
-    setToolbar(searchBox(value, onInput, placeholder));
-  }
   function syncToolslot() {
     if (!toolbarSlot || !chatBarEl || !botBarEl || !tabSlot) return;
     const chatPending = !!(state.changes?.total || state.changes?.actions || state.changes?.staged || state.changes?.conflicts);
@@ -26690,10 +27171,10 @@ ${negative.value.trim()}
     refreshStatus();
   }
   function syncSettingsBar() {
-    const row = document.querySelector(".tabs");
-    if (!row) return;
+    const row2 = document.querySelector(".tabs");
+    if (!row2) return;
     const inSettings = active2 === "settings";
-    for (const b of Array.from(row.querySelectorAll(".tab, .tabsep, .modetab"))) {
+    for (const b of Array.from(row2.querySelectorAll(".tab, .tabsep, .modetab"))) {
       if (b.closest(".modtabs")) continue;
       b.style.display = inSettings ? "none" : "";
     }
@@ -26701,7 +27182,7 @@ ${negative.value.trim()}
     syncBadge.style.visibility = inSettings ? "hidden" : "";
     const bar3 = getSettingsBar();
     if (bar3) {
-      if (bar3.parentElement !== row) row.appendChild(bar3);
+      if (bar3.parentElement !== row2) row2.appendChild(bar3);
       bar3.style.display = inSettings ? "" : "none";
     }
   }
@@ -26742,14 +27223,14 @@ ${negative.value.trim()}
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.39"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.40"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
       healthEl.title = transport.versionGate;
     } else {
       healthEl.appendChild(el("span", { class: "hint", text: `\uBC31\uC5D4\uB4DC v${h.version}` }));
-      const behind = backendBehind("0.15.39", h.version, h.installKind);
+      const behind = backendBehind("0.15.40", h.version, h.installKind);
       if (behind) {
         const b = el("button", { class: "ghost tiny behindchip", text: "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8 \uD544\uC694", title: behind });
         b.addEventListener("click", () => {
@@ -26850,7 +27331,7 @@ ${negative.value.trim()}
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.15.39" }),
+        el("span", { class: "dim", text: "v0.15.40" }),
         healthEl,
         el("span", { class: "spacer" }),
         // 승인 / 반영 for the whole bot, from every tab (§1-76).
@@ -27204,6 +27685,6 @@ ${negative.value.trim()}
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.15.39"} loaded`);
+    console.log(`[risu-hina] v${"0.15.40"} loaded`);
   })();
 })();
