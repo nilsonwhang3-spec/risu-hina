@@ -16,8 +16,8 @@ asset rules, review sidecars and `hina/<bot>/` stayed behind.
   warning in the tool result (put another bot's folder back; use rename_bot_folder for this bot's).
 - **A rename adopts an unpinned folder under the new name** (merge, file clashes still refused). It also
   carries the old name's review sidecars and asset assignments to files already moved there, so a hand
-  move is repaired by renaming. Refused while another bot's `projects/` folder is missing (it may be the
-  folder that was moved).
+  move is repaired by renaming. (A "another bot's folder is missing, refuse" guard was tried and dropped:
+  on the real install 4 bots have `hina/<bot>/` but never had a project folder.)
 - **The panel asks when the bot is renamed** (`folder_info.reason = 'renamed'`), not only for key-named
   placeholder folders. It does not ask when the user picked the folder name (`renamedFrom` without
   `followsName`) or when another bot sharing the folder still has the old name. The prompt says when it

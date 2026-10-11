@@ -372,31 +372,7 @@ def _check_free(key: str, old: str, new: str, *, adopt: bool = False) -> bool:
                 raise FolderConflict(
                     f"두 폴더에 같은 파일이 있습니다: {dst.relative_to(space_root()).as_posix()}/{clash[0]}")
             merge = True
-    if merge:
-        _refuse_stray(key, old)
     return merge
-
-
-def _refuse_stray(key: str, old: str) -> None:
-    """Before merging into an unpinned folder: is another bot's project
-    folder missing? Then that folder may be what was moved to the new name
-    (the §1-105 report: the AI renamed the wrong bot's folder first), and
-    adopting it would hand one bot's material to another."""
-    sp = space_root()
-    for k, v in _bots_map().items():
-        f = str(v.get("folder") or "") if isinstance(v, dict) else ""
-        if not f or f == old or k == key:
-            continue
-        hina = sp / "hina" / f
-        proj = sp / "projects" / f
-        try:
-            had_work = hina.is_dir() and any(hina.iterdir())
-        except OSError:
-            had_work = False
-        if had_work and not proj.exists():
-            raise FolderConflict(
-                f"다른 봇의 폴더 projects/{f} 가 없습니다 - 새 이름의 폴더가 그 봇의 것을 옮긴 것일 수 있어 "
-                f"합치지 않았습니다. 아니라면 빈 projects/{f} 폴더를 만든 뒤 다시 시도하세요")
 
 
 def _follows_name(key: str, folder: str, name: str) -> bool:

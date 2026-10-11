@@ -215,11 +215,6 @@ os.rename(space / "projects" / "아이기스", space / "projects" / "파르마�
 os.rename(space / "studio" / "output" / "아이기스", space / "studio" / "output" / "파르마의 용병단")
 check("pinned_dirs notices the move", {"projects/아이기스", "studio/output/아이기스"} <= before - workspace.pinned_dirs())
 workspace.out_dir(CKR)
-# A sibling bot whose project folder went missing blocks adopting a folder.
-os.rename(space / "projects" / "파르마 기사단", space / "projects" / "_away")
-raises("adopting is refused while another bot's folder is missing", workspace.rename_bot_folder, CKR,
-       "파르마의 용병단", exc=workspace.FolderConflict)
-os.rename(space / "projects" / "_away", space / "projects" / "파르마 기사단")
 r = workspace.rename_bot_folder(CKR, "파르마의 용병단")
 check("the rename adopts the hand-moved folders", r["merged"] and r["folder"] == "파르마의 용병단", str(r))
 check("files are in place", (space / "projects" / "파르마의 용병단" / "out" / "a.md").is_file()
