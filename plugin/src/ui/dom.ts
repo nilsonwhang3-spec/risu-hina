@@ -300,6 +300,7 @@ export const TOOL_GLYPH: Record<string, [string, string]> = {
   propose_bot_restore: ['⏪', '스냅샷 복원 제안'],
   list_staged: ['📌', '제안 확인'],
   run_python: ['🐍', '스크립트'],
+  rename_bot_folder: ['📁', '봇 폴더 이름'],
   write_file: ['💾', '파일 쓰기'],
   list_files: ['📁', '파일 목록'],
   read_file: ['📄', '파일 읽기'],

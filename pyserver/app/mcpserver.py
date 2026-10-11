@@ -636,7 +636,7 @@ _STUDIO_READS = frozenset({"studio_job", "studio_meta", "studio_parse", "studio_
                            "studio_emotion_check"})
 _FILE_TOOLS = frozenset({"write_file", "run_python", "fetch_assets", "rename_assets", "export_script_text",
                          "save_bot_charx", "save_module_file", "suggest_selection", "review_folder",
-                         "create_module", "improve_skill"})
+                         "create_module", "improve_skill", "rename_bot_folder"})
 
 
 def _READS_ONLY(name: str) -> bool:

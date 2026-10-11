@@ -9,8 +9,11 @@
  * empty old-named folder straight back. The backend's project rename moves
  * all of it; this module is the one place that offers it.
  *
- * Asked after an open and after a card 반영 (the moment a name usually gets
- * decided). "그대로 두기" is remembered per bot and suggested name, so the
+ * Asked for a placeholder folder, and (§1-105) for a folder named after what
+ * the bot used to be called once the bot is renamed - the user expects the
+ * folder to follow the name. A folder name the user picked is never asked
+ * about (the backend decides: `reason`). Asked after an open and after a
+ * card 반영 (the moment a name usually gets decided). "그대로 두기" is remembered per bot and suggested name, so the
  * same question does not come back on every open; a different name later
  * asks again.
  */
@@ -38,15 +41,16 @@ export async function suggestFolderRename(): Promise<void> {
   if (!ck || !state.health) return;
   let info: Awaited<ReturnType<typeof state.botFolderInfo>> = null;
   try { info = await state.botFolderInfo(); } catch { return; }
-  // Only a placeholder (key-named) folder: one that already carries a name -
-  // an earlier name of the bot, or one the user picked - is theirs to keep.
-  if (!info || !info.suggested || !info.hashLike || ck !== state.activeCharKey) return;
+  if (!info || !info.suggested || !info.reason || ck !== state.activeCharKey) return;
   if (dismissed()[ck] === info.suggested) return;
   const tag = ck + '\u0000' + info.suggested + '\u0000' + info.folder;
   if (askedFor === tag) return;
   askedFor = tag;
-  const why = `이 봇의 작업 폴더가 이름이 정해지기 전에 임시 이름(projects/${info.folder})으로 만들어졌습니다.`;
-  shellPrompt(`${why} 봇 이름에 맞춰 projects/${info.suggested} 로 바꿀까요? (폴더 안 파일·AI 메모·에셋 규칙·스튜디오 결과도 함께 옮깁니다)`, [
+  const why = info.reason === 'renamed'
+    ? `봇 이름이 바뀌었지만 작업 폴더는 옛 이름(projects/${info.folder}) 그대로입니다.`
+    : `이 봇의 작업 폴더가 이름이 정해지기 전에 임시 이름(projects/${info.folder})으로 만들어졌습니다.`;
+  const merge = info.merge ? ` 이미 있는 projects/${info.suggested} 폴더와 합칩니다(같은 파일이 있으면 바꾸지 않습니다).` : '';
+  shellPrompt(`${why} 봇 이름에 맞춰 projects/${info.suggested} 로 바꿀까요? (폴더 안 파일·AI 메모·에셋 규칙·스튜디오 결과도 함께 옮깁니다)${merge}`, [
     {
       label: `${info.suggested} 로 바꾸기`, primary: true,
       run: async () => {

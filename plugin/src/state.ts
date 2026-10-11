@@ -1704,19 +1704,20 @@ class AppState {
   }
 
   /** The bot's project folder under projects/, and the name it could take (§1-89). */
-  async botFolderInfo(): Promise<{ folder: string; key: string; hashLike: boolean; name: string; suggested: string } | null> {
+  async botFolderInfo(): Promise<{ folder: string; key: string; hashLike: boolean; name: string; suggested: string;
+    reason?: '' | 'hash' | 'renamed'; merge?: boolean } | null> {
     if (!this.activeCharKey) return null;
     return await transport.get('/workspace/folder', { charKey: this.activeCharKey });
   }
 
   /** Rename the project folder with everything keyed by it (notes, rules, studio output). */
-  async renameBotFolder(folder: string): Promise<{ old: string; folder: string }> {
+  async renameBotFolder(folder: string): Promise<{ old: string; folder: string; merged?: boolean }> {
     // Moving a big studio output folder can take a while; a lost answer is
     // checked against the folder itself rather than reported as a failure
     // (the first real rename finished server-side after the panel gave up).
     const ck = this.activeCharKey;
     try {
-      const r = await transport.post<{ old: string; folder: string }>('/workspace/folder/rename', { charKey: ck, folder }, 180_000);
+      const r = await transport.post<{ old: string; folder: string; merged?: boolean }>('/workspace/folder/rename', { charKey: ck, folder }, 180_000);
       this.touchFiles();
       return r;
     } catch (e) {

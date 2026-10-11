@@ -242,6 +242,9 @@ Workspace rules (mandatory - every bot shares ONE global space):
   `..`). studio_generate pushes batch results into the chat as they finish, so do not list them
   again. Keep long documents as files too (write_file) and say where.
 - Other bots' folders are visible. Reading is fine; **never modify another bot's folder unasked.**
+- **A bot's folder is pinned to the bot by name** (the current bot's folder name is given to you; a
+  similar-looking folder may belong to another bot). Never move or rename `projects/<bot>`,
+  `studio/output/<bot>` or `hina/<bot>` with run_python or file tools - use rename_bot_folder.
 - **You handle assets (images) too.** list_assets for the list, fetch_assets to pull them into
   hina/<bot>/scratch/assets/, run_python (PIL) to process, then propose the resulting PNG/WebP with propose_asset_add /
   propose_asset_replace. Approval snapshots the image bytes in Hina and stages card references.
@@ -3273,9 +3276,25 @@ def build(model: Any = None) -> Agent[Deps]:
 
         규칙적인 치환이나 통계는 이쪽이 정확하다.
         """
+        try:
+            pinned = workspace.pinned_dirs()
+        except Exception:  # noqa: BLE001 - a guard only
+            pinned = set()
         r = pyexec.run(code, workspace.root(ctx.deps.char_key), ctx.deps.chat_key,
                        ctx.deps.char_key, session_id=ctx.deps.session_id, mode=ctx.deps.mode)
         parts = []
+        try:
+            gone = sorted(pinned - workspace.pinned_dirs())
+        except Exception:  # noqa: BLE001
+            gone = []
+        if gone:
+            # §1-105: a bot folder moved here leaves the bot pinned to the
+            # old name - it reads as an empty folder and notes, asset rules
+            # and review state stay behind.
+            parts.append("경고: 봇에 연결된 폴더가 사라졌습니다: " + ", ".join(gone) + ". "
+                         "봇 폴더는 run_python 으로 옮기거나 이름을 바꾸면 안 됩니다 (봇 연결·메모·에셋 규칙·검수 "
+                         "기록이 따라가지 않습니다). 다른 봇의 폴더였다면 바로 원래 이름으로 되돌리세요. 이 봇의 폴더 "
+                         "이름을 바꾸려던 것이면 rename_bot_folder(새 이름) 를 부르세요 - 이미 옮겨진 폴더도 합쳐 연결합니다.")
         if r.get("staged"):
             parts.append(f"{r['staged']}건을 제안으로 등록했습니다. 승인하셔야 반영됩니다.")
         if r.get("stdout"):
@@ -3336,6 +3355,50 @@ def build(model: Any = None) -> Agent[Deps]:
             return f"{rel} 에 {len(content)}자를 썼습니다"
         path = workspace.write_out(ctx.deps.char_key, rel, content)
         return f"{path} 에 {len(content)}자를 썼습니다"
+
+    @agent.tool
+    def rename_bot_folder(ctx: RunContext[Deps], new_name: str) -> str:
+        """Rename THIS bot's folder (projects/<bot>/, studio/output/<bot>/ and hina/<bot>/ together) and
+        reconnect the bot to it - the only correct way; do it when the user asks (e.g. after the bot was
+        renamed). Never move or rename a bot folder with run_python or file tools: the bot stays pinned
+        to the old name and its notes, asset rules and review state stay behind. A folder already at the
+        new name that no bot owns is merged in (a file on both sides is refused), so this also repairs a
+        folder that was moved by hand. Other bots' folders are never touched.
+        """
+        ck = ctx.deps.char_key
+        if not ck or modmod.is_module_key(ck) or home.is_home(ctx.deps.chat_key):
+            return "봇이 열려 있지 않아 봇 폴더를 바꿀 수 없습니다."
+        try:
+            r = workspace.rename_bot_folder(ck, new_name)
+        except workspace.WorkspaceError as e:
+            return f"바꾸지 못했습니다: {e}"
+        if r["folder"] == r["old"]:
+            return f"이미 그 이름입니다: projects/{r['folder']}/"
+        moves = ", ".join(f"{m['from']} → {m['to']}" for m in r.get("moved") or []) or "옮길 폴더 없음"
+        out = (f"봇 폴더를 '{r['old']}' → '{r['folder']}' 로 바꾸고 봇을 연결했습니다"
+               + (" (이미 있던 폴더에 합침)" if r.get("merged") else "") + f". {moves}. "
+               f"함께 옮긴 것: {json.dumps(r.get('rekeyed') or {}, ensure_ascii=False)}")
+        if r.get("warnings"):
+            out += " 경고: " + "; ".join(r["warnings"])
+        return out
+
+    @agent.instructions
+    def _bot_folder_line(ctx: RunContext[Deps]) -> str:
+        # §1-105: the rules say projects/<bot>/ and the agent had to guess
+        # which folder that is - it picked a similar-named bot's.
+        ck = ctx.deps.char_key
+        if not ck or modmod.is_module_key(ck) or home.is_home(ctx.deps.chat_key):
+            return ""
+        try:
+            info = workspace.folder_info(ck)
+        except Exception:  # noqa: BLE001
+            return ""
+        f = info["folder"]
+        line = (f"이 봇의 폴더 이름(<bot>): `{f}` - projects/{f}/, studio/output/{f}/, hina/{f}/. "
+                "폴더 이름은 봇 이름과 따로 고정되어 있습니다; 바꾸려면 rename_bot_folder 만 쓰세요.")
+        if info.get("reason") == "renamed":
+            line += f" (봇 이름이 '{info['name']}' 로 바뀌었지만 폴더는 옛 이름 그대로입니다.)"
+        return line
 
     @agent.tool
     def list_files(ctx: RunContext[Deps], directory: str = "") -> str:

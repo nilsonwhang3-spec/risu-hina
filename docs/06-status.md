@@ -1,5 +1,28 @@
 # 06. Implementation status — as of 2026-10-10 (v0.15.40, Risu Hina)
 
+## §1-105 (2026-10-11): a renamed bot's folder follows the name; the AI renames folders the right way
+
+Real use: a bot was renamed in RisuAI and the user asked the AI to rename its workspace and studio OUT
+folders too. The AI had no tool for it and was never told which folder is the bot's, so it renamed a
+similar-named bot's folder with run_python first, put it back, then moved the right ones - but only the
+directories. bots.json still pinned the bot to the old name, `out_dir()` regrew it empty, and the notes,
+asset rules, review sidecars and `hina/<bot>/` stayed behind.
+
+- **New agent / MCP tool `rename_bot_folder(new_name)`** runs the existing project rename
+  (`workspace.rename_bot_folder`: projects/, hina/, studio/output/, bots.json, notes, asset rules,
+  sidecars, skills). The instructions now name the current bot's folder and forbid moving bot folders
+  with run_python or file tools.
+- **run_python guard:** pinned bot folders are listed before and after; one that disappeared gets a
+  warning in the tool result (put another bot's folder back; use rename_bot_folder for this bot's).
+- **A rename adopts an unpinned folder under the new name** (merge, file clashes still refused). It also
+  carries the old name's review sidecars and asset assignments to files already moved there, so a hand
+  move is repaired by renaming. Refused while another bot's `projects/` folder is missing (it may be the
+  folder that was moved).
+- **The panel asks when the bot is renamed** (`folder_info.reason = 'renamed'`), not only for key-named
+  placeholder folders. It does not ask when the user picked the folder name (`renamedFrom` without
+  `followsName`) or when another bot sharing the folder still has the old name. The prompt says when it
+  will merge into an existing folder.
+
 ## §1-104 (2026-10-11): 새 대화 on the carry screen, workspace folders and uploads show at once
 
 - **새 대화 needed two presses:** with the last conversation from another chat on screen (§1-100 carry),

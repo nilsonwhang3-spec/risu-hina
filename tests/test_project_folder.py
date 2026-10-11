@@ -149,11 +149,17 @@ raises("the persona top folder is reserved", workspace.rename_bot_folder, CK2, w
 raises("an empty name is refused", workspace.rename_bot_folder, CK2, "  ::  ", exc=workspace.WorkspaceError)
 (space / "projects" / "남의폴더").mkdir()
 (space / "projects" / "남의폴더" / "x.md").write_text("x", encoding="utf-8")
-raises("an existing foreign folder is refused (no merge)", workspace.rename_bot_folder, CK2, "남의폴더",
+(space / "projects" / "유키").mkdir(parents=True, exist_ok=True)
+(space / "projects" / "유키" / "x.md").write_text("mine", encoding="utf-8")
+raises("a folder with the same file on both sides is refused", workspace.rename_bot_folder, CK2, "남의폴더",
        exc=workspace.FolderConflict)
-check("the foreign folder is untouched", (space / "projects" / "남의폴더" / "x.md").is_file())
+check("the foreign folder is untouched", (space / "projects" / "남의폴더" / "x.md").read_text(encoding="utf-8") == "x"
+      and (space / "projects" / "유키" / "x.md").read_text(encoding="utf-8") == "mine")
+(space / "projects" / "유키" / "x.md").unlink()
+store.upsert_character("cha-proj-2", "미도리", {"name": "미도리"}, 1)
+check("a name another bot holds is not suggested", workspace.folder_info(CK2)["suggested"] == "")
 store.upsert_character("cha-proj-2", "남의폴더", {"name": "남의폴더"}, 1)
-check("a taken name is not suggested", workspace.folder_info(CK2)["suggested"] == "")
+check("a folder no bot holds can be adopted", workspace.folder_info(CK2)["suggested"] == "남의폴더")
 store.upsert_character("cha-proj-2", "유키", {"name": "유키"}, 1)
 check("route: taken name -> 409", status_of(main.h_workspace_folder_rename,
                                            {"charKey": CK2, "folder": "미도리"}) == 409)
@@ -180,6 +186,60 @@ res = files.move_many(files.SPACE, ["projects/유키짱"], "projects/보관")
 check("move_many reports the refusal per item", res["done"] == 0 and len(res["failed"]) == 1, str(res))
 r = files.move(files.SPACE, "projects/남의폴더", "projects/보관")
 check("an ordinary folder still moves", r["to"] == "projects/보관/남의폴더", str(r))
+
+print("\ntest_bot_renamed_folder_follows")
+# §1-105 (real use): the bot 천년전쟁 아이기스 was renamed 파르마의 용병단 in
+# RisuAI. The AI moved projects/ and studio/output/ by run_python; the bot
+# stayed pinned to the old name, out_dir() regrew it empty, and notes and
+# review state stayed behind. Another bot (Parma Knights) has a similar name.
+CKR = store.upsert_character("cha-ren-1", "아이기스", {"name": "아이기스"}, 20)
+CKP = store.upsert_character("cha-ren-2", "파르마 기사단", {"name": "파르마 기사단"}, 21)
+check("pinned to the first name", workspace.bot_folder(CKR) == "아이기스")
+workspace.out_dir(CKP); workspace.hina_dir(CKP)
+(workspace.out_dir(CKR) / "a.md").write_text("a", encoding="utf-8")
+(workspace.hina_dir(CKR) / "scripts" / "s.py").write_text("pass", encoding="utf-8")
+(space / "studio" / "output" / "아이기스" / "표정-1차").mkdir(parents=True)
+(space / "studio" / "output" / "아이기스" / "표정-1차" / "a.png").write_bytes(b"\x89PNG\r\n\x1a\nx")
+studio.write_selection("studio/output/아이기스/표정-1차", {"a.png": {"use": True}})
+agentnotes.save("project:아이기스", "호칭", "용병단 메모", "테스트")
+check("no suggestion while the name matches", workspace.folder_info(CKR)["reason"] == "")
+store.upsert_character("cha-ren-1", "파르마의 용병단", {"name": "파르마의 용병단"}, 20)
+info = workspace.folder_info(CKR)
+check("a renamed bot is offered its new name", info["reason"] == "renamed" and info["suggested"] == "파르마의 용병단",
+      str(info))
+before = workspace.pinned_dirs()
+check("pinned_dirs sees the bot's folders", {"projects/아이기스", "hina/아이기스", "studio/output/아이기스"} <= before,
+      str(before))
+# The hand move (what run_python did), then something regrows the old name.
+os.rename(space / "projects" / "아이기스", space / "projects" / "파르마의 용병단")
+os.rename(space / "studio" / "output" / "아이기스", space / "studio" / "output" / "파르마의 용병단")
+check("pinned_dirs notices the move", {"projects/아이기스", "studio/output/아이기스"} <= before - workspace.pinned_dirs())
+workspace.out_dir(CKR)
+# A sibling bot whose project folder went missing blocks adopting a folder.
+os.rename(space / "projects" / "파르마 기사단", space / "projects" / "_away")
+raises("adopting is refused while another bot's folder is missing", workspace.rename_bot_folder, CKR,
+       "파르마의 용병단", exc=workspace.FolderConflict)
+os.rename(space / "projects" / "_away", space / "projects" / "파르마 기사단")
+r = workspace.rename_bot_folder(CKR, "파르마의 용병단")
+check("the rename adopts the hand-moved folders", r["merged"] and r["folder"] == "파르마의 용병단", str(r))
+check("files are in place", (space / "projects" / "파르마의 용병단" / "out" / "a.md").is_file()
+      and (space / "hina" / "파르마의 용병단" / "scripts" / "s.py").is_file()
+      and (space / "studio" / "output" / "파르마의 용병단" / "표정-1차" / "a.png").is_file())
+check("the old names are gone", not (space / "projects" / "아이기스").exists()
+      and not (space / "hina" / "아이기스").exists())
+check("notes followed", [n["title"] for n in agentnotes.listing("project:파르마의 용병단")["notes"]] == ["호칭"])
+check("review state followed the hand-moved folder",
+      studio.read_selection("studio/output/파르마의 용병단/표정-1차").get("a.png", {}).get("use") is True)
+bots = json.loads((space / ".hina" / "bots.json").read_text(encoding="utf-8"))
+check("bots.json follows the name", bots[CKR]["folder"] == "파르마의 용병단" and bots[CKR].get("followsName"),
+      str(bots[CKR]))
+check("the similar-named bot is untouched", workspace.bot_folder(CKP) == "파르마 기사단")
+check("nothing more to suggest", workspace.folder_info(CKR)["reason"] == "")
+store.upsert_character("cha-ren-1", "파르마 용병대", {"name": "파르마 용병대"}, 20)
+check("a folder that follows the name is offered again", workspace.folder_info(CKR)["reason"] == "renamed")
+workspace.rename_bot_folder(CKR, "용병 자료")
+store.upsert_character("cha-ren-1", "또 다른 이름", {"name": "또 다른 이름"}, 20)
+check("a folder name the user picked is theirs", workspace.folder_info(CKR)["reason"] == "")
 
 print("\ntest_persona_folder")
 p1 = workspace.persona_folder("pid-1", "아키라")
