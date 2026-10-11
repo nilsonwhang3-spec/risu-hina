@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.15.40
+//@display-name Risu Hina v0.15.41
 //@api 3.0
-//@version 0.15.40
+//@version 0.15.41
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -195,7 +195,7 @@
           this.tokenSafe = true;
           this.lastHealth = body;
           this.probeInfo = "";
-          this.gate = versionGate("0.15.40", String(body.version || ""));
+          this.gate = versionGate("0.15.41", String(body.version || ""));
           return body;
         }
         /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -2637,8 +2637,13 @@
         stage_edit: ["\u270F\uFE0F", "\uC218\uC815 \uC81C\uC548"],
         stage_bulk: ["\u270F\uFE0F", "\uC77C\uAD04 \uC81C\uC548"],
         stage_delete: ["\u2702\uFE0F", "\uC0AD\uC81C \uC81C\uC548"],
+        propose_assets_delete: ["\u{1F5D1}", "\uC5D0\uC14B \uC0AD\uC81C \uC81C\uC548"],
+        propose_scripts_delete: ["\u{1F5D1}", "\uC77C\uAD04 \uC0AD\uC81C \uC81C\uC548"],
+        list_bot_snapshots: ["\u{1F516}", "\uBD07 \uC2A4\uB0C5\uC0F7"],
+        propose_bot_restore: ["\u23EA", "\uC2A4\uB0C5\uC0F7 \uBCF5\uC6D0 \uC81C\uC548"],
         list_staged: ["\u{1F4CC}", "\uC81C\uC548 \uD655\uC778"],
         run_python: ["\u{1F40D}", "\uC2A4\uD06C\uB9BD\uD2B8"],
+        rename_bot_folder: ["\u{1F4C1}", "\uBD07 \uD3F4\uB354 \uC774\uB984"],
         write_file: ["\u{1F4BE}", "\uD30C\uC77C \uC4F0\uAE30"],
         list_files: ["\u{1F4C1}", "\uD30C\uC77C \uBAA9\uB85D"],
         read_file: ["\u{1F4C4}", "\uD30C\uC77C \uC77D\uAE30"],
@@ -5159,6 +5164,13 @@ name: ${nm}
         async forgetBots(charKeys) {
           return await transport.post("/bots/forget", { charKeys }, 3e5);
         }
+        async assetUsage() {
+          return await transport.get("/assets/usage", {}, 12e4);
+        }
+        /** Remove store files nothing references - not a bot, not a snapshot - older than `days`. */
+        async assetGc(days) {
+          return await transport.post("/assets/gc", days == null ? {} : { days }, 3e5);
+        }
         /** A .charx of any Hina bot (not only the open one), assets it lacks left out. */
         async charxOf(charKey) {
           const r = await transport.post("/charx/build", { charKey, allowMissing: true, name: "" }, 6e5);
@@ -5748,6 +5760,8 @@ name: ${nm}
         async cardCheckpoint(label2) {
           await transport.post("/card/checkpoint", { charKey: this.botKey, label: label2 });
         }
+        /** This bot's snapshots and those of the bots sharing its folder (same
+         * name / family, §1-103) - a mate's row carries `from`, its bot's name. */
         async cardCheckpoints() {
           const r = await transport.get("/card/checkpoints", { charKey: this.botKey });
           return r.checkpoints ?? [];
@@ -5763,9 +5777,13 @@ name: ${nm}
           return r.deleted;
         }
         async cardRestore(id) {
-          await transport.post("/card/checkpoint/restore", { charKey: this.botKey, id });
+          const r = await transport.post(
+            "/card/checkpoint/restore",
+            { charKey: this.botKey, id }
+          );
           this.bump();
           void this.refreshBotChanges();
+          return r ?? {};
         }
         /** The host update a card patch calls for, or null when nothing differs. */
         cardUpdateFrom(patch, whole) {
@@ -10713,7 +10731,10 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       if (this.busy) return;
       try {
         await state.newAgentSession();
-        await this.render();
+        this.pendingCarry = "";
+        this.carryDecided = true;
+        state.forgetCarry();
+        await this.render(state.sessionId);
         this.hooks.notice("\uC0C8 \uB300\uD654\uB97C \uC2DC\uC791\uD588\uC2B5\uB2C8\uB2E4.", "ok");
       } catch (e) {
         this.hooks.notice("\uC0C8 \uB300\uD654\uB97C \uC2DC\uC791\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg7(e), "err");
@@ -10952,10 +10973,18 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         if (textTimer === null) textTimer = setTimeout(flushText, 120);
       };
       let proposingTool = false;
+      let quietTimer = null;
+      const quiet = () => {
+        if (quietTimer !== null) {
+          clearTimeout(quietTimer);
+          quietTimer = null;
+        }
+      };
       try {
         for await (const ev of state.agentChat(prompt, abort.signal)) {
           if (this.destroyed) break;
           const e = ev;
+          quiet();
           if (e.type !== "text") flushText();
           switch (e.type) {
             case "plan": {
@@ -11011,6 +11040,18 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
               segmentText.set(node, textAcc);
               setThinking(false);
               scheduleText(node);
+              quietTimer = setTimeout(() => {
+                quietTimer = null;
+                setThinking(true, "\uB2E4\uC74C \uB2E8\uACC4\uB97C \uC900\uBE44\uD558\uB294 \uC911\uC785\uB2C8\uB2E4\u2026");
+              }, 2500);
+              break;
+            }
+            case "toolDraft": {
+              const name = String(e.name ?? "");
+              const chars = Number(e.chars ?? 0);
+              const label2 = PROPOSING_TOOL.test(name) ? "\uC81C\uC548 \uC791\uC131 \uC911" : `${TOOL_GLYPH[name]?.[1] ?? (name || "\uB3C4\uAD6C \uD638\uCD9C")} \uC900\uBE44 \uC911`;
+              setThinking(true, `${label2}\u2026 ${chars.toLocaleString()}\uC790`);
+              this.scroll();
               break;
             }
             case "tool": {
@@ -11158,6 +11199,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         }
         void clientLog("error", "agent chat failed", { error: String(e) });
       } finally {
+        quiet();
         flushText();
         stopPermitPoll();
         this.abortCtl = null;
@@ -12413,7 +12455,16 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       }
     });
     row2.append(
-      el("span", { class: "grow", text: c.label || "(\uBB34\uC81C)" }),
+      el("span", { class: "grow" }, [
+        el("span", { text: c.label || "(\uBB34\uC81C)" }),
+        // Another bot of this project folder's snapshot (§1-103).
+        c.from ? el("span", {
+          class: "badge",
+          style: { marginLeft: "6px" },
+          text: `\u2194 ${c.from}`,
+          title: "\uAC19\uC740 \uD504\uB85C\uC81D\uD2B8 \uD3F4\uB354\uB97C \uC4F0\uB294 \uBD07\uC758 \uC2A4\uB0C5\uC0F7\uC785\uB2C8\uB2E4"
+        }) : null
+      ]),
       el("span", { class: "n", text: fmtTime(c.created_at * 1e3) }),
       edit
     );
@@ -13974,6 +14025,13 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       if (viewMount) clear(viewMount);
     }
     kitRender(mount2);
+    if (!lastListing) {
+      for (const m of [treeMount, viewMount]) {
+        if (m && !m.childElementCount) {
+          m.appendChild(el("div", { class: "row hint skelhead" }, [el("span", { class: "spin" }), el("span", { text: " \uD30C\uC77C \uBAA9\uB85D\uC744 \uBD88\uB7EC\uC624\uB294 \uC911\u2026" })]));
+        }
+      }
+    }
   }
   var pendingRefreshes = /* @__PURE__ */ new Map();
   function refreshKey() {
@@ -14034,6 +14092,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       if (key !== refreshKey()) return;
       if (!lastListing) {
         clear(treeMount);
+        if (viewMount) clear(viewMount);
         treeMount.appendChild(el("div", { class: "notice err", text: msg12(e) }));
       } else notice2("\uBAA9\uB85D \uAC31\uC2E0 \uC2E4\uD328 \u2014 \uB9C8\uC9C0\uB9C9\uC73C\uB85C \uBC1B\uC740 \uBAA9\uB85D\uC785\uB2C8\uB2E4: " + msg12(e), "err");
       void clientLog("error", "files tab refresh failed", {
@@ -14055,6 +14114,56 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       treeMount?.setAttribute("aria-busy", String(fileOperations > 0));
       viewMount?.setAttribute("aria-busy", String(fileOperations > 0));
     }
+  }
+  function addLocal(dirs, files = []) {
+    if (!lastListing) return;
+    const areaOf = (path) => lastListing.areas.find((a) => path === a.area || path.startsWith(a.area + "/"));
+    const want = [...dirs];
+    for (const f of files) {
+      const dir = f.path.slice(0, f.path.lastIndexOf("/"));
+      if (dir) want.push(dir);
+    }
+    for (const d of want) {
+      const a = areaOf(d);
+      if (!a || d === a.area) continue;
+      a.dirs = a.dirs ?? [];
+      for (let at = d.indexOf("/", a.area.length + 1); ; at = d.indexOf("/", at + 1)) {
+        const part = at < 0 ? d : d.slice(0, at);
+        if (!a.dirs.includes(part)) a.dirs.push(part);
+        if (at < 0) break;
+      }
+    }
+    const now = Date.now() / 1e3;
+    for (const f of files) {
+      const a = areaOf(f.path);
+      if (!a) continue;
+      const name = f.path.slice(f.path.lastIndexOf("/") + 1);
+      a.files = a.files.filter((x) => x.path !== f.path);
+      a.files.push({
+        path: f.path,
+        name,
+        size: f.size,
+        modified: now,
+        textual: /\.(txt|md|json|lua|js|ts|css|html|csv|ya?ml|xml|py)$/i.test(name)
+      });
+    }
+    buildNodes(lastListing);
+    drawTree();
+    drawCentre();
+  }
+  async function makeFolder(where, raw) {
+    const nm = raw.trim().replace(/[\\/]+/g, "-");
+    if (!nm) return false;
+    try {
+      await state.mkdirFile(where + "/" + nm);
+    } catch (e) {
+      notice2("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg12(e), "err");
+      return false;
+    }
+    expandTo(where + "/" + nm);
+    addLocal([where + "/" + nm]);
+    state.touchFiles();
+    return true;
   }
   function buildNodes(data) {
     nodes = /* @__PURE__ */ new Map();
@@ -14163,16 +14272,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       const name = el("input", { placeholder: "\uD3F4\uB354 \uC774\uB984" });
       const ok = el("button", { class: "primary tiny", text: "\uB9CC\uB4E4\uAE30" });
       ok.addEventListener("click", async () => {
-        const n = name.value.trim().replace(/[\\/]+/g, "-");
-        if (!n) return;
-        try {
-          await state.mkdirFile(where + "/" + n);
-          close();
-          expandTo(where + "/" + n);
-          await refresh();
-        } catch (e) {
-          notice2("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg12(e), "err");
-        }
+        if (await makeFolder(where, name.value)) close();
       });
       name.addEventListener("keydown", (e) => {
         if (e.key === "Enter") ok.click();
@@ -14569,6 +14669,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           disabled: !fileClipboard || !writable,
           onClick: () => void pasteInto(uploadTarget())
         },
+        { label: "\uC0C8 \uD3F4\uB354", disabled: !writable, onClick: () => treeNewFolder(uploadTarget()) },
         { label: "\uC804\uCCB4 \uC120\uD0DD", onClick: () => {
           selectAll(n);
           drawCentre();
@@ -14890,16 +14991,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       placeholder: "\uD3F4\uB354 \uC774\uB984",
       ok: "\uB9CC\uB4E4\uAE30",
       onSubmit: async (raw) => {
-        const nm = raw.trim().replace(/[\\/]+/g, "-");
-        if (!nm) return;
-        try {
-          await state.mkdirFile(where + "/" + nm);
-          expandTo(where + "/" + nm);
-          state.touchFiles();
-          await refresh();
-        } catch (e) {
-          notice2("\uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg12(e), "err");
-        }
+        await makeFolder(where, raw);
       }
     });
   }
@@ -15418,6 +15510,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           bytes: new Uint8Array(await file.arrayBuffer())
         })));
         const r = await state.uploadBatch(into, entries, !!extractZips);
+        addLocal([], (r.files ?? []).filter((f) => f.path).map((f) => ({ path: f.path, size: f.size })));
         done += r.count;
         extracted += r.extracted;
         sentBytes += bytes;
@@ -15425,6 +15518,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         for (const { file, rel } of batch) {
           try {
             const r = await uploadOne(file, rel ? into + "/" + rel : into, !!extractZips && /\.zip$/i.test(file.name));
+            if (r.path) addLocal([], [{ path: r.path, size: file.size }]);
             done += 1;
             if (r.extracted) extracted += r.extracted;
           } catch (e2) {
@@ -15448,9 +15542,11 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     if (nodes.has(into)) {
       selectedDir = into;
       expandTo(into);
+      drawTree();
+      drawCentre();
     }
     state.touchFiles();
-    await refresh();
+    void refresh();
   }
   async function uploadOne(file, dir, extract) {
     if (TEXT_UPLOAD_RE.test(file.name)) {
@@ -18173,10 +18269,10 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           return;
         }
         if (!r.newer) {
-          const mismatch = r.current !== "0.15.40";
+          const mismatch = r.current !== "0.15.41";
           const ahead = r.ahead ?? (!!r.latest && r.latest !== r.current);
           say(
-            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.40"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
+            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.41"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
             mismatch || ahead ? "" : "ok"
           );
           return;
@@ -18267,7 +18363,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.15.40",
+            version: "0.15.41",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -18475,7 +18571,8 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       try {
         const r = await state.forgetBots(keys);
         picked.clear();
-        out.appendChild(el("div", { class: "notice " + (r.failed.length ? "err" : "ok"), text: `Hina\uC5D0\uC11C ${r.forgotten.length}\uAC1C\uB97C \uC9C0\uC6E0\uC2B5\uB2C8\uB2E4.` + (r.failed.length ? ` ${r.failed.length}\uAC1C\uB294 \uC9C0\uC6B0\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: ${r.failed[0].error}` : "") + " RisuAI \uCABD\uACFC projects/ \uC758 \uD30C\uC77C\uC740 \uADF8\uB300\uB85C\uC785\uB2C8\uB2E4." }));
+        const handed = r.forgotten.reduce((n, f) => n + (f.snapshotsHanded ?? 0), 0);
+        out.appendChild(el("div", { class: "notice " + (r.failed.length ? "err" : "ok"), text: `Hina\uC5D0\uC11C ${r.forgotten.length}\uAC1C\uB97C \uC9C0\uC6E0\uC2B5\uB2C8\uB2E4.` + (r.failed.length ? ` ${r.failed.length}\uAC1C\uB294 \uC9C0\uC6B0\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: ${r.failed[0].error}` : "") + (handed ? ` \uBD07 \uC2A4\uB0C5\uC0F7 ${handed}\uAC1C\uB294 \uAC19\uC740 \uC774\uB984\uC758 \uBD07\uC73C\uB85C \uB118\uACBC\uC2B5\uB2C8\uB2E4.` : "") + " RisuAI \uCABD\uACFC projects/ \uC758 \uD30C\uC77C\uC740 \uADF8\uB300\uB85C\uC785\uB2C8\uB2E4." }));
       } catch (e) {
         out.appendChild(el("div", { class: "notice err", text: "\uC9C0\uC6B0\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg20(e) }));
       }
@@ -18514,7 +18611,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       tools,
       list2,
       nav,
-      el("div", { class: "hint", style: { marginTop: "8px" }, text: '\uD3EC\uCF13\uB9AC\uC2A4\uC758 \uD734\uC9C0\uD1B5\xB7\uBE44\uD65C\uC131\uD654(\uBCF4\uAD00) \uBD07\uC740 \uD50C\uB7EC\uADF8\uC778\uC774 \uBCFC \uC218 \uC5C6\uB294 \uACF3\uC5D0 \uC788\uC5B4 "RisuAI\uC5D0 \uC5C6\uC74C"\uC73C\uB85C \uB098\uC635\uB2C8\uB2E4. \uAC00\uB9AC\uAE30\uB9CC \uD55C \uBD07\uC740 RisuAI\uC5D0 \uC788\uC74C\uC73C\uB85C \uC149\uB2C8\uB2E4. \uC9C0\uC6CC\uB3C4 projects/ \uC758 \uD30C\uC77C\uC740 \uB0A8\uACE0, \uC774\uBBF8\uC9C0 \uC800\uC7A5\uC18C\uB294 \uC2A4\uD1A0\uC5B4 \uC815\uB9AC(GC)\uAC00 \uC815\uB9AC\uD569\uB2C8\uB2E4.' })
+      el("div", { class: "hint", style: { marginTop: "8px" }, text: '\uD3EC\uCF13\uB9AC\uC2A4\uC758 \uD734\uC9C0\uD1B5\xB7\uBE44\uD65C\uC131\uD654(\uBCF4\uAD00) \uBD07\uC740 \uD50C\uB7EC\uADF8\uC778\uC774 \uBCFC \uC218 \uC5C6\uB294 \uACF3\uC5D0 \uC788\uC5B4 "RisuAI\uC5D0 \uC5C6\uC74C"\uC73C\uB85C \uB098\uC635\uB2C8\uB2E4. \uAC00\uB9AC\uAE30\uB9CC \uD55C \uBD07\uC740 RisuAI\uC5D0 \uC788\uC74C\uC73C\uB85C \uC149\uB2C8\uB2E4. \uC9C0\uC6CC\uB3C4 projects/ \uC758 \uD30C\uC77C\uC740 \uB0A8\uC2B5\uB2C8\uB2E4. \uBD07 \uC2A4\uB0C5\uC0F7\uC740 RisuAI\uC5D0 \uC788\uB294 \uAC19\uC740 \uC774\uB984\uC758 \uBD07\uC774 \uC788\uC73C\uBA74 \uADF8 \uBD07\uC73C\uB85C \uB118\uC5B4\uAC00\uACE0, \uC5C6\uC73C\uBA74 \uD568\uAED8 \uC9C0\uC6CC\uC9D1\uB2C8\uB2E4. \uC774 \uBD07\uB9CC \uC4F0\uB358 \uC774\uBBF8\uC9C0\uB294 \uC544\uB798 \uC774\uBBF8\uC9C0 \uC800\uC7A5\uC18C \uC815\uB9AC\uAC00 \uC9C0\uC6C1\uB2C8\uB2E4.' })
     ]);
   }
   function row(b, picked, onPick, after) {
@@ -18568,7 +18665,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       pick2,
       el("span", { class: "grow" }, [
         el("div", { text: b.name || "(\uC774\uB984 \uC5C6\uC74C)" }),
-        el("div", { class: "hint", text: `\uCC57 ${b.chats}\uAC1C \xB7 ${b.turns}\uD134 \xB7 Hina \uC218\uC815 ${fmtTime(b.updatedAt * 1e3)}${when}` + (b.pendingActions ? ` \xB7 \uC2B9\uC778 \uB300\uAE30 ${b.pendingActions}` : "") }),
+        el("div", { class: "hint", text: `\uCC57 ${b.chats}\uAC1C \xB7 ${b.turns}\uD134 \xB7 Hina \uC218\uC815 ${fmtTime(b.updatedAt * 1e3)}${when}` + (b.pendingActions ? ` \xB7 \uC2B9\uC778 \uB300\uAE30 ${b.pendingActions}` : "") + (b.snapshots ? ` \xB7 \uBD07 \uC2A4\uB0C5\uC0F7 ${b.snapshots}\uAC1C` + (b.snapshotHeir ? ` \u2192 \uC0AD\uC81C\uD558\uBA74 '${b.snapshotHeir}'(\uC73C)\uB85C \uB118\uC5B4\uAC10` : " (\uC0AD\uC81C\uD558\uBA74 \uD568\uAED8 \uC9C0\uC6CC\uC9D0)") : "") }),
         note
       ]),
       el("span", { class: "badge" + (b.state === "trash" ? " warn" : ""), text: LABEL[b.state] || b.state }),
@@ -18583,6 +18680,88 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       }), save);
     }
     return item;
+  }
+  function buildAssetStoreCard(onMount) {
+    const stats = el("div", { class: "assetusage" });
+    const out = el("div", {});
+    const gc = el("button", { class: "tiny", text: "\uC548 \uC4F0\uB294 \uC774\uBBF8\uC9C0 \uC815\uB9AC" });
+    const mb2 = (n) => `${(n / 1048576).toFixed(1)}MB`;
+    const line = (label2, n, bytes, hint) => el("div", { class: "row" }, [
+      el("span", { class: "grow", text: label2 }),
+      el("span", { class: "n", text: `${n.toLocaleString()}\uAC1C \xB7 ${mb2(bytes)}` }),
+      el("span", { class: "hint", style: { flexBasis: "100%" }, text: hint })
+    ]);
+    const draw2 = (u) => {
+      stats.replaceChildren(
+        line("\uBD07\xB7\uBAA8\uB4C8\uC774 \uC4F0\uB294 \uC774\uBBF8\uC9C0", u.live.blobs, u.live.bytes, "\uC9C0\uC6B0\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4."),
+        line(
+          "\uC2A4\uB0C5\uC0F7\uB9CC \uAC00\uC9C4 \uC774\uBBF8\uC9C0",
+          u.snapshot.blobs,
+          u.snapshot.bytes,
+          `\uC9C0\uC6B4 \uC5D0\uC14B\uC744 \uC2A4\uB0C5\uC0F7\uC73C\uB85C \uB418\uB3CC\uB9B4 \uB54C RisuAI\uC5D0 \uB2E4\uC2DC \uB4F1\uB85D\uD558\uB824\uACE0 \uB0A8\uACA8 \uB461\uB2C8\uB2E4 (\uBD07 \uC2A4\uB0C5\uC0F7 ${u.snapshots}\uAC1C). \uADF8 \uC2A4\uB0C5\uC0F7\uC744 \uC9C0\uC6B0\uBA74 \uC815\uB9AC \uB300\uC0C1\uC774 \uB429\uB2C8\uB2E4.`
+        ),
+        line(
+          "\uC544\uBB34\uB3C4 \uC548 \uC4F0\uB294 \uC774\uBBF8\uC9C0",
+          u.orphan.blobs,
+          u.orphan.bytes,
+          `${u.gcDays}\uC77C\uC774 \uC9C0\uB09C ${u.orphan.collectable.toLocaleString()}\uAC1C(${mb2(u.orphan.collectableBytes)})\uB97C \uC815\uB9AC\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4. \uB3D9\uAE30\uD654 \uC911\uC778 \uC774\uBBF8\uC9C0\uB97C \uC9C0\uC6B0\uC9C0 \uC54A\uC73C\uB824\uACE0 \uCD5C\uADFC \uAC83\uC740 \uAE30\uB2E4\uB9BD\uB2C8\uB2E4.`
+        )
+      );
+      gc.disabled = !u.orphan.collectable;
+    };
+    const reload = async () => {
+      try {
+        draw2(await state.assetUsage());
+      } catch (e) {
+        stats.replaceChildren(el("div", { class: "hint", text: "\uC800\uC7A5\uC18C \uD604\uD669\uC744 \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg20(e) }));
+      }
+    };
+    armed(gc, "\uC548 \uC4F0\uB294 \uC774\uBBF8\uC9C0 \uC815\uB9AC", "\uC815\uB9D0 \uC9C0\uC6B8\uAE4C\uC694?", async () => {
+      gc.disabled = true;
+      clear(out);
+      try {
+        const r = await state.assetGc();
+        out.appendChild(el("div", { class: "notice ok", text: `\uC774\uBBF8\uC9C0 ${r.removed}\uAC1C \xB7 ${mb2(r.freed)}\uB97C \uC9C0\uC6E0\uC2B5\uB2C8\uB2E4.` }));
+      } catch (e) {
+        out.appendChild(el("div", { class: "notice err", text: "\uC815\uB9AC\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg20(e) }));
+      }
+      await reload();
+    });
+    let seen = false;
+    onMount?.(async () => {
+      if (seen) await reload();
+    });
+    stats.appendChild(el("div", { class: "hint", text: "\uBD88\uB7EC\uC624\uB294 \uC911\u2026" }));
+    gc.disabled = true;
+    const card2 = el("div", { class: "card" }, [
+      el("h2", { text: "\uC774\uBBF8\uC9C0 \uC800\uC7A5\uC18C" }),
+      el("div", { class: "hint", text: "Hina\uAC00 RisuAI\uC5D0\uC11C \uC77D\uC5B4 \uC624\uAC70\uB098 \uB9CC\uB4E0 \uC774\uBBF8\uC9C0\uC785\uB2C8\uB2E4 (\uB0B4\uC6A9\uC774 \uAC19\uC73C\uBA74 \uD55C \uBC88\uB9CC \uC800\uC7A5). RisuAI \uCABD \uD30C\uC77C\uC740 \uAC74\uB4DC\uB9AC\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4." }),
+      stats,
+      el("div", { class: "row", style: { marginTop: "6px" } }, [gc]),
+      out
+    ]);
+    const first = () => {
+      if (!seen) {
+        seen = true;
+        void reload();
+      }
+    };
+    if (typeof IntersectionObserver === "function") {
+      const io2 = new IntersectionObserver((entries) => {
+        if (!entries.some((x) => x.isIntersecting)) return;
+        io2.disconnect();
+        first();
+      });
+      io2.observe(card2);
+    } else {
+      const load = el("button", { class: "ghost tiny", text: "\uD604\uD669 \uBD88\uB7EC\uC624\uAE30" });
+      load.addEventListener("click", () => {
+        load.remove();
+        first();
+      });
+      stats.replaceChildren(load);
+    }
+    return card2;
   }
   function msg20(e) {
     return e instanceof Error ? e.message : String(e);
@@ -18646,9 +18825,14 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         refreshers.push(refresh3);
       })]],
       // Its own tab (§1-102, user): some people have hundreds of bots.
-      ["\uC800\uC7A5\uACF5\uAC04 \uC815\uB9AC", [buildBotCleanupCard((refresh3) => {
-        refreshers.push(refresh3);
-      })]],
+      ["\uC800\uC7A5\uACF5\uAC04 \uC815\uB9AC", [
+        buildBotCleanupCard((refresh3) => {
+          refreshers.push(refresh3);
+        }),
+        buildAssetStoreCard((refresh3) => {
+          refreshers.push(refresh3);
+        })
+      ]],
       ["\uC815\uBCF4 \xB7 \uB85C\uADF8", [buildCatalogCard(), buildDebugCard(), aboutMount]]
     ];
     const bar3 = el("div", { class: "subtabs" });
@@ -19211,7 +19395,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.40"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.41"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -20402,16 +20586,24 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         b.addEventListener("click", async () => {
           b.disabled = true;
           try {
-            await state.cardRestore(c.id);
+            const r = await state.cardRestore(c.id);
             close();
-            shellNotice("\uCE74\uB4DC\xB7\uBD07 \uB85C\uC5B4\uBD81\xB7\uC2A4\uD06C\uB9BD\uD2B8\uB97C \uB418\uB3CC\uB838\uC2B5\uB2C8\uB2E4. \uB418\uB3CC\uB9AC\uAE30 \uC9C1\uC804 \uC0C1\uD0DC\uB3C4 \uC2A4\uB0C5\uC0F7\uC73C\uB85C \uB0A8\uACA8 \uB450\uC5C8\uC2B5\uB2C8\uB2E4.", "ok");
+            shellNotice(restoredText(r), "ok");
           } catch (e) {
             shellNotice("\uBCF5\uC6D0\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: " + msg25(e), "err");
           }
         });
         const title = el("div", {}, [
           el("span", { text: c.label || "(\uBB34\uC81C)" }),
-          opts.newest ? el("span", { class: "badge", style: { marginLeft: "6px" }, text: "\uCD5C\uC2E0 \uC2A4\uB0C5\uC0F7" }) : null
+          opts.newest ? el("span", { class: "badge", style: { marginLeft: "6px" }, text: "\uCD5C\uC2E0 \uC2A4\uB0C5\uC0F7" }) : null,
+          // A snapshot of another bot in this project folder (same name or a
+          // copy, §1-103): restorable here, and said so.
+          c.from ? el("span", {
+            class: "badge",
+            style: { marginLeft: "6px" },
+            text: `\u2194 ${c.from}`,
+            title: "\uAC19\uC740 \uD504\uB85C\uC81D\uD2B8 \uD3F4\uB354\uB97C \uC4F0\uB294 \uBD07\uC758 \uC2A4\uB0C5\uC0F7\uC785\uB2C8\uB2E4. \uC5EC\uAE30\uB85C \uB418\uB3CC\uB9B4 \uC218 \uC788\uC2B5\uB2C8\uB2E4"
+          }) : null
         ]);
         const ren = opts.auto ? null : el("button", { class: "ghost tiny", text: "\u270E", title: "\uC774\uB984 \uBC14\uAFB8\uAE30" });
         ren?.addEventListener("click", () => {
@@ -20477,6 +20669,13 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       clear(body);
       body.appendChild(el("div", { class: "hint", text: msg25(e) }));
     }
+  }
+  function restoredText(r) {
+    let t = (r.from ? `'${r.from}'\uC758 \uC2A4\uB0C5\uC0F7\uC73C\uB85C ` : "") + "\uCE74\uB4DC\xB7\uBD07 \uB85C\uC5B4\uBD81\xB7\uC2A4\uD06C\uB9BD\uD2B8\xB7\uC5D0\uC14B \uBAA9\uB85D\uC744 \uB418\uB3CC\uB838\uC2B5\uB2C8\uB2E4";
+    t += r.changes?.total ? ` (\uBC18\uC601\uD560 \uBCC0\uACBD ${r.changes.total}\uAC74).` : " (RisuAI\uC640 \uAC19\uC544 \uBC18\uC601\uD560 \uAC83\uC774 \uC5C6\uC2B5\uB2C8\uB2E4).";
+    if (r.assetsRevived) t += ` \uC5D0\uC14B ${r.assetsRevived}\uAC1C\uB294 \uBD07 \uBC18\uC601 \uB54C RisuAI\uC5D0 \uC774\uBBF8\uC9C0\uB97C \uB2E4\uC2DC \uB4F1\uB85D\uD569\uB2C8\uB2E4.`;
+    if (r.assetsLost) t += ` \uC5D0\uC14B ${r.assetsLost}\uAC1C\uB294 Hina\uC5D0 \uC774\uBBF8\uC9C0\uAC00 \uC5C6\uC5B4, RisuAI\uC5D0 \uD30C\uC77C\uC774 \uB0A8\uC544 \uC788\uC5B4\uC57C \uBCF4\uC785\uB2C8\uB2E4.`;
+    return t + " \uB418\uB3CC\uB9AC\uAE30 \uC9C1\uC804 \uC0C1\uD0DC\uB3C4 \uC2A4\uB0C5\uC0F7\uC73C\uB85C \uB0A8\uACA8 \uB450\uC5C8\uC2B5\uB2C8\uB2E4.";
   }
 
   // src/ui/tab-assets.ts
@@ -21259,13 +21458,14 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     } catch {
       return;
     }
-    if (!info || !info.suggested || !info.hashLike || ck !== state.activeCharKey) return;
+    if (!info || !info.suggested || !info.reason || ck !== state.activeCharKey) return;
     if (dismissed()[ck] === info.suggested) return;
     const tag = ck + "\0" + info.suggested + "\0" + info.folder;
     if (askedFor === tag) return;
     askedFor = tag;
-    const why = `\uC774 \uBD07\uC758 \uC791\uC5C5 \uD3F4\uB354\uAC00 \uC774\uB984\uC774 \uC815\uD574\uC9C0\uAE30 \uC804\uC5D0 \uC784\uC2DC \uC774\uB984(projects/${info.folder})\uC73C\uB85C \uB9CC\uB4E4\uC5B4\uC84C\uC2B5\uB2C8\uB2E4.`;
-    shellPrompt(`${why} \uBD07 \uC774\uB984\uC5D0 \uB9DE\uCDB0 projects/${info.suggested} \uB85C \uBC14\uAFC0\uAE4C\uC694? (\uD3F4\uB354 \uC548 \uD30C\uC77C\xB7AI \uBA54\uBAA8\xB7\uC5D0\uC14B \uADDC\uCE59\xB7\uC2A4\uD29C\uB514\uC624 \uACB0\uACFC\uB3C4 \uD568\uAED8 \uC62E\uAE41\uB2C8\uB2E4)`, [
+    const why = info.reason === "renamed" ? `\uBD07 \uC774\uB984\uC774 \uBC14\uB00C\uC5C8\uC9C0\uB9CC \uC791\uC5C5 \uD3F4\uB354\uB294 \uC61B \uC774\uB984(projects/${info.folder}) \uADF8\uB300\uB85C\uC785\uB2C8\uB2E4.` : `\uC774 \uBD07\uC758 \uC791\uC5C5 \uD3F4\uB354\uAC00 \uC774\uB984\uC774 \uC815\uD574\uC9C0\uAE30 \uC804\uC5D0 \uC784\uC2DC \uC774\uB984(projects/${info.folder})\uC73C\uB85C \uB9CC\uB4E4\uC5B4\uC84C\uC2B5\uB2C8\uB2E4.`;
+    const merge = info.merge ? ` \uC774\uBBF8 \uC788\uB294 projects/${info.suggested} \uD3F4\uB354\uC640 \uD569\uCE69\uB2C8\uB2E4(\uAC19\uC740 \uD30C\uC77C\uC774 \uC788\uC73C\uBA74 \uBC14\uAFB8\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4).` : "";
+    shellPrompt(`${why} \uBD07 \uC774\uB984\uC5D0 \uB9DE\uCDB0 projects/${info.suggested} \uB85C \uBC14\uAFC0\uAE4C\uC694? (\uD3F4\uB354 \uC548 \uD30C\uC77C\xB7AI \uBA54\uBAA8\xB7\uC5D0\uC14B \uADDC\uCE59\xB7\uC2A4\uD29C\uB514\uC624 \uACB0\uACFC\uB3C4 \uD568\uAED8 \uC62E\uAE41\uB2C8\uB2E4)${merge}`, [
       {
         label: `${info.suggested} \uB85C \uBC14\uAFB8\uAE30`,
         primary: true,
@@ -27223,14 +27423,14 @@ ${negative.value.trim()}
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.40"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.41"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
       healthEl.title = transport.versionGate;
     } else {
       healthEl.appendChild(el("span", { class: "hint", text: `\uBC31\uC5D4\uB4DC v${h.version}` }));
-      const behind = backendBehind("0.15.40", h.version, h.installKind);
+      const behind = backendBehind("0.15.41", h.version, h.installKind);
       if (behind) {
         const b = el("button", { class: "ghost tiny behindchip", text: "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8 \uD544\uC694", title: behind });
         b.addEventListener("click", () => {
@@ -27331,7 +27531,7 @@ ${negative.value.trim()}
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.15.40" }),
+        el("span", { class: "dim", text: "v0.15.41" }),
         healthEl,
         el("span", { class: "spacer" }),
         // 승인 / 반영 for the whole bot, from every tab (§1-76).
@@ -27685,6 +27885,6 @@ ${negative.value.trim()}
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.15.40"} loaded`);
+    console.log(`[risu-hina] v${"0.15.41"} loaded`);
   })();
 })();

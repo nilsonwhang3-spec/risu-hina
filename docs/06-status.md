@@ -1,4 +1,6 @@
-# 06. Implementation status — as of 2026-10-10 (v0.15.40, Risu Hina)
+# 06. Implementation status — as of 2026-10-11 (v0.15.41, Risu Hina)
+
+## 0.15.41 (2026-10-11): §1-103~105 shared snapshots, image store, proposal progress, 새 대화, workspace speed, renamed bot folders
 
 ## §1-105 (2026-10-11): a renamed bot's folder follows the name; the AI renames folders the right way
 
