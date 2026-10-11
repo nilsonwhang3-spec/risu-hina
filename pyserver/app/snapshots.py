@@ -158,17 +158,24 @@ def restore(chat_key: str, checkpoint_id: str) -> dict:
 # functions rather than nullable-ing chat_key: every consumer above assumes a
 # chat (markdown, message_count), and a bot snapshot has neither.
 
-def create_card(char_key: str, label: str, kind: str = "user") -> str:
+def create_card(char_key: str, label: str, kind: str = "user", *, baseline: bool = False) -> str:
     """Snapshot the bot as one unit: card fields, scripts, global lorebook.
-    `kind` as in create()."""
+    `kind` as in create().
+
+    `baseline=True` snapshots what RisuAI holds as of the last read rather
+    than the working copy - the card as it was before a 반영 that is about
+    to be (or has just been) written (§1-103)."""
     _check_kind(kind)
     rows = cardmod.rows_for_checkpoint(char_key)
+    lore = store.lore_rows_global(char_key)
+    if baseline:
+        rows, lore = _as_baseline(rows, lore)
     cid = uuid.uuid4().hex
     db.execute(
         "INSERT INTO card_checkpoints(id, char_key, label, fields_json, scripts_json, "
         "lore_json, created_at, kind) VALUES(?,?,?,?,?,?,?,?)",
         (cid, char_key, label, db.js(rows["fields"]), db.js(rows["scripts"]),
-         db.js(store.lore_rows_global(char_key)), db.now(), kind),
+         db.js(lore), db.now(), kind),
     )
     if kind == "auto":
         prune_auto_card(char_key)
@@ -179,6 +186,24 @@ def create_card(char_key: str, label: str, kind: str = "user") -> str:
         (char_key, char_key, keep),
     )
     return cid
+
+
+def _as_baseline(rows: dict, lore: list[dict]) -> tuple[dict, list[dict]]:
+    """Working rows turned into the baseline they sit on: added rows dropped,
+    every other row back to its original, in RisuAI's order."""
+    def order(r: dict) -> int:
+        return int(r["base_seq"]) if r.get("base_seq") is not None else int(r.get("seq") or 0)
+    fields = []
+    for r in rows["fields"]:
+        if r.get("original") is None:
+            continue
+        fields.append({**r, "body": r["original"], "extra_json": None,
+                       "seq": order(r) if r.get("field") == cardmod.LIST_FIELD else r.get("seq")})
+    scripts_ = [{**r, "entry_json": r["original_json"], "origin": "original", "seq": order(r)}
+                for r in rows["scripts"] if r.get("original_json") is not None and r.get("origin") != "added"]
+    lore_ = [{**r, "entry_json": r["original_json"], "origin": "original", "seq": order(r)}
+             for r in lore if r.get("original_json") is not None and r.get("origin") != "added"]
+    return {"fields": fields, "scripts": scripts_}, lore_
 
 
 def prune_auto_card(char_key: str, keep: int | None = None) -> int:
@@ -195,29 +220,68 @@ def prune_auto_card(char_key: str, keep: int | None = None) -> int:
     return cur.rowcount or 0
 
 
+def mates(char_key: str) -> list[str]:
+    """The bots whose snapshots this bot shares: itself, then every bot in
+    the same project folder - its family and the bots of (almost) the same
+    name (workspace.folder_mates, §1-94). A creator keeps v0.2 and v0.3 of
+    one bot as two RisuAI characters; a snapshot taken on either is the
+    same bot's history (§1-103). A module or the home chat shares nothing."""
+    from . import home, workspace
+    from . import modules as modmod
+    if home.is_home(char_key) or modmod.is_module_key(char_key):
+        return [char_key]
+    try:
+        return workspace.folder_mates(char_key)
+    except Exception:  # noqa: BLE001 - a folder problem must not hide the bot's own list
+        return [char_key]
+
+
 def listing_card(char_key: str) -> list[dict]:
+    """This bot's snapshots and its folder mates', newest first. A mate's row
+    says whose it is (`from`), so the list can tell them apart."""
+    keys = mates(char_key)
+    marks = ",".join("?" * len(keys))
     rows = db.query(
-        "SELECT id, label, created_at, kind FROM card_checkpoints "
-        "WHERE char_key = ? ORDER BY created_at DESC",
-        (char_key,),
+        f"SELECT c.id, c.label, c.created_at, c.kind, c.char_key, c.source_name, "
+        f"       COALESCE(ch.name, '') AS bot_name "
+        f"FROM card_checkpoints c LEFT JOIN characters ch ON ch.char_key = c.char_key "
+        f"WHERE c.char_key IN ({marks}) ORDER BY c.created_at DESC",
+        keys,
     )
-    return [dict(r) for r in rows]
+    out = []
+    for r in rows:
+        d = {"id": r["id"], "label": r["label"], "created_at": r["created_at"], "kind": r["kind"]}
+        own = r["char_key"] == char_key
+        if not own or r["source_name"]:
+            d["from"] = r["source_name"] or r["bot_name"] or r["char_key"]
+            d["fromKey"] = r["char_key"]
+        d["own"] = own
+        out.append(d)
+    return out
+
+
+def _card_row(char_key: str, checkpoint_id: str):
+    """A snapshot this bot may use: its own or a folder mate's."""
+    keys = mates(char_key)
+    marks = ",".join("?" * len(keys))
+    row = db.one(f"SELECT * FROM card_checkpoints WHERE id = ? AND char_key IN ({marks})",
+                 (checkpoint_id, *keys))
+    if row is None:
+        raise LookupError(f"unknown checkpoint: {checkpoint_id}")
+    return row
 
 
 def rename_card(char_key: str, checkpoint_id: str, label: str) -> None:
     text = (label or "").strip()[:80]
     if not text:
         raise ValueError("스냅샷 이름을 입력해 주세요")
-    if db.one("SELECT id FROM card_checkpoints WHERE id = ? AND char_key = ?", (checkpoint_id, char_key)) is None:
-        raise LookupError(f"unknown checkpoint: {checkpoint_id}")
-    db.execute("UPDATE card_checkpoints SET label = ? WHERE id = ? AND char_key = ?",
-               (text, checkpoint_id, char_key))
+    _card_row(char_key, checkpoint_id)
+    db.execute("UPDATE card_checkpoints SET label = ? WHERE id = ?", (text, checkpoint_id))
 
 
 def delete_card(char_key: str, checkpoint_id: str) -> None:
-    if db.one("SELECT id FROM card_checkpoints WHERE id = ? AND char_key = ?", (checkpoint_id, char_key)) is None:
-        raise LookupError(f"unknown checkpoint: {checkpoint_id}")
-    db.execute("DELETE FROM card_checkpoints WHERE id = ? AND char_key = ?", (checkpoint_id, char_key))
+    _card_row(char_key, checkpoint_id)
+    db.execute("DELETE FROM card_checkpoints WHERE id = ?", (checkpoint_id,))
 
 
 def clear_card(char_key: str, keep: int = 0) -> int:
@@ -237,20 +301,61 @@ def clear_card(char_key: str, keep: int = 0) -> int:
 
 
 def restore_card(char_key: str, checkpoint_id: str) -> dict:
-    row = db.one("SELECT * FROM card_checkpoints WHERE id = ? AND char_key = ?",
-                 (checkpoint_id, char_key))
-    if row is None:
-        raise LookupError(f"unknown checkpoint: {checkpoint_id}")
+    """Make the working copy what the snapshot holds, over today's baseline
+    (card.restore_content), so the change list is exactly what 반영 will do -
+    this works after a 반영 and from a folder mate's snapshot alike (§1-103).
+
+    Asset references RisuAI's card does not hold now come back as pending
+    keys over the bytes Hina stored, so 반영 registers the images again:
+    RisuAI deletes unreferenced asset files when it boots."""
+    row = _card_row(char_key, checkpoint_id)
     # Same as chat restore: snapshot first so restoring is undoable, and only
     # ever one of them (see restore()).
     db.execute("DELETE FROM card_checkpoints WHERE char_key = ? AND label = 'restore 직전' "
                "AND kind = 'auto'", (char_key,))
     create_card(char_key, "restore 직전", kind="auto")
-    counts = cardmod.restore_rows(char_key, {
-        "fields": db.unjs(row["fields_json"], []) or [],
-        "scripts": db.unjs(row["scripts_json"], []) or [],
-    })
-    lore_n = store.restore_lore_rows_global(char_key, db.unjs(row["lore_json"], []) or [])
-    log.info("restored card char=%s checkpoint=%s fields=%s scripts=%s lore=%s",
-             char_key, checkpoint_id, counts["fields"], counts["scripts"], lore_n)
-    return {"ok": True, "restored": checkpoint_id, **counts, "lore": lore_n}
+    with db.transaction():
+        counts = cardmod.restore_content(char_key, {
+            "fields": db.unjs(row["fields_json"], []) or [],
+            "scripts": db.unjs(row["scripts_json"], []) or [],
+        })
+        lore_n = store.restore_lore_content_global(char_key, db.unjs(row["lore_json"], []) or [])
+        assets_out = _revive_assets(char_key)
+    log.info("restored card char=%s checkpoint=%s (from %s) %s lore=%s assets=%s",
+             char_key, checkpoint_id, row["char_key"], counts, lore_n, assets_out)
+    out = {"ok": True, "restored": checkpoint_id, **counts, "lore": lore_n, **assets_out,
+           "changes": cardmod.changes(char_key)}
+    if row["char_key"] != char_key:
+        bot = db.one("SELECT name FROM characters WHERE char_key = ?", (row["char_key"],))
+        out["from"] = row["source_name"] or (bot["name"] if bot else "") or row["char_key"]
+    return out
+
+
+def _revive_assets(char_key: str) -> dict:
+    """Point every working asset reference RisuAI's card lacks at a pending
+    key over the stored bytes (assets.revive). Counts what came back and what
+    could not: a key whose bytes Hina never stored shows only if RisuAI
+    still has the file."""
+    from . import assets
+    have = cardmod.baseline_asset_keys(char_key)
+    revived = lost = 0
+    for r in cardmod.scripts(char_key, cardmod.ASSET_KIND):
+        key = str(r["entry"].get("key") or "")
+        if not key or key in have or key.startswith(assets.PENDING_PREFIX):
+            continue
+        pending = assets.revive(key)
+        if pending is None:
+            lost += 1
+            continue
+        db.execute("UPDATE card_scripts SET entry_json = ? WHERE id = ?",
+                   (db.js({**r["entry"], "key": pending}), r["id"]))
+        revived += 1
+    img = db.one("SELECT id, body FROM card_fields WHERE char_key = ? AND field = 'image' AND seq = 0", (char_key,))
+    if img is not None and img["body"] and img["body"] not in have:
+        pending = assets.revive(str(img["body"]))
+        if pending is None:
+            lost += 1
+        elif pending != img["body"]:
+            db.execute("UPDATE card_fields SET body = ? WHERE id = ?", (pending, img["id"]))
+            revived += 1
+    return {"assetsRevived": revived, "assetsLost": lost}

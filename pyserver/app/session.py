@@ -17,6 +17,7 @@ import dataclasses
 import asyncio
 import json
 import threading
+import time
 import uuid
 from contextlib import ExitStack
 from typing import Any, AsyncGenerator
@@ -589,6 +590,7 @@ async def run(session_id: str, prompt: str, mode: str = "", persona: str = "", *
 
     model_name = (config.section("agent").get("model") or "")
     text_acc: list[str] = []
+    drafts: dict = {}
     captured: list = []
     capture_stack = ExitStack()
 
@@ -632,7 +634,7 @@ async def run(session_id: str, prompt: str, mode: str = "", persona: str = "", *
                     break
                 pending = asyncio.ensure_future(it.__anext__())
                 _checkpoint(session_id, ev)
-                for line in _translate(ev, text_acc):
+                for line in _translate(ev, text_acc, drafts):
                     yield line
                 # Side events land right after the event whose tool pushed
                 # them - "showed it mid-turn" is the whole point.
@@ -812,7 +814,11 @@ def _explain(e: Exception) -> str:
     return raw
 
 
-def _translate(ev: Any, acc: list[str]) -> list[str]:
+# How often a tool call still being written reports its size (§1-103).
+DRAFT_EVERY_S = 1.0
+
+
+def _translate(ev: Any, acc: list[str], drafts: dict | None = None) -> list[str]:
     """pydantic-ai events -> our NDJSON vocabulary.
 
     Only what the panel renders is forwarded; the rest is dropped rather than
@@ -827,11 +833,27 @@ def _translate(ev: Any, acc: list[str]) -> list[str]:
             out.append(_line({"type": "text", "text": part.content}))
         elif getattr(part, "tool_name", None):
             out.append(_line({"type": "tool", "name": part.tool_name}))
+            if drafts is not None:
+                args = getattr(part, "args", None)
+                drafts[ev.index] = {"name": part.tool_name, "at": time.monotonic(),
+                                    "chars": len(args) if isinstance(args, str) else 0}
     elif isinstance(ev, PartDeltaEvent):
         delta = ev.delta
         if isinstance(delta, TextPartDelta) and delta.content_delta:
             acc.append(delta.content_delta)
             out.append(_line({"type": "text", "text": delta.content_delta}))
+        elif drafts is not None and type(delta).__name__ == "ToolCallPartDelta":
+            # The model is still WRITING the call: 740 ids is minutes of
+            # arguments before the tool runs and its card can appear, and the
+            # panel showed nothing the whole time. Its size, once a second.
+            d = drafts.setdefault(ev.index, {"name": "", "at": 0.0, "chars": 0})
+            d["name"] = d["name"] or (getattr(delta, "tool_name_delta", None) or "")
+            a = getattr(delta, "args_delta", None)
+            d["chars"] += len(a) if isinstance(a, str) else len(json.dumps(a, ensure_ascii=False)) if a else 0
+            now = time.monotonic()
+            if now - d["at"] >= DRAFT_EVERY_S:
+                d["at"] = now
+                out.append(_line({"type": "toolDraft", "name": d["name"], "chars": d["chars"]}))
     else:
         name = type(ev).__name__
         if name == "FunctionToolCallEvent":

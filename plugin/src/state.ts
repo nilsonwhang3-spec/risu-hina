@@ -301,6 +301,16 @@ export interface HinaBot {
   state: '' | 'live' | 'trash' | 'missing';
   trashTime: number; purgeAt: number; checkedAt: number; updatedAt: number;
   chats: number; turns: number; pendingActions: number; liveNamesake: boolean; charxReady: boolean;
+  /** Bot snapshots, and the live bot of the same name that inherits them on 삭제 (§1-103). */
+  snapshots?: number; snapshotHeir?: string;
+}
+
+/** The image store by who still needs each file (GET /assets/usage, §1-103). */
+export interface AssetUsage {
+  live: { blobs: number; bytes: number };
+  snapshot: { blobs: number; bytes: number };
+  orphan: { blobs: number; bytes: number; collectable: number; collectableBytes: number };
+  gcDays: number; snapshots: number;
 }
 
 export interface CharxBuilt {
@@ -2485,8 +2495,17 @@ class AppState {
   }
 
   /** The same for many at once; one refusal does not stop the rest. */
-  async forgetBots(charKeys: string[]): Promise<{ forgotten: { name: string }[]; failed: { charKey: string; error: string }[] }> {
+  async forgetBots(charKeys: string[]): Promise<{ forgotten: { name: string; snapshotsHanded?: number; heir?: string }[]; failed: { charKey: string; error: string }[] }> {
     return await transport.post('/bots/forget', { charKeys }, 300_000);
+  }
+
+  async assetUsage(): Promise<AssetUsage> {
+    return await transport.get<AssetUsage>('/assets/usage', {}, 120_000);
+  }
+
+  /** Remove store files nothing references - not a bot, not a snapshot - older than `days`. */
+  async assetGc(days?: number): Promise<{ removed: number; freed: number; orphanKeys: number }> {
+    return await transport.post('/assets/gc', days == null ? {} : { days }, 300_000);
   }
 
   /** A .charx of any Hina bot (not only the open one), assets it lacks left out. */
@@ -3214,7 +3233,9 @@ class AppState {
     await transport.post('/card/checkpoint', { charKey: this.botKey, label });
   }
 
-  async cardCheckpoints(): Promise<{ id: string; label: string; created_at: number; kind?: string }[]> {
+  /** This bot's snapshots and those of the bots sharing its folder (same
+   * name / family, §1-103) - a mate's row carries `from`, its bot's name. */
+  async cardCheckpoints(): Promise<{ id: string; label: string; created_at: number; kind?: string; from?: string; own?: boolean }[]> {
     const r = await transport.get<{ checkpoints: any[] }>('/card/checkpoints', { charKey: this.botKey });
     return r.checkpoints ?? [];
   }
@@ -3232,10 +3253,12 @@ class AppState {
     return r.deleted;
   }
 
-  async cardRestore(id: string): Promise<void> {
-    await transport.post('/card/checkpoint/restore', { charKey: this.botKey, id });
+  async cardRestore(id: string): Promise<{ from?: string; assetsRevived?: number; assetsLost?: number; changes?: { total?: number } }> {
+    const r = await transport.post<{ from?: string; assetsRevived?: number; assetsLost?: number; changes?: { total?: number } }>(
+      '/card/checkpoint/restore', { charKey: this.botKey, id });
     this.bump();
     void this.refreshBotChanges();
+    return r ?? {};
   }
 
   /** The host update a card patch calls for, or null when nothing differs. */

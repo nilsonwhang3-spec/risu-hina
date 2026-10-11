@@ -1,5 +1,40 @@
 # 06. Implementation status — as of 2026-10-10 (v0.15.40, Risu Hina)
 
+## §1-103 (2026-10-11): shared bot snapshots, restore over today's baseline, image store, "제안 작성 중"
+
+- **Asked:** (1) can bots with (almost) the same name share snapshots like they share a folder; (2) can a
+  deletion of assets be restored from a snapshot - designed together with orphan asset / orphan bot cleanup;
+  (3) a 740-asset deletion proposal took minutes to show its card with nothing on screen.
+- **Found while checking (2):** a bot snapshot restore put the snapshot's rows back *baseline included*. After
+  a 반영 that is wrong: the restored rows read as unchanged (0 changes, 반영 sent nothing), their `before` no
+  longer matched live, and the next open deleted them again. And the automatic "반영 직전" snapshot was taken
+  in h_card_commit from the working copy, i.e. the state *after* the write - restoring it could not undo it.
+  RisuAI also deletes asset files no character references on every boot (bootstrap.ts `cleanChunks`, when not
+  account-synced), so a restored reference may name a file RisuAI no longer has.
+- **Restore = content over today's baseline:** `card.restore_content` / `store.restore_lore_content_global`
+  keep original/original_json/base_seq and pair the snapshot's rows with the baseline via `merge.match`
+  (pair → unchanged/edited, baseline-only → deleted, snapshot-only → added). The change list is exactly what
+  반영 will do. Works the same before 반영 (restores to "no change"), after 반영, and across bots.
+- **Images come back:** after a restore, every asset reference (and the profile picture) the RisuAI card does
+  not hold gets a pending key over the bytes Hina stored (`assets.revive`), so 반영 registers them again through
+  `saveAsset` (same content key). References whose bytes Hina never had are counted (`assetsLost`).
+- **"반영 직전" is now the card before the write:** `create_card(baseline=True)` snapshots the rows' baseline.
+- **Shared snapshots (1):** `workspace.folder_mates` = bots pinned to the same folder (family + name_stem,
+  §1-94). `snapshots.listing_card` lists all of them; a mate's row carries `from` (badge `↔ 이름` in the 버전
+  popover and the landing list); restore/rename/delete accept a mate's id; `restore 직전` stays the bot's own.
+  Forgetting a bot (저장공간 정리) hands its snapshots to a live mate (`source_name` column keeps the origin)
+  instead of deleting them; the list says where they will go.
+- **Image store (orphan assets):** GC never drops a key a bot snapshot references (`snapshot_keys`); live keys
+  now include deleted-not-yet-반영 and baseline keys. `GET /assets/usage` splits the store into live /
+  snapshot-only / orphan; 저장공간 정리 has an 이미지 저장소 card (loads when scrolled into view) with
+  "안 쓰는 이미지 정리". Deleting snapshots is what frees snapshot-only images.
+- **(3) Proposal progress:** `session._translate` turns ToolCallPartDelta into `toolDraft {name, chars}` at most
+  once a second; the panel shows "제안 작성 중… N자". When streamed text stops for 2.5s the "…중입니다" row comes
+  back ("다음 단계를 준비하는 중입니다…") - providers that deliver a call whole send no deltas. Root cause fix:
+  `propose_assets_delete(name_filter/names/field/invert, preview)` picks rows on the server, so the model never
+  writes hundreds of ids; the instructions point bulk deletes at it.
+- Verified: tests/test_snapshot_share.py (new, in the gate), gate ALL GREEN.
+
 ## 0.15.40 (2026-10-10): §1-101~102 landing pages, studio layout, 1장 finish, reference bots, 저장공간 정리
 
 ## §1-102 (2026-10-10): bots RisuAI no longer has, no more 새 봇으로 저장, fragment editor height

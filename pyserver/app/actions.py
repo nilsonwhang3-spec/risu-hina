@@ -462,7 +462,14 @@ def _card_checkpoint_create(a: dict) -> str:
 def _card_checkpoint_restore(a: dict) -> str:
     from . import snapshots
     out = snapshots.restore_card(a["charKey"], a["args"]["id"])
-    return f"봇 스냅샷으로 되돌렸습니다 (필드 {out['fields']}, 스크립트 {out['scripts']})"
+    text = f"봇 스냅샷으로 되돌렸습니다 (필드 {out['fields']}, 스크립트 {out['scripts']}, 반영할 변경 {out['changes']['total']}건)"
+    if out.get("from"):
+        text += f" - '{out['from']}'의 스냅샷"
+    if out.get("assetsRevived"):
+        text += f"; 에셋 {out['assetsRevived']}개는 반영 때 RisuAI에 다시 등록됩니다"
+    if out.get("assetsLost"):
+        text += f"; 에셋 {out['assetsLost']}개는 Hina에 이미지가 없어 RisuAI에 파일이 남아 있어야 보입니다"
+    return text
 
 
 def _asset_stage(a: dict) -> str:

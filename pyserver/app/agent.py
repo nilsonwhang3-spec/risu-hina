@@ -258,8 +258,10 @@ Workspace rules (mandatory - every bot shares ONE global space):
   Review Regex/global-note references separately when the user also asks to update their use.
   After approval, names remain in Hina's working copy until 봇 반영.
   **Several at once = one proposal**: additions via propose_assets_add(list), deletions via
-  propose_scripts_delete(ids) - one card per item makes approval as slow as the count and buries
-  the screen in cards.
+  propose_assets_delete(name_filter/names/field, preview first) - the server picks the rows, so
+  never write out dozens of ids (that alone takes minutes); propose_scripts_delete(ids) only for a
+  few hand-picked ones. One card per item makes approval as slow as the count and buries the
+  screen in cards. A deletion is undone by restoring a bot snapshot (list_bot_snapshots).
   RisuAI rule: **several assets with the same name = a random pool** ({{asset::name}} picks one at
   random). `_1`, `_2` in charx filenames only make filenames unique; they are not the name. A
   trailing `.png` in a name is usually a mistake (calls use the bare name); bulk removal is the
@@ -1920,6 +1922,54 @@ def build(model: Any = None) -> Agent[Deps]:
         return out
 
     @agent.tool
+    def propose_assets_delete(ctx: RunContext[Deps], reason: str, name_filter: str = '', names: str = '',
+                              field: str = 'all', invert: bool = False, preview: bool = True) -> str:
+        r"""Delete REGISTERED CARD assets chosen by a rule, in ONE proposal - the server picks the rows.
+
+        Use this instead of listing ids for anything more than a handful: writing hundreds of ids
+        takes minutes before the card can appear. name_filter: Python regex searched in the name
+        (e.g. '^nsfw_', '_\d+$'); names: comma-separated exact names; both given = either matches;
+        neither = every asset of `field`. field: additional/emotion/cc/all. invert=True deletes
+        what does NOT match (keep-list). First preview=True (count + examples), explain it, then
+        preview=False. A name used by several rows (a random pool) deletes all of them. Deleted
+        assets can be brought back from a bot snapshot (the one taken at 반영 holds them).
+        """
+        import re as _re
+        if field not in ('additional', 'emotion', 'cc', 'all'):
+            return 'field: additional, emotion, cc, all'
+        try:
+            rx = _re.compile(name_filter) if name_filter else None
+        except _re.error as e:
+            return f'정규식 오류: {e}'
+        wanted = {n.strip() for n in (names or '').split(',') if n.strip()}
+        rows = cardmod.scripts(ctx.deps.char_key, cardmod.ASSET_KIND)
+        hits = []
+        for r in rows:
+            e = r['entry']
+            if field != 'all' and e.get('field') != field:
+                continue
+            name = str(e.get('name') or '')
+            match = (not rx and not wanted) or (rx is not None and bool(rx.search(name))) or name in wanted
+            if match != bool(invert):
+                hits.append(r)
+        if not hits:
+            return f'조건에 맞는 에셋이 없습니다 (전체 {len(rows)}개)'
+        if len(hits) > 5000:
+            return f'{len(hits)}개 - 한 제안은 5000개까지입니다. name_filter 로 나누세요'
+        by_field: dict[str, int] = {}
+        for r in hits:
+            f = str(r['entry'].get('field') or 'additional')
+            by_field[f] = by_field.get(f, 0) + 1
+        names_hit = [str(r['entry'].get('name') or '') for r in hits]
+        if preview:
+            return json.dumps({'delete': len(hits), 'of': len(rows), 'byField': by_field,
+                               'examples': names_hit[:15], 'kept': len(rows) - len(hits)}, ensure_ascii=False)
+        rule = name_filter or (f'이름 {len(wanted)}개' if wanted else '전체')
+        return _propose(ctx, 'script_delete_many',
+                        f"에셋 참조 {len(hits)}개 삭제 · {field} · {'제외 ' if invert else ''}{rule} — {reason}",
+                        {'ids': [r['id'] for r in hits]})
+
+    @agent.tool
     def propose_script_delete(ctx: RunContext[Deps], script_id: str, reason: str) -> str:
         """Propose deleting a Regex or trigger entry (for several, propose_scripts_delete)."""
         cur = cardmod.script_entry(script_id)
@@ -2109,11 +2159,18 @@ def build(model: Any = None) -> Agent[Deps]:
 
     @agent.tool
     def list_bot_snapshots(ctx: RunContext[Deps]) -> str:
-        """The bot (card) snapshots. Separate from chat snapshots."""
+        """The bot (card) snapshots, newest first. Separate from chat snapshots.
+
+        Bots in the same project folder (versions/copies of the same name) share
+        snapshots; such a row says whose it is, and it can be restored here too."""
         rows = snapshots.listing_card(ctx.deps.char_key)
         if not rows:
             return "봇 스냅샷이 없습니다"
-        return "\n".join(f"id={r['id']} {r['label'] or '(이름 없음)'}" for r in rows)
+        return "\n".join(
+            f"id={r['id']} {r['label'] or '(이름 없음)'}"
+            + (" [자동]" if r.get("kind") == "auto" else "")
+            + (f" [같은 이름 봇 '{r['from']}'의 스냅샷]" if r.get("from") else "")
+            for r in rows)
 
     @agent.tool
     def propose_bot_snapshot(ctx: RunContext[Deps], label: str) -> str:
@@ -2123,9 +2180,17 @@ def build(model: Any = None) -> Agent[Deps]:
 
     @agent.tool
     def propose_bot_restore(ctx: RunContext[Deps], snapshot_id: str, reason: str) -> str:
-        """Propose restoring a bot snapshot. Overwrites the card working copy wholesale."""
+        """Propose restoring a bot snapshot (its own or a same-name bot's, see list_bot_snapshots).
+
+        The working copy becomes the snapshot's card, scripts, asset list and bot lorebook; the
+        change list then shows what 봇 반영 will do. Deleted assets come back: their images are
+        registered in RisuAI again on 반영. Nothing reaches RisuAI before 반영."""
+        snap = next((r for r in snapshots.listing_card(ctx.deps.char_key) if r["id"] == snapshot_id), None)
+        if snap is None:
+            return "없는 봇 스냅샷입니다 - list_bot_snapshots 로 id 를 확인하세요"
+        whose = f" ('{snap['from']}'의 스냅샷)" if snap.get("from") else ""
         return _propose(ctx, "card_checkpoint_restore",
-                        f"봇 스냅샷 {snapshot_id} 로 되돌리기 — {reason} (카드 작업본을 덮어씁니다)",
+                        f"봇 스냅샷 “{snap['label'] or snapshot_id}”{whose}로 되돌리기 — {reason} (카드 작업본을 덮어씁니다)",
                         {"id": snapshot_id})
 
     @agent.tool

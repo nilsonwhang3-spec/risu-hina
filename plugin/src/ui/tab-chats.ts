@@ -207,7 +207,7 @@ export function refreshBootBox(mount: HTMLElement): void {
 
 // --- cached lists --------------------------------------------------------------
 
-interface Snap { id: string; label: string; created_at: number; kind?: string }
+interface Snap { id: string; label: string; created_at: number; kind?: string; from?: string }
 
 /**
  * One fetch per key; the boxes waiting on it are filled in place. A newer key
@@ -455,7 +455,12 @@ function snapRow(c: Snap, deletable: boolean, mount: HTMLElement): HTMLElement {
     }
   });
   row.append(
-    el('span', { class: 'grow', text: c.label || '(무제)' }),
+    el('span', { class: 'grow' }, [
+      el('span', { text: c.label || '(무제)' }),
+      // Another bot of this project folder's snapshot (§1-103).
+      c.from ? el('span', { class: 'badge', style: { marginLeft: '6px' }, text: `↔ ${c.from}`,
+                            title: '같은 프로젝트 폴더를 쓰는 봇의 스냅샷입니다' }) : null,
+    ]),
     el('span', { class: 'n', text: fmtTime(c.created_at * 1000) }),
     edit,
   );

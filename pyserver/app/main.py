@@ -655,6 +655,11 @@ def h_assets_gc(arg: dict) -> dict:
     return assets.gc(None if days in (None, "") else float(days))
 
 
+def h_assets_usage(arg: dict) -> dict:
+    """The image store split live / snapshot-only / orphan (§1-103)."""
+    return assets.usage()
+
+
 def h_assets_blob(arg: dict) -> Any:
     raise ApiError(500, "assets/blob must be dispatched directly")
 
@@ -2614,10 +2619,15 @@ def h_card_changes(arg: dict) -> dict:
 
 
 def h_card_commit(arg: dict) -> dict:
-    """The card write landed. Snapshot, and let the client re-read (see h_commit)."""
+    """The card write landed. Snapshot, and let the client re-read (see h_commit).
+
+    The snapshot is the card as RisuAI held it BEFORE this write - the rows'
+    baseline, which the re-read is about to replace. It used to be the
+    working copy, i.e. what had just been written: a "반영 직전" that held the
+    state after the 반영, so restoring it could not undo one (§1-103)."""
     ck = _char(arg)
     pending = cardmod.changes(ck)
-    snapshots.create_card(ck, str(arg.get("label") or "반영 직전"), kind="auto")
+    snapshots.create_card(ck, str(arg.get("label") or "반영 직전"), kind="auto", baseline=True)
     log.info("card commit char=%s shipped %s", ck, pending.get("total"))
     return {"charKey": ck, "shipped": pending.get("total"), "changes": pending}
 
@@ -2928,6 +2938,7 @@ ROUTES: dict[str, Handler] = {
     "GET /assets/status": h_assets_status,
     "GET /assets/list": h_assets_list,
     "POST /assets/gc": h_assets_gc,
+    "GET /assets/usage": h_assets_usage,
     "GET /assets/blob": h_assets_blob,
     "POST /assets/blob": h_assets_blob,
     "POST /files/download": h_file_download,

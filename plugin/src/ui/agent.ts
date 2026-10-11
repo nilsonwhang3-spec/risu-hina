@@ -1004,10 +1004,18 @@ export class AgentPanel {
 
     // Set when a propose_* / stage_* call starts; its toolResult draws the card.
     let proposingTool = false;
+    // Text hides the "…중입니다" row; when the text stops and nothing else
+    // comes, the model is usually writing a tool call (a 740-asset proposal
+    // took minutes), so the row comes back instead of the turn looking over.
+    let quietTimer: ReturnType<typeof setTimeout> | null = null;
+    const quiet = (): void => {
+      if (quietTimer !== null) { clearTimeout(quietTimer); quietTimer = null; }
+    };
     try {
       for await (const ev of state.agentChat(prompt, abort.signal)) {
         if (this.destroyed) break;
         const e = ev as Record<string, unknown>;
+        quiet();
         if (e.type !== 'text') flushText();
         switch (e.type) {
           case 'plan': {
@@ -1063,6 +1071,17 @@ export class AgentPanel {
             // it comes back the moment the model turns to a tool again.
             setThinking(false);
             scheduleText(node);
+            quietTimer = setTimeout(() => { quietTimer = null; setThinking(true, '다음 단계를 준비하는 중입니다…'); }, 2500);
+            break;
+          }
+          case 'toolDraft': {
+            // The model is still writing a tool call's arguments (§1-103):
+            // no card can exist until it finishes, so say how far it got.
+            const name = String(e.name ?? '');
+            const chars = Number(e.chars ?? 0);
+            const label = PROPOSING_TOOL.test(name) ? '제안 작성 중' : `${TOOL_GLYPH[name]?.[1] ?? (name || '도구 호출')} 준비 중`;
+            setThinking(true, `${label}… ${chars.toLocaleString()}자`);
+            this.scroll();
             break;
           }
           case 'tool': {
@@ -1244,6 +1263,7 @@ export class AgentPanel {
       }
       void clientLog('error', 'agent chat failed', { error: String(e) });
     } finally {
+      quiet();
       flushText();
       stopPermitPoll();
       this.abortCtl = null;

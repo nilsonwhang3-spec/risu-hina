@@ -441,9 +441,9 @@ async function openVersions(anchor: HTMLElement): Promise<void> {
       b.addEventListener('click', async () => {
         (b as HTMLButtonElement).disabled = true;
         try {
-          await state.cardRestore(c.id);
+          const r = await state.cardRestore(c.id);
           close();
-          shellNotice('카드·봇 로어북·스크립트를 되돌렸습니다. 되돌리기 직전 상태도 스냅샷으로 남겨 두었습니다.', 'ok');
+          shellNotice(restoredText(r), 'ok');
         } catch (e) {
           shellNotice('복원에 실패했습니다: ' + msg(e), 'err');
         }
@@ -451,6 +451,10 @@ async function openVersions(anchor: HTMLElement): Promise<void> {
       const title = el('div', {}, [
         el('span', { text: c.label || '(무제)' }),
         opts.newest ? el('span', { class: 'badge', style: { marginLeft: '6px' }, text: '최신 스냅샷' }) : null,
+        // A snapshot of another bot in this project folder (same name or a
+        // copy, §1-103): restorable here, and said so.
+        c.from ? el('span', { class: 'badge', style: { marginLeft: '6px' }, text: `↔ ${c.from}`,
+                              title: '같은 프로젝트 폴더를 쓰는 봇의 스냅샷입니다. 여기로 되돌릴 수 있습니다' }) : null,
       ]);
       const ren = opts.auto ? null : el('button', { class: 'ghost tiny', text: '✎', title: '이름 바꾸기' });
       ren?.addEventListener('click', () => {
@@ -518,4 +522,14 @@ async function openVersions(anchor: HTMLElement): Promise<void> {
     clear(body);
     body.appendChild(el('div', { class: 'hint', text: msg(e) }));
   }
+}
+
+/** The restore's outcome in one line: what the 반영 will do, and the images
+ * that come back with it (§1-103). */
+function restoredText(r: { from?: string; assetsRevived?: number; assetsLost?: number; changes?: { total?: number } }): string {
+  let t = (r.from ? `'${r.from}'의 스냅샷으로 ` : '') + '카드·봇 로어북·스크립트·에셋 목록을 되돌렸습니다';
+  t += r.changes?.total ? ` (반영할 변경 ${r.changes.total}건).` : ' (RisuAI와 같아 반영할 것이 없습니다).';
+  if (r.assetsRevived) t += ` 에셋 ${r.assetsRevived}개는 봇 반영 때 RisuAI에 이미지를 다시 등록합니다.`;
+  if (r.assetsLost) t += ` 에셋 ${r.assetsLost}개는 Hina에 이미지가 없어, RisuAI에 파일이 남아 있어야 보입니다.`;
+  return t + ' 되돌리기 직전 상태도 스냅샷으로 남겨 두었습니다.';
 }

@@ -120,6 +120,8 @@ def listing() -> list[dict]:
         pending = db.one("SELECT COUNT(*) AS n FROM pending_actions WHERE char_key = ? AND status = 'pending'", (ck,))["n"]
         same = [n for n in live_names.get(_norm(b["name"]), [])] if b["risu_state"] != "live" else []
         tt = int(b["risu_trash_time"] or 0)
+        snaps = db.one("SELECT COUNT(*) AS n FROM card_checkpoints WHERE char_key = ?", (ck,))["n"]
+        heir = _snapshot_heir(ck) if snaps and b["risu_state"] in ("missing", "trash") else None
         out.append({
             "charKey": ck, "chaId": b["cha_id"], "name": b["name"] or "",
             "state": b["risu_state"] or "", "trashTime": tt,
@@ -129,6 +131,9 @@ def listing() -> list[dict]:
             "liveNamesake": bool(same),
             # A card uploaded before the full-card format cannot become a .charx.
             "charxReady": cardmod.is_full(ck),
+            # Bot snapshots, and the live bot of the same name they go to
+            # when this one is forgotten (forget, §1-103).
+            "snapshots": snaps, "snapshotHeir": heir["name"] if heir else "",
         })
     return out
 
@@ -167,8 +172,17 @@ def forget(char_key: str) -> dict:
     except Exception:  # noqa: BLE001 - an odd key: rows still go
         sys_dir = None
     chat_keys = [r["chat_key"] for r in db.query("SELECT chat_key FROM chats WHERE char_key = ?", (char_key,))]
+    heir = _snapshot_heir(char_key)
     removed: dict[str, int] = {}
+    handed = 0
     with db.transaction():
+        if heir:
+            # The bot's snapshots are the history of the bot the user still
+            # has (§1-103): they move to it, labelled with where they came from.
+            handed = db.execute(
+                "UPDATE card_checkpoints SET char_key = ?, "
+                "source_name = CASE WHEN source_name = '' THEN ? ELSE source_name END WHERE char_key = ?",
+                (heir["char_key"], row["name"] or char_key, char_key)).rowcount or 0
         def gone(table: str, sql: str, params) -> None:
             cur = db.execute(sql, params)
             n = getattr(cur, "rowcount", 0) or 0
@@ -187,8 +201,26 @@ def forget(char_key: str) -> dict:
         gone("characters", "DELETE FROM characters WHERE char_key = ?", (char_key,))
     if sys_dir is not None and sys_dir.is_dir():
         shutil.rmtree(sys_dir, ignore_errors=True)
-    log.info("forgot bot %s (%s, %s): %s", char_key, row["name"], state, removed)
+    log.info("forgot bot %s (%s, %s): %s; snapshots handed to %s: %s", char_key, row["name"], state,
+             removed, heir["char_key"] if heir else "-", handed)
+    note = "RisuAI 쪽은 건드리지 않았습니다. projects/ 의 파일은 남아 있습니다. "
+    if handed:
+        note += f"봇 스냅샷 {handed}개는 '{heir['name']}'(으)로 넘겼습니다. "
+    note += "이 봇만 쓰던 이미지는 '이미지 저장소 정리'가 정리합니다 (스냅샷이 가진 이미지는 남습니다)."
     return {"charKey": char_key, "name": row["name"], "removed": removed,
-            "systemDir": str(sys_dir) if sys_dir else "",
-            "note": "RisuAI 쪽은 건드리지 않았습니다. projects/ 의 파일은 남아 있습니다. "
-                    "이미지 저장소는 '스토어 정리 (GC)'가 7일 뒤 정리합니다."}
+            "snapshotsHanded": handed, "heir": heir["name"] if heir else "",
+            "systemDir": str(sys_dir) if sys_dir else "", "note": note}
+
+
+def _snapshot_heir(char_key: str) -> dict | None:
+    """The bot that inherits a forgotten bot's snapshots: a folder mate
+    (same family or (almost) the same name) that RisuAI has live, the most
+    recently used first. None = the snapshots go with the bot."""
+    from . import snapshots
+    for ck in snapshots.mates(char_key):
+        if ck == char_key:
+            continue
+        r = db.one("SELECT char_key, name, risu_state FROM characters WHERE char_key = ?", (ck,))
+        if r is not None and (r["risu_state"] or "") == "live":
+            return {"char_key": r["char_key"], "name": r["name"] or r["char_key"]}
+    return None

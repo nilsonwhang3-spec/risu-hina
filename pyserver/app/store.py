@@ -1081,6 +1081,40 @@ def restore_lore_rows_global(ck: str, rows: list[dict]) -> int:
     return len(rows)
 
 
+def restore_lore_content_global(ck: str, rows: list[dict]) -> int:
+    """restore_lore_rows_global over today's baseline - see
+    card.restore_content for why the baseline must not go back with it."""
+    from . import merge
+    where = "char_key = ? AND scope = 'global' AND chat_key IS NULL"
+    snap = sorted((r for r in rows or [] if isinstance(r, dict) and r.get("origin") != "deleted"),
+                  key=lambda r: int(r.get("seq") or 0))
+    entries = [db.unjs(r.get("entry_json"), {}) or {} for r in snap]
+    db.execute(f"DELETE FROM lore_entries WHERE {where} AND (origin = 'added' OR original_json IS NULL)", (ck,))
+    db.execute(f"UPDATE lore_entries SET conflict_json = NULL WHERE {where} AND conflict_json IS NOT NULL", (ck,))
+    base = [db.row_to_dict(r) for r in db.query(
+        f"SELECT * FROM lore_entries WHERE {where} ORDER BY COALESCE(base_seq, seq)", (ck,))]
+    originals = [db.unjs(b["original_json"], {}) or {} for b in base]
+    m = merge.match(originals, entries, merge.LORE)
+    for p in m.pairs:
+        e = entries[p.theirs_at]
+        origin = "original" if merge.canon(e) == merge.canon(originals[p.base_at]) else "edited"
+        db.execute("UPDATE lore_entries SET entry_json = ?, origin = ?, seq = ? WHERE id = ?",
+                   (db.js(e), origin, p.theirs_at, base[p.base_at]["id"]))
+    for n, i in enumerate(m.base_only):
+        db.execute("UPDATE lore_entries SET entry_json = original_json, origin = 'deleted', seq = ? WHERE id = ?",
+                   (len(entries) + n, base[i]["id"]))
+    now = db.now()
+    for j in m.theirs_only:
+        lid = str(snap[j].get("id") or "")
+        if not lid or db.one("SELECT 1 FROM lore_entries WHERE id = ?", (lid,)) is not None:
+            lid = uuid.uuid4().hex
+        db.execute(
+            "INSERT INTO lore_entries(id, char_key, scope, chat_key, seq, entry_json, original_json, "
+            "origin, created_at) VALUES(?,?,'global',NULL,?,?,NULL,'added',?)",
+            (lid, ck, j, db.js(entries[j]), now))
+    return len(entries)
+
+
 def reset_lore_global(ck: str) -> int:
     """Working copy back to the baseline: added rows go, everything else
     becomes its original again, and conflict marks are cleared - the baseline

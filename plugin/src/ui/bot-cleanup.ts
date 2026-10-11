@@ -18,7 +18,7 @@
  * A bot RisuAI has is never offered, and nothing here touches RisuAI.
  */
 import { el, clear, armed, fmtTime } from './dom';
-import { state, type HinaBot } from '../state';
+import { state, type HinaBot, type AssetUsage } from '../state';
 
 const LABEL: Record<string, string> = { trash: 'RisuAI 휴지통', missing: 'RisuAI에 없음' };
 const PAGE = 30;
@@ -136,8 +136,10 @@ export function buildBotCleanupCard(onMount?: (refresh: () => Promise<void>) => 
     try {
       const r = await state.forgetBots(keys);
       picked.clear();
+      const handed = r.forgotten.reduce((n, f) => n + (f.snapshotsHanded ?? 0), 0);
       out.appendChild(el('div', { class: 'notice ' + (r.failed.length ? 'err' : 'ok'), text:
         `Hina에서 ${r.forgotten.length}개를 지웠습니다.` + (r.failed.length ? ` ${r.failed.length}개는 지우지 못했습니다: ${r.failed[0].error}` : '')
+        + (handed ? ` 봇 스냅샷 ${handed}개는 같은 이름의 봇으로 넘겼습니다.` : '')
         + ' RisuAI 쪽과 projects/ 의 파일은 그대로입니다.' }));
     } catch (e) {
       out.appendChild(el('div', { class: 'notice err', text: '지우지 못했습니다: ' + msg(e) }));
@@ -179,7 +181,8 @@ export function buildBotCleanupCard(onMount?: (refresh: () => Promise<void>) => 
     list,
     nav,
     el('div', { class: 'hint', style: { marginTop: '8px' }, text: '포켓리스의 휴지통·비활성화(보관) 봇은 플러그인이 볼 수 없는 곳에 있어 "RisuAI에 없음"으로 나옵니다. '
-      + '가리기만 한 봇은 RisuAI에 있음으로 셉니다. 지워도 projects/ 의 파일은 남고, 이미지 저장소는 스토어 정리(GC)가 정리합니다.' }),
+      + '가리기만 한 봇은 RisuAI에 있음으로 셉니다. 지워도 projects/ 의 파일은 남습니다. 봇 스냅샷은 RisuAI에 있는 같은 이름의 봇이 있으면 그 봇으로 넘어가고, '
+      + '없으면 함께 지워집니다. 이 봇만 쓰던 이미지는 아래 이미지 저장소 정리가 지웁니다.' }),
   ]);
 }
 
@@ -231,7 +234,8 @@ function row(b: HinaBot, picked: Set<string>, onPick: () => void, after: () => v
     el('span', { class: 'grow' }, [
       el('div', { text: b.name || '(이름 없음)' }),
       el('div', { class: 'hint', text: `챗 ${b.chats}개 · ${b.turns}턴 · Hina 수정 ${fmtTime(b.updatedAt * 1000)}${when}`
-        + (b.pendingActions ? ` · 승인 대기 ${b.pendingActions}` : '') }),
+        + (b.pendingActions ? ` · 승인 대기 ${b.pendingActions}` : '')
+        + (b.snapshots ? ` · 봇 스냅샷 ${b.snapshots}개` + (b.snapshotHeir ? ` → 삭제하면 '${b.snapshotHeir}'(으)로 넘어감` : ' (삭제하면 함께 지워짐)') : '') }),
       note,
     ]),
     el('span', { class: 'badge' + (b.state === 'trash' ? ' warn' : ''), text: LABEL[b.state] || b.state }),
@@ -242,6 +246,76 @@ function row(b: HinaBot, picked: Set<string>, onPick: () => void, after: () => v
       title: '다시 임포트한 새 버전일 가능성이 큽니다 - 이 항목은 옛 버전의 Hina 작업본입니다' }), save);
   }
   return item;
+}
+
+/**
+ * The image store (§1-103): every picture Hina has read from RisuAI or made,
+ * kept once by content. Split by who still needs a file - a bot (or module)
+ * working copy, only a bot snapshot (kept so a restore can register the
+ * image in RisuAI again; deleting those snapshots frees it), or nothing.
+ * 정리 removes the last kind once it is older than gcDays.
+ */
+export function buildAssetStoreCard(onMount?: (refresh: () => Promise<void>) => void): HTMLElement {
+  const stats = el('div', { class: 'assetusage' });
+  const out = el('div', {});
+  const gc = el('button', { class: 'tiny', text: '안 쓰는 이미지 정리' }) as HTMLButtonElement;
+  const mb = (n: number) => `${(n / 1048576).toFixed(1)}MB`;
+  const line = (label: string, n: number, bytes: number, hint: string) => el('div', { class: 'row' }, [
+    el('span', { class: 'grow', text: label }),
+    el('span', { class: 'n', text: `${n.toLocaleString()}개 · ${mb(bytes)}` }),
+    el('span', { class: 'hint', style: { flexBasis: '100%' }, text: hint }),
+  ]);
+  const draw = (u: AssetUsage): void => {
+    stats.replaceChildren(
+      line('봇·모듈이 쓰는 이미지', u.live.blobs, u.live.bytes, '지우지 않습니다.'),
+      line('스냅샷만 가진 이미지', u.snapshot.blobs, u.snapshot.bytes,
+        `지운 에셋을 스냅샷으로 되돌릴 때 RisuAI에 다시 등록하려고 남겨 둡니다 (봇 스냅샷 ${u.snapshots}개). 그 스냅샷을 지우면 정리 대상이 됩니다.`),
+      line('아무도 안 쓰는 이미지', u.orphan.blobs, u.orphan.bytes,
+        `${u.gcDays}일이 지난 ${u.orphan.collectable.toLocaleString()}개(${mb(u.orphan.collectableBytes)})를 정리할 수 있습니다. 동기화 중인 이미지를 지우지 않으려고 최근 것은 기다립니다.`),
+    );
+    gc.disabled = !u.orphan.collectable;
+  };
+  const reload = async (): Promise<void> => {
+    try { draw(await state.assetUsage()); } catch (e) { stats.replaceChildren(el('div', { class: 'hint', text: '저장소 현황을 읽지 못했습니다: ' + msg(e) })); }
+  };
+  armed(gc, '안 쓰는 이미지 정리', '정말 지울까요?', async () => {
+    gc.disabled = true;
+    clear(out);
+    try {
+      const r = await state.assetGc();
+      out.appendChild(el('div', { class: 'notice ok', text: `이미지 ${r.removed}개 · ${mb(r.freed)}를 지웠습니다.` }));
+    } catch (e) {
+      out.appendChild(el('div', { class: 'notice err', text: '정리하지 못했습니다: ' + msg(e) }));
+    }
+    await reload();
+  });
+  // Counting reads every bot snapshot, so it waits until the tab is looked
+  // at - opening 설정 must stay instant (§1-100).
+  let seen = false;
+  onMount?.(async () => { if (seen) await reload(); });
+  stats.appendChild(el('div', { class: 'hint', text: '불러오는 중…' }));
+  gc.disabled = true;
+  const card = el('div', { class: 'card' }, [
+    el('h2', { text: '이미지 저장소' }),
+    el('div', { class: 'hint', text: 'Hina가 RisuAI에서 읽어 오거나 만든 이미지입니다 (내용이 같으면 한 번만 저장). RisuAI 쪽 파일은 건드리지 않습니다.' }),
+    stats,
+    el('div', { class: 'row', style: { marginTop: '6px' } }, [gc]),
+    out,
+  ]);
+  const first = (): void => { if (!seen) { seen = true; void reload(); } };
+  if (typeof IntersectionObserver === 'function') {
+    const io = new IntersectionObserver((entries) => {
+      if (!entries.some((x) => x.isIntersecting)) return;
+      io.disconnect();
+      first();
+    });
+    io.observe(card);
+  } else {
+    const load = el('button', { class: 'ghost tiny', text: '현황 불러오기' });
+    load.addEventListener('click', () => { load.remove(); first(); });
+    stats.replaceChildren(load);
+  }
+  return card;
 }
 
 function msg(e: unknown): string {

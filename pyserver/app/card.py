@@ -809,6 +809,124 @@ def rows_for_checkpoint(ck: str) -> dict:
     }
 
 
+def restore_content(ck: str, snap: dict) -> dict:
+    """Put a snapshot's CONTENT into the working copy, over today's baseline.
+
+    restore_rows put the snapshot's rows back whole - baseline included. That
+    is only right while RisuAI still holds what it held when the snapshot was
+    taken. After a 반영 it is not: the restored rows read as unchanged (0
+    changes, 반영 sends nothing), their `before` no longer matches live, and the
+    next open's merge deletes every restored row RisuAI no longer has - so
+    undoing a 740-asset deletion that had been 반영 silently did nothing
+    (§1-103). And a snapshot of another bot of the same name has a baseline
+    that was never this bot's at all.
+
+    So the baseline (original, original_json, base_seq) stays what RisuAI
+    holds now, and the snapshot only decides what the working copy should
+    become: rows are paired with the baseline by merge.match - a pair is
+    unchanged or edited, a baseline row the snapshot lacks is deleted, a
+    snapshot row the baseline lacks is added. The diff then says exactly what
+    반영 will do to get RisuAI back to the snapshot.
+    """
+    now = db.now()
+    fields = [r for r in (snap.get("fields") or []) if isinstance(r, dict)]
+    scripts_ = [r for r in (snap.get("scripts") or []) if isinstance(r, dict)]
+    out = {"fields": 0, "greetings": 0, "scripts": 0}
+
+    # Conflict marks belong to the working copy being replaced.
+    db.execute("UPDATE card_fields SET conflict_json = NULL WHERE char_key = ? AND conflict_json IS NOT NULL", (ck,))
+    db.execute("UPDATE card_scripts SET conflict_json = NULL WHERE char_key = ? AND conflict_json IS NOT NULL", (ck,))
+
+    # Scalars by name. A field the snapshot does not have (an older schema)
+    # keeps today's text.
+    for r in fields:
+        name = str(r.get("field") or "")
+        if not name or name == LIST_FIELD:
+            continue
+        cur = db.one("SELECT id, body FROM card_fields WHERE char_key = ? AND field = ? AND seq = ?",
+                     (ck, name, int(r.get("seq") or 0)))
+        if cur is None:
+            continue
+        body = str(r.get("body") or "")
+        db.execute("UPDATE card_fields SET body = ?, extra_json = NULL, updated_at = ? WHERE id = ?",
+                   (body, now, cur["id"]))
+        out["fields"] += 1
+
+    # Greetings: the snapshot's live list against today's baseline list.
+    def live_greeting(r: dict) -> bool:
+        return not (db.unjs(r.get("extra_json"), {}) or {}).get("deleted")
+    want = [str(r.get("body") or "") for r in sorted(
+        (r for r in fields if r.get("field") == LIST_FIELD and live_greeting(r)),
+        key=lambda r: int(r.get("seq") or 0))]
+    db.execute("DELETE FROM card_fields WHERE char_key = ? AND field = ? AND original IS NULL", (ck, LIST_FIELD))
+    base = [db.row_to_dict(r) for r in db.query(
+        "SELECT * FROM card_fields WHERE char_key = ? AND field = ? ORDER BY COALESCE(base_seq, seq)",
+        (ck, LIST_FIELD))]
+    m = merge.match([b["original"] or "" for b in base], want, merge.GREETING)
+    for p in m.pairs:
+        db.execute("UPDATE card_fields SET body = ?, seq = ?, extra_json = NULL, updated_at = ? WHERE id = ?",
+                   (want[p.theirs_at], p.theirs_at, now, base[p.base_at]["id"]))
+    for n, i in enumerate(m.base_only):
+        db.execute("UPDATE card_fields SET body = original, seq = ?, extra_json = ?, updated_at = ? WHERE id = ?",
+                   (len(want) + n, db.js({"deleted": True}), now, base[i]["id"]))
+    for j in m.theirs_only:
+        db.execute(
+            "INSERT INTO card_fields(id, char_key, field, seq, body, original, extra_json, created_at, updated_at) "
+            "VALUES(?,?,?,?,?,NULL,NULL,?,?)", (uuid.uuid4().hex, ck, LIST_FIELD, j, want[j], now, now))
+    out["greetings"] = len(want)
+
+    # Scripts (Regex, triggers, asset references), kind by kind.
+    for kind in SCRIPT_KINDS:
+        snap_rows = sorted((r for r in scripts_ if r.get("kind") == kind and r.get("origin") != "deleted"),
+                           key=lambda r: int(r.get("seq") or 0))
+        entries = [db.unjs(r.get("entry_json"), {}) or {} for r in snap_rows]
+        db.execute("DELETE FROM card_scripts WHERE char_key = ? AND kind = ? AND origin = 'added'", (ck, kind))
+        base = [db.row_to_dict(r) for r in db.query(
+            "SELECT * FROM card_scripts WHERE char_key = ? AND kind = ? AND original_json IS NOT NULL "
+            "ORDER BY COALESCE(base_seq, seq)", (ck, kind))]
+        # Rows with no baseline at all (older than original_json) cannot be
+        # compared with anything; the snapshot replaces them.
+        db.execute("DELETE FROM card_scripts WHERE char_key = ? AND kind = ? AND original_json IS NULL", (ck, kind))
+        originals = [db.unjs(b["original_json"], {}) or {} for b in base]
+        m = merge.match(originals, entries, _SPECS.get(kind, merge.ASSET))
+        for p in m.pairs:
+            e = entries[p.theirs_at]
+            origin = "original" if merge.canon(e) == merge.canon(originals[p.base_at]) else "edited"
+            db.execute("UPDATE card_scripts SET entry_json = ?, origin = ?, seq = ? WHERE id = ?",
+                       (db.js(e), origin, p.theirs_at, base[p.base_at]["id"]))
+        for n, i in enumerate(m.base_only):
+            db.execute("UPDATE card_scripts SET entry_json = original_json, origin = 'deleted', seq = ? WHERE id = ?",
+                       (len(entries) + n, base[i]["id"]))
+        for j in m.theirs_only:
+            # The snapshot's id when it is free: a proposal that names the
+            # row still names it.
+            sid = str(snap_rows[j].get("id") or "")
+            if not sid or db.one("SELECT 1 FROM card_scripts WHERE id = ?", (sid,)) is not None:
+                sid = uuid.uuid4().hex
+            db.execute(
+                "INSERT INTO card_scripts(id, char_key, kind, seq, entry_json, origin, created_at) "
+                "VALUES(?,?,?,?,?, 'added', ?)", (sid, ck, kind, j, db.js(entries[j]), now))
+        out["scripts"] += len(entries)
+    return out
+
+
+def baseline_asset_keys(ck: str) -> set[str]:
+    """Asset keys the card in RisuAI references as of the last read: those
+    files exist there. Anything else the working copy points at may not -
+    RisuAI deletes unreferenced asset files on every boot (bootstrap.ts
+    cleanChunks), so a restored reference needs its bytes sent again."""
+    keys = set()
+    for r in db.query("SELECT original_json FROM card_scripts WHERE char_key = ? AND kind = ? "
+                      "AND original_json IS NOT NULL AND origin <> 'added'", (ck, ASSET_KIND)):
+        k = (db.unjs(r["original_json"], {}) or {}).get("key")
+        if k:
+            keys.add(str(k))
+    img = db.one("SELECT original FROM card_fields WHERE char_key = ? AND field = 'image' AND seq = 0", (ck,))
+    if img is not None and img["original"]:
+        keys.add(str(img["original"]))
+    return keys
+
+
 def restore_rows(ck: str, snap: dict) -> dict:
     fields = list(snap.get("fields") or [])
     scripts_ = list(snap.get("scripts") or [])

@@ -467,6 +467,96 @@ def stage_changes(ck: str, kind: str, items: list[dict]) -> dict:
     return {'changed': changed, 'pending': True}
 
 
+def revive(key: str) -> str | None:
+    """A pending key for bytes the store already holds under `key`, so the
+    next 반영 registers them in RisuAI again (saveAsset), or None when the
+    store never had them.
+
+    For references a restore brings back (§1-103): RisuAI deletes asset files
+    no character references on every boot (bootstrap.ts cleanChunks), so after
+    a deletion has been 반영 the original key may name nothing there any more.
+    Sending the bytes again is harmless when the file is still there - RisuAI
+    keys by content, so it lands under the same name."""
+    if not key_ok(key) or key.startswith(PENDING_PREFIX):
+        return key if key.startswith(PENDING_PREFIX) else None
+    r = db.one("SELECT k.content_hash, b.ext FROM asset_keys k JOIN asset_blobs b "
+               "ON b.content_hash = k.content_hash WHERE k.risu_key = ? AND k.state = 'present'", (key,))
+    if r is None or not blob_path(r["content_hash"], r["ext"]).is_file():
+        return None
+    pending = PENDING_PREFIX + r["content_hash"] + "." + ext_of(key)
+    db.execute(
+        "INSERT INTO asset_keys(risu_key, content_hash, state, error, updated_at) VALUES(?,?,'present','',?) "
+        "ON CONFLICT(risu_key) DO UPDATE SET content_hash=excluded.content_hash, state='present', "
+        "error='', updated_at=excluded.updated_at", (pending, r["content_hash"], db.now()))
+    return pending
+
+
+def snapshot_keys() -> set[str]:
+    """Asset keys some bot snapshot references (asset rows and the profile
+    picture). GC keeps their bytes: a snapshot whose images were collected
+    would restore names pointing at nothing."""
+    keys: set[str] = set()
+    for r in db.query("SELECT fields_json, scripts_json FROM card_checkpoints"):
+        for row in db.unjs(r["scripts_json"], []) or []:
+            if isinstance(row, dict) and row.get("kind") == "assetref":
+                k = (db.unjs(row.get("entry_json"), {}) or {}).get("key")
+                if isinstance(k, str) and key_ok(k):
+                    keys.add(k)
+        for row in db.unjs(r["fields_json"], []) or []:
+            if isinstance(row, dict) and row.get("field") == "image":
+                for k in (row.get("body"), row.get("original")):
+                    if isinstance(k, str) and key_ok(k):
+                        keys.add(k)
+    return keys
+
+
+def _live_keys() -> set[str]:
+    """Keys a bot's (or module's) working copy references now."""
+    keys = {r["risu_key"] for r in db.query("SELECT DISTINCT risu_key FROM char_assets")}
+    for r in db.query("SELECT entry_json, original_json FROM card_scripts WHERE kind = 'assetref'"):
+        for raw in (r["entry_json"], r["original_json"]):
+            k = (db.unjs(raw, {}) or {}).get("key")
+            if isinstance(k, str):
+                keys.add(k)
+    for r in db.query("SELECT body, original FROM card_fields WHERE field = 'image'"):
+        for k in (r["body"], r["original"]):
+            if isinstance(k, str) and key_ok(k):
+                keys.add(k)
+    return keys
+
+
+def usage() -> dict:
+    """The store split by who still needs each file, for 저장공간 정리.
+
+    live      a bot's or module's working copy references it
+    snapshot  only a bot snapshot does - kept for restore; deleting those
+              snapshots is what frees it
+    orphan    nothing does - GC removes it once older than gcDays
+    """
+    live, snap = _live_keys(), snapshot_keys()
+    rank = {"orphan": 0, "snapshot": 1, "live": 2}
+    by_hash: dict[str, str] = {}
+    for r in db.query("SELECT risu_key, content_hash FROM asset_keys WHERE content_hash IS NOT NULL"):
+        k, h = r["risu_key"], r["content_hash"]
+        cur = "live" if k in live else ("snapshot" if k in snap else "orphan")
+        if rank[cur] > rank[by_hash.get(h, "orphan")]:
+            by_hash[h] = cur
+    days = float(settings().get("gcDays") or 7)
+    cutoff = db.now() - days * 86400
+    out = {s: {"blobs": 0, "bytes": 0} for s in ("live", "snapshot", "orphan")}
+    out["orphan"]["collectable"] = 0
+    out["orphan"]["collectableBytes"] = 0
+    for b in db.query("SELECT content_hash, size, created_at FROM asset_blobs"):
+        s = by_hash.get(b["content_hash"], "orphan")
+        out[s]["blobs"] += 1
+        out[s]["bytes"] += int(b["size"] or 0)
+        if s == "orphan" and float(b["created_at"] or 0) < cutoff:
+            out["orphan"]["collectable"] += 1
+            out["orphan"]["collectableBytes"] += int(b["size"] or 0)
+    snaps = db.one("SELECT COUNT(*) AS n FROM card_checkpoints")
+    return {**out, "gcDays": days, "snapshots": int(snaps["n"] if snaps else 0), "store": store_stats()}
+
+
 def adopt(ck: str, key: str, rel: str, *, name: str = "", field: str = "additional") -> dict:
     """The host saved a space file as an asset and told us the key: put
     the same bytes in the store under it and append it to the manifest, so
@@ -528,12 +618,15 @@ def gc(days: float | None = None) -> dict:
     if days is None:
         days = float(settings().get("gcDays") or 7)
     cutoff = db.now() - days * 86400
-    # Keys nobody references and blobs no key points at.
-    orphan_keys = db.execute(
-        "DELETE FROM asset_keys WHERE risu_key NOT IN (SELECT risu_key FROM char_assets) "
-        "AND risu_key NOT IN (SELECT json_extract(entry_json,'$.key') FROM card_scripts "
-        "WHERE kind='assetref' AND origin<>'deleted' AND json_extract(entry_json,'$.key') IS NOT NULL)"
-    ).rowcount
+    # Keys nobody references and blobs no key points at. "Nobody" includes the
+    # bot snapshots (§1-103): their images are what makes a restore possible,
+    # so they go only when the snapshots holding them do. A deleted-but-not-
+    # yet-반영 row still counts too - RisuAI has it until the 반영.
+    keep = _live_keys() | snapshot_keys()
+    orphan_keys = 0
+    for r in db.query("SELECT risu_key FROM asset_keys"):
+        if r["risu_key"] not in keep:
+            orphan_keys += db.execute("DELETE FROM asset_keys WHERE risu_key = ?", (r["risu_key"],)).rowcount or 0
     victims = db.query(
         "SELECT content_hash, ext, size FROM asset_blobs WHERE created_at < ? AND content_hash "
         "NOT IN (SELECT content_hash FROM asset_keys WHERE content_hash IS NOT NULL)",

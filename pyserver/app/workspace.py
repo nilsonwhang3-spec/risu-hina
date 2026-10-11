@@ -310,6 +310,28 @@ def bot_key_for_folder(folder: str) -> str:
     return ""
 
 
+def folder_mates(char_key: str) -> list[str]:
+    """Every bot (char_key in Hina's DB) whose work shares this bot's folder:
+    its family and the bots of (almost) the same name (bot_folder), itself
+    first. These are one bot to the user - versions and copies kept under
+    one name - so they share snapshots too (§1-103)."""
+    try:
+        folder = bot_folder(char_key)
+    except WorkspaceError:
+        return [char_key]
+    keys = {str(k) for k, v in _bots_map().items()
+            if isinstance(v, dict) and str(v.get("folder") or "") == folder}
+    if not keys:
+        return [char_key]
+    marks = ",".join("?" * len(keys))
+    rows = db.query(
+        f"SELECT char_key FROM characters WHERE char_key IN ({marks}) OR family_key IN ({marks}) "
+        "ORDER BY updated_at DESC", (*keys, *keys))
+    out = [char_key]
+    out += [r["char_key"] for r in rows if r["char_key"] != char_key]
+    return out
+
+
 def _check_free(key: str, old: str, new: str) -> None:
     for k, v in _bots_map().items():
         # Bots sharing this folder (same name) are not "another bot".

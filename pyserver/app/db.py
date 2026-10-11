@@ -691,6 +691,10 @@ ADD_COLUMNS = [
     # rather than a label convention, because the user can rename a label.
     ("checkpoints", "kind", "TEXT NOT NULL DEFAULT 'user'"),
     ("card_checkpoints", "kind", "TEXT NOT NULL DEFAULT 'user'"),
+    # §1-103: the bot a snapshot was taken from, by name, once that bot is
+    # gone - forgetting an old version hands its snapshots to the live bot of
+    # the same name instead of deleting them (presence.forget).
+    ("card_checkpoints", "source_name", "TEXT NOT NULL DEFAULT ''"),
 ]
 
 
