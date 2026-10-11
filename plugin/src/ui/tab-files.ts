@@ -196,6 +196,15 @@ export function renderFilesTab(mount: HTMLElement): void {
     if (viewMount) clear(viewMount);
   }
   kitRender(mount);
+  // The first listing of a real space takes seconds: say so, the way the
+  // studio does, instead of an empty pane that reads as broken.
+  if (!lastListing) {
+    for (const m of [treeMount, viewMount]) {
+      if (m && !m.childElementCount) {
+        m.appendChild(el('div', { class: 'row hint skelhead' }, [el('span', { class: 'spin' }), el('span', { text: ' 파일 목록을 불러오는 중…' })]));
+      }
+    }
+  }
   // Opening the tab no longer clears the badge (§1-36): a new file stays
   // marked - a dot on its folder in the tree and on its row - until that
   // folder is actually looked at. "1 in the workspace, but where?" was the
@@ -259,6 +268,7 @@ async function refreshOnce(key: string): Promise<void> {
     if (key !== refreshKey()) return;
     if (!lastListing) {
       clear(treeMount);
+      if (viewMount) clear(viewMount);
       treeMount.appendChild(el('div', { class: 'notice err', text: msg(e) }));
     } else notice('목록 갱신 실패 — 마지막으로 받은 목록입니다: ' + msg(e), 'err');
     // With the stack: the one report of this was a bare "reading 'filter'",
@@ -282,6 +292,63 @@ async function fileOperation<T>(text: string, run: () => Promise<T>): Promise<T>
     treeMount?.setAttribute('aria-busy', String(fileOperations > 0));
     viewMount?.setAttribute('aria-busy', String(fileOperations > 0));
   }
+}
+
+/**
+ * Show what an operation just made without waiting for the listing.
+ *
+ * A refresh is the whole space (/files, megabytes on a real install with
+ * the studio's thousands of pictures), so a new folder or four uploaded
+ * files took seconds to appear and the tab read as frozen. They go into the
+ * listing held here at once; touchFiles() then reconciles in the background.
+ */
+function addLocal(dirs: string[], files: { path: string; size: number }[] = []): void {
+  if (!lastListing) return;
+  const areaOf = (path: string) => lastListing!.areas.find((a) => path === a.area || path.startsWith(a.area + '/'));
+  const want = [...dirs];
+  for (const f of files) {
+    const dir = f.path.slice(0, f.path.lastIndexOf('/'));
+    if (dir) want.push(dir);
+  }
+  for (const d of want) {
+    const a = areaOf(d);
+    if (!a || d === a.area) continue;
+    a.dirs = a.dirs ?? [];
+    // Every folder on the way down, so the tree has somewhere to hang it.
+    for (let at = d.indexOf('/', a.area.length + 1); ; at = d.indexOf('/', at + 1)) {
+      const part = at < 0 ? d : d.slice(0, at);
+      if (!a.dirs.includes(part)) a.dirs.push(part);
+      if (at < 0) break;
+    }
+  }
+  const now = Date.now() / 1000;
+  for (const f of files) {
+    const a = areaOf(f.path);
+    if (!a) continue;
+    const name = f.path.slice(f.path.lastIndexOf('/') + 1);
+    a.files = a.files.filter((x) => x.path !== f.path);
+    a.files.push({ path: f.path, name, size: f.size, modified: now,
+                   textual: /\.(txt|md|json|lua|js|ts|css|html|csv|ya?ml|xml|py)$/i.test(name) });
+  }
+  buildNodes(lastListing);
+  drawTree();
+  drawCentre();
+}
+
+/** mkdir, shown at once (addLocal), then the listing catches up. */
+async function makeFolder(where: string, raw: string): Promise<boolean> {
+  const nm = raw.trim().replace(/[\\/]+/g, '-');
+  if (!nm) return false;
+  try {
+    await state.mkdirFile(where + '/' + nm);
+  } catch (e) {
+    notice('만들지 못했습니다: ' + msg(e), 'err');
+    return false;
+  }
+  expandTo(where + '/' + nm);
+  addLocal([where + '/' + nm]);
+  state.touchFiles();
+  return true;
 }
 
 // --- the folder model ----------------------------------------------------------
@@ -422,16 +489,7 @@ function drawTree(): void {
     const name = el('input', { placeholder: '폴더 이름' }) as HTMLInputElement;
     const ok = el('button', { class: 'primary tiny', text: '만들기' });
     ok.addEventListener('click', async () => {
-      const n = name.value.trim().replace(/[\\/]+/g, '-');
-      if (!n) return;
-      try {
-        await state.mkdirFile(where + '/' + n);
-        close();
-        expandTo(where + '/' + n);
-        await refresh();
-      } catch (e) {
-        notice('만들지 못했습니다: ' + msg(e), 'err');
-      }
+      if (await makeFolder(where, name.value)) close();
     });
     name.addEventListener('keydown', (e) => { if ((e as KeyboardEvent).key === 'Enter') ok.click(); });
     body.appendChild(el('div', { class: 'hint', text: `${where}/ 안에` }));
@@ -817,6 +875,7 @@ function drawCentre(): void {
     menuAt((ev as MouseEvent).clientX, (ev as MouseEvent).clientY, [
       { label: clipboard ? `붙여넣기 (${clipboard.paths.length})` : '붙여넣기',
         disabled: !clipboard || !writable, onClick: () => void pasteInto(uploadTarget()) },
+      { label: '새 폴더', disabled: !writable, onClick: () => treeNewFolder(uploadTarget()) },
       { label: '전체 선택', onClick: () => { selectAll(n); drawCentre(); } },
       { label: '선택 해제', disabled: !selection.size,
         onClick: () => { selection.clear(); drawCentre(); } },
@@ -1102,18 +1161,7 @@ function treeNewFolder(where: string): void {
     label: `${where}/ 안에`,
     placeholder: '폴더 이름',
     ok: '만들기',
-    onSubmit: async (raw) => {
-      const nm = raw.trim().replace(/[\\/]+/g, '-');
-      if (!nm) return;
-      try {
-        await state.mkdirFile(where + '/' + nm);
-        expandTo(where + '/' + nm);
-        state.touchFiles();
-        await refresh();
-      } catch (e) {
-        notice('만들지 못했습니다: ' + msg(e), 'err');
-      }
-    },
+    onSubmit: async (raw) => { await makeFolder(where, raw); },
   });
 }
 
@@ -1657,6 +1705,7 @@ async function uploadMany(files: Incoming[], into: string): Promise<void> {
         name: file.name, rel, bytes: new Uint8Array(await file.arrayBuffer()),
       })));
       const r = await state.uploadBatch(into, entries, !!extractZips);
+      addLocal([], (r.files ?? []).filter((f) => f.path).map((f) => ({ path: f.path, size: f.size })));
       done += r.count;
       extracted += r.extracted;
       sentBytes += bytes;
@@ -1666,6 +1715,7 @@ async function uploadMany(files: Incoming[], into: string): Promise<void> {
       for (const { file, rel } of batch) {
         try {
           const r = await uploadOne(file, rel ? into + '/' + rel : into, !!extractZips && /\.zip$/i.test(file.name));
+          if (r.path) addLocal([], [{ path: r.path, size: file.size }]);
           done += 1;
           if (r.extracted) extracted += r.extracted;
         } catch (e2) {
@@ -1689,9 +1739,10 @@ async function uploadMany(files: Incoming[], into: string): Promise<void> {
     + (failed ? ` 실패 ${failed}개.` : '');
   ui.finish(!failed, failed ? `완료 · 실패 ${failed}개` : '완료');
   notice(summary, failed ? 'err' : 'ok');
-  if (nodes.has(into)) { selectedDir = into; expandTo(into); }
+  if (nodes.has(into)) { selectedDir = into; expandTo(into); drawTree(); drawCentre(); }
+  // The rows are already there (addLocal per batch); this reconciles.
   state.touchFiles();
-  await refresh();
+  void refresh();
 }
 
 /**

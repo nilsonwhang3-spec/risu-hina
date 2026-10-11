@@ -723,7 +723,14 @@ export class AgentPanel {
     if (this.busy) return;
     try {
       await state.newAgentSession();
-      await this.render();
+      // 새 대화 answers the carry question too: without this, render() saw the
+      // last conversation from another chat, dropped the session just made and
+      // offered to continue the old one - the first press only "worked" on a
+      // second press.
+      this.pendingCarry = '';
+      this.carryDecided = true;
+      state.forgetCarry();
+      await this.render(state.sessionId);
       this.hooks.notice('새 대화를 시작했습니다.', 'ok');
     } catch (e) {
       this.hooks.notice('새 대화를 시작하지 못했습니다: ' + msg(e), 'err');

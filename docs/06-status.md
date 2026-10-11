@@ -1,5 +1,17 @@
 # 06. Implementation status — as of 2026-10-10 (v0.15.40, Risu Hina)
 
+## §1-104 (2026-10-11): 새 대화 on the carry screen, workspace folders and uploads show at once
+
+- **새 대화 needed two presses:** with the last conversation from another chat on screen (§1-100 carry),
+  `newConversation` made a session and then called `render()` without it; render saw the carry again, set
+  `state.sessionId = ''` and offered the old conversation, so a message sent then continued it. 새 대화 now
+  answers the carry (pendingCarry cleared, carryDecided, `forgetCarry`) and renders the new session.
+  tests/agent_planning_ui.mjs covers it (without the fix the panel loops).
+- **Workspace tab:** a new folder or uploaded files waited for a full `/files` refresh (megabytes on a real
+  space) before showing. `addLocal` inserts them into the held listing at once and `touchFiles` reconciles in
+  the background; the toolbar, tree and list menus share `makeFolder`. The list's right-click menu has 새 폴더.
+  The first listing shows a spinner (the studio's) instead of empty panes.
+
 ## §1-103 (2026-10-11): shared bot snapshots, restore over today's baseline, image store, "제안 작성 중"
 
 - **Asked:** (1) can bots with (almost) the same name share snapshots like they share a folder; (2) can a

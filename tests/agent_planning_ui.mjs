@@ -121,5 +121,26 @@ await new Promise((r) => setTimeout(r, 0));
 assert.deepEqual(moved, ['old-s'], '여기서 이어가기 moves the session to this chat');
 assert.equal(carriedPanel.root.querySelector('.carrybanner'), null, 'and the question goes');
 carriedPanel.destroy();
+
+// §1-103: 새 대화 on the carry screen opens a new conversation on the FIRST
+// press. It used to re-render, see the carry again, drop the new session and
+// offer the old conversation once more.
+let forgot = 0;
+const own = [];
+Object.assign(state, {
+  sessionId: '', carry: { sessionId: 'old-s', chatKey: 'chat-old', label: '옛봇 · 옛챗' },
+  async newAgentSession() { state.sessionId = 'fresh-s'; },
+  forgetCarry() { forgot++; state.carry = null; },
+  async agentSession(id) { own.push(id); state.sessionId = id || ''; return { session: null, messages: [], staged: [], agentReady: true }; },
+});
+const freshPanel = new AgentPanel({ onStagedChanged() {}, onApplied() {}, notice() {} });
+await freshPanel.render();
+assert.ok(freshPanel.root.querySelector('.carrybanner'), 'the carry question is up');
+[...freshPanel.root.querySelectorAll('button')].find((b) => b.textContent === '새 대화').dispatchEvent(new window.Event('click'));
+await new Promise((r) => setTimeout(r, 10));
+assert.equal(freshPanel.root.querySelector('.carrybanner'), null, '새 대화 drops the carry question');
+assert.deepEqual(own, ['fresh-s'], 'and loads the new session, not the carried one');
+assert.equal(forgot, 1, 'and forgets the carry');
+freshPanel.destroy();
 panel.destroy(); desktop.destroy();
 console.log('PASS - planning mode, Todo progress and persistent mobile proposal folding');
