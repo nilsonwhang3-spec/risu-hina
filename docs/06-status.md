@@ -4,6 +4,17 @@
 
 ## 0.15.41 (2026-10-11): §1-103~105 shared snapshots, image store, proposal progress, 새 대화, workspace speed, renamed bot folders
 
+## §1-107 (2026-10-12): 대조 without the panel blinking away, orphan chats save as JSON
+
+- **Field report on 0.15.42:** pressing 'RisuAI와 대조' closed the panel to RisuAI for a moment and came back.
+  `host.readInventory` hid the container on every read (for the 'db' permission prompt that sits behind the
+  fullscreen panel). It now steps aside only when the read has not answered within 900 ms - the same race
+  `modules.ts` already used; a granted permission answers at once and the panel stays.
+- **Orphan chats get 'JSON으로 저장'** like orphan bots' CharX: the existing GET /export/risuchat builds the
+  risuChat envelope from Hina's copy (RisuAI's chat import takes it); saved as `<봇> - <챗>.json`.
+- Verified: plugin smoke (no hideContainer on a quick read; a live bot's chat RisuAI lacks is the only orphan,
+  saves as risuChat with its message, and 삭제 forgets it).
+
 ## §1-106 (2026-10-12): 저장공간 정리 in four sections — orphan bots/chats/modules, snapshots, images, temp files by kind
 
 Asked: the cleanup tab should cover 봇/챗/모듈 (orphans of each), a snapshot list, images, and the

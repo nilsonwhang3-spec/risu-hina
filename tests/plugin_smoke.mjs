@@ -3939,6 +3939,10 @@ console.log('\ntest_bot_cleanup');
   const auth = { Authorization: 'Bearer plugin-smoke-token', 'Content-Type': 'application/json' };
   await fetch(backend.url + '/workspace', { method: 'POST', headers: auth, body: JSON.stringify({
     charId: 'cha-gone-smoke', characterIndex: 7, card: { name: '사라진 봇', chaId: 'cha-gone-smoke' }, chats: [] }) });
+  // §1-107: a chat of the open (live) bot that RisuAI no longer has.
+  await fetch(backend.url + '/workspace', { method: 'POST', headers: auth, body: JSON.stringify({
+    charId: host.liveChar.chaId, characterIndex: 0, card: structuredClone(host.liveChar),
+    chats: [{ chat: { id: 'ghost-chat-smoke', name: '지운 챗', message: [{ role: 'user', data: '유령', time: 1, chatId: 'g1' }] }, chatIndex: 9 }] }) });
   document.getElementById('open-settings')?.dispatchEvent(new window.Event('click', { bubbles: true }));
   await settle(900);
   const card = () => [...document.querySelectorAll('.card')].find((c) => c.querySelector('h2')?.textContent === 'Hina에만 남은 봇 · 챗 · 모듈');
@@ -3947,8 +3951,10 @@ console.log('\ntest_bot_cleanup');
   check('저장공간 정리 has four sections', sections.join(',') === '봇 · 챗 · 모듈,스냅샷,이미지,임시파일', sections.join(','));
   document.querySelector('.storenav [data-section="orphans"]')?.dispatchEvent(new window.Event('click', { bubbles: true }));
   await settle(100);
+  const hidesBefore = host.calls.filter((c) => c === 'hideContainer').length;
   findButton(card(), 'RisuAI와 대조')?.dispatchEvent(new window.Event('click', { bubbles: true }));
   await settle(1500);
+  check('a quick RisuAI read does not hide the panel', host.calls.filter((c) => c === 'hideContainer').length === hidesBefore);
   const rows = () => [...(card()?.querySelectorAll('.botcleanrow') ?? [])];
   // Earlier tests left other bots behind (characters replaced whole); only
   // the open one is RisuAI's.
@@ -3970,7 +3976,27 @@ console.log('\ntest_bot_cleanup');
   // §1-106: the same comparison judged the open bot's chats by id - none of
   // them is an orphan, and the chip row counts chats and modules too.
   const orphanChats = (await (await fetch(backend.url + '/chats/orphans', { headers: auth })).json()).chats || [];
-  check('the open bot chats are not orphans', orphanChats.length === 0, JSON.stringify(orphanChats).slice(0, 200));
+  check('only the chat RisuAI no longer has is an orphan', orphanChats.map((c) => c.name).join(',') === '지운 챗',
+        JSON.stringify(orphanChats).slice(0, 200));
+  document.querySelector('[data-orphan-kind="chat"]')?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(100);
+  const ghost = () => [...(card()?.querySelectorAll('.botcleanrow') ?? [])].find((r) => /지운 챗/.test(r.textContent || ''));
+  const blobs = [];
+  const origUrl = globalThis.URL.createObjectURL;
+  globalThis.URL.createObjectURL = (b) => { blobs.push(b); return 'blob:stub'; };
+  findButton(ghost(), 'JSON으로 저장')?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(800);
+  globalThis.URL.createObjectURL = origUrl;
+  const saved = blobs.length ? JSON.parse(await blobs[0].text()) : {};
+  check('an orphan chat saves as a risuChat JSON', saved.type === 'risuChat' && saved.data?.message?.[0]?.data === '유령',
+        JSON.stringify(saved).slice(0, 200));
+  const gdel = [...(ghost()?.querySelectorAll('button') ?? [])].find((b) => b.textContent === '삭제');
+  gdel?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(100);
+  gdel?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(1200);
+  check('삭제 forgets the orphan chat', !ghost()
+        && !((await (await fetch(backend.url + '/chats/orphans', { headers: auth })).json()).chats || []).length);
   check('kind chips for bots, chats, modules',
         [...document.querySelectorAll('[data-orphan-kind]')].map((b) => b.getAttribute('data-orphan-kind')).join(',') === 'bot,chat,module');
   const section = (id) => document.querySelector(`.storenav [data-section="${id}"]`)?.dispatchEvent(new window.Event('click', { bubbles: true }));

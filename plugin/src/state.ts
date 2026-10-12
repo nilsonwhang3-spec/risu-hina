@@ -2520,6 +2520,11 @@ class AppState {
     return (await transport.get<{ chats: OrphanChat[] }>('/chats/orphans')).chats ?? [];
   }
 
+  /** Any chat Hina holds as a risuChat envelope (RisuAI's own chat import takes it). */
+  async chatEnvelope(chatKey: string): Promise<{ filename: string; envelope: unknown }> {
+    return await transport.get('/export/risuchat', { chatKey }, 120_000);
+  }
+
   async forgetChats(chatKeys: string[]): Promise<{ forgotten: { name: string }[]; failed: { chatKey: string; error: string }[] }> {
     return await transport.post('/chats/forget', { chatKeys }, 300_000);
   }

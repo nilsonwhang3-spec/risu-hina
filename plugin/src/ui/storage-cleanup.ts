@@ -18,6 +18,7 @@
  * checkboxes and one bulk 삭제. Nothing here touches RisuAI.
  */
 import { el, clear, armed, fmtTime } from './dom';
+import * as host from '../host';
 import { fmtSize } from './studio/store';
 import {
   state, type HinaBot, type AssetUsage, type OrphanChat, type OrphanModule, type StoredSnapshot, type TempKind,
@@ -269,7 +270,7 @@ function buildOrphanCard(onMount?: (refresh: () => Promise<void>) => void): HTML
       ? [botList, 'RisuAI에서 지웠거나 휴지통에 넣은 봇, 다시 임포트해 새 봇이 된 옛 버전의 작업본입니다. CharX로 받아 둘 수 있습니다. '
         + '포켓리스의 휴지통·비활성화(보관) 봇은 플러그인이 볼 수 없어 "RisuAI에 없음"으로 나옵니다. 봇 스냅샷은 RisuAI에 있는 같은 이름의 봇으로 넘어가고, 없으면 함께 지워집니다.']
       : kind === 'chat'
-        ? [chatList, 'RisuAI에 있는 봇에서 지운 챗의 작업본입니다. 지우면 그 챗의 턴·AI 대화·편집 대기·챗 스냅샷이 함께 지워집니다. '
+        ? [chatList, 'RisuAI에 있는 봇에서 지운 챗의 작업본입니다. JSON(risuChat)으로 받아 RisuAI에 다시 가져올 수 있습니다. 지우면 그 챗의 턴·AI 대화·편집 대기·챗 스냅샷이 함께 지워집니다. '
           + '휴지통이나 RisuAI에 없는 봇의 챗은 봇과 함께 지워지므로 여기 나오지 않습니다.']
         : [modList, 'RisuAI에서 지운 모듈의 작업본입니다. risum으로 받아 둘 수 있습니다. 지우면 모듈 스냅샷도 함께 지워집니다.'];
     body.replaceChildren(el('div', { class: 'hint', style: { margin: '6px 0' }, text: hint }), list.root);
@@ -376,6 +377,22 @@ function botRow(b: HinaBot, ctx: RowCtx<HinaBot>): HTMLElement {
 
 function chatRow(c: OrphanChat, ctx: RowCtx<OrphanChat>): HTMLElement {
   const item = el('div', { class: 'chatitem botcleanrow' });
+  const note = el('div', { class: 'hint' });
+  const save = el('button', { class: 'ghost tiny', text: 'JSON으로 저장',
+    title: 'Hina 작업본으로 risuChat JSON 을 받습니다 - RisuAI의 챗 가져오기로 다시 넣을 수 있습니다' }) as HTMLButtonElement;
+  save.addEventListener('click', async () => {
+    save.disabled = true;
+    try {
+      const r = await state.chatEnvelope(c.chatKey);
+      const name = `${c.bot || 'chat'} - ${c.name || c.chatKey}`.replace(/[\\/:*?"<>|\x00-\x1f]/g, '_').trim();
+      host.download(`${name}.json`, JSON.stringify(r.envelope), 'application/json');
+      note.textContent = '내려받았습니다. RisuAI 챗 목록의 가져오기로 다시 넣을 수 있습니다.';
+    } catch (e) {
+      note.textContent = 'JSON을 만들지 못했습니다: ' + msg(e);
+    } finally {
+      save.disabled = false;
+    }
+  });
   const extra = [c.sessions ? `AI 대화 ${c.sessions}` : '', c.staged ? `승인 대기 편집 ${c.staged}` : '',
     c.snapshots ? `챗 스냅샷 ${c.snapshots}개` : ''].filter(Boolean).join(' · ');
   item.append(
@@ -383,8 +400,10 @@ function chatRow(c: OrphanChat, ctx: RowCtx<OrphanChat>): HTMLElement {
     el('span', { class: 'grow' }, [
       el('div', { text: `${c.bot || '(이름 없는 봇)'} › ${c.name || '(이름 없는 챗)'}` }),
       el('div', { class: 'hint', text: `${c.turns}턴 · Hina 수정 ${fmtTime(c.updatedAt * 1000)}` + (extra ? ' · ' + extra : '') }),
+      note,
     ]),
     el('span', { class: 'badge', text: 'RisuAI에서 지운 챗' }),
+    save,
     ctx.del(c, item),
   );
   return item;

@@ -77,14 +77,25 @@ export async function readInventory(withModules = true): Promise<{
   characters: { chaId: string; name: string; trashTime: number; chats?: string[] }[];
   modules: string[] | null;
 }> {
-  let dbSlice: Record<string, unknown> | null = null;
-  try { await Risuai.hideContainer(); } catch { /* not shown */ }
-  try {
-    dbSlice = await Risuai.getDatabase(withModules ? ['characters', 'modules'] : ['characters']);
-  } catch (e) {
-    throw new HostError('failed', 'RisuAI 캐릭터 목록을 읽지 못했습니다: ' + String(e));
-  } finally {
-    try { await Risuai.showContainer('fullscreen'); } catch { /* fine */ }
+  let dbSlice: Record<string, unknown> | null | undefined;
+  const read = Risuai.getDatabase(withModules ? ['characters', 'modules'] : ['characters']);
+  // Step aside only when the answer is slow - that is the permission prompt
+  // waiting behind the panel. Hiding on every read made the panel blink
+  // away to RisuAI and back on each 'RisuAI와 대조' (§1-107, as modules.ts).
+  const quick = await Promise.race([
+    read.then((v) => ({ v })),
+    new Promise<null>((r) => setTimeout(() => r(null), 900)),
+  ]).catch((e) => { throw new HostError('failed', 'RisuAI 캐릭터 목록을 읽지 못했습니다: ' + String(e)); });
+  if (quick) dbSlice = quick.v;
+  else {
+    try { await Risuai.hideContainer(); } catch { /* not shown */ }
+    try {
+      dbSlice = await read;
+    } catch (e) {
+      throw new HostError('failed', 'RisuAI 캐릭터 목록을 읽지 못했습니다: ' + String(e));
+    } finally {
+      try { await Risuai.showContainer('fullscreen'); } catch { /* fine */ }
+    }
   }
   const list = dbSlice && Array.isArray(dbSlice['characters']) ? dbSlice['characters'] as RisuCharacter[] : null;
   if (!list) throw new HostError('failed', 'RisuAI 캐릭터 목록을 읽지 못했습니다 (권한을 허용했는지 확인해 주세요)');
