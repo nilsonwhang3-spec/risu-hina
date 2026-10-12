@@ -35,6 +35,7 @@ run "history thinking ids"    "$PY" tests/test_history.py
 run "partial replace"         "$PY" tests/test_textedit.py
 run "reference bots are read-only" "$PY" tests/test_reference_bots.py
 run "bots RisuAI no longer has" "$PY" tests/test_bot_presence.py
+run "storage cleanup: orphan chats/modules, snapshots, temp kinds" "$PY" tests/test_storage_cleanup.py
 run "shared snapshots, restore over baseline, image store" "$PY" tests/test_snapshot_share.py
 run "three-way merge"         "$PY" tests/test_merge.py
 run "edit-session lifecycle"  "$PY" tests/test_lifecycle.py

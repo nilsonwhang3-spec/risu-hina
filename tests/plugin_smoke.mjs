@@ -3941,8 +3941,12 @@ console.log('\ntest_bot_cleanup');
     charId: 'cha-gone-smoke', characterIndex: 7, card: { name: '사라진 봇', chaId: 'cha-gone-smoke' }, chats: [] }) });
   document.getElementById('open-settings')?.dispatchEvent(new window.Event('click', { bubbles: true }));
   await settle(900);
-  const card = () => [...document.querySelectorAll('.card')].find((c) => c.querySelector('h2')?.textContent === 'Hina에만 남은 봇');
+  const card = () => [...document.querySelectorAll('.card')].find((c) => c.querySelector('h2')?.textContent === 'Hina에만 남은 봇 · 챗 · 모듈');
   check('settings carry the leftover-bot card', !!card());
+  const sections = [...document.querySelectorAll('.storenav [data-section]')].map((b) => b.textContent);
+  check('저장공간 정리 has four sections', sections.join(',') === '봇 · 챗 · 모듈,스냅샷,이미지,임시파일', sections.join(','));
+  document.querySelector('.storenav [data-section="orphans"]')?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(100);
   findButton(card(), 'RisuAI와 대조')?.dispatchEvent(new window.Event('click', { bubbles: true }));
   await settle(1500);
   const rows = () => [...(card()?.querySelectorAll('.botcleanrow') ?? [])];
@@ -3963,6 +3967,23 @@ console.log('\ntest_bot_cleanup');
   check('삭제 forgets it in Hina', !left.some((b) => b.name === '사라진 봇') && !gone(),
         left.map((b) => b.name + ':' + b.state).join(', '));
   check('the open bot stays, marked live', left.some((b) => b.state === 'live'), JSON.stringify(left).slice(0, 200));
+  // §1-106: the same comparison judged the open bot's chats by id - none of
+  // them is an orphan, and the chip row counts chats and modules too.
+  const orphanChats = (await (await fetch(backend.url + '/chats/orphans', { headers: auth })).json()).chats || [];
+  check('the open bot chats are not orphans', orphanChats.length === 0, JSON.stringify(orphanChats).slice(0, 200));
+  check('kind chips for bots, chats, modules',
+        [...document.querySelectorAll('[data-orphan-kind]')].map((b) => b.getAttribute('data-orphan-kind')).join(',') === 'bot,chat,module');
+  const section = (id) => document.querySelector(`.storenav [data-section="${id}"]`)?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  section('snapshots');
+  await settle(1200);
+  const snapCard = [...document.querySelectorAll('.card')].find((c) => c.querySelector('h2')?.textContent === '스냅샷');
+  check('the snapshot section loads its list on open', !!snapCard && /스냅샷 \d+개/.test(snapCard.textContent || ''), (snapCard?.textContent || '').slice(0, 200));
+  section('temp');
+  await settle(2500);
+  const kinds = [...document.querySelectorAll('.tempkind')].map((k) => k.getAttribute('data-kind'));
+  check('the temp section lists the kinds', kinds.includes('scratch') && kinds.includes('thumbs') && kinds.includes('system'), kinds.join(','));
+  section('orphans');
+  await settle(100);
   document.getElementById('open-settings')?.dispatchEvent(new window.Event('click', { bubbles: true }));
   await settle(300);
 }

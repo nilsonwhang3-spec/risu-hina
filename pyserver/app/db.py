@@ -673,6 +673,11 @@ ADD_COLUMNS = [
     ("characters", "risu_state", "TEXT NOT NULL DEFAULT ''"),
     ("characters", "risu_trash_time", "INTEGER NOT NULL DEFAULT 0"),
     ("characters", "risu_checked_at", "REAL NOT NULL DEFAULT 0"),
+    # §1-106: whether the bot's RisuAI character still has this chat, by
+    # chat.id - '' never compared (or the bot itself is not live), 'live',
+    # 'missing' (deleted in RisuAI; Hina's copy is an orphan).
+    ("chats", "risu_state", "TEXT NOT NULL DEFAULT ''"),
+    ("chats", "risu_checked_at", "REAL NOT NULL DEFAULT 0"),
     # What the agent calls itself (presets.agentName).
     ("agent_presets", "agent_name", "TEXT NOT NULL DEFAULT ''"),
     # v11: request-parameter JSON (providers.plan_for). temperature keeps its

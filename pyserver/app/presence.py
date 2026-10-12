@@ -23,6 +23,14 @@ Opening a bot in the panel (workspace.materialize) marks it live.
 
 `forget` removes Hina's copy of a bot RisuAI no longer has. It never touches
 RisuAI, and the user's files under projects/ stay.
+
+§1-106 widens the same comparison to chats and modules, from the same read:
+- a chat of a LIVE bot whose `chat.id` the RisuAI character no longer has is
+  `missing` (chats.risu_state). Chats of a trashed / missing bot follow their
+  bot and are not listed on their own; a chat Hina has no id for is never
+  judged.
+- a module working copy (modules.py) whose id is not in RisuAI's `modules`
+  is `missing` (its meta row's `risuState`). Opening it marks it live again.
 """
 from __future__ import annotations
 
@@ -59,13 +67,17 @@ def mark_live(char_key: str) -> None:
                "WHERE char_key = ?", (time.time(), char_key))
 
 
-def record(characters: list[dict]) -> dict:
+def record(characters: list[dict], modules: list | None = None) -> dict:
     """Compare Hina's bots with RisuAI's list as the plugin read it.
 
-    `characters`: [{chaId, name?, trashTime?}] - every entry of RisuAI's
-    `characters` (the trash included). An empty list is refused: a failed
-    read must not turn every bot into an orphan."""
+    `characters`: [{chaId, name?, trashTime?, chats?}] - every entry of
+    RisuAI's `characters` (the trash included); `chats` is the list of that
+    character's chat ids, and without it the bot's chats are not judged.
+    `modules`: RisuAI's module ids, or None when they were not read.
+    An empty character list is refused: a failed read must not turn every
+    bot into an orphan."""
     seen: dict[str, int] = {}
+    chat_ids: dict[str, set[str]] = {}
     for c in characters or []:
         cid = str((c or {}).get("chaId") or "")
         if not cid or cid in ("§temp", "§playground"):
@@ -75,6 +87,8 @@ def record(characters: list[dict]) -> dict:
         except (TypeError, ValueError):
             tt = 0
         seen[cid] = tt
+        if isinstance((c or {}).get("chats"), list):
+            chat_ids[cid] = {str(x) for x in c["chats"] if x}
     if not seen:
         raise PresenceError("RisuAI 캐릭터 목록이 비어 있습니다 - 대조하지 않았습니다")
     now = time.time()
@@ -89,8 +103,40 @@ def record(characters: list[dict]) -> dict:
             counts[state] += 1
             db.execute("UPDATE characters SET risu_state = ?, risu_trash_time = ?, risu_checked_at = ? "
                        "WHERE char_key = ?", (state, tt, now, b["char_key"]))
-    log.info("bot presence: %s (RisuAI %d)", counts, len(seen))
-    return {"counts": counts, "risuCount": len(seen), "bots": listing()}
+            _record_chats(b["char_key"], chat_ids.get(cid) if state == "live" else None, now)
+        mod_counts = _record_modules(modules, now)
+    chat_counts = {"missing": db.one("SELECT COUNT(*) AS n FROM chats WHERE risu_state = 'missing'")["n"]}
+    log.info("bot presence: %s, chats %s, modules %s (RisuAI %d)", counts, chat_counts, mod_counts, len(seen))
+    return {"counts": counts, "risuCount": len(seen), "bots": listing(),
+            "chatCounts": chat_counts, "moduleCounts": mod_counts}
+
+
+def _record_chats(char_key: str, ids: set[str] | None, now: float) -> None:
+    """A live bot's chats against its RisuAI chat ids; anything else is
+    reset to '' (a trashed bot's chats go with the bot, and a bot whose
+    chats were not sent is not judged)."""
+    if ids is None:
+        db.execute("UPDATE chats SET risu_state = '', risu_checked_at = 0 WHERE char_key = ?", (char_key,))
+        return
+    for r in db.query("SELECT chat_key, chat_id FROM chats WHERE char_key = ?", (char_key,)):
+        cid = str(r["chat_id"] or "")
+        st = "" if not cid else ("live" if cid in ids else "missing")
+        db.execute("UPDATE chats SET risu_state = ?, risu_checked_at = ? WHERE chat_key = ?",
+                   (st, now if st else 0, r["chat_key"]))
+
+
+def _record_modules(ids: list | None, now: float) -> dict:
+    from . import modules as modmod
+    if ids is None:
+        return {}
+    have = {str(x) for x in ids if x}
+    counts = {"live": 0, "missing": 0}
+    for ck in modmod.keys():
+        meta = modmod.meta(ck)
+        st = "live" if str(meta.get("id") or "") in have else "missing"
+        counts[st] += 1
+        modmod.set_presence(ck, st, now)
+    return counts
 
 
 def _norm(name: str) -> str:
@@ -210,6 +256,102 @@ def forget(char_key: str) -> dict:
     return {"charKey": char_key, "name": row["name"], "removed": removed,
             "snapshotsHanded": handed, "heir": heir["name"] if heir else "",
             "systemDir": str(sys_dir) if sys_dir else "", "note": note}
+
+
+# --- chats and modules (§1-106) -------------------------------------------------
+
+def chat_listing() -> list[dict]:
+    """Chats of live bots that RisuAI no longer has, with the work Hina holds."""
+    out = []
+    for r in db.query("SELECT c.chat_key, c.char_key, c.chat_id, c.name, c.updated_at, c.risu_checked_at, "
+                      "ch.name AS bot FROM chats c JOIN characters ch ON ch.char_key = c.char_key "
+                      "WHERE c.risu_state = 'missing' AND ch.risu_state = 'live' ORDER BY c.updated_at DESC"):
+        tk = r["chat_key"]
+        n = lambda sql: db.one(sql, (tk,))["n"]  # noqa: E731
+        out.append({
+            "chatKey": tk, "charKey": r["char_key"], "chatId": r["chat_id"], "name": r["name"] or "",
+            "bot": r["bot"] or "", "updatedAt": r["updated_at"], "checkedAt": r["risu_checked_at"] or 0,
+            "turns": n("SELECT COUNT(*) AS n FROM turns WHERE chat_key = ?"),
+            "staged": n("SELECT COUNT(*) AS n FROM staged_edits WHERE chat_key = ? AND status = 'pending'"),
+            "snapshots": n("SELECT COUNT(*) AS n FROM checkpoints WHERE chat_key = ?"),
+            "sessions": n("SELECT COUNT(*) AS n FROM sessions WHERE chat_key = ?"),
+        })
+    return out
+
+
+def forget_chat(chat_key: str) -> dict:
+    """Remove Hina's copy of a chat RisuAI no longer has: its turns, the AI
+    conversations about it, its edits, local lore, memory and snapshots.
+    Refused unless the last comparison found it missing."""
+    from . import workspace
+    row = db.one("SELECT chat_key, char_key, name, risu_state FROM chats WHERE chat_key = ?", (chat_key,))
+    if row is None:
+        raise PresenceError("없는 챗입니다")
+    if (row["risu_state"] or "") != "missing":
+        raise PresenceError("RisuAI에 있는 챗(또는 아직 대조하지 않은 챗)은 지울 수 없습니다 - 먼저 'RisuAI와 대조'를 눌러 주세요")
+    removed: dict[str, int] = {}
+
+    def gone(table: str, sql: str, params) -> None:
+        n = getattr(db.execute(sql, params), "rowcount", 0) or 0
+        if n:
+            removed[table] = removed.get(table, 0) + n
+    with db.transaction():
+        for sid in [r["id"] for r in db.query("SELECT id FROM sessions WHERE chat_key = ?", (chat_key,))]:
+            gone("agent_messages", "DELETE FROM agent_messages WHERE session_id = ?", (sid,))
+        for table in ("sessions", "turns_original", "staged_edits", "checkpoints", "memories",
+                      "lore_entries", "pending_actions"):
+            gone(table, f"DELETE FROM {table} WHERE chat_key = ?", (chat_key,))
+        gone("chats", "DELETE FROM chats WHERE chat_key = ?", (chat_key,))  # turns cascade
+    try:
+        orig = workspace.root(row["char_key"]) / "original"
+        for f in (orig / f"{chat_key}.md", orig / f"{chat_key}.hypa.json"):
+            f.unlink(missing_ok=True)
+    except (OSError, Exception):  # noqa: BLE001 - the rows are what matters
+        pass
+    log.info("forgot chat %s (%s of %s): %s", chat_key, row["name"], row["char_key"], removed)
+    return {"chatKey": chat_key, "name": row["name"] or "", "removed": removed}
+
+
+def module_listing() -> list[dict]:
+    """Module working copies RisuAI no longer has."""
+    from . import modules as modmod
+    out = []
+    for ck in modmod.keys():
+        m = modmod.meta(ck)
+        if m.get("risuState") != "missing":
+            continue
+        r = modmod.row(ck)
+        out.append({**r, "checkedAt": m.get("checkedAt") or 0,
+                    "snapshots": db.one("SELECT COUNT(*) AS n FROM card_checkpoints WHERE char_key = ?", (ck,))["n"]})
+    out.sort(key=lambda r: r["name"].casefold())
+    return out
+
+
+def forget_module(ck: str) -> dict:
+    """Remove Hina's copy of a module RisuAI no longer has (refused unless
+    the last comparison found it missing): working copy, snapshots,
+    proposals and its system folder. RisuAI is not touched."""
+    from . import workspace
+    from . import modules as modmod
+    if not modmod.is_module_key(ck) or not modmod.meta(ck):
+        raise PresenceError("없는 모듈입니다")
+    m = modmod.meta(ck)
+    if m.get("risuState") != "missing":
+        raise PresenceError("RisuAI에 있는 모듈(또는 아직 대조하지 않은 모듈)은 지울 수 없습니다 - 먼저 'RisuAI와 대조'를 눌러 주세요")
+    sys_dir = None
+    try:
+        sys_dir = workspace.root(ck)
+    except Exception:  # noqa: BLE001
+        sys_dir = None
+    with db.transaction():
+        snaps = db.execute("DELETE FROM card_checkpoints WHERE char_key = ?", (ck,)).rowcount or 0
+        db.execute("DELETE FROM pending_actions WHERE char_key = ?", (ck,))
+        db.execute("DELETE FROM lore_entries WHERE char_key = ?", (ck,))
+        modmod.forget(ck)
+    if sys_dir is not None and sys_dir.is_dir():
+        shutil.rmtree(sys_dir, ignore_errors=True)
+    log.info("forgot module %s (%s), snapshots %s", ck, m.get("name"), snaps)
+    return {"key": ck, "name": m.get("name") or "", "snapshots": snaps}
 
 
 def _snapshot_heir(char_key: str) -> dict | None:

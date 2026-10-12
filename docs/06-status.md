@@ -2,6 +2,44 @@
 
 ## 0.15.41 (2026-10-11): §1-103~105 shared snapshots, image store, proposal progress, 새 대화, workspace speed, renamed bot folders
 
+## §1-106 (2026-10-12): 저장공간 정리 in four sections — orphan bots/chats/modules, snapshots, images, temp files by kind
+
+Asked: the cleanup tab should cover 봇/챗/모듈 (orphans of each), a snapshot list, images, and the
+workspace temp files broken down. Measured on the test install first: hina/.cleanup (the old quarantine,
+585 MB, 6,345 files), studio thumbnails 250 MB, data/workspace/<key>/scratch 90 MB (assets an old
+fetch_assets wrote to the SYSTEM folder, e4f7627) and .scratch 48 MB, data/tool-results 21 MB, 42
+automatic bot snapshots holding 68 MB of the DB.
+
+- **One comparison, three kinds.** `host.readInventory` reads `characters` (each with its chat ids) and
+  `modules` in one getDatabase; POST /bots/presence takes `modules` too. `chats.risu_state` (new columns
+  `risu_state`, `risu_checked_at`): a chat of a LIVE bot whose id RisuAI no longer has is `missing`; a
+  trashed/missing bot's chats are reset to '' (they go with the bot), a chat without an id is never judged,
+  a character sent without `chats` (older panel) is not judged. Modules: `risuState` in the module's meta
+  row. Uploading a chat / syncing a module marks it live.
+- **Forget:** `presence.forget_chat` (sessions + agent_messages, turns_original, staged_edits, checkpoints,
+  memories, local lore, pending_actions, the chat row → turns cascade, original/<chat_key>.md/.hypa.json) and
+  `presence.forget_module` (card snapshots, proposals, lore, working copy, system folder). Both refused
+  unless the last comparison said `missing`. Routes GET /chats/orphans, POST /chats/forget {chatKeys},
+  GET /modules/orphans, POST /modules/forget-orphans {keys}.
+- **Snapshots (`storage.snapshot_listing`):** card_checkpoints (bot/module), checkpoints (chat),
+  persona_checkpoints in one list with owner, user vs automatic, size, and "주인 없음" (owner gone from Hina,
+  or a persona RisuAI no longer lists). POST /storage/snapshots/delete {items:[{type,id}]}. Deleting the
+  snapshots is what turns snapshot-only images into collectable ones (이미지 section).
+- **Temp files (`storage.temp_scan` / `temp_clean`):** nine kinds — 옛 정리 보관함, AI 작업 임시(scratch),
+  AI 실행 스크립트 (helper risuhina.py excluded), 공간 scratch/, 캐시·조각 (__pycache__/.cache, .tmp, `.part`
+  older than a day), RisuAI 소스 사본 (hina/.sources), 썸네일 캐시, 시스템 작업 폴더 (data/workspace/*/scratch
+  and .scratch, named by bot), 지난 도구 결과 (tool-results of sessions not running). Each kind has per-bot
+  groups and its largest files. A clean deletes exactly the scanned entries (the plan id holds them; used
+  once), skips files whose size/mtime changed, prunes emptied folders but never the scratch/scripts roots,
+  and is refused while an AI turn runs. projects/, out/, studio output and skills never appear.
+- **Panel:** `ui/storage-cleanup.ts` (was bot-cleanup.ts): section buttons 봇 · 챗 · 모듈 / 스냅샷 / 이미지 /
+  임시파일 (last one remembered per browser); one `pagedList` for every list (filter, chip rows, 30 rows a
+  page, "조건에 맞는 N개 모두 선택", bulk 삭제, row 삭제). Orphan modules can be saved as .risum, bots as .charx.
+  Snapshots and images load when their section is first opened; the temp scan runs on open and on 다시 확인
+  only (it walks the space).
+- Verified: tests/test_storage_cleanup.py (new, in the gate), plugin smoke (four sections, chat ids sent,
+  snapshot and temp sections render).
+
 ## §1-105 (2026-10-11): a renamed bot's folder follows the name; the AI renames folders the right way
 
 Real use: a bot was renamed in RisuAI and the user asked the AI to rename its workspace and studio OUT

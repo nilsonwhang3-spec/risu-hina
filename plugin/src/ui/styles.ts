@@ -421,6 +421,18 @@ pre.mono {
 .botcleantools { gap: 8px; align-items: center; max-width: 640px; margin-bottom: 6px; }
 .botcleanrow { flex-wrap: wrap; }
 .botcleanrow input[type=checkbox] { width: auto; flex-shrink: 0; }
+/* §1-106: the section row and the temp-file kinds. */
+.storenav { margin: 0 0 10px; }
+.storenav .chip { padding: 5px 12px; font-size: 12px; }
+.tempkinds { margin-top: 8px; max-width: 760px; }
+.tempkind { padding: 8px 6px; border-bottom: 1px solid var(--borderc, #2b323f); }
+.tempkind.dim { opacity: .55; }
+.tempkindhead { gap: 8px; align-items: flex-start; }
+.tempkind input[type=checkbox] { width: auto; flex-shrink: 0; margin-top: 3px; }
+.tempkind .n { color: var(--textcolor2, #79839a); font-size: 11px; white-space: nowrap; }
+.tempkind details { margin: 4px 0 0 24px; }
+.tempgroup { gap: 8px; align-items: center; padding: 2px 0; }
+.templargest { max-height: 180px; overflow: auto; white-space: pre-wrap; font-size: 11px; margin: 2px 0 0; }
 .loadingrow { cursor: default; }
 .foldrow { cursor: pointer; }
 .chatitem.busy { opacity: .6; }

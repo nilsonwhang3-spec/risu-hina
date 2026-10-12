@@ -65,10 +65,22 @@ export async function readCharacter(characterIndex: number): Promise<RisuCharact
  * as cloneBot does.
  */
 export async function listCharacters(): Promise<{ chaId: string; name: string; trashTime: number }[]> {
+  return (await readInventory(false)).characters;
+}
+
+/**
+ * RisuAI's characters with their chat ids, and its module ids (§1-106) - one
+ * read for 저장공간 정리's comparison of bots, chats and modules. `modules` is
+ * null when the slice did not carry them (then they are not judged).
+ */
+export async function readInventory(withModules = true): Promise<{
+  characters: { chaId: string; name: string; trashTime: number; chats?: string[] }[];
+  modules: string[] | null;
+}> {
   let dbSlice: Record<string, unknown> | null = null;
   try { await Risuai.hideContainer(); } catch { /* not shown */ }
   try {
-    dbSlice = await Risuai.getDatabase(['characters']);
+    dbSlice = await Risuai.getDatabase(withModules ? ['characters', 'modules'] : ['characters']);
   } catch (e) {
     throw new HostError('failed', 'RisuAI 캐릭터 목록을 읽지 못했습니다: ' + String(e));
   } finally {
@@ -76,8 +88,23 @@ export async function listCharacters(): Promise<{ chaId: string; name: string; t
   }
   const list = dbSlice && Array.isArray(dbSlice['characters']) ? dbSlice['characters'] as RisuCharacter[] : null;
   if (!list) throw new HostError('failed', 'RisuAI 캐릭터 목록을 읽지 못했습니다 (권한을 허용했는지 확인해 주세요)');
-  return list.filter((c) => c && typeof c.chaId === 'string' && c.chaId)
-    .map((c) => ({ chaId: String(c.chaId), name: String(c.name ?? ''), trashTime: Number((c as Record<string, unknown>).trashTime) || 0 }));
+  const characters = list.filter((c) => c && typeof c.chaId === 'string' && c.chaId).map((c) => {
+    const row: { chaId: string; name: string; trashTime: number; chats?: string[] } = {
+      chaId: String(c.chaId), name: String(c.name ?? ''), trashTime: Number((c as Record<string, unknown>).trashTime) || 0,
+    };
+    // A chat without an id is left out: Hina keeps such a chat with an empty
+    // chat_id and never judges it.
+    const chats = (c as Record<string, unknown>).chats;
+    if (withModules && Array.isArray(chats)) {
+      row.chats = chats.map((ch) => String((ch as Record<string, unknown> | null)?.id ?? '')).filter(Boolean);
+    }
+    return row;
+  });
+  const mods = dbSlice?.['modules'];
+  const modules = withModules && Array.isArray(mods)
+    ? mods.filter((m) => m && typeof m === 'object' && (m as Record<string, unknown>).id).map((m) => String((m as Record<string, unknown>).id))
+    : null;
+  return { characters, modules };
 }
 
 export async function readChat(slot: Slot): Promise<RisuChat> {

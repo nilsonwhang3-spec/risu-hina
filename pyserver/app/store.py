@@ -128,13 +128,14 @@ def ingest_chat(cha_id: str, chat: dict, chat_index: int | None, *,
             "SELECT 1 AS x FROM turns WHERE chat_key = ? LIMIT 1", (tk,)) is not None or db.one(
             "SELECT 1 AS x FROM turns_original WHERE chat_key = ? LIMIT 1", (tk,)) is not None
         db.execute(
-            "INSERT INTO chats(chat_key, char_key, chat_id, chat_index, name, meta_json, orig_count, created_at, updated_at) "
-            "VALUES(?,?,?,?,?,?,?,?,?) "
+            "INSERT INTO chats(chat_key, char_key, chat_id, chat_index, name, meta_json, orig_count, created_at, updated_at, risu_state) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?) "
             "ON CONFLICT(chat_key) DO UPDATE SET "
             "  chat_index=excluded.chat_index, name=excluded.name, meta_json=excluded.meta_json, "
-            "  orig_count=excluded.orig_count, updated_at=excluded.updated_at",
+            "  orig_count=excluded.orig_count, updated_at=excluded.updated_at, risu_state=excluded.risu_state",
+            # Read from RisuAI just now: it has the chat (§1-106).
             (tk, ck, str(chat.get("id") or ""), chat_index, str(chat.get("name") or ""),
-             db.js(doc["meta"]), len(messages), now, now),
+             db.js(doc["meta"]), len(messages), now, now, "live" if chat.get("id") else ""),
         )
 
         reset = force or not exists

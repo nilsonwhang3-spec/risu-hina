@@ -305,6 +305,31 @@ export interface HinaBot {
   snapshots?: number; snapshotHeir?: string;
 }
 
+/** A chat of a live bot that RisuAI no longer has (GET /chats/orphans, §1-106). */
+export interface OrphanChat {
+  chatKey: string; charKey: string; chatId: string; name: string; bot: string;
+  updatedAt: number; checkedAt: number; turns: number; staged: number; snapshots: number; sessions: number;
+}
+
+/** A module working copy RisuAI no longer has (GET /modules/orphans). */
+export interface OrphanModule {
+  key: string; id: string; name: string; description: string; lore: number; regex: number;
+  trigger: number; assets: number; total: number; dirty: boolean; checkedAt: number; snapshots: number;
+}
+
+/** One snapshot of any kind (GET /storage/snapshots). */
+export interface StoredSnapshot {
+  type: 'bot' | 'module' | 'chat' | 'persona'; id: string; ownerKey: string; owner: string; sub: string;
+  label: string; auto: boolean; createdAt: number; bytes: number; orphan: boolean; ownerState: string;
+}
+
+/** The workspace's temporary files by kind (GET /storage/temp). */
+export interface TempKind {
+  id: string; label: string; hint: string; count: number; bytes: number; newest: number;
+  groups: { group: string; count: number; bytes: number; newest: number }[];
+  largest: string[];
+}
+
 /** The image store by who still needs each file (GET /assets/usage, §1-103). */
 export interface AssetUsage {
   live: { blobs: number; bytes: number };
@@ -2484,10 +2509,45 @@ class AppState {
   }
 
   /** Read RisuAI's character list and record which of Hina's bots it still has. */
-  async compareBots(): Promise<{ counts: Record<string, number>; risuCount: number; bots: HinaBot[] }> {
-    const { listCharacters } = await import('./host');
-    const characters = await listCharacters();
-    return await transport.post('/bots/presence', { characters });
+  async compareBots(): Promise<{ counts: Record<string, number>; risuCount: number; bots: HinaBot[];
+                                  chatCounts?: Record<string, number>; moduleCounts?: Record<string, number> }> {
+    // Chats (by id) and modules come from the same read (§1-106).
+    const { characters, modules } = await host.readInventory();
+    return await transport.post('/bots/presence', modules ? { characters, modules } : { characters }, 120_000);
+  }
+
+  async orphanChats(): Promise<OrphanChat[]> {
+    return (await transport.get<{ chats: OrphanChat[] }>('/chats/orphans')).chats ?? [];
+  }
+
+  async forgetChats(chatKeys: string[]): Promise<{ forgotten: { name: string }[]; failed: { chatKey: string; error: string }[] }> {
+    return await transport.post('/chats/forget', { chatKeys }, 300_000);
+  }
+
+  async orphanModules(): Promise<OrphanModule[]> {
+    return (await transport.get<{ modules: OrphanModule[] }>('/modules/orphans')).modules ?? [];
+  }
+
+  async forgetModules(keys: string[]): Promise<{ forgotten: { name: string }[]; failed: { key: string; error: string }[] }> {
+    return await transport.post('/modules/forget-orphans', { keys }, 300_000);
+  }
+
+  async storedSnapshots(): Promise<StoredSnapshot[]> {
+    return (await transport.get<{ snapshots: StoredSnapshot[] }>('/storage/snapshots', {}, 60_000)).snapshots ?? [];
+  }
+
+  async deleteSnapshots(items: { type: string; id: string }[]): Promise<{ removed: number; missing: string[] }> {
+    return await transport.post('/storage/snapshots/delete', { items }, 120_000);
+  }
+
+  async tempScan(): Promise<{ plan: string; kinds: TempKind[]; aiRunning: boolean }> {
+    return await transport.get('/storage/temp', {}, 300_000);
+  }
+
+  async tempClean(plan: string, picks: { kind: string; group?: string }[]): Promise<{ removed: number; freed: number; skipped: number }> {
+    const r = await transport.post<{ removed: number; freed: number; skipped: number }>('/storage/temp/clean', { plan, picks }, 600_000);
+    this.touchFiles();
+    return r;
   }
 
   /** Remove Hina's copy of a bot RisuAI no longer has. RisuAI is not touched. */

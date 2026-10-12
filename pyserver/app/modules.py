@@ -181,7 +181,8 @@ def sync(module: dict, *, reset: bool = False) -> dict:
         "  cha_id=excluded.cha_id, name=excluded.name, card_json=excluded.card_json, updated_at=excluded.updated_at",
         (ck, mid, card["name"], None, db.js(card), "", now, now))
     meta = _meta_get(ck)
-    meta.update({"id": mid, "name": card["name"], "syncedAt": now})
+    # Read from RisuAI just now: it has the module (§1-106).
+    meta.update({"id": mid, "name": card["name"], "syncedAt": now, "risuState": "live", "checkedAt": now})
     _meta_set(ck, meta)
     first = not cardmod.exists(ck)
     card_reset = reset or first
@@ -268,13 +269,33 @@ def dirty() -> list[dict]:
 
 
 def forget(ck: str) -> None:
-    """RisuAI no longer has the module: drop its working copy."""
+    """RisuAI no longer has the module: drop its working copy (and its
+    snapshots, proposals and system folder - presence.forget_module)."""
     if not is_module_key(ck):
         return
     db.execute("DELETE FROM meta WHERE key = ?", (_META + ck,))
     db.execute("DELETE FROM characters WHERE char_key = ?", (ck,))
     db.execute("DELETE FROM card_fields WHERE char_key = ?", (ck,))
     db.execute("DELETE FROM card_scripts WHERE char_key = ?", (ck,))
+
+
+def keys() -> list[str]:
+    """Every module working copy Hina holds."""
+    return [r["key"][len(_META):] for r in db.query("SELECT key FROM meta WHERE key LIKE ?", (_META + "%",))
+            if store.character_row(r["key"][len(_META):]) is not None]
+
+
+def meta(ck: str) -> dict:
+    return _meta_get(ck)
+
+
+def set_presence(ck: str, state: str, when: float) -> None:
+    """Whether RisuAI's `modules` still has it (§1-106): 'live' / 'missing'."""
+    m = _meta_get(ck)
+    if not m:
+        return
+    m.update({"risuState": state, "checkedAt": when})
+    _meta_set(ck, m)
 
 
 # --- combinations ---------------------------------------------------------------

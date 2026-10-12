@@ -1859,8 +1859,9 @@ def h_bots_presence(arg: dict) -> dict:
     chars = arg.get("characters")
     if not isinstance(chars, list):
         raise ApiError(400, "characters 가 필요합니다")
+    mods = arg.get("modules")
     try:
-        return presence.record(chars)
+        return presence.record(chars, [str(m) for m in mods] if isinstance(mods, list) else None)
     except presence.PresenceError as e:
         raise ApiError(409, str(e))
 
@@ -1881,6 +1882,62 @@ def h_bots_forget(arg: dict) -> dict:
     try:
         return presence.forget(ck)
     except presence.PresenceError as e:
+        raise ApiError(409, str(e))
+
+
+def h_chats_orphans(arg: dict) -> dict:
+    """Chats of live bots RisuAI no longer has (§1-106)."""
+    return {"chats": presence.chat_listing()}
+
+
+def _forget_many(arg: dict, key: str, fn) -> dict:
+    keys = arg.get(key + "s")
+    if not isinstance(keys, list):
+        keys = [arg.get(key)] if arg.get(key) else []
+    done, failed = [], []
+    for k in [str(x) for x in keys if x]:
+        try:
+            done.append(fn(k))
+        except presence.PresenceError as e:
+            failed.append({key: k, "error": str(e)})
+    return {"forgotten": done, "failed": failed}
+
+
+def h_chats_forget(arg: dict) -> dict:
+    return _forget_many(arg, "chatKey", presence.forget_chat)
+
+
+def h_modules_orphans(arg: dict) -> dict:
+    return {"modules": presence.module_listing()}
+
+
+def h_modules_forget(arg: dict) -> dict:
+    return _forget_many(arg, "key", presence.forget_module)
+
+
+def h_storage_snapshots(arg: dict) -> dict:
+    from . import storage
+    return {"snapshots": storage.snapshot_listing()}
+
+
+def h_storage_snapshots_delete(arg: dict) -> dict:
+    from . import storage
+    items = arg.get("items")
+    if not isinstance(items, list):
+        raise ApiError(400, "items 가 필요합니다")
+    return storage.snapshot_delete(items)
+
+
+def h_storage_temp(arg: dict) -> dict:
+    from . import storage
+    return storage.temp_scan()
+
+
+def h_storage_temp_clean(arg: dict) -> dict:
+    from . import storage
+    try:
+        return storage.temp_clean(str(arg.get("plan") or ""), arg.get("picks") or [])
+    except storage.StorageError as e:
         raise ApiError(409, str(e))
 
 
@@ -3013,6 +3070,14 @@ ROUTES: dict[str, Handler] = {
     "GET /bots": h_bots,
     "POST /bots/presence": h_bots_presence,
     "POST /bots/forget": h_bots_forget,
+    "GET /chats/orphans": h_chats_orphans,
+    "POST /chats/forget": h_chats_forget,
+    "GET /modules/orphans": h_modules_orphans,
+    "POST /modules/forget-orphans": h_modules_forget,
+    "GET /storage/snapshots": h_storage_snapshots,
+    "POST /storage/snapshots/delete": h_storage_snapshots_delete,
+    "GET /storage/temp": h_storage_temp,
+    "POST /storage/temp/clean": h_storage_temp_clean,
     "POST /workspace": h_workspace_create,
     "GET /workspace/get": h_workspace_get,
     "GET /workspace/dirty": h_workspace_dirty,
