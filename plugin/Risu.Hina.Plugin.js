@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.15.41
+//@display-name Risu Hina v0.15.42
 //@api 3.0
-//@version 0.15.41
+//@version 0.15.42
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -195,7 +195,7 @@
           this.tokenSafe = true;
           this.lastHealth = body;
           this.probeInfo = "";
-          this.gate = versionGate("0.15.41", String(body.version || ""));
+          this.gate = versionGate("0.15.42", String(body.version || ""));
           return body;
         }
         /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -561,26 +561,6 @@
   });
 
   // src/host.ts
-  var host_exports = {};
-  __export(host_exports, {
-    HostError: () => HostError,
-    NO_SELECT_HINT: () => NO_SELECT_HINT,
-    canon: () => canon,
-    cardOf: () => cardOf,
-    copyToClipboard: () => copyToClipboard,
-    currentSlot: () => currentSlot,
-    describeCardParts: () => describeCardParts,
-    download: () => download,
-    downloadBytes: () => downloadBytes,
-    fnv32: () => fnv32,
-    linkModule: () => linkModule,
-    listCharacters: () => listCharacters,
-    readCharacter: () => readCharacter,
-    readChat: () => readChat,
-    saveAsCopy: () => saveAsCopy,
-    writeCharacter: () => writeCharacter,
-    writeChat: () => writeChat
-  });
   async function currentSlot() {
     let characterIndex;
     try {
@@ -605,14 +585,14 @@
     if (!char) throw new HostError("missing", `\uCE90\uB9AD\uD130 ${characterIndex}\uB97C \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4`);
     return char;
   }
-  async function listCharacters() {
+  async function readInventory(withModules = true) {
     let dbSlice = null;
     try {
       await Risuai.hideContainer();
     } catch {
     }
     try {
-      dbSlice = await Risuai.getDatabase(["characters"]);
+      dbSlice = await Risuai.getDatabase(withModules ? ["characters", "modules"] : ["characters"]);
     } catch (e) {
       throw new HostError("failed", "RisuAI \uCE90\uB9AD\uD130 \uBAA9\uB85D\uC744 \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + String(e));
     } finally {
@@ -623,7 +603,21 @@
     }
     const list2 = dbSlice && Array.isArray(dbSlice["characters"]) ? dbSlice["characters"] : null;
     if (!list2) throw new HostError("failed", "RisuAI \uCE90\uB9AD\uD130 \uBAA9\uB85D\uC744 \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4 (\uAD8C\uD55C\uC744 \uD5C8\uC6A9\uD588\uB294\uC9C0 \uD655\uC778\uD574 \uC8FC\uC138\uC694)");
-    return list2.filter((c) => c && typeof c.chaId === "string" && c.chaId).map((c) => ({ chaId: String(c.chaId), name: String(c.name ?? ""), trashTime: Number(c.trashTime) || 0 }));
+    const characters = list2.filter((c) => c && typeof c.chaId === "string" && c.chaId).map((c) => {
+      const row = {
+        chaId: String(c.chaId),
+        name: String(c.name ?? ""),
+        trashTime: Number(c.trashTime) || 0
+      };
+      const chats = c.chats;
+      if (withModules && Array.isArray(chats)) {
+        row.chats = chats.map((ch) => String(ch?.id ?? "")).filter(Boolean);
+      }
+      return row;
+    });
+    const mods = dbSlice?.["modules"];
+    const modules = withModules && Array.isArray(mods) ? mods.filter((m) => m && typeof m === "object" && m.id).map((m) => String(m.id)) : null;
+    return { characters, modules };
   }
   async function readChat(slot) {
     const chat = await Risuai.getChatFromIndex(slot.characterIndex, slot.chatIndex);
@@ -3961,10 +3955,10 @@ name: ${nm}
         }
         /** Hand one RisuAI module to the backend (first read, a merge, or `reset` after 반영). */
         async syncModule(raw, reset = false) {
-          const row2 = await transport.post("/module/sync", { module: raw, reset }, 12e4);
-          this.openModules = this.openModules.map((m) => m.key === row2.key ? row2 : m);
-          this.syncModuleAssets(raw, row2.key);
-          return row2;
+          const row = await transport.post("/module/sync", { module: raw, reset }, 12e4);
+          this.openModules = this.openModules.map((m) => m.key === row.key ? row : m);
+          this.syncModuleAssets(raw, row.key);
+          return row;
         }
         /** A module's images into the store, like the bot's (assets.ts), in the background. */
         syncModuleAssets(raw, key) {
@@ -4022,9 +4016,9 @@ name: ${nm}
             for (const id of ids) {
               const raw = modules.find((m) => String(m["id"] ?? "") === id);
               if (!raw || raw["mcp"]) continue;
-              const row2 = await transport.post("/module/sync", { module: raw }, 12e4);
-              rows.push(row2);
-              this.syncModuleAssets(raw, row2.key);
+              const row = await transport.post("/module/sync", { module: raw }, 12e4);
+              rows.push(row);
+              this.syncModuleAssets(raw, row.key);
             }
             if (this.moduleOwnerKey !== owner) return;
             this.openModules = rows;
@@ -4054,9 +4048,9 @@ name: ${nm}
             const raw = modules.find((m) => String(m["id"] ?? "") === id);
             if (!raw) continue;
             if (raw["mcp"]) throw new Error(`'${String(raw["name"] ?? "")}' \uC740(\uB294) MCP \uBAA8\uB4C8\uC774\uB77C \uD3B8\uC9D1\uD560 \uB0B4\uC6A9\uC774 \uC5C6\uC2B5\uB2C8\uB2E4`);
-            const row2 = await transport.post("/module/sync", { module: raw }, 12e4);
-            rows.push(row2);
-            this.syncModuleAssets(raw, row2.key);
+            const row = await transport.post("/module/sync", { module: raw }, 12e4);
+            rows.push(row);
+            this.syncModuleAssets(raw, row.key);
           }
           this.openModules = rows;
           if (this.cardTarget && !rows.some((m) => m.key === this.cardTarget)) this.cardTarget = "";
@@ -4070,10 +4064,10 @@ name: ${nm}
         async openModule(id, focus = true) {
           const ids = this.openModules.map((m) => m.id);
           if (!ids.includes(id)) await this.setOpenModules([...ids, id]);
-          const row2 = this.openModules.find((m) => m.id === id);
-          if (!row2) throw new Error("RisuAI\uC5D0\uC11C \uC774 \uBAA8\uB4C8\uC744 \uCC3E\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4");
-          if (focus) this.focusModule(row2.key);
-          return row2;
+          const row = this.openModules.find((m) => m.id === id);
+          if (!row) throw new Error("RisuAI\uC5D0\uC11C \uC774 \uBAA8\uB4C8\uC744 \uCC3E\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4");
+          if (focus) this.focusModule(row.key);
+          return row;
         }
         async closeModule(key) {
           this.openModules = this.openModules.filter((m) => m.key !== key);
@@ -4124,21 +4118,21 @@ name: ${nm}
               report(t);
               progress(t);
             };
-            let row2 = this.openModules.find((m) => m.key === key);
-            if (!row2) row2 = (await transport.get("/modules")).modules.find((m) => m.key === key);
-            if (!row2) throw new Error("\uBAA8\uB4C8 \uC791\uC5C5\uBCF8\uC744 \uCC3E\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4");
-            say(`\uBAA8\uB4C8 '${row2.name}' \uC744(\uB97C) RisuAI\uC5D0 \uBC18\uC601\uD558\uB294 \uC911\u2026`);
+            let row = this.openModules.find((m) => m.key === key);
+            if (!row) row = (await transport.get("/modules")).modules.find((m) => m.key === key);
+            if (!row) throw new Error("\uBAA8\uB4C8 \uC791\uC5C5\uBCF8\uC744 \uCC3E\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4");
+            say(`\uBAA8\uB4C8 '${row.name}' \uC744(\uB97C) RisuAI\uC5D0 \uBC18\uC601\uD558\uB294 \uC911\u2026`);
             const patch = await this.cardPatch(key);
             const update = this.cardUpdateFrom(patch, false);
             if (!update) return { applied: 0, mode: "noop", verified: true };
             await this.resolveStagedAssets(update, say, key);
-            const r = await writeModule(row2.id, update);
+            const r = await writeModule(row.id, update);
             if (!r.verified) {
               return { applied: r.applied, mode: r.mode, verified: false, parts: r.parts, ...r.drift ? { drift: r.drift } : {} };
             }
             say("RisuAI \uBC18\uC601 \uD655\uC778 \uC644\uB8CC \xB7 \uBAA8\uB4C8 \uC791\uC5C5\uBCF8\uC744 \uB3D9\uAE30\uD654\uD558\uB294 \uC911\u2026");
             await this.cardCommit("\uBC18\uC601 \uC9C1\uC804", key);
-            await this.syncModule(await readModule(row2.id), true);
+            await this.syncModule(await readModule(row.id), true);
             this.bump();
             void this.refreshBotChanges();
             return { applied: r.applied, mode: r.mode, verified: true, parts: r.parts };
@@ -4146,9 +4140,9 @@ name: ${nm}
         }
         /** Read RisuAI's copy of the target module again (a change made over there). */
         async rereadModule(key = this.cardTarget) {
-          const row2 = this.openModules.find((m) => m.key === key);
-          if (!row2) return void 0;
-          const r = await this.syncModule(await readModule(row2.id));
+          const row = this.openModules.find((m) => m.key === key);
+          if (!row) return void 0;
+          const r = await this.syncModule(await readModule(row.id));
           this.bump();
           void this.refreshBotChanges();
           return r.merge;
@@ -4206,8 +4200,8 @@ name: ${nm}
           if (!key) {
             const raw = await readModule(id);
             if (raw["mcp"]) throw new Error("MCP \uBAA8\uB4C8\uC740 \uD30C\uC77C\uB85C \uC800\uC7A5\uD560 \uB0B4\uC6A9\uC774 \uC5C6\uC2B5\uB2C8\uB2E4");
-            const row2 = await transport.post("/module/sync", { module: raw }, 12e4);
-            key = row2.key;
+            const row = await transport.post("/module/sync", { module: raw }, 12e4);
+            key = row.key;
             await this.syncModuleAssets(raw, key);
           }
           return await this.exportModule(format, allowMissing, "", key);
@@ -4269,13 +4263,13 @@ name: ${nm}
           }
         }
         async cachePersonaIcons(rows, live) {
-          for (const row2 of rows) {
-            const p = live.find((x) => row2.id ? x.id === row2.id : x.index === row2.index);
+          for (const row of rows) {
+            const p = live.find((x) => row.id ? x.id === row.id : x.index === row.index);
             if (!p?.icon) continue;
             const bytes = await personaImage(p.icon);
             if (!bytes) continue;
             try {
-              const saved2 = await transport.post("/persona/icon", { key: row2.key, iconKey: p.icon, base64: toBase64(bytes) });
+              const saved2 = await transport.post("/persona/icon", { key: row.key, iconKey: p.icon, base64: toBase64(bytes) });
               this.patchPersona(saved2);
             } catch (e) {
               void clientLog("warn", "persona icon cache", { error: String(e).slice(0, 200) });
@@ -4283,19 +4277,19 @@ name: ${nm}
           }
         }
         /** One row changed: the list and the open persona follow, one emit. */
-        patchPersona(row2) {
-          if (this.personas) this.personas = this.personas.map((x) => x.key === row2.key ? { ...x, ...row2 } : x);
-          if (this.persona?.key === row2.key) this.persona = { ...this.persona, ...row2 };
+        patchPersona(row) {
+          if (this.personas) this.personas = this.personas.map((x) => x.key === row.key ? { ...x, ...row } : x);
+          if (this.persona?.key === row.key) this.persona = { ...this.persona, ...row };
           this.emit();
-          return row2;
+          return row;
         }
         /** Open one persona for editing (its project folder exists from the sync). */
         async openPersona(key) {
-          const row2 = await transport.get("/persona", { key });
-          this.persona = row2;
+          const row = await transport.get("/persona", { key });
+          this.persona = row;
           this.touchFiles();
           if (this.editMode === "persona") void this.syncModuleOwner();
-          return row2;
+          return row;
         }
         /** The backend's rows again, without reading RisuAI (an approved AI edit). */
         async refreshPersonaList() {
@@ -4332,11 +4326,11 @@ name: ${nm}
         }
         /** A NEW persona in the working copy; RisuAI gets it on 반영. */
         async createPersona(name, prompt = "") {
-          const row2 = await transport.post("/persona/create", { name, prompt });
-          this.personas = [...this.personas ?? [], row2];
-          this.persona = row2;
+          const row = await transport.post("/persona/create", { name, prompt });
+          this.personas = [...this.personas ?? [], row];
+          this.persona = row;
           this.touchFiles();
-          return row2;
+          return row;
         }
         async personaCheckpoints(key = this.persona?.key ?? "") {
           const r = await transport.get("/persona/checkpoints", { key });
@@ -4380,11 +4374,11 @@ name: ${nm}
           });
         }
         async performPersonaWriteBack(key) {
-          const row2 = await transport.get("/persona", { key });
-          if (!row2.dirty) return { written: false, name: row2.work.name };
-          if (row2.isNew) {
-            const bytes2 = row2.work.image ? await this.fileBytes(row2.work.image) : null;
-            const made = await createPersona({ name: row2.work.name, prompt: row2.work.prompt }, bytes2);
+          const row = await transport.get("/persona", { key });
+          if (!row.dirty) return { written: false, name: row.work.name };
+          if (row.isNew) {
+            const bytes2 = row.work.image ? await this.fileBytes(row.work.image) : null;
+            const made = await createPersona({ name: row.work.name, prompt: row.work.prompt }, bytes2);
             const after2 = await transport.post("/persona/commit", {
               key,
               id: made.id,
@@ -4401,14 +4395,14 @@ name: ${nm}
             return { written: true, name: made.name };
           }
           const live = (await readPersonas()).personas;
-          const p = live.find((x) => row2.id ? x.id === row2.id : x.index === row2.index && x.name === row2.base.name);
+          const p = live.find((x) => row.id ? x.id === row.id : x.index === row.index && x.name === row.base.name);
           if (!p) throw new Error("RisuAI\uC5D0\uC11C \uC774 \uD398\uB974\uC18C\uB098\uB97C \uCC3E\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4 (\uC9C0\uC6CC\uC84C\uC744 \uC218 \uC788\uC2B5\uB2C8\uB2E4). \uCCAB \uD654\uBA74\uC5D0\uC11C \uB2E4\uC2DC \uC77D\uC5B4 \uC8FC\uC138\uC694");
-          if (p.selected) return this.personaSaveAsCopy(key, row2, p);
-          if (p.name !== row2.base.name || p.prompt !== row2.base.prompt || p.icon !== row2.iconKey) {
+          if (p.selected) return this.personaSaveAsCopy(key, row, p);
+          if (p.name !== row.base.name || p.prompt !== row.base.prompt || p.icon !== row.iconKey) {
             throw new Error("RisuAI \uCABD\uC5D0\uC11C \uC774 \uD398\uB974\uC18C\uB098\uAC00 \uBC14\uB00C\uC5C8\uC2B5\uB2C8\uB2E4. \uCCAB \uD654\uBA74\uC5D0\uC11C \uD398\uB974\uC18C\uB098\uB97C \uB2E4\uC2DC \uC77D\uC5B4 \uC8FC\uC138\uC694 (\uD3B8\uC9D1 \uB0B4\uC6A9\uC740 \uC791\uC5C5\uBCF8\uC5D0 \uB0A8\uC544 \uC788\uC2B5\uB2C8\uB2E4)");
           }
-          const bytes = row2.work.image ? await this.fileBytes(row2.work.image) : null;
-          const saved2 = await writePersona(p, { name: row2.work.name, prompt: row2.work.prompt }, bytes);
+          const bytes = row.work.image ? await this.fileBytes(row.work.image) : null;
+          const saved2 = await writePersona(p, { name: row.work.name, prompt: row.work.prompt }, bytes);
           const after = await transport.post("/persona/commit", {
             key,
             name: saved2.name,
@@ -4430,10 +4424,10 @@ name: ${nm}
          * the original's working copy goes back to RisuAI's (an automatic snapshot
          * keeps the edit there too), and the copy is what the persona tab shows next.
          */
-        async personaSaveAsCopy(key, row2, p) {
-          const name = copyName(row2.base.name, row2.work.name);
-          const bytes = row2.work.image ? await this.fileBytes(row2.work.image) : null;
-          const made = await createPersona({ name, prompt: row2.work.prompt }, bytes, p);
+        async personaSaveAsCopy(key, row, p) {
+          const name = copyName(row.base.name, row.work.name);
+          const bytes = row.work.image ? await this.fileBytes(row.work.image) : null;
+          const made = await createPersona({ name, prompt: row.work.prompt }, bytes, p);
           try {
             await transport.post("/persona/reset", { key });
           } catch (e) {
@@ -5152,9 +5146,34 @@ name: ${nm}
         }
         /** Read RisuAI's character list and record which of Hina's bots it still has. */
         async compareBots() {
-          const { listCharacters: listCharacters2 } = await Promise.resolve().then(() => (init_host(), host_exports));
-          const characters = await listCharacters2();
-          return await transport.post("/bots/presence", { characters });
+          const { characters, modules } = await readInventory();
+          return await transport.post("/bots/presence", modules ? { characters, modules } : { characters }, 12e4);
+        }
+        async orphanChats() {
+          return (await transport.get("/chats/orphans")).chats ?? [];
+        }
+        async forgetChats(chatKeys) {
+          return await transport.post("/chats/forget", { chatKeys }, 3e5);
+        }
+        async orphanModules() {
+          return (await transport.get("/modules/orphans")).modules ?? [];
+        }
+        async forgetModules(keys) {
+          return await transport.post("/modules/forget-orphans", { keys }, 3e5);
+        }
+        async storedSnapshots() {
+          return (await transport.get("/storage/snapshots", {}, 6e4)).snapshots ?? [];
+        }
+        async deleteSnapshots(items5) {
+          return await transport.post("/storage/snapshots/delete", { items: items5 }, 12e4);
+        }
+        async tempScan() {
+          return await transport.get("/storage/temp", {}, 3e5);
+        }
+        async tempClean(plan, picks) {
+          const r = await transport.post("/storage/temp/clean", { plan, picks }, 6e5);
+          this.touchFiles();
+          return r;
         }
         /** Remove Hina's copy of a bot RisuAI no longer has. RisuAI is not touched. */
         async forgetBot(charKey) {
@@ -5553,15 +5572,15 @@ name: ${nm}
                 linked = true;
               }
               await this.loadModules().catch(() => void 0);
-              const row2 = await this.openModule(mid, true);
+              const row = await this.openModule(mid, true);
               this.openTabRequest = CARD_TABS.has(this.activeTab) ? this.activeTab : "botlore";
               this.emit();
-              detail = `RisuAI\uC5D0 \uC0C8 \uBAA8\uB4C8 '${row2.name}' \uC744(\uB97C) \uB9CC\uB4E4\uACE0 \uD328\uB110\uC5D0 \uC5F4\uC5C8\uC2B5\uB2C8\uB2E4 (id=${mid}, key=${row2.key})` + (linked ? " \xB7 \uC774 \uBD07\uC758 \uBAA8\uB4C8 \uBAA9\uB85D\uC5D0 \uC5F0\uACB0\uD588\uC2B5\uB2C8\uB2E4" : "") + ".";
+              detail = `RisuAI\uC5D0 \uC0C8 \uBAA8\uB4C8 '${row.name}' \uC744(\uB97C) \uB9CC\uB4E4\uACE0 \uD328\uB110\uC5D0 \uC5F4\uC5C8\uC2B5\uB2C8\uB2E4 (id=${mid}, key=${row.key})` + (linked ? " \xB7 \uC774 \uBD07\uC758 \uBAA8\uB4C8 \uBAA9\uB85D\uC5D0 \uC5F0\uACB0\uD588\uC2B5\uB2C8\uB2E4" : "") + ".";
             } else if (r.host.kind === "host_open_module") {
-              const row2 = await this.openModule(String(r.host.args?.id || ""), true);
+              const row = await this.openModule(String(r.host.args?.id || ""), true);
               this.openTabRequest = CARD_TABS.has(this.activeTab) ? this.activeTab : "botlore";
               this.emit();
-              detail = `\uBAA8\uB4C8 '${row2.name}' \uC744(\uB97C) \uD328\uB110\uC5D0 \uC5F4\uC5C8\uC2B5\uB2C8\uB2E4. \uC774\uC81C \uC774 \uBAA8\uB4C8\uC744 \uC77D\uACE0 \uACE0\uCE60 \uC218 \uC788\uC2B5\uB2C8\uB2E4 (focus_target).`;
+              detail = `\uBAA8\uB4C8 '${row.name}' \uC744(\uB97C) \uD328\uB110\uC5D0 \uC5F4\uC5C8\uC2B5\uB2C8\uB2E4. \uC774\uC81C \uC774 \uBAA8\uB4C8\uC744 \uC77D\uACE0 \uACE0\uCE60 \uC218 \uC788\uC2B5\uB2C8\uB2E4 (focus_target).`;
             } else if (r.host.kind === "host_open_tab") {
               const tab = String(r.host.args?.tab || "");
               const mk = r.host.charKey || "";
@@ -5909,9 +5928,9 @@ name: ${nm}
           const collect2 = (value) => {
             if (typeof value === "string" && value.startsWith("assets/hina-pending-")) pending3.add(value);
           };
-          for (const row2 of update.emotionImages ?? []) if (Array.isArray(row2)) collect2(row2[1]);
-          for (const row2 of update.additionalAssets ?? []) if (Array.isArray(row2)) collect2(row2[1]);
-          for (const row2 of update.ccAssets ?? []) if (row2 && typeof row2 === "object") collect2(row2.uri);
+          for (const row of update.emotionImages ?? []) if (Array.isArray(row)) collect2(row[1]);
+          for (const row of update.additionalAssets ?? []) if (Array.isArray(row)) collect2(row[1]);
+          for (const row of update.ccAssets ?? []) if (row && typeof row === "object") collect2(row.uri);
           for (const f of update.fields ?? []) if (f.field === "image") collect2(f.after);
           const resolved = /* @__PURE__ */ new Map();
           let done = 0;
@@ -5926,9 +5945,9 @@ name: ${nm}
           });
           const replace = (value) => typeof value === "string" ? resolved.get(value) ?? value : value;
           if (update.fields) update.fields = update.fields.map((f) => f.field === "image" ? { ...f, after: String(replace(f.after)) } : f);
-          if (update.emotionImages) update.emotionImages = update.emotionImages.map((row2) => Array.isArray(row2) ? [row2[0], replace(row2[1]), ...row2.slice(2)] : row2);
-          if (update.additionalAssets) update.additionalAssets = update.additionalAssets.map((row2) => Array.isArray(row2) ? [row2[0], replace(row2[1]), ...row2.slice(2)] : row2);
-          if (update.ccAssets) update.ccAssets = update.ccAssets.map((row2) => row2 && typeof row2 === "object" ? { ...row2, uri: replace(row2.uri) } : row2);
+          if (update.emotionImages) update.emotionImages = update.emotionImages.map((row) => Array.isArray(row) ? [row[0], replace(row[1]), ...row.slice(2)] : row);
+          if (update.additionalAssets) update.additionalAssets = update.additionalAssets.map((row) => Array.isArray(row) ? [row[0], replace(row[1]), ...row.slice(2)] : row);
+          if (update.ccAssets) update.ccAssets = update.ccAssets.map((row) => row && typeof row === "object" ? { ...row, uri: replace(row.uri) } : row);
         }
       };
       state = new AppState();
@@ -6530,7 +6549,7 @@ name: ${nm}
         const busy = el("span", { class: "hint" });
         const other = !!a.chatKey && a.chatKey !== state.activeChatKey;
         const lines = Array.isArray(a.args?.lines) ? a.args.lines.map(String).slice(0, 6) : [];
-        const row2 = el("div", { class: "stagedrow" }, [
+        const row = el("div", { class: "stagedrow" }, [
           a.kind === "studio_batch" ? el("span", { class: "badge warn", text: "\uC0DD\uC131" }) : a.byHost ? el("span", { class: "badge err", text: "RisuAI" }) : el("span", { class: "badge", text: "\uC791\uC5C5\uBCF8" }),
           el("div", { class: "grow" }, [
             el("div", { text: a.summary }),
@@ -6548,7 +6567,7 @@ name: ${nm}
             await decideAnywhere(a, approve);
           } catch (e) {
             busy.textContent = "";
-            list2.insertBefore(el("div", { class: "notice err", text: msg3(e) }), row2);
+            list2.insertBefore(el("div", { class: "notice err", text: msg3(e) }), row);
             yes.disabled = no.disabled = false;
             return;
           }
@@ -6557,7 +6576,7 @@ name: ${nm}
         };
         yes.addEventListener("click", () => void decide(true));
         no.addEventListener("click", () => void decide(false));
-        list2.appendChild(row2);
+        list2.appendChild(row);
       }
       if (staged.length) {
         const yes = el("button", { class: "primary tiny", text: `\uD134 \uC218\uC815 ${staged.length}\uAC74 \uC2B9\uC778` });
@@ -6855,19 +6874,19 @@ name: ${nm}
   function shellPrompt(text2, actions) {
     if (!noticeMount) return;
     clear(noticeMount);
-    const row2 = el("div", { class: "row", style: { marginTop: "6px", gap: "6px" } });
-    const box = el("div", { class: "notice shellprompt" }, [el("div", { text: text2 }), row2]);
+    const row = el("div", { class: "row", style: { marginTop: "6px", gap: "6px" } });
+    const box = el("div", { class: "notice shellprompt" }, [el("div", { text: text2 }), row]);
     for (const a of actions) {
       const b = el("button", { class: (a.primary ? "primary" : "ghost") + " tiny", text: a.label });
       b.addEventListener("click", async () => {
-        for (const x of Array.from(row2.querySelectorAll("button"))) x.disabled = true;
+        for (const x of Array.from(row.querySelectorAll("button"))) x.disabled = true;
         try {
           await a.run();
         } finally {
           if (box.isConnected) box.remove();
         }
       });
-      row2.appendChild(b);
+      row.appendChild(b);
     }
     noticeMount.appendChild(box);
   }
@@ -7012,21 +7031,21 @@ name: ${nm}
             title.firstChild.textContent = label2;
           });
         });
-        const row2 = el("div", { class: "verrow" });
+        const row = el("div", { class: "verrow" });
         const del = el("button", { class: "ghost tiny", title: "\uC774 \uC2A4\uB0C5\uC0F7 \uC0AD\uC81C" });
         armed(del, "\u2715", "\uC0AD\uC81C \uD655\uC778", async () => {
-          row2.classList.add("deleting");
+          row.classList.add("deleting");
           del.disabled = true;
           try {
             await state.deleteCheckpoint(c.id);
-            row2.remove();
+            row.remove();
           } catch (e) {
-            row2.classList.remove("deleting");
+            row.classList.remove("deleting");
             del.disabled = false;
             shellNotice("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg4(e), "err");
           }
         });
-        row2.append(
+        row.append(
           el("div", { class: "grow" }, [
             title,
             el("div", { class: "hint", text: `${c.message_count}\uD134 \xB7 ${fmtTime(c.created_at * 1e3)}` })
@@ -7035,7 +7054,7 @@ name: ${nm}
           b,
           del
         );
-        return row2;
+        return row;
       };
       for (const [idx, c] of users.slice(0, 12).entries()) {
         body.appendChild(verRow(c, { newest: idx === 0 }));
@@ -8301,6 +8320,18 @@ pre.mono {
 .botcleantools { gap: 8px; align-items: center; max-width: 640px; margin-bottom: 6px; }
 .botcleanrow { flex-wrap: wrap; }
 .botcleanrow input[type=checkbox] { width: auto; flex-shrink: 0; }
+/* \xA71-106: the section row and the temp-file kinds. */
+.storenav { margin: 0 0 10px; }
+.storenav .chip { padding: 5px 12px; font-size: 12px; }
+.tempkinds { margin-top: 8px; max-width: 760px; }
+.tempkind { padding: 8px 6px; border-bottom: 1px solid var(--borderc, #2b323f); }
+.tempkind.dim { opacity: .55; }
+.tempkindhead { gap: 8px; align-items: flex-start; }
+.tempkind input[type=checkbox] { width: auto; flex-shrink: 0; margin-top: 3px; }
+.tempkind .n { color: var(--textcolor2, #79839a); font-size: 11px; white-space: nowrap; }
+.tempkind details { margin: 4px 0 0 24px; }
+.tempgroup { gap: 8px; align-items: center; padding: 2px 0; }
+.templargest { max-height: 180px; overflow: auto; white-space: pre-wrap; font-size: 11px; margin: 2px 0 0; }
 .loadingrow { cursor: default; }
 .foldrow { cursor: pointer; }
 .chatitem.busy { opacity: .6; }
@@ -10751,7 +10782,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           return;
         }
         for (const s of sessions) {
-          const row2 = el("div", { class: "sessrow" }, [
+          const row = el("div", { class: "sessrow" }, [
             el("div", { class: "grow" }, [
               el("div", { text: s.title }),
               el("div", {
@@ -10760,11 +10791,11 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
               })
             ])
           ]);
-          row2.addEventListener("click", async () => {
+          row.addEventListener("click", async () => {
             close();
             await this.render(s.sessionId);
           });
-          body.appendChild(row2);
+          body.appendChild(row);
         }
       } catch (e) {
         clear(body);
@@ -11158,17 +11189,17 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
               if (/(할까요|진행|괜찮|해도 될|원하시|할지|고를까요|어떻게)[^\n?]{0,40}\?\s*$/.test(textAcc.trim())) {
                 const yes = el("button", { class: "primary tiny", text: "\uB124, \uC9C4\uD589\uD574 \uC8FC\uC138\uC694" });
                 const no = el("button", { class: "ghost tiny", text: "\uC544\uB2C8\uC694" });
-                const row2 = el("div", { class: "row quickreply" }, [yes, no]);
+                const row = el("div", { class: "row quickreply" }, [yes, no]);
                 yes.addEventListener("click", () => {
-                  row2.remove();
+                  row.remove();
                   this.sendText("\uB124, \uADF8\uB300\uB85C \uC9C4\uD589\uD574 \uC8FC\uC138\uC694.");
                 });
                 no.addEventListener("click", () => {
-                  row2.remove();
+                  row.remove();
                   this.input.value = "\uC544\uB2C8\uC694, ";
                   this.input.focus();
                 });
-                bubble.appendChild(row2);
+                bubble.appendChild(row);
               }
               const more = el("button", { class: "ghost tiny continuebtn", text: "\uACC4\uC18D \uC774\uC5B4\uC11C", title: "\uBC29\uAE08 \uD134\uC5D0\uC11C \uB05D\uB0B4\uC9C0 \uBABB\uD55C \uC791\uC5C5\uC744 \uC774\uC5B4\uAC11\uB2C8\uB2E4" });
               more.addEventListener("click", () => {
@@ -11709,9 +11740,9 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     }
     for (const a of spec3.actions ?? []) a.addEventListener("click", (e) => e.stopPropagation());
     const title = typeof spec3.title === "string" ? el("span", { text: spec3.title }) : spec3.title;
-    let row2;
+    let row;
     if (spec3.variant === "pick") {
-      row2 = el("div", {
+      row = el("div", {
         class: "pickrow" + (spec3.toggle && !spec3.toggle.checked ? " off" : "") + (spec3.cls ? " " + spec3.cls : "") + (spec3.selected ? " on" : "")
       }, [
         toggleNode,
@@ -11724,7 +11755,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         ...spec3.actions ?? []
       ]);
     } else {
-      row2 = el("div", {
+      row = el("div", {
         class: "treerow lorecard" + (spec3.selected ? " on" : "")
       }, [
         toggleNode,
@@ -11735,12 +11766,12 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         ...spec3.actions ?? []
       ]);
     }
-    if (spec3.dimmed) row2.style.opacity = "0.55";
+    if (spec3.dimmed) row.style.opacity = "0.55";
     if (spec3.onClick) {
-      row2.addEventListener("click", () => spec3.onClick());
-      row2.style.cursor = "pointer";
+      row.addEventListener("click", () => spec3.onClick());
+      row.style.cursor = "pointer";
     }
-    return row2;
+    return row;
   }
   function namePopover(anchor, opts) {
     const body = el("div", { class: "applypop" });
@@ -11842,9 +11873,9 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       draw2();
       try {
         await state.setOpenModules([...keep, ...ids.filter((i) => !keep.includes(i))]);
-        const row3 = state.openModules.find((m) => m.id === focus);
-        if (row3) onFocus(row3.key);
-        say(ids.length > 1 ? `\uBAA8\uB4C8 ${ids.length}\uAC1C\uB97C \uC5F4\uC5C8\uC2B5\uB2C8\uB2E4.` : `'${row3?.name ?? ""}' \uC744(\uB97C) \uC5F4\uC5C8\uC2B5\uB2C8\uB2E4. \uD0ED \uC904\uC5D0\uC11C \uD3B8\uC9D1\uD569\uB2C8\uB2E4.`);
+        const row2 = state.openModules.find((m) => m.id === focus);
+        if (row2) onFocus(row2.key);
+        say(ids.length > 1 ? `\uBAA8\uB4C8 ${ids.length}\uAC1C\uB97C \uC5F4\uC5C8\uC2B5\uB2C8\uB2E4.` : `'${row2?.name ?? ""}' \uC744(\uB97C) \uC5F4\uC5C8\uC2B5\uB2C8\uB2E4. \uD0ED \uC904\uC5D0\uC11C \uD3B8\uC9D1\uD569\uB2C8\uB2E4.`);
       } catch (e) {
         say("\uC5F4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg8(e), "err");
       } finally {
@@ -11852,7 +11883,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         if (body.isConnected) draw2();
       }
     };
-    const row2 = (m) => {
+    const row = (m) => {
       const opened = state.openModules.find((x) => x.id === m.id);
       const right = [];
       if (m.mcp) {
@@ -11915,7 +11946,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       const rank = (m) => state.openModules.some((x) => x.id === m.id) ? 0 : m.linked ? 1 : 2;
       shown.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
       if (!all.length) list2.appendChild(el("div", { class: "hint", style: { padding: "8px" }, text: "RisuAI\uC5D0 \uBAA8\uB4C8\uC774 \uC5C6\uC2B5\uB2C8\uB2E4. \uD30C\uC77C\uC5D0\uC11C \uAC00\uC838\uC62C \uC218 \uC788\uC2B5\uB2C8\uB2E4." }));
-      for (const m of shown) list2.appendChild(row2(m));
+      for (const m of shown) list2.appendChild(row(m));
       const pending3 = all.filter((m) => m.linked && !m.mcp && !state.openModules.some((x) => x.id === m.id));
       if (pending3.length && state.editMode === "bot") {
         const b = el("button", { class: "ghost tiny", text: `RisuAI\uC5D0\uC11C \uCF1C\uC9C4 \uBAA8\uB4C8 \uBAA8\uB450 \uC5F4\uAE30 (${pending3.length})` });
@@ -12436,7 +12467,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     fill2();
   }
   function snapRow(c, deletable, mount2) {
-    const row2 = el("div", { class: "chatitem" });
+    const row = el("div", { class: "chatitem" });
     const edit = el("button", { class: "ghost tiny", text: "\uD3B8\uC9D1" });
     edit.title = "\uC791\uC5C5\uBCF8\uC744 \uC774 \uC2DC\uC810\uC73C\uB85C \uB418\uB3CC\uB9B0 \uB4A4 \uBD07 \uD3B8\uC9D1\uC73C\uB85C \uB4E4\uC5B4\uAC11\uB2C8\uB2E4 (\uC9C1\uC804 \uC0C1\uD0DC\uB3C4 \uC2A4\uB0C5\uC0F7\uC73C\uB85C \uB0A8\uC2B5\uB2C8\uB2E4)";
     edit.addEventListener("click", async (ev) => {
@@ -12454,7 +12485,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         edit.textContent = "\uD3B8\uC9D1";
       }
     });
-    row2.append(
+    row.append(
       el("span", { class: "grow" }, [
         el("span", { text: c.label || "(\uBB34\uC81C)" }),
         // Another bot of this project folder's snapshot (§1-103).
@@ -12471,7 +12502,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     if (deletable) {
       const del = el("button", { class: "ghost tiny", title: "\uC774 \uC2A4\uB0C5\uC0F7 \uC0AD\uC81C" });
       armed(del, "\u2715", "\uC0AD\uC81C \uD655\uC778", async () => {
-        row2.classList.add("deleting");
+        row.classList.add("deleting");
         del.disabled = true;
         edit.disabled = true;
         try {
@@ -12479,15 +12510,15 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           snaps.drop();
           renderChatsTab(mount2);
         } catch (e) {
-          row2.classList.remove("deleting");
+          row.classList.remove("deleting");
           del.disabled = false;
           edit.disabled = false;
           flash("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg10(e));
         }
       });
-      row2.appendChild(del);
+      row.appendChild(del);
     }
-    return row2;
+    return row;
   }
   function chatBody(body, mount2) {
     const char = state.character;
@@ -12560,7 +12591,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       });
       return item;
     };
-    const pagedList = (key, items5, into) => {
+    const pagedList2 = (key, items5, into) => {
       const list2 = el("div", { class: "chatlist" });
       const draw2 = () => {
         clear(list2);
@@ -12580,7 +12611,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       const rows = liveChats.map((c, i) => ({ chat: c, index: i })).filter((r) => !needle || String(r.chat.name ?? "").toLowerCase().includes(needle));
       if (needle) {
         if (!rows.length) listArea.appendChild(el("div", { class: "hint", text: `\u2018${filters.chat}\u2019 \uC5D0 \uB9DE\uB294 \uCC57\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.` }));
-        else pagedList("chat", rows, listArea);
+        else pagedList2("chat", rows, listArea);
         return;
       }
       const grouped3 = /* @__PURE__ */ new Map();
@@ -12590,14 +12621,14 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         grouped3.get(key).push(r);
       }
       const loose = grouped3.get("") ?? [];
-      if (loose.length) pagedList("chat", loose, listArea);
+      if (loose.length) pagedList2("chat", loose, listArea);
       for (const f of folders) {
         const items5 = grouped3.get(String(f.id)) ?? [];
         if (!items5.length) continue;
         const fid = String(f.id);
         const isOpen = openFolders.has(fid);
         const fbody = el("div", { class: "folderbody" + (isOpen ? " open" : "") });
-        pagedList("chat:" + fid, items5, fbody);
+        pagedList2("chat:" + fid, items5, fbody);
         const caret = el("span", { text: isOpen ? "\u25BE" : "\u25B8" });
         const head = el("button", { class: "folderhead" }, [
           caret,
@@ -12617,7 +12648,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       const orphans = [...grouped3.entries()].filter(([k]) => k !== "" && !known.has(k)).flatMap(([, v]) => v);
       if (orphans.length) {
         listArea.appendChild(el("div", { class: "sectiontitle", style: { marginTop: "10px" }, text: "\uD3F4\uB354 \uC5C6\uC74C" }));
-        pagedList("chat:orphans", orphans, listArea);
+        pagedList2("chat:orphans", orphans, listArea);
       }
     };
     fillChats();
@@ -12682,7 +12713,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       }
       const p = paged("persona", hits);
       p.redrawOn(fill2);
-      for (const row2 of p.rows) list2.appendChild(personaRow(row2, mount2));
+      for (const row of p.rows) list2.appendChild(personaRow(row, mount2));
       if (p.nav) list2.appendChild(p.nav);
     };
     const fbox = filterBox("persona", `\uD398\uB974\uC18C\uB098 ${ps.length}\uAC1C \uC911 \uCC3E\uAE30 (\uC774\uB984\xB7\uC124\uBA85)`, ps.length, fill2);
@@ -12694,7 +12725,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
   function personaRow(p, mount2) {
     const edit = el("button", { class: "ghost tiny", text: "\uD3B8\uC9D1" });
     const name = p.work.name || p.name;
-    const row2 = el("div", { class: "chatitem" }, [
+    const row = el("div", { class: "chatitem" }, [
       personaAvatar(p.iconKey, name),
       el("span", { class: "grow" }, [
         el("div", { text: name || "(\uC774\uB984 \uC5C6\uC74C)" }),
@@ -12718,18 +12749,18 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         flash("\uD398\uB974\uC18C\uB098\uB97C \uC5F4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg10(e));
       } finally {
         busy = false;
-        if (row2.isConnected) {
+        if (row.isConnected) {
           edit.disabled = false;
           edit.textContent = "\uD3B8\uC9D1";
         }
       }
     };
-    row2.addEventListener("click", () => void enter());
+    row.addEventListener("click", () => void enter());
     edit.addEventListener("click", (ev) => {
       ev.stopPropagation();
       void enter();
     });
-    return row2;
+    return row;
   }
   async function enterModule(id) {
     setEditMode("module");
@@ -12746,10 +12777,10 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     state.touchFiles([up.path]);
     setEditMode("module");
     await state.syncModuleOwner();
-    const row2 = await state.importModuleFile(up.path, progress);
+    const row = await state.importModuleFile(up.path, progress);
     setTab("botlore");
-    shellNotice(`'${row2.name}' \uBAA8\uB4C8\uC744 RisuAI\uC5D0 \uCD94\uAC00\uD558\uACE0 \uC5F4\uC5C8\uC2B5\uB2C8\uB2E4 (\uC6D0\uBCF8 \uD30C\uC77C: ${up.path}).`, "ok");
-    return row2.key;
+    shellNotice(`'${row.name}' \uBAA8\uB4C8\uC744 RisuAI\uC5D0 \uCD94\uAC00\uD558\uACE0 \uC5F4\uC5C8\uC2B5\uB2C8\uB2E4 (\uC6D0\uBCF8 \uD30C\uC77C: ${up.path}).`, "ok");
+    return row.key;
   }
   function moduleBody(body, mount2) {
     const head = el("div", { class: "row", style: { marginBottom: "8px", gap: "6px" } }, [
@@ -12820,7 +12851,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     const save = el("button", { class: "ghost tiny", text: "\u2B07 \uC800\uC7A5", title: "\uC774 \uBAA8\uB4C8\uC744 .charx / .risum \uC73C\uB85C \uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4\uC5D0 \uC800\uC7A5\uD569\uB2C8\uB2E4" });
     const open4 = state.openModules.find((x) => x.id === m.id);
     const first = m.description.split("\n")[0].slice(0, 80);
-    const row2 = el("div", { class: "chatitem" + (m.mcp ? " dim" : "") }, [
+    const row = el("div", { class: "chatitem" + (m.mcp ? " dim" : "") }, [
       el("span", { class: "grow" }, [
         el("div", { text: "\u25EB " + (m.name || "(\uC774\uB984 \uC5C6\uC74C)") }),
         el("div", { class: "hint clip1", text: m.mcp ? "MCP \uBAA8\uB4C8 - \uD3B8\uC9D1\uD560 \uB0B4\uC6A9\uC774 \uC5C6\uC2B5\uB2C8\uB2E4" : moduleLine(m) + (first ? " \u2014 " + first : "") })
@@ -12831,7 +12862,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       m.mcp ? null : save,
       m.mcp ? null : edit
     ]);
-    if (m.mcp) return row2;
+    if (m.mcp) return row;
     save.addEventListener("click", (ev) => {
       ev.stopPropagation();
       const box = el("div", { class: "applypop" });
@@ -12852,18 +12883,18 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         flash("\uBAA8\uB4C8\uC744 \uC5F4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg10(e));
       } finally {
         busy = false;
-        if (row2.isConnected) {
+        if (row.isConnected) {
           edit.disabled = false;
           edit.textContent = "\uD3B8\uC9D1";
         }
       }
     };
-    row2.addEventListener("click", () => void enter());
+    row.addEventListener("click", () => void enter());
     edit.addEventListener("click", (ev) => {
       ev.stopPropagation();
       void enter();
     });
-    return row2;
+    return row;
   }
   function newPersonaButton(onMade) {
     const b = el("button", { class: "ghost tiny", text: "\uFF0B \uC0C8 \uD398\uB974\uC18C\uB098", title: "\uC0C8 \uD398\uB974\uC18C\uB098\uB97C \uB9CC\uB4ED\uB2C8\uB2E4 - \uBC18\uC601\uD558\uBA74 RisuAI \uD398\uB974\uC18C\uB098 \uBAA9\uB85D\uC5D0 \uCD94\uAC00\uB429\uB2C8\uB2E4" });
@@ -14321,9 +14352,9 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       el("div", { class: "hint", text: `\uC804\uCCB4 ${fmtSize3(data.totalSize)}` })
     ]));
     if (hadFocus) {
-      const row2 = treeMount.querySelector(".treebranch.on") ?? treeMount;
+      const row = treeMount.querySelector(".treebranch.on") ?? treeMount;
       try {
-        row2.focus({ preventScroll: true });
+        row.focus({ preventScroll: true });
       } catch {
       }
     }
@@ -14786,7 +14817,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
   function listRow2(e, order, n) {
     const box = el("input", { type: "checkbox" });
     box.checked = selection.has(e.path);
-    const row2 = el("div", { class: "frow" + (selection.has(e.path) ? " sel" : "") + clipClass(e.path), title: e.path }, [
+    const row = el("div", { class: "frow" + (selection.has(e.path) ? " sel" : "") + clipClass(e.path), title: e.path }, [
       box,
       // A folder glyph for folders; files carry their extension as a small tag
       // instead of a pictogram - the picture glyphs rendered as stray letters
@@ -14807,20 +14838,20 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       drawCentre();
       focusList();
     });
-    row2.addEventListener("click", (ev) => {
+    row.addEventListener("click", (ev) => {
       pick(e.path, ev, order);
       drawCentre();
       focusList();
     });
-    row2.addEventListener("dblclick", () => openEntry(e.path, n));
-    wireRowDnd(row2, e, n);
-    row2.addEventListener("contextmenu", (ev) => openRowMenu(ev, e, n));
-    return row2;
+    row.addEventListener("dblclick", () => openEntry(e.path, n));
+    wireRowDnd(row, e, n);
+    row.addEventListener("contextmenu", (ev) => openRowMenu(ev, e, n));
+    return row;
   }
-  function wireRowDnd(row2, e, n) {
-    if (!n.virtual) installDrag(row2, () => selection.has(e.path) ? [...selection] : [e.path]);
+  function wireRowDnd(row, e, n) {
+    if (!n.virtual) installDrag(row, () => selection.has(e.path) ? [...selection] : [e.path]);
     if (e.node && !n.virtual && USER_AREAS.has(n.area.area)) {
-      installDrop(row2, {
+      installDrop(row, {
         into: () => e.path,
         onFiles: (path, files) => void uploadMany(files, path),
         onMove: (path, sources) => void moveSelected(sources, path)
@@ -15759,7 +15790,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           notice10("\uC21C\uC11C\uB97C \uBC14\uAFB8\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg13(err), "err");
         }
       };
-      const row2 = listRow({
+      const row = listRow({
         variant: "tree",
         selected: e.id === openId4,
         title: el("button", {
@@ -15777,19 +15808,19 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         onClick: () => open4(e)
       });
       const io2 = Number(e.entry.insertorder ?? 100);
-      row2.insertBefore(
+      row.insertBefore(
         el("span", { class: "hint ordertag", title: "\uC6B0\uC120\uC21C\uC704 (insertorder)", text: String(io2) }),
-        row2.children[1] ?? null
+        row.children[1] ?? null
       );
       if (e.conflict) {
-        row2.insertBefore(conflictBadge(), row2.querySelector(".movebtn"));
+        row.insertBefore(conflictBadge(), row.querySelector(".movebtn"));
       } else if (e.origin !== "original") {
-        row2.insertBefore(
+        row.insertBefore(
           el("span", { class: "badge warn", text: e.origin === "added" ? "\uCD94\uAC00" : "\uC218\uC815" }),
-          row2.querySelector(".movebtn")
+          row.querySelector(".movebtn")
         );
       }
-      return row2;
+      return row;
     }
     function open4(e) {
       if (!viewMount6) return;
@@ -16151,10 +16182,10 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       title: item.id
     });
     name.addEventListener("click", () => open(item));
-    const row2 = el("div", { class: "treerow" }, [name]);
-    if (item.isNew) row2.appendChild(el("span", { class: "badge ok", text: "\uCD94\uAC00" }));
-    else if (item.changed) row2.appendChild(el("span", { class: "badge warn", text: "\uC218\uC815" }));
-    return row2;
+    const row = el("div", { class: "treerow" }, [name]);
+    if (item.isNew) row.appendChild(el("span", { class: "badge ok", text: "\uCD94\uAC00" }));
+    else if (item.changed) row.appendChild(el("span", { class: "badge warn", text: "\uC218\uC815" }));
+    return row;
   }
   function open(item) {
     if (!viewMount2) return;
@@ -16465,7 +16496,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const entries = await spec3.load();
         clear(listMount2);
         if (spec3.folders) drawFolders(entries, spec3.folders);
-        else for (const entry of entries) listMount2.appendChild(row2(entry));
+        else for (const entry of entries) listMount2.appendChild(row(entry));
         const actions = el("div", { class: "row", style: { marginTop: "10px", gap: "6px" } });
         if (spec3.onCreate) {
           const add = el("button", { class: "primary", text: spec3.createLabel ?? "\uC0C8\uB85C \uCD94\uAC00" });
@@ -16497,7 +16528,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     foldedFolders.set(spec3.title, folded2);
     const drawFolders = (entries, folders) => {
       const names = [.../* @__PURE__ */ new Set([...folders.list(), ...entries.map((e) => e.group ?? "")])].filter(Boolean).sort((a, b) => a.localeCompare(b));
-      for (const entry of entries.filter((e) => !e.group)) listMount2.appendChild(row2(entry));
+      for (const entry of entries.filter((e) => !e.group)) listMount2.appendChild(row(entry));
       for (const name of names) {
         const inside = entries.filter((e) => e.group === name);
         const open4 = !folded2.has(name);
@@ -16526,7 +16557,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           listMount2.appendChild(el("div", { class: "hint", style: { padding: "0 8px 4px" }, text: "(\uBE44\uC5B4 \uC788\uC74C)" }));
           continue;
         }
-        for (const entry of inside) listMount2.appendChild(row2(entry));
+        for (const entry of inside) listMount2.appendChild(row(entry));
       }
     };
     const moveButton = (entry, folders) => {
@@ -16557,7 +16588,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       listMount2.appendChild(el("div", { class: "notice err", text: msg16(e) }));
       setTimeout(() => void draw2(), 2500);
     };
-    const row2 = (entry) => {
+    const row = (entry) => {
       const pickArea = el("div", { class: "grow" }, [
         el("div", { class: "pickname" }, [
           el("span", { text: entry.name }),
@@ -17345,11 +17376,11 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       for (const n of p.modelNotes) provBox.appendChild(el("div", { class: "hint", text: "\xB7 " + n }));
       if (p.unsupported.length) provBox.appendChild(el("div", { class: "hint", text: "\uBCF4\uB0B4\uC9C0 \uC54A\uB294 \uD544\uB4DC: " + p.unsupported.join(", ") }));
       if (p.modelExample) provBox.appendChild(el("div", { class: "hint", text: "\uBAA8\uB378 \uC774\uB984 \uC608: " + p.modelExample }));
-      const row2 = el("div", { class: "row", style: { marginTop: "4px" } }, [
+      const row = el("div", { class: "row", style: { marginTop: "4px" } }, [
         Object.keys(p.template).length ? fill2 : null,
         p.docs ? el("a", { href: p.docs, target: "_blank", rel: "noopener", class: "hint", text: "\uBB38\uC11C \u2197" }) : null
       ]);
-      provBox.appendChild(row2);
+      provBox.appendChild(row);
     };
     keySel.addEventListener("change", syncProvider);
     baseUrl.addEventListener("input", syncProvider);
@@ -17783,13 +17814,13 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           listMount2.appendChild(el("div", { class: "hint", text: "\uB4F1\uB85D\uB41C \uC2A4\uD0AC\uC774 \uC5C6\uC2B5\uB2C8\uB2E4." }));
           return;
         }
-        for (const s of r.skills) listMount2.appendChild(row2(s));
+        for (const s of r.skills) listMount2.appendChild(row(s));
       } catch (e) {
         clear(listMount2);
         listMount2.appendChild(el("div", { class: "notice err", text: msg18(e) }));
       }
     };
-    const row2 = (s) => {
+    const row = (s) => {
       const toggle = el("input", { type: "checkbox", checked: s.enabled, title: "\uCF1C\uBA74 \uBAA9\uB85D\uC5D0 \uC2E4\uB824 \uC5D0\uC774\uC804\uD2B8\uAC00 \uBD88\uB7EC\uC62C \uC218 \uC788\uC2B5\uB2C8\uB2E4" });
       toggle.addEventListener("change", async () => {
         try {
@@ -18269,10 +18300,10 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           return;
         }
         if (!r.newer) {
-          const mismatch = r.current !== "0.15.41";
+          const mismatch = r.current !== "0.15.42";
           const ahead = r.ahead ?? (!!r.latest && r.latest !== r.current);
           say(
-            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.41"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
+            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.42"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
             mismatch || ahead ? "" : "ok"
           );
           return;
@@ -18363,7 +18394,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.15.41",
+            version: "0.15.42",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -18444,64 +18475,86 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
   init_transport();
   init_host();
 
-  // src/ui/bot-cleanup.ts
+  // src/ui/storage-cleanup.ts
   init_dom();
+  init_store();
   init_state();
-  var LABEL = { trash: "RisuAI \uD734\uC9C0\uD1B5", missing: "RisuAI\uC5D0 \uC5C6\uC74C" };
   var PAGE2 = 30;
-  var CHIPS = [["all", "\uC804\uCCB4"], ["trash", "\uD734\uC9C0\uD1B5"], ["missing", "RisuAI\uC5D0 \uC5C6\uC74C"], ["namesake", "\uAC19\uC740 \uC774\uB984\uC774 RisuAI\uC5D0 \uC788\uC74C"]];
-  function buildBotCleanupCard(onMount) {
-    let bots = [];
-    let chip = "all";
+  function pagedList(spec3) {
+    let items5 = [];
     let filter6 = "";
     let page = 0;
+    const on = (spec3.chips ?? []).map(() => 0);
     const picked = /* @__PURE__ */ new Set();
-    const summary = el("div", { class: "hint" });
     const out = el("div", {});
+    const chipBox = el("div", {});
     const tools = el("div", { class: "row botcleantools" });
     const list2 = el("div", { class: "chatlist botcleanlist" });
     const nav = el("div", {});
-    const compare = el("button", { class: "primary tiny", text: "RisuAI\uC640 \uB300\uC870" });
-    compare.title = "RisuAI\uC758 \uCE90\uB9AD\uD130 \uBAA9\uB85D\uC744 \uC77D\uC5B4 Hina\uC758 \uBD07\uACFC \uB9DE\uCDB0 \uBD05\uB2C8\uB2E4 (\uCC98\uC74C\uC5D0\uB294 RisuAI\uAC00 \uB370\uC774\uD130 \uC811\uADFC \uAD8C\uD55C\uC744 \uBB3B\uC2B5\uB2C8\uB2E4)";
-    const search = el("input", { class: "searchinput", type: "search", placeholder: "\uC774\uB984\uC73C\uB85C \uCC3E\uAE30" });
+    const search = el("input", { class: "searchinput", type: "search", placeholder: spec3.placeholder ?? "\uC774\uB984\uC73C\uB85C \uCC3E\uAE30" });
     search.addEventListener("input", () => {
       filter6 = search.value;
       page = 0;
       drawRows();
     });
-    const chipBox = el("div", { class: "row botcleanchips" });
-    const pickAll = el("input", { type: "checkbox", title: "\uBCF4\uC774\uB294 \uCABD \uC804\uCCB4 \uC120\uD0DD" });
+    const pickAll = el("input", { type: "checkbox", title: "\uC774 \uCABD\uC5D0 \uBCF4\uC774\uB294 \uAC83 \uC804\uCCB4 \uC120\uD0DD" });
+    const pickEvery = el("button", { class: "ghost tiny" });
     const bulk = el("button", { class: "ghost tiny danger" });
-    const gone = () => bots.filter((b) => b.state === "trash" || b.state === "missing");
+    const passes = (t, skip = -1) => (spec3.chips ?? []).every((row, i) => i === skip || row[on[i]][2](t));
     const shown = () => {
       const needle = filter6.trim().toLowerCase();
-      return gone().filter((b) => (chip === "all" || (chip === "namesake" ? b.liveNamesake : b.state === chip)) && (!needle || b.name.toLowerCase().includes(needle))).sort((a, b) => a.name.localeCompare(b.name, void 0, { numeric: true }) || b.updatedAt - a.updatedAt);
+      const rows = items5.filter((t) => passes(t) && (!needle || spec3.text(t).toLowerCase().includes(needle)));
+      return spec3.sort ? rows.sort(spec3.sort) : rows;
     };
-    const drawSummary2 = () => {
-      const by = (s) => bots.filter((b) => b.state === s).length;
-      const checked = Math.max(0, ...bots.map((b) => b.checkedAt || 0));
-      const unchecked = bots.filter((b) => !b.state).length;
-      summary.textContent = `Hina\uC758 \uBD07 ${bots.length}\uAC1C \xB7 RisuAI\uC5D0 \uC788\uC74C ${by("live")} \xB7 \uD734\uC9C0\uD1B5 ${by("trash")} \xB7 \uC5C6\uC74C ${by("missing")}` + (unchecked ? ` \xB7 \uB300\uC870 \uC548 \uB428 ${unchecked}` : "") + (checked ? ` \xB7 \uB9C8\uC9C0\uB9C9 \uB300\uC870 ${fmtTime(checked * 1e3)}` : " \xB7 \uC544\uC9C1 \uB300\uC870\uD558\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4");
-    };
-    const syncBulk = () => {
-      for (const k of [...picked]) if (!gone().some((b) => b.charKey === k)) picked.delete(k);
-      bulk.textContent = picked.size ? `\uC120\uD0DD\uD55C ${picked.size}\uAC1C Hina\uC5D0\uC11C \uC0AD\uC81C` : "\uC120\uD0DD \uC0AD\uC81C";
+    const visible = () => shown().slice(page * PAGE2, page * PAGE2 + PAGE2);
+    const sync = () => {
+      const keys = new Set(items5.map(spec3.key));
+      for (const k of [...picked]) if (!keys.has(k)) picked.delete(k);
+      bulk.textContent = picked.size ? `\uC120\uD0DD\uD55C ${picked.size}\uAC1C \uC0AD\uC81C` : "\uC120\uD0DD \uC0AD\uC81C";
       bulk.disabled = !picked.size;
-      const vis = shown().slice(page * PAGE2, page * PAGE2 + PAGE2);
-      pickAll.checked = vis.length > 0 && vis.every((b) => picked.has(b.charKey));
+      const vis = visible();
+      pickAll.checked = vis.length > 0 && vis.every((t) => picked.has(spec3.key(t)));
+      const all = shown();
+      pickEvery.textContent = `\uC870\uAC74\uC5D0 \uB9DE\uB294 ${all.length}\uAC1C \uBAA8\uB450 \uC120\uD0DD`;
+      pickEvery.style.display = all.length > PAGE2 && !all.every((t) => picked.has(spec3.key(t))) ? "" : "none";
     };
     const drawChips = () => {
       clear(chipBox);
-      for (const [id, label2] of CHIPS) {
-        const n = id === "all" ? gone().length : id === "namesake" ? gone().filter((b2) => b2.liveNamesake).length : gone().filter((b2) => b2.state === id).length;
-        const b = el("button", { class: "ghost tiny chip" + (chip === id ? " on" : ""), text: `${label2} ${n}` });
-        b.addEventListener("click", () => {
-          chip = id;
-          page = 0;
-          drawChips();
-          drawRows();
+      (spec3.chips ?? []).forEach((row, i) => {
+        const box = el("div", { class: "row botcleanchips" });
+        row.forEach(([, label2, pred], j) => {
+          const n = items5.filter((t) => passes(t, i) && pred(t)).length;
+          const b = el("button", { class: "ghost tiny chip" + (on[i] === j ? " on" : ""), text: `${label2} ${n}` });
+          b.addEventListener("click", () => {
+            on[i] = j;
+            page = 0;
+            drawChips();
+            drawRows();
+          });
+          box.appendChild(b);
         });
-        chipBox.appendChild(b);
+        chipBox.appendChild(box);
+      });
+    };
+    const ctx = {
+      pick: (t) => {
+        const box = el("input", { type: "checkbox", title: "\uC120\uD0DD" });
+        box.checked = picked.has(spec3.key(t));
+        box.addEventListener("change", () => {
+          if (box.checked) picked.add(spec3.key(t));
+          else picked.delete(spec3.key(t));
+          sync();
+        });
+        return box;
+      },
+      del: (t, item) => {
+        const b = el("button", { class: "ghost tiny danger", title: "Hina\uC5D0\uC11C \uC9C0\uC6C1\uB2C8\uB2E4 (RisuAI\uB294 \uADF8\uB300\uB85C)" });
+        armed(b, "\uC0AD\uC81C", "\uC815\uB9D0 \uC9C0\uC6B8\uAE4C\uC694?", async () => {
+          b.disabled = true;
+          item.classList.add("deleting");
+          await removeKeys([spec3.key(t)]);
+        });
+        return b;
       }
     };
     const drawRows = () => {
@@ -18510,14 +18563,10 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       const rows = shown();
       const pages2 = Math.max(1, Math.ceil(rows.length / PAGE2));
       page = Math.min(page, pages2 - 1);
-      tools.style.display = gone().length ? "" : "none";
+      tools.style.display = items5.length ? "" : "none";
       list2.style.display = rows.length ? "" : "none";
-      for (const b of rows.slice(page * PAGE2, page * PAGE2 + PAGE2)) {
-        list2.appendChild(row(b, picked, () => syncBulk(), () => {
-          void reload();
-        }));
-      }
-      if (!rows.length && gone().length) nav.appendChild(el("div", { class: "hint", text: "\uC870\uAC74\uC5D0 \uB9DE\uB294 \uBD07\uC774 \uC5C6\uC2B5\uB2C8\uB2E4." }));
+      for (const t of visible()) list2.appendChild(spec3.row(t, ctx));
+      if (!rows.length) nav.appendChild(el("div", { class: "hint", text: items5.length ? "\uC870\uAC74\uC5D0 \uB9DE\uB294 \uD56D\uBAA9\uC774 \uC5C6\uC2B5\uB2C8\uB2E4." : spec3.empty }));
       if (pages2 > 1) {
         const prev = el("button", { class: "ghost tiny", text: "\u2039 \uC774\uC804" });
         const next = el("button", { class: "ghost tiny", text: "\uB2E4\uC74C \u203A" });
@@ -18538,59 +18587,168 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           next
         ]));
       }
-      syncBulk();
+      sync();
     };
-    const draw2 = (next) => {
-      bots = next;
-      drawSummary2();
-      drawChips();
-      drawRows();
-      if (!gone().length && bots.some((b) => b.checkedAt)) {
-        out.replaceChildren(el("div", { class: "hint", text: "RisuAI\uC5D0 \uC5C6\uB294 \uBD07\uC774 \uC5C6\uC2B5\uB2C8\uB2E4." }));
-      }
+    const notice10 = (text2, err = false) => {
+      out.replaceChildren(el("div", { class: "notice " + (err ? "err" : "ok"), text: text2 }));
     };
-    const reload = async () => {
+    const removeKeys = async (keys) => {
+      bulk.disabled = true;
       try {
-        draw2(await state.hinaBots());
+        const r = await spec3.remove(keys);
+        for (const k of keys) picked.delete(k);
+        notice10(r.text, r.err);
       } catch (e) {
-        summary.textContent = "\uBD07 \uBAA9\uB85D\uC744 \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg20(e);
+        notice10("\uC9C0\uC6B0\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg20(e), true);
       }
     };
     pickAll.addEventListener("change", () => {
-      for (const b of shown().slice(page * PAGE2, page * PAGE2 + PAGE2)) {
-        if (pickAll.checked) picked.add(b.charKey);
-        else picked.delete(b.charKey);
+      for (const t of visible()) {
+        if (pickAll.checked) picked.add(spec3.key(t));
+        else picked.delete(spec3.key(t));
       }
+      drawRows();
+    });
+    pickEvery.addEventListener("click", () => {
+      for (const t of shown()) picked.add(spec3.key(t));
       drawRows();
     });
     armed(bulk, "\uC120\uD0DD \uC0AD\uC81C", "\uC815\uB9D0 \uC9C0\uC6B8\uAE4C\uC694?", async () => {
       const keys = [...picked];
-      bulk.disabled = true;
       bulk.textContent = `${keys.length}\uAC1C \uC9C0\uC6B0\uB294 \uC911\u2026`;
-      clear(out);
-      try {
-        const r = await state.forgetBots(keys);
-        picked.clear();
-        const handed = r.forgotten.reduce((n, f) => n + (f.snapshotsHanded ?? 0), 0);
-        out.appendChild(el("div", { class: "notice " + (r.failed.length ? "err" : "ok"), text: `Hina\uC5D0\uC11C ${r.forgotten.length}\uAC1C\uB97C \uC9C0\uC6E0\uC2B5\uB2C8\uB2E4.` + (r.failed.length ? ` ${r.failed.length}\uAC1C\uB294 \uC9C0\uC6B0\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: ${r.failed[0].error}` : "") + (handed ? ` \uBD07 \uC2A4\uB0C5\uC0F7 ${handed}\uAC1C\uB294 \uAC19\uC740 \uC774\uB984\uC758 \uBD07\uC73C\uB85C \uB118\uACBC\uC2B5\uB2C8\uB2E4.` : "") + " RisuAI \uCABD\uACFC projects/ \uC758 \uD30C\uC77C\uC740 \uADF8\uB300\uB85C\uC785\uB2C8\uB2E4." }));
-      } catch (e) {
-        out.appendChild(el("div", { class: "notice err", text: "\uC9C0\uC6B0\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg20(e) }));
-      }
-      await reload();
+      await removeKeys(keys);
     });
     tools.append(
-      el("label", { class: "row", title: "\uC774 \uCABD\uC5D0 \uBCF4\uC774\uB294 \uBD07 \uC804\uCCB4 \uC120\uD0DD" }, [pickAll, el("span", { class: "hint", text: "\uC774 \uCABD \uC804\uCCB4" })]),
+      el("label", { class: "row", title: "\uC774 \uCABD\uC5D0 \uBCF4\uC774\uB294 \uAC83 \uC804\uCCB4 \uC120\uD0DD" }, [pickAll, el("span", { class: "hint", text: "\uC774 \uCABD \uC804\uCCB4" })]),
+      pickEvery,
       el("span", { class: "grow" }),
       bulk
     );
+    const root2 = el("div", {}, [
+      out,
+      el("div", { class: "landfilter", style: { marginTop: "8px" } }, [search]),
+      chipBox,
+      tools,
+      list2,
+      nav
+    ]);
+    return {
+      root: root2,
+      set: (next) => {
+        items5 = next;
+        drawChips();
+        drawRows();
+      },
+      notice: notice10
+    };
+  }
+  var BOT_LABEL = { trash: "RisuAI \uD734\uC9C0\uD1B5", missing: "RisuAI\uC5D0 \uC5C6\uC74C" };
+  function buildOrphanCard(onMount) {
+    let bots = [];
+    let chats = [];
+    let mods = [];
+    let kind = "bot";
+    const summary = el("div", { class: "hint" });
+    const out = el("div", {});
+    const kinds = el("div", { class: "row botcleanchips" });
+    const body = el("div", {});
+    const compare = el("button", { class: "primary tiny", text: "RisuAI\uC640 \uB300\uC870" });
+    compare.title = "RisuAI\uC758 \uCE90\uB9AD\uD130(\uCC57 \uD3EC\uD568)\xB7\uBAA8\uB4C8 \uBAA9\uB85D\uC744 \uC77D\uC5B4 Hina\uC758 \uC791\uC5C5\uBCF8\uACFC \uB9DE\uCDB0 \uBD05\uB2C8\uB2E4 (\uCC98\uC74C\uC5D0\uB294 RisuAI\uAC00 \uB370\uC774\uD130 \uC811\uADFC \uAD8C\uD55C\uC744 \uBB3B\uC2B5\uB2C8\uB2E4)";
+    const goneBots = () => bots.filter((b) => b.state === "trash" || b.state === "missing");
+    const botList = pagedList({
+      key: (b) => b.charKey,
+      text: (b) => b.name,
+      sort: (a, b) => a.name.localeCompare(b.name, void 0, { numeric: true }) || b.updatedAt - a.updatedAt,
+      chips: [[
+        ["all", "\uC804\uCCB4", () => true],
+        ["trash", "\uD734\uC9C0\uD1B5", (b) => b.state === "trash"],
+        ["missing", "RisuAI\uC5D0 \uC5C6\uC74C", (b) => b.state === "missing"],
+        ["namesake", "\uAC19\uC740 \uC774\uB984\uC774 RisuAI\uC5D0 \uC788\uC74C", (b) => b.liveNamesake]
+      ]],
+      row: botRow,
+      remove: async (keys) => {
+        const r = await state.forgetBots(keys);
+        const handed = r.forgotten.reduce((n, f) => n + (f.snapshotsHanded ?? 0), 0);
+        await reload();
+        return { err: !!r.failed.length, text: `\uBD07 ${r.forgotten.length}\uAC1C\uB97C Hina\uC5D0\uC11C \uC9C0\uC6E0\uC2B5\uB2C8\uB2E4.` + (r.failed.length ? ` ${r.failed.length}\uAC1C\uB294 \uC9C0\uC6B0\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: ${r.failed[0].error}` : "") + (handed ? ` \uBD07 \uC2A4\uB0C5\uC0F7 ${handed}\uAC1C\uB294 \uAC19\uC740 \uC774\uB984\uC758 \uBD07\uC73C\uB85C \uB118\uACBC\uC2B5\uB2C8\uB2E4.` : "") + " RisuAI \uCABD\uACFC projects/ \uC758 \uD30C\uC77C\uC740 \uADF8\uB300\uB85C\uC785\uB2C8\uB2E4." };
+      },
+      empty: "RisuAI\uC5D0 \uC5C6\uB294 \uBD07\uC774 \uC5C6\uC2B5\uB2C8\uB2E4."
+    });
+    const chatList = pagedList({
+      key: (c) => c.chatKey,
+      text: (c) => `${c.bot} ${c.name}`,
+      sort: (a, b) => a.bot.localeCompare(b.bot, void 0, { numeric: true }) || b.updatedAt - a.updatedAt,
+      chips: [[["all", "\uC804\uCCB4", () => true], ["edits", "AI \uB300\uD654\xB7\uD3B8\uC9D1\uC774 \uC788\uB294 \uCC57", (c) => c.sessions > 0 || c.staged > 0 || c.snapshots > 0]]],
+      row: chatRow,
+      remove: async (keys) => {
+        const r = await state.forgetChats(keys);
+        await reload();
+        return { err: !!r.failed.length, text: `\uCC57 ${r.forgotten.length}\uAC1C\uB97C Hina\uC5D0\uC11C \uC9C0\uC6E0\uC2B5\uB2C8\uB2E4.` + (r.failed.length ? ` ${r.failed.length}\uAC1C\uB294 \uC9C0\uC6B0\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: ${r.failed[0].error}` : "") + " RisuAI \uCABD\uC740 \uADF8\uB300\uB85C\uC785\uB2C8\uB2E4." };
+      },
+      placeholder: "\uBD07\xB7\uCC57 \uC774\uB984\uC73C\uB85C \uCC3E\uAE30",
+      empty: "\uC9C0\uC6B4 \uCC57\uC774 \uB0A8\uC544 \uC788\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4."
+    });
+    const modList = pagedList({
+      key: (m) => m.key,
+      text: (m) => m.name,
+      sort: (a, b) => a.name.localeCompare(b.name, void 0, { numeric: true }),
+      row: moduleRow2,
+      remove: async (keys) => {
+        const r = await state.forgetModules(keys);
+        await reload();
+        return { err: !!r.failed.length, text: `\uBAA8\uB4C8 ${r.forgotten.length}\uAC1C\uB97C Hina\uC5D0\uC11C \uC9C0\uC6E0\uC2B5\uB2C8\uB2E4.` + (r.failed.length ? ` ${r.failed.length}\uAC1C\uB294 \uC9C0\uC6B0\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: ${r.failed[0].error}` : "") + " RisuAI \uCABD\uC740 \uADF8\uB300\uB85C\uC785\uB2C8\uB2E4." };
+      },
+      empty: "RisuAI\uC5D0 \uC5C6\uB294 \uBAA8\uB4C8\uC774 \uC5C6\uC2B5\uB2C8\uB2E4."
+    });
+    const drawKinds = () => {
+      clear(kinds);
+      const entries = [
+        ["bot", "\uACE0\uC544 \uBD07", goneBots().length],
+        ["chat", "\uACE0\uC544 \uCC57", chats.length],
+        ["module", "\uACE0\uC544 \uBAA8\uB4C8", mods.length]
+      ];
+      for (const [id, label2, n] of entries) {
+        const b = el("button", { class: "ghost tiny chip" + (kind === id ? " on" : ""), text: `${label2} ${n}`, dataset: { orphanKind: id } });
+        b.addEventListener("click", () => {
+          kind = id;
+          drawKinds();
+          drawBody();
+        });
+        kinds.appendChild(b);
+      }
+    };
+    const drawBody = () => {
+      const [list2, hint] = kind === "bot" ? [botList, 'RisuAI\uC5D0\uC11C \uC9C0\uC6E0\uAC70\uB098 \uD734\uC9C0\uD1B5\uC5D0 \uB123\uC740 \uBD07, \uB2E4\uC2DC \uC784\uD3EC\uD2B8\uD574 \uC0C8 \uBD07\uC774 \uB41C \uC61B \uBC84\uC804\uC758 \uC791\uC5C5\uBCF8\uC785\uB2C8\uB2E4. CharX\uB85C \uBC1B\uC544 \uB458 \uC218 \uC788\uC2B5\uB2C8\uB2E4. \uD3EC\uCF13\uB9AC\uC2A4\uC758 \uD734\uC9C0\uD1B5\xB7\uBE44\uD65C\uC131\uD654(\uBCF4\uAD00) \uBD07\uC740 \uD50C\uB7EC\uADF8\uC778\uC774 \uBCFC \uC218 \uC5C6\uC5B4 "RisuAI\uC5D0 \uC5C6\uC74C"\uC73C\uB85C \uB098\uC635\uB2C8\uB2E4. \uBD07 \uC2A4\uB0C5\uC0F7\uC740 RisuAI\uC5D0 \uC788\uB294 \uAC19\uC740 \uC774\uB984\uC758 \uBD07\uC73C\uB85C \uB118\uC5B4\uAC00\uACE0, \uC5C6\uC73C\uBA74 \uD568\uAED8 \uC9C0\uC6CC\uC9D1\uB2C8\uB2E4.'] : kind === "chat" ? [chatList, "RisuAI\uC5D0 \uC788\uB294 \uBD07\uC5D0\uC11C \uC9C0\uC6B4 \uCC57\uC758 \uC791\uC5C5\uBCF8\uC785\uB2C8\uB2E4. \uC9C0\uC6B0\uBA74 \uADF8 \uCC57\uC758 \uD134\xB7AI \uB300\uD654\xB7\uD3B8\uC9D1 \uB300\uAE30\xB7\uCC57 \uC2A4\uB0C5\uC0F7\uC774 \uD568\uAED8 \uC9C0\uC6CC\uC9D1\uB2C8\uB2E4. \uD734\uC9C0\uD1B5\uC774\uB098 RisuAI\uC5D0 \uC5C6\uB294 \uBD07\uC758 \uCC57\uC740 \uBD07\uACFC \uD568\uAED8 \uC9C0\uC6CC\uC9C0\uBBC0\uB85C \uC5EC\uAE30 \uB098\uC624\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4."] : [modList, "RisuAI\uC5D0\uC11C \uC9C0\uC6B4 \uBAA8\uB4C8\uC758 \uC791\uC5C5\uBCF8\uC785\uB2C8\uB2E4. risum\uC73C\uB85C \uBC1B\uC544 \uB458 \uC218 \uC788\uC2B5\uB2C8\uB2E4. \uC9C0\uC6B0\uBA74 \uBAA8\uB4C8 \uC2A4\uB0C5\uC0F7\uB3C4 \uD568\uAED8 \uC9C0\uC6CC\uC9D1\uB2C8\uB2E4."];
+      body.replaceChildren(el("div", { class: "hint", style: { margin: "6px 0" }, text: hint }), list2.root);
+    };
+    const drawSummary2 = () => {
+      const by = (s) => bots.filter((b) => b.state === s).length;
+      const checked = Math.max(0, ...bots.map((b) => b.checkedAt || 0));
+      const unchecked = bots.filter((b) => !b.state).length;
+      summary.textContent = `Hina\uC758 \uBD07 ${bots.length}\uAC1C \xB7 RisuAI\uC5D0 \uC788\uC74C ${by("live")} \xB7 \uD734\uC9C0\uD1B5 ${by("trash")} \xB7 \uC5C6\uC74C ${by("missing")}` + (unchecked ? ` \xB7 \uB300\uC870 \uC548 \uB428 ${unchecked}` : "") + (checked ? ` \xB7 \uB9C8\uC9C0\uB9C9 \uB300\uC870 ${fmtTime(checked * 1e3)}` : " \xB7 \uC544\uC9C1 \uB300\uC870\uD558\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4");
+    };
+    const reload = async () => {
+      try {
+        [bots, chats, mods] = await Promise.all([state.hinaBots(), state.orphanChats(), state.orphanModules()]);
+      } catch (e) {
+        summary.textContent = "\uBAA9\uB85D\uC744 \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg20(e);
+        return;
+      }
+      drawSummary2();
+      drawKinds();
+      botList.set(goneBots());
+      chatList.set(chats);
+      modList.set(mods);
+    };
     compare.addEventListener("click", async () => {
       compare.disabled = true;
       compare.textContent = "RisuAI \uBAA9\uB85D \uC77D\uB294 \uC911\u2026";
       clear(out);
       try {
         const r = await state.compareBots();
-        draw2(r.bots);
-        out.replaceChildren(el("div", { class: "notice ok", text: `RisuAI \uCE90\uB9AD\uD130 ${r.risuCount}\uAC1C\uC640 \uB300\uC870\uD588\uC2B5\uB2C8\uB2E4 \u2014 \uD734\uC9C0\uD1B5 ${r.counts.trash ?? 0} \xB7 \uC5C6\uC74C ${r.counts.missing ?? 0}` }));
+        await reload();
+        const mc = r.moduleCounts && "missing" in r.moduleCounts ? ` \xB7 \uBAA8\uB4C8 ${r.moduleCounts.missing ?? 0}` : "";
+        out.replaceChildren(el("div", { class: "notice ok", text: `RisuAI \uCE90\uB9AD\uD130 ${r.risuCount}\uAC1C\uC640 \uB300\uC870\uD588\uC2B5\uB2C8\uB2E4 \u2014 \uBD07: \uD734\uC9C0\uD1B5 ${r.counts.trash ?? 0} \xB7 \uC5C6\uC74C ${r.counts.missing ?? 0} \xB7 \uCC57 ${r.chatCounts?.missing ?? 0}${mc}` }));
       } catch (e) {
         out.replaceChildren(el("div", { class: "notice err", text: msg20(e) }));
       } finally {
@@ -18600,29 +18758,20 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     });
     onMount?.(reload);
     void reload();
+    drawKinds();
+    drawBody();
     return el("div", { class: "card" }, [
-      el("h2", { text: "Hina\uC5D0\uB9CC \uB0A8\uC740 \uBD07" }),
-      el("div", { class: "hint", text: "RisuAI\uC5D0\uC11C \uC9C0\uC6E0\uAC70\uB098 \uD734\uC9C0\uD1B5\uC5D0 \uB123\uC740 \uBD07, \uB2E4\uC2DC \uC784\uD3EC\uD2B8\uD574 \uC0C8 \uBD07\uC774 \uB41C \uC61B \uBC84\uC804\uC758 Hina \uC791\uC5C5\uBCF8\uC785\uB2C8\uB2E4. CharX\uB85C \uBC1B\uC544 \uB450\uAC70\uB098 Hina\uC5D0\uC11C \uC9C0\uC6B8 \uC218 \uC788\uC2B5\uB2C8\uB2E4 (RisuAI \uCABD\uC740 \uAC74\uB4DC\uB9AC\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4)." }),
+      el("h2", { text: "Hina\uC5D0\uB9CC \uB0A8\uC740 \uBD07 \xB7 \uCC57 \xB7 \uBAA8\uB4C8" }),
+      el("div", { class: "hint", text: "Hina\uB294 \uD328\uB110\uC5D0\uC11C \uC5F0 \uBD07\xB7\uCC57\xB7\uBAA8\uB4C8\uB9C8\uB2E4 \uC791\uC5C5\uBCF8\uC744 \uB461\uB2C8\uB2E4. RisuAI\uC5D0\uC11C \uC9C0\uC6B4 \uB4A4\uC5D0\uB3C4 \uB0A8\uB294 \uADF8 \uC791\uC5C5\uBCF8\uC744 \uCC3E\uC544 \uC9C0\uC6C1\uB2C8\uB2E4 (RisuAI \uCABD\uC740 \uAC74\uB4DC\uB9AC\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4)." }),
       el("div", { class: "row", style: { margin: "6px 0" } }, [compare]),
       summary,
       out,
-      el("div", { class: "landfilter", style: { marginTop: "8px" } }, [search]),
-      chipBox,
-      tools,
-      list2,
-      nav,
-      el("div", { class: "hint", style: { marginTop: "8px" }, text: '\uD3EC\uCF13\uB9AC\uC2A4\uC758 \uD734\uC9C0\uD1B5\xB7\uBE44\uD65C\uC131\uD654(\uBCF4\uAD00) \uBD07\uC740 \uD50C\uB7EC\uADF8\uC778\uC774 \uBCFC \uC218 \uC5C6\uB294 \uACF3\uC5D0 \uC788\uC5B4 "RisuAI\uC5D0 \uC5C6\uC74C"\uC73C\uB85C \uB098\uC635\uB2C8\uB2E4. \uAC00\uB9AC\uAE30\uB9CC \uD55C \uBD07\uC740 RisuAI\uC5D0 \uC788\uC74C\uC73C\uB85C \uC149\uB2C8\uB2E4. \uC9C0\uC6CC\uB3C4 projects/ \uC758 \uD30C\uC77C\uC740 \uB0A8\uC2B5\uB2C8\uB2E4. \uBD07 \uC2A4\uB0C5\uC0F7\uC740 RisuAI\uC5D0 \uC788\uB294 \uAC19\uC740 \uC774\uB984\uC758 \uBD07\uC774 \uC788\uC73C\uBA74 \uADF8 \uBD07\uC73C\uB85C \uB118\uC5B4\uAC00\uACE0, \uC5C6\uC73C\uBA74 \uD568\uAED8 \uC9C0\uC6CC\uC9D1\uB2C8\uB2E4. \uC774 \uBD07\uB9CC \uC4F0\uB358 \uC774\uBBF8\uC9C0\uB294 \uC544\uB798 \uC774\uBBF8\uC9C0 \uC800\uC7A5\uC18C \uC815\uB9AC\uAC00 \uC9C0\uC6C1\uB2C8\uB2E4.' })
+      kinds,
+      body
     ]);
   }
-  function row(b, picked, onPick, after) {
+  function botRow(b, ctx) {
     const note = el("div", { class: "hint" });
-    const pick2 = el("input", { type: "checkbox", title: "\uC120\uD0DD" });
-    pick2.checked = picked.has(b.charKey);
-    pick2.addEventListener("change", () => {
-      if (pick2.checked) picked.add(b.charKey);
-      else picked.delete(b.charKey);
-      onPick();
-    });
     const save = el("button", { class: "ghost tiny", text: "CharX\uB85C \uC800\uC7A5", title: "Hina \uC791\uC5C5\uBCF8\uC73C\uB85C .charx \uB97C \uB9CC\uB4E4\uC5B4 \uBC1B\uC2B5\uB2C8\uB2E4" });
     if (!b.charxReady) {
       save.disabled = true;
@@ -18643,45 +18792,277 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         save.textContent = "CharX\uB85C \uC800\uC7A5";
       }
     });
-    const del = el("button", { class: "ghost tiny danger", title: "Hina\uC758 \uC791\uC5C5\uBCF8\xB7\uB300\uD654 \uAE30\uB85D\uC744 \uC9C0\uC6C1\uB2C8\uB2E4 (RisuAI\uB294 \uADF8\uB300\uB85C)" });
     const item = el("div", { class: "chatitem botcleanrow" });
-    armed(del, "Hina\uC5D0\uC11C \uC0AD\uC81C", "\uC815\uB9D0 \uC9C0\uC6B8\uAE4C\uC694?", async () => {
-      del.disabled = true;
-      save.disabled = true;
-      item.classList.add("deleting");
-      try {
-        await state.forgetBot(b.charKey);
-        picked.delete(b.charKey);
-        after();
-      } catch (e) {
-        item.classList.remove("deleting");
-        del.disabled = false;
-        save.disabled = !b.charxReady;
-        note.textContent = "\uC9C0\uC6B0\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg20(e);
-      }
-    });
     const when = b.state === "trash" && b.purgeAt ? ` \xB7 RisuAI\uAC00 ${fmtTime(b.purgeAt)}\uC5D0 \uC601\uAD6C \uC0AD\uC81C` : "";
     item.append(
-      pick2,
+      ctx.pick(b),
       el("span", { class: "grow" }, [
         el("div", { text: b.name || "(\uC774\uB984 \uC5C6\uC74C)" }),
         el("div", { class: "hint", text: `\uCC57 ${b.chats}\uAC1C \xB7 ${b.turns}\uD134 \xB7 Hina \uC218\uC815 ${fmtTime(b.updatedAt * 1e3)}${when}` + (b.pendingActions ? ` \xB7 \uC2B9\uC778 \uB300\uAE30 ${b.pendingActions}` : "") + (b.snapshots ? ` \xB7 \uBD07 \uC2A4\uB0C5\uC0F7 ${b.snapshots}\uAC1C` + (b.snapshotHeir ? ` \u2192 \uC0AD\uC81C\uD558\uBA74 '${b.snapshotHeir}'(\uC73C)\uB85C \uB118\uC5B4\uAC10` : " (\uC0AD\uC81C\uD558\uBA74 \uD568\uAED8 \uC9C0\uC6CC\uC9D0)") : "") }),
         note
-      ]),
-      el("span", { class: "badge" + (b.state === "trash" ? " warn" : ""), text: LABEL[b.state] || b.state }),
-      save,
-      del
+      ])
     );
     if (b.liveNamesake) {
-      item.insertBefore(el("span", {
+      item.appendChild(el("span", {
         class: "badge ok",
         text: "\uAC19\uC740 \uC774\uB984\uC774 RisuAI\uC5D0 \uC788\uC74C",
         title: "\uB2E4\uC2DC \uC784\uD3EC\uD2B8\uD55C \uC0C8 \uBC84\uC804\uC77C \uAC00\uB2A5\uC131\uC774 \uD07D\uB2C8\uB2E4 - \uC774 \uD56D\uBAA9\uC740 \uC61B \uBC84\uC804\uC758 Hina \uC791\uC5C5\uBCF8\uC785\uB2C8\uB2E4"
-      }), save);
+      }));
     }
+    item.append(
+      el("span", { class: "badge" + (b.state === "trash" ? " warn" : ""), text: BOT_LABEL[b.state] || b.state }),
+      save,
+      ctx.del(b, item)
+    );
     return item;
   }
-  function buildAssetStoreCard(onMount) {
+  function chatRow(c, ctx) {
+    const item = el("div", { class: "chatitem botcleanrow" });
+    const extra = [
+      c.sessions ? `AI \uB300\uD654 ${c.sessions}` : "",
+      c.staged ? `\uC2B9\uC778 \uB300\uAE30 \uD3B8\uC9D1 ${c.staged}` : "",
+      c.snapshots ? `\uCC57 \uC2A4\uB0C5\uC0F7 ${c.snapshots}\uAC1C` : ""
+    ].filter(Boolean).join(" \xB7 ");
+    item.append(
+      ctx.pick(c),
+      el("span", { class: "grow" }, [
+        el("div", { text: `${c.bot || "(\uC774\uB984 \uC5C6\uB294 \uBD07)"} \u203A ${c.name || "(\uC774\uB984 \uC5C6\uB294 \uCC57)"}` }),
+        el("div", { class: "hint", text: `${c.turns}\uD134 \xB7 Hina \uC218\uC815 ${fmtTime(c.updatedAt * 1e3)}` + (extra ? " \xB7 " + extra : "") })
+      ]),
+      el("span", { class: "badge", text: "RisuAI\uC5D0\uC11C \uC9C0\uC6B4 \uCC57" }),
+      ctx.del(c, item)
+    );
+    return item;
+  }
+  function moduleRow2(m, ctx) {
+    const note = el("div", { class: "hint" });
+    const save = el("button", { class: "ghost tiny", text: "risum\uC73C\uB85C \uC800\uC7A5", title: "Hina \uC791\uC5C5\uBCF8\uC73C\uB85C .risum \uC744 \uB9CC\uB4E4\uC5B4 \uBC1B\uC2B5\uB2C8\uB2E4" });
+    save.addEventListener("click", async () => {
+      save.disabled = true;
+      save.textContent = "\uB9CC\uB4DC\uB294 \uC911\u2026";
+      try {
+        const r = await state.exportModule("risum", true, "", m.key);
+        note.textContent = `${r.path} \uC5D0 \uB9CC\uB4E4\uC5C8\uC2B5\uB2C8\uB2E4` + (r.dropped ? ` (Hina\uC5D0 \uC5C6\uB294 \uC5D0\uC14B ${r.dropped}\uAC1C\uB294 \uBE60\uC84C\uC2B5\uB2C8\uB2E4)` : "");
+        await state.downloadFile(r.path);
+      } catch (e) {
+        note.textContent = "risum\uC744 \uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg20(e);
+      } finally {
+        save.disabled = false;
+        save.textContent = "risum\uC73C\uB85C \uC800\uC7A5";
+      }
+    });
+    const item = el("div", { class: "chatitem botcleanrow" });
+    const parts = [`\uB85C\uC5B4 ${m.lore}`, `\uC815\uADDC\uC2DD ${m.regex}`, `\uD2B8\uB9AC\uAC70 ${m.trigger}`, `\uC5D0\uC14B ${m.assets}`];
+    if (m.snapshots) parts.push(`\uC2A4\uB0C5\uC0F7 ${m.snapshots}\uAC1C`);
+    item.append(
+      ctx.pick(m),
+      el("span", { class: "grow" }, [
+        el("div", { text: m.name || "(\uC774\uB984 \uC5C6\uC74C)" }),
+        el("div", { class: "hint", text: parts.join(" \xB7 ") }),
+        note
+      ])
+    );
+    if (m.dirty) item.appendChild(el("span", { class: "badge warn", text: `\uBC18\uC601 \uC548 \uD55C \uC218\uC815 ${m.total}`, title: "Hina\uC5D0\uC11C \uACE0\uCE5C \uB4A4 RisuAI\uC5D0 \uBC18\uC601\uD558\uC9C0 \uC54A\uC740 \uB0B4\uC6A9\uC774 \uC788\uC2B5\uB2C8\uB2E4 - \uC9C0\uC6B0\uAE30 \uC804\uC5D0 risum\uC73C\uB85C \uBC1B\uC544 \uB450\uC138\uC694" }));
+    item.append(el("span", { class: "badge", text: "RisuAI\uC5D0 \uC5C6\uC74C" }), save, ctx.del(m, item));
+    return item;
+  }
+  var SNAP_TYPE = { bot: "\uBD07", module: "\uBAA8\uB4C8", chat: "\uCC57", persona: "\uD398\uB974\uC18C\uB098" };
+  function buildSnapshotCard() {
+    let rows = [];
+    const summary = el("div", { class: "hint", text: "\uBD88\uB7EC\uC624\uB294 \uC911\u2026" });
+    const key = (s) => `${s.type}:${s.id}`;
+    const list2 = pagedList({
+      key,
+      text: (s) => `${s.owner} ${s.sub} ${s.label}`,
+      sort: (a, b) => b.createdAt - a.createdAt,
+      chips: [
+        [
+          ["all", "\uC804\uCCB4", () => true],
+          ["bot", "\uBD07", (s) => s.type === "bot"],
+          ["module", "\uBAA8\uB4C8", (s) => s.type === "module"],
+          ["chat", "\uCC57", (s) => s.type === "chat"],
+          ["persona", "\uD398\uB974\uC18C\uB098", (s) => s.type === "persona"]
+        ],
+        [
+          ["all", "\uBAA8\uB450", () => true],
+          ["user", "\uC9C1\uC811 \uB9CC\uB4E0 \uAC83", (s) => !s.auto],
+          ["auto", "\uC790\uB3D9 \uBC31\uC5C5", (s) => s.auto],
+          ["orphan", "\uC8FC\uC778\uC774 \uC5C6\uB294 \uAC83", (s) => s.orphan || s.ownerState === "missing" || s.ownerState === "trash"]
+        ]
+      ],
+      row: snapshotRow,
+      remove: async (keys) => {
+        const items5 = keys.map((k) => {
+          const i = k.indexOf(":");
+          return { type: k.slice(0, i), id: k.slice(i + 1) };
+        });
+        const r = await state.deleteSnapshots(items5);
+        await load();
+        return { err: !!r.missing.length, text: `\uC2A4\uB0C5\uC0F7 ${r.removed}\uAC1C\uB97C \uC9C0\uC6E0\uC2B5\uB2C8\uB2E4.` + (r.missing.length ? ` ${r.missing.length}\uAC1C\uB294 \uC774\uBBF8 \uC5C6\uC5C8\uC2B5\uB2C8\uB2E4.` : "") + " \uADF8 \uC2A4\uB0C5\uC0F7\uB9CC \uAC16\uACE0 \uC788\uB358 \uC774\uBBF8\uC9C0\uB294 \uC774\uBBF8\uC9C0 \uD0ED\uC758 \uC815\uB9AC \uB300\uC0C1\uC774 \uB429\uB2C8\uB2E4." };
+      },
+      placeholder: "\uC8FC\uC778\xB7\uC774\uB984\uC73C\uB85C \uCC3E\uAE30",
+      empty: "\uC2A4\uB0C5\uC0F7\uC774 \uC5C6\uC2B5\uB2C8\uB2E4."
+    });
+    const load = async () => {
+      try {
+        rows = await state.storedSnapshots();
+      } catch (e) {
+        summary.textContent = "\uC2A4\uB0C5\uC0F7\uC744 \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg20(e);
+        return;
+      }
+      const total = rows.reduce((n, s) => n + s.bytes, 0);
+      const auto = rows.filter((s) => s.auto);
+      summary.textContent = `\uC2A4\uB0C5\uC0F7 ${rows.length}\uAC1C \xB7 ${fmtSize(total)} (\uC790\uB3D9 \uBC31\uC5C5 ${auto.length}\uAC1C \xB7 ${fmtSize(auto.reduce((n, s) => n + s.bytes, 0))})`;
+      list2.set(rows);
+    };
+    const card2 = el("div", { class: "card" }, [
+      el("h2", { text: "\uC2A4\uB0C5\uC0F7" }),
+      el("div", { class: "hint", text: "\uBD07\xB7\uBAA8\uB4C8\xB7\uCC57\xB7\uD398\uB974\uC18C\uB098\uC758 \uC2A4\uB0C5\uC0F7 \uC804\uBD80\uC785\uB2C8\uB2E4. \uC790\uB3D9 \uBC31\uC5C5\uC740 \uBC18\uC601\xB7\uBCF5\uC6D0\xB7\uC0AD\uC81C \uC9C1\uC804\uC5D0 Hina\uAC00 \uC2A4\uC2A4\uB85C \uB9CC\uB4E0 \uAC83\uC785\uB2C8\uB2E4. \uC8FC\uC778\uC774 \uC5C6\uB294 \uAC83\uC740 \uC8FC\uC778(\uBD07\xB7\uCC57\xB7\uD398\uB974\uC18C\uB098)\uC774 Hina\uB098 RisuAI\uC5D0\uC11C \uC0AC\uB77C\uC9C4 \uC2A4\uB0C5\uC0F7\uC785\uB2C8\uB2E4." }),
+      summary,
+      list2.root
+    ]);
+    return { card: card2, load };
+  }
+  function snapshotRow(s, ctx) {
+    const item = el("div", { class: "chatitem botcleanrow" });
+    const gone = s.orphan ? "\uC8FC\uC778 \uC5C6\uC74C" : s.ownerState === "missing" ? "RisuAI\uC5D0 \uC5C6\uC74C" : s.ownerState === "trash" ? "RisuAI \uD734\uC9C0\uD1B5" : "";
+    item.append(
+      ctx.pick(s),
+      el("span", { class: "badge", text: SNAP_TYPE[s.type] }),
+      el("span", { class: "grow" }, [
+        el("div", { text: s.label || "(\uC774\uB984 \uC5C6\uC74C)" }),
+        el("div", { class: "hint", text: [s.owner, s.sub, fmtTime(s.createdAt * 1e3), fmtSize(s.bytes)].filter(Boolean).join(" \xB7 ") })
+      ])
+    );
+    if (s.auto) item.appendChild(el("span", { class: "badge", text: "\uC790\uB3D9" }));
+    if (gone) item.appendChild(el("span", { class: "badge warn", text: gone }));
+    item.appendChild(ctx.del(s, item));
+    return item;
+  }
+  function buildTempCard() {
+    let plan = "";
+    let kinds = [];
+    const picks = /* @__PURE__ */ new Map();
+    const summary = el("div", { class: "hint", text: "\uBD88\uB7EC\uC624\uB294 \uC911\u2026" });
+    const out = el("div", {});
+    const list2 = el("div", { class: "tempkinds" });
+    const rescan = el("button", { class: "ghost tiny", text: "\uB2E4\uC2DC \uD655\uC778" });
+    const go = el("button", { class: "tiny danger" });
+    const pickedBytes = () => kinds.reduce((n, k) => {
+      const p = picks.get(k.id);
+      if (p === void 0) return n;
+      if (p === null) return n + k.bytes;
+      return n + k.groups.filter((g) => p.has(g.group)).reduce((m, g) => m + g.bytes, 0);
+    }, 0);
+    const syncGo = () => {
+      const b = pickedBytes();
+      go.textContent = b ? `\uC120\uD0DD\uD55C ${fmtSize(b)} \uC9C0\uC6B0\uAE30` : "\uC120\uD0DD\uD55C \uD56D\uBAA9 \uC9C0\uC6B0\uAE30";
+      go.disabled = !b || !plan;
+    };
+    const draw2 = () => {
+      clear(list2);
+      for (const k of kinds) {
+        const p = picks.get(k.id);
+        const box = el("input", { type: "checkbox", title: "\uC774 \uC885\uB958 \uC804\uCCB4" });
+        box.checked = p === null;
+        box.indeterminate = p instanceof Set && p.size > 0;
+        box.disabled = !k.count;
+        box.addEventListener("change", () => {
+          if (box.checked) picks.set(k.id, null);
+          else picks.delete(k.id);
+          draw2();
+        });
+        const head = el("div", { class: "row tempkindhead" }, [
+          box,
+          el("span", { class: "grow" }, [el("b", { text: k.label }), el("div", { class: "hint", text: k.hint })]),
+          el("span", { class: "n", text: k.count ? `${k.count.toLocaleString()}\uAC1C \xB7 ${fmtSize(k.bytes)}` : "\uC5C6\uC74C" })
+        ]);
+        const row = el("div", { class: "tempkind" + (k.count ? "" : " dim"), dataset: { kind: k.id } }, [head]);
+        if (k.count && (k.groups.length > 1 || k.largest.length)) {
+          const det = el("details", {});
+          det.appendChild(el("summary", { class: "hint", text: (k.groups.length > 1 ? `\uBD07\uBCC4 ${k.groups.length}\uACF3` : "\uC790\uC138\uD788") + (k.newest ? ` \xB7 \uAC00\uC7A5 \uCD5C\uADFC ${fmtTime(k.newest * 1e3)}` : "") }));
+          if (k.groups.length > 1) {
+            for (const g of k.groups) {
+              const gb = el("input", { type: "checkbox" });
+              gb.checked = p === null || p instanceof Set && p.has(g.group);
+              gb.addEventListener("change", () => {
+                const cur = picks.get(k.id);
+                const set = cur === null ? new Set(k.groups.map((x) => x.group)) : cur ?? /* @__PURE__ */ new Set();
+                if (gb.checked) set.add(g.group);
+                else set.delete(g.group);
+                if (set.size === k.groups.length) picks.set(k.id, null);
+                else if (set.size) picks.set(k.id, set);
+                else picks.delete(k.id);
+                draw2();
+              });
+              det.appendChild(el("label", { class: "row tempgroup" }, [
+                gb,
+                el("span", { class: "grow", text: g.group || "(\uACF5\uC6A9)" }),
+                el("span", { class: "n", text: `${g.count.toLocaleString()}\uAC1C \xB7 ${fmtSize(g.bytes)} \xB7 ${fmtTime(g.newest * 1e3)}` })
+              ]));
+            }
+          }
+          if (k.largest.length) {
+            det.appendChild(el("div", { class: "hint", style: { marginTop: "4px" }, text: "\uD070 \uD30C\uC77C\uBD80\uD130:" }));
+            det.appendChild(el("pre", { class: "templargest", text: k.largest.join("\n") + (k.count > k.largest.length ? `
+\u2026 \uC678 ${k.count - k.largest.length}\uAC1C` : "") }));
+          }
+          row.appendChild(det);
+        }
+        list2.appendChild(row);
+      }
+      syncGo();
+    };
+    const load = async () => {
+      rescan.disabled = true;
+      summary.textContent = "\uC791\uC5C5 \uACF5\uAC04\uC744 \uC0B4\uD3B4\uBCF4\uB294 \uC911\u2026";
+      try {
+        const r = await state.tempScan();
+        plan = r.plan;
+        kinds = r.kinds;
+        for (const id of [...picks.keys()]) if (!kinds.some((k) => k.id === id && k.count)) picks.delete(id);
+        const total = kinds.reduce((n, k) => n + k.bytes, 0);
+        summary.textContent = `\uC784\uC2DC \uD30C\uC77C ${kinds.reduce((n, k) => n + k.count, 0).toLocaleString()}\uAC1C \xB7 ${fmtSize(total)}` + (r.aiRunning ? " \u2014 AI\uAC00 \uC791\uC5C5 \uC911\uC774\uB77C \uC9C0\uAE08\uC740 \uC9C0\uC6B8 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4" : "");
+        draw2();
+      } catch (e) {
+        summary.textContent = "\uC784\uC2DC \uD30C\uC77C\uC744 \uD655\uC778\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg20(e);
+      } finally {
+        rescan.disabled = false;
+      }
+    };
+    rescan.addEventListener("click", () => {
+      clear(out);
+      void load();
+    });
+    armed(go, "\uC120\uD0DD\uD55C \uD56D\uBAA9 \uC9C0\uC6B0\uAE30", "\uC815\uB9D0 \uC9C0\uC6B8\uAE4C\uC694?", async () => {
+      const body = [];
+      for (const [kind, p] of picks) {
+        if (p === null) body.push({ kind });
+        else for (const group of p) body.push({ kind, group });
+      }
+      go.disabled = true;
+      go.textContent = "\uC9C0\uC6B0\uB294 \uC911\u2026";
+      try {
+        const r = await state.tempClean(plan, body);
+        picks.clear();
+        out.replaceChildren(el("div", { class: "notice ok", text: `${r.removed.toLocaleString()}\uAC1C \xB7 ${fmtSize(r.freed)}\uB97C \uC9C0\uC6E0\uC2B5\uB2C8\uB2E4.` + (r.skipped ? ` \uD655\uC778 \uB4A4 \uBC14\uB010 \uD30C\uC77C ${r.skipped}\uAC1C\uB294 \uAC74\uB108\uB6F0\uC5C8\uC2B5\uB2C8\uB2E4.` : "") }));
+      } catch (e) {
+        out.replaceChildren(el("div", { class: "notice err", text: "\uC9C0\uC6B0\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg20(e) }));
+      }
+      await load();
+    });
+    syncGo();
+    const card2 = el("div", { class: "card" }, [
+      el("h2", { text: "\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 \uC784\uC2DC\uD30C\uC77C" }),
+      el("div", { class: "hint", text: "\uC791\uC5C5 \uACF5\uAC04\uACFC \uC2DC\uC2A4\uD15C \uD3F4\uB354\uC758 \uC784\uC2DC \uD30C\uC77C\uC744 \uC885\uB958\uBCC4\uB85C \uBCF4\uC5EC \uC90D\uB2C8\uB2E4. \uD504\uB85C\uC81D\uD2B8 \uD30C\uC77C\xB7\uACB0\uACFC\uBB3C(out)\xB7\uC2A4\uD29C\uB514\uC624 \uC774\uBBF8\uC9C0\xB7\uC2A4\uD0AC\uC740 \uC5EC\uAE30 \uB098\uC624\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4. \uD655\uC778\uD55C \uB4A4 \uBC14\uB010 \uD30C\uC77C\uC740 \uC9C0\uC6B0\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4." }),
+      el("div", { class: "row", style: { margin: "6px 0", gap: "8px" } }, [rescan, el("span", { class: "grow" }), go]),
+      summary,
+      out,
+      list2
+    ]);
+    return { card: card2, load };
+  }
+  function buildAssetStoreCard() {
     const stats = el("div", { class: "assetusage" });
     const out = el("div", {});
     const gc = el("button", { class: "tiny", text: "\uC548 \uC4F0\uB294 \uC774\uBBF8\uC9C0 \uC815\uB9AC" });
@@ -18698,7 +19079,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           "\uC2A4\uB0C5\uC0F7\uB9CC \uAC00\uC9C4 \uC774\uBBF8\uC9C0",
           u.snapshot.blobs,
           u.snapshot.bytes,
-          `\uC9C0\uC6B4 \uC5D0\uC14B\uC744 \uC2A4\uB0C5\uC0F7\uC73C\uB85C \uB418\uB3CC\uB9B4 \uB54C RisuAI\uC5D0 \uB2E4\uC2DC \uB4F1\uB85D\uD558\uB824\uACE0 \uB0A8\uACA8 \uB461\uB2C8\uB2E4 (\uBD07 \uC2A4\uB0C5\uC0F7 ${u.snapshots}\uAC1C). \uADF8 \uC2A4\uB0C5\uC0F7\uC744 \uC9C0\uC6B0\uBA74 \uC815\uB9AC \uB300\uC0C1\uC774 \uB429\uB2C8\uB2E4.`
+          `\uC9C0\uC6B4 \uC5D0\uC14B\uC744 \uC2A4\uB0C5\uC0F7\uC73C\uB85C \uB418\uB3CC\uB9B4 \uB54C RisuAI\uC5D0 \uB2E4\uC2DC \uB4F1\uB85D\uD558\uB824\uACE0 \uB0A8\uACA8 \uB461\uB2C8\uB2E4 (\uBD07 \uC2A4\uB0C5\uC0F7 ${u.snapshots}\uAC1C). \uC2A4\uB0C5\uC0F7 \uD0ED\uC5D0\uC11C \uADF8 \uC2A4\uB0C5\uC0F7\uC744 \uC9C0\uC6B0\uBA74 \uC815\uB9AC \uB300\uC0C1\uC774 \uB429\uB2C8\uB2E4.`
         ),
         line(
           "\uC544\uBB34\uB3C4 \uC548 \uC4F0\uB294 \uC774\uBBF8\uC9C0",
@@ -18709,7 +19090,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       );
       gc.disabled = !u.orphan.collectable;
     };
-    const reload = async () => {
+    const load = async () => {
       try {
         draw2(await state.assetUsage());
       } catch (e) {
@@ -18725,11 +19106,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       } catch (e) {
         out.appendChild(el("div", { class: "notice err", text: "\uC815\uB9AC\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg20(e) }));
       }
-      await reload();
-    });
-    let seen = false;
-    onMount?.(async () => {
-      if (seen) await reload();
+      await load();
     });
     stats.appendChild(el("div", { class: "hint", text: "\uBD88\uB7EC\uC624\uB294 \uC911\u2026" }));
     gc.disabled = true;
@@ -18740,28 +19117,62 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       el("div", { class: "row", style: { marginTop: "6px" } }, [gc]),
       out
     ]);
-    const first = () => {
-      if (!seen) {
-        seen = true;
-        void reload();
+    return { card: card2, load };
+  }
+  var SECTION_KEY = "hina.storageSection";
+  function buildStorageCleanup(onMount) {
+    let refreshOrphans = null;
+    const orphans = buildOrphanCard((r) => {
+      refreshOrphans = r;
+    });
+    const snaps2 = buildSnapshotCard();
+    const images = buildAssetStoreCard();
+    const temp = buildTempCard();
+    const sections = [
+      ["orphans", "\uBD07 \xB7 \uCC57 \xB7 \uBAA8\uB4C8", orphans, null],
+      ["snapshots", "\uC2A4\uB0C5\uC0F7", snaps2.card, snaps2.load],
+      ["images", "\uC774\uBBF8\uC9C0", images.card, images.load],
+      ["temp", "\uC784\uC2DC\uD30C\uC77C", temp.card, temp.load]
+    ];
+    const loaded = /* @__PURE__ */ new Set();
+    const nav = el("div", { class: "row botcleanchips storenav" });
+    const panes = el("div", {});
+    let current3 = "orphans";
+    try {
+      current3 = localStorage.getItem(SECTION_KEY) || "orphans";
+    } catch {
+    }
+    if (!sections.some((s) => s[0] === current3)) current3 = "orphans";
+    const show = (id) => {
+      current3 = id;
+      try {
+        localStorage.setItem(SECTION_KEY, id);
+      } catch {
+      }
+      for (const [sid, label2, card2, load] of sections) {
+        card2.style.display = sid === id ? "" : "none";
+        const b = nav.querySelector(`[data-section="${sid}"]`);
+        b?.classList.toggle("on", sid === id);
+        if (b) b.textContent = label2;
+        if (sid === id && load && !loaded.has(sid)) {
+          loaded.add(sid);
+          void load();
+        }
       }
     };
-    if (typeof IntersectionObserver === "function") {
-      const io2 = new IntersectionObserver((entries) => {
-        if (!entries.some((x) => x.isIntersecting)) return;
-        io2.disconnect();
-        first();
-      });
-      io2.observe(card2);
-    } else {
-      const load = el("button", { class: "ghost tiny", text: "\uD604\uD669 \uBD88\uB7EC\uC624\uAE30" });
-      load.addEventListener("click", () => {
-        load.remove();
-        first();
-      });
-      stats.replaceChildren(load);
+    for (const [sid, label2, card2] of sections) {
+      const b = el("button", { class: "ghost tiny chip", text: label2, dataset: { section: sid } });
+      b.addEventListener("click", () => show(sid));
+      nav.appendChild(b);
+      panes.appendChild(card2);
     }
-    return card2;
+    show(current3);
+    onMount?.(async () => {
+      if (refreshOrphans) await refreshOrphans();
+      const s = sections.find((x) => x[0] === current3);
+      if (s?.[3] && loaded.has(current3) && current3 !== "temp") await s[3]();
+    });
+    return el("div", {}, [nav, panes]);
   }
   function msg20(e) {
     return e instanceof Error ? e.message : String(e);
@@ -18824,15 +19235,11 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       ["\uACE0\uAE09 \uAE30\uB2A5", [buildMcpCard((refresh3) => {
         refreshers.push(refresh3);
       })]],
-      // Its own tab (§1-102, user): some people have hundreds of bots.
-      ["\uC800\uC7A5\uACF5\uAC04 \uC815\uB9AC", [
-        buildBotCleanupCard((refresh3) => {
-          refreshers.push(refresh3);
-        }),
-        buildAssetStoreCard((refresh3) => {
-          refreshers.push(refresh3);
-        })
-      ]],
+      // Its own tab (§1-102, user): some people have hundreds of bots. Four
+      // sections since §1-106: 봇·챗·모듈 · 스냅샷 · 이미지 · 임시파일.
+      ["\uC800\uC7A5\uACF5\uAC04 \uC815\uB9AC", [buildStorageCleanup((refresh3) => {
+        refreshers.push(refresh3);
+      })]],
       ["\uC815\uBCF4 \xB7 \uB85C\uADF8", [buildCatalogCard(), buildDebugCard(), aboutMount]]
     ];
     const bar3 = el("div", { class: "subtabs" });
@@ -19274,7 +19681,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         for (const k of r.keys) {
           const edit = el("button", { class: "ghost tiny", text: "\uC218\uC815" });
           const del = el("button", { class: "ghost tiny" });
-          const row2 = el("div", { class: "verrow keyrow" }, [
+          const row = el("div", { class: "verrow keyrow" }, [
             el("div", { class: "grow" }, [
               el("div", {}, [
                 el("span", { text: k.name }),
@@ -19297,7 +19704,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
               say(e instanceof Error ? e.message : String(e), "err");
             }
           });
-          listMount2.appendChild(row2);
+          listMount2.appendChild(row);
         }
       } catch (e) {
         clear(listMount2);
@@ -19395,7 +19802,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.41"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.42"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -19560,11 +19967,11 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         title: f.id
       });
       name.addEventListener("click", () => open2(f));
-      const row2 = el("div", { class: "treerow" }, [name]);
-      if (f.deleted) row2.appendChild(el("span", { class: "badge", text: "\uC0AD\uC81C \uC608\uC815" }));
-      else if (f.isNew) row2.appendChild(el("span", { class: "badge warn", text: "\uCD94\uAC00" }));
-      else if (f.changed) row2.appendChild(el("span", { class: "badge warn", text: "\uC218\uC815" }));
-      treeMount3.appendChild(row2);
+      const row = el("div", { class: "treerow" }, [name]);
+      if (f.deleted) row.appendChild(el("span", { class: "badge", text: "\uC0AD\uC81C \uC608\uC815" }));
+      else if (f.isNew) row.appendChild(el("span", { class: "badge warn", text: "\uCD94\uAC00" }));
+      else if (f.changed) row.appendChild(el("span", { class: "badge warn", text: "\uC218\uC815" }));
+      treeMount3.appendChild(row);
     }
   }
   async function saveTyped(f, value, btn) {
@@ -20093,12 +20500,12 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       else b.addEventListener("click", run);
       return b;
     };
-    const row2 = el("div", { class: "row", style: { padding: "6px" } });
-    if (mode2 === "v1") row2.appendChild(btn("V1", true, () => {
+    const row = el("div", { class: "row", style: { padding: "6px" } });
+    if (mode2 === "v1") row.appendChild(btn("V1", true, () => {
     }));
-    row2.appendChild(btn("V2", mode2 === "v2", () => void switchMode("v2")));
-    row2.appendChild(btn("Lua", mode2 === "lua", () => void switchMode("lua")));
-    sideMount.appendChild(row2);
+    row.appendChild(btn("V2", mode2 === "v2", () => void switchMode("v2")));
+    row.appendChild(btn("Lua", mode2 === "lua", () => void switchMode("lua")));
+    sideMount.appendChild(row);
     sideMount.appendChild(el("div", { class: "hint", style: { padding: "0 8px" }, text: mode2 === "lua" ? "Lua \uC2A4\uD06C\uB9BD\uD2B8 \uD55C \uAC1C\uAC00 \uC774 \uBD07\uC758 \uD2B8\uB9AC\uAC70\uC785\uB2C8\uB2E4." : mode2 === "v2" ? `V2 \uBE14\uB85D \uD504\uB85C\uADF8\uB7A8 \xB7 \uC774\uBCA4\uD2B8 ${Math.max(0, items4.length - 1)}\uAC1C` : mode2 === "v1" ? "V1 (\uAD6C\uD615) \uD2B8\uB9AC\uAC70\uC785\uB2C8\uB2E4." : "\uD2B8\uB9AC\uAC70\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4. \uBAA8\uB4DC\uB97C \uACE8\uB77C \uC2DC\uC791\uD569\uB2C8\uB2E4." }));
   }
   async function switchMode(to) {
@@ -20612,21 +21019,21 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
             title.firstChild.textContent = label2;
           });
         });
-        const row2 = el("div", { class: "verrow" });
+        const row = el("div", { class: "verrow" });
         const del = el("button", { class: "ghost tiny", title: "\uC774 \uC2A4\uB0C5\uC0F7 \uC0AD\uC81C" });
         armed(del, "\u2715", "\uC0AD\uC81C \uD655\uC778", async () => {
-          row2.classList.add("deleting");
+          row.classList.add("deleting");
           del.disabled = true;
           try {
             await state.deleteCardCheckpoint(c.id);
-            row2.remove();
+            row.remove();
           } catch (e) {
-            row2.classList.remove("deleting");
+            row.classList.remove("deleting");
             del.disabled = false;
             shellNotice("\uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg25(e), "err");
           }
         });
-        row2.append(
+        row.append(
           el("div", { class: "grow" }, [
             title,
             el("div", { class: "hint", text: fmtTime(c.created_at * 1e3) })
@@ -20635,7 +21042,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           b,
           del
         );
-        return row2;
+        return row;
       };
       for (const [idx, c] of users.slice(0, 12).entries()) {
         body.appendChild(verRow(c, { newest: idx === 0 }));
@@ -20945,10 +21352,10 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     }
     if (c.row && editable()) {
       const del = el("button", { class: "ghost tiny", text: "\u2715", title: "\uCE74\uB4DC\uC5D0\uC11C \uC774 \uCC38\uC870\uB97C \uC9C0\uC6C1\uB2C8\uB2E4" });
-      const row2 = c.row;
+      const row = c.row;
       armed(del, "\u2715", "\uC815\uB9D0?", async () => {
         try {
-          await state.deleteScript(row2.id);
+          await state.deleteScript(row.id);
           void state.refreshBotChanges();
           await refreshNow6();
         } catch (e) {
@@ -20962,7 +21369,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
   }
   function beginRename(c, nameEl) {
     if (!c.row) return;
-    const row2 = c.row;
+    const row = c.row;
     const input2 = el("input", { value: c.name, class: "assetrename" });
     const done = async (commit) => {
       const v = input2.value.trim();
@@ -20971,7 +21378,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         return;
       }
       try {
-        await state.saveScript(row2.id, { ...row2.entry, name: v });
+        await state.saveScript(row.id, { ...row.entry, name: v });
         void state.refreshBotChanges();
         await refreshNow6();
       } catch (e) {
@@ -21096,7 +21503,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       clear(list2);
       for (const r of state.personas ?? [p]) {
         if (r.gone) continue;
-        const row2 = el("div", { class: "chatitem" + (r.key === state.persona?.key ? " current" : "") }, [
+        const row = el("div", { class: "chatitem" + (r.key === state.persona?.key ? " current" : "") }, [
           personaAvatar(r.iconKey, r.work.name || r.name),
           el("span", { class: "grow", text: r.work.name || r.name || "(\uC774\uB984 \uC5C6\uC74C)" }),
           r.selected ? el("span", { class: "badge", text: "\uC120\uD0DD\uB428", title: "RisuAI\uC5D0\uC11C \uC9C0\uAE08 \uC120\uD0DD\uB41C \uD398\uB974\uC18C\uB098 - \uBC18\uC601\uD558\uBA74 \uC0C8 \uD398\uB974\uC18C\uB098(\uC0AC\uBCF8)\uB85C \uC800\uC7A5\uB429\uB2C8\uB2E4" }) : null,
@@ -21104,7 +21511,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           r.dirty ? el("span", { class: "badge warn", text: `\uBBF8\uBC18\uC601 ${r.total}` }) : null,
           r.risuChanged ? el("span", { class: "badge warn", text: "RisuAI\uB3C4 \uBC14\uB01C", title: "RisuAI \uCABD\uC5D0\uC11C\uB3C4 \uBC14\uB00C\uC5C8\uC2B5\uB2C8\uB2E4 - \uBC18\uC601\uD558\uBA74 \uB36E\uC5B4\uC501\uB2C8\uB2E4" }) : null
         ]);
-        row2.addEventListener("click", async () => {
+        row.addEventListener("click", async () => {
           if (r.key === state.persona?.key) return;
           try {
             await state.openPersona(r.key);
@@ -21112,7 +21519,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
             shellNotice("\uD398\uB974\uC18C\uB098\uB97C \uC5F4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg26(e), "err");
           }
         });
-        list2.appendChild(row2);
+        list2.appendChild(row);
       }
     };
     const nameIn = el("input", { placeholder: "\uD398\uB974\uC18C\uB098 \uC774\uB984" });
@@ -21371,7 +21778,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       }
       const users = cps.filter((c) => c.kind !== "auto");
       const autos = cps.filter((c) => c.kind === "auto");
-      const row2 = (c, auto) => {
+      const row = (c, auto) => {
         const back = el("button", { class: "ghost tiny", text: "\uB418\uB3CC\uB9AC\uAE30", title: "\uC791\uC5C5\uBCF8\uC744 \uC774 \uC2DC\uC810\uC73C\uB85C \uB418\uB3CC\uB9BD\uB2C8\uB2E4 (\uC9C1\uC804 \uC0C1\uD0DC\uB3C4 \uC2A4\uB0C5\uC0F7\uC73C\uB85C \uB0A8\uC2B5\uB2C8\uB2E4)" });
         back.addEventListener("click", async () => {
           back.disabled = true;
@@ -21410,7 +21817,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         }
         return r;
       };
-      for (const c of users) body.appendChild(row2(c, false));
+      for (const c of users) body.appendChild(row(c, false));
       if (autos.length) {
         const fold2 = el("div", { class: "autohead" });
         const auto = el("div", { style: { display: "none" } });
@@ -21421,7 +21828,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           head.textContent = `${open4 ? "\u25BE" : "\u25B8"} \uC790\uB3D9 \uBC31\uC5C5 ${autos.length}\uAC1C`;
         });
         fold2.appendChild(head);
-        for (const c of autos) auto.appendChild(row2(c, true));
+        for (const c of autos) auto.appendChild(row(c, true));
         body.append(fold2, auto);
       }
     } catch (e) {
@@ -21687,14 +22094,14 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         );
         const names = fields2(doc.rules.find((r) => r.id === aset.ruleId)?.template || "").filter((k) => k !== "character");
         for (const slot of aset.slots) {
-          const row2 = el("div", { class: "card" });
-          row2.appendChild(field("\uC2AC\uB86F ID", input(slot.id, (v) => {
+          const row = el("div", { class: "card" });
+          row.appendChild(field("\uC2AC\uB86F ID", input(slot.id, (v) => {
             slot.id = v;
           })));
-          for (const key of names) row2.appendChild(field(key, input(slot.fields[key] || "", (v) => {
+          for (const key of names) row.appendChild(field(key, input(slot.fields[key] || "", (v) => {
             slot.fields[key] = v;
           })));
-          row2.append(
+          row.append(
             select(modes, slot.status, (v) => {
               slot.status = v;
             }),
@@ -21703,7 +22110,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
               draw2();
             })
           );
-          sets.appendChild(row2);
+          sets.appendChild(row);
         }
         sets.appendChild(button("\uC2AC\uB86F \uCD94\uAC00", () => {
           aset.slots.push({ id: uid(), fields: {}, status: "required" });
@@ -21937,18 +22344,18 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     lastStep = 0;
   }
   function statusRow() {
-    const row2 = el("div", { class: "row", style: { gap: "8px", flexWrap: "wrap", marginBottom: "6px" } });
+    const row = el("div", { class: "row", style: { gap: "8px", flexWrap: "wrap", marginBottom: "6px" } });
     const nStyles = activeOf("styles").length;
     const nChars = activeOf("characters").length;
-    row2.appendChild(el("span", { class: "hint", text: `\uD65C\uC131 \uCE74\uB4DC: \uC2A4\uD0C0\uC77C ${nStyles} \xB7 \uCE90\uB9AD\uD130 ${nChars}` }));
+    row.appendChild(el("span", { class: "hint", text: `\uD65C\uC131 \uCE74\uB4DC: \uC2A4\uD0C0\uC77C ${nStyles} \xB7 \uCE90\uB9AD\uD130 ${nChars}` }));
     const status = S.status;
     if (!status) {
-      row2.appendChild(el("span", { class: "hint", text: "\uC0C1\uD0DC\uB97C \uC77D\uB294 \uC911\uC785\uB2C8\uB2E4\u2026" }));
-      return row2;
+      row.appendChild(el("span", { class: "hint", text: "\uC0C1\uD0DC\uB97C \uC77D\uB294 \uC911\uC785\uB2C8\uB2E4\u2026" }));
+      return row;
     }
     const acc = status.account;
     if (acc) {
-      row2.append(
+      row.append(
         el("span", {
           class: "badge",
           title: "Anlas \u2014 \uB808\uD37C\uB7F0\uC2A4 \uC778\uCF54\uB529\uACFC \uB514\uB809\uD130 \uD234\uC774 \uC4F0\uB294 \uC794\uB7C9",
@@ -21962,8 +22369,8 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         el("span", { class: "hint", text: `tier ${acc.tier ?? "?"}` })
       );
     }
-    if (status.error) row2.appendChild(el("span", { class: "hint err", text: status.error }));
-    return row2;
+    if (status.error) row.appendChild(el("span", { class: "hint err", text: status.error }));
+    return row;
   }
   function tokenNotice() {
     const status = S.status;
@@ -22154,7 +22561,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     const items5 = S.cards.scenes ?? [];
     const cur = items5.find((i) => i.path === gen.scenePreset) ?? null;
     const label2 = (i) => i.name + (i.count ? ` (\uC52C ${i.count})` : "");
-    const row2 = pickerRow(cur ? { name: label2(cur) } : null, {
+    const row = pickerRow(cur ? { name: label2(cur) } : null, {
       title: items5.length ? `\uC800\uC7A5\uB41C \uD504\uB9AC\uC14B ${items5.length}\uAC1C \u2014 \uC120\uD0DD \xB7 \uC218\uC815 \xB7 \uC0AD\uC81C \xB7 \uCD94\uAC00` : "\uD504\uB9AC\uC14B \uCD94\uAC00",
       emptyHint: items5.length ? "\uC120\uD0DD\uB41C \uC52C \uD504\uB9AC\uC14B \uC5C6\uC74C \u2014 \u203A \uC5D0\uC11C \uACE0\uB974\uC138\uC694" : "\uC52C \uD504\uB9AC\uC14B\uC774 \uC5C6\uC2B5\uB2C8\uB2E4. \u203A \uC5D0\uC11C \uD558\uB098 \uB9CC\uB4E4\uC5B4 \uC8FC\uC138\uC694.",
       onOpen: () => openListPicker({
@@ -22212,7 +22619,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         createLabel: "\uC0C8 \uD504\uB9AC\uC14B \uCD94\uAC00"
       })
     });
-    return el("div", { class: "field grow" }, [el("span", { text: "\uC52C \uD504\uB9AC\uC14B" }), row2]);
+    return el("div", { class: "field grow" }, [el("span", { text: "\uC52C \uD504\uB9AC\uC14B" }), row]);
   }
   async function startRun(overrides = {}) {
     if (!await styleSync.beforeRun()) return;
@@ -24009,7 +24416,7 @@ ${negative.value.trim()}
     const badges = [];
     if (it.vibe) badges.push({ text: `\uBC14\uC774\uBE0C ${it.vibe}`, title: "\uC774 \uCE74\uB4DC\uC758 \uBC14\uC774\uBE0C\uAC00 \uD568\uAED8 \uC2E4\uB9BD\uB2C8\uB2E4" });
     if (it.charref) badges.push({ text: `\uB808\uD37C\uB7F0\uC2A4 ${it.charref}` });
-    const row2 = listRow({
+    const row = listRow({
       variant: "pick",
       selected: S.charOpen === it.path,
       title: it.name || it.path.split("/").pop() || it.path,
@@ -24041,8 +24448,8 @@ ${negative.value.trim()}
         hub.drawLeft();
       }
     });
-    installDrag(row2, () => [it.path]);
-    return row2;
+    installDrag(row, () => [it.path]);
+    return row;
   }
   function addCharacter(anchor, folder) {
     namePopover(anchor, {
@@ -24108,8 +24515,8 @@ ${negative.value.trim()}
       void pasteIn(sel);
     } else if ((ev.key === "Delete" || ev.key === "Backspace") && many.length) {
       ev.preventDefault();
-      const row2 = ev.currentTarget.querySelector(".treebranch.on");
-      const r = row2?.getBoundingClientRect();
+      const row = ev.currentTarget.querySelector(".treebranch.on");
+      const r = row?.getBoundingClientRect();
       confirmDelete(many, { clientX: (r?.left ?? 40) + 40, clientY: (r?.bottom ?? 60) + 4 });
     } else if (ev.key === "Escape" && treeSel2.size > 1) {
       treeSel2 = /* @__PURE__ */ new Set([sel]);
@@ -24648,7 +25055,7 @@ ${negative.value.trim()}
         continue;
       }
       for (const it of items5) {
-        const row2 = el("div", { class: "pickrow" + (selFrag === it.path ? " on" : ""), title: it.path }, [
+        const row = el("div", { class: "pickrow" + (selFrag === it.path ? " on" : ""), title: it.path }, [
           el("div", { class: "grow" }, [
             el("div", { class: "pickname" }, [
               el("span", { text: it.name }),
@@ -24661,12 +25068,12 @@ ${negative.value.trim()}
             it.description ? el("div", { class: "hint", text: it.description }) : null
           ])
         ]);
-        installDrag(row2, () => [it.path]);
-        row2.addEventListener("click", () => {
+        installDrag(row, () => [it.path]);
+        row.addEventListener("click", () => {
           selFrag = it.path;
           hub.drawCentre();
         });
-        listBody.appendChild(row2);
+        listBody.appendChild(row);
       }
     }
     if (!selFrag) {
@@ -24803,14 +25210,14 @@ ${negative.value.trim()}
       if (S.jobId) void cancelRun();
       else void startRun({ scenePreset: "", count: gen.count });
     });
-    const row2 = el("div", { class: "row runctl" }, [
+    const row = el("div", { class: "row runctl" }, [
       el("span", { class: "studiosectitle", text: "\uC7A5\uC218" }),
       el("div", { class: "stepper" }, [minus, count, plus]),
       el("span", { class: "grow" }),
       runBtn
     ]);
     syncControls();
-    return row2;
+    return row;
   }
   function singleTick() {
     syncControls();
@@ -26300,7 +26707,7 @@ ${negative.value.trim()}
         if (preview2.problems?.length) throw new Error(preview2.problems.join("\n"));
         if (preview2.managed) {
           const body = el("div", {}, [el("div", { class: "hint", text: "\uBCF5\uC218 \uCC44\uD0DD\uC740 .2, .3 \uBC88\uD638\uB85C \uC800\uC7A5\uD558\uBA70, \uBD07\uC5D0\uC11C\uB294 \uAC19\uC740 \uC774\uB984\uC758 \uB79C\uB364 \uD6C4\uBCF4\uB85C \uC0AC\uC6A9\uD569\uB2C8\uB2E4." })]);
-          for (const row2 of preview2.mapping || []) body.appendChild(el("div", { text: row2.source.split("/").pop() + " \u2192 " + row2.target }));
+          for (const row of preview2.mapping || []) body.appendChild(el("div", { text: row.source.split("/").pop() + " \u2192 " + row.target }));
           const run = el("button", { class: "primary", text: "\uB0B4\uBCF4\uB0B4\uAE30" });
           const output = el("div", { class: "notice" });
           run.addEventListener("click", async () => {
@@ -27006,9 +27413,9 @@ ${negative.value.trim()}
       buildLeftPrompt(leftContent);
     }
     if (hadFocus) {
-      const row2 = leftContent.querySelector(".treebranch.on") ?? leftContent;
+      const row = leftContent.querySelector(".treebranch.on") ?? leftContent;
       try {
-        row2.focus({ preventScroll: true });
+        row.focus({ preventScroll: true });
       } catch {
       }
     }
@@ -27371,10 +27778,10 @@ ${negative.value.trim()}
     refreshStatus();
   }
   function syncSettingsBar() {
-    const row2 = document.querySelector(".tabs");
-    if (!row2) return;
+    const row = document.querySelector(".tabs");
+    if (!row) return;
     const inSettings = active2 === "settings";
-    for (const b of Array.from(row2.querySelectorAll(".tab, .tabsep, .modetab"))) {
+    for (const b of Array.from(row.querySelectorAll(".tab, .tabsep, .modetab"))) {
       if (b.closest(".modtabs")) continue;
       b.style.display = inSettings ? "none" : "";
     }
@@ -27382,7 +27789,7 @@ ${negative.value.trim()}
     syncBadge.style.visibility = inSettings ? "hidden" : "";
     const bar3 = getSettingsBar();
     if (bar3) {
-      if (bar3.parentElement !== row2) row2.appendChild(bar3);
+      if (bar3.parentElement !== row) row.appendChild(bar3);
       bar3.style.display = inSettings ? "" : "none";
     }
   }
@@ -27423,14 +27830,14 @@ ${negative.value.trim()}
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.41"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.42"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
       healthEl.title = transport.versionGate;
     } else {
       healthEl.appendChild(el("span", { class: "hint", text: `\uBC31\uC5D4\uB4DC v${h.version}` }));
-      const behind = backendBehind("0.15.41", h.version, h.installKind);
+      const behind = backendBehind("0.15.42", h.version, h.installKind);
       if (behind) {
         const b = el("button", { class: "ghost tiny behindchip", text: "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8 \uD544\uC694", title: behind });
         b.addEventListener("click", () => {
@@ -27531,7 +27938,7 @@ ${negative.value.trim()}
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.15.41" }),
+        el("span", { class: "dim", text: "v0.15.42" }),
         healthEl,
         el("span", { class: "spacer" }),
         // 승인 / 반영 for the whole bot, from every tab (§1-76).
@@ -27885,6 +28292,6 @@ ${negative.value.trim()}
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.15.41"} loaded`);
+    console.log(`[risu-hina] v${"0.15.42"} loaded`);
   })();
 })();

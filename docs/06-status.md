@@ -1,4 +1,6 @@
-# 06. Implementation status — as of 2026-10-11 (v0.15.41, Risu Hina)
+# 06. Implementation status — as of 2026-10-12 (v0.15.42, Risu Hina)
+
+## 0.15.42 (2026-10-12): §1-106 저장공간 정리 in four sections — orphan bots/chats/modules, snapshots, images, temp files
 
 ## 0.15.41 (2026-10-11): §1-103~105 shared snapshots, image store, proposal progress, 새 대화, workspace speed, renamed bot folders
 
