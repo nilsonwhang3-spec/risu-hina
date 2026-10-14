@@ -4,6 +4,21 @@
 
 ## 0.15.41 (2026-10-11): §1-103~105 shared snapshots, image store, proposal progress, 새 대화, workspace speed, renamed bot folders
 
+## §1-108 (2026-10-14): a masked desktop fetch failure is named; https on a local backend is flagged
+
+- **Field report:** "실패했습니다. 백엔드에 닿지 못했습니다 (Expected double-quoted property name in JSON at
+  position 18 ...)" on the RisuAI desktop app, after the user toggled a VPN. The cause was the URL
+  `https://127.0.0.1:6020` - the backend serves plain HTTP, so the TLS handshake failed. Switching to http fixed it.
+- **Why the message was useless:** RisuAI's Tauri `streamed_fetch` (src-tauri/src/main.rs) reports a failed
+  request as `format!(r#"{{"success":false, body:{}}}"#, e)` - `body` unquoted - and its own JSON.parse of that
+  throws; position 18 is the `b`. The real reqwest error never reaches the plugin. Upstream bug, not ours.
+- **`explainFetchFailure`** (transport.ts) turns that parse error (V8 and WebKit wording) into "연결 자체가 실패했습니다
+  ... http/https, 포트, 백엔드 실행 여부"; other errors pass through.
+- **`localHttpsHint`**: https:// on loopback, RFC 1918, link-local or 100.64/10 (Tailscale) gets "http 입니다 -
+  <http URL> 로 바꿔 주세요", in the connect error and live under the URL field in ⚙ → 연결 (`.hint.schemewarn`,
+  hidden when empty; not `.hint.warn`, which the MCP card's smoke check selects). Domains are left alone.
+- Verified: tests/connect_hints.mjs (added to the gate), gate ALL GREEN.
+
 ## §1-107 (2026-10-12): 대조 without the panel blinking away, orphan chats save as JSON
 
 - **Field report on 0.15.42:** pressing 'RisuAI와 대조' closed the panel to RisuAI for a moment and came back.

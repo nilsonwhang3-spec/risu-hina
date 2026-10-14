@@ -90,6 +90,7 @@ if [ -d plugin/node_modules ]; then
   run "host save result names what was written" node tests/host_save_and_listing.mjs
   run "hilite mirror follows a set value" node tests/hilite_value.mjs
   run "backend-behind hints and the version gate" node tests/version_hints.mjs
+  run "masked desktop fetch failure and local https" node tests/connect_hints.mjs
   run "complete JSON response deadline" node tests/transport_timeout.mjs
   run "markdown progress and CRLF" node tests/markdown_progress.mjs
   run "planning and mobile proposal UI" node tests/agent_planning_ui.mjs

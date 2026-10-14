@@ -14,7 +14,7 @@ import { buildSkillsCard } from './skills';
 import { buildAgentNotesCard } from './agent-notes';
 import { agentPanel } from './agentpane';
 import { buildDebugCard, buildUpdateCard } from './debugpanel';
-import { transport } from '../transport';
+import { localHttpsHint, transport } from '../transport';
 import { copyToClipboard } from '../host';
 import { buildMcpCard } from './mcp-ui';
 import { buildStorageCleanup } from './storage-cleanup';
@@ -144,6 +144,11 @@ function buildConnectionCard(): HTMLElement {
   const url = el('input', { value: cfg.url, placeholder: 'http://127.0.0.1:6020' });
   const token = el('input', { value: cfg.token, type: 'password', placeholder: 'data/token.txt' });
   const out = el('div', { class: 'hint' });
+  // https:// on a loopback/private address never connects (plain-HTTP backend).
+  const httpsWarn = el('div', { class: 'hint schemewarn' });
+  const checkScheme = (): void => { httpsWarn.textContent = localHttpsHint(url.value); };
+  url.addEventListener('input', checkScheme);
+  checkScheme();
 
   const save = el('button', { class: 'primary', text: '저장하고 연결' });
   save.addEventListener('click', async () => {
@@ -168,6 +173,7 @@ function buildConnectionCard(): HTMLElement {
   return el('div', { class: 'card' }, [
     el('h2', { text: '백엔드 연결' }),
     el('label', { class: 'field' }, [el('span', { text: 'URL' }), url]),
+    httpsWarn,
     el('label', { class: 'field' }, [
       el('span', { text: '토큰 (루프백이면 비워 두셔도 됩니다)' }), token,
     ]),

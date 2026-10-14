@@ -248,6 +248,8 @@ pre.mono {
   background: rgba(128,128,128,.08); border-radius: 5px; padding: 8px; margin: 6px 0 0;
 }
 .hint { color: var(--textcolor2, #79839a); font-size: 12px; }
+.hint.schemewarn { color: #f59e0b; }
+.hint.schemewarn:empty { display: none; }
 .sectionline { height: 1px; background: var(--borderc, #2b323f); margin: 16px 0 12px; }
 .sectiontitle {
   font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;

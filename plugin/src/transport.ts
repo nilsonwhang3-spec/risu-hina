@@ -117,9 +117,12 @@ export class Transport {
       // and say the panel keeps trying - the shell does (startReconnect).
       this.route = 'blocked';
       this.tokenSafe = false;
+      const why = e instanceof Error ? e.message : String(e);
+      const https = localHttpsHint(this.cfg.url);
       throw new BackendError(0,
-        `백엔드에 닿지 못했습니다 (${e instanceof Error ? e.message : String(e)}). ` +
-        'URL 이 맞는지, 터널·VPN 이 열려 있는지 확인해 주세요. 잠시 뒤 자동으로 다시 시도합니다.');
+        `백엔드에 닿지 못했습니다 (${explainFetchFailure(why)}). ` +
+        (https ? https + ' ' : 'URL 이 맞는지, 터널·VPN 이 열려 있는지 확인해 주세요. ') +
+        '잠시 뒤 자동으로 다시 시도합니다.');
     }
     const body = (await readJson(res)) as HealthInfo | null;
     if (!body || (body.service !== SIGNATURE)) {
@@ -433,6 +436,40 @@ async function readJson(res: Response): Promise<unknown> {
 
 function isRaw(v: unknown): v is { _raw: string } {
   return !!v && typeof v === 'object' && '_raw' in v && Object.keys(v as object).length === 1;
+}
+
+/**
+ * The RisuAI desktop app (Tauri) reports a failed request as
+ * `{"success":false, body:<reqwest error>}` - `body` unquoted - so its own
+ * JSON.parse throws and the real cause (refused, TLS, timeout) is lost. A user
+ * saw "Expected double-quoted property name in JSON at position 18" for an
+ * https:// URL on a plain-HTTP backend. Name what it means instead.
+ */
+export function explainFetchFailure(message: string): string {
+  // V8 (WebView2) and WebKit (macOS / Linux webviews) word it differently.
+  if (/double-quoted property name|JSON Parse error/i.test(message)) {
+    return '연결 자체가 실패했습니다. RisuAI 데스크톱 앱이 원래 오류를 깨진 형식으로 넘겨 원인 문구가 사라졌습니다'
+      + ' — 주소의 http/https, 포트, 백엔드 실행 여부를 확인해 주세요';
+  }
+  return message;
+}
+
+/**
+ * The backend serves plain HTTP; https:// on a loopback or private address
+ * fails at the TLS handshake. A domain behind a tunnel or reverse proxy is
+ * left alone - that is where https belongs. Returns the advice, or ''.
+ */
+export function localHttpsHint(url: string): string {
+  let u: URL;
+  try { u = new URL(url.trim()); } catch { return ''; }
+  if (u.protocol !== 'https:') return '';
+  const host = u.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  const local = host === 'localhost' || host.endsWith('.localhost') || host === '::1'
+    || /^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host)
+    || /^172\.(1[6-9]|2\d|3[01])\./.test(host) || /^169\.254\./.test(host)
+    || /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(host); // Tailscale / CGNAT
+  if (!local) return '';
+  return `로컬·사설 주소의 백엔드는 https 가 아니라 http 입니다 — ${url.trim().replace(/^https:/i, 'http:')} 로 바꿔 주세요.`;
 }
 
 /** Paths that work across versions: the ones an update needs. */
