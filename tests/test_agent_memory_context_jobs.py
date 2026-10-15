@@ -15,7 +15,7 @@ sys.stdout.reconfigure(encoding="utf-8")
 
 from app import agent, agentcontext, agentnotes, config, db, main, session, studiojob, updater
 from pydantic_ai import Agent, capture_run_messages
-from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, ToolCallPart, ToolReturnPart, UserPromptPart
+from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, ThinkingPart, ToolCallPart, ToolReturnPart, UserPromptPart
 from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.models.test import TestModel
 
@@ -68,6 +68,58 @@ class Features(unittest.TestCase):
         # reservation capped at 12K (not the whole max_tokens).
         self.assertEqual(compressed.call_args.args[1],
                          198000 - agentcontext.estimate_tokens("instructionstool schema") - 12000)
+
+    def test_large_max_tokens_compresses_before_hard_limit(self):
+        # §1-109: 65536 output on a 220K window put the soft budget above the
+        # hard one, so history in between stopped every step unsummarized.
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock
+        settings = {"autoCompact": True, "contextWindowTokens": 220000, "maxTokens": 32000}
+        request = SimpleNamespace(messages=[ModelRequest(parts=[UserPromptPart("hello")])],
+                                  model_request_parameters=SimpleNamespace(function_tools="tool schema"),
+                                  model_settings={"max_tokens": 65536}, model=None)
+        ctx = SimpleNamespace(deps=agent.Deps("chat", "A", "", Path(DATA.name)))
+        compressed = AsyncMock(return_value=(request.messages, None))
+        with patch.object(config, "section", return_value=settings), \
+             patch.object(agentcontext, "get_instructions", return_value="instructions"), \
+             patch.object(agentcontext, "compress", compressed):
+            asyncio.run(agentcontext.AutoContext().before_model_request(ctx, request))
+        fixed = agentcontext.estimate_tokens("instructionstool schema")
+        self.assertEqual(compressed.call_args.args[1], 220000 - fixed - 65536 - 1024)
+
+    def test_capacity_error_names_the_settings_and_numbers(self):
+        def respond(messages, info):
+            raise AssertionError("must stop before the provider")
+        def fail(messages, info):
+            raise RuntimeError("summary down")
+        ag = Agent(FunctionModel(respond), deps_type=agent.Deps, capabilities=[agentcontext.AutoContext()])
+        settings = {"autoCompact": True, "contextWindowTokens": 8000, "maxTokens": 1000}
+        with patch.object(config, "section", return_value=settings), \
+             self.assertRaises(agentcontext.ContextCapacityError) as caught:
+            asyncio.run(ag.run("가" * 5000, deps=agent.Deps("chat", "A", "", Path(DATA.name))))
+        text = str(caught.exception)
+        self.assertIn("사용 모델의 컨텍스트 크기", text)
+        self.assertIn("최대 출력 토큰", text)
+        self.assertIn("8,000", text)
+        self.assertNotIn("맥락 한도", text)
+
+    def test_summary_retries_once_when_thinking_eats_the_cap(self):
+        caps = []
+        def model(messages, info):
+            caps.append(info.model_settings.get("max_tokens"))
+            if len(caps) == 1:
+                return ModelResponse(parts=[ThinkingPart(content="long thoughts")], finish_reason="length")
+            return ModelResponse(parts=[TextPart(content="요약: 남은 작업 X")])
+        messages = [ModelRequest(parts=[UserPromptPart("작업 " + "가" * 3000)]),
+                    ModelResponse(parts=[TextPart(content="답 " + "나" * 3000)]),
+                    ModelRequest(parts=[UserPromptPart("다음")]),
+                    ModelResponse(parts=[TextPart(content="끝")])]
+        with patch.object(config, "section", return_value={}):
+            result, info = asyncio.run(agentcontext.compress(messages, 5000, FunctionModel(model), force=True))
+        self.assertEqual(info["method"], "summary")
+        self.assertEqual(caps, [16000, 32000])
+        self.assertEqual(info["diagnostics"]["retriedMaxTokens"], 32000)
+        self.assertEqual(info["usage"].requests, 2)
 
     def test_repeated_instructions_do_not_trigger_early_compression(self):
         def model(messages, info):

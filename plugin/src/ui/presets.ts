@@ -224,7 +224,10 @@ export function buildAdvancedCard(memorySection?: HTMLElement): HTMLElement {
     const req = field('maxRequestsPerTurn');
     const calls = field('maxToolCallsPerTurn');
     const capTok = field('maxInputTokensPerTurn');
-    const histTok = Math.max(2000, Math.floor(contextWindow * .8) - FIXED_PROMPT_TOKENS - outputTokens);
+    // Same as the backend (agentcontext.py): 90% less fixed and a 12K output
+    // reservation, but never past the hard limit that reserves all of max_tokens.
+    const histTok = Math.max(2000, Math.min(Math.floor(contextWindow * .9) - FIXED_PROMPT_TOKENS - Math.min(outputTokens, 12000),
+      contextWindow - FIXED_PROMPT_TOKENS - outputTokens - 1024));
     const perReq = FIXED_PROMPT_TOKENS + histTok;
     const reqUsed = req > 0 ? req : 50;
     const worst = perReq * reqUsed;
@@ -238,7 +241,7 @@ export function buildAdvancedCard(memorySection?: HTMLElement): HTMLElement {
       el('div', { text: capTok > 0
         ? (capTok < typical ? `⚠ 입력 상한 ${fmtN(capTok)} 이 보통 턴보다 작습니다 - 대부분의 턴이 중간에 멈춥니다.` : `입력 상한 ${fmtN(capTok)}: 최악 턴의 ${fmtN(capTok / worst * 100)}% 지점에서 멈춥니다.`)
         : '입력 상한 없음: 최악 턴까지 허용합니다.' }),
-      el('div', { class: 'hint', text: `기록은 컨텍스트 ${fmtN(contextWindow)}토큰의 80%에서 최대 출력 ${fmtN(outputTokens)}토큰과 고정 프롬프트 약 1.5만 토큰을 뺀 예산으로 계산합니다. 실제 요청의 지침·도구 크기에 따라 달라지며, 캐시 할인은 반영하지 않았습니다.` }),
+      el('div', { class: 'hint', text: `기록은 컨텍스트 ${fmtN(contextWindow)}토큰의 90%에서 고정 프롬프트 약 1.5만 토큰과 출력 예약(최대 1.2만)을 뺀 예산으로 계산하되, 최대 출력 ${fmtN(outputTokens)}토큰을 전부 뺀 한도는 넘지 않습니다. 실제 요청의 지침·도구 크기에 따라 달라지며, 캐시 할인은 반영하지 않았습니다.` }),
     );
   };
 

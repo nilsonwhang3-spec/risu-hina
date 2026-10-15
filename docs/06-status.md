@@ -4,6 +4,23 @@
 
 ## 0.15.41 (2026-10-11): §1-103~105 shared snapshots, image store, proposal progress, 새 대화, workspace speed, renamed bot folders
 
+## §1-109 (2026-10-15): a large max-output setting no longer stops every step with ContextCapacityError
+
+- **Field report:** since switching to Gemini 4 (Argon), every few steps stopped with "요약/축소 후에도 입력 한도를
+  넘어 ... 맥락 한도 설정을 확인해 주세요", and the user found no such setting.
+- **Cause 1 - soft budget above the hard one:** the soft (summarize) budget reserved `min(maxTokens, 12K)`, the
+  hard (stop) budget the whole `maxTokens`. Past `0.1 × window + 13K` output (≈35K at 220K; Gemini presets often
+  use 65536) history between the two was never summarized and every step raised. The soft budget is now
+  `min(soft, hard)`; at the 32K default it is unchanged.
+- **Cause 2 - thinking ate the summary cap:** the summary ran with `max_tokens` 8000, which Gemini-style models
+  spend on thoughts too, leaving no text (then a 10-minute cooldown). Now 16000 (`compactSummaryMaxTokens`), and a
+  response with no text that hit the cap or only thought gets one retry at twice the cap; diagnostics record
+  `retriedMaxTokens`, usage sums both attempts.
+- **The message** names the real settings (⚙ → 에이전트 → 'AI 메모리 · 자동 컨텍스트 압축' → '사용 모델의 컨텍스트 크기',
+  preset '최대 출력 토큰'), the estimated history, the hard budget and its parts, and whether the summary failed.
+  The settings hint and the advanced-card simulation now state the 90%/hard-limit formula (they said 80%).
+- Verified: tests (large max_tokens compresses at the hard budget; error text; summary retry), gate ALL GREEN.
+
 ## §1-108 (2026-10-14): a masked desktop fetch failure is named; https on a local backend is flagged
 
 - **Field report:** "실패했습니다. 백엔드에 닿지 못했습니다 (Expected double-quoted property name in JSON at

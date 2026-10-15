@@ -102,7 +102,7 @@ export function buildAgentNotesCard(onMount: (refresh: () => Promise<void>) => v
     el('label', {}, [enabled, el('span', { text: ' AI 메모리 사용' })]),
     el('label', {}, [auto, el('span', { text: ' 요청마다 컨텍스트를 확인하고 자동 압축' })]),
     el('label', { class: 'field' }, [el('span', { text: '사용 모델의 컨텍스트 크기 (토큰)' }), windowSize]),
-    el('p', { class: 'hint', text: '대화 예산은 컨텍스트의 80%에서 지침·도구 정의·최대 답변 토큰을 뺀 만큼 자동 계산합니다. 나머지 20%는 안전 여유이며, 별도의 글자 수 제한은 없습니다. 토큰 수는 추정치입니다. 사용자 지시와 미완료 작업을 보존하며, 요약에는 설정한 모델을 사용합니다.' }),
+    el('p', { class: 'hint', text: '대화가 컨텍스트의 90%에서 지침·도구 정의·출력 예약을 뺀 만큼을 넘으면 자동 요약합니다. 컨텍스트에서 지침·도구와 프리셋의 최대 출력 토큰을 전부 뺀 한도를 요약 후에도 넘으면 진행을 멈춥니다. 별도의 글자 수 제한은 없습니다. 토큰 수는 추정치입니다. 사용자 지시와 미완료 작업을 보존하며, 요약에는 설정한 모델을 사용합니다.' }),
     el('div', { class: 'row' }, [settings, history, learning]),
     el('div', { class: 'row' }, [shared, add, reloadBtn]), list, status,
   ]);

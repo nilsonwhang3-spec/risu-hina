@@ -164,7 +164,10 @@ class Continuity(unittest.TestCase):
         response = info['diagnostics']['responses'][0]
         self.assertEqual(response['finish'], 'length')
         self.assertEqual(response['textChars'], 0)
-        self.assertEqual(info['usage'].output_tokens, 8000)
+        # Thinking-only at the cap gets one retry with twice the room (§1-109).
+        self.assertEqual(info['diagnostics']['retriedMaxTokens'], 32000)
+        self.assertEqual(len(info['diagnostics']['responses']), 2)
+        self.assertEqual(info['usage'].output_tokens, 16000)
         self.assertNotIn('private reasoning', json.dumps(info['diagnostics']))
 
 if __name__ == '__main__': unittest.main()
