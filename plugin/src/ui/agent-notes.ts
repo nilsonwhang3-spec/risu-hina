@@ -62,7 +62,7 @@ export function buildAgentNotesCard(onMount: (refresh: () => Promise<void>) => v
   settings.addEventListener('click', async () => {
     try {
       const tokens = Number(windowSize.value);
-      if (!Number.isInteger(tokens) || tokens < 8000) throw new Error('컨텍스트 크기는 8000 이상 정수로 입력하세요.');
+      if (!Number.isInteger(tokens) || tokens < 8000) throw new Error('자동 요약 기준은 8000 이상 정수로 입력하세요.');
       await transport.post('/config', { config: { agent: { memoryEnabled: enabled.checked, autoCompact: auto.checked, contextWindowTokens: tokens } } });
       status.textContent = '설정을 저장했습니다.';
       settings.dispatchEvent(new Event('contextsettingschange', { bubbles: true }));
@@ -101,8 +101,8 @@ export function buildAgentNotesCard(onMount: (refresh: () => Promise<void>) => v
     el('h3', { text: 'AI 메모리 · 자동 컨텍스트 압축' }),
     el('label', {}, [enabled, el('span', { text: ' AI 메모리 사용' })]),
     el('label', {}, [auto, el('span', { text: ' 요청마다 컨텍스트를 확인하고 자동 압축' })]),
-    el('label', { class: 'field' }, [el('span', { text: '사용 모델의 컨텍스트 크기 (토큰)' }), windowSize]),
-    el('p', { class: 'hint', text: '대화가 컨텍스트의 90%에서 지침·도구 정의·출력 예약을 뺀 만큼을 넘으면 자동 요약합니다. 컨텍스트에서 지침·도구와 프리셋의 최대 출력 토큰을 전부 뺀 한도를 요약 후에도 넘으면 진행을 멈춥니다. 별도의 글자 수 제한은 없습니다. 토큰 수는 추정치입니다. 사용자 지시와 미완료 작업을 보존하며, 요약에는 설정한 모델을 사용합니다.' }),
+    el('label', { class: 'field' }, [el('span', { text: '자동 요약 기준 (토큰)' }), windowSize]),
+    el('p', { class: 'hint', text: '모델의 한도가 아니라 요청 하나의 비용 상한입니다. 요청마다 기록 전체를 보내므로, 1M 모델이어도 22만 정도를 권장합니다(모델 한도보다 크게 잡으면 안 됩니다). 대화가 이 값의 90%에서 지침·도구 정의·출력 예약을 뺀 만큼을 넘으면 자동 요약합니다. 이 값에서 지침·도구와 프리셋의 최대 출력 토큰을 전부 뺀 한도를 요약 후에도 넘으면 진행을 멈춥니다. 별도의 글자 수 제한은 없습니다. 토큰 수는 추정치입니다. 사용자 지시와 미완료 작업을 보존하며, 요약에는 설정한 모델을 사용합니다.' }),
     el('div', { class: 'row' }, [settings, history, learning]),
     el('div', { class: 'row' }, [shared, add, reloadBtn]), list, status,
   ]);

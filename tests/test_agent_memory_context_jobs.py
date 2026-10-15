@@ -98,7 +98,8 @@ class Features(unittest.TestCase):
              self.assertRaises(agentcontext.ContextCapacityError) as caught:
             asyncio.run(ag.run("가" * 5000, deps=agent.Deps("chat", "A", "", Path(DATA.name))))
         text = str(caught.exception)
-        self.assertIn("사용 모델의 컨텍스트 크기", text)
+        self.assertIn("자동 요약 기준", text)
+        self.assertIn("비용", text)
         self.assertIn("최대 출력 토큰", text)
         self.assertIn("8,000", text)
         self.assertNotIn("맥락 한도", text)
