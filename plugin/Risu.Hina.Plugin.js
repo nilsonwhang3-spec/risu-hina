@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.15.42
+//@display-name Risu Hina v0.15.43
 //@api 3.0
-//@version 0.15.42
+//@version 0.15.43
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -59,6 +59,25 @@
   }
   function isRaw(v) {
     return !!v && typeof v === "object" && "_raw" in v && Object.keys(v).length === 1;
+  }
+  function explainFetchFailure(message) {
+    if (/double-quoted property name|JSON Parse error/i.test(message)) {
+      return "\uC5F0\uACB0 \uC790\uCCB4\uAC00 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4. RisuAI \uB370\uC2A4\uD06C\uD1B1 \uC571\uC774 \uC6D0\uB798 \uC624\uB958\uB97C \uAE68\uC9C4 \uD615\uC2DD\uC73C\uB85C \uB118\uACA8 \uC6D0\uC778 \uBB38\uAD6C\uAC00 \uC0AC\uB77C\uC84C\uC2B5\uB2C8\uB2E4 \u2014 \uC8FC\uC18C\uC758 http/https, \uD3EC\uD2B8, \uBC31\uC5D4\uB4DC \uC2E4\uD589 \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694";
+    }
+    return message;
+  }
+  function localHttpsHint(url) {
+    let u;
+    try {
+      u = new URL(url.trim());
+    } catch {
+      return "";
+    }
+    if (u.protocol !== "https:") return "";
+    const host = u.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+    const local = host === "localhost" || host.endsWith(".localhost") || host === "::1" || /^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host) || /^172\.(1[6-9]|2\d|3[01])\./.test(host) || /^169\.254\./.test(host) || /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(host);
+    if (!local) return "";
+    return `\uB85C\uCEEC\xB7\uC0AC\uC124 \uC8FC\uC18C\uC758 \uBC31\uC5D4\uB4DC\uB294 https \uAC00 \uC544\uB2C8\uB77C http \uC785\uB2C8\uB2E4 \u2014 ${url.trim().replace(/^https:/i, "http:")} \uB85C \uBC14\uAFD4 \uC8FC\uC138\uC694.`;
   }
   function backendBehind(plugin, backend, installKind = "") {
     const v = (s) => s.split(".").map((x) => parseInt(x, 10) || 0);
@@ -161,9 +180,11 @@
             if (e instanceof BackendError) throw e;
             this.route = "blocked";
             this.tokenSafe = false;
+            const why = e instanceof Error ? e.message : String(e);
+            const https = localHttpsHint(this.cfg.url);
             throw new BackendError(
               0,
-              `\uBC31\uC5D4\uB4DC\uC5D0 \uB2FF\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4 (${e instanceof Error ? e.message : String(e)}). URL \uC774 \uB9DE\uB294\uC9C0, \uD130\uB110\xB7VPN \uC774 \uC5F4\uB824 \uC788\uB294\uC9C0 \uD655\uC778\uD574 \uC8FC\uC138\uC694. \uC7A0\uC2DC \uB4A4 \uC790\uB3D9\uC73C\uB85C \uB2E4\uC2DC \uC2DC\uB3C4\uD569\uB2C8\uB2E4.`
+              `\uBC31\uC5D4\uB4DC\uC5D0 \uB2FF\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4 (${explainFetchFailure(why)}). ` + (https ? https + " " : "URL \uC774 \uB9DE\uB294\uC9C0, \uD130\uB110\xB7VPN \uC774 \uC5F4\uB824 \uC788\uB294\uC9C0 \uD655\uC778\uD574 \uC8FC\uC138\uC694. ") + "\uC7A0\uC2DC \uB4A4 \uC790\uB3D9\uC73C\uB85C \uB2E4\uC2DC \uC2DC\uB3C4\uD569\uB2C8\uB2E4."
             );
           }
           const body = await readJson(res);
@@ -195,7 +216,7 @@
           this.tokenSafe = true;
           this.lastHealth = body;
           this.probeInfo = "";
-          this.gate = versionGate("0.15.42", String(body.version || ""));
+          this.gate = versionGate("0.15.43", String(body.version || ""));
           return body;
         }
         /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -586,19 +607,29 @@
     return char;
   }
   async function readInventory(withModules = true) {
-    let dbSlice = null;
-    try {
-      await Risuai.hideContainer();
-    } catch {
-    }
-    try {
-      dbSlice = await Risuai.getDatabase(withModules ? ["characters", "modules"] : ["characters"]);
-    } catch (e) {
+    let dbSlice;
+    const read = Risuai.getDatabase(withModules ? ["characters", "modules"] : ["characters"]);
+    const quick = await Promise.race([
+      read.then((v) => ({ v })),
+      new Promise((r) => setTimeout(() => r(null), 900))
+    ]).catch((e) => {
       throw new HostError("failed", "RisuAI \uCE90\uB9AD\uD130 \uBAA9\uB85D\uC744 \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + String(e));
-    } finally {
+    });
+    if (quick) dbSlice = quick.v;
+    else {
       try {
-        await Risuai.showContainer("fullscreen");
+        await Risuai.hideContainer();
       } catch {
+      }
+      try {
+        dbSlice = await read;
+      } catch (e) {
+        throw new HostError("failed", "RisuAI \uCE90\uB9AD\uD130 \uBAA9\uB85D\uC744 \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + String(e));
+      } finally {
+        try {
+          await Risuai.showContainer("fullscreen");
+        } catch {
+        }
       }
     }
     const list2 = dbSlice && Array.isArray(dbSlice["characters"]) ? dbSlice["characters"] : null;
@@ -5152,6 +5183,10 @@ name: ${nm}
         async orphanChats() {
           return (await transport.get("/chats/orphans")).chats ?? [];
         }
+        /** Any chat Hina holds as a risuChat envelope (RisuAI's own chat import takes it). */
+        async chatEnvelope(chatKey) {
+          return await transport.get("/export/risuchat", { chatKey }, 12e4);
+        }
         async forgetChats(chatKeys) {
           return await transport.post("/chats/forget", { chatKeys }, 3e5);
         }
@@ -8147,6 +8182,8 @@ pre.mono {
   background: rgba(128,128,128,.08); border-radius: 5px; padding: 8px; margin: 6px 0 0;
 }
 .hint { color: var(--textcolor2, #79839a); font-size: 12px; }
+.hint.schemewarn { color: #f59e0b; }
+.hint.schemewarn:empty { display: none; }
 .sectionline { height: 1px; background: var(--borderc, #2b323f); margin: 16px 0 12px; }
 .sectiontitle {
   font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
@@ -16826,7 +16863,10 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       const req = field2("maxRequestsPerTurn");
       const calls = field2("maxToolCallsPerTurn");
       const capTok = field2("maxInputTokensPerTurn");
-      const histTok = Math.max(2e3, Math.floor(contextWindow * 0.8) - FIXED_PROMPT_TOKENS - outputTokens);
+      const histTok = Math.max(2e3, Math.min(
+        Math.floor(contextWindow * 0.9) - FIXED_PROMPT_TOKENS - Math.min(outputTokens, 12e3),
+        contextWindow - FIXED_PROMPT_TOKENS - outputTokens - 1024
+      ));
       const perReq = FIXED_PROMPT_TOKENS + histTok;
       const reqUsed = req > 0 ? req : 50;
       const worst = perReq * reqUsed;
@@ -16838,7 +16878,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         el("div", { text: `\uBCF4\uD1B5 \uD134 (\uC694\uCCAD ${fmtN(Math.min(reqUsed, usage?.avgRequests || 8))}\uD68C) \u2248 ${fmtN(typical)} \uD1A0\uD070` }),
         el("div", { text: `\uCD5C\uC545 \uD134 (\uC694\uCCAD ${req > 0 ? fmtN(req) : "50(\uB77C\uC774\uBE0C\uB7EC\uB9AC \uAE30\uBCF8)"}\uD68C) \u2248 ${fmtN(worst)} \uD1A0\uD070` + (calls > 0 ? ` \xB7 \uD234 \uD638\uCD9C ${fmtN(calls)}\uD68C\uC5D0\uC11C\uB3C4 \uBA48\uCDA4` : "") }),
         el("div", { text: capTok > 0 ? capTok < typical ? `\u26A0 \uC785\uB825 \uC0C1\uD55C ${fmtN(capTok)} \uC774 \uBCF4\uD1B5 \uD134\uBCF4\uB2E4 \uC791\uC2B5\uB2C8\uB2E4 - \uB300\uBD80\uBD84\uC758 \uD134\uC774 \uC911\uAC04\uC5D0 \uBA48\uCDA5\uB2C8\uB2E4.` : `\uC785\uB825 \uC0C1\uD55C ${fmtN(capTok)}: \uCD5C\uC545 \uD134\uC758 ${fmtN(capTok / worst * 100)}% \uC9C0\uC810\uC5D0\uC11C \uBA48\uCDA5\uB2C8\uB2E4.` : "\uC785\uB825 \uC0C1\uD55C \uC5C6\uC74C: \uCD5C\uC545 \uD134\uAE4C\uC9C0 \uD5C8\uC6A9\uD569\uB2C8\uB2E4." }),
-        el("div", { class: "hint", text: `\uAE30\uB85D\uC740 \uCEE8\uD14D\uC2A4\uD2B8 ${fmtN(contextWindow)}\uD1A0\uD070\uC758 80%\uC5D0\uC11C \uCD5C\uB300 \uCD9C\uB825 ${fmtN(outputTokens)}\uD1A0\uD070\uACFC \uACE0\uC815 \uD504\uB86C\uD504\uD2B8 \uC57D 1.5\uB9CC \uD1A0\uD070\uC744 \uBE80 \uC608\uC0B0\uC73C\uB85C \uACC4\uC0B0\uD569\uB2C8\uB2E4. \uC2E4\uC81C \uC694\uCCAD\uC758 \uC9C0\uCE68\xB7\uB3C4\uAD6C \uD06C\uAE30\uC5D0 \uB530\uB77C \uB2EC\uB77C\uC9C0\uBA70, \uCE90\uC2DC \uD560\uC778\uC740 \uBC18\uC601\uD558\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4.` })
+        el("div", { class: "hint", text: `\uAE30\uB85D\uC740 \uC790\uB3D9 \uC694\uC57D \uAE30\uC900 ${fmtN(contextWindow)}\uD1A0\uD070\uC758 90%\uC5D0\uC11C \uACE0\uC815 \uD504\uB86C\uD504\uD2B8 \uC57D 1.5\uB9CC \uD1A0\uD070\uACFC \uCD9C\uB825 \uC608\uC57D(\uCD5C\uB300 1.2\uB9CC)\uC744 \uBE80 \uC608\uC0B0\uC73C\uB85C \uACC4\uC0B0\uD558\uB418, \uCD5C\uB300 \uCD9C\uB825 ${fmtN(outputTokens)}\uD1A0\uD070\uC744 \uC804\uBD80 \uBE80 \uD55C\uB3C4\uB294 \uB118\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4. \uC2E4\uC81C \uC694\uCCAD\uC758 \uC9C0\uCE68\xB7\uB3C4\uAD6C \uD06C\uAE30\uC5D0 \uB530\uB77C \uB2EC\uB77C\uC9C0\uBA70, \uCE90\uC2DC \uD560\uC778\uC740 \uBC18\uC601\uD558\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4.` })
       );
     };
     const drawMeasured = () => {
@@ -18186,7 +18226,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     settings.addEventListener("click", async () => {
       try {
         const tokens = Number(windowSize.value);
-        if (!Number.isInteger(tokens) || tokens < 8e3) throw new Error("\uCEE8\uD14D\uC2A4\uD2B8 \uD06C\uAE30\uB294 8000 \uC774\uC0C1 \uC815\uC218\uB85C \uC785\uB825\uD558\uC138\uC694.");
+        if (!Number.isInteger(tokens) || tokens < 8e3) throw new Error("\uC790\uB3D9 \uC694\uC57D \uAE30\uC900\uC740 8000 \uC774\uC0C1 \uC815\uC218\uB85C \uC785\uB825\uD558\uC138\uC694.");
         await transport.post("/config", { config: { agent: { memoryEnabled: enabled.checked, autoCompact: auto.checked, contextWindowTokens: tokens } } });
         status.textContent = "\uC124\uC815\uC744 \uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4.";
         settings.dispatchEvent(new Event("contextsettingschange", { bubbles: true }));
@@ -18227,8 +18267,8 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       el("h3", { text: "AI \uBA54\uBAA8\uB9AC \xB7 \uC790\uB3D9 \uCEE8\uD14D\uC2A4\uD2B8 \uC555\uCD95" }),
       el("label", {}, [enabled, el("span", { text: " AI \uBA54\uBAA8\uB9AC \uC0AC\uC6A9" })]),
       el("label", {}, [auto, el("span", { text: " \uC694\uCCAD\uB9C8\uB2E4 \uCEE8\uD14D\uC2A4\uD2B8\uB97C \uD655\uC778\uD558\uACE0 \uC790\uB3D9 \uC555\uCD95" })]),
-      el("label", { class: "field" }, [el("span", { text: "\uC0AC\uC6A9 \uBAA8\uB378\uC758 \uCEE8\uD14D\uC2A4\uD2B8 \uD06C\uAE30 (\uD1A0\uD070)" }), windowSize]),
-      el("p", { class: "hint", text: "\uB300\uD654 \uC608\uC0B0\uC740 \uCEE8\uD14D\uC2A4\uD2B8\uC758 80%\uC5D0\uC11C \uC9C0\uCE68\xB7\uB3C4\uAD6C \uC815\uC758\xB7\uCD5C\uB300 \uB2F5\uBCC0 \uD1A0\uD070\uC744 \uBE80 \uB9CC\uD07C \uC790\uB3D9 \uACC4\uC0B0\uD569\uB2C8\uB2E4. \uB098\uBA38\uC9C0 20%\uB294 \uC548\uC804 \uC5EC\uC720\uC774\uBA70, \uBCC4\uB3C4\uC758 \uAE00\uC790 \uC218 \uC81C\uD55C\uC740 \uC5C6\uC2B5\uB2C8\uB2E4. \uD1A0\uD070 \uC218\uB294 \uCD94\uC815\uCE58\uC785\uB2C8\uB2E4. \uC0AC\uC6A9\uC790 \uC9C0\uC2DC\uC640 \uBBF8\uC644\uB8CC \uC791\uC5C5\uC744 \uBCF4\uC874\uD558\uBA70, \uC694\uC57D\uC5D0\uB294 \uC124\uC815\uD55C \uBAA8\uB378\uC744 \uC0AC\uC6A9\uD569\uB2C8\uB2E4." }),
+      el("label", { class: "field" }, [el("span", { text: "\uC790\uB3D9 \uC694\uC57D \uAE30\uC900 (\uD1A0\uD070)" }), windowSize]),
+      el("p", { class: "hint", text: "\uBAA8\uB378\uC758 \uD55C\uB3C4\uAC00 \uC544\uB2C8\uB77C \uC694\uCCAD \uD558\uB098\uC758 \uBE44\uC6A9 \uC0C1\uD55C\uC785\uB2C8\uB2E4. \uC694\uCCAD\uB9C8\uB2E4 \uAE30\uB85D \uC804\uCCB4\uB97C \uBCF4\uB0B4\uBBC0\uB85C, 1M \uBAA8\uB378\uC774\uC5B4\uB3C4 22\uB9CC \uC815\uB3C4\uB97C \uAD8C\uC7A5\uD569\uB2C8\uB2E4(\uBAA8\uB378 \uD55C\uB3C4\uBCF4\uB2E4 \uD06C\uAC8C \uC7A1\uC73C\uBA74 \uC548 \uB429\uB2C8\uB2E4). \uB300\uD654\uAC00 \uC774 \uAC12\uC758 90%\uC5D0\uC11C \uC9C0\uCE68\xB7\uB3C4\uAD6C \uC815\uC758\xB7\uCD9C\uB825 \uC608\uC57D\uC744 \uBE80 \uB9CC\uD07C\uC744 \uB118\uC73C\uBA74 \uC790\uB3D9 \uC694\uC57D\uD569\uB2C8\uB2E4. \uC774 \uAC12\uC5D0\uC11C \uC9C0\uCE68\xB7\uB3C4\uAD6C\uC640 \uD504\uB9AC\uC14B\uC758 \uCD5C\uB300 \uCD9C\uB825 \uD1A0\uD070\uC744 \uC804\uBD80 \uBE80 \uD55C\uB3C4\uB97C \uC694\uC57D \uD6C4\uC5D0\uB3C4 \uB118\uC73C\uBA74 \uC9C4\uD589\uC744 \uBA48\uCDA5\uB2C8\uB2E4. \uBCC4\uB3C4\uC758 \uAE00\uC790 \uC218 \uC81C\uD55C\uC740 \uC5C6\uC2B5\uB2C8\uB2E4. \uD1A0\uD070 \uC218\uB294 \uCD94\uC815\uCE58\uC785\uB2C8\uB2E4. \uC0AC\uC6A9\uC790 \uC9C0\uC2DC\uC640 \uBBF8\uC644\uB8CC \uC791\uC5C5\uC744 \uBCF4\uC874\uD558\uBA70, \uC694\uC57D\uC5D0\uB294 \uC124\uC815\uD55C \uBAA8\uB378\uC744 \uC0AC\uC6A9\uD569\uB2C8\uB2E4." }),
       el("div", { class: "row" }, [settings, history, learning]),
       el("div", { class: "row" }, [shared, add, reloadBtn]),
       list2,
@@ -18300,10 +18340,10 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           return;
         }
         if (!r.newer) {
-          const mismatch = r.current !== "0.15.42";
+          const mismatch = r.current !== "0.15.43";
           const ahead = r.ahead ?? (!!r.latest && r.latest !== r.current);
           say(
-            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.42"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
+            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.43"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
             mismatch || ahead ? "" : "ok"
           );
           return;
@@ -18394,7 +18434,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.15.42",
+            version: "0.15.43",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -18477,6 +18517,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
 
   // src/ui/storage-cleanup.ts
   init_dom();
+  init_host();
   init_store();
   init_state();
   var PAGE2 = 30;
@@ -18718,7 +18759,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       }
     };
     const drawBody = () => {
-      const [list2, hint] = kind === "bot" ? [botList, 'RisuAI\uC5D0\uC11C \uC9C0\uC6E0\uAC70\uB098 \uD734\uC9C0\uD1B5\uC5D0 \uB123\uC740 \uBD07, \uB2E4\uC2DC \uC784\uD3EC\uD2B8\uD574 \uC0C8 \uBD07\uC774 \uB41C \uC61B \uBC84\uC804\uC758 \uC791\uC5C5\uBCF8\uC785\uB2C8\uB2E4. CharX\uB85C \uBC1B\uC544 \uB458 \uC218 \uC788\uC2B5\uB2C8\uB2E4. \uD3EC\uCF13\uB9AC\uC2A4\uC758 \uD734\uC9C0\uD1B5\xB7\uBE44\uD65C\uC131\uD654(\uBCF4\uAD00) \uBD07\uC740 \uD50C\uB7EC\uADF8\uC778\uC774 \uBCFC \uC218 \uC5C6\uC5B4 "RisuAI\uC5D0 \uC5C6\uC74C"\uC73C\uB85C \uB098\uC635\uB2C8\uB2E4. \uBD07 \uC2A4\uB0C5\uC0F7\uC740 RisuAI\uC5D0 \uC788\uB294 \uAC19\uC740 \uC774\uB984\uC758 \uBD07\uC73C\uB85C \uB118\uC5B4\uAC00\uACE0, \uC5C6\uC73C\uBA74 \uD568\uAED8 \uC9C0\uC6CC\uC9D1\uB2C8\uB2E4.'] : kind === "chat" ? [chatList, "RisuAI\uC5D0 \uC788\uB294 \uBD07\uC5D0\uC11C \uC9C0\uC6B4 \uCC57\uC758 \uC791\uC5C5\uBCF8\uC785\uB2C8\uB2E4. \uC9C0\uC6B0\uBA74 \uADF8 \uCC57\uC758 \uD134\xB7AI \uB300\uD654\xB7\uD3B8\uC9D1 \uB300\uAE30\xB7\uCC57 \uC2A4\uB0C5\uC0F7\uC774 \uD568\uAED8 \uC9C0\uC6CC\uC9D1\uB2C8\uB2E4. \uD734\uC9C0\uD1B5\uC774\uB098 RisuAI\uC5D0 \uC5C6\uB294 \uBD07\uC758 \uCC57\uC740 \uBD07\uACFC \uD568\uAED8 \uC9C0\uC6CC\uC9C0\uBBC0\uB85C \uC5EC\uAE30 \uB098\uC624\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4."] : [modList, "RisuAI\uC5D0\uC11C \uC9C0\uC6B4 \uBAA8\uB4C8\uC758 \uC791\uC5C5\uBCF8\uC785\uB2C8\uB2E4. risum\uC73C\uB85C \uBC1B\uC544 \uB458 \uC218 \uC788\uC2B5\uB2C8\uB2E4. \uC9C0\uC6B0\uBA74 \uBAA8\uB4C8 \uC2A4\uB0C5\uC0F7\uB3C4 \uD568\uAED8 \uC9C0\uC6CC\uC9D1\uB2C8\uB2E4."];
+      const [list2, hint] = kind === "bot" ? [botList, 'RisuAI\uC5D0\uC11C \uC9C0\uC6E0\uAC70\uB098 \uD734\uC9C0\uD1B5\uC5D0 \uB123\uC740 \uBD07, \uB2E4\uC2DC \uC784\uD3EC\uD2B8\uD574 \uC0C8 \uBD07\uC774 \uB41C \uC61B \uBC84\uC804\uC758 \uC791\uC5C5\uBCF8\uC785\uB2C8\uB2E4. CharX\uB85C \uBC1B\uC544 \uB458 \uC218 \uC788\uC2B5\uB2C8\uB2E4. \uD3EC\uCF13\uB9AC\uC2A4\uC758 \uD734\uC9C0\uD1B5\xB7\uBE44\uD65C\uC131\uD654(\uBCF4\uAD00) \uBD07\uC740 \uD50C\uB7EC\uADF8\uC778\uC774 \uBCFC \uC218 \uC5C6\uC5B4 "RisuAI\uC5D0 \uC5C6\uC74C"\uC73C\uB85C \uB098\uC635\uB2C8\uB2E4. \uBD07 \uC2A4\uB0C5\uC0F7\uC740 RisuAI\uC5D0 \uC788\uB294 \uAC19\uC740 \uC774\uB984\uC758 \uBD07\uC73C\uB85C \uB118\uC5B4\uAC00\uACE0, \uC5C6\uC73C\uBA74 \uD568\uAED8 \uC9C0\uC6CC\uC9D1\uB2C8\uB2E4.'] : kind === "chat" ? [chatList, "RisuAI\uC5D0 \uC788\uB294 \uBD07\uC5D0\uC11C \uC9C0\uC6B4 \uCC57\uC758 \uC791\uC5C5\uBCF8\uC785\uB2C8\uB2E4. JSON(risuChat)\uC73C\uB85C \uBC1B\uC544 RisuAI\uC5D0 \uB2E4\uC2DC \uAC00\uC838\uC62C \uC218 \uC788\uC2B5\uB2C8\uB2E4. \uC9C0\uC6B0\uBA74 \uADF8 \uCC57\uC758 \uD134\xB7AI \uB300\uD654\xB7\uD3B8\uC9D1 \uB300\uAE30\xB7\uCC57 \uC2A4\uB0C5\uC0F7\uC774 \uD568\uAED8 \uC9C0\uC6CC\uC9D1\uB2C8\uB2E4. \uD734\uC9C0\uD1B5\uC774\uB098 RisuAI\uC5D0 \uC5C6\uB294 \uBD07\uC758 \uCC57\uC740 \uBD07\uACFC \uD568\uAED8 \uC9C0\uC6CC\uC9C0\uBBC0\uB85C \uC5EC\uAE30 \uB098\uC624\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4."] : [modList, "RisuAI\uC5D0\uC11C \uC9C0\uC6B4 \uBAA8\uB4C8\uC758 \uC791\uC5C5\uBCF8\uC785\uB2C8\uB2E4. risum\uC73C\uB85C \uBC1B\uC544 \uB458 \uC218 \uC788\uC2B5\uB2C8\uB2E4. \uC9C0\uC6B0\uBA74 \uBAA8\uB4C8 \uC2A4\uB0C5\uC0F7\uB3C4 \uD568\uAED8 \uC9C0\uC6CC\uC9D1\uB2C8\uB2E4."];
       body.replaceChildren(el("div", { class: "hint", style: { margin: "6px 0" }, text: hint }), list2.root);
     };
     const drawSummary2 = () => {
@@ -18818,6 +18859,25 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
   }
   function chatRow(c, ctx) {
     const item = el("div", { class: "chatitem botcleanrow" });
+    const note = el("div", { class: "hint" });
+    const save = el("button", {
+      class: "ghost tiny",
+      text: "JSON\uC73C\uB85C \uC800\uC7A5",
+      title: "Hina \uC791\uC5C5\uBCF8\uC73C\uB85C risuChat JSON \uC744 \uBC1B\uC2B5\uB2C8\uB2E4 - RisuAI\uC758 \uCC57 \uAC00\uC838\uC624\uAE30\uB85C \uB2E4\uC2DC \uB123\uC744 \uC218 \uC788\uC2B5\uB2C8\uB2E4"
+    });
+    save.addEventListener("click", async () => {
+      save.disabled = true;
+      try {
+        const r = await state.chatEnvelope(c.chatKey);
+        const name = `${c.bot || "chat"} - ${c.name || c.chatKey}`.replace(/[\\/:*?"<>|\x00-\x1f]/g, "_").trim();
+        download(`${name}.json`, JSON.stringify(r.envelope), "application/json");
+        note.textContent = "\uB0B4\uB824\uBC1B\uC558\uC2B5\uB2C8\uB2E4. RisuAI \uCC57 \uBAA9\uB85D\uC758 \uAC00\uC838\uC624\uAE30\uB85C \uB2E4\uC2DC \uB123\uC744 \uC218 \uC788\uC2B5\uB2C8\uB2E4.";
+      } catch (e) {
+        note.textContent = "JSON\uC744 \uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4: " + msg20(e);
+      } finally {
+        save.disabled = false;
+      }
+    });
     const extra = [
       c.sessions ? `AI \uB300\uD654 ${c.sessions}` : "",
       c.staged ? `\uC2B9\uC778 \uB300\uAE30 \uD3B8\uC9D1 ${c.staged}` : "",
@@ -18827,9 +18887,11 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       ctx.pick(c),
       el("span", { class: "grow" }, [
         el("div", { text: `${c.bot || "(\uC774\uB984 \uC5C6\uB294 \uBD07)"} \u203A ${c.name || "(\uC774\uB984 \uC5C6\uB294 \uCC57)"}` }),
-        el("div", { class: "hint", text: `${c.turns}\uD134 \xB7 Hina \uC218\uC815 ${fmtTime(c.updatedAt * 1e3)}` + (extra ? " \xB7 " + extra : "") })
+        el("div", { class: "hint", text: `${c.turns}\uD134 \xB7 Hina \uC218\uC815 ${fmtTime(c.updatedAt * 1e3)}` + (extra ? " \xB7 " + extra : "") }),
+        note
       ]),
       el("span", { class: "badge", text: "RisuAI\uC5D0\uC11C \uC9C0\uC6B4 \uCC57" }),
+      save,
       ctx.del(c, item)
     );
     return item;
@@ -19280,6 +19342,12 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     const url = el("input", { value: cfg.url, placeholder: "http://127.0.0.1:6020" });
     const token2 = el("input", { value: cfg.token, type: "password", placeholder: "data/token.txt" });
     const out = el("div", { class: "hint" });
+    const httpsWarn = el("div", { class: "hint schemewarn" });
+    const checkScheme = () => {
+      httpsWarn.textContent = localHttpsHint(url.value);
+    };
+    url.addEventListener("input", checkScheme);
+    checkScheme();
     const save = el("button", { class: "primary", text: "\uC800\uC7A5\uD558\uACE0 \uC5F0\uACB0" });
     save.addEventListener("click", async () => {
       save.disabled = true;
@@ -19297,6 +19365,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     return el("div", { class: "card" }, [
       el("h2", { text: "\uBC31\uC5D4\uB4DC \uC5F0\uACB0" }),
       el("label", { class: "field" }, [el("span", { text: "URL" }), url]),
+      httpsWarn,
       el("label", { class: "field" }, [
         el("span", { text: "\uD1A0\uD070 (\uB8E8\uD504\uBC31\uC774\uBA74 \uBE44\uC6CC \uB450\uC154\uB3C4 \uB429\uB2C8\uB2E4)" }),
         token2
@@ -19802,7 +19871,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.42"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.43"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -27830,14 +27899,14 @@ ${negative.value.trim()}
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.42"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.43"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
       healthEl.title = transport.versionGate;
     } else {
       healthEl.appendChild(el("span", { class: "hint", text: `\uBC31\uC5D4\uB4DC v${h.version}` }));
-      const behind = backendBehind("0.15.42", h.version, h.installKind);
+      const behind = backendBehind("0.15.43", h.version, h.installKind);
       if (behind) {
         const b = el("button", { class: "ghost tiny behindchip", text: "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8 \uD544\uC694", title: behind });
         b.addEventListener("click", () => {
@@ -27938,7 +28007,7 @@ ${negative.value.trim()}
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.15.42" }),
+        el("span", { class: "dim", text: "v0.15.43" }),
         healthEl,
         el("span", { class: "spacer" }),
         // 승인 / 반영 for the whole bot, from every tab (§1-76).
@@ -28292,6 +28361,6 @@ ${negative.value.trim()}
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.15.42"} loaded`);
+    console.log(`[risu-hina] v${"0.15.43"} loaded`);
   })();
 })();

@@ -1,4 +1,6 @@
-# 06. Implementation status — as of 2026-10-12 (v0.15.42, Risu Hina)
+# 06. Implementation status — as of 2026-10-15 (v0.15.43, Risu Hina)
+
+## 0.15.43 (2026-10-15): §1-107~109 대조 without the panel blinking, orphan chat JSON, desktop fetch-failure hint, context compression before the hard limit
 
 ## 0.15.42 (2026-10-12): §1-106 저장공간 정리 in four sections — orphan bots/chats/modules, snapshots, images, temp files
 
@@ -19,6 +21,9 @@
 - **The message** names the real settings (⚙ → 에이전트 → 'AI 메모리 · 자동 컨텍스트 압축' → '사용 모델의 컨텍스트 크기',
   preset '최대 출력 토큰'), the estimated history, the hard budget and its parts, and whether the summary failed.
   The settings hint and the advanced-card simulation now state the 90%/hard-limit formula (they said 80%).
+- **Not the model's limit:** raising the setting to a 1M model's window makes every request carry up to ~900K
+  tokens. It is now '자동 요약 기준 (토큰)', its hint calls it a per-request cost cap (22만 recommended even on 1M
+  models, never above the model's limit), and the error suggests a new chat or a lower max output first.
 - Verified: tests (large max_tokens compresses at the hard budget; error text; summary retry), gate ALL GREEN.
 
 ## §1-108 (2026-10-14): a masked desktop fetch failure is named; https on a local backend is flagged
