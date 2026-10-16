@@ -269,6 +269,7 @@ function installDom() {
   globalThis.document = document;
   globalThis.Node = window.Node;
   globalThis.HTMLElement = window.HTMLElement;
+  globalThis.MutationObserver = window.MutationObserver;
   globalThis.HTMLInputElement = window.HTMLInputElement;
   globalThis.HTMLTextAreaElement = window.HTMLTextAreaElement;
   globalThis.Blob = window.Blob ?? globalThis.Blob;
@@ -4045,6 +4046,40 @@ check('with no bot, persona editing stays available',
   check('the agent panel never says chatKey is required',
         !/chatKey is required/.test(document.querySelector('.panel.active .right')?.textContent || ''),
         (document.querySelector('.panel.active .right')?.textContent || '').slice(0, 140));
+}
+
+console.log('\ntest_bug_report');
+{
+  // §1-113: reports stalled on "where is the log?", so every red notice grows
+  // an [오류 제보] button and the report is one block for a community comment.
+  check('the title row has a 오류 제보 button', !!findByTitle(document, '오류 제보'));
+  const n = document.createElement('div');
+  n.className = 'notice err';
+  n.textContent = '반영 실패: C:\\Users\\홍길동\\Risu Hina\\pyserver\\server.log 를 보세요 (me@example.com)';
+  (document.querySelector('.panel.active') || document.body).appendChild(n);
+  await settle(50);
+  const b = n.querySelector('.bugbtn');
+  check('a red notice grows a 오류 제보 button', !!b, n.outerHTML.slice(0, 200));
+  b?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(1500);
+  const text = document.querySelector('.bugreport .bugtext')?.value || '';
+  check('the report names both versions and the error clicked',
+        text.startsWith('[Risu Hina 오류 제보]') && /플러그인 v\d/.test(text) && /백엔드 v\d/.test(text)
+        && /누른 오류: 반영 실패/.test(text), text.slice(0, 300));
+  check('the report masks the home folder, paths and e-mail',
+        !/홍길동|example\.com|Risu Hina\\pyserver/.test(text) && /server\.log/.test(text), text.slice(0, 400));
+  check('the report fits a comment', text.length <= 3600, String(text.length));
+  check('the report never carries the token', !text.includes(backend.token || '\u0000'));
+  const what = document.querySelector('.bugreport .bugwhat');
+  if (what) {
+    what.value = '로어북 반영을 누르면 실패';
+    what.dispatchEvent(new window.Event('input', { bubbles: true }));
+  }
+  check('what the user typed leads the report',
+        (document.querySelector('.bugreport .bugtext')?.value || '').startsWith('상황: 로어북 반영을 누르면 실패'));
+  document.querySelector('.modalback .modalhead .iconbtn')?.dispatchEvent(new window.Event('click', { bubbles: true }));
+  n.remove();
+  await settle(50);
 }
 
 console.log('\ntest_unload');

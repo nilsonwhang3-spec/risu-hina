@@ -12,6 +12,25 @@
 
 ## 0.15.41 (2026-10-11): §1-103~105 shared snapshots, image store, proposal progress, 새 대화, workspace speed, renamed bot folders
 
+## §1-113 (2026-10-17): 오류 제보 — one block to paste under the maker's community post
+
+- **Problem:** reports stalled until someone told the user where the log was: 진단 정보 and 서버 로그 sit two clicks deep
+  in ⚙ → 정보. GitHub issues and a mail/form relay were considered and dropped (user's call: too much for the reporter
+  and for the maker); reports arrive as community comments, so the panel only has to produce one pasteable block.
+- **Entry points:** every red notice (`.notice.err`, anywhere in the panel) grows an [오류 제보] button - one
+  `MutationObserver` in `ui/bugreport.ts` instead of edits at forty call sites, so new screens get it for free; a bug
+  icon in the title row for "something feels wrong" with nothing on screen; [오류 제보] first in ⚙ → 정보's debug card.
+- **The block:** time, plugin/backend versions (or the connect error when the backend is down), RisuAI platform,
+  route, server OS/python, install kind, screen, OS/browser, AI model/host/reasoning/max output, the active tab, the
+  error clicked, the panel's own recent errors (notices and uncaught errors, kept client-side so a dead backend still
+  leaves them) and the server's last warn/error lines (404 probes dropped). An optional "상황" line the user types leads
+  it. Capped at 3500 characters. No key or token; Windows/home paths become `<path>\…\<file>`, home names `<user>`,
+  e-mail addresses `<email>`, because a comment is public.
+- Copy goes through `host.copyToClipboard` (execCommand, the path that works in the iframe); when it is refused the
+  box is selected and the user is told to copy it by hand.
+- Verified: smoke `test_bug_report` (button on a notice, versions + clicked error, masking with a spaced path - which
+  caught a first regex that broke on "Risu Hina\pyserver", 3600-char cap, no token, the typed line leads); gate ALL GREEN.
+
 ## §1-112 (2026-10-17): an entry deleted in RisuAI no longer blocks every 반영 after the conflict is resolved
 
 - **Field report (PocketRisu):** after deleting lorebook entries in PocketRisu's own editor, every 봇 반영 failed with

@@ -38,6 +38,7 @@ import { noteStudioLeft, renderStudioTab } from './tab-studio';
 import { getSettingsBar } from './tab-settings';
 import { installDropGuard } from './tree';
 import { openModulePicker, setModuleFocusHandler } from './module-picker';
+import { bugReportButton } from './bugreport';
 
 /**
  * Content views in the tab bar; settings is not one of them.
@@ -620,6 +621,7 @@ export function buildShell(): void {
       // Visible from every tab once the add-on is installed (설정 → 고급 기능).
       mcpHeaderSwitch(),
       reload,
+      bugReportButton(),
       settingsBtn,
       close,
     ]),

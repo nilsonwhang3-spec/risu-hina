@@ -226,6 +226,10 @@ label.field.row > span { display: inline; margin: 0; color: inherit; font-size: 
 }
 .notice.err { background: rgba(239, 68, 68, .12); }
 .notice.ok { background: rgba(16, 185, 129, .12); }
+/* 오류 제보 (§1-113): the button every red notice grows, and the report. */
+.notice.err .bugbtn { margin-left: 8px; vertical-align: baseline; }
+.bugreport textarea { width: 100%; box-sizing: border-box; margin-top: 8px; }
+.bugreport .bugtext { font-size: 11.5px; white-space: pre; overflow: auto; }
 
 /* The lorebook entry's insertorder, beside its name. */
 .ordertag {

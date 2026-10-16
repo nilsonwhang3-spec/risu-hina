@@ -20,6 +20,7 @@ import { renderMarkdown } from './markdown';
 import { transport } from '../transport';
 import * as host from '../host';
 import { memSnapshot } from './mem';
+import { openBugReport } from './bugreport';
 
 /**
  * Updating, in the order it actually happens.
@@ -161,7 +162,9 @@ export function buildDebugCard(): HTMLElement {
     ]));
   };
 
-  const diagBtn = el('button', { class: 'primary', text: '진단 정보' });
+  const reportBtn = el('button', { class: 'primary', text: '오류 제보' });
+  reportBtn.addEventListener('click', () => openBugReport());
+  const diagBtn = el('button', { class: 'ghost', text: '진단 정보' });
   diagBtn.addEventListener('click', async () => {
     diagBtn.disabled = true;
     try {
@@ -215,9 +218,10 @@ export function buildDebugCard(): HTMLElement {
   return el('div', { class: 'card' }, [
     el('h2', { text: '문제 신고 · 디버깅' }),
     el('div', { class: 'hint', style: { marginBottom: '8px' } }, [
-      '문제가 생기면 아래 두 가지를 복사해서 함께 보내 주세요. API 키나 토큰은 포함되지 않습니다.',
+      '문제가 생기면 [오류 제보] 를 눌러 나온 내용을 제작자의 커뮤니티 글에 댓글로 붙여넣어 주세요. '
+      + '제작자가 더 자세히 물어보면 진단 정보와 서버 로그 전체를 보내 주세요. API 키나 토큰은 포함되지 않습니다.',
     ]),
-    el('div', { class: 'row' }, [diagBtn, logBtn, levelSel]),
+    el('div', { class: 'row' }, [reportBtn, diagBtn, logBtn, levelSel]),
     out,
   ]);
 }

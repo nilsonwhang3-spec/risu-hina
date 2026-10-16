@@ -11,6 +11,7 @@ import { bootstrap } from './ui/shell';
 import { ICON, pollWhileVisible } from './ui/dom';
 import { smallScreen } from './ui/blobimg';
 import { memSnapshot } from './ui/mem';
+import { recordClientError, watchErrorNotices } from './ui/bugreport';
 
 /** When this page last hid, from the previous life of this iframe: a phone
  * that shows `pagehide` followed by a boot seconds later was reloaded by
@@ -78,10 +79,15 @@ async function resolveConfig(): Promise<{ url: string; token: string }> {
     // The plugin's own memory numbers, while the page shows: every 30s on a
     // phone (the one that reloads), every 5 minutes elsewhere.
     pollWhileVisible(() => { void clientLog('debug', 'mem', memSnapshot()); }, smallScreen() ? 30_000 : 300_000);
+    // Every red notice gets an [오류 제보] button, and what it said is kept
+    // for the report - even while the backend is the thing that is down.
+    watchErrorNotices();
     window.addEventListener('error', (ev) => {
+      recordClientError(String(ev.message));
       void clientLog('error', 'uncaught error', { message: String(ev.message).slice(0, 300), file: String(ev.filename || '').slice(-80), line: ev.lineno });
     });
     window.addEventListener('unhandledrejection', (ev) => {
+      recordClientError(String((ev as PromiseRejectionEvent).reason));
       void clientLog('error', 'unhandled rejection', { reason: String((ev as PromiseRejectionEvent).reason).slice(0, 300) });
     });
     window.addEventListener('pagehide', (ev) => {
