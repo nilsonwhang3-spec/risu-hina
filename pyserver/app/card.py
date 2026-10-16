@@ -367,6 +367,15 @@ def _merge_greetings(ck: str, greetings: list[str], now: float, out: dict) -> No
                 (uuid.uuid4().hex, ck, LIST_FIELD, seq, op.seq, op.theirs, op.theirs, now, now))
         elif op.action == merge.DELETE:
             db.execute("DELETE FROM card_fields WHERE id = ?", (op.row.id,))
+        elif op.theirs is None:
+            # Gone from RisuAI: same rule as the lorebook (store._merge_lore) -
+            # a stale baseline here fails every later write-back (§1-112).
+            if op.row.dirty:  # the deletion mark: deleted on both sides
+                db.execute("DELETE FROM card_fields WHERE id = ?", (op.row.id,))  # deleted both sides
+            else:
+                db.execute("UPDATE card_fields SET original = NULL, base_seq = NULL, extra_json = NULL, "
+                           "conflict_json = ?, updated_at = ? WHERE id = ?",
+                           (db.js(op.conflict), now, op.row.id))
         elif op.action == merge.ADOPT:
             db.execute("UPDATE card_fields SET body = ?, original = ?, base_seq = ?, "
                        "conflict_json = NULL, updated_at = ? WHERE id = ?",
@@ -400,6 +409,7 @@ def _merge_scripts(ck: str, kind: str, entries: list[dict], now: float, out: dic
                                    base=db.unjs(r["original_json"], None),
                                    dirty=r["origin"] != "original",
                                    order=r["base_seq"] if r["base_seq"] is not None else r["seq"]))
+    by_id = {r["id"]: r for r in rows}
     ops = merge.plan(based, entries, spec)
     same = merge.adopted_additions(extra, [o for o in ops if o.action == merge.INSERT], spec)
     folded = {id(o) for o in same.values()}
@@ -417,6 +427,15 @@ def _merge_scripts(ck: str, kind: str, entries: list[dict], now: float, out: dic
                 (uuid.uuid4().hex, ck, kind, seq, op.seq, text, text, now))
         elif op.action == merge.DELETE:
             db.execute("DELETE FROM card_scripts WHERE id = ?", (op.row.id,))
+        elif op.theirs is None:
+            # Gone from RisuAI: same rule as the lorebook (store._merge_lore) -
+            # a stale baseline here fails every later write-back (§1-112).
+            if by_id[op.row.id]["origin"] == "deleted":
+                db.execute("DELETE FROM card_scripts WHERE id = ?", (op.row.id,))
+            else:
+                db.execute("UPDATE card_scripts SET original_json = NULL, base_seq = NULL, "
+                           "origin = 'added', conflict_json = ? WHERE id = ?",
+                           (db.js(op.conflict), op.row.id))
         elif op.action == merge.ADOPT:
             db.execute("UPDATE card_scripts SET entry_json = ?, original_json = ?, base_seq = ?, "
                        "origin = 'original', conflict_json = NULL WHERE id = ?",

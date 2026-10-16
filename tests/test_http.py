@@ -764,6 +764,86 @@ def test_reopen_merges_card_and_lore(s: Server) -> None:
           body.get("conflicts") == 0 and (body.get("lore") or {}).get("total") == 1, str(body)[:200])
 
 
+def test_deleted_in_risu_can_write_back(s: Server) -> None:
+    """§1-112, reported from PocketRisu: a lorebook entry edited here and then
+    deleted in RisuAI became a 'deleted-upstream' conflict, and whichever side
+    it was resolved to, 반영 failed with "봇 로어북이 바뀌었습니다" for good.
+    The row kept its old baseline, so the patch's `before` still held an entry
+    RisuAI no longer has, and the plugin's guard (live == before) never passed.
+    The same held for greetings and scripts. Each check is `before == live`,
+    which is exactly the guard."""
+    print("test_deleted_in_risu_can_write_back")
+    def lore(comment: str, content: str) -> dict:
+        return {"key": [comment], "comment": comment, "content": content}
+
+    def rx(name: str, out: str) -> dict:
+        return {"comment": name, "in": name, "out": out, "type": "editdisplay"}
+
+    def up(entries: list[dict], greetings: list[str], regex: list[dict]) -> str:
+        st, body = s.post("/workspace", {**payload([make_chat("dl", "챗", 2)]),
+                                         "charId": "cha-del", "cardFull": True,
+                                         "card": {"name": "삭제 봇", "chaId": "cha-del", "desc": "설명",
+                                                  "firstMessage": "첫 인사", "alternateGreetings": greetings,
+                                                  "globalLore": entries, "customscript": regex}})
+        assert st == 200, body
+        return (body.get("workspace") or {})["charKey"]
+
+    def same(a: list, b: list) -> bool:
+        def key(x: dict) -> tuple:
+            return (x.get("comment"), x.get("content"), x.get("out"))
+        return [key(x) for x in a] == [key(x) for x in b]
+
+    L = [lore("가", "A"), lore("나", "B"), lore("다", "C")]
+    R = [rx("r1", "1"), rx("r2", "2")]
+    ck = up(L, ["인사 1", "인사 2"], R)
+    st, body = s.get(q("/lore", charKey=ck, scope="global"))
+    by = {e["entry"]["comment"]: e for e in body["lore"]}
+    s.post("/lore/update", {"charKey": ck, "id": by["나"]["id"], "entry": {**by["나"]["entry"], "content": "내가 고침"}})
+    s.post("/lore/delete", {"charKey": ck, "id": by["다"]["id"]})       # deleted here too
+    st, body = s.get(q("/card/scripts", charKey=ck, kind="customscript"))
+    r2 = next(x for x in body["items"] if x["entry"].get("comment") == "r2")
+    s.post("/card/script", {"charKey": ck, "id": r2["id"], "entry": {**r2["entry"], "out": "내 것"}})
+    st, body = s.get(q("/card", charKey=ck))
+    g2 = next(f for f in body["fields"] if f["field"] == "alternateGreetings" and f["body"] == "인사 2")
+    s.post("/card/field", {"charKey": ck, "id": g2["id"], "body": "내 인사 2"})
+
+    # RisuAI (PocketRisu's own editor): 나 and 다 deleted, r2 deleted, 인사 2 deleted.
+    L2, G2, R2 = [L[0]], ["인사 1"], [R[0]]
+    up(L2, G2, R2)
+    st, body = s.get(q("/conflicts", charKey=ck))
+    kinds = sorted(c["kind"] for c in body.get("conflicts") or [])
+    check("an entry deleted on both sides is not a conflict; the edited ones are",
+          "lore" in kinds and kinds.count("lore") == 1, str(kinds))
+    st, p = s.get(q("/card/patch", charKey=ck))
+    check("while unresolved, the baseline already matches RisuAI (lore)",
+          same(p["globalLore"]["before"], L2), str(p["globalLore"]["before"])[:200])
+    check("... greetings", p["alternateGreetings"]["before"] == G2, str(p["alternateGreetings"]["before"]))
+    check("... regex", same(p["customscript"]["before"], R2), str(p["customscript"]["before"])[:200])
+
+    # Keep mine for the lorebook: it goes back as an addition.
+    lc = next(c for c in body["conflicts"] if c["kind"] == "lore")
+    st, _ = s.post("/conflict/resolve", {"kind": "lore", "id": lc["id"], "choice": "mine"})
+    st, p = s.get(q("/card/patch", charKey=ck))
+    check("keeping mine: before == live, and the list re-adds the entry",
+          same(p["globalLore"]["before"], L2)
+          and [e["comment"] for e in p["globalLore"]["list"]] == ["가", "나"], str(p["globalLore"])[:250])
+
+    # Reopen again (RisuAI unchanged): no conflict comes back, nothing stale.
+    up(L2, G2, R2)
+    st, body = s.get(q("/conflicts", charKey=ck))
+    check("a reopen does not raise the kept entry again", not [c for c in body["conflicts"] if c["kind"] == "lore"],
+          str(body)[:200])
+
+    # Take theirs for whatever is left: the rows go, before still == live.
+    st, _ = s.post("/conflict/resolve", {"charKey": ck, "all": True, "choice": "theirs"})
+    st, body = s.get(q("/conflicts", charKey=ck))
+    st, p = s.get(q("/card/patch", charKey=ck))
+    check("taking theirs leaves no conflict and before == live everywhere",
+          body.get("total") == 0 and same(p["globalLore"]["before"], L2)
+          and p["alternateGreetings"]["before"] == G2 and same(p["customscript"]["before"], R2),
+          str(body)[:120] + str(p)[:200])
+
+
 def test_reopen_keeps_pending_edits(s: Server, ws: dict) -> None:
     print("test_reopen_keeps_pending_edits")
     a = ws["chats"][0]["chatKey"]
@@ -2568,6 +2648,7 @@ def main() -> int:
             test_reopen_keeps_pending_edits(s, ws)
             test_reopen_merges_risu_changes(s)
             test_reopen_merges_card_and_lore(s)
+            test_deleted_in_risu_can_write_back(s)
             test_agent_readiness_is_consistent(s, ws)
             test_agent_output_budget(s, ws)
             test_memory_as_rows(s, ws)

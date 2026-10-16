@@ -757,10 +757,25 @@ def _merge_lore(ck: str, scope: str, tk: str | None, entries: list, now: float) 
         if op.action == merge.DELETE:
             db.execute("DELETE FROM lore_entries WHERE id = ?", (row["id"],))
             continue
+        if op.theirs is None:
+            # RisuAI no longer has the entry. Deleted on both sides: nothing
+            # left to decide. Otherwise the row loses its baseline and becomes
+            # an addition - keeping the old baseline put an entry RisuAI does
+            # not have into the write-back guard's `before`, and 반영 failed
+            # with "봇 로어북이 바뀌었습니다" forever, whichever side the
+            # conflict was resolved to (§1-112). The ancestor stays in
+            # conflict_json.base for the conflict view.
+            if row["origin"] == "deleted":
+                db.execute("DELETE FROM lore_entries WHERE id = ?", (row["id"],))
+            else:
+                db.execute("UPDATE lore_entries SET original_json = NULL, base_seq = NULL, "
+                           "origin = 'added', conflict_json = ? WHERE id = ?",
+                           (db.js(op.conflict), row["id"]))
+            continue
         # Every paired row's baseline moves to RisuAI's current value, even a
         # conflicted one: otherwise the next diff lies again and the write-back
         # guard could never pass.
-        base_json = row["original_json"] if op.theirs is None else db.js(op.theirs)
+        base_json = db.js(op.theirs)
         if op.action == merge.ADOPT:
             db.execute("UPDATE lore_entries SET entry_json = ?, original_json = ?, base_seq = ?, "
                        "origin = 'original', conflict_json = NULL WHERE id = ?",

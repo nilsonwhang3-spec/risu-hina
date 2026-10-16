@@ -10,6 +10,24 @@
 
 ## 0.15.41 (2026-10-11): §1-103~105 shared snapshots, image store, proposal progress, 새 대화, workspace speed, renamed bot folders
 
+## §1-112 (2026-10-17): an entry deleted in RisuAI no longer blocks every 반영 after the conflict is resolved
+
+- **Field report (PocketRisu):** after deleting lorebook entries in PocketRisu's own editor, every 봇 반영 failed with
+  "RisuAI 쪽에서 봇 로어북이(가) 바뀌었습니다. 패널을 다시 열어 병합한 뒤 반영해 주세요", even after the conflicts
+  were resolved and the panel reopened.
+- **Cause (reproduced in a test):** an entry edited here and deleted in RisuAI is a `deleted-upstream` conflict. The
+  merge kept the row's **old baseline** (`original_json`), so `lore_baseline` - the `before` the plugin's guard compares
+  with live - still listed an entry RisuAI no longer has. Neither choice cleared it: 내 것 only dropped the flag, RisuAI
+  것 turned the row into a tombstone that still carried the baseline. And a row deleted on both sides was re-raised as a
+  conflict on every open. Greetings (`card_fields.original`) and scripts (`card_scripts.original_json`) had the same
+  `COALESCE(theirs, original)`.
+- **Fix:** a row RisuAI no longer has carries no baseline. On merge: deleted on both sides -> the row goes quietly;
+  otherwise baseline/base_seq cleared and the row becomes an addition (lore/scripts `origin='added'`), the ancestor kept
+  in `conflict_json.base` for the conflict view. Resolving: 내 것 also clears the baseline (mends rows resolved before
+  this fix), RisuAI 것 deletes the row. Rows already stuck heal on the next open.
+- Verified: `test_deleted_in_risu_can_write_back` (lore, greeting, regex: `before == live` while unresolved, after 내 것,
+  after a reopen, after RisuAI 것) - fails 7 checks on the old code; gate ALL GREEN.
+
 ## §1-111 (2026-10-16): setup.bat starts the server as an ordinary process, from any install path
 
 - **Field report (same reporter, PocketRisu = Windows portable, not Docker):** right after setup.bat,

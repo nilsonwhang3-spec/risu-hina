@@ -110,20 +110,27 @@ def resolve(kind: str, row_id: str, choice: str) -> dict:
     r = db.row_to_dict(row) or {}
     info = db.unjs(r.get("conflict_json"), {}) or {}
 
+    gone = info.get("kind") == "deleted-upstream"
     if choice == "mine":
-        db.execute(f"UPDATE {table} SET conflict_json = NULL WHERE id = ?", (row_id,))
+        if gone and info.get("theirs") is None and kind in ("lore", "card_script", "card_field"):
+            # RisuAI no longer has it, so keeping ours means adding it back: no
+            # baseline. The merge already clears it; this also mends a row
+            # resolved before §1-112, whose stale baseline failed every 반영.
+            extra = ", origin = 'added'" if kind in ("lore", "card_script") else ""
+            db.execute(f"UPDATE {table} SET {base_col} = NULL, base_seq = NULL, conflict_json = NULL{extra} "
+                       "WHERE id = ?", (row_id,))
+        else:
+            db.execute(f"UPDATE {table} SET conflict_json = NULL WHERE id = ?", (row_id,))
         log.info("conflict kept-mine %s %s", kind, row_id)
         return {"ok": True, "kind": kind, "id": row_id, "choice": choice}
 
     # Taking RisuAI's copy overwrites work, so it is undoable.
     _snapshot(kind, r)
-    if info.get("kind") == "deleted-upstream":
-        if kind in ("lore", "card_script"):
-            # Same tombstone the panel's own delete uses, so the write-back
-            # leaves it out of the list instead of the row simply vanishing.
-            db.execute(f"UPDATE {table} SET origin = 'deleted', conflict_json = NULL WHERE id = ?", (row_id,))
-        else:
-            db.execute(f"DELETE FROM {table} WHERE id = ?", (row_id,))
+    if gone:
+        # RisuAI already lacks it: the row just goes. (A tombstone here kept
+        # the old baseline, so the write-back guard expected an entry RisuAI
+        # no longer has and refused every 반영 - §1-112.)
+        db.execute(f"DELETE FROM {table} WHERE id = ?", (row_id,))
         log.info("conflict took-theirs(delete) %s %s", kind, row_id)
         return {"ok": True, "kind": kind, "id": row_id, "choice": choice, "deleted": True}
 
