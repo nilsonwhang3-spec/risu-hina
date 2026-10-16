@@ -6,6 +6,29 @@
 
 ## 0.15.41 (2026-10-11): §1-103~105 shared snapshots, image store, proposal progress, 새 대화, workspace speed, renamed bot folders
 
+## §1-110 (2026-10-16): PocketRisu's relay connect failure is named; setup.bat waits when double-clicked
+
+- **Field report:** setup.bat double-clicked "flashed and closed"; run from PowerShell it installed and `/health`
+  answered on 6020, yet 연결 said "백엔드에서 Risu Hina 응답을 받지 못했습니다 (HTTP 500 · {"error":"fetch failed"})
+  주소가 다른 서버를 가리키거나..." with the URL left at `http://127.0.0.1:6020`.
+- **What the 500 is:** not the backend. PocketRisu's `/proxy2` (server.cjs `reverseProxyFunc`) passes a Node
+  `fetch()` connect error to `next(err)`, and its last Express handler answers 500 `{error: err.message}` -
+  undici's message is just "fetch failed". So PocketRisu's node process could not open 127.0.0.1:6020: most likely
+  PocketRisu in Docker (its loopback is the container), or the backend down at that moment. Asked the reporter.
+- **`relayFailureHint`** (transport.ts): on a non-Hina reply whose body names a relay connect failure (fetch
+  failed / Proxy request failed / ECONN*), say the RisuAI server could not connect, and for a loopback URL list
+  "backend off" and "PocketRisu in Docker·WSL·another PC" with `http://host.docker.internal:6020` to try.
+- **setup.bat / uninstall.bat:** manage.ps1 pauses ("Done/FAILED ... Press Enter") only when its parent cmd's
+  command line ends `.bat" "` - Explorer's signature, measured against PowerShell `&`, `cmd /c` and Start-Process;
+  only the shell launch matched. ssh/automation never pause. The flash was a successful install closing.
+- **status `listening`** matched only `127.0.0.1:<port>` and said NO for `RISUHINA_HOST=0.0.0.0`; now either.
+- **Docker docs** (docs/17, RELEASE_README §2): PocketRisu's official compose network is `risuai-nodeonly_default`
+  (project `risuai-nodeonly`), not `pocketrisu_default`; its save is the named volume `risuai-nodeonly_risuai-save`,
+  mountable read-only. New: installed backend + Docker PocketRisu (host.docker.internal → `RISUHINA_HOST=0.0.0.0`
+  + token). Measured: a `$env:` var does not reach the WMI-started backend, a `setx` User variable does.
+  Unmeasured: whether Docker Desktop's host.docker.internal reaches a 127.0.0.1-only bind (no Docker here).
+- Verified: tests/connect_hints.mjs, gate ALL GREEN.
+
 ## §1-109 (2026-10-15): a large max-output setting no longer stops every step with ContextCapacityError
 
 - **Field report:** since switching to Gemini 4 (Argon), every few steps stopped with "요약/축소 후에도 입력 한도를

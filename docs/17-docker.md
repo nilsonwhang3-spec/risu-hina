@@ -64,19 +64,33 @@ PocketRisu 가 호스트에서 직접 실행 중이면 연결 주소는 `http://
 PocketRisu 도 컨테이너라면 그 안의 `127.0.0.1` 은 PocketRisu 컨테이너 자신을 가리킨다.
 두 서비스를 같은 Docker 네트워크에 넣고 연결 주소를 `http://risu-hina:6020` 으로 설정한다.
 
-예를 들어 PocketRisu 가 이미 `pocketrisu_default` 네트워크에 연결되어 있다면,
-`compose.yaml` 옆에 `compose.override.yaml` 을 만든다. 네트워크 이름은 실제 환경에 맞춘다.
+PocketRisu 공식 `docker-compose.yml` 은 프로젝트 이름이 `risuai-nodeonly` 라서 네트워크 이름이
+**`risuai-nodeonly_default`** 다. 실제 이름은 이렇게 확인한다.
+
+```sh
+docker inspect risuai-nodeonly --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}'
+```
+
+`compose.yaml` 옆에 `compose.override.yaml` 을 만든다. 네트워크 이름은 위에서 확인한 값으로 바꾼다.
 
 ```yaml
 services:
   risu-hina:
     networks:
+      - default
       - pocketrisu
 
 networks:
   pocketrisu:
     external: true
-    name: pocketrisu_default
+    name: risuai-nodeonly_default
+```
+
+`default` 를 같이 적어 둬야 호스트의 `127.0.0.1:6020` 포트 공개와 기존 네트워크가 그대로 유지된다.
+연결되었는지는 PocketRisu 컨테이너 안에서 확인한다.
+
+```sh
+docker exec risuai-nodeonly node -e "fetch('http://risu-hina:6020/health').then(r=>r.text()).then(console.log)"
 ```
 
 ```sh
@@ -107,10 +121,62 @@ services:
           create_host_path: false
 ```
 
+PocketRisu 공식 compose 는 저장 폴더를 호스트 폴더가 아니라 named volume
+`risuai-nodeonly_risuai-save` 에 둔다. 그때는 bind 대신 그 볼륨을 읽기 전용으로 붙인다.
+
+```yaml
+services:
+  risu-hina:
+    volumes:
+      - pocketrisu-save:/pocketrisu-save:ro
+
+volumes:
+  pocketrisu-save:
+    external: true
+    name: risuai-nodeonly_risuai-save
+```
+
 기본 `/data` 볼륨은 유지한다. 저장 폴더와 `risuai.db` 및 존재하는 `-wal`/`-shm` 파일을
 컨테이너의 UID/GID `10001:10001` 이 읽을 수 있어야 한다. SQLite 상태나 권한 때문에 읽지 못하면
 이 최적화/저장 확인 기능을 사용할 수 없으며, 플러그인 에셋 전송 경로를 사용한다.
 호스트 전체나 Docker 소켓을 마운트할 필요는 없다.
+
+### 백엔드는 Windows/Linux 설치, PocketRisu 만 Docker
+
+`setup.bat`/`setup.sh` 로 설치한 백엔드에 Docker 의 PocketRisu 를 붙이면, 플러그인 기본 주소
+`http://127.0.0.1:6020` 은 PocketRisu 컨테이너 자신을 가리켜 연결이 실패한다. 플러그인에는
+`HTTP 500 · {"error":"fetch failed"}` 로 보인다(PocketRisu 의 `/proxy2` 가 연결하지 못했다는 뜻이다).
+
+가장 깔끔한 해결은 백엔드도 위의 Docker 구성으로 옮겨 같은 네트워크에 넣는 것이다(주소 `http://risu-hina:6020`,
+토큰 필요, 저장 폴더 볼륨도 바로 붙일 수 있다). 설치형 백엔드를 그대로 쓰려면:
+
+1. **먼저 `host.docker.internal` 을 시도한다.** 플러그인 ⚙ → 연결 → 백엔드 URL 을
+   `http://host.docker.internal:6020` 으로 바꾼다. Docker Desktop(Windows·macOS)은 이 이름을 호스트로 넘겨 준다.
+   PocketRisu 컨테이너 안에서 먼저 확인할 수 있다.
+
+   ```sh
+   docker exec risuai-nodeonly node -e "fetch('http://host.docker.internal:6020/health').then(r=>r.text()).then(console.log,console.error)"
+   ```
+
+   Linux 의 Docker Engine 은 이 이름이 기본으로 없다. PocketRisu 의 compose 에
+   `extra_hosts: ["host.docker.internal:host-gateway"]` 를 넣고 2 단계도 해야 한다.
+2. **그래도 `ECONNREFUSED` 면 백엔드 바인딩을 넓힌다.** 백엔드는 기본적으로 `127.0.0.1` 에서만 받는다.
+   Windows 에서는 **사용자 환경 변수**로 바꾼다. 백엔드는 WMI 로 띄워지므로 PowerShell 창의 `$env:` 는 닿지 않는다(실측).
+
+   ```bat
+   setx RISUHINA_HOST 0.0.0.0
+   powershell -ExecutionPolicy Bypass -File pyserver\manage.ps1 -Action restart
+   ```
+
+   서비스(`-Service`)로 설치했다면 `nssm set RisuHina AppEnvironmentExtra RISUHINA_HOST=0.0.0.0` 후 서비스를 재시작한다.
+   Linux 는 `RISUHINA_HOST=0.0.0.0 ./start.sh` (systemd 라면 `Environment=`).
+   Windows 방화벽 창이 뜨면 **개인 네트워크만** 허용한다.
+3. **토큰을 넣는다.** 루프백이 아닌 곳에서 온 요청은 토큰이 필수다. `data\token.txt`
+   (또는 `manage.ps1 -Action token`)의 값을 플러그인 ⚙ → 연결 → 토큰에 넣는다. 0.0.0.0 바인딩이면 같은 LAN 의
+   다른 기기도 포트에 닿으므로 토큰을 공개하지 않는다.
+
+이 구성에서는 PocketRisu 저장 폴더가 Docker 볼륨 안에 있어 고속 경로(`pocketrisu.savePath`)를 쓸 수 없다.
+에셋은 플러그인이 보내 주므로 처음 한 번만 느리다.
 
 ## 데이터와 실행 방식
 

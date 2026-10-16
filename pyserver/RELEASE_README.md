@@ -87,6 +87,18 @@ data/       DB · 설정(config.json) · 토큰(token.txt) · 워크스페이스
 
 > 이 경로는 PocketRisu 를 수정하지 않는다. 읽기만 하고, 쓰기는 늘 플러그인을 통해 RisuAI API 로 한다.
 
+**PocketRisu 를 Docker 로 돌린다면** 컨테이너 안의 `127.0.0.1` 은 PocketRisu 자신이라, 연결이
+`HTTP 500 · {"error":"fetch failed"}` 로 실패한다.
+
+1. 백엔드 URL 을 `http://host.docker.internal:6020` 으로 바꾼다 (Docker Desktop). 확인:
+   `docker exec risuai-nodeonly node -e "fetch('http://host.docker.internal:6020/health').then(r=>r.text()).then(console.log,console.error)"`
+2. 그래도 `ECONNREFUSED` 면 `setx RISUHINA_HOST 0.0.0.0` → `powershell -ExecutionPolicy Bypass -File pyserver\manage.ps1 -Action restart`
+   (방화벽 창은 개인 네트워크만 허용).
+3. 루프백이 아니게 되면 **토큰이 필요하다**: `data\token.txt` 의 값을 플러그인 ⚙ → 연결 → 토큰에.
+
+저장 폴더가 Docker 볼륨 안이라 고속 경로(3번)는 쓸 수 없다. 백엔드도 Docker 로 옮겨 같은 네트워크에 두면
+(`http://risu-hina:6020`) 저장 볼륨까지 붙일 수 있다 — 저장소 `docs/17-docker.md`.
+
 같은 PC 에서 **웹 RisuAI(risu.xyz)** 도 쓴다면 그것은 유형 2 의 브라우저 규칙(HTTPS · 토큰)을 따른다 — 브라우저는 https 페이지에서 http://127.0.0.1 로 요청하지 못한다. 이때는 §3-1 의 Tailscale serve 가 가장 간단하다.
 
 ---

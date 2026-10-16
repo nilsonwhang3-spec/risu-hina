@@ -320,9 +320,11 @@ function Get-Status {
 
     # Must match LISTENING specifically: a bare ":6020" also matches TIME_WAIT
     # rows from a client socket and reports a live server when nothing is bound.
+    # RISUHINA_HOST=0.0.0.0 (a Docker or LAN PocketRisu) listens on 0.0.0.0,
+    # which the old 127.0.0.1-only match reported as NO.
     $listening = @(netstat -ano -p tcp |
         Select-String -SimpleMatch 'LISTENING' |
-        Select-String -SimpleMatch ("127.0.0.1:{0}" -f $Port))
+        Select-String -Pattern ("\s(127\.0\.0\.1|0\.0\.0\.0):{0}\s" -f $Port))
     Write-Output ("listening  {0} on {1}" -f $(if ($listening.Count) { 'yes' } else { 'NO' }), $Port)
 
     try {
@@ -345,12 +347,41 @@ function Show-Token {
     }
 }
 
-switch ($Action) {
-    'setup'     { Invoke-Setup }
-    'uninstall' { Invoke-Uninstall }
-    'start'     { Start-Server; Get-Status }
-    'stop'      { Stop-Server }
-    'restart'   { Stop-Server; Start-Sleep -Seconds 1; Start-Server; Get-Status }
-    'status'    { Get-Status }
-    'token'     { Show-Token }
+# A double-click runs setup.bat in a console that closes the moment it exits,
+# so the result - or the error - flashes by unread. A field report took a
+# successful install for a broken one ("the cmd window flashes and closes").
+# Explorer launches a .bat as  cmd.exe /c ""<path>\setup.bat" "  - the trailing
+# quoted space is its signature (measured); cmd, PowerShell and ssh never add
+# it, so only then is there nobody else to read the output, and only then wait.
+function Test-DoubleClick {
+    try {
+        $me = Get-CimInstance Win32_Process -Filter ("ProcessId={0}" -f $PID)
+        $parent = Get-CimInstance Win32_Process -Filter ("ProcessId={0}" -f $me.ParentProcessId)
+        return ($parent.Name -ieq 'cmd.exe') -and ($parent.CommandLine -match '\.bat" "\s*$')
+    } catch { return $false }
+}
+
+$pause = ($Action -in 'setup', 'uninstall') -and (Test-DoubleClick)
+try {
+    switch ($Action) {
+        'setup'     { Invoke-Setup }
+        'uninstall' { Invoke-Uninstall }
+        'start'     { Start-Server; Get-Status }
+        'stop'      { Stop-Server }
+        'restart'   { Stop-Server; Start-Sleep -Seconds 1; Start-Server; Get-Status }
+        'status'    { Get-Status }
+        'token'     { Show-Token }
+    }
+} catch {
+    if (-not $pause) { throw }
+    Write-Host ''
+    Write-Host ("FAILED: {0}" -f $_.Exception.Message) -ForegroundColor Red
+    Write-Host 'Press Enter to close this window.'
+    [void](Read-Host)
+    exit 1
+}
+if ($pause) {
+    Write-Host ''
+    Write-Host 'Done. Press Enter to close this window.'
+    [void](Read-Host)
 }

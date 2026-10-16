@@ -152,7 +152,9 @@ export class Transport {
       throw new BackendError(
         res.status,
         `백엔드에서 Risu Hina 응답을 받지 못했습니다 (${what}${raw ? ' · ' + raw : ''}). ` +
-        '주소가 다른 서버를 가리키거나 터널이 아직 안 열렸을 수 있습니다. 잠시 뒤 자동으로 다시 시도합니다.',
+        (relayFailureHint(raw, this.cfg.url)
+          || '주소가 다른 서버를 가리키거나 터널이 아직 안 열렸을 수 있습니다. ') +
+        '잠시 뒤 자동으로 다시 시도합니다.',
         body,
       );
     }
@@ -452,6 +454,30 @@ export function explainFetchFailure(message: string): string {
       + ' — 주소의 http/https, 포트, 백엔드 실행 여부를 확인해 주세요';
   }
   return message;
+}
+
+/**
+ * PocketRisu (and RisuAI's own node server) relays nativeFetch through its
+ * /proxy2. When Node's fetch cannot even connect, the relay answers 500
+ * {"error":"fetch failed"} - our backend never saw the request. A field report
+ * read the old "address points at another server" text as a wrong URL, with
+ * the URL untouched and the backend healthy on the same PC. Returns the
+ * advice, or ''.
+ */
+export function relayFailureHint(raw: string, url: string): string {
+  if (!/fetch failed|Proxy request failed|ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENOTFOUND|EHOSTUNREACH/i.test(raw)) return '';
+  let host = '';
+  try { host = new URL(url.trim()).hostname.replace(/^\[|\]$/g, '').toLowerCase(); } catch { /* keep '' */ }
+  const loopback = host === 'localhost' || host === '::1' || /^127\./.test(host);
+  if (loopback) {
+    return 'RisuAI(PocketRisu) 서버가 이 주소의 백엔드에 연결하지 못했습니다. 주소는 맞아도 '
+      + '① 백엔드가 지금 꺼져 있거나 ② PocketRisu 가 Docker·WSL·다른 PC 에서 돌고 있으면 그쪽의 127.0.0.1 은 '
+      + '이 PC 의 백엔드가 아닙니다 — 같은 PC 에서 http://127.0.0.1:6020/health 가 열리는지, '
+      + 'PocketRisu 를 어떻게 실행했는지 확인해 주세요. PocketRisu 가 Docker 라면 주소를 '
+      + 'http://host.docker.internal:6020 으로 바꿔 보세요(설치 안내서의 Docker 절). ';
+  }
+  return 'RisuAI 서버가 이 주소의 백엔드에 연결하지 못했습니다 — 백엔드가 실행 중인지, '
+    + 'RisuAI 서버가 있는 기기에서 이 주소(포트·터널·방화벽)에 닿는지 확인해 주세요. ';
 }
 
 /**

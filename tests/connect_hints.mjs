@@ -33,4 +33,20 @@ for (const u of ['http://127.0.0.1:6020', 'https://hina.example.com', 'https://1
   assert.equal(localHttpsHint(u), '', `left alone: ${u}`);
 }
 
-console.log('PASS - masked desktop fetch failure and https on a local backend');
+// PocketRisu's /proxy2 could not connect: 500 {"error":"fetch failed"}, the
+// backend healthy on the same PC and the URL left at its default.
+const { relayFailureHint } = mod;
+const local = relayFailureHint('{"error":"fetch failed"}', 'http://127.0.0.1:6020');
+assert.match(local, /PocketRisu/, 'names the relay, not a wrong address');
+assert.match(local, /Docker/, 'mentions the container case');
+assert.match(local, /host\.docker\.internal:6020/, 'and the address to try there');
+assert.match(local, /127\.0\.0\.1:6020\/health/, 'gives the check to run');
+assert.match(relayFailureHint('{"error":"Proxy request failed: connect ECONNREFUSED"}', 'http://localhost:6020'), /PocketRisu/);
+const remote = relayFailureHint('{"error":"fetch failed"}', 'https://hina.example.com');
+assert.match(remote, /RisuAI 서버가/, 'remote URL gets the generic relay advice');
+assert.doesNotMatch(remote, /Docker/);
+for (const raw of ['', '<html>502 Bad Gateway</html>', '{"service":"other"}']) {
+  assert.equal(relayFailureHint(raw, 'http://127.0.0.1:6020'), '', `left alone: ${raw}`);
+}
+
+console.log('PASS - masked desktop fetch failure, https on a local backend, relay connect failure');
