@@ -8,6 +8,28 @@
 
 ## 0.15.41 (2026-10-11): §1-103~105 shared snapshots, image store, proposal progress, 새 대화, workspace speed, renamed bot folders
 
+## §1-111 (2026-10-16): setup.bat starts the server as an ordinary process, from any install path
+
+- **Field report (same reporter, PocketRisu = Windows portable, not Docker):** right after setup.bat,
+  `listening yes`/`health ok`, a few seconds later `Test-NetConnection` False; `.\python\python.exe .\run.py` by hand
+  stayed up and the plugin connected. Their own workaround: a .bat running that.
+- **Found 1 - unquoted path (measured):** `Start-Server` gave WMI `cmd.exe /c <path>\start.bat <port>` with no
+  quotes. With a space or a parenthesis anywhere in the install path nothing ran and Create still returned 0 -
+  setup printed `processes 0`/`health unreachable`. Now `cmd.exe /c ""<bat>" <port>"`; measured with "a b",
+  "(paren)", "(홍길동)", "x (y) & z" via both WMI and Start-Process.
+- **Found 2 - the WMI child lives in WmiPrvSE's job (measured `IsProcessInJob` = True, grandparent WmiPrvSE).**
+  Not reproduced here: the server survived 4+ min, a 9-min wait for the host's idle exit, and an 800 MB
+  allocation (host quota MemoryPerHost 512 MB is not enforced on it). The reporter's cause stays unconfirmed
+  (WMI host lifetime or an antivirus rule against WMI-spawned processes are the candidates).
+- **Fix:** WMI only over ssh (`SSH_CONNECTION`/`SSH_CLIENT`, the reason it was introduced); at the desk
+  `Start-Process cmd.exe -WindowStyle Hidden`, an ordinary child like the reporter's working run. Measured: from a
+  path with a space, parentheses and Korean it starts, outlives the setup shell, and survives the launching
+  console being killed.
+- **Start check:** instead of a fixed 5 s sleep, wait up to 30 s for `/health` (first boot seeds skills and took
+  longer - status said `listening NO` with health ok), look again 5 s later, and on failure say so with the log
+  path and "double-click pyserver\start.bat".
+- Verified: gate ALL GREEN.
+
 ## §1-110 (2026-10-16): PocketRisu's relay connect failure is named; setup.bat waits when double-clicked
 
 - **Field report:** setup.bat double-clicked "flashed and closed"; run from PowerShell it installed and `/health`

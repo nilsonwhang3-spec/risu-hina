@@ -180,16 +180,47 @@ function Invoke-Setup {
 function Start-Server {
     if (-not (Test-Path $VenvPy)) { throw 'no interpreter - run setup first' }
     if (-not (Test-Path $Bat)) { throw "missing $Bat" }
-    # Win32_Process.Create runs under the WMI service, outside the ssh session's
-    # job object. Start-Process does not: OpenSSH kills the whole job when the
-    # session ends, which looks like a successful start that leaves nothing
-    # listening. The .bat owns all quoting so this command line needs none.
-    $r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
-        CommandLine = 'cmd.exe /c ' + $Bat + ' ' + $Port
+    # cmd /c strips the outer pair of quotes, leaving "<bat>" <port>. The old
+    # unquoted form ran nothing at all - Create still returned 0 - once the
+    # install path had a space or a parenthesis (measured: "a b", "(x)").
+    $cmdArgs = '/c ""{0}" {1}"' -f $Bat, $Port
+    if ($env:SSH_CONNECTION -or $env:SSH_CLIENT) {
+        # Over ssh: Win32_Process.Create runs under the WMI service, outside
+        # the session's job object. Start-Process does not: OpenSSH kills the
+        # whole job when the session ends, which looks like a successful start
+        # that leaves nothing listening.
+        $r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
+            CommandLine = 'cmd.exe ' + $cmdArgs
+        }
+        if ($r.ReturnValue -ne 0) { throw ("Win32_Process.Create returned {0}" -f $r.ReturnValue) }
+        Write-Output ("start: pid {0}" -f $r.ProcessId)
+    } else {
+        # At the desk: an ordinary child, not one of WmiPrvSE's. A WMI-started
+        # server sits inside the provider host's job (measured: IsProcessInJob)
+        # and a field report had it die seconds after a healthy start, while
+        # "python run.py" by hand stayed up.
+        $p = Start-Process -FilePath 'cmd.exe' -ArgumentList $cmdArgs -WindowStyle Hidden -PassThru
+        Write-Output ("start: pid {0}" -f $p.Id)
     }
-    if ($r.ReturnValue -ne 0) { throw ("Win32_Process.Create returned {0}" -f $r.ReturnValue) }
-    Write-Output ("start: pid {0}" -f $r.ProcessId)
-    Start-Sleep -Seconds 5
+    # First boot seeds skills and studio defaults and can take longer than the
+    # fixed 5 s this used to sleep; wait for /health, then look again a little
+    # later so a server that dies right after starting is not reported as up.
+    $url = "http://127.0.0.1:{0}/health" -f $Port
+    $up = $false
+    for ($i = 0; $i -lt 30 -and -not $up; $i++) {
+        Start-Sleep -Seconds 1
+        try { Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 -Uri $url | Out-Null; $up = $true } catch {}
+    }
+    if ($up) {
+        Start-Sleep -Seconds 5
+        try { Invoke-WebRequest -UseBasicParsing -TimeoutSec 3 -Uri $url | Out-Null }
+        catch { $up = $false; Write-Output 'start: the server answered once and then stopped.' }
+    }
+    if (-not $up) {
+        Write-Output ('start: not running. See {0}' -f $Log)
+        Write-Output ('       To run it in a window of its own instead, double-click {0}' -f $Bat)
+        Write-Output '       (closing that window stops the server).'
+    }
 }
 
 function Stop-Server {
