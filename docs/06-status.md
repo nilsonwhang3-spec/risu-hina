@@ -1,4 +1,6 @@
-# 06. Implementation status — as of 2026-10-16 (v0.15.44, Risu Hina)
+# 06. Implementation status — as of 2026-10-16 (v0.15.45, Risu Hina)
+
+## 0.15.45 (2026-10-16): §1-111 setup.bat starts the server as an ordinary process, from any install path
 
 ## 0.15.44 (2026-10-16): §1-110 PocketRisu relay connect failure named, setup.bat waits when double-clicked, Docker PocketRisu guide
 
