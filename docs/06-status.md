@@ -1,4 +1,6 @@
-# 06. Implementation status — as of 2026-10-16 (v0.15.45, Risu Hina)
+# 06. Implementation status — as of 2026-10-17 (v0.15.46, Risu Hina)
+
+## 0.15.46 (2026-10-17): §1-112 an entry deleted in RisuAI no longer blocks every 반영 after the conflict is resolved
 
 ## 0.15.45 (2026-10-16): §1-111 setup.bat starts the server as an ordinary process, from any install path
 
