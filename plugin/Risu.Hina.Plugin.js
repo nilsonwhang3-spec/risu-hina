@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.15.43
+//@display-name Risu Hina v0.15.44
 //@api 3.0
-//@version 0.15.43
+//@version 0.15.44
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -65,6 +65,19 @@
       return "\uC5F0\uACB0 \uC790\uCCB4\uAC00 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4. RisuAI \uB370\uC2A4\uD06C\uD1B1 \uC571\uC774 \uC6D0\uB798 \uC624\uB958\uB97C \uAE68\uC9C4 \uD615\uC2DD\uC73C\uB85C \uB118\uACA8 \uC6D0\uC778 \uBB38\uAD6C\uAC00 \uC0AC\uB77C\uC84C\uC2B5\uB2C8\uB2E4 \u2014 \uC8FC\uC18C\uC758 http/https, \uD3EC\uD2B8, \uBC31\uC5D4\uB4DC \uC2E4\uD589 \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694";
     }
     return message;
+  }
+  function relayFailureHint(raw, url) {
+    if (!/fetch failed|Proxy request failed|ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENOTFOUND|EHOSTUNREACH/i.test(raw)) return "";
+    let host = "";
+    try {
+      host = new URL(url.trim()).hostname.replace(/^\[|\]$/g, "").toLowerCase();
+    } catch {
+    }
+    const loopback = host === "localhost" || host === "::1" || /^127\./.test(host);
+    if (loopback) {
+      return "RisuAI(PocketRisu) \uC11C\uBC84\uAC00 \uC774 \uC8FC\uC18C\uC758 \uBC31\uC5D4\uB4DC\uC5D0 \uC5F0\uACB0\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4. \uC8FC\uC18C\uB294 \uB9DE\uC544\uB3C4 \u2460 \uBC31\uC5D4\uB4DC\uAC00 \uC9C0\uAE08 \uAEBC\uC838 \uC788\uAC70\uB098 \u2461 PocketRisu \uAC00 Docker\xB7WSL\xB7\uB2E4\uB978 PC \uC5D0\uC11C \uB3CC\uACE0 \uC788\uC73C\uBA74 \uADF8\uCABD\uC758 127.0.0.1 \uC740 \uC774 PC \uC758 \uBC31\uC5D4\uB4DC\uAC00 \uC544\uB2D9\uB2C8\uB2E4 \u2014 \uAC19\uC740 PC \uC5D0\uC11C http://127.0.0.1:6020/health \uAC00 \uC5F4\uB9AC\uB294\uC9C0, PocketRisu \uB97C \uC5B4\uB5BB\uAC8C \uC2E4\uD589\uD588\uB294\uC9C0 \uD655\uC778\uD574 \uC8FC\uC138\uC694. PocketRisu \uAC00 Docker \uB77C\uBA74 \uC8FC\uC18C\uB97C http://host.docker.internal:6020 \uC73C\uB85C \uBC14\uAFD4 \uBCF4\uC138\uC694(\uC124\uCE58 \uC548\uB0B4\uC11C\uC758 Docker \uC808). ";
+    }
+    return "RisuAI \uC11C\uBC84\uAC00 \uC774 \uC8FC\uC18C\uC758 \uBC31\uC5D4\uB4DC\uC5D0 \uC5F0\uACB0\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4 \u2014 \uBC31\uC5D4\uB4DC\uAC00 \uC2E4\uD589 \uC911\uC778\uC9C0, RisuAI \uC11C\uBC84\uAC00 \uC788\uB294 \uAE30\uAE30\uC5D0\uC11C \uC774 \uC8FC\uC18C(\uD3EC\uD2B8\xB7\uD130\uB110\xB7\uBC29\uD654\uBCBD)\uC5D0 \uB2FF\uB294\uC9C0 \uD655\uC778\uD574 \uC8FC\uC138\uC694. ";
   }
   function localHttpsHint(url) {
     let u;
@@ -203,7 +216,7 @@
             ].filter(Boolean).join(" \xB7 ");
             throw new BackendError(
               res.status,
-              `\uBC31\uC5D4\uB4DC\uC5D0\uC11C Risu Hina \uC751\uB2F5\uC744 \uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4 (${what}${raw ? " \xB7 " + raw : ""}). \uC8FC\uC18C\uAC00 \uB2E4\uB978 \uC11C\uBC84\uB97C \uAC00\uB9AC\uD0A4\uAC70\uB098 \uD130\uB110\uC774 \uC544\uC9C1 \uC548 \uC5F4\uB838\uC744 \uC218 \uC788\uC2B5\uB2C8\uB2E4. \uC7A0\uC2DC \uB4A4 \uC790\uB3D9\uC73C\uB85C \uB2E4\uC2DC \uC2DC\uB3C4\uD569\uB2C8\uB2E4.`,
+              `\uBC31\uC5D4\uB4DC\uC5D0\uC11C Risu Hina \uC751\uB2F5\uC744 \uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4 (${what}${raw ? " \xB7 " + raw : ""}). ` + (relayFailureHint(raw, this.cfg.url) || "\uC8FC\uC18C\uAC00 \uB2E4\uB978 \uC11C\uBC84\uB97C \uAC00\uB9AC\uD0A4\uAC70\uB098 \uD130\uB110\uC774 \uC544\uC9C1 \uC548 \uC5F4\uB838\uC744 \uC218 \uC788\uC2B5\uB2C8\uB2E4. ") + "\uC7A0\uC2DC \uB4A4 \uC790\uB3D9\uC73C\uB85C \uB2E4\uC2DC \uC2DC\uB3C4\uD569\uB2C8\uB2E4.",
               body
             );
           }
@@ -216,7 +229,7 @@
           this.tokenSafe = true;
           this.lastHealth = body;
           this.probeInfo = "";
-          this.gate = versionGate("0.15.43", String(body.version || ""));
+          this.gate = versionGate("0.15.44", String(body.version || ""));
           return body;
         }
         /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -18340,10 +18353,10 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           return;
         }
         if (!r.newer) {
-          const mismatch = r.current !== "0.15.43";
+          const mismatch = r.current !== "0.15.44";
           const ahead = r.ahead ?? (!!r.latest && r.latest !== r.current);
           say(
-            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.43"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
+            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.44"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
             mismatch || ahead ? "" : "ok"
           );
           return;
@@ -18434,7 +18447,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.15.43",
+            version: "0.15.44",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -19871,7 +19884,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.43"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.44"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -27899,14 +27912,14 @@ ${negative.value.trim()}
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.43"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.44"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
       healthEl.title = transport.versionGate;
     } else {
       healthEl.appendChild(el("span", { class: "hint", text: `\uBC31\uC5D4\uB4DC v${h.version}` }));
-      const behind = backendBehind("0.15.43", h.version, h.installKind);
+      const behind = backendBehind("0.15.44", h.version, h.installKind);
       if (behind) {
         const b = el("button", { class: "ghost tiny behindchip", text: "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8 \uD544\uC694", title: behind });
         b.addEventListener("click", () => {
@@ -28007,7 +28020,7 @@ ${negative.value.trim()}
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.15.43" }),
+        el("span", { class: "dim", text: "v0.15.44" }),
         healthEl,
         el("span", { class: "spacer" }),
         // 승인 / 반영 for the whole bot, from every tab (§1-76).
@@ -28361,6 +28374,6 @@ ${negative.value.trim()}
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.15.43"} loaded`);
+    console.log(`[risu-hina] v${"0.15.44"} loaded`);
   })();
 })();

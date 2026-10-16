@@ -1,4 +1,6 @@
-# 06. Implementation status — as of 2026-10-15 (v0.15.43, Risu Hina)
+# 06. Implementation status — as of 2026-10-16 (v0.15.44, Risu Hina)
+
+## 0.15.44 (2026-10-16): §1-110 PocketRisu relay connect failure named, setup.bat waits when double-clicked, Docker PocketRisu guide
 
 ## 0.15.43 (2026-10-15): §1-107~109 대조 without the panel blinking, orphan chat JSON, desktop fetch-failure hint, context compression before the hard limit
 
