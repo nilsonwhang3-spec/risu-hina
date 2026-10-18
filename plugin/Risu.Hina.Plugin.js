@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.15.46
+//@display-name Risu Hina v0.15.47
 //@api 3.0
-//@version 0.15.46
+//@version 0.15.47
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -229,7 +229,7 @@
           this.tokenSafe = true;
           this.lastHealth = body;
           this.probeInfo = "";
-          this.gate = versionGate("0.15.46", String(body.version || ""));
+          this.gate = versionGate("0.15.47", String(body.version || ""));
           return body;
         }
         /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -367,8 +367,8 @@
                 if (v !== void 0) yield v;
               }
             }
-            const tail = parseLine(buf);
-            if (tail !== void 0) yield tail;
+            const tail2 = parseLine(buf);
+            if (tail2 !== void 0) yield tail2;
           } finally {
             signal?.removeEventListener("abort", onAbort);
             void reader.cancel().catch(() => {
@@ -2312,14 +2312,14 @@
     let head = 0;
     const max = Math.min(before.length, after.length);
     while (head < max && before[head] === after[head]) head++;
-    let tail = 0;
-    while (tail < max - head && before[before.length - 1 - tail] === after[after.length - 1 - tail]) tail++;
+    let tail2 = 0;
+    while (tail2 < max - head && before[before.length - 1 - tail2] === after[after.length - 1 - tail2]) tail2++;
     const mk = (text2, cls) => {
       const frag = document.createDocumentFragment();
       frag.appendChild(document.createTextNode(text2.slice(0, head)));
-      const mid = text2.slice(head, text2.length - tail);
+      const mid = text2.slice(head, text2.length - tail2);
       if (mid) frag.appendChild(el("span", { class: cls, text: mid }));
-      frag.appendChild(document.createTextNode(text2.slice(text2.length - tail)));
+      frag.appendChild(document.createTextNode(text2.slice(text2.length - tail2)));
       return frag;
     };
     return { before: mk(before, "diff-del"), after: mk(after, "diff-ins") };
@@ -2407,12 +2407,12 @@
     const b = after.split("\n");
     let head = 0;
     while (head < a.length && head < b.length && a[head] === b[head]) head++;
-    let tail = 0;
-    while (tail < a.length - head && tail < b.length - head && a[a.length - 1 - tail] === b[b.length - 1 - tail]) tail++;
+    let tail2 = 0;
+    while (tail2 < a.length - head && tail2 < b.length - head && a[a.length - 1 - tail2] === b[b.length - 1 - tail2]) tail2++;
     const out = [];
     for (let i = 0; i < head; i++) out.push({ kind: "same", text: a[i] });
-    const am = a.slice(head, a.length - tail);
-    const bm = b.slice(head, b.length - tail);
+    const am = a.slice(head, a.length - tail2);
+    const bm = b.slice(head, b.length - tail2);
     if (am.length && bm.length && am.length * bm.length <= 4e6) {
       const n = am.length, m = bm.length;
       const dp = [];
@@ -2442,7 +2442,7 @@
       for (const t of am) out.push({ kind: "del", text: t });
       for (const t of bm) out.push({ kind: "ins", text: t });
     }
-    for (let i = a.length - tail; i < a.length; i++) out.push({ kind: "same", text: a[i] });
+    for (let i = a.length - tail2; i < a.length; i++) out.push({ kind: "same", text: a[i] });
     return out;
   }
   function diffView(before, after, opts = {}) {
@@ -8173,6 +8173,10 @@ label.field.row > span { display: inline; margin: 0; color: inherit; font-size: 
 }
 .notice.err { background: rgba(239, 68, 68, .12); }
 .notice.ok { background: rgba(16, 185, 129, .12); }
+/* \uC624\uB958 \uC81C\uBCF4 (\xA71-113): the button every red notice grows, and the report. */
+.notice.err .bugbtn { margin-left: 8px; vertical-align: baseline; }
+.bugreport textarea { width: 100%; box-sizing: border-box; margin-top: 8px; }
+.bugreport .bugtext { font-size: 11.5px; white-space: pre; overflow: auto; }
 
 /* The lorebook entry's insertorder, beside its name. */
 .ordertag {
@@ -11065,6 +11069,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         for await (const ev of state.agentChat(prompt, abort.signal)) {
           if (this.destroyed) break;
           const e = ev;
+          if (e.type === "ping") continue;
           quiet();
           if (e.type !== "text") flushText();
           switch (e.type) {
@@ -18321,6 +18326,179 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     };
   }
 
+  // src/ui/bugreport.ts
+  init_dom();
+  init_state();
+  init_transport();
+  init_host();
+  var recent = [];
+  var KEEP = 12;
+  function recordClientError(text2) {
+    const t = String(text2 || "").replace(/\s+/g, " ").trim().slice(0, 300);
+    if (!t) return;
+    const last = recent[recent.length - 1];
+    if (last && last.text === t) {
+      last.at = Date.now();
+      return;
+    }
+    recent.push({ at: Date.now(), text: t });
+    if (recent.length > KEEP) recent.shift();
+  }
+  var BUG_ICON = svg('<path d="M8 2l1.9 1.9M16 2l-1.9 1.9"/><path d="M9 7.1V6a3 3 0 0 1 6 0v1.1"/><path d="M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6z"/><path d="M12 20v-9M6 13H2M22 13h-4M6.5 17.5 3 20M17.5 17.5 21 20M6.5 9 3 7M17.5 9 21 7"/>', 17);
+  function bugReportButton() {
+    const b = el("button", {
+      class: "iconbtn",
+      html: BUG_ICON,
+      title: "\uC624\uB958 \uC81C\uBCF4 \u2014 \uC624\uB958\uAC00 \uB0AC\uAC70\uB098 \uC774\uC0C1\uD558\uBA74 \uB20C\uB7EC \uC8FC\uC138\uC694. \uC81C\uC791\uC790\uC5D0\uAC8C \uBCF4\uB0BC \uB0B4\uC6A9\uC744 \uB9CC\uB4E4\uC5B4 \uC90D\uB2C8\uB2E4"
+    });
+    b.addEventListener("click", () => openBugReport());
+    return b;
+  }
+  function watchErrorNotices(root2 = document.body) {
+    if (typeof MutationObserver === "undefined") return;
+    const attach = (n) => {
+      if (n.closest(".bugreport") || n.querySelector(".bugbtn")) return;
+      const text2 = (n.textContent || "").trim();
+      if (!text2) return;
+      recordClientError(text2);
+      const b = el("button", { class: "ghost tiny bugbtn", text: "\uC624\uB958 \uC81C\uBCF4", title: "\uC774 \uC624\uB958\uB97C \uC81C\uC791\uC790\uC5D0\uAC8C \uC54C\uB9B4 \uB0B4\uC6A9\uC744 \uB9CC\uB4ED\uB2C8\uB2E4" });
+      b.addEventListener("click", (e) => {
+        e.stopPropagation();
+        openBugReport(text2);
+      });
+      n.appendChild(b);
+    };
+    new MutationObserver((records) => {
+      for (const r of records) {
+        r.addedNodes.forEach((node) => {
+          if (node.nodeType !== 1) return;
+          const e = node;
+          if (e.matches(".notice.err")) attach(e);
+          e.querySelectorAll(".notice.err").forEach(attach);
+        });
+      }
+    }).observe(root2, { childList: true, subtree: true });
+  }
+  function openBugReport(trigger = "") {
+    const what = el("textarea", {
+      class: "bugwhat",
+      rows: "3",
+      placeholder: "\uBB34\uC2A8 \uC791\uC5C5 \uC911\uC774\uC5C8\uB294\uC9C0 \uD55C\uB450 \uC904 (\uC120\uD0DD) \u2014 \uC608: \uB85C\uC5B4\uBD81 \uBC18\uC601\uC744 \uB204\uB974\uBA74 \uC2E4\uD328\uD569\uB2C8\uB2E4"
+    });
+    const out = el("textarea", { class: "mono bugtext", rows: "14", readonly: "readonly", spellcheck: "false" });
+    out.value = "\uB0B4\uC6A9\uC744 \uBAA8\uC73C\uB294 \uC911\uC785\uB2C8\uB2E4\u2026";
+    const status = el("div", { class: "hint" });
+    const copy = el("button", { class: "primary", text: "\uBCF5\uC0AC" });
+    copy.disabled = true;
+    let built2 = "";
+    const full2 = () => (what.value.trim() ? `\uC0C1\uD669: ${what.value.trim()}
+` : "") + built2;
+    const refresh3 = () => {
+      out.value = full2();
+    };
+    what.addEventListener("input", refresh3);
+    copy.addEventListener("click", () => {
+      const ok = copyToClipboard(full2());
+      if (!ok) {
+        out.focus();
+        out.select();
+      }
+      clear(status);
+      status.appendChild(el("div", {
+        class: "notice " + (ok ? "ok" : ""),
+        text: ok ? "\uBCF5\uC0AC\uD588\uC2B5\uB2C8\uB2E4. \uC81C\uC791\uC790\uC758 \uCEE4\uBBA4\uB2C8\uD2F0 \uAE00\uC5D0 \uB313\uAE00\uB85C \uBD99\uC5EC\uB123\uC5B4 \uC8FC\uC138\uC694." : "\uC790\uB3D9 \uBCF5\uC0AC\uAC00 \uB9C9\uD600 \uC788\uC2B5\uB2C8\uB2E4. \uC704 \uC0C1\uC790\uB97C \uAE38\uAC8C \uB20C\uB7EC(\uB610\uB294 Ctrl+A) \uC804\uCCB4 \uC120\uD0DD\uD55C \uB4A4 \uBCF5\uC0AC\uD574 \uC8FC\uC138\uC694."
+      }));
+    });
+    modal("\uC624\uB958 \uC81C\uBCF4", el("div", { class: "bugreport" }, [
+      el("div", { class: "notice" }, [
+        el("div", { text: "\uC544\uB798 \uB0B4\uC6A9\uC744 \uBCF5\uC0AC\uD574\uC11C \uC81C\uC791\uC790\uC5D0\uAC8C \uCEE4\uBBA4\uB2C8\uD2F0 \uB313\uAE00\uB85C \uBD99\uC5EC\uB123\uC5B4 \uC8FC\uC138\uC694." }),
+        el("div", { class: "hint", text: "API \uD0A4\xB7\uD1A0\uD070\uC740 \uB4E4\uC5B4 \uC788\uC9C0 \uC54A\uACE0, PC \uC0AC\uC6A9\uC790 \uC774\uB984\uACFC \uC124\uCE58 \uACBD\uB85C\uB294 \uAC00\uB824\uC9D1\uB2C8\uB2E4. \uB313\uAE00\uC740 \uACF5\uAC1C\uB418\uB2C8 \uD55C \uBC88 \uD6D1\uC5B4\uBCF4\uACE0 \uBCF4\uB0B4 \uC8FC\uC138\uC694." })
+      ]),
+      what,
+      out,
+      el("div", { class: "row", style: { marginTop: "8px" } }, [copy]),
+      status
+    ]), { wide: true, sticky: true });
+    void buildReport(trigger).then((text2) => {
+      built2 = text2;
+      refresh3();
+      copy.disabled = false;
+    });
+  }
+  async function buildReport(trigger = "") {
+    const lines = ["[Risu Hina \uC624\uB958 \uC81C\uBCF4]"];
+    const at = /* @__PURE__ */ new Date();
+    const pad = (n) => String(n).padStart(2, "0");
+    lines.push(`\uC2DC\uAC01: ${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${pad(at.getHours())}:${pad(at.getMinutes())}`);
+    let diag = null;
+    try {
+      diag = await state.diagnostics(false);
+    } catch {
+      diag = null;
+    }
+    const backend = diag ? `v${String(diag["version"] ?? "?")}` : `\uC5F0\uACB0 \uC548 \uB428 (${state.connectError || "\uC751\uB2F5 \uC5C6\uC74C"})`;
+    lines.push(`\uBC84\uC804: \uD50C\uB7EC\uADF8\uC778 v${"0.15.47"} \xB7 \uBC31\uC5D4\uB4DC ${backend}`);
+    const health = state.health ?? {};
+    lines.push("\uD658\uACBD: " + [
+      `RisuAI ${transport.hostPlatform || "?"}`,
+      `\uC5F0\uACB0 ${transport.routeKind || "?"}`,
+      diag ? `\uC11C\uBC84 ${String(diag["platform"] ?? "?")}/py${String(diag["python"] ?? "?")}` : "",
+      health["installKind"] ? `\uC124\uCE58 ${String(health["installKind"])}` : "",
+      window.innerWidth ? `\uD654\uBA74 ${window.innerWidth}x${window.innerHeight}` : "",
+      shortUa(navigator.userAgent)
+    ].filter(Boolean).join(" \xB7 "));
+    const agent = diag?.["agent"] ?? null;
+    if (agent) {
+      lines.push("AI: " + [
+        String(agent["model"] || "(\uBAA8\uB378 \uBBF8\uC124\uC815)"),
+        agent["baseUrlHost"] ? `@${String(agent["baseUrlHost"])}` : "",
+        agent["reasoning"] ? `\uC0AC\uACE0 ${String(agent["reasoning"])}` : "",
+        agent["maxTokens"] ? `\uCD5C\uB300\uCD9C\uB825 ${String(agent["maxTokens"])}` : "",
+        diag?.["agentReady"] ? "" : "\uC900\uBE44 \uC548 \uB428"
+      ].filter(Boolean).join(" \xB7 "));
+    }
+    const tab = document.querySelector(".tabs .tab.active .tablabel")?.textContent?.trim();
+    if (tab) lines.push(`\uBCF4\uB358 \uD0ED: ${tab}`);
+    if (trigger) lines.push("", `\uB204\uB978 \uC624\uB958: ${trigger.replace(/\s+/g, " ").trim().slice(0, 400)}`);
+    const head = trigger.replace(/\s+/g, " ").trim().slice(0, 300);
+    const others = recent.filter((r) => r.text !== head);
+    if (others.length) {
+      lines.push("", "\uD654\uBA74\uC5D0 \uB72C \uCD5C\uADFC \uC624\uB958:");
+      for (const r of others.slice(-6)) lines.push(`- ${clock(r.at)} ${r.text}`);
+    }
+    if (diag) {
+      try {
+        const r = await state.logs(40, "warn");
+        const kept = r.lines.filter((l) => !/->\s*404\b/.test(l)).slice(-15);
+        if (kept.length) {
+          lines.push("", "\uC11C\uBC84 \uB85C\uADF8 (warn \uC774\uC0C1, \uCD5C\uADFC):");
+          for (const l of kept) lines.push(l.length > 240 ? l.slice(0, 240) + "\u2026" : l);
+        }
+      } catch {
+        lines.push("", "(\uC11C\uBC84 \uB85C\uADF8\uB97C \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4)");
+      }
+    }
+    let text2 = mask(lines.join("\n"));
+    if (text2.length > 3500) text2 = text2.slice(0, 3500) + "\n\u2026(\uAE38\uC5B4\uC11C \uC798\uB790\uC2B5\uB2C8\uB2E4)";
+    return text2;
+  }
+  function mask(text2) {
+    return text2.replace(/\b[A-Za-z]:[\\/](?:[^\\/\r\n"'<>|:*?]+[\\/])*[^\\/\s"'<>|:*?]*/g, (m) => "<path>" + tail(m)).replace(/(\/(?:home|Users)\/)[^/\s"']+/g, "$1<user>").replace(/[\w.+-]+@[\w-]+\.[\w.-]+/g, "<email>");
+  }
+  function tail(path) {
+    const parts = path.split(/[\\/]+/).filter(Boolean);
+    return parts.length > 1 ? "\\\u2026\\" + parts[parts.length - 1] : "";
+  }
+  function clock(t) {
+    const d = new Date(t);
+    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  }
+  function shortUa(ua) {
+    const os = /Android [\d.]+|iPhone OS [\d_]+|iPad|Windows NT [\d.]+|Mac OS X [\d_]+|Linux/.exec(ua)?.[0] ?? "";
+    const br = /(Edg|Chrome|Firefox|Version)\/[\d]+/.exec(ua)?.[0] ?? "";
+    return [os.replace(/_/g, "."), br.replace("Version", "Safari")].filter(Boolean).join(" ");
+  }
+
   // src/ui/debugpanel.ts
   function buildUpdateCard() {
     const out = el("div", { class: "outbox" });
@@ -18353,10 +18531,10 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           return;
         }
         if (!r.newer) {
-          const mismatch = r.current !== "0.15.46";
+          const mismatch = r.current !== "0.15.47";
           const ahead = r.ahead ?? (!!r.latest && r.latest !== r.current);
           say(
-            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.46"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
+            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.47"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
             mismatch || ahead ? "" : "ok"
           );
           return;
@@ -18440,14 +18618,16 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         el("pre", { class: "mono filepreview", text: text2 })
       ]));
     };
-    const diagBtn = el("button", { class: "primary", text: "\uC9C4\uB2E8 \uC815\uBCF4" });
+    const reportBtn = el("button", { class: "primary", text: "\uC624\uB958 \uC81C\uBCF4" });
+    reportBtn.addEventListener("click", () => openBugReport());
+    const diagBtn = el("button", { class: "ghost", text: "\uC9C4\uB2E8 \uC815\uBCF4" });
     diagBtn.addEventListener("click", async () => {
       diagBtn.disabled = true;
       try {
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.15.46",
+            version: "0.15.47",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -18490,9 +18670,9 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     return el("div", { class: "card" }, [
       el("h2", { text: "\uBB38\uC81C \uC2E0\uACE0 \xB7 \uB514\uBC84\uAE45" }),
       el("div", { class: "hint", style: { marginBottom: "8px" } }, [
-        "\uBB38\uC81C\uAC00 \uC0DD\uAE30\uBA74 \uC544\uB798 \uB450 \uAC00\uC9C0\uB97C \uBCF5\uC0AC\uD574\uC11C \uD568\uAED8 \uBCF4\uB0B4 \uC8FC\uC138\uC694. API \uD0A4\uB098 \uD1A0\uD070\uC740 \uD3EC\uD568\uB418\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4."
+        "\uBB38\uC81C\uAC00 \uC0DD\uAE30\uBA74 [\uC624\uB958 \uC81C\uBCF4] \uB97C \uB20C\uB7EC \uB098\uC628 \uB0B4\uC6A9\uC744 \uC81C\uC791\uC790\uC758 \uCEE4\uBBA4\uB2C8\uD2F0 \uAE00\uC5D0 \uB313\uAE00\uB85C \uBD99\uC5EC\uB123\uC5B4 \uC8FC\uC138\uC694. \uC81C\uC791\uC790\uAC00 \uB354 \uC790\uC138\uD788 \uBB3C\uC5B4\uBCF4\uBA74 \uC9C4\uB2E8 \uC815\uBCF4\uC640 \uC11C\uBC84 \uB85C\uADF8 \uC804\uCCB4\uB97C \uBCF4\uB0B4 \uC8FC\uC138\uC694. API \uD0A4\uB098 \uD1A0\uD070\uC740 \uD3EC\uD568\uB418\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4."
       ]),
-      el("div", { class: "row" }, [diagBtn, logBtn, levelSel]),
+      el("div", { class: "row" }, [reportBtn, diagBtn, logBtn, levelSel]),
       out
     ]);
   }
@@ -19884,7 +20064,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.46"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.47"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -27912,14 +28092,14 @@ ${negative.value.trim()}
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.46"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.47"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
       healthEl.title = transport.versionGate;
     } else {
       healthEl.appendChild(el("span", { class: "hint", text: `\uBC31\uC5D4\uB4DC v${h.version}` }));
-      const behind = backendBehind("0.15.46", h.version, h.installKind);
+      const behind = backendBehind("0.15.47", h.version, h.installKind);
       if (behind) {
         const b = el("button", { class: "ghost tiny behindchip", text: "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8 \uD544\uC694", title: behind });
         b.addEventListener("click", () => {
@@ -28020,7 +28200,7 @@ ${negative.value.trim()}
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.15.46" }),
+        el("span", { class: "dim", text: "v0.15.47" }),
         healthEl,
         el("span", { class: "spacer" }),
         // 승인 / 반영 for the whole bot, from every tab (§1-76).
@@ -28028,6 +28208,7 @@ ${negative.value.trim()}
         // Visible from every tab once the add-on is installed (설정 → 고급 기능).
         mcpHeaderSwitch(),
         reload,
+        bugReportButton(),
         settingsBtn,
         close
       ]),
@@ -28185,8 +28366,8 @@ ${negative.value.trim()}
     const conflicts = m.conflict ?? 0;
     if (!bits.length && !conflicts) return;
     const head = bits.length ? `RisuAI \uCABD \uBCC0\uACBD\uC744 \uBC1B\uC558\uC2B5\uB2C8\uB2E4 (${bits.join(" \xB7 ")}).` : "";
-    const tail = conflicts ? ` \uD3B8\uC9D1 \uC911\uC774\uB358 ${conflicts}\uAC74\uC740 \uCDA9\uB3CC\uB85C \uD45C\uC2DC\uD588\uC2B5\uB2C8\uB2E4 \u2014 \uBC18\uC601 \uC804\uC5D0 \uACE8\uB77C \uC8FC\uC138\uC694.` : "";
-    shellNotice((head + tail).trim(), conflicts ? "err" : "ok");
+    const tail2 = conflicts ? ` \uD3B8\uC9D1 \uC911\uC774\uB358 ${conflicts}\uAC74\uC740 \uCDA9\uB3CC\uB85C \uD45C\uC2DC\uD588\uC2B5\uB2C8\uB2E4 \u2014 \uBC18\uC601 \uC804\uC5D0 \uACE8\uB77C \uC8FC\uC138\uC694.` : "";
+    shellNotice((head + tail2).trim(), conflicts ? "err" : "ok");
   }
   async function uploadAfterConnect(force = false) {
     const revision = state.contextRevision;
@@ -28315,10 +28496,13 @@ ${negative.value.trim()}
       pollWhileVisible(() => {
         void clientLog("debug", "mem", memSnapshot());
       }, smallScreen() ? 3e4 : 3e5);
+      watchErrorNotices();
       window.addEventListener("error", (ev) => {
+        recordClientError(String(ev.message));
         void clientLog("error", "uncaught error", { message: String(ev.message).slice(0, 300), file: String(ev.filename || "").slice(-80), line: ev.lineno });
       });
       window.addEventListener("unhandledrejection", (ev) => {
+        recordClientError(String(ev.reason));
         void clientLog("error", "unhandled rejection", { reason: String(ev.reason).slice(0, 300) });
       });
       window.addEventListener("pagehide", (ev) => {
@@ -28374,6 +28558,6 @@ ${negative.value.trim()}
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.15.46"} loaded`);
+    console.log(`[risu-hina] v${"0.15.47"} loaded`);
   })();
 })();

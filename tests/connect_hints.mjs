@@ -8,7 +8,7 @@ import { build } from '../plugin/node_modules/esbuild/lib/main.js';
 const out = await build({
   entryPoints: [new URL('../plugin/src/transport.ts', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')],
   bundle: true, write: false, format: 'esm', platform: 'neutral', logLevel: 'silent',
-  define: { __PLUGIN_VERSION__: '"0.15.46"' },
+  define: { __PLUGIN_VERSION__: '"0.15.47"' },
 });
 const mod = await import('data:text/javascript;base64,' + Buffer.from(out.outputFiles[0].text).toString('base64'));
 const { explainFetchFailure, localHttpsHint } = mod;
