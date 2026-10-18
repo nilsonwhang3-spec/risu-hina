@@ -1,4 +1,6 @@
-# 06. Implementation status — as of 2026-10-18 (v0.15.47, Risu Hina)
+# 06. Implementation status — as of 2026-10-18 (v0.15.48, Risu Hina)
+
+## 0.15.48 (2026-10-18): §1-115 MCP installs on Python 3.14 (FastAPI 0.118.3 / Starlette 0.48.0)
 
 ## 0.15.47 (2026-10-18): §1-113~114 오류 제보 block, a long silent think no longer drops the AI chat at 60 seconds
 
