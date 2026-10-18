@@ -189,6 +189,11 @@ def _run_install() -> None:
             error = "pip 설치에 실패했습니다 (코드 %s)." % proc.returncode
             if "No module named pip" in output:
                 error += " 이 인터프리터에 pip 이 없습니다."
+            elif "ResolutionImpossible" in output:
+                # §1-115: a venv install (setup.sh) keeps the FastAPI/Starlette
+                # it was set up with; an update replaces requirements.in only.
+                error += (" 이 백엔드에 설치된 패키지 버전이 MCP 와 맞지 않습니다. 직접 만든 venv(setup.sh)라면"
+                          " 최신 버전으로 업데이트한 뒤 setup.sh 를 다시 실행해 의존성을 맞추고 재시작해 주세요.")
         else:
             # Swap in only a finished install: a half-written target must never
             # be what the next start loads.

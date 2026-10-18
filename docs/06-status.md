@@ -14,6 +14,21 @@
 
 ## 0.15.41 (2026-10-11): §1-103~105 shared snapshots, image store, proposal progress, 새 대화, workspace speed, renamed bot folders
 
+## §1-115 (2026-10-18): MCP installs on Python 3.14 (FastAPI 0.118.3 / Starlette 0.48.0)
+
+- **Field report (Termux Debian, setup.sh venv, Python 3.14.4):** 설정 → 고급 기능 → MCP 설치 failed with
+  `mcp 2.2.0 depends on starlette>=0.48.0; python_version >= "3.14"` / `The user requested (constraint)
+  starlette==0.41.3` / `ResolutionImpossible`.
+- **Cause:** mcpaddon pins every installed package with `-c` (so the add-on resolves against what will be imported),
+  and FastAPI 0.115.6 caps Starlette at <0.42. mcp 2.2.0 asks for Starlette >=0.48 on 3.14 only, so 3.11 bundles never
+  hit it. Reproduced on a CPython 3.14.0 venv with the mcpaddon constraint logic.
+- **Fix:** `requirements.in` FastAPI 0.115.6 -> 0.118.3 (the smallest step whose range, <0.49, admits 0.48), and the three
+  cp311 locks get fastapi 0.118.3 / starlette 0.48.0 (both py3-none-any, same hash on every platform; every other line
+  unchanged). Bundled installs stage a new python/ on update as with any lock change. A venv install keeps its old
+  packages after an update, so a ResolutionImpossible failure now tells the user to re-run setup.sh.
+- Verified: gate ALL GREEN on FastAPI 0.118.3 (test_mcp reinstalls the add-on for real); test_mcp ALL PASS with the
+  server on CPython 3.14.0 (add-on installed into py314, every MCP check); the old pins on 3.14 still fail the same way.
+
 ## §1-114 (2026-10-18): a long silent think no longer drops the AI chat at 60 seconds
 
 - **Field report (Vertex Gemini, thinking):** answers that took under a minute arrived; past one minute the panel showed

@@ -79,7 +79,7 @@ D:\code\risu-hina\setup.bat
 setup: using C:\Program Files\Python311\python.exe
 setup: creating venv
 setup: installing dependencies
-setup: fastapi 0.115.6 uvicorn 0.34.0
+setup: fastapi 0.118.3 uvicorn 0.34.0
 setup: data dir D:\code\risu-hina\data
 ```
 

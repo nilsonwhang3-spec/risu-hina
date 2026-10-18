@@ -1,4 +1,4 @@
-fastapi==0.115.6
+fastapi==0.118.3
 uvicorn==0.34.0
 httpx==0.28.1
 pydantic-ai-slim[openai]==2.33.0
