@@ -3633,7 +3633,7 @@ async def _startup() -> None:
     # was loaded happens now, before anything imports it.
     mcpserver.init(asyncio.get_running_loop())
     await run_in_threadpool(mcpaddon.sweep_pending_removal)
-    if await run_in_threadpool(mcpaddon.load):
+    if await run_in_threadpool(mcpaddon.startup):
         try:
             await mcpserver._enable_async()
         except Exception as e:  # noqa: BLE001 - an add-on must never stop the backend

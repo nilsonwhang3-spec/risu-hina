@@ -132,6 +132,40 @@ def ensure_addon(s: th.Server, cache: Path) -> bool:
     return bool(addon.get("loaded"))
 
 
+def missing_dependency_repairs(tag: str, cache: Path) -> None:
+    """§1-115: an update that replaced python/ took away a package the
+    add-on had pruned as a duplicate. The next start must reinstall it, not
+    leave MCP dead with ModuleNotFoundError. Simulated by deleting cryptography
+    (not in the bundle; the field case) from a seeded copy; ~1 min, network."""
+    print("test_mcp_missing_dependency")
+    s = th.Server()
+    dest = s.data / "addons" / "mcp" / tag
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(cache, dest)
+    for p in list(dest.glob("cryptography")) + list(dest.glob("cryptography-*.dist-info")):
+        shutil.rmtree(p)
+    try:
+        if not s.wait_ready():
+            check("server starts with a broken add-on", False, s.drain()[-2000:])
+            return
+        _, body = s.get("/mcp/status")
+        addon = body.get("addon") or {}
+        check("a missing dependency starts a reinstall", (addon.get("job") or {}).get("running") is True
+              or addon.get("loaded") is True, str(addon)[:300])
+        deadline = time.time() + 900
+        while time.time() < deadline and (addon.get("job") or {}).get("running"):
+            time.sleep(2)
+            _, body = s.get("/mcp/status")
+            addon = body.get("addon") or {}
+        check("the reinstall loads it", addon.get("loaded") is True,
+              str(addon.get("loadError")) + " " + str((addon.get("job") or {}).get("error")))
+        check("the missing package is back", (dest / "cryptography").is_dir())
+        _, h = s.get("/health")
+        check("and /mcp is mounted again", (h.get("mcp") or {}).get("mounted") is True, str(h.get("mcp")))
+    finally:
+        s.stop()
+
+
 def main() -> int:
     tag = py_tag(server_python())
     cache = ROOT / ".cache" / "mcp-addon" / tag
@@ -535,6 +569,8 @@ def main() -> int:
         check("rotated token cuts off the old one", st == 401, str(st))
     finally:
         s.stop()
+    if cache.is_dir():
+        missing_dependency_repairs(tag, cache)
     print()
     print("ALL PASS" if not FAILURES else f"{len(FAILURES)} FAILED: {FAILURES}")
     return 0 if not FAILURES else 1

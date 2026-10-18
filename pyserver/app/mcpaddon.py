@@ -93,6 +93,38 @@ def load() -> bool:
     return _loaded
 
 
+# Run in a child so a failed import leaves nothing of the add-on loaded here:
+# its .pyd files would be locked on Windows and block the reinstall's swap.
+_PROBE = ("import site, sys; site.addsitedir(sys.argv[1]); "
+          "import mcp.server.lowlevel, mcp.server.streamable_http_manager")
+
+
+def startup() -> bool:
+    """load(), after checking the add-on still imports. Its install deleted
+    copies of what the interpreter already had (_prune_duplicates), and an
+    update that replaces python/ can take one of those away - a package the
+    agent pip-installed into it, say (§1-115: cryptography, after the 0.15.48
+    lock change). Then the add-on is reinstalled in the background, which
+    resolves against the new interpreter and mounts /mcp when it is done."""
+    t = target()
+    if not t.is_dir() or not _installed_version():
+        return False
+    try:
+        from .permits import _env
+        probe = subprocess.run([sys.executable, "-c", _PROBE, str(t)], env=_env(), capture_output=True,
+                               timeout=120, text=True, encoding="utf-8", errors="replace")
+    except Exception as e:  # noqa: BLE001 - the probe is a convenience; load() still reports
+        log.warn("mcp add-on probe failed to run: %s", e)
+        return load()
+    if probe.returncode != 0 and "ModuleNotFoundError" in (probe.stderr or ""):
+        global _load_error
+        _load_error = (probe.stderr or "").strip().splitlines()[-1][:300]
+        log.warn("mcp add-on is missing a dependency (%s) - reinstalling", _load_error)
+        install()
+        return False
+    return load()
+
+
 def status() -> dict:
     if (root() / REMOVE_MARK).is_file():
         return {"installed": False, "version": "", "wanted": MCP_VERSION, "loaded": _loaded, "loadError": "",

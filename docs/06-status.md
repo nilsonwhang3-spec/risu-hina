@@ -1,4 +1,6 @@
-# 06. Implementation status — as of 2026-10-18 (v0.15.48, Risu Hina)
+# 06. Implementation status — as of 2026-10-18 (v0.15.49, Risu Hina)
+
+## 0.15.49 (2026-10-18): §1-116 an MCP add-on that lost a dependency reinstalls itself at startup
 
 ## 0.15.48 (2026-10-18): §1-115 MCP installs on Python 3.14 (FastAPI 0.118.3 / Starlette 0.48.0)
 
@@ -15,6 +17,18 @@
 ## 0.15.42 (2026-10-12): §1-106 저장공간 정리 in four sections — orphan bots/chats/modules, snapshots, images, temp files
 
 ## 0.15.41 (2026-10-11): §1-103~105 shared snapshots, image store, proposal progress, 새 대화, workspace speed, renamed bot folders
+
+## §1-116 (2026-10-18): an MCP add-on that lost a dependency reinstalls itself at startup
+
+- **Found on the test server right after 0.15.48:** `/mcp` gone, `loadError: ModuleNotFoundError: No module named
+  'cryptography'`. The agent had once pip-installed cryptography into the bundled python/, so the add-on's install
+  pruned its own copy as a shadowed duplicate. 0.15.48 changed the lock, the update swapped in a fresh python/, and
+  the package went with the old one. Any install with an extra package in python/ would hit this on a lock change.
+- **Fix:** startup calls `mcpaddon.startup()`: a child process imports the add-on first (a failed import here would
+  leave its .pyd files locked on Windows and block the swap); on `ModuleNotFoundError` the add-on is reinstalled in
+  the background - resolving against the new interpreter - and mounts /mcp when done. Otherwise `load()` as before.
+- Verified: `test_mcp_missing_dependency` (seeded add-on minus cryptography -> reinstall starts, loads, cryptography
+  back, /mcp mounted); gate ALL GREEN; the test server healed on update.
 
 ## §1-115 (2026-10-18): MCP installs on Python 3.14 (FastAPI 0.118.3 / Starlette 0.48.0)
 
