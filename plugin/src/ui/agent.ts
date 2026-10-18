@@ -1022,6 +1022,8 @@ export class AgentPanel {
       for await (const ev of state.agentChat(prompt, abort.signal)) {
         if (this.destroyed) break;
         const e = ev as Record<string, unknown>;
+        // Keep-alive while the model thinks silently (§1-114); not an event.
+        if (e.type === 'ping') continue;
         quiet();
         if (e.type !== 'text') flushText();
         switch (e.type) {

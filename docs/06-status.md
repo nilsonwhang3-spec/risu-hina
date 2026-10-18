@@ -12,6 +12,20 @@
 
 ## 0.15.41 (2026-10-11): §1-103~105 shared snapshots, image store, proposal progress, 새 대화, workspace speed, renamed bot folders
 
+## §1-114 (2026-10-18): a long silent think no longer drops the AI chat at 60 seconds
+
+- **Field report (Vertex Gemini, thinking):** answers that took under a minute arrived; past one minute the panel showed
+  `중단됨 1m 0s` / `network error`, and the server logged `agent turn cut off (CancelledError)` exactly 60s after
+  `POST /chat`.
+- **Cause:** a thinking model on Vertex sends no tokens until it has finished thinking, and the `/chat` NDJSON stream
+  wrote nothing in the meantime. Something between panel and backend (a reverse proxy - nginx' default
+  `proxy_read_timeout` is 60s - or a relay) closes a response that has been silent that long.
+- **Fix:** the run loop already wakes every second to flush side events; when nothing has gone out for
+  `PING_EVERY_S` (15s) it writes `{"type":"ping"}`. The panel skips it before any event handling. Older plugins have no
+  `case 'ping'` and ignore it too, so the backend update alone fixes the drop.
+- Verified: `test_ping_while_the_model_thinks` (tests/test_stream_events.py: a FunctionModel silent for 2.6s with a
+  0.5s interval yields pings before the text and still ends in `done`); gate ALL GREEN.
+
 ## §1-113 (2026-10-17): 오류 제보 — one block to paste under the maker's community post
 
 - **Problem:** reports stalled until someone told the user where the log was: 진단 정보 and 서버 로그 sit two clicks deep

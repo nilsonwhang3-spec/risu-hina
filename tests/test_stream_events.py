@@ -65,6 +65,39 @@ check("a taken title counts up instead of overwriting", rel2.endswith("비교-�
 rel3 = workspace.write_artifact(CK, '<>:"/\\|?*', "x")
 check("a hostile title still makes a file", rel3.endswith(".md") and "artifacts/" in rel3, rel3)
 
+print("\ntest_ping_while_the_model_thinks")
+# A model silent past PING_EVERY_S (Gemini thinking on Vertex) must not leave
+# the stream silent: a proxy's read timeout (nginx 60s) drops it (§1-114).
+import asyncio  # noqa: E402
+import json  # noqa: E402
+from pydantic_ai import Agent  # noqa: E402
+from pydantic_ai.models.function import FunctionModel  # noqa: E402
+from app import agent as agent_mod  # noqa: E402
+
+
+async def _slow_stream(messages, info):
+    await asyncio.sleep(2.6)  # the run loop wakes once a second
+    yield "생각 끝"
+
+
+workspace.ensure_space()
+db.execute("INSERT INTO chats(chat_key, char_key, name, created_at, updated_at) VALUES(?,?,?,?,?)",
+           ("chat-stream-ping", CK, "핑 챗", db.now(), db.now()))
+PSID = session.create("chat-stream-ping")["sessionId"]
+session.get_agent = lambda: Agent(FunctionModel(stream_function=_slow_stream), deps_type=agent_mod.Deps)
+session.PING_EVERY_S = 0.5
+
+
+async def _collect() -> list[dict]:
+    return [json.loads(line) async for line in session.run(PSID, "안녕")]
+
+events = asyncio.run(_collect())
+types = [e.get("type") for e in events]
+check("a silent model gets pings in between", types.count("ping") >= 2, str(types))
+check("the pings come before the answer", "ping" in types and "text" in types
+      and types.index("ping") < types.index("text"), str(types))
+check("and the turn still finishes", types[-1] == "done", str(types[-3:]))
+
 print()
 if FAILURES:
     print(f"FAIL - {len(FAILURES)} check(s): " + ", ".join(FAILURES))

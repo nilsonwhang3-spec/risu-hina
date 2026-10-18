@@ -431,6 +431,8 @@ def stopped(session_id: str | None) -> bool:
 # the next "계속 진행해줘" then redid the old job.
 _ACTIVE: dict[str, asyncio.Event] = {}
 SUPERSEDE_WAIT_S = 20.0
+# Silence after which the /chat stream sends {"type":"ping"} (see run()).
+PING_EVERY_S = 15.0
 
 
 async def _supersede(session_id: str) -> None:
@@ -617,6 +619,7 @@ async def run(session_id: str, prompt: str, mode: str = "", persona: str = "", *
             # on with a timeout and picked up again.
             it = events.__aiter__()
             pending = asyncio.ensure_future(it.__anext__())
+            last_out = time.monotonic()
             while True:
                 done, _ = await asyncio.wait({pending}, timeout=1.0)
                 if stopped(session_id):
@@ -626,8 +629,17 @@ async def run(session_id: str, prompt: str, mode: str = "", persona: str = "", *
                     raise TurnStopped()
                 if not done:
                     for extra in _drain_extra(session_id):
+                        last_out = time.monotonic()
                         yield _line(extra)
+                    # A model that thinks before its first token (Gemini on
+                    # Vertex, §1-114) sends nothing for minutes, and a proxy in
+                    # front of the backend (nginx' 60s proxy_read_timeout)
+                    # drops a response that has been silent that long.
+                    if time.monotonic() - last_out >= PING_EVERY_S:
+                        last_out = time.monotonic()
+                        yield _line({"type": "ping"})
                     continue
+                last_out = time.monotonic()
                 try:
                     ev = pending.result()
                 except StopAsyncIteration:
