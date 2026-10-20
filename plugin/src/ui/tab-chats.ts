@@ -27,7 +27,7 @@ import { setEditMode, setTab, bootState, type BootStep } from './shell';
 import type { RisuChat } from '../risuai';
 import { HostError } from '../host';
 import { describeSync, syncBusy } from '../assets';
-import { transport } from '../transport';
+import { addressKind, transport } from '../transport';
 import { personaImage } from '../persona';
 import type { PersonaRow } from '../state';
 import { shellNotice } from './chatbar';
@@ -282,7 +282,9 @@ export function renderChatsTab(mount: HTMLElement): void {
     root.appendChild(el('div', { class: 'notice err' }, [
       el('div', { text: '백엔드에 연결하지 못했습니다.' }),
       el('div', { class: 'hint', text: state.connectError }),
-      transport.hostPlatform === 'web'
+      // The proxy-then-direct wait is a domain's; an IP address on web is
+      // refused or blocked by the browser, and the error says why (§1-117).
+      transport.hostPlatform === 'web' && addressKind(transport.config.url).kind === 'domain'
         ? el('div', { class: 'hint', style: { marginTop: '4px' }, text:
             '웹 RisuAI(risuai.xyz)에서는 최초 연결까지 3분 정도 걸릴 수 있습니다 (프록시 → 직접 연결 폴백에 걸리는 시간). 패널이 30초마다 자동으로 다시 시도하니 그대로 두셔도 됩니다.' })
         : null,

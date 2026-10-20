@@ -903,6 +903,10 @@ function startReconnect(force: boolean): void {
   const tick = async () => {
     reconnectTimer = null;
     if (state.health) return;
+    // Web RisuAI refused the address itself (§1-117): no amount of retrying
+    // reaches it, and each try only adds the same error to the screen. A new
+    // URL from 설정 → 연결 connects on its own.
+    if (transport.refusedPrivate) { refreshStatus(); return; }
     reconnectAttempts += 1;
     const lastError = state.connectError;
     const lastProbe = transport.probeInfo;

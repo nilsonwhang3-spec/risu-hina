@@ -16,7 +16,7 @@
  */
 import { el, clear, modal, svg } from './dom';
 import { state } from '../state';
-import { transport } from '../transport';
+import { addressKind, transport } from '../transport';
 import * as host from '../host';
 
 /** The panel's own recent errors, newest last. Kept even while the backend is
@@ -136,6 +136,7 @@ export async function buildReport(trigger = ''): Promise<string> {
   lines.push('환경: ' + [
     `RisuAI ${transport.hostPlatform || '?'}`,
     `연결 ${transport.routeKind || '?'}`,
+    addressLabel(transport.config.url),
     diag ? `서버 ${String(diag['platform'] ?? '?')}/py${String(diag['python'] ?? '?')}` : '',
     health['installKind'] ? `설치 ${String(health['installKind'])}` : '',
     window.innerWidth ? `화면 ${window.innerWidth}x${window.innerHeight}` : '',
@@ -200,6 +201,14 @@ function tail(path: string): string {
 function clock(t: number): string {
   const d = new Date(t);
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+/** The backend URL's class and scheme, never the address (§1-117): web
+ * RisuAI refuses an IP outright, and the masked report could not show it. */
+function addressLabel(url: string): string {
+  if (!url) return '주소 없음';
+  const { kind, scheme } = addressKind(url);
+  return `주소 ${kind}${scheme ? '/' + scheme : ''}`;
 }
 
 function shortUa(ua: string): string {

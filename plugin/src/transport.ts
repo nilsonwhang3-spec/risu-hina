@@ -77,6 +77,7 @@ export class Transport {
       this.tokenSafe = false;
       this.route = 'unknown';
       this.lastHealth = null;
+      this.privateRefused = false;
     }
     this.cfg = { url, token: (cfg.token || '').trim() };
   }
@@ -86,6 +87,13 @@ export class Transport {
   get routeKind(): RouteKind { return this.route; }
   get hostPlatform(): string { return this.platform; }
   get tokenAttached(): boolean { return this.tokenSafe; }
+  /**
+   * Web RisuAI refused the configured address outright (a private or loopback
+   * IP). Retrying cannot help - only a different URL can - so the reconnect
+   * loop stops and the "wait 3 minutes" advice is not shown.
+   */
+  get refusedPrivate(): boolean { return this.privateRefused; }
+  private privateRefused = false;
 
   async detectPlatform(): Promise<void> {
     try {
@@ -106,6 +114,7 @@ export class Transport {
   async connect(): Promise<HealthInfo> {
     if (!this.cfg.url) throw new BackendError(0, '백엔드 URL이 설정되어 있지 않습니다');
     if (this.platform === 'unknown') await this.detectPlatform();
+    this.privateRefused = false;
 
     let res: Response;
     try {
@@ -118,10 +127,16 @@ export class Transport {
       this.route = 'blocked';
       this.tokenSafe = false;
       const why = e instanceof Error ? e.message : String(e);
+      const web = webPrivateHint(why, this.cfg.url);
+      if (web) {
+        this.privateRefused = true;
+        throw new BackendError(0, `백엔드에 닿지 못했습니다 (${why}). ${web}`);
+      }
       const https = localHttpsHint(this.cfg.url);
+      const browser = this.platform === 'web' ? webLocalFetchHint(why, this.cfg.url) : '';
       throw new BackendError(0,
         `백엔드에 닿지 못했습니다 (${explainFetchFailure(why)}). ` +
-        (https ? https + ' ' : 'URL 이 맞는지, 터널·VPN 이 열려 있는지 확인해 주세요. ') +
+        (https ? https + ' ' : browser ? browser + ' ' : 'URL 이 맞는지, 터널·VPN 이 열려 있는지 확인해 주세요. ') +
         '잠시 뒤 자동으로 다시 시도합니다.');
     }
     const body = (await readJson(res)) as HealthInfo | null;
@@ -367,7 +382,9 @@ export class Transport {
     if (wantToken && this.cfg.token) {
       if (!this.tokenSafe && this.platform === 'web') {
         // Refuse rather than risk relaying the token to a third party.
-        throw new BackendError(0, '직접 연결이 확인되지 않아 토큰을 보내지 않았습니다. 연결 진단을 먼저 실행해 주세요');
+        throw new BackendError(0, '직접 연결이 확인되지 않아 토큰을 보내지 않았습니다. ' + (this.privateRefused
+          ? '웹 RisuAI 는 IP 주소의 백엔드에 연결할 수 없습니다 — 설정 → 연결의 URL 을 https 주소(tailscale serve 의 …ts.net 등)로 바꿔 주세요'
+          : '연결 진단을 먼저 실행해 주세요'));
       }
       headers['Authorization'] = 'Bearer ' + this.cfg.token;
     }
@@ -489,13 +506,69 @@ export function localHttpsHint(url: string): string {
   let u: URL;
   try { u = new URL(url.trim()); } catch { return ''; }
   if (u.protocol !== 'https:') return '';
-  const host = u.hostname.replace(/^\[|\]$/g, '').toLowerCase();
-  const local = host === 'localhost' || host.endsWith('.localhost') || host === '::1'
-    || /^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host)
-    || /^172\.(1[6-9]|2\d|3[01])\./.test(host) || /^169\.254\./.test(host)
-    || /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(host); // Tailscale / CGNAT
-  if (!local) return '';
+  if (addressKind(url).kind === 'domain') return '';
   return `로컬·사설 주소의 백엔드는 https 가 아니라 http 입니다 — ${url.trim().replace(/^https:/i, 'http:')} 로 바꿔 주세요.`;
+}
+
+export type AddressKind = 'loopback' | 'private' | 'tailscale' | 'domain' | 'invalid';
+
+/**
+ * What sort of address the backend URL is, without the address itself - the
+ * 오류 제보 block masks the URL, and the class is what decides most
+ * connection reports (§1-117).
+ */
+export function addressKind(url: string): { kind: AddressKind; scheme: string } {
+  let u: URL;
+  try { u = new URL(url.trim()); } catch { return { kind: 'invalid', scheme: '' }; }
+  const scheme = u.protocol.replace(/:$/, '');
+  const host = u.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  if (host === 'localhost' || host.endsWith('.localhost') || host === '::1' || /^127\./.test(host)) {
+    return { kind: 'loopback', scheme };
+  }
+  // Tailscale hands out 100.64.0.0/10 (CGNAT).
+  if (/^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(host)) return { kind: 'tailscale', scheme };
+  if (/^10\./.test(host) || /^192\.168\./.test(host) || /^172\.(1[6-9]|2\d|3[01])\./.test(host)
+    || /^169\.254\./.test(host) || /^f[cd][0-9a-f]{2}:/.test(host) || /^fe80:/.test(host)) {
+    return { kind: 'private', scheme };
+  }
+  return { kind: 'domain', scheme };
+}
+
+/**
+ * Web RisuAI will not fetch a private or loopback address at all: its
+ * nativeFetch throws "웹에서는 사설망 직접 호출 불가. Tauri 또는 LAN Node
+ * self-host 사용" before any request leaves. A field report (2026-10-20) sat
+ * on "URL·VPN 확인, 3분 걸릴 수 있음, 자동 재시도" for twenty minutes - none of
+ * which can help: Tailscale being up does not matter while the URL is an IP.
+ * The way out is an https host name. Returns the advice, or ''.
+ */
+export function webPrivateHint(message: string, url: string): string {
+  // Keyed on the host's own refusal, not on the URL: older hosts, and plain
+  // fetch to 127.0.0.1 in some browsers, do reach a loopback backend.
+  if (!/사설망 직접 호출 불가/.test(message)) return '';
+  const { kind } = addressKind(url);
+  const which = kind === 'tailscale' ? 'Tailscale IP(100.x)' : kind === 'private' ? '사설 IP(192.168·10.x 등)'
+    : kind === 'loopback' ? '127.0.0.1·localhost' : '이 주소';
+  return `웹 RisuAI 는 ${which} 로 백엔드에 연결할 수 없습니다 — 기다리거나 Tailscale·VPN 을 켜도 바뀌지 않습니다. `
+    + '백엔드 PC 에서 tailscale serve 로 만든 https://<기기이름>.ts.net 주소나 Cloudflare 터널 같은 https 도메인을 '
+    + '설정 → 연결의 URL 에 넣거나, 같은 PC 라면 PocketRisu·RisuAI 데스크톱 앱에서 열어 주세요.';
+}
+
+/**
+ * Web RisuAI, an IP address, and the browser's own "Failed to fetch": the
+ * request never left the page. Reproduced 2026-10-20 with a healthy backend on
+ * the same PC (its /health and CORS preflight both fine from curl), so the
+ * browser stopped it - Chrome asks before an https page reaches 127.0.0.1 or
+ * the LAN (Local Network Access), and plain fetch off sends it to a relay that
+ * cannot reach it either. Not a tunnel or VPN problem. Returns the advice, or ''.
+ */
+export function webLocalFetchHint(message: string, url: string): string {
+  if (!/Failed to fetch|NetworkError|Load failed/i.test(message)) return '';
+  const { kind } = addressKind(url);
+  if (kind !== 'loopback' && kind !== 'private' && kind !== 'tailscale') return '';
+  return '웹 RisuAI 에서 IP 주소의 백엔드로 가는 요청을 브라우저가 막았을 수 있습니다 — 백엔드가 켜져 있다면 '
+    + '주소창 자물쇠 → 사이트 설정에서 "로컬 네트워크 액세스"를 허용하고 RisuAI 의 Use Plain Fetch 를 켜 보세요. '
+    + '가장 확실한 길은 tailscale serve 의 https://<기기이름>.ts.net 같은 https 주소이고, 같은 PC 라면 PocketRisu·데스크톱 앱입니다.';
 }
 
 /** Paths that work across versions: the ones an update needs. */

@@ -49,4 +49,32 @@ for (const raw of ['', '<html>502 Bad Gateway</html>', '{"service":"other"}']) {
   assert.equal(relayFailureHint(raw, 'http://127.0.0.1:6020'), '', `left alone: ${raw}`);
 }
 
-console.log('PASS - masked desktop fetch failure, https on a local backend, relay connect failure');
+// Web RisuAI refuses a private address before any request (§1-117): the
+// advice names the address class and the https way out, never "wait".
+const { webPrivateHint, addressKind } = mod;
+const HOST = '웹에서는 사설망 직접 호출 불가. Tauri 또는 LAN Node self-host 사용';
+const lo = webPrivateHint(HOST, 'http://127.0.0.1:6020');
+assert.match(lo, /127\.0\.0\.1·localhost/, 'names loopback');
+assert.match(lo, /ts\.net/, 'gives the tailscale serve address');
+assert.match(lo, /PocketRisu/, 'and the same-PC alternative');
+assert.doesNotMatch(lo, /자동으로 다시 시도/, 'no retry promise');
+assert.match(webPrivateHint(HOST, 'http://100.101.102.103:6020'), /Tailscale IP/);
+assert.match(webPrivateHint(HOST, 'http://192.168.0.5:6020'), /사설 IP/);
+assert.equal(webPrivateHint('Failed to fetch', 'http://127.0.0.1:6020'), '', 'other failures left alone');
+const kinds = {
+  'http://127.0.0.1:6020': 'loopback', 'http://localhost:6020': 'loopback', 'http://[::1]:6020': 'loopback',
+  'http://100.64.0.1:6020': 'tailscale', 'http://100.127.9.9': 'tailscale', 'http://100.128.0.1': 'domain',
+  'http://192.168.1.2:6020': 'private', 'http://10.1.2.3': 'private', 'http://172.16.0.1': 'private',
+  'https://pc.tailnet.ts.net': 'domain', 'https://hina.example.com': 'domain', 'nope': 'invalid',
+};
+for (const [u, k] of Object.entries(kinds)) assert.equal(addressKind(u).kind, k, u);
+assert.equal(addressKind('https://pc.tailnet.ts.net').scheme, 'https');
+
+// The browser itself refused (Failed to fetch) an IP address from web RisuAI.
+const { webLocalFetchHint } = mod;
+assert.match(webLocalFetchHint('Failed to fetch', 'http://127.0.0.1:6020'), /로컬 네트워크 액세스/);
+assert.match(webLocalFetchHint('TypeError: NetworkError when attempting to fetch resource.', 'http://100.70.1.1:6020'), /ts\.net/);
+assert.equal(webLocalFetchHint('Failed to fetch', 'https://hina.example.com'), '', 'a domain keeps the tunnel advice');
+assert.equal(webLocalFetchHint('ECONNREFUSED', 'http://127.0.0.1:6020'), '', 'other failures left alone');
+
+console.log('PASS - masked desktop fetch failure, https on a local backend, relay connect failure, web private refusal');

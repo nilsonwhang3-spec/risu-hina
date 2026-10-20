@@ -18,6 +18,29 @@
 
 ## 0.15.41 (2026-10-11): §1-103~105 shared snapshots, image store, proposal progress, 새 대화, workspace speed, renamed bot folders
 
+## §1-117 (2026-10-20): web RisuAI with an IP address says why it cannot connect
+
+- **Field report (오류 제보 block):** web RisuAI, `연결 blocked`, twenty minutes of "백엔드에 닿지 못했습니다 (웹에서는
+  사설망 직접 호출 불가. Tauri 또는 LAN Node self-host 사용)". That text is the host's: web RisuAI's nativeFetch refuses a
+  private/loopback address before any request leaves. Our wrapping told the user to check the URL and VPN, that the
+  first connection can take 3 minutes, and that the panel retries every 30s - none of which can help. Tailscale
+  being up does not matter while the URL is an IP; only an https host name (tailscale serve `…ts.net`, a tunnel) does.
+- **Fix (plugin only):** `webPrivateHint` recognises the host's refusal and replaces the advice with the address
+  class and the https way out; `transport.refusedPrivate` stops the reconnect loop and hides the 3-minute note (a new
+  URL from 설정 → 연결 connects as before); the token-refusal notice that followed says the same. The 오류 제보 block now
+  carries `주소 <loopback|private|tailscale|domain|invalid>/<scheme>` - the masked report could not show which it was.
+  README's web RisuAI connection line no longer reads as if `http://<Tailscale IP>` works there.
+- Keyed on the host message, not the URL: older hosts and some browsers' plain fetch to 127.0.0.1 do connect.
+- **Second case, reproduced by the user the same day:** web RisuAI + `http://127.0.0.1:6020` on the backend's own PC
+  gives "Failed to fetch", not the host refusal - so loopback is not refused by the host, and the reporter most likely
+  used a LAN or Tailscale IP. curl from that PC: POST /health 200, preflight 204 with CORS headers - the browser
+  stopped it (most likely Chrome's Local Network Access permission; not confirmed). `webLocalFetchHint` (web, IP
+  address, Failed to fetch / NetworkError / Load failed) points at the site permission and Use Plain Fetch and
+  names the https address as the sure way; the loop keeps retrying here, since granting the permission can fix it.
+  The 3-minute proxy-fallback note now shows only for a domain URL.
+- Verified: `tests/connect_hints.mjs` (hint per address class, other failures untouched, addressKind table); not
+  run against a live web RisuAI.
+
 ## §1-116 (2026-10-18): an MCP add-on that lost a dependency reinstalls itself at startup
 
 - **Found on the test server right after 0.15.48:** `/mcp` gone, `loadError: ModuleNotFoundError: No module named
