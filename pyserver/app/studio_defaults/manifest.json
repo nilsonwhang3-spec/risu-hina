@@ -2,6 +2,21 @@
   "source": "the test server staging snapshot",
   "files": [
     {
+      "path": "fragments/보케.md",
+      "sha256": "569dec2e9dbbc5700b42baee2682c50dd7b8a9282db599816f84d0d3d707bc36",
+      "size": 113
+    },
+    {
+      "path": "fragments/아웃포커스.md",
+      "sha256": "a929d238c63182eac1af9f4f549f61b4bf9a79356bd2f7b471e297a58ee5cd10",
+      "size": 177
+    },
+    {
+      "path": "fragments/조명.md",
+      "sha256": "f5d1149e1e8da84cf9e60154cb916cd72d8aae9e95a62d75960b6cb65f0907af",
+      "size": 154
+    },
+    {
       "path": "fragments/표정/표정_부끄.md",
       "sha256": "24a141778d3896157ac4b3f8360b0a3d45beb5d939e05a795845d4ff467d8b85",
       "size": 201

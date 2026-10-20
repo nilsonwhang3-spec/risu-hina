@@ -64,13 +64,13 @@ class Improvements(unittest.TestCase):
         self.assertFalse(manifest["unresolved"])
         paths = {e["path"] for e in manifest["files"]}
         self.assertEqual({p.split('/')[1] for p in paths if p.startswith('fragments/')},
-                         {"표정"})
+                         {"표정", "조명.md", "보케.md", "아웃포커스.md"})
         self.assertEqual({p for p in paths if not p.startswith('fragments/')},
                          {"styles/오피스카운셀링.md"})
         actual = {p.relative_to(studiodefaults.SOURCE).as_posix()
                   for p in studiodefaults.SOURCE.rglob('*') if p.is_file() and p.name != 'manifest.json'}
         self.assertEqual(actual, paths)
-        self.assertFalse(any("의상" in e["path"] or "보케" in e["path"] for e in manifest["files"]))
+        self.assertFalse(any("의상" in e["path"] or "체위" in e["path"] or "랜덤" in e["path"] for e in manifest["files"]))
 
     def test_helper_rejects_incomplete_or_duplicate_verdicts(self):
         one = {"n": 1, "verdict": "use", "reason": "Complete"}
