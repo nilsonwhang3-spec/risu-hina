@@ -22,7 +22,7 @@ RisuAI 봇 제작·수정 통합 플러그인(+챗 수정). 봇 카드·로어�
 | 백엔드 주소 | `http://127.0.0.1:6020` | Tailscale / Cloudflare 터널 주소, 또는 LAN IP |
 | 토큰 | **필요 없음** (루프백 면제) | **필수** — `data/token.txt`, 끌 수 없음 |
 | HTTPS | 불필요 | 웹 RisuAI(https://risu.xyz)에서 붙으려면 **필수** (Tailscale serve · Cloudflare 가 해결) |
-| RisuAI 설정 | 없음 | 웹 RisuAI 는 **Use Plain Fetch** 켜기 |
+| RisuAI 설정 | 없음 | 웹 RisuAI 는 고급 설정 → 비권장 설정 보이기 → **직접 요청 보내기**(Use Plain Fetch) 켜기 |
 | 에셋 동기화 | **고속 경로** — PocketRisu 의 DB 를 직접 읽음 (수천 개도 수 초) | 플러그인이 올려 보냄 (느리지만 어디서나 됨) |
 | 바인딩 | 127.0.0.1 그대로 | 터널이면 127.0.0.1 그대로. LAN 직결만 `RISUHINA_HOST=0.0.0.0` |
 
@@ -99,7 +99,7 @@ data/       DB · 설정(config.json) · 토큰(token.txt) · 워크스페이스
 저장 폴더가 Docker 볼륨 안이라 고속 경로(3번)는 쓸 수 없다. 백엔드도 Docker 로 옮겨 같은 네트워크에 두면
 (`http://risu-hina:6020`) 저장 볼륨까지 붙일 수 있다 — 저장소 `docs/17-docker.md`.
 
-같은 PC 에서 **웹 RisuAI(risu.xyz)** 도 쓴다면 그것은 유형 2 의 브라우저 규칙(HTTPS · 토큰)을 따른다 — 브라우저는 https 페이지에서 http://127.0.0.1 로 요청하지 못한다. 이때는 §3-1 의 Tailscale serve 가 가장 간단하다.
+같은 PC 에서 **웹 RisuAI(risuai.xyz)** 도 쓴다면 주소는 그대로 `http://127.0.0.1:6020` 이다. 웹 RisuAI 의 고급 설정 → 비권장 설정 보이기 → **직접 요청 보내기**를 켜고, Chrome 이 묻는 **로컬 네트워크 액세스**를 허용한다.
 
 ---
 
@@ -111,7 +111,7 @@ data/       DB · 설정(config.json) · 토큰(token.txt) · 워크스페이스
 
 - **토큰 필수.** `data/token.txt` 의 값을 플러그인 ⚙ → 연결 → 토큰에 넣는다. 첫 기동 로그와 `manage.ps1 -Action status` 에도 찍힌다. 비루프백 요청은 토큰 없이는 무엇도 받지 않는다 — 설정으로 끌 수 없다.
 - **주소.** 브라우저(웹 RisuAI)에서 붙으려면 **HTTPS** 주소여야 한다. PocketRisu 는 서버 쪽에서 요청하므로 http 도 된다.
-- **웹 RisuAI** 는 설정 → *Use Plain Fetch* 를 켠다. 꺼져 있으면 요청이 risu 의 릴레이 서버를 거쳐 사설 주소에 닿지 못한다.
+- **웹 RisuAI** 는 설정 → 고급 설정 → 비권장 설정 보이기 → *직접 요청 보내기*(Use Plain Fetch)를 켠다. 꺼져 있으면 요청이 risu 의 릴레이 서버를 거쳐 사설 주소에 닿지 못한다. Chrome 이 **로컬 네트워크 액세스**를 물으면 허용한다.
 - **고속 경로 없음.** 에셋은 플러그인이 RisuAI 에서 읽어 올려 보낸다(진행률이 봇 카드에 뜬다). 처음 한 번만 느리고, 같은 파일은 다시 보내지 않는다.
 
 주소를 여는 방법은 세 가지. **①이 기본값**이다.
@@ -242,7 +242,7 @@ pyserver/server.log                      (Linux 는 pm2 logs risu-hina)
 | 증상 | 원인·조치 |
 |---|---|
 | 플러그인 "백엔드 연결 안 됨" | URL 오타, 백엔드 미기동, 유형 2 에서 토큰 미입력. 처음 몇 분은 자동 재시도한다 |
-| 웹 RisuAI 에서만 실패 | **Use Plain Fetch** 를 켠다. http 주소면 브라우저가 막는다 → 3-1/3-2 의 https 주소 |
+| 웹 RisuAI 에서만 실패 | **직접 요청 보내기**(Use Plain Fetch)를 켜고 로컬 네트워크 액세스를 허용한다. 같은 PC 의 `http://127.0.0.1:6020` 은 이것으로 된다. 다른 기기는 3-1/3-2 의 https 주소 |
 | `unauthorized` | 토큰이 다르다. `data/token.txt` 의 값을 ⚙ → 연결 → 토큰에 |
 | 헤더에 "버전이 다릅니다" | §6 순서대로 플러그인 → 백엔드 |
 | 에이전트 400 `Unsupported parameter …` | 프로바이더가 그 필드를 거부한다. 오류에 적힌 JSON 을 프리셋 파라미터 JSON 에 넣는다 |

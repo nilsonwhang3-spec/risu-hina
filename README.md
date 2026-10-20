@@ -114,7 +114,10 @@ PocketRisu (브라우저)  ←→  리스히나 백엔드 (같은 PC)
 
 연결 주소: 다른 기기의 PocketRisu 는 `http://<Tailscale IP>:6020`. 루프백이 아니면 토큰이 필수다. 최초 기동 때 콘솔에 나오는 토큰(`data/token.txt`)을 연결 설정에 넣는다.
 
-**웹 RisuAI(risuai.xyz)에는 IP 주소를 쓰지 않는다** — `192.168.x`·Tailscale IP(`100.x`) 같은 사설 주소는 RisuAI 가 요청 전에 거절하고("웹에서는 사설망 직접 호출 불가"), 같은 PC 의 `127.0.0.1` 도 브라우저가 막아 `Failed to fetch` 가 난다. Tailscale 을 켜 둬도 마찬가지다. 백엔드 PC 에서 `tailscale serve` 로 만든 `https://<기기이름>.ts.net` 주소나 Cloudflare 터널 같은 HTTPS 도메인을 쓰고, RisuAI 의 **Use Plain Fetch** 를 켠다.
+**웹 RisuAI(risuai.xyz)** 는 RisuAI 설정 → 고급 설정 → **비권장 설정 보이기** → **직접 요청 보내기**(Use Plain Fetch)를 켜야 한다. 꺼져 있으면 요청이 RisuAI 중계 서버를 거쳐 내 PC 에 닿지 못한다.
+
+- 같은 PC: `http://127.0.0.1:6020` 그대로 된다. 처음 연결할 때 Chrome 이 묻는 **로컬 네트워크 액세스**를 허용한다.
+- 다른 기기: 백엔드 PC 에서 `tailscale serve` 로 만든 `https://<기기이름>.ts.net` 주소나 Cloudflare 터널 같은 HTTPS 도메인을 쓴다.
 
 ### 재부팅 후 자동 기동 (설치 패키지)
 

@@ -271,7 +271,7 @@ function buildDiagnosticCard(): HTMLElement {
             class: 'hint',
             text: '대개는 백엔드 앞의 터널·VPN 이 아직 안 열린 것이고, 패널이 30초마다 다시 시도합니다. '
               + '계속 실패하면 위에 인용된 응답을 보세요 — HTML 이나 다른 서버의 답이면 URL 이 잘못된 것이고, '
-              + 'sv.risuai.xyz 의 오류면 RisuAI 설정의 Use Plain Fetch 가 꺼져 요청이 릴레이된 것입니다.',
+              + 'sv.risuai.xyz 의 오류면 RisuAI 의 고급 설정 → 비권장 설정 보이기 → "직접 요청 보내기"(Use Plain Fetch)가 꺼져 요청이 릴레이된 것입니다.',
           }),
         ]));
       }

@@ -8,7 +8,7 @@ import { build } from '../plugin/node_modules/esbuild/lib/main.js';
 const out = await build({
   entryPoints: [new URL('../plugin/src/transport.ts', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')],
   bundle: true, write: false, format: 'esm', platform: 'neutral', logLevel: 'silent',
-  define: { __PLUGIN_VERSION__: '"0.15.49"' },
+  define: { __PLUGIN_VERSION__: '"0.15.50"' },
 });
 const mod = await import('data:text/javascript;base64,' + Buffer.from(out.outputFiles[0].text).toString('base64'));
 const { explainFetchFailure, localHttpsHint } = mod;
@@ -56,7 +56,7 @@ const HOST = '웹에서는 사설망 직접 호출 불가. Tauri 또는 LAN Node
 const lo = webPrivateHint(HOST, 'http://127.0.0.1:6020');
 assert.match(lo, /127\.0\.0\.1·localhost/, 'names loopback');
 assert.match(lo, /ts\.net/, 'gives the tailscale serve address');
-assert.match(lo, /PocketRisu/, 'and the same-PC alternative');
+assert.match(lo, /직접 요청 보내기/, 'names the plain-fetch setting by its Korean label');
 assert.doesNotMatch(lo, /자동으로 다시 시도/, 'no retry promise');
 assert.match(webPrivateHint(HOST, 'http://100.101.102.103:6020'), /Tailscale IP/);
 assert.match(webPrivateHint(HOST, 'http://192.168.0.5:6020'), /사설 IP/);
@@ -73,8 +73,20 @@ assert.equal(addressKind('https://pc.tailnet.ts.net').scheme, 'https');
 // The browser itself refused (Failed to fetch) an IP address from web RisuAI.
 const { webLocalFetchHint } = mod;
 assert.match(webLocalFetchHint('Failed to fetch', 'http://127.0.0.1:6020'), /로컬 네트워크 액세스/);
-assert.match(webLocalFetchHint('TypeError: NetworkError when attempting to fetch resource.', 'http://100.70.1.1:6020'), /ts\.net/);
+assert.match(webLocalFetchHint('TypeError: NetworkError when attempting to fetch resource.', 'http://100.70.1.1:6020'), /직접 요청 보내기/);
 assert.equal(webLocalFetchHint('Failed to fetch', 'https://hina.example.com'), '', 'a domain keeps the tunnel advice');
 assert.equal(webLocalFetchHint('ECONNREFUSED', 'http://127.0.0.1:6020'), '', 'other failures left alone');
+
+const { webRelayHint } = mod;
+assert.match(webRelayHint('http://127.0.0.1:6020'), /Use Plain Fetch/);
+assert.equal(webRelayHint('https://hina.example.com'), '', 'a domain keeps the generic advice');
+
+// "127.0.0.1:6020" without a scheme fetched risuai.xyz's own index.html.
+const { normalizeBackendUrl } = mod;
+assert.equal(normalizeBackendUrl(' 127.0.0.1:6020/ '), 'http://127.0.0.1:6020');
+assert.equal(normalizeBackendUrl('localhost:6020'), 'http://localhost:6020');
+assert.equal(normalizeBackendUrl('https://pc.tailnet.ts.net/'), 'https://pc.tailnet.ts.net');
+assert.equal(normalizeBackendUrl('http://192.168.0.5:6020'), 'http://192.168.0.5:6020');
+assert.equal(normalizeBackendUrl(''), '');
 
 console.log('PASS - masked desktop fetch failure, https on a local backend, relay connect failure, web private refusal');

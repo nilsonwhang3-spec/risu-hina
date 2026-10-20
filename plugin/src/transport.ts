@@ -9,6 +9,11 @@
  *   networkRoute: 'local_network'  - without it the browser tries a direct
  *       fetch to a private address first and only falls back to /proxy2 after
  *       it fails. Measured cost: ~2.3s to first byte, every request.
+ *       NOT on web RisuAI (§1-117): there the host throws "웹에서는 사설망 직접
+ *       호출 불가" for any localhost / LAN address on that route, before any
+ *       request. Without it, 'Use Plain Fetch' fetches from the page itself,
+ *       which reaches 127.0.0.1 once Chrome's local network access is allowed
+ *       (confirmed 2026-10-20 on risuai.xyz, Chrome 155).
  *   no `interceptor`              - setting it to 'openai_streaming' is what
  *       selects PocketRisu's WebSocket proxy-job path, which batched the first
  *       four chunks of a stream together. Plain /proxy2 streams correctly.
@@ -71,7 +76,7 @@ export class Transport {
   private tokenSafe = false;
 
   configure(cfg: Config): void {
-    const url = (cfg.url || '').trim().replace(/\/+$/, '');
+    const url = normalizeBackendUrl(cfg.url || '');
     if (url !== this.cfg.url) {
       // A different backend has to re-earn the right to see the token.
       this.tokenSafe = false;
@@ -167,7 +172,8 @@ export class Transport {
       throw new BackendError(
         res.status,
         `백엔드에서 Risu Hina 응답을 받지 못했습니다 (${what}${raw ? ' · ' + raw : ''}). ` +
-        (relayFailureHint(raw, this.cfg.url)
+        ((this.platform === 'web' ? webRelayHint(this.cfg.url) : '')
+          || relayFailureHint(raw, this.cfg.url)
           || '주소가 다른 서버를 가리키거나 터널이 아직 안 열렸을 수 있습니다. ') +
         '잠시 뒤 자동으로 다시 시도합니다.',
         body,
@@ -383,7 +389,7 @@ export class Transport {
       if (!this.tokenSafe && this.platform === 'web') {
         // Refuse rather than risk relaying the token to a third party.
         throw new BackendError(0, '직접 연결이 확인되지 않아 토큰을 보내지 않았습니다. ' + (this.privateRefused
-          ? '웹 RisuAI 는 IP 주소의 백엔드에 연결할 수 없습니다 — 설정 → 연결의 URL 을 https 주소(tailscale serve 의 …ts.net 등)로 바꿔 주세요'
+          ? `RisuAI 가 이 주소로 가는 요청을 거절했습니다 — 플러그인을 최신으로 다시 넣고 ${PLAIN_FETCH} 를 켜 주세요`
           : '연결 진단을 먼저 실행해 주세요'));
       }
       headers['Authorization'] = 'Bearer ' + this.cfg.token;
@@ -392,7 +398,7 @@ export class Transport {
     const init: import('./risuai').NativeFetchOptions = {
       method,
       headers,
-      networkRoute: 'local_network',
+      networkRoute: this.platform === 'web' ? 'auto' : 'local_network',
     };
     if (opts.bytes) {
       headers['Content-Type'] = 'application/octet-stream';
@@ -510,6 +516,20 @@ export function localHttpsHint(url: string): string {
   return `로컬·사설 주소의 백엔드는 https 가 아니라 http 입니다 — ${url.trim().replace(/^https:/i, 'http:')} 로 바꿔 주세요.`;
 }
 
+/**
+ * The URL as typed, made absolute. "127.0.0.1:6020" without a scheme is a
+ * relative path to nativeFetch: on web RisuAI it fetched risuai.xyz's own
+ * index.html and the probe reported "HTTP 200 · <!DOCTYPE html>" (§1-117).
+ * A missing scheme becomes http:// - the backend serves plain HTTP; a
+ * tunnel's domain is typed with https:// in practice, and if not, the
+ * https-only host answers with its own error rather than a page.
+ */
+export function normalizeBackendUrl(raw: string): string {
+  let url = raw.trim().replace(/\/+$/, '');
+  if (url && !/^[a-z][a-z0-9+.-]*:\/\//i.test(url)) url = 'http://' + url.replace(/^\/+/, '');
+  return url;
+}
+
 export type AddressKind = 'loopback' | 'private' | 'tailscale' | 'domain' | 'invalid';
 
 /**
@@ -543,32 +563,47 @@ export function addressKind(url: string): { kind: AddressKind; scheme: string } 
  * The way out is an https host name. Returns the advice, or ''.
  */
 export function webPrivateHint(message: string, url: string): string {
-  // Keyed on the host's own refusal, not on the URL: older hosts, and plain
-  // fetch to 127.0.0.1 in some browsers, do reach a loopback backend.
+  // Keyed on the host's own refusal: the plugin no longer asks for that route
+  // on web, so this is an older plugin or an undetected platform.
   if (!/사설망 직접 호출 불가/.test(message)) return '';
   const { kind } = addressKind(url);
   const which = kind === 'tailscale' ? 'Tailscale IP(100.x)' : kind === 'private' ? '사설 IP(192.168·10.x 등)'
     : kind === 'loopback' ? '127.0.0.1·localhost' : '이 주소';
-  return `웹 RisuAI 는 ${which} 로 백엔드에 연결할 수 없습니다 — 기다리거나 Tailscale·VPN 을 켜도 바뀌지 않습니다. `
-    + '백엔드 PC 에서 tailscale serve 로 만든 https://<기기이름>.ts.net 주소나 Cloudflare 터널 같은 https 도메인을 '
-    + '설정 → 연결의 URL 에 넣거나, 같은 PC 라면 PocketRisu·RisuAI 데스크톱 앱에서 열어 주세요.';
+  return `RisuAI 가 ${which} 로 가는 요청을 보내기 전에 거절했습니다 — 기다리거나 VPN 을 켜도 바뀌지 않습니다. `
+    + `Risu Hina 플러그인을 최신으로 다시 넣고, ${PLAIN_FETCH} 를 켠 다음 브라우저가 묻는 "로컬 네트워크 액세스"를 허용해 주세요. `
+    + '다른 기기의 백엔드라면 tailscale serve 의 https://<기기이름>.ts.net 같은 https 주소가 가장 확실합니다.';
 }
+
+/** Where web RisuAI keeps "Use Plain Fetch" (hidden by default, Korean label). */
+export const PLAIN_FETCH = 'RisuAI 설정 → 고급 설정 → 비권장 설정 보이기 → "직접 요청 보내기"(Use Plain Fetch)';
 
 /**
  * Web RisuAI, an IP address, and the browser's own "Failed to fetch": the
- * request never left the page. Reproduced 2026-10-20 with a healthy backend on
- * the same PC (its /health and CORS preflight both fine from curl), so the
- * browser stopped it - Chrome asks before an https page reaches 127.0.0.1 or
- * the LAN (Local Network Access), and plain fetch off sends it to a relay that
- * cannot reach it either. Not a tunnel or VPN problem. Returns the advice, or ''.
+ * request never left the page. With plain fetch on, Chrome asks before an
+ * https page reaches 127.0.0.1 or the LAN (Local Network Access); declining,
+ * or a backend that is not running, ends here. Confirmed 2026-10-20: plain
+ * fetch + the permission connects web RisuAI to http://127.0.0.1:6020.
+ * Returns the advice, or ''.
  */
 export function webLocalFetchHint(message: string, url: string): string {
   if (!/Failed to fetch|NetworkError|Load failed/i.test(message)) return '';
   const { kind } = addressKind(url);
   if (kind !== 'loopback' && kind !== 'private' && kind !== 'tailscale') return '';
-  return '웹 RisuAI 에서 IP 주소의 백엔드로 가는 요청을 브라우저가 막았을 수 있습니다 — 백엔드가 켜져 있다면 '
-    + '주소창 자물쇠 → 사이트 설정에서 "로컬 네트워크 액세스"를 허용하고 RisuAI 의 Use Plain Fetch 를 켜 보세요. '
-    + '가장 확실한 길은 tailscale serve 의 https://<기기이름>.ts.net 같은 https 주소이고, 같은 PC 라면 PocketRisu·데스크톱 앱입니다.';
+  return '브라우저가 이 주소로 가는 요청을 막았거나 백엔드가 꺼져 있습니다 — 백엔드가 켜져 있다면 '
+    + '주소창 자물쇠 → 사이트 설정에서 "로컬 네트워크 액세스"를 허용해 주세요(거부했다면 여기서 다시 허용). '
+    + `${PLAIN_FETCH} 도 켜져 있어야 합니다.`;
+}
+
+/**
+ * Web RisuAI, an IP address, and something other than our backend answered:
+ * with plain fetch off the request went to RisuAI's relay server, which
+ * cannot reach a private address. Returns the advice, or ''.
+ */
+export function webRelayHint(url: string): string {
+  const { kind } = addressKind(url);
+  if (kind !== 'loopback' && kind !== 'private' && kind !== 'tailscale') return '';
+  return `요청이 RisuAI 중계 서버를 거쳐 이 주소에 닿지 못했습니다 — ${PLAIN_FETCH} 를 켜고, `
+    + '브라우저가 묻는 "로컬 네트워크 액세스"를 허용해 주세요. ';
 }
 
 /** Paths that work across versions: the ones an update needs. */

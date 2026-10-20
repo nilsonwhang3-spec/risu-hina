@@ -1,4 +1,6 @@
-# 06. Implementation status — as of 2026-10-18 (v0.15.49, Risu Hina)
+# 06. Implementation status — as of 2026-10-20 (v0.15.50, Risu Hina)
+
+## 0.15.50 (2026-10-20): §1-117 web RisuAI connects to a backend on 127.0.0.1
 
 ## 0.15.49 (2026-10-18): §1-116 an MCP add-on that lost a dependency reinstalls itself at startup
 
@@ -18,28 +20,30 @@
 
 ## 0.15.41 (2026-10-11): §1-103~105 shared snapshots, image store, proposal progress, 새 대화, workspace speed, renamed bot folders
 
-## §1-117 (2026-10-20): web RisuAI with an IP address says why it cannot connect
+## §1-117 (2026-10-20): web RisuAI connects to a backend on 127.0.0.1
 
 - **Field report (오류 제보 block):** web RisuAI, `연결 blocked`, twenty minutes of "백엔드에 닿지 못했습니다 (웹에서는
-  사설망 직접 호출 불가. Tauri 또는 LAN Node self-host 사용)". That text is the host's: web RisuAI's nativeFetch refuses a
-  private/loopback address before any request leaves. Our wrapping told the user to check the URL and VPN, that the
-  first connection can take 3 minutes, and that the panel retries every 30s - none of which can help. Tailscale
-  being up does not matter while the URL is an IP; only an https host name (tailscale serve `…ts.net`, a tunnel) does.
-- **Fix (plugin only):** `webPrivateHint` recognises the host's refusal and replaces the advice with the address
-  class and the https way out; `transport.refusedPrivate` stops the reconnect loop and hides the 3-minute note (a new
-  URL from 설정 → 연결 connects as before); the token-refusal notice that followed says the same. The 오류 제보 block now
-  carries `주소 <loopback|private|tailscale|domain|invalid>/<scheme>` - the masked report could not show which it was.
-  README's web RisuAI connection line no longer reads as if `http://<Tailscale IP>` works there.
-- Keyed on the host message, not the URL: older hosts and some browsers' plain fetch to 127.0.0.1 do connect.
-- **Second case, reproduced by the user the same day:** web RisuAI + `http://127.0.0.1:6020` on the backend's own PC
-  gives "Failed to fetch", not the host refusal - so loopback is not refused by the host, and the reporter most likely
-  used a LAN or Tailscale IP. curl from that PC: POST /health 200, preflight 204 with CORS headers - the browser
-  stopped it (most likely Chrome's Local Network Access permission; not confirmed). `webLocalFetchHint` (web, IP
-  address, Failed to fetch / NetworkError / Load failed) points at the site permission and Use Plain Fetch and
-  names the https address as the sure way; the loop keeps retrying here, since granting the permission can fix it.
-  The 3-minute proxy-fallback note now shows only for a domain URL.
-- Verified: `tests/connect_hints.mjs` (hint per address class, other failures untouched, addressKind table); not
-  run against a live web RisuAI.
+  사설망 직접 호출 불가. Tauri 또는 LAN Node self-host 사용)", wrapped in our "check the URL and VPN / first connection
+  takes 3 minutes / retrying every 30s" - none of which could help.
+- **Cause (read from the RisuAI source and the bundle risuai.xyz serves):** `fetchNative` with
+  `networkRoute: 'local_network'` throws that message on web for any localhost / 127.0.0.1 / 10.x / 172.16-31 /
+  192.168 / 169.254 / `.local` / dotless host, before any request. The plugin set that route on every request (it
+  made PocketRisu's relay 2.3s faster). So on web RisuAI the plugin itself made every local backend unreachable.
+- **Fix:** on `platform === 'web'` the route is `'auto'`. With RisuAI's "직접 요청 보내기" (Use Plain Fetch; 고급 설정 →
+  비권장 설정 보이기) the page fetches the backend itself; Chrome asks for Local Network Access once. Plain fetch off
+  -> the request goes to sv.risuai.xyz, which cannot reach it, the signature check fails and the token is never
+  sent (the leak guard is unchanged).
+- **Second find, same session:** a URL typed without a scheme (`127.0.0.1:6020`) is a relative path to nativeFetch;
+  web RisuAI fetched its own index.html and the probe said "HTTP 200 · <!DOCTYPE html>". `normalizeBackendUrl`
+  prefixes `http://`.
+- Hints: the host refusal (older plugin / undetected platform) -> update the plugin, plain fetch, permission, and the
+  reconnect loop stops (`transport.refusedPrivate`); web + IP + "Failed to fetch" -> the site's local network
+  permission; web + IP + a foreign answer -> plain fetch is off. The 3-minute note shows only for a domain URL. The
+  오류 제보 block carries `주소 <loopback|private|tailscale|domain|invalid>/<scheme>` - `invalid` is what gave away the
+  missing scheme. README / RELEASE_README name the setting by its Korean label and say 127.0.0.1 works on web.
+- Verified: the user, web RisuAI (risuai.xyz) + Chrome 155 + this PC's backend at `http://127.0.0.1:6020`: the
+  permission prompt appeared and the panel connected. Before that, from an https page, `POST /health` returned 200
+  once the permission was granted and hung on the prompt before. `tests/connect_hints.mjs`.
 
 ## §1-116 (2026-10-18): an MCP add-on that lost a dependency reinstalls itself at startup
 

@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.15.49
+//@display-name Risu Hina v0.15.50
 //@api 3.0
-//@version 0.15.49
+//@version 0.15.50
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -87,10 +87,48 @@
       return "";
     }
     if (u.protocol !== "https:") return "";
-    const host = u.hostname.replace(/^\[|\]$/g, "").toLowerCase();
-    const local = host === "localhost" || host.endsWith(".localhost") || host === "::1" || /^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host) || /^172\.(1[6-9]|2\d|3[01])\./.test(host) || /^169\.254\./.test(host) || /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(host);
-    if (!local) return "";
+    if (addressKind(url).kind === "domain") return "";
     return `\uB85C\uCEEC\xB7\uC0AC\uC124 \uC8FC\uC18C\uC758 \uBC31\uC5D4\uB4DC\uB294 https \uAC00 \uC544\uB2C8\uB77C http \uC785\uB2C8\uB2E4 \u2014 ${url.trim().replace(/^https:/i, "http:")} \uB85C \uBC14\uAFD4 \uC8FC\uC138\uC694.`;
+  }
+  function normalizeBackendUrl(raw) {
+    let url = raw.trim().replace(/\/+$/, "");
+    if (url && !/^[a-z][a-z0-9+.-]*:\/\//i.test(url)) url = "http://" + url.replace(/^\/+/, "");
+    return url;
+  }
+  function addressKind(url) {
+    let u;
+    try {
+      u = new URL(url.trim());
+    } catch {
+      return { kind: "invalid", scheme: "" };
+    }
+    const scheme = u.protocol.replace(/:$/, "");
+    const host = u.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+    if (host === "localhost" || host.endsWith(".localhost") || host === "::1" || /^127\./.test(host)) {
+      return { kind: "loopback", scheme };
+    }
+    if (/^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(host)) return { kind: "tailscale", scheme };
+    if (/^10\./.test(host) || /^192\.168\./.test(host) || /^172\.(1[6-9]|2\d|3[01])\./.test(host) || /^169\.254\./.test(host) || /^f[cd][0-9a-f]{2}:/.test(host) || /^fe80:/.test(host)) {
+      return { kind: "private", scheme };
+    }
+    return { kind: "domain", scheme };
+  }
+  function webPrivateHint(message, url) {
+    if (!/사설망 직접 호출 불가/.test(message)) return "";
+    const { kind } = addressKind(url);
+    const which = kind === "tailscale" ? "Tailscale IP(100.x)" : kind === "private" ? "\uC0AC\uC124 IP(192.168\xB710.x \uB4F1)" : kind === "loopback" ? "127.0.0.1\xB7localhost" : "\uC774 \uC8FC\uC18C";
+    return `RisuAI \uAC00 ${which} \uB85C \uAC00\uB294 \uC694\uCCAD\uC744 \uBCF4\uB0B4\uAE30 \uC804\uC5D0 \uAC70\uC808\uD588\uC2B5\uB2C8\uB2E4 \u2014 \uAE30\uB2E4\uB9AC\uAC70\uB098 VPN \uC744 \uCF1C\uB3C4 \uBC14\uB00C\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4. Risu Hina \uD50C\uB7EC\uADF8\uC778\uC744 \uCD5C\uC2E0\uC73C\uB85C \uB2E4\uC2DC \uB123\uACE0, ${PLAIN_FETCH} \uB97C \uCF20 \uB2E4\uC74C \uBE0C\uB77C\uC6B0\uC800\uAC00 \uBB3B\uB294 "\uB85C\uCEEC \uB124\uD2B8\uC6CC\uD06C \uC561\uC138\uC2A4"\uB97C \uD5C8\uC6A9\uD574 \uC8FC\uC138\uC694. \uB2E4\uB978 \uAE30\uAE30\uC758 \uBC31\uC5D4\uB4DC\uB77C\uBA74 tailscale serve \uC758 https://<\uAE30\uAE30\uC774\uB984>.ts.net \uAC19\uC740 https \uC8FC\uC18C\uAC00 \uAC00\uC7A5 \uD655\uC2E4\uD569\uB2C8\uB2E4.`;
+  }
+  function webLocalFetchHint(message, url) {
+    if (!/Failed to fetch|NetworkError|Load failed/i.test(message)) return "";
+    const { kind } = addressKind(url);
+    if (kind !== "loopback" && kind !== "private" && kind !== "tailscale") return "";
+    return `\uBE0C\uB77C\uC6B0\uC800\uAC00 \uC774 \uC8FC\uC18C\uB85C \uAC00\uB294 \uC694\uCCAD\uC744 \uB9C9\uC558\uAC70\uB098 \uBC31\uC5D4\uB4DC\uAC00 \uAEBC\uC838 \uC788\uC2B5\uB2C8\uB2E4 \u2014 \uBC31\uC5D4\uB4DC\uAC00 \uCF1C\uC838 \uC788\uB2E4\uBA74 \uC8FC\uC18C\uCC3D \uC790\uBB3C\uC1E0 \u2192 \uC0AC\uC774\uD2B8 \uC124\uC815\uC5D0\uC11C "\uB85C\uCEEC \uB124\uD2B8\uC6CC\uD06C \uC561\uC138\uC2A4"\uB97C \uD5C8\uC6A9\uD574 \uC8FC\uC138\uC694(\uAC70\uBD80\uD588\uB2E4\uBA74 \uC5EC\uAE30\uC11C \uB2E4\uC2DC \uD5C8\uC6A9). ${PLAIN_FETCH} \uB3C4 \uCF1C\uC838 \uC788\uC5B4\uC57C \uD569\uB2C8\uB2E4.`;
+  }
+  function webRelayHint(url) {
+    const { kind } = addressKind(url);
+    if (kind !== "loopback" && kind !== "private" && kind !== "tailscale") return "";
+    return `\uC694\uCCAD\uC774 RisuAI \uC911\uACC4 \uC11C\uBC84\uB97C \uAC70\uCCD0 \uC774 \uC8FC\uC18C\uC5D0 \uB2FF\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4 \u2014 ${PLAIN_FETCH} \uB97C \uCF1C\uACE0, \uBE0C\uB77C\uC6B0\uC800\uAC00 \uBB3B\uB294 "\uB85C\uCEEC \uB124\uD2B8\uC6CC\uD06C \uC561\uC138\uC2A4"\uB97C \uD5C8\uC6A9\uD574 \uC8FC\uC138\uC694. `;
   }
   function backendBehind(plugin, backend, installKind = "") {
     const v = (s) => s.split(".").map((x) => parseInt(x, 10) || 0);
@@ -123,7 +161,7 @@
   function clientLog(level, event, detail) {
     return transport.post("/clientlog", { level, event, detail }).then(() => void 0).catch(() => void 0);
   }
-  var BackendError, SIGNATURE, DEFAULT_TIMEOUT_MS, UPLOAD_TIMEOUT_MS, Transport, GATE_EXEMPT, transport;
+  var BackendError, SIGNATURE, DEFAULT_TIMEOUT_MS, UPLOAD_TIMEOUT_MS, Transport, PLAIN_FETCH, GATE_EXEMPT, transport;
   var init_transport = __esm({
     "src/transport.ts"() {
       "use strict";
@@ -145,11 +183,12 @@
         lastHealth = null;
         tokenSafe = false;
         configure(cfg) {
-          const url = (cfg.url || "").trim().replace(/\/+$/, "");
+          const url = normalizeBackendUrl(cfg.url || "");
           if (url !== this.cfg.url) {
             this.tokenSafe = false;
             this.route = "unknown";
             this.lastHealth = null;
+            this.privateRefused = false;
           }
           this.cfg = { url, token: (cfg.token || "").trim() };
         }
@@ -168,6 +207,15 @@
         get tokenAttached() {
           return this.tokenSafe;
         }
+        /**
+         * Web RisuAI refused the configured address outright (a private or loopback
+         * IP). Retrying cannot help - only a different URL can - so the reconnect
+         * loop stops and the "wait 3 minutes" advice is not shown.
+         */
+        get refusedPrivate() {
+          return this.privateRefused;
+        }
+        privateRefused = false;
         async detectPlatform() {
           try {
             const info = await Risuai.getRuntimeInfo();
@@ -186,6 +234,7 @@
         async connect() {
           if (!this.cfg.url) throw new BackendError(0, "\uBC31\uC5D4\uB4DC URL\uC774 \uC124\uC815\uB418\uC5B4 \uC788\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4");
           if (this.platform === "unknown") await this.detectPlatform();
+          this.privateRefused = false;
           let res;
           try {
             res = await this.probe();
@@ -194,10 +243,16 @@
             this.route = "blocked";
             this.tokenSafe = false;
             const why = e instanceof Error ? e.message : String(e);
+            const web = webPrivateHint(why, this.cfg.url);
+            if (web) {
+              this.privateRefused = true;
+              throw new BackendError(0, `\uBC31\uC5D4\uB4DC\uC5D0 \uB2FF\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4 (${why}). ${web}`);
+            }
             const https = localHttpsHint(this.cfg.url);
+            const browser = this.platform === "web" ? webLocalFetchHint(why, this.cfg.url) : "";
             throw new BackendError(
               0,
-              `\uBC31\uC5D4\uB4DC\uC5D0 \uB2FF\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4 (${explainFetchFailure(why)}). ` + (https ? https + " " : "URL \uC774 \uB9DE\uB294\uC9C0, \uD130\uB110\xB7VPN \uC774 \uC5F4\uB824 \uC788\uB294\uC9C0 \uD655\uC778\uD574 \uC8FC\uC138\uC694. ") + "\uC7A0\uC2DC \uB4A4 \uC790\uB3D9\uC73C\uB85C \uB2E4\uC2DC \uC2DC\uB3C4\uD569\uB2C8\uB2E4."
+              `\uBC31\uC5D4\uB4DC\uC5D0 \uB2FF\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4 (${explainFetchFailure(why)}). ` + (https ? https + " " : browser ? browser + " " : "URL \uC774 \uB9DE\uB294\uC9C0, \uD130\uB110\xB7VPN \uC774 \uC5F4\uB824 \uC788\uB294\uC9C0 \uD655\uC778\uD574 \uC8FC\uC138\uC694. ") + "\uC7A0\uC2DC \uB4A4 \uC790\uB3D9\uC73C\uB85C \uB2E4\uC2DC \uC2DC\uB3C4\uD569\uB2C8\uB2E4."
             );
           }
           const body = await readJson(res);
@@ -216,7 +271,7 @@
             ].filter(Boolean).join(" \xB7 ");
             throw new BackendError(
               res.status,
-              `\uBC31\uC5D4\uB4DC\uC5D0\uC11C Risu Hina \uC751\uB2F5\uC744 \uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4 (${what}${raw ? " \xB7 " + raw : ""}). ` + (relayFailureHint(raw, this.cfg.url) || "\uC8FC\uC18C\uAC00 \uB2E4\uB978 \uC11C\uBC84\uB97C \uAC00\uB9AC\uD0A4\uAC70\uB098 \uD130\uB110\uC774 \uC544\uC9C1 \uC548 \uC5F4\uB838\uC744 \uC218 \uC788\uC2B5\uB2C8\uB2E4. ") + "\uC7A0\uC2DC \uB4A4 \uC790\uB3D9\uC73C\uB85C \uB2E4\uC2DC \uC2DC\uB3C4\uD569\uB2C8\uB2E4.",
+              `\uBC31\uC5D4\uB4DC\uC5D0\uC11C Risu Hina \uC751\uB2F5\uC744 \uBC1B\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4 (${what}${raw ? " \xB7 " + raw : ""}). ` + ((this.platform === "web" ? webRelayHint(this.cfg.url) : "") || relayFailureHint(raw, this.cfg.url) || "\uC8FC\uC18C\uAC00 \uB2E4\uB978 \uC11C\uBC84\uB97C \uAC00\uB9AC\uD0A4\uAC70\uB098 \uD130\uB110\uC774 \uC544\uC9C1 \uC548 \uC5F4\uB838\uC744 \uC218 \uC788\uC2B5\uB2C8\uB2E4. ") + "\uC7A0\uC2DC \uB4A4 \uC790\uB3D9\uC73C\uB85C \uB2E4\uC2DC \uC2DC\uB3C4\uD569\uB2C8\uB2E4.",
               body
             );
           }
@@ -229,7 +284,7 @@
           this.tokenSafe = true;
           this.lastHealth = body;
           this.probeInfo = "";
-          this.gate = versionGate("0.15.49", String(body.version || ""));
+          this.gate = versionGate("0.15.50", String(body.version || ""));
           return body;
         }
         /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -401,14 +456,14 @@
           const wantToken = opts.withToken !== false;
           if (wantToken && this.cfg.token) {
             if (!this.tokenSafe && this.platform === "web") {
-              throw new BackendError(0, "\uC9C1\uC811 \uC5F0\uACB0\uC774 \uD655\uC778\uB418\uC9C0 \uC54A\uC544 \uD1A0\uD070\uC744 \uBCF4\uB0B4\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4. \uC5F0\uACB0 \uC9C4\uB2E8\uC744 \uBA3C\uC800 \uC2E4\uD589\uD574 \uC8FC\uC138\uC694");
+              throw new BackendError(0, "\uC9C1\uC811 \uC5F0\uACB0\uC774 \uD655\uC778\uB418\uC9C0 \uC54A\uC544 \uD1A0\uD070\uC744 \uBCF4\uB0B4\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4. " + (this.privateRefused ? `RisuAI \uAC00 \uC774 \uC8FC\uC18C\uB85C \uAC00\uB294 \uC694\uCCAD\uC744 \uAC70\uC808\uD588\uC2B5\uB2C8\uB2E4 \u2014 \uD50C\uB7EC\uADF8\uC778\uC744 \uCD5C\uC2E0\uC73C\uB85C \uB2E4\uC2DC \uB123\uACE0 ${PLAIN_FETCH} \uB97C \uCF1C \uC8FC\uC138\uC694` : "\uC5F0\uACB0 \uC9C4\uB2E8\uC744 \uBA3C\uC800 \uC2E4\uD589\uD574 \uC8FC\uC138\uC694"));
             }
             headers["Authorization"] = "Bearer " + this.cfg.token;
           }
           const init = {
             method,
             headers,
-            networkRoute: "local_network"
+            networkRoute: this.platform === "web" ? "auto" : "local_network"
           };
           if (opts.bytes) {
             headers["Content-Type"] = "application/octet-stream";
@@ -425,6 +480,7 @@
           return await withDeadline(call, path, budget);
         }
       };
+      PLAIN_FETCH = 'RisuAI \uC124\uC815 \u2192 \uACE0\uAE09 \uC124\uC815 \u2192 \uBE44\uAD8C\uC7A5 \uC124\uC815 \uBCF4\uC774\uAE30 \u2192 "\uC9C1\uC811 \uC694\uCCAD \uBCF4\uB0B4\uAE30"(Use Plain Fetch)';
       GATE_EXEMPT = /* @__PURE__ */ new Set(["/health", "/update/check", "/update/apply", "/plugin", "/logs", "/diag", "/config"]);
       transport = new Transport();
     }
@@ -12372,7 +12428,9 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       root2.appendChild(el("div", { class: "notice err" }, [
         el("div", { text: "\uBC31\uC5D4\uB4DC\uC5D0 \uC5F0\uACB0\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4." }),
         el("div", { class: "hint", text: state.connectError }),
-        transport.hostPlatform === "web" ? el("div", { class: "hint", style: { marginTop: "4px" }, text: "\uC6F9 RisuAI(risuai.xyz)\uC5D0\uC11C\uB294 \uCD5C\uCD08 \uC5F0\uACB0\uAE4C\uC9C0 3\uBD84 \uC815\uB3C4 \uAC78\uB9B4 \uC218 \uC788\uC2B5\uB2C8\uB2E4 (\uD504\uB85D\uC2DC \u2192 \uC9C1\uC811 \uC5F0\uACB0 \uD3F4\uBC31\uC5D0 \uAC78\uB9AC\uB294 \uC2DC\uAC04). \uD328\uB110\uC774 30\uCD08\uB9C8\uB2E4 \uC790\uB3D9\uC73C\uB85C \uB2E4\uC2DC \uC2DC\uB3C4\uD558\uB2C8 \uADF8\uB300\uB85C \uB450\uC154\uB3C4 \uB429\uB2C8\uB2E4." }) : null,
+        // The proxy-then-direct wait is a domain's; an IP address on web is
+        // refused or blocked by the browser, and the error says why (§1-117).
+        transport.hostPlatform === "web" && addressKind(transport.config.url).kind === "domain" ? el("div", { class: "hint", style: { marginTop: "4px" }, text: "\uC6F9 RisuAI(risuai.xyz)\uC5D0\uC11C\uB294 \uCD5C\uCD08 \uC5F0\uACB0\uAE4C\uC9C0 3\uBD84 \uC815\uB3C4 \uAC78\uB9B4 \uC218 \uC788\uC2B5\uB2C8\uB2E4 (\uD504\uB85D\uC2DC \u2192 \uC9C1\uC811 \uC5F0\uACB0 \uD3F4\uBC31\uC5D0 \uAC78\uB9AC\uB294 \uC2DC\uAC04). \uD328\uB110\uC774 30\uCD08\uB9C8\uB2E4 \uC790\uB3D9\uC73C\uB85C \uB2E4\uC2DC \uC2DC\uB3C4\uD558\uB2C8 \uADF8\uB300\uB85C \uB450\uC154\uB3C4 \uB429\uB2C8\uB2E4." }) : null,
         el("div", { class: "row", style: { marginTop: "6px" } }, [
           el("span", { class: "hint", text: "\uC124\uC815 \u2192 \uC5F0\uACB0\uC5D0\uC11C URL\uACFC \uD1A0\uD070\uC744 \uD655\uC778\uD574 \uC8FC\uC138\uC694." }),
           go
@@ -18437,11 +18495,12 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       diag = null;
     }
     const backend = diag ? `v${String(diag["version"] ?? "?")}` : `\uC5F0\uACB0 \uC548 \uB428 (${state.connectError || "\uC751\uB2F5 \uC5C6\uC74C"})`;
-    lines.push(`\uBC84\uC804: \uD50C\uB7EC\uADF8\uC778 v${"0.15.49"} \xB7 \uBC31\uC5D4\uB4DC ${backend}`);
+    lines.push(`\uBC84\uC804: \uD50C\uB7EC\uADF8\uC778 v${"0.15.50"} \xB7 \uBC31\uC5D4\uB4DC ${backend}`);
     const health = state.health ?? {};
     lines.push("\uD658\uACBD: " + [
       `RisuAI ${transport.hostPlatform || "?"}`,
       `\uC5F0\uACB0 ${transport.routeKind || "?"}`,
+      addressLabel(transport.config.url),
       diag ? `\uC11C\uBC84 ${String(diag["platform"] ?? "?")}/py${String(diag["python"] ?? "?")}` : "",
       health["installKind"] ? `\uC124\uCE58 ${String(health["installKind"])}` : "",
       window.innerWidth ? `\uD654\uBA74 ${window.innerWidth}x${window.innerHeight}` : "",
@@ -18493,6 +18552,11 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     const d = new Date(t);
     return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
   }
+  function addressLabel(url) {
+    if (!url) return "\uC8FC\uC18C \uC5C6\uC74C";
+    const { kind, scheme } = addressKind(url);
+    return `\uC8FC\uC18C ${kind}${scheme ? "/" + scheme : ""}`;
+  }
   function shortUa(ua) {
     const os = /Android [\d.]+|iPhone OS [\d_]+|iPad|Windows NT [\d.]+|Mac OS X [\d_]+|Linux/.exec(ua)?.[0] ?? "";
     const br = /(Edg|Chrome|Firefox|Version)\/[\d]+/.exec(ua)?.[0] ?? "";
@@ -18531,10 +18595,10 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           return;
         }
         if (!r.newer) {
-          const mismatch = r.current !== "0.15.49";
+          const mismatch = r.current !== "0.15.50";
           const ahead = r.ahead ?? (!!r.latest && r.latest !== r.current);
           say(
-            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.49"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
+            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.50"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
             mismatch || ahead ? "" : "ok"
           );
           return;
@@ -18627,7 +18691,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.15.49",
+            version: "0.15.50",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -19650,7 +19714,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
             el("div", { text: "web RisuAI\uC5D0\uC11C \uC9C1\uC811 \uC5F0\uACB0\uC774 \uD655\uC778\uB418\uC9C0 \uC54A\uC544 \uD1A0\uD070\uC744 \uBCF4\uB0B4\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4." }),
             el("div", {
               class: "hint",
-              text: "\uB300\uAC1C\uB294 \uBC31\uC5D4\uB4DC \uC55E\uC758 \uD130\uB110\xB7VPN \uC774 \uC544\uC9C1 \uC548 \uC5F4\uB9B0 \uAC83\uC774\uACE0, \uD328\uB110\uC774 30\uCD08\uB9C8\uB2E4 \uB2E4\uC2DC \uC2DC\uB3C4\uD569\uB2C8\uB2E4. \uACC4\uC18D \uC2E4\uD328\uD558\uBA74 \uC704\uC5D0 \uC778\uC6A9\uB41C \uC751\uB2F5\uC744 \uBCF4\uC138\uC694 \u2014 HTML \uC774\uB098 \uB2E4\uB978 \uC11C\uBC84\uC758 \uB2F5\uC774\uBA74 URL \uC774 \uC798\uBABB\uB41C \uAC83\uC774\uACE0, sv.risuai.xyz \uC758 \uC624\uB958\uBA74 RisuAI \uC124\uC815\uC758 Use Plain Fetch \uAC00 \uAEBC\uC838 \uC694\uCCAD\uC774 \uB9B4\uB808\uC774\uB41C \uAC83\uC785\uB2C8\uB2E4."
+              text: '\uB300\uAC1C\uB294 \uBC31\uC5D4\uB4DC \uC55E\uC758 \uD130\uB110\xB7VPN \uC774 \uC544\uC9C1 \uC548 \uC5F4\uB9B0 \uAC83\uC774\uACE0, \uD328\uB110\uC774 30\uCD08\uB9C8\uB2E4 \uB2E4\uC2DC \uC2DC\uB3C4\uD569\uB2C8\uB2E4. \uACC4\uC18D \uC2E4\uD328\uD558\uBA74 \uC704\uC5D0 \uC778\uC6A9\uB41C \uC751\uB2F5\uC744 \uBCF4\uC138\uC694 \u2014 HTML \uC774\uB098 \uB2E4\uB978 \uC11C\uBC84\uC758 \uB2F5\uC774\uBA74 URL \uC774 \uC798\uBABB\uB41C \uAC83\uC774\uACE0, sv.risuai.xyz \uC758 \uC624\uB958\uBA74 RisuAI \uC758 \uACE0\uAE09 \uC124\uC815 \u2192 \uBE44\uAD8C\uC7A5 \uC124\uC815 \uBCF4\uC774\uAE30 \u2192 "\uC9C1\uC811 \uC694\uCCAD \uBCF4\uB0B4\uAE30"(Use Plain Fetch)\uAC00 \uAEBC\uC838 \uC694\uCCAD\uC774 \uB9B4\uB808\uC774\uB41C \uAC83\uC785\uB2C8\uB2E4.'
             })
           ]));
         }
@@ -20064,7 +20128,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.49"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.50"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -28092,14 +28156,14 @@ ${negative.value.trim()}
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.49"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.50"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
       healthEl.title = transport.versionGate;
     } else {
       healthEl.appendChild(el("span", { class: "hint", text: `\uBC31\uC5D4\uB4DC v${h.version}` }));
-      const behind = backendBehind("0.15.49", h.version, h.installKind);
+      const behind = backendBehind("0.15.50", h.version, h.installKind);
       if (behind) {
         const b = el("button", { class: "ghost tiny behindchip", text: "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8 \uD544\uC694", title: behind });
         b.addEventListener("click", () => {
@@ -28200,7 +28264,7 @@ ${negative.value.trim()}
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.15.49" }),
+        el("span", { class: "dim", text: "v0.15.50" }),
         healthEl,
         el("span", { class: "spacer" }),
         // 승인 / 반영 for the whole bot, from every tab (§1-76).
@@ -28402,6 +28466,10 @@ ${negative.value.trim()}
     const tick2 = async () => {
       reconnectTimer = null;
       if (state.health) return;
+      if (transport.refusedPrivate) {
+        refreshStatus();
+        return;
+      }
       reconnectAttempts += 1;
       const lastError = state.connectError;
       const lastProbe = transport.probeInfo;
@@ -28558,6 +28626,6 @@ ${negative.value.trim()}
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.15.49"} loaded`);
+    console.log(`[risu-hina] v${"0.15.50"} loaded`);
   })();
 })();
