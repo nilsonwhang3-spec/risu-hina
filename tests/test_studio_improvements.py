@@ -64,7 +64,7 @@ class Improvements(unittest.TestCase):
         self.assertFalse(manifest["unresolved"])
         paths = {e["path"] for e in manifest["files"]}
         self.assertEqual({p.split('/')[1] for p in paths if p.startswith('fragments/')},
-                         {"표정", "체위", "랜덤섹스.md"})
+                         {"표정"})
         self.assertEqual({p for p in paths if not p.startswith('fragments/')},
                          {"styles/오피스카운셀링.md"})
         actual = {p.relative_to(studiodefaults.SOURCE).as_posix()
