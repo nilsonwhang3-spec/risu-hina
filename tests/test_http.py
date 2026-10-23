@@ -353,6 +353,12 @@ def test_dispatcher(s: Server) -> None:
     check("wrong token is 401", st == 401, str(st))
     st, body = s.post("/workspace", {"charId": "x", "chat": {"message": "nope"}})
     check("bad payload is 400 not 500", st == 400, f"{st} {body}")
+    # Reattach to a turn that is not running (§1-119): 404, which the panel
+    # turns back into the error that broke the stream; still behind the token.
+    st, body = s.post("/chat/attach", {"sessionId": "no-such-session", "after": 3})
+    check("attach to no running turn is 404", st == 404 and "error" in body, f"{st} {body}")
+    st, _ = s.post("/chat/attach", {"sessionId": "x"}, token=None)
+    check("attach needs the token", st == 401, str(st))
 
 
 def test_multi_chat_workspace(s: Server) -> dict:

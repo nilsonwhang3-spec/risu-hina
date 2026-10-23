@@ -730,6 +730,83 @@ async def run(session_id: str, prompt: str, mode: str = "", persona: str = "", *
             _ACTIVE.pop(session_id, None)
 
 
+class _Turn:
+    """One /chat turn's NDJSON lines, kept apart from the HTTP response that
+    carries them (§1-119). A connection can die mid-turn for reasons the
+    turn has no part in - RisuAI desktop (Tauri) gives every native fetch a
+    240s total timeout, a proxy has its own - and the turn used to die with
+    it. Now the turn runs to its end in a task of its own and the panel picks
+    the stream up again from the line it last read (POST /chat/attach)."""
+
+    def __init__(self) -> None:
+        self.lines: list[str] = []
+        self.done = False
+        self.changed = asyncio.Event()
+        self.task: asyncio.Task | None = None
+
+
+_TURNS: dict[str, _Turn] = {}
+# How long a finished turn's lines stay for a panel that is reconnecting.
+TURN_KEEP_S = 300.0
+
+
+def start_turn(session_id: str, prompt: str, mode: str = "", persona: str = "", **kw: Any) -> _Turn:
+    """Start `run` in its own task, buffering its lines; follow() reads them."""
+    turn = _Turn()
+    _TURNS[session_id] = turn
+
+    async def pump() -> None:
+        try:
+            async for line in run(session_id, prompt, mode, persona, **kw):
+                turn.lines.append(line)
+                turn.changed.set()
+        except BaseException as e:  # noqa: BLE001 - shutdown cancels the task
+            if isinstance(e, Exception):
+                log.exception(f"agent turn pump failed session={session_id}")
+                turn.lines.append(_line({"type": "error", "error": _explain(e)}))
+            else:
+                raise
+        finally:
+            turn.done = True
+            turn.changed.set()
+            await asyncio.sleep(TURN_KEEP_S)
+            if _TURNS.get(session_id) is turn:
+                _TURNS.pop(session_id, None)
+
+    turn.task = asyncio.ensure_future(pump())
+    return turn
+
+
+def turn_for(session_id: str) -> _Turn | None:
+    return _TURNS.get(session_id)
+
+
+async def follow(turn: _Turn, after: int = 0) -> AsyncGenerator[str, None]:
+    """Yield the turn's lines from index `after` on, waiting for new ones until
+    the turn ends. A client that goes away only stops this generator; the
+    turn itself goes on (중단 is POST /agent/stop)."""
+    i = max(0, after)
+    last_out = time.monotonic()
+    while True:
+        while i < len(turn.lines):
+            yield turn.lines[i]
+            i += 1
+            last_out = time.monotonic()
+        if turn.done:
+            return
+        turn.changed.clear()
+        if i < len(turn.lines):
+            continue
+        try:
+            await asyncio.wait_for(turn.changed.wait(), 1.0)
+        except asyncio.TimeoutError:
+            # The run loop pings on its own; this covers a reattach that
+            # lands while the turn waits on something silent.
+            if time.monotonic() - last_out >= PING_EVERY_S:
+                last_out = time.monotonic()
+                yield _line({"type": "ping"})
+
+
 def _save_partial_history(session_id: str, prompt: str, partial: str, why: str,
                           since: int | None = None, captured: list | None = None) -> None:
     try:

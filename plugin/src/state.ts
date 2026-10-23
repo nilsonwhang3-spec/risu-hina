@@ -52,6 +52,8 @@ import type { RisuChat, RisuCharacter, RisuMessage } from './risuai';
 
 /** The tabs that show a card - the bot's, or a module's while one is the target. */
 const CARD_TABS = new Set(['meta', 'botlore', 'regex', 'trigger', 'assets']);
+// Reattaches in a row without a line read in between (§1-119).
+const ATTACH_RETRIES = 5;
 
 export interface ChatInfo {
   chatKey: string;
@@ -2317,8 +2319,17 @@ class AppState {
     if (this.liveModules === null && this.editMode !== 'chat' && !this.moduleLoading) {
       await this.loadModules().catch(() => undefined);
     }
-    yield* transport.stream('/chat', {
-      sessionId: this.sessionId, prompt,
+    const sessionId = this.sessionId;
+    // The turn outlives its connection (§1-119): RisuAI desktop ends every
+    // native fetch after 240s, a proxy may cut sooner. A stream that breaks
+    // before 'done' / 'error' is picked up again from the last line read;
+    // the backend kept the turn running and the lines it wrote meanwhile.
+    let read = 0;
+    let ended = false;
+    let retries = 0;
+    let cause: unknown = null;
+    let body: unknown = {
+      sessionId, prompt,
       mode: this.agentMode,
       // Which persona the persona tab has open (§1-89); the agent is told.
       persona: this.editMode === 'persona' ? (this.persona?.key ?? '') : '',
@@ -2326,7 +2337,35 @@ class AppState {
       target: this.cardTarget,
       modules: this.openModules.map((m) => m.key),
       linked: this.linkedNotOpen,
-    }, signal);
+    };
+    let path = '/chat';
+    for (;;) {
+      try {
+        for await (const ev of transport.stream(path, body, signal)) {
+          read++;
+          retries = 0;
+          const type = (ev as { type?: unknown })?.type;
+          if (type === 'done' || type === 'error') ended = true;
+          yield ev;
+        }
+        if (ended || signal?.aborted) return;
+        // A clean end without 'done': a proxy closed the response. Same as a break.
+        throw new Error('network error');
+      } catch (e) {
+        // Before the first line the turn may not exist yet: nothing to resume.
+        // 404 from attach: the turn is gone (or an older backend has no
+        // attach) - the break that sent us here is the error worth showing.
+        if (e instanceof BackendError && path === '/chat/attach' && e.status === 404) throw cause ?? e;
+        if (signal?.aborted || ended || read === 0 || retries >= ATTACH_RETRIES) throw e;
+        cause ??= e;
+        retries++;
+        await new Promise((r) => setTimeout(r, Math.min(1000 * retries, 5000)));
+        if (signal?.aborted) throw e;
+        void clientLog('info', 'agent stream reattach', { after: read, retry: retries, error: String(e) });
+        path = '/chat/attach';
+        body = { sessionId, after: read };
+      }
+    }
   }
 
   /** 중단 as a request the backend hears at once (§1-44): the aborted fetch

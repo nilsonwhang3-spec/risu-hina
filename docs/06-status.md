@@ -22,6 +22,30 @@
 
 ## 0.15.41 (2026-10-11): §1-103~105 shared snapshots, image store, proposal progress, 새 대화, workspace speed, renamed bot folders
 
+## §1-119 (2026-10-24): an AI turn survives its connection; the panel reattaches
+
+- **Field reports (오류 제보):** (1) Vertex Gemini, cut at exactly 1m 0s with `network error` - the 2026-10-18 report
+  §1-114 already fixed (pings), sent again. (2) Vertex Gemini on a 100K-token request, cut at exactly **4m 0s**:
+  `POST /chat` 06:40:06, `agent turn cut off (CancelledError)` 06:44:06, with a run_python result in between, so
+  the stream was not silent and pings could not help.
+- **Cause (RisuAI source, `src-tauri/src/main.rs` `streamed_fetch`):** RisuAI desktop sends a plugin's
+  `nativeFetch` through reqwest with `.timeout(timeout_secs.unwrap_or(240))`, and reqwest's timeout covers the
+  whole response body. The JS side passes the key as `timeout_secs`, which Tauri 2 by default does not map to the snake_case
+  parameter (it expects `timeoutSecs`; not verified on a desktop build), so even a `requestTimeoutMs` would likely not lift it. Node self-host
+  `/proxy2` has its own 600s default. A plugin cannot keep one HTTP response open past these.
+- **Fix:** the turn no longer lives inside the response. `session.start_turn` runs `run()` in its own task and
+  buffers its NDJSON lines; `/chat` only `follow()`s that buffer, so a dropped connection ends the reading, not the
+  turn (중단 has been an explicit `POST /agent/stop` since §1-44). New `POST /chat/attach {sessionId, after}`
+  replays from line `after` and follows to the end; 404 when there is no turn (ended over `TURN_KEEP_S` = 300s ago,
+  or the backend restarted). The panel (`state.agentChat`) counts lines read; a break before `done`/`error` waits
+  1-5s and attaches, up to 5 times in a row without progress; a 404 rethrows the original break. An older backend
+  answers 404 for the route, so a new plugin degrades to the old behaviour.
+- Side effect, intended: closing or reloading the panel mid-turn no longer kills the turn; it finishes and saves
+  its history. A new prompt on the same session still supersedes a running turn (§1-56).
+- Verified: `test_turn_outlives_its_connection` (tests/test_stream_events.py: reader closed after `start`, the
+  turn still reaches `done`, attach from line 1 replays `text`..`done` without `start`, the buffer is dropped
+  after its grace); test_http: attach to no turn is 404, and it needs the token.
+
 ## §1-118 (2026-10-23): the title row keeps 닫기 on screen on an upright iPhone
 
 - **Report (critical):** iPhone, portrait. With 승인 N / 반영 N and the MCP switch showing, the title row ran past

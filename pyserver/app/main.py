@@ -3124,6 +3124,7 @@ ROUTES: dict[str, Handler] = {
     "POST /commit": h_commit,
 
     "POST /chat": h_chat,
+    "POST /chat/attach": h_chat,
     "POST /session": h_session_create,
     "GET /session": h_session_get,
     "POST /session/move": h_session_move,
@@ -3537,8 +3538,40 @@ async def dispatch(path: str, request: Request) -> Response:
         linked = [{"id": str(m.get("id") or ""), "name": str(m.get("name") or "")[:120]}
                   for m in (body.get("linked") or []) if isinstance(m, dict) and m.get("id")][:60]
         log.info("POST /chat session=%s prompt=%sB mode=%s target=%s", sid, len(prompt), mode or "-", target or "-")
+        # The turn runs in its own task; this response only follows it, so a
+        # dropped connection no longer ends the turn (§1-119).
+        turn = session.start_turn(sid, prompt, mode, persona, target=target, modules=opened, linked=linked)
         return StreamingResponse(
-            session.run(sid, prompt, mode, persona, target=target, modules=opened, linked=linked),
+            session.follow(turn),
+            media_type="application/x-ndjson; charset=utf-8",
+            headers={
+                **config.cors_headers(origin),
+                "Cache-Control": "no-cache, no-transform",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    if key == "POST /chat/attach":
+        # The panel lost the /chat stream mid-turn and picks it up again from
+        # the last line it read (§1-119). 404 = no turn to follow (it ended
+        # long ago, or the backend restarted): the panel shows its error.
+        raw = await request.body()
+        try:
+            body = json.loads(raw) if raw else {}
+        except ValueError:
+            return _json(400, {"error": "body is not valid JSON"}, origin)
+        sid = str(body.get("sessionId") or "")
+        try:
+            after = int(body.get("after") or 0)
+        except (TypeError, ValueError):
+            after = 0
+        turn = session.turn_for(sid)
+        if turn is None:
+            _log(request.method, pathname, 404, started, sid[:8])
+            return _json(404, {"error": "이어 받을 턴이 없습니다"}, origin)
+        log.info("POST /chat/attach session=%s after=%s of=%s done=%s", sid, after, len(turn.lines), turn.done)
+        return StreamingResponse(
+            session.follow(turn, after),
             media_type="application/x-ndjson; charset=utf-8",
             headers={
                 **config.cors_headers(origin),

@@ -98,6 +98,34 @@ check("the pings come before the answer", "ping" in types and "text" in types
       and types.index("ping") < types.index("text"), str(types))
 check("and the turn still finishes", types[-1] == "done", str(types[-3:]))
 
+print("\ntest_turn_outlives_its_connection")
+# RisuAI desktop ends a native fetch after 240s; the turn must not end with it,
+# and the panel picks the stream up again from the line it last read (§1-119).
+session.TURN_KEEP_S = 1.5
+
+
+async def _drop_and_attach() -> tuple[list[dict], list[dict], bool, bool]:
+    turn = session.start_turn(PSID, "다시")
+    first = []
+    gen = session.follow(turn)
+    async for line in gen:
+        first.append(json.loads(line))
+        break
+    await gen.aclose()  # the connection dies after one line
+    await asyncio.sleep(3.2)  # the model answers meanwhile, nobody listening
+    finished = turn.done
+    rest = [json.loads(line) async for line in session.follow(session.turn_for(PSID), len(first))]
+    await asyncio.sleep(1.8)
+    return first, rest, finished, session.turn_for(PSID) is None
+
+first, rest, finished, dropped = asyncio.run(_drop_and_attach())
+rtypes = [e.get("type") for e in rest]
+check("the turn starts with the first line", [e.get("type") for e in first] == ["start"], str(first))
+check("and ends although the reader went away", finished)
+check("attach replays what came after the last line read", "text" in rtypes and rtypes[-1] == "done"
+      and "start" not in rtypes, str(rtypes))
+check("a finished turn is forgotten after its grace", dropped)
+
 print()
 if FAILURES:
     print(f"FAIL - {len(FAILURES)} check(s): " + ", ".join(FAILURES))
