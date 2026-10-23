@@ -38,7 +38,9 @@ export const BUG_ICON = svg('<path d="M8 2l1.9 1.9M16 2l-1.9 1.9"/><path d="M9 7
 /** The title-row button. */
 export function bugReportButton(): HTMLButtonElement {
   const b = el('button', {
-    class: 'iconbtn', html: BUG_ICON,
+    // hdrbug: the first title-row button to go on a phone (styles.ts); the
+    // red notices and ⚙ 정보 still reach the report there.
+    class: 'iconbtn hdrbug', html: BUG_ICON,
     title: '오류 제보 — 오류가 났거나 이상하면 눌러 주세요. 제작자에게 보낼 내용을 만들어 줍니다',
   }) as HTMLButtonElement;
   b.addEventListener('click', () => openBugReport());

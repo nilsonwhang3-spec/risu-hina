@@ -1365,6 +1365,19 @@ button.exbtn:hover:not(:disabled) { border-color: #2563eb; filter: none; backgro
 
   header { padding: 7px 10px; gap: 6px; }
   header h1 span { display: none; }
+  /* The X must stay on screen (§1-118): it is the only way back to RisuAI
+     after 반영. On an iPhone held upright the row ran out of width and the X
+     went off the right edge. The buttons keep their size, only the status
+     yields, and the version and the bug button (still reachable from every
+     red notice and ⚙ 정보) go. Basis 0 on the stretchy parts, so if the buttons
+     alone still do not fit, the row wraps and the X lands on a second line
+     instead of past the edge. */
+  header { flex-wrap: wrap; row-gap: 4px; }
+  header > * { flex-shrink: 0; }
+  header > .status { flex: 1 1 0; }
+  header > .spacer { flex: 1 1 0; }
+  header > .dim, header .hdrbug { display: none; }
+  header > button:last-child { margin-left: auto; }
   .status .chatname { display: none; }
   .tab { padding: 8px 11px; }
   .pad { padding: 10px; }

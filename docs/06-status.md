@@ -1,4 +1,6 @@
-# 06. Implementation status — as of 2026-10-20 (v0.15.50, Risu Hina)
+# 06. Implementation status — as of 2026-10-23 (v0.15.51, Risu Hina)
+
+## 0.15.51 (2026-10-23): §1-118 the title row keeps 닫기 on screen on an upright iPhone; studio defaults trimmed
 
 ## 0.15.50 (2026-10-20): §1-117 web RisuAI connects to a backend on 127.0.0.1
 
@@ -19,6 +21,22 @@
 ## 0.15.42 (2026-10-12): §1-106 저장공간 정리 in four sections — orphan bots/chats/modules, snapshots, images, temp files
 
 ## 0.15.41 (2026-10-11): §1-103~105 shared snapshots, image store, proposal progress, 새 대화, workspace speed, renamed bot folders
+
+## §1-118 (2026-10-23): the title row keeps 닫기 on screen on an upright iPhone
+
+- **Report (critical):** iPhone, portrait. With 승인 N / 반영 N and the MCP switch showing, the title row ran past
+  the right edge and the X went with it. The X is the only way back to RisuAI after 반영, so the panel became a trap.
+- **Cause:** every title-row button kept its natural width and the row had nowhere to put the overflow; the version,
+  the bug button (§1-113) and the icons simply did not fit 390px. Reproduced in `tools/harness.mjs` at `?w=390` with
+  every chip forced visible: settings was the last thing on screen.
+- **Fix (styles.ts, the <=760px block):** the version and the bug button hide (the report is still on every red
+  notice and in ⚙ 정보); buttons keep their size and only the status pill shrinks; the row may wrap, with the
+  stretchy parts at basis 0 so only the buttons themselves can force a wrap, and the X takes `margin-left: auto` so a
+  wrapped X sits at the right of the second line.
+- Verified (headless Chrome via CDP on the harness, all chips shown with two-digit counts): 390 and 375 -> one row,
+  X right edge 380 / 365; 320 -> two rows, X at the right of the second. Before the fix, 390 had no X at all.
+- Also in this release: the studio defaults ship only the expression fragments, the style card and the lighting /
+  bokeh / out-of-focus fragments (`fe62470`, `fdebdb4`).
 
 ## §1-117 (2026-10-20): web RisuAI connects to a backend on 127.0.0.1
 
