@@ -138,12 +138,18 @@ def missing_dependency_repairs(tag: str, cache: Path) -> None:
     leave MCP dead with ModuleNotFoundError. Simulated by deleting cryptography
     (not in the bundle; the field case) from a seeded copy; ~1 min, network."""
     print("test_mcp_missing_dependency")
-    s = th.Server()
+
+    def seed(data: Path) -> None:
+        # Before the server starts: its startup imports the add-on in a child
+        # process, which held these files while they were being deleted.
+        d = data / "addons" / "mcp" / tag
+        d.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(cache, d)
+        for p in list(d.glob("cryptography")) + list(d.glob("cryptography-*.dist-info")):
+            shutil.rmtree(p)
+
+    s = th.Server(seed=seed)
     dest = s.data / "addons" / "mcp" / tag
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(cache, dest)
-    for p in list(dest.glob("cryptography")) + list(dest.glob("cryptography-*.dist-info")):
-        shutil.rmtree(p)
     try:
         if not s.wait_ready():
             check("server starts with a broken add-on", False, s.drain()[-2000:])
@@ -169,11 +175,13 @@ def missing_dependency_repairs(tag: str, cache: Path) -> None:
 def main() -> int:
     tag = py_tag(server_python())
     cache = ROOT / ".cache" / "mcp-addon" / tag
-    s = th.Server()
-    if cache.is_dir():
-        dest = s.data / "addons" / "mcp" / tag
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(cache, dest)
+    def seed(data: Path) -> None:
+        if cache.is_dir():
+            d = data / "addons" / "mcp" / tag
+            d.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(cache, d)
+
+    s = th.Server(seed=seed)
     try:
         if not s.wait_ready():
             print("server failed to start:")

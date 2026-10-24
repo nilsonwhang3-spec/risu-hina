@@ -75,10 +75,14 @@ def free_port() -> int:
 
 
 class Server:
-    def __init__(self, require_token: bool = True, codex: bool = True) -> None:
+    def __init__(self, require_token: bool = True, codex: bool = True, seed=None) -> None:
         self.port = free_port()
         self.token = "test-token-" + str(self.port)
         self.data = Path(tempfile.mkdtemp(prefix="risuhina-test-"))
+        # Files the server must find at startup go in before it runs: seeding
+        # after Popen raced its own startup (the MCP add-on import check).
+        if seed is not None:
+            seed(self.data)
         # The subscription path ships ON; an operator turns it off by putting
         # `"OPENAI_CODEX": 0` in config.json by hand. `codex=False` seeds that
         # hand edit and is asserted on its own server
