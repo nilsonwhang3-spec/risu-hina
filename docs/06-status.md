@@ -1,4 +1,6 @@
-# 06. Implementation status — as of 2026-10-23 (v0.15.51, Risu Hina)
+# 06. Implementation status — as of 2026-10-24 (v0.15.52, Risu Hina)
+
+## 0.15.52 (2026-10-24): §1-119 an AI turn survives its connection (RisuAI desktop 240s cap); the panel reattaches
 
 ## 0.15.51 (2026-10-23): §1-118 the title row keeps 닫기 on screen on an upright iPhone; studio defaults trimmed
 

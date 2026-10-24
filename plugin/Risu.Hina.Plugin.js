@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.15.51
+//@display-name Risu Hina v0.15.52
 //@api 3.0
-//@version 0.15.51
+//@version 0.15.52
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -284,7 +284,7 @@
           this.tokenSafe = true;
           this.lastHealth = body;
           this.probeInfo = "";
-          this.gate = versionGate("0.15.51", String(body.version || ""));
+          this.gate = versionGate("0.15.52", String(body.version || ""));
           return body;
         }
         /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -3619,7 +3619,7 @@ name: ${nm}
       await transport.post("/actions/complete", body);
     }
   }
-  var CARD_TABS, StudioFiles, AppState, state;
+  var CARD_TABS, ATTACH_RETRIES, StudioFiles, AppState, state;
   var init_state = __esm({
     "src/state.ts"() {
       "use strict";
@@ -3631,6 +3631,7 @@ name: ${nm}
       init_operation();
       init_assets();
       CARD_TABS = /* @__PURE__ */ new Set(["meta", "botlore", "regex", "trigger", "assets"]);
+      ATTACH_RETRIES = 5;
       StudioFiles = class {
         // --- NovelAI ---------------------------------------------------------------
         /** Two meters and the library path. Anlas and the v5 quota are separate. */
@@ -5081,8 +5082,13 @@ name: ${nm}
           if (this.liveModules === null && this.editMode !== "chat" && !this.moduleLoading) {
             await this.loadModules().catch(() => void 0);
           }
-          yield* transport.stream("/chat", {
-            sessionId: this.sessionId,
+          const sessionId = this.sessionId;
+          let read = 0;
+          let ended = false;
+          let retries = 0;
+          let cause = null;
+          let body = {
+            sessionId,
             prompt,
             mode: this.agentMode,
             // Which persona the persona tab has open (§1-89); the agent is told.
@@ -5091,7 +5097,31 @@ name: ${nm}
             target: this.cardTarget,
             modules: this.openModules.map((m) => m.key),
             linked: this.linkedNotOpen
-          }, signal);
+          };
+          let path = "/chat";
+          for (; ; ) {
+            try {
+              for await (const ev of transport.stream(path, body, signal)) {
+                read++;
+                retries = 0;
+                const type = ev?.type;
+                if (type === "done" || type === "error") ended = true;
+                yield ev;
+              }
+              if (ended || signal?.aborted) return;
+              throw new Error("network error");
+            } catch (e) {
+              if (e instanceof BackendError && path === "/chat/attach" && e.status === 404) throw cause ?? e;
+              if (signal?.aborted || ended || read === 0 || retries >= ATTACH_RETRIES) throw e;
+              cause ??= e;
+              retries++;
+              await new Promise((r) => setTimeout(r, Math.min(1e3 * retries, 5e3)));
+              if (signal?.aborted) throw e;
+              void clientLog("info", "agent stream reattach", { after: read, retry: retries, error: String(e) });
+              path = "/chat/attach";
+              body = { sessionId, after: read };
+            }
+          }
         }
         /** 중단 as a request the backend hears at once (§1-44): the aborted fetch
          * alone reaches it only at the turn's next write when a proxy sits between. */
@@ -18510,7 +18540,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       diag = null;
     }
     const backend = diag ? `v${String(diag["version"] ?? "?")}` : `\uC5F0\uACB0 \uC548 \uB428 (${state.connectError || "\uC751\uB2F5 \uC5C6\uC74C"})`;
-    lines.push(`\uBC84\uC804: \uD50C\uB7EC\uADF8\uC778 v${"0.15.51"} \xB7 \uBC31\uC5D4\uB4DC ${backend}`);
+    lines.push(`\uBC84\uC804: \uD50C\uB7EC\uADF8\uC778 v${"0.15.52"} \xB7 \uBC31\uC5D4\uB4DC ${backend}`);
     const health = state.health ?? {};
     lines.push("\uD658\uACBD: " + [
       `RisuAI ${transport.hostPlatform || "?"}`,
@@ -18610,10 +18640,10 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           return;
         }
         if (!r.newer) {
-          const mismatch = r.current !== "0.15.51";
+          const mismatch = r.current !== "0.15.52";
           const ahead = r.ahead ?? (!!r.latest && r.latest !== r.current);
           say(
-            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.51"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
+            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.52"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
             mismatch || ahead ? "" : "ok"
           );
           return;
@@ -18706,7 +18736,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.15.51",
+            version: "0.15.52",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -20143,7 +20173,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.51"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.52"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -28171,14 +28201,14 @@ ${negative.value.trim()}
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.51"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.52"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
       healthEl.title = transport.versionGate;
     } else {
       healthEl.appendChild(el("span", { class: "hint", text: `\uBC31\uC5D4\uB4DC v${h.version}` }));
-      const behind = backendBehind("0.15.51", h.version, h.installKind);
+      const behind = backendBehind("0.15.52", h.version, h.installKind);
       if (behind) {
         const b = el("button", { class: "ghost tiny behindchip", text: "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8 \uD544\uC694", title: behind });
         b.addEventListener("click", () => {
@@ -28279,7 +28309,7 @@ ${negative.value.trim()}
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.15.51" }),
+        el("span", { class: "dim", text: "v0.15.52" }),
         healthEl,
         el("span", { class: "spacer" }),
         // 승인 / 반영 for the whole bot, from every tab (§1-76).
@@ -28641,6 +28671,6 @@ ${negative.value.trim()}
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.15.51"} loaded`);
+    console.log(`[risu-hina] v${"0.15.52"} loaded`);
   })();
 })();
