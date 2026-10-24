@@ -229,10 +229,66 @@ export function drawSelectedGallery(node: Folder): void {
   }
 }
 
-/** Whether the loaded groups belong to this folder AND are current -
- * drawCentre's gate. */
+/** Whether the loaded groups belong to this folder and were not invalidated -
+ * drawCentre's gate. A files change no longer counts (§1-120): a batch
+ * bumps it per image, and each bump rebuilt the grid under the user. New
+ * files reach an open 검수 through pollGroups, held behind a button. */
 export function hasGroups(folder: string): boolean {
-  return !!groups && groups.folder === folder && groupsRev === state.filesRev;
+  return !!groups && groups.folder === folder && groupsRev !== -1;
+}
+
+/** 검수 is on screen with its groups drawn: background changes wait (§1-120). */
+export function inspectLive(): boolean {
+  return !!groups && !!S.selected && groups.folder === S.selected && groupsRev !== -1
+    && !S.selectedFile && (S.centreMode === 'selector' || (S.centreMode === 'tab' && S.centreTab === 'inspect'));
+}
+
+// A re-read that differs from what is drawn, held until the user asks for it
+// (or the screen is redrawn for another reason) - §1-120.
+let pendingGroups: StudioGroups | null = null;
+let pendingBox: HTMLElement | null = null;
+
+function takeGroups(fresh: StudioGroups): void {
+  // Keep flags the user just clicked (the debounced save may not have
+  // landed) for files that are still there; new files take the server's.
+  const mine = selection;
+  groups = fresh;
+  groupsRev = state.filesRev;
+  selection = {};
+  for (const g of [...groups.groups.map((x) => x.items), groups.unmatched].flat()) {
+    selection[g.filename] = mine[g.filename] ? { ...g.selection, ...mine[g.filename] } : { ...g.selection };
+  }
+}
+
+function filesOf(g: StudioGroups): Set<string> {
+  return new Set([...g.groups.flatMap((x) => x.items), ...g.unmatched].map((i) => i.filename));
+}
+
+function syncPending(): void {
+  const box = pendingBox;
+  if (!box || !box.isConnected) return;
+  clear(box);
+  if (!pendingGroups || !groups) return;
+  const now = filesOf(groups);
+  const next = filesOf(pendingGroups);
+  const added = [...next].filter((f) => !now.has(f)).length;
+  const gone = [...now].filter((f) => !next.has(f)).length;
+  const label = added ? `새 이미지 ${added}장` + (gone ? ` · ${gone}장 빠짐` : '')
+    : gone ? `${gone}장 빠짐` : '바뀐 파일 있음';
+  const b = el('button', { class: 'ghost tiny badge', text: label + ' · 표시',
+    title: '배치나 AI 가 이 폴더에 쓴 것을 화면에 반영합니다. 누를 때까지 지금 화면은 그대로입니다' });
+  b.addEventListener('click', () => applyPending());
+  box.appendChild(b);
+}
+
+/** Draw the held re-read, keeping the scroll where it was. */
+function applyPending(): void {
+  if (!pendingGroups) return;
+  const top = S.viewMount?.scrollTop ?? 0;
+  takeGroups(pendingGroups);
+  pendingGroups = null;
+  hub.drawCentre();
+  if (S.viewMount) S.viewMount.scrollTop = top;
 }
 
 /** A library re-read (entering the tab, a refresh) forgets the groups too:
@@ -266,17 +322,17 @@ export async function pollGroups(): Promise<void> {
     const eff = effective(prefsFor(folder));
     const fresh = await state.studio.group(folder, eff.pattern, eff.groupBy);
     if (!groups || groups.folder !== folder || ruleGen !== gen1) return;
-    if (groupSig(fresh) === groupSig(groups)) return;
-    // Keep flags the user just clicked (the debounced save may not have
-    // landed) for files that are still there; new files take the server's.
-    const mine = selection;
-    groups = fresh;
-    groupsRev = state.filesRev;
-    selection = {};
-    for (const g of [...groups.groups.map((x) => x.items), groups.unmatched].flat()) {
-      selection[g.filename] = mine[g.filename] ? { ...g.selection, ...mine[g.filename] } : { ...g.selection };
+    if (groupSig(fresh) === groupSig(groups)) { pendingGroups = null; syncPending(); return; }
+    // An empty folder has nothing to disturb: show the first images at once.
+    if (!filesOf(groups).size || !inspectLive()) {
+      takeGroups(fresh);
+      pendingGroups = null;
+      hub.drawCentre();
+      return;
     }
-    hub.drawCentre();
+    // Otherwise the user may be mid-review: hold it behind a button (§1-120).
+    pendingGroups = fresh;
+    syncPending();
   } catch { /* the next tick tries again */ }
 }
 
@@ -295,6 +351,7 @@ export async function loadGroups(folder: string, editedRule = false): Promise<vo
     const eff = effective(prefsFor(folder));
     groupsRev = state.filesRev;
     groups = await state.studio.group(folder, eff.pattern, eff.groupBy);
+    pendingGroups = null;
     selection = {};
     for (const g of [...groups.groups.map((x) => x.items), groups.unmatched].flat()) {
       selection[g.filename] = { ...g.selection };
@@ -368,6 +425,14 @@ export function drawSelector(node: Folder): void {
   const p = prefsFor(node.path);
   cellSyncs.clear();
   missingSync = null;
+  // A redraw for any other reason (a drill, a click) takes the held re-read
+  // along: the grid is being rebuilt anyway.
+  if (pendingGroups && pendingGroups.folder === node.path) {
+    takeGroups(pendingGroups);
+    pendingGroups = null;
+    drawSelector(node);
+    return;
+  }
   applyFocus(node, g);
 
   // --- top: ONE row of what is used all the time (§1-62, user: "탭이 여전히
@@ -379,6 +444,8 @@ export function drawSelector(node: Folder): void {
     el('span', { class: 'sectiontitle path grow', title: node.path,
                  text: `${node.path} · ${g.total}장` }),
   );
+  pendingBox = el('span', { class: 'selpending' });
+  head.appendChild(pendingBox);
   viewMount.appendChild(head);
   const bar = el('div', { class: 'row seltools', style: { marginBottom: '8px' } });
   const mkView = (v: 'all' | 'group' | 'rep', label: string) => ({

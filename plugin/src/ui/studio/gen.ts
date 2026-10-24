@@ -502,7 +502,8 @@ async function finishJob(j: StudioJob): Promise<void> {
   // The batch wrote images: the files tab gets the news (and the unseen
   // badge) while we re-read our own slice.
   hub.touchQuiet(j.payload?.saved ?? []);
-  await hub.refresh();
+  // Not a visit: an open 검수 gets the new images behind its button (§1-120).
+  await hub.refresh({ visit: false });
   await hub.loadStatus();
 }
 

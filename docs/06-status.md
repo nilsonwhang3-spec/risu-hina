@@ -24,6 +24,24 @@
 
 ## 0.15.41 (2026-10-11): §1-103~105 shared snapshots, image store, proposal progress, 새 대화, workspace speed, renamed bot folders
 
+## §1-120 (2026-10-24): 검수 keeps its grid while a batch writes into the folder
+
+- **Request:** every image a batch saved rebuilt the 검수 DOM; reviewing while the batch ran was not possible.
+- **Two causes:** (1) `pollGroups` (every 5s while 검수 shows) called `drawCentre()` whenever the folder's file set
+  changed - once per new image; (2) a files change (`filesRev`, bumped per image by an agent batch, and once by
+  `finishJob`) went through `refresh()` as a visit, which invalidated the groups and redrew twice (a "읽는 중"
+  frame, then the grid). `hasGroups` also tied the drawn groups to `filesRev`, so any redraw after a bump re-read.
+- **Fix (`studio/selector.ts`, `index.ts`, `gen.ts`):** while 검수 is on screen with groups drawn (`inspectLive()`), a
+  background re-read is held in `pendingGroups` and the head row shows **"새 이미지 N장 · 표시"** (plus "N장 빠짐").
+  Pressing it takes the re-read (flags the user just set win, as before) and keeps the scroll. A redraw the user
+  causes anyway (drill, view switch) takes it along. An empty folder still shows its first images at once.
+  `refresh()` from a files change or a finished batch is not a visit (`visit: entering || openStudioRequest`) and
+  neither invalidates nor redraws a live 검수; it nudges `pollGroups` instead. `hasGroups` only honours explicit
+  invalidation. Clicking the 검수 tab reads the folder fresh.
+- Verified (headless Chrome on the harness, 4 images in `studio/output/test`): copying a fifth file in left the same
+  `.selgrid` node connected after the poll, with "새 이미지 1장 · 표시"; pressing it redrew to 5장 and cleared the
+  button. Gate.
+
 ## §1-119 (2026-10-24): an AI turn survives its connection; the panel reattaches
 
 - **Field reports (오류 제보):** (1) Vertex Gemini, cut at exactly 1m 0s with `network error` - the 2026-10-18 report

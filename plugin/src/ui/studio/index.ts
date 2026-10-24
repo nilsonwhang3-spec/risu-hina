@@ -44,7 +44,7 @@ import { drawSingle, singleTick, syncControls, buildRunControls } from './center
 import { drawBatch, batchTick } from './center-batch';
 import { buildStrip, stripTick, refreshStrip } from './strip';
 import { drawFolder } from './center-folder';
-import { hasGroups, loadGroups, drawSelector, setViewMode, setFocus, drawSelectedGallery, invalidateGroups, pollGroups } from './selector';
+import { hasGroups, loadGroups, drawSelector, setViewMode, setFocus, drawSelectedGallery, invalidateGroups, pollGroups, inspectLive } from './selector';
 import { setLayoutControls } from '../shell';
 import { reclamp } from '../splitter';
 
@@ -207,8 +207,9 @@ export function renderStudioTab(mount: HTMLElement): void {
     // any rev - another machine writes into the same space), and so does a
     // files change while we sit here. What no longer re-reads is every other
     // state emit - a chat token, a card edit elsewhere - which used to cost
-    // the same five requests each.
-    void refresh();
+    // the same five requests each. A files change while we sit here is not
+    // a visit: an open 검수 holds it behind a button (§1-120).
+    void refresh({ visit: entering || !!state.openStudioRequest });
   }
   bindAgent({ notice });
   const inner = mount.querySelector('.right-inner');
@@ -352,7 +353,7 @@ async function refresh(opts: { visit?: boolean } = {}): Promise<void> {
   }
   if (libChanged && !want) {
     if (S.leftTab !== 'output') drawLeft();
-    if (!centreShowsOutput() || S.outputLoaded) drawCentre();
+    if ((!centreShowsOutput() || S.outputLoaded) && (visit || !inspectLive())) drawCentre();
   }
 
   const out = await outP;
@@ -369,7 +370,11 @@ async function refresh(opts: { visit?: boolean } = {}): Promise<void> {
   const firstOutput = !S.outputLoaded;
   S.outputLoaded = true;
   if (outChanged || firstOutput) buildOutput();
-  if (outChanged || firstOutput || visit) invalidateGroups();
+  // 검수 open and drawn: a background change (a batch image, the agent) is
+  // re-read by pollGroups and held behind its button instead of rebuilding
+  // the grid under the user (§1-120).
+  const holdInspect = !visit && !want && inspectLive();
+  if ((outChanged || firstOutput || visit) && !holdInspect) invalidateGroups();
   if (want) {
     state.openStudioRequest = null;
     const folder = wantFolder;
@@ -394,7 +399,8 @@ async function refresh(opts: { visit?: boolean } = {}): Promise<void> {
     drawCentre();
   } else {
     if (S.leftTab === 'output' && (outChanged || firstOutput || libChanged)) drawLeft();
-    if (centreShowsOutput() && (outChanged || firstOutput || libChanged || visit)) drawCentre();
+    if (holdInspect) { if (outChanged) void pollGroups(); }
+    else if (centreShowsOutput() && (outChanged || firstOutput || libChanged || visit)) drawCentre();
   }
   if (libChanged) checkUnresolved();
   markJobsStale();
@@ -626,6 +632,9 @@ function drawCentre(): void {
       if (S.centreTab === tab) return;
       S.centreTab = tab;
       persistCentreTab();
+      // Arriving at 검수 reads the folder fresh: what a batch wrote while
+      // another tab showed is not held behind the button (§1-120).
+      if (tab === 'inspect') invalidateGroups();
       drawCentre();
     });
     return b;
