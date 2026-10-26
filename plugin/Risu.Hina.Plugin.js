@@ -1,7 +1,7 @@
 //@name risu-hina
-//@display-name Risu Hina v0.15.52
+//@display-name Risu Hina v0.15.53
 //@api 3.0
-//@version 0.15.52
+//@version 0.15.53
 //@update-url https://raw.githubusercontent.com/nilsonwhang3-spec/risu-hina/master/plugin/Risu.Hina.Plugin.js
 //@author Risu Hina
 
@@ -284,7 +284,7 @@
           this.tokenSafe = true;
           this.lastHealth = body;
           this.probeInfo = "";
-          this.gate = versionGate("0.15.52", String(body.version || ""));
+          this.gate = versionGate("0.15.53", String(body.version || ""));
           return body;
         }
         /** Why ordinary calls are refused right now (version mismatch), or ''. */
@@ -3406,7 +3406,7 @@ name: ${nm}
         },
         notice: (_text, _kind = "") => {
         },
-        refresh: async () => {
+        refresh: async (_opts) => {
         },
         refreshArea: async (_area, _opts = {}) => {
         },
@@ -5112,7 +5112,15 @@ name: ${nm}
               throw new Error("network error");
             } catch (e) {
               if (e instanceof BackendError && path === "/chat/attach" && e.status === 404) throw cause ?? e;
-              if (signal?.aborted || ended || read === 0 || retries >= ATTACH_RETRIES) throw e;
+              if (signal?.aborted || ended || read === 0) throw e;
+              if (retries >= ATTACH_RETRIES) {
+                const ev = await this.turnOutcome(sessionId, e);
+                if (ev) {
+                  yield ev;
+                  return;
+                }
+                throw e;
+              }
               cause ??= e;
               retries++;
               await new Promise((r) => setTimeout(r, Math.min(1e3 * retries, 5e3)));
@@ -5122,6 +5130,23 @@ name: ${nm}
               body = { sessionId, after: read };
             }
           }
+        }
+        /** What a lost turn came to, as an 'error' event for the agent view, or
+         * null when the backend cannot say either (then the break itself shows). */
+        async turnOutcome(sessionId, broke) {
+          let r;
+          try {
+            r = await transport.get("/chat/outcome", { sessionId }, 1e4);
+          } catch {
+            return null;
+          }
+          void clientLog("info", "agent stream outcome", { state: r.state, error: String(broke) });
+          const lost = `\uBC31\uC5D4\uB4DC\uC640\uC758 \uC2A4\uD2B8\uB9BC \uC5F0\uACB0\uC774 \uB04A\uACBC\uC2B5\uB2C8\uB2E4 (${broke instanceof Error ? broke.message : String(broke)}).`;
+          if (r.state === "error") return { type: "error", error: `${r.error || "\uC54C \uC218 \uC5C6\uB294 \uC624\uB958"}
+(${lost} \uC11C\uBC84\uC5D0 \uD655\uC778\uD55C \uC774 \uD134\uC758 \uACB0\uACFC\uC785\uB2C8\uB2E4.)` };
+          if (r.state === "done") return { type: "error", error: `${lost} \uD134 \uC790\uCCB4\uB294 \uC11C\uBC84\uC5D0\uC11C \uB05D\uB0AC\uACE0 \uACB0\uACFC\uB294 \uB300\uD654 \uAE30\uB85D\uC5D0 \uC800\uC7A5\uB418\uC5C8\uC2B5\uB2C8\uB2E4. \uB300\uD654\uB97C \uB2E4\uC2DC \uC5F4\uBA74 \uBCF4\uC785\uB2C8\uB2E4.` };
+          if (r.state === "running") return { type: "error", error: `${lost} \uD134\uC740 \uC11C\uBC84\uC5D0\uC11C \uACC4\uC18D \uC9C4\uD589 \uC911\uC774\uBA70, \uB05D\uB098\uBA74 \uB300\uD654 \uAE30\uB85D\uC5D0 \uC800\uC7A5\uB429\uB2C8\uB2E4. \uC7A0\uC2DC \uB4A4 \uB300\uD654\uB97C \uB2E4\uC2DC \uC5F4\uC5B4 \uC8FC\uC138\uC694.` };
+          return null;
         }
         /** 중단 as a request the backend hears at once (§1-44): the aborted fetch
          * alone reaches it only at the turn's next write when a proxy sits between. */
@@ -18540,7 +18565,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       diag = null;
     }
     const backend = diag ? `v${String(diag["version"] ?? "?")}` : `\uC5F0\uACB0 \uC548 \uB428 (${state.connectError || "\uC751\uB2F5 \uC5C6\uC74C"})`;
-    lines.push(`\uBC84\uC804: \uD50C\uB7EC\uADF8\uC778 v${"0.15.52"} \xB7 \uBC31\uC5D4\uB4DC ${backend}`);
+    lines.push(`\uBC84\uC804: \uD50C\uB7EC\uADF8\uC778 v${"0.15.53"} \xB7 \uBC31\uC5D4\uB4DC ${backend}`);
     const health = state.health ?? {};
     lines.push("\uD658\uACBD: " + [
       `RisuAI ${transport.hostPlatform || "?"}`,
@@ -18570,21 +18595,45 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       lines.push("", "\uD654\uBA74\uC5D0 \uB72C \uCD5C\uADFC \uC624\uB958:");
       for (const r of others.slice(-6)) lines.push(`- ${clock(r.at)} ${r.text}`);
     }
+    let entries = [];
     if (diag) {
       try {
-        const r = await state.logs(40, "warn");
-        const kept = r.lines.filter((l) => !/->\s*404\b/.test(l)).slice(-15);
-        if (kept.length) {
-          lines.push("", "\uC11C\uBC84 \uB85C\uADF8 (warn \uC774\uC0C1, \uCD5C\uADFC):");
-          for (const l of kept) lines.push(l.length > 240 ? l.slice(0, 240) + "\u2026" : l);
-        }
+        const r = await state.logs(300, "info");
+        const kept = r.lines.filter((l) => !/->\s*404\b/.test(l) && (logLevel(l) !== "info" || STREAM_INFO.test(l))).slice(-15);
+        entries = kept.map(logEntry);
       } catch {
         lines.push("", "(\uC11C\uBC84 \uB85C\uADF8\uB97C \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4)");
       }
     }
-    let text2 = mask(lines.join("\n"));
-    if (text2.length > 3500) text2 = text2.slice(0, 3500) + "\n\u2026(\uAE38\uC5B4\uC11C \uC798\uB790\uC2B5\uB2C8\uB2E4)";
+    return fitReport(lines, entries);
+  }
+  function fitReport(head, entries, max = 3500) {
+    const build = (from2) => {
+      const tail2 = entries.slice(from2);
+      const out = head.slice();
+      if (tail2.length) {
+        out.push("", "\uC11C\uBC84 \uB85C\uADF8 (warn \uC774\uC0C1 + \uC2A4\uD2B8\uB9BC \uC7AC\uC811\uC18D, \uCD5C\uADFC):");
+        if (from2 > 0) out.push(`\u2026(\uC624\uB798\uB41C ${from2}\uC904 \uC0DD\uB7B5)`);
+        for (const e of tail2) out.push(...e);
+      }
+      return mask(out.join("\n"));
+    };
+    let from = 0;
+    let text2 = build(from);
+    while (text2.length > max && from < entries.length) text2 = build(++from);
+    if (text2.length > max) text2 = text2.slice(0, max) + "\n\u2026(\uAE38\uC5B4\uC11C \uC798\uB790\uC2B5\uB2C8\uB2E4)";
     return text2;
+  }
+  var STREAM_INFO = /agent stream (reattach|outcome)|POST \/chat\/attach|agent turn cut off/;
+  function logLevel(line) {
+    return line.slice(22, 27).trim().toLowerCase();
+  }
+  function logEntry(entry) {
+    const rows = entry.split("\n").map((s) => s.trimEnd()).filter(Boolean);
+    const cut = (s, n) => s.length > n ? s.slice(0, n) + "\u2026" : s;
+    if (rows.length < 2) return [cut(entry, 240)];
+    const last = rows[rows.length - 1];
+    return [cut(rows[0], 240), "  \u2026 " + cut(last.trim(), 600)];
   }
   function mask(text2) {
     return text2.replace(/\b[A-Za-z]:[\\/](?:[^\\/\r\n"'<>|:*?]+[\\/])*[^\\/\s"'<>|:*?]*/g, (m) => "<path>" + tail(m)).replace(/(\/(?:home|Users)\/)[^/\s"']+/g, "$1<user>").replace(/[\w.+-]+@[\w-]+\.[\w.-]+/g, "<email>");
@@ -18640,10 +18689,10 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
           return;
         }
         if (!r.newer) {
-          const mismatch = r.current !== "0.15.52";
+          const mismatch = r.current !== "0.15.53";
           const ahead = r.ahead ?? (!!r.latest && r.latest !== r.current);
           say(
-            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.52"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
+            `\uBC31\uC5D4\uB4DC v${r.current} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.53"} \xB7 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4 v${r.latest}. ` + (ahead ? "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uBCF4\uB2E4 \uC55E\uC120 \uAC1C\uBC1C/\uC2A4\uD14C\uC774\uC9D5 \uBC84\uC804\uC785\uB2C8\uB2E4." : "\uBC31\uC5D4\uB4DC\uB294 \uACF5\uAC1C \uB9B4\uB9AC\uC2A4\uC640 \uAC19\uC740 \uBC84\uC804\uC785\uB2C8\uB2E4.") + (mismatch ? " \uD50C\uB7EC\uADF8\uC778\uACFC \uBC31\uC5D4\uB4DC \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4. \uB300\uC751 \uB9B4\uB9AC\uC2A4 \uAC8C\uC2DC \uC5EC\uBD80\uB97C \uD655\uC778\uD574 \uC8FC\uC138\uC694." : ""),
             mismatch || ahead ? "" : "ok"
           );
           return;
@@ -18736,7 +18785,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
         const server = await state.diagnostics();
         const report = {
           plugin: {
-            version: "0.15.52",
+            version: "0.15.53",
             platform: transport.hostPlatform,
             route: transport.routeKind,
             tokenAttached: transport.tokenAttached,
@@ -20173,7 +20222,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
       el("pre", {
         class: "mono",
         text: [
-          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.52"}`,
+          `\uD50C\uB7EC\uADF8\uC778   v${"0.15.53"}`,
           `\uBC31\uC5D4\uB4DC     ${h ? "v" + h.version : "\uBBF8\uC5F0\uACB0"}`,
           `\uC6CC\uD06C\uC2A4\uD398\uC774\uC2A4 ${h?.workspaces ?? "?"}\uAC1C`
         ].join("\n")
@@ -23082,7 +23131,7 @@ button.linkbtn:hover { background: rgba(125, 211, 252, .12); filter: none; }
     setTimeout(releasePreview, 2e4);
     hub.jobTick();
     hub.touchQuiet(j.payload?.saved ?? []);
-    await hub.refresh();
+    await hub.refresh({ visit: false });
     await hub.loadStatus();
   }
   function markJobsStale() {
@@ -26445,7 +26494,50 @@ ${negative.value.trim()}
     }
   }
   function hasGroups(folder) {
-    return !!groups && groups.folder === folder && groupsRev === state.filesRev;
+    return !!groups && groups.folder === folder && groupsRev !== -1;
+  }
+  function inspectLive() {
+    return !!groups && !!S.selected && groups.folder === S.selected && groupsRev !== -1 && !S.selectedFile && (S.centreMode === "selector" || S.centreMode === "tab" && S.centreTab === "inspect");
+  }
+  var pendingGroups = null;
+  var pendingBox = null;
+  function takeGroups(fresh) {
+    const mine = selection2;
+    groups = fresh;
+    groupsRev = state.filesRev;
+    selection2 = {};
+    for (const g of [...groups.groups.map((x) => x.items), groups.unmatched].flat()) {
+      selection2[g.filename] = mine[g.filename] ? { ...g.selection, ...mine[g.filename] } : { ...g.selection };
+    }
+  }
+  function filesOf(g) {
+    return new Set([...g.groups.flatMap((x) => x.items), ...g.unmatched].map((i) => i.filename));
+  }
+  function syncPending() {
+    const box = pendingBox;
+    if (!box || !box.isConnected) return;
+    clear(box);
+    if (!pendingGroups || !groups) return;
+    const now = filesOf(groups);
+    const next = filesOf(pendingGroups);
+    const added = [...next].filter((f) => !now.has(f)).length;
+    const gone = [...now].filter((f) => !next.has(f)).length;
+    const label2 = added ? `\uC0C8 \uC774\uBBF8\uC9C0 ${added}\uC7A5` + (gone ? ` \xB7 ${gone}\uC7A5 \uBE60\uC9D0` : "") : gone ? `${gone}\uC7A5 \uBE60\uC9D0` : "\uBC14\uB010 \uD30C\uC77C \uC788\uC74C";
+    const b = el("button", {
+      class: "ghost tiny badge",
+      text: label2 + " \xB7 \uD45C\uC2DC",
+      title: "\uBC30\uCE58\uB098 AI \uAC00 \uC774 \uD3F4\uB354\uC5D0 \uC4F4 \uAC83\uC744 \uD654\uBA74\uC5D0 \uBC18\uC601\uD569\uB2C8\uB2E4. \uB204\uB97C \uB54C\uAE4C\uC9C0 \uC9C0\uAE08 \uD654\uBA74\uC740 \uADF8\uB300\uB85C\uC785\uB2C8\uB2E4"
+    });
+    b.addEventListener("click", () => applyPending());
+    box.appendChild(b);
+  }
+  function applyPending() {
+    if (!pendingGroups) return;
+    const top = S.viewMount?.scrollTop ?? 0;
+    takeGroups(pendingGroups);
+    pendingGroups = null;
+    hub.drawCentre();
+    if (S.viewMount) S.viewMount.scrollTop = top;
   }
   function invalidateGroups() {
     groupsRev = -1;
@@ -26470,15 +26562,19 @@ ${negative.value.trim()}
       const eff = effective(prefsFor(folder));
       const fresh = await state.studio.group(folder, eff.pattern, eff.groupBy);
       if (!groups || groups.folder !== folder || ruleGen !== gen1) return;
-      if (groupSig(fresh) === groupSig(groups)) return;
-      const mine = selection2;
-      groups = fresh;
-      groupsRev = state.filesRev;
-      selection2 = {};
-      for (const g of [...groups.groups.map((x) => x.items), groups.unmatched].flat()) {
-        selection2[g.filename] = mine[g.filename] ? { ...g.selection, ...mine[g.filename] } : { ...g.selection };
+      if (groupSig(fresh) === groupSig(groups)) {
+        pendingGroups = null;
+        syncPending();
+        return;
       }
-      hub.drawCentre();
+      if (!filesOf(groups).size || !inspectLive()) {
+        takeGroups(fresh);
+        pendingGroups = null;
+        hub.drawCentre();
+        return;
+      }
+      pendingGroups = fresh;
+      syncPending();
     } catch {
     }
   }
@@ -26496,6 +26592,7 @@ ${negative.value.trim()}
       const eff = effective(prefsFor(folder));
       groupsRev = state.filesRev;
       groups = await state.studio.group(folder, eff.pattern, eff.groupBy);
+      pendingGroups = null;
       selection2 = {};
       for (const g of [...groups.groups.map((x) => x.items), groups.unmatched].flat()) {
         selection2[g.filename] = { ...g.selection };
@@ -26563,6 +26660,12 @@ ${negative.value.trim()}
     const p = prefsFor(node.path);
     cellSyncs.clear();
     missingSync = null;
+    if (pendingGroups && pendingGroups.folder === node.path) {
+      takeGroups(pendingGroups);
+      pendingGroups = null;
+      drawSelector(node);
+      return;
+    }
     applyFocus(node, g);
     const head = el("div", { class: "row selhead", style: { marginBottom: "6px" } });
     head.append(
@@ -26573,6 +26676,8 @@ ${negative.value.trim()}
         text: `${node.path} \xB7 ${g.total}\uC7A5`
       })
     );
+    pendingBox = el("span", { class: "selpending" });
+    head.appendChild(pendingBox);
     viewMount6.appendChild(head);
     const bar3 = el("div", { class: "row seltools", style: { marginBottom: "8px" } });
     const mkView = (v, label2) => ({
@@ -27519,7 +27624,7 @@ ${negative.value.trim()}
         void loadJobs(true).then(() => hub.jobTick());
       }, 5e3, () => wasStudioActive);
     } else if (entering || renderedRev !== state.filesRev || state.openStudioRequest) {
-      void refresh2();
+      void refresh2({ visit: entering || !!state.openStudioRequest });
     }
     bindAgent({ notice: notice9 });
     const inner = mount2.querySelector(".right-inner");
@@ -27624,7 +27729,7 @@ ${negative.value.trim()}
     }
     if (libChanged && !want) {
       if (S.leftTab !== "output") drawLeft();
-      if (!centreShowsOutput() || S.outputLoaded) drawCentre2();
+      if ((!centreShowsOutput() || S.outputLoaded) && (visit || !inspectLive())) drawCentre2();
     }
     const out = await outP;
     const extrasChanged = await extrasP;
@@ -27640,7 +27745,8 @@ ${negative.value.trim()}
     const firstOutput = !S.outputLoaded;
     S.outputLoaded = true;
     if (outChanged || firstOutput) buildOutput();
-    if (outChanged || firstOutput || visit) invalidateGroups();
+    const holdInspect = !visit && !want && inspectLive();
+    if ((outChanged || firstOutput || visit) && !holdInspect) invalidateGroups();
     if (want) {
       state.openStudioRequest = null;
       const folder = wantFolder;
@@ -27663,7 +27769,9 @@ ${negative.value.trim()}
       drawCentre2();
     } else {
       if (S.leftTab === "output" && (outChanged || firstOutput || libChanged)) drawLeft();
-      if (centreShowsOutput() && (outChanged || firstOutput || libChanged || visit)) drawCentre2();
+      if (holdInspect) {
+        if (outChanged) void pollGroups();
+      } else if (centreShowsOutput() && (outChanged || firstOutput || libChanged || visit)) drawCentre2();
     }
     if (libChanged) checkUnresolved();
     markJobsStale();
@@ -27847,6 +27955,7 @@ ${negative.value.trim()}
         if (S.centreTab === tab) return;
         S.centreTab = tab;
         persistCentreTab();
+        if (tab === "inspect") invalidateGroups();
         drawCentre2();
       });
       return b;
@@ -28201,14 +28310,14 @@ ${negative.value.trim()}
       if (reconnectTimer) healthEl.appendChild(el("span", { class: "hint", text: "\uC7AC\uC2DC\uB3C4 \uC911" }));
     } else if (transport.versionGate) {
       healthEl.className = "status bad";
-      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.52"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
+      healthEl.appendChild(el("span", { text: `\uBC31\uC5D4\uB4DC v${h.version} \xB7 \uD50C\uB7EC\uADF8\uC778 v${"0.15.53"} \u2014 \uBC84\uC804\uC774 \uB2E4\uB985\uB2C8\uB2E4` }));
       const go = el("button", { class: "primary tiny", text: transport.versionGate.includes("\uBC31\uC5D4\uB4DC\uB97C \uC5C5\uB370\uC774\uD2B8") ? "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8\uB85C" : "\uC548\uB0B4 \uBCF4\uAE30" });
       go.addEventListener("click", () => setTab("settings"));
       healthEl.appendChild(go);
       healthEl.title = transport.versionGate;
     } else {
       healthEl.appendChild(el("span", { class: "hint", text: `\uBC31\uC5D4\uB4DC v${h.version}` }));
-      const behind = backendBehind("0.15.52", h.version, h.installKind);
+      const behind = backendBehind("0.15.53", h.version, h.installKind);
       if (behind) {
         const b = el("button", { class: "ghost tiny behindchip", text: "\uBC31\uC5D4\uB4DC \uC5C5\uB370\uC774\uD2B8 \uD544\uC694", title: behind });
         b.addEventListener("click", () => {
@@ -28309,7 +28418,7 @@ ${negative.value.trim()}
     document.body.appendChild(el("div", { class: "wrap" }, [
       el("header", {}, [
         el("h1", { html: ICON.app + "<span>Risu Hina</span>" }),
-        el("span", { class: "dim", text: "v0.15.52" }),
+        el("span", { class: "dim", text: "v0.15.53" }),
         healthEl,
         el("span", { class: "spacer" }),
         // 승인 / 반영 for the whole bot, from every tab (§1-76).
@@ -28671,6 +28780,6 @@ ${negative.value.trim()}
       });
     } catch {
     }
-    console.log(`[risu-hina] v${"0.15.52"} loaded`);
+    console.log(`[risu-hina] v${"0.15.53"} loaded`);
   })();
 })();
